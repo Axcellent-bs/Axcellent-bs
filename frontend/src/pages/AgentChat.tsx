@@ -434,13 +434,13 @@ export default function AgentChat() {
             ) : (
               <>
               {orchConn === "off" && room === ALL_ROOM && (
-                <p className="mx-auto mb-4 max-w-3xl rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">중앙 Agent(총괄)가 꺼져 있어 안전 관문 기록만 보입니다. 켜는 방법: <code className="font-mono">{ORCH_CMD}</code></p>
+                <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">중앙 Agent(총괄)가 꺼져 있어 안전 관문 기록만 보입니다. 켜는 방법: <code className="font-mono">{ORCH_CMD}</code></p>
               )}
               {room === ALL_ROOM && <CommNote conn={commConn} truncated={commTruncated} />}
-              <ol role="log" aria-live="polite" aria-relevant="additions" aria-label="부서 AI 대화" className="mx-auto flex max-w-3xl flex-col gap-4">
+              <ol role="log" aria-live="polite" aria-relevant="additions" aria-label="부서 AI 대화" className="flex flex-col gap-4">
                 {items.map((it) => <Item key={it.id} it={it} busyHold={busyHold} orchOn={orchOn} orchMock={orchMock} onDecide={decide} />)}
               </ol>
-              <p className="mx-auto mt-6 max-w-3xl text-center text-[11px] text-ink-500">{PROD_NOTE}</p>
+              <p className="mt-6 text-center text-[11px] text-ink-500">{PROD_NOTE}</p>
               </>
             )}
           </div>
@@ -458,9 +458,9 @@ export default function AgentChat() {
 
 /** 공통 로그가 503이거나 꺼졌을 때 / 잘렸을 때 한 줄 안내 */
 function CommNote({ conn, truncated }: { conn: Conn; truncated: boolean }) {
-  if (conn === "unready") return <p className="mx-auto mb-4 max-w-3xl rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">{COMM_503}</p>;
-  if (conn === "off") return <p className="mx-auto mb-4 max-w-3xl rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-500">{COMM_OFF}</p>;
-  if (truncated) return <p className="mx-auto mb-4 max-w-3xl rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-500">공통 로그가 많아 앞부분만 받았습니다 (최대 1000줄).</p>;
+  if (conn === "unready") return <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">{COMM_503}</p>;
+  if (conn === "off") return <p className="mb-4 rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-500">{COMM_OFF}</p>;
+  if (truncated) return <p className="mb-4 rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-500">공통 로그가 많아 앞부분만 받았습니다 (최대 1000줄).</p>;
   return null;
 }
 const COMM_503 = "공통 로그: 준비 안 됨(503) — dashboard-api에 공통 로그 읽기가 아직 연결되지 않았습니다 (ax-backend #249). 부서 간 직통 대화는 연결 뒤에 보입니다. 목 모드(DASHBOARD_MOCK=1)에서는 예시 대화가 나옵니다.";

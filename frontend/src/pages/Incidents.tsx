@@ -264,7 +264,7 @@ export default function Incidents() {
   );
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 px-8 py-8">
+    <div className="space-y-6 px-8 py-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="flex items-center gap-2 text-sm text-ink-500">

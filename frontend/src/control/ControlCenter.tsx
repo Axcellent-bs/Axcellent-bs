@@ -20,7 +20,7 @@ const ago = (m: number) => (m === 0 ? '방금' : m < 60 ? `${m}분 전` : `${Mat
 
 function Page({ title, desc, children }: { title: string; desc: string; children: ReactNode }) {
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-8 pb-12">
+    <div className="space-y-6 px-8 pb-12">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-sm text-ink-500">관제 센터</p>

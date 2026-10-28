@@ -75,7 +75,7 @@ export default function ServiceOps() {
 
   const list = Object.values(ops)
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-8 pb-12">
+    <div className="space-y-6 px-8 pb-12">
       <header>
         <p className="text-sm text-ink-500">관제 센터</p>
         <h1 className="text-2xl font-semibold">서비스 관리</h1>

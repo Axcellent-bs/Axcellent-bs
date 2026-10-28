@@ -34,7 +34,7 @@ export default function KeyIssue() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-8 pb-12">
+    <div className="space-y-6 px-8 pb-12">
       <header>
         <p className="text-sm text-ink-500">관제 센터</p>
         <h1 className="text-2xl font-semibold">연결 키 발급</h1>

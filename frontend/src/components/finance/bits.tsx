@@ -84,7 +84,7 @@ export function Panel({ id, title, titleHidden, hint, meta, tools, children }: {
           <h2 id={id ? `${id}-title` : undefined} className="flex flex-wrap items-center gap-2 text-base font-semibold text-ink-900">
             <span className={titleHidden ? "sr-only" : undefined}>{title}</span> <MockBadge meta={meta} />
           </h2>
-          {hint && <p className="mt-0.5 max-w-3xl text-xs leading-relaxed text-ink-500">{hint}</p>}
+          {hint && <p className="mt-0.5 text-xs leading-relaxed text-ink-500">{hint}</p>}
           <MetaLine meta={meta} />
         </div>
         {tools && <div className="flex flex-wrap items-center gap-2">{tools}</div>}

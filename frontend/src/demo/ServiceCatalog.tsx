@@ -15,7 +15,7 @@ export default function ServiceCatalog() {
   const SERVICES = usePublishedServices()
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8 px-8 py-8">
+    <div className="space-y-8 px-8 py-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-sm text-ink-500">시스템 관리</p>
