@@ -724,3 +724,24 @@ def test_domain_simple_request_merge_failure_waits(service: PlanningService) -> 
     pr = [p for p in service.state.prs if p.auto][-1]
     task = next(t for t in service.state.tasks if t.id == pr.task)
     assert not pr.merged and task.state == "머지 대기"
+
+
+def test_github_checks_fall_back_to_statuses_without_checks_permission() -> None:
+    """개인용 토큰은 Checks 권한이 없다. check-runs가 403이어도 커밋 상태로 판단한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/pulls/7"):
+            return httpx.Response(200, json={"head": {"sha": "abc"}})
+        if path.endswith("/check-runs"):
+            return httpx.Response(403, json={"message": "Resource not accessible by personal access token"})
+        if path.endswith("/status"):
+            return httpx.Response(200, json={"statuses": [{"context": "ci", "state": "success"}]})
+        return httpx.Response(404, json={})
+
+    from planning_agent.vcs.github import GithubVcsAdapter
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = GithubVcsAdapter("acme/shop", "t" * 12, client=client)
+    checks = run(adapter.get_checks(7))
+    assert checks.state == "passed" and [r.name for r in checks.runs] == ["ci"]

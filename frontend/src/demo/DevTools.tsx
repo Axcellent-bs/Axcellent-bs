@@ -24,7 +24,7 @@ const KINDS = [
 ]
 const KIND_LABEL: Record<string, string> = Object.fromEntries(KINDS.map((k) => [k.id, k.label]))
 const SOURCE: Record<VcsConfig['source'], string> = { screen: '이 화면', env: '서버 설정 파일', default: '기본값' }
-const PERMISSIONS = ['코드 읽기·쓰기', 'PR 읽기·쓰기', 'Checks 읽기', '커밋 상태 읽기']
+const PERMISSIONS = ['Contents 읽기·쓰기', 'Pull requests 읽기·쓰기', 'Commit statuses 읽기']
 
 // 형상관리 외의 연결 지점. 형상관리 연결로 함께 되는 것과 아직 없는 것을 나눠 보여 준다
 const OTHERS: { name: string; tools: string; state: 'with-vcs' | 'linked' | 'planned'; to?: string }[] = [

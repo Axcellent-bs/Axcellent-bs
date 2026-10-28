@@ -304,9 +304,15 @@ class GithubVcsAdapter:
     async def get_checks(self, number: int) -> Checks:
         pr = await self._call("GET", f"/pulls/{int(number)}")
         sha = pr["head"]["sha"]
-        runs_raw = await self._call(
-            "GET", f"/commits/{sha}/check-runs", params={"per_page": PER_PAGE}
-        )
+        # 개인용 토큰(fine-grained)에는 Checks 권한이 없다. 막히면 커밋 상태만으로 판단한다
+        try:
+            runs_raw = await self._call(
+                "GET", f"/commits/{sha}/check-runs", params={"per_page": PER_PAGE}
+            )
+        except VcsError as exc:
+            if exc.code not in ("forbidden", "not_found"):
+                raise
+            runs_raw = None
         status = await self._call("GET", f"/commits/{sha}/status")
         runs = [
             CheckRun(name=r.get("name", ""), state=_run_state(r))
