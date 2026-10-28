@@ -150,6 +150,9 @@ class GithubVcsAdapter:
             res = await self._client.request(
                 method, url, json=json, params=params, headers=self._headers()
             )
+        except UnicodeEncodeError:
+            # 토큰·주소에 쓸 수 없는 글자가 있으면 머리글을 못 만든다. 값은 남기지 않는다
+            raise VcsError("config", f"{where} 토큰이나 주소에 쓸 수 없는 글자가 있다") from None
         except httpx.HTTPError as exc:
             # 예외 문구에 요청 정보가 섞일 수 있어 이름만 남긴다
             raise VcsError("unavailable", f"{where} 연결 실패 ({type(exc).__name__})") from None

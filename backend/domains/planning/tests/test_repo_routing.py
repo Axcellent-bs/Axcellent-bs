@@ -343,3 +343,18 @@ def test_mount_prefixes_paths_for_safety() -> None:
     finally:
         vcs._screen = None
         vcs.set_vcs(None)
+
+
+def test_token_with_non_ascii_is_rejected() -> None:
+    from planning_agent import vcs
+
+    vcs.set_vcs(None)
+    vcs._screen = None
+    try:
+        with pytest.raises(vcs.VcsError) as e:
+            vcs.upsert_connection(kind="github", repo="acme/shop", token="ghp_abc한글def1234")
+        assert e.value.code == "config" and "한글" in e.value.message
+        assert vcs.connections() == []
+    finally:
+        vcs._screen = None
+        vcs.set_vcs(None)

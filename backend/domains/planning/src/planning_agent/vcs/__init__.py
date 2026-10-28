@@ -295,6 +295,9 @@ def upsert_connection(
     cid = cid or _next_id(rows)
     before = rows.get(cid)
     new_token = (token or "").strip()
+    # 토큰은 영문·숫자·기호만 된다 (한글 입력 상태로 치거나 다른 글자가 같이 붙여지면 요청 머리글을 못 만든다)
+    if new_token and (not new_token.isascii() or any(ch.isspace() for ch in new_token)):
+        raise VcsError("config", "토큰에 쓸 수 없는 글자(한글·공백 등)가 들어 있어요. 토큰을 다시 복사해 넣어 주세요")
     conn = Connection(
         id=cid,
         kind=kind,
