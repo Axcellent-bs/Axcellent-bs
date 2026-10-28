@@ -56,7 +56,7 @@ export AGENT_TEMPLATE_MOCK=1
 # 총괄은 자기 목 스위치가 따로 있다. 부서는 가짜 대신 위에서 띄운 서비스들을 실제로 부른다(카드는 서비스별로 모아 부서 단위로 합침)
 export ORCHESTRATOR_MOCK=1 ORCHESTRATOR_REAL_DEPTS=infra,data,planning,marketing,support,finance,hr
 # 화면(AXcellent 3090, 고객사 쇼핑몰 shop-web 3000)에서 직접 부르는 서버의 CORS
-WEB="http://localhost:3090,http://127.0.0.1:3090,http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001"
+WEB="http://localhost:3090,http://127.0.0.1:3090,http://localhost:3000,http://127.0.0.1:3000,http://localhost:3010,http://127.0.0.1:3010,http://localhost:3001"
 export DASHBOARD_CORS_ORIGINS="$WEB" FINANCE_CORS_ORIGINS="$WEB" SHOP_CORS_ORIGINS="$WEB"
 export SAFETY_CORS_ORIGINS="$WEB" PLANNING_CORS_ORIGINS="$WEB"
 
