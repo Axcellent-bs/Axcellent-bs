@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ago, shortDateTime } from "@/lib/format";
 import { ANALYSIS, SEVERITY, currentIncidents, incidentUrl, type Incident, type IncidentMeta } from "@/lib/dejafix";
+import { DEJAFIX_LIVE } from "@/lib/env";
 
 // 장애 대응 탭 = 지금 진행 중인 장애만. DejaFix API(GET /api/incidents?status=problem)에서 받아 AXcellent가 그린다.
 // 상세(리포트·근거·변경 계획)는 DejaFix 화면으로 보낸다. DejaFix 화면을 이 안에 띄우지 않는다.
@@ -10,7 +11,7 @@ type State = { data: Incident[]; meta: IncidentMeta } | null;
 
 function Chip({ map, k }: { map: Record<string | number, { label: string; tone: string }>; k: string | number }) {
   const v = map[k] ?? { label: String(k), tone: "bg-ink-100 text-ink-700" };
-  return <span className={`chip ${v.tone}`}>{v.label}</span>;
+  return <span className={`chip whitespace-nowrap ${v.tone}`}>{v.label}</span>;
 }
 
 export default function Incidents() {
@@ -42,7 +43,13 @@ export default function Incidents() {
     <div className="mx-auto max-w-6xl space-y-6 px-8 py-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-sm text-ink-500">DejaFix 데이터</p>
+          <p className="flex items-center gap-2 text-sm text-ink-500">
+            DejaFix 데이터
+            {/* 녹화본인지 실제 서버인지 화면에 밝힌다 */}
+            {DEJAFIX_LIVE
+              ? <span className="chip bg-emerald-50 text-emerald-700">실시간</span>
+              : <span className="chip bg-amber-50 text-amber-700" title="VITE_DEJAFIX_LIVE=on 이면 실제 DejaFix를 부릅니다">데모 녹화본</span>}
+          </p>
           <h1 className="text-2xl font-semibold">현재 장애</h1>
           <p className="mt-1 text-sm text-ink-500">지금 해결되지 않은 장애만 보여 줍니다. 원인 분석과 변경 계획은 DejaFix에서 봅니다.</p>
         </div>
@@ -76,11 +83,11 @@ export default function Incidents() {
           <table className="w-full text-sm">
             <thead className="bg-app text-left text-xs text-ink-500">
               <tr>
-                <th className="px-6 py-3 font-medium">심각도</th>
+                <th className="whitespace-nowrap px-6 py-3 font-medium">심각도</th>
                 <th className="px-3 py-3 font-medium">장애</th>
                 <th className="px-3 py-3 font-medium">호스트</th>
                 <th className="px-3 py-3 font-medium">시작</th>
-                <th className="px-3 py-3 font-medium">AI 분석</th>
+                <th className="whitespace-nowrap px-3 py-3 font-medium">AI 분석</th>
                 <th className="px-6 py-3 font-medium"><span className="sr-only">상세</span></th>
               </tr>
             </thead>
@@ -93,9 +100,9 @@ export default function Incidents() {
                     <p className="mt-0.5 text-xs text-ink-500">#{i.id}{i.tags.length > 0 && ` · ${i.tags.map((t) => t.value).join(", ")}`}</p>
                   </td>
                   <td className="px-3 py-3">
-                    {i.host.name ? <span className="font-mono text-xs">{i.host.name}</span> : <span className="text-xs text-ink-500" title="DejaFix가 아직 호스트 정보를 채우지 않았습니다">확인 중</span>}
+                    {i.host.name ? <span className="whitespace-nowrap font-mono text-xs">{i.host.name}</span> : <span className="text-xs text-ink-500" title="DejaFix가 아직 호스트 정보를 채우지 않았습니다">확인 중</span>}
                   </td>
-                  <td className="px-3 py-3 text-xs text-ink-700" title={shortDateTime(i.started_at)}>{ago(i.started_at)}</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-xs text-ink-700" title={shortDateTime(i.started_at)}>{ago(i.started_at)}</td>
                   <td className="px-3 py-3"><Chip map={ANALYSIS} k={i.analysis.status} /></td>
                   <td className="px-6 py-3 text-right">
                     <a href={incidentUrl(i.id)} target="_blank" rel="noreferrer" className="btn-quiet whitespace-nowrap">DejaFix에서 보기 ↗</a>

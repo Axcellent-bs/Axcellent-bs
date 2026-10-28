@@ -3,7 +3,7 @@
 // 쓰기(POST 등)는 저장하지 않고 성공 응답만 돌려준다. 그래서 버튼을 눌러도 화면 데이터는 바뀌지 않는다.
 // VITE_MOCK=off면 아무것도 가로채지 않고 src/lib/env.ts 주소의 실제 AI 백엔드를 부른다.
 import raw from './fixtures.json'
-import { MOCK } from '@/lib/env'
+import { DEJAFIX_LIVE, MOCK } from '@/lib/env'
 
 type Fixture = { status: number; body: unknown }
 const FIXTURES = raw as Record<string, Fixture>
@@ -19,7 +19,8 @@ function route(input: string): { svc: string; path: string } | null {
   if (input.startsWith('/orch/')) return { svc: 'orch', path: input.slice('/orch'.length) }
   if (input.startsWith('/data-a2a/')) return { svc: 'data', path: input.slice('/data-a2a'.length) }
   // DejaFix 백엔드(장애 대응). 녹화본은 DejaFix 레포 frontend/src/mocks의 응답이다 (README)
-  if (input.startsWith('/dejafix-api/')) return { svc: 'dejafix', path: input.slice('/dejafix-api'.length) }
+  // VITE_DEJAFIX_LIVE=on 이면 가로채지 않고 실제 DejaFix로 보낸다
+  if (input.startsWith('/dejafix-api/')) return DEJAFIX_LIVE ? null : { svc: 'dejafix', path: input.slice('/dejafix-api'.length) }
   return null
 }
 

@@ -1,6 +1,7 @@
 import react from '@vitejs/plugin-react'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
+import { dejafixProxy } from './dejafix-proxy'
 
 // 기본은 데모 모드: API 응답을 src/mock이 녹화본으로 대신한다. VITE_MOCK=off면 실제 AI 백엔드를 부른다 (.env.example).
 // GitHub Pages(https://axcellent-bs.github.io/Axcellent-bs/)용 빌드는 `npm run build:pages`가 base를 /Axcellent-bs/로 바꾼다.
@@ -12,12 +13,11 @@ export default defineConfig(({ mode }) => {
     '^/orch/': { target: env.ORCHESTRATOR_PROXY_TARGET || 'http://localhost:8000', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/orch/, '') },
     // 데이터 AI(8106). 데이터분석 AI 화면의 KPI 직접 조회용
     '/data-a2a': { target: env.DATA_PROXY_TARGET || 'http://localhost:8106', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/data-a2a/, '') },
-    // DejaFix 백엔드. DejaFix도 기본 포트가 8000이라 총괄과 같이 띄울 때는 둘 중 하나를 바꾼다
-    '/dejafix-api': { target: env.DEJAFIX_PROXY_TARGET || 'http://localhost:8000', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/dejafix-api/, '') },
   }
   return {
     base: process.env.DEMO_BASE ?? '/',
-    plugins: [react()],
+    // /dejafix-api 는 로그인까지 대신 해야 해서 단순 프록시가 아니라 플러그인이 맡는다 (dejafix-proxy.ts)
+    plugins: [react(), dejafixProxy(env)],
     resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
     server: { port: 3090, strictPort: true, proxy },
     preview: { port: 3090, strictPort: true, proxy },

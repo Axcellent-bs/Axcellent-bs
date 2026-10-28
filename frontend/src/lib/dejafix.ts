@@ -1,4 +1,4 @@
-import { DEJAFIX_API_URL, DEJAFIX_TOKEN, DEJAFIX_WEB_URL } from "./env";
+import { DEJAFIX_API_URL, DEJAFIX_WEB_URL } from "./env";
 
 // 장애 대응 탭: DejaFix 화면을 띄우지 않고 DejaFix API에서 데이터만 받는다.
 // 형식은 DejaFix/DejaFix contracts/api.md #10 `GET /api/incidents`, contracts/incident.schema.json 기준. 화면 없는 함수만 둔다.
@@ -30,15 +30,14 @@ export interface IncidentMeta {
 
 /** 지금 진행 중인 장애만 (status=problem). DejaFix가 started_at 내림차순으로 준다 */
 export async function currentIncidents(): Promise<{ data: Incident[]; meta: IncidentMeta }> {
-  const headers: Record<string, string> = {};
-  if (DEJAFIX_TOKEN) headers.Authorization = `Bearer ${DEJAFIX_TOKEN}`;
   let res: Response;
   try {
-    res = await fetch(`${DEJAFIX_API_URL}/api/incidents?status=problem&limit=100`, { cache: "no-store", headers });
+    res = await fetch(`${DEJAFIX_API_URL}/api/incidents?status=problem&limit=100`, { cache: "no-store" });
   } catch {
     throw new Error("DejaFix 서버에 연결할 수 없습니다.");
   }
-  if (res.status === 401) throw new Error("DejaFix 로그인 정보가 없거나 만료됐습니다 (VITE_DEJAFIX_TOKEN).");
+  if (res.status === 502) throw new Error("DejaFix 백엔드에 연결할 수 없습니다 (frontend/.env 의 DEJAFIX_PROXY_TARGET 확인).");
+  if (res.status === 401) throw new Error("DejaFix 로그인 정보가 없거나 만료됐습니다 (frontend/.env 의 DEJAFIX_USERNAME·DEJAFIX_PASSWORD 확인).");
   if (!res.ok) throw new Error(`DejaFix가 오류를 돌려줬습니다 (HTTP ${res.status}).`);
   const body = (await res.json()) as { data?: Incident[]; meta?: IncidentMeta };
   return { data: body.data ?? [], meta: body.meta ?? { next_cursor: null } };
