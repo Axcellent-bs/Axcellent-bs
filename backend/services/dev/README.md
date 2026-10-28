@@ -9,6 +9,7 @@
 | `verify_rollback_target` | read |
 | `list_in_progress` | read |
 | `verify_handover` | read |
+| `start_dev` | A |
 
 - 실행: `uv run --package ax-svc-dev uvicorn svc_dev.main:app --port 8111` (backend/ 에서, 목 모드 `AGENT_TEMPLATE_MOCK=1`)
 - 다른 에이전트가 `planning`로 불러도 위 skill이면 이 서비스로 온다 (`route_target`).

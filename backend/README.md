@@ -27,8 +27,8 @@ AXcellent AI 백엔드. ax-company-hq/ax-backend(dev `04f0e28`, 10/28)를 복사
 | `data` | 데이터 분석 | 8106 | domains/data | 4 |
 | `handover` | 인수인계 | 8104 | domains/hr | 6 |
 | `decisions` | 결정 기록 | 8114 | domains/hr | 5 |
-| `planning` | 요청·기획서 | 8101 | domains/planning | 1 |
-| `dev` | 개발·배포 | 8111 | domains/planning | 5 |
+| `planning` | 요청·기획서 | 8101 | domains/planning | 2 |
+| `dev` | 개발·배포 | 8111 | domains/planning | 6 |
 | `incident` | 장애 대응 | 8107 | domains/infra-dejafix | 3 |
 | `hosts` | PC·서버 연결 | 8117 | 없음 | 0 (`services/hosts/README.md`) |
 
@@ -127,6 +127,7 @@ subscribe([EventType.HANDOFF_COMPLETED], on_handoff_completed)
 
 - 실제 모드에서 아직 출처가 없는 화면 데이터(지식 조각·후기)는 지어내지 않고 빈 목록이다.
 - 캣북스에는 배포 기록이 없어서, 인프라 진단은 원인 배포를 특정하지 못하면 롤백하지 않고 사람에게 넘긴다(이관 큐).
-- 같은 부서에서 나뉜 서비스는 메모리를 따로 가진다. 예: `planning`에서 받은 요청이 `dev`에 안 보이고, `inquiry`의 문의가 `claims`에 안 보인다. 공유 저장소(DB)를 붙여야 이어진다.
+- 같은 부서에서 나뉜 서비스는 메모리를 따로 가진다. 예: `inquiry`의 문의가 `claims`에 안 보인다. 공유 저장소(DB)를 붙여야 이어진다.
+- `planning`·`dev`는 A2A로 잇는다(`PLANNING_ROLE`, `planning_agent/dev_handoff.py`). `planning`이 확정한 기획서·작업을 `start_dev`로 넘기면 `dev`가 PR·검수·자동 머지를 하고 `receive_dev_result`로 작업·PR·요청 상태를 돌려준다. 역할 없이(합친 모드) 띄우면 예전처럼 한 프로세스에서 다 한다.
 - `infra/compose.server.yml`(서버 PC·게이트웨이)은 아직 옛 이름이다. Docker 빌드는 아직 확인하지 않았다.
 - 원본 ax-backend는 계속 바뀐다. 이 복사본과 어느 쪽을 기준으로 할지 정해야 한다.

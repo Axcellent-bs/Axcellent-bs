@@ -6,6 +6,7 @@ import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, type Action, type Request, type State as S } from './data'
 import { ActivityList, Dep, State, Tag } from './parts'
 import { Linked, Ref, convoHref, hrefOf, prSlug, reviewOf } from './links'
+import { RepoTag } from './repo'
 import { Flow, Head, Layout, ListPane, Side, Step, mergedLabel, prStatus, specStatus } from './flow'
 
 // 프로젝트 = 원본 요청 (같은 요청으로 연결만 한 것은 원본에 붙인다)
@@ -105,7 +106,7 @@ export function Projects({ s, d, sel }: { s: S; d: Dispatch<Action>; sel?: strin
                 return (
                   <li key={p.id}>
                     <a href={`#/work/prs/${prSlug(p.id)}`} className="plain-link">{p.title.replace(/^[A-Z]\d+: /, '')}</a>
-                    <div className="muted">{p.id} · 검수 {p.reviews[p.reviews.length - 1]} · {xr ? `${xr.lane === 'human' ? '사람 확인' : '교차검증'} 대기 ${xr.id}` : mergedLabel(p)} · {p.gate.lines}줄 {p.gate.files}파일</div>
+                    <div className="muted">{p.id} · 검수 {p.reviews[p.reviews.length - 1]} · {xr ? `${xr.lane === 'human' ? '사람 확인' : '교차검증'} 대기 ${xr.id}` : mergedLabel(p)} · {p.gate.lines}줄 {p.gate.files}파일 <RepoTag p={p} /></div>
                   </li>
                 )
               })}

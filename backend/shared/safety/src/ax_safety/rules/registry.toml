@@ -191,6 +191,66 @@ action = "create_ticket"
 owner = "planning"
 base_grade = "A"
 
+# 기획 → 개발 넘기기 (서비스 나누기). planning·dev 서비스가 같은 부서 기록을 옮길 뿐이라 A
+[[actions]]
+action = "start_dev"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+[[actions]]
+action = "receive_dev_result"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+# 올릴 레포 승인·기각 (연결이 여럿일 때 AI 제안 → 사람 판단). PR 생성·머지는 따로 관문을 지난다
+[[actions]]
+action = "approve_repo"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+[[actions]]
+action = "reject_repo"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+# 코딩 에이전트 (개발팀원이 쓴 기획). 작업 등록·다시 시도와 리뷰 뒤 수정 커밋은 A.
+# 첫 커밋·PR은 generate_pr(B), 리뷰는 review_pr, 머지는 merge_pr(B) 관문을 그대로 지난다
+[[actions]]
+action = "dev_task_create"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+[[actions]]
+action = "dev_task_retry"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+# 코딩 작업 사람 중단 (열린 PR 닫기·브랜치 지우기). 병합된 것은 건드리지 않아 A
+[[actions]]
+action = "dev_task_cancel"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+[[actions]]
+action = "code_write"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+# 개발 AI 대화 (개발 화면). 메시지 하나를 대화에 더하는 기록. 작업을 띄우는 건 dev_task_create
+[[actions]]
+action = "dev_chat"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
 # 기록·회신·초안은 A (#166). 돈·배포에 닿지 않는다
 [[actions]]
 action = "write_spec"

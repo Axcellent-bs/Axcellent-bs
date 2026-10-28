@@ -53,7 +53,8 @@ body { @apply bg-canvas text-ink-900 antialiased; }
 @layer components {
   .chip { @apply inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium; }
   .btn { @apply inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40; }
-  .btn-primary { @apply btn bg-brand-600 text-white hover:bg-brand-strong; }
+  /* 개발·배포처럼 공통 디자인 스타일이 버튼 글씨색을 덮는 화면에서도 흰 글씨를 지킨다 */
+  .btn-primary { @apply btn bg-brand-600 !text-white hover:bg-brand-strong; }
   .btn-ghost { @apply btn border border-ink-100 bg-surface text-ink-700 hover:bg-ink-100; }
   .btn-quiet { @apply btn text-ink-500 hover:bg-ink-100 hover:text-ink-900; }
   .panel-title { @apply text-[11px] font-semibold uppercase tracking-wider text-ink-500; }

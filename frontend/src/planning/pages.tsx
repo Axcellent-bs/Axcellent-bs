@@ -7,6 +7,9 @@ import { ActivityList, Dep, Grade, Lead, LinkTable, Point, Sec, State, Stats, ro
 import { Linked, Ref, convoHref, go, hrefOf, prFromSlug, prSlug, reviewOf } from './links'
 import { CONFIRMED_BY, Flow, Head, Layout, ListPane, Pairs, Side, Step, mergedLabel } from './flow'
 import { SendWindow } from './depts'
+import { apiBase, deployApi, kst, type DeployCheck, type Deployment } from './api'
+import { RepoTag, RepoTargetBlock } from './repo'
+import { CodingLabel, CodingStep, DevTeamTag, codingState, fromDevTeam, isRunning } from './coding'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -137,6 +140,7 @@ function PrLine({ s, p, d }: { s: S; p: PR; d: Dispatch<Action> }) {
       <div className="muted small mono">{p.gate.lines}줄·{p.gate.files}파일 · {p.gate.paths}</div>
       <span className="tags">
         <Tag tone={last === '통과' ? 'green' : 'amber'}>검수 {last}{p.reviews.length > 1 ? ` (${p.reviews.length}회차)` : ''}</Tag>
+        <RepoTag p={p} />
         {p.merged ? <Tag tone="green">{mergedLabel(p)}</Tag> : xr ? <a href={`#/work/reviews/${xr.id}`}><Tag tone="amber">{xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기'} {xr.id}</Tag></a> : rejected ? <Tag tone="amber">검증자 거절</Tag> : null}
       </span>
       {!p.merged && (last === '불일치' || rejected) && <Button size="small" onClick={() => d({ type: 'reviewPr', pr: p.id })}>다시 검수</Button>}
@@ -150,15 +154,39 @@ export function Work({ s, d, item }: P & { item?: string }) {
   const [line, setLine] = useState<CodeLine>()
   useEffect(() => { setLine(undefined) }, [item])
   const prOf = (taskId: string) => s.prs.find((p) => p.task === taskId)
-  const sel = s.prs.find((p) => p.id === prFromSlug(item)) ?? s.prs.find((p) => reviewOf(s, p.id)) ?? s.prs[s.prs.length - 1]
+  // 주소가 작업 id면 그 작업의 PR, PR이 아직 없으면 작업만 보여 준다 (직접 개발 직후)
+  const byTask = s.tasks.find((t) => t.id === item)
+  const taskOnly = byTask && !prOf(byTask.id) ? byTask : undefined
+  const sel = (byTask && prOf(byTask.id)) ?? s.prs.find((p) => p.id === prFromSlug(item)) ?? s.prs.find((p) => p.target?.status === 'proposed') ?? s.prs.find((p) => reviewOf(s, p.id)) ?? s.prs[s.prs.length - 1]
   const groupOf = (taskId: string, state: string) => { const p = prOf(taskId); return state === '완료' || p?.merged ? 2 : p && reviewOf(s, p.id) ? 1 : 0 }
   const tasks = s.tasks.slice().reverse()
   const row = (t: S['tasks'][number]) => {
     const p = prOf(t.id)
     const xr = p && reviewOf(s, p.id)
-    return { key: t.id, href: p ? `#/work/prs/${prSlug(p.id)}` : `#/work/specs/${t.spec}/${t.para}`, on: !!p && p.id === sel?.id, title: t.title, meta: <>{t.id}{p ? ` · ${p.id}` : ''} <State v={xr ? waitLabel(xr) : t.state} /></> }
+    const coding = t.coding && !p?.merged && !p?.target && !xr ? codingState(t.coding) : undefined
+    return {
+      key: t.id,
+      href: p ? `#/work/prs/${prSlug(p.id)}` : t.coding ? `#/work/prs/${encodeURIComponent(t.id)}` : `#/work/specs/${t.spec}/${t.para}`,
+      on: taskOnly ? t.id === taskOnly.id : !!p && p.id === sel?.id,
+      title: t.title,
+      meta: <>{t.id}{p ? ` · ${p.id}` : ''} <State v={p?.target?.status === 'proposed' ? '레포 승인 대기' : xr ? waitLabel(xr) : coding ?? t.state} live={!!coding && !!t.coding && isRunning(t.coding.status)} />{fromDevTeam(s, t) && <> <DevTeamTag /></>}</>,
+    }
   }
   const list = <ListPane empty="작업 없음" groups={(['진행 중', '교차검증·사람 확인', '완료'] as const).map((label, i) => ({ label, rows: tasks.filter((t) => groupOf(t.id, t.state) === i).map(row) }))} />
+  if (taskOnly) {
+    const text = s.specs.find((x) => x.id === taskOnly.spec)?.paras.find((p) => p.id === taskOnly.para)?.text
+    return (
+      <Layout list={list} head={<Head kicker={<>{taskOnly.id} · {taskOnly.spec}{fromDevTeam(s, taskOnly) && <> · <DevTeamTag /></>}</>} title={taskOnly.title} side={taskOnly.coding ? <CodingLabel c={taskOnly.coding} /> : <State v={taskOnly.state} />} />}>
+        <Flow>
+          <CodingStep task={taskOnly} />
+          <Step name="작업" on href={`#/work/specs/${taskOnly.spec}/${taskOnly.para}`} title={`${taskOnly.id} · ${taskOnly.spec} ${taskOnly.para}`}>
+            {text && <p>{text}</p>}
+          </Step>
+          <Step name="PR" on={false} title="PR 전" />
+        </Flow>
+      </Layout>
+    )
+  }
   if (!sel) return <Layout list={list}><div className="empty"><b>PR 없음</b></div></Layout>
   const task = s.tasks.find((t) => t.id === sel.task)
   const spec = s.specs.find((x) => x.id === task?.spec)
@@ -170,7 +198,7 @@ export function Work({ s, d, item }: P & { item?: string }) {
   return (
     <Layout
       list={list}
-      head={<Head kicker={<>{sel.id} · {task?.id} · <span className="mono">{sel.branch}</span></>} title={sel.title.replace(/^[A-Z]\d+: /, '')} side={<State v={sel.merged ? '완료' : xr ? waitLabel(xr) : last === '불일치' || rejected ? '불일치' : '머지 대기'} />} />}
+      head={<Head kicker={<>{sel.id} · {task?.id} · <span className="mono">{sel.branch}</span>{fromDevTeam(s, task) && <> · <DevTeamTag /></>}</>} title={sel.title.replace(/^[A-Z]\d+: /, '')} side={<State v={sel.merged ? '완료' : xr ? waitLabel(xr) : last === '불일치' || rejected ? '불일치' : '머지 대기'} />} />}
       side={
         <Side title="근거 체인" sum={`${chain.length}단계`}>
           {chain.map((x, i) => <p key={i} className="pside-msg"><b>{x.kind}</b> {x.href ? <a href={x.kind === '문단' && spec && para ? `#/work/specs/${spec.id}/${para.id}` : x.href} className="plain-link">{x.title}</a> : x.title}</p>)}
@@ -179,11 +207,17 @@ export function Work({ s, d, item }: P & { item?: string }) {
       below={<Trace s={s} pr={sel} line={line} setLine={setLine} />}
     >
       <Flow>
+        {task && <CodingStep task={task} />}
         <Step name="작업" on href={task ? `#/work/specs/${task.spec}/${task.para}` : undefined} title={task ? `${task.id} · ${task.spec} ${task.para}` : '-'}>
           {para && <p>{para.text}</p>}
           {para?.warn && <Tag tone="amber">경고 {para.warn.card}</Tag>}
           {para?.incident && <Tag tone="amber">장애 {para.incident}</Tag>}
         </Step>
+        {sel.target && (
+          <Step name="대상 레포" on={sel.target.status === 'approved'} title={sel.target.status === 'approved' ? sel.target.repo : sel.target.status === 'rejected' ? '거절됨' : '승인 대기'}>
+            <RepoTargetBlock key={sel.id} p={sel} d={d} />
+          </Step>
+        )}
         <Step name="관문" on title={`${sel.gate.result} · ${sel.gate.lines}줄·${sel.gate.files}파일 · ${sel.gate.paths}`} />
         <Step name="검수" on={last === '통과'} title={sel.reviews.join(' → ')}>
           {!sel.merged && (last === '불일치' || rejected) && <Button size="small" onClick={() => d({ type: 'reviewPr', pr: sel.id })}>다시 검수</Button>}
@@ -465,7 +499,70 @@ export function Ops({ s, item }: { s: S; item?: string }) {
           )
         })}
       </Flow>
+      <Deployments s={s} />
     </div>
+  )
+}
+
+// ---------------------------------------------------------------- 배포 기록·배포 후 확인 (dev 서비스 REST, SSE 상태와 따로 읽는다)
+type Tone = 'green' | 'amber' | 'neutral'
+const DEP_STATUS: Record<Deployment['status'], [string, Tone]> = {
+  requested: ['승인 대기', 'amber'], running: ['배포 중', 'neutral'], succeeded: ['배포됨', 'green'], failed: ['실패', 'amber'], rolled_back: ['롤백됨', 'neutral'],
+}
+const VERDICT: Record<DeployCheck['verdict'], [string, Tone]> = { ok: ['정상', 'green'], watch: ['관찰', 'neutral'], suspect: ['의심', 'amber'] }
+const APPROVAL: Record<string, string> = { prod: 'prod 배포', protected_path: '보호 경로' }
+const ROLLBACK = { B: '자동 롤백 가능', C: '사람 승인 필요' }
+const Chip = ({ v }: { v: [string, Tone] }) => <span className={`st st-${v[1]}`}>{v[0]}</span>
+
+function Deployments({ s }: { s: S }) {
+  const toast = useToast()
+  const [rows, setRows] = useState<Deployment[] | null>(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState('')
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    let live = true
+    deployApi(apiBase('dev')).list()
+      .then((r) => { if (live) { setRows(r); setErr('') } })
+      .catch((e: Error) => { if (live) { setRows([]); setErr(e.message) } })
+    return () => { live = false }
+  }, [tick])
+  const run = (id: string, kind: 'approve' | 'check', done: string) => {
+    setBusy(`${id}:${kind}`)
+    deployApi(apiBase('dev'))[kind](id)
+      .then(() => { toast.show(done); setTick((n) => n + 1) })
+      .catch((e: Error) => toast.show(e.message))
+      .finally(() => setBusy(''))
+  }
+  if (rows === null) return null
+  return (
+    <section className="flow-sec">
+      <h2>배포 · 배포 후 확인</h2>
+      {err && <p className="muted small">{err}</p>}
+      {rows.length === 0 ? <div className="empty"><b>배포 기록 없음</b></div> : (
+        <Flow label="배포 기록">
+          {rows.map((dep) => {
+            const c = dep.check
+            const rb = c?.rollback
+            return (
+              <Step key={dep.id} name={kst(dep.at).slice(6) || '-'} on={dep.status === 'succeeded' && c?.verdict !== 'suspect'} title={<>{dep.id} · {dep.version ?? '-'} · {dep.env} <Chip v={DEP_STATUS[dep.status] ?? [dep.status, 'neutral']} /></>}>
+                <Pairs items={[
+                  ['PR', dep.pr_numbers.map((n, i) => <span key={n}>{i > 0 && ', '}<Ref s={s} id={`PR #${n}`} /></span>)],
+                  ...(dep.approval_reasons.length ? [['승인', <>{dep.approval_reasons.map((r) => APPROVAL[r] ?? r).join(' · ')}{dep.protected_paths.length > 0 && <span className="mono small"> {dep.protected_paths.join(', ')}</span>}{dep.approved_by && ` · ${dep.approved_by}`}</>] as [string, ReactNode]] : []),
+                  ['확인', c ? <><Chip v={VERDICT[c.verdict] ?? [c.verdict, 'neutral']} /> · {c.window_minutes}분 · {kst(c.at)}</> : '없음'],
+                  ...(c ? [['근거', <ul>{c.evidence.map((e) => <li key={e}>{e}</li>)}</ul>] as [string, ReactNode]] : []),
+                  ...(rb ? [['롤백', <><Grade g={rb.grade} /> {ROLLBACK[rb.grade]} <span className="muted small mono">후보 {rb.suspect_count} · 확신도 낮음 {rb.low_confidence} · 되돌릴 수 없음 {rb.irreversible_count} · 이전 롤백 {rb.prior_rollbacks}</span></>] as [string, ReactNode]] : []),
+                ]} />
+                <div className="actions">
+                  {dep.status === 'requested' && <Button size="small" variant="primary" disabled={!!busy} onClick={() => run(dep.id, 'approve', `${dep.id} 배포 승인`)}>배포 승인</Button>}
+                  {dep.status !== 'requested' && dep.status !== 'running' && <Button size="small" disabled={!!busy} onClick={() => run(dep.id, 'check', `${dep.id} 배포 후 확인`)}>배포 후 확인 다시 보기</Button>}
+                </div>
+              </Step>
+            )
+          })}
+        </Flow>
+      )}
+    </section>
   )
 }
 

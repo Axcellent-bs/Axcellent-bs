@@ -464,3 +464,35 @@ a.plain-link:hover { color: var(--primary); }
 .pl-menu a.on::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; border-radius: 2px; background: var(--text); }
 .pl-tools { display: flex; align-items: center; gap: 10px; flex-shrink: 0; margin-left: auto; }
 .planning-scope .page { padding: 24px 32px 48px; }
+
+/* 대상 레포 (AI 제안 → 사람 승인) */
+.repo-block { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.repo-reasons { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 13px; color: var(--text-2); }
+.repo-reasons .grade { margin-right: 4px; }
+.repo-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.repo-pick { display: inline-flex; gap: 6px; align-items: center; }
+
+/* AI와 대화 패널 (개발·배포 화면 오른쪽) */
+.chat-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(460px, 100vw); z-index: 45; display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12); }
+.chat-drawer-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.chat-drawer-bar { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.chat-sel { flex: 1; min-width: 0; }
+.chat-drawer-msgs { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.chat-drawer-msgs > .bubble.user { align-self: flex-end; }
+.chat-drawer-msgs > .bubble.ai { align-self: flex-start; }
+.chat-examples { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: auto; }
+.bubble.q { background: var(--primary-soft); border-left: 3px solid var(--primary); }
+.bubble.err { background: transparent; border: 1px solid var(--danger); color: var(--danger); display: grid; gap: 8px; }
+.chat-card { align-self: flex-start; width: 92%; display: grid; gap: 8px; padding: 10px 12px; font-size: 13.5px; border: 1px solid var(--border); background: var(--surface-2); }
+.chat-card-h { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.chat-card ul { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+.chat-card-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.chat-paths { display: flex; flex-wrap: wrap; gap: 4px; }
+.chat-drawer .sl-composer { margin: 8px 16px 16px; }
+.chat-drawer .sl-composer textarea:disabled { opacity: 0.6; }
+button.chip { cursor: pointer; font: inherit; }
+
+/* 코딩 에이전트가 일하는 중: 상태 글자 앞 점이 깜빡인다 */
+.st.st-live::before { background: var(--primary, #5b5bd6); animation: st-blink 1s ease-in-out infinite; }
+@keyframes st-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
+@media (prefers-reduced-motion: reduce) { .st.st-live::before { animation: none; } }

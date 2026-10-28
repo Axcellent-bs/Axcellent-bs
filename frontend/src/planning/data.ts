@@ -11,11 +11,11 @@
 //   - 사람은 사후 감사 화면에서 AI가 스스로 승인한 건을 보고, 기준을 바로 끌 수 있다.
 
 export type Dept =
-  | 'planning' | 'hr' | 'support' | 'marketing' | 'data' | 'finance'
+  | 'planning' | 'dev' | 'hr' | 'support' | 'marketing' | 'data' | 'finance'
   | 'infra' | 'orchestrator' | 'safety' | 'shop' | 'memory' | 'human'
 
 export const DEPT_NAME: Record<Dept, string> = {
-  planning: '기획개발', hr: '인사', support: '고객지원', marketing: '마케팅', data: '데이터분석',
+  planning: '요청·기획서', dev: '개발·배포', hr: '인사', support: '고객지원', marketing: '마케팅', data: '데이터분석',
   finance: '재무/정산', infra: '인프라(DejaFix)', orchestrator: '통합 에이전트', safety: '안전 레이어',
   shop: '판매 사이트', memory: '회사 기억', human: '사람',
 }
@@ -56,6 +56,7 @@ export interface Spec {
   basis: string[]
   humanSentences: number
   confirmedBy?: Approver
+  origin?: string // 'dev_team' = 개발팀이 직접 넣은 기획
 }
 
 export type TaskState = '진행 중' | 'PR 검수' | '머지 대기' | '완료' | 'C 보류'
@@ -66,6 +67,21 @@ export interface Task {
   title: string
   owner: string
   state: TaskState
+  coding?: CodingRun // 코딩 에이전트 실행 상태 (dev 서비스)
+}
+
+// 코딩 에이전트 한 번의 실행. SSE로 단계가 바뀐다
+export type CodingStatus = 'queued' | 'reading' | 'writing' | 'reviewing' | 'opened' | 'merged' | 'waiting_human' | 'failed' | 'canceled'
+export interface CodingFile { path: string; additions: number; deletions: number; reason: string }
+export interface CodingRun {
+  status: CodingStatus
+  model: string | null
+  files: CodingFile[]
+  summary: string | null
+  review: { verdict: '통과' | '불일치'; notes: string[] } | null
+  error: string | null
+  attempts: number
+  updatedAt?: string
 }
 
 export interface PR {
@@ -79,6 +95,19 @@ export interface PR {
   auto?: boolean // 사람 클릭 없이 머지됨 (기준 또는 교차검증)
   mergedBy?: 'rule' | 'review' | 'human'
   rule?: string // 자동 머지에 쓴 기준 (AR-n)
+  target?: RepoTarget // 레포가 2개 이상일 때 AI가 고른 대상 레포 (사람 승인 전에는 PR을 열지 않는다)
+}
+
+// PR을 올릴 레포. 연결 1개면 자동 승인, 2개 이상이면 AI 제안 → 사람 승인
+export interface RepoTarget {
+  connectionId: string
+  repo: string
+  status: 'proposed' | 'approved' | 'rejected'
+  confidence: 'high' | 'mid' | 'low'
+  reasons: string[] // "AI: "로 시작하면 LLM 판단
+  candidates: { connectionId: string; repo: string; score: number }[]
+  decidedBy: string | null
+  decidedAt: string | null
 }
 
 export interface Message { who: string; dept: Dept; text: string; decision?: string; t?: string }
@@ -211,6 +240,31 @@ export interface State {
   warnings: number
   firstPrMinutes: number[]
   autoPolicy: AutoPolicy
+  chats?: ChatThread[] // AI와 대화 (dev 서비스 SSE에 있을 때만)
+}
+
+// ---- AI와 대화: 개발 에이전트와 대화하다 필요한 것이 모이면 코딩 작업을 시작한다
+export type ChatStatus = 'talking' | 'started' | 'blocked'
+export type ChatKind = 'text' | 'question' | 'plan' | 'started' | 'error'
+export interface ChatPlan { title: string; plan: string; done: string[]; paths: string[] }
+export interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  text: string
+  at: string
+  kind: ChatKind
+  plan?: ChatPlan | null
+  taskId?: string | null
+}
+export interface ChatThread {
+  id: string
+  title: string
+  status: ChatStatus
+  messages: ChatMessage[]
+  taskId: string | null
+  connection: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 // ---- 되돌릴 수 없는 일: 교차검증 대신 항상 사람이 확인한다 (기획서 확정·PR 머지 둘 다)
@@ -431,6 +485,8 @@ export type Action =
   | { type: 'advance' } // 다음 단계 한 칸 (버스·화면이 일정 간격으로 보낸다)
   | { type: 'generatePrs'; spec: string }
   | { type: 'reviewPr'; pr: string }
+  | { type: 'approveRepo'; pr: string; connection?: string } // connection 없으면 제안된 레포로 승인
+  | { type: 'rejectRepo'; pr: string }
   | { type: 'acceptDraft'; request: string }
   | { type: 'writeSpec'; request: string }
   // 교차검증·학습 기준·사람 확인

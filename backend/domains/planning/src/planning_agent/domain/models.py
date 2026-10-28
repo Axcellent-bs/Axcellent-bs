@@ -28,6 +28,7 @@ Dept = Literal[
     "shop",
     "memory",
     "human",
+    "dev",  # 같은 부서의 개발·배포 서비스 (planning 서비스와 따로 뜰 때)
 ]
 
 DEPT_NAME: dict[str, str] = {
@@ -43,10 +44,11 @@ DEPT_NAME: dict[str, str] = {
     "shop": "판매 사이트",
     "memory": "회사 기억",
     "human": "사람",
+    "dev": "개발·배포",
 }
 
 ReqState = Literal["접수", "기획 중", "작업 중", "완료", "중복 연결", "기각"]
-TaskState = Literal["진행 중", "PR 검수", "머지 대기", "완료", "C 보류"]
+TaskState = Literal["진행 중", "PR 검수", "머지 대기", "완료", "C 보류", "중단"]
 Review = Literal["통과", "불일치"]
 ActivityKind = Literal["A2A", "이벤트", "execute", "API", "사람"]
 Grade = Literal["A", "B", "C", "read"]
@@ -130,6 +132,55 @@ class Spec(DomainModel):
     human_sentences: int = 0
     auto: bool = False  # 간단 요청 규칙·자동 확정 규칙으로 사람 확정 없이 처리됨
     auto_review: AutoReview | None = None  # 자동 확정을 멈춘 이유 (확정되면 비움)
+    # planning 서비스가 dev 서비스로 넘긴 기획서 (start_dev). 합친 모드에서는 늘 False
+    handed_to_dev: bool = False
+    # 기획서를 쓴 곳. "dev_team" = 개발팀원이 개발 화면에서 직접 쓴 기획 (코딩 에이전트)
+    origin: str | None = None
+
+
+CodingStatus = Literal[
+    "queued",
+    "reading",
+    "writing",
+    "reviewing",
+    "opened",
+    "merged",
+    "waiting_human",
+    "failed",
+    "canceled",  # 사람이 중단 (열린 PR은 닫고 브랜치를 지움)
+]
+
+
+class CodingFile(DomainModel):
+    """코딩 에이전트가 바꾼 파일 하나. 줄 수는 기준 브랜치 글과 비교해 코드로 센다."""
+
+    path: str
+    additions: int = 0
+    deletions: int = 0
+    reason: str = ""
+
+
+class CodingReview(DomainModel):
+    verdict: Review
+    notes: list[str] = Field(default_factory=list)
+
+
+class CodingRun(DomainModel):
+    """코딩 에이전트 진행 상태 (작업 하나). 단계마다 바뀌어 SSE로 나간다.
+
+    `attempts`는 파일을 쓴 횟수 (첫 작성 1, 리뷰 불일치 뒤 수정 2).
+    `connection`은 올릴 연결 id, `pr`은 만든 PR 표시 id (없으면 None)."""
+
+    status: CodingStatus = "queued"
+    model: str | None = None
+    files: list[CodingFile] = Field(default_factory=list)
+    summary: str | None = None
+    review: CodingReview | None = None
+    error: str | None = None
+    attempts: int = 0
+    updated_at: UtcDatetime
+    connection: str | None = None
+    pr: str | None = None
 
 
 class Task(DomainModel):
@@ -139,6 +190,7 @@ class Task(DomainModel):
     title: str
     owner: str
     state: TaskState
+    coding: CodingRun | None = None  # 코딩 에이전트 작업만 (개발팀 기획)
 
 
 class PrGate(DomainModel):
@@ -148,6 +200,27 @@ class PrGate(DomainModel):
     lines: int
     files: int
     paths: str
+
+
+class RepoCandidate(DomainModel):
+    connection_id: str
+    repo: str
+    score: int
+
+
+class RepoTarget(DomainModel):
+    """PR을 올릴 레포(연결). AI가 제안하고 사람이 승인한다 (연결이 하나면 자동 승인).
+
+    `candidates`는 규칙 점수 순, `reasons`는 짧은 근거 줄 (LLM 근거는 앞에 "AI: ")."""
+
+    connection_id: str
+    repo: str
+    status: Literal["proposed", "approved", "rejected"]
+    confidence: Literal["high", "mid", "low"]
+    reasons: list[str] = Field(default_factory=list)
+    candidates: list[RepoCandidate] = Field(default_factory=list)
+    decided_by: str | None = None
+    decided_at: UtcDatetime | None = None
 
 
 class PR(DomainModel):
@@ -165,6 +238,12 @@ class PR(DomainModel):
     deployed_version: str | None = None
     auto: bool = False  # 간단 요청 규칙·자동 머지 규칙으로 자동 머지됨
     auto_review: AutoReview | None = None  # 자동 머지를 멈춘 이유 (머지되면 비움)
+    # 형상관리 연결 계층으로 실제로 올린 변경 번호·주소 (목 설정이면 None)
+    vcs_number: int | None = None
+    url: str | None = None
+    # 올릴 레포 제안·승인 (형상관리 연결이 있을 때만. 목 설정이면 None)
+    target: RepoTarget | None = None
+    closed: bool = False  # 작업 중단으로 닫음 (병합 안 함)
 
 
 class Message(DomainModel):
@@ -303,6 +382,43 @@ class AutoPolicy(DomainModel):
     log: list[AutoLog] = Field(default_factory=list)
 
 
+class ChatPlan(DomainModel):
+    """개발 AI가 대화로 정리한 구현 계획 (코딩 작업 입력)."""
+
+    title: str
+    plan: str
+    done: list[str] = Field(default_factory=list)
+    paths: list[str] = Field(default_factory=list)
+
+
+ChatKind = Literal["text", "question", "plan", "started", "error"]
+
+
+class ChatMessage(DomainModel):
+    id: str  # m1, m2 … (대화 안에서)
+    role: Literal["user", "assistant"]
+    text: str
+    at: UtcDatetime
+    kind: ChatKind = "text"
+    plan: ChatPlan | None = None
+    task_id: str | None = None
+
+
+class ChatThread(DomainModel):
+    """개발 화면에서 개발팀원이 개발 AI와 나눈 대화 하나. 계획이 서면 코딩 작업을 띄운다.
+
+    status: talking(대화 중) · started(작업 띄움, `task_id`) · blocked(연결이 없어 못 띄움)."""
+
+    id: str  # chat-1 …
+    title: str
+    status: Literal["talking", "started", "blocked"] = "talking"
+    messages: list[ChatMessage] = Field(default_factory=list)
+    task_id: str | None = None
+    connection: str | None = None
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+
+
 class State(DomainModel):
     tenant_id: str = TENANT_ID_DEFAULT
     seq: int = 0  # 들어오고 나간 연동 건마다 1씩 (새로 받은 것 표시용)
@@ -322,6 +438,7 @@ class State(DomainModel):
     warnings: int = 0
     first_pr_minutes: list[int] = Field(default_factory=list)
     auto_policy: AutoPolicy
+    chats: list[ChatThread] = Field(default_factory=list)  # 개발 AI 대화 (dev_chat.py)
 
 
 def dump(model: BaseModel) -> dict:

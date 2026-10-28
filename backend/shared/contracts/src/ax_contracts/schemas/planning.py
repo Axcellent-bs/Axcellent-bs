@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
@@ -184,3 +184,38 @@ class ChangeResultInput(AxModel):
 
 class ChangeResultOutput(AxModel):
     applied: int  # 이 결과를 적용한 요청 부서 쪽 항목 수 (문의 n건 등)
+
+
+# ---- 기획 → 개발 넘기기 (서비스 나누기, planning·dev)
+#
+# - `start_dev`: planning 서비스 → dev 서비스, 등급 A. 확정된 기획서와 작업을 넘긴다.
+# - `receive_dev_result`: dev 서비스 → planning 서비스, 등급 A. 작업·PR·요청 상태를 돌려준다.
+# - request·spec·tasks·prs는 planning 도메인 모델(`planning_agent.domain.models`)을
+#   `dump()`(model_dump(mode="json", by_alias=True))한 dict 그대로다. 같은 부서 안이라
+#   모양을 여기서 다시 정하지 않는다.
+# - 결과는 같은 `ctx_req_` 사건에 `path`를 비운 새 요청으로 보낸다(LOOP_DETECTED 방지).
+# - 멱등성 키: `ctx_req_…:start_dev:SPEC-n`, `ctx_req_…:dev_result:SPEC-n:<지문>`.
+
+
+class DevHandoffInput(AxModel):
+    request: dict[str, Any]  # Request dump
+    spec: dict[str, Any]  # Spec dump (status 확정)
+    tasks: list[dict[str, Any]] = Field(default_factory=list)  # Task dump
+
+
+class DevHandoffOutput(AxModel):
+    accepted: bool
+    spec_id: str
+    task_ids: list[str] = Field(default_factory=list)
+
+
+class DevResultInput(AxModel):
+    spec_id: str
+    request_id: str
+    request_state: str  # Request.state 값 (작업 중·완료 …)
+    tasks: list[dict[str, Any]] = Field(default_factory=list)  # Task dump
+    prs: list[dict[str, Any]] = Field(default_factory=list)  # PR dump
+
+
+class DevResultOutput(AxModel):
+    applied: int  # planning 쪽에 반영한 작업·PR 수

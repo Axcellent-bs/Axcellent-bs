@@ -1,7 +1,7 @@
 // 기획개발 백엔드(planning 에이전트, 8101) REST·SSE와 화면 상태(State)를 잇는다.
 // 백엔드는 snake_case·ISO 시각, 화면은 camelCase·KST "MM-DD HH:mm"이라 여기서 한 번만 바꾼다.
 // 백엔드에 없는 값(학습 기준·감사 목록)은 빈 값으로 두고 지어내지 않는다.
-import type { Action, Activity, AuditItem, CrossReview, Doc, Incident, OutMsg, PR, Request, State, Thread } from './data'
+import type { Action, Activity, AuditItem, ChatThread, CrossReview, Doc, Incident, OutMsg, PR, Request, State, Thread } from './data'
 
 export const PLANNING_API = (import.meta.env.VITE_PLANNING_API_URL as string | undefined) ?? 'http://localhost:8101'
 /** 개발·배포 서비스 에이전트(dev, 8111). 업무 로직은 기획과 같은 planning 도메인이라 같은 REST(`/api/planning`)를 쓴다 */
@@ -121,6 +121,7 @@ export function fromBackend(raw: Json, queue: QueueItem[]): State {
     draftsAccepted: Number(s.draftsAccepted ?? 0),
     warnings: Number(s.warnings ?? 0),
     firstPrMinutes: (s.firstPrMinutes as number[]) ?? [],
+    ...(Array.isArray(s.chats) ? { chats: toThreads(raw.chats) } : {}),
     autoPolicy: {
       rules: [], // 관찰 기반 학습 기준은 백엔드에 아직 없다 (FR-ATL-007~009)
       observing: [],
@@ -154,3 +155,77 @@ export const planningApi = (base: string) => ({
   action: (a: Action) => call<Json>(base, '/actions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a) }),
   eventsUrl: () => `${base}/api/planning/events`,
 })
+
+// ---- 배포 기록·배포 후 확인 (dev 서비스 `/api/planning/deployments`). SSE 상태와 따로 읽는다
+export interface RollbackSuggestion { suspect_count: number; low_confidence: number; irreversible_count: number; prior_rollbacks: number; grade: 'B' | 'C'; rules: string[] }
+export interface DeployCheck { deployment: string; at: string; window_minutes: number; verdict: 'ok' | 'watch' | 'suspect'; evidence: string[]; candidate_prs: string[]; rollback: RollbackSuggestion | null }
+export interface Deployment {
+  id: string; pr_numbers: number[]; version: string | null; env: 'dev' | 'prod'; at: string
+  status: 'requested' | 'running' | 'succeeded' | 'failed' | 'rolled_back'
+  approved_by: string | null; approval_reasons: string[]; protected_paths: string[]; check: DeployCheck | null
+}
+
+export const deployApi = (base: string) => ({
+  list: () => call<unknown>(base, '/deployments').then((d) => (Array.isArray(d) ? (d as Deployment[]).filter((x) => x && typeof x.id === 'string') : [])),
+  approve: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+  check: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/check`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+})
+
+// ---- 형상관리 연결 목록 (dev 서비스 `/api/planning/vcs/connections`). 레포 여러 개를 잇고 PR마다 대상 레포를 고른다
+export interface VcsConnection {
+  id: string; kind: string; repo: string; base_url: string; base_branch: string; description: string
+  paths: string[]; mount?: string; token_set: boolean; token_hint: string; source: 'screen' | 'env'
+}
+export interface VcsConnectionInput { id?: string; kind: string; repo: string; base_url?: string; base_branch?: string; token?: string; description?: string; paths?: string[]; mount?: string }
+export interface VcsTestResult { ok: boolean; code: string | null; message: string; checked_at: string; connection_id: string }
+
+// 녹화 데모(목)는 모르는 주소에 빈 배열·{ok:true}를 준다. 연결 모양이 아닌 값은 버린다
+const toConnections = (d: unknown): VcsConnection[] =>
+  Array.isArray(d) ? (d as VcsConnection[]).filter((c) => c && typeof c.id === 'string' && typeof c.repo === 'string').map((c) => ({ ...c, paths: Array.isArray(c.paths) ? c.paths : [] })) : []
+const post = (body: unknown = {}): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+
+export const vcsApi = (base: string) => {
+  const list = () => call<unknown>(base, '/vcs/connections').then(toConnections)
+  // POST 응답이 목록이 아니면(목 등) 다시 읽는다
+  const after = (d: unknown) => (Array.isArray(d) ? toConnections(d) : list())
+  return {
+    list,
+    save: (c: VcsConnectionInput) => call<unknown>(base, '/vcs/connections', post(c)).then(after),
+    remove: (id: string) => call<unknown>(base, `/vcs/connections/${encodeURIComponent(id)}/delete`, post()).then(after),
+    test: (id: string) => call<VcsTestResult>(base, `/vcs/connections/${encodeURIComponent(id)}/test`, post()),
+  }
+}
+
+// ---- 직접 개발 (dev 서비스 `/api/planning/dev-tasks`). 개발팀이 기획을 바로 넣으면 코딩 에이전트가 PR까지 만든다
+export interface DevTaskInput { title: string; plan: string; done?: string; paths?: string[]; connection?: string }
+export interface DevTaskStarted { request_id: string; spec_id: string; task_id: string; status: 'queued' }
+
+export const devTaskApi = (base: string) => ({
+  // 목(녹화 데모)은 POST에 {ok:true}만 준다. task_id가 없으면 실패로 본다
+  create: (x: DevTaskInput) => call<Partial<DevTaskStarted>>(base, '/dev-tasks', post(x)).then((d) => {
+    if (!d || typeof d.task_id !== 'string') throw new PlanningApiError('NO_TASK', '개발·배포 서버가 작업을 만들지 않았어요')
+    return d as DevTaskStarted
+  }),
+  retry: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/retry`, post()),
+  cancel: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/cancel`, post()),
+})
+
+// ---- AI와 대화 (dev 서비스 `/api/planning/dev-chat`). 답이 오면 바뀐 대화 전체를 돌려준다 (5~30초)
+export interface ChatSend { thread_id?: string; message: string; connection?: string }
+
+// 대화 모양이 아닌 값(목의 {ok:true} 등)은 버린다
+const isThread = (x: unknown): x is Json => !!x && typeof x === 'object' && typeof (x as Json).id === 'string' && Array.isArray((x as Json).messages)
+const toThread = (x: Json): ChatThread => camelize(x) as ChatThread
+export const toThreads = (d: unknown): ChatThread[] => (Array.isArray(d) ? d.filter(isThread).map(toThread) : [])
+
+export const chatApi = (base: string) => {
+  const one = (d: unknown) => {
+    if (!isThread(d)) throw new PlanningApiError('NO_THREAD', '개발·배포 서버가 대화를 돌려주지 않았어요')
+    return toThread(d)
+  }
+  return {
+    list: () => call<unknown>(base, '/dev-chat').then(toThreads),
+    get: (id: string) => call<unknown>(base, `/dev-chat/${encodeURIComponent(id)}`).then(one),
+    send: (x: ChatSend) => call<unknown>(base, '/dev-chat', post(x)).then(one),
+  }
+}

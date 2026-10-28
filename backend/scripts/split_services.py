@@ -24,6 +24,9 @@ DEPARTMENTS = {
     "planning": ("planning", "planning_agent", "PLANNING_AGENT_CARD", "ax-agent-planning"),
     "infra": ("infra-dejafix", "infra_agent", "INFRA_AGENT_CARD", "ax-agent-infra"),
 }
+# 부서 이름 → 서비스 역할 환경변수. 같은 부서 앱을 서비스마다 따로 띄울 때 맡은 몫을 알린다
+# (기획개발: planning = 기획서까지, dev = PR·머지, `planning_agent/dev_handoff.py`)
+ROLE_ENVS = {"planning": "PLANNING_ROLE"}
 # 직접 만든 서비스 (부서 패키지를 쪼개지 않음)
 STANDALONE = {"orchestrator", "hosts"}
 
@@ -60,6 +63,8 @@ def build(svc) -> None:
     out = ROOT / "services" / svc.id
     write(out / "agent-card.json", json.dumps(card, ensure_ascii=False, indent=2) + "\n")
     mod = f"svc_{svc.id}"
+    role_env = ROLE_ENVS.get(svc.department)
+    role_line = f'os.environ.setdefault("{role_env}", "{svc.id}")\n' if role_env else ""
     write(out / "src" / mod / "__init__.py", "")
     write(
         out / "src" / mod / "main.py",
@@ -73,7 +78,7 @@ import os
 from pathlib import Path
 
 os.environ.setdefault("{card_env}", str(Path(__file__).resolve().parents[2] / "agent-card.json"))
-
+{role_line}
 from {package}.main import app  # noqa: E402
 
 __all__ = ["app"]

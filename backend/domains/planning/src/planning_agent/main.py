@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
+from planning_agent import vcs
 from planning_agent.api import create_api_router
 from planning_agent.handlers import HANDLERS
 from planning_agent.runtime import get_service
@@ -51,6 +52,8 @@ def _cors_origins() -> list[str]:
     return [o.strip() for o in raw.split(",") if o.strip()]
 
 
+# 화면에서 넣어 둔 형상관리 연결을 다시 읽는다 (PLANNING_VCS_STORE가 있을 때)
+vcs.load_saved()
 app = create_agent_app(load_card(), HANDLERS)
 app.include_router(create_api_router(get_service))
 app.add_middleware(

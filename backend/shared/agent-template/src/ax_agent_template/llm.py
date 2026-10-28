@@ -192,6 +192,35 @@ def _usage_tokens(response: httpx.Response) -> tuple[int, int]:
         return 0, 0
 
 
+def _closed(node: Any) -> Any:
+    """객체마다 `additionalProperties: false`를 붙인다 (엄격 스키마 요구)."""
+    if isinstance(node, dict):
+        if node.get("type") == "object" or "properties" in node:
+            node.setdefault("additionalProperties", False)
+        for value in node.values():
+            _closed(value)
+    elif isinstance(node, list):
+        for value in node:
+            _closed(value)
+    return node
+
+
+def response_payload(
+    base_url: str, model: str | None, messages: list, name: str, json_schema: dict
+) -> dict[str, Any]:
+    """OpenAI 호환 요청 본문. Anthropic(Claude) 호환 주소는 스키마를 엄격하게(strict) 받고
+    `temperature`를 받지 않아서 그 둘만 맞춘다. 다른 주소(Gemini 등)는 예전 그대로다."""
+    anthropic = "anthropic.com" in (base_url or "")
+    schema_block: dict[str, Any] = {"name": name, "schema": json_schema}
+    payload: dict[str, Any] = {"model": model, "messages": messages}
+    if anthropic:
+        schema_block = {"name": name, "strict": True, "schema": _closed(json_schema)}
+    else:
+        payload["temperature"] = 0
+    payload["response_format"] = {"type": "json_schema", "json_schema": schema_block}
+    return payload
+
+
 class LLMClient:
     """OpenAI 호환 LLM 클라이언트 래퍼. 기본 모델은 Gemini다(이미지도 같은 엔드포인트로 읽는다)."""
 
@@ -200,9 +229,14 @@ class LLMClient:
         dept: str,
         settings: LLMSettings | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        timeout: float | None = None,
     ) -> None:
         self.dept = dept
         self.settings = settings or LLMSettings.from_env(dept)
+        # 요청 하나의 응답 제한(초). 긴 글을 쓰는 쪽(코딩 에이전트)은 늘려 쓴다.
+        # `<부서>_LLM_TIMEOUT_SEC` → `LLM_TIMEOUT_SEC` → 기본 60초
+        env = os.getenv(f"{env_prefix(dept)}_LLM_TIMEOUT_SEC") or os.getenv("LLM_TIMEOUT_SEC")
+        self.timeout = timeout or (float(env) if env else DEFAULT_TIMEOUT_SEC)
         self._transport = transport  # 테스트에서 가짜 서버를 끼우는 자리. 운영은 None
 
     async def structured(
@@ -232,15 +266,10 @@ class LLMClient:
             raise LLMNotConfiguredError(
                 f"{env_prefix(self.dept)}_LLM_BASE_URL 또는 LLM_BASE_URL이 없다"
             )
-        payload = {
-            "model": self.settings.model,
-            "messages": messages,
-            "temperature": 0,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {"name": schema.__name__, "schema": schema.model_json_schema()},
-            },
-        }
+        payload = response_payload(
+            self.settings.base_url, self.settings.model, messages, schema.__name__,
+            schema.model_json_schema(),
+        )
         headers = (
             {"Authorization": f"Bearer {self.settings.api_key}"} if self.settings.api_key else {}
         )
@@ -249,7 +278,7 @@ class LLMClient:
         model = self.settings.model
         last_problem = "응답이 비어 있다"
         async with httpx.AsyncClient(
-            timeout=DEFAULT_TIMEOUT_SEC, transport=self._transport
+            timeout=self.timeout, transport=self._transport
         ) as http:
             for _ in range(attempts):
                 try:
