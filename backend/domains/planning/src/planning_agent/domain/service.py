@@ -33,7 +33,7 @@ from ax_agent_template import execute as gate_module
 from ax_contracts.schemas import TENANT_ID_DEFAULT, Evidence, ExecuteDecision, RequestMeta
 from ax_contracts.schemas.planning import ChangeResultInput, DevHandoffInput, DevResultInput
 from ax_contracts.schemas.record import RecordCase, RecordKind
-from planning_agent import vcs_bridge
+from planning_agent import repo_routing, vcs_bridge
 from planning_agent.dev_handoff import (
     RECEIVE_DEV_RESULT,
     ROLES,
@@ -74,6 +74,7 @@ from planning_agent.domain.models import (
     OutMsg,
     Para,
     PrGate,
+    RepoTarget,
     ReqState,
     Request,
     Spec,
@@ -265,6 +266,13 @@ class PrParams(_Params):
     pr: str | int
 
 
+class RepoParams(_Params):
+    """올릴 레포 승인. connection을 안 주면 제안된 연결로."""
+
+    pr: str | int
+    connection: str | None = None
+
+
 class RequestParams(_Params):
     request: str
 
@@ -346,6 +354,8 @@ ACTIONS: dict[str, tuple[str, type[_Params]]] = {
     "generate_prs": ("_generate_prs", SpecParams),
     "review_pr": ("_review_pr", PrParams),
     "merge_pr": ("_merge_pr", PrParams),
+    "approve_repo": ("_approve_repo", RepoParams),
+    "reject_repo": ("_reject_repo", PrParams),
     "accept_draft": ("_accept_draft", RequestParams),
     "reject_draft": ("_reject_draft", RejectDraftParams),
     "reject_decision": ("_reject_decision", RejectDecisionParams),
@@ -724,6 +734,12 @@ class PlanningService:
 
     async def merge_pr(self, pr: str) -> ActionResult:
         return await self.dispatch({"type": "merge_pr", "pr": pr})
+
+    async def approve_repo(self, pr: str, connection: str | None = None) -> ActionResult:
+        return await self.dispatch({"type": "approve_repo", "pr": pr, "connection": connection})
+
+    async def reject_repo(self, pr: str) -> ActionResult:
+        return await self.dispatch({"type": "reject_repo", "pr": pr})
 
     async def accept_draft(self, request: str) -> ActionResult:
         return await self.dispatch({"type": "accept_draft", "request": request})
@@ -1278,12 +1294,12 @@ class PlanningService:
             changed_paths=auto_paths,
             auto=True,
         )
-        # 관문을 지난 뒤에만 형상관리에 실제로 올린다 (목 설정이면 아무것도 안 함)
-        opened = await vcs_bridge.open_pr(pr, req.id, spec_id, "R1")
+        # 관문을 지난 뒤에만 형상관리에 실제로 올린다 (목 설정이면 아무것도 안 함).
+        # 연결이 여럿이면 올릴 레포를 제안만 하고 사람 승인(approveRepo)을 기다린다
+        routed = await self._route_and_open(pr, req, spec_id, "R1", ctx, req.title)
         s.prs.append(pr)
         step("planning", "safety", "execute(generate_pr)", "execute", gen_text, "B")
-        if opened:
-            step("planning", "planning", opened.point, "API", opened.text)
+        s.activity.extend(routed)
         step(
             "planning",
             "shop",
@@ -1295,6 +1311,16 @@ class PlanningService:
         review_text = f"{pr_id} 검수 통과 (완료 기준 C1), CI 통과"
         await self._execute("review_pr", ctx, f"{pr_id}:r1", review_text)
         step("planning", "planning", "review_pr", "A2A", review_text, "A")
+
+        if self._repo_pending(pr):
+            # 올릴 레포 승인 전: PR은 열어 두고 머지 대기 (승인하면 자동 머지 규칙대로 이어 간다)
+            task.state = "머지 대기"
+            for r in s.requests:
+                if r.id == req.id:
+                    r.spec = spec_id
+                    r.state = "작업 중"
+            s.activity.append(self._repo_wait_act(ctx, pr))
+            return
 
         merge_text = f"{pr_id} 간단 요청 규칙·검수·CI 통과 → 자동 머지 허용"
         merge_rules = pr_check(s, pr)
@@ -2269,14 +2295,13 @@ class PlanningService:
             )
             review_text = f"{pr.id} 검수 {review}{' (완료 기준 C2)' if review == '불일치' else ''}"
             await self._execute("review_pr", ctx, f"{pr.id}:r1", review_text)
-            # 관문을 지난 뒤에만 형상관리에 실제로 올린다 (목 설정이면 아무것도 안 함)
-            note = await vcs_bridge.open_pr(pr, req.id if req else None, spec, t.para)
-            if note:
-                s.activity.append(
-                    self._act(
-                        self.clock(), ctx, "planning", "planning", note.point, "API", note.text
-                    )
+            # 관문을 지난 뒤에만 형상관리에 실제로 올린다 (목 설정이면 아무것도 안 함).
+            # 연결이 여럿이면 올릴 레포를 제안만 하고 사람 승인(approveRepo)을 기다린다
+            s.activity.extend(
+                await self._route_and_open(
+                    pr, req, spec, t.para, ctx, para.text if para else t.title
                 )
+            )
             s.prs.append(pr)
             created.append(pr)
             t.state = "머지 대기" if review == "통과" else "PR 검수"
@@ -2334,6 +2359,8 @@ class PlanningService:
         p = self._find_pr(s, pr)
         if p is None or p.merged:
             return
+        if self._repo_pending(p):
+            raise ActionError("REPO_NOT_APPROVED", f"{p.id} 올릴 레포를 먼저 승인해야 한다")
         await self._do_merge(s, p, pr_check(s, p), auto=False)
 
     async def _try_auto_merge(self, s: State, p: PR) -> bool:
@@ -2342,6 +2369,9 @@ class PlanningService:
         걸리면 "교차검증 대기", 되돌릴 수 없는 영역이면 "사람 확인"으로 두고 머지하지 않는다.
         safety가 merge_pr을 보류·거절해도 "교차검증 대기" (PR 생성·검수는 그대로 남는다)."""
         if p.merged or not p.reviews or p.reviews[-1] != "통과":
+            return False
+        if self._repo_pending(p):
+            s.activity.append(self._repo_wait_act(self._ctx_of_pr(s, p), p))
             return False
         check = pr_check(s, p)
         if check.ok:
@@ -2368,6 +2398,134 @@ class PlanningService:
             )
         )
         return False
+
+    # ---- 올릴 레포 (연결이 여럿일 때 제안 → 사람 승인)
+
+    @staticmethod
+    def _repo_pending(p: PR) -> bool:
+        """올릴 레포가 아직 승인되지 않았나 (제안·기각). 목 설정이면 늘 False."""
+        return p.target is not None and p.target.status != "approved"
+
+    def _repo_wait_act(self, ctx: str, p: PR) -> Activity:
+        state = "제안" if p.target and p.target.status == "proposed" else "기각"
+        return self._act(
+            self.clock(),
+            ctx,
+            "planning",
+            "planning",
+            "vcs.repo_pending",
+            "API",
+            f"{p.id} 올릴 레포 {state} 상태 → 승인 전까지 머지 대기 (approveRepo)",
+        )
+
+    async def _route_and_open(
+        self,
+        pr: PR,
+        req: Request | None,
+        spec_id: str | None,
+        para_id: str | None,
+        ctx: str,
+        para_text: str,
+    ) -> list[Activity]:
+        """올릴 레포를 정하고, 승인된 연결이면 바로 올린다. 남길 활동 줄을 돌려준다."""
+        inp = repo_routing.RouteInput(
+            title=pr.title,
+            text=para_text,
+            changed_paths=tuple(pr.changed_paths),
+            request_title=req.title if req else "",
+            area=pr.gate.paths,
+        )
+        pr.target = await vcs_bridge.propose(pr, inp, self.clock())
+        acts: list[Activity] = []
+        if self._repo_pending(pr):
+            text = vcs_bridge.proposed_text(pr) + " → 사람 승인 대기"
+            acts.append(
+                self._act(
+                    self.clock(), ctx, "planning", "planning", "vcs.repo_proposed", "API", text
+                )
+            )
+            return acts
+        note = await vcs_bridge.open_pr(pr, req.id if req else None, spec_id, para_id)
+        if note:
+            acts.append(
+                self._act(self.clock(), ctx, "planning", "planning", note.point, "API", note.text)
+            )
+        return acts
+
+    def _repo_pr(self, s: State, pr: str | int) -> PR:
+        p = self._find_pr(s, pr)
+        if p is None:
+            raise ActionError("NOT_FOUND", f"PR {pr}가 없다")
+        if not vcs_bridge.enabled():
+            raise ActionError("NO_VCS", "형상관리 연결이 없다 (목 설정)")
+        if p.merged or p.vcs_number is not None:
+            raise ActionError("INVALID_ACTION", f"{p.id}는 이미 형상관리에 올렸다")
+        return p
+
+    async def _approve_repo(self, s: State, pr: str | int, connection: str | None) -> None:
+        """사람이 올릴 레포를 승인한다 (다른 연결을 고를 수도 있다). 승인 뒤 바로 올리고,
+        이 승인만 기다리던 PR이면 자동 머지 규칙대로 이어 간다 (걸리면 대기열·사람 머지)."""
+        p = self._repo_pr(s, pr)
+        cid = connection or (p.target.connection_id if p.target else None)
+        conn = next((c for c in vcs_bridge.targets() if c.id == cid), None)
+        if conn is None:
+            raise ActionError("UNKNOWN_CONNECTION", f"모르는 연결: {cid}")
+        repo = conn.repo or conn.id
+        ctx = self._ctx_of_pr(s, p)
+        text = f"팀장 {TEAM_LEAD}이 {p.id} → {repo} 레포 승인"
+        await self._execute("approve_repo", ctx, f"{p.id}:{conn.id}", text, {"connection": conn.id})
+        old = p.target
+        same = old is not None and old.connection_id == conn.id
+        if old is not None and same:
+            reasons = list(old.reasons)
+        elif old is not None:
+            reasons = [f"사람이 고름 (제안 {old.repo})"]
+        else:
+            reasons = ["사람이 고름"]
+        p.target = RepoTarget(
+            connection_id=conn.id,
+            repo=repo,
+            status="approved",
+            confidence=old.confidence if old is not None and same else "low",
+            reasons=reasons,
+            candidates=list(old.candidates) if old is not None else [],
+            decided_by=TEAM_LEAD,
+            decided_at=self.clock(),
+        )
+        s.activity.append(
+            self._act(
+                self.clock(), ctx, "human", "planning", "레포 승인", "사람", f"{text} (사람 클릭)"
+            )
+        )
+        task = next((t for t in s.tasks if t.id == p.task), None)
+        sp = next((x for x in s.specs if task and x.id == task.spec), None)
+        req = self._request_of_spec(s, sp) if sp else None
+        note = await vcs_bridge.open_pr(
+            p, req.id if req else None, task.spec if task else None, task.para if task else None
+        )
+        if note:
+            s.activity.append(
+                self._act(self.clock(), ctx, "planning", "planning", note.point, "API", note.text)
+            )
+        if note is not None and note.ok and p.auto_review is None:
+            await self._try_auto_merge(s, p)
+
+    async def _reject_repo(self, s: State, pr: str | int) -> None:
+        """사람이 제안된 레포를 기각한다. 아무것도 올리지 않는다 (나중에 연결을 골라 승인)."""
+        p = self._repo_pr(s, pr)
+        if p.target is None:
+            raise ActionError("INVALID_ACTION", f"{p.id}에 제안된 레포가 없다")
+        ctx = self._ctx_of_pr(s, p)
+        text = f"팀장 {TEAM_LEAD}이 {p.id} → {p.target.repo} 레포 제안 기각"
+        await self._execute("reject_repo", ctx, f"{p.id}:reject", text)
+        p.target.status = "rejected"
+        p.target.decided_by = TEAM_LEAD
+        p.target.decided_at = self.clock()
+        s.activity.append(
+            self._act(
+                self.clock(), ctx, "human", "planning", "레포 기각", "사람", f"{text} (사람 클릭)"
+            )
+        )
 
     def _ctx_of_pr(self, s: State, p: PR) -> str:
         task = next((t for t in s.tasks if t.id == p.task), None)

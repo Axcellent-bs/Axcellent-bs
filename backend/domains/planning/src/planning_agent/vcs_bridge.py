@@ -3,16 +3,21 @@
 - `PLANNING_VCS_KIND`가 `mock`(기본)이면 아무것도 하지 않는다. 목 모드 상태·활동은 그대로다.
 - 그 밖이면(또는 테스트가 부품을 바꿔 끼우면) 관문 `execute()`를 지난 PR을 실제로 올리고 병합한다.
 - 부품이 실패해도 예외를 밖으로 내지 않는다. 활동 한 줄(`Note`)만 돌려주고 PR은 병합하지 않는다.
+- 연결이 여러 개면 `propose()`가 올릴 레포를 제안하고(`repo_routing.py`), 사람이 승인한 연결로만
+  올린다. 연결이 하나면 바로 승인한다 ("자동 (연결 1개)").
 - 이 파일과 도메인은 프로그램 이름을 모른다 (`rg` 0건, NFR-EXT-003).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
-from planning_agent import vcs
-from planning_agent.domain.models import PR
+from planning_agent import repo_routing, vcs
+from planning_agent.domain.models import PR, RepoCandidate, RepoTarget
 from planning_agent.vcs.base import VcsAdapter, VcsError
+
+AUTO_ONE = "자동 (연결 1개)"
 
 NOTE_FILE_DIR = "docs/generated"
 
@@ -26,13 +31,66 @@ class Note:
     text: str
 
 
-def active() -> VcsAdapter | None:
+def enabled() -> bool:
+    """실제로 올릴 연결이 있나. 연결이 없고 바꿔 끼운 부품도 없으면 False (목 설정)."""
+    return vcs.is_overridden() or bool(vcs.connections())
+
+
+def targets() -> list[vcs.Connection]:
+    """PR을 보낼 수 있는 연결 (목 설정이면 빈 목록)."""
+    return vcs.routing_connections() if enabled() else []
+
+
+def active(connection_id: str | None = None) -> VcsAdapter | None:
     """실제로 부를 부품. 목 설정이면 None (도메인은 지금처럼 가짜 PR만 쓴다).
 
-    설정이 잘못됐으면 `VcsError`(config)를 던진다. 부르는 쪽이 실패 한 줄로 바꾼다."""
-    if not vcs.is_overridden() and vcs.configured_kind() == "mock":
+    연결을 주면 그 연결의 부품, 안 주면 첫 연결의 부품이다.
+    설정이 잘못됐거나 모르는 연결이면 `VcsError`를 던진다. 부르는 쪽이 실패 한 줄로 바꾼다."""
+    if not enabled():
         return None
-    return vcs.get_vcs()
+    if connection_id is None:
+        return vcs.get_vcs()
+    return vcs.get_adapter(connection_id)
+
+
+def _connection_of(pr: PR) -> str | None:
+    return pr.target.connection_id if pr.target is not None else None
+
+
+async def propose(pr: PR, inp: repo_routing.RouteInput, now: datetime) -> RepoTarget | None:
+    """올릴 레포를 정한다. 목 설정이면 None. 연결이 하나면 승인, 여럿이면 제안."""
+    conns = targets()
+    if not conns:
+        return None
+    cands = [repo_routing.Candidate(c.id, c.repo or c.id, c.description, c.paths) for c in conns]
+    if len(cands) == 1:
+        j = repo_routing.score_rules(inp, cands)
+        return RepoTarget(
+            connection_id=j.connection_id,
+            repo=j.repo,
+            status="approved",
+            confidence=j.confidence,
+            reasons=j.reasons,
+            candidates=[RepoCandidate(**c) for c in j.candidates],
+            decided_by=AUTO_ONE,
+            decided_at=now,
+        )
+    j = await repo_routing.decide(inp, cands)
+    return RepoTarget(
+        connection_id=j.connection_id,
+        repo=j.repo,
+        status="proposed",
+        confidence=j.confidence,
+        reasons=j.reasons,
+        candidates=[RepoCandidate(**c) for c in j.candidates],
+    )
+
+
+def proposed_text(pr: PR) -> str:
+    """제안 활동 한 줄."""
+    t = pr.target
+    assert t is not None
+    return f"{pr.id} → {t.repo} 제안 (확신 {t.confidence}) · 근거 {' · '.join(t.reasons)}"
 
 
 def change_body(pr: PR, request_id: str | None, spec_id: str | None, para_id: str | None) -> str:
@@ -56,11 +114,17 @@ def change_files(pr: PR, body: str, spec_id: str | None) -> dict[str, str]:
 
 
 async def open_pr(
-    pr: PR, request_id: str | None, spec_id: str | None, para_id: str | None
+    pr: PR,
+    request_id: str | None,
+    spec_id: str | None,
+    para_id: str | None,
+    connection_id: str | None = None,
 ) -> Note | None:
-    """③ PR을 실제로 올리고 번호·주소를 PR에 적는다. 목 설정이면 None."""
+    """③ PR을 실제로 올리고 번호·주소를 PR에 적는다. 목 설정이면 None.
+
+    연결을 안 주면 PR의 승인된 레포(`target`), 그것도 없으면 첫 연결로 올린다."""
     try:
-        adapter = active()
+        adapter = active(connection_id or _connection_of(pr))
     except VcsError as exc:
         return Note(False, "vcs.open_failed", f"{pr.id} 형상관리에 올리지 못함 ({exc.code})")
     if adapter is None:
@@ -82,10 +146,12 @@ async def open_pr(
     return Note(True, "vcs.opened", f"{pr.id} → 형상관리 변경 #{opened.number} ({opened.branch})")
 
 
-async def merge_pr(pr: PR) -> Note | None:
-    """④ 실제로 병합한다. 목 설정이면 None. 실패하면 ok False (PR은 병합하지 않은 채로 둔다)."""
+async def merge_pr(pr: PR, connection_id: str | None = None) -> Note | None:
+    """④ 실제로 병합한다. 목 설정이면 None. 실패하면 ok False (PR은 병합하지 않은 채로 둔다).
+
+    PR을 올린 연결(`target`)에서 병합한다."""
     try:
-        adapter = active()
+        adapter = active(connection_id or _connection_of(pr))
     except VcsError as exc:
         return Note(False, "vcs.merge_failed", f"{pr.id} 형상관리 병합 실패 ({exc.code})")
     if adapter is None:

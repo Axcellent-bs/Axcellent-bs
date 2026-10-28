@@ -280,6 +280,73 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             result.update(ok=False, code=exc.code, message=exc.message)
         return _ok(result, get_service())
 
+    # ---- 형상관리 연결 여러 개 (레포마다 하나). PR마다 AI가 연결을 제안하고 사람이 승인한다
+
+    def _connections() -> dict:
+        rows = vcs.list_connections()
+        return _ok(rows, get_service(), count=len(rows))
+
+    @router.get("/vcs/connections")
+    def list_vcs_connections() -> dict:
+        return _connections()
+
+    @router.post("/vcs/connections", response_model=None)
+    async def post_vcs_connection(request: Request) -> dict | JSONResponse:
+        """연결 넣기·바꾸기. id가 없으면 새 연결(`conn-n`), 토큰을 비우면 그 연결의 토큰을 둔다."""
+        body = await _body(request)
+        if body is None:
+            return _err(400, "INVALID_VCS", "본문은 JSON 객체여야 한다")
+        paths = body.get("paths") or []
+        if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+            return _err(400, "INVALID_VCS", "paths는 문자열 목록이어야 한다")
+        text = {
+            k: body.get(k)
+            for k in ("id", "kind", "repo", "base_url", "base_branch", "token", "description")
+        }
+        if any(v is not None and not isinstance(v, str) for v in text.values()):
+            return _err(400, "INVALID_VCS", "문자열 필드에 다른 값이 들어 있다")
+        try:
+            vcs.upsert_connection(
+                id=text["id"] or None,
+                kind=text["kind"] or "",
+                repo=text["repo"] or "",
+                base_url=text["base_url"] or "",
+                base_branch=text["base_branch"] or "",
+                token=text["token"] or None,
+                description=text["description"] or "",
+                paths=paths,
+            )
+        except vcs.VcsError as exc:
+            return _err(400, "INVALID_VCS", exc.message)
+        return _connections()
+
+    @router.post("/vcs/connections/{connection_id}/delete", response_model=None)
+    def post_vcs_connection_delete(connection_id: str) -> dict | JSONResponse:
+        try:
+            removed = vcs.delete_connection(connection_id)
+        except vcs.VcsError as exc:
+            return _err(400, "INVALID_VCS", exc.message)
+        if not removed:
+            return _err(404, "NOT_FOUND", f"연결 {connection_id}가 없다")
+        return _connections()
+
+    @router.post("/vcs/connections/{connection_id}/test", response_model=None)
+    async def post_vcs_connection_test(connection_id: str) -> dict | JSONResponse:
+        """연결 하나 확인: 최근 하루 병합 목록을 읽어 본다 (쓰기 없음)."""
+        from datetime import UTC, datetime, timedelta
+
+        if not any(c.id == connection_id for c in vcs.connections()):
+            return _err(404, "NOT_FOUND", f"연결 {connection_id}가 없다")
+        now = datetime.now(UTC)
+        result: dict[str, Any] = {"connection_id": connection_id, "checked_at": now.isoformat()}
+        try:
+            adapter = vcs.get_adapter(connection_id)
+            changes = await adapter.find_changes(now - timedelta(days=1), now)
+            result.update(ok=True, code=None, message=f"최근 하루 병합 {len(changes)}건 읽음")
+        except vcs.VcsError as exc:
+            result.update(ok=False, code=exc.code, message=exc.message)
+        return _ok(result, get_service())
+
     @router.post("/reset")
     def post_reset() -> dict:
         svc = get_service()
