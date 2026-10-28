@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { ACCOUNTS, COMPANY, homeOf, useSession } from './session'
 
 // 사내망 안에서만 열리는 로그인 화면. 계정에 배정된 서비스에 따라 로그인 뒤 보이는 메뉴가 다르다.
@@ -61,7 +61,8 @@ export default function LoginPage() {
       <section className="flex items-center justify-center px-6 py-12">
         <div className="w-full max-w-sm space-y-8">
           <div>
-            <p className="text-sm text-ink-500">{COMPANY.name} 워크스페이스</p>
+            <Link to="/" className="text-sm text-ink-500 hover:text-ink-900">← 서비스 둘러보기</Link>
+            <p className="mt-6 text-sm text-ink-500">{COMPANY.name} 워크스페이스</p>
             <h1 className="mt-1 text-2xl font-semibold">로그인</h1>
           </div>
           <form onSubmit={submit} className="space-y-3">

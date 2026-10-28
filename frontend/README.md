@@ -24,7 +24,7 @@
 | --- | --- | --- |
 | 장애 대응 (DejaFix 화면, 메뉴는 바깥 사이드바 하위 메뉴) | DejaFix | `/infra`, `/infra/reports` … |
 | PC·서버 연결 | DejaFix | `/hosts` |
-| 고객 문의 | AXcellent | `/`, `/console`, `/support` |
+| 고객 문의 | AXcellent | `/inquiry`, `/console`, `/support` |
 | 클레임·보상 | AXcellent | `/claims`, `/queue` |
 | 리뷰·지식 | AXcellent | `/reviews`, `/kb` |
 | 공지·쿠폰 | AXcellent | `/marketing` |
@@ -37,6 +37,7 @@
 | 총괄·사건 | AXcellent | `/orchestrator` |
 | 기본 포함: AI 대화방·AI 오피스 | AXcellent | `/agents/chat`, `/agents/office` |
 | 시스템 관리: 서비스 고르기·회사 서비스 연결 | AXcellent | `/system/services`, `/system/integrations` |
+| 메인(로그인 전 서비스 카탈로그) | — | `/` → 로그인 버튼 → `/login` |
 
 - 화면은 ax-frontend의 부서 화면을 그대로 다시 쓰고, 서비스 단위로 메뉴만 나눴어요. 서비스 목록은 `src/demo/services.ts`에 있어요.
 - 오른쪽 위 **프로필 전환** 드롭다운으로 예시 직원 계정을 바꿔 가며 볼 수 있어요. 주소 뒤에 `?as=support`처럼 붙이면 그 계정으로 바로 들어가요. 계정 id는 `admin`, `infra`, `dev`, `planning`, `support`, `marketing`, `finance`, `hr`, `data`예요.
