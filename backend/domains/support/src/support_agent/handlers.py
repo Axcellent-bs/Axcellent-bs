@@ -22,7 +22,14 @@ from pydantic import BaseModel, ValidationError
 
 from ax_agent_template.execute import execute
 from ax_agent_template.server import error_result
-from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
+from ax_contracts.schemas import (
+    HANDED_TO_HUMAN,
+    AgentRequest,
+    AgentResult,
+    Evidence,
+    InputReason,
+    TaskStatus,
+)
 from support_agent import (
     buyer_ids,
     compensation,
@@ -527,6 +534,24 @@ async def _request_coupon(
     )
     reply = await SEND("marketing", coupon_request)
 
+    if reply.outcome == HANDED_TO_HUMAN:
+        # 쿠폰 서비스가 꺼져 담당 부서 사람에게 넘어갔다.
+        # 지급 전이라 완료로 두지 않고 번호도 쓰지 않는다
+        return AgentResult(
+            meta=request.meta,
+            status=TaskStatus.INPUT_REQUIRED,
+            reason_code=InputReason.DEPT_INPUT,
+            outcome=HANDED_TO_HUMAN,
+            output={
+                **reply.output,
+                "eligible": True,
+                "buyer_id": buyer_id,
+                "count": decision.count,
+                "unit_value": decision.unit_value,
+                "total_value": decision.total_value,
+            },
+            evidence=evidence,
+        )
     if _sequence_consumed(reply):
         LEDGER.advance(context_id)
     output = {

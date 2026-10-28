@@ -9,6 +9,7 @@
 4. 받는 서비스가 켜져 있지 않으면(`routing.py`, `AX_ENABLED_SERVICES`) A2A 대신
    조직도에서 맡은 부서를 찾아 사람 할 일함(dashboard-api)에 `HandoffTask`로 넣고
    `input-required` + `handed_to_human`을 돌려준다. 조직도에도 없으면 `failed` + `no_assignee`.
+   목록·조회 skill(카드의 `read` + `handoff: false`)은 넘기지 않고 `rejected` + `service_disabled`.
 
 `target`은 에이전트 이름(`planning`)이거나 주소(`http://localhost:8101`)다.
 TODO: 이름 → 주소는 지금 포트 표와 환경변수(`AX_<이름>_URL`)로 찾는다.
@@ -117,8 +118,17 @@ async def _hand_off(
 ) -> AgentResult:
     """켜지 않은 서비스로 가는 요청을 조직도의 부서 할 일함에 넣는다.
 
-    모든 넘김을 공통 로그에 남긴다.
+    모든 넘김을 공통 로그에 남긴다. 목록·조회 skill은 사람에게 넘기지 않는다(`routing.is_lookup`).
     """
+    if routing.is_lookup(service, req.skill):
+        disabled = error_result(
+            req.meta,
+            TaskStatus.REJECTED,
+            ErrorCode.SERVICE_DISABLED,
+            f"{service} 서비스가 켜져 있지 않다. 목록·조회라 사람에게 넘기지 않았다",
+        )
+        disabled.output["to_service"] = service
+        return _log_handoff(name, target, service, req, disabled)
     assignment = routing.assignment_for(service, req.skill)
     if assignment is None:
         failed = error_result(

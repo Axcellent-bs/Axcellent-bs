@@ -6,14 +6,27 @@ SCN-A 8단계. 영향 고객(데이터분석 영향 분석)은 문의를 안 낸
 안전 관문의 한도 검사, 초과는 C 보류)에 한 건씩 직렬로 요청하며, 지급은 마케팅이 한다.
 같은 사건·구매자·사유는 한 번만 요청한다 (`request_compensation`과 같은 키라 문의 경로로
 이미 보상한 고객은 다시 보내지 않는다).
+
+공지·쿠폰 서비스(coupon)를 켜지 않은 고객사는 고객마다 보내지 않고 사건 하나에 한 건으로 묶어
+마케팅 담당 부서 할 일함에 넘긴다(대상 고객 목록·건수·총액). 결과는 완료가 아니라
+`input-required` + `handed_to_human`이고, 사람이 끝내면 총괄이 `handoff.completed`로 이어 간다.
 """
 
 from __future__ import annotations
 
 import re
 
+from ax_agent_template import routing
 from ax_agent_template.server import error_result
-from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
+from ax_agent_template.services import route_target
+from ax_contracts.schemas import (
+    HANDED_TO_HUMAN,
+    AgentRequest,
+    AgentResult,
+    Evidence,
+    InputReason,
+    TaskStatus,
+)
 from support_agent import buyer_ids, compensation
 from support_agent import handlers as h
 from support_agent.incident_schemas import (
@@ -95,6 +108,9 @@ async def request_incident_compensation(request: AgentRequest) -> AgentResult:
         ref_ids=ref_ids,
     )
 
+    if not routing.is_enabled(route_target("marketing", "issue_coupon")):
+        return await _hand_off_batch(request, parsed.reason_code, buyers, decision, evidence)
+
     results: list[IncidentCouponResult] = []
     stopped = limit_reached = False
     async with h.LEDGER.lock(context_id):  # 같은 사건의 요청은 한 건씩 (sequence가 이어지게)
@@ -172,6 +188,72 @@ async def request_incident_compensation(request: AgentRequest) -> AgentResult:
         body.model_dump(mode="json"),
         outcome="partial" if bad else "requested",
         evidence=evidence,
+    )
+
+
+async def _hand_off_batch(
+    request: AgentRequest,
+    reason_code: str,
+    buyers: list[str],
+    decision: compensation.CompensationDecision,
+    evidence: Evidence,
+) -> AgentResult:
+    """쿠폰 서비스가 꺼진 고객사: 사건의 보상을 한 건으로 묶어 담당 부서 할 일함에 넘긴다.
+
+    사건당 상한과 이미 지급한 고객은 쿠폰 서비스가 켜졌을 때와 같은 규칙으로 뺀다.
+    같은 사건·사유는 같은 멱등 키라 다시 불러도 할 일함에 한 건만 생긴다.
+    """
+    context_id = request.meta.context_id
+    async with h.LEDGER.lock(context_id):
+        issued_buyers, issued_total = issued_in_incident(context_id)
+        selected: list[str] = []
+        limit_reached = False
+        for buyer in buyers:
+            if _key(context_id, buyer, reason_code) in h.LEDGER.results:
+                continue  # 이미 보상한 고객
+            if (
+                issued_buyers + len(selected) + 1 > compensation.MAX_INCIDENT_BUYERS
+                or issued_total + (len(selected) + 1) * decision.total_value
+                > compensation.MAX_INCIDENT_TOTAL
+            ):
+                limit_reached = True
+                continue
+            selected.append(buyer)
+        summary = {
+            "reason_code": reason_code,
+            "unit_value": decision.unit_value,
+            "count": decision.count,
+            "buyer_ids": selected,
+            "buyer_count": len(selected),
+            "total_value": len(selected) * decision.total_value,
+            "limit_reached": limit_reached,
+        }
+        if not selected:
+            output = {**summary, "requested": 0}
+            return h._done(request, output, outcome="requested", evidence=evidence)
+        key = f"{context_id}:request_incident_compensation:{reason_code}"
+        batch = AgentRequest(
+            meta=request.meta.model_copy(update={"idempotency_key": key}),
+            skill="issue_coupon",
+            input={"purpose_code": "compensation", "batch": True, **summary},
+        )
+        reply = await h.SEND("marketing", batch)
+
+    if reply.outcome != HANDED_TO_HUMAN:
+        # 조직도에 맡은 부서가 없거나(no_assignee) 할 일함에 못 넣었다(inbox_unreachable)
+        failed = error_result(request.meta, TaskStatus.FAILED, reply.outcome or "handoff_failed")
+        failed.output.update(summary)
+        return failed
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.INPUT_REQUIRED,
+        reason_code=InputReason.DEPT_INPUT,
+        outcome=HANDED_TO_HUMAN,
+        output={**reply.output, **summary},
+        evidence=evidence,
+        decision_reason=(
+            f"쿠폰 서비스가 켜져 있지 않아 보상 {len(selected)}명을 한 건으로 담당 부서에 넘김"
+        ),
     )
 
 

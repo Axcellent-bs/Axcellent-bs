@@ -50,6 +50,8 @@ class ErrorCode(StrEnum):
     MISSING_CONTEXT = "MISSING_CONTEXT"
     SEQUENCE_GAP = "SEQUENCE_GAP"
     INVALID_INPUT = "INVALID_INPUT"  # 입력이 계약 형식과 다르다(형식 위반은 rejected)
+    # 받는 서비스가 꺼져 있고 그 skill이 목록·조회(read, handoff=false)라 사람에게도 넘기지 않았다
+    SERVICE_DISABLED = "service_disabled"
 
 
 class RequestMeta(AxModel):
@@ -106,6 +108,8 @@ class AgentResult(AxModel):
     - 받는 서비스가 꺼져 있어 사람 할 일함으로 넘김: `handed_to_human` (status는 `input-required`,
       `reason_code`는 `dept_input`, output에 `task_id`. `schemas/handoff.py`)
     - 받는 서비스가 꺼져 있고 조직도에도 맡은 부서가 없음: `no_assignee` (status는 `failed`)
+    - 받는 서비스가 꺼져 있고 목록·조회 skill이라 넘기지 않음: `service_disabled`
+      (status는 `rejected`)
     - 요청 거부(`rejected`): `ErrorCode` 값
     - 마감 초과는 `canceled`(outcome `TIMEOUT`), 실행 오류는 `failed`
 
