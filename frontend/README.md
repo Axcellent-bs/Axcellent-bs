@@ -93,6 +93,15 @@ npm run build:pages  # GitHub Pages용 빌드 (dist/, 404.html 포함)
 
 DejaFix 화면은 띄우지 않아요. DejaFix API 계약(`DejaFix/DejaFix` `contracts/api.md` #10)의 `GET /api/incidents?status=problem`으로 **지금 진행 중인 장애만** 받아서 AXcellent가 그려요 (`src/pages/Incidents.tsx`, `src/lib/dejafix.ts`).
 
+- 기본은 **데모 녹화본**(DejaFix 레포 목 데이터)이라 화면 제목 옆에 "데모 녹화본"이 붙어요. **실제 DejaFix 데이터**를 보려면 `frontend/.env`에 아래를 넣고 개발 서버를 다시 켜요. 그러면 "실시간"으로 바뀌어요.
+
+  ```
+  VITE_DEJAFIX_LIVE=on                          # 다른 AI는 녹화본 그대로, 장애 대응만 실제 DejaFix
+  DEJAFIX_PROXY_TARGET=http://127.0.0.1:18000   # DejaFix 백엔드 주소
+  DEJAFIX_USERNAME=admin                        # DejaFix 계정 (viewer 이상)
+  DEJAFIX_PASSWORD=<DejaFix .env 의 DEMO_ADMIN_PASSWORD>
+  ```
+  DejaFix는 모든 API에 로그인 토큰을 요구해요. 개발 서버(`dejafix-proxy.ts`)가 이 계정으로 대신 로그인해서 부르기 때문에 토큰과 비밀번호는 화면 코드에 실리지 않아요. 읽기(GET)만 넘겨요.
 - 30초마다 다시 받아요. 응답의 `meta.stale`이 true면 "수집 멈춤" 안내를 띄워요.
 - 원인 분석·리포트·변경 계획은 DejaFix 화면에서 봐요. 장애마다 "DejaFix에서 보기 ↗"가 `VITE_DEJAFIX_WEB_URL/incidents/<id>`를 열어요.
 - 예전에 `public/dejafix/`에 넣어 두던 DejaFix 빌드본과 `scripts/build-dejafix.mjs`는 지웠어요.
