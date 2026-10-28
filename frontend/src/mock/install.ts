@@ -15,6 +15,8 @@ const BY_PORT: Record<string, string> = {
 
 function route(input: string): { svc: string; path: string } | null {
   const m = /^https?:\/\/(?:localhost|127\.0\.0\.1):(\d+)(\/.*)?$/.exec(input)
+  // 할 일함(dashboard-api /api/dashboard/handoffs)은 녹화본이 없다. 데모 모드에서도 실제 dashboard-api를 부른다
+  if (m && m[1] === '8020' && (m[2] ?? '').startsWith('/api/dashboard/handoffs')) return null
   if (m) return BY_PORT[m[1]] && !(PLANNING_LIVE && BY_PORT[m[1]] === 'planning') ? { svc: BY_PORT[m[1]], path: m[2] ?? '/' } : null
   if (input.startsWith('/orch/')) return { svc: 'orch', path: input.slice('/orch'.length) }
   if (input.startsWith('/data-a2a/')) return { svc: 'data', path: input.slice('/data-a2a'.length) }
