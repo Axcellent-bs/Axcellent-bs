@@ -25,6 +25,7 @@ import LoginPage from '@/demo/LoginPage'
 import { canOpen, homeOf, useSession } from '@/demo/session'
 import { useEnabledServices } from '@/demo/services'
 import ServiceCatalog from '@/demo/ServiceCatalog'
+import CompanyConnect from '@/demo/CompanyConnect'
 import CatalogHome from '@/demo/CatalogHome'
 import ControlCenter from '@/control/ControlCenter'
 import OperatorLogin from '@/control/OperatorLogin'
@@ -79,6 +80,7 @@ function Pages() {
           <Route path="/infra/*" element={<DejaFixFrame />} />
           <Route path="/system/hosts" element={<Navigate to="/hosts" replace />} />
           <Route path="/system/services" element={<ServiceCatalog />} />
+          <Route path="/system/connect" element={<CompanyConnect />} />
           <Route path="/control/*" element={<ControlCenter />} />
           <Route path="/system/integrations" element={<Integrations />} />
           {/* catbooks 시절 /admin/* 주소 호환 */}

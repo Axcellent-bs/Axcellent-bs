@@ -2,6 +2,7 @@
 // 부서는 코드에 두지 않는다. 계정마다 쓸 서비스를 배정하고, 회사가 켠 서비스 중 배정된 것만 열린다(services.ts).
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
 import { SERVICES, SHARED_PATHS, getEnabled, matchPath } from './services'
+import { getCompany } from './company'
 
 export type Account = {
   id: string
@@ -53,9 +54,9 @@ export function canOpen(account: Account, path: string, enabled = getEnabled()) 
   return bases.some((b) => matchPath(b, path))
 }
 
-/** 로그인 뒤 처음 여는 화면: 운영팀은 관제 센터, 고객사 시스템 관리자는 서비스 고르기, 나머지는 첫 서비스(없으면 AI 대화방) */
+/** 로그인 뒤 처음 여는 화면: 운영팀은 관제 센터, 고객사 시스템 관리자는 서비스 고르기(연결 전이면 AXcellent 연결), 나머지는 첫 서비스(없으면 AI 대화방) */
 export const homeOf = (account: Account, enabled = getEnabled()) =>
-  account.operator ? '/control' : account.admin ? '/system/services' : servicesOf(account, enabled)[0]?.entry ?? '/agents/chat'
+  account.operator ? '/control' : account.admin ? (getCompany() ? '/system/services' : '/system/connect') : servicesOf(account, enabled)[0]?.entry ?? '/agents/chat'
 
 const KEY = 'axcellent-demo-account'
 const load = (): Account | null => {

@@ -5,7 +5,7 @@ import { AccountSwitcher } from "@/demo/AccountSwitcher";
 import { canOpen, homeOf, servicesOf, useSession } from "@/demo/session";
 import { useCompany } from "@/demo/company";
 import { activeChild, matchPath, useEnabledServices, type SubItem } from "@/demo/services";
-import { IconAgents, IconBell, IconChart, IconDashboard, IconLayout, IconOffice, IconSearch } from "../icons";
+import { IconAgents, IconBell, IconBolt, IconChart, IconDashboard, IconLayout, IconOffice, IconSearch } from "../icons";
 import { DejaFixTools } from "@/demo/DejaFixTools";
 
 /** DejaFix 장애 대응 화면이면 그 상단바 도구를 바깥 상단바에 둔다 */
@@ -30,7 +30,7 @@ const CONTROL_MENU: SubItem[] = [
   { href: "/control/incidents", label: "장애·사건" },
   { href: "/control/quality", label: "AI 품질" },
   { href: "/control/cost", label: "비용·사용량" },
-  { href: "/control/connect", label: "고객사 연결 (시연)" },
+  { href: "/control/keys", label: "연결 키 발급" },
 ];
 
 const CONTROL_NAV: NavItem[] = [
@@ -38,6 +38,7 @@ const CONTROL_NAV: NavItem[] = [
 ];
 
 const SYSTEM_NAV: NavItem[] = [
+  { href: "/system/connect", label: "AXcellent 연결", Icon: IconBolt, match: ["/system/connect"] },
   { href: "/system/services", label: "서비스 고르기", Icon: IconDashboard, match: ["/system/services"] },
   { href: "/system/integrations", label: "회사 서비스 연결", Icon: IconLayout, match: ["/system/integrations"] },
 ];
