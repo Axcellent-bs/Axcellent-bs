@@ -39,7 +39,7 @@ from ax_dashboard_api import (
     communications as communication_log,
 )
 from ax_dashboard_api.auth import require_human_for_writes
-from ax_dashboard_api.envelope import ApiError, is_mock, ok, require_mock
+from ax_dashboard_api.envelope import ApiError, is_mock, ok, or_unavailable, require_mock
 from ax_dashboard_api import live_views
 from ax_dashboard_api.schemas import (
     AgentMessageBody,
@@ -106,13 +106,15 @@ def reviews() -> dict:
 
 
 # ---------------------------------------- 클레임·보상 큐·KPI (목 모드 또는 support A2A)
+# 꺼진 서비스의 조회(`service_disabled`)는 지어내지 않는다. 목록은 빈 목록, 숫자 집계는 `data: null`로 두고
+# `meta.unavailable`에 "확인할 수 없음 (○○ 서비스가 꺼져 있음)"을 남긴다 (envelope.or_unavailable).
 # 목 모드는 메모리 데이터, 아니면 support skill을 부르고 `claim_mapping`으로 화면 모델에 맞춘다.
 @router.get("/kpis")
 async def kpis() -> dict:
     if is_mock():
         return ok(mock_data.KPI)
-    out = await support_client.call("inquiry_overview")
-    return ok(Kpi.model_validate(out["kpis"]))
+    out = await or_unavailable(support_client.call("inquiry_overview"), None)
+    return ok(Kpi.model_validate(out["kpis"]) if out is not None else None)
 
 
 @router.get("/claims")
@@ -120,7 +122,7 @@ async def claims(status: str | None = None) -> dict:
     if is_mock():
         items = mock_data.list_claims(status)
     else:
-        out = await support_client.call("list_claims")
+        out = await or_unavailable(support_client.call("list_claims"), {"items": []})
         items = claim_mapping.filter_by_status(
             [claim_mapping.to_claim(c) for c in out["items"]], status
         )
@@ -132,7 +134,8 @@ async def claims(status: str | None = None) -> dict:
 async def claim_stats() -> dict:
     if is_mock():
         return ok(mock_data.claim_stats())
-    return ok(claim_mapping.to_stats(await support_client.call("claim_stats")))
+    out = await or_unavailable(support_client.call("claim_stats"), None)
+    return ok(claim_mapping.to_stats(out) if out is not None else None)
 
 
 @router.get("/claims/{claim_id}")
@@ -151,7 +154,10 @@ async def queue_entries() -> dict:
     if is_mock():
         view = mock_data.queue_view()
     else:
-        view = claim_mapping.to_queue(await support_client.call("claim_queue"))
+        out = await or_unavailable(support_client.call("claim_queue"), None)
+        if out is None:
+            return ok(None)
+        view = claim_mapping.to_queue(out)
     return ok(view, total=len(view.queue))
 
 
@@ -223,7 +229,7 @@ async def conversations() -> dict:
     if is_mock():
         items = mock_data.list_conversations()
     else:
-        out = await support_client.call("list_inquiries")
+        out = await or_unavailable(support_client.call("list_inquiries"), {"items": []})
         items = [ConversationListItem.model_validate(i) for i in out.get("items", [])]
     return ok(items, total=len(items))
 
@@ -355,7 +361,9 @@ async def handovers(status: HandoverStatus | None = None, area: str | None = Non
 
 async def _live_handovers(**filters: str | None) -> list[HandoverView]:
     payload = {k: v for k, v in filters.items() if v is not None}
-    out = await hr_client.call("list_handovers", {**payload, "limit": HR_LIST_LIMIT})
+    out = await or_unavailable(
+        hr_client.call("list_handovers", {**payload, "limit": HR_LIST_LIMIT}), {"handovers": []}
+    )
     return [HandoverView.model_validate(h) for h in out["handovers"]]
 
 
@@ -382,8 +390,11 @@ async def handover_questions(
 
 
 async def _live_questions(**filters: str | None) -> list[HandoverQuestion]:
-    out = await hr_client.call(
-        "list_open_questions", {k: v for k, v in filters.items() if v is not None}
+    out = await or_unavailable(
+        hr_client.call(
+            "list_open_questions", {k: v for k, v in filters.items() if v is not None}
+        ),
+        {"questions": []},
     )
     return [HandoverQuestion.model_validate(q) for q in out["questions"]]
 
@@ -418,7 +429,9 @@ async def candidate_cards(area: str | None = None) -> dict:
     if is_mock():
         items = mock_handover.BOARD.candidate_cards(area)
     else:
-        out = await hr_client.call("list_candidate_cards", {"area": area} if area else {})
+        out = await or_unavailable(
+            hr_client.call("list_candidate_cards", {"area": area} if area else {}), {"cards": []}
+        )
         items = [Card.model_validate(c) for c in out["cards"]]
     return ok(items, total=len(items))
 
@@ -434,7 +447,9 @@ async def decision_cards(
         items = mock_handover.BOARD.active_cards(area, context_id)[:limit]
     else:
         payload = _given(area=area, context_id=context_id)
-        out = await hr_client.call("list_cards", {**payload, "limit": limit})
+        out = await or_unavailable(
+            hr_client.call("list_cards", {**payload, "limit": limit}), {"cards": []}
+        )
         items = [Card.model_validate(c) for c in out["cards"]]
     return ok(items, total=len(items))
 
@@ -483,7 +498,8 @@ async def roster(area: str | None = None) -> dict:
     """영역별 담당·교대와 담당 공백. 개인 정보는 없다."""
     if is_mock():
         return ok(mock_hr.BOARD.get_roster(area))
-    return ok(GetRosterOutput.model_validate(await hr_client.call("get_roster", _given(area=area))))
+    out = await or_unavailable(hr_client.call("get_roster", _given(area=area)), None)
+    return ok(GetRosterOutput.model_validate(out) if out is not None else None)
 
 
 @router.get("/hr-activity/{context_id}")
@@ -492,7 +508,9 @@ async def hr_activity(context_id: str) -> dict:
     if is_mock():
         items = mock_hr.BOARD.audit_timeline(context_id)
     else:
-        out = await hr_client.call("get_audit_timeline", {"context_id": context_id})
+        out = await or_unavailable(
+            hr_client.call("get_audit_timeline", {"context_id": context_id}), {"entries": []}
+        )
         items = [AuditEntry.model_validate(e) for e in out["entries"]]
     return ok(items, total=len(items))
 
@@ -516,8 +534,11 @@ async def customers_at_risk(
     if is_mock():
         out = mock_customers.at_risk(min_level, limit)
     else:
-        out = await support_client.call(
-            "list_at_risk_customers", {"min_level": min_level, "limit": limit}
+        out = await or_unavailable(
+            support_client.call(
+                "list_at_risk_customers", {"min_level": min_level, "limit": limit}
+            ),
+            {"items": [], "total": 0},
         )
     return ok(out["items"], total=out["total"])
 
@@ -564,7 +585,9 @@ async def change_requests(
         out = mock_customers.change_requests(inquiry_id, status)
     else:
         payload = {k: v for k, v in {"inquiry_id": inquiry_id, "status": status}.items() if v}
-        out = await support_client.call("list_change_requests", payload)
+        out = await or_unavailable(
+            support_client.call("list_change_requests", payload), {"items": []}
+        )
     return ok(out["items"], total=len(out["items"]))
 
 

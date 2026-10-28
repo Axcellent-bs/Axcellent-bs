@@ -26,6 +26,7 @@ from ax_agent_template.client import call_agent
 from ax_contracts.schemas import (
     AgentRequest,
     Card,
+    ErrorCode,
     ListInProgressInput,
     ListInProgressOutput,
     RequestMeta,
@@ -37,6 +38,14 @@ from hr_agent.clients.errors import UpstreamError, current_meta
 from hr_agent.clients.memory import CardHit
 
 CALL_TIMEOUT_SECONDS = 20
+
+
+class ServiceDisabledError(UpstreamError):
+    """받는 서비스가 꺼져 있어 조회가 막혔다 (`service_disabled`, 업무 요청 라우터)."""
+
+    def __init__(self, service: str) -> None:
+        self.reason = f"확인할 수 없음 ({service} 서비스가 꺼져 있음)"
+        super().__init__("planning", self.reason)
 
 
 class A2APlanningClient:
@@ -65,6 +74,8 @@ class A2APlanningClient:
             AgentRequest(meta=meta, skill=skill, input=payload),
             http_client=self._http,
         )
+        if result.status == TaskStatus.REJECTED and result.outcome == ErrorCode.SERVICE_DISABLED:
+            raise ServiceDisabledError(str(result.output.get("to_service") or self._target))
         if result.status != TaskStatus.COMPLETED:
             raise UpstreamError(
                 "planning", f"{skill}: {result.status.value} {result.outcome or ''}".strip()
@@ -72,7 +83,13 @@ class A2APlanningClient:
         return result.output
 
     async def list_in_progress(self, query: ListInProgressInput) -> ListInProgressOutput:
-        raw = await self._call("list_in_progress", query.model_dump(mode="json"))
+        try:
+            raw = await self._call("list_in_progress", query.model_dump(mode="json"))
+        except ServiceDisabledError as disabled:
+            # 꺼진 서비스의 조회는 "없음"으로 보고 진행한다. 지어내지 않고 이유를 남긴다
+            return ListInProgressOutput(
+                items=[], collected_at=datetime.now(UTC), unavailable=disabled.reason
+            )
         try:
             return ListInProgressOutput.model_validate(raw)
         except ValidationError as exc:

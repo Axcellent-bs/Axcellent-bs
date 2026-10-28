@@ -17,8 +17,8 @@ from typing import Any
 
 from ax_agent_template import config
 from ax_agent_template.client import call_agent
-from ax_contracts.schemas import AgentRequest, AgentResult, RequestMeta, TaskStatus
-from ax_dashboard_api.envelope import ApiError
+from ax_contracts.schemas import AgentRequest, AgentResult, ErrorCode, RequestMeta, TaskStatus
+from ax_dashboard_api.envelope import ApiError, ServiceDisabled
 from ax_dashboard_api.support_client import UI_CONTEXT_PREFIX
 
 AGENT_NAME = "dashboard-api"
@@ -65,6 +65,8 @@ def _message(result: AgentResult, default: str) -> str:
 def unwrap(result: AgentResult) -> dict[str, Any]:
     """결과를 출력 dict로 바꾸거나 API 오류로 올린다."""
     outcome = str(result.outcome or "")
+    if result.status == TaskStatus.REJECTED and outcome == ErrorCode.SERVICE_DISABLED:
+        raise ServiceDisabled(str(result.output.get("to_service") or "hr"))
     if result.status == TaskStatus.REJECTED:
         if outcome == "INVALID_INPUT":
             raise ApiError(422, "INVALID_INPUT", _message(result, "입력이 형식과 다르다"))

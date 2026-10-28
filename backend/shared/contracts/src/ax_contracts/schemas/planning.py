@@ -94,6 +94,9 @@ class ListInProgressInput(AxModel):
 class ListInProgressOutput(AxModel):
     items: list[InProgressItem] = Field(default_factory=list)
     collected_at: UtcDatetime  # 조회 시각 (근거)
+    # 조회하지 못했을 때의 이유 (예: 받는 서비스가 꺼져 있음). 비어 있으면 정상 조회다.
+    # 이때 `items`는 "없음"이 아니라 "확인할 수 없음"이다
+    unavailable: str | None = None
 
 
 class VerifyHandoverInput(AxModel):
