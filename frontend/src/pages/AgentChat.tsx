@@ -19,7 +19,7 @@ const ORCH_CMD = "cd ax-backend && ORCHESTRATOR_MOCK=1 uv run uvicorn ax_orchest
 
 /** unready = 서버는 답했지만 503 (공통 로그 읽기가 아직 연결 안 됨) */
 type Conn = "unknown" | "on" | "off" | "unready";
-const PROD_NOTE = "운영 환경에서는 대시보드가 총괄·안전 관문 기록도 dashboard-api를 거쳐 읽어야 합니다 (지금은 개발용으로 각 서버를 직접 부름).";
+const PROD_NOTE = "운영 환경에서는 AXcellent가 총괄·안전 관문 기록도 dashboard-api를 거쳐 읽어야 합니다 (지금은 개발용으로 각 서버를 직접 부름).";
 
 // 이 화면에서 시작한 사건이 어느 시나리오였는지 기억한다 (방 이름에 쓰는 편의 기능, 없어도 동작)
 const SCENARIO_KEY = "agentChat.scenarios";

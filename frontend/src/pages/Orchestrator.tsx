@@ -5,9 +5,10 @@ import {
   type Incident,
 } from "@/lib/adminRelay";
 import { ago } from "@/lib/format";
+import { COMPANY } from "@/demo/session";
 
 // 총괄 화면 (재무 AI 화면과 같은 짜임): 머리말 → 요약 카드 → 사건 목록과 상세.
-// 캣북스에서 문제가 터지면 총괄이 사건 하나로 묶고 부서에 나눠 맡긴다. 이 화면은 읽기 전용이다.
+// 고객사에서 문제가 터지면 총괄이 사건 하나로 묶고 부서에 나눠 맡긴다. 이 화면은 읽기 전용이다.
 const POLL_MS = 10_000;
 
 export default function OrchestratorPage() {
@@ -44,7 +45,7 @@ export default function OrchestratorPage() {
       <header className="flex flex-wrap items-end gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">총괄·사건</h1>
-          <p className="mt-1 max-w-2xl text-sm text-ink-500">캣북스에서 문제가 터지면 총괄 에이전트가 사건 하나로 묶고, 7개 부서에 일을 나눠 맡깁니다. 사람 승인이 필요한 일만 사람에게 올립니다. 이 화면은 읽기 전용입니다.</p>
+          <p className="mt-1 max-w-2xl text-sm text-ink-500">{COMPANY.name}에서 문제가 터지면 총괄 에이전트가 사건 하나로 묶고, 7개 부서에 일을 나눠 맡깁니다. 사람 승인이 필요한 일만 사람에게 올립니다. 이 화면은 읽기 전용입니다.</p>
         </div>
         <div className="ml-auto flex items-center gap-2 text-xs">
           <button className="btn-ghost" onClick={load}>새로고침{updatedAt ? ` · ${clock(updatedAt.toISOString())}` : ""}</button>

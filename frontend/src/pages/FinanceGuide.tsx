@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "@/lib/nav";
+import { COMPANY } from "@/demo/session";
 
 // 재무 AI 관리자 사용법. 기준 문서: ax-backend docs/notes/finance/2026-10-23-finance-redesign.md (§12 장애 사건 재무 + 재무팀 모듈)
 // 원본 사용법 문서(ax-backend docs/notes/finance/admin-guide.md)도 같은 내용으로 고쳐야 한다.
@@ -48,7 +49,7 @@ export default function FinanceGuidePage() {
         <Link href="/finance" className="text-sm text-brand-700 hover:underline">← 재무 AI로 돌아가기</Link>
         <h1 className="mt-3 text-2xl font-bold tracking-tight">재무 AI 관리자 사용법</h1>
         <p className="mt-3 rounded-2xl bg-brand-50 px-4 py-3 text-sm leading-relaxed text-brand-700">
-          재무 AI는 <b>캣북스의 재무팀</b>입니다. 화면은 두 탭입니다.
+          재무 AI는 <b>{COMPANY.name}의 재무팀</b>입니다. 화면은 두 탭입니다.
           기본으로 열리는 <b>장애 사건 재무</b>는 장애가 났을 때 <b>⑨ 보상 쿠폰을 장부에 적고 → ⑩ 손실(피해 + 보상)을 정리하고 → ⑰ 끝난 뒤 감사하는</b> 일을 사건별로 보여 줍니다.
           <b>평상시 재무 업무</b>에는 결산, 대사, 판매자 정산, 한도 제안, 사후 감사가 있습니다.
           쿠폰·환불을 한 건씩 승인하지는 않습니다.
@@ -165,7 +166,7 @@ export default function FinanceGuidePage() {
         <Q q="오래된 장애 사건은 어디 있나요?">사건 탭 끝의 <b>이전 사건 N건</b> 목록에 있습니다.</Q>
         <Q q="장애 사건 목록이 비어 있어요.">아직 재무가 아는 장애 사건이 없다는 뜻입니다. 총괄 AI가 사건(<code>ctx_inc_…</code>)을 열고 보상 쿠폰이 나가면 나타납니다.</Q>
         <Q q="피해 금액이 이상해 보여요.">피해 숫자는 데이터 AI의 영향 분석 그대로입니다. 데이터 담당자에게 문의하세요.</Q>
-        <Q q="결산 확정·메모·결정 버튼이 꺼져 있어요.">사람 권한이 설정되지 않은 것입니다. 데모에서는 ax-frontend 루트 <code>.env</code>에 <code>VITE_SAFETY_HUMAN_TOKEN=human:이름</code>을 넣고 대시보드를 다시 켭니다.</Q>
+        <Q q="결산 확정·메모·결정 버튼이 꺼져 있어요.">사람 권한이 설정되지 않은 것입니다. 데모에서는 <code>frontend/.env</code>에 <code>VITE_SAFETY_HUMAN_TOKEN=human:이름</code>을 넣고 개발 서버를 다시 켭니다.</Q>
         <Q q="&quot;예시 데이터&quot; 표시가 있어요.">재무 AI가 연습용 자료를 보여 주는 중입니다. 실제 쇼핑몰 숫자가 아닙니다.</Q>
         <Q q="&quot;재무 AI 서버(8105)에 연결하지 못했습니다&quot;가 보여요.">ax-backend에서 <code>docker compose -f infra/compose.yml up -d safety finance</code>로 켭니다. 안전 장치가 꺼져 있는 동안 돈이 나가는 일은 모두 멈춥니다.</Q>
       </Part>

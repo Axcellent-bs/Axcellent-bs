@@ -1,7 +1,7 @@
 import { Link } from 'react-router'
 import { IconAgents, IconOffice } from '@/components/icons'
 import { homeOf, useSession } from './session'
-import { FAMILIES, SERVICES, type Service } from './services'
+import { FAMILIES, SERVICES, agentName, type Service } from './services'
 
 // 로그인 전에 여는 메인 페이지 = 서비스 제품군 카탈로그. 어떤 서비스가 있는지 보고, 로그인 버튼으로 로그인 화면에 간다.
 // 회사가 실제로 켤 서비스는 로그인 뒤 시스템 관리자가 서비스 고르기(/system/services)에서 정한다.
@@ -23,7 +23,7 @@ function ServiceCard({ s }: { s: Service }) {
         <Mark s={s} />
         <div className="min-w-0">
           <p className="font-semibold text-ink-900">{s.name}</p>
-          <p className="text-xs text-ink-500">{s.by}</p>
+          <p className="text-xs text-ink-500">{agentName(s) ?? s.by}</p>
         </div>
       </div>
       <p className="text-sm leading-relaxed text-ink-700">{s.desc}</p>

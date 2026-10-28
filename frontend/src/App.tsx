@@ -11,6 +11,7 @@ import Data from '@/pages/Data'
 import Finance from '@/pages/Finance'
 import FinanceGuide from '@/pages/FinanceGuide'
 import Hr from '@/pages/Hr'
+import Incidents from '@/pages/Incidents'
 import Orchestrator from '@/pages/Orchestrator'
 import Kb from '@/pages/Kb'
 import Marketing from '@/pages/Marketing'
@@ -19,7 +20,6 @@ import Queue from '@/pages/Queue'
 import Reviews from '@/pages/Reviews'
 import Support from '@/pages/Support'
 import InfraHosts from '@/demo/InfraHosts'
-import DejaFixFrame from '@/demo/DejaFixFrame'
 import Integrations from '@/demo/Integrations'
 import LoginPage from '@/demo/LoginPage'
 import { canOpen, homeOf, useSession } from '@/demo/session'
@@ -72,11 +72,13 @@ function Pages() {
           <Route path="/support" element={<Support />} />
           <Route path="/hosts" element={<InfraHosts />} />
           <Route path="/infra/hosts" element={<Navigate to="/hosts" replace />} />
-          <Route path="/infra/*" element={<DejaFixFrame />} />
+          <Route path="/infra" element={<Incidents />} />
+          {/* 예전 DejaFix 화면 주소(/infra/reports 등)는 현재 장애로. 리포트·변경 계획은 DejaFix 화면에서 본다 */}
+          <Route path="/infra/*" element={<Navigate to="/infra" replace />} />
           <Route path="/system/hosts" element={<Navigate to="/hosts" replace />} />
           <Route path="/system/services" element={<ServiceCatalog />} />
           <Route path="/system/integrations" element={<Integrations />} />
-          {/* catbooks 시절 /admin/* 주소 호환 */}
+          {/* 예전 관리자 대시보드(/admin/*) 주소 호환 */}
           <Route path="/admin/*" element={<LegacyAdminRedirect />} />
           <Route path="*" element={<ToHome />} />
         </Routes>

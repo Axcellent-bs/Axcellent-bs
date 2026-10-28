@@ -1,4 +1,4 @@
-// 기획팀(/planning)·개발팀(/dev) 화면. 업무 시스템(dashboard-web) 안에서 돈다.
+// 기획팀(/planning)·개발팀(/dev) 화면. AXcellent 안에서 돈다.
 // 메뉴 = 프로젝트·요청·작업·정리·소통·규정·자료·지표, 각 메뉴의 하위 목록은 그 아래 가로탭. 화면 안 이동은 해시(#/<메뉴>/<가로탭>)로 한다.
 // 공통 화면 컴포넌트(@dejafix/common-frontend)의 스타일은 .planning-scope 안에만 적용된다 (postcss.config.js).
 import '@dejafix/common-frontend/styles.css'

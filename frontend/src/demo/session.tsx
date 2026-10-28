@@ -28,7 +28,8 @@ export const ACCOUNTS: Account[] = [
   { id: 'data', name: '데이터 분석가', role: '데이터 분석가', email: 'data@catbooks.example', services: ['data'] },
 ]
 
-export const COMPANY = { name: '캣북스', network: '192.168.10.0/24' }
+/** 설치된 고객사. 데모 기본값은 캣북스 (.env VITE_COMPANY_NAME) */
+export const COMPANY = { name: (import.meta.env.VITE_COMPANY_NAME as string | undefined) ?? '캣북스', network: '192.168.10.0/24' }
 
 const SYSTEM_PATHS = ['/system']
 
