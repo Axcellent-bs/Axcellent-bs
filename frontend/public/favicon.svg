@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>AXcellent</title>
+  <rect width="64" height="64" rx="14" fill="#1d1d3a"/>
+  <g transform="translate(-2.5 0)">
+    <g fill="#DFB85D" transform="translate(1.6 1.4)">
+      <path fill-rule="evenodd" d="M8 46 22 18h7l4 28h-6l-.8-6H16l-2 6Zm11.5-11h5.9l-1.1-10Z"/>
+      <path d="M36 18h7l10 28h-7Z"/>
+      <path d="M54 18h7L41 46h-7Z"/>
+    </g>
+    <g fill="#ffffff">
+      <path fill-rule="evenodd" d="M8 46 22 18h7l4 28h-6l-.8-6H16l-2 6Zm11.5-11h5.9l-1.1-10Z"/>
+      <path d="M36 18h7l10 28h-7Z"/>
+      <path d="M54 18h7L41 46h-7Z"/>
+    </g>
+  </g>
+</svg>
