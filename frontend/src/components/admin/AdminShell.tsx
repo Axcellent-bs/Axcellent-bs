@@ -6,10 +6,6 @@ import { canOpen, homeOf, servicesOf, useSession } from "@/demo/session";
 import { useCompany } from "@/demo/company";
 import { activeChild, matchPath, useEnabledServices, type SubItem } from "@/demo/services";
 import { IconAgents, IconBell, IconBolt, IconChart, IconDashboard, IconLayout, IconOffice, IconSearch } from "../icons";
-import { DejaFixTools } from "@/demo/DejaFixTools";
-
-/** DejaFix 장애 대응 화면이면 그 상단바 도구를 바깥 상단바에 둔다 */
-const onDejaFix = (path: string) => matchPath("/infra", path);
 
 // 메뉴는 부서가 아니라 서비스다. 이 계정에 배정됐고 회사가 켠 서비스만 보인다 (src/demo/services.ts, session.tsx).
 type NavItem = { href: string; label: string; Icon: ComponentType<{ size?: number }>; logo?: string; children?: SubItem[]; match: string[] };
@@ -27,6 +23,7 @@ const SHARED_NAV: NavItem[] = [
 const CONTROL_MENU: SubItem[] = [
   { href: "/control", label: "전체 현황" },
   { href: "/control/companies", label: "고객사" },
+  { href: "/control/services", label: "서비스 관리" },
   { href: "/control/incidents", label: "장애·사건" },
   { href: "/control/quality", label: "AI 품질" },
   { href: "/control/cost", label: "비용·사용량" },
@@ -83,7 +80,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
             <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
           </button>
           {!collapsed && (
-            <Link href={home} className="-ml-2 flex items-center gap-3" aria-label="내 부서 홈">
+            <Link href={home} className="-ml-2 flex items-center gap-3" aria-label="내 첫 화면">
               <img src={`${import.meta.env.BASE_URL}axcellent-wordmark.png`} alt="AXcellent" className="h-7 w-auto" />
             </Link>
           )}
@@ -135,7 +132,6 @@ export function AdminShell({ children }: { children: ReactNode }) {
             )
           )}
           <div className="flex-1" />
-          {onDejaFix(path) && <DejaFixTools />}
           <div className="flex shrink-0 items-center gap-4 text-ink-700">
             {account && canOpen(account, "/console") && <Link href="/console" title="문의 찾기" aria-label="문의 찾기"><IconSearch size={20} /></Link>}
             <IconBell size={20} />

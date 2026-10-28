@@ -1,5 +1,5 @@
 import { ACCOUNTS } from './session'
-import { SERVICES, toggleService, useEnabledServices, type Service } from './services'
+import { AGENTS, SERVICES as ALL_SERVICES, agentName, toggleService, useEnabledServices, usePublishedServices, type Service } from './services'
 
 // 서비스 고르기: Adobe Creative Cloud 앱 목록처럼 회사가 쓸 서비스를 켜고 끈다. 끈 서비스는 모든 직원 메뉴에서 빠진다.
 // 직원에게 어떤 서비스를 줄지는 계정마다 배정한다(아래 표). 부서는 두지 않는다.
@@ -13,6 +13,8 @@ function ServiceMark({ s }: { s: Service }) {
 
 export default function ServiceCatalog() {
   const enabled = useEnabledServices()
+  // AXcellent가 카탈로그에서 내린 서비스는 새로 고를 수 없어서 목록에서 뺀다
+  const SERVICES = usePublishedServices()
   const users = (id: string) => ACCOUNTS.filter((a) => a.services.includes(id)).length
 
   return (
@@ -35,7 +37,7 @@ export default function ServiceCatalog() {
                 <ServiceMark s={s} />
                 <div className="min-w-0">
                   <p className="card-title">{s.name}</p>
-                  <p className="text-xs text-ink-500">{s.by}</p>
+                  <p className="text-xs text-ink-500">{agentName(s) ?? s.by}</p>
                 </div>
                 {on && <span className="chip ml-auto bg-emerald-50 text-emerald-700">사용 중</span>}
               </div>
@@ -55,6 +57,37 @@ export default function ServiceCatalog() {
           )
         })}
       </ul>
+
+      <section className="card overflow-hidden">
+        <div className="px-6 pt-6">
+          <h2 className="card-title">관리하는 AI</h2>
+          <p className="mt-1 text-sm text-ink-500">서비스마다 맡은 AI가 있습니다. AI 7개는 모두 AXcellent에서 관리합니다.</p>
+        </div>
+        <table className="mt-4 w-full text-sm">
+          <thead className="bg-app text-left text-xs text-ink-500">
+            <tr>
+              <th className="px-6 py-3 font-medium">AI</th>
+              <th className="px-3 py-3 font-medium">맡은 서비스</th>
+              <th className="px-3 py-3 font-medium">연결 서버</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-ink-100">
+            {AGENTS.map((g) => (
+              <tr key={g.id}>
+                <td className="px-6 py-3 font-medium">{g.name}</td>
+                <td className="px-3 py-3">
+                  <div className="flex flex-wrap gap-1">
+                    {SERVICES.filter((s) => s.agent === g.id).map((s) => (
+                      <span key={s.id} className={`chip ${enabled.includes(s.id) ? 'bg-brand-50 text-brand-700' : 'bg-ink-100 text-ink-500 line-through'}`}>{s.name}</span>
+                    ))}
+                  </div>
+                </td>
+                <td className="px-3 py-3 font-mono text-xs text-ink-500">{g.backend}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
 
       <section className="card p-6">
         <h2 className="card-title">기본 포함</h2>
@@ -86,7 +119,7 @@ export default function ServiceCatalog() {
                 <td className="px-3 py-3">
                   <div className="flex flex-wrap gap-1">
                     {a.services.map((id) => {
-                      const s = SERVICES.find((x) => x.id === id)
+                      const s = ALL_SERVICES.find((x) => x.id === id)
                       if (!s) return null
                       return (
                         <span key={id} className={`chip ${enabled.includes(id) ? 'bg-brand-50 text-brand-700' : 'bg-ink-100 text-ink-500 line-through'}`}>{s.name}</span>

@@ -4,7 +4,6 @@ export const COMPANY = {
   name: import.meta.env.VITE_COMPANY_NAME ?? '캣북스',
   tagline: import.meta.env.VITE_COMPANY_TAGLINE ?? '책과 문구, 고양이가 지키는 서점',
   shopUrl: import.meta.env.VITE_SHOP_WEB_URL ?? 'http://localhost:3000',
-  adminUrl: import.meta.env.VITE_DASHBOARD_WEB_URL ?? 'http://localhost:3001', // 관리자(/admin/)로 돌아가는 링크
 }
 
 // 판매 사이트 파비콘을 브랜드 아이콘으로 쓴다. ① .env에 지정한 아이콘 ② 흔한 경로(logo.png·icon.svg·favicon.svg·favicon.ico)를

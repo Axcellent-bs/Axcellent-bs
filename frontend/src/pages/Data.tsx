@@ -5,8 +5,9 @@ import { LearningKpi } from "@/components/data/LearningKpi";
 import { Chip, TONE, useResource } from "@/components/finance/bits";
 import { dataAi, sortRecent } from "@/lib/data";
 import { orchestrator } from "@/lib/orchestrator";
+import { CompanyName } from "@/demo/CompanyName";
 
-// 데이터분석 AI 화면 = 캣북스 데이터분석팀. 짜임은 재무 AI(/finance)와 같다.
+// 데이터분석 AI 화면 = 고객사 데이터분석팀. 짜임은 재무 AI(/finance)와 같다.
 // 기본 화면은 시나리오 A(결제 장애)의 "장애 사건 데이터": 이상 감지 → 영향 분석 → 복구 확인 → 처리 시간 요약.
 // 두 번째 탭 "평상시 지표"는 학습 효과·KPI(SCN-L). 숫자는 서버가 계산한 값만 보여 준다.
 
@@ -61,7 +62,7 @@ export default function DataPage() {
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">데이터 분석</h1>
           <p className="mt-1 max-w-2xl text-sm text-ink-500">
-            캣북스의 데이터분석팀입니다. 장애가 나면 실패한 주문·영향 고객·피해 금액을 세고, 복구됐는지 지표로 확인하고, 처리 시간을 요약합니다.
+            <CompanyName />의 데이터분석팀입니다. 장애가 나면 실패한 주문·영향 고객·피해 금액을 세고, 복구됐는지 지표로 확인하고, 처리 시간을 요약합니다.
             평소에는 같은 장애가 다시 났을 때 얼마나 빨리 복구했는지, AI가 사람 없이 끝낸 비율을 봅니다.
           </p>
         </div>

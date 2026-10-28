@@ -1,7 +1,9 @@
 // 백엔드 없이 도는 데모: 화면이 부르는 fetch·EventSource를 녹화본(fixtures.json)으로 대신한다.
 // 녹화본은 ax-backend 서비스들을 목 모드(*_MOCK=1)로 띄우고 GET 응답을 그대로 저장한 것이다.
 // 쓰기(POST 등)는 저장하지 않고 성공 응답만 돌려준다. 그래서 버튼을 눌러도 화면 데이터는 바뀌지 않는다.
+// VITE_MOCK=off면 아무것도 가로채지 않고 src/lib/env.ts 주소의 실제 AI 백엔드를 부른다.
 import raw from './fixtures.json'
+import { MOCK } from '@/lib/env'
 
 type Fixture = { status: number; body: unknown }
 const FIXTURES = raw as Record<string, Fixture>
@@ -16,6 +18,8 @@ function route(input: string): { svc: string; path: string } | null {
   if (m) return BY_PORT[m[1]] ? { svc: BY_PORT[m[1]], path: m[2] ?? '/' } : null
   if (input.startsWith('/orch/')) return { svc: 'orch', path: input.slice('/orch'.length) }
   if (input.startsWith('/data-a2a/')) return { svc: 'data', path: input.slice('/data-a2a'.length) }
+  // DejaFix 백엔드(장애 대응). 녹화본은 DejaFix 레포 frontend/src/mocks의 응답이다 (README)
+  if (input.startsWith('/dejafix-api/')) return { svc: 'dejafix', path: input.slice('/dejafix-api'.length) }
   return null
 }
 
@@ -46,7 +50,7 @@ const json = (f: Fixture) =>
   })
 
 const realFetch = window.fetch.bind(window)
-window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+const demoFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
   const hit = route(url)
   if (!hit) return realFetch(input, init)
@@ -54,6 +58,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   await new Promise((r) => setTimeout(r, 120)) // 로딩 표시가 한 번은 보이게
   return json(lookup(method, hit.svc, hit.path))
 }
+
+if (MOCK) window.fetch = demoFetch
 
 /** 기획개발 화면은 SSE(`/api/planning/events`)로 전체 상태를 받는다. 녹화한 상태를 한 번 흘려 준다 */
 class DemoEventSource extends EventTarget {
@@ -90,4 +96,4 @@ class DemoEventSource extends EventTarget {
     this.readyState = 2
   }
 }
-window.EventSource = DemoEventSource as unknown as typeof EventSource
+if (MOCK) window.EventSource = DemoEventSource as unknown as typeof EventSource

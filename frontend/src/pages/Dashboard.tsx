@@ -20,7 +20,7 @@ export default function DashboardPage() {
   const [d, setD] = useState<Dashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { api.admin.dashboard(days).then((x) => { setD(x); setError(null); }).catch(() => setError(OFFLINE)); }, [days]);
-  if (!d) return <Loading error={error} what="대시보드를 불러오는 중…" />;
+  if (!d) return <Loading error={error} what="문의 현황을 불러오는 중…" />;
   const t = d.totals;
   const labels = d.daily.map((r) => shortDate(r.date));
 
