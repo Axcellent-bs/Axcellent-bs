@@ -16,8 +16,9 @@
 
 1. 고치는 곳은 `frontend/`, `backend/`, `docs/`. 생성물(`node_modules/`, `dist/`, `.venv/`, `.logs/`, `__pycache__/`)은 손으로 고치지 않는다
 2. 자동화 파일(`.claude/`, `.github/`, `CLAUDE.md`)은 사람만 바꾼다
-3. 녹화본(`src/mock/fixtures.json`)을 지어내지 않는다. 새 응답은 계약 문서나 실제 녹화가 출처
-   - 출처가 아직 없는 화면은 임시 목 데이터를 `src/mock/draft-<이름>.ts`에 둘 수 있다 (첫 줄에 `// draft:` 표시, 그 화면에서만 import, `fixtures.json`에는 넣지 않음)
+3. 화면은 실제 모드 백엔드만 부른다. 녹화본·데모 모드는 없다. 데이터를 지어내지 않는다
+   - 출처가 아직 없는 화면은 빈 상태 + "준비 중" 표시(`src/components/Preparing.tsx`)로 둔다
+   - 백엔드 목 스위치(`AGENT_TEMPLATE_MOCK`, `<서비스>_MOCK`)·테스트용 가짜 부서·dashboard-api `mock_only` 응답은 **테스트 전용**이다. 로컬 실행·데모에 쓰지 않는다
 4. 디자인은 AXcellent 토큰과 공용 클래스(`card`, `chip`, `btn-primary`, `btn-ghost`, `field` 등)를 쓴다
 5. 타입 검사를 우회해서 통과시키지 않는다
 6. 비밀값은 `.env`에만. 커밋 금지
@@ -56,12 +57,12 @@ cd frontend
 npm ci
 npm run typecheck
 npx vite build
-npm run dev   # http://localhost:3090, ?as=<계정 id>로 바로 로그인
 
 cd ../backend
 uv sync --all-packages
-uv run pytest -q
-bash scripts/run_all.sh   # 백엔드 서버 전체 띄우기 (끄기: bash scripts/run_all.sh stop)
+uv run pytest -q          # 단위 테스트는 목 스위치(테스트 전용)로 돈다
+bash scripts/run_all.sh   # 백엔드 서버 전체를 실제 모드로 띄우기 (끄기: bash scripts/run_all.sh stop)
+bash scripts/run_web.sh   # 화면을 실제 모드 토큰과 함께 http://localhost:3090 에 띄우기 (?as=<계정 id>로 바로 로그인)
 ```
 
 ## 루프

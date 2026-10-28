@@ -1,6 +1,5 @@
 // 사람 할 일함: 켜지 않은 서비스로 가던 일을 에이전트가 dashboard-api(8020)에 넣고, 사람이 여기서 끝낸다.
 // 계약은 backend/shared/contracts/src/ax_contracts/schemas/handoff.py (HandoffTask, HandoffCompleteBody).
-// 녹화본이 없다. 데모 모드에서도 이 주소는 가로채지 않고 실제 dashboard-api를 부른다 (src/mock/install.ts).
 import { useEffect, useSyncExternalStore } from "react";
 import { ApiError } from "./apiError";
 import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN } from "./env";

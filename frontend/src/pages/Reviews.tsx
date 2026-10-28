@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loading, OFFLINE } from "@/components/admin/bits";
+import { PreparingChip, PreparingNotice } from "@/components/Preparing";
 import { Stars } from "@/components/Stars";
 import { api } from "@/lib/api";
 import { dateStr } from "@/lib/format";
@@ -24,10 +25,11 @@ export default function ReviewsPage() {
   return (
     <div className="space-y-5 px-8 pb-10 pt-2">
       <div>
-        <h1 className="text-xl font-semibold">후기 관리</h1>
+        <h1 className="flex items-center gap-2 text-xl font-semibold">후기 관리 <PreparingChip /></h1>
         <p className="mt-1 text-sm text-ink-500">개인정보·외부 링크·비속어·광고성 문구가 있는 후기는 자동으로 보류됩니다. 낮은 별점과 함께 불량·배송 문제를 말한 후기는 공개한 채 선제 연락 대상으로 표시합니다.</p>
       </div>
       <div className="flex gap-3 text-sm"><span className="chip bg-amber-50 py-1 text-amber-700">확인 대기 {pending}</span><span className="chip bg-red-50 py-1 text-red-700">선제 연락 대상 {outreach.length}</span></div>
+      <PreparingNotice what="후기" source="쇼핑몰 후기 데이터(shop-api)" />
       {error && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-xs font-medium text-red-800">{error}</p>}
       <ul className="space-y-3">
         {rows.map((r) => (

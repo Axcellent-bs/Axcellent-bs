@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Loading } from "@/components/admin/bits";
 import IncidentRecords from "@/components/hr/IncidentRecords";
-import { HUMAN_TOKEN_SET, MOCK } from "@/lib/env";
+import { HUMAN_TOKEN_SET } from "@/lib/env";
 import { ago, shortDateTime } from "@/lib/format";
 import {
   hr,
@@ -28,7 +28,6 @@ const VERDICT: Record<string, { label: string; tone: string }> = {
   warn: { label: "확인 필요", tone: "bg-amber-50 text-amber-700" },
   block: { label: "진행 전 확인 필요", tone: "bg-red-50 text-red-700" },
 };
-const DEMO_DRAFT: PlanDraft = { title: "결제 서버 캐시 도입", summary: "결제 응답 속도를 위해 서버 캐시를 도입한다", area: "payment", kind: "spec" };
 const EMPTY_DRAFT: PlanDraft = { title: "", summary: "", area: "", kind: "spec" };
 const INPUT = "w-full rounded-xl border border-ink-100 bg-app px-3 py-2 text-sm";
 
@@ -173,10 +172,9 @@ export default function HrPage({ part = "hr" }: { part?: HrPart }) {
 
       {part === "ops" && <>
       {/* ④ 기록 도구 */}
-      {/* 실제 모드: 인사 AI가 실제로 남긴 사건 기록과 고른 사건의 처리 내역. 녹화본 데모에는 사건 목록이 없어 번호 입력으로 본다 */}
-      {!MOCK && <IncidentRecords />}
+      {/* 인사 AI가 실제로 남긴 사건 기록과 고른 사건의 처리 내역 */}
+      <IncidentRecords />
       <Section title="계획 비교" desc="새 계획이 과거에 기각된 안과 겹치는지 확인합니다. 저장하지 않고 보기만 합니다."><PlanChecker /></Section>
-      {MOCK && <Section title="AI가 한 일" desc="사건 번호로 AI의 처리 내역을 시간순으로 봅니다."><Activity /></Section>}
       </>}
     </div>
   );
@@ -293,8 +291,7 @@ function RosterGrid({ roster }: { roster: Roster }) {
 
 // ---------------------------------------------------------------- 계획 비교·감사 기록
 function PlanChecker() {
-  // 예시 입력은 녹화본 데모에서만 채운다. 실제 모드는 빈 칸에서 시작한다
-  const [draft, setDraft] = useState<PlanDraft>(MOCK ? DEMO_DRAFT : EMPTY_DRAFT);
+  const [draft, setDraft] = useState<PlanDraft>(EMPTY_DRAFT);
   const [result, setResult] = useState<PlanCheck | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -327,36 +324,6 @@ function PlanChecker() {
           {result.no_related_cards && <p className="text-xs text-ink-500">관련된 과거 기록을 찾지 못했습니다. 기록에 없는 것이지 문제가 없다는 뜻은 아닙니다.</p>}
         </div>
       )}
-    </div>
-  );
-}
-
-function Activity() {
-  const [ctx, setCtx] = useState("ctx_hnd_0001");
-  const [rows, setRows] = useState<Awaited<ReturnType<typeof hr.activity>> | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  async function load(e: FormEvent) {
-    e.preventDefault(); setErr(null);
-    try { setRows(await hr.activity(ctx.trim())); } catch (x) { setErr(errText(x)); setRows(null); }
-  }
-  return (
-    <div className="space-y-3">
-      <form onSubmit={load} className="flex gap-2">
-        <input className={INPUT} value={ctx} onChange={(e) => setCtx(e.target.value)} placeholder="사건 번호 (ctx_...)" />
-        <button className="btn-ghost shrink-0">보기</button>
-      </form>
-      {err && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{err}</p>}
-      {rows && (rows.length === 0 ? <p className="text-xs text-ink-500">이 사건에서 기록된 일이 없습니다.</p> : (
-        <ol className="divide-y divide-ink-100 rounded-2xl border border-ink-100">
-          {rows.map((r) => (
-            <li key={r.seq} className="flex flex-wrap items-baseline gap-x-3 px-4 py-2 text-xs">
-              <span className="tabular-nums text-ink-500">{shortDateTime(r.at)}</span>
-              <span className="font-medium">{r.kind}</span>
-              <span className="text-ink-500">{Object.entries(r.payload).map(([k, val]) => `${k}: ${String(val)}`).join(" · ")}</span>
-            </li>
-          ))}
-        </ol>
-      ))}
     </div>
   );
 }
