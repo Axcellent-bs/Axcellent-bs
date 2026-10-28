@@ -105,5 +105,4 @@ DejaFix 화면은 띄우지 않아요. DejaFix API 계약(`DejaFix/DejaFix` `con
   ```
   DejaFix는 모든 API에 로그인 토큰을 요구해요. 개발 서버(`dejafix-proxy.ts`)가 이 계정으로 대신 로그인해서 부르기 때문에 토큰과 비밀번호는 화면 코드에 실리지 않아요. 읽기(GET)만 넘겨요.
 - 30초마다 다시 받아요. 응답의 `meta.stale`이 true면 "수집 멈춤" 안내를 띄워요.
-- 원인 분석·리포트·변경 계획은 DejaFix 화면에서 봐요. 장애마다 "DejaFix에서 보기 ↗"가 `VITE_DEJAFIX_WEB_URL/incidents/<id>`를 열어요.
 - 예전에 `public/dejafix/`에 넣어 두던 DejaFix 빌드본과 `scripts/build-dejafix.mjs`는 지웠어요.
