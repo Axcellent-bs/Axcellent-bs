@@ -154,6 +154,27 @@ class PrGate(DomainModel):
     paths: str
 
 
+class RepoCandidate(DomainModel):
+    connection_id: str
+    repo: str
+    score: int
+
+
+class RepoTarget(DomainModel):
+    """PR을 올릴 레포(연결). AI가 제안하고 사람이 승인한다 (연결이 하나면 자동 승인).
+
+    `candidates`는 규칙 점수 순, `reasons`는 짧은 근거 줄 (LLM 근거는 앞에 "AI: ")."""
+
+    connection_id: str
+    repo: str
+    status: Literal["proposed", "approved", "rejected"]
+    confidence: Literal["high", "mid", "low"]
+    reasons: list[str] = Field(default_factory=list)
+    candidates: list[RepoCandidate] = Field(default_factory=list)
+    decided_by: str | None = None
+    decided_at: UtcDatetime | None = None
+
+
 class PR(DomainModel):
     id: str  # 표시용 "PR #28"
     number: int  # 28 (계약 RelatedPr.pr_number)
@@ -172,6 +193,8 @@ class PR(DomainModel):
     # 형상관리 연결 계층으로 실제로 올린 변경 번호·주소 (목 설정이면 None)
     vcs_number: int | None = None
     url: str | None = None
+    # 올릴 레포 제안·승인 (형상관리 연결이 있을 때만. 목 설정이면 None)
+    target: RepoTarget | None = None
 
 
 class Message(DomainModel):

@@ -204,6 +204,19 @@ owner = "planning"
 requesters = ["planning", "dev"]
 base_grade = "A"
 
+# 올릴 레포 승인·기각 (연결이 여럿일 때 AI 제안 → 사람 판단). PR 생성·머지는 따로 관문을 지난다
+[[actions]]
+action = "approve_repo"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+[[actions]]
+action = "reject_repo"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
 # 기록·회신·초안은 A (#166). 돈·배포에 닿지 않는다
 [[actions]]
 action = "write_spec"

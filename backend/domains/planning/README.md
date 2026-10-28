@@ -110,12 +110,15 @@ execute params (safety #171 `thresholds.toml` 규칙 키, 모두 도메인 상�
 - 도메인 연결은 `vcs_bridge.py`. `mock`이면 아무것도 하지 않아 상태·활동이 지금과 같다. 그 밖이면 `generate_pr`·`review_pr` 관문 뒤에 `gen/` 브랜치로 PR을 올리고(본문에 요청·기획서·문단 ID, 커밋 파일은 `docs/generated/<spec>/<task>.md` 작업 기록 하나) PR에 `vcs_number`·`url`을 적는다. `merge_pr` 관문 뒤에 실제 병합한다.
 - 부품이 실패하면 활동(`vcs.open_failed`·`vcs.merge_failed`) 한 줄만 남기고 PR은 병합하지 않는다. 설정이 잘못돼도 같다(fail-closed). 사람 머지 버튼으로 다시 시도할 수 있고, 이미 병합된 변경은 성공으로 본다.
 - 테스트: `tests/test_vcs_adapter.py`가 같은 계약 묶음을 목·GitHub(가짜 서버 `httpx.MockTransport`, 공개·사내 주소)에 돌린다. 실제 API는 부르지 않는다.
-- 아직: `find_related_prs`·역추적은 여전히 메모리 PR을 본다(①②⑤ 연결 전). 간단 요청 자동 처리(`_auto_complete`)는 아직 부품을 부르지 않는다.
+- 연결 여러 개(레포마다 하나): 화면 연결은 `POST /vcs/connections`(`{id?, kind, repo, base_url?, base_branch?, token?, description?, paths?}`, id가 없으면 `conn-n`, 토큰을 비우면 그 연결의 토큰 유지, 틀리면 400 `INVALID_VCS`·이전 값 유지) · `GET /vcs/connections` · `POST /vcs/connections/{id}/delete`(없으면 404) · `POST /vcs/connections/{id}/test`(최근 하루 병합 읽기). 연결 모양 `{id, kind, repo, base_url, base_branch, description, paths, token_set, token_hint, source}`(토큰 값은 안 줌). 환경변수 설정은 종류가 `mock`이 아니면 id `env`·source `env` 연결이 된다(`PLANNING_VCS_DESCRIPTION`·`PLANNING_VCS_PATHS` 쉼표 구분도 읽음, 화면에서 못 바꿈). 예전 `GET/POST /vcs`·`/vcs/test`는 첫 연결을 본다. 화면 연결은 종류가 `mock`이어도 켜진 연결이다(메모리 레포).
+- 레포 고르기(`repo_routing.py`): PR을 만들 때(`_generate_prs`·간단 요청 `_auto_build`, 관문 뒤) 규칙 점수(바꿀 경로가 담당 경로 안 +3, 작업·요청 낱말이 레포 이름·설명에 +1, 확신 high·mid·low)로 고르고, planning LLM(`PLANNING_LLM_*`·`LLM_*`)이 있으면 후보 id 하나와 근거 3줄(`AI: `)을 받는다(후보 밖 id·오류면 규칙). 결과는 PR `target`(`connection_id, repo, status, confidence, reasons, candidates, decided_by, decided_at`). 연결이 하나면 바로 승인("자동 (연결 1개)")하고 올린다. 여럿이면 `proposed`로 두고 올리지 않는다(활동 `vcs.repo_proposed`, 머지 대기 `vcs.repo_pending`, 사람 머지 버튼은 400 `REPO_NOT_APPROVED`).
+- 사람 판단: `POST /actions` `{"type": "approveRepo", "pr": "PR #31", "connection"?: "conn-2"}`(관문 `approve_repo` A 뒤 그 연결에 올리고 자동 머지 규칙대로 이어 감) · `{"type": "rejectRepo", "pr": "PR #31"}`(관문 `reject_repo` A, 아무것도 안 올림, 나중에 연결을 골라 승인). 나눠 띄우면 PR은 `dev` 서비스에 있으니 `dev`로 보낸다(레포 제안은 `receive_dev_result`로 planning에 넘어가지 않는다).
+- 아직: `find_related_prs`·역추적은 여전히 메모리 PR을 본다(①②⑤ 연결 전, 연결이 여럿이어도 같다). 간단 요청을 레포 승인 뒤 머지하면 자동 처리 이력·승급 연속 건수에는 넣지 않는다.
 
 ## 4. 의존
 `ax-contracts`, `ax-agent-template`, `fastapi`, `uvicorn`, `httpx`. 다른 부서 폴더를 import하지 않는다.
 - hr `record_case` 입력은 계약 `RecordCase`(`record.py`)로 만들어 `execute(record_case)` params의 `record_case`에 넣는다 (`decision_rejected`·`spec_confirmed`).
-- 실행 관문: `ax_agent_template.execute.execute()` (safety). 상태를 바꾸는 단계마다 부른다: `create_ticket`·`write_spec`·`confirm_spec`·`split_tasks`·`generate_pr`(B)·`review_pr`·`merge_pr`(B)·`record_case`·`extract_decision`·`review_ticket_draft`·`link_incident`·`send_message`·`auto_policy_update`·`auto_policy_propose`(C, 보류가 정상). 멱등성 키는 `context_id:액션:대상`.
+- 실행 관문: `ax_agent_template.execute.execute()` (safety). 상태를 바꾸는 단계마다 부른다: `create_ticket`·`write_spec`·`confirm_spec`·`split_tasks`·`generate_pr`(B)·`review_pr`·`merge_pr`(B)·`record_case`·`extract_decision`·`review_ticket_draft`·`link_incident`·`send_message`·`auto_policy_update`·`auto_policy_propose`(C, 보류가 정상)·`approve_repo`·`reject_repo`(올릴 레포 사람 판단). 멱등성 키는 `context_id:액션:대상`.
 
 ## 5. 하지 않는 것
 - 원인 판정을 하지 않는다 (infra 몫). 후보와 시간 관계만 회신한다.
