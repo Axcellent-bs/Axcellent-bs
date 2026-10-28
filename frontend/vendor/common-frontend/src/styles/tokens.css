@@ -1,0 +1,163 @@
+/* 디자인 토큰. 원본: DejaFix/DejaFix (GitHub dev) frontend/src/styles/tokens.css (값 그대로).
+   라이트가 기본이고, 다크는 같은 이름의 토큰을 다시 정의한다.
+   인디고 색·각진 모양은 theme.css가 이 위에 덮어쓴다(DejaFix와 같은 순서).
+
+   DejaFix에서 바꾼 것은 이름뿐이다:
+   - 도메인 이름 토큰(--sev-*, --risk-*, --heat-*, --ai-*)은 뺐다.
+   - 범용 상태색은 같은 값으로 새 이름을 붙였다:
+     --success = risk-low, --warning = sev-warning, --danger = sev-high, --info = sev-info */
+:root {
+  --bg: #f5f6f6;
+  --surface: #ffffff;
+  --surface-2: #fafbfb;
+  --text: #1c2120;
+  --text-2: #4f5755;
+  --text-3: #818a88;
+  --border: rgba(20, 40, 36, 0.09);
+  --border-strong: rgba(20, 40, 36, 0.16);
+  --hover: rgba(20, 40, 36, 0.045);
+  --track: rgba(20, 40, 36, 0.07);
+
+  --primary: #0f5e54;
+  --primary-hover: #0b4a42;
+  --primary-soft: #e4f0ee;
+  --on-primary: #ffffff;
+  --accent: #a8731a;
+  --accent-soft: #f6eedd;
+
+  --sidebar-bg: rgba(255, 255, 255, 0.8);
+  --topbar-bg: rgba(245, 246, 246, 0.84);
+  --code-bg: #1c2120;
+  --code-fg: #f1f4f3;
+  --chip-neutral-bg: rgba(20, 40, 36, 0.07);
+  --skeleton-a: #e9eceb;
+  --skeleton-b: #f4f6f5;
+
+  /* 상태 (DejaFix sev-info / sev-warning / sev-high / risk-low 값) */
+  --info: #3c6e9e;
+  --info-soft: #e7eff7;
+  --warning: #a87a0a;
+  --warning-soft: #faf1d8;
+  --danger: #cf3d34;
+  --danger-soft: #fbe7e5;
+  --success: #2f7d4f;
+  --success-soft: #e4f2e9;
+
+  /* 차트 */
+  --chart-text: #818a88;
+  --chart-grid: rgba(20, 40, 36, 0.07);
+  --series-1: #0f6e62;
+  --series-2: #c9811f;
+  --series-3: #3c6e9e;
+  --series-4: #b1495a;
+
+  --radius-lg: 18px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 1px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.12);
+
+  --font:
+    'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, 'Apple SD Gothic Neo',
+    'Malgun Gothic', 'Segoe UI', sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --sidebar-w: 232px;
+  --panel-w: 400px;
+  --topbar-h: 60px;
+
+  /* --- 이 템플릿에서 추가한 토큰 (DejaFix에는 숫자로 직접 쓰여 있던 값) --- */
+  --radius-pill: 999px; /* 알약 모양 */
+  --radius-round: 50%; /* 원 (점, 스위치 손잡이) */
+  --overlay: rgba(10, 14, 13, 0.45); /* Modal 배경 (신규) */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0e1312;
+    --surface: #161c1b;
+    --surface-2: #1b2322;
+    --text: #edf1f0;
+    --text-2: #b4bebb;
+    --text-3: #8a9693;
+    --border: rgba(255, 255, 255, 0.09);
+    --border-strong: rgba(255, 255, 255, 0.17);
+    --hover: rgba(255, 255, 255, 0.06);
+    --track: rgba(255, 255, 255, 0.1);
+    --primary: #3fae9c;
+    --primary-hover: #55c0ae;
+    --primary-soft: rgba(63, 174, 156, 0.16);
+    --on-primary: #04201b;
+    --accent: #d9a441;
+    --accent-soft: rgba(217, 164, 65, 0.16);
+    --sidebar-bg: rgba(22, 28, 27, 0.82);
+    --topbar-bg: rgba(14, 19, 18, 0.84);
+    --code-bg: #0a0e0d;
+    --code-fg: #e3eae8;
+    --chip-neutral-bg: rgba(255, 255, 255, 0.1);
+    --skeleton-a: #1b2322;
+    --skeleton-b: #232d2b;
+    --info: #7fb0dc;
+    --info-soft: rgba(127, 176, 220, 0.16);
+    --warning: #dcae45;
+    --warning-soft: rgba(220, 174, 69, 0.16);
+    --danger: #f0746a;
+    --danger-soft: rgba(240, 116, 106, 0.16);
+    --success: #5fc084;
+    --success-soft: rgba(95, 192, 132, 0.16);
+    --chart-text: #8a9693;
+    --chart-grid: rgba(255, 255, 255, 0.08);
+    --series-1: #4cc3b0;
+    --series-2: #e0ab55;
+    --series-3: #7fb0dc;
+    --series-4: #e0828f;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.55);
+    --overlay: rgba(0, 0, 0, 0.6);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #0e1312;
+  --surface: #161c1b;
+  --surface-2: #1b2322;
+  --text: #edf1f0;
+  --text-2: #b4bebb;
+  --text-3: #8a9693;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.17);
+  --hover: rgba(255, 255, 255, 0.06);
+  --track: rgba(255, 255, 255, 0.1);
+  --primary: #3fae9c;
+  --primary-hover: #55c0ae;
+  --primary-soft: rgba(63, 174, 156, 0.16);
+  --on-primary: #04201b;
+  --accent: #d9a441;
+  --accent-soft: rgba(217, 164, 65, 0.16);
+  --sidebar-bg: rgba(22, 28, 27, 0.82);
+  --topbar-bg: rgba(14, 19, 18, 0.84);
+  --code-bg: #0a0e0d;
+  --code-fg: #e3eae8;
+  --chip-neutral-bg: rgba(255, 255, 255, 0.1);
+  --skeleton-a: #1b2322;
+  --skeleton-b: #232d2b;
+  --info: #7fb0dc;
+  --info-soft: rgba(127, 176, 220, 0.16);
+  --warning: #dcae45;
+  --warning-soft: rgba(220, 174, 69, 0.16);
+  --danger: #f0746a;
+  --danger-soft: rgba(240, 116, 106, 0.16);
+  --success: #5fc084;
+  --success-soft: rgba(95, 192, 132, 0.16);
+  --chart-text: #8a9693;
+  --chart-grid: rgba(255, 255, 255, 0.08);
+  --series-1: #4cc3b0;
+  --series-2: #e0ab55;
+  --series-3: #7fb0dc;
+  --series-4: #e0828f;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.55);
+  --overlay: rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}

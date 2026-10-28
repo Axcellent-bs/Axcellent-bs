@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AXcellent 구조 프로토타입: 사내 설치형 부서 AI 업무 시스템 (데모)" />
+    <link rel="icon" href="./favicon.ico" sizes="any" />
+    <link rel="icon" href="./logo.png" type="image/png" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <title>AXcellent 데모</title>
+    <!-- 데모는 밝은 화면 하나만 쓴다. 첫 화면이 그려지기 전에 화면 스타일(현재/공통)을 적용한다 -->
+    <script>var r=document.documentElement;r.dataset.theme='light';r.dataset.ui='current';try{var q=new URLSearchParams(location.search).get('ui');if(q==='common'||q==='current')localStorage.setItem('axcellent-demo-ui',q);if((q||localStorage.getItem('axcellent-demo-ui'))==='common')r.dataset.ui='common'}catch(e){}</script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
