@@ -53,7 +53,8 @@ export function duration(sec: unknown): string {
 /** 막대용 분 단위(소수 첫째 자리) */
 export const minutes = (sec: number) => Math.round(sec / 6) / 10;
 
-export const CATEGORY_KO: Record<string, string> = { books: "도서", stationery: "문구", ebooks: "전자책", goods: "굿즈" };
+/** 쇼핑몰 카테고리 코드 → 화면 이름. 표에 없는 코드는 받은 그대로 보여 준다 (실서버 시드 코드: book, stationery) */
+export const CATEGORY_KO: Record<string, string> = { book: "도서", books: "도서", stationery: "문구", ebook: "전자책", ebooks: "전자책", goods: "굿즈" };
 
 export const STEP_STATUS_KO: Record<string, { label: string; tone: "ok" | "warn" | "bad" | "info" | "muted" }> = {
   completed: { label: "끝남", tone: "ok" },
@@ -104,7 +105,9 @@ export function evidenceLines(summary: string | null | undefined): { headline: s
   return { headline: lines[0] ?? null, notes: lines.slice(1) };
 }
 
+/** 서버가 꺼졌을 때 무엇이 꺼졌는지 보여 주는 이름 */
 export const DATA_SERVER = "데이터 AI 서버(8106)";
+export const ORCH_SERVER = "총괄 서버(8000)";
 export const kpiLive = DATA_A2A_TOKEN !== "";
 
 export const dataAi = {

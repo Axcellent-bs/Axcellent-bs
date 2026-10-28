@@ -5,11 +5,11 @@ import { incidentTitle, type OrchIncident } from "@/lib/agentChat";
 import { krw } from "@/lib/finance";
 import { shortDateTime } from "@/lib/format";
 import {
-  CATEGORY_KO, FLOW, INCIDENT_STATUS_KO, STEP_STATUS_KO, UNKNOWN, bool, count, duration, impactOf, num, recoveryOf, stepOf,
+  CATEGORY_KO, FLOW, INCIDENT_STATUS_KO, ORCH_SERVER, STEP_STATUS_KO, UNKNOWN, bool, count, duration, impactOf, num, recoveryOf, stepOf,
 } from "@/lib/data";
 
-// 장애 사건 데이터 (시나리오 A 결제 장애): 이상 감지 → 영향 분석 → 복구 확인 → 처리 시간 요약.
-// 숫자는 총괄 사건에 담긴 데이터 AI 결과 그대로. 없으면 "확인할 수 없음".
+// 장애 사건 데이터 (결제 장애): 이상 감지 → 영향 분석 → 복구 확인 → 처리 시간 요약.
+// 숫자는 총괄 사건(GET /orch/api/incidents)에 담긴 데이터 AI 결과 그대로. 없으면 "확인할 수 없음".
 
 const RECENT = 6;
 
@@ -132,9 +132,15 @@ function RecoveryCard({ inc }: { inc: OrchIncident }) {
 export function IncidentData({ list, detail, selected, onSelect }: {
   list: Resource<OrchIncident[]>; detail: Resource<OrchIncident>; selected: string | null; onSelect: (id: string) => void;
 }) {
-  if (!list.env) return list.error ? <ErrorBox message={`총괄 사건 목록을 받지 못했습니다. ${list.error}`} onRetry={list.reload} /> : <Waiting />;
+  if (!list.env) return list.error ? <ErrorBox message={`${ORCH_SERVER}에서 사건 목록을 받지 못했어요. ${list.error}`} onRetry={list.reload} /> : <Waiting />;
   const incidents = list.env.data;
-  if (incidents.length === 0) return <Empty>아직 장애 사건이 없습니다. 총괄에 사건이 들어오면 여기에 나타납니다.</Empty>;
+  if (incidents.length === 0) {
+    return (
+      <Empty>
+        아직 장애 사건이 없어요. 쇼핑몰에서 결제 장애가 감지되면 총괄이 사건을 열고, 데이터 AI가 센 실패 주문·영향 고객·피해 금액이 여기에 나타납니다.
+      </Empty>
+    );
+  }
   // 상세가 아직 오지 않았으면 목록의 값(같은 사건 모양)을 쓴다
   const inc = detail.env?.data.context_id === selected ? detail.env.data : incidents.find((i) => i.context_id === selected) ?? null;
   const impact = impactOf(inc);
@@ -150,7 +156,7 @@ export function IncidentData({ list, detail, selected, onSelect }: {
             <Stat label="피해 금액" value={krw(num(impact?.damage_amount))} tone={num(impact?.damage_amount) == null ? "text-ink-500" : "text-accent"} />
             <Stat label="복구까지 걸린 시간" value={duration(inc.metrics?.mttr_seconds)} sub="사건 시작부터 해결까지 (총괄 기록)" tone={num(inc.metrics?.mttr_seconds) == null ? "text-ink-500" : ""} />
           </div>
-          <Panel id="data-flow" title="데이터 AI 처리 흐름" hint={`${incidentTitle(inc)} · ${shortDateTime(inc.opened_at)} 시작`} meta={list.env.meta}>
+          <Panel id="data-flow" title="데이터 AI 처리 흐름" hint={`${incidentTitle(inc)} · ${shortDateTime(inc.opened_at)} 시작`}>
             <Flow inc={inc} />
           </Panel>
           <div className="grid gap-5 lg:grid-cols-[3fr_2fr]">
