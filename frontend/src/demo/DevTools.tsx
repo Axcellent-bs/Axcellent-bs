@@ -107,6 +107,39 @@ export function DevToolsPanel() {
   const kindReady = KINDS.find((k) => k.id === form?.kind)?.ready
   const editing = form?.id ? list?.find((c) => c.id === form.id) : undefined
 
+  // 연결 추가는 목록 맨 위, 수정은 그 연결 카드 바로 아래에 연다
+  const formEl = form && (
+          <form onSubmit={save} className="space-y-3 rounded-xl border border-brand-200 bg-brand-50/40 p-4">
+            <h3 className="font-medium">{editing ? `${editing.repo} 수정` : '연결 추가'}</h3>
+            <div className="grid gap-3 md:grid-cols-[1fr_2fr]">
+              <select className="field" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })} aria-label="형상관리 종류">
+                {KINDS.map((k) => <option key={k.id} value={k.id} disabled={!k.ready}>{k.label}{k.ready ? '' : ' — 준비 중'}</option>)}
+              </select>
+              <input className="field font-mono" placeholder="API 주소 (비우면 github.com, 사내 설치형은 https://<주소>/api/v3)" value={form.base_url}
+                onChange={(e) => setForm({ ...form, base_url: e.target.value })} aria-label="API 주소" />
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <input className="field font-mono" placeholder="레포 owner/name" value={form.repo} onChange={(e) => setForm({ ...form, repo: e.target.value })} aria-label="레포" />
+              <input className="field font-mono" placeholder="병합 대상 브랜치" value={form.base_branch} onChange={(e) => setForm({ ...form, base_branch: e.target.value })} aria-label="병합 대상 브랜치" />
+              <input className="field font-mono" type="password" autoComplete="off" placeholder={editing?.token_set ? '접근 토큰 (비우면 기존 토큰 유지)' : '접근 토큰'} value={form.token}
+                onChange={(e) => setForm({ ...form, token: e.target.value })} aria-label="접근 토큰" />
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <input className="field" placeholder="설명 (예: 쇼핑몰 웹)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} aria-label="설명" />
+              <textarea className="field font-mono" rows={2} placeholder="담당 경로 (예: shop-web/, src/)" value={form.paths} onChange={(e) => setForm({ ...form, paths: e.target.value })} aria-label="담당 경로" />
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="text-ink-500">토큰 권한 (이 레포만)</span>
+              {PERMISSIONS.map((p) => <span key={p} className="chip bg-ink-100 text-ink-700">{p}</span>)}
+            </div>
+            {error && <p className="text-sm text-red-700">{error}</p>}
+            <div className="flex gap-2">
+              <button className="btn-primary px-5" disabled={saving || offline || !kindReady}>{saving ? '저장 중…' : '저장'}</button>
+              <button type="button" className="btn-ghost" onClick={() => { setForm(null); setError(null) }}>취소</button>
+            </div>
+          </form>
+  )
+
   return (
     <div className="space-y-6">
       <section className="card space-y-4 p-6">
@@ -118,6 +151,8 @@ export function DevToolsPanel() {
           <button type="button" className="btn-primary ml-auto px-4" disabled={offline || (!!form && !form.id)}
             onClick={() => { setForm({ ...EMPTY }); setError(null) }}>연결 추가</button>
         </div>
+
+        {form && !form.id && formEl}
 
         {list && !list.length && !form && <p className="border-t border-ink-100 pt-4 text-sm text-ink-500">연결 없음 · 시연 데이터</p>}
 
@@ -159,43 +194,13 @@ export function DevToolsPanel() {
                       </div>
                     )}
                   </dl>
+                  {form?.id === c.id && <div className="mt-4">{formEl}</div>}
                 </li>
               )
             })}
           </ul>
         )}
 
-        {form && (
-          <form onSubmit={save} className="space-y-3 border-t border-ink-100 pt-4">
-            <h3 className="font-medium">{editing ? `${editing.repo} 수정` : '연결 추가'}</h3>
-            <div className="grid gap-3 md:grid-cols-[1fr_2fr]">
-              <select className="field" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })} aria-label="형상관리 종류">
-                {KINDS.map((k) => <option key={k.id} value={k.id} disabled={!k.ready}>{k.label}{k.ready ? '' : ' — 준비 중'}</option>)}
-              </select>
-              <input className="field font-mono" placeholder="API 주소 (비우면 github.com, 사내 설치형은 https://<주소>/api/v3)" value={form.base_url}
-                onChange={(e) => setForm({ ...form, base_url: e.target.value })} aria-label="API 주소" />
-            </div>
-            <div className="grid gap-3 md:grid-cols-3">
-              <input className="field font-mono" placeholder="레포 owner/name" value={form.repo} onChange={(e) => setForm({ ...form, repo: e.target.value })} aria-label="레포" />
-              <input className="field font-mono" placeholder="병합 대상 브랜치" value={form.base_branch} onChange={(e) => setForm({ ...form, base_branch: e.target.value })} aria-label="병합 대상 브랜치" />
-              <input className="field font-mono" type="password" autoComplete="off" placeholder={editing?.token_set ? '접근 토큰 (비우면 기존 토큰 유지)' : '접근 토큰'} value={form.token}
-                onChange={(e) => setForm({ ...form, token: e.target.value })} aria-label="접근 토큰" />
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <input className="field" placeholder="설명 (예: 쇼핑몰 웹)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} aria-label="설명" />
-              <textarea className="field font-mono" rows={2} placeholder="담당 경로 (예: shop-web/, src/)" value={form.paths} onChange={(e) => setForm({ ...form, paths: e.target.value })} aria-label="담당 경로" />
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="text-ink-500">토큰 권한 (이 레포만)</span>
-              {PERMISSIONS.map((p) => <span key={p} className="chip bg-ink-100 text-ink-700">{p}</span>)}
-            </div>
-            {error && <p className="text-sm text-red-700">{error}</p>}
-            <div className="flex gap-2">
-              <button className="btn-primary px-5" disabled={saving || offline || !kindReady}>{saving ? '저장 중…' : '저장'}</button>
-              <button type="button" className="btn-ghost" onClick={() => { setForm(null); setError(null) }}>취소</button>
-            </div>
-          </form>
-        )}
         {!form && error && <p className="text-sm text-red-700">{error}</p>}
       </section>
 
