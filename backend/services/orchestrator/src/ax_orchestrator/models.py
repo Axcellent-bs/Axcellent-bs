@@ -63,6 +63,8 @@ class StepRun:
     output: dict[str, Any] = field(default_factory=dict)
     transferred_to: str | None = None
     reason_code: str | None = None
+    # 꺼진 서비스라 사람 할 일함으로 넘어간 일 번호 (status "waiting_human", 업무 요청 라우터)
+    handoff_task_id: str | None = None
 
     def view(self) -> dict[str, Any]:
         return {
@@ -78,11 +80,15 @@ class StepRun:
             "finished_at": iso(self.finished_at),
             "transferred_to": self.transferred_to,
             "reason_code": self.reason_code,
+            "handoff_task_id": self.handoff_task_id,
             "output": self.output,
         }
 
 
 TERMINAL = {"completed", "failed", "skipped", "rejected_by_human", "transfer_queued"}
+# 끝나지 않은 대기 상태. C 등급 승인 대기(held)와
+# 사람 할 일함 처리 대기(waiting_human)는 다른 상태다
+WAITING = {"held", "waiting_human"}
 
 
 @dataclass
@@ -100,6 +106,7 @@ class Incident:
     events: list[dict[str, Any]] = field(default_factory=list)
     outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
     holds: dict[str, Any] = field(default_factory=dict)  # step_id -> Hold
+    handoffs: dict[str, Any] = field(default_factory=dict)  # step_id -> HandoffWait
     summary: list[str] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
     shared: dict[str, Any] = field(default_factory=dict)  # 부서가 준 값 중 다른 부서에 넘길 것
@@ -129,5 +136,16 @@ class Incident:
                 {"step_id": sid, "skill": self.steps[sid].skill, "label": self.steps[sid].label}
                 for sid, hold in self.holds.items()
                 if hold.pending
+            ],
+            "pending_handoffs": [
+                {
+                    "step_id": sid,
+                    "skill": self.steps[sid].skill,
+                    "label": self.steps[sid].label,
+                    "task_id": wait.task_id,
+                    "assignee_unit": wait.assignee_unit,
+                }
+                for sid, wait in self.handoffs.items()
+                if wait.pending
             ],
         }

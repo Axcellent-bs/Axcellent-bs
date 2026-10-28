@@ -15,6 +15,7 @@ const STEP_KO: Record<string, { label: string; tone: string }> = {
   running: { label: "기록 중", tone: "bg-brand-50 text-brand-700" },
   pending: { label: "기록 전", tone: "bg-ink-100 text-ink-500" },
   held: { label: "사람 확인 대기", tone: "bg-amber-50 text-amber-700" },
+  waiting_human: { label: "담당 부서 처리 대기", tone: "bg-violet-50 text-violet-700" },
   failed: { label: "기록 실패", tone: "bg-red-50 text-red-700" },
   skipped: { label: "건너뜀", tone: "bg-ink-100 text-ink-500" },
   rejected_by_human: { label: "사람이 거절", tone: "bg-red-50 text-red-700" },
