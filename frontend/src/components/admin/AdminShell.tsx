@@ -47,7 +47,7 @@ function NavIcon({ item, size }: { item: NavItem; size: number }) {
 // 할 일함은 어느 서비스를 샀든 보이는 기본 메뉴다 (SHARED_PATHS). 열린 일이 있으면 개수를 띄운다
 const HANDOFFS_HREF = "/handoffs";
 const SHARED_NAV: NavItem[] = [
-  { href: HANDOFFS_HREF, label: "할 일함", Icon: IconInbox, match: [HANDOFFS_HREF] },
+  { href: HANDOFFS_HREF, label: "받은 요청", Icon: IconInbox, match: [HANDOFFS_HREF] },
   { href: "/agents/chat", label: "AI 대화방", Icon: IconAgents, match: ["/agents/chat"] },
   { href: "/agents/office", label: "AI 오피스", Icon: IconOffice, match: ["/agents/office"] },
 ];
