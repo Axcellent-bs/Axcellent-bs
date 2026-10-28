@@ -240,6 +240,31 @@ export interface State {
   warnings: number
   firstPrMinutes: number[]
   autoPolicy: AutoPolicy
+  chats?: ChatThread[] // AI와 대화 (dev 서비스 SSE에 있을 때만)
+}
+
+// ---- AI와 대화: 개발 에이전트와 대화하다 필요한 것이 모이면 코딩 작업을 시작한다
+export type ChatStatus = 'talking' | 'started' | 'blocked'
+export type ChatKind = 'text' | 'question' | 'plan' | 'started' | 'error'
+export interface ChatPlan { title: string; plan: string; done: string[]; paths: string[] }
+export interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  text: string
+  at: string
+  kind: ChatKind
+  plan?: ChatPlan | null
+  taskId?: string | null
+}
+export interface ChatThread {
+  id: string
+  title: string
+  status: ChatStatus
+  messages: ChatMessage[]
+  taskId: string | null
+  connection: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 // ---- 되돌릴 수 없는 일: 교차검증 대신 항상 사람이 확인한다 (기획서 확정·PR 머지 둘 다)

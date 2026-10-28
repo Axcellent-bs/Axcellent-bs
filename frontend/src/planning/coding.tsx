@@ -1,10 +1,9 @@
-// 직접 개발: 개발팀이 기획을 바로 넣으면 코딩 에이전트가 파일 읽기 → 작성 → 리뷰 → PR까지 간다.
+// 코딩 에이전트: AI와 대화(chat.tsx)로 시작한 작업은 파일 읽기 → 작성 → 리뷰 → PR까지 간다.
 // 진행 상태는 Task.coding으로 SSE를 타고 온다
-import { useEffect, useState, type FormEvent } from 'react'
+import { useState } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import type { CodingRun, CodingStatus, State as S, Task } from './data'
-import { DEV_API, PlanningApiError, devTaskApi, vcsApi, type VcsConnection } from './api'
-import { go } from './links'
+import { DEV_API, PlanningApiError, devTaskApi } from './api'
 import { State, Tag } from './parts'
 import { Step } from './flow'
 
@@ -30,89 +29,6 @@ export const DevTeamTag = () => <Tag>개발팀 기획</Tag>
 
 /** 목록 줄·머리에 쓰는 코딩 상태 글자 */
 export const codingState = (c: CodingRun) => CODING_LABEL[c.status] ?? c.status
-
-// 쉼표·줄바꿈으로 나눈다
-const split = (x: string) => x.split(/[,\n]/).map((p) => p.trim()).filter(Boolean)
-
-/** 헤더의 "직접 개발" 창 */
-export function DevTaskDialog({ onClose, onTools }: { onClose: () => void; onTools: () => void }) {
-  const toast = useToast()
-  const [conns, setConns] = useState<VcsConnection[]>([])
-  const [f, setF] = useState({ title: '', plan: '', done: '', paths: '', connection: '' })
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<{ code: string; message: string } | null>(null)
-
-  useEffect(() => {
-    vcsApi(DEV_API).list().then(setConns).catch(() => setConns([]))
-  }, [])
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!f.plan.trim()) return setErr({ code: 'INVALID_INPUT', message: '기획 내용을 넣어 주세요.' })
-    setBusy(true)
-    setErr(null)
-    try {
-      const paths = split(f.paths)
-      const r = await api.create({
-        title: f.title.trim(), plan: f.plan.trim(),
-        ...(f.done.trim() ? { done: f.done.trim() } : {}),
-        ...(paths.length ? { paths } : {}),
-        ...(f.connection ? { connection: f.connection } : {}),
-      })
-      toast.show('코딩 에이전트가 시작했어요')
-      onClose()
-      go(`#/work/prs/${encodeURIComponent(r.task_id)}`)
-    } catch (x) {
-      const code = x instanceof PlanningApiError ? x.code : 'NETWORK'
-      const message = code === 'LLM_NOT_CONFIGURED' ? 'LLM 설정 필요 (backend/.env)'
-        : x instanceof PlanningApiError ? x.message : '개발·배포 서버에 연결할 수 없어요'
-      setErr({ code, message })
-      toast.show(message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value })
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 pt-16" onClick={onClose} role="presentation">
-      <div role="dialog" aria-modal="true" aria-label="직접 개발" className="w-full max-w-2xl space-y-4 rounded-2xl p-5 shadow-xl"
-        style={{ background: 'rgb(var(--canvas))' }} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">직접 개발</h2>
-          <button type="button" className="btn-quiet px-2 py-1" onClick={onClose} aria-label="닫기">✕</button>
-        </div>
-        <form onSubmit={submit} className="space-y-3">
-          <input className="field" placeholder="제목" value={f.title} onChange={set('title')} aria-label="제목" />
-          <textarea className="field" rows={6} required placeholder="기획 내용" value={f.plan} onChange={set('plan')} aria-label="기획 내용" />
-          <textarea className="field" rows={3} placeholder="완료 기준 (한 줄에 하나)" value={f.done} onChange={set('done')} aria-label="완료 기준" />
-          <div className="grid gap-3 md:grid-cols-2">
-            <textarea className="field font-mono" rows={2} placeholder="바꿀 경로 힌트 (예: shop-web/, src/)" value={f.paths} onChange={set('paths')} aria-label="바꿀 경로 힌트" />
-            <select className="field font-mono" value={f.connection} onChange={set('connection')} aria-label="대상 레포">
-              <option value="">대상 레포 · AI가 고름</option>
-              {conns.map((c) => <option key={c.id} value={c.id}>{c.repo}</option>)}
-            </select>
-          </div>
-          {err && (
-            <div className="flex flex-wrap items-center gap-2 text-sm text-red-700">
-              <span>{err.code === 'NO_VCS' ? '연결된 레포 없음' : err.message}</span>
-              {err.code === 'NO_VCS' && <button type="button" className="btn-ghost" onClick={() => { onClose(); onTools() }}>개발 도구 연결</button>}
-            </div>
-          )}
-          <div className="flex gap-2">
-            <button className="btn-primary px-5" disabled={busy || !f.plan.trim()}>{busy ? '보내는 중…' : '코딩 시작'}</button>
-            <button type="button" className="btn-ghost" onClick={onClose}>취소</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
 
 /** 작업·PR 흐름 맨 위 "코딩 에이전트" 단계 */
 export function CodingStep({ task }: { task: Task }) {

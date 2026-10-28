@@ -18,7 +18,7 @@ import { Projects } from './projects'
 import { convoHref } from './links'
 import { Knowledge } from './knowledge'
 import { repoPending } from './repo'
-import { DevTaskDialog } from './coding'
+import { ChatPanel, useDevChat } from './chat'
 import { prSlug } from './links'
 
 type IconName = NonNullable<NavItem['icon']>
@@ -93,7 +93,7 @@ function Planning({ part }: { part: PlanningPart }) {
   const route = useRoute(P.home)
   const [state, dispatch, connected] = useSharedStore(apiBase(part))
   const [tools, setTools] = useState(false)
-  const [devTask, setDevTask] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
   const toast = useToast()
   useEffect(() => {
     const on = (e: Event) => toast.show((e as CustomEvent<string>).detail)
@@ -129,6 +129,7 @@ function Planning({ part }: { part: PlanningPart }) {
   const recentIn = inbound.filter((x) => x.point !== 'message').slice(-3).reverse()
   const repoWait = part === 'dev' ? repoPending(state) : 0
   const firstRepoWait = state.prs.find((p) => p.target?.status === 'proposed')
+  const chat = useDevChat(state, part === 'dev' && connected)
 
   const badge: Record<string, number> = part === 'planning' ? { requests: newWork || incoming, talk: newTalk } : { talk: newTalk }
   const menu = [
@@ -154,8 +155,11 @@ function Planning({ part }: { part: PlanningPart }) {
           {repoWait > 0 && firstRepoWait && (
             <a href={`#/work/prs/${prSlug(firstRepoWait.id)}`} className="chip amber" title="대상 레포 승인 대기 PR">레포 승인 대기 {repoWait}</a>
           )}
+          {part === 'dev' && chat.working.length > 0 && (
+            <button type="button" className="chip amber" onClick={() => { chat.select(chat.working[0]); setChatOpen(true) }}>AI 작업 중 {chat.working.length}</button>
+          )}
           {part === 'dev' && (
-            <button type="button" className="btn-primary px-3 py-1" disabled={!connected} title={connected ? '코딩 에이전트' : '개발·배포 서버 꺼짐'} onClick={() => setDevTask(true)}>직접 개발</button>
+            <button type="button" className="btn-primary px-3 py-1" disabled={!connected} title={connected ? '개발 에이전트' : '개발·배포 서버 꺼짐'} onClick={() => setChatOpen(true)}>AI와 대화</button>
           )}
           {part === 'dev' && (
             <button type="button" className="btn-quiet px-2 py-1" title="개발 도구 연결" aria-label="개발 도구 연결" onClick={() => setTools(true)}>
@@ -166,7 +170,9 @@ function Planning({ part }: { part: PlanningPart }) {
         </div>
       </header>
       {tools && <DevToolsDialog onClose={() => setTools(false)} />}
-      {devTask && <DevTaskDialog onClose={() => setDevTask(false)} onTools={() => setTools(true)} />}
+      {part === 'dev' && chatOpen && (
+        <ChatPanel s={state} chat={chat} connected={connected} onClose={() => setChatOpen(false)} onTools={() => { setChatOpen(false); setTools(true) }} />
+      )}
       <div className="pl-bar">
         <nav className="pl-menu" aria-label={`${P.title} 메뉴`}>
           {menu.map((m) => (
