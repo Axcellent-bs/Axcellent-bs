@@ -1,9 +1,10 @@
 // AXcellent 관제 센터 (AXcellent 운영팀 전용, 고객사 계정은 못 연다). 고객사에 설치된 AXcellent가 보내는 상태 신호만 모아 본다.
-// 탭: 전체 현황 · 고객사 · 장애·사건 · AI 품질 · 비용·사용량 · 연결 키 발급. 숫자는 data.ts의 데모 예시다.
+// 탭: 전체 현황 · 고객사 · 서비스 관리 · 장애·사건 · AI 품질 · 비용·사용량 · 연결 키 발급. 숫자는 data.ts의 데모 예시다.
 import { useState, type ReactNode } from 'react'
 import { useLocation } from 'react-router'
 import { COMPANIES, COST_BY_SERVICE, COST_TREND, INCIDENTS, LATEST_VERSION, QUALITY, won, type Health, type Origin } from './data'
 import KeyIssue from './KeyIssue'
+import ServiceOps from './ServiceOps'
 import { useCompany, useKeys } from '@/demo/company'
 
 const HEALTH: Record<Health, { label: string; tone: string; dot: string }> = {
@@ -331,5 +332,6 @@ export default function ControlCenter() {
   if (tab === 'quality') return <Quality />
   if (tab === 'cost') return <Cost />
   if (tab === 'keys') return <KeyIssue />
+  if (tab === 'services') return <ServiceOps />
   return <Overview />
 }

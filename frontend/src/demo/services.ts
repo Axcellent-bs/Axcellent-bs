@@ -163,3 +163,39 @@ export function useEnabledServices() {
     getEnabled,
   )
 }
+
+// ---------------------------------------------------------------- AXcellent가 공개한 서비스 (관제 센터 서비스 관리)
+// 운영팀이 카탈로그에서 내린 서비스는 메인 카탈로그와 고객사 서비스 고르기에 안 보인다. 이미 쓰고 있는 고객사는 그대로 쓴다.
+const HIDDEN_KEY = 'axcellent-demo-hidden-services'
+let hidden: string[] = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? '[]') as string[]
+  } catch {
+    return []
+  }
+})()
+const hiddenListeners = new Set<() => void>()
+export const getHidden = () => hidden
+export function toggleHidden(id: string) {
+  hidden = hidden.includes(id) ? hidden.filter((x) => x !== id) : [...hidden, id]
+  try {
+    localStorage.setItem(HIDDEN_KEY, JSON.stringify(hidden))
+  } catch {
+    /* 새로고침하면 전부 공개 상태로 돌아간다 */
+  }
+  hiddenListeners.forEach((l) => l())
+}
+export function useHiddenServices() {
+  return useSyncExternalStore(
+    (l) => {
+      hiddenListeners.add(l)
+      return () => hiddenListeners.delete(l)
+    },
+    getHidden,
+  )
+}
+/** 카탈로그에 공개 중인 서비스 */
+export function usePublishedServices() {
+  const h = useHiddenServices()
+  return SERVICES.filter((s) => !h.includes(s.id))
+}

@@ -38,7 +38,7 @@
 | 기본 포함: AI 대화방·AI 오피스 | AXcellent | `/agents/chat`, `/agents/office` |
 | 시스템 관리: 서비스 고르기·회사 서비스 연결 | AXcellent | `/system/services`, `/system/integrations` |
 | 메인(로그인 전 서비스 카탈로그) | — | `/` → 로그인 버튼 → `/login` |
-| 관제 센터(AXcellent 운영팀 전용): 전체 현황·고객사·장애·사건·AI 품질·비용·사용량·**연결 키 발급** | AXcellent | `/control/login` → `/control/…` (계정 `?as=axc`) |
+| 관제 센터(AXcellent 운영팀 전용): 전체 현황·고객사·**서비스 관리**(버전·배포·카탈로그 공개)·장애·사건·AI 품질·비용·사용량·**연결 키 발급** | AXcellent | `/control/login` → `/control/…` (계정 `?as=axc`) |
 | AXcellent 연결(고객사 시스템 관리자): 받은 키 넣어 연결·끊기 | AXcellent | `/system/connect` |
 
 - 화면은 ax-frontend의 부서 화면을 그대로 다시 쓰고, 서비스 단위로 메뉴만 나눴어요. 서비스 목록은 `src/demo/services.ts`에 있어요.
