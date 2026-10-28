@@ -8,8 +8,8 @@
     <link rel="icon" href="./logo.png" type="image/png" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
     <title>AXcellent 데모</title>
-    <!-- 데모는 밝은 화면 하나만 쓴다. 첫 화면이 그려지기 전에 화면 스타일(현재/공통)을 적용한다 -->
-    <script>var r=document.documentElement;r.dataset.theme='light';r.dataset.ui='current';try{var q=new URLSearchParams(location.search).get('ui');if(q==='common'||q==='current')localStorage.setItem('axcellent-demo-ui',q);if((q||localStorage.getItem('axcellent-demo-ui'))==='common')r.dataset.ui='common'}catch(e){}</script>
+    <!-- 데모는 밝은 화면 하나만 쓴다 -->
+    <script>document.documentElement.dataset.theme='light'</script>
   </head>
   <body>
     <div id="root"></div>

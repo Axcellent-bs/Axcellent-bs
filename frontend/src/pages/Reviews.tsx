@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loading, OFFLINE } from "@/components/admin/bits";
-import { Stars } from "@/components/shop/bits";
+import { Stars } from "@/components/Stars";
 import { api } from "@/lib/api";
 import { dateStr } from "@/lib/format";
 import type { AdminReview } from "@/lib/types";

@@ -3,164 +3,12 @@
 @tailwind utilities;
 
 /*
-  Design tokens as "R G B" so Tailwind can apply opacity (bg-ink-900/40).
-  Agent console: indigo + coral, left icon rail, lavender side panel — light and dark.
-  Storefront (.theme-shop below) swaps the same variables for a paper-and-green palette, so one set of
-  Tailwind classes serves both. Chart colors (--chart-1, --chart-2) are validated per mode with the
-  dataviz palette validator; text never uses them.
+  디자인 토큰: DejaFix common-frontend(vendor/common-frontend/src/styles/tokens.css + theme.css) 라이트 값.
+  인디고 팔레트, 모서리 0, 얇은 테두리 카드. Tailwind가 투명도(bg-ink-900/40)를 쓸 수 있게 "R G B"로 적는다.
+  데모는 밝은 화면 하나만 쓴다.
 */
 :root {
   color-scheme: light;
-  --canvas: 222 226 233;
-  --app: 255 255 255;
-  --surface: 255 255 255;
-  --surface-2: 247 246 253;
-  --ink-50: 248 248 251;
-  --ink-100: 239 239 245;
-  --ink-300: 210 210 222;
-  --ink-500: 120 120 140;
-  --ink-700: 62 62 82;
-  --ink-900: 34 34 52;
-  --brand-50: 240 238 252;
-  --brand-100: 226 223 250;
-  --brand-500: 91 79 208;
-  --brand-600: 59 49 166;
-  --brand-700: 59 49 166;
-  --brand-strong: 46 38 136;
-  --hero-from: 247 160 132;
-  --hero-to: 236 116 82;
-  --chart-1: 75 63 176;
-  --chart-2: 236 116 82;
-  --red-50: 254 242 242;
-  --red-100: 254 226 226;
-  --red-700: 185 28 28;
-  --red-800: 153 27 27;
-  --amber-50: 255 251 235;
-  --amber-100: 254 243 199;
-  --amber-700: 180 83 9;
-  --amber-800: 146 64 14;
-  --emerald-50: 236 253 245;
-  --emerald-100: 209 250 229;
-  --emerald-700: 4 120 87;
-  --emerald-800: 6 95 70;
-  --violet-50: 245 243 255;
-  --violet-700: 109 40 217;
-  --accent: 236 116 82;
-  --accent-50: 254 239 234;
-}
-
-.dark {
-  color-scheme: dark;
-  --canvas: 9 9 14;
-  --app: 20 19 28;
-  --surface: 28 27 38;
-  --surface-2: 33 31 46;
-  --ink-50: 22 21 30;
-  --ink-100: 42 40 56;
-  --ink-300: 70 67 90;
-  --ink-500: 156 152 178;
-  --ink-700: 210 207 225;
-  --ink-900: 239 238 246;
-  --brand-50: 35 31 69;
-  --brand-100: 46 40 96;
-  --brand-500: 134 125 232;
-  --brand-600: 97 86 216;
-  --brand-700: 185 178 247;
-  --brand-strong: 78 68 190;
-  --hero-from: 196 104 74;
-  --hero-to: 168 78 52;
-  --chart-1: 134 125 232;
-  --chart-2: 212 112 79;
-  --red-50: 58 22 24;
-  --red-100: 82 28 30;
-  --red-700: 252 165 165;
-  --red-800: 254 202 202;
-  --amber-50: 56 40 14;
-  --amber-100: 78 55 16;
-  --amber-700: 252 211 77;
-  --amber-800: 253 230 138;
-  --emerald-50: 13 48 37;
-  --emerald-100: 16 68 52;
-  --emerald-700: 110 231 183;
-  --emerald-800: 167 243 208;
-  --violet-50: 40 30 72;
-  --violet-700: 196 181 253;
-  --accent: 212 112 79;
-  --accent-50: 62 34 26;
-}
-
-html, body { height: 100%; }
-body { @apply bg-canvas text-ink-900 antialiased; }
-
-@layer components {
-  .chip { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium; }
-  .btn { @apply inline-flex items-center justify-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40; }
-  .btn-primary { @apply btn bg-brand-600 text-white hover:bg-brand-strong; }
-  .btn-ghost { @apply btn border border-ink-100 bg-surface text-ink-700 hover:bg-ink-100; }
-  .btn-quiet { @apply btn text-ink-500 hover:bg-ink-100 hover:text-ink-900; }
-  .panel-title { @apply text-[11px] font-semibold uppercase tracking-wider text-ink-500; }
-  .card { @apply rounded-3xl bg-surface; }
-  .card-title { @apply text-[15px] font-semibold text-ink-900; }
-  .field { @apply w-full rounded-xl border border-ink-100 bg-surface px-3 py-2 text-sm text-ink-900 outline-none placeholder:text-ink-500 focus:border-brand-500 focus:ring-2 focus:ring-brand-100; }
-}
-
-.scroll-thin { scrollbar-width: thin; }
-
-/* Cards float with soft shadows instead of sitting flat on the canvas (flat in dark mode). */
-.card { box-shadow: 0 10px 30px -18px rgb(34 34 52 / 0.25); }
-.dark .card { box-shadow: none; }
-
-/* ---------- storefront palette: warm paper, bookstore green, coral price ---------- */
-.theme-shop {
-  --canvas: 247 245 240;
-  --app: 255 255 255;
-  --surface: 255 255 255;
-  --surface-2: 248 246 240;
-  --ink-50: 250 249 246;
-  --ink-100: 238 235 227;
-  --ink-300: 208 202 188;
-  --ink-500: 118 111 97;
-  --ink-700: 68 63 54;
-  --ink-900: 31 28 23;
-  --brand-50: 233 246 239;
-  --brand-100: 208 236 220;
-  --brand-500: 34 139 96;
-  --brand-600: 20 108 74;
-  --brand-700: 20 108 74;
-  --brand-strong: 12 80 54;
-  --hero-from: 38 150 104;
-  --hero-to: 16 98 66;
-  --accent: 210 62 44;
-  --accent-50: 253 237 233;
-}
-
-.dark .theme-shop {
-  --canvas: 15 17 15;
-  --app: 23 26 23;
-  --surface: 29 33 29;
-  --surface-2: 35 40 35;
-  --ink-50: 21 24 21;
-  --ink-100: 42 47 41;
-  --ink-300: 68 75 66;
-  --ink-500: 154 160 150;
-  --ink-700: 208 213 203;
-  --ink-900: 238 241 235;
-  --brand-50: 24 47 37;
-  --brand-100: 31 66 51;
-  --brand-500: 84 190 142;
-  --brand-600: 58 163 117;
-  --brand-700: 150 222 190;
-  --brand-strong: 40 140 98;
-  --hero-from: 40 130 92;
-  --hero-to: 22 92 64;
-  --accent: 236 112 92;
-  --accent-50: 62 32 26;
-}
-
-/* ---------- 화면 스타일 토글 '공통': DejaFix common-frontend 모양 ----------
-   <html data-ui="common">일 때 위 토큰을 common-frontend(vendor/common-frontend/src/styles/tokens.css + theme.css)
-   라이트 값으로 바꾼다. 인디고 팔레트, 모서리 0, 얇은 테두리 카드. */
-:root[data-ui='common'] {
   --canvas: 235 235 245;
   --app: 246 246 251;
   --surface: 255 255 255;
@@ -198,10 +46,27 @@ body { @apply bg-canvas text-ink-900 antialiased; }
   --accent: 91 91 214;
   --accent-50: 236 236 251;
 }
-:root[data-ui='common'] *,
-:root[data-ui='common'] *::before,
-:root[data-ui='common'] *::after { border-radius: 0 !important; }
-:root[data-ui='common'] .card {
+
+html, body { height: 100%; }
+body { @apply bg-canvas text-ink-900 antialiased; }
+
+@layer components {
+  .chip { @apply inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium; }
+  .btn { @apply inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40; }
+  .btn-primary { @apply btn bg-brand-600 text-white hover:bg-brand-strong; }
+  .btn-ghost { @apply btn border border-ink-100 bg-surface text-ink-700 hover:bg-ink-100; }
+  .btn-quiet { @apply btn text-ink-500 hover:bg-ink-100 hover:text-ink-900; }
+  .panel-title { @apply text-[11px] font-semibold uppercase tracking-wider text-ink-500; }
+  .card { @apply bg-surface; }
+  .card-title { @apply text-[15px] font-semibold text-ink-900; }
+  .field { @apply w-full border border-ink-100 bg-surface px-3 py-2 text-sm text-ink-900 outline-none placeholder:text-ink-500 focus:border-brand-500 focus:ring-2 focus:ring-brand-100; }
+}
+
+.scroll-thin { scrollbar-width: thin; }
+
+/* common-frontend 모양: 모서리 0 (화면들이 쓰는 rounded-* 클래스도 함께 각지게), 얇은 테두리 카드 */
+*, *::before, *::after { border-radius: 0 !important; }
+.card {
   border: 1px solid rgb(var(--ink-100));
   box-shadow: 0 1px 2px rgb(35 35 69 / 0.05), 0 6px 18px rgb(35 35 69 / 0.05);
 }

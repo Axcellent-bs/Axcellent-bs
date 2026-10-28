@@ -15,7 +15,6 @@ import { Talk } from './talk'
 import { Projects } from './projects'
 import { convoHref } from './links'
 import { Knowledge } from './knowledge'
-import { useUiStyle } from '@/demo/uiStyle'
 
 type IconName = NonNullable<NavItem['icon']>
 interface Section { label: string; icon: IconName; tabs: { id: string; label: string }[] }
@@ -73,10 +72,8 @@ function useRoute(home: string): string {
 }
 
 export default function PlanningPage({ part = 'planning' }: { part?: PlanningPart }) {
-  // 화면 스타일 토글이 '공통'이면 업무 시스템 색으로 덮어쓰지 않고 common-frontend 원래 모양을 쓴다 (planning.css)
-  const ui = useUiStyle()
   return (
-    <div className="planning-scope" data-theme="light" data-ui={ui}>
+    <div className="planning-scope" data-theme="light">
       <ToastProvider>
         <Planning key={part} part={part} />
       </ToastProvider>

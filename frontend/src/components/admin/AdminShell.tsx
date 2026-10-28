@@ -5,7 +5,6 @@ import { AccountSwitcher } from "@/demo/AccountSwitcher";
 import { COMPANY, canOpen, homeOf, servicesOf, useSession } from "@/demo/session";
 import { activeChild, matchPath, useEnabledServices, type SubItem } from "@/demo/services";
 import { IconAgents, IconBell, IconDashboard, IconLayout, IconOffice, IconSearch } from "../icons";
-import { UiStyleToggle, useUiStyle } from "@/demo/uiStyle";
 import { DejaFixTools } from "@/demo/DejaFixTools";
 
 /** DejaFix 장애 대응 화면이면 그 상단바 도구를 바깥 상단바에 둔다 */
@@ -38,98 +37,18 @@ function useNav(): NavItem[] {
 
 const isOn = (path: string, item: NavItem) => item.match.some((m) => matchPath(m, path));
 
-function LogoMark() {
-  return (
-    <img src={`${import.meta.env.BASE_URL}logo.png`} width={34} height={34} alt="" aria-hidden="true" />
-  );
-}
-
-/** Agent console frame: left icon rail + underline tabs, filling the whole window. */
-export function AdminShell({ children }: { children: ReactNode }) {
-  const path = usePathname();
-  const { account } = useSession();
-  const nav = useNav();
-  const home = account ? homeOf(account) : "/";
-  const ui = useUiStyle();
-  const subNav = nav.find((n) => n.children && isOn(path, n));
-  const subOn = subNav ? activeChild(path, subNav.children!) : undefined;
-  if (ui === "common") return <CommonShell nav={nav} home={home}>{children}</CommonShell>;
-
-  return (
-    <div className="flex h-screen overflow-hidden bg-app text-ink-900">
-      <div className="flex min-w-0 flex-1 overflow-hidden bg-app">
-        <nav className="flex w-[76px] shrink-0 flex-col items-center gap-2 border-r border-ink-100 py-6" aria-label="주 메뉴">
-          <Link href={home} className="mb-6" aria-label="내 부서 홈"><LogoMark /></Link>
-          {nav.map((item) => {
-            const { href, label } = item;
-            const on = isOn(path, item);
-            return (
-              <Link key={href} href={href} title={label} aria-label={label} aria-current={on ? "page" : undefined}
-                className={`relative flex h-11 w-11 items-center justify-center rounded-xl transition ${on ? "text-brand-600" : "text-ink-500 hover:bg-ink-100 hover:text-ink-900"}`}>
-                {on && <span className="absolute -left-[16px] h-6 w-1 rounded-r bg-accent" />}
-                <NavIcon item={item} size={20} />
-              </Link>
-            );
-          })}
-          <div className="mt-auto flex flex-col items-center gap-3"><UiStyleToggle /></div>
-        </nav>
-
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-[72px] shrink-0 items-center gap-6 px-8">
-            <span className="mr-2 shrink-0 text-[15px] font-semibold tracking-tight">AXcellent <span className="font-normal text-ink-500">with</span> {COMPANY.name}</span>
-            <div className="flex min-w-0 flex-1 items-center gap-6 overflow-x-auto py-1 scroll-thin">
-            {nav.map((item) => {
-              const { href, label } = item;
-              const on = isOn(path, item);
-              return (
-                <Link key={href} href={href} aria-current={on ? "page" : undefined}
-                  className={`relative shrink-0 py-2 text-sm transition ${on ? "font-semibold text-ink-900" : "text-ink-500 hover:text-ink-900"}`}>
-                  {label}
-                  {on && <span className="absolute -bottom-0.5 left-0 right-0 h-0.5 rounded bg-ink-900" />}
-                </Link>
-              );
-            })}
-            </div>
-            <div className="flex shrink-0 items-center gap-4 text-ink-700">
-              {onDejaFix(path) && <DejaFixTools compact />}
-              {account && canOpen(account, "/console") && <Link href="/console" title="문의 찾기" aria-label="문의 찾기"><IconSearch size={20} /></Link>}
-              <IconBell size={20} />
-              <span className="chip hidden bg-emerald-50 text-emerald-700 2xl:inline-flex" title="사내망에서만 열리고 외부 접근은 막혀 있습니다">사내망 {COMPANY.network}</span>
-              <AccountSwitcher />
-            </div>
-          </header>
-          {subNav && (
-            <nav className="flex shrink-0 items-center gap-5 overflow-x-auto border-b border-ink-100 px-8 scroll-thin" aria-label={`${subNav.label} 메뉴`}>
-              {subNav.children!.map((c) => {
-                const on = c.href === subOn;
-                return (
-                  <Link key={c.href} href={c.href} aria-current={on ? "page" : undefined}
-                    className={`relative shrink-0 py-2.5 text-[13px] transition ${on ? "font-semibold text-brand-600" : "text-ink-500 hover:text-ink-900"}`}>
-                    {c.label}{c.soon && <span className="ml-1 text-[11px] text-ink-300">준비 중</span>}
-                    {on && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-brand-600" />}
-                  </Link>
-                );
-              })}
-            </nav>
-          )}
-          <main className="relative min-h-0 flex-1 overflow-y-auto">{children}</main>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- 화면 스타일 '공통'
-// DejaFix common-frontend AppShell 모양: 어두운 보라 사이드바(접기) + 흰 상단바.
+// 화면 틀: DejaFix common-frontend AppShell 모양. 어두운 보라 사이드바(접기) + 흰 상단바.
 // common-frontend CSS는 .btn·.card 같은 이름이 업무 화면과 겹쳐서, 틀만 같은 값으로 다시 그렸다 (vendor/common-frontend/src/styles/shell.css).
 const SIDE_KEY = "axcellent-demo-side";
 const readSide = () => {
   try { return localStorage.getItem(SIDE_KEY) === "collapsed"; } catch { return false; }
 };
 
-function CommonShell({ nav, home, children }: { nav: NavItem[]; home: string; children: ReactNode }) {
+export function AdminShell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const { account } = useSession();
+  const nav = useNav();
+  const home = account ? homeOf(account) : "/";
   const [collapsed, setCollapsed] = useState(readSide);
   const toggle = () => setCollapsed((v) => {
     try { localStorage.setItem(SIDE_KEY, v ? "open" : "collapsed"); } catch { /* 저장이 막혀도 화면은 동작한다 */ }
@@ -186,7 +105,6 @@ function CommonShell({ nav, home, children }: { nav: NavItem[]; home: string; ch
           <div className="flex shrink-0 items-center gap-4 text-ink-700">
             {account && canOpen(account, "/console") && <Link href="/console" title="문의 찾기" aria-label="문의 찾기"><IconSearch size={20} /></Link>}
             <IconBell size={20} />
-            <UiStyleToggle horizontal />
             <AccountSwitcher />
           </div>
         </header>

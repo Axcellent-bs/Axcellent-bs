@@ -41,7 +41,7 @@
 
 - 화면은 ax-frontend의 부서 화면을 그대로 다시 쓰고, 서비스 단위로 메뉴만 나눴어요. 서비스 목록은 `src/demo/services.ts`에 있어요.
 - 오른쪽 위 **프로필 전환** 드롭다운으로 예시 직원 계정을 바꿔 가며 볼 수 있어요. 주소 뒤에 `?as=support`처럼 붙이면 그 계정으로 바로 들어가요. 계정 id는 `admin`, `infra`, `dev`, `planning`, `support`, `marketing`, `finance`, `hr`, `data`예요.
-- 화면 스타일: 왼쪽 아래(공통 모드에서는 오른쪽 위) **현재/공통** 토글로 지금 업무 시스템 모양과 DejaFix common-frontend 모양(보라 사이드바)을 바꿔 봐요. 주소에 `?ui=common`을 붙여도 돼요.
+- 화면 모양은 DejaFix common-frontend(보라 사이드바, 인디고, 각진 모서리) 하나만 써요.
 
 ## 데이터는 어디서 오나
 

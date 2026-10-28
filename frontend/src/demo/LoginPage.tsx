@@ -25,7 +25,7 @@ export default function LoginPage() {
 
   return (
     <div className="grid min-h-screen bg-app text-ink-900 lg:grid-cols-[1.1fr_1fr]">
-      <section className="hidden flex-col justify-between bg-brand-600 p-12 text-white lg:flex">
+      <section className="hidden flex-col justify-between bg-[#1d1d3a] p-12 text-white lg:flex">
         <div>
           <h1><img src={`${import.meta.env.BASE_URL}axcellent-wordmark.png`} alt="AXcellent" className="h-10 w-auto" /></h1>
           <p className="mt-1 text-sm text-white/70">사내 설치형 AX 솔루션</p>

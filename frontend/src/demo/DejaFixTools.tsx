@@ -9,8 +9,7 @@ const press = (selector: string) => doc()?.querySelector<HTMLElement>(selector)?
 
 type View = { urgent: string; hot: boolean; tz: string; panel: boolean }
 
-/** compact: 상단 탭이 같은 줄에 있는 현재 UI에서는 급한 장애 글을 아주 넓은 화면에서만 보인다 */
-export function DejaFixTools({ compact = false }: { compact?: boolean }) {
+export function DejaFixTools() {
   const [v, setV] = useState<View | null>(null)
 
   useEffect(() => {
@@ -37,7 +36,7 @@ export function DejaFixTools({ compact = false }: { compact?: boolean }) {
     <div className="flex min-w-0 items-center gap-3">
       {v.urgent && (
         <button type="button" onClick={() => press('.topbar .urgentbar')} title={v.urgent}
-          className={`hidden min-w-0 max-w-[420px] items-center gap-1.5 truncate text-sm ${compact ? '2xl:flex' : 'xl:flex'} ${v.hot ? 'text-red-700' : 'text-ink-700'}`}>
+          className={`hidden min-w-0 max-w-[420px] items-center gap-1.5 truncate text-sm xl:flex ${v.hot ? 'text-red-700' : 'text-ink-700'}`}>
           <span className="truncate">{v.urgent}</span>
         </button>
       )}

@@ -1,10 +1,11 @@
 import type { Config } from 'tailwindcss'
 
-// catbooks에서 옮긴 설정. 색은 모두 styles.css의 CSS 변수를 읽어 라이트/다크를 변수 교체로 처리한다.
+// 색은 모두 styles.css의 CSS 변수(common-frontend 토큰 값)를 읽는다.
 const v = (name: string) => `rgb(var(--${name}) / <alpha-value>)`
 const scale = (name: string, shades: number[]) => Object.fromEntries(shades.map((s) => [s, v(`${name}-${s}`)]))
 
 const config: Config = {
+  // 몇몇 화면에 dark: 클래스가 남아 있다. 'class'로 두어 OS 다크 설정에 끌려가지 않게 한다(데모는 밝은 화면만)
   darkMode: 'class',
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
