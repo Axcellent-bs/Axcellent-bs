@@ -22,7 +22,6 @@ const HUMAN = ['.claude', '.github', 'CLAUDE.md'];
 const NEVER = [
   ['frontend', 'node_modules'],
   ['frontend', 'dist'],
-  ['frontend', 'public', 'dejafix'], // scripts/build-dejafix.mjs 가 만든다
 ];
 
 function main() {
