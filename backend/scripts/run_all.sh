@@ -89,12 +89,22 @@ else
     . <(tr -d '\r' < .env)
     set +a
   fi
+  # backend/.env 에 없으면 레포 맨 위 .env 에서 LLM 설정 4개만 읽는다 (DejaFix 형식 .env 를 같이 쓰는 경우).
+  # 다른 값(메일·Zabbix 등)은 서버에 넘기지 않고, 줄 끝 주석(공백 뒤 #)은 뗀다
+  if [ -f ../.env ]; then
+    for v in LLM_MODEL LLM_BASE_URL LLM_API_KEY EMBED_MODEL; do
+      [ -n "${!v:-}" ] && continue
+      val=$(tr -d '\r' < ../.env | sed -n "s/^$v=//p" | tail -n 1 | sed -E 's/^\xEF\xBB\xBF//; s/[[:space:]]+#.*$//; s/[[:space:]]+$//; s/^"(.*)"$/\1/')
+      [ -n "$val" ] && export "$v=$val"
+    done
+  fi
   # 실제 모드에서는 어떤 목 스위치도 남기지 않는다 (.env에 남아 있어도 끈다)
   for v in $(env | sed -n 's/^\([A-Z_]*_MOCK\)=.*/\1/p'); do unset "$v"; done
   unset ORCHESTRATOR_REAL_DEPTS
   for v in LLM_MODEL LLM_BASE_URL LLM_API_KEY; do
-    [ -n "${!v:-}" ] || echo "경고: backend/.env 에 $v 가 없습니다. LLM을 쓰는 skill은 규칙 기반 대체 답을 냅니다." >&2
+    [ -n "${!v:-}" ] || echo "경고: backend/.env 와 레포 맨 위 .env 에 $v 가 없습니다. LLM을 쓰는 skill은 규칙 기반 대체 답을 냅니다." >&2
   done
+  [ -n "${EMBED_MODEL:-}" ] || echo "경고: EMBED_MODEL 이 없습니다. 회사 기억(memory) 검색이 실패합니다 (예: gemini-embedding-001)." >&2
 
   # 이벤트 버스 (Redis Streams)
   if [ -z "${REDIS_URL:-}" ]; then
