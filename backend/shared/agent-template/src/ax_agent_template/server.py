@@ -215,6 +215,18 @@ def _verified_requester(meta: RequestMeta) -> str | None:
         return None
 
 
+def _hide_token(result: AgentResult) -> AgentResult:
+    """결과 `meta.token`을 비운다.
+
+    핸들러가 요청 meta를 그대로 돌려줘도 토큰이 응답에 남지 않게 한다.
+
+    계약의 `RequestMeta.token`은 필수 필드라 지우지 않고 빈 문자열로 가린다.
+    """
+    if not result.meta.token:
+        return result
+    return result.model_copy(update={"meta": result.meta.model_copy(update={"token": ""})})
+
+
 def _execution_id(result: AgentResult) -> str | None:
     value = result.output.get("execution_id")
     return value if isinstance(value, str) and len(value) <= 64 else None
@@ -244,7 +256,7 @@ async def _handle(
         grade=grade,
         requester=requester,
     )
-    result = await _process(card, handlers, request)
+    result = _hide_token(await _process(card, handlers, request))
     sent: dict[str, Any] = {
         "skill": request.skill,
         "status": result.status.value,

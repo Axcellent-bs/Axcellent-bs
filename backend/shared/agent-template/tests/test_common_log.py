@@ -216,3 +216,13 @@ async def test_publish_skips_events_without_context_id(store) -> None:
     events.reset_mock_bus()
     await events.publish(_published("evt_2", context_id=None))
     assert _all(store) == []
+
+
+def test_log_records_never_contain_request_token(store, app, request_body) -> None:
+    client = TestClient(app)
+    client.post("/a2a", json=request_body(token="mock:orchestrator"))  # 정상
+    client.post("/a2a", json=request_body("boom", token="mock:orchestrator"))  # 핸들러 오류
+    client.post("/a2a", json=request_body(token="plain-secret-token"))  # 토큰 거부
+    dumped = json.dumps([r.model_dump(mode="json") for r in _all(store)], ensure_ascii=False)
+    assert len(_all(store)) == 6
+    assert "mock:orchestrator" not in dumped and "plain-secret-token" not in dumped
