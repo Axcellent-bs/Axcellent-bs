@@ -11,11 +11,11 @@
 //   - 사람은 사후 감사 화면에서 AI가 스스로 승인한 건을 보고, 기준을 바로 끌 수 있다.
 
 export type Dept =
-  | 'planning' | 'hr' | 'support' | 'marketing' | 'data' | 'finance'
+  | 'planning' | 'dev' | 'hr' | 'support' | 'marketing' | 'data' | 'finance'
   | 'infra' | 'orchestrator' | 'safety' | 'shop' | 'memory' | 'human'
 
 export const DEPT_NAME: Record<Dept, string> = {
-  planning: '기획개발', hr: '인사', support: '고객지원', marketing: '마케팅', data: '데이터분석',
+  planning: '요청·기획서', dev: '개발·배포', hr: '인사', support: '고객지원', marketing: '마케팅', data: '데이터분석',
   finance: '재무/정산', infra: '인프라(DejaFix)', orchestrator: '통합 에이전트', safety: '안전 레이어',
   shop: '판매 사이트', memory: '회사 기억', human: '사람',
 }
