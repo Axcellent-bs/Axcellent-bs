@@ -31,6 +31,7 @@ from ax_contracts.schemas.event import (
     CouponIssuedData,
     EventEnvelope,
     EventType,
+    HandoffCompletedData,
     IncidentData,
     InfraAnomalyData,
     MetricAnomalyData,
@@ -55,6 +56,16 @@ from ax_contracts.schemas.event import (
     SupportInquiryResolvedData,
 )
 from ax_contracts.schemas.execute import ExecuteDecision, ExecuteRequest, HoldReason
+from ax_contracts.schemas.handoff import (
+    HANDED_TO_HUMAN,
+    INBOX_UNREACHABLE,
+    NO_ASSIGNEE,
+    HandedToHumanOutput,
+    HandoffCompleteBody,
+    HandoffCreate,
+    HandoffStatus,
+    HandoffTask,
+)
 from ax_contracts.schemas.finance import (
     ReviewHoldDecision,
     ReviewHoldInput,
@@ -174,6 +185,9 @@ from ax_contracts.schemas.review import ActionReviewInput, ActionReviewOutput
 
 __all__ = [
     "EVENT_DATA_MODELS",
+    "HANDED_TO_HUMAN",
+    "INBOX_UNREACHABLE",
+    "NO_ASSIGNEE",
     "TENANT_ID_DEFAULT",
     "ActionReviewInput",
     "ActionReviewOutput",
@@ -209,6 +223,12 @@ __all__ = [
     "ContextPrefix",
     "CouponIssuedData",
     "Escalation",
+    "HandedToHumanOutput",
+    "HandoffCompleteBody",
+    "HandoffCompletedData",
+    "HandoffCreate",
+    "HandoffStatus",
+    "HandoffTask",
     "FindActiveIncidentInput",
     "FindActiveIncidentOutput",
     "ErrorCode",

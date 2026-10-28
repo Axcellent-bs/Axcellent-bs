@@ -103,6 +103,9 @@ class AgentResult(AxModel):
     - 정책 거절: `auto_rejected` (status는 `completed`)
     - 재무 교차검증 거절: `rejected_by_review` (status는 `completed`)
     - 중복 연결: `linked_duplicate`
+    - 받는 서비스가 꺼져 있어 사람 할 일함으로 넘김: `handed_to_human` (status는 `input-required`,
+      `reason_code`는 `dept_input`, output에 `task_id`. `schemas/handoff.py`)
+    - 받는 서비스가 꺼져 있고 조직도에도 맡은 부서가 없음: `no_assignee` (status는 `failed`)
     - 요청 거부(`rejected`): `ErrorCode` 값
     - 마감 초과는 `canceled`(outcome `TIMEOUT`), 실행 오류는 `failed`
 

@@ -90,14 +90,34 @@ def is_mock(name: str | None = None) -> bool:
     return any(os.getenv(f"{env_prefix(n)}_MOCK") == "1" for n in {name, department_of(name)})
 
 
+TOKENS_ENV = "AX_AGENT_TOKENS"
+
+
+def token_registry() -> dict[str, str]:
+    """실제 모드 에이전트 토큰 명부 `AX_AGENT_TOKENS="이름=토큰,이름=토큰"` → {이름: 토큰}.
+
+    모든 에이전트가 같은 명부를 받아 서로의 토큰을 검증한다. 로컬 실행(`scripts/run_all.sh`)은
+    켤 때마다 새 토큰을 만들어 넘기므로 비밀값이 파일에 남지 않는다.
+    """
+    pairs: dict[str, str] = {}
+    for item in os.getenv(TOKENS_ENV, "").split(","):
+        name, sep, token = item.strip().partition("=")
+        if sep and name and token:
+            pairs[name.strip()] = token.strip()
+    return pairs
+
+
 def agent_token(name: str) -> str:
-    """이 에이전트가 요청에 붙이는 토큰. 목 모드에서는 `mock:<이름>`이다."""
+    """이 에이전트가 요청에 붙이는 토큰. `<이름>_TOKEN` → 토큰 명부 → 목 모드 `mock:<이름>` 순서."""
     token = os.getenv(f"{env_prefix(name)}_TOKEN")
     if token:
         return token
+    registered = token_registry().get(name)
+    if registered:
+        return registered
     if is_mock(name):
         return f"mock:{name}"
-    raise RuntimeError(f"{env_prefix(name)}_TOKEN이 설정되지 않았다")
+    raise RuntimeError(f"{env_prefix(name)}_TOKEN이 설정되지 않았다 ({TOKENS_ENV}에도 없음)")
 
 
 def agent_url(target: str) -> str:

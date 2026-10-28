@@ -141,11 +141,12 @@ class Gate:
         )
 
         spec = self.registry.get(request.action)
-        # 서비스 에이전트(예: dev)는 원래 부서(planning) 이름으로도 인정한다 (services.py)
-        allowed = spec.allowed_requesters if spec else []
-        if spec is None or (
-            request.requester not in allowed and department_of(request.requester) not in allowed
-        ):
+        # 서비스로 나뉜 에이전트(coupon 등)는 원래 부서 이름(marketing)으로 신고된 액션도 쓸 수 있다
+        allowed = spec is not None and (
+            request.requester in spec.allowed_requesters
+            or department_of(request.requester) in spec.allowed_requesters
+        )
+        if not allowed:
             report = {"reason": "미등록 액션이거나 요청자가 이 액션을 신고하지 않았다"}
             return await self._hold(request, execution_id, HoldReason.UNREGISTERED_ACTION, report)
 

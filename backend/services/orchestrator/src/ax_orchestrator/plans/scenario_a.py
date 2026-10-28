@@ -22,8 +22,14 @@ COMPENSATION_BATCH = 50
 
 
 def _window(inc: Incident) -> dict[str, Any]:
+    """영향 분석 구간. 신호가 장애 시작 시각(since)을 주면 그때부터 센다.
+
+    없으면 예전처럼 사건이 열린 시각 앞 15분부터. 앞 장애(이미 지난 다른 사건)의 실패 주문이
+    섞이지 않게 하려는 것이다.
+    """
+    start = inc.since if inc.since is not None else inc.opened_at - timedelta(minutes=15)
     return {
-        "window_from": iso(inc.opened_at - timedelta(minutes=15)),
+        "window_from": iso(start),
         "window_to": iso(inc.opened_at + timedelta(minutes=15)),
     }
 

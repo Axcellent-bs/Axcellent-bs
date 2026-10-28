@@ -5,6 +5,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from ax_dashboard_api import handoffs
 from ax_dashboard_api.envelope import install_error_handlers
 from ax_dashboard_api.routes import router
 
@@ -23,6 +24,9 @@ app.add_middleware(
 )
 install_error_handlers(app)
 app.include_router(router)
+# 사람 할 일함: 에이전트가 넣는 창구(에이전트 토큰)와 사람이 보는 창구(쓰기는 사람 토큰)
+app.include_router(handoffs.intake)
+app.include_router(handoffs.inbox)
 
 
 @app.get("/health")

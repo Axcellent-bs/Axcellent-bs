@@ -16,6 +16,17 @@ from ax_contracts.schemas import EventEnvelope, EventType
 from ax_orchestrator.engine import Engine
 from ax_orchestrator.models import Incident, Plan, iso
 
+
+def _since(env: EventEnvelope) -> datetime | None:
+    """신호의 장애 시작 시각(data.since). 없거나 형식이 다르면 None."""
+    raw = env.data.get("since")
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
 LOOKBACK = timedelta(minutes=15)  # 사건이 열리기 직전 실패 주문·문의도 같은 사건으로 본다
 INCIDENT_EVENTS = {EventType.SHOP_DEGRADED, EventType.INFRA_ANOMALY_DETECTED}
 SEVERITY_OPENS = {"high", "critical"}
@@ -110,6 +121,7 @@ class IncidentManager:
             title=self._title(env, component),
             component=component,
             opened_at=env.occurred_at,
+            since=_since(env),
         )
         inc.log(f"이벤트 수신: {env.type.value} ({env.source}, {iso(env.occurred_at)})")
         self.incidents[inc.context_id] = inc

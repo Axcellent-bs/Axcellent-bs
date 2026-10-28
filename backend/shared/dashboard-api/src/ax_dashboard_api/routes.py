@@ -40,6 +40,7 @@ from ax_dashboard_api import (
 )
 from ax_dashboard_api.auth import require_human_for_writes
 from ax_dashboard_api.envelope import ApiError, is_mock, ok, require_mock
+from ax_dashboard_api import live_views
 from ax_dashboard_api.schemas import (
     AgentMessageBody,
     CandidateDecisionBody,
@@ -62,39 +63,46 @@ from ax_dashboard_api.schemas import (
 HR_LIST_LIMIT = 200  # hr 조회 skill의 최대 건수
 
 router = APIRouter(prefix="/api/dashboard", dependencies=[Depends(require_human_for_writes)])
-# 목 데이터만 있는 경로 (클레임·보상 큐·후기·집계 등). 실제 연결은 이후 단계에서 바꾼다
-mock_only = APIRouter(dependencies=[Depends(require_mock)])
+# 목 모드는 메모리 데이터, 실제 모드는 shop-api·support에서 읽는다 (`live_views.py`).
+# 지식 조각·후기는 아직 실제 출처가 없어 실제 모드에서는 빈 목록이다 (지어내지 않는다).
+mock_only = APIRouter()
 
 
 @mock_only.get("/health")
 def health() -> dict:
-    return ok(mock_data.health())
+    return ok(mock_data.health() if is_mock() else live_views.health())
 
 
 @mock_only.get("/users")
-def users() -> dict:
-    return ok(mock_data.USERS, total=len(mock_data.USERS))
+async def users() -> dict:
+    items = mock_data.USERS if is_mock() else await live_views.users()
+    return ok(items, total=len(items))
 
 
 @mock_only.get("/metrics")
-def metrics(days: int = Query(14, ge=1, le=90)) -> dict:
-    return ok(mock_data.dashboard(days))
+async def metrics(days: int = Query(14, ge=1, le=90)) -> dict:
+    return ok(mock_data.dashboard(days) if is_mock() else await live_views.metrics(days))
 
 
 @mock_only.get("/kb-chunks")
 def kb_chunks() -> dict:
-    return ok(mock_data.KB_CHUNKS, total=len(mock_data.KB_CHUNKS))
+    items = mock_data.KB_CHUNKS if is_mock() else []
+    return ok(items, total=len(items))
 
 
 @mock_only.get("/orders")
-def orders(user_id: int) -> dict:
-    items = mock_data.ORDERS_BY_USER.get(user_id, [])
+async def orders(user_id: int) -> dict:
+    if is_mock():
+        items = mock_data.ORDERS_BY_USER.get(user_id, [])
+    else:
+        items = await live_views.orders(user_id)
     return ok(items, total=len(items))
 
 
 @mock_only.get("/reviews")
 def reviews() -> dict:
-    return ok(mock_data.REVIEWS, total=len(mock_data.REVIEWS))
+    items = mock_data.REVIEWS if is_mock() else []
+    return ok(items, total=len(items))
 
 
 # ---------------------------------------- 클레임·보상 큐·KPI (목 모드 또는 support A2A)
@@ -328,7 +336,7 @@ async def conversation_status(conversation_id: int, body: StatusBody) -> dict:
 # ---------------------------------------------------------------- 쓰기 (목 모드)
 # 승인·지급 계열(claims approve·reject·receive·inspection, queue-entries/process)은
 # 실제 연결 때 support `execute()` 관문으로 넘긴다. 지금은 목 데이터만 바꾼다.
-@mock_only.post("/reviews/{review_id}/status")
+@mock_only.post("/reviews/{review_id}/status", dependencies=[Depends(require_mock)])
 def review_status(review_id: int, body: ReviewStatusBody) -> dict:
     return ok(mock_actions.set_review_status(review_id, body.status))
 

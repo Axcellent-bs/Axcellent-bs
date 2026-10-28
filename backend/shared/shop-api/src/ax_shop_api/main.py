@@ -22,6 +22,7 @@ from pydantic import AwareDatetime, BaseModel, Field
 
 from ax_agent_template.config import set_agent_name
 from ax_agent_template.server import verify_token
+from ax_agent_template.services import department_of
 from ax_contracts.data_access.shop_failed_orders import ShopFailedOrdersQuery
 from ax_contracts.data_access.shop_metric_series import ShopMetricSeriesQuery
 from ax_shop_api import inquiries, orchestrator_relay, outbox, retention, support_client
@@ -188,7 +189,8 @@ def _caller(allowed: set[str]) -> Callable[..., str]:
             requester = verify_token(token.strip())  # 요청자는 토큰에서 꺼낸다
         except PermissionError as error:
             raise ShopError("UNAUTHORIZED", "토큰을 검증할 수 없다", 401) from error
-        if requester not in allowed:
+        # 서비스로 나뉜 에이전트(claims 등)는 원래 부서 이름(support)으로도 인정한다
+        if requester not in allowed and department_of(requester) not in allowed:
             raise ShopError("FORBIDDEN", "이 API를 호출할 수 없는 요청자다", 403)
         return requester
 

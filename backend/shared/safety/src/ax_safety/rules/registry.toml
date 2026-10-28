@@ -265,6 +265,12 @@ action = "send_message"
 owner = "planning"
 base_grade = "A"
 
+# 사건을 PR·기획서에 연결 (SCN-A 대응 단계). 기획개발 기록만 바꾸고 돈·배포에 닿지 않아 A (Agent Card grade A)
+[[actions]]
+action = "link_incident"
+owner = "planning"
+base_grade = "A"
+
 # 기획서 확정은 A. 열린 질문·기각 경고·근거 없음·되돌릴 수 없는 영역이면 C (thresholds.toml)
 [[actions]]
 action = "confirm_spec"
