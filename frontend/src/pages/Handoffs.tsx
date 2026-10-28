@@ -10,7 +10,7 @@ import {
 } from "@/lib/handoffs";
 import { skillLabel } from "@/lib/labels";
 
-// 할 일함: 회사가 켜지 않은 서비스로 가던 일을 에이전트가 사람에게 넘긴 것 (dashboard-api GET /api/dashboard/handoffs).
+// 받은 요청(코드·API 이름은 할 일함·handoff): 회사가 켜지 않은 서비스로 가던 일을 에이전트가 사람에게 넘긴 것 (dashboard-api GET /api/dashboard/handoffs).
 // 사람은 결과를 적고 끝내거나 반려한다 (POST /api/dashboard/handoffs/{id}/complete, 사람 토큰).
 // 부서·담당자 이름은 조직도(backend/config/org.yaml)에서 온 API 값을 그대로 보여 준다. 화면에 회사·부서 이름을 쓰지 않는다.
 const REFRESH_MS = 30_000;
@@ -183,8 +183,9 @@ export default function Handoffs() {
     <div className="space-y-6 px-8 py-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">할 일함</h1>
-          <p className="mt-1 text-sm text-ink-500">AI가 회사가 켜지 않은 서비스로 보내려던 일을 맡은 부서에 넘긴 목록이에요. 결과를 적고 끝내면 맡긴 AI에게 전해져요.</p>
+          <h1 className="text-2xl font-semibold">받은 요청</h1>
+          <p className="mt-1 text-sm text-ink-700">회사가 켜지 않은 서비스의 일을 AI가 우리 부서에 맡겼어요</p>
+          <p className="mt-0.5 text-sm text-ink-500">결과를 적고 끝내면 맡긴 AI에게 전해져요.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <select className="field w-auto py-1.5 text-xs" aria-label="상태" value={status} onChange={(e) => setParams(() => {

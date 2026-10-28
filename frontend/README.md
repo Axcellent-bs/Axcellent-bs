@@ -145,9 +145,9 @@ npm run build:pages  # GitHub Pages용 빌드 (dist/, 404.html 포함)
 5. **화면 확인 경로**: 실서버로 직접 열어 본 주소를 PR 본문에 적어요
    - 예: http://localhost:3090/data, http://localhost:3090/data#daily, 사건 지정은 `/data?incident=<context_id>`
 
-## 할 일함 확인 방법
+## 받은 요청 확인 방법
 
-할 일함(`/handoffs`)은 회사가 켜지 않은 서비스로 가던 일을 AI가 맡은 부서(사람)에게 넘긴 목록이에요. 어느 서비스를 샀든 보이는 기본 메뉴이고, 열린 일이 있으면 메뉴에 개수가 붙어요 (30초마다 다시 셈). 백엔드 흐름은 `backend/README.md` "업무 요청 라우터"에 있어요. 위 체크리스트 순서로 적었어요.
+받은 요청(`/handoffs`, 코드·API 이름은 할 일함·handoff)은 회사가 켜지 않은 서비스로 가던 일을 AI가 맡은 부서(사람)에게 넘긴 목록이에요. 어느 서비스를 샀든 보이는 기본 메뉴이고, 열린 일이 있으면 메뉴에 개수가 붙어요 (30초마다 다시 셈). 백엔드 흐름은 `backend/README.md` "업무 요청 라우터"에 있어요. 위 체크리스트 순서로 적었어요.
 
 1. **화면이 부르는 주소 표**: 녹화본이 없어요. 데모 모드(`VITE_MOCK` 기본값)에서도 이 주소는 가로채지 않고 실제 dashboard-api를 불러요 (`src/mock/install.ts`)
 
