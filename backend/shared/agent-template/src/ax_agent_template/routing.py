@@ -11,6 +11,8 @@
   업무(skill 또는 서비스 id) → 맡은 부서·담당자. skill을 먼저 찾고 없으면 서비스 id로 찾는다.
   부서 이름은 이 파일에만 있고 코드에는 쓰지 않는다.
   파일이 없거나 업무가 없으면 `None`(지어내지 않음).
+- 목록·조회: 받는 서비스 카드에서 `grade: read` + `handoff: false`인 skill은 사람에게 넘기지 않는다
+  (`is_lookup`). `call_agent`는 `rejected` + `service_disabled`로 답한다.
 
 ```yaml
 assignments:
@@ -21,6 +23,7 @@ assignments:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -33,6 +36,9 @@ from ax_agent_template.services import BY_ID
 
 ENABLED_ENV = "AX_ENABLED_SERVICES"
 ORG_ENV = "AX_ORG_CONFIG"
+CARDS_ENV = "AX_SERVICE_CARDS_DIR"
+# 서비스 카드 폴더 (`backend/services/<id>/agent-card.json`). 이 파일 기준 backend/ 아래
+_DEFAULT_CARDS = Path(__file__).resolve().parents[4] / "services"
 
 logger = logging.getLogger("ax.routing")
 
@@ -111,7 +117,48 @@ def assignment_for(service_id: str, skill: str) -> Assignment | None:
     return org.get(skill) or org.get(service_id)
 
 
+# 서비스 카드의 skill 표: 서비스 id → {skill id → skill 정보}. 파일 내용이 바뀌면 다시 읽는다
+_cards: dict[str, tuple[float, dict[str, dict[str, Any]]]] = {}
+
+
+def _card_skills(service_id: str) -> dict[str, dict[str, Any]] | None:
+    """받는 서비스의 Agent Card에서 skill 표를 읽는다. 카드를 못 읽으면 None.
+
+    꺼진 서비스는 떠 있지 않을 수 있어서 HTTP가 아니라 카드 파일(`AX_SERVICE_CARDS_DIR`,
+    기본 `backend/services`)을 읽는다.
+    """
+    base = Path(os.getenv(CARDS_ENV) or _DEFAULT_CARDS)
+    path = base / service_id / "agent-card.json"
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return None
+    cached = _cards.get(service_id)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    try:
+        card = json.loads(path.read_text(encoding="utf-8"))
+        skills = {s["id"]: s for s in card.get("skills", []) if isinstance(s, dict) and "id" in s}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        logger.error("서비스 카드를 읽지 못했다: %s (%s)", path, error)
+        return None
+    _cards[service_id] = (mtime, skills)
+    return skills
+
+
+def is_lookup(service_id: str, skill: str) -> bool:
+    """꺼진 서비스로 가도 사람에게 넘기지 않을 목록·조회 skill인지.
+
+    카드에서 `grade`가 `read`이고 `handoff`가 `false`일 때만 True. 카드를 못 읽거나 skill이 없으면
+    False(지금처럼 넘긴다). `read`여도 공지 초안·영향 분석처럼 사람이 대신할 수 있는 일은 넘긴다.
+    """
+    skills = _card_skills(service_id)
+    entry = (skills or {}).get(skill)
+    return bool(entry) and entry.get("grade") == "read" and entry.get("handoff") is False
+
+
 def reset_cache() -> None:
     """테스트 초기화용."""
     global _cache
     _cache = None
+    _cards.clear()

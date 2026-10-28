@@ -15,9 +15,12 @@
       "input_schema": "shared/contracts/src/ax_contracts/schemas/escalation.py#FindActiveIncidentInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/escalation.py#FindActiveIncidentOutput",
       "grade": "read",
-      "allowed_requesters": ["support"],
+      "allowed_requesters": [
+        "support"
+      ],
       "verifier": null,
-      "priority": "required"
+      "priority": "required",
+      "handoff": false
     }
   ]
 }

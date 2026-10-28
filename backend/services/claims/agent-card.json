@@ -33,7 +33,8 @@
         "orchestrator"
       ],
       "verifier": null,
-      "priority": "recommended"
+      "priority": "recommended",
+      "handoff": false
     },
     {
       "id": "get_claim",
@@ -46,7 +47,8 @@
         "orchestrator"
       ],
       "verifier": null,
-      "priority": "recommended"
+      "priority": "recommended",
+      "handoff": false
     },
     {
       "id": "claim_stats",
@@ -59,7 +61,8 @@
         "orchestrator"
       ],
       "verifier": null,
-      "priority": "recommended"
+      "priority": "recommended",
+      "handoff": false
     },
     {
       "id": "claim_queue",
@@ -72,7 +75,8 @@
         "orchestrator"
       ],
       "verifier": null,
-      "priority": "recommended"
+      "priority": "recommended",
+      "handoff": false
     },
     {
       "id": "create_claim",

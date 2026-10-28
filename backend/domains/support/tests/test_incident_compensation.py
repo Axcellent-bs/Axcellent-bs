@@ -367,3 +367,101 @@ def test_a_buyer_marketing_linked_to_an_earlier_coupon_is_not_counted_as_issued(
     from support_agent import incident_handlers
 
     assert incident_handlers.issued_in_incident(CTX) == (1, 2000)  # 새로 지급한 한 명뿐
+
+
+# ---------------------------------------------------------------- 쿠폰 서비스가 꺼진 고객사 (업무 요청 라우터)
+SEVEN = [f"buy_00{n:02d}" for n in range(1, 8)]
+
+
+def handed(task_id: str = "hof_comp1") -> AgentResult:
+    """라우터(call_agent)가 꺼진 서비스 요청에 돌려주는 결과와 같은 모양."""
+    return reply(
+        TaskStatus.INPUT_REQUIRED,
+        {"task_id": task_id, "to_service": "coupon", "assignee_unit": "마케팅", "assignee": None},
+        outcome="handed_to_human",
+        reason_code="dept_input",
+    )
+
+
+def test_with_coupon_off_seven_buyers_become_one_waiting_request(sent: Sent, monkeypatch) -> None:
+    monkeypatch.setenv("AX_ENABLED_SERVICES", "inquiry,claims,reviews")  # coupon 없음
+    sent.replies.append(handed())
+    result = call(SEVEN)
+
+    assert len(sent) == 1  # 고객마다가 아니라 사건 하나에 한 건
+    [req] = sent
+    assert req.skill == "issue_coupon"
+    assert req.meta.idempotency_key == f"{CTX}:request_incident_compensation:payment_failure"
+    unit = compensation.decide("payment_failure", 1).total_value
+    assert req.input == {
+        "purpose_code": "compensation",
+        "batch": True,
+        "reason_code": "payment_failure",
+        "unit_value": unit,
+        "count": 1,
+        "buyer_ids": SEVEN,
+        "buyer_count": 7,
+        "total_value": 7 * unit,
+        "limit_reached": False,
+    }
+    # 지급 전이라 완료가 아니라 담당 부서 처리 대기
+    assert (result["status"], result["outcome"], result["reason_code"]) == (
+        "input-required",
+        "handed_to_human",
+        "dept_input",
+    )
+    assert result["output"]["task_id"] == "hof_comp1"
+    assert result["output"]["buyer_count"] == 7
+
+
+def test_with_coupon_off_the_batch_respects_the_incident_limits(sent: Sent, monkeypatch) -> None:
+    monkeypatch.setenv("AX_ENABLED_SERVICES", "inquiry,claims")
+    monkeypatch.setattr(compensation, "MAX_INCIDENT_BUYERS", 3)
+    sent.replies.append(handed())
+    result = call(SEVEN)
+    [req] = sent
+    assert req.input["buyer_ids"] == SEVEN[:3]
+    assert req.input["limit_reached"] is True
+    assert result["output"]["limit_reached"] is True
+
+
+def test_with_coupon_off_and_no_department_the_compensation_fails(sent: Sent, monkeypatch) -> None:
+    monkeypatch.setenv("AX_ENABLED_SERVICES", "inquiry,claims")
+    sent.replies.append(reply(TaskStatus.FAILED, {"to_service": "coupon"}, outcome="no_assignee"))
+    result = call(SEVEN)
+    assert (result["status"], result["outcome"]) == ("failed", "no_assignee")
+    assert result["output"]["buyer_count"] == 7
+    assert len(sent) == 1
+
+
+def test_with_coupon_on_buyers_are_still_sent_one_by_one(sent: Sent, monkeypatch) -> None:
+    monkeypatch.delenv("AX_ENABLED_SERVICES", raising=False)
+    result = call(SEVEN)
+    assert len(sent) == 7
+    assert result["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_a_single_coupon_handed_to_a_human_is_waiting_not_completed(sent: Sent) -> None:
+    """문의 경로(request_compensation)도 넘김을 받으면 완료로 두지 않고 번호도 쓰지 않는다."""
+    sent.replies.append(handed("hof_one"))
+    request = AgentRequest.model_validate(
+        {
+            "meta": {
+                "context_id": CTX,
+                "token": "t",
+                "deadline": (datetime.now(UTC) + timedelta(seconds=30)).isoformat(),
+            },
+            "skill": "request_compensation",
+        }
+    )
+    decision = compensation.decide("payment_failure", 1)
+    key = f"{CTX}:request_compensation:buy_0001:payment_failure"
+    from ax_contracts.schemas import Evidence
+
+    result = await handlers._request_coupon(request, "buy_0001", decision, key, Evidence())
+    assert (result.status, result.outcome) == ("input-required", "handed_to_human")
+    assert result.output["task_id"] == "hof_one"
+    assert result.output["buyer_id"] == "buy_0001"
+    assert handlers.LEDGER.peek(CTX) == 1  # 번호를 쓰지 않았다
+    assert key not in handlers.LEDGER.results  # 지급 기록으로 남기지 않는다

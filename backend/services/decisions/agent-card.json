@@ -52,7 +52,8 @@
         "orchestrator"
       ],
       "verifier": null,
-      "priority": "recommended"
+      "priority": "recommended",
+      "handoff": false
     },
     {
       "id": "list_cards",
@@ -65,7 +66,8 @@
         "orchestrator"
       ],
       "verifier": null,
-      "priority": "recommended"
+      "priority": "recommended",
+      "handoff": false
     },
     {
       "id": "get_audit_timeline",
@@ -78,7 +80,8 @@
         "orchestrator"
       ],
       "verifier": null,
-      "priority": "recommended"
+      "priority": "recommended",
+      "handoff": false
     },
     {
       "id": "decide_candidate_card",

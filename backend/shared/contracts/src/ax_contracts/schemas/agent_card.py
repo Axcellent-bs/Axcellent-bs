@@ -29,6 +29,9 @@ class Skill(AxModel):
     - `grade`: `read`는 상태 변경 없음. 그 밖의 등급은 실행할 때 반드시 `execute()`를 거친다.
     - `verifier`: B 등급의 교차검증 주체. B면 필수이고 요청 부서와 같으면 안 된다.
     - `input_schema`·`output_schema`: 스키마 파일 경로 문자열.
+    - `handoff`: 이 skill을 가진 서비스가 꺼져 있을 때 사람 할 일함으로 넘길지(업무 요청 라우터).
+      `false`는 목록·조회처럼 사람이 대신할 일이 아닌 `read` skill에만 단다. 비우면 넘긴다.
+      `read`이면서 `false`면 라우터가 넘기지 않고 `rejected` + `service_disabled`로 답한다.
     """
 
     id: str = Field(pattern=SNAKE_CASE)
@@ -39,6 +42,7 @@ class Skill(AxModel):
     allowed_requesters: list[str]
     verifier: str | None = None
     priority: Priority
+    handoff: bool | None = None
 
     @model_validator(mode="after")
     def _b_grade_needs_verifier(self) -> Skill:
