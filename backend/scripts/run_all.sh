@@ -81,8 +81,8 @@ export AX_SUPPORT_URL=http://127.0.0.1:8102 AX_HR_URL=http://127.0.0.1:8104
 export AX_MARKETING_URL=http://127.0.0.1:8103 AX_INFRA_URL=http://127.0.0.1:8107
 # 이름이 다른 주소 변수 (shop-api의 총괄 중계, hr의 회사 기억)
 export SHOP_ORCHESTRATOR_URL=http://127.0.0.1:8000 HR_MEMORY_URL=http://127.0.0.1:8002
-# 화면(AXcellent 프론트 3090)에서 직접 부르는 서버의 CORS
-WEB="http://localhost:3090,http://127.0.0.1:3090,http://localhost:3001"
+# 화면(AXcellent 3090, 캣북스 쇼핑몰 3000)에서 직접 부르는 서버의 CORS
+WEB="http://localhost:3090,http://127.0.0.1:3090,http://localhost:3001,http://localhost:3000"
 export DASHBOARD_CORS_ORIGINS="$WEB" FINANCE_CORS_ORIGINS="$WEB" SHOP_CORS_ORIGINS="$WEB"
 export SAFETY_CORS_ORIGINS="$WEB" PLANNING_CORS_ORIGINS="$WEB"
 # A2A 주고받은 기록(AI 대화방이 읽는다)

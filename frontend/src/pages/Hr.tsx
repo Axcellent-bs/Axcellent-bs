@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Loading } from "@/components/admin/bits";
-import { HUMAN_TOKEN_SET } from "@/lib/env";
+import IncidentRecords from "@/components/hr/IncidentRecords";
+import { HUMAN_TOKEN_SET, MOCK } from "@/lib/env";
 import { ago, shortDateTime } from "@/lib/format";
 import {
   hr,
@@ -28,6 +29,7 @@ const VERDICT: Record<string, { label: string; tone: string }> = {
   block: { label: "진행 전 확인 필요", tone: "bg-red-50 text-red-700" },
 };
 const DEMO_DRAFT: PlanDraft = { title: "결제 서버 캐시 도입", summary: "결제 응답 속도를 위해 서버 캐시를 도입한다", area: "payment", kind: "spec" };
+const EMPTY_DRAFT: PlanDraft = { title: "", summary: "", area: "", kind: "spec" };
 const INPUT = "w-full rounded-xl border border-ink-100 bg-app px-3 py-2 text-sm";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : "요청에 실패했습니다");
@@ -171,8 +173,10 @@ export default function HrPage({ part = "hr" }: { part?: HrPart }) {
 
       {part === "ops" && <>
       {/* ④ 기록 도구 */}
+      {/* 실제 모드: 인사 AI가 실제로 남긴 사건 기록과 고른 사건의 처리 내역. 녹화본 데모에는 사건 목록이 없어 번호 입력으로 본다 */}
+      {!MOCK && <IncidentRecords />}
       <Section title="계획 비교" desc="새 계획이 과거에 기각된 안과 겹치는지 확인합니다. 저장하지 않고 보기만 합니다."><PlanChecker /></Section>
-      <Section title="AI가 한 일" desc="사건 번호로 AI의 처리 내역을 시간순으로 봅니다."><Activity /></Section>
+      {MOCK && <Section title="AI가 한 일" desc="사건 번호로 AI의 처리 내역을 시간순으로 봅니다."><Activity /></Section>}
       </>}
     </div>
   );
@@ -289,7 +293,8 @@ function RosterGrid({ roster }: { roster: Roster }) {
 
 // ---------------------------------------------------------------- 계획 비교·감사 기록
 function PlanChecker() {
-  const [draft, setDraft] = useState<PlanDraft>(DEMO_DRAFT);
+  // 예시 입력은 녹화본 데모에서만 채운다. 실제 모드는 빈 칸에서 시작한다
+  const [draft, setDraft] = useState<PlanDraft>(MOCK ? DEMO_DRAFT : EMPTY_DRAFT);
   const [result, setResult] = useState<PlanCheck | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
