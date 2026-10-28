@@ -2385,10 +2385,11 @@ class PlanningService:
             gen_text = f"{pr_id} 변경 {lines}줄·{files}파일·{area} → 코드 규칙 확인"
             t = self.clock()
             try:
+                # 다시 시도마다 새 키로 보낸다. 같은 키면 관문이 처음 결정(보류)을 그대로 돌려준다
                 await self._execute(
                     "generate_pr",
                     job.ctx,
-                    pr_id,
+                    f"{pr_id}:run{job.run_id}",
                     gen_text,
                     _pr_size_params(lines, files, paths, task.id),
                 )

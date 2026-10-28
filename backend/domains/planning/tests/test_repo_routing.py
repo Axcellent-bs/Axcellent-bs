@@ -358,3 +358,24 @@ def test_token_with_non_ascii_is_rejected() -> None:
     finally:
         vcs._screen = None
         vcs.set_vcs(None)
+
+
+def test_connections_survive_restart(tmp_path, monkeypatch) -> None:
+    from planning_agent import vcs
+
+    store = tmp_path / "vcs.json"
+    monkeypatch.setenv("PLANNING_VCS_STORE", str(store))
+    vcs.set_vcs(None)
+    vcs._screen = None
+    try:
+        vcs.upsert_connection(kind="mock", repo="acme/shop-web", mount="shop-web/", paths=["src/"])
+        vcs._screen = None  # 다시 켠 것처럼
+        assert vcs.load_saved() == 1
+        c = vcs.connections()[0]
+        assert (c.repo, c.mount, c.paths) == ("acme/shop-web", "shop-web/", ("src/",))
+        vcs.delete_connection(c.id)
+        vcs._screen = None
+        assert vcs.load_saved() == 0
+    finally:
+        vcs._screen = None
+        vcs.set_vcs(None)

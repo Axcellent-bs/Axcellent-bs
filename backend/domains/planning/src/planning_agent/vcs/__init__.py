@@ -23,6 +23,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import os
 import re
 from dataclasses import dataclass, field
@@ -262,6 +264,42 @@ def is_overridden() -> bool:
     return _override is not None
 
 
+# 화면 연결을 저장하는 파일 (`PLANNING_VCS_STORE`). 서버를 다시 켜도 연결이 남는다.
+# 토큰이 들어 있어 `.env`처럼 다루고 커밋하지 않는다 (run_all.sh가 git에 안 올라가는 backend/.data/에 둔다)
+def _store_path() -> str:
+    return os.getenv("PLANNING_VCS_STORE") or ""
+
+
+def _save() -> None:
+    path = _store_path()
+    if not path:
+        return
+    rows = [{**dataclasses.asdict(c), "paths": list(c.paths)} for c in (_screen or {}).values()]
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(rows, f, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def load_saved() -> int:
+    """저장해 둔 화면 연결을 읽는다. 읽은 수를 돌려준다 (파일이 없거나 깨졌으면 0)."""
+    global _screen
+    path = _store_path()
+    if not path or not os.path.exists(path):
+        return 0
+    try:
+        with open(path, encoding="utf-8") as f:
+            rows = json.load(f)
+        conns = {
+            r["id"]: Connection(**{**r, "paths": tuple(r.get("paths") or ())}) for r in rows
+        }
+    except (OSError, ValueError, KeyError, TypeError):
+        return 0
+    _screen = conns or None
+    _adapters.clear()
+    return len(conns)
+
+
 def _next_id(taken: dict[str, Connection]) -> str:
     nums = [int(m.group(1)) for k in taken if (m := re.fullmatch(r"conn-(\d+)", k))]
     return f"conn-{max(nums, default=0) + 1}"
@@ -314,6 +352,7 @@ def upsert_connection(
     rows[cid] = conn
     _screen = rows
     _adapters[cid] = (conn, adapter)
+    _save()
     return conn
 
 
@@ -328,6 +367,7 @@ def delete_connection(connection_id: str) -> bool:
     del rows[connection_id]
     _screen = rows or None
     _adapters.pop(connection_id, None)
+    _save()
     return True
 
 
