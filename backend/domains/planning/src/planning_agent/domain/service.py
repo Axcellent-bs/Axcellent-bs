@@ -2396,6 +2396,13 @@ class PlanningService:
                 held = exc.decision.status == "held"
                 cr.status = "waiting_human" if held else "failed"
                 cr.error = f"실행 관문이 generate_pr를 허락하지 않음 ({exc.decision.status})"
+                conn = vcs.find_connection(cr.connection) if cr.connection else None
+                if held and conn is not None and not conn.mount:
+                    # 떼어 온 레포는 경로가 src/…라서 회사 코드 기준 허용 경로 밖으로 보인다
+                    cr.error += (
+                        " · 연결의 '회사 코드 위치'가 비어 있어 경로가 허용 경로 밖으로 보였을 수 있음"
+                        " → 연결 수정에서 넣고 다시 시도"
+                    )
                 cr.updated_at = t
                 if held:
                     task.state = "C 보류"
