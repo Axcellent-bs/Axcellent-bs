@@ -17,6 +17,8 @@ import { Talk } from './talk'
 import { Projects } from './projects'
 import { convoHref } from './links'
 import { Knowledge } from './knowledge'
+import { repoPending } from './repo'
+import { prSlug } from './links'
 
 type IconName = NonNullable<NavItem['icon']>
 interface Section { label: string; icon: IconName; tabs: { id: string; label: string }[] }
@@ -123,6 +125,8 @@ function Planning({ part }: { part: PlanningPart }) {
   const newTalk = inbound.filter((x) => x.point === 'message' && (x.seq ?? 0) > talkSeen).length
   const incoming = incomingCount(state)
   const recentIn = inbound.filter((x) => x.point !== 'message').slice(-3).reverse()
+  const repoWait = part === 'dev' ? repoPending(state) : 0
+  const firstRepoWait = state.prs.find((p) => p.target?.status === 'proposed')
 
   const badge: Record<string, number> = part === 'planning' ? { requests: newWork || incoming, talk: newTalk } : { talk: newTalk }
   const menu = [
@@ -145,6 +149,9 @@ function Planning({ part }: { part: PlanningPart }) {
           <Chip tone={connected ? 'green' : 'amber'} title={`${P.title} 서버 ${apiBase(part)}`}>
             {`${P.title} ${connected ? '켜짐' : '꺼짐'}`}
           </Chip>
+          {repoWait > 0 && firstRepoWait && (
+            <a href={`#/work/prs/${prSlug(firstRepoWait.id)}`} className="chip amber" title="대상 레포 승인 대기 PR">레포 승인 대기 {repoWait}</a>
+          )}
           {part === 'dev' && (
             <button type="button" className="btn-quiet px-2 py-1" title="개발 도구 연결" aria-label="개발 도구 연결" onClick={() => setTools(true)}>
               <IconGear size={20} />

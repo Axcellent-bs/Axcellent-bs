@@ -464,3 +464,10 @@ a.plain-link:hover { color: var(--primary); }
 .pl-menu a.on::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; border-radius: 2px; background: var(--text); }
 .pl-tools { display: flex; align-items: center; gap: 10px; flex-shrink: 0; margin-left: auto; }
 .planning-scope .page { padding: 24px 32px 48px; }
+
+/* 대상 레포 (AI 제안 → 사람 승인) */
+.repo-block { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.repo-reasons { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 13px; color: var(--text-2); }
+.repo-reasons .grade { margin-right: 4px; }
+.repo-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.repo-pick { display: inline-flex; gap: 6px; align-items: center; }
