@@ -38,7 +38,7 @@ function Section({ title, desc, children }: { title: string; desc?: ReactNode; c
     <section className="card space-y-4 p-6">
       <div>
         <h2 className="text-lg font-semibold">{title}</h2>
-        {desc && <p className="mt-1 max-w-3xl text-xs text-ink-500">{desc}</p>}
+        {desc && <p className="mt-1 text-xs text-ink-500">{desc}</p>}
       </div>
       {children}
     </section>
@@ -106,11 +106,11 @@ export default function HrPage({ part = "hr" }: { part?: HrPart }) {
   const count = (s: HandoverStatus) => handovers.filter((h) => h.status === s).length;
 
   return (
-    <div className="max-w-[1320px] space-y-8 px-8 pb-12 pt-2">
+    <div className="space-y-8 px-8 pb-12 pt-2">
       <header className="flex flex-wrap items-end gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{P.title}</h1>
-          <p className="mt-1 max-w-2xl text-sm text-ink-500">{P.desc} 완성도와 판정은 AI가 아니라 정해진 계산과 기준으로 합니다.</p>
+          <p className="mt-1 text-sm text-ink-500">{P.desc} 완성도와 판정은 AI가 아니라 정해진 계산과 기준으로 합니다.</p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
           <Chip label={`${P.title} ${up ? "켜짐" : "꺼짐"}`} tone={up ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"} />

@@ -46,7 +46,7 @@ export default function SupportPage() {
       <header className="flex flex-wrap items-end gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">AI 처리 내역</h1>
-          <p className="mt-1 max-w-2xl text-sm text-ink-500">
+          <p className="mt-1 text-sm text-ink-500">
             <CompanyName />의 고객지원팀입니다. 이탈할 것 같은 고객을 먼저 찾고, 문의마다 보상 후보와 결제가 막힌 곳을 보여 주고, 문의가 갑자기 몰리는 분류와 기획개발로 보낸 변경 요청을 봅니다.
             이 화면은 보기만 하며, 보상·변경 요청을 보내는 일은 사람이 승인한 뒤 따로 합니다.
           </p>

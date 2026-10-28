@@ -41,11 +41,11 @@ export default function OrchestratorPage() {
   const tone = holds ? "text-amber-800" : "text-emerald-800";
 
   return (
-    <div className="max-w-[1320px] space-y-8 px-8 pb-12 pt-2">
+    <div className="space-y-8 px-8 pb-12 pt-2">
       <header className="flex flex-wrap items-end gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">총괄·사건</h1>
-          <p className="mt-1 max-w-2xl text-sm text-ink-500"><CompanyName />에서 문제가 터지면 총괄 에이전트가 사건 하나로 묶고, 7개 부서에 일을 나눠 맡깁니다. 사람 승인이 필요한 일만 사람에게 올립니다. 이 화면은 읽기 전용입니다.</p>
+          <p className="mt-1 text-sm text-ink-500"><CompanyName />에서 문제가 터지면 총괄 에이전트가 사건 하나로 묶고, 7개 부서에 일을 나눠 맡깁니다. 사람 승인이 필요한 일만 사람에게 올립니다. 이 화면은 읽기 전용입니다.</p>
         </div>
         <div className="ml-auto flex items-center gap-2 text-xs">
           <button className="btn-ghost" onClick={load}>새로고침{updatedAt ? ` · ${clock(updatedAt.toISOString())}` : ""}</button>

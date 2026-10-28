@@ -55,6 +55,7 @@ async function get<T>(path: string): Promise<T> {
   }
   if (res.status === 502) throw new Error("DejaFix 백엔드에 연결할 수 없습니다 (frontend/.env 의 DEJAFIX_PROXY_TARGET 확인).");
   if (res.status === 401) throw new Error("DejaFix 로그인 정보가 없거나 만료됐습니다 (frontend/.env 의 DEJAFIX_USERNAME·DEJAFIX_PASSWORD 확인).");
+  if (res.status === 404) throw new Error("DejaFix에 없는 장애입니다.");
   if (!res.ok) throw new Error(`DejaFix가 오류를 돌려줬습니다 (HTTP ${res.status}).`);
   return (await res.json()) as T;
 }
@@ -70,6 +71,97 @@ export const recentIncidents = async () => list(await get<List>("/api/incidents?
 
 /** 현황 KPI 4종 */
 export const dashboardSummary = async () => (await get<{ data: DashboardSummary }>("/api/dashboard/summary")).data;
+
+// 계약 #11 GET /api/incidents/{id}. DejaFix가 저장한 값을 옮겨 줄 뿐이라 화면도 문장·원인·티어를 바꾸지 않고 그대로 보여 준다.
+export type Confidence = "low" | "medium" | "high";
+export type Tier = "A" | "B" | "C";
+
+export interface Report {
+  id: number;
+  version: number;
+  kind: "llm" | "fallback" | string;
+  summary: string;
+  impact: { hosts: string[]; services: string[]; user_impact: string | null; evidence_ids: string[] };
+  causes: { rank: number; title: string; confidence: Confidence; reasoning: string; evidence_ids: string[]; verify: string | null }[];
+  facts: { label: string; value: number | string | null; unit: string | null; unknown_reason: string | null; evidence_ids: string[]; collected_at: string | null }[];
+  unknowns: { label: string; reason: string }[];
+  next_checks: string[];
+  created_at: string;
+}
+
+export interface Evidence {
+  id: string;
+  tool: string;
+  args: Record<string, unknown>;
+  ok: boolean;
+  duration_ms: number | null;
+  result_summary: string | null;
+  data_clock: string | null;
+  called_at: string;
+}
+
+export interface PlanStep {
+  seq: number;
+  action_id: string | null;
+  title: string;
+  target: string | null;
+  command_preview: string | null;
+  tier: Tier;
+  rationale: string | null;
+  precheck: string | null;
+  expected_effect: string | null;
+  risk: string | null;
+  rollback: string | null;
+  evidence_ids: string[];
+}
+
+export interface IncidentDetail {
+  incident: Incident;
+  report: Report | null;
+  evidence: Evidence[];
+  plan: { id: number; title: string; goal: string | null; mode: string; max_tier: Tier; assumptions: string[] } | null;
+  steps: PlanStep[];
+  mail_logs: { id: number; kind: string; recipient: string; status: string; attempts: number; error: string | null; created_at: string; sent_at: string | null }[];
+}
+
+/** 장애 하나의 상세(리포트·근거·변경 계획·메일 기록) */
+export const incidentDetail = async (id: number) => (await get<{ data: IncidentDetail }>(`/api/incidents/${id}`)).data;
+
+/** 확인할 수 없는 이유 코드를 사람이 읽는 말로 */
+export const UNKNOWN_REASON: Record<string, string> = {
+  NOT_COLLECTED: "수집하지 않음",
+  STALE: "값이 오래됨",
+  TOOL_ERROR: "조회 실패",
+  NO_DATA: "데이터 없음",
+};
+
+export const CONFIDENCE: Record<string, { label: string; tone: string }> = {
+  high: { label: "확신도 높음", tone: "bg-emerald-50 text-emerald-700" },
+  medium: { label: "확신도 보통", tone: "bg-amber-50 text-amber-700" },
+  low: { label: "확신도 낮음", tone: "bg-ink-100 text-ink-700" },
+};
+
+/** 변경 단계 등급. 판정은 DejaFix가 규칙(actions.yaml)으로 한 값 그대로다 */
+export const TIER: Record<string, { label: string; tone: string }> = {
+  A: { label: "A · 조회 · 안전", tone: "bg-emerald-50 text-emerald-700" },
+  B: { label: "B · 변경 · 승인 필요", tone: "bg-amber-50 text-amber-700" },
+  C: { label: "C · 금지 · 사람이 판단", tone: "bg-red-50 text-red-700" },
+};
+
+/**
+ * 목록용 장애 제목. Zabbix 트리거 이름을 사람이 읽기 쉽게 줄인다(원문은 title 속성으로 남긴다).
+ * DejaFix frontend/src/components/incidentFormat.ts readableTitle (DejaFix PR #187)과 같은 규칙.
+ * - 앞의 템플릿 접두사 제거: 'Windows: …' → '…'
+ * - '"서비스ID" (표시 이름 (서비스ID))'·'"서비스ID" (표시 이름)' → '표시 이름'
+ * 문장을 새로 만들거나 번역하지 않고 중복만 덜어 낸다.
+ */
+export function readableTitle(title: string): string {
+  const out = title
+    .replace(/^[A-Za-z][\w .-]{0,40}:\s+/, "")
+    .replace(/"([^"]+)"\s*\(([^()]*?)(?:\s*\(\1\))?\)/g, (_, id: string, name: string) => name.trim() || id)
+    .trim();
+  return out || title;
+}
 
 /** Zabbix 심각도 0~5 → 화면 표시 */
 export const SEVERITY: Record<number, { label: string; tone: string }> = {

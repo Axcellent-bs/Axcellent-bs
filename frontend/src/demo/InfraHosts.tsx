@@ -66,7 +66,7 @@ export default function InfraHosts() {
   }, [flow]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-8 py-8">
+    <div className="space-y-6 px-8 py-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-sm text-ink-500">{asAdmin ? '시스템 관리' : 'DejaFix'}</p>

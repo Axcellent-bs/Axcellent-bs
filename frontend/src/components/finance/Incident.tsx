@@ -384,7 +384,7 @@ export function IncidentFinance({ list, selected, onSelect, tick, onGoToQueue }:
           <h2 id="incident-finance-title" className="flex flex-wrap items-center gap-2 text-base font-semibold text-ink-900">
             장애 사건 재무 <MockBadge meta={list.env?.meta} />
           </h2>
-          <p className="mt-0.5 max-w-3xl text-xs leading-relaxed text-ink-500">
+          <p className="mt-0.5 text-xs leading-relaxed text-ink-500">
             결제 같은 서비스에 장애가 나면 총괄 AI가 사건을 열고, 보상은 고객지원 AI가 정해 마케팅 AI가 지급합니다.
             재무는 보상·환불로 <b>빠져나간 돈</b>을 사건별 장부에 적고, 사건이 끝나면 규칙대로 나갔는지 감사합니다. 쿠폰 업무와 장애 손실 집계는 재무가 하지 않습니다.
           </p>

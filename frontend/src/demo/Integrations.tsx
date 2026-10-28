@@ -43,7 +43,7 @@ export default function Integrations() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-8 py-8">
+    <div className="space-y-6 px-8 py-8">
       <header>
         <p className="text-sm text-ink-500">시스템 관리</p>
         <h1 className="text-2xl font-semibold">회사 서비스 연결</h1>

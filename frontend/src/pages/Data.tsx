@@ -61,7 +61,7 @@ export default function DataPage() {
       <header className="flex flex-wrap items-end gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">데이터 분석</h1>
-          <p className="mt-1 max-w-2xl text-sm text-ink-500">
+          <p className="mt-1 text-sm text-ink-500">
             <CompanyName />의 데이터분석팀입니다. 장애가 나면 실패한 주문·영향 고객·피해 금액을 세고, 복구됐는지 지표로 확인하고, 처리 시간을 요약합니다.
             평소에는 같은 장애가 다시 났을 때 얼마나 빨리 복구했는지, AI가 사람 없이 끝낸 비율을 봅니다.
           </p>

@@ -1,8 +1,6 @@
-import { ACCOUNTS } from './session'
-import { AGENTS, SERVICES as ALL_SERVICES, agentName, toggleService, useEnabledServices, usePublishedServices, type Service } from './services'
+import { AGENTS, agentName, toggleService, useEnabledServices, usePublishedServices, type Service } from './services'
 
 // 서비스 고르기: Adobe Creative Cloud 앱 목록처럼 회사가 쓸 서비스를 켜고 끈다. 끈 서비스는 모든 직원 메뉴에서 빠진다.
-// 직원에게 어떤 서비스를 줄지는 계정마다 배정한다(아래 표). 부서는 두지 않는다.
 function ServiceMark({ s }: { s: Service }) {
   return (
     <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${s.by === 'DejaFix' ? 'bg-[#1d1d3a]' : 'bg-brand-50 text-brand-600'}`}>
@@ -15,10 +13,9 @@ export default function ServiceCatalog() {
   const enabled = useEnabledServices()
   // AXcellent가 카탈로그에서 내린 서비스는 새로 고를 수 없어서 목록에서 뺀다
   const SERVICES = usePublishedServices()
-  const users = (id: string) => ACCOUNTS.filter((a) => a.services.includes(id)).length
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8 px-8 py-8">
+    <div className="space-y-8 px-8 py-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-sm text-ink-500">시스템 관리</p>
@@ -47,8 +44,7 @@ export default function ServiceCatalog() {
                   {s.children.filter((c) => !c.soon).map((c) => <span key={c.href} className="chip bg-ink-100 text-ink-700">{c.label}</span>)}
                 </div>
               )}
-              <div className="mt-auto flex items-center justify-between gap-3 border-t border-ink-100 pt-3">
-                <span className="text-xs text-ink-500">배정된 직원 {users(s.id)}명</span>
+              <div className="mt-auto flex items-center justify-end gap-3 border-t border-ink-100 pt-3">
                 <button type="button" onClick={() => toggleService(s.id)} className={on ? 'btn-ghost' : 'btn-primary'}>
                   {on ? '빼기' : '추가하기'}
                 </button>
@@ -98,41 +94,6 @@ export default function ServiceCatalog() {
         </div>
       </section>
 
-      <section className="card overflow-hidden">
-        <div className="px-6 pt-6">
-          <h2 className="card-title">직원별 서비스</h2>
-          <p className="mt-1 text-sm text-ink-500">부서 대신 직원마다 쓸 서비스를 배정합니다. 회사가 끈 서비스는 흐리게 보입니다.</p>
-        </div>
-        <table className="mt-4 w-full text-sm">
-          <thead className="bg-app text-left text-xs text-ink-500">
-            <tr>
-              <th className="px-6 py-3 font-medium">직원 (예시)</th>
-              <th className="px-3 py-3 font-medium">계정</th>
-              <th className="px-3 py-3 font-medium">배정된 서비스</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-ink-100">
-            {ACCOUNTS.map((a) => (
-              <tr key={a.id}>
-                <td className="px-6 py-3 font-medium">{a.role}</td>
-                <td className="px-3 py-3 text-ink-500">{a.email}</td>
-                <td className="px-3 py-3">
-                  <div className="flex flex-wrap gap-1">
-                    {a.services.map((id) => {
-                      const s = ALL_SERVICES.find((x) => x.id === id)
-                      if (!s) return null
-                      return (
-                        <span key={id} className={`chip ${enabled.includes(id) ? 'bg-brand-50 text-brand-700' : 'bg-ink-100 text-ink-500 line-through'}`}>{s.name}</span>
-                      )
-                    })}
-                    {a.admin && <span className="chip bg-ink-100 text-ink-700">시스템 관리</span>}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
     </div>
   )
 }

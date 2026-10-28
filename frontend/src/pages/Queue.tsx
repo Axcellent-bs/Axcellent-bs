@@ -32,7 +32,7 @@ export default function QueuePage() {
       <div className="flex flex-wrap items-end gap-4">
         <div>
           <h1 className="text-xl font-semibold">보상 큐</h1>
-          <p className="mt-1 max-w-2xl text-sm text-ink-500">
+          <p className="mt-1 text-sm text-ink-500">
             반품 상품이 물류센터에 <b>입고된 순서</b>대로 줄을 섭니다. 검수가 정상이고 금액이 자동 처리 한도 이내이며(교환은 재고가 있을 때) 상담원 보류가 없으면 순서대로 환불·보상이 지급됩니다.
             조건이 안 맞는 건은 사유를 달고 줄에 남고, 뒤의 건을 막지 않습니다. 재고는 먼저 입고된 건에 먼저 배정됩니다.
           </p>
