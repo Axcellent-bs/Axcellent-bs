@@ -1,7 +1,7 @@
 // 기획개발 백엔드(planning 에이전트, 8101) REST·SSE와 화면 상태(State)를 잇는다.
 // 백엔드는 snake_case·ISO 시각, 화면은 camelCase·KST "MM-DD HH:mm"이라 여기서 한 번만 바꾼다.
 // 백엔드에 없는 값(학습 기준·감사 목록)은 빈 값으로 두고 지어내지 않는다.
-import type { Action, Activity, AuditItem, CrossReview, Doc, Incident, OutMsg, PR, Request, State, Thread } from './data'
+import type { Action, Activity, AuditItem, ChatThread, CrossReview, Doc, Incident, OutMsg, PR, Request, State, Thread } from './data'
 import { MOCK, PLANNING_LIVE } from '@/lib/env'
 
 // 녹화본 데모에서 기획개발만 실제로 부를 때(VITE_PLANNING_LIVE=on)는 개발 서버 프록시(/planning-api)를 탄다. planning CORS에 3090이 없어서다
@@ -123,6 +123,7 @@ export function fromBackend(raw: Json, queue: QueueItem[]): State {
     draftsAccepted: Number(s.draftsAccepted ?? 0),
     warnings: Number(s.warnings ?? 0),
     firstPrMinutes: (s.firstPrMinutes as number[]) ?? [],
+    ...(Array.isArray(s.chats) ? { chats: toThreads(raw.chats) } : {}),
     autoPolicy: {
       rules: [], // 관찰 기반 학습 기준은 백엔드에 아직 없다 (FR-ATL-007~009)
       observing: [],
@@ -209,3 +210,23 @@ export const devTaskApi = (base: string) => ({
   }),
   retry: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/retry`, post()),
 })
+
+// ---- AI와 대화 (dev 서비스 `/api/planning/dev-chat`). 답이 오면 바뀐 대화 전체를 돌려준다 (5~30초)
+export interface ChatSend { thread_id?: string; message: string; connection?: string }
+
+// 대화 모양이 아닌 값(목의 {ok:true} 등)은 버린다
+const isThread = (x: unknown): x is Json => !!x && typeof x === 'object' && typeof (x as Json).id === 'string' && Array.isArray((x as Json).messages)
+const toThread = (x: Json): ChatThread => camelize(x) as ChatThread
+export const toThreads = (d: unknown): ChatThread[] => (Array.isArray(d) ? d.filter(isThread).map(toThread) : [])
+
+export const chatApi = (base: string) => {
+  const one = (d: unknown) => {
+    if (!isThread(d)) throw new PlanningApiError('NO_THREAD', '개발·배포 서버가 대화를 돌려주지 않았어요')
+    return toThread(d)
+  }
+  return {
+    list: () => call<unknown>(base, '/dev-chat').then(toThreads),
+    get: (id: string) => call<unknown>(base, `/dev-chat/${encodeURIComponent(id)}`).then(one),
+    send: (x: ChatSend) => call<unknown>(base, '/dev-chat', post(x)).then(one),
+  }
+}
