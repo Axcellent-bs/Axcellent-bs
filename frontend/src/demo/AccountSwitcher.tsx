@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { ACCOUNTS, OPERATORS, homeOf, servicesOf, useSession } from './session'
+import { ACCOUNTS, OPERATORS, assignedOf, homeOf, useSession } from './session'
 import { useEnabledServices } from './services'
 
 // 데모 전용: 예시 직원 계정을 바꿔 가며 배정된 서비스 화면을 보여 준다. 실제 제품에는 없다.
@@ -50,7 +50,7 @@ export function AccountSwitcher() {
               className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm hover:bg-ink-100 ${a.id === account.id ? 'bg-brand-50' : ''}`}>
               <span>
                 <span className="block font-medium">{a.role}</span>
-                <span className="block text-xs text-ink-500">{servicesOf(a, enabled).map((s) => s.name).join(' · ') || a.email}</span>
+                <span className="block text-xs text-ink-500">{assignedOf(a, enabled).map((s) => s.name).join(' · ') || a.email}</span>
               </span>
               {a.id === account.id && <span className="text-brand-600" aria-hidden="true">●</span>}
             </button>

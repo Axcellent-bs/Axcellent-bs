@@ -8,7 +8,7 @@ import { AGENTS, activeChild, matchPath, useEnabledServices, type Service, type 
 import { IconAgents, IconBell, IconBolt, IconChart, IconDashboard, IconLayout, IconOffice, IconSearch } from "../icons";
 
 // 메뉴: AI가 상위 탭이고, 그 AI가 맡은 서비스가 하위 탭이다. 서비스 안 화면(예: 고객 문의의 상담 콘솔)은 그 아래 한 단 더.
-// 이 계정에 배정됐고 회사가 켠 서비스만, 그 서비스를 맡은 AI만 보인다 (src/demo/services.ts, session.tsx).
+// AI 7개는 모든 직원 메뉴에 보인다(회사가 서비스 고르기에서 끈 서비스만 빠짐). DejaFix 서비스는 배정된 계정에만 (src/demo/session.tsx servicesOf).
 // AI가 맡지 않은 서비스(DejaFix 장애 대응·PC·서버 연결)와 공용 화면은 구분선 아래에 둔다.
 type SubNav = { href: string; label: string; soon?: boolean; match: string[]; children?: SubItem[] };
 type NavItem = { href: string; label: string; Icon: ComponentType<{ size?: number }>; logo?: string; children?: SubNav[]; match: string[]; divider?: boolean };
