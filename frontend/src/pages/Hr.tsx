@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Loading } from "@/components/admin/bits";
+import { DecisionCard } from "@/components/hr/DecisionCards";
 import IncidentRecords from "@/components/hr/IncidentRecords";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
 import { ago, shortDateTime } from "@/lib/format";
+import { useSearchParams } from "@/lib/nav";
 import {
   hr,
   type HandoverQuestion, type HandoverStatus, type HandoverView, type HrCard, type PlanCheck, type PlanDraft, type Roster,
@@ -56,7 +58,8 @@ function Tile({ label, count, note, tone }: { label: string; count: number | str
   );
 }
 
-interface View { handovers: HandoverView[]; cards: HrCard[]; roster: Roster }
+/** `decided`가 null이면 확정 카드 목록을 받지 못한 것(서버가 아직 이 조회를 모를 때) */
+interface View { handovers: HandoverView[]; cards: HrCard[]; decided: HrCard[] | null; roster: Roster }
 
 // 데모에서 인사(인수인계·담당 명부)와 운영(결정 기록·계획 비교)을 두 부서로 나눴다. 데이터는 같은 hr 서비스에서 받는다.
 export type HrPart = "hr" | "ops";
@@ -82,14 +85,18 @@ const PART = {
 
 export default function HrPage({ part = "hr" }: { part?: HrPart }) {
   const P = PART[part];
+  const ctxParam = useSearchParams().get("ctx"); // 총괄 사건 화면의 "결정 기록에서 보기"로 들어올 때
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [up, setUp] = useState(true);
 
   const load = useCallback(async () => {
     try {
-      const [handovers, cards, roster] = await Promise.all([hr.handovers(), hr.candidateCards(), hr.roster()]);
-      setView({ handovers, cards, roster }); setUp(true);
+      const [handovers, cards, roster, decided] = await Promise.all([
+        hr.handovers(), hr.candidateCards(), hr.roster(),
+        hr.decisionCards().catch(() => null), // 이 조회만 실패해도 화면 나머지는 보여 준다
+      ]);
+      setView({ handovers, cards, decided, roster }); setUp(true);
     } catch (e) { setUp(false); setError(errText(e)); }
   }, []);
   useEffect(() => {
@@ -173,7 +180,14 @@ export default function HrPage({ part = "hr" }: { part?: HrPart }) {
       {part === "ops" && <>
       {/* ④ 기록 도구 */}
       {/* 인사 AI가 실제로 남긴 사건 기록과 고른 사건의 처리 내역 */}
-      <IncidentRecords />
+      <IncidentRecords initialCtx={ctxParam} />
+      <Section title="확정된 결정 카드" desc="후보가 아니라 기록으로 확정된 카드입니다. 최근 순으로 최대 50장을 보여 줍니다.">
+        {view.decided === null
+          ? <p className="text-xs text-amber-800">확정 카드 목록을 받지 못했습니다. 서버가 이 조회를 아직 지원하지 않을 수 있습니다.</p>
+          : view.decided.length === 0
+            ? <p className="py-6 text-center text-sm text-ink-500">아직 확정된 결정 카드가 없습니다.</p>
+            : <div className="space-y-3">{view.decided.map((c) => <DecisionCard key={c.card_id} card={c} />)}</div>}
+      </Section>
       <Section title="계획 비교" desc="새 계획이 과거에 기각된 안과 겹치는지 확인합니다. 저장하지 않고 보기만 합니다."><PlanChecker /></Section>
       </>}
     </div>

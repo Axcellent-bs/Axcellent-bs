@@ -9,6 +9,7 @@ from ax_contracts.schemas import (
     DecideCandidateCardOutput,
     GetAuditTimelineOutput,
     ListCandidateCardsOutput,
+    ListCardsOutput,
     ListHandoversOutput,
     ListOpenQuestionsOutput,
 )
@@ -165,6 +166,60 @@ def test_approving_a_candidate_makes_it_active_and_supersedes_the_older_decision
     older = svc.store.one("SELECT data FROM mock_cards WHERE card_id = ?", (old,))
     assert '"status": "superseded"' in older["data"]
     assert "card.approve" in svc.audit.kinds("ctx_dv_0001")
+
+
+def confirmed_card(client, ctx="ctx_old_0001", area="payment", summary="결제 재시도를 최대 2회로 확정했다"):
+    res = post(
+        client,
+        "record_case",
+        {
+            "context_id": ctx,
+            "kind": "spec_confirmed",
+            "summary": summary,
+            "decision_reason": "중복 결제 위험",
+            "alternatives_considered": ["없음"],
+            "source_refs": ["pr:1", f"area:{area}"],
+            "author": "planning",
+        },
+        f"o-{ctx}",
+        ctx,
+        "mock:planning",
+    )
+    return res["output"]["card_id"]
+
+
+def test_list_cards_shows_only_confirmed_cards_newest_first(svc, client) -> None:
+    older = confirmed_card(client, "ctx_old_0001")
+    newer = confirmed_card(client, "ctx_old_0002", summary="결제 타임아웃을 5초로 확정했다")
+    candidate_card(client)  # 후보는 확정 목록에 나오지 않는다
+    res = post(client, "list_cards", {})
+    out = ListCardsOutput.model_validate(res["output"])
+    assert res["status"] == "completed" and res["outcome"] == "listed"
+    assert {c.card_id for c in out.cards} == {older, newer}
+    assert all(c.candidate is False for c in out.cards)
+    assert out.cards[0].created_at >= out.cards[-1].created_at
+
+
+def test_list_cards_filters_by_incident_and_area_and_limit(svc, client) -> None:
+    first = confirmed_card(client, "ctx_old_0001")
+    confirmed_card(client, "ctx_old_0002", area="search", summary="검색 색인을 새로 만들기로 확정했다")
+    mine = ListCardsOutput.model_validate(
+        post(client, "list_cards", {"context_id": "ctx_old_0001"})["output"]
+    )
+    assert [c.card_id for c in mine.cards] == [first]
+    none = ListCardsOutput.model_validate(
+        post(client, "list_cards", {"context_id": "ctx_nope_0001"})["output"]
+    )
+    assert none.cards == []
+    payment = ListCardsOutput.model_validate(post(client, "list_cards", {"area": "payment"})["output"])
+    assert [c.card_id for c in payment.cards] == [first]
+    one = ListCardsOutput.model_validate(post(client, "list_cards", {"limit": 1})["output"])
+    assert len(one.cards) == 1
+
+
+def test_list_cards_rejects_a_bad_limit(svc, client) -> None:
+    res = post(client, "list_cards", {"limit": 0})
+    assert res["status"] == "rejected" and res["outcome"] == "INVALID_INPUT"
 
 
 def test_rejecting_a_candidate_retires_it(svc, client) -> None:

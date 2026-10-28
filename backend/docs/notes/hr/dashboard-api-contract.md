@@ -23,6 +23,7 @@
 | 변경(발령·퇴직·입사) | `GET /assignment-changes?status&area&member_id` | `list_changes` | `ChangeView[]` | `GET_assignment-changes.json` |
 | 명부·공백 | `GET /roster?area` | `get_roster` | `GetRosterOutput` | `GET_roster.json` |
 | 후보 카드 큐 | `GET /candidate-cards?area` | `list_candidate_cards` | `Card[]` (`status=candidate`) | `GET_candidate-cards.json` |
+| 확정된 결정 카드 | `GET /decision-cards?area&context_id&limit` | `list_cards` | `Card[]` (후보가 아닌 `active`, 최근 순) | 없음 (목 모드는 사람이 승인한 카드만) |
 | 후보 카드 결정 | `POST /candidate-cards/{card_id}/decision` | `decide_candidate_card` | `DecideCandidateCardOutput` | `POST_candidate-cards_decision.json` |
 | 감사 기록 | `GET /hr-activity/{context_id}` | `get_audit_timeline` | `AuditEntry[]` | `GET_hr-activity.json` |
 | 계획 비교(선택) | `POST /plan-checks` | `check_plan` | `CheckPlanOutput` | `POST_plan-checks.json` |
