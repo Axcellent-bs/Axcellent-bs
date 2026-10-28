@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ago, shortDateTime } from "@/lib/format";
-import { ANALYSIS, SEVERITY, currentIncidents, dashboardSummary, recentIncidents, type DashboardSummary, type Incident, type IncidentMeta, type Measured } from "@/lib/dejafix";
+import { ANALYSIS, SEVERITY, currentIncidents, readableTitle, dashboardSummary, recentIncidents, type DashboardSummary, type Incident, type IncidentMeta, type Measured } from "@/lib/dejafix";
 import { DEJAFIX_LIVE } from "@/lib/env";
 
 // 장애 대응 탭 = 지금 진행 중인 장애만. DejaFix API(GET /api/incidents?status=problem)에서 받아 AXcellent가 그린다.
@@ -32,7 +32,7 @@ function UrgentCard({ incident, loading }: { incident: Incident | undefined; loa
       ) : (
         <div className={`card space-y-3 border-l-4 px-5 py-4 ${BAND[incident.severity.level] ?? "border-l-ink-300"}`}>
           <Chip map={SEVERITY} k={incident.severity.level} />
-          <p className="font-semibold text-ink-900">{incident.title}</p>
+          <p className="font-semibold text-ink-900" title={incident.title}>{readableTitle(incident.title)}</p>
           <dl className="grid grid-cols-3 gap-2 text-xs">
             <div><dt className="text-ink-500">호스트</dt><dd className="mt-0.5 truncate font-mono font-semibold" title={incident.host.name ?? undefined}>{incident.host.name ?? "확인 중"}</dd></div>
             <div><dt className="text-ink-500">시작</dt><dd className="mt-0.5 font-semibold">{shortDateTime(incident.started_at)}</dd></div>
@@ -128,6 +128,13 @@ function Heatmap({ incidents, end }: { incidents: Incident[]; end: number }) {
       )}
     </section>
   );
+}
+
+/** 목록 아래 줄 태그: 제목에 이미 나온 서비스 이름·ID는 빼고 짧은 분류만 남긴다(전체는 title 속성) */
+function shortTags(i: Incident): string[] {
+  const title = i.title.toLowerCase();
+  // 'windows'·'os' 같은 짧은 분류는 제목에 있어도 남긴다
+  return [...new Set(i.tags.map((t) => t.value))].filter((v) => v.length <= 12 || !title.includes(v.toLowerCase()));
 }
 
 function Chip({ map, k }: { map: Record<string | number, { label: string; tone: string }>; k: string | number }) {
@@ -234,12 +241,14 @@ export default function Incidents() {
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-100">
-              {list.map((i) => (
+              {list.map((i) => {
+                const tags = shortTags(i);
+                return (
                 <tr key={i.id} className="align-top">
                   <td className="px-6 py-3"><Chip map={SEVERITY} k={i.severity.level} /></td>
                   <td className="px-3 py-3">
-                    <p className="font-medium text-ink-900">{i.title}</p>
-                    <p className="mt-0.5 text-xs text-ink-500">#{i.id}{i.tags.length > 0 && ` · ${i.tags.map((t) => t.value).join(", ")}`}</p>
+                    <p className="font-medium text-ink-900" title={i.title}>{readableTitle(i.title)}</p>
+                    <p className="mt-0.5 text-xs text-ink-500" title={i.tags.map((t) => t.value).join(", ")}>#{i.id}{tags.length > 0 && ` · ${tags.join(", ")}`}</p>
                   </td>
                   <td className="px-3 py-3">
                     {i.host.name ? <span className="whitespace-nowrap font-mono text-xs">{i.host.name}</span> : <span className="text-xs text-ink-500" title="DejaFix가 아직 호스트 정보를 채우지 않았습니다">확인 중</span>}
@@ -247,7 +256,8 @@ export default function Incidents() {
                   <td className="whitespace-nowrap px-3 py-3 text-xs text-ink-700" title={shortDateTime(i.started_at)}>{ago(i.started_at)}</td>
                   <td className="px-6 py-3"><Chip map={ANALYSIS} k={i.analysis.status} /></td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </section>
