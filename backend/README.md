@@ -43,7 +43,7 @@ AXcellent AI 백엔드. ax-company-hq/ax-backend(dev `04f0e28`, 10/28)를 복사
 
 ## 로컬 실행 (실제 모드, 기본)
 
-목 모드 없이 실제 LLM·실제 에이전트 토큰·이벤트 버스·파일 DB로 돈다. 고객사는 캣북스(쇼핑몰 `shop-api`)이고,
+실제 LLM·실제 에이전트 토큰·이벤트 버스·파일 DB로 돈다. 로컬 실행은 이 실제 모드 하나다. 고객사는 캣북스(쇼핑몰 `shop-api`)이고,
 AXcellent 에이전트들이 캣북스의 실제 주문·결제 데이터로 A2A 작업을 한다.
 
 ```bash
@@ -69,7 +69,8 @@ bash scripts/run_all.sh stop
   마케팅 AI가 게시한 공지 배너는 shop-web에 아직 그리는 곳이 없다(ax-frontend 쪽 작업).
 - 장애 대응 흐름: AI 대화방의 "캣북스에 장애 넣기" → 캣북스 결제가 실제로 실패 → 쇼핑몰 감시가 `shop.degraded`
   (20초 지속, `SHOP_DEGRADED_SUSTAIN_S`) → Redis → 총괄이 사건을 열고 7개 부서를 실제로 부른다.
-- 예전 목 모드는 `bash scripts/run_all.sh mock` (시드 데이터·가짜 LLM, 네트워크 없이 화면 확인용).
+- **목 스위치는 테스트 전용**: `AGENT_TEMPLATE_MOCK=1`·`<서비스>_MOCK=1`(예: `DATA_MOCK`, `ORCHESTRATOR_MOCK`, `DASHBOARD_MOCK`)과 테스트용 가짜 부서(`services/orchestrator/.../mock/`)는 CI 단위 테스트가 쓴다. 로컬 실행·데모에는 쓰지 않는다. `run_all.sh`는 `.env`에 남아 있어도 끄고, `run_all.sh mock`은 지웠다.
+- dashboard-api의 목 데이터 응답(`routes.py` `mock_only`)도 테스트 전용이다. 실제 모드에서 출처가 없는 응답(지식 조각·후기)은 지어내지 않고 빈 목록이고, 화면은 "준비 중"으로 표시한다.
 
 ## 업무 요청 라우터
 
