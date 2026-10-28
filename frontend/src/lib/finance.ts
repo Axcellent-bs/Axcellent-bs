@@ -3,7 +3,7 @@ import { FINANCE_AGENT_URL, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from "./env";
 import { humanizeIds, incidentNo } from "./format";
 
 // 재무 화면 → finance(8105) · safety(8001) API. 응답은 ax-backend 규약 {data, meta} / {error: {code, message}}.
-// 재무 AI = 캣북스의 재무팀 (결산·대사·판매자 정산·예산 한도·사후 감사).
+// 재무 AI = 고객사의 재무팀 (결산·대사·판매자 정산·예산 한도·사후 감사).
 // 형식 기준: ax-backend docs/notes/finance/2026-10-23-finance-redesign.md §11·§12-1. 필드 이름을 바꾸지 않는다.
 
 // ---------------------------------------------------------------- 공통 봉투
