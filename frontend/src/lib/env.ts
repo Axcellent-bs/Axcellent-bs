@@ -27,6 +27,9 @@ export const DATA_A2A_TOKEN = import.meta.env.VITE_DATA_A2A_TOKEN ?? 'mock:dashb
 /** 사람 토큰이 설정돼 있는지. 없으면 쓰기 버튼을 끄고 안내한다 */
 export const HUMAN_TOKEN_SET = SAFETY_HUMAN_TOKEN.length > 0
 
+/** 기획개발 AI(planning, 8101)만 실제 서버로 부를지. 다른 AI는 녹화본으로 두고 요청·기획서·개발·배포 탭만 실데이터로 볼 때 on */
+export const PLANNING_LIVE = !MOCK || import.meta.env.VITE_PLANNING_LIVE === 'on'
+
 /** 장애 대응: DejaFix 백엔드. 기본값 /dejafix-api는 개발 서버가 로그인까지 대신 해 주는 프록시(dejafix-proxy.ts) */
 export const DEJAFIX_API_URL = import.meta.env.VITE_DEJAFIX_API_URL ?? '/dejafix-api'
 /** DejaFix만 실제 서버로 부를지. 다른 AI는 녹화본으로 두고 장애 대응 탭만 실데이터로 볼 때 on */

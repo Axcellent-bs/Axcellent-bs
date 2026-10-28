@@ -2,8 +2,10 @@
 // 백엔드는 snake_case·ISO 시각, 화면은 camelCase·KST "MM-DD HH:mm"이라 여기서 한 번만 바꾼다.
 // 백엔드에 없는 값(학습 기준·감사 목록)은 빈 값으로 두고 지어내지 않는다.
 import type { Action, Activity, AuditItem, CrossReview, Doc, Incident, OutMsg, PR, Request, State, Thread } from './data'
+import { MOCK, PLANNING_LIVE } from '@/lib/env'
 
-export const PLANNING_API = (import.meta.env.VITE_PLANNING_API_URL as string | undefined) ?? 'http://localhost:8101'
+// 녹화본 데모에서 기획개발만 실제로 부를 때(VITE_PLANNING_LIVE=on)는 개발 서버 프록시(/planning-api)를 탄다. planning CORS에 3090이 없어서다
+export const PLANNING_API = (import.meta.env.VITE_PLANNING_API_URL as string | undefined) ?? (MOCK && PLANNING_LIVE ? '/planning-api' : 'http://localhost:8101')
 
 type Json = Record<string, unknown>
 const camel = (k: string) => k.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())

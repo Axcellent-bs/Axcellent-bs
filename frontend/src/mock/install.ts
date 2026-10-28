@@ -3,7 +3,7 @@
 // 쓰기(POST 등)는 저장하지 않고 성공 응답만 돌려준다. 그래서 버튼을 눌러도 화면 데이터는 바뀌지 않는다.
 // VITE_MOCK=off면 아무것도 가로채지 않고 src/lib/env.ts 주소의 실제 AI 백엔드를 부른다.
 import raw from './fixtures.json'
-import { DEJAFIX_LIVE, MOCK } from '@/lib/env'
+import { DEJAFIX_LIVE, MOCK, PLANNING_LIVE } from '@/lib/env'
 
 type Fixture = { status: number; body: unknown }
 const FIXTURES = raw as Record<string, Fixture>
@@ -15,7 +15,7 @@ const BY_PORT: Record<string, string> = {
 
 function route(input: string): { svc: string; path: string } | null {
   const m = /^https?:\/\/(?:localhost|127\.0\.0\.1):(\d+)(\/.*)?$/.exec(input)
-  if (m) return BY_PORT[m[1]] ? { svc: BY_PORT[m[1]], path: m[2] ?? '/' } : null
+  if (m) return BY_PORT[m[1]] && !(PLANNING_LIVE && BY_PORT[m[1]] === 'planning') ? { svc: BY_PORT[m[1]], path: m[2] ?? '/' } : null
   if (input.startsWith('/orch/')) return { svc: 'orch', path: input.slice('/orch'.length) }
   if (input.startsWith('/data-a2a/')) return { svc: 'data', path: input.slice('/data-a2a'.length) }
   // DejaFix 백엔드(장애 대응). 녹화본은 DejaFix 레포 frontend/src/mocks의 응답이다 (README)
@@ -97,4 +97,12 @@ class DemoEventSource extends EventTarget {
     this.readyState = 2
   }
 }
-if (MOCK) window.EventSource = DemoEventSource as unknown as typeof EventSource
+// 녹화본이 없는 주소(실제로 부르는 기획개발 /planning-api 등)는 진짜 EventSource로 연다
+const RealEventSource = window.EventSource
+function PickEventSource(url: string | URL, init?: EventSourceInit) {
+  return route(String(url)) ? new DemoEventSource(url) : new RealEventSource(url, init)
+}
+PickEventSource.CONNECTING = 0
+PickEventSource.OPEN = 1
+PickEventSource.CLOSED = 2
+if (MOCK) window.EventSource = PickEventSource as unknown as typeof EventSource
