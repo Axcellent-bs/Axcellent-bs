@@ -59,7 +59,8 @@
         "orchestrator"
       ],
       "verifier": null,
-      "priority": "recommended"
+      "priority": "recommended",
+      "handoff": false
     },
     {
       "id": "verify_handover",

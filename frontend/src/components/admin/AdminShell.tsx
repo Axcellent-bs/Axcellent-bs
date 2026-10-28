@@ -5,13 +5,14 @@ import { AccountSwitcher } from "@/demo/AccountSwitcher";
 import { canOpen, homeOf, servicesOf, useSession } from "@/demo/session";
 import { useCompany } from "@/demo/company";
 import { AGENTS, activeChild, matchPath, useEnabledServices, type Service, type SubItem } from "@/demo/services";
-import { IconAgents, IconBell, IconBolt, IconBox, IconChart, IconDashboard, IconLayout, IconOffice, IconSearch } from "../icons";
+import { useOpenHandoffCount } from "@/lib/handoffs";
+import { IconAgents, IconBell, IconBolt, IconBox, IconChart, IconDashboard, IconInbox, IconLayout, IconOffice, IconSearch } from "../icons";
 
 // 메뉴: AI가 상위 탭이고, 그 AI가 맡은 서비스가 하위 탭이다. 서비스 안 화면(예: 고객 문의의 상담 콘솔)은 그 아래 한 단 더.
 // 고객사 계정은 시스템 관리자 하나이고, 회사가 켠 서비스는 전부 메뉴에 보인다(서비스 고르기에서 끈 서비스만 빠짐, src/demo/session.tsx).
 // AI가 맡지 않은 서비스(DejaFix 장애 대응·PC·서버 연결)와 공용 화면은 구분선 아래에 둔다.
 type SubNav = { href: string; label: string; soon?: boolean; match: string[]; children?: SubItem[] };
-type NavItem = { href: string; label: string; Icon: ComponentType<{ size?: number }>; logo?: string; children?: SubNav[]; match: string[]; divider?: boolean };
+type NavItem = { href: string; label: string; Icon: ComponentType<{ size?: number }>; logo?: string; children?: SubNav[]; match: string[]; divider?: boolean; badge?: number | null };
 
 const subNav = (items?: SubItem[]): SubNav[] | undefined => items?.map((c) => ({ ...c, match: [c.href] }));
 const serviceNav = (s: Service): NavItem => ({ href: s.entry, label: s.name, Icon: s.Icon, logo: s.logo, children: subNav(s.children), match: s.paths });
@@ -43,7 +44,10 @@ function NavIcon({ item, size }: { item: NavItem; size: number }) {
   return item.logo ? <img src={item.logo} alt="" width={size} height={size} className="shrink-0" /> : <item.Icon size={size} />;
 }
 
+// 할 일함은 어느 서비스를 샀든 보이는 기본 메뉴다 (SHARED_PATHS). 열린 일이 있으면 개수를 띄운다
+const HANDOFFS_HREF = "/handoffs";
 const SHARED_NAV: NavItem[] = [
+  { href: HANDOFFS_HREF, label: "받은 요청", Icon: IconInbox, match: [HANDOFFS_HREF] },
   { href: "/agents/chat", label: "AI 대화방", Icon: IconAgents, match: ["/agents/chat"] },
   { href: "/agents/office", label: "AI 오피스", Icon: IconOffice, match: ["/agents/office"] },
 ];
@@ -97,7 +101,10 @@ const readSide = () => {
 export function AdminShell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const { account } = useSession();
-  const nav = useNav();
+  const baseNav = useNav();
+  const hasInbox = baseNav.some((n) => n.href === HANDOFFS_HREF);
+  const openHandoffs = useOpenHandoffCount(hasInbox);
+  const nav = baseNav.map((n) => (n.href === HANDOFFS_HREF ? { ...n, badge: openHandoffs } : n));
   const home = account ? homeOf(account) : "/";
   const company = useCompany();
   const [collapsed, setCollapsed] = useState(readSide);
@@ -129,9 +136,12 @@ export function AdminShell({ children }: { children: ReactNode }) {
             <div key={href}>
               {item.divider && <div className={`my-2 border-t border-white/10 ${collapsed ? "mx-3" : "mx-[18px]"}`} aria-hidden="true" />}
               <Link href={href} title={collapsed ? label : undefined} aria-label={label} aria-current={on && !subs ? "page" : undefined}
-                className={`flex items-center gap-3.5 py-[13px] text-sm font-semibold transition ${collapsed ? "justify-center" : "px-[18px]"} ${on ? (open ? "text-white" : "bg-[#5b5bd6] text-white") : "hover:bg-white/10"}`}>
+                className={`relative flex items-center gap-3.5 py-[13px] text-sm font-semibold transition ${collapsed ? "justify-center" : "px-[18px]"} ${on ? (open ? "text-white" : "bg-[#5b5bd6] text-white") : "hover:bg-white/10"}`}>
                 <NavIcon item={item} size={item.logo ? 22 : 18} />
                 {!collapsed && <span className="truncate">{label}</span>}
+                {!!item.badge && (collapsed
+                  ? <span className="absolute right-3 top-2.5 h-2 w-2 rounded-full bg-amber-400" aria-label={`열린 일 ${item.badge}건`} />
+                  : <span className="ml-auto shrink-0 rounded-full bg-amber-400 px-1.5 text-[11px] font-semibold leading-[18px] text-[#1d1d3a]" aria-label={`열린 일 ${item.badge}건`}>{item.badge > 99 ? "99+" : item.badge}</span>)}
               </Link>
               {open && subs.map((c) => {
                 const sub = c === subOn;

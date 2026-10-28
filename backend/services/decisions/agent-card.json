@@ -52,7 +52,22 @@
         "orchestrator"
       ],
       "verifier": null,
-      "priority": "recommended"
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "list_cards",
+      "description": "확정된(후보가 아닌) 결정 카드를 최근 순으로 조회한다. 사건 번호를 주면 그 사건에서 만든 카드만 돌려준다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCardsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCardsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
     },
     {
       "id": "get_audit_timeline",
@@ -65,7 +80,8 @@
         "orchestrator"
       ],
       "verifier": null,
-      "priority": "recommended"
+      "priority": "recommended",
+      "handoff": false
     },
     {
       "id": "decide_candidate_card",

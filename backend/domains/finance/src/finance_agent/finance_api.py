@@ -30,7 +30,8 @@ from fastapi.responses import JSONResponse
 from ax_agent_template.config import agent_name_scope, agent_url, is_mock
 from ax_agent_template.execute import execute
 from ax_contracts.schemas import Evidence, RequestMeta
-from finance_agent import audit, closing, policy, reconciliation, settlement
+from ax_contracts.schemas.common import TENANT_ID_DEFAULT
+from finance_agent import audit, chat_log, closing, policy, reconciliation, settlement
 from finance_agent import finance_config as fc
 from finance_agent.handlers import closing_key, incident_impact, state
 from finance_agent.human import human_from_authorization
@@ -371,4 +372,5 @@ def add_finance_api(app: FastAPI) -> None:
         data, missing = await audit.audit_report(
             books, n, impact_lookup=incident_impact, context_id=context_id or None
         )
+        await chat_log.audit_findings(data.get("findings") or [], TENANT_ID_DEFAULT)
         return ok(data, books.meta(missing))

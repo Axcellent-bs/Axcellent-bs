@@ -154,7 +154,8 @@ async def test_a_disabled_service_missing_from_the_org_chart_is_no_assignee(
 ) -> None:
     monkeypatch.setenv(routing.ENABLED_ENV, "inquiry")
     recorder = Recorder()
-    result = await _call("data", _request("kpi_summary"), recorder)
+    # impact_analysis는 read지만 사람이 할 수 있는 일이라 넘기는 쪽이다
+    result = await _call("data", _request("impact_analysis"), recorder)
     assert (result.status, result.outcome) == ("failed", "no_assignee")
     assert result.output["to_service"] == "data"
     assert recorder.requests == []  # 할 일함에도 A2A에도 보내지 않는다
@@ -200,3 +201,57 @@ def test_org_chart_keeps_unit_names_only_in_the_file(org) -> None:
     table = routing.load_org()
     assert table["claims"] == routing.Assignment("고객지원", None)
     assert routing.assignment_for("claims", "decide_claim") == routing.Assignment("고객지원", None)
+
+
+@pytest.mark.asyncio
+async def test_a_lookup_to_a_disabled_service_is_not_handed_off(
+    monkeypatch, org, log_store
+) -> None:
+    """카드에서 read + handoff:false인 목록·조회는 받은 요청을 만들지 않는다."""
+    monkeypatch.setenv(routing.ENABLED_ENV, "finance")
+    recorder = Recorder()
+    result = await _call("claims", _request("list_claims"), recorder)
+    assert (result.status, result.outcome) == ("rejected", "service_disabled")
+    assert result.output["to_service"] == "claims"
+    assert recorder.requests == []  # 할 일함에도 A2A에도 보내지 않는다
+    [line] = log_store.query(CommonLogQuery(kinds=["task_status"])).records
+    assert (line.task_status, line.payload["outcome"]) == ("rejected", "service_disabled")
+
+
+@pytest.mark.asyncio
+async def test_read_work_like_a_notice_draft_is_still_handed_off(monkeypatch, tmp_path) -> None:
+    """read 등급이어도 공지 초안처럼 사람이 대신할 수 있는 일은 받은 요청 1건이 된다."""
+    org = tmp_path / "org.yaml"
+    org.write_text("assignments:\n  coupon: {unit: 마케팅}\n", encoding="utf-8")
+    monkeypatch.setenv(routing.ORG_ENV, str(org))
+    monkeypatch.setenv(routing.ENABLED_ENV, "inquiry")
+    recorder = Recorder()
+    result = await _call("marketing", _request("draft_notice"), recorder)
+    assert result.outcome == "handed_to_human"
+    assert [r.url.path for r in recorder.requests] == ["/api/dashboard/handoffs"]
+
+
+@pytest.mark.asyncio
+async def test_an_action_skill_to_a_disabled_service_is_one_human_task(monkeypatch, org) -> None:
+    monkeypatch.setenv(routing.ENABLED_ENV, "inquiry")
+    recorder = Recorder()
+    result = await _call("finance", _request("settlement_hold"), recorder)
+    assert result.outcome == "handed_to_human"
+    assert len(recorder.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_without_a_readable_card_the_skill_is_handed_off(monkeypatch, org, tmp_path) -> None:
+    """카드를 못 읽으면 조회인지 알 수 없어 지금처럼 넘긴다 (지어내서 막지 않는다)."""
+    monkeypatch.setenv(routing.CARDS_ENV, str(tmp_path / "no-cards"))
+    monkeypatch.setenv(routing.ENABLED_ENV, "inquiry")
+    recorder = Recorder()
+    await _call("finance", _request("closing_report"), recorder)
+    assert [r.url.path for r in recorder.requests] == ["/api/dashboard/handoffs"]
+
+
+def test_lookup_flags_come_from_the_service_cards() -> None:
+    assert routing.is_lookup("coupon", "list_active_notices") is True
+    assert routing.is_lookup("coupon", "draft_notice") is False  # read지만 일
+    assert routing.is_lookup("coupon", "issue_coupon") is False  # 실행
+    assert routing.is_lookup("coupon", "no_such_skill") is False

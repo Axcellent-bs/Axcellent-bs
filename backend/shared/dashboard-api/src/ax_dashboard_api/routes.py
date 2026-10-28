@@ -423,6 +423,22 @@ async def candidate_cards(area: str | None = None) -> dict:
     return ok(items, total=len(items))
 
 
+@router.get("/decision-cards")
+async def decision_cards(
+    area: str | None = None,
+    context_id: str | None = None,
+    limit: int = Query(50, ge=1, le=HR_LIST_LIMIT),
+) -> dict:
+    """확정된(후보가 아닌) 결정 카드 (최근 순). `context_id`를 주면 그 사건에서 만든 카드만."""
+    if is_mock():
+        items = mock_handover.BOARD.active_cards(area, context_id)[:limit]
+    else:
+        payload = _given(area=area, context_id=context_id)
+        out = await hr_client.call("list_cards", {**payload, "limit": limit})
+        items = [Card.model_validate(c) for c in out["cards"]]
+    return ok(items, total=len(items))
+
+
 @router.post("/candidate-cards/{card_id}/decision")
 async def decide_candidate_card(card_id: str, body: CandidateDecisionBody) -> dict:
     """후보 카드 승인·폐기. hr이 `decide_candidate_card`(A)로 실행하고, 같은 결정은 성공한다."""

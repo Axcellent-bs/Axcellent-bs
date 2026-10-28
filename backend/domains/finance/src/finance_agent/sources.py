@@ -18,6 +18,7 @@ data `impact_analysis`의 입력·출력은 계약(`ImpactAnalysisInput`·`Impac
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from importlib import resources
@@ -162,6 +163,11 @@ class MockSources:
         return _int(self.seed.get("fraud_scores", {}).get(seller_id))
 
 
+# 같은 사건·같은 구간의 영향 분석은 이 시간 동안 다시 묻지 않는다. 재무 화면이 몇 초마다 다시 불러도
+# data에 같은 A2A 요청이 반복되지 않게 한다 (AI 대화방에 같은 대화가 쌓이지 않게)
+IMPACT_CACHE_SECONDS = 300
+
+
 class LiveSources:
     """data 에이전트 A2A 호출. 응답이 없거나 형식이 다르면 None."""
 
@@ -185,19 +191,26 @@ class LiveSources:
         payload = impact_input(window)
         if payload is None:
             return None
-        output = await self._ask_data(
-            meta, "impact_analysis", payload.model_dump(mode="json", exclude_none=True)
-        )
+        body = payload.model_dump(mode="json", exclude_none=True)
+        key = (context_id, json.dumps(body, sort_keys=True))
+        hit = self._impact_cache.get(key)
+        now = time.monotonic()
+        if hit is not None and now - hit[0] < IMPACT_CACHE_SECONDS:
+            return hit[1]
+        output = await self._ask_data(meta, "impact_analysis", body)
         if output is None:
             return None
         try:
             ImpactAnalysisOutput.model_validate(output)
         except ValidationError:
             return None
-        return _impact_from(output, f"data:impact_analysis:{context_id}")
+        impact = _impact_from(output, f"data:impact_analysis:{context_id}")
+        self._impact_cache[key] = (now, impact)
+        return impact
 
     def __init__(self, http_client: httpx.AsyncClient | None = None) -> None:
         self._http = http_client  # 테스트용
+        self._impact_cache: dict[tuple[str, str], tuple[float, Impact | None]] = {}
 
     async def _read_json(self, url: str, timeout: float) -> Any | None:
         """읽기 전용 GET. 응답이 없거나 200이 아니거나 JSON이 아니면 None (fail-closed)."""

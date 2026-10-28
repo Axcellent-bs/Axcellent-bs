@@ -210,6 +210,17 @@ class HandoverBoard:
             if c.card_id not in self._decisions and (area is None or c.extra.get("area") == area)
         ]
 
+    def active_cards(self, area: str | None = None, context_id: str | None = None) -> list[Card]:
+        """사람이 승인해 확정된 카드 (최근 순)."""
+        approved = [
+            c
+            for c in self.cards
+            if self._decisions.get(c.card_id) == "approve"
+            and (area is None or c.extra.get("area") == area)
+            and (context_id is None or c.context_id == context_id)
+        ]
+        return sorted(approved, key=lambda c: (c.created_at, c.card_id), reverse=True)
+
     def decide(
         self, card_id: str, decision: Literal["approve", "reject"]
     ) -> DecideCandidateCardOutput:

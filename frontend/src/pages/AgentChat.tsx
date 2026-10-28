@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  ALL_ROOM, DIRECT_ROOM, INCIDENT_STATUS_KO, SAFETY_ROOM, buildTimeline, incidentTitle, messageCount,
+  INCIDENT_STATUS_KO, SAFETY_ROOM, buildTimeline, incidentTitle, messageCount,
   type ChatItem, type OrchIncident, type Tone,
 } from "@/lib/agentChat";
 import { api, ApiError } from "@/lib/api";
@@ -64,9 +64,9 @@ function ConnChip({ label, conn }: { label: string; conn: Conn }) {
 }
 
 // ---------------------------------------------------------------- 타임라인 항목
-function Avatar({ name, k }: { name: string; k: string }) {
+function Avatar({ name, k, small = false }: { name: string; k: string; small?: boolean }) {
   return (
-    <span aria-hidden="true" className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${bubbleOf(k).avatar}`}>
+    <span aria-hidden="true" className={`flex ${small ? "h-5 w-5 text-[10px]" : "h-8 w-8"} shrink-0 items-center justify-center rounded-full text-xs font-semibold ${bubbleOf(k).avatar}`}>
       {name.slice(0, 1)}
     </span>
   );
@@ -82,7 +82,8 @@ function Message({ m }: { m: Extract<ChatItem, { kind: "msg" }> }) {
         <div className={`flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs ${right ? "justify-end" : ""}`}>
           <span className="font-semibold text-ink-900">{m.from}</span>
           <span className="chip bg-ink-100 px-1.5 py-0 text-[10px] text-ink-500">→ {m.to}</span>
-          <time dateTime={m.at} className="tabular-nums text-[11px] text-ink-500">{hhmm(m.at)}</time>
+          <time dateTime={m.at} className="tabular-nums text-[11px] text-ink-500">{hhmm(m.at)}{m.repeat && m.lastAt ? ` ~ ${hhmm(m.lastAt)}` : ""}</time>
+          {m.repeat && <span className="chip bg-brand-50 px-1.5 py-0 text-[10px] font-semibold text-brand-700" title="같은 내용을 여러 번 주고받아 하나로 묶었습니다">×{m.repeat}</span>}
         </div>
         <div title={m.raw} className={`mt-1 rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${right ? "rounded-tr-md" : "rounded-tl-md"} ${look.bubble} ${right ? "" : TONE_MARK[m.tone]}`}>
           <p>{right ? "" : TONE_ICON[m.tone]}{m.text}</p>
@@ -221,7 +222,8 @@ export default function AgentChat() {
   const [commTruncated, setCommTruncated] = useState(false);
   // 총괄이 목 모드라고 알려 줄 때만(GET /api/incidents의 meta.mock) 총괄 보류에 승인·거절 버튼을 보인다
   const [orchMock, setOrchMock] = useState(false);
-  const [room, setRoom] = useState(ALL_ROOM);
+  const [room, setRoom] = useState<string>(SAFETY_ROOM);
+  const roomPicked = useRef(false);
   const [seen, setSeen] = useState<Record<string, number>>({});
   const [busyHold, setBusyHold] = useState<string | null>(null);
   const [fault, setFault] = useState<FaultState | null>(null);
@@ -258,14 +260,13 @@ export default function AgentChat() {
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
-    for (const id of [ALL_ROOM, SAFETY_ROOM, DIRECT_ROOM, ...incidents.map((i) => i.context_id)]) {
+    for (const id of [SAFETY_ROOM, ...incidents.map((i) => i.context_id)]) {
       c[id] = messageCount(buildTimeline(incidents, executions, comms, id));
     }
     return c;
   }, [incidents, executions, comms]);
 
   const rooms: Room[] = useMemo(() => [
-    { id: ALL_ROOM, title: "전체", count: counts[ALL_ROOM] ?? 0 },
     ...[...incidents].reverse().map((inc) => ({
       id: inc.context_id,
       title: incidentTitle(inc),
@@ -273,13 +274,8 @@ export default function AgentChat() {
       status: inc.status,
       count: counts[inc.context_id] ?? 0,
     })),
-    {
-      id: DIRECT_ROOM, title: "부서 간 직통",
-      sub: commConn === "unready" ? "공통 로그 준비 안 됨" : commConn === "off" ? "연결 안 됨" : "사건에 묶이지 않은 부서끼리의 대화",
-      count: counts[DIRECT_ROOM] ?? 0,
-    },
     { id: SAFETY_ROOM, title: "안전 관문(돈이 나가는 일)", sub: safetyConn === "off" ? "연결 안 됨" : undefined, count: counts[SAFETY_ROOM] ?? 0 },
-  ], [incidents, counts, safetyConn, commConn]);
+  ], [incidents, counts, safetyConn]);
 
   // 지금 보고 있는 방은 읽음 처리
   useEffect(() => { setSeen((s) => (s[room] === counts[room] ? s : { ...s, [room]: counts[room] ?? 0 })); }, [room, counts]);
@@ -294,6 +290,10 @@ export default function AgentChat() {
   useEffect(() => {
     if (orchConn !== "on") return;
     const ids = incidents.map((i) => i.context_id);
+    if (!roomPicked.current) {
+      roomPicked.current = true;
+      if (ids.length) setRoom(ids[ids.length - 1]);
+    }
     if (knownIncidents.current === null) { knownIncidents.current = new Set(ids); return; }
     const opened = ids.find((id) => !knownIncidents.current?.has(id));
     for (const id of ids) knownIncidents.current.add(id);
@@ -319,6 +319,17 @@ export default function AgentChat() {
   }, [revealed, items.length]);
   const shown = useMemo(() => items.slice(0, Math.min(revealed, items.length)), [items, revealed]);
   const typing = primed.current && revealed < items.length;
+  // 참석자: 이 방에서 말한 쪽과 받은 쪽 (처음 등장한 순서)
+  const participants = useMemo(() => {
+    const seen = new Map<string, { key: string; name: string }>();
+    for (const it of items) {
+      if (it.kind !== "msg") continue;
+      // 맡은 AI가 없는 단계("담당 미정")·받는 쪽이 기록되지 않은 줄은 참석자가 아니다
+      if (it.from !== "담당 미정" && !seen.has(it.from)) seen.set(it.from, { key: it.fromKey, name: it.from });
+      if (it.to && it.to !== "받는 쪽 미기록" && it.to !== "담당 미정" && !seen.has(it.to)) seen.set(it.to, { key: it.to, name: it.to });
+    }
+    return [...seen.values()];
+  }, [items]);
 
   // ------------------------------------------------ 스크롤: 맨 아래에 붙어 있으면 따라가고, 위로 올렸으면 "새 메시지" 알약
   const scroller = useRef<HTMLDivElement>(null);
@@ -397,15 +408,26 @@ export default function AgentChat() {
         <RoomList rooms={rooms} selected={room} unseen={unseen} onSelect={setRoom} />
 
         <section aria-label="대화 기록" className="card relative flex min-h-[420px] min-w-0 flex-1 flex-col overflow-hidden">
+          {participants.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 border-b border-ink-100 px-4 py-2.5 lg:px-6" aria-label="참석자">
+              <span className="mr-1 text-xs font-semibold text-ink-700">참석자 {participants.length}</span>
+              {participants.map((p) => (
+                <span key={p.key} className="flex items-center gap-1.5 rounded-full bg-ink-50 py-0.5 pl-0.5 pr-2.5 text-xs text-ink-700 ring-1 ring-ink-100">
+                  <Avatar name={p.name} k={p.key} small />
+                  {p.name}
+                </span>
+              ))}
+            </div>
+          )}
           <div ref={scroller} onScroll={onScroll} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-5 lg:px-6">
             {roomEmpty ? (
               <EmptyState orchConn={orchConn} safetyConn={safetyConn} commConn={commConn} room={room} />
             ) : (
               <>
-              {orchConn === "off" && room === ALL_ROOM && (
+              {orchConn === "off" && room === SAFETY_ROOM && (
                 <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">총괄 AI가 꺼져 있어 안전 관문 기록만 보입니다. 켜는 방법: <code className="font-mono">{ORCH_CMD}</code></p>
               )}
-              {room === ALL_ROOM && <CommNote conn={commConn} truncated={commTruncated} />}
+              {room !== SAFETY_ROOM && <CommNote conn={commConn} truncated={commTruncated} />}
               <ol role="log" aria-live="polite" aria-relevant="additions" aria-label="부서 AI 대화" className="flex flex-col gap-4">
                 {shown.map((it) => <Item key={it.id} it={it} busyHold={busyHold} orchOn={orchOn} orchMock={orchMock} onDecide={decide} />)}
                 {typing && <p className="animate-pulse px-1 text-xs text-ink-500" aria-live="polite">AI들이 이야기하는 중… ({items.length - revealed}개 남음)</p>}
@@ -433,21 +455,10 @@ function CommNote({ conn, truncated }: { conn: Conn; truncated: boolean }) {
   if (truncated) return <p className="mb-4 rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-500">공통 로그가 많아 앞부분만 받았습니다 (최대 1000줄).</p>;
   return null;
 }
-const COMM_503 = "공통 로그: 준비 안 됨(503) — dashboard-api에 공통 로그 읽기가 아직 연결되지 않았습니다 (ax-backend #249). 부서 간 직통 대화는 연결 뒤에 보입니다. 목 모드(DASHBOARD_MOCK=1)에서는 예시 대화가 나옵니다.";
-const COMM_OFF = "공통 로그: dashboard-api(VITE_DASHBOARD_API_URL)에 연결할 수 없어 부서 간 직통 대화를 불러오지 못했습니다.";
+const COMM_503 = "공통 로그: 준비 안 됨(503) — dashboard-api에 공통 로그 읽기가 아직 연결되지 않았습니다 (ax-backend #249). 부서끼리 주고받은 대화는 연결 뒤에 보입니다. 목 모드(DASHBOARD_MOCK=1)에서는 예시 대화가 나옵니다.";
+const COMM_OFF = "공통 로그: dashboard-api(VITE_DASHBOARD_API_URL)에 연결할 수 없어 부서끼리 주고받은 대화를 불러오지 못했습니다.";
 
 function EmptyState({ orchConn, safetyConn, commConn, room }: { orchConn: Conn; safetyConn: Conn; commConn: Conn; room: string }) {
-  if (room === DIRECT_ROOM) {
-    return (
-      <div className="mx-auto max-w-md py-16 text-center text-sm text-ink-500">
-        {commConn === "unready" ? COMM_503
-          : commConn === "off" ? COMM_OFF
-          : commConn === "unknown" ? "불러오는 중…"
-          : "아직 사건에 묶이지 않은 부서 간 대화가 없습니다. 공통 로그에서 부서끼리 직접 주고받은 A2A 요청·응답이 여기에 쌓입니다."}
-        <p className="mt-4 text-[11px]">{PROD_NOTE}</p>
-      </div>
-    );
-  }
   if (room === SAFETY_ROOM) {
     return (
       <div className="mx-auto max-w-md py-16 text-center text-sm text-ink-500">

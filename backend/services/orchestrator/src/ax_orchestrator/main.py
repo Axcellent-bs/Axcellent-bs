@@ -58,6 +58,8 @@ class AppState:
     def __init__(self) -> None:
         self.mock = os.getenv("ORCHESTRATOR_MOCK") == "1"
         self.hold_timeout = float(os.getenv("ORCHESTRATOR_HOLD_TIMEOUT", "600"))
+        # 사람 할 일함 처리를 기다리는 시간(초). 넘으면 그 단계는 rejected_by_human (기본 하루)
+        self.handoff_timeout = float(os.getenv("ORCHESTRATOR_HANDOFF_TIMEOUT", "86400"))
         self.latency = float(os.getenv("ORCHESTRATOR_MOCK_LATENCY", "0.7"))
         self.registry = Registry()
         self.fakes: FakeDepartments | None = None
@@ -93,6 +95,7 @@ class AppState:
             RecordingCaller(caller, self.usage),
             publish=self._publish,
             hold_timeout=self.hold_timeout,
+            handoff_timeout=self.handoff_timeout,
             retry_delay=0.2,
         )
         self.fakes = fakes

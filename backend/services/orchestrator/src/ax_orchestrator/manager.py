@@ -15,6 +15,7 @@ from typing import Any
 from ax_contracts.schemas import EventEnvelope, EventType
 from ax_orchestrator.engine import Engine
 from ax_orchestrator.models import Incident, Plan, iso
+from ax_orchestrator.plans.finance_anomaly import finance_anomaly
 
 
 def _since(env: EventEnvelope) -> datetime | None:
@@ -28,7 +29,15 @@ def _since(env: EventEnvelope) -> datetime | None:
         return None
 
 LOOKBACK = timedelta(minutes=15)  # 사건이 열리기 직전 실패 주문·문의도 같은 사건으로 본다
-INCIDENT_EVENTS = {EventType.SHOP_DEGRADED, EventType.INFRA_ANOMALY_DETECTED}
+INCIDENT_EVENTS = {
+    EventType.SHOP_DEGRADED,
+    EventType.INFRA_ANOMALY_DETECTED,
+    EventType.FINANCE_ANOMALY_DETECTED,
+}
+# 이벤트 종류별 plan. 없는 종류는 기본 plan(시나리오 A)
+PLANS: dict[EventType, tuple[str, Callable[[], Plan]]] = {
+    EventType.FINANCE_ANOMALY_DETECTED: ("finance_anomaly", finance_anomaly),
+}
 SEVERITY_OPENS = {"high", "critical"}
 SUPPORT_EVENTS = {EventType.SUPPORT_INQUIRY_RECEIVED, EventType.SUPPORT_INQUIRY_SURGE}
 
@@ -36,9 +45,12 @@ SUBSCRIBED = [
     EventType.SHOP_DEGRADED,
     EventType.SHOP_RECOVERED,
     EventType.INFRA_ANOMALY_DETECTED,
+    EventType.FINANCE_ANOMALY_DETECTED,
     EventType.METRIC_ANOMALY,
     EventType.SUPPORT_INQUIRY_RECEIVED,
     EventType.SUPPORT_INQUIRY_SURGE,
+    # 사람 할 일함에서 끝낸 일 → 기다리던 단계를 이어 간다 (업무 요청 라우터)
+    EventType.HANDOFF_COMPLETED,
 ]
 
 
@@ -98,11 +110,15 @@ class IncidentManager:
         """처리 결과를 `(outcome, 사건)`으로 돌려준다.
 
         outcome: `duplicate`(같은 event_id) · `ignored`(총괄 소관 아님) ·
-        `noted`(기록만, 열린 사건이 있으면 거기에) · `merged`(열린 사건에 합침) · `opened`(새 사건).
+        `noted`(기록만, 열린 사건이 있으면 거기에) · `merged`(열린 사건에 합침) ·
+        `opened`(새 사건) ·
+        `resumed`(사람 할 일함 처리 결과로 단계를 이어 감) · `unmatched`(기다리는 단계가 없음).
         """
         if env.event_id in self._seen:
             return "duplicate", None
         self._seen.add(env.event_id)
+        if env.type == EventType.HANDOFF_COMPLETED:
+            return self._resume_handoff(env)
         verdict = self.judge(env)
         component = str(env.data.get("component") or "api")
         existing = self.open_for(component)
@@ -117,7 +133,7 @@ class IncidentManager:
             return "merged", existing
         inc = Incident(
             context_id=Incident.new_context_id(),
-            kind="scenario_a",
+            kind=PLANS[env.type][0] if env.type in PLANS else "scenario_a",
             title=self._title(env, component),
             component=component,
             opened_at=env.occurred_at,
@@ -125,8 +141,28 @@ class IncidentManager:
         )
         inc.log(f"이벤트 수신: {env.type.value} ({env.source}, {iso(env.occurred_at)})")
         self.incidents[inc.context_id] = inc
-        self._tasks[inc.context_id] = asyncio.create_task(self.engine.run(inc, self.plan_factory()))
+        inc.signal = dict(env.data)
+        plan = PLANS[env.type][1]() if env.type in PLANS else self.plan_factory()
+        self._tasks[inc.context_id] = asyncio.create_task(self.engine.run(inc, plan))
         return "opened", inc
+
+    def _resume_handoff(self, env: EventEnvelope) -> tuple[str, Incident | None]:
+        """같은 context_id 사건에서 같은 task_id를 기다리는 단계를 찾아 사람 결과를 넣는다.
+
+        이미 반영한 일이거나(다른 event_id로 다시 와도) 기다리는 단계가 없으면 `unmatched`.
+        사람이 적은 결과는 `untrusted.result`로 오고, 데이터로만 단계 결과에 넣는다.
+        """
+        inc = self.incidents.get(env.context_id or "")
+        task_id = env.data.get("task_id")
+        status = env.data.get("status")
+        result = env.untrusted.get("result")
+        if inc is None or not isinstance(task_id, str) or not isinstance(status, str):
+            return "unmatched", inc
+        note = result if isinstance(result, str) else None
+        if not self.engine.complete_handoff(inc, task_id, status, note):
+            return "unmatched", inc
+        inc.log(f"사람 할 일함 처리 결과 수신: {task_id} ({status}, {env.event_id})")
+        return "resumed", inc
 
     @staticmethod
     def _title(env: EventEnvelope, component: str) -> str:

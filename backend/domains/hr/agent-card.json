@@ -137,6 +137,19 @@
       "priority": "recommended"
     },
     {
+      "id": "list_cards",
+      "description": "확정된(후보가 아닌) 결정 카드를 최근 순으로 조회한다. 사건 번호를 주면 그 사건에서 만든 카드만 돌려준다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCardsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCardsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "get_audit_timeline",
       "description": "사건 하나에서 hr이 한 일을 시간순으로 조회한다. 기록이 없으면 비어 있다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#GetAuditTimelineInput",
