@@ -7,6 +7,8 @@
 - 상태를 바꾸는 `link_incident`·`create_ticket`은 서비스 안에서 `execute()`를 거친다. 관문이
   거부하면 실행하지 않고 `failed`(outcome `gate_rejected`)로 돌려준다.
 - 사람 버튼(기획서 확정·PR 머지·승급 승인)은 A2A로 받지 않는다. REST(`api.py`)로만 받는다.
+- 기획 → 개발 넘기기(`start_dev`·`receive_dev_result`)는 같은 부서의 planning·dev 서비스끼리만
+  주고받는다(A, execute 경유). 보내는 쪽은 `dev_handoff.py`다.
 - hr 연동(`list_in_progress`·`verify_handover`, 계약 #103)은 읽기다. 담당자·영역 대응과 비교는
   `domain/handover.py`의 코드 규칙으로만 한다. 인계 내용의 좋고 나쁨은 판단하지 않는다.
 """
@@ -21,6 +23,10 @@ from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.planning import (
     CreateTicketInput,
     CreateTicketOutput,
+    DevHandoffInput,
+    DevHandoffOutput,
+    DevResultInput,
+    DevResultOutput,
     FindRelatedPrsInput,
     FindRelatedPrsOutput,
     InProgressItem,
@@ -506,6 +512,105 @@ async def verify_handover(request: AgentRequest) -> AgentResult:
     )
 
 
+def _missing_key(request: AgentRequest) -> AgentResult:
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.FAILED,
+        outcome="missing_idempotency_key",
+        output={"message": "상태 변경 skill에는 idempotency_key가 필요하다"},
+    )
+
+
+def _gate_rejected(request: AgentRequest, exc: GateRefused) -> AgentResult:
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.FAILED,
+        outcome="gate_rejected",
+        output={"message": f"실행 관문이 {exc.action}을 허락하지 않아 실행하지 않았다"},
+        evidence=Evidence(
+            data_summary=f"execute({exc.action}) → {exc.decision.status}",
+            ref_ids=[exc.decision.execution_id],
+        ),
+    )
+
+
+async def start_dev(request: AgentRequest) -> AgentResult:
+    """dev 서비스: planning이 넘긴 확정 기획서·작업을 받아 PR 만들기로 잇는다 (A, execute 경유)."""
+    try:
+        inp = DevHandoffInput.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    if not request.meta.idempotency_key:
+        return _missing_key(request)
+    try:
+        result = await get_service().start_dev(
+            context_id=request.meta.context_id,
+            requester=_requester(request),
+            request=inp.request,
+            spec=inp.spec,
+            tasks=inp.tasks,
+            idempotency_key=request.meta.idempotency_key,
+        )
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    except GateRefused as exc:
+        return _gate_rejected(request, exc)
+    out = DevHandoffOutput.model_validate(result.output)
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        outcome=result.outcome,
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(
+            data_summary=f"{out.spec_id} 작업 {len(out.task_ids)}건 받음",
+            ref_ids=[f"spec:{out.spec_id}"] + [f"task:{t}" for t in out.task_ids],
+        ),
+    )
+
+
+async def receive_dev_result(request: AgentRequest) -> AgentResult:
+    """planning 서비스: dev가 돌려준 작업·PR·요청 상태를 반영한다 (A, execute 경유)."""
+    try:
+        inp = DevResultInput.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    if not request.meta.idempotency_key:
+        return _missing_key(request)
+    try:
+        result = await get_service().receive_dev_result(
+            context_id=request.meta.context_id,
+            requester=_requester(request),
+            spec_id=inp.spec_id,
+            request_id=inp.request_id,
+            request_state=inp.request_state,
+            tasks=inp.tasks,
+            prs=inp.prs,
+            idempotency_key=request.meta.idempotency_key,
+        )
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    except ValueError as exc:
+        return AgentResult(
+            meta=request.meta,
+            status=TaskStatus.FAILED,
+            outcome="invalid_input",
+            output={"message": str(exc)},
+        )
+    except GateRefused as exc:
+        return _gate_rejected(request, exc)
+    out = DevResultOutput(applied=result.output["applied"])
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(
+            data_summary=f"{inp.spec_id} 작업·PR {out.applied}건 반영 · {inp.request_id} "
+            f"{inp.request_state}",
+            ref_ids=[f"spec:{inp.spec_id}", f"req:{inp.request_id}"],
+        ),
+    )
+
+
 HANDLERS = {
     "create_ticket": create_ticket,
     "find_related_prs": find_related_prs,
@@ -513,4 +618,6 @@ HANDLERS = {
     "verify_rollback_target": verify_rollback_target,
     "list_in_progress": list_in_progress,
     "verify_handover": verify_handover,
+    "start_dev": start_dev,
+    "receive_dev_result": receive_dev_result,
 }

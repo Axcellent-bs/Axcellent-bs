@@ -20,6 +20,7 @@ def service(monkeypatch: pytest.MonkeyPatch, reset_state: None) -> PlanningServi
     템플릿 상태를 비우는 reset_state 뒤에 돌아야 에이전트 이름이 planning으로 남는다.
     """
     monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
+    monkeypatch.delenv("PLANNING_ROLE", raising=False)  # 서비스 역할 없이 합친 모드로 본다
     config.set_agent_name("planning")  # 다른 부서 테스트가 먼저 돌아도 execute 요청자는 planning
     return set_service(PlanningService())
 

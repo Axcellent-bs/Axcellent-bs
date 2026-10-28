@@ -16,20 +16,32 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import os
 import re
 import weakref
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ax_agent_template import config as template_config
 from ax_agent_template import execute as gate_module
 from ax_contracts.schemas import TENANT_ID_DEFAULT, Evidence, ExecuteDecision, RequestMeta
-from ax_contracts.schemas.planning import ChangeResultInput
+from ax_contracts.schemas.planning import ChangeResultInput, DevHandoffInput, DevResultInput
 from ax_contracts.schemas.record import RecordCase, RecordKind
+from planning_agent.dev_handoff import (
+    RECEIVE_DEV_RESULT,
+    ROLES,
+    START_DEV,
+    DevSender,
+    dev_result_key,
+    send_to_service,
+    start_dev_key,
+)
 from planning_agent.domain.autocheck import (
     WAIT_CROSS_CHECK,
     Check,
@@ -61,6 +73,7 @@ from planning_agent.domain.models import (
     OutMsg,
     Para,
     PrGate,
+    ReqState,
     Request,
     Spec,
     State,
@@ -379,7 +392,15 @@ class PlanningService:
         gate: Gate | None = None,
         tenant_id: str = TENANT_ID_DEFAULT,
         result_sender: ResultSender | None = None,
+        role: str | None = None,
+        dev_sender: DevSender | None = None,
     ):
+        # 서비스 역할: "" = 합친 모드(원래 동작), "planning" = 기획서까지, "dev" = PR·머지만
+        self.role = (os.getenv("PLANNING_ROLE", "") if role is None else role).strip()
+        if self.role and self.role not in ROLES:
+            raise ValueError(f"모르는 PLANNING_ROLE: {self.role}")
+        self._send_dev: DevSender = dev_sender or send_to_service
+        self._sending: set[asyncio.Task] = set()
         self._clock_factory: Callable[[], Clock] = (
             (lambda: clock) if clock else default_clock_factory()
         )
@@ -399,6 +420,7 @@ class PlanningService:
         self.state: State = initial_state()
         self.state.tenant_id = self.tenant_id
         self._idempotent: dict[str, ActionResult] = {}
+        self._dev_sent: dict[str, str] = {}  # dev: 기획서 → 마지막으로 돌려준 결과 지문
 
     def reset(self) -> None:
         """초기 데이터로 되돌린다 (구독자는 유지하고 새 상태를 알린다)."""
@@ -445,19 +467,117 @@ class PlanningService:
             before = len(s.activity)
             result = await fn(s, **params) or ActionResult()
             await self._advance(s)
+            outgoing = self._dev_outgoing(s)
             self._to_outbox(s, before)
             result.changed = s != self.state
             if result.changed:
                 self.state = s
                 self.version += 1
                 self._notify()
-            return result
+        # 넘기기는 상태를 바꿔 끼운 뒤 잠금 밖에서 보낸다 (잠금을 쥔 채 네트워크를 부르지 않는다)
+        for item in outgoing:
+            self._spawn_send(*item)
+        return result
+
+    # ---- 기획 → 개발 넘기기 (서비스 역할이 있을 때만)
+
+    def _dev_outgoing(self, s: State) -> list[tuple[str, str, BaseModel, str]]:
+        """이번 액션으로 보낼 넘기기 목록 (skill, context_id, 입력, idempotency_key).
+
+        planning: 이번에 넘김 표시가 붙은 기획서.
+        dev: 작업·PR·요청 상태가 지난번과 달라진 기획서."""
+        if not self.role:
+            return []
+        out: list[tuple[str, str, BaseModel, str]] = []
+        if self.role == "planning":
+            was = {sp.id for sp in self.state.specs if sp.handed_to_dev}
+            for sp in s.specs:
+                req = self._request_of_spec(s, sp)
+                if not sp.handed_to_dev or sp.id in was or req is None:
+                    continue
+                inp = DevHandoffInput(
+                    request=dump(req),
+                    spec=dump(sp),
+                    tasks=[dump(t) for t in s.tasks if t.spec == sp.id],
+                )
+                out.append((START_DEV, req.context_id, inp, start_dev_key(req.context_id, sp.id)))
+            return out
+        for sp in s.specs:
+            req = self._request_of_spec(s, sp)
+            if not sp.handed_to_dev or req is None:
+                continue
+            tasks = [t for t in s.tasks if t.spec == sp.id]
+            ids = {t.id for t in tasks}
+            res = DevResultInput(
+                spec_id=sp.id,
+                request_id=req.id,
+                request_state=req.state,
+                tasks=[dump(t) for t in tasks],
+                prs=[dump(p) for p in s.prs if p.task in ids],
+            )
+            raw = json.dumps(res.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+            fp = hashlib.sha1(raw.encode()).hexdigest()[:12]
+            if self._dev_sent.get(sp.id) == fp:
+                continue
+            self._dev_sent[sp.id] = fp
+            out.append(
+                (RECEIVE_DEV_RESULT, req.context_id, res, dev_result_key(req.context_id, sp.id, fp))
+            )
+        return out
+
+    def _spawn_send(self, skill: str, ctx: str, payload: BaseModel, key: str) -> None:
+        task = asyncio.create_task(self._send_one(skill, ctx, payload, key))
+        self._sending.add(task)
+        task.add_done_callback(self._sending.discard)
+
+    async def _send_one(self, skill: str, ctx: str, payload: BaseModel, key: str) -> None:
+        """한 건 보낸다. 실패해도 상태는 그대로 두고 활동에 한 줄 남긴다."""
+        try:
+            how = await self._send_dev(skill, ctx, self.tenant_id, payload, key)
+        except Exception:  # 넘기기 실패가 이미 바꾼 상태를 되돌리지 않게 한다
+            how = "보내지 못함 (오류)"
+        if how.startswith("보냄"):
+            return
+        frm, to = ("planning", "dev") if self.role == "planning" else ("dev", "planning")
+
+        async def log(s: State) -> None:
+            s.activity.append(
+                self._act(self.clock(), ctx, frm, to, skill, "A2A", f"{skill} {how}", "A")
+            )
+
+        await self._apply(log)
+
+    async def wait_sent(self) -> None:
+        """보내는 중인 넘기기가 끝날 때까지 기다린다 (테스트용)."""
+        while self._sending:
+            await asyncio.gather(*list(self._sending), return_exceptions=True)
+
+    def _hand_to_dev(self, s: State, sp: Spec, req: Request | None, ctx: str) -> None:
+        """planning 역할: 확정된 기획서를 dev 서비스로 넘긴다고 표시한다 (보내기는 바꿔 끼운 뒤)."""
+        if self.role != "planning" or req is None or sp.handed_to_dev:
+            return
+        ids = [t.id for t in s.tasks if t.spec == sp.id and t.state == "진행 중"]
+        if not ids:
+            return
+        sp.handed_to_dev = True
+        s.activity.append(
+            self._act(
+                self.clock(),
+                ctx,
+                "planning",
+                "dev",
+                START_DEV,
+                "A2A",
+                f"{sp.id} 작업 {', '.join(ids)} → 개발·배포 서비스로 넘김",
+                "A",
+            )
+        )
 
     def _to_outbox(self, s: State, before: int) -> None:
         """기획개발이 다른 부서로 보낸 활동은 그 부서 창구(outbox)에도 쌓는다."""
         next_id = len(s.outbox)
         for a in s.activity[before:]:
-            if a.from_ == "planning" and a.to != "planning":
+            if a.from_ == "planning" and a.to not in ("planning", "dev"):
                 next_id += 1
                 s.outbox.append(
                     OutMsg(
@@ -946,22 +1066,38 @@ class PlanningService:
                 return
 
     async def _advance_step(self, s: State) -> bool:
+        """역할 planning은 기획서 초안·자동 확정까지, 역할 dev는 PR 만들기부터 한다.
+
+        합친 모드(역할 없음)는 전부 한다."""
         flow = {r.id for r in s.requests if r.flow}
         for r in s.requests:
+            if self.role == "dev":
+                break  # dev는 요청으로 기획서를 쓰지 않는다 (start_dev로 확정본을 받는다)
             if r.flow and r.state == "접수" and r.spec is None and r.duplicate_of is None:
                 if r.via != "create_ticket":
                     await self._accept_draft(s, r.id)
                 await self._draft_spec(s, r)
                 return True
+        if self.role == "planning":
+            return False  # PR 만들기·재검수·머지는 dev 서비스 몫
         for sp in s.specs:
             if sp.request not in flow or sp.status != "확정":
                 continue
             has_pr = {p.task for p in s.prs}
-            if any(
-                t.spec == sp.id and t.state == "진행 중" and t.id not in has_pr for t in s.tasks
-            ):
+            todo = [
+                t
+                for t in s.tasks
+                if t.spec == sp.id and t.state == "진행 중" and t.id not in has_pr
+            ]
+            if not todo:
+                continue
+            req = self._request_of_spec(s, sp)
+            if self.role == "dev" and sp.auto and req and req.auto and req.auto.ok:
+                # planning이 넘긴 간단 요청: 원래 간단 요청 경로대로 PR·머지까지 한 번에
+                await self._auto_build(s, req, sp, todo[0])
+            else:
                 await self._generate_prs(s, sp.id)
-                return True
+            return True
         for p in s.prs:
             task = next((t for t in s.tasks if t.id == p.task), None)
             sp = next((x for x in s.specs if task and x.id == task.spec), None)
@@ -1005,23 +1141,40 @@ class PlanningService:
 
     async def _auto_complete(self, s: State, req: Request) -> None:
         """간단 요청 한 번에 처리: write_spec → 자동 확정 → split_tasks → generate_pr(B) →
-        review_pr → merge_pr(B) → record_case → 요청 부서 회신. 사람 클릭 없음."""
-        spec_id = f"SPEC-{len(s.specs) + 6}"
-        task_id = f"T-{len(s.tasks) + 10}"
-        number = len(s.prs) + 30
-        pr_id = f"PR #{number}"
-        lines, files = estimate(req.title)
-        limit = auto_limit(s.auto_policy)
-        ctx = req.context_id
+        review_pr → merge_pr(B) → record_case → 요청 부서 회신. 사람 클릭 없음.
+
+        역할 planning은 작업 분할까지 하고 dev 서비스로 넘긴다.
+        나머지는 dev가 `_auto_build`로 한다."""
+        split = self.role == "planning"
+        prelude = None if split else self._auto_prelude(s)
+        sp, task = await self._auto_plan(s, req, done=not split)
+        if split:
+            for r in s.requests:
+                if r.id == req.id:
+                    r.spec = sp.id
+                    r.state = "작업 중"
+            self._hand_to_dev(s, sp, req, req.context_id)
+            return
+        await self._auto_build(s, req, sp, task, prelude)
+
+    def _auto_prelude(self, s: State) -> tuple[datetime, datetime | None]:
+        """간단 요청 처리 시각과 승급 제안 시각 (시계를 부르는 순서를 원래대로 둔다)."""
         pol = s.auto_policy
-        streak = pol.streak + 1
         t = self.clock()
         propose = (
-            pol.proposal is None and streak >= PROMOTE_AFTER and pol.level < len(AUTO_LEVELS) - 1
+            pol.proposal is None
+            and pol.streak + 1 >= PROMOTE_AFTER
+            and pol.level < len(AUTO_LEVELS) - 1
         )
-        next_lv = AUTO_LEVELS[min(pol.level + 1, len(AUTO_LEVELS) - 1)]
-        why = f"L{pol.level}에서 연속 {streak}건 정상 머지, 자동 머지 PR의 장애 연결 0건"
-        propose_at = self.clock() if propose else None
+        return t, (self.clock() if propose else None)
+
+    async def _auto_plan(self, s: State, req: Request, *, done: bool) -> tuple[Spec, Task]:
+        """간단 요청 앞쪽: write_spec → 자동 확정 → split_tasks.
+
+        `done`이면 작업을 바로 완료로 둔다 (합친 모드)."""
+        spec_id = f"SPEC-{len(s.specs) + 6}"
+        task_id = f"T-{len(s.tasks) + 10}"
+        ctx = req.context_id
 
         def step(frm, to, point, kind, text, grade=None) -> Activity:
             act = self._act(self.clock(), ctx, frm, to, point, kind, text, grade)
@@ -1034,26 +1187,25 @@ class PlanningService:
             f"{spec_id} 작성 (요구사항 1, 완료 기준 1, 질문 0) → 간단 요청 규칙으로 자동 확정"
         )
         await self._execute("write_spec", ctx, spec_id, spec_text, {"request": req.id})
-        s.specs.append(
-            Spec(
-                id=spec_id,
-                title=req.title,
-                request=req.id,
-                status="확정",
-                auto=True,
-                problem=f"{DEPT_NAME[req.from_]}에서 받은 요청: {req.title}",
-                goal="화면 표시를 요청대로 고친다 (동작 변경 없음)",
-                paras=[
-                    Para(id="R1", kind="req", text=req.title),
-                    Para(id="C1", kind="done", text="바뀐 화면에서 요청한 표시가 그대로 보인다"),
-                ],
-                basis=[f"{req.id} ({DEPT_NAME[req.from_]})", "간단 요청 규칙 통과"],
-                human_sentences=0,
-            )
+        sp = Spec(
+            id=spec_id,
+            title=req.title,
+            request=req.id,
+            status="확정",
+            auto=True,
+            problem=f"{DEPT_NAME[req.from_]}에서 받은 요청: {req.title}",
+            goal="화면 표시를 요청대로 고친다 (동작 변경 없음)",
+            paras=[
+                Para(id="R1", kind="req", text=req.title),
+                Para(id="C1", kind="done", text="바뀐 화면에서 요청한 표시가 그대로 보인다"),
+            ],
+            basis=[f"{req.id} ({DEPT_NAME[req.from_]})", "간단 요청 규칙 통과"],
+            human_sentences=0,
         )
+        s.specs.append(sp)
         step("planning", "planning", "write_spec", "A2A", spec_text, "A")
         # 자동 확정도 confirm_spec 관문을 거친다 (#171 규칙 키, 값은 기획서에서 코드로 계산)
-        spec_rules = spec_check(s.specs[-1])
+        spec_rules = spec_check(sp)
         await self._execute(
             "confirm_spec",
             ctx,
@@ -1063,12 +1215,46 @@ class PlanningService:
         )
 
         await self._execute("split_tasks", ctx, task_id, f"R1 → 작업 {task_id}", {"spec": spec_id})
-        s.tasks.append(
-            Task(
-                id=task_id, spec=spec_id, para="R1", title=req.title, owner="에이전트", state="완료"
-            )
+        task = Task(
+            id=task_id,
+            spec=spec_id,
+            para="R1",
+            title=req.title,
+            owner="에이전트",
+            state="완료" if done else "진행 중",
         )
+        s.tasks.append(task)
         step("planning", "planning", "split_tasks", "A2A", f"R1 → 작업 {task_id}", "A")
+        return sp, task
+
+    async def _auto_build(
+        self,
+        s: State,
+        req: Request,
+        sp: Spec,
+        task: Task,
+        prelude: tuple[datetime, datetime | None] | None = None,
+    ) -> None:
+        """간단 요청 뒤쪽: generate_pr(B) → review_pr → merge_pr(B) → record_case →
+        회신·승급 제안."""
+        t, propose_at = prelude or self._auto_prelude(s)
+        spec_id = sp.id
+        task_id = task.id
+        number = len(s.prs) + 30
+        pr_id = f"PR #{number}"
+        lines, files = estimate(req.title)
+        limit = auto_limit(s.auto_policy)
+        ctx = req.context_id
+        pol = s.auto_policy
+        streak = pol.streak + 1
+        propose = propose_at is not None
+        next_lv = AUTO_LEVELS[min(pol.level + 1, len(AUTO_LEVELS) - 1)]
+        why = f"L{pol.level}에서 연속 {streak}건 정상 머지, 자동 머지 PR의 장애 연결 0건"
+
+        def step(frm, to, point, kind, text, grade=None) -> Activity:
+            act = self._act(self.clock(), ctx, frm, to, point, kind, text, grade)
+            s.activity.append(act)
+            return act
 
         gen_text = f"{pr_id} 변경 {lines}줄·{files}파일·{limit['paths']} → 코드 규칙 통과"
         auto_paths = changed_paths_for(spec_id, "R1", limit["paths"])
@@ -1136,6 +1322,7 @@ class PlanningService:
         )
         pr.merged = True
         pr.merged_at = merged_act.at
+        task.state = "완료"
 
         case_text = f"① spec_confirmed·pr_merged·request_closed · {req.id} (자동 처리)"
         await self._execute("record_case", ctx, f"{req.id}:auto_closed", case_text)
@@ -1662,6 +1849,118 @@ class PlanningService:
         self._idempotent[idempotency_key] = result
         return result
 
+    async def start_dev(
+        self,
+        *,
+        context_id: str,
+        requester: str,
+        request: dict,
+        spec: dict,
+        tasks: list[dict],
+        idempotency_key: str,
+    ) -> ActionResult:
+        """dev 서비스: planning이 넘긴 확정 기획서·작업을 받는다 (A).
+
+        요청·기획서·작업은 id로 덮어쓴다.
+
+        받은 뒤 다음 단계(PR 만들기·검수·자동 머지)는 기존 규칙대로 이어 간다.
+        같은 idempotency_key의 두 번째 요청은 이전 결과를 돌려준다."""
+        cached = self._idempotent.get(idempotency_key)
+        if cached is not None:
+            return ActionResult(changed=False, outcome=cached.outcome, output=dict(cached.output))
+        req = Request.model_validate(request)
+        sp = Spec.model_validate(spec)
+        got = [Task.model_validate(t) for t in tasks]
+        req.flow = True  # 받은 뒤 사람 클릭 없이 PR까지 잇는다
+        sp.handed_to_dev = True
+
+        async def run(s: State) -> ActionResult:
+            t = self.clock()
+            ctx = req.context_id
+            ids = [x.id for x in got]
+            text = f"{sp.id} 작업 {', '.join(ids) or '없음'} 받음 → PR 만들기"
+            await self._execute(
+                START_DEV, ctx, sp.id, text, {"request": req.id, "tasks": ids}, [sp.id, *ids]
+            )
+            self._upsert(s.requests, [req])
+            self._upsert(s.specs, [sp])
+            self._upsert(s.tasks, got)
+            frm = requester if requester in DEPT_NAME else "planning"
+            s.activity.append(self._act(t, ctx, frm, "dev", START_DEV, "A2A", text, "A"))
+            return ActionResult(
+                outcome="accepted",
+                output={"accepted": True, "spec_id": sp.id, "task_ids": ids},
+            )
+
+        result = await self._apply(run)
+        self._idempotent[idempotency_key] = result
+        return result
+
+    async def receive_dev_result(
+        self,
+        *,
+        context_id: str,
+        requester: str,
+        spec_id: str,
+        request_id: str,
+        request_state: str,
+        tasks: list[dict],
+        prs: list[dict],
+        idempotency_key: str,
+    ) -> ActionResult:
+        """planning 서비스: dev가 돌려준 작업·PR·요청 상태를 반영한다 (A).
+
+        작업·PR은 id로 덮어쓴다."""
+        cached = self._idempotent.get(idempotency_key)
+        if cached is not None:
+            return ActionResult(changed=False, outcome=cached.outcome, output=dict(cached.output))
+        if request_state not in get_args(ReqState):
+            raise ValueError(f"모르는 요청 상태: {request_state}")
+        got_tasks = [Task.model_validate(t) for t in tasks]
+        got_prs = [PR.model_validate(p) for p in prs]
+
+        async def run(s: State) -> ActionResult:
+            t = self.clock()
+            req = next((r for r in s.requests if r.id == request_id), None)
+            ctx = req.context_id if req else context_id
+            merged = sum(1 for p in got_prs if p.merged)
+            text = (
+                f"{spec_id} 작업 {len(got_tasks)}·PR {len(got_prs)}(머지 {merged}) 반영"
+                f" · {request_id} {request_state}"
+            )
+            await self._execute(
+                RECEIVE_DEV_RESULT,
+                ctx,
+                f"{spec_id}:{len(s.activity)}",
+                text,
+                {"request": request_id, "request_state": request_state},
+                [spec_id, request_id],
+            )
+            self._upsert(s.tasks, got_tasks)
+            self._upsert(s.prs, got_prs)
+            if req:
+                req.state = request_state  # type: ignore[assignment]
+            frm = requester if requester in DEPT_NAME else "dev"
+            s.activity.append(
+                self._act(t, ctx, frm, "planning", RECEIVE_DEV_RESULT, "A2A", text, "A")
+            )
+            return ActionResult(output={"applied": len(got_tasks) + len(got_prs)})
+
+        result = await self._apply(run)
+        self._idempotent[idempotency_key] = result
+        return result
+
+    @staticmethod
+    def _upsert(rows: list, items: list) -> None:
+        """id가 같으면 그 자리에서 바꾸고, 없으면 뒤에 붙인다."""
+        index = {r.id: i for i, r in enumerate(rows)}
+        for item in items:
+            if item.id in index:
+                rows[index[item.id]] = item
+            else:
+                index[item.id] = len(rows)
+                rows.append(item)
+
     # ---------------------------------------------------------------- 사람·에이전트 액션
 
     async def _send(self, s: State, to: str, point: str, text: str, ctx: str) -> None:
@@ -1910,6 +2209,7 @@ class PlanningService:
                     "read",
                 )
             )
+        self._hand_to_dev(s, sp, req, ctx)
 
     async def _generate_prs(self, s: State, spec: str) -> None:
         todo = [t for t in s.tasks if t.spec == spec and t.state == "진행 중"]
