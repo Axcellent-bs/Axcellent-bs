@@ -8,6 +8,7 @@ import { Linked, Ref, convoHref, go, hrefOf, prFromSlug, prSlug, reviewOf } from
 import { CONFIRMED_BY, Flow, Head, Layout, ListPane, Pairs, Side, Step, mergedLabel } from './flow'
 import { SendWindow } from './depts'
 import { apiBase, deployApi, kst, type DeployCheck, type Deployment } from './api'
+import { RepoTag, RepoTargetBlock } from './repo'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -138,6 +139,7 @@ function PrLine({ s, p, d }: { s: S; p: PR; d: Dispatch<Action> }) {
       <div className="muted small mono">{p.gate.lines}줄·{p.gate.files}파일 · {p.gate.paths}</div>
       <span className="tags">
         <Tag tone={last === '통과' ? 'green' : 'amber'}>검수 {last}{p.reviews.length > 1 ? ` (${p.reviews.length}회차)` : ''}</Tag>
+        <RepoTag p={p} />
         {p.merged ? <Tag tone="green">{mergedLabel(p)}</Tag> : xr ? <a href={`#/work/reviews/${xr.id}`}><Tag tone="amber">{xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기'} {xr.id}</Tag></a> : rejected ? <Tag tone="amber">검증자 거절</Tag> : null}
       </span>
       {!p.merged && (last === '불일치' || rejected) && <Button size="small" onClick={() => d({ type: 'reviewPr', pr: p.id })}>다시 검수</Button>}
@@ -151,13 +153,13 @@ export function Work({ s, d, item }: P & { item?: string }) {
   const [line, setLine] = useState<CodeLine>()
   useEffect(() => { setLine(undefined) }, [item])
   const prOf = (taskId: string) => s.prs.find((p) => p.task === taskId)
-  const sel = s.prs.find((p) => p.id === prFromSlug(item)) ?? s.prs.find((p) => reviewOf(s, p.id)) ?? s.prs[s.prs.length - 1]
+  const sel = s.prs.find((p) => p.id === prFromSlug(item)) ?? s.prs.find((p) => p.target?.status === 'proposed') ?? s.prs.find((p) => reviewOf(s, p.id)) ?? s.prs[s.prs.length - 1]
   const groupOf = (taskId: string, state: string) => { const p = prOf(taskId); return state === '완료' || p?.merged ? 2 : p && reviewOf(s, p.id) ? 1 : 0 }
   const tasks = s.tasks.slice().reverse()
   const row = (t: S['tasks'][number]) => {
     const p = prOf(t.id)
     const xr = p && reviewOf(s, p.id)
-    return { key: t.id, href: p ? `#/work/prs/${prSlug(p.id)}` : `#/work/specs/${t.spec}/${t.para}`, on: !!p && p.id === sel?.id, title: t.title, meta: <>{t.id}{p ? ` · ${p.id}` : ''} <State v={xr ? waitLabel(xr) : t.state} /></> }
+    return { key: t.id, href: p ? `#/work/prs/${prSlug(p.id)}` : `#/work/specs/${t.spec}/${t.para}`, on: !!p && p.id === sel?.id, title: t.title, meta: <>{t.id}{p ? ` · ${p.id}` : ''} <State v={p?.target?.status === 'proposed' ? '레포 승인 대기' : xr ? waitLabel(xr) : t.state} /></> }
   }
   const list = <ListPane empty="작업 없음" groups={(['진행 중', '교차검증·사람 확인', '완료'] as const).map((label, i) => ({ label, rows: tasks.filter((t) => groupOf(t.id, t.state) === i).map(row) }))} />
   if (!sel) return <Layout list={list}><div className="empty"><b>PR 없음</b></div></Layout>
@@ -185,6 +187,11 @@ export function Work({ s, d, item }: P & { item?: string }) {
           {para?.warn && <Tag tone="amber">경고 {para.warn.card}</Tag>}
           {para?.incident && <Tag tone="amber">장애 {para.incident}</Tag>}
         </Step>
+        {sel.target && (
+          <Step name="대상 레포" on={sel.target.status === 'approved'} title={sel.target.status === 'approved' ? sel.target.repo : sel.target.status === 'rejected' ? '거절됨' : '승인 대기'}>
+            <RepoTargetBlock key={sel.id} p={sel} d={d} />
+          </Step>
+        )}
         <Step name="관문" on title={`${sel.gate.result} · ${sel.gate.lines}줄·${sel.gate.files}파일 · ${sel.gate.paths}`} />
         <Step name="검수" on={last === '통과'} title={sel.reviews.join(' → ')}>
           {!sel.merged && (last === '불일치' || rejected) && <Button size="small" onClick={() => d({ type: 'reviewPr', pr: sel.id })}>다시 검수</Button>}

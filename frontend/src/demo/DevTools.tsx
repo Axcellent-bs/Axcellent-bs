@@ -1,29 +1,18 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from '@/lib/nav'
-import { DEV_API } from '@/planning/api'
+import { DEV_API, vcsApi, type VcsConnection, type VcsTestResult } from '@/planning/api'
 
 // 개발 도구 연결: 고객사 개발팀이 쓰는 형상관리·CI·배포 도구를 개발·배포 AI(dev)에 잇는 창구.
-// 형상관리 설정은 dev 서비스(`/api/planning/vcs`)에 저장된다. 토큰은 서버 메모리에만 있고 화면에는 끝 4자리만 온다.
-type VcsConfig = {
-  kind: string
-  repo: string
-  base_url: string
-  base_branch: string
-  token_set: boolean
-  token_hint: string
-  source: 'screen' | 'env' | 'default'
-}
-type VcsTest = { ok: boolean; kind: string; code: string | null; message: string; checked_at: string }
-
+// 형상관리 연결은 레포마다 1개, 여러 개. dev 서비스(`/api/planning/vcs/connections`)에 저장되고 토큰은 끝 4자리만 온다.
+// 연결이 2개 이상이면 AI가 PR마다 대상 레포를 제안하고 사람이 승인한다.
 const KINDS = [
   { id: 'github', label: 'GitHub', ready: true },
   { id: 'gitlab', label: 'GitLab (사내 설치형 포함)', ready: false },
   { id: 'bitbucket', label: 'Bitbucket', ready: false },
   { id: 'svn', label: 'SVN · 읽기 전용', ready: false },
-  { id: 'mock', label: '연결 안 함 (시연 데이터)', ready: true },
 ]
 const KIND_LABEL: Record<string, string> = Object.fromEntries(KINDS.map((k) => [k.id, k.label]))
-const SOURCE: Record<VcsConfig['source'], string> = { screen: '이 화면', env: '서버 설정 파일', default: '기본값' }
+const SOURCE: Record<string, string> = { screen: '이 화면', env: '서버 설정 파일' }
 const PERMISSIONS = ['Contents 읽기·쓰기', 'Pull requests 읽기·쓰기', 'Commit statuses 읽기']
 
 // 형상관리 외의 연결 지점. 형상관리 연결로 함께 되는 것과 아직 없는 것을 나눠 보여 준다
@@ -35,55 +24,62 @@ const OTHERS: { name: string; tools: string; state: 'with-vcs' | 'linked' | 'pla
   { name: '알림', tools: '슬랙 · Teams · 잔디', state: 'planned' },
 ]
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${DEV_API}/api/planning${path}`, { cache: 'no-store', ...init })
-  const body = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error((body as { error?: { message?: string } }).error?.message ?? `응답 ${res.status}`)
-  return (body as { data: T }).data
-}
-const isConfig = (x: unknown): x is VcsConfig => !!x && typeof x === 'object' && 'kind' in x
+const api = vcsApi(DEV_API)
+type Form = { id?: string; kind: string; base_url: string; repo: string; base_branch: string; token: string; description: string; paths: string }
+const EMPTY: Form = { kind: 'github', base_url: '', repo: '', base_branch: 'main', token: '', description: '', paths: '' }
+const toForm = (c: VcsConnection): Form => ({ id: c.id, kind: c.kind, base_url: c.base_url ?? '', repo: c.repo, base_branch: c.base_branch || 'main', token: '', description: c.description ?? '', paths: c.paths.join(', ') })
+// 담당 경로: 쉼표·줄바꿈으로 나눈다
+const splitPaths = (x: string) => x.split(/[,\n]/).map((p) => p.trim()).filter(Boolean)
+const failed = (id: string, message: string): VcsTestResult => ({ ok: false, code: 'unavailable', message, checked_at: new Date().toISOString(), connection_id: id })
 
-/** 형상관리 설정 + 다른 개발 도구. 개발·배포 화면의 톱니바퀴 창과 시스템 관리 화면이 같이 쓴다 */
+const TONE = { ok: 'bg-emerald-50 text-emerald-700', bad: 'bg-red-50 text-red-700', wait: 'bg-amber-50 text-amber-700', none: 'bg-ink-100 text-ink-700' }
+
+/** 형상관리 연결 목록 + 다른 개발 도구. 개발·배포 화면의 톱니바퀴 창과 시스템 관리 화면이 같이 쓴다 */
 export function DevToolsPanel() {
-  const [cfg, setCfg] = useState<VcsConfig | null>(null)
+  const [list, setList] = useState<VcsConnection[] | null>(null)
   const [offline, setOffline] = useState(false)
-  const [form, setForm] = useState({ kind: 'github', base_url: '', repo: '', base_branch: 'dev', token: '' })
+  const [tests, setTests] = useState<Record<string, VcsTestResult>>({})
+  const [testing, setTesting] = useState<string | null>(null)
+  const [form, setForm] = useState<Form | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [test, setTest] = useState<VcsTest | null>(null)
-  const [testing, setTesting] = useState(false)
 
-  const load = (c: VcsConfig) => {
-    setCfg(c)
-    setForm({ kind: c.kind === 'mock' ? 'github' : c.kind, base_url: c.base_url, repo: c.repo, base_branch: c.base_branch || 'dev', token: '' })
-  }
   useEffect(() => {
-    call<unknown>('/vcs')
-      .then((d) => (isConfig(d) ? load(d) : setOffline(true)))
-      .catch(() => setOffline(true))
+    api.list().then(setList).catch(() => { setList([]); setOffline(true) })
   }, [])
 
-  const runTest = async () => {
-    setTesting(true)
+  const runTest = async (id: string) => {
+    setTesting(id)
     try {
-      setTest(await call<VcsTest>('/vcs/test', { method: 'POST' }))
+      const r = await api.test(id)
+      setTests((t) => ({ ...t, [id]: r && typeof r.message === 'string' ? r : failed(id, '확인 결과 없음') }))
     } catch (e) {
-      setTest({ ok: false, kind: cfg?.kind ?? '', code: 'unavailable', message: (e as Error).message, checked_at: new Date().toISOString() })
+      setTests((t) => ({ ...t, [id]: failed(id, (e as Error).message) }))
     } finally {
-      setTesting(false)
+      setTesting(null)
     }
   }
 
   const save = async (e: FormEvent) => {
     e.preventDefault()
-    if (form.kind !== 'mock' && !/^[\w.-]+\/[\w.-]+$/.test(form.repo.trim())) return setError('레포는 owner/name 형태로 넣어 주세요.')
-    if (form.kind !== 'mock' && !form.token && !cfg?.token_set) return setError('접근 토큰을 넣어 주세요.')
+    if (!form) return
+    const editing = list?.find((c) => c.id === form.id)
+    const repo = form.repo.trim()
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return setError('레포는 owner/name 형태로 넣어 주세요.')
+    if (!form.token && !editing?.token_set) return setError('접근 토큰을 넣어 주세요.')
     setSaving(true)
     setError(null)
     try {
-      load(await call<VcsConfig>('/vcs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }))
-      setTest(null)
-      await runTest()
+      const { paths, token, ...rest } = form
+      const next = await api.save({
+        ...rest, repo, base_url: form.base_url.trim(), base_branch: form.base_branch.trim() || 'main',
+        description: form.description.trim(), paths: splitPaths(paths), ...(token ? { token } : {}),
+      })
+      setList(next)
+      setForm(null)
+      // 저장한 연결을 바로 확인한다 (새 연결은 레포 이름으로 찾는다)
+      const saved = next.find((c) => (form.id ? c.id === form.id : c.repo === repo))
+      if (saved) void runTest(saved.id)
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -91,68 +87,116 @@ export function DevToolsPanel() {
     }
   }
 
-  const connected = cfg && cfg.kind !== 'mock'
-  const status = !cfg ? null : !connected ? { label: '연결 안 함', tone: 'bg-ink-100 text-ink-700' }
-    : test?.ok ? { label: '연결됨', tone: 'bg-emerald-50 text-emerald-700' }
-    : test ? { label: '연결 실패', tone: 'bg-red-50 text-red-700' }
-    : { label: '확인 전', tone: 'bg-amber-50 text-amber-700' }
-  const kindReady = KINDS.find((k) => k.id === form.kind)?.ready
+  const remove = async (c: VcsConnection) => {
+    if (!window.confirm(`${c.repo} 연결을 지울까요?`)) return
+    setError(null)
+    try {
+      setList(await api.remove(c.id))
+      if (form?.id === c.id) setForm(null)
+    } catch (err) {
+      setError((err as Error).message)
+    }
+  }
+
+  const status = (c: VcsConnection) => {
+    const t = tests[c.id]
+    if (testing === c.id) return { label: '확인 중…', tone: TONE.none }
+    return t?.ok ? { label: '연결됨', tone: TONE.ok } : t ? { label: '연결 실패', tone: TONE.bad } : { label: '확인 전', tone: TONE.wait }
+  }
+  const connected = !!list?.length
+  const kindReady = KINDS.find((k) => k.id === form?.kind)?.ready
+  const editing = form?.id ? list?.find((c) => c.id === form.id) : undefined
 
   return (
     <div className="space-y-6">
-      <section className="card space-y-5 p-6">
+      <section className="card space-y-4 p-6">
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="card-title text-lg">형상관리</h2>
-          {status && <span className={`chip ${status.tone}`}>{testing ? '확인 중…' : status.label}</span>}
+          {list && <span className={`chip ${connected ? TONE.none : TONE.wait}`}>레포 {list.length}</span>}
+          {list && list.length > 1 && <span className="chip bg-ink-100 text-ink-700">PR마다 AI 제안 · 사람 승인</span>}
           {offline && <span className="chip bg-amber-50 text-amber-700">개발·배포 AI에 연결할 수 없음</span>}
-          <span className="ml-auto text-xs text-ink-500">개발·배포 AI가 PR 만들기·검수·머지·역추적에 씁니다</span>
+          <button type="button" className="btn-primary ml-auto px-4" disabled={offline || (!!form && !form.id)}
+            onClick={() => { setForm({ ...EMPTY }); setError(null) }}>연결 추가</button>
         </div>
 
-        {cfg && (
-          <dl className="grid gap-x-6 gap-y-3 border-t border-ink-100 pt-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
-            <div><dt className="text-xs text-ink-500">종류</dt><dd className="mt-0.5 font-medium">{KIND_LABEL[cfg.kind] ?? cfg.kind}</dd></div>
-            <div><dt className="text-xs text-ink-500">레포</dt><dd className="mt-0.5 font-mono">{cfg.repo || '—'}</dd></div>
-            <div><dt className="text-xs text-ink-500">병합 대상 브랜치</dt><dd className="mt-0.5 font-mono">{cfg.base_branch || '—'}</dd></div>
-            <div><dt className="text-xs text-ink-500">API 주소</dt><dd className="mt-0.5 truncate font-mono text-xs leading-5">{cfg.base_url || '기본 주소'}</dd></div>
-            <div><dt className="text-xs text-ink-500">접근 토큰</dt><dd className="mt-0.5 font-mono">{cfg.token_set ? cfg.token_hint : '없음'}</dd></div>
-            <div><dt className="text-xs text-ink-500">설정 출처</dt><dd className="mt-0.5">{SOURCE[cfg.source]}</dd></div>
-            {test && (
-              <div className="sm:col-span-2 lg:col-span-3">
-                <dt className="text-xs text-ink-500">마지막 확인</dt>
-                <dd className={`mt-0.5 ${test.ok ? 'text-emerald-700' : 'text-red-700'}`}>
-                  {test.message}{test.code ? ` (${test.code})` : ''} · {new Date(test.checked_at).toLocaleTimeString('ko-KR')}
-                </dd>
-              </div>
-            )}
-          </dl>
+        {list && !list.length && !form && <p className="border-t border-ink-100 pt-4 text-sm text-ink-500">연결 없음 · 시연 데이터</p>}
+
+        {!!list?.length && (
+          <ul className="space-y-3">
+            {list.map((c) => {
+              const st = status(c)
+              const t = tests[c.id]
+              return (
+                <li key={c.id} className={`rounded-xl border p-4 ${form?.id === c.id ? 'border-ink-400' : 'border-ink-100'}`}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono font-medium">{c.repo}</span>
+                    <span className="chip bg-ink-100 text-ink-700">{KIND_LABEL[c.kind] ?? c.kind}</span>
+                    <span className={`chip ${st.tone}`}>{st.label}</span>
+                    <span className="chip bg-ink-100 text-ink-500">{SOURCE[c.source] ?? c.source}</span>
+                    <div className="ml-auto flex gap-1.5">
+                      <button type="button" className="btn-ghost" onClick={() => runTest(c.id)} disabled={!!testing || offline}>연결 확인</button>
+                      <button type="button" className="btn-ghost" onClick={() => { setForm(toForm(c)); setError(null) }}>수정</button>
+                      <button type="button" className="btn-quiet" onClick={() => remove(c)}>삭제</button>
+                    </div>
+                  </div>
+                  <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                    <div><dt className="text-xs text-ink-500">병합 대상 브랜치</dt><dd className="mt-0.5 font-mono">{c.base_branch || '—'}</dd></div>
+                    <div><dt className="text-xs text-ink-500">API 주소</dt><dd className="mt-0.5 truncate font-mono text-xs leading-5">{c.base_url || '기본 주소'}</dd></div>
+                    <div><dt className="text-xs text-ink-500">접근 토큰</dt><dd className="mt-0.5 font-mono">{c.token_set ? c.token_hint : '없음'}</dd></div>
+                    <div><dt className="text-xs text-ink-500">설명</dt><dd className="mt-0.5">{c.description || '—'}</dd></div>
+                    <div className="sm:col-span-2 lg:col-span-4">
+                      <dt className="text-xs text-ink-500">담당 경로</dt>
+                      <dd className="mt-1 flex flex-wrap gap-1.5">
+                        {c.paths.length ? c.paths.map((p) => <span key={p} className="chip bg-ink-100 font-mono text-ink-700">{p}</span>) : <span className="text-ink-500">—</span>}
+                      </dd>
+                    </div>
+                    {t && (
+                      <div className="sm:col-span-2 lg:col-span-4">
+                        <dt className="text-xs text-ink-500">마지막 확인</dt>
+                        <dd className={`mt-0.5 ${t.ok ? 'text-emerald-700' : 'text-red-700'}`}>
+                          {t.message}{t.code ? ` (${t.code})` : ''} · {new Date(t.checked_at).toLocaleTimeString('ko-KR')}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                </li>
+              )
+            })}
+          </ul>
         )}
 
-        <form onSubmit={save} className="space-y-3 border-t border-ink-100 pt-4">
-          <div className="grid gap-3 md:grid-cols-[1fr_2fr]">
-            <select className="field" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })} aria-label="형상관리 종류">
-              {KINDS.map((k) => <option key={k.id} value={k.id} disabled={!k.ready}>{k.label}{k.ready ? '' : ' — 준비 중'}</option>)}
-            </select>
-            <input className="field font-mono" placeholder="API 주소 (비우면 https://api.github.com, 사내 설치형은 https://<주소>/api/v3)" value={form.base_url}
-              onChange={(e) => setForm({ ...form, base_url: e.target.value })} aria-label="API 주소" disabled={form.kind === 'mock'} />
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <input className="field font-mono" placeholder="레포 owner/name" value={form.repo} onChange={(e) => setForm({ ...form, repo: e.target.value })} aria-label="레포" disabled={form.kind === 'mock'} />
-            <input className="field font-mono" placeholder="병합 대상 브랜치" value={form.base_branch} onChange={(e) => setForm({ ...form, base_branch: e.target.value })} aria-label="병합 대상 브랜치" disabled={form.kind === 'mock'} />
-            <input className="field font-mono" type="password" autoComplete="off" placeholder={cfg?.token_set ? '접근 토큰 (비우면 기존 토큰 유지)' : '접근 토큰'} value={form.token}
-              onChange={(e) => setForm({ ...form, token: e.target.value })} aria-label="접근 토큰" disabled={form.kind === 'mock'} />
-          </div>
-          {form.kind !== 'mock' && (
+        {form && (
+          <form onSubmit={save} className="space-y-3 border-t border-ink-100 pt-4">
+            <h3 className="font-medium">{editing ? `${editing.repo} 수정` : '연결 추가'}</h3>
+            <div className="grid gap-3 md:grid-cols-[1fr_2fr]">
+              <select className="field" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })} aria-label="형상관리 종류">
+                {KINDS.map((k) => <option key={k.id} value={k.id} disabled={!k.ready}>{k.label}{k.ready ? '' : ' — 준비 중'}</option>)}
+              </select>
+              <input className="field font-mono" placeholder="API 주소 (비우면 github.com, 사내 설치형은 https://<주소>/api/v3)" value={form.base_url}
+                onChange={(e) => setForm({ ...form, base_url: e.target.value })} aria-label="API 주소" />
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <input className="field font-mono" placeholder="레포 owner/name" value={form.repo} onChange={(e) => setForm({ ...form, repo: e.target.value })} aria-label="레포" />
+              <input className="field font-mono" placeholder="병합 대상 브랜치" value={form.base_branch} onChange={(e) => setForm({ ...form, base_branch: e.target.value })} aria-label="병합 대상 브랜치" />
+              <input className="field font-mono" type="password" autoComplete="off" placeholder={editing?.token_set ? '접근 토큰 (비우면 기존 토큰 유지)' : '접근 토큰'} value={form.token}
+                onChange={(e) => setForm({ ...form, token: e.target.value })} aria-label="접근 토큰" />
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <input className="field" placeholder="설명 (예: 쇼핑몰 웹)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} aria-label="설명" />
+              <textarea className="field font-mono" rows={2} placeholder="담당 경로 (예: shop-web/, src/)" value={form.paths} onChange={(e) => setForm({ ...form, paths: e.target.value })} aria-label="담당 경로" />
+            </div>
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="text-ink-500">토큰 권한 (레포 1개만)</span>
+              <span className="text-ink-500">토큰 권한 (이 레포만)</span>
               {PERMISSIONS.map((p) => <span key={p} className="chip bg-ink-100 text-ink-700">{p}</span>)}
             </div>
-          )}
-          {error && <p className="text-sm text-red-700">{error}</p>}
-          <div className="flex gap-2">
-            <button className="btn-primary px-5" disabled={saving || offline || !kindReady}>{saving ? '저장 중…' : '저장'}</button>
-            <button type="button" className="btn-ghost" onClick={runTest} disabled={testing || offline || !cfg}>연결 확인</button>
-          </div>
-        </form>
+            {error && <p className="text-sm text-red-700">{error}</p>}
+            <div className="flex gap-2">
+              <button className="btn-primary px-5" disabled={saving || offline || !kindReady}>{saving ? '저장 중…' : '저장'}</button>
+              <button type="button" className="btn-ghost" onClick={() => { setForm(null); setError(null) }}>취소</button>
+            </div>
+          </form>
+        )}
+        {!form && error && <p className="text-sm text-red-700">{error}</p>}
       </section>
 
       <section className="card p-6">

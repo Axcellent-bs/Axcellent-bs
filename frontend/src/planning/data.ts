@@ -79,6 +79,19 @@ export interface PR {
   auto?: boolean // 사람 클릭 없이 머지됨 (기준 또는 교차검증)
   mergedBy?: 'rule' | 'review' | 'human'
   rule?: string // 자동 머지에 쓴 기준 (AR-n)
+  target?: RepoTarget // 레포가 2개 이상일 때 AI가 고른 대상 레포 (사람 승인 전에는 PR을 열지 않는다)
+}
+
+// PR을 올릴 레포. 연결 1개면 자동 승인, 2개 이상이면 AI 제안 → 사람 승인
+export interface RepoTarget {
+  connectionId: string
+  repo: string
+  status: 'proposed' | 'approved' | 'rejected'
+  confidence: 'high' | 'mid' | 'low'
+  reasons: string[] // "AI: "로 시작하면 LLM 판단
+  candidates: { connectionId: string; repo: string; score: number }[]
+  decidedBy: string | null
+  decidedAt: string | null
 }
 
 export interface Message { who: string; dept: Dept; text: string; decision?: string; t?: string }
@@ -431,6 +444,8 @@ export type Action =
   | { type: 'advance' } // 다음 단계 한 칸 (버스·화면이 일정 간격으로 보낸다)
   | { type: 'generatePrs'; spec: string }
   | { type: 'reviewPr'; pr: string }
+  | { type: 'approveRepo'; pr: string; connection?: string } // connection 없으면 제안된 레포로 승인
+  | { type: 'rejectRepo'; pr: string }
   | { type: 'acceptDraft'; request: string }
   | { type: 'writeSpec'; request: string }
   // 교차검증·학습 기준·사람 확인

@@ -171,3 +171,28 @@ export const deployApi = (base: string) => ({
   approve: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
   check: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/check`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
 })
+
+// ---- 형상관리 연결 목록 (dev 서비스 `/api/planning/vcs/connections`). 레포 여러 개를 잇고 PR마다 대상 레포를 고른다
+export interface VcsConnection {
+  id: string; kind: string; repo: string; base_url: string; base_branch: string; description: string
+  paths: string[]; token_set: boolean; token_hint: string; source: 'screen' | 'env'
+}
+export interface VcsConnectionInput { id?: string; kind: string; repo: string; base_url?: string; base_branch?: string; token?: string; description?: string; paths?: string[] }
+export interface VcsTestResult { ok: boolean; code: string | null; message: string; checked_at: string; connection_id: string }
+
+// 녹화 데모(목)는 모르는 주소에 빈 배열·{ok:true}를 준다. 연결 모양이 아닌 값은 버린다
+const toConnections = (d: unknown): VcsConnection[] =>
+  Array.isArray(d) ? (d as VcsConnection[]).filter((c) => c && typeof c.id === 'string' && typeof c.repo === 'string').map((c) => ({ ...c, paths: Array.isArray(c.paths) ? c.paths : [] })) : []
+const post = (body: unknown = {}): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+
+export const vcsApi = (base: string) => {
+  const list = () => call<unknown>(base, '/vcs/connections').then(toConnections)
+  // POST 응답이 목록이 아니면(목 등) 다시 읽는다
+  const after = (d: unknown) => (Array.isArray(d) ? toConnections(d) : list())
+  return {
+    list,
+    save: (c: VcsConnectionInput) => call<unknown>(base, '/vcs/connections', post(c)).then(after),
+    remove: (id: string) => call<unknown>(base, `/vcs/connections/${encodeURIComponent(id)}/delete`, post()).then(after),
+    test: (id: string) => call<VcsTestResult>(base, `/vcs/connections/${encodeURIComponent(id)}/test`, post()),
+  }
+}
