@@ -41,6 +41,13 @@ if [ "${1:-}" = "stop" ]; then
   exit 0
 fi
 
+# backend/.env 가 있으면 먼저 읽는다 (LLM 키·모델 등). 아래 주소·목 설정이 그 위에 덮인다
+if [ -f .env ]; then
+  set -a
+  . ./.env
+  set +a
+fi
+
 # 컨테이너가 아니라서 서비스 이름 대신 localhost 주소를 알려 준다 (AX_<이름>_URL, agent_url)
 while read -r name port _; do
   [ -n "$name" ] || continue
