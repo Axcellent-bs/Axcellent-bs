@@ -6,7 +6,7 @@ import './planning.css'
 import { useEffect, useRef, useState } from 'react'
 import { Chip, ToastOutlet, ToastProvider, useToast, type NavItem } from '@dejafix/common-frontend'
 import { ACTION_ERROR_EVENT, useSharedStore } from './store'
-import { PLANNING_API } from './api'
+import { apiBase } from './api'
 import { Dep, Point } from './parts'
 import { Activity, Aftercare, Audit, Autonomy, Links, Metrics, Ops, Reviews, Specs, Work } from './pages'
 import { Requests, incomingCount } from './requests'
@@ -86,7 +86,7 @@ function Planning({ part }: { part: PlanningPart }) {
   const SECTIONS = P.sections
   const isSection = (x: string) => x in SECTIONS
   const route = useRoute(P.home)
-  const [state, dispatch, connected] = useSharedStore()
+  const [state, dispatch, connected] = useSharedStore(apiBase(part))
   const toast = useToast()
   useEffect(() => {
     const on = (e: Event) => toast.show((e as CustomEvent<string>).detail)
@@ -139,7 +139,7 @@ function Planning({ part }: { part: PlanningPart }) {
           <p className="pl-desc">{P.desc}</p>
         </div>
         <div className="pl-tools">
-          <Chip tone={connected ? 'green' : 'amber'} title={`기획개발 서버 ${PLANNING_API}`}>
+          <Chip tone={connected ? 'green' : 'amber'} title={`${P.title} 서버 ${apiBase(part)}`}>
             {`${P.title} ${connected ? '켜짐' : '꺼짐'}`}
           </Chip>
           <ToastOutlet />

@@ -1,0 +1,12 @@
+services:
+  handover:
+    build:
+      context: ../..
+      dockerfile: services/handover/Dockerfile
+    ports:
+      - "8104:8104"
+    env_file:
+      - path: ../../.env
+        required: false
+      - path: ./.env
+        required: false

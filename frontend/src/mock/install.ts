@@ -10,7 +10,7 @@ const FIXTURES = raw as Record<string, Fixture>
 
 /** 포트·경로 앞부분으로 어느 서비스 요청인지 정한다 (원래 대시보드의 env.ts 기본 주소 기준) */
 const BY_PORT: Record<string, string> = {
-  '8020': 'dash', '8001': 'safety', '8105': 'fin', '8010': 'relay', '8101': 'planning', '8000': 'orch', '8106': 'data',
+  '8020': 'dash', '8001': 'safety', '8105': 'fin', '8010': 'relay', '8101': 'planning', '8111': 'planning', '8000': 'orch', '8106': 'data',
 }
 
 function route(input: string): { svc: string; path: string } | null {

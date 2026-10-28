@@ -1,0 +1,12 @@
+services:
+  claims:
+    build:
+      context: ../..
+      dockerfile: services/claims/Dockerfile
+    ports:
+      - "8112:8112"
+    env_file:
+      - path: ../../.env
+        required: false
+      - path: ./.env
+        required: false

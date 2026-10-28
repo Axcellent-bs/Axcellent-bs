@@ -1,0 +1,84 @@
+{
+  "name": "decisions",
+  "owner": "준하",
+  "description": "결정 기록 — hr 업무 중 이 서비스 skill만 맡는다. 인사 — 부서가 보낸 사건·결정 기록을 받아 회사 기억에 카드로 남긴다",
+  "url": "http://decisions:8114/a2a",
+  "version": "0.1.0",
+  "capabilities": {
+    "streaming": true,
+    "push_notifications": false
+  },
+  "skills": [
+    {
+      "id": "record_case",
+      "description": "부서가 보낸 사건·결정 기록(kind, 요약, 결정 이유, 검토한 대안, 근거 참조)을 받아 결정 카드로 정리해 회사 기억에 저장한다. 결정이 없는 기록은 기록만 남기고, 확신이 낮은 카드는 후보로 보류한다. 같은 기록이 두 번 오면 한 번만 처리한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/record.py#RecordCase",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordCaseOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "orchestrator",
+        "planning",
+        "support",
+        "marketing",
+        "finance",
+        "data",
+        "infra"
+      ],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "check_plan",
+      "description": "새 계획 초안을 같은 영역의 결정 카드와 비교한다. 기각된 안과 비슷하면 경고(경과 일수는 코드가 계산), 채택하지 않기로 한 대안과 같으면 충돌, 확정된 결정과 같은 방향이면 일치로 알린다. 관련 카드가 없으면 판정하지 않고 '기록에 없음'으로 답한다. 조회 전용이다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#CheckPlanInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#CheckPlanOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator",
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_candidate_cards",
+      "description": "확신이 낮아 사람 확인을 기다리는 후보 카드를 조회한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCandidateCardsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCandidateCardsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "get_audit_timeline",
+      "description": "사건 하나에서 hr이 한 일을 시간순으로 조회한다. 기록이 없으면 비어 있다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#GetAuditTimelineInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#GetAuditTimelineOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "decide_candidate_card",
+      "description": "후보 카드를 사람이 승인(active)하거나 폐기(retired)한다. 승인하면 같은 영역의 옛 결정을 대체됨으로 연결한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideCandidateCardInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideCandidateCardOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    }
+  ]
+}

@@ -1,0 +1,166 @@
+{
+  "name": "hr",
+  "owner": "준하",
+  "description": "인사 — 부서가 보낸 사건·결정 기록을 받아 회사 기억에 카드로 남긴다",
+  "url": "http://hr:8104/a2a",
+  "version": "0.1.0",
+  "capabilities": {
+    "streaming": true,
+    "push_notifications": false
+  },
+  "skills": [
+    {
+      "id": "record_case",
+      "description": "부서가 보낸 사건·결정 기록(kind, 요약, 결정 이유, 검토한 대안, 근거 참조)을 받아 결정 카드로 정리해 회사 기억에 저장한다. 결정이 없는 기록은 기록만 남기고, 확신이 낮은 카드는 후보로 보류한다. 같은 기록이 두 번 오면 한 번만 처리한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/record.py#RecordCase",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordCaseOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "orchestrator",
+        "planning",
+        "support",
+        "marketing",
+        "finance",
+        "data",
+        "infra"
+      ],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "get_roster",
+      "description": "영역별 담당자·역할·교대 일정과, 담당이 없거나 교대 시각에 비는 공백 영역을 조회한다(조회 전용, 개인 인사 정보 없음).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#GetRosterInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#GetRosterOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator",
+        "planning",
+        "support",
+        "marketing",
+        "finance",
+        "data",
+        "infra"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "start_handover",
+      "description": "인계자·영역을 받아 인수인계 초안을 만든다. 진행 중인 일(planning)·결정 카드(회사 기억)·연락처(명부)는 자동으로 채우고, 빈 자리는 인계자에게 묻는 질문으로 돌려준다. 완성도와 빈 자리 수는 코드가 계산한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#StartHandoverInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#StartHandoverOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "answer_handover_question",
+      "description": "인계자가 빈 자리 질문에 답하면 해당 항목을 채우고 완성도를 다시 계산한다. 같은 답을 두 번 보내도 한 번만 반영한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#AnswerHandoverQuestionInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#AnswerHandoverQuestionOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "confirm_handover",
+      "description": "인수인계를 확정한다. 완성도가 기준 이상이면 planning이 진행 중 항목 누락을 교차검증한 뒤 확정(B), 기준 미만이면 보류 큐에 올려 사람이 결정한다(C).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ConfirmHandoverInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ConfirmHandoverOutput",
+      "grade": "B",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": "planning",
+      "priority": "recommended"
+    },
+    {
+      "id": "check_plan",
+      "description": "새 계획 초안을 같은 영역의 결정 카드와 비교한다. 기각된 안과 비슷하면 경고(경과 일수는 코드가 계산), 채택하지 않기로 한 대안과 같으면 충돌, 확정된 결정과 같은 방향이면 일치로 알린다. 관련 카드가 없으면 판정하지 않고 '기록에 없음'으로 답한다. 조회 전용이다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#CheckPlanInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#CheckPlanOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator",
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_handovers",
+      "description": "인수인계 현황(상태·완성도·인계 목록·답을 기다리는 질문)을 조회한다. 저장된 값을 그대로 돌려주는 읽기 전용이다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListHandoversInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListHandoversOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_open_questions",
+      "description": "인계자의 답을 기다리는 질문 목록을 조회한다(대시보드가 인계자에게 보여 주는 질문).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListOpenQuestionsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListOpenQuestionsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_candidate_cards",
+      "description": "확신이 낮아 사람 확인을 기다리는 후보 카드를 조회한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCandidateCardsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCandidateCardsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "get_audit_timeline",
+      "description": "사건 하나에서 hr이 한 일을 시간순으로 조회한다. 기록이 없으면 비어 있다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#GetAuditTimelineInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#GetAuditTimelineOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "decide_candidate_card",
+      "description": "후보 카드를 사람이 승인(active)하거나 폐기(retired)한다. 승인하면 같은 영역의 옛 결정을 대체됨으로 연결한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideCandidateCardInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideCandidateCardOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    }
+  ]
+}

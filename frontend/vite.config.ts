@@ -10,11 +10,13 @@ export default defineConfig(({ mode }) => {
   const env = { ...loadEnv(mode, fileURLToPath(new URL('.', import.meta.url)), ''), ...process.env }
   const proxy = {
     // 총괄(orchestrator). '^/orch/'로 한정한다. '/orch'만 쓰면 '/orchestrator' 화면 주소까지 프록시로 가 버린다
-    '^/orch/': { target: env.ORCHESTRATOR_PROXY_TARGET || 'http://localhost:8000', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/orch/, '') },
+    '^/orch/': { target: env.ORCHESTRATOR_PROXY_TARGET || 'http://127.0.0.1:8000', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/orch/, '') },
     // 데이터 AI(8106). 데이터분석 AI 화면의 KPI 직접 조회용
-    '/data-a2a': { target: env.DATA_PROXY_TARGET || 'http://localhost:8106', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/data-a2a/, '') },
+    '/data-a2a': { target: env.DATA_PROXY_TARGET || 'http://127.0.0.1:8106', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/data-a2a/, '') },
     // 기획개발 AI(8101). VITE_PLANNING_LIVE=on 일 때 화면이 여기로 부른다 (planning CORS에 3090이 없음)
-    '/planning-api': { target: env.PLANNING_PROXY_TARGET || 'http://localhost:8101', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/planning-api/, '') },
+    '/planning-api': { target: env.PLANNING_PROXY_TARGET || 'http://127.0.0.1:8101', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/planning-api/, '') },
+    // 개발·배포 서비스(dev, 8111)
+    '/dev-api': { target: env.DEV_PROXY_TARGET || 'http://127.0.0.1:8111', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/dev-api/, '') },
   }
   return {
     base: process.env.DEMO_BASE ?? '/',
