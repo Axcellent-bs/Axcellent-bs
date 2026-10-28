@@ -176,9 +176,9 @@ export const deployApi = (base: string) => ({
 // ---- 형상관리 연결 목록 (dev 서비스 `/api/planning/vcs/connections`). 레포 여러 개를 잇고 PR마다 대상 레포를 고른다
 export interface VcsConnection {
   id: string; kind: string; repo: string; base_url: string; base_branch: string; description: string
-  paths: string[]; token_set: boolean; token_hint: string; source: 'screen' | 'env'
+  paths: string[]; mount?: string; token_set: boolean; token_hint: string; source: 'screen' | 'env'
 }
-export interface VcsConnectionInput { id?: string; kind: string; repo: string; base_url?: string; base_branch?: string; token?: string; description?: string; paths?: string[] }
+export interface VcsConnectionInput { id?: string; kind: string; repo: string; base_url?: string; base_branch?: string; token?: string; description?: string; paths?: string[]; mount?: string }
 export interface VcsTestResult { ok: boolean; code: string | null; message: string; checked_at: string; connection_id: string }
 
 // 녹화 데모(목)는 모르는 주소에 빈 배열·{ok:true}를 준다. 연결 모양이 아닌 값은 버린다

@@ -25,9 +25,9 @@ const OTHERS: { name: string; tools: string; state: 'with-vcs' | 'linked' | 'pla
 ]
 
 const api = vcsApi(DEV_API)
-type Form = { id?: string; kind: string; base_url: string; repo: string; base_branch: string; token: string; description: string; paths: string }
-const EMPTY: Form = { kind: 'github', base_url: '', repo: '', base_branch: 'main', token: '', description: '', paths: '' }
-const toForm = (c: VcsConnection): Form => ({ id: c.id, kind: c.kind, base_url: c.base_url ?? '', repo: c.repo, base_branch: c.base_branch || 'main', token: '', description: c.description ?? '', paths: c.paths.join(', ') })
+type Form = { id?: string; kind: string; base_url: string; repo: string; base_branch: string; token: string; description: string; paths: string; mount: string }
+const EMPTY: Form = { kind: 'github', base_url: '', repo: '', base_branch: 'main', token: '', description: '', paths: '', mount: '' }
+const toForm = (c: VcsConnection): Form => ({ id: c.id, kind: c.kind, base_url: c.base_url ?? '', repo: c.repo, base_branch: c.base_branch || 'main', token: '', description: c.description ?? '', paths: c.paths.join(', '), mount: c.mount ?? '' })
 // 담당 경로: 쉼표·줄바꿈으로 나눈다
 const splitPaths = (x: string) => x.split(/[,\n]/).map((p) => p.trim()).filter(Boolean)
 const failed = (id: string, message: string): VcsTestResult => ({ ok: false, code: 'unavailable', message, checked_at: new Date().toISOString(), connection_id: id })
@@ -73,7 +73,7 @@ export function DevToolsPanel() {
       const { paths, token, ...rest } = form
       const next = await api.save({
         ...rest, repo, base_url: form.base_url.trim(), base_branch: form.base_branch.trim() || 'main',
-        description: form.description.trim(), paths: splitPaths(paths), ...(token ? { token } : {}),
+        description: form.description.trim(), paths: splitPaths(paths), mount: form.mount.trim(), ...(token ? { token } : {}),
       })
       setList(next)
       setForm(null)
@@ -127,6 +127,7 @@ export function DevToolsPanel() {
             <div className="grid gap-3 md:grid-cols-2">
               <input className="field" placeholder="설명 (예: 쇼핑몰 웹)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} aria-label="설명" />
               <textarea className="field font-mono" rows={2} placeholder="담당 경로 (예: shop-web/, src/)" value={form.paths} onChange={(e) => setForm({ ...form, paths: e.target.value })} aria-label="담당 경로" />
+              <input className="field font-mono md:col-span-2" placeholder="회사 코드 위치 (예: shop-web/ · 레포가 회사 코드의 한 폴더일 때. 비우면 레포 루트)" value={form.mount} onChange={(e) => setForm({ ...form, mount: e.target.value })} aria-label="회사 코드 위치" />
             </div>
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
               <span className="text-ink-500">토큰 권한 (이 레포만)</span>
@@ -179,6 +180,7 @@ export function DevToolsPanel() {
                     <div><dt className="text-xs text-ink-500">API 주소</dt><dd className="mt-0.5 truncate font-mono text-xs leading-5">{c.base_url || '기본 주소'}</dd></div>
                     <div><dt className="text-xs text-ink-500">접근 토큰</dt><dd className="mt-0.5 font-mono">{c.token_set ? c.token_hint : '없음'}</dd></div>
                     <div><dt className="text-xs text-ink-500">설명</dt><dd className="mt-0.5">{c.description || '—'}</dd></div>
+                    <div><dt className="text-xs text-ink-500">회사 코드 위치</dt><dd className="mt-0.5 font-mono">{c.mount || '레포 루트'}</dd></div>
                     <div className="sm:col-span-2 lg:col-span-4">
                       <dt className="text-xs text-ink-500">담당 경로</dt>
                       <dd className="mt-1 flex flex-wrap gap-1.5">

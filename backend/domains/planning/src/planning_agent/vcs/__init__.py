@@ -88,6 +88,9 @@ class Connection:
     base_branch: str = "dev"
     description: str = ""
     paths: tuple[str, ...] = ()
+    # 이 레포가 회사 코드에서 놓인 자리 (예: 쇼핑몰 화면만 떼어 온 레포 → "shop-web/").
+    # 안전 관문·역추적에는 이 앞머리를 붙인 경로로 보내고, 커밋은 레포 안 경로 그대로 한다
+    mount: str = ""
     source: str = "screen"  # screen · env (바꿔 끼운 부품이면 override)
     token: str = field(default="", repr=False)
 
@@ -101,6 +104,7 @@ class Connection:
             "base_branch": self.base_branch,
             "description": self.description,
             "paths": list(self.paths),
+            "mount": self.mount,
             "token_set": bool(self.token),
             "token_hint": _hint(self.token),
             "source": self.source,
@@ -132,6 +136,25 @@ def clean_paths(paths: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
     return tuple(out)
 
 
+def clean_mount(raw: str | None) -> str:
+    """앞머리 경로를 `shop-web/`처럼 끝이 `/`인 상대 경로로 다듬는다. 비우면 레포 루트 그대로."""
+    p = (raw or "").strip().replace("\\", "/")
+    while p.startswith(("./", "/")):
+        p = p[2:] if p.startswith("./") else p[1:]
+    if not p:
+        return ""
+    if ".." in p.split("/"):
+        raise VcsError("config", "앞머리 경로에 ..를 쓸 수 없다")
+    return p if p.endswith("/") else p + "/"
+
+
+def logical_paths(connection_id: str | None, paths: list[str] | tuple[str, ...]) -> list[str]:
+    """레포 안 경로에 그 연결의 앞머리를 붙인다 (안전 관문·역추적용). 앞머리가 없으면 그대로."""
+    conn = find_connection(connection_id) if connection_id else None
+    mount = conn.mount if conn else ""
+    return [p if not mount or p.startswith(mount) else mount + p for p in paths]
+
+
 def _env_connection() -> Connection | None:
     kind = (os.getenv("PLANNING_VCS_KIND") or "").strip().lower()
     if not kind or kind == "mock":
@@ -144,6 +167,7 @@ def _env_connection() -> Connection | None:
         base_branch=os.getenv("PLANNING_VCS_BASE_BRANCH") or "dev",
         description=os.getenv("PLANNING_VCS_DESCRIPTION") or "",
         paths=clean_paths((os.getenv("PLANNING_VCS_PATHS") or "").split(",")),
+        mount=clean_mount(os.getenv("PLANNING_VCS_MOUNT")),
         source="env",
         token=os.getenv("PLANNING_VCS_TOKEN") or "",
     )
@@ -253,6 +277,7 @@ def upsert_connection(
     description: str = "",
     paths: list[str] | tuple[str, ...] | None = None,
     id: str | None = None,  # noqa: A002 - 화면 계약의 필드 이름
+    mount: str | None = None,
 ) -> Connection:
     """화면 연결을 넣거나 바꾼다. 토큰을 비워 보내면 그 연결의 이전 토큰을 그대로 쓴다.
 
@@ -278,6 +303,7 @@ def upsert_connection(
         base_branch=base_branch.strip() or "dev",
         description=description.strip(),
         paths=clean_paths(paths),
+        mount=clean_mount(mount) if mount is not None else (before.mount if before else ""),
         source="screen",
         token=new_token or (before.token if before else ""),
     )

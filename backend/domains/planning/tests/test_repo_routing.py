@@ -177,7 +177,7 @@ def test_connections_api() -> None:
     row = r.json()["data"][0]
     assert set(row) == {
         "id", "kind", "repo", "base_url", "base_branch", "description",
-        "paths", "token_set", "token_hint", "source",
+        "paths", "mount", "token_set", "token_hint", "source",
     }  # fmt: skip
     assert (row["id"], row["token_set"], row["source"]) == ("conn-1", True, "screen")
     r = c.post("/api/planning/vcs/connections", json={"kind": "mock", "repo": "acme/api"})
@@ -323,3 +323,23 @@ def test_mock_default_unchanged() -> None:
     with pytest.raises(ActionError) as err:
         run(a.approve_repo("PR #31"))
     assert err.value.code == "NO_VCS"
+
+
+def test_mount_prefixes_paths_for_safety() -> None:
+    """레포를 회사 코드의 한 자리(앞머리)에 놓으면 관문용 경로에 그 앞머리가 붙는다."""
+    from planning_agent import vcs
+
+    vcs.set_vcs(None)
+    vcs._screen = None
+    try:
+        c = vcs.upsert_connection(kind="mock", repo="acme/shop-web", mount="/shop-web")
+        assert c.mount == "shop-web/" and c.public()["mount"] == "shop-web/"
+        assert vcs.logical_paths(c.id, ["src/App.tsx", "shop-web/x.ts"]) == [
+            "shop-web/src/App.tsx",
+            "shop-web/x.ts",
+        ]
+        # 다시 저장할 때 앞머리를 안 주면 그대로 둔다
+        assert vcs.upsert_connection(id=c.id, kind="mock", repo="acme/shop-web").mount == "shop-web/"
+    finally:
+        vcs._screen = None
+        vcs.set_vcs(None)

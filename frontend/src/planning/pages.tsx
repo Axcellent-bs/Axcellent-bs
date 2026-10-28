@@ -9,7 +9,7 @@ import { CONFIRMED_BY, Flow, Head, Layout, ListPane, Pairs, Side, Step, mergedLa
 import { SendWindow } from './depts'
 import { apiBase, deployApi, kst, type DeployCheck, type Deployment } from './api'
 import { RepoTag, RepoTargetBlock } from './repo'
-import { CodingStep, DevTeamTag, codingState, fromDevTeam } from './coding'
+import { CodingLabel, CodingStep, DevTeamTag, LiveDot, codingState, fromDevTeam, isRunning } from './coding'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -169,14 +169,14 @@ export function Work({ s, d, item }: P & { item?: string }) {
       href: p ? `#/work/prs/${prSlug(p.id)}` : t.coding ? `#/work/prs/${encodeURIComponent(t.id)}` : `#/work/specs/${t.spec}/${t.para}`,
       on: taskOnly ? t.id === taskOnly.id : !!p && p.id === sel?.id,
       title: t.title,
-      meta: <>{t.id}{p ? ` · ${p.id}` : ''} <State v={p?.target?.status === 'proposed' ? '레포 승인 대기' : xr ? waitLabel(xr) : coding ?? t.state} />{fromDevTeam(s, t) && <> <DevTeamTag /></>}</>,
+      meta: <>{t.id}{p ? ` · ${p.id}` : ''} {coding && t.coding && isRunning(t.coding.status) && <LiveDot />}<State v={p?.target?.status === 'proposed' ? '레포 승인 대기' : xr ? waitLabel(xr) : coding ?? t.state} />{fromDevTeam(s, t) && <> <DevTeamTag /></>}</>,
     }
   }
   const list = <ListPane empty="작업 없음" groups={(['진행 중', '교차검증·사람 확인', '완료'] as const).map((label, i) => ({ label, rows: tasks.filter((t) => groupOf(t.id, t.state) === i).map(row) }))} />
   if (taskOnly) {
     const text = s.specs.find((x) => x.id === taskOnly.spec)?.paras.find((p) => p.id === taskOnly.para)?.text
     return (
-      <Layout list={list} head={<Head kicker={<>{taskOnly.id} · {taskOnly.spec}{fromDevTeam(s, taskOnly) && <> · <DevTeamTag /></>}</>} title={taskOnly.title} side={<State v={taskOnly.coding ? codingState(taskOnly.coding) : taskOnly.state} />} />}>
+      <Layout list={list} head={<Head kicker={<>{taskOnly.id} · {taskOnly.spec}{fromDevTeam(s, taskOnly) && <> · <DevTeamTag /></>}</>} title={taskOnly.title} side={taskOnly.coding ? <CodingLabel c={taskOnly.coding} /> : <State v={taskOnly.state} />} />}>
         <Flow>
           <CodingStep task={taskOnly} />
           <Step name="작업" on href={`#/work/specs/${taskOnly.spec}/${taskOnly.para}`} title={`${taskOnly.id} · ${taskOnly.spec} ${taskOnly.para}`}>

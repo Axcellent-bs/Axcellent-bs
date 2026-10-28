@@ -14,6 +14,14 @@ export const CODING_LABEL: Record<CodingStatus, string> = {
   opened: 'PR 열림', merged: '머지됨', waiting_human: '사람 확인', failed: '실패',
 }
 const DONE: CodingStatus[] = ['opened', 'merged']
+/** 에이전트가 지금 일하는 중인 상태 (옆에 깜빡이는 점) */
+const RUNNING: CodingStatus[] = ['queued', 'reading', 'writing', 'reviewing']
+export const isRunning = (s?: CodingStatus | string) => RUNNING.includes(s as CodingStatus)
+export const LiveDot = () => <span className="live-dot" aria-hidden="true" />
+/** 상태 글자 + 진행 중이면 깜빡이는 점 */
+export const CodingLabel = ({ c }: { c: CodingRun }) => (
+  <span className="live-label">{isRunning(c.status) && <LiveDot />}<State v={codingState(c)} /></span>
+)
 const STUCK: CodingStatus[] = ['failed', 'waiting_human']
 
 /** 개발팀이 직접 넣은 기획에서 나온 작업인가 */
@@ -51,7 +59,7 @@ export function CodingStep({ task }: { task: Task }) {
     }
   }
   return (
-    <Step name="코딩 에이전트" on={DONE.includes(c.status)} title={<State v={codingState(c)} />}>
+    <Step name="코딩 에이전트" on={DONE.includes(c.status)} title={<CodingLabel c={c} />}>
       <span className="tags">
         {c.model && <Tag><span className="mono">{c.model}</span></Tag>}
         {c.attempts > 1 && <Tag>{c.attempts}회차</Tag>}

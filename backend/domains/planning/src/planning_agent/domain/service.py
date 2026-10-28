@@ -2377,7 +2377,8 @@ class PlanningService:
             task, cr = self._coding_of(s, job)
             number = len(s.prs) + 30
             pr_id = f"PR #{number}"
-            paths = sorted(r.path for r in rows)
+            # 안전 관문·역추적은 회사 코드 기준 경로(연결의 앞머리를 붙인 것)로 본다. 커밋은 레포 안 경로
+            paths = sorted(vcs.logical_paths(cr.connection, [r.path for r in rows]))
             lines, files = coder.total_lines(rows), len(rows)
             area = coder.area_of(paths)
             gen_text = f"{pr_id} 변경 {lines}줄·{files}파일·{area} → 코드 규칙 확인"

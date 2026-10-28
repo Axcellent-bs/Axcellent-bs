@@ -304,7 +304,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             return _err(400, "INVALID_VCS", "paths는 문자열 목록이어야 한다")
         text = {
             k: body.get(k)
-            for k in ("id", "kind", "repo", "base_url", "base_branch", "token", "description")
+            for k in ("id", "kind", "repo", "base_url", "base_branch", "token", "description", "mount")
         }
         if any(v is not None and not isinstance(v, str) for v in text.values()):
             return _err(400, "INVALID_VCS", "문자열 필드에 다른 값이 들어 있다")
@@ -318,6 +318,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
                 token=text["token"] or None,
                 description=text["description"] or "",
                 paths=paths,
+                mount=text["mount"],
             )
         except vcs.VcsError as exc:
             return _err(400, "INVALID_VCS", exc.message)
