@@ -4,11 +4,39 @@ import { useState, type ComponentType, type ReactNode } from "react";
 import { AccountSwitcher } from "@/demo/AccountSwitcher";
 import { canOpen, homeOf, servicesOf, useSession } from "@/demo/session";
 import { useCompany } from "@/demo/company";
-import { activeChild, matchPath, useEnabledServices, type SubItem } from "@/demo/services";
+import { AGENTS, activeChild, matchPath, useEnabledServices, type Service, type SubItem } from "@/demo/services";
 import { IconAgents, IconBell, IconBolt, IconBox, IconChart, IconDashboard, IconLayout, IconOffice, IconSearch } from "../icons";
 
-// 메뉴는 부서가 아니라 서비스다. 이 계정에 배정됐고 회사가 켠 서비스만 보인다 (src/demo/services.ts, session.tsx).
-type NavItem = { href: string; label: string; Icon: ComponentType<{ size?: number }>; logo?: string; children?: SubItem[]; match: string[] };
+// 메뉴: AI가 상위 탭이고, 그 AI가 맡은 서비스가 하위 탭이다. 서비스 안 화면(예: 고객 문의의 상담 콘솔)은 그 아래 한 단 더.
+// AI 7개는 모든 직원 메뉴에 보인다(회사가 서비스 고르기에서 끈 서비스만 빠짐). DejaFix 서비스는 배정된 계정에만 (src/demo/session.tsx servicesOf).
+// AI가 맡지 않은 서비스(DejaFix 장애 대응·PC·서버 연결)와 공용 화면은 구분선 아래에 둔다.
+type SubNav = { href: string; label: string; soon?: boolean; match: string[]; children?: SubItem[] };
+type NavItem = { href: string; label: string; Icon: ComponentType<{ size?: number }>; logo?: string; children?: SubNav[]; match: string[]; divider?: boolean };
+
+const subNav = (items?: SubItem[]): SubNav[] | undefined => items?.map((c) => ({ ...c, match: [c.href] }));
+const serviceNav = (s: Service): NavItem => ({ href: s.entry, label: s.name, Icon: s.Icon, logo: s.logo, children: subNav(s.children), match: s.paths });
+
+/** AI별 탭. 맡은 서비스가 하나면 AI 탭이 그 서비스를 바로 열고, 둘 이상이면 서비스가 하위 탭이 된다 */
+function agentNav(services: Service[]): NavItem[] {
+  return AGENTS.flatMap((g) => {
+    const mine = services.filter((s) => s.agent === g.id);
+    if (mine.length === 0) return [];
+    const match = mine.flatMap((s) => s.paths);
+    if (mine.length === 1) return [{ href: mine[0].entry, label: g.name, Icon: g.Icon, children: subNav(mine[0].children), match }];
+    return [{
+      href: mine[0].entry, label: g.name, Icon: g.Icon, match,
+      children: mine.map((s) => ({ href: s.entry, label: s.name, match: s.paths, children: s.children })),
+    }];
+  });
+}
+
+/** 하위 탭 중 지금 주소에 가장 길게 맞는 것 (/control 과 /control/keys 가 같이 켜지지 않게) */
+function activeSub(path: string, subs: SubNav[]): SubNav | undefined {
+  let best: SubNav | undefined;
+  let len = -1;
+  for (const c of subs) for (const m of c.match) if (matchPath(m, path) && m.length > len) { best = c; len = m.length; }
+  return best;
+}
 
 /** 메뉴 아이콘. logo가 있으면 아이콘 대신 그 이미지를 쓴다 (DejaFix) */
 function NavIcon({ item, size }: { item: NavItem; size: number }) {
@@ -31,7 +59,7 @@ const CONTROL_MENU: SubItem[] = [
 ];
 
 const CONTROL_NAV: NavItem[] = [
-  { href: "/control", label: "관제 센터", Icon: IconChart, children: CONTROL_MENU, match: ["/control"] },
+  { href: "/control", label: "관제 센터", Icon: IconChart, children: subNav(CONTROL_MENU), match: ["/control"] },
 ];
 
 const SYSTEM_NAV: NavItem[] = [
@@ -49,9 +77,12 @@ function useNav(): NavItem[] {
   if (account.operator) return CONTROL_NAV;
   // 회사 연결 전에는 AXcellent 연결만 보인다
   if (!company) return account.admin ? SYSTEM_NAV.filter((n) => n.href === "/system/connect") : [];
-  const services = servicesOf(account, enabled).map((s) => ({ href: s.entry, label: s.name, Icon: s.Icon, logo: s.logo, children: s.children, match: s.paths }));
+  const services = servicesOf(account, enabled);
+  const agents = agentNav(services);
+  const rest = [...services.filter((s) => !s.agent).map(serviceNav), ...SHARED_NAV];
+  if (agents.length) rest[0] = { ...rest[0], divider: true };
   // 고객사 시스템 관리자는 관리 메뉴를 맨 위에
-  return account.admin ? [...SYSTEM_NAV, ...services, ...SHARED_NAV] : [...services, ...SHARED_NAV];
+  return [...(account.admin ? SYSTEM_NAV : []), ...agents, ...rest];
 }
 
 const isOn = (path: string, item: NavItem) => item.match.some((m) => matchPath(m, path));
@@ -93,22 +124,34 @@ export function AdminShell({ children }: { children: ReactNode }) {
           const { href, label, children: subs } = item;
           const on = isOn(path, item);
           const open = on && subs && !collapsed;
-          const subOn = open ? activeChild(path, subs) : undefined;
+          const subOn = open ? activeSub(path, subs) : undefined;
           return (
             <div key={href}>
+              {item.divider && <div className={`my-2 border-t border-white/10 ${collapsed ? "mx-3" : "mx-[18px]"}`} aria-hidden="true" />}
               <Link href={href} title={collapsed ? label : undefined} aria-label={label} aria-current={on && !subs ? "page" : undefined}
                 className={`flex items-center gap-3.5 py-[13px] text-sm font-semibold transition ${collapsed ? "justify-center" : "px-[18px]"} ${on ? (open ? "text-white" : "bg-[#5b5bd6] text-white") : "hover:bg-white/10"}`}>
                 <NavIcon item={item} size={item.logo ? 22 : 18} />
                 {!collapsed && <span className="truncate">{label}</span>}
               </Link>
               {open && subs.map((c) => {
-                const sub = c.href === subOn;
+                const sub = c === subOn;
+                // 서비스 안 화면이 있으면 그 서비스가 열려 있을 때 한 단 더 보여 준다
+                const inner = sub && c.children ? c.children : undefined;
+                const innerOn = inner ? activeChild(path, inner) : undefined;
                 return (
-                  <Link key={c.href} href={c.href} aria-current={sub ? "page" : undefined}
-                    className={`flex items-center gap-2 py-2.5 pl-[50px] pr-[18px] text-[13px] transition ${sub ? "bg-[#5b5bd6] font-semibold text-white" : "text-[#c9c9e6] hover:bg-white/10"}`}>
-                    <span className="truncate">{c.label}</span>
-                    {c.soon && <span className="ml-auto shrink-0 bg-white/10 px-1.5 text-[11px] text-[#9a9ac4]">준비 중</span>}
-                  </Link>
+                  <div key={c.href}>
+                    <Link href={c.href} aria-current={sub && !inner ? "page" : undefined}
+                      className={`flex items-center gap-2 py-2.5 pl-[50px] pr-[18px] text-[13px] transition ${sub ? (inner ? "font-semibold text-white" : "bg-[#5b5bd6] font-semibold text-white") : "text-[#c9c9e6] hover:bg-white/10"}`}>
+                      <span className="truncate">{c.label}</span>
+                      {c.soon && <span className="ml-auto shrink-0 bg-white/10 px-1.5 text-[11px] text-[#9a9ac4]">준비 중</span>}
+                    </Link>
+                    {inner?.map((g) => (
+                      <Link key={g.href} href={g.href} aria-current={g.href === innerOn ? "page" : undefined}
+                        className={`flex items-center gap-2 py-2 pl-[66px] pr-[18px] text-[12.5px] transition ${g.href === innerOn ? "bg-[#5b5bd6] font-semibold text-white" : "text-[#a9a9d0] hover:bg-white/10"}`}>
+                        <span className="truncate">{g.label}</span>
+                      </Link>
+                    ))}
+                  </div>
                 );
               })}
             </div>

@@ -40,8 +40,12 @@ const ALL = [...ACCOUNTS, ...OPERATORS]
 
 const SYSTEM_PATHS = ['/system']
 
-/** 이 계정이 지금 쓸 수 있는 서비스: 배정됐고 회사가 켠 것 */
+/** 이 계정이 지금 쓸 수 있는 서비스: 회사가 켠 AI 서비스 전부 + 이 계정에 배정된 그 밖의 서비스(DejaFix 등) */
 export const servicesOf = (account: Account, enabled = getEnabled()) =>
+  SERVICES.filter((s) => enabled.includes(s.id) && (s.agent !== undefined || account.services.includes(s.id)))
+
+/** 이 계정에 배정된 서비스(회사가 켠 것 중). 첫 화면과 프로필 전환 목록은 이걸로 정한다 */
+export const assignedOf = (account: Account, enabled = getEnabled()) =>
   SERVICES.filter((s) => account.services.includes(s.id) && enabled.includes(s.id))
 
 export function canOpen(account: Account, path: string, enabled = getEnabled(), connected = !!getCompany()) {
@@ -61,7 +65,7 @@ export const homeOf = (account: Account, enabled = getEnabled()) =>
   account.operator ? '/control'
     : account.admin ? (getCompany() ? '/system/services' : '/system/connect')
     : !getCompany() ? '/login'
-    : servicesOf(account, enabled)[0]?.entry ?? '/agents/chat'
+    : assignedOf(account, enabled)[0]?.entry ?? '/agents/chat'
 
 const KEY = 'axcellent-demo-account'
 const load = (): Account | null => {

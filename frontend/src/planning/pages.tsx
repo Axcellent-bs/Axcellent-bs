@@ -148,7 +148,7 @@ function PrLine({ s, p, d }: { s: S; p: PR; d: Dispatch<Action> }) {
 const waitLabel = (x: CrossReview) => (x.lane === 'human' ? '사람 확인 대기' : '교차검증 대기')
 export function Work({ s, d, item }: P & { item?: string }) {
   const [line, setLine] = useState<CodeLine>()
-  useEffect(() => setLine(undefined), [item])
+  useEffect(() => { setLine(undefined) }, [item])
   const prOf = (taskId: string) => s.prs.find((p) => p.task === taskId)
   const sel = s.prs.find((p) => p.id === prFromSlug(item)) ?? s.prs.find((p) => reviewOf(s, p.id)) ?? s.prs[s.prs.length - 1]
   const groupOf = (taskId: string, state: string) => { const p = prOf(taskId); return state === '완료' || p?.merged ? 2 : p && reviewOf(s, p.id) ? 1 : 0 }
