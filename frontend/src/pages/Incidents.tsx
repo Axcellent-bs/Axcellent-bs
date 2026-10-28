@@ -1,13 +1,134 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ago, shortDateTime } from "@/lib/format";
-import { ANALYSIS, SEVERITY, currentIncidents, type Incident, type IncidentMeta } from "@/lib/dejafix";
+import { ANALYSIS, SEVERITY, currentIncidents, dashboardSummary, recentIncidents, type DashboardSummary, type Incident, type IncidentMeta, type Measured } from "@/lib/dejafix";
 import { DEJAFIX_LIVE } from "@/lib/env";
 
 // 장애 대응 탭 = 지금 진행 중인 장애만. DejaFix API(GET /api/incidents?status=problem)에서 받아 AXcellent가 그린다.
-// 상세(리포트·근거·변경 계획)는 DejaFix 화면으로 보낸다. DejaFix 화면을 이 안에 띄우지 않는다.
+// DejaFix 현황 화면의 가장 급한 장애·요약·언제 · 어디서도 같은 API 데이터로 다시 그린다. DejaFix 화면을 이 안에 띄우지 않는다.
 const REFRESH_MS = 30_000;
 
 type State = { data: Incident[]; meta: IncidentMeta } | null;
+
+/** 값 하나. 모르면 0·빈칸 대신 '확인할 수 없음' (DejaFix SAFE-10과 같은 규칙) */
+function Num({ m }: { m: Measured | undefined }) {
+  if (!m || m.unknown || m.value === null) return <span className="text-sm font-normal text-ink-500">확인할 수 없음</span>;
+  return <>{m.value.toLocaleString("ko-KR")}</>;
+}
+
+const unitOf = (m: Measured | undefined) => (m && !m.unknown && m.value !== null ? m.unit : "");
+
+/** 심각도별 카드 왼쪽 띠 색 */
+const BAND: Record<number, string> = { 5: "border-l-red-600", 4: "border-l-red-500", 3: "border-l-amber-500", 2: "border-l-amber-400" };
+
+/** 가장 급한 장애 1건 = 심각도 높은 순, 같으면 최근 시작 순 */
+function UrgentCard({ incident, loading }: { incident: Incident | undefined; loading: boolean }) {
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-semibold text-ink-700">가장 급한 장애</h2>
+      {loading ? (
+        <p className="card px-5 py-6 text-sm text-ink-500">불러오는 중…</p>
+      ) : !incident ? (
+        <p className="card border-l-4 border-l-emerald-500 px-5 py-6 text-sm text-ink-700">해결되지 않은 장애가 없습니다.</p>
+      ) : (
+        <div className={`card space-y-3 border-l-4 px-5 py-4 ${BAND[incident.severity.level] ?? "border-l-ink-300"}`}>
+          <Chip map={SEVERITY} k={incident.severity.level} />
+          <p className="font-semibold text-ink-900">{incident.title}</p>
+          <dl className="grid grid-cols-3 gap-2 text-xs">
+            <div><dt className="text-ink-500">호스트</dt><dd className="mt-0.5 truncate font-mono font-semibold" title={incident.host.name ?? undefined}>{incident.host.name ?? "확인 중"}</dd></div>
+            <div><dt className="text-ink-500">시작</dt><dd className="mt-0.5 font-semibold">{shortDateTime(incident.started_at)}</dd></div>
+            <div><dt className="text-ink-500">경과</dt><dd className="mt-0.5 font-semibold">{ago(incident.started_at)}</dd></div>
+          </dl>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** 요약 4칸 = DejaFix 현황 KPI (GET /api/dashboard/summary) */
+function SummaryTiles({ s, error }: { s: DashboardSummary | null; error: string | null }) {
+  const tile = (label: string, dot: string, value: ReactNode, sub: string) => (
+    <div className="card px-4 py-3">
+      <p className="flex items-center gap-1.5 text-xs text-ink-500"><i className={`h-2 w-2 rounded-full ${dot}`} />{label}</p>
+      <p className="mt-1 text-xl font-semibold">{value}</p>
+      <p className="text-xs text-ink-500">{sub}</p>
+    </div>
+  );
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-semibold text-ink-700">요약</h2>
+      {error && !s && <p className="card px-4 py-3 text-xs text-red-700">{error}</p>}
+      <div className="grid grid-cols-2 gap-2">
+        {tile("진행 중", "bg-amber-400", s ? <Num m={s.active_incidents} /> : "…", unitOf(s?.active_incidents))}
+        {tile("높음 이상", "bg-red-500", s ? <Num m={s.high_incidents} /> : "…", unitOf(s?.high_incidents))}
+        {tile("정상 호스트", "bg-sky-500", s ? <><Num m={s.hosts.ok} /> / <Num m={s.hosts.total} /></> : "…",
+          s && !s.hosts.unknown.unknown && s.hosts.unknown.value ? `확인 불가 ${s.hosts.unknown.value}대` : "대")}
+        {tile("오늘 리포트", "bg-orange-500", s ? <Num m={s.reports_today} /> : "…",
+          s && !s.avg_analysis_sec.unknown && s.avg_analysis_sec.value !== null ? `평균 분석 ${s.avg_analysis_sec.value}초` : unitOf(s?.reports_today))}
+      </div>
+    </section>
+  );
+}
+
+const HOURS = 24;
+const MAX_ROWS = 8;
+
+/** 언제 · 어디서 = 최근 24시간, 호스트별 · 시간별로 장애가 열린 횟수. 최근 장애 목록(해결 포함)에서 센다 */
+function Heatmap({ incidents, end }: { incidents: Incident[]; end: number }) {
+  const { rows, max, startHour } = useMemo(() => {
+    const hourMs = 3_600_000;
+    const last = Math.floor(end / hourMs) * hourMs; // 기준 시각이 속한 시간 칸의 시작
+    const first = last - (HOURS - 1) * hourMs;
+    const byHost = new Map<string, number[]>();
+    for (const i of incidents) {
+      const t = Date.parse(i.started_at);
+      if (t < first || t >= last + hourMs) continue;
+      const name = i.host.name ?? "(호스트 확인 중)";
+      const cells = byHost.get(name) ?? Array<number>(HOURS).fill(0);
+      cells[Math.floor((t - first) / hourMs)] += 1;
+      byHost.set(name, cells);
+    }
+    const sorted = [...byHost.entries()]
+      .map(([name, cells]) => ({ name, cells, total: cells.reduce((a, b) => a + b, 0) }))
+      .sort((a, b) => b.total - a.total);
+    const top = sorted.slice(0, MAX_ROWS);
+    const others = sorted.slice(MAX_ROWS);
+    if (others.length) top.push({ name: `그 밖 ${others.length}대`, cells: Array.from({ length: HOURS }, (_, h) => others.reduce((a, o) => a + o.cells[h], 0)), total: 0 });
+    return { rows: top, max: Math.max(1, ...top.flatMap((r) => r.cells)), startHour: new Date(first).getHours() };
+  }, [incidents, end]);
+
+  return (
+    <section className="card px-6 py-5">
+      <div className="mb-4 flex flex-wrap items-baseline gap-x-3">
+        <h2 className="font-semibold">언제 · 어디서 장애가 났나</h2>
+        <span className="text-xs text-ink-500">최근 24시간 · 호스트별 장애가 열린 횟수</span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="py-6 text-center text-sm text-ink-500">최근 24시간 동안 열린 장애가 없습니다.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <div className="grid min-w-[640px] gap-[3px] text-[11px]" style={{ gridTemplateColumns: `minmax(96px,160px) repeat(${HOURS}, minmax(0,1fr))` }}>
+            {rows.map((r) => (
+              <Fragment key={r.name}>
+                <span className="truncate pr-2 font-mono leading-6 text-ink-700" title={r.name}>{r.name}</span>
+                {r.cells.map((n, h) => (
+                  <span key={h} className={`h-6 ${n ? "" : "bg-ink-100"}`} title={`${r.name} · ${(startHour + h) % 24}시 · ${n}건`}
+                    style={n ? { background: `rgba(220, 38, 38, ${0.15 + 0.85 * (n / max)})` } : undefined} />
+                ))}
+              </Fragment>
+            ))}
+            <span />
+            {Array.from({ length: HOURS }, (_, h) => (
+              <span key={h} className="text-center text-ink-500">{h % 3 === 0 ? `${(startHour + h) % 24}시` : ""}</span>
+            ))}
+          </div>
+          <p className="mt-3 flex items-center justify-end gap-2 text-xs text-ink-500">
+            적음 <span className="h-3 w-24" style={{ background: "linear-gradient(to right, rgba(220,38,38,.15), rgba(220,38,38,1))" }} /> 많음
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
 
 function Chip({ map, k }: { map: Record<string | number, { label: string; tone: string }>; k: string | number }) {
   const v = map[k] ?? { label: String(k), tone: "bg-ink-100 text-ink-700" };
@@ -18,15 +139,24 @@ export default function Incidents() {
   const [state, setState] = useState<State>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [recent, setRecent] = useState<Incident[] | null>(null);
 
   const load = useCallback(async () => {
-    try {
-      setState(await currentIncidents());
+    // 셋은 따로 받는다. 하나가 실패해도 나머지는 그린다
+    const [cur, sum, rec] = await Promise.allSettled([currentIncidents(), dashboardSummary(), recentIncidents()]);
+    const msg = (r: PromiseRejectedResult, fallback: string) => (r.reason instanceof Error ? r.reason.message : fallback);
+    if (cur.status === "fulfilled") {
+      setState(cur.value);
       setError(null);
       setLoadedAt(new Date().toISOString());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "장애 목록을 불러오지 못했습니다.");
-    }
+    } else setError(msg(cur, "장애 목록을 불러오지 못했습니다."));
+    if (sum.status === "fulfilled") {
+      setSummary(sum.value);
+      setSummaryError(null);
+    } else setSummaryError(msg(sum, "요약을 불러오지 못했습니다."));
+    if (rec.status === "fulfilled") setRecent(rec.value.data);
   }, []);
 
   useEffect(() => {
@@ -38,9 +168,18 @@ export default function Incidents() {
   const list = state?.data ?? [];
   const high = list.filter((i) => i.severity.level >= 4).length;
   const asOf = state?.meta.data_as_of ?? loadedAt;
+  const urgent = useMemo(
+    () => [...list].sort((a, b) => b.severity.level - a.severity.level || Date.parse(b.started_at) - Date.parse(a.started_at))[0],
+    [list],
+  );
+  // 시간 분포의 기준 시각: 실시간이면 받은 시각, 녹화본이면 녹화된 마지막 장애 시각 (녹화본은 지난 날짜라서)
+  const heatEnd = useMemo(
+    () => (DEJAFIX_LIVE || !recent?.length ? Date.parse(loadedAt ?? "") || Date.now() : Math.max(...recent.map((i) => Date.parse(i.started_at)))),
+    [recent, loadedAt],
+  );
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-8 py-8">
+    <div className="mx-auto max-w-7xl space-y-6 px-8 py-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="flex items-center gap-2 text-sm text-ink-500">
@@ -72,11 +211,15 @@ export default function Incidents() {
         </p>
       )}
 
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="min-w-0 space-y-6">
       {!state && !error && <p className="card px-6 py-10 text-center text-sm text-ink-500">장애 목록을 불러오는 중…</p>}
 
       {state && list.length === 0 && (
         <p className="card px-6 py-10 text-center text-sm text-ink-700">지금 진행 중인 장애가 없습니다.</p>
       )}
+
+      {recent && <Heatmap incidents={recent} end={heatEnd} />}
 
       {list.length > 0 && (
         <section className="card overflow-hidden">
@@ -109,6 +252,15 @@ export default function Incidents() {
           </table>
         </section>
       )}
+
+      </div>
+
+      {/* 오른쪽 레일: DejaFix 현황 화면과 같은 자리 */}
+      <aside className="space-y-6 xl:sticky xl:top-0" aria-label="요약">
+        <UrgentCard incident={urgent} loading={!state && !error} />
+        <SummaryTiles s={summary} error={summaryError} />
+      </aside>
+      </div>
     </div>
   );
 }
