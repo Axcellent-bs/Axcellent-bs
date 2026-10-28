@@ -71,6 +71,21 @@ export const recentIncidents = async () => list(await get<List>("/api/incidents?
 /** 현황 KPI 4종 */
 export const dashboardSummary = async () => (await get<{ data: DashboardSummary }>("/api/dashboard/summary")).data;
 
+/**
+ * 목록용 장애 제목. Zabbix 트리거 이름을 사람이 읽기 쉽게 줄인다(원문은 title 속성으로 남긴다).
+ * DejaFix frontend/src/components/incidentFormat.ts readableTitle (DejaFix PR #187)과 같은 규칙.
+ * - 앞의 템플릿 접두사 제거: 'Windows: …' → '…'
+ * - '"서비스ID" (표시 이름 (서비스ID))'·'"서비스ID" (표시 이름)' → '표시 이름'
+ * 문장을 새로 만들거나 번역하지 않고 중복만 덜어 낸다.
+ */
+export function readableTitle(title: string): string {
+  const out = title
+    .replace(/^[A-Za-z][\w .-]{0,40}:\s+/, "")
+    .replace(/"([^"]+)"\s*\(([^()]*?)(?:\s*\(\1\))?\)/g, (_, id: string, name: string) => name.trim() || id)
+    .trim();
+  return out || title;
+}
+
 /** Zabbix 심각도 0~5 → 화면 표시 */
 export const SEVERITY: Record<number, { label: string; tone: string }> = {
   5: { label: "재해", tone: "bg-red-600 text-white" },
