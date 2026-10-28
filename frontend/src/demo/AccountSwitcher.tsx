@@ -56,7 +56,7 @@ export function AccountSwitcher() {
             </button>
           ))}
           <div className="mt-1 border-t border-ink-100 pt-1">
-            <button type="button" onClick={() => { signOut(); navigate('/login') }}
+            <button type="button" onClick={() => { signOut(); navigate('/') }}
               className="w-full rounded-xl px-3 py-2 text-left text-sm text-ink-700 hover:bg-ink-100">로그아웃</button>
           </div>
         </div>
