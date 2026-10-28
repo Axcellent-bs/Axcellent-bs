@@ -30,6 +30,7 @@ from ax_agent_template import execute as gate_module
 from ax_contracts.schemas import TENANT_ID_DEFAULT, Evidence, ExecuteDecision, RequestMeta
 from ax_contracts.schemas.planning import ChangeResultInput
 from ax_contracts.schemas.record import RecordCase, RecordKind
+from planning_agent import vcs_bridge
 from planning_agent.domain.autocheck import (
     WAIT_CROSS_CHECK,
     Check,
@@ -1953,6 +1954,14 @@ class PlanningService:
             )
             review_text = f"{pr.id} 검수 {review}{' (완료 기준 C2)' if review == '불일치' else ''}"
             await self._execute("review_pr", ctx, f"{pr.id}:r1", review_text)
+            # 관문을 지난 뒤에만 형상관리에 실제로 올린다 (목 설정이면 아무것도 안 함)
+            note = await vcs_bridge.open_pr(pr, req.id if req else None, spec, t.para)
+            if note:
+                s.activity.append(
+                    self._act(
+                        self.clock(), ctx, "planning", "planning", note.point, "API", note.text
+                    )
+                )
             s.prs.append(pr)
             created.append(pr)
             t.state = "머지 대기" if review == "통과" else "PR 검수"
@@ -2068,6 +2077,15 @@ class PlanningService:
         else:
             merge_text = f"팀장 {TEAM_LEAD}이 {p.id} 머지"
         await self._execute("merge_pr", ctx, p.id, merge_text, {**check.params, "auto": auto})
+        # merge_pr 관문을 지난 뒤 형상관리에서 실제로 병합한다.
+        # 실패하면 한 줄 남기고 병합하지 않는다
+        note = await vcs_bridge.merge_pr(p)
+        if note:
+            s.activity.append(
+                self._act(self.clock(), ctx, "planning", "planning", note.point, "API", note.text)
+            )
+            if not note.ok:
+                return
         case = f"① kind pr_merged · {p.id}" + (" (자동 머지)" if auto else "")
         if auto:
             record = RecordCase(

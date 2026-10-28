@@ -103,6 +103,15 @@ execute params (safety #171 `thresholds.toml` 규칙 키, 모두 도메인 상�
 
 화면 모델과 다른 점(화면 쪽 변환 함수가 맞춘다): 필드는 snake_case(`duplicateOf` → `duplicate_of`, `autoPolicy` → `auto_policy`, `ctx` → `context_id`), 시각은 UTC ISO8601(`t` → `at`, `updated` → `updated_at`, `mergedAt` → `merged_at`, 사건 `at` → `opened_at`), PR에 `number`·`merged_at`·`changed_paths`가 더 있다. `from` 키는 그대로다.
 
+### 형상관리 연결 (FR-AG-011, NFR-EXT-003)
+- 공통 인터페이스 `vcs/base.py` `VcsAdapter`: ① `find_changes(since, until, path_prefix)` 구간 안 병합 변경 ② `get_change(number)` 바뀐 파일·줄(추가·삭제 수, 새 줄 번호) ③ `open_change(branch, title, body, base, files)` 브랜치·커밋·병합 요청 ④ `merge_change(number, method="squash")` ⑤ `get_trace_meta(number)` 제목·본문의 `REQ-n`·`SPEC-n`·`SPEC-n:R3`/`R3` + `get_checks(number)` CI 상태(passed·failed·pending, 검사 0개는 pending). `capabilities.read_only`면 ③④를 하지 않는다(FR-AG-013).
+- 부품: `vcs/mock.py`(기본, 메모리) · `vcs/github.py`(REST v3, git data API로 커밋). 프로그램 이름은 `vcs/` 안에만 둔다.
+- 고르기: `PLANNING_VCS_KIND`(`mock` 기본·`github`) · `PLANNING_VCS_REPO`(`owner/name`) · `PLANNING_VCS_TOKEN` · `PLANNING_VCS_BASE_URL`(기본 공개 API, 사내 설치형은 `https://<호스트>/api/v3`) · `PLANNING_VCS_BASE_BRANCH`(기본 `dev`). 토큰 권한은 대상 레포 하나에 contents·pull requests 읽기·쓰기, checks·commit statuses 읽기.
+- 도메인 연결은 `vcs_bridge.py`. `mock`이면 아무것도 하지 않아 상태·활동이 지금과 같다. 그 밖이면 `generate_pr`·`review_pr` 관문 뒤에 `gen/` 브랜치로 PR을 올리고(본문에 요청·기획서·문단 ID, 커밋 파일은 `docs/generated/<spec>/<task>.md` 작업 기록 하나) PR에 `vcs_number`·`url`을 적는다. `merge_pr` 관문 뒤에 실제 병합한다.
+- 부품이 실패하면 활동(`vcs.open_failed`·`vcs.merge_failed`) 한 줄만 남기고 PR은 병합하지 않는다. 설정이 잘못돼도 같다(fail-closed). 사람 머지 버튼으로 다시 시도할 수 있고, 이미 병합된 변경은 성공으로 본다.
+- 테스트: `tests/test_vcs_adapter.py`가 같은 계약 묶음을 목·GitHub(가짜 서버 `httpx.MockTransport`, 공개·사내 주소)에 돌린다. 실제 API는 부르지 않는다.
+- 아직: `find_related_prs`·역추적은 여전히 메모리 PR을 본다(①②⑤ 연결 전). 간단 요청 자동 처리(`_auto_complete`)는 아직 부품을 부르지 않는다.
+
 ## 4. 의존
 `ax-contracts`, `ax-agent-template`, `fastapi`, `uvicorn`, `httpx`. 다른 부서 폴더를 import하지 않는다.
 - hr `record_case` 입력은 계약 `RecordCase`(`record.py`)로 만들어 `execute(record_case)` params의 `record_case`에 넣는다 (`decision_rejected`·`spec_confirmed`).
@@ -114,4 +123,4 @@ execute params (safety #171 `thresholds.toml` 규칙 키, 모두 도메인 상�
 - 배포·롤백을 실행하지 않는다 (infra가 한다). 롤백 대상 교차검증만 한다.
 - `execute()` 없이 상태를 바꾸지 않는다. 관문이 거부·무응답이면 실행하지 않는다.
 - 외부 입력(`untrusted`)을 읽거나 지시로 해석하지 않는다.
-- v0은 실제 GitHub PR 생성·hr 호출·DB 저장을 하지 않는다 (목 데이터, 프로세스 메모리).
+- 목 설정(`PLANNING_VCS_KIND=mock`, 기본)에서는 실제 PR 생성·hr 호출·DB 저장을 하지 않는다 (목 데이터, 프로세스 메모리).

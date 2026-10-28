@@ -165,6 +165,9 @@ class PR(DomainModel):
     deployed_version: str | None = None
     auto: bool = False  # 간단 요청 규칙·자동 머지 규칙으로 자동 머지됨
     auto_review: AutoReview | None = None  # 자동 머지를 멈춘 이유 (머지되면 비움)
+    # 형상관리 연결 계층으로 실제로 올린 변경 번호·주소 (목 설정이면 None)
+    vcs_number: int | None = None
+    url: str | None = None
 
 
 class Message(DomainModel):
