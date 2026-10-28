@@ -891,3 +891,24 @@ def test_github_checks_fall_back_to_statuses_without_checks_permission() -> None
     adapter = GithubVcsAdapter("acme/shop", "t" * 12, client=client)
     checks = run(adapter.get_checks(7))
     assert checks.state == "passed" and [r.name for r in checks.runs] == ["ci"]
+
+
+def test_open_conflict_adopts_existing_change() -> None:
+    """앞선 시도에서 브랜치·PR이 이미 올라갔으면 새로 만들지 않고 이어받는다."""
+    from planning_agent import vcs_bridge
+    from planning_agent.domain.models import PR, PrGate
+
+    adapter = MockVcsAdapter(first_number=900)
+    vcs.set_vcs(adapter)
+    try:
+        run(adapter.open_change(branch="gen/t-12", title="t", body="b", files={"a.md": "x"}))
+        run(adapter.merge_change(900))
+        pr = PR(id="PR #32", number=32, task="T-12", title="t", branch="gen/t-12", reviews=["통과"],
+                gate=PrGate(result="통과", lines=1, files=1, paths="docs/"), merged=False)
+        note = run(vcs_bridge.open_pr(pr, "REQ-1", "SPEC-1", "R1"))
+        assert note is not None and note.ok and note.point == "vcs.adopted"
+        assert pr.vcs_number == 900 and "이미 병합됨" in note.text
+        merged = run(vcs_bridge.merge_pr(pr))
+        assert merged is not None and merged.ok
+    finally:
+        vcs.set_vcs(None)

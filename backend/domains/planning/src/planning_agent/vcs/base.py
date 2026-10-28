@@ -147,6 +147,11 @@ class VcsAdapter(Protocol):
         """② 변경 하나와 바뀐 파일·줄."""
         ...
 
+    async def find_change_by_branch(self, branch: str) -> Change | None:
+        """브랜치로 이미 올라간 변경(열림·병합 모두)을 찾는다. 없으면 None.
+        다시 올리다 브랜치가 겹칠 때(conflict) 새로 만들지 않고 이어받는 데 쓴다."""
+        ...
+
     async def open_change(
         self,
         branch: str,

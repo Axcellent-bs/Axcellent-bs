@@ -260,6 +260,16 @@ class GithubVcsAdapter:
         files = await self._pages(f"/pulls/{int(number)}/files")
         return self._change(pr, files)
 
+    async def find_change_by_branch(self, branch: str) -> Change | None:
+        owner = self.repo.split("/", 1)[0]
+        pulls = await self._call(
+            "GET", "/pulls", params={"head": f"{owner}:{branch}", "state": "all", "per_page": 5}
+        )
+        if not pulls:
+            return None
+        newest = max(pulls, key=lambda p: p.get("number", 0))
+        return await self.get_change(int(newest["number"]))
+
     async def open_change(
         self,
         branch: str,

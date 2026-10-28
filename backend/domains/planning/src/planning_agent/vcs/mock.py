@@ -142,6 +142,10 @@ class MockVcsAdapter:
     async def get_change(self, number: int) -> Change:
         return self._entry(number).change
 
+    async def find_change_by_branch(self, branch: str) -> Change | None:
+        found = [e.change for e in self._entries.values() if e.change.branch == branch]
+        return max(found, key=lambda c: c.number) if found else None
+
     async def open_change(
         self,
         branch: str,

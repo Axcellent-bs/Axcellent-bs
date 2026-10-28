@@ -143,10 +143,29 @@ async def open_pr(
             files=files or change_files(pr, body, spec_id),
         )
     except VcsError as exc:
+        # 같은 브랜치가 이미 있으면(앞선 시도에서 올라감) 새로 만들지 않고 그 변경을 이어받는다
+        if exc.code == "conflict":
+            adopted = await _adopt(adapter, pr)
+            if adopted is not None:
+                return adopted
         return Note(False, "vcs.open_failed", f"{pr.id} 형상관리에 올리지 못함 ({exc.code})")
     pr.vcs_number = opened.number
     pr.url = opened.url
     return Note(True, "vcs.opened", f"{pr.id} → 형상관리 변경 #{opened.number} ({opened.branch})")
+
+
+async def _adopt(adapter: VcsAdapter, pr: PR) -> Note | None:
+    """브랜치로 이미 올라간 변경을 찾아 PR에 적는다. 못 찾으면 None."""
+    try:
+        found = await adapter.find_change_by_branch(pr.branch)
+    except VcsError:
+        return None
+    if found is None:
+        return None
+    pr.vcs_number = found.number
+    pr.url = found.url
+    state = "이미 병합됨" if found.merged else "열려 있음"
+    return Note(True, "vcs.adopted", f"{pr.id} → 이미 올라간 변경 #{found.number} 이어받음 ({state})")
 
 
 async def update_pr(pr: PR, files: dict[str, str], message: str) -> Note | None:
