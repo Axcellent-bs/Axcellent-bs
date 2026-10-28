@@ -140,6 +140,7 @@ export function LineChart({
   const every = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(iw / 46))));
 
   function onMove(e: React.PointerEvent<SVGRectElement>) {
+    if (n === 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const px = e.clientX - rect.left;
     setHover(Math.max(0, Math.min(n - 1, Math.round(((px) / Math.max(1, iw)) * (n - 1)))));
