@@ -7,15 +7,22 @@ import { api, ApiError } from "@/lib/api";
 import { finance, type ExecutionRecord } from "@/lib/finance";
 import { Link } from "@/lib/nav";
 import { orchestrator } from "@/lib/orchestrator";
+import { shopFaults, type FaultKind, type FaultState } from "@/lib/shopFaults";
 import type { CommLine } from "@/lib/types";
 
 // AI 대화방. 부서 AI들이 A2A로 주고받은 일을 메신저처럼 보여 준다.
 // 말풍선 문장은 lib/agentChat.ts가 기록된 값으로만 만든다. 이 파일은 화면과 새로고침만 맡는다.
 // 출처 세 곳: 총괄(사건·단계), 안전 관문(돈이 나가는 실행), dashboard-api 공통 로그(부서 간 소통).
 // 운영 환경에서는 총괄·안전 관문 기록도 dashboard-api를 거쳐 읽어야 한다 (지금은 개발용 직접 호출, 백엔드 후속 작업).
+// 총괄이 실제 모드(meta.mock=false)면 가짜 신호 대신 고객사 쇼핑몰(캣북스)에 실제 결제 장애를 넣는다 (lib/shopFaults.ts).
 
 const POLL_MS = 3000;
-const ORCH_CMD = "cd ax-backend && ORCHESTRATOR_MOCK=1 uv run uvicorn ax_orchestrator.main:app --app-dir orchestrator/src --port 8000";
+const ORCH_CMD = "cd backend && bash scripts/run_all.sh";
+
+const REAL_FAULTS: { id: FaultKind; label: string; hint: string }[] = [
+  { id: "failure", label: "결제 오류 — 서버 오류(5xx)", hint: "캣북스 결제 서버가 모든 결제를 5xx로 실패시킵니다. 감시가 20초쯤 이어지는 걸 확인하면 사건이 열립니다." },
+  { id: "latency", label: "결제 지연 — 응답 2초", hint: "캣북스 결제 응답이 2초 늦어집니다. p95가 기준을 넘는 상태가 이어지면 사건이 열립니다." },
+];
 
 /** unready = 서버는 답했지만 503 (공통 로그 읽기가 아직 연결 안 됨) */
 type Conn = "unknown" | "on" | "off" | "unready";
@@ -256,11 +263,22 @@ export default function AgentChat() {
   const [starting, setStarting] = useState(false);
   const [scenarioNames, setScenarioNames] = useState<Record<string, string>>(loadScenarioNames);
   const [busyHold, setBusyHold] = useState<string | null>(null);
+  const [faultKind, setFaultKind] = useState<FaultKind>("failure");
+  const [fault, setFault] = useState<FaultState | null>(null);
+  // 장애를 넣은 뒤 새로 열리는 사건으로 방을 옮기려고, 넣을 때 있던 사건 목록을 기억한다
+  const known = useRef<Set<string> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const [inc, exe, com] = await Promise.allSettled([orchestrator.incidents(), finance.executions(), api.communications()]);
-    if (inc.status === "fulfilled") { setIncidents(inc.value.data); setOrchMock(inc.value.meta.mock === true); setOrchConn("on"); }
+    if (inc.status === "fulfilled") {
+      setIncidents(inc.value.data);
+      setOrchMock(inc.value.meta.mock === true);
+      setOrchConn("on");
+      if (inc.value.meta.mock !== true) shopFaults.state().then(setFault, () => setFault(null));
+      const opened = known.current && inc.value.data.find((i) => !known.current?.has(i.context_id));
+      if (opened) { known.current = null; setRoom(opened.context_id); }
+    }
     else { setOrchConn("off"); setOrchMock(false); }
     if (exe.status === "fulfilled") { setExecutions(exe.value); setSafetyConn("on"); } else setSafetyConn("off");
     if (com.status === "fulfilled") { setComms(com.value.data); setCommTruncated(com.value.meta?.truncated === true); setCommConn("on"); }
@@ -361,6 +379,25 @@ export default function AgentChat() {
     }
   }
 
+  async function injectFault() {
+    setStarting(true);
+    setError(null);
+    try {
+      known.current = new Set(incidents.map((i) => i.context_id));
+      setFault(await shopFaults.inject(faultKind));
+    } catch (e) {
+      known.current = null;
+      setError(`캣북스에 장애를 넣지 못했습니다: ${(e as Error).message}`);
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  async function releaseFault() {
+    setError(null);
+    try { setFault(await shopFaults.release()); } catch (e) { setError(`장애를 해제하지 못했습니다: ${(e as Error).message}`); }
+  }
+
   async function decide(h: Extract<ChatItem, { kind: "hold" }>, approved: boolean) {
     if (!h.contextId || !h.stepId) return;
     setBusyHold(h.id);
@@ -393,6 +430,27 @@ export default function AgentChat() {
             <span className="chip bg-ink-100 text-ink-500">{POLL_MS / 1000}초마다 새로고침</span>
           </div>
         </div>
+        {orchOn && !orchMock ? (
+          <div className="flex w-full max-w-md flex-col items-end gap-1.5">
+            <div className="flex w-full items-center gap-2">
+              <label htmlFor="fault" className="sr-only">캣북스 장애 종류</label>
+              <select id="fault" value={faultKind} onChange={(e) => setFaultKind(e.target.value as FaultKind)}
+                className="min-w-0 flex-1 rounded-lg border border-ink-300 bg-surface px-2 py-1.5 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
+                {REAL_FAULTS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+              </select>
+              <button className="btn-primary shrink-0" disabled={starting || fault?.active} onClick={injectFault}>
+                {starting ? "넣는 중…" : "캣북스에 장애 넣기"}
+              </button>
+              <button className="btn-ghost shrink-0" disabled={!fault?.active} onClick={releaseFault}>장애 해제</button>
+            </div>
+            <p className="flex w-full flex-wrap items-center justify-end gap-1.5 text-right text-xs text-ink-500">
+              <span className={`chip ${fault?.active ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
+                캣북스 결제 {fault == null ? "상태 확인 중" : fault.active ? (fault.failing ? "오류 주입 중" : `지연 ${fault.delay_ms}ms 주입 중`) : "정상"}{fault?.degraded ? " · 장애 감지됨" : ""}
+              </span>
+              {REAL_FAULTS.find((f) => f.id === faultKind)?.hint}
+            </p>
+          </div>
+        ) : (
         <div className="flex w-full max-w-sm flex-col items-end gap-1.5">
           <div className="flex w-full items-center gap-2">
             <label htmlFor="scenario" className="sr-only">장애 시나리오</label>
@@ -420,6 +478,7 @@ export default function AgentChat() {
             </fieldset>
           )}
         </div>
+        )}
       </header>
 
       {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-800">{error}</p>}
