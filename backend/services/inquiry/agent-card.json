@@ -21,7 +21,8 @@
         "shop-api"
       ],
       "verifier": null,
-      "priority": "required"
+      "priority": "required",
+      "handoff": false
     },
     {
       "id": "get_inquiry",
@@ -35,7 +36,8 @@
         "shop-api"
       ],
       "verifier": null,
-      "priority": "required"
+      "priority": "required",
+      "handoff": false
     },
     {
       "id": "check_reply",
@@ -141,7 +143,8 @@
         "data"
       ],
       "verifier": null,
-      "priority": "recommended"
+      "priority": "recommended",
+      "handoff": false
     },
     {
       "id": "detect_inquiry_surge",
@@ -181,7 +184,8 @@
         "orchestrator"
       ],
       "verifier": null,
-      "priority": "optional"
+      "priority": "optional",
+      "handoff": false
     },
     {
       "id": "receive_change_result",

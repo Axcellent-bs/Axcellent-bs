@@ -20,7 +20,8 @@
         "orchestrator"
       ],
       "verifier": null,
-      "priority": "optional"
+      "priority": "optional",
+      "handoff": false
     },
     {
       "id": "list_at_risk_customers",
@@ -33,7 +34,8 @@
         "orchestrator"
       ],
       "verifier": null,
-      "priority": "optional"
+      "priority": "optional",
+      "handoff": false
     }
   ]
 }
