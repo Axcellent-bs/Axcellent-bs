@@ -39,7 +39,7 @@ export function Knowledge() {
   const [open, setOpen] = useState<string>()
   const [over, setOver] = useState(false)
   const input = useRef<HTMLInputElement>(null)
-  useEffect(() => save(files), [files])
+  useEffect(() => { save(files) }, [files])
 
   const add = async (list: FileList | null) => {
     if (!list?.length) return
