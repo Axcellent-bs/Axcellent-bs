@@ -5,7 +5,7 @@ import {
   type MarketingLive,
 } from "@/lib/marketingLive";
 
-// 마케팅 AI 화면의 실제 모드(VITE_MOCK=off). 캣북스 쇼핑몰 배너와 안전 장치 기록을 읽기만 한다.
+// 마케팅 AI 화면. 캣북스 쇼핑몰 배너와 안전 장치 기록을 읽기만 한다.
 // 기록 번호(공지 번호·처리 번호·사건 번호)는 화면 글자로 쓰지 않고 마우스를 올리면 보이게(title) 둔다.
 
 const REFRESH_MS = 15_000;

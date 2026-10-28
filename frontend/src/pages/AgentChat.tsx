@@ -455,7 +455,7 @@ function CommNote({ conn, truncated }: { conn: Conn; truncated: boolean }) {
   if (truncated) return <p className="mb-4 rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-500">공통 로그가 많아 앞부분만 받았습니다 (최대 1000줄).</p>;
   return null;
 }
-const COMM_503 = "공통 로그: 준비 안 됨(503) — dashboard-api에 공통 로그 읽기가 아직 연결되지 않았습니다 (ax-backend #249). 부서끼리 주고받은 대화는 연결 뒤에 보입니다. 목 모드(DASHBOARD_MOCK=1)에서는 예시 대화가 나옵니다.";
+const COMM_503 = "공통 로그: 준비 안 됨(503) — dashboard-api에 공통 로그 읽기가 아직 연결되지 않았습니다 (ax-backend #249). 부서끼리 주고받은 대화는 연결 뒤에 보입니다.";
 const COMM_OFF = "공통 로그: dashboard-api(VITE_DASHBOARD_API_URL)에 연결할 수 없어 부서끼리 주고받은 대화를 불러오지 못했습니다.";
 
 function EmptyState({ orchConn, safetyConn, commConn, room }: { orchConn: Conn; safetyConn: Conn; commConn: Conn; room: string }) {
@@ -472,7 +472,7 @@ function EmptyState({ orchConn, safetyConn, commConn, room }: { orchConn: Conn; 
     return (
       <div className="mx-auto max-w-xl py-14 text-sm text-ink-700">
         <p className="font-semibold text-ink-900">총괄 AI가 꺼져 있습니다.</p>
-        <p className="mt-1 text-ink-500">ax-backend에서 목 모드로 켜면 가짜 부서 7곳과 함께 장애 시나리오를 돌려 볼 수 있습니다.</p>
+        <p className="mt-1 text-ink-500">backend/에서 실제 모드로 켜면 캣북스 쇼핑몰 장애로 AI들이 함께 일하는 과정을 볼 수 있습니다.</p>
         <pre className="mt-3 overflow-x-auto rounded-xl bg-ink-50 p-3 font-mono text-xs text-ink-700 ring-1 ring-ink-100"><code>{ORCH_CMD}</code></pre>
         <p className="mt-2 text-xs text-ink-500">다른 포트에서 켰다면 루트 .env의 ORCHESTRATOR_PROXY_TARGET(개발 서버 프록시 대상)을 바꾸고 개발 서버를 다시 시작하세요.</p>
       </div>

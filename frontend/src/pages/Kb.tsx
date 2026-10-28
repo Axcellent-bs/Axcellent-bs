@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { IconSearch } from "@/components/icons";
 import { Loading, OFFLINE } from "@/components/admin/bits";
+import { PreparingChip, PreparingNotice } from "@/components/Preparing";
 import { api } from "@/lib/api";
 
 type Chunk = Awaited<ReturnType<typeof api.admin.kb>>[number];
@@ -23,7 +24,7 @@ export default function KnowledgeBasePage() {
     <div className="space-y-4 px-8 pb-10 pt-2">
       <div className="flex flex-wrap items-end gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">지식베이스</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">지식베이스 <PreparingChip /></h1>
           <p className="text-sm text-ink-500">답변 초안·검증 가드가 근거로 쓰고, 클레임 판정이 규칙 번호(예: KB-REF-01#1)로 인용하는 정책 문서 {chunks.length}개 섹션</p>
         </div>
         <label className="relative ml-auto w-full max-w-xs">
@@ -31,6 +32,7 @@ export default function KnowledgeBasePage() {
           <input className="field rounded-full pl-9" placeholder="정책 검색 (예: 환불, KB-DEL-01)" value={q} onChange={(e) => setQ(e.target.value)} aria-label="정책 검색" />
         </label>
       </div>
+      {chunks.length === 0 && <PreparingNotice what="정책 문서" source="회사 정책 문서 저장소(memory)" />}
       {docs.map(([title, items]) => (
         <section key={title} className="card p-5">
           <h2 className="card-title mb-3">{title}</h2>
@@ -44,7 +46,7 @@ export default function KnowledgeBasePage() {
           </ul>
         </section>
       ))}
-      {!docs.length && <p className="text-sm text-ink-500">검색 결과가 없습니다.</p>}
+      {!docs.length && chunks.length > 0 && <p className="text-sm text-ink-500">검색 결과가 없습니다.</p>}
     </div>
   );
 }

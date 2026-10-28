@@ -3,7 +3,6 @@ import { useNavigate } from "react-router";
 import { Link } from "@/lib/nav";
 import { ago, shortDateTime } from "@/lib/format";
 import { ANALYSIS, SEVERITY, currentIncidents, readableTitle, dashboardSummary, recentIncidents, type DashboardSummary, type Incident, type IncidentMeta, type Measured } from "@/lib/dejafix";
-import { DEJAFIX_LIVE } from "@/lib/env";
 
 // 장애 대응 탭 = 지금 진행 중인 장애만. DejaFix API(GET /api/incidents?status=problem)에서 받아 AXcellent가 그린다.
 // 장애를 누르면 AXcellent 장애 상세(/infra/:id, IncidentDetail.tsx)로 간다.
@@ -257,11 +256,8 @@ export default function Incidents() {
     const resolved = (recent ?? []).filter((i) => i.status !== "problem" && !openIds.has(i.id));
     return { top: open.slice(0, LIST_LIMIT), rest: [...open.slice(LIST_LIMIT), ...resolved], urgent: open[0] };
   }, [list, recent]);
-  // 시간 분포의 기준 시각: 실시간이면 받은 시각, 녹화본이면 녹화된 마지막 장애 시각 (녹화본은 지난 날짜라서)
-  const heatEnd = useMemo(
-    () => (DEJAFIX_LIVE || !recent?.length ? Date.parse(loadedAt ?? "") || Date.now() : Math.max(...recent.map((i) => Date.parse(i.started_at)))),
-    [recent, loadedAt],
-  );
+  // 시간 분포의 기준 시각: 받은 시각
+  const heatEnd = useMemo(() => Date.parse(loadedAt ?? "") || Date.now(), [loadedAt]);
 
   return (
     <div className="space-y-6 px-8 py-8">
@@ -269,10 +265,7 @@ export default function Incidents() {
         <div>
           <p className="flex items-center gap-2 text-sm text-ink-500">
             DejaFix 데이터
-            {/* 녹화본인지 실제 서버인지 화면에 밝힌다 */}
-            {DEJAFIX_LIVE
-              ? <span className="chip bg-emerald-50 text-emerald-700">실시간</span>
-              : <span className="chip bg-amber-50 text-amber-700" title="VITE_DEJAFIX_LIVE=on 이면 실제 DejaFix를 부릅니다">데모 녹화본</span>}
+            <span className="chip bg-emerald-50 text-emerald-700">실시간</span>
           </p>
           <h1 className="text-2xl font-semibold">현재 장애</h1>
           <p className="mt-1 text-sm text-ink-500">해결되지 않은 장애를 심각도 순으로 보여 줍니다. 누르면 상세로 갑니다.</p>

@@ -1,9 +1,8 @@
-# AXcellent 데모
+# AXcellent 화면
 
-구조 회의용 프로토타입이에요. 백엔드 없이 프론트만으로 돌아가요.
+화면은 항상 실제 백엔드(`backend/`, 실제 모드)에 붙어서 돌아요. 녹화본으로 도는 데모는 없어요.
 
-- 이 폴더(`frontend/`)에서 `npm ci` → `npm run dev`로 띄워요 (http://localhost:3090). 처음 만든 곳은 [NYejin/axcellent-demo](https://github.com/NYejin/axcellent-demo)예요.
-- GitHub Pages로 올릴 때는 `npm run build:pages`가 `/Axcellent-bs/` 경로로 빌드해요. Pages 배포 워크플로는 아직 넣지 않았어요.
+- 백엔드를 켠 뒤 `backend/`에서 `bash scripts/run_web.sh`로 띄워요 (http://localhost:3090). 실제 모드 토큰이 같이 들어가요. 처음 만든 곳은 [NYejin/axcellent-demo](https://github.com/NYejin/axcellent-demo)예요.
 - AI 화면은 [ax-frontend](https://github.com/ax-company-hq/ax-frontend) `dashboard-web`(캣북스 대시보드, dev `c1eb44a`)에서 옮겨 왔어요. 캣북스 대시보드는 없앨 예정이고, AI 7개는 여기서 관리해요 (아래 "AI 7개").
 
 ## 보여 주는 구조
@@ -69,24 +68,24 @@
 
 ## 데이터는 어디서 오나
 
-- `src/mock/fixtures.json`: ax-backend 서비스들을 목 모드(`*_MOCK=1`)로 띄우고, 화면이 부르는 GET 응답을 녹화한 거예요(2026-10-27, 79개).
-  - `GET dejafix /api/incidents` 1개는 DejaFix 레포(`DejaFix/DejaFix` dev `15d0477`) `frontend/src/mocks`가 `status=problem`에 돌려주는 응답 그대로예요.
-  - 재무 AI 자체 점검 결과는 바꿔 뒀어요. 녹화할 때 서비스끼리 연결하지 않아서 연결 실패 5개가 나왔는데, 이 항목만 "연결됨"으로 고쳤어요.
-- `src/mock/install.ts`: `fetch`와 `EventSource`를 가로채서 녹화본을 돌려줘요.
-  - 쓰기 요청(POST)은 성공 응답만 돌려줘요. 그래서 버튼을 눌러도 화면 데이터는 바뀌지 않아요.
+- 모든 AI 화면은 실제 모드 백엔드(`backend/scripts/run_all.sh`)를 불러요. 백엔드가 꺼져 있으면 어느 서버가 꺼졌는지 안내해요.
+- 실제 데이터 출처가 아직 없는 화면(리뷰·지식의 후기 관리·지식베이스)은 "준비 중"으로 표시하고 빈 상태로 둬요. 예시 데이터를 만들지 않아요.
 - 서비스 고르기, PC·서버 연결, 회사 서비스 연결 화면의 데이터는 브라우저(localStorage)에만 저장돼요.
 
 ## 실행
 
 ```bash
-npm install
-npm run dev          # http://localhost:3090
-npm run build:pages  # GitHub Pages용 빌드 (dist/, 404.html 포함)
+# 백엔드 (다른 터미널)
+cd backend && uv sync --all-packages && bash scripts/run_all.sh
+# 화면: 실제 모드 토큰과 함께 개발 서버를 켠다
+cd backend && bash scripts/run_web.sh   # http://localhost:3090
 ```
+
+`frontend/`에서 `npm run dev`로 바로 켜도 되지만, 그러면 토큰이 없어 쓰기 버튼·데이터 AI 지표가 꺼져요.
 
 ## 실제 AI 백엔드에 붙이기
 
-기본은 녹화본으로 도는 데모예요. `.env.example`을 `.env`로 복사해서 `VITE_MOCK=off`로 바꾸면 녹화본을 끄고 ax-backend·DejaFix를 직접 불러요. 주소·토큰은 같은 파일에 있어요.
+주소를 바꿀 때만 `.env.example`을 `.env`로 복사해서 고쳐요. 토큰은 보통 `run_web.sh`가 넣어요.
 
 - 총괄·데이터 AI·DejaFix는 CORS가 없어서 개발 서버 프록시(`/orch`, `/data-a2a`, `/dejafix-api`)로 불러요 (`vite.config.ts`).
 - 총괄과 DejaFix 백엔드는 둘 다 기본 포트가 8000이라, 같이 띄울 때는 한쪽 포트를 바꾸고 `ORCHESTRATOR_PROXY_TARGET`이나 `DEJAFIX_PROXY_TARGET`을 맞춰요.
@@ -99,11 +98,11 @@ npm run build:pages  # GitHub Pages용 빌드 (dist/, 404.html 포함)
    ```bash
    cd backend
    uv sync --all-packages
-   bash scripts/run_all.sh        # mock 인자 없이. 끄기: bash scripts/run_all.sh stop
+   bash scripts/run_all.sh        # 끄기: bash scripts/run_all.sh stop
    ```
    - 포트 8000~8122를 써요. 시작할 때 이 포트를 쥔 프로세스를 끄기 때문에, 8000에 DejaFix를 띄워 뒀다면 DejaFix를 다른 포트(예: 18000)로 옮겨 두세요
    - 쇼핑몰 고객 주문 트래픽(`scripts/shop_traffic.py`, 3초마다 1건)도 같이 켜져요
-2. 화면을 켜요. `backend/.data/web.env`의 `VITE_MOCK=off`와 토큰을 읽어 개발 서버(3090)를 켜요. 3090에 다른 개발 서버가 떠 있으면 먼저 꺼요
+2. 화면을 켜요. `backend/.data/web.env`의 토큰을 읽어 개발 서버(3090)를 켜요. 3090에 다른 개발 서버가 떠 있으면 먼저 꺼요
    ```bash
    bash scripts/run_web.sh        # backend/ 에서
    ```
@@ -132,7 +131,7 @@ npm run build:pages  # GitHub Pages용 빌드 (dist/, 404.html 포함)
 
 ## 서비스 실서버 연결 체크리스트
 
-녹화본으로 만든 서비스 화면을 실제 백엔드에 붙일 때 이 순서로 확인해요. 데이터 분석(`/data`)을 예로 들어요.
+서비스 화면을 실제 백엔드에 붙일 때 이 순서로 확인해요. 데이터 분석(`/data`)을 예로 들어요.
 
 1. **화면이 부르는 주소 표**: 화면 코드(`src/pages/<화면>.tsx`, `src/lib/<서비스>.ts`, `src/components/<서비스>/`)에서 `fetch`하는 주소를 전부 찾아 표로 적고, 실제 모드에서 각 주소가 응답하는지 확인해요
    - 예: 위 "화면이 부르는 주소" 표 (총괄 3개, 데이터 AI 2개)
@@ -149,7 +148,7 @@ npm run build:pages  # GitHub Pages용 빌드 (dist/, 404.html 포함)
 
 받은 요청(`/handoffs`, 코드·API 이름은 할 일함·handoff)은 회사가 켜지 않은 서비스로 가던 일을 AI가 맡은 부서(사람)에게 넘긴 목록이에요. 어느 서비스를 샀든 보이는 기본 메뉴이고, 열린 일이 있으면 메뉴에 개수가 붙어요 (30초마다 다시 셈). 백엔드 흐름은 `backend/README.md` "업무 요청 라우터"에 있어요. 위 체크리스트 순서로 적었어요.
 
-1. **화면이 부르는 주소 표**: 녹화본이 없어요. 데모 모드(`VITE_MOCK` 기본값)에서도 이 주소는 가로채지 않고 실제 dashboard-api를 불러요 (`src/mock/install.ts`)
+1. **화면이 부르는 주소 표**
 
    | 화면 부분 | 화면이 부르는 주소 | 실제 서버 |
    | --- | --- | --- |
@@ -173,10 +172,9 @@ npm run build:pages  # GitHub Pages용 빌드 (dist/, 404.html 포함)
 
 DejaFix 화면은 띄우지 않아요. DejaFix API 계약(`DejaFix/DejaFix` `contracts/api.md` #10)의 `GET /api/incidents?status=problem`으로 **지금 진행 중인 장애만** 받아서 AXcellent가 그려요 (`src/pages/Incidents.tsx`, `src/lib/dejafix.ts`).
 
-- 기본은 **데모 녹화본**(DejaFix 레포 목 데이터)이라 화면 제목 옆에 "데모 녹화본"이 붙어요. **실제 DejaFix 데이터**를 보려면 `frontend/.env`에 아래를 넣고 개발 서버를 다시 켜요. 그러면 "실시간"으로 바뀌어요.
+- 항상 **실제 DejaFix 데이터**를 불러요. `frontend/.env`에 아래를 넣고 개발 서버를 다시 켜요.
 
   ```
-  VITE_DEJAFIX_LIVE=on                          # 다른 AI는 녹화본 그대로, 장애 대응만 실제 DejaFix
   DEJAFIX_PROXY_TARGET=http://127.0.0.1:18000   # DejaFix 백엔드 주소
   DEJAFIX_USERNAME=admin                        # DejaFix 계정 (viewer 이상)
   DEJAFIX_PASSWORD=<DejaFix .env 의 DEMO_ADMIN_PASSWORD>

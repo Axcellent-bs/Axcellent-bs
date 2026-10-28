@@ -2,7 +2,7 @@ import { DASHBOARD_API_URL, RELAY_API_URL } from "./env";
 import { finance, type ExecutionRecord, type Review } from "./finance";
 import { shortDateTime } from "./format";
 
-// 마케팅 AI 화면의 실제 데이터 (VITE_MOCK=off일 때만 부른다).
+// 마케팅 AI 화면의 실제 데이터.
 // - 쇼핑몰(shop-api) GET /api/shop/banners: 지금 캣북스에 걸린 공지 배너. 고객 화면용이라 토큰이 없다.
 // - 안전 장치(safety) GET /api/safety/executions: 마케팅 AI가 요청한 공지 게시·쿠폰 발급 기록(등급·금액).
 // - 안전 장치 GET /api/safety/reviews: 사람 결정을 기다리는 보류 건.
