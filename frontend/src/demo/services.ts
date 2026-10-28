@@ -32,7 +32,7 @@ export const AGENTS: { id: AgentId; name: string; Icon: ComponentType<{ size?: n
   { id: 'data', Icon: IconChart, name: '데이터분석 AI', backend: 'data (8106)' },
   { id: 'hr', Icon: IconUsers, name: '인사 AI', backend: 'dashboard-api (8020)' },
   { id: 'marketing', Icon: IconMegaphone, name: '마케팅 AI', backend: '연결 전 (화면 안 시연 데이터)' },
-  { id: 'planning', Icon: IconPlan, name: '기획개발 AI', backend: 'planning (8101) · dashboard-api (8020)' },
+  { id: 'planning', Icon: IconPlan, name: '개발', backend: 'planning (8101) · dashboard-api (8020)' },
 ]
 
 export type Service = {
