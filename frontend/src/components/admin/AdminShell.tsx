@@ -27,6 +27,7 @@ const SHARED_NAV: NavItem[] = [
 const CONTROL_MENU: SubItem[] = [
   { href: "/control", label: "전체 현황" },
   { href: "/control/companies", label: "고객사" },
+  { href: "/control/services", label: "서비스 관리" },
   { href: "/control/incidents", label: "장애·사건" },
   { href: "/control/quality", label: "AI 품질" },
   { href: "/control/cost", label: "비용·사용량" },

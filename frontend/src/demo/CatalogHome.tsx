@@ -1,7 +1,7 @@
 import { Link } from 'react-router'
 import { IconAgents, IconOffice } from '@/components/icons'
 import { homeOf, useSession } from './session'
-import { FAMILIES, SERVICES, type Service } from './services'
+import { FAMILIES, usePublishedServices, type Service } from './services'
 
 // 로그인 전에 여는 메인 페이지 = 서비스 제품군 카탈로그. 어떤 서비스가 있는지 보고, 로그인 버튼으로 로그인 화면에 간다.
 // 회사가 실제로 켤 서비스는 로그인 뒤 시스템 관리자가 서비스 고르기(/system/services)에서 정한다.
@@ -38,6 +38,7 @@ function ServiceCard({ s }: { s: Service }) {
 
 export default function CatalogHome() {
   const { account } = useSession()
+  const SERVICES = usePublishedServices()
 
   return (
     <div className="min-h-screen bg-app text-ink-900">
@@ -98,6 +99,7 @@ export default function CatalogHome() {
 
           {FAMILIES.map((f) => {
             const list = SERVICES.filter((s) => s.family === f.id)
+            if (!list.length) return null
             return (
               <div key={f.id} id={`fam-${f.id}`} className="scroll-mt-6 space-y-4">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-ink-100 pb-2">
