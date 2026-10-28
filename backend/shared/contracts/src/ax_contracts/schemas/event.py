@@ -55,6 +55,8 @@ class EventType(StrEnum):
     SAFETY_ACTION_EXECUTED = "safety.action_executed"
     SAFETY_ACTION_HELD = "safety.action_held"
     SAFETY_REVIEW_DECIDED = "safety.review_decided"
+    # 사람 할 일함 (dashboard-api, 업무 요청 라우터)
+    HANDOFF_COMPLETED = "handoff.completed"
 
 
 class EventEnvelope(AxModel):
@@ -331,6 +333,22 @@ class SupportInquiryResolvedData(AxModel):
     refund_amount: int | None = Field(default=None, ge=0)
 
 
+
+class HandoffCompletedData(AxModel):
+    """`handoff.completed`. 사람이 할 일함의 일을 끝내면 dashboard-api가 한 번 발행한다.
+
+    맡긴 쪽 에이전트는 `task_id`로 처음 받은 `handed_to_human` 결과와 이어 붙인다.
+    사람이 적은 결과 문장은 사실 필드가 아니라서 봉투의 `untrusted.result`로 준다.
+    멱등 키는 `handoff.completed:<task_id>`라 같은 일은 한 번만 나간다.
+    """
+
+    task_id: str
+    status: Literal["done", "rejected"]
+    from_service: str
+    to_service: str
+    skill: str
+
+
 # 이벤트 종류 → data 모델. 발행 담당이 새 data 모델을 추가할 때 여기에 한 줄 더한다.
 EVENT_DATA_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.SHOP_DEGRADED: ShopDegradedData,
@@ -357,4 +375,5 @@ EVENT_DATA_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.SAFETY_REVIEW_DECIDED: SafetyReviewDecidedData,
     EventType.SUPPORT_INQUIRY_RECEIVED: SupportInquiryReceivedData,
     EventType.SUPPORT_INQUIRY_RESOLVED: SupportInquiryResolvedData,
+    EventType.HANDOFF_COMPLETED: HandoffCompletedData,
 }
