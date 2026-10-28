@@ -1,0 +1,5 @@
+/* 한 번에 불러오는 진입점. 순서는 DejaFix main.tsx와 같다: 토큰 → 기본·컴포넌트 → 테마 → 사이드바·헤더 구조. */
+@import './tokens.css';
+@import './global.css';
+@import './theme.css';
+@import './shell.css';
