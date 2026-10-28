@@ -151,6 +151,20 @@ def test_deciding_a_card_removes_it_from_the_queue(client: TestClient) -> None:
     assert client.get(BASE + "/candidate-cards").json()["data"] == []
 
 
+def test_decision_cards_list_only_approved_cards(client: TestClient) -> None:
+    assert client.get(BASE + "/decision-cards").json()["data"] == []
+    decide(client, "card_d2c8a53d7ee0")  # 승인
+    decide(client, "card_77aa10c2be31", "reject")  # 폐기는 확정이 아니다
+    body = client.get(BASE + "/decision-cards").json()
+    cards = [Card.model_validate(c) for c in body["data"]]
+    assert [c.card_id for c in cards] == ["card_d2c8a53d7ee0"] and body["meta"]["total"] == 1
+    by_incident = client.get(BASE + "/decision-cards", params={"context_id": "ctx_dec_0003"}).json()
+    assert [c["card_id"] for c in by_incident["data"]] == ["card_d2c8a53d7ee0"]
+    other = client.get(BASE + "/decision-cards", params={"context_id": "ctx_dec_9999"}).json()
+    assert other["data"] == []
+    assert client.get(BASE + "/decision-cards", params={"limit": 0}).status_code == 422
+
+
 def test_same_decision_twice_succeeds_and_the_opposite_conflicts(client: TestClient) -> None:
     decide(client, "card_d2c8a53d7ee0")
     assert decide(client, "card_d2c8a53d7ee0").status_code == 200
@@ -176,7 +190,7 @@ def test_not_connected_outside_mock_mode(monkeypatch: pytest.MonkeyPatch) -> Non
 
     monkeypatch.setattr(hr_client, "SEND", unreachable)
     client = TestClient(app)
-    for path in ("/handovers", "/handover-questions", "/candidate-cards"):
+    for path in ("/handovers", "/handover-questions", "/candidate-cards", "/decision-cards"):
         response = client.get(BASE + path)
         assert response.status_code == 502
         assert response.json()["error"]["code"] == "UPSTREAM_ERROR"

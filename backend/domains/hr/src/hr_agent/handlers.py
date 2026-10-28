@@ -75,6 +75,7 @@ _HANDLERS = {
     "list_handovers": _with_services(views.list_handovers),
     "list_open_questions": _with_services(views.list_open_questions),
     "list_candidate_cards": _with_services(views.list_candidate_cards),
+    "list_cards": _with_services(views.list_cards),
     "get_audit_timeline": _with_services(views.get_audit_timeline),
     "decide_candidate_card": _with_services(card_decision.decide_candidate_card),
     "check_plan": check_plan,
