@@ -136,10 +136,24 @@ execute params (safety #171 `thresholds.toml` 규칙 키, 모두 도메인 상�
 - LLM 설정: `PLANNING_LLM_MODEL`·`PLANNING_LLM_BASE_URL`·`PLANNING_LLM_API_KEY`(없으면 공통 `LLM_*`). 레포 이름·파일 글·기획 글만 보내고 토큰은 보내지 않는다. 테스트는 `coder.set_llm()`으로 가짜를 끼운다(`tests/test_coder.py`).
 - 아직: 실패 뒤 이미 PR이 있는 작업(리뷰 LLM 오류 등)은 다시 시도하지 않는다(PR 화면에서 머지·판단). 파일 하나를 통째로 다시 쓰므로 600줄 넘는 파일은 사람 몫이다.
 
+### 개발 AI와 대화 (개발 화면, `dev_chat.py`)
+개발팀원은 양식 대신 개발 AI와 대화한다. 요청이 흐리면 AI가 되묻고, 계획이 서면 코딩 작업(`create_dev_task`, 위 흐름 그대로)을 스스로 띄워 PR까지 간다. `POST /dev-tasks`는 그대로 둔다(안에서 다시 쓴다).
+
+- `GET /dev-chat` → 대화 목록(최근 바뀐 것 먼저, 20개) · `GET /dev-chat/{thread_id}` → 대화 하나(없으면 404).
+- `POST /dev-chat` `{thread_id?, message(1~4000자), connection?}` → 사용자 메시지를 적고 AI 답 하나를 받은 뒤 바뀐 대화를 준다. `thread_id`가 없으면 새 대화(`chat-1`, `chat-2`…, 제목 = 첫 메시지 40자).
+- 대화 `{id, title, status: talking|started|blocked, messages, task_id, connection, created_at, updated_at}`, 메시지 `{id(m1..), role: user|assistant, text, at, kind: text|question|plan|started|error, plan: {title, plan, done[], paths[]}|null, task_id}`.
+- 상태 `chats`에도 들어가 SSE로 나간다. 사용자 메시지는 LLM을 부르기 전에 먼저 적어 화면에 바로 보이고, 작업을 띄운 뒤 진행은 작업 `coding`으로 본다. 초기화하면 비운다.
+- 한 번 주고받기: LLM(`{reply, action: ask|start, plan?, connection?}`)에 대화(최근 20개, 데이터 블록)·연결 목록(id·레포·설명·담당 경로)·실제 파일 경로(coder와 같은 걸러내기, 합 300개)를 준다. 되묻기는 2번까지(그 뒤에도 묻는데 계획이 있으면 띄운다). "진행해"·"만들어 줘"·"PR 올려" 같은 말이면 이번 계획 또는 지난 계획으로 띄운다. 계획은 다듬는다(제목 200자, `..` 경로 빼기, 완료 기준 20줄).
+- 올릴 연결: 대화에 고른 것(`connection`) → LLM이 고른 id → 메시지에 나온 연결 id·레포 이름 → 연결이 하나면 그것. 여럿인데 못 정하면 어느 레포인지 묻는다(`question`, 계획을 붙여 둬서 연결을 골라 "진행해"면 바로 띄운다).
+- 작업을 띄우면 `started` 메시지(`task_id`)와 대화 `status: started`. 그 대화에 또 쓰면 LLM 없이 작업 진행 상태만 답한다(다른 변경은 새 대화).
+- 연결이 없으면 요청을 실패시키지 않고 200 + `error` 메시지("연결된 레포가 없어…")와 `status: blocked`를 준다. 연결을 붙인 뒤 다시 보내면 이어 간다. LLM 오류·시간 초과(60초)도 `error` 메시지 한 줄(예외 종류만, 내용·비밀 값 없음).
+- 오류: 409 `LLM_NOT_CONFIGURED`(가장 먼저 본다, 아무것도 안 적음) · 400 `INVALID_INPUT`(형식, 모르는 연결) · 404 `NOT_FOUND`(대화 없음) · 409 `WRONG_ROLE`(planning 서비스) · 409 `GATE_REJECTED`.
+- 메시지 하나를 적을 때마다 관문 `dev_chat`(A, 대상 `chat-1:m2`, 사건 `ctx_chat_1`). LLM은 `coder`와 같은 설정, 테스트는 `dev_chat.set_llm()`(`tests/test_dev_chat.py`).
+
 ## 4. 의존
 `ax-contracts`, `ax-agent-template`, `fastapi`, `uvicorn`, `httpx`. 다른 부서 폴더를 import하지 않는다.
 - hr `record_case` 입력은 계약 `RecordCase`(`record.py`)로 만들어 `execute(record_case)` params의 `record_case`에 넣는다 (`decision_rejected`·`spec_confirmed`).
-- 실행 관문: `ax_agent_template.execute.execute()` (safety). 상태를 바꾸는 단계마다 부른다: `create_ticket`·`write_spec`·`confirm_spec`·`split_tasks`·`generate_pr`(B)·`review_pr`·`merge_pr`(B)·`record_case`·`extract_decision`·`review_ticket_draft`·`link_incident`·`send_message`·`auto_policy_update`·`auto_policy_propose`(C, 보류가 정상)·`approve_repo`·`reject_repo`(올릴 레포 사람 판단)·`dev_task_create`·`dev_task_retry`·`code_write`(코딩 에이전트, A). 멱등성 키는 `context_id:액션:대상`.
+- 실행 관문: `ax_agent_template.execute.execute()` (safety). 상태를 바꾸는 단계마다 부른다: `create_ticket`·`write_spec`·`confirm_spec`·`split_tasks`·`generate_pr`(B)·`review_pr`·`merge_pr`(B)·`record_case`·`extract_decision`·`review_ticket_draft`·`link_incident`·`send_message`·`auto_policy_update`·`auto_policy_propose`(C, 보류가 정상)·`approve_repo`·`reject_repo`(올릴 레포 사람 판단)·`dev_task_create`·`dev_task_retry`·`code_write`(코딩 에이전트, A)·`dev_chat`(개발 AI 대화, A). 멱등성 키는 `context_id:액션:대상`.
 
 ## 5. 하지 않는 것
 - 원인 판정을 하지 않는다 (infra 몫). 후보와 시간 관계만 회신한다.

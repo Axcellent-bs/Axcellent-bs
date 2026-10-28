@@ -237,6 +237,13 @@ owner = "planning"
 requesters = ["planning", "dev"]
 base_grade = "A"
 
+# 개발 AI 대화 (개발 화면). 메시지 하나를 대화에 더하는 기록. 작업을 띄우는 건 dev_task_create
+[[actions]]
+action = "dev_chat"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
 # 기록·회신·초안은 A (#166). 돈·배포에 닿지 않는다
 [[actions]]
 action = "write_spec"

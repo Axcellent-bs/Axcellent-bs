@@ -65,6 +65,9 @@ from planning_agent.domain.models import (
     AutoProposal,
     AutoReview,
     AutoRun,
+    ChatMessage,
+    ChatPlan,
+    ChatThread,
     CodingFile,
     CodingReview,
     CodingRun,
@@ -2152,6 +2155,76 @@ class PlanningService:
         result = await self._apply(run)
         self._spawn_coder(result.output["task_id"])
         return result
+
+    # ---- 개발 AI 대화 (dev_chat.py). 메시지 하나 = 작은 액션 하나 (관문 dev_chat A)
+
+    def chat_of(self, thread_id: str) -> ChatThread | None:
+        return next((c for c in self.state.chats if c.id == thread_id), None)
+
+    @staticmethod
+    def chat_ctx(thread_id: str) -> str:
+        return "ctx_" + thread_id.replace("-", "_")
+
+    async def chat_add(
+        self,
+        thread_id: str | None,
+        role: str,
+        text: str,
+        *,
+        kind: str = "text",
+        plan: ChatPlan | None = None,
+        task_id: str | None = None,
+        status: str | None = None,
+        connection: str | None = None,
+        title: str | None = None,
+    ) -> ChatThread:
+        """대화에 메시지 하나를 더한다. thread_id가 없으면 새 대화(`chat-n`)를 연다."""
+
+        async def run(s: State) -> ActionResult:
+            t = self.clock()
+            if thread_id is None:
+                nums = [int(c.id.split("-")[1]) for c in s.chats if c.id[5:].isdigit()]
+                th = ChatThread(
+                    id=f"chat-{max(nums, default=0) + 1}",
+                    title=title or "새 대화",
+                    created_at=t,
+                    updated_at=t,
+                )
+                s.chats.append(th)
+            else:
+                found = next((c for c in s.chats if c.id == thread_id), None)
+                if found is None:
+                    raise ActionError("NOT_FOUND", f"대화 {thread_id}가 없다")
+                th = found
+            mid = f"m{len(th.messages) + 1}"
+            await self._execute(
+                "dev_chat",
+                self.chat_ctx(th.id),
+                f"{th.id}:{mid}",
+                f"{th.id} {role} 메시지 {mid} ({kind})",
+                {"thread": th.id, "role": role, "kind": kind, "task": task_id},
+                [th.id],
+            )
+            th.messages.append(
+                ChatMessage(
+                    id=mid, role=role, text=text, at=t, kind=kind, plan=plan, task_id=task_id
+                )
+            )
+            if status:
+                th.status = status  # type: ignore[assignment]
+            if task_id:
+                th.task_id = task_id
+            if connection:
+                th.connection = connection
+            if title and thread_id is not None:
+                th.title = title
+            th.updated_at = t
+            return ActionResult(outcome="chat", output={"thread_id": th.id})
+
+        result = await self._apply(run)
+        found = self.chat_of(result.output["thread_id"])
+        assert found is not None
+        return found
 
     async def retry_dev_task(self, task_id: str, connection: str | None = None) -> ActionResult:
         """실패·사람 확인으로 멈춘 코딩 작업을 처음부터 다시 돌린다 (PR을 아직 안 만든 것만)."""
