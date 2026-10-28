@@ -26,3 +26,21 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npx vite build
+
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: backend/.python-version
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.13.1
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --all-packages --frozen
+      - run: uv run pytest -q
