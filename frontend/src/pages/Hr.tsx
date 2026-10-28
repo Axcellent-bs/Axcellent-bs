@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Loading } from "@/components/admin/bits";
-import { DecisionCard, IncidentRecords } from "@/components/hr/IncidentRecords";
-import { HUMAN_TOKEN_SET } from "@/lib/env";
-import { useSearchParams } from "@/lib/nav";
+import { DecisionCard } from "@/components/hr/DecisionCards";
+import IncidentRecords from "@/components/hr/IncidentRecords";
+import { HUMAN_TOKEN_SET, MOCK } from "@/lib/env";
 import { ago, shortDateTime } from "@/lib/format";
+import { useSearchParams } from "@/lib/nav";
 import {
   hr,
   type HandoverQuestion, type HandoverStatus, type HandoverView, type HrCard, type PlanCheck, type PlanDraft, type Roster,
@@ -30,6 +31,7 @@ const VERDICT: Record<string, { label: string; tone: string }> = {
   block: { label: "진행 전 확인 필요", tone: "bg-red-50 text-red-700" },
 };
 const DEMO_DRAFT: PlanDraft = { title: "결제 서버 캐시 도입", summary: "결제 응답 속도를 위해 서버 캐시를 도입한다", area: "payment", kind: "spec" };
+const EMPTY_DRAFT: PlanDraft = { title: "", summary: "", area: "", kind: "spec" };
 const INPUT = "w-full rounded-xl border border-ink-100 bg-app px-3 py-2 text-sm";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : "요청에 실패했습니다");
@@ -84,7 +86,7 @@ const PART = {
 
 export default function HrPage({ part = "hr" }: { part?: HrPart }) {
   const P = PART[part];
-  const ctxParam = useSearchParams().get("ctx"); // 총괄 사건 화면에서 "결정 기록에서 보기"로 들어올 때
+  const ctxParam = useSearchParams().get("ctx"); // 총괄 사건 화면의 "결정 기록에서 보기"로 들어올 때
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [up, setUp] = useState(true);
@@ -178,18 +180,19 @@ export default function HrPage({ part = "hr" }: { part?: HrPart }) {
 
       {part === "ops" && <>
       {/* ④ 기록 도구 */}
-      <Section title="최근 사건의 인사 기록" desc="장애 사건마다 인사 AI가 무엇을 기록했는지 번호 입력 없이 봅니다. 사건과 기록 단계 상태는 총괄이 준 값이고, 기록과 카드는 인사 AI가 저장한 값입니다.">
-        <IncidentRecords initialCtx={ctxParam} />
-      </Section>
-      <Section title="확정된 결정 카드" desc="후보가 아니라 기록으로 확정된 카드입니다. 최근 순으로 최대 50장을 보여 줍니다.">
-        {view.decided === null
-          ? <p className="text-xs text-amber-800">확정 카드 목록을 받지 못했습니다. 서버가 이 조회를 아직 지원하지 않을 수 있습니다.</p>
-          : view.decided.length === 0
-            ? <p className="py-6 text-center text-sm text-ink-500">아직 확정된 결정 카드가 없습니다.</p>
-            : <div className="space-y-3">{view.decided.map((c) => <DecisionCard key={c.card_id} card={c} />)}</div>}
-      </Section>
+      {/* 실제 모드: 인사 AI가 실제로 남긴 사건 기록과 고른 사건의 처리 내역. 녹화본 데모에는 사건 목록이 없어 번호 입력으로 본다 */}
+      {!MOCK && <IncidentRecords initialCtx={ctxParam} />}
+      {!MOCK && (
+        <Section title="확정된 결정 카드" desc="후보가 아니라 기록으로 확정된 카드입니다. 최근 순으로 최대 50장을 보여 줍니다.">
+          {view.decided === null
+            ? <p className="text-xs text-amber-800">확정 카드 목록을 받지 못했습니다. 서버가 이 조회를 아직 지원하지 않을 수 있습니다.</p>
+            : view.decided.length === 0
+              ? <p className="py-6 text-center text-sm text-ink-500">아직 확정된 결정 카드가 없습니다.</p>
+              : <div className="space-y-3">{view.decided.map((c) => <DecisionCard key={c.card_id} card={c} />)}</div>}
+        </Section>
+      )}
       <Section title="계획 비교" desc="새 계획이 과거에 기각된 안과 겹치는지 확인합니다. 저장하지 않고 보기만 합니다."><PlanChecker /></Section>
-      <Section title="사건 번호로 직접 찾기" desc="목록에 없는 사건은 번호로 AI의 처리 내역을 시간순으로 봅니다."><Activity /></Section>
+      {MOCK && <Section title="AI가 한 일" desc="사건 번호로 AI의 처리 내역을 시간순으로 봅니다."><Activity /></Section>}
       </>}
     </div>
   );
@@ -306,7 +309,8 @@ function RosterGrid({ roster }: { roster: Roster }) {
 
 // ---------------------------------------------------------------- 계획 비교·감사 기록
 function PlanChecker() {
-  const [draft, setDraft] = useState<PlanDraft>(DEMO_DRAFT);
+  // 예시 입력은 녹화본 데모에서만 채운다. 실제 모드는 빈 칸에서 시작한다
+  const [draft, setDraft] = useState<PlanDraft>(MOCK ? DEMO_DRAFT : EMPTY_DRAFT);
   const [result, setResult] = useState<PlanCheck | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -344,12 +348,11 @@ function PlanChecker() {
 }
 
 function Activity() {
-  const [ctx, setCtx] = useState("");
+  const [ctx, setCtx] = useState("ctx_hnd_0001");
   const [rows, setRows] = useState<Awaited<ReturnType<typeof hr.activity>> | null>(null);
   const [err, setErr] = useState<string | null>(null);
   async function load(e: FormEvent) {
     e.preventDefault(); setErr(null);
-    if (!ctx.trim()) { setErr("사건 번호를 입력하세요"); return; }
     try { setRows(await hr.activity(ctx.trim())); } catch (x) { setErr(errText(x)); setRows(null); }
   }
   return (

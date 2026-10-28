@@ -98,7 +98,7 @@ function IncidentTabs({ recent, older, selected, onSelect }: { recent: IncidentS
               aria-selected={on} aria-controls={PANEL_ID} tabIndex={on || (!recentSelected && idx === 0) ? 0 : -1}
               onClick={() => onSelect(i.context_id)} onKeyDown={(e) => onKey(e, idx)}
               className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${on ? "bg-brand-600 text-white" : "bg-surface text-ink-700 ring-1 ring-ink-100 hover:bg-ink-100"}`}>
-              <span className="truncate">{incidentName(i.context_id, i.component)}</span>
+              <span className="truncate" title={i.context_id}>{incidentName(i.context_id, i.component, i.opened_at)}</span>
               <span className={`shrink-0 text-xs tabular-nums ${on ? "text-white/80" : "text-ink-500"}`}>{shortDay(i.opened_at)}</span>
               {dot && <span className={`h-2 w-2 shrink-0 rounded-full ${dot.cls} ${on ? "ring-2 ring-white" : ""}`} role="img" aria-label={dot.label} title={dot.label} />}
             </button>

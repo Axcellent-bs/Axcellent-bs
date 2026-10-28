@@ -1,6 +1,7 @@
 import { ApiError } from "./apiError";
 import { writeAuth } from "./api";
 import { DASHBOARD_API_URL } from "./env";
+import type { OrchIncident } from "./agentChat";
 
 // 인사 AI 화면 → dashboard-api(/api/dashboard/...). 응답은 ax-backend 규약 {data, meta}.
 // 모양은 ax-backend contracts/hr.py 모델 그대로다. 화면은 hr이 계산한 값을 다시 계산하지 않는다.
@@ -104,4 +105,6 @@ export const hr = {
   roster: () => call<Roster>("/roster"),
   activity: (contextId: string) => call<AuditEntry[]>(`/hr-activity/${encodeURIComponent(contextId)}`),
   checkPlan: (draft: PlanDraft) => post<PlanCheck>("/plan-checks", { draft }),
+  /** 총괄 사건 목록(dashboard-api가 총괄 /api/incidents를 중계). 인사 AI의 사건 기록 단계(record_case)가 들어 있다 */
+  incidents: () => call<OrchIncident[]>("/incidents"),
 };

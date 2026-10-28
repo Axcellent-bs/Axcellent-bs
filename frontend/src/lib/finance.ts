@@ -443,10 +443,18 @@ export function todoTab(t: Pick<FinanceTodo, "kind" | "link">): FinanceTab {
 export const COMPONENT_KO: Record<string, string> = { payment: "결제", order: "주문", shop: "쇼핑몰", search: "검색", delivery: "배송" };
 export const componentKo = (c: string | null | undefined) => (c ? COMPONENT_KO[c] ?? "서비스" : null);
 
-/** "ctx_inc_scn_a_0001" + "payment" → "장애 #0001 · 결제". 장애가 난 곳을 모르면 "장애 #0001" */
-export function incidentName(contextId: string, component?: string | null): string {
+/**
+ * 사건 이름. 시연 사건 "ctx_inc_scn_a_0001" + "payment" → "장애 #0001 · 결제".
+ * 실제 사건 번호(ctx_inc_ + 16진수)는 사람에게 의미가 없어 "결제 장애 · 오후 4:38"처럼 시각으로 부른다.
+ */
+export function incidentName(contextId: string, component?: string | null, openedAt?: string | null): string {
   const where = componentKo(component);
-  return `장애 #${incidentNo(contextId)}${where ? ` · ${where}` : ""}`;
+  const no = incidentNo(contextId);
+  if (/^[0-9a-f]{8,}$/i.test(no)) {
+    const at = openedAt ? new Date(openedAt).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" }) : null;
+    return `${where ?? "서비스"} 장애${at ? ` · ${at}` : ""}`;
+  }
+  return `장애 #${no}${where ? ` · ${where}` : ""}`;
 }
 
 /** 최근 사건이 먼저. 시각이 없는 사건은 뒤로 */

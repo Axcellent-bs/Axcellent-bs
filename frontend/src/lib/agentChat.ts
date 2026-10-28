@@ -7,7 +7,7 @@ import type { CommLine, CommOutcome } from "./types";
 // 부서가 돌려준 자유 문장(summary·note·untrusted 등)은 화면에 옮기지 않는다. 화면 없는 순수 함수만 둔다.
 
 // ---------------------------------------------------------------- 총괄 JSON (ax-backend orchestrator models.py view())
-export type StepStatus = "pending" | "running" | "held" | "completed" | "failed" | "skipped" | "rejected_by_human";
+export type StepStatus = "pending" | "running" | "held" | "waiting_human" | "completed" | "failed" | "skipped" | "rejected_by_human";
 
 export interface OrchStep {
   step_id: string;
@@ -22,6 +22,8 @@ export interface OrchStep {
   finished_at: string | null;
   transferred_to: string | null;
   reason_code: string | null;
+  /** 서비스가 꺼져 담당 부서 할 일함으로 넘어간 일 번호 (status "waiting_human", 업무 요청 라우터) */
+  handoff_task_id?: string | null;
   output: Record<string, unknown>;
 }
 
@@ -84,7 +86,7 @@ const METRIC_KO: Record<string, string> = {
 };
 const SUBJECT_KO: Record<string, string> = { payment: "결제가", api: "쇼핑몰이", db: "주문 DB가", search: "검색이", shipping: "배송이" };
 /** 총괄 제목 끝의 "(metric)"에서 지표 코드를 꺼낸다 */
-function metricOf(inc: OrchIncident): string | null {
+function metricOf(inc: Pick<OrchIncident, "title">): string | null {
   return /\(([^)]+)\)\s*$/.exec(inc.title)?.[1] ?? null;
 }
 /** "오후 5:44" */
@@ -99,7 +101,7 @@ function idsOf(output: Record<string, unknown> | null | undefined): string[] {
 const rawOf = (...parts: (string | null | undefined | false)[]) => parts.filter(Boolean).join(" · ") || undefined;
 
 /** 방 이름: "결제가 서버 오류로 자꾸 실패해요" */
-export function incidentTitle(inc: OrchIncident): string {
+export function incidentTitle(inc: Pick<OrchIncident, "title" | "component">): string {
   const comp = COMPONENT_KO[inc.component] ?? inc.component;
   const metric = metricOf(inc);
   const subject = SUBJECT_KO[inc.component] ?? `${comp}이(가)`;
@@ -253,6 +255,7 @@ function resultLine(step: OrchStep): { text: string; tone: Tone } {
   switch (step.status) {
     case "completed":
       if (step.transferred_to) return { text: `이관받아 처리 완료했습니다.`, tone: "ok" };
+      if (step.output.handled_by === "human") return { text: "담당 부서 사람이 처리해서 이어 갑니다.", tone: "ok" };
       return { text: `${stepLabel(step.label)} 완료했습니다.${retryTxt}`, tone: "ok" };
     case "failed": {
       if (step.note.startsWith("canceled")) return { text: `시간 안에 끝내지 못했습니다 — 시간 초과${retryTxt}.`, tone: "fail" };
@@ -260,9 +263,14 @@ function resultLine(step: OrchStep): { text: string; tone: Tone } {
       return { text: `실패했습니다${retries > 0 ? ` — ${retries}회 재시도 후 중단` : ""}.`, tone: "fail" };
     }
     case "rejected_by_human":
+      if (step.handoff_task_id) {
+        return { text: step.note === "사람 처리 시간 초과로 자동 거절" ? "담당 부서 처리 기한이 지나 자동 거절되었습니다." : "담당 부서 사람이 처리하지 않기로 했습니다.", tone: "warn" };
+      }
       return { text: step.note === "시간 초과로 자동 거절" ? "결정 기한이 지나 자동 거절되었습니다." : "사람이 거절해 진행하지 않았습니다.", tone: "warn" };
     case "held":
       return { text: "C 등급이라 사람 승인을 기다립니다. 보류 중입니다.", tone: "warn" };
+    case "waiting_human":
+      return { text: "담당 부서 사람의 처리를 기다립니다.", tone: "warn" };
     case "skipped":
       return { text: "건너뛰었습니다.", tone: "muted" };
     default:
@@ -330,6 +338,15 @@ export function incidentItems(inc: OrchIncident): ChatItem[] {
         title: stepLabel(step.label), detail: `${speaker(step.dept)} · ${skillKo(step.skill)}`,
       });
       if (pending) continue;
+    }
+    if (step.handoff_task_id) {
+      // 받는 서비스가 꺼져 있어 담당 부서 사람에게 넘어감 (C 등급 승인 대기와 다르다)
+      const unit = typeof step.output.assignee_unit === "string" ? step.output.assignee_unit : "담당 부서";
+      out.push({
+        kind: "msg", id: `${sid}:handoff`, at: step.started_at, room, from: speaker(step.dept), to: speaker(CENTRAL), fromKey: step.dept ?? "", central: false,
+        text: `이 서비스는 켜져 있지 않아 ${unit} 할 일함으로 넘겼습니다. 사람이 처리하면 이어 갑니다.`, tag: "사람 처리", raw: rawOf(`skill: ${step.skill}`, step.handoff_task_id), tone: "warn", facts: [],
+      });
+      if (step.status === "waiting_human") continue;
     }
     if (step.finished_at && step.status !== "held") {
       const r = resultLine(step);

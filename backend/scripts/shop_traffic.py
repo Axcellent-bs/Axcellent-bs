@@ -4,6 +4,10 @@
 정하지 않는다. 쇼핑몰에 결제 장애가 주입돼 있으면 결제 서버가 5xx로 실패시키고, 쇼핑몰 감시가 그걸 재서
 `shop.degraded`를 낸다. 그래서 장애 대응 사건이 실제 주문·결제 기록에서 시작한다.
 
+결제가 실패한 고객 일부(`SHOP_TRAFFIC_INQUIRY_RATE`, 기본 0.3)는 쇼핑몰 문의 창구(`POST /api/shop/inquiries`)로
+그 주문에 대해 문의를 남긴다. 실제 고객이 하는 행동을 흉내 낸 것이고, 문의 문장은 아래 예시 중에서 고른다.
+문의는 고객지원 AI가 받아 처리한다.
+
     python scripts/shop_traffic.py            # SHOP_API_URL(기본 http://127.0.0.1:8010), 3초마다 1건
     SHOP_TRAFFIC_INTERVAL_S=1 python scripts/shop_traffic.py
 
@@ -22,6 +26,16 @@ import urllib.request
 
 BASE = os.getenv("SHOP_API_URL", "http://127.0.0.1:8010").rstrip("/")
 INTERVAL = float(os.getenv("SHOP_TRAFFIC_INTERVAL_S", "3"))
+INQUIRY_RATE = float(os.getenv("SHOP_TRAFFIC_INQUIRY_RATE", "0.3"))
+
+# 결제가 실패한 고객이 남기는 문의 (고객 시뮬레이터의 예시 문장)
+FAILED_PAYMENT_INQUIRIES = [
+    ("결제가 안 돼요", "결제 버튼을 눌렀는데 계속 오류가 나요. 카드 결제가 안 되는 건가요?"),
+    ("결제 오류 문의", "결제하다가 오류가 났는데 돈이 빠져나간 건 아니죠? 확인 부탁드려요."),
+    ("주문이 결제 실패로 나와요", "방금 주문했는데 결제 실패라고 떠요. 다시 해도 똑같아요."),
+    ("선물용 책 결제", "내일까지 선물해야 하는데 결제가 계속 실패해요. 언제쯤 되나요?"),
+    ("카드 결제 실패", "다른 카드로도 해 봤는데 둘 다 결제 오류가 나요. 사이트 문제인가요?"),
+]
 
 
 def call(method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
@@ -56,6 +70,11 @@ def main() -> int:
                     status, paid = call("POST", f"/api/shop/orders/{order_id}/payments", {"method_code": "card"})
                     result = paid.get("data", {}).get("status") or paid.get("error", {}).get("code")
                     print(f"{time.strftime('%H:%M:%S')} {order_id} 결제 {status} {result}", flush=True)
+                    if result == "payment_failed" and rng.random() < INQUIRY_RATE:
+                        buyer = order["data"]["buyer_id"]
+                        subject, body = rng.choice(FAILED_PAYMENT_INQUIRIES)
+                        st, _ = call("POST", "/api/shop/inquiries", {"buyer_id": buyer, "order_id": order_id, "subject": subject, "body": body})
+                        print(f"{time.strftime('%H:%M:%S')} {order_id} 고객 문의 접수 {st}", flush=True)
                 else:
                     print(f"{time.strftime('%H:%M:%S')} 주문 실패 {status} {order.get('error')}", flush=True)
         except (urllib.error.URLError, OSError, KeyError, ValueError) as error:

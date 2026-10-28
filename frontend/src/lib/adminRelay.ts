@@ -6,7 +6,7 @@ import { RELAY_API_URL, RELAY_TOKEN } from "./env";
 // `main.py`(`departments()`) 기준이고, 중계 응답은 OpenAPI에 모양이 없어 손으로 적는다.
 // 토큰은 환경변수(개발용)에서만 오고 브라우저 저장소에는 두지 않는다. 진짜 로그인은 사람 인증 뒤에 붙는다.
 
-export type StepStatus = "pending" | "running" | "completed" | "failed" | "held" | "skipped" | "rejected_by_human" | "transfer_queued";
+export type StepStatus = "pending" | "running" | "completed" | "failed" | "held" | "waiting_human" | "skipped" | "rejected_by_human" | "transfer_queued";
 
 export interface Step {
   step_id: string;
@@ -94,14 +94,16 @@ export const STEP_STATUS: Record<StepStatus, { label: string; tone: string }> = 
   completed: { label: "완료", tone: "bg-emerald-50 text-emerald-700" },
   failed: { label: "실패", tone: "bg-red-50 text-red-700" },
   held: { label: "사람 승인 대기", tone: "bg-amber-50 text-amber-700" },
+  // 서비스가 꺼져 있어 담당 부서 할 일함으로 넘어간 단계 (C 등급 승인 대기와 다름)
+  waiting_human: { label: "담당 부서 처리 대기", tone: "bg-violet-50 text-violet-700" },
   skipped: { label: "건너뜀", tone: "bg-ink-100 text-ink-500" },
   rejected_by_human: { label: "보류 후 거절", tone: "bg-red-50 text-red-700" },
-  transfer_queued: { label: "이관 큐로 넘김", tone: "bg-brand-50 text-brand-700" },
+  transfer_queued: { label: "사람에게 넘김", tone: "bg-brand-50 text-brand-700" },
 };
 export const INCIDENT_STATUS: Record<Incident["status"], { label: string; tone: string }> = {
-  open: { label: "진행 중", tone: "bg-brand-50 text-brand-700" },
-  resolved: { label: "해결", tone: "bg-emerald-50 text-emerald-700" },
-  degraded: { label: "일부 미완료", tone: "bg-amber-50 text-amber-700" },
+  open: { label: "AI가 처리 중", tone: "bg-brand-50 text-brand-700" },
+  resolved: { label: "해결됨", tone: "bg-emerald-50 text-emerald-700" },
+  degraded: { label: "사람 확인 필요", tone: "bg-amber-50 text-amber-700" },
 };
 export const SHARED_KO: Record<string, string> = { notice_id: "점검 공지 번호", recovered_notice_id: "정상화 공지 번호" };
 export const GRADE: Record<string, { label: string; tone: string }> = {

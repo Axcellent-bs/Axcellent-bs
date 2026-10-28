@@ -10,6 +10,7 @@ import Dashboard from '@/pages/Dashboard'
 import Data from '@/pages/Data'
 import Finance from '@/pages/Finance'
 import FinanceGuide from '@/pages/FinanceGuide'
+import Handoffs from '@/pages/Handoffs'
 import Hr from '@/pages/Hr'
 import Incidents from '@/pages/Incidents'
 import IncidentDetail from '@/pages/IncidentDetail'
@@ -78,6 +79,7 @@ function Pages() {
           <Route path="/data" element={<Data />} />
           <Route path="/planning" element={<PlanningPage part="planning" />} />
           <Route path="/dev" element={<PlanningPage part="dev" />} />
+          <Route path="/handoffs" element={<Handoffs />} />
           <Route path="/agents/chat" element={<AgentChat />} />
           <Route path="/agents/office" element={<AgentOffice />} />
           <Route path="/support" element={<Support />} />
