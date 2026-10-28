@@ -202,6 +202,11 @@ def _pr_size_params(lines: int, files: int, paths: list[str], task: str) -> dict
     }
 
 
+# 관문이 보류해도 본 작업을 되돌리지 않는 부수 기록. 인사 기록은 인사가 실행하는 일이라
+# 기획·개발 쪽 관문에서는 보류될 수 있다 (등록표 owner hr)
+SOFT_ACTIONS = frozenset({"record_case"})
+
+
 class GateRefused(Exception):
     """관문이 실행을 허락하지 않았다. 액션 전체를 버린다."""
 
@@ -429,6 +434,8 @@ class PlanningService:
         self._send_result: ResultSender = result_sender or send_change_result
         self.tenant_id = tenant_id
         self.gate_calls: list[GateCall] = []
+        # 보류돼도 본 작업을 막지 않는 부수 기록 (SOFT_ACTIONS)
+        self.soft_holds: list[GateCall] = []
         self._subscribers: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = {}
         self._locks: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self.version = 0
@@ -644,6 +651,13 @@ class PlanningService:
             GateCall(action, key, decision.status, decision.grade, decision.execution_id)
         )
         if decision.status not in allow:
+            # 인사 기록(record_case)은 인사(hr)가 실행하는 일이라 이쪽 관문이 보류할 수 있다.
+            # 머지·확정 같은 본 작업은 이미 끝났으니 되돌리지 않고 보류만 남긴다 (soft_holds)
+            if action in SOFT_ACTIONS:
+                self.soft_holds.append(
+                    GateCall(action, key, decision.status, decision.grade, decision.execution_id)
+                )
+                return decision
             raise GateRefused(action, key, decision)
         return decision
 
@@ -2378,7 +2392,7 @@ class PlanningService:
             task, cr = self._coding_of(s, job)
             number = len(s.prs) + 30
             pr_id = f"PR #{number}"
-            # 안전 관문·역추적은 회사 코드 기준 경로(연결의 앞머리를 붙인 것)로 본다. 커밋은 레포 안 경로
+            # 관문·역추적은 회사 코드 기준 경로(연결 앞머리를 붙인 것). 커밋은 레포 안 경로
             paths = sorted(vcs.logical_paths(cr.connection, [r.path for r in rows]))
             lines, files = coder.total_lines(rows), len(rows)
             area = coder.area_of(paths)
@@ -2401,7 +2415,8 @@ class PlanningService:
                 if held and conn is not None and not conn.mount:
                     # 떼어 온 레포는 경로가 src/…라서 회사 코드 기준 허용 경로 밖으로 보인다
                     cr.error += (
-                        " · 연결의 '회사 코드 위치'가 비어 있어 경로가 허용 경로 밖으로 보였을 수 있음"
+                        " · 연결의 '회사 코드 위치'가 비어 있어"
+                        " 경로가 허용 경로 밖으로 보였을 수 있음"
                         " → 연결 수정에서 넣고 다시 시도"
                     )
                 cr.updated_at = t
