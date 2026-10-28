@@ -28,20 +28,48 @@ export interface IncidentMeta {
   stale?: boolean;
 }
 
-/** 지금 진행 중인 장애만 (status=problem). DejaFix가 started_at 내림차순으로 준다 */
-export async function currentIncidents(): Promise<{ data: Incident[]; meta: IncidentMeta }> {
+/** 계약 공통 형식: 값 하나와 단위·수집 시각. 확인할 수 없으면 value=null + unknown=true (0으로 바꾸지 않는다) */
+export interface Measured {
+  value: number | null;
+  unit: string;
+  collected_at: string;
+  unknown: boolean;
+  unknown_reason?: string;
+}
+
+/** 계약 #5 GET /api/dashboard/summary */
+export interface DashboardSummary {
+  active_incidents: Measured;
+  high_incidents: Measured;
+  hosts: { ok: Measured; total: Measured; unknown: Measured };
+  reports_today: Measured;
+  avg_analysis_sec: Measured;
+}
+
+async function get<T>(path: string): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${DEJAFIX_API_URL}/api/incidents?status=problem&limit=100`, { cache: "no-store" });
+    res = await fetch(`${DEJAFIX_API_URL}${path}`, { cache: "no-store" });
   } catch {
     throw new Error("DejaFix 서버에 연결할 수 없습니다.");
   }
   if (res.status === 502) throw new Error("DejaFix 백엔드에 연결할 수 없습니다 (frontend/.env 의 DEJAFIX_PROXY_TARGET 확인).");
   if (res.status === 401) throw new Error("DejaFix 로그인 정보가 없거나 만료됐습니다 (frontend/.env 의 DEJAFIX_USERNAME·DEJAFIX_PASSWORD 확인).");
   if (!res.ok) throw new Error(`DejaFix가 오류를 돌려줬습니다 (HTTP ${res.status}).`);
-  const body = (await res.json()) as { data?: Incident[]; meta?: IncidentMeta };
-  return { data: body.data ?? [], meta: body.meta ?? { next_cursor: null } };
+  return (await res.json()) as T;
 }
+
+type List = { data?: Incident[]; meta?: IncidentMeta };
+const list = (body: List) => ({ data: body.data ?? [], meta: body.meta ?? { next_cursor: null } });
+
+/** 지금 진행 중인 장애만 (status=problem). DejaFix가 started_at 내림차순으로 준다 */
+export const currentIncidents = async () => list(await get<List>("/api/incidents?status=problem&limit=100"));
+
+/** 해결된 것까지 최근 장애 100건 (시간대·호스트 분포용) */
+export const recentIncidents = async () => list(await get<List>("/api/incidents?limit=100"));
+
+/** 현황 KPI 4종 */
+export const dashboardSummary = async () => (await get<{ data: DashboardSummary }>("/api/dashboard/summary")).data;
 
 /** Zabbix 심각도 0~5 → 화면 표시 */
 export const SEVERITY: Record<number, { label: string; tone: string }> = {
