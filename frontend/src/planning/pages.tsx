@@ -7,6 +7,7 @@ import { ActivityList, Dep, Grade, Lead, LinkTable, Point, Sec, State, Stats, ro
 import { Linked, Ref, convoHref, go, hrefOf, prFromSlug, prSlug, reviewOf } from './links'
 import { CONFIRMED_BY, Flow, Head, Layout, ListPane, Pairs, Side, Step, mergedLabel } from './flow'
 import { SendWindow } from './depts'
+import { apiBase, deployApi, kst, type DeployCheck, type Deployment } from './api'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -465,7 +466,70 @@ export function Ops({ s, item }: { s: S; item?: string }) {
           )
         })}
       </Flow>
+      <Deployments s={s} />
     </div>
+  )
+}
+
+// ---------------------------------------------------------------- 배포 기록·배포 후 확인 (dev 서비스 REST, SSE 상태와 따로 읽는다)
+type Tone = 'green' | 'amber' | 'neutral'
+const DEP_STATUS: Record<Deployment['status'], [string, Tone]> = {
+  requested: ['승인 대기', 'amber'], running: ['배포 중', 'neutral'], succeeded: ['배포됨', 'green'], failed: ['실패', 'amber'], rolled_back: ['롤백됨', 'neutral'],
+}
+const VERDICT: Record<DeployCheck['verdict'], [string, Tone]> = { ok: ['정상', 'green'], watch: ['관찰', 'neutral'], suspect: ['의심', 'amber'] }
+const APPROVAL: Record<string, string> = { prod: 'prod 배포', protected_path: '보호 경로' }
+const ROLLBACK = { B: '자동 롤백 가능', C: '사람 승인 필요' }
+const Chip = ({ v }: { v: [string, Tone] }) => <span className={`st st-${v[1]}`}>{v[0]}</span>
+
+function Deployments({ s }: { s: S }) {
+  const toast = useToast()
+  const [rows, setRows] = useState<Deployment[] | null>(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState('')
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    let live = true
+    deployApi(apiBase('dev')).list()
+      .then((r) => { if (live) { setRows(r); setErr('') } })
+      .catch((e: Error) => { if (live) { setRows([]); setErr(e.message) } })
+    return () => { live = false }
+  }, [tick])
+  const run = (id: string, kind: 'approve' | 'check', done: string) => {
+    setBusy(`${id}:${kind}`)
+    deployApi(apiBase('dev'))[kind](id)
+      .then(() => { toast.show(done); setTick((n) => n + 1) })
+      .catch((e: Error) => toast.show(e.message))
+      .finally(() => setBusy(''))
+  }
+  if (rows === null) return null
+  return (
+    <section className="flow-sec">
+      <h2>배포 · 배포 후 확인</h2>
+      {err && <p className="muted small">{err}</p>}
+      {rows.length === 0 ? <div className="empty"><b>배포 기록 없음</b></div> : (
+        <Flow label="배포 기록">
+          {rows.map((dep) => {
+            const c = dep.check
+            const rb = c?.rollback
+            return (
+              <Step key={dep.id} name={kst(dep.at).slice(6) || '-'} on={dep.status === 'succeeded' && c?.verdict !== 'suspect'} title={<>{dep.id} · {dep.version ?? '-'} · {dep.env} <Chip v={DEP_STATUS[dep.status] ?? [dep.status, 'neutral']} /></>}>
+                <Pairs items={[
+                  ['PR', dep.pr_numbers.map((n, i) => <span key={n}>{i > 0 && ', '}<Ref s={s} id={`PR #${n}`} /></span>)],
+                  ...(dep.approval_reasons.length ? [['승인', <>{dep.approval_reasons.map((r) => APPROVAL[r] ?? r).join(' · ')}{dep.protected_paths.length > 0 && <span className="mono small"> {dep.protected_paths.join(', ')}</span>}{dep.approved_by && ` · ${dep.approved_by}`}</>] as [string, ReactNode]] : []),
+                  ['확인', c ? <><Chip v={VERDICT[c.verdict] ?? [c.verdict, 'neutral']} /> · {c.window_minutes}분 · {kst(c.at)}</> : '없음'],
+                  ...(c ? [['근거', <ul>{c.evidence.map((e) => <li key={e}>{e}</li>)}</ul>] as [string, ReactNode]] : []),
+                  ...(rb ? [['롤백', <><Grade g={rb.grade} /> {ROLLBACK[rb.grade]} <span className="muted small mono">후보 {rb.suspect_count} · 확신도 낮음 {rb.low_confidence} · 되돌릴 수 없음 {rb.irreversible_count} · 이전 롤백 {rb.prior_rollbacks}</span></>] as [string, ReactNode]] : []),
+                ]} />
+                <div className="actions">
+                  {dep.status === 'requested' && <Button size="small" variant="primary" disabled={!!busy} onClick={() => run(dep.id, 'approve', `${dep.id} 배포 승인`)}>배포 승인</Button>}
+                  {dep.status !== 'requested' && dep.status !== 'running' && <Button size="small" disabled={!!busy} onClick={() => run(dep.id, 'check', `${dep.id} 배포 후 확인`)}>배포 후 확인 다시 보기</Button>}
+                </div>
+              </Step>
+            )
+          })}
+        </Flow>
+      )}
+    </section>
   )
 }
 

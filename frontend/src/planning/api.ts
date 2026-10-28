@@ -156,3 +156,18 @@ export const planningApi = (base: string) => ({
   action: (a: Action) => call<Json>(base, '/actions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a) }),
   eventsUrl: () => `${base}/api/planning/events`,
 })
+
+// ---- 배포 기록·배포 후 확인 (dev 서비스 `/api/planning/deployments`). SSE 상태와 따로 읽는다
+export interface RollbackSuggestion { suspect_count: number; low_confidence: number; irreversible_count: number; prior_rollbacks: number; grade: 'B' | 'C'; rules: string[] }
+export interface DeployCheck { deployment: string; at: string; window_minutes: number; verdict: 'ok' | 'watch' | 'suspect'; evidence: string[]; candidate_prs: string[]; rollback: RollbackSuggestion | null }
+export interface Deployment {
+  id: string; pr_numbers: number[]; version: string | null; env: 'dev' | 'prod'; at: string
+  status: 'requested' | 'running' | 'succeeded' | 'failed' | 'rolled_back'
+  approved_by: string | null; approval_reasons: string[]; protected_paths: string[]; check: DeployCheck | null
+}
+
+export const deployApi = (base: string) => ({
+  list: () => call<unknown>(base, '/deployments').then((d) => (Array.isArray(d) ? (d as Deployment[]).filter((x) => x && typeof x.id === 'string') : [])),
+  approve: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+  check: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/check`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+})

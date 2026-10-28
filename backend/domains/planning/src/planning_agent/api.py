@@ -17,11 +17,13 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from planning_agent.deploy_store import get_deploy_store
+from planning_agent.domain.deploy import DeployError
 from planning_agent.domain.metrics import compute_metrics
 from planning_agent.domain.models import dump
 from planning_agent.domain.projects import project_detail, project_summary, sorted_projects
 from planning_agent.domain.rules import AUTO_LEVELS, PROMOTE_AFTER, auto_limit
-from planning_agent.domain.service import ActionError, GateRefused, PlanningService
+from planning_agent.domain.service import TEAM_LEAD, ActionError, GateRefused, PlanningService
 from planning_agent.domain.trace import code_of, trace_of, trace_text
 
 KEEPALIVE_SECONDS = 15.0
@@ -243,6 +245,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
     def post_reset() -> dict:
         svc = get_service()
         svc.reset()
+        get_deploy_store().reset()
         return _ok(svc.snapshot(), svc)
 
     @router.get("/events")
@@ -278,5 +281,102 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    # ---- 배포 기록·배포 후 확인 (deploy_store.py)
+
+    def _deploy_row(dep_id: str, *, history: bool = False) -> dict:
+        store = get_deploy_store()
+        dep = store.get(dep_id)
+        assert dep is not None
+        check = store.latest_check(dep_id)
+        row = {**dump(dep), "check": dump(check) if check else None}
+        if history:
+            row["checks"] = [dump(c) for c in store.checks.get(dep_id, [])]
+        return row
+
+    def _deploy_err(exc: DeployError) -> JSONResponse:
+        status = {"NOT_FOUND": 404, "NOT_REQUESTED": 409, "NOT_DEPLOYED": 409}.get(exc.code, 400)
+        return _err(status, exc.code, exc.message)
+
+    def _gate_err(exc: GateRefused) -> JSONResponse:
+        return _err(
+            409,
+            "GATE_REJECTED",
+            f"실행 관문이 {exc.action}을 허락하지 않아 실행하지 않았다 ({exc.decision.status})",
+        )
+
+    async def _body(request: Request) -> dict | None:
+        try:
+            body = await request.json()
+        except ValueError:
+            return None
+        return body if isinstance(body, dict) else None
+
+    @router.get("/deployments")
+    def list_deployments() -> dict:
+        svc = get_service()
+        rows = [_deploy_row(d.id) for d in reversed(get_deploy_store().deployments)]
+        return _ok(rows, svc, count=len(rows))
+
+    @router.get("/deployments/{dep_id}", response_model=None)
+    def get_deployment(dep_id: str) -> dict | JSONResponse:
+        svc = get_service()
+        if get_deploy_store().get(dep_id) is None:
+            return _err(404, "NOT_FOUND", f"배포 {dep_id}가 없다")
+        return _ok(_deploy_row(dep_id, history=True), svc)
+
+    @router.post("/deployments", response_model=None)
+    async def post_deployment(request: Request) -> dict | JSONResponse:
+        """배포 요청 `{pr_numbers: [28], env: "dev"|"prod"}`. prod·보호 경로면 `requested`."""
+        svc = get_service()
+        body = await _body(request)
+        if body is None:
+            return _err(400, "INVALID_DEPLOY", "본문은 JSON 객체여야 한다")
+        nums = body.get("pr_numbers")
+        env = body.get("env", "dev")
+        if (
+            not isinstance(nums, list)
+            or not nums
+            or not all(isinstance(n, int) and not isinstance(n, bool) for n in nums)
+        ):
+            return _err(400, "INVALID_DEPLOY", "pr_numbers는 PR 번호(정수) 목록이어야 한다")
+        if env not in ("dev", "prod"):
+            return _err(400, "INVALID_DEPLOY", "env는 dev 또는 prod")
+        try:
+            dep = await get_deploy_store().request(svc, nums, env)
+        except DeployError as exc:
+            return _deploy_err(exc)
+        except GateRefused as exc:
+            return _gate_err(exc)
+        return _ok(_deploy_row(dep.id), svc, needs_approval=dep.status == "requested")
+
+    @router.post("/deployments/{dep_id}/approve", response_model=None)
+    async def post_approve_deployment(dep_id: str, request: Request) -> dict | JSONResponse:
+        """사람 승인 버튼. 본문 `{approved_by}`는 없어도 된다 (목: 팀장)."""
+        svc = get_service()
+        body = await _body(request) or {}
+        who = body.get("approved_by")
+        who = who.strip() if isinstance(who, str) and who.strip() else TEAM_LEAD
+        try:
+            dep = await get_deploy_store().approve(svc, dep_id, who)
+        except DeployError as exc:
+            return _deploy_err(exc)
+        except GateRefused as exc:
+            return _gate_err(exc)
+        return _ok(_deploy_row(dep.id), svc)
+
+    @router.post("/deployments/{dep_id}/check", response_model=None)
+    async def post_deployment_check(dep_id: str, request: Request) -> dict | JSONResponse:
+        """배포 후 확인 (read). 본문 `{window_minutes}`는 없어도 된다 (기본 30분)."""
+        svc = get_service()
+        body = await _body(request) or {}
+        window = body.get("window_minutes", 30)
+        if isinstance(window, bool) or not isinstance(window, int) or not 1 <= window <= 1440:
+            return _err(400, "INVALID_CHECK", "window_minutes는 1~1440 정수")
+        try:
+            await get_deploy_store().check(svc, dep_id, window)
+        except DeployError as exc:
+            return _deploy_err(exc)
+        return _ok(_deploy_row(dep_id), svc)
 
     return router
