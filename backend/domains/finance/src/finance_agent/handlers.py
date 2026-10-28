@@ -40,7 +40,7 @@ from ax_contracts.schemas import (
     RequestMeta,
     TaskStatus,
 )
-from finance_agent import audit, closing
+from finance_agent import audit, chat_log, closing
 from finance_agent import books as bk
 from finance_agent import finance_config as fc
 from finance_agent import ledger as lg
@@ -178,10 +178,16 @@ async def on_event(envelope: EventEnvelope) -> None:
         ledger.coupon_events.setdefault(envelope.context_id, []).append(
             lg.coupon_from_event(envelope.context_id, data, envelope.occurred_at)
         )
+        chat_log.ledger_recorded(
+            envelope.context_id, envelope.tenant_id, envelope.source, "coupon", total, count
+        )
     elif envelope.type == EventType.PAYMENT_REFUNDED:
         order_id, amount = order_key(data.get("order_id")), _positive_int(data.get("refund_amount"))
         if order_id is not None and amount is not None:
             ledger.refunds[order_id] = ledger.refunds.get(order_id, 0) + amount
+            chat_log.ledger_recorded(
+                envelope.context_id, envelope.tenant_id, envelope.source, "refund", amount
+            )
 
 
 SUBSCRIBED_EVENTS = [EventType.COUPON_ISSUED, EventType.PAYMENT_REFUNDED]
@@ -433,6 +439,7 @@ async def audit_report(request: AgentRequest) -> AgentResult:
     report, missing = await audit.audit_report(
         books, data.days, impact_lookup=lookup, context_id=data.context_id
     )
+    await chat_log.audit_findings(report["findings"], request.meta.tenant_id)
     output = AuditReportOutput(
         window_from=report["from"],
         window_to=report["to"],

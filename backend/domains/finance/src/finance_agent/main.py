@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from ax_agent_template import events
 from ax_agent_template.events import subscribe
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
@@ -174,7 +175,12 @@ async def daily_closing_loop(interval: float, first_delay: float = DAILY_CLOSING
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """서버가 도는 동안 재무 AI 테스트와 매일 결산을 주기적으로 돌린다 (각각 `=0`이면 끔)."""
+    """서버가 도는 동안 재무 AI 테스트와 매일 결산을 주기적으로 돌린다 (각각 `=0`이면 끔).
+
+    템플릿 앱의 lifespan을 이것으로 바꾸므로, 템플릿이 하던 이벤트 소비 시작·종료도 여기서 한다
+    (빠지면 실제 모드에서 coupon.issued·payment.refunded를 받지 못해 장부가 비고 AI 대화방에도 안 나온다).
+    """
+    events.start_consumer()
     interval = self_test_seconds()
     SELF_TEST_SCHEDULE.update(interval_seconds=interval, next_run_at=None)
     closing_interval = daily_closing_seconds()
@@ -195,6 +201,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await task
         SELF_TEST_SCHEDULE.update(interval_seconds=0, next_run_at=None)
         DAILY_CLOSING_SCHEDULE.update(interval_seconds=0, next_run_at=None)
+        await events.stop_consumer()
 
 
 class DashboardCORS:

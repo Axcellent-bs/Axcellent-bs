@@ -54,7 +54,7 @@ export interface DemoRequest {
 export const DEPT_KO: Record<string, string> = {
   orchestrator: "총괄 AI", planning: "기획개발", support: "고객지원", marketing: "마케팅", hr: "인사",
   finance: "재무", data: "데이터분석", infra: "장애 대응", safety: "안전 관문", memory: "회사 기억", "shop-api": "캣북스 쇼핑몰",
-  "dashboard-api": "AXcellent 화면",
+  "dashboard-api": "AXcellent 화면", operator: "운영자(사람)",
 };
 // 백엔드는 서비스 단위로 나뉘어 있다(backend/README.md). 서비스 이름 → 화면 메뉴의 AI 이름
 const SERVICE_DEPT: Record<string, string> = {
@@ -65,7 +65,7 @@ const SERVICE_KO: Record<string, string> = {
   inquiry: "고객 문의", claims: "클레임·보상", reviews: "리뷰·지식", coupon: "공지·쿠폰", handover: "인수인계", decisions: "결정 기록",
   dev: "개발·배포", planning: "요청·기획서", incident: "장애 대응",
 };
-const NOT_AGENT = new Set(["orchestrator", "safety", "memory", "shop-api", "dashboard-api"]);
+const NOT_AGENT = new Set(["orchestrator", "safety", "memory", "shop-api", "dashboard-api", "operator"]);
 /** 말하는 쪽 이름. 부서·서비스는 "{부서} AI", 총괄·안전 관문 등은 그대로 */
 export function speaker(dept: string | null | undefined): string {
   if (!dept) return "담당 미정";
@@ -85,6 +85,11 @@ const METRIC_KO: Record<string, string> = {
   error_rate_5xx: "서버 오류로 자꾸 실패해요", p95_latency_ms: "응답이 느려졌어요", order_fail_rate: "주문 실패가 늘었어요", payment_fail_rate: "실패가 늘었어요",
 };
 const SUBJECT_KO: Record<string, string> = { payment: "결제가", api: "쇼핑몰이", db: "주문 DB가", search: "검색이", shipping: "배송이" };
+// 재무 이상 사건(finance.anomaly_detected)은 주어 없이 한 문장으로
+const FINANCE_KO: Record<string, string> = {
+  repeat_refund: "같은 고객이 환불을 반복해요", refund_rate_jump: "환불이 갑자기 많아졌어요",
+  split_under_limit: "한도 바로 아래로 쪼갠 지급이 있어요", duplicate_coupon: "같은 사건 보상 쿠폰이 두 번 나갔어요",
+};
 /** 총괄 제목 끝의 "(metric)"에서 지표 코드를 꺼낸다 */
 function metricOf(inc: Pick<OrchIncident, "title">): string | null {
   return /\(([^)]+)\)\s*$/.exec(inc.title)?.[1] ?? null;
@@ -104,6 +109,7 @@ const rawOf = (...parts: (string | null | undefined | false)[]) => parts.filter(
 export function incidentTitle(inc: Pick<OrchIncident, "title" | "component">): string {
   const comp = COMPONENT_KO[inc.component] ?? inc.component;
   const metric = metricOf(inc);
+  if (inc.component === "finance") return (metric && FINANCE_KO[metric]) || "돈 흐름에서 이상한 점을 찾았어요";
   const subject = SUBJECT_KO[inc.component] ?? `${comp}이(가)`;
   return metric && METRIC_KO[metric] ? `${subject} ${METRIC_KO[metric]}` : `${comp}에 문제가 생겼어요`;
 }
@@ -131,6 +137,7 @@ const ACTION_KO: Record<string, string> = {
   get_inquiry: "문의 조회", inquiry_overview: "문의 현황 조회", list_claims: "클레임 목록 조회", claim_stats: "클레임 통계",
   claim_queue: "보상 대기열 조회", process_claim_queue: "보상 대기열 처리", customer_signals: "고객 이상 신호 조회",
   release_fault_injection: "쇼핑몰 장애 해제", receive_change_result: "변경 결과 받기",
+  ledger_record: "장부에 기록", audit_report: "사후 감사", closing_report: "기간 손익 정리",
 };
 export const actionKo = (a: string) => ACTION_KO[a] ?? a;
 /** 코드 이름 → 사람이 읽는 이름. 모르는 이름은 밑줄을 띄어 쓴다 */
@@ -153,7 +160,7 @@ export type Tone = "request" | "ok" | "warn" | "fail" | "muted";
 export interface Fact { label: string; value: string }
 
 export type ChatItem =
-  | { kind: "msg"; id: string; at: string; room: string; from: string; to: string; fromKey: string; central: boolean; text: string; tag?: string; raw?: string; tone: Tone; facts: Fact[] }
+  | { kind: "msg"; id: string; at: string; room: string; from: string; to: string; fromKey: string; central: boolean; text: string; tag?: string; raw?: string; tone: Tone; facts: Fact[]; repeat?: number; lastAt?: string }
   | { kind: "system"; id: string; at: string; room: string; text: string }
   | { kind: "hold"; id: string; at: string; room: string; title: string; detail: string; state: "pending" | "approved" | "rejected" | "timeout"; contextId?: string; stepId?: string; link?: string }
   | { kind: "separator"; id: string; at: string; room: string; text: string; raw?: string; variant: "day" | "topic" };
@@ -290,7 +297,7 @@ export function incidentItems(inc: OrchIncident): ChatItem[] {
   const out: ChatItem[] = [];
   const opened = inc.opened_at ?? inc.events[0]?.at ?? "";
   out.push({ kind: "separator", id: `${room}:sep`, at: opened, room, text: `${incidentTitle(inc)}${opened ? ` · ${clockKo(opened)} 시작` : ""}`, raw: `사건 번호 ${inc.context_id}`, variant: "topic" });
-  out.push({ kind: "system", id: `${room}:open`, at: opened, room, text: `캣북스 쇼핑몰이 "${incidentTitle(inc)}" 신호를 보내서 총괄 AI가 사건을 열었어요.` });
+  out.push({ kind: "system", id: `${room}:open`, at: opened, room, text: `${inc.component === "finance" ? "재무 AI가 사후 감사에서" : "캣북스 쇼핑몰이"} "${incidentTitle(inc)}" 신호를 보내서 총괄 AI가 사건을 열었어요.` });
 
   for (const step of inc.steps) {
     const sid = `${room}:${step.step_id}`;
@@ -524,7 +531,7 @@ export function buildTimeline(incidents: OrchIncident[], executions: ExecutionRe
     for (const rec of recs) items.push(...executionItems(rec));
   }
   for (const c of commItems(comms, incidents, executions)) {
-    // 전체 방에서는 안전 관문 기록과 같은 건(execution_id 일치)을 두 번 보이지 않는다
+    // ALL_ROOM(AI 오피스가 쓴다)에서는 안전 관문 기록과 같은 건(execution_id 일치)을 두 번 보이지 않는다
     if (room === ALL_ROOM ? !c.dupOf : room === c.room) {
       const { dupOf: _dup, ...msg } = c;
       items.push(msg);
@@ -532,7 +539,29 @@ export function buildTimeline(incidents: OrchIncident[], executions: ExecutionRe
   }
   const indexed = items.map((it, i) => ({ it, i }));
   indexed.sort((a, b) => time(a.it.at) - time(b.it.at) || a.i - b.i);
-  return withDaySeparators(indexed.map((x) => x.it));
+  return withDaySeparators(collapseRepeats(indexed.map((x) => x.it)));
+}
+
+// 같은 AI가 같은 상대에게 같은 말을 짧은 시간 안에 되풀이하면(쿠폰 28장 지급, 화면 새로고침마다 다시 물은 영향 분석 등)
+// 첫 말풍선 하나에 "×N"으로 묶는다. 스크롤만 길어지고 새 정보가 없어서다.
+const REPEAT_WINDOW_MS = 2 * 60_000;
+function collapseRepeats(items: ChatItem[]): ChatItem[] {
+  const out: ChatItem[] = [];
+  const last = new Map<string, Extract<ChatItem, { kind: "msg" }>>();
+  for (const it of items) {
+    if (it.kind !== "msg") { out.push(it); continue; }
+    const key = [it.fromKey, it.to, it.text, it.tone].join("|");
+    const prev = last.get(key);
+    if (prev && time(it.at) - time(prev.lastAt ?? prev.at) <= REPEAT_WINDOW_MS) {
+      prev.repeat = (prev.repeat ?? 1) + 1;
+      prev.lastAt = it.at;
+      continue;
+    }
+    const copy = { ...it };
+    last.set(key, copy);
+    out.push(copy);
+  }
+  return out;
 }
 
 /** 날짜가 바뀌는 곳에 "10월 23일 (목) · 오전" 구분선 */

@@ -40,6 +40,7 @@ function noteKo(note: string): string {
 function eventKo(message: string, inc: Incident): string {
   if (message.startsWith("이벤트 수신: shop.degraded")) return "캣북스 쇼핑몰에서 장애 신호를 받음";
   if (message.startsWith("이벤트 수신: shop.recovered")) return "캣북스 쇼핑몰에서 복구 신호를 받음";
+  if (message.startsWith("이벤트 수신: finance.anomaly_detected")) return "재무 AI에서 사후 감사 이상 신호를 받음";
   if (message.startsWith("사건 시작:")) return `사건 시작: ${incidentTitle(inc)}`;
   const end = /^사건 종료: (\w+)/.exec(message);
   if (end) return `사건 종료: ${STATUS_SAY[end[1]] ?? end[1]}`;
