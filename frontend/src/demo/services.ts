@@ -127,8 +127,8 @@ export const SERVICES: Service[] = [
 /** 서비스를 맡은 AI 이름 (DejaFix 서비스는 없음) */
 export const agentName = (s: Service) => AGENTS.find((g) => g.id === s.agent)?.name
 
-/** 서비스를 고르지 않아도 모두 쓰는 화면 */
-export const SHARED_PATHS = ['/agents/chat', '/agents/office']
+/** 서비스를 고르지 않아도 모두 쓰는 화면. 할 일함은 꺼진 서비스로 가던 일이 사람에게 쌓이는 곳이라 어느 서비스를 샀든 보인다 */
+export const SHARED_PATHS = ['/handoffs', '/agents/chat', '/agents/office']
 
 export const matchPath = (base: string, path: string) =>
   base === '/' ? path === '/' : path === base || path.startsWith(`${base}/`)

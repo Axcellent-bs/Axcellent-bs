@@ -145,6 +145,30 @@ npm run build:pages  # GitHub Pages용 빌드 (dist/, 404.html 포함)
 5. **화면 확인 경로**: 실서버로 직접 열어 본 주소를 PR 본문에 적어요
    - 예: http://localhost:3090/data, http://localhost:3090/data#daily, 사건 지정은 `/data?incident=<context_id>`
 
+## 할 일함 확인 방법
+
+할 일함(`/handoffs`)은 회사가 켜지 않은 서비스로 가던 일을 AI가 맡은 부서(사람)에게 넘긴 목록이에요. 어느 서비스를 샀든 보이는 기본 메뉴이고, 열린 일이 있으면 메뉴에 개수가 붙어요 (30초마다 다시 셈). 백엔드 흐름은 `backend/README.md` "업무 요청 라우터"에 있어요. 위 체크리스트 순서로 적었어요.
+
+1. **화면이 부르는 주소 표**: 녹화본이 없어요. 데모 모드(`VITE_MOCK` 기본값)에서도 이 주소는 가로채지 않고 실제 dashboard-api를 불러요 (`src/mock/install.ts`)
+
+   | 화면 부분 | 화면이 부르는 주소 | 실제 서버 |
+   | --- | --- | --- |
+   | 목록·메뉴 개수 | `GET /api/dashboard/handoffs?status=<open\|done\|rejected>&unit=<부서>` | dashboard-api 8020 |
+   | 끝내기·반려 | `POST /api/dashboard/handoffs/{task_id}/complete` `{"result", "status": "done"\|"rejected"}` (사람 토큰 `VITE_SAFETY_HUMAN_TOKEN`) | dashboard-api 8020 |
+
+   코드: `src/pages/Handoffs.tsx`, `src/lib/handoffs.ts`, 업무 이름(skill)을 읽는 말로 바꾸는 표는 `src/lib/labels.ts`의 `SKILL_KO`
+2. **진짜 모드에서 데이터가 생기는 방법**: 서비스 일부만 켜고, 꺼진 서비스로 가는 요청을 만들어요
+   - `backend/config/org.example.yaml`을 `config/org.yaml`로 복사해 부서 이름을 고쳐요 (조직도에 없는 업무는 할 일함에 안 들어가고 `no_assignee`로 실패해요)
+   - `backend/.env`에 `AX_ENABLED_SERVICES=<켤 서비스 id, 쉼표>`를 적고 `bash scripts/run_all.sh`로 켜요. 예: 재무(`finance`)를 빼고 켜면 다른 AI가 재무에 맡기는 일(정산 보류 등)이 재무 담당 부서 할 일함에 쌓여요
+   - 그다음 "데이터 분석 화면 확인 방법" 3번처럼 결제 장애를 주입하면, 사건 처리 중 꺼 둔 서비스로 가는 일이 할 일함에 들어와요
+3. **회사 이름·고유 용어 제거**: 부서·담당자 이름은 조직도(`org.yaml`)에서 온 API 값을 그대로 보여 줘요. 화면 코드에 회사·부서 이름이 없어요. 서비스 이름은 `src/demo/services.ts`의 이름을 써요
+4. **빈 상태·서버 꺼짐 안내**
+   - 열린 일이 없으면: "넘겨받은 일이 없어요. 회사가 켜지 않은 서비스로 가는 일이 여기 쌓여요."
+   - 서버가 꺼지면: "dashboard-api(8020)에 연결할 수 없어요" (메뉴 개수는 숨겨요)
+   - 사람 토큰이 비어 있으면 끝내기·반려 버튼을 끄고 이유를 보여 줘요. 외부에서 들어온 내용(`untrusted`)은 글자 그대로만 보여 주고 HTML로 해석하지 않아요
+   - 이벤트 버스가 없어 `handoff.completed`를 못 보내면 서버가 503으로 일을 열어 둬요. 화면은 서버 메시지를 그대로 보여 줘요
+5. **화면 확인 경로**: http://localhost:3090/handoffs (열린 일), `/handoffs?status=done`, `/handoffs?status=`(전체), `/handoffs?unit=<부서>`, 한 건 지정은 `/handoffs?id=<task_id>`
+
 ## 장애 대응 (DejaFix)
 
 DejaFix 화면은 띄우지 않아요. DejaFix API 계약(`DejaFix/DejaFix` `contracts/api.md` #10)의 `GET /api/incidents?status=problem`으로 **지금 진행 중인 장애만** 받아서 AXcellent가 그려요 (`src/pages/Incidents.tsx`, `src/lib/dejafix.ts`).
