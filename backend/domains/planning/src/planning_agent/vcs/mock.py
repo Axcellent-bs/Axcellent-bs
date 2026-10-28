@@ -3,6 +3,8 @@
 - 기본값이자 모든 테스트가 쓰는 부품이다. 외부 호출이 없다.
 - 번호는 `first_number`부터 1씩 늘어난다 (같은 순서로 부르면 같은 번호).
 - `seed()`로 병합된 변경·CI 상태를 미리 넣을 수 있다.
+- `seed_files()`로 기준 브랜치 파일을 넣는다 (코딩 에이전트 읽기용). 병합하면 그 변경 파일이
+  기준 브랜치에 들어간다.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 
 from planning_agent.vcs.base import (
+    LIST_LIMIT,
     Capabilities,
     Change,
     ChangedFile,
@@ -21,7 +24,9 @@ from planning_agent.vcs.base import (
     TraceMeta,
     VcsError,
     check_branch,
+    check_path,
     combine_checks,
+    decode_text,
     parse_trace,
 )
 
@@ -58,6 +63,7 @@ class MockVcsAdapter:
         self._default_checks = default_checks
         self._entries: dict[int, _Entry] = {}
         self._branches: set[str] = set()
+        self._files: dict[str, str] = {}  # 기준 브랜치 파일 (경로 → 글)
         self._caps = Capabilities(kind="mock", read_only=read_only)
         # 쓰기 호출 기록 (테스트에서 execute 뒤에만 불렀는지 본다)
         self.writes: list[tuple[str, int]] = []
@@ -105,6 +111,14 @@ class MockVcsAdapter:
 
     def set_checks(self, number: int, runs: list[CheckRun]) -> None:
         self._entry(number).runs = list(runs)
+
+    def seed_files(self, files: dict[str, str]) -> None:
+        """기준 브랜치에 파일을 넣는다 (`{경로: 글}`)."""
+        self._files.update(files)
+
+    def contents(self, number: int) -> dict[str, str]:
+        """변경 하나가 커밋한 파일 (테스트용)."""
+        return dict(self._entry(number).contents)
 
     # ---- 공통 인터페이스
 
@@ -164,6 +178,24 @@ class MockVcsAdapter:
         self.writes.append(("open_change", number))
         return OpenedChange(number=number, url=f"mock://change/{number}", branch=branch)
 
+    async def update_change(self, number: int, files: dict[str, str], message: str) -> OpenedChange:
+        self._writable()
+        if not files:
+            raise VcsError("invalid", "커밋할 파일이 없다")
+        entry = self._entry(number)
+        if entry.change.merged:
+            raise VcsError("conflict", f"이미 병합된 변경: {number}")
+        entry.contents.update(files)
+        entry.change = replace(
+            entry.change,
+            files=tuple(
+                ChangedFile(path=p, additions=len(c.splitlines()), lines=_added_lines(c))
+                for p, c in entry.contents.items()
+            ),
+        )
+        self.writes.append(("update_change", number))
+        return OpenedChange(number=number, url=entry.change.url, branch=entry.change.branch)
+
     async def merge_change(self, number: int, method: str = "squash") -> Change:
         self._writable()
         if method not in MERGE_METHODS:
@@ -172,8 +204,26 @@ class MockVcsAdapter:
         if entry.change.merged:
             raise VcsError("conflict", f"이미 병합된 변경: {number}")
         entry.change = replace(entry.change, merged=True, merged_at=self._clock())
+        if entry.change.base == self.base_branch:
+            self._files.update(entry.contents)
         self.writes.append(("merge_change", number))
         return entry.change
+
+    async def list_files(self, prefix: str | None = None, limit: int = LIST_LIMIT) -> list[str]:
+        rows = sorted(p for p in self._files if prefix is None or p.startswith(prefix))
+        return rows[: max(0, limit)]
+
+    async def read_file(self, path: str, ref: str | None = None) -> str:
+        path = check_path(path)
+        files = self._files
+        if ref and ref != self.base_branch:
+            entry = next((e for e in self._entries.values() if e.change.branch == ref), None)
+            if entry is None:
+                raise VcsError("not_found", f"모르는 브랜치: {ref}")
+            files = {**self._files, **entry.contents}
+        if path not in files:
+            raise VcsError("not_found", f"파일이 없다: {path}")
+        return decode_text(files[path].encode("utf-8"), path)
 
     async def get_trace_meta(self, number: int) -> TraceMeta:
         entry = self._entry(number)

@@ -3,6 +3,7 @@
 기획개발이 형상관리에 바라는 일 5가지 + CI 상태 조회 1가지를 정한다.
 ① 구간 안 변경 찾기 ② 변경 하나의 바뀐 파일·줄 ③ 브랜치 만들고 병합 요청 올리기
 ④ 병합 ⑤ 역추적 메타데이터 (+ CI 상태, IF-CUS-002)
+코딩 에이전트용으로 파일 목록·파일 읽기와 열린 병합 요청에 커밋 더하기(③-2)가 있다.
 
 - 프로그램 이름은 연결 부품(이 폴더)만 안다. 도메인은 이 인터페이스만 부른다.
 - 쓰기(③④)는 `execute()` 관문을 지난 뒤에만 부른다. 부품은 관문을 모른다.
@@ -18,6 +19,9 @@ from typing import Literal, Protocol, runtime_checkable
 
 # 생성 PR 브랜치는 이 접두사로만 만든다 (FR-AG-008)
 BRANCH_PREFIX = "gen/"
+# 파일 읽기 한도 (이보다 크면 읽지 않는다)
+MAX_READ_BYTES = 100 * 1024
+LIST_LIMIT = 2000
 
 CheckState = Literal["passed", "failed", "pending"]
 
@@ -154,8 +158,20 @@ class VcsAdapter(Protocol):
         """③ 브랜치 만들고 파일을 커밋하고 병합 요청을 올린다. `execute()` 뒤에만 부른다."""
         ...
 
+    async def update_change(self, number: int, files: dict[str, str], message: str) -> OpenedChange:
+        """③-2 열린 병합 요청 브랜치에 커밋 하나를 더한다. `execute()` 뒤에만 부른다."""
+        ...
+
     async def merge_change(self, number: int, method: str = "squash") -> Change:
         """④ 병합. `execute()` 뒤에만 부른다."""
+        ...
+
+    async def list_files(self, prefix: str | None = None, limit: int = LIST_LIMIT) -> list[str]:
+        """기준 브랜치의 파일 경로 (정렬, 최대 limit개)."""
+        ...
+
+    async def read_file(self, path: str, ref: str | None = None) -> str:
+        """파일 하나의 글 (기본은 기준 브랜치). 바이너리·한도 초과는 `VcsError`(invalid)."""
         ...
 
     async def get_trace_meta(self, number: int) -> TraceMeta:
@@ -203,6 +219,27 @@ def check_branch(branch: str) -> str:
     if ".." in branch or " " in branch:
         raise VcsError("invalid", f"쓸 수 없는 브랜치 이름: {branch}")
     return branch
+
+
+def check_path(path: str) -> str:
+    """읽고 쓸 파일 경로 검사: 상대 경로, `..`·빈 조각 없음."""
+    p = (path or "").strip()
+    parts = p.split("/")
+    if not p or p.startswith("/") or "\\" in p or any(x in ("", ".", "..") for x in parts):
+        raise VcsError("invalid", f"쓸 수 없는 파일 경로: {path}")
+    return p
+
+
+def decode_text(data: bytes, path: str) -> str:
+    """파일 바이트를 글로 바꾼다. 한도 초과·바이너리면 `VcsError`(invalid)."""
+    if len(data) > MAX_READ_BYTES:
+        raise VcsError("invalid", f"파일이 너무 크다 ({len(data)}바이트): {path}")
+    if b"\x00" in data:
+        raise VcsError("invalid", f"바이너리 파일: {path}")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise VcsError("invalid", f"UTF-8 글이 아니다: {path}") from None
 
 
 def combine_checks(runs: list[CheckRun]) -> Checks:

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import itertools
 import json
@@ -114,6 +115,21 @@ class FakeGithub:
     def set_checks(self, number: int, runs: list[CheckRun]) -> None:
         self._set_runs(self.pulls[number]["head"]["sha"], runs)
 
+    def seed_files(self, files: dict[str, str]) -> None:
+        """기준 브랜치 파일을 넣는다."""
+        self.commits[self.refs[self.base_branch]].update(files)
+
+    def _pull_files(self, head: str, base: str) -> list[dict]:
+        new, old = self.commits[head], self.commits[self.refs[base]]
+        out = []
+        for path, content in new.items():
+            if old.get(path) == content:
+                continue
+            rows = content.splitlines()
+            patch = f"@@ -0,0 +1,{len(rows)} @@\n" + "\n".join(f"+{r}" for r in rows)
+            out.append({"filename": path, "additions": len(rows), "deletions": 0, "patch": patch})
+        return out
+
     # ---- 요청 처리
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
@@ -158,6 +174,36 @@ class FakeGithub:
                 return httpx.Response(422, json={"message": "Reference already exists"})
             self.refs[name] = body["sha"]
             return httpx.Response(201, json={"ref": body["ref"]})
+        if m == "PATCH" and (g := re.fullmatch(r"/git/refs/heads/(.+)", path)):
+            name = g.group(1)
+            if name not in self.refs:
+                return httpx.Response(422, json={"message": "Reference does not exist"})
+            self.refs[name] = body["sha"]
+            for number, pr in self.pulls.items():
+                if pr["head"]["ref"] == name and not pr["merged"]:
+                    pr["head"]["sha"] = body["sha"]
+                    self.files[number] = self._pull_files(body["sha"], pr["base"]["ref"])
+            return httpx.Response(200, json={"ref": f"refs/heads/{name}"})
+        if m == "GET" and (g := re.fullmatch(r"/git/trees/(\w+)", path)):
+            tree = self.commits.get(g.group(1))
+            if tree is None or q.get("recursive") != "1":
+                return httpx.Response(404, json={"message": "Not Found"})
+            rows = [{"path": p, "type": "blob", "size": len(c)} for p, c in tree.items()]
+            rows.append({"path": "shop-web", "type": "tree"})
+            return httpx.Response(200, json={"tree": rows, "truncated": False})
+        if m == "GET" and (g := re.fullmatch(r"/contents/(.+)", path)):
+            sha = self.refs.get(q.get("ref") or self.base_branch)
+            content = self.commits.get(sha or "", {}).get(g.group(1))
+            if content is None:
+                return httpx.Response(404, json={"message": "Not Found"})
+            raw = content.encode("utf-8")
+            encoded = base64.b64encode(raw).decode("ascii")
+            # GitHub처럼 60자마다 줄을 바꿔 보낸다
+            wrapped = "\n".join(encoded[i : i + 60] for i in range(0, len(encoded), 60))
+            return httpx.Response(
+                200,
+                json={"type": "file", "encoding": "base64", "size": len(raw), "content": wrapped},
+            )
         if m == "POST" and path == "/pulls":
             return self._open(body)
         if m == "GET" and path == "/pulls":
@@ -422,6 +468,106 @@ def test_checks_mapping(h: Harness, runs: list[CheckRun], state: str) -> None:
 
 
 # ---------------------------------------------------------------- 공용 도우미
+
+
+def _seed_files(h: Harness, files: dict[str, str]) -> None:
+    if h.name == "mock":
+        h.adapter.seed_files(files)
+    else:
+        h.server.seed_files(files)  # type: ignore[attr-defined]
+
+
+BASE_FILES = {
+    "shop-web/a.tsx": "export const a = 1\n",
+    "shop-web/b/c.ts": "export const c = 2\n",
+    "docs/x.md": "# x\n",
+}
+
+
+def test_list_files_prefix_and_limit(h: Harness) -> None:
+    _seed_files(h, BASE_FILES)
+    files = run(h.adapter.list_files())
+    assert set(BASE_FILES) <= set(files) and files == sorted(files)
+    assert "shop-web" not in files  # 폴더는 넣지 않는다
+    assert run(h.adapter.list_files("shop-web/")) == ["shop-web/a.tsx", "shop-web/b/c.ts"]
+    assert len(run(h.adapter.list_files(limit=2))) == 2
+
+
+def test_read_file_base_and_errors(h: Harness) -> None:
+    _seed_files(
+        h,
+        {
+            **BASE_FILES,
+            "shop-web/logo.bin": "PNG\x00\x01",
+            "shop-web/big.ts": "x" * (100 * 1024 + 1),
+        },
+    )
+    assert run(h.adapter.read_file("shop-web/b/c.ts")) == "export const c = 2\n"
+    cases = {
+        "shop-web/none.ts": "not_found",
+        "../etc/passwd": "invalid",
+        "/shop-web/a.tsx": "invalid",
+        "shop-web/logo.bin": "invalid",
+        "shop-web/big.ts": "invalid",
+    }
+    for path, code in cases.items():
+        with pytest.raises(VcsError) as err:
+            run(h.adapter.read_file(path))
+        assert err.value.code == code, path
+
+
+def test_update_change_adds_commit_on_branch(h: Harness) -> None:
+    _seed_files(h, BASE_FILES)
+    opened = run(
+        h.adapter.open_change("gen/t-d1-1", "R1: 배너", BODY, files={"shop-web/a.tsx": "A\n"})
+    )
+    assert run(h.adapter.read_file("shop-web/a.tsx", ref="gen/t-d1-1")) == "A\n"
+    assert run(h.adapter.read_file("shop-web/a.tsx")) == "export const a = 1\n"
+    again = run(
+        h.adapter.update_change(
+            opened.number, {"shop-web/a.tsx": "AA\n", "shop-web/new.ts": "n\n"}, "리뷰 반영"
+        )
+    )
+    assert (again.number, again.branch) == (opened.number, "gen/t-d1-1")
+    assert run(h.adapter.read_file("shop-web/a.tsx", ref="gen/t-d1-1")) == "AA\n"
+    assert run(h.adapter.read_file("shop-web/new.ts", ref="gen/t-d1-1")) == "n\n"
+    change = run(h.adapter.get_change(opened.number))
+    assert set(change.changed_paths) == {"shop-web/a.tsx", "shop-web/new.ts"}
+    with pytest.raises(VcsError) as err:
+        run(h.adapter.update_change(opened.number, {}, "빈 커밋"))
+    assert err.value.code == "invalid"
+    run(h.adapter.merge_change(opened.number))
+    with pytest.raises(VcsError) as err:
+        run(h.adapter.update_change(opened.number, {"shop-web/a.tsx": "B\n"}, "병합 뒤"))
+    assert err.value.code == "conflict"
+
+
+def test_mock_merge_moves_files_to_base() -> None:
+    adapter = MockVcsAdapter()
+    adapter.seed_files(BASE_FILES)
+    opened = run(adapter.open_change("gen/t-1", "t", BODY, files={"shop-web/a.tsx": "A\n"}))
+    run(adapter.merge_change(opened.number))
+    assert run(adapter.read_file("shop-web/a.tsx")) == "A\n"
+
+
+def test_github_update_and_reads_use_expected_routes() -> None:
+    h = _github_harness()
+    _seed_files(h, BASE_FILES)
+    server = h.server  # type: ignore[attr-defined]
+    opened = run(h.adapter.open_change("gen/t-2", "t", BODY, files={"shop-web/a.tsx": "A\n"}))
+    server.seen.clear()
+    run(h.adapter.update_change(opened.number, {"shop-web/a.tsx": "B\n"}, "fix"))
+    calls = [(r.method, r.url.path.removeprefix(f"/repos/{REPO}")) for r in server.seen]
+    assert calls[0] == ("GET", f"/pulls/{opened.number}")
+    assert calls[-1] == ("PATCH", "/git/refs/heads/gen/t-2")
+    server.seen.clear()
+    run(h.adapter.list_files())
+    run(h.adapter.read_file("shop-web/a.tsx", ref="gen/t-2"))
+    paths = [r.url.path.removeprefix(f"/repos/{REPO}") for r in server.seen]
+    assert paths[0] == "/git/ref/heads/dev" and paths[1].startswith("/git/trees/")
+    assert paths[2] == "/contents/shop-web/a.tsx"
+    assert server.seen[2].url.params["ref"] == "gen/t-2"
+    assert all(FAKE_TOKEN not in str(r.url) for r in server.seen)
 
 
 def test_parse_trace_orders_and_dedupes() -> None:

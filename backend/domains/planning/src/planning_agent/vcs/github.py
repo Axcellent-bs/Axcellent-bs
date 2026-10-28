@@ -3,12 +3,17 @@
 - 대상 레포 하나(`owner/name`)만 본다. 주소를 바꾸면 GitHub Enterprise도 된다.
 - 필요한 권한: contents 읽기·쓰기, pull requests 읽기·쓰기, checks·commit statuses 읽기.
 - ③ 커밋은 git data API(ref → blob → tree → commit → ref)로 만든다. 브랜치는 `gen/`만.
+  ③-2 수정 커밋은 PR 브랜치 끝에 같은 방법으로 커밋을 더하고 ref를 옮긴다.
+- 파일 목록은 git trees API(재귀), 파일 글은 contents API(base64)로 읽는다. 100KB 넘는 파일·
+  바이너리는 읽지 않는다.
 - 토큰은 요청 헤더에만 넣는다. 로그·오류 메시지·repr에 남기지 않는다.
 - HTTP 오류는 `VcsError(code, message)`로 바꾼다.
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 from datetime import datetime
 from typing import Any
@@ -17,6 +22,8 @@ from urllib.parse import quote
 import httpx
 
 from planning_agent.vcs.base import (
+    LIST_LIMIT,
+    MAX_READ_BYTES,
     Capabilities,
     Change,
     ChangedFile,
@@ -27,7 +34,9 @@ from planning_agent.vcs.base import (
     TraceMeta,
     VcsError,
     check_branch,
+    check_path,
     combine_checks,
+    decode_text,
     parse_trace,
 )
 
@@ -263,8 +272,20 @@ class GithubVcsAdapter:
         if not files:
             raise VcsError("invalid", "커밋할 파일이 없다")
         base = base or self.base_branch
-        ref = await self._call("GET", f"/git/ref/heads/{quote(base, safe='/')}")
-        parent = ref["object"]["sha"]
+        parent = await self._head(base)
+        new = await self._commit(parent, files, title)
+        await self._call("POST", "/git/refs", json={"ref": f"refs/heads/{branch}", "sha": new})
+        pr = await self._call(
+            "POST", "/pulls", json={"title": title, "body": body, "head": branch, "base": base}
+        )
+        return OpenedChange(number=int(pr["number"]), url=pr.get("html_url"), branch=branch)
+
+    async def _head(self, branch: str) -> str:
+        ref = await self._call("GET", f"/git/ref/heads/{quote(branch, safe='/')}")
+        return ref["object"]["sha"]
+
+    async def _commit(self, parent: str, files: dict[str, str], message: str) -> str:
+        """parent 위에 파일을 올린 커밋을 만들고 sha를 돌려준다 (ref는 옮기지 않는다)."""
         commit = await self._call("GET", f"/git/commits/{parent}")
         tree_items = []
         for path, content in files.items():
@@ -278,15 +299,51 @@ class GithubVcsAdapter:
         new = await self._call(
             "POST",
             "/git/commits",
-            json={"message": title, "tree": tree["sha"], "parents": [parent]},
+            json={"message": message, "tree": tree["sha"], "parents": [parent]},
         )
+        return new["sha"]
+
+    async def update_change(self, number: int, files: dict[str, str], message: str) -> OpenedChange:
+        if not files:
+            raise VcsError("invalid", "커밋할 파일이 없다")
+        pr = await self._call("GET", f"/pulls/{int(number)}")
+        if pr.get("merged") or pr.get("merged_at"):
+            raise VcsError("conflict", f"이미 병합된 변경: {number}")
+        branch = check_branch((pr.get("head") or {}).get("ref", ""))
+        parent = await self._head(branch)
+        new = await self._commit(parent, files, message)
         await self._call(
-            "POST", "/git/refs", json={"ref": f"refs/heads/{branch}", "sha": new["sha"]}
-        )
-        pr = await self._call(
-            "POST", "/pulls", json={"title": title, "body": body, "head": branch, "base": base}
+            "PATCH", f"/git/refs/heads/{quote(branch, safe='/')}", json={"sha": new, "force": False}
         )
         return OpenedChange(number=int(pr["number"]), url=pr.get("html_url"), branch=branch)
+
+    async def list_files(self, prefix: str | None = None, limit: int = LIST_LIMIT) -> list[str]:
+        head = await self._head(self.base_branch)
+        tree = await self._call("GET", f"/git/trees/{head}", params={"recursive": "1"})
+        rows = sorted(
+            str(item.get("path", ""))
+            for item in (tree or {}).get("tree", [])
+            if item.get("type") == "blob"
+            and (prefix is None or str(item.get("path", "")).startswith(prefix))
+        )
+        return rows[: max(0, limit)]
+
+    async def read_file(self, path: str, ref: str | None = None) -> str:
+        path = check_path(path)
+        got = await self._call(
+            "GET", f"/contents/{quote(path, safe='/')}", params={"ref": ref or self.base_branch}
+        )
+        if not isinstance(got, dict) or got.get("type") != "file":
+            raise VcsError("invalid", f"파일이 아니다: {path}")
+        if int(got.get("size") or 0) > MAX_READ_BYTES:
+            raise VcsError("invalid", f"파일이 너무 크다 ({got.get('size')}바이트): {path}")
+        if got.get("encoding") != "base64":
+            raise VcsError("invalid", f"읽을 수 없는 인코딩: {path}")
+        try:
+            data = base64.b64decode(str(got.get("content") or ""), validate=False)
+        except (binascii.Error, ValueError):
+            raise VcsError("invalid", f"내용을 풀지 못함: {path}") from None
+        return decode_text(data, path)
 
     async def merge_change(self, number: int, method: str = "squash") -> Change:
         if method not in MERGE_METHODS:

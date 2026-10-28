@@ -119,10 +119,13 @@ async def open_pr(
     spec_id: str | None,
     para_id: str | None,
     connection_id: str | None = None,
+    files: dict[str, str] | None = None,
+    body: str | None = None,
 ) -> Note | None:
     """③ PR을 실제로 올리고 번호·주소를 PR에 적는다. 목 설정이면 None.
 
-    연결을 안 주면 PR의 승인된 레포(`target`), 그것도 없으면 첫 연결로 올린다."""
+    연결을 안 주면 PR의 승인된 레포(`target`), 그것도 없으면 첫 연결로 올린다.
+    `files`·`body`를 주면 그것을 커밋·본문으로 쓴다 (코딩 에이전트). 안 주면 작업 기록 파일 하나."""
     try:
         adapter = active(connection_id or _connection_of(pr))
     except VcsError as exc:
@@ -131,19 +134,38 @@ async def open_pr(
         return None
     if adapter.capabilities.read_only:
         return Note(False, "vcs.read_only", f"{pr.id} 읽기 전용 모드 → 사람 반영 필요")
-    body = change_body(pr, request_id, spec_id, para_id)
+    body = body or change_body(pr, request_id, spec_id, para_id)
     try:
         opened = await adapter.open_change(
             branch=pr.branch,
             title=pr.title,
             body=body,
-            files=change_files(pr, body, spec_id),
+            files=files or change_files(pr, body, spec_id),
         )
     except VcsError as exc:
         return Note(False, "vcs.open_failed", f"{pr.id} 형상관리에 올리지 못함 ({exc.code})")
     pr.vcs_number = opened.number
     pr.url = opened.url
     return Note(True, "vcs.opened", f"{pr.id} → 형상관리 변경 #{opened.number} ({opened.branch})")
+
+
+async def update_pr(pr: PR, files: dict[str, str], message: str) -> Note | None:
+    """③-2 올린 PR 브랜치에 수정 커밋을 더한다. 목 설정이면 None. 실패하면 ok False."""
+    try:
+        adapter = active(_connection_of(pr))
+    except VcsError as exc:
+        return Note(False, "vcs.update_failed", f"{pr.id} 수정 커밋 실패 ({exc.code})")
+    if adapter is None:
+        return None
+    if adapter.capabilities.read_only:
+        return Note(False, "vcs.read_only", f"{pr.id} 읽기 전용 모드 → 사람 반영 필요")
+    if pr.vcs_number is None:
+        return Note(False, "vcs.update_failed", f"{pr.id} 형상관리 변경 번호가 없어 커밋하지 않음")
+    try:
+        await adapter.update_change(pr.vcs_number, files, message)
+    except VcsError as exc:
+        return Note(False, "vcs.update_failed", f"{pr.id} 수정 커밋 실패 ({exc.code})")
+    return Note(True, "vcs.updated", f"{pr.id} → 형상관리 변경 #{pr.vcs_number} 수정 커밋")
 
 
 async def merge_pr(pr: PR, connection_id: str | None = None) -> Note | None:

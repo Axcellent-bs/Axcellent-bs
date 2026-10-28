@@ -17,7 +17,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from planning_agent import vcs
+from planning_agent import coder, vcs
 from planning_agent.deploy_store import get_deploy_store
 from planning_agent.domain.deploy import DeployError
 from planning_agent.domain.metrics import compute_metrics
@@ -28,6 +28,8 @@ from planning_agent.domain.service import TEAM_LEAD, ActionError, GateRefused, P
 from planning_agent.domain.trace import code_of, trace_of, trace_text
 
 KEEPALIVE_SECONDS = 15.0
+# 코딩 작업 오류 중 409로 주는 것 (설정·상태 문제). 나머지 입력 오류는 400
+CODING_CONFLICT = {"NO_VCS", "LLM_NOT_CONFIGURED", "NOT_RETRYABLE", "WRONG_ROLE"}
 
 
 def _ok(data: Any, svc: PlanningService, **meta: Any) -> dict:
@@ -484,5 +486,64 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
         except DeployError as exc:
             return _deploy_err(exc)
         return _ok(_deploy_row(dep_id), svc)
+
+    # ---- 코딩 에이전트: 개발팀원이 쓴 기획을 레포에 구현 (coder.py). 진행은 작업 `coding`(SSE)
+
+    def _coding_err(exc: ActionError) -> JSONResponse:
+        status = 409 if exc.code in CODING_CONFLICT else 404 if exc.code == "NOT_FOUND" else 400
+        return _err(status, exc.code, exc.message)
+
+    @router.post("/dev-tasks", response_model=None)
+    async def post_dev_task(request: Request) -> dict | JSONResponse:
+        """`{title, plan, done?, paths?, connection?}` → `{request_id, spec_id, task_id, status}`.
+
+        진행은 작업 `coding`(SSE 상태)으로 본다."""
+        svc = get_service()
+        body = await _body(request)
+        if body is None:
+            return _err(400, "INVALID_INPUT", "본문은 JSON 객체여야 한다")
+        title, plan, done = body.get("title"), body.get("plan"), body.get("done")
+        paths, connection = body.get("paths"), body.get("connection")
+        if not isinstance(title, str) or not title.strip() or len(title) > 200:
+            return _err(400, "INVALID_INPUT", "title은 1~200자 문자열이어야 한다")
+        if not isinstance(plan, str) or not plan.strip() or len(plan) > coder.MAX_PLAN_CHARS:
+            return _err(
+                400, "INVALID_INPUT", f"plan은 1~{coder.MAX_PLAN_CHARS}자 문자열이어야 한다"
+            )
+        if done is not None and (not isinstance(done, str) or len(done) > 4000):
+            return _err(400, "INVALID_INPUT", "done은 4000자 이하 문자열이어야 한다")
+        if paths is not None and (
+            not isinstance(paths, list)
+            or len(paths) > 20
+            or not all(isinstance(p, str) and len(p) <= 300 for p in paths)
+        ):
+            return _err(400, "INVALID_INPUT", "paths는 문자열 목록(20개 이하)이어야 한다")
+        if connection is not None and not isinstance(connection, str):
+            return _err(400, "INVALID_INPUT", "connection은 문자열이어야 한다")
+        try:
+            result = await svc.create_dev_task(
+                title=title, plan=plan, done=done, paths=paths, connection=connection or None
+            )
+        except ActionError as exc:
+            return _coding_err(exc)
+        except GateRefused as exc:
+            return _gate_err(exc)
+        return _ok(result.output, svc)
+
+    @router.post("/dev-tasks/{task_id}/retry", response_model=None)
+    async def post_dev_task_retry(task_id: str, request: Request) -> dict | JSONResponse:
+        """실패·사람 확인으로 멈춘 코딩 작업 다시 돌리기. 본문 `{connection?}`은 없어도 된다."""
+        svc = get_service()
+        body = await _body(request) or {}
+        connection = body.get("connection")
+        if connection is not None and not isinstance(connection, str):
+            return _err(400, "INVALID_INPUT", "connection은 문자열이어야 한다")
+        try:
+            result = await svc.retry_dev_task(task_id, connection or None)
+        except ActionError as exc:
+            return _coding_err(exc)
+        except GateRefused as exc:
+            return _gate_err(exc)
+        return _ok(result.output, svc)
 
     return router

@@ -217,6 +217,26 @@ owner = "planning"
 requesters = ["planning", "dev"]
 base_grade = "A"
 
+# 코딩 에이전트 (개발팀원이 쓴 기획). 작업 등록·다시 시도와 리뷰 뒤 수정 커밋은 A.
+# 첫 커밋·PR은 generate_pr(B), 리뷰는 review_pr, 머지는 merge_pr(B) 관문을 그대로 지난다
+[[actions]]
+action = "dev_task_create"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+[[actions]]
+action = "dev_task_retry"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+[[actions]]
+action = "code_write"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
 # 기록·회신·초안은 A (#166). 돈·배포에 닿지 않는다
 [[actions]]
 action = "write_spec"

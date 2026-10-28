@@ -134,6 +134,45 @@ class Spec(DomainModel):
     auto_review: AutoReview | None = None  # 자동 확정을 멈춘 이유 (확정되면 비움)
     # planning 서비스가 dev 서비스로 넘긴 기획서 (start_dev). 합친 모드에서는 늘 False
     handed_to_dev: bool = False
+    # 기획서를 쓴 곳. "dev_team" = 개발팀원이 개발 화면에서 직접 쓴 기획 (코딩 에이전트)
+    origin: str | None = None
+
+
+CodingStatus = Literal[
+    "queued", "reading", "writing", "reviewing", "opened", "merged", "waiting_human", "failed"
+]
+
+
+class CodingFile(DomainModel):
+    """코딩 에이전트가 바꾼 파일 하나. 줄 수는 기준 브랜치 글과 비교해 코드로 센다."""
+
+    path: str
+    additions: int = 0
+    deletions: int = 0
+    reason: str = ""
+
+
+class CodingReview(DomainModel):
+    verdict: Review
+    notes: list[str] = Field(default_factory=list)
+
+
+class CodingRun(DomainModel):
+    """코딩 에이전트 진행 상태 (작업 하나). 단계마다 바뀌어 SSE로 나간다.
+
+    `attempts`는 파일을 쓴 횟수 (첫 작성 1, 리뷰 불일치 뒤 수정 2).
+    `connection`은 올릴 연결 id, `pr`은 만든 PR 표시 id (없으면 None)."""
+
+    status: CodingStatus = "queued"
+    model: str | None = None
+    files: list[CodingFile] = Field(default_factory=list)
+    summary: str | None = None
+    review: CodingReview | None = None
+    error: str | None = None
+    attempts: int = 0
+    updated_at: UtcDatetime
+    connection: str | None = None
+    pr: str | None = None
 
 
 class Task(DomainModel):
@@ -143,6 +182,7 @@ class Task(DomainModel):
     title: str
     owner: str
     state: TaskState
+    coding: CodingRun | None = None  # 코딩 에이전트 작업만 (개발팀 기획)
 
 
 class PrGate(DomainModel):
