@@ -17,7 +17,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from planning_agent import coder, vcs
+from planning_agent import coder, dev_chat, vcs
 from planning_agent.deploy_store import get_deploy_store
 from planning_agent.domain.deploy import DeployError
 from planning_agent.domain.metrics import compute_metrics
@@ -30,6 +30,7 @@ from planning_agent.domain.trace import code_of, trace_of, trace_text
 KEEPALIVE_SECONDS = 15.0
 # 코딩 작업 오류 중 409로 주는 것 (설정·상태 문제). 나머지 입력 오류는 400
 CODING_CONFLICT = {"NO_VCS", "LLM_NOT_CONFIGURED", "NOT_RETRYABLE", "WRONG_ROLE"}
+MAX_CHATS_LISTED = 20
 
 
 def _ok(data: Any, svc: PlanningService, **meta: Any) -> dict:
@@ -545,5 +546,58 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
         except GateRefused as exc:
             return _gate_err(exc)
         return _ok(result.output, svc)
+
+    # ---- 개발 AI 대화 (dev_chat.py). 계획이 서면 코딩 작업을 띄운다. 대화는 상태 `chats`(SSE)
+
+    @router.get("/dev-chat")
+    def list_dev_chats() -> dict:
+        svc = get_service()
+        rows = sorted(
+            svc.state.chats,
+            key=lambda c: (c.updated_at, int(c.id.split("-")[-1] or 0)),
+            reverse=True,
+        )[:MAX_CHATS_LISTED]
+        return _list(rows, svc)
+
+    @router.get("/dev-chat/{thread_id}", response_model=None)
+    def get_dev_chat(thread_id: str) -> dict | JSONResponse:
+        svc = get_service()
+        th = svc.chat_of(thread_id)
+        if th is None:
+            return _err(404, "NOT_FOUND", f"대화 {thread_id}가 없다")
+        return _ok(dump(th), svc)
+
+    @router.post("/dev-chat", response_model=None)
+    async def post_dev_chat(request: Request) -> dict | JSONResponse:
+        """`{thread_id?, message, connection?}` → 바뀐 대화. AI 답 하나까지 기다린다."""
+        svc = get_service()
+        if dev_chat.get_llm() is None:
+            return _err(409, "LLM_NOT_CONFIGURED", "LLM 설정이 없다 (PLANNING_LLM_*·LLM_*)")
+        body = await _body(request)
+        if body is None:
+            return _err(400, "INVALID_INPUT", "본문은 JSON 객체여야 한다")
+        thread_id, message, connection = (
+            body.get("thread_id"),
+            body.get("message"),
+            body.get("connection"),
+        )
+        if thread_id is not None and (not isinstance(thread_id, str) or not thread_id):
+            return _err(400, "INVALID_INPUT", "thread_id는 문자열이어야 한다")
+        if (
+            not isinstance(message, str)
+            or not message.strip()
+            or len(message) > dev_chat.MAX_MESSAGE_CHARS
+        ):
+            limit = dev_chat.MAX_MESSAGE_CHARS
+            return _err(400, "INVALID_INPUT", f"message는 1~{limit}자 문자열이어야 한다")
+        if connection is not None and not isinstance(connection, str):
+            return _err(400, "INVALID_INPUT", "connection은 문자열이어야 한다")
+        try:
+            th = await dev_chat.turn(svc, thread_id, message, connection or None)
+        except ActionError as exc:
+            return _coding_err(exc)
+        except GateRefused as exc:
+            return _gate_err(exc)
+        return _ok(dump(th), svc)
 
     return router

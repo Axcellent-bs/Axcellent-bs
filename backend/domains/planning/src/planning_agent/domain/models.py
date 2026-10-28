@@ -373,6 +373,43 @@ class AutoPolicy(DomainModel):
     log: list[AutoLog] = Field(default_factory=list)
 
 
+class ChatPlan(DomainModel):
+    """개발 AI가 대화로 정리한 구현 계획 (코딩 작업 입력)."""
+
+    title: str
+    plan: str
+    done: list[str] = Field(default_factory=list)
+    paths: list[str] = Field(default_factory=list)
+
+
+ChatKind = Literal["text", "question", "plan", "started", "error"]
+
+
+class ChatMessage(DomainModel):
+    id: str  # m1, m2 … (대화 안에서)
+    role: Literal["user", "assistant"]
+    text: str
+    at: UtcDatetime
+    kind: ChatKind = "text"
+    plan: ChatPlan | None = None
+    task_id: str | None = None
+
+
+class ChatThread(DomainModel):
+    """개발 화면에서 개발팀원이 개발 AI와 나눈 대화 하나. 계획이 서면 코딩 작업을 띄운다.
+
+    status: talking(대화 중) · started(작업 띄움, `task_id`) · blocked(연결이 없어 못 띄움)."""
+
+    id: str  # chat-1 …
+    title: str
+    status: Literal["talking", "started", "blocked"] = "talking"
+    messages: list[ChatMessage] = Field(default_factory=list)
+    task_id: str | None = None
+    connection: str | None = None
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+
+
 class State(DomainModel):
     tenant_id: str = TENANT_ID_DEFAULT
     seq: int = 0  # 들어오고 나간 연동 건마다 1씩 (새로 받은 것 표시용)
@@ -392,6 +429,7 @@ class State(DomainModel):
     warnings: int = 0
     first_pr_minutes: list[int] = Field(default_factory=list)
     auto_policy: AutoPolicy
+    chats: list[ChatThread] = Field(default_factory=list)  # 개발 AI 대화 (dev_chat.py)
 
 
 def dump(model: BaseModel) -> dict:
