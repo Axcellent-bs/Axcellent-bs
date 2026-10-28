@@ -32,7 +32,8 @@ from planning_agent.domain.models import Incident
 DEJAFIX_URL_ENV = "PLANNING_DEJAFIX_API_URL"
 CALL_TIMEOUT_SECONDS = 5.0
 
-# DejaFix 계약 형식은 `{data: [{id, title, status, started_at, ...}], meta}`다(화면 frontend/src/lib/dejafix.ts와 같음).
+# DejaFix 계약 형식은 `{data: [{id, title, status, started_at, ...}], meta}`다
+# (화면 frontend/src/lib/dejafix.ts와 같음).
 # 다른 이름들은 다른 감지 도구를 붙일 때를 위한 여유분이다.
 _TIME_KEYS = (
     "started_at",

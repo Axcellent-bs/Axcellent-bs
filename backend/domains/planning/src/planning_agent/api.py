@@ -29,7 +29,7 @@ from planning_agent.domain.trace import code_of, trace_of, trace_text
 
 KEEPALIVE_SECONDS = 15.0
 # 코딩 작업 오류 중 409로 주는 것 (설정·상태 문제). 나머지 입력 오류는 400
-CODING_CONFLICT = {"NO_VCS", "LLM_NOT_CONFIGURED", "NOT_RETRYABLE", "WRONG_ROLE"}
+CODING_CONFLICT = {"NO_VCS", "LLM_NOT_CONFIGURED", "NOT_RETRYABLE", "NOT_CANCELABLE", "WRONG_ROLE"}
 MAX_CHATS_LISTED = 20
 
 
@@ -304,7 +304,9 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             return _err(400, "INVALID_VCS", "paths는 문자열 목록이어야 한다")
         text = {
             k: body.get(k)
-            for k in ("id", "kind", "repo", "base_url", "base_branch", "token", "description", "mount")
+            for k in (
+                "id", "kind", "repo", "base_url", "base_branch", "token", "description", "mount"
+            )
         }
         if any(v is not None and not isinstance(v, str) for v in text.values()):
             return _err(400, "INVALID_VCS", "문자열 필드에 다른 값이 들어 있다")
@@ -542,6 +544,18 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             return _err(400, "INVALID_INPUT", "connection은 문자열이어야 한다")
         try:
             result = await svc.retry_dev_task(task_id, connection or None)
+        except ActionError as exc:
+            return _coding_err(exc)
+        except GateRefused as exc:
+            return _gate_err(exc)
+        return _ok(result.output, svc)
+
+    @router.post("/dev-tasks/{task_id}/cancel", response_model=None)
+    async def post_dev_task_cancel(task_id: str) -> dict | JSONResponse:
+        """코딩 작업 중단. 열린 PR은 닫고 브랜치를 지운다 (머지된 것은 되돌리지 않는다)."""
+        svc = get_service()
+        try:
+            result = await svc.cancel_dev_task(task_id)
         except ActionError as exc:
             return _coding_err(exc)
         except GateRefused as exc:

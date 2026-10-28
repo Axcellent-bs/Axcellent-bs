@@ -483,3 +483,76 @@ def test_retry_reuses_written_code_without_llm(service: PlanningService, adapter
     assert c.pr is not None and c.status in ("opened", "merged")
     assert any("작성해 둔 코드로 PR 다시 시도" in a.text for a in service.state.activity)
     assert coder.draft_of(service, "T-D1") is None
+
+
+def test_apply_edits_and_fallback() -> None:
+    from planning_agent.coder import Edit, apply_edits
+
+    assert apply_edits("a\nb\nc\n", [Edit(find="b\n", replace="B\n")]) == "a\nB\nc\n"
+    assert apply_edits("x x", [Edit(find="x", replace="y")]) is None  # 두 번 나옴
+    assert apply_edits("abc", [Edit(find="zz", replace="y")]) is None  # 없음
+
+
+def test_edits_are_used_and_fix_only_flagged_files(service: PlanningService, adapter) -> None:
+    """고칠 파일은 바꿀 부분(edits)만 받고, 리뷰가 짚은 파일만 다시 쓴다."""
+    from planning_agent.coder import Edit
+
+    class EditLLM(FakeLLM):
+        async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
+            data = untrusted or {}
+            if schema is FileWrite and data.get("action") == "modify":
+                self.calls.append((schema.__name__, prompt, data))
+                cur = data["current"]
+                first = cur.splitlines(keepends=True)[0]
+                return FileWrite(edits=[Edit(find=first, replace="// 고침\n" + first)], reason="한 줄")
+            return await super().structured(prompt, schema, untrusted, images, context_id)
+
+    llm = EditLLM(
+        reviews=[
+            CodeReview(verdict="불일치", notes=["공지 보완"], fix_files=[NOTICE]),
+            CodeReview(verdict="통과", notes=[]),
+        ]
+    )
+    coder.set_llm(llm)
+    run(_go(service))
+    writes = [c[2]["path"] for c in llm.calls if c[0] == "FileWrite"]
+    assert writes.count(BANNER) == 1 and writes.count(NOTICE) == 2  # 배너는 다시 안 씀
+    banner = next(f for f in _task(service).coding.files if f.path == BANNER)
+    assert banner.additions == 1 and banner.deletions == 0
+
+
+def test_cancel_running_task_and_close_open_pr(service: PlanningService, adapter) -> None:
+    """중단: 돌던 실행을 멈추고, 열린 PR은 닫는다. 머지된 작업은 중단하지 않는다."""
+    # 1) 리뷰 직전에서 멈춰 둔 작업: PR이 열린 상태로 중단 → PR 닫힘
+    gate = asyncio.Event()
+
+    class SlowReview(FakeLLM):
+        async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
+            if schema is CodeReview:
+                await gate.wait()
+            return await super().structured(prompt, schema, untrusted, images, context_id)
+
+    coder.set_llm(SlowReview())
+
+    async def flow():
+        await service.create_dev_task(
+            title="배너", plan="배너 문구를 바꾼다", done=DONE, paths=None, connection=None
+        )
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if _task(service).coding.status == "reviewing":
+                break
+        out = await service.cancel_dev_task("T-D1")
+        gate.set()
+        await service.wait_coding()
+        return out
+
+    out = run(flow())
+    task = _task(service)
+    assert out.outcome == "canceled" and task.coding.status == "canceled" and task.state == "중단"
+    pr = next(p for p in service.state.prs if p.task == "T-D1")
+    assert pr.closed and not pr.merged and ("close_change", pr.vcs_number) in adapter.writes
+    assert "vcs.closed" in _points(service)
+    # 2) 이미 중단된 작업은 다시 중단하지 않는다
+    with pytest.raises(ActionError):
+        run(service.cancel_dev_task("T-D1"))

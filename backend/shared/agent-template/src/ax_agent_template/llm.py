@@ -229,9 +229,14 @@ class LLMClient:
         dept: str,
         settings: LLMSettings | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        timeout: float | None = None,
     ) -> None:
         self.dept = dept
         self.settings = settings or LLMSettings.from_env(dept)
+        # 요청 하나의 응답 제한(초). 긴 글을 쓰는 쪽(코딩 에이전트)은 늘려 쓴다.
+        # `<부서>_LLM_TIMEOUT_SEC` → `LLM_TIMEOUT_SEC` → 기본 60초
+        env = os.getenv(f"{env_prefix(dept)}_LLM_TIMEOUT_SEC") or os.getenv("LLM_TIMEOUT_SEC")
+        self.timeout = timeout or (float(env) if env else DEFAULT_TIMEOUT_SEC)
         self._transport = transport  # 테스트에서 가짜 서버를 끼우는 자리. 운영은 None
 
     async def structured(
@@ -273,7 +278,7 @@ class LLMClient:
         model = self.settings.model
         last_problem = "응답이 비어 있다"
         async with httpx.AsyncClient(
-            timeout=DEFAULT_TIMEOUT_SEC, transport=self._transport
+            timeout=self.timeout, transport=self._transport
         ) as http:
             for _ in range(attempts):
                 try:

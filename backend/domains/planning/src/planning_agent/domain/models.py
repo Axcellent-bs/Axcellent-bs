@@ -48,7 +48,7 @@ DEPT_NAME: dict[str, str] = {
 }
 
 ReqState = Literal["접수", "기획 중", "작업 중", "완료", "중복 연결", "기각"]
-TaskState = Literal["진행 중", "PR 검수", "머지 대기", "완료", "C 보류"]
+TaskState = Literal["진행 중", "PR 검수", "머지 대기", "완료", "C 보류", "중단"]
 Review = Literal["통과", "불일치"]
 ActivityKind = Literal["A2A", "이벤트", "execute", "API", "사람"]
 Grade = Literal["A", "B", "C", "read"]
@@ -139,7 +139,15 @@ class Spec(DomainModel):
 
 
 CodingStatus = Literal[
-    "queued", "reading", "writing", "reviewing", "opened", "merged", "waiting_human", "failed"
+    "queued",
+    "reading",
+    "writing",
+    "reviewing",
+    "opened",
+    "merged",
+    "waiting_human",
+    "failed",
+    "canceled",  # 사람이 중단 (열린 PR은 닫고 브랜치를 지움)
 ]
 
 
@@ -235,6 +243,7 @@ class PR(DomainModel):
     url: str | None = None
     # 올릴 레포 제안·승인 (형상관리 연결이 있을 때만. 목 설정이면 None)
     target: RepoTarget | None = None
+    closed: bool = False  # 작업 중단으로 닫음 (병합 안 함)
 
 
 class Message(DomainModel):

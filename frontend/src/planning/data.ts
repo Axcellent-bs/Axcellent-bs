@@ -71,7 +71,7 @@ export interface Task {
 }
 
 // 코딩 에이전트 한 번의 실행. SSE로 단계가 바뀐다
-export type CodingStatus = 'queued' | 'reading' | 'writing' | 'reviewing' | 'opened' | 'merged' | 'waiting_human' | 'failed'
+export type CodingStatus = 'queued' | 'reading' | 'writing' | 'reviewing' | 'opened' | 'merged' | 'waiting_human' | 'failed' | 'canceled'
 export interface CodingFile { path: string; additions: number; deletions: number; reason: string }
 export interface CodingRun {
   status: CodingStatus

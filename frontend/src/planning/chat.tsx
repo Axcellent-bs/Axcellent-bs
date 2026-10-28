@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Chip, useToast, type ChipTone } from '@dejafix/common-frontend'
 import type { ChatMessage, ChatStatus, ChatThread, CodingStatus, State as S, Task } from './data'
 import { DEV_API, PlanningApiError, chatApi, vcsApi, type VcsConnection } from './api'
-import { CODING_LABEL, isRunning } from './coding'
+import { CODING_LABEL, CancelButton, isRunning } from './coding'
 import { State } from './parts'
 import { go } from './links'
 import { Tag } from './parts'
@@ -234,7 +234,10 @@ function Started({ m, s, onOpen }: { m: ChatMessage; s: S; onOpen: () => void })
         <div className="chat-card-row">
           {files > 0 ? <Tag>{files}파일</Tag> : <span />}
           {id && (
-            <button type="button" className="btn-ghost" onClick={() => { onOpen(); go(`#/work/prs/${encodeURIComponent(id)}`) }}>작업 보기</button>
+            <span className="tags">
+              <CancelButton taskId={id} status={c?.status} />
+              <button type="button" className="btn-ghost" onClick={() => { onOpen(); go(`#/work/prs/${encodeURIComponent(id)}`) }}>작업 보기</button>
+            </span>
           )}
         </div>
       </div>

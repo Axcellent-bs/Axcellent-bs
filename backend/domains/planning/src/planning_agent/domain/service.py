@@ -2285,6 +2285,57 @@ class PlanningService:
         self._spawn_coder(task_id)
         return result
 
+    async def cancel_dev_task(self, task_id: str) -> ActionResult:
+        """코딩 작업을 사람이 중단한다. 돌던 실행은 멈추고, 열린(병합 안 된) PR은 닫고
+        브랜치를 지운다. 이미 병합된 작업은 되돌리지 않는다 (되돌리기 PR은 사람이 판단)."""
+        task = next((t for t in self.state.tasks if t.id == task_id), None)
+        if task is None or task.coding is None:
+            raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+        if task.coding.status in ("merged", "canceled"):
+            raise ActionError(
+                "NOT_CANCELABLE",
+                f"{task_id}는 이미 {'머지됨' if task.coding.status == 'merged' else '중단됨'}"
+                " → 되돌리려면 되돌리기 PR이 필요하다",
+            )
+        # 먼저 실행을 끊는다: 다음 단계에서 CoderGone으로 멈추고, 기다리던 LLM 호출도 취소한다
+        self._coding_live.pop(task_id, None)
+        running = self._coding.pop(task_id, None)
+        if running is not None:
+            running.cancel()
+        coder.drop_draft(self, task_id)
+
+        async def run(s: State) -> ActionResult:
+            x = next((t for t in s.tasks if t.id == task_id), None)
+            if x is None or x.coding is None:
+                raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+            sp = next((p for p in s.specs if p.id == x.spec), None)
+            req = self._request_of_spec(s, sp) if sp else None
+            ctx = req.context_id if req else f"task:{task_id}"
+            t = self.clock()
+            text = f"{task_id} 코딩 작업 중단 (사람 클릭)"
+            n = sum(1 for g in self.gate_calls if g.action == "dev_task_cancel") + 1
+            await self._execute("dev_task_cancel", ctx, f"{task_id}:{n}", text)
+            s.activity.append(self._act(t, ctx, "human", "dev", "dev_task_cancel", "사람", text))
+            pr = next((p for p in s.prs if p.task == task_id and not p.merged), None)
+            if pr is not None and not pr.closed:
+                note = await vcs_bridge.close_pr(pr)
+                if note is not None:
+                    s.activity.append(
+                        self._act(self.clock(), ctx, "dev", "dev", note.point, "API", note.text)
+                    )
+                if note is None or note.ok:
+                    pr.closed = True
+            x.coding.status = "canceled"
+            closed = pr is not None and pr.closed
+            x.coding.error = "사람이 중단" + (f" · {pr.id} 닫음" if closed else "")
+            x.coding.updated_at = self.clock()
+            x.state = "중단"
+            return ActionResult(
+                outcome="canceled", output={"task_id": task_id, "status": "canceled"}
+            )
+
+        return await self._apply(run)
+
     def _spawn_coder(self, task_id: str) -> None:
         self._coding_seq += 1
         run_id = self._coding_live[task_id] = self._coding_seq

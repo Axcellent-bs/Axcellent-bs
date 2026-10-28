@@ -11,7 +11,7 @@ const api = devTaskApi(DEV_API)
 
 export const CODING_LABEL: Record<CodingStatus, string> = {
   queued: '대기', reading: '파일 읽는 중', writing: '코드 작성 중', reviewing: '리뷰 중',
-  opened: 'PR 열림', merged: '머지됨', waiting_human: '사람 확인', failed: '실패',
+  opened: 'PR 열림', merged: '머지됨', waiting_human: '사람 확인', failed: '실패', canceled: '중단됨',
 }
 const DONE: CodingStatus[] = ['opened', 'merged']
 /** 에이전트가 지금 일하는 중인 상태 (옆에 깜빡이는 점) */
@@ -20,6 +20,28 @@ export const isRunning = (s?: CodingStatus | string) => RUNNING.includes(s as Co
 /** 상태 글자. 진행 중이면 앞 점이 깜빡인다 */
 export const CodingLabel = ({ c }: { c: CodingRun }) => <State v={codingState(c)} live={isRunning(c.status)} />
 const STUCK: CodingStatus[] = ['failed', 'waiting_human']
+/** 사람이 중단할 수 있는 상태 (머지됨·중단됨이 아니면) */
+export const canCancel = (s?: CodingStatus) => !!s && s !== 'merged' && s !== 'canceled'
+
+/** 작업 중단 버튼. 열린 PR은 서버가 닫고 브랜치를 지운다 */
+export function CancelButton({ taskId, status }: { taskId: string; status?: CodingStatus }) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  if (!canCancel(status)) return null
+  const cancel = async () => {
+    if (!window.confirm(`${taskId} 작업을 중단할까요? 열린 PR은 닫고 브랜치를 지워요.`)) return
+    setBusy(true)
+    try {
+      await api.cancel(taskId)
+      toast.show(`${taskId} 중단`)
+    } catch (x) {
+      toast.show(x instanceof PlanningApiError ? x.message : '개발·배포 서버에 연결할 수 없어요')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return <Button size="small" onClick={cancel} disabled={busy}>{busy ? '중단하는 중…' : '작업 중단'}</Button>
+}
 
 /** 개발팀이 직접 넣은 기획에서 나온 작업인가 */
 export function fromDevTeam(s: S, t?: Task): boolean {
@@ -82,7 +104,10 @@ export function CodingStep({ task }: { task: Task }) {
       )}
       {!!c.review?.notes.length && <ul>{c.review.notes.map((n, i) => <li key={i} className="muted">{n}</li>)}</ul>}
       {c.error && <p className="tag-amber">{c.error}</p>}
-      {STUCK.includes(c.status) && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : '다시 시도'}</Button>}
+      <span className="tags">
+        {STUCK.includes(c.status) && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : '다시 시도'}</Button>}
+        <CancelButton taskId={task.id} status={c.status} />
+      </span>
     </Step>
   )
 }

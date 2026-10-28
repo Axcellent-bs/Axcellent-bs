@@ -14,8 +14,8 @@ from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 
 from ax_agent_template.server import create_agent_app
-from planning_agent import vcs
 from ax_contracts.schemas import AgentCard
+from planning_agent import vcs
 from planning_agent.api import create_api_router
 from planning_agent.handlers import HANDLERS
 from planning_agent.runtime import get_service

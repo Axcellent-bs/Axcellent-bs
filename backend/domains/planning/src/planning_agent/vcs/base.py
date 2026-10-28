@@ -171,6 +171,10 @@ class VcsAdapter(Protocol):
         """④ 병합. `execute()` 뒤에만 부른다."""
         ...
 
+    async def close_change(self, number: int) -> None:
+        """병합 안 된 변경을 닫고 브랜치를 지운다 (작업 중단 되돌리기). 병합됐으면 conflict."""
+        ...
+
     async def list_files(self, prefix: str | None = None, limit: int = LIST_LIMIT) -> list[str]:
         """기준 브랜치의 파일 경로 (정렬, 최대 limit개)."""
         ...

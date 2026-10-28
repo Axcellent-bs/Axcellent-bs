@@ -37,6 +37,7 @@ MERGE_METHODS = ("merge", "squash", "rebase")
 class _Entry:
     change: Change
     body: str
+    closed: bool = False
     runs: list[CheckRun] = field(default_factory=list)
     contents: dict[str, str] = field(default_factory=dict)
 
@@ -199,6 +200,14 @@ class MockVcsAdapter:
         )
         self.writes.append(("update_change", number))
         return OpenedChange(number=number, url=entry.change.url, branch=entry.change.branch)
+
+    async def close_change(self, number: int) -> None:
+        self._writable()
+        entry = self._entry(number)
+        if entry.change.merged:
+            raise VcsError("conflict", f"이미 병합된 변경: {number}")
+        entry.closed = True
+        self.writes.append(("close_change", number))
 
     async def merge_change(self, number: int, method: str = "squash") -> Change:
         self._writable()

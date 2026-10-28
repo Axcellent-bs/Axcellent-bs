@@ -38,7 +38,8 @@ MAX_DONE_LINES = 20
 MAX_ATTEMPTS = 2  # 첫 작성 + 리뷰 불일치 뒤 수정 1번
 MAX_NOTES = 5
 MAX_DIFF_CHARS = 12000  # 리뷰에 보낼 파일 하나의 diff 길이
-LLM_TIMEOUT_SECONDS = 180.0
+LLM_TIMEOUT_SECONDS = 400.0  # 단계 하나 전체 (요청 재시도 포함)
+LLM_HTTP_TIMEOUT_SECONDS = 180.0  # 요청 하나. 기본 60초면 긴 파일을 쓰다 끊겨 다시 요청한다
 DEV_TEAM = "dev_team"
 DEFAULT_DONE = "기획에 적은 동작이 그대로 구현되고 기존 동작은 바뀌지 않는다"
 
@@ -73,14 +74,25 @@ class CodePlan(BaseModel):
     summary: str = ""
 
 
+class Edit(BaseModel):
+    """바꿀 부분 하나. find는 지금 파일에 꼭 한 번 나오는 글이다."""
+
+    find: str
+    replace: str
+
+
 class FileWrite(BaseModel):
-    content: str
+    """고친 파일. 고칠 때는 edits(바꿀 부분만), 새 파일이거나 edits로 못 쓸 때만 content(전체)."""
+
+    edits: list[Edit] = Field(default_factory=list)
+    content: str = ""
     reason: str = ""
 
 
 class CodeReview(BaseModel):
     verdict: Literal["통과", "불일치"]
     notes: list[str] = Field(default_factory=list)
+    fix_files: list[str] = Field(default_factory=list)  # 다시 고칠 파일 (비면 전부)
 
 
 PLAN_PROMPT = (
@@ -100,9 +112,20 @@ WRITE_PROMPT = (
     "맞게 고친다.\n"
     "- current는 지금 파일 글이다 (새 파일이면 빈 글). 필요한 곳만 바꾸고 나머지는 그대로 둔다.\n"
     "- review_notes가 있으면 지난 리뷰의 지적이다. 모두 반영한다.\n"
-    "- content에는 파일 전체의 새 글만 넣는다 (설명·코드 블록 표시 없이).\n"
+    "- 있는 파일(action modify)은 바꿀 부분만 edits로 준다. find는 current에 꼭 한 번 나오는 "
+    "글을 그대로 복사하고(앞뒤 몇 줄 포함), replace는 바꾼 글이다. content는 비운다.\n"
+    "- 새 파일(action create)이거나 edits로 쓰기 어려울 때만 content에 파일 전체 글을 넣는다 "
+    "(설명·코드 블록 표시 없이).\n"
     "- reason은 바꾼 내용 한 줄이다.\n"
-    '- JSON {"content": "...", "reason": "..."} 로만 답한다.'
+    '- JSON {"edits": [{"find": "...", "replace": "..."}], "content": "", "reason": "..."} 로만 '
+    "답한다."
+)
+
+FULL_PROMPT = (
+    "너는 개발팀의 코딩 에이전트다. 바꿀 부분(edits)을 지금 파일에 맞출 수 없었다. "
+    "이번에는 파일 전체의 새 글을 content에 넣는다 (edits는 비운다). 필요한 곳만 바꾸고 "
+    "나머지는 그대로 둔다.\n"
+    '- JSON {"edits": [], "content": "...", "reason": "..."} 로만 답한다.'
 )
 
 REVIEW_PROMPT = (
@@ -110,7 +133,8 @@ REVIEW_PROMPT = (
     "채우는지 본다.\n"
     "- 완료 기준을 모두 채우고 눈에 띄는 오류가 없으면 verdict 통과, 아니면 불일치.\n"
     f"- notes는 짧은 한국어 지적 줄이다 ({MAX_NOTES}줄 이하). 불일치면 고칠 점을 적는다.\n"
-    '- JSON {"verdict": "통과", "notes": ["..."]} 로만 답한다.'
+    "- 불일치면 fix_files에 다시 고쳐야 하는 파일 경로만 적는다.\n"
+    '- JSON {"verdict": "통과", "notes": ["..."], "fix_files": []} 로만 답한다.'
 )
 
 
@@ -138,7 +162,7 @@ def get_llm() -> LLMClient | None:
         return _llm
     settings = LLMSettings.from_env("planning")
     if settings.model and settings.base_url:
-        return LLMClient("planning", settings=settings)
+        return LLMClient("planning", settings=settings, timeout=LLM_HTTP_TIMEOUT_SECONDS)
     return None
 
 
@@ -372,6 +396,46 @@ def _base(job: Job) -> dict[str, Any]:
     return {"title": job.title, "plan": job.plan, "done": list(job.done)}
 
 
+def apply_edits(current: str, edits: list[Edit]) -> str | None:
+    """바꿀 부분을 차례로 적용한다. find가 꼭 한 번 나오지 않으면 None (전체 쓰기로 다시)."""
+    text = current
+    for e in edits:
+        if not e.find or text.count(e.find) != 1:
+            return None
+        text = text.replace(e.find, e.replace, 1)
+    return text
+
+
+async def _write_one(
+    llm: Any, job: Job, pick: FilePick, current: str, notes: list[str]
+) -> tuple[str, str]:
+    """파일 하나의 새 글과 이유. 바꿀 부분(edits)을 적용하고, 못 맞추면 전체를 다시 받는다."""
+    data = {
+        **_base(job),
+        "path": pick.path,
+        "action": pick.action,
+        "why": pick.reason,
+        "current": current,
+        "review_notes": notes,
+    }
+    got = await _ask(llm, f"파일 쓰기 {pick.path}", WRITE_PROMPT, FileWrite, data, job.ctx)
+    if got.edits and pick.action != "create":
+        applied = apply_edits(current, got.edits)
+        if applied is not None:
+            return applied, _one_line(got.reason or pick.reason)
+        got = await _ask(llm, f"파일 다시 쓰기 {pick.path}", FULL_PROMPT, FileWrite, data, job.ctx)
+    reason = _one_line(got.reason or pick.reason)
+    if got.content:
+        return got.content, reason
+    if got.edits:  # 새 파일인데 edits만 왔다: 바꿀 글을 이어 붙인다
+        return "".join(e.replace for e in got.edits), reason
+    return current, reason
+
+
+def _one_line(text: str) -> str:
+    return " ".join(text.split())[:200]
+
+
 async def _write_all(
     llm: Any,
     job: Job,
@@ -379,21 +443,12 @@ async def _write_all(
     current: dict[str, str],
     notes: list[str],
 ) -> tuple[dict[str, str], dict[str, str]]:
-    """파일마다 새 글을 받는다. (경로 → 새 글, 경로 → 이유)."""
-    contents: dict[str, str] = {}
-    reasons: dict[str, str] = {}
-    for pick in picks:
-        data = {
-            **_base(job),
-            "path": pick.path,
-            "action": pick.action,
-            "why": pick.reason,
-            "current": current.get(pick.path, ""),
-            "review_notes": notes,
-        }
-        got = await _ask(llm, f"파일 쓰기 {pick.path}", WRITE_PROMPT, FileWrite, data, job.ctx)
-        contents[pick.path] = got.content
-        reasons[pick.path] = " ".join((got.reason or pick.reason).split())[:200]
+    """파일마다 새 글을 받는다 (동시에). (경로 → 새 글, 경로 → 이유)."""
+    results = await asyncio.gather(
+        *(_write_one(llm, job, pick, current.get(pick.path, ""), notes) for pick in picks)
+    )
+    contents = {pick.path: res[0] for pick, res in zip(picks, results, strict=True)}
+    reasons = {pick.path: res[1] for pick, res in zip(picks, results, strict=True)}
     return contents, reasons
 
 
@@ -572,7 +627,9 @@ async def _open_and_review(
             return
         attempts += 1
         await svc.coding_step(job, "writing", attempts=attempts)
-        fixed, fix_reasons = await _write_all(llm, job, picks, contents, notes)
+        # 리뷰가 짚은 파일만 다시 쓴다 (짚은 게 없으면 전부)
+        targets = [p for p in picks if p.path in set(review.fix_files)] or picks
+        fixed, fix_reasons = await _write_all(llm, job, targets, contents, notes)
         changed = {p: c for p, c in fixed.items() if c != contents.get(p)}
         if not changed:
             raise CoderStop("waiting_human", "리뷰 지적을 반영한 수정이 없음 → 사람 확인")

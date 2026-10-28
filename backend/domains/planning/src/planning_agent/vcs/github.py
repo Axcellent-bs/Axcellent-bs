@@ -22,6 +22,7 @@ from urllib.parse import quote
 import httpx
 
 from planning_agent.vcs.base import (
+    BRANCH_PREFIX,
     LIST_LIMIT,
     MAX_READ_BYTES,
     Capabilities,
@@ -357,6 +358,20 @@ class GithubVcsAdapter:
         except (binascii.Error, ValueError):
             raise VcsError("invalid", f"내용을 풀지 못함: {path}") from None
         return decode_text(data, path)
+
+    async def close_change(self, number: int) -> None:
+        pr = await self._call("GET", f"/pulls/{int(number)}")
+        if pr.get("merged") or pr.get("merged_at"):
+            raise VcsError("conflict", f"이미 병합된 변경: {number}")
+        if pr.get("state") != "closed":
+            await self._call("PATCH", f"/pulls/{int(number)}", json={"state": "closed"})
+        branch = (pr.get("head") or {}).get("ref") or ""
+        if branch.startswith(BRANCH_PREFIX):  # 에이전트가 만든 브랜치만 지운다
+            try:
+                await self._call("DELETE", f"/git/refs/heads/{quote(branch, safe='/')}")
+            except VcsError as exc:
+                if exc.code not in ("not_found", "invalid"):
+                    raise
 
     async def merge_change(self, number: int, method: str = "squash") -> Change:
         if method not in MERGE_METHODS:

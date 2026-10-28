@@ -231,6 +231,13 @@ owner = "planning"
 requesters = ["planning", "dev"]
 base_grade = "A"
 
+# 코딩 작업 사람 중단 (열린 PR 닫기·브랜치 지우기). 병합된 것은 건드리지 않아 A
+[[actions]]
+action = "dev_task_cancel"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
 [[actions]]
 action = "code_write"
 owner = "planning"

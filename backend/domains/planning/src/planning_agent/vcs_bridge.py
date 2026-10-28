@@ -165,7 +165,8 @@ async def _adopt(adapter: VcsAdapter, pr: PR) -> Note | None:
     pr.vcs_number = found.number
     pr.url = found.url
     state = "이미 병합됨" if found.merged else "열려 있음"
-    return Note(True, "vcs.adopted", f"{pr.id} → 이미 올라간 변경 #{found.number} 이어받음 ({state})")
+    text = f"{pr.id} → 이미 올라간 변경 #{found.number} 이어받음 ({state})"
+    return Note(True, "vcs.adopted", text)
 
 
 async def update_pr(pr: PR, files: dict[str, str], message: str) -> Note | None:
@@ -208,6 +209,21 @@ async def merge_pr(pr: PR, connection_id: str | None = None) -> Note | None:
         if exc.code != "conflict" or not await _already_merged(adapter, pr.vcs_number):
             return Note(False, "vcs.merge_failed", f"{pr.id} 형상관리 병합 실패 ({exc.code})")
     return Note(True, "vcs.merged", f"{pr.id} → 형상관리 변경 #{pr.vcs_number} 병합")
+
+
+async def close_pr(pr: PR) -> Note | None:
+    """중단: 병합 안 된 PR을 닫고 브랜치를 지운다. 목 설정이면 None. 실패하면 ok False."""
+    try:
+        adapter = active(_connection_of(pr))
+    except VcsError as exc:
+        return Note(False, "vcs.close_failed", f"{pr.id} PR 닫기 실패 ({exc.code})")
+    if adapter is None or pr.vcs_number is None:
+        return None
+    try:
+        await adapter.close_change(pr.vcs_number)
+    except VcsError as exc:
+        return Note(False, "vcs.close_failed", f"{pr.id} PR 닫기 실패 ({exc.code})")
+    return Note(True, "vcs.closed", f"{pr.id} → 형상관리 변경 #{pr.vcs_number} 닫고 브랜치 지움")
 
 
 async def _already_merged(adapter: VcsAdapter, number: int) -> bool:
