@@ -88,6 +88,8 @@ class ShopDegradedData(AxModel):
     metric_code: str
     value: float | None = None
     threshold: float | None = None
+    # 기준을 넘기 시작한 첫 표본의 시각 (UTC). 영향 분석이 이번 장애 구간만 세도록 총괄이 쓴다
+    since: UtcDatetime | None = None
 
 
 class PaymentFailedData(AxModel):
