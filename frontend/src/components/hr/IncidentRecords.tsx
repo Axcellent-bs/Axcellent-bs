@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { clockKo, incidentTitle, INCIDENT_STATUS_KO, type OrchIncident, type OrchStep } from "@/lib/agentChat";
 import { dateStr } from "@/lib/format";
 import { hr, type AuditEntry } from "@/lib/hr";
+import { Link } from "@/lib/nav";
 
 // 결정 기록 화면(실제 모드): 캣북스 사건이 나면 총괄 AI가 인사 AI에게 사건 기록(record_case)을 맡긴다.
 // 그 단계를 총괄 사건 목록(dashboard-api /incidents)에서 꺼내 "어느 사건을, 언제, 무엇으로, 어떤 상태로" 기록했는지 보여 주고,
@@ -68,10 +69,10 @@ function auditDetail(e: AuditEntry): string {
 }
 
 // ---------------------------------------------------------------- 사건 기록 목록 + 고른 사건의 타임라인
-export default function IncidentRecords() {
+export default function IncidentRecords({ initialCtx = null }: { initialCtx?: string | null }) {
   const [incidents, setIncidents] = useState<OrchIncident[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [picked, setPicked] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string | null>(initialCtx); // 총괄 사건 화면에서 넘어오면 그 사건을 먼저 보여 준다
 
   const load = useCallback(async () => {
     try {
@@ -117,6 +118,7 @@ export default function IncidentRecords() {
             {incidents.map((inc) => <option key={inc.context_id} value={inc.context_id}>{incidentName(inc)}{inc.opened_at ? ` (${dateStr(inc.opened_at)})` : ""}</option>)}
           </select>
         )}
+        {current && <Link href={`/orchestrator?ctx=${encodeURIComponent(current.context_id)}`} className="inline-block text-xs font-semibold text-brand-600 underline underline-offset-2">총괄 사건에서 보기 →</Link>}
         {current ? <Timeline inc={current} /> : <p className="text-xs text-ink-500">볼 사건이 없습니다.</p>}
       </section>
     </div>

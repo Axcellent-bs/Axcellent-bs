@@ -97,6 +97,9 @@ export const hr = {
       idempotency_key: `ui:${questionId}:${hash(answer)}`, // 답변 전체의 해시라 앞부분만 같은 다른 답과는 구분된다
     }),
   candidateCards: () => call<HrCard[]>("/candidate-cards"),
+  /** 확정된(후보가 아닌) 결정 카드, 최근 순. 사건 번호를 주면 그 사건에서 만든 카드만 */
+  decisionCards: (contextId?: string, limit = 50) =>
+    call<HrCard[]>(`/decision-cards?limit=${limit}${contextId ? `&context_id=${encodeURIComponent(contextId)}` : ""}`),
   decide: (cardId: string, decision: "approve" | "reject") =>
     post<{ card_id: string; status: string }>(`/candidate-cards/${encodeURIComponent(cardId)}/decision`, { decision }),
   roster: () => call<Roster>("/roster"),

@@ -1,6 +1,6 @@
-"""대시보드 인사 화면이 보여 줄 현황 조회 skill 4개(모두 읽기 전용, 관문을 거치지 않는다).
+"""대시보드 인사 화면이 보여 줄 현황 조회 skill 5개(모두 읽기 전용, 관문을 거치지 않는다).
 
-- `list_handovers` · `list_open_questions` · `list_candidate_cards` · `get_audit_timeline`
+- `list_handovers` · `list_open_questions` · `list_candidate_cards` · `list_cards` · `get_audit_timeline`
 값은 저장된 그대로 돌려주고 새로 계산하거나 지어내지 않는다(진행률·완성도는 저장·계산된 값).
 """
 
@@ -20,6 +20,8 @@ from ax_contracts.schemas import (
     HandoverView,
     ListCandidateCardsInput,
     ListCandidateCardsOutput,
+    ListCardsInput,
+    ListCardsOutput,
     ListHandoversInput,
     ListHandoversOutput,
     ListOpenQuestionsInput,
@@ -122,6 +124,21 @@ async def list_candidate_cards(svc: Services, request: AgentRequest) -> AgentRes
         output,
         f"사람 확인을 기다리는 후보 카드 {len(cards)}장",
         [c.card_id for c in cards],
+    )
+
+
+async def list_cards(svc: Services, request: AgentRequest) -> AgentResult:
+    """후보가 아닌 확정 카드를 최근 순으로 돌려준다. 사건 번호를 주면 그 사건에서 만든 카드만."""
+    params = _parse_input(ListCardsInput, request)
+    if isinstance(params, AgentResult):
+        return params
+    found = await svc.memory.list_cards(area=params.area, states=["active"])
+    cards = [c for c in found if params.context_id is None or c.context_id == params.context_id]
+    cards.sort(key=lambda c: (c.created_at, c.card_id), reverse=True)
+    cards = cards[: params.limit]
+    output = ListCardsOutput(cards=cards, collected_at=svc.clock())
+    return _done(
+        svc, request, output, f"확정된 결정 카드 {len(cards)}장", [c.card_id for c in cards]
     )
 
 

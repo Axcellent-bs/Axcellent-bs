@@ -6,6 +6,8 @@ import {
 } from "@/lib/adminRelay";
 import { incidentTitle, stepLabel } from "@/lib/agentChat";
 import { ago } from "@/lib/format";
+import { recordState } from "@/lib/incidentRecord";
+import { Link, useSearchParams } from "@/lib/nav";
 import { CompanyName } from "@/demo/CompanyName";
 
 // 총괄 화면 (재무 AI 화면과 같은 짜임): 머리말 → 요약 카드 → 사건 목록과 상세.
@@ -54,8 +56,9 @@ function eventKo(message: string, inc: Incident): string {
 }
 
 export default function OrchestratorPage() {
+  const ctxParam = useSearchParams().get("ctx"); // 결정 기록 화면에서 "총괄 사건에서 보기"로 들어올 때
   const [incidents, setIncidents] = useState<Incident[] | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(ctxParam);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
@@ -64,7 +67,7 @@ export default function OrchestratorPage() {
     try {
       const { data } = await adminRelay.incidents();
       setIncidents(data); setError(null); setUpdatedAt(new Date());
-      setSelected((cur) => cur ?? data.at(-1)?.context_id ?? null);
+      setSelected((cur) => (cur && data.some((i) => i.context_id === cur) ? cur : data.at(-1)?.context_id ?? null));
     } catch (e) { setError(relayError(e as { status?: number; message: string })); }
   }, []);
   useEffect(() => {
@@ -142,6 +145,7 @@ export default function OrchestratorPage() {
 function IncidentDetail({ incident }: { incident: Incident }) {
   const shared = Object.entries(incident.shared ?? {});
   const done = incident.steps.filter((s) => s.status === "completed").length;
+  const record = recordState(incident);
   return (
     <div className="min-w-0 space-y-5">
       <section className="card space-y-3 p-5">
@@ -151,6 +155,10 @@ function IncidentDetail({ incident }: { incident: Incident }) {
           <span className="ml-auto text-xs tabular-nums text-ink-500">단계 {done}/{incident.steps.length} 완료</span>
         </div>
         <p className="text-xs text-ink-500" title={`사건 번호 ${incident.context_id}`}>시작 {clock(incident.opened_at)} · 종료 {clock(incident.closed_at)}</p>
+        <p className="flex flex-wrap items-center gap-2 text-sm">
+          <span className={`chip ${record.tone}`}>{record.label}</span>
+          {record.step && <Link href={`/ops?ctx=${encodeURIComponent(incident.context_id)}`} className="text-xs font-semibold text-brand-600 underline underline-offset-2">결정 기록에서 보기 →</Link>}
+        </p>
         {!!shared.length && (
           <ul className="flex flex-wrap gap-2 text-sm">
             {shared.map(([key, value]) => (

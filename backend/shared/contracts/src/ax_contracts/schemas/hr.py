@@ -18,6 +18,7 @@ skill과 등급(등급 신고는 안전 레이어 레지스트리가 원본이�
 | `decide_candidate_card` | A | 확신 낮은 후보 카드를 사람이 승인·폐기 |
 | `list_handovers`·`list_open_questions`·`list_onboardings` | 읽기 | 인수인계·질문·온보딩 현황 |
 | `list_changes`·`list_candidate_cards`·`get_audit_timeline` | 읽기 | 변경·후보 카드·감사 기록 |
+| `list_cards` | 읽기 | 확정된(후보가 아닌) 결정 카드 목록 |
 
 `RecordCaseOutput`은 모델만 추가했고, hr의 출력 전환은 hr 담당 PR에서 한다.
 
@@ -400,6 +401,19 @@ class ListCandidateCardsInput(AxModel):
 
 class ListCandidateCardsOutput(AxModel):
     cards: list[Card] = Field(default_factory=list)  # `status == "candidate"`인 카드
+    collected_at: UtcDatetime
+
+
+class ListCardsInput(AxModel):
+    """확정된 결정 카드 목록 조회. `context_id`를 주면 그 사건에서 만든 카드만 돌려준다."""
+
+    area: str | None = None
+    context_id: str | None = None
+    limit: int = Field(default=50, ge=1, le=200)
+
+
+class ListCardsOutput(AxModel):
+    cards: list[Card] = Field(default_factory=list)  # 후보가 아닌 `active` 카드, 최근 순
     collected_at: UtcDatetime
 
 
