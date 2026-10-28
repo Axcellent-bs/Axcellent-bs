@@ -125,7 +125,7 @@ export default function IncidentDetail() {
   const r = data?.report;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-8 py-8">
+    <div className="space-y-6 px-8 py-8">
       <Link href="/infra" className="text-sm text-ink-500 hover:text-ink-900">← 현재 장애</Link>
 
       {error && <p role="alert" className="card border-l-4 border-l-red-500 px-5 py-3 text-sm text-red-700">{error}</p>}

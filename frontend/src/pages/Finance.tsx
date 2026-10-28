@@ -164,7 +164,7 @@ export default function FinancePage() {
       <header className="flex flex-wrap items-end gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">재무 관리</h1>
-          <p className="mt-1 max-w-2xl text-sm text-ink-500">
+          <p className="mt-1 text-sm text-ink-500">
             <CompanyName />의 재무팀입니다. 장애가 나면 보상 쿠폰을 사건별 장부에 적고, 피해와 보상을 더해 손실을 정리하고, 끝난 뒤 보상이 규칙대로 나갔는지 감사합니다.
             평소에는 결산·대사·정산·한도·감사를 합니다. 쿠폰·환불을 한 건씩 승인하지는 않습니다(그건 안전 장치가 기준표로 검사합니다).
           </p>

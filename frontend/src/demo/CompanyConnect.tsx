@@ -86,7 +86,7 @@ export default function CompanyConnect() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 px-8 py-8">
+    <div className="space-y-6 px-8 py-8">
       <header>
         <p className="text-sm text-ink-500">시스템 관리</p>
         <h1 className="text-2xl font-semibold">AXcellent 연결</h1>

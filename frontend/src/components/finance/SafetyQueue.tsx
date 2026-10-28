@@ -79,7 +79,7 @@ export function SafetyQueue({ reviews, error, highlight, reload }: { reviews: Re
         <h2 id="safety-queue-title" className="text-base font-semibold text-ink-900">안전 장치 보류 큐</h2>
         <p className={`text-sm font-semibold ${pending.length ? "text-amber-800" : "text-emerald-800"}`}>{pending.length ? `결정 기다림 ${pending.length}건` : "기다리는 일 없음"}</p>
       </div>
-      <p className="mt-0.5 max-w-3xl text-xs leading-relaxed text-ink-500">
+      <p className="mt-0.5 text-xs leading-relaxed text-ink-500">
         판매자 정산 지급처럼 사람만 정할 수 있는 일과, 안전 장치가 C로 보류한 보상 쿠폰·환불(한도 초과·금액 불일치)이 여기 모입니다. 금액과 이유를 보고 진행 또는 멈춤을 누르세요. 진행은 되돌릴 수 없고, 애매하면 멈춤을 누르세요. 정한 시간 안에 아무도 누르지 않으면 자동으로 멈춥니다.
       </p>
       {error && <p role="alert" className="mt-3 rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{SAFETY_SERVER}에서 보류 큐를 받지 못했습니다. {error}</p>}
