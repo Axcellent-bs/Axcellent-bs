@@ -40,8 +40,12 @@ const ALL = [...ACCOUNTS, ...OPERATORS]
 
 const SYSTEM_PATHS = ['/system']
 
-/** 이 계정이 지금 쓸 수 있는 서비스: 배정됐고 회사가 켠 것 */
+/** 이 계정이 지금 쓸 수 있는 서비스: 회사가 켠 AI 서비스 전부 + 이 계정에 배정된 그 밖의 서비스(DejaFix 등) */
 export const servicesOf = (account: Account, enabled = getEnabled()) =>
+  SERVICES.filter((s) => enabled.includes(s.id) && (s.agent !== undefined || account.services.includes(s.id)))
+
+/** 이 계정에 배정된 서비스(회사가 켠 것 중). 첫 화면과 프로필 전환 목록은 이걸로 정한다 */
+export const assignedOf = (account: Account, enabled = getEnabled()) =>
   SERVICES.filter((s) => account.services.includes(s.id) && enabled.includes(s.id))
 
 export function canOpen(account: Account, path: string, enabled = getEnabled()) {
@@ -56,7 +60,7 @@ export function canOpen(account: Account, path: string, enabled = getEnabled()) 
 
 /** 로그인 뒤 처음 여는 화면: 운영팀은 관제 센터, 고객사 시스템 관리자는 서비스 고르기(연결 전이면 AXcellent 연결), 나머지는 첫 서비스(없으면 AI 대화방) */
 export const homeOf = (account: Account, enabled = getEnabled()) =>
-  account.operator ? '/control' : account.admin ? (getCompany() ? '/system/services' : '/system/connect') : servicesOf(account, enabled)[0]?.entry ?? '/agents/chat'
+  account.operator ? '/control' : account.admin ? (getCompany() ? '/system/services' : '/system/connect') : assignedOf(account, enabled)[0]?.entry ?? '/agents/chat'
 
 const KEY = 'axcellent-demo-account'
 const load = (): Account | null => {

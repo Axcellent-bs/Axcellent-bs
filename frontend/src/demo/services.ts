@@ -21,17 +21,18 @@ export const FAMILIES: { id: Family; name: string; desc: string }[] = [
 /**
  * AXcellent가 관리하는 AI 7개. 예전 캣북스 대시보드(ax-frontend dashboard-web)에 있던 AI를 모두 이리로 옮겼다.
  * id는 ax-backend .github/team.yml 부서 id, backend는 화면이 부르는 서버(src/lib/env.ts).
+ * 왼쪽 메뉴는 이 순서대로 AI가 상위 탭이고, 그 AI가 맡은 서비스가 하위 탭이다 (AdminShell).
  * 안전 관문(safety)·회사 기억(memory)은 AI 화면이 아니라 뒤에서 도는 서버라 넣지 않는다. 인프라는 DejaFix가 맡는다.
  */
 export type AgentId = 'orchestrator' | 'support' | 'finance' | 'data' | 'hr' | 'marketing' | 'planning'
-export const AGENTS: { id: AgentId; name: string; backend: string }[] = [
-  { id: 'orchestrator', name: '총괄', backend: 'orchestrator (8000) · shop-api 관리 중계 (8010)' },
-  { id: 'support', name: '고객지원 AI', backend: 'dashboard-api (8020)' },
-  { id: 'finance', name: '재무 AI', backend: 'finance (8105) · safety (8001)' },
-  { id: 'data', name: '데이터분석 AI', backend: 'data (8106)' },
-  { id: 'hr', name: '인사 AI', backend: 'dashboard-api (8020)' },
-  { id: 'marketing', name: '마케팅 AI', backend: '연결 전 (화면 안 시연 데이터)' },
-  { id: 'planning', name: '기획개발 AI', backend: 'planning (8101) · dashboard-api (8020)' },
+export const AGENTS: { id: AgentId; name: string; Icon: ComponentType<{ size?: number }>; backend: string }[] = [
+  { id: 'orchestrator', Icon: IconBolt, name: '총괄', backend: 'orchestrator (8000) · shop-api 관리 중계 (8010)' },
+  { id: 'support', Icon: IconUser, name: '고객지원 AI', backend: 'dashboard-api (8020)' },
+  { id: 'finance', Icon: IconShield, name: '재무 AI', backend: 'finance (8105) · safety (8001)' },
+  { id: 'data', Icon: IconChart, name: '데이터분석 AI', backend: 'data (8106)' },
+  { id: 'hr', Icon: IconUsers, name: '인사 AI', backend: 'dashboard-api (8020)' },
+  { id: 'marketing', Icon: IconMegaphone, name: '마케팅 AI', backend: '연결 전 (화면 안 시연 데이터)' },
+  { id: 'planning', Icon: IconPlan, name: '기획개발 AI', backend: 'planning (8101) · dashboard-api (8020)' },
 ]
 
 export type Service = {
