@@ -3,13 +3,13 @@ import { Link, useNavigate } from 'react-router'
 import { ACCOUNTS, homeOf, useSession } from './session'
 import { useCompany } from './company'
 
-// 사내망 안에서만 열리는 로그인 화면. 계정에 배정된 서비스에 따라 로그인 뒤 보이는 메뉴가 다르다.
+// 사내망 안에서만 열리는 로그인 화면. 고객사 계정은 시스템 관리자 하나다(session.tsx).
 // 데모라 비밀번호는 확인하지 않는다.
 export default function LoginPage() {
   const { signIn } = useSession()
   const company = useCompany()
   const navigate = useNavigate()
-  const [email, setEmail] = useState(company ? ACCOUNTS[1].email : ACCOUNTS[0].email)
+  const [email, setEmail] = useState(ACCOUNTS[0].email)
   const [password, setPassword] = useState('demo')
   const [error, setError] = useState<string | null>(null)
 
@@ -20,7 +20,7 @@ export default function LoginPage() {
   const submit = (e: FormEvent) => {
     e.preventDefault()
     const a = ACCOUNTS.find((x) => x.email === email.trim().toLowerCase())
-    if (!a) return setError('등록되지 않은 계정입니다. 아래 데모 계정 중 하나를 고르세요.')
+    if (!a) return setError('등록되지 않은 계정입니다. 아래 데모 계정으로 들어가세요.')
     if (!company && !a.admin) return setError('회사 연결 전에는 시스템 관리자만 로그인할 수 있어요.')
     if (!password) return setError('비밀번호를 입력하세요.')
     enter(a.id)
@@ -90,7 +90,7 @@ export default function LoginPage() {
           </form>
           <div className="space-y-2">
             <p className="text-xs font-medium text-ink-500">데모 계정</p>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid gap-2">
               {ACCOUNTS.map((a) => {
                 // 회사 연결 전에는 시스템 관리자만 들어갈 수 있다
                 const locked = !company && !a.admin

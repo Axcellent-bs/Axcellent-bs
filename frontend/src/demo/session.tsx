@@ -1,5 +1,5 @@
 // 데모 로그인 세션. 실제 인증이 아니다: 계정은 아래 목록에 고정돼 있고, 고른 계정을 브라우저에만 기억한다.
-// 부서는 코드에 두지 않는다. 계정마다 쓸 서비스를 배정하고, 회사가 켠 서비스 중 배정된 것만 열린다(services.ts).
+// 고객사 계정은 시스템 관리자 하나다. 회사가 켠 서비스(services.ts)와 시스템 관리 메뉴를 전부 연다.
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
 import { SERVICES, SHARED_PATHS, getEnabled, matchPath } from './services'
 import { getCompany } from './company'
@@ -18,20 +18,13 @@ export type Account = {
   operator?: boolean
 }
 
-// 예시 직원. ?as=<id> 링크가 그대로 동작하도록 id는 예전 값을 둔다
+// 고객사 계정. 직무별 예시 계정(인프라·CS·재무 등)은 없앴다. 예전 ?as=<직무 id> 링크는 시스템 관리자로 들어간다(load)
 export const ACCOUNTS: Account[] = [
-  { id: 'admin', name: '시스템 관리자', role: '시스템 관리자', email: 'admin@catbooks.example', services: ['orchestrator'], admin: true },
-  { id: 'infra', name: '인프라 엔지니어', role: '인프라 엔지니어', email: 'infra@catbooks.example', services: ['incident', 'hosts'] },
-  { id: 'dev', name: '개발자', role: '개발자', email: 'dev@catbooks.example', services: ['dev', 'incident'] },
-  { id: 'planning', name: '기획자', role: '기획자', email: 'planning@catbooks.example', services: ['planning', 'decisions'] },
-  { id: 'support', name: 'CS 상담원', role: 'CS 상담원', email: 'support@catbooks.example', services: ['inquiry', 'claims', 'reviews'] },
-  { id: 'marketing', name: '마케터', role: '마케터', email: 'marketing@catbooks.example', services: ['coupon', 'data'] },
-  { id: 'finance', name: '재무 담당', role: '재무 담당', email: 'finance@catbooks.example', services: ['finance', 'claims'] },
-  { id: 'hr', name: '인사 담당', role: '인사 담당', email: 'hr@catbooks.example', services: ['handover', 'decisions'] },
-  { id: 'data', name: '데이터 분석가', role: '데이터 분석가', email: 'data@catbooks.example', services: ['data'] },
+  { id: 'admin', name: '시스템 관리자', role: '시스템 관리자', email: 'admin@catbooks.example', services: SERVICES.map((s) => s.id), admin: true },
 ]
+const ADMIN = ACCOUNTS[0]
 
-// AXcellent 운영팀 계정. 고객사 로그인 화면·프로필 전환에는 나오지 않고, 관제 로그인(/control/login)에서만 쓴다
+// AXcellent 운영팀 계정. 고객사 로그인 화면에는 나오지 않고, 관제 로그인(/control/login)에서만 쓴다
 export const OPERATORS: Account[] = [
   { id: 'axc', name: 'AXcellent 운영팀', role: 'AXcellent 운영팀', email: 'ops@axcellent.dev', services: [], operator: true },
 ]
@@ -44,7 +37,7 @@ const SYSTEM_PATHS = ['/system']
 export const servicesOf = (account: Account, enabled = getEnabled()) =>
   SERVICES.filter((s) => enabled.includes(s.id) && (s.agent !== undefined || account.services.includes(s.id)))
 
-/** 이 계정에 배정된 서비스(회사가 켠 것 중). 첫 화면과 프로필 전환 목록은 이걸로 정한다 */
+/** 이 계정에 배정된 서비스(회사가 켠 것 중). 운영팀이 아닌 계정의 첫 화면은 이걸로 정한다 */
 export const assignedOf = (account: Account, enabled = getEnabled()) =>
   SERVICES.filter((s) => account.services.includes(s.id) && enabled.includes(s.id))
 
@@ -71,14 +64,15 @@ const KEY = 'axcellent-demo-account'
 const load = (): Account | null => {
   // ?as=<계정 id> 로 열면 그 계정으로 바로 들어간다 (팀원에게 화면 링크를 줄 때)
   const as = new URLSearchParams(window.location.search).get('as')
-  const direct = ALL.find((a) => a.id === as)
+  // 없어진 직무 계정 id(infra·support 등)로 와도 시스템 관리자로 연다
+  const direct = as ? ALL.find((a) => a.id === as) ?? ADMIN : null
   if (direct) {
     save(direct.id)
     return direct
   }
   try {
     const id = localStorage.getItem(KEY)
-    return ALL.find((a) => a.id === id) ?? null
+    return id ? ALL.find((a) => a.id === id) ?? ADMIN : null
   } catch {
     return null
   }
