@@ -110,6 +110,7 @@ class Incident:
     summary: list[str] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
     shared: dict[str, Any] = field(default_factory=dict)  # 부서가 준 값 중 다른 부서에 넘길 것
+    signal: dict[str, Any] = field(default_factory=dict)  # 사건을 연 이벤트의 data (plan이 입력으로 쓴다)
 
     @staticmethod
     def new_context_id() -> str:

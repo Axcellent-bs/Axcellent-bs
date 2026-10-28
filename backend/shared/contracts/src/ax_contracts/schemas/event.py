@@ -44,6 +44,8 @@ class EventType(StrEnum):
     METRIC_ANOMALY = "metric.anomaly"
     # 인프라(DejaFix 어댑터)
     INFRA_ANOMALY_DETECTED = "infra.anomaly_detected"
+    # 재무 (사후 감사가 새 의심 건을 찾음: 같은 고객 반복 환불 등)
+    FINANCE_ANOMALY_DETECTED = "finance.anomaly_detected"
     # 통합 에이전트
     INCIDENT_OPENED = "incident.opened"
     INCIDENT_RESOLVED = "incident.resolved"
