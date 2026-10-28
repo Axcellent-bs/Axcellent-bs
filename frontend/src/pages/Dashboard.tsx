@@ -46,7 +46,7 @@ export default function DashboardPage() {
             </div>
           </div>
           <ChartWithTable
-            chart={<LineChart height={220} area xLabels={labels} tooltipTitle={(i) => d.daily[i].date}
+            chart={<LineChart height={220} area xLabels={labels} tooltipTitle={(i) => d.daily[i]?.date ?? ""}
               series={[{ key: "inq", label: "문의", color: "chart-1", values: d.daily.map((r) => r.inquiries) }, { key: "claims", label: "클레임", color: "chart-2", values: d.daily.map((r) => r.claims) }]} />}
             table={<TableView columns={["날짜", "문의", "클레임", "자동", "상담원 확인", "지급액"]}
               rows={[...d.daily].reverse().map((r) => [r.date, r.inquiries, r.claims, r.auto, r.agent, won(r.paid)])} />} />
