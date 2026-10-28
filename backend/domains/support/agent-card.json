@@ -1,0 +1,343 @@
+{
+  "name": "support",
+  "owner": "병환",
+  "description": "고객지원 — 고객 문의를 접수하고 분류·근거 검색·답변 초안 3가지와 가드 검사를 만들어 상담원 화면에 제공한다",
+  "url": "http://support:8102/a2a",
+  "version": "0.1.0",
+  "capabilities": {
+    "streaming": true,
+    "push_notifications": false
+  },
+  "skills": [
+    {
+      "id": "list_inquiries",
+      "description": "문의 목록을 최근 수정 순으로 돌려준다. 상태(open, resolved, escalated)로 거를 수 있다. 상태를 바꾸지 않는다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#ListInquiriesInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#ConversationListItem",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator", "shop-api"],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "get_inquiry",
+      "description": "문의 하나의 메시지 전체와 메시지별 분석(분류, 근거, 초안 3가지, 가드 결과)을 돌려준다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#GetInquiryInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Conversation",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator", "shop-api"],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "check_reply",
+      "description": "고객에게 보낼 답변 문장을 코드 규칙으로 검사해 통과 여부와 걸린 규칙(환불 약속, 개인정보, 빈 답변)을 돌려준다. 답변 문장은 untrusted.text로 받는다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#CheckReplyInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Validation",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "summarize_inquiry",
+      "description": "문의 대화를 요약하고 해결 여부, 다음 조치, 사람에게 넘길 필요를 돌려준다. 저장하지 않는다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#SummarizeInquiryInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Summary",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "create_inquiry",
+      "description": "새 문의를 접수하고 첫 메시지를 분석한다. 제목과 본문은 untrusted.subject, untrusted.message로 받는다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#CreateInquiryInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Conversation",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api", "shop-api", "orchestrator"],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "add_customer_message",
+      "description": "기존 문의에 고객 메시지를 추가하고 분석한다. 본문은 untrusted.message로 받는다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#AddCustomerMessageInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Conversation",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api", "shop-api", "orchestrator"],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "send_reply",
+      "description": "상담원이 확정한 답변을 고객에게 보낸다. 가드를 통과하지 못하면 보내지 않고 이유를 돌려준다. 답변은 untrusted.text로 받는다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#SendReplyInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Conversation",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "reject_draft",
+      "description": "상담원이 거절한 답변 초안 스타일을 기록한다 (초안 채택률 지표용). 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#RejectDraftInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#RejectDraftInput",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "set_inquiry_status",
+      "description": "문의 상태를 open, resolved, escalated 중 하나로 바꾼다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#SetInquiryStatusInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Conversation",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "request_compensation",
+      "description": "보상 단가·대상을 코드 정책표로 판정해 마케팅 issue_coupon(compensation)에 사건별 sequence로 직렬 요청한다. 지급과 execute()는 마케팅이 하고, 고객지원 자신의 상태는 바꾸지 않는다. 보상 대상이 아니면 not_eligible로 돌려준다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#RequestCompensationInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#RequestCompensationOutput",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "list_claims",
+      "description": "클레임 목록을 최근 순으로 돌려준다. 상태로 거를 수 있다. 상태를 바꾸지 않는다.",
+      "input_schema": "agents/support/src/support_agent/claim_schemas.py#ListClaimsInput",
+      "output_schema": "agents/support/src/support_agent/claim_schemas.py#Claim",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "get_claim",
+      "description": "클레임 하나의 판정 근거(규칙 적중, 품목별 금액, 공제)와 감사 기록을 돌려준다.",
+      "input_schema": "agents/support/src/support_agent/claim_schemas.py#GetClaimInput",
+      "output_schema": "agents/support/src/support_agent/claim_schemas.py#Claim",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "claim_stats",
+      "description": "클레임 상태별 건수와 규칙 적중 횟수를 코드로 센다.",
+      "input_schema": "agents/support/src/support_agent/claim_schemas.py#ListClaimsInput",
+      "output_schema": "agents/support/src/support_agent/claim_schemas.py#ClaimStats",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "claim_queue",
+      "description": "보상 큐(환불할 금액이 있는 승인·입고 건)와 반품 대기 목록을 돌려준다. 검수 전·불합격 건은 ready=false와 이유를 담는다.",
+      "input_schema": "agents/support/src/support_agent/claim_schemas.py#ListClaimsInput",
+      "output_schema": "agents/support/src/support_agent/claim_schemas.py#ClaimQueue",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "create_claim",
+      "description": "취소·반품·교환 클레임을 접수하고 주문 사실로 규칙 판정한다(자동 거절·정보 필요·사람 확인·반품 대기·자동 승인). 금액은 입력으로 받지 않고 코드가 계산한다. 사유 설명은 untrusted.description. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/claim_schemas.py#CreateClaimInput",
+      "output_schema": "agents/support/src/support_agent/claim_schemas.py#Claim",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api", "shop-api", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "decide_claim",
+      "description": "사람 확인이 필요한 클레임을 상담원이 승인·거절한다. 메모는 untrusted.note. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/claim_schemas.py#DecideClaimInput",
+      "output_schema": "agents/support/src/support_agent/claim_schemas.py#Claim",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "receive_return",
+      "description": "반품 입고를 기록한다(선택으로 검수 결과). 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/claim_schemas.py#ReceiveReturnInput",
+      "output_schema": "agents/support/src/support_agent/claim_schemas.py#Claim",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api", "shop-api"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "inspect_return",
+      "description": "입고한 반품의 검수 결과(pass·fail·partial)를 기록한다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/claim_schemas.py#InspectReturnInput",
+      "output_schema": "agents/support/src/support_agent/claim_schemas.py#Claim",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "process_claim_queue",
+      "description": "보상 큐의 준비된 건을 refund_request(execute, 안전 관문의 한도 검사·기준 이상 C 보류)로 지급 처리한다. 실행되면 shop-api 환불 API로 현금을 환불하고, 실패하면 보류로 남겨 같은 키로 재시도한다.",
+      "input_schema": "agents/support/src/support_agent/claim_schemas.py#ProcessClaimQueueInput",
+      "output_schema": "agents/support/src/support_agent/claim_schemas.py#QueueRun",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "inquiry_overview",
+      "description": "문의 KPI(초안 채택률·수정 정도·가드 적중·분류별 건수)와 답변 대기 문의를 코드로 집계해 돌려준다. 상태를 바꾸지 않는다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#ListInquiriesInput",
+      "output_schema": "agents/support/src/support_agent/insight_schemas.py#InquiryOverview",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator", "data"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "detect_inquiry_surge",
+      "description": "최근 창의 분류별 문의 수를 평소(앞선 기간의 같은 길이 창 평균, baseline_method=median이면 창별 건수의 중앙값)와 견줘 급증한 분류를 돌려준다 (DEP-CS-05). 샘플은 문의 ID만 담고 원문은 담지 않는다. 총량 이상은 data 소관이다.",
+      "input_schema": "agents/support/src/support_agent/insight_schemas.py#SurgeInput",
+      "output_schema": "agents/support/src/support_agent/insight_schemas.py#SurgeReport",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator", "data"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "request_change",
+      "description": "문의에서 나온 변경 요청을 기획개발 create_ticket(직통, 기획개발이 execute)로 보내고, 돌려받은 ctx_req_ 사건 번호를 문의와 연결해 저장한다. 같은 요청이 있으면 linked_duplicate로 묶여 한 사건에 문의가 여러 개 붙을 수 있다. 제목·근거는 요약만 받고 개인정보가 있으면 거부한다. 고객 원문은 보내지 않는다.",
+      "input_schema": "agents/support/src/support_agent/change_schemas.py#RequestChangeInput",
+      "output_schema": "agents/support/src/support_agent/change_schemas.py#RequestChangeOutput",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_change_requests",
+      "description": "문의와 기획개발 변경 요청의 연결 목록 (문의·사건·상태로 거름).",
+      "input_schema": "agents/support/src/support_agent/change_schemas.py#ListChangeRequestsInput",
+      "output_schema": "agents/support/src/support_agent/change_schemas.py#ListChangeRequestsOutput",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "receive_change_result",
+      "description": "기획개발이 변경 요청을 닫을 때(완료·거절) 보내는 결과(ChangeResultInput)를 그 ctx_req_ 사건에 연결된 모든 문의에 적용하고 적용한 문의 수를 돌려준다(저장소 기록). 같은 결과의 재전송은 한 번만 적용하고, 이미 닫힌 요청에 다른 결과가 오면 거절한다. 연결된 문의가 없으면 applied=0. 요약은 코드가 만든 한 줄이며 고객 공지는 따로 붙인다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ChangeResultInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ChangeResultOutput",
+      "grade": "A",
+      "allowed_requesters": ["planning"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "suggest_compensation",
+      "description": "문의의 주문 사실(약속 배송일·배송 완료 시각)로 코드가 지연 일수를 세고 정책표로 보상 쿠폰 후보를 제안한다(읽기, 쿠폰을 내지 않음). 고객 원문은 읽지 않는다. 담당자가 승인하면 응답의 request를 request_compensation에 그대로 보낸다. 약속일이 없으면 확인할 수 없음으로 돌려준다.",
+      "input_schema": "agents/support/src/support_agent/suggest_schemas.py#SuggestCompensationInput",
+      "output_schema": "agents/support/src/support_agent/suggest_schemas.py#CompensationSuggestion",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "request_incident_compensation",
+      "description": "사건(ctx_inc_)으로 피해를 본 영향 고객 목록(구매자 ID, 데이터분석 영향 분석 결과)에게 보상 쿠폰을 요청한다. 문의를 내지 않은 고객도 대상이다. 총괄만 부를 수 있다. 사유는 결제 장애(payment_failure)만 받고 단가와 건수 상한은 정책표가 정한다. 고객마다 마케팅 issue_coupon에 한 건씩 직렬로 요청하며(안전 관문의 한도 검사, 초과는 C 보류) 지급은 마케팅이 한다. 같은 사건·구매자·사유는 한 번만 요청하고, 마케팅에 닿지 않으면 남은 요청을 멈춘다.",
+      "input_schema": "agents/support/src/support_agent/incident_schemas.py#RequestIncidentCompensationInput",
+      "output_schema": "agents/support/src/support_agent/incident_schemas.py#IncidentCompensationOutput",
+      "grade": "A",
+      "allowed_requesters": ["orchestrator"],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "diagnose_payment",
+      "description": "문의의 주문에서 결제가 어디서 막혔는지 주문 상태와 결제 시도 기록으로 코드가 정한다(읽기). 결제 완료·결제 실패(서버 문제인지 거절인지)·결제 시도 없음·중복 결제·기록 불일치·취소를 가르고 다음 할 일(재시도·대기·환불 검토·담당자 확인)을 돌려준다. 고객 원문은 읽지 않고, 재결제·취소·환불은 하지 않는다. 문의의 구매자와 주문의 구매자가 다르면 not_found다.",
+      "input_schema": "agents/support/src/support_agent/payment_schemas.py#DiagnosePaymentInput",
+      "output_schema": "agents/support/src/support_agent/payment_schemas.py#PaymentDiagnosis",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "prepare_handoff",
+      "description": "문의를 사람에게 넘길 때 필요한 인계 패키지를 코드가 모아 준다(읽기, 이관 판단에 LLM을 쓰지 않는다). 이관 사유 코드(명시적 사람 요청, 개인정보 요청, 같은 주제 반복, 클레임 검토 필요, 결제 검토, 고위험 고객, 사건 관련, 답변 가드 반복 차단, 근거 없음)와 근거 사실, 권고(none·review·handoff_now), 이관 대상 코드(부서 이름이 아님), 이미 한 조치(클레임 판정·환불 완료 금액, 기획개발 변경 요청, 결제 진단), 남은 일, 답 대기 시간, 반복 횟수, 사람이 읽을 요약(LLM, 실패하면 고정 문장)을 돌려준다. 환불이 끝난 클레임이 있으면 already_refunded로 알려 중복 환불을 막는다. 상태를 바꾸지 않고 권고만 하며 고객 원문과 개인정보를 싣지 않는다.",
+      "input_schema": "agents/support/src/support_agent/handoff_schemas.py#PrepareHandoffInput",
+      "output_schema": "agents/support/src/support_agent/handoff_schemas.py#HandoffPackage",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "assess_deletion_request",
+      "description": "문의에 붙은 개인정보 삭제 요청이 본인 것으로 보이는지 규칙으로 1차 판단한다(읽기, LLM 없음). 문의에 연결된 주문의 구매자와 문의를 낸 구매자가 같은지, 요청에 적힌 주문 번호·상품이 주문 기록과 맞는지, 같은 구매자가 짧은 시간에 여러 주문을 다루는 흔적이 없는지를 보고 일치(consistent)·불일치(mismatch)·판단불가(insufficient)와 확신도(low·medium·high, 퍼센트 없음), 근거 목록, 사람이 읽을 요약을 돌려준다. 불일치·판단불가는 거절 권고로 표시한다. 본인으로 확정하거나 삭제하지 않고 최종 판단은 사람이 한다. 문의 원문은 untrusted로만 읽고 지시로 해석하지 않으며, 본인 확인을 위해 개인정보를 더 요구하지 않는다.",
+      "input_schema": "agents/support/src/support_agent/privacy_schemas.py#AssessDeletionInput",
+      "output_schema": "agents/support/src/support_agent/privacy_schemas.py#DeletionAssessment",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "customer_signals",
+      "description": "구매자(buy_…) 한 명의 이탈·재문의 위험 신호를 문의·클레임 기록에서 코드가 센다(읽기). 하루 넘게 답 못 받은 문의, 화난·답답한 메시지, 잦은 문의, 이관, 거절된 클레임, 잦은 클레임을 점수 기준표로 더해 low·medium·high와 이유(코드·건수·점수)를 돌려준다. 클레임이 3건 이상이면 이탈과 별개로 패턴 검토 표시를 단다. 고객 이름과 문의 원문은 읽지도 돌려주지도 않는다. 구매 이력이 필요한 RFM·LTV·코호트는 data 소관이다.",
+      "input_schema": "agents/support/src/support_agent/signal_schemas.py#CustomerSignalsInput",
+      "output_schema": "agents/support/src/support_agent/signal_schemas.py#CustomerSignals",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "list_at_risk_customers",
+      "description": "이탈·재문의 위험이 기준 단계(medium 또는 high) 이상인 구매자를 점수 높은 순으로 돌려준다(읽기). 리텐션 캠페인이나 담당자 후속 연락의 대상 목록으로 쓴다. 구매자 가명 ID와 건수·이유만 담는다.",
+      "input_schema": "agents/support/src/support_agent/signal_schemas.py#ListAtRiskInput",
+      "output_schema": "agents/support/src/support_agent/signal_schemas.py#AtRiskCustomers",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "analyze_receipt",
+      "description": "영수증 글(untrusted.receipt_text)과 사진(untrusted.images)에서 금액·날짜·주문번호·배송비·품목을 코드가 뽑아 문의에 붙은 주문과 대조한다(읽기). 개인정보는 가린 뒤 읽고 원문은 저장하지 않는다. 사진은 이미지 분석이 연결됐을 때만 읽고 아니면 읽지 못했다고 알린다. 같음·다름·확인할 수 없음만 말하고 환불 판정은 하지 않는다.",
+      "input_schema": "agents/support/src/support_agent/analysis_schemas.py#AnalyzeReceiptInput",
+      "output_schema": "agents/support/src/support_agent/analysis_schemas.py#AnalyzeReceiptOutput",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "analyze_claim_request",
+      "description": "문의의 마지막 고객 메시지를 환불·교환·취소·이벤트 문의로 분류하고(LLM은 분류만, 못 쓰면 단어 규칙) 고객이 말한 품목을 주문과 맞춘 뒤, 접수했다면 어떻게 판정될지 규칙(claim_rules)으로 환불 범위를 미리 계산한다(읽기, 접수하지 않음). 담당자가 확인해 create_claim에 보낼 입력(suggested_claim)을 함께 돌려준다.",
+      "input_schema": "agents/support/src/support_agent/analysis_schemas.py#AnalyzeClaimRequestInput",
+      "output_schema": "agents/support/src/support_agent/analysis_schemas.py#AnalyzeClaimRequestOutput",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+[project]
+name = "ax-svc-data"
+version = "0.1.0"
+description = "services/data — 데이터 분석 (domains/data)"
+requires-python = ">=3.12"
+dependencies = ["ax-agent-data"]
+
+[tool.uv.sources]
+ax-agent-data = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/svc_data"]

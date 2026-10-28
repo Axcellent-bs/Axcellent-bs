@@ -1,0 +1,134 @@
+"""공지 초안 생성과 게시 저장소. 프레임워크에 의존하지 않는다.
+
+문안은 사실 필드로만 만드는 고정 템플릿이다(LLM은 아직 연결하지 않았다). 원인은 적지 않고,
+약속 금액은 `promises[]`에서 코드가 옮겨 적는다. 외부 입력(`untrusted`)은 읽지 않는다.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import itertools
+from collections.abc import Callable
+from datetime import UTC, datetime
+
+from marketing_agent.schemas import DraftNoticeInput, NoticeDraft, NoticeView
+
+_COMPONENT_LABEL = {"api": "서비스 접속", "db": "데이터 조회", "payment": "결제"}
+
+
+def _template(data: DraftNoticeInput) -> str:
+    label = _COMPONENT_LABEL.get(data.facts.component or "", "일부 서비스")
+    if data.kind == "incident_opened":
+        text = f"{label} 이용이 원활하지 않은 상황을 확인했습니다. 복구되는 대로 안내드리겠습니다."
+    elif data.kind == "incident_resolved":
+        text = f"{label} 이용이 정상으로 돌아왔습니다. 불편을 드려 죄송합니다."
+    else:
+        text = "새 상품이 등록되었습니다."
+    for promise in data.promises:
+        kind = "적립금" if promise.type == "points" else "쿠폰"
+        text += f" ({promise.condition}: {kind} {promise.amount:,}원)"
+    return text
+
+
+def make_draft(context_id: str, data: DraftNoticeInput) -> NoticeDraft:
+    """같은 입력이면 같은 초안(`draft_id`도 같다)을 만든다."""
+    digest = hashlib.sha256(f"{context_id}:{data.model_dump_json()}".encode()).hexdigest()[:10]
+    return NoticeDraft(
+        draft_id=f"drf_{digest}",
+        kind=data.kind,
+        channel_code=data.channel_code,
+        public_text=_template(data),
+        facts=data.facts,
+        promises=data.promises,
+        valid_from=data.valid_from,
+        valid_to=data.valid_to,
+    )
+
+
+class NoticeStore:
+    """초안·게시 공지를 메모리에 둔다(목 모드). 같은 초안을 두 번 게시하면 같은 `notice_id`다.
+
+    공지는 게시되면 `published`이고 다음 둘 중 하나로 `ended`가 된다.
+    - 복구 공지(`incident_resolved`)를 게시하면 같은 `context_id`의 장애 공지가 끝난다.
+    - `valid_to`가 지났다.
+    """
+
+    def __init__(self, now: Callable[[], datetime] = lambda: datetime.now(UTC)) -> None:
+        self.now = now
+        self._drafts: dict[str, NoticeDraft] = {}
+        self._published: dict[str, tuple[str, NoticeDraft]] = {}  # notice_id → (context_id, draft)
+        self._by_draft: dict[str, str] = {}
+        self._ended: set[str] = set()
+        self._published_at: dict[str, datetime] = {}
+        self._counter = itertools.count(1)
+
+    def save_draft(self, draft: NoticeDraft) -> None:
+        self._drafts[draft.draft_id] = draft
+
+    def get_draft(self, draft_id: str) -> NoticeDraft | None:
+        return self._drafts.get(draft_id)
+
+    def publish(self, context_id: str, draft: NoticeDraft) -> str:
+        if draft.draft_id in self._by_draft:
+            return self._by_draft[draft.draft_id]
+        notice_id = f"ntc_{next(self._counter):04d}"
+        if draft.kind == "incident_resolved":  # 복구 공지가 나가면 같은 사건의 장애 공지는 끝난다
+            for earlier_id, (earlier_context, earlier) in self._published.items():
+                if earlier_context == context_id and earlier.kind == "incident_opened":
+                    self._ended.add(earlier_id)
+        self._published[notice_id] = (context_id, draft)
+        self._published_at[notice_id] = self.now()
+        self._by_draft[draft.draft_id] = notice_id
+        return notice_id
+
+    def _status(self, notice_id: str, draft: NoticeDraft, at: datetime | None = None) -> str:
+        expired = draft.valid_to is not None and (at or self.now()) > draft.valid_to
+        return "ended" if notice_id in self._ended or expired else "published"
+
+    def active(
+        self,
+        *,
+        component: str | None = None,
+        channel_code: str | None = None,
+        at: datetime | None = None,
+        limit: int = 20,
+    ) -> tuple[list[NoticeView], int]:
+        """지금(또는 `at`) 게시 중인 공지를 최근 게시 순으로 돌려준다. (목록, 조건에 맞는 전체 수).
+
+        끝난 공지(복구 공지로 끝났거나 `valid_to`가 지난 것)와 아직 시작하지 않은 공지
+        (`valid_from` 전)는 뺀다. 복구 공지로 끝났는지는 `at`과 상관없이 지금 상태를 따른다.
+        """
+        moment = at or self.now()
+        matched: list[str] = []
+        for notice_id in reversed(list(self._published)):
+            _, draft = self._published[notice_id]
+            if self._status(notice_id, draft, moment) == "ended":
+                continue
+            if draft.valid_from is not None and moment < draft.valid_from:
+                continue
+            if component is not None and draft.facts.component != component:
+                continue
+            if channel_code is not None and draft.channel_code != channel_code:
+                continue
+            matched.append(notice_id)
+        return [self.view(notice_id, moment) for notice_id in matched[:limit]], len(matched)
+
+    def view(self, notice_id: str, at: datetime | None = None) -> NoticeView:
+        """게시된 공지만 보여 준다(끝난 공지는 `status: ended`로). 없으면 '확인할 수 없음'이다."""
+        found = self._published.get(notice_id)
+        if found is None:
+            return NoticeView(found=False, unknown_reason="게시된 공지를 찾을 수 없음")
+        context_id, draft = found
+        return NoticeView(
+            found=True,
+            notice_id=notice_id,
+            context_id=context_id,
+            published_at=self._published_at[notice_id],
+            status=self._status(notice_id, draft, at),
+            channel_code=draft.channel_code,
+            public_text=draft.public_text,
+            facts=draft.facts,
+            promises=draft.promises,
+            valid_from=draft.valid_from,
+            valid_to=draft.valid_to,
+        )

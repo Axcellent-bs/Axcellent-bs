@@ -1,0 +1,39 @@
+{
+  "name": "reviews",
+  "owner": "병환",
+  "description": "리뷰·지식 — support 업무 중 이 서비스 skill만 맡는다. 고객지원 — 고객 문의를 접수하고 분류·근거 검색·답변 초안 3가지와 가드 검사를 만들어 상담원 화면에 제공한다",
+  "url": "http://reviews:8122/a2a",
+  "version": "0.1.0",
+  "capabilities": {
+    "streaming": true,
+    "push_notifications": false
+  },
+  "skills": [
+    {
+      "id": "customer_signals",
+      "description": "구매자(buy_…) 한 명의 이탈·재문의 위험 신호를 문의·클레임 기록에서 코드가 센다(읽기). 하루 넘게 답 못 받은 문의, 화난·답답한 메시지, 잦은 문의, 이관, 거절된 클레임, 잦은 클레임을 점수 기준표로 더해 low·medium·high와 이유(코드·건수·점수)를 돌려준다. 클레임이 3건 이상이면 이탈과 별개로 패턴 검토 표시를 단다. 고객 이름과 문의 원문은 읽지도 돌려주지도 않는다. 구매 이력이 필요한 RFM·LTV·코호트는 data 소관이다.",
+      "input_schema": "agents/support/src/support_agent/signal_schemas.py#CustomerSignalsInput",
+      "output_schema": "agents/support/src/support_agent/signal_schemas.py#CustomerSignals",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "list_at_risk_customers",
+      "description": "이탈·재문의 위험이 기준 단계(medium 또는 high) 이상인 구매자를 점수 높은 순으로 돌려준다(읽기). 리텐션 캠페인이나 담당자 후속 연락의 대상 목록으로 쓴다. 구매자 가명 ID와 건수·이유만 담는다.",
+      "input_schema": "agents/support/src/support_agent/signal_schemas.py#ListAtRiskInput",
+      "output_schema": "agents/support/src/support_agent/signal_schemas.py#AtRiskCustomers",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    }
+  ]
+}

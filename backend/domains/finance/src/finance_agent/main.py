@@ -1,0 +1,293 @@
+"""ax-agent-finance 서버 진입점."""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+import os
+import re
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any, Literal
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+from ax_agent_template.events import subscribe
+from ax_agent_template.server import create_agent_app
+from ax_contracts.schemas import AgentCard
+from finance_agent import closing
+from finance_agent import finance_config as fc
+from finance_agent.finance_api import add_finance_api
+from finance_agent.handlers import (
+    HANDLERS,
+    SUBSCRIBED_EVENTS,
+    closing_key,
+    on_event,
+    recompute,
+    state,
+)
+from finance_agent.incidents import add_incident_api
+from finance_agent.ledger import EVENTS
+from finance_agent.selftest import SELF_TEST_TTL_HOURS, is_fresh, run_self_test
+
+# 대시보드(dashboard-web)는 브라우저에서 이 서버를 바로 부른다. 대부분 조회(GET)이고, 사람 결정
+# 경로(`DECISION_PATHS`)만 POST·Authorization을 허용한다. A2A(`POST /a2a`)는 에이전트끼리만 쓴다
+DEFAULT_CORS_ORIGINS = "http://localhost:3001,http://127.0.0.1:3001"
+DECISION_PATHS = re.compile(
+    r"^/api/finance/(closing/confirm|reconciliation/[^/]+/note|settlements/batch)$"
+)
+
+logger = logging.getLogger("ax.finance")
+
+# 재무 AI 테스트 자동 실행: 서버가 켜지고 잠시 뒤 한 번, 그다음 `FINANCE_SELF_TEST_SECONDS`마다
+DEFAULT_SELF_TEST_SECONDS = 600
+SELF_TEST_FIRST_DELAY = 5.0
+SELF_TEST_SCHEDULE: dict[str, Any] = {"interval_seconds": 0, "next_run_at": None}
+Trigger = Literal["auto", "manual"]
+
+# 매일 결산(①) 자동 실행: 전날 하루 손익을 주기마다 미리 계산해 둔다. 확정(사람)은 하지 않는다
+DEFAULT_DAILY_CLOSING_SECONDS = 86400
+DAILY_CLOSING_FIRST_DELAY = 10.0
+DAILY_CLOSING_SCHEDULE: dict[str, Any] = {"interval_seconds": 0, "next_run_at": None}
+
+
+def _card_path() -> Path:
+    """`agents/finance/agent-card.json`을 찾는다. 컨테이너와 레포 루트 실행 모두에서 동작한다."""
+    override = os.getenv("FINANCE_AGENT_CARD")
+    candidates = [
+        Path(override) if override else None,
+        Path.cwd() / "domains" / "finance" / "agent-card.json",
+        Path(__file__).resolve().parents[2] / "agent-card.json",
+    ]
+    for path in candidates:
+        if path and path.is_file():
+            return path
+    raise FileNotFoundError("agent-card.json을 찾을 수 없다 (FINANCE_AGENT_CARD로 경로를 지정한다)")
+
+
+def load_card() -> AgentCard:
+    return AgentCard.model_validate_json(_card_path().read_text(encoding="utf-8"))
+
+
+def subscribe_events() -> bool:
+    """지급·환불 이벤트를 구독한다. 이벤트 버스가 아직 없으면(템플릿 TODO) 건너뛴다."""
+    try:
+        subscribe(SUBSCRIBED_EVENTS, on_event)
+    except NotImplementedError:
+        logger.warning(
+            "이벤트 버스 미연결: coupon.issued·payment.refunded를 받지 못한다 "
+            "(사건 보상 쿠폰 장부는 안전 관문 실행 기록으로 채운다)"
+        )
+        EVENTS["connected"] = False
+        return False
+    EVENTS["connected"] = True
+    return True
+
+
+def self_test_seconds() -> int:
+    """`FINANCE_SELF_TEST_SECONDS` (기본 600초). 0이면 자동 테스트를 끈다. 잘못된 값은 기본값."""
+    raw = os.getenv("FINANCE_SELF_TEST_SECONDS", "").strip()
+    if not raw:
+        return DEFAULT_SELF_TEST_SECONDS
+    try:
+        return max(int(raw), 0)
+    except ValueError:
+        logger.warning("FINANCE_SELF_TEST_SECONDS=%r는 숫자가 아니라 기본 600초를 쓴다", raw)
+        return DEFAULT_SELF_TEST_SECONDS
+
+
+async def run_and_store_self_test(trigger: Trigger) -> dict[str, Any]:
+    """재무 AI 테스트를 돌리고 `/api/finance/self-test/last`가 읽는 곳에 남긴다."""
+    result = await run_self_test(recompute)
+    result["trigger"] = trigger
+    state().last_self_test = result
+    return result
+
+
+async def self_test_loop(interval: float, first_delay: float = SELF_TEST_FIRST_DELAY) -> None:
+    """`first_delay`초 뒤 한 번, 그다음 `interval`초마다 자동 테스트. 한 번 실패해도 계속 돈다."""
+    delay = first_delay
+    while True:
+        SELF_TEST_SCHEDULE["next_run_at"] = (
+            datetime.now(UTC) + timedelta(seconds=delay)
+        ).isoformat()
+        await asyncio.sleep(delay)
+        try:
+            result = await run_and_store_self_test("auto")
+            logger.info("재무 AI 자동 테스트: %s (%s)", result["result"], result["summary"])
+        except Exception:  # 다음 회차는 그대로 돈다
+            logger.exception("재무 AI 자동 테스트 중 오류")
+        delay = interval
+
+
+def daily_closing_seconds() -> int:
+    """`FINANCE_DAILY_CLOSING_SECONDS` (기본 86400초). 0이면 끈다. 잘못된 값은 기본값."""
+    raw = os.getenv("FINANCE_DAILY_CLOSING_SECONDS", "").strip()
+    if not raw:
+        return DEFAULT_DAILY_CLOSING_SECONDS
+    try:
+        return max(int(raw), 0)
+    except ValueError:
+        logger.warning("FINANCE_DAILY_CLOSING_SECONDS=%r는 숫자가 아니라 기본 86400초를 쓴다", raw)
+        return DEFAULT_DAILY_CLOSING_SECONDS
+
+
+async def run_and_store_daily_closing(trigger: Trigger) -> dict[str, Any]:
+    """전날 하루 결산을 계산해 `/api/finance/closing/last`가 읽는 곳에 남긴다.
+
+    조회만 한다: 확정(`closing/confirm`)은 사람이 대시보드에서 하고, 여기서는 하지 않는다.
+    """
+    books = await state().books()
+    day = fc.today() - timedelta(days=1)
+    confirmation = state().records.closings.get(closing_key("day", day))
+    report = await closing.closing_report(books, "day", day, confirmation)
+    stored = {
+        "date": day.isoformat(),
+        "report": report,
+        "trigger": trigger,
+        "ran_at": datetime.now(UTC).isoformat(),
+        "source": books.source,
+    }
+    state().last_daily_closing = stored
+    return stored
+
+
+async def daily_closing_loop(interval: float, first_delay: float = DAILY_CLOSING_FIRST_DELAY):
+    """`first_delay`초 뒤 한 번, 그다음 `interval`초마다 전날 결산. 한 번 실패해도 계속 돈다."""
+    delay = first_delay
+    while True:
+        DAILY_CLOSING_SCHEDULE["next_run_at"] = (
+            datetime.now(UTC) + timedelta(seconds=delay)
+        ).isoformat()
+        await asyncio.sleep(delay)
+        try:
+            stored = await run_and_store_daily_closing("auto")
+            logger.info("매일 결산 자동 실행: %s 기준", stored["date"])
+        except Exception:  # 다음 회차는 그대로 돈다
+            logger.exception("매일 결산 자동 실행 중 오류")
+        delay = interval
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """서버가 도는 동안 재무 AI 테스트와 매일 결산을 주기적으로 돌린다 (각각 `=0`이면 끔)."""
+    interval = self_test_seconds()
+    SELF_TEST_SCHEDULE.update(interval_seconds=interval, next_run_at=None)
+    closing_interval = daily_closing_seconds()
+    DAILY_CLOSING_SCHEDULE.update(interval_seconds=closing_interval, next_run_at=None)
+    tasks = []
+    if interval:
+        tasks.append(asyncio.create_task(self_test_loop(interval, SELF_TEST_FIRST_DELAY)))
+    if closing_interval:
+        tasks.append(
+            asyncio.create_task(daily_closing_loop(closing_interval, DAILY_CLOSING_FIRST_DELAY))
+        )
+    try:
+        yield
+    finally:
+        for task in tasks:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        SELF_TEST_SCHEDULE.update(interval_seconds=0, next_run_at=None)
+        DAILY_CLOSING_SCHEDULE.update(interval_seconds=0, next_run_at=None)
+
+
+class DashboardCORS:
+    """출처는 `FINANCE_CORS_ORIGINS`. 사람 결정 경로만 POST를 열고, 나머지는 GET만 연다."""
+
+    def __init__(self, app: ASGIApp, origins: list[str]) -> None:
+        self.get_only = CORSMiddleware(app, allow_origins=origins, allow_methods=["GET"])
+        self.decisions = CORSMiddleware(
+            app,
+            allow_origins=origins,
+            allow_methods=["GET", "POST"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        target = self.decisions if DECISION_PATHS.match(path) else self.get_only
+        await target(scope, receive, send)
+
+
+def cors_origins() -> list[str]:
+    raw = os.getenv("FINANCE_CORS_ORIGINS", DEFAULT_CORS_ORIGINS)
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+def add_read_api(app: FastAPI) -> None:
+    """대시보드용 기존 조회 API. 상태를 바꾸지 않는다. 응답은 `{data, meta}`.
+
+    재무 재설계 API(overview·closing·reconciliation·settlements·policy·audit)는 `finance_api.py`.
+    """
+
+    @app.get("/api/finance/ledger")
+    def ledger() -> dict:
+        book = state().ledger
+        compensation = [{"context_id": cid, **row} for cid, row in book.coupons.items()]
+        refunds = [{"order_id": oid, "refunded": amount} for oid, amount in book.refunds.items()]
+        return {"data": {"compensation": compensation, "refunds": refunds}, "meta": {}}
+
+    @app.get("/api/finance/self-test")
+    async def self_test() -> dict:
+        """재무 AI 테스트 버튼: 가짜 자료로 판단 점검, 연결 확인. 상태를 바꾸지 않는다."""
+        result = await run_and_store_self_test("manual")
+        return {"data": result, "meta": {}}
+
+    @app.get("/api/finance/self-test/last")
+    def last_self_test() -> dict:
+        """마지막 테스트 결과(자동·수동). 12시간이 지나면 지운다.
+
+        `meta.interval_seconds`는 지금 도는 자동 테스트 주기(0이면 꺼짐), `meta.next_run_at`은
+        다음 자동 실행 시각(UTC ISO, 꺼져 있으면 null).
+        """
+        last = state().last_self_test
+        if last and not is_fresh(last):
+            state().last_self_test = last = None
+        return {
+            "data": last,
+            "meta": {
+                "ttl_hours": SELF_TEST_TTL_HOURS,
+                "interval_seconds": SELF_TEST_SCHEDULE["interval_seconds"],
+                "next_run_at": SELF_TEST_SCHEDULE["next_run_at"],
+            },
+        }
+
+    @app.get("/api/finance/closing/last")
+    def last_daily_closing() -> dict:
+        """마지막 자동 결산 결과(전날 기준). 확정 전 미리 계산해 둔 값이다.
+
+        `meta.interval_seconds`는 지금 도는 자동 결산 주기(0이면 꺼짐), `meta.next_run_at`은
+        다음 자동 실행 시각(UTC ISO, 꺼져 있으면 null).
+        """
+        return {
+            "data": state().last_daily_closing,
+            "meta": {
+                "interval_seconds": DAILY_CLOSING_SCHEDULE["interval_seconds"],
+                "next_run_at": DAILY_CLOSING_SCHEDULE["next_run_at"],
+            },
+        }
+
+    @app.get("/api/finance/market-ops")
+    def market_ops() -> dict:
+        rows = state().ledger.market_ops
+        return {"data": list(reversed(rows)), "meta": {"count": len(rows)}}
+
+
+def create_app() -> FastAPI:
+    app = create_agent_app(load_card(), HANDLERS)
+    app.router.lifespan_context = lifespan
+    app.add_middleware(DashboardCORS, origins=cors_origins())
+    add_read_api(app)
+    add_finance_api(app)
+    add_incident_api(app)
+    return app
+
+
+app = create_app()
+subscribe_events()

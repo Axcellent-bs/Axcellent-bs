@@ -1,0 +1,12 @@
+services:
+  coupon:
+    build:
+      context: ../..
+      dockerfile: services/coupon/Dockerfile
+    ports:
+      - "8103:8103"
+    env_file:
+      - path: ../../.env
+        required: false
+      - path: ./.env
+        required: false

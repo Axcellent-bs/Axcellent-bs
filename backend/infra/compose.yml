@@ -1,0 +1,76 @@
+name: ax-backend
+
+include:
+  # 각 서비스 compose 뒤에 common-log/<서비스>.yml을 합쳐 공통 로그 볼륨·경로를 붙인다 (#249)
+  # shared: 공통 / services: 서비스 13개 (hosts는 아직 백엔드 없음)
+  - path:
+      - ../shared/safety/compose.yml
+      - ./common-log/safety.yml
+  - path:
+      - ../shared/memory/compose.yml
+      - ./common-log/memory.yml
+  - path:
+      - ../shared/shop-api/compose.yml
+      - ./common-log/shop-api.yml
+  - path:
+      - ../shared/dashboard-api/compose.yml
+      - ./common-log/dashboard-api.yml
+  - path:
+      - ../services/orchestrator/compose.yml
+      - ./common-log/orchestrator.yml
+  - path:
+      - ../services/inquiry/compose.yml
+      - ./common-log/inquiry.yml
+  - path:
+      - ../services/claims/compose.yml
+      - ./common-log/claims.yml
+  - path:
+      - ../services/reviews/compose.yml
+      - ./common-log/reviews.yml
+  - path:
+      - ../services/coupon/compose.yml
+      - ./common-log/coupon.yml
+  - path:
+      - ../services/finance/compose.yml
+      - ./common-log/finance.yml
+  - path:
+      - ../services/data/compose.yml
+      - ./common-log/data.yml
+  - path:
+      - ../services/handover/compose.yml
+      - ./common-log/handover.yml
+  - path:
+      - ../services/decisions/compose.yml
+      - ./common-log/decisions.yml
+  - path:
+      - ../services/planning/compose.yml
+      - ./common-log/planning.yml
+  - path:
+      - ../services/dev/compose.yml
+      - ./common-log/dev.yml
+  - path:
+      - ../services/incident/compose.yml
+      - ./common-log/incident.yml
+
+services:
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${COMPOSE_POSTGRES_USER:-ax}
+      POSTGRES_PASSWORD: ${COMPOSE_POSTGRES_PASSWORD:-ax}
+      POSTGRES_DB: ${COMPOSE_POSTGRES_DB:-ax}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
+  # 공통 로그 SQLite(WAL). 모든 서비스가 같은 named volume을 읽고 쓴다.
+  # Windows bind mount·:ro는 WAL 공유가 깨지므로 쓰지 않는다.
+  common-log:

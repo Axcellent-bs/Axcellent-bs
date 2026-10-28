@@ -2,8 +2,14 @@
 // 백엔드는 snake_case·ISO 시각, 화면은 camelCase·KST "MM-DD HH:mm"이라 여기서 한 번만 바꾼다.
 // 백엔드에 없는 값(학습 기준·감사 목록)은 빈 값으로 두고 지어내지 않는다.
 import type { Action, Activity, AuditItem, CrossReview, Doc, Incident, OutMsg, PR, Request, State, Thread } from './data'
+import { MOCK, PLANNING_LIVE } from '@/lib/env'
 
-export const PLANNING_API = (import.meta.env.VITE_PLANNING_API_URL as string | undefined) ?? 'http://localhost:8101'
+// 녹화본 데모에서 기획개발만 실제로 부를 때(VITE_PLANNING_LIVE=on)는 개발 서버 프록시(/planning-api)를 탄다. planning CORS에 3090이 없어서다
+export const PLANNING_API = (import.meta.env.VITE_PLANNING_API_URL as string | undefined) ?? (MOCK && PLANNING_LIVE ? '/planning-api' : 'http://localhost:8101')
+/** 개발·배포 서비스 에이전트(dev, 8111). 업무 로직은 기획과 같은 planning 도메인이라 같은 REST(`/api/planning`)를 쓴다 */
+export const DEV_API = (import.meta.env.VITE_DEV_API_URL as string | undefined) ?? (MOCK && PLANNING_LIVE ? '/dev-api' : 'http://localhost:8111')
+/** 화면 서비스(요청·기획서 / 개발·배포)마다 자기 에이전트를 부른다 */
+export const apiBase = (part: 'planning' | 'dev') => (part === 'dev' ? DEV_API : PLANNING_API)
 
 type Json = Record<string, unknown>
 const camel = (k: string) => k.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
@@ -134,8 +140,8 @@ export class PlanningApiError extends Error {
   }
 }
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${PLANNING_API}/api/planning${path}`, { cache: 'no-store', ...init })
+async function call<T>(base: string, path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${base}/api/planning${path}`, { cache: 'no-store', ...init })
   const body = await res.json().catch(() => ({}))
   if (!res.ok) {
     const err = (body as { error?: { code?: string; message?: string } }).error
@@ -144,9 +150,9 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return (body as { data: T }).data
 }
 
-export const planningApi = {
-  state: () => call<Json>('/state'),
-  reviewQueue: () => call<QueueItem[]>('/review-queue'),
-  action: (a: Action) => call<Json>('/actions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a) }),
-  eventsUrl: () => `${PLANNING_API}/api/planning/events`,
-}
+export const planningApi = (base: string) => ({
+  state: () => call<Json>(base, '/state'),
+  reviewQueue: () => call<QueueItem[]>(base, '/review-queue'),
+  action: (a: Action) => call<Json>(base, '/actions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a) }),
+  eventsUrl: () => `${base}/api/planning/events`,
+})

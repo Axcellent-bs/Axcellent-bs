@@ -9,19 +9,20 @@ import type { Action, State } from './data'
 export const ACTION_ERROR_EVENT = 'planning:action-error'
 const report = (message: string) => window.dispatchEvent(new CustomEvent(ACTION_ERROR_EVENT, { detail: message }))
 
-export function useSharedStore(): [State, (a: Action) => void, boolean] {
+export function useSharedStore(base: string): [State, (a: Action) => void, boolean] {
   const [state, setState] = useState<State>(EMPTY_STATE)
   const [connected, setConnected] = useState(false)
+  const api = planningApi(base)
   const reviews = useRef(state.reviews)
   reviews.current = state.reviews
 
   useEffect(() => {
     let alive = true
     const apply = async (raw: Record<string, unknown>) => {
-      const queue = await planningApi.reviewQueue().catch(() => [] as QueueItem[])
+      const queue = await api.reviewQueue().catch(() => [] as QueueItem[])
       if (alive) setState(fromBackend(raw, queue))
     }
-    const es = new EventSource(planningApi.eventsUrl())
+    const es = new EventSource(api.eventsUrl())
     es.addEventListener('state', (e) => {
       setConnected(true)
       void apply(JSON.parse((e as MessageEvent).data) as Record<string, unknown>)
@@ -32,7 +33,7 @@ export function useSharedStore(): [State, (a: Action) => void, boolean] {
       alive = false
       es.close()
     }
-  }, [])
+  }, [base]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const dispatch = useCallback((a: Action) => {
     let send: Action | undefined = a
@@ -44,12 +45,12 @@ export function useSharedStore(): [State, (a: Action) => void, boolean] {
     } else if (a.type === 'humanDecide') {
       return report('보류는 아직 서버에서 받지 않습니다. 기다리면 대기열에 남습니다')
     }
-    planningApi.action(send).catch((e: unknown) => {
+    api.action(send).catch((e: unknown) => {
       if (e instanceof PlanningApiError && e.code === 'UNKNOWN_ACTION') report('이 기능은 아직 기획개발 서버에 연결되지 않았습니다')
       else if (e instanceof PlanningApiError) report(e.message)
       else report('기획개발 서버에 연결할 수 없습니다')
     })
-  }, [])
+  }, [base]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return [state, dispatch, connected]
 }
