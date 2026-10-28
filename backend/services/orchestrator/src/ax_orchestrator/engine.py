@@ -15,6 +15,7 @@ from datetime import timedelta
 from typing import Any
 
 from ax_contracts.schemas import (
+    HANDED_TO_HUMAN,
     AgentRequest,
     AgentResult,
     ErrorCode,
@@ -53,6 +54,31 @@ class Hold:
         self.event.set()
 
 
+class HandoffWait:
+    """꺼진 서비스라 사람 할 일함으로 넘어간 단계(`handed_to_human`). C 등급 보류와 다르다.
+
+    사람이 할 일함에서 끝내면 `handoff.completed`가 오고, `IncidentManager`가 `finish`를 부른다.
+    한 번 끝난 일은 다시 바뀌지 않는다(같은 이벤트가 두 번 와도 한 번만 반영).
+    """
+
+    def __init__(self, task_id: str, assignee_unit: str | None) -> None:
+        self.task_id = task_id
+        self.assignee_unit = assignee_unit
+        self.pending = True
+        self.status: str | None = None  # done | rejected | timeout
+        self.result: str | None = None  # 사람이 적은 결과 (외부 입력처럼 데이터로만 다룬다)
+        self.event = asyncio.Event()
+
+    def finish(self, status: str, result: str | None) -> bool:
+        if not self.pending:
+            return False
+        self.pending = False
+        self.status = status
+        self.result = result
+        self.event.set()
+        return True
+
+
 class Engine:
     def __init__(
         self,
@@ -61,6 +87,7 @@ class Engine:
         *,
         publish: Publisher | None = None,
         hold_timeout: float = 600.0,
+        handoff_timeout: float = 86400.0,
         retry_delay: float = 0.0,
         step_timeout: float = 30.0,
         llm_pick: LlmPicker | None = None,
@@ -70,6 +97,7 @@ class Engine:
         self.caller = caller
         self.publish = publish
         self.hold_timeout = hold_timeout
+        self.handoff_timeout = handoff_timeout
         self.retry_delay = retry_delay
         self.step_timeout = step_timeout
         self.llm_pick = llm_pick
@@ -346,6 +374,8 @@ class Engine:
         """input-required 중계. 끝났으면 True, 다시 호출해야 하면 False(+ `_next_payload`)."""
         reason = result.reason_code
         run.reason_code = reason.value if reason else None
+        if result.outcome == HANDED_TO_HUMAN:  # 받는 서비스가 꺼져 있어 사람 할 일함으로 감
+            return await self._wait_handoff(inc, step, run, result)
         if reason == InputReason.HUMAN_INPUT:
             return await self._wait_human(inc, step, run, dept, payload, result)
         if reason == InputReason.DEPT_INPUT:
@@ -403,6 +433,64 @@ class Engine:
             inc.log(f"{run.label}: {run.note}")
         return True
 
+    async def _wait_handoff(
+        self, inc: Incident, step: Step, run: StepRun, result: AgentResult
+    ) -> bool:
+        """사람 할 일함 처리를 기다린다. 사건은 열린 채로, 이 단계에 기대지 않는 단계는 계속 돈다.
+
+        - done: 사람이 적은 결과를 이 단계의 결과로 넣고 완료 → 뒤 단계가 이어진다
+        - rejected·시간 초과: C 등급 보류 거절과 같이 `rejected_by_human`
+        """
+        output = dict(result.output)
+        task_id = output.get("task_id")
+        if not isinstance(task_id, str) or not task_id:
+            self._fail(inc, run, "사람 할 일함으로 넘겼다는데 일 번호(task_id)가 없음")
+            return True
+        unit = output.get("assignee_unit")
+        wait = HandoffWait(task_id, unit if isinstance(unit, str) else None)
+        inc.handoffs[step.id] = wait
+        run.status = "waiting_human"
+        run.handoff_task_id = task_id
+        run.output = output
+        run.note = f"{wait.assignee_unit or '맡은 부서'} 할 일함에서 사람 처리 대기 ({task_id})"
+        inc.log(f"{run.label}: {run.note}")
+        try:
+            await asyncio.wait_for(wait.event.wait(), timeout=self.handoff_timeout)
+        except TimeoutError:
+            wait.finish("timeout", None)
+        run.finished_at = now()
+        if wait.status == "done":
+            run.status = "completed"
+            run.output = {
+                "handled_by": "human",
+                "task_id": task_id,
+                "assignee_unit": wait.assignee_unit,
+                "to_service": output.get("to_service"),
+                "result": wait.result,
+            }
+            run.note = f"사람이 처리 ({wait.assignee_unit or '맡은 부서'})"
+            inc.outputs[run.step_id] = run.output
+        else:
+            run.status = "rejected_by_human"
+            run.note = (
+                "사람 처리 시간 초과로 자동 거절"
+                if wait.status == "timeout"
+                else "사람이 처리하지 않기로 함"
+            )
+        inc.log(f"{run.label}: {run.note}")
+        return True
+
+    def complete_handoff(
+        self, inc: Incident, task_id: str, status: str, result: str | None
+    ) -> bool:
+        """`handoff.completed`를 단계에 반영한다. 기다리는 일이 없거나 이미 끝났으면 False."""
+        if status not in ("done", "rejected"):
+            return False
+        for wait in inc.handoffs.values():
+            if wait.task_id == task_id:
+                return wait.finish(status, result)
+        return False
+
     def decide_hold(self, inc: Incident, step_id: str, approved: bool) -> bool:
         hold = inc.holds.get(step_id)
         if hold is None or not hold.pending:
@@ -456,6 +544,7 @@ class Engine:
             "steps_total": len(statuses),
             "steps_completed": statuses.count("completed"),
             "held": sum(1 for r in inc.steps.values() if r.reason_code == "human_input"),
+            "handoffs": sum(1 for r in inc.steps.values() if r.handoff_task_id),
             "transfers": sum(1 for r in inc.steps.values() if r.transferred_to),
             "retries": retries,
             "auto_rate": round(
@@ -474,6 +563,7 @@ class Engine:
             "skipped": f"건너뜀 ({run.note})",
             "rejected_by_human": f"보류 후 거절 ({run.note})",
             "transfer_queued": f"이관 큐로 넘김 ({run.note})",
+            "waiting_human": f"사람 처리 대기 ({run.note})",
         }.get(run.status, run.status)
         return f"{run.label} [{who}] {text}"
 
@@ -486,4 +576,4 @@ def new_event_id() -> str:
     return f"evt_{uuid.uuid4().hex[:12]}"
 
 
-__all__ = ["Engine", "Hold", "iso", "new_event_id"]
+__all__ = ["Engine", "HandoffWait", "Hold", "iso", "new_event_id"]
