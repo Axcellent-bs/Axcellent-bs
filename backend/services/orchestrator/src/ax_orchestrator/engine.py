@@ -304,6 +304,13 @@ class Engine:
                     return
                 payload = continue_payload
                 continue
+            if status == TaskStatus.REJECTED and outcome == ErrorCode.SERVICE_DISABLED.value:
+                # 받는 서비스가 꺼져 있고 조회라 사람에게도 넘기지 않았다
+                # → 실패가 아니라 "확인할 수 없음"으로 건너뛴다
+                service = result.output.get("to_service") or dept
+                run.reason_code = outcome
+                self._skip(inc, run, f"확인할 수 없음 ({service} 서비스가 꺼져 있음)")
+                return
             if outcome in TRANSFER_CODES and status in (TaskStatus.REJECTED, TaskStatus.COMPLETED):
                 await self._transfer(inc, step, run, dept, payload, outcome)
                 return
@@ -548,7 +555,15 @@ class Engine:
             "transfers": sum(1 for r in inc.steps.values() if r.transferred_to),
             "retries": retries,
             "auto_rate": round(
-                1 - sum(1 for r in inc.steps.values() if r.reason_code) / max(len(statuses), 1), 2
+                # 꺼진 서비스라 건너뛴 조회(service_disabled)는 사람이 개입한 일이 아니라 빼고 센다
+                1
+                - sum(
+                    1
+                    for r in inc.steps.values()
+                    if r.reason_code and r.reason_code != ErrorCode.SERVICE_DISABLED.value
+                )
+                / max(len(statuses), 1),
+                2,
             ),
         }
         inc.log(f"사건 종료: {inc.status}")

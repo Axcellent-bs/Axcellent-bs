@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Awaitable
+from contextvars import ContextVar
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -19,10 +21,52 @@ class ApiError(Exception):
         self.message = message
 
 
+class ServiceDisabled(ApiError):
+    """받는 서비스가 꺼져 있어 조회가 막혔다(`service_disabled`, 업무 요청 라우터).
+
+    목록·집계 화면은 `or_unavailable`로 받아 "없음"으로 계속 진행하고
+    `meta.unavailable`에 이유를 남긴다.
+    단건 조회처럼 보여 줄 것이 없는 곳은 이 오류(503)가 그대로 나간다.
+    """
+
+    def __init__(self, service: str) -> None:
+        self.service = service
+        super().__init__(503, "SERVICE_DISABLED", unavailable_text(service))
+
+
+def unavailable_text(service: str) -> str:
+    return f"확인할 수 없음 ({service} 서비스가 꺼져 있음)"
+
+
+# 이 요청에서 "확인할 수 없음"으로 남길 이유 (요청 하나 = 작업 하나라 다른 요청에 새지 않는다)
+_UNAVAILABLE: ContextVar[tuple[str, ...]] = ContextVar("dashboard_unavailable", default=())
+
+
+def note_unavailable(message: str) -> None:
+    current = _UNAVAILABLE.get()
+    if message not in current:
+        _UNAVAILABLE.set((*current, message))
+
+
+async def or_unavailable[T](call: Awaitable[T], empty: T) -> T:
+    """꺼진 서비스의 조회면 `empty`(없음)로 계속 진행하고 이유를 응답 meta에 남긴다.
+
+    `empty`는 빈 목록처럼 "없음"인 값만 준다. 숫자를 지어내지 않는다.
+    """
+    try:
+        return await call
+    except ServiceDisabled as disabled:
+        note_unavailable(disabled.message)
+        return empty
+
+
 def ok(data: Any, total: int | None = None) -> dict[str, Any]:
     meta: dict[str, Any] = {"tenant_id": os.getenv("TENANT_ID", TENANT_ID_DEFAULT)}
     if total is not None:
         meta["total"] = total
+    unavailable = _UNAVAILABLE.get()
+    if unavailable:
+        meta["unavailable"] = list(unavailable)
     return {"data": data, "meta": meta}
 
 

@@ -153,9 +153,19 @@ async def start_handover(svc: Services, request: AgentRequest) -> AgentResult:
         "contacts": bool(contacts),
     }
     refs = [i.item_id for i in items + decision_items]
+    # 진행 중 항목을 조회하지 못했으면(예: 개발·배포 서비스가 꺼짐)
+    # 0건이 아니라 "확인할 수 없음"이다.
+    # 자동으로 채우지 못한 칸이라 인계자에게 질문이 간다
+    in_progress_text = in_progress.unavailable or f"{len(items)}건"
+    if in_progress.unavailable:
+        svc.audit.record(
+            request.meta.context_id,
+            "start_handover.in_progress_unavailable",
+            {"reason": in_progress.unavailable},
+        )
     summary = (
         f"{owner} → {params.successor_id or '후임 미정'} / {area}: "
-        f"진행 중 {len(items)}건, 결정 카드 {len(decision_items)}장, 연락처 {len(contacts)}명"
+        f"진행 중 {in_progress_text}, 결정 카드 {len(decision_items)}장, 연락처 {len(contacts)}명"
     )
 
     decision = await svc.gate.execute(

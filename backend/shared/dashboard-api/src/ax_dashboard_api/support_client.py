@@ -17,8 +17,8 @@ from typing import Any
 
 from ax_agent_template import config
 from ax_agent_template.client import call_agent
-from ax_contracts.schemas import AgentRequest, AgentResult, RequestMeta, TaskStatus
-from ax_dashboard_api.envelope import ApiError
+from ax_contracts.schemas import AgentRequest, AgentResult, ErrorCode, RequestMeta, TaskStatus
+from ax_dashboard_api.envelope import ApiError, ServiceDisabled
 
 AGENT_NAME = "dashboard-api"
 # 화면(상담원) 호출의 사건 ID 접두사. 계약 `ContextPrefix`에 없는 임시 값이라 이 상수 한 곳에서만
@@ -61,6 +61,8 @@ def unwrap(result: AgentResult) -> dict[str, Any]:
         raise ApiError(409, "NOT_EXECUTED", f"실행되지 않았다 ({state}). 승인 대기 또는 거부 상태")
     if result.status == TaskStatus.CANCELED:
         raise ApiError(504, "UPSTREAM_TIMEOUT", "support 에이전트가 제때 응답하지 않았다")
+    if result.status == TaskStatus.REJECTED and outcome == ErrorCode.SERVICE_DISABLED:
+        raise ServiceDisabled(str(result.output.get("to_service") or "support"))
     if result.status == TaskStatus.REJECTED:
         raise ApiError(403, "UPSTREAM_REJECTED", f"support가 요청을 거부했다 ({outcome})")
     if result.status == TaskStatus.COMPLETED:

@@ -286,6 +286,7 @@ function resultLine(step: OrchStep): { text: string; tone: Tone } {
 }
 
 const SKIP_WHY: [RegExp, string][] = [
+  [/^확인할 수 없음 \(.+ 서비스가 꺼져 있음\)/, "그 서비스가 꺼져 있어 확인할 수 없어 건너뜀"],
   [/^선행 단계 미완료/, "앞 단계가 끝나지 않아 건너뜀"],
   [/Agent Card에 skill 없음/, "맡을 부서를 찾지 못해 건너뜀 (Agent Card에 skill 없음)"],
   [/allowed_requesters/, "총괄이 요청할 수 없는 skill이라 건너뜀"],

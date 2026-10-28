@@ -16,7 +16,7 @@ import httpx
 
 from ax_agent_template.config import agent_url
 from ax_dashboard_api import support_client
-from ax_dashboard_api.envelope import ApiError
+from ax_dashboard_api.envelope import ApiError, or_unavailable
 from ax_dashboard_api.schemas import (
     Dashboard,
     DashboardTotals,
@@ -102,9 +102,10 @@ def health() -> Health:
 
 async def metrics(days: int) -> Dashboard:
     """support의 문의·클레임 데이터로 센 집계. 일별 추이는 아직 support가 주지 않아 비운다."""
-    overview = await support_client.call("inquiry_overview")
-    claims = (await support_client.call("list_claims")).get("items", [])
-    queue = await support_client.call("claim_queue")
+    # 꺼진 서비스(문의·클레임)의 몫은 비우고 meta.unavailable에 "확인할 수 없음"을 남긴다
+    overview = await or_unavailable(support_client.call("inquiry_overview"), {})
+    claims = (await or_unavailable(support_client.call("list_claims"), {})).get("items", [])
+    queue = await or_unavailable(support_client.call("claim_queue"), {})
     kpis = overview.get("kpis", {})
     waiting = overview.get("waiting", [])
     by_status = Counter(str(c.get("status")) for c in claims)
