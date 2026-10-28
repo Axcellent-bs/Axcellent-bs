@@ -191,6 +191,19 @@ action = "create_ticket"
 owner = "planning"
 base_grade = "A"
 
+# 기획 → 개발 넘기기 (서비스 나누기). planning·dev 서비스가 같은 부서 기록을 옮길 뿐이라 A
+[[actions]]
+action = "start_dev"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+[[actions]]
+action = "receive_dev_result"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
 # 기록·회신·초안은 A (#166). 돈·배포에 닿지 않는다
 [[actions]]
 action = "write_spec"

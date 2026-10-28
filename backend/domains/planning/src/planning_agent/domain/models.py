@@ -28,6 +28,7 @@ Dept = Literal[
     "shop",
     "memory",
     "human",
+    "dev",  # 같은 부서의 개발·배포 서비스 (planning 서비스와 따로 뜰 때)
 ]
 
 DEPT_NAME: dict[str, str] = {
@@ -43,6 +44,7 @@ DEPT_NAME: dict[str, str] = {
     "shop": "판매 사이트",
     "memory": "회사 기억",
     "human": "사람",
+    "dev": "개발·배포",
 }
 
 ReqState = Literal["접수", "기획 중", "작업 중", "완료", "중복 연결", "기각"]
@@ -130,6 +132,8 @@ class Spec(DomainModel):
     human_sentences: int = 0
     auto: bool = False  # 간단 요청 규칙·자동 확정 규칙으로 사람 확정 없이 처리됨
     auto_review: AutoReview | None = None  # 자동 확정을 멈춘 이유 (확정되면 비움)
+    # planning 서비스가 dev 서비스로 넘긴 기획서 (start_dev). 합친 모드에서는 늘 False
+    handed_to_dev: bool = False
 
 
 class Task(DomainModel):

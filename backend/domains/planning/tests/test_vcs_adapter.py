@@ -702,3 +702,25 @@ def test_bridge_merge_is_safe_to_retry() -> None:
     assert run(vcs_bridge.merge_pr(pr)).ok
     again = run(vcs_bridge.merge_pr(pr))
     assert again.ok and adapter.writes.count(("merge_change", pr.vcs_number)) == 1
+
+
+def test_domain_simple_request_opens_and_merges(service: PlanningService) -> None:
+    """간단 요청 자동 처리 경로도 관문 뒤에 부품으로 올리고 병합한다."""
+    adapter = MockVcsAdapter(first_number=700)
+    vcs.set_vcs(adapter)
+    run(service.inbound("support_simple"))
+    auto = [p for p in service.state.prs if p.auto]
+    assert auto and auto[-1].vcs_number == 700 and auto[-1].merged
+    assert adapter.writes == [("open_change", 700), ("merge_change", 700)]
+
+
+def test_domain_simple_request_merge_failure_waits(service: PlanningService) -> None:
+    class BrokenMerge(MockVcsAdapter):
+        async def merge_change(self, number: int, method: str = "squash"):
+            raise VcsError("conflict", "merge conflict")
+
+    vcs.set_vcs(BrokenMerge())
+    run(service.inbound("support_simple"))
+    pr = [p for p in service.state.prs if p.auto][-1]
+    task = next(t for t in service.state.tasks if t.id == pr.task)
+    assert not pr.merged and task.state == "머지 대기"
