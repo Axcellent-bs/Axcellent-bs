@@ -28,5 +28,5 @@
     "typescript": "~6.0.2",
     "vite": "^8.3.4"
   },
-  "description": "AXcellent 구조 프로토타입 (프론트만, 녹화된 목 응답으로 동작)"
+  "description": "AXcellent 화면 (실제 모드 백엔드에 붙어서 동작)"
 }

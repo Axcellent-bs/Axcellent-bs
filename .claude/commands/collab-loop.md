@@ -51,9 +51,7 @@ ax-backend `/collab-loop`를 이 레포에 맞게 줄인 것이다. 이 레포�
 - 남의 PR 브랜치에 push 금지
 - 다른 레포(ax-frontend, ax-company-hq/ax-backend 원본, DejaFix)에는 쓰지 않는다 (PR·이슈·코멘트 모두). 필요한 일은 E로 이 레포에 적는다
 - force push, dev/main 직접 push, 브랜치 삭제 금지. `.env` 읽지 않음. `.claude/` 수정 금지
-- 녹화본(`frontend/src/mock/fixtures.json`)을 지어내지 않는다. 새 응답이 필요하면 출처(계약 문서·실제 녹화)를 PR 본문에 적고, 출처가 없으면 `needs-human`
-  - 예외(임시 목 데이터): 화면을 먼저 만들어야 하는데 출처가 없으면 `frontend/src/mock/draft-<이름>.ts`에 임시 데이터를 둬도 된다. 파일 첫 줄에 `// draft: 출처 없음, 실제 응답 나오면 교체 (#이슈)`, 그 화면에서만 import, PR 본문에 "임시 목 데이터" 명시. `fixtures.json`에는 넣지 않는다
-  - 이 예외로 만든 PR은 `needs-human` 대상이 아니다. 리뷰 때 draft 데이터가 `fixtures.json`이나 다른 화면으로 새지 않았는지만 본다
+- 녹화본·임시 목 데이터는 만들지 않는다. 화면은 실서버 응답만 쓰고, 데이터가 없으면 빈 상태, 서버가 꺼져 있으면 어떤 서버가 꺼졌는지 보여준다.
 - 타입 검사·빌드를 끄거나(`// @ts-ignore` 남발, `any`로 덮기) 우회해서 통과시키지 않음. 백엔드 테스트를 지우거나 약하게 만들지 않음. 남의 PR에서 보이면 코멘트 + `needs-human`
 - 훅이나 권한에 막히면 Bash·다른 도구로 우회하지 않는다. 막힌 명령과 이유를 보고하고 그 작업은 건너뛴다
 - 모든 코멘트·리뷰 첫 줄에 `[loop:<이름>]`
@@ -82,7 +80,7 @@ ax-backend `/collab-loop`를 이 레포에 맞게 줄인 것이다. 이 레포�
 - `stacked-on #M`이 열려 있으면 #M부터
 - 시작 전 `[loop:<이름>] 리뷰 중` 코멘트. 다른 루프가 30분 안에 찜했으면 건너뜀
 - 최신 커밋에 이미 다른 루프의 리뷰 코멘트가 있으면 건너뛰고, CI 초록·충돌 없음·예약 안 됨·needs-human 아님이면 예약만
-- 확인: 연결 이슈 요구사항, 보호 경로, 타입 검사 우회, 녹화본을 지어냈는지, **AXcellent 디자인(토큰·`card`·`chip`·`btn-*` 클래스)을 따르는지**, 다른 시스템 화면을 iframe·DOM 긁기로 다시 들이지 않았는지
+- 확인: 연결 이슈 요구사항, 보호 경로, 타입 검사 우회, 녹화본·임시 목 데이터를 만들거나 데이터를 지어냈는지, **AXcellent 디자인(토큰·`card`·`chip`·`btn-*` 클래스)을 따르는지**, 다른 시스템 화면을 iframe·DOM 긁기로 다시 들이지 않았는지
 - 로컬 확인(루프 worktree에서만): `gh pr checkout <번호> --detach`로 받아 `frontend/`에서 `npm ci && npm run typecheck && npx vite build`, 백엔드를 바꾼 PR이면 `backend/`에서 `uv sync --all-packages --frozen && uv run pytest -q`도 돌린다. 끝나면 `dist/`를 지우고 `git switch --detach origin/dev`로 돌아간다
 - 문제 없음 → 확인한 것 3줄 코멘트 → (needs-human 아니면) 예약 / 문제 있음 → 구체적인 코멘트. 막아야 하면 `needs-human` 라벨 + 이유. 재확인에서 고쳐졌으면 고쳐졌다고 코멘트한다 (`needs-human`은 사람이 뗀다)
 
