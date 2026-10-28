@@ -29,6 +29,7 @@ class IdPrefix(StrEnum):
     EXECUTION = "exe_"
     REVIEW = "rev_"
     CARD = "card_"
+    HANDOFF = "hof_"  # 사람 할 일함의 일 (dashboard-api가 발급)
 
 
 class ContextPrefix(StrEnum):

@@ -88,6 +88,19 @@ export SAFETY_CORS_ORIGINS="$WEB" PLANNING_CORS_ORIGINS="$WEB"
 # A2A 주고받은 기록(AI 대화방이 읽는다)
 export AX_COMMON_LOG_DB="$PWD/$DATA/common_log.db"
 
+# 업무 요청 라우터 (README "업무 요청 라우터"): 켠 서비스면 에이전트로, 안 켠 서비스면 사람 할 일함으로
+# 켠 서비스는 backend/.env 의 AX_ENABLED_SERVICES (쉼표 목록). 없거나 비어 있으면 전부 켠다(예전 동작)
+if [ -z "${AX_ENABLED_SERVICES:-}" ] && [ -f .env ]; then
+  AX_ENABLED_SERVICES=$(tr -d '\r' < .env | sed -n 's/^AX_ENABLED_SERVICES=//p' | tail -n 1 | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//; s/^"(.*)"$/\1/')
+fi
+export AX_ENABLED_SERVICES="${AX_ENABLED_SERVICES:-}"
+# 조직도(업무 → 맡은 부서·담당자). config/org.yaml 이 있으면 쓴다 (예시: config/org.example.yaml)
+if [ -z "${AX_ORG_CONFIG:-}" ] && [ -f config/org.yaml ]; then
+  export AX_ORG_CONFIG="$PWD/config/org.yaml"
+fi
+# 사람 할 일함 저장 파일 (dashboard-api)
+export AX_HANDOFF_DB="$PWD/$DATA/handoffs.db"
+
 if [ "$MODE" = "mock" ]; then
   export AGENT_TEMPLATE_MOCK=1
   # 총괄은 자기 목 스위치가 따로 있다. 부서는 가짜 대신 위에서 띄운 서비스들을 실제로 부른다
@@ -183,6 +196,7 @@ fi
 
 sleep 8
 echo "모드: $MODE"
+echo "켠 서비스: ${AX_ENABLED_SERVICES:-전부}  조직도: ${AX_ORG_CONFIG:-없음}"
 while read -r name port _; do
   [ -n "$name" ] || continue
   code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port/health" || true)
