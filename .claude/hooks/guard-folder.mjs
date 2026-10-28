@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // PreToolUse 훅: 쓰기 도구(Edit/Write/MultiEdit/NotebookEdit)를 레포 안 작업 폴더로 제한한다.
-// 루프(에이전트)는 frontend/ 와 docs/ 만 고친다. 자동화 파일(.claude/, .github/, CLAUDE.md)은 사람만 바꾼다.
+// 루프(에이전트)는 frontend/, backend/, docs/ 만 고친다. 자동화 파일(.claude/, .github/, CLAUDE.md)은 사람만 바꾼다.
 // 사람이 직접 자동화 파일을 고칠 때는 .claude/settings.local.json 에 {"env": {"AX_HUMAN": "1"}} 를 둔다.
 // exit 0 = 허용, exit 2 = 차단(사유는 stderr). 파싱 오류 등은 모두 차단(fail closed).
 import fs from 'node:fs';
@@ -15,13 +15,15 @@ function block(msg) {
 }
 
 /** 루프가 고칠 수 있는 곳 */
-const WORK = ['frontend', 'docs'];
+const WORK = ['frontend', 'backend', 'docs'];
 /** 사람만 고치는 곳 */
 const HUMAN = ['.claude', '.github', 'CLAUDE.md'];
 /** 아무도 손으로 고치지 않는 곳 (생성물·비밀값) */
 const NEVER = [
   ['frontend', 'node_modules'],
   ['frontend', 'dist'],
+  ['backend', '.venv'],
+  ['backend', '.logs'],
 ];
 
 function main() {
@@ -52,6 +54,7 @@ function main() {
   const base = low[low.length - 1];
 
   if (base === '.env' || base.startsWith('.env.') && base !== '.env.example') return block(`비밀값 파일은 고치지 않습니다: ${file}`);
+  if (low.includes('__pycache__')) return block(`생성물 폴더는 손으로 고치지 않습니다: __pycache__`);
   for (const n of NEVER) if (n.every((s, i) => low[i] === s.toLowerCase())) return block(`생성물 폴더는 손으로 고치지 않습니다: ${n.join('/')}`);
 
   const top = segs[0];
