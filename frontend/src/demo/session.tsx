@@ -2,6 +2,7 @@
 // 부서는 코드에 두지 않는다. 계정마다 쓸 서비스를 배정하고, 회사가 켠 서비스 중 배정된 것만 열린다(services.ts).
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
 import { SERVICES, SHARED_PATHS, getEnabled, matchPath } from './services'
+import { getCompany } from './company'
 
 export type Account = {
   id: string
@@ -11,8 +12,10 @@ export type Account = {
   email: string
   /** 배정된 서비스 id (services.ts) */
   services: string[]
-  /** 시스템 관리 화면(서비스 고르기·서비스 연결)을 여는 계정 */
+  /** 고객사 시스템 관리자: 서비스 고르기·회사 서비스 연결을 연다 */
   admin?: boolean
+  /** AXcellent 운영팀(우리 개발자): 관제 센터(/control)만 연다. 고객사 화면에는 들어가지 않는다 */
+  operator?: boolean
 }
 
 // 예시 직원. ?as=<id> 링크가 그대로 동작하도록 id는 예전 값을 둔다
@@ -28,7 +31,12 @@ export const ACCOUNTS: Account[] = [
   { id: 'data', name: '데이터 분석가', role: '데이터 분석가', email: 'data@catbooks.example', services: ['data'] },
 ]
 
-export const COMPANY = { name: '캣북스', network: '192.168.10.0/24' }
+// AXcellent 운영팀 계정. 고객사 로그인 화면·프로필 전환에는 나오지 않고, 관제 로그인(/control/login)에서만 쓴다
+export const OPERATORS: Account[] = [
+  { id: 'axc', name: 'AXcellent 운영팀', role: 'AXcellent 운영팀', email: 'ops@axcellent.dev', services: [], operator: true },
+]
+const ALL = [...ACCOUNTS, ...OPERATORS]
+
 
 const SYSTEM_PATHS = ['/system']
 
@@ -37,6 +45,7 @@ export const servicesOf = (account: Account, enabled = getEnabled()) =>
   SERVICES.filter((s) => account.services.includes(s.id) && enabled.includes(s.id))
 
 export function canOpen(account: Account, path: string, enabled = getEnabled()) {
+  if (account.operator) return matchPath('/control', path)
   const bases = [
     ...SHARED_PATHS,
     ...(account.admin ? SYSTEM_PATHS : []),
@@ -45,22 +54,22 @@ export function canOpen(account: Account, path: string, enabled = getEnabled()) 
   return bases.some((b) => matchPath(b, path))
 }
 
-/** 로그인 뒤 처음 여는 화면: 첫 서비스, 없으면 관리 화면이나 AI 대화방 */
+/** 로그인 뒤 처음 여는 화면: 운영팀은 관제 센터, 고객사 시스템 관리자는 서비스 고르기(연결 전이면 AXcellent 연결), 나머지는 첫 서비스(없으면 AI 대화방) */
 export const homeOf = (account: Account, enabled = getEnabled()) =>
-  servicesOf(account, enabled)[0]?.entry ?? (account.admin ? '/system/services' : '/agents/chat')
+  account.operator ? '/control' : account.admin ? (getCompany() ? '/system/services' : '/system/connect') : servicesOf(account, enabled)[0]?.entry ?? '/agents/chat'
 
 const KEY = 'axcellent-demo-account'
 const load = (): Account | null => {
   // ?as=<계정 id> 로 열면 그 계정으로 바로 들어간다 (팀원에게 화면 링크를 줄 때)
   const as = new URLSearchParams(window.location.search).get('as')
-  const direct = ACCOUNTS.find((a) => a.id === as)
+  const direct = ALL.find((a) => a.id === as)
   if (direct) {
     save(direct.id)
     return direct
   }
   try {
     const id = localStorage.getItem(KEY)
-    return ACCOUNTS.find((a) => a.id === id) ?? null
+    return ALL.find((a) => a.id === id) ?? null
   } catch {
     return null
   }
@@ -80,7 +89,7 @@ const Ctx = createContext<Session | null>(null)
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [account, setAccount] = useState<Account | null>(load)
   const signIn = useCallback((id: string) => {
-    const next = ACCOUNTS.find((a) => a.id === id) ?? null
+    const next = ALL.find((a) => a.id === id) ?? null
     setAccount(next)
     save(next?.id ?? null)
     return next

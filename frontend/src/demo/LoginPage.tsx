@@ -1,11 +1,13 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { ACCOUNTS, COMPANY, homeOf, useSession } from './session'
+import { ACCOUNTS, homeOf, useSession } from './session'
+import { useCompany } from './company'
 
 // 사내망 안에서만 열리는 로그인 화면. 계정에 배정된 서비스에 따라 로그인 뒤 보이는 메뉴가 다르다.
 // 데모라 비밀번호는 확인하지 않는다.
 export default function LoginPage() {
   const { signIn } = useSession()
+  const company = useCompany()
   const navigate = useNavigate()
   const [email, setEmail] = useState(ACCOUNTS[1].email)
   const [password, setPassword] = useState('demo')
@@ -39,11 +41,11 @@ export default function LoginPage() {
           <dl className="grid max-w-md grid-cols-2 gap-3 text-sm">
             <div className="rounded-2xl bg-white/10 p-4">
               <dt className="text-white/60">설치된 회사</dt>
-              <dd className="mt-1 font-semibold">{COMPANY.name}</dd>
+              <dd className="mt-1 font-semibold">{company?.name ?? '없음'}</dd>
             </div>
             <div className="rounded-2xl bg-white/10 p-4">
               <dt className="text-white/60">접속 범위</dt>
-              <dd className="mt-1 font-semibold">사내망 {COMPANY.network}</dd>
+              <dd className="mt-1 font-semibold">{company ? `사내망 ${company.network}` : '—'}</dd>
             </div>
             <div className="rounded-2xl bg-white/10 p-4">
               <dt className="text-white/60">외부 접근</dt>
@@ -62,7 +64,7 @@ export default function LoginPage() {
         <div className="w-full max-w-sm space-y-8">
           <div>
             <Link to="/" className="text-sm text-ink-500 hover:text-ink-900">← 서비스 둘러보기</Link>
-            <p className="mt-6 text-sm text-ink-500">{COMPANY.name} 워크스페이스</p>
+            <p className="mt-6 text-sm text-ink-500">{company ? `${company.name} 워크스페이스` : 'AXcellent'}</p>
             <h1 className="mt-1 text-2xl font-semibold">로그인</h1>
           </div>
           <form onSubmit={submit} className="space-y-3">
