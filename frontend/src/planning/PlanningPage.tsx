@@ -7,6 +7,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Chip, ToastOutlet, ToastProvider, useToast, type NavItem } from '@dejafix/common-frontend'
 import { ACTION_ERROR_EVENT, useSharedStore } from './store'
 import { apiBase } from './api'
+import { DevToolsDialog } from '@/demo/DevTools'
+import { IconGear } from '@/components/icons'
 import { Dep, Point } from './parts'
 import { Activity, Aftercare, Audit, Autonomy, Links, Metrics, Ops, Reviews, Specs, Work } from './pages'
 import { Requests, incomingCount } from './requests'
@@ -87,6 +89,7 @@ function Planning({ part }: { part: PlanningPart }) {
   const isSection = (x: string) => x in SECTIONS
   const route = useRoute(P.home)
   const [state, dispatch, connected] = useSharedStore(apiBase(part))
+  const [tools, setTools] = useState(false)
   const toast = useToast()
   useEffect(() => {
     const on = (e: Event) => toast.show((e as CustomEvent<string>).detail)
@@ -142,9 +145,15 @@ function Planning({ part }: { part: PlanningPart }) {
           <Chip tone={connected ? 'green' : 'amber'} title={`${P.title} 서버 ${apiBase(part)}`}>
             {`${P.title} ${connected ? '켜짐' : '꺼짐'}`}
           </Chip>
+          {part === 'dev' && (
+            <button type="button" className="btn-quiet px-2 py-1" title="개발 도구 연결" aria-label="개발 도구 연결" onClick={() => setTools(true)}>
+              <IconGear size={20} />
+            </button>
+          )}
           <ToastOutlet />
         </div>
       </header>
+      {tools && <DevToolsDialog onClose={() => setTools(false)} />}
       <div className="pl-bar">
         <nav className="pl-menu" aria-label={`${P.title} 메뉴`}>
           {menu.map((m) => (

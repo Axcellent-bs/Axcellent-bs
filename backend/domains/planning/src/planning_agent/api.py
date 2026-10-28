@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from planning_agent import vcs
 from planning_agent.deploy_store import get_deploy_store
 from planning_agent.domain.deploy import DeployError
 from planning_agent.domain.metrics import compute_metrics
@@ -240,6 +241,44 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             outcome=result.outcome,
             result=result.output,
         )
+
+    # ---- 개발 도구 연결: 형상관리 (시스템 관리자 화면)
+
+    @router.get("/vcs")
+    def get_vcs_config() -> dict:
+        return _ok(vcs.describe(), get_service())
+
+    # CORS가 GET·POST만 열려 있어서 저장도 POST로 받는다
+    @router.post("/vcs")
+    async def put_vcs_config(request: Request) -> Any:
+        body = await request.json()
+        if not isinstance(body, dict):
+            return _err(400, "INVALID_VCS", "본문은 객체여야 한다")
+        try:
+            vcs.configure(
+                kind=str(body.get("kind") or ""),
+                repo=str(body.get("repo") or ""),
+                base_url=str(body.get("base_url") or ""),
+                base_branch=str(body.get("base_branch") or ""),
+                token=body.get("token") or None,
+            )
+        except vcs.VcsError as exc:
+            return _err(400, "INVALID_VCS", exc.message)
+        return _ok(vcs.describe(), get_service())
+
+    @router.post("/vcs/test")
+    async def post_vcs_test() -> dict:
+        """연결 확인: 최근 하루 병합 목록을 읽어 본다 (쓰기 없음)."""
+        from datetime import UTC, datetime, timedelta
+
+        now = datetime.now(UTC)
+        result: dict[str, Any] = {"kind": vcs.configured_kind(), "checked_at": now.isoformat()}
+        try:
+            changes = await vcs.get_vcs().find_changes(now - timedelta(days=1), now)
+            result.update(ok=True, code=None, message=f"최근 하루 병합 {len(changes)}건 읽음")
+        except vcs.VcsError as exc:
+            result.update(ok=False, code=exc.code, message=exc.message)
+        return _ok(result, get_service())
 
     @router.post("/reset")
     def post_reset() -> dict:

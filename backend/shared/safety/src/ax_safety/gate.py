@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
+from ax_agent_template.services import department_of
 from ax_contracts.schemas import ExecuteDecision, ExecuteRequest, HoldReason
 from ax_safety.rules import ActionSpec, Registry, ThresholdTable, higher
 from ax_safety.store import ExecutionRecord, Review, Store
@@ -140,7 +141,11 @@ class Gate:
         )
 
         spec = self.registry.get(request.action)
-        if spec is None or request.requester not in spec.allowed_requesters:
+        # 서비스 에이전트(예: dev)는 원래 부서(planning) 이름으로도 인정한다 (services.py)
+        allowed = spec.allowed_requesters if spec else []
+        if spec is None or (
+            request.requester not in allowed and department_of(request.requester) not in allowed
+        ):
             report = {"reason": "미등록 액션이거나 요청자가 이 액션을 신고하지 않았다"}
             return await self._hold(request, execution_id, HoldReason.UNREGISTERED_ACTION, report)
 

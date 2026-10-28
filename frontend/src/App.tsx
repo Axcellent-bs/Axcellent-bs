@@ -22,6 +22,7 @@ import Reviews from '@/pages/Reviews'
 import Support from '@/pages/Support'
 import InfraHosts from '@/demo/InfraHosts'
 import Integrations from '@/demo/Integrations'
+import DevTools from '@/demo/DevTools'
 import LoginPage from '@/demo/LoginPage'
 import { canOpen, homeOf, useSession } from '@/demo/session'
 import { useEnabledServices } from '@/demo/services'
@@ -92,6 +93,7 @@ function Pages() {
           <Route path="/system/connect" element={<CompanyConnect />} />
           <Route path="/control/*" element={<ControlCenter />} />
           <Route path="/system/integrations" element={<Integrations />} />
+          <Route path="/system/devtools" element={<DevTools />} />
           {/* 예전 관리자 대시보드(/admin/*) 주소 호환 */}
           <Route path="/admin/*" element={<LegacyAdminRedirect />} />
           <Route path="*" element={<ToHome />} />
