@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { ago } from '@/lib/format'
-import { COMPANY } from './session'
+import { useCompany } from './company'
 import { newId, now, privateIp, useHosts, type Host } from './store'
 
 // PC·서버 연결 (DejaFix 서비스): 자빅스처럼 회사 PC를 IP로 등록해 연결한다. 사내망 주소만 받아서 시스템이 회사 밖으로 열리지 않는다.
@@ -12,6 +12,7 @@ const STATUS: Record<Host['status'], { label: string; tone: string; dot: string 
 
 export default function InfraHosts() {
   const [hosts, setHosts] = useHosts()
+  const company = useCompany()
   const [form, setForm] = useState({ dept: '', hostname: '', ip: '' })
   // 팀 이름은 회사가 정한다. 이미 쓰는 이름을 제안만 하고 새 이름도 받는다
   const teams = [...new Set(hosts.map((h) => h.dept))]
@@ -46,7 +47,7 @@ export default function InfraHosts() {
           <p className="mt-1 text-sm text-ink-500">회사 PC와 서버를 사내 IP로 연결하고 연결 상태를 챙깁니다.</p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
-          <span className="chip bg-ink-100 text-ink-700">사내망 {COMPANY.network}</span>
+          {company && <span className="chip bg-ink-100 text-ink-700">사내망 {company.network}</span>}
           <span className="chip bg-emerald-50 text-emerald-700">외부 접근 차단</span>
           <span className="chip bg-brand-50 text-brand-700">연결 {online}/{hosts.length}대</span>
         </div>
@@ -56,7 +57,7 @@ export default function InfraHosts() {
         <div className="flex flex-col items-center gap-5">
           <div className="rounded-2xl bg-brand-600 px-6 py-3 text-center text-white">
             <p className="font-semibold">DejaFix</p>
-            <p className="text-xs text-white/70">{COMPANY.name} 사내 서버</p>
+            <p className="text-xs text-white/70">{company ? `${company.name} 사내 서버` : '연결된 고객사 없음'}</p>
           </div>
           <div className="h-5 w-px bg-ink-300" aria-hidden="true" />
           <ul className="grid w-full grid-cols-2 gap-3 md:grid-cols-3">

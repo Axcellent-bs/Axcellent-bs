@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { ACCOUNTS, homeOf, servicesOf, useSession } from './session'
+import { ACCOUNTS, OPERATORS, homeOf, servicesOf, useSession } from './session'
 import { useEnabledServices } from './services'
 
 // 데모 전용: 예시 직원 계정을 바꿔 가며 배정된 서비스 화면을 보여 준다. 실제 제품에는 없다.
@@ -45,7 +45,7 @@ export function AccountSwitcher() {
       {open && (
         <div role="menu" className="card absolute right-0 top-11 z-50 w-72 border border-ink-100 p-2">
           <p className="px-3 pb-1 pt-2 text-xs text-ink-500">프로필 전환 (데모)</p>
-          {ACCOUNTS.map((a) => (
+          {(account.operator ? OPERATORS : ACCOUNTS).map((a) => (
             <button key={a.id} role="menuitemradio" aria-checked={a.id === account.id} type="button" onClick={() => pick(a.id)}
               className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm hover:bg-ink-100 ${a.id === account.id ? 'bg-brand-50' : ''}`}>
               <span>
@@ -56,7 +56,7 @@ export function AccountSwitcher() {
             </button>
           ))}
           <div className="mt-1 border-t border-ink-100 pt-1">
-            <button type="button" onClick={() => { signOut(); navigate('/') }}
+            <button type="button" onClick={() => { const op = account.operator; signOut(); navigate(op ? '/control/login' : '/') }}
               className="w-full rounded-xl px-3 py-2 text-left text-sm text-ink-700 hover:bg-ink-100">로그아웃</button>
           </div>
         </div>

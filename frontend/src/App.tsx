@@ -26,6 +26,8 @@ import { canOpen, homeOf, useSession } from '@/demo/session'
 import { useEnabledServices } from '@/demo/services'
 import ServiceCatalog from '@/demo/ServiceCatalog'
 import CatalogHome from '@/demo/CatalogHome'
+import ControlCenter from '@/control/ControlCenter'
+import OperatorLogin from '@/control/OperatorLogin'
 
 export function App() {
   return (
@@ -33,6 +35,8 @@ export function App() {
       {/* 로그인 전에도 여는 메인: 서비스 제품군 카탈로그 */}
       <Route path="/" element={<CatalogHome />} />
       <Route path="/login" element={<LoginPage />} />
+      {/* AXcellent 운영팀 전용 입구 */}
+      <Route path="/control/login" element={<OperatorLogin />} />
       <Route path="*" element={<Guarded><Pages /></Guarded>} />
     </Routes>
   )
@@ -43,7 +47,7 @@ function Guarded({ children }: { children: ReactNode }) {
   const { account } = useSession()
   const { pathname } = useLocation()
   const enabled = useEnabledServices()
-  if (!account) return <Navigate to="/" replace />
+  if (!account) return <Navigate to={pathname.startsWith('/control') ? '/control/login' : '/'} replace />
   if (!canOpen(account, pathname, enabled)) return <Navigate to={homeOf(account, enabled)} replace />
   return <>{children}</>
 }
@@ -75,6 +79,7 @@ function Pages() {
           <Route path="/infra/*" element={<DejaFixFrame />} />
           <Route path="/system/hosts" element={<Navigate to="/hosts" replace />} />
           <Route path="/system/services" element={<ServiceCatalog />} />
+          <Route path="/control/*" element={<ControlCenter />} />
           <Route path="/system/integrations" element={<Integrations />} />
           {/* catbooks 시절 /admin/* 주소 호환 */}
           <Route path="/admin/*" element={<LegacyAdminRedirect />} />

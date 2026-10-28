@@ -2,9 +2,10 @@ import { Link } from "@/lib/nav";
 import { usePathname } from "@/lib/nav";
 import { useState, type ComponentType, type ReactNode } from "react";
 import { AccountSwitcher } from "@/demo/AccountSwitcher";
-import { COMPANY, canOpen, homeOf, servicesOf, useSession } from "@/demo/session";
+import { canOpen, homeOf, servicesOf, useSession } from "@/demo/session";
+import { useCompany } from "@/demo/company";
 import { activeChild, matchPath, useEnabledServices, type SubItem } from "@/demo/services";
-import { IconAgents, IconBell, IconDashboard, IconLayout, IconOffice, IconSearch } from "../icons";
+import { IconAgents, IconBell, IconChart, IconDashboard, IconLayout, IconOffice, IconSearch } from "../icons";
 import { DejaFixTools } from "@/demo/DejaFixTools";
 
 /** DejaFix 장애 대응 화면이면 그 상단바 도구를 바깥 상단바에 둔다 */
@@ -22,6 +23,20 @@ const SHARED_NAV: NavItem[] = [
   { href: "/agents/chat", label: "AI 대화방", Icon: IconAgents, match: ["/agents/chat"] },
   { href: "/agents/office", label: "AI 오피스", Icon: IconOffice, match: ["/agents/office"] },
 ];
+// 관제 센터: 고객사에 설치된 AXcellent 상태를 모아 보는 AXcellent 운영팀 전용 화면 (src/control). 고객사 계정에는 안 보인다
+const CONTROL_MENU: SubItem[] = [
+  { href: "/control", label: "전체 현황" },
+  { href: "/control/companies", label: "고객사" },
+  { href: "/control/incidents", label: "장애·사건" },
+  { href: "/control/quality", label: "AI 품질" },
+  { href: "/control/cost", label: "비용·사용량" },
+  { href: "/control/connect", label: "고객사 연결 (시연)" },
+];
+
+const CONTROL_NAV: NavItem[] = [
+  { href: "/control", label: "관제 센터", Icon: IconChart, children: CONTROL_MENU, match: ["/control"] },
+];
+
 const SYSTEM_NAV: NavItem[] = [
   { href: "/system/services", label: "서비스 고르기", Icon: IconDashboard, match: ["/system/services"] },
   { href: "/system/integrations", label: "회사 서비스 연결", Icon: IconLayout, match: ["/system/integrations"] },
@@ -31,8 +46,10 @@ function useNav(): NavItem[] {
   const { account } = useSession();
   const enabled = useEnabledServices();
   if (!account) return [];
+  if (account.operator) return CONTROL_NAV;
   const services = servicesOf(account, enabled).map((s) => ({ href: s.entry, label: s.name, Icon: s.Icon, logo: s.logo, children: s.children, match: s.paths }));
-  return [...services, ...SHARED_NAV, ...(account.admin ? SYSTEM_NAV : [])];
+  // 고객사 시스템 관리자는 관리 메뉴를 맨 위에
+  return account.admin ? [...SYSTEM_NAV, ...services, ...SHARED_NAV] : [...services, ...SHARED_NAV];
 }
 
 const isOn = (path: string, item: NavItem) => item.match.some((m) => matchPath(m, path));
@@ -49,6 +66,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const { account } = useSession();
   const nav = useNav();
   const home = account ? homeOf(account) : "/";
+  const company = useCompany();
   const [collapsed, setCollapsed] = useState(readSide);
   const toggle = () => setCollapsed((v) => {
     try { localStorage.setItem(SIDE_KEY, v ? "open" : "collapsed"); } catch { /* 저장이 막혀도 화면은 동작한다 */ }
@@ -98,8 +116,23 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-[60px] shrink-0 items-center gap-3 border-b border-ink-300 bg-surface px-8">
-          <span className="shrink-0 text-[15px] font-semibold">AXcellent <span className="font-normal text-ink-500">with</span> {COMPANY.name}</span>
-          <span className="chip hidden bg-emerald-50 text-emerald-700 xl:inline-flex" title="사내망에서만 열리고 외부 접근은 막혀 있습니다">사내망 {COMPANY.network}</span>
+          {/* 관제 센터는 여러 고객사를 보는 AXcellent 운영팀 화면이라 특정 회사 이름·사내망을 붙이지 않는다 */}
+          {matchPath("/control", path) ? (
+            <span className="shrink-0 text-[15px] font-semibold">AXcellent <span className="font-normal text-ink-500">관제 센터</span></span>
+          ) : (
+            /* 지금 연결된 고객사 이름. 연결을 끊으면 with 뒤를 비운다 (demo/company.ts) */
+            company ? (
+              <>
+                <span className="shrink-0 text-[15px] font-semibold">AXcellent <span className="font-normal text-ink-500">with</span> {company.name}</span>
+                <span className="chip hidden bg-emerald-50 text-emerald-700 xl:inline-flex" title="사내망에서만 열리고 외부 접근은 막혀 있습니다">사내망 {company.network}</span>
+              </>
+            ) : (
+              <>
+                <span className="shrink-0 text-[15px] font-semibold">AXcellent</span>
+                <span className="chip hidden bg-ink-100 text-ink-500 xl:inline-flex">연결된 고객사 없음</span>
+              </>
+            )
+          )}
           <div className="flex-1" />
           {onDejaFix(path) && <DejaFixTools />}
           <div className="flex shrink-0 items-center gap-4 text-ink-700">

@@ -38,8 +38,11 @@
 | 기본 포함: AI 대화방·AI 오피스 | AXcellent | `/agents/chat`, `/agents/office` |
 | 시스템 관리: 서비스 고르기·회사 서비스 연결 | AXcellent | `/system/services`, `/system/integrations` |
 | 메인(로그인 전 서비스 카탈로그) | — | `/` → 로그인 버튼 → `/login` |
+| 관제 센터(AXcellent 운영팀 전용): 전체 현황·고객사(연결·끊기)·장애·사건·AI 품질·비용·사용량·고객사 연결 시연 | AXcellent | `/control/login` → `/control/…` (계정 `?as=axc`) |
 
 - 화면은 ax-frontend의 부서 화면을 그대로 다시 쓰고, 서비스 단위로 메뉴만 나눴어요. 서비스 목록은 `src/demo/services.ts`에 있어요.
+- 상단의 "AXcellent with ○○"는 관제 센터에서 연결한 고객사를 따라가요. 연결을 끊으면 회사 이름이 빠져요.
+- 관제 센터는 우리 팀원만 쓰는 화면이라 고객사 로그인·프로필 전환에는 운영팀 계정이 나오지 않아요.
 - 오른쪽 위 **프로필 전환** 드롭다운으로 예시 직원 계정을 바꿔 가며 볼 수 있어요. 주소 뒤에 `?as=support`처럼 붙이면 그 계정으로 바로 들어가요. 계정 id는 `admin`, `infra`, `dev`, `planning`, `support`, `marketing`, `finance`, `hr`, `data`예요.
 - 화면 모양은 DejaFix common-frontend(보라 사이드바, 인디고, 각진 모서리) 하나만 써요.
 
