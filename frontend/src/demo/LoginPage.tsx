@@ -9,7 +9,7 @@ export default function LoginPage() {
   const { signIn } = useSession()
   const company = useCompany()
   const navigate = useNavigate()
-  const [email, setEmail] = useState(ACCOUNTS[1].email)
+  const [email, setEmail] = useState(company ? ACCOUNTS[1].email : ACCOUNTS[0].email)
   const [password, setPassword] = useState('demo')
   const [error, setError] = useState<string | null>(null)
 
@@ -21,6 +21,7 @@ export default function LoginPage() {
     e.preventDefault()
     const a = ACCOUNTS.find((x) => x.email === email.trim().toLowerCase())
     if (!a) return setError('등록되지 않은 계정입니다. 아래 데모 계정 중 하나를 고르세요.')
+    if (!company && !a.admin) return setError('회사 연결 전에는 시스템 관리자만 로그인할 수 있어요.')
     if (!password) return setError('비밀번호를 입력하세요.')
     enter(a.id)
   }
@@ -67,6 +68,14 @@ export default function LoginPage() {
             <p className="mt-6 text-sm text-ink-500">{company ? `${company.name} 워크스페이스` : 'AXcellent'}</p>
             <h1 className="mt-1 text-2xl font-semibold">로그인</h1>
           </div>
+          {!company && (
+            <div className="space-y-3 rounded-2xl bg-amber-50 px-4 py-4 text-sm text-amber-800">
+              <p className="font-semibold">아직 회사가 연결되지 않았어요</p>
+              <p>처음 설치했다면 AXcellent에서 받은 연결 키로 처음 설정을 해 주세요. 시스템 관리자 계정도 거기서 만들어요.</p>
+              <Link to="/setup" className="btn-primary w-full py-2.5">처음 설정 시작</Link>
+              <p className="text-xs">연결을 끊은 경우에는 시스템 관리자로 로그인해서 다시 연결해요.</p>
+            </div>
+          )}
           <form onSubmit={submit} className="space-y-3">
             <label className="block space-y-1 text-sm">
               <span className="text-ink-700">회사 이메일</span>
@@ -82,13 +91,17 @@ export default function LoginPage() {
           <div className="space-y-2">
             <p className="text-xs font-medium text-ink-500">데모 계정</p>
             <div className="grid grid-cols-2 gap-2">
-              {ACCOUNTS.map((a) => (
-                <button key={a.id} type="button" onClick={() => enter(a.id)}
-                  className="rounded-xl border border-ink-100 bg-surface px-3 py-2 text-left text-sm hover:border-brand-500">
-                  <span className="block font-medium">{a.role}</span>
-                  <span className="block truncate text-xs text-ink-500">{a.email}</span>
-                </button>
-              ))}
+              {ACCOUNTS.map((a) => {
+                // 회사 연결 전에는 시스템 관리자만 들어갈 수 있다
+                const locked = !company && !a.admin
+                return (
+                  <button key={a.id} type="button" onClick={() => enter(a.id)} disabled={locked} title={locked ? '회사 연결 뒤에 쓸 수 있어요' : undefined}
+                    className="rounded-xl border border-ink-100 bg-surface px-3 py-2 text-left text-sm hover:border-brand-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-ink-100">
+                    <span className="block font-medium">{a.role}</span>
+                    <span className="block truncate text-xs text-ink-500">{locked ? '연결 뒤에 사용' : a.email}</span>
+                  </button>
+                )
+              })}
             </div>
           </div>
         </div>

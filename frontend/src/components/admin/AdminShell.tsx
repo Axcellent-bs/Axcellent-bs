@@ -5,7 +5,7 @@ import { AccountSwitcher } from "@/demo/AccountSwitcher";
 import { canOpen, homeOf, servicesOf, useSession } from "@/demo/session";
 import { useCompany } from "@/demo/company";
 import { AGENTS, activeChild, matchPath, useEnabledServices, type Service, type SubItem } from "@/demo/services";
-import { IconAgents, IconBell, IconBolt, IconChart, IconDashboard, IconLayout, IconOffice, IconSearch } from "../icons";
+import { IconAgents, IconBell, IconBolt, IconBox, IconChart, IconDashboard, IconLayout, IconOffice, IconSearch } from "../icons";
 
 // 메뉴: AI가 상위 탭이고, 그 AI가 맡은 서비스가 하위 탭이다. 서비스 안 화면(예: 고객 문의의 상담 콘솔)은 그 아래 한 단 더.
 // AI 7개는 모든 직원 메뉴에 보인다(회사가 서비스 고르기에서 끈 서비스만 빠짐). DejaFix 서비스는 배정된 계정에만 (src/demo/session.tsx servicesOf).
@@ -65,14 +65,18 @@ const CONTROL_NAV: NavItem[] = [
 const SYSTEM_NAV: NavItem[] = [
   { href: "/system/connect", label: "AXcellent 연결", Icon: IconBolt, match: ["/system/connect"] },
   { href: "/system/services", label: "서비스 고르기", Icon: IconDashboard, match: ["/system/services"] },
+  { href: "/system/hosts", label: "사내 PC 연결", Icon: IconBox, match: ["/system/hosts"] },
   { href: "/system/integrations", label: "회사 서비스 연결", Icon: IconLayout, match: ["/system/integrations"] },
 ];
 
 function useNav(): NavItem[] {
   const { account } = useSession();
   const enabled = useEnabledServices();
+  const company = useCompany();
   if (!account) return [];
   if (account.operator) return CONTROL_NAV;
+  // 회사 연결 전에는 AXcellent 연결만 보인다
+  if (!company) return account.admin ? SYSTEM_NAV.filter((n) => n.href === "/system/connect") : [];
   const services = servicesOf(account, enabled);
   const agents = agentNav(services);
   const rest = [...services.filter((s) => !s.agent).map(serviceNav), ...SHARED_NAV];
