@@ -62,6 +62,8 @@ bash scripts/run_all.sh stop
 - `scripts/shop_traffic.py`가 3초마다 캣북스 고객 주문·결제를 넣는다. 결제 성공·실패는 쇼핑몰이 정한다.
   결제가 실패한 고객 일부(30%)는 쇼핑몰 문의 창구로 그 주문에 대해 문의를 남긴다 → 고객지원 AI가 받아 답변 초안을 쓴다.
 - 장애 넣기·빼기는 운영자 명령이다: `bash scripts/shop_fault.sh failure|latency|clear|status`. 테스트 기록을 지우려면 `bash scripts/run_all.sh reset`.
+- 재무 AI가 주인공인 장애: `bash scripts/shop_fault.sh refund-abuse` — 캣북스 고객 한 명이 주문을 연달아 사고 전부 취소·환불받는다.
+  고객지원 AI가 자동 승인 → 상담원 대기열 처리 → 안전 관문 `refund_request`로 실제 환불 → 재무 AI 사후 감사가 "같은 고객 반복 환불"을 찾는다(/finance 내부통제·감사).
 - 캣북스 쇼핑몰 화면(고객이 보는 곳)은 ax-frontend의 shop-web이다. 같은 shop-api(8010)에 붙여 띄우면 장애 때 결제 화면에
   "결제 서버에 문제가 있어 결제하지 못했습니다"가 뜬다: `cd ax-frontend && npm run dev:shop` (3000, CORS 허용됨).
   마케팅 AI가 게시한 공지 배너는 shop-web에 아직 그리는 곳이 없다(ax-frontend 쪽 작업).
