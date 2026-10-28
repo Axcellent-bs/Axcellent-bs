@@ -1,4 +1,4 @@
-import { DEJAFIX_API_URL, DEJAFIX_WEB_URL } from "./env";
+import { DEJAFIX_API_URL } from "./env";
 
 // 장애 대응 탭: DejaFix 화면을 띄우지 않고 DejaFix API에서 데이터만 받는다.
 // 형식은 DejaFix/DejaFix contracts/api.md #10 `GET /api/incidents`, contracts/incident.schema.json 기준. 화면 없는 함수만 둔다.
@@ -42,9 +42,6 @@ export async function currentIncidents(): Promise<{ data: Incident[]; meta: Inci
   const body = (await res.json()) as { data?: Incident[]; meta?: IncidentMeta };
   return { data: body.data ?? [], meta: body.meta ?? { next_cursor: null } };
 }
-
-/** DejaFix 화면의 장애 상세 주소. 상세는 DejaFix가 그린다 */
-export const incidentUrl = (id: number) => `${DEJAFIX_WEB_URL.replace(/\/$/, "")}/incidents/${id}`;
 
 /** Zabbix 심각도 0~5 → 화면 표시 */
 export const SEVERITY: Record<number, { label: string; tone: string }> = {

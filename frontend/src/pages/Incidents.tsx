@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ago, shortDateTime } from "@/lib/format";
-import { ANALYSIS, SEVERITY, currentIncidents, incidentUrl, type Incident, type IncidentMeta } from "@/lib/dejafix";
+import { ANALYSIS, SEVERITY, currentIncidents, type Incident, type IncidentMeta } from "@/lib/dejafix";
 import { DEJAFIX_LIVE } from "@/lib/env";
 
 // 장애 대응 탭 = 지금 진행 중인 장애만. DejaFix API(GET /api/incidents?status=problem)에서 받아 AXcellent가 그린다.
@@ -51,7 +51,7 @@ export default function Incidents() {
               : <span className="chip bg-amber-50 text-amber-700" title="VITE_DEJAFIX_LIVE=on 이면 실제 DejaFix를 부릅니다">데모 녹화본</span>}
           </p>
           <h1 className="text-2xl font-semibold">현재 장애</h1>
-          <p className="mt-1 text-sm text-ink-500">지금 해결되지 않은 장애만 보여 줍니다. 원인 분석과 변경 계획은 DejaFix에서 봅니다.</p>
+          <p className="mt-1 text-sm text-ink-500">지금 해결되지 않은 장애만 보여 줍니다.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className={`chip ${list.length ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>진행 중 {list.length}건</span>
@@ -87,8 +87,7 @@ export default function Incidents() {
                 <th className="px-3 py-3 font-medium">장애</th>
                 <th className="px-3 py-3 font-medium">호스트</th>
                 <th className="px-3 py-3 font-medium">시작</th>
-                <th className="whitespace-nowrap px-3 py-3 font-medium">AI 분석</th>
-                <th className="px-6 py-3 font-medium"><span className="sr-only">상세</span></th>
+                <th className="whitespace-nowrap px-6 py-3 font-medium">AI 분석</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-100">
@@ -103,10 +102,7 @@ export default function Incidents() {
                     {i.host.name ? <span className="whitespace-nowrap font-mono text-xs">{i.host.name}</span> : <span className="text-xs text-ink-500" title="DejaFix가 아직 호스트 정보를 채우지 않았습니다">확인 중</span>}
                   </td>
                   <td className="whitespace-nowrap px-3 py-3 text-xs text-ink-700" title={shortDateTime(i.started_at)}>{ago(i.started_at)}</td>
-                  <td className="px-3 py-3"><Chip map={ANALYSIS} k={i.analysis.status} /></td>
-                  <td className="px-6 py-3 text-right">
-                    <a href={incidentUrl(i.id)} target="_blank" rel="noreferrer" className="btn-quiet whitespace-nowrap">DejaFix에서 보기 ↗</a>
-                  </td>
+                  <td className="px-6 py-3"><Chip map={ANALYSIS} k={i.analysis.status} /></td>
                 </tr>
               ))}
             </tbody>

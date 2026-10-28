@@ -83,7 +83,7 @@ function Pages() {
           <Route path="/hosts" element={<InfraHosts />} />
           <Route path="/infra/hosts" element={<Navigate to="/hosts" replace />} />
           <Route path="/infra" element={<Incidents />} />
-          {/* 예전 DejaFix 화면 주소(/infra/reports 등)는 현재 장애로. 리포트·변경 계획은 DejaFix 화면에서 본다 */}
+          {/* 예전 DejaFix 화면 주소(/infra/reports 등)는 현재 장애로 */}
           <Route path="/infra/*" element={<Navigate to="/infra" replace />} />
           <Route path="/system/hosts" element={<InfraHosts />} />
           <Route path="/system/services" element={<ServiceCatalog />} />

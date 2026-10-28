@@ -31,5 +31,3 @@ export const HUMAN_TOKEN_SET = SAFETY_HUMAN_TOKEN.length > 0
 export const DEJAFIX_API_URL = import.meta.env.VITE_DEJAFIX_API_URL ?? '/dejafix-api'
 /** DejaFix만 실제 서버로 부를지. 다른 AI는 녹화본으로 두고 장애 대응 탭만 실데이터로 볼 때 on */
 export const DEJAFIX_LIVE = !MOCK || import.meta.env.VITE_DEJAFIX_LIVE === 'on'
-/** 장애 상세를 여는 DejaFix 화면 주소 */
-export const DEJAFIX_WEB_URL = import.meta.env.VITE_DEJAFIX_WEB_URL ?? 'http://localhost:5173'
