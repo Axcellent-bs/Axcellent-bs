@@ -7,8 +7,8 @@ import {
   type A2AResult, type KpiSummaryOutput,
 } from "@/lib/data";
 
-// 학습 효과·KPI (SCN-L): 회사 기억을 참조한 2차 사건이 1차보다 얼마나 빨리 복구됐는지, 자동 처리율·등급·차단·이관.
-// 데이터 AI의 kpi_summary 결과를 그대로 보여 준다. 화면에서는 초 → 분 단위만 바꾼다.
+// 학습 효과·KPI: 회사 기억을 참조한 2차 사건이 1차보다 얼마나 빨리 복구됐는지, 자동 처리율·등급·차단·이관.
+// 데이터 AI(8106)의 kpi_summary(POST /data-a2a/a2a) 결과를 그대로 보여 준다. 화면에서는 초 → 분 단위만 바꾼다.
 
 /** 값이 0이거나 비었을 때 근거의 "확인할 수 없음" 사유를 같이 보여 준다 */
 function Notes({ notes }: { notes: string[] }) {
@@ -35,7 +35,7 @@ function KpiBody({ res }: { res: A2AResult<KpiSummaryOutput> }) {
   const rate = num(o.auto_handled_rate);
   const grades = o.grade_counts ?? {};
   const blocked = o.blocked_counts ?? {};
-  const meta = { mock: res.fallback, collected_at: res.evidence?.collected_at ?? undefined };
+  const meta = { mock: false, collected_at: res.evidence?.collected_at ?? undefined };
 
   return (
     <div className="space-y-5">
@@ -43,7 +43,7 @@ function KpiBody({ res }: { res: A2AResult<KpiSummaryOutput> }) {
         hint="같은 종류의 장애가 다시 났을 때, 회사 기억(지난 사건 기록)을 참조해 더 빨리 복구했는지 봅니다.">
         {headline && <p className="mb-4 rounded-2xl bg-brand-50 px-4 py-3 text-sm font-medium text-brand-700">{headline}</p>}
         {incs.length === 0 ? (
-          <><Empty>비교할 사건이 없습니다 ({UNKNOWN}).</Empty><Notes notes={notes} /></>
+          <><Empty>아직 비교할 사건이 없어요. 장애 사건이 해결되면 사건별 복구 시간이 여기에 쌓입니다.</Empty><Notes notes={notes} /></>
         ) : (
           <div className="grid gap-5 lg:grid-cols-[3fr_2fr]">
             <div>
@@ -98,8 +98,8 @@ function KpiBody({ res }: { res: A2AResult<KpiSummaryOutput> }) {
 }
 
 function LiveKpi({ tick }: { tick: number }) {
-  const res = useResource("kpi", () => dataAi.kpiSummary().then((r) => ({ data: r, meta: { mock: r.fallback } })), tick);
-  if (!res.env) return res.error ? <ErrorBox message={`${res.error}. ${DATA_SERVER}가 켜져 있는지 확인하세요.`} onRetry={res.reload} /> : <Waiting />;
+  const res = useResource("kpi", () => dataAi.kpiSummary().then((r) => ({ data: r, meta: { mock: false } })), tick);
+  if (!res.env) return res.error ? <ErrorBox message={`${res.error}. ${DATA_SERVER}가 켜져 있는지 확인해 주세요.`} onRetry={res.reload} /> : <Waiting />;
   return (
     <>
       {res.error && <div className="mb-3"><ErrorBox message={`새로 받지 못해 이전 값을 보여 줍니다. ${res.error}`} onRetry={res.reload} /></div>}
@@ -112,7 +112,7 @@ export function LearningKpi({ tick }: { tick: number }) {
   if (!kpiLive) {
     return (
       <Panel id="data-learning" title="학습 효과·KPI">
-        <Empty>실시간 조회 꺼짐 — 운영에서는 dashboard-api 중계 예정</Empty>
+        <Empty>데이터 AI 토큰(VITE_DATA_A2A_TOKEN)이 없어 평상시 지표를 받지 않아요. backend/의 scripts/run_web.sh로 화면을 켜면 토큰이 들어갑니다.</Empty>
       </Panel>
     );
   }

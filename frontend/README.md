@@ -91,6 +91,60 @@ npm run build:pages  # GitHub Pages용 빌드 (dist/, 404.html 포함)
 - 총괄·데이터 AI·DejaFix는 CORS가 없어서 개발 서버 프록시(`/orch`, `/data-a2a`, `/dejafix-api`)로 불러요 (`vite.config.ts`).
 - 총괄과 DejaFix 백엔드는 둘 다 기본 포트가 8000이라, 같이 띄울 때는 한쪽 포트를 바꾸고 `ORCHESTRATOR_PROXY_TARGET`이나 `DEJAFIX_PROXY_TARGET`을 맞춰요.
 
+## 데이터 분석 화면 확인 방법
+
+데이터 분석 화면(`/data`)은 녹화본 없이 실제 모드 백엔드(`backend/`)의 값만 보여 줘요. 사건이 없으면 빈 상태 안내가 나오고, 예시 숫자는 만들지 않아요.
+
+1. 백엔드를 실제 모드로 켜요 (Docker 필요. LLM 설정은 `backend/.env`나 레포 맨 위 `.env`. 없으면 LLM을 쓰는 skill이 규칙 기반 대체 답을 내요. 데이터 분석 숫자는 LLM 없이 계산돼요)
+   ```bash
+   cd backend
+   uv sync --all-packages
+   bash scripts/run_all.sh        # mock 인자 없이. 끄기: bash scripts/run_all.sh stop
+   ```
+   - 포트 8000~8122를 써요. 시작할 때 이 포트를 쥔 프로세스를 끄기 때문에, 8000에 DejaFix를 띄워 뒀다면 DejaFix를 다른 포트(예: 18000)로 옮겨 두세요
+   - 쇼핑몰 고객 주문 트래픽(`scripts/shop_traffic.py`, 3초마다 1건)도 같이 켜져요
+2. 화면을 켜요. `backend/.data/web.env`의 `VITE_MOCK=off`와 토큰을 읽어 개발 서버(3090)를 켜요. 3090에 다른 개발 서버가 떠 있으면 먼저 꺼요
+   ```bash
+   bash scripts/run_web.sh        # backend/ 에서
+   ```
+3. 장애 사건을 만들어요. 쇼핑몰에 결제 장애를 주입하면 주문 결제가 5xx로 실패하고, 쇼핑몰 감시가 20초 넘게 이어진 실패를 재서 `shop.degraded`를 내요. 총괄이 그걸 받아 사건을 열고 데이터 AI가 영향 분석·복구 확인·처리 시간 요약을 해요
+   ```bash
+   # backend/ 에서. 주입은 admin 토큰만 돼요 (web.env의 VITE_SHOP_ADMIN_TOKEN, 값은 출력하지 않음)
+   export SHOP_FAULT_TOKEN="$(sed -n 's/^VITE_SHOP_ADMIN_TOKEN=//p' .data/web.env)"
+   .venv/Scripts/python.exe infra/fault-injection/payment_fault.py inject   # macOS·Linux: .venv/bin/python
+   # 30초쯤 기다린 뒤 해제하면 shop.recovered로 복구 확인이 이어져요
+   .venv/Scripts/python.exe infra/fault-injection/payment_fault.py clear
+   ```
+   - 감지 시간은 `SHOP_DEGRADED_SUSTAIN_S`(run_all.sh 기본 20초)와 `SHOP_MONITOR_INTERVAL_S`(5초)로 정해져요
+4. http://localhost:3090/data 를 열어요. "장애 사건 데이터"에 사건이, "평상시 지표"(`/data#daily`)에 복구 시간·자동 처리율이 나와요. 사건을 하나 더 만들면 1차·2차 복구 시간이 비교돼요
+
+화면이 부르는 주소:
+
+| 화면 부분 | 화면이 부르는 주소 | 실제 서버 |
+| --- | --- | --- |
+| 총괄 켜짐/꺼짐 칩 | `GET /orch/health` | 총괄 orchestrator 8000 `/health` |
+| 장애 사건 목록 | `GET /orch/api/incidents` | 총괄 8000 `/api/incidents` |
+| 고른 사건 상세 | `GET /orch/api/incidents/{context_id}` | 총괄 8000 `/api/incidents/{context_id}` |
+| 데이터 AI 켜짐/꺼짐 칩 | `GET /data-a2a/health` | 데이터 AI data 8106 `/health` |
+| 평상시 지표 | `POST /data-a2a/a2a` (skill `kpi_summary`, 토큰 `VITE_DATA_A2A_TOKEN`) | 데이터 AI 8106 `/a2a` |
+
+`/orch`, `/data-a2a`는 개발 서버 프록시예요 (`vite.config.ts`, `ORCHESTRATOR_PROXY_TARGET`·`DATA_PROXY_TARGET`).
+
+## 서비스 실서버 연결 체크리스트
+
+녹화본으로 만든 서비스 화면을 실제 백엔드에 붙일 때 이 순서로 확인해요. 데이터 분석(`/data`)을 예로 들어요.
+
+1. **화면이 부르는 주소 표**: 화면 코드(`src/pages/<화면>.tsx`, `src/lib/<서비스>.ts`, `src/components/<서비스>/`)에서 `fetch`하는 주소를 전부 찾아 표로 적고, 실제 모드에서 각 주소가 응답하는지 확인해요
+   - 예: 위 "화면이 부르는 주소" 표 (총괄 3개, 데이터 AI 2개)
+2. **진짜 모드에서 데이터가 생기는 방법**: 화면에 값이 채워지려면 백엔드에서 무슨 일이 있어야 하는지 찾아 적어요. 시드나 녹화본이 아니라 실제 흐름으로 만들어요
+   - 예: 결제 장애 주입(`backend/infra/fault-injection/payment_fault.py`) → 쇼핑몰 감시 `shop.degraded` → 총괄 사건 → 데이터 AI 단계
+3. **회사 이름·고유 용어 제거**: 특정 회사 이름(예: 캣북스)을 화면에 박지 않아요. 연결된 회사 이름(`src/demo/company.ts`의 `useCompany()`)을 쓰고, 연결 전이면 이름 없이 써요. 문서 번호(SCN-L, 시나리오 A 등)도 화면 문구에서 빼요
+   - 예: "데이터분석팀입니다" 앞에 연결된 회사 이름을 붙이고, 없으면 이름 없이
+4. **빈 상태·서버 꺼짐 안내**: 값이 없을 때 예시 숫자를 만들지 않고 무엇을 하면 채워지는지 안내해요. "예시 데이터"처럼 녹화본을 전제한 표시는 빼요. 서버가 꺼지면 어느 서버가 꺼졌는지 이름과 포트로 보여 줘요
+   - 예: "아직 장애 사건이 없어요…", "데이터 AI 서버(8106)에 연결할 수 없어요", "총괄 서버(8000)에 연결할 수 없어요"
+5. **화면 확인 경로**: 실서버로 직접 열어 본 주소를 PR 본문에 적어요
+   - 예: http://localhost:3090/data, http://localhost:3090/data#daily, 사건 지정은 `/data?incident=<context_id>`
+
 ## 장애 대응 (DejaFix)
 
 DejaFix 화면은 띄우지 않아요. DejaFix API 계약(`DejaFix/DejaFix` `contracts/api.md` #10)의 `GET /api/incidents?status=problem`으로 **지금 진행 중인 장애만** 받아서 AXcellent가 그려요 (`src/pages/Incidents.tsx`, `src/lib/dejafix.ts`).
