@@ -39,10 +39,12 @@
 | 시스템 관리: 서비스 고르기·회사 서비스 연결 | AXcellent | `/system/services`, `/system/integrations` |
 | 메인(로그인 전 서비스 카탈로그) | — | `/` → 로그인 버튼 → `/login` |
 | 관제 센터(AXcellent 운영팀 전용): 전체 현황·고객사·**서비스 관리**(버전·배포·카탈로그 공개)·장애·사건·AI 품질·비용·사용량·**연결 키 발급** | AXcellent | `/control/login` → `/control/…` (계정 `?as=axc`) |
-| AXcellent 연결(고객사 시스템 관리자): 받은 키 넣어 연결·끊기 | AXcellent | `/system/connect` |
+| 처음 설정(설치 직후 한 번): 연결 키 → 시스템 관리자 계정 → 회사 정보 → 연결 | AXcellent | `/setup` (`/login?company=none`에서 시작) |
+| AXcellent 연결(고객사 시스템 관리자): 연결된 회사 정보 보기·고치기·끊기, 다른 키로 다시 연결 | AXcellent | `/system/connect` |
+| 사내 PC 연결(고객사 시스템 관리자): 에이전트 설치 명령 → Zabbix 등록 → DejaFix 인식 | DejaFix | `/system/hosts` |
 
 - 서비스 목록과 서비스마다 맡은 AI는 `src/demo/services.ts`에 있어요.
-- 연결 흐름: AXcellent 운영팀이 관제 센터에서 연결 키를 발급 → 고객사 시스템 관리자가 "AXcellent 연결"에 키를 넣어 연결. 상단 "AXcellent with ○○"가 연결된 회사를 따라가고, 끊으면 회사 이름이 빠져요.
+- 연결 흐름: AXcellent 운영팀이 관제 센터에서 연결 키를 발급(키에는 회사 정보 없음) → 고객사가 처음 설정에서 키 확인 → 시스템 관리자 계정 만들기 → 회사 정보 입력 → 연결. 회사 연결 전에는 직원 계정이 로그인할 수 없어요. 상단 "AXcellent with ○○"가 연결된 회사를 따라가고, 끊으면 회사 이름이 빠져요.
 - 관제 센터는 우리 팀원만 쓰는 화면이라 고객사 로그인·프로필 전환에는 운영팀 계정이 나오지 않아요.
 - 오른쪽 위 **프로필 전환** 드롭다운으로 예시 직원 계정을 바꿔 가며 볼 수 있어요. 주소 뒤에 `?as=support`처럼 붙이면 그 계정으로 바로 들어가요. 계정 id는 `admin`, `infra`, `dev`, `planning`, `support`, `marketing`, `finance`, `hr`, `data`예요.
 - 화면 모양은 DejaFix common-frontend(보라 사이드바, 인디고, 각진 모서리) 하나만 써요.

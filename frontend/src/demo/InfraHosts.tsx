@@ -1,9 +1,19 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { useLocation } from 'react-router'
 import { ago } from '@/lib/format'
 import { useCompany } from './company'
 import { newId, now, privateIp, useHosts, type Host } from './store'
 
-// PC·서버 연결 (DejaFix 서비스): 자빅스처럼 회사 PC를 IP로 등록해 연결한다. 사내망 주소만 받아서 시스템이 회사 밖으로 열리지 않는다.
+// 사내 PC 연결 (시스템 관리자 /system/hosts, DejaFix 서비스 /hosts 같은 화면).
+// PC를 IP로 등록하면 Zabbix에 호스트 등록 → 에이전트 응답 확인 → DejaFix가 그 호스트를 읽기 시작하는 순서로 연결된다.
+// 데모라 실제 Zabbix는 부르지 않고 단계만 보여 준다. 사내망 주소만 받아서 시스템이 회사 밖으로 열리지 않는다.
+const FLOW = [
+  { title: 'Zabbix에 호스트 등록', note: 'host.create · 그룹 Windows · 템플릿 Windows by Zabbix agent active' },
+  { title: '에이전트 응답 확인', note: 'PC의 Zabbix agent 2가 첫 데이터를 보냄 (10051)' },
+  { title: 'DejaFix가 호스트 인식', note: 'DejaFix 읽기 전용 계정의 host.get에 새 PC가 보임' },
+  { title: '연결 완료', note: 'CPU·메모리·디스크 감시 시작, 장애가 나면 DejaFix 장애 대응으로' },
+] as const
+const FLOW_MS = 1200
 const STATUS: Record<Host['status'], { label: string; tone: string; dot: string }> = {
   online: { label: '연결됨', tone: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
   offline: { label: '응답 없음', tone: 'bg-red-50 text-red-700', dot: 'bg-red-500' },
@@ -17,6 +27,12 @@ export default function InfraHosts() {
   // 팀 이름은 회사가 정한다. 이미 쓰는 이름을 제안만 하고 새 이름도 받는다
   const teams = [...new Set(hosts.map((h) => h.dept))]
   const [error, setError] = useState<string | null>(null)
+  const { pathname } = useLocation()
+  const asAdmin = pathname.startsWith('/system')
+  // 지금 연결 중인 PC와 단계
+  const [flow, setFlow] = useState<{ id: string; name: string; step: number } | null>(null)
+  // 데모용 Zabbix 서버 주소: 회사 사내망의 .5
+  const zabbixHost = company ? company.network.replace(/\.\d+\/\d+$/, '.5') : '<Zabbix 서버>'
 
   const online = hosts.filter((h) => h.status === 'online').length
   const update = (id: string, patch: Partial<Host>) => setHosts((list) => list.map((h) => (h.id === id ? { ...h, ...patch } : h)))
@@ -35,15 +51,26 @@ export default function InfraHosts() {
     setHosts((list) => [...list, h])
     setError(null)
     setForm({ ...form, hostname: '', ip: '' })
-    setTimeout(() => update(h.id, { status: 'online', agent: 'AXcellent 0.9', lastSeen: now() }), 1200)
+    setFlow({ id: h.id, name: h.hostname, step: 0 })
   }
+
+  useEffect(() => {
+    if (!flow) return
+    if (flow.step >= FLOW.length - 1) {
+      update(flow.id, { status: 'online', agent: 'Zabbix agent 2 · DejaFix 감시 중', lastSeen: now() })
+      const t = setTimeout(() => setFlow(null), 2500)
+      return () => clearTimeout(t)
+    }
+    const t = setTimeout(() => setFlow((f) => (f ? { ...f, step: f.step + 1 } : f)), FLOW_MS)
+    return () => clearTimeout(t)
+  }, [flow]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-8 py-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-sm text-ink-500">DejaFix</p>
-          <h1 className="text-2xl font-semibold">PC·서버 연결</h1>
+          <p className="text-sm text-ink-500">{asAdmin ? '시스템 관리' : 'DejaFix'}</p>
+          <h1 className="text-2xl font-semibold">{asAdmin ? '사내 PC 연결' : 'PC·서버 연결'}</h1>
           <p className="mt-1 text-sm text-ink-500">회사 PC와 서버를 사내 IP로 연결하고 연결 상태를 챙깁니다.</p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
@@ -108,14 +135,40 @@ export default function InfraHosts() {
         </table>
       </section>
 
+      {flow && (
+        <section className="card space-y-3 p-6" aria-live="polite">
+          <h2 className="card-title">{flow.name} 연결 중</h2>
+          <ol className="space-y-2">
+            {FLOW.map((f, i) => {
+              const done = i < flow.step || (i === flow.step && flow.step === FLOW.length - 1)
+              const nowStep = i === flow.step && !done
+              return (
+                <li key={f.title} className={`flex flex-wrap items-center gap-3 rounded-xl px-4 py-2.5 text-sm ${nowStep ? 'bg-brand-50 font-semibold text-brand-700' : done ? 'text-ink-900' : 'text-ink-500'}`}>
+                  <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${done ? 'bg-emerald-700 text-white' : nowStep ? 'animate-pulse bg-brand-600 text-white' : 'bg-ink-100 text-ink-500'}`}>{done ? '✓' : i + 1}</span>
+                  {f.title}
+                  <span className="ml-auto text-xs font-normal text-ink-500">{f.note}</span>
+                </li>
+              )
+            })}
+          </ol>
+        </section>
+      )}
+
       <section className="card p-6">
         <h2 className="card-title">PC 추가</h2>
+        <div className="mt-3 space-y-1 rounded-2xl bg-app p-4 text-sm">
+          <p className="font-medium text-ink-900">1. 그 PC에 Zabbix agent 2를 설치해요</p>
+          <p className="break-all rounded-xl bg-[#1d1d3a] px-3 py-2 font-mono text-xs text-[#e4e4f4]">
+            msiexec /i zabbix_agent2-7.0-windows-amd64.msi /qn SERVER={zabbixHost} SERVERACTIVE={zabbixHost} HOSTNAME={form.hostname.trim() || '<PC 이름>'}
+          </p>
+          <p className="pt-1 font-medium text-ink-900">2. 아래에 PC 이름과 IP를 넣고 연결하면 Zabbix 등록부터 DejaFix 연결까지 이어서 해요</p>
+        </div>
         <form onSubmit={add} className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_1fr_auto]">
           <input className="field" list="host-teams" placeholder="사용하는 팀·위치 (예: 3층 CS실)" value={form.dept} onChange={(e) => setForm({ ...form, dept: e.target.value })} aria-label="사용하는 팀·위치" />
           <datalist id="host-teams">{teams.map((t) => <option key={t} value={t} />)}</datalist>
           <input className="field" placeholder="PC 이름 (예: mkt-pc-02)" value={form.hostname} onChange={(e) => setForm({ ...form, hostname: e.target.value })} aria-label="PC 이름" />
           <input className="field font-mono" placeholder="사내 IP (예: 192.168.10.42)" value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })} aria-label="IP" />
-          <button className="btn-primary">연결</button>
+          <button className="btn-primary" disabled={!!flow}>연결</button>
         </form>
         {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
       </section>

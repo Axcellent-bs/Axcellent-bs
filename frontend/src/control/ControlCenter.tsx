@@ -160,13 +160,13 @@ function Companies() {
   const keys = useKeys()
   // 키로 새로 연결한 회사(예시 목록에 없는 회사)는 맨 위에 붙인다
   const fresh = keys
-    .filter((k) => k.status === 'connected' && !COMPANIES.some((c) => c.id === k.company.id))
-    .map((k) => ({ ...COMPANIES[4], ...k.company, version: LATEST_VERSION, lastSeenMin: 0, health: 'ok' as Health, pcs: 1, services: 4, incidentsToday: 0 }))
+    .flatMap((k) => (k.status === 'connected' && k.company && !COMPANIES.some((c) => c.id === k.company!.id) ? [k.company] : []))
+    .map((company) => ({ ...COMPANIES[4], ...company, version: LATEST_VERSION, lastSeenMin: 0, health: 'ok' as Health, pcs: 1, services: 4, incidentsToday: 0 }))
   const rows = [...fresh, ...COMPANIES]
   return (
     <Page title="고객사" desc="회사별 설치 버전, 켠 서비스, 마지막 연결 시각이에요.">
       <p className="bg-brand-50 px-4 py-3 text-sm text-brand-700">
-        연결은 고객사 시스템 관리자가 발급받은 키를 넣어서 해요(연결 키 발급 탭). 이 데모에 지금 연결된 회사: <b>{current?.name ?? '없음'}</b>
+        연결은 고객사 시스템 관리자가 발급받은 키를 넣고 회사 정보를 입력해서 해요(연결 키 발급 탭). 이 데모에 지금 연결된 회사: <b>{current?.name ?? '없음'}</b>
       </p>
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[920px] text-sm">

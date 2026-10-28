@@ -44,8 +44,10 @@ const SYSTEM_PATHS = ['/system']
 export const servicesOf = (account: Account, enabled = getEnabled()) =>
   SERVICES.filter((s) => account.services.includes(s.id) && enabled.includes(s.id))
 
-export function canOpen(account: Account, path: string, enabled = getEnabled()) {
+export function canOpen(account: Account, path: string, enabled = getEnabled(), connected = !!getCompany()) {
   if (account.operator) return matchPath('/control', path)
+  // 회사 연결 전: 시스템 관리자는 AXcellent 연결만, 직원은 아무 화면도 못 연다
+  if (!connected) return !!account.admin && matchPath('/system/connect', path)
   const bases = [
     ...SHARED_PATHS,
     ...(account.admin ? SYSTEM_PATHS : []),
@@ -56,7 +58,10 @@ export function canOpen(account: Account, path: string, enabled = getEnabled()) 
 
 /** 로그인 뒤 처음 여는 화면: 운영팀은 관제 센터, 고객사 시스템 관리자는 서비스 고르기(연결 전이면 AXcellent 연결), 나머지는 첫 서비스(없으면 AI 대화방) */
 export const homeOf = (account: Account, enabled = getEnabled()) =>
-  account.operator ? '/control' : account.admin ? (getCompany() ? '/system/services' : '/system/connect') : servicesOf(account, enabled)[0]?.entry ?? '/agents/chat'
+  account.operator ? '/control'
+    : account.admin ? (getCompany() ? '/system/services' : '/system/connect')
+    : !getCompany() ? '/login'
+    : servicesOf(account, enabled)[0]?.entry ?? '/agents/chat'
 
 const KEY = 'axcellent-demo-account'
 const load = (): Account | null => {

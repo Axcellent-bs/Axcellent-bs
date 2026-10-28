@@ -24,8 +24,10 @@ import Integrations from '@/demo/Integrations'
 import LoginPage from '@/demo/LoginPage'
 import { canOpen, homeOf, useSession } from '@/demo/session'
 import { useEnabledServices } from '@/demo/services'
+import { useCompany } from '@/demo/company'
 import ServiceCatalog from '@/demo/ServiceCatalog'
 import CompanyConnect from '@/demo/CompanyConnect'
+import Setup from '@/demo/Setup'
 import CatalogHome from '@/demo/CatalogHome'
 import ControlCenter from '@/control/ControlCenter'
 import OperatorLogin from '@/control/OperatorLogin'
@@ -36,6 +38,8 @@ export function App() {
       {/* 로그인 전에도 여는 메인: 서비스 제품군 카탈로그 */}
       <Route path="/" element={<CatalogHome />} />
       <Route path="/login" element={<LoginPage />} />
+      {/* 처음 설치했을 때: 연결 키 → 시스템 관리자 계정 → 회사 정보 */}
+      <Route path="/setup" element={<Setup />} />
       {/* AXcellent 운영팀 전용 입구 */}
       <Route path="/control/login" element={<OperatorLogin />} />
       <Route path="*" element={<Guarded><Pages /></Guarded>} />
@@ -48,8 +52,9 @@ function Guarded({ children }: { children: ReactNode }) {
   const { account } = useSession()
   const { pathname } = useLocation()
   const enabled = useEnabledServices()
+  const company = useCompany()
   if (!account) return <Navigate to={pathname.startsWith('/control') ? '/control/login' : '/'} replace />
-  if (!canOpen(account, pathname, enabled)) return <Navigate to={homeOf(account, enabled)} replace />
+  if (!canOpen(account, pathname, enabled, !!company)) return <Navigate to={homeOf(account, enabled)} replace />
   return <>{children}</>
 }
 
@@ -80,7 +85,7 @@ function Pages() {
           <Route path="/infra" element={<Incidents />} />
           {/* 예전 DejaFix 화면 주소(/infra/reports 등)는 현재 장애로. 리포트·변경 계획은 DejaFix 화면에서 본다 */}
           <Route path="/infra/*" element={<Navigate to="/infra" replace />} />
-          <Route path="/system/hosts" element={<Navigate to="/hosts" replace />} />
+          <Route path="/system/hosts" element={<InfraHosts />} />
           <Route path="/system/services" element={<ServiceCatalog />} />
           <Route path="/system/connect" element={<CompanyConnect />} />
           <Route path="/control/*" element={<ControlCenter />} />
