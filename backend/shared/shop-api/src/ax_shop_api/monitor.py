@@ -11,6 +11,7 @@ import math
 import os
 from collections import deque
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from ax_contracts.schemas import EventType, ShopDegradedData
 from ax_shop_api import outbox
@@ -75,10 +76,19 @@ class Monitor:
         return None
 
     def _enqueue(
-        self, event_type: EventType, metric: str, value: float | None, threshold: float | None
+        self,
+        event_type: EventType,
+        metric: str,
+        value: float | None,
+        threshold: float | None,
+        since: float | None = None,
     ) -> None:
         data = ShopDegradedData(
-            component=COMPONENT, metric_code=metric, value=value, threshold=threshold
+            component=COMPONENT,
+            metric_code=metric,
+            value=value,
+            threshold=threshold,
+            since=datetime.fromtimestamp(since, UTC) if since is not None else None,
         )
         with self.db.tx() as conn:
             if event_type == EventType.SHOP_DEGRADED:
@@ -110,7 +120,7 @@ class Monitor:
         if not self.degraded and now - self._breach_since >= self.thresholds.sustain_s:
             self.degraded = True
             self._metric_code = breach[0]
-            self._enqueue(EventType.SHOP_DEGRADED, *breach)
+            self._enqueue(EventType.SHOP_DEGRADED, *breach, since=self._breach_since)
 
     def reset(self) -> None:
         """장애를 해제할 때: 지난 표본을 버리고, 장애 상태였다면 `shop.recovered`를 발행한다.

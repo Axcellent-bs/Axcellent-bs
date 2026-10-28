@@ -17,6 +17,10 @@ import type { CommLine } from "@/lib/types";
 // 장애는 이 화면에서 일으키지 않는다(사람이 요청하면 운영자가 캣북스에 넣는다). 화면은 캣북스 결제 상태만 읽어 보여 준다.
 
 const POLL_MS = 3000;
+// AI들은 1초 안에 수십 건을 주고받는다. 새로 도착한 메시지는 줄 세워 하나씩 보여 준다 (밀리면 조금 빠르게)
+const REVEAL_MS = 600;
+const REVEAL_FAST_MS = 200;
+const FAST_BACKLOG = 20;
 const ORCH_CMD = "cd backend && bash scripts/run_all.sh";
 
 /** unready = 서버는 답했지만 503 (공통 로그 읽기가 아직 연결 안 됨) */
@@ -222,6 +226,7 @@ export default function AgentChat() {
   const [busyHold, setBusyHold] = useState<string | null>(null);
   const [fault, setFault] = useState<FaultState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
     const [inc, exe, com] = await Promise.allSettled([orchestrator.incidents(), finance.executions(), api.communications()]);
@@ -239,6 +244,7 @@ export default function AgentChat() {
       setCommTruncated(false);
       setCommConn(com.reason instanceof ApiError && com.reason.status === 503 ? "unready" : "off");
     }
+    setLoaded(true);
   }, []);
 
   // 3초마다 새로고침. 탭이 가려져 있으면 쉬고, 다시 보이면 바로 한 번
@@ -281,27 +287,67 @@ export default function AgentChat() {
 
   const items = useMemo(() => buildTimeline(incidents, executions, comms, room), [incidents, executions, comms, room]);
 
+  // ------------------------------------------------ 새 사건이 열리면 그 방으로 옮겨 처음부터 차례로 보여 준다
+  // 화면을 연 순간 이미 있던 사건은 옮기지 않는다
+  const knownIncidents = useRef<Set<string> | null>(null);
+  const replayRoom = useRef<string | null>(null);
+  useEffect(() => {
+    if (orchConn !== "on") return;
+    const ids = incidents.map((i) => i.context_id);
+    if (knownIncidents.current === null) { knownIncidents.current = new Set(ids); return; }
+    const opened = ids.find((id) => !knownIncidents.current?.has(id));
+    for (const id of ids) knownIncidents.current.add(id);
+    if (opened) { replayRoom.current = opened; setRoom(opened); }
+  }, [incidents, orchConn]);
+
+  // ------------------------------------------------ 하나씩 보여 주기
+  // 방을 열 때 이미 있던 기록은 한 번에(지난 기록을 다시 재생하지 않음), 그 뒤에 도착한 것은 하나씩
+  const [revealed, setRevealed] = useState(0);
+  const primed = useRef(false);
+  useLayoutEffect(() => { primed.current = false; }, [room]);
+  useLayoutEffect(() => {
+    if (primed.current || !loaded) return;
+    primed.current = true;
+    if (replayRoom.current === room) { replayRoom.current = null; setRevealed(0); return; }
+    setRevealed(items.length);
+  }, [room, items.length, loaded]);
+  useEffect(() => {
+    if (!primed.current || revealed >= items.length) return;
+    const backlog = items.length - revealed;
+    const t = setTimeout(() => setRevealed((r) => r + 1), backlog > FAST_BACKLOG ? REVEAL_FAST_MS : REVEAL_MS);
+    return () => clearTimeout(t);
+  }, [revealed, items.length]);
+  const shown = useMemo(() => items.slice(0, Math.min(revealed, items.length)), [items, revealed]);
+  const typing = primed.current && revealed < items.length;
+
   // ------------------------------------------------ 스크롤: 맨 아래에 붙어 있으면 따라가고, 위로 올렸으면 "새 메시지" 알약
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const lastLen = useRef(0);
   const [fresh, setFresh] = useState(0);
-  const toBottom = useCallback(() => {
+  // 화면이 스스로 내린 스크롤은 "사람이 위로 올림"으로 보지 않는다 (부드러운 스크롤 도중의 scroll 이벤트)
+  const autoScrollAt = useRef(0);
+  const toBottom = useCallback((smooth = false) => {
     const el = scroller.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el) {
+      autoScrollAt.current = Date.now();
+      el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+    }
     pinned.current = true;
     setFresh(0);
   }, []);
   useLayoutEffect(() => { lastLen.current = 0; pinned.current = true; }, [room]);
   useLayoutEffect(() => {
-    const added = messageCount(items) - lastLen.current;
-    lastLen.current = messageCount(items);
-    if (pinned.current) toBottom();
+    const now = messageCount(shown);
+    const added = now - lastLen.current;
+    const first = lastLen.current === 0;
+    lastLen.current = now;
+    if (pinned.current) toBottom(!first);
     else if (added > 0) setFresh((f) => f + added);
-  }, [items, toBottom]);
+  }, [shown, toBottom]);
   const onScroll = () => {
     const el = scroller.current;
-    if (!el) return;
+    if (!el || Date.now() - autoScrollAt.current < 600) return;
     pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     if (pinned.current) setFresh(0);
   };
@@ -361,14 +407,15 @@ export default function AgentChat() {
               )}
               {room === ALL_ROOM && <CommNote conn={commConn} truncated={commTruncated} />}
               <ol role="log" aria-live="polite" aria-relevant="additions" aria-label="부서 AI 대화" className="flex flex-col gap-4">
-                {items.map((it) => <Item key={it.id} it={it} busyHold={busyHold} orchOn={orchOn} orchMock={orchMock} onDecide={decide} />)}
+                {shown.map((it) => <Item key={it.id} it={it} busyHold={busyHold} orchOn={orchOn} orchMock={orchMock} onDecide={decide} />)}
+                {typing && <p className="animate-pulse px-1 text-xs text-ink-500" aria-live="polite">AI들이 이야기하는 중… ({items.length - revealed}개 남음)</p>}
               </ol>
               <p className="mt-6 text-center text-[11px] text-ink-500">{PROD_NOTE}</p>
               </>
             )}
           </div>
           {fresh > 0 && (
-            <button onClick={toBottom}
+            <button onClick={() => toBottom(true)}
               className="btn-primary absolute bottom-4 left-1/2 -translate-x-1/2 shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500">
               새 메시지 {fresh}개 ↓
             </button>

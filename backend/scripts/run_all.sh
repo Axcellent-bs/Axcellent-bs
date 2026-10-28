@@ -3,6 +3,7 @@
 #   bash backend/scripts/run_all.sh          # 실제 모드: 실제 LLM·실제 토큰·Redis·파일 DB, 캣북스 고객 주문 트래픽
 #   bash backend/scripts/run_all.sh mock     # 목 모드(예전 방식): 시드 데이터·가짜 LLM, 네트워크 없이 화면 확인용
 #   bash backend/scripts/run_all.sh stop     # 이 스크립트가 띄운 것 끄기
+#   bash backend/scripts/run_all.sh reset    # 끄고 테스트로 쌓인 기록(.data·이벤트 버스)을 지운다
 # 먼저 backend/ 에서 `uv sync --all-packages` 한 번. 로그는 backend/.logs/<이름>.log
 #
 # 실제 모드에 필요한 것
@@ -54,6 +55,16 @@ stop_all() {
 if [ "${1:-}" = "stop" ]; then
   stop_all
   echo "stopped"
+  exit 0
+fi
+
+# 테스트로 쌓인 기록을 지우고 처음부터: 캣북스 주문·AI 대화 기록·인사 기록·LLM 사용량·이벤트 버스
+# (캣북스 쇼핑몰은 비어 있으면 시드를 다시 넣는다)
+if [ "${1:-}" = "reset" ]; then
+  stop_all
+  rm -f "$DATA"/*.db "$DATA"/*.db-wal "$DATA"/*.db-shm "$DATA"/web.env
+  docker exec ax-redis redis-cli FLUSHALL >/dev/null 2>&1 || true
+  echo "reset: backend/.data 와 이벤트 버스를 비웠습니다. 다시 켜려면 bash scripts/run_all.sh"
   exit 0
 fi
 

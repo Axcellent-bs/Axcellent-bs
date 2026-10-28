@@ -92,6 +92,8 @@ class Incident:
     title: str
     component: str
     opened_at: datetime = field(default_factory=now)
+    # 신호가 알려 준 장애 시작 시각 (shop.degraded data.since). 없으면 None
+    since: datetime | None = None
     closed_at: datetime | None = None
     status: str = "open"
     steps: dict[str, StepRun] = field(default_factory=dict)
