@@ -50,24 +50,39 @@ export interface DemoRequest {
 
 // ---------------------------------------------------------------- 이름표
 export const DEPT_KO: Record<string, string> = {
-  orchestrator: "중앙 Agent(총괄)", planning: "기획개발", support: "고객지원", marketing: "마케팅", hr: "인사",
-  finance: "재무", data: "데이터분석", infra: "인프라", safety: "안전 관문", memory: "회사 기억", "shop-api": "판매 사이트",
+  orchestrator: "총괄 AI", planning: "기획개발", support: "고객지원", marketing: "마케팅", hr: "인사",
+  finance: "재무", data: "데이터분석", infra: "장애 대응", safety: "안전 관문", memory: "회사 기억", "shop-api": "캣북스 쇼핑몰",
+  "dashboard-api": "AXcellent 화면",
 };
-const NOT_AGENT = new Set(["orchestrator", "safety", "memory", "shop-api"]);
-/** 말하는 쪽 이름. 부서는 "{부서} Agent", 총괄·안전 관문 등은 그대로 */
+// 백엔드는 서비스 단위로 나뉘어 있다(backend/README.md). 서비스 이름 → 화면 메뉴의 AI 이름
+const SERVICE_DEPT: Record<string, string> = {
+  inquiry: "support", claims: "support", reviews: "support", coupon: "marketing", handover: "hr", decisions: "hr",
+  dev: "planning", incident: "infra",
+};
+const SERVICE_KO: Record<string, string> = {
+  inquiry: "고객 문의", claims: "클레임·보상", reviews: "리뷰·지식", coupon: "공지·쿠폰", handover: "인수인계", decisions: "결정 기록",
+  dev: "개발·배포", planning: "요청·기획서", incident: "장애 대응",
+};
+const NOT_AGENT = new Set(["orchestrator", "safety", "memory", "shop-api", "dashboard-api"]);
+/** 말하는 쪽 이름. 부서·서비스는 "{부서} AI", 총괄·안전 관문 등은 그대로 */
 export function speaker(dept: string | null | undefined): string {
   if (!dept) return "담당 미정";
-  const ko = DEPT_KO[dept] ?? dept;
-  return NOT_AGENT.has(dept) ? ko : `${ko} Agent`;
+  const key = SERVICE_DEPT[dept] ?? dept;
+  const ko = DEPT_KO[key] ?? dept;
+  return NOT_AGENT.has(key) || key === "infra" ? ko : `${ko} AI`;
 }
+/** 서비스 이름(마우스를 올리면 보이는 설명용). 부서와 같으면 비운다 */
+export const serviceKo = (name: string | null | undefined) => (name ? SERVICE_KO[name] ?? null : null);
 
-export const INCIDENT_STATUS_KO: Record<string, string> = { open: "진행 중", resolved: "해결", degraded: "일부 미완료" };
+export const INCIDENT_STATUS_KO: Record<string, string> = { open: "AI가 처리 중", resolved: "해결됨", degraded: "사람 확인 필요" };
 
 // 사건 이름. 총괄은 "payment 장애 감지 (error_rate_5xx)"처럼 코드로 주므로 사람이 읽는 말로 바꾼다
 const COMPONENT_KO: Record<string, string> = { payment: "결제", api: "판매 사이트", db: "주문 DB", search: "검색", shipping: "배송" };
+// 제목은 "결제가 서버 오류로 자꾸 실패해요"처럼 한 문장. 코드(5xx·p95)는 마우스를 올리면 보인다
 const METRIC_KO: Record<string, string> = {
-  error_rate_5xx: "서버 오류(5xx) 급증", p95_latency_ms: "응답 지연", order_fail_rate: "주문 실패율 상승", payment_fail_rate: "결제 실패율 상승",
+  error_rate_5xx: "서버 오류로 자꾸 실패해요", p95_latency_ms: "응답이 느려졌어요", order_fail_rate: "주문 실패가 늘었어요", payment_fail_rate: "실패가 늘었어요",
 };
+const SUBJECT_KO: Record<string, string> = { payment: "결제가", api: "쇼핑몰이", db: "주문 DB가", search: "검색이", shipping: "배송이" };
 /** 총괄 제목 끝의 "(metric)"에서 지표 코드를 꺼낸다 */
 function metricOf(inc: OrchIncident): string | null {
   return /\(([^)]+)\)\s*$/.exec(inc.title)?.[1] ?? null;
@@ -83,11 +98,12 @@ function idsOf(output: Record<string, unknown> | null | undefined): string[] {
 }
 const rawOf = (...parts: (string | null | undefined | false)[]) => parts.filter(Boolean).join(" · ") || undefined;
 
-/** 방 이름: "결제 장애 — 서버 오류(5xx) 급증" */
+/** 방 이름: "결제가 서버 오류로 자꾸 실패해요" */
 export function incidentTitle(inc: OrchIncident): string {
   const comp = COMPONENT_KO[inc.component] ?? inc.component;
   const metric = metricOf(inc);
-  return metric ? `${comp} 장애 — ${METRIC_KO[metric] ?? metric}` : `${comp} 장애`;
+  const subject = SUBJECT_KO[inc.component] ?? `${comp}이(가)`;
+  return metric && METRIC_KO[metric] ? `${subject} ${METRIC_KO[metric]}` : `${comp}에 문제가 생겼어요`;
 }
 
 // skill·액션 이름표. 화면에는 이 이름만 보이고 코드 이름은 마우스를 올리면(툴팁) 보인다
@@ -107,6 +123,12 @@ const ACTION_KO: Record<string, string> = {
   get_claim: "클레임 조회", receive_return: "반품 입고", inspect_return: "반품 검수", create_ticket: "변경 요청 접수",
   generate_pr: "코드 변경 만들기", merge_pr: "코드 변경 합치기", confirm_spec: "기획서 확정",
   start_handover: "인수인계 시작", answer_handover_question: "인수인계 질문 답변", decide_candidate_card: "후보 기록 결정",
+  request_incident_compensation: "피해 고객 한꺼번에 보상", suggest_compensation: "보상안 제안", diagnose_payment: "결제 기록 확인",
+  kpi_summary: "핵심 지표 정리", "memory.card_write": "회사 기억에 남기기", "memory.card_link": "회사 기억 연결",
+  find_active_incident: "진행 중인 사건 찾기", create_inquiry: "고객 문의 접수", list_inquiries: "문의 목록 조회",
+  get_inquiry: "문의 조회", inquiry_overview: "문의 현황 조회", list_claims: "클레임 목록 조회", claim_stats: "클레임 통계",
+  claim_queue: "보상 대기열 조회", process_claim_queue: "보상 대기열 처리", customer_signals: "고객 이상 신호 조회",
+  release_fault_injection: "쇼핑몰 장애 해제", receive_change_result: "변경 결과 받기",
 };
 export const actionKo = (a: string) => ACTION_KO[a] ?? a;
 /** 코드 이름 → 사람이 읽는 이름. 모르는 이름은 밑줄을 띄어 쓴다 */
@@ -147,6 +169,9 @@ const FIELD_KO: Record<string, string> = {
   failed_orders: "실패 주문", affected_customers: "영향 고객", lost_amount: "매출 손실", compensation_coupon_count: "보상 쿠폰",
   compensation_total: "보상 합계", total_loss: "총 손실", recovered: "복구", infra_metrics_ok: "지표 정상", card_id: "기록 id",
   channel_code: "게시 위치", state: "상태", match: "금액 일치", pr_number: "코드 변경 번호", severity: "심각도", grade: "등급",
+  kind: "종류", incidents: "사건", auto_handled_rate: "자동 처리율", escalation_count: "사람에게 넘김", count: "건수",
+  requested: "요청", unit_value: "1건 금액", reason_code: "사유", coupon_count: "쿠폰", outcome: "결과",
+  avg_handle_seconds: "평균 처리 시간(초)", related_prs: "관련 PR", by_category: "분류별",
 };
 /** 코드 값 → 사람이 읽는 말 */
 const VALUE_KO: Record<string, string> = {
@@ -156,6 +181,9 @@ const VALUE_KO: Record<string, string> = {
   completed: "완료", failed: "실패", skipped: "건너뜀", critical: "매우 높음",
   // 구성요소
   payment: "결제", api: "판매 사이트", db: "주문 DB", search: "검색", shipping: "배송",
+  // 공지·보상 종류
+  incident_opened: "장애 시작 알림", incident_resolved: "복구 알림", payment_failure: "결제 장애 보상", card_created: "기록 만듦",
+  undetermined: "원인 미확정",
 };
 /** id·번호는 사람에게 의미가 적어 말풍선에 넣지 않는다 (툴팁의 코드 정보로만) */
 const ID_KEY = /(^|_)id$|_ids$/;
@@ -174,14 +202,17 @@ export function safeFacts(output: Record<string, unknown> | null | undefined): F
   for (const [key, value] of Object.entries(output)) {
     if (facts.length >= MAX_FACTS) break;
     if (key.startsWith("_") || UNSAFE_KEYS.has(key) || ID_KEY.test(key)) continue;
-    const label = FIELD_KO[key] ?? key;
+    // 이름표가 없는 코드 이름은 말풍선에 띄우지 않는다 (마우스를 올리면 보이는 코드 정보에는 남는다)
+    const label = FIELD_KO[key];
+    if (!label) continue;
     if (typeof value === "number" && Number.isFinite(value)) {
-      facts.push({ label, value: MONEY.test(key) ? `${fmtNum(value)}원` : fmtNum(value) });
+      const shown = /_rate$/.test(key) && value <= 1 ? `${Math.round(value * 100)}%` : MONEY.test(key) || key === "unit_value" ? `${fmtNum(value)}원` : fmtNum(value);
+      facts.push({ label, value: shown });
     } else if (typeof value === "boolean") {
       facts.push({ label, value: value ? "예" : "아니오" });
     } else if (typeof value === "string" && SAFE_TOKEN.test(value)) {
       facts.push({ label, value: VALUE_KO[value] ?? value });
-    } else if (Array.isArray(value)) {
+    } else if (Array.isArray(value) && value.length > 0) {
       // 목록은 개수만. 단, 안전한 토큰 몇 개는 보여 준다 (PR 번호·버전 등)
       const tokens = value
         .map((v) => (typeof v === "number" ? `#${v}` : typeof v === "string" && SAFE_TOKEN.test(v) ? VALUE_KO[v] ?? v : pickToken(v)))
@@ -251,7 +282,7 @@ export function incidentItems(inc: OrchIncident): ChatItem[] {
   const out: ChatItem[] = [];
   const opened = inc.opened_at ?? inc.events[0]?.at ?? "";
   out.push({ kind: "separator", id: `${room}:sep`, at: opened, room, text: `${incidentTitle(inc)}${opened ? ` · ${clockKo(opened)} 시작` : ""}`, raw: `사건 번호 ${inc.context_id}`, variant: "topic" });
-  out.push({ kind: "system", id: `${room}:open`, at: opened, room, text: `판매 사이트에서 ${incidentTitle(inc)} 신호가 와서 사건이 열렸습니다.` });
+  out.push({ kind: "system", id: `${room}:open`, at: opened, room, text: `캣북스 쇼핑몰이 "${incidentTitle(inc)}" 신호를 보내서 총괄 AI가 사건을 열었어요.` });
 
   for (const step of inc.steps) {
     const sid = `${room}:${step.step_id}`;
@@ -418,14 +449,36 @@ export function commItem(line: CommLine, room: string, safetyIds: ReadonlySet<st
   const label = COMM_OUTCOME_KO[line.outcome] ?? line.outcome;
   const dupOf = line.execution_id && safetyIds.has(line.execution_id) ? line.execution_id : undefined;
   const tag = ["공통 로그 기록", dupOf ? "안전 관문 방에 같은 건이 있음" : null].filter(Boolean).join(" · ");
-  const raw = rawOf(line.skill ? `skill: ${line.skill}` : null, line.execution_id, line.context_id);
+  const raw = rawOf(
+    line.skill ? `skill: ${line.skill}` : null,
+    [line.from_agent, line.to_agent].filter(Boolean).join(" → "),
+    line.execution_id,
+    line.context_id,
+  );
   const holdHint = line.outcome === "held" && !dupOf ? " — 안전 관문 보류 큐(/finance)에서 결정" : "";
   return {
     kind: "msg", id: `log:${line.log_id}`, at: line.occurred_at, room,
     from: speaker(line.from_agent), to: line.to_agent ? speaker(line.to_agent) : "받는 쪽 미기록",
     fromKey: line.from_agent, central: line.from_agent === CENTRAL,
-    text: `${line.skill ? skillKo(line.skill) : skill}: ${label}${holdHint}`, tag, raw, tone: COMM_TONE[line.outcome] ?? "muted", facts: [], dupOf,
+    text: `${commSentence(line.skill ? skillKo(line.skill) : skill, line.outcome, label, line.from_agent)}${holdHint}`, tag, raw, tone: COMM_TONE[line.outcome] ?? "muted", facts: [], dupOf,
   };
+}
+
+/** 공통 로그 한 줄을 대화체로. 요청은 부탁, 결과는 알림 */
+function commSentence(what: string, outcome: string, label: string, from?: string | null): string {
+  // 안전 관문 기록은 "부탁"이 아니라 실행해도 되는지 판정하는 쪽이다
+  if (from === "safety") {
+    if (outcome === "in_progress") return `${what} — 실행해도 되는지 확인하고 있어요`;
+    if (outcome === "completed") return `${what} — 실행해도 돼요`;
+  }
+  switch (outcome) {
+    case "in_progress": return `${what} 부탁해요`;
+    case "completed": return `${what} 끝났어요`;
+    case "rejected": return `${what} — 할 수 없어서 거절했어요`;
+    case "held": return `${what} — 보류했어요 (사람 결정 대기)`;
+    case "needs_human": return `${what} — 사람 확인이 필요해요`;
+    default: return `${what}: ${label}`;
+  }
 }
 
 /** 소통 줄을 방별 말풍선으로. 총괄 기록과 겹치는 줄은 빼고, 안전 관문과 겹치는 줄은 `dupOf`를 단다 */

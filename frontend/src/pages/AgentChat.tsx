@@ -1,41 +1,28 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ALL_ROOM, DIRECT_ROOM, INCIDENT_STATUS_KO, SAFETY_ROOM, buildTimeline, incidentTitle, messageCount,
-  type ChatItem, type DemoRequest, type OrchIncident, type Tone,
+  type ChatItem, type OrchIncident, type Tone,
 } from "@/lib/agentChat";
 import { api, ApiError } from "@/lib/api";
 import { finance, type ExecutionRecord } from "@/lib/finance";
 import { Link } from "@/lib/nav";
 import { orchestrator } from "@/lib/orchestrator";
-import { shopFaults, type FaultKind, type FaultState } from "@/lib/shopFaults";
+import { shopFaults, type FaultState } from "@/lib/shopFaults";
 import type { CommLine } from "@/lib/types";
 
 // AI 대화방. 부서 AI들이 A2A로 주고받은 일을 메신저처럼 보여 준다.
 // 말풍선 문장은 lib/agentChat.ts가 기록된 값으로만 만든다. 이 파일은 화면과 새로고침만 맡는다.
 // 출처 세 곳: 총괄(사건·단계), 안전 관문(돈이 나가는 실행), dashboard-api 공통 로그(부서 간 소통).
 // 운영 환경에서는 총괄·안전 관문 기록도 dashboard-api를 거쳐 읽어야 한다 (지금은 개발용 직접 호출, 백엔드 후속 작업).
-// 총괄이 실제 모드(meta.mock=false)면 가짜 신호 대신 고객사 쇼핑몰(캣북스)에 실제 결제 장애를 넣는다 (lib/shopFaults.ts).
+// 장애는 이 화면에서 일으키지 않는다(사람이 요청하면 운영자가 캣북스에 넣는다). 화면은 캣북스 결제 상태만 읽어 보여 준다.
 
 const POLL_MS = 3000;
 const ORCH_CMD = "cd backend && bash scripts/run_all.sh";
-
-const REAL_FAULTS: { id: FaultKind; label: string; hint: string }[] = [
-  { id: "failure", label: "결제 오류 — 서버 오류(5xx)", hint: "캣북스 결제 서버가 모든 결제를 5xx로 실패시킵니다. 감시가 20초쯤 이어지는 걸 확인하면 사건이 열립니다." },
-  { id: "latency", label: "결제 지연 — 응답 2초", hint: "캣북스 결제 응답이 2초 늦어집니다. p95가 기준을 넘는 상태가 이어지면 사건이 열립니다." },
-];
 
 /** unready = 서버는 답했지만 503 (공통 로그 읽기가 아직 연결 안 됨) */
 type Conn = "unknown" | "on" | "off" | "unready";
 const PROD_NOTE = "운영 환경에서는 AXcellent가 총괄·안전 관문 기록도 dashboard-api를 거쳐 읽어야 합니다 (지금은 개발용으로 각 서버를 직접 부름).";
 
-// 이 화면에서 시작한 사건이 어느 시나리오였는지 기억한다 (방 이름에 쓰는 편의 기능, 없어도 동작)
-const SCENARIO_KEY = "agentChat.scenarios";
-function loadScenarioNames(): Record<string, string> {
-  try { return JSON.parse(localStorage.getItem(SCENARIO_KEY) ?? "{}") as Record<string, string>; } catch { return {}; }
-}
-function saveScenarioNames(v: Record<string, string>) {
-  try { localStorage.setItem(SCENARIO_KEY, JSON.stringify(v)); } catch { /* 저장 못 해도 화면은 그대로 */ }
-}
 const clock = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" }) : "");
 
 // ---------------------------------------------------------------- 부서별 말풍선 색 (디자인 토큰만 사용)
@@ -146,7 +133,7 @@ function HoldBanner({ h, busy, canDecide, orchMock, onDecide }: {
       </div>
       <p className="mt-1 text-[11px] opacity-75">
         {h.detail}
-        {showButtons && h.state === "pending" && " · 목 모드 데모 전용 버튼입니다. 중앙 Agent는 스스로 승인하지 않고, 여기서 누른 결정을 그대로 전달합니다."}
+        {showButtons && h.state === "pending" && " · 목 모드 데모 전용 버튼입니다. 총괄 AI는 스스로 승인하지 않고, 여기서 누른 결정을 그대로 전달합니다."}
         {orchHold && !orchMock && h.state === "pending" && " · 실제 모드에서는 C 등급 보류를 안전 관문 보류 큐 한 곳에서만 결정합니다 (이 화면의 총괄 결정 경로는 사람 확인이 없어 목 모드에서만 씁니다)."}
       </p>
     </li>
@@ -220,31 +207,6 @@ function RoomList({ rooms, selected, unseen, onSelect }: { rooms: Room[]; select
 }
 
 // ---------------------------------------------------------------- 페이지
-const DEMO_OPTIONS: { key: keyof DemoRequest; label: string }[] = [
-  { key: "hold_rollback", label: "롤백을 C 등급 보류로 (사람 승인 대기)" },
-  { key: "fail_marketing", label: "공지 게시 한 번 실패 (재시도)" },
-  { key: "wrong_owner", label: "공지 게시 소관 아님 (이관)" },
-  { key: "infra_card_empty", label: "인프라 카드 비어 있음 (건너뜀)" },
-];
-
-// 이름 붙인 장애 시나리오. 총괄 목 모드의 옵션 조합이다 (장애 종류 자체는 결제 장애 plan 하나뿐)
-const SCENARIOS: { id: string; label: string; hint: string; req: DemoRequest }[] = [
-  { id: "auto", label: "결제 장애 — 모두 자동 해결", hint: "진단·롤백·공지·보상·손실 리포트까지 사람 없이 끝납니다.", req: {} },
-  { id: "hold", label: "롤백 확신도 낮음 — 사람 승인", hint: "원인 진단의 확신이 낮아 롤백이 🚩 사람 승인 대기로 멈춥니다. 승인·거절해 보세요.", req: { hold_rollback: true } },
-  { id: "retry", label: "공지 게시 실패 — 재시도로 복구", hint: "마케팅 공지가 한 번 실패하고 중앙 Agent가 다시 시도합니다.", req: { fail_marketing: true } },
-  { id: "transfer", label: "공지 담당 착오 — 다른 부서로 이관", hint: "공지 요청을 받은 부서가 '소관 아님'으로 돌려보내 중앙 Agent가 이관합니다.", req: { wrong_owner: true } },
-  { id: "partial", label: "인프라 AI 연결 끊김 — 일부 건너뛰고 종료", hint: "인프라 카드가 비어 진단·롤백을 건너뛰고 부분 종료합니다.", req: { infra_card_empty: true } },
-  { id: "storm", label: "겹친 사고 — 실패·이관·보류 한꺼번에", hint: "공지 실패, 이관, 롤백 승인 대기가 한 사건에서 모두 일어납니다.", req: { hold_rollback: true, fail_marketing: true, wrong_owner: true } },
-  { id: "random", label: "무작위", hint: "위 옵션을 무작위로 섞어 시작합니다.", req: {} },
-  { id: "custom", label: "직접 고르기", hint: "아래 옵션을 직접 골라 시작합니다.", req: {} },
-];
-
-function randomDemo(): DemoRequest {
-  const req: DemoRequest = {};
-  for (const o of DEMO_OPTIONS) if (Math.random() < 0.4) req[o.key] = true;
-  return req;
-}
-
 export default function AgentChat() {
   const [incidents, setIncidents] = useState<OrchIncident[]>([]);
   const [executions, setExecutions] = useState<ExecutionRecord[]>([]);
@@ -257,16 +219,8 @@ export default function AgentChat() {
   const [orchMock, setOrchMock] = useState(false);
   const [room, setRoom] = useState(ALL_ROOM);
   const [seen, setSeen] = useState<Record<string, number>>({});
-  const [scenario, setScenario] = useState("hold");
-  const [demo, setDemo] = useState<DemoRequest>({ hold_rollback: true });
-  const picked = SCENARIOS.find((s) => s.id === scenario) ?? SCENARIOS[0];
-  const [starting, setStarting] = useState(false);
-  const [scenarioNames, setScenarioNames] = useState<Record<string, string>>(loadScenarioNames);
   const [busyHold, setBusyHold] = useState<string | null>(null);
-  const [faultKind, setFaultKind] = useState<FaultKind>("failure");
   const [fault, setFault] = useState<FaultState | null>(null);
-  // 장애를 넣은 뒤 새로 열리는 사건으로 방을 옮기려고, 넣을 때 있던 사건 목록을 기억한다
-  const known = useRef<Set<string> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -276,8 +230,6 @@ export default function AgentChat() {
       setOrchMock(inc.value.meta.mock === true);
       setOrchConn("on");
       if (inc.value.meta.mock !== true) shopFaults.state().then(setFault, () => setFault(null));
-      const opened = known.current && inc.value.data.find((i) => !known.current?.has(i.context_id));
-      if (opened) { known.current = null; setRoom(opened.context_id); }
     }
     else { setOrchConn("off"); setOrchMock(false); }
     if (exe.status === "fulfilled") { setExecutions(exe.value); setSafetyConn("on"); } else setSafetyConn("off");
@@ -308,23 +260,20 @@ export default function AgentChat() {
 
   const rooms: Room[] = useMemo(() => [
     { id: ALL_ROOM, title: "전체", count: counts[ALL_ROOM] ?? 0 },
-    ...[...incidents].reverse().map((inc) => {
-      const name = scenarioNames[inc.context_id];
-      return {
-        id: inc.context_id,
-        title: name ?? incidentTitle(inc),
-        sub: `${clock(inc.opened_at)} 시작${name ? ` · ${incidentTitle(inc)}` : ""}`,
-        status: inc.status,
-        count: counts[inc.context_id] ?? 0,
-      };
-    }),
+    ...[...incidents].reverse().map((inc) => ({
+      id: inc.context_id,
+      title: incidentTitle(inc),
+      sub: `${clock(inc.opened_at)} 시작`,
+      status: inc.status,
+      count: counts[inc.context_id] ?? 0,
+    })),
     {
       id: DIRECT_ROOM, title: "부서 간 직통",
       sub: commConn === "unready" ? "공통 로그 준비 안 됨" : commConn === "off" ? "연결 안 됨" : "사건에 묶이지 않은 부서끼리의 대화",
       count: counts[DIRECT_ROOM] ?? 0,
     },
     { id: SAFETY_ROOM, title: "안전 관문(돈이 나가는 일)", sub: safetyConn === "off" ? "연결 안 됨" : undefined, count: counts[SAFETY_ROOM] ?? 0 },
-  ], [incidents, counts, safetyConn, commConn, scenarioNames]);
+  ], [incidents, counts, safetyConn, commConn]);
 
   // 지금 보고 있는 방은 읽음 처리
   useEffect(() => { setSeen((s) => (s[room] === counts[room] ? s : { ...s, [room]: counts[room] ?? 0 })); }, [room, counts]);
@@ -357,47 +306,6 @@ export default function AgentChat() {
     if (pinned.current) setFresh(0);
   };
 
-  async function start() {
-    setStarting(true);
-    setError(null);
-    try {
-      const req = scenario === "custom" ? demo : scenario === "random" ? randomDemo() : picked.req;
-      const { context_id } = await orchestrator.startDemo(req);
-      // 진행 중인 사건에 합쳐지면 이미 붙은 이름을 덮지 않는다
-      setScenarioNames((m) => {
-        if (m[context_id]) return m;
-        const next = { ...m, [context_id]: scenario === "custom" ? "직접 고른 시나리오" : picked.label };
-        saveScenarioNames(next);
-        return next;
-      });
-      await refresh();
-      setRoom(context_id);
-    } catch (e) {
-      setError(`장애 시나리오를 시작하지 못했습니다: ${(e as Error).message}`);
-    } finally {
-      setStarting(false);
-    }
-  }
-
-  async function injectFault() {
-    setStarting(true);
-    setError(null);
-    try {
-      known.current = new Set(incidents.map((i) => i.context_id));
-      setFault(await shopFaults.inject(faultKind));
-    } catch (e) {
-      known.current = null;
-      setError(`캣북스에 장애를 넣지 못했습니다: ${(e as Error).message}`);
-    } finally {
-      setStarting(false);
-    }
-  }
-
-  async function releaseFault() {
-    setError(null);
-    try { setFault(await shopFaults.release()); } catch (e) { setError(`장애를 해제하지 못했습니다: ${(e as Error).message}`); }
-  }
-
   async function decide(h: Extract<ChatItem, { kind: "hold" }>, approved: boolean) {
     if (!h.contextId || !h.stepId) return;
     setBusyHold(h.id);
@@ -421,64 +329,20 @@ export default function AgentChat() {
         <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold tracking-tight">AI 대화방</h1>
           <p className="mt-1 text-sm text-ink-500">
-            부서 AI들이 A2A로 일을 주고받은 기록입니다. 문장은 기록된 사실(skill·결과·금액)로 만들고, 사람이 결정할 일은 🚩로 표시합니다.
+            AI들이 서로 일을 부탁하고 결과를 알려 준 실제 기록입니다(A2A). 사람이 결정할 일은 🚩로 표시합니다.
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
-            <ConnChip label="중앙 Agent" conn={orchConn} />
+            <ConnChip label="총괄 AI" conn={orchConn} />
             <ConnChip label="안전 관문" conn={safetyConn} />
             <ConnChip label="공통 로그" conn={commConn} />
+            {orchOn && !orchMock && (
+              <span className={`chip ${fault?.active ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`} title="캣북스 쇼핑몰 결제 서버 상태 (장애는 운영자가 넣고 뺀다)">
+                캣북스 결제 {fault == null ? "확인 중" : fault.active ? (fault.failing ? "장애 중" : `느림(${fault.delay_ms}ms)`) : "정상"}{fault?.degraded ? " · 감지됨" : ""}
+              </span>
+            )}
             <span className="chip bg-ink-100 text-ink-500">{POLL_MS / 1000}초마다 새로고침</span>
           </div>
         </div>
-        {orchOn && !orchMock ? (
-          <div className="flex w-full max-w-md flex-col items-end gap-1.5">
-            <div className="flex w-full items-center gap-2">
-              <label htmlFor="fault" className="sr-only">캣북스 장애 종류</label>
-              <select id="fault" value={faultKind} onChange={(e) => setFaultKind(e.target.value as FaultKind)}
-                className="min-w-0 flex-1 rounded-lg border border-ink-300 bg-surface px-2 py-1.5 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
-                {REAL_FAULTS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
-              </select>
-              <button className="btn-primary shrink-0" disabled={starting || fault?.active} onClick={injectFault}>
-                {starting ? "넣는 중…" : "캣북스에 장애 넣기"}
-              </button>
-              <button className="btn-ghost shrink-0" disabled={!fault?.active} onClick={releaseFault}>장애 해제</button>
-            </div>
-            <p className="flex w-full flex-wrap items-center justify-end gap-1.5 text-right text-xs text-ink-500">
-              <span className={`chip ${fault?.active ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
-                캣북스 결제 {fault == null ? "상태 확인 중" : fault.active ? (fault.failing ? "오류 주입 중" : `지연 ${fault.delay_ms}ms 주입 중`) : "정상"}{fault?.degraded ? " · 장애 감지됨" : ""}
-              </span>
-              {REAL_FAULTS.find((f) => f.id === faultKind)?.hint}
-            </p>
-          </div>
-        ) : (
-        <div className="flex w-full max-w-sm flex-col items-end gap-1.5">
-          <div className="flex w-full items-center gap-2">
-            <label htmlFor="scenario" className="sr-only">장애 시나리오</label>
-            <select id="scenario" value={scenario} onChange={(e) => setScenario(e.target.value)}
-              className="min-w-0 flex-1 rounded-lg border border-ink-300 bg-surface px-2 py-1.5 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
-              {SCENARIOS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-            </select>
-            <span title={orchOn ? "고른 시나리오로 판매 사이트 결제 장애를 주입합니다 (총괄 목 모드)" : "중앙 Agent(총괄)가 꺼져 있어 시작할 수 없습니다"}>
-              <button className="btn-primary shrink-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
-                disabled={!orchOn || starting} onClick={start}>
-                {starting ? "시작하는 중…" : "장애 시나리오 시작"}
-              </button>
-            </span>
-          </div>
-          <p className="w-full text-right text-xs text-ink-500">{picked.hint} 진행 중인 결제 장애가 있으면 같은 사건에 합쳐집니다.</p>
-          {scenario === "custom" && (
-            <fieldset className="w-full space-y-1 text-left text-xs text-ink-500">
-              <legend className="sr-only">장애 시나리오 옵션</legend>
-              {DEMO_OPTIONS.map((o) => (
-                <label key={o.key} className="flex items-center gap-2">
-                  <input type="checkbox" checked={!!demo[o.key]} onChange={(e) => setDemo((d) => ({ ...d, [o.key]: e.target.checked }))} />
-                  {o.label}
-                </label>
-              ))}
-            </fieldset>
-          )}
-        </div>
-        )}
       </header>
 
       {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-800">{error}</p>}
@@ -493,7 +357,7 @@ export default function AgentChat() {
             ) : (
               <>
               {orchConn === "off" && room === ALL_ROOM && (
-                <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">중앙 Agent(총괄)가 꺼져 있어 안전 관문 기록만 보입니다. 켜는 방법: <code className="font-mono">{ORCH_CMD}</code></p>
+                <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">총괄 AI가 꺼져 있어 안전 관문 기록만 보입니다. 켜는 방법: <code className="font-mono">{ORCH_CMD}</code></p>
               )}
               {room === ALL_ROOM && <CommNote conn={commConn} truncated={commTruncated} />}
               <ol role="log" aria-live="polite" aria-relevant="additions" aria-label="부서 AI 대화" className="flex flex-col gap-4">
@@ -549,7 +413,7 @@ function EmptyState({ orchConn, safetyConn, commConn, room }: { orchConn: Conn; 
   if (orchConn === "off") {
     return (
       <div className="mx-auto max-w-xl py-14 text-sm text-ink-700">
-        <p className="font-semibold text-ink-900">중앙 Agent(총괄)가 꺼져 있습니다.</p>
+        <p className="font-semibold text-ink-900">총괄 AI가 꺼져 있습니다.</p>
         <p className="mt-1 text-ink-500">ax-backend에서 목 모드로 켜면 가짜 부서 7곳과 함께 장애 시나리오를 돌려 볼 수 있습니다.</p>
         <pre className="mt-3 overflow-x-auto rounded-xl bg-ink-50 p-3 font-mono text-xs text-ink-700 ring-1 ring-ink-100"><code>{ORCH_CMD}</code></pre>
         <p className="mt-2 text-xs text-ink-500">다른 포트에서 켰다면 루트 .env의 ORCHESTRATOR_PROXY_TARGET(개발 서버 프록시 대상)을 바꾸고 개발 서버를 다시 시작하세요.</p>
