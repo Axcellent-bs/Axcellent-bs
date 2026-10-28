@@ -4,7 +4,8 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Chip, useToast, type ChipTone } from '@dejafix/common-frontend'
 import type { ChatMessage, ChatStatus, ChatThread, CodingStatus, State as S, Task } from './data'
 import { DEV_API, PlanningApiError, chatApi, vcsApi, type VcsConnection } from './api'
-import { CODING_LABEL, LiveDot, isRunning } from './coding'
+import { CODING_LABEL, isRunning } from './coding'
+import { State } from './parts'
 import { go } from './links'
 import { Tag } from './parts'
 
@@ -16,7 +17,6 @@ const STATUS: Record<ChatStatus, { label: string; tone: ChipTone }> = {
   blocked: { label: '막힘', tone: 'amber' },
 }
 const RUNNING: CodingStatus[] = ['queued', 'reading', 'writing', 'reviewing']
-const CODING_TONE: Partial<Record<CodingStatus, ChipTone>> = { opened: 'green', merged: 'green', waiting_human: 'amber', failed: 'amber' }
 const EXAMPLES = [
   '고객센터 운영 시간 문구를 평일 9–18시로 바꿔 줘',
   '주문 목록에 배송 상태 필터를 추가해 줘',
@@ -229,7 +229,7 @@ function Started({ m, s, onOpen }: { m: ChatMessage; s: S; onOpen: () => void })
       <div className="chat-card">
         <div className="chat-card-h">
           <span className="mono">{id ?? '작업'}</span>
-          <Chip tone={CODING_TONE[status] ?? 'neutral'}>{isRunning(status) && <LiveDot />}{CODING_LABEL[status] ?? status}</Chip>
+          <State v={CODING_LABEL[status] ?? status} live={isRunning(status)} />
         </div>
         <div className="chat-card-row">
           {files > 0 ? <Tag>{files}파일</Tag> : <span />}

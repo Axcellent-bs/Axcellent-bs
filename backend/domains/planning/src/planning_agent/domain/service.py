@@ -447,6 +447,7 @@ class PlanningService:
         """초기 데이터로 되돌린다 (구독자는 유지하고 새 상태를 알린다)."""
         self._init_state()
         self._coding_live.clear()  # 돌던 코딩 실행은 다음 단계에서 멈춘다
+        self.__dict__.pop("_coding_drafts", None)  # 작성해 둔 코드도 지운다
         self.gate_calls.clear()
         self.version += 1
         self._notify()

@@ -26,9 +26,10 @@ export function Grade({ g }: { g?: string }) {
 }
 
 // 상태 = 점 하나 + 글자
-export function State({ v }: { v: string }) {
+/** `live`면 앞 점이 깜빡인다 (에이전트가 일하는 중) */
+export function State({ v, live }: { v: string; live?: boolean }) {
   const tone = ['완료', '확정', '통과', '승인', '구현됨', '정식'].includes(v) ? 'green' : ['접수', '초안', '머지 대기', '불일치', 'C 보류', '중복 연결', '거절', '걸림', '해제됨', '교차검증 대기', '사람 확인 대기', '교차검증 거절', '학습 거부', '기준 해제', '장애 연결', '승인 대기', '레포 승인 대기'].includes(v) ? 'amber' : 'neutral'
-  return <span className={`st st-${tone}`}>{v}</span>
+  return <span className={`st st-${tone}${live ? ' st-live' : ''}`}>{v}</span>
 }
 
 // 줄·카드 전체를 눌러 이동한다. 안에 있는 링크·버튼·입력칸을 누르면 그쪽이 먼저다

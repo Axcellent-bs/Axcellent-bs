@@ -400,6 +400,32 @@ async def _write_all(
 # ---------------------------------------------------------------- 흐름
 
 
+@dataclass
+class Draft:
+    """작성까지 끝낸 코드. PR을 못 올리고 멈췄을 때 다시 시도하면
+    LLM을 다시 부르지 않고 이걸로 올린다."""
+
+    connection: str | None
+    picks: list[FilePick]
+    originals: dict[str, str]
+    contents: dict[str, str]
+    rows: list[CodingFile]
+    summary: str | None
+
+
+def _drafts(svc: PlanningService) -> dict[str, Draft]:
+    """서비스마다 작업 id → 작성해 둔 코드 (프로세스 메모리). PR이 열리면 지운다."""
+    return svc.__dict__.setdefault("_coding_drafts", {})
+
+
+def draft_of(svc: PlanningService, task_id: str) -> Draft | None:
+    return _drafts(svc).get(task_id)
+
+
+def drop_draft(svc: PlanningService, task_id: str) -> None:
+    _drafts(svc).pop(task_id, None)
+
+
 async def run(svc: PlanningService, job: Job) -> None:
     """코딩 작업 하나를 끝까지 돌린다. 어떤 실패든 상태에 한 줄로 남기고 멈춘다."""
     from planning_agent.domain.service import GateRefused
@@ -437,6 +463,22 @@ async def _run(svc: PlanningService, job: Job) -> None:
     if llm is None:
         raise CoderStop("failed", "LLM 설정이 없다")
     adapter = _adapter(job.connection)
+
+    # 다시 시도: 같은 연결로 작성해 둔 코드가 있으면 읽기·쓰기(LLM)를 건너뛰고 PR부터 다시 한다
+    draft = draft_of(svc, job.task_id)
+    if draft is not None and draft.connection == job.connection:
+        picks, originals, contents, rows, summary = (
+            draft.picks, draft.originals, draft.contents, draft.rows, draft.summary,
+        )
+        await svc.coding_step(
+            job, "writing", point="code.write",
+            text=f"작성해 둔 코드로 PR 다시 시도 · {write_text(rows)}",
+            files=rows, summary=summary, attempts=1,
+        )
+        await _open_and_review(
+            svc, job, llm, picks, originals, contents, rows, summary
+        )
+        return
 
     # 1. 읽기
     await svc.coding_step(job, "reading")
@@ -481,6 +523,8 @@ async def _run(svc: PlanningService, job: Job) -> None:
     if not contents:
         raise CoderStop("failed", "바뀐 내용이 없음", "code.write", "바뀐 파일 0개")
     rows = file_rows(originals, contents, reasons)
+    draft = Draft(job.connection, picks, originals, contents, rows, summary)
+    _drafts(svc)[job.task_id] = draft
     if total_lines(rows) > MAX_TOTAL_LINES:
         raise CoderStop(
             "waiting_human",
@@ -493,10 +537,25 @@ async def _run(svc: PlanningService, job: Job) -> None:
         job, "writing", point="code.write", text=write_text(rows), files=rows, attempts=1
     )
 
-    # 4. 커밋·PR (관문 generate_pr 뒤)
+    await _open_and_review(svc, job, llm, picks, originals, contents, rows, summary)
+
+
+async def _open_and_review(
+    svc: PlanningService,
+    job: Job,
+    llm: Any,
+    picks: list[FilePick],
+    originals: dict[str, str],
+    contents: dict[str, str],
+    rows: list[CodingFile],
+    summary: str | None,
+) -> None:
+    # 4. 커밋·PR (관문 generate_pr 뒤). 올라가면 작성해 둔 코드는 지운다 (그 뒤는 PR에서)
     if not await svc.coding_open(job, contents, rows, pr_body(job, rows, summary or "")):
         return
+    drop_draft(svc, job.task_id)
     picks = [p for p in picks if p.path in contents]
+    reasons = {r.path: r.reason for r in rows}
 
     # 5. 리뷰 → 불일치면 한 번 고친다
     attempts = 1

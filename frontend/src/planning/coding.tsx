@@ -17,11 +17,8 @@ const DONE: CodingStatus[] = ['opened', 'merged']
 /** 에이전트가 지금 일하는 중인 상태 (옆에 깜빡이는 점) */
 const RUNNING: CodingStatus[] = ['queued', 'reading', 'writing', 'reviewing']
 export const isRunning = (s?: CodingStatus | string) => RUNNING.includes(s as CodingStatus)
-export const LiveDot = () => <span className="live-dot" aria-hidden="true" />
-/** 상태 글자 + 진행 중이면 깜빡이는 점 */
-export const CodingLabel = ({ c }: { c: CodingRun }) => (
-  <span className="live-label">{isRunning(c.status) && <LiveDot />}<State v={codingState(c)} /></span>
-)
+/** 상태 글자. 진행 중이면 앞 점이 깜빡인다 */
+export const CodingLabel = ({ c }: { c: CodingRun }) => <State v={codingState(c)} live={isRunning(c.status)} />
 const STUCK: CodingStatus[] = ['failed', 'waiting_human']
 
 /** 개발팀이 직접 넣은 기획에서 나온 작업인가 */

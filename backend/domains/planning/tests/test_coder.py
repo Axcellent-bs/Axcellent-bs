@@ -455,3 +455,31 @@ def test_dev_role_reports_coding_result_to_planning(adapter) -> None:
     got = _task(planning)
     assert got.coding is not None and got.coding.status == "merged"
     assert any(p.task == "T-D1" and p.merged for p in planning.state.prs)
+
+
+def test_retry_reuses_written_code_without_llm(service: PlanningService, adapter) -> None:
+    """PR을 못 올리고 멈춘 뒤 다시 시도하면 이미 작성한 코드로 PR만 다시 올린다 (LLM 다시 안 부름)."""
+
+    class BrokenOpen(MockVcsAdapter):
+        async def open_change(self, *a, **kw):
+            raise VcsError("forbidden", "no access")
+
+    broken = BrokenOpen()
+    broken.seed_files(FILES)
+    vcs.set_vcs(broken)
+    llm = FakeLLM()
+    coder.set_llm(llm)
+    run(_go(service))
+    assert _task(service).coding.status == "failed"
+    wrote = [c[0] for c in llm.calls]
+    assert wrote.count("CodePlan") == 1 and wrote.count("FileWrite") == 2
+
+    vcs.set_vcs(adapter)  # 형상관리 권한을 고쳤다고 치고 다시 시도
+    run(service.retry_dev_task("T-D1"))
+    run(service.wait_coding())
+    again = [c[0] for c in llm.calls]
+    assert again.count("CodePlan") == 1 and again.count("FileWrite") == 2  # 다시 쓰지 않음
+    c = _task(service).coding
+    assert c.pr is not None and c.status in ("opened", "merged")
+    assert any("작성해 둔 코드로 PR 다시 시도" in a.text for a in service.state.activity)
+    assert coder.draft_of(service, "T-D1") is None

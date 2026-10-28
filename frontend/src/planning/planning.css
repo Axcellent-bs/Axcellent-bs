@@ -492,8 +492,7 @@ a.plain-link:hover { color: var(--primary); }
 .chat-drawer .sl-composer textarea:disabled { opacity: 0.6; }
 button.chip { cursor: pointer; font: inherit; }
 
-/* 코딩 에이전트가 일하는 중: 상태 옆 깜빡이는 점 */
-.live-label { display: inline-flex; align-items: center; gap: 6px; }
-.live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 999px; background: var(--primary, #5b5bd6); margin-right: 4px; animation: live-blink 1s ease-in-out infinite; flex-shrink: 0; }
-@keyframes live-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
-@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+/* 코딩 에이전트가 일하는 중: 상태 글자 앞 점이 깜빡인다 */
+.st.st-live::before { background: var(--primary, #5b5bd6); animation: st-blink 1s ease-in-out infinite; }
+@keyframes st-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
+@media (prefers-reduced-motion: reduce) { .st.st-live::before { animation: none; } }
