@@ -196,3 +196,16 @@ export const vcsApi = (base: string) => {
     test: (id: string) => call<VcsTestResult>(base, `/vcs/connections/${encodeURIComponent(id)}/test`, post()),
   }
 }
+
+// ---- 직접 개발 (dev 서비스 `/api/planning/dev-tasks`). 개발팀이 기획을 바로 넣으면 코딩 에이전트가 PR까지 만든다
+export interface DevTaskInput { title: string; plan: string; done?: string; paths?: string[]; connection?: string }
+export interface DevTaskStarted { request_id: string; spec_id: string; task_id: string; status: 'queued' }
+
+export const devTaskApi = (base: string) => ({
+  // 목(녹화 데모)은 POST에 {ok:true}만 준다. task_id가 없으면 실패로 본다
+  create: (x: DevTaskInput) => call<Partial<DevTaskStarted>>(base, '/dev-tasks', post(x)).then((d) => {
+    if (!d || typeof d.task_id !== 'string') throw new PlanningApiError('NO_TASK', '개발·배포 서버가 작업을 만들지 않았어요')
+    return d as DevTaskStarted
+  }),
+  retry: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/retry`, post()),
+})

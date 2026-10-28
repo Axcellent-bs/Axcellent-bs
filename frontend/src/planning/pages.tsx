@@ -9,6 +9,7 @@ import { CONFIRMED_BY, Flow, Head, Layout, ListPane, Pairs, Side, Step, mergedLa
 import { SendWindow } from './depts'
 import { apiBase, deployApi, kst, type DeployCheck, type Deployment } from './api'
 import { RepoTag, RepoTargetBlock } from './repo'
+import { CodingStep, DevTeamTag, codingState, fromDevTeam } from './coding'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -153,15 +154,39 @@ export function Work({ s, d, item }: P & { item?: string }) {
   const [line, setLine] = useState<CodeLine>()
   useEffect(() => { setLine(undefined) }, [item])
   const prOf = (taskId: string) => s.prs.find((p) => p.task === taskId)
-  const sel = s.prs.find((p) => p.id === prFromSlug(item)) ?? s.prs.find((p) => p.target?.status === 'proposed') ?? s.prs.find((p) => reviewOf(s, p.id)) ?? s.prs[s.prs.length - 1]
+  // 주소가 작업 id면 그 작업의 PR, PR이 아직 없으면 작업만 보여 준다 (직접 개발 직후)
+  const byTask = s.tasks.find((t) => t.id === item)
+  const taskOnly = byTask && !prOf(byTask.id) ? byTask : undefined
+  const sel = (byTask && prOf(byTask.id)) ?? s.prs.find((p) => p.id === prFromSlug(item)) ?? s.prs.find((p) => p.target?.status === 'proposed') ?? s.prs.find((p) => reviewOf(s, p.id)) ?? s.prs[s.prs.length - 1]
   const groupOf = (taskId: string, state: string) => { const p = prOf(taskId); return state === '완료' || p?.merged ? 2 : p && reviewOf(s, p.id) ? 1 : 0 }
   const tasks = s.tasks.slice().reverse()
   const row = (t: S['tasks'][number]) => {
     const p = prOf(t.id)
     const xr = p && reviewOf(s, p.id)
-    return { key: t.id, href: p ? `#/work/prs/${prSlug(p.id)}` : `#/work/specs/${t.spec}/${t.para}`, on: !!p && p.id === sel?.id, title: t.title, meta: <>{t.id}{p ? ` · ${p.id}` : ''} <State v={p?.target?.status === 'proposed' ? '레포 승인 대기' : xr ? waitLabel(xr) : t.state} /></> }
+    const coding = t.coding && !p?.merged && !p?.target && !xr ? codingState(t.coding) : undefined
+    return {
+      key: t.id,
+      href: p ? `#/work/prs/${prSlug(p.id)}` : t.coding ? `#/work/prs/${encodeURIComponent(t.id)}` : `#/work/specs/${t.spec}/${t.para}`,
+      on: taskOnly ? t.id === taskOnly.id : !!p && p.id === sel?.id,
+      title: t.title,
+      meta: <>{t.id}{p ? ` · ${p.id}` : ''} <State v={p?.target?.status === 'proposed' ? '레포 승인 대기' : xr ? waitLabel(xr) : coding ?? t.state} />{fromDevTeam(s, t) && <> <DevTeamTag /></>}</>,
+    }
   }
   const list = <ListPane empty="작업 없음" groups={(['진행 중', '교차검증·사람 확인', '완료'] as const).map((label, i) => ({ label, rows: tasks.filter((t) => groupOf(t.id, t.state) === i).map(row) }))} />
+  if (taskOnly) {
+    const text = s.specs.find((x) => x.id === taskOnly.spec)?.paras.find((p) => p.id === taskOnly.para)?.text
+    return (
+      <Layout list={list} head={<Head kicker={<>{taskOnly.id} · {taskOnly.spec}{fromDevTeam(s, taskOnly) && <> · <DevTeamTag /></>}</>} title={taskOnly.title} side={<State v={taskOnly.coding ? codingState(taskOnly.coding) : taskOnly.state} />} />}>
+        <Flow>
+          <CodingStep task={taskOnly} />
+          <Step name="작업" on href={`#/work/specs/${taskOnly.spec}/${taskOnly.para}`} title={`${taskOnly.id} · ${taskOnly.spec} ${taskOnly.para}`}>
+            {text && <p>{text}</p>}
+          </Step>
+          <Step name="PR" on={false} title="PR 전" />
+        </Flow>
+      </Layout>
+    )
+  }
   if (!sel) return <Layout list={list}><div className="empty"><b>PR 없음</b></div></Layout>
   const task = s.tasks.find((t) => t.id === sel.task)
   const spec = s.specs.find((x) => x.id === task?.spec)
@@ -173,7 +198,7 @@ export function Work({ s, d, item }: P & { item?: string }) {
   return (
     <Layout
       list={list}
-      head={<Head kicker={<>{sel.id} · {task?.id} · <span className="mono">{sel.branch}</span></>} title={sel.title.replace(/^[A-Z]\d+: /, '')} side={<State v={sel.merged ? '완료' : xr ? waitLabel(xr) : last === '불일치' || rejected ? '불일치' : '머지 대기'} />} />}
+      head={<Head kicker={<>{sel.id} · {task?.id} · <span className="mono">{sel.branch}</span>{fromDevTeam(s, task) && <> · <DevTeamTag /></>}</>} title={sel.title.replace(/^[A-Z]\d+: /, '')} side={<State v={sel.merged ? '완료' : xr ? waitLabel(xr) : last === '불일치' || rejected ? '불일치' : '머지 대기'} />} />}
       side={
         <Side title="근거 체인" sum={`${chain.length}단계`}>
           {chain.map((x, i) => <p key={i} className="pside-msg"><b>{x.kind}</b> {x.href ? <a href={x.kind === '문단' && spec && para ? `#/work/specs/${spec.id}/${para.id}` : x.href} className="plain-link">{x.title}</a> : x.title}</p>)}
@@ -182,6 +207,7 @@ export function Work({ s, d, item }: P & { item?: string }) {
       below={<Trace s={s} pr={sel} line={line} setLine={setLine} />}
     >
       <Flow>
+        {task && <CodingStep task={task} />}
         <Step name="작업" on href={task ? `#/work/specs/${task.spec}/${task.para}` : undefined} title={task ? `${task.id} · ${task.spec} ${task.para}` : '-'}>
           {para && <p>{para.text}</p>}
           {para?.warn && <Tag tone="amber">경고 {para.warn.card}</Tag>}

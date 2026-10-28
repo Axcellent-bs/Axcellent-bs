@@ -56,6 +56,7 @@ export interface Spec {
   basis: string[]
   humanSentences: number
   confirmedBy?: Approver
+  origin?: string // 'dev_team' = 개발팀이 직접 넣은 기획
 }
 
 export type TaskState = '진행 중' | 'PR 검수' | '머지 대기' | '완료' | 'C 보류'
@@ -66,6 +67,21 @@ export interface Task {
   title: string
   owner: string
   state: TaskState
+  coding?: CodingRun // 코딩 에이전트 실행 상태 (dev 서비스)
+}
+
+// 코딩 에이전트 한 번의 실행. SSE로 단계가 바뀐다
+export type CodingStatus = 'queued' | 'reading' | 'writing' | 'reviewing' | 'opened' | 'merged' | 'waiting_human' | 'failed'
+export interface CodingFile { path: string; additions: number; deletions: number; reason: string }
+export interface CodingRun {
+  status: CodingStatus
+  model: string | null
+  files: CodingFile[]
+  summary: string | null
+  review: { verdict: '통과' | '불일치'; notes: string[] } | null
+  error: string | null
+  attempts: number
+  updatedAt?: string
 }
 
 export interface PR {
