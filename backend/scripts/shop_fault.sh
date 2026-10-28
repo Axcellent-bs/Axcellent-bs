@@ -4,6 +4,7 @@
 #   bash backend/scripts/shop_fault.sh failure    # 결제가 서버 오류(5xx)로 실패 → 약 25초 뒤 사건이 열린다
 #   bash backend/scripts/shop_fault.sh latency    # 결제 응답 2초 지연
 #   bash backend/scripts/shop_fault.sh clear      # 해제
+#   bash backend/scripts/shop_fault.sh refund-abuse [구매자 건수]  # 재무 AI 장애: 한 고객이 주문을 연달아 사고 전부 환불(환불 남용)
 #   bash backend/scripts/shop_fault.sh            # 지금 상태
 # 관리자 토큰은 run_all.sh 가 만든 backend/.data/web.env 에서 읽는다(출력하지 않는다).
 set -eu
@@ -20,6 +21,7 @@ case "${1:-status}" in
   latency) curl -s -X POST "$URL" -H "$AUTH" -H "Content-Type: application/json" -d '{"kind":"latency","delay_ms":2000}' ;;
   clear) curl -s -X DELETE "$URL" -H "$AUTH" ;;
   status) curl -s "$URL" -H "$AUTH" ;;
-  *) echo "사용법: shop_fault.sh [failure|latency|clear|status]" >&2; exit 2 ;;
+  refund-abuse) shift; exec "${PY:-.venv/Scripts/python.exe}" scripts/refund_abuse.py "$@" ;;
+  *) echo "사용법: shop_fault.sh [failure|latency|clear|status|refund-abuse]" >&2; exit 2 ;;
 esac
 echo
