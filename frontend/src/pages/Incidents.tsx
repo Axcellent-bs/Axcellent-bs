@@ -9,6 +9,7 @@ import { DEJAFIX_LIVE } from "@/lib/env";
 // 장애를 누르면 AXcellent 장애 상세(/infra/:id, IncidentDetail.tsx)로 간다.
 // DejaFix 현황 화면의 가장 급한 장애·요약·언제 · 어디서도 같은 API 데이터로 다시 그린다. DejaFix 화면을 이 안에 띄우지 않는다.
 const REFRESH_MS = 30_000;
+const LIST_LIMIT = 10;
 
 type State = { data: Incident[]; meta: IncidentMeta } | null;
 
@@ -171,13 +172,52 @@ function shortTags(i: Incident): string[] {
   return [...new Set(i.tags.map((t) => t.value))].filter((v) => v.length <= 12 || !title.includes(v.toLowerCase()));
 }
 
+/** 장애 표. 행을 누르면 상세(/infra/:id) */
+function IncidentTable({ rows, showStatus = false }: { rows: Incident[]; showStatus?: boolean }) {
+  const navigate = useNavigate();
+  return (
+    <table className="w-full text-sm">
+      <thead className="bg-app text-left text-xs text-ink-500">
+        <tr>
+          <th className="whitespace-nowrap px-6 py-3 font-medium">심각도</th>
+          <th className="px-3 py-3 font-medium">장애</th>
+          <th className="px-3 py-3 font-medium">호스트</th>
+          <th className="px-3 py-3 font-medium">시작</th>
+          <th className="whitespace-nowrap px-6 py-3 font-medium">AI 분석</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-ink-100">
+        {rows.map((i) => {
+          const tags = shortTags(i);
+          return (
+            <tr key={i.id} className="cursor-pointer align-top hover:bg-app" onClick={() => navigate(`/infra/${i.id}`)}>
+              <td className="px-6 py-3"><Chip map={SEVERITY} k={i.severity.level} /></td>
+              <td className="px-3 py-3">
+                <Link href={`/infra/${i.id}`} className="font-medium text-ink-900 hover:underline" title={i.title} onClick={(e) => e.stopPropagation()}>{readableTitle(i.title)}</Link>
+                <p className="mt-0.5 text-xs text-ink-500" title={i.tags.map((t) => t.value).join(", ")}>
+                  #{i.id}{tags.length > 0 && ` · ${tags.join(", ")}`}
+                  {showStatus && i.status === "resolved" && <span className="chip ml-2 bg-emerald-50 text-emerald-700">해결됨{i.resolved_at && ` · ${ago(i.resolved_at)}`}</span>}
+                </p>
+              </td>
+              <td className="px-3 py-3">
+                {i.host.name ? <span className="whitespace-nowrap font-mono text-xs">{i.host.name}</span> : <span className="text-xs text-ink-500" title="DejaFix가 아직 호스트 정보를 채우지 않았습니다">확인 중</span>}
+              </td>
+              <td className="whitespace-nowrap px-3 py-3 text-xs text-ink-700" title={shortDateTime(i.started_at)}>{ago(i.started_at)}</td>
+              <td className="px-6 py-3"><Chip map={ANALYSIS} k={i.analysis.status} /></td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
 function Chip({ map, k }: { map: Record<string | number, { label: string; tone: string }>; k: string | number }) {
   const v = map[k] ?? { label: String(k), tone: "bg-ink-100 text-ink-700" };
   return <span className={`chip whitespace-nowrap ${v.tone}`}>{v.label}</span>;
 }
 
 export default function Incidents() {
-  const navigate = useNavigate();
   const [state, setState] = useState<State>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
@@ -210,10 +250,13 @@ export default function Incidents() {
   const list = state?.data ?? [];
   const high = list.filter((i) => i.severity.level >= 4).length;
   const asOf = state?.meta.data_as_of ?? loadedAt;
-  const urgent = useMemo(
-    () => [...list].sort((a, b) => b.severity.level - a.severity.level || Date.parse(b.started_at) - Date.parse(a.started_at))[0],
-    [list],
-  );
+  // DejaFix 현황과 같은 우선순위: 심각도 높은 순, 같으면 최근 시작 순. 위 LIST_LIMIT건만 표에, 나머지와 해결된 장애는 접어 둔다
+  const { top, rest, urgent } = useMemo(() => {
+    const open = [...list].sort((a, b) => b.severity.level - a.severity.level || Date.parse(b.started_at) - Date.parse(a.started_at));
+    const openIds = new Set(open.map((i) => i.id));
+    const resolved = (recent ?? []).filter((i) => i.status !== "problem" && !openIds.has(i.id));
+    return { top: open.slice(0, LIST_LIMIT), rest: [...open.slice(LIST_LIMIT), ...resolved], urgent: open[0] };
+  }, [list, recent]);
   // 시간 분포의 기준 시각: 실시간이면 받은 시각, 녹화본이면 녹화된 마지막 장애 시각 (녹화본은 지난 날짜라서)
   const heatEnd = useMemo(
     () => (DEJAFIX_LIVE || !recent?.length ? Date.parse(loadedAt ?? "") || Date.now() : Math.max(...recent.map((i) => Date.parse(i.started_at)))),
@@ -232,7 +275,7 @@ export default function Incidents() {
               : <span className="chip bg-amber-50 text-amber-700" title="VITE_DEJAFIX_LIVE=on 이면 실제 DejaFix를 부릅니다">데모 녹화본</span>}
           </p>
           <h1 className="text-2xl font-semibold">현재 장애</h1>
-          <p className="mt-1 text-sm text-ink-500">지금 해결되지 않은 장애만 보여 줍니다.</p>
+          <p className="mt-1 text-sm text-ink-500">해결되지 않은 장애를 심각도 순으로 보여 줍니다. 누르면 상세로 갑니다.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className={`chip ${list.length ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>진행 중 {list.length}건</span>
@@ -263,39 +306,25 @@ export default function Incidents() {
 
       {recent && <Heatmap incidents={recent} end={heatEnd} />}
 
-      {list.length > 0 && (
+      {top.length > 0 && (
         <section className="card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-app text-left text-xs text-ink-500">
-              <tr>
-                <th className="whitespace-nowrap px-6 py-3 font-medium">심각도</th>
-                <th className="px-3 py-3 font-medium">장애</th>
-                <th className="px-3 py-3 font-medium">호스트</th>
-                <th className="px-3 py-3 font-medium">시작</th>
-                <th className="whitespace-nowrap px-6 py-3 font-medium">AI 분석</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-ink-100">
-              {list.map((i) => {
-                const tags = shortTags(i);
-                return (
-                <tr key={i.id} className="cursor-pointer align-top hover:bg-app" onClick={() => navigate(`/infra/${i.id}`)}>
-                  <td className="px-6 py-3"><Chip map={SEVERITY} k={i.severity.level} /></td>
-                  <td className="px-3 py-3">
-                    <Link href={`/infra/${i.id}`} className="font-medium text-ink-900 hover:underline" title={i.title} onClick={(e) => e.stopPropagation()}>{readableTitle(i.title)}</Link>
-                    <p className="mt-0.5 text-xs text-ink-500" title={i.tags.map((t) => t.value).join(", ")}>#{i.id}{tags.length > 0 && ` · ${tags.join(", ")}`}</p>
-                  </td>
-                  <td className="px-3 py-3">
-                    {i.host.name ? <span className="whitespace-nowrap font-mono text-xs">{i.host.name}</span> : <span className="text-xs text-ink-500" title="DejaFix가 아직 호스트 정보를 채우지 않았습니다">확인 중</span>}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-3 text-xs text-ink-700" title={shortDateTime(i.started_at)}>{ago(i.started_at)}</td>
-                  <td className="px-6 py-3"><Chip map={ANALYSIS} k={i.analysis.status} /></td>
-                </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <IncidentTable rows={top} />
         </section>
+      )}
+
+      {/* DejaFix 현황처럼: 목록 밖의 진행 중 장애와 해결된 장애는 접어 둔다 */}
+      {rest.length > 0 && (
+        <details className="card group overflow-hidden">
+          <summary className="flex cursor-pointer list-none items-center gap-3 px-6 py-4">
+            <span className="text-ink-500 transition group-open:rotate-90" aria-hidden="true">▸</span>
+            <span className="font-semibold">나머지 · 해결된 장애</span>
+            <span className="chip bg-ink-100 text-ink-700">{rest.length}건</span>
+            <span className="ml-auto text-xs text-ink-500">목록 밖의 장애</span>
+          </summary>
+          <div className="border-t border-ink-100">
+            <IncidentTable rows={rest} showStatus />
+          </div>
+        </details>
       )}
 
       </div>
