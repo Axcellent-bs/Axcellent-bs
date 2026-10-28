@@ -11,7 +11,7 @@ type State = { data: Incident[]; meta: IncidentMeta } | null;
 
 function Chip({ map, k }: { map: Record<string | number, { label: string; tone: string }>; k: string | number }) {
   const v = map[k] ?? { label: String(k), tone: "bg-ink-100 text-ink-700" };
-  return <span className={`chip ${v.tone}`}>{v.label}</span>;
+  return <span className={`chip whitespace-nowrap ${v.tone}`}>{v.label}</span>;
 }
 
 export default function Incidents() {
@@ -83,11 +83,11 @@ export default function Incidents() {
           <table className="w-full text-sm">
             <thead className="bg-app text-left text-xs text-ink-500">
               <tr>
-                <th className="px-6 py-3 font-medium">심각도</th>
+                <th className="whitespace-nowrap px-6 py-3 font-medium">심각도</th>
                 <th className="px-3 py-3 font-medium">장애</th>
                 <th className="px-3 py-3 font-medium">호스트</th>
                 <th className="px-3 py-3 font-medium">시작</th>
-                <th className="px-3 py-3 font-medium">AI 분석</th>
+                <th className="whitespace-nowrap px-3 py-3 font-medium">AI 분석</th>
                 <th className="px-6 py-3 font-medium"><span className="sr-only">상세</span></th>
               </tr>
             </thead>
@@ -100,9 +100,9 @@ export default function Incidents() {
                     <p className="mt-0.5 text-xs text-ink-500">#{i.id}{i.tags.length > 0 && ` · ${i.tags.map((t) => t.value).join(", ")}`}</p>
                   </td>
                   <td className="px-3 py-3">
-                    {i.host.name ? <span className="font-mono text-xs">{i.host.name}</span> : <span className="text-xs text-ink-500" title="DejaFix가 아직 호스트 정보를 채우지 않았습니다">확인 중</span>}
+                    {i.host.name ? <span className="whitespace-nowrap font-mono text-xs">{i.host.name}</span> : <span className="text-xs text-ink-500" title="DejaFix가 아직 호스트 정보를 채우지 않았습니다">확인 중</span>}
                   </td>
-                  <td className="px-3 py-3 text-xs text-ink-700" title={shortDateTime(i.started_at)}>{ago(i.started_at)}</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-xs text-ink-700" title={shortDateTime(i.started_at)}>{ago(i.started_at)}</td>
                   <td className="px-3 py-3"><Chip map={ANALYSIS} k={i.analysis.status} /></td>
                   <td className="px-6 py-3 text-right">
                     <a href={incidentUrl(i.id)} target="_blank" rel="noreferrer" className="btn-quiet whitespace-nowrap">DejaFix에서 보기 ↗</a>
