@@ -218,7 +218,7 @@ export default function FinancePage() {
                 <button type="button" onClick={() => goToQueue(null)}
                   className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-surface px-4 py-3 text-left shadow-sm transition hover:ring-2 hover:ring-brand-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
                   <Chip label="보류 쿠폰" tone={TONE.warn} />
-                  <span className="min-w-0 flex-1 text-sm font-medium text-ink-900">{incidentName(i.context_id, i.component)} 보상 쿠폰 {i.held_count}장이 보류 큐에서 결정을 기다림</span>
+                  <span className="min-w-0 flex-1 text-sm font-medium text-ink-900">{incidentName(i.context_id, i.component, i.opened_at)} 보상 쿠폰 {i.held_count}장이 보류 큐에서 결정을 기다림</span>
                   <span className="text-xs font-medium text-brand-700">보류 큐로 →</span>
                 </button>
               </li>
@@ -228,7 +228,7 @@ export default function FinancePage() {
                 <button type="button" onClick={() => openIncident(i.context_id, true)}
                   className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-surface px-4 py-3 text-left shadow-sm transition hover:ring-2 hover:ring-brand-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
                   <Chip label="사건 감사" tone={TONE.bad} />
-                  <span className="min-w-0 flex-1 text-sm font-medium text-ink-900">{incidentName(i.context_id, i.component)} 사건 후 감사에서 확인할 점이 나옴</span>
+                  <span className="min-w-0 flex-1 text-sm font-medium text-ink-900">{incidentName(i.context_id, i.component, i.opened_at)} 사건 후 감사에서 확인할 점이 나옴</span>
                   <span className="text-xs font-medium text-brand-700">보러 가기 →</span>
                 </button>
               </li>

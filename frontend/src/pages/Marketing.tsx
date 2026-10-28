@@ -1,11 +1,14 @@
 import { useState, type ReactNode } from "react";
+import LiveMarketing from "@/components/marketing/LiveMarketing";
+import { MOCK } from "@/lib/env";
 import { ago, shortDateTime, won } from "@/lib/format";
 import {
   ACTIVITY, CHANNEL_KO, COUPONS, DRAFTS, HOLD_KO, KIND_KO, NOTICES, PURPOSE_KO, SKILL_KO, couponTotal,
   type NoticeFacts,
 } from "@/lib/marketing";
 
-// 마케팅 AI 화면 (인사 AI·재무 AI 화면과 같은 짜임). 전부 시연용 가상 데이터이고 API를 부르지 않는다.
+// 마케팅 AI 화면 (인사 AI·재무 AI 화면과 같은 짜임). 실제 모드(VITE_MOCK=off)는 LiveMarketing이 캣북스 배너와
+// 안전 장치 기록을 읽어 그린다. 아래 DemoMarketing은 데모 모드 전용으로, 시연용 가상 데이터이고 API를 부르지 않는다.
 // 공지는 확인된 사실 필드만 보여 주고 장애 원인은 적지 않는다. 쿠폰 금액 검증·등급 판정은 마케팅이 아니라
 // 안전 장치 코드 규칙이 하며, 화면은 총액(건수 x 단가)만 보여 준다.
 
@@ -47,6 +50,10 @@ function Facts({ f }: { f: NoticeFacts }) {
 }
 
 export default function MarketingPage() {
+  return MOCK ? <DemoMarketing /> : <LiveMarketing />;
+}
+
+function DemoMarketing() {
   const held = COUPONS.filter((c) => c.grade === "C");
   const rejected = DRAFTS.filter((d) => d.status === "rejected");
   const waits = NOTICES.filter((n) => n.incident_started_at).map((n) => (new Date(n.published_at).getTime() - new Date(n.incident_started_at as string).getTime()) / 60000);

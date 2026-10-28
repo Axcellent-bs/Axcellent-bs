@@ -84,7 +84,7 @@ const METRIC_KO: Record<string, string> = {
 };
 const SUBJECT_KO: Record<string, string> = { payment: "결제가", api: "쇼핑몰이", db: "주문 DB가", search: "검색이", shipping: "배송이" };
 /** 총괄 제목 끝의 "(metric)"에서 지표 코드를 꺼낸다 */
-function metricOf(inc: OrchIncident): string | null {
+function metricOf(inc: Pick<OrchIncident, "title">): string | null {
   return /\(([^)]+)\)\s*$/.exec(inc.title)?.[1] ?? null;
 }
 /** "오후 5:44" */
@@ -99,7 +99,7 @@ function idsOf(output: Record<string, unknown> | null | undefined): string[] {
 const rawOf = (...parts: (string | null | undefined | false)[]) => parts.filter(Boolean).join(" · ") || undefined;
 
 /** 방 이름: "결제가 서버 오류로 자꾸 실패해요" */
-export function incidentTitle(inc: OrchIncident): string {
+export function incidentTitle(inc: Pick<OrchIncident, "title" | "component">): string {
   const comp = COMPONENT_KO[inc.component] ?? inc.component;
   const metric = metricOf(inc);
   const subject = SUBJECT_KO[inc.component] ?? `${comp}이(가)`;
