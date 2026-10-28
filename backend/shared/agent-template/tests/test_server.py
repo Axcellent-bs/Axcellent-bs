@@ -110,3 +110,33 @@ def test_handlers_must_match_card_skills(card, handlers) -> None:
         create_agent_app(card, {"echo": handlers["echo"]})
     with pytest.raises(ValueError, match="카드에 없음"):
         create_agent_app(card, {**handlers, "extra": handlers["echo"]})
+
+
+SECRET = "mock:orchestrator"
+
+
+@pytest.mark.parametrize(
+    ("skill", "meta_extra", "expected_status"),
+    [
+        ("echo", {}, "completed"),
+        ("boom", {}, "failed"),
+        ("broken_output", {}, "failed"),
+        ("nope", {}, "rejected"),
+        ("echo", {"deadline_in": -5}, "canceled"),
+        ("echo", {"path": ["echo_agent"]}, "rejected"),
+        ("echo", {"path": ["a", "b", "c", "d"]}, "rejected"),
+    ],
+)
+def test_result_never_echoes_request_token(
+    client, request_body, skill, meta_extra, expected_status
+) -> None:
+    result = client.post("/a2a", json=request_body(skill, token=SECRET, **meta_extra)).json()
+    assert result["status"] == expected_status
+    assert result["meta"]["token"] == ""
+    assert SECRET not in str(result)
+
+
+def test_unauthorized_result_never_echoes_request_token(client, request_body) -> None:
+    result = client.post("/a2a", json=request_body(token="plain-secret-token")).json()
+    assert result["outcome"] == "UNAUTHORIZED"
+    assert "plain-secret-token" not in str(result)
