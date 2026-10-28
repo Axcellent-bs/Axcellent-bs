@@ -1,7 +1,11 @@
 """ax-orchestrator 서버 진입점.
 
 목 모드(`ORCHESTRATOR_MOCK=1`)에서는 가짜 부서(`mock/fake_departments.py`)로 시나리오 A를
-끝까지 돌리고, `/demo` 목업 화면으로 사건 흐름을 보여 준다. 실제 부서 연동은 3단계에서 붙인다.
+끝까지 돌리고, `/demo` 목업 화면으로 사건 흐름을 보여 준다.
+
+실제 모드(`ORCHESTRATOR_MOCK`이 1이 아님)에서는 7개 부서를 모두 실제 서비스로 부르고, 이벤트 버스
+(`REDIS_URL`)로 판매 사이트의 `shop.degraded`를 받아 사건을 연다. 가짜 신호를 넣는 데모 입구와
+승인 흉내는 목 모드에서만 연다.
 """
 
 from __future__ import annotations
@@ -77,7 +81,8 @@ class AppState:
             fakes.script("infra", "diagnose_incident", "undetermined")
         if demo.not_recovered:
             fakes.script("infra", "verify_recovery", "not_recovered")
-        real = real_depts_from_env(DEPTS)
+        # 실제 모드는 가짜 부서를 쓰지 않는다. 목 모드에서만 ORCHESTRATOR_REAL_DEPTS로 일부를 실제로 붙인다
+        real = real_depts_from_env(DEPTS) if self.mock else set(DEPTS)
         if real:
             set_agent_name("orchestrator")
         caller = HybridDepartments(fakes, real)
@@ -157,19 +162,17 @@ def demo_page() -> FileResponse:
 
 @app.get("/api/registry")
 async def registry() -> dict:
-    _require_mock()
     if state.manager is None:
         await state.build()
     view = state.registry.view()
     for dept in view["depts"]:
         dept["mode"] = state.modes.get(dept["name"], "mock")
-    return {"data": view, "meta": {"mock": True, "modes": state.modes}}
+    return {"data": view, "meta": {"mock": state.mock, "modes": state.modes}}
 
 
 @app.get("/api/departments")
 async def departments() -> dict:
     """부서별 카드·skill·사용량(총괄이 부른 호출을 센 실측)과 최근 호출. 화면의 부서 카드가 쓴다."""
-    _require_mock()
     if state.manager is None:
         await state.build()
     view = state.registry.view()
@@ -194,7 +197,7 @@ async def departments() -> dict:
     items.sort(key=lambda d: DEPTS.index(d["name"]) if d["name"] in DEPTS else len(DEPTS))
     return {
         "data": items,
-        "meta": {"mock": True, "window_seconds": WINDOW_SECONDS, "bucket_seconds": BUCKET_SECONDS},
+        "meta": {"mock": state.mock, "window_seconds": WINDOW_SECONDS, "bucket_seconds": BUCKET_SECONDS},
     }
 
 
@@ -264,16 +267,15 @@ async def inject(req: DemoRequest | None = None) -> dict:
 
 @app.post("/api/events")
 async def receive_event(env: EventEnvelope) -> dict:
-    """다른 부서가 이벤트를 보내 볼 수 있는 개발용 입구(목·혼합 모드).
+    """다른 부서가 이벤트를 보내 볼 수 있는 입구. 실제 모드에서도 열어 둔다(이벤트 버스와 같은 판단).
 
     실제 전달은 Redis Streams 구독(`start_event_bus`)이고, 그때도 판단은 같은 `manager.process`다.
     """
-    _require_mock()
     manager = state.manager or await state.build()
     outcome, inc = await manager.process(env)
     return {
         "data": {"outcome": outcome, "context_id": inc.context_id if inc else None},
-        "meta": {"mock": True},
+        "meta": {"mock": state.mock},
     }
 
 

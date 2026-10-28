@@ -41,3 +41,7 @@ safe-test-out/
 
 # 로컬 실행 로그 (scripts/run_all.sh)
 .logs/
+
+# 로컬 실행 데이터·로그 (scripts/run_all.sh)
+.data/
+.logs/

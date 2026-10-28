@@ -88,9 +88,21 @@ def test_invalid_query_uses_error_envelope(client: TestClient) -> None:
     assert response.json()["error"]["code"] == "INVALID_REQUEST"
 
 
-def test_without_mock_returns_503(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_without_mock_reviews_are_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """후기는 아직 실제 출처가 없다. 실제 모드에서는 지어내지 않고 빈 목록이다."""
     monkeypatch.delenv("DASHBOARD_MOCK", raising=False)
     monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
-    response = TestClient(app).get(f"{BASE}/reviews")  # 아직 목 전용인 경로
+    response = TestClient(app).get(f"{BASE}/reviews")
+    assert response.status_code == 200
+    assert response.json()["data"] == []
+
+
+def test_without_mock_review_status_returns_503(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DASHBOARD_MOCK", raising=False)
+    monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
+    monkeypatch.setenv("DASHBOARD_HUMAN_TOKENS", "운영자:t0ken")
+    response = TestClient(app).post(
+        f"{BASE}/reviews/1/status", json={"status": "visible"}, headers={"Authorization": "Bearer t0ken"}
+    )  # 아직 목 전용인 쓰기 경로
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "UPSTREAM_NOT_CONNECTED"

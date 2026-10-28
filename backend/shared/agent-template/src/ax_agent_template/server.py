@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
@@ -34,7 +35,13 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from ax_agent_template import events
-from ax_agent_template.config import MAX_PATH_LENGTH, agent_name_scope, is_mock, set_agent_name
+from ax_agent_template.config import (
+    MAX_PATH_LENGTH,
+    agent_name_scope,
+    is_mock,
+    set_agent_name,
+    token_registry,
+)
 from ax_agent_template.services import SERVICE_PORTS, department_of
 from ax_agent_template.logging import log_event
 from ax_contracts.schemas import (
@@ -74,20 +81,28 @@ def error_result(
 def verify_token(token: str) -> str:
     """토큰을 검증하고 요청자(에이전트 이름)를 돌려준다.
 
-    TODO: 실제 에이전트 토큰 검증. 지금은 목 모드에서만 `mock:<이름>`을 받는다.
-    목 모드가 아니면 거부한다(fail-closed).
+    실제 모드: 토큰 명부(`AX_AGENT_TOKENS`)에서 같은 토큰을 찾아 그 이름을 돌려준다.
+    목 모드에서는 `mock:<이름>`도 받는다. 어느 쪽도 아니면 거부한다(fail-closed).
     """
     if is_mock() and token.startswith("mock:") and len(token) > len("mock:"):
         return token.removeprefix("mock:")
+    for name, known in token_registry().items():
+        if hmac.compare_digest(known, token):
+            return name
     raise PermissionError("토큰을 검증할 수 없다")
 
 
 async def enqueue_escalation(escalation: Escalation) -> None:
-    """이관 큐에 넣는다. TODO: 통합 에이전트의 이관 큐 연동. 목 모드는 메모리에 쌓는다."""
+    """이관 큐에 넣는다. 프로세스 메모리에 쌓고, 실제 모드는 공통 로그(`escalated`)에도 남겨 화면이 읽게 한다."""
+    MOCK_ESCALATIONS.append(escalation)
     if is_mock():
-        MOCK_ESCALATIONS.append(escalation)
         return
-    raise NotImplementedError("TODO: 이관 큐 연동")
+    log_event(
+        escalation.context_id,
+        escalation.tenant_id,
+        "escalated",
+        {"reason": escalation.reason, "path": list(escalation.path)},
+    )
 
 
 def check_loop(card: AgentCard, meta: RequestMeta) -> bool:
