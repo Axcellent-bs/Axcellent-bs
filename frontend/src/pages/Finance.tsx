@@ -15,7 +15,7 @@ import {
   FINANCE_SERVER, FINANCE_TABS, SAFETY_SERVER, finance, incidentName, krw, plainText, sortIncidents, todoTab,
   type FinanceKpis, type FinanceTab, type FinanceTodo, type Review, type SelfTest, type SelfTestLastMeta,
 } from "@/lib/finance";
-import { COMPANY } from "@/demo/session";
+import { CompanyName } from "@/demo/CompanyName";
 
 // 재무 AI 화면 = 고객사 재무팀. 기본 화면은 시나리오 A(결제 장애)의 "장애 사건 재무"(⑨ 쿠폰 장부 → ⑩ 손실 → ⑰ 사건 후 감사).
 // 평상시 업무(결산·대사·정산·한도 제안·감사)는 두 번째 탭에 둔다. 재무 AI 테스트는 서버가 10분마다 자동으로 한다.
@@ -36,7 +36,7 @@ const TAB_LABEL: Record<FinanceTab, string> = {
 
 const KPI: { key: keyof FinanceKpis; label: string; hint: string }[] = [
   { key: "gmv", label: "총거래액", hint: "고객이 결제한 금액 전체" },
-  { key: "commission_revenue", label: "판매 수수료 매출", hint: `판매자에게 받는 수수료. ${COMPANY.name}의 매출` },
+  { key: "commission_revenue", label: "판매 수수료 매출", hint: "판매자에게 받는 수수료. 회사의 매출" },
   { key: "refund_total", label: "환불", hint: "고객에게 돌려준 돈" },
   { key: "coupon_cost", label: "쿠폰 비용", hint: "회사가 부담한 쿠폰 할인" },
   { key: "pg_fee", label: "PG 수수료", hint: "결제대행사에 내는 수수료" },
@@ -165,7 +165,7 @@ export default function FinancePage() {
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">재무 관리</h1>
           <p className="mt-1 max-w-2xl text-sm text-ink-500">
-            {COMPANY.name}의 재무팀입니다. 장애가 나면 보상 쿠폰을 사건별 장부에 적고, 피해와 보상을 더해 손실을 정리하고, 끝난 뒤 보상이 규칙대로 나갔는지 감사합니다.
+            <CompanyName />의 재무팀입니다. 장애가 나면 보상 쿠폰을 사건별 장부에 적고, 피해와 보상을 더해 손실을 정리하고, 끝난 뒤 보상이 규칙대로 나갔는지 감사합니다.
             평소에는 결산·대사·정산·한도·감사를 합니다. 쿠폰·환불을 한 건씩 승인하지는 않습니다(그건 안전 장치가 기준표로 검사합니다).
           </p>
         </div>

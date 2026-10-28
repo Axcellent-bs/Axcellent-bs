@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "@/lib/nav";
-import { COMPANY } from "@/demo/session";
+import { CompanyName } from "@/demo/CompanyName";
 
 // 재무 AI 관리자 사용법. 기준 문서: ax-backend docs/notes/finance/2026-10-23-finance-redesign.md (§12 장애 사건 재무 + 재무팀 모듈)
 // 원본 사용법 문서(ax-backend docs/notes/finance/admin-guide.md)도 같은 내용으로 고쳐야 한다.
@@ -49,7 +49,7 @@ export default function FinanceGuidePage() {
         <Link href="/finance" className="text-sm text-brand-700 hover:underline">← 재무 AI로 돌아가기</Link>
         <h1 className="mt-3 text-2xl font-bold tracking-tight">재무 AI 관리자 사용법</h1>
         <p className="mt-3 rounded-2xl bg-brand-50 px-4 py-3 text-sm leading-relaxed text-brand-700">
-          재무 AI는 <b>{COMPANY.name}의 재무팀</b>입니다. 화면은 두 탭입니다.
+          재무 AI는 <b><CompanyName />의 재무팀</b>입니다. 화면은 두 탭입니다.
           기본으로 열리는 <b>장애 사건 재무</b>는 장애가 났을 때 <b>⑨ 보상 쿠폰을 장부에 적고 → ⑩ 손실(피해 + 보상)을 정리하고 → ⑰ 끝난 뒤 감사하는</b> 일을 사건별로 보여 줍니다.
           <b>평상시 재무 업무</b>에는 결산, 대사, 판매자 정산, 한도 제안, 사후 감사가 있습니다.
           쿠폰·환불을 한 건씩 승인하지는 않습니다.

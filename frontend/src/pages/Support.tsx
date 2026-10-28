@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 import { AtRisk } from "@/components/support/AtRisk";
 import { InquiryCheck } from "@/components/support/InquiryCheck";
 import { SurgeChanges } from "@/components/support/SurgeChanges";
-import { COMPANY } from "@/demo/session";
+import { CompanyName } from "@/demo/CompanyName";
 
 // 고객지원 AI 화면 = 고객사 고객지원팀. 짜임은 데이터분석 AI(/data)·재무 AI(/finance)와 같다.
 // 세 탭: 위험 고객(기본) · 문의 진단(보상 후보·결제 진단) · 급증·변경 요청. 모두 읽기 전용이고, 숫자는 서버가 센 값만 보여 준다.
@@ -47,7 +47,7 @@ export default function SupportPage() {
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">AI 처리 내역</h1>
           <p className="mt-1 max-w-2xl text-sm text-ink-500">
-            {COMPANY.name}의 고객지원팀입니다. 이탈할 것 같은 고객을 먼저 찾고, 문의마다 보상 후보와 결제가 막힌 곳을 보여 주고, 문의가 갑자기 몰리는 분류와 기획개발로 보낸 변경 요청을 봅니다.
+            <CompanyName />의 고객지원팀입니다. 이탈할 것 같은 고객을 먼저 찾고, 문의마다 보상 후보와 결제가 막힌 곳을 보여 주고, 문의가 갑자기 몰리는 분류와 기획개발로 보낸 변경 요청을 봅니다.
             이 화면은 보기만 하며, 보상·변경 요청을 보내는 일은 사람이 승인한 뒤 따로 합니다.
           </p>
         </div>
