@@ -1,5 +1,5 @@
 // 서비스 카탈로그. 부서를 코드에 박지 않으려고 부서 묶음을 없애고, 부서 안에 있던 기능을 서비스 하나하나로 꺼냈다.
-// 회사는 Adobe Creative Cloud처럼 필요한 서비스만 골라 쓰고(/system/services), 직원 계정에는 쓸 서비스를 배정한다(session.tsx).
+// 회사는 Adobe Creative Cloud처럼 필요한 서비스만 골라 쓰고(/system/services), 켠 서비스는 시스템 관리자 메뉴에 전부 보인다(session.tsx).
 // 화면은 예전 캣북스 대시보드의 AI 화면을 옮겨 온 것이다. paths가 그 서비스에 속한 화면 주소, agent가 맡은 AI다.
 import { useSyncExternalStore, type ComponentType } from 'react'
 import {

@@ -67,7 +67,7 @@ export default function CatalogHome() {
               필요한 AI 서비스만 골라 회사 안에서 쓰세요
             </h1>
             <p className="max-w-xl text-base leading-relaxed text-white/75">
-              AXcellent는 회사 서버에 설치하는 AI 업무 서비스 모음이에요. 쓰고 싶은 서비스만 켜고, 직원마다 쓸 서비스를 배정해요.
+              AXcellent는 회사 서버에 설치하는 AI 업무 서비스 모음이에요. 쓰고 싶은 서비스만 켜서 바로 써요.
             </p>
             <div className="flex flex-wrap gap-3">
               <Link to="/login" className="rounded-full bg-[#e0a72c] px-6 py-3 text-sm font-semibold text-[#1d1d3a] hover:brightness-105">로그인</Link>
@@ -143,7 +143,7 @@ export default function CatalogHome() {
         <section className="flex flex-wrap items-center justify-between gap-4 rounded-3xl bg-[#1d1d3a] px-8 py-8 text-white">
           <div>
             <p className="text-xl font-semibold">이미 회사에 설치돼 있나요?</p>
-            <p className="mt-1 text-sm text-white/70">회사 이메일로 로그인하면 내게 배정된 서비스가 열려요.</p>
+            <p className="mt-1 text-sm text-white/70">회사 이메일로 로그인하면 회사가 켠 서비스가 모두 열려요.</p>
           </div>
           <Link to="/login" className="rounded-full bg-white px-6 py-3 text-sm font-semibold text-[#1d1d3a] hover:bg-white/90">로그인</Link>
         </section>

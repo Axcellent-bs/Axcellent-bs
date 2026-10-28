@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { ACCOUNTS, OPERATORS, assignedOf, homeOf, useSession } from './session'
-import { useEnabledServices } from './services'
+import { useSession } from './session'
 
-// 데모 전용: 예시 직원 계정을 바꿔 가며 배정된 서비스 화면을 보여 준다. 실제 제품에는 없다.
+// 오른쪽 위 계정 메뉴. 고객사 계정이 시스템 관리자 하나라 계정 전환은 없고, 누가 들어와 있는지와 로그아웃만 둔다.
 export function AccountSwitcher() {
-  const { account, signIn, signOut } = useSession()
+  const { account, signOut } = useSession()
   const navigate = useNavigate()
-  const enabled = useEnabledServices()
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDivElement>(null)
 
@@ -26,11 +24,6 @@ export function AccountSwitcher() {
   }, [open])
 
   if (!account) return null
-  const pick = (id: string) => {
-    const a = signIn(id)
-    setOpen(false)
-    if (a) navigate(homeOf(a, enabled))
-  }
 
   return (
     <div ref={box} className="relative">
@@ -44,19 +37,12 @@ export function AccountSwitcher() {
       </button>
       {open && (
         <div role="menu" className="card absolute right-0 top-11 z-50 w-72 border border-ink-100 p-2">
-          <p className="px-3 pb-1 pt-2 text-xs text-ink-500">프로필 전환 (데모)</p>
-          {(account.operator ? OPERATORS : ACCOUNTS).map((a) => (
-            <button key={a.id} role="menuitemradio" aria-checked={a.id === account.id} type="button" onClick={() => pick(a.id)}
-              className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm hover:bg-ink-100 ${a.id === account.id ? 'bg-brand-50' : ''}`}>
-              <span>
-                <span className="block font-medium">{a.role}</span>
-                <span className="block text-xs text-ink-500">{assignedOf(a, enabled).map((s) => s.name).join(' · ') || a.email}</span>
-              </span>
-              {a.id === account.id && <span className="text-brand-600" aria-hidden="true">●</span>}
-            </button>
-          ))}
+          <div className="px-3 py-2 text-sm">
+            <p className="font-medium">{account.name}</p>
+            <p className="text-xs text-ink-500">{account.email}</p>
+          </div>
           <div className="mt-1 border-t border-ink-100 pt-1">
-            <button type="button" onClick={() => { const op = account.operator; signOut(); navigate(op ? '/control/login' : '/') }}
+            <button type="button" role="menuitem" onClick={() => { const op = account.operator; signOut(); navigate(op ? '/control/login' : '/') }}
               className="w-full rounded-xl px-3 py-2 text-left text-sm text-ink-700 hover:bg-ink-100">로그아웃</button>
           </div>
         </div>
