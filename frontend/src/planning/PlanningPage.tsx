@@ -18,6 +18,7 @@ import { Projects } from './projects'
 import { convoHref } from './links'
 import { Knowledge } from './knowledge'
 import { repoPending } from './repo'
+import { DevTaskDialog } from './coding'
 import { prSlug } from './links'
 
 type IconName = NonNullable<NavItem['icon']>
@@ -92,6 +93,7 @@ function Planning({ part }: { part: PlanningPart }) {
   const route = useRoute(P.home)
   const [state, dispatch, connected] = useSharedStore(apiBase(part))
   const [tools, setTools] = useState(false)
+  const [devTask, setDevTask] = useState(false)
   const toast = useToast()
   useEffect(() => {
     const on = (e: Event) => toast.show((e as CustomEvent<string>).detail)
@@ -153,6 +155,9 @@ function Planning({ part }: { part: PlanningPart }) {
             <a href={`#/work/prs/${prSlug(firstRepoWait.id)}`} className="chip amber" title="대상 레포 승인 대기 PR">레포 승인 대기 {repoWait}</a>
           )}
           {part === 'dev' && (
+            <button type="button" className="btn-primary px-3 py-1" disabled={!connected} title={connected ? '코딩 에이전트' : '개발·배포 서버 꺼짐'} onClick={() => setDevTask(true)}>직접 개발</button>
+          )}
+          {part === 'dev' && (
             <button type="button" className="btn-quiet px-2 py-1" title="개발 도구 연결" aria-label="개발 도구 연결" onClick={() => setTools(true)}>
               <IconGear size={20} />
             </button>
@@ -161,6 +166,7 @@ function Planning({ part }: { part: PlanningPart }) {
         </div>
       </header>
       {tools && <DevToolsDialog onClose={() => setTools(false)} />}
+      {devTask && <DevTaskDialog onClose={() => setDevTask(false)} onTools={() => setTools(true)} />}
       <div className="pl-bar">
         <nav className="pl-menu" aria-label={`${P.title} 메뉴`}>
           {menu.map((m) => (
