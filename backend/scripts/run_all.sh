@@ -108,8 +108,7 @@ if [ "$MODE" = "mock" ]; then
   if [ -f .env ]; then
     set -a
     # shellcheck disable=SC1090
-    . <(tr -d '
-' < .env)
+    . <(tr -d '\r' < .env)
     set +a
   fi
   export AGENT_TEMPLATE_MOCK=1
