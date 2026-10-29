@@ -25,9 +25,11 @@ const DEPT_SAY: Record<string, string> = {
 const STEP_KO: Record<string, string> = {
   rollback: "배포 되돌리기", recovery: "복구 확인", recovered_draft: "정상화 공지 초안", diagnose: "원인 진단",
   impact: "영향 분석", notice: "점검 공지", compensation: "피해 고객 보상",
+  cost: "배송비·비용 기록 확인", record: "처리 결과 기록",
 };
 const NOTE_KO: Record<string, string> = {
   undetermined: "원인을 특정하지 못함", requested: "보상을 요청함", card_created: "기록을 남김",
+  partial: "일부만 확인함", candidate: "후보 기록으로 저장함 (사람 확인 대기)",
   "failed: gate_rejected": "안전 관문이 막음", recovered: "복구됨", not_recovered: "아직 복구 안 됨",
 };
 const STATUS_SAY: Record<string, string> = { degraded: "사람 확인 필요", resolved: "해결됨", open: "AI가 처리 중" };
@@ -44,6 +46,7 @@ function eventKo(message: string, inc: Incident): string {
   if (message.startsWith("이벤트 수신: shop.degraded")) return "캣북스 쇼핑몰에서 장애 신호를 받음";
   if (message.startsWith("이벤트 수신: shop.recovered")) return "캣북스 쇼핑몰에서 복구 신호를 받음";
   if (message.startsWith("이벤트 수신: finance.anomaly_detected")) return "재무 AI에서 사후 감사 이상 신호를 받음";
+  if (message.startsWith("이벤트 수신: support.inquiry_resolved")) return "고객지원 AI에서 문의 해결 신호를 받음";
   if (message.startsWith("사건 시작:")) return `사건 시작: ${incidentTitle(inc)}`;
   const end = /^사건 종료: (\w+)/.exec(message);
   if (end) return `사건 종료: ${STATUS_SAY[end[1]] ?? end[1]}`;
