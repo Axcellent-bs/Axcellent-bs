@@ -1,0 +1,24 @@
+# Domains must not import each other (CLAUDE.md backend rule): they talk only via A2A call_agent.
+# Run: `uv run lint-imports` in backend/ (pytest runs it: shared/agent-template/tests/test_import_contracts.py).
+# Keep this file ASCII-only: lint-imports reads it with the OS default encoding (cp949 on Korean Windows).
+[importlinter]
+root_packages =
+    data_agent
+    finance_agent
+    hr_agent
+    infra_agent
+    marketing_agent
+    planning_agent
+    support_agent
+
+[importlinter:contract:domains-independent]
+name = Domains do not import each other
+type = independence
+modules =
+    data_agent
+    finance_agent
+    hr_agent
+    infra_agent
+    marketing_agent
+    planning_agent
+    support_agent
