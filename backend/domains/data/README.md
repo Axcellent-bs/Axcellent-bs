@@ -68,10 +68,16 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 | LOW_PRICE | 25 × 비율 | 카테고리 중앙값의 50% 미만(`LOW_PRICE_FACTOR`)인 상품 비율 | 확인함 (판매 중 상품이 없으면 확인할 수 없음) |
 | BULK_LISTING | 15 | 24시간 등록 50개 이상 | 확인함 |
 | DUP_BUSINESS | 20 | 같은 사업자 해시의 다른 판매자 | **확인할 수 없음**: shop-api `sellers`에 사업자 정보가 없어 `business_hash`가 null이다 (컬럼 추가는 팀 결정 필요) |
-| FRAUD_SIMILAR | 25 × 유사도 | 지난 사기 판매자 카드와의 유사도 | **확인할 수 없음**: hr에 data가 부를 수 있는 유사 사기 카드 skill이 없다. `similar_card_ids`는 빈 목록 |
+| FRAUD_SIMILAR | 25 × 유사도 | 지난 사기 판매자 카드와의 유사도 | hr `find_similar_fraud_cards`(A2A, #107). **dense일 때만 확인함**. 아래 참고 |
 
 - 확인할 수 없는 규칙은 0점으로 셈하지 않는다. 점수에서 빼고 `unknown_rules`, `reasons[].note`, summary에 "확인할 수 없음: <규칙>"으로 남긴다. summary에는 "확인한 규칙 N개 기준 점수, 확인한 규칙으로 낼 수 있는 최대 K점"(K = 100 − 확인 못 한 규칙 가중치)을 함께 적는다.
   - 지금은 사업자 중복·유사 카드가 늘 빠져서 K가 55점이다. `score`로는 high(70점 이상)가 나오지 않는다.
+- FRAUD_SIMILAR: hr `find_similar_fraud_cards`에 판매자 사실(가입 일수·저가 비율·24시간 등록·사업자 중복 여부, 개인정보 없음)을 보낸다 (`clients/hr_cards.py`, 5초 제한)
+  - `method=dense`(임베딩 코사인): `max_similarity`를 규칙 값으로 쓴다. 카드 id는 `similar_card_ids`
+  - `method=dice`(글자 2-gram 대체): 척도가 달라 점수에 쓰지 않는다. "확인할 수 없음: FRAUD_SIMILAR (임베딩 없음, dice 대체)". 카드 id는 참고로 `similar_card_ids`에 넣는다
+  - hr 꺼짐(서비스 꺼짐 포함)·무응답·시간 초과·형식 오류: 확인할 수 없음, 이유를 남긴다
+  - 확인할 수 없으면 다른 규칙처럼 `complete`·`max_possible_score`에 반영된다
+  - hr이 dense를 쓰려면 hr 쪽 임베딩 설정(`MEMORY_*` 또는 `LLM_*`와 `EMBED_MODEL`)이 있어야 한다. 없으면 hr은 dice로 답한다
 - 불완전 표시와 보수적 상한 (`FraudScoreOutput`)
   - `complete`: `unknown_rules`가 비어 있으면 true
   - `max_possible_score`: `score` + 확인 못 한 규칙 가중치 합 (100 상한). 빠진 규칙을 모두 위험(만점)으로 본 값이다. `complete`면 `score`와 같다

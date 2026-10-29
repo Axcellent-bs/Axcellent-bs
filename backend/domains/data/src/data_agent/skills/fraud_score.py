@@ -17,7 +17,13 @@ shop-api 판매자 정보(`/sellers/{id}/profile`)와 가격(`/sellers/{id}/pric
 - LOW_PRICE: 판매 중 상품 중 카테고리 중앙값의 50% 미만 비율. 판매 중 상품이 없으면 확인할 수 없음
 - BULK_LISTING: `listings_last_24h`
 - DUP_BUSINESS: `business_hash_duplicated`가 null이면(지금 shop-api는 늘 null) 확인할 수 없음
-- FRAUD_SIMILAR: hr에 data가 부를 수 있는 유사 사기 카드 skill이 없어 늘 확인할 수 없음
+- FRAUD_SIMILAR: hr `find_similar_fraud_cards`(A2A, #107)에 판매자 사실(개인정보 없음)을 보낸다
+  - method=dense: `max_similarity`를 규칙 값으로 쓰고, 카드 id를 `similar_card_ids`에 넣는다
+  - method=dice: 척도가 달라 점수에 쓰지 않는다
+    ("확인할 수 없음: FRAUD_SIMILAR (임베딩 없음, dice 대체)").
+    카드 id는 참고로 `similar_card_ids`에 넣는다
+  - hr 꺼짐·무응답·시간 초과·형식 오류: 확인할 수 없음 (이유를 남긴다)
+  - 확인할 수 없으면 다른 규칙처럼 `complete`·`max_possible_score`에 반영된다
 """
 
 from __future__ import annotations
@@ -25,8 +31,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from ax_contracts.schemas import Evidence
+from ax_contracts.schemas import Evidence, RequestMeta
 from ax_contracts.schemas.data import FraudReason, FraudScoreInput, FraudScoreOutput
+from data_agent.clients.hr_cards import SendFn, SimilarCards, similar_fraud_cards
 from data_agent.clients.shop_client import SellerClient
 from data_agent.metrics.fraud import (
     BULK_LISTING,
@@ -43,6 +50,8 @@ from data_agent.metrics.fraud import (
 )
 
 NO_SIMILAR_CARD_SKILL = "hr에 data가 부를 수 있는 유사 사기 카드 skill이 없음"
+NO_REQUEST_META = "요청 정보가 없어 hr에 유사 사기 카드를 묻지 않음"
+DICE_FALLBACK = "임베딩 없음, dice 대체"
 NO_BUSINESS_HASH = "shop-api 판매자 정보에 사업자 해시가 없음"
 NO_ACTIVE_PRODUCTS = "판매 중인 상품이 없어 저가 비율을 정할 수 없음"
 JOINED_IN_FUTURE = "가입 시각이 지금보다 뒤라 가입 일수를 정할 수 없음"
@@ -69,9 +78,18 @@ def _describe(code: str, value: float) -> str:
 
 
 async def score_fraud(
-    data: FraudScoreInput, shop: SellerClient, now: datetime | None = None
+    data: FraudScoreInput,
+    shop: SellerClient,
+    now: datetime | None = None,
+    *,
+    meta: RequestMeta | None = None,
+    send: SendFn | None = None,
 ) -> FraudResult:
-    """판매자 사실을 shop-api에서 읽어 점수를 낸다. 못 읽으면 `ShopUnavailable`이 그대로 나간다."""
+    """판매자 사실을 shop-api에서 읽어 점수를 낸다. 못 읽으면 `ShopUnavailable`이 그대로 나간다.
+
+    `meta`가 있으면 hr에 유사 사기 카드를 묻는다(`send`, 기본 `call_agent`). 없으면 묻지 않고
+    FRAUD_SIMILAR는 확인할 수 없음이다.
+    """
     now = now or datetime.now(UTC)
     profile = await shop.seller_profile(data.seller_id)
     prices = await shop.seller_prices(data.seller_id)
@@ -86,7 +104,26 @@ async def score_fraud(
         unknown[LOW_PRICE] = NO_ACTIVE_PRODUCTS
     if profile.business_hash_duplicated is None:
         unknown[DUP_BUSINESS] = NO_BUSINESS_HASH
-    unknown[FRAUD_SIMILAR] = NO_SIMILAR_CARD_SKILL
+    if meta is None:
+        similar = SimilarCards(method=None, reason=NO_REQUEST_META)
+    else:
+        similar = await similar_fraud_cards(
+            {
+                "joined_days": max(joined_days, 0),
+                "low_price_ratio": ratio,
+                "listings_last_24h": profile.listings_last_24h,
+                "business_hash_duplicated": profile.business_hash_duplicated,
+            },
+            meta,
+            send,
+        )
+    similarity = 0.0
+    if similar.method == "dense":
+        similarity = similar.max_similarity
+    elif similar.method == "dice":  # 척도가 달라 점수에 쓰지 않는다(카드 id는 참고로 남긴다)
+        unknown[FRAUD_SIMILAR] = DICE_FALLBACK
+    else:
+        unknown[FRAUD_SIMILAR] = similar.reason or NO_SIMILAR_CARD_SKILL
 
     # 확인 못 한 규칙에는 점수가 나오지 않는 값을 넣고, 결과에서 그 규칙을 뺀다(점수 계산은 그대로)
     facts = SellerFacts(
@@ -94,7 +131,7 @@ async def score_fraud(
         low_price_ratio=ratio,
         business_hash_duplicated=bool(profile.business_hash_duplicated),
         listings_last_24h=profile.listings_last_24h,
-        max_fraud_card_similarity=0.0,
+        max_fraud_card_similarity=similarity,
     )
     scored = score_seller(facts)
     checked = [code for code in WEIGHTS if code not in unknown]
@@ -139,7 +176,7 @@ async def score_fraud(
         score=scored.score,
         level=scored.level,
         reasons=reasons,
-        similar_card_ids=[],
+        similar_card_ids=similar.card_ids,
         summary=" ".join(parts),
         unknown_rules=unknown_rules,
         complete=not unknown_rules,
@@ -153,6 +190,12 @@ async def score_fraud(
         if pairs
         else f"확인할 수 없음: {LOW_PRICE} ({NO_ACTIVE_PRODUCTS})",
         f"확인한 규칙: {', '.join(checked) or '없음'}",
+        (
+            f"유사 사기 카드 ({similar.method}): 최대 유사도 {similar.max_similarity:g}, "
+            f"카드 {', '.join(similar.card_ids) or '없음'}"
+            if similar.method
+            else f"유사 사기 카드: 읽지 못함 ({similar.reason})"
+        ),
         *(f"확인할 수 없음: {code} ({unknown[code]})" for code in unknown_rules),
         f"확인한 규칙으로 낼 수 있는 최대 {checked_max}점, "
         f"확인 못 한 규칙을 모두 위험으로 본 최대 {worst}점({worst_level}) (가중치 초안: "
@@ -163,6 +206,7 @@ async def score_fraud(
         queries=[
             f"shop_seller_profile seller_id={data.seller_id}",
             f"shop_seller_prices seller_id={data.seller_id}",
+            "hr.find_similar_fraud_cards",
         ],
         data_summary="\n".join(lines),
         collected_at=datetime.now(UTC),
