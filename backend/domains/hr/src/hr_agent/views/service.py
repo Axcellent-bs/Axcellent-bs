@@ -1,6 +1,7 @@
 """대시보드 인사 화면이 보여 줄 현황 조회 skill 5개(모두 읽기 전용, 관문을 거치지 않는다).
 
-- `list_handovers` · `list_open_questions` · `list_candidate_cards` · `list_cards` · `get_audit_timeline`
+- `list_handovers` · `list_open_questions` · `list_candidate_cards` · `list_cards` ·
+  `get_audit_timeline`
 값은 저장된 그대로 돌려주고 새로 계산하거나 지어내지 않는다(진행률·완성도는 저장·계산된 값).
 """
 

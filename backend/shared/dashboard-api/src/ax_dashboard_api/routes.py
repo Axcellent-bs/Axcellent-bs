@@ -27,6 +27,7 @@ from ax_contracts.schemas.record import Card
 from ax_dashboard_api import (
     claim_mapping,
     hr_client,
+    live_views,
     mock_actions,
     mock_customers,
     mock_data,
@@ -40,7 +41,6 @@ from ax_dashboard_api import (
 )
 from ax_dashboard_api.auth import require_human_for_writes
 from ax_dashboard_api.envelope import ApiError, is_mock, ok, or_unavailable, require_mock
-from ax_dashboard_api import live_views
 from ax_dashboard_api.schemas import (
     AgentMessageBody,
     CandidateDecisionBody,
@@ -106,7 +106,8 @@ def reviews() -> dict:
 
 
 # ---------------------------------------- 클레임·보상 큐·KPI (목 모드 또는 support A2A)
-# 꺼진 서비스의 조회(`service_disabled`)는 지어내지 않는다. 목록은 빈 목록, 숫자 집계는 `data: null`로 두고
+# 꺼진 서비스의 조회(`service_disabled`)는 지어내지 않는다.
+# 목록은 빈 목록, 숫자 집계는 `data: null`로 두고
 # `meta.unavailable`에 "확인할 수 없음 (○○ 서비스가 꺼져 있음)"을 남긴다 (envelope.or_unavailable).
 # 목 모드는 메모리 데이터, 아니면 support skill을 부르고 `claim_mapping`으로 화면 모델에 맞춘다.
 @router.get("/kpis")

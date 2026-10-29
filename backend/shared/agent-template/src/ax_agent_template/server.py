@@ -42,8 +42,8 @@ from ax_agent_template.config import (
     set_agent_name,
     token_registry,
 )
-from ax_agent_template.services import SERVICE_PORTS, department_of
 from ax_agent_template.logging import log_event
+from ax_agent_template.services import SERVICE_PORTS, department_of
 from ax_contracts.schemas import (
     AgentCard,
     AgentRequest,
@@ -93,7 +93,10 @@ def verify_token(token: str) -> str:
 
 
 async def enqueue_escalation(escalation: Escalation) -> None:
-    """이관 큐에 넣는다. 프로세스 메모리에 쌓고, 실제 모드는 공통 로그(`escalated`)에도 남겨 화면이 읽게 한다."""
+    """이관 큐에 넣는다.
+
+    프로세스 메모리에 쌓고, 실제 모드는 공통 로그(`escalated`)에도 남겨 화면이 읽게 한다.
+    """
     MOCK_ESCALATIONS.append(escalation)
     if is_mock():
         return
@@ -147,7 +150,8 @@ def create_agent_app(card: AgentCard, handlers: Mapping[str, Handler]) -> FastAP
     핸들러는 `async def handler(request: AgentRequest) -> AgentResult`다.
     """
     skill_ids = {skill.id for skill in card.skills}
-    # 서비스 에이전트(services.py)는 부서 핸들러 중 자기 카드 skill만 쓴다. 핸들러 없는 skill은 그대로 실패
+    # 서비스 에이전트(services.py)는 부서 핸들러 중 자기 카드 skill만 쓴다.
+    # 핸들러 없는 skill은 그대로 실패
     if card.name in SERVICE_PORTS:
         handlers = {k: v for k, v in handlers.items() if k in skill_ids}
     if set(handlers) != skill_ids:

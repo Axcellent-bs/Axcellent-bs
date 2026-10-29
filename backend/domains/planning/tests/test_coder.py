@@ -458,7 +458,10 @@ def test_dev_role_reports_coding_result_to_planning(adapter) -> None:
 
 
 def test_retry_reuses_written_code_without_llm(service: PlanningService, adapter) -> None:
-    """PR을 못 올리고 멈춘 뒤 다시 시도하면 이미 작성한 코드로 PR만 다시 올린다 (LLM 다시 안 부름)."""
+    """PR을 못 올리고 멈춘 뒤 다시 시도하면 이미 작성한 코드로 PR만 다시 올린다.
+
+    LLM은 다시 부르지 않는다.
+    """
 
     class BrokenOpen(MockVcsAdapter):
         async def open_change(self, *a, **kw):
@@ -504,7 +507,8 @@ def test_edits_are_used_and_fix_only_flagged_files(service: PlanningService, ada
                 self.calls.append((schema.__name__, prompt, data))
                 cur = data["current"]
                 first = cur.splitlines(keepends=True)[0]
-                return FileWrite(edits=[Edit(find=first, replace="// 고침\n" + first)], reason="한 줄")
+                edit = Edit(find=first, replace="// 고침\n" + first)
+                return FileWrite(edits=[edit], reason="한 줄")
             return await super().structured(prompt, schema, untrusted, images, context_id)
 
     llm = EditLLM(

@@ -62,5 +62,6 @@ async def test_new_audit_finding_opens_finance_incident(published: list[EventEnv
     assert env.type == EventType.FINANCE_ANOMALY_DETECTED and env.source == "finance"
     assert env.data["component"] == "finance" and env.data["metric_code"] == "repeat_refund"
     assert env.data["buyer_ids"] == ["buy_0008"]
-    await chat_log.audit_findings([{**finding, "refs": ["ref_9"]}], "shop-demo")  # 다른 의심 건은 새로
+    # 다른 의심 건은 새로
+    await chat_log.audit_findings([{**finding, "refs": ["ref_9"]}], "shop-demo")
     assert len(published) == 2

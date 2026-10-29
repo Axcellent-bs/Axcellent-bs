@@ -168,7 +168,9 @@ def test_approving_a_candidate_makes_it_active_and_supersedes_the_older_decision
     assert "card.approve" in svc.audit.kinds("ctx_dv_0001")
 
 
-def confirmed_card(client, ctx="ctx_old_0001", area="payment", summary="결제 재시도를 최대 2회로 확정했다"):
+def confirmed_card(
+    client, ctx="ctx_old_0001", area="payment", summary="결제 재시도를 최대 2회로 확정했다"
+):
     res = post(
         client,
         "record_case",
@@ -202,7 +204,9 @@ def test_list_cards_shows_only_confirmed_cards_newest_first(svc, client) -> None
 
 def test_list_cards_filters_by_incident_and_area_and_limit(svc, client) -> None:
     first = confirmed_card(client, "ctx_old_0001")
-    confirmed_card(client, "ctx_old_0002", area="search", summary="검색 색인을 새로 만들기로 확정했다")
+    confirmed_card(
+        client, "ctx_old_0002", area="search", summary="검색 색인을 새로 만들기로 확정했다"
+    )
     mine = ListCardsOutput.model_validate(
         post(client, "list_cards", {"context_id": "ctx_old_0001"})["output"]
     )
@@ -211,7 +215,9 @@ def test_list_cards_filters_by_incident_and_area_and_limit(svc, client) -> None:
         post(client, "list_cards", {"context_id": "ctx_nope_0001"})["output"]
     )
     assert none.cards == []
-    payment = ListCardsOutput.model_validate(post(client, "list_cards", {"area": "payment"})["output"])
+    payment = ListCardsOutput.model_validate(
+        post(client, "list_cards", {"area": "payment"})["output"]
+    )
     assert [c.card_id for c in payment.cards] == [first]
     one = ListCardsOutput.model_validate(post(client, "list_cards", {"limit": 1})["output"])
     assert len(one.cards) == 1

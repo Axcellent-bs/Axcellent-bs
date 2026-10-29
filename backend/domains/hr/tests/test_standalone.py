@@ -90,7 +90,8 @@ def test_agent_card_lists_all_skills_with_resolvable_schemas() -> None:
         for ref in (skill.input_schema, skill.output_schema):
             path, _, cls = ref.partition("#")
             assert (REPO / path).is_file(), ref
-            module = path.removeprefix("shared/contracts/src/").removesuffix(".py").replace("/", ".")
+            stem = path.removeprefix("shared/contracts/src/").removesuffix(".py")
+            module = stem.replace("/", ".")
             assert hasattr(importlib.import_module(module), cls), ref
         assert skill.grade == ("read" if skill.id in READ_ONLY else skill.grade)
         if skill.grade == "B":

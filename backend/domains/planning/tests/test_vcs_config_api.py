@@ -38,7 +38,9 @@ def test_save_github_hides_token_and_keeps_it_on_blank() -> None:
 
 def test_bad_config_rejected_and_previous_kept() -> None:
     c = TestClient(app)
-    r = c.post("/api/planning/vcs", json={"kind": "github", "repo": "not-a-repo", "token": "x" * 10})
+    r = c.post(
+        "/api/planning/vcs", json={"kind": "github", "repo": "not-a-repo", "token": "x" * 10}
+    )
     assert r.status_code == 400 and r.json()["error"]["code"] == "INVALID_VCS"
     assert c.get("/api/planning/vcs").json()["data"]["kind"] == "mock"
     r = c.post("/api/planning/vcs", json={"kind": "svn"})

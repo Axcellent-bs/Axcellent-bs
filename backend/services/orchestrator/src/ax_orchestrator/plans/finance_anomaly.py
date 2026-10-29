@@ -48,6 +48,12 @@ def finance_anomaly() -> Plan:
                 gate=_signals_gate,
                 required=False,
             ),
-            Step("record", "record_case", "사건 기록 (hr)", also_after=("audit", "signals"), kind="record"),
+            Step(
+                "record",
+                "record_case",
+                "사건 기록 (hr)",
+                also_after=("audit", "signals"),
+                kind="record",
+            ),
         ],
     )
