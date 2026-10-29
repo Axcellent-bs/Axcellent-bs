@@ -96,6 +96,7 @@ export interface PR {
   mergedBy?: 'rule' | 'review' | 'human'
   rule?: string // 자동 머지에 쓴 기준 (AR-n)
   target?: RepoTarget // 레포가 2개 이상일 때 AI가 고른 대상 레포 (사람 승인 전에는 PR을 열지 않는다)
+  url?: string | null // 형상관리(깃허브)에 열린 실제 PR 주소
 }
 
 // PR을 올릴 레포. 연결 1개면 자동 승인, 2개 이상이면 AI 제안 → 사람 승인

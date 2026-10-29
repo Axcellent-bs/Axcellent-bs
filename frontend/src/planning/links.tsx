@@ -18,7 +18,10 @@ export function requestView(r: Request): 'all' | 'incoming' | 'progress' | 'done
 export const prSlug = (id: string) => id.replace('PR #', 'PR-')
 export const prFromSlug = (x?: string) => x?.replace(/^PR-/, 'PR #')
 
-export const go = (href: string) => { location.hash = href }
+export const go = (href: string) => {
+  if (/^https?:\/\//.test(href)) window.open(href, '_blank', 'noopener')
+  else location.hash = href
+}
 export const deptHref = (d: Dept) => `#/metrics/activity/${d}`
 // 사건·요청 하나(context_id)에서 에이전트끼리 주고받은 대화
 export const convoHref = (ctx: string) => `#/talk/${ctx}`

@@ -222,7 +222,7 @@ export function Work({ s, d, item }: P & { item?: string }) {
         <Step name="검수" on={last === '통과'} title={sel.reviews.join(' → ')}>
           {!sel.merged && (last === '불일치' || rejected) && <Button size="small" onClick={() => d({ type: 'reviewPr', pr: sel.id })}>다시 검수</Button>}
         </Step>
-        <Step name="머지" on={sel.merged} href={xr ? `#/work/reviews/${xr.id}` : undefined} title={sel.merged ? mergedLabel(sel) : xr ? `${waitLabel(xr)} · ${xr.id}` : rejected ? '검증자 거절' : '머지 전'}>
+        <Step name="머지" on={sel.merged} href={sel.url || (xr ? `#/work/reviews/${xr.id}` : undefined)} title={sel.merged ? mergedLabel(sel) : xr ? `${waitLabel(xr)} · ${xr.id}` : rejected ? '검증자 거절' : '머지 전'}>
           {xr && <p className="muted">{xr.verifier}</p>}
         </Step>
       </Flow>
