@@ -158,6 +158,9 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const kst = (iso) => iso ? new Date(iso).toLocaleTimeString('ko-KR', {hour12: false}) : '';
 
+// 이 화면은 목 모드 전용이다. 목 모드에서만 통하는 admin·사람 토큰을 쓴다
+const DEMO_ADMIN_TOKEN = 'mock:admin';
+const DEMO_HUMAN_TOKEN = 'human:demo';
 const last = {};
 function setHTML(id, html) {
   if (last[id] === html) return;  // 같은 내용이면 다시 그리지 않아 버튼 클릭이 끊기지 않는다
@@ -172,7 +175,8 @@ async function inject() {
     wrong_owner: $('o-owner').checked, infra_card_empty: $('o-infra').checked,
     undetermined: $('o-undet').checked, not_recovered: $('o-norec').checked };
   const r = await fetch('/api/demo/incidents', { method: 'POST',
-    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${DEMO_ADMIN_TOKEN}` },
+    body: JSON.stringify(body) });
   const j = await r.json();
   current = j.data.context_id; pinned = true;
   $('inject').disabled = false;
@@ -181,7 +185,8 @@ async function inject() {
 
 async function decide(step, approved) {
   await fetch(`/api/incidents/${current}/holds/${step}`, { method: 'POST',
-    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approved }) });
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${DEMO_HUMAN_TOKEN}` },
+    body: JSON.stringify({ approved }) });
   tick();
 }
 window.decide = decide;

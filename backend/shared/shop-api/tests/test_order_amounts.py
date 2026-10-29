@@ -99,7 +99,11 @@ def test_items_expose_id_title_and_unit_fields(client: TestClient) -> None:
     assert (first["title"], first["qty"], first["unit_price"]) == ("파이썬 입문서", 2, 18000)
     assert (first["paid_amount"], first["points_share"]) == (36000, 0)
     # 이름이 바뀌어도 주문 당시 이름이 남는다
-    client.patch("/api/shop/products/prd_0001", json={"name": "바뀐 이름"})
+    client.patch(
+        "/api/shop/products/prd_0001",
+        json={"name": "바뀐 이름"},
+        headers={"Authorization": "Bearer mock:admin"},
+    )
     again = client.get(f"/api/shop/orders/{order['order_id']}").json()["data"]
     assert again["items"][0]["title"] == "파이썬 입문서"
 

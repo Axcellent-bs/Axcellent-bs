@@ -7,6 +7,8 @@ from ax_shop_api import outbox
 from ax_shop_api.db import Db
 from ax_shop_api.main import create_app
 
+ADMIN = {"Authorization": "Bearer mock:admin"}
+
 
 @pytest.fixture(autouse=True)
 def _mock_mode(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -169,11 +171,12 @@ def test_product_create_and_update(client: TestClient) -> None:
             "price": 12000,
             "stock": 5,
         },
+        headers=ADMIN,
     )
     assert created.status_code == 201
     product_id = created.json()["data"]["product_id"]
     patched = client.patch(
-        f"/api/shop/products/{product_id}", json={"price": 11000, "active": False}
+        f"/api/shop/products/{product_id}", json={"price": 11000, "active": False}, headers=ADMIN
     )
     assert patched.json()["data"]["price"] == 11000
     listed = {p["product_id"] for p in client.get("/api/shop/products").json()["data"]}
@@ -185,4 +188,4 @@ def test_product_create_and_update(client: TestClient) -> None:
         "price": 1,
         "stock": 1,
     }
-    assert client.post("/api/shop/products", json=unknown_seller).status_code == 404
+    assert client.post("/api/shop/products", json=unknown_seller, headers=ADMIN).status_code == 404

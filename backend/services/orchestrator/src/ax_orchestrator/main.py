@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
@@ -26,6 +26,7 @@ from ax_agent_template import events
 from ax_agent_template.config import set_agent_name
 from ax_contracts.schemas import EventEnvelope, EventType
 from ax_orchestrator.a2a import build_a2a_app
+from ax_orchestrator.auth import require_admin, require_agent, require_human
 from ax_orchestrator.engine import Engine
 from ax_orchestrator.hybrid import HybridDepartments, real_depts_from_env
 from ax_orchestrator.manager import SUBSCRIBED, IncidentManager
@@ -255,8 +256,11 @@ async def incident(context_id: str) -> JSONResponse:
 
 
 @app.post("/api/demo/incidents")
-async def inject(req: DemoRequest | None = None) -> dict:
-    """판매 사이트 결제 장애를 주입한 것처럼 `shop.degraded` 이벤트를 넣는다(목 모드)."""
+async def inject(req: DemoRequest | None = None, _: str = Depends(require_admin)) -> dict:
+    """판매 사이트 결제 장애를 주입한 것처럼 `shop.degraded` 이벤트를 넣는다(목 모드).
+
+    운영자 전용이라 admin 토큰만 받는다.
+    """
     _require_mock()
     manager = await state.build(req)
     env = EventEnvelope(
@@ -274,10 +278,10 @@ async def inject(req: DemoRequest | None = None) -> dict:
 
 
 @app.post("/api/events")
-async def receive_event(env: EventEnvelope) -> dict:
+async def receive_event(env: EventEnvelope, _: str = Depends(require_agent())) -> dict:
     """다른 부서가 이벤트를 보내 볼 수 있는 입구.
 
-    실제 모드에서도 열어 둔다(이벤트 버스와 같은 판단).
+    실제 모드에서도 열어 둔다(이벤트 버스와 같은 판단). 에이전트 토큰(`AX_AGENT_TOKENS`)만 받는다.
 
     실제 전달은 Redis Streams 구독(`start_event_bus`)이고, 그때도 판단은 같은 `manager.process`다.
     """
@@ -290,11 +294,13 @@ async def receive_event(env: EventEnvelope) -> dict:
 
 
 @app.post("/api/incidents/{context_id}/holds/{step_id}")
-async def decide(context_id: str, step_id: str, body: Decision) -> dict:
+async def decide(
+    context_id: str, step_id: str, body: Decision, _: str = Depends(require_human)
+) -> dict:
     """목 모드의 승인·거절 흉내. 총괄이 승인하는 것이 아니다.
 
-    이 엔드포인트에는 사람 토큰 확인이 없다(#265). 그래서 목 모드에서만 열고,
-    실제 모드의 사람 결정은 안전 관문 보류 큐 하나로만 간다.
+    사람 토큰(`SAFETY_HUMAN_TOKENS`)만 받는다. 그래도 목 모드에서만 열고,
+    실제 모드의 사람 결정은 안전 관문 보류 큐 하나로만 간다(#265).
     """
     _require_mock()
     if not (state.manager and state.manager.hold_decision(context_id, step_id, body.approved)):

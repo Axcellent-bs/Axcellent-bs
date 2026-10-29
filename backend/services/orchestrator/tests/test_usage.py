@@ -12,6 +12,9 @@ from ax_orchestrator.models import now
 from ax_orchestrator.plans.scenario_a import scenario_a
 from ax_orchestrator.usage import CallRecord, RecordingCaller, UsageRecorder
 
+# admin 토큰. 명부는 conftest.py의 `_write_tokens`가 넣는다
+ADMIN = {"Authorization": "Bearer admin-test-token"}
+
 
 def _req(skill: str = "impact_analysis", key: str | None = "k1") -> AgentRequest:
     meta = RequestMeta(
@@ -112,7 +115,7 @@ def test_departments_endpoint_exposes_usage_after_an_incident(monkeypatch) -> No
         before = client.get("/api/departments").json()
         assert [d["name"] for d in before["data"]][:3] == ["infra", "data", "planning"]
         assert all(d["usage"]["calls"] == 0 for d in before["data"])
-        created = client.post("/api/demo/incidents", json={"fail_marketing": True})
+        created = client.post("/api/demo/incidents", json={"fail_marketing": True}, headers=ADMIN)
         ctx = created.json()["data"]["context_id"]
         _wait_done(client, ctx)
         after = {d["name"]: d for d in client.get("/api/departments").json()["data"]}
@@ -127,7 +130,7 @@ def test_departments_endpoint_exposes_usage_after_an_incident(monkeypatch) -> No
 def test_departments_marks_unavailable_dept(monkeypatch) -> None:
     _fresh_state(monkeypatch)
     with TestClient(app) as client:
-        client.post("/api/demo/incidents", json={"infra_card_empty": True})
+        client.post("/api/demo/incidents", json={"infra_card_empty": True}, headers=ADMIN)
         depts = client.get("/api/departments").json()["data"]
     infra = next(d for d in depts if d["name"] == "infra")
     assert infra["available"] is False and infra["skills"] == []

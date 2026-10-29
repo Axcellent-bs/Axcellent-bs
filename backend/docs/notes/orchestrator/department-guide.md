@@ -20,7 +20,7 @@ ORCHESTRATOR_REAL_DEPTS=finance uv run python -m ax_orchestrator
 4. `GET /api/registry`로 내 카드가 제대로 읽혔는지 확인한다(`unavailable`에 내 부서가 있으면 카드 수집 실패).
 
 ## 이벤트를 총괄에 보내 보는 법 (발행하는 부서용)
-총괄이 구독하는 이벤트와 판정은 아래와 같다. 실제 전달은 Redis Streams(agent-template TODO)로 바뀌지만 판정 규칙은 같다. 지금은 개발용 입구 `POST /api/events`에 `EventEnvelope` JSON을 보내 확인한다.
+총괄이 구독하는 이벤트와 판정은 아래와 같다. 실제 전달은 Redis Streams(agent-template TODO)로 바뀌지만 판정 규칙은 같다. 지금은 개발용 입구 `POST /api/events`에 `EventEnvelope` JSON을 보내 확인한다. 이 입구는 에이전트 토큰(`AX_AGENT_TOKENS`, 목 모드는 `mock:<이름>`)이 있어야 한다.
 
 | 이벤트 | 총괄의 판정 |
 |---|---|
@@ -30,7 +30,8 @@ ORCHESTRATOR_REAL_DEPTS=finance uv run python -m ax_orchestrator
 | 그 밖의 이벤트 | 무시 |
 
 ```
-curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json' -d '{
+curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json' 
+  -H 'Authorization: Bearer <에이전트 토큰>' -d '{
   "event_id": "evt_demo01", "type": "shop.degraded", "occurred_at": "2026-10-16T01:00:00Z",
   "source": "shop-api", "idempotency_key": "evt_demo01",
   "data": {"component": "payment", "metric_code": "error_rate_5xx", "value": 0.42}}'
