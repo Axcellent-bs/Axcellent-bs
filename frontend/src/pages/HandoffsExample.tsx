@@ -37,7 +37,7 @@ type ExItem = {
 
 const ITEMS: ExItem[] = [
   { id: "ex-1", from: "개발·배포", dept: "개발팀", category: "PR 교차검증", kind: "사람 확인 요청", title: "PR #12 교차검증 사람 확인",
-    reason: "진행 중 사건과 구성요소 겹침", status: "waiting", minutesAgo: 25, href: "/dev#/work/prs", hrefLabel: "작업·PR" },
+    reason: "진행 중 사건과 구성요소 겹침", status: "waiting", minutesAgo: 25, href: "/dev/work/prs", hrefLabel: "작업·PR" },
   { id: "ex-2", from: "고객지원", dept: "재무팀", category: "환불 승인", kind: "사람 확인 요청", title: "환불 120,000원 승인",
     reason: "주문 2310 파손 · 자동 환불 한도 50,000원 초과", risky: true, status: "waiting", minutesAgo: 40, href: "/claims", hrefLabel: "클레임·보상" },
   { id: "ex-3", from: "고객지원", dept: "고객지원팀", category: "고객 문의 답변", kind: "서비스 꺼짐 대신", title: "고객 문의 직접 답변",
@@ -53,7 +53,7 @@ const ITEMS: ExItem[] = [
     reason: "신규 입사자 2명 · 월 한도 300만 원 요청", status: "claimed", claimedBy: "김서연", minutesAgo: 50, href: "/hr", hrefLabel: "인수인계" },
   { id: "ex-8", from: "개발·배포", dept: "개발팀", category: "배포 후 점검", kind: "사람 확인 요청", title: "배포 후 점검 결과 확인",
     reason: "주문 API 배포 · 자동 점검 1건 경고", status: "done", claimedBy: "박지훈", result: "경고는 로그 설정 문제 · 서비스 영향 없음",
-    minutesAgo: 300, closedMinutesAgo: 260, href: "/dev#/work/ops", hrefLabel: "운영·배포" },
+    minutesAgo: 300, closedMinutesAgo: 260, href: "/dev/work/ops", hrefLabel: "운영·배포" },
 ];
 
 const ESCALATE_MIN = 120;
