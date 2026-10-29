@@ -71,6 +71,7 @@ from planning_agent.vcs.base import (
     parse_trace,
     state_of,
 )
+from planning_agent.vcs.github_app import GithubAppAuth
 
 DEFAULT_BASE_URL = "https://api.github.com"
 MERGE_METHODS = ("merge", "squash", "rebase")
@@ -140,8 +141,9 @@ class GithubVcsAdapter:
     def __init__(
         self,
         repo: str,
-        token: str,
+        token: str = "",
         *,
+        app: GithubAppAuth | None = None,
         base_url: str = DEFAULT_BASE_URL,
         base_branch: str = "dev",
         client: httpx.AsyncClient | None = None,
@@ -149,12 +151,14 @@ class GithubVcsAdapter:
     ):
         if not _REPO.match(repo or ""):
             raise VcsError("config", "레포는 owner/name 형식이어야 한다")
-        if not token:
+        if not token and app is None:
             raise VcsError("config", "토큰이 비어 있다")
         self.repo = repo
         self.base_url = base_url.rstrip("/")
         self.base_branch = base_branch
         self.__token = token
+        # GitHub App 연결이면 사람 토큰 대신 설치 토큰을 받아 쓴다 (github_app.py)
+        self._app = app
         self._client = client or httpx.AsyncClient(timeout=timeout)
         self._caps = Capabilities(kind="github", issues=True)
 
@@ -173,15 +177,24 @@ class GithubVcsAdapter:
 
     # ---- HTTP
 
-    def _headers(self) -> dict[str, str]:
+    async def _auth(self) -> str:
+        if self._app is not None:
+            return await self._app.token(self._client, self.base_url)
+        return self.__token
+
+    @staticmethod
+    def _headers(token: str) -> dict[str, str]:
         return {
-            "Authorization": f"Bearer {self.__token}",
+            "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
 
     def _clean(self, text: str) -> str:
-        return text.replace(self.__token, "***")
+        for secret in [self.__token, *(self._app.secrets() if self._app else [])]:
+            if secret:
+                text = text.replace(secret, "***")
+        return text
 
     async def _call(
         self,
@@ -203,9 +216,10 @@ class GithubVcsAdapter:
         json: dict | None = None,
         params: dict | None = None,
     ) -> Any:
+        token = await self._auth()
         try:
             res = await self._client.request(
-                method, url, json=json, params=params, headers=self._headers()
+                method, url, json=json, params=params, headers=self._headers(token)
             )
         except UnicodeEncodeError:
             # 토큰·주소에 쓸 수 없는 글자가 있으면 머리글을 못 만든다. 값은 남기지 않는다

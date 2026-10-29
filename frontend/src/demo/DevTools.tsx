@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from '@/lib/nav'
-import { DEV_API, vcsApi, type VcsConnection, type VcsTestResult } from '@/lib/planning'
+import { DEV_API, vcsApi, type VcsAuth, type VcsConnection, type VcsTestResult } from '@/lib/planning'
 
 // 개발 도구 연결: 고객사 개발팀이 쓰는 형상관리·CI·배포 도구를 개발·배포 AI(dev)에 잇는 창구.
 // 형상관리 연결은 레포마다 1개, 여러 개. dev 서비스(`/api/planning/vcs/connections`)에 저장되고 토큰은 끝 4자리만 온다.
@@ -13,7 +13,9 @@ const KINDS = [
 ]
 const KIND_LABEL: Record<string, string> = Object.fromEntries(KINDS.map((k) => [k.id, k.label]))
 const SOURCE: Record<string, string> = { screen: '이 화면', env: '서버 설정 파일' }
-const PERMISSIONS = ['Contents 읽기·쓰기', 'Pull requests 읽기·쓰기', 'Commit statuses 읽기']
+const PERMISSIONS = ['Contents 읽기·쓰기', 'Pull requests 읽기·쓰기', 'Issues 읽기·쓰기', 'Commit statuses 읽기']
+// 인증 방식. 회사 레포는 조직이 설치하는 GitHub App, 사람 토큰은 개인 레포·시험용
+const AUTHS: { id: VcsAuth; label: string }[] = [{ id: 'app', label: 'GitHub App (조직 설치)' }, { id: 'token', label: '개인 접근 토큰' }]
 
 // 형상관리 외의 연결 지점. 형상관리 연결로 함께 되는 것과 아직 없는 것을 나눠 보여 준다
 const OTHERS: { name: string; tools: string; state: 'with-vcs' | 'linked' | 'planned'; to?: string }[] = [
@@ -25,9 +27,9 @@ const OTHERS: { name: string; tools: string; state: 'with-vcs' | 'linked' | 'pla
 ]
 
 const api = vcsApi(DEV_API)
-type Form = { id?: string; kind: string; base_url: string; repo: string; base_branch: string; token: string; description: string; paths: string; mount: string }
-const EMPTY: Form = { kind: 'github', base_url: '', repo: '', base_branch: 'main', token: '', description: '', paths: '', mount: '' }
-const toForm = (c: VcsConnection): Form => ({ id: c.id, kind: c.kind, base_url: c.base_url ?? '', repo: c.repo, base_branch: c.base_branch || 'main', token: '', description: c.description ?? '', paths: c.paths.join(', '), mount: c.mount ?? '' })
+type Form = { id?: string; kind: string; base_url: string; repo: string; base_branch: string; token: string; description: string; paths: string; mount: string; auth: VcsAuth; app_id: string; installation_id: string; private_key: string; key_name: string }
+const EMPTY: Form = { kind: 'github', base_url: '', repo: '', base_branch: 'main', token: '', description: '', paths: '', mount: '', auth: 'app', app_id: '', installation_id: '', private_key: '', key_name: '' }
+const toForm = (c: VcsConnection): Form => ({ id: c.id, kind: c.kind, base_url: c.base_url ?? '', repo: c.repo, base_branch: c.base_branch || 'main', token: '', description: c.description ?? '', paths: c.paths.join(', '), mount: c.mount ?? '', auth: c.auth ?? 'token', app_id: c.app_id ?? '', installation_id: c.installation_id ?? '', private_key: '', key_name: '' })
 // 담당 경로: 쉼표·줄바꿈으로 나눈다
 const splitPaths = (x: string) => x.split(/[,\n]/).map((p) => p.trim()).filter(Boolean)
 const failed = (id: string, message: string): VcsTestResult => ({ ok: false, code: 'unavailable', message, checked_at: new Date().toISOString(), connection_id: id })
@@ -66,14 +68,19 @@ export function DevToolsPanel() {
     const editing = list?.find((c) => c.id === form.id)
     const repo = form.repo.trim()
     if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return setError('레포는 owner/name 형태로 넣어 주세요.')
-    if (!form.token && !editing?.token_set) return setError('접근 토큰을 넣어 주세요.')
+    const app = form.auth === 'app'
+    if (app) {
+      if (!/^\d+$/.test(form.app_id.trim()) || !/^\d+$/.test(form.installation_id.trim())) return setError('앱 ID와 설치 ID는 숫자로 넣어 주세요.')
+      if (!form.private_key && !editing?.key_set) return setError('GitHub App 개인 키(.pem) 파일을 골라 주세요.')
+    } else if (!form.token && !editing?.token_set) return setError('접근 토큰을 넣어 주세요.')
     setSaving(true)
     setError(null)
     try {
-      const { paths, token, ...rest } = form
+      const { paths, token, private_key, key_name: _name, app_id, installation_id, ...rest } = form
       const next = await api.save({
         ...rest, repo, base_url: form.base_url.trim(), base_branch: form.base_branch.trim() || 'main',
-        description: form.description.trim(), paths: splitPaths(paths), mount: form.mount.trim(), ...(token ? { token } : {}),
+        description: form.description.trim(), paths: splitPaths(paths), mount: form.mount.trim(),
+        ...(app ? { app_id: app_id.trim(), installation_id: installation_id.trim(), ...(private_key ? { private_key } : {}) } : token ? { token } : {}),
       })
       setList(next)
       setForm(null)
@@ -85,6 +92,17 @@ export function DevToolsPanel() {
     } finally {
       setSaving(false)
     }
+  }
+
+  // 개인 키는 파일에서 바로 읽어 보낸다. 화면에는 파일 이름만 남기고 내용은 보여 주지 않는다
+  const pickKey = (file?: File) => {
+    if (!file || !form) return
+    if (file.size > 16_000) return setError('개인 키 파일이 너무 커요. GitHub App에서 받은 .pem 파일을 골라 주세요.')
+    void file.text().then((text) => {
+      if (!text.includes('PRIVATE KEY')) return setError('GitHub App 개인 키(.pem) 파일이 아니에요.')
+      setError(null)
+      setForm((f) => (f ? { ...f, private_key: text, key_name: file.name } : f))
+    })
   }
 
   const remove = async (c: VcsConnection) => {
@@ -121,16 +139,39 @@ export function DevToolsPanel() {
             <div className="grid gap-3 md:grid-cols-3">
               <input className="field font-mono" placeholder="레포 owner/name" value={form.repo} onChange={(e) => setForm({ ...form, repo: e.target.value })} aria-label="레포" />
               <input className="field font-mono" placeholder="병합 대상 브랜치" value={form.base_branch} onChange={(e) => setForm({ ...form, base_branch: e.target.value })} aria-label="병합 대상 브랜치" />
-              <input className="field font-mono" type="password" autoComplete="off" placeholder={editing?.token_set ? '접근 토큰 (비우면 기존 토큰 유지)' : '접근 토큰'} value={form.token}
-                onChange={(e) => setForm({ ...form, token: e.target.value })} aria-label="접근 토큰" />
+              {form.auth === 'token' && (
+                <input className="field font-mono" type="password" autoComplete="off" placeholder={editing?.token_set ? '접근 토큰 (비우면 기존 토큰 유지)' : '접근 토큰'} value={form.token}
+                  onChange={(e) => setForm({ ...form, token: e.target.value })} aria-label="접근 토큰" />
+              )}
             </div>
+            {form.kind === 'github' && (
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="인증 방식">
+                  {AUTHS.map((a) => (
+                    <button key={a.id} type="button" role="radio" aria-checked={form.auth === a.id} onClick={() => setForm({ ...form, auth: a.id })}
+                      className={`chip py-1 ${form.auth === a.id ? 'bg-brand-600 text-white' : 'bg-ink-100 text-ink-700'}`}>{a.label}</button>
+                  ))}
+                </div>
+                {form.auth === 'app' && (
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <input className="field font-mono" inputMode="numeric" placeholder="앱 ID (App ID)" value={form.app_id} onChange={(e) => setForm({ ...form, app_id: e.target.value })} aria-label="앱 ID" />
+                    <input className="field font-mono" inputMode="numeric" placeholder="설치 ID (Installation ID)" value={form.installation_id} onChange={(e) => setForm({ ...form, installation_id: e.target.value })} aria-label="설치 ID" />
+                    <label className="field flex cursor-pointer items-center gap-2 text-sm">
+                      <input type="file" accept=".pem,application/x-pem-file" className="sr-only" onChange={(e) => pickKey(e.target.files?.[0])} aria-label="개인 키 파일" />
+                      <span className="chip bg-ink-100 text-ink-700">개인 키 .pem</span>
+                      <span className="truncate text-ink-500">{form.key_name || (editing?.key_set ? '넣음 · 바꾸려면 다시 고르기' : '파일 고르기')}</span>
+                    </label>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="grid gap-3 md:grid-cols-2">
               <input className="field" placeholder="설명 (예: 쇼핑몰 웹)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} aria-label="설명" />
               <textarea className="field font-mono" rows={2} placeholder="담당 경로 (예: shop-web/, src/)" value={form.paths} onChange={(e) => setForm({ ...form, paths: e.target.value })} aria-label="담당 경로" />
               <input className="field font-mono md:col-span-2" placeholder="회사 코드 위치 (예: shop-web/ · 레포가 회사 코드의 한 폴더일 때. 비우면 레포 루트)" value={form.mount} onChange={(e) => setForm({ ...form, mount: e.target.value })} aria-label="회사 코드 위치" />
             </div>
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="text-ink-500">토큰 권한 (이 레포만)</span>
+              <span className="text-ink-500">{form.auth === 'app' ? '앱 권한 (설치할 때 이 레포만 고르기)' : '토큰 권한 (이 레포만)'}</span>
               {PERMISSIONS.map((p) => <span key={p} className="chip bg-ink-100 text-ink-700">{p}</span>)}
             </div>
             {error && <p className="text-sm text-red-700">{error}</p>}
@@ -178,7 +219,11 @@ export function DevToolsPanel() {
                   <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
                     <div><dt className="text-xs text-ink-500">병합 대상 브랜치</dt><dd className="mt-0.5 font-mono">{c.base_branch || '—'}</dd></div>
                     <div><dt className="text-xs text-ink-500">API 주소</dt><dd className="mt-0.5 truncate font-mono text-xs leading-5">{c.base_url || '기본 주소'}</dd></div>
-                    <div><dt className="text-xs text-ink-500">접근 토큰</dt><dd className="mt-0.5 font-mono">{c.token_set ? c.token_hint : '없음'}</dd></div>
+                    {c.auth === 'app' ? (
+                      <div><dt className="text-xs text-ink-500">GitHub App</dt><dd className="mt-0.5 font-mono">앱 {c.app_id} · 설치 {c.installation_id}{c.key_set ? '' : ' · 키 없음'}</dd></div>
+                    ) : (
+                      <div><dt className="text-xs text-ink-500">접근 토큰</dt><dd className="mt-0.5 font-mono">{c.token_set ? c.token_hint : '없음'}</dd></div>
+                    )}
                     <div><dt className="text-xs text-ink-500">설명</dt><dd className="mt-0.5">{c.description || '—'}</dd></div>
                     <div><dt className="text-xs text-ink-500">회사 코드 위치</dt><dd className="mt-0.5 font-mono">{c.mount || '레포 루트'}</dd></div>
                     <div className="sm:col-span-2 lg:col-span-4">

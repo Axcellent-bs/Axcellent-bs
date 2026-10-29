@@ -189,8 +189,14 @@ export const deployApi = (base: string) => ({
 export interface VcsConnection {
   id: string; kind: string; repo: string; base_url: string; base_branch: string; description: string
   paths: string[]; mount?: string; token_set: boolean; token_hint: string; source: 'screen' | 'env'
+  // 인증: token(사람 토큰) · app(GitHub App). App 개인 키는 넣었는지만 온다
+  auth?: VcsAuth; app_id?: string; installation_id?: string; key_set?: boolean
 }
-export interface VcsConnectionInput { id?: string; kind: string; repo: string; base_url?: string; base_branch?: string; token?: string; description?: string; paths?: string[]; mount?: string }
+export type VcsAuth = 'token' | 'app'
+export interface VcsConnectionInput {
+  id?: string; kind: string; repo: string; base_url?: string; base_branch?: string; token?: string; description?: string; paths?: string[]; mount?: string
+  auth?: VcsAuth; app_id?: string; installation_id?: string; private_key?: string
+}
 export interface VcsTestResult { ok: boolean; code: string | null; message: string; checked_at: string; connection_id: string }
 
 // 녹화 데모(목)는 모르는 주소에 빈 배열·{ok:true}를 준다. 연결 모양이 아닌 값은 버린다

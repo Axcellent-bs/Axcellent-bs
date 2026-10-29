@@ -14,10 +14,16 @@
 | `PLANNING_VCS_BASE_BRANCH` | 병합 대상 브랜치 (기본 `dev`) |
 | `PLANNING_VCS_DESCRIPTION` | 레포 설명 (레포 고르기 근거) |
 | `PLANNING_VCS_PATHS` | 담당 경로 (쉼표로 나눈다, 레포 고르기 근거) |
+| `PLANNING_VCS_AUTH` | `token`(기본, 사람 토큰) · `app`(GitHub App) |
+| `PLANNING_VCS_APP_ID` · `PLANNING_VCS_INSTALLATION_ID` | GitHub App ID · 조직에 설치한 설치 ID |
+| `PLANNING_VCS_PRIVATE_KEY_FILE` | GitHub App 개인 키(.pem) 파일 경로 |
 
 - 연결이 하나도 없으면 목 부품 하나만 쓴다 (도메인은 실제 PR을 올리지 않는다).
 - 부품은 연결마다 한 번 만들어 둔다. 설정이 바뀌면 다시 만든다. 테스트는 `set_vcs()`로 바꿔 끼운다.
 - 토큰은 이 프로세스 메모리에만 두고 화면·로그로 돌려주지 않는다 (넣었는지와 끝 4자리만).
+- 회사 레포는 GitHub App(`auth=app`)으로 붙인다.
+  사람 토큰은 그 사람이 가진 레포에만 닿고 사람에 묶인다.
+  App 개인 키는 토큰처럼 다루고 화면에는 넣었는지만 보여 준다.
 - `get_vcs()`·`configure()`·`describe()`는 첫 연결을 보는 예전 화면용 길이다.
 """
 
@@ -86,6 +92,7 @@ __all__ = [
 ]
 
 KINDS = ("mock", "github")
+AUTHS = ("token", "app")
 ENV_ID = "env"
 OVERRIDE_ID = "default"
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
@@ -107,6 +114,11 @@ class Connection:
     mount: str = ""
     source: str = "screen"  # screen · env (바꿔 끼운 부품이면 override)
     token: str = field(default="", repr=False)
+    # 인증 방식: token(사람 토큰) · app(GitHub App 설치 토큰)
+    auth: str = "token"
+    app_id: str = ""
+    installation_id: str = ""
+    private_key: str = field(default="", repr=False)
 
     def public(self) -> dict:
         """화면에 보여 줄 모양. 토큰 값 대신 넣었는지와 끝 4자리만 준다."""
@@ -122,6 +134,10 @@ class Connection:
             "token_set": bool(self.token),
             "token_hint": _hint(self.token),
             "source": self.source,
+            "auth": self.auth,
+            "app_id": self.app_id,
+            "installation_id": self.installation_id,
+            "key_set": bool(self.private_key),
         }
 
 
@@ -184,7 +200,22 @@ def _env_connection() -> Connection | None:
         mount=clean_mount(os.getenv("PLANNING_VCS_MOUNT")),
         source="env",
         token=os.getenv("PLANNING_VCS_TOKEN") or "",
+        auth=(os.getenv("PLANNING_VCS_AUTH") or "token").strip().lower(),
+        app_id=(os.getenv("PLANNING_VCS_APP_ID") or "").strip(),
+        installation_id=(os.getenv("PLANNING_VCS_INSTALLATION_ID") or "").strip(),
+        private_key=_read_key_file(os.getenv("PLANNING_VCS_PRIVATE_KEY_FILE") or ""),
     )
+
+
+def _read_key_file(path: str) -> str:
+    """App 개인 키 파일을 읽는다. 없거나 못 읽으면 빈 값 (연결을 만들 때 config 오류가 된다)."""
+    if not path:
+        return ""
+    try:
+        with open(path, encoding="ascii") as f:
+            return f.read()
+    except (OSError, UnicodeDecodeError):
+        return ""
 
 
 def connections() -> list[Connection]:
@@ -224,10 +255,19 @@ def _build(conn: Connection) -> VcsAdapter:
         return MockVcsAdapter(base_branch=conn.base_branch or "dev")
     if kind == "github":
         from planning_agent.vcs.github import DEFAULT_BASE_URL, GithubVcsAdapter
+        from planning_agent.vcs.github_app import GithubAppAuth
 
+        if conn.auth not in AUTHS:
+            raise VcsError("config", f"모르는 인증 방식: {conn.auth} (가능: {', '.join(AUTHS)})")
+        app = (
+            GithubAppAuth(conn.app_id, conn.installation_id, conn.private_key)
+            if conn.auth == "app"
+            else None
+        )
         return GithubVcsAdapter(
             repo=conn.repo,
-            token=conn.token,
+            token="" if app else conn.token,
+            app=app,
             base_url=conn.base_url or DEFAULT_BASE_URL,
             base_branch=conn.base_branch or "dev",
         )
@@ -327,8 +367,12 @@ def upsert_connection(
     paths: list[str] | tuple[str, ...] | None = None,
     id: str | None = None,  # noqa: A002 - 화면 계약의 필드 이름
     mount: str | None = None,
+    auth: str | None = None,
+    app_id: str | None = None,
+    installation_id: str | None = None,
+    private_key: str | None = None,
 ) -> Connection:
-    """화면 연결을 넣거나 바꾼다. 토큰을 비워 보내면 그 연결의 이전 토큰을 그대로 쓴다.
+    """화면 연결을 넣거나 바꾼다. 토큰·App 개인 키를 비워 보내면 그 연결의 이전 값을 그대로 쓴다.
 
     부품을 바로 만들어 보고, 형식이 틀리면 `VcsError`(config)를 던지고 아무것도 바꾸지 않는다."""
     global _screen
@@ -351,6 +395,7 @@ def upsert_connection(
             "config",
             "토큰에 쓸 수 없는 글자(한글·공백 등)가 들어 있어요. 토큰을 다시 복사해 넣어 주세요",
         )
+    new_key = (private_key or "").strip()
     conn = Connection(
         id=cid,
         kind=kind,
@@ -362,6 +407,14 @@ def upsert_connection(
         mount=clean_mount(mount) if mount is not None else (before.mount if before else ""),
         source="screen",
         token=new_token or (before.token if before else ""),
+        auth=(auth or (before.auth if before else "token")).strip().lower(),
+        app_id=(app_id if app_id is not None else (before.app_id if before else "")).strip(),
+        installation_id=(
+            installation_id
+            if installation_id is not None
+            else (before.installation_id if before else "")
+        ).strip(),
+        private_key=new_key or (before.private_key if before else ""),
     )
     adapter = _build(conn)  # 틀리면 여기서 VcsError, 상태는 그대로
     rows[cid] = conn
