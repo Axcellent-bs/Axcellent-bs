@@ -35,7 +35,7 @@ MAX_HISTORY = 20  # LLM에 보낼 최근 메시지 수
 MAX_LISTING = 300  # LLM에 보여 줄 파일 경로 수 (연결 전체 합)
 MAX_LISTED_CONNECTIONS = 3
 MAX_REPLY_CHARS = 2000
-LLM_TIMEOUT_SECONDS = 60.0
+LLM_TIMEOUT_SECONDS = 180.0  # 계획(plan)까지 쓰는 답은 60초를 넘기도 한다. 코딩 요청 하나와 같게
 LIST_TIMEOUT_SECONDS = 20.0
 
 # 바로 진행하라는 말 (소문자·공백 하나로 맞춘 뒤 찾는다)
