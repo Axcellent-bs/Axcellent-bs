@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, ValidationError
 
+from ax_agent_template.client import call_agent
 from ax_agent_template.llm import LLMClient
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.data import (
@@ -202,12 +203,19 @@ async def accuracy_report(request: AgentRequest) -> AgentResult:
     )
 
 
+def get_fraud_card_sender():  # noqa: ANN201 - 테스트·평가가 바꿔 끼우는 자리
+    """hr 유사 사기 카드 조회에 쓰는 A2A 함수. 기본은 `call_agent`."""
+    return call_agent
+
+
 async def fraud_score(request: AgentRequest) -> AgentResult:
     data = _parse(request, FraudScoreInput)
     if isinstance(data, AgentResult):
         return data
     try:
-        result = await score_fraud(data, get_seller_client())
+        result = await score_fraud(
+            data, get_seller_client(), meta=request.meta, send=get_fraud_card_sender()
+        )
     except ShopUnavailable as error:
         query = f"shop_seller_profile seller_id={data.seller_id}"
         if error.code == "SELLER_NOT_FOUND":

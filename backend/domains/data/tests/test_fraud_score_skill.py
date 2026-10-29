@@ -62,6 +62,11 @@ def shop(monkeypatch: pytest.MonkeyPatch) -> Db:
         return HttpSellerClient(ShopApi("http://shop", token="mock:data", client=http))
 
     monkeypatch.setattr(handlers, "get_seller_client", client)
+
+    async def hr_off(target, request):  # noqa: ANN001, ANN202 - 네트워크 없이 hr 꺼짐
+        raise httpx.ConnectError("hr 없음")
+
+    monkeypatch.setattr(handlers, "get_fraud_card_sender", lambda: hr_off)
     return db
 
 
