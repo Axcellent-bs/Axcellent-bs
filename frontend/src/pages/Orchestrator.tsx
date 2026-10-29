@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loading } from "@/components/admin/bits";
+import { SupportOverviewCard } from "@/components/admin/SupportOverviewCard";
 import {
   GRADE, INCIDENT_STATUS, STEP_STATUS, adminRelay, clock, deptKo, relayEnabled, relayError,
   type Incident,
@@ -113,6 +114,8 @@ export default function OrchestratorPage() {
           <p className={`ml-auto max-w-sm pb-1 text-xs ${tone}`}>승인·거절은 총괄이 하지 않고 사람이 안전 관문 보류 큐에서 합니다. 대부분의 단계는 총괄이 규칙대로 부서에 맡겨 끝냅니다.</p>
         </div>
       </section>
+
+      <SupportOverviewCard />
 
       {list.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-ink-300 px-5 py-8 text-center text-sm text-ink-500">
