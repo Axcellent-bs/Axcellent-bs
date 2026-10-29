@@ -25,6 +25,7 @@ import InfraHosts from '@/demo/InfraHosts'
 import Integrations from '@/demo/Integrations'
 import DevTools from '@/demo/DevTools'
 import LoginPage from '@/demo/LoginPage'
+import SignupPage from '@/demo/SignupPage'
 import { canOpen, homeOf, useSession } from '@/demo/session'
 import { useEnabledServices } from '@/demo/services'
 import { useCompany } from '@/demo/company'
@@ -41,6 +42,7 @@ export function App() {
       {/* 로그인 전에도 여는 메인: 서비스 제품군 카탈로그 */}
       <Route path="/" element={<CatalogHome />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/signup" element={<SignupPage />} />
       {/* 처음 설치했을 때: 연결 키 → 시스템 관리자 계정 → 회사 정보 */}
       <Route path="/setup" element={<Setup />} />
       {/* AXcellent 운영팀 전용 입구 */}
