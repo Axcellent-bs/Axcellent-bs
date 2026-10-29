@@ -149,7 +149,7 @@ export function DevToolsPanel() {
                 <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="인증 방식">
                   {AUTHS.map((a) => (
                     <button key={a.id} type="button" role="radio" aria-checked={form.auth === a.id} onClick={() => setForm({ ...form, auth: a.id })}
-                      className={`chip py-1 ${form.auth === a.id ? 'bg-brand-600 text-white' : 'bg-ink-100 text-ink-700'}`}>{a.label}</button>
+                      className={`chip py-1 ${form.auth === a.id ? 'bg-brand-600 !text-white' : 'bg-ink-100 text-ink-700'}`}>{a.label}</button>
                   ))}
                 </div>
                 {form.auth === 'app' && (
