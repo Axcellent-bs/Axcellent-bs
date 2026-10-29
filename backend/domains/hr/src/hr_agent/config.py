@@ -71,6 +71,10 @@ class HrSettings:
       값(0.7063)을 올림했고, 임베딩 모델이 바뀌면 다시 정한다.
     - `dense_match_cosine`: 확정된 결정과 "같은 방향"(MATCH)으로 보는 코사인. 같은 개발용 질의에서
       첫 결과 정밀도 100%가 되는 가장 낮은 값이다.
+    - `dense_verify`: Dense가 찾은 후보를 LLM이 "관련 있음/없음"으로 한 번 더 거른다(8-2).
+      기본 꺼짐. LLM 설정이 없거나 판정이 실패하면 거르지 않고 원래 결과를 쓴다.
+    - `dense_cut`: 검증을 켰을 때 1위 코사인보다 이만큼 넘게 낮은 후보는 뺀다.
+      개발용 질의에서 정한 값이다.
     """
 
     mock: bool = True
@@ -83,6 +87,8 @@ class HrSettings:
     dense_search: bool = True
     dense_min_cosine: float = 0.71
     dense_match_cosine: float = 0.72
+    dense_verify: bool = False
+    dense_cut: float = 0.05
     timer_enabled: bool = False
     lock_ttl_minutes: int = 1440
     planning_mode: str = "mock"
@@ -106,4 +112,6 @@ class HrSettings:
             not in ("0", "false", "off"),
             dense_min_cosine=_float(source, "HR_DENSE_MIN_COSINE", 0.71),
             dense_match_cosine=_float(source, "HR_DENSE_MATCH_COSINE", 0.72),
+            dense_verify=_flag(source, "HR_DENSE_VERIFY"),
+            dense_cut=_float(source, "HR_DENSE_CUT", 0.05),
         )

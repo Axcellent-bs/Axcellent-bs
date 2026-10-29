@@ -21,6 +21,9 @@ Dense(임베딩), 카드 620장(골든 120 + 방해 500) 기준. 근거와 한�
 | `split_eval.py` | 개발:평가 비율(5:5, 4:6)과 규모별 "올바른 개수" |
 | `make_distractors.py` | 방해 카드 생성기 (시드 고정, 기본 500장) |
 | `audit_distractors.py` | 정답보다 위에 올라온 방해 카드 점검 |
+| `refine-rules.md` | 8-2 Dense 보완: 시험 방법과 채택 기준(결과 전에 정함), 결과, 판정 |
+| `refine_eval.py` | 8-2 변형 V0~V3 평가: `python refine_eval.py <dev\|test\|holdout>` (V3는 Claude 호출) |
+| `make_holdout.py`, `queries_holdout.json` | 8-2 검증용 질의 40개(마지막에 한 번만 평가) |
 | `run_explain.py` | `check_plan` 끝에서 끝까지 평가 (실제 Gemini·Claude 호출) |
 | `results/` | 위 스크립트의 결과 |
 

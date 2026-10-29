@@ -31,6 +31,7 @@ from ax_contracts.schemas import (
 )
 from hr_agent.clients.memory import CardHit, card_state
 from hr_agent.results import completed, invalid_input, make_evidence, refused
+from hr_agent.retrieval.cards import dense_text
 from hr_agent.roster import store as roster
 from hr_agent.services import Services
 from hr_agent.util import overlap, similarity
@@ -91,6 +92,23 @@ JUDGING_PHRASES = (
 )
 
 
+async def _verify(
+    svc: Services, draft_text: str, found: list[tuple[Card, float]]
+) -> list[tuple[Card, float]]:
+    """검증을 켰으면 1위에서 `dense_cut` 넘게 낮은 후보를 빼고, 남은 앞 3개를 LLM이 거른다.
+
+    LLM 설정이 없거나 판정이 실패하면(None) 거르지 않은 결과를 그대로 쓴다.
+    """
+    if svc.verifier is None or not found:
+        return found
+    top = found[0][1]
+    near = [(c, s) for c, s in found if s >= top - svc.settings.dense_cut - 1e-9]
+    verdict = await svc.verifier.verify(draft_text, [(c.card_id, dense_text(c)) for c, _ in near])
+    if verdict is None:
+        return near
+    return [(c, s) for c, s in near[:3] if verdict.get(c.card_id)]
+
+
 async def _dense_hits(svc: Services, draft_text: str, area: str) -> list[CardHit] | None:
     """임베딩으로 관련 카드를 찾는다. 쓸 수 없거나 실패하면 None이고 호출한 쪽이 Dice로 대체한다."""
     if svc.dense is None:
@@ -100,6 +118,7 @@ async def _dense_hits(svc: Services, draft_text: str, area: str) -> list[CardHit
         found = await svc.dense.search(
             draft_text, cards, k=5, min_cosine=svc.settings.dense_min_cosine
         )
+        found = await _verify(svc, draft_text, found)
     except Exception:  # noqa: BLE001 - 임베딩 실패가 계획 점검을 막지 않게 한다
         return None
     return [CardHit(card, score) for card, score in found]
