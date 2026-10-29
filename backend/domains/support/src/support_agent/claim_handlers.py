@@ -32,8 +32,55 @@ from support_agent.claim_schemas import (
     ReceiveReturnInput,
 )
 from support_agent.claims import now_iso
+from support_agent.schemas import RecordClaimActivityInput
 
 CLAIMS = persistence.build_claim_store()
+
+
+async def _record_activity(request: AgentRequest, claim: Any, kind: str, **extra: Any) -> None:
+    """클레임이 문의에서 접수된 것이면 그 처리 결과를 문의의 AI 처리 내력에 남긴다.
+
+    문의와 같은 프로세스면 바로 남기고, 아니면(서비스가 나뉘어 있으면) 문의 서비스에 알린다.
+    내력은 부가 기록이라 실패해도 클레임 처리는 그대로 끝난다.
+    """
+    if claim.conversation_id is None:
+        return
+    payload = {
+        "inquiry_id": claim.conversation_id,
+        "kind": kind,
+        "claim_id": claim.id,
+        "claim_type": claim.type,
+        "reason": claim.reason,
+        "status": claim.status,
+        "outcome": claim.outcome,
+        "amount": claim.expected_refund,
+        **{k: v for k, v in extra.items() if v is not None},
+    }
+    try:
+        record = RecordClaimActivityInput.model_validate(payload)
+        if h.STORE.get(claim.conversation_id) is not None:
+            h.log_claim_activity(claim.conversation_id, record)
+            return
+        meta = request.meta.model_copy(
+            update={
+                "idempotency_key": (
+                    f"{claim.context_id}:record_claim_activity:claim:{claim.id}:{kind}"
+                    f":{claim.updated_at}"
+                )
+            }
+        )
+        reply = await h.SEND(
+            "support",
+            AgentRequest(meta=meta, skill="record_claim_activity", input=record.model_dump()),
+        )
+        if reply.status != TaskStatus.COMPLETED:
+            h.logger.warning("클레임 결과를 문의 내력에 남기지 못했다: %s", reply.outcome)
+    except Exception:  # noqa: BLE001 - 내력은 부가 기록이다
+        h.logger.warning(
+            "클레임 결과를 문의 내력에 남기지 못했다 (claim %s)", claim.id, exc_info=True
+        )
+
+
 # 지급을 실행하지 못한 이유 (safety 판정 상태 → 화면에 보일 문장)
 HELD_MESSAGE = {
     "verifying": "재무 교차검증 중",
@@ -139,6 +186,7 @@ async def create_claim(request: AgentRequest) -> AgentResult:
             unsealed=parsed.unsealed,
             conversation_id=parsed.conversation_id,
         )
+        await _record_activity(request, claim, "claim_created")
         return claim.model_dump(mode="json"), False
 
     return await h._write(
@@ -176,6 +224,7 @@ async def decide_claim(request: AgentRequest) -> AgentResult:
             system_outcome=claim.outcome,
             agent_action=parsed.decision,
         )
+        await _record_activity(request, claim, "claim_decided", decision=parsed.decision)
         return claim.model_dump(mode="json"), False
 
     return await h._write(
@@ -202,6 +251,9 @@ async def receive_return(request: AgentRequest) -> AgentResult:
         claim.inspection = parsed.inspection
         claim.inspection_note = _note(request) or claim.inspection_note
         CLAIMS.set_status(claim, "return_received", "receive", inspection=parsed.inspection)
+        await _record_activity(
+            request, claim, "claim_return_received", inspection=parsed.inspection
+        )
         return claim.model_dump(mode="json"), False
 
     return await h._write(
@@ -223,6 +275,7 @@ async def inspect_return(request: AgentRequest) -> AgentResult:
         claim.inspection = parsed.inspection
         claim.inspection_note = _note(request) or claim.inspection_note
         CLAIMS.set_status(claim, "return_received", "inspection", inspection=parsed.inspection)
+        await _record_activity(request, claim, "claim_inspected", inspection=parsed.inspection)
         return claim.model_dump(mode="json"), False
 
     return await h._write(
@@ -347,6 +400,7 @@ async def process_claim_queue(request: AgentRequest) -> AgentResult:
             compensation=0,
             execution=decision.execution_id,
         )
+        await _record_activity(request, claim, "claim_paid", amount=claim.refund_paid)
         paid += 1
         results.append(QueueRunResult(claim_id=claim.id, result="paid", refund=claim.refund_paid))
     run = QueueRun(results=results, paid=paid, held=held, queue=CLAIMS.queue().queue)

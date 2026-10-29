@@ -107,6 +107,22 @@ class ConversationListItem(AxModel):
     awaiting_reply: bool
 
 
+class ActivityEntry(AxModel):
+    """문의 한 건의 AI 처리 내력 한 줄. 누가(actor) 무엇을(kind) 했는지를 시간순으로 남긴다.
+
+    `title`·`detail`은 코드가 만든 사실 문장이고, 코드 값(`data`)은 화면이 이름표를 붙일 때 쓴다.
+    고객 원문·답변 본문은 담지 않는다.
+    """
+
+    at: str
+    actor: Literal["ai", "agent", "customer", "system"]
+    kind: str
+    title: str
+    detail: str = ""
+    ref: str | None = None  # 이어진 대상 (예: claim:3)
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
 class Conversation(ConversationListItem):
     tenant_id: str = TENANT_ID_DEFAULT
     context_id: str
@@ -114,7 +130,8 @@ class Conversation(ConversationListItem):
     messages: list[Message] = Field(default_factory=list)
     summary: Summary | None = None
     order_no: str | None = None
-    claims: list[dict[str, Any]] = Field(default_factory=list)  # 5단계에서 채운다
+    claims: list[dict[str, Any]] = Field(default_factory=list)  # 읽을 때 이어진 클레임으로 채운다
+    activity: list[ActivityEntry] = Field(default_factory=list)  # AI 처리 내력 (오래된 것부터)
 
 
 # ---------------------------------------------------------------- LLM 응답 스키마
@@ -200,6 +217,29 @@ class SummarizeInquiryInput(AxModel):
 class SetInquiryStatusInput(AxModel):
     inquiry_id: int
     status: InquiryStatus
+
+
+ClaimActivityKind = Literal[
+    "claim_created", "claim_decided", "claim_return_received", "claim_inspected", "claim_paid"
+]
+
+
+class RecordClaimActivityInput(AxModel):
+    """클레임 서비스가 문의 서비스에 알리는 클레임 처리 결과. 문장은 문의 쪽이 코드로 만든다.
+
+    고객이 쓴 글·상담원 메모는 받지 않는다 (코드 값과 금액만).
+    """
+
+    inquiry_id: int
+    kind: ClaimActivityKind
+    claim_id: int
+    claim_type: str | None = None
+    reason: str | None = None
+    status: str | None = None
+    outcome: str | None = None
+    decision: Literal["approve", "reject"] | None = None
+    inspection: str | None = None
+    amount: int | None = None
 
 
 class RequestCompensationInput(AxModel):

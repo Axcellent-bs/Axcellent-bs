@@ -136,7 +136,12 @@ export interface ConversationListItem {
   urgency: "low" | "medium" | "high" | null; status: "open" | "resolved" | "escalated"; order_id: number | null;
   updated_at: string; preview: string; awaiting_reply: boolean;
 }
-export interface Conversation extends ConversationListItem { messages: Message[]; summary: Summary | null; order_no: string | null; claims: Claim[] }
+/** 문의의 AI 처리 내력 한 줄 (고객지원이 코드로 남긴 사실. `data`는 코드 값이라 화면이 이름표를 붙인다) */
+export interface ActivityEntry {
+  at: string; actor: "ai" | "agent" | "customer" | "system"; kind: string; title: string; detail: string;
+  ref: string | null; data: Record<string, unknown>;
+}
+export interface Conversation extends ConversationListItem { messages: Message[]; summary: Summary | null; order_no: string | null; claims: Claim[]; activity: ActivityEntry[] }
 
 export interface Kpi {
   conversations: number; by_status: Record<string, number>; agent_replies: number; draft_adoption_rate: number | null;

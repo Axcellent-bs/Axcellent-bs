@@ -226,6 +226,16 @@ async def analyze_receipt(request: AgentRequest) -> AgentResult:
         pii_masked=pii_kinds,
         notes=notes,
     )
+    h.log_activity(
+        inquiry.id,
+        kind="receipt_checked",
+        title="AI가 영수증을 주문과 대조했어요",
+        data={
+            "verdict": check.verdict,
+            "mismatches": list(check.mismatches),
+            "images": len(images),
+        },
+    )
     return h._done(
         request,
         output.model_dump(mode="json"),

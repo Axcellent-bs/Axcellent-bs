@@ -45,11 +45,13 @@ from support_agent import (
 )
 from support_agent.schemas import (
     AddCustomerMessageInput,
+    Analysis,
     CheckReplyInput,
     Conversation,
     CreateInquiryInput,
     GetInquiryInput,
     ListInquiriesInput,
+    RecordClaimActivityInput,
     RejectDraftInput,
     RequestCompensationInput,
     SendReplyInput,
@@ -108,6 +110,79 @@ def _missing_text(request: AgentRequest, key: str) -> AgentResult:
     )
 
 
+# 클레임 처리 결과가 문의 내력에 남는 문장 (코드가 만든다)
+CLAIM_ACTIVITY_TITLE = {
+    "claim_created": ("ai", "AI가 클레임을 접수하고 규칙으로 판정했어요"),
+    "claim_decided": ("agent", "상담원이 클레임을 판단했어요"),
+    "claim_return_received": ("agent", "반품이 입고됐어요"),
+    "claim_inspected": ("agent", "반품 검수 결과를 남겼어요"),
+    "claim_paid": ("system", "환불이 지급됐어요"),
+}
+
+
+def log_claim_activity(inquiry_id: int, claim: RecordClaimActivityInput) -> None:
+    """클레임 처리 결과를 이어진 문의의 AI 처리 내력에 남긴다."""
+    actor, title = CLAIM_ACTIVITY_TITLE[claim.kind]
+    if claim.kind == "claim_decided" and claim.decision:
+        title = (
+            "상담원이 클레임을 승인했어요"
+            if claim.decision == "approve"
+            else "상담원이 클레임을 거절했어요"
+        )
+    log_activity(
+        inquiry_id,
+        kind=claim.kind,
+        actor=actor,
+        title=title,
+        ref=f"claim:{claim.claim_id}",
+        data=claim.model_dump(mode="json", exclude={"inquiry_id", "kind"}, exclude_none=True),
+    )
+
+
+def _view(conversation: Conversation) -> dict[str, Any]:
+    """화면에 줄 문의: 이 문의에 이어진 클레임을 붙인다 (저장된 문의 자체는 바꾸지 않는다)."""
+    # 클레임 저장소는 claim_handlers가 만든다 (그쪽이 이 모듈을 import하므로 늦게 가져온다)
+    from support_agent import claim_handlers
+
+    data = conversation.model_dump(mode="json")
+    data["claims"] = [
+        c.model_dump(mode="json")
+        for c in claim_handlers.CLAIMS.list()
+        if c.conversation_id == conversation.id
+    ]
+    return data
+
+
+def log_activity(inquiry_id: int | None, **entry: Any) -> None:
+    """문의의 AI 처리 내력에 남긴다. 기록이 실패해도 처리 결과는 바꾸지 않는다."""
+    if inquiry_id is None:
+        return
+    try:
+        STORE.log_activity(inquiry_id, **entry)
+    except Exception:  # noqa: BLE001 - 내력은 부가 기록이다
+        logger.warning("AI 처리 내력을 남기지 못했다 (inquiry %s)", inquiry_id, exc_info=True)
+
+
+def _analysis_entry(analysis: Analysis, *, fallback: bool, first: bool) -> dict[str, Any]:
+    c = analysis.classification
+    drafts = analysis.drafts or []
+    return {
+        "kind": "inquiry_analyzed",
+        "title": "AI가 문의를 분석하고 답변 초안을 만들었어요"
+        if first
+        else "AI가 고객의 새 메시지를 분석하고 답변 초안을 다시 만들었어요",
+        "data": {
+            "category": c.category if c else None,
+            "urgency": c.urgency if c else None,
+            "sentiment": c.sentiment if c else None,
+            "drafts": len(drafts),
+            "drafts_passed": sum(1 for d in drafts if d.validation.passed),
+            "sources": len(analysis.sources or []),
+            "fallback": fallback,
+        },
+    }
+
+
 async def _write(
     request: AgentRequest,
     action: str,
@@ -160,7 +235,7 @@ async def get_inquiry(request: AgentRequest) -> AgentResult:
     conversation = STORE.get(parsed.inquiry_id)
     if conversation is None or _not_owned(conversation, parsed.user_id):
         return _not_found(request, parsed.inquiry_id)
-    return _done(request, conversation.model_dump(mode="json"))
+    return _done(request, _view(conversation))
 
 
 async def check_reply(request: AgentRequest) -> AgentResult:
@@ -181,6 +256,12 @@ async def summarize_inquiry(request: AgentRequest) -> AgentResult:
     if conversation is None:
         return _not_found(request, parsed.inquiry_id)
     summary, fallback = await drafting.summarize(conversation)
+    log_activity(
+        parsed.inquiry_id,
+        kind="summary_made",
+        title="AI가 상담 기록을 정리했어요",
+        data={"escalate": summary.escalate, "resolved": summary.resolved, "fallback": fallback},
+    )
     return _done(request, summary.model_dump(mode="json"), fallback=fallback)
 
 
@@ -261,7 +342,8 @@ async def create_inquiry(request: AgentRequest) -> AgentResult:
             analysis=analysis,
         )
         await events.emit_inquiry_received(request, conversation)
-        return conversation.model_dump(mode="json"), fallback
+        log_activity(conversation.id, **_analysis_entry(analysis, fallback=fallback, first=True))
+        return _view(conversation), fallback
 
     return await _write(
         request, "create_inquiry", f"user:{parsed.user_id}", {"user_id": parsed.user_id}, apply
@@ -287,7 +369,8 @@ async def add_customer_message(request: AgentRequest) -> AgentResult:
         analysis, fallback = await drafting.analyze(message, conversation.subject, extra)
         updated = STORE.add_customer_message(parsed.inquiry_id, message, analysis)
         await events.emit_inquiry_received(request, updated)
-        return updated.model_dump(mode="json"), fallback
+        log_activity(parsed.inquiry_id, **_analysis_entry(analysis, fallback=fallback, first=False))
+        return _view(updated), fallback
 
     return await _write(
         request,
@@ -313,6 +396,13 @@ async def send_reply(request: AgentRequest) -> AgentResult:
     request = incident_context.follow_inquiry(request, conversation.context_id)
     validation = guard.check_reply(text)
     if not validation.passed:
+        log_activity(
+            parsed.inquiry_id,
+            kind="reply_blocked",
+            actor="system",
+            title="답변 가드가 이 답변을 보내지 못하게 막았어요",
+            data={"findings": [f.code for f in validation.findings if f.level == "error"]},
+        )
         return _done(
             request,
             {"validation": validation.model_dump(mode="json")},
@@ -336,7 +426,15 @@ async def send_reply(request: AgentRequest) -> AgentResult:
                     else None,
                 }
             )
-        return conversation.model_dump(mode="json"), False
+        how = "written" if not parsed.draft_style else ("edited" if edited else "accepted")
+        log_activity(
+            parsed.inquiry_id,
+            kind="reply_sent",
+            actor="agent",
+            title="상담원이 고객에게 답변을 보냈어요",
+            data={"draft_style": parsed.draft_style, "how": how},
+        )
+        return _view(conversation), False
 
     return await _write(
         request,
@@ -362,6 +460,13 @@ async def reject_draft(request: AgentRequest) -> AgentResult:
                 "style": parsed.draft_style,
                 "result": "rejected",
             }
+        )
+        log_activity(
+            parsed.inquiry_id,
+            kind="draft_rejected",
+            actor="agent",
+            title="상담원이 답변 초안을 제외했어요",
+            data={"draft_style": parsed.draft_style},
         )
         return {"inquiry_id": parsed.inquiry_id, "draft_style": parsed.draft_style}, False
 
@@ -392,13 +497,53 @@ async def set_inquiry_status(request: AgentRequest) -> AgentResult:
         linked = [c for c in claim_handlers.CLAIMS.list() if c.conversation_id == conversation.id]
         claim = max(linked, key=lambda c: c.id, default=None)
         await events.emit_inquiry_resolved(request, conversation, claim)
-        return conversation.model_dump(mode="json"), False
+        log_activity(
+            conversation.id,
+            kind="status_changed",
+            actor="agent",
+            title="상담원이 문의 상태를 바꿨어요",
+            data={"status": parsed.status},
+        )
+        if parsed.status == "resolved":
+            log_activity(
+                conversation.id,
+                kind="handed_to_orchestrator",
+                actor="system",
+                title="처리 결과를 총괄 AI에 넘겼어요 (재무·인사 기록으로 이어져요)",
+                ref=f"context:{conversation.context_id}",
+            )
+        return _view(conversation), False
 
     return await _write(
         request,
         "set_inquiry_status",
         f"inquiry:{parsed.inquiry_id}:{parsed.status}",
         {"inquiry_id": parsed.inquiry_id, "status": parsed.status},
+        apply,
+    )
+
+
+async def record_claim_activity(request: AgentRequest) -> AgentResult:
+    """클레임 서비스가 알려 준 처리 결과를 문의의 AI 처리 내력에 남긴다 (execute() 경유)."""
+    parsed = _parse(request, RecordClaimActivityInput)
+    if isinstance(parsed, AgentResult):
+        return parsed
+    if STORE.get(parsed.inquiry_id) is None:
+        return _not_found(request, parsed.inquiry_id)
+
+    async def apply() -> tuple[dict[str, Any], bool]:
+        log_claim_activity(parsed.inquiry_id, parsed)
+        return {
+            "inquiry_id": parsed.inquiry_id,
+            "kind": parsed.kind,
+            "claim_id": parsed.claim_id,
+        }, False
+
+    return await _write(
+        request,
+        "record_claim_activity",
+        f"inquiry:{parsed.inquiry_id}:claim:{parsed.claim_id}:{parsed.kind}",
+        {"inquiry_id": parsed.inquiry_id, "claim_id": parsed.claim_id},
         apply,
     )
 
@@ -425,7 +570,39 @@ def _sequence_consumed(reply: AgentResult) -> bool:
 
 @_caller_meta
 async def request_compensation(request: AgentRequest) -> AgentResult:
-    """보상 단가를 판정해 마케팅 `issue_coupon(compensation)`에 요청한다 (DEP-CS-02)."""
+    """보상 단가를 판정해 마케팅 `issue_coupon(compensation)`에 요청하고 결과를 내력에 남긴다."""
+    result = await _request_compensation(request)
+    parsed = _parse(request, RequestCompensationInput)
+    if not isinstance(parsed, AgentResult):
+        _log_compensation(parsed, result)
+    return result
+
+
+def _log_compensation(parsed: RequestCompensationInput, result: AgentResult) -> None:
+    out = result.output
+    data: dict[str, Any] = {"reason_code": parsed.reason_code, "outcome": result.outcome}
+    if out.get("eligible") is False:
+        title = "보상 요청이 기준에 맞지 않아 보내지 않았어요"
+        data["reason"] = out.get("reason")
+    elif result.status == TaskStatus.INPUT_REQUIRED:
+        title = "쿠폰 서비스가 꺼져 있어 보상 요청을 담당자에게 넘겼어요"
+    elif result.status == TaskStatus.COMPLETED and out.get("eligible"):
+        title = "AI가 보상 쿠폰을 마케팅에 요청했어요"
+        data.update(
+            count=out.get("count"),
+            total_value=out.get("total_value"),
+            marketing_status=out.get("marketing_status"),
+        )
+    else:
+        title = "보상 요청이 끝나지 않아 보류했어요"
+    conversation = STORE.get(parsed.inquiry_id)
+    last = conversation.activity[-1] if conversation and conversation.activity else None
+    if last is not None and last.kind == "compensation" and last.data == data:
+        return  # 같은 요청의 재전송은 한 번만 남긴다
+    log_activity(parsed.inquiry_id, kind="compensation", title=title, data=data)
+
+
+async def _request_compensation(request: AgentRequest) -> AgentResult:
     parsed = _parse(request, RequestCompensationInput)
     if isinstance(parsed, AgentResult):
         return parsed
@@ -632,5 +809,6 @@ HANDLERS = {
     "send_reply": send_reply,
     "reject_draft": reject_draft,
     "set_inquiry_status": set_inquiry_status,
+    "record_claim_activity": record_claim_activity,
     "request_compensation": request_compensation,
 }
