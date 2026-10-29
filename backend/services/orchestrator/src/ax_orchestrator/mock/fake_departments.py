@@ -48,7 +48,7 @@ CARDS: dict[str, list[tuple[str, str, str | None]]] = {
         ("audit_report", "read", None),
         ("record_support_cost", "read", None),
     ],
-    "hr": [("record_case", "A", None)],
+    "hr": [("record_case", "A", None), ("get_audit_timeline", "read", None)],
 }
 OWNERS = {
     "infra": "예진",
@@ -156,6 +156,19 @@ DEFAULT_OUTPUTS: dict[str, Callable[[AgentRequest], dict[str, Any]]] = {
     ),
     "verify_recovery": lambda r: _ok(recovered=True, infra_metrics_ok=True),
     "record_case": lambda r: _ok(card_id="card_mock01"),
+    # 실제 인사 `GetAuditTimelineOutput` 모양(`record_case`가 남긴 감사 기록)
+    "get_audit_timeline": lambda r: _ok(
+        context_id=r.input.get("context_id"),
+        entries=[
+            {
+                "seq": 1,
+                "at": "2026-10-29T06:00:00Z",
+                "kind": "record_case.candidate",
+                "payload": {"card_id": "card_mock01"},
+            }
+        ],
+        collected_at="2026-10-29T06:00:01Z",
+    ),
     # 실제 고객지원 `IncidentCompensationOutput` 모양(고객마다 한 건씩 마케팅에 요청한 결과)
     "request_incident_compensation": lambda r: _ok(
         reason_code=r.input.get("reason_code", "payment_failure"),
@@ -212,6 +225,9 @@ DEFAULT_OUTPUTS: dict[str, Callable[[AgentRequest], dict[str, Any]]] = {
 
 # 계획대로 안 될 때(갈림길)를 보이려고 (skill, 동작 이름)마다 다른 결과를 낸다
 ALT_OUTPUTS: dict[tuple[str, str], Callable[[AgentRequest], dict[str, Any]]] = {
+    ("get_audit_timeline", "no_record"): lambda r: _ok(
+        context_id=r.input.get("context_id"), entries=[], collected_at="2026-10-29T06:00:01Z"
+    ),
     ("diagnose_incident", "undetermined"): lambda r: _ok(
         status="undetermined", suspects=[], impact_scope=["payment"]
     ),

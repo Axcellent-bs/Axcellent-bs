@@ -25,11 +25,11 @@ const DEPT_SAY: Record<string, string> = {
 const STEP_KO: Record<string, string> = {
   rollback: "배포 되돌리기", recovery: "복구 확인", recovered_draft: "정상화 공지 초안", diagnose: "원인 진단",
   impact: "영향 분석", notice: "점검 공지", compensation: "피해 고객 보상",
-  cost: "배송비·비용 기록 확인", record: "처리 결과 기록",
+  cost: "배송비·비용 기록 확인", record: "처리 결과 기록", verify: "인사 기록 읽어 확인",
 };
 const NOTE_KO: Record<string, string> = {
   undetermined: "원인을 특정하지 못함", requested: "보상을 요청함", card_created: "기록을 남김",
-  partial: "일부만 확인함", candidate: "후보 기록으로 저장함 (사람 확인 대기)",
+  listed: "인사 기록에서 확인함", partial: "일부만 확인함", candidate: "후보 기록으로 저장함 (사람 확인 대기)",
   "failed: gate_rejected": "안전 관문이 막음", recovered: "복구됨", not_recovered: "아직 복구 안 됨",
 };
 const STATUS_SAY: Record<string, string> = { degraded: "사람 확인 필요", resolved: "해결됨", open: "AI가 처리 중" };
