@@ -46,7 +46,19 @@ function Console() {
     })();
   }, [refresh, open, params]);
 
-  const afterChange = async (c: Conversation) => { setConv(c); await refresh(); };
+  // 바뀐 문의는 목록·KPI를 다시 불러오는 동안(약 0.6초)에도 바로 보이게 먼저 끼워 넣는다.
+  // 새 문의는 맨 위에, 있던 문의는 제자리에 두고, 순서와 숫자는 뒤따르는 refresh가 서버 값으로 바로잡는다.
+  const afterChange = async (c: Conversation) => {
+    setConv(c);
+    setList((prev) => {
+      const item: ConversationListItem = {
+        id: c.id, customer_name: c.customer_name, subject: c.subject, category: c.category, sentiment: c.sentiment,
+        urgency: c.urgency, status: c.status, order_id: c.order_id, updated_at: c.updated_at, preview: c.preview, awaiting_reply: c.awaiting_reply,
+      };
+      return prev.some((i) => i.id === c.id) ? prev.map((i) => (i.id === c.id ? item : i)) : [item, ...prev];
+    });
+    await refresh();
+  };
   async function run(label: string, fn: () => Promise<void>) {
     setBusy(label); setError(null);
     try { await fn(); } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
