@@ -152,6 +152,90 @@ async def test_merge_pr_rules(gate: Gate, verifier: Any, act) -> None:
         assert [hit["key"] for hit in review.report["rules"]] == [key]  # type: ignore[union-attr]
 
 
+_CROSS_CLEAN = dict(
+    changed_lines=100,
+    changed_files=3,
+    changed_paths=["docs/a.md"],
+    review_mismatch_count=0,
+    linked_incident_count=1,  # 장애 났던 경로: 근거가 없으면 C
+    irreversible_count=0,
+    cross_check=True,
+    active_incident_overlap=0,
+    data_verdict="normal",
+    recent_incident_count=0,
+    evidence_missing=0,
+)
+
+
+@pytest.mark.asyncio
+async def test_merge_cross_check_clears_only_linked_incident(gate: Gate, act) -> None:
+    """교차검증 근거가 깨끗하면 장애 났던 경로 규칙 대신 근거로 보고 B로 머지한다."""
+    ok = await gate.execute(act("merge_pr", "planning", "cross-ok", **_CROSS_CLEAN))
+    assert (ok.grade, ok.status, ok.verifier) == ("B", "executed", "safety")
+
+    # 코드 위험 규칙은 근거로 풀리지 않는다
+    for key, bad in {
+        "merge_changed_lines": {"changed_lines": 301},
+        "merge_allowed_paths": {"changed_paths": ["scripts/x.sh"]},
+        "pr_review_mismatch": {"review_mismatch_count": 2},
+        "merge_irreversible": {"irreversible_count": 1},
+    }.items():
+        decision = await gate.execute(
+            act("merge_pr", "planning", f"cross-code-{key}", **{**_CROSS_CLEAN, **bad})
+        )
+        review = gate.store.get_review(decision.review_id or "")
+        assert decision.status == "held"
+        assert [hit["key"] for hit in review.report["rules"]] == [key]  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("key", "bad"),
+    [
+        ("merge_cross_active_incident", {"active_incident_overlap": 1}),
+        ("merge_cross_data_verdict", {"data_verdict": "anomaly"}),
+        ("merge_cross_data_verdict", {"data_verdict": "unknown"}),
+        ("merge_cross_recent_incident", {"recent_incident_count": 1}),
+        ("merge_cross_evidence_missing", {"evidence_missing": 2}),
+    ],
+)
+async def test_merge_cross_check_evidence_goes_to_human(
+    gate: Gate, act, key: str, bad: dict[str, Any]
+) -> None:
+    """근거 하나라도 걸리면 C(사람 확인). 진행 중인 사건과 겹쳐도 자동 거절이 아니라 보류다."""
+    decision = await gate.execute(
+        act("merge_pr", "planning", f"cross-{key}-{bad}", **{**_CROSS_CLEAN, **bad})
+    )
+    assert (decision.grade, decision.status) == ("C", "held")
+    review = gate.store.get_review(decision.review_id or "")
+    assert [hit["key"] for hit in review.report["rules"]] == [key]  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+async def test_merge_cross_check_missing_evidence_fails_closed(gate: Gate, act) -> None:
+    """cross_check만 보내고 근거 필드가 없으면 넷 다 걸린다."""
+    params = {
+        k: v
+        for k, v in _CROSS_CLEAN.items()
+        if k
+        not in (
+            "active_incident_overlap",
+            "data_verdict",
+            "recent_incident_count",
+            "evidence_missing",
+        )
+    }
+    decision = await gate.execute(act("merge_pr", "planning", "cross-none", **params))
+    assert decision.status == "held"
+    review = gate.store.get_review(decision.review_id or "")
+    assert {hit["key"] for hit in review.report["rules"]} == {  # type: ignore[union-attr]
+        "merge_cross_active_incident",
+        "merge_cross_data_verdict",
+        "merge_cross_recent_incident",
+        "merge_cross_evidence_missing",
+    }
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("requester", ["planning", "dev"])
 @pytest.mark.parametrize(

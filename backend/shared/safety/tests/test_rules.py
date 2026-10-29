@@ -23,6 +23,7 @@ def test_rule_files_load_and_match_agreed_values() -> None:
     values.pop("merge_protected_paths")
     values.pop("revert_allowed_paths")
     values.pop("revert_protected_paths")
+    values.pop("merge_cross_data_verdict")
     assert values == {
         "coupon_total": 300_000,
         "coupon_unit": 20_000,
