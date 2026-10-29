@@ -37,6 +37,7 @@ pytestmark = pytest.mark.asyncio
 
 W_FROM = datetime(2026, 10, 21, 5, 0, tzinfo=UTC)
 W_TO = datetime(2026, 10, 21, 5, 30, tzinfo=UTC)
+HOUR = timedelta(hours=1)
 BASE = "http://shop.test"
 Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -275,8 +276,18 @@ async def test_anomaly_detection_reads_payment_fail_rate_from_shop_api() -> None
         "payment_count",
         "order_count",
     }
-    # 장애 쪽 실패 절대 기준을 위해 구간의 실패 주문도 한 번 읽는다
-    assert [r.url.path for r in seen if r not in series] == ["/api/shop/failed-orders"]
+    # 장애 쪽 실패 확률 기준을 위해 실패 주문도 읽는다
+    # (구간 한 번 + 지난 7일 같은 시각 ±1시간을 하루씩)
+    failed = [r for r in seen if r not in series]
+    assert [r.url.path for r in failed] == ["/api/shop/failed-orders"] * 8
+    ranges = [(r.url.params["from"], r.url.params["to"]) for r in failed]
+    assert ranges[0] == (shop_client._iso(W_FROM), shop_client._iso(W_TO))
+    for day, (frm, to) in enumerate(ranges[1:], start=1):
+        shift = timedelta(days=day)
+        assert (frm, to) == (
+            shop_client._iso(W_FROM - shift - HOUR),
+            shop_client._iso(W_TO - shift + HOUR),
+        )
 
 
 async def test_metric_series_error_raises_unavailable() -> None:

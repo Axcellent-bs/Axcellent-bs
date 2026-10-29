@@ -9,9 +9,11 @@ infra `verify_recovery`가 롤백 후 구간을 물어 `any_anomaly`로 복구 �
 - 주문 수는 감소만 이상이다. 증가(세일·캠페인)는 이상이 아니고, 게시 중 공지·캠페인이 있으면
   근거에 남긴다(`campaigns`).
 - 실패 주문 수는 주문이 평소보다 많으면 그만큼 기준을 늘려 본다.
-- 결제 실패율은 장애 쪽 실패 코드(영향 분석과 같은 분류)로 단계별 기준을 본다. 5분에
-  `fault_failures`건 이상이거나, 1건 이상인 5분이 `fault_consecutive`개 연속이면 기준선과
-  상관없이 이상이다. 1건이 이어지지 않으면 이상이 아니고 severity low로 기록만 한다.
+- 결제 실패율은 장애 쪽 실패 코드(영향 분석과 같은 분류)로 확률 기준을 본다. 평소 이 시각의
+  장애 쪽 실패율 λ(지난 7일 같은 시각 ±1시간, 하한 `fault_lambda_floor`)에서 관측 건수가
+  나올 확률이 `fault_p_anomaly`보다 작거나, 이어진 두 구간이 모두 `fault_p_low`보다 작고 곱이
+  `fault_p_anomaly`보다 작으면 기준선과 상관없이 이상이다. 이상이 아닌데 `fault_p_low`보다
+  작으면 severity low로 기록만 한다.
 - 판정할 수 없으면(기준선 0, 표본 부족, 빈 구간) 지표 `status`가 unknown이고,
   모든 지표가 unknown이면 구간 `status`도 unknown이다("확인할 수 없음").
 """
@@ -128,8 +130,10 @@ async def detect_anomalies(
         *(f"{j.metric}: {j.note}" for j in judgements),
         *notes,
         f"판정 설정: 5분 결제 {settings.min_payments}건 이상만 실패율 판정, "
-        f"유의수준 {settings.alpha}, 장애 쪽 실패 5분 {settings.fault_failures}건 이상 또는 "
-        f"1건 이상 {settings.fault_consecutive}구간 연속이면 이상"
+        f"유의수준 {settings.alpha}, 장애 쪽 실패는 평소 이 시각에 그만큼 날 확률이 "
+        f"{settings.fault_p_anomaly:g}보다 작으면 이상(이어진 두 구간은 곱, "
+        f"{settings.fault_p_low:g}보다 작으면 low 기록, 평소 5분 실패 하한 "
+        f"{settings.fault_lambda_floor:g}건)"
         + ("" if judged.fault_codes_read else " (실패 코드를 읽지 못해 이 규칙은 쓰지 않음)"),
     ]
     evidence = Evidence(

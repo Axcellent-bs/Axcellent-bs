@@ -10,12 +10,14 @@
       (주문이 2배면 실패도 2배까지는 정상).
     - 문의 수는 증가가 이상이다.
   - 구간 합계 검정(유의수준 `alpha`)과 5분 구간별 검정(`alpha`를 구간 수로 나눔)을 함께 본다.
-- 장애 쪽 실패 절대 기준(`judge_payment`): 거래가 적은 시간대(새벽)·약한 장애를 잡는다.
+- 장애 쪽 실패 확률 기준(`judge_payment`): 거래가 적은 시간대(새벽)·약한 장애를 잡는다.
   - 실패 코드 분류는 영향 분석과 같다(`impact.split_failures`, 장애 쪽 = `FAULT_REASONS`).
-  - 단계별 기준. 기준선과 상관없이 결제 실패율 이상이다.
-    - 5분 구간 하나의 장애 쪽 실패가 `fault_failures`건 이상
-    - 장애 쪽 실패가 1건 이상인 5분 구간이 `fault_consecutive`개 연속
-  - 1건짜리가 이어지지 않으면(지속 안 됨) 이상이 아니다. severity "low"와 이유만 남긴다.
+  - 평소 실패율 λ: 지난 7일 같은 시각 ±1시간 5분 구간의 장애 쪽 실패 평균. 너무 작으면
+    `fault_lambda_floor`로 올린다. 지난 7일 자료가 없으면 이 기준은 판정하지 않는다.
+  - 5분 구간마다 p = P(X ≥ 관측 건수 | λ) (포아송 꼬리확률)
+    - p < `fault_p_anomaly`이면 기준선·표본 수와 상관없이 결제 실패율 이상이다.
+    - 이어진 두 구간이 모두 p < `fault_p_low`이면 두 확률을 곱해 다시 본다.
+    - 이상이 아닌데 p < `fault_p_low`이면 severity "low"와 이유만 남긴다(사건 아님).
   - 연속은 구간 안에서만 본다. 앞 구간 자료가 없으면 연속이 아니다(추측하지 않는다).
   - 사용자 쪽 실패(카드 거절 등)·처음 보는 코드는 이 규칙에 넣지 않는다 (세일 오탐 방지).
 - 판정할 수 없으면 "이상 없음"이 아니라 "확인할 수 없음"(`unknown`)이다.
@@ -45,8 +47,14 @@ BUCKET = timedelta(minutes=5)
 # 기본값은 정확도 평가(domains/data/eval)로 정했다. 회사별로 바꿀 수 있다(`settings_for`)
 DEFAULT_MIN_PAYMENTS = 5
 DEFAULT_ALPHA = 0.001
-DEFAULT_FAULT_FAILURES = 2  # 5분 구간 하나의 장애 쪽 실패 건수 기준 (평가로 정함)
-DEFAULT_FAULT_CONSECUTIVE = 2  # 장애 쪽 실패 1건 이상인 5분 구간이 이만큼 연속이면 이상
+# 예전 고정 기준. 지금 판정은 쓰지 않는다(환경변수 호환용으로만 읽는다)
+DEFAULT_FAULT_FAILURES = 2
+DEFAULT_FAULT_CONSECUTIVE = 2
+# 장애 쪽 실패 확률 기준 (기존 27개 평가 케이스로 정함, eval/README.md)
+DEFAULT_FAULT_LAMBDA_FLOOR = 0.05  # 5분 평균 장애 쪽 실패 λ의 하한
+DEFAULT_FAULT_P_ANOMALY = 0.01  # 이 확률보다 드물면 이상
+DEFAULT_FAULT_P_LOW = 0.1  # 이 확률보다 드물면 low 기록, 이어진 두 구간이면 곱해서 다시 판정
+FAULT_LAMBDA_SPAN = timedelta(hours=1)  # λ를 구할 때 보는 같은 시각 앞뒤 범위
 
 RATE_METRICS = frozenset({"payment_fail_rate"})
 DROP_METRICS = frozenset({"order_count"})  # 감소만 이상
@@ -57,8 +65,11 @@ RISE_METRICS = frozenset({"order_fail_count", "inquiry_count"})  # 증가만 이
 class Settings:
     min_payments: int = DEFAULT_MIN_PAYMENTS
     alpha: float = DEFAULT_ALPHA
-    fault_failures: int = DEFAULT_FAULT_FAILURES
-    fault_consecutive: int = DEFAULT_FAULT_CONSECUTIVE
+    fault_failures: int = DEFAULT_FAULT_FAILURES  # 쓰지 않음 (예전 기준)
+    fault_consecutive: int = DEFAULT_FAULT_CONSECUTIVE  # 쓰지 않음 (예전 기준)
+    fault_lambda_floor: float = DEFAULT_FAULT_LAMBDA_FLOOR
+    fault_p_anomaly: float = DEFAULT_FAULT_P_ANOMALY
+    fault_p_low: float = DEFAULT_FAULT_P_LOW
 
 
 def settings_for(tenant_id: str | None, env: Mapping[str, str]) -> Settings:
@@ -66,6 +77,9 @@ def settings_for(tenant_id: str | None, env: Mapping[str, str]) -> Settings:
 
     - `DATA_ANOMALY_MIN_PAYMENTS`·`DATA_ANOMALY_ALPHA`·`DATA_ANOMALY_FAULT_FAILURES`·
       `DATA_ANOMALY_FAULT_CONSECUTIVE`: 모든 회사 기본값
+    - `DATA_FAULT_LAMBDA_FLOOR`·`DATA_FAULT_P_ANOMALY`·`DATA_FAULT_P_LOW`: 장애 쪽 실패 확률 기준
+      (모든 회사 공통). `DATA_ANOMALY_FAULT_FAILURES`·`DATA_ANOMALY_FAULT_CONSECUTIVE`는 읽기만
+      하고 판정에 쓰지 않는다(예전 기준)
     - `DATA_ANOMALY_SETTINGS`: 회사별 덮어쓰기
       (`tenant=min_payments:alpha[:fault_failures[:fault_consecutive]];…`,
       예 `shop-demo=8:0.001;big-shop=20:0.0005:10:3`). 세 번째·네 번째 값은 빼도 된다.
@@ -78,6 +92,11 @@ def settings_for(tenant_id: str | None, env: Mapping[str, str]) -> Settings:
         fault_consecutive=_int(
             env.get("DATA_ANOMALY_FAULT_CONSECUTIVE"), DEFAULT_FAULT_CONSECUTIVE
         ),
+        fault_lambda_floor=_positive(
+            env.get("DATA_FAULT_LAMBDA_FLOOR"), DEFAULT_FAULT_LAMBDA_FLOOR
+        ),
+        fault_p_anomaly=_float(env.get("DATA_FAULT_P_ANOMALY"), DEFAULT_FAULT_P_ANOMALY),
+        fault_p_low=_float(env.get("DATA_FAULT_P_LOW"), DEFAULT_FAULT_P_LOW),
     )
     for item in (env.get("DATA_ANOMALY_SETTINGS") or "").split(";"):
         name, _, values = item.partition("=")
@@ -85,7 +104,8 @@ def settings_for(tenant_id: str | None, env: Mapping[str, str]) -> Settings:
             payments, _, rest = values.partition(":")
             alpha, _, rest = rest.partition(":")
             faults, _, consecutive = rest.partition(":")
-            return Settings(
+            return replace(
+                base,
                 min_payments=_int(payments, base.min_payments),
                 alpha=_float(alpha, base.alpha),
                 fault_failures=_int(faults, base.fault_failures),
@@ -97,6 +117,14 @@ def settings_for(tenant_id: str | None, env: Mapping[str, str]) -> Settings:
 def _int(text: str | None, default: int) -> int:
     try:
         value = int(str(text).strip())
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _positive(text: str | None, default: float) -> float:
+    try:
+        value = float(str(text).strip())
     except (TypeError, ValueError):
         return default
     return value if value > 0 else default
@@ -374,6 +402,32 @@ def fault_buckets(orders: list[FailedOrder]) -> dict[datetime, float]:
     return _by_bucket([(o.failed_at, 1.0) for o in fault])
 
 
+def fault_lambda(
+    bucket: datetime,
+    history: dict[datetime, float],
+    orders: dict[datetime, float] | None,
+    floor: float,
+) -> tuple[float | None, float | None]:
+    """5분 구간의 평소 장애 쪽 실패율 λ: (하한을 적용한 값, 하한 전 값).
+
+    지난 7일 같은 시각 ±`FAULT_LAMBDA_SPAN`의 5분 구간 중 주문 자료가 있는 구간(0건 기록 포함)의
+    장애 쪽 실패 평균이다. 그런 구간이 하나도 없으면 (None, None) = 지난 7일 자료 없음.
+    """
+    if not orders:
+        return None, None
+    steps = int(FAULT_LAMBDA_SPAN / BUCKET)
+    slots = [
+        bucket - timedelta(days=day) + BUCKET * k
+        for day in range(1, BASELINE_DAYS + 1)
+        for k in range(-steps, steps + 1)
+    ]
+    seen = [t for t in slots if t in orders]
+    if not seen:
+        return None, None
+    raw = sum(history.get(t, 0.0) for t in seen) / len(seen)
+    return max(raw, floor), raw
+
+
 def judge_payment(
     window: list[datetime],
     rate: dict[datetime, float],
@@ -381,44 +435,70 @@ def judge_payment(
     faults: dict[datetime, float] | None,
     settings: Settings,
     orders: dict[datetime, float] | None = None,
+    fault_history: dict[datetime, float] | None = None,
 ) -> Judgement:
-    """결제 실패율 = 통계 판정(`judge_rate`) + 장애 쪽 실패 단계별 기준.
+    """결제 실패율 = 통계 판정(`judge_rate`) + 장애 쪽 실패 확률 기준.
 
-    `faults`는 5분 구간별 장애 쪽 실패 건수(`fault_buckets`)다. None이면 실패 코드를 읽지 못한
-    것이라 통계 판정만 한다. 아래 둘 중 하나면 기준선·표본 수와 상관없이 이상이다.
-    - 5분 구간 하나의 장애 쪽 실패가 `fault_failures`건 이상
-    - 장애 쪽 실패가 1건 이상인 5분 구간이 `fault_consecutive`개 연속
-    둘 다 아니고 장애 쪽 실패가 있으면(1건짜리가 이어지지 않음) 통계 판정을 그대로 두고
-    severity "low"와 "장애 쪽 실패 N건, 지속 안 됨"을 남긴다. 사건을 만들 이상이 아니다.
-    연속은 `window` 안에서만 본다. 앞 구간 자료는 읽지 않으므로 구간 첫 5분은 앞과 이어졌다고
-    보지 않는다. 실패가 0건인 5분이 끼면 연속이 끊긴다. 단, 주문 시도가 0건으로 기록된 5분
-    (`orders`에 값 0) 하나는 건너뛴다(새벽처럼 주문이 없어 실패할 기회도 없던 5분). 자료가 없는
-    5분(`orders`에 값이 없음, 조회 실패)은 건너뛰지 않고 연속을 끊는다(추측하지 않는다).
+    `faults`는 구간 안 5분 구간별 장애 쪽 실패 건수(`fault_buckets`)다. None이면 실패 코드를 읽지
+    못한 것이라 통계 판정만 한다. `fault_history`는 지난 7일 같은 시각 ±1시간의 장애 쪽 실패
+    건수(None이면 읽지 못함)이고, `orders`(주문 수, 지난 7일 포함)로 자료가 있는 5분 구간을 안다.
+
+    - 5분 구간마다 λ(`fault_lambda`, 하한 `fault_lambda_floor`)와 p = P(X ≥ 관측 | λ)를 구한다.
+    - p < `fault_p_anomaly`인 구간이 있으면 이상이다.
+    - 이어진 두 구간이 모두 p < `fault_p_low`이면 두 p를 곱해 `fault_p_anomaly`와 다시 비교한다.
+      이어짐은 `window` 안에서만 본다(구간 첫 5분은 앞과 이어졌다고 보지 않는다). 주문 시도가
+      0건으로 기록된 5분 하나는 건너뛰고, 자료가 없는 5분은 연속을 끊는다(추측하지 않는다).
+    - 이상이 아닌데 p < `fault_p_low`인 구간이 있으면 통계 판정을 그대로 두고 severity "low"와
+      이유를 남긴다. 사건을 만들 이상이 아니다(통계 판정이 unknown이면 unknown 그대로).
+    - 지난 7일 자료가 없어 λ를 정할 수 없으면 이 기준은 판정하지 않는다(통계 판정 그대로).
+      장애 쪽 실패가 있으면 severity "low"로 남긴다.
     """
     base = judge_rate(window, rate, payments, settings)
     if faults is None:
         return replace(base, note=base.note + "; 장애 쪽 실패 코드를 읽지 못해 통계 판정만 함")
     counts = [int(faults.get(b, 0)) for b in window]
-    total, worst = sum(counts), max(counts, default=0)
-    burst = [b for b, c in zip(window, counts, strict=True) if c >= settings.fault_failures]
-    runs = _runs(window, counts, orders)
-    lasting = [run for run in runs if len(run) >= settings.fault_consecutive]
-    longest = max((len(run) for run in runs), default=0)
+    total = sum(counts)
+    floor = settings.fault_lambda_floor
+    lams = [fault_lambda(b, fault_history or {}, orders, floor) for b in window]
+    if fault_history is None or all(lam is None for lam, _ in lams):
+        reason = "지난 7일 같은 시각 장애 쪽 실패 자료가 없어 평소 실패율을 정할 수 없음"
+        note = f"{base.note}; 장애 쪽 실패 {total}건 — {reason}"
+        if total and base.status != "anomaly":
+            return replace(base, severity="low", note=note)
+        return replace(base, note=note)
+    ps = [
+        poisson_upper(c, lam) if c > 0 and lam is not None else 1.0
+        for c, (lam, _) in zip(counts, lams, strict=True)
+    ]
+    single = [b for b, p in zip(window, ps, strict=True) if p < settings.fault_p_anomaly]
+    rare = [i for i, p in enumerate(ps) if p < settings.fault_p_low]
+    pairs = [
+        (a, b, ps[a] * ps[b])
+        for a, b in zip(rare, rare[1:], strict=False)
+        if _joined(window[a], window[b], orders)
+    ]
+    paired = [
+        window[i] for a, b, joint in pairs if joint < settings.fault_p_anomaly for i in (a, b)
+    ]
+    p_min = min([*ps, *(joint for _, _, joint in pairs)], default=1.0)
+    known = [lam for lam, _ in lams if lam is not None]
+    raw = [r for _, r in lams if r is not None]
     rule = (
-        f"장애 쪽 실패 {total}건 (5분 최대 {worst}건, 연속 최대 {longest}구간; "
-        f"5분에 {settings.fault_failures}건 이상이거나 "
-        f"{settings.fault_consecutive}구간 연속이면 이상)"
+        f"장애 쪽 실패 {total}건 (5분 최대 {max(counts, default=0)}건), "
+        f"평소 5분 {max(raw, default=0.0):.3g}건 (하한 {floor:g} 적용 {max(known):.3g}), "
+        f"가장 드문 확률 p={p_min:.2g}; p<{settings.fault_p_anomaly:g}이거나 "
+        f"이어진 두 구간의 곱이 그보다 작으면 이상, p<{settings.fault_p_low:g}이면 low 기록"
     )
-    hits = sorted({*burst, *(b for run in lasting for b in run)})
+    hits = sorted({*single, *paired})
     if not hits:
-        if not total:
+        if not rare:
             return replace(base, note=f"{base.note}; {rule}")
-        note = f"{base.note}; 장애 쪽 실패 {total}건, 지속 안 됨 — {rule}"
+        note = f"{base.note}; 장애 쪽 실패 {total}건, 드물지만 이상 아님 — {rule}"
         if base.status == "anomaly":  # 통계 판정이 이미 이상이면 그대로 둔다
             return replace(base, note=note)
         return replace(base, severity="low", note=note)
     severity: Literal["low", "mid", "high"] = (
-        "high" if worst >= 3 * settings.fault_failures else "mid"
+        "high" if p_min < settings.fault_p_anomaly / 1000 else "mid"
     )
     statistical = base.status == "anomaly"
     if statistical and base.severity == "high":
@@ -441,26 +521,7 @@ def judge_payment(
     )
 
 
-MAX_SKIPPED_EMPTY = 1  # 연속을 셀 때 건너뛸 수 있는 주문 0건 5분 구간 수
-
-
-def _runs(
-    window: list[datetime], counts: list[int], orders: dict[datetime, float] | None = None
-) -> list[list[datetime]]:
-    """장애 쪽 실패가 1건 이상인 5분 구간의 연속 묶음 (구간 안에서만).
-
-    사이에 낀 5분이 주문 0건으로 기록돼 있으면 `MAX_SKIPPED_EMPTY`개까지 건너뛰고 이어 본다.
-    건너뛴 5분은 연속 길이에 세지 않는다. 자료가 없는 5분은 건너뛰지 않는다.
-    """
-    runs: list[list[datetime]] = []
-    for bucket, count in zip(window, counts, strict=True):
-        if count < 1:
-            continue
-        if runs and _joined(runs[-1][-1], bucket, orders):
-            runs[-1].append(bucket)
-        else:
-            runs.append([bucket])
-    return runs
+MAX_SKIPPED_EMPTY = 1  # 이어진 두 구간을 볼 때 건너뛸 수 있는 주문 0건 5분 구간 수
 
 
 def _joined(last: datetime, bucket: datetime, orders: dict[datetime, float] | None) -> bool:
