@@ -24,7 +24,7 @@ export const go = (href: string) => {
 }
 export const deptHref = (d: Dept) => `#/metrics/activity/${d}`
 // 사건·요청 하나(context_id)에서 에이전트끼리 주고받은 대화
-export const convoHref = (ctx: string) => `#/talk/${ctx}`
+export const convoHref = (ctx: string) => `#/agents/${ctx}`
 
 // 요청의 기획서 (요청에 spec이 없어도 기획서가 요청을 가리키면 그것)
 export const specOf = (s: State, r: Request) => s.specs.find((x) => x.id === r.spec || x.request === r.id)

@@ -14,7 +14,7 @@ import { Activity, Aftercare, Audit, Autonomy, Links, Metrics, Ops, Reviews, Spe
 import { PrsTab } from './repows'
 import { Requests, incomingCount } from './requests'
 import { Docs } from './docs'
-import { Talk } from './talk'
+import { AgentTalk, Talk } from './talk'
 import { Projects } from './projects'
 import { convoHref } from './links'
 import { Knowledge } from './knowledge'
@@ -23,7 +23,8 @@ import { ChatPanel, useDevChat } from './chat'
 import { prSlug } from './links'
 
 type IconName = NonNullable<NavItem['icon']>
-interface Section { label: string; icon: IconName; tabs: { id: string; label: string }[] }
+// hidden: 메뉴에는 안 보이지만 주소로는 열린다 (소통은 부서 공용 탭으로 뺄 때까지 숨김)
+interface Section { label: string; icon: IconName; tabs: { id: string; label: string }[]; hidden?: boolean }
 
 // 데모에서 기획(요청을 기획서로)과 개발(작업·검증·배포·사후관리)을 두 부서로 나눴다. 데이터는 같은 기획개발 서비스에서 받는다.
 export type PlanningPart = 'planning' | 'dev'
@@ -37,7 +38,8 @@ const PARTS: Record<PlanningPart, { title: string; desc: string; home: string; s
       requests: { label: '요청', icon: 'bell', tabs: [] }, // 들어온·진행 중·해결·후속은 화면 안 필터 (#/requests/<필터>)
       work: { label: '기획서', icon: 'plan', tabs: [{ id: 'specs', label: '기획서' }] },
       docs: { label: '정리', icon: 'report', tabs: [] },
-      talk: { label: '소통', icon: 'send', tabs: [] },
+      agents: { label: '에이전트 대화', icon: 'send', tabs: [] },
+      talk: { label: '소통', icon: 'send', tabs: [], hidden: true },
       knowledge: { label: '규정·자료', icon: 'admin', tabs: [] },
       metrics: { label: '지표', icon: 'dashboard', tabs: [
         { id: 'overview', label: '지표' },
@@ -56,7 +58,8 @@ const PARTS: Record<PlanningPart, { title: string; desc: string; home: string; s
         { id: 'ops', label: '운영·배포' },
         { id: 'aftercare', label: '사후관리' },
       ] },
-      talk: { label: '소통', icon: 'send', tabs: [] },
+      agents: { label: '에이전트 대화', icon: 'send', tabs: [] },
+      talk: { label: '소통', icon: 'send', tabs: [], hidden: true },
       metrics: { label: '지표', icon: 'dashboard', tabs: [
         { id: 'autonomy', label: '자동 처리 범위' },
         { id: 'audit', label: 'AI 승인 감사' },
@@ -134,7 +137,7 @@ function Planning({ part }: { part: PlanningPart }) {
 
   const badge: Record<string, number> = part === 'planning' ? { requests: newWork || incoming, talk: newTalk } : { talk: newTalk }
   const menu = [
-    ...Object.keys(SECTIONS).map((id) => ({
+    ...Object.keys(SECTIONS).filter((id) => !SECTIONS[id].hidden).map((id) => ({
       href: `#/${id}${SECTIONS[id].tabs[0] ? `/${SECTIONS[id].tabs[0].id}` : ''}`,
       label: SECTIONS[id].label,
       on: section === id,
@@ -218,6 +221,7 @@ function Planning({ part }: { part: PlanningPart }) {
           {section === 'work' && tab === 'aftercare' && <Aftercare s={state} item={item} />}
           {section === 'docs' && <Docs s={state} d={dispatch} item={item} />}
           {section === 'talk' && <Talk s={state} d={dispatch} item={item} />}
+          {section === 'agents' && <AgentTalk s={state} item={item} />}
           {section === 'knowledge' && <Knowledge />}
           {section === 'projects' && <Projects s={state} d={dispatch} sel={item} />}
           {section === 'metrics' && tab === 'overview' && <Metrics s={state} />}
