@@ -94,6 +94,9 @@ class Rule(_Strict):
     - 숫자 파라미터: `param` + `field` (`op`·`value`), 예: `pr_changed_lines`
     - 경로 목록: `paths_within` + `field` + `allowed` (하나라도 허용 접두사 밖이면 걸림)
     - 보호 경로: `paths_avoid` + `field` + `protected` (하나라도 보호 경로와 같거나 그 아래면 걸림)
+    - 정해진 값: `param_in` + `field` + `allowed` (값이 문자열이고 `allowed` 안이어야 통과)
+
+    `when`은 params가 그 값일 때만 규칙을 적용하고, `unless`는 params가 그 값이면 규칙을 건너뛴다.
     """
 
     key: str
@@ -107,6 +110,7 @@ class Rule(_Strict):
         "param",
         "paths_within",
         "paths_avoid",
+        "param_in",
     ]
     op: Literal[">=", ">", "<", "<="] = ">="
     value: int = Field(default=0, ge=0)
@@ -114,13 +118,16 @@ class Rule(_Strict):
     allowed: list[str] = Field(default_factory=list)
     protected: list[str] = Field(default_factory=list)
     when: dict[str, Any] = Field(default_factory=dict)
+    unless: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _field_needed(self) -> Rule:
-        if self.metric in ("param", "paths_within", "paths_avoid") and not self.field:
+        if self.metric in ("param", "paths_within", "paths_avoid", "param_in") and not self.field:
             raise ValueError(f"{self.key}: {self.metric} 규칙에는 field가 필요하다")
         if self.metric == "paths_avoid" and not [p for p in self.protected if p]:
             raise ValueError(f"{self.key}: paths_avoid 규칙에는 protected가 필요하다")
+        if self.metric == "param_in" and not self.allowed:
+            raise ValueError(f"{self.key}: param_in 규칙에는 allowed가 필요하다")
         return self
 
     def hit(self, observed: int) -> bool:

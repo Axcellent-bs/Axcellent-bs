@@ -308,6 +308,17 @@ class Gate:
         for rule in self.thresholds.rules_for(spec.action):
             if any(request.params.get(k) != v for k, v in rule.when.items()):
                 continue
+            if rule.unless and all(request.params.get(k) == v for k, v in rule.unless.items()):
+                continue
+            if rule.metric == "param_in":
+                value = request.params.get(rule.field or "")
+                if not isinstance(value, str) or value not in rule.allowed:
+                    hits.append(
+                        {"key": rule.key, "observed": value, "allowed": rule.allowed}
+                        if isinstance(value, str)
+                        else {"key": rule.key, "invalid": rule.field}
+                    )
+                continue
             if rule.metric == "paths_within":
                 paths = request.params.get(rule.field or "")
                 if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):

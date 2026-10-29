@@ -229,6 +229,56 @@ metric = "param"
 field = "linked_incident_count"
 op = ">"
 value = 0
+# 교차검증 근거(cross_check = true)가 붙으면 아래 merge_cross_* 규칙 넷으로 대신 본다
+unless = { cross_check = true }
+
+# ---- merge_pr 교차검증 (다른 부서 근거로 판정). 개발 AI가 근거를 모아 cross_check = true와 함께 보낸다.
+# - 근거가 대신하는 것은 "장애 났던 경로"(pr_linked_incident) 하나뿐이다. 크기·허용 경로·보호 경로·
+#   검수 불일치·되돌릴 수 없는 영역은 코드 위험이라 운영 근거로 풀지 않는다 (걸리면 그대로 C)
+# - 하나라도 걸리면 C(사람 확인). 진행 중인 사건과 겹쳐도 자동 거절하지 않는다: 그 PR이 장애
+#   수정일 수 있어서, 거절 대신 사람이 본다 (보고서의 rules에 걸린 규칙이 남는다)
+# - 필드가 없거나 형식이 틀리면 걸린 것으로 본다(fail-closed). 서비스를 안 고른 회사는 근거를 못
+#   모으므로 evidence_missing으로 사람 확인
+# - 시간 창(데이터분석 24시간, 같은 경로 장애 7일)과 근거별 대기(30초)는 개발 AI가 근거를 모을 때
+#   쓰는 값이다. 관문은 그 결과만 본다
+# 진행 중인 사건과 바뀐 경로의 구성요소가 겹치는 수 (총괄 find_active_incident)
+[[rules]]
+key = "merge_cross_active_incident"
+action = "merge_pr"
+metric = "param"
+field = "active_incident_overlap"
+op = ">"
+value = 0
+when = { cross_check = true }
+
+# 데이터분석 anomaly_detection 최근 24시간 판정. "normal"만 통과 ("anomaly"·"unknown"은 사람 확인)
+[[rules]]
+key = "merge_cross_data_verdict"
+action = "merge_pr"
+metric = "param_in"
+field = "data_verdict"
+allowed = ["normal"]
+when = { cross_check = true }
+
+# 같은 경로의 최근 7일 장애·revert 수
+[[rules]]
+key = "merge_cross_recent_incident"
+action = "merge_pr"
+metric = "param"
+field = "recent_incident_count"
+op = ">"
+value = 0
+when = { cross_check = true }
+
+# 모으지 못한 근거 수 (서비스 꺼짐·호출 실패·30초 안에 응답 없음)
+[[rules]]
+key = "merge_cross_evidence_missing"
+action = "merge_pr"
+metric = "param"
+field = "evidence_missing"
+op = ">"
+value = 0
+when = { cross_check = true }
 
 [[rules]]
 key = "merge_irreversible"
