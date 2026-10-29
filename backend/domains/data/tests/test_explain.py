@@ -61,7 +61,7 @@ async def test_decimal_and_anomaly_template() -> None:
 @pytest.mark.asyncio
 async def test_unknown_kind_lists_key_values() -> None:
     result = await explain("other", {"a": 1, "b": "x"}, _Boom("data"))
-    assert result == Explanation("other: a=1, b=x", True)
+    assert result == Explanation("other: a=1, b=x", True, "llm_error")  # 시간 초과 = 호출 실패
 
 
 @pytest.mark.asyncio

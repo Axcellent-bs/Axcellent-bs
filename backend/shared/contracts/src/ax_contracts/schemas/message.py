@@ -114,6 +114,10 @@ class AgentResult(AxModel):
     - 마감 초과는 `canceled`(outcome `TIMEOUT`), 실행 오류는 `failed`
 
     `fallback`은 LLM·스키마 검증이 실패해 고정 템플릿으로 대체했을 때 true다.
+    `fallback_reason`은 그 이유 코드다(없으면 None). 예: data `explain`의 `llm_unavailable`
+    (모델 설정 없음)·`llm_error`(호출 실패)·`format_error`(응답 형식 불일치)·`number_invalid`
+    (계산에 없는 숫자). `fallback_numbers`는 `number_invalid`일 때 걸린 숫자다. LLM 문장 원문은
+    넣지 않는다.
     """
 
     meta: RequestMeta
@@ -125,6 +129,8 @@ class AgentResult(AxModel):
     decision_reason: str | None = None
     alternatives_considered: list[str] = Field(default_factory=list)
     fallback: bool = False
+    fallback_reason: str | None = None
+    fallback_numbers: list[float] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _check_status_fields(self) -> AgentResult:

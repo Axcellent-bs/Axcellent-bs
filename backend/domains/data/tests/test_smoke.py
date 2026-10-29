@@ -11,4 +11,7 @@ def test_import() -> None:
 def test_health() -> None:
     response = TestClient(app).get("/health")
     assert response.status_code == 200
-    assert response.json() == {"data": {"status": "ok"}, "meta": {}}
+    body = response.json()
+    assert body["data"]["status"] == "ok" and body["meta"] == {}
+    # 설명 LLM 설정 여부 (설정이 없으면 설명은 늘 템플릿, fallback_reason=llm_unavailable)
+    assert isinstance(body["data"]["llm_configured"], bool)

@@ -268,6 +268,12 @@ async def _handle(
     }
     if execution_id := _execution_id(result):
         sent["execution_id"] = execution_id
+    if result.fallback:  # 템플릿으로 대체한 이유 (LLM 문장 원문은 남기지 않는다)
+        sent["fallback"] = True
+        if result.fallback_reason:
+            sent["fallback_reason"] = result.fallback_reason
+        if result.fallback_numbers:
+            sent["fallback_numbers"] = result.fallback_numbers
     log_event(
         meta.context_id,
         meta.tenant_id,

@@ -33,7 +33,7 @@ from ax_contracts.data_access.shop_failed_orders import (
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import CategoryImpact, ImpactAnalysisInput, ImpactAnalysisOutput
 from data_agent.clients.shop_client import ShopClient, ShopUnavailable, get_shop_client
-from data_agent.explain import explain
+from data_agent.explain import Explanation, explain
 from data_agent.impact import (
     EXCESS_DAYS,
     EXCESS_MARGIN,
@@ -95,6 +95,8 @@ class ImpactResult:
     output: ImpactAnalysisOutput
     evidence: Evidence
     fallback: bool
+    fallback_reason: str | None = None  # 설명을 템플릿으로 대체한 이유 (`explain.FALLBACK_REASONS`)
+    fallback_numbers: tuple[float, ...] = ()  # `number_invalid`일 때 계산에 없던 숫자
 
 
 def _category_distribution(orders: list) -> list[CategoryImpact]:
@@ -191,9 +193,23 @@ async def analyze_impact(
         summary += f"\n{name} {count}건은 장애 피해에서 제외"
     if result.truncated:
         summary += f"\n조회 한도 {query.limit}건에 걸려 일부만 반영됨(truncated)"
+    if note := explanation.note():
+        summary += f"\n{note}"
     evidence = Evidence(
         queries=[condition],
         data_summary=summary,
         collected_at=datetime.now(UTC),
     )
-    return ImpactResult(output=output, evidence=evidence, fallback=explanation.fallback)
+    return _result(output, evidence, explanation)
+
+
+def _result(
+    output: ImpactAnalysisOutput, evidence: Evidence, explained: Explanation
+) -> ImpactResult:
+    return ImpactResult(
+        output=output,
+        evidence=evidence,
+        fallback=explained.fallback,
+        fallback_reason=explained.reason,
+        fallback_numbers=explained.bad_numbers,
+    )

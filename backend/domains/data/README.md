@@ -103,6 +103,24 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 - LLM은 1차·2차 MTTR 비교 한 줄만 쓴다(`evidence.data_summary` 첫 줄). 숫자가 어긋나면 고정 문장.
 - 목 정답: 1차 MTTR 9분(기억 참조 없음, 이관 1) / 2차 6분(기억 참조) → "2차 사건은 회사 기억을 참조해 1차보다 3분 빨리 복구했습니다." 등급 A3·B2·C1, 차단 3, 이관 1, 자동 처리율 0.5.
 
+### 설명 문장(LLM)과 템플릿 대체 이유
+- 숫자는 코드가 계산하고 LLM은 문장만 쓴다(`explain.py`). 문장에 넘긴 facts에 없는 숫자가 있거나 LLM이 실패하면 고정 템플릿으로 바꾸고 `fallback=true`다.
+- 바꾼 이유를 남긴다 (`AgentResult.fallback_reason`, 영향 분석·이상 탐지·KPI):
+
+| 이유 | 언제 |
+| --- | --- |
+| `llm_unavailable` | 모델 설정이 없음 (`DATA_LLM_MODEL`·`DATA_LLM_BASE_URL` 또는 공통 `LLM_MODEL`·`LLM_BASE_URL`) |
+| `llm_error` | 호출 실패 (HTTP 오류·시간 초과·연결 실패) |
+| `format_error` | 응답이 형식(스키마)에 맞지 않음 (다시 요청해도), 또는 문장이 비어 있음 |
+| `number_invalid` | 문장에 계산에 없는 숫자가 있음. 걸린 숫자는 `fallback_numbers` |
+
+- 남는 곳
+  - skill 근거 `evidence.data_summary`: "설명 문장을 템플릿으로 대체함: number_invalid (계산에 없는 숫자: 9876543)"
+  - 공통 로그 `result_sent` payload: `fallback`·`fallback_reason`·`fallback_numbers` (템플릿이 옮긴다)
+  - **LLM 문장 원문은 어디에도 남기지 않는다** (걸린 숫자만 남긴다)
+- `GET /health`: `{"data": {"status": "ok", "llm_configured": true|false}}`. `llm_configured`는 설명용 모델과 주소가 설정됐는지다(키 값은 보지 않는다). false면 설명은 늘 템플릿(`llm_unavailable`)이다.
+- 평가 결과 파일(`eval/results/latest.json`)에 케이스별 `fallback_reason`·`fallback_numbers`가 남는다. 지표(`llm.fallback_rate` 등) 정의는 그대로다.
+
 ## 3. 입출력 계약
 contracts/ 참조 (TODO)
 ## 4. 의존

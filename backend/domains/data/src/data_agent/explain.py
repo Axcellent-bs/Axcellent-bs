@@ -3,6 +3,11 @@
 - 숫자는 코드가 계산해서 넘기고, LLM은 문장만 쓴다.
 - LLM 문장 속 숫자가 facts에 없으면 버리고 고정 템플릿으로 대체한다(fallback=True).
 - LLM 예외(미설정·타임아웃 등)와 스키마 검증 실패도 템플릿으로 대체한다.
+- 대체할 때 이유를 남긴다(`Explanation.reason`). LLM 문장 원문은 남기지 않는다.
+  - `llm_unavailable`: 모델 설정이 없음
+  - `llm_error`: 호출 실패 (HTTP 오류·시간 초과 등)
+  - `format_error`: 응답이 형식(스키마)에 맞지 않거나 문장이 비어 있음
+  - `number_invalid`: 문장에 계산에 없는 숫자가 있음. 걸린 숫자는 `bad_numbers`
 """
 
 from __future__ import annotations
@@ -10,9 +15,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-from ax_agent_template.llm import LLMClient
+from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
 
 # 1,234 / 1234 / 0.5 / 12.5 형태. 퍼센트 기호는 숫자 뒤에 붙으므로 숫자만 뽑으면 된다.
 _NUMBER_RE = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?")
@@ -29,10 +34,33 @@ class _Summary(BaseModel):
     summary: str
 
 
+LLM_UNAVAILABLE = "llm_unavailable"
+LLM_ERROR = "llm_error"
+FORMAT_ERROR = "format_error"
+NUMBER_INVALID = "number_invalid"
+FALLBACK_REASONS = (LLM_UNAVAILABLE, LLM_ERROR, FORMAT_ERROR, NUMBER_INVALID)
+
+
 @dataclass(frozen=True)
 class Explanation:
     summary: str
     fallback: bool
+    reason: str | None = None  # 템플릿으로 대체한 이유 (`FALLBACK_REASONS`), 대체 안 했으면 None
+    bad_numbers: tuple[float, ...] = ()  # `number_invalid`일 때 계산에 없던 숫자
+
+    def note(self) -> str | None:
+        """근거(evidence)에 붙일 한 줄. 대체하지 않았으면 None. LLM 문장 원문은 넣지 않는다."""
+        if not self.fallback:
+            return None
+        line = f"설명 문장을 템플릿으로 대체함: {self.reason or 'unknown'}"
+        if self.bad_numbers:
+            line += " (계산에 없는 숫자: " + ", ".join(_show(n) for n in self.bad_numbers) + ")"
+        return line
+
+
+def _show(number: float) -> str:
+    """숫자 표기 (정수면 소수점 없이, 지수 표기 없이)."""
+    return str(int(number)) if number.is_integer() else repr(number)
 
 
 def _extract_numbers(text: str) -> set[float]:
@@ -53,9 +81,16 @@ def _fact_numbers(facts: dict[str, int | float | str]) -> set[float]:
     return allowed
 
 
-def _numbers_valid(summary: str, facts: dict[str, int | float | str]) -> bool:
+def _bad_numbers(summary: str, facts: dict[str, int | float | str]) -> list[float]:
+    """문장 속 숫자 중 facts에 없는 것 (작은 것부터)."""
     allowed = _fact_numbers(facts)
-    return all(any(abs(n - a) < 1e-9 for a in allowed) for n in _extract_numbers(summary))
+    return sorted(
+        n for n in _extract_numbers(summary) if not any(abs(n - a) < 1e-9 for a in allowed)
+    )
+
+
+def _numbers_valid(summary: str, facts: dict[str, int | float | str]) -> bool:
+    return not _bad_numbers(summary, facts)
 
 
 def _fmt(value: object, *, comma: bool = False) -> str:
@@ -99,12 +134,22 @@ def _template(kind: str, facts: dict[str, int | float | str]) -> str:
 
 
 async def explain(kind: str, facts: dict[str, int | float | str], llm: LLMClient) -> Explanation:
-    """facts를 설명하는 문장을 만든다. 검증에 실패하면 템플릿(fallback=True)을 쓴다."""
+    """facts를 설명하는 문장을 만든다. 검증에 실패하면 템플릿(fallback=True)과 이유를 쓴다."""
+
+    def fallback(reason: str, numbers: list[float] | None = None) -> Explanation:
+        return Explanation(_template(kind, facts), True, reason, tuple(numbers or ()))
+
     try:
         result = await llm.structured(_PROMPT.format(kind=kind, facts=facts), _Summary)
         summary = result.summary.strip()
-    except Exception:  # LLM 미설정·타임아웃·검증 실패 모두 템플릿으로 대체
-        return Explanation(_template(kind, facts), True)
-    if not summary or not _numbers_valid(summary, facts):
-        return Explanation(_template(kind, facts), True)
+    except LLMNotConfiguredError:
+        return fallback(LLM_UNAVAILABLE)
+    except (LLMFormatError, ValidationError):
+        return fallback(FORMAT_ERROR)
+    except Exception:  # 호출 실패(HTTP 오류·시간 초과 등) 모두 템플릿으로 대체
+        return fallback(LLM_ERROR)
+    if not summary:
+        return fallback(FORMAT_ERROR)
+    if bad := _bad_numbers(summary, facts):
+        return fallback(NUMBER_INVALID, bad)
     return Explanation(summary, False)
