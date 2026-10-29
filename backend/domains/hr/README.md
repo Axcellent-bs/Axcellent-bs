@@ -26,6 +26,7 @@ Agent Card: `agent-card.json` (`/.well-known/agent-card.json`으로 공개). 입
 | `answer_handover_question` | A | 인계자 답변 반영, 같은 답은 한 번만 | orchestrator·dashboard-api |
 | `confirm_handover` | B(planning 검증) / 완성도 미달 C | 인수인계 확정 | orchestrator |
 | `check_plan` | 조회 | 새 계획을 과거 결정과 비교 (기각됨·충돌·일치·기록에 없음) | orchestrator·dashboard-api·planning |
+| `find_similar_fraud_cards` | 조회 | 판매자 사실(가입 일수·저가 비율·24시간 등록 수)과 비슷한 지난 사기 카드(kind=fraud)와 유사도 0~1. 기준 미만이면 빈 목록 | data |
 | `decide_candidate_card` | A | 확신 낮은 후보 카드를 사람이 승인(확정)·폐기 | orchestrator·dashboard-api |
 | `list_cards` | 조회 | 확정된(후보가 아닌) 결정 카드, 최근 순. `context_id`로 한 사건의 카드만 | orchestrator·dashboard-api |
 | `list_handovers`·`list_open_questions`·`list_candidate_cards`·`get_audit_timeline` | 조회 | 대시보드 인사 화면용 현황(인수인계·인계자 질문·후보 카드·감사 기록) | orchestrator·dashboard-api |
