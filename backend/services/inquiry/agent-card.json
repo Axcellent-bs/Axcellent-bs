@@ -158,7 +158,8 @@
         "data"
       ],
       "verifier": null,
-      "priority": "recommended"
+      "priority": "recommended",
+      "handoff": false
     },
     {
       "id": "request_change",

@@ -10,6 +10,8 @@ from ax_contracts.schemas.data import (
     AnomalyDetectionOutput,
     BusinessMetric,
     CategoryImpact,
+    CauseFact,
+    CauseHypothesis,
     FraudReason,
     FraudScoreInput,
     FraudScoreOutput,
@@ -19,6 +21,8 @@ from ax_contracts.schemas.data import (
     KpiSummaryInput,
     KpiSummaryOutput,
     MetricVerdict,
+    RootCauseInput,
+    RootCauseOutput,
 )
 from ax_contracts.schemas.escalation import (
     Escalation,
@@ -333,6 +337,10 @@ __all__ = [
     "KpiSummaryInput",
     "KpiSummaryOutput",
     "MetricVerdict",
+    "CauseFact",
+    "CauseHypothesis",
+    "RootCauseInput",
+    "RootCauseOutput",
     "AuditEntry",
     "ChangeStatus",
     "ChangeView",

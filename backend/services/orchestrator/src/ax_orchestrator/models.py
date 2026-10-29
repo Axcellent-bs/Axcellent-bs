@@ -89,6 +89,10 @@ TERMINAL = {"completed", "failed", "skipped", "rejected_by_human", "transfer_que
 # 끝나지 않은 대기 상태. C 등급 승인 대기(held)와
 # 사람 할 일함 처리 대기(waiting_human)는 다른 상태다
 WAITING = {"held", "waiting_human"}
+# 사유 코드가 있어도 사람이 개입한 일로 세지 않는 것 (자동 처리율)
+# - service_disabled: 꺼진 서비스라 건너뛴 조회
+# - cause_confident: 확신도 높은 원인 후보가 있어 원인 확인 요청을 하지 않음
+NOT_INTERVENTION = {"service_disabled", "cause_confident"}
 
 
 @dataclass

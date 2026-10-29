@@ -21,7 +21,8 @@
         "data"
       ],
       "verifier": null,
-      "priority": "required"
+      "priority": "required",
+      "handoff": false
     },
     {
       "id": "link_incident",

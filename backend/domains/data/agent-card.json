@@ -48,6 +48,17 @@
       "allowed_requesters": ["orchestrator", "dashboard-api"],
       "verifier": null,
       "priority": "recommended"
+    },
+    {
+      "id": "root_cause_hypotheses",
+      "description": "이상 구간(시작·끝 시각)과 지표를 받아 구간 앞 30분~구간 끝의 사실(배포·머지된 PR, 게시 중 공지, 문의 급증, 지난 비슷한 사건)을 A2A로 모으고, 그 사실만 근거로 원인 후보(설명·근거 사실 id·확신도)를 고른다. 숫자·시각은 사실에서만 나오고, 근거 없는 후보와 사실에 없는 숫자·시각을 쓴 후보는 버린다. LLM이 실패하면 시간 순서 규칙(이상 직전 배포 1순위)으로 대체한다. 확신도 high 후보가 없으면 확인 필요, 사실이 없으면 확인할 수 없음. 꺼진 서비스의 사실은 건너뛰고 확인할 수 없음으로 남긴다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#RootCauseInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#RootCauseOutput",
+      "grade": "read",
+      "allowed_requesters": ["orchestrator", "dashboard-api"],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
     }
   ]
 }

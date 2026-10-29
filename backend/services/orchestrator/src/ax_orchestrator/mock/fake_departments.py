@@ -33,11 +33,13 @@ CARDS: dict[str, list[tuple[str, str, str | None]]] = {
         ("anomaly_detection", "read", None),
         ("impact_analysis", "read", None),
         ("kpi_summary", "read", None),
+        ("root_cause_hypotheses", "read", None),
     ],
     "planning": [
         ("find_related_prs", "read", None),
         ("link_incident", "A", None),
         ("verify_rollback_target", "read", None),
+        ("create_ticket", "A", None),
     ],
     "marketing": [("draft_notice", "read", None), ("publish_notice", "A", None)],
     "support": [("send_reply", "A", None), ("request_incident_compensation", "A", None)],
@@ -107,6 +109,31 @@ DEFAULT_OUTPUTS: dict[str, Callable[[AgentRequest], dict[str, Any]]] = {
     "rollback_deployment": lambda r: _ok(rolled_back_to=r.input.get("to_version")),
     "find_related_prs": lambda r: _ok(candidates=[{"pr_number": 412}, {"pr_number": 418}]),
     "link_incident": lambda r: _ok(linked_paras=["PR #412", "PR #418"]),
+    # 실제 데이터 `RootCauseOutput` 모양. 확신도 high 후보가 있어 원인 확인 요청은 건너뛴다
+    "root_cause_hypotheses": lambda r: _ok(
+        hypotheses=[
+            {
+                "explanation": "PR #412 배포가 원인일 수 있음",
+                "fact_ids": ["f2"],
+                "confidence": "high",
+            }
+        ],
+        needs_confirmation=False,
+        facts=[
+            {"fact_id": "f1", "kind": "anomaly", "source": "input", "summary": "결제 실패율 이상"},
+            {
+                "fact_id": "f2",
+                "kind": "deploy",
+                "source": "planning.find_related_prs",
+                "ref": "pr:412",
+                "summary": "PR #412 병합·배포",
+            },
+        ],
+        summary="원인 후보 1개 (근거 사실 1개)",
+    ),
+    "create_ticket": lambda r: _ok(
+        request_id="REQ-90", context_id="ctx_req_0090", outcome="created"
+    ),
     "draft_notice": lambda r: _ok(draft_id=f"drf_{r.input.get('kind', 'x')}"),
     "publish_notice": lambda r: _ok(
         notice_id=f"ntc_{r.input.get('draft_id', 'none')}",

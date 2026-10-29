@@ -27,6 +27,7 @@
       "grade": "read",
       "allowed_requesters": ["orchestrator", "infra", "data"],
       "verifier": null,
+      "handoff": false,
       "priority": "required"
     },
     {

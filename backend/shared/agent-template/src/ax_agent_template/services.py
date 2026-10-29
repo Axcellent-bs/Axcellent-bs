@@ -96,7 +96,13 @@ SERVICES: tuple[Service, ...] = (
         "data",
         "data",
         8106,
-        ("anomaly_detection", "impact_analysis", "fraud_score", "kpi_summary"),
+        (
+            "anomaly_detection",
+            "impact_analysis",
+            "fraud_score",
+            "kpi_summary",
+            "root_cause_hypotheses",
+        ),
         "데이터 분석",
     ),
     Service(

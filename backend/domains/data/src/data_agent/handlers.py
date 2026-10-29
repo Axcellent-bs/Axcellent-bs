@@ -2,6 +2,7 @@
 
 - impact_analysis, anomaly_detection은 읽기 전용(grade read)이라 `execute()`를 거치지 않는다.
 - kpi_summary는 공통 로그 저장소를 읽기만 한다(grade read).
+- root_cause_hypotheses는 다른 부서에 조회만 하고(A2A) 원인 후보를 고른다(grade read).
 - fraud_score는 카드에는 있지만 아직 구현 전이다. 템플릿이 카드와 핸들러가 같아야 시작하므로
   `not_implemented` 실패를 돌려주는 자리 핸들러를 둔다(후속 PR에서 교체).
 - 외부 입력(`request.untrusted`)은 읽지 않는다.
@@ -22,12 +23,14 @@ from ax_contracts.schemas.data import (
     AnomalyDetectionInput,
     ImpactAnalysisInput,
     KpiSummaryInput,
+    RootCauseInput,
 )
 from data_agent.clients.log_client import get_log_source
 from data_agent.clients.shop_client import ShopUnavailable
 from data_agent.skills.anomaly_detection import detect_anomalies, get_metric_source
 from data_agent.skills.impact_analysis import analyze_impact
 from data_agent.skills.kpi_summary import summarize_kpi
+from data_agent.skills.root_cause import estimate_root_cause
 
 
 def get_llm() -> LLMClient:
@@ -135,6 +138,23 @@ async def kpi_summary(request: AgentRequest) -> AgentResult:
     )
 
 
+async def root_cause_hypotheses(request: AgentRequest) -> AgentResult:
+    """사실을 모아 원인 후보를 고른다. 조회만 하고 상태를 바꾸지 않는다(grade read)."""
+    data = _parse(request, RootCauseInput)
+    if isinstance(data, AgentResult):
+        return data
+    if data.window_from >= data.window_to:
+        return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    result = await estimate_root_cause(data, request.meta, get_llm())
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+        fallback=result.fallback,
+    )
+
+
 def _not_implemented(skill: str):
     async def handler(request: AgentRequest) -> AgentResult:
         return _result(
@@ -152,4 +172,5 @@ HANDLERS = {
     "anomaly_detection": anomaly_detection,
     "fraud_score": _not_implemented("fraud_score"),  # TODO: 후속 PR
     "kpi_summary": kpi_summary,
+    "root_cause_hypotheses": root_cause_hypotheses,
 }

@@ -29,7 +29,36 @@ export const FLOW: { key: string; label: string; stepId: string; note?: string }
   { key: "kpi", label: "처리 시간 요약", stepId: "kpi" },
 ];
 
+/** 원인 추정(root_cause_hypotheses). 사실은 코드가 모은 것, 후보는 그 사실 id만 근거로 한다 */
+export type CauseConfidence = "high" | "mid" | "low";
+export interface CauseFact { fact_id: string; kind: string; at?: string | null; source: string; ref?: string | null; summary: string }
+export interface CauseHypothesis { explanation: string; fact_ids: string[]; confidence: CauseConfidence | string }
+export interface RootCauseOutput { hypotheses?: CauseHypothesis[] | null; needs_confirmation?: boolean | null; facts?: CauseFact[] | null; summary?: string | null }
+
+export const CONFIDENCE_KO: Record<string, { label: string; tone: "ok" | "warn" | "muted" }> = {
+  high: { label: "확신 높음", tone: "ok" },
+  mid: { label: "확신 중간", tone: "warn" },
+  low: { label: "확신 낮음", tone: "muted" },
+};
+export const FACT_KIND_KO: Record<string, string> = {
+  anomaly: "이상 구간",
+  deploy: "배포·PR",
+  notice: "공지",
+  inquiry_surge: "문의 급증",
+  past_incident: "지난 사건",
+  unavailable: UNKNOWN,
+};
+/** 사실 출처(skill) → 화면 이름 */
+export const FACT_SOURCE_KO: Record<string, string> = {
+  input: "총괄이 준 이상 구간",
+  "planning.find_related_prs": "기획개발 AI · 관련 PR",
+  "marketing.list_active_notices": "마케팅 AI · 게시 중 공지",
+  "support.detect_inquiry_surge": "고객지원 AI · 문의 급증",
+  "memory.card_search": "회사 기억 · 지난 사건",
+};
+
 export const stepOf = (inc: OrchIncident | null | undefined, stepId: string): OrchStep | undefined => inc?.steps.find((s) => s.step_id === stepId);
+export const rootCauseOf = (inc: OrchIncident | null | undefined) => (stepOf(inc, "root_cause")?.output ?? null) as RootCauseOutput | null;
 export const impactOf = (inc: OrchIncident | null | undefined) => (stepOf(inc, "impact")?.output ?? null) as ImpactOutput | null;
 export const recoveryOf = (inc: OrchIncident | null | undefined) => (stepOf(inc, "recovery")?.output ?? null) as RecoveryOutput | null;
 

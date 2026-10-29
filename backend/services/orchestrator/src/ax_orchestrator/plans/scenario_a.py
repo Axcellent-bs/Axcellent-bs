@@ -5,6 +5,9 @@
   문의를 낸 고객의 보상은 고객지원이 직통으로 처리한다(#228).
 - 갈림길: 원인 미확정이면 롤백하지 않고 이관 큐로, 복구 확인이 실패하면
   정상화 공지 없이 이관 큐로 돌린다.
+- 원인 추정: 영향 분석 다음에 데이터 `root_cause_hypotheses`로 원인 후보를 받는다(사실만 근거).
+  확신도 high 후보가 없거나 원인 추정을 받지 못했으면 원인 확인 업무를 기획개발 `create_ticket`으로
+  넘긴다. 그 서비스가 꺼져 있으면 업무 요청 라우터가 사람 할 일함(받은 요청)으로 넘긴다.
 - 사건 후: 데이터 처리 시간 요약(`kpi_summary`)을 요청한다.
 - 재무는 사건 중에 부르지 않는다(멘토 피드백, SCN-A). 장애 때 나간 쿠폰·환불은 이벤트로 재무 장부에
   기록되고, 비용은 평상시 결산·사후 감사에서 다룬다.
@@ -146,6 +149,50 @@ def _compensation_gate(inc: Incident) -> tuple[str, str, str] | None:
     return ("skipped", "no_affected_customers", "영향 고객 목록이 없어 보상 요청 없음")
 
 
+def _root_cause(inc: Incident) -> dict[str, Any]:
+    # 이상 구간은 영향 분석과 같다. 지표는 결제 장애라 결제 실패율이다
+    window = _window(inc)
+    return {
+        "context_id": inc.context_id,
+        "window_from": window["window_from"],
+        "window_to": window["window_to"],
+        "metric": "payment_fail_rate",
+        "component": inc.component,
+    }
+
+
+def _cause_check_gate(inc: Incident) -> tuple[str, str, str] | None:
+    """원인 후보에 확신도 high가 있으면 원인 확인 업무를 넘기지 않는다."""
+    found = _out(inc, "root_cause")
+    if found and found.get("needs_confirmation") is False:
+        return ("skipped", "cause_confident", "확신도 높은 원인 후보가 있어 원인 확인 요청 없음")
+    return None
+
+
+def _cause_check(inc: Incident) -> dict[str, Any]:
+    """원인 확인 요청. 문장은 데이터가 준 요약·후보 설명을 그대로 옮기고 지어내지 않는다."""
+    found = _out(inc, "root_cause")
+    facts = {f.get("fact_id"): f for f in found.get("facts") or []}
+    hypotheses = found.get("hypotheses") or []
+    if found:
+        lines = [str(found.get("summary") or "")]
+        lines += [f"후보({h.get('confidence')}): {h.get('explanation')}" for h in hypotheses]
+    else:
+        lines = ["원인 추정을 받지 못함 (확인할 수 없음)"]
+    refs = [
+        facts[i]["ref"]
+        for h in hypotheses
+        for i in h.get("fact_ids") or []
+        if i in facts and facts[i].get("ref") and facts[i].get("kind") != "anomaly"
+    ]
+    return {
+        "title": f"{inc.component} 장애 원인 확인",
+        "evidence": " / ".join(line for line in lines if line),
+        "source_ref": inc.context_id,
+        "evidence_ids": list(dict.fromkeys(refs)),
+    }
+
+
 def _kpi(inc: Incident) -> dict[str, Any]:
     return {"context_ids": [inc.context_id]}
 
@@ -156,6 +203,23 @@ def scenario_a() -> Plan:
         steps=[
             Step("diagnose", "diagnose_incident", "원인 진단 (infra)", build=_diagnose),
             Step("impact", "impact_analysis", "영향 분석 (data)", build=_impact),
+            Step(
+                "root_cause",
+                "root_cause_hypotheses",
+                "원인 후보 추정 (data)",
+                after=("impact",),
+                build=_root_cause,
+                required=False,
+            ),
+            Step(
+                "cause_check",
+                "create_ticket",
+                "원인 확인 요청 (planning)",
+                also_after=("root_cause",),
+                build=_cause_check,
+                gate=_cause_check_gate,
+                required=False,
+            ),
             Step(
                 "rollback",
                 "rollback_deployment",
@@ -247,6 +311,7 @@ def scenario_a() -> Plan:
                     "link_incident",
                     "compensation",
                     "kpi",
+                    "root_cause",
                 ),
                 kind="record",
             ),

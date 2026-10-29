@@ -23,6 +23,7 @@ def test_card_validates(card: AgentCard) -> None:
         "impact_analysis",
         "fraud_score",
         "kpi_summary",
+        "root_cause_hypotheses",
     }
 
 
@@ -46,3 +47,9 @@ def test_impact_analysis_requesters(card: AgentCard) -> None:
         "planning",
     }
     assert skill.priority == "required"
+
+
+def test_root_cause_is_a_lookup_for_orchestrator(card: AgentCard) -> None:
+    skill = next(s for s in card.skills if s.id == "root_cause_hypotheses")
+    assert set(skill.allowed_requesters) == {"orchestrator", "dashboard-api"}
+    assert skill.handoff is False  # 꺼져 있으면 사람에게 넘기지 않고 건너뛴다

@@ -23,7 +23,16 @@ from ax_contracts.schemas import (
     RequestMeta,
     TaskStatus,
 )
-from ax_orchestrator.models import TERMINAL, Incident, Plan, Step, StepRun, iso, now
+from ax_orchestrator.models import (
+    NOT_INTERVENTION,
+    TERMINAL,
+    Incident,
+    Plan,
+    Step,
+    StepRun,
+    iso,
+    now,
+)
 from ax_orchestrator.registry import Registry
 
 Caller = Callable[[str, AgentRequest], Awaitable[AgentResult]]
@@ -555,12 +564,12 @@ class Engine:
             "transfers": sum(1 for r in inc.steps.values() if r.transferred_to),
             "retries": retries,
             "auto_rate": round(
-                # 꺼진 서비스라 건너뛴 조회(service_disabled)는 사람이 개입한 일이 아니라 빼고 센다
+                # 꺼진 서비스라 건너뛴 조회 등(NOT_INTERVENTION)은 사람이 개입한 일이 아니다
                 1
                 - sum(
                     1
                     for r in inc.steps.values()
-                    if r.reason_code and r.reason_code != ErrorCode.SERVICE_DISABLED.value
+                    if r.reason_code and r.reason_code not in NOT_INTERVENTION
                 )
                 / max(len(statuses), 1),
                 2,
