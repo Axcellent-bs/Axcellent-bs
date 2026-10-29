@@ -1,0 +1,12 @@
+services:
+  dejafix-proxy:
+    build:
+      context: ../..
+      dockerfile: shared/dejafix-proxy/Dockerfile
+    ports:
+      - "8030:8030"
+    env_file:
+      - path: ../../.env
+        required: false
+      - path: ./.env
+        required: false
