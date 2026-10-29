@@ -51,6 +51,7 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
     - 예전 고정 기준 환경변수 `DATA_ANOMALY_FAULT_FAILURES`(5분 2건)·`DATA_ANOMALY_FAULT_CONSECUTIVE`(2구간 연속)는 읽기만 하고 판정에 쓰지 않는다
     - 회사별 설정: `DATA_ANOMALY_SETTINGS="tenant=min_payments:alpha[:fault_failures[:fault_consecutive]];…"` (확률 기준 3개는 회사 공통)
     - 주기 감시(`monitor.py`)도 같은 판정 함수(`detect.judge_window`)를 쓴다.
+    - 지난 7일 실패 주문은 공급자마다 1시간 칸으로 캐시한다(`detect._HistoryCache`, #129). 날마다 필요한 범위를 덮는 칸 중 없는 칸만 읽고, 판정에는 그 범위 안 주문만 쓴다(캐시 없을 때와 같은 결과). 감시 1회 조회: 첫 감시 8번, 같은 공급자의 다음 감시는 구간 1번(시간 칸이 바뀔 때만 날마다 1번씩 더). 한도(5000건)만큼 받은 칸은 잘렸을 수 있어 캐시하지 않는다
   - 평가 규칙: `eval/README.md`
 - shop-api 응답 없음·401·403·5xx·형식 오류면 숫자를 0으로 내지 않고 `failed`·`unavailable`과 "확인할 수 없음" 근거로 답한다.
 
