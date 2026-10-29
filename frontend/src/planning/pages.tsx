@@ -198,7 +198,7 @@ export function Work({ s, d, item }: P & { item?: string }) {
   return (
     <Layout
       list={list}
-      head={<Head kicker={<>{sel.id} · {task?.id} · <span className="mono">{sel.branch}</span>{fromDevTeam(s, task) && <> · <DevTeamTag /></>}</>} title={sel.title.replace(/^[A-Z]\d+: /, '')} side={<State v={sel.merged ? '완료' : xr ? waitLabel(xr) : last === '불일치' || rejected ? '불일치' : '머지 대기'} />} />}
+      head={<Head kicker={<>{sel.id} · {task?.id} · <span className="mono">{sel.branch}</span>{sel.vcsNumber != null && <> · <a href={`#/work/prs/repo/${sel.vcsNumber}`} className="plain-link">레포 #{sel.vcsNumber}</a></>}{fromDevTeam(s, task) && <> · <DevTeamTag /></>}</>} title={sel.title.replace(/^[A-Z]\d+: /, '')} side={<State v={sel.merged ? '완료' : xr ? waitLabel(xr) : last === '불일치' || rejected ? '불일치' : '머지 대기'} />} />}
       side={
         <Side title="근거 체인" sum={`${chain.length}단계`}>
           {chain.map((x, i) => <p key={i} className="pside-msg"><b>{x.kind}</b> {x.href ? <a href={x.kind === '문단' && spec && para ? `#/work/specs/${spec.id}/${para.id}` : x.href} className="plain-link">{x.title}</a> : x.title}</p>)}

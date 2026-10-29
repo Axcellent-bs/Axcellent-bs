@@ -241,3 +241,52 @@ export const chatApi = (base: string) => {
     send: (x: ChatSend) => call<unknown>(base, '/dev-chat', post(x)).then(one),
   }
 }
+
+// ---- 레포 작업 공간 (dev 서비스 `/api/planning/repo/*`). 연결된 레포의 PR·브랜치를 GitHub를 열지 않고 다룬다
+export type RepoPrState = 'open' | 'merged' | 'closed'
+export type RepoCheckState = 'passed' | 'failed' | 'pending'
+export interface RepoInternal { id: string; task: string; merged: boolean; closed: boolean }
+export interface RepoPr {
+  number: number; title: string; state: RepoPrState; branch: string; base: string; author: string; body?: string; draft: boolean
+  created_at: string | null; updated_at: string | null; merged_at: string | null; closed_at: string | null; url: string | null
+  comments: number | null; checks: RepoCheckState | null; internal?: RepoInternal | null
+}
+export interface RepoMeta { connection: string; repo: string; base_branch: string; read_only: boolean }
+export interface RepoFile { path: string; status: string; additions: number; deletions: number; patch: string | null; previous_path: string | null; truncated: boolean }
+export interface RepoCommit { sha: string; message: string; author: string; at: string | null }
+export interface RepoComment { id: string; author: string; body: string; at: string | null }
+export interface RepoPrDetail extends RepoMeta {
+  pr: RepoPr; internal: RepoInternal | null
+  diff: { number: number; files: RepoFile[]; truncated: boolean; total_files: number }
+  commits: RepoCommit[]; comments: RepoComment[]
+  checks: { state: RepoCheckState; runs: { name: string; state: RepoCheckState }[] } | null
+}
+export interface RepoBranch {
+  name: string; sha: string; protected: boolean; default: boolean; base: boolean; last_commit_at: string | null
+  ahead: number | null; behind: number | null; pr: { number: number; state: RepoPrState; title: string } | null
+}
+export type MergeMethod = 'merge' | 'squash' | 'rebase'
+
+const qs = (x: Record<string, string | number | undefined>) => {
+  const p = new URLSearchParams()
+  for (const [k, v] of Object.entries(x)) if (v !== undefined && v !== '') p.set(k, String(v))
+  const t = p.toString()
+  return t ? `?${t}` : ''
+}
+
+export const repoApi = (base: string, connection?: string) => {
+  const c = connection || undefined
+  const pr = (n: number, act: string) => `/repo/prs/${n}/${act}${qs({ connection: c })}`
+  return {
+    prs: (state: 'all' | RepoPrState = 'all', q?: string, limit = 100) =>
+      call<RepoMeta & { items: RepoPr[] }>(base, `/repo/prs${qs({ connection: c, state, q, limit })}`),
+    pr: (n: number) => call<RepoPrDetail>(base, `/repo/prs/${n}${qs({ connection: c })}`),
+    branches: () => call<RepoMeta & { items: RepoBranch[] }>(base, `/repo/branches${qs({ connection: c })}`),
+    merge: (n: number, method: MergeMethod) => call<{ pr: RepoPr; via: 'internal' | 'repo' }>(base, pr(n, 'merge'), post({ method })),
+    close: (n: number) => call<{ pr: RepoPr }>(base, pr(n, 'close'), post()),
+    reopen: (n: number) => call<{ pr: RepoPr }>(base, pr(n, 'reopen'), post()),
+    comment: (n: number, body: string) => call<{ comment: RepoComment }>(base, pr(n, 'comment'), post({ body })),
+    revert: (n: number) => call<{ revert: { number: number; url: string | null; branch: string } }>(base, pr(n, 'revert'), post()),
+    deleteBranch: (name: string) => call<{ deleted: string }>(base, `/repo/branches/delete${qs({ connection: c })}`, post({ name })),
+  }
+}

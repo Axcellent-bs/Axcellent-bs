@@ -10,7 +10,8 @@ import { apiBase } from './api'
 import { DevToolsDialog } from '@/demo/DevTools'
 import { IconGear } from '@/components/icons'
 import { Dep, Point } from './parts'
-import { Activity, Aftercare, Audit, Autonomy, Links, Metrics, Ops, Reviews, Specs, Work } from './pages'
+import { Activity, Aftercare, Audit, Autonomy, Links, Metrics, Ops, Reviews, Specs } from './pages'
+import { PrsTab } from './repows'
 import { Requests, incomingCount } from './requests'
 import { Docs } from './docs'
 import { Talk } from './talk'
@@ -211,7 +212,7 @@ function Planning({ part }: { part: PlanningPart }) {
           )}
           {section === 'requests' && <Requests s={state} d={dispatch} filter={sub} item={rest[0] ? decodeURIComponent(rest[0]) : undefined} />}
           {section === 'work' && tab === 'specs' && <Specs s={state} d={dispatch} item={item} item2={item2} />}
-          {section === 'work' && tab === 'prs' && <Work s={state} d={dispatch} item={item} />}
+          {section === 'work' && tab === 'prs' && <PrsTab s={state} d={dispatch} parts={rest.map((x) => decodeURIComponent(x))} />}
           {section === 'work' && tab === 'reviews' && <Reviews s={state} d={dispatch} item={item} />}
           {section === 'work' && tab === 'ops' && <Ops s={state} item={item} />}
           {section === 'work' && tab === 'aftercare' && <Aftercare s={state} item={item} />}
