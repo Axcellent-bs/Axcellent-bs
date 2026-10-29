@@ -29,6 +29,8 @@ class KpiResult:
     evidence: Evidence
     fallback: bool
     summary: str | None
+    fallback_reason: str | None = None  # 설명을 템플릿으로 대체한 이유 (`explain.FALLBACK_REASONS`)
+    fallback_numbers: tuple[float, ...] = ()  # `number_invalid`일 때 계산에 없던 숫자
 
 
 def _minutes(seconds: int) -> int | float:
@@ -74,11 +76,14 @@ async def summarize_kpi(
 
     summary: str | None = None
     fallback = False
+    explained = None
     facts = _comparison_facts(output.incidents)
     notes = list(computed.notes)
     if facts is not None:
-        explanation = await explain("kpi", facts, llm)
-        summary, fallback = explanation.summary, explanation.fallback
+        explained = await explain("kpi", facts, llm)
+        summary, fallback = explained.summary, explained.fallback
+        if note := explained.note():
+            notes.append(note)
     elif output.incidents:
         notes.append("1차·2차 비교 확인할 수 없음: MTTR이 있는 사건 2건 미만")
     if not result.records:
@@ -100,4 +105,11 @@ async def summarize_kpi(
         collected_at=datetime.now(UTC),
         ref_ids=[i.context_id for i in output.incidents],
     )
-    return KpiResult(output=output, evidence=evidence, fallback=fallback, summary=summary)
+    return KpiResult(
+        output=output,
+        evidence=evidence,
+        fallback=fallback,
+        summary=summary,
+        fallback_reason=explained.reason if explained else None,
+        fallback_numbers=explained.bad_numbers if explained else (),
+    )

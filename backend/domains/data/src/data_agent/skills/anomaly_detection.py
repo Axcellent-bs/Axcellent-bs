@@ -44,6 +44,8 @@ class AnomalyResult:
     output: AnomalyDetectionOutput
     evidence: Evidence
     fallback: bool
+    fallback_reason: str | None = None  # 설명을 템플릿으로 대체한 이유 (`explain.FALLBACK_REASONS`)
+    fallback_numbers: tuple[float, ...] = ()  # `number_invalid`일 때 계산에 없던 숫자
 
 
 def get_metric_source(env: Mapping[str, str]) -> MetricSource:
@@ -96,6 +98,7 @@ async def detect_anomalies(
     any_anomaly = bool(abnormal)
     status = "anomaly" if abnormal else "unknown" if len(unknown) == len(judgements) else "normal"
     fallback = False
+    explained = None
     if any_anomaly:
         worst = min(abnormal, key=lambda j: j.p_value if j.p_value is not None else 1.0)
         explanation = await explain(
@@ -109,6 +112,7 @@ async def detect_anomalies(
             llm,
         )
         summary, fallback = explanation.summary, explanation.fallback
+        explained = explanation
     elif status == "unknown":
         reasons = sorted({j.note.removeprefix("확인할 수 없음: ") for j in unknown})
         summary = "확인할 수 없음: " + "; ".join(reasons)
@@ -136,6 +140,8 @@ async def detect_anomalies(
         f"{settings.fault_lambda_floor:g}건)"
         + ("" if judged.fault_codes_read else " (실패 코드를 읽지 못해 이 규칙은 쓰지 않음)"),
     ]
+    if explained is not None and (note := explained.note()):
+        lines.append(note)
     evidence = Evidence(
         queries=[
             f"metric_series metrics={','.join(needed)} "
@@ -145,7 +151,13 @@ async def detect_anomalies(
         data_summary="\n".join(lines),
         collected_at=datetime.now(UTC),
     )
-    return AnomalyResult(output=output, evidence=evidence, fallback=fallback)
+    return AnomalyResult(
+        output=output,
+        evidence=evidence,
+        fallback=fallback,
+        fallback_reason=explained.reason if explained else None,
+        fallback_numbers=explained.bad_numbers if explained else (),
+    )
 
 
 def env_settings(tenant_id: str | None, env: Mapping[str, str] = os.environ) -> Settings:

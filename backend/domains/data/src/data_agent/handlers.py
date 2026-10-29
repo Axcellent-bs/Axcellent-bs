@@ -57,6 +57,14 @@ def get_seller_client() -> SellerClient:
     return HttpSellerClient(shop_api(os.environ))
 
 
+def _fallback_reason(result: object) -> dict:
+    """설명을 템플릿으로 대체한 이유 (`AgentResult.fallback_reason`·`fallback_numbers`)."""
+    return {
+        "fallback_reason": getattr(result, "fallback_reason", None),
+        "fallback_numbers": list(getattr(result, "fallback_numbers", ())),
+    }
+
+
 def _result(request: AgentRequest, status: TaskStatus, **kwargs) -> AgentResult:
     return AgentResult(meta=request.meta, status=status, **kwargs)
 
@@ -111,6 +119,7 @@ async def impact_analysis(request: AgentRequest) -> AgentResult:
         output=result.output.model_dump(mode="json"),
         evidence=result.evidence,
         fallback=result.fallback,
+        **_fallback_reason(result),
     )
 
 
@@ -145,6 +154,7 @@ async def anomaly_detection(request: AgentRequest) -> AgentResult:
         output=result.output.model_dump(mode="json"),
         evidence=result.evidence,
         fallback=result.fallback,
+        **_fallback_reason(result),
     )
 
 
@@ -165,6 +175,7 @@ async def kpi_summary(request: AgentRequest) -> AgentResult:
         output=result.output.model_dump(mode="json"),
         evidence=result.evidence,
         fallback=result.fallback,
+        **_fallback_reason(result),
     )
 
 
@@ -182,6 +193,7 @@ async def root_cause_hypotheses(request: AgentRequest) -> AgentResult:
         output=result.output.model_dump(mode="json"),
         evidence=result.evidence,
         fallback=result.fallback,
+        **_fallback_reason(result),
     )
 
 

@@ -52,6 +52,13 @@ class LLMResponseError(RuntimeError):
     """다시 요청해도 응답이 스키마에 맞지 않거나 API가 오류를 돌려줬을 때."""
 
 
+class LLMFormatError(LLMResponseError):
+    """API는 답했지만 다시 요청해도 응답이 스키마에 맞지 않을 때 (`LLMResponseError`의 한 종류).
+
+    호출 실패(HTTP 오류·시간 초과)와 구분하려고 둔다. 기존처럼 `LLMResponseError`로 잡아도 된다.
+    """
+
+
 # Gemini가 읽는 이미지 형식(OpenAI 호환 엔드포인트의 base64 data URL).
 # 그 밖의 형식은 보내기 전에 거부한다.
 SUPPORTED_IMAGE_TYPES = frozenset(
@@ -303,7 +310,7 @@ class LLMClient:
                     continue
                 self.record_usage(context_id, model, input_tokens, output_tokens, True)
                 return result
-        raise LLMResponseError(f"{last_problem} — {attempts}번 요청했다")
+        raise LLMFormatError(f"{last_problem} — {attempts}번 요청했다")
 
     def record_usage(
         self,

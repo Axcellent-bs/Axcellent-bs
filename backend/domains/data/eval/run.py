@@ -366,6 +366,9 @@ async def run_case(case: dict[str, Any]) -> dict[str, Any]:
             else "확인할 수 없음" in anomaly.output.summary,
             "llm_used": anomaly.output.any_anomaly,
             "fallback": anomaly.fallback,
+            # 결과 파일 참고용 (지표에는 쓰지 않는다): 템플릿으로 대체한 이유와 걸린 숫자
+            "fallback_reason": anomaly.fallback_reason,
+            "fallback_numbers": list(anomaly.fallback_numbers),
             "fabricated": _fabricated(anomaly.output.summary, allowed)
             if anomaly.output.any_anomaly
             else False,
@@ -408,6 +411,8 @@ async def run_case(case: dict[str, Any]) -> dict[str, Any]:
                     "excess": _excess(want, getattr(got, EXCESS_FIELD, None)),
                     "declined_in_window": want["declined_payments"],
                     "fallback": impact.fallback,
+                    "fallback_reason": impact.fallback_reason,
+                    "fallback_numbers": list(impact.fallback_numbers),
                     "fabricated": _fabricated(got.summary, numbers),
                 }
 

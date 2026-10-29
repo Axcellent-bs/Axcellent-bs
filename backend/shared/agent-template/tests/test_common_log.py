@@ -83,6 +83,35 @@ def test_execution_id_is_copied_only_when_it_is_a_short_string(store, card, requ
     assert sent.payload["execution_id"] == "exe_9"
 
 
+def test_fallback_reason_is_copied_to_result_sent(store, card, request_body) -> None:
+    from ax_agent_template.server import create_agent_app
+    from ax_contracts.schemas import AgentResult, TaskStatus
+
+    async def replaced(request: AgentRequest) -> AgentResult:
+        return AgentResult(
+            meta=request.meta,
+            status=TaskStatus.COMPLETED,
+            output={"summary": "템플릿 문장"},
+            fallback=True,
+            fallback_reason="number_invalid",
+            fallback_numbers=[9876543.0],
+        )
+
+    app = create_agent_app(card, {"echo": replaced, "boom": replaced, "broken_output": replaced})
+    TestClient(app).post("/a2a", json=request_body())
+    sent = [r for r in _all(store) if r.kind == "result_sent"][0]
+    assert sent.payload["fallback"] is True
+    assert sent.payload["fallback_reason"] == "number_invalid"
+    assert sent.payload["fallback_numbers"] == [9876543.0]
+    assert "템플릿 문장" not in json.dumps(sent.payload, ensure_ascii=False)  # 문장은 남기지 않음
+
+
+def test_no_fallback_means_no_fallback_fields(store, app, request_body) -> None:
+    TestClient(app).post("/a2a", json=request_body())
+    sent = [r for r in _all(store) if r.kind == "result_sent"][0]
+    assert not {"fallback", "fallback_reason", "fallback_numbers"} & set(sent.payload)
+
+
 def test_a_failing_store_never_breaks_request_handling(app, request_body, caplog) -> None:
     class Broken:
         def write(self, record) -> None:
