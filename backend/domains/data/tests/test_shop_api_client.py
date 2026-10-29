@@ -277,7 +277,8 @@ async def test_anomaly_detection_reads_payment_fail_rate_from_shop_api() -> None
         "order_count",
     }
     # 장애 쪽 실패 확률 기준을 위해 실패 주문도 읽는다
-    # (구간 한 번 + 지난 7일 같은 시각 ±1시간을 하루씩)
+    # (구간 한 번 + 지난 7일 같은 시각 ±1시간을 하루씩. 하루치는 그 범위를 덮는 1시간 칸으로
+    # 읽는다(#129): 05:00~05:30 구간이면 04:00~06:30을 덮는 04:00~07:00)
     failed = [r for r in seen if r not in series]
     assert [r.url.path for r in failed] == ["/api/shop/failed-orders"] * 8
     ranges = [(r.url.params["from"], r.url.params["to"]) for r in failed]
@@ -286,7 +287,7 @@ async def test_anomaly_detection_reads_payment_fail_rate_from_shop_api() -> None
         shift = timedelta(days=day)
         assert (frm, to) == (
             shop_client._iso(W_FROM - shift - HOUR),
-            shop_client._iso(W_TO - shift + HOUR),
+            shop_client._iso(W_TO - shift + HOUR + timedelta(minutes=30)),
         )
 
 

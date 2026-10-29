@@ -6,11 +6,13 @@
 
 from __future__ import annotations
 
+import weakref
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol, runtime_checkable
 
 from ax_contracts.data_access.shop_failed_orders import FailedOrder
+from data_agent.clients.shop_client import FAILED_ORDERS_LIMIT
 from data_agent.metrics.anomaly import Agg
 from data_agent.metrics.judge import (
     BASELINE_DAYS,
@@ -96,21 +98,113 @@ async def _faults(
     return None if orders is None else fault_buckets(orders)
 
 
+# 지난 7일 실패 주문 캐시의 단위. 1시간 칸 단위로 읽어 두면, 5분마다 도는 감시가 같은 칸을
+# 다시 읽지 않는다 (칸 끝이 1시간을 넘어갈 때만 날마다 1칸씩 새로 읽는다)
+HISTORY_SLOT = timedelta(hours=1)
+
+
+class _HistoryCache:
+    """공급자 하나의 지난 날 실패 주문을 1시간 칸별로 들고 있는다.
+
+    읽은 칸은 [칸 시작, 칸 끝) 실패 주문 전부다(0건이면 빈 목록). λ는 판정 구간보다 최소
+    23시간 전 자료만 보므로, 이미 지난 시간의 실패 기록이 바뀌지 않는다고 보고 다시 읽지 않는다.
+    """
+
+    def __init__(self) -> None:
+        self.slots: dict[datetime, list[FailedOrder]] = {}
+
+    def prune(self, oldest: datetime) -> None:
+        for slot in [s for s in self.slots if s < oldest]:
+            del self.slots[slot]
+
+
+_history_caches: weakref.WeakKeyDictionary[object, _HistoryCache] = weakref.WeakKeyDictionary()
+
+
+def _cache_for(source: object) -> _HistoryCache | None:
+    try:
+        return _history_caches.setdefault(source, _HistoryCache())
+    except TypeError:  # weakref·hash가 안 되는 공급자(테스트 가짜 등): 캐시 없이 읽는다
+        return None
+
+
+def _floor_slot(ts: datetime) -> datetime:
+    return ts.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+
+
+def _slots(a: datetime, b: datetime) -> list[datetime]:
+    """[a, b)를 덮는 1시간 칸 시작 시각들."""
+    out, slot = [], _floor_slot(a)
+    while slot < b:
+        out.append(slot)
+        slot += HISTORY_SLOT
+    return out
+
+
+async def _read_slots(
+    source: FaultFailureSource, cache: _HistoryCache, needed: list[datetime]
+) -> bool | None:
+    """캐시에 없는 칸을 이어진 묶음마다 한 번씩 읽어 채운다.
+
+    하나라도 못 읽으면 False, 잘렸을 수 있으면(한도만큼 받음) 채우지 않고 None이다.
+    """
+    missing = [s for s in needed if s not in cache.slots]
+    runs: list[list[datetime]] = []
+    for slot in missing:
+        if runs and runs[-1][-1] + HISTORY_SLOT == slot:
+            runs[-1].append(slot)
+        else:
+            runs.append([slot])
+    for run in runs:
+        orders = await source.failed_orders(run[0], run[-1] + HISTORY_SLOT)
+        if orders is None:
+            return False
+        if len(orders) >= FAILED_ORDERS_LIMIT:  # 잘렸을 수 있어 캐시에 넣지 않는다
+            return None
+        filled: dict[datetime, list[FailedOrder]] = {slot: [] for slot in run}
+        for order in orders:
+            slot = _floor_slot(order.failed_at)
+            if slot in filled:
+                filled[slot].append(order)
+        cache.slots.update(filled)
+    return True
+
+
 async def _fault_history(
     source: MetricSource, window_from: datetime, window_to: datetime
 ) -> dict[datetime, float] | None:
     """지난 7일 같은 시각 ±1시간의 장애 쪽 실패 (평소 실패율 λ용). 하루라도 못 읽으면 None.
 
     7일을 한 번에 읽지 않고 날마다 필요한 범위만 읽는다(조회 건수 제한에 걸리지 않게).
+    같은 공급자로 다시 판정하면(주기 감시) 이미 읽은 1시간 칸은 다시 읽지 않는다(`_HistoryCache`).
+    날마다 [시작, 끝) 안 주문만 골라 세므로 결과는 캐시 없이 날마다 읽을 때와 같다.
     """
     if not isinstance(source, FaultFailureSource):
         return None
-    out: dict[datetime, float] = {}
+    cache = _cache_for(source)
+    ranges = []
     for day in range(1, BASELINE_DAYS + 1):
         shift = timedelta(days=day)
-        orders = await source.failed_orders(
-            window_from - shift - FAULT_LAMBDA_SPAN, window_to - shift + FAULT_LAMBDA_SPAN
+        ranges.append(
+            (window_from - shift - FAULT_LAMBDA_SPAN, window_to - shift + FAULT_LAMBDA_SPAN)
         )
+    if cache is not None:
+        cache.prune(_floor_slot(ranges[-1][0]) - timedelta(days=1))
+        out: dict[datetime, float] = {}
+        for a, b in ranges:
+            needed = _slots(a, b)
+            read = await _read_slots(source, cache, needed)
+            if read is False:
+                return None
+            if read is None:  # 잘렸을 수 있음: 이번에는 캐시 없이 날마다 읽는다
+                break
+            orders = [o for slot in needed for o in cache.slots[slot] if a <= o.failed_at < b]
+            out.update(fault_buckets(orders))
+        else:
+            return out
+    out = {}
+    for a, b in ranges:
+        orders = await source.failed_orders(a, b)
         if orders is None:
             return None
         out.update(fault_buckets(orders))
