@@ -99,8 +99,18 @@ execute params (safety #171 `thresholds.toml` 규칙 키, 모두 도메인 상�
 
 경고 무시 확정 (FR-SPEC-006): 인사 경고(`warn`)가 남은 문단을 둔 채 `confirmSpec`을 하면 "warn 무시 진행"을 세 곳에 남긴다. `execute(confirm_spec)` params `warn_ignored`, `record_case`(kind `spec_confirmed`) params의 `record_case.summary`·`source_refs`와 `warn_ignored`, 활동 로그(point `audit.warn_ignored`, hr로 가는 `record_case` 활동).
 
-오류 코드: `INVALID_ACTION`·`UNKNOWN_ACTION`·`MISSING_DECISION_REASON`(400), `SIMULATOR_DISABLED`(403), `NOT_FOUND`(404), `GATE_REJECTED`(409, 관문 거부로 실행 안 함).
+오류 코드: `INVALID_ACTION`·`UNKNOWN_ACTION`·`MISSING_DECISION_REASON`(400), `UNAUTHORIZED`(401), `SIMULATOR_DISABLED`·`FORBIDDEN`(403), `NOT_FOUND`(404), `GATE_REJECTED`(409, 관문 거부로 실행 안 함).
 사람 버튼(`confirmSpec`·`mergePr`·`approvePromotion`)은 REST로만 받고 A2A skill로는 열지 않는다.
+
+쓰기 토큰 (`auth.py`, 총괄 `ax_orchestrator/auth.py`와 같은 규칙): 모든 `POST`는 `Authorization: Bearer <토큰>`이 있어야 한다. 토큰이 없거나 모르는 토큰이면 401 `UNAUTHORIZED`, 다른 종류면 403 `FORBIDDEN`. 토큰 명부(`AX_AGENT_TOKENS`·`SAFETY_HUMAN_TOKENS`)가 비었고 목 모드도 아니면 다 거부한다. 목 모드(`AGENT_TEMPLATE_MOCK`·`PLANNING_MOCK`)에서만 `human:<이름>`(사람)·`mock:<이름>`(에이전트)를 받는다. `GET`·SSE `/events`는 열어 둔다.
+
+| 토큰 | 경로 |
+| --- | --- |
+| 사람 (`SAFETY_HUMAN_TOKENS`) | `/actions`(확정·머지·레포 승인·기각 등), `/requests/{id}/reject`, `/deployments/{id}/approve`·`/check`, `/dev-tasks/{id}/retry`·`/cancel`·`/revise` |
+| admin (에이전트 명부의 `admin`) | `/reset`, `/vcs`·`/vcs/test`·`/vcs/connections`·`/vcs/connections/{id}/delete`·`/test`, `/actions`의 자동 범위 바꾸기(`approvePromotion`·`rejectPromotion`) |
+| 사람 또는 에이전트 | `/dev-chat`, `POST /dev-tasks`, `POST /deployments`, `/actions`의 시뮬레이터 접수(`inbound`·`deptChat`) |
+
+형상관리 토큰 값은 어느 응답에도 넣지 않는다(`token_set`·끝 4자리 `token_hint`만). 화면은 사람 쓰기에 `VITE_SAFETY_HUMAN_TOKEN`, 초기화·형상관리 연결에 `VITE_SHOP_ADMIN_TOKEN`(admin)을 보낸다(`scripts/run_all.sh`가 `.data/web.env`에 넣음).
 
 화면 모델과 다른 점(화면 쪽 변환 함수가 맞춘다): 필드는 snake_case(`duplicateOf` → `duplicate_of`, `autoPolicy` → `auto_policy`, `ctx` → `context_id`), 시각은 UTC ISO8601(`t` → `at`, `updated` → `updated_at`, `mergedAt` → `merged_at`, 사건 `at` → `opened_at`), PR에 `number`·`merged_at`·`changed_paths`가 더 있다. `from` 키는 그대로다.
 

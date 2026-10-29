@@ -11,12 +11,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
 from planning_agent import vcs
 from planning_agent.api import create_api_router
+from planning_agent.auth import AuthError
 from planning_agent.handlers import HANDLERS
 from planning_agent.runtime import get_service
 
@@ -56,6 +59,17 @@ def _cors_origins() -> list[str]:
 vcs.load_saved()
 app = create_agent_app(load_card(), HANDLERS)
 app.include_router(create_api_router(get_service))
+
+
+@app.exception_handler(AuthError)
+async def _auth_error(_: Request, exc: AuthError) -> JSONResponse:
+    # 쓰기 토큰 거부도 화면이 읽는 `{error: {code, message}}` 모양으로 준다
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"code": exc.code, "message": exc.detail}},
+    )
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),

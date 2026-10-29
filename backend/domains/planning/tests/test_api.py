@@ -123,7 +123,13 @@ def test_not_found_and_bad_json_envelopes(client) -> None:
 def test_simulator_actions_need_mock_mode(client, monkeypatch) -> None:
     for key in ("AGENT_TEMPLATE_MOCK", "PLANNING_MOCK"):
         monkeypatch.delenv(key, raising=False)
-    res = client.post(f"{BASE}/actions", json={"type": "inbound", "kind": "support_ticket"})
+    # 실제 모드에서는 목 토큰을 안 받으니 설정한 사람 토큰을 쓴다
+    monkeypatch.setenv("SAFETY_HUMAN_TOKENS", "operator:human-test-token")
+    res = client.post(
+        f"{BASE}/actions",
+        json={"type": "inbound", "kind": "support_ticket"},
+        headers={"Authorization": "Bearer human-test-token"},
+    )
     assert (res.status_code, res.json()["error"]["code"]) == (403, "SIMULATOR_DISABLED")
 
 
