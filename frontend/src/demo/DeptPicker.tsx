@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 // 부서 고르기. 목록에 없으면 "직접 입력"으로 적는다. 회원가입·회원 연결·받은 요청 보내기가 같이 쓴다.
-export const DEPTS = ['기획팀', '개발팀', '고객지원팀', '재무팀', '마케팅팀', '인사팀', '데이터분석팀', '인프라팀']
+export const DEPTS = ['기획팀', '개발팀', '고객지원팀', '재무팀', '마케팅팀', '인사팀', '데이터분석팀', '인프라팀', '경영지원팀']
 const CUSTOM = '__custom'
 
 export function DeptPicker({ value, onChange, className = '', label = '부서', size = 'md' }: {
