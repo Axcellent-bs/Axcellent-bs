@@ -5,6 +5,9 @@
   (`confirm_spec`처럼 snake_case도 받는다). 사람 버튼(확정·머지·승급 승인)은 여기로만 받는다.
 - `GET /events`는 SSE(`text/event-stream`). 연결하면 현재 상태를 한 번 보내고, 상태가 바뀔 때마다
   `event: state` + 전체 상태 JSON을 보낸다. 15초마다 주석 줄로 연결을 유지한다.
+- 쓰기(`POST`)는 `Authorization: Bearer <토큰>`이 있어야 한다 (auth.py).
+  사람 결정은 사람 토큰, 초기화·형상관리 연결·자동 범위는 admin 토큰,
+  요청 접수·대화는 사람이나 에이전트 토큰. 읽기·SSE는 열어 둔다.
 """
 
 from __future__ import annotations
@@ -14,17 +17,32 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from planning_agent import coder, dev_chat, vcs
+from planning_agent.auth import (
+    check_admin,
+    check_caller,
+    check_human,
+    require_admin,
+    require_caller,
+    require_human,
+)
 from planning_agent.deploy_store import get_deploy_store
 from planning_agent.domain.deploy import DeployError
 from planning_agent.domain.metrics import compute_metrics
 from planning_agent.domain.models import dump
 from planning_agent.domain.projects import project_detail, project_summary, sorted_projects
 from planning_agent.domain.rules import AUTO_LEVELS, PROMOTE_AFTER, auto_limit
-from planning_agent.domain.service import TEAM_LEAD, ActionError, GateRefused, PlanningService
+from planning_agent.domain.service import (
+    SIMULATOR_ACTIONS,
+    TEAM_LEAD,
+    ActionError,
+    GateRefused,
+    PlanningService,
+    action_name,
+)
 from planning_agent.domain.trace import code_of, trace_of, trace_text
 
 KEEPALIVE_SECONDS = 15.0
@@ -38,6 +56,26 @@ CODING_CONFLICT = {
     "WRONG_ROLE",
 }
 MAX_CHATS_LISTED = 20
+
+# 쓰기 토큰 종류 (auth.py). 라우트마다 `dependencies=`로 건다
+HUMAN = [Depends(require_human)]
+ADMIN = [Depends(require_admin)]
+CALLER = [Depends(require_caller)]
+# `POST /actions`는 액션 종류로 고른다: 자동 범위 바꾸기는 admin, 시뮬레이터 접수는 사람·에이전트,
+# 나머지(확정·머지·레포 승인·기각 등)는 사람
+ADMIN_ACTIONS = frozenset({"approve_promotion", "reject_promotion"})
+INTAKE_ACTIONS = frozenset(SIMULATOR_ACTIONS)
+
+
+def _check_action(body: Any, authorization: str | None) -> None:
+    raw = body.get("type") if isinstance(body, dict) else None
+    name = action_name(raw) if isinstance(raw, str) else ""
+    if name in ADMIN_ACTIONS:
+        check_admin(authorization)
+    elif name in INTAKE_ACTIONS:
+        check_caller(authorization)
+    else:
+        check_human(authorization)
 
 
 def _ok(data: Any, svc: PlanningService, **meta: Any) -> dict:
@@ -193,12 +231,16 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
         )
 
     @router.post("/actions", response_model=None)
-    async def post_action(request: Request) -> dict | JSONResponse:
+    async def post_action(
+        request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
         svc = get_service()
         try:
             body = await request.json()
         except ValueError:
+            check_human(authorization)
             return _err(400, "INVALID_ACTION", "JSON이 아니다")
+        _check_action(body, authorization)
         try:
             result = await svc.dispatch(body)
         except ActionError as exc:
@@ -218,7 +260,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             result=result.output,
         )
 
-    @router.post("/requests/{request_id}/reject", response_model=None)
+    @router.post("/requests/{request_id}/reject", response_model=None, dependencies=HUMAN)
     async def post_reject_request(request_id: str, request: Request) -> dict | JSONResponse:
         """개선 초안 기각. 본문 `{decision_reason, alternatives_considered}` 둘 다 필수.
 
@@ -259,7 +301,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
         return _ok(vcs.describe(), get_service())
 
     # CORS가 GET·POST만 열려 있어서 저장도 POST로 받는다
-    @router.post("/vcs")
+    @router.post("/vcs", dependencies=ADMIN)
     async def put_vcs_config(request: Request) -> Any:
         body = await request.json()
         if not isinstance(body, dict):
@@ -276,7 +318,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             return _err(400, "INVALID_VCS", exc.message)
         return _ok(vcs.describe(), get_service())
 
-    @router.post("/vcs/test")
+    @router.post("/vcs/test", dependencies=ADMIN)
     async def post_vcs_test() -> dict:
         """연결 확인: 최근 하루 병합 목록을 읽어 본다 (쓰기 없음)."""
         from datetime import UTC, datetime, timedelta
@@ -300,7 +342,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
     def list_vcs_connections() -> dict:
         return _connections()
 
-    @router.post("/vcs/connections", response_model=None)
+    @router.post("/vcs/connections", response_model=None, dependencies=ADMIN)
     async def post_vcs_connection(request: Request) -> dict | JSONResponse:
         """연결 넣기·바꾸기. id가 없으면 새 연결(`conn-n`), 토큰을 비우면 그 연결의 토큰을 둔다."""
         body = await _body(request)
@@ -340,7 +382,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             return _err(400, "INVALID_VCS", exc.message)
         return _connections()
 
-    @router.post("/vcs/connections/{connection_id}/delete", response_model=None)
+    @router.post("/vcs/connections/{connection_id}/delete", response_model=None, dependencies=ADMIN)
     def post_vcs_connection_delete(connection_id: str) -> dict | JSONResponse:
         try:
             removed = vcs.delete_connection(connection_id)
@@ -350,7 +392,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             return _err(404, "NOT_FOUND", f"연결 {connection_id}가 없다")
         return _connections()
 
-    @router.post("/vcs/connections/{connection_id}/test", response_model=None)
+    @router.post("/vcs/connections/{connection_id}/test", response_model=None, dependencies=ADMIN)
     async def post_vcs_connection_test(connection_id: str) -> dict | JSONResponse:
         """연결 하나 확인: 최근 하루 병합 목록을 읽어 본다 (쓰기 없음)."""
         from datetime import UTC, datetime, timedelta
@@ -367,7 +409,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             result.update(ok=False, code=exc.code, message=exc.message)
         return _ok(result, get_service())
 
-    @router.post("/reset")
+    @router.post("/reset", dependencies=ADMIN)
     def post_reset() -> dict:
         svc = get_service()
         svc.reset()
@@ -453,7 +495,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             return _err(404, "NOT_FOUND", f"배포 {dep_id}가 없다")
         return _ok(_deploy_row(dep_id, history=True), svc)
 
-    @router.post("/deployments", response_model=None)
+    @router.post("/deployments", response_model=None, dependencies=CALLER)
     async def post_deployment(request: Request) -> dict | JSONResponse:
         """배포 요청 `{pr_numbers: [28], env: "dev"|"prod"}`. prod·보호 경로면 `requested`."""
         svc = get_service()
@@ -478,7 +520,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             return _gate_err(exc)
         return _ok(_deploy_row(dep.id), svc, needs_approval=dep.status == "requested")
 
-    @router.post("/deployments/{dep_id}/approve", response_model=None)
+    @router.post("/deployments/{dep_id}/approve", response_model=None, dependencies=HUMAN)
     async def post_approve_deployment(dep_id: str, request: Request) -> dict | JSONResponse:
         """사람 승인 버튼. 본문 `{approved_by}`는 없어도 된다 (목: 팀장)."""
         svc = get_service()
@@ -493,7 +535,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             return _gate_err(exc)
         return _ok(_deploy_row(dep.id), svc)
 
-    @router.post("/deployments/{dep_id}/check", response_model=None)
+    @router.post("/deployments/{dep_id}/check", response_model=None, dependencies=HUMAN)
     async def post_deployment_check(dep_id: str, request: Request) -> dict | JSONResponse:
         """배포 후 확인 (read). 본문 `{window_minutes}`는 없어도 된다 (기본 30분)."""
         svc = get_service()
@@ -513,7 +555,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
         status = 409 if exc.code in CODING_CONFLICT else 404 if exc.code == "NOT_FOUND" else 400
         return _err(status, exc.code, exc.message)
 
-    @router.post("/dev-tasks", response_model=None)
+    @router.post("/dev-tasks", response_model=None, dependencies=CALLER)
     async def post_dev_task(request: Request) -> dict | JSONResponse:
         """`{title, plan, done?, paths?, connection?}` → `{request_id, spec_id, task_id, status}`.
 
@@ -550,7 +592,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             return _gate_err(exc)
         return _ok(result.output, svc)
 
-    @router.post("/dev-tasks/{task_id}/retry", response_model=None)
+    @router.post("/dev-tasks/{task_id}/retry", response_model=None, dependencies=HUMAN)
     async def post_dev_task_retry(task_id: str, request: Request) -> dict | JSONResponse:
         """실패·사람 확인으로 멈춘 코딩 작업 다시 돌리기. 본문 `{connection?}`은 없어도 된다."""
         svc = get_service()
@@ -566,7 +608,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             return _gate_err(exc)
         return _ok(result.output, svc)
 
-    @router.post("/dev-tasks/{task_id}/cancel", response_model=None)
+    @router.post("/dev-tasks/{task_id}/cancel", response_model=None, dependencies=HUMAN)
     async def post_dev_task_cancel(task_id: str) -> dict | JSONResponse:
         """코딩 작업 중단. 열린 PR은 닫고 브랜치를 지운다 (머지된 것은 되돌리지 않는다)."""
         svc = get_service()
@@ -578,7 +620,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             return _gate_err(exc)
         return _ok(result.output, svc)
 
-    @router.post("/dev-tasks/{task_id}/revise", response_model=None)
+    @router.post("/dev-tasks/{task_id}/revise", response_model=None, dependencies=HUMAN)
     async def post_dev_task_revise(task_id: str, request: Request) -> dict | JSONResponse:
         """사람 확인을 기다리는 코딩 PR에 수정 지시 `{note}`. 개발 AI가 고쳐 같은 PR에 커밋한다."""
         svc = get_service()
@@ -614,7 +656,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             return _err(404, "NOT_FOUND", f"대화 {thread_id}가 없다")
         return _ok(dump(th), svc)
 
-    @router.post("/dev-chat", response_model=None)
+    @router.post("/dev-chat", response_model=None, dependencies=CALLER)
     async def post_dev_chat(request: Request) -> dict | JSONResponse:
         """`{thread_id?, message, connection?}` → 바뀐 대화. AI 답 하나까지 기다린다."""
         svc = get_service()

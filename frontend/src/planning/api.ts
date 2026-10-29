@@ -1,6 +1,7 @@
 // 기획개발 백엔드(planning 에이전트, 8101) REST·SSE와 화면 상태(State)를 잇는다.
 // 백엔드는 snake_case·ISO 시각, 화면은 camelCase·KST "MM-DD HH:mm"이라 여기서 한 번만 바꾼다.
 // 백엔드에 없는 값(학습 기준·감사 목록)은 빈 값으로 두고 지어내지 않는다.
+import { RELAY_TOKEN, SAFETY_HUMAN_TOKEN } from '@/lib/env'
 import type { Action, Activity, AuditItem, ChatThread, CrossReview, Doc, Incident, OutMsg, PR, Request, State, Thread } from './data'
 
 export const PLANNING_API = (import.meta.env.VITE_PLANNING_API_URL as string | undefined) ?? 'http://localhost:8101'
@@ -149,10 +150,21 @@ async function call<T>(base: string, path: string, init?: RequestInit): Promise<
   return (body as { data: T }).data
 }
 
+// 쓰기 토큰 (백엔드 auth.py): 사람 결정·요청 접수·대화는 사람 토큰, 초기화·형상관리 연결은 운영자(admin) 토큰
+type Who = 'human' | 'admin'
+const post = (body: unknown = {}, who: Who = 'human'): RequestInit => {
+  const token = who === 'admin' ? RELAY_TOKEN : SAFETY_HUMAN_TOKEN
+  return {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+  }
+}
+
 export const planningApi = (base: string) => ({
   state: () => call<Json>(base, '/state'),
   reviewQueue: () => call<QueueItem[]>(base, '/review-queue'),
-  action: (a: Action) => call<Json>(base, '/actions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a) }),
+  action: (a: Action) => call<Json>(base, '/actions', post(a)),
   eventsUrl: () => `${base}/api/planning/events`,
 })
 
@@ -167,8 +179,8 @@ export interface Deployment {
 
 export const deployApi = (base: string) => ({
   list: () => call<unknown>(base, '/deployments').then((d) => (Array.isArray(d) ? (d as Deployment[]).filter((x) => x && typeof x.id === 'string') : [])),
-  approve: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
-  check: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/check`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+  approve: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/approve`, post()),
+  check: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/check`, post()),
 })
 
 // ---- 형상관리 연결 목록 (dev 서비스 `/api/planning/vcs/connections`). 레포 여러 개를 잇고 PR마다 대상 레포를 고른다
@@ -182,7 +194,6 @@ export interface VcsTestResult { ok: boolean; code: string | null; message: stri
 // 녹화 데모(목)는 모르는 주소에 빈 배열·{ok:true}를 준다. 연결 모양이 아닌 값은 버린다
 const toConnections = (d: unknown): VcsConnection[] =>
   Array.isArray(d) ? (d as VcsConnection[]).filter((c) => c && typeof c.id === 'string' && typeof c.repo === 'string').map((c) => ({ ...c, paths: Array.isArray(c.paths) ? c.paths : [] })) : []
-const post = (body: unknown = {}): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 
 export const vcsApi = (base: string) => {
   const list = () => call<unknown>(base, '/vcs/connections').then(toConnections)
@@ -190,9 +201,9 @@ export const vcsApi = (base: string) => {
   const after = (d: unknown) => (Array.isArray(d) ? toConnections(d) : list())
   return {
     list,
-    save: (c: VcsConnectionInput) => call<unknown>(base, '/vcs/connections', post(c)).then(after),
-    remove: (id: string) => call<unknown>(base, `/vcs/connections/${encodeURIComponent(id)}/delete`, post()).then(after),
-    test: (id: string) => call<VcsTestResult>(base, `/vcs/connections/${encodeURIComponent(id)}/test`, post()),
+    save: (c: VcsConnectionInput) => call<unknown>(base, '/vcs/connections', post(c, 'admin')).then(after),
+    remove: (id: string) => call<unknown>(base, `/vcs/connections/${encodeURIComponent(id)}/delete`, post({}, 'admin')).then(after),
+    test: (id: string) => call<VcsTestResult>(base, `/vcs/connections/${encodeURIComponent(id)}/test`, post({}, 'admin')),
   }
 }
 

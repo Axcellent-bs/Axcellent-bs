@@ -1,4 +1,4 @@
-"""planning 테스트 공용 설정: 목 모드 고정, 테스트마다 새 상태 저장소, A2A 요청 만들기."""
+"""planning 테스트 공용 설정: 목 모드 고정, 새 상태 저장소, A2A 요청 만들기, 목 쓰기 토큰."""
 
 from __future__ import annotations
 
@@ -6,10 +6,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 
 from ax_agent_template import config
 from ax_agent_template.testing import reset_state  # noqa: F401  autouse, 템플릿 상태 초기화
-from planning_agent.domain.service import PlanningService
+from planning_agent.api import ADMIN_ACTIONS
+from planning_agent.domain.service import PlanningService, action_name
 from planning_agent.runtime import set_service
 
 
@@ -47,6 +49,40 @@ def _a2a_body(
         "input": payload,
         "untrusted": untrusted or {},
     }
+
+
+MOCK_HUMAN = "Bearer human:tester"
+MOCK_ADMIN = "Bearer mock:admin"
+ADMIN_PATHS = ("/api/planning/reset", "/api/planning/vcs")
+
+
+def _mock_token(url: Any, json: Any) -> str:
+    path = str(url)
+    if any(p in path for p in ADMIN_PATHS):
+        return MOCK_ADMIN
+    kind = json.get("type") if isinstance(json, dict) else None
+    if isinstance(kind, str) and action_name(kind) in ADMIN_ACTIONS:
+        return MOCK_ADMIN
+    return MOCK_HUMAN
+
+
+@pytest.fixture(autouse=True)
+def mock_write_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    """쓰기 API 토큰(auth.py). Authorization을 안 넣은 요청에 목 토큰을 붙인다.
+
+    admin 자리(초기화·형상관리·자동 범위)는 `mock:admin`, 나머지는 사람 `human:tester`.
+    토큰 규칙 자체는 test_write_auth.py가 Authorization을 직접 넣어 본다.
+    """
+    original = TestClient.request
+
+    def request(self: TestClient, method: str, url: Any, *args: Any, **kwargs: Any) -> Any:
+        headers = dict(kwargs.get("headers") or {})
+        if method.upper() == "POST" and not any(k.lower() == "authorization" for k in headers):
+            headers["Authorization"] = _mock_token(url, kwargs.get("json"))
+            kwargs["headers"] = headers
+        return original(self, method, url, *args, **kwargs)
+
+    monkeypatch.setattr(TestClient, "request", request)
 
 
 @pytest.fixture
