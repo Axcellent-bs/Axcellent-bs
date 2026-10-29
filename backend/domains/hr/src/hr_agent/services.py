@@ -17,6 +17,7 @@ from hr_agent.clients.planning import MockPlanningClient, PlanningClient
 from hr_agent.clients.safety import GateClient, MockGate, TemplateGate
 from hr_agent.config import Clock, HrSettings, system_clock
 from hr_agent.narrative import Narrator
+from hr_agent.retrieval.cards import DenseCardSearch, build_dense_search
 from hr_agent.store import Store
 from hr_agent.util import dumps, loads
 
@@ -50,6 +51,7 @@ class Services:
     narrator: Narrator
     audit: AuditLog
     idem: IdempotencyStore
+    dense: DenseCardSearch | None = None  # None이면 계획 비교는 Dice로 찾는다
     extras: dict[str, Any] = field(default_factory=dict)
 
 
@@ -58,6 +60,7 @@ def build_services(
     *,
     clock: Clock | None = None,
     llm: LLMClient | None = None,
+    dense: DenseCardSearch | None = None,
     seed: bool = True,
 ) -> Services:
     """설정에 맞는 부품을 만든다. 목 모드면 목 클라이언트와 가상 시드 데이터를 쓴다."""
@@ -74,6 +77,8 @@ def build_services(
         from hr_agent.clients.real import A2APlanningClient
 
         planning = A2APlanningClient()
+    if dense is None and settings.dense_search and not settings.mock:
+        dense = build_dense_search(settings.db_path)
     gate: GateClient
     if settings.mock:
         gate = MockGate(store, clock, hold_ttl_minutes=settings.hold_ttl_minutes)
@@ -89,6 +94,7 @@ def build_services(
         narrator=Narrator(llm),
         audit=AuditLog(store, clock),
         idem=IdempotencyStore(store, clock),
+        dense=dense,
     )
     from hr_agent.handover.service import register_verifiers
 

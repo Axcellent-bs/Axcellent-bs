@@ -230,6 +230,8 @@ class PlanFinding(AxModel):
     level: Literal["info", "warn"]
     message: str
     card_ids: list[str] = Field(default_factory=list)  # 근거 카드
+    # LLM이 쓴 설명(참고용). 판정에는 쓰지 않고, 검증에 실패하면 비운다
+    explanation: str | None = None
 
 
 class SimilarCard(AxModel):

@@ -6,10 +6,15 @@
 - `MATCH`(info): 채택된 카드와 같은 방향이다.
 - 관련 카드가 없으면 판정하지 않고 `no_related_cards`로 "기록에 없음"을 알린다.
 후보(확신도 낮은) 카드는 참고 목록에만 넣고 판정 근거로 쓰지 않는다.
+
+관련 카드는 임베딩(Dense)으로 찾고, 설정이 없거나 호출이 실패하면 글자 2-gram(Dice)으로 대체한다.
+경고마다 LLM 설명을 붙일 수 있다(`explanation`). 설명은 참고용이고 판정에는 쓰지 않으며,
+숫자가 계산값과 다르거나 호출이 실패하면 비운다.
 """
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 from pydantic import ValidationError
@@ -63,6 +68,86 @@ def _conflicting_alternative(card: Card, draft_text: str) -> str | None:
     return None
 
 
+EXPLAIN_LIMIT = 3  # 경고 설명을 LLM에 맡기는 최대 개수(호출 수와 지연을 묶는다)
+EXPLAIN_PURPOSE = (
+    "이 판정이 새 계획과 어떤 관계인지를 근거 카드의 결정과 이유로 풀어 쓴 설명 문장. "
+    "진행·중단 같은 권고나 판단, 판정 코드 이름은 쓰지 않는다"
+)
+# 설명이 판단을 대신하면 버린다(판정은 코드가 한다). 완벽한 검사는 아니고 흔한 표현만 거른다
+JUDGING_PHRASES = (
+    "진행해도",
+    "추진해도",
+    "해도 된다",
+    "해도 됩니다",
+    "하면 된다",
+    "하면 됩니다",
+    "그대로 진행",
+    "따르면",
+    "어렵다",
+    "어렵습니다",
+    "MATCH",
+    "CONFLICT",
+    "REJECTED_BEFORE",
+)
+
+
+async def _dense_hits(svc: Services, draft_text: str, area: str) -> list[CardHit] | None:
+    """임베딩으로 관련 카드를 찾는다. 쓸 수 없거나 실패하면 None이고 호출한 쪽이 Dice로 대체한다."""
+    if svc.dense is None:
+        return None
+    try:
+        cards = await svc.memory.list_cards(area=area, states=["active", "candidate"])
+        found = await svc.dense.search(
+            draft_text, cards, k=5, min_cosine=svc.settings.dense_min_cosine
+        )
+    except Exception:  # noqa: BLE001 - 임베딩 실패가 계획 점검을 막지 않게 한다
+        return None
+    return [CardHit(card, score) for card, score in found]
+
+
+async def _explain(
+    svc: Services,
+    draft_title: str,
+    draft_summary: str,
+    findings: list[PlanFinding],
+    hits: list[CardHit],
+) -> list[PlanFinding]:
+    """경고마다 LLM 설명 문장을 붙인다. 사실은 코드가 정하고 LLM은 문장만 쓴다."""
+    if not svc.narrator.enabled or not findings:
+        return findings
+    cards = {h.card.card_id: h.card for h in hits}
+    now = svc.clock()
+
+    async def one(finding: PlanFinding) -> PlanFinding:
+        card = cards.get(finding.card_ids[0]) if finding.card_ids else None
+        if card is None:
+            return finding
+        facts: dict[str, object] = {
+            "판정": finding.code,
+            "계획 제목": draft_title,
+            "근거 카드 제목": card.title,
+            "근거 카드 결정": str(card.extra.get("decision") or ""),
+            "근거 카드 이유": str(card.extra.get("reason") or ""),
+            "고정 문장": finding.message,
+        }
+        if finding.code == "REJECTED_BEFORE":
+            days = max(0, (now.astimezone(UTC).date() - _decided_at(card).date()).days)
+            facts["기각 후 경과 일수"] = days
+        sentence = await svc.narrator.sentence(
+            EXPLAIN_PURPOSE,
+            facts,
+            finding.message,
+            untrusted={"계획 요약": draft_summary},
+        )
+        if sentence.fallback or any(p in sentence.text for p in JUDGING_PHRASES):
+            return finding
+        return finding.model_copy(update={"explanation": sentence.text})
+
+    head = list(findings[:EXPLAIN_LIMIT])
+    explained = await asyncio.gather(*(one(f) for f in head))
+    return [*explained, *findings[EXPLAIN_LIMIT:]]
+
+
 async def check_plan(svc: Services, request: AgentRequest) -> AgentResult:
     try:
         params = CheckPlanInput.model_validate(request.input)
@@ -76,14 +161,20 @@ async def check_plan(svc: Services, request: AgentRequest) -> AgentResult:
 
     now = svc.clock()
     draft_text = f"{draft.title} {draft.summary}"
-    found = await svc.memory.search_cards(
-        draft_text, area=draft.area, states=["active", "candidate"], limit=500
-    )
-    rescored = [CardHit(h.card, _score(h.card, draft_text)) for h in found]
-    hits: list[CardHit] = sorted(
-        (h for h in rescored if h.score >= svc.settings.similarity_threshold),
-        key=lambda h: (-h.score, h.card.card_id),
-    )[:5]
+    dense_hits = await _dense_hits(svc, draft_text, draft.area)
+    if dense_hits is not None:
+        hits: list[CardHit] = dense_hits
+        match_score, method = svc.settings.dense_match_cosine, "dense"
+    else:
+        found = await svc.memory.search_cards(
+            draft_text, area=draft.area, states=["active", "candidate"], limit=500
+        )
+        rescored = [CardHit(h.card, _score(h.card, draft_text)) for h in found]
+        hits = sorted(
+            (h for h in rescored if h.score >= svc.settings.similarity_threshold),
+            key=lambda h: (-h.score, h.card.card_id),
+        )[:5]
+        match_score, method = MATCH_SCORE, "dice"
     similar = [
         SimilarCard(card_id=h.card.card_id, summary=h.card.title, status=card_state(h.card))
         for h in hits
@@ -123,7 +214,7 @@ async def check_plan(svc: Services, request: AgentRequest) -> AgentResult:
                     card_ids=[card.card_id],
                 )
             )
-        elif hit.score >= MATCH_SCORE:
+        elif hit.score >= match_score:
             findings.append(
                 PlanFinding(
                     code="MATCH",
@@ -133,6 +224,7 @@ async def check_plan(svc: Services, request: AgentRequest) -> AgentResult:
                 )
             )
 
+    findings = await _explain(svc, draft.title, draft.summary, findings, hits)
     verdict = "warn" if any(f.level == "warn" for f in findings) else "ok"
     output = CheckPlanOutput(
         verdict=verdict,
@@ -150,7 +242,13 @@ async def check_plan(svc: Services, request: AgentRequest) -> AgentResult:
     svc.audit.record(
         request.meta.context_id,
         "check_plan",
-        {"area": draft.area, "verdict": verdict, "findings": [f.code for f in findings]},
+        {
+            "area": draft.area,
+            "verdict": verdict,
+            "findings": [f.code for f in findings],
+            "method": method,
+            "explained": sum(1 for f in findings if f.explanation),
+        },
     )
     return completed(
         request,

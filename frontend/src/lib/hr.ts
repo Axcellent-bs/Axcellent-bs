@@ -54,7 +54,11 @@ export interface HrCard {
 export interface RosterEntry { area: string; role: "owner" | "backup"; member_id: string; shift_start: string | null; shift_end: string | null }
 export interface Roster { entries: RosterEntry[]; gap_areas: string[]; collected_at: string }
 export interface AuditEntry { seq: number; at: string; kind: string; payload: Record<string, unknown> }
-export interface PlanFinding { code: string; level: string; message: string; card_ids: string[] }
+export interface PlanFinding {
+  code: string; level: string; message: string; card_ids: string[];
+  /** LLM이 쓴 설명(참고용). 판정에는 쓰이지 않고, 검증에 실패하면 없다 */
+  explanation?: string | null;
+}
 export interface PlanCheck {
   verdict: "ok" | "warn" | "block" | string;
   findings: PlanFinding[];

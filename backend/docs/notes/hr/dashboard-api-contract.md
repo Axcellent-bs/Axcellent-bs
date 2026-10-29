@@ -37,7 +37,7 @@
 | `POST /handover-questions/{id}/answer` | `{"answer": "…", "idempotency_key": "…"}` | 계약 `HandoverAnswerRequest`. `answer`는 비어 있으면 안 된다. 같은 답을 다시 보내면 한 번만 반영되고, **다른 답**을 다시 보내면 409 `CONFLICT` |
 | `POST /onboardings/{id}/steps/{step_id}` | `{"done": true}` | `false`면 완료 취소. 이미 그 상태면 그대로 성공(`outcome=duplicate`) |
 | `POST /candidate-cards/{id}/decision` | `{"decision": "approve"\|"reject", "note": "…"}` | 이미 반영된 같은 결정은 성공, 반대 결정은 409 `NOT_CANDIDATE` |
-| `POST /plan-checks` | `{"draft": {"title","summary","area","kind"}}` | `kind`는 `spec`·`ticket`·`deploy_plan` |
+| `POST /plan-checks` | `{"draft": {"title","summary","area","kind"}}` | `kind`는 `spec`·`ticket`·`deploy_plan`. 응답의 `findings[].explanation`은 LLM이 쓴 참고용 설명이고, 판정에는 쓰이지 않으며 검증에 실패하거나 LLM이 없으면 `null` |
 
 경로의 `{...}`는 hr skill 입력의 대응 필드로 옮긴다(`question_id`, `onboarding_id`+`step_id`, `card_id`).
 

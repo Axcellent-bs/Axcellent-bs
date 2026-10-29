@@ -32,6 +32,9 @@
 | `HR_TIMER` | 꺼짐 | `1`이면 곧 끝나는 교대의 인수인계를 자동 시작 |
 | `HR_PLANNING_MODE` | mock | `a2a`면 planning을 A2A로 부름 |
 | `HR_MEMORY_MODE` | mock | `http`면 memory를 REST로 부름 (`HR_MEMORY_URL`) |
+| `HR_DENSE_SEARCH` | 켬 | 계획 비교의 관련 카드를 임베딩(Dense)으로 찾는다. `0`이면 끄고 Dice만 쓴다. 임베딩 설정(`MEMORY_LLM_*`·`MEMORY_EMBED_MODEL` 또는 `LLM_*`·`EMBED_MODEL`)이 없거나 호출이 실패해도 Dice로 대체한다 |
+| `HR_DENSE_MIN_COSINE` | 0.71 | Dense에서 관련 카드로 보는 코사인 하한(임베딩 모델을 바꾸면 골든 셋으로 다시 정한다) |
+| `HR_DENSE_MATCH_COSINE` | 0.72 | 확정된 결정과 같은 방향(MATCH)으로 보는 코사인 |
 | `HR_DEMO_PORT` | 8114 | 데모 포트 |
 
 ## 4. 등급표 (신고 초안, 레지스트리 반영은 태윤 PR)
