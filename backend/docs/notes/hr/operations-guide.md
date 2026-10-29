@@ -35,6 +35,9 @@
 | `HR_DENSE_SEARCH` | 켬 | 계획 비교의 관련 카드를 임베딩(Dense)으로 찾는다. `0`이면 끄고 Dice만 쓴다. 임베딩 설정(`MEMORY_LLM_*`·`MEMORY_EMBED_MODEL` 또는 `LLM_*`·`EMBED_MODEL`)이 없거나 호출이 실패해도 Dice로 대체한다 |
 | `HR_DENSE_MIN_COSINE` | 0.71 | Dense에서 관련 카드로 보는 코사인 하한(임베딩 모델을 바꾸면 골든 셋으로 다시 정한다) |
 | `HR_DENSE_MATCH_COSINE` | 0.72 | 확정된 결정과 같은 방향(MATCH)으로 보는 코사인 |
+| `HR_DENSE_VERIFY` | 꺼짐 | `1`이면 Dense가 찾은 후보를 LLM이 "관련 있음/없음"으로 한 번 더 거른다(질의마다 Claude 호출 1회). LLM 설정이 없거나 판정이 실패하면 거르지 않는다 |
+| `HR_DENSE_CUT` | 0.05 | 검증을 켰을 때 1위 코사인보다 이만큼 넘게 낮은 후보는 뺀다 |
+| `HR_LLM_MODEL`·`HR_LLM_BASE_URL`·`HR_LLM_API_KEY` | 없음(공통 `LLM_*` 사용) | 실제 모드에서 이 값(또는 `LLM_*`)이 있으면 hr이 문장 생성과 검증에 LLM을 쓴다. 없으면 규칙 기반 문장만 쓴다 |
 | `HR_DEMO_PORT` | 8114 | 데모 포트 |
 
 ## 4. 등급표 (신고 초안, 레지스트리 반영은 태윤 PR)

@@ -194,3 +194,84 @@ def test_without_llm_there_is_no_explanation(make) -> None:
     svc, client = make(embedder=MockEmbedder(), dense_min_cosine=0.2)
     _record(client, 1, REJECTED)
     assert _check(client, *CACHE).findings[0].explanation is None
+
+
+class FakeVerifier:
+    """후보 id별 판정을 정해진 대로 돌려주거나(None이면 실패) 호출을 센다."""
+
+    def __init__(self, verdict) -> None:
+        self.verdict, self.calls = verdict, []
+
+    async def verify(self, query, candidates):
+        self.calls.append((query, [cid for cid, _ in candidates]))
+        return self.verdict
+
+
+def test_verifier_drops_candidates_judged_irrelevant(make) -> None:
+    svc, client = make(embedder=MockEmbedder(), dense_min_cosine=0.2)
+    card = _record(client, 1, REJECTED)
+    svc.verifier = FakeVerifier({card: False})
+    out = _check(client, *CACHE)
+    assert out.no_related_cards is True and out.findings == []
+    assert svc.verifier.calls[0][1] == [card]
+
+
+def test_verifier_keeps_candidates_judged_relevant(make) -> None:
+    svc, client = make(embedder=MockEmbedder(), dense_min_cosine=0.2)
+    card = _record(client, 1, REJECTED)
+    svc.verifier = FakeVerifier({card: True})
+    assert [f.code for f in _check(client, *CACHE).findings] == ["REJECTED_BEFORE"]
+
+
+def test_failed_verification_falls_back_to_unfiltered_results(make) -> None:
+    svc, client = make(embedder=MockEmbedder(), dense_min_cosine=0.2)
+    _record(client, 1, REJECTED)
+    svc.verifier = FakeVerifier(None)  # 판정 실패
+    assert [f.code for f in _check(client, *CACHE).findings] == ["REJECTED_BEFORE"]
+
+
+def test_verifier_is_not_called_when_nothing_was_found(make) -> None:
+    svc, client = make(embedder=MockEmbedder(), dense_min_cosine=0.99)
+    _record(client, 1, REJECTED)
+    svc.verifier = FakeVerifier({})
+    assert _check(client, *CACHE).no_related_cards is True
+    assert svc.verifier.calls == []
+
+
+def test_verification_is_off_by_default(make) -> None:
+    svc, client = make(embedder=MockEmbedder(), dense_min_cosine=0.2)
+    assert svc.verifier is None  # 기본값은 꺼짐
+
+
+def test_cut_removes_candidates_far_below_the_top(make) -> None:
+    svc, client = make(embedder=MockEmbedder(), dense_min_cosine=0.1, dense_cut=0.0)
+    first = _record(client, 1, REJECTED)
+    _record(client, 2, ADOPTED)  # 계획과 거리가 먼 두 번째 카드
+    svc.verifier = FakeVerifier({first: True})
+    _check(client, *CACHE)
+    assert svc.verifier.calls[0][1] == [first]  # 1위만 남겨 검증에 보낸다
+
+
+def test_build_services_makes_an_llm_from_env_in_real_mode(monkeypatch) -> None:
+    for key in ("HR_LLM_MODEL", "HR_LLM_BASE_URL", "HR_LLM_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("LLM_MODEL", "some-model")
+    monkeypatch.setenv("LLM_BASE_URL", "http://llm/v1")
+    monkeypatch.setenv("HR_DENSE_VERIFY", "1")
+    monkeypatch.setenv("HR_DENSE_SEARCH", "0")
+    real = build_services(
+        HrSettings.from_env({**__import__("os").environ, "HR_MOCK": "", "AGENT_TEMPLATE_MOCK": ""}),
+        seed=False,
+    )
+    assert real.narrator.enabled and real.verifier is not None
+    real.store.close()
+    mock = build_services(HrSettings(mock=True, dense_verify=True))
+    assert not mock.narrator.enabled and mock.verifier is None  # 목 모드(CI)는 LLM을 쓰지 않는다
+    mock.store.close()
+    monkeypatch.delenv("LLM_MODEL")
+    no_llm = build_services(
+        HrSettings.from_env({**__import__("os").environ, "HR_MOCK": "", "AGENT_TEMPLATE_MOCK": ""}),
+        seed=False,
+    )
+    assert not no_llm.narrator.enabled and no_llm.verifier is None
+    no_llm.store.close()
