@@ -488,6 +488,21 @@ REAL_DONE = [
 ]
 
 
+def real_state() -> State:
+    """실행 중인 서버의 첫 상태: 프로토타입 예시(요청·기획서·작업·PR·사건·결정·문서·활동)를 비우고
+    실제로 머지된 작업 하나만 둔다. 소통 채널(팀·부서)은 메시지 없이 남긴다."""
+    state = initial_state()
+    state.requests, state.specs, state.tasks, state.prs = [], [], [], []
+    state.docs, state.decisions, state.incidents, state.activity = [], [], [], []
+    state.threads = [t for t in state.threads if not t.on]
+    for t in state.threads:
+        t.messages = []
+    state.first_pr_minutes = []
+    state.drafts_in = state.drafts_accepted = state.warnings = 0
+    add_real_example(state)
+    return state
+
+
 def add_real_example(state: State) -> None:
     """실제로 머지된 개발 AI 작업 하나(REQ-D1·SPEC-D1·T-D1·PR #30 = 깃허브 #9)를 맨 앞에 더한다."""
     merged = kst("10-29 11:06")
