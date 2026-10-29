@@ -25,12 +25,16 @@ export type Account = {
 export type MemberKind = '운영자' | '관리자' | '일반회원'
 export const kindOf = (a: Account): MemberKind => (a.operator ? '운영자' : a.admin ? '관리자' : '일반회원')
 /** 일반회원이 회사에 연결돼 있나 (운영자·관리자는 늘 true) */
-export const isLinked = (a: Account) => !!a.operator || !!a.admin || (!!getCompany() && memberLinked(a.email))
+export const isLinked = (a: Account) =>
+  !!a.operator || !!a.admin || (!!getCompany() && (DEMO_IDS.has(a.id) || memberLinked(a.email)))
 
-// 데모 고객사 계정(관리자). 예전 ?as=<직무 id> 링크는 관리자로 들어간다(load)
+// 데모 고객사 계정: 관리자 + 일반회원(시스템 관리 메뉴 없음, 회사에 연결된 상태). 예전 ?as=<직무 id> 링크는 관리자로 들어간다(load)
+// 화면에만 있는 계정이라 백엔드 데이터(재무 장부 등)에는 영향이 없다
 export const ACCOUNTS: Account[] = [
   { id: 'admin', name: '관리자', role: '관리자', email: 'admin@catbooks.example', services: SERVICES.map((s) => s.id), admin: true },
+  { id: 'member', name: '일반회원', role: '일반회원', email: 'member@catbooks.example', services: [] },
 ]
+const DEMO_IDS = new Set(ACCOUNTS.map((a) => a.id))
 const ADMIN = ACCOUNTS[0]
 
 // 회원가입으로 만든 고객사 계정 (데모: 이 브라우저에만 저장, 비밀번호는 저장하지 않는다)
