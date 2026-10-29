@@ -96,11 +96,11 @@ const Dot = ({ tone }: { tone: Tone }) => <span className={`inline-block h-2.5 w
 type View = ExItem & { to: string | null; byRule: boolean; escalated: boolean; tone: Tone; label: string };
 
 const STATUS_TABS: { value: ExStatus | "all"; label: string }[] = [
+  { value: "all", label: "전체" },
   { value: "waiting", label: "대기" },
   { value: "claimed", label: "처리 중" },
   { value: "done", label: "끝남" },
   { value: "rejected", label: "반려" },
-  { value: "all", label: "전체" },
 ];
 // 목록 순서: 대기(팀 정하기·2시간 넘음·확인 권한 필요가 먼저) → 처리 중 → 끝남 → 반려
 const STATUS_ORDER: Record<ExStatus, number> = { waiting: 0, claimed: 1, done: 2, rejected: 3 };
@@ -125,7 +125,7 @@ export default function HandoffsExample({ toggle }: { toggle: ReactNode }) {
   const [rules, setRules] = useState<Rule[]>(loadRules);
   const [scope, setScope] = useState<"all" | "mine">("all");
   const [service, setService] = useState("");
-  const [status, setStatus] = useState<ExStatus | "all">("waiting");
+  const [status, setStatus] = useState<ExStatus | "all">("all");
   const [selectedId, setSelectedId] = useState<string>(ITEMS[0].id);
   const [toast, setToast] = useState<string | null>(null);
 
