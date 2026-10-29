@@ -48,7 +48,7 @@ const ITEMS: ExItem[] = [
   { id: "ex-6", from: "데이터분석", dept: null, category: "지표 이상 확인", kind: "사람 확인 요청", title: "주간 매출 지표 급감 확인",
     reason: "지난주 대비 매출 -38% · 집계 누락 의심", status: "waiting", minutesAgo: 20, href: "/data", hrefLabel: "데이터 분석",
     suggest: { dept: "데이터분석팀", reasons: ["지표·집계 관련 요청", "데이터분석 서비스에서 보냄", "비슷한 요청 3건을 데이터분석팀이 처리"] } },
-  { id: "ex-7", from: "인사", dept: "경영지원팀", category: "법인카드 한도", kind: "사람 확인 요청", title: "법인카드 한도 변경 확인",
+  { id: "ex-7", from: "인사", dept: "인사팀", category: "법인카드 한도", kind: "사람 확인 요청", title: "법인카드 한도 변경 확인",
     reason: "신규 입사자 2명 · 월 한도 300만 원 요청", status: "claimed", claimedBy: "김서연", minutesAgo: 50, href: "/hr", hrefLabel: "인수인계" },
   { id: "ex-8", from: "개발·배포", dept: "개발팀", category: "배포 후 점검", kind: "사람 확인 요청", title: "배포 후 점검 결과 확인",
     reason: "주문 API 배포 · 자동 점검 1건 경고", status: "done", claimedBy: "박지훈", result: "경고는 로그 설정 문제 · 서비스 영향 없음",
@@ -96,12 +96,14 @@ const Dot = ({ tone }: { tone: Tone }) => <span className={`inline-block h-2.5 w
 type View = ExItem & { to: string | null; byRule: boolean; escalated: boolean; tone: Tone; label: string };
 
 const STATUS_TABS: { value: ExStatus | "all"; label: string }[] = [
-  { value: "all", label: "전체" },
   { value: "waiting", label: "대기" },
   { value: "claimed", label: "처리 중" },
   { value: "done", label: "끝남" },
   { value: "rejected", label: "반려" },
+  { value: "all", label: "전체" },
 ];
+// 목록 순서: 대기(팀 정하기·2시간 넘음·확인 권한 필요가 먼저) → 처리 중 → 끝남 → 반려
+const STATUS_ORDER: Record<ExStatus, number> = { waiting: 0, claimed: 1, done: 2, rejected: 3 };
 
 const Chip = ({ className, children }: { className: string; children: ReactNode }) => <span className={`chip ${className}`}>{children}</span>;
 const KindChip = ({ kind }: { kind: Kind }) => (
@@ -123,7 +125,7 @@ export default function HandoffsExample({ toggle }: { toggle: ReactNode }) {
   const [rules, setRules] = useState<Rule[]>(loadRules);
   const [scope, setScope] = useState<"all" | "mine">("all");
   const [service, setService] = useState("");
-  const [status, setStatus] = useState<ExStatus | "all">("all");
+  const [status, setStatus] = useState<ExStatus | "all">("waiting");
   const [selectedId, setSelectedId] = useState<string>(ITEMS[0].id);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -154,7 +156,10 @@ export default function HandoffsExample({ toggle }: { toggle: ReactNode }) {
   const services = [...new Set(ITEMS.map((i) => i.from))];
   const scoped = views.filter((v) => (scope === "all" || (!!myDept && v.to === myDept)) && (!service || v.from === service));
   const count = (s: ExStatus | "all") => scoped.filter((v) => s === "all" || v.status === s).length;
-  const shown = scoped.filter((v) => status === "all" || v.status === status);
+  const urgency = (v: View) => (!v.to ? 0 : v.escalated ? 1 : v.risky ? 2 : 3)
+  const shown = scoped
+    .filter((v) => status === "all" || v.status === status)
+    .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || urgency(a) - urgency(b) || b.minutesAgo - a.minutesAgo);
   const selected = shown.find((v) => v.id === selectedId) ?? shown[0];
 
   const patch = (id: string, p: Partial<ExItem>) => setItems((xs) => xs.map((x) => (x.id === id ? { ...x, ...p } : x)));
