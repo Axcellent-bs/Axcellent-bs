@@ -350,12 +350,64 @@ class ActivityEntry(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
 
 
+class FeedbackFlag(BaseModel):
+    code: str
+    message: str
+    info: bool = False
+
+
+class Feedback(BaseModel):
+    """해결된 문의에 고객이 남긴 평가(후기). 글은 개인정보를 가려 저장돼 온다."""
+
+    rating: int
+    resolved: bool
+    comment: str = ""
+    status: Literal["visible", "flagged", "hidden"]
+    flags: list[FeedbackFlag] = Field(default_factory=list)
+    source: Literal["customer", "console"] = "customer"
+    created_at: str
+    decided_by: str | None = None
+    decided_at: str | None = None
+
+
+class FeedbackItem(BaseModel):
+    inquiry_id: int
+    customer_name: str
+    subject: str
+    category: str | None = None
+    order_id: str | None = None
+    order_no: str | None = None
+    feedback: Feedback
+
+
+class FeedbackCategoryStat(BaseModel):
+    count: int
+    average: float | None = None
+
+
+class FeedbackOverview(BaseModel):
+    """만족도 요약. 평가가 없으면 평균·비율은 null이고 0으로 지어내지 않는다."""
+
+    resolved_inquiries: int
+    rated: int
+    response_rate: float | None = None
+    average_rating: float | None = None
+    satisfied_rate: float | None = None
+    solved_rate: float | None = None
+    distribution: dict[str, int] = Field(default_factory=dict)
+    by_category: dict[str, FeedbackCategoryStat] = Field(default_factory=dict)
+    pending_review: int = 0
+    hidden: int = 0
+    follow_up: int = 0
+
+
 class Conversation(ConversationListItem):
     messages: list[Message] = Field(default_factory=list)
     summary: Summary | None = None
     order_no: str | None = None
     claims: list[Claim] = Field(default_factory=list)
     activity: list[ActivityEntry] = Field(default_factory=list)
+    feedback: Feedback | None = None
 
 
 # ---------------------------------------------------------------- 후기
@@ -529,6 +581,18 @@ class ClaimSuggestion(BaseModel):
     notes: list[str] = Field(default_factory=list)
     preview: dict[str, Any] | None = None
     suggested_items: list[ClaimIntakeItem] | None = None
+
+
+class FeedbackBody(BaseModel):
+    """상담 화면에서 고객을 대신해 시험으로 남기는 평가. 고객 화면은 쇼핑몰이 직접 부른다."""
+
+    rating: int = Field(ge=1, le=5)
+    resolved: bool
+    comment: str = Field(default="", max_length=300)
+
+
+class FeedbackStatusBody(BaseModel):
+    status: Literal["visible", "hidden"]
 
 
 class NoteBody(BaseModel):

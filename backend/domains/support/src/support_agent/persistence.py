@@ -264,6 +264,9 @@ class PersistentInquiryStore(InquiryStore):
     def set_status(self, *args: Any, **kwargs: Any) -> Conversation:
         return self._save(super().set_status(*args, **kwargs))
 
+    def set_feedback(self, *args: Any, **kwargs: Any) -> Conversation:
+        return self._save(super().set_feedback(*args, **kwargs))
+
     def log_activity(self, *args: Any, **kwargs: Any) -> Conversation | None:
         conversation = super().log_activity(*args, **kwargs)
         return None if conversation is None else self._save(conversation)

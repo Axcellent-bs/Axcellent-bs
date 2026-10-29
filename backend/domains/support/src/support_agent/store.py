@@ -15,6 +15,7 @@ from support_agent.schemas import (
     Analysis,
     Conversation,
     ConversationListItem,
+    Feedback,
     InquiryStatus,
     Message,
     Urgency,
@@ -129,6 +130,11 @@ class InquiryStore:
                 data=data or {},
             )
         )
+        return conversation
+
+    def set_feedback(self, inquiry_id: int, feedback: Feedback) -> Conversation:
+        conversation = self._conversations[inquiry_id]
+        conversation.feedback = feedback
         return conversation
 
     def set_status(self, inquiry_id: int, status: InquiryStatus) -> Conversation:

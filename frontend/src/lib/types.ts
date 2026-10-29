@@ -148,12 +148,31 @@ export interface ClaimSuggestion {
   preview: { outcome: string; resolution: string; requires_return: boolean; expected_refund: number; reasons: { code: string; level: string; message: string }[] } | null;
   suggested_items: ClaimIntake["items"] | null;
 }
+/** 해결된 문의에 고객이 남긴 평가(후기). 글은 개인정보를 가려 저장돼 온다 */
+export type FeedbackStatus = "visible" | "flagged" | "hidden";
+export interface Feedback {
+  rating: number; resolved: boolean; comment: string; status: FeedbackStatus;
+  flags: { code: string; message: string; info: boolean }[];
+  source: "customer" | "console"; created_at: string; decided_by: string | null; decided_at: string | null;
+}
+/** 후기 관리 화면의 한 줄: 어느 문의의 후기인지와 후기 */
+export interface FeedbackItem {
+  inquiry_id: number; customer_name: string; subject: string; category: string | null;
+  order_id: string | null; order_no: string | null; feedback: Feedback;
+}
+/** 만족도 요약 (고객지원이 코드로 센 값. 평가가 없으면 평균·비율은 null) */
+export interface FeedbackOverview {
+  resolved_inquiries: number; rated: number; response_rate: number | null; average_rating: number | null;
+  satisfied_rate: number | null; solved_rate: number | null; distribution: Record<string, number>;
+  by_category: Record<string, { count: number; average: number | null }>;
+  pending_review: number; hidden: number; follow_up: number;
+}
 /** 문의의 AI 처리 내력 한 줄 (고객지원이 코드로 남긴 사실. `data`는 코드 값이라 화면이 이름표를 붙인다) */
 export interface ActivityEntry {
   at: string; actor: "ai" | "agent" | "customer" | "system"; kind: string; title: string; detail: string;
   ref: string | null; data: Record<string, unknown>;
 }
-export interface Conversation extends ConversationListItem { messages: Message[]; summary: Summary | null; order_no: string | null; claims: Claim[]; activity: ActivityEntry[] }
+export interface Conversation extends ConversationListItem { messages: Message[]; summary: Summary | null; order_no: string | null; claims: Claim[]; activity: ActivityEntry[]; feedback: Feedback | null }
 
 export interface Kpi {
   conversations: number; by_status: Record<string, number>; agent_replies: number; draft_adoption_rate: number | null;

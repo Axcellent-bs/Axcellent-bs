@@ -50,6 +50,10 @@ from ax_dashboard_api.schemas import (
     ConversationCreate,
     ConversationListItem,
     DraftStyleBody,
+    FeedbackBody,
+    FeedbackItem,
+    FeedbackOverview,
+    FeedbackStatusBody,
     InspectionBody,
     Kpi,
     NoteBody,
@@ -368,6 +372,70 @@ async def create_conversation_claim(conversation_id: int, body: ClaimIntakeBody)
         target=f"inquiry:{conversation_id}:order:{order_id}:{body.type}",
     )
     return ok(claim_mapping.to_detail(out))
+
+
+@router.post("/conversations/{conversation_id}/feedback", status_code=201)
+async def submit_conversation_feedback(conversation_id: int, body: FeedbackBody) -> dict:
+    """해결된 문의에 고객 평가를 대신 남긴다(시험용). 문의당 한 번이고 해결된 문의만 된다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "평가는 실제 모드에서만 된다")
+    await support_client.call(
+        "submit_feedback",
+        {
+            "inquiry_id": conversation_id,
+            "rating": body.rating,
+            "resolved": body.resolved,
+            "source": "console",
+        },
+        {"comment": body.comment},
+        target=f"inquiry:{conversation_id}",
+    )
+    return ok(
+        await _conversation(
+            await support_client.call("get_inquiry", {"inquiry_id": conversation_id})
+        )
+    )
+
+
+@router.get("/feedback")
+async def feedback_list(
+    status: Literal["visible", "flagged", "hidden"] | None = None,
+    max_rating: int | None = Query(default=None, ge=1, le=5),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict:
+    """후기(해결 결과 평가) 목록, 최근 순. 후기 관리 화면이 읽는다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "후기는 실제 모드에서만 된다")
+    payload = {"limit": limit, **({"status": status} if status else {})}
+    if max_rating is not None:
+        payload["max_rating"] = max_rating
+    out = await or_unavailable(
+        support_client.call("list_feedback", payload), {"items": [], "total": 0}
+    )
+    items = [FeedbackItem.model_validate(i) for i in out.get("items", [])]
+    return ok(items, total=out.get("total", len(items)))
+
+
+@router.get("/feedback/stats")
+async def feedback_stats() -> dict:
+    """만족도 요약(평균 별점, 만족 비율, 해결 응답 비율, 분포, 분류별). 센 값 그대로다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "후기는 실제 모드에서만 된다")
+    out = await or_unavailable(support_client.call("feedback_overview"), None)
+    return ok(FeedbackOverview.model_validate(out) if out is not None else None)
+
+
+@router.post("/feedback/{inquiry_id}/status")
+async def set_feedback_status(inquiry_id: int, body: FeedbackStatusBody) -> dict:
+    """확인 대기 후기를 공개하거나 숨긴다. 상담원 결정이라 사람 토큰이 필요하다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "후기는 실제 모드에서만 된다")
+    out = await support_client.call(
+        "set_feedback_status",
+        {"inquiry_id": inquiry_id, "status": body.status},
+        target=f"inquiry:{inquiry_id}:{body.status}",
+    )
+    return ok(FeedbackItem.model_validate(out))
 
 
 @router.post("/conversations/{conversation_id}/agent-messages", status_code=201)

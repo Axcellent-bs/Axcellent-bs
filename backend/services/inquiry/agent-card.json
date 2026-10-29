@@ -144,6 +144,57 @@
       "priority": "recommended"
     },
     {
+      "id": "submit_feedback",
+      "description": "해결된 문의에 고객이 별점·해결 여부·후기 글(untrusted.comment)로 평가를 남긴다. 문의당 한 번이고 개인정보는 가려 저장하며, 부적절한 표현이 있으면 확인 대기로 둔다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#SubmitFeedbackInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Feedback",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api",
+        "shop-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "set_feedback_status",
+      "description": "후기를 공개 또는 숨김으로 정한다 (확인 대기 후기의 결정). 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#SetFeedbackStatusInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Feedback",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_feedback",
+      "description": "후기(해결 결과 평가) 목록을 최근 순으로 읽는다. 상태·별점으로 거를 수 있다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#ListFeedbackInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Feedback",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "feedback_overview",
+      "description": "해결된 문의의 평가를 코드가 센 만족도 요약(평균 별점, 만족 비율, 해결 응답 비율, 분포, 분류별, 확인 대기, 선제 연락 대상)으로 읽는다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#ListFeedbackInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Feedback",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "inquiry_overview",
       "description": "문의 KPI(초안 채택률·수정 정도·가드 적중·분류별 건수)와 답변 대기 문의를 코드로 집계해 돌려준다. 상태를 바꾸지 않는다.",
       "input_schema": "agents/support/src/support_agent/schemas.py#ListInquiriesInput",

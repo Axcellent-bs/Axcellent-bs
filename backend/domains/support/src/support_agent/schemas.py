@@ -123,6 +123,31 @@ class ActivityEntry(AxModel):
     data: dict[str, Any] = Field(default_factory=dict)
 
 
+FeedbackStatus = Literal["visible", "flagged", "hidden"]
+
+
+class FeedbackFlag(AxModel):
+    """후기에 코드가 붙인 표시. `info`이면 공개는 그대로 두고 선제 연락 같은 후속 조치만 알린다."""
+
+    code: str
+    message: str
+    info: bool = False
+
+
+class Feedback(AxModel):
+    """고객이 해결된 문의에 남긴 평가(후기). 글은 개인정보를 가린 채 저장한다."""
+
+    rating: int = Field(ge=1, le=5)
+    resolved: bool  # 고객이 "문제가 해결됐다"고 답했는지
+    comment: str = ""
+    status: FeedbackStatus = "visible"
+    flags: list[FeedbackFlag] = Field(default_factory=list)
+    source: Literal["customer", "console"] = "customer"
+    created_at: str
+    decided_by: str | None = None
+    decided_at: str | None = None
+
+
 class Conversation(ConversationListItem):
     tenant_id: str = TENANT_ID_DEFAULT
     context_id: str
@@ -132,6 +157,7 @@ class Conversation(ConversationListItem):
     order_no: str | None = None
     claims: list[dict[str, Any]] = Field(default_factory=list)  # 읽을 때 이어진 클레임으로 채운다
     activity: list[ActivityEntry] = Field(default_factory=list)  # AI 처리 내력 (오래된 것부터)
+    feedback: Feedback | None = None  # 해결 결과에 대한 고객 평가 (문의당 한 번)
 
 
 # ---------------------------------------------------------------- LLM 응답 스키마
@@ -240,6 +266,27 @@ class RecordClaimActivityInput(AxModel):
     decision: Literal["approve", "reject"] | None = None
     inspection: str | None = None
     amount: int | None = None
+
+
+class SubmitFeedbackInput(AxModel):
+    """해결된 문의의 평가. 후기 글은 `untrusted.comment`로만 받는다."""
+
+    inquiry_id: int
+    rating: int = Field(ge=1, le=5)
+    resolved: bool
+    user_id: int | None = None  # 고객 화면이 대신 부를 때 본인 문의인지 확인한다
+    source: Literal["customer", "console"] = "customer"
+
+
+class ListFeedbackInput(AxModel):
+    status: FeedbackStatus | None = None
+    max_rating: int | None = Field(default=None, ge=1, le=5)
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class SetFeedbackStatusInput(AxModel):
+    inquiry_id: int
+    status: Literal["visible", "hidden"]
 
 
 class RequestCompensationInput(AxModel):

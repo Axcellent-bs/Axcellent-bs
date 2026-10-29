@@ -559,3 +559,103 @@ def test_a_duplicate_claim_is_reported_not_swallowed(client: TestClient, fake: F
     )
     assert response.status_code == 409 and response.json()["error"]["code"] == "DUPLICATE_CLAIM"
     assert [r.skill for r in fake.sent] == ["get_inquiry", "create_claim"]
+
+
+# ---------------------------------------------------------------- 후기(해결 결과 평가)
+FEEDBACK = {
+    "rating": 2,
+    "resolved": False,
+    "comment": "아직도 안 왔어요",
+    "status": "visible",
+    "flags": [{"code": "CS_FOLLOW_UP", "message": "선제 연락이 필요하다", "info": True}],
+    "source": "customer",
+    "created_at": "2026-10-29T07:00:00Z",
+}
+
+
+def test_feedback_list_passes_filters_and_returns_items(client: TestClient, fake: Fake) -> None:
+    fake.outputs["list_feedback"] = {
+        "items": [
+            {
+                "inquiry_id": 7,
+                "customer_name": "김하늘",
+                "subject": "배송 문의",
+                "category": "shipping",
+                "feedback": FEEDBACK,
+            }
+        ],
+        "total": 1,
+    }
+    body = client.get(BASE + "/feedback?status=visible&max_rating=2&limit=20").json()
+    assert body["meta"]["total"] == 1
+    assert body["data"][0]["feedback"]["flags"][0]["code"] == "CS_FOLLOW_UP"
+    sent = fake.sent[0]
+    assert sent.skill == "list_feedback"
+    assert sent.input == {"limit": 20, "status": "visible", "max_rating": 2}
+
+
+def test_feedback_stats_are_passed_through_without_inventing_numbers(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.outputs["feedback_overview"] = {
+        "resolved_inquiries": 0,
+        "rated": 0,
+        "response_rate": None,
+        "average_rating": None,
+        "satisfied_rate": None,
+        "solved_rate": None,
+        "distribution": {"1": 0, "2": 0, "3": 0, "4": 0, "5": 0},
+        "by_category": {},
+        "pending_review": 0,
+        "hidden": 0,
+        "follow_up": 0,
+    }
+    data = client.get(BASE + "/feedback/stats").json()["data"]
+    assert (
+        data["average_rating"] is None and data["satisfied_rate"] is None
+    )  # 0으로 지어내지 않는다
+
+
+def test_hiding_a_review_asks_the_support_skill_with_an_idempotency_key(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.outputs["set_feedback_status"] = {
+        "inquiry_id": 7,
+        "customer_name": "김하늘",
+        "subject": "s",
+        "feedback": {**FEEDBACK, "status": "hidden", "decided_by": "dashboard-api"},
+    }
+    response = client.post(BASE + "/feedback/7/status", json={"status": "hidden"})
+    assert response.status_code == 200 and response.json()["data"]["feedback"]["status"] == "hidden"
+    sent = fake.sent[0]
+    assert sent.skill == "set_feedback_status" and sent.input == {
+        "inquiry_id": 7,
+        "status": "hidden",
+    }
+    assert sent.meta.idempotency_key.endswith(":set_feedback_status:inquiry:7:hidden")
+    assert client.post(BASE + "/feedback/7/status", json={"status": "flagged"}).status_code == 422
+
+
+def test_console_files_a_test_review_and_returns_the_conversation(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.outputs["submit_feedback"] = {"inquiry_id": 7, "rated": True, "rating": 4}
+    fake.outputs["get_inquiry"] = {**INQUIRY, "status": "resolved", "feedback": FEEDBACK}
+    response = client.post(
+        BASE + "/conversations/7/feedback",
+        json={"rating": 4, "resolved": True, "comment": "빨라서 좋았어요"},
+    )
+    assert response.status_code == 201
+    assert response.json()["data"]["feedback"]["rating"] == 2  # 문의를 다시 읽어 돌려준다
+    submit = next(r for r in fake.sent if r.skill == "submit_feedback")
+    assert submit.input == {"inquiry_id": 7, "rating": 4, "resolved": True, "source": "console"}
+    assert submit.untrusted == {"comment": "빨라서 좋았어요"}  # 고객이 쓴 글은 untrusted로만
+    bad = client.post(BASE + "/conversations/7/feedback", json={"rating": 6, "resolved": True})
+    assert bad.status_code == 422
+
+
+def test_rating_an_unresolved_inquiry_is_a_conflict(client: TestClient, fake: Fake) -> None:
+    fake.outputs["submit_feedback"] = {"message": "해결된 문의에만 평가를 남길 수 있다"}
+    fake.outcomes["submit_feedback"] = "invalid_state"
+    response = client.post(BASE + "/conversations/7/feedback", json={"rating": 5, "resolved": True})
+    assert response.status_code == 409 and response.json()["error"]["code"] == "INVALID_STATE"
