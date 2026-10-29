@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -177,3 +178,39 @@ def test_commentary_uses_llm_only_when_live_and_configured(
         assert text == "LLM이 쓴 설명" and "59" in fake.prompts[0]  # 코드가 계산한 영업 결과
     else:
         assert text == closing.template_commentary("오늘", t)
+
+
+# ---------- 고객사 이름은 설정에서만 (#43) ----------
+
+
+def test_commentary_prompt_uses_tenant_name_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TENANT_NAME", "책방누리")
+    prompt = closing.commentary_prompt({"기간": "오늘"})
+    assert prompt.startswith("너는 책방누리 재무팀이다.")
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_commentary_prompt_without_tenant_name_has_no_company(
+    monkeypatch: pytest.MonkeyPatch, value: str | None
+) -> None:
+    if value is None:
+        monkeypatch.delenv("TENANT_NAME", raising=False)
+    else:
+        monkeypatch.setenv("TENANT_NAME", value)
+    prompt = closing.commentary_prompt({"기간": "오늘"})
+    assert prompt.startswith("너는 재무팀이다.")
+    assert "캣북스" not in prompt
+
+
+def test_live_commentary_prompt_carries_tenant_name(kit, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TENANT_NAME", "책방누리")
+    fake = _FakeLLM("m", False)
+    monkeypatch.setattr(closing, "LLMClient", lambda dept: fake)
+    asyncio.run(closing.write_commentary("오늘", closing.Totals(1000, 100, 10, 0, 31, 1), False))
+    assert "책방누리 재무팀" in fake.prompts[0] and "캣북스" not in fake.prompts[0]
+
+
+@pytest.mark.parametrize("name", ["closing.py", "handlers.py"])
+def test_finance_code_has_no_hardcoded_tenant_name(name: str) -> None:
+    source = (Path(closing.__file__).parent / name).read_text(encoding="utf-8")
+    assert "캣북스" not in source

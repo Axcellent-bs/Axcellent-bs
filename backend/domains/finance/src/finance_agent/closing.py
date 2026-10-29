@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Literal
@@ -161,6 +162,25 @@ class Commentary(BaseModel):
     text: str = Field(min_length=1, max_length=600)
 
 
+TENANT_NAME_ENV = "TENANT_NAME"
+
+
+def tenant_name() -> str:
+    """고객사 이름. 설정(`TENANT_NAME`)에서만 읽고, 없으면 빈 문자열(이름 없이 쓴다)."""
+    return os.getenv(TENANT_NAME_ENV, "").strip()
+
+
+def commentary_prompt(numbers: dict[str, Any]) -> str:
+    """결산 설명 LLM 프롬프트. 회사 이름은 설정에 있을 때만 넣는다."""
+    name = tenant_name()
+    team = f"{name} 재무팀" if name else "재무팀"
+    return (
+        f"너는 {team}이다. 아래 손익 숫자(정수 원, 코드가 계산함)를 대표가 읽을 쉬운 한국어 "
+        "두세 문장으로 설명하라. 숫자를 새로 계산하거나 바꾸지 말고 주어진 값만 쓴다.\n"
+        f"{numbers}"
+    )
+
+
 async def write_commentary(label: str, t: Totals, mock: bool) -> tuple[str, str]:
     """(설명, 출처). 목 모드이거나 LLM 설정이 없거나 실패하면 템플릿 문장."""
     fallback = template_commentary(label, t)
@@ -172,11 +192,7 @@ async def write_commentary(label: str, t: Totals, mock: bool) -> tuple[str, str]
     numbers = {"기간": label, "주문 수": t.order_count} | {
         LINE_LABELS[k]: v for k, v in t.as_kpis().items()
     }
-    prompt = (
-        "너는 캣북스 재무팀이다. 아래 손익 숫자(정수 원, 코드가 계산함)를 대표가 읽을 쉬운 한국어 "
-        "두세 문장으로 설명하라. 숫자를 새로 계산하거나 바꾸지 말고 주어진 값만 쓴다.\n"
-        f"{numbers}"
-    )
+    prompt = commentary_prompt(numbers)
     try:
         out = await client.structured(prompt, Commentary)
     except Exception:  # 미구현·네트워크·스키마 오류 모두 템플릿으로
