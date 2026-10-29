@@ -238,6 +238,13 @@ owner = "planning"
 requesters = ["planning", "dev"]
 base_grade = "A"
 
+# 대기 중인 코딩 PR에 사람이 수정 지시 (같은 PR에 커밋을 더한다, 머지는 그대로 merge_pr 관문) A
+[[actions]]
+action = "dev_task_revise"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
 [[actions]]
 action = "code_write"
 owner = "planning"

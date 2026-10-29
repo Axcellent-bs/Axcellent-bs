@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import secrets
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -135,32 +136,45 @@ async def open_pr(
     if adapter.capabilities.read_only:
         return Note(False, "vcs.read_only", f"{pr.id} 읽기 전용 모드 → 사람 반영 필요")
     body = body or change_body(pr, request_id, spec_id, para_id)
+    files = files or change_files(pr, body, spec_id)
+    renamed = ""
     try:
-        opened = await adapter.open_change(
-            branch=pr.branch,
-            title=pr.title,
-            body=body,
-            files=files or change_files(pr, body, spec_id),
-        )
+        opened = await adapter.open_change(branch=pr.branch, title=pr.title, body=body, files=files)
     except VcsError as exc:
-        # 같은 브랜치가 이미 있으면(앞선 시도에서 올라감) 새로 만들지 않고 그 변경을 이어받는다
-        if exc.code == "conflict":
-            adopted = await _adopt(adapter, pr)
-            if adopted is not None:
-                return adopted
-        return Note(False, "vcs.open_failed", f"{pr.id} 형상관리에 올리지 못함 ({exc.code})")
+        if exc.code != "conflict":
+            return Note(False, "vcs.open_failed", f"{pr.id} 형상관리에 올리지 못함 ({exc.code})")
+        # 같은 브랜치가 이미 있다. 앞선 시도에서 이 PR이 올라간 것이면 이어받는다
+        adopted = await _adopt(adapter, pr, set(files))
+        if adopted is not None:
+            return adopted
+        # 다른 작업이 쓰던 브랜치다 (서버를 다시 켜 작업 번호가 겹친 경우 등): 새 이름으로 올린다
+        old = pr.branch
+        pr.branch = f"{old}-{secrets.token_hex(3)}"
+        try:
+            opened = await adapter.open_change(
+                branch=pr.branch, title=pr.title, body=body, files=files
+            )
+        except VcsError as again:
+            pr.branch = old
+            code = again.code
+            return Note(False, "vcs.open_failed", f"{pr.id} 형상관리에 올리지 못함 ({code})")
+        renamed = f", {old}는 다른 작업이 써서 새 브랜치"
     pr.vcs_number = opened.number
     pr.url = opened.url
-    return Note(True, "vcs.opened", f"{pr.id} → 형상관리 변경 #{opened.number} ({opened.branch})")
+    text = f"{pr.id} → 형상관리 변경 #{opened.number} ({opened.branch}{renamed})"
+    return Note(True, "vcs.opened", text)
 
 
-async def _adopt(adapter: VcsAdapter, pr: PR) -> Note | None:
-    """브랜치로 이미 올라간 변경을 찾아 PR에 적는다. 못 찾으면 None."""
+async def _adopt(adapter: VcsAdapter, pr: PR, paths: set[str]) -> Note | None:
+    """브랜치로 이미 올라간 변경이 이 PR의 앞선 시도면 PR에 적는다. 아니면 None.
+
+    제목과 바꾼 파일이 같아야 같은 PR로 본다. 브랜치 이름만 같은 다른 작업의 PR(이미 머지된
+    것 포함)을 이어받으면 올리지도 않은 PR이 머지됐다고 나온다."""
     try:
         found = await adapter.find_change_by_branch(pr.branch)
     except VcsError:
         return None
-    if found is None:
+    if found is None or found.title != pr.title or set(found.changed_paths) != paths:
         return None
     pr.vcs_number = found.number
     pr.url = found.url

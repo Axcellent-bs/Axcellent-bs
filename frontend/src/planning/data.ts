@@ -82,6 +82,8 @@ export interface CodingRun {
   error: string | null
   attempts: number
   updatedAt?: string
+  pr?: string | null
+  instruction?: string | null // 사람이 대기 중인 PR에 준 수정 지시
 }
 
 export interface PR {
@@ -492,6 +494,7 @@ export type Action =
   | { type: 'writeSpec'; request: string }
   // 교차검증·학습 기준·사람 확인
   | { type: 'decideReview'; review: string } // 시연: 검증자(다른 부서)가 판단
+  | { type: 'mergePr'; pr: string } // 사람 머지 (서버 액션, 누구나)
   | { type: 'humanDecide'; review: string; ok: boolean } // 되돌릴 수 없는 일만
   | { type: 'disableRule'; rule: string } // 기준 끄기 (승인 없이 바로)
   | { type: 'decideRule'; rule: string; ok: boolean } // 기준 넓히기 판단 (재무 AI 또는 사람, 시뮬레이터가 보낸다)

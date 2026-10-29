@@ -903,14 +903,48 @@ def test_open_conflict_adopts_existing_change() -> None:
     adapter = MockVcsAdapter(first_number=900)
     vcs.set_vcs(adapter)
     try:
-        run(adapter.open_change(branch="gen/t-12", title="t", body="b", files={"a.md": "x"}))
+        files = {"docs/generated/spec-1/t-12.md": "x"}  # 이 PR이 올리는 파일과 같다
+        run(adapter.open_change(branch="gen/t-12", title="t", body="b", files=files))
         run(adapter.merge_change(900))
-        pr = PR(id="PR #32", number=32, task="T-12", title="t", branch="gen/t-12", reviews=["통과"],
-                gate=PrGate(result="통과", lines=1, files=1, paths="docs/"), merged=False)
+        pr = PR(
+            id="PR #32",
+            number=32,
+            task="T-12",
+            title="t",
+            branch="gen/t-12",
+            reviews=["통과"],
+            gate=PrGate(result="통과", lines=1, files=1, paths="docs/"),
+            merged=False,
+        )
         note = run(vcs_bridge.open_pr(pr, "REQ-1", "SPEC-1", "R1"))
         assert note is not None and note.ok and note.point == "vcs.adopted"
         assert pr.vcs_number == 900 and "이미 병합됨" in note.text
         merged = run(vcs_bridge.merge_pr(pr))
         assert merged is not None and merged.ok
+    finally:
+        vcs.set_vcs(None)
+
+
+def test_open_conflict_with_other_tasks_branch_opens_new_branch() -> None:
+    """서버를 다시 켜 작업 번호가 겹쳐 브랜치 이름이 같아도, 다른 작업의 (머지된) PR은
+    이어받지 않고 새 브랜치로 올린다."""
+    from planning_agent import vcs_bridge
+    from planning_agent.domain.models import PR, PrGate
+
+    adapter = MockVcsAdapter(first_number=4)
+    vcs.set_vcs(adapter)
+    try:
+        old = {"src/ShopShell.tsx": "팝업"}
+        run(adapter.open_change(branch="gen/t-d1-1", title="R1: 팝업", body="b", files=old))
+        run(adapter.merge_change(4))
+        pr = PR(id="PR #31", number=31, task="T-D1", title="R1: 보라색", branch="gen/t-d1-1",
+                reviews=[], gate=PrGate(result="통과", lines=1, files=1, paths="src/"),
+                merged=False)  # fmt: skip
+        files = {"src/styles.css": "purple"}
+        note = run(vcs_bridge.open_pr(pr, None, None, None, files=files, body="b"))
+        assert note is not None and note.ok and note.point == "vcs.opened"
+        assert pr.vcs_number == 5 and pr.branch.startswith("gen/t-d1-1-")
+        assert "다른 작업이 써서 새 브랜치" in note.text
+        assert not run(adapter.get_change(5)).merged
     finally:
         vcs.set_vcs(None)

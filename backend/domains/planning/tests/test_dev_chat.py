@@ -137,15 +137,98 @@ def test_vague_then_start_creates_task_and_runs(service: PlanningService, adapte
     assert "dev_task_create" in [g.action for g in service.gate_calls]
 
 
-def test_started_thread_reports_status_without_new_task(service: PlanningService, adapter) -> None:
+def _settle(service: PlanningService, task_id: str) -> str:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        st = _task(service, task_id).coding.status
+        if st in ("merged", "waiting_human", "failed", "canceled"):
+            return st
+        time.sleep(0.02)
+    return _task(service, task_id).coding.status
+
+
+def test_started_thread_reports_status_while_running(service: PlanningService, adapter) -> None:
     dev_chat.set_llm(ChatLLM([START]))
     with TestClient(app) as c:
         _post(c, message="Banner.tsx 문구를 '신간 배너'로 바꾸고 PR 올려 줘")
+        _settle(service, "T-D1")
+        _task(service).coding.status = "writing"  # 아직 도는 중이라고 치고
         r = _post(c, thread_id="chat-1", message="어떻게 되고 있어?")
         th = r.json()["data"]
     assert th["status"] == "started"
-    assert th["messages"][-1]["kind"] == "text" and "T-D1" in th["messages"][-1]["text"]
+    last = th["messages"][-1]
+    assert last["kind"] == "text" and "T-D1" in last["text"] and "새 대화" not in last["text"]
     assert sum(1 for t in service.state.tasks if t.coding is not None) == 1
+
+
+def test_follow_up_after_merge_starts_next_task_in_same_thread(
+    service: PlanningService, adapter
+) -> None:
+    """끝난 작업 뒤 이어 말하면 새 대화로 보내지 않고 같은 대화에서 다음 작업을 띄운다."""
+    follow = TurnPlan(
+        title="배너 문구 한 번 더", plan="배너 문구를 '오늘의 신간'으로", done=["보인다"]
+    )
+    fake = ChatLLM([START, ChatTurn(reply="이어서 바꿀게요.", action="start", plan=follow)])
+    dev_chat.set_llm(fake)
+    with TestClient(app) as c:
+        _post(c, message="Banner.tsx 문구를 '신간 배너'로 바꾸고 PR 올려 줘")
+        assert _settle(service, "T-D1") == "merged"
+        th = _post(c, thread_id="chat-1", message="문구를 '오늘의 신간'으로 다시 바꿔").json()[
+            "data"
+        ]
+    assert th["id"] == "chat-1" and th["status"] == "started" and th["task_id"] == "T-D2"
+    last_task = fake.calls[1]["last_task"]
+    assert last_task["id"] == "T-D1" and last_task["status"] == "merged"
+    assert last_task["files"] == [BANNER]
+
+
+def test_follow_up_on_waiting_pr_becomes_revision_on_same_pr(
+    service: PlanningService, adapter
+) -> None:
+    """사람 확인을 기다리는 PR이 있으면 이어 한 말은 그 PR의 수정 지시가 된다 (같은 PR에 커밋)."""
+    fixed = "export function Banner() {\n  return <div>오늘의 신간</div>\n}\n"
+
+    class Picky(CoderLLM):
+        def __init__(self):
+            super().__init__()
+            self.reviews = ["불일치", "불일치", "통과"]
+            self.instructions: list[str | None] = []
+
+        async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
+            data = untrusted or {}
+            if schema is FileWrite:
+                self.instructions.append(data.get("instruction"))
+                if data.get("instruction"):
+                    return FileWrite(content=fixed)
+                return FileWrite(content=f"// {len(self.instructions)}\n" + data["current"])
+            if schema is CodeReview:
+                return CodeReview(verdict=self.reviews.pop(0), notes=["문구가 다르다"])
+            return await super().structured(prompt, schema, untrusted, images, context_id)
+
+    llm = Picky()
+    coder.set_llm(llm)
+    dev_chat.set_llm(ChatLLM([START]))
+    with TestClient(app) as c:
+        _post(c, message="Banner.tsx 문구를 '신간 배너'로 바꾸고 PR 올려 줘")
+        assert _settle(service, "T-D1") == "waiting_human"
+        pr = next(p for p in service.state.prs if p.task == "T-D1")
+        th = _post(c, thread_id="chat-1", message="문구는 '오늘의 신간'으로 해").json()["data"]
+        assert th["messages"][-1]["kind"] == "started" and pr.id in th["messages"][-1]["text"]
+        # 리뷰는 통과했지만 앞선 불일치 기록이 있어 자동 머지 기준 밖 → 사람 머지 대기
+        assert _settle(service, "T-D1") == "waiting_human"
+        pr = next(p for p in service.state.prs if p.task == "T-D1")  # 상태는 바꿔 끼워진다
+        assert pr.reviews[-1] == "통과" and not pr.merged
+        assert (
+            c.post("/api/planning/actions", json={"type": "mergePr", "pr": pr.id}).status_code
+            == 200
+        )
+    pr = next(p for p in service.state.prs if p.task == "T-D1")
+    assert pr.merged and _task(service).coding.status == "merged"
+    assert len([p for p in service.state.prs if p.task == "T-D1"]) == 1  # 새 PR 없음
+    assert ("update_change", pr.vcs_number) in adapter.writes
+    assert adapter.contents(pr.vcs_number)[BANNER] == fixed
+    assert "문구는 '오늘의 신간'으로 해" in llm.instructions
+    assert _task(service).coding.instruction == "문구는 '오늘의 신간'으로 해"
 
 
 def test_go_ahead_uses_last_plan(service: PlanningService, adapter) -> None:

@@ -648,3 +648,38 @@ def test_preview_keeps_outline_of_long_file() -> None:
 def test_review_prompt_does_not_ask_for_build_evidence() -> None:
     assert "빌드" in coder.REVIEW_PROMPT and "볼 수 없" in coder.REVIEW_PROMPT
     assert "기획에 없는" in coder.WRITE_PROMPT
+
+
+# ---------------------------------------------------------------- 대기 조치: 수정 지시·시간 초과
+
+
+def test_cross_check_wait_escalates_to_human_after_timeout(
+    service: PlanningService, adapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import timedelta
+
+    monkeypatch.setenv("PLANNING_CROSS_CHECK_TIMEOUT_MIN", "10")
+    mismatch = CodeReview(verdict="불일치", notes=["아직 아님"])
+    coder.set_llm(FakeLLM(reviews=[mismatch, mismatch]))
+    run(_go(service))
+    pr = next(p for p in service.state.prs if p.task == "T-D1")
+    assert pr.auto_review is not None and pr.auto_review.state == "교차검증 대기"
+    run(service.escalate_waits())  # 아직 10분 안 됨
+    pr = next(p for p in service.state.prs if p.task == "T-D1")
+    assert pr.auto_review.state == "교차검증 대기"
+    pr.auto_review.at -= timedelta(minutes=11)
+    run(service.escalate_waits())
+    pr = next(p for p in service.state.prs if p.task == "T-D1")
+    assert pr.auto_review.state == "사람 확인"
+    assert "10분 응답 없음" in (_task(service).coding.error or "")
+
+
+def test_revise_only_for_waiting_task_with_open_pr(service: PlanningService, adapter) -> None:
+    coder.set_llm(FakeLLM())
+    run(_go(service))  # 머지까지 감
+    with pytest.raises(ActionError) as err:
+        run(service.revise_dev_task("T-D1", "색을 바꿔"))
+    assert err.value.code == "NOT_REVISABLE"
+    with pytest.raises(ActionError) as err:
+        run(service.revise_dev_task("T-D1", "   "))
+    assert err.value.code == "INVALID_INPUT"
