@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { ACCOUNTS, customerAccounts, homeOf, useSession } from './session'
+import { ACCOUNTS, customerAccounts, homeOf, isLinked, useSession } from './session'
 import { useCompany } from './company'
 
 /** 로그인·회원가입 왼쪽 안내 칸 */
@@ -60,7 +60,8 @@ export default function LoginPage() {
     e.preventDefault()
     const a = customerAccounts().find((x) => x.email === email.trim().toLowerCase())
     if (!a) return setError('등록되지 않은 계정입니다. 아래 데모 계정으로 들어가세요.')
-    if (!company && !a.admin) return setError('회사 연결 전에는 시스템 관리자만 로그인할 수 있어요.')
+    if (!company && !a.admin) return setError('회사 연결 전에는 관리자만 로그인할 수 있어요.')
+    if (!isLinked(a)) return setError('회사 관리자가 계정이나 이 PC를 회사에 연결하면 로그인할 수 있어요.')
     if (!password) return setError('비밀번호를 입력하세요.')
     enter(a.id)
   }
@@ -79,9 +80,9 @@ export default function LoginPage() {
           {!company && (
             <div className="space-y-3 rounded-2xl bg-amber-50 px-4 py-4 text-sm text-amber-800">
               <p className="font-semibold">아직 회사가 연결되지 않았어요</p>
-              <p>처음 설치했다면 AXcellent에서 받은 연결 키로 처음 설정을 해 주세요. 시스템 관리자 계정도 거기서 만들어요.</p>
-              <Link to="/setup" className="btn-primary w-full py-2.5">처음 설정 시작</Link>
-              <p className="text-xs">연결을 끊은 경우에는 시스템 관리자로 로그인해서 다시 연결해요.</p>
+              <p>관리자는 운영자에게 받은 키로 관리자 가입을 해 주세요. 회사 연결도 거기서 해요.</p>
+              <Link to="/setup" className="btn-primary w-full py-2.5">관리자 가입</Link>
+              <p className="text-xs">연결을 끊은 경우에는 관리자로 로그인해서 다시 연결해요.</p>
             </div>
           )}
           <form onSubmit={submit} className="space-y-3">

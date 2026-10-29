@@ -38,7 +38,7 @@ export default function KeyIssue() {
       <header>
         <p className="text-sm text-ink-500">관제 센터</p>
         <h1 className="text-2xl font-semibold">연결 키 발급</h1>
-        <p className="mt-1 text-sm text-ink-500">키에는 회사 정보가 없어요. 고객사 시스템 관리자가 키를 넣은 뒤 회사 정보를 직접 입력해서 연결해요.</p>
+        <p className="mt-1 text-sm text-ink-500">키에는 회사 정보가 없어요. 고객사 관리자가 이 키로 관리자 가입을 하고 회사 정보를 입력해서 연결해요.</p>
       </header>
 
       <section className="card p-6">

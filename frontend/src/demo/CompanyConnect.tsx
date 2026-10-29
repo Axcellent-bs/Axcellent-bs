@@ -205,7 +205,7 @@ export default function CompanyConnect() {
               </form>
               {error && <p className="text-sm text-red-700">{error}</p>}
               <div className="flex flex-wrap items-center gap-3 border-t border-ink-100 pt-3 text-xs text-ink-500">
-                <span>키는 AXcellent 운영팀이 발급해요. 키에는 회사 정보가 없고, 다음 단계에서 직접 입력해요.</span>
+                <span>키는 AXcellent 운영자가 발급해요. 키에는 회사 정보가 없고, 다음 단계에서 직접 입력해요.</span>
                 {demoKey && <button type="button" className="btn-ghost px-2.5 py-1 text-xs" onClick={fillDemoKey}>데모: 발급된 키 넣기</button>}
               </div>
             </section>

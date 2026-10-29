@@ -6,7 +6,7 @@ import { canOpen, homeOf, servicesOf, useSession } from "@/demo/session";
 import { useCompany } from "@/demo/company";
 import { AGENTS, activeChild, matchPath, useEnabledServices, type Service, type SubItem } from "@/demo/services";
 import { useOpenHandoffCount } from "@/lib/handoffs";
-import { IconAgents, IconBell, IconBolt, IconBox, IconChart, IconDashboard, IconInbox, IconLayout, IconOffice, IconSearch } from "../icons";
+import { IconAgents, IconBell, IconBolt, IconBox, IconChart, IconDashboard, IconInbox, IconLayout, IconOffice, IconSearch, IconUsers } from "../icons";
 
 // 메뉴: AI가 상위 탭이고, 그 AI가 맡은 서비스가 하위 탭이다. 서비스 안 화면(예: 고객 문의의 상담 콘솔)은 그 아래 한 단 더.
 // 고객사 계정은 시스템 관리자 하나이고, 회사가 켠 서비스는 전부 메뉴에 보인다(서비스 고르기에서 끈 서비스만 빠짐, src/demo/session.tsx).
@@ -70,6 +70,7 @@ const SYSTEM_NAV: NavItem[] = [
   { href: "/system/connect", label: "AXcellent 연결", Icon: IconBolt, match: ["/system/connect"] },
   { href: "/system/services", label: "서비스 고르기", Icon: IconDashboard, match: ["/system/services"] },
   { href: "/system/hosts", label: "사내 PC 연결", Icon: IconBox, match: ["/system/hosts"] },
+  { href: "/system/members", label: "회원 연결", Icon: IconUsers, match: ["/system/members"] },
   { href: "/system/integrations", label: "회사 서비스 연결", Icon: IconLayout, match: ["/system/integrations"] },
 ];
 

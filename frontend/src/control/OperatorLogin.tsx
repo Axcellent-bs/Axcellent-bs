@@ -16,7 +16,7 @@ export default function OperatorLogin() {
   const submit = (e: FormEvent) => {
     e.preventDefault()
     const op = OPERATORS.find((x) => x.email === email.trim().toLowerCase())
-    if (!op) return setError('AXcellent 운영팀 계정이 아니에요. 고객사 계정은 고객사 로그인에서 들어가요.')
+    if (!op) return setError('운영자 계정이 아니에요. 고객사 계정(관리자·일반회원)은 고객사 로그인에서 들어가요.')
     if (!password) return setError('비밀번호를 입력하세요.')
     const a = signIn(op.id)
     if (a) navigate(homeOf(a), { replace: true })
@@ -27,12 +27,12 @@ export default function OperatorLogin() {
       <div className="w-full max-w-sm space-y-8">
         <div className="space-y-3 text-center">
           <img src={WORDMARK} alt="AXcellent" className="mx-auto h-9 w-auto" />
-          <p className="text-sm text-white/60">운영팀 전용 · 관제 센터</p>
+          <p className="text-sm text-white/60">운영자 전용 · 관제 센터</p>
         </div>
         <form onSubmit={submit} className="space-y-3 bg-surface p-6">
           <h1 className="text-lg font-semibold">관제 센터 로그인</h1>
           <label className="block space-y-1 text-sm">
-            <span className="text-ink-700">운영팀 이메일</span>
+            <span className="text-ink-700">운영자 이메일</span>
             <input className="field" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
           </label>
           <label className="block space-y-1 text-sm">

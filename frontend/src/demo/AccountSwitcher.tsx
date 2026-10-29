@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { useSession } from './session'
+import { kindOf, useSession } from './session'
 
-// 오른쪽 위 계정 메뉴. 고객사 계정이 시스템 관리자 하나라 계정 전환은 없고, 누가 들어와 있는지와 로그아웃만 둔다.
+// 오른쪽 위 계정 메뉴. 계정 전환은 없고, 누가 어떤 역할(운영자·관리자·일반회원)로 들어와 있는지와 로그아웃만 둔다.
 export function AccountSwitcher() {
   const { account, signOut } = useSession()
   const navigate = useNavigate()
@@ -30,15 +30,16 @@ export function AccountSwitcher() {
       <button type="button" onClick={() => setOpen((v) => !v)} aria-haspopup="menu" aria-expanded={open}
         className="flex items-center gap-2 rounded-full border border-ink-100 bg-surface py-1 pl-1 pr-3 text-sm hover:bg-ink-100">
         <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white">
-          {account.role.slice(0, 1)}
+          {account.name.slice(0, 1)}
         </span>
-        <span className="font-medium">{account.role}</span>
+        <span className="font-medium">{account.name}</span>
+        <span className="chip bg-ink-100 text-ink-700">{kindOf(account)}</span>
         <span className="text-ink-500" aria-hidden="true">▾</span>
       </button>
       {open && (
         <div role="menu" className="card absolute right-0 top-11 z-50 w-72 border border-ink-100 p-2">
           <div className="px-3 py-2 text-sm">
-            <p className="font-medium">{account.name}</p>
+            <p className="font-medium">{account.name} <span className="text-xs font-normal text-ink-500">{kindOf(account)}{account.admin ? ' · 회사 계정' : ''}</span></p>
             <p className="text-xs text-ink-500">{account.email}</p>
           </div>
           <div className="mt-1 border-t border-ink-100 pt-1">

@@ -31,6 +31,7 @@ import { useEnabledServices } from '@/demo/services'
 import { useCompany } from '@/demo/company'
 import ServiceCatalog from '@/demo/ServiceCatalog'
 import CompanyConnect from '@/demo/CompanyConnect'
+import MembersPage from '@/demo/MembersPage'
 import Setup from '@/demo/Setup'
 import CatalogHome from '@/demo/CatalogHome'
 import ControlCenter from '@/control/ControlCenter'
@@ -43,7 +44,7 @@ export function App() {
       <Route path="/" element={<CatalogHome />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
-      {/* 처음 설치했을 때: 연결 키 → 시스템 관리자 계정 → 회사 정보 */}
+      {/* 관리자(회사 계정) 가입: 운영자에게 받은 키 → 관리자 계정 → 회사 정보 */}
       <Route path="/setup" element={<Setup />} />
       {/* AXcellent 운영팀 전용 입구 */}
       <Route path="/control/login" element={<OperatorLogin />} />
@@ -93,6 +94,7 @@ function Pages() {
           {/* 예전 DejaFix 화면 주소(/infra/reports 등)는 현재 장애로 */}
           <Route path="/infra/*" element={<Navigate to="/infra" replace />} />
           <Route path="/system/hosts" element={<InfraHosts />} />
+          <Route path="/system/members" element={<MembersPage />} />
           <Route path="/system/services" element={<ServiceCatalog />} />
           <Route path="/system/connect" element={<CompanyConnect />} />
           <Route path="/control/*" element={<ControlCenter />} />
