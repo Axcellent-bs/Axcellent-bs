@@ -190,6 +190,9 @@ function SimilarCases({ incident }: { incident: Incident }) {
           ))}
         </ul>
       )}
+      {step.finished_at && (
+        <p className="text-xs text-ink-500">사건이 열린 뒤 {Math.max(Math.round((Date.parse(step.finished_at) - Date.parse(incident.opened_at)) / 1000), 0)}초 만에 찾았습니다.</p>
+      )}
       <p className="text-xs text-ink-500">참고용입니다. 이 결과로 자동 조치하지 않습니다.</p>
     </section>
   );

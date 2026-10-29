@@ -3,6 +3,7 @@
 import pytest
 
 from ax_orchestrator.mock.harness import new_incident
+from ax_orchestrator.plans.finance_anomaly import finance_anomaly
 from ax_orchestrator.plans.scenario_a import scenario_a
 
 
@@ -63,3 +64,14 @@ async def test_unknown_cause_and_action_are_left_empty(harness) -> None:
     await run(harness)
     sent = called(harness, "record_resolution")[0].input
     assert sent["root_cause"] is None and sent["action"] is None
+
+
+@pytest.mark.asyncio
+async def test_finance_anomaly_also_searches_similar_past_incidents(harness) -> None:
+    engine = await harness.start()
+    inc = new_incident()
+    await engine.run(inc, finance_anomaly())
+    order = [r.skill for _, r in harness.fakes.calls]
+    assert order.index("find_similar_cases") < order.index("record_case")
+    assert inc.steps["similar_cases"].status == "completed"
+    assert inc.view()["recommendation"]["status"] == "no_evidence"

@@ -4,6 +4,7 @@
 1. 재무 AI가 사후 감사를 다시 돌려 의심 건을 사건 기록으로 남긴다 (read)
 2. 고객지원 AI가 의심 고객의 이상 신호(문의·클레임·환불 이력)를 본다 (read, 고객이 없으면 건너뜀)
 3. 인사 AI가 사건을 회사 기억에 기록한다
+사건이 열릴 때 인사 AI `find_similar_cases`로 비슷한 과거 사건을 찾아 보여 준다(참고용, 필수 아님).
 
 돈을 돌려받거나 고객을 막는 일은 하지 않는다. 사람이 재무 화면(/finance)에서 보고 판단한다.
 """
@@ -34,10 +35,21 @@ def _signals_gate(inc: Incident) -> tuple[str, str, str] | None:
     return ("skipped", "no_buyer", "의심 고객이 특정되지 않아 고객 신호 확인 없음")
 
 
+def _similar(inc: Incident) -> dict[str, Any]:
+    return {"query": f"{inc.title} {inc.component}".strip(), "limit": 3}
+
+
 def finance_anomaly() -> Plan:
     return Plan(
         name="finance_anomaly",
         steps=[
+            Step(
+                "similar_cases",
+                "find_similar_cases",
+                "비슷한 과거 사건 찾기 (hr)",
+                build=_similar,
+                required=False,
+            ),
             Step("audit", "audit_report", "사후 감사 다시 확인 (finance)", build=_audit),
             Step(
                 "signals",
@@ -52,7 +64,7 @@ def finance_anomaly() -> Plan:
                 "record",
                 "record_case",
                 "사건 기록 (hr)",
-                also_after=("audit", "signals"),
+                also_after=("audit", "signals", "similar_cases"),
                 kind="record",
             ),
         ],
