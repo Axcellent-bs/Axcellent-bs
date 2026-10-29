@@ -22,6 +22,7 @@
 | `prepare_handoff` | read |
 | `assess_deletion_request` | read |
 | `analyze_receipt` | read |
+| `analyze_claim_request` | read |
 
 - 실행: `uv run --package ax-svc-inquiry uvicorn svc_inquiry.main:app --port 8102` (backend/ 에서, 목 모드 `AGENT_TEMPLATE_MOCK=1`)
 - 다른 에이전트가 `support`로 불러도 위 skill이면 이 서비스로 온다 (`route_target`).

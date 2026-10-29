@@ -253,9 +253,11 @@ def test_receipt_analysis_unknown_inquiry_is_not_found(client: TestClient, fake:
     assert response.status_code == 404
 
 
-def test_analyze_receipt_is_served_by_the_inquiry_service() -> None:
+def test_skills_that_read_inquiries_are_served_by_the_inquiry_service() -> None:
     """문의 저장소는 서비스마다 따로라서, 문의를 읽는 skill은 문의 서비스에서 받아야 한다."""
     from ax_agent_template.services import BY_ID, route_target
 
-    assert route_target("support", "analyze_receipt") == "inquiry"
-    assert "analyze_receipt" not in BY_ID["claims"].skills
+    for skill in ("analyze_receipt", "analyze_claim_request"):
+        assert route_target("support", skill) == "inquiry"
+        assert skill in BY_ID["inquiry"].skills
+        assert skill not in BY_ID["claims"].skills
