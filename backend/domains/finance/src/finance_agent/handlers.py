@@ -318,8 +318,8 @@ async def seller_review(request: AgentRequest) -> AgentResult:
         )
         return done(output, _evidence(["documents"], "제출 서류 미확인"), outcome="auto_rejected")
 
-    score = await state().sources.fraud_score(request.meta, data.seller_id)
-    if score is None:  # 위험 점수 없이는 판단하지 않는다
+    fraud = await state().sources.fraud_score(request.meta, data.seller_id)
+    if fraud is None:  # 위험 점수 없이는 판단하지 않는다
         output = SellerReviewOutput(
             seller_id=data.seller_id, decision="undetermined", reason_code="risk_unavailable"
         )
@@ -329,13 +329,23 @@ async def seller_review(request: AgentRequest) -> AgentResult:
             outcome="undetermined",
         )
 
-    evidence = _evidence(["data:fraud_score"], f"위험 점수 {score}", [data.seller_id])
-    params = {
+    score = fraud.score
+    summary = f"위험 점수 {score}"
+    params: dict[str, Any] = {
         "seller_id": data.seller_id,
         "risk_score": score,
         "category_codes": data.category_codes,
         "decision": "approve",
     }
+    if fraud.is_bound:
+        # 빠진 규칙을 위험으로 본 상한이다. 상한이 보류 기준(70)을 넘어도 사기로 확정하지 않고
+        # safety 보류 → 사람 확인으로만 보낸다 (상한 high의 정밀도가 낮다: 24명 평가에서 64%)
+        summary = (
+            f"위험 점수 상한 {score} (확인한 점수 {fraud.confirmed}, "
+            f"확인 못 한 규칙 {', '.join(fraud.unknown_rules)}을 위험으로 봄). 사기 확정 아님"
+        )
+        params |= {"confirmed_score": fraud.confirmed, "unknown_rules": list(fraud.unknown_rules)}
+    evidence = _evidence(["data:fraud_score"], summary, [data.seller_id])
     decision, previous, key = await _gated(
         request, "seller_review", data.seller_id, params, evidence
     )
@@ -350,6 +360,8 @@ async def seller_review(request: AgentRequest) -> AgentResult:
         seller_id=data.seller_id,
         decision=label,  # type: ignore[arg-type]
         risk_score=score,
+        confirmed_score=fraud.confirmed,
+        unknown_rules=list(fraud.unknown_rules),
         reason_code=decision.hold_reason.value if decision.hold_reason else "risk_checked",
         execution_id=decision.execution_id,
         review_id=decision.review_id,

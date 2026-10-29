@@ -30,6 +30,9 @@ class SellerReviewOutput(AxModel):
     seller_id: str
     decision: Literal["approved", "held", "rejected", "undetermined"]
     risk_score: int | None = None
+    # 빠진 규칙이 있으면 risk_score는 상한이다. 확인한 규칙만의 점수와 빠진 규칙을 같이 남긴다
+    confirmed_score: int | None = None
+    unknown_rules: list[str] = Field(default_factory=list)
     reason_code: str
     execution_id: str | None = None
     review_id: str | None = None

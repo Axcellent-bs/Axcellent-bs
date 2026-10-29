@@ -73,6 +73,23 @@ def paid_total(order: dict[str, Any]) -> int | None:
     return total
 
 
+@dataclass(frozen=True)
+class FraudScore:
+    """판매자 심사에 쓰는 위험 점수.
+
+    `score`는 safety에 넘기는 값이다. 빠진 규칙이 있으면 상한(빠진 규칙을 위험으로 본 점수)이고,
+    `confirmed`는 확인한 규칙만의 점수다. 사람 확인 화면에 둘 다 보여 상한으로 잡힌 것임을 알린다.
+    """
+
+    score: int
+    confirmed: int
+    unknown_rules: tuple[str, ...] = ()
+
+    @property
+    def is_bound(self) -> bool:
+        return bool(self.unknown_rules)
+
+
 IMPACT_FIELDS = ("failed_order_count", "affected_customer_count", "damage_amount")
 
 
@@ -95,14 +112,14 @@ class Sources(Protocol):
 
     async def paid_amount(self, meta: RequestMeta, order_id: str) -> int | None: ...
 
-    async def fraud_score(self, meta: RequestMeta, seller_id: str) -> int | None: ...
+    async def fraud_score(self, meta: RequestMeta, seller_id: str) -> FraudScore | None: ...
 
 
 def _int(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
-def fraud_score_from(output: dict[str, Any]) -> int | None:
+def fraud_score_from(output: dict[str, Any]) -> FraudScore | None:
     """data `FraudScoreOutput`에서 판매자 심사에 쓸 점수.
 
     빠진 규칙(자료가 없어 확인 못 한 규칙)이 있으면 확인한 규칙만의 점수(`score`)는 낮게 나온다
@@ -112,11 +129,13 @@ def fraud_score_from(output: dict[str, Any]) -> int | None:
     score = _int(output.get("score"))
     if score is None:
         return None
-    incomplete = output.get("complete") is False or bool(output.get("unknown_rules"))
-    if not incomplete:
-        return score
+    unknown = [r for r in output.get("unknown_rules") or [] if isinstance(r, str)]
+    if output.get("complete") is not False and not unknown:
+        return FraudScore(score=score, confirmed=score)
     worst = _int(output.get("max_possible_score"))
-    return worst if worst is not None and worst >= score else None
+    if worst is None or worst < score:
+        return None
+    return FraudScore(score=worst, confirmed=score, unknown_rules=tuple(unknown) or ("unknown",))
 
 
 def _impact_from(output: dict[str, Any], ref: str) -> Impact | None:
@@ -176,8 +195,9 @@ class MockSources:
     async def paid_amount(self, meta: RequestMeta, order_id: str) -> int | None:
         return _int(self.seed.get("payments", {}).get(str(order_id)))
 
-    async def fraud_score(self, meta: RequestMeta, seller_id: str) -> int | None:
-        return _int(self.seed.get("fraud_scores", {}).get(seller_id))
+    async def fraud_score(self, meta: RequestMeta, seller_id: str) -> FraudScore | None:
+        value = _int(self.seed.get("fraud_scores", {}).get(seller_id))
+        return FraudScore(score=value, confirmed=value) if value is not None else None
 
 
 # 같은 사건·같은 구간의 영향 분석은 이 시간 동안 다시 묻지 않는다. 재무 화면이 몇 초마다 다시 불러도
@@ -285,6 +305,6 @@ class LiveSources:
         order = body.get("data") if isinstance(body, dict) else None
         return paid_total(order) if isinstance(order, dict) else None
 
-    async def fraud_score(self, meta: RequestMeta, seller_id: str) -> int | None:
+    async def fraud_score(self, meta: RequestMeta, seller_id: str) -> FraudScore | None:
         output = await self._ask_data(meta, "fraud_score", {"seller_id": seller_id})
         return fraud_score_from(output) if output else None

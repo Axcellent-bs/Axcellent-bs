@@ -239,7 +239,7 @@ export interface Review {
 }
 
 // ---------------------------------------------------------------- 유지되는 기능
-export interface MarketOp { skill: "seller_review" | "settlement_hold"; seller_id: string; decision?: string; status?: string; risk_score?: number | null; reason_code: string; review_id: string | null; at: string }
+export interface MarketOp { skill: "seller_review" | "settlement_hold"; seller_id: string; decision?: string; status?: string; risk_score?: number | null; confirmed_score?: number | null; unknown_rules?: string[]; reason_code: string; review_id: string | null; at: string }
 export interface SelfTestCheck { name: string; ok: boolean; detail: string; level: "fail" | "warn" }
 export interface SelfTest {
   result: "pass" | "warn" | "fail";

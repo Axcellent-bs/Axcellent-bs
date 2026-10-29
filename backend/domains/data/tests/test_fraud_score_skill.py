@@ -259,9 +259,12 @@ def test_finance_reads_the_bound_from_this_output(shop: Db) -> None:
     assert output["complete"] is False
     assert output["score"] == 28
     # 재무는 불완전한 점수(28)가 아니라 보수적 상한(73)으로 심사한다
-    assert fraud_score_from(output) == 73
+    bound = fraud_score_from(output)
+    assert bound is not None and (bound.score, bound.confirmed) == (73, 28)
+    assert bound.unknown_rules == (DUP_BUSINESS, FRAUD_SIMILAR)
 
     complete = {**output, "unknown_rules": [], "complete": True, "max_possible_score": 28}
-    assert fraud_score_from(complete) == 28
+    full = fraud_score_from(complete)
+    assert full is not None and (full.score, full.confirmed, full.unknown_rules) == (28, 28, ())
     legacy = {k: v for k, v in output.items() if k not in ("complete", "max_possible_score")}
     assert fraud_score_from(legacy) is None  # 상한이 없는 예전 응답은 판단하지 않는다
