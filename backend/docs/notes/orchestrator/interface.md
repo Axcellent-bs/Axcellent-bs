@@ -6,7 +6,7 @@
 | 입구 | 형식 | 처리 |
 | --- | --- | --- |
 | 이벤트 버스(지금은 개발용 `POST /api/events`) | `EventEnvelope` | `event_id` 중복 제거 → 사건 판단 → 사건이면 `ctx_inc_<hex>` 발급 |
-| `POST /a2a` | `AgentRequest` | 총괄 자신의 skill. 지금은 `find_active_incident`(읽기, 요청자 `support`)만: 구성요소·시각에 맞는 사건의 `context_id`를 돌려준다. 시각이 없으면 열린 사건만, 있으면 사건 구간(시작 15분 전 ~ 종료)을 본다. 이상 보고·해결 보고 접수는 계약이 정해진 뒤 |
+| `POST /a2a` | `AgentRequest` | 총괄 자신의 skill. 지금은 `find_active_incident`(읽기, 요청자 `support`·`planning`)만: 구성요소·시각에 맞는 사건의 `context_id`를 돌려준다. 시각이 없으면 열린 사건만, 있으면 사건 구간(시작 15분 전 ~ 종료)을 본다. 이상 보고·해결 보고 접수는 계약이 정해진 뒤 |
 
 구독 이벤트: `shop.degraded`, `shop.recovered`, `infra.anomaly_detected`, `metric.anomaly`, `support.inquiry_received`, `support.inquiry_surge`.
 

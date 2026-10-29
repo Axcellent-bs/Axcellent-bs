@@ -16,7 +16,8 @@
       "output_schema": "shared/contracts/src/ax_contracts/schemas/escalation.py#FindActiveIncidentOutput",
       "grade": "read",
       "allowed_requesters": [
-        "support"
+        "support",
+        "planning"
       ],
       "verifier": null,
       "priority": "required",
