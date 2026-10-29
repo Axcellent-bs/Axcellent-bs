@@ -19,6 +19,22 @@ export interface FinanceMeta {
 }
 export interface Envelope<T> { data: T; meta: FinanceMeta }
 
+// ---------------------------------------------------------------- 고객지원 비용 기록 (record_support_cost가 장부에 남긴 것)
+export interface SupportCostRecord {
+  record_id: string;
+  inquiry_id: number;
+  order_id: string | null;
+  resolution: string;
+  claim_decision: string | null;
+  refund_amount: number;
+  coupon_issued: boolean;
+  expense_used: boolean;
+  /** 장부에서 주문을 못 찾으면 null (추정하지 않는다) */
+  shipping_fee: number | null;
+  context_id: string;
+  recorded_at: string;
+}
+
 // ---------------------------------------------------------------- §11 overview
 export type TodoKind = "settlement_batch" | "closing_confirm" | "recon_exception" | "audit_finding" | "policy_alert";
 export interface FinanceTodo { kind: TodoKind; title: string; count: number | null; amount: number | null; link: string | null }
@@ -352,6 +368,9 @@ export const finance = {
   incidents: () => fin<Envelope<IncidentSummary[]>>("/api/finance/incidents"),
   /** 없는 사건이면 404 {"error": {"code": "not_found"}} */
   incident: (contextId: string) => fin<Envelope<IncidentDetail>>(`/api/finance/incidents/${encodeURIComponent(contextId)}`),
+
+  /** 고객지원이 닫은 문의의 비용 기록. 최근 것이 먼저 */
+  supportCosts: () => fin<Envelope<SupportCostRecord[]>>("/api/finance/support-costs"),
 
   // 유지
   marketOps: () => data(fin<{ data: MarketOp[] }>("/api/finance/market-ops")),
