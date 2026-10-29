@@ -435,6 +435,12 @@ export const initialState: State = {
     { t: '10-22 09:05', ctx: 'ctx_req_0008', kind: '자동 확정', ref: 'SPEC-4', what: '도서 상세의 출간일 표기 오타 수정', basis: '질문 없음·경고 없음·근거 2개', verifier: '조건 검사 (안전 레이어 execute() 기록)', result: '확정 → 작업 T-8' },
     { t: '10-22 09:06', ctx: 'ctx_req_0008', kind: '자동 머지', ref: 'PR #27', what: 'R1: 도서 상세의 출간일 표기 오타 수정', rule: 'AR-1', basis: 'shop-web/ 30줄·2파일 이하 · 경고 없음', verifier: '안전 레이어 코드 규칙 (변경 줄·파일·허용 경로)', result: '머지 · dev 배포' },
     { t: '10-22 10:20', ctx: 'ctx_inc_0001', kind: '자동 확정', ref: 'SPEC-6', what: '결제 경로 설정 변경 카나리 배포', basis: '질문 없음·경고 없음·근거 2개', verifier: '조건 검사 (안전 레이어 execute() 기록)', result: '확정 → 작업 T-10' },
+    // 승인 감사 예시 (사전 승인 대신 사후 감사로 보는 건들)
+    { t: '10-22 08:40', ctx: 'ctx_req_0005', kind: '교차검증 승인', ref: 'PR #26', what: 'R1: 공지 배너 문구 2줄 수정', basis: '기준 밖(2파일) · 데이터분석 근거: 같은 경로 최근 30일 장애 0건', verifier: '데이터분석 + 총괄 (둘 다 승인)', result: '머지 · 관찰 시작' },
+    { t: '10-22 09:30', ctx: 'ctx_req_0010', kind: '교차검증 거절', ref: 'PR #31', what: 'R2: 쿠폰 적용 순서 변경', basis: '쿠폰 지급 로직(promotions.py) 보호 경로 · 재무 영향 계산 불가', verifier: '재무 + 총괄', result: '거절 → 작업 반려, 사람 확인' },
+    { t: '10-22 11:10', ctx: 'ctx_req_0005', kind: '관찰 통과', ref: 'PR #26', what: '공지 배너 문구 2줄 수정', basis: '머지 뒤 관찰 2분 · 장애·revert 0건', verifier: '안전 레이어 관찰 기록', result: '학습 근거 1건 추가' },
+    { t: '10-22 11:15', ctx: 'ctx_req_0005', kind: '기준 제안', ref: 'AR-2', what: 'shop-web/notice/ 40줄·3파일 이하 자동 머지', rule: 'AR-2', basis: '관찰 통과 머지 2건(PR #24·#26) · 백테스트 장애 0건', verifier: '재무 AI review_threshold_change (안전 장치 안)', result: '승인 대기' },
+    { t: '10-22 13:02', ctx: 'ctx_inc_0001', kind: '기준 해제', ref: 'AR-1', what: '자동 머지 기준 AR-1 끔', rule: 'AR-1', basis: '이 기준으로 머지한 경로에서 장애 연결 (ctx_inc_0001)', verifier: '안전 레이어 자동 축소', result: '해제 → 같은 경로는 다시 교차검증' },
   ],
   draftsIn: 2,
   draftsAccepted: 0,

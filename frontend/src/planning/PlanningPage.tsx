@@ -7,7 +7,7 @@ import { useEffect, useReducer, useRef, useState } from 'react'
 import { Chip, ToastOutlet, ToastProvider, useToast, type NavItem } from '@dejafix/common-frontend'
 import { ACTION_ERROR_EVENT, useSharedStore } from './store'
 import { apiBase } from './api'
-import { initialState, reducer } from './data'
+import { TODAY, initialState, reducer, type State as DemoState } from './data'
 import { DevToolsDialog } from '@/demo/DevTools'
 import { IconGear } from '@/components/icons'
 import { Dep, Point } from './parts'
@@ -92,6 +92,8 @@ export default function PlanningPage({ part = 'planning' }: { part?: PlanningPar
 }
 
 const EXAMPLE_KEY = 'axcellent-planning-example'
+// 예시의 AI 승인 감사는 "오늘" 건만 보여서, 예시 기록 날짜를 오늘로 옮긴다
+const todayDemo = (s: DemoState): DemoState => ({ ...s, audit: s.audit.map((a) => ({ ...a, t: `${TODAY}${a.t.slice(5)}` })) })
 
 function Planning({ part }: { part: PlanningPart }) {
   const P = PARTS[part]
@@ -101,7 +103,7 @@ function Planning({ part }: { part: PlanningPart }) {
   const [live, liveDispatch, connected] = useSharedStore(apiBase(part))
   // 예시 모드: 서버 대신 화면 안의 프로토타입 예시 데이터(data.ts)로 흐름을 보여 준다. 서버 데이터는 건드리지 않는다
   const [example, setExample] = useState(() => { try { return localStorage.getItem(EXAMPLE_KEY) === '1' } catch { return false } })
-  const [demo, demoDispatch] = useReducer(reducer, initialState)
+  const [demo, demoDispatch] = useReducer(reducer, initialState, todayDemo)
   const state = example ? demo : live
   const dispatch = example ? demoDispatch : liveDispatch
   const pickExample = (on: boolean) => {
