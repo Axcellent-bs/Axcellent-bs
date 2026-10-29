@@ -38,6 +38,13 @@ def _flag(env: Mapping[str, str], name: str) -> bool:
     return env.get(name, "").strip().lower() in TRUE_VALUES
 
 
+def _float(env: Mapping[str, str], name: str, default: float) -> float:
+    try:
+        return float(env.get(name, "") or default)
+    except ValueError:
+        return default
+
+
 def _int(env: Mapping[str, str], name: str, default: int) -> int:
     try:
         return int(env.get(name, "") or default)
@@ -58,6 +65,12 @@ class HrSettings:
     - `planning_mode`·`memory_mode`: `mock`(기본) 또는 실제 연동(`a2a`·`http`, `clients/real.py`).
     - `lock_ttl_minutes`: 변경 잠금을 잡고 있는 요청이 이 시간 넘게 끝나지 않으면 잠금을 푼다.
     - `similarity_threshold`: 계획 비교에서 "관련 카드"로 보는 유사도 하한(제안값).
+    - `dense_search`: 계획 비교의 관련 카드 검색을 임베딩(Dense)으로 한다. 설정이 없거나 호출이
+      실패하면 Dice로 대체한다(`HR_DENSE_SEARCH=0`이면 끈다).
+    - `dense_min_cosine`: Dense에서 "관련 카드"로 보는 코사인 하한. 골든 셋 개발용 질의에서 정한
+      값(0.7063)을 올림했고, 임베딩 모델이 바뀌면 다시 정한다.
+    - `dense_match_cosine`: 확정된 결정과 "같은 방향"(MATCH)으로 보는 코사인. 같은 개발용 질의에서
+      첫 결과 정밀도 100%가 되는 가장 낮은 값이다.
     """
 
     mock: bool = True
@@ -67,6 +80,9 @@ class HrSettings:
     hold_ttl_minutes: int = 10
     card_auto_confirm: str = "high"
     similarity_threshold: float = 0.2
+    dense_search: bool = True
+    dense_min_cosine: float = 0.71
+    dense_match_cosine: float = 0.72
     timer_enabled: bool = False
     lock_ttl_minutes: int = 1440
     planning_mode: str = "mock"
@@ -86,4 +102,8 @@ class HrSettings:
             lock_ttl_minutes=_int(source, "HR_LOCK_TTL_MIN", 1440),
             planning_mode=source.get("HR_PLANNING_MODE") or "mock",
             memory_mode=source.get("HR_MEMORY_MODE") or "mock",
+            dense_search=source.get("HR_DENSE_SEARCH", "1").strip().lower()
+            not in ("0", "false", "off"),
+            dense_min_cosine=_float(source, "HR_DENSE_MIN_COSINE", 0.71),
+            dense_match_cosine=_float(source, "HR_DENSE_MATCH_COSINE", 0.72),
         )

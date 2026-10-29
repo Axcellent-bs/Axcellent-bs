@@ -334,7 +334,13 @@ function PlanChecker() {
       {result && v && (
         <div className="space-y-2 rounded-2xl border border-ink-100 p-4">
           <Chip label={v.label} tone={v.tone} />
-          {result.findings.map((f, i) => <p key={i} className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">{f.message}</p>)}
+          {result.findings.map((f, i) => (
+            <div key={i} className="space-y-1 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
+              <p>{f.message}</p>
+              {f.explanation && <p className="text-amber-900/80">AI 설명(참고용): {f.explanation}</p>}
+              {f.card_ids.length > 0 && <p className="text-[11px] text-amber-700/80" title="판정 근거로 쓴 결정 카드">근거 카드 {f.card_ids.join(", ")}</p>}
+            </div>
+          ))}
           {result.no_related_cards && <p className="text-xs text-ink-500">관련된 과거 기록을 찾지 못했습니다. 기록에 없는 것이지 문제가 없다는 뜻은 아닙니다.</p>}
         </div>
       )}
