@@ -24,3 +24,5 @@
 | [requirements.md](requirements.md) | 요구사항 |
 | [team-rules.md](team-rules.md) | 팀 규칙 |
 | [departments/](departments/) | 부서별 문서 |
+| [notes/](notes/) | 부서별 작업 노트 (설계안·시험 기록) |
+| [notes/support/2026-10-29-llm-setup-and-receipt-test.md](notes/support/2026-10-29-llm-setup-and-receipt-test.md) | 고객지원 LLM 연결·영수증 대조 시험 기록 (답변이 고정 문구로 나올 때 확인 순서, Gemini 모델별 응답 시간, 영수증 사진별 분석) |
