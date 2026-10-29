@@ -102,6 +102,7 @@ SERVICES: tuple[Service, ...] = (
             "fraud_score",
             "kpi_summary",
             "root_cause_hypotheses",
+            "accuracy_report",
         ),
         "데이터 분석",
     ),

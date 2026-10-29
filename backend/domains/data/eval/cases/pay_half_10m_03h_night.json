@@ -1,0 +1,42 @@
+{
+  "id": "pay_half_10m_03h_night",
+  "kind": "payment_fault",
+  "description": "결제 장애 10분, 세기 50%, 3시",
+  "window": {
+    "from": "2026-09-08T03:00:00Z",
+    "to": "2026-09-08T04:00:00Z"
+  },
+  "traffic": {
+    "orders_per_5m": 5
+  },
+  "injection": {
+    "type": "payment_failure",
+    "from": "2026-09-08T03:30:00Z",
+    "to": "2026-09-08T03:40:00Z",
+    "fraction": 0.5
+  },
+  "cause": {
+    "type": "none"
+  },
+  "llm": "hallucinate",
+  "expected": {
+    "anomaly": {
+      "expected": true,
+      "metric": "payment_fail_rate",
+      "onset": "2026-09-08T03:30:00Z",
+      "first_failure_bucket": "2026-09-08T03:35:00Z",
+      "unknown_expected": false
+    },
+    "impact": {
+      "failed_order_count": 1,
+      "affected_customer_count": 1,
+      "damage_amount": 29000,
+      "all_failed_payments": 1,
+      "declined_payments": 0
+    },
+    "root_cause": {
+      "injected": "none",
+      "ref": null
+    }
+  }
+}

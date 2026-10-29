@@ -1,0 +1,77 @@
+{
+  "description": "라벨 있는 판매자 케이스 (사기 점수)",
+  "sellers": [
+    {
+      "id": "seller_fraud_dump",
+      "label": "fraud",
+      "description": "가입 2일, 상품 80% 저가, 24시간 120개 등록, 중복 사업자",
+      "facts": {
+        "joined_days": 2,
+        "low_price_ratio": 0.8,
+        "business_hash_duplicated": true,
+        "listings_last_24h": 120,
+        "max_fraud_card_similarity": 0.3
+      }
+    },
+    {
+      "id": "seller_fraud_copy",
+      "label": "fraud",
+      "description": "가입 1일, 지난 사기 판매자와 매우 비슷, 저가 60%",
+      "facts": {
+        "joined_days": 1,
+        "low_price_ratio": 0.6,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 70,
+        "max_fraud_card_similarity": 0.9
+      }
+    },
+    {
+      "id": "seller_fraud_quiet",
+      "label": "fraud",
+      "description": "가입 5일, 중복 사업자, 저가 50%, 등록은 적음",
+      "facts": {
+        "joined_days": 5,
+        "low_price_ratio": 0.5,
+        "business_hash_duplicated": true,
+        "listings_last_24h": 12,
+        "max_fraud_card_similarity": 0.4
+      }
+    },
+    {
+      "id": "seller_new_honest",
+      "label": "normal",
+      "description": "가입 3일 신규, 가격 정상, 등록 20개",
+      "facts": {
+        "joined_days": 3,
+        "low_price_ratio": 0.05,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 20,
+        "max_fraud_card_similarity": 0.0
+      }
+    },
+    {
+      "id": "seller_big_honest",
+      "label": "normal",
+      "description": "오래된 대형 판매자, 하루 200개 등록",
+      "facts": {
+        "joined_days": 400,
+        "low_price_ratio": 0.1,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 200,
+        "max_fraud_card_similarity": 0.1
+      }
+    },
+    {
+      "id": "seller_sale_honest",
+      "label": "normal",
+      "description": "1년 된 판매자가 재고 정리 세일 (저가 70%)",
+      "facts": {
+        "joined_days": 365,
+        "low_price_ratio": 0.7,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 30,
+        "max_fraud_card_similarity": 0.0
+      }
+    }
+  ]
+}

@@ -14,6 +14,7 @@
 - grade_counts: `execute_decided`의 grade별 건수.
 - blocked_counts: `rejected`의 `payload.reason_code`별 건수 (없으면 "UNKNOWN").
 - escalation_count: `escalated` 기록 수.
+- human_feedback: 받은 요청 반려율·승인 거절률·확인할 수 없음 비율 (`human_feedback()`).
 
 값을 정할 수 없으면 추측하지 않고 None·0으로 두고 `notes`에 "확인할 수 없음" 사유를 남긴다.
 """
@@ -26,7 +27,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from ax_contracts.data_access.common_log import LogRecord
-from ax_contracts.schemas.data import IncidentKpi, KpiSummaryOutput
+from ax_contracts.schemas.data import HumanFeedback, IncidentKpi, KpiSummaryOutput
 
 INCIDENT_PREFIX = "ctx_inc_"
 RESOLVED_EVENT = "incident.resolved"
@@ -138,5 +139,48 @@ def compute_kpi(records: list[LogRecord], context_ids: list[str] | None = None) 
         grade_counts=dict(grades),
         blocked_counts=dict(blocked),
         escalation_count=len(escalated),
+        human_feedback=human_feedback(records),
     )
     return KpiComputation(output=output, notes=notes, recovery_basis=basis)
+
+
+# 사람 반응으로 세는 결과 코드 (공통 로그 payload.outcome)
+HANDOFF_DONE, HANDOFF_REJECTED = "handoff_done", "handoff_rejected"
+REVIEW_APPROVED, REVIEW_REJECTED = "review_approved", "review_rejected"
+UNKNOWN_OUTCOMES = frozenset({"unavailable", "service_disabled"})
+
+
+def _share(part: int, whole: int) -> float | None:
+    return round(part / whole, 4) if whole else None
+
+
+def human_feedback(records: list[LogRecord]) -> HumanFeedback | None:
+    """공통 로그에서 사람 반응 비율을 센다. 사건이 아닌 기록(받은 요청 등)도 센다.
+
+    - 받은 요청: dashboard-api가 일을 끝낼 때 남기는 `task_status`
+      (`handoff_done`·`handoff_rejected`)
+    - 승인: safety가 사람 결정 때 남기는 `task_status` (`review_approved`·`review_rejected`).
+      마감이 지나 자동 거절된 건은 사람 결정이 아니라 세지 않는다.
+    - 확인할 수 없음: 에이전트 응답 `result_sent` 중 결과 코드가 `unavailable`·`service_disabled`
+    기록이 하나도 없으면 None이다.
+    """
+    if not records:
+        return None
+    outcomes = [str(r.payload.get("outcome") or "") for r in records if r.kind == "task_status"]
+    handoffs = [o for o in outcomes if o in (HANDOFF_DONE, HANDOFF_REJECTED)]
+    reviews = [o for o in outcomes if o in (REVIEW_APPROVED, REVIEW_REJECTED)]
+    results = [r for r in records if r.kind == "result_sent"]
+    unknown = [r for r in results if r.payload.get("outcome") in UNKNOWN_OUTCOMES]
+    handoff_rejected = handoffs.count(HANDOFF_REJECTED)
+    review_rejected = reviews.count(REVIEW_REJECTED)
+    return HumanFeedback(
+        handoffs_closed=len(handoffs),
+        handoffs_rejected=handoff_rejected,
+        handoff_reject_rate=_share(handoff_rejected, len(handoffs)),
+        reviews_decided=len(reviews),
+        reviews_rejected=review_rejected,
+        review_reject_rate=_share(review_rejected, len(reviews)),
+        results_total=len(results),
+        results_unknown=len(unknown),
+        unknown_rate=_share(len(unknown), len(results)),
+    )

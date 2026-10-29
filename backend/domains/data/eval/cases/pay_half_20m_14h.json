@@ -1,0 +1,44 @@
+{
+  "id": "pay_half_20m_14h",
+  "kind": "payment_fault",
+  "description": "결제 장애 20분, 세기 50%, 14시",
+  "window": {
+    "from": "2026-09-04T14:00:00Z",
+    "to": "2026-09-04T15:00:00Z"
+  },
+  "traffic": {
+    "orders_per_5m": 5
+  },
+  "injection": {
+    "type": "payment_failure",
+    "from": "2026-09-04T14:20:00Z",
+    "to": "2026-09-04T14:40:00Z",
+    "fraction": 0.5
+  },
+  "cause": {
+    "type": "notice",
+    "minutes_before": 12,
+    "notice_id": "ntc_eval_03"
+  },
+  "llm": "grounded",
+  "expected": {
+    "anomaly": {
+      "expected": true,
+      "metric": "payment_fail_rate",
+      "onset": "2026-09-04T14:20:00Z",
+      "first_failure_bucket": "2026-09-04T14:20:00Z",
+      "unknown_expected": false
+    },
+    "impact": {
+      "failed_order_count": 13,
+      "affected_customer_count": 12,
+      "damage_amount": 336600,
+      "all_failed_payments": 15,
+      "declined_payments": 2
+    },
+    "root_cause": {
+      "injected": "notice",
+      "ref": "ntc_eval_03"
+    }
+  }
+}

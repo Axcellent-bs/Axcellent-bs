@@ -193,6 +193,21 @@ def create_app(
             return _error(404, "NOT_FOUND", "보류 건이 없다")
         except ValueError as exc:
             return _error(409, "ALREADY_DECIDED", str(exc))
+        # 사람 결정을 공통 로그에 남긴다 (data `kpi_summary`의 승인 거절률).
+        # 누가 결정했는지는 남기지 않는다
+        log_event(
+            review.context_id,
+            review.tenant_id,
+            "task_status",
+            {
+                "review_id": review.review_id,
+                "execution_id": review.execution_id,
+                "outcome": f"review_{review.status}",
+            },
+            source="safety",
+            skill=review.action,
+            task_status=review.status,
+        )
         return _ok(review.model_dump(mode="json"))
 
     @app.get("/api/safety/audit-logs")

@@ -1,0 +1,44 @@
+{
+  "id": "sale_x2_10h",
+  "kind": "sale",
+  "description": "세일 주문 2배 (정상)",
+  "window": {
+    "from": "2026-09-17T10:00:00Z",
+    "to": "2026-09-17T11:00:00Z"
+  },
+  "traffic": {
+    "orders_per_5m": 5
+  },
+  "injection": {
+    "type": "sale",
+    "factor": 2.0,
+    "from": "2026-09-17T10:00:00Z",
+    "to": "2026-09-17T11:00:00Z"
+  },
+  "cause": {
+    "type": "campaign",
+    "minutes_before": 5,
+    "notice_id": "ntc_eval_16"
+  },
+  "llm": "grounded",
+  "expected": {
+    "anomaly": {
+      "expected": false,
+      "metric": null,
+      "onset": null,
+      "first_failure_bucket": null,
+      "unknown_expected": false
+    },
+    "impact": {
+      "failed_order_count": 0,
+      "affected_customer_count": 0,
+      "damage_amount": 0,
+      "all_failed_payments": 4,
+      "declined_payments": 4
+    },
+    "root_cause": {
+      "injected": "campaign",
+      "ref": "ntc_eval_16"
+    }
+  }
+}

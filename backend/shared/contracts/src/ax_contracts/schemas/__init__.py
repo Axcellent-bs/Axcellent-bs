@@ -6,6 +6,9 @@
 from ax_contracts.schemas.agent_card import AgentCard, Capabilities, Skill
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel, UtcDatetime
 from ax_contracts.schemas.data import (
+    AccuracyMiss,
+    AccuracyReportInput,
+    AccuracyReportOutput,
     AnomalyDetectionInput,
     AnomalyDetectionOutput,
     BusinessMetric,
@@ -15,6 +18,7 @@ from ax_contracts.schemas.data import (
     FraudReason,
     FraudScoreInput,
     FraudScoreOutput,
+    HumanFeedback,
     ImpactAnalysisInput,
     ImpactAnalysisOutput,
     IncidentKpi,
@@ -336,6 +340,10 @@ __all__ = [
     "IncidentKpi",
     "KpiSummaryInput",
     "KpiSummaryOutput",
+    "AccuracyMiss",
+    "AccuracyReportInput",
+    "AccuracyReportOutput",
+    "HumanFeedback",
     "MetricVerdict",
     "CauseFact",
     "CauseHypothesis",

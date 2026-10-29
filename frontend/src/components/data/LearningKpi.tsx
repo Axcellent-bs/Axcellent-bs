@@ -1,4 +1,5 @@
 import { Bars, Stat } from "@/components/admin/bits";
+import { AgentAccuracy } from "@/components/data/AgentAccuracy";
 import { ChartWithTable, RingMeter, TableView } from "@/components/charts";
 import { Chip, Empty, ErrorBox, Panel, TONE, Waiting, useResource } from "@/components/finance/bits";
 import { humanId, shortDateTime } from "@/lib/format";
@@ -99,11 +100,20 @@ function KpiBody({ res }: { res: A2AResult<KpiSummaryOutput> }) {
 
 function LiveKpi({ tick }: { tick: number }) {
   const res = useResource("kpi", () => dataAi.kpiSummary().then((r) => ({ data: r, meta: { mock: false } })), tick);
-  if (!res.env) return res.error ? <ErrorBox message={`${res.error}. ${DATA_SERVER}가 켜져 있는지 확인해 주세요.`} onRetry={res.reload} /> : <Waiting />;
+  if (!res.env) {
+    if (!res.error) return <Waiting />;
+    return (
+      <div className="space-y-5">
+        <ErrorBox message={`${res.error}. ${DATA_SERVER}가 켜져 있는지 확인해 주세요.`} onRetry={res.reload} />
+        <AgentAccuracy tick={tick} feedback={undefined} feedbackError={`운영 중 반응 비율: ${UNKNOWN} (KPI를 받지 못함)`} />
+      </div>
+    );
+  }
   return (
     <>
       {res.error && <div className="mb-3"><ErrorBox message={`새로 받지 못해 이전 값을 보여 줍니다. ${res.error}`} onRetry={res.reload} /></div>}
       <KpiBody res={res.env.data} />
+      <div className="mt-5"><AgentAccuracy tick={tick} feedback={res.env.data.output.human_feedback ?? null} /></div>
     </>
   );
 }
@@ -111,9 +121,12 @@ function LiveKpi({ tick }: { tick: number }) {
 export function LearningKpi({ tick }: { tick: number }) {
   if (!kpiLive) {
     return (
-      <Panel id="data-learning" title="학습 효과·KPI">
-        <Empty>데이터 AI 토큰(VITE_DATA_A2A_TOKEN)이 없어 평상시 지표를 받지 않아요. backend/의 scripts/run_web.sh로 화면을 켜면 토큰이 들어갑니다.</Empty>
-      </Panel>
+      <div className="space-y-5">
+        <Panel id="data-learning" title="학습 효과·KPI">
+          <Empty>데이터 AI 토큰(VITE_DATA_A2A_TOKEN)이 없어 평상시 지표를 받지 않아요. backend/의 scripts/run_web.sh로 화면을 켜면 토큰이 들어갑니다.</Empty>
+        </Panel>
+        <AgentAccuracy tick={tick} feedback={null} />
+      </div>
     );
   }
   return <LiveKpi tick={tick} />;
