@@ -107,6 +107,8 @@ const rawOf = (...parts: (string | null | undefined | false)[]) => parts.filter(
 
 /** 방 이름: "결제가 서버 오류로 자꾸 실패해요" */
 export function incidentTitle(inc: Pick<OrchIncident, "title" | "component">): string {
+  // 고객지원 처리 결과 사건은 총괄이 사람이 읽는 제목("고객 문의 #1 처리 결과 기록")을 이미 준다
+  if (inc.component.startsWith("support-inquiry-")) return inc.title;
   const comp = COMPONENT_KO[inc.component] ?? inc.component;
   const metric = metricOf(inc);
   if (inc.component === "finance") return (metric && FINANCE_KO[metric]) || "돈 흐름에서 이상한 점을 찾았어요";
@@ -121,7 +123,7 @@ const ACTION_KO: Record<string, string> = {
   rollback_deployment: "배포 되돌리기", verify_recovery: "복구 확인", restart_service: "서비스 다시 켜기",
   find_related_prs: "관련 코드 변경 찾기", link_incident: "사건에 코드 변경 연결", verify_rollback_target: "되돌릴 배포 확인",
   draft_notice: "공지 초안 작성", publish_notice: "공지 게시", get_notice: "공지 조회",
-  loss_aggregation: "손실 리포트", record_case: "사건 기록", check_plan: "예전 결정과 비교",
+  loss_aggregation: "손실 리포트", record_support_cost: "배송비·비용 기록 확인", record_case: "사건 기록", check_plan: "예전 결정과 비교",
   // 돈이 나가는 일·안전 관문
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 확정",
   seller_review: "판매자 입점 심사", settlement_hold: "판매자 정산 멈춤", hold_settlement: "판매자 정산 멈춤",
@@ -299,7 +301,9 @@ export function incidentItems(inc: OrchIncident): ChatItem[] {
   const out: ChatItem[] = [];
   const opened = inc.opened_at ?? inc.events[0]?.at ?? "";
   out.push({ kind: "separator", id: `${room}:sep`, at: opened, room, text: `${incidentTitle(inc)}${opened ? ` · ${clockKo(opened)} 시작` : ""}`, raw: `사건 번호 ${inc.context_id}`, variant: "topic" });
-  out.push({ kind: "system", id: `${room}:open`, at: opened, room, text: `${inc.component === "finance" ? "재무 AI가 사후 감사에서" : "캣북스 쇼핑몰이"} "${incidentTitle(inc)}" 신호를 보내서 총괄 AI가 사건을 열었어요.` });
+  out.push({ kind: "system", id: `${room}:open`, at: opened, room, text: inc.component.startsWith("support-inquiry-")
+      ? `고객지원 AI가 문의를 해결 종료해서 총괄 AI가 "${incidentTitle(inc)}" 사건을 열고 재무·인사에 넘겼어요.`
+      : `${inc.component === "finance" ? "재무 AI가 사후 감사에서" : "캣북스 쇼핑몰이"} "${incidentTitle(inc)}" 신호를 보내서 총괄 AI가 사건을 열었어요.` });
 
   for (const step of inc.steps) {
     const sid = `${room}:${step.step_id}`;
