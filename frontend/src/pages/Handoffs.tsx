@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
 import { AGENTS, SERVICES } from "@/demo/services";
 import { ApiError } from "@/lib/apiError";
@@ -9,6 +9,7 @@ import {
   type HandoffStatus, type HandoffTask,
 } from "@/lib/handoffs";
 import { skillLabel } from "@/lib/labels";
+import HandoffsExample from "./HandoffsExample";
 
 // 받은 요청(코드·API 이름은 할 일함·handoff): 회사가 켜지 않은 서비스로 가던 일을 에이전트가 사람에게 넘긴 것 (dashboard-api GET /api/dashboard/handoffs).
 // 사람은 결과를 적고 끝내거나 반려한다 (POST /api/dashboard/handoffs/{id}/complete, 사람 토큰).
@@ -134,7 +135,31 @@ function Detail({ task, onClosed }: { task: HandoffTask; onClosed: (t: HandoffTa
   );
 }
 
+// 실제 데이터 / 예시 데이터 전환. 기획·개발 화면과 같은 방식으로 브라우저에 기억한다
+const EXAMPLE_KEY = "axcellent-handoffs-example";
+
+function DataToggle({ example, onPick }: { example: boolean; onPick: (on: boolean) => void }) {
+  return (
+    <div className="flex gap-1 rounded-full bg-ink-50 p-0.5" role="group" aria-label="데이터 보기">
+      {([[false, "실제 데이터"], [true, "예시 데이터"]] as const).map(([on, label]) => (
+        <button key={label} type="button" aria-pressed={example === on} onClick={() => onPick(on)}
+          className={`rounded-full px-3 py-1 text-xs font-medium ${example === on ? "bg-accent text-white" : "text-ink-700 hover:bg-ink-100"}`}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
 export default function Handoffs() {
+  const [example, setExample] = useState(() => { try { return localStorage.getItem(EXAMPLE_KEY) === "1"; } catch { return false; } });
+  const pick = (on: boolean) => {
+    setExample(on);
+    try { localStorage.setItem(EXAMPLE_KEY, on ? "1" : "0"); } catch { /* 저장이 막혀도 이번 화면에서는 바뀐다 */ }
+  };
+  const toggle = <DataToggle example={example} onPick={pick} />;
+  return example ? <HandoffsExample toggle={toggle} /> : <RealHandoffs toggle={toggle} />;
+}
+
+function RealHandoffs({ toggle }: { toggle: ReactNode }) {
   const [params, setParams] = useSearchParams();
   const status = (params.get("status") ?? "open") as HandoffStatus | "";
   const unit = params.get("unit") ?? "";
@@ -188,6 +213,7 @@ export default function Handoffs() {
           <p className="mt-0.5 text-sm text-ink-500">결과를 적고 끝내면 맡긴 AI에게 전해져요.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
+          {toggle}
           <select className="field w-auto py-1.5 text-xs" aria-label="상태" value={status} onChange={(e) => setParams(() => {
             const next = new URLSearchParams(params);
             next.set("status", e.target.value);
