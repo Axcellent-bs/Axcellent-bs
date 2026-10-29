@@ -3,10 +3,11 @@
 // 공통 화면 컴포넌트(@dejafix/common-frontend)의 스타일은 .planning-scope 안에만 적용된다 (postcss.config.js).
 import '@dejafix/common-frontend/styles.css'
 import './planning.css'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useReducer, useRef, useState } from 'react'
 import { Chip, ToastOutlet, ToastProvider, useToast, type NavItem } from '@dejafix/common-frontend'
 import { ACTION_ERROR_EVENT, useSharedStore } from './store'
 import { apiBase } from './api'
+import { initialState, reducer } from './data'
 import { DevToolsDialog } from '@/demo/DevTools'
 import { IconGear } from '@/components/icons'
 import { Dep, Point } from './parts'
@@ -90,12 +91,23 @@ export default function PlanningPage({ part = 'planning' }: { part?: PlanningPar
   )
 }
 
+const EXAMPLE_KEY = 'axcellent-planning-example'
+
 function Planning({ part }: { part: PlanningPart }) {
   const P = PARTS[part]
   const SECTIONS = P.sections
   const isSection = (x: string) => x in SECTIONS
   const route = useRoute(P.home)
-  const [state, dispatch, connected] = useSharedStore(apiBase(part))
+  const [live, liveDispatch, connected] = useSharedStore(apiBase(part))
+  // 예시 모드: 서버 대신 화면 안의 프로토타입 예시 데이터(data.ts)로 흐름을 보여 준다. 서버 데이터는 건드리지 않는다
+  const [example, setExample] = useState(() => { try { return localStorage.getItem(EXAMPLE_KEY) === '1' } catch { return false } })
+  const [demo, demoDispatch] = useReducer(reducer, initialState)
+  const state = example ? demo : live
+  const dispatch = example ? demoDispatch : liveDispatch
+  const pickExample = (on: boolean) => {
+    setExample(on)
+    try { localStorage.setItem(EXAMPLE_KEY, on ? '1' : '0') } catch { /* 저장이 막혀도 이번 화면에서는 바뀐다 */ }
+  }
   const [tools, setTools] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const toast = useToast()
@@ -153,9 +165,13 @@ function Planning({ part }: { part: PlanningPart }) {
           <p className="pl-desc">{P.desc}</p>
         </div>
         <div className="pl-tools">
-          <Chip tone={connected ? 'green' : 'amber'} title={`${P.title} 서버 ${apiBase(part)}`}>
-            {`${P.title} ${connected ? '켜짐' : '꺼짐'}`}
-          </Chip>
+          <div className="seg-toggle" role="group" aria-label="데이터 보기">
+            <button type="button" aria-pressed={!example} onClick={() => pickExample(false)}>실제 데이터</button>
+            <button type="button" aria-pressed={example} onClick={() => pickExample(true)}>예시 데이터</button>
+          </div>
+          {example
+            ? <Chip tone="amber" title="화면 안 예시 데이터. 서버에 반영되지 않아요">예시 모드</Chip>
+            : <Chip tone={connected ? 'green' : 'amber'} title={`${P.title} 서버 ${apiBase(part)}`}>{`${P.title} ${connected ? '켜짐' : '꺼짐'}`}</Chip>}
           {repoWait > 0 && firstRepoWait && (
             <a href={`#/work/prs/${prSlug(firstRepoWait.id)}`} className="chip amber" title="대상 레포 승인 대기 PR">레포 승인 대기 {repoWait}</a>
           )}
@@ -163,7 +179,7 @@ function Planning({ part }: { part: PlanningPart }) {
             <button type="button" className="chip amber" onClick={() => { chat.select(chat.working[0]); setChatOpen(true) }}>AI 작업 중 {chat.working.length}</button>
           )}
           {part === 'dev' && (
-            <button type="button" className="btn-primary px-3 py-1" disabled={!connected} title={connected ? '개발 에이전트' : '개발·배포 서버 꺼짐'} onClick={() => setChatOpen(true)}>AI와 대화</button>
+            <button type="button" className="btn-primary px-3 py-1" disabled={!connected || example} title={example ? '예시 모드에서는 쓸 수 없어요' : connected ? '개발 에이전트' : '개발·배포 서버 꺼짐'} onClick={() => setChatOpen(true)}>AI와 대화</button>
           )}
           {part === 'dev' && (
             <button type="button" className="btn-quiet px-2 py-1" title="개발 도구 연결" aria-label="개발 도구 연결" onClick={() => setTools(true)}>

@@ -715,3 +715,9 @@ button.chip { cursor: pointer; font: inherit; }
   .rp-cmt { display: none; }
   .rp-search { max-width: none; flex-basis: 100%; }
 }
+
+/* 실제·예시 데이터 전환 */
+.seg-toggle { display: inline-flex; border: 1px solid var(--border, #dcdce6); border-radius: 8px; overflow: hidden; }
+.seg-toggle button { font: inherit; font-size: 12px; padding: 4px 10px; background: transparent; color: var(--text-2); border: 0; cursor: pointer; }
+.seg-toggle button[aria-pressed="true"] { background: var(--primary, #5b5bd6); color: #fff; }
+.seg-toggle button:focus-visible { outline: 2px solid var(--primary, #5b5bd6); outline-offset: -2px; }
