@@ -1,7 +1,9 @@
 """검색 방식 평가 (합성 골든 셋). 사용: python run_eval.py [방식 이름]
 
-- 방식은 SCORERS에 이름으로 등록한다(지금은 현재 방식인 `dice`만).
-  Dense·Sparse·Hybrid는 같은 자리에 더한다.
+- 방식: `dice`(현재 방식), `dense`(임베딩 코사인). `dense-mock`은 네트워크 없이 배선만 확인한다.
+  Sparse·Hybrid는 같은 자리에 더한다.
+- `dense`는 backend/.env 의 MEMORY_LLM_*·MEMORY_EMBED_MODEL(없으면 LLM_*·EMBED_MODEL)을 읽고,
+  만든 벡터는 backend/.data/eval_vectors.db 에 저장해 다시 쓴다(키는 출력하지 않는다).
 - 질의는 `pool`(같은 기능의 카드 풀) 안에서만 검색한다.
   상위 5개 중 점수가 임계값 이상인 것만 결과로 본다.
 - 임계값은 개발용(dev) 질의로만 정한다. 최종 수치는 평가용(test) 질의로 낸다.
@@ -11,15 +13,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 import sys
 from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
 
+from ax_agent_template.llm import LLMClient, LLMSettings, MockLLMClient
+from hr_agent.retrieval.dense import DenseIndex, LLMEmbedder, cosine, mask, text_key
 from hr_agent.util import similarity
 
 HERE = Path(__file__).parent
+BACKEND = HERE.parents[2]
 K = 5
 
 Scorer = Callable[[str, dict], float]
@@ -32,6 +39,48 @@ def card_text(card: dict) -> str:
 SCORERS: dict[str, Scorer] = {
     "dice": lambda query, card: similarity(query, card_text(card)),
 }
+
+
+def load_env() -> dict[str, str]:
+    """프로세스 환경에 backend/.env 의 값을 얹는다. 파일 안의 값은 출력하지 않는다."""
+    env = dict(os.environ)
+    path = BACKEND / ".env"
+    if path.exists():
+        for line in path.read_text(encoding="utf-8-sig").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            value = value.split(" #")[0].strip().strip('"')
+            if value:
+                env[key.strip()] = value
+    return env
+
+
+async def build_dense(name: str, cards: list[dict], queries: list[dict]) -> Scorer:
+    """카드와 질의를 색인(이미 있으면 재사용)하고 코사인 점수 함수를 돌려준다."""
+    data = BACKEND / ".data"
+    data.mkdir(exist_ok=True)
+    if name == "dense-mock":
+        client, model, path = MockLLMClient(), "mock", data / "eval_vectors_mock.db"
+    else:
+        settings = LLMSettings.from_env("memory", load_env())
+        if not settings.embed_model:
+            raise SystemExit("임베딩 모델 설정이 없다: MEMORY_EMBED_MODEL 또는 EMBED_MODEL")
+        client, model = LLMClient("memory", settings), settings.embed_model
+        path = data / "eval_vectors.db"
+    index = DenseIndex(str(path), LLMEmbedder(client), model)
+    items = [(c["card_id"], card_text(c)) for c in cards]
+    items += [(text_key(mask(q["query"])), mask(q["query"])) for q in queries]
+    created = await index.index(items)
+    print(f"임베딩 {created}건 새로 만듦 (전체 {len(items)}건, 모델 {model})")
+
+    def score(query: str, card: dict) -> float:
+        q = index.vector(text_key(mask(query)))
+        c = index.vector(card["card_id"])
+        return cosine(q, c)
+
+    return score
 
 
 def rank(scorer: Scorer, query: str, pool: list[dict]) -> list[tuple[str, float]]:
@@ -81,9 +130,12 @@ def pick_threshold(rows: list[dict]) -> float:
 
 
 def main(name: str) -> dict:
-    scorer = SCORERS[name]
     cards = json.loads((HERE / "cards.json").read_text(encoding="utf-8"))
     queries = json.loads((HERE / "queries.json").read_text(encoding="utf-8"))
+    if name in ("dense", "dense-mock"):
+        scorer = asyncio.run(build_dense(name, cards, queries))
+    else:
+        scorer = SCORERS[name]
     pools: dict[str, list[dict]] = defaultdict(list)
     for c in cards:
         pools[c["extra"]["function"]].append(c)
