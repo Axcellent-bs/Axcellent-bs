@@ -102,7 +102,7 @@ from planning_agent.domain.rules import (
     para_of,
     verify_rollback,
 )
-from planning_agent.domain.seed import initial_state
+from planning_agent.domain.seed import add_real_example, initial_state
 from planning_agent.domain.trace import changed_paths_for
 from planning_agent.result_notify import ResultSender, send_change_result
 from planning_agent.vcs.base import VcsError
@@ -419,6 +419,7 @@ class PlanningService:
         result_sender: ResultSender | None = None,
         role: str | None = None,
         dev_sender: DevSender | None = None,
+        real_example: bool = False,
     ):
         # 서비스 역할: "" = 합친 모드(원래 동작), "planning" = 기획서까지, "dev" = PR·머지만
         self.role = (os.getenv("PLANNING_ROLE", "") if role is None else role).strip()
@@ -442,6 +443,8 @@ class PlanningService:
         self._subscribers: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = {}
         self._locks: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self.version = 0
+        # 실행 중인 서버는 예시 앞에 실제 머지된 작업 하나를 더 보여 준다 (seed.add_real_example)
+        self.real_example = real_example
         self._init_state()
 
     # ---- 상태·구독
@@ -449,6 +452,8 @@ class PlanningService:
     def _init_state(self) -> None:
         self.clock: Clock = self._clock_factory()
         self.state: State = initial_state()
+        if self.real_example:
+            add_real_example(self.state)
         self.state.tenant_id = self.tenant_id
         self._idempotent: dict[str, ActionResult] = {}
         self._dev_sent: dict[str, str] = {}  # dev: 기획서 → 마지막으로 돌려준 결과 지문

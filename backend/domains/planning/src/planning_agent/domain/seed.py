@@ -11,6 +11,9 @@ from planning_agent.domain.models import (
     Activity,
     AutoLog,
     AutoPolicy,
+    CodingFile,
+    CodingReview,
+    CodingRun,
     Decision,
     Doc,
     DocBlock,
@@ -20,6 +23,7 @@ from planning_agent.domain.models import (
     Para,
     ParaWarn,
     PrGate,
+    RepoTarget,
     Request,
     RollbackCheck,
     Spec,
@@ -465,5 +469,115 @@ def initial_state() -> State:
                     at=kst("10-22 09:00"), text="L1 문구·표시 소규모(30줄·2파일)로 시작", by="사람"
                 )
             ],
+        ),
+    )
+
+
+# 실제 작업 하나: 10/29 개발 AI 대화로 만들어 데모 레포 NYejin/cat-books-test에 머지된 PR #9.
+# 위 초기 데이터는 프로토타입 예시라 깃허브에 실제 PR이 없다. 실행 중인 서버에만 더한다.
+REAL_TITLE = "쇼핑몰 메인컬러를 보라색으로 변경하고 전역 --brand-* 남색 복원"
+REAL_PLAN = (
+    "1) src/styles.css의 .theme-shop 안 --brand-* 변수를 라이트·다크 모두 보라색 계열로 바꿔요.\n"
+    "2) :root와 .dark의 --brand-* 값은 PR #7 이전 커밋의 남색 값으로 되돌려요.\n"
+    "3) 다른 파일의 색상 사용처는 건드리지 않고, 변수 이름은 그대로 유지해요."
+)
+REAL_DONE = [
+    "라이트·다크 모두 .theme-shop 안 --brand-* 값이 보라색 계열로 바뀌어 있다",
+    "src/styles.css의 :root와 .dark의 --brand-* 값이 PR #7 이전 남색 값과 같다",
+    "변수 이름은 바뀌지 않고, styles.css 밖의 파일은 수정되지 않는다",
+]
+
+
+def add_real_example(state: State) -> None:
+    """실제로 머지된 개발 AI 작업 하나(REQ-D1·SPEC-D1·T-D1·PR #30 = 깃허브 #9)를 맨 앞에 더한다."""
+    merged = kst("10-29 11:06")
+    state.requests.insert(
+        0,
+        Request(
+            id="REQ-D1",
+            context_id="ctx_dev_0001",
+            from_="dev",
+            via="dev_team",
+            title=REAL_TITLE,
+            evidence="개발팀 기획 (개발 AI 대화)",
+            state="완료",
+            spec="SPEC-D1",
+        ),
+    )
+    state.specs.insert(
+        0,
+        Spec(
+            id="SPEC-D1",
+            title=REAL_TITLE,
+            request="REQ-D1",
+            status="확정",
+            problem=REAL_PLAN,
+            goal=REAL_TITLE,
+            paras=[
+                Para(id="R1", kind="req", text=REAL_TITLE, paths=["src/styles.css"]),
+                *[Para(id=f"C{i}", kind="done", text=t) for i, t in enumerate(REAL_DONE, 1)],
+            ],
+            basis=["개발팀 기획 (개발 AI 대화)"],
+            human_sentences=1,
+            handed_to_dev=True,
+            origin="dev_team",
+        ),
+    )
+    state.tasks.insert(
+        0,
+        Task(
+            id="T-D1",
+            spec="SPEC-D1",
+            para="R1",
+            title=REAL_TITLE,
+            owner="에이전트",
+            state="완료",
+            coding=CodingRun(
+                status="merged",
+                model="claude-sonnet-5-5",
+                files=[
+                    CodingFile(
+                        path="src/styles.css",
+                        additions=24,
+                        deletions=24,
+                        reason=".theme-shop(라이트·다크) --brand-*를 보라색으로, "
+                        ":root·.dark --brand-*를 남색으로 복원",
+                    )
+                ],
+                summary="수정 대상은 src/styles.css 하나. .theme-shop의 --brand-*를 보라색으로, "
+                ":root·.dark의 --brand-*를 남색으로 되돌린다",
+                review=CodingReview(verdict="통과"),
+                attempts=1,
+                updated_at=merged,
+                connection="conn-1",
+                pr="PR #30",
+            ),
+        ),
+    )
+    state.prs.insert(
+        0,
+        PR(
+            id="PR #30",
+            number=30,
+            task="T-D1",
+            title=f"R1: {REAL_TITLE}",
+            branch="gen/t-d1-1-ed745f",
+            reviews=["통과"],
+            gate=PrGate(result="통과", lines=48, files=1, paths="src/"),
+            merged=True,
+            merged_at=merged,
+            changed_paths=["src/styles.css"],
+            auto=True,
+            vcs_number=9,
+            url="https://github.com/NYejin/cat-books-test/pull/9",
+            target=RepoTarget(
+                connection_id="conn-1",
+                repo="NYejin/cat-books-test",
+                status="approved",
+                confidence="high",
+                reasons=["개발팀이 고른 연결"],
+                decided_by="개발팀",
+                decided_at=kst("10-29 11:05"),
+            ),
         ),
     )
