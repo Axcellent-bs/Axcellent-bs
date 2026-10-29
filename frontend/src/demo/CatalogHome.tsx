@@ -48,6 +48,7 @@ export default function CatalogHome() {
           <nav className="ml-4 hidden gap-5 text-sm text-white/70 md:flex" aria-label="메인 메뉴">
             <a href="#families" className="hover:text-white">제품군</a>
             <a href="#install" className="hover:text-white">설치 방식</a>
+            <Link to="/plans" className="hover:text-white">요금제</Link>
           </nav>
           <div className="ml-auto flex items-center gap-2">
             {account && (
@@ -73,9 +74,9 @@ export default function CatalogHome() {
               AXcellent는 회사 서버에 설치하는 AI 업무 서비스 모음이에요. 쓰고 싶은 서비스만 켜서 바로 써요.
             </p>
             <div className="flex flex-wrap gap-3">
-              <Link to="/signup" className="rounded-full bg-[#e0a72c] px-6 py-3 text-sm font-semibold text-[#1d1d3a] hover:brightness-105">회원가입</Link>
+              <Link to="/plans" className="rounded-full bg-[#e0a72c] px-6 py-3 text-sm font-semibold text-[#1d1d3a] hover:brightness-105">조직 플랜 시작</Link>
+              <Link to="/signup" className="rounded-full border border-white/30 px-6 py-3 text-sm font-semibold text-white hover:bg-white/10">회원가입</Link>
               <Link to="/login" className="rounded-full border border-white/30 px-6 py-3 text-sm font-semibold text-white hover:bg-white/10">로그인</Link>
-              <a href="#families" className="rounded-full border border-white/30 px-6 py-3 text-sm font-semibold text-white hover:bg-white/10">서비스 둘러보기</a>
             </div>
           </div>
           <ul className="grid grid-cols-4 gap-3 sm:grid-cols-5" aria-label={`서비스 ${SERVICES.length}개`}>

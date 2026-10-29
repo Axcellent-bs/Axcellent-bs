@@ -20,7 +20,8 @@ export default function Setup() {
   const { signIn } = useSession()
   const navigate = useNavigate()
   const [stage, setStage] = useState(0)
-  const [keyInput, setKeyInput] = useState('')
+  // 조직 플랜 결제 뒤 "이 키로 관리자 가입"으로 오면 키가 채워져 있다 (/setup?key=)
+  const [keyInput, setKeyInput] = useState(() => new URLSearchParams(window.location.search).get('key') ?? '')
   const [key, setKey] = useState<IssuedKey | null>(null)
   const [admin, setAdmin] = useState({ name: '', email: '', password: '' })
   const [info, setInfo] = useState<CompanyInfo>({ name: '', industry: INDUSTRIES[0], network: DETECTED_NETWORK })
@@ -56,7 +57,6 @@ export default function Setup() {
     if (stage === 0) {
       const r = checkKey(keyInput)
       if (!r.ok) return setError(r.reason)
-      if (company && r.issued.company?.id !== company.id) return setError(`이 설치에는 이미 ${company.name}이(가) 연결돼 있어요. 그 회사 키를 넣어 주세요.`)
       setKey(r.issued)
     }
     if (stage === 1) {
@@ -115,6 +115,7 @@ export default function Setup() {
               {error && <p className="text-sm text-red-700">{error}</p>}
               <div className="flex items-center gap-2">
                 <button className="btn-primary px-5">키 확인</button>
+                <Link to="/plans" className="btn-quiet">키가 없나요? 조직 플랜 시작</Link>
                 {demoKey && <button type="button" className="btn-ghost ml-auto px-2.5 py-1 text-xs" onClick={fillDemo}>데모: 발급된 키 넣기</button>}
               </div>
             </form>
@@ -125,6 +126,7 @@ export default function Setup() {
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-lg font-semibold">관리자 계정 만들기</h1>
                 {sameCompany && <span className="chip bg-ink-100 text-ink-700">{company?.name}</span>}
+                {company && !sameCompany && <span className="chip bg-amber-50 text-amber-700">새 회사로 연결 · 지금 연결된 {company.name}은 끊겨요</span>}
                 <span className="chip bg-emerald-50 text-emerald-700">키 확인됨</span>
               </div>
               <p className="text-sm text-ink-500">이 계정으로 서비스 고르기, 사내 PC 연결, 회원 연결을 해요.</p>

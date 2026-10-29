@@ -26,6 +26,7 @@ import Integrations from '@/demo/Integrations'
 import DevTools from '@/demo/DevTools'
 import LoginPage from '@/demo/LoginPage'
 import SignupPage from '@/demo/SignupPage'
+import PlanPurchase from '@/demo/PlanPurchase'
 import { canOpen, homeOf, useSession } from '@/demo/session'
 import { useEnabledServices } from '@/demo/services'
 import { useCompany } from '@/demo/company'
@@ -44,6 +45,7 @@ export function App() {
       <Route path="/" element={<CatalogHome />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      <Route path="/plans" element={<PlanPurchase />} />
       {/* 관리자(회사 계정) 가입: 운영자에게 받은 키 → 관리자 계정 → 회사 정보 */}
       <Route path="/setup" element={<Setup />} />
       {/* AXcellent 운영팀 전용 입구 */}
