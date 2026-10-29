@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-29T05:52:29Z",
+  "generated_at": "2026-10-29T08:12:51Z",
   "case_count": 27,
   "metrics": {
     "anomaly.detection_rate": 1.0,
@@ -35,7 +35,7 @@
     "holdout.anomaly.monitor_false_alarm_count": 6,
     "holdout.anomaly.low_recorded_rate": null,
     "holdout.impact.match_rate": 1.0,
-    "holdout.impact.excess_mean_abs_error": null,
+    "holdout.impact.excess_mean_abs_error": 0.53,
     "holdout.anomaly.payment_mean_delay_minutes": 9.62,
     "holdout.anomaly.payment_max_delay_minutes": 30.0,
     "holdout.anomaly.drop_mean_delay_minutes": 13.33,

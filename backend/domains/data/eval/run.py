@@ -46,6 +46,7 @@ from ax_contracts.schemas import (  # noqa: E402
 from ax_contracts.schemas.data import (  # noqa: E402
     AnomalyDetectionInput,
     ImpactAnalysisInput,
+    ImpactAnalysisOutput,
     RootCauseInput,
 )
 from ax_shop_api.lookups import Lookups  # noqa: E402
@@ -178,6 +179,25 @@ def load_cases() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
 
 def _numbers(text: str) -> set[float]:
     return {float(n.replace(",", "")) for n in re.findall(r"\d+(?:,\d{3})*(?:\.\d+)?", text)}
+
+
+def _impact_allowed(got: ImpactAnalysisOutput, usual: float | None) -> set[float]:
+    """영향 설명에 써도 되는 숫자. 실서버 영향 설명(explain)의 facts와 같은 값이어야 한다.
+
+    실패 주문 수·영향 고객 수·피해 금액 + 초과분(skill 출력) + 평소 실패 수(소수 둘째 자리).
+    평소 실패 수는 근거 문장을 읽지 않고 평가가 케이스의 지난 7일 결제 기록으로 직접 센다
+    (`eval_world.usual_fault_failures`). 모르면(None) 넣지 않는다.
+    """
+    allowed = {
+        float(got.failed_order_count),
+        float(got.affected_customer_count),
+        float(got.damage_amount),
+    }
+    if got.excess_failed_order_count is not None:
+        allowed.add(float(got.excess_failed_order_count))
+    if usual is not None:
+        allowed.add(round(usual, 2))
+    return allowed
 
 
 def _fabricated(summary: str, allowed: set[float]) -> bool:
@@ -381,11 +401,7 @@ async def run_case(case: dict[str, Any]) -> dict[str, Any]:
                 }
             else:
                 got = impact.output
-                numbers = {
-                    float(got.failed_order_count),
-                    float(got.affected_customer_count),
-                    float(got.damage_amount),
-                }
+                numbers = _impact_allowed(got, eval_world.usual_fault_failures(world))
                 out["impact"] = {
                     "want": wanted,
                     "got": {k: getattr(got, k) for k in keys},
