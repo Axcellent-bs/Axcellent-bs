@@ -339,7 +339,8 @@ def test_mount_prefixes_paths_for_safety() -> None:
             "shop-web/x.ts",
         ]
         # 다시 저장할 때 앞머리를 안 주면 그대로 둔다
-        assert vcs.upsert_connection(id=c.id, kind="mock", repo="acme/shop-web").mount == "shop-web/"
+        saved = vcs.upsert_connection(id=c.id, kind="mock", repo="acme/shop-web")
+        assert saved.mount == "shop-web/"
     finally:
         vcs._screen = None
         vcs.set_vcs(None)

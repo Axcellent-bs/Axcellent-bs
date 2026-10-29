@@ -47,7 +47,8 @@ def write(path: Path, text: str) -> None:
 
 def build(svc) -> None:
     folder, package, card_env, dist = DEPARTMENTS[svc.department]
-    dept_card = json.loads((ROOT / "domains" / folder / "agent-card.json").read_text(encoding="utf-8"))
+    card_path = ROOT / "domains" / folder / "agent-card.json"
+    dept_card = json.loads(card_path.read_text(encoding="utf-8"))
     by_id = {s["id"]: s for s in dept_card["skills"]}
     missing = [k for k in svc.skills if k not in by_id]
     if missing:
@@ -70,14 +71,17 @@ def build(svc) -> None:
         out / "src" / mod / "main.py",
         f'''"""{svc.name} 서비스 에이전트 ({svc.id}, {svc.port}).
 
-업무 로직은 `domains/{folder}`({package})를 그대로 쓰고, 이 폴더의 `agent-card.json`에 올린 skill만 받는다.
+업무 로직은 `domains/{folder}`({package})를 그대로 쓰고,
+이 폴더의 `agent-card.json`에 올린 skill만 받는다.
 카드에 없는 skill은 템플릿 ACL이 막는다. 서비스 대응표: `ax_agent_template/services.py`.
 """
 
 import os
 from pathlib import Path
 
-os.environ.setdefault("{card_env}", str(Path(__file__).resolve().parents[2] / "agent-card.json"))
+os.environ.setdefault(
+    "{card_env}", str(Path(__file__).resolve().parents[2] / "agent-card.json")
+)
 {role_line}
 from {package}.main import app  # noqa: E402
 
@@ -150,7 +154,8 @@ CMD ["uvicorn", "{mod}.main:app", "--host", "0.0.0.0", "--port", "{svc.port}"]
 | --- | --- |
 {rows}
 
-- 실행: `uv run --package ax-svc-{svc.id} uvicorn {mod}.main:app --port {svc.port}` (backend/ 에서, 목 모드 `AGENT_TEMPLATE_MOCK=1`)
+- 실행: `uv run --package ax-svc-{svc.id} uvicorn {mod}.main:app --port {svc.port}`
+  (backend/ 에서, 목 모드 `AGENT_TEMPLATE_MOCK=1`)
 - 다른 에이전트가 `{svc.department}`로 불러도 위 skill이면 이 서비스로 온다 (`route_target`).
 - 이 폴더는 `scripts/split_services.py`가 만든다. 손으로 고치지 말고 대응표를 고친다.
 ''',

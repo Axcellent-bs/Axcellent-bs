@@ -21,8 +21,9 @@ CARD_TIMEOUT = 5.0
 def http_card_fetcher(client: httpx.AsyncClient | None = None) -> CardFetcher:
     """`GET <부서>/.well-known/agent-card.json`. 실패하면 None(레지스트리가 처리).
 
-    부서가 서비스 여러 개로 나뉘어 있으면(services.py, 예: support → inquiry·claims·reviews) 서비스 카드를
-    모두 받아 skill을 합친 부서 카드 하나로 돌려준다. 호출은 `call_agent`가 skill로 서비스를 고른다.
+    부서가 서비스 여러 개로 나뉘어 있으면(services.py, 예: support → inquiry·claims·reviews)
+    서비스 카드를 모두 받아 skill을 합친 부서 카드 하나로 돌려준다.
+    호출은 `call_agent`가 skill로 서비스를 고른다.
     """
 
     async def get(http: httpx.AsyncClient, name: str) -> dict[str, Any] | None:

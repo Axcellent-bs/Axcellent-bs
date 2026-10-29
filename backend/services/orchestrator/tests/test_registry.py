@@ -64,7 +64,9 @@ async def test_real_dev_cards_load() -> None:
     }
     # 업무 로직(부서 카드)은 backend/domains/<부서>에 있다
     cards = {
-        dept: json.loads((ROOT / "domains" / folder / "agent-card.json").read_text(encoding="utf-8"))
+        dept: json.loads(
+            (ROOT / "domains" / folder / "agent-card.json").read_text(encoding="utf-8")
+        )
         for dept, folder in names.items()
     }
 

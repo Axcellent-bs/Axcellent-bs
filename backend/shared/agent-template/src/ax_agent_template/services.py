@@ -1,13 +1,14 @@
 """서비스 13개와 에이전트의 대응표.
 
-AXcellent는 부서가 아니라 서비스 단위로 판다(고객사가 필요한 서비스만 고른다). 그래서 에이전트도 서비스마다
-하나씩 띄운다. 업무 로직은 원래 부서 패키지(`backend/domains/<부서>`)를 그대로 쓰고, 서비스는 그중
-자기 skill만 카드에 올려 따로 띄운다.
+AXcellent는 부서가 아니라 서비스 단위로 판다(고객사가 필요한 서비스만 고른다).
+그래서 에이전트도 서비스마다 하나씩 띄운다. 업무 로직은 원래 부서 패키지
+(`backend/domains/<부서>`)를 그대로 쓰고, 서비스는 그중 자기 skill만 카드에 올려 따로 띄운다.
 
 - 다른 에이전트는 예전처럼 부서 이름(`support`, `hr` 등)으로 불러도 된다. `route_target()`이
   skill을 보고 그 skill을 맡은 서비스로 보낸다.
-- 받는 쪽 `allowed_requesters`에는 부서 이름이 적혀 있다. 서비스 이름으로 온 요청은 `department_of()`로
-  부서 이름까지 같이 본다 (`claims`가 보낸 요청은 `support`가 보낸 것으로도 인정).
+- 받는 쪽 `allowed_requesters`에는 부서 이름이 적혀 있다. 서비스 이름으로 온 요청은
+  `department_of()`로 부서 이름까지 같이 본다
+  (`claims`가 보낸 요청은 `support`가 보낸 것으로도 인정).
 - 서비스 id는 화면 `frontend/src/demo/services.ts`의 `SERVICES` id와 같다.
 """
 
@@ -74,7 +75,9 @@ SERVICES: tuple[Service, ...] = (
         ),
         "클레임·보상",
     ),
-    Service("reviews", "support", 8122, ("customer_signals", "list_at_risk_customers"), "리뷰·지식"),
+    Service(
+        "reviews", "support", 8122, ("customer_signals", "list_at_risk_customers"), "리뷰·지식"
+    ),
     Service(
         "coupon",
         "marketing",

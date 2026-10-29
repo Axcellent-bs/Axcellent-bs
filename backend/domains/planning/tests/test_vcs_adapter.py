@@ -880,7 +880,9 @@ def test_github_checks_fall_back_to_statuses_without_checks_permission() -> None
         if path.endswith("/pulls/7"):
             return httpx.Response(200, json={"head": {"sha": "abc"}})
         if path.endswith("/check-runs"):
-            return httpx.Response(403, json={"message": "Resource not accessible by personal access token"})
+            return httpx.Response(
+                403, json={"message": "Resource not accessible by personal access token"}
+            )
         if path.endswith("/status"):
             return httpx.Response(200, json={"statuses": [{"context": "ci", "state": "success"}]})
         return httpx.Response(404, json={})

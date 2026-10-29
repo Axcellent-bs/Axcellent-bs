@@ -83,7 +83,8 @@ class AppState:
             fakes.script("infra", "diagnose_incident", "undetermined")
         if demo.not_recovered:
             fakes.script("infra", "verify_recovery", "not_recovered")
-        # 실제 모드는 가짜 부서를 쓰지 않는다. 목 모드에서만 ORCHESTRATOR_REAL_DEPTS로 일부를 실제로 붙인다
+        # 실제 모드는 가짜 부서를 쓰지 않는다.
+        # 목 모드에서만 ORCHESTRATOR_REAL_DEPTS로 일부를 실제로 붙인다
         real = real_depts_from_env(DEPTS) if self.mock else set(DEPTS)
         if real:
             set_agent_name("orchestrator")
@@ -200,7 +201,11 @@ async def departments() -> dict:
     items.sort(key=lambda d: DEPTS.index(d["name"]) if d["name"] in DEPTS else len(DEPTS))
     return {
         "data": items,
-        "meta": {"mock": state.mock, "window_seconds": WINDOW_SECONDS, "bucket_seconds": BUCKET_SECONDS},
+        "meta": {
+            "mock": state.mock,
+            "window_seconds": WINDOW_SECONDS,
+            "bucket_seconds": BUCKET_SECONDS,
+        },
     }
 
 
@@ -270,7 +275,9 @@ async def inject(req: DemoRequest | None = None) -> dict:
 
 @app.post("/api/events")
 async def receive_event(env: EventEnvelope) -> dict:
-    """다른 부서가 이벤트를 보내 볼 수 있는 입구. 실제 모드에서도 열어 둔다(이벤트 버스와 같은 판단).
+    """다른 부서가 이벤트를 보내 볼 수 있는 입구.
+
+    실제 모드에서도 열어 둔다(이벤트 버스와 같은 판단).
 
     실제 전달은 Redis Streams 구독(`start_event_bus`)이고, 그때도 판단은 같은 `manager.process`다.
     """

@@ -46,7 +46,9 @@ async def _shop_get(path: str, params: dict[str, Any] | None = None) -> Any:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
             res = await client.get(f"{_shop_url()}{path}", params=params)
     except httpx.HTTPError as error:
-        raise ApiError(502, "UPSTREAM_UNAVAILABLE", f"shop-api에 연결할 수 없다 ({error})") from error
+        raise ApiError(
+            502, "UPSTREAM_UNAVAILABLE", f"shop-api에 연결할 수 없다 ({error})"
+        ) from error
     if res.status_code >= 400:
         raise ApiError(502, "UPSTREAM_ERROR", f"shop-api 오류 (HTTP {res.status_code})")
     return res.json().get("data")

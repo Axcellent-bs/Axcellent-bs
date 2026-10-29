@@ -102,7 +102,9 @@ def test_without_mock_review_status_returns_503(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
     monkeypatch.setenv("DASHBOARD_HUMAN_TOKENS", "운영자:t0ken")
     response = TestClient(app).post(
-        f"{BASE}/reviews/1/status", json={"status": "visible"}, headers={"Authorization": "Bearer t0ken"}
+        f"{BASE}/reviews/1/status",
+        json={"status": "visible"},
+        headers={"Authorization": "Bearer t0ken"},
     )  # 아직 목 전용인 쓰기 경로
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "UPSTREAM_NOT_CONNECTED"

@@ -369,7 +369,7 @@ def test_a_buyer_marketing_linked_to_an_earlier_coupon_is_not_counted_as_issued(
     assert incident_handlers.issued_in_incident(CTX) == (1, 2000)  # 새로 지급한 한 명뿐
 
 
-# ---------------------------------------------------------------- 쿠폰 서비스가 꺼진 고객사 (업무 요청 라우터)
+# ------------------------------------------------- 쿠폰 서비스가 꺼진 고객사 (업무 요청 라우터)
 SEVEN = [f"buy_00{n:02d}" for n in range(1, 8)]
 
 

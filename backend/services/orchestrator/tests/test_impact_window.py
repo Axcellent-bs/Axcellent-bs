@@ -11,7 +11,14 @@ OPENED = datetime(2026, 10, 28, 7, 24, 1, tzinfo=UTC)
 
 
 def _incident(since: datetime | None) -> Incident:
-    return Incident(context_id="ctx_inc_test", kind="scenario_a", title="t", component="payment", opened_at=OPENED, since=since)
+    return Incident(
+        context_id="ctx_inc_test",
+        kind="scenario_a",
+        title="t",
+        component="payment",
+        opened_at=OPENED,
+        since=since,
+    )
 
 
 def test_window_starts_at_since() -> None:
@@ -38,6 +45,7 @@ def _env(data: dict) -> EventEnvelope:
 
 
 def test_since_is_read_from_event() -> None:
-    assert _since(_env({"component": "payment", "since": "2026-10-28T07:23:36Z"})) == OPENED - timedelta(seconds=25)
+    env = _env({"component": "payment", "since": "2026-10-28T07:23:36Z"})
+    assert _since(env) == OPENED - timedelta(seconds=25)
     assert _since(_env({"component": "payment"})) is None
     assert _since(_env({"component": "payment", "since": "어제"})) is None
