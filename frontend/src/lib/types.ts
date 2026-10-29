@@ -136,6 +136,18 @@ export interface ConversationListItem {
   urgency: "low" | "medium" | "high" | null; status: "open" | "resolved" | "escalated"; order_id: number | null;
   updated_at: string; preview: string; awaiting_reply: boolean;
 }
+/** 상담 콘솔의 클레임 접수 입력 (구매자·주문은 서버가 문의에서 읽는다) */
+export interface ClaimIntake {
+  type: "cancel" | "return" | "exchange"; reason: ClaimReason; items?: { order_item_id: string; qty: number }[] | null;
+  unsealed: boolean; evidence_count: number; description: string;
+}
+/** AI가 고객의 마지막 메시지에서 읽은 요청과 접수했을 때 규칙이 낼 판정 (접수하지 않는다) */
+export interface ClaimSuggestion {
+  request_kind: "refund" | "exchange" | "cancel" | "event_inquiry" | "other"; reason: ClaimReason | null;
+  claim_type: ClaimIntake["type"] | null; items: string[]; unmatched_items: string[]; source: "llm" | "rules"; notes: string[];
+  preview: { outcome: string; resolution: string; requires_return: boolean; expected_refund: number; reasons: { code: string; level: string; message: string }[] } | null;
+  suggested_items: ClaimIntake["items"] | null;
+}
 /** 문의의 AI 처리 내력 한 줄 (고객지원이 코드로 남긴 사실. `data`는 코드 값이라 화면이 이름표를 붙인다) */
 export interface ActivityEntry {
   at: string; actor: "ai" | "agent" | "customer" | "system"; kind: string; title: string; detail: string;

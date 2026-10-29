@@ -97,7 +97,7 @@ function Console() {
               </div>
               <Composer conv={conv} load={load} onSent={afterChange} />
             </main>
-            <CopilotPanel conv={conv} onUseDraft={(draft) => setLoad({ nonce: Date.now(), draft })}
+            <CopilotPanel conv={conv} onUseDraft={(draft) => setLoad({ nonce: Date.now(), draft })} onClaimCreated={() => run("claim", () => reload(conv.id))}
               onRejectDraft={(d) => run("reject", async () => { await api.admin.rejectDraft(conv.id, d.style); setKpi(await api.admin.kpi()); })} />
           </>
         ) : <div className="card flex flex-1 items-center justify-center text-sm text-ink-500">왼쪽에서 문의를 선택하세요.</div>}
