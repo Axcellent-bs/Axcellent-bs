@@ -119,3 +119,20 @@ def score_seller(facts: SellerFacts) -> FraudScore:
     else:
         level = "low"
     return FraudScore(score=score, level=level, reasons=reasons)
+
+
+def level_for(score: int) -> Level:
+    """점수의 등급. `score_seller`와 같은 기준(`MID_LEVEL_MIN`·`HIGH_LEVEL_MIN`)이다."""
+    if score >= HIGH_LEVEL_MIN:
+        return "high"
+    if score >= MID_LEVEL_MIN:
+        return "mid"
+    return "low"
+
+
+def max_possible_score(score: int, unknown_rules: list[str]) -> int:
+    """보수적 상한: 확인한 점수 + 확인 못 한 규칙 가중치 합 (100 상한).
+
+    빠진 규칙을 모두 위험(만점)으로 본 값이다. 빠진 규칙이 없으면 `score` 그대로다.
+    """
+    return min(100, score + sum(WEIGHTS[code] for code in unknown_rules))
