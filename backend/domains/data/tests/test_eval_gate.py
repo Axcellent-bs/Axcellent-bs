@@ -67,6 +67,9 @@ def test_guards_hold_regardless_of_the_baseline(report) -> None:  # noqa: ANN001
     assert report["metrics"]["llm.fabricated_number_rate"] == 0.0
     assert report["metrics"]["root_cause.ungrounded_survived_rate"] == 0.0
     assert not any(c["answer_drift"] for c in report["cases"])
+    # 판매자 데이터를 shop-api 코드로 만들었을 때 정답지 facts가 그대로 나온다
+    assert not any(s["facts_drift"] for s in report["sellers"])
+    assert all(s["skill_status"] == "completed" for s in report["sellers"])
 
 
 def test_compare_flags_drops_and_lost_values(run) -> None:  # noqa: ANN001

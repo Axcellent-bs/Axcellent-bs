@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -9,6 +10,7 @@ from ax_agent_template.llm import MockLLMClient
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
 from data_agent import handlers
+from data_agent.clients.shop_client import HttpSellerClient, ShopApi
 from data_agent.handlers import HANDLERS
 
 CTX = "ctx_inc_0001"
@@ -110,10 +112,23 @@ def test_not_mock_env_is_unavailable(client: TestClient, monkeypatch: pytest.Mon
     assert result["outcome"] == "unavailable"
 
 
-def test_unimplemented_skill_is_rejected_cleanly(client: TestClient) -> None:
+def test_fraud_score_without_shop_api_is_unavailable(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """fraud_score는 구현됐다(예전 not_implemented). shop-api가 없으면 숫자 없이 unavailable."""
+
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    def seller_client() -> HttpSellerClient:
+        http = httpx.AsyncClient(transport=httpx.MockTransport(down))
+        return HttpSellerClient(ShopApi("http://shop", token="mock:data", client=http))
+
+    monkeypatch.setattr(handlers, "get_seller_client", seller_client)
     result = client.post("/a2a", json=_body("fraud_score", {"seller_id": "sel_1"})).json()
     assert result["status"] == "failed"
-    assert result["outcome"] == "not_implemented"
+    assert result["outcome"] == "unavailable"
+    assert result["output"]["message"].startswith("확인할 수 없음")
 
 
 def test_loop_is_rejected(client: TestClient) -> None:

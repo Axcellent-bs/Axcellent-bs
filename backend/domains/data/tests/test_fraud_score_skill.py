@@ -1,0 +1,162 @@
+"""fraud_score 핸들러: shop-api 판매자 정보·가격을 실제 shop-api 앱(경로·토큰 포함)으로 읽는다.
+
+- 사업자 해시(shop-api에 없음)와 유사 사기 카드(hr skill 없음)는 "확인할 수 없음"이고
+  점수에서 빠진다.
+- shop-api를 못 읽으면 failed + unavailable, 없는 판매자는 failed + not_found.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import UTC, datetime, timedelta
+
+import httpx
+import pytest
+
+from ax_agent_template import config, events
+from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
+from ax_contracts.schemas.data import FraudScoreOutput
+from ax_shop_api.db import Db
+from ax_shop_api.main import create_app
+from data_agent import handlers
+from data_agent.clients.shop_client import HttpSellerClient, ShopApi
+from data_agent.metrics.fraud import DUP_BUSINESS, FRAUD_SIMILAR, WEIGHTS
+
+
+def _iso(moment: datetime) -> str:
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+@pytest.fixture(autouse=True)
+def _mock_mode(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN202
+    monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
+    monkeypatch.setenv("SHOP_MONITOR_INTERVAL_S", "0")
+    events.reset_mock_bus()
+    before = config._agent_name
+    yield
+    config._agent_name = before  # shop-api 앱이 프로세스 이름을 shop으로 바꾼다
+
+
+@pytest.fixture
+def shop(monkeypatch: pytest.MonkeyPatch) -> Db:
+    """실제 shop-api 앱. 핸들러의 판매자 클라이언트가 이 앱을 data 토큰으로 부른다."""
+    db = Db(":memory:")
+    app = create_app(db, seed_data=False)
+
+    def client() -> HttpSellerClient:
+        http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://shop")
+        return HttpSellerClient(ShopApi("http://shop", token="mock:data", client=http))
+
+    monkeypatch.setattr(handlers, "get_seller_client", client)
+    return db
+
+
+def _seller(db: Db, seller_id: str, joined: datetime, products: list[tuple[int, datetime]]) -> None:
+    with db.tx() as conn:
+        conn.execute(
+            "INSERT INTO sellers VALUES (?, ?, 'book', 'shop-demo', NULL, ?)",
+            (seller_id, seller_id, _iso(joined)),
+        )
+        for i, (price, created) in enumerate(products):
+            conn.execute(
+                "INSERT INTO products VALUES (?, ?, ?, 'book', ?, 1, 1, 'shop-demo', NULL, ?, ?)",
+                (f"prd_{seller_id}_{i}", seller_id, "상품", price, _iso(created), _iso(created)),
+            )
+
+
+def _call(seller_id: str):  # noqa: ANN202
+    meta = RequestMeta(
+        context_id="ctx_fraud_test",
+        token="mock:finance",
+        path=["finance"],
+        deadline=datetime.now(UTC) + timedelta(seconds=30),
+    )
+    request = AgentRequest(meta=meta, skill="fraud_score", input={"seller_id": seller_id})
+    return asyncio.run(handlers.HANDLERS["fraud_score"](request))
+
+
+def test_scores_known_rules_only_and_lists_unknown_rules(shop: Db) -> None:
+    now = datetime.now(UTC)
+    old = now - timedelta(days=30)
+    _seller(shop, "sel_ref", now - timedelta(days=400), [(20000, old)] * 6)  # 카테고리 기준 가격
+    # 가입 2일, 상품 4개 중 2개 저가(5,000원 < 중앙값 20,000원의 50%), 4개 모두 24시간 안에 등록
+    recent = now - timedelta(hours=2)
+    products = [(5000, recent), (5000, recent), (20000, recent), (20000, recent)]
+    _seller(shop, "sel_new", now - timedelta(days=2, hours=1), products)
+
+    result = _call("sel_new")
+    assert result.status == TaskStatus.COMPLETED
+    out = FraudScoreOutput.model_validate(result.output)
+    # NEW_ACCOUNT 15 + LOW_PRICE 25 × 0.5 = 12.5 → 28점 (BULK_LISTING은 50개 미만이라 0)
+    assert (out.score, out.level) == (28, "low")
+    assert out.unknown_rules == [DUP_BUSINESS, FRAUD_SIMILAR]
+    assert out.similar_card_ids == []
+    points = {r.rule_code: r.weight for r in out.reasons if r.note is None}
+    assert points == {"NEW_ACCOUNT": 15.0, "LOW_PRICE": 12.5}
+    notes = [r.note for r in out.reasons if r.note]
+    assert len(notes) == 2 and all(n.startswith("확인할 수 없음: ") for n in notes)
+    assert all(r.weight == 0.0 for r in out.reasons if r.note)
+    max_possible = 100 - WEIGHTS[DUP_BUSINESS] - WEIGHTS[FRAUD_SIMILAR]
+    assert "확인할 수 없음: DUP_BUSINESS" in out.summary
+    assert "확인할 수 없음: FRAUD_SIMILAR" in out.summary
+    assert f"확인한 규칙 3개 기준 점수, 최대 가능 점수 {max_possible}점" in out.summary
+    assert "승인·보류는 정하지 않는다" in out.summary
+    assert result.evidence is not None
+    assert "확인할 수 없음: FRAUD_SIMILAR" in result.evidence.data_summary
+
+
+def test_seller_without_active_products_cannot_tell_low_price(shop: Db) -> None:
+    _seller(shop, "sel_empty", datetime.now(UTC) - timedelta(days=100), [])
+    out = FraudScoreOutput.model_validate(_call("sel_empty").output)
+    assert out.unknown_rules == ["LOW_PRICE", DUP_BUSINESS, FRAUD_SIMILAR]
+    assert out.score == 0
+    assert "확인한 규칙 2개 기준 점수, 최대 가능 점수 30점" in out.summary
+
+
+def test_unknown_seller_is_not_found(shop: Db) -> None:
+    result = _call("sel_none")
+    assert result.status == TaskStatus.FAILED
+    assert result.outcome == "not_found"
+    assert result.output["code"] == "SELLER_NOT_FOUND"
+    assert result.output["message"].startswith("확인할 수 없음")
+
+
+def test_shop_api_down_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    def client() -> HttpSellerClient:
+        http = httpx.AsyncClient(transport=httpx.MockTransport(down))
+        return HttpSellerClient(ShopApi("http://shop", token="mock:data", client=http))
+
+    monkeypatch.setattr(handlers, "get_seller_client", client)
+    result = _call("sel_1")
+    assert result.status == TaskStatus.FAILED
+    assert result.outcome == "unavailable"
+    assert result.output["code"] == "UNAVAILABLE"
+    assert "score" not in result.output  # 숫자를 지어내지 않는다
+
+
+def test_shop_api_rejecting_the_token_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = create_app(Db(":memory:"))
+
+    def client() -> HttpSellerClient:
+        http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://shop")
+        return HttpSellerClient(ShopApi("http://shop", token="mock:finance", client=http))
+
+    monkeypatch.setattr(handlers, "get_seller_client", client)
+    result = _call("sel_0001")
+    assert (result.status, result.outcome) == (TaskStatus.FAILED, "unavailable")
+    assert result.output["code"] == "FORBIDDEN"
+
+
+def test_invalid_input(shop: Db) -> None:
+    meta = RequestMeta(
+        context_id="ctx_fraud_test",
+        token="mock:finance",
+        path=["finance"],
+        deadline=datetime.now(UTC) + timedelta(seconds=30),
+    )
+    request = AgentRequest(meta=meta, skill="fraud_score", input={})
+    result = asyncio.run(handlers.HANDLERS["fraud_score"](request))
+    assert result.outcome == "invalid_input"

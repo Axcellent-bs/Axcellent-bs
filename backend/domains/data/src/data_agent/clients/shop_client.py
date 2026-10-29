@@ -1,7 +1,8 @@
-"""판매 사이트(shop-api) 조회 클라이언트: 실패 주문과 지표 시계열 (이슈 #59).
+"""판매 사이트(shop-api) 조회 클라이언트: 실패 주문, 지표 시계열, 판매자 정보·가격 (이슈 #59).
 
 판매 사이트 DB에 직접 쿼리하지 않고 shop-api 읽기 전용 API만 부른다
-(`contracts/data-access` `shop_failed_orders`·`shop_metric_series`).
+(`contracts/data-access` `shop_failed_orders`·`shop_metric_series`·`shop_seller_profile`·
+`shop_seller_prices`).
 - 주소는 `AX_SHOP_API_URL`(없으면 `http://shop-api:8010`)이다.
 - 토큰은 support와 같은 방식이다: `Authorization: Bearer <data 토큰>`(`DATA_TOKEN`, 목 모드는
   `mock:data`). 요청자는 shop-api가 토큰에서 꺼낸다.
@@ -15,6 +16,7 @@ import os
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any, Protocol, get_args
+from urllib.parse import quote
 
 import httpx
 from pydantic import ValidationError
@@ -26,6 +28,8 @@ from ax_contracts.data_access.shop_failed_orders import (
     ShopFailedOrdersResult,
 )
 from ax_contracts.data_access.shop_metric_series import MetricName, ShopMetricSeriesResult
+from ax_contracts.data_access.shop_seller_prices import ShopSellerPricesResult
+from ax_contracts.data_access.shop_seller_profile import ShopSellerProfile
 from data_agent import demo_anchor
 from data_agent.seed import DEMO_ALIGN_FROM, INCIDENT_FROM, INCIDENT_TO, SEED_FAILED_ORDERS
 
@@ -137,6 +141,36 @@ class HttpShopClient:
             return ShopFailedOrdersResult.model_validate(data)
         except ValidationError as exc:
             raise ShopUnavailable("BAD_RESPONSE", "실패 주문 응답 형식이 계약과 다르다") from exc
+
+
+class SellerClient(Protocol):
+    async def seller_profile(self, seller_id: str) -> ShopSellerProfile: ...
+
+    async def seller_prices(self, seller_id: str) -> ShopSellerPricesResult: ...
+
+
+class HttpSellerClient:
+    """`GET /api/shop/sellers/{id}/profile`·`/prices`로 판매자 정보를 읽는다 (fraud_score).
+
+    없는 판매자는 `ShopUnavailable("SELLER_NOT_FOUND")`이다(shop-api 404).
+    """
+
+    def __init__(self, api: ShopApi) -> None:
+        self.api = api
+
+    async def seller_profile(self, seller_id: str) -> ShopSellerProfile:
+        data = await self.api.get(f"/sellers/{quote(seller_id, safe='')}/profile", {})
+        try:
+            return ShopSellerProfile.model_validate(data)
+        except ValidationError as exc:
+            raise ShopUnavailable("BAD_RESPONSE", "판매자 정보 응답 형식이 계약과 다르다") from exc
+
+    async def seller_prices(self, seller_id: str) -> ShopSellerPricesResult:
+        data = await self.api.get(f"/sellers/{quote(seller_id, safe='')}/prices", {})
+        try:
+            return ShopSellerPricesResult.model_validate(data)
+        except ValidationError as exc:
+            raise ShopUnavailable("BAD_RESPONSE", "판매자 가격 응답 형식이 계약과 다르다") from exc
 
 
 class HttpMetricSource:

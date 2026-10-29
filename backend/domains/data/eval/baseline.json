@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-29T03:51:10Z",
+  "generated_at": "2026-10-29T04:03:48Z",
   "case_count": 27,
   "metrics": {
     "anomaly.detection_rate": 1.0,
@@ -13,9 +13,9 @@
     "impact.match_rate": 1.0,
     "impact.mean_abs_amount_error": 0.0,
     "impact.mean_abs_amount_error_pct": 0.0,
-    "fraud.skill_available": 0.0,
+    "fraud.skill_available": 1.0,
     "fraud.precision": null,
-    "fraud.recall": null,
+    "fraud.recall": 0.0,
     "fraud.rule_precision": 1.0,
     "fraud.rule_recall": 0.3333,
     "llm.fabricated_number_rate": 0.0,

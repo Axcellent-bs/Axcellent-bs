@@ -30,6 +30,7 @@ WEIGHTS: dict[str, int] = {
 
 NEW_ACCOUNT_DAYS = 7  # 가입 7일 미만
 BULK_LISTING_COUNT = 50  # 24시간 등록 50개 이상
+LOW_PRICE_FACTOR = 0.5  # 카테고리 중앙값의 50% 미만이면 저가 상품
 MID_LEVEL_MIN = 30
 HIGH_LEVEL_MIN = 70
 
@@ -55,6 +56,17 @@ class FraudScore:
     score: int  # 0~100
     level: Level
     reasons: list[FraudReason]
+
+
+def low_price_ratio(prices: list[tuple[int, int]]) -> float:
+    """(가격, 카테고리 중앙값) 목록에서 중앙값의 `LOW_PRICE_FACTOR` 미만인 상품 비율.
+
+    상품이 없으면 비율을 정할 수 없어 ValueError다(0으로 두지 않는다).
+    """
+    if not prices:
+        raise ValueError("no products")
+    low = sum(1 for price, median in prices if price < median * LOW_PRICE_FACTOR)
+    return low / len(prices)
 
 
 def _validate(f: SellerFacts) -> None:

@@ -92,6 +92,8 @@ class FraudReason(AxModel):
     rule_code: str
     value: float
     weight: float
+    # 확인할 수 없는 규칙이면 "확인할 수 없음: <규칙> (이유)". 그때 value·weight는 0이고 점수에 없다
+    note: str | None = None
 
 
 class FraudScoreOutput(AxModel):
@@ -101,6 +103,8 @@ class FraudScoreOutput(AxModel):
     reasons: list[FraudReason] = Field(default_factory=list)
     similar_card_ids: list[str] = Field(default_factory=list)
     summary: str
+    # 데이터가 없어 확인하지 못한 규칙 코드. 점수는 확인한 규칙만으로 낸다
+    unknown_rules: list[str] = Field(default_factory=list)
 
 
 # ---------- kpi_summary ----------

@@ -43,6 +43,28 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
   - 평가 규칙: `eval/README.md`
 - shop-api 응답 없음·401·403·5xx·형식 오류면 숫자를 0으로 내지 않고 `failed`·`unavailable`과 "확인할 수 없음" 근거로 답한다.
 
+### fraud_score (판매자 사기 위험 점수)
+- **가중치는 재무(태윤) 확정 전 초안이다** (`metrics/fraud.py` `WEIGHTS`). 점수는 판단 재료이고 승인·보류는 정하지 않는다(grade read, 재무·정산이 정한다).
+- 입력: `seller_id` (`FraudScoreInput`)
+- 사용하는 데이터 (shop-api 읽기 전용, 기존 `sellers`·`products` 테이블만)
+  - `GET /api/shop/sellers/{seller_id}/profile` (`ShopSellerProfile`): `joined_at`(=`sellers.created_at`), `listings_last_24h`(최근 24시간에 만든 상품 수), `product_count`(판매 중 상품 수)
+  - `GET /api/shop/sellers/{seller_id}/prices` (`ShopSellerPricesResult`): 판매 중 상품의 가격과 같은 카테고리 판매 중 상품 가격의 중앙값
+- 규칙 (계산은 `metrics/fraud.score_seller`, LLM 없음)
+
+| 규칙 | 가중치(초안) | 사실 | 지금 |
+| --- | --- | --- | --- |
+| NEW_ACCOUNT | 15 | 가입 7일 미만 | 확인함 |
+| LOW_PRICE | 25 × 비율 | 카테고리 중앙값의 50% 미만(`LOW_PRICE_FACTOR`)인 상품 비율 | 확인함 (판매 중 상품이 없으면 확인할 수 없음) |
+| BULK_LISTING | 15 | 24시간 등록 50개 이상 | 확인함 |
+| DUP_BUSINESS | 20 | 같은 사업자 해시의 다른 판매자 | **확인할 수 없음**: shop-api `sellers`에 사업자 정보가 없어 `business_hash`가 null이다 (컬럼 추가는 팀 결정 필요) |
+| FRAUD_SIMILAR | 25 × 유사도 | 지난 사기 판매자 카드와의 유사도 | **확인할 수 없음**: hr에 data가 부를 수 있는 유사 사기 카드 skill이 없다. `similar_card_ids`는 빈 목록 |
+
+- 확인할 수 없는 규칙은 0점으로 셈하지 않는다. 점수에서 빼고 `unknown_rules`, `reasons[].note`, summary에 "확인할 수 없음: <규칙>"으로 남긴다. summary에는 "확인한 규칙 N개 기준 점수, 최대 가능 점수 M점"(M = 100 − 확인 못 한 규칙 가중치)을 함께 적는다.
+  - 지금은 사업자 중복·유사 카드가 늘 빠져서 최대 가능 점수가 55점이다. high(70점 이상)는 나오지 않는다.
+- shop-api를 못 읽으면 `failed`·`unavailable`(다른 skill과 같음), 없는 판매자(404)는 `failed`·`not_found`. 둘 다 숫자를 내지 않는다.
+- 목 판매자 데이터는 없다. `DATA_MOCK=1`이어도 shop-api를 부른다.
+- 평가: `eval/README.md`의 판매자 케이스
+
 ### kpi_summary (DSH-04, SCN-L)
 - 공통 로그 저장소를 **읽기만** 한다. `DATA_MOCK=1`이면 시드(`seed_logs.py`), 아니면 `AX_COMMON_LOG_DB`(compose는 `infra/common-log/data.yml`이 연결). 비어 있으면 `unavailable`.
 - 사건 = `ctx_inc_` context (입력 `context_ids`를 주면 그 context). 숫자는 `metrics/kpi.py`가 계산한다.

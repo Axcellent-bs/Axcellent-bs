@@ -237,6 +237,25 @@ def test_data_fraud_score() -> None:
     for bad in (-1, 101):
         with pytest.raises(ValidationError):
             FraudScoreOutput.model_validate({**body, "score": bad})
+    # 예전 응답(unknown_rules·note 없음)도 그대로 읽힌다
+    assert FraudScoreOutput.model_validate(body).unknown_rules == []
+    assert FraudScoreOutput.model_validate(body).reasons[0].note is None
+    unknown = FraudScoreOutput.model_validate(
+        {
+            **body,
+            "reasons": [
+                {
+                    "rule_code": "FRAUD_SIMILAR",
+                    "value": 0.0,
+                    "weight": 0.0,
+                    "note": "확인할 수 없음: FRAUD_SIMILAR",
+                }
+            ],
+            "unknown_rules": ["FRAUD_SIMILAR"],
+        }
+    )
+    assert unknown.unknown_rules == ["FRAUD_SIMILAR"]
+    assert unknown.reasons[0].note == "확인할 수 없음: FRAUD_SIMILAR"
 
 
 def test_data_kpi_summary() -> None:
@@ -257,9 +276,12 @@ def test_data_kpi_summary() -> None:
     # 사건 0건이면 auto_handled_rate는 None (#40). 값이 있으면 0~1 범위는 그대로
     empty = KpiSummaryOutput.model_validate({"escalation_count": 0})
     assert empty.auto_handled_rate is None
-    assert KpiSummaryOutput.model_validate(
-        {"auto_handled_rate": None, "escalation_count": 0}
-    ).auto_handled_rate is None
+    assert (
+        KpiSummaryOutput.model_validate(
+            {"auto_handled_rate": None, "escalation_count": 0}
+        ).auto_handled_rate
+        is None
+    )
     with pytest.raises(ValidationError):
         KpiSummaryOutput.model_validate({"auto_handled_rate": 1.5, "escalation_count": 0})
     with pytest.raises(ValidationError):
