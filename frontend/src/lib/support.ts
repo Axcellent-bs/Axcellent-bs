@@ -85,6 +85,14 @@ export interface ChangeRequest {
   updated_at: string | null;
 }
 
+/** 안전 관문 실행 기록 한 줄 (dashboard-api GET /executions). 요청 원문·금액 계산은 빼고 판정만 온다 */
+export interface ExecutionRow {
+  execution_id: string;
+  created_at: string;
+  request: { action: string; requester: string; context_id: string };
+  decision: { grade: "A" | "B" | "C"; status: "executed" | "verifying" | "held" | "rejected" | "failed"; hold_reason?: string | null };
+}
+
 // ---------------------------------------------------------------- 호출
 async function get<T>(path: string): Promise<Envelope<T> & { meta: { total?: number } }> {
   let res: Response;
@@ -117,6 +125,8 @@ export const support = {
   compensation: (inquiryId: number) => get<CompensationSuggestion>(`${BASE}/conversations/${inquiryId}/compensation-suggestion`),
   paymentDiagnosis: (inquiryId: number) => get<PaymentDiagnosis>(`${BASE}/conversations/${inquiryId}/payment-diagnosis`),
   inquirySurge: () => get<InquirySurge>(`${BASE}/inquiry-surge`),
+  /** 한 사건 번호로 기록된 처리(안전 관문 실행 기록) */
+  executions: (contextId: string) => get<ExecutionRow[]>(`${BASE}/executions${qs({ context_id: contextId })}`),
   changeRequests: (q: { inquiryId?: number; status?: ChangeStatus } = {}) =>
     get<ChangeRequest[]>(`${BASE}/change-requests${qs({ inquiry_id: q.inquiryId, status: q.status })}`),
 };
