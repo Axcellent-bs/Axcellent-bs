@@ -8,7 +8,9 @@
 
 from __future__ import annotations
 
+import argparse
 import json
+import random
 import sys
 from datetime import timedelta
 from pathlib import Path
@@ -19,6 +21,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import eval_world  # noqa: E402
 
 CASES = Path(__file__).resolve().parent / "cases"
+HOLDOUT = Path(__file__).resolve().parent / "holdout"
+# holdout(처음 보는 케이스) 생성 seed와 개수. 다시 만들 때는 seed를 바꾸고 README에 이유를 적는다
+HOLDOUT_SEED = 20261029
+HOLDOUT_COUNT = 40
 WINDOW_MINUTES = 60
 
 
@@ -399,7 +405,116 @@ def _with_ids(index: int, spec: dict[str, Any]) -> dict[str, Any]:
     return {**spec, "cause": cause}
 
 
+# ---------------------------------------------------------------- holdout (처음 보는 케이스)
+
+# 장애 종류: (이름, 결제 장애 세기 또는 None=주문 급감, 실패 코드)
+HOLDOUT_FAULTS: list[tuple[str, float | None, str | None]] = [
+    ("pay_full", 1.0, None),
+    ("pay_half", 0.5, None),
+    ("pay_weak20", 0.2, None),
+    ("pay_timeout", 1.0, "PG_TIMEOUT"),
+    ("order_drop", None, None),
+]
+HOLDOUT_START = eval_world.parse("2026-11-01T00:00:00Z")
+
+
+def holdout_specs(seed: int = HOLDOUT_SEED, count: int = HOLDOUT_COUNT) -> list[dict[str, Any]]:
+    """seed로 무작위 시나리오를 만든다. 장애 없는 케이스와 장애 케이스가 반반이다.
+
+    무작위로 고르는 것: 시각(0~23시), 장애 종류(결제 100%·50%·20%·타임아웃·주문 급감),
+    길이(5~60분), 세일 여부, 잡음 건수. 같은 seed면 늘 같은 시나리오다.
+    """
+    rng = random.Random(seed)
+    specs: list[dict[str, Any]] = []
+    for index in range(count):
+        fault = index % 2 == 1
+        hour = rng.randrange(24)
+        start = HOLDOUT_START + timedelta(days=index, hours=hour)
+        window = {"from": eval_world.iso(start), "to": eval_world.iso(start + timedelta(hours=1))}
+        sale = rng.random() < 0.25
+        sale_factor = rng.choice([2.0, 3.0]) if sale else None
+        noise = sorted(rng.sample(range(60), rng.choice([0, 0, 1, 2, 3])))
+        noise_history = rng.random() < 0.5
+        llm = rng.choice(["grounded", "hallucinate", "fail"])
+        condition: dict[str, Any] = {
+            "hour": hour,
+            "fault": None,
+            "minutes": None,
+            "strength": None,
+            "sale_factor": sale_factor,
+            "noise": len(noise),
+        }
+        if fault:
+            name, fraction, code = HOLDOUT_FAULTS[rng.randrange(len(HOLDOUT_FAULTS))]
+            minutes = rng.randint(5, 60)
+            offset = rng.randint(0, 60 - minutes)
+            block = _block(window, offset, minutes)
+            if fraction is None:
+                factor = rng.choice([0.1, 0.3, 0.5])
+                kind, injection = "order_drop", {"type": "order_drop", **block, "factor": factor}
+                condition.update(fault=name, minutes=minutes, strength=f"주문 {factor:.0%}로")
+            else:
+                kind = "payment_fault"
+                injection = {"type": "payment_failure", **block, "fraction": fraction}
+                if code:
+                    injection["fault_code"] = code
+                condition.update(fault=name, minutes=minutes, strength=f"실패 {fraction:.0%}")
+        else:
+            kind, injection = "normal", {"type": "none"}
+        if noise:
+            injection.update(
+                noise_at_minutes=noise, noise_history=noise_history, noise_code="PG_TIMEOUT"
+            )
+        specs.append(
+            {
+                "id": f"holdout_{seed}_{index:02d}",
+                "kind": kind,
+                "description": "무작위 생성 (holdout)",
+                "window": window,
+                "traffic": {"orders_per_5m": 5, **({"sale_factor": sale_factor} if sale else {})},
+                "injection": injection,
+                "cause": dict(NONE),
+                "llm": llm,
+                "holdout": {"seed": seed, **condition},
+            }
+        )
+    return specs
+
+
+def holdout_expected(spec: dict[str, Any]) -> dict[str, Any]:
+    """holdout 정답. 생성 조건으로 정하고, 결제 장애는 만들어진 장애 쪽 실패 수로 다듬는다.
+
+    - 결제 장애에서 장애 쪽 실패가 1건뿐이면 지금 정의대로 low 기록으로 채점한다(사건 아님)
+    - 0건이면(주문이 없어 실패할 기회가 없었음) 데이터에 장애 흔적이 없어 이상 아님으로 본다
+    """
+    answer = expected(spec)
+    if spec["kind"] == "payment_fault":
+        failures = answer["impact"]["failed_order_count"]
+        if failures <= 1:
+            answer["anomaly"]["expected"] = False
+            answer["anomaly"]["low_expected"] = failures == 1
+    return answer
+
+
+def write_holdout(seed: int = HOLDOUT_SEED, count: int = HOLDOUT_COUNT) -> None:
+    HOLDOUT.mkdir(exist_ok=True)
+    for old in HOLDOUT.glob("*.json"):
+        old.unlink()
+    for spec in holdout_specs(seed, count):
+        case = {**spec, "expected": holdout_expected(spec)}
+        path = HOLDOUT / f"{spec['id']}.json"
+        path.write_text(json.dumps(case, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"wrote {count} holdout scenarios (seed {seed}) to {HOLDOUT}")
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description="정답지를 만든다")
+    parser.add_argument("--holdout", action="store_true", help="holdout(처음 보는 케이스)만 만든다")
+    parser.add_argument("--seed", type=int, default=HOLDOUT_SEED, help="holdout seed")
+    args = parser.parse_args()
+    if args.holdout:
+        write_holdout(args.seed)
+        return
     CASES.mkdir(exist_ok=True)
     for old in CASES.glob("*.json"):
         old.unlink()

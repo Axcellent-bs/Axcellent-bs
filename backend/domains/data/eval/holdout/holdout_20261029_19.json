@@ -1,0 +1,54 @@
+{
+  "id": "holdout_20261029_19",
+  "kind": "payment_fault",
+  "description": "무작위 생성 (holdout)",
+  "window": {
+    "from": "2026-11-20T22:00:00Z",
+    "to": "2026-11-20T23:00:00Z"
+  },
+  "traffic": {
+    "orders_per_5m": 5
+  },
+  "injection": {
+    "type": "payment_failure",
+    "from": "2026-11-20T22:24:00Z",
+    "to": "2026-11-20T22:58:00Z",
+    "fraction": 0.2
+  },
+  "cause": {
+    "type": "none"
+  },
+  "llm": "fail",
+  "holdout": {
+    "seed": 20261029,
+    "hour": 22,
+    "fault": "pay_weak20",
+    "minutes": 34,
+    "strength": "실패 20%",
+    "sale_factor": null,
+    "noise": 0
+  },
+  "expected": {
+    "anomaly": {
+      "expected": true,
+      "low_expected": false,
+      "metric": "payment_fail_rate",
+      "onset": "2026-11-20T22:24:00Z",
+      "first_failure_bucket": "2026-11-20T22:25:00Z",
+      "unknown_expected": false,
+      "noise_fault_failures": 0
+    },
+    "impact": {
+      "unknown_expected": false,
+      "failed_order_count": 5,
+      "affected_customer_count": 5,
+      "damage_amount": 92500,
+      "all_failed_payments": 6,
+      "declined_payments": 1
+    },
+    "root_cause": {
+      "injected": "none",
+      "ref": null
+    }
+  }
+}
