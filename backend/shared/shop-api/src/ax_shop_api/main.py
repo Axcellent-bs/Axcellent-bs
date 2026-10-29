@@ -26,6 +26,8 @@ from ax_agent_template.server import verify_token
 from ax_agent_template.services import department_of
 from ax_contracts.data_access.shop_failed_orders import ShopFailedOrdersQuery
 from ax_contracts.data_access.shop_metric_series import ShopMetricSeriesQuery
+from ax_contracts.data_access.shop_seller_prices import ShopSellerPricesQuery
+from ax_contracts.data_access.shop_seller_profile import ShopSellerProfileQuery
 from ax_shop_api import inquiries, orchestrator_relay, outbox, retention, support_client
 from ax_shop_api.db import Db
 from ax_shop_api.lookups import Lookups
@@ -559,6 +561,16 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
         query = _query(ShopMetricSeriesQuery, metric=metric, from_=from_, to=to, bucket=bucket)
         result = lookups.metric_series(query)
         return _ok(result.model_dump(mode="json"))
+
+    @app.get("/api/shop/sellers/{seller_id}/profile")
+    async def seller_profile(seller_id: str, _: str = Depends(_caller(DATA_READERS))) -> dict:
+        query = _query(ShopSellerProfileQuery, seller_id=seller_id)
+        return _ok(lookups.seller_profile(query).model_dump(mode="json"))
+
+    @app.get("/api/shop/sellers/{seller_id}/prices")
+    async def seller_prices(seller_id: str, _: str = Depends(_caller(DATA_READERS))) -> dict:
+        query = _query(ShopSellerPricesQuery, seller_id=seller_id)
+        return _ok(lookups.seller_prices(query).model_dump(mode="json"))
 
     return app
 

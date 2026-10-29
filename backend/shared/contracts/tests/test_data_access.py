@@ -74,6 +74,13 @@ def test_seller_profile() -> None:
         ShopSellerProfile.model_validate({**PROFILE, "business_number": "123-45-67890"})
     with pytest.raises(ValidationError):
         ShopSellerProfile.model_validate({**PROFILE, "joined_at": "2026-10-01T00:00:00"})
+    # 사업자 해시가 아직 없는 shop-api는 null을 준다 (지어내지 않는다)
+    unknown = ShopSellerProfile.model_validate(
+        {**PROFILE, "business_hash": None, "business_hash_duplicated": None}
+    )
+    assert (unknown.business_hash, unknown.business_hash_duplicated) == (None, None)
+    bare = {k: v for k, v in PROFILE.items() if not k.startswith("business_")}
+    assert ShopSellerProfile.model_validate(bare).business_hash_duplicated is None
 
 
 def test_seller_prices() -> None:

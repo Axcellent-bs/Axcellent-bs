@@ -4,8 +4,10 @@
   (`eval_world`), data의 실제 skill 코드로 돌려 정답과 비교한다.
   - 이상 탐지: `detect_anomalies` (shop-api 지표 시계열을 data의 `HttpMetricSource`로 읽는다)
   - 영향 분석: `analyze_impact` (실패 주문을 data의 `HttpShopClient`로 읽는다)
-  - 사기 점수: `fraud_score` 핸들러. 아직 미구현이면 "확인할 수 없음"으로 두고, 참고로 규칙 점수
-    (`metrics/fraud.score_seller`)를 라벨과 비교한다.
+  - 사기 점수: `fraud_score` 핸들러. 판매자마다 shop-api 코드로 임시 DB를 만들고(`eval_sellers`)
+    핸들러가 data의 `HttpSellerClient`로 읽는다. shop-api에 없는 사실(사업자 중복·유사 카드)은
+    핸들러에서 "확인할 수 없음"이라 점수에서 빠진다(`fraud.precision`·`recall`). 참고로 정답지
+    `facts` 전부로 낸 규칙 점수(`metrics/fraud.score_seller`)도 라벨과 비교한다(`rule_*`).
   - 원인 추정: `estimate_root_cause` (다른 부서 응답은 주입한 원인으로 만든 가짜 A2A)
 - LLM은 평가용 클라이언트(`eval_llm.ScriptedLLM`)라 CI에서도 결과가 같다.
 - 결과: 표를 출력하고 `results/latest.json`에 저장한다(커밋하지 않음).
@@ -27,9 +29,12 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import eval_llm  # noqa: E402
+import eval_sellers  # noqa: E402
 import eval_world  # noqa: E402
 import httpx  # noqa: E402
 
+from ax_contracts.data_access.shop_seller_prices import ShopSellerPricesQuery  # noqa: E402
+from ax_contracts.data_access.shop_seller_profile import ShopSellerProfileQuery  # noqa: E402
 from ax_contracts.schemas import (  # noqa: E402
     TENANT_ID_DEFAULT,
     AgentRequest,
@@ -42,14 +47,16 @@ from ax_contracts.schemas.data import (  # noqa: E402
     ImpactAnalysisInput,
     RootCauseInput,
 )
+from ax_shop_api.lookups import Lookups  # noqa: E402
 from data_agent import handlers  # noqa: E402
 from data_agent.clients.shop_client import (  # noqa: E402
     HttpMetricSource,
+    HttpSellerClient,
     HttpShopClient,
     ShopApi,
     ShopUnavailable,
 )
-from data_agent.metrics.fraud import SellerFacts, score_seller  # noqa: E402
+from data_agent.metrics.fraud import SellerFacts, low_price_ratio, score_seller  # noqa: E402
 from data_agent.skills.anomaly_detection import detect_anomalies  # noqa: E402
 from data_agent.skills.impact_analysis import analyze_impact  # noqa: E402
 from data_agent.skills.root_cause import estimate_root_cause  # noqa: E402
@@ -327,26 +334,57 @@ async def run_case(case: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _facts_drift(db: Any, seller: dict[str, Any], now: datetime) -> list[str]:
+    """만든 shop-api 데이터가 정답지 facts(shop-api에 넣을 수 있는 것)와 다른 항목."""
+    lookups = Lookups(db, now=lambda: now)
+    profile = lookups.seller_profile(ShopSellerProfileQuery(seller_id=seller["id"]))
+    prices = lookups.seller_prices(ShopSellerPricesQuery(seller_id=seller["id"]))
+    pairs = [(i.price, i.category_median_price) for i in prices.items]
+    got = {
+        "joined_days": (now - profile.joined_at).days,
+        "listings_last_24h": profile.listings_last_24h,
+        "low_price_ratio": low_price_ratio(pairs),
+    }
+    return [k for k, v in got.items() if abs(float(v) - float(seller["facts"][k])) > 1e-9]
+
+
 async def run_sellers(sellers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
-    for seller in sellers:
-        request = AgentRequest(
-            meta=_meta("ctx_eval_fraud"), skill="fraud_score", input={"seller_id": seller["id"]}
-        )
-        result = await handlers.HANDLERS["fraud_score"](request)
-        level = result.output.get("level") if result.status == TaskStatus.COMPLETED else None
-        rule = score_seller(SellerFacts(**seller["facts"]))
-        rows.append(
-            {
-                "id": seller["id"],
-                "label": seller["label"],
-                "skill_status": result.status.value,
-                "skill_outcome": result.outcome,
-                "skill_level": level,
-                "rule_score": rule.score,
-                "rule_level": rule.level,
-            }
-        )
+    original = handlers.get_seller_client
+    try:
+        for seller in sellers:
+            now = datetime.now(UTC)
+            db = eval_sellers.build(seller, now)
+            async with httpx.AsyncClient(
+                transport=eval_sellers.transport(db), base_url="http://shop"
+            ) as client:
+                api = ShopApi("http://shop", token="eval", client=client)
+                handlers.get_seller_client = lambda api=api: HttpSellerClient(api)
+                request = AgentRequest(
+                    meta=_meta("ctx_eval_fraud"),
+                    skill="fraud_score",
+                    input={"seller_id": seller["id"]},
+                )
+                result = await handlers.HANDLERS["fraud_score"](request)
+            done = result.status == TaskStatus.COMPLETED
+            output = result.output if done else {}
+            rule = score_seller(SellerFacts(**seller["facts"]))
+            rows.append(
+                {
+                    "id": seller["id"],
+                    "label": seller["label"],
+                    "facts_drift": _facts_drift(db, seller, now),
+                    "skill_status": result.status.value,
+                    "skill_outcome": result.outcome,
+                    "skill_score": output.get("score"),
+                    "skill_level": output.get("level"),
+                    "unknown_rules": output.get("unknown_rules", []),
+                    "rule_score": rule.score,
+                    "rule_level": rule.level,
+                }
+            )
+    finally:
+        handlers.get_seller_client = original
     return rows
 
 
@@ -493,9 +531,23 @@ def wrong_cases(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> l
             if r["ungrounded_survived"]:
                 add(c["id"], "원인 추정", f"근거 없는 후보 {r['ungrounded_survived']}개가 남음")
     for s in sellers:
+        if s["facts_drift"]:
+            add(
+                s["id"],
+                "정답지",
+                f"만든 판매자 데이터가 facts와 다르다: {', '.join(s['facts_drift'])}",
+            )
         if s["skill_status"] != "completed":
             add(
                 s["id"], "사기 점수", f"skill이 답하지 않음 ({s['skill_outcome']}) — 확인할 수 없음"
+            )
+        elif (s["skill_level"] == "high") != (s["label"] == "fraud"):
+            unknown = ", ".join(s["unknown_rules"]) or "없음"
+            add(
+                s["id"],
+                "사기 점수",
+                f"라벨 {s['label']} / skill 등급 {s['skill_level']} ({s['skill_score']}점, "
+                f"확인 못 한 규칙: {unknown})",
             )
         if (s["rule_level"] == "high") != (s["label"] == "fraud"):
             add(

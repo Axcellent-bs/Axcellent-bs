@@ -3,8 +3,8 @@
 - impact_analysis, anomaly_detection은 읽기 전용(grade read)이라 `execute()`를 거치지 않는다.
 - kpi_summary는 공통 로그 저장소를 읽기만 한다(grade read).
 - root_cause_hypotheses는 다른 부서에 조회만 하고(A2A) 원인 후보를 고른다(grade read).
-- fraud_score는 카드에는 있지만 아직 구현 전이다. 템플릿이 카드와 핸들러가 같아야 시작하므로
-  `not_implemented` 실패를 돌려주는 자리 핸들러를 둔다(후속 PR에서 교체).
+- fraud_score는 shop-api 판매자 정보·가격을 읽어 규칙 점수를 낸다(grade read). 승인·보류는 정하지
+  않는다. 확인할 수 없는 규칙은 점수에서 빼고 `unknown_rules`로 알린다. 없는 판매자는 `not_found`다.
 - 외부 입력(`request.untrusted`)은 읽지 않는다.
 - shop-api에서 데이터를 받지 못하면(`ShopUnavailable`) 숫자를 0으로 내지 않고 `failed`·`unavailable`
   과 "확인할 수 없음" 근거로 답한다.
@@ -22,15 +22,22 @@ from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.data import (
     AccuracyReportInput,
     AnomalyDetectionInput,
+    FraudScoreInput,
     ImpactAnalysisInput,
     KpiSummaryInput,
     RootCauseInput,
 )
 from data_agent.clients.fact_sources import notices_at
 from data_agent.clients.log_client import get_log_source
-from data_agent.clients.shop_client import ShopUnavailable
+from data_agent.clients.shop_client import (
+    HttpSellerClient,
+    SellerClient,
+    ShopUnavailable,
+    shop_api,
+)
 from data_agent.skills.accuracy_report import eval_dir, load_report
 from data_agent.skills.anomaly_detection import detect_anomalies, env_settings, get_metric_source
+from data_agent.skills.fraud_score import score_fraud
 from data_agent.skills.impact_analysis import analyze_impact
 from data_agent.skills.kpi_summary import summarize_kpi
 from data_agent.skills.root_cause import estimate_root_cause
@@ -39,6 +46,14 @@ from data_agent.skills.root_cause import estimate_root_cause
 def get_llm() -> LLMClient:
     """설명 문장용 LLM. 테스트는 이 함수를 바꿔 끼운다. 미설정이면 explain이 템플릿으로 대체한다."""
     return LLMClient("data")
+
+
+def get_seller_client() -> SellerClient:
+    """판매자 정보 클라이언트(shop-api). 테스트·평가는 이 함수를 바꿔 끼운다.
+
+    목 판매자 데이터는 없어서 `DATA_MOCK`이어도 shop-api를 부른다(지어내지 않는다).
+    """
+    return HttpSellerClient(shop_api(os.environ))
 
 
 def _result(request: AgentRequest, status: TaskStatus, **kwargs) -> AgentResult:
@@ -108,6 +123,7 @@ async def anomaly_detection(request: AgentRequest) -> AgentResult:
         source = get_metric_source(os.environ)
     except NotImplementedError as error:
         return _unavailable(request, error)
+
     async def campaigns(start: datetime, end: datetime) -> list[str]:
         """주문이 늘었을 때 게시 중이던 공지·캠페인 (근거용). 마케팅이 꺼져 있으면 그 이유 한 줄."""
         return [f.summary for f in await notices_at(start, end, request.meta)]
@@ -186,22 +202,38 @@ async def accuracy_report(request: AgentRequest) -> AgentResult:
     )
 
 
-def _not_implemented(skill: str):
-    async def handler(request: AgentRequest) -> AgentResult:
-        return _result(
-            request,
-            TaskStatus.FAILED,
-            outcome="not_implemented",
-            output={"message": f"{skill}은(는) 아직 구현되지 않았다"},
-        )
-
-    return handler
+async def fraud_score(request: AgentRequest) -> AgentResult:
+    data = _parse(request, FraudScoreInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        result = await score_fraud(data, get_seller_client())
+    except ShopUnavailable as error:
+        query = f"shop_seller_profile seller_id={data.seller_id}"
+        if error.code == "SELLER_NOT_FOUND":
+            message = f"확인할 수 없음: shop-api에 판매자 {data.seller_id}가 없음 [{error.code}]"
+            return _result(
+                request,
+                TaskStatus.FAILED,
+                outcome="not_found",
+                output={"message": message, "code": error.code},
+                evidence=Evidence(
+                    queries=[query], data_summary=message, collected_at=datetime.now(UTC)
+                ),
+            )
+        return _shop_unavailable(request, error, query)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
 
 
 HANDLERS = {
     "impact_analysis": impact_analysis,
     "anomaly_detection": anomaly_detection,
-    "fraud_score": _not_implemented("fraud_score"),  # TODO: 후속 PR
+    "fraud_score": fraud_score,
     "kpi_summary": kpi_summary,
     "root_cause_hypotheses": root_cause_hypotheses,
     "accuracy_report": accuracy_report,

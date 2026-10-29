@@ -36,6 +36,8 @@
 | `POST /api/shop/coupons`, `GET /api/shop/coupons[?buyer_id&purpose_code]`, `GET /api/shop/coupons/{id}` | 쿠폰. 발급은 `marketing` 토큰만, `idempotency_key` 필수(같은 키·같은 내용은 이전 쿠폰, 다르면 409), 총액은 서버가 건수×단가로 계산, 조회는 `marketing`·`support`·`finance`·`orchestrator` |
 | `GET /api/shop/failed-orders?from&to[&category&limit]` | 실패 주문 목록(결제 `failed` 한 건이 한 줄, `category`는 첫 품목 분류, `reason`은 실패 코드). `data`·`admin` 토큰만. `from`·`to`는 시간대 있는 UTC 시각, `limit` 기본 1000(최대 5000)이고 넘으면 `truncated` |
 | `GET /api/shop/metric-series?metric&from&to[&bucket]` | 지표 시계열(`order_count`·`order_fail_count`·`payment_fail_rate`·`payment_count`, 5분 버킷). 건수는 빈 버킷을 0으로 채우고 비율은 결제 시도가 없는 버킷을 뺀다(값이 없는 것과 0%를 섞지 않는다). 7일(2016점)을 넘으면 `truncated`. `data`·`admin` 토큰만 |
+| `GET /api/shop/sellers/{seller_id}/profile` | 판매자 정보(data fraud_score). `joined_at`=`sellers.created_at`, `product_count`=판매 중 상품 수, `listings_last_24h`=`now−24시간 <= created_at <= now`인 상품 수. 사업자 정보가 테이블에 없어 `business_hash`·`business_hash_duplicated`는 null. 없는 판매자는 404 `SELLER_NOT_FOUND`. `data`·`admin` 토큰만 |
+| `GET /api/shop/sellers/{seller_id}/prices` | 판매자 판매 중 상품별 가격과 같은 카테고리 판매 중 상품(모든 판매자) 가격의 중앙값(짝수 개면 가운데 두 값 평균을 반올림). 없는 판매자는 404. `data`·`admin` 토큰만 |
 | `POST /api/shop/orders/{id}/cancel` | 미결제·결제 실패 주문 취소(결제된 주문의 환불은 SHOP-12) |
 
 - 장애 측정: 결제 시도마다 지연·5xx를 기록하고, **p95 1,000ms 초과 또는 5xx 2% 초과가 1분 지속**되면 `shop.degraded`(`component: payment`, `metric_code`: `p95_latency_ms`·`error_rate_5xx`)를, 해제하거나 정상으로 돌아오면 `shop.recovered`를 발행한다. 기준값은 `SHOP_DEGRADED_P95_MS`·`SHOP_DEGRADED_5XX_RATE`·`SHOP_DEGRADED_SUSTAIN_S`·`SHOP_MONITOR_WINDOW_S`로 바꾸고, 주기 판정 간격은 `SHOP_MONITOR_INTERVAL_S`(0이면 끔)다. 지연은 값만 기록한다(실제로 기다리지 않는다).
