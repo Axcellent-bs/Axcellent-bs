@@ -25,6 +25,7 @@ const DEPT_SAY: Record<string, string> = {
 const STEP_KO: Record<string, string> = {
   rollback: "배포 되돌리기", recovery: "복구 확인", recovered_draft: "정상화 공지 초안", diagnose: "원인 진단",
   impact: "영향 분석", notice: "점검 공지", compensation: "피해 고객 보상",
+  similar_cases: "비슷한 과거 사건 찾기", resolution: "해결 내용 기록",
   cost: "배송비·비용 기록 확인", record: "처리 결과 기록", verify: "인사 기록 읽어 확인",
 };
 const NOTE_KO: Record<string, string> = {
@@ -148,6 +149,50 @@ export default function OrchestratorPage() {
   );
 }
 
+interface PastCase {
+  card_id: string; title: string; summary: string; similarity: number; resolved: boolean;
+  resolution?: { outcome: string; root_cause: string | null; action: string | null; minutes_to_resolve: number | null } | null;
+}
+const OUTCOME_KO: Record<string, string> = { resolved: "해결됨", workaround: "임시 조치", unresolved: "미해결" };
+
+/** 사건이 열릴 때 인사 AI가 찾은 비슷한 과거 사건. 저장된 해결 내용만 보여 주고 추천은 하지 않는다 */
+function SimilarCases({ incident }: { incident: Incident }) {
+  const step = incident.steps.find((s) => s.skill === "find_similar_cases");
+  if (!step || step.status === "pending" || step.status === "running") return null;
+  const cases = (step.output?.cases as PastCase[] | undefined) ?? [];
+  return (
+    <section className="card space-y-2 p-5">
+      <h3 className="text-[15px] font-semibold">비슷한 과거 사건</h3>
+      {step.status !== "completed" ? (
+        <p className="text-sm text-ink-500">인사 AI에서 과거 사건을 찾지 못했습니다. 사건 처리에는 영향이 없습니다.</p>
+      ) : !cases.length ? (
+        <p className="text-sm text-ink-500">비슷한 과거 사건이 없습니다.</p>
+      ) : (
+        <ul className="space-y-3">
+          {cases.map((c) => (
+            <li key={c.card_id} className="rounded-xl border border-ink-100 p-3 text-sm">
+              <p className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">{c.title}</span>
+                <span className="chip bg-ink-100 text-ink-700 tabular-nums">유사도 {Math.round(c.similarity * 100)}%</span>
+                <span className={`chip ${c.resolved ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{c.resolved ? "해결 기록 있음" : "해결 기록 없음"}</span>
+              </p>
+              {c.resolution && (
+                <dl className="mt-2 grid grid-cols-[4rem_1fr] gap-x-3 gap-y-1 text-xs text-ink-700">
+                  <dt className="text-ink-500">결과</dt><dd>{OUTCOME_KO[c.resolution.outcome] ?? c.resolution.outcome}</dd>
+                  <dt className="text-ink-500">원인</dt><dd>{c.resolution.root_cause ?? "확인할 수 없음"}</dd>
+                  <dt className="text-ink-500">조치</dt><dd>{c.resolution.action ?? "확인할 수 없음"}</dd>
+                  <dt className="text-ink-500">소요 시간</dt><dd>{c.resolution.minutes_to_resolve != null ? `${c.resolution.minutes_to_resolve}분` : "확인할 수 없음"}</dd>
+                </dl>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-xs text-ink-500">참고용입니다. 이 결과로 자동 조치하지 않습니다.</p>
+    </section>
+  );
+}
+
 function IncidentDetail({ incident }: { incident: Incident }) {
   const shared = Object.entries(incident.shared ?? {});
   const done = incident.steps.filter((s) => s.status === "completed").length;
@@ -181,6 +226,8 @@ function IncidentDetail({ incident }: { incident: Incident }) {
           </div>
         )}
       </section>
+
+      <SimilarCases incident={incident} />
 
       <section className="card overflow-x-auto p-5">
         <h3 className="mb-3 text-[15px] font-semibold">단계</h3>

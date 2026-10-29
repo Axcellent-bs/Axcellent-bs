@@ -48,7 +48,12 @@ CARDS: dict[str, list[tuple[str, str, str | None]]] = {
         ("audit_report", "read", None),
         ("record_support_cost", "read", None),
     ],
-    "hr": [("record_case", "A", None), ("get_audit_timeline", "read", None)],
+    "hr": [
+        ("record_case", "A", None),
+        ("get_audit_timeline", "read", None),
+        ("find_similar_cases", "read", None),
+        ("record_resolution", "A", None),
+    ],
 }
 OWNERS = {
     "infra": "예진",
@@ -156,6 +161,10 @@ DEFAULT_OUTPUTS: dict[str, Callable[[AgentRequest], dict[str, Any]]] = {
     ),
     "verify_recovery": lambda r: _ok(recovered=True, infra_metrics_ok=True),
     "record_case": lambda r: _ok(card_id="card_mock01"),
+    "find_similar_cases": lambda r: _ok(
+        cases=[], max_similarity=0.0, method="dense", collected_at="2026-10-29T06:00:00Z"
+    ),
+    "record_resolution": lambda r: _ok(outcome="recorded", card_id="card_mock01"),
     # 실제 인사 `GetAuditTimelineOutput` 모양(`record_case`가 남긴 감사 기록)
     "get_audit_timeline": lambda r: _ok(
         context_id=r.input.get("context_id"),
