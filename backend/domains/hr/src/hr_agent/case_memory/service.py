@@ -103,12 +103,21 @@ async def record_resolution(svc: Services, request: AgentRequest) -> AgentResult
             evidence=make_evidence(svc.clock, "해결 내용을 기록할 카드가 없음: 확인할 수 없음", []),
         )
     card = max(cards, key=lambda c: c.created_at)
+    resolved_at = params.resolved_at or svc.clock()
+    minutes = params.minutes_to_resolve
+    if params.opened_at is not None:
+        if params.opened_at > resolved_at:
+            return invalid_input(request, "opened_at: 해결 시각보다 늦을 수 없다")
+        if minutes is None:  # 시스템이 잰다. 사람이 시간을 직접 적지 않는다
+            minutes = int((resolved_at - params.opened_at).total_seconds() // 60)
     resolution = CaseResolution(
         outcome=params.outcome,
         root_cause=params.root_cause,
         action=params.action,
-        minutes_to_resolve=params.minutes_to_resolve,
-        resolved_at=params.resolved_at or svc.clock(),
+        minutes_to_resolve=minutes,
+        resolved_at=resolved_at,
+        opened_at=params.opened_at,
+        prior_case_id=params.prior_case_id,
     )
     key = f"record_resolution:{card.card_id}:{_payload_hash(resolution)}"
     evidence = make_evidence(svc.clock, f"해결 내용 기록: 사건 {params.context_id}", [card.card_id])

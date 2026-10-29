@@ -287,3 +287,45 @@ def test_input_required_is_data_not_an_error() -> None:
         TaskStatus.INPUT_REQUIRED, reason_code=InputReason.HUMAN_INPUT, output={"questions": []}
     )
     assert hr_client.unwrap(waiting) == {"questions": []}
+
+
+# ---------------------------------------------------------------- 사건 해결 내용 입력
+RESOLUTION_URL = BASE + "/incidents/ctx_inc_0001/resolution"
+
+
+def test_resolution_is_sent_to_hr_with_the_incidents_context_and_no_typed_minutes(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.outputs["record_resolution"] = {"outcome": "recorded", "card_id": "card_x"}
+    response = client.post(
+        RESOLUTION_URL,
+        json={
+            "outcome": "resolved",
+            "root_cause": "결제 대행사 응답 지연",
+            "action": "타임아웃 조정",
+            "opened_at": "2026-10-29T08:00:00Z",
+            "prior_case_id": "card_old",
+        },
+    )
+    assert response.status_code == 200 and response.json()["data"]["card_id"] == "card_x"
+    sent = fake.last("record_resolution")
+    assert sent.meta.context_id == "ctx_inc_0001" and sent.meta.idempotency_key
+    assert sent.input["context_id"] == "ctx_inc_0001" and sent.input["prior_case_id"] == "card_old"
+    assert "minutes_to_resolve" not in sent.input  # 소요 시간은 사람이 적지 않는다
+
+
+def test_resolution_needs_a_human_token(client: TestClient, fake: Fake) -> None:
+    client.headers.pop("authorization", None)
+    response = client.post(RESOLUTION_URL, json={"outcome": "resolved"})
+    assert response.status_code == 401 and not fake.sent
+
+
+def test_resolution_without_a_card_is_404(client: TestClient, fake: Fake) -> None:
+    fake.outputs["record_resolution"] = {"outcome": "no_card"}
+    response = client.post(RESOLUTION_URL, json={"outcome": "unresolved"})
+    assert response.status_code == 404 and response.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_resolution_rejects_an_unknown_outcome(client: TestClient, fake: Fake) -> None:
+    response = client.post(RESOLUTION_URL, json={"outcome": "great"})
+    assert response.status_code == 422 and not fake.sent

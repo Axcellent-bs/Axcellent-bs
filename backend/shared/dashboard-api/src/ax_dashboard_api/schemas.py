@@ -7,6 +7,7 @@ dashboard-web `src/lib/types.ts`와 필드 이름·형태를 같게 맞췄다. �
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -538,6 +539,20 @@ class CandidateDecisionBody(BaseModel):
 
     decision: Literal["approve", "reject"]
     note: str | None = None
+
+
+class ResolutionBody(BaseModel):
+    """사건 해결 내용. 사람이 사건을 닫을 때 결과·원인·조치를 적는다. 소요 시간은 적지 않는다.
+
+    `opened_at`(사건이 열린 시각)을 주면 hr이 해결 시각과의 차이를 분으로 잰다.
+    `prior_case_id`는 그 사건을 시작할 때 근거로 보여 준 과거 사건 카드다(없으면 처음 겪는 장애).
+    """
+
+    outcome: Literal["resolved", "workaround", "unresolved"]
+    root_cause: str | None = Field(default=None, max_length=300)
+    action: str | None = Field(default=None, max_length=300)
+    opened_at: datetime | None = None
+    prior_case_id: str | None = None
 
 
 class AgentMessageBody(TextBody):
