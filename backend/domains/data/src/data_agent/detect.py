@@ -123,7 +123,14 @@ async def judge_window(
             judgements.append(unknown_judgement(metric, EMPTY_WINDOW))
         elif metric in RATE_METRICS:
             judgements.append(
-                judge_payment(window, series[metric], series["payment_count"], faults, settings)
+                judge_payment(
+                    window,
+                    series[metric],
+                    series["payment_count"],
+                    faults,
+                    settings,
+                    orders=series["order_count"],
+                )
             )
         elif metric == "order_count":
             judgements.append(orders)

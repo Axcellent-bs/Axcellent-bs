@@ -9,8 +9,9 @@ infra `verify_recovery`가 롤백 후 구간을 물어 `any_anomaly`로 복구 �
 - 주문 수는 감소만 이상이다. 증가(세일·캠페인)는 이상이 아니고, 게시 중 공지·캠페인이 있으면
   근거에 남긴다(`campaigns`).
 - 실패 주문 수는 주문이 평소보다 많으면 그만큼 기준을 늘려 본다.
-- 결제 실패율은 장애 쪽 실패 코드(영향 분석과 같은 분류)가 5분에 회사별 기준(`fault_failures`)
-  이상이면 기준선과 상관없이 이상이다. 새벽처럼 거래가 적은 시간대·약한 장애를 잡는다.
+- 결제 실패율은 장애 쪽 실패 코드(영향 분석과 같은 분류)로 단계별 기준을 본다. 5분에
+  `fault_failures`건 이상이거나, 1건 이상인 5분이 `fault_consecutive`개 연속이면 기준선과
+  상관없이 이상이다. 1건이 이어지지 않으면 이상이 아니고 severity low로 기록만 한다.
 - 판정할 수 없으면(기준선 0, 표본 부족, 빈 구간) 지표 `status`가 unknown이고,
   모든 지표가 unknown이면 구간 `status`도 unknown이다("확인할 수 없음").
 """
@@ -127,7 +128,8 @@ async def detect_anomalies(
         *(f"{j.metric}: {j.note}" for j in judgements),
         *notes,
         f"판정 설정: 5분 결제 {settings.min_payments}건 이상만 실패율 판정, "
-        f"유의수준 {settings.alpha}, 장애 쪽 실패 5분 {settings.fault_failures}건 이상이면 이상"
+        f"유의수준 {settings.alpha}, 장애 쪽 실패 5분 {settings.fault_failures}건 이상 또는 "
+        f"1건 이상 {settings.fault_consecutive}구간 연속이면 이상"
         + ("" if judged.fault_codes_read else " (실패 코드를 읽지 못해 이 규칙은 쓰지 않음)"),
     ]
     evidence = Evidence(

@@ -37,8 +37,14 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 - `DATA_MOCK`이 1이 아니면 shop-api 읽기 전용 API를 부른다 (`clients/shop_client.py`). 주소는 `AX_SHOP_API_URL`(없으면 `http://shop-api:8010`), 토큰은 `Authorization: Bearer <DATA_TOKEN>`.
   - impact_analysis: `GET /api/shop/failed-orders` (from·to·category·limit)
   - anomaly_detection: `GET /api/shop/metric-series`. 기준선 7일 + 구간을 하루씩 나눠 읽는다(shop-api 한도 2016점). shop-api가 계산하지 않는 `inquiry_count`는 빈 시계열(판정 불가)이다.
-    - 결제 실패율을 볼 때 구간의 `GET /api/shop/failed-orders`도 읽는다. 장애 쪽 실패 코드(영향 분석과 같은 분류)가 5분에 기준(`DATA_ANOMALY_FAULT_FAILURES`, 기본 1건) 이상이면 기준선과 상관없이 이상이다. 못 읽으면 통계 판정만 한다.
-    - 회사별 설정: `DATA_ANOMALY_SETTINGS="tenant=min_payments:alpha[:fault_failures];…"`
+    - 결제 실패율을 볼 때 구간의 `GET /api/shop/failed-orders`도 읽고, 장애 쪽 실패 코드(영향 분석과 같은 분류)를 5분마다 센다. 못 읽으면 통계 판정(7일 기준선 비교)만 한다. 단계별 기준:
+      - 5분 하나에 장애 쪽 실패가 `DATA_ANOMALY_FAULT_FAILURES`(기본 2)건 이상이면 기준선과 상관없이 이상
+      - 장애 쪽 실패 1건 이상인 5분이 `DATA_ANOMALY_FAULT_CONSECUTIVE`(기본 2)개 연속이면 이상
+        - 연속은 감시 구간 안에서만 센다. 앞 구간 자료는 읽지 않으므로 구간 첫 5분은 앞과 이어졌다고 보지 않는다
+        - 사이에 주문 시도가 0건으로 기록된 5분 하나는 건너뛴다(새벽처럼 실패할 기회가 없던 5분). 자료가 없는 5분(조회 실패 등)은 연속을 끊는다
+      - 1건이 한 구간만 나면 이상이 아니다. 통계 판정(normal, 표본 부족이면 unknown)을 그대로 두고 severity `low`와 "장애 쪽 실패 1건, 지속 안 됨"을 남긴다. 사건은 만들지 않는다
+      - 사용자 쪽 실패(카드 거절 등)·처음 보는 코드는 세지 않는다
+    - 회사별 설정: `DATA_ANOMALY_SETTINGS="tenant=min_payments:alpha[:fault_failures[:fault_consecutive]];…"`
     - 주기 감시(`monitor.py`)도 같은 판정 함수(`detect.judge_window`)를 쓴다.
   - 평가 규칙: `eval/README.md`
 - shop-api 응답 없음·401·403·5xx·형식 오류면 숫자를 0으로 내지 않고 `failed`·`unavailable`과 "확인할 수 없음" 근거로 답한다.
