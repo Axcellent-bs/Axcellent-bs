@@ -95,6 +95,7 @@ export const SKILL_KO: Record<string, string> = {
   anomaly_detection: "이상 징후 찾기", impact_analysis: "영향 분석", fraud_score: "부정 거래 점수", kpi_summary: "지표 요약",
   get_roster: "담당 명부 보기", start_handover: "인수인계 시작", answer_handover_question: "인수인계 질문 답하기",
   confirm_handover: "인수인계 확인", list_handovers: "인수인계 목록 보기", list_open_questions: "남은 질문 보기",
+  find_similar_cases: "비슷한 과거 사건 찾기", record_resolution: "해결 내용 기록",
   record_case: "결정 기록", check_plan: "계획 점검", list_candidate_cards: "후보 카드 보기", get_audit_timeline: "감사 기록 보기",
   decide_candidate_card: "후보 카드 결정",
   create_ticket: "요청 접수",

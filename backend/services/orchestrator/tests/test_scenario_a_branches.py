@@ -126,7 +126,8 @@ async def test_post_incident_kpi_is_requested_for_this_incident(harness) -> None
     assert kpi[0].input == {"context_ids": [inc.context_id]}
     order = [r.skill for _, r in harness.fakes.calls]
     assert order.index("kpi_summary") > order.index("publish_notice")
-    assert order[-1] == "record_case"  # 사건 기록은 모든 단계가 끝난 뒤 한 번
+    # 사건 기록은 모든 단계가 끝난 뒤 한 번, 그 뒤 해결 기록
+    assert order[-2:] == ["record_case", "record_resolution"]
 
 
 @pytest.mark.asyncio

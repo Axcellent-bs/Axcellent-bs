@@ -90,7 +90,7 @@ async def test_scenario_records_every_call_per_dept(harness: Harness) -> None:
     engine.caller = RecordingCaller(engine.caller, usage)
     await engine.run(new_incident(), scenario_a())
     assert usage.summary("marketing")["calls"] == 4
-    assert usage.summary("hr")["calls"] == 1
+    assert usage.summary("hr")["calls"] == 3
     # 영향 분석 + 원인 후보 추정 + 처리 시간 요약(kpi_summary)
     assert usage.summary("data")["calls"] == 3
 
@@ -124,7 +124,7 @@ def test_departments_endpoint_exposes_usage_after_an_incident(monkeypatch) -> No
     publish = next(s for s in marketing["skills"] if s["id"] == "publish_notice")
     assert publish["calls"] == 3 and publish["errors"] == 1
     assert len(marketing["series"]) == 20 and marketing["recent"][0]["skill"] == "publish_notice"
-    assert after["hr"]["usage"]["calls"] == 1
+    assert after["hr"]["usage"]["calls"] == 3
 
 
 def test_departments_marks_unavailable_dept(monkeypatch) -> None:

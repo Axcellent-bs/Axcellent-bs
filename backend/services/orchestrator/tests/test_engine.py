@@ -31,7 +31,7 @@ async def test_scenario_a_completes(harness) -> None:
     assert (check.status, check.reason_code) == ("skipped", "cause_confident")
     assert all(s.status == "completed" for k, s in inc.steps.items() if k != "cause_check")
     assert harness.events == ["incident.opened", "incident.resolved"]
-    assert inc.metrics["steps_total"] == 15
+    assert inc.metrics["steps_total"] == 17
     assert inc.metrics["auto_rate"] == 1.0
 
 
@@ -61,7 +61,7 @@ async def test_order_dependencies_respected(harness) -> None:
     order = [r.skill for _, r in harness.fakes.calls]
     assert order.index("publish_notice") > order.index("draft_notice")
     assert order.index("verify_recovery") > order.index("rollback_deployment")
-    assert order[-1] == "record_case"
+    assert order[-1] == "record_resolution"
 
 
 @pytest.mark.asyncio

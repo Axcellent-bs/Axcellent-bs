@@ -21,6 +21,8 @@ export interface Step {
   finished_at: string | null;
   transferred_to: string | null;
   reason_code: string | null;
+  /** 단계 결과. 스킬마다 모양이 다르다(예: 비슷한 과거 사건 찾기의 cases) */
+  output?: Record<string, unknown>;
 }
 export interface PendingHold { step_id: string; skill: string; label: string }
 export interface Incident {
