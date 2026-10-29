@@ -347,6 +347,8 @@ table.data .mono, table.data .point, .point { white-space: nowrap; }
 .st::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); flex: none; }
 .st-green::before { background: var(--success); }
 .st-amber::before { background: var(--warning, #d69e2e); }
+.st-red::before { background: var(--danger, #c53030); }
+.st-gray::before { background: var(--border-strong); }
 .li-title { flex-basis: 100%; line-height: 1.4; }
 .proj-list .doc-li { padding: 10px 12px; }
 .proj-li-meta { font-size: 12.5px; color: var(--text-3); font-weight: 400; gap: 10px; }
@@ -493,7 +495,7 @@ a.plain-link:hover { color: var(--primary); }
 button.chip { cursor: pointer; font: inherit; }
 
 /* 코딩 에이전트가 일하는 중: 상태 글자 앞 점이 깜빡인다 */
-.st.st-live::before { background: var(--primary, #5b5bd6); animation: st-blink 1s ease-in-out infinite; }
+.st.st-live::before { animation: st-blink 1s ease-in-out infinite; } /* 색은 상태 색(초록·주황) 그대로 */
 @keyframes st-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
 @media (prefers-reduced-motion: reduce) { .st.st-live::before { animation: none; } }
 

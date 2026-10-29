@@ -25,11 +25,26 @@ export function Grade({ g }: { g?: string }) {
   return <span className="grade" title={g === 'read' ? '상태를 바꾸지 않는 읽기' : `${g} 등급`}>{g === 'read' ? '읽기' : `${g}등급`}</span>
 }
 
-// 상태 = 점 하나 + 글자
-/** `live`면 앞 점이 깜빡인다 (에이전트가 일하는 중) */
+// 상태 = 점 하나 + 글자. 점 색 (10/29 예진 기준)
+//   초록 깜빡임 진행 중 · 초록 사람이 볼 것(문제 없음) · 주황 깜빡임 리뷰 중 · 주황 사람이 볼 것(문제 있음)
+//   빨강 실패·거절·불일치·장애 연결·걸림 · 회색 성공적으로 끝나 다시 안 봐도 됨
+const GREEN_LIVE = ['진행 중', '파일 읽는 중', '코드 작성 중', '관찰 중', '기획 중', '작업 중']
+const GREEN = ['대기', '접수', '초안', '머지 대기', 'PR 열림', 'PR 검수', '승인 대기', '레포 승인 대기', '확인 대기']
+const AMBER_LIVE = ['리뷰 중']
+const AMBER = ['교차검증 대기', '사람 확인 대기', '사람 확인', 'C 보류']
+const RED = ['실패', '거절', '불일치', '장애 연결', '걸림', '교차검증 거절', '검증자 거절', '학습 거부']
+type Tone = 'green' | 'amber' | 'red' | 'gray'
+const toneOf = (v: string): [Tone, boolean] =>
+  GREEN_LIVE.includes(v) ? ['green', true]
+    : GREEN.includes(v) ? ['green', false]
+    : AMBER_LIVE.includes(v) ? ['amber', true]
+    : AMBER.includes(v) ? ['amber', false]
+    : RED.includes(v) ? ['red', false]
+    : ['gray', false] // 완료·확정·통과·승인·머지됨·정식·중단됨·중복 연결·해제됨 등
+/** `live`를 주면 목록에 없는 글자라도 깜빡인다 (에이전트가 일하는 중) */
 export function State({ v, live }: { v: string; live?: boolean }) {
-  const tone = ['완료', '확정', '통과', '승인', '구현됨', '정식'].includes(v) ? 'green' : ['접수', '초안', '머지 대기', '불일치', 'C 보류', '중복 연결', '거절', '걸림', '해제됨', '교차검증 대기', '사람 확인 대기', '교차검증 거절', '학습 거부', '기준 해제', '장애 연결', '승인 대기', '레포 승인 대기'].includes(v) ? 'amber' : 'neutral'
-  return <span className={`st st-${tone}${live ? ' st-live' : ''}`}>{v}</span>
+  const [tone, blink] = toneOf(v)
+  return <span className={`st st-${tone}${live || blink ? ' st-live' : ''}`}>{v}</span>
 }
 
 // 줄·카드 전체를 눌러 이동한다. 안에 있는 링크·버튼·입력칸을 누르면 그쪽이 먼저다
