@@ -13,7 +13,7 @@ from ax_contracts.schemas import EventEnvelope, EventType, ExecuteDecision, Hold
 from finance_agent import handlers
 from finance_agent.main import app, load_card
 from finance_agent.recheck import VerifyAmountInput, recompute
-from finance_agent.sources import MockSources
+from finance_agent.sources import FraudScore, MockSources
 
 CTX = "ctx_inc_0001"
 
@@ -325,6 +325,32 @@ def test_risky_seller_is_held_for_human(
     assert (result["status"], result["reason_code"]) == ("input-required", "human_input")
     assert (result["output"]["decision"], result["output"]["review_id"]) == ("held", "rev_1")
     assert result["output"]["risk_score"] == 85
+
+
+def test_bound_score_goes_to_human_not_fraud_verdict(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """빠진 규칙이 있으면 상한을 넘기고, 사람 확인에 확인한 점수·빠진 규칙을 같이 보인다."""
+
+    class BoundSources(MockSources):
+        async def fraud_score(self, meta: Any, seller_id: str) -> FraudScore | None:
+            return FraudScore(
+                score=76, confirmed=31, unknown_rules=("DUP_BUSINESS", "FRAUD_SIMILAR")
+            )
+
+    handlers.reset_state(BoundSources())
+    calls = _fake_execute(
+        monkeypatch,
+        _decision("held", "C", hold_reason=HoldReason.OVER_THRESHOLD, review_id="rev_2"),
+    )
+    result = _call(client, "seller_review", SELLER, token="mock:orchestrator")
+    assert (result["status"], result["output"]["decision"]) == ("input-required", "held")
+    assert calls[0]["params"]["risk_score"] == 76
+    assert calls[0]["params"]["confirmed_score"] == 31
+    assert calls[0]["params"]["unknown_rules"] == ["DUP_BUSINESS", "FRAUD_SIMILAR"]
+    out = result["output"]
+    assert (out["risk_score"], out["confirmed_score"]) == (76, 31)
+    assert "사기 확정 아님" in result["evidence"]["data_summary"]
 
 
 def test_seller_review_without_documents_or_score_never_executes(

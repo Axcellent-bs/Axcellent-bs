@@ -45,7 +45,9 @@ function MarketOps({ tick, sellers }: { tick: number; sellers: Record<string, st
           {ops.slice(0, 10).map((m, i) => (
             <li key={i} className="flex flex-wrap items-center gap-2 py-2">
               <span className="font-medium">{m.skill === "seller_review" ? "입점 심사" : "정산 멈춤"}</span>
-              <span className="text-ink-700" title={m.seller_id}>{humanId(m.seller_id, sellers)}{m.risk_score != null && ` · 위험 점수 ${m.risk_score}점`}</span>
+              <span className="text-ink-700" title={m.seller_id}>{humanId(m.seller_id, sellers)}{m.risk_score != null && (m.unknown_rules?.length && m.confirmed_score != null
+                ? ` · 위험 점수 상한 ${m.risk_score}점 (확인한 점수 ${m.confirmed_score}점, 확인 못 한 규칙 ${m.unknown_rules.length}개)`
+                : ` · 위험 점수 ${m.risk_score}점`)}</span>
               <span className="ml-auto flex items-center gap-2 text-xs text-ink-500">
                 {shortDateTime(m.at)}
                 <Chip label={m.skill === "seller_review" ? SELLER_KO[m.decision ?? ""] ?? "확인 필요" : HOLD_KO[m.status ?? ""] ?? "확인 필요"}
