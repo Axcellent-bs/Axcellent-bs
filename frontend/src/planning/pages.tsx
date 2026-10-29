@@ -178,10 +178,10 @@ export function Work({ s, d, item }: P & { item?: string }) {
     return (
       <Layout list={list} head={<Head kicker={<>{taskOnly.id} · {taskOnly.spec}{fromDevTeam(s, taskOnly) && <> · <DevTeamTag /></>}</>} title={taskOnly.title} side={taskOnly.coding ? <CodingLabel c={taskOnly.coding} /> : <State v={taskOnly.state} />} />}>
         <Flow>
-          <CodingStep task={taskOnly} />
           <Step name="작업" on href={`#/work/specs/${taskOnly.spec}/${taskOnly.para}`} title={`${taskOnly.id} · ${taskOnly.spec} ${taskOnly.para}`}>
             {text && <p>{text}</p>}
           </Step>
+          <CodingStep task={taskOnly} />
           <Step name="PR" on={false} title="PR 전" />
         </Flow>
       </Layout>
@@ -207,12 +207,12 @@ export function Work({ s, d, item }: P & { item?: string }) {
       below={<Trace s={s} pr={sel} line={line} setLine={setLine} />}
     >
       <Flow>
-        {task && <CodingStep task={task} />}
         <Step name="작업" on href={task ? `#/work/specs/${task.spec}/${task.para}` : undefined} title={task ? `${task.id} · ${task.spec} ${task.para}` : '-'}>
           {para && <p>{para.text}</p>}
           {para?.warn && <Tag tone="amber">경고 {para.warn.card}</Tag>}
           {para?.incident && <Tag tone="amber">장애 {para.incident}</Tag>}
         </Step>
+        {task && <CodingStep task={task} />}
         {sel.target && (
           <Step name="대상 레포" on={sel.target.status === 'approved'} title={sel.target.status === 'approved' ? sel.target.repo : sel.target.status === 'rejected' ? '거절됨' : '승인 대기'}>
             <RepoTargetBlock key={sel.id} p={sel} d={d} />
