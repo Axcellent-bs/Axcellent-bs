@@ -10,9 +10,14 @@
       (주문이 2배면 실패도 2배까지는 정상).
     - 문의 수는 증가가 이상이다.
   - 구간 합계 검정(유의수준 `alpha`)과 5분 구간별 검정(`alpha`를 구간 수로 나눔)을 함께 본다.
+- 장애 쪽 실패 절대 기준(`judge_payment`): 거래가 적은 시간대(새벽)·약한 장애를 잡는다.
+  - 실패 코드 분류는 영향 분석과 같다(`impact.split_failures`, 장애 쪽 = `FAULT_REASONS`).
+  - 5분 구간 하나의 장애 쪽 실패 건수가 회사별 기준(`fault_failures`) 이상이면 기준선과
+    상관없이 결제 실패율 이상이다.
+  - 사용자 쪽 실패(카드 거절 등)·처음 보는 코드는 이 규칙에 넣지 않는다 (세일 오탐 방지).
 - 판정할 수 없으면 "이상 없음"이 아니라 "확인할 수 없음"(`unknown`)이다.
   - 기준선이 0 (지난 7일 같은 시간대 값이 모두 0, 실패 0건)
-  - 결제 건수가 모자라 실패율을 판정할 5분 구간이 없음
+  - 결제 건수가 모자라 실패율을 판정할 5분 구간이 없고, 장애 쪽 실패도 기준 미만
   - 구간에 주문·결제 기록이 하나도 없음 (빈 구간)
   - 지표 자료가 없음
 """
@@ -21,9 +26,12 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Literal
+
+from ax_contracts.data_access.shop_failed_orders import FailedOrder, ShopFailedOrdersResult
+from data_agent.impact import split_failures
 
 Status = Literal["normal", "anomaly", "unknown"]
 Direction = Literal["up", "down"]
@@ -34,6 +42,7 @@ BUCKET = timedelta(minutes=5)
 # 기본값은 정확도 평가(domains/data/eval)로 정했다. 회사별로 바꿀 수 있다(`settings_for`)
 DEFAULT_MIN_PAYMENTS = 5
 DEFAULT_ALPHA = 0.001
+DEFAULT_FAULT_FAILURES = 1  # 5분 구간 하나의 장애 쪽 실패 건수 기준 (평가로 정함)
 
 RATE_METRICS = frozenset({"payment_fail_rate"})
 DROP_METRICS = frozenset({"order_count"})  # 감소만 이상
@@ -44,25 +53,32 @@ RISE_METRICS = frozenset({"order_fail_count", "inquiry_count"})  # 증가만 이
 class Settings:
     min_payments: int = DEFAULT_MIN_PAYMENTS
     alpha: float = DEFAULT_ALPHA
+    fault_failures: int = DEFAULT_FAULT_FAILURES
 
 
 def settings_for(tenant_id: str | None, env: Mapping[str, str]) -> Settings:
     """회사별 판정 설정.
 
-    - `DATA_ANOMALY_MIN_PAYMENTS`·`DATA_ANOMALY_ALPHA`: 모든 회사 기본값
-    - `DATA_ANOMALY_SETTINGS`: 회사별 덮어쓰기 (`tenant=min_payments:alpha;…`,
-      예 `shop-demo=8:0.001;big-shop=20:0.0005`). 형식이 틀린 항목은 무시한다.
+    - `DATA_ANOMALY_MIN_PAYMENTS`·`DATA_ANOMALY_ALPHA`·`DATA_ANOMALY_FAULT_FAILURES`:
+      모든 회사 기본값
+    - `DATA_ANOMALY_SETTINGS`: 회사별 덮어쓰기 (`tenant=min_payments:alpha[:fault_failures];…`,
+      예 `shop-demo=8:0.001;big-shop=20:0.0005:10`). 세 번째 값은 빼도 된다.
+      형식이 틀린 항목은 무시한다.
     """
     base = Settings(
         min_payments=_int(env.get("DATA_ANOMALY_MIN_PAYMENTS"), DEFAULT_MIN_PAYMENTS),
         alpha=_float(env.get("DATA_ANOMALY_ALPHA"), DEFAULT_ALPHA),
+        fault_failures=_int(env.get("DATA_ANOMALY_FAULT_FAILURES"), DEFAULT_FAULT_FAILURES),
     )
     for item in (env.get("DATA_ANOMALY_SETTINGS") or "").split(";"):
         name, _, values = item.partition("=")
         if tenant_id and name.strip() == tenant_id:
-            payments, _, alpha = values.partition(":")
+            payments, _, rest = values.partition(":")
+            alpha, _, faults = rest.partition(":")
             return Settings(
-                min_payments=_int(payments, base.min_payments), alpha=_float(alpha, base.alpha)
+                min_payments=_int(payments, base.min_payments),
+                alpha=_float(alpha, base.alpha),
+                fault_failures=_int(faults, base.fault_failures),
             )
     return base
 
@@ -138,7 +154,8 @@ class Judgement:
     p_value: float | None
     severity: Literal["low", "mid", "high"] | None
     note: str  # 판정 근거 한 줄 (확인할 수 없으면 그 이유)
-    peak_ts: datetime | None = None  # 가장 벗어난 5분 구간
+    peak_ts: datetime | None = None  # 가장 벗어난 연속 구간의 시작
+    peak_to: datetime | None = None  # 그 구간의 끝 (다음 5분 구간 시작)
     notes: list[str] = field(default_factory=list)
 
 
@@ -240,9 +257,9 @@ def judge_rate(
         ns = int(sum(payments[b] for b in part))
         ks = int(sum(round(rate.get(b, 0.0) * payments[b]) for b in part))
         if ks / ns > p0:  # 상승만 본다
-            tests.append((binom_upper(ks, ns, p0), window[i]))
+            tests.append((binom_upper(ks, ns, p0), window[i], window[j] + BUCKET))
     count = len(segments(len(window)))
-    p_raw, peak = min(tests, default=(1.0, None))
+    p_raw, peak, peak_to = min(tests, default=(1.0, None, None), key=lambda t: t[0])
     p_best = min(1.0, p_raw * count)
     observed = k / n
     status: Status = "anomaly" if p_best < settings.alpha and observed > p0 else "normal"
@@ -263,6 +280,7 @@ def judge_rate(
         severity=_severity(p_best, settings.alpha) if status == "anomaly" else None,
         note=note,
         peak_ts=peak,
+        peak_to=peak_to,
     )
 
 
@@ -299,9 +317,9 @@ def judge_count(
         lam = sum(lams[i : j + 1]) * volume_factor
         obs = int(round(sum(observed[i : j + 1])))
         if lam > 0 and (obs < lam if falling else obs > lam):
-            tests.append((tail(obs, lam), window[i]))
+            tests.append((tail(obs, lam), window[i], window[j] + BUCKET))
     count = len(segments(len(window)))
-    p_raw, peak = min(tests, default=(1.0, None))
+    p_raw, peak, peak_to = min(tests, default=(1.0, None, None), key=lambda t: t[0])
     p_best = min(1.0, p_raw * count)
     moved = bool(tests)
     status: Status = "anomaly" if p_best < settings.alpha and moved else "normal"
@@ -330,7 +348,68 @@ def judge_count(
         severity=_severity(p_best, settings.alpha) if status == "anomaly" else None,
         note=note,
         peak_ts=peak,
+        peak_to=peak_to,
         notes=notes,
+    )
+
+
+def fault_buckets(orders: list[FailedOrder]) -> dict[datetime, float]:
+    """실패 주문을 5분 구간별 **장애 쪽** 실패 건수로 센다.
+
+    분류는 영향 분석과 같은 `impact.split_failures`다. 사용자 쪽 사유(카드 거절 등)·처음 보는
+    코드·사유 없음은 세지 않는다.
+    """
+    fault = split_failures(ShopFailedOrdersResult(orders=orders)).fault
+    return _by_bucket([(o.failed_at, 1.0) for o in fault])
+
+
+def judge_payment(
+    window: list[datetime],
+    rate: dict[datetime, float],
+    payments: dict[datetime, float],
+    faults: dict[datetime, float] | None,
+    settings: Settings,
+) -> Judgement:
+    """결제 실패율 = 통계 판정(`judge_rate`) + 장애 쪽 실패 절대 기준.
+
+    `faults`는 5분 구간별 장애 쪽 실패 건수(`fault_buckets`)다. None이면 실패 코드를 읽지 못한
+    것이라 통계 판정만 한다. 5분 구간 하나라도 장애 쪽 실패가 `fault_failures`건 이상이면
+    기준선·표본 수와 상관없이 이상이다. 장애 쪽 실패가 기준 미만이고 표본도 모자라면 통계 판정의
+    "확인할 수 없음"이 그대로 남는다.
+    """
+    base = judge_rate(window, rate, payments, settings)
+    if faults is None:
+        return replace(base, note=base.note + "; 장애 쪽 실패 코드를 읽지 못해 통계 판정만 함")
+    counts = [int(faults.get(b, 0)) for b in window]
+    total, worst = sum(counts), max(counts, default=0)
+    hits = [b for b, c in zip(window, counts, strict=True) if c >= settings.fault_failures]
+    rule = (
+        f"장애 쪽 실패 {total}건 (5분 최대 {worst}건, "
+        f"5분에 {settings.fault_failures}건 이상이면 이상)"
+    )
+    if not hits:
+        return replace(base, note=f"{base.note}; {rule}")
+    severity: Literal["low", "mid", "high"] = (
+        "high" if worst >= 3 * settings.fault_failures else "mid"
+    )
+    statistical = base.status == "anomaly"
+    if statistical and base.severity == "high":
+        severity = "high"
+    observed = base.observed
+    total_payments = sum(payments.get(b) or 0.0 for b in window)
+    if base.status == "unknown" and total_payments:  # 표본이 모자라도 셀 수 있었던 실패율
+        fails = sum(round(rate.get(b, 0.0) * (payments.get(b) or 0.0)) for b in window)
+        observed = round(fails / total_payments, 4)
+    return replace(
+        base,
+        status="anomaly",
+        observed=observed,
+        ratio=round(observed / base.baseline, 2) if base.baseline else None,
+        direction="up",
+        severity=severity,
+        note=f"{base.note.removeprefix('확인할 수 없음: ')}; {rule} → 이상",
+        peak_ts=base.peak_ts if statistical else hits[0],
+        peak_to=base.peak_to if statistical else hits[-1] + BUCKET,
     )
 
 
