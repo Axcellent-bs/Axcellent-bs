@@ -131,8 +131,12 @@ class DenseIndex:
     def _hash(text: str) -> str:
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-    async def index(self, items: Sequence[tuple[str, str]]) -> int:
-        """(키, 글) 목록을 색인한다. 글이 바뀌었거나 처음인 것만 임베딩하고 그 개수를 돌려준다."""
+    async def index(self, items: Sequence[tuple[str, str]], chunk: int = 32) -> int:
+        """(키, 글) 목록을 색인한다. 글이 바뀌었거나 처음인 것만 임베딩하고 그 개수를 돌려준다.
+
+        `chunk`개씩 임베딩해 바로 저장한다. 중간에 실패해도 앞선 묶음은 남아서, 다시 부르면
+        나머지만 이어서 한다(한도가 있는 API에서 이미 받은 벡터를 버리지 않는다).
+        """
         with self._connect() as db:
             known = dict(
                 db.execute(
@@ -140,22 +144,22 @@ class DenseIndex:
                 ).fetchall()
             )
         todo = [(k, t) for k, t in items if known.get(k) != self._hash(t)]
-        if not todo:
-            return 0
-        vectors = await self._embedder.embed([t for _, t in todo])
-        if len(vectors) != len(todo):
-            raise EmbedError(f"임베딩 개수가 입력과 다르다: {len(vectors)} != {len(todo)}")
-        rows = []
-        for (key, text), vec in zip(todo, vectors, strict=True):
-            unit = normalize(vec)
-            self._cache[key] = unit
-            rows.append((key, self._model, self._hash(text), len(unit), unit.tobytes()))
-        with self._connect() as db:
-            db.executemany(
-                "INSERT OR REPLACE INTO vectors (key, model, text_hash, dim, vector)"
-                " VALUES (?, ?, ?, ?, ?)",
-                rows,
-            )
+        for start in range(0, len(todo), chunk):
+            part = todo[start : start + chunk]
+            vectors = await self._embedder.embed([t for _, t in part])
+            if len(vectors) != len(part):
+                raise EmbedError(f"임베딩 개수가 입력과 다르다: {len(vectors)} != {len(part)}")
+            rows = []
+            for (key, text), vec in zip(part, vectors, strict=True):
+                unit = normalize(vec)
+                self._cache[key] = unit
+                rows.append((key, self._model, self._hash(text), len(unit), unit.tobytes()))
+            with self._connect() as db:
+                db.executemany(
+                    "INSERT OR REPLACE INTO vectors (key, model, text_hash, dim, vector)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    rows,
+                )
         return len(todo)
 
     def vector(self, key: str) -> array | None:

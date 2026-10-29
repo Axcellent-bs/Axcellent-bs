@@ -179,3 +179,29 @@ async def test_embedder_splits_into_batches() -> None:
     emb = LLMEmbedder(client, batch_size=2, retry_base_sec=0.0, pause_sec=0.0)
     assert len(await emb.embed(["a", "b", "c", "d", "e"])) == 5
     assert client.calls == 3
+
+
+class FailsOnSecondCall:
+    """첫 호출은 성공하고 둘째 호출부터 실패하는 임베더(한도 초과 흉내)."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self._mock = MockLLMClient()
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        self.calls += 1
+        if self.calls >= 2:
+            raise EmbedError("quota")
+        return await self._mock.embed(texts)
+
+
+@pytest.mark.asyncio
+async def test_failed_index_keeps_finished_chunks_and_resumes(tmp_path) -> None:
+    path = str(tmp_path / "v.db")
+    items = [(f"k{i}", f"카드 {i} 내용") for i in range(5)]
+    with pytest.raises(EmbedError):
+        await DenseIndex(path, FailsOnSecondCall(), "mock").index(items, chunk=2)
+    resumed = CountingEmbedder()
+    # 첫 묶음(2개)은 저장돼 있어서 나머지 3개만 다시 임베딩한다
+    assert await DenseIndex(path, resumed, "mock").index(items, chunk=2) == 3
+    assert sum(len(c) for c in resumed.calls) == 3
