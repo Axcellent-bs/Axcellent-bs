@@ -288,6 +288,36 @@ class Truth:
     impact_amount: int = 0
 
 
+USUAL_MARGIN = timedelta(hours=1)  # 평소 실패 수: 같은 시각 ±1시간 (영향 분석 #102와 같음)
+
+
+def usual_fault_failures(world: World) -> float | None:
+    """평가가 직접 센 평소 장애 쪽 실패 수 (구간 길이만큼). 영향 분석 초과분(#102)과 같은 방식이다.
+
+    지난 7일 각 날의 [구간 시작 − 1시간, 구간 끝 + 1시간)에서, 결제가 1건 이상 기록된 5분 구간의
+    장애 쪽 실패(주입한 장애 + 잡음) 평균 × 구간 길이. 그런 5분이 없으면 None(확인할 수 없음).
+    data 에이전트 코드가 아니라 이 시나리오가 만든 결제 기록에서 센다.
+    """
+    window_from, window_to = world.window
+
+    def floor(moment: datetime) -> datetime:
+        return moment.replace(minute=moment.minute - moment.minute % 5, second=0, microsecond=0)
+
+    ranges = [
+        (
+            window_from - timedelta(days=day) - USUAL_MARGIN,
+            window_to - timedelta(days=day) + USUAL_MARGIN,
+        )
+        for day in range(1, HISTORY_DAYS + 1)
+    ]
+    past = [p for p in world.payments if any(start <= p.at < end for start, end in ranges)]
+    active = {floor(p.at) for p in past}
+    if not active:
+        return None
+    fails = sum(1 for p in past if p.failure_code is not None and (p.faulty or p.noise))
+    return fails / len(active) * ((window_to - window_from) / BUCKET)
+
+
 def truth(world: World) -> Truth:
     window_from, window_to = world.window
     inside = [p for p in world.payments if window_from <= p.at < window_to]
