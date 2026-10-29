@@ -60,6 +60,7 @@ BASELINE = HERE / "baseline.json"
 POLL_WINDOW = timedelta(minutes=15)  # 주기 감시가 묻는 구간 길이
 POLL_STEP = timedelta(minutes=5)  # 주기 감시 간격
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
+LOW_NOTE = "장애 쪽 실패 1건"  # low 기록의 이유에 이 문구가 있어야 한다
 # 장애 종류별로 "잡았다"고 보는 지표. 결제 장애는 비율(실패율)과 건수(실패 주문 수) 어느 쪽으로
 # 잡아도 된다: 5분 결제가 적으면 실패율은 판정하지 않고 실패 주문 수로 본다 (#55 다음 PR)
 SIGNALS: dict[str, list[str]] = {
@@ -82,6 +83,10 @@ METRICS: dict[str, tuple[str, str | None]] = {
     "anomaly.drop_mean_delay_minutes": ("주문 급감 탐지 지연 평균 (분)", "lower"),
     "anomaly.drop_max_delay_minutes": ("주문 급감 탐지 지연 최대 (분)", "lower"),
     "anomaly.unknown_handled_rate": ("빈 구간을 '확인할 수 없음'으로 답한 비율", "higher"),
+    "anomaly.low_recorded_rate": (
+        "낮은 등급(low)으로 남겨야 하는 케이스 중 사건 없이 low로 남긴 비율",
+        "higher",
+    ),
     "impact.match_rate": ("영향 분석 일치율 (건수·고객·금액 모두 정답과 같음)", "higher"),
     "impact.mean_abs_amount_error": ("영향 분석 금액 오차 평균 (원)", "lower"),
     "impact.mean_abs_amount_error_pct": (
@@ -215,12 +220,22 @@ async def run_case(case: dict[str, Any]) -> dict[str, Any]:
         metric = expected["anomaly"]["metric"]
         signals = SIGNALS.get(case["kind"], [])
         status = getattr(anomaly.output, "status", None)  # 예전 계약에는 없다
+        # low 기록: 잡아야 할 지표가 사건(이상) 없이 severity low로 남고 이유에 실패 1건을 적었는지
+        low_recorded = any(
+            v.metric in signals
+            and v.severity == "low"
+            and getattr(v, "status", None) in ("normal", "unknown")
+            and LOW_NOTE in (getattr(v, "note", None) or "")
+            for v in anomaly.output.verdicts
+        )
         out["anomaly"] = {
             "expected": expected["anomaly"]["expected"],
             "metric": metric,
             "signals": signals,
             "flagged": flagged,
             "detected": any(m in flagged for m in signals) if signals else None,
+            "low_expected": expected["anomaly"].get("low_expected", False),
+            "low_recorded": low_recorded,
             "any_anomaly": anomaly.output.any_anomaly,
             "status": status,
             "summary": anomaly.output.summary,
@@ -356,6 +371,7 @@ def summarize(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> dic
     faults = [c for c in cases if c["anomaly"]["expected"]]
     quiet = [c for c in cases if not c["anomaly"]["expected"]]
     empty = [c for c in cases if c["kind"] == "empty"]
+    lows = [c for c in cases if c["anomaly"]["low_expected"]]
 
     def _delays(kind: str) -> list[float]:
         return [
@@ -395,6 +411,9 @@ def summarize(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> dic
         "anomaly.drop_max_delay_minutes": max(drop_delays) if drop_delays else None,
         "anomaly.unknown_handled_rate": _rate(
             sum(1 for c in empty if c["anomaly"]["said_unknown"]), len(empty)
+        ),
+        "anomaly.low_recorded_rate": _rate(
+            sum(1 for c in lows if c["anomaly"]["low_recorded"]), len(lows)
         ),
         "impact.match_rate": _rate(sum(1 for i in impacts if i["got"] == i["want"]), len(impacts)),
         "impact.mean_abs_amount_error": round(sum(errors) / len(errors), 1) if errors else None,
@@ -438,6 +457,12 @@ def wrong_cases(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> l
                 c["id"],
                 "이상 탐지",
                 f"{'·'.join(a['signals'])} 이상을 못 잡음 (잡은 지표: {a['flagged'] or '없음'})",
+            )
+        if a["low_expected"] and not a["low_recorded"]:
+            add(
+                c["id"],
+                "이상 탐지",
+                f"사건 없이 low로 '{LOW_NOTE}'을 남겨야 함 (잡은 지표: {a['flagged'] or '없음'})",
             )
         if not a["expected"] and a["any_anomaly"]:
             add(c["id"], "이상 탐지", f"장애가 아닌데 이상이라고 함: {', '.join(a['flagged'])}")

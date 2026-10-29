@@ -20,7 +20,7 @@ uv run python domains/data/eval/run.py   # 결과: eval/results/latest.json
 
 | 종류 | 케이스 | 이유 |
 | --- | --- | --- |
-| 결제 장애 | `pay_*` | 길이·세기(100·50·20%)·시간대(낮·저녁·새벽)별로 잡는지와 지연을 본다 |
+| 결제 장애 | `pay_*` (아래 low 케이스 제외) | 길이·세기(100·50·20%)·시간대(낮·저녁·새벽)별로 잡는지와 지연을 본다 |
 | 처음 보는 실패 코드 | `pay_full_20m_14h_new_code` | 분류할 수 없는 코드면 영향 숫자를 지어내지 않고 "확인할 수 없음"으로 답하는지 본다 |
 | 주문 급감 | `order_drop_*` | 감소 방향도 잡는지 본다 |
 | 평소 | `normal_*` | 카드 거절만 있는 평소 구간에서 오탐이 없는지 본다 |
@@ -29,4 +29,6 @@ uv run python domains/data/eval/run.py   # 결과: eval/results/latest.json
 | 잡음: 평소 타임아웃 | `noise_timeout_14h`, `noise_timeout_03h_night` | 매일 결제사 타임아웃이 가끔 1건씩 나는 평소 구간(낮·새벽)을 장애로 보지 않는지 본다. 장애 쪽 실패 절대 기준의 오탐을 재려고 넣었다 |
 | 잡음: 한 번 난 타임아웃 | `noise_single_timeout_03h_night` | 새벽에 장애 쪽 실패 1건만 나고 끝나면 이상이 아닌지 본다 |
 | 새벽 타임아웃 장애 | `pay_timeout_25m_03h_night` | 새벽에 장애 쪽 실패(알려진 코드 `PG_TIMEOUT`)가 여러 5분 구간 이어지면 이상으로 잡는지, 영향 숫자를 내는지 본다 |
+| 새벽 약한 장애 (low 기록) | `pay_half_10m_03h_night` | 새벽 10분 50% 장애는 실패 1건이라 잡음 1건과 데이터로 구분 불가. 기록 여부로 채점. 사건(이상)이 아니어야 하고, 지표 판정이 normal 또는 unknown + severity `low` + 이유에 "장애 쪽 실패 1건"이면 맞다(`anomaly.low_recorded_rate`) |
+| 새벽 약한 장애 (이상) | `pay_half_20m_03h_night` | 새벽 20분 50% 장애(03:40~04:00)로 장애 쪽 실패가 3건 나온다. 데이터로 장애라고 말할 수 있어 이상으로 잡는지 본다 |
 | 판매자 | `sellers.json` | 사기 점수 등급 |

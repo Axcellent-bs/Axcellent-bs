@@ -22,6 +22,7 @@
   "expected": {
     "anomaly": {
       "expected": true,
+      "low_expected": false,
       "metric": "order_count",
       "onset": "2026-09-11T19:25:00Z",
       "first_failure_bucket": null,

@@ -72,6 +72,14 @@ def _with_code(spec: dict[str, Any], code: str) -> dict[str, Any]:
     return {**spec, "injection": {**spec["injection"], "failure_code": code}}
 
 
+LOW_REASON = "새벽 10분 50% 장애는 실패 1건이라 잡음 1건과 데이터로 구분 불가. 기록 여부로 채점"
+
+
+def _low(spec: dict[str, Any]) -> dict[str, Any]:
+    """사건(이상)이 아니라 낮은 등급(low) 기록으로 채점하는 장애 시나리오."""
+    return {**spec, "expect": "low", "answer_reason": LOW_REASON}
+
+
 def _with_fault_code(spec: dict[str, Any], code: str) -> dict[str, Any]:
     """장애로 실패한 결제의 코드를 알려진 장애 쪽 코드 `code`로 바꾼다 (영향 숫자는 낸다)."""
     return {**spec, "injection": {**spec["injection"], "fault_code": code}}
@@ -94,7 +102,9 @@ SPECS: list[dict[str, Any]] = [
     _fault(
         "pay_full_20m_03h_night", 7, 3, 20, 20, 1.0, DEPLOY, note="결제 장애 20분, 새벽(주문 적음)"
     ),
-    _fault("pay_half_10m_03h_night", 8, 3, 30, 10, 0.5, NONE, "hallucinate"),
+    # 새벽 10분 50% 장애는 장애 쪽 실패가 1건뿐이라 잡음 1건과 데이터로 구분할 수 없다.
+    # 사건(이상)으로 채점하지 않고, 1건을 낮은 등급(low)으로 기록했는지로 채점한다
+    _low(_fault("pay_half_10m_03h_night", 8, 3, 30, 10, 0.5, NONE, "hallucinate")),
     _fault("pay_full_20m_10h_two_deploys_rule", 9, 10, 20, 20, 1.0, DEPLOY_WITH_OLD, "fail"),
     # 결제 장애인데 shop-api가 처음 보는 실패 코드를 준다 → 영향 숫자는 "확인할 수 없음"
     _with_code(
@@ -238,6 +248,18 @@ SPECS: list[dict[str, Any]] = [
         NONE,
         note="구간과 지난 7일 모두 데이터 없음",
     ),
+    # 새벽 20분 50% 장애: 장애 쪽 실패가 2건 이상 나와 데이터로 장애라고 말할 수 있다 (정답: 이상)
+    # 새 케이스는 맨 뒤에 둔다 (앞 케이스의 원인 id 번호가 밀리지 않게)
+    _fault(
+        "pay_half_20m_03h_night",
+        27,
+        3,
+        40,
+        20,
+        0.5,
+        NONE,
+        note="결제 장애 20분(03:40~04:00), 세기 50%, 새벽 3시 — 장애 쪽 실패 3건",
+    ),
 ]
 
 # 판매자 케이스: 주입한 판매자 사실과 라벨. 사기 패턴 = 신규 + 저가 덤핑 + 대량 등록(+ 중복 사업자)
@@ -329,9 +351,12 @@ def expected(spec: dict[str, Any]) -> dict[str, Any]:
     kind = spec["kind"]
     injection = spec["injection"]
     cause = spec["cause"]["type"]
+    low = spec.get("expect") == "low"
     return {
         "anomaly": {
-            "expected": kind in EXPECTED_METRIC,
+            # low 케이스: 장애를 넣었지만 사건(이상)이 아니다. 낮은 등급 기록으로 채점한다
+            "expected": kind in EXPECTED_METRIC and not low,
+            "low_expected": low,
             "metric": EXPECTED_METRIC.get(kind),
             # 탐지 지연은 장애를 넣은 시각부터 잰다
             "onset": injection.get("from") if kind in EXPECTED_METRIC else None,

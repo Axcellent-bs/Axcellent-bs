@@ -19,9 +19,12 @@
     "type": "none"
   },
   "llm": "hallucinate",
+  "expect": "low",
+  "answer_reason": "새벽 10분 50% 장애는 실패 1건이라 잡음 1건과 데이터로 구분 불가. 기록 여부로 채점",
   "expected": {
     "anomaly": {
-      "expected": true,
+      "expected": false,
+      "low_expected": true,
       "metric": "payment_fail_rate",
       "onset": "2026-09-08T03:30:00Z",
       "first_failure_bucket": "2026-09-08T03:35:00Z",
