@@ -15,7 +15,7 @@ from typing import Any
 
 from ax_agent_template.config import is_mock
 from ax_agent_template.llm import LLMClient, MockLLMClient
-from support_agent import guard, kb, languages, privacy_rules
+from support_agent import categories, guard, kb, languages, privacy_rules
 from support_agent.schemas import (
     STYLES,
     Analysis,
@@ -204,6 +204,8 @@ async def analyze(
     try:
         classified = await llm.structured(
             "고객 메시지의 의도, 분야, 감정, 긴급도를 분류하고 정책 문서 검색 질의를 만들어라. "
+            "category는 다음 코드 중 하나만 쓰고 다른 이름을 만들지 않는다: "
+            f"{categories.PROMPT_HINT}. "
             "정책 문서는 한국어이므로 search_query는 고객 언어와 관계없이 한국어로 쓴다. "
             "keywords에는 고객 메시지의 핵심 단어를 최대 5개 넣고 개인정보는 넣지 않는다.",
             LLMClassification,

@@ -1,8 +1,11 @@
 import type { CommOutcome } from "./types";
 
+// 고객지원이 정하는 분류 코드(backend/domains/support/src/support_agent/categories.py)와 같은 말이다.
+// delivery·defect·other는 예전 코드라 옛 데이터를 위해 남긴다.
 export const CATEGORY_KO: Record<string, string> = {
-  refund: "환불·반품", cancel: "주문 취소", delivery: "배송", defect: "불량·파손·오배송", payment: "결제",
-  product: "상품", review: "후기", account: "적립금·계정", other: "기타",
+  refund: "환불·반품", shipping: "배송", payment: "결제", cancel: "주문 취소", product: "상품", account: "적립금·계정",
+  review: "후기", privacy_deletion: "개인정보 삭제 요청", general: "일반 문의",
+  delivery: "배송", defect: "불량·파손·오배송", other: "기타",
 };
 export const SENTIMENT_KO: Record<string, string> = { calm: "차분", frustrated: "답답함", angry: "화남" };
 export const URGENCY_KO: Record<string, string> = { low: "낮음", medium: "보통", high: "높음" };

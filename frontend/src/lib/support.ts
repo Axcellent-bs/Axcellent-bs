@@ -167,7 +167,9 @@ export const METHOD_KO: Record<string, string> = { card: "카드", transfer: "�
 export const PAY_STATUS_KO: Record<string, string> = { succeeded: "성공", failed: "실패", pending: "대기", refunded: "환불" };
 
 export const TOPIC_KO: Record<string, string> = {
-  payment: "결제", delivery: "배송", refund: "환불·반품", product: "상품", account: "계정", other: "기타",
+  payment: "결제", shipping: "배송", refund: "환불·반품", cancel: "주문 취소", product: "상품", account: "계정",
+  review: "후기", privacy_deletion: "개인정보 삭제 요청", general: "일반 문의",
+  delivery: "배송", other: "기타", // 예전 코드
 };
 
 export const CHANGE_STATUS_KO: Record<string, { label: string; tone: Tone }> = {
