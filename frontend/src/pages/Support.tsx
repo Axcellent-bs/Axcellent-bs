@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { AtRisk } from "@/components/support/AtRisk";
+import { IncidentResponse } from "@/components/support/IncidentResponse";
 import { InquiryCheck } from "@/components/support/InquiryCheck";
 import { SurgeChanges } from "@/components/support/SurgeChanges";
 import { CompanyName } from "@/demo/CompanyName";
@@ -10,11 +11,12 @@ import { CompanyName } from "@/demo/CompanyName";
 
 const REFRESH_MS = 30_000;
 
-type Mode = "risk" | "inquiry" | "surge";
+type Mode = "risk" | "inquiry" | "surge" | "response";
 const MODES: { id: Mode; label: string; hash: string }[] = [
   { id: "risk", label: "위험 고객", hash: "" },
   { id: "inquiry", label: "문의 진단", hash: "#inquiry" },
   { id: "surge", label: "급증·변경 요청", hash: "#surge" },
+  { id: "response", label: "사건 대응 기록", hash: "#response" },
 ];
 
 export default function SupportPage() {
@@ -56,7 +58,7 @@ export default function SupportPage() {
         </div>
       </header>
 
-      <div role="tablist" aria-label="고객지원 화면" className="flex w-full gap-1 rounded-2xl bg-surface p-1 ring-1 ring-ink-100 sm:w-auto sm:max-w-xl">
+      <div role="tablist" aria-label="고객지원 화면" className="flex w-full gap-1 rounded-2xl bg-surface p-1 ring-1 ring-ink-100 sm:w-auto sm:max-w-2xl">
         {MODES.map((m) => (
           <button key={m.id} type="button" role="tab" id={`support-mode-${m.id}`} aria-selected={mode === m.id} aria-controls={`support-mode-panel-${m.id}`} onClick={() => openMode(m.id)}
             className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${mode === m.id ? "bg-brand-600 text-white" : "text-ink-700 hover:bg-ink-100"}`}>
@@ -69,6 +71,7 @@ export default function SupportPage() {
         {mode === "risk" && <AtRisk tick={tick} selected={buyer} onSelect={openBuyer} />}
         {mode === "inquiry" && <InquiryCheck tick={tick} selected={inquiry} onSelect={openInquiry} />}
         {mode === "surge" && <SurgeChanges tick={tick} />}
+        {mode === "response" && <IncidentResponse tick={tick} />}
       </div>
     </div>
   );
