@@ -19,6 +19,7 @@ const HOW_KO: Record<string, string> = { accepted: "AI 초안 그대로", edited
 // 클레임이 문의 서비스에서 올 때 쓰는 상태 이름 중 공용 이름표에 없는 것
 const CLAIM_STATE_KO: Record<string, string> = { approved: "승인됨", ...CLAIM_STATUS_KO };
 const STATUS_TO_KO: Record<string, string> = { open: "진행 중으로", resolved: "해결로", escalated: "이관으로" };
+const FEEDBACK_STATUS_KO: Record<string, string> = { visible: "공개로", hidden: "숨김으로", flagged: "확인 대기로" };
 const INSPECTION_RESULT_KO: Record<string, string> = { pass: "정상", fail: "불합격", partial: "일부만 정상" };
 
 const str = (v: unknown) => (typeof v === "string" ? v : null);
@@ -63,6 +64,16 @@ function detailOf(e: ActivityEntry): string {
         num(d.total_value) != null && won(num(d.total_value)!),
         str(d.reason),
       );
+    case "feedback_received":
+      return parts(
+        num(d.rating) != null && `별점 ${num(d.rating)}점`,
+        d.resolved === true ? "해결됐다고 답함" : d.resolved === false ? "해결 안 됐다고 답함" : null,
+        str(d.status) === "flagged" && "확인 대기",
+        Array.isArray(d.flags) && d.flags.includes("CS_FOLLOW_UP") && "선제 연락 대상",
+        d.source === "console" && "시험 평가",
+      );
+    case "feedback_status_changed":
+      return FEEDBACK_STATUS_KO[str(d.status) ?? ""] ?? "";
     case "claim_created":
     case "claim_decided":
     case "claim_return_received":

@@ -66,6 +66,17 @@ action = "record_claim_activity"
 owner = "support"
 base_grade = "A"
 
+# 해결된 문의에 대한 고객 평가(후기) 남기기와 공개·숨김 결정. 돈은 움직이지 않는다
+[[actions]]
+action = "submit_feedback"
+owner = "support"
+base_grade = "A"
+
+[[actions]]
+action = "set_feedback_status"
+owner = "support"
+base_grade = "A"
+
 # 클레임 처리 기록 (#105). 돈이 나가지 않는 기록만. 환불 지급은 refund_request(A, 한도 넘으면 C)
 [[actions]]
 action = "create_claim"

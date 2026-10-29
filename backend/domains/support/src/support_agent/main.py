@@ -11,6 +11,7 @@ from support_agent import receipt_vision
 from support_agent.change_handlers import CHANGE_HANDLERS
 from support_agent.claim_analysis import ANALYSIS_HANDLERS
 from support_agent.claim_handlers import CLAIM_HANDLERS
+from support_agent.feedback_handlers import FEEDBACK_HANDLERS
 from support_agent.handlers import HANDLERS
 from support_agent.handoff_handlers import HANDOFF_HANDLERS
 from support_agent.incident_handlers import INCIDENT_HANDLERS
@@ -42,6 +43,7 @@ def load_card() -> AgentCard:
 ALL_HANDLERS = {
     **HANDLERS,
     **CLAIM_HANDLERS,
+    **FEEDBACK_HANDLERS,
     **INSIGHT_HANDLERS,
     **CHANGE_HANDLERS,
     **ANALYSIS_HANDLERS,

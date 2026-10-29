@@ -1,5 +1,5 @@
 import { ApiError } from "./apiError";
-import type { AdminReview, Claim, ClaimDetail, ClaimIntake, ClaimSuggestion, ClaimStats, CommLine, CommMeta, Conversation, ConversationListItem, Dashboard, Health, Kpi, Me, QueueRun, QueueView, ReceiptAnalysis, ReceiptImageInput, Summary, Validation } from "./types";
+import type { AdminReview, Claim, ClaimDetail, ClaimIntake, ClaimSuggestion, ClaimStats, CommLine, CommMeta, Conversation, ConversationListItem, Dashboard, FeedbackItem, FeedbackOverview, FeedbackStatus, Health, Kpi, Me, QueueRun, QueueView, ReceiptAnalysis, ReceiptImageInput, Summary, Validation } from "./types";
 
 import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN } from "./env";
 
@@ -89,6 +89,13 @@ export const api = {
     rejectDraft: (id: number, draft_style: string) => post<void>(`/api/dashboard/conversations/${id}/reject-draft`, { draft_style }),
     receiptAnalysis: (id: number, b: { images?: ReceiptImageInput[]; receipt_text?: string }) =>
       post<ReceiptAnalysis>(`/api/dashboard/conversations/${id}/receipt-analysis`, b),
+    feedback: (q: { status?: FeedbackStatus; max_rating?: number } = {}) =>
+      request<FeedbackItem[]>(`/api/dashboard/feedback${Object.keys(q).length ? `?${new URLSearchParams(Object.entries(q).map(([k, v]) => [k, String(v)]))}` : ""}`),
+    feedbackStats: () => request<FeedbackOverview | null>("/api/dashboard/feedback/stats"),
+    setFeedbackStatus: (inquiryId: number, status: "visible" | "hidden") =>
+      post<FeedbackItem>(`/api/dashboard/feedback/${inquiryId}/status`, { status }),
+    submitFeedback: (id: number, b: { rating: number; resolved: boolean; comment: string }) =>
+      post<Conversation>(`/api/dashboard/conversations/${id}/feedback`, b),
     claimSuggestion: (id: number) => post<ClaimSuggestion>(`/api/dashboard/conversations/${id}/claim-suggestion`),
     createClaim: (id: number, b: ClaimIntake) => post<ClaimDetail>(`/api/dashboard/conversations/${id}/claims`, b),
     summary: (id: number) => post<Summary>(`/api/dashboard/conversations/${id}/summary`),

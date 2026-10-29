@@ -7,6 +7,7 @@ import { FindingList, ValidationBadge } from "../Findings";
 import { StatusChip } from "./bits";
 import { ActivityLog } from "./ActivityLog";
 import { ClaimIntake } from "./ClaimIntake";
+import { FeedbackCard } from "./FeedbackCard";
 import { ReceiptAnalysisCard } from "./ReceiptAnalysisCard";
 
 /** 가장 가까운 근거 정책의 유사도가 이 값 미만이면 "근거 정책 부족"으로 알린다.
@@ -63,7 +64,7 @@ function SourceItem({ s }: { s: Source }) {
   );
 }
 
-export function CopilotPanel({ conv, onUseDraft, onRejectDraft, onClaimCreated }: { conv: Conversation; onUseDraft: (d: Draft) => void; onRejectDraft: (d: Draft) => void; onClaimCreated: () => void }) {
+export function CopilotPanel({ conv, onUseDraft, onRejectDraft, onClaimCreated, onFeedback }: { conv: Conversation; onUseDraft: (d: Draft) => void; onRejectDraft: (d: Draft) => void; onClaimCreated: () => void; onFeedback: (c: Conversation) => void }) {
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
   const last: Message | undefined = [...conv.messages].reverse().find((m) => m.role === "customer" && m.analysis);
   const a = last?.analysis;
@@ -127,6 +128,8 @@ export function CopilotPanel({ conv, onUseDraft, onRejectDraft, onClaimCreated }
           <ul className="space-y-2">{a.sources.map((s) => <SourceItem key={s.id} s={s} />)}</ul>
         </section>
       )}
+
+      <FeedbackCard conv={conv} onSaved={onFeedback} />
 
       <ActivityLog items={conv.activity ?? []} />
     </aside>
