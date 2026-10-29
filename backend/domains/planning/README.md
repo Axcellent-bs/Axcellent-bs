@@ -138,9 +138,12 @@ execute params (safety #171 `thresholds.toml` 규칙 키, 모두 도메인 상�
 | GET | `/repo/prs?state=&q=&limit=` | PR 목록(최대 100, 본문 뺌). 내부 PR과 번호가 이어진 것은 `internal{id, task, merged, closed}` |
 | GET | `/repo/prs/{n}` | 머리(`pr`)·`diff`·`commits`·`comments`·`checks`·`internal` |
 | GET | `/repo/branches` | 브랜치(기준·기본 먼저) + 그 브랜치의 PR(열린 것 우선) |
+| GET | `/repo/issues?state=open·closed·all&q=&limit=` | 이슈 목록(PR 뺌, 본문 뺌, 라벨·담당자·코멘트 수). 이슈 칸이 없는 연결(`issues: false`)은 409 `NO_ISSUES` |
+| GET | `/repo/issues/{n}` | 이슈 머리(`issue`)·`comments` |
 | POST (사람) | `/repo/prs/{n}/merge` `{method: merge(기본)·squash·rebase}` | AI PR이면 내부 `mergePr` 흐름 그대로(`via: internal`), 아니면 관문 `merge_pr`(같은 크기·경로 params) 뒤 병합 |
 | POST (사람) | `/repo/prs/{n}/close` · `/reopen` | AI 코딩 작업 PR 닫기는 작업 중단(`cancel_dev_task`). 그 밖은 관문 `repo_close_pr`·`repo_reopen_pr`(A). 중단한 AI 작업은 다시 열지 않음(409 `INTERNAL_FLOW`) |
 | POST (사람) | `/repo/prs/{n}/comment` `{body}` | 관문 `repo_comment`(A) |
+| POST (사람) | `/repo/issues/{n}/comment` `{body}` | 이슈 코멘트. PR 코멘트와 같은 관문 `repo_comment`(A) |
 | POST (사람) | `/repo/prs/{n}/revert` `{title?}` | 병합된 PR만. 관문 `repo_revert_pr`(B, merge_pr과 같은 크기·경로·보호 경로 규칙 `revert_*`) 뒤 되돌리기 PR을 연다. 새 PR은 보통 PR처럼 머지한다 |
 | POST (사람) | `/repo/branches/delete` `{name}` | 기준·기본·보호 브랜치 400 `PROTECTED_BRANCH`, 열린 PR 브랜치 409 `OPEN_PR`. 관문 `repo_delete_branch`(A) |
 

@@ -767,3 +767,10 @@ button.chip { cursor: pointer; font: inherit; }
 .df-split .df-del { background: var(--danger-soft); }
 .df-split .df-empty { background: var(--surface-2); }
 .df-compact .df-bar { position: static; }
+
+/* 이슈: 닫힘(완료) 보라 · 닫힘(안 함) 회색, 라벨 칩 */
+.rp-dot.rp-iss-done, .rp-icon.rp-iss-done, .rp-state.rp-iss-done { background: var(--info); }
+.rp-dot.rp-iss-skip, .rp-icon.rp-iss-skip, .rp-state.rp-iss-skip { background: var(--text-3); }
+.rp-label { display: inline-flex; align-items: center; margin-left: 6px; padding: 0 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); font: inherit; font-size: 11.5px; font-weight: 500; line-height: 18px; border-radius: var(--radius-pill) !important; cursor: pointer; vertical-align: middle; }
+.rp-side .rp-label { margin: 0 4px 4px 0; cursor: default; }
+.rp-label:hover { border-color: var(--primary); color: var(--text); }

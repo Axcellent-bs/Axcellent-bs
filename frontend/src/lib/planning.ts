@@ -253,7 +253,14 @@ export interface RepoPr {
   created_at: string | null; updated_at: string | null; merged_at: string | null; closed_at: string | null; url: string | null
   comments: number | null; checks: RepoCheckState | null; internal?: RepoInternal | null
 }
-export interface RepoMeta { connection: string; repo: string; base_branch: string; read_only: boolean }
+export interface RepoMeta { connection: string; repo: string; base_branch: string; read_only: boolean; issues?: boolean }
+export type RepoIssueState = 'open' | 'closed'
+export interface RepoIssue {
+  number: number; title: string; state: RepoIssueState; author: string; body?: string; labels: string[]; assignees: string[]
+  comments: number | null; created_at: string | null; updated_at: string | null; closed_at: string | null; url: string | null
+  reason: string | null // completed · not_planned
+}
+export interface RepoIssueDetail extends RepoMeta { issue: RepoIssue; comments: RepoComment[] }
 export interface RepoFile { path: string; status: string; additions: number; deletions: number; patch: string | null; previous_path: string | null; truncated: boolean }
 export interface RepoCommit { sha: string; message: string; author: string; at: string | null }
 export interface RepoComment { id: string; author: string; body: string; at: string | null }
@@ -304,6 +311,10 @@ export const repoApi = (base: string, connection?: string) => {
       call<RepoGraph>(base, `/repo/graph${qs({ connection: c, branches: branches?.length ? branches.join(',') : undefined, limit })}`),
     commit: (sha: string) => call<RepoMeta & { commit: RepoCommitDetail }>(base, `/repo/commits/${encodeURIComponent(sha)}${qs({ connection: c })}`),
     deleteBranch: (name: string) => call<{ deleted: string }>(base, `/repo/branches/delete${qs({ connection: c })}`, post({ name })),
+    issues: (state: 'all' | RepoIssueState = 'all', q?: string, limit = 100) =>
+      call<RepoMeta & { items: RepoIssue[] }>(base, `/repo/issues${qs({ connection: c, state, q, limit })}`),
+    issue: (n: number) => call<RepoIssueDetail>(base, `/repo/issues/${n}${qs({ connection: c })}`),
+    commentIssue: (n: number, body: string) => call<{ comment: RepoComment }>(base, `/repo/issues/${n}/comment${qs({ connection: c })}`, post({ body })),
   }
 }
 

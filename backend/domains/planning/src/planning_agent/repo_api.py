@@ -30,6 +30,8 @@ from planning_agent.vcs.base import (
     GRAPH_BRANCHES,
     GRAPH_LIMIT,
     GRAPH_MAX,
+    ISSUE_LIST_LIMIT,
+    ISSUE_STATES,
     MERGE_METHODS,
     Change,
     Graph,
@@ -109,6 +111,7 @@ def _repo_meta(cid: str, conn: vcs.Connection, adapter: VcsAdapter) -> dict:
         "repo": conn.repo or str(getattr(adapter, "repo", "") or ""),
         "base_branch": str(getattr(adapter, "base_branch", "") or conn.base_branch),
         "read_only": adapter.capabilities.read_only,
+        "issues": adapter.capabilities.issues,
     }
 
 
@@ -165,6 +168,11 @@ async def _body(request: Request) -> dict:
     except ValueError:
         return {}
     return body if isinstance(body, dict) else {}
+
+
+def _issues(adapter: VcsAdapter) -> None:
+    if not adapter.capabilities.issues:
+        raise RepoError(409, "NO_ISSUES", "이 형상관리 연결에는 이슈가 없다")
 
 
 def _writable(adapter: VcsAdapter) -> None:
@@ -251,6 +259,75 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], PlanningService
                     "checks": ci,
                 }
             )
+
+        return await guard(run)
+
+    # 이슈: 읽기와 코멘트. 코멘트는 PR 코멘트와 같은 repo_comment 관문을 지난다
+    @router.get("/repo/issues", response_model=None)
+    async def list_repo_issues(
+        connection: str | None = None,
+        state: str = "open",
+        q: str | None = None,
+        limit: int = ISSUE_LIST_LIMIT,
+    ) -> dict | JSONResponse:
+        async def run() -> dict:
+            if state not in ISSUE_STATES:
+                raise RepoError(
+                    400, "INVALID_INPUT", f"state는 {', '.join(ISSUE_STATES)} 중 하나다"
+                )
+            cid, adapter, conn = _resolve(connection)
+            _issues(adapter)
+            n = max(1, min(int(limit), MAX_LIST))
+            rows = await adapter.list_issues(state, (q or "").strip()[:200] or None, n)
+            items = []
+            for i in rows:
+                item = _plain(i)
+                item.pop("body", None)
+                items.append(item)
+            data = {**_repo_meta(cid, conn, adapter), "state": state, "items": items}
+            return ok(data, count=len(items), more=len(rows) >= n)
+
+        return await guard(run)
+
+    @router.get("/repo/issues/{number}", response_model=None)
+    async def get_repo_issue(number: int, connection: str | None = None) -> dict | JSONResponse:
+        async def run() -> dict:
+            cid, adapter, conn = _resolve(connection)
+            _issues(adapter)
+            head, comments = await asyncio.gather(
+                adapter.describe_issue(number), adapter.list_comments(number)
+            )
+            return ok(
+                {
+                    **_repo_meta(cid, conn, adapter),
+                    "issue": _plain(head),
+                    "comments": [_plain(c) for c in comments],
+                }
+            )
+
+        return await guard(run)
+
+    @router.post("/repo/issues/{number}/comment", response_model=None, dependencies=HUMAN)
+    async def comment_repo_issue(
+        number: int, request: Request, connection: str | None = None
+    ) -> dict | JSONResponse:
+        async def run() -> dict:
+            body = await _body(request)
+            text = body.get("body")
+            if not isinstance(text, str) or not text.strip() or len(text) > MAX_COMMENT:
+                raise RepoError(400, "INVALID_INPUT", f"body는 1~{MAX_COMMENT}자 문자열이다")
+            cid, adapter, _ = _resolve(connection)
+            _issues(adapter)
+            _writable(adapter)
+            await adapter.describe_issue(number)  # 없는 이슈·PR 번호면 여기서 404
+            made = await get_service().repo_write(
+                "repo_comment",
+                f"{cid}#{number}",
+                f"사람이 레포 이슈 #{number}에 코멘트",
+                {"chars": len(text)},
+                lambda: adapter.add_comment(number, text),
+            )
+            return ok({"comment": _plain(made)})
 
         return await guard(run)
 

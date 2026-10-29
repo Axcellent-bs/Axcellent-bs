@@ -50,6 +50,8 @@ class Capabilities:
     kind: str
     read_only: bool = False
     checks: bool = True
+    # 이슈 칸이 있는지. 없는 프로그램(SVN·Perforce 등)은 나중에 게시판·요청란으로 대신한다
+    issues: bool = False
 
 
 @dataclass(frozen=True)
@@ -141,6 +143,8 @@ DIFF_FILE_CHARS = 20_000
 DIFF_TOTAL_CHARS = 300_000
 COMMIT_LIMIT = 100
 COMMENT_LIMIT = 100
+ISSUE_LIST_LIMIT = 50
+ISSUE_STATES = ("open", "closed", "all")
 BRANCH_LIMIT = 200
 MERGE_METHODS = ("merge", "squash", "rebase")
 
@@ -203,6 +207,26 @@ class Comment:
     author: str
     body: str
     at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class IssueSummary:
+    """이슈 하나의 머리 정보 (목록·상세 머리). 병합 요청은 들어가지 않는다."""
+
+    number: int
+    title: str
+    state: Literal["open", "closed"]
+    author: str = ""
+    body: str = ""
+    labels: tuple[str, ...] = ()
+    assignees: tuple[str, ...] = ()
+    comments: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    closed_at: datetime | None = None
+    url: str | None = None
+    # 닫힌 이유: completed(완료) · not_planned(안 함). 모르면 None
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -367,6 +391,17 @@ def match_query(c: ChangeSummary, query: str | None) -> bool:
     return any(q in (x or "").lower() for x in (c.title, c.branch, c.author))
 
 
+def match_issue(i: IssueSummary, query: str | None) -> bool:
+    """제목·번호(`12`, `#12`)·작성자·라벨로 찾는다. 대소문자 무시."""
+    q = (query or "").strip().lower()
+    if not q:
+        return True
+    num = q.lstrip("#")
+    if num.isdigit() and int(num) == i.number:
+        return True
+    return any(q in (x or "").lower() for x in (i.title, i.author, *i.labels))
+
+
 def state_of(merged: bool, closed: bool) -> ChangeState:
     return "merged" if merged else ("closed" if closed else "open")
 
@@ -455,6 +490,16 @@ class VcsAdapter(Protocol):
         ...
 
     async def add_comment(self, number: int, body: str) -> Comment: ...
+
+    async def list_issues(
+        self, state: str = "open", query: str | None = None, limit: int = ISSUE_LIST_LIMIT
+    ) -> list[IssueSummary]:
+        """이슈 목록 (최근 바뀐 순). `capabilities.issues`가 False면 부르지 않는다."""
+        ...
+
+    async def describe_issue(self, number: int) -> IssueSummary:
+        """이슈 하나. 코멘트는 `list_comments`로 읽고 `add_comment`로 단다 (번호를 같이 쓴다)."""
+        ...
 
     async def reopen_change(self, number: int) -> ChangeSummary:
         """닫힌(병합 안 된) 변경을 다시 연다. 병합됐으면 conflict."""
