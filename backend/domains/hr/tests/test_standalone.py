@@ -31,6 +31,7 @@ STATE_CHANGING = {
 READ_ONLY = {
     "get_roster",
     "check_plan",
+    "find_similar_fraud_cards",
     "list_handovers",
     "list_open_questions",
     "list_candidate_cards",
@@ -85,7 +86,7 @@ def test_agent_card_lists_all_skills_with_resolvable_schemas() -> None:
     card = load_card()
     ids = {s.id for s in card.skills}
     assert ids == set(HANDLERS) == STATE_CHANGING.keys() | READ_ONLY
-    assert len(ids) == 12
+    assert len(ids) == 13
     for skill in card.skills:
         for ref in (skill.input_schema, skill.output_schema):
             path, _, cls = ref.partition("#")
@@ -110,7 +111,7 @@ def test_agent_card_grades_match_the_safety_registry_draft(svc) -> None:
 
 def test_agent_card_is_served_over_http(client: TestClient) -> None:
     served = client.get("/.well-known/agent-card.json").json()
-    assert served["name"] == "hr" and len(served["skills"]) == 12
+    assert served["name"] == "hr" and len(served["skills"]) == 13
 
 
 # 2) 결정성 ----------------------------------------------------------------------

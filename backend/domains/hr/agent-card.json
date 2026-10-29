@@ -98,6 +98,18 @@
       "priority": "recommended"
     },
     {
+      "id": "find_similar_fraud_cards",
+      "description": "판매자 사실(가입 일수·저가 상품 비율·24시간 등록 수·사업자 중복 여부)과 비슷한 지난 사기 카드(kind=fraud)를 찾아 카드 id와 유사도(0~1)를 돌려준다. 기준 미만이면 빈 목록과 max_similarity 0을 준다. 조회 전용이다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#FindSimilarFraudCardsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#FindSimilarFraudCardsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "data"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "list_handovers",
       "description": "인수인계 현황(상태·완성도·인계 목록·답을 기다리는 질문)을 조회한다. 저장된 값을 그대로 돌려주는 읽기 전용이다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListHandoversInput",

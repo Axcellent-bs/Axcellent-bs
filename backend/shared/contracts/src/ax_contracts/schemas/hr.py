@@ -14,6 +14,7 @@ skill과 등급(등급 신고는 안전 레이어 레지스트리가 원본이�
 | `start_onboarding` | A | 읽기 순서·입문 체크리스트 |
 | `check_plan` | 읽기 | 새 계획이 과거에 기각된 안인지 판정 |
 | `get_roster` | 읽기 | 담당·교대 명부 (개인정보 제외) |
+| `find_similar_fraud_cards` | 읽기 | 비슷한 지난 사기 카드와 유사도 (요청자 data) |
 | `update_onboarding_step` | A | 온보딩 단계 완료 표시(진행률은 코드가 다시 계산) |
 | `decide_candidate_card` | A | 확신 낮은 후보 카드를 사람이 승인·폐기 |
 | `list_handovers`·`list_open_questions`·`list_onboardings` | 읽기 | 인수인계·질문·온보딩 현황 |
@@ -277,6 +278,36 @@ class GetRosterInput(AxModel):
 class GetRosterOutput(AxModel):
     entries: list[RosterEntry] = Field(default_factory=list)
     gap_areas: list[str] = Field(default_factory=list)  # 담당 공백 영역
+    collected_at: UtcDatetime
+
+
+# ---- 유사 사기 카드 조회 (data의 사기 점수 FRAUD_SIMILAR 규칙용) ------------------------------
+
+
+class SellerFraudFacts(AxModel):
+    """판매자 사실. 개인정보(이름·연락처·사업자번호)는 보내지 않는다."""
+
+    joined_days: int = Field(ge=0)  # 가입 후 경과 일수
+    low_price_ratio: float = Field(ge=0, le=1)  # 저가 상품 비율
+    listings_last_24h: int = Field(ge=0)  # 24시간 등록 수
+    business_hash_duplicated: bool | None = None  # 사업자 중복 여부(모르면 None)
+
+
+class FindSimilarFraudCardsInput(AxModel):
+    facts: SellerFraudFacts
+    limit: int = Field(default=3, ge=1, le=10)
+
+
+class SimilarFraudCard(AxModel):
+    card_id: str
+    title: str
+    similarity: float = Field(ge=0, le=1)  # 높을수록 비슷하다. 방식(method)이 다르면 척도가 다르다
+
+
+class FindSimilarFraudCardsOutput(AxModel):
+    cards: list[SimilarFraudCard] = Field(default_factory=list)  # 유사도 높은 순, 기준 미만은 뺀다
+    max_similarity: float = Field(default=0.0, ge=0, le=1)  # cards가 없으면 0
+    method: Literal["dense", "dice"]  # dense=임베딩(코사인), dice=글자 2-gram 대체
     collected_at: UtcDatetime
 
 

@@ -13,6 +13,7 @@ from ax_contracts.schemas import AgentRequest, AgentResult
 from hr_agent.cards import decision as card_decision
 from hr_agent.cards import service as cards
 from hr_agent.clients.errors import UpstreamError, bind_meta
+from hr_agent.fraud_similar import service as fraud_similar
 from hr_agent.handover import service as handover
 from hr_agent.planning_check import service as planning_check
 from hr_agent.results import failed
@@ -79,6 +80,7 @@ _HANDLERS = {
     "get_audit_timeline": _with_services(views.get_audit_timeline),
     "decide_candidate_card": _with_services(card_decision.decide_candidate_card),
     "check_plan": check_plan,
+    "find_similar_fraud_cards": _with_services(fraud_similar.find_similar_fraud_cards),
     "record_case": record_case,
     "get_roster": get_roster,
     "start_handover": start_handover,
