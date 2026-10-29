@@ -7,7 +7,7 @@ import { RESULT_MAX } from "@/lib/handoffs";
 
 // 받은 요청 예시 모드. 서버 대신 화면 안 예시로 흐름을 보여 준다(서버 데이터는 건드리지 않는다).
 // - 요청은 사람이 아니라 부서(팀)로 간다. 팀이 정해지지 않은 종류는 AI가 팀을 제안하고, 사람이 고르면 "이 종류 → 팀" 규칙으로 저장한다
-// - 팀 안에서는 같이 보는 목록이고, 누구든 "내가 할게"로 맡는다. 위험한 건(확인 권한 필요)은 확인 권한이 있는 사람만 승인한다
+// - 팀 안에서는 같이 보는 목록이고, 누구든 "내가 하기"로 맡는다. 위험한 건(확인 권한 필요)은 확인 권한이 있는 사람만 승인한다
 // - 2시간 동안 아무도 안 맡으면 그 팀 확인 권한자에게 알린 것으로 보여 준다
 // 처리 상태는 이 화면에서만 바뀌고(새로고침하면 처음으로), 보내기 규칙만 브라우저에 기억한다.
 
@@ -353,7 +353,7 @@ function Detail({ v, now, me, approver, rules, onRoute, onClaim, onRelease, onCl
 
       {v.status === "waiting" && v.to && (
         <div className="border-t border-ink-100 pt-4">
-          <button type="button" className="btn-primary" onClick={onClaim}>내가 할게</button>
+          <button type="button" className="btn-primary" onClick={onClaim}>내가 하기</button>
         </div>
       )}
 
