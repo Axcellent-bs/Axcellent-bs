@@ -166,7 +166,7 @@ function Companies() {
   return (
     <Page title="고객사" desc="회사별 설치 버전, 켠 서비스, 마지막 연결 시각이에요.">
       <p className="bg-brand-50 px-4 py-3 text-sm text-brand-700">
-        연결은 고객사 시스템 관리자가 발급받은 키를 넣고 회사 정보를 입력해서 해요(연결 키 발급 탭). 이 데모에 지금 연결된 회사: <b>{current?.name ?? '없음'}</b>
+        연결은 고객사 관리자가 발급받은 키로 관리자 가입을 하면서 해요(연결 키 발급 탭). 이 데모에 지금 연결된 회사: <b>{current?.name ?? '없음'}</b>
       </p>
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[920px] text-sm">
