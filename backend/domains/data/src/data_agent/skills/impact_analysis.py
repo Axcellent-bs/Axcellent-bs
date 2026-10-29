@@ -14,6 +14,8 @@ LLM은 `summary` 문장만 쓰며, 숫자가 어긋나면 고정 템플릿으로
 - 평소 = 지난 7일 같은 시각 ±1시간의 장애 쪽 실패를 결제가 기록된 5분 평균으로 구해 구간 길이만큼
   곱한 값. 초과분 = 구간 장애 쪽 실패 − 평소 (반올림, 0 미만이면 0)
 - 지난 7일 자료가 없거나 읽지 못하면 None(확인할 수 없음). 결제 수를 주지 않는 클라이언트(목)도 None
+- 계산된 초과분과 평소 실패 수(소수 둘째 자리)는 LLM 설명의 facts에도 넣는다. 그래서 설명이 이 두
+  숫자를 써도 통과하고, 계산에 없는 숫자는 계속 막는다(`explain._numbers_valid`). 모르면 넣지 않는다
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from data_agent.explain import explain
 from data_agent.impact import (
     EXCESS_DAYS,
     EXCESS_MARGIN,
+    ImpactCounts,
     aggregate_impact,
     excess_failures,
     split_failures,
@@ -109,6 +112,25 @@ def _category_distribution(orders: list) -> list[CategoryImpact]:
     ]
 
 
+def impact_facts(
+    counts: ImpactCounts, excess: int | None, usual: float | None
+) -> dict[str, int | float | str]:
+    """영향 설명에 넘기는 숫자 (설명이 쓸 수 있는 숫자는 이것뿐이다).
+
+    초과분·평소 실패 수는 계산했을 때만 넣는다. 평소 실패 수는 근거 문장과 같은 소수 둘째 자리다.
+    """
+    facts: dict[str, int | float | str] = {
+        "failed_order_count": counts.failed_order_count,
+        "affected_customer_count": counts.affected_customer_count,
+        "damage_amount": counts.damage_amount,
+    }
+    if excess is not None:
+        facts["excess_failed_order_count"] = excess
+    if usual is not None:
+        facts["usual_fault_failures"] = round(usual, 2)
+    return facts
+
+
 async def analyze_impact(
     data: ImpactAnalysisInput,
     tenant_id: str,
@@ -140,17 +162,9 @@ async def analyze_impact(
     customer_ids = sorted({order.buyer_id for order in split.fault})
     by_category = _category_distribution(split.fault)
 
-    explanation = await explain(
-        "impact",
-        {
-            "failed_order_count": counts.failed_order_count,
-            "affected_customer_count": counts.affected_customer_count,
-            "damage_amount": counts.damage_amount,
-        },
-        llm,
-    )
     usual, usual_note = await _usual(client, data, tenant_id)
     excess = excess_failures(counts.failed_order_count, usual)
+    explanation = await explain("impact", impact_facts(counts, excess, usual), llm)
     text = explanation.summary
     if excess is not None:
         text = f"{text} 평소보다 {excess}건 많음."

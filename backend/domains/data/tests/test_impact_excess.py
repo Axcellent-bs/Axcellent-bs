@@ -129,3 +129,51 @@ def test_usual_counts_only_buckets_with_payments() -> None:
     assert usual_fault_failures({START: 0.0}, [], timedelta(minutes=10)) is None
     assert excess_failures(3, 0.5) == 3  # 2.5 → 3 (반올림)
     assert excess_failures(3, None) is None
+
+
+# ---------- 설명(LLM)이 계산된 초과분·평소 실패 수를 쓸 수 있다 ----------
+
+
+class SayLLM:
+    """늘 같은 문장을 돌려주는 LLM. 받은 프롬프트를 남긴다."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.prompts: list[str] = []
+
+    async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):  # noqa: ANN001, ANN201
+        self.prompts.append(prompt)
+        return schema(summary=self.text)
+
+
+def _explain(shop: object, text: str):  # noqa: ANN202
+    llm = SayLLM(text)
+    result = asyncio.run(analyze_impact(WINDOW, "shop-demo", llm, shop=shop))
+    return result, llm
+
+
+def test_explanation_may_use_the_computed_excess_and_usual_failures() -> None:
+    sentence = "장애 쪽 실패 6건으로 평소 0.6건보다 5건 많습니다."
+    result, llm = _explain(FakeShop(6, history_noise_per_day=3), sentence)
+    assert result.fallback is False
+    assert result.output.summary.startswith(sentence)
+    # 설명에 넘긴 facts에 계산된 두 숫자가 들어 있다
+    assert "'excess_failed_order_count': 5" in llm.prompts[0]
+    assert "'usual_fault_failures': 0.6" in llm.prompts[0]
+
+
+def test_numbers_not_in_the_calculation_are_still_rejected() -> None:
+    result, _ = _explain(FakeShop(6, history_noise_per_day=3), "평소보다 7건 많습니다.")
+    assert result.fallback is True  # 7은 계산에 없다 → 템플릿
+    assert "7건" not in result.output.summary
+    assert result.output.summary.startswith("장애 구간 실패 주문 6건")
+    # 평소 실패 수를 반올림해 바꿔 써도 막는다 (0.6 → 1)
+    rounded, _ = _explain(FakeShop(6, history_noise_per_day=3), "평소 1건보다 5건 많습니다.")
+    assert rounded.fallback is True
+
+
+def test_without_history_excess_and_usual_are_not_allowed() -> None:
+    result, llm = _explain(FakeShop(6, history_payments=None), "평소 0.6건보다 5건 많습니다.")
+    assert result.fallback is True  # 평소를 모르면 facts에 없다
+    assert "excess_failed_order_count" not in llm.prompts[0]
+    assert "usual_fault_failures" not in llm.prompts[0]
