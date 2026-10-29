@@ -25,6 +25,15 @@
     "llm.fallback_rate": 0.25,
     "root_cause.top1_rate": 1.0,
     "root_cause.ungrounded_survived_rate": 0.0,
-    "root_cause.needs_confirmation_rate": 1.0
+    "root_cause.needs_confirmation_rate": 1.0,
+    "holdout.anomaly.detection_rate": 0.8947,
+    "holdout.anomaly.false_positive_rate": 0.0952,
+    "holdout.anomaly.monitor_false_alarm_count": 6,
+    "holdout.anomaly.low_recorded_rate": null,
+    "holdout.impact.match_rate": 0.4667,
+    "holdout.anomaly.payment_mean_delay_minutes": 9.62,
+    "holdout.anomaly.payment_max_delay_minutes": 30.0,
+    "holdout.anomaly.drop_mean_delay_minutes": 13.33,
+    "holdout.anomaly.drop_max_delay_minutes": 20.0
   }
 }

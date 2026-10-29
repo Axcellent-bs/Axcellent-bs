@@ -13,6 +13,8 @@
 - 잡음(`type: fault_noise`): 장애 구간 없이 `at_minutes`분마다 결제 하나만 결제 서버 쪽에서
   실패한다(`fault_code`). `history`가 참이면 지난 7일 같은 시각에도 넣는다. 그 5분에 주문이
   없으면 잡음도 없다. 잡음은 장애가 아니라 정답의 장애 실패 수에 넣지 않는다.
+- 다른 상황에 얹는 잡음(holdout 생성기): `noise_at_minutes`·`noise_history`·`noise_code`.
+- 구간 전체 세일(holdout 생성기): `traffic.sale_factor`배로 주문이 늘어난다.
 
 정답(실패 주문 수·금액·영향 고객, 이상 시작 시각)은 data 에이전트 코드가 아니라 여기서 만든
 결제 기록에서 바로 센다(`Truth`).
@@ -182,8 +184,21 @@ def build(spec: dict[str, Any]) -> World:
     clock_seconds = [0.0]
     shop = service.Shop(db, clock=lambda: clock_seconds[0])
     order_no = 0
-    noise = _noise_targets(injection, window_from) if kind == "fault_noise" else []
+    if kind == "fault_noise":
+        noise = _noise_targets(injection, window_from)
+    elif injection.get("noise_at_minutes"):  # 다른 상황에 얹은 잡음 (holdout 생성기)
+        noise = _noise_targets(
+            {
+                "at_minutes": injection["noise_at_minutes"],
+                "history": injection.get("noise_history"),
+            },
+            window_from,
+        )
+    else:
+        noise = []
     code = injection.get("failure_code") or injection.get("fault_code")
+    noise_code = injection.get("noise_code") or code
+    sale_factor = float(traffic.get("sale_factor", 1.0))  # 구간 전체 세일 (holdout 생성기)
     with _clock() as now:
         for slot in _slots(window_from, window_to):
             in_window = window_from <= slot < window_to
@@ -194,6 +209,8 @@ def build(spec: dict[str, Any]) -> World:
                 level *= float(injection["factor"])
             if in_window and kind == "sale" and _in(slot, injection):
                 level *= float(injection["factor"])
+            if in_window:
+                level *= sale_factor
             count = _poisson(rng, level)  # 실제 주문처럼 5분마다 포아송으로 흔들린다
             for i in range(count):
                 moment = slot + timedelta(seconds=int((i + 0.5) * 300 / max(count, 1)))
@@ -221,11 +238,12 @@ def build(spec: dict[str, Any]) -> World:
                 paid = shop.pay(order["order_id"], "card", simulate)
                 if faulty or blip:
                     shop.release_fault()
-                    if code:
+                    final = code if faulty else noise_code
+                    if final:
                         with db.tx() as conn:
                             conn.execute(
                                 "UPDATE payments SET failure_code = ? WHERE order_id = ?",
-                                (code, paid["order_id"]),
+                                (final, paid["order_id"]),
                             )
                 with db.tx() as conn:  # 방금 넣은 결제 기록 (정답은 여기서 센다)
                     pay = conn.execute(

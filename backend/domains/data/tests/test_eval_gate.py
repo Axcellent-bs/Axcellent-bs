@@ -55,6 +55,22 @@ def test_answers_are_computed_from_the_scenario_data(run) -> None:  # noqa: ANN0
         assert make_cases.expected(spec) == case["expected"], case["id"]
 
 
+def test_holdout_is_regenerated_from_its_seed(run) -> None:  # noqa: ANN001
+    """holdout은 seed로 다시 만든 시나리오·정답과 같다 (손으로 고친 케이스가 아님)."""
+    make_cases = _load("make_cases")
+    holdout = run.load_holdout()
+    assert len(holdout) == make_cases.HOLDOUT_COUNT
+    seed = holdout[0]["holdout"]["seed"]
+    assert seed == make_cases.HOLDOUT_SEED
+    specs = {s["id"]: s for s in make_cases.holdout_specs(seed)}
+    faults = sum(1 for c in holdout if c["holdout"]["fault"] is not None)
+    assert faults == len(holdout) // 2  # 장애 없는 케이스와 장애 케이스가 반반
+    for case in holdout:
+        spec = {k: v for k, v in case.items() if k != "expected"}
+        assert specs[case["id"]] == spec, case["id"]
+        assert make_cases.holdout_expected(spec) == case["expected"], case["id"]
+
+
 def test_accuracy_does_not_drop_below_baseline(run, report) -> None:  # noqa: ANN001
     baseline = json.loads((EVAL / "baseline.json").read_text(encoding="utf-8"))["metrics"]
     worse = run.compare(report["metrics"], baseline)

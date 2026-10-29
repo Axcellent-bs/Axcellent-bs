@@ -63,6 +63,7 @@ from data_agent.skills.impact_analysis import analyze_impact  # noqa: E402
 from data_agent.skills.root_cause import estimate_root_cause  # noqa: E402
 
 CASES = HERE / "cases"
+HOLDOUT = HERE / "holdout"  # 처음 보는 케이스 (make_cases.py --holdout). 결과 숫자만 본다
 RESULTS = HERE / "results"
 BASELINE = HERE / "baseline.json"
 POLL_WINDOW = timedelta(minutes=15)  # 주기 감시가 묻는 구간 길이
@@ -127,6 +128,26 @@ METRICS: dict[str, tuple[str, str | None]] = {
     ),
     "root_cause.needs_confirmation_rate": ("원인 추정: '확인 필요'로 끝난 비율", None),
 }
+
+
+# holdout(처음 보는 케이스)에서 따로 내는 지표. 이름 앞에 `holdout.`을 붙인다
+HOLDOUT_METRICS = [
+    "anomaly.detection_rate",
+    "anomaly.false_positive_rate",
+    "anomaly.monitor_false_alarm_count",
+    "anomaly.low_recorded_rate",
+    "impact.match_rate",
+    "anomaly.payment_mean_delay_minutes",
+    "anomaly.payment_max_delay_minutes",
+    "anomaly.drop_mean_delay_minutes",
+    "anomaly.drop_max_delay_minutes",
+]
+for _name in HOLDOUT_METRICS:
+    METRICS[f"holdout.{_name}"] = (f"holdout: {METRICS[_name][0]}", METRICS[_name][1])
+
+
+def load_holdout() -> list[dict[str, Any]]:
+    return [json.loads(path.read_text(encoding="utf-8")) for path in sorted(HOLDOUT.glob("*.json"))]
 
 
 def load_cases() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -627,15 +648,27 @@ async def evaluate() -> dict[str, Any]:
     scenarios, sellers = load_cases()
     cases = [await run_case(case) for case in scenarios]
     seller_rows = await run_sellers(sellers)
+    holdout = load_holdout()
+    holdout_rows = [await run_case(case) for case in holdout]
+    held = summarize(holdout_rows, [])
+    metrics = summarize(cases, seller_rows)
+    metrics.update({f"holdout.{name}": held[name] for name in HOLDOUT_METRICS})
     return {
         "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "llm": "eval_llm.ScriptedLLM (평가용, 네트워크 없음)",
         "case_count": len(cases),
         "seller_count": len(seller_rows),
-        "metrics": summarize(cases, seller_rows),
+        "metrics": metrics,
         "wrong": wrong_cases(cases, seller_rows),
         "cases": cases,
         "sellers": seller_rows,
+        "holdout": {
+            "seed": holdout[0]["holdout"]["seed"] if holdout else None,
+            "case_count": len(holdout_rows),
+            "wrong": wrong_cases(holdout_rows, []),
+            "conditions": {c["id"]: c["holdout"] for c in holdout},
+            "cases": holdout_rows,
+        },
     }
 
 
@@ -676,6 +709,11 @@ def main() -> None:
     print(f"\n틀린 케이스 {len(report['wrong'])}개")
     for w in report["wrong"]:
         print(f"- [{w['area']}] {w['id']}: {w['what']}")
+    # holdout은 결과 숫자만 본다 (내용을 보고 판정 규칙을 맞추지 않는다). 자세한 것은 결과 파일에
+    held = report["holdout"]
+    print(
+        f"holdout {held['case_count']}개 (seed {held['seed']}) 중 틀린 항목 {len(held['wrong'])}개"
+    )
     RESULTS.mkdir(exist_ok=True)
     (RESULTS / "latest.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
