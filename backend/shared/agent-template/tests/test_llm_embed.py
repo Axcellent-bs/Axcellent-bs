@@ -51,6 +51,27 @@ async def test_real_embed_needs_configuration() -> None:
 
 
 @pytest.mark.asyncio
+async def test_real_embed_keeps_response_order_when_index_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"data": [{"embedding": [1.0, 0.0]}, {"embedding": [0.0, 1.0]}]},
+        )
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kw: real_client(transport=httpx.MockTransport(handler)),
+    )
+    settings = LLMSettings(base_url="http://llm/v1/", api_key="k", embed_model="m")
+    vectors = await LLMClient("memory", settings).embed(["a", "b"])
+    assert vectors == [[1.0, 0.0], [0.0, 1.0]]
+
+
+@pytest.mark.asyncio
 async def test_real_embed_calls_openai_compatible_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, object] = {}
 

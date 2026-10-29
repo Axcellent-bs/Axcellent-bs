@@ -357,7 +357,11 @@ class LLMClient:
                 )
                 response.raise_for_status()
             body = response.json()
-            items = sorted(body["data"], key=lambda item: item["index"])
+            # `index`가 없는 응답(Gemini 호환 엔드포인트)은 응답에 온 순서를 그대로 쓴다
+            items = sorted(
+                enumerate(body["data"]), key=lambda pair: pair[1].get("index", pair[0])
+            )
+            items = [item for _, item in items]
             vectors = [[float(x) for x in item["embedding"]] for item in items]
             if len(vectors) != len(texts):
                 raise ValueError(f"임베딩 개수가 입력과 다르다: {len(vectors)} != {len(texts)}")
