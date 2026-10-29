@@ -1,7 +1,7 @@
 // "이 코드 왜 이렇게 했지?" 역추적: 코드 줄 → PR → 작업 → 기획서 문단 → 결정 → 요청 → 근거.
 // 모든 연결은 문단 id로 이어져 있어서 코드 규칙으로만 따라간다 (LLM 없음).
 import type { PR, State } from '@/lib/planningData'
-import { toPath } from '@/components/planning/links'
+import { toPath } from '@/components/planning-common/links'
 
 export interface CodeLine { path: string; line: number; text: string }
 export interface TraceStep { kind: '코드' | 'PR' | '작업' | '문단' | '결정' | '기각 이력' | '기획서' | '요청' | '근거' | '장애'; title: string; detail?: string; href?: string }

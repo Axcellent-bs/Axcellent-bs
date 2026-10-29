@@ -4,10 +4,10 @@
 import type { Dispatch } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, type Action, type Request, type State as S } from '@/lib/planningData'
-import { ActivityList, Dep, State, Tag } from '@/components/planning/parts'
-import { Linked, Ref, convoHref, hrefOf, prSlug, reviewOf, toPath } from '@/components/planning/links'
-import { RepoTag } from '@/components/planning/repo'
-import { Flow, Head, Layout, ListPane, Side, Step, mergedLabel, prStatus, specStatus } from '@/components/planning/flow'
+import { ActivityList, Dep, State, Tag } from '@/components/planning-common/parts'
+import { Linked, Ref, convoHref, hrefOf, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
+import { RepoTag } from '@/components/planning-common/repo'
+import { Flow, Head, Layout, ListPane, Side, Step, mergedLabel, prStatus, specStatus } from '@/components/planning-common/flow'
 
 // 프로젝트 = 원본 요청 (같은 요청으로 연결만 한 것은 원본에 붙인다)
 export const projectsOf = (s: S) => s.requests.filter((r) => r.state !== '중복 연결')

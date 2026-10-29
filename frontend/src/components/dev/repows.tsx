@@ -5,9 +5,9 @@ import { useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent
 import { Button, Modal, useDismiss, useToast } from '@dejafix/common-frontend'
 import type { Action, State as S } from '@/lib/planningData'
 import { DEV_API, PlanningApiError, kst, repoApi, vcsApi, type MergeMethod, type RepoBranch, type RepoCheckState, type RepoFile, type RepoGraph, type RepoGraphCommit, type RepoPr, type RepoPrDetail, type RepoPrState, type VcsConnection } from '@/lib/planning'
-import { layoutGraph, laneColor, type GraphRow } from '@/components/planning/graphlayout'
-import { prSlug, toPath, go } from '@/components/planning/links'
-import { Work } from '@/components/planning/pages'
+import { layoutGraph, laneColor, type GraphRow } from '@/components/dev/graphlayout'
+import { prSlug, toPath, go } from '@/components/planning-common/links'
+import { Work } from '@/components/dev/work'
 
 // ---------------------------------------------------------------- 공용
 

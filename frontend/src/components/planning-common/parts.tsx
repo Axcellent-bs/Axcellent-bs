@@ -2,7 +2,7 @@
 import type { Key, KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import { type ChipTone, type Column } from '@dejafix/common-frontend'
 import { DEPT_NAME, type Activity, type Dept, type State as S } from '@/lib/planningData'
-import { Linked, convoHref, deptHref, go, toPath } from '@/components/planning/links'
+import { Linked, convoHref, deptHref, go, toPath } from '@/components/planning-common/links'
 
 // 부서·연결 지점은 글자로만 보인다. 링크가 필요한 곳에서만 link를 켠다
 export function Dep({ d, link }: { d: Dept; link?: boolean }) {

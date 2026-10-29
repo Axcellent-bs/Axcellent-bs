@@ -3,7 +3,7 @@
 // 목록(파일 이름·분류·크기·시각)은 이 브라우저에만 남는다 (연동 전 시연용). 파일 내용은 저장하지 않는다.
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import {Button, Card, Notice, PageHeader, Select, useToast } from '@dejafix/common-frontend'
-import { Tag } from '@/components/planning/parts'
+import { Tag } from '@/components/planning-common/parts'
 
 const KINDS = ['회사 규정', '업무 매뉴얼', '기획 가이드', '용어·정책', '기타'] as const
 type Kind = (typeof KINDS)[number]

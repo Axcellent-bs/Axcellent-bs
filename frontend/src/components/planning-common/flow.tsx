@@ -2,8 +2,8 @@
 // 단계 머리는 짧은 라벨 + 값. 줄·단계·블록은 통째로 눌러 이동한다 (rowNav).
 import type { ReactNode } from 'react'
 import type { PR, Spec, State as S } from '@/lib/planningData'
-import { reviewOf, toPath } from '@/components/planning/links'
-import { rowNav } from '@/components/planning/parts'
+import { reviewOf, toPath } from '@/components/planning-common/links'
+import { rowNav } from '@/components/planning-common/parts'
 
 export const CONFIRMED_BY = { auto: '자동 확정', review: '교차검증 후 확정', human: '사람 확인 후 확정' } as const
 export const mergedLabel = (p: PR) => !p.merged ? '머지 전' : p.mergedBy === 'rule' ? `자동 머지 · ${p.rule}` : p.mergedBy === 'review' ? '교차검증 후 자동 머지' : '사람 머지'

@@ -4,10 +4,10 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Chip, useToast, type ChipTone } from '@dejafix/common-frontend'
 import type { ChatMessage, ChatStatus, ChatThread, CodingStatus, State as S, Task } from '@/lib/planningData'
 import { DEV_API, PlanningApiError, chatApi, vcsApi, type VcsConnection } from '@/lib/planning'
-import { CODING_LABEL, CancelButton, isRunning } from '@/components/planning/coding'
-import { State } from '@/components/planning/parts'
-import { go, toPath } from '@/components/planning/links'
-import { Tag } from '@/components/planning/parts'
+import { CODING_LABEL, CancelButton, isRunning } from '@/components/dev/coding'
+import { State } from '@/components/planning-common/parts'
+import { go, toPath } from '@/components/planning-common/links'
+import { Tag } from '@/components/planning-common/parts'
 
 const api = chatApi(DEV_API)
 

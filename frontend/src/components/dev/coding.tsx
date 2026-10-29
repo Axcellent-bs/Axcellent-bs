@@ -4,8 +4,8 @@ import { useState, type FormEvent } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import type { CodingRun, CodingStatus, State as S, Task } from '@/lib/planningData'
 import { DEV_API, PlanningApiError, devTaskApi, planningApi } from '@/lib/planning'
-import { State, Tag } from '@/components/planning/parts'
-import { Step } from '@/components/planning/flow'
+import { State, Tag } from '@/components/planning-common/parts'
+import { Step } from '@/components/planning-common/flow'
 
 const api = devTaskApi(DEV_API)
 const actions = planningApi(DEV_API)

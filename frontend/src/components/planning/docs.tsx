@@ -3,8 +3,8 @@
 import { useState, type Dispatch } from 'react'
 import {Button, PageHeader, Select, useToast } from '@dejafix/common-frontend'
 import { type Action, type Doc, type DocBlock, type State } from '@/lib/planningData'
-import { Linked, Ref, go, toPath } from '@/components/planning/links'
-import { Sec, Tag } from '@/components/planning/parts'
+import { Linked, Ref, go, toPath } from '@/components/planning-common/links'
+import { Sec, Tag } from '@/components/planning-common/parts'
 
 export function Docs({ s, d, item }: { s: State; d: Dispatch<Action>; item?: string }) {
   const toast = useToast()

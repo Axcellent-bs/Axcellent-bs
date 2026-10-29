@@ -4,8 +4,8 @@
 import { useEffect, useState, type Dispatch } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, TODAY, type Action, type Request, type State as S } from '@/lib/planningData'
-import { Tag, rowNav } from '@/components/planning/parts'
-import { Ref, convoHref, isFollowUp, nextOf, prSlug, reviewOf, toPath } from '@/components/planning/links'
+import { Tag, rowNav } from '@/components/planning-common/parts'
+import { Ref, convoHref, isFollowUp, nextOf, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
 import { gather } from '@/components/planning/projects'
 
 // ---------------------------------------------------------------- 필터

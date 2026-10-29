@@ -4,9 +4,9 @@
 import { useEffect, useRef, useState, type Dispatch, type KeyboardEvent } from 'react'
 import {Select, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, type Action, type Activity, type Dept, type Message, type State, type Thread } from '@/lib/planningData'
-import { Linked, Ref, toPath } from '@/components/planning/links'
-import { Dep, Grade, Point, Tag } from '@/components/planning/parts'
-import { useCommunications } from '@/components/planning/comms'
+import { Linked, Ref, toPath } from '@/components/planning-common/links'
+import { Dep, Grade, Point, Tag } from '@/components/planning-common/parts'
+import { useCommunications } from '@/components/planning-common/comms'
 
 // 채널마다 마지막으로 본 메시지 수 (화면을 옮겨도 유지)
 const seen = new Map<string, number>()

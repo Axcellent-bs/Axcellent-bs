@@ -3,7 +3,7 @@ import { useEffect, useState, type Dispatch } from 'react'
 import { Button } from '@dejafix/common-frontend'
 import type { Action, PR, RepoTarget, State as S } from '@/lib/planningData'
 import { DEV_API, kst, vcsApi, type VcsConnection } from '@/lib/planning'
-import { Tag } from '@/components/planning/parts'
+import { Tag } from '@/components/planning-common/parts'
 
 const CONF: Record<RepoTarget['confidence'], { label: string; tone: 'green' | 'amber' | 'neutral' }> = {
   high: { label: '확신 높음', tone: 'green' },
