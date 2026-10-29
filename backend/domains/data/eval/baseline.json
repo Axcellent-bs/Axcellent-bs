@@ -16,7 +16,7 @@
     "impact.match_rate": 1.0,
     "impact.mean_abs_amount_error": 0.0,
     "impact.mean_abs_amount_error_pct": 0.0,
-    "impact.excess_mean_abs_error": null,
+    "impact.excess_mean_abs_error": 0.0,
     "fraud.skill_available": 1.0,
     "fraud.precision": null,
     "fraud.recall": 0.0,

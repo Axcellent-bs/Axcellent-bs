@@ -38,6 +38,9 @@ class ImpactAnalysisOutput(AxModel):
     damage_amount: int = Field(ge=0)  # 정수 원
     by_category: list[CategoryImpact] = Field(default_factory=list)
     summary: str
+    # 평소보다 더 실패한 건수: 구간 장애 쪽 실패 − 지난 7일 같은 시각 ±1시간의 평소 실패
+    # (구간 길이만큼, 반올림, 0 미만이면 0). 지난 7일 자료가 없으면 None. 예전 응답에는 없다
+    excess_failed_order_count: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _customer_count_matches_ids(self) -> Self:

@@ -5,8 +5,10 @@
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 
 from ax_contracts.data_access.shop_failed_orders import FailedOrder, ShopFailedOrdersResult
 
@@ -97,3 +99,38 @@ def aggregate_impact(result: ShopFailedOrdersResult | list[FailedOrder]) -> Impa
         affected_customer_count=len({o.buyer_id for o in orders}),
         damage_amount=sum(o.amount for o in orders),
     )
+
+
+# ---------------------------------------------------------------- 초과분 (평소보다 더 실패한 건수)
+
+EXCESS_DAYS = 7  # 지난 7일
+EXCESS_MARGIN = timedelta(hours=1)  # 같은 시각 ±1시간
+_BUCKET = timedelta(minutes=5)
+
+
+def _floor_5m(ts: datetime) -> datetime:
+    ts = ts.astimezone(UTC)
+    return ts.replace(minute=ts.minute - ts.minute % 5, second=0, microsecond=0)
+
+
+def usual_fault_failures(
+    payments: dict[datetime, float], fault_times: list[datetime], window: timedelta
+) -> float | None:
+    """지난 7일 같은 시각 ±1시간의 평소 장애 쪽 실패를 구간 길이만큼으로 환산한다.
+
+    `payments`는 5분 구간별 결제 수, `fault_times`는 그 기간 장애 쪽 실패 시각이다. 결제가 1건
+    이상 기록된 5분만 평균에 넣는다(자료가 없는 시간을 실패 0건으로 세지 않는다). 그런 5분이
+    하나도 없으면 None(확인할 수 없음)이다.
+    """
+    active = {_floor_5m(b) for b, n in payments.items() if n and n > 0}
+    if not active:
+        return None
+    fails = sum(1 for t in fault_times if _floor_5m(t) in active)
+    return fails / len(active) * (window / _BUCKET)
+
+
+def excess_failures(window_faults: int, usual: float | None) -> int | None:
+    """초과분 = 구간 장애 쪽 실패 − 평소 실패 (반올림, 0 미만이면 0). 평소를 모르면 None."""
+    if usual is None:
+        return None
+    return max(0, math.floor(window_faults - usual + 0.5))
