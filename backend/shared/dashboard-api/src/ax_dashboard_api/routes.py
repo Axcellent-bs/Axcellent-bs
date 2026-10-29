@@ -224,6 +224,23 @@ async def process_queue(body: QueueProcessBody | None = None) -> dict:
     return ok(claim_mapping.to_run(out))
 
 
+async def _conversation(out: dict) -> Conversation:
+    """support의 문의를 화면 모양으로 바꾼다.
+
+    이어진 클레임은 클레임 서비스에서 읽어(문의 서비스와 프로세스가 다르다) 화면 모양으로
+    붙인다. 클레임 서비스가 꺼져 있으면 문의 서비스가 준 것만 보인다.
+    """
+    linked = await or_unavailable(support_client.call("list_claims"), {"items": []})
+    claims: dict[int, dict] = {c["id"]: c for c in out.get("claims") or []}
+    for c in linked.get("items") or []:
+        if c.get("conversation_id") == out.get("id"):
+            claims[c["id"]] = c
+    ordered = sorted(claims.values(), key=lambda c: c["id"])
+    return Conversation.model_validate(
+        {**out, "claims": [claim_mapping.to_claim(c) for c in ordered]}
+    )
+
+
 # ---------------------------------------------------------------- 문의 (목 모드 또는 support A2A)
 # 목 모드(`DASHBOARD_MOCK=1`)는 메모리 데이터, 아니면 support 에이전트 skill을 부른다.
 @router.get("/conversations")
@@ -244,7 +261,7 @@ async def conversation(conversation_id: int) -> dict:
             raise ApiError(404, "NOT_FOUND", f"문의 {conversation_id}를 찾을 수 없다")
         return ok(found)
     out = await support_client.call("get_inquiry", {"inquiry_id": conversation_id})
-    return ok(Conversation.model_validate(out))
+    return ok(await _conversation(out))
 
 
 @router.post("/conversations", status_code=201)
@@ -265,7 +282,7 @@ async def create_conversation(body: ConversationCreate) -> dict:
         {"subject": body.subject, "message": body.message},
         target=f"user:{body.user_id}",
     )
-    return ok(Conversation.model_validate(out))
+    return ok(await _conversation(out))
 
 
 @router.post("/conversations/{conversation_id}/customer-messages", status_code=201)
@@ -278,7 +295,7 @@ async def customer_message(conversation_id: int, body: TextBody) -> dict:
         {"message": body.text},
         target=f"inquiry:{conversation_id}",
     )
-    return ok(Conversation.model_validate(out))
+    return ok(await _conversation(out))
 
 
 @router.post("/conversations/{conversation_id}/check")
@@ -325,7 +342,7 @@ async def agent_message(conversation_id: int, body: AgentMessageBody) -> dict:
         {"text": body.text},
         target=f"inquiry:{conversation_id}",
     )
-    return ok(Conversation.model_validate(out))
+    return ok(await _conversation(out))
 
 
 @router.post("/conversations/{conversation_id}/reject-draft")
@@ -413,9 +430,7 @@ async def handover_questions(
 
 async def _live_questions(**filters: str | None) -> list[HandoverQuestion]:
     out = await or_unavailable(
-        hr_client.call(
-            "list_open_questions", {k: v for k, v in filters.items() if v is not None}
-        ),
+        hr_client.call("list_open_questions", {k: v for k, v in filters.items() if v is not None}),
         {"questions": []},
     )
     return [HandoverQuestion.model_validate(q) for q in out["questions"]]
@@ -557,9 +572,7 @@ async def customers_at_risk(
         out = mock_customers.at_risk(min_level, limit)
     else:
         out = await or_unavailable(
-            support_client.call(
-                "list_at_risk_customers", {"min_level": min_level, "limit": limit}
-            ),
+            support_client.call("list_at_risk_customers", {"min_level": min_level, "limit": limit}),
             {"items": [], "total": 0},
         )
     return ok(out["items"], total=out["total"])

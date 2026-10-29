@@ -411,3 +411,61 @@ def test_user_numbers_and_buyer_ids_convert_both_ways() -> None:
     assert claim_mapping._user_id("buy_0001") == 1
     assert claim_mapping._user_id("buy_0123") == 123
     assert claim_mapping._user_id("usr_1") is None and claim_mapping._user_id("buyer-x") is None
+
+
+def test_conversation_carries_linked_claims_and_activity(client: TestClient, fake: Fake) -> None:
+    """상담 콘솔이 문의를 열면 이어진 클레임(화면 모양)과 AI 처리 내력이 함께 온다."""
+    fake.outputs["get_inquiry"] = {
+        "id": 7,
+        "customer_name": "김하늘",
+        "subject": "배송 문의",
+        "status": "open",
+        "updated_at": "2026-10-22T00:00:00Z",
+        "preview": "언제 오나요",
+        "awaiting_reply": True,
+        "messages": [],
+        "claims": [{**CLAIM, "conversation_id": 7}],
+        "activity": [
+            {
+                "at": "2026-10-22T00:00:01Z",
+                "actor": "agent",
+                "kind": "claim_decided",
+                "title": "상담원이 클레임을 승인했어요",
+                "ref": "claim:1",
+                "data": {"claim_id": 1, "decision": "approve"},
+            }
+        ],
+    }
+    data = client.get(BASE + "/conversations/7").json()["data"]
+    assert [c["id"] for c in data["claims"]] == [1]
+    assert data["claims"][0]["conversation_id"] == 7
+    assert data["activity"][0]["kind"] == "claim_decided"
+    assert data["activity"][0]["data"]["decision"] == "approve"
+
+
+def test_conversation_reads_linked_claims_from_the_claims_service(
+    client: TestClient, fake: Fake
+) -> None:
+    """문의 서비스는 클레임을 모른다(프로세스가 다르다). 클레임 서비스에서 읽어 붙인다."""
+    fake.outputs["get_inquiry"] = {
+        "id": 7,
+        "customer_name": "김하늘",
+        "subject": "배송 문의",
+        "status": "open",
+        "updated_at": "2026-10-22T00:00:00Z",
+        "preview": "언제 오나요",
+        "awaiting_reply": True,
+        "messages": [],
+        "claims": [],
+        "activity": [],
+    }
+    fake.outputs["list_claims"] = {
+        "items": [
+            {**CLAIM, "id": 1, "conversation_id": 7},
+            {**CLAIM, "id": 2, "conversation_id": 8},  # 다른 문의의 클레임은 붙이지 않는다
+            {**CLAIM, "id": 3, "conversation_id": None},
+        ]
+    }
+    data = client.get(BASE + "/conversations/7").json()["data"]
+    assert [c["id"] for c in data["claims"]] == [1]
+    assert {r.skill for r in fake.sent} == {"get_inquiry", "list_claims"}

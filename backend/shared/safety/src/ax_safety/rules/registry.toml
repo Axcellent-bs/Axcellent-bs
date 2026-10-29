@@ -60,6 +60,12 @@ action = "set_inquiry_status"
 owner = "support"
 base_grade = "A"
 
+# 클레임 서비스가 문의 서비스에 알리는 클레임 처리 결과 기록 (문의의 AI 처리 내력). 돈은 움직이지 않는다
+[[actions]]
+action = "record_claim_activity"
+owner = "support"
+base_grade = "A"
+
 # 클레임 처리 기록 (#105). 돈이 나가지 않는 기록만. 환불 지급은 refund_request(A, 한도 넘으면 C)
 [[actions]]
 action = "create_claim"

@@ -42,6 +42,7 @@ SERVICES: tuple[Service, ...] = (
             "send_reply",
             "reject_draft",
             "set_inquiry_status",
+            "record_claim_activity",
             "inquiry_overview",
             "detect_inquiry_surge",
             "request_change",
