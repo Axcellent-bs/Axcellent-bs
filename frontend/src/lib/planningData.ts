@@ -181,7 +181,11 @@ export interface CrossReview {
   result?: '승인' | '거절'
   resultWhy?: string
   decidedAt?: string
+  at?: string // 대기 시작 (ISO, 서버 대기열에서 옴). 없으면 t로 계산
 }
+
+// 교차검증 대기를 사람 확인으로 넘기기까지 (분). 백엔드 PLANNING_CROSS_CHECK_TIMEOUT_MIN 기본값과 같다
+export const CROSS_CHECK_TIMEOUT_MIN = 10
 
 // ---- 학습된 자동 처리 기준 (#191, 재현·태윤 조건). 학습 근거는 검토자 승인이 아니라 "머지 뒤 장애·revert 없음 + 관찰 기간".
 // 같은 범위에서 관찰을 통과한 머지가 OBSERVE_N건 모이면 기준을 제안하고, 넓히는 쪽은 safety 안전 장치 안이면 재무 AI
@@ -923,12 +927,12 @@ function decideReview(s: State, reviewId: string): State {
 // 되돌릴 수 없는 일: 사람이 확인하고 진행하거나 보류한다
 function humanDecide(s: State, reviewId: string, ok: boolean): State {
   const r = s.reviews.find((x) => x.id === reviewId)
-  if (!r || r.result || r.lane !== 'human') return s
+  if (!r || r.result) return s
   const t = now()
   const next: State = {
     ...s,
     reviews: s.reviews.map((x) => (x.id === r.id ? { ...x, result: ok ? '승인' : '거절', resultWhy: ok ? '사람이 확인하고 진행' : '사람이 보류', decidedAt: t } : x)),
-    activity: [...s.activity, { t, ctx: r.ctx, from: 'human', to: 'planning', point: '사람 확인', kind: '사람', text: `팀장 노예진이 ${r.ref} ${TARGET_LABEL[r.target]} ${ok ? '진행' : '보류'} (되돌릴 수 없는 일: ${r.irreversible})` }],
+    activity: [...s.activity, { t, ctx: r.ctx, from: 'human', to: 'planning', point: '사람 확인', kind: '사람', text: `팀장 노예진이 ${r.ref} ${TARGET_LABEL[r.target]} ${ok ? '진행' : '보류'}${r.irreversible ? ` (되돌릴 수 없는 일: ${r.irreversible})` : ' (교차검증 대기 중 사람 확인)'}` }],
   }
   if (!ok) return next
   return r.target === 'confirm_spec' ? confirmSpecCore(next, r.ref, 'human', `${r.id} 사람 확인`) : mergeCore(next, r.ref, 'human', undefined, r.id)

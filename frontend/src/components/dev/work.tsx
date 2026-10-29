@@ -1,7 +1,7 @@
 // 개발 작업·PR과 AI 교차검증. 프로젝트 탭과 같은 틀(왼쪽 목록 / 가운데 세로 흐름 / 오른쪽 곁 블록)
 import { useEffect, useState, type Dispatch, type ReactNode } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
-import { TARGET_LABEL, OBSERVE_MIN, type Action, type CrossReview, type PR, type State as S } from '@/lib/planningData'
+import { CROSS_CHECK_TIMEOUT_MIN, TARGET_LABEL, OBSERVE_MIN, type Action, type CrossReview, type PR, type State as S } from '@/lib/planningData'
 import { codeOf, traceOf, type CodeLine } from '@/components/dev/trace'
 import { State, Tag } from '@/components/planning-common/parts'
 import { Linked, Ref, convoHref, hrefOf, prFromSlug, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
@@ -13,6 +13,46 @@ interface P { s: S; d: Dispatch<Action> }
 
 // ---------------------------------------------------------------- 작업·PR (왼쪽 작업 목록 / 가운데 PR 흐름 / 오른쪽 근거 체인)
 const waitLabel = (x: CrossReview) => (x.lane === 'human' ? '사람 확인 대기' : '교차검증 대기')
+
+// 대기 시작부터 지난 분. 서버 건은 ISO(at), 예시 건은 "MM-DD HH:mm"(KST)
+function waitedMin(x: CrossReview, now: number): number | undefined {
+  const m = x.t.match(/^(\d{2})-(\d{2}) (\d{2}):(\d{2})$/)
+  const start = x.at ? Date.parse(x.at) : m ? Date.parse(`${new Date(now).getFullYear()}-${m[1]}-${m[2]}T${m[3]}:${m[4]}:00+09:00`) : NaN
+  return Number.isNaN(start) ? undefined : Math.max(0, Math.floor((now - start) / 60_000))
+}
+function useNow(ms = 30_000) {
+  const [t, setT] = useState(() => Date.now())
+  useEffect(() => {
+    const id = window.setInterval(() => setT(Date.now()), ms)
+    return () => window.clearInterval(id)
+  }, [ms])
+  return t
+}
+
+// 판단 전: 무엇을 기다리는지 · 얼마나 · 언제 사람에게 넘어가는지 · 지금 사람이 할 수 있는 것
+function Waiting({ s, d, r }: P & { r: CrossReview }) {
+  const toast = useToast()
+  const now = useNow()
+  const waited = waitedMin(r, now)
+  const left = waited === undefined ? undefined : CROSS_CHECK_TIMEOUT_MIN - waited
+  const open = r.checks.filter((c) => c.result !== '통과').map((c) => c.label)
+  const prHref = r.target === 'merge_pr' ? toPath(`work/prs/${prSlug(r.ref)}`) : hrefOf(s, r.ref)
+  return (
+    <>
+      <Pairs items={[
+        ['기다리는 것', r.lane === 'ai' ? `${r.verifier} 판정` : r.irreversible ? `사람 확인 · ${r.irreversible}` : '사람 확인'],
+        ['대기', waited === undefined ? r.t : `${r.t}부터 · ${waited}분`],
+        ...(r.lane === 'ai' ? [['사람 확인으로', left === undefined ? `${CROSS_CHECK_TIMEOUT_MIN}분 뒤 자동` : left > 0 ? `${left}분 뒤 자동` : '곧 넘어감'] as [string, string]] : []),
+        ...(open.length ? [['걸린 항목', open.join(' · ')] as [string, string]] : r.routeWhy.length ? [['걸린 항목', r.routeWhy.join(' · ')] as [string, string]] : []),
+      ]} />
+      <div className="actions">
+        <Button variant="primary" onClick={() => { d({ type: 'humanDecide', review: r.id, ok: true }); toast.show(`${r.ref} 진행`) }}>확인하고 진행</Button>
+        {r.lane === 'human' && <Button onClick={() => { d({ type: 'humanDecide', review: r.id, ok: false }); toast.show(`${r.ref} 보류`) }}>보류</Button>}
+        {prHref && <a href={prHref} className="btn-quiet px-3 py-1">{r.target === 'merge_pr' ? 'PR에서 수정 요청' : '기획서 보기'}</a>}
+      </div>
+    </>
+  )
+}
 export function Work({ s, d, item }: P & { item?: string }) {
   const [line, setLine] = useState<CodeLine>()
   useEffect(() => { setLine(undefined) }, [item])
@@ -129,7 +169,6 @@ function Trace({ s, pr, line: picked, setLine }: { s: S; pr: PR; line?: CodeLine
 
 // ---------------------------------------------------------------- AI 교차검증 대기열 + 사람 확인 (되돌릴 수 없는 일)
 export function Reviews({ s, d, item }: P & { item?: string }) {
-  const toast = useToast()
   const all = s.reviews.slice().reverse()
   const r = s.reviews.find((x) => x.id === item) ?? all.find((x) => !x.result) ?? all[0]
   const row = (x: CrossReview) => ({ key: x.id, href: toPath(`work/reviews/${x.id}`), on: x.id === r?.id, title: `${TARGET_LABEL[x.target]} · ${x.title}`, meta: <>{x.id} · {x.ref} <State v={x.result ?? waitLabel(x)} /></> })
@@ -152,12 +191,6 @@ export function Reviews({ s, d, item }: P & { item?: string }) {
               ['자기 승인', r.lane === 'ai' ? '아님 · 기획개발 밖' : '해당 없음'],
               ...(r.irreversible ? [['되돌릴 수 없음', r.irreversible] as [string, string]] : []),
             ]} />
-            {!r.result && r.lane === 'human' && (
-              <div className="actions">
-                <Button variant="primary" onClick={() => { d({ type: 'humanDecide', review: r.id, ok: true }); toast.show(`${r.ref} 진행`) }}>확인하고 진행</Button>
-                <Button onClick={() => { d({ type: 'humanDecide', review: r.id, ok: false }); toast.show(`${r.ref} 보류`) }}>보류</Button>
-              </div>
-            )}
           </Side>
           <Side title="대화" href={convoHref(r.ctx)} sum={<span className="mono">{r.ctx}</span>} />
         </>
@@ -170,10 +203,10 @@ export function Reviews({ s, d, item }: P & { item?: string }) {
           {r.recommendWhy && <p className="muted">{r.recommendWhy}</p>}
         </Step>
         <Step name="규칙" on title={`통과 ${cnt('통과')} · 확인 필요 ${cnt('확인 필요')} · 걸림 ${cnt('걸림')}`}>
-          <ul>{r.checks.map((c) => <li key={c.label}><State v={c.result} /> <b>{c.label}</b> <span className="muted"><Linked s={s} text={c.detail} /></span></li>)}</ul>
+          <ul>{r.checks.map((c) => <li key={c.label}><State v={c.result} tone={c.result === '확인 필요' ? 'amber' : c.result === '통과' ? 'green' : undefined} /> <b>{c.label}</b> <span className="muted"><Linked s={s} text={c.detail} /></span></li>)}</ul>
         </Step>
-        <Step name="판단" on={!!r.result} title={r.result ? `${r.result} · ${r.decidedAt}` : '대기'}>
-          {r.resultWhy && <p className="muted">{r.resultWhy}</p>}
+        <Step name="판단" on={!!r.result} title={r.result ? `${r.result} · ${r.decidedAt}` : <State v={waitLabel(r)} live />}>
+          {r.result ? r.resultWhy && <p className="muted">{r.resultWhy}</p> : <Waiting s={s} d={d} r={r} />}
         </Step>
         {r.target === 'merge_pr' && r.lane === 'ai' && (() => {
           const o = s.autoPolicy.observing.find((x) => x.pr === r.ref)

@@ -45,9 +45,10 @@ const toneOf = (v: string): [Tone, boolean] =>
     : RED.includes(v) ? ['red', false]
     : GRAY.includes(v) ? ['gray', false]
     : ['green', false]
-/** `live`를 주면 목록에 없는 글자라도 깜빡인다 (에이전트가 일하는 중) */
-export function State({ v, live }: { v: string; live?: boolean }) {
-  const [tone, blink] = toneOf(v)
+/** `live`를 주면 목록에 없는 글자라도 깜빡인다 (에이전트가 일하는 중). `tone`은 그 자리에서만 색을 정할 때 */
+export function State({ v, live, tone: force }: { v: string; live?: boolean; tone?: Tone }) {
+  const [auto, blink] = toneOf(v)
+  const tone = force ?? auto
   return <span className={`st st-${tone}${live || blink ? ' st-live' : ''}`}>{v}</span>
 }
 
