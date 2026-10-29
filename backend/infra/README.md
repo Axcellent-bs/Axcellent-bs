@@ -42,6 +42,7 @@ docker compose -f infra/compose.yml -f infra/compose.server.yml up -d --build
 | memory | 8002 |
 | shop-api | 8010 |
 | dashboard-api | 8020 |
+| dejafix-proxy | 8030 |
 | agents/planning | 8101 |
 | agents/support | 8102 |
 | agents/marketing | 8103 |
