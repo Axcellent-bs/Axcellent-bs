@@ -1,8 +1,9 @@
 """코딩 에이전트 (개발 역할). 개발팀원이 개발 화면에 쓴 기획을 연결된 레포에 실제로 구현한다.
 
 흐름: 파일 목록 읽기 → 후보 파일 고르기(LLM, 이름만) → 후보 내용을 보고 확정(LLM) →
-파일마다 새 글 쓰기(LLM) → 관문 뒤 커밋·PR → 완료 기준으로 리뷰(LLM) → 불일치면 한 번 고쳐
-(리뷰가 짚은 새 파일도 더해) 같은 브랜치에 수정 커밋 → 기존 자동 머지 규칙.
+파일마다 새 글 쓰기(LLM) → 완료 기준으로 리뷰(LLM) → 불일치면 한 번 고쳐(리뷰가 짚은 새
+파일도 더해) 다시 리뷰 → 관문 뒤 마지막 결과만 커밋 하나로 PR → 리뷰 결과를 PR에 남기고
+기존 자동 머지 규칙.
 
 - 상태 잠금 밖에서 돈다. 단계마다 서비스의 작은 액션(`coding_*`)으로 진행 상태를 적는다 (SSE).
 - 한도: 파일 5개, 바뀐 줄 합 1500줄, 고칠 파일 600줄. 넘으면 PR 없이 사람 확인(`waiting_human`).
@@ -568,7 +569,7 @@ async def _write_all(
 
 @dataclass
 class Draft:
-    """작성까지 끝낸 코드. PR을 못 올리고 멈췄을 때 다시 시도하면
+    """리뷰까지 끝낸 코드. PR을 못 올리고 멈췄을 때 다시 시도하면
     LLM을 다시 부르지 않고 이걸로 올린다."""
 
     connection: str | None
@@ -577,6 +578,9 @@ class Draft:
     contents: dict[str, str]
     rows: list[CodingFile]
     summary: str | None
+    verdicts: list[str] = field(default_factory=list)  # 리뷰 결과 차례대로
+    notes: list[str] = field(default_factory=list)  # 마지막 리뷰의 지적
+    attempts: int = 1
 
 
 def _drafts(svc: PlanningService) -> dict[str, Draft]:
@@ -630,26 +634,19 @@ async def _run(svc: PlanningService, job: Job) -> None:
         raise CoderStop("failed", "LLM 설정이 없다")
     adapter = _adapter(job.connection)
 
-    # 다시 시도: 같은 연결로 작성해 둔 코드가 있으면 읽기·쓰기(LLM)를 건너뛰고 PR부터 다시 한다
+    # 다시 시도: 같은 연결로 리뷰까지 끝낸 코드가 있으면 LLM을 다시 부르지 않고 PR부터 다시 한다
     draft = draft_of(svc, job.task_id)
     if draft is not None and draft.connection == job.connection:
-        picks, originals, contents, rows, summary = (
-            draft.picks,
-            draft.originals,
-            draft.contents,
-            draft.rows,
-            draft.summary,
-        )
         await svc.coding_step(
             job,
             "writing",
             point="code.write",
-            text=f"작성해 둔 코드로 PR 다시 시도 · {write_text(rows)}",
-            files=rows,
-            summary=summary,
-            attempts=1,
+            text=f"작성해 둔 코드로 PR 다시 시도 · {write_text(draft.rows)}",
+            files=draft.rows,
+            summary=draft.summary,
+            attempts=draft.attempts,
         )
-        await _open_and_review(svc, job, llm, picks, originals, contents, rows, summary)
+        await _open(svc, job, draft)
         return
 
     # 1. 읽기
@@ -700,8 +697,6 @@ async def _run(svc: PlanningService, job: Job) -> None:
     if not contents:
         raise CoderStop("failed", "바뀐 내용이 없음", "code.write", "바뀐 파일 0개")
     rows = file_rows(originals, contents, reasons)
-    draft = Draft(job.connection, picks, originals, contents, rows, summary)
-    _drafts(svc)[job.task_id] = draft
     if total_lines(rows) > MAX_TOTAL_LINES:
         raise CoderStop(
             "waiting_human",
@@ -714,57 +709,66 @@ async def _run(svc: PlanningService, job: Job) -> None:
         job, "writing", point="code.write", text=write_text(rows), files=rows, attempts=1
     )
 
-    await _open_and_review(svc, job, llm, picks, originals, contents, rows, summary)
+    # 4. 리뷰 → 불일치면 한 번 고쳐 다시 리뷰 (PR 전)
+    draft = Draft(job.connection, picks, originals, contents, rows, summary)
+    draft = await _review(svc, job, llm, draft)
+    _drafts(svc)[job.task_id] = draft
+
+    # 5. 마지막 결과만 커밋 하나로 PR
+    await _open(svc, job, draft)
 
 
-async def _open_and_review(
-    svc: PlanningService,
-    job: Job,
-    llm: Any,
-    picks: list[FilePick],
-    originals: dict[str, str],
-    contents: dict[str, str],
-    rows: list[CodingFile],
-    summary: str | None,
-) -> None:
-    # 4. 커밋·PR (관문 generate_pr 뒤). 올라가면 작성해 둔 코드는 지운다 (그 뒤는 PR에서)
-    if not await svc.coding_open(job, contents, rows, pr_body(job, rows, summary or "")):
-        return
-    drop_draft(svc, job.task_id)
-    picks = [p for p in picks if p.path in contents]
-    reasons = {r.path: r.reason for r in rows}
-
-    # 5. 리뷰 → 불일치면 한 번 고친다
-    attempts = 1
+async def _review(svc: PlanningService, job: Job, llm: Any, d: Draft) -> Draft:
+    """완료 기준으로 리뷰한다. 불일치면 짚은 파일만 고쳐 다시 리뷰 (모두 PR 전, 커밋 없음).
+    두 번째도 불일치거나 고친 게 없으면 그대로 돌려준다 (PR 뒤 사람 확인으로 간다)."""
+    reasons = {r.path: r.reason for r in d.rows}
+    d.picks = [p for p in d.picks if p.path in d.contents]
     while True:
         await svc.coding_step(job, "reviewing")
         diffs = [
-            {"path": p, "diff": unified(p, originals.get(p, ""), c)} for p, c in contents.items()
+            {"path": p, "diff": unified(p, d.originals.get(p, ""), c)}
+            for p, c in d.contents.items()
         ]
         review = await _ask(
             llm, "리뷰", REVIEW_PROMPT, CodeReview, {**_base(job), "diffs": diffs}, job.ctx
         )
-        notes = [" ".join(n.split())[:200] for n in review.notes if str(n).strip()][:MAX_NOTES]
-        if not await svc.coding_review(job, review.verdict, notes):
-            return
-        attempts += 1
-        await svc.coding_step(job, "writing", attempts=attempts)
+        d.notes = [" ".join(n.split())[:200] for n in review.notes if str(n).strip()][:MAX_NOTES]
+        d.verdicts.append(review.verdict)
+        if review.verdict == "통과" or d.attempts >= MAX_ATTEMPTS:
+            return d
+        d.attempts += 1
+        await svc.coding_step(job, "writing", attempts=d.attempts)
         # 리뷰가 짚은 파일만 다시 쓴다 (짚은 게 없으면 전부, 새로 짚은 파일은 더한다)
-        targets = await _fix_targets(job, picks, review.fix_files, notes, originals)
-        picks += [t for t in targets if t not in picks]
-        current = {t.path: contents.get(t.path, originals.get(t.path, "")) for t in targets}
-        fixed, fix_reasons = await _write_all(llm, job, targets, current, notes)
+        targets = await _fix_targets(job, d.picks, review.fix_files, d.notes, d.originals)
+        d.picks += [t for t in targets if t not in d.picks]
+        current = {t.path: d.contents.get(t.path, d.originals.get(t.path, "")) for t in targets}
+        fixed, fix_reasons = await _write_all(llm, job, targets, current, d.notes)
         changed = {p: c for p, c in fixed.items() if c != current[p]}
         if not changed:
-            raise CoderStop("waiting_human", "리뷰 지적을 반영한 수정이 없음 → 사람 확인")
-        contents.update(changed)
+            return d
+        d.contents.update(changed)
         reasons.update({p: fix_reasons[p] for p in changed})
-        rows = file_rows(originals, contents, reasons)
-        if total_lines(rows) > MAX_TOTAL_LINES:
+        d.rows = file_rows(d.originals, d.contents, reasons)
+        if total_lines(d.rows) > MAX_TOTAL_LINES:
             raise CoderStop(
                 "waiting_human",
-                f"수정 뒤 바뀐 줄 {total_lines(rows)}줄 > {MAX_TOTAL_LINES}줄 → 사람 확인",
+                f"수정 뒤 바뀐 줄 {total_lines(d.rows)}줄 > {MAX_TOTAL_LINES}줄"
+                " → 사람 확인 (PR 없음)",
             )
-        await svc.coding_step(job, "writing", point="code.write", text=write_text(rows), files=rows)
-        if not await svc.coding_fix(job, changed, rows):
-            return
+        await svc.coding_step(
+            job,
+            "writing",
+            point="code.write",
+            text=f"리뷰 지적 반영 · {write_text(d.rows)}",
+            files=d.rows,
+        )
+
+
+async def _open(svc: PlanningService, job: Job, d: Draft) -> None:
+    """관문 generate_pr 뒤 커밋 하나로 PR을 열고 리뷰 결과를 PR에 남긴다 (통과면 자동 머지)."""
+    if not await svc.coding_open(job, d.contents, d.rows, pr_body(job, d.rows, d.summary or "")):
+        return
+    drop_draft(svc, job.task_id)
+    verdict = d.verdicts[-1] if d.verdicts else "불일치"
+    if await svc.coding_review(job, verdict, d.notes, earlier=d.verdicts[:-1]):
+        raise CoderStop("waiting_human", "리뷰 불일치 → 사람 확인")

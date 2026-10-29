@@ -244,13 +244,14 @@ def test_review_mismatch_then_one_fix_then_pass(service: PlanningService, adapte
     assert c.status == "merged" and c.attempts == 2
     pr = next(p for p in service.state.prs if p.id == c.pr)
     assert pr.reviews == ["불일치", "통과"] and pr.merged
-    assert adapter.writes == [("open_change", 1), ("update_change", 1), ("merge_change", 1)]
+    # 리뷰·수정은 PR 전에 끝내고 마지막 결과만 커밋 하나로 올린다
+    assert adapter.writes == [("open_change", 1), ("merge_change", 1)]
     assert adapter.contents(1) == {BANNER: BANNER_FIX}
-    assert "code_write" in [g.action for g in service.gate_calls]
+    assert "code_write" not in [g.action for g in service.gate_calls]
     second = [x for x in fake.calls if x[0] == "FileWrite"][1]
     assert second[2]["review_notes"] == ["C2 모바일 문구가 없다"]
     assert second[2]["current"] == BANNER_NEW  # 지난 작성본 위에서 고친다
-    assert _points(service).count("code.review") == 2
+    assert _points(service).count("code.review") == 1
 
 
 def test_review_mismatch_twice_waits_in_queue(service: PlanningService, adapter) -> None:
@@ -527,7 +528,7 @@ def test_edits_are_used_and_fix_only_flagged_files(service: PlanningService, ada
 
 def test_cancel_running_task_and_close_open_pr(service: PlanningService, adapter) -> None:
     """중단: 돌던 실행을 멈추고, 열린 PR은 닫는다. 머지된 작업은 중단하지 않는다."""
-    # 1) 리뷰 직전에서 멈춰 둔 작업: PR이 열린 상태로 중단 → PR 닫힘
+    # 1) 리뷰 중에 중단: 리뷰는 PR 전이라 PR 없이 멈춘다
     gate = asyncio.Event()
 
     class SlowReview(FakeLLM):
@@ -554,12 +555,21 @@ def test_cancel_running_task_and_close_open_pr(service: PlanningService, adapter
     out = run(flow())
     task = _task(service)
     assert out.outcome == "canceled" and task.coding.status == "canceled" and task.state == "중단"
-    pr = next(p for p in service.state.prs if p.task == "T-D1")
-    assert pr.closed and not pr.merged and ("close_change", pr.vcs_number) in adapter.writes
-    assert "vcs.closed" in _points(service)
+    assert not any(p.task == "T-D1" for p in service.state.prs) and adapter.writes == []
     # 2) 이미 중단된 작업은 다시 중단하지 않는다
     with pytest.raises(ActionError):
         run(service.cancel_dev_task("T-D1"))
+
+    # 3) 리뷰 불일치 두 번으로 PR이 열린 채 사람 확인 대기 → 중단하면 PR을 닫는다
+    mismatch = CodeReview(verdict="불일치", notes=["아직 아님"])
+    coder.set_llm(FakeLLM(reviews=[mismatch, mismatch]))
+    run(_go(service))
+    task = _task(service, "T-D2")
+    assert task.coding.status == "waiting_human" and task.coding.pr
+    run(service.cancel_dev_task("T-D2"))
+    pr = next(p for p in service.state.prs if p.task == "T-D2")
+    assert pr.closed and not pr.merged and ("close_change", pr.vcs_number) in adapter.writes
+    assert "vcs.closed" in _points(service)
 
 
 # ---------------------------------------------------------------- 파일 확정·리뷰 추가 파일

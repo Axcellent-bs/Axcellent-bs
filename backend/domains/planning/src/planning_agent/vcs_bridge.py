@@ -203,7 +203,8 @@ async def merge_pr(pr: PR, connection_id: str | None = None) -> Note | None:
     if pr.vcs_number is None:
         return Note(False, "vcs.merge_failed", f"{pr.id} 형상관리 변경 번호가 없어 병합하지 않음")
     try:
-        await adapter.merge_change(pr.vcs_number)
+        # 리뷰·수정을 PR 전에 끝내 PR 하나가 커밋 하나다. 이력이 그대로 남는 merge commit으로 합친다
+        await adapter.merge_change(pr.vcs_number, method="merge")
     except VcsError as exc:
         # 앞선 시도에서 병합만 되고 상태 반영이 버려졌으면 이미 병합된 것으로 본다
         if exc.code != "conflict" or not await _already_merged(adapter, pr.vcs_number):
