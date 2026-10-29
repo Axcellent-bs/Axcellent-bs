@@ -114,7 +114,8 @@ class IncidentKpi(AxModel):
 
 class KpiSummaryOutput(AxModel):
     incidents: list[IncidentKpi] = Field(default_factory=list)
-    auto_handled_rate: float = Field(ge=0, le=1)
+    # 사건이 0건이면 셀 것이 없어 None (#40)
+    auto_handled_rate: float | None = Field(default=None, ge=0, le=1)
     grade_counts: dict[str, int] = Field(default_factory=dict)
     blocked_counts: dict[str, int] = Field(default_factory=dict)
     escalation_count: int = Field(ge=0)

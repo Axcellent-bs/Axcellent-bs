@@ -45,7 +45,7 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
   - detected_at: 사건의 첫 로그 시각
   - recovered_at: `incident.resolved` 발행 → 없으면 `verify_recovery` 완료(근거에 "복구 여부 미확인(verify 완료 기준)") → 없으면 None
   - resolved_notice_at: 두 번째로 완료된 `publish_notice`. mttr_seconds = recovered_at − detected_at
-  - used_memory: `memory_referenced` 로그 유무. auto_handled_rate: `escalated` 없는 사건 비율
+  - used_memory: `memory_referenced` 로그 유무. auto_handled_rate: `escalated` 없는 사건 비율 (사건 0건이면 null)
   - grade_counts(`execute_decided`), blocked_counts(`rejected` 사유별), escalation_count(`escalated`)
 - 값을 정할 수 없으면 None·0으로 두고 `evidence.data_summary`에 "확인할 수 없음" 사유를 남긴다. 지금은 `execute_decided`·`rejected`·`escalated`를 쓰는 곳이 없어 실제 모드에서 이 셋은 0이다.
 - LLM은 1차·2차 MTTR 비교 한 줄만 쓴다(`evidence.data_summary` 첫 줄). 숫자가 어긋나면 고정 문장.
