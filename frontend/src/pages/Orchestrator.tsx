@@ -31,6 +31,8 @@ const STEP_KO: Record<string, string> = {
 const NOTE_KO: Record<string, string> = {
   undetermined: "원인을 특정하지 못함", requested: "보상을 요청함", card_created: "기록을 남김",
   listed: "인사 기록에서 확인함", partial: "일부만 확인함", candidate: "후보 기록으로 저장함 (사람 확인 대기)",
+  found: "비슷한 과거 사건을 찾음", none: "비슷한 과거 사건 없음", recorded: "해결 내용을 남김", duplicate: "이미 남긴 해결 내용",
+  no_card: "해결 내용을 남길 기록이 없음",
   "failed: gate_rejected": "안전 관문이 막음", recovered: "복구됨", not_recovered: "아직 복구 안 됨",
 };
 const STATUS_SAY: Record<string, string> = { degraded: "사람 확인 필요", resolved: "해결됨", open: "AI가 처리 중" };
@@ -174,7 +176,7 @@ function SimilarCases({ incident }: { incident: Incident }) {
               <p className="flex flex-wrap items-center gap-2">
                 <span className="font-medium">{c.title}</span>
                 <span className="chip bg-ink-100 text-ink-700 tabular-nums">유사도 {Math.round(c.similarity * 100)}%</span>
-                <span className={`chip ${c.resolved ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{c.resolved ? "해결 기록 있음" : "해결 기록 없음"}</span>
+                <span className={`chip ${c.resolution?.outcome === "resolved" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{c.resolution ? OUTCOME_KO[c.resolution.outcome] ?? c.resolution.outcome : "해결 기록 없음"}</span>
               </p>
               {c.resolution && (
                 <dl className="mt-2 grid grid-cols-[4rem_1fr] gap-x-3 gap-y-1 text-xs text-ink-700">
