@@ -6,6 +6,7 @@ import type { Conversation, Draft, Message, Source } from "@/lib/types";
 import { FindingList, ValidationBadge } from "../Findings";
 import { StatusChip } from "./bits";
 import { ActivityLog } from "./ActivityLog";
+import { ClaimIntake } from "./ClaimIntake";
 import { ReceiptAnalysisCard } from "./ReceiptAnalysisCard";
 
 /** 가장 가까운 근거 정책의 유사도가 이 값 미만이면 "근거 정책 부족"으로 알린다.
@@ -62,7 +63,7 @@ function SourceItem({ s }: { s: Source }) {
   );
 }
 
-export function CopilotPanel({ conv, onUseDraft, onRejectDraft }: { conv: Conversation; onUseDraft: (d: Draft) => void; onRejectDraft: (d: Draft) => void }) {
+export function CopilotPanel({ conv, onUseDraft, onRejectDraft, onClaimCreated }: { conv: Conversation; onUseDraft: (d: Draft) => void; onRejectDraft: (d: Draft) => void; onClaimCreated: () => void }) {
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
   const last: Message | undefined = [...conv.messages].reverse().find((m) => m.role === "customer" && m.analysis);
   const a = last?.analysis;
@@ -105,6 +106,7 @@ export function CopilotPanel({ conv, onUseDraft, onRejectDraft }: { conv: Conver
               </Link>
             ))}
             {!conv.claims.length && <p className="text-xs text-ink-500">이 주문에 접수된 클레임이 없습니다.</p>}
+            <ClaimIntake key={conv.id} conv={conv} onCreated={onClaimCreated} />
           </div>
         </section>
       )}

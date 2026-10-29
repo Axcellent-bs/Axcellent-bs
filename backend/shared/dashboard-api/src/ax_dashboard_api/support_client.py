@@ -52,6 +52,8 @@ def unwrap(result: AgentResult) -> dict[str, Any]:
         findings = result.output.get("validation", {}).get("findings", [])
         message = findings[0]["message"] if findings else "답변 가드에 걸렸다"
         raise ApiError(422, "REPLY_BLOCKED", message)
+    if outcome == "duplicate_claim":
+        raise ApiError(409, "DUPLICATE_CLAIM", str(result.output.get("message", "이미 접수됐다")))
     if outcome == "invalid_state":
         raise ApiError(
             409, "INVALID_STATE", str(result.output.get("message", "현재 상태에서는 할 수 없다"))

@@ -501,6 +501,36 @@ class StatusBody(BaseModel):
     status: ConversationStatus
 
 
+class ClaimIntakeItem(BaseModel):
+    order_item_id: str = Field(min_length=1)
+    qty: int = Field(ge=1)
+
+
+class ClaimIntakeBody(BaseModel):
+    """상담 콘솔에서 상담원이 확인해 접수하는 클레임. 구매자·주문은 문의에서 읽는다."""
+
+    type: Literal["cancel", "return", "exchange"]
+    reason: ClaimReason
+    items: list[ClaimIntakeItem] | None = None  # 없으면 주문 전체
+    unsealed: bool = False
+    evidence_count: int = Field(default=0, ge=0, le=20)
+    description: str = Field(default="", max_length=500)
+
+
+class ClaimSuggestion(BaseModel):
+    """AI가 고객의 마지막 메시지에서 읽은 요청과, 접수했을 때 규칙이 낼 판정 (접수하지 않는다)."""
+
+    request_kind: Literal["refund", "exchange", "cancel", "event_inquiry", "other"]
+    reason: ClaimReason | None = None
+    claim_type: Literal["cancel", "return", "exchange"] | None = None
+    items: list[str] = Field(default_factory=list)
+    unmatched_items: list[str] = Field(default_factory=list)
+    source: Literal["llm", "rules"] = "llm"
+    notes: list[str] = Field(default_factory=list)
+    preview: dict[str, Any] | None = None
+    suggested_items: list[ClaimIntakeItem] | None = None
+
+
 class NoteBody(BaseModel):
     note: str = ""
 

@@ -44,6 +44,8 @@ from ax_dashboard_api.envelope import ApiError, is_mock, ok, or_unavailable, req
 from ax_dashboard_api.schemas import (
     AgentMessageBody,
     CandidateDecisionBody,
+    ClaimIntakeBody,
+    ClaimSuggestion,
     Conversation,
     ConversationCreate,
     ConversationListItem,
@@ -326,6 +328,46 @@ async def receipt_analysis(conversation_id: int, body: ReceiptAnalysisBody) -> d
     if "check" not in out:  # 주문이 없는 문의 등: 분석 결과 없이 사유만 돌아온다
         raise ApiError(409, "NO_ORDER", str(out.get("message", "영수증을 대조할 수 없다")))
     return ok(out)
+
+
+@router.post("/conversations/{conversation_id}/claim-suggestion")
+async def claim_suggestion(conversation_id: int) -> dict:
+    """고객의 마지막 메시지에서 환불·교환·취소 요청을 읽어 접수 입력을 제안한다(접수 안 함)."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "클레임 제안은 실제 모드에서만 된다")
+    out = await support_client.call("analyze_claim_request", {"inquiry_id": conversation_id})
+    if "request_kind" not in out:  # 고객 메시지가 없는 문의 등: 분석 결과 없이 사유만 돌아온다
+        raise ApiError(409, "NO_REQUEST", str(out.get("message", "분석할 요청이 없다")))
+    suggested = out.get("suggested_claim") or {}
+    return ok(ClaimSuggestion.model_validate({**out, "suggested_items": suggested.get("items")}))
+
+
+@router.post("/conversations/{conversation_id}/claims", status_code=201)
+async def create_conversation_claim(conversation_id: int, body: ClaimIntakeBody) -> dict:
+    """상담원이 확인한 클레임을 이 문의에서 접수한다. 구매자·주문은 문의에서 읽는다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "클레임 접수는 실제 모드에서만 된다")
+    inquiry = await support_client.call("get_inquiry", {"inquiry_id": conversation_id})
+    order_id, user_id = inquiry.get("order_id"), inquiry.get("user_id")
+    if not order_id or user_id is None:
+        raise ApiError(409, "NO_ORDER", "문의에 주문이 연결되어 있지 않아 클레임을 접수할 수 없다")
+    out = await support_client.call(
+        "create_claim",
+        {
+            "buyer_id": claim_mapping.buyer_id_for(user_id),
+            "customer_name": inquiry.get("customer_name") or f"고객 {user_id}",
+            "order_id": str(order_id),
+            "type": body.type,
+            "reason": body.reason,
+            "items": [i.model_dump() for i in body.items] if body.items else None,
+            "unsealed": body.unsealed,
+            "evidence_count": body.evidence_count,
+            "conversation_id": conversation_id,
+        },
+        {"description": body.description},
+        target=f"inquiry:{conversation_id}:order:{order_id}:{body.type}",
+    )
+    return ok(claim_mapping.to_detail(out))
 
 
 @router.post("/conversations/{conversation_id}/agent-messages", status_code=201)

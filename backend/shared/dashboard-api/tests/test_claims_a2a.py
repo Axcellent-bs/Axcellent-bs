@@ -125,6 +125,7 @@ class Fake:
         self.sent: list[AgentRequest] = []
         self.outputs: dict[str, dict[str, Any]] = {}
         self.outcome: str | None = None
+        self.outcomes: dict[str, str] = {}  # skill별 결과 (없으면 `outcome`)
 
     async def __call__(self, target: str, req: AgentRequest) -> AgentResult:
         assert target == "support"
@@ -132,7 +133,7 @@ class Fake:
         return AgentResult(
             meta=req.meta,
             status=TaskStatus.COMPLETED,
-            outcome=self.outcome,
+            outcome=self.outcomes.get(req.skill, self.outcome),
             output=self.outputs.get(req.skill, {}),
         )
 
@@ -469,3 +470,92 @@ def test_conversation_reads_linked_claims_from_the_claims_service(
     data = client.get(BASE + "/conversations/7").json()["data"]
     assert [c["id"] for c in data["claims"]] == [1]
     assert {r.skill for r in fake.sent} == {"get_inquiry", "list_claims"}
+
+
+# ---------------------------------------------------------------- 상담 콘솔 클레임 접수
+INQUIRY = {
+    "id": 7,
+    "user_id": 1,
+    "customer_name": "김하늘",
+    "subject": "찢어졌어요",
+    "status": "open",
+    "order_id": "ord_0002",
+    "updated_at": "2026-10-22T00:00:00Z",
+    "preview": "p",
+    "awaiting_reply": True,
+    "messages": [],
+}
+
+
+def test_claim_suggestion_reads_the_request_without_filing_it(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.outputs["analyze_claim_request"] = {
+        "request_kind": "refund",
+        "reason": "defect",
+        "claim_type": "return",
+        "items": ["고양이의 하루"],
+        "unmatched_items": [],
+        "source": "llm",
+        "notes": [],
+        "preview": {"outcome": "needs_review", "expected_refund": 33000, "reasons": []},
+        "suggested_claim": {
+            "buyer_id": "buy_0001",
+            "items": [{"order_item_id": "itm_1", "qty": 1}],
+        },
+    }
+    data = client.post(BASE + "/conversations/7/claim-suggestion").json()["data"]
+    assert (data["claim_type"], data["reason"]) == ("return", "defect")
+    assert data["preview"]["expected_refund"] == 33000
+    assert data["suggested_items"] == [{"order_item_id": "itm_1", "qty": 1}]
+    assert [r.skill for r in fake.sent] == ["analyze_claim_request"]  # 접수하지 않는다
+    assert fake.sent[0].input == {"inquiry_id": 7}
+
+
+def test_claim_suggestion_without_a_customer_message_is_a_conflict(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.outputs["analyze_claim_request"] = {"message": "분석할 고객 메시지가 없다"}
+    response = client.post(BASE + "/conversations/7/claim-suggestion")
+    assert response.status_code == 409 and response.json()["error"]["code"] == "NO_REQUEST"
+
+
+def test_console_files_a_claim_for_the_inquiry_order_and_buyer(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.outputs["get_inquiry"] = INQUIRY
+    fake.outputs["create_claim"] = claim(status="needs_review", conversation_id=7)
+    response = client.post(
+        BASE + "/conversations/7/claims",
+        json={"type": "return", "reason": "defect", "evidence_count": 2, "description": "찢어짐"},
+    )
+    assert response.status_code == 201
+    assert response.json()["data"]["conversation_id"] == 7
+    create = next(r for r in fake.sent if r.skill == "create_claim")
+    # 구매자·주문은 화면이 정하지 않고 문의에서 읽는다
+    assert create.input["buyer_id"] == "buy_0001" and create.input["order_id"] == "ord_0002"
+    assert create.input["conversation_id"] == 7 and create.input["customer_name"] == "김하늘"
+    assert create.untrusted == {"description": "찢어짐"}  # 고객·상담원 글은 untrusted로만
+    assert create.meta.idempotency_key.endswith(":create_claim:inquiry:7:order:ord_0002:return")
+
+
+def test_console_cannot_file_a_claim_for_an_inquiry_without_an_order(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.outputs["get_inquiry"] = {**INQUIRY, "order_id": None}
+    response = client.post(
+        BASE + "/conversations/7/claims", json={"type": "cancel", "reason": "change_of_mind"}
+    )
+    assert response.status_code == 409 and response.json()["error"]["code"] == "NO_ORDER"
+    assert [r.skill for r in fake.sent] == ["get_inquiry"]
+
+
+def test_a_duplicate_claim_is_reported_not_swallowed(client: TestClient, fake: Fake) -> None:
+    fake.outputs["get_inquiry"] = INQUIRY
+    fake.outputs["create_claim"] = {"message": "같은 품목에 진행 중인 클레임이 있다"}
+    fake.outcomes["create_claim"] = "duplicate_claim"
+    response = client.post(
+        BASE + "/conversations/7/claims", json={"type": "cancel", "reason": "other"}
+    )
+    assert response.status_code == 409 and response.json()["error"]["code"] == "DUPLICATE_CLAIM"
+    assert [r.skill for r in fake.sent] == ["get_inquiry", "create_claim"]
