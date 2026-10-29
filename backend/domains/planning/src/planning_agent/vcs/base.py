@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import heapq
 import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -215,6 +216,119 @@ class Branch:
     behind: int | None = None
 
 
+# ---- 커밋 그래프 (SourceTree·`git log --graph`처럼 레포 상태를 한눈에)
+
+GRAPH_LIMIT = 200
+GRAPH_MAX = 500
+# 그래프에 올릴 브랜치 수 (GitHub는 브랜치마다 커밋 목록을 한 번씩 부른다)
+GRAPH_BRANCHES = 30
+GRAPH_MESSAGE_CHARS = 500
+
+
+@dataclass(frozen=True)
+class GraphCommit:
+    sha: str
+    parents: tuple[str, ...] = ()
+    message: str = ""
+    author: str = ""
+    at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class GraphPr:
+    """그래프 위 PR 꼬리표: head 끝 커밋·머지 커밋 → PR 번호."""
+
+    number: int
+    title: str
+    state: ChangeState
+    branch: str
+    head_sha: str = ""
+    merge_sha: str = ""
+
+
+@dataclass(frozen=True)
+class GraphBranch:
+    name: str
+    sha: str = ""
+    default: bool = False
+
+
+@dataclass(frozen=True)
+class Graph:
+    """커밋 그래프. commits는 최신이 먼저이고 자식이 늘 부모보다 앞이다."""
+
+    commits: tuple[GraphCommit, ...] = ()
+    # 그래프에 올린 브랜치의 끝 커밋 (이름 → sha)
+    heads: dict[str, str] = field(default_factory=dict)
+    # 고를 수 있는 브랜치 전체 (필터용)
+    branches: tuple[GraphBranch, ...] = ()
+    prs: tuple[GraphPr, ...] = ()
+    # 한도(커밋 수·브랜치 수)에 걸려 뒤를 뺐다
+    truncated: bool = False
+
+
+@dataclass(frozen=True)
+class CommitDetail:
+    sha: str
+    parents: tuple[str, ...] = ()
+    message: str = ""
+    author: str = ""
+    at: datetime | None = None
+    url: str | None = None
+    files: tuple[FileDiff, ...] = ()
+    total_files: int = 0
+
+
+def order_commits(commits: list[GraphCommit]) -> list[GraphCommit]:
+    """최신 순으로 늘어놓되 자식이 늘 부모보다 앞에 오게 한다 (시계가 어긋나도).
+
+    같은 시각이면 나중에 넣은 것이 먼저다. 목록에 없는 부모는 무시한다."""
+    if not commits:
+        return []
+    seq = {c.sha: i for i, c in enumerate(commits)}
+    by = {c.sha: c for c in commits}
+
+    def key(c: GraphCommit) -> tuple[float, int]:
+        stamp = c.at.timestamp() if c.at is not None else float("-inf")
+        return (-stamp, -seq[c.sha])
+
+    children: dict[str, int] = dict.fromkeys(by, 0)
+    for c in by.values():
+        for p in set(c.parents):
+            if p in children:
+                children[p] += 1
+
+    ready = [(key(c), c.sha) for c in by.values() if children[c.sha] == 0]
+    heapq.heapify(ready)
+    out: list[GraphCommit] = []
+    while ready:
+        _, sha = heapq.heappop(ready)
+        c = by[sha]
+        out.append(c)
+        for p in set(c.parents):
+            if p in children:
+                children[p] -= 1
+                if children[p] == 0:
+                    heapq.heappush(ready, (key(by[p]), p))
+    if len(out) < len(by):  # 고리가 있으면(있을 수 없지만) 남은 것을 뒤에 붙인다
+        seen = {c.sha for c in out}
+        out += sorted((c for c in by.values() if c.sha not in seen), key=key)
+    return out
+
+
+def reachable(commits: list[GraphCommit], tips: list[str]) -> set[str]:
+    by = {c.sha: c for c in commits}
+    seen: set[str] = set()
+    stack = [t for t in tips if t in by]
+    while stack:
+        sha = stack.pop()
+        if sha in seen:
+            continue
+        seen.add(sha)
+        stack.extend(p for p in by[sha].parents if p in by and p not in seen)
+    return seen
+
+
 def cap_diff(number: int, files: list[FileDiff]) -> Diff:
     """diff 크기를 묶는다: 파일 300개, 파일당 2만 자, 합 30만 자. 넘으면 잘라 truncated."""
     out: list[FileDiff] = []
@@ -356,6 +470,16 @@ class VcsAdapter(Protocol):
         """브랜치 지우기. 기준·기본 브랜치는 invalid."""
         ...
 
+    async def list_graph(
+        self, branches: list[str] | None = None, limit: int = GRAPH_LIMIT
+    ) -> Graph:
+        """커밋 그래프 (고른 브랜치에서 닿는 커밋, 최신 순 limit개). None이면 브랜치 전체."""
+        ...
+
+    async def get_commit(self, sha: str) -> CommitDetail:
+        """커밋 하나의 전체 메시지·부모·바뀐 파일 (+/−만, diff 글은 빼도 된다)."""
+        ...
+
 
 # ---------------------------------------------------------------- 공용 도우미
 
@@ -393,6 +517,16 @@ def check_branch(branch: str) -> str:
     if ".." in branch or " " in branch:
         raise VcsError("invalid", f"쓸 수 없는 브랜치 이름: {branch}")
     return branch
+
+
+_SHA = re.compile(r"^[0-9A-Za-z]{4,64}$")
+
+
+def check_sha(sha: str) -> str:
+    s = (sha or "").strip()
+    if not _SHA.match(s):
+        raise VcsError("invalid", f"커밋 sha가 아니다: {sha[:80]}")
+    return s
 
 
 def check_path(path: str) -> str:

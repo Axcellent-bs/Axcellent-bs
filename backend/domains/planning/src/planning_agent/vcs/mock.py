@@ -19,6 +19,8 @@ from planning_agent.vcs.base import (
     CHANGE_LIST_LIMIT,
     COMMENT_LIMIT,
     COMMIT_LIMIT,
+    GRAPH_LIMIT,
+    GRAPH_MAX,
     LIST_LIMIT,
     Branch,
     Capabilities,
@@ -29,22 +31,33 @@ from planning_agent.vcs.base import (
     Checks,
     Comment,
     Commit,
+    CommitDetail,
     Diff,
     FileDiff,
+    Graph,
+    GraphBranch,
+    GraphCommit,
+    GraphPr,
     OpenedChange,
     TraceMeta,
     VcsError,
     cap_diff,
     check_branch,
     check_path,
+    check_sha,
     combine_checks,
     decode_text,
     match_query,
+    order_commits,
     parse_trace,
+    reachable,
     state_of,
 )
 
 MERGE_METHODS = ("merge", "squash", "rebase")
+# 커밋 그래프의 첫 커밋 (기준 브랜치 시작점)
+ROOT_SHA = "a" * 40
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 @dataclass
@@ -482,3 +495,118 @@ class MockVcsAdapter:
         self._gone.add(name)
         self._branches.discard(name)
         self.writes.append(("delete_branch", 0))
+
+    # ---- 커밋 그래프 (변경·브랜치로 히스토리를 지어 낸다)
+
+    @staticmethod
+    def merge_sha(number: int) -> str:
+        return f"{number:04d}ffff".ljust(40, "0")
+
+    def _history(self) -> tuple[list[GraphCommit], dict[str, str], dict[str, int]]:
+        """(만든 순 커밋, 브랜치 끝, 커밋 → 변경 번호). 브랜치는 만든 때 기준 끝에서 갈라지고,
+        머지하면 머지 커밋(부모 둘)이 기준 쪽에 생긴다."""
+        commits = [GraphCommit(sha=ROOT_SHA, message="init", author="dev-user")]
+        owner: dict[str, int] = {}
+        tips: dict[str, str] = {self.base_branch: ROOT_SHA}
+        events: list[tuple[datetime, int, int]] = []
+        for n, e in self._entries.items():
+            events.append((e.created_at or _EPOCH, 0, n))
+            if e.change.merged:
+                events.append((e.change.merged_at or e.created_at or _EPOCH, 1, n))
+        for _, kind, n in sorted(events):
+            e = self._entries[n]
+            c = e.change
+            if kind == 0:
+                parent = tips.get(c.base, tips[self.base_branch])
+                for cm in e.commits:
+                    commits.append(
+                        GraphCommit(
+                            sha=cm.sha,
+                            parents=(parent,),
+                            message=cm.message,
+                            author=cm.author,
+                            at=cm.at,
+                        )
+                    )
+                    owner[cm.sha] = n
+                    parent = cm.sha
+                tips[c.branch] = parent
+                continue
+            into = tips.get(c.base, tips[self.base_branch])
+            side = tips.get(c.branch)
+            sha = self.merge_sha(n)
+            commits.append(
+                GraphCommit(
+                    sha=sha,
+                    parents=(into, side) if side and side != into else (into,),
+                    message=f"Merge pull request #{n} from {c.branch}",
+                    author=e.author,
+                    at=c.merged_at,
+                )
+            )
+            owner[sha] = n
+            tips[c.base] = sha
+        heads = {
+            name: sha
+            for name, sha in tips.items()
+            if name == self.base_branch or name not in self._gone
+        }
+        return commits, heads, owner
+
+    async def list_graph(
+        self, branches: list[str] | None = None, limit: int = GRAPH_LIMIT
+    ) -> Graph:
+        limit = max(1, min(int(limit), GRAPH_MAX))
+        commits, heads, _ = self._history()
+        names = [self.base_branch, *(n for n in heads if n != self.base_branch)]
+        chosen = set(branches or ())
+        picked = [n for n in names if n in chosen] if chosen else names
+        keep = reachable(commits, [heads[n] for n in picked])
+        ordered = order_commits([c for c in commits if c.sha in keep])
+        prs = tuple(
+            GraphPr(
+                number=n,
+                title=e.change.title,
+                state=state_of(e.change.merged, e.closed),
+                branch=e.change.branch,
+                head_sha=e.commits[-1].sha if e.commits else "",
+                merge_sha=self.merge_sha(n) if e.change.merged else "",
+            )
+            for n, e in sorted(self._entries.items(), reverse=True)
+        )
+        return Graph(
+            commits=tuple(ordered[:limit]),
+            heads={n: heads[n] for n in picked},
+            branches=tuple(
+                GraphBranch(name=n, sha=heads[n], default=n == self.base_branch) for n in names
+            ),
+            prs=prs,
+            truncated=len(ordered) > limit,
+        )
+
+    async def get_commit(self, sha: str) -> CommitDetail:
+        sha = check_sha(sha)
+        commits, _, owner = self._history()
+        c = next((x for x in commits if x.sha == sha), None)
+        if c is None:
+            raise VcsError("not_found", f"커밋이 없다: {sha}")
+        if sha in owner:
+            files = [
+                FileDiff(path=f.path, additions=f.additions, deletions=f.deletions)
+                for f in self._entries[owner[sha]].change.files
+            ]
+        else:  # 첫 커밋: 기준 브랜치 파일
+            files = [
+                FileDiff(path=p, status="added", additions=len(t.splitlines()))
+                for p, t in sorted(self._files.items())
+            ]
+        return CommitDetail(
+            sha=c.sha,
+            parents=c.parents,
+            message=c.message,
+            author=c.author,
+            at=c.at,
+            url=None,
+            files=tuple(files),
+            total_files=len(files),
+        )

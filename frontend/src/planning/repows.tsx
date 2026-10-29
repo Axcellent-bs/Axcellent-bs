@@ -1,10 +1,11 @@
 // 작업·PR 탭의 레포 작업 공간: 연결된 레포의 PR 게시판·PR 상세(대화·커밋·변경 파일)·브랜치.
 // 사람이 GitHub에 직접 올린 PR도 보이고, AI가 만든 PR은 내부 PR 화면으로 잇는다.
 // 화면 모양은 GitHub·GitLab의 PR 화면 순서를 따른다 (상태 탭 · 검색 · 줄 / 머리 · 버튼 · 탭 · 곁 칸).
-import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { Button, Modal, useDismiss, useToast } from '@dejafix/common-frontend'
 import type { Action, State as S } from './data'
-import { DEV_API, PlanningApiError, kst, repoApi, vcsApi, type MergeMethod, type RepoBranch, type RepoCheckState, type RepoFile, type RepoPr, type RepoPrDetail, type RepoPrState, type VcsConnection } from './api'
+import { DEV_API, PlanningApiError, kst, repoApi, vcsApi, type MergeMethod, type RepoBranch, type RepoCheckState, type RepoFile, type RepoGraph, type RepoGraphCommit, type RepoPr, type RepoPrDetail, type RepoPrState, type VcsConnection } from './api'
+import { layoutGraph, laneColor, type GraphRow } from './graphlayout'
 import { prSlug } from './links'
 import { Work } from './pages'
 
@@ -109,11 +110,11 @@ function LoadError({ error }: { error: unknown }) {
   return <div className="empty"><b>{code === 'NO_VCS' ? '연결된 레포 없음' : errText(error)}</b>{code === 'NO_VCS' && <span>개발 도구 연결</span>}</div>
 }
 
-// ---------------------------------------------------------------- 탭 틀: 작업 · 레포 PR · 브랜치
+// ---------------------------------------------------------------- 탭 틀: 작업 · 레포 PR · 브랜치 · 커밋 그래프
 
 export function PrsTab({ s, d, parts }: { s: S; d: Dispatch<Action>; parts: string[] }) {
   const [view, a, b] = parts
-  const mode = view === 'repo' ? 'repo' : view === 'branches' ? 'branches' : 'work'
+  const mode = view === 'repo' ? 'repo' : view === 'branches' ? 'branches' : view === 'graph' ? 'graph' : 'work'
   const [conns, conn, setConn] = useConnection()
   const repo = conns.find((c) => c.id === conn)
   return (
@@ -123,6 +124,7 @@ export function PrsTab({ s, d, parts }: { s: S; d: Dispatch<Action>; parts: stri
           <a href="#/work/prs" className={mode === 'work' ? 'on' : ''} aria-current={mode === 'work' ? 'page' : undefined}>작업</a>
           <a href={repoHref()} className={mode === 'repo' ? 'on' : ''} aria-current={mode === 'repo' ? 'page' : undefined}>레포 PR</a>
           <a href="#/work/prs/branches" className={mode === 'branches' ? 'on' : ''} aria-current={mode === 'branches' ? 'page' : undefined}>브랜치</a>
+          <a href={GRAPH_HREF} className={mode === 'graph' ? 'on' : ''} aria-current={mode === 'graph' ? 'page' : undefined}>커밋 그래프</a>
         </nav>
         {mode !== 'work' && conns.length > 1 && (
           <select className="select mono" value={conn} onChange={(e) => setConn(e.target.value)} aria-label="레포">
@@ -135,6 +137,7 @@ export function PrsTab({ s, d, parts }: { s: S; d: Dispatch<Action>; parts: stri
       {mode === 'repo' && !a && <Board key={conn} conn={conn} />}
       {mode === 'repo' && a && /^\d+$/.test(a) && <PrView key={`${conn}:${a}`} conn={conn} number={Number(a)} tab={b} />}
       {mode === 'branches' && <BranchTable key={conn} conn={conn} />}
+      {mode === 'graph' && <GraphView key={conn} conn={conn} sel={a && /^[0-9A-Za-z]{4,64}$/.test(a) ? a : undefined} />}
     </>
   )
 }
@@ -544,5 +547,277 @@ function BranchTable({ conn }: { conn: string }) {
       </div>
       {del && <Confirm title="브랜치 지우기" ok="지우기" danger busy={busy} onClose={() => setDel(null)} onOk={() => void remove(del)} rows={[['브랜치', <code>{del.name}</code>], ['PR', del.pr ? `#${del.pr.number} ${STATE_LABEL[del.pr.state]}` : '-'], ['앞섬', del.ahead ?? '-']]} />}
     </section>
+  )
+}
+
+// ---------------------------------------------------------------- 커밋 그래프 (SourceTree처럼: 줄 · 점 · 머지 선 · 브랜치·PR 꼬리표)
+
+const GRAPH_HREF = '#/work/prs/graph'
+const graphHref = (sha?: string) => (sha ? `${GRAPH_HREF}/${sha}` : GRAPH_HREF)
+const LANE = 14
+const ROW = 30
+const GRAPH_LIMITS = [100, 200, 500] as const
+const GRAPH_KEY = 'ax.repo.graph.limit'
+
+function readLimit(): number {
+  try {
+    const n = Number(localStorage.getItem(GRAPH_KEY))
+    return (GRAPH_LIMITS as readonly number[]).includes(n) ? n : 200
+  } catch { return 200 }
+}
+
+function GraphView({ conn, sel }: { conn: string; sel?: string }) {
+  const api = useMemo(() => repoApi(DEV_API, conn), [conn])
+  const [limit, setLimitState] = useState(readLimit)
+  const [picked, setPicked] = useState<string[] | null>(null) // null = 브랜치 전체
+  const g = useLoad(() => api.graph(picked, limit), [api, limit, picked?.join('\n') ?? '*'])
+  const setLimit = (n: number) => { setLimitState(n); try { localStorage.setItem(GRAPH_KEY, String(n)) } catch { /* 기억 못 해도 된다 */ } }
+  const data = g.data
+  const commits = useMemo(() => (Array.isArray(data?.commits) ? data.commits : []), [data])
+  const base = data?.base_branch ?? ''
+  const layout = useMemo(() => {
+    const heads = data?.heads ?? {}
+    const def = data?.branches?.find((b) => b.default)?.name
+    const reserve: [string, string][] = []
+    if (base && heads[base]) reserve.push([base, heads[base]])
+    if (def && def !== base && heads[def]) reserve.push([def, heads[def]])
+    return layoutGraph(commits, base, reserve)
+  }, [commits, data, base])
+  const bySha = useMemo(() => new Map(commits.map((c) => [c.sha, c])), [commits])
+
+  const open = (sha?: string) => { location.hash = graphHref(sha) }
+  useEffect(() => {
+    if (!sel) return
+    // 브랜치 고르기 창이 열려 있으면 Esc는 그 창만 닫는다
+    const on = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target instanceof HTMLInputElement) && !document.querySelector('.rg-pick-menu')) open() }
+    window.addEventListener('keydown', on)
+    return () => window.removeEventListener('keydown', on)
+  }, [sel])
+
+  const onRowKey = (e: ReactKeyboardEvent<HTMLTableRowElement>, sha: string) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(sha) }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      const next = (e.key === 'ArrowDown' ? e.currentTarget.nextElementSibling : e.currentTarget.previousElementSibling) as HTMLElement | null
+      next?.focus()
+    }
+  }
+
+  const branchCount = data?.branches?.length ?? 0
+  return (
+    <section className="rp-board rg">
+      <div className="rp-board-head">
+        <BranchPick branches={data?.branches ?? []} base={base} value={picked} onChange={setPicked} />
+        <div className="seg rg-limit" role="group" aria-label="커밋 수">
+          {GRAPH_LIMITS.map((n) => (
+            <button key={n} type="button" className={limit === n ? 'on' : ''} aria-pressed={limit === n} onClick={() => setLimit(n)}>{n}</button>
+          ))}
+        </div>
+        {data && (
+          <span className="rg-count">
+            <span>커밋 <b>{commits.length}</b></span>
+            <span>브랜치 <b>{picked ? `${data.selected.length}/${branchCount}` : branchCount}</b></span>
+            {data.truncated && <span className="tag tag-amber">한도까지</span>}
+          </span>
+        )}
+        <Button size="small" onClick={g.reload} disabled={g.loading} aria-label="새로 읽기">{g.loading && data ? '읽는 중' : '새로 읽기'}</Button>
+      </div>
+      {g.error ? <LoadError error={g.error} /> : !data ? <div className="empty"><b>읽는 중</b></div> : !commits.length ? <div className="empty"><b>커밋 없음</b></div> : (
+        <div className={sel ? 'rg-body rg-with-side' : 'rg-body'}>
+          <div className="rg-scroll">
+            <table className="rg-table" aria-label="커밋 그래프" aria-rowcount={commits.length}>
+              <thead>
+                <tr>
+                  <th className="rg-g" style={{ width: layout.width * LANE + 8 }}>그래프</th>
+                  <th>메시지</th>
+                  <th className="rg-author">작성자</th>
+                  <th className="rg-when">시각</th>
+                  <th className="rg-shacol">커밋</th>
+                </tr>
+              </thead>
+              <tbody>
+                {commits.map((c, i) => (
+                  <tr key={c.sha} tabIndex={0} className={sel === c.sha ? 'on' : undefined} aria-selected={sel === c.sha}
+                    onClick={() => open(sel === c.sha ? undefined : c.sha)} onKeyDown={(e) => onRowKey(e, c.sha)}>
+                    <td className="rg-g"><GraphCell row={layout.rows[i]} width={layout.width} c={c} head={c.refs.length > 0} /></td>
+                    <td className="rg-msg">
+                      <span className="rg-msg-in">
+                        <Labels c={c} base={base} />
+                        <span className="rg-text" title={c.message}>{c.message.split('\n')[0]}</span>
+                      </span>
+                    </td>
+                    <td className="rg-author">{c.author || '-'}</td>
+                    <td className="rg-when" title={kst(c.at)}>{ago(c.at)}</td>
+                    <td className="rg-shacol"><code className="rg-sha">{c.sha.slice(0, 7)}</code></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {sel && <CommitPanel key={sel} api={api} sha={sel} row={bySha.get(sel)} base={base} known={bySha} onPick={open} onClose={() => open()} />}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function GraphCell({ row, width, c, head }: { row?: GraphRow; width: number; c: RepoGraphCommit; head: boolean }) {
+  if (!row) return null
+  const w = width * LANE + 8
+  const x = (k: number) => 4 + k * LANE + LANE / 2
+  const ys = [0, ROW / 2, ROW]
+  const label = `${c.sha.slice(0, 7)} · ${row.merge ? '머지 커밋' : '커밋'} · 부모 ${c.parents.length}${c.refs.length ? ` · ${c.refs.join(', ')}` : ''}`
+  return (
+    <svg className="rg-svg" width={w} height={ROW} viewBox={`0 0 ${w} ${ROW}`} role="img" aria-label={label}>
+      {row.segs.map((s, i) => {
+        const x1 = x(s.a)
+        const x2 = x(s.b)
+        const y0 = ys[s.y0]
+        const y1 = ys[s.y1]
+        const m = (y0 + y1) / 2
+        const d = x1 === x2 ? `M${x1} ${y0}V${y1}` : `M${x1} ${y0}C${x1} ${m} ${x2} ${m} ${x2} ${y1}`
+        return <path key={i} d={d} className={`rg-c${s.c}`} />
+      })}
+      <circle cx={x(row.col)} cy={ROW / 2} r={head ? 5 : 4} className={`rg-node rg-c${row.c}${row.merge ? ' rg-merge' : ''}`}>
+        <title>{label}</title>
+      </circle>
+    </svg>
+  )
+}
+
+/** 브랜치 끝·PR 꼬리표. 기준 브랜치가 먼저 */
+function Labels({ c, base }: { c: RepoGraphCommit; base: string }) {
+  if (!c.refs.length && !c.prs.length) return null
+  const refs = [...c.refs].sort((a, b) => Number(b === base) - Number(a === base))
+  return (
+    <span className="rg-labels">
+      {refs.map((r) => (
+        <span key={r} className={`rg-ref rg-c${laneColor(r, base, 0)}${r === base ? ' rg-ref-base' : ''}`} title={`브랜치 ${r}`}>
+          <span className="rg-sw" aria-hidden />{r}
+        </span>
+      ))}
+      {c.prs.map((p) => (
+        <a key={p.number} href={repoHref(p.number)} className="rg-pr" title={`${STATE_LABEL[p.state]} · ${p.title}`} onClick={(e) => e.stopPropagation()}>
+          <span className={`rp-dot rp-${p.state}`} aria-hidden />PR #{p.number}
+        </a>
+      ))}
+    </span>
+  )
+}
+
+function BranchPick({ branches, base, value, onChange }: { branches: RepoGraph['branches']; base: string; value: string[] | null; onChange: (v: string[] | null) => void }) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<Set<string>>(new Set())
+  const [q, setQ] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+  const all = branches.map((b) => b.name)
+  const start = () => { setDraft(new Set(value ?? all)); setQ(''); setOpen(true) }
+  const finish = () => {
+    setOpen(false)
+    const next = all.filter((n) => draft.has(n))
+    if (!next.length) return
+    const same = value ? next.length === value.length && next.every((n) => value.includes(n)) : next.length === all.length
+    if (!same) onChange(next.length === all.length ? null : next)
+  }
+  useDismiss(ref, open, finish)
+  const toggle = (n: string) => setDraft((s) => { const t = new Set(s); if (t.has(n)) t.delete(n); else t.add(n); return t })
+  const shown = q.trim() ? branches.filter((b) => b.name.toLowerCase().includes(q.trim().toLowerCase())) : branches
+  const label = !value ? '브랜치 전체' : value.length === 1 ? value[0] : `브랜치 ${value.length}개`
+  return (
+    <div className="rg-pick" ref={ref}>
+      <Button size="small" aria-haspopup="dialog" aria-expanded={open} onClick={() => (open ? finish() : start())} disabled={!branches.length}>
+        <span className="rg-pick-label">{label}</span> ▾
+      </Button>
+      {open && (
+        <div className="rp-menu rg-pick-menu" role="dialog" aria-label="브랜치 고르기">
+          <div className="rg-pick-quick">
+            <button type="button" onClick={() => setDraft(new Set(all))}>전체</button>
+            {base && all.includes(base) && <button type="button" onClick={() => setDraft(new Set([base]))}>기준만</button>}
+            <button type="button" onClick={() => setDraft(new Set())}>비우기</button>
+          </div>
+          {branches.length > 10 && (
+            <input className="rg-pick-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="브랜치 찾기" aria-label="브랜치 찾기" autoFocus />
+          )}
+          <div className="rg-pick-list">
+            {shown.map((b) => (
+              <label key={b.name} className="rg-pick-row">
+                <input type="checkbox" checked={draft.has(b.name)} onChange={() => toggle(b.name)} />
+                <span className={`rg-sw rg-c${laneColor(b.name, base, 0)}`} aria-hidden />
+                <code>{b.name}</code>
+                {b.base && <span className="tag">기준</span>}
+                {b.default && <span className="tag tag-green">기본</span>}
+              </label>
+            ))}
+          </div>
+          <div className="rg-pick-foot">
+            <span className="muted small">{draft.size}/{all.length}</span>
+            <Button size="small" variant="primary" disabled={!draft.size} onClick={finish}>적용</Button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CommitPanel({ api, sha, row, base, known, onPick, onClose }: {
+  api: ReturnType<typeof repoApi>; sha: string; row?: RepoGraphCommit; base: string
+  known: Map<string, RepoGraphCommit>; onPick: (sha: string) => void; onClose: () => void
+}) {
+  const det = useLoad(() => api.commit(sha), [api, sha])
+  const c = det.data?.commit
+  const message = c?.message ?? row?.message ?? ''
+  const [first, ...rest] = message.split('\n')
+  const body = rest.join('\n').trim()
+  const parents = c?.parents ?? row?.parents ?? []
+  const files = c?.files ?? []
+  return (
+    <aside className="rg-side" aria-label="커밋 상세">
+      <div className="rg-side-h">
+        <code className="rp-sha">{sha.slice(0, 7)}</code>
+        {parents.length > 1 && <span className="tag">머지</span>}
+        <button type="button" className="rg-x" onClick={onClose} aria-label="닫기">×</button>
+      </div>
+      <h3 className="rg-side-title">{first || (det.loading ? '읽는 중' : '-')}</h3>
+      {body && <pre className="rg-side-body">{body}</pre>}
+      {det.error ? <LoadError error={det.error} /> : null}
+      <dl className="pairs">
+        <div><dt>작성자</dt><dd>{c?.author || row?.author || '-'}</dd></div>
+        <div><dt>시각</dt><dd>{kst(c?.at ?? row?.at) || '-'}</dd></div>
+        <div><dt>커밋</dt><dd><code className="rg-full">{sha}</code></dd></div>
+        <div><dt>부모</dt><dd className="rg-parents">
+          {parents.length ? parents.map((p) => (
+            known.has(p)
+              ? <button key={p} type="button" className="rg-sha rg-link" onClick={() => onPick(p)} title={known.get(p)?.message.split('\n')[0]}>{p.slice(0, 7)}</button>
+              : <code key={p} className="rg-sha">{p.slice(0, 7)}</code>
+          )) : <span className="muted">없음 (첫 커밋)</span>}
+        </dd></div>
+        {!!row?.refs.length && <div><dt>브랜치</dt><dd><Labels c={{ ...row, prs: [] }} base={base} /></dd></div>}
+        {!!row?.prs.length && <div><dt>PR</dt><dd className="rg-prs">
+          {row.prs.map((p) => (
+            <span key={p.number}>
+              <a href={repoHref(p.number)} className="rp-br-pr"><span className={`rp-dot rp-${p.state}`} aria-hidden /><span className="mono">#{p.number}</span> {p.title}</a>
+              {p.internal && <AiTag id={p.internal} />}
+            </span>
+          ))}
+        </dd></div>}
+      </dl>
+      <section className="rg-side-files">
+        <h4>바뀐 파일 <span className="muted">{c ? c.total_files : ''}</span>
+          {c && <span className="rg-side-n"><span className="rp-add">+{files.reduce((n, f) => n + f.additions, 0)}</span> <span className="rp-del">−{files.reduce((n, f) => n + f.deletions, 0)}</span></span>}
+        </h4>
+        {!c ? (det.loading ? <span className="muted small">읽는 중</span> : null) : !files.length ? <span className="muted small">없음</span> : (
+          <ul className="rg-files">
+            {files.map((f) => (
+              <li key={f.path} title={f.path}>
+                <span className="rg-file-name">{f.path.split('/').pop()}<span className="muted small"> {f.path.split('/').slice(0, -1).join('/')}</span></span>
+                <span className="rp-tree-n"><span className="rp-add">+{f.additions}</span> <span className="rp-del">−{f.deletions}</span></span>
+              </li>
+            ))}
+            {c.total_files > files.length && <li className="muted small">… {c.total_files - files.length}개 더</li>}
+          </ul>
+        )}
+      </section>
+      {c?.url && /^https?:\/\//.test(c.url) && <a href={c.url} target="_blank" rel="noopener noreferrer" className="small rg-ext">GitHub에서 열기 ↗</a>}
+    </aside>
   )
 }

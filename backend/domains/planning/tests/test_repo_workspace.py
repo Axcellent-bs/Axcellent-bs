@@ -579,3 +579,189 @@ def test_github_errors_in_api_hide_token(client) -> None:
     assert res.status_code == 502
     assert res.json()["error"]["code"] == "VCS_UNAUTHORIZED"
     assert FAKE_TOKEN not in res.text
+
+
+# ---------------------------------------------------------------- 커밋 그래프
+
+
+def test_order_commits_keeps_children_first_despite_clock_skew() -> None:
+    from planning_agent.vcs.base import GraphCommit, order_commits
+
+    early = datetime(2026, 10, 1, tzinfo=UTC)
+    late = datetime(2026, 10, 9, tzinfo=UTC)
+    rows = [
+        GraphCommit(sha="root", at=early),
+        GraphCommit(sha="pare", parents=("root",), at=late),  # 부모 시계가 더 늦다
+        GraphCommit(sha="chil", parents=("pare",), at=early),
+        GraphCommit(sha="side", parents=("root",), at=datetime(2026, 10, 5, tzinfo=UTC)),
+    ]
+    got = [c.sha for c in order_commits(rows)]
+    assert got.index("chil") < got.index("pare") < got.index("root")
+    assert got[-1] == "root"
+
+
+def test_mock_graph_branches_merges_and_prs() -> None:
+    m = _mock()
+    done = m.seed(title="머지된 것", branch="feat/done", merged_at=T0)
+    live = run(m.open_change("gen/t-7", "R1: 작업", "", files={"docs/x.md": "x\n"}))
+    run(m.update_change(live.number, {"docs/x.md": "y\n"}, "고침"))
+    gone = m.seed(title="버린 것", branch="fix/gone")
+    run(m.delete_branch("fix/gone"))
+    g = run(m.list_graph())
+    by = {c.sha: c for c in g.commits}
+    merge = by[m.merge_sha(done)]
+    assert len(merge.parents) == 2 and merge.parents[1] == f"seed{done:04d}"
+    assert g.heads["dev"] == merge.sha
+    assert set(g.heads) == {"dev", "feat/done", "gen/t-7"}  # 지운 브랜치는 끝이 없다
+    assert f"seed{gone:04d}" not in by  # 어디서도 닿지 않는 커밋은 뺀다
+    assert [b.name for b in g.branches][0] == "dev" and g.branches[0].default
+    shas = [c.sha for c in g.commits]
+    assert shas[-1] == "a" * 40  # 첫 커밋이 맨 아래
+    for c in g.commits:  # 자식이 늘 부모보다 위
+        assert all(shas.index(p) > shas.index(c.sha) for p in c.parents if p in by)
+    prs = {p.number: p for p in g.prs}
+    assert prs[done].merge_sha == merge.sha and prs[live.number].state == "open"
+    assert prs[live.number].head_sha == g.heads["gen/t-7"]
+    only = run(m.list_graph(["gen/t-7"], 200))
+    assert set(only.heads) == {"gen/t-7"}
+    assert m.merge_sha(done) not in {c.sha for c in only.commits}
+    small = run(m.list_graph(None, 2))
+    assert len(small.commits) == 2 and small.truncated
+    detail = run(m.get_commit(g.heads["gen/t-7"]))
+    assert detail.message == "고침" and detail.files[0].path == "docs/x.md"
+    with pytest.raises(VcsError) as exc:
+        run(m.get_commit("ffff0000"))
+    assert exc.value.code == "not_found"
+    with pytest.raises(VcsError) as exc:
+        run(m.get_commit("../etc"))
+    assert exc.value.code == "invalid"
+
+
+class GraphFake(Fake):
+    """브랜치 셋: dev(머지 커밋) · main · feat/1 (dev 위 한 커밋)."""
+
+    COMMITS = {
+        "r000": ([], "2026-10-20T00:00:00Z", "init"),
+        "f000": (["r000"], "2026-10-21T00:00:00Z", "feat: 예전 기능"),
+        "d111": (["r000", "f000"], "2026-10-22T00:00:00Z", "Merge pull request #2"),
+        "m111": (["r000"], "2026-10-23T00:00:00Z", "release"),
+        "f111": (["d111"], "2026-10-24T00:00:00Z", "fix: 고침\n\n본문"),
+    }
+    TIPS = {"dev": "d111", "main": "m111", "feat/1": "f111"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.pulls[1]["head"]["sha"] = "f111"
+        self.pulls[2]["merge_commit_sha"] = "d111"
+        self.listed: list[str] = []
+
+    def _row(self, sha: str) -> dict:
+        parents, date, msg = self.COMMITS[sha]
+        return {
+            "sha": sha,
+            "parents": [{"sha": p} for p in parents],
+            "commit": {
+                "message": msg,
+                "author": {"name": "Kim", "date": date},
+                "committer": {"date": date},
+            },
+            "author": {"login": "kim"},
+            "html_url": f"https://github.example/{REPO}/commit/{sha}",
+        }
+
+    def _walk(self, tip: str) -> list[str]:
+        out: list[str] = []
+        stack = [tip]
+        while stack:
+            s = stack.pop()
+            if s not in out:
+                out.append(s)
+                stack.extend(self.COMMITS[s][0])
+        return out
+
+    def handler(self, req: httpx.Request) -> httpx.Response:
+        rest = req.url.path[len(f"/repos/{REPO}") :]
+        if req.method == "GET" and rest == "/branches":
+            self.seen.append(req)
+            return httpx.Response(
+                200,
+                json=[
+                    {"name": n, "commit": {"sha": s}, "protected": False}
+                    for n, s in [("feat/1", "f111"), ("main", "m111"), ("dev", "d111")]
+                ],
+            )
+        if req.method == "GET" and rest == "/commits":
+            self.seen.append(req)
+            name = req.url.params["sha"]
+            self.listed.append(name)
+            if name not in self.TIPS:
+                return httpx.Response(404, json={"message": "No commit found"})
+            return httpx.Response(200, json=[self._row(s) for s in self._walk(self.TIPS[name])])
+        if req.method == "GET" and rest.removeprefix("/commits/") in self.COMMITS:
+            self.seen.append(req)
+            row = self._row(rest.removeprefix("/commits/"))
+            row["files"] = [
+                {"filename": "shop-web/a.ts", "status": "modified", "additions": 3, "deletions": 1}
+            ]
+            return httpx.Response(200, json=row)
+        return super().handler(req)
+
+
+def test_github_graph_dedupes_orders_and_labels() -> None:
+    fake = GraphFake()
+    gh = _gh(fake)
+    g = run(gh.list_graph())
+    assert [c.sha for c in g.commits] == ["f111", "m111", "d111", "f000", "r000"]
+    assert next(c for c in g.commits if c.sha == "d111").parents == ("r000", "f000")
+    assert g.heads == {"dev": "d111", "main": "m111", "feat/1": "f111"}
+    assert [b.name for b in g.branches] == ["dev", "main", "feat/1"]  # 기준 · 기본 먼저
+    assert next(b for b in g.branches if b.name == "main").default
+    prs = {p.number: p for p in g.prs}
+    assert prs[1].head_sha == "f111" and prs[1].merge_sha == ""
+    assert prs[2].merge_sha == "d111" and prs[2].state == "merged"
+    assert sorted(fake.listed) == ["dev", "feat/1", "main"]
+    assert all(r.headers["Authorization"] == f"Bearer {FAKE_TOKEN}" for r in fake.seen)
+
+    fake.listed.clear()
+    only = run(gh.list_graph(["feat/1", "nope"], 3))
+    assert fake.listed == ["feat/1"]  # 모르는 브랜치는 부르지 않는다
+    assert [c.sha for c in only.commits] == ["f111", "d111", "f000"] and only.truncated
+    assert only.heads == {"feat/1": "f111"}
+
+    d = run(gh.get_commit("f111"))
+    assert d.message.startswith("fix: 고침") and d.parents == ("d111",)
+    assert d.files[0].additions == 3 and d.files[0].patch is None
+    assert d.url and d.url.endswith("/commit/f111")
+
+
+def test_api_graph_labels_and_commit_detail(client, repo) -> None:
+    done = repo.seed(title="머지된 것", branch="feat/done", merged_at=T0)
+    live = run(repo.open_change("gen/t-8", "R2: 작업", "", files={"docs/y.md": "y\n"}))
+    res = client.get(f"{BASE}/graph")
+    assert res.status_code == 200, res.text
+    d = res.json()["data"]
+    assert d["base_branch"] == "dev" and d["limit"] == 200 and d["truncated"] is False
+    by = {c["sha"]: c for c in d["commits"]}
+    tip = d["heads"]["gen/t-8"]
+    assert by[tip]["refs"] == ["gen/t-8"]
+    assert by[tip]["prs"][0]["number"] == live.number and by[tip]["prs"][0]["state"] == "open"
+    merge = by[d["heads"]["dev"]]
+    assert "dev" in merge["refs"] and len(merge["parents"]) == 2
+    assert merge["prs"][0]["number"] == done
+    assert d["branches"][0] == {"name": "dev", "sha": merge["sha"], "default": True, "base": True}
+
+    one = client.get(f"{BASE}/graph", params={"branches": "gen/t-8", "limit": 1}).json()
+    assert one["data"]["selected"] == ["gen/t-8"] and len(one["data"]["commits"]) == 1
+    assert one["meta"]["more"] is True
+    many = ",".join(f"b{i}" for i in range(31))
+    assert client.get(f"{BASE}/graph", params={"branches": many}).status_code == 400
+
+    c = client.get(f"{BASE}/commits/{tip}")
+    assert c.status_code == 200 and c.json()["data"]["commit"]["files"][0]["path"] == "docs/y.md"
+    assert client.get(f"{BASE}/commits/ffff0000").status_code == 404
+    assert client.get(f"{BASE}/commits/bad!sha").json()["error"]["code"] == "VCS_INVALID"
+
+
+def test_api_graph_without_connection_is_409(client) -> None:
+    res = client.get(f"{BASE}/graph")
+    assert res.status_code == 409 and res.json()["error"]["code"] == "NO_VCS"

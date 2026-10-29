@@ -266,6 +266,17 @@ export interface RepoBranch {
   ahead: number | null; behind: number | null; pr: { number: number; state: RepoPrState; title: string } | null
 }
 export type MergeMethod = 'merge' | 'squash' | 'rebase'
+// 커밋 그래프: 최신이 먼저, 자식이 늘 부모보다 앞. refs = 이 커밋이 끝인 브랜치, prs = 이 커밋에 달린 PR
+export interface RepoGraphPr { number: number; state: RepoPrState; title: string; branch: string; internal: string | null }
+export interface RepoGraphCommit { sha: string; parents: string[]; message: string; author: string; at: string | null; refs: string[]; prs: RepoGraphPr[] }
+export interface RepoGraph extends RepoMeta {
+  commits: RepoGraphCommit[]; heads: Record<string, string>; selected: string[]
+  branches: { name: string; sha: string; default: boolean; base: boolean }[]; truncated: boolean; limit: number
+}
+export interface RepoCommitDetail {
+  sha: string; parents: string[]; message: string; author: string; at: string | null; url: string | null
+  files: RepoFile[]; total_files: number
+}
 
 const qs = (x: Record<string, string | number | undefined>) => {
   const p = new URLSearchParams()
@@ -287,6 +298,9 @@ export const repoApi = (base: string, connection?: string) => {
     reopen: (n: number) => call<{ pr: RepoPr }>(base, pr(n, 'reopen'), post()),
     comment: (n: number, body: string) => call<{ comment: RepoComment }>(base, pr(n, 'comment'), post({ body })),
     revert: (n: number) => call<{ revert: { number: number; url: string | null; branch: string } }>(base, pr(n, 'revert'), post()),
+    graph: (branches: string[] | null, limit: number) =>
+      call<RepoGraph>(base, `/repo/graph${qs({ connection: c, branches: branches?.length ? branches.join(',') : undefined, limit })}`),
+    commit: (sha: string) => call<RepoMeta & { commit: RepoCommitDetail }>(base, `/repo/commits/${encodeURIComponent(sha)}${qs({ connection: c })}`),
     deleteBranch: (name: string) => call<{ deleted: string }>(base, `/repo/branches/delete${qs({ connection: c })}`, post({ name })),
   }
 }

@@ -30,6 +30,10 @@ from planning_agent.vcs.base import (
     COMMENT_LIMIT,
     COMMIT_LIMIT,
     DIFF_MAX_FILES,
+    GRAPH_BRANCHES,
+    GRAPH_LIMIT,
+    GRAPH_MAX,
+    GRAPH_MESSAGE_CHARS,
     LIST_LIMIT,
     MAX_READ_BYTES,
     Branch,
@@ -42,17 +46,24 @@ from planning_agent.vcs.base import (
     CheckState,
     Comment,
     Commit,
+    CommitDetail,
     Diff,
     FileDiff,
+    Graph,
+    GraphBranch,
+    GraphCommit,
+    GraphPr,
     OpenedChange,
     TraceMeta,
     VcsError,
     cap_diff,
     check_branch,
     check_path,
+    check_sha,
     combine_checks,
     decode_text,
     match_query,
+    order_commits,
     parse_trace,
     state_of,
 )
@@ -65,6 +76,8 @@ MAX_PAGES = 10
 LIST_PAGES = 3
 LIST_CHECKS = 20
 BRANCH_COMPARE = 30
+# 커밋 그래프: 브랜치별 커밋 목록을 동시에 몇 개까지 부를지
+GRAPH_PARALLEL = 8
 MAX_COMMENT_CHARS = 65_000
 # GitHub 화면의 Revert 버튼과 같은 길 (REST에는 없다)
 _REVERT = """
@@ -749,3 +762,145 @@ class GithubVcsAdapter:
         if name == self.base_branch or name == await self._default_branch():
             raise VcsError("invalid", f"기준·기본 브랜치는 지우지 않는다: {name}")
         await self._call("DELETE", f"/git/refs/heads/{quote(name, safe='/')}")
+
+    # ---- 커밋 그래프
+
+    @staticmethod
+    def _graph_commit(c: dict) -> GraphCommit:
+        info = c.get("commit") or {}
+        who = info.get("author") or {}
+        committer = info.get("committer") or {}
+        return GraphCommit(
+            sha=str(c.get("sha") or ""),
+            parents=tuple(
+                str(p["sha"])
+                for p in (c.get("parents") or [])
+                if isinstance(p, dict) and p.get("sha")
+            ),
+            message=str(info.get("message") or "")[:GRAPH_MESSAGE_CHARS],
+            author=(c.get("author") or {}).get("login") or who.get("name") or "",
+            at=_time(committer.get("date") or who.get("date")),
+        )
+
+    async def _graph_pulls(self) -> list[GraphPr]:
+        """최근 갱신된 PR 한 쪽(100개)만 본다. 막히면 꼬리표 없이 그린다."""
+        try:
+            rows = await self._call(
+                "GET",
+                "/pulls",
+                params={"state": "all", "sort": "updated", "direction": "desc", "per_page": 100},
+            )
+        except VcsError:
+            return []
+        out: list[GraphPr] = []
+        for pr in rows if isinstance(rows, list) else []:
+            if not isinstance(pr, dict) or "number" not in pr:
+                continue
+            merged = bool(pr.get("merged") or pr.get("merged_at"))
+            head = pr.get("head") or {}
+            out.append(
+                GraphPr(
+                    number=int(pr["number"]),
+                    title=pr.get("title") or "",
+                    state=state_of(merged, pr.get("state") == "closed"),
+                    branch=str(head.get("ref") or ""),
+                    head_sha=str(head.get("sha") or ""),
+                    # 열린 PR의 merge_commit_sha는 시험 머지라 머지된 것만 쓴다
+                    merge_sha=str(pr.get("merge_commit_sha") or "") if merged else "",
+                )
+            )
+        return out
+
+    async def _branch_commits(self, name: str, pages: int, sem: asyncio.Semaphore) -> list[dict]:
+        out: list[dict] = []
+        async with sem:
+            for page in range(1, pages + 1):
+                try:
+                    got = await self._call(
+                        "GET",
+                        "/commits",
+                        params={"sha": name, "per_page": PER_PAGE, "page": page},
+                    )
+                except VcsError as exc:
+                    # 그사이 지운 브랜치·빈 레포
+                    if exc.code in ("not_found", "invalid", "conflict"):
+                        break
+                    raise
+                items = [c for c in (got if isinstance(got, list) else []) if isinstance(c, dict)]
+                out.extend(items)
+                if len(items) < PER_PAGE:
+                    break
+        return out
+
+    async def list_graph(
+        self, branches: list[str] | None = None, limit: int = GRAPH_LIMIT
+    ) -> Graph:
+        limit = max(1, min(int(limit), GRAPH_MAX))
+        default, rows, prs = await asyncio.gather(
+            self._default_branch(),
+            self._call("GET", "/branches", params={"per_page": PER_PAGE}),
+            self._graph_pulls(),
+        )
+        rows = [r for r in (rows if isinstance(rows, list) else []) if isinstance(r, dict)]
+        rows = [r for r in rows if r.get("name")]
+        main = (self.base_branch, default)
+        rank = {n: i for i, n in enumerate(main)}
+        rows.sort(key=lambda r: rank.get(str(r["name"]), len(main)))
+        all_branches = tuple(
+            GraphBranch(
+                name=str(r["name"]),
+                sha=str((r.get("commit") or {}).get("sha") or ""),
+                default=str(r["name"]) == default,
+            )
+            for r in rows
+        )
+        names = [b.name for b in all_branches]
+        chosen = set(branches or ())
+        wanted = [n for n in names if n in chosen] if chosen else names
+        picked = wanted[:GRAPH_BRANCHES]
+        sem = asyncio.Semaphore(GRAPH_PARALLEL)
+        deep = -(-limit // PER_PAGE)
+        got = await asyncio.gather(
+            *(self._branch_commits(n, deep if n in main else 1, sem) for n in picked)
+        )
+        seen: dict[str, GraphCommit] = {}
+        for chunk in got:
+            for raw in chunk:
+                c = self._graph_commit(raw)
+                if c.sha and c.sha not in seen:
+                    seen[c.sha] = c
+        ordered = order_commits(list(seen.values()))
+        heads = {b.name: b.sha for b in all_branches if b.name in picked and b.sha}
+        return Graph(
+            commits=tuple(ordered[:limit]),
+            heads=heads,
+            branches=all_branches,
+            prs=tuple(prs),
+            truncated=len(ordered) > limit or len(wanted) > len(picked),
+        )
+
+    async def get_commit(self, sha: str) -> CommitDetail:
+        sha = check_sha(sha)
+        got = await self._call("GET", f"/commits/{sha}")
+        got = got if isinstance(got, dict) else {}
+        head = self._graph_commit(got)
+        files = [f for f in (got.get("files") or []) if isinstance(f, dict)]
+        return CommitDetail(
+            sha=head.sha or sha,
+            parents=head.parents,
+            message=str((got.get("commit") or {}).get("message") or "")[:20_000],
+            author=head.author,
+            at=head.at,
+            url=got.get("html_url"),
+            files=tuple(
+                FileDiff(
+                    path=str(f.get("filename") or ""),
+                    status=f.get("status") or "modified",
+                    additions=int(f.get("additions", 0)),
+                    deletions=int(f.get("deletions", 0)),
+                    previous_path=f.get("previous_filename"),
+                )
+                for f in files[:DIFF_MAX_FILES]
+            ),
+            total_files=len(files),
+        )

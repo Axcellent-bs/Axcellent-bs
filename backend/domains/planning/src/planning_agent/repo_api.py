@@ -27,8 +27,12 @@ from planning_agent.domain.models import PR
 from planning_agent.domain.service import ActionError, GateRefused, PlanningService
 from planning_agent.vcs.base import (
     CHANGE_LIST_LIMIT,
+    GRAPH_BRANCHES,
+    GRAPH_LIMIT,
+    GRAPH_MAX,
     MERGE_METHODS,
     Change,
+    Graph,
     VcsAdapter,
     VcsError,
 )
@@ -121,6 +125,38 @@ def _size_params(cid: str, change: Change) -> dict:
         "auto": False,
         "source": "repo",
     }
+
+
+def _graph_rows(graph: Graph, linked: dict[int, PR]) -> list[dict]:
+    """커밋마다 브랜치 끝 꼬리표(refs)와 PR 꼬리표(prs)를 붙인다.
+    PR은 머지됐으면 머지 커밋에, 아니면 head 끝 커밋에 단다."""
+    refs: dict[str, list[str]] = {}
+    for name, sha in graph.heads.items():
+        refs.setdefault(sha, []).append(name)
+    prs: dict[str, list[dict]] = {}
+    for p in graph.prs:
+        at = (p.merge_sha or p.head_sha) if p.state == "merged" else p.head_sha
+        if not at:
+            continue
+        internal = linked.get(p.number)
+        prs.setdefault(at, []).append(
+            {
+                "number": p.number,
+                "state": p.state,
+                "title": p.title,
+                "branch": p.branch,
+                "internal": internal.id if internal else None,
+            }
+        )
+    return [
+        {
+            **_plain(c),
+            "parents": list(c.parents),
+            "refs": refs.get(c.sha, []),
+            "prs": prs.get(c.sha, []),
+        }
+        for c in graph.commits
+    ]
 
 
 async def _body(request: Request) -> dict:
@@ -245,6 +281,49 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], PlanningService
                 )
             items.sort(key=lambda x: (not (x["default"] or x["base"]), x["name"]))
             return ok({**meta, "items": items}, count=len(items))
+
+        return await guard(run)
+
+    @router.get("/repo/graph", response_model=None)
+    async def repo_graph(
+        connection: str | None = None,
+        branches: str | None = None,
+        limit: int = GRAPH_LIMIT,
+    ) -> dict | JSONResponse:
+        async def run() -> dict:
+            names = list(dict.fromkeys(b.strip() for b in (branches or "").split(",") if b.strip()))
+            if len(names) > GRAPH_BRANCHES or any(len(b) > 255 for b in names):
+                raise RepoError(
+                    400, "INVALID_INPUT", f"branches는 {GRAPH_BRANCHES}개까지 쉼표로 적는다"
+                )
+            n = max(1, min(int(limit), GRAPH_MAX))
+            cid, adapter, conn = _resolve(connection)
+            graph = await adapter.list_graph(names or None, n)
+            meta = _repo_meta(cid, conn, adapter)
+            rows = _graph_rows(graph, _linked(get_service(), cid))
+            data = {
+                **meta,
+                "commits": rows,
+                "heads": dict(graph.heads),
+                "selected": list(graph.heads),
+                "branches": [
+                    {**_plain(b), "base": b.name == meta["base_branch"]} for b in graph.branches
+                ],
+                "truncated": graph.truncated,
+                "limit": n,
+            }
+            return ok(data, count=len(rows), more=graph.truncated)
+
+        return await guard(run)
+
+    @router.get("/repo/commits/{sha}", response_model=None)
+    async def get_repo_commit(sha: str, connection: str | None = None) -> dict | JSONResponse:
+        async def run() -> dict:
+            cid, adapter, conn = _resolve(connection)
+            got = await adapter.get_commit(sha)
+            commit = _plain(got)
+            commit["parents"] = list(got.parents)
+            return ok({**_repo_meta(cid, conn, adapter), "commit": commit})
 
         return await guard(run)
 
