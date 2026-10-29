@@ -721,3 +721,49 @@ button.chip { cursor: pointer; font: inherit; }
 .seg-toggle button { font: inherit; font-size: 12px; padding: 4px 10px; background: transparent; color: var(--text-2); border: 0; cursor: pointer; }
 .seg-toggle button[aria-pressed="true"] { background: var(--primary, #5b5bd6); color: #fff; }
 .seg-toggle button:focus-visible { outline: 2px solid var(--primary, #5b5bd6); outline-offset: -2px; }
+
+/* 변경 파일 (GitHub Files changed 기준): 위 줄 · 확인함 진행 · 파일 편집 · 줄 코멘트 · 리뷰 끝내기 */
+.df { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.df-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 8px 10px; border: 1px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 3; }
+.df-progress { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.df-meter { width: 90px; height: 6px; background: var(--border); display: inline-block; overflow: hidden; }
+.df-meter span { display: block; height: 100%; background: var(--success); }
+.df-review-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.df-review { position: relative; margin-left: auto; }
+.df-review-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: 340px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 8px 24px rgb(0 0 0 / 0.12); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.df-review-pop textarea, .df-cmt-form textarea, .df-editor textarea { width: 100%; font: inherit; font-size: 13px; padding: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); resize: vertical; }
+.df-editor textarea { font-family: var(--mono); font-size: 12.5px; line-height: 1.55; }
+.df-radio { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+.df-find { width: 100%; font: inherit; font-size: 12.5px; padding: 5px 8px; border: 1px solid var(--border); background: var(--surface); margin-bottom: 4px; }
+.df-check { color: var(--success); margin-right: 4px; }
+.rp-tree button.df-done .rp-tree-name { color: var(--text-3); }
+.df-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50% !important; background: var(--warning); margin-right: 6px; vertical-align: middle; }
+.df-file-h { cursor: default; flex-wrap: wrap; }
+.df-file-toggle { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; text-align: left; padding: 0; }
+.df-icon { border: 0; background: none; color: var(--text-3); cursor: pointer; padding: 2px 4px; display: inline-flex; }
+.df-icon:hover { color: var(--text); background: var(--hover); }
+.df-viewed-box { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--text-2); border: 1px solid var(--border); padding: 1px 8px; cursor: pointer; background: var(--surface); }
+.df-viewed .rp-file-h { background: var(--surface); }
+.df-viewed .df-viewed-box { background: var(--success-soft); border-color: var(--success); color: var(--text); }
+.df-editor { padding: 12px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); }
+.df-editor-h, .df-mine-h, .df-cmt-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.df-commit { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.df-commit input { flex: 1; min-width: 200px; font: inherit; font-size: 13px; padding: 5px 8px; border: 1px solid var(--border); background: var(--surface); }
+.df-mine { border-top: 2px solid var(--warning); }
+.df-mine-h { padding: 8px 12px; background: var(--warning-soft); }
+.df-mine-act { margin-left: auto; display: inline-flex; gap: 6px; }
+.df-plus { width: 16px; height: 16px; line-height: 14px; padding: 0; border: 0; background: var(--primary); color: #fff; font-size: 13px; cursor: pointer; opacity: 0; }
+.rp-ln:hover .df-plus, .df-split-row:hover .df-plus, .df-plus:focus-visible { opacity: 1; }
+.df-thread { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--surface-2); padding: 8px 12px 8px 60px; display: flex; flex-direction: column; gap: 8px; font-family: var(--font, inherit); white-space: normal; }
+.df-cmt { background: var(--surface); border: 1px solid var(--border); padding: 8px 10px; }
+.df-cmt p { margin: 4px 0 0; font-size: 13px; white-space: pre-wrap; }
+.df-x { margin-left: auto; border: 0; background: none; color: var(--text-3); cursor: pointer; font-size: 15px; }
+.df-cmt-form { display: flex; flex-direction: column; gap: 6px; }
+.df-cmt-act { display: flex; justify-content: flex-end; gap: 6px; }
+.df-split-row { display: grid; grid-template-columns: 48px 18px minmax(0, 1fr) 48px 18px minmax(0, 1fr); }
+.df-split-row .rp-txt { white-space: pre-wrap; word-break: break-all; }
+.df-split-full { padding: 0 8px; }
+.df-split .df-add { background: var(--success-soft); }
+.df-split .df-del { background: var(--danger-soft); }
+.df-split .df-empty { background: var(--surface-2); }
+.df-compact .df-bar { position: static; }

@@ -74,13 +74,14 @@ function toReview(q: QueueItem, ctxOf: (ref: string) => string): CrossReview & {
     target: q.action,
     ref: q.id,
     title: q.title,
-    lane: (q.params.irreversible_count ?? 0) > 0 ? 'human' : 'ai',
+    lane: (q.params.irreversible_count ?? 0) > 0 || q.state.includes('사람') ? 'human' : 'ai',
     routeWhy: q.rules,
     summary: Object.entries(q.params).map(([k, v]) => `${k} ${v}`).join(' · '),
     checks: [],
     verifier: VERIFIER[q.action],
     result: done,
     decideWith: q.decide_with,
+    at: q.at,
   }
 }
 
