@@ -102,6 +102,23 @@ def _int(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
+def fraud_score_from(output: dict[str, Any]) -> int | None:
+    """data `FraudScoreOutput`에서 판매자 심사에 쓸 점수.
+
+    빠진 규칙(자료가 없어 확인 못 한 규칙)이 있으면 확인한 규칙만의 점수(`score`)는 낮게 나온다
+    (지금 최대 55점, safety 보류 기준 70점). 그대로 쓰면 사기 판매자도 자동 승인되므로,
+    빠진 규칙을 위험으로 본 최대 점수(`max_possible_score`)를 쓰고, 그것도 없으면 판단하지 않는다.
+    """
+    score = _int(output.get("score"))
+    if score is None:
+        return None
+    incomplete = output.get("complete") is False or bool(output.get("unknown_rules"))
+    if not incomplete:
+        return score
+    worst = _int(output.get("max_possible_score"))
+    return worst if worst is not None and worst >= score else None
+
+
 def _impact_from(output: dict[str, Any], ref: str) -> Impact | None:
     # data `ImpactCounts` 필드 이름 (agents/data impact.py, DEP-DATA-02)
     counts = [_int(output.get(k)) for k in IMPACT_FIELDS]
@@ -270,4 +287,4 @@ class LiveSources:
 
     async def fraud_score(self, meta: RequestMeta, seller_id: str) -> int | None:
         output = await self._ask_data(meta, "fraud_score", {"seller_id": seller_id})
-        return _int(output.get("risk_score")) if output else None
+        return fraud_score_from(output) if output else None
