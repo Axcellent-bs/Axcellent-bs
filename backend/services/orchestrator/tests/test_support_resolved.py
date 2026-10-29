@@ -37,8 +37,8 @@ async def test_a_resolved_inquiry_goes_to_finance_then_hr(harness) -> None:
 
     assert inc.kind == "support_resolved"
     assert inc.title == "고객 문의 #7 처리 결과 기록"
-    assert [r.dept for r in inc.steps.values()] == ["finance", "hr"]
-    assert [r.status for r in inc.steps.values()] == ["completed", "completed"]
+    assert [r.dept for r in inc.steps.values()] == ["finance", "hr", "hr"]
+    assert [r.status for r in inc.steps.values()] == ["completed"] * 3
     assert inc.status == "resolved"
     # 재무가 받은 입력은 이벤트가 알려 준 사실뿐이다
     finance_call = next(c for c in harness.fakes.calls if c[1].skill == "record_support_cost")
@@ -62,7 +62,7 @@ async def test_an_inquiry_without_expense_is_still_recorded(harness) -> None:
     inc = await mgr.handle(resolved("evt_r2", 8, order_id="ord_0216"))
     await mgr.wait(inc.context_id)
 
-    assert [r.status for r in inc.steps.values()] == ["completed", "completed"]
+    assert [r.status for r in inc.steps.values()] == ["completed"] * 3
     assert inc.shared["expense_used"] is False  # False·0도 보관한다 (None만 비운다)
     assert inc.shared["refund_amount"] == 0
     record_call = next(c for c in harness.fakes.calls if c[1].skill == "record_case")
@@ -109,3 +109,32 @@ async def test_the_same_event_twice_records_once(harness) -> None:
     await mgr.wait(first.context_id)
     assert len(mgr.incidents) == 1
     assert sum(1 for c in harness.fakes.calls if c[1].skill == "record_case") == 1
+
+
+@pytest.mark.asyncio
+async def test_the_hr_record_is_read_back_by_this_incident(harness) -> None:
+    mgr = IncidentManager(await harness.start(), scenario_a)
+    inc = await mgr.handle(resolved("evt_v1", 5))
+    await mgr.wait(inc.context_id)
+
+    verify_call = next(c for c in harness.fakes.calls if c[1].skill == "get_audit_timeline")
+    assert verify_call[0] == "hr"
+    assert verify_call[1].input == {"context_id": inc.context_id}  # 이 사건의 기록만 읽는다
+    assert inc.steps["verify"].status == "completed"
+    assert inc.status == "resolved"
+    # 기록을 쓴 뒤에 읽는다
+    skills = [c[1].skill for c in harness.fakes.calls]
+    assert skills.index("record_case") < skills.index("get_audit_timeline")
+
+
+@pytest.mark.asyncio
+async def test_a_missing_hr_record_is_sent_to_a_human_instead_of_assumed(harness) -> None:
+    harness.fakes.script("hr", "get_audit_timeline", "no_record")
+    mgr = IncidentManager(await harness.start(), scenario_a)
+    inc = await mgr.handle(resolved("evt_v2", 6))
+    await mgr.wait(inc.context_id)
+
+    verify = inc.steps["verify"]
+    assert verify.status == "transfer_queued"
+    assert verify.reason_code == "record_not_found"
+    assert inc.status == "degraded"  # 기록을 확인하지 못한 사건은 해결로 세지 않는다

@@ -8,6 +8,9 @@
 
 고객에게 돈을 돌려주거나 쿠폰을 내는 일은 하지 않는다. 그건 고객지원이 이미 처리한 일이고,
 이 plan은 그 결과를 기록하고 넘기기만 한다.
+
+3. 인사 AI의 감사 기록을 읽어, 이 사건의 기록이 실제로 남았는지 확인한다 (read).
+   남지 않았으면 이관 큐로 돌려 사람이 보게 한다 (기록이 남았다고 믿고 넘어가지 않는다).
 """
 
 from __future__ import annotations
@@ -30,6 +33,20 @@ SIGNAL_FIELDS = (
 
 def _cost(inc: Incident) -> dict[str, Any]:
     return {k: inc.signal[k] for k in SIGNAL_FIELDS if inc.signal.get(k) is not None}
+
+
+# 인사가 `record_case`로 남기는 감사 기록: `record_case.<결과>`(카드·후보·중복)와 `record_only`
+def _recorded(entry: dict[str, Any]) -> bool:
+    kind = str(entry.get("kind") or "")
+    return kind.startswith("record_case.") or kind == "record_only"
+
+
+def _verify_record(output: dict[str, Any]) -> tuple[str, str] | None:
+    """인사 감사 기록에 처리 결과 기록이 없으면 사람이 보게 한다 (있으면 None)."""
+    entries = output.get("entries") or []
+    if any(_recorded(e) for e in entries if isinstance(e, dict)):
+        return None
+    return "record_not_found", "인사 기록에서 이 사건의 처리 결과 기록을 찾지 못함"
 
 
 def support_resolved() -> Plan:
@@ -56,6 +73,14 @@ def support_resolved() -> Plan:
                 # 재무 기록이 실패해도 상담 처리 결과는 기록으로 남긴다
                 also_after=("cost",),
                 kind="record",
+            ),
+            Step(
+                "verify",
+                "get_audit_timeline",
+                "인사 기록 읽어 확인 (hr)",
+                after=("record",),
+                build=lambda inc: {"context_id": inc.context_id},
+                verdict=_verify_record,
             ),
         ],
     )
