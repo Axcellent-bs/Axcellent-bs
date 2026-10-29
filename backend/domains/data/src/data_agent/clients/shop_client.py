@@ -128,6 +128,10 @@ class HttpShopClient:
     def __init__(self, api: ShopApi) -> None:
         self.api = api
 
+    async def payment_counts(self, window_from: datetime, window_to: datetime) -> dict:
+        """5분 구간별 결제 수 (`/metric-series` `payment_count`). 초과분의 평소 실패에 쓴다."""
+        return dict(await HttpMetricSource(self.api).fetch("payment_count", window_from, window_to))
+
     async def list_failed_orders(self, query: ShopFailedOrdersQuery) -> ShopFailedOrdersResult:
         params: dict[str, Any] = {
             "from": _iso(query.from_),

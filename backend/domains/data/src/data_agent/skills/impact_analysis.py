@@ -9,21 +9,82 @@ LLM은 `summary` 문장만 쓰며, 숫자가 어긋나면 고정 템플릿으로
 (`ShopUnavailable` → 핸들러가 "확인할 수 없음"으로 답한다).
 - 실패 사유가 없는 결제 (`NO_FAILURE_REASON`)
 - 둘 다 아닌 처음 보는 실패 코드 (`UNKNOWN_FAILURE_CODE`, "처음 보는 실패 코드 N건")
+
+초과분(`excess_failed_order_count`): 장애 때문에 평소보다 더 실패한 건수다.
+- 평소 = 지난 7일 같은 시각 ±1시간의 장애 쪽 실패를 결제가 기록된 5분 평균으로 구해 구간 길이만큼
+  곱한 값. 초과분 = 구간 장애 쪽 실패 − 평소 (반올림, 0 미만이면 0)
+- 지난 7일 자료가 없거나 읽지 못하면 None(확인할 수 없음). 결제 수를 주지 않는 클라이언트(목)도 None
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Protocol, runtime_checkable
 
 from ax_agent_template.llm import LLMClient
-from ax_contracts.data_access.shop_failed_orders import ShopFailedOrdersQuery
+from ax_contracts.data_access.shop_failed_orders import (
+    ShopFailedOrdersQuery,
+    ShopFailedOrdersResult,
+)
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import CategoryImpact, ImpactAnalysisInput, ImpactAnalysisOutput
 from data_agent.clients.shop_client import ShopClient, ShopUnavailable, get_shop_client
 from data_agent.explain import explain
-from data_agent.impact import aggregate_impact, split_failures
+from data_agent.impact import (
+    EXCESS_DAYS,
+    EXCESS_MARGIN,
+    aggregate_impact,
+    excess_failures,
+    split_failures,
+    usual_fault_failures,
+)
+
+HISTORY_LIMIT = 5000  # 지난 7일 하루치 실패 주문 조회 한도 (shop-api 최대)
+
+
+@runtime_checkable
+class HistoryClient(Protocol):
+    """초과분 계산에 필요한 결제 수도 주는 클라이언트 (shop-api)."""
+
+    async def payment_counts(self, window_from: datetime, window_to: datetime) -> dict: ...
+
+    async def list_failed_orders(self, query: ShopFailedOrdersQuery) -> ShopFailedOrdersResult: ...
+
+
+async def _usual(
+    client: object, data: ImpactAnalysisInput, tenant_id: str
+) -> tuple[float | None, str]:
+    """평소 장애 쪽 실패(구간 길이만큼)와 근거 한 줄. 모르면 (None, 이유)."""
+    if not isinstance(client, HistoryClient):
+        return None, "평소 비교: 확인할 수 없음 (지난 7일 결제 수를 읽을 수 없는 클라이언트)"
+    payments: dict = {}
+    fault_times: list[datetime] = []
+    try:
+        for day in range(1, EXCESS_DAYS + 1):
+            start = data.window_from - timedelta(days=day) - EXCESS_MARGIN
+            end = data.window_to - timedelta(days=day) + EXCESS_MARGIN
+            payments.update(await client.payment_counts(start, end))
+            past = await client.list_failed_orders(
+                ShopFailedOrdersQuery(
+                    from_=start,
+                    to=end,
+                    category=data.category,
+                    limit=HISTORY_LIMIT,
+                    tenant_id=tenant_id,
+                )
+            )
+            fault_times += [o.failed_at for o in split_failures(past).fault]
+    except ShopUnavailable as error:
+        return None, f"평소 비교: 확인할 수 없음 (지난 7일 조회 실패 {error.code})"
+    usual = usual_fault_failures(payments, fault_times, data.window_to - data.window_from)
+    if usual is None:
+        return None, "평소 비교: 확인할 수 없음 (지난 7일 같은 시각 ±1시간에 결제 기록이 없음)"
+    return usual, (
+        f"평소 비교: 지난 7일 같은 시각 ±1시간 장애 쪽 실패 {len(fault_times)}건, "
+        f"구간 길이로 환산한 평소 {usual:.2f}건"
+    )
 
 
 @dataclass(frozen=True)
@@ -88,13 +149,19 @@ async def analyze_impact(
         },
         llm,
     )
+    usual, usual_note = await _usual(client, data, tenant_id)
+    excess = excess_failures(counts.failed_order_count, usual)
+    text = explanation.summary
+    if excess is not None:
+        text = f"{text} 평소보다 {excess}건 많음."
     output = ImpactAnalysisOutput(
         failed_order_count=counts.failed_order_count,
         affected_customer_count=len(customer_ids),
         affected_customer_ids=customer_ids,
         damage_amount=counts.damage_amount,
         by_category=by_category,
-        summary=explanation.summary,
+        summary=text,
+        excess_failed_order_count=excess,
     )
     condition = (
         f"shop_failed_orders from={data.window_from.isoformat()} "
@@ -105,6 +172,7 @@ async def analyze_impact(
         f"실패 주문 {counts.failed_order_count}건, 영향 고객 {len(customer_ids)}명, "
         f"피해 금액 {counts.damage_amount}원, 카테고리 {len(by_category)}개"
     )
+    summary += f"\n{usual_note}" + (f", 초과분 {excess}건" if excess is not None else "")
     for name, count in sorted(split.excluded.items()):
         summary += f"\n{name} {count}건은 장애 피해에서 제외"
     if result.truncated:
