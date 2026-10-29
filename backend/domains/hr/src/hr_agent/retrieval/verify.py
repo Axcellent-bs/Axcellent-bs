@@ -13,6 +13,9 @@ from typing import Protocol
 
 from pydantic import BaseModel, Field
 
+from ax_contracts.schemas import Card
+from hr_agent.retrieval.cards import dense_text
+
 MAX_CANDIDATES = 3
 
 
@@ -63,3 +66,23 @@ class RelevanceVerifier:
         if sorted(got) != sorted(labels):  # 빠졌거나 받지 않은 label이 있거나 중복이면 버린다
             return None
         return {labels[j.label]: j.relevant for j in out.judgements}
+
+
+async def apply_verification(
+    verifier: RelevanceVerifier | None,
+    cut: float,
+    query: str,
+    found: list[tuple[Card, float]],
+) -> list[tuple[Card, float]]:
+    """검증이 켜져 있으면 1위에서 `cut` 넘게 낮은 후보를 빼고, 남은 앞 3개를 LLM이 거른다.
+
+    검증기가 없거나 판정이 실패하면(None) 거르지 않은 결과를 그대로 쓴다.
+    """
+    if verifier is None or not found:
+        return found
+    top = found[0][1]
+    near = [(c, s) for c, s in found if s >= top - cut - 1e-9]
+    verdict = await verifier.verify(query, [(c.card_id, dense_text(c)) for c, _ in near])
+    if verdict is None:
+        return near
+    return [(c, s) for c, s in near[:MAX_CANDIDATES] if verdict.get(c.card_id)]

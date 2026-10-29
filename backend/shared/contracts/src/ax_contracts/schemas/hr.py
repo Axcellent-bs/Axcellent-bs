@@ -20,6 +20,8 @@ skill과 등급(등급 신고는 안전 레이어 레지스트리가 원본이�
 | `list_handovers`·`list_open_questions`·`list_onboardings` | 읽기 | 인수인계·질문·온보딩 현황 |
 | `list_changes`·`list_candidate_cards`·`get_audit_timeline` | 읽기 | 변경·후보 카드·감사 기록 |
 | `list_cards` | 읽기 | 확정된(후보가 아닌) 결정 카드 목록 |
+| `record_resolution` | A | 사건 카드에 해결 내용(원인·조치·결과·소요 시간) 기록 |
+| `find_similar_cases` | 읽기 | 비슷한 과거 사건·결정과 당시 해결 내용 |
 
 `RecordCaseOutput`은 모델만 추가했고, hr의 출력 전환은 hr 담당 PR에서 한다.
 
@@ -447,6 +449,70 @@ class ListCardsInput(AxModel):
 
 class ListCardsOutput(AxModel):
     cards: list[Card] = Field(default_factory=list)  # 후보가 아닌 `active` 카드, 최근 순
+    collected_at: UtcDatetime
+
+
+class CaseResolution(AxModel):
+    """사건이 어떻게 해결됐는지. 값이 없으면 지어내지 않고 비워 둔다.
+
+    카드 본문에는 빈 값이 "확인할 수 없음"으로 적힌다.
+    """
+
+    outcome: Literal["resolved", "workaround", "unresolved"]
+    root_cause: str | None = None
+    action: str | None = None
+    minutes_to_resolve: int | None = Field(default=None, ge=0)
+    resolved_at: UtcDatetime | None = None
+
+
+class RecordResolutionInput(AxModel):
+    """`record_resolution` 입력. 사건(`context_id`)의 카드에 해결 내용을 채운다."""
+
+    context_id: str
+    outcome: Literal["resolved", "workaround", "unresolved"]
+    root_cause: str | None = None
+    action: str | None = None
+    minutes_to_resolve: int | None = Field(default=None, ge=0)
+    resolved_at: UtcDatetime | None = None  # 없으면 요청을 받은 시각
+
+
+class RecordResolutionOutput(AxModel):
+    """`record_resolution` 결과.
+
+    - `recorded`: 사건의 카드에 해결 내용을 채웠다.
+    - `duplicate`: 같은 내용이 이미 기록되어 있다.
+    - `no_card`: 그 사건에서 만든 카드가 없어 기록할 곳이 없다.
+    """
+
+    outcome: Literal["recorded", "duplicate", "no_card"]
+    card_id: str | None = None
+
+
+class FindSimilarCasesInput(AxModel):
+    """`find_similar_cases` 입력. 질의는 현재 사건을 설명하는 글이다(증상·영역 등)."""
+
+    query: str = Field(min_length=1)
+    area: str | None = None
+    only_resolved: bool = False  # true면 해결 내용이 기록된 카드만
+    limit: int = Field(default=3, ge=1, le=10)
+
+
+class SimilarCase(AxModel):
+    card_id: str
+    title: str
+    summary: str  # 카드의 결정 한 줄(없으면 제목)
+    similarity: float = Field(ge=0.0, le=1.0)  # 검색 점수 그대로
+    resolved: bool
+    resolution: CaseResolution | None = None
+    created_at: UtcDatetime
+
+
+class FindSimilarCasesOutput(AxModel):
+    """비슷한 과거 사건·결정(최대 `limit`건). 기준 미만이면 비어 있고 `max_similarity`는 0이다."""
+
+    cases: list[SimilarCase] = Field(default_factory=list)
+    max_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
+    method: Literal["dense", "dice"]
     collected_at: UtcDatetime
 
 

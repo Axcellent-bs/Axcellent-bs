@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from ax_contracts.schemas import AgentRequest, AgentResult
 from hr_agent.cards import decision as card_decision
 from hr_agent.cards import service as cards
+from hr_agent.case_memory import service as case_memory
 from hr_agent.clients.errors import UpstreamError, bind_meta
 from hr_agent.fraud_similar import service as fraud_similar
 from hr_agent.handover import service as handover
@@ -81,6 +82,8 @@ _HANDLERS = {
     "decide_candidate_card": _with_services(card_decision.decide_candidate_card),
     "check_plan": check_plan,
     "find_similar_fraud_cards": _with_services(fraud_similar.find_similar_fraud_cards),
+    "find_similar_cases": _with_services(case_memory.find_similar_cases),
+    "record_resolution": _with_services(case_memory.record_resolution),
     "record_case": record_case,
     "get_roster": get_roster,
     "start_handover": start_handover,

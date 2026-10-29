@@ -136,6 +136,8 @@ SERVICES: tuple[Service, ...] = (
             "record_case",
             "check_plan",
             "find_similar_fraud_cards",
+            "find_similar_cases",
+            "record_resolution",
             "list_candidate_cards",
             "list_cards",
             "get_audit_timeline",
