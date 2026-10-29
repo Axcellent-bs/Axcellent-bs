@@ -102,9 +102,10 @@ from planning_agent.domain.rules import (
     para_of,
     verify_rollback,
 )
-from planning_agent.domain.seed import initial_state
+from planning_agent.domain.seed import initial_state, real_state
 from planning_agent.domain.trace import changed_paths_for
 from planning_agent.result_notify import ResultSender, send_change_result
+from planning_agent.vcs.base import VcsError
 
 AGENT_NAME = "planning"
 MAX_INSTRUCTION_CHARS = 1000  # 사람 수정 지시 길이
@@ -418,6 +419,7 @@ class PlanningService:
         result_sender: ResultSender | None = None,
         role: str | None = None,
         dev_sender: DevSender | None = None,
+        real_example: bool = False,
     ):
         # 서비스 역할: "" = 합친 모드(원래 동작), "planning" = 기획서까지, "dev" = PR·머지만
         self.role = (os.getenv("PLANNING_ROLE", "") if role is None else role).strip()
@@ -441,13 +443,15 @@ class PlanningService:
         self._subscribers: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = {}
         self._locks: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self.version = 0
+        # 실행 중인 서버는 예시 대신 실제 머지된 작업 하나로 시작한다 (seed.real_state)
+        self.real_example = real_example
         self._init_state()
 
     # ---- 상태·구독
 
     def _init_state(self) -> None:
         self.clock: Clock = self._clock_factory()
-        self.state: State = initial_state()
+        self.state: State = real_state() if self.real_example else initial_state()
         self.state.tenant_id = self.tenant_id
         self._idempotent: dict[str, ActionResult] = {}
         self._dev_sent: dict[str, str] = {}  # dev: 기획서 → 마지막으로 돌려준 결과 지문
@@ -2337,6 +2341,39 @@ class PlanningService:
             )
 
         return await self._apply(run)
+
+    async def repo_write(
+        self,
+        action: str,
+        target: str,
+        text: str,
+        params: dict | None,
+        op: Callable[[], Awaitable[Any]],
+    ) -> Any:
+        """레포 작업 공간 사람 버튼 (사람이 직접 올린 PR·브랜치). 관문을 지난 뒤에만 형상관리를
+        부르고 활동을 남긴다. 형상관리 오류는 실패 활동을 남긴 뒤 `VcsError`로 다시 던진다."""
+        box: dict[str, Any] = {}
+        ctx = f"repo:{target.split('#', 1)[0].split(':', 1)[0]}"
+
+        async def run(s: State) -> ActionResult:
+            n = sum(1 for g in self.gate_calls if g.action == action) + 1
+            await self._execute(action, ctx, f"{target}:{n}", text, params)
+            try:
+                box["result"] = await op()
+            except VcsError as exc:
+                box["error"] = exc
+                note = f"{text} 실패 ({exc.code})"
+                s.activity.append(
+                    self._act(self.clock(), ctx, "dev", "dev", f"vcs.{action}_failed", "API", note)
+                )
+                return ActionResult(outcome="failed")
+            s.activity.append(self._act(self.clock(), ctx, "human", "dev", action, "사람", text))
+            return ActionResult(outcome=action)
+
+        await self._apply(run)
+        if "error" in box:
+            raise box["error"]
+        return box.get("result")
 
     async def revise_dev_task(self, task_id: str, note: str) -> ActionResult:
         """대기 중인 코딩 PR에 사람이 수정 지시를 준다. 개발 AI가 지시대로 고치고 리뷰한 뒤

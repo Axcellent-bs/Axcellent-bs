@@ -127,6 +127,26 @@ execute params (safety #171 `thresholds.toml` 규칙 키, 모두 도메인 상�
 - 코딩 에이전트용 인터페이스(목·GitHub 둘 다, 같은 계약 테스트): `list_files(prefix, limit=2000)` 기준 브랜치 파일 경로(GitHub는 git trees 재귀) · `read_file(path, ref=None)` 파일 글(GitHub는 contents API base64, 100KB 넘는 파일·바이너리·`..` 경로는 `invalid`) · `update_change(number, files, message)` 열린 PR 브랜치에 수정 커밋 더하기(GitHub는 커밋 만들고 ref PATCH). 목은 `seed_files()`로 기준 브랜치 파일을 넣고, 병합하면 그 파일이 기준 브랜치에 들어간다.
 - 아직: `find_related_prs`·역추적은 여전히 메모리 PR을 본다(①②⑤ 연결 전, 연결이 여럿이어도 같다). 간단 요청을 레포 승인 뒤 머지하면 자동 처리 이력·승급 연속 건수에는 넣지 않는다.
 
+### 레포 작업 공간 (개발 화면 작업·PR 탭, `repo_api.py`)
+연결된 레포의 PR·브랜치를 GitHub를 열지 않고 다룬다. 사람이 직접 올린 PR도 모두 보인다.
+
+- 부품 인터페이스(목·GitHub 둘 다, `tests/test_repo_workspace.py`): `list_changes(state, query, limit)`(open·merged·closed·all, 제목·브랜치·번호·작성자 찾기, 최근 갱신 순, 열린 PR 20개까지 CI 점) · `describe_change` · `get_diff`(파일별 unified diff, 파일 300개·파일당 2만 자·합 30만 자에서 자르고 `truncated`) · `list_commits` · `list_comments`(대화 코멘트) · `add_comment` · `reopen_change` · `revert_change`(GitHub는 GraphQL `revertPullRequest` = 화면의 Revert 버튼, 목은 병합 직전 기준 파일로 되돌리는 변경) · `list_branches`(기본·보호, GitHub는 30개까지 compare로 ahead/behind·마지막 커밋 시각) · `delete_branch`(기준·기본 브랜치는 `invalid`)
+- REST (`?connection=<id>`, 없으면 첫 연결, 연결이 없으면 409 `NO_VCS`, 모르는 연결 404):
+
+| 메서드 | 경로 | 내용 |
+| --- | --- | --- |
+| GET | `/repo/prs?state=&q=&limit=` | PR 목록(최대 100, 본문 뺌). 내부 PR과 번호가 이어진 것은 `internal{id, task, merged, closed}` |
+| GET | `/repo/prs/{n}` | 머리(`pr`)·`diff`·`commits`·`comments`·`checks`·`internal` |
+| GET | `/repo/branches` | 브랜치(기준·기본 먼저) + 그 브랜치의 PR(열린 것 우선) |
+| POST (사람) | `/repo/prs/{n}/merge` `{method: merge(기본)·squash·rebase}` | AI PR이면 내부 `mergePr` 흐름 그대로(`via: internal`), 아니면 관문 `merge_pr`(같은 크기·경로 params) 뒤 병합 |
+| POST (사람) | `/repo/prs/{n}/close` · `/reopen` | AI 코딩 작업 PR 닫기는 작업 중단(`cancel_dev_task`). 그 밖은 관문 `repo_close_pr`·`repo_reopen_pr`(A). 중단한 AI 작업은 다시 열지 않음(409 `INTERNAL_FLOW`) |
+| POST (사람) | `/repo/prs/{n}/comment` `{body}` | 관문 `repo_comment`(A) |
+| POST (사람) | `/repo/prs/{n}/revert` `{title?}` | 병합된 PR만. 관문 `repo_revert_pr`(B, merge_pr과 같은 크기·경로·보호 경로 규칙 `revert_*`) 뒤 되돌리기 PR을 연다. 새 PR은 보통 PR처럼 머지한다 |
+| POST (사람) | `/repo/branches/delete` `{name}` | 기준·기본·보호 브랜치 400 `PROTECTED_BRANCH`, 열린 PR 브랜치 409 `OPEN_PR`. 관문 `repo_delete_branch`(A) |
+
+- 부품 오류는 `VCS_<코드>`(not_found 404·conflict 409·invalid 400·rate_limited 429·그 밖 502), 읽기 전용 연결 쓰기는 409 `READ_ONLY`, 관문 거부 409 `GATE_REJECTED`. 쓰기마다 활동(`from` human, point = 액션 이름)을 남기고 실패하면 `vcs.<액션>_failed`.
+- 아직: 줄 코멘트·리뷰 승인, 충돌 해결, 브랜치 만들기는 없다. 목록 코멘트 수는 이슈 목록 한 쪽(100개)에서만 읽는다.
+
 ### 코딩 에이전트 (개발 역할, `coder.py`)
 개발팀원이 개발 화면에 자기 기획을 쓰면 에이전트가 연결된 레포에서 실제로 구현한다.
 

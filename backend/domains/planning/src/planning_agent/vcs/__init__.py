@@ -31,11 +31,17 @@ from dataclasses import dataclass, field
 
 from planning_agent.vcs.base import (
     BRANCH_PREFIX,
+    Branch,
     Capabilities,
     Change,
     ChangedFile,
+    ChangeSummary,
     CheckRun,
     Checks,
+    Comment,
+    Commit,
+    Diff,
+    FileDiff,
     OpenedChange,
     TraceMeta,
     VcsAdapter,
@@ -46,11 +52,17 @@ from planning_agent.vcs.mock import MockVcsAdapter
 
 __all__ = [
     "BRANCH_PREFIX",
+    "Branch",
     "Capabilities",
     "Change",
+    "ChangeSummary",
     "ChangedFile",
     "CheckRun",
     "Checks",
+    "Comment",
+    "Commit",
+    "Diff",
+    "FileDiff",
     "Connection",
     "MockVcsAdapter",
     "OpenedChange",
@@ -291,9 +303,7 @@ def load_saved() -> int:
     try:
         with open(path, encoding="utf-8") as f:
             rows = json.load(f)
-        conns = {
-            r["id"]: Connection(**{**r, "paths": tuple(r.get("paths") or ())}) for r in rows
-        }
+        conns = {r["id"]: Connection(**{**r, "paths": tuple(r.get("paths") or ())}) for r in rows}
     except (OSError, ValueError, KeyError, TypeError):
         return 0
     _screen = conns or None

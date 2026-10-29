@@ -21,6 +21,8 @@ def test_rule_files_load_and_match_agreed_values() -> None:
     values.pop("merge_allowed_paths")
     values.pop("pr_protected_paths")
     values.pop("merge_protected_paths")
+    values.pop("revert_allowed_paths")
+    values.pop("revert_protected_paths")
     assert values == {
         "coupon_total": 300_000,
         "coupon_unit": 20_000,
@@ -115,11 +117,12 @@ def test_protected_paths_rules_are_loaded_for_both_actions() -> None:
     """#169: 보호 경로는 generate_pr·merge_pr에 같은 목록으로 걸려 있다."""
     table = load_thresholds()
     rules = {rule.key: rule for rule in table.rules if rule.metric == "paths_avoid"}
-    assert set(rules) == {"pr_protected_paths", "merge_protected_paths"}
+    assert set(rules) == {"pr_protected_paths", "merge_protected_paths", "revert_protected_paths"}
     pr, merge = rules["pr_protected_paths"], rules["merge_protected_paths"]
-    assert (pr.action, merge.action) == ("generate_pr", "merge_pr")
-    assert pr.field == merge.field == "changed_paths"
-    assert pr.protected == merge.protected
+    revert = rules["revert_protected_paths"]
+    assert (pr.action, merge.action, revert.action) == ("generate_pr", "merge_pr", "repo_revert_pr")
+    assert pr.field == merge.field == revert.field == "changed_paths"
+    assert pr.protected == merge.protected == revert.protected
     for path in ("shop-web/src/pages/Checkout.tsx", "shop-api/src/ax_shop_api/service.py"):
         assert path in pr.protected
 

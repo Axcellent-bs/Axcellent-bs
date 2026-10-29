@@ -65,6 +65,37 @@ export function Talk({ s: state, d, item }: { s: State; d: Dispatch<Action>; ite
   )
 }
 
+// 에이전트 대화 탭: 요청·개발 작업 흐름만 (장애 사건 대화는 공용 AI 대화방에서 본다, 겹치지 않게)
+// 소통(사람 채널)은 부서 공용 탭으로 뺄 때까지 숨긴다
+const isIncident = (s: State, ctx: string) => ctx.startsWith('ctx_inc') || s.incidents.some((x) => x.ctx === ctx)
+export function AgentTalk({ s: state, item }: { s: State; item?: string }) {
+  const live = useCommunications('planning')
+  const s = live ? { ...state, activity: live } : state
+  const convos = convosOf(s).filter((c) => !isIncident(s, c.ctx))
+  // 장애 사건 주소로 들어오면 공용 AI 대화방으로 안내한다
+  if (item && isIncident(s, item)) {
+    return <div className="empty"><b>장애 사건 대화는 AI 대화방에서 봐요</b><a href="/agents/chat" className="btn-ghost">AI 대화방 열기</a></div>
+  }
+  const convo = convos.find((c) => c.ctx === item) ?? convos[0]
+  return (
+    <div className="slack">
+      <aside className="sl-side" aria-label="에이전트 대화">
+        <div className="sl-ws">요청·작업 대화 <span className="muted">{convos.length}</span></div>
+        <div className="sl-group">
+          {convos.map((c) => (
+            <a key={c.ctx} href={`#/agents/${c.ctx}`} className={`sl-ch${c.ctx === convo?.ctx ? ' on' : ''}`} title={c.title}>
+              <span className="sl-hash">⇄</span>
+              <span className="sl-ch-name">{c.title}</span>
+              <span className="sl-count">{c.items.length}</span>
+            </a>
+          ))}
+        </div>
+      </aside>
+      {convo ? <ConvoView s={s} c={convo} /> : <div className="empty"><b>요청·작업 대화 없음</b></div>}
+    </div>
+  )
+}
+
 function Group({ label, list, cur, fallback }: { label: string; list: Thread[]; cur?: string; fallback?: boolean }) {
   const isOn = (t: Thread) => t.id === cur || (fallback && !cur && t.id === 'CH-team')
   return (
