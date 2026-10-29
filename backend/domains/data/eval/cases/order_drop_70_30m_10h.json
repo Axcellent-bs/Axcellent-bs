@@ -1,0 +1,44 @@
+{
+  "id": "order_drop_70_30m_10h",
+  "kind": "order_drop",
+  "description": "주문 70% 급감 30분 (결제 정상)",
+  "window": {
+    "from": "2026-09-10T10:00:00Z",
+    "to": "2026-09-10T11:00:00Z"
+  },
+  "traffic": {
+    "orders_per_5m": 5
+  },
+  "injection": {
+    "type": "order_drop",
+    "factor": 0.3,
+    "from": "2026-09-10T10:20:00Z",
+    "to": "2026-09-10T10:50:00Z"
+  },
+  "cause": {
+    "type": "deploy",
+    "minutes_before": 8,
+    "pr_number": 709
+  },
+  "llm": "grounded",
+  "expected": {
+    "anomaly": {
+      "expected": true,
+      "metric": "order_count",
+      "onset": "2026-09-10T10:20:00Z",
+      "first_failure_bucket": null,
+      "unknown_expected": false
+    },
+    "impact": {
+      "failed_order_count": 0,
+      "affected_customer_count": 0,
+      "damage_amount": 0,
+      "all_failed_payments": 2,
+      "declined_payments": 2
+    },
+    "root_cause": {
+      "injected": "deploy",
+      "ref": "pr:709"
+    }
+  }
+}

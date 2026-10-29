@@ -20,6 +20,7 @@ from pydantic import BaseModel, ValidationError
 from ax_agent_template.llm import LLMClient
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.data import (
+    AccuracyReportInput,
     AnomalyDetectionInput,
     ImpactAnalysisInput,
     KpiSummaryInput,
@@ -27,6 +28,7 @@ from ax_contracts.schemas.data import (
 )
 from data_agent.clients.log_client import get_log_source
 from data_agent.clients.shop_client import ShopUnavailable
+from data_agent.skills.accuracy_report import eval_dir, load_report
 from data_agent.skills.anomaly_detection import detect_anomalies, get_metric_source
 from data_agent.skills.impact_analysis import analyze_impact
 from data_agent.skills.kpi_summary import summarize_kpi
@@ -155,6 +157,24 @@ async def root_cause_hypotheses(request: AgentRequest) -> AgentResult:
     )
 
 
+async def accuracy_report(request: AgentRequest) -> AgentResult:
+    """정확도 평가 결과 파일을 읽어 준다. 결과가 없으면 source none(확인할 수 없음)."""
+    data = _parse(request, AccuracyReportInput)
+    if isinstance(data, AgentResult):
+        return data
+    report = load_report(eval_dir(os.environ))
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=report.model_dump(mode="json"),
+        evidence=Evidence(
+            queries=["eval/results/latest.json", "eval/baseline.json"],
+            data_summary=report.summary,
+            collected_at=datetime.now(UTC),
+        ),
+    )
+
+
 def _not_implemented(skill: str):
     async def handler(request: AgentRequest) -> AgentResult:
         return _result(
@@ -173,4 +193,5 @@ HANDLERS = {
     "fraud_score": _not_implemented("fraud_score"),  # TODO: 후속 PR
     "kpi_summary": kpi_summary,
     "root_cause_hypotheses": root_cause_hypotheses,
+    "accuracy_report": accuracy_report,
 }

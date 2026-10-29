@@ -1,0 +1,44 @@
+{
+  "id": "pay_full_20m_10h",
+  "kind": "payment_fault",
+  "description": "결제 장애 20분, 세기 100%, 10시",
+  "window": {
+    "from": "2026-09-01T10:00:00Z",
+    "to": "2026-09-01T11:00:00Z"
+  },
+  "traffic": {
+    "orders_per_5m": 5
+  },
+  "injection": {
+    "type": "payment_failure",
+    "from": "2026-09-01T10:20:00Z",
+    "to": "2026-09-01T10:40:00Z",
+    "fraction": 1.0
+  },
+  "cause": {
+    "type": "deploy",
+    "minutes_before": 8,
+    "pr_number": 700
+  },
+  "llm": "grounded",
+  "expected": {
+    "anomaly": {
+      "expected": true,
+      "metric": "payment_fail_rate",
+      "onset": "2026-09-01T10:20:00Z",
+      "first_failure_bucket": "2026-09-01T10:20:00Z",
+      "unknown_expected": false
+    },
+    "impact": {
+      "failed_order_count": 29,
+      "affected_customer_count": 19,
+      "damage_amount": 606700,
+      "all_failed_payments": 30,
+      "declined_payments": 1
+    },
+    "root_cause": {
+      "injected": "deploy",
+      "ref": "pr:700"
+    }
+  }
+}

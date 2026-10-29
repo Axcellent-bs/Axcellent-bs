@@ -1,0 +1,24 @@
+{
+  "generated_at": "2026-10-29T01:36:00Z",
+  "case_count": 21,
+  "metrics": {
+    "anomaly.detection_rate": 0.6667,
+    "anomaly.false_positive_rate": 0.6667,
+    "anomaly.mean_delay_minutes": 6.88,
+    "anomaly.max_delay_minutes": 20.0,
+    "anomaly.unknown_handled_rate": 0.0,
+    "impact.match_rate": 0.4545,
+    "impact.mean_abs_amount_error": 25045.5,
+    "impact.mean_abs_amount_error_pct": 6.95,
+    "fraud.skill_available": 0.0,
+    "fraud.precision": null,
+    "fraud.recall": null,
+    "fraud.rule_precision": 1.0,
+    "fraud.rule_recall": 0.3333,
+    "llm.fabricated_number_rate": 0.0,
+    "llm.fallback_rate": 0.3448,
+    "root_cause.top1_rate": 0.9167,
+    "root_cause.ungrounded_survived_rate": 0.0,
+    "root_cause.needs_confirmation_rate": 1.0
+  }
+}

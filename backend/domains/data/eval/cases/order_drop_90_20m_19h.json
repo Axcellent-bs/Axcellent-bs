@@ -1,0 +1,42 @@
+{
+  "id": "order_drop_90_20m_19h",
+  "kind": "order_drop",
+  "description": "주문 90% 급감 20분",
+  "window": {
+    "from": "2026-09-11T19:00:00Z",
+    "to": "2026-09-11T20:00:00Z"
+  },
+  "traffic": {
+    "orders_per_5m": 5
+  },
+  "injection": {
+    "type": "order_drop",
+    "factor": 0.1,
+    "from": "2026-09-11T19:25:00Z",
+    "to": "2026-09-11T19:45:00Z"
+  },
+  "cause": {
+    "type": "none"
+  },
+  "llm": "grounded",
+  "expected": {
+    "anomaly": {
+      "expected": true,
+      "metric": "order_count",
+      "onset": "2026-09-11T19:25:00Z",
+      "first_failure_bucket": null,
+      "unknown_expected": false
+    },
+    "impact": {
+      "failed_order_count": 0,
+      "affected_customer_count": 0,
+      "damage_amount": 0,
+      "all_failed_payments": 2,
+      "declined_payments": 2
+    },
+    "root_cause": {
+      "injected": "none",
+      "ref": null
+    }
+  }
+}

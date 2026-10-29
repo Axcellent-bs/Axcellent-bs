@@ -24,6 +24,7 @@ def test_card_validates(card: AgentCard) -> None:
         "fraud_score",
         "kpi_summary",
         "root_cause_hypotheses",
+        "accuracy_report",
     }
 
 

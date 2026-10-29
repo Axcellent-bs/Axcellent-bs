@@ -1,0 +1,44 @@
+{
+  "id": "pay_weak20_45m_19h",
+  "kind": "payment_fault",
+  "description": "결제 장애 45분, 세기 20%, 19시",
+  "window": {
+    "from": "2026-09-06T19:00:00Z",
+    "to": "2026-09-06T20:00:00Z"
+  },
+  "traffic": {
+    "orders_per_5m": 5
+  },
+  "injection": {
+    "type": "payment_failure",
+    "from": "2026-09-06T19:10:00Z",
+    "to": "2026-09-06T19:55:00Z",
+    "fraction": 0.2
+  },
+  "cause": {
+    "type": "deploy",
+    "minutes_before": 8,
+    "pr_number": 705
+  },
+  "llm": "fail",
+  "expected": {
+    "anomaly": {
+      "expected": true,
+      "metric": "payment_fail_rate",
+      "onset": "2026-09-06T19:10:00Z",
+      "first_failure_bucket": "2026-09-06T19:10:00Z",
+      "unknown_expected": false
+    },
+    "impact": {
+      "failed_order_count": 13,
+      "affected_customer_count": 10,
+      "damage_amount": 461100,
+      "all_failed_payments": 16,
+      "declined_payments": 3
+    },
+    "root_cause": {
+      "injected": "deploy",
+      "ref": "pr:705"
+    }
+  }
+}

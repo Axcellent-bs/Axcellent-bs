@@ -120,7 +120,53 @@ export interface KpiSummaryOutput {
   grade_counts: Record<string, number>;
   blocked_counts: Record<string, number>;
   escalation_count: number | null;
+  /** 운영 중 사람 반응 (공통 로그로 셈). 로그가 없으면 null */
+  human_feedback?: HumanFeedback | null;
 }
+export interface HumanFeedback {
+  handoffs_closed: number; handoffs_rejected: number; handoff_reject_rate: number | null;
+  reviews_decided: number; reviews_rejected: number; review_reject_rate: number | null;
+  results_total: number; results_unknown: number; unknown_rate: number | null;
+}
+
+/** 정확도 평가 결과 (accuracy_report). source none이면 평가 결과가 없다 */
+export interface AccuracyMiss { case_id: string; area: string; what: string }
+export interface AccuracyReportOutput {
+  source: "latest" | "baseline" | "none";
+  generated_at: string | null;
+  case_count: number | null;
+  metrics: Record<string, number | null>;
+  misses: AccuracyMiss[];
+  summary: string;
+}
+/** 화면에 보여 줄 평가 지표: 이름, 단위(rate=비율 %, min=분, won=원, pct=%, flag=예/아니오) */
+export const ACCURACY_METRICS: { key: string; label: string; unit: "rate" | "min" | "won" | "pct" | "flag"; better: "high" | "low" | null }[] = [
+  { key: "anomaly.detection_rate", label: "이상 탐지 탐지율", unit: "rate", better: "high" },
+  { key: "anomaly.false_positive_rate", label: "이상 탐지 오탐률", unit: "rate", better: "low" },
+  { key: "anomaly.mean_delay_minutes", label: "탐지 지연 (평균)", unit: "min", better: "low" },
+  { key: "anomaly.unknown_handled_rate", label: "빈 구간을 '확인할 수 없음'으로 답함", unit: "rate", better: "high" },
+  { key: "impact.match_rate", label: "영향 분석 일치율", unit: "rate", better: "high" },
+  { key: "impact.mean_abs_amount_error", label: "영향 분석 금액 오차 (평균)", unit: "won", better: "low" },
+  { key: "fraud.skill_available", label: "사기 점수 skill 응답", unit: "flag", better: "high" },
+  { key: "fraud.precision", label: "사기 점수 정밀도", unit: "rate", better: "high" },
+  { key: "fraud.recall", label: "사기 점수 재현율", unit: "rate", better: "high" },
+  { key: "llm.fabricated_number_rate", label: "설명에 지어낸 숫자", unit: "rate", better: "low" },
+  { key: "llm.fallback_rate", label: "설명 템플릿 대체", unit: "rate", better: null },
+  { key: "root_cause.top1_rate", label: "원인 추정 1순위 적중", unit: "rate", better: "high" },
+  { key: "root_cause.ungrounded_survived_rate", label: "근거 없는 원인 후보가 남음", unit: "rate", better: "low" },
+  { key: "root_cause.needs_confirmation_rate", label: "원인 추정 '확인 필요'", unit: "rate", better: null },
+];
+export function formatMetric(value: number | null | undefined, unit: (typeof ACCURACY_METRICS)[number]["unit"]): string {
+  const v = num(value);
+  if (v == null) return UNKNOWN;
+  if (unit === "rate") return `${Math.round(v * 1000) / 10}%`;
+  if (unit === "pct") return `${v}%`;
+  if (unit === "min") return `${v}분`;
+  if (unit === "won") return `${Math.round(v).toLocaleString("ko-KR")}원`;
+  return v >= 1 ? "예" : "아니오 (미구현)";
+}
+/** 비율을 % 글자로. 분모가 없으면(null) 확인할 수 없음 */
+export const percent = (v: number | null | undefined) => (num(v) == null ? UNKNOWN : `${Math.round((v as number) * 1000) / 10}%`);
 export interface Evidence { data_summary: string; queries: string[]; ref_ids: string[]; collected_at?: string | null }
 export interface A2AResult<T> { status: string; outcome?: string | null; output: T; evidence: Evidence; fallback: boolean }
 
@@ -146,16 +192,19 @@ export const dataAi = {
     if (!res.ok) throw new ApiError(`${DATA_SERVER} 상태 확인 실패 (${res.status})`, res.status);
     return true;
   },
-  kpiSummary: async (): Promise<A2AResult<KpiSummaryOutput>> => {
-    const body = {
-      meta: { context_id: "ctx_req_dashboard", token: DATA_A2A_TOKEN, path: [], deadline: new Date(Date.now() + 30_000).toISOString() },
-      skill: "kpi_summary",
-      input: {},
-    };
-    const res = await fetch(`${DATA_A2A_URL}/a2a`, { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    const json = (await res.json().catch(() => null)) as A2AResult<KpiSummaryOutput> | null;
-    if (!res.ok || !json) throw new ApiError(`${DATA_SERVER}에서 KPI를 받지 못했습니다 (${res.status})`, res.status);
-    if (json.status !== "completed") throw new ApiError(`데이터 AI가 요청을 처리하지 않았습니다 (${json.outcome ?? json.status})`, res.status);
-    return json;
-  },
+  kpiSummary: () => askData<KpiSummaryOutput>("kpi_summary", "KPI"),
+  accuracyReport: () => askData<AccuracyReportOutput>("accuracy_report", "정확도 평가 결과"),
 };
+
+async function askData<T>(skill: string, what: string): Promise<A2AResult<T>> {
+  const body = {
+    meta: { context_id: "ctx_req_dashboard", token: DATA_A2A_TOKEN, path: [], deadline: new Date(Date.now() + 30_000).toISOString() },
+    skill,
+    input: {},
+  };
+  const res = await fetch(`${DATA_A2A_URL}/a2a`, { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const json = (await res.json().catch(() => null)) as A2AResult<T> | null;
+  if (!res.ok || !json) throw new ApiError(`${DATA_SERVER}에서 ${what}를 받지 못했습니다 (${res.status})`, res.status);
+  if (json.status !== "completed") throw new ApiError(`데이터 AI가 요청을 처리하지 않았습니다 (${json.outcome ?? json.status})`, res.status);
+  return json;
+}

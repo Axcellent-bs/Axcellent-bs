@@ -68,3 +68,22 @@ def test_auth_refusal_is_logged_as_rejected(
     assert [r.kind for r in records] == ["rejected"]
     assert records[0].source == "safety"
     assert records[0].payload["reason_code"] == reason
+
+
+@pytest.mark.parametrize("decision", ["approved", "rejected"])
+def test_human_review_decision_is_logged(
+    client: Any, coupon: Any, log_store: Any, decision: str
+) -> None:
+    """사람의 보류 결정이 남아야 data `kpi_summary`가 승인 거절률을 셀 수 있다."""
+    body = coupon(20, 20_000, purpose_code="campaign", key="big").model_dump(mode="json")
+    review_id = client.post("/api/safety/executions", json=body, headers=MARKETING).json()["data"][
+        "review_id"
+    ]
+    url = f"/api/safety/reviews/{review_id}/decision"
+    human = {"Authorization": "Bearer human:taeyoon"}
+    assert client.post(url, json={"decision": decision}, headers=human).status_code == 200
+    (record,) = [r for r in _records(log_store) if r.kind == "task_status"]
+    assert record.source == "safety"
+    assert record.payload["outcome"] == f"review_{decision}"
+    assert record.payload["review_id"] == review_id
+    assert "taeyoon" not in str(record.payload)  # 결정한 사람은 남기지 않는다

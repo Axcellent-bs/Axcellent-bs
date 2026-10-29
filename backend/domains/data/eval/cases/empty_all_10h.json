@@ -1,0 +1,40 @@
+{
+  "id": "empty_all_10h",
+  "kind": "empty",
+  "description": "구간과 지난 7일 모두 데이터 없음",
+  "window": {
+    "from": "2026-09-21T10:00:00Z",
+    "to": "2026-09-21T11:00:00Z"
+  },
+  "traffic": {
+    "orders_per_5m": 5
+  },
+  "injection": {
+    "type": "empty",
+    "history_empty": true
+  },
+  "cause": {
+    "type": "none"
+  },
+  "llm": "grounded",
+  "expected": {
+    "anomaly": {
+      "expected": false,
+      "metric": null,
+      "onset": null,
+      "first_failure_bucket": null,
+      "unknown_expected": true
+    },
+    "impact": {
+      "failed_order_count": 0,
+      "affected_customer_count": 0,
+      "damage_amount": 0,
+      "all_failed_payments": 0,
+      "declined_payments": 0
+    },
+    "root_cause": {
+      "injected": "none",
+      "ref": null
+    }
+  }
+}

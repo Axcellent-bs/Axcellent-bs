@@ -1,0 +1,44 @@
+{
+  "id": "pay_full_20m_03h_night",
+  "kind": "payment_fault",
+  "description": "결제 장애 20분, 새벽(주문 적음)",
+  "window": {
+    "from": "2026-09-07T03:00:00Z",
+    "to": "2026-09-07T04:00:00Z"
+  },
+  "traffic": {
+    "orders_per_5m": 5
+  },
+  "injection": {
+    "type": "payment_failure",
+    "from": "2026-09-07T03:20:00Z",
+    "to": "2026-09-07T03:40:00Z",
+    "fraction": 1.0
+  },
+  "cause": {
+    "type": "deploy",
+    "minutes_before": 8,
+    "pr_number": 706
+  },
+  "llm": "grounded",
+  "expected": {
+    "anomaly": {
+      "expected": true,
+      "metric": "payment_fail_rate",
+      "onset": "2026-09-07T03:20:00Z",
+      "first_failure_bucket": "2026-09-07T03:25:00Z",
+      "unknown_expected": false
+    },
+    "impact": {
+      "failed_order_count": 3,
+      "affected_customer_count": 3,
+      "damage_amount": 66000,
+      "all_failed_payments": 3,
+      "declined_payments": 0
+    },
+    "root_cause": {
+      "injected": "deploy",
+      "ref": "pr:706"
+    }
+  }
+}

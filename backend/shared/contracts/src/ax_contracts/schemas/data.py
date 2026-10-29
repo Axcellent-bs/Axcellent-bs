@@ -112,6 +112,25 @@ class IncidentKpi(AxModel):
     used_memory: bool
 
 
+class HumanFeedback(AxModel):
+    """운영 중 사람 반응 (공통 로그로 센다). 분모가 0이면 비율은 None(확인할 수 없음).
+
+    - 받은 요청 반려율: 사람 할 일함에서 끝난 일 중 반려(`handoff_rejected`)
+    - 승인 거절률: 사람이 결정한 C 등급 보류 중 거절(`review_rejected`)
+    - 확인할 수 없음 비율: 에이전트 응답(`result_sent`) 중 `unavailable`·`service_disabled`
+    """
+
+    handoffs_closed: int = Field(default=0, ge=0)
+    handoffs_rejected: int = Field(default=0, ge=0)
+    handoff_reject_rate: float | None = Field(default=None, ge=0, le=1)
+    reviews_decided: int = Field(default=0, ge=0)
+    reviews_rejected: int = Field(default=0, ge=0)
+    review_reject_rate: float | None = Field(default=None, ge=0, le=1)
+    results_total: int = Field(default=0, ge=0)
+    results_unknown: int = Field(default=0, ge=0)
+    unknown_rate: float | None = Field(default=None, ge=0, le=1)
+
+
 class KpiSummaryOutput(AxModel):
     incidents: list[IncidentKpi] = Field(default_factory=list)
     # 사건이 0건이면 셀 것이 없어 None (#40)
@@ -119,6 +138,33 @@ class KpiSummaryOutput(AxModel):
     grade_counts: dict[str, int] = Field(default_factory=dict)
     blocked_counts: dict[str, int] = Field(default_factory=dict)
     escalation_count: int = Field(ge=0)
+    # 운영 중 사람 반응 비율 (선택). 공통 로그가 하나도 없으면 None
+    human_feedback: HumanFeedback | None = None
+
+
+# ---------- accuracy_report ----------
+#
+# 정확도 평가(`domains/data/eval/run.py`) 결과를 화면에 준다. 최근 실행 결과(results/latest.json)가
+# 있으면 그것을, 없으면 커밋된 기준(baseline.json)을 준다. 둘 다 없으면 source "none".
+
+
+class AccuracyReportInput(AxModel):
+    pass
+
+
+class AccuracyMiss(AxModel):
+    case_id: str
+    area: str  # 이상 탐지·영향 분석·원인 추정·사기 점수·LLM 설명
+    what: str
+
+
+class AccuracyReportOutput(AxModel):
+    source: Literal["latest", "baseline", "none"]
+    generated_at: UtcDatetime | None = None
+    case_count: int | None = Field(default=None, ge=0)
+    metrics: dict[str, float | None] = Field(default_factory=dict)  # 값이 없으면 None
+    misses: list[AccuracyMiss] = Field(default_factory=list)  # 최근 실행 결과에만 있다
+    summary: str
 
 
 # ---------- root_cause_hypotheses ----------

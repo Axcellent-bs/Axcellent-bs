@@ -1,0 +1,39 @@
+{
+  "id": "normal_14h",
+  "kind": "normal",
+  "description": "평소 14시",
+  "window": {
+    "from": "2026-09-16T14:00:00Z",
+    "to": "2026-09-16T15:00:00Z"
+  },
+  "traffic": {
+    "orders_per_5m": 5
+  },
+  "injection": {
+    "type": "none"
+  },
+  "cause": {
+    "type": "none"
+  },
+  "llm": "fail",
+  "expected": {
+    "anomaly": {
+      "expected": false,
+      "metric": null,
+      "onset": null,
+      "first_failure_bucket": null,
+      "unknown_expected": false
+    },
+    "impact": {
+      "failed_order_count": 0,
+      "affected_customer_count": 0,
+      "damage_amount": 0,
+      "all_failed_payments": 2,
+      "declined_payments": 2
+    },
+    "root_cause": {
+      "injected": "none",
+      "ref": null
+    }
+  }
+}
