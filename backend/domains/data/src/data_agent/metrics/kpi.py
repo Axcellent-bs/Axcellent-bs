@@ -10,7 +10,7 @@
 - resolved_notice_at: 두 번째로 완료된 `publish_notice`(정상화 공지) 시각. 없으면 None.
 - mttr_seconds: recovered_at − detected_at (정수 초). recovered_at이 없으면 None.
 - used_memory: 사건에 `memory_referenced` 기록이 있으면 True.
-- auto_handled_rate: `escalated` 기록이 없는 사건 수 / 사건 수. 사건이 0이면 0.0.
+- auto_handled_rate: `escalated` 기록이 없는 사건 수 / 사건 수. 사건이 0이면 None.
 - grade_counts: `execute_decided`의 grade별 건수.
 - blocked_counts: `rejected`의 `payload.reason_code`별 건수 (없으면 "UNKNOWN").
 - escalation_count: `escalated` 기록 수.
@@ -33,6 +33,7 @@ RESOLVED_EVENT = "incident.resolved"
 RECOVERY_SKILL = "verify_recovery"
 NOTICE_SKILL = "publish_notice"
 UNVERIFIED_RECOVERY = "복구 여부 미확인(verify 완료 기준)"
+NO_INCIDENT_RATE = "사건 0건이라 확인할 수 없음"
 
 
 @dataclass(frozen=True)
@@ -126,7 +127,9 @@ def compute_kpi(records: list[LogRecord], context_ids: list[str] | None = None) 
             notes.append(f"{name}: 확인할 수 없음: 해당 종류 로그 0건 ({kind})")
 
     escalated_contexts = {r.context_id for r in escalated}
-    rate = (len(incidents) - len(escalated_contexts)) / len(incidents) if incidents else 0.0
+    rate = (len(incidents) - len(escalated_contexts)) / len(incidents) if incidents else None
+    if rate is None:
+        notes.append(f"auto_handled_rate: {NO_INCIDENT_RATE}")
     grades = Counter(r.grade for r in decided if r.grade)
     blocked = Counter(str(r.payload.get("reason_code") or "UNKNOWN") for r in rejected)
     output = KpiSummaryOutput(

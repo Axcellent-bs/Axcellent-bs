@@ -254,6 +254,14 @@ def test_data_kpi_summary() -> None:
         }
     )
     assert out.grade_counts["A"] == 3
+    # 사건 0건이면 auto_handled_rate는 None (#40). 값이 있으면 0~1 범위는 그대로
+    empty = KpiSummaryOutput.model_validate({"escalation_count": 0})
+    assert empty.auto_handled_rate is None
+    assert KpiSummaryOutput.model_validate(
+        {"auto_handled_rate": None, "escalation_count": 0}
+    ).auto_handled_rate is None
+    with pytest.raises(ValidationError):
+        KpiSummaryOutput.model_validate({"auto_handled_rate": 1.5, "escalation_count": 0})
     with pytest.raises(ValidationError):
         IncidentKpi.model_validate({**incident, "mttr_seconds": -1})
 

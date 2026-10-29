@@ -18,7 +18,7 @@ from data_agent import handlers, seed_logs
 from data_agent.clients.log_client import CommonLogSource, MockLogSource, get_log_source
 from data_agent.explain import _Summary
 from data_agent.handlers import HANDLERS
-from data_agent.metrics.kpi import UNVERIFIED_RECOVERY, compute_kpi
+from data_agent.metrics.kpi import NO_INCIDENT_RATE, UNVERIFIED_RECOVERY, compute_kpi
 from data_agent.seed_logs import CTX_FIRST, CTX_SECOND, SEED_LOGS
 from data_agent.skills.kpi_summary import summarize_kpi
 
@@ -148,10 +148,26 @@ async def test_empty_logs() -> None:
     result = await _kpi(period_from=datetime(2027, 1, 1, tzinfo=UTC))
     out = result.output
     assert out.incidents == []
-    assert out.auto_handled_rate == 0.0
+    assert out.auto_handled_rate is None  # 셀 사건이 없으면 0%가 아니라 확인할 수 없음 (#40)
     assert out.grade_counts == {} and out.blocked_counts == {} and out.escalation_count == 0
     assert result.summary is None
     assert "확인할 수 없음: 조건에 맞는 공통 로그 0건" in result.evidence.data_summary
+    assert f"auto_handled_rate: {NO_INCIDENT_RATE}" in result.evidence.data_summary
+
+
+def test_rate_is_none_when_only_non_incident_logs() -> None:
+    # 로그는 있지만 사건(ctx_inc_)이 아닌 기록뿐이면 사건 0건
+    records = [r.model_copy(update={"context_id": "ctx_req_x"}) for r in SEED_LOGS[:5]]
+    computed = compute_kpi(records)
+    assert computed.output.incidents == []
+    assert computed.output.auto_handled_rate is None
+    assert f"auto_handled_rate: {NO_INCIDENT_RATE}" in computed.notes
+
+
+def test_rate_with_incidents_is_unchanged() -> None:
+    computed = compute_kpi(SEED_LOGS)
+    assert computed.output.auto_handled_rate == seed_logs.EXPECTED_AUTO_HANDLED_RATE
+    assert not any(NO_INCIDENT_RATE in n for n in computed.notes)
 
 
 def test_missing_kinds_are_reported_not_guessed() -> None:
