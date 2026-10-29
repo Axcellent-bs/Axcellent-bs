@@ -6,11 +6,25 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ax_contracts.data_access.shop_failed_orders import FailedOrder, ShopFailedOrdersResult
 
-# 결제한 사람 쪽 사유. 장애와 무관하므로 장애 피해에서 뺀다 (shop-api `failure_code`)
+# 장애(결제 서버·결제사 쪽) 사유. 이 코드만 장애 피해로 센다 (shop-api `failure_code`)
+FAULT_REASONS = frozenset(
+    {
+        "PG_UNAVAILABLE",  # shop-api 장애 주입(결제 서버 5xx)
+        "PG_TIMEOUT",
+        "PG_ERROR",
+        "PG_5XX",
+        "GATEWAY_TIMEOUT",
+        "PAYMENT_GATEWAY_TIMEOUT",
+        "TIMEOUT",
+        "SERVER_ERROR",
+        "NETWORK_ERROR",
+    }
+)
+# 결제한 사람 쪽 사유. 장애와 무관하므로 장애 피해에서 뺀다
 USER_SIDE_REASONS: dict[str, str] = {
     "PG_DECLINED": "카드 거절",
     "CARD_DECLINED": "카드 거절",
@@ -29,29 +43,36 @@ MISSING_REASONS = frozenset({"", "UNKNOWN"})
 class FailureSplit:
     """실패 결제를 장애 피해와 제외 대상으로 나눈 결과."""
 
-    fault: list[FailedOrder]  # 장애로 실패한 결제 (사용자 쪽 사유가 아닌 것)
+    fault: list[FailedOrder]  # 장애로 실패한 결제 (`FAULT_REASONS`)
     excluded: dict[str, int]  # 사용자 쪽 사유 이름(카드 거절 등) → 건수
     missing_reason: int  # 실패 사유가 없는 결제 수 (있으면 장애인지 알 수 없다)
+    unseen: dict[str, int] = field(default_factory=dict)  # 처음 보는 실패 코드 → 건수
 
 
 def split_failures(result: ShopFailedOrdersResult) -> FailureSplit:
     """실패 사유로 장애 피해와 사용자 쪽 실패를 나눈다.
 
-    사용자 쪽 사유(`USER_SIDE_REASONS`)는 빼고, 그 밖의 사유(서버 오류·시간 초과 등)는 장애로 센다.
-    사유가 없는 결제는 어느 쪽인지 알 수 없어 따로 센다.
+    장애 쪽 사유(`FAULT_REASONS`)만 장애로 세고, 사용자 쪽 사유(`USER_SIDE_REASONS`)는 뺀다.
+    둘 다 아닌 처음 보는 코드와 사유가 없는 결제는 어느 쪽인지 알 수 없어 따로 센다
+    (있으면 영향 분석은 숫자를 내지 않는다).
     """
     fault: list[FailedOrder] = []
     excluded: Counter[str] = Counter()
+    unseen: Counter[str] = Counter()
     missing = 0
     for order in result.orders:
-        code = (order.reason or "").strip()
-        if code.upper() in MISSING_REASONS:
+        code = (order.reason or "").strip().upper()
+        if code in MISSING_REASONS:
             missing += 1
-        elif code.upper() in USER_SIDE_REASONS:
-            excluded[USER_SIDE_REASONS[code.upper()]] += 1
-        else:
+        elif code in USER_SIDE_REASONS:
+            excluded[USER_SIDE_REASONS[code]] += 1
+        elif code in FAULT_REASONS:
             fault.append(order)
-    return FailureSplit(fault=fault, excluded=dict(excluded), missing_reason=missing)
+        else:
+            unseen[code] += 1
+    return FailureSplit(
+        fault=fault, excluded=dict(excluded), missing_reason=missing, unseen=dict(unseen)
+    )
 
 
 @dataclass(frozen=True)

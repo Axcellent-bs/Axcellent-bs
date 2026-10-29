@@ -143,7 +143,8 @@ export interface AccuracyReportOutput {
 export const ACCURACY_METRICS: { key: string; label: string; unit: "rate" | "min" | "won" | "pct" | "flag"; better: "high" | "low" | null }[] = [
   { key: "anomaly.detection_rate", label: "이상 탐지 탐지율", unit: "rate", better: "high" },
   { key: "anomaly.false_positive_rate", label: "이상 탐지 오탐률", unit: "rate", better: "low" },
-  { key: "anomaly.mean_delay_minutes", label: "탐지 지연 (평균)", unit: "min", better: "low" },
+  { key: "anomaly.payment_mean_delay_minutes", label: "결제 장애 탐지 지연 (평균)", unit: "min", better: "low" },
+  { key: "anomaly.drop_mean_delay_minutes", label: "주문 급감 탐지 지연 (평균)", unit: "min", better: "low" },
   { key: "anomaly.unknown_handled_rate", label: "빈 구간을 '확인할 수 없음'으로 답함", unit: "rate", better: "high" },
   { key: "impact.match_rate", label: "영향 분석 일치율", unit: "rate", better: "high" },
   { key: "impact.mean_abs_amount_error", label: "영향 분석 금액 오차 (평균)", unit: "won", better: "low" },

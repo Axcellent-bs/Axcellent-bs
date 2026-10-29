@@ -4,9 +4,11 @@ shop-api에서 실패 주문을 읽어 건수·금액·영향 고객·카테고�
 LLM은 `summary` 문장만 쓰며, 숫자가 어긋나면 고정 템플릿으로 대체한다(`fallback`).
 
 장애 피해는 장애로 실패한 결제만 센다(정확도 평가 PR #55). shop-api 실패 주문의 `reason`
-(failure_code)이 사용자 쪽 사유(카드 거절·한도 초과 등)면 빼고, 뺀 건수는 근거에 따로 적는다.
-실패 사유가 없는 결제가 있으면 장애인지 알 수 없어 숫자를 내지 않는다(`ShopUnavailable`
-`NO_FAILURE_REASON` → 핸들러가 "확인할 수 없음"으로 답한다).
+(failure_code)이 장애 쪽 코드(`impact.FAULT_REASONS`)인 것만 세고, 사용자 쪽 사유(카드 거절·
+한도 초과 등)는 빼서 근거에 따로 적는다. 아래면 장애인지 알 수 없어 숫자를 내지 않는다
+(`ShopUnavailable` → 핸들러가 "확인할 수 없음"으로 답한다).
+- 실패 사유가 없는 결제 (`NO_FAILURE_REASON`)
+- 둘 다 아닌 처음 보는 실패 코드 (`UNKNOWN_FAILURE_CODE`, "처음 보는 실패 코드 N건")
 """
 
 from __future__ import annotations
@@ -65,6 +67,13 @@ async def analyze_impact(
         raise ShopUnavailable(
             "NO_FAILURE_REASON",
             f"실패 사유가 없는 결제 {split.missing_reason}건이 있어 장애 피해인지 알 수 없다",
+        )
+    if split.unseen:
+        codes = ", ".join(f"{code} {count}건" for code, count in sorted(split.unseen.items()))
+        raise ShopUnavailable(
+            "UNKNOWN_FAILURE_CODE",
+            f"처음 보는 실패 코드 {sum(split.unseen.values())}건 ({codes})이 있어 "
+            "장애 피해인지 알 수 없다",
         )
     counts = aggregate_impact(split.fault)  # 음수 금액이면 ValueError
     customer_ids = sorted({order.buyer_id for order in split.fault})

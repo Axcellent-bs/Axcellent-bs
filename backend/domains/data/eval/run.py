@@ -43,7 +43,12 @@ from ax_contracts.schemas.data import (  # noqa: E402
     RootCauseInput,
 )
 from data_agent import handlers  # noqa: E402
-from data_agent.clients.shop_client import HttpMetricSource, HttpShopClient, ShopApi  # noqa: E402
+from data_agent.clients.shop_client import (  # noqa: E402
+    HttpMetricSource,
+    HttpShopClient,
+    ShopApi,
+    ShopUnavailable,
+)
 from data_agent.metrics.fraud import SellerFacts, score_seller  # noqa: E402
 from data_agent.skills.anomaly_detection import detect_anomalies  # noqa: E402
 from data_agent.skills.impact_analysis import analyze_impact  # noqa: E402
@@ -55,6 +60,12 @@ BASELINE = HERE / "baseline.json"
 POLL_WINDOW = timedelta(minutes=15)  # 주기 감시가 묻는 구간 길이
 POLL_STEP = timedelta(minutes=5)  # 주기 감시 간격
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
+# 장애 종류별로 "잡았다"고 보는 지표. 결제 장애는 비율(실패율)과 건수(실패 주문 수) 어느 쪽으로
+# 잡아도 된다: 5분 결제가 적으면 실패율은 판정하지 않고 실패 주문 수로 본다 (#55 다음 PR)
+SIGNALS: dict[str, list[str]] = {
+    "payment_fault": ["payment_fail_rate", "order_fail_count"],
+    "order_drop": ["order_count"],
+}
 
 # 지표 이름 → (설명, 좋아지는 방향). 방향이 None이면 기준 비교에서 빼는 참고값이다
 METRICS: dict[str, tuple[str, str | None]] = {
@@ -66,8 +77,10 @@ METRICS: dict[str, tuple[str, str | None]] = {
         "이상 탐지 오탐률 (장애 없는 시나리오 중 이상이라고 한 비율)",
         "lower",
     ),
-    "anomaly.mean_delay_minutes": ("탐지 지연 평균 (분, 5분 간격 감시 기준)", "lower"),
-    "anomaly.max_delay_minutes": ("탐지 지연 최대 (분)", "lower"),
+    "anomaly.payment_mean_delay_minutes": ("결제 장애 탐지 지연 평균 (분, 5분 간격 감시)", "lower"),
+    "anomaly.payment_max_delay_minutes": ("결제 장애 탐지 지연 최대 (분)", "lower"),
+    "anomaly.drop_mean_delay_minutes": ("주문 급감 탐지 지연 평균 (분)", "lower"),
+    "anomaly.drop_max_delay_minutes": ("주문 급감 탐지 지연 최대 (분)", "lower"),
     "anomaly.unknown_handled_rate": ("빈 구간을 '확인할 수 없음'으로 답한 비율", "higher"),
     "impact.match_rate": ("영향 분석 일치율 (건수·고객·금액 모두 정답과 같음)", "higher"),
     "impact.mean_abs_amount_error": ("영향 분석 금액 오차 평균 (원)", "lower"),
@@ -165,7 +178,7 @@ async def _delay(case: dict[str, Any], source: HttpMetricSource) -> float | None
     llm = eval_llm.ScriptedLLM("fail")  # 감시는 LLM을 쓰지 않는다
     while moment <= end:
         data = AnomalyDetectionInput(
-            window_from=moment - POLL_WINDOW, window_to=moment, metrics=[expected["metric"]]
+            window_from=moment - POLL_WINDOW, window_to=moment, metrics=SIGNALS[case["kind"]]
         )
         result = await detect_anomalies(data, source, llm)
         if any(v.is_anomaly for v in result.output.verdicts):
@@ -200,14 +213,21 @@ async def run_case(case: dict[str, Any]) -> dict[str, Any]:
             if x is not None
         }
         metric = expected["anomaly"]["metric"]
+        signals = SIGNALS.get(case["kind"], [])
+        status = getattr(anomaly.output, "status", None)  # 예전 계약에는 없다
         out["anomaly"] = {
             "expected": expected["anomaly"]["expected"],
             "metric": metric,
+            "signals": signals,
             "flagged": flagged,
-            "detected": metric in flagged if metric else None,
+            "detected": any(m in flagged for m in signals) if signals else None,
             "any_anomaly": anomaly.output.any_anomaly,
+            "status": status,
             "summary": anomaly.output.summary,
-            "said_unknown": "확인할 수 없음" in anomaly.output.summary,
+            # 구간 상태가 있으면 그것으로, 없으면(예전 코드) 문장으로 본다
+            "said_unknown": status == "unknown"
+            if status is not None
+            else "확인할 수 없음" in anomaly.output.summary,
             "llm_used": anomaly.output.any_anomaly,
             "fallback": anomaly.fallback,
             "fabricated": _fabricated(anomaly.output.summary, allowed)
@@ -217,33 +237,43 @@ async def run_case(case: dict[str, Any]) -> dict[str, Any]:
         }
 
         if case["kind"] in ("payment_fault", "empty"):
-            impact = await analyze_impact(
-                ImpactAnalysisInput(window_from=window_from, window_to=window_to, scope="payment"),
-                TENANT_ID_DEFAULT,
-                llm,
-                shop=shop,
-            )
-            got = impact.output
             want = expected["impact"]
-            numbers = {
-                float(got.failed_order_count),
-                float(got.affected_customer_count),
-                float(got.damage_amount),
-            }
-            out["impact"] = {
-                "want": {
-                    k: want[k]
-                    for k in ("failed_order_count", "affected_customer_count", "damage_amount")
-                },
-                "got": {
-                    "failed_order_count": got.failed_order_count,
-                    "affected_customer_count": got.affected_customer_count,
-                    "damage_amount": got.damage_amount,
-                },
-                "declined_in_window": want["declined_payments"],
-                "fallback": impact.fallback,
-                "fabricated": _fabricated(got.summary, numbers),
-            }
+            keys = ("failed_order_count", "affected_customer_count", "damage_amount")
+            wanted = (
+                {"unknown": True} if want.get("unknown_expected") else {k: want[k] for k in keys}
+            )
+            try:
+                impact = await analyze_impact(
+                    ImpactAnalysisInput(
+                        window_from=window_from, window_to=window_to, scope="payment"
+                    ),
+                    TENANT_ID_DEFAULT,
+                    llm,
+                    shop=shop,
+                )
+            except ShopUnavailable as error:  # 숫자 없이 "확인할 수 없음"으로 답함
+                out["impact"] = {
+                    "want": wanted,
+                    "got": {"unknown": True},
+                    "unknown_code": error.code,
+                    "declined_in_window": want["declined_payments"],
+                    "fallback": False,
+                    "fabricated": False,
+                }
+            else:
+                got = impact.output
+                numbers = {
+                    float(got.failed_order_count),
+                    float(got.affected_customer_count),
+                    float(got.damage_amount),
+                }
+                out["impact"] = {
+                    "want": wanted,
+                    "got": {k: getattr(got, k) for k in keys},
+                    "declined_in_window": want["declined_payments"],
+                    "fallback": impact.fallback,
+                    "fabricated": _fabricated(got.summary, numbers),
+                }
 
         if case["kind"] in ("payment_fault", "order_drop", "sale"):
             injection = case["injection"]
@@ -305,6 +335,10 @@ async def run_sellers(sellers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+def _mean(values: list[float]) -> float | None:
+    return round(sum(values) / len(values), 2) if values else None
+
+
 def _rate(hits: int, total: int) -> float | None:
     return round(hits / total, 4) if total else None
 
@@ -322,16 +356,24 @@ def summarize(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> dic
     faults = [c for c in cases if c["anomaly"]["expected"]]
     quiet = [c for c in cases if not c["anomaly"]["expected"]]
     empty = [c for c in cases if c["kind"] == "empty"]
-    delays = [
-        c["anomaly"]["delay_minutes"] for c in faults if c["anomaly"]["delay_minutes"] is not None
-    ]
+
+    def _delays(kind: str) -> list[float]:
+        return [
+            c["anomaly"]["delay_minutes"]
+            for c in faults
+            if c["kind"] == kind and c["anomaly"]["delay_minutes"] is not None
+        ]
+
+    pay_delays, drop_delays = _delays("payment_fault"), _delays("order_drop")
     impacts = [c["impact"] for c in cases if "impact" in c]
-    errors = [abs(i["got"]["damage_amount"] - i["want"]["damage_amount"]) for i in impacts]
+    # 금액 오차는 정답·결과가 둘 다 숫자인 케이스만 (확인할 수 없음 케이스는 일치율로만 본다)
+    numeric = [i for i in impacts if "damage_amount" in i["got"] and "damage_amount" in i["want"]]
+    errors = [abs(i["got"]["damage_amount"] - i["want"]["damage_amount"]) for i in numeric]
     pct = [
         abs(i["got"]["damage_amount"] - i["want"]["damage_amount"])
         / i["want"]["damage_amount"]
         * 100
-        for i in impacts
+        for i in numeric
         if i["want"]["damage_amount"]
     ]
     explanations = [c["anomaly"] for c in cases if c["anomaly"]["llm_used"]] + impacts
@@ -347,8 +389,10 @@ def summarize(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> dic
         "anomaly.false_positive_rate": _rate(
             sum(1 for c in quiet if c["anomaly"]["any_anomaly"]), len(quiet)
         ),
-        "anomaly.mean_delay_minutes": round(sum(delays) / len(delays), 2) if delays else None,
-        "anomaly.max_delay_minutes": max(delays) if delays else None,
+        "anomaly.payment_mean_delay_minutes": _mean(pay_delays),
+        "anomaly.payment_max_delay_minutes": max(pay_delays) if pay_delays else None,
+        "anomaly.drop_mean_delay_minutes": _mean(drop_delays),
+        "anomaly.drop_max_delay_minutes": max(drop_delays) if drop_delays else None,
         "anomaly.unknown_handled_rate": _rate(
             sum(1 for c in empty if c["anomaly"]["said_unknown"]), len(empty)
         ),
@@ -393,7 +437,7 @@ def wrong_cases(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> l
             add(
                 c["id"],
                 "이상 탐지",
-                f"{a['metric']} 이상을 못 잡음 (잡은 지표: {a['flagged'] or '없음'})",
+                f"{'·'.join(a['signals'])} 이상을 못 잡음 (잡은 지표: {a['flagged'] or '없음'})",
             )
         if not a["expected"] and a["any_anomaly"]:
             add(c["id"], "이상 탐지", f"장애가 아닌데 이상이라고 함: {', '.join(a['flagged'])}")

@@ -114,3 +114,15 @@ def test_handler_answers_cannot_tell_when_a_reason_is_missing(monkeypatch) -> No
     assert result["output"]["code"] == "NO_FAILURE_REASON"
     assert result["output"]["message"].startswith("확인할 수 없음")
     assert "failed_order_count" not in result["output"]  # 숫자를 내지 않는다
+
+
+@pytest.mark.asyncio
+async def test_unseen_failure_code_gives_no_numbers_and_says_how_many() -> None:
+    """장애 쪽도 사용자 쪽도 아닌 처음 보는 코드는 장애인지 알 수 없다."""
+    orders = [*ORDERS, _order("o7", "b7", 4_000, "PG_RATE_LIMITED")]
+    with pytest.raises(ShopUnavailable) as caught:
+        await analyze_impact(WINDOW, "shop-demo", MockLLMClient(), shop=FakeShop(orders))
+    assert caught.value.code == "UNKNOWN_FAILURE_CODE"
+    assert "처음 보는 실패 코드 1건 (PG_RATE_LIMITED 1건)" in str(caught.value)
+    split = split_failures(ShopFailedOrdersResult(orders=orders))
+    assert split.unseen == {"PG_RATE_LIMITED": 1}
