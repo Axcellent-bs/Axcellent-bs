@@ -6,6 +6,8 @@
 - 결제 장애: shop-api 장애 주입(`Shop.inject_fault("failure")`·`release_fault`) 그대로다.
   세기(`fraction`)는 장애 구간 주문 중 장애가 걸린 채 결제한 비율이다.
 - 카드 거절(평상시 실패): `simulate="failure"`로 일정 간격마다 하나씩 넣는다 (`PG_DECLINED`).
+- 처음 보는 실패 코드(`injection.failure_code`): 장애로 실패한 결제의 `failure_code`를 그 코드로
+  바꾼다 (shop-api가 새 코드를 쓰기 시작한 상황).
 
 정답(실패 주문 수·금액·영향 고객, 이상 시작 시각)은 data 에이전트 코드가 아니라 여기서 만든
 결제 기록에서 바로 센다(`Truth`).
@@ -59,6 +61,7 @@ class Payment:
     amount: int
     at: datetime
     failure_code: str | None  # None이면 성공
+    faulty: bool = False  # 장애가 걸린 채 결제했는지 (정답은 이것으로 센다)
 
 
 @dataclass
@@ -191,6 +194,12 @@ def build(spec: dict[str, Any]) -> World:
                 paid = shop.pay(order["order_id"], "card", simulate)
                 if faulty:
                     shop.release_fault()
+                    if injection.get("failure_code"):
+                        with db.tx() as conn:
+                            conn.execute(
+                                "UPDATE payments SET failure_code = ? WHERE order_id = ?",
+                                (injection["failure_code"], paid["order_id"]),
+                            )
                 with db.tx() as conn:  # 방금 넣은 결제 기록 (정답은 여기서 센다)
                     pay = conn.execute(
                         "SELECT amount, status, failure_code FROM payments "
@@ -204,6 +213,7 @@ def build(spec: dict[str, Any]) -> World:
                         amount=int(pay["amount"]),
                         at=moment,
                         failure_code=None if pay["status"] == "succeeded" else pay["failure_code"],
+                        faulty=faulty,
                     )
                 )
     return world
@@ -224,7 +234,7 @@ class Truth:
 def truth(world: World) -> Truth:
     window_from, window_to = world.window
     inside = [p for p in world.payments if window_from <= p.at < window_to]
-    fault = [p for p in inside if p.failure_code == "PG_UNAVAILABLE"]
+    fault = [p for p in inside if p.faulty and p.failure_code is not None]
     failed = [p for p in inside if p.failure_code is not None]
     onset = None
     if fault:

@@ -64,12 +64,21 @@ class MetricVerdict(AxModel):
     ratio: float | None = None  # 기준값이 0이면 None
     is_anomaly: bool
     severity: Literal["low", "mid", "high"] | None = None
+    # 판정 상태 (#55 이후). unknown이면 판정할 수 없었던 것이고 is_anomaly는 false다.
+    # 그때 observed·baseline은 판정에 쓰지 않은 값(셀 수 있었던 값 또는 0)이다
+    status: Literal["normal", "anomaly", "unknown"] | None = None
+    direction: Literal["up", "down"] | None = None  # 이상이면 벗어난 방향
+    note: str | None = None  # 판정 근거 한 줄 또는 확인할 수 없는 이유
 
 
 class AnomalyDetectionOutput(AxModel):
     verdicts: list[MetricVerdict] = Field(default_factory=list)
     any_anomaly: bool
     summary: str
+    # 구간 전체 상태 (#55 이후): 이상이 하나라도 있으면 anomaly,
+    # 모든 지표를 판정할 수 없으면 unknown
+    status: Literal["normal", "anomaly", "unknown"] | None = None
+    unknown_metrics: list[BusinessMetric] = Field(default_factory=list)
 
 
 # ---------- fraud_score ----------

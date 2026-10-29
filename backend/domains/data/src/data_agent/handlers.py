@@ -26,10 +26,11 @@ from ax_contracts.schemas.data import (
     KpiSummaryInput,
     RootCauseInput,
 )
+from data_agent.clients.fact_sources import notices_at
 from data_agent.clients.log_client import get_log_source
 from data_agent.clients.shop_client import ShopUnavailable
 from data_agent.skills.accuracy_report import eval_dir, load_report
-from data_agent.skills.anomaly_detection import detect_anomalies, get_metric_source
+from data_agent.skills.anomaly_detection import detect_anomalies, env_settings, get_metric_source
 from data_agent.skills.impact_analysis import analyze_impact
 from data_agent.skills.kpi_summary import summarize_kpi
 from data_agent.skills.root_cause import estimate_root_cause
@@ -107,8 +108,18 @@ async def anomaly_detection(request: AgentRequest) -> AgentResult:
         source = get_metric_source(os.environ)
     except NotImplementedError as error:
         return _unavailable(request, error)
+    async def campaigns(start: datetime, end: datetime) -> list[str]:
+        """주문이 늘었을 때 게시 중이던 공지·캠페인 (근거용). 마케팅이 꺼져 있으면 그 이유 한 줄."""
+        return [f.summary for f in await notices_at(start, end, request.meta)]
+
     try:
-        result = await detect_anomalies(data, source, get_llm())
+        result = await detect_anomalies(
+            data,
+            source,
+            get_llm(),
+            settings=env_settings(request.meta.tenant_id, os.environ),
+            campaigns=campaigns,
+        )
     except ShopUnavailable as error:
         return _shop_unavailable(request, error, "shop_metric_series")
     return _result(

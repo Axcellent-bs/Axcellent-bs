@@ -36,9 +36,13 @@ _BASE = {
     "order_fail_count": 4.0,
     "order_count": 60.0,
     "inquiry_count": 20.0,
+    "payment_count": 60.0,  # 실패율 판정의 표본 수 (shop-api `payment_count`와 같은 뜻)
 }
 
-INCIDENT_MULTIPLIER = 5.0  # 장애 구간 payment_fail_rate 배수
+# 장애 구간 payment_fail_rate 배수 (기본 2% → 약 50%). shop-api 장애 주입은 결제를 전부 실패시킨다.
+# 예전 5배(10%)는 새벽(5분 결제 12건)에 실패가 5분에 1건뿐이라
+# 통계로 장애라 말할 수 없었다 (#55 평가)
+INCIDENT_MULTIPLIER = 25.0
 
 
 def _jitter(ts: datetime) -> float:

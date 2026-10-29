@@ -18,7 +18,7 @@
   "cause": {
     "type": "campaign",
     "minutes_before": 5,
-    "notice_id": "ntc_eval_18"
+    "notice_id": "ntc_eval_19"
   },
   "llm": "grounded",
   "expected": {
@@ -30,6 +30,7 @@
       "unknown_expected": false
     },
     "impact": {
+      "unknown_expected": false,
       "failed_order_count": 0,
       "affected_customer_count": 0,
       "damage_amount": 0,
@@ -38,7 +39,7 @@
     },
     "root_cause": {
       "injected": "campaign",
-      "ref": "ntc_eval_18"
+      "ref": "ntc_eval_19"
     }
   }
 }

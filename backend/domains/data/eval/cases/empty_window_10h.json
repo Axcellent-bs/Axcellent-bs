@@ -25,6 +25,7 @@
       "unknown_expected": true
     },
     "impact": {
+      "unknown_expected": false,
       "failed_order_count": 0,
       "affected_customer_count": 0,
       "damage_amount": 0,

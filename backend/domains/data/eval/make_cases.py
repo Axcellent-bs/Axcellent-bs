@@ -67,6 +67,11 @@ def _shape(cid, kind, day, hour, injection, cause, llm="grounded", note=""):  # 
     }
 
 
+def _with_code(spec: dict[str, Any], code: str) -> dict[str, Any]:
+    """장애로 실패한 결제의 실패 코드를 `code`로 바꾸는 시나리오."""
+    return {**spec, "injection": {**spec["injection"], "failure_code": code}}
+
+
 DEPLOY = {"type": "deploy", "minutes_before": 8}
 DEPLOY_WITH_OLD = {"type": "deploy", "minutes_before": 6, "older_deploy_minutes_before": 27}
 NOTICE = {"type": "notice", "minutes_before": 12}
@@ -86,6 +91,20 @@ SPECS: list[dict[str, Any]] = [
     ),
     _fault("pay_half_10m_03h_night", 8, 3, 30, 10, 0.5, NONE, "hallucinate"),
     _fault("pay_full_20m_10h_two_deploys_rule", 9, 10, 20, 20, 1.0, DEPLOY_WITH_OLD, "fail"),
+    # 결제 장애인데 shop-api가 처음 보는 실패 코드를 준다 → 영향 숫자는 "확인할 수 없음"
+    _with_code(
+        _fault(
+            "pay_full_20m_14h_new_code",
+            22,
+            14,
+            20,
+            20,
+            1.0,
+            DEPLOY,
+            note="결제 장애 20분, 실패 코드가 처음 보는 PG_RATE_LIMITED",
+        ),
+        "PG_RATE_LIMITED",
+    ),
     # 주문 급감 (결제는 정상)
     _shape(
         "order_drop_70_30m_10h",
@@ -267,6 +286,8 @@ def expected(spec: dict[str, Any]) -> dict[str, Any]:
             "unknown_expected": kind == "empty",  # 빈 구간은 "이상 없음"이 아니라 확인할 수 없음
         },
         "impact": {
+            # 처음 보는 실패 코드면 장애인지 알 수 없어 숫자를 내지 않아야 한다
+            "unknown_expected": bool(injection.get("failure_code")),
             "failed_order_count": t.fault_failed_orders,
             "affected_customer_count": t.fault_customers,
             "damage_amount": t.fault_amount,

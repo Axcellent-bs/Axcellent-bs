@@ -113,15 +113,31 @@ async def deploys(data: RootCauseInput, meta: RequestMeta, send: SendFn) -> list
 
 
 async def notices(data: RootCauseInput, meta: RequestMeta, send: SendFn) -> list[RawFact]:
+    _, end = span(data)
+    return await notices_at(data.window_from, end, meta, send, exclude_context=data.context_id)
+
+
+async def notices_at(
+    at: datetime,
+    end: datetime,
+    meta: RequestMeta,
+    send: SendFn | None = None,
+    *,
+    exclude_context: str | None = None,
+) -> list[RawFact]:
+    """`at` 시각에 게시 중이던 공지·캠페인 (`end` 뒤에 게시한 것은 뺀다).
+
+    원인 추정과 이상 탐지(세일·캠페인 근거)가 같이 쓴다.
+    """
+    send = send or call_agent
     source = "marketing.list_active_notices"
-    start, end = span(data)
-    payload = {"at": _iso(data.window_from), "limit": 20}
+    payload = {"at": _iso(at), "limit": 20}
     result, error = await _ask(send, "marketing", "list_active_notices", payload, meta)
     if result is None or result.status != TaskStatus.COMPLETED:
         return [_unavailable(source, result, error)]
     facts = []
     for item in (result.output or {}).get("items") or []:
-        if item.get("context_id") == data.context_id:
+        if exclude_context and item.get("context_id") == exclude_context:
             continue  # 이 사건에 대응해 올린 공지는 원인이 아니다
         published = _parse_time(item.get("published_at")) or _parse_time(item.get("valid_from"))
         if published is None or published > end:

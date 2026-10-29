@@ -30,6 +30,7 @@
       "unknown_expected": false
     },
     "impact": {
+      "unknown_expected": false,
       "failed_order_count": 13,
       "affected_customer_count": 10,
       "damage_amount": 461100,

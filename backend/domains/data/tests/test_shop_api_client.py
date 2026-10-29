@@ -245,19 +245,32 @@ async def test_metric_series_skips_metric_shop_api_does_not_compute() -> None:
 
 async def test_anomaly_detection_reads_payment_fail_rate_from_shop_api() -> None:
     seen: list[httpx.Request] = []
-    source = HttpMetricSource(
-        _api(_series_handler(seen, lambda ts: 0.25 if W_FROM <= ts < W_TO else 0.02))
-    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # 실패율 판정에 표본 수(payment_count)와 주문 수(order_count)도 같이 읽는다
+        metric = request.url.params["metric"]
+        if metric == "payment_fail_rate":
+            rate = lambda ts: 0.25 if W_FROM <= ts < W_TO else 0.02  # noqa: E731
+        else:
+            rate = lambda ts: 20.0  # noqa: E731 - 5분마다 결제·주문 20건
+        return _series_handler(seen, rate)(request)
+
+    source = HttpMetricSource(_api(handler))
     data = AnomalyDetectionInput(window_from=W_FROM, window_to=W_TO, metrics=["payment_fail_rate"])
     result = await detect_anomalies(data, source, MockLLMClient(responses={}))
 
     verdict = result.output.verdicts[0]
     assert verdict.metric == "payment_fail_rate"
     assert verdict.is_anomaly is True
+    assert verdict.status == "anomaly"
     assert verdict.observed == 0.25
     assert verdict.baseline == 0.02
     assert result.output.any_anomaly is True
-    assert {r.url.params["metric"] for r in seen} == {"payment_fail_rate"}
+    assert {r.url.params["metric"] for r in seen} == {
+        "payment_fail_rate",
+        "payment_count",
+        "order_count",
+    }
 
 
 async def test_metric_series_error_raises_unavailable() -> None:
