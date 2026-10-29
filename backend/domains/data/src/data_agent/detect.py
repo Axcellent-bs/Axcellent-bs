@@ -14,6 +14,7 @@ from ax_contracts.data_access.shop_failed_orders import FailedOrder
 from data_agent.metrics.anomaly import Agg
 from data_agent.metrics.judge import (
     BASELINE_DAYS,
+    FAULT_LAMBDA_SPAN,
     RATE_METRICS,
     Judgement,
     Settings,
@@ -48,7 +49,7 @@ class MetricSource(Protocol):
 
 @runtime_checkable
 class FaultFailureSource(Protocol):
-    """실패 주문(실패 코드 포함)도 주는 공급자. 장애 쪽 실패 절대 기준에 쓴다.
+    """실패 주문(실패 코드 포함)도 주는 공급자. 장애 쪽 실패 확률 기준에 쓴다.
 
     이 메서드가 없는 공급자(목 등)나 None을 준 경우(읽지 못함)는 통계 판정만 한다.
     """
@@ -95,6 +96,27 @@ async def _faults(
     return None if orders is None else fault_buckets(orders)
 
 
+async def _fault_history(
+    source: MetricSource, window_from: datetime, window_to: datetime
+) -> dict[datetime, float] | None:
+    """지난 7일 같은 시각 ±1시간의 장애 쪽 실패 (평소 실패율 λ용). 하루라도 못 읽으면 None.
+
+    7일을 한 번에 읽지 않고 날마다 필요한 범위만 읽는다(조회 건수 제한에 걸리지 않게).
+    """
+    if not isinstance(source, FaultFailureSource):
+        return None
+    out: dict[datetime, float] = {}
+    for day in range(1, BASELINE_DAYS + 1):
+        shift = timedelta(days=day)
+        orders = await source.failed_orders(
+            window_from - shift - FAULT_LAMBDA_SPAN, window_to - shift + FAULT_LAMBDA_SPAN
+        )
+        if orders is None:
+            return None
+        out.update(fault_buckets(orders))
+    return out
+
+
 async def judge_window(
     source: MetricSource,
     window_from: datetime,
@@ -105,11 +127,14 @@ async def judge_window(
     """구간 [window_from, window_to)를 지난 7일 같은 시간대와 비교해 지표별 판정을 낸다."""
     metrics = list(dict.fromkeys(metrics or [])) or [name for name, _ in WATCHED_METRICS]
     start = _floor_5m(window_from)
+    # λ의 자료 유무는 이 주문 수 시계열로 안다. 7일 전 날의 "같은 시각 − 1시간" 쪽은 이 범위 밖이라
+    # 그 날은 범위 안 구간만 센다(자료가 있는 구간만 평균)
     history_from = start - timedelta(days=BASELINE_DAYS)
     needed = list(dict.fromkeys([*metrics, "order_count", "payment_count"]))
     series = {m: await _series(source, m, history_from, window_to) for m in needed}
     window = window_buckets(window_from, window_to)
     faults = await _faults(source, start, window_to) if RATE_METRICS & set(metrics) else None
+    fault_history = await _fault_history(source, start, window_to) if faults is not None else None
 
     empty = empty_window(window, series["order_count"], series["payment_count"])
     orders = judge_count("order_count", window, series["order_count"], settings)
@@ -130,6 +155,7 @@ async def judge_window(
                     faults,
                     settings,
                     orders=series["order_count"],
+                    fault_history=fault_history,
                 )
             )
         elif metric == "order_count":
