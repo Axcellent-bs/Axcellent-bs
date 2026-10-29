@@ -108,10 +108,47 @@ class A2AData:
         result = await call_agent("data", request)
         if result.status != TaskStatus.COMPLETED:
             return None, f"data anomaly_detection {result.status.value} ({result.outcome})"
-        any_anomaly = result.output.get("any_anomaly")
+        return business_verdict(result.output)
+
+
+def business_verdict(output: dict[str, Any]) -> tuple[bool | None, str]:
+    """data `anomaly_detection` 출력을 (정상 여부, 메모)로 바꾼다.
+
+    판정 상태(`status`, #64 이후)가 있으면 그것만 본다. 정상(normal)이고 부른 지표 중
+    판정할 수 없는 것이 없을 때만 True, 이상(anomaly)이면 False, 판정할 수 없으면(unknown,
+    또는 지표 일부가 unknown) None이다. None은 복구를 확정하지 않는다는 뜻이다.
+    `status`가 없는 예전 응답은 `any_anomaly`만 본다.
+    """
+    summary = str(output.get("summary") or "")
+    status = output.get("status")
+    if status is None:
+        any_anomaly = output.get("any_anomaly")
         if not isinstance(any_anomaly, bool):
             return None, "data anomaly_detection 응답에 any_anomaly가 없음"
-        return (not any_anomaly), str(result.output.get("summary") or "")
+        return (not any_anomaly), summary
+    if status == "anomaly":
+        return False, summary
+    unknown = [str(m) for m in output.get("unknown_metrics") or []]
+    if status == "normal" and not unknown:
+        return True, summary
+    if status not in ("normal", "unknown"):
+        return None, f"업무 지표를 판정할 수 없음: 알 수 없는 판정 상태 {status!r}"
+    return None, "업무 지표를 판정할 수 없음: " + _unknown_reason(output, unknown, summary)
+
+
+def _unknown_reason(output: dict[str, Any], unknown: list[str], summary: str) -> str:
+    notes = [
+        f"{v.get('metric')} {str(v['note']).removeprefix('확인할 수 없음: ')}"
+        if v.get("note")
+        else str(v.get("metric"))
+        for v in output.get("verdicts") or []
+        if isinstance(v, dict) and v.get("status") == "unknown"
+    ]
+    if notes:
+        return "; ".join(notes)
+    if unknown:
+        return ", ".join(unknown) + (f" ({summary})" if summary else "")
+    return summary or "사유 없음"
 
 
 def default_shop() -> ShopClient:

@@ -65,7 +65,7 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json' \
 - `input-required`: `dept_input`이면 `output.question = {skill, input}`을 총괄이 해당 부서에 물어 답을 `input.answers`로 넣어 다시 부른다. `human_input`이면 사람 승인을 기다리고(총괄은 승인하지 않음), 마감이 지나면 자동 거절로 처리한다.
 - 카드에 없는 skill, 총괄이 요청할 수 없는 skill(`allowed_requesters`)은 "확인할 수 없음"으로 건너뛴다.
 - 문의 경로의 보상·쿠폰은 총괄이 부르지 않는다(#228 결정 A). 고객지원이 문의 접수 때 처리하고 마케팅에 직접 요청한다. 총괄은 영향 고객 일괄 보상만 고객지원 `request_incident_compensation`으로 요청한다.
-- 계획대로 안 될 때: 원인 미확정(`diagnose_incident`가 `undetermined`)이면 롤백하지 않고 이관 큐로, `verify_recovery`가 `recovered=false`이면 정상화 공지 없이 이관 큐로 돌린다. 복구 확인은 인프라가 30초 간격으로 다시 확인하는 시간을 기다리도록 마감을 180초로 준다.
+- 계획대로 안 될 때: 원인 미확정(`diagnose_incident`가 `undetermined`)이면 롤백하지 않고 이관 큐로, `verify_recovery`가 `recovered=false`이면(업무 지표를 판정할 수 없어 복구를 확정하지 못한 경우 포함) 정상화 공지 없이 이관 큐로 돌린다. 복구 확인은 인프라가 30초 간격으로 다시 확인하는 시간을 기다리도록 마감을 180초로 준다.
 
 """
 
