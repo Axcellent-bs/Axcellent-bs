@@ -19,6 +19,7 @@
   "expected": {
     "anomaly": {
       "expected": false,
+      "low_expected": false,
       "metric": null,
       "onset": null,
       "first_failure_bucket": null,

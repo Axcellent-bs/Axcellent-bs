@@ -22,6 +22,7 @@
   "expected": {
     "anomaly": {
       "expected": true,
+      "low_expected": false,
       "metric": "payment_fail_rate",
       "onset": "2026-09-05T10:20:00Z",
       "first_failure_bucket": "2026-09-05T10:20:00Z",
