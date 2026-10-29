@@ -1,7 +1,19 @@
 # agents/data
 담당: 재현 · 포트: 8106
 ## 1. 역할
-(TODO: 담당자가 작성)
+쇼핑몰 데이터를 **읽어서** 숫자를 계산하고 돌려준다. skill 6개는 모두 읽기 전용(`grade: read`, `services/data/agent-card.json`)이다.
+
+| skill | 무엇 | 읽는 것 |
+| --- | --- | --- |
+| `anomaly_detection` | 업무 지표(결제 실패율·주문 실패 건수·주문 수·문의량)를 5분 단위로 지난 7일 같은 시간대와 비교해 지표별 이상 여부·배수·심각도 | shop-api `GET /api/shop/metric-series`, `GET /api/shop/failed-orders`(장애 쪽 실패 코드). 이상일 때 근거로 marketing `list_active_notices`(A2A) |
+| `impact_analysis` | 장애 구간의 실패 주문 수·영향 고객 수·고객 ID·피해 금액(정수 원)·카테고리 분포, 평소보다 더 실패한 초과분. 영향 숫자의 유일한 출처 | shop-api `GET /api/shop/failed-orders` (구간 + 지난 7일 같은 시간대) |
+| `fraud_score` | 판매자 사기 위험 점수(0~100)·등급·규칙 근거·유사 사기 카드 | shop-api `GET /api/shop/sellers/{id}/profile`·`/prices`, hr `find_similar_fraud_cards`(A2A) |
+| `kpi_summary` | 사건별 MTTR, 자동 처리율, 등급별 처리·차단 건수, 이관 건수, 1차·2차 유사 사건 처리 시간 비교 | 공통 로그 저장소(agent-template `common_log`, `AX_COMMON_LOG_DB`) |
+| `root_cause_hypotheses` | 이상 구간 앞 30분~구간 끝의 사실만 근거로 원인 후보(설명·근거 사실 id·확신도) | planning `find_related_prs`, marketing `list_active_notices`, support `detect_inquiry_surge`, memory `card_search` (모두 A2A, `clients/fact_sources.py`) |
+| `accuracy_report` | 정확도 평가 결과 | `eval/results/latest.json`(없으면 `eval/baseline.json`). 다시 계산하지 않는다 |
+
+- 숫자는 코드가 계산한다(`metrics/`, `impact.py`, `detect.py`). LLM은 계산이 끝난 숫자로 설명 문장만 쓴다(`explain.py`)
+- 주기 감시(`monitor.py`)는 `anomaly_detection`과 같은 판정 함수로 최근 구간을 보고 `metric.anomaly` 이벤트를 낸다. 사건은 열지 않는다(`context_id` 없음)
 ## 2. 실행 방법
 `docker compose -f infra/compose.yml up data` / 목 모드: `DATA_MOCK=1`
 
@@ -127,4 +139,13 @@ contracts/ 참조 (TODO)
 ## 4. 의존
 ax-contracts, ax-agent-template
 ## 5. 하지 않는 것
-(TODO: 담당자가 작성)
+코드에서 확인한 것만 적는다.
+
+- **승인·보류를 정하지 않는다.** `fraud_score`는 점수와 근거만 준다. 승인·보류는 재무·정산이 정한다(`handlers.py`, `metrics/fraud.py`)
+- **상태를 바꾸지 않는다.** skill은 모두 `grade: read`이고 `execute()`(안전 관문)를 부르지 않는다. 데이터를 쓰는 곳은 없다. 이 패키지가 내보내는 것은 감시의 `metric.anomaly` 이벤트뿐이다(공통 로그 기록은 agent-template이 한다)
+- **숫자를 LLM이 만들지 않는다.** 설명 문장에 계산에 없는 숫자가 있으면 버리고 템플릿으로 대체한다(`explain._bad_numbers`, `number_invalid`). 원인 후보도 근거 사실이 없거나 사실에 없는 숫자·시각을 쓰면 버린다(`skills/root_cause.validate`). LLM이 실패하면 템플릿·시간 순서 규칙으로 대체한다
+- **원인을 판정하지 않는다.** `anomaly_detection`은 이상 여부만, `root_cause_hypotheses`는 후보만 준다. 확신도 high 후보가 없으면 "확인 필요"다
+- **다른 부서 데이터를 직접 읽지 않는다.** 다른 `domains` 코드를 import하지 않고 다른 부서 저장소를 열지 않는다. 다른 부서 정보는 A2A(`call_agent`)로만 묻는다(`clients/fact_sources.py`, `clients/hr_cards.py`, `clients/planning_client.py`). 쇼핑몰 데이터는 shop-api 읽기 전용 API로만 읽는다
+- **읽지 못한 값을 0으로 채우지 않는다.** shop-api 응답 없음·401·403·5xx·형식 오류면 `failed`·`unavailable`과 "확인할 수 없음"으로 답한다(`ShopUnavailable`). 꺼진 서비스의 사실은 "확인할 수 없음(서비스 꺼짐)"으로 남긴다. 확인할 수 없는 사기 규칙은 0점이 아니라 점수에서 뺀다
+- **외부 입력(`request.untrusted`)을 읽지 않는다**(`handlers.py`)
+- **LLM 문장 원문을 남기지 않는다.** 템플릿 대체 이유와 걸린 숫자만 남긴다
