@@ -45,7 +45,7 @@
       "input_schema": "agents/marketing/src/marketing_agent/schemas.py#ListActiveNoticesInput",
       "output_schema": "agents/marketing/src/marketing_agent/schemas.py#ActiveNotices",
       "grade": "read",
-      "allowed_requesters": ["support", "finance", "orchestrator"],
+      "allowed_requesters": ["support", "finance", "orchestrator", "data"],
       "verifier": null,
       "priority": "recommended"
     },

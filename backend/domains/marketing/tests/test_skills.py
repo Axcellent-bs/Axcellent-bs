@@ -432,7 +432,12 @@ def test_list_active_notices_is_read_only_and_for_listed_requesters() -> None:
     assert load_card().skills[0].id  # 카드가 읽힌다
     card = {skill.id: skill for skill in load_card().skills}
     assert card["list_active_notices"].grade == "read"
-    assert card["list_active_notices"].allowed_requesters == ["support", "finance", "orchestrator"]
+    assert card["list_active_notices"].allowed_requesters == [
+        "support",
+        "finance",
+        "orchestrator",
+        "data",  # 원인 추정에서 이상 직전 공지를 사실로 모은다
+    ]
 
 
 def test_notice_view_carries_its_incident_and_publish_time() -> None:

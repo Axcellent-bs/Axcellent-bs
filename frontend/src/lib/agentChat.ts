@@ -291,6 +291,7 @@ const SKIP_WHY: [RegExp, string][] = [
   [/Agent Card에 skill 없음/, "맡을 부서를 찾지 못해 건너뜀 (Agent Card에 skill 없음)"],
   [/allowed_requesters/, "총괄이 요청할 수 없는 skill이라 건너뜀"],
   [/^고객 자료 대기/, "고객 자료를 기다려 보류"],
+  [/^확신도 높은 원인 후보가 있어/, "확신도 높은 원인 후보가 있어 원인 확인 요청 없이 건너뜀"],
 ];
 
 export function incidentItems(inc: OrchIncident): ChatItem[] {

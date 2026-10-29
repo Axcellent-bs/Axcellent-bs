@@ -61,6 +61,7 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json' -
 | skill | 등급 | 단계 | 선행 단계 | 필수 | 입력 예시 |
 |---|---|---|---|---|---|
 | `impact_analysis` | read | 영향 분석 (data) | 없음 (사건 시작 즉시) | 예 | `{"scope": "payment", "window_from": "2026-10-16T00:45:00Z", "window_to": "2026-10-16T01:15:00Z"}` |
+| `root_cause_hypotheses` | read | 원인 후보 추정 (data) | impact | 아니오 | `{"component": "payment", "context_id": "ctx_inc_guide", "metric": "payment_fail_rate", "window_from": "2026-10-16T00:45:00Z", "window_to": "2026-10-16T01:15:00Z"}` |
 | `kpi_summary` | read | 처리 시간 요약 (data) | recovered_notice(끝나면) | 아니오 | `{"context_ids": ["ctx_inc_guide"]}` |
 
 ## planning
@@ -95,4 +96,4 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json' -
 
 | skill | 등급 | 단계 | 선행 단계 | 필수 | 입력 예시 |
 |---|---|---|---|---|---|
-| `record_case` | A | 사건 기록 (hr) | recovered_notice(끝나면), link_incident(끝나면), compensation(끝나면), kpi(끝나면) | 예 | `{"alternatives_considered": [], "area": "infra", "author": "orchestrator", "context_id": "ctx_inc_guide", "decision_reason": "scenario_a plan 실행 결과 — 완료: diagnose_incident, impact_analysis, rollback_deployment, find_related_prs, link_incident, draft_notice, pu` |
+| `record_case` | A | 사건 기록 (hr) | recovered_notice(끝나면), link_incident(끝나면), compensation(끝나면), kpi(끝나면), root_cause(끝나면) | 예 | `{"alternatives_considered": ["create_ticket: skipped (확신도 높은 원인 후보가 있어 원인 확인 요청 없음)"], "area": "infra", "author": "orchestrator", "context_id": "ctx_inc_guide", "decision_reason": "scenario_a plan 실행 결과 — 완료: diagnose_incident, impact_analysis, root_cause_hypo` |

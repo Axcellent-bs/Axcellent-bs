@@ -57,7 +57,8 @@
       "allowed_requesters": [
         "support",
         "finance",
-        "orchestrator"
+        "orchestrator",
+        "data"
       ],
       "verifier": null,
       "priority": "recommended",

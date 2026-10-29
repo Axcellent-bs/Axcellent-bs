@@ -26,9 +26,13 @@ async def wait_hold(inc, step_id):
 async def test_scenario_a_completes(harness) -> None:
     inc = await run(harness)
     assert inc.status == "resolved"
-    assert all(s.status == "completed" for s in inc.steps.values())
+    # 원인 후보에 확신도 high가 있으면 원인 확인 요청만 건너뛴다 (사람 개입 아님)
+    check = inc.steps["cause_check"]
+    assert (check.status, check.reason_code) == ("skipped", "cause_confident")
+    assert all(s.status == "completed" for k, s in inc.steps.items() if k != "cause_check")
     assert harness.events == ["incident.opened", "incident.resolved"]
-    assert inc.metrics["steps_total"] == 13
+    assert inc.metrics["steps_total"] == 15
+    assert inc.metrics["auto_rate"] == 1.0
 
 
 @pytest.mark.asyncio

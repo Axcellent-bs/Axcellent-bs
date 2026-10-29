@@ -119,3 +119,58 @@ class KpiSummaryOutput(AxModel):
     grade_counts: dict[str, int] = Field(default_factory=dict)
     blocked_counts: dict[str, int] = Field(default_factory=dict)
     escalation_count: int = Field(ge=0)
+
+
+# ---------- root_cause_hypotheses ----------
+#
+# 이상 구간 앞 30분 ~ 구간 끝의 사실(배포·공지·문의 급증·지난 사건)을 코드가 모으고,
+# LLM은 모은 사실을 엮어 원인 후보를 고르고 설명만 한다. 숫자·시각은 사실에서만 나온다.
+# 후보는 근거 사실 id가 반드시 있고, 사실 목록에 없는 id·숫자·시각을 쓴 후보는 버린다.
+
+# anomaly: 입력으로 받은 이상 구간 자체.
+# unavailable: 출처 서비스가 꺼졌거나 답하지 않아 확인할 수 없음
+CauseFactKind = Literal[
+    "anomaly", "deploy", "notice", "inquiry_surge", "past_incident", "unavailable"
+]
+CauseConfidence = Literal["high", "mid", "low"]
+
+
+class RootCauseInput(AxModel):
+    context_id: str  # 원인을 찾는 사건 (ctx_inc_)
+    window_from: UtcDatetime  # 이상 구간 시작
+    window_to: UtcDatetime  # 이상 구간 끝
+    metric: BusinessMetric  # 이상이 난 지표
+    component: str | None = None  # 알면 좁혀 찾는다 (예: payment)
+
+
+class CauseFact(AxModel):
+    fact_id: str  # 이 응답 안에서만 쓰는 id (f1, f2 …)
+    kind: CauseFactKind
+    at: UtcDatetime | None = None  # 사실의 시각. 확인할 수 없음이면 None
+    source: str  # 어디서 받았는지 (예: planning.find_related_prs)
+    ref: str | None = None  # 출처 쪽 id (pr:412, 공지 id, 카드 id)
+    summary: str  # 코드가 쓴 한 줄
+
+
+class CauseHypothesis(AxModel):
+    explanation: str
+    fact_ids: list[str] = Field(min_length=1)  # 근거 사실 id
+    confidence: CauseConfidence
+
+
+class RootCauseOutput(AxModel):
+    hypotheses: list[CauseHypothesis] = Field(default_factory=list)  # 확신도 높은 순
+    needs_confirmation: bool  # 확신도 high 후보가 없으면 true (사람이 원인을 확인)
+    facts: list[CauseFact] = Field(default_factory=list)
+    summary: str  # 사실이 하나도 없으면 "확인할 수 없음 …"
+
+    @model_validator(mode="after")
+    def _hypotheses_cite_facts(self) -> Self:
+        known = {f.fact_id for f in self.facts}
+        for hypothesis in self.hypotheses:
+            missing = set(hypothesis.fact_ids) - known
+            if missing:
+                raise ValueError(f"hypothesis cites unknown facts: {sorted(missing)}")
+        if not any(h.confidence == "high" for h in self.hypotheses) and not self.needs_confirmation:
+            raise ValueError("needs_confirmation must be true without a high-confidence hypothesis")
+        return self

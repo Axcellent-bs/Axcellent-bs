@@ -1,4 +1,7 @@
-"""부서별 연동 안내서를 다시 만든다: python orchestrator/scripts/make_department_guide.py"""
+"""부서별 연동 안내서를 다시 만든다.
+
+python services/orchestrator/scripts/make_department_guide.py
+"""
 
 import asyncio
 from pathlib import Path
@@ -6,7 +9,7 @@ from pathlib import Path
 from ax_orchestrator.guide import render
 
 OUT = (
-    Path(__file__).resolve().parents[2] / "docs" / "notes" / "orchestrator" / "department-guide.md"
+    Path(__file__).resolve().parents[3] / "docs" / "notes" / "orchestrator" / "department-guide.md"
 )
 
 if __name__ == "__main__":

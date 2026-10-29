@@ -217,6 +217,7 @@
       "grade": "read",
       "allowed_requesters": ["dashboard-api", "orchestrator", "data"],
       "verifier": null,
+      "handoff": false,
       "priority": "recommended"
     },
     {
