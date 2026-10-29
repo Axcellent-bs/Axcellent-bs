@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-29T10:28:16Z",
+  "generated_at": "2026-10-29T10:48:43Z",
   "case_count": 33,
   "metrics": {
     "anomaly.detection_rate": 1.0,
@@ -30,15 +30,15 @@
     "root_cause.top1_rate": 1.0,
     "root_cause.ungrounded_survived_rate": 0.0,
     "root_cause.needs_confirmation_rate": 1.0,
-    "holdout.anomaly.detection_rate": 0.8947,
-    "holdout.anomaly.false_positive_rate": 0.0952,
-    "holdout.anomaly.monitor_false_alarm_count": 6,
-    "holdout.anomaly.low_recorded_rate": null,
+    "holdout.anomaly.detection_rate": 0.8333,
+    "holdout.anomaly.false_positive_rate": 0.0455,
+    "holdout.anomaly.monitor_false_alarm_count": 1,
+    "holdout.anomaly.low_recorded_rate": 1.0,
     "holdout.impact.match_rate": 1.0,
-    "holdout.impact.excess_mean_abs_error": 0.53,
-    "holdout.anomaly.payment_mean_delay_minutes": 9.62,
-    "holdout.anomaly.payment_max_delay_minutes": 30.0,
-    "holdout.anomaly.drop_mean_delay_minutes": 13.33,
-    "holdout.anomaly.drop_max_delay_minutes": 20.0
+    "holdout.impact.excess_mean_abs_error": 0.71,
+    "holdout.anomaly.payment_mean_delay_minutes": 7.5,
+    "holdout.anomaly.payment_max_delay_minutes": 15.0,
+    "holdout.anomaly.drop_mean_delay_minutes": 10.0,
+    "holdout.anomaly.drop_max_delay_minutes": 10.0
   }
 }
