@@ -1,0 +1,65 @@
+{
+  "id": "holdout_2026102902_33",
+  "kind": "payment_fault",
+  "description": "무작위 생성 (holdout)",
+  "window": {
+    "from": "2026-12-04T01:00:00Z",
+    "to": "2026-12-04T02:00:00Z"
+  },
+  "traffic": {
+    "orders_per_5m": 5
+  },
+  "injection": {
+    "type": "payment_failure",
+    "from": "2026-12-04T01:07:00Z",
+    "to": "2026-12-04T01:37:00Z",
+    "fraction": 0.5,
+    "noise_at_minutes": [
+      15,
+      21,
+      55
+    ],
+    "noise_history": true,
+    "noise_code": "PG_TIMEOUT"
+  },
+  "cause": {
+    "type": "none"
+  },
+  "llm": "grounded",
+  "holdout": {
+    "seed": 2026102902,
+    "hour": 1,
+    "fault": "pay_half",
+    "minutes": 30,
+    "strength": "실패 50%",
+    "sale_factor": null,
+    "noise": 3
+  },
+  "expected": {
+    "anomaly": {
+      "expected": true,
+      "low_expected": false,
+      "metric": "payment_fail_rate",
+      "onset": "2026-12-04T01:07:00Z",
+      "first_failure_bucket": "2026-12-04T01:10:00Z",
+      "unknown_expected": false,
+      "noise_fault_failures": 2
+    },
+    "impact": {
+      "unknown_expected": false,
+      "failed_order_count": 4,
+      "affected_customer_count": 4,
+      "damage_amount": 132600,
+      "injected_failed_order_count": 2,
+      "injected_customer_count": 2,
+      "injected_damage_amount": 83000,
+      "noise_failed_orders": 2,
+      "all_failed_payments": 4,
+      "declined_payments": 0
+    },
+    "root_cause": {
+      "injected": "none",
+      "ref": null
+    }
+  }
+}

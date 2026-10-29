@@ -23,7 +23,8 @@ import eval_world  # noqa: E402
 CASES = Path(__file__).resolve().parent / "cases"
 HOLDOUT = Path(__file__).resolve().parent / "holdout"
 # holdout(처음 보는 케이스) 생성 seed와 개수. 다시 만들 때는 seed를 바꾸고 README에 이유를 적는다
-HOLDOUT_SEED = 20261029
+# seed는 만든 날(YYYYMMDD) + 그날 몇 번째(2자리). v2(#132)는 2026-10-29 두 번째
+HOLDOUT_SEED = 2026102902
 HOLDOUT_COUNT = 40
 WINDOW_MINUTES = 60
 
@@ -761,6 +762,8 @@ def holdout_specs(seed: int = HOLDOUT_SEED, count: int = HOLDOUT_COUNT) -> list[
 
     무작위로 고르는 것: 시각(0~23시), 장애 종류(결제 100%·50%·20%·타임아웃·주문 급감),
     길이(5~60분), 세일 여부, 잡음 건수. 같은 seed면 늘 같은 시나리오다.
+    세일과 주문 급감은 함께 고르지 않는다(#132): 구간 전체 세일이 주문 급감을 덮어 생성 조합만으로
+    정답을 말할 수 없게 된다(seed 20261029 분석 `_33`). 주문 급감이면 세일 여부를 뽑지 않는다.
     """
     rng = random.Random(seed)
     specs: list[dict[str, Any]] = []
@@ -769,8 +772,6 @@ def holdout_specs(seed: int = HOLDOUT_SEED, count: int = HOLDOUT_COUNT) -> list[
         hour = rng.randrange(24)
         start = HOLDOUT_START + timedelta(days=index, hours=hour)
         window = {"from": eval_world.iso(start), "to": eval_world.iso(start + timedelta(hours=1))}
-        sale = rng.random() < 0.25
-        sale_factor = rng.choice([2.0, 3.0]) if sale else None
         noise = sorted(rng.sample(range(60), rng.choice([0, 0, 1, 2, 3])))
         noise_history = rng.random() < 0.5
         llm = rng.choice(["grounded", "hallucinate", "fail"])
@@ -779,7 +780,7 @@ def holdout_specs(seed: int = HOLDOUT_SEED, count: int = HOLDOUT_COUNT) -> list[
             "fault": None,
             "minutes": None,
             "strength": None,
-            "sale_factor": sale_factor,
+            "sale_factor": None,
             "noise": len(noise),
         }
         if fault:
@@ -799,6 +800,9 @@ def holdout_specs(seed: int = HOLDOUT_SEED, count: int = HOLDOUT_COUNT) -> list[
                 condition.update(fault=name, minutes=minutes, strength=f"실패 {fraction:.0%}")
         else:
             kind, injection = "normal", {"type": "none"}
+        sale = kind != "order_drop" and rng.random() < 0.25
+        sale_factor = rng.choice([2.0, 3.0]) if sale else None
+        condition["sale_factor"] = sale_factor
         if noise:
             injection.update(
                 noise_at_minutes=noise, noise_history=noise_history, noise_code="PG_TIMEOUT"
