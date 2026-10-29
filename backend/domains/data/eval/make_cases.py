@@ -91,6 +91,46 @@ def _with_fault_code(spec: dict[str, Any], code: str) -> dict[str, Any]:
     return {**spec, "injection": {**spec["injection"], "fault_code": code}}
 
 
+# 낮 케이스 주문량 (5분, 시간대 배수 전). 평소 장애 쪽 실패 1~3건을 넣을 주문이 모자라지 않게
+DAY_TRAFFIC = 20
+
+
+USUAL_MARGIN_MINUTES = 60  # λ가 보는 같은 시각 ±1시간. 지난 날 그 범위에도 주문·평소 실패를 만든다
+
+
+def _usual_faults(cid: str) -> list[int]:
+    """구간 시작 기준 분: 5분마다 평소 장애 쪽 실패 1~3건을 넣을 시각. 케이스 id로 늘 같은 값이다.
+
+    잡음(`fault_noise`)과 같은 방식이라 `history`면 지난 7일 같은 시각에도 같은 수가 난다.
+    구간 앞뒤 1시간에도 주문이 있으므로(`history_margin_minutes`, 그날은 앞쪽만) 그 범위까지 만든다.
+    그날 구간 뒤 시각은 주문이 없어 쓰이지 않는다.
+    """
+    rng = random.Random(f"usual:{cid}")
+    first = -USUAL_MARGIN_MINUTES // 5
+    last = (WINDOW_MINUTES + USUAL_MARGIN_MINUTES) // 5
+    return [5 * b for b in range(first, last) for _ in range(rng.randint(1, 3))]
+
+
+def _usual_day(spec: dict[str, Any]) -> dict[str, Any]:
+    """낮에 평소에도 장애 쪽 실패(PG_TIMEOUT)가 5분에 1~3건씩 나는 시나리오로 바꾼다 (#131).
+
+    장애 없음은 `fault_noise`로, 결제 장애는 그 위에 같은 잡음을 얹는다. 주문량은 `DAY_TRAFFIC`.
+    """
+    minutes = _usual_faults(spec["id"])
+    injection = dict(spec["injection"])
+    if injection["type"] == "none":
+        injection = {
+            "type": "fault_noise",
+            "at_minutes": minutes,
+            "fault_code": "PG_TIMEOUT",
+            "history": True,
+        }
+    else:
+        injection.update(noise_at_minutes=minutes, noise_history=True, noise_code="PG_TIMEOUT")
+    traffic = {"orders_per_5m": DAY_TRAFFIC, "history_margin_minutes": USUAL_MARGIN_MINUTES}
+    return {**spec, "traffic": traffic, "injection": injection}
+
+
 DEPLOY = {"type": "deploy", "minutes_before": 8}
 DEPLOY_WITH_OLD = {"type": "deploy", "minutes_before": 6, "older_deploy_minutes_before": 27}
 NOTICE = {"type": "notice", "minutes_before": 12}
@@ -265,6 +305,80 @@ SPECS: list[dict[str, Any]] = [
         0.5,
         NONE,
         note="결제 장애 20분(03:40~04:00), 세기 50%, 새벽 3시 — 장애 쪽 실패 3건",
+    ),
+    # 낮에 평소에도 장애 쪽 실패가 5분에 1~3건씩 난다 (#131). 시간대별 평소 실패율(λ) 기준(#112)의
+    # 효과를 재려는 케이스다. 장애 없음 3개(정답: 이상 아님), 장애 3개(정답: 이상)
+    _usual_day(
+        _shape(
+            "usual_fault_normal_10h",
+            "normal",
+            28,
+            10,
+            {"type": "none"},
+            NONE,
+            note="평소 10시, 매일 장애 쪽 실패가 5분에 1~3건 (정상)",
+        )
+    ),
+    _usual_day(
+        _shape(
+            "usual_fault_normal_12h",
+            "normal",
+            29,
+            12,
+            {"type": "none"},
+            NONE,
+            "hallucinate",
+            note="평소 12시, 매일 장애 쪽 실패가 5분에 1~3건 (정상)",
+        )
+    ),
+    _usual_day(
+        _shape(
+            "usual_fault_normal_15h",
+            "normal",
+            30,
+            15,
+            {"type": "none"},
+            NONE,
+            "fail",
+            note="평소 15시, 매일 장애 쪽 실패가 5분에 1~3건 (정상)",
+        )
+    ),
+    _usual_day(
+        _fault(
+            "usual_fault_pay_full_15m_11h",
+            2,
+            11,
+            25,
+            15,
+            1.0,
+            DEPLOY,
+            note="결제 장애 15분, 세기 100%, 11시 — 평소에도 장애 쪽 실패 5분에 1~3건",
+        )
+    ),
+    _usual_day(
+        _fault(
+            "usual_fault_pay_half_20m_13h",
+            3,
+            13,
+            20,
+            20,
+            0.5,
+            NOTICE,
+            "hallucinate",
+            note="결제 장애 20분, 세기 50%, 13시 — 평소에도 장애 쪽 실패 5분에 1~3건",
+        )
+    ),
+    _usual_day(
+        _fault(
+            "usual_fault_pay_weak20_30m_16h",
+            4,
+            16,
+            15,
+            30,
+            0.2,
+            NONE,
+            note="결제 장애 30분, 세기 20%, 16시 — 평소에도 장애 쪽 실패 5분에 1~3건",
+        )
     ),
 ]
 

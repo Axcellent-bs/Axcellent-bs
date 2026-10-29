@@ -135,12 +135,20 @@ def _clock() -> Iterator[list[datetime]]:
         service._now = original
 
 
-def _slots(window_from: datetime, window_to: datetime) -> list[datetime]:
-    """분석 구간과, 기준선에 쓰는 지난 7일 같은 시간대 버킷 시작 시각."""
+def _slots(
+    window_from: datetime, window_to: datetime, margin: timedelta = timedelta(0)
+) -> list[datetime]:
+    """분석 구간과, 기준선에 쓰는 지난 7일 같은 시간대 버킷 시작 시각.
+
+    `margin`이 있으면 같은 시간대 앞뒤 `margin`까지 주문을 만든다(#131). 평소 실패율 λ는 같은 시각
+    ±1시간을 보므로, 그 범위가 비어 있으면(0건 기록) λ가 실제보다 낮게 나온다. 그날(분석하는 날)은
+    앞쪽만 만든다. 구간 뒤는 아직 오지 않은 시간이다. 앞쪽이 없으면 구간 첫 감시가 지난 날과 비교해
+    주문 급감처럼 보인다.
+    """
     slots: list[datetime] = []
     for day in range(HISTORY_DAYS, -1, -1):
-        moment = window_from - timedelta(days=day)
-        end = window_to - timedelta(days=day)
+        moment = window_from - timedelta(days=day) - margin
+        end = window_to - timedelta(days=day) + (margin if day else timedelta(0))
         while moment < end:
             slots.append(moment)
             moment += BUCKET
@@ -206,7 +214,8 @@ def build(spec: dict[str, Any]) -> World:
     noise_code = injection.get("noise_code") or code
     sale_factor = float(traffic.get("sale_factor", 1.0))  # 구간 전체 세일 (holdout 생성기)
     with _clock() as now:
-        for slot in _slots(window_from, window_to):
+        margin = timedelta(minutes=int(traffic.get("history_margin_minutes", 0)))
+        for slot in _slots(window_from, window_to, margin):
             in_window = window_from <= slot < window_to
             if kind == "empty" and (in_window or injection.get("history_empty")):
                 continue  # 이 버킷에는 주문이 하나도 없다
