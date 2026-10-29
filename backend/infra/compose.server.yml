@@ -29,6 +29,11 @@ services:
     expose:
       - "8020"
     restart: unless-stopped
+  dejafix-proxy:
+    ports: !reset []
+    expose:
+      - "8030"
+    restart: unless-stopped
   planning:
     ports: !reset []
     expose:

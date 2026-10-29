@@ -15,6 +15,8 @@ include:
   - path:
       - ../shared/dashboard-api/compose.yml
       - ./common-log/dashboard-api.yml
+  # LLM·사건 기록이 없는 읽기 프록시라 공통 로그 파일은 붙이지 않는다
+  - path: ../shared/dejafix-proxy/compose.yml
   - path:
       - ../services/orchestrator/compose.yml
       - ./common-log/orchestrator.yml
