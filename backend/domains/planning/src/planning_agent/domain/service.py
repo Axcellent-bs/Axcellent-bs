@@ -105,6 +105,7 @@ from planning_agent.domain.rules import (
 from planning_agent.domain.seed import initial_state
 from planning_agent.domain.trace import changed_paths_for
 from planning_agent.result_notify import ResultSender, send_change_result
+from planning_agent.vcs.base import VcsError
 
 AGENT_NAME = "planning"
 MAX_INSTRUCTION_CHARS = 1000  # 사람 수정 지시 길이
@@ -2337,6 +2338,39 @@ class PlanningService:
             )
 
         return await self._apply(run)
+
+    async def repo_write(
+        self,
+        action: str,
+        target: str,
+        text: str,
+        params: dict | None,
+        op: Callable[[], Awaitable[Any]],
+    ) -> Any:
+        """레포 작업 공간 사람 버튼 (사람이 직접 올린 PR·브랜치). 관문을 지난 뒤에만 형상관리를
+        부르고 활동을 남긴다. 형상관리 오류는 실패 활동을 남긴 뒤 `VcsError`로 다시 던진다."""
+        box: dict[str, Any] = {}
+        ctx = f"repo:{target.split('#', 1)[0].split(':', 1)[0]}"
+
+        async def run(s: State) -> ActionResult:
+            n = sum(1 for g in self.gate_calls if g.action == action) + 1
+            await self._execute(action, ctx, f"{target}:{n}", text, params)
+            try:
+                box["result"] = await op()
+            except VcsError as exc:
+                box["error"] = exc
+                note = f"{text} 실패 ({exc.code})"
+                s.activity.append(
+                    self._act(self.clock(), ctx, "dev", "dev", f"vcs.{action}_failed", "API", note)
+                )
+                return ActionResult(outcome="failed")
+            s.activity.append(self._act(self.clock(), ctx, "human", "dev", action, "사람", text))
+            return ActionResult(outcome=action)
+
+        await self._apply(run)
+        if "error" in box:
+            raise box["error"]
+        return box.get("result")
 
     async def revise_dev_task(self, task_id: str, note: str) -> ActionResult:
         """대기 중인 코딩 PR에 사람이 수정 지시를 준다. 개발 AI가 지시대로 고치고 리뷰한 뒤
