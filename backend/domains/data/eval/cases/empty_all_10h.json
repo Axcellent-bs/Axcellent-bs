@@ -23,7 +23,8 @@
       "metric": null,
       "onset": null,
       "first_failure_bucket": null,
-      "unknown_expected": true
+      "unknown_expected": true,
+      "noise_fault_failures": 0
     },
     "impact": {
       "unknown_expected": false,

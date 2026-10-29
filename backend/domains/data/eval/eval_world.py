@@ -8,6 +8,11 @@
 - 카드 거절(평상시 실패): `simulate="failure"`로 일정 간격마다 하나씩 넣는다 (`PG_DECLINED`).
 - 처음 보는 실패 코드(`injection.failure_code`): 장애로 실패한 결제의 `failure_code`를 그 코드로
   바꾼다 (shop-api가 새 코드를 쓰기 시작한 상황).
+- 알려진 장애 쪽 코드(`injection.fault_code`, 예 `PG_TIMEOUT`): 장애로 실패한 결제의 코드를 그것으로
+  바꾼다. 처음 보는 코드가 아니라서 영향 숫자는 낼 수 있어야 한다.
+- 잡음(`type: fault_noise`): 장애 구간 없이 `at_minutes`분마다 결제 하나만 결제 서버 쪽에서
+  실패한다(`fault_code`). `history`가 참이면 지난 7일 같은 시각에도 넣는다. 그 5분에 주문이
+  없으면 잡음도 없다. 잡음은 장애가 아니라 정답의 장애 실패 수에 넣지 않는다.
 
 정답(실패 주문 수·금액·영향 고객, 이상 시작 시각)은 data 에이전트 코드가 아니라 여기서 만든
 결제 기록에서 바로 센다(`Truth`).
@@ -62,6 +67,7 @@ class Payment:
     at: datetime
     failure_code: str | None  # None이면 성공
     faulty: bool = False  # 장애가 걸린 채 결제했는지 (정답은 이것으로 센다)
+    noise: bool = False  # 잡음으로 결제 서버 쪽에서 실패했는지 (장애 아님)
 
 
 @dataclass
@@ -146,6 +152,19 @@ def _poisson(rng: random.Random, mean: float) -> int:
     return count
 
 
+def _noise_targets(injection: dict[str, Any], window_from: datetime) -> list[datetime]:
+    """잡음(장애 쪽 실패 1건)을 넣을 시각. 구간 시작부터 `at_minutes`분 뒤.
+
+    `history`가 참이면 지난 7일 같은 시각에도 넣는다 (매일 가끔 나는 결제사 타임아웃).
+    """
+    days = range(HISTORY_DAYS, -1, -1) if injection.get("history") else [0]
+    return sorted(
+        window_from - timedelta(days=day) + timedelta(minutes=int(m))
+        for day in days
+        for m in injection["at_minutes"]
+    )
+
+
 def build(spec: dict[str, Any]) -> World:
     """시나리오 명세로 쇼핑몰 데이터를 만든다."""
     db = Db(":memory:")
@@ -163,6 +182,8 @@ def build(spec: dict[str, Any]) -> World:
     clock_seconds = [0.0]
     shop = service.Shop(db, clock=lambda: clock_seconds[0])
     order_no = 0
+    noise = _noise_targets(injection, window_from) if kind == "fault_noise" else []
+    code = injection.get("failure_code") or injection.get("fault_code")
     with _clock() as now:
         for slot in _slots(window_from, window_to):
             in_window = window_from <= slot < window_to
@@ -188,17 +209,23 @@ def build(spec: dict[str, Any]) -> World:
                     and _in(moment, injection)
                     and rng.random() < float(injection.get("fraction", 1.0))
                 )
-                if faulty:
+                # 잡음: 이 5분 안의 첫 결제 하나만 결제 서버 쪽에서 실패한다 (장애 구간이 아님)
+                while noise and noise[0] + BUCKET <= moment:  # 주문이 없던 5분은 잡음도 없다
+                    noise.pop(0)
+                blip = bool(noise) and noise[0] <= moment
+                if blip:
+                    noise.pop(0)
+                if faulty or blip:
                     shop.inject_fault("failure")
                 simulate = "failure" if order_no % DECLINE_EVERY == 0 else None
                 paid = shop.pay(order["order_id"], "card", simulate)
-                if faulty:
+                if faulty or blip:
                     shop.release_fault()
-                    if injection.get("failure_code"):
+                    if code:
                         with db.tx() as conn:
                             conn.execute(
                                 "UPDATE payments SET failure_code = ? WHERE order_id = ?",
-                                (injection["failure_code"], paid["order_id"]),
+                                (code, paid["order_id"]),
                             )
                 with db.tx() as conn:  # 방금 넣은 결제 기록 (정답은 여기서 센다)
                     pay = conn.execute(
@@ -214,6 +241,7 @@ def build(spec: dict[str, Any]) -> World:
                         at=moment,
                         failure_code=None if pay["status"] == "succeeded" else pay["failure_code"],
                         faulty=faulty,
+                        noise=blip,
                     )
                 )
     return world
@@ -229,6 +257,7 @@ class Truth:
     all_failed_payments: int  # 카드 거절 포함 모든 실패 결제 (진단용)
     declined_payments: int  # 카드 거절(PG_DECLINED)
     onset: str | None  # 장애로 실패한 첫 결제가 든 5분 버킷 시작
+    noise_failures: int = 0  # 구간 안 잡음(장애 아님) 실패 결제
 
 
 def truth(world: World) -> Truth:
@@ -247,4 +276,5 @@ def truth(world: World) -> Truth:
         all_failed_payments=len(failed),
         declined_payments=sum(1 for p in failed if p.failure_code == "PG_DECLINED"),
         onset=onset,
+        noise_failures=sum(1 for p in inside if p.noise and p.failure_code is not None),
     )

@@ -72,6 +72,11 @@ def _with_code(spec: dict[str, Any], code: str) -> dict[str, Any]:
     return {**spec, "injection": {**spec["injection"], "failure_code": code}}
 
 
+def _with_fault_code(spec: dict[str, Any], code: str) -> dict[str, Any]:
+    """장애로 실패한 결제의 코드를 알려진 장애 쪽 코드 `code`로 바꾼다 (영향 숫자는 낸다)."""
+    return {**spec, "injection": {**spec["injection"], "fault_code": code}}
+
+
 DEPLOY = {"type": "deploy", "minutes_before": 8}
 DEPLOY_WITH_OLD = {"type": "deploy", "minutes_before": 6, "older_deploy_minutes_before": 27}
 NOTICE = {"type": "notice", "minutes_before": 12}
@@ -165,6 +170,54 @@ SPECS: list[dict[str, Any]] = [
         {"type": "sale", "start": 15, "minutes": 30, "factor": 4.0},
         CAMPAIGN,
         note="타임세일 30분 주문 4배 (정상)",
+    ),
+    # 잡음: 장애가 아닌데 장애 쪽 실패 코드(결제사 타임아웃)가 가끔 1건씩 섞인다 (정답: 정상)
+    _shape(
+        "noise_timeout_14h",
+        "normal",
+        23,
+        14,
+        {"type": "fault_noise", "at_minutes": [7, 38], "fault_code": "PG_TIMEOUT", "history": True},
+        NONE,
+        note="평소 14시, 매일 결제사 타임아웃이 가끔 1건씩 (정상)",
+    ),
+    _shape(
+        "noise_timeout_03h_night",
+        "normal",
+        24,
+        3,
+        {
+            "type": "fault_noise",
+            "at_minutes": [12, 47],
+            "fault_code": "PG_TIMEOUT",
+            "history": True,
+        },
+        NONE,
+        "hallucinate",
+        note="평소 새벽 3시, 매일 결제사 타임아웃이 가끔 1건씩 (정상)",
+    ),
+    _shape(
+        "noise_single_timeout_03h_night",
+        "normal",
+        25,
+        3,
+        {"type": "fault_noise", "at_minutes": [22], "fault_code": "PG_TIMEOUT"},
+        NONE,
+        note="새벽 3시, 결제사 타임아웃 1건만 나고 끝남 (정상)",
+    ),
+    # 새벽에 장애 쪽 실패가 여러 5분 구간 계속된다 (정답: 이상). 코드는 알려진 PG_TIMEOUT
+    _with_fault_code(
+        _fault(
+            "pay_timeout_25m_03h_night",
+            26,
+            3,
+            20,
+            25,
+            1.0,
+            NONE,
+            note="새벽 3시, 결제사 타임아웃 25분 계속 (PG_TIMEOUT)",
+        ),
+        "PG_TIMEOUT",
     ),
     # 데이터가 비어 있는 구간
     _shape(
@@ -284,6 +337,7 @@ def expected(spec: dict[str, Any]) -> dict[str, Any]:
             "onset": injection.get("from") if kind in EXPECTED_METRIC else None,
             "first_failure_bucket": t.onset,  # 장애로 실패한 첫 결제가 든 5분 버킷
             "unknown_expected": kind == "empty",  # 빈 구간은 "이상 없음"이 아니라 확인할 수 없음
+            "noise_fault_failures": t.noise_failures,  # 구간 안 잡음 실패 (장애 아님)
         },
         "impact": {
             # 처음 보는 실패 코드면 장애인지 알 수 없어 숫자를 내지 않아야 한다

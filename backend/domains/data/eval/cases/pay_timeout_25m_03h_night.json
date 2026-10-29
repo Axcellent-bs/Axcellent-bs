@@ -1,0 +1,45 @@
+{
+  "id": "pay_timeout_25m_03h_night",
+  "kind": "payment_fault",
+  "description": "새벽 3시, 결제사 타임아웃 25분 계속 (PG_TIMEOUT)",
+  "window": {
+    "from": "2026-09-26T03:00:00Z",
+    "to": "2026-09-26T04:00:00Z"
+  },
+  "traffic": {
+    "orders_per_5m": 5
+  },
+  "injection": {
+    "type": "payment_failure",
+    "from": "2026-09-26T03:20:00Z",
+    "to": "2026-09-26T03:45:00Z",
+    "fraction": 1.0,
+    "fault_code": "PG_TIMEOUT"
+  },
+  "cause": {
+    "type": "none"
+  },
+  "llm": "grounded",
+  "expected": {
+    "anomaly": {
+      "expected": true,
+      "metric": "payment_fail_rate",
+      "onset": "2026-09-26T03:20:00Z",
+      "first_failure_bucket": "2026-09-26T03:20:00Z",
+      "unknown_expected": false,
+      "noise_fault_failures": 0
+    },
+    "impact": {
+      "unknown_expected": false,
+      "failed_order_count": 8,
+      "affected_customer_count": 7,
+      "damage_amount": 275600,
+      "all_failed_payments": 8,
+      "declined_payments": 0
+    },
+    "root_cause": {
+      "injected": "none",
+      "ref": null
+    }
+  }
+}
