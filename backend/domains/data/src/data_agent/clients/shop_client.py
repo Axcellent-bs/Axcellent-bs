@@ -34,6 +34,7 @@ TIMEOUT_SECONDS = 10.0
 SHOP_METRICS: frozenset[str] = frozenset(get_args(MetricName))
 # shop-api는 한 번에 5분 버킷 2016점(7일)까지 준다. 기준선 7일 + 구간을 하루씩 나눠 읽는다
 SERIES_CHUNK = timedelta(days=1)
+FAILED_ORDERS_LIMIT = 5000  # shop-api `/failed-orders`의 최대 limit
 
 Point = tuple[datetime, float]
 
@@ -147,6 +148,21 @@ class HttpMetricSource:
 
     def __init__(self, api: ShopApi) -> None:
         self.api = api
+
+    async def failed_orders(
+        self, window_from: datetime, window_to: datetime
+    ) -> list[FailedOrder] | None:
+        """구간의 실패 결제(실패 코드 포함). 장애 쪽 실패 절대 기준에 쓴다 (`detect`).
+
+        읽지 못하면 None이다. 그때 판정은 통계 판정만 한다(지표 판정 자체는 막지 않는다).
+        잘렸으면(`truncated`) 읽은 만큼만 센다. 장애 쪽 실패는 실제보다 적게 셀 뿐 많게 세지 않는다.
+        """
+        query = ShopFailedOrdersQuery(from_=window_from, to=window_to, limit=FAILED_ORDERS_LIMIT)
+        try:
+            result = await HttpShopClient(self.api).list_failed_orders(query)
+        except ShopUnavailable:
+            return None
+        return list(result.orders)
 
     async def fetch(self, metric: str, window_from: datetime, window_to: datetime) -> list[Point]:
         if metric not in SHOP_METRICS:

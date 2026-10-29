@@ -247,6 +247,9 @@ async def test_anomaly_detection_reads_payment_fail_rate_from_shop_api() -> None
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/failed-orders"):  # 장애 쪽 실패 코드 (여기선 없음)
+            seen.append(request)
+            return httpx.Response(200, json={"data": {"orders": []}, "meta": {}})
         # 실패율 판정에 표본 수(payment_count)와 주문 수(order_count)도 같이 읽는다
         metric = request.url.params["metric"]
         if metric == "payment_fail_rate":
@@ -266,11 +269,14 @@ async def test_anomaly_detection_reads_payment_fail_rate_from_shop_api() -> None
     assert verdict.observed == 0.25
     assert verdict.baseline == 0.02
     assert result.output.any_anomaly is True
-    assert {r.url.params["metric"] for r in seen} == {
+    series = [r for r in seen if r.url.path.endswith("/metric-series")]
+    assert {r.url.params["metric"] for r in series} == {
         "payment_fail_rate",
         "payment_count",
         "order_count",
     }
+    # 장애 쪽 실패 절대 기준을 위해 구간의 실패 주문도 한 번 읽는다
+    assert [r.url.path for r in seen if r not in series] == ["/api/shop/failed-orders"]
 
 
 async def test_metric_series_error_raises_unavailable() -> None:
