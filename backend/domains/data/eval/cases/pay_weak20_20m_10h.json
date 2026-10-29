@@ -18,7 +18,7 @@
   "cause": {
     "type": "none"
   },
-  "llm": "grounded",
+  "llm": "realistic_notation",
   "expected": {
     "anomaly": {
       "expected": true,

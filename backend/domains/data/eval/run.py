@@ -137,6 +137,10 @@ METRICS: dict[str, tuple[str, str | None]] = {
     "fraud.complete_rate": ("사기 점수 skill 답 중 complete=true 비율 (빠진 규칙 없음)", "higher"),
     "llm.fabricated_number_rate": ("LLM 설명에 지어낸 숫자가 남은 비율 (최종 문장 기준)", "lower"),
     "llm.fallback_rate": ("설명이 템플릿으로 대체된 비율", None),
+    "llm.notation_fallback_rate": (
+        "표기만 바꾼 설명(realistic_notation)을 검증이 버리고 템플릿으로 대체한 비율",
+        None,
+    ),
     "root_cause.top1_rate": ("원인 추정: 주입한 원인이 1순위 후보인 비율", "higher"),
     "root_cause.ungrounded_survived_rate": (
         "원인 추정: 일부러 넣은 근거 없는 후보가 남은 비율",
@@ -325,7 +329,12 @@ async def run_case(case: dict[str, Any]) -> dict[str, Any]:
         api = ShopApi("http://shop", token="eval", client=client)
         source, shop = HttpMetricSource(api), HttpShopClient(api)
         llm = eval_llm.ScriptedLLM(case["llm"])
-        out: dict[str, Any] = {"id": case["id"], "kind": case["kind"], "answer_drift": drift}
+        out: dict[str, Any] = {
+            "id": case["id"],
+            "kind": case["kind"],
+            "llm": case["llm"],
+            "answer_drift": drift,
+        }
 
         anomaly = await detect_anomalies(
             AnomalyDetectionInput(window_from=window_from, window_to=window_to), source, llm
@@ -564,6 +573,14 @@ def summarize(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> dic
         if i["want"]["damage_amount"]
     ]
     explanations = [c["anomaly"] for c in cases if c["anomaly"]["llm_used"]] + impacts
+    # 표기만 바꿔 적는 가짜 LLM 케이스의 설명 (#133). 지금 검증은 바꾼 표기도 없는 숫자로 본다
+    notation = [
+        e
+        for c in cases
+        if c.get("llm") == "realistic_notation"
+        for e in ([c["anomaly"]] if c["anomaly"]["llm_used"] else [])
+        + ([c["impact"]] if "impact" in c and "fallback_reason" in c["impact"] else [])
+    ]
     root = [c["root_cause"] for c in cases if "root_cause" in c]
     with_cause = [r for r in root if r["top1"] is not None]
     planted = sum(r["planted_ungrounded"] for r in root)
@@ -616,6 +633,9 @@ def summarize(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> dic
         ),
         "llm.fallback_rate": _rate(
             sum(1 for e in explanations if e["fallback"]), len(explanations)
+        ),
+        "llm.notation_fallback_rate": _rate(
+            sum(1 for e in notation if e["fallback"]), len(notation)
         ),
         "root_cause.top1_rate": _rate(sum(1 for r in with_cause if r["top1"]), len(with_cause)),
         "root_cause.ungrounded_survived_rate": _rate(

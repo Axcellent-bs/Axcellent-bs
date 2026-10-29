@@ -8,6 +8,9 @@
 - hallucinate: grounded 답에 지어낸 것을 섞는다. 설명에는 사실에 없는 숫자를 붙이고, 원인 후보에는
   없는 사실 id를 쓴 후보와 지어낸 숫자를 쓴 후보를 앞에 넣는다(`planted_ungrounded`로 센다).
 - fail: 늘 실패한다(LLM 미설정·시간 초과와 같다). 코드가 템플릿·규칙으로 대체해야 한다.
+- realistic_notation: 실제 LLM처럼 계산값의 표기만 바꿔 적는다(#133). 지어낸 숫자는 없다.
+  - 1보다 작은 비율은 퍼센트(0.42 → 42%), 소수는 소수 첫째 자리 반올림(2.747 → 2.7),
+    1000 이상 정수는 천 단위 쉼표(1234000 → 1,234,000). 원인 후보는 grounded와 같다.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from typing import Any
 
 from ax_agent_template.llm import LLMResponseError
 
+MODES = ("grounded", "hallucinate", "fail", "realistic_notation")
 MADE_UP_SUMMARY = " 추정 손실 9,876,543원"
 MADE_UP_CAUSE_NUMBER = "결제 실패율이 47%까지 올랐을 수 있음"
 
@@ -31,9 +35,21 @@ def _facts_in(prompt: str) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def realistic(value: Any) -> str:
+    """실제 LLM이 흔히 바꿔 적는 표기 (`realistic_notation`)."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return str(value)
+    if isinstance(value, float) and not value.is_integer():
+        if 0 < abs(value) < 1:
+            return f"{round(value * 100, 1):g}%"
+        return f"{value:.1f}"
+    number = int(value)
+    return f"{number:,}" if abs(number) >= 1000 else str(number)
+
+
 class ScriptedLLM:
     def __init__(self, mode: str = "grounded") -> None:
-        if mode not in ("grounded", "hallucinate", "fail"):
+        if mode not in MODES:
             raise ValueError(f"unknown llm mode: {mode}")
         self.mode = mode
         self.calls = 0
@@ -46,7 +62,8 @@ class ScriptedLLM:
         name = schema.__name__
         if name == "_Summary":
             facts = _facts_in(prompt)
-            text = ", ".join(f"{key} {value}" for key, value in facts.items()) or "값 없음"
+            show = realistic if self.mode == "realistic_notation" else str
+            text = ", ".join(f"{key} {show(value)}" for key, value in facts.items()) or "값 없음"
             if self.mode == "hallucinate":
                 text += MADE_UP_SUMMARY
             return schema(summary=text)

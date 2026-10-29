@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-29T10:48:43Z",
+  "generated_at": "2026-10-29T11:19:17Z",
   "case_count": 33,
   "metrics": {
     "anomaly.detection_rate": 1.0,
@@ -26,7 +26,8 @@
     "fraud.conservative_recall": 0.7778,
     "fraud.complete_rate": 0.0,
     "llm.fabricated_number_rate": 0.0,
-    "llm.fallback_rate": 0.2647,
+    "llm.fallback_rate": 0.3824,
+    "llm.notation_fallback_rate": 0.5714,
     "root_cause.top1_rate": 1.0,
     "root_cause.ungrounded_survived_rate": 0.0,
     "root_cause.needs_confirmation_rate": 1.0,
