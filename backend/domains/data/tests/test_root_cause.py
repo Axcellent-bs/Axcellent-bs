@@ -325,3 +325,51 @@ def test_reversed_window_is_invalid(client: TestClient) -> None:
     result = client.post("/a2a", json=_body("root_cause_hypotheses", payload)).json()
     assert result["status"] == "failed"
     assert result["outcome"] == "invalid_input"
+
+
+@pytest.mark.asyncio
+async def test_same_confidence_is_reordered_by_proximity_not_llm_order() -> None:
+    """LLM이 오래된 배포(25분 전)를 먼저 줘도 이상 시작과 가까운 배포(10분 전)가 1순위."""
+    llm = FakeLLM(
+        [
+            {
+                "explanation": "PR #405 배포 뒤 이상일 수 있음",
+                "fact_ids": ["f2"],
+                "confidence": "mid",
+            },
+            {
+                "explanation": "PR #412 배포 뒤 이상일 수 있음",
+                "fact_ids": ["f3"],
+                "confidence": "mid",
+            },
+        ]
+    )
+    result, _ = await _run(sources(), llm)
+    out = result.output
+    assert out.facts[1].ref == "pr:405" and out.facts[2].ref == "pr:412"
+    assert [h.fact_ids for h in out.hypotheses] == [["f3"], ["f2"]]
+    assert result.fallback is False
+    assert (
+        "같은 확신도 안에서는 근거 사실 시각이 이상 시작과 가까운 순"
+        in result.evidence.data_summary
+    )
+
+
+@pytest.mark.asyncio
+async def test_higher_confidence_still_comes_first() -> None:
+    llm = FakeLLM(
+        [
+            {
+                "explanation": "PR #412 배포 뒤 이상일 수 있음",
+                "fact_ids": ["f3"],
+                "confidence": "low",
+            },
+            {
+                "explanation": "PR #405 배포 뒤 이상일 수 있음",
+                "fact_ids": ["f2"],
+                "confidence": "high",
+            },
+        ]
+    )
+    result, _ = await _run(sources(), llm)
+    assert [h.confidence for h in result.output.hypotheses] == ["high", "low"]

@@ -2,6 +2,11 @@
 
 shop-api에서 실패 주문을 읽어 건수·금액·영향 고객·카테고리별 분포를 코드로 계산한다.
 LLM은 `summary` 문장만 쓰며, 숫자가 어긋나면 고정 템플릿으로 대체한다(`fallback`).
+
+장애 피해는 장애로 실패한 결제만 센다(정확도 평가 PR #55). shop-api 실패 주문의 `reason`
+(failure_code)이 사용자 쪽 사유(카드 거절·한도 초과 등)면 빼고, 뺀 건수는 근거에 따로 적는다.
+실패 사유가 없는 결제가 있으면 장애인지 알 수 없어 숫자를 내지 않는다(`ShopUnavailable`
+`NO_FAILURE_REASON` → 핸들러가 "확인할 수 없음"으로 답한다).
 """
 
 from __future__ import annotations
@@ -14,9 +19,9 @@ from ax_agent_template.llm import LLMClient
 from ax_contracts.data_access.shop_failed_orders import ShopFailedOrdersQuery
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import CategoryImpact, ImpactAnalysisInput, ImpactAnalysisOutput
-from data_agent.clients.shop_client import ShopClient, get_shop_client
+from data_agent.clients.shop_client import ShopClient, ShopUnavailable, get_shop_client
 from data_agent.explain import explain
-from data_agent.impact import aggregate_impact
+from data_agent.impact import aggregate_impact, split_failures
 
 
 @dataclass(frozen=True)
@@ -55,9 +60,15 @@ async def analyze_impact(
     )
     result = await client.list_failed_orders(query)
 
-    counts = aggregate_impact(result)  # 음수 금액이면 ValueError
-    customer_ids = sorted({order.buyer_id for order in result.orders})
-    by_category = _category_distribution(result.orders)
+    split = split_failures(result)
+    if split.missing_reason:
+        raise ShopUnavailable(
+            "NO_FAILURE_REASON",
+            f"실패 사유가 없는 결제 {split.missing_reason}건이 있어 장애 피해인지 알 수 없다",
+        )
+    counts = aggregate_impact(split.fault)  # 음수 금액이면 ValueError
+    customer_ids = sorted({order.buyer_id for order in split.fault})
+    by_category = _category_distribution(split.fault)
 
     explanation = await explain(
         "impact",
@@ -85,6 +96,8 @@ async def analyze_impact(
         f"실패 주문 {counts.failed_order_count}건, 영향 고객 {len(customer_ids)}명, "
         f"피해 금액 {counts.damage_amount}원, 카테고리 {len(by_category)}개"
     )
+    for name, count in sorted(split.excluded.items()):
+        summary += f"\n{name} {count}건은 장애 피해에서 제외"
     if result.truncated:
         summary += f"\n조회 한도 {query.limit}건에 걸려 일부만 반영됨(truncated)"
     evidence = Evidence(
