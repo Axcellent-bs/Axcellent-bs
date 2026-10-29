@@ -26,10 +26,13 @@ export default function RepeatCompare() {
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
-    hr.decisionCards(undefined, 50)
-      .then((cards) => { if (alive) setRows(rowsOf(cards)); })
-      .catch((e) => { if (alive) setErr(e instanceof Error ? e.message : "기록을 받지 못했습니다"); });
-    return () => { alive = false; };
+    const load = () =>
+      hr.decisionCards(undefined, 50)
+        .then((cards) => { if (alive) { setRows(rowsOf(cards)); setErr(null); } })
+        .catch((e) => { if (alive) setErr(e instanceof Error ? e.message : "기록을 받지 못했습니다"); });
+    load();
+    const poll = setInterval(load, 15000); // 해결 내용을 방금 적어도 15초 안에 반영된다
+    return () => { alive = false; clearInterval(poll); };
   }, []);
 
   const groups = [
