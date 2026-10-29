@@ -42,9 +42,13 @@
     },
     "impact": {
       "unknown_expected": false,
-      "failed_order_count": 0,
-      "affected_customer_count": 0,
-      "damage_amount": 0,
+      "failed_order_count": 1,
+      "affected_customer_count": 1,
+      "damage_amount": 27000,
+      "injected_failed_order_count": 0,
+      "injected_customer_count": 0,
+      "injected_damage_amount": 0,
+      "noise_failed_orders": 1,
       "all_failed_payments": 3,
       "declined_payments": 2
     },

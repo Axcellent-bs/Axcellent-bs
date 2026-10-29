@@ -342,6 +342,224 @@ SELLERS: list[dict[str, Any]] = [
             "max_fraud_card_similarity": 0.0,
         },
     },
+    # 추가 18명 (사기 6, 정상 12). 정상 쪽에 경계 케이스(신규 정상·세일 저가·대량 등록)를 넣는다.
+    # 기존 6명은 그대로 두고 뒤에 붙인다
+    {
+        "id": "seller_fraud_bulk_new",
+        "label": "fraud",
+        "description": "가입 당일, 저가 90%, 24시간 100개 등록, 지난 사기 판매자와 비슷",
+        "facts": {
+            "joined_days": 0,
+            "low_price_ratio": 0.9,
+            "business_hash_duplicated": False,
+            "listings_last_24h": 100,
+            "max_fraud_card_similarity": 0.6,
+        },
+    },
+    {
+        "id": "seller_fraud_dup_dump",
+        "label": "fraud",
+        "description": "가입 4일, 중복 사업자, 저가 75%, 24시간 60개 등록",
+        "facts": {
+            "joined_days": 4,
+            "low_price_ratio": 0.75,
+            "business_hash_duplicated": True,
+            "listings_last_24h": 60,
+            "max_fraud_card_similarity": 0.2,
+        },
+    },
+    {
+        "id": "seller_fraud_aged",
+        "label": "fraud",
+        "description": "가입 20일(신규 아님), 중복 사업자, 저가 80%, 사기 판매자와 비슷, 등록 적음",
+        "facts": {
+            "joined_days": 20,
+            "low_price_ratio": 0.8,
+            "business_hash_duplicated": True,
+            "listings_last_24h": 5,
+            "max_fraud_card_similarity": 0.7,
+        },
+    },
+    {
+        "id": "seller_fraud_similar_only",
+        "label": "fraud",
+        "description": "가입 2일, 지난 사기 판매자와 거의 같음, 저가 30%, 등록 적음",
+        "facts": {
+            "joined_days": 2,
+            "low_price_ratio": 0.3,
+            "business_hash_duplicated": False,
+            "listings_last_24h": 15,
+            "max_fraud_card_similarity": 0.95,
+        },
+    },
+    {
+        "id": "seller_fraud_cheap_only",
+        "label": "fraud",
+        "description": "가입 1일, 모든 상품 저가, 24시간 40개 등록",
+        "facts": {
+            "joined_days": 1,
+            "low_price_ratio": 1.0,
+            "business_hash_duplicated": False,
+            "listings_last_24h": 40,
+            "max_fraud_card_similarity": 0.5,
+        },
+    },
+    {
+        "id": "seller_fraud_reactivated",
+        "label": "fraud",
+        "description": "가입 90일 휴면 계정이 갑자기 저가 60% 상품 80개 등록, 중복 사업자",
+        "facts": {
+            "joined_days": 90,
+            "low_price_ratio": 0.6,
+            "business_hash_duplicated": True,
+            "listings_last_24h": 80,
+            "max_fraud_card_similarity": 0.3,
+        },
+    },
+    {
+        "id": "seller_new_honest_launch",
+        "label": "normal",
+        "description": "경계: 가입 1일 신규 브랜드가 첫날 60개 등록, 가격 정상",
+        "facts": {
+            "joined_days": 1,
+            "low_price_ratio": 0.05,
+            "business_hash_duplicated": False,
+            "listings_last_24h": 60,
+            "max_fraud_card_similarity": 0.0,
+        },
+    },
+    {
+        "id": "seller_new_honest_small",
+        "label": "normal",
+        "description": "경계: 가입 당일 신규, 상품 5개, 가격 정상",
+        "facts": {
+            "joined_days": 0,
+            "low_price_ratio": 0.0,
+            "business_hash_duplicated": False,
+            "listings_last_24h": 5,
+            "max_fraud_card_similarity": 0.0,
+        },
+    },
+    {
+        "id": "seller_new_honest_cheap",
+        "label": "normal",
+        "description": "경계: 가입 4일 신규, 저렴한 상품 25%, 등록 10개",
+        "facts": {
+            "joined_days": 4,
+            "low_price_ratio": 0.25,
+            "business_hash_duplicated": False,
+            "listings_last_24h": 10,
+            "max_fraud_card_similarity": 0.05,
+        },
+    },
+    {
+        "id": "seller_sale_clearance",
+        "label": "normal",
+        "description": "경계: 오래된 판매자 폐업 정리 세일 (저가 90%)",
+        "facts": {
+            "joined_days": 800,
+            "low_price_ratio": 0.9,
+            "business_hash_duplicated": False,
+            "listings_last_24h": 8,
+            "max_fraud_card_similarity": 0.0,
+        },
+    },
+    {
+        "id": "seller_sale_bulk_event",
+        "label": "normal",
+        "description": "경계: 세일 행사로 저가 60% 상품 50개 등록",
+        "facts": {
+            "joined_days": 200,
+            "low_price_ratio": 0.6,
+            "business_hash_duplicated": False,
+            "listings_last_24h": 50,
+            "max_fraud_card_similarity": 0.1,
+        },
+    },
+    {
+        "id": "seller_sale_new_promo",
+        "label": "normal",
+        "description": "경계: 가입 6일 신규가 오픈 기념 세일 (저가 50%)",
+        "facts": {
+            "joined_days": 6,
+            "low_price_ratio": 0.5,
+            "business_hash_duplicated": False,
+            "listings_last_24h": 20,
+            "max_fraud_card_similarity": 0.0,
+        },
+    },
+    {
+        "id": "seller_big_bulk_daily",
+        "label": "normal",
+        "description": "경계: 대형 판매자, 하루 300개 등록, 가격 정상",
+        "facts": {
+            "joined_days": 1500,
+            "low_price_ratio": 0.05,
+            "business_hash_duplicated": False,
+            "listings_last_24h": 300,
+            "max_fraud_card_similarity": 0.05,
+        },
+    },
+    {
+        "id": "seller_big_bulk_cheap",
+        "label": "normal",
+        "description": "경계: 대형 판매자, 저가 카테고리 상품 40%, 하루 150개 등록",
+        "facts": {
+            "joined_days": 700,
+            "low_price_ratio": 0.4,
+            "business_hash_duplicated": False,
+            "listings_last_24h": 150,
+            "max_fraud_card_similarity": 0.1,
+        },
+    },
+    {
+        "id": "seller_steady_small",
+        "label": "normal",
+        "description": "오래된 작은 판매자, 하루 2개 등록",
+        "facts": {
+            "joined_days": 1000,
+            "low_price_ratio": 0.0,
+            "business_hash_duplicated": False,
+            "listings_last_24h": 2,
+            "max_fraud_card_similarity": 0.0,
+        },
+    },
+    {
+        "id": "seller_steady_mid",
+        "label": "normal",
+        "description": "중간 규모 판매자, 가격 정상",
+        "facts": {
+            "joined_days": 120,
+            "low_price_ratio": 0.1,
+            "business_hash_duplicated": False,
+            "listings_last_24h": 12,
+            "max_fraud_card_similarity": 0.1,
+        },
+    },
+    {
+        "id": "seller_used_books",
+        "label": "normal",
+        "description": "중고 책 판매자 (중고라 저가 45%)",
+        "facts": {
+            "joined_days": 300,
+            "low_price_ratio": 0.45,
+            "business_hash_duplicated": False,
+            "listings_last_24h": 20,
+            "max_fraud_card_similarity": 0.2,
+        },
+    },
+    {
+        "id": "seller_transfer_honest",
+        "label": "normal",
+        "description": "가입 30일, 다른 몰에서 옮겨 와 45개 등록 (저가 20%)",
+        "facts": {
+            "joined_days": 30,
+            "low_price_ratio": 0.2,
+            "business_hash_duplicated": False,
+            "listings_last_24h": 45,
+            "max_fraud_card_similarity": 0.3,
+        },
+    },
 ]
 
 EXPECTED_METRIC = {
@@ -373,9 +591,15 @@ def expected(spec: dict[str, Any]) -> dict[str, Any]:
         "impact": {
             # 처음 보는 실패 코드면 장애인지 알 수 없어 숫자를 내지 않아야 한다
             "unknown_expected": bool(injection.get("failure_code")),
-            "failed_order_count": t.fault_failed_orders,
-            "affected_customer_count": t.fault_customers,
-            "damage_amount": t.fault_amount,
+            # 정답: 구간 안 장애 쪽 실패 결제 전부 (주입한 장애 + 그 구간 잡음). eval/README.md
+            "failed_order_count": t.impact_failed_orders,
+            "affected_customer_count": t.impact_customers,
+            "damage_amount": t.impact_amount,
+            # 주입한 장애로 생긴 실패만 (예전 정의). 초과분 지표 `impact.excess_*`의 정답
+            "injected_failed_order_count": t.fault_failed_orders,
+            "injected_customer_count": t.fault_customers,
+            "injected_damage_amount": t.fault_amount,
+            "noise_failed_orders": t.noise_failures,
             "all_failed_payments": t.all_failed_payments,
             "declined_payments": t.declined_payments,
         },
@@ -486,10 +710,11 @@ def holdout_expected(spec: dict[str, Any]) -> dict[str, Any]:
 
     - 결제 장애에서 장애 쪽 실패가 1건뿐이면 지금 정의대로 low 기록으로 채점한다(사건 아님)
     - 0건이면(주문이 없어 실패할 기회가 없었음) 데이터에 장애 흔적이 없어 이상 아님으로 본다
+    - 여기서 세는 실패는 주입한 장애로 생긴 것만이다(잡음 제외). 잡음은 장애가 아니다
     """
     answer = expected(spec)
     if spec["kind"] == "payment_fault":
-        failures = answer["impact"]["failed_order_count"]
+        failures = answer["impact"]["injected_failed_order_count"]
         if failures <= 1:
             answer["anomaly"]["expected"] = False
             answer["anomaly"]["low_expected"] = failures == 1

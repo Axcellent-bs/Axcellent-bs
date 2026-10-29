@@ -19,6 +19,12 @@
 정답(실패 주문 수·금액·영향 고객, 이상 시작 시각)은 data 에이전트 코드가 아니라 여기서 만든
 결제 기록에서 바로 센다(`Truth`).
 
+- 영향 분석 정답(`impact_*`): 구간 안의 장애 쪽 실패 결제 전부 = 주입한 장애로 실패한 결제 +
+  그 구간에 난 잡음 실패. 운영에서는 둘을 구분할 수 없고, 잡음으로 실패한 고객도 실제 결제 실패라
+  보상 대상이다. 카드 거절(`PG_DECLINED`)은 결제한 사람 쪽 사유라 넣지 않는다.
+- 주입한 장애만(`fault_*`): 예전 영향 분석 정답. 초과분 지표(`impact.excess_*`)의 정답이고,
+  결제 장애의 장애 쪽 실패 0건·1건 채점(이상 아님·low 기록)에도 쓴다.
+
 5분마다 주문 수는 시간대 수준을 평균으로 한 포아송 분포다(실제 주문처럼 흔들린다).
 난수는 시나리오 id로 씨앗을 고정한 `random.Random`만 쓴다. 같은 시나리오면 늘 같은 데이터다.
 """
@@ -269,13 +275,17 @@ def build(spec: dict[str, Any]) -> World:
 class Truth:
     """시나리오가 만든 결제 기록에서 바로 센 정답."""
 
-    fault_failed_orders: int  # 장애(PG_UNAVAILABLE)로 실패한 주문
+    fault_failed_orders: int  # 주입한 장애로 실패한 주문 (잡음 제외)
     fault_customers: int
     fault_amount: int  # 원
     all_failed_payments: int  # 카드 거절 포함 모든 실패 결제 (진단용)
     declined_payments: int  # 카드 거절(PG_DECLINED)
     onset: str | None  # 장애로 실패한 첫 결제가 든 5분 버킷 시작
     noise_failures: int = 0  # 구간 안 잡음(장애 아님) 실패 결제
+    # 영향 분석 정답: 구간 안 장애 쪽 실패 전부 (주입한 장애 + 잡음)
+    impact_failed_orders: int = 0
+    impact_customers: int = 0
+    impact_amount: int = 0
 
 
 def truth(world: World) -> Truth:
@@ -283,6 +293,7 @@ def truth(world: World) -> Truth:
     inside = [p for p in world.payments if window_from <= p.at < window_to]
     fault = [p for p in inside if p.faulty and p.failure_code is not None]
     failed = [p for p in inside if p.failure_code is not None]
+    fault_side = [p for p in failed if p.faulty or p.noise]  # 주입한 장애 + 잡음
     onset = None
     if fault:
         first = min(p.at for p in fault)
@@ -295,4 +306,7 @@ def truth(world: World) -> Truth:
         declined_payments=sum(1 for p in failed if p.failure_code == "PG_DECLINED"),
         onset=onset,
         noise_failures=sum(1 for p in inside if p.noise and p.failure_code is not None),
+        impact_failed_orders=len(fault_side),
+        impact_customers=len({p.buyer_id for p in fault_side}),
+        impact_amount=sum(p.amount for p in fault_side),
     )

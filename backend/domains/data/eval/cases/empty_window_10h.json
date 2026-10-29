@@ -31,6 +31,10 @@
       "failed_order_count": 0,
       "affected_customer_count": 0,
       "damage_amount": 0,
+      "injected_failed_order_count": 0,
+      "injected_customer_count": 0,
+      "injected_damage_amount": 0,
+      "noise_failed_orders": 0,
       "all_failed_payments": 0,
       "declined_payments": 0
     },

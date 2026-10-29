@@ -72,6 +72,222 @@
         "listings_last_24h": 30,
         "max_fraud_card_similarity": 0.0
       }
+    },
+    {
+      "id": "seller_fraud_bulk_new",
+      "label": "fraud",
+      "description": "가입 당일, 저가 90%, 24시간 100개 등록, 지난 사기 판매자와 비슷",
+      "facts": {
+        "joined_days": 0,
+        "low_price_ratio": 0.9,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 100,
+        "max_fraud_card_similarity": 0.6
+      }
+    },
+    {
+      "id": "seller_fraud_dup_dump",
+      "label": "fraud",
+      "description": "가입 4일, 중복 사업자, 저가 75%, 24시간 60개 등록",
+      "facts": {
+        "joined_days": 4,
+        "low_price_ratio": 0.75,
+        "business_hash_duplicated": true,
+        "listings_last_24h": 60,
+        "max_fraud_card_similarity": 0.2
+      }
+    },
+    {
+      "id": "seller_fraud_aged",
+      "label": "fraud",
+      "description": "가입 20일(신규 아님), 중복 사업자, 저가 80%, 사기 판매자와 비슷, 등록 적음",
+      "facts": {
+        "joined_days": 20,
+        "low_price_ratio": 0.8,
+        "business_hash_duplicated": true,
+        "listings_last_24h": 5,
+        "max_fraud_card_similarity": 0.7
+      }
+    },
+    {
+      "id": "seller_fraud_similar_only",
+      "label": "fraud",
+      "description": "가입 2일, 지난 사기 판매자와 거의 같음, 저가 30%, 등록 적음",
+      "facts": {
+        "joined_days": 2,
+        "low_price_ratio": 0.3,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 15,
+        "max_fraud_card_similarity": 0.95
+      }
+    },
+    {
+      "id": "seller_fraud_cheap_only",
+      "label": "fraud",
+      "description": "가입 1일, 모든 상품 저가, 24시간 40개 등록",
+      "facts": {
+        "joined_days": 1,
+        "low_price_ratio": 1.0,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 40,
+        "max_fraud_card_similarity": 0.5
+      }
+    },
+    {
+      "id": "seller_fraud_reactivated",
+      "label": "fraud",
+      "description": "가입 90일 휴면 계정이 갑자기 저가 60% 상품 80개 등록, 중복 사업자",
+      "facts": {
+        "joined_days": 90,
+        "low_price_ratio": 0.6,
+        "business_hash_duplicated": true,
+        "listings_last_24h": 80,
+        "max_fraud_card_similarity": 0.3
+      }
+    },
+    {
+      "id": "seller_new_honest_launch",
+      "label": "normal",
+      "description": "경계: 가입 1일 신규 브랜드가 첫날 60개 등록, 가격 정상",
+      "facts": {
+        "joined_days": 1,
+        "low_price_ratio": 0.05,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 60,
+        "max_fraud_card_similarity": 0.0
+      }
+    },
+    {
+      "id": "seller_new_honest_small",
+      "label": "normal",
+      "description": "경계: 가입 당일 신규, 상품 5개, 가격 정상",
+      "facts": {
+        "joined_days": 0,
+        "low_price_ratio": 0.0,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 5,
+        "max_fraud_card_similarity": 0.0
+      }
+    },
+    {
+      "id": "seller_new_honest_cheap",
+      "label": "normal",
+      "description": "경계: 가입 4일 신규, 저렴한 상품 25%, 등록 10개",
+      "facts": {
+        "joined_days": 4,
+        "low_price_ratio": 0.25,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 10,
+        "max_fraud_card_similarity": 0.05
+      }
+    },
+    {
+      "id": "seller_sale_clearance",
+      "label": "normal",
+      "description": "경계: 오래된 판매자 폐업 정리 세일 (저가 90%)",
+      "facts": {
+        "joined_days": 800,
+        "low_price_ratio": 0.9,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 8,
+        "max_fraud_card_similarity": 0.0
+      }
+    },
+    {
+      "id": "seller_sale_bulk_event",
+      "label": "normal",
+      "description": "경계: 세일 행사로 저가 60% 상품 50개 등록",
+      "facts": {
+        "joined_days": 200,
+        "low_price_ratio": 0.6,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 50,
+        "max_fraud_card_similarity": 0.1
+      }
+    },
+    {
+      "id": "seller_sale_new_promo",
+      "label": "normal",
+      "description": "경계: 가입 6일 신규가 오픈 기념 세일 (저가 50%)",
+      "facts": {
+        "joined_days": 6,
+        "low_price_ratio": 0.5,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 20,
+        "max_fraud_card_similarity": 0.0
+      }
+    },
+    {
+      "id": "seller_big_bulk_daily",
+      "label": "normal",
+      "description": "경계: 대형 판매자, 하루 300개 등록, 가격 정상",
+      "facts": {
+        "joined_days": 1500,
+        "low_price_ratio": 0.05,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 300,
+        "max_fraud_card_similarity": 0.05
+      }
+    },
+    {
+      "id": "seller_big_bulk_cheap",
+      "label": "normal",
+      "description": "경계: 대형 판매자, 저가 카테고리 상품 40%, 하루 150개 등록",
+      "facts": {
+        "joined_days": 700,
+        "low_price_ratio": 0.4,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 150,
+        "max_fraud_card_similarity": 0.1
+      }
+    },
+    {
+      "id": "seller_steady_small",
+      "label": "normal",
+      "description": "오래된 작은 판매자, 하루 2개 등록",
+      "facts": {
+        "joined_days": 1000,
+        "low_price_ratio": 0.0,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 2,
+        "max_fraud_card_similarity": 0.0
+      }
+    },
+    {
+      "id": "seller_steady_mid",
+      "label": "normal",
+      "description": "중간 규모 판매자, 가격 정상",
+      "facts": {
+        "joined_days": 120,
+        "low_price_ratio": 0.1,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 12,
+        "max_fraud_card_similarity": 0.1
+      }
+    },
+    {
+      "id": "seller_used_books",
+      "label": "normal",
+      "description": "중고 책 판매자 (중고라 저가 45%)",
+      "facts": {
+        "joined_days": 300,
+        "low_price_ratio": 0.45,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 20,
+        "max_fraud_card_similarity": 0.2
+      }
+    },
+    {
+      "id": "seller_transfer_honest",
+      "label": "normal",
+      "description": "가입 30일, 다른 몰에서 옮겨 와 45개 등록 (저가 20%)",
+      "facts": {
+        "joined_days": 30,
+        "low_price_ratio": 0.2,
+        "business_hash_duplicated": false,
+        "listings_last_24h": 45,
+        "max_fraud_card_similarity": 0.3
+      }
     }
   ]
 }
