@@ -47,6 +47,7 @@ CORS 허용 출처는 `DASHBOARD_CORS_ORIGINS`(쉼표 구분, 기본 `http://loc
 | POST `/conversations/{id}/check` | `check_reply` |
 | POST `/conversations/{id}/agent-messages` | `send_reply` (가드 차단이면 422 `REPLY_BLOCKED`) |
 | POST `/conversations/{id}/reject-draft`, `/summary`, `/status` | `reject_draft`, `summarize_inquiry`, `set_inquiry_status` |
+| POST `/conversations/{id}/receipt-analysis` | `analyze_receipt` (읽기). 본문 `images`(최대 4장, jpeg·png·webp, base64)·`receipt_text`는 `untrusted`로만 넘긴다. 글·사진이 모두 없으면 422, 주문이 없는 문의는 409 `NO_ORDER`. 목 모드는 501 |
 
 요청마다 새 `ctx_ui_<hex>` 사건 ID(아래 "사건 ID")를 붙이고, 상태를 바꾸는 skill에는 `idempotency_key`(context_id + skill + 대상)를 붙인다. 오류 매핑: `not_found`→404, `not_executed_*`(보류·거부)→409 `NOT_EXECUTED`, 타임아웃→504 `UPSTREAM_TIMEOUT`, 거부→403 `UPSTREAM_REJECTED`, 그 밖의 실패→502 `UPSTREAM_ERROR`.
 `POST /conversations`는 선택 필드 `customer_name`을 support에 넘긴다 (없으면 "고객 <user_id>"). 고객 목록(`/users`)은 shop-api 연결 전까지 목 전용이다.

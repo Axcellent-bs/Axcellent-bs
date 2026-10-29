@@ -5,6 +5,30 @@ import { won } from "@/lib/format";
 import type { Conversation, Draft, Message, Source } from "@/lib/types";
 import { FindingList, ValidationBadge } from "../Findings";
 import { StatusChip } from "./bits";
+import { ReceiptAnalysisCard } from "./ReceiptAnalysisCard";
+
+/** 가장 가까운 근거 정책의 유사도가 이 값 미만이면 "근거 정책 부족"으로 알린다.
+ *  기준은 시험에서 본 값(맞는 정책 0.6~0.7, 맞는 정책이 없는 문의 0.1~0.2)에서 정한 임시 값이다. */
+const POLICY_LOW_SCORE = 0.3;
+
+/** 이 문의에 맞는 정책이 있는지. 점수는 백엔드가 준 값을 그대로 쓰고 화면이 새로 만들지 않는다. */
+function policyGap(sources: Source[] | undefined): { kind: "none" | "weak"; top: number } | null {
+  if (!sources || sources.length === 0) return { kind: "none", top: 0 };
+  const top = Math.max(...sources.filter((s) => !s.from_decision).map((s) => s.score), 0);
+  return top < POLICY_LOW_SCORE && !sources.some((s) => s.from_decision) ? { kind: "weak", top } : null;
+}
+
+function PolicyGapNotice({ gap }: { gap: { kind: "none" | "weak"; top: number } }) {
+  return (
+    <section role="note" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
+      <p className="font-semibold">{gap.kind === "none" ? "근거 정책 없음" : `근거 정책 부족 · 가장 가까운 정책 유사도 ${gap.top.toFixed(1)}`}</p>
+      <p className="mt-1">
+        이 문의에 맞는 정책을 찾지 못했습니다. 아래 초안은 일정·금액을 단정하지 못하고 일반적인 안내에 그칩니다.
+        보내기 전에 정책을 직접 확인하고, 자주 들어오는 문의라면 정책 문서 추가를 요청하세요.
+      </p>
+    </section>
+  );
+}
 
 function DraftCard({ draft, onUse, onReject }: { draft: Draft; onUse: () => void; onReject: () => void }) {
   return (
@@ -44,6 +68,7 @@ export function CopilotPanel({ conv, onUseDraft, onRejectDraft }: { conv: Conver
   const cls = a?.classification;
   const awaiting = conv.messages.at(-1)?.role === "customer";
   const drafts = (a?.drafts ?? []).filter((d) => !hidden[`${last?.id}-${d.style}`]);
+  const gap = a ? policyGap(a.sources) : null;
 
   return (
     <aside className="scroll-thin flex w-[380px] shrink-0 flex-col gap-4 overflow-y-auto rounded-3xl bg-surface-2 p-4" aria-label="상담 코파일럿">
@@ -63,11 +88,14 @@ export function CopilotPanel({ conv, onUseDraft, onRejectDraft }: { conv: Conver
         </section>
       )}
 
+      {gap && <PolicyGapNotice gap={gap} />}
+
       {conv.order_id && (
         <section>
           <h3 className="panel-title mb-2">연결된 주문 · 클레임</h3>
           <div className="space-y-2">
-            <p className="rounded-xl border border-ink-100 bg-surface px-3 py-2 text-xs">주문 <b>{conv.order_no}</b> — 답변 초안은 이 영수증과 아래 판정을 근거로 만들어집니다.</p>
+            <p className="rounded-xl border border-ink-100 bg-surface px-3 py-2 text-xs">주문 <b>{conv.order_no ?? conv.order_id}</b> — 답변 초안은 이 영수증과 아래 판정을 근거로 만들어집니다.</p>
+            <ReceiptAnalysisCard key={conv.id} conversationId={conv.id} />
             {conv.claims.map((c) => (
               <Link key={c.id} href={`/claims?id=${c.id}`} className="block rounded-xl border border-ink-100 bg-surface p-3 text-xs hover:border-brand-500">
                 <div className="flex items-center gap-2"><StatusChip status={c.status} /><b>{CLAIM_TYPE_KO[c.type]} · {CLAIM_REASON_KO[c.reason]}</b><span className="ml-auto text-ink-500">#{c.id}</span></div>

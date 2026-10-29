@@ -16,7 +16,6 @@
 | `process_claim_queue` | A |
 | `suggest_compensation` | read |
 | `request_incident_compensation` | A |
-| `analyze_receipt` | read |
 | `analyze_claim_request` | read |
 
 - 실행: `uv run --package ax-svc-claims uvicorn svc_claims.main:app --port 8112` (backend/ 에서, 목 모드 `AGENT_TEMPLATE_MOCK=1`)

@@ -53,6 +53,7 @@ from ax_dashboard_api.schemas import (
     NoteBody,
     OnboardingStepBody,
     QueueProcessBody,
+    ReceiptAnalysisBody,
     ReviewStatusBody,
     StatusBody,
     Summary,
@@ -288,6 +289,26 @@ async def check_reply(conversation_id: int, body: TextBody) -> dict:
         "check_reply", {"inquiry_id": conversation_id}, {"text": body.text}
     )
     return ok(Validation.model_validate(out))
+
+
+@router.post("/conversations/{conversation_id}/receipt-analysis")
+async def receipt_analysis(conversation_id: int, body: ReceiptAnalysisBody) -> dict:
+    """문의에 붙은 주문과 고객이 보낸 영수증(글·사진)을 코드가 대조한다 (읽기, 저장 안 함).
+
+    사진은 support의 이미지 분석이 연결됐을 때만 읽고, 아니면 `images_status`로 알린다.
+    """
+    text = (body.receipt_text or "").strip()
+    if not text and not body.images:
+        raise ApiError(422, "INVALID_INPUT", "영수증 글 또는 사진이 필요하다")
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "영수증 분석은 실제 모드에서만 된다")
+    untrusted: dict = {"images": [i.model_dump() for i in body.images]}
+    if text:
+        untrusted["receipt_text"] = text
+    out = await support_client.call("analyze_receipt", {"inquiry_id": conversation_id}, untrusted)
+    if "check" not in out:  # 주문이 없는 문의 등: 분석 결과 없이 사유만 돌아온다
+        raise ApiError(409, "NO_ORDER", str(out.get("message", "영수증을 대조할 수 없다")))
+    return ok(out)
 
 
 @router.post("/conversations/{conversation_id}/agent-messages", status_code=201)

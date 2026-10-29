@@ -163,3 +163,99 @@ def test_ui_contexts_never_use_a_prefix_owned_by_another_department(
     for context in contexts:
         assert context.startswith(support_client.UI_CONTEXT_PREFIX)
         assert not any(context.startswith(reserved.value) for reserved in ContextPrefix)
+
+
+# ---------------------------------------------------------------- 영수증 분석
+RECEIPT_OUT = {
+    "facts": {
+        "total": 27000,
+        "paid_on": "2026-10-28",
+        "order_no": "ORD_0216",
+        "shipping_fee": 3000,
+        "items": [],
+        "ambiguous_total": False,
+    },
+    "order": {
+        "order_id": "ord_0216",
+        "cash_paid": 27000,
+        "gross_total": 27000,
+        "shipping_fee": 3000,
+        "paid_on": "2026-10-28",
+        "item_titles": ["데이터 분석 실전"],
+    },
+    "check": {
+        "verdict": "consistent",
+        "checked": ["total", "date"],
+        "mismatches": [],
+        "matched_basis": "cash",
+        "unmatched_receipt_items": [],
+        "missing_from_receipt": [],
+    },
+    "images_status": "read",
+    "pii_masked": [],
+    "notes": [],
+}
+PHOTO = {"ref": "receipt.png", "media_type": "image/png", "data_base64": "aGVsbG8="}
+
+
+def test_receipt_analysis_calls_analyze_receipt_with_untrusted_images(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.output = RECEIPT_OUT
+    response = client.post(BASE + "/conversations/7/receipt-analysis", json={"images": [PHOTO]})
+    assert response.status_code == 200
+    assert response.json()["data"]["check"]["verdict"] == "consistent"
+    sent = fake.sent[0]
+    assert sent.skill == "analyze_receipt" and sent.input == {"inquiry_id": 7}
+    assert sent.untrusted["images"] == [PHOTO]  # 사진·글은 untrusted로만 넘긴다
+    assert "receipt_text" not in sent.untrusted
+    assert sent.meta.idempotency_key is None  # 읽기라 멱등 키가 없다
+
+
+def test_receipt_analysis_forwards_text_and_needs_something_to_read(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.output = RECEIPT_OUT
+    assert client.post(BASE + "/conversations/7/receipt-analysis", json={}).status_code == 422
+    assert (
+        client.post(
+            BASE + "/conversations/7/receipt-analysis", json={"receipt_text": "  "}
+        ).status_code
+        == 422
+    )
+    assert fake.sent == []
+    client.post(BASE + "/conversations/7/receipt-analysis", json={"receipt_text": "총 27,000원"})
+    assert fake.sent[0].untrusted == {"images": [], "receipt_text": "총 27,000원"}
+
+
+def test_receipt_analysis_rejects_too_many_or_unknown_images(
+    client: TestClient, fake: Fake
+) -> None:
+    url = BASE + "/conversations/7/receipt-analysis"
+    assert client.post(url, json={"images": [PHOTO] * 5}).status_code == 422
+    gif = {**PHOTO, "media_type": "image/gif"}
+    assert client.post(url, json={"images": [gif]}).status_code == 422
+    assert fake.sent == []
+
+
+def test_receipt_analysis_without_an_order_is_a_conflict(client: TestClient, fake: Fake) -> None:
+    fake.outcome = "no_order"
+    fake.output = {"message": "문의에 주문이 없어 분석할 수 없다"}
+    response = client.post(BASE + "/conversations/7/receipt-analysis", json={"images": [PHOTO]})
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "NO_ORDER"
+
+
+def test_receipt_analysis_unknown_inquiry_is_not_found(client: TestClient, fake: Fake) -> None:
+    fake.outcome = "not_found"
+    fake.output = {"message": "문의 9를 찾을 수 없다"}
+    response = client.post(BASE + "/conversations/9/receipt-analysis", json={"images": [PHOTO]})
+    assert response.status_code == 404
+
+
+def test_analyze_receipt_is_served_by_the_inquiry_service() -> None:
+    """문의 저장소는 서비스마다 따로라서, 문의를 읽는 skill은 문의 서비스에서 받아야 한다."""
+    from ax_agent_template.services import BY_ID, route_target
+
+    assert route_target("support", "analyze_receipt") == "inquiry"
+    assert "analyze_receipt" not in BY_ID["claims"].skills
