@@ -34,6 +34,7 @@ export function AccountSwitcher() {
         </span>
         <span className="font-medium">{account.name}</span>
         <span className="chip bg-ink-100 text-ink-700">{kindOf(account)}</span>
+        {account.dept && <span className="hidden text-xs text-ink-500 sm:inline">{account.dept}</span>}
         <span className="text-ink-500" aria-hidden="true">▾</span>
       </button>
       {open && (
@@ -41,6 +42,12 @@ export function AccountSwitcher() {
           <div className="px-3 py-2 text-sm">
             <p className="font-medium">{account.name} <span className="text-xs font-normal text-ink-500">{kindOf(account)}{account.admin ? ' · 회사 계정' : ''}</span></p>
             <p className="text-xs text-ink-500">{account.email}</p>
+            {(account.dept || account.approver) && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {account.dept && <span className="chip bg-ink-100 text-ink-700">{account.dept}</span>}
+                {account.approver && <span className="chip bg-brand-50 text-brand-700">확인 권한</span>}
+              </div>
+            )}
           </div>
           <div className="mt-1 border-t border-ink-100 pt-1">
             <button type="button" role="menuitem" onClick={() => { const op = account.operator; signOut(); navigate(op ? '/control/login' : '/') }}

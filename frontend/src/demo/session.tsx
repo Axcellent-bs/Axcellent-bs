@@ -6,7 +6,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
 import { SERVICES, SHARED_PATHS, getEnabled, matchPath } from './services'
 import { getCompany } from './company'
-import { memberLinked } from './members'
+import { memberLinked, useProfiles, withProfile } from './members'
 
 export type Account = {
   id: string
@@ -20,6 +20,10 @@ export type Account = {
   admin?: boolean
   /** 운영자(AXcellent 운영팀): 관제 센터(/control)만 연다. 고객사 화면에는 들어가지 않는다 */
   operator?: boolean
+  /** 부서. 받은 요청이 이 부서로 온다 */
+  dept?: string
+  /** 확인 권한: 받은 요청 중 위험한 건(확인 권한 필요)을 승인할 수 있다 */
+  approver?: boolean
 }
 
 export type MemberKind = '운영자' | '관리자' | '일반회원'
@@ -31,8 +35,8 @@ export const isLinked = (a: Account) =>
 // 데모 고객사 계정: 관리자 + 일반회원(시스템 관리 메뉴 없음, 회사에 연결된 상태). 예전 ?as=<직무 id> 링크는 관리자로 들어간다(load)
 // 화면에만 있는 계정이라 백엔드 데이터(재무 장부 등)에는 영향이 없다
 export const ACCOUNTS: Account[] = [
-  { id: 'admin', name: '관리자', role: '관리자', email: 'admin@catbooks.example', services: SERVICES.map((s) => s.id), admin: true },
-  { id: 'member', name: '일반회원', role: '일반회원', email: 'member@catbooks.example', services: SERVICES.map((s) => s.id) },
+  { id: 'admin', name: '관리자', role: '관리자', email: 'admin@catbooks.example', services: SERVICES.map((s) => s.id), admin: true, dept: '경영지원팀', approver: true },
+  { id: 'member', name: '일반회원', role: '일반회원', email: 'member@catbooks.example', services: SERVICES.map((s) => s.id), dept: '개발팀', approver: false },
 ]
 const DEMO_IDS = new Set(ACCOUNTS.map((a) => a.id))
 const ADMIN = ACCOUNTS[0]
@@ -47,14 +51,14 @@ const loadSignups = (): Account[] => {
     return []
   }
 }
-/** 로그인할 수 있는 고객사 계정: 데모 계정 + 회원가입한 계정 */
-export const customerAccounts = (): Account[] => [...ACCOUNTS, ...loadSignups()]
+/** 로그인할 수 있는 고객사 계정: 데모 계정 + 회원가입한 계정 (관리자가 바꾼 부서·확인 권한을 덮어쓴다) */
+export const customerAccounts = (): Account[] => [...ACCOUNTS, ...loadSignups()].map((a) => withProfile(a))
 
 /** 이미 가입된 이메일인가 (운영자 포함) */
 export const emailTaken = (email: string) =>
   [...customerAccounts(), ...OPERATORS].some((a) => a.email === email.trim().toLowerCase())
 
-export type SignupInput = { name: string; email: string; role?: string }
+export type SignupInput = { name: string; email: string; role?: string; dept?: string }
 /** 회원가입. 일반회원 가입(/signup)과 관리자 가입(/setup, 운영자에게 받은 키 확인 뒤)이 같이 쓴다 */
 export function registerAccount(x: SignupInput, admin = false): Account {
   const email = x.email.trim().toLowerCase()
@@ -67,6 +71,7 @@ export function registerAccount(x: SignupInput, admin = false): Account {
     // 관리자·일반회원 모두 회사가 켠 서비스(DejaFix 포함)를 쓴다. 차이는 시스템 관리 메뉴뿐
     services: SERVICES.map((s) => s.id),
     ...(admin ? { admin: true } : {}),
+    ...(x.dept?.trim() ? { dept: x.dept.trim() } : {}),
   }
   try {
     localStorage.setItem(SIGNUP_KEY, JSON.stringify([...loadSignups(), account]))
@@ -155,7 +160,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setAccount(null)
     save(null)
   }, [])
-  const value = useMemo(() => ({ account, signIn, signOut }), [account, signIn, signOut])
+  // 관리자가 부서·확인 권한을 바꾸면 로그인한 계정에도 바로 보인다
+  const profiles = useProfiles()
+  const current = useMemo(() => (account ? withProfile(account, profiles) : null), [account, profiles])
+  const value = useMemo(() => ({ account: current, signIn, signOut }), [current, signIn, signOut])
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 
