@@ -55,14 +55,15 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 - shop-api 응답 없음·401·403·5xx·형식 오류면 숫자를 0으로 내지 않고 `failed`·`unavailable`과 "확인할 수 없음" 근거로 답한다.
 
 ### fraud_score (판매자 사기 위험 점수)
-- **가중치는 재무(태윤) 확정 전 초안이다** (`metrics/fraud.py` `WEIGHTS`). 점수는 판단 재료이고 승인·보류는 정하지 않는다(grade read, 재무·정산이 정한다).
+- **가중치: 재무 확정 (#99, 2026-10-29). 사업자 중복·유사 사기 카드 자료가 생기면 다시 잰다** (`metrics/fraud.py` `WEIGHTS`). 점수는 판단 재료이고 승인·보류는 정하지 않는다(grade read, 재무·정산이 정한다).
+- 재무는 상한 high(70 이상)를 사람 확인으로 보낸다(#99). 사기 확정 아님.
 - 입력: `seller_id` (`FraudScoreInput`)
 - 사용하는 데이터 (shop-api 읽기 전용, 기존 `sellers`·`products` 테이블만)
   - `GET /api/shop/sellers/{seller_id}/profile` (`ShopSellerProfile`): `joined_at`(=`sellers.created_at`), `listings_last_24h`(최근 24시간에 만든 상품 수), `product_count`(판매 중 상품 수)
   - `GET /api/shop/sellers/{seller_id}/prices` (`ShopSellerPricesResult`): 판매 중 상품의 가격과 같은 카테고리 판매 중 상품 가격의 중앙값
 - 규칙 (계산은 `metrics/fraud.score_seller`, LLM 없음)
 
-| 규칙 | 가중치(초안) | 사실 | 지금 |
+| 규칙 | 가중치(재무 확정 #99) | 사실 | 지금 |
 | --- | --- | --- | --- |
 | NEW_ACCOUNT | 15 | 가입 7일 미만 | 확인함 |
 | LOW_PRICE | 25 × 비율 | 카테고리 중앙값의 50% 미만(`LOW_PRICE_FACTOR`)인 상품 비율 | 확인함 (판매 중 상품이 없으면 확인할 수 없음) |

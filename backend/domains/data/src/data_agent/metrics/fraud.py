@@ -1,6 +1,7 @@
 """판매자 사기 위험 규칙 점수 (fraud_score).
 
-가중치는 재무(태윤) 합의 전 초안이다. 점수는 판단 재료일 뿐 승인·보류는 재무/정산이 정한다.
+가중치: 재무 확정 (#99, 2026-10-29). 사업자 중복·유사 사기 카드 자료가 생기면 다시 잰다.
+점수는 판단 재료일 뿐 승인·보류는 재무/정산이 정한다.
 순수 계산이며 LLM을 쓰지 않는다.
 """
 
@@ -19,7 +20,7 @@ DUP_BUSINESS = "DUP_BUSINESS"
 BULK_LISTING = "BULK_LISTING"
 FRAUD_SIMILAR = "FRAUD_SIMILAR"
 
-# 규칙별 최대 점수 (초안, 합계 100)
+# 규칙별 최대 점수 (재무 확정 #99, 합계 100)
 WEIGHTS: dict[str, int] = {
     NEW_ACCOUNT: 15,
     LOW_PRICE: 25,
@@ -83,7 +84,8 @@ def _validate(f: SellerFacts) -> None:
 def score_seller(facts: SellerFacts) -> FraudScore:
     """판매자 사실로 0~100 정수 점수와 위험 등급, 규칙 근거를 계산한다.
 
-    가중치는 재무(태윤) 합의 전 초안이다. 입력이 범위 밖이면 ValueError.
+    가중치: 재무 확정 (#99, 2026-10-29). 사업자 중복·유사 사기 카드 자료가 생기면 다시 잰다.
+    입력이 범위 밖이면 ValueError.
     """
     _validate(facts)
     candidates: list[tuple[str, float, float]] = [
