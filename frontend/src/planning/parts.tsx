@@ -31,8 +31,11 @@ export function Grade({ g }: { g?: string }) {
 const GREEN_LIVE = ['진행 중', '파일 읽는 중', '코드 작성 중', '관찰 중', '기획 중', '작업 중']
 const GREEN = ['대기', '접수', '초안', '머지 대기', 'PR 열림', 'PR 검수', '승인 대기', '레포 승인 대기', '확인 대기']
 const AMBER_LIVE = ['리뷰 중']
-const AMBER = ['교차검증 대기', '사람 확인 대기', '사람 확인', 'C 보류']
+// 끝나지 않고 멈춘 것(중단·기준 해제)은 다시 봐야 하니 주황
+const AMBER = ['교차검증 대기', '사람 확인 대기', '사람 확인', 'C 보류', '중단됨', '중단', '해제됨', '기준 해제']
 const RED = ['실패', '거절', '불일치', '장애 연결', '걸림', '교차검증 거절', '검증자 거절', '학습 거부']
+// 회색은 성공적으로 끝나 다시 볼 필요 없는 것만. 목록에 없는 글자는 회색으로 숨기지 않고 초록(볼 것)
+const GRAY = ['완료', '확정', '통과', '승인', '구현됨', '정식', '머지됨', '관찰 통과', '중복 연결']
 type Tone = 'green' | 'amber' | 'red' | 'gray'
 const toneOf = (v: string): [Tone, boolean] =>
   GREEN_LIVE.includes(v) ? ['green', true]
@@ -40,7 +43,8 @@ const toneOf = (v: string): [Tone, boolean] =>
     : AMBER_LIVE.includes(v) ? ['amber', true]
     : AMBER.includes(v) ? ['amber', false]
     : RED.includes(v) ? ['red', false]
-    : ['gray', false] // 완료·확정·통과·승인·머지됨·정식·중단됨·중복 연결·해제됨 등
+    : GRAY.includes(v) ? ['gray', false]
+    : ['green', false]
 /** `live`를 주면 목록에 없는 글자라도 깜빡인다 (에이전트가 일하는 중) */
 export function State({ v, live }: { v: string; live?: boolean }) {
   const [tone, blink] = toneOf(v)
