@@ -44,6 +44,20 @@ export const AUDIT_KO: Record<string, string> = {
   submitted: "신청 접수", decided: "자동 판정", evidence_added: "사진 추가", withdrawn: "철회", agent_override: "상담원 승인",
   agent_confirmed: "상담원 거절", received: "반품 입고", inspected: "검수 결과 변경", paid: "지급 완료",
 };
+/** 영수증 대조 결과. 같음·다름·확인할 수 없음만 말하고 환불 판정은 하지 않는다. */
+export const RECEIPT_VERDICT_KO: Record<string, string> = { consistent: "주문과 같음", mismatch: "주문과 다름", insufficient: "확인할 수 없음" };
+export const RECEIPT_VERDICT_TONE: Record<string, string> = {
+  consistent: "bg-emerald-50 text-emerald-700", mismatch: "bg-red-50 text-red-700", insufficient: "bg-amber-50 text-amber-700",
+};
+export const RECEIPT_MISMATCH_KO: Record<string, string> = {
+  RECEIPT_AMOUNT_MISMATCH: "총 결제 금액이 주문과 다름", RECEIPT_DATE_MISMATCH: "결제일이 주문과 다름",
+  RECEIPT_ORDER_NO_MISMATCH: "주문번호가 주문과 다름", RECEIPT_SHIPPING_MISMATCH: "배송비가 주문과 다름",
+  RECEIPT_ITEM_AMOUNT_MISMATCH: "품목 금액이 주문과 다름", RECEIPT_ITEM_UNKNOWN: "주문에 없는 품목이 영수증에 있음",
+};
+export const RECEIPT_FIELD_KO: Record<string, string> = { total: "총 결제 금액", date: "결제일", order_no: "주문번호", shipping_fee: "배송비", items: "품목" };
+export const RECEIPT_IMAGES_KO: Record<string, string> = {
+  none: "사진 없음", read: "사진을 읽음", unavailable: "이미지 분석 미연결", failed: "사진 읽기 실패", skipped: "사진을 읽지 않음(개수·크기·형식)",
+};
 export const OUTCOME_KO: Record<string, string> = {
   auto_rejected: "자동 거절", needs_info: "자료 요청", needs_review: "상담원 확인", approved_pending_return: "승인(입고 후 지급)", auto_approved: "자동 승인·지급",
 };

@@ -70,6 +70,23 @@ export interface ClaimInput {
 }
 
 export interface AuditEntry { actor: string; action: string; detail: Record<string, unknown>; at: string }
+/** 영수증 분석 결과 (dashboard-api POST /conversations/{id}/receipt-analysis). 대조만 하고 환불 판정은 하지 않는다. */
+export interface ReceiptFacts {
+  total: number | null; paid_on: string | null; order_no: string | null; shipping_fee: number | null;
+  items: { title: string; qty: number; amount: number | null }[]; ambiguous_total: boolean;
+}
+export interface ReceiptAnalysis {
+  facts: ReceiptFacts;
+  order: { order_id: string; cash_paid: number; gross_total: number; shipping_fee: number; paid_on: string; item_titles: string[] };
+  check: {
+    verdict: "consistent" | "mismatch" | "insufficient"; checked: string[]; mismatches: string[];
+    matched_basis: "cash" | "gross" | null; unmatched_receipt_items: string[]; missing_from_receipt: string[];
+  };
+  images_status: "none" | "read" | "unavailable" | "failed" | "skipped";
+  pii_masked: string[]; notes: string[];
+}
+export interface ReceiptImageInput { ref: string; media_type: "image/jpeg" | "image/png" | "image/webp"; data_base64: string }
+
 export interface ClaimDetail extends Claim {
   audit: AuditEntry[];
   receipt: {

@@ -453,6 +453,21 @@ class TextBody(BaseModel):
     text: str = Field(min_length=1)
 
 
+class ReceiptImageBody(BaseModel):
+    """영수증 사진 한 장. 크기·형식은 support가 다시 검사한다 (jpeg·png·webp, 약 4.5MB 이하)."""
+
+    ref: str = Field(min_length=1, max_length=200)
+    media_type: Literal["image/jpeg", "image/png", "image/webp"] = "image/jpeg"
+    data_base64: str = Field(min_length=1, max_length=6_000_000)
+
+
+class ReceiptAnalysisBody(BaseModel):
+    """영수증 분석 요청. 글·사진 중 하나는 있어야 한다 (사진은 최대 4장)."""
+
+    images: list[ReceiptImageBody] = Field(default_factory=list, max_length=4)
+    receipt_text: str | None = Field(default=None, max_length=20_000)
+
+
 class CandidateDecisionBody(BaseModel):
     """후보 카드 결정. `approve`는 승인(active), `reject`는 폐기(retired)."""
 

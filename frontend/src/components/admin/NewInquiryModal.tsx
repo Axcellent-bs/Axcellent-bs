@@ -10,12 +10,13 @@ const PRESETS = [
 ];
 
 export function NewInquiryModal({ onClose, onCreate }: {
-  onClose: () => void; onCreate: (b: { user_id: number; subject: string; message: string; order_id?: number | null }) => Promise<void>;
+  onClose: () => void; onCreate: (b: { user_id: number; subject: string; message: string; order_id?: string | null }) => Promise<void>;
 }) {
   const [users, setUsers] = useState<Me[]>([]);
   const [userId, setUserId] = useState<number | null>(null);
   const [orders, setOrders] = useState<{ id: number; order_no: string; status_ko: string; title: string }[]>([]);
-  const [orderId, setOrderId] = useState<number | null>(null);
+  // support는 shop-api 주문 ID(`ord_0216`)로 주문을 찾는다. 숫자 ID를 보내면 주문이 연결되지 않는다.
+  const [orderId, setOrderId] = useState<string | null>(null);
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -42,8 +43,8 @@ export function NewInquiryModal({ onClose, onCreate }: {
         <div className="space-y-2.5">
           <div className="grid grid-cols-2 gap-2">
             <select className="field" value={userId ?? ""} onChange={(e) => setUserId(Number(e.target.value))} aria-label="고객">{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
-            <select className="field" value={orderId ?? ""} onChange={(e) => setOrderId(e.target.value ? Number(e.target.value) : null)} aria-label="연결할 주문">
-              <option value="">주문 연결 안 함</option>{orders.map((o) => <option key={o.id} value={o.id}>{o.order_no} · {o.status_ko} · {o.title.slice(0, 12)}</option>)}
+            <select className="field" value={orderId ?? ""} onChange={(e) => setOrderId(e.target.value || null)} aria-label="연결할 주문">
+              <option value="">주문 연결 안 함</option>{orders.map((o) => <option key={o.id} value={o.order_no}>{o.order_no} · {o.status_ko} · {o.title.slice(0, 12)}</option>)}
             </select>
           </div>
           <input className="field" placeholder="제목" value={subject} onChange={(e) => setSubject(e.target.value)} />
