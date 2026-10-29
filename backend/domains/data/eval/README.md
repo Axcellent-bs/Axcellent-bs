@@ -26,6 +26,7 @@ uv run python domains/data/eval/run.py   # 결과: eval/results/latest.json
 | seed | 만든 날 | 이유 |
 | --- | --- | --- |
 | `20261029` | 2026-10-29 | 처음 만듦 |
+| `20261029` | 2026-10-29 | 같은 seed로 다시 만듦. 시나리오는 같고 영향 분석 정답 정의만 바뀜 |
 
 - 무작위로 고르는 것
   - 시각(0~23시)
@@ -34,10 +35,37 @@ uv run python domains/data/eval/run.py   # 결과: eval/results/latest.json
   - 세일 여부(25%, 구간 전체 2·3배)
   - 잡음 건수(0~3건, 결제사 타임아웃, 지난 7일에도 넣을지)
 - 데이터는 기존 케이스와 같이 shop-api 코드로 만든다(`eval_world.build`).
-- 정답은 생성 조건에서 정한다. 결제 장애는 실제로 만들어진 장애 쪽 실패 수로 다듬는다.
-  - 1건뿐이면 지금 정의대로 low 기록으로 채점한다.
-  - 0건이면(주문이 없어 실패할 기회가 없었음) 데이터에 흔적이 없어 이상 아님으로 본다.
+- 정답은 생성 조건에서 정한다. 결제 장애는 실제로 만들어진 장애 쪽 실패 수로 다듬는다(아래 "장애 쪽 실패가 0건·1건일 때").
 - 케이스마다 생성 조건이 `holdout` 필드에 있다. 결과 파일에는 `holdout.wrong`(틀린 항목)과 `holdout.conditions`가 남는다. `run.py`는 화면에 틀린 항목 수만 보여 준다.
+
+## 영향 분석 정답 정의
+
+- **정답 = 장애 구간 안의 장애 쪽 실패 결제 전부** (주입한 장애로 실패한 결제 + 그 구간에 난 잡음 실패). 건수·영향 고객·피해 금액 모두 이 기준이다(`impact.match_rate`, `impact.mean_abs_amount_error*`).
+  - 이유 1: 운영에서는 주입한 장애와 잡음을 구분할 수 없다. 둘 다 결제 서버 쪽 실패 코드이고, 결제 기록에는 "이건 장애, 이건 잡음" 표시가 없다.
+  - 이유 2: 잡음으로 실패한 고객도 실제로 결제에 실패했다. 보상 대상이다.
+  - 카드 거절(`PG_DECLINED`) 같은 결제한 사람 쪽 사유는 넣지 않는다(예전과 같음).
+  - 처음 보는 실패 코드면 숫자를 내지 않아야 맞다(예전과 같음).
+- 정답 파일 `expected.impact`
+  - `failed_order_count`·`affected_customer_count`·`damage_amount`: 위 정답
+  - `injected_*`: 주입한 장애로 생긴 실패만(2026-10-29 이전 정의). `noise_failed_orders`: 구간 안 잡음 실패
+- 바꾼 날: 2026-10-29. 기존 27개와 holdout 40개 모두 다시 만들었다. holdout seed는 그대로다(시나리오는 같고 정답 정의만 바뀜).
+
+### 초과분 지표 (`impact.excess_*`)
+
+- 장애 때문에 **평소보다 더** 실패한 건수를 따로 잰다.
+- 정답 = 주입한 장애로 생긴 실패만 (`injected_failed_order_count`, 예전 정의)
+- 비교 대상 = 장애 구간 실패 − 지난 7일 같은 시간대 평균 실패 (반올림). 영향 분석 skill이 출력 `excess_failed_order_count`로 내야 하는 값이다.
+- `impact.excess_mean_abs_error`: 건수 오차 평균 (낮을수록 좋음)
+- 지금 영향 분석 skill은 이 값을 내지 않는다. 그래서 "확인할 수 없음"(null)이다. skill에 이 출력이 생기면 `run.py`가 그대로 읽는다.
+
+## 결제 장애에서 장애 쪽 실패가 0건·1건일 때 (채점 규칙)
+
+결제 장애를 넣었어도, 그 구간에 주문이 적으면 장애로 실패한 결제가 거의 없을 수 있다. 데이터에 남은 흔적으로 채점한다(#91에서 정함).
+
+- **0건 → "이상 아님"으로 채점한다.** 주문이 없어 실패할 기회가 없었다. 데이터에 장애 흔적이 없어 이상이라고 말할 근거가 없다.
+- **1건 → 사건(이상)이 아니라 low 기록으로 채점한다.** 잡음 1건과 데이터로 구분할 수 없다(`anomaly.low_recorded_rate`, `pay_half_10m_03h_night`와 같은 기준).
+- 여기서 세는 실패는 **주입한 장애로 생긴 것만**이다(`injected_failed_order_count`). 잡음은 장애가 아니므로 0건·1건 판단에 넣지 않는다.
+- 지금은 holdout 생성기(`make_cases.holdout_expected`)가 이 규칙을 쓴다. 기존 27개는 명세에서 직접 정한다(`_low`).
 
 ## 평가와 감시의 차이 (감시 재현 지표)
 
@@ -75,4 +103,4 @@ uv run python domains/data/eval/run.py   # 결과: eval/results/latest.json
 | 새벽 타임아웃 장애 | `pay_timeout_25m_03h_night` | 새벽에 장애 쪽 실패(알려진 코드 `PG_TIMEOUT`)가 여러 5분 구간 이어지면 이상으로 잡는지, 영향 숫자를 내는지 본다 |
 | 새벽 약한 장애 (low 기록) | `pay_half_10m_03h_night` | 새벽 10분 50% 장애는 실패 1건이라 잡음 1건과 데이터로 구분 불가. 기록 여부로 채점. 사건(이상)이 아니어야 하고, 지표 판정이 normal 또는 unknown + severity `low` + 이유에 "장애 쪽 실패 1건"이면 맞다(`anomaly.low_recorded_rate`) |
 | 새벽 약한 장애 (이상) | `pay_half_20m_03h_night` | 새벽 20분 50% 장애(03:40~04:00)로 장애 쪽 실패가 3건 나온다. 데이터로 장애라고 말할 수 있어 이상으로 잡는지 본다 |
-| 판매자 | `sellers.json` | 사기 점수 등급. 판매자마다 shop-api 코드로 임시 DB를 만들어 `facts` 중 shop-api에 넣을 수 있는 것(가입 일수·저가 비율·24시간 등록 수)을 넣고, fraud_score 핸들러가 실제 shop-api 조회 경로로 읽는다(`eval_sellers.py`). 사업자 중복·유사 카드는 넣을 수 없어 핸들러에서 "확인할 수 없음"이다. `fraud.precision`·`recall`은 그 핸들러 결과(`level` high=사기), `fraud.conservative_precision`·`conservative_recall`은 같은 결과의 보수적 상한(`max_possible_level` high=사기), `fraud.complete_rate`는 빠진 규칙 없이 답한 비율, `fraud.rule_*`는 `facts` 전부로 낸 참고 점수다 |
+| 판매자 | `sellers.json` (24명: 사기 9, 정상 15) | 사기 점수 등급. 정상 쪽에 경계 케이스(신규인데 정상, 세일로 저가가 많은 정상, 대량 등록하는 큰 판매자)를 넣었다. 판매자마다 shop-api 코드로 임시 DB를 만들어 `facts` 중 shop-api에 넣을 수 있는 것(가입 일수·저가 비율·24시간 등록 수)을 넣고, fraud_score 핸들러가 실제 shop-api 조회 경로로 읽는다(`eval_sellers.py`). 사업자 중복·유사 카드는 넣을 수 없어 핸들러에서 "확인할 수 없음"이다. `fraud.precision`·`recall`은 그 핸들러 결과(`level` high=사기), `fraud.conservative_precision`·`conservative_recall`은 같은 결과의 보수적 상한(`max_possible_level` high=사기), `fraud.complete_rate`는 빠진 규칙 없이 답한 비율, `fraud.rule_*`는 `facts` 전부로 낸 참고 점수다 |

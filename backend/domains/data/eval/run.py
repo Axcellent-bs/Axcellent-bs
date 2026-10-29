@@ -109,8 +109,15 @@ METRICS: dict[str, tuple[str, str | None]] = {
         "낮은 등급(low)으로 남겨야 하는 케이스 중 사건 없이 low로 남긴 비율",
         "higher",
     ),
-    "impact.match_rate": ("영향 분석 일치율 (건수·고객·금액 모두 정답과 같음)", "higher"),
+    "impact.match_rate": (
+        "영향 분석 일치율 (건수·고객·금액 모두 정답과 같음. 정답 = 구간 안 장애 쪽 실패 전부)",
+        "higher",
+    ),
     "impact.mean_abs_amount_error": ("영향 분석 금액 오차 평균 (원)", "lower"),
+    "impact.excess_mean_abs_error": (
+        "초과분 건수 오차 평균 (skill 초과분 vs 주입한 장애 실패, skill이 안 내면 확인할 수 없음)",
+        "lower",
+    ),
     "impact.mean_abs_amount_error_pct": (
         "영향 분석 금액 오차 평균 (%, 정답 0원 케이스 제외)",
         "lower",
@@ -144,6 +151,7 @@ HOLDOUT_METRICS = [
     "anomaly.monitor_false_alarm_count",
     "anomaly.low_recorded_rate",
     "impact.match_rate",
+    "impact.excess_mean_abs_error",
     "anomaly.payment_mean_delay_minutes",
     "anomaly.payment_max_delay_minutes",
     "anomaly.drop_mean_delay_minutes",
@@ -273,13 +281,25 @@ def _from_first_failure(case: dict[str, Any], delay: float | None) -> float | No
     return (caught - eval_world.parse(first)).total_seconds() / 60
 
 
+# 초과분: 장애 구간 실패 − 지난 7일 같은 시간대 평균 실패(반올림). 정답은 주입한 장애로 생긴 실패만.
+# 영향 분석 skill 출력에 이 필드가 생기면 읽는다. 지금은 없어서 "확인할 수 없음"(None)이다
+EXCESS_FIELD = "excess_failed_order_count"
+
+
+def _excess(want: dict[str, Any], got: Any) -> dict[str, Any]:
+    answer = None if want.get("unknown_expected") else want["injected_failed_order_count"]
+    value = got if isinstance(got, int) else None
+    return {"want": answer, "got": value, "unknown": value is None}
+
+
 async def run_case(case: dict[str, Any]) -> dict[str, Any]:
     world = eval_world.build(case)
     truth = eval_world.truth(world)
     expected = case["expected"]
     drift = (
-        truth.fault_failed_orders != expected["impact"]["failed_order_count"]
-        or truth.fault_amount != expected["impact"]["damage_amount"]
+        truth.impact_failed_orders != expected["impact"]["failed_order_count"]
+        or truth.impact_amount != expected["impact"]["damage_amount"]
+        or truth.fault_failed_orders != expected["impact"]["injected_failed_order_count"]
     )
     window_from, window_to = world.window
     async with httpx.AsyncClient(transport=world.transport(), base_url="http://shop") as client:
@@ -353,6 +373,7 @@ async def run_case(case: dict[str, Any]) -> dict[str, Any]:
                 out["impact"] = {
                     "want": wanted,
                     "got": {"unknown": True},
+                    "excess": _excess(want, None),
                     "unknown_code": error.code,
                     "declined_in_window": want["declined_payments"],
                     "fallback": False,
@@ -368,6 +389,7 @@ async def run_case(case: dict[str, Any]) -> dict[str, Any]:
                 out["impact"] = {
                     "want": wanted,
                     "got": {k: getattr(got, k) for k in keys},
+                    "excess": _excess(want, getattr(got, EXCESS_FIELD, None)),
                     "declined_in_window": want["declined_payments"],
                     "fallback": impact.fallback,
                     "fabricated": _fabricated(got.summary, numbers),
@@ -509,6 +531,11 @@ def summarize(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> dic
     # 금액 오차는 정답·결과가 둘 다 숫자인 케이스만 (확인할 수 없음 케이스는 일치율로만 본다)
     numeric = [i for i in impacts if "damage_amount" in i["got"] and "damage_amount" in i["want"]]
     errors = [abs(i["got"]["damage_amount"] - i["want"]["damage_amount"]) for i in numeric]
+    excess = [
+        abs(i["excess"]["got"] - i["excess"]["want"])
+        for i in impacts
+        if i["excess"]["got"] is not None and i["excess"]["want"] is not None
+    ]
     pct = [
         abs(i["got"]["damage_amount"] - i["want"]["damage_amount"])
         / i["want"]["damage_amount"]
@@ -551,6 +578,7 @@ def summarize(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> dic
         "impact.match_rate": _rate(sum(1 for i in impacts if i["got"] == i["want"]), len(impacts)),
         "impact.mean_abs_amount_error": round(sum(errors) / len(errors), 1) if errors else None,
         "impact.mean_abs_amount_error_pct": round(sum(pct) / len(pct), 2) if pct else None,
+        "impact.excess_mean_abs_error": _mean(excess),
         "fraud.skill_available": 1.0
         if any(s["skill_status"] == "completed" for s in sellers)
         else 0.0,
