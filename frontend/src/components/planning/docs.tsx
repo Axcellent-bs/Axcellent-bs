@@ -2,14 +2,14 @@
 // 수정은 칸에서 벗어날 때(blur) 저장한다. 연동 버스에 붙어 있으면 다른 화면에도 바로 보인다.
 import { useState, type Dispatch } from 'react'
 import {Button, PageHeader, Select, useToast } from '@dejafix/common-frontend'
-import { type Action, type Doc, type DocBlock, type State } from './data'
-import { Linked, Ref, go } from './links'
-import { Sec, Tag } from './parts'
+import { type Action, type Doc, type DocBlock, type State } from '@/lib/planningData'
+import { Linked, Ref, go, toPath } from '@/components/planning/links'
+import { Sec, Tag } from '@/components/planning/parts'
 
 export function Docs({ s, d, item }: { s: State; d: Dispatch<Action>; item?: string }) {
   const toast = useToast()
   const sel = item ?? s.docs[s.docs.length - 1]?.id ?? ''
-  const setSel = (id: string) => go(`#/docs/${id}`)
+  const setSel = (id: string) => go(toPath(`docs/${id}`))
   const [about, setAbout] = useState(s.requests[0]?.id ?? '')
   const doc = s.docs.find((x) => x.id === sel) ?? s.docs[s.docs.length - 1]
   const lastId = `DOC-${s.docs.length + 1}`
@@ -21,7 +21,7 @@ export function Docs({ s, d, item }: { s: State; d: Dispatch<Action>; item?: str
       <aside className="col-left">
         <div className="ph">문서 {s.docs.length}개</div>
         {s.docs.slice().reverse().map((x) => (
-          <a key={x.id} href={`#/docs/${x.id}`} className={`doc-li${x.id === doc?.id ? ' on' : ''}`}>
+          <a key={x.id} href={toPath(`docs/${x.id}`)} className={`doc-li${x.id === doc?.id ? ' on' : ''}`}>
             <span className="mono">{x.id}</span> {x.title} {x.by === 'ai' && <Tag tone="green">AI 정리</Tag>}
           </a>
         ))}
@@ -57,7 +57,7 @@ function Editor({ doc, d, s }: { doc: Doc; d: Dispatch<Action>; s: State }) {
       <p className="muted small" style={{ margin: 0 }}>
         <span className="mono">{doc.id}</span> · 마지막 수정 {doc.updated}
         {todos.length > 0 && <> · 할 일 {todos.filter((b) => b.done).length}/{todos.length}</>}
-        {doc.about && <> · 요청 <Ref s={s} id={doc.about} /> · <a href={`#/projects/${doc.about}`}>프로젝트 보기</a></>}
+        {doc.about && <> · 요청 <Ref s={s} id={doc.about} /> · <a href={toPath(`projects/${doc.about}`)}>프로젝트 보기</a></>}
         {doc.by === 'ai' && <> · AI 어시스턴트가 정리</>}
       </p>
       <div className="doc-blocks">

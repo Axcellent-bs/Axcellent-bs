@@ -3,11 +3,11 @@
 // 단계 한 줄·곁 블록은 통째로 눌러 그 내용을 다루는 화면(해당 프로젝트 항목)으로 간다.
 import type { Dispatch } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
-import { DEPT_NAME, type Action, type Request, type State as S } from './data'
-import { ActivityList, Dep, State, Tag } from './parts'
-import { Linked, Ref, convoHref, hrefOf, prSlug, reviewOf } from './links'
-import { RepoTag } from './repo'
-import { Flow, Head, Layout, ListPane, Side, Step, mergedLabel, prStatus, specStatus } from './flow'
+import { DEPT_NAME, type Action, type Request, type State as S } from '@/lib/planningData'
+import { ActivityList, Dep, State, Tag } from '@/components/planning/parts'
+import { Linked, Ref, convoHref, hrefOf, prSlug, reviewOf, toPath } from '@/components/planning/links'
+import { RepoTag } from '@/components/planning/repo'
+import { Flow, Head, Layout, ListPane, Side, Step, mergedLabel, prStatus, specStatus } from '@/components/planning/flow'
 
 // 프로젝트 = 원본 요청 (같은 요청으로 연결만 한 것은 원본에 붙인다)
 export const projectsOf = (s: S) => s.requests.filter((r) => r.state !== '중복 연결')
@@ -47,7 +47,7 @@ export function Projects({ s, d, sel }: { s: S; d: Dispatch<Action>; sel?: strin
     { label: '진행 중', rows: sorted.filter((x) => order(x) === 0) },
     { label: '접수', rows: sorted.filter((x) => order(x) === 1) },
     { label: '완료', rows: sorted.filter((x) => order(x) === 2) },
-  ].map((gr) => ({ label: gr.label, rows: gr.rows.map((x) => ({ key: x.id, href: `#/projects/${x.id}`, on: x.id === r.id, title: x.title, meta: <>{DEPT_NAME[x.from]} <State v={x.state} /></> })) }))
+  ].map((gr) => ({ label: gr.label, rows: gr.rows.map((x) => ({ key: x.id, href: toPath(`projects/${x.id}`), on: x.id === r.id, title: x.title, meta: <>{DEPT_NAME[x.from]} <State v={x.state} /></> })) }))
 
   return (
     <Layout
@@ -55,12 +55,12 @@ export function Projects({ s, d, sel }: { s: S; d: Dispatch<Action>; sel?: strin
       head={<Head kicker={<>{r.id} · {DEPT_NAME[r.from]}</>} title={r.title} side={<><State v={r.state} /><Button size="small" onClick={() => { d({ type: 'gatherDoc', about: r.id }); toast.show(`${r.id} 정리 문서를 만들었습니다`) }}>문서로 정리</Button></>} />}
       side={
         <>
-          <Side title="소통" href={g.threads[0] ? `#/talk/${g.threads[0].id}` : convoHref(r.ctx)} sum={`대화 ${talks} · 결정 ${g.decisions.length}`}>
+          <Side title="소통" href={g.threads[0] ? toPath(`talk/${g.threads[0].id}`) : convoHref(r.ctx)} sum={`대화 ${talks} · 결정 ${g.decisions.length}`}>
             {g.threads.flatMap((t) => t.messages.slice(-2).map((m, i) => <p key={`${t.id}-${i}`} className="pside-msg"><b>{m.who}</b> <Linked s={s} text={m.text} /></p>))}
             {g.decisions.map((x) => <p key={x.id} className="pside-msg"><Ref s={s} id={x.id} /> {x.text}</p>)}
             <a href={convoHref(r.ctx)} className="pside-link">에이전트 대화 {g.activity.length}</a>
           </Side>
-          <Side title="문서" href={g.docs.length ? `#/docs/${g.docs[g.docs.length - 1].id}` : undefined} sum={`정리 문서 ${g.docs.length}`}>
+          <Side title="문서" href={g.docs.length ? toPath(`docs/${g.docs[g.docs.length - 1].id}`) : undefined} sum={`정리 문서 ${g.docs.length}`}>
             {g.docs.map((x) => <p key={x.id} className="pside-msg"><Ref s={s} id={x.id} /> {x.title}</p>)}
           </Side>
         </>
@@ -79,14 +79,14 @@ export function Projects({ s, d, sel }: { s: S; d: Dispatch<Action>; sel?: strin
           {g.dups.map((x) => <p key={x.id} className="muted">같은 요청 <Ref s={s} id={x.id} /> · {DEPT_NAME[x.from]}</p>)}
         </Step>
 
-        <Step name="기획" on={g.tasks.length > 0} href={g.spec ? `#/work/specs/${g.spec.id}` : hrefOf(s, r.id)} title={g.spec ? `${g.spec.id} · ${specStatus(s, g.spec)} · 작업 ${g.tasks.length}` : '기획서 없음'}>
+        <Step name="기획" on={g.tasks.length > 0} href={g.spec ? toPath(`work/specs/${g.spec.id}`) : hrefOf(s, r.id)} title={g.spec ? `${g.spec.id} · ${specStatus(s, g.spec)} · 작업 ${g.tasks.length}` : '기획서 없음'}>
           {g.spec && (
             <ul>
               {g.spec.paras.map((p) => {
                 const ts = g.tasks.filter((t) => t.para === p.id)
                 return (
                   <li key={p.id}>
-                    <a href={`#/work/specs/${g.spec!.id}/${p.id}`} className="plain-link">{p.id} {p.text}</a>
+                    <a href={toPath(`work/specs/${g.spec!.id}/${p.id}`)} className="plain-link">{p.id} {p.text}</a>
                     {p.warn && <> <Tag tone="amber">경고 {p.warn.card}</Tag></>}
                     {p.incident && <> <Tag tone="amber">장애 {p.incident}</Tag></>}
                     {ts.map((x) => <div key={x.id} className="muted">{x.id} · {x.state}</div>)}
@@ -98,14 +98,14 @@ export function Projects({ s, d, sel }: { s: S; d: Dispatch<Action>; sel?: strin
           {g.spec && reviewOf(s, g.spec.id) && <p><Ref s={s} id={reviewOf(s, g.spec.id)!.id} /> · {reviewOf(s, g.spec.id)!.verifier}</p>}
         </Step>
 
-        <Step name="운영" on={g.prs.some((p) => p.merged)} href={g.prs.length ? `#/work/ops/${r.id}` : undefined} title={g.prs.length ? prStatus(s, g.prs) : 'PR 없음'}>
+        <Step name="운영" on={g.prs.some((p) => p.merged)} href={g.prs.length ? toPath(`work/ops/${r.id}`) : undefined} title={g.prs.length ? prStatus(s, g.prs) : 'PR 없음'}>
           {g.prs.length > 0 && (
             <ul>
               {g.prs.map((p) => {
                 const xr = reviewOf(s, p.id)
                 return (
                   <li key={p.id}>
-                    <a href={`#/work/prs/${prSlug(p.id)}`} className="plain-link">{p.title.replace(/^[A-Z]\d+: /, '')}</a>
+                    <a href={toPath(`work/prs/${prSlug(p.id)}`)} className="plain-link">{p.title.replace(/^[A-Z]\d+: /, '')}</a>
                     <div className="muted">{p.id} · 검수 {p.reviews[p.reviews.length - 1]} · {xr ? `${xr.lane === 'human' ? '사람 확인' : '교차검증'} 대기 ${xr.id}` : mergedLabel(p)} · {p.gate.lines}줄 {p.gate.files}파일 <RepoTag p={p} /></div>
                   </li>
                 )

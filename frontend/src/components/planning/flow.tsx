@@ -1,9 +1,9 @@
 // 프로젝트 탭의 레이아웃(왼쪽 목록 / 가운데 세로 흐름 / 오른쪽 곁 블록)을 다른 탭에서도 쓰는 조각.
 // 단계 머리는 짧은 라벨 + 값. 줄·단계·블록은 통째로 눌러 이동한다 (rowNav).
 import type { ReactNode } from 'react'
-import type { PR, Spec, State as S } from './data'
-import { reviewOf } from './links'
-import { rowNav } from './parts'
+import type { PR, Spec, State as S } from '@/lib/planningData'
+import { reviewOf, toPath } from '@/components/planning/links'
+import { rowNav } from '@/components/planning/parts'
 
 export const CONFIRMED_BY = { auto: '자동 확정', review: '교차검증 후 확정', human: '사람 확인 후 확정' } as const
 export const mergedLabel = (p: PR) => !p.merged ? '머지 전' : p.mergedBy === 'rule' ? `자동 머지 · ${p.rule}` : p.mergedBy === 'review' ? '교차검증 후 자동 머지' : '사람 머지'
@@ -66,7 +66,7 @@ export function ListPane({ groups, empty }: { groups: { label: string; rows: Lis
         <div key={g.label} className="list-group">
           <div className="ph">{g.label} {g.rows.length}</div>
           {g.rows.map((r) => (
-            <a key={r.key} href={r.href} className={`doc-li${r.on ? ' on' : ''}`}>
+            <a key={r.key} href={toPath(r.href)} className={`doc-li${r.on ? ' on' : ''}`}>
               <span className="li-title">{r.title}</span>
               {r.meta && <span className="proj-li-meta">{r.meta}</span>}
             </a>

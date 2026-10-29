@@ -1,6 +1,7 @@
 // "이 코드 왜 이렇게 했지?" 역추적: 코드 줄 → PR → 작업 → 기획서 문단 → 결정 → 요청 → 근거.
 // 모든 연결은 문단 id로 이어져 있어서 코드 규칙으로만 따라간다 (LLM 없음).
-import type { PR, State } from './data'
+import type { PR, State } from '@/lib/planningData'
+import { toPath } from '@/components/planning/links'
 
 export interface CodeLine { path: string; line: number; text: string }
 export interface TraceStep { kind: '코드' | 'PR' | '작업' | '문단' | '결정' | '기각 이력' | '기획서' | '요청' | '근거' | '장애'; title: string; detail?: string; href?: string }
@@ -29,16 +30,16 @@ export function traceOf(s: State, prId: string, line?: CodeLine): TraceStep[] {
   const steps: TraceStep[] = []
   const code = line ?? codeOf(s, pr)[0]
   steps.push({ kind: '코드', title: `${code.path}:${code.line}`, detail: code.text })
-  steps.push({ kind: 'PR', title: `${pr.id} ${pr.title}`, detail: `${pr.branch} · ${pr.merged ? (pr.mergedBy === 'rule' ? `기준 ${pr.rule}로 자동 머지` : pr.mergedBy === 'review' ? '교차검증 승인 뒤 자동 머지' : '사람 머지') : '머지 전'} · 검수 ${pr.reviews.join(' → ')}`, href: '#/work/prs' })
-  if (task) steps.push({ kind: '작업', title: `${task.id} ${task.title}`, detail: `상태 ${task.state}`, href: '#/work/prs' })
+  steps.push({ kind: 'PR', title: `${pr.id} ${pr.title}`, detail: `${pr.branch} · ${pr.merged ? (pr.mergedBy === 'rule' ? `기준 ${pr.rule}로 자동 머지` : pr.mergedBy === 'review' ? '교차검증 승인 뒤 자동 머지' : '사람 머지') : '머지 전'} · 검수 ${pr.reviews.join(' → ')}`, href: toPath('work/prs') })
+  if (task) steps.push({ kind: '작업', title: `${task.id} ${task.title}`, detail: `상태 ${task.state}`, href: toPath('work/prs') })
   if (para && spec) {
-    steps.push({ kind: '문단', title: `${spec.id} ${para.id}`, detail: para.text, href: '#/work/specs' })
+    steps.push({ kind: '문단', title: `${spec.id} ${para.id}`, detail: para.text, href: toPath('work/specs') })
     if (para.warn) steps.push({ kind: '기각 이력', title: para.warn.card, detail: para.warn.text })
-    if (para.incident) steps.push({ kind: '장애', title: para.incident, detail: '이 문단이 장애에 연결됨 (link_incident)', href: '#/work/aftercare' })
+    if (para.incident) steps.push({ kind: '장애', title: para.incident, detail: '이 문단이 장애에 연결됨 (link_incident)', href: toPath('work/aftercare') })
   }
   for (const x of decisions) steps.push({ kind: '결정', title: `${x.id} ${x.text}`, detail: `이유: ${x.reason} · 검토한 대안: ${x.alternatives} · 출처: ${x.from}` })
-  if (spec) steps.push({ kind: '기획서', title: `${spec.id} ${spec.title}`, detail: `문제: ${spec.problem} · 목표: ${spec.goal}${spec.confirmedBy === 'auto' ? ' · 조건(질문·경고 없음, 근거 있음)으로 자동 확정' : spec.confirmedBy === 'review' ? ' · AI 교차검증 승인 뒤 확정' : ''}`, href: '#/work/specs' })
-  if (req) steps.push({ kind: '요청', title: `${req.id} ${req.title}`, detail: `${req.from === 'human' ? '사람' : req.via} · ${req.evidence}`, href: '#/requests/incoming' })
+  if (spec) steps.push({ kind: '기획서', title: `${spec.id} ${spec.title}`, detail: `문제: ${spec.problem} · 목표: ${spec.goal}${spec.confirmedBy === 'auto' ? ' · 조건(질문·경고 없음, 근거 있음)으로 자동 확정' : spec.confirmedBy === 'review' ? ' · AI 교차검증 승인 뒤 확정' : ''}`, href: toPath('work/specs') })
+  if (req) steps.push({ kind: '요청', title: `${req.id} ${req.title}`, detail: `${req.from === 'human' ? '사람' : req.via} · ${req.evidence}`, href: toPath('requests/incoming') })
   if (spec?.basis.length) steps.push({ kind: '근거', title: `근거 ${spec.basis.length}건`, detail: spec.basis.join(' / ') })
   return steps
 }

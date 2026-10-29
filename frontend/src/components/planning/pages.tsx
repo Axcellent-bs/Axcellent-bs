@@ -1,15 +1,15 @@
 // 기획개발팀 탭의 하위 화면. 작업·운영·사후관리·교차검증은 프로젝트 탭과 같은 틀(왼쪽 목록 / 가운데 세로 흐름 / 오른쪽 곁 블록)을 쓴다
 import { useEffect, useState, type Dispatch, type ReactNode } from 'react'
 import { Button, Card, Notice, useToast, type Column } from '@dejafix/common-frontend'
-import { DEPT_NAME, IRREVERSIBLE, PORTS, TARGET_LABEL, TODAY, GUARD, OBSERVE_MIN, OBSERVE_N, activeRules, ruleText, type Action, type Activity as Act, type AuditItem, type AutoRule, type CrossReview, type Dept, type PR, type Spec, type State as S } from './data'
-import { codeOf, traceOf, type CodeLine } from './trace'
-import { ActivityList, Dep, Grade, Lead, LinkTable, Point, Sec, State, Stats, rowNav, Tag } from './parts'
-import { Linked, Ref, convoHref, go, hrefOf, prFromSlug, prSlug, reviewOf } from './links'
-import { CONFIRMED_BY, Flow, Head, Layout, ListPane, Pairs, Side, Step, mergedLabel } from './flow'
-import { SendWindow } from './depts'
-import { apiBase, deployApi, kst, type DeployCheck, type Deployment } from './api'
-import { RepoTag, RepoTargetBlock } from './repo'
-import { CodingLabel, CodingStep, DevTeamTag, codingState, fromDevTeam, isRunning } from './coding'
+import { DEPT_NAME, IRREVERSIBLE, PORTS, TARGET_LABEL, TODAY, GUARD, OBSERVE_MIN, OBSERVE_N, activeRules, ruleText, type Action, type Activity as Act, type AuditItem, type AutoRule, type CrossReview, type Dept, type PR, type Spec, type State as S } from '@/lib/planningData'
+import { codeOf, traceOf, type CodeLine } from '@/components/planning/trace'
+import { ActivityList, Dep, Grade, Lead, LinkTable, Point, Sec, State, Stats, rowNav, Tag } from '@/components/planning/parts'
+import { Linked, Ref, convoHref, go, hrefOf, prFromSlug, prSlug, reviewOf, toPath } from '@/components/planning/links'
+import { CONFIRMED_BY, Flow, Head, Layout, ListPane, Pairs, Side, Step, mergedLabel } from '@/components/planning/flow'
+import { SendWindow } from '@/components/planning/depts'
+import { apiBase, deployApi, kst, type DeployCheck, type Deployment } from '@/lib/planning'
+import { RepoTag, RepoTargetBlock } from '@/components/planning/repo'
+import { CodingLabel, CodingStep, DevTeamTag, codingState, fromDevTeam, isRunning } from '@/components/planning/coding'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -24,7 +24,7 @@ export function Specs({ s, d, item, item2 }: P & { item?: string; item2?: string
 
 function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
   const para = spec.paras.find((p) => p.id === item2) ?? spec.paras.find((p) => p.id === (spec.id === 'SPEC-7' ? 'R2' : '')) ?? spec.paras[0]
-  const paraHref = (id: string) => `#/work/specs/${spec.id}/${id}`
+  const paraHref = (id: string) => toPath(`work/specs/${spec.id}/${id}`)
   const setParaId = (id: string) => go(paraHref(id))
   const tasks = s.tasks.filter((t) => t.spec === spec.id && t.para === para.id)
   const prs = s.prs.filter((p) => tasks.some((t) => t.id === p.task))
@@ -38,7 +38,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
       <aside className="col-left">
         <div className="ph">기획 문서</div>
         {s.specs.map((x) => (
-          <a key={x.id} href={`#/work/specs/${x.id}`} className={`doc-li${x.id === spec.id ? ' on' : ''}`}>
+          <a key={x.id} href={toPath(`work/specs/${x.id}`)} className={`doc-li${x.id === spec.id ? ' on' : ''}`}>
             <span className="mono">{x.id}</span> {x.title} <State v={x.status} />
           </a>
         ))}
@@ -48,9 +48,9 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
           {spec.paras.map((p) => (
             <li key={p.id}><a href={paraHref(p.id)} className={p.id === para.id ? 'on' : ''}>{p.id} {p.kind === 'req' ? '요구사항' : '완료 기준'}</a></li>
           ))}
-          {spec.question && <li>{thread ? <a href={`#/talk/${thread.id}`}>질문 1개 남음</a> : '질문 1개 남음'}</li>}
+          {spec.question && <li>{thread ? <a href={toPath(`talk/${thread.id}`)}>질문 1개 남음</a> : '질문 1개 남음'}</li>}
           <li>결정 이력 {decisions.length}건</li>
-          {thread && <li><a href={`#/talk/${thread.id}`}>문서 스레드 열기</a></li>}
+          {thread && <li><a href={toPath(`talk/${thread.id}`)}>문서 스레드 열기</a></li>}
         </ul>
       </aside>
 
@@ -62,14 +62,14 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
           <span style={{ flex: 1 }} />
         </div>
         <p className="muted small">
-          요청 <Ref s={s} id={spec.request} /> · <a href={`#/projects/${spec.request}`}>프로젝트 보기</a> · 에이전트가 작성, 사람이 쓴 문장 {spec.humanSentences}개
+          요청 <Ref s={s} id={spec.request} /> · <a href={toPath(`projects/${spec.request}`)}>프로젝트 보기</a> · 에이전트가 작성, 사람이 쓴 문장 {spec.humanSentences}개
         </p>
         {spec.status === '초안' && !xr && spec.question && <Notice tone="warn">빈 항목 질문이 남아 있습니다. 답이 오면 AI가 확정 조건(질문 없음·인사 경고 없음·근거 있음)을 다시 보고, 맞으면 바로 확정하고 아니면 AI 교차검증에 올립니다.</Notice>}
         {xr && (
           <Notice tone="warn">
             {xr.lane === 'human'
-              ? <>되돌릴 수 없는 일({xr.irreversible})이라 AI가 정하지 않습니다. <a href={`#/work/reviews/${xr.id}`}>사람 확인 대기열 {xr.id}</a>에서 팀장이 확인합니다.</>
-              : <>자동 확정 조건에 맞지 않아({xr.routeWhy.join(', ')}) <a href={`#/work/reviews/${xr.id}`}>AI 교차검증 {xr.id}</a>에 올라가 있습니다. 판단은 {xr.verifier}가 합니다.</>}
+              ? <>되돌릴 수 없는 일({xr.irreversible})이라 AI가 정하지 않습니다. <a href={toPath(`work/reviews/${xr.id}`)}>사람 확인 대기열 {xr.id}</a>에서 팀장이 확인합니다.</>
+              : <>자동 확정 조건에 맞지 않아({xr.routeWhy.join(', ')}) <a href={toPath(`work/reviews/${xr.id}`)}>AI 교차검증 {xr.id}</a>에 올라가 있습니다. 판단은 {xr.verifier}가 합니다.</>}
           </Notice>
         )}
         <h3 className="sec">문제</h3><p>{spec.problem}</p>
@@ -95,7 +95,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
         <Sec title="PR" sub="작업 1개 = PR 1개">
           {prs.length ? prs.map((p) => <PrLine key={p.id} s={s} p={p} d={d} />) : <span className="muted">아직 없음</span>}
         </Sec>
-        <Sec title="스레드 · 결정" sub={thread ? <a href={`#/talk/${thread.id}`}>스레드 전체 보기</a> : undefined}>
+        <Sec title="스레드 · 결정" sub={thread ? <a href={toPath(`talk/${thread.id}`)}>스레드 전체 보기</a> : undefined}>
           {thread?.messages.slice(-2).map((m, i) => <div key={i} className="msg"><b>{m.who}</b> <Linked s={s} text={m.text} />{m.decision && <> <Tag tone="green">{m.decision}</Tag></>}</div>)}
           {decisions.map((x) => <div key={x.id} className="msg"><span className="mono">{x.id}</span> {x.text} {x.sentToHr && <span className="muted">· 인사에 ① 전송</span>}</div>)}
         </Sec>
@@ -136,12 +136,12 @@ function PrLine({ s, p, d }: { s: S; p: PR; d: Dispatch<Action> }) {
   const rejected = !p.merged && !xr && s.reviews.some((x) => x.ref === p.id && x.result === '거절')
   return (
     <div className="pr-line">
-      <div><a href={`#/work/prs/${prSlug(p.id)}`}><b>{p.id}</b> {p.title}</a></div>
+      <div><a href={toPath(`work/prs/${prSlug(p.id)}`)}><b>{p.id}</b> {p.title}</a></div>
       <div className="muted small mono">{p.gate.lines}줄·{p.gate.files}파일 · {p.gate.paths}</div>
       <span className="tags">
         <Tag tone={last === '통과' ? 'green' : 'amber'}>검수 {last}{p.reviews.length > 1 ? ` (${p.reviews.length}회차)` : ''}</Tag>
         <RepoTag p={p} />
-        {p.merged ? <Tag tone="green">{mergedLabel(p)}</Tag> : xr ? <a href={`#/work/reviews/${xr.id}`}><Tag tone="amber">{xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기'} {xr.id}</Tag></a> : rejected ? <Tag tone="amber">검증자 거절</Tag> : null}
+        {p.merged ? <Tag tone="green">{mergedLabel(p)}</Tag> : xr ? <a href={toPath(`work/reviews/${xr.id}`)}><Tag tone="amber">{xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기'} {xr.id}</Tag></a> : rejected ? <Tag tone="amber">검증자 거절</Tag> : null}
       </span>
       {!p.merged && (last === '불일치' || rejected) && <Button size="small" onClick={() => d({ type: 'reviewPr', pr: p.id })}>다시 검수</Button>}
     </div>
@@ -166,7 +166,7 @@ export function Work({ s, d, item }: P & { item?: string }) {
     const coding = t.coding && !p?.merged && !p?.target && !xr ? codingState(t.coding) : undefined
     return {
       key: t.id,
-      href: p ? `#/work/prs/${prSlug(p.id)}` : t.coding ? `#/work/prs/${encodeURIComponent(t.id)}` : `#/work/specs/${t.spec}/${t.para}`,
+      href: p ? toPath(`work/prs/${prSlug(p.id)}`) : t.coding ? toPath(`work/prs/${encodeURIComponent(t.id)}`) : toPath(`work/specs/${t.spec}/${t.para}`),
       on: taskOnly ? t.id === taskOnly.id : !!p && p.id === sel?.id,
       title: t.title,
       meta: <>{t.id}{p ? ` · ${p.id}` : ''} <State v={p?.target?.status === 'proposed' ? '레포 승인 대기' : xr ? waitLabel(xr) : coding ?? t.state} live={!!coding && !!t.coding && isRunning(t.coding.status)} />{fromDevTeam(s, t) && <> <DevTeamTag /></>}</>,
@@ -178,7 +178,7 @@ export function Work({ s, d, item }: P & { item?: string }) {
     return (
       <Layout list={list} head={<Head kicker={<>{taskOnly.id} · {taskOnly.spec}{fromDevTeam(s, taskOnly) && <> · <DevTeamTag /></>}</>} title={taskOnly.title} side={taskOnly.coding ? <CodingLabel c={taskOnly.coding} /> : <State v={taskOnly.state} />} />}>
         <Flow>
-          <Step name="작업" on href={`#/work/specs/${taskOnly.spec}/${taskOnly.para}`} title={`${taskOnly.id} · ${taskOnly.spec} ${taskOnly.para}`}>
+          <Step name="작업" on href={toPath(`work/specs/${taskOnly.spec}/${taskOnly.para}`)} title={`${taskOnly.id} · ${taskOnly.spec} ${taskOnly.para}`}>
             {text && <p>{text}</p>}
           </Step>
           <CodingStep task={taskOnly} />
@@ -198,16 +198,16 @@ export function Work({ s, d, item }: P & { item?: string }) {
   return (
     <Layout
       list={list}
-      head={<Head kicker={<>{sel.id} · {task?.id} · <span className="mono">{sel.branch}</span>{sel.vcsNumber != null && <> · <a href={`#/work/prs/repo/${sel.vcsNumber}`} className="plain-link">레포 #{sel.vcsNumber}</a></>}{fromDevTeam(s, task) && <> · <DevTeamTag /></>}</>} title={sel.title.replace(/^[A-Z]\d+: /, '')} side={<State v={sel.merged ? '완료' : xr ? waitLabel(xr) : last === '불일치' || rejected ? '불일치' : '머지 대기'} />} />}
+      head={<Head kicker={<>{sel.id} · {task?.id} · <span className="mono">{sel.branch}</span>{sel.vcsNumber != null && <> · <a href={toPath(`work/prs/repo/${sel.vcsNumber}`)} className="plain-link">레포 #{sel.vcsNumber}</a></>}{fromDevTeam(s, task) && <> · <DevTeamTag /></>}</>} title={sel.title.replace(/^[A-Z]\d+: /, '')} side={<State v={sel.merged ? '완료' : xr ? waitLabel(xr) : last === '불일치' || rejected ? '불일치' : '머지 대기'} />} />}
       side={
         <Side title="근거 체인" sum={`${chain.length}단계`}>
-          {chain.map((x, i) => <p key={i} className="pside-msg"><b>{x.kind}</b> {x.href ? <a href={x.kind === '문단' && spec && para ? `#/work/specs/${spec.id}/${para.id}` : x.href} className="plain-link">{x.title}</a> : x.title}</p>)}
+          {chain.map((x, i) => <p key={i} className="pside-msg"><b>{x.kind}</b> {x.href ? <a href={x.kind === '문단' && spec && para ? toPath(`work/specs/${spec.id}/${para.id}`) : toPath(x.href)} className="plain-link">{x.title}</a> : x.title}</p>)}
         </Side>
       }
       below={<Trace s={s} pr={sel} line={line} setLine={setLine} />}
     >
       <Flow>
-        <Step name="작업" on href={task ? `#/work/specs/${task.spec}/${task.para}` : undefined} title={task ? `${task.id} · ${task.spec} ${task.para}` : '-'}>
+        <Step name="작업" on href={task ? toPath(`work/specs/${task.spec}/${task.para}`) : undefined} title={task ? `${task.id} · ${task.spec} ${task.para}` : '-'}>
           {para && <p>{para.text}</p>}
           {para?.warn && <Tag tone="amber">경고 {para.warn.card}</Tag>}
           {para?.incident && <Tag tone="amber">장애 {para.incident}</Tag>}
@@ -222,7 +222,7 @@ export function Work({ s, d, item }: P & { item?: string }) {
         <Step name="검수" on={last === '통과'} title={sel.reviews.join(' → ')}>
           {!sel.merged && (last === '불일치' || rejected) && <Button size="small" onClick={() => d({ type: 'reviewPr', pr: sel.id })}>다시 검수</Button>}
         </Step>
-        <Step name="머지" on={sel.merged} href={sel.url || (xr ? `#/work/reviews/${xr.id}` : undefined)} title={sel.merged ? mergedLabel(sel) : xr ? `${waitLabel(xr)} · ${xr.id}` : rejected ? '검증자 거절' : '머지 전'}>
+        <Step name="머지" on={sel.merged} href={sel.url || (xr ? toPath(`work/reviews/${xr.id}`) : undefined)} title={sel.merged ? mergedLabel(sel) : xr ? `${waitLabel(xr)} · ${xr.id}` : rejected ? '검증자 거절' : '머지 전'}>
           {xr && <p className="muted">{xr.verifier}</p>}
         </Step>
       </Flow>
@@ -253,7 +253,7 @@ function Trace({ s, pr, line: picked, setLine }: { s: S; pr: PR; line?: CodeLine
             <li key={i} className="trace-step">
               <span className="trace-kind">{x.kind}</span>
               <div>
-                <div>{x.href ? <a href={x.href}>{x.title}</a> : <b>{x.title}</b>}</div>
+                <div>{x.href ? <a href={toPath(x.href)}>{x.title}</a> : <b>{x.title}</b>}</div>
                 {x.detail && <div className="muted small">{x.detail}</div>}
               </div>
             </li>
@@ -269,7 +269,7 @@ export function Reviews({ s, d, item }: P & { item?: string }) {
   const toast = useToast()
   const all = s.reviews.slice().reverse()
   const r = s.reviews.find((x) => x.id === item) ?? all.find((x) => !x.result) ?? all[0]
-  const row = (x: CrossReview) => ({ key: x.id, href: `#/work/reviews/${x.id}`, on: x.id === r?.id, title: `${TARGET_LABEL[x.target]} · ${x.title}`, meta: <>{x.id} · {x.ref} <State v={x.result ?? waitLabel(x)} /></> })
+  const row = (x: CrossReview) => ({ key: x.id, href: toPath(`work/reviews/${x.id}`), on: x.id === r?.id, title: `${TARGET_LABEL[x.target]} · ${x.title}`, meta: <>{x.id} · {x.ref} <State v={x.result ?? waitLabel(x)} /></> })
   const list = <ListPane empty="대기 없음" groups={[
     { label: '교차검증 대기', rows: all.filter((x) => !x.result && x.lane === 'ai').map(row) },
     { label: '사람 확인 대기', rows: all.filter((x) => !x.result && x.lane === 'human').map(row) },
@@ -381,7 +381,7 @@ export function Autonomy({ s, d, item }: P & { item?: string }) {
           <LinkTable
             rows={pol.history.slice().reverse()}
             rowKey={(h) => h.pr}
-            rowHref={(h) => `#/work/prs/${prSlug(h.pr)}`}
+            rowHref={(h) => toPath(`work/prs/${prSlug(h.pr)}`)}
             rowTitle="PR과 코드 역추적 보기"
             columns={[
               { key: 't', header: '시각', render: (h) => <span className="mono small">{h.t}</span> },
@@ -419,8 +419,8 @@ export function Audit({ s, d }: P) {
       <Stats items={[
         { label: '자동 확정', value: n('자동 확정'), hint: '기획서' },
         { label: '자동 머지', value: n('자동 머지'), hint: '학습된 기준으로' },
-        { label: '교차검증 승인', value: n('교차검증 승인'), hint: `거절 ${n('교차검증 거절')}`, href: '#/work/reviews' },
-        { label: '정식이 된 기준', value: n('기준 정식'), hint: `제안 ${n('기준 제안')} · 거부 ${n('학습 거부')}`, href: '#/metrics/autonomy' },
+        { label: '교차검증 승인', value: n('교차검증 승인'), hint: `거절 ${n('교차검증 거절')}`, href: toPath('work/reviews') },
+        { label: '정식이 된 기준', value: n('기준 정식'), hint: `제안 ${n('기준 제안')} · 거부 ${n('학습 거부')}`, href: toPath('metrics/autonomy') },
       ]} />
       <Card as="section" title="건별 기록" sub={`오늘 ${today.length}건 · 최근 순`}>
         {today.length
@@ -444,22 +444,22 @@ export function Metrics({ s }: { s: S }) {
       <section className="flow-sec">
         <h2>기획·개발</h2>
         <Stats items={[
-          { label: '요청 → 첫 PR', value: avgPr, hint: '평균', href: '#/work/prs' },
-          { label: '완료 기준 일치', value: pct(prs.filter((p) => p.reviews[p.reviews.length - 1] === '통과').length, prs.length), hint: `PR ${prs.length}`, href: '#/work/prs' },
-          { label: '검수 1회 통과', value: pct(prs.filter((p) => p.reviews[0] === '통과').length, prs.length), hint: `PR ${prs.length}`, href: '#/work/prs' },
-          { label: '사람이 쓴 문장', value: human, href: '#/talk' },
-          { label: '기각 안 경고', value: s.warnings, hint: 'check_plan', href: '#/work/specs/SPEC-7/R2' },
-          { label: '초안 채택', value: pct(s.draftsAccepted, s.draftsIn), hint: `초안 ${s.draftsIn}`, href: '#/requests/incoming' },
+          { label: '요청 → 첫 PR', value: avgPr, hint: '평균', href: toPath('work/prs') },
+          { label: '완료 기준 일치', value: pct(prs.filter((p) => p.reviews[p.reviews.length - 1] === '통과').length, prs.length), hint: `PR ${prs.length}`, href: toPath('work/prs') },
+          { label: '검수 1회 통과', value: pct(prs.filter((p) => p.reviews[0] === '통과').length, prs.length), hint: `PR ${prs.length}`, href: toPath('work/prs') },
+          { label: '사람이 쓴 문장', value: human, href: toPath('talk') },
+          { label: '기각 안 경고', value: s.warnings, hint: 'check_plan', href: toPath('work/specs/SPEC-7/R2') },
+          { label: '초안 채택', value: pct(s.draftsAccepted, s.draftsIn), hint: `초안 ${s.draftsIn}`, href: toPath('requests/incoming') },
         ]} />
       </section>
       <section className="flow-sec">
         <h2>자동 처리 · 오늘</h2>
         <Stats items={[
-          { label: '자동 확정', value: n('자동 확정'), href: '#/metrics/audit' },
-          { label: '자동 머지', value: n('자동 머지'), href: '#/metrics/audit' },
-          { label: '교차검증 대기', value: s.reviews.filter((x) => !x.result).length, href: '#/work/reviews' },
-          { label: '교차검증 승인 / 거절', value: `${n('교차검증 승인')} / ${n('교차검증 거절')}`, href: '#/metrics/audit' },
-          { label: '사용 중 기준', value: activeRules(s.autoPolicy).length, href: '#/metrics/autonomy' },
+          { label: '자동 확정', value: n('자동 확정'), href: toPath('metrics/audit') },
+          { label: '자동 머지', value: n('자동 머지'), href: toPath('metrics/audit') },
+          { label: '교차검증 대기', value: s.reviews.filter((x) => !x.result).length, href: toPath('work/reviews') },
+          { label: '교차검증 승인 / 거절', value: `${n('교차검증 승인')} / ${n('교차검증 거절')}`, href: toPath('metrics/audit') },
+          { label: '사용 중 기준', value: activeRules(s.autoPolicy).length, href: toPath('metrics/autonomy') },
         ]} />
       </section>
     </div>
@@ -477,19 +477,19 @@ export function Ops({ s, item }: { s: S; item?: string }) {
   const mergedAt = (id: string) => s.activity.filter((a) => a.text.startsWith(`${id} `) && (a.point === 'github_merge_pull' || a.point === 'execute(merge_pr)')).pop()?.t ?? s.incidents.flatMap((i) => i.candidates).find((c) => c.pr === id)?.mergedAt ?? '-'
   return (
     <div className="flow-col">
-      {req && <Notice icon="bell"><Ref s={s} id={req.id} /> {req.title} · <a href="#/work/ops">전체</a> · <a href={`#/projects/${req.id}`}>프로젝트</a></Notice>}
+      {req && <Notice icon="bell"><Ref s={s} id={req.id} /> {req.title} · <a href={toPath('work/ops')}>전체</a> · <a href={toPath(`projects/${req.id}`)}>프로젝트</a></Notice>}
       <Stats items={[
         { label: '배포된 PR', value: merged.length },
         { label: '자동 머지', value: merged.filter((p) => p.auto).length },
         { label: '사람 머지', value: merged.filter((p) => !p.auto).length },
-        { label: '머지 전', value: open.length, href: '#/work/prs' },
-        { label: '장애 연결', value: merged.filter((p) => incidentOf(p.id)).length, href: '#/work/aftercare' },
+        { label: '머지 전', value: open.length, href: toPath('work/prs') },
+        { label: '장애 연결', value: merged.filter((p) => incidentOf(p.id)).length, href: toPath('work/aftercare') },
       ]} />
       <Flow label="배포 이력">
         {merged.slice().reverse().map((p) => {
           const i = incidentOf(p.id)
           return (
-            <Step key={p.id} name={mergedAt(p.id).slice(6) || '-'} on={!i} href={`#/work/prs/${prSlug(p.id)}`} title={<>{p.id} · {p.title.replace(/^[A-Z]\d+: /, '')}</>}>
+            <Step key={p.id} name={mergedAt(p.id).slice(6) || '-'} on={!i} href={toPath(`work/prs/${prSlug(p.id)}`)} title={<>{p.id} · {p.title.replace(/^[A-Z]\d+: /, '')}</>}>
               <Pairs items={[
                 ['머지', mergedLabel(p)],
                 ['관문', `${p.gate.result} · ${p.gate.lines}줄·${p.gate.files}파일 · ${p.gate.paths}`],
@@ -583,12 +583,12 @@ export function Aftercare({ s, item }: { s: S; item?: string }) {
             <Flow>
               <Step name="개시" on href={convoHref(i.ctx)} title={`${i.at} · 통합 에이전트`} />
               <Step name="후보" on={i.candidates.length > 0} title={i.candidates.map((c) => c.pr).join(', ') || '없음'}>
-                <ul>{i.candidates.map((c) => <li key={c.pr}><Ref s={s} id={c.pr} /> · <a href={`#/work/specs/${c.spec}/${c.para}`} className="plain-link">{c.spec} {c.para}</a> · {c.mergedAt} 머지</li>)}</ul>
+                <ul>{i.candidates.map((c) => <li key={c.pr}><Ref s={s} id={c.pr} /> · <a href={toPath(`work/specs/${c.spec}/${c.para}`)} className="plain-link">{c.spec} {c.para}</a> · {c.mergedAt} 머지</li>)}</ul>
               </Step>
               <Step name="롤백" on={!!i.rollbackCheck} title={i.rollbackCheck ? `${i.rollbackCheck.result} · ${i.rollbackCheck.target}` : '없음'}>
                 {i.rollbackCheck && <p className="muted">{i.rollbackCheck.why}</p>}
               </Step>
-              <Step name="문단" on={i.linked} href={c0 ? `#/work/specs/${c0.spec}/${c0.para}` : undefined} title={i.candidates.map((c) => `${c.spec} ${c.para}`).join(', ') || '-'} />
+              <Step name="문단" on={i.linked} href={c0 ? toPath(`work/specs/${c0.spec}/${c0.para}`) : undefined} title={i.candidates.map((c) => `${c.spec} ${c.para}`).join(', ') || '-'} />
               <Step name="후속" on={!!follow} href={follow ? hrefOf(s, follow.id) : undefined} title={follow ? `${follow.id} · ${follow.state}` : '없음'}>
                 {follow && <p>{follow.title}</p>}
               </Step>
@@ -618,8 +618,8 @@ export function Activity({ s, item }: { s: S; item?: string }) {
   const of = (x: Dept | 'all') => s.activity.filter((a) => x === 'all' || a.from === x || a.to === x)
   const rows = of(peer)
   const list = <ListPane groups={[{ label: '부서', rows: [
-    { key: 'all', href: '#/metrics/activity', on: peer === 'all', title: '전체', meta: <>{s.activity.length}건</> },
-    ...peers.map((x) => ({ key: x, href: `#/metrics/activity/${x}`, on: peer === x, title: DEPT_NAME[x], meta: <>{of(x).length}건</> })),
+    { key: 'all', href: toPath('metrics/activity'), on: peer === 'all', title: '전체', meta: <>{s.activity.length}건</> },
+    ...peers.map((x) => ({ key: x, href: toPath(`metrics/activity/${x}`), on: peer === x, title: DEPT_NAME[x], meta: <>{of(x).length}건</> })),
   ] }]} />
   return (
     <Layout
@@ -654,7 +654,7 @@ export function Links({ s, d }: P) {
         {peers.map((peer) => {
           const ports = PORTS.filter((p) => p.peer === peer)
           return (
-            <Side key={peer} title={DEPT_NAME[peer]} href={`#/metrics/activity/${peer}`} sum={`연결 ${ports.length} · 오늘 ${ports.reduce((n, p) => n + count(p), 0)}건`}>
+            <Side key={peer} title={DEPT_NAME[peer]} href={toPath(`metrics/activity/${peer}`)} sum={`연결 ${ports.length} · 오늘 ${ports.reduce((n, p) => n + count(p), 0)}건`}>
               <ul className="peer-rows">
                 {ports.map((p) => (
                   <li key={`${p.dir}|${p.point}`} title={p.what}>

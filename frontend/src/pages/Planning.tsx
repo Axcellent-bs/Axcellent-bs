@@ -1,27 +1,27 @@
 // 기획팀(/planning)·개발팀(/dev) 화면. AXcellent 안에서 돈다.
-// 메뉴 = 프로젝트·요청·작업·정리·소통·규정·자료·지표, 각 메뉴의 하위 목록은 그 아래 가로탭. 화면 안 이동은 해시(#/<메뉴>/<가로탭>)로 한다.
+// 메뉴 = 프로젝트·요청·작업·정리·소통·규정·자료·지표, 각 메뉴의 하위 목록은 그 아래 가로탭. 화면 안 이동은 경로(/planning|/dev/<메뉴>/<가로탭>)로 한다.
 // 공통 화면 컴포넌트(@dejafix/common-frontend)의 스타일은 .planning-scope 안에만 적용된다 (postcss.config.js).
 import '@dejafix/common-frontend/styles.css'
-import './planning.css'
-import { useEffect, useReducer, useRef, useState } from 'react'
+import '@/components/planning/planning.css'
+import { useEffect, useReducer, useRef, useState, type MouseEvent } from 'react'
+import { useLocation, useNavigate } from 'react-router'
 import { Chip, ToastOutlet, ToastProvider, useToast, type NavItem } from '@dejafix/common-frontend'
-import { ACTION_ERROR_EVENT, useSharedStore } from './store'
-import { apiBase } from './api'
-import { TODAY, initialState, reducer, type State as DemoState } from './data'
+import { ACTION_ERROR_EVENT, useSharedStore, apiBase } from '@/lib/planning'
+import { TODAY, initialState, reducer, type State as DemoState } from '@/lib/planningData'
 import { DevToolsDialog } from '@/demo/DevTools'
 import { IconGear } from '@/components/icons'
-import { Dep, Point } from './parts'
-import { Activity, Aftercare, Audit, Autonomy, Links, Metrics, Ops, Reviews, Specs } from './pages'
-import { PrsTab } from './repows'
-import { Requests, incomingCount } from './requests'
-import { Docs } from './docs'
-import { AgentTalk, Talk } from './talk'
-import { Projects } from './projects'
-import { convoHref } from './links'
-import { Knowledge } from './knowledge'
-import { repoPending } from './repo'
-import { ChatPanel, useDevChat } from './chat'
-import { prSlug } from './links'
+import { Dep, Point } from '@/components/planning/parts'
+import { Activity, Aftercare, Audit, Autonomy, Links, Metrics, Ops, Reviews, Specs } from '@/components/planning/pages'
+import { PrsTab } from '@/components/planning/repows'
+import { Requests, incomingCount } from '@/components/planning/requests'
+import { Docs } from '@/components/planning/docs'
+import { AgentTalk, Talk } from '@/components/planning/talk'
+import { Projects } from '@/components/planning/projects'
+import { convoHref, toPath, go, setPlanningNav } from '@/components/planning/links'
+import { Knowledge } from '@/components/planning/knowledge'
+import { repoPending } from '@/components/planning/repo'
+import { ChatPanel, useDevChat } from '@/components/planning/chat'
+import { prSlug } from '@/components/planning/links'
 
 type IconName = NonNullable<NavItem['icon']>
 // hidden: 메뉴에는 안 보이지만 주소로는 열린다 (소통은 부서 공용 탭으로 뺄 때까지 숨김)
@@ -36,7 +36,7 @@ const PARTS: Record<PlanningPart, { title: string; desc: string; home: string; s
     home: 'requests',
     sections: {
       projects: { label: '프로젝트', icon: 'menu', tabs: [] },
-      requests: { label: '요청', icon: 'bell', tabs: [] }, // 들어온·진행 중·해결·후속은 화면 안 필터 (#/requests/<필터>)
+      requests: { label: '요청', icon: 'bell', tabs: [] }, // 들어온·진행 중·해결·후속은 화면 안 필터 (requests/<필터>)
       work: { label: '기획서', icon: 'plan', tabs: [{ id: 'specs', label: '기획서' }] },
       docs: { label: '정리', icon: 'report', tabs: [] },
       agents: { label: '에이전트 대화', icon: 'send', tabs: [] },
@@ -70,20 +70,34 @@ const PARTS: Record<PlanningPart, { title: string; desc: string; home: string; s
   },
 }
 
-function useRoute(home: string): string {
-  const read = () => location.hash.replace(/^#\/?/, '') || home
-  const [r, setR] = useState(read)
+// /dev/work/prs/PR-28 → work/prs/PR-28. 예전 해시 주소(/dev#/work/prs)로 들어오면 경로로 옮긴다
+function useRoute(base: string, home: string): string {
+  const { pathname, hash } = useLocation()
+  const navigate = useNavigate()
+  setPlanningNav(base, navigate)
   useEffect(() => {
-    const on = () => setR(read())
-    window.addEventListener('hashchange', on)
-    return () => window.removeEventListener('hashchange', on)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  return r
+    if (hash.startsWith('#/')) navigate(`${base}/${hash.slice(2)}`, { replace: true })
+  }, [hash]) // eslint-disable-line react-hooks/exhaustive-deps
+  return pathname.slice(base.length).replace(/^\/+|\/+$/g, '') || home
+}
+
+// 화면 안 <a href="/dev/...">는 새로 불러오지 않고 react-router로 옮긴다 (새 탭·수정 키 클릭은 브라우저에 맡긴다)
+function useInnerLinks() {
+  const navigate = useNavigate()
+  return (e: MouseEvent) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    const a = (e.target as HTMLElement).closest('a')
+    const href = a?.getAttribute('href')
+    if (!a || !href || a.target || !href.startsWith('/') || href.startsWith('//')) return
+    e.preventDefault()
+    navigate(href)
+  }
 }
 
 export default function PlanningPage({ part = 'planning' }: { part?: PlanningPart }) {
+  const onLinks = useInnerLinks()
   return (
-    <div className="planning-scope" data-theme="light">
+    <div className="planning-scope" data-theme="light" onClick={onLinks}>
       <ToastProvider>
         <Planning key={part} part={part} />
       </ToastProvider>
@@ -99,7 +113,7 @@ function Planning({ part }: { part: PlanningPart }) {
   const P = PARTS[part]
   const SECTIONS = P.sections
   const isSection = (x: string) => x in SECTIONS
-  const route = useRoute(P.home)
+  const route = useRoute(`/${part}`, P.home)
   const [live, liveDispatch, connected] = useSharedStore(apiBase(part))
   // 예시 모드: 서버 대신 화면 안의 프로토타입 예시 데이터(data.ts)로 흐름을 보여 준다. 서버 데이터는 건드리지 않는다
   const [example, setExample] = useState(() => { try { return localStorage.getItem(EXAMPLE_KEY) === '1' } catch { return false } })
@@ -126,7 +140,7 @@ function Planning({ part }: { part: PlanningPart }) {
   const [item, item2] = (tabs.length ? rest : [sub, ...rest]).map((x) => (x ? decodeURIComponent(x) : undefined))
   // 없는 화면 주소(예: 예전 '참여한 사건')는 들어온 요청으로 돌린다
   useEffect(() => {
-    if (!planning) location.replace(`#/${P.home}`)
+    if (!planning) go(P.home, true)
   }, [planning, section]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 다른 부서에서 들어온 것: 기획개발 화면(요청·작업)을 볼 때까지 "새로"로 센다
@@ -152,7 +166,7 @@ function Planning({ part }: { part: PlanningPart }) {
   const badge: Record<string, number> = part === 'planning' ? { requests: newWork || incoming, talk: newTalk } : { talk: newTalk }
   const menu = [
     ...Object.keys(SECTIONS).filter((id) => !SECTIONS[id].hidden).map((id) => ({
-      href: `#/${id}${SECTIONS[id].tabs[0] ? `/${SECTIONS[id].tabs[0].id}` : ''}`,
+      href: toPath(`${id}${SECTIONS[id].tabs[0] ? `/${SECTIONS[id].tabs[0].id}` : ''}`),
       label: SECTIONS[id].label,
       on: section === id,
       badge: badge[id] || 0,
@@ -175,7 +189,7 @@ function Planning({ part }: { part: PlanningPart }) {
             ? <Chip tone="amber" title="화면 안 예시 데이터. 서버에 반영되지 않아요">예시 모드</Chip>
             : <Chip tone={connected ? 'green' : 'amber'} title={`${P.title} 서버 ${apiBase(part)}`}>{`${P.title} ${connected ? '켜짐' : '꺼짐'}`}</Chip>}
           {repoWait > 0 && firstRepoWait && (
-            <a href={`#/work/prs/${prSlug(firstRepoWait.id)}`} className="chip amber" title="대상 레포 승인 대기 PR">레포 승인 대기 {repoWait}</a>
+            <a href={toPath(`work/prs/${prSlug(firstRepoWait.id)}`)} className="chip amber" title="대상 레포 승인 대기 PR">레포 승인 대기 {repoWait}</a>
           )}
           {part === 'dev' && chat.working.length > 0 && (
             <button type="button" className="chip amber" onClick={() => { chat.select(chat.working[0]); setChatOpen(true) }}>AI 작업 중 {chat.working.length}</button>
@@ -213,7 +227,7 @@ function Planning({ part }: { part: PlanningPart }) {
               {tabs.map((t) => {
                 const n = section === 'work' && t.id === 'reviews' ? state.reviews.filter((x) => !x.result).length : 0
                 return (
-                  <a key={t.id} href={`#/${section}/${t.id}`} className={t.id === tab ? 'on' : ''} role="tab" aria-selected={t.id === tab}>
+                  <a key={t.id} href={toPath(`${section}/${t.id}`)} className={t.id === tab ? 'on' : ''} role="tab" aria-selected={t.id === tab}>
                     {t.label}
                     {n > 0 && <span className="subtab-count">{n}</span>}
                   </a>

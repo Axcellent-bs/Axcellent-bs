@@ -1,7 +1,7 @@
 // 소통 › 에이전트 대화의 원천: dashboard-api 공통 로그 조회
 // `GET /api/dashboard/communications?dept=planning` (#248·#277·#278).
 import { useEffect, useState } from 'react'
-import type { Activity, Dept } from './data'
+import type { Activity, Dept } from '@/lib/planningData'
 
 const API = (import.meta.env.VITE_DASHBOARD_API_URL as string | undefined) ?? 'http://localhost:8020'
 const POLL_MS = 5000

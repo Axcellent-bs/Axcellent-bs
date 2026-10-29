@@ -1,8 +1,8 @@
 // 여러 화면이 같이 쓰는 작은 조각. 목록 줄·카드는 통째로 눌러 다음 화면으로 간다 (rowNav, LinkTable)
 import type { Key, KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import { type ChipTone, type Column } from '@dejafix/common-frontend'
-import { DEPT_NAME, type Activity, type Dept, type State as S } from './data'
-import { Linked, convoHref, deptHref, go } from './links'
+import { DEPT_NAME, type Activity, type Dept, type State as S } from '@/lib/planningData'
+import { Linked, convoHref, deptHref, go, toPath } from '@/components/planning/links'
 
 // 부서·연결 지점은 글자로만 보인다. 링크가 필요한 곳에서만 link를 켠다
 export function Dep({ d, link }: { d: Dept; link?: boolean }) {
@@ -12,7 +12,7 @@ export function Dep({ d, link }: { d: Dept; link?: boolean }) {
 
 export function Point({ children, link }: { children: string; link?: boolean }) {
   if (!link) return <code className="point">{children}</code>
-  return <a href="#/metrics/links" className="point-link" title="부서 연동 표에서 보기"><code className="point">{children}</code></a>
+  return <a href={toPath('metrics/links')} className="point-link" title="부서 연동 표에서 보기"><code className="point">{children}</code></a>
 }
 
 // 색 배경 칩 대신 글자로만 표시한다. 색은 정말 봐야 하는 상태(초록=끝남, 주황=사람이 볼 것)에만
@@ -132,7 +132,7 @@ export function Stats({ items }: { items: { label: string; value: ReactNode; hin
     <div className="stats">
       {items.map((x) => {
         const inner = <><span className="stats-label">{x.label}</span><b>{x.value}</b>{x.hint && <span className="stats-hint">{x.hint}</span>}</>
-        return x.href ? <a key={x.label} href={x.href} className="stats-item">{inner}</a> : <div key={x.label} className="stats-item">{inner}</div>
+        return x.href ? <a key={x.label} href={toPath(x.href)} className="stats-item">{inner}</a> : <div key={x.label} className="stats-item">{inner}</div>
       })}
     </div>
   )

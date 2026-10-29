@@ -3,10 +3,10 @@
 // 에이전트 대화: 사건·요청 하나(context_id)에서 에이전트끼리 주고받은 A2A·이벤트·execute 기록을 읽기 전용으로 본다.
 import { useEffect, useRef, useState, type Dispatch, type KeyboardEvent } from 'react'
 import {Select, useToast } from '@dejafix/common-frontend'
-import { DEPT_NAME, type Action, type Activity, type Dept, type Message, type State, type Thread } from './data'
-import { Linked, Ref } from './links'
-import { Dep, Grade, Point, Tag } from './parts'
-import { useCommunications } from './comms'
+import { DEPT_NAME, type Action, type Activity, type Dept, type Message, type State, type Thread } from '@/lib/planningData'
+import { Linked, Ref, toPath } from '@/components/planning/links'
+import { Dep, Grade, Point, Tag } from '@/components/planning/parts'
+import { useCommunications } from '@/components/planning/comms'
 
 // 채널마다 마지막으로 본 메시지 수 (화면을 옮겨도 유지)
 const seen = new Map<string, number>()
@@ -49,7 +49,7 @@ export function Talk({ s: state, d, item }: { s: State; d: Dispatch<Action>; ite
         <div className="sl-group">
           <div className="sl-group-h">에이전트 대화 <span className="muted">{convos.length}</span></div>
           {convos.map((c) => (
-            <a key={c.ctx} href={`#/talk/${c.ctx}`} className={`sl-ch${c.ctx === convo?.ctx ? ' on' : ''}`} title={c.title}>
+            <a key={c.ctx} href={toPath(`talk/${c.ctx}`)} className={`sl-ch${c.ctx === convo?.ctx ? ' on' : ''}`} title={c.title}>
               <span className="sl-hash">⇄</span>
               <span className="sl-ch-name">{c.title}</span>
               <span className="sl-count">{c.items.length}</span>
@@ -83,7 +83,7 @@ export function AgentTalk({ s: state, item }: { s: State; item?: string }) {
         <div className="sl-ws">요청·작업 대화 <span className="muted">{convos.length}</span></div>
         <div className="sl-group">
           {convos.map((c) => (
-            <a key={c.ctx} href={`#/agents/${c.ctx}`} className={`sl-ch${c.ctx === convo?.ctx ? ' on' : ''}`} title={c.title}>
+            <a key={c.ctx} href={toPath(`agents/${c.ctx}`)} className={`sl-ch${c.ctx === convo?.ctx ? ' on' : ''}`} title={c.title}>
               <span className="sl-hash">⇄</span>
               <span className="sl-ch-name">{c.title}</span>
               <span className="sl-count">{c.items.length}</span>
@@ -104,7 +104,7 @@ function Group({ label, list, cur, fallback }: { label: string; list: Thread[]; 
       {list.map((t) => {
         const unread = isOn(t) ? 0 : Math.max(0, t.messages.length - (seen.get(t.id) ?? t.messages.length))
         return (
-          <a key={t.id} href={`#/talk/${t.id}`} className={`sl-ch${isOn(t) ? ' on' : ''}${unread ? ' unread' : ''}`}>
+          <a key={t.id} href={toPath(`talk/${t.id}`)} className={`sl-ch${isOn(t) ? ' on' : ''}${unread ? ' unread' : ''}`}>
             <span className="sl-hash">{t.kind === 'dept' ? '●' : '#'}</span>
             <span className="sl-ch-name">{channelName(t)}</span>
             {unread > 0 && <span className="sl-badge">{unread}</span>}
@@ -148,7 +148,7 @@ function ThreadView({ s, d, th }: { s: State; d: Dispatch<Action>; th: Thread })
       <section className="sl-main">
         <header className="sl-head">
           <div><b>{th.kind === 'dept' ? '' : '# '}{channelName(th)}</b> <span className="muted small">{topic(th)}</span></div>
-          {spec && <a href={`#/work/specs/${spec.id}`} className="small">{spec.id} 문서 열기</a>}
+          {spec && <a href={toPath(`work/specs/${spec.id}`)} className="small">{spec.id} 문서 열기</a>}
         </header>
         <div className="sl-msgs">
           <div className="sl-day"><span>오늘</span></div>
@@ -184,12 +184,12 @@ function ThreadView({ s, d, th }: { s: State; d: Dispatch<Action>; th: Thread })
         {th.peer && (
           <>
             <div className="sl-info-h">{DEPT_NAME[th.peer]} 에이전트와의 대화 {peerConvos.length}건</div>
-            {peerConvos.length ? peerConvos.map((c) => <a key={c.ctx} href={`#/talk/${c.ctx}`} className="small">⇄ {c.title}</a>) : <span className="muted small">아직 없음</span>}
+            {peerConvos.length ? peerConvos.map((c) => <a key={c.ctx} href={toPath(`talk/${c.ctx}`)} className="small">⇄ {c.title}</a>) : <span className="muted small">아직 없음</span>}
           </>
         )}
         <div className="sl-info-h">문서에 옮길 곳</div>
         <Select value={docId} onChange={(e) => setDocId(e.target.value)} options={s.docs.slice().reverse().map((x) => ({ value: x.id, label: `${x.id} ${x.title}` }))} />
-        {docId && <a href={`#/docs/${docId}`} className="small">{docId} 열기</a>}
+        {docId && <a href={toPath(`docs/${docId}`)} className="small">{docId} 열기</a>}
         <div className="sl-info-h">이 채널의 결정 {decisions.length}건</div>
         {decisions.length ? decisions.map((x) => <div key={x.id} className="small"><Ref s={s} id={x.id} /> {x.text}</div>) : <span className="muted small">아직 없음</span>}
       </aside>
@@ -231,7 +231,7 @@ function ConvoView({ s, c }: { s: State; c: Convo }) {
         <div className="sl-composer readonly">
           <span className="muted small">
             에이전트끼리 주고받은 기록이라 여기서는 쓰지 않습니다. 사람이 끼어들려면 상대 부서 채널에 쓰세요:{' '}
-            {peers.map((x) => { const t = peerChannel(x); return t ? <a key={x} href={`#/talk/${t.id}`}>{DEPT_NAME[x]} </a> : null })}
+            {peers.map((x) => { const t = peerChannel(x); return t ? <a key={x} href={toPath(`talk/${t.id}`)}>{DEPT_NAME[x]} </a> : null })}
           </span>
         </div>
       </section>

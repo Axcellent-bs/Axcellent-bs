@@ -1,8 +1,9 @@
 // 기획개발 백엔드(planning 에이전트, 8101) REST·SSE와 화면 상태(State)를 잇는다.
 // 백엔드는 snake_case·ISO 시각, 화면은 camelCase·KST "MM-DD HH:mm"이라 여기서 한 번만 바꾼다.
 // 백엔드에 없는 값(학습 기준·감사 목록)은 빈 값으로 두고 지어내지 않는다.
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { RELAY_TOKEN, SAFETY_HUMAN_TOKEN } from '@/lib/env'
-import type { Action, Activity, AuditItem, ChatThread, CrossReview, Doc, Incident, OutMsg, PR, Request, State, Thread } from './data'
+import type { Action, Activity, AuditItem, ChatThread, CrossReview, Doc, Incident, OutMsg, PR, Request, State, Thread } from '@/lib/planningData'
 
 export const PLANNING_API = (import.meta.env.VITE_PLANNING_API_URL as string | undefined) ?? 'http://localhost:8101'
 /** 개발·배포 서비스 에이전트(dev, 8111). 업무 로직은 기획과 같은 planning 도메인이라 같은 REST(`/api/planning`)를 쓴다 */
@@ -303,4 +304,59 @@ export const repoApi = (base: string, connection?: string) => {
     commit: (sha: string) => call<RepoMeta & { commit: RepoCommitDetail }>(base, `/repo/commits/${encodeURIComponent(sha)}${qs({ connection: c })}`),
     deleteBranch: (name: string) => call<{ deleted: string }>(base, `/repo/branches/delete${qs({ connection: c })}`, post({ name })),
   }
+}
+
+// ── 화면 상태 (예전 store.ts) ──
+// 기획개발 화면 상태는 기획개발 백엔드(planning 에이전트) 한 곳에서 온다.
+// SSE `GET /api/planning/events`로 바뀔 때마다 전체 상태를 받고, 사람 버튼은 `POST /api/planning/actions`로 보낸다.
+// 화면 안에서 상태를 지어내거나 혼자 진행시키지 않는다. 서버가 꺼져 있으면 빈 화면과 "연결 안 됨"을 보여 준다.
+
+/** 액션이 실패하면 화면(PlanningPage)이 토스트로 알린다 */
+export const ACTION_ERROR_EVENT = 'planning:action-error'
+const report = (message: string) => window.dispatchEvent(new CustomEvent(ACTION_ERROR_EVENT, { detail: message }))
+
+export function useSharedStore(base: string): [State, (a: Action) => void, boolean] {
+  const [state, setState] = useState<State>(EMPTY_STATE)
+  const [connected, setConnected] = useState(false)
+  const api = planningApi(base)
+  const reviews = useRef(state.reviews)
+  reviews.current = state.reviews
+
+  useEffect(() => {
+    let alive = true
+    const apply = async (raw: Record<string, unknown>) => {
+      const queue = await api.reviewQueue().catch(() => [] as QueueItem[])
+      if (alive) setState(fromBackend(raw, queue))
+    }
+    const es = new EventSource(api.eventsUrl())
+    es.addEventListener('state', (e) => {
+      setConnected(true)
+      void apply(JSON.parse((e as MessageEvent).data) as Record<string, unknown>)
+    })
+    es.onopen = () => setConnected(true)
+    es.onerror = () => setConnected(es.readyState === EventSource.OPEN)
+    return () => {
+      alive = false
+      es.close()
+    }
+  }, [base]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const dispatch = useCallback((a: Action) => {
+    let send: Action | undefined = a
+    // 교차검증 대기열의 "승인"은 백엔드가 알려 준 확정·머지 액션(decide_with)으로 보낸다
+    if (a.type === 'decideReview' || (a.type === 'humanDecide' && a.ok)) {
+      const r = reviews.current.find((x) => x.id === a.review) as { decideWith?: Action } | undefined
+      send = r?.decideWith
+      if (!send) return report('이 검증 건을 처리할 서버 액션이 없습니다')
+    } else if (a.type === 'humanDecide') {
+      return report('보류는 아직 서버에서 받지 않습니다. 기다리면 대기열에 남습니다')
+    }
+    api.action(send).catch((e: unknown) => {
+      if (e instanceof PlanningApiError && e.code === 'UNKNOWN_ACTION') report('이 기능은 아직 기획개발 서버에 연결되지 않았습니다')
+      else if (e instanceof PlanningApiError) report(e.message)
+      else report('기획개발 서버에 연결할 수 없습니다')
+    })
+  }, [base]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  return [state, dispatch, connected]
 }
