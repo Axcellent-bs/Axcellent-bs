@@ -55,6 +55,8 @@ from finance_agent.schemas import (
     SellerReviewOutput,
     SettlementHoldInput,
     SettlementHoldOutput,
+    SupportCostInput,
+    SupportCostOutput,
 )
 from finance_agent.sources import Impact, LiveSources, MockSources, Sources, order_key
 
@@ -70,6 +72,8 @@ class Ledger:
         self.seen_events: set[str] = set()
         self.done: dict[str, AgentResult] = {}  # 멱등성 키 → 끝난 상태 변경 결과
         self.market_ops: list[dict[str, Any]] = []  # 판매자 심사·정산 보류 결과 기록
+        # 문의 번호 → 고객지원 처리 결과 비용 기록
+        self.support_costs: dict[int, dict[str, Any]] = {}
         self.coupon_events: dict[str, list[dict[str, Any]]] = {}  # context_id → 보상 쿠폰 이벤트
 
     def compensation(self, context_id: str) -> dict[str, int]:
@@ -461,9 +465,83 @@ async def audit_report(request: AgentRequest) -> AgentResult:
     )
 
 
+# ------------------------------------------------- record_support_cost (읽기·장부 기록)
+SUPPORT_COST_QUERIES = ["shop-api:/api/shop/orders"]
+
+
+async def record_support_cost(request: AgentRequest) -> AgentResult:
+    """고객지원이 닫은 문의의 처리 결과를 받아 배송비·비용 기록을 확인하고 재무 장부에 남긴다.
+
+    돈을 움직이거나 외부 상태를 바꾸지 않는다(그래서 읽기 등급이다). 경비를 쓰지 않은 문의
+    (답변만 한 문의, 환불·쿠폰이 없는 문의)도 상담 처리 결과를 기록으로 남긴다.
+    같은 문의는 한 번만 기록한다. 주문을 장부에서 찾지 못하면 배송비를 비우고 이유를 적는다.
+    """
+    data = _parse(request, SupportCostInput)
+    if isinstance(data, AgentResult):
+        return data
+    ledger = state().ledger
+    refund = data.refund_amount or 0
+    coupon = data.coupon_id is not None
+    unavailable: list[str] = []
+    shipping_fee: int | None = None
+    if data.order_id is not None:
+        books = await state().books()
+        order = books.order(data.order_id)
+        if order is not None:
+            shipping_fee = int(order.get("shipping_fee") or 0)
+        else:
+            unavailable.append(f"장부에 주문 {data.order_id}가 없어 배송비를 확인하지 못함")
+        unavailable.extend(books.meta([])["unavailable"])
+    else:
+        unavailable.append("문의에 주문이 연결되지 않아 배송비를 확인하지 못함")
+    expense = refund > 0 or coupon
+    previous = ledger.support_costs.get(data.inquiry_id)
+    record = previous or {
+        "record_id": f"sc_{data.inquiry_id}",
+        "inquiry_id": data.inquiry_id,
+        "order_id": data.order_id,
+        "resolution": data.resolution,
+        "claim_decision": data.claim_decision,
+        "refund_amount": refund,
+        "coupon_issued": coupon,
+        "expense_used": expense,
+        "shipping_fee": shipping_fee,
+        "context_id": request.meta.context_id,
+        "recorded_at": _now().isoformat(),
+    }
+    ledger.support_costs[data.inquiry_id] = record
+    spent = "경비 사용 없음"
+    if expense:
+        spent = f"환불 {refund:,}원" + (", 쿠폰 지급" if coupon else "")
+    note = f"문의 #{data.inquiry_id} 처리 결과 기록: {data.resolution}, {spent}"
+    output = SupportCostOutput(
+        record_id=record["record_id"],
+        inquiry_id=data.inquiry_id,
+        order_id=record["order_id"],
+        status="already_recorded" if previous is not None else "recorded",
+        resolution=record["resolution"],
+        claim_decision=record["claim_decision"],
+        refund_amount=record["refund_amount"],
+        coupon_issued=record["coupon_issued"],
+        expense_used=record["expense_used"],
+        shipping_fee=record["shipping_fee"],
+        note=note,
+        unavailable=unavailable,
+    )
+    refs = [f"inquiry:{data.inquiry_id}"] + ([f"order:{data.order_id}"] if data.order_id else [])
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome="partial" if unavailable else "recorded",
+        output=output.model_dump(mode="json"),
+        evidence=_evidence(SUPPORT_COST_QUERIES, note, refs),
+    )
+
+
 HANDLERS = {
     "seller_review": seller_review,
     "settlement_hold": settlement_hold,
     "closing_report": closing_report,
     "audit_report": audit_report,
+    "record_support_cost": record_support_cost,
 }

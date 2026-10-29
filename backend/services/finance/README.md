@@ -8,6 +8,7 @@
 | `settlement_hold` | B |
 | `closing_report` | read |
 | `audit_report` | read |
+| `record_support_cost` | read |
 
 - 실행: `uv run --package ax-svc-finance uvicorn svc_finance.main:app --port 8105` (backend/ 에서, 목 모드 `AGENT_TEMPLATE_MOCK=1`)
 - 다른 에이전트가 `finance`로 불러도 위 skill이면 이 서비스로 온다 (`route_target`).

@@ -126,3 +126,37 @@ class AuditReportOutput(AxModel):
     stats: AuditStats
     findings: list[AuditFinding]
     unavailable: list[str] = Field(default_factory=list)
+
+
+# ------------------------------- record_support_cost (orchestrator → finance, 읽기·기록)
+class SupportCostInput(AxModel):
+    """고객지원이 닫은 문의의 처리 결과 (`support.inquiry_resolved` 이벤트의 사실 필드)."""
+
+    inquiry_id: int
+    order_id: str | None = None
+    resolution: Literal["answered", "claim_decided", "compensated", "escalated"]
+    claim_id: int | None = None
+    claim_decision: Literal["approve", "reject"] | None = None
+    coupon_id: str | None = None
+    refund_amount: int | None = Field(default=None, ge=0)
+
+
+class SupportCostOutput(AxModel):
+    """문의 한 건의 비용 기록.
+
+    `expense_used`가 false여도(경비를 쓰지 않아도) 상담 처리 결과는 기록한다.
+    주문을 장부에서 찾지 못하면 `shipping_fee`는 비우고 `unavailable`에 적는다(추정하지 않는다).
+    """
+
+    record_id: str
+    inquiry_id: int
+    order_id: str | None = None
+    status: Literal["recorded", "already_recorded"]
+    resolution: str
+    claim_decision: str | None = None
+    refund_amount: int
+    coupon_issued: bool
+    expense_used: bool
+    shipping_fee: int | None = None
+    note: str
+    unavailable: list[str] = Field(default_factory=list)
