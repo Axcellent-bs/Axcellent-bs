@@ -181,6 +181,7 @@ class CodingRun(DomainModel):
     updated_at: UtcDatetime
     connection: str | None = None
     pr: str | None = None
+    instruction: str | None = None  # 사람이 대기 중인 PR에 준 수정 지시 (마지막 것)
 
 
 class Task(DomainModel):

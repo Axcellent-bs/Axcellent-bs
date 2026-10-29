@@ -208,6 +208,7 @@ export const devTaskApi = (base: string) => ({
   }),
   retry: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/retry`, post()),
   cancel: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/cancel`, post()),
+  revise: (taskId: string, note: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/revise`, post({ note })),
 })
 
 // ---- AI와 대화 (dev 서비스 `/api/planning/dev-chat`). 답이 오면 바뀐 대화 전체를 돌려준다 (5~30초)

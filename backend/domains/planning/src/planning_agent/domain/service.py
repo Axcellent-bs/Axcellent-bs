@@ -45,6 +45,7 @@ from planning_agent.dev_handoff import (
 )
 from planning_agent.domain.autocheck import (
     WAIT_CROSS_CHECK,
+    WAIT_HUMAN,
     Check,
     planned_area,
     planned_paths,
@@ -106,6 +107,7 @@ from planning_agent.domain.trace import changed_paths_for
 from planning_agent.result_notify import ResultSender, send_change_result
 
 AGENT_NAME = "planning"
+MAX_INSTRUCTION_CHARS = 1000  # 사람 수정 지시 길이
 TEAM_LEAD = "노예진"  # 확정·머지·승급 승인 버튼을 누르는 팀장 (목)
 
 Gate = Callable[[str, dict, RequestMeta, Evidence], Awaitable[ExecuteDecision]]
@@ -2336,6 +2338,105 @@ class PlanningService:
 
         return await self._apply(run)
 
+    async def revise_dev_task(self, task_id: str, note: str) -> ActionResult:
+        """대기 중인 코딩 PR에 사람이 수정 지시를 준다. 개발 AI가 지시대로 고치고 리뷰한 뒤
+        같은 PR에 커밋을 더한다 (PR 게시판에 새 PR을 늘리지 않는다)."""
+        text = " ".join(str(note or "").split())
+        if not text or len(text) > MAX_INSTRUCTION_CHARS:
+            raise ActionError("INVALID_INPUT", f"지시는 1~{MAX_INSTRUCTION_CHARS}자여야 한다")
+        task = next((t for t in self.state.tasks if t.id == task_id), None)
+        if task is None or task.coding is None:
+            raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+        pr = next((p for p in self.state.prs if p.task == task_id), None)
+        if (
+            task_id in self._coding
+            or task.coding.status != "waiting_human"
+            or pr is None
+            or pr.merged
+            or pr.closed
+        ):
+            raise ActionError(
+                "NOT_REVISABLE", f"{task_id}는 열린 PR로 사람 확인을 기다리는 작업이 아니다"
+            )
+        llm = self._coding_llm()
+
+        async def run(s: State) -> ActionResult:
+            x = next((t for t in s.tasks if t.id == task_id), None)
+            if x is None or x.coding is None:
+                raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+            sp = next((p for p in s.specs if p.id == x.spec), None)
+            req = self._request_of_spec(s, sp) if sp else None
+            ctx = req.context_id if req else f"task:{task_id}"
+            t = self.clock()
+            act = f"{task_id} 수정 지시: {text[:80]}"
+            n = sum(1 for g in self.gate_calls if g.action == "dev_task_revise") + 1
+            await self._execute(
+                "dev_task_revise", ctx, f"{task_id}:{n}", act, {"chars": len(text)}
+            )
+            x.coding.status = "queued"
+            x.coding.error = None
+            x.coding.instruction = text
+            x.coding.model = coder.model_name(llm)
+            x.coding.attempts = 0
+            x.coding.updated_at = t
+            x.state = "진행 중"
+            s.activity.append(self._act(t, ctx, "human", "dev", "dev_task_revise", "사람", act))
+            return ActionResult(outcome="queued", output={"task_id": task_id, "status": "queued"})
+
+        result = await self._apply(run)
+        self._spawn_coder(task_id)
+        return result
+
+    async def escalate_waits(self) -> None:
+        """교차검증 대기가 오래되면 사람 확인으로 넘긴다.
+
+        `PLANNING_CROSS_CHECK_TIMEOUT_MIN`(기본 10분). 교차검증자가 답하지 않아 PR이 멈춰 있지
+        않게 한다. 화면 SSE가 열려 있는 동안 주기적으로 부른다."""
+        mins = _cross_check_timeout_min()
+        now = self.clock()
+        stale = {
+            p.id
+            for p in self.state.prs
+            if not p.merged
+            and not p.closed
+            and p.auto_review is not None
+            and p.auto_review.state == WAIT_CROSS_CHECK
+            and now - p.auto_review.at >= timedelta(minutes=mins)
+        }
+        if not stale:
+            return
+
+        async def run(s: State) -> None:
+            for p in s.prs:
+                if p.id not in stale or p.auto_review is None:
+                    continue
+                p.auto_review.state = WAIT_HUMAN
+                why = f"교차검증 {mins}분 응답 없음 → 사람 확인"
+                s.activity.append(
+                    self._act(
+                        self.clock(),
+                        self._ctx_of_pr(s, p),
+                        "planning",
+                        "planning",
+                        "auto_review",
+                        "execute",
+                        f"{p.id} {why}",
+                        "B",
+                    )
+                )
+                task = next((t for t in s.tasks if t.id == p.task), None)
+                if task and task.coding is not None and task.coding.status == "waiting_human":
+                    task.coding.error = why
+
+        await self._apply(run)
+
+    def coding_pr(self, job: coder.Job) -> PR | None:
+        """이 작업이 연 PR (병합·닫힘 아닌 것). 수정 지시 실행이 고칠 대상."""
+        return next(
+            (p for p in self.state.prs if p.task == job.task_id and not p.merged and not p.closed),
+            None,
+        )
+
     def _spawn_coder(self, task_id: str) -> None:
         self._coding_seq += 1
         run_id = self._coding_live[task_id] = self._coding_seq
@@ -2377,6 +2478,7 @@ class PlanningService:
             done=tuple(p.text for p in sp.paras if p.kind == "done"),
             hints=tuple(r1.paths) if r1 else (),
             connection=task.coding.connection,
+            instruction=task.coding.instruction,
         )
 
     def _coding_of(self, s: State, job: coder.Job) -> tuple[Task, CodingRun]:
@@ -2592,6 +2694,49 @@ class PlanningService:
 
         await self._apply(run)
         return fix
+
+    async def coding_commit(
+        self, job: coder.Job, changed: dict[str, str], rows: list[CodingFile], message: str
+    ) -> bool:
+        """관문 code_write(A) 뒤 고친 파일을 같은 PR 브랜치에 커밋한다 (사람 수정 지시)."""
+        ok = False
+
+        async def run(s: State) -> None:
+            nonlocal ok
+            task, cr = self._coding_of(s, job)
+            p = next((x for x in s.prs if x.id == cr.pr), None)
+            if p is None:
+                raise coder.CoderStop("failed", "PR이 없다")
+            paths = sorted(r.path for r in rows)
+            lines, files = coder.total_lines(rows), len(rows)
+            n = sum(1 for g in self.gate_calls if g.action == "code_write") + 1
+            await self._execute(
+                "code_write",
+                job.ctx,
+                f"{p.id}:commit{n}",
+                f"{p.id} {message} ({len(changed)}개 파일)",
+                _pr_size_params(lines, files, paths, task.id),
+            )
+            note = await vcs_bridge.update_pr(p, changed, message)
+            if note is not None:
+                s.activity.append(
+                    self._act(self.clock(), job.ctx, "dev", "dev", note.point, "API", note.text)
+                )
+            if note is not None and not note.ok:
+                cr.status = "failed"
+                cr.error = note.text
+                cr.updated_at = self.clock()
+                self._code_act(s, job, "code.failed", cr.error)
+                return
+            p.gate = PrGate(result="통과", lines=lines, files=files, paths=coder.area_of(paths))
+            p.changed_paths = paths
+            p.auto_review = None
+            cr.files = rows
+            cr.updated_at = self.clock()
+            ok = True
+
+        await self._apply(run)
+        return ok
 
     # ---------------------------------------------------------------- 사람·에이전트 액션
 
@@ -3138,7 +3283,7 @@ class PlanningService:
         if auto:
             merge_text = f"{p.id} 자동 머지 ({rule_text} → merge_pr 규칙 통과, 사후 감사)"
         else:
-            merge_text = f"팀장 {TEAM_LEAD}이 {p.id} 머지"
+            merge_text = f"사람이 {p.id} 머지"
         await self._execute("merge_pr", ctx, p.id, merge_text, {**check.params, "auto": auto})
         # merge_pr 관문을 지난 뒤 형상관리에서 실제로 병합한다.
         # 실패하면 한 줄 남기고 병합하지 않는다
@@ -3218,7 +3363,7 @@ class PlanningService:
                     "planning",
                     "PR 머지",
                     "사람",
-                    f"팀장 {TEAM_LEAD}이 {p.id} 머지 (사람 클릭)",
+                    f"사람이 {p.id} 머지 (사람 클릭)",
                 )
             )
         s.activity.append(
@@ -3708,3 +3853,11 @@ __all__ = [
     "PlanningService",
     "action_name",
 ]
+
+
+def _cross_check_timeout_min() -> int:
+    """교차검증 대기를 사람 확인으로 넘기기까지 분 (`PLANNING_CROSS_CHECK_TIMEOUT_MIN`, 기본 10)."""
+    try:
+        return max(1, int(os.getenv("PLANNING_CROSS_CHECK_TIMEOUT_MIN", "10")))
+    except ValueError:
+        return 10

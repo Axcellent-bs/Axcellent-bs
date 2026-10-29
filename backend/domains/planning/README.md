@@ -132,6 +132,9 @@ execute params (safety #171 `thresholds.toml` 규칙 키, 모두 도메인 상�
   4. 리뷰(LLM, PR 전): diff와 완료 기준 → `통과`·`불일치` + 노트. 불일치면 노트를 넣어 짚은 파일만 한 번 다시 쓰고(짚은 새 파일은 더한다) 다시 리뷰. 커밋은 아직 없다.
   5. 커밋·PR: 관문 `generate_pr`(B, 실제 줄·파일·경로) 뒤 `gen/<작업>-<실행 번호>` 브랜치에 마지막 결과만 커밋 하나로 올리고 PR을 연다(본문에 기획·완료 기준·파일별 이유, `요청`·`기획서`·`문단` 줄). 리뷰 결과를 관문 `review_pr` 뒤 PR `reviews`에 남긴다(PR 전 불일치도 앞에 붙인다). 활동 `code.review`. 두 번 다 불일치면 `waiting_human`(대기열 `pr_review_mismatch`).
   6. 머지: 통과면 기존 자동 머지 규칙(`merge_pr` 크기·보호 경로·장애 연결 등). 걸리면 `waiting_human`, 사람이 머지 버튼을 누르면 `merged`. 형상관리에는 merge commit으로 합친다.
+- 사람 확인 대기(열린 PR) 조치: 화면 코딩 카드의 **수정 지시**(`POST /dev-tasks/{id}/revise` `{note}`, 관문 `dev_task_revise` A) → 개발 AI가 PR 브랜치 글 위에서 지시대로 고치고 리뷰한 뒤 **같은 PR에 커밋**(관문 `code_write` A) → 리뷰 기록·자동 머지 규칙. **머지**는 누구나(`mergePr`, 감사 기록 "사람이 머지"). 대화에서 대기 중인 작업에 이어 말해도 수정 지시가 된다.
+- 교차검증 대기가 `PLANNING_CROSS_CHECK_TIMEOUT_MIN`(기본 10분) 넘으면 사람 확인으로 넘긴다(화면 SSE가 열려 있는 동안 확인, 활동 `auto_review`).
+- 브랜치가 이미 있으면 제목·바꾼 파일이 같은 앞선 시도일 때만 이어받고, 아니면(서버를 다시 켜 작업 번호가 겹침 등) `gen/<작업>-<실행>-<6자리>` 새 브랜치로 올린다.
 - 한도: 파일 5개, 바뀐 줄 합 1500줄, 고칠 파일 600줄(넘으면 PR 없이 `waiting_human`, 작업 `C 보류`). LLM 오류·시간 초과(180초)·형상관리 오류는 `failed` + 짧은 이유(예외 내용·비밀 값 없음), 활동 `code.failed`.
 - LLM 설정: `PLANNING_LLM_MODEL`·`PLANNING_LLM_BASE_URL`·`PLANNING_LLM_API_KEY`(없으면 공통 `LLM_*`). 레포 이름·파일 글·기획 글만 보내고 토큰은 보내지 않는다. 테스트는 `coder.set_llm()`으로 가짜를 끼운다(`tests/test_coder.py`).
 - 아직: 실패 뒤 이미 PR이 있는 작업(리뷰 LLM 오류 등)은 다시 시도하지 않는다(PR 화면에서 머지·판단). 파일 하나를 통째로 다시 쓰므로 600줄 넘는 파일은 사람 몫이다.

@@ -29,7 +29,14 @@ from planning_agent.domain.trace import code_of, trace_of, trace_text
 
 KEEPALIVE_SECONDS = 15.0
 # 코딩 작업 오류 중 409로 주는 것 (설정·상태 문제). 나머지 입력 오류는 400
-CODING_CONFLICT = {"NO_VCS", "LLM_NOT_CONFIGURED", "NOT_RETRYABLE", "NOT_CANCELABLE", "WRONG_ROLE"}
+CODING_CONFLICT = {
+    "NO_VCS",
+    "LLM_NOT_CONFIGURED",
+    "NOT_RETRYABLE",
+    "NOT_CANCELABLE",
+    "NOT_REVISABLE",
+    "WRONG_ROLE",
+}
 MAX_CHATS_LISTED = 20
 
 
@@ -305,7 +312,14 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
         text = {
             k: body.get(k)
             for k in (
-                "id", "kind", "repo", "base_url", "base_branch", "token", "description", "mount"
+                "id",
+                "kind",
+                "repo",
+                "base_url",
+                "base_branch",
+                "token",
+                "description",
+                "mount",
             )
         }
         if any(v is not None and not isinstance(v, str) for v in text.values()):
@@ -379,6 +393,8 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
                     try:
                         await asyncio.wait_for(queue.get(), timeout=KEEPALIVE_SECONDS)
                     except TimeoutError:
+                        # 화면이 열려 있는 동안 오래된 교차검증 대기를 사람 확인으로 넘긴다
+                        await svc.escalate_waits()
                         yield ": keepalive\n\n"
                         continue
                     while not queue.empty():  # 몰려온 변경은 마지막 상태 한 번으로
@@ -556,6 +572,22 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
         svc = get_service()
         try:
             result = await svc.cancel_dev_task(task_id)
+        except ActionError as exc:
+            return _coding_err(exc)
+        except GateRefused as exc:
+            return _gate_err(exc)
+        return _ok(result.output, svc)
+
+    @router.post("/dev-tasks/{task_id}/revise", response_model=None)
+    async def post_dev_task_revise(task_id: str, request: Request) -> dict | JSONResponse:
+        """사람 확인을 기다리는 코딩 PR에 수정 지시 `{note}`. 개발 AI가 고쳐 같은 PR에 커밋한다."""
+        svc = get_service()
+        body = await _body(request) or {}
+        note = body.get("note")
+        if not isinstance(note, str):
+            return _err(400, "INVALID_INPUT", "note는 문자열이어야 한다")
+        try:
+            result = await svc.revise_dev_task(task_id, note)
         except ActionError as exc:
             return _coding_err(exc)
         except GateRefused as exc:

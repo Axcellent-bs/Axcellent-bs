@@ -130,6 +130,7 @@ WRITE_PROMPT = (
     "너는 개발팀의 코딩 에이전트다. 아래 데이터의 파일 하나를 기획(plan)과 완료 기준(done)에 "
     "맞게 고친다.\n"
     "- current는 지금 파일 글이다 (새 파일이면 빈 글). 필요한 곳만 바꾸고 나머지는 그대로 둔다.\n"
+    "- instruction이 있으면 사람이 직접 준 수정 지시다. 무엇보다 먼저 따른다.\n"
     "- review_notes가 있으면 지난 리뷰의 지적이다. 모두 반영한다.\n"
     "- why는 이 파일에서 고칠 부분이다. others는 같은 작업에서 다른 파일이 맡은 일이니 "
     "여기서 겹쳐 하지 않는다.\n"
@@ -216,6 +217,7 @@ class Job:
     done: tuple[str, ...]
     hints: tuple[str, ...]
     connection: str | None
+    instruction: str | None = None  # 사람이 대기 중인 PR에 준 수정 지시
 
 
 class CoderGone(Exception):
@@ -472,6 +474,7 @@ async def _write_one(
         "others": [{"path": o.path, "why": o.reason} for o in others or [] if o.path != pick.path],
         "current": current,
         "review_notes": notes,
+        "instruction": job.instruction,
     }
     got = await _ask(llm, f"파일 쓰기 {pick.path}", WRITE_PROMPT, FileWrite, data, job.ctx)
     if got.edits and pick.action != "create":
@@ -634,6 +637,11 @@ async def _run(svc: PlanningService, job: Job) -> None:
         raise CoderStop("failed", "LLM 설정이 없다")
     adapter = _adapter(job.connection)
 
+    # 사람 수정 지시: 열린 PR 브랜치의 지금 글 위에서 고쳐 같은 PR에 커밋한다
+    if job.instruction and svc.coding_pr(job) is not None:
+        await _revise(svc, job, llm, adapter)
+        return
+
     # 다시 시도: 같은 연결로 리뷰까지 끝낸 코드가 있으면 LLM을 다시 부르지 않고 PR부터 다시 한다
     draft = draft_of(svc, job.task_id)
     if draft is not None and draft.connection == job.connection:
@@ -769,6 +777,64 @@ async def _open(svc: PlanningService, job: Job, d: Draft) -> None:
     if not await svc.coding_open(job, d.contents, d.rows, pr_body(job, d.rows, d.summary or "")):
         return
     drop_draft(svc, job.task_id)
+    verdict = d.verdicts[-1] if d.verdicts else "불일치"
+    if await svc.coding_review(job, verdict, d.notes, earlier=d.verdicts[:-1]):
+        raise CoderStop("waiting_human", "리뷰 불일치 → 사람 확인")
+
+
+async def _read_or_empty(adapter: VcsAdapter, path: str, ref: str | None = None) -> str:
+    """파일 글. 없으면(새로 만든 파일 등) 빈 글."""
+    try:
+        return await adapter.read_file(path, ref)
+    except VcsError as exc:
+        if exc.code == "not_found":
+            return ""
+        raise CoderStop("failed", f"형상관리 파일 읽기 {path} 실패 ({exc.code})") from None
+
+
+async def _revise(svc: PlanningService, job: Job, llm: Any, adapter: VcsAdapter) -> None:
+    """사람 지시 → PR 브랜치 글 위에서 고치기 → 리뷰(불일치면 한 번 더) → 같은 PR에 커밋.
+
+    리뷰가 통과하면 기존 자동 머지 규칙으로 잇는다 (걸리면 다시 사람 확인)."""
+    pr = svc.coding_pr(job)
+    if pr is None:
+        raise CoderStop("failed", "고칠 PR이 없다")
+    await svc.coding_step(job, "reading")
+    paths = list(pr.changed_paths)
+    base_rows = await asyncio.gather(*(_read_or_empty(adapter, p) for p in paths))
+    head_rows = await asyncio.gather(*(_read_or_empty(adapter, p, pr.branch) for p in paths))
+    base = dict(zip(paths, base_rows, strict=True))
+    current = dict(zip(paths, head_rows, strict=True))
+    picks = [
+        FilePick(path=p, action="modify" if current[p] else "create", reason="사람 지시 반영")
+        for p in paths
+    ]
+    await svc.coding_step(
+        job, "writing", point="code.plan", text=f"사람 지시 · {pr.id} 파일 {len(picks)}개",
+        attempts=1,
+    )  # fmt: skip
+
+    fixed, reasons = await _write_all(llm, job, picks, current, [])
+    changed = {p: c for p, c in fixed.items() if c != current[p]}
+    if not changed:
+        raise CoderStop("waiting_human", "지시를 반영한 수정이 없음 → 사람 확인")
+    contents = {**current, **changed}
+    rows = file_rows(base, contents, reasons)
+    if total_lines(rows) > MAX_TOTAL_LINES:
+        raise CoderStop(
+            "waiting_human", f"바뀐 줄 {total_lines(rows)}줄 > {MAX_TOTAL_LINES}줄 → 사람 확인"
+        )
+    await svc.coding_step(
+        job, "writing", point="code.write", text=f"사람 지시 반영 · {write_text(rows)}", files=rows
+    )
+
+    d = await _review(svc, job, llm, Draft(job.connection, picks, base, contents, rows, None))
+    final = {p: c for p, c in d.contents.items() if c != current.get(p, "")}
+    if not final:
+        raise CoderStop("waiting_human", "지시를 반영한 수정이 없음 → 사람 확인")
+    message = f"사람 지시 반영: {_one_line(job.instruction or '')[:60]}"
+    if not await svc.coding_commit(job, final, d.rows, message):
+        return
     verdict = d.verdicts[-1] if d.verdicts else "불일치"
     if await svc.coding_review(job, verdict, d.notes, earlier=d.verdicts[:-1]):
         raise CoderStop("waiting_human", "리뷰 불일치 → 사람 확인")

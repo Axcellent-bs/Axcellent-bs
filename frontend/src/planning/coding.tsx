@@ -1,13 +1,14 @@
 // 코딩 에이전트: AI와 대화(chat.tsx)로 시작한 작업은 파일 읽기 → 작성 → 리뷰 → PR까지 간다.
 // 진행 상태는 Task.coding으로 SSE를 타고 온다
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import type { CodingRun, CodingStatus, State as S, Task } from './data'
-import { DEV_API, PlanningApiError, devTaskApi } from './api'
+import { DEV_API, PlanningApiError, devTaskApi, planningApi } from './api'
 import { State, Tag } from './parts'
 import { Step } from './flow'
 
 const api = devTaskApi(DEV_API)
+const actions = planningApi(DEV_API)
 
 export const CODING_LABEL: Record<CodingStatus, string> = {
   queued: '대기', reading: '파일 읽는 중', writing: '코드 작성 중', reviewing: '리뷰 중',
@@ -61,8 +62,33 @@ export const codingState = (c: CodingRun) => CODING_LABEL[c.status] ?? c.status
 export function CodingStep({ task }: { task: Task }) {
   const toast = useToast()
   const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
   const c = task.coding
   if (!c) return null
+  // 열린 PR로 사람 확인을 기다리면: 다시 시도 대신 수정 지시·사람 머지
+  const waitingPr = c.status === 'waiting_human' && !!c.pr
+  const act = async (run: () => Promise<unknown>, done: string) => {
+    setBusy(true)
+    try {
+      await run()
+      toast.show(done)
+      return true
+    } catch (x) {
+      toast.show(x instanceof PlanningApiError ? x.message : '개발·배포 서버에 연결할 수 없어요')
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }
+  const revise = async (e: FormEvent) => {
+    e.preventDefault()
+    if (note.trim() && await act(() => api.revise(task.id, note.trim()), `${c.pr} 수정 지시 보냄`)) setNote('')
+  }
+  const merge = () => {
+    if (c.pr && window.confirm(`${c.pr}를 머지할까요? 자동 머지 기준 밖이라 사람이 머지한 것으로 기록돼요.`)) {
+      void act(() => actions.action({ type: 'mergePr', pr: c.pr! }), `${c.pr} 머지`)
+    }
+  }
   const files = c.files ?? []
   const add = files.reduce((n, x) => n + (x.additions || 0), 0)
   const del = files.reduce((n, x) => n + (x.deletions || 0), 0)
@@ -84,6 +110,7 @@ export function CodingStep({ task }: { task: Task }) {
         {c.attempts > 1 && <Tag>{c.attempts}회차</Tag>}
         {!!files.length && <Tag>{files.length}파일 · <span className="mono">+{add} −{del}</span></Tag>}
         {c.review && <Tag tone={c.review.verdict === '통과' ? 'green' : 'amber'}>리뷰 {c.review.verdict}</Tag>}
+        {c.instruction && <Tag>사람 지시</Tag>}
       </span>
       {c.summary && <p>{c.summary}</p>}
       {!!files.length && (
@@ -103,9 +130,17 @@ export function CodingStep({ task }: { task: Task }) {
         </div>
       )}
       {!!c.review?.notes.length && <ul>{c.review.notes.map((n, i) => <li key={i} className="muted">{n}</li>)}</ul>}
+      {c.instruction && <p className="muted">지시: {c.instruction}</p>}
       {c.error && <p className="tag-amber">{c.error}</p>}
+      {waitingPr && (
+        <form className="flex gap-2" onSubmit={revise}>
+          <input className="field flex-1" value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} placeholder="수정 지시 (같은 PR에 커밋)" aria-label="수정 지시" />
+          <Button size="small" type="submit" disabled={busy || !note.trim()}>수정 지시</Button>
+        </form>
+      )}
       <span className="tags">
-        {STUCK.includes(c.status) && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : '다시 시도'}</Button>}
+        {waitingPr && <Button size="small" variant="primary" onClick={merge} disabled={busy}>머지</Button>}
+        {STUCK.includes(c.status) && !waitingPr && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : '다시 시도'}</Button>}
         <CancelButton taskId={task.id} status={c.status} />
       </span>
     </Step>
