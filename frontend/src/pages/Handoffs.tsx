@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
 import { AGENTS, SERVICES } from "@/demo/services";
 import { ApiError } from "@/lib/apiError";
@@ -9,6 +9,7 @@ import {
   type HandoffStatus, type HandoffTask,
 } from "@/lib/handoffs";
 import { skillLabel } from "@/lib/labels";
+import { useMediaQuery } from "@/lib/useMediaQuery";
 import HandoffsExample from "./HandoffsExample";
 
 // 받은 요청(코드·API 이름은 할 일함·handoff): 회사가 켜지 않은 서비스로 가던 일을 에이전트가 사람에게 넘긴 것 (dashboard-api GET /api/dashboard/handoffs).
@@ -201,7 +202,10 @@ function RealHandoffs({ toggle }: { toggle: ReactNode }) {
       return next;
     });
 
-  const selected = useMemo(() => tasks?.find((t) => t.task_id === selectedId) ?? tasks?.[0], [tasks, selectedId]);
+  // 넓은 화면은 상세를 오른쪽에, 좁은 화면은 누른 줄 바로 밑에 펼친다(다시 누르면 접힘)
+  const wide = useMediaQuery("(min-width: 1280px)");
+  const selected = useMemo(() => tasks?.find((t) => t.task_id === selectedId) ?? (wide ? tasks?.[0] : undefined), [tasks, selectedId, wide]);
+  const pick = (id: string) => setParam("id", !wide && id === selected?.task_id ? null : id);
   const unreachable = error === UNREACHABLE;
 
   return (
@@ -270,10 +274,11 @@ function RealHandoffs({ toggle }: { toggle: ReactNode }) {
                 {tasks.map((t) => {
                   const on = t.task_id === selected?.task_id;
                   return (
-                    <tr key={t.task_id} onClick={() => setParam("id", t.task_id)} aria-selected={on}
+                    <Fragment key={t.task_id}>
+                    <tr onClick={() => pick(t.task_id)} aria-selected={on}
                       className={`cursor-pointer border-b border-ink-100 last:border-0 ${on ? "bg-brand-50" : "hover:bg-app"}`}>
                       <td className="px-4 py-3">
-                        <button type="button" className="text-left font-medium" onClick={(e) => { e.stopPropagation(); setParam("id", t.task_id); }}>
+                        <button type="button" className="text-left font-medium" onClick={(e) => { e.stopPropagation(); pick(t.task_id); }} aria-expanded={wide ? undefined : on}>
                           {serviceName(t.from_service)}
                         </button>
                         <p className="text-xs text-ink-500">→ {serviceName(t.to_service)}</p>
@@ -286,12 +291,18 @@ function RealHandoffs({ toggle }: { toggle: ReactNode }) {
                       <td className="whitespace-nowrap px-4 py-3 text-ink-700" title={shortDateTime(t.created_at)}>{ago(t.created_at)}</td>
                       <td className="px-4 py-3"><StatusChip status={t.status} /></td>
                     </tr>
+                    {!wide && on && selected && (
+                      <tr className="border-b border-ink-100 bg-app">
+                        <td colSpan={5} className="p-3"><div className="row-expand"><Detail task={selected} onClosed={() => load()} /></div></td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>
             </table>
           </div>
-          {selected && <Detail task={selected} onClosed={() => load()} />}
+          {wide && selected && <Detail task={selected} onClosed={() => load()} />}
         </div>
       )}
     </div>

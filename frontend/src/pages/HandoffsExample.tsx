@@ -4,6 +4,7 @@ import { DeptPicker } from "@/demo/DeptPicker";
 import { customerAccounts, useSession } from "@/demo/session";
 import { ago, shortDateTime } from "@/lib/format";
 import { RESULT_MAX } from "@/lib/handoffs";
+import { useMediaQuery } from "@/lib/useMediaQuery";
 
 // 받은 요청 예시 모드. 서버 대신 화면 안 예시로 흐름을 보여 준다(서버 데이터는 건드리지 않는다).
 // - 요청은 사람이 아니라 부서(팀)로 간다. 팀이 정해지지 않은 종류는 AI가 팀을 제안하고, 사람이 고르면 "이 종류 → 팀" 규칙으로 저장한다
@@ -126,7 +127,9 @@ export default function HandoffsExample({ toggle }: { toggle: ReactNode }) {
   const [scope, setScope] = useState<"all" | "mine">("all");
   const [service, setService] = useState("");
   const [status, setStatus] = useState<ExStatus | "all">("all");
-  const [selectedId, setSelectedId] = useState<string>(ITEMS[0].id);
+  const [selectedId, setSelectedId] = useState<string | null>(ITEMS[0].id);
+  // 넓은 화면은 상세를 오른쪽에, 좁은 화면은 누른 항목 바로 밑에 펼친다(다시 누르면 접힘)
+  const wide = useMediaQuery("(min-width: 1280px)");
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -160,7 +163,7 @@ export default function HandoffsExample({ toggle }: { toggle: ReactNode }) {
   const shown = scoped
     .filter((v) => status === "all" || v.status === status)
     .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || urgency(a) - urgency(b) || b.minutesAgo - a.minutesAgo);
-  const selected = shown.find((v) => v.id === selectedId) ?? shown[0];
+  const selected = shown.find((v) => v.id === selectedId) ?? (wide ? shown[0] : undefined);
 
   const patch = (id: string, p: Partial<ExItem>) => setItems((xs) => xs.map((x) => (x.id === id ? { ...x, ...p } : x)));
   const addRule = (category: string, dept: string) => {
@@ -175,6 +178,17 @@ export default function HandoffsExample({ toggle }: { toggle: ReactNode }) {
     saveRules(next);
     setToast(`"${category}" 규칙을 지웠어요.`);
   };
+
+  const detail = selected && (
+    <Detail key={selected.id} v={selected} now={now} me={me} approver={approver} rules={rules}
+      onRoute={(dept) => addRule(selected.category, dept)}
+      onClaim={() => { patch(selected.id, { status: "claimed", claimedBy: me }); setToast("내가 맡았어요. 팀 사람들에게 처리 중으로 보여요."); }}
+      onRelease={() => { patch(selected.id, { status: "waiting", claimedBy: undefined }); setToast("놓았어요. 다시 팀 목록에 대기로 보여요."); }}
+      onClose={(st, result) => {
+        patch(selected.id, { status: st, result, closedMinutesAgo: 0 });
+        setToast(st === "done" ? (selected.risky ? "승인하고 끝냈어요." : "끝냈어요. 보낸 서비스에 결과가 전해져요.") : "반려했어요. 보낸 서비스에 이유가 전해져요.");
+      }} />
+  );
 
   return (
     <div className="space-y-6 px-8 py-8">
@@ -219,7 +233,7 @@ export default function HandoffsExample({ toggle }: { toggle: ReactNode }) {
               <ul className="divide-y divide-ink-100">
                 {shown.map((v) => (
                   <li key={v.id}>
-                    <button type="button" onClick={() => setSelectedId(v.id)} aria-selected={v.id === selected?.id}
+                    <button type="button" onClick={() => setSelectedId(!wide && v.id === selected?.id ? null : v.id)} aria-expanded={wide ? undefined : v.id === selected?.id} aria-selected={v.id === selected?.id}
                       className={`w-full border-l-2 px-4 py-3 text-left transition ${v.id === selected?.id ? "border-brand-600 bg-brand-50" : "border-transparent hover:bg-app"}`}>
                       <div className="flex items-center gap-2 text-sm">
                         <Dot tone={v.tone} />
@@ -234,6 +248,7 @@ export default function HandoffsExample({ toggle }: { toggle: ReactNode }) {
                         <span className={`chip ${v.status === "claimed" ? "bg-emerald-50 text-emerald-700" : v.status === "rejected" ? "bg-red-50 text-red-700" : "bg-ink-100 text-ink-700"}`}>{v.label}</span>
                       </div>
                     </button>
+                    {!wide && v.id === selected?.id && <div className="row-expand border-t border-ink-100 bg-app p-3">{detail}</div>}
                   </li>
                 ))}
               </ul>
@@ -262,16 +277,7 @@ export default function HandoffsExample({ toggle }: { toggle: ReactNode }) {
           </section>
         </div>
 
-        {selected && (
-          <Detail key={selected.id} v={selected} now={now} me={me} approver={approver} rules={rules}
-            onRoute={(dept) => addRule(selected.category, dept)}
-            onClaim={() => { patch(selected.id, { status: "claimed", claimedBy: me }); setToast("내가 맡았어요. 팀 사람들에게 처리 중으로 보여요."); }}
-            onRelease={() => { patch(selected.id, { status: "waiting", claimedBy: undefined }); setToast("놓았어요. 다시 팀 목록에 대기로 보여요."); }}
-            onClose={(st, result) => {
-              patch(selected.id, { status: st, result, closedMinutesAgo: 0 });
-              setToast(st === "done" ? (selected.risky ? "승인하고 끝냈어요." : "끝냈어요. 보낸 서비스에 결과가 전해져요.") : "반려했어요. 보낸 서비스에 이유가 전해져요.");
-            }} />
-        )}
+        {wide && detail}
       </div>
 
       {toast && (
