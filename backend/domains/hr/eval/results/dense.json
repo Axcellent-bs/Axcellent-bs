@@ -1,0 +1,131 @@
+{
+ "method": "dense",
+ "k": 5,
+ "threshold_chosen_on_dev": 0.7063,
+ "dev": {
+  "n": 33,
+  "n_answerable": 26,
+  "n_no_answer": 7,
+  "recall_at_1": 0.8846,
+  "recall_at_5": 0.9615,
+  "mrr": 0.9071,
+  "citation_precision": 0.4737,
+  "no_answer_accuracy": 1.0
+ },
+ "test": {
+  "n": 67,
+  "n_answerable": 54,
+  "n_no_answer": 13,
+  "recall_at_1": 0.963,
+  "recall_at_5": 1.0,
+  "mrr": 0.9815,
+  "citation_precision": 0.6102,
+  "no_answer_accuracy": 0.9231
+ },
+ "test_without_threshold": {
+  "n": 67,
+  "n_answerable": 54,
+  "n_no_answer": 13,
+  "recall_at_1": 0.963,
+  "recall_at_5": 1.0,
+  "mrr": 0.9815,
+  "citation_precision": 0.2296,
+  "no_answer_accuracy": 0.0
+ },
+ "test_by_function": {
+  "escalation": {
+   "n": 20,
+   "n_answerable": 16,
+   "n_no_answer": 4,
+   "recall_at_1": 0.9375,
+   "recall_at_5": 1.0,
+   "mrr": 0.9688,
+   "citation_precision": 0.3833,
+   "no_answer_accuracy": 1.0
+  },
+  "handover": {
+   "n": 16,
+   "n_answerable": 13,
+   "n_no_answer": 3,
+   "recall_at_1": 1.0,
+   "recall_at_5": 1.0,
+   "mrr": 1.0,
+   "citation_precision": 0.4795,
+   "no_answer_accuracy": 0.6667
+  },
+  "plan_check": {
+   "n": 31,
+   "n_answerable": 25,
+   "n_no_answer": 6,
+   "recall_at_1": 0.96,
+   "recall_at_5": 1.0,
+   "mrr": 0.98,
+   "citation_precision": 0.8233,
+   "no_answer_accuracy": 1.0
+  }
+ },
+ "test_by_type": {
+  "identifier": {
+   "n": 13,
+   "n_answerable": 13,
+   "n_no_answer": 0,
+   "recall_at_1": 1.0,
+   "recall_at_5": 1.0,
+   "mrr": 1.0,
+   "citation_precision": 0.8205,
+   "no_answer_accuracy": null
+  },
+  "long_mixed": {
+   "n": 13,
+   "n_answerable": 13,
+   "n_no_answer": 0,
+   "recall_at_1": 0.8462,
+   "recall_at_5": 1.0,
+   "mrr": 0.9231,
+   "citation_precision": 0.4808,
+   "no_answer_accuracy": null
+  },
+  "no_answer": {
+   "n": 13,
+   "n_answerable": 0,
+   "n_no_answer": 13,
+   "recall_at_1": null,
+   "recall_at_5": null,
+   "mrr": null,
+   "citation_precision": null,
+   "no_answer_accuracy": 0.9231
+  },
+  "paraphrase": {
+   "n": 28,
+   "n_answerable": 28,
+   "n_no_answer": 0,
+   "recall_at_1": 1.0,
+   "recall_at_5": 1.0,
+   "mrr": 1.0,
+   "citation_precision": 0.5726,
+   "no_answer_accuracy": null
+  }
+ },
+ "test_by_domain": {
+  "일반": {
+   "n": 28,
+   "n_answerable": 28,
+   "n_no_answer": 0,
+   "recall_at_1": 0.9643,
+   "recall_at_5": 1.0,
+   "mrr": 0.9821,
+   "citation_precision": 0.6875,
+   "no_answer_accuracy": null
+  },
+  "캣북스": {
+   "n": 26,
+   "n_answerable": 26,
+   "n_no_answer": 0,
+   "recall_at_1": 0.9615,
+   "recall_at_5": 1.0,
+   "mrr": 0.9808,
+   "citation_precision": 0.5269,
+   "no_answer_accuracy": null
+  }
+ }
+}
