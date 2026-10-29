@@ -258,6 +258,48 @@ def test_data_fraud_score() -> None:
     assert unknown.reasons[0].note == "확인할 수 없음: FRAUD_SIMILAR"
 
 
+def test_data_fraud_score_bounds() -> None:
+    body = {"seller_id": "sel_1", "score": 28, "level": "low", "summary": "s"}
+    # 예전 응답(세 필드 없음)은 알 수 없음(None)으로 읽힌다. 기본값으로 complete를 지어내지 않는다
+    legacy = FraudScoreOutput.model_validate(body)
+    assert (legacy.complete, legacy.max_possible_score, legacy.max_possible_level) == (
+        None,
+        None,
+        None,
+    )
+    partial = FraudScoreOutput.model_validate(
+        {
+            **body,
+            "unknown_rules": ["DUP_BUSINESS", "FRAUD_SIMILAR"],
+            "complete": False,
+            "max_possible_score": 73,
+            "max_possible_level": "high",
+        }
+    )
+    assert (partial.complete, partial.max_possible_score, partial.max_possible_level) == (
+        False,
+        73,
+        "high",
+    )
+    dumped = partial.model_dump(mode="json")
+    assert {"complete", "max_possible_score", "max_possible_level"} <= dumped.keys()
+    whole = FraudScoreOutput.model_validate(
+        {**body, "complete": True, "max_possible_score": 28, "max_possible_level": "low"}
+    )
+    assert whole.complete is True
+    bad_cases = [
+        {"complete": True, "unknown_rules": ["FRAUD_SIMILAR"]},  # 빠진 규칙이 있는데 complete
+        {"complete": False},  # 빠진 규칙이 없는데 불완전
+        {"max_possible_score": 27},  # 상한이 점수보다 작음
+        {"max_possible_score": 101},
+        {"max_possible_score": -1},
+        {"max_possible_level": "critical"},
+    ]
+    for bad in bad_cases:
+        with pytest.raises(ValidationError):
+            FraudScoreOutput.model_validate({**body, **bad})
+
+
 def test_data_kpi_summary() -> None:
     assert KpiSummaryInput().context_ids == []
     incident = {"context_id": "ctx_inc_1", "detected_at": T0, "used_memory": False}

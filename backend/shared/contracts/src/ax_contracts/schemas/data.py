@@ -105,6 +105,24 @@ class FraudScoreOutput(AxModel):
     summary: str
     # 데이터가 없어 확인하지 못한 규칙 코드. 점수는 확인한 규칙만으로 낸다
     unknown_rules: list[str] = Field(default_factory=list)
+    # 점수가 불완전한지와 보수적 상한. data는 늘 채운다. 예전 응답(필드 없음)은 None = 알 수 없음
+    # - complete: unknown_rules가 비어 있으면 true
+    # - max_possible_score: score + 확인 못 한 규칙 가중치 합 (100 상한).
+    #   빠진 규칙을 모두 위험으로 본 값
+    # - max_possible_level: max_possible_score의 등급
+    complete: bool | None = None
+    max_possible_score: int | None = Field(default=None, ge=0, le=100)
+    max_possible_level: Literal["low", "mid", "high"] | None = None
+
+    @model_validator(mode="after")
+    def _bounds(self) -> FraudScoreOutput:
+        if self.complete is True and self.unknown_rules:
+            raise ValueError("complete=true인데 unknown_rules가 있다")
+        if self.complete is False and not self.unknown_rules:
+            raise ValueError("complete=false인데 unknown_rules가 비어 있다")
+        if self.max_possible_score is not None and self.max_possible_score < self.score:
+            raise ValueError("max_possible_score는 score보다 작을 수 없다")
+        return self
 
 
 # ---------- kpi_summary ----------

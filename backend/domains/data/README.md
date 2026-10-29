@@ -65,8 +65,16 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 | DUP_BUSINESS | 20 | 같은 사업자 해시의 다른 판매자 | **확인할 수 없음**: shop-api `sellers`에 사업자 정보가 없어 `business_hash`가 null이다 (컬럼 추가는 팀 결정 필요) |
 | FRAUD_SIMILAR | 25 × 유사도 | 지난 사기 판매자 카드와의 유사도 | **확인할 수 없음**: hr에 data가 부를 수 있는 유사 사기 카드 skill이 없다. `similar_card_ids`는 빈 목록 |
 
-- 확인할 수 없는 규칙은 0점으로 셈하지 않는다. 점수에서 빼고 `unknown_rules`, `reasons[].note`, summary에 "확인할 수 없음: <규칙>"으로 남긴다. summary에는 "확인한 규칙 N개 기준 점수, 최대 가능 점수 M점"(M = 100 − 확인 못 한 규칙 가중치)을 함께 적는다.
-  - 지금은 사업자 중복·유사 카드가 늘 빠져서 최대 가능 점수가 55점이다. high(70점 이상)는 나오지 않는다.
+- 확인할 수 없는 규칙은 0점으로 셈하지 않는다. 점수에서 빼고 `unknown_rules`, `reasons[].note`, summary에 "확인할 수 없음: <규칙>"으로 남긴다. summary에는 "확인한 규칙 N개 기준 점수, 확인한 규칙으로 낼 수 있는 최대 K점"(K = 100 − 확인 못 한 규칙 가중치)을 함께 적는다.
+  - 지금은 사업자 중복·유사 카드가 늘 빠져서 K가 55점이다. `score`로는 high(70점 이상)가 나오지 않는다.
+- 불완전 표시와 보수적 상한 (`FraudScoreOutput`)
+  - `complete`: `unknown_rules`가 비어 있으면 true
+  - `max_possible_score`: `score` + 확인 못 한 규칙 가중치 합 (100 상한). 빠진 규칙을 모두 위험(만점)으로 본 값이다. `complete`면 `score`와 같다
+  - `max_possible_level`: `max_possible_score`의 등급 (기준은 `metrics/fraud.py` `MID_LEVEL_MIN`·`HIGH_LEVEL_MIN`)
+  - summary에 "불완전: 확인 못 한 규칙을 모두 위험으로 보면 최대 M점(등급)"을 적는다
+- **소비자 안내: `complete=false`이면 `score`만으로 승인하지 말 것. `max_possible_score`를 쓰거나 사람 확인으로 넘길 것.**
+  - 재무 판매자 심사(`finance_agent.sources.fraud_score_from`)는 이 규칙대로 `max_possible_score`를 쓴다.
+  - 세 필드가 없는 예전 응답은 알 수 없음(null)으로 읽힌다. 그때도 `score`만으로 승인하지 않는다.
 - shop-api를 못 읽으면 `failed`·`unavailable`(다른 skill과 같음), 없는 판매자(404)는 `failed`·`not_found`. 둘 다 숫자를 내지 않는다.
 - 목 판매자 데이터는 없다. `DATA_MOCK=1`이어도 shop-api를 부른다.
 - 평가: `eval/README.md`의 판매자 케이스

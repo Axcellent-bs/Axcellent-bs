@@ -70,6 +70,11 @@ def test_guards_hold_regardless_of_the_baseline(report) -> None:  # noqa: ANN001
     # 판매자 데이터를 shop-api 코드로 만들었을 때 정답지 facts가 그대로 나온다
     assert not any(s["facts_drift"] for s in report["sellers"])
     assert all(s["skill_status"] == "completed" for s in report["sellers"])
+    # 불완전 표시와 보수적 상한이 늘 채워지고, 상한은 점수 이상이다
+    for s in report["sellers"]:
+        assert s["skill_complete"] is (not s["unknown_rules"])
+        assert s["skill_score"] <= s["skill_max_score"] <= 100
+        assert s["skill_max_level"] in ("low", "mid", "high")
 
 
 def test_compare_flags_drops_and_lost_values(run) -> None:  # noqa: ANN001

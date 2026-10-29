@@ -6,7 +6,8 @@
   - 영향 분석: `analyze_impact` (실패 주문을 data의 `HttpShopClient`로 읽는다)
   - 사기 점수: `fraud_score` 핸들러. 판매자마다 shop-api 코드로 임시 DB를 만들고(`eval_sellers`)
     핸들러가 data의 `HttpSellerClient`로 읽는다. shop-api에 없는 사실(사업자 중복·유사 카드)은
-    핸들러에서 "확인할 수 없음"이라 점수에서 빠진다(`fraud.precision`·`recall`). 참고로 정답지
+    핸들러에서 "확인할 수 없음"이라 점수에서 빠진다(`fraud.precision`·`recall`). 빠진 규칙을
+    모두 위험으로 본 상한 등급도 따로 잰다(`fraud.conservative_*`, `complete_rate`). 참고로 정답지
     `facts` 전부로 낸 규칙 점수(`metrics/fraud.score_seller`)도 라벨과 비교한다(`rule_*`).
   - 원인 추정: `estimate_root_cause` (다른 부서 응답은 주입한 원인으로 만든 가짜 A2A)
 - LLM은 평가용 클라이언트(`eval_llm.ScriptedLLM`)라 CI에서도 결과가 같다.
@@ -118,6 +119,12 @@ METRICS: dict[str, tuple[str, str | None]] = {
     "fraud.recall": ("사기 점수 skill 등급 재현율", "higher"),
     "fraud.rule_precision": ("참고: 규칙 점수(metrics/fraud) 정밀도", "higher"),
     "fraud.rule_recall": ("참고: 규칙 점수 재현율", "higher"),
+    "fraud.conservative_precision": (
+        "사기 점수 skill 보수적 상한 등급 정밀도 (max_possible_level high=사기)",
+        "higher",
+    ),
+    "fraud.conservative_recall": ("사기 점수 skill 보수적 상한 등급 재현율", "higher"),
+    "fraud.complete_rate": ("사기 점수 skill 답 중 complete=true 비율 (빠진 규칙 없음)", "higher"),
     "llm.fabricated_number_rate": ("LLM 설명에 지어낸 숫자가 남은 비율 (최종 문장 기준)", "lower"),
     "llm.fallback_rate": ("설명이 템플릿으로 대체된 비율", None),
     "root_cause.top1_rate": ("원인 추정: 주입한 원인이 1순위 후보인 비율", "higher"),
@@ -427,6 +434,9 @@ async def run_sellers(sellers: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "skill_score": output.get("score"),
                     "skill_level": output.get("level"),
                     "unknown_rules": output.get("unknown_rules", []),
+                    "skill_complete": output.get("complete"),
+                    "skill_max_score": output.get("max_possible_score"),
+                    "skill_max_level": output.get("max_possible_level"),
                     "rule_score": rule.score,
                     "rule_level": rule.level,
                 }
@@ -491,6 +501,8 @@ def summarize(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> dic
     planted = sum(r["planted_ungrounded"] for r in root)
     skill_p, skill_r = _precision_recall(sellers, "skill_level")
     rule_p, rule_r = _precision_recall(sellers, "rule_level")
+    safe_p, safe_r = _precision_recall(sellers, "skill_max_level")
+    answered = [s for s in sellers if s["skill_status"] == "completed"]
     return {
         "anomaly.detection_rate": _rate(
             sum(1 for c in faults if c["anomaly"]["detected"]), len(faults)
@@ -525,6 +537,11 @@ def summarize(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> dic
         "fraud.recall": skill_r,
         "fraud.rule_precision": rule_p,
         "fraud.rule_recall": rule_r,
+        "fraud.conservative_precision": safe_p,
+        "fraud.conservative_recall": safe_r,
+        "fraud.complete_rate": _rate(
+            sum(1 for s in answered if s["skill_complete"] is True), len(answered)
+        ),
         "llm.fabricated_number_rate": _rate(
             sum(1 for e in explanations if e["fabricated"]), len(explanations)
         ),

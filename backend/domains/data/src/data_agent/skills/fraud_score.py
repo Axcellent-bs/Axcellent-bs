@@ -6,8 +6,12 @@ shop-api 판매자 정보(`/sellers/{id}/profile`)와 가격(`/sellers/{id}/pric
 점수는 판단 재료이며 승인·보류는 정하지 않는다(재무·정산이 정한다).
 
 확인할 수 없는 사실은 0점으로 셈하지 않는다. 그 규칙은 점수에서 빼고 `unknown_rules`·`reasons`
-(`note`)·summary에 "확인할 수 없음: <규칙>"으로 남긴다. summary에는 확인한 규칙 수와 최대 가능 점수
-(100 − 확인 못 한 규칙 가중치)를 함께 적는다.
+(`note`)·summary에 "확인할 수 없음: <규칙>"으로 남긴다. summary에는 확인한 규칙 수와 확인한 규칙으로
+낼 수 있는 최대 점수(100 − 확인 못 한 규칙 가중치)를 함께 적는다.
+
+점수가 불완전한지(`complete`)와 보수적 상한(`max_possible_score`·`max_possible_level`)도 낸다.
+상한은 확인한 점수 + 확인 못 한 규칙 가중치 합(100 상한)으로, 빠진 규칙을 모두 위험으로 본 값이다.
+`complete=false`이면 소비자는 `score`만으로 승인하지 않는다(상한을 쓰거나 사람 확인).
 
 - NEW_ACCOUNT: `joined_at`으로 가입 일수. 가입 시각이 지금보다 뒤면 확인할 수 없음
 - LOW_PRICE: 판매 중 상품 중 카테고리 중앙값의 50% 미만 비율. 판매 중 상품이 없으면 확인할 수 없음
@@ -32,7 +36,9 @@ from data_agent.metrics.fraud import (
     NEW_ACCOUNT,
     WEIGHTS,
     SellerFacts,
+    level_for,
     low_price_ratio,
+    max_possible_score,
     score_seller,
 )
 
@@ -94,7 +100,9 @@ async def score_fraud(
     checked = [code for code in WEIGHTS if code not in unknown]
     triggered = [r for r in scored.reasons if r.rule_code not in unknown]
     unknown_rules = [code for code in WEIGHTS if code in unknown]
-    max_possible = 100 - sum(WEIGHTS[code] for code in unknown_rules)
+    checked_max = 100 - sum(WEIGHTS[code] for code in unknown_rules)
+    worst = max_possible_score(scored.score, unknown_rules)
+    worst_level = level_for(worst)
 
     reasons = [
         FraudReason(rule_code=r.rule_code, value=r.value, weight=round(r.points, 2))
@@ -117,7 +125,13 @@ async def score_fraud(
     ]
     parts += [f"확인할 수 없음: {code} ({unknown[code]})." for code in unknown_rules]
     if unknown_rules:
-        parts.append(f"확인한 규칙 {len(checked)}개 기준 점수, 최대 가능 점수 {max_possible}점.")
+        parts.append(
+            f"확인한 규칙 {len(checked)}개 기준 점수, "
+            f"확인한 규칙으로 낼 수 있는 최대 {checked_max}점."
+        )
+        parts.append(
+            f"불완전: 확인 못 한 규칙을 모두 위험으로 보면 최대 {worst}점({LEVEL_KO[worst_level]})."
+        )
     parts.append(DECISION_NOTE)
 
     output = FraudScoreOutput(
@@ -128,6 +142,9 @@ async def score_fraud(
         similar_card_ids=[],
         summary=" ".join(parts),
         unknown_rules=unknown_rules,
+        complete=not unknown_rules,
+        max_possible_score=worst,
+        max_possible_level=worst_level,
     )
     lines = [
         f"가입 {profile.joined_at.isoformat()} ({joined_days}일 전)",
@@ -137,7 +154,8 @@ async def score_fraud(
         else f"확인할 수 없음: {LOW_PRICE} ({NO_ACTIVE_PRODUCTS})",
         f"확인한 규칙: {', '.join(checked) or '없음'}",
         *(f"확인할 수 없음: {code} ({unknown[code]})" for code in unknown_rules),
-        f"최대 가능 점수 {max_possible}점 (가중치 초안: "
+        f"확인한 규칙으로 낼 수 있는 최대 {checked_max}점, "
+        f"확인 못 한 규칙을 모두 위험으로 본 최대 {worst}점({worst_level}) (가중치 초안: "
         + ", ".join(f"{code} {weight}" for code, weight in WEIGHTS.items())
         + ")",
     ]
