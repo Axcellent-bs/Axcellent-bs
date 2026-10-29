@@ -32,7 +32,7 @@ export const isLinked = (a: Account) =>
 // 화면에만 있는 계정이라 백엔드 데이터(재무 장부 등)에는 영향이 없다
 export const ACCOUNTS: Account[] = [
   { id: 'admin', name: '관리자', role: '관리자', email: 'admin@catbooks.example', services: SERVICES.map((s) => s.id), admin: true },
-  { id: 'member', name: '일반회원', role: '일반회원', email: 'member@catbooks.example', services: [] },
+  { id: 'member', name: '일반회원', role: '일반회원', email: 'member@catbooks.example', services: SERVICES.map((s) => s.id) },
 ]
 const DEMO_IDS = new Set(ACCOUNTS.map((a) => a.id))
 const ADMIN = ACCOUNTS[0]
@@ -64,7 +64,8 @@ export function registerAccount(x: SignupInput, admin = false): Account {
     name: x.name.trim(),
     role: x.role?.trim() || (admin ? '관리자' : '일반회원'),
     email,
-    services: admin ? SERVICES.map((s) => s.id) : [],
+    // 관리자·일반회원 모두 회사가 켠 서비스(DejaFix 포함)를 쓴다. 차이는 시스템 관리 메뉴뿐
+    services: SERVICES.map((s) => s.id),
     ...(admin ? { admin: true } : {}),
   }
   try {
