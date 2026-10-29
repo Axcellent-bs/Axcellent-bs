@@ -275,7 +275,7 @@ def test_llm_failure_fails_then_retry_succeeds(service: PlanningService, adapter
     coder.set_llm(FakeLLM(fail={"CodePlan"}))
     run(_go(service))
     c = _task(service).coding
-    assert c.status == "failed" and c.error == "LLM 파일 고르기 실패 (LLMResponseError)"
+    assert c.status == "failed" and c.error == "LLM 후보 고르기 실패 (LLMResponseError)"
     assert "code.failed" in _points(service) and adapter.writes == []
     assert "500" not in (c.error or "")
 
@@ -475,13 +475,13 @@ def test_retry_reuses_written_code_without_llm(service: PlanningService, adapter
     run(_go(service))
     assert _task(service).coding.status == "failed"
     wrote = [c[0] for c in llm.calls]
-    assert wrote.count("CodePlan") == 1 and wrote.count("FileWrite") == 2
+    assert wrote.count("CodePlan") == 2 and wrote.count("FileWrite") == 2  # 후보·확정
 
     vcs.set_vcs(adapter)  # 형상관리 권한을 고쳤다고 치고 다시 시도
     run(service.retry_dev_task("T-D1"))
     run(service.wait_coding())
     again = [c[0] for c in llm.calls]
-    assert again.count("CodePlan") == 1 and again.count("FileWrite") == 2  # 다시 쓰지 않음
+    assert again.count("CodePlan") == 2 and again.count("FileWrite") == 2  # 다시 쓰지 않음
     c = _task(service).coding
     assert c.pr is not None and c.status in ("opened", "merged")
     assert any("작성해 둔 코드로 PR 다시 시도" in a.text for a in service.state.activity)
@@ -560,3 +560,81 @@ def test_cancel_running_task_and_close_open_pr(service: PlanningService, adapter
     # 2) 이미 중단된 작업은 다시 중단하지 않는다
     with pytest.raises(ActionError):
         run(service.cancel_dev_task("T-D1"))
+
+
+# ---------------------------------------------------------------- 파일 확정·리뷰 추가 파일
+
+
+def test_confirm_step_sees_previews_and_can_change_picks(service: PlanningService, adapter) -> None:
+    """이름으로 고른 후보의 내용을 보여 주고, 확정 단계가 고른 파일로 작업한다."""
+
+    class TwoStepLLM(FakeLLM):
+        async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
+            data = untrusted or {}
+            if schema is CodePlan and "candidates" in data:
+                self.calls.append(("Confirm", prompt, data))
+                return CodePlan(files=[FilePick(path=BANNER, reason="배너 문구")], summary="확정")
+            if schema is CodePlan:
+                self.calls.append((schema.__name__, prompt, data))
+                return CodePlan(
+                    files=[
+                        FilePick(path=BANNER, reason="배너"),
+                        FilePick(path=CHECKOUT, reason="혹시 몰라"),
+                    ]
+                )
+            return await super().structured(prompt, schema, untrusted, images, context_id)
+
+    llm = TwoStepLLM(writes={BANNER: BANNER_NEW})
+    coder.set_llm(llm)
+    run(_go(service))
+    confirm = next(c for c in llm.calls if c[0] == "Confirm")
+    previews = {c["path"]: c["preview"] for c in confirm[2]["candidates"]}
+    assert previews[BANNER] == BANNER_OLD and CHECKOUT in previews
+    c = _task(service).coding
+    assert c.status == "merged" and [f.path for f in c.files] == [BANNER]
+    assert c.summary == "확정"
+    write = next(x for x in llm.calls if x[0] == "FileWrite")
+    assert write[2]["others"] == []
+
+
+def test_review_can_add_a_file_in_fix_pass(service: PlanningService, adapter) -> None:
+    """리뷰가 diff에 없던 파일을 짚으면 수정 단계에서 그 파일도 고친다 (없으면 새로 만든다)."""
+    theme = "shop-web/src/theme.ts"
+    NOTES = "shop-web/src/lib/notes.ts"
+    fake = FakeLLM(
+        plan=CodePlan(files=[FilePick(path=BANNER, reason="배너")]),
+        writes={BANNER: BANNER_NEW, theme: "export const brand = 'blue'\n", NOTES: "x\n"},
+        reviews=[
+            CodeReview(verdict="불일치", notes=["테마 파일도 필요"], fix_files=[theme, NOTES]),
+            CodeReview(verdict="통과", notes=[]),
+        ],
+    )
+    coder.set_llm(fake)
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "merged" and c.attempts == 2, c.error
+    assert {f.path for f in c.files} == {BANNER, theme, NOTES}
+    wrote = [x[2] for x in fake.calls if x[0] == "FileWrite"]
+    added = {d["path"]: d for d in wrote[1:]}
+    assert added[theme]["action"] == "create" and added[theme]["current"] == ""
+    assert added[NOTES]["action"] == "modify"
+    assert added[NOTES]["current"] == FILES[NOTES]
+    assert BANNER not in added  # 짚지 않은 파일은 다시 안 쓴다
+    assert adapter.contents(1)[theme] == "export const brand = 'blue'\n"
+
+
+def test_preview_keeps_outline_of_long_file() -> None:
+    body = (
+        ":root {\n  --brand: indigo;\n}\n"
+        + "/* 채움 */\n" * 600
+        + ".theme-shop {\n  --brand: green;\n}\n"
+    )
+    out = coder.preview_of(body)
+    assert len(out) < len(body) and ":root {" in out
+    assert ".theme-shop {" in out and "뼈대 줄" in out
+    assert coder.preview_of("짧은 파일\n") == "짧은 파일\n"
+
+
+def test_review_prompt_does_not_ask_for_build_evidence() -> None:
+    assert "빌드" in coder.REVIEW_PROMPT and "볼 수 없" in coder.REVIEW_PROMPT
+    assert "기획에 없는" in coder.WRITE_PROMPT
