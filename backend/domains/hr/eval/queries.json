@@ -1,0 +1,1072 @@
+[
+ {
+  "query_id": "q_AP01",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "새 버전을 올렸더니 주문 생성이 자꾸 에러 나서 이전 버전으로 되돌린 기록",
+  "expected": [
+   "gold_A1_01"
+  ],
+  "pool": "plan_check",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_AP02",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "프로모션 기간에 화면 개편 같은 건 미루기로 한 적이 있나",
+  "expected": [
+   "gold_A1_05",
+   "gold_A2_02"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AP03",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "금요일 늦은 시간에 올리면 안 되는 이유",
+  "expected": [
+   "gold_A2_01"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AP04",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "새벽에 혼자 배포해도 되나요",
+  "expected": [
+   "gold_A2_04"
+  ],
+  "pool": "plan_check",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_AP05",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "테이블에 칸을 추가할 때 서비스가 멈추지 않게 하는 방법",
+  "expected": [
+   "gold_A3_01"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AP06",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "필드를 없앨 때 옛 코드가 깨지지 않게 하는 절차",
+  "expected": [
+   "gold_A3_03"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AP07",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "한 결제 대행사에 문제가 생기면 다른 곳으로 자동으로 돌리는 기능은 어떻게 하기로 했나",
+  "expected": [
+   "gold_A4_03"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AP08",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "결제 완료 알림이 진짜인지 확인하는 방법",
+  "expected": [
+   "gold_A4_04"
+  ],
+  "pool": "plan_check",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_AP09",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "사람이 회사를 나가면 접근 권한은 언제 없애나",
+  "expected": [
+   "gold_A5_02"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AP10",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "잠깐만 쓰는 권한은 얼마나 유지되나",
+  "expected": [
+   "gold_A5_03"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AP11",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "AI 호출 비용이 갑자기 커질 때 대처 방법",
+  "expected": [
+   "gold_A6_02"
+  ],
+  "pool": "plan_check",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_AP12",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "장애가 나면 고객에게 얼마나 빨리 알려야 하나",
+  "expected": [
+   "gold_A7_01"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AP13",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "고객에게 보내는 사과 글에 원인을 적어도 되나",
+  "expected": [
+   "gold_A7_05"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AP14",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "회원이 탈퇴하면 정보는 얼마 뒤에 지우나",
+  "expected": [
+   "gold_A8_01"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AP15",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "트래픽이 몰릴 걸 알고 미리 서버를 늘려 두는 결정",
+  "expected": [
+   "gold_A9_02"
+  ],
+  "pool": "plan_check",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_AP16",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "응답이 조금씩 느려지는 변경을 막는 기준",
+  "expected": [
+   "gold_A10_05"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AP17",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "조회가 많아서 DB 부담을 줄이려고 한 조치",
+  "expected": [
+   "gold_A9_03",
+   "gold_A9_04"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AP18",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "개발자가 아닌 외부 인력에게 줄 수 있는 권한 범위",
+  "expected": [
+   "gold_A5_05"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AI01",
+  "function": "plan_check",
+  "type": "identifier",
+  "query": "shop-api v2.14",
+  "expected": [
+   "gold_A1_01"
+  ],
+  "pool": "plan_check",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_AI02",
+  "function": "plan_check",
+  "type": "identifier",
+  "query": "payment v1.8 카나리",
+  "expected": [
+   "gold_A1_03"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AI03",
+  "function": "plan_check",
+  "type": "identifier",
+  "query": "shop-web 장바구니 개편",
+  "expected": [
+   "gold_A1_05"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AI04",
+  "function": "plan_check",
+  "type": "identifier",
+  "query": "웹훅 서명 검증",
+  "expected": [
+   "gold_A4_04"
+  ],
+  "pool": "plan_check",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_AI05",
+  "function": "plan_check",
+  "type": "identifier",
+  "query": "오토스케일 상한 20",
+  "expected": [
+   "gold_A9_05"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AI06",
+  "function": "plan_check",
+  "type": "identifier",
+  "query": "테스트 커버리지 70%",
+  "expected": [
+   "gold_A10_01"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AI07",
+  "function": "plan_check",
+  "type": "identifier",
+  "query": "로그 보관 30일",
+  "expected": [
+   "gold_A6_04"
+  ],
+  "pool": "plan_check",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_AI08",
+  "function": "plan_check",
+  "type": "identifier",
+  "query": "점프 서버 읽기 전용 계정",
+  "expected": [
+   "gold_A5_04"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AI09",
+  "function": "plan_check",
+  "type": "identifier",
+  "query": "정산일 결제 모듈 동결",
+  "expected": [
+   "gold_A2_03"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AL01",
+  "function": "plan_check",
+  "type": "long_mixed",
+  "query": "이번 주 금요일 오후 4시에 결제 관련 수정을 배포할 계획입니다. 프로모션은 없고 당직은 한 명입니다.",
+  "expected": [
+   "gold_A2_01",
+   "gold_A2_04"
+  ],
+  "pool": "plan_check",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_AL02",
+  "function": "plan_check",
+  "type": "long_mixed",
+  "query": "다음 달 말일에 정산 배치가 도는 날 결제 모듈 설정을 바꾸려고 합니다.",
+  "expected": [
+   "gold_A2_03"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AL03",
+  "function": "plan_check",
+  "type": "long_mixed",
+  "query": "주문 테이블에 컬럼을 추가하는 마이그레이션을 낮 시간에 돌리려고 합니다. 행 수는 2천만 건입니다.",
+  "expected": [
+   "gold_A3_01"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AL04",
+  "function": "plan_check",
+  "type": "long_mixed",
+  "query": "새 간편결제를 전체 사용자에게 한 번에 열고 싶습니다.",
+  "expected": [
+   "gold_A4_02"
+  ],
+  "pool": "plan_check",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_AL05",
+  "function": "plan_check",
+  "type": "long_mixed",
+  "query": "외주 개발자에게 운영 DB 쓰기 권한을 일주일만 주려고 합니다.",
+  "expected": [
+   "gold_A5_03",
+   "gold_A5_04",
+   "gold_A5_05"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AL06",
+  "function": "plan_check",
+  "type": "long_mixed",
+  "query": "이벤트 시작 전날 장바구니 화면을 개편해서 올리려고 합니다.",
+  "expected": [
+   "gold_A1_05",
+   "gold_A2_02"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AL07",
+  "function": "plan_check",
+  "type": "long_mixed",
+  "query": "클라우드 비용이 이번 달 예산을 넘을 것 같은데 서버를 더 늘려도 될까요?",
+  "expected": [
+   "gold_A6_01"
+  ],
+  "pool": "plan_check",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_AL08",
+  "function": "plan_check",
+  "type": "long_mixed",
+  "query": "결제 모듈 변경인데 테스트 커버리지가 60%이고 e2e는 아직 안 돌렸습니다.",
+  "expected": [
+   "gold_A10_01",
+   "gold_A10_02"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AL09",
+  "function": "plan_check",
+  "type": "long_mixed",
+  "query": "점검 공지에 장애 원인을 DB 문제라고 적고 싶은데 아직 확정은 아닙니다.",
+  "expected": [
+   "gold_A7_05"
+  ],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AN01",
+  "function": "plan_check",
+  "type": "no_answer",
+  "query": "연말정산 서류 제출 일정",
+  "expected": [],
+  "pool": "plan_check",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_AN02",
+  "function": "plan_check",
+  "type": "no_answer",
+  "query": "사무실 이전 때 해야 할 일",
+  "expected": [],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AN03",
+  "function": "plan_check",
+  "type": "no_answer",
+  "query": "채용 면접관 배정 기준",
+  "expected": [],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AN04",
+  "function": "plan_check",
+  "type": "no_answer",
+  "query": "법인카드 사용 한도",
+  "expected": [],
+  "pool": "plan_check",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_AN05",
+  "function": "plan_check",
+  "type": "no_answer",
+  "query": "출장비 정산 규정",
+  "expected": [],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AN06",
+  "function": "plan_check",
+  "type": "no_answer",
+  "query": "사내 동호회 지원금",
+  "expected": [],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AN07",
+  "function": "plan_check",
+  "type": "no_answer",
+  "query": "노트북 교체 주기",
+  "expected": [],
+  "pool": "plan_check",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_AN08",
+  "function": "plan_check",
+  "type": "no_answer",
+  "query": "화재 대피 훈련 일정",
+  "expected": [],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_AN09",
+  "function": "plan_check",
+  "type": "no_answer",
+  "query": "해외 법인 설립 절차",
+  "expected": [],
+  "pool": "plan_check",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BP01",
+  "function": "escalation",
+  "type": "paraphrase",
+  "query": "결제 대행사 서버가 간헐적으로 오류 응답을 줬던 사건",
+  "expected": [
+   "gold_B1_02"
+  ],
+  "pool": "escalation",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_BP02",
+  "function": "escalation",
+  "type": "paraphrase",
+  "query": "배포 직후부터 결제가 전부 에러였고 되돌려서 해결한 사건",
+  "expected": [
+   "gold_B1_03"
+  ],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BP03",
+  "function": "escalation",
+  "type": "paraphrase",
+  "query": "새로 띄운 서버에서만 결제가 안 됐던 이유",
+  "expected": [
+   "gold_B1_05"
+  ],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BP04",
+  "function": "escalation",
+  "type": "paraphrase",
+  "query": "특정 카드로만 승인이 계속 거절됐던 건",
+  "expected": [
+   "gold_B1_06"
+  ],
+  "pool": "escalation",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_BP05",
+  "function": "escalation",
+  "type": "paraphrase",
+  "query": "결제 승인 응답이 평소보다 몇 배 느렸는데 결제 대행사가 원인이었던 일",
+  "expected": [
+   "gold_B2_01"
+  ],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BP06",
+  "function": "escalation",
+  "type": "paraphrase",
+  "query": "몇 분 간격으로 서버가 멈칫거리는 현상",
+  "expected": [
+   "gold_B2_03"
+  ],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BP07",
+  "function": "escalation",
+  "type": "paraphrase",
+  "query": "인기 상품 주문만 안 들어가는 현상",
+  "expected": [
+   "gold_B3_02"
+  ],
+  "pool": "escalation",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_BP08",
+  "function": "escalation",
+  "type": "paraphrase",
+  "query": "정각마다 주문이 느려졌던 이유",
+  "expected": [
+   "gold_B3_04"
+  ],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BP09",
+  "function": "escalation",
+  "type": "paraphrase",
+  "query": "재고가 마이너스로 표시된 이유",
+  "expected": [
+   "gold_B4_01"
+  ],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BP10",
+  "function": "escalation",
+  "type": "paraphrase",
+  "query": "로그인이 갑자기 풀리고 다시 해도 안 됐던 사건",
+  "expected": [
+   "gold_B5_02"
+  ],
+  "pool": "escalation",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_BP11",
+  "function": "escalation",
+  "type": "paraphrase",
+  "query": "같은 쿠폰이 두 번 들어갔다는 문의",
+  "expected": [
+   "gold_B6_01",
+   "gold_B6_02",
+   "gold_B6_04"
+  ],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BP12",
+  "function": "escalation",
+  "type": "paraphrase",
+  "query": "같은 카드로 환불이 반복되는 의심 사례",
+  "expected": [
+   "gold_B9_01"
+  ],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BI01",
+  "function": "escalation",
+  "type": "identifier",
+  "query": "NullPointerException",
+  "expected": [
+   "gold_B1_03"
+  ],
+  "pool": "escalation",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_BI02",
+  "function": "escalation",
+  "type": "identifier",
+  "query": "502 PG 승인 서버",
+  "expected": [
+   "gold_B1_02"
+  ],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BI03",
+  "function": "escalation",
+  "type": "identifier",
+  "query": "GC 힙 크기",
+  "expected": [
+   "gold_B2_03"
+  ],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BI04",
+  "function": "escalation",
+  "type": "identifier",
+  "query": "쿠폰 멱등 키",
+  "expected": [
+   "gold_B6_01"
+  ],
+  "pool": "escalation",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_BI05",
+  "function": "escalation",
+  "type": "identifier",
+  "query": "커넥션 누수",
+  "expected": [
+   "gold_B8_02"
+  ],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BI06",
+  "function": "escalation",
+  "type": "identifier",
+  "query": "CDN 인증서 만료",
+  "expected": [
+   "gold_B7_04"
+  ],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BL01",
+  "function": "escalation",
+  "type": "long_mixed",
+  "query": "오늘 오후 2시부터 결제 API의 5xx 비율이 6%까지 올랐고 최근 배포는 없었습니다. 결제 대행사 상태 페이지에는 별다른 공지가 없습니다.",
+  "expected": [
+   "gold_B1_02",
+   "gold_B1_04"
+  ],
+  "pool": "escalation",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_BL02",
+  "function": "escalation",
+  "type": "long_mixed",
+  "query": "서버 두 대를 추가한 직후부터 그 서버로 가는 결제 요청만 모두 실패합니다.",
+  "expected": [
+   "gold_B1_05"
+  ],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BL03",
+  "function": "escalation",
+  "type": "long_mixed",
+  "query": "이벤트가 시작되자 한정 쿠폰이 준비한 수량보다 많이 발급됐습니다.",
+  "expected": [
+   "gold_B6_03"
+  ],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BL04",
+  "function": "escalation",
+  "type": "long_mixed",
+  "query": "야간 배치가 끝난 뒤 쇼핑몰 재고와 창고 재고가 서로 다릅니다.",
+  "expected": [
+   "gold_B4_03"
+  ],
+  "pool": "escalation",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_BL05",
+  "function": "escalation",
+  "type": "long_mixed",
+  "query": "특정 지역 사용자만 상품 이미지가 깨져 보인다는 제보가 이어집니다.",
+  "expected": [
+   "gold_B7_03"
+  ],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BL06",
+  "function": "escalation",
+  "type": "long_mixed",
+  "query": "가입한 지 얼마 안 된 계정들이 프로모션 상품을 사자마자 환불합니다.",
+  "expected": [
+   "gold_B9_02"
+  ],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BN01",
+  "function": "escalation",
+  "type": "no_answer",
+  "query": "서버실 온도 경보",
+  "expected": [],
+  "pool": "escalation",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_BN02",
+  "function": "escalation",
+  "type": "no_answer",
+  "query": "직원 근태 시스템 오류",
+  "expected": [],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BN03",
+  "function": "escalation",
+  "type": "no_answer",
+  "query": "프린터 연결 문제",
+  "expected": [],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BN04",
+  "function": "escalation",
+  "type": "no_answer",
+  "query": "사무실 와이파이가 느림",
+  "expected": [],
+  "pool": "escalation",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_BN05",
+  "function": "escalation",
+  "type": "no_answer",
+  "query": "사내 메일 스팸 급증",
+  "expected": [],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_BN06",
+  "function": "escalation",
+  "type": "no_answer",
+  "query": "회의실 예약 오류",
+  "expected": [],
+  "pool": "escalation",
+  "split": "test"
+ },
+ {
+  "query_id": "q_CP01",
+  "function": "handover",
+  "type": "paraphrase",
+  "query": "새벽에 알림이 한 번 왔다가 저절로 정상화된 것을 아침 담당에게 알려 준 기록",
+  "expected": [
+   "gold_C1_01"
+  ],
+  "pool": "handover",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_CP02",
+  "function": "handover",
+  "type": "paraphrase",
+  "query": "교대자가 도착하기 전 두 시간 동안 당직이 비었던 사례",
+  "expected": [
+   "gold_C1_03"
+  ],
+  "pool": "handover",
+  "split": "test"
+ },
+ {
+  "query_id": "q_CP03",
+  "function": "handover",
+  "type": "paraphrase",
+  "query": "나간 사람과 연락이 안 돼서 문서에만 의존해야 하는 정산 업무",
+  "expected": [
+   "gold_C2_02"
+  ],
+  "pool": "handover",
+  "split": "test"
+ },
+ {
+  "query_id": "q_CP04",
+  "function": "handover",
+  "type": "paraphrase",
+  "query": "퇴사자가 혼자 갖고 있던 배포용 키 문제",
+  "expected": [
+   "gold_C2_01"
+  ],
+  "pool": "handover",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_CP05",
+  "function": "handover",
+  "type": "paraphrase",
+  "query": "다른 팀으로 옮겼지만 아직 질문하면 답해 주는 사람의 협력사 업무",
+  "expected": [
+   "gold_C3_03"
+  ],
+  "pool": "handover",
+  "split": "test"
+ },
+ {
+  "query_id": "q_CP06",
+  "function": "handover",
+  "type": "paraphrase",
+  "query": "예전 일과 새 일을 2주 동안 같이 하는 경우",
+  "expected": [
+   "gold_C3_04"
+  ],
+  "pool": "handover",
+  "split": "test"
+ },
+ {
+  "query_id": "q_CP07",
+  "function": "handover",
+  "type": "paraphrase",
+  "query": "육아휴직으로 반년 자리를 비우는 고객 문의 담당",
+  "expected": [
+   "gold_C4_01"
+  ],
+  "pool": "handover",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_CP08",
+  "function": "handover",
+  "type": "paraphrase",
+  "query": "휴가 중에도 꼭 연락해야 하는 기준",
+  "expected": [
+   "gold_C4_04"
+  ],
+  "pool": "handover",
+  "split": "test"
+ },
+ {
+  "query_id": "q_CP09",
+  "function": "handover",
+  "type": "paraphrase",
+  "query": "결제 장애를 대응하던 사람이 바뀌면서 롤백은 보류 중이라고 넘기는 인계",
+  "expected": [
+   "gold_C5_01"
+  ],
+  "pool": "handover",
+  "split": "test"
+ },
+ {
+  "query_id": "q_CP10",
+  "function": "handover",
+  "type": "paraphrase",
+  "query": "월말 마감 체크리스트 일부만 끝낸 채로 넘기는 일",
+  "expected": [
+   "gold_C6_01"
+  ],
+  "pool": "handover",
+  "split": "test"
+ },
+ {
+  "query_id": "q_CI01",
+  "function": "handover",
+  "type": "identifier",
+  "query": "배포 키 퇴사자 개인 저장소",
+  "expected": [
+   "gold_C2_01"
+  ],
+  "pool": "handover",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_CI02",
+  "function": "handover",
+  "type": "identifier",
+  "query": "공용 계정 5개 비밀번호",
+  "expected": [
+   "gold_C2_04"
+  ],
+  "pool": "handover",
+  "split": "test"
+ },
+ {
+  "query_id": "q_CI03",
+  "function": "handover",
+  "type": "identifier",
+  "query": "자동 갱신 조항 60일 전 통지",
+  "expected": [
+   "gold_C6_04"
+  ],
+  "pool": "handover",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_CI04",
+  "function": "handover",
+  "type": "identifier",
+  "query": "육아휴직 6개월",
+  "expected": [
+   "gold_C4_01"
+  ],
+  "pool": "handover",
+  "split": "test"
+ },
+ {
+  "query_id": "q_CI05",
+  "function": "handover",
+  "type": "identifier",
+  "query": "보안 교육 2시간",
+  "expected": [
+   "gold_C7_02"
+  ],
+  "pool": "handover",
+  "split": "test"
+ },
+ {
+  "query_id": "q_CL01",
+  "function": "handover",
+  "type": "long_mixed",
+  "query": "월 정산 대사를 맡던 담당이 떠나는데 대사가 절반만 끝났고 기준 엑셀의 숨은 시트에 예외 규칙이 있습니다.",
+  "expected": [
+   "gold_C2_02"
+  ],
+  "pool": "handover",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_CL02",
+  "function": "handover",
+  "type": "long_mixed",
+  "query": "쿠폰 중복 발급 수정을 배포해 둔 상태에서 담당이 교대합니다. 24시간 동안 지켜봐야 합니다.",
+  "expected": [
+   "gold_C5_02"
+  ],
+  "pool": "handover",
+  "split": "test"
+ },
+ {
+  "query_id": "q_CL03",
+  "function": "handover",
+  "type": "long_mixed",
+  "query": "교대 시간이 지났는데 다음 당직자가 아직 오지 않았고 그 사이 경보가 몇 건 있었습니다.",
+  "expected": [
+   "gold_C1_03"
+  ],
+  "pool": "handover",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_CL04",
+  "function": "handover",
+  "type": "long_mixed",
+  "query": "새로 입사한 팀원의 계정을 언제 어떤 순서로 받는지 알려 줘야 합니다.",
+  "expected": [
+   "gold_C7_01"
+  ],
+  "pool": "handover",
+  "split": "test"
+ },
+ {
+  "query_id": "q_CL05",
+  "function": "handover",
+  "type": "long_mixed",
+  "query": "다음 분기 감사를 앞두고 접근 로그 증빙을 모으던 담당이 바뀝니다.",
+  "expected": [
+   "gold_C6_03"
+  ],
+  "pool": "handover",
+  "split": "test"
+ },
+ {
+  "query_id": "q_CN01",
+  "function": "handover",
+  "type": "no_answer",
+  "query": "출장 항공권 예약 방법",
+  "expected": [],
+  "pool": "handover",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_CN02",
+  "function": "handover",
+  "type": "no_answer",
+  "query": "건강검진 일정",
+  "expected": [],
+  "pool": "handover",
+  "split": "test"
+ },
+ {
+  "query_id": "q_CN03",
+  "function": "handover",
+  "type": "no_answer",
+  "query": "주차 등록 안내",
+  "expected": [],
+  "pool": "handover",
+  "split": "dev"
+ },
+ {
+  "query_id": "q_CN04",
+  "function": "handover",
+  "type": "no_answer",
+  "query": "구내식당 메뉴 변경",
+  "expected": [],
+  "pool": "handover",
+  "split": "test"
+ },
+ {
+  "query_id": "q_CN05",
+  "function": "handover",
+  "type": "no_answer",
+  "query": "사원증 재발급 절차",
+  "expected": [],
+  "pool": "handover",
+  "split": "test"
+ }
+]
