@@ -419,3 +419,20 @@ def test_seed_dates_move_with_today(client: TestClient, monkeypatch) -> None:
     monkeypatch.setattr(fc, "now", lambda: later)
     data = client.get("/api/finance/overview").json()["data"]
     assert data["date"] == later.date().isoformat() and data["kpis"]["gmv"] > 0
+
+
+def test_support_costs_lists_recorded_inquiries_newest_first(client: TestClient) -> None:
+    assert _get(client, "/api/finance/support-costs")["data"] == []
+    ledger = handlers.state().ledger
+    for n in (1, 2):
+        ledger.support_costs[n] = {
+            "record_id": f"sc_{n}",
+            "inquiry_id": n,
+            "order_id": "ord_2001",
+            "resolution": "answered",
+            "refund_amount": 0,
+            "recorded_at": f"2026-10-29T0{n}:00:00+00:00",
+        }
+    body = _get(client, "/api/finance/support-costs")
+    assert [r["inquiry_id"] for r in body["data"]] == [2, 1]
+    assert META_KEYS <= set(body["meta"])

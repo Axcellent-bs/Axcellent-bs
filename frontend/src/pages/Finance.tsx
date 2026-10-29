@@ -10,6 +10,7 @@ import { PolicySection } from "@/components/finance/Policy";
 import { ReconciliationSection } from "@/components/finance/Reconciliation";
 import { SafetyQueue } from "@/components/finance/SafetyQueue";
 import { SettlementsSection } from "@/components/finance/Settlements";
+import { SupportCostsSection } from "@/components/finance/SupportCosts";
 import { Link } from "@/lib/nav";
 import {
   FINANCE_SERVER, FINANCE_TABS, SAFETY_SERVER, finance, incidentName, krw, plainText, sortIncidents, todoTab,
@@ -327,6 +328,8 @@ export default function FinancePage() {
           {tab === "audit" && <AuditSection tick={tick} />}
         </div>
       </div>
+
+      <SupportCostsSection tick={tick} />
 
       </div>
       )}

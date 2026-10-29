@@ -354,6 +354,15 @@ def add_finance_api(app: FastAPI) -> None:
         data, meta = await settlements_view(name)
         return ok(data, meta)
 
+    @app.get("/api/finance/support-costs")
+    async def get_support_costs() -> dict:
+        """고객지원이 닫은 문의의 비용 기록(`record_support_cost`가 남긴 것). 최근 기록이 먼저."""
+        books = await state().books()
+        rows = sorted(
+            state().ledger.support_costs.values(), key=lambda r: r["recorded_at"], reverse=True
+        )
+        return ok(rows, books.meta())
+
     @app.get("/api/finance/policy")
     async def get_policy() -> dict:
         books = await state().books()
