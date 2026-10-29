@@ -58,10 +58,11 @@ from data_agent.clients.shop_client import (  # noqa: E402
     ShopApi,
     ShopUnavailable,
 )
+from data_agent.impact import ImpactCounts  # noqa: E402
 from data_agent.metrics.fraud import SellerFacts, low_price_ratio, score_seller  # noqa: E402
 from data_agent.metrics.judge import Settings  # noqa: E402
 from data_agent.skills.anomaly_detection import detect_anomalies  # noqa: E402
-from data_agent.skills.impact_analysis import analyze_impact  # noqa: E402
+from data_agent.skills.impact_analysis import analyze_impact, impact_facts  # noqa: E402
 from data_agent.skills.root_cause import estimate_root_cause  # noqa: E402
 
 CASES = HERE / "cases"
@@ -182,22 +183,20 @@ def _numbers(text: str) -> set[float]:
 
 
 def _impact_allowed(got: ImpactAnalysisOutput, usual: float | None) -> set[float]:
-    """영향 설명에 써도 되는 숫자. 실서버 영향 설명(explain)의 facts와 같은 값이어야 한다.
+    """영향 설명에 써도 되는 숫자. 실서버가 영향 설명(explain)에 넘기는 facts를 만드는 함수
+    (`impact_analysis.impact_facts`)를 그대로 써서 두 곳이 갈라지지 않게 한다.
 
-    실패 주문 수·영향 고객 수·피해 금액 + 초과분(skill 출력) + 평소 실패 수(소수 둘째 자리).
-    평소 실패 수는 근거 문장을 읽지 않고 평가가 케이스의 지난 7일 결제 기록으로 직접 센다
-    (`eval_world.usual_fault_failures`). 모르면(None) 넣지 않는다.
+    실패 주문 수·영향 고객 수·피해 금액·초과분은 skill 출력에서 가져온다. 평소 실패 수는 실서버
+    계산을 검증하려고 근거 문장을 읽지 않고 평가가 케이스의 지난 7일 결제 기록으로 직접 센 값
+    (`eval_world.usual_fault_failures`)을 넣는다. 모르면(None) 넣지 않는다.
     """
-    allowed = {
-        float(got.failed_order_count),
-        float(got.affected_customer_count),
-        float(got.damage_amount),
-    }
-    if got.excess_failed_order_count is not None:
-        allowed.add(float(got.excess_failed_order_count))
-    if usual is not None:
-        allowed.add(round(usual, 2))
-    return allowed
+    counts = ImpactCounts(
+        failed_order_count=got.failed_order_count,
+        affected_customer_count=got.affected_customer_count,
+        damage_amount=got.damage_amount,
+    )
+    facts = impact_facts(counts, got.excess_failed_order_count, usual)
+    return {float(v) for v in facts.values() if isinstance(v, int | float)}
 
 
 def _fabricated(summary: str, allowed: set[float]) -> bool:
