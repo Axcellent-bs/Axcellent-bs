@@ -1,9 +1,9 @@
 // 대상 레포: 연결이 2개 이상이면 AI가 PR마다 레포를 제안하고, 사람이 승인해야 실제 PR이 열린다
 import { useEffect, useState, type Dispatch } from 'react'
 import { Button } from '@dejafix/common-frontend'
-import type { Action, PR, RepoTarget, State as S } from './data'
-import { DEV_API, kst, vcsApi, type VcsConnection } from './api'
-import { Tag } from './parts'
+import type { Action, PR, RepoTarget, State as S } from '@/lib/planningData'
+import { DEV_API, kst, vcsApi, type VcsConnection } from '@/lib/planning'
+import { Tag } from '@/components/planning-common/parts'
 
 const CONF: Record<RepoTarget['confidence'], { label: string; tone: 'green' | 'amber' | 'neutral' }> = {
   high: { label: '확신 높음', tone: 'green' },

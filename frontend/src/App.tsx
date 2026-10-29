@@ -17,7 +17,8 @@ import IncidentDetail from '@/pages/IncidentDetail'
 import Orchestrator from '@/pages/Orchestrator'
 import Kb from '@/pages/Kb'
 import Marketing from '@/pages/Marketing'
-import PlanningPage from '@/planning/PlanningPage'
+import PlanningPage from '@/pages/Planning'
+import DevPage from '@/pages/Dev'
 import Queue from '@/pages/Queue'
 import Reviews from '@/pages/Reviews'
 import Support from '@/pages/Support'
@@ -83,8 +84,8 @@ function Pages() {
           <Route path="/marketing" element={<Marketing />} />
           <Route path="/orchestrator" element={<Orchestrator />} />
           <Route path="/data" element={<Data />} />
-          <Route path="/planning" element={<PlanningPage part="planning" />} />
-          <Route path="/dev" element={<PlanningPage part="dev" />} />
+          <Route path="/planning/*" element={<PlanningPage />} />
+          <Route path="/dev/*" element={<DevPage />} />
           <Route path="/handoffs" element={<Handoffs />} />
           <Route path="/agents/chat" element={<AgentChat />} />
           <Route path="/agents/office" element={<AgentOffice />} />

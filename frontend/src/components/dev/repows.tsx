@@ -3,11 +3,11 @@
 // 화면 모양은 GitHub·GitLab의 PR 화면 순서를 따른다 (상태 탭 · 검색 · 줄 / 머리 · 버튼 · 탭 · 곁 칸).
 import { useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { Button, Modal, useDismiss, useToast } from '@dejafix/common-frontend'
-import type { Action, State as S } from './data'
-import { DEV_API, PlanningApiError, kst, repoApi, vcsApi, type MergeMethod, type RepoBranch, type RepoCheckState, type RepoFile, type RepoGraph, type RepoGraphCommit, type RepoPr, type RepoPrDetail, type RepoPrState, type VcsConnection } from './api'
-import { layoutGraph, laneColor, type GraphRow } from './graphlayout'
-import { prSlug } from './links'
-import { Work } from './pages'
+import type { Action, State as S } from '@/lib/planningData'
+import { DEV_API, PlanningApiError, kst, repoApi, vcsApi, type MergeMethod, type RepoBranch, type RepoCheckState, type RepoFile, type RepoGraph, type RepoGraphCommit, type RepoPr, type RepoPrDetail, type RepoPrState, type VcsConnection } from '@/lib/planning'
+import { layoutGraph, laneColor, type GraphRow } from '@/components/dev/graphlayout'
+import { prSlug, toPath, go } from '@/components/planning-common/links'
+import { Work } from '@/components/dev/work'
 
 // ---------------------------------------------------------------- 공용
 
@@ -50,7 +50,7 @@ export function ago(iso?: string | null): string {
   return kst(iso).slice(0, 5)
 }
 
-const repoHref = (n?: number, sub?: string) => `#/work/prs/repo${n ? `/${n}` : ''}${sub ? `/${sub}` : ''}`
+const repoHref = (n?: number, sub?: string) => toPath(`work/prs/repo${n ? `/${n}` : ''}${sub ? `/${sub}` : ''}`)
 
 function PrState({ v }: { v: RepoPrState }) {
   return <span className={`rp-state rp-${v}`}>{STATE_LABEL[v]}</span>
@@ -63,7 +63,7 @@ function Branches({ head, base }: { head: string; base: string }) {
   return <span className="rp-br"><code>{head}</code><span aria-hidden>→</span><code>{base}</code></span>
 }
 function AiTag({ id }: { id: string }) {
-  return <a href={`#/work/prs/${prSlug(id)}`} className="grade rp-ai" title={`내부 ${id}`}>AI · {id}</a>
+  return <a href={toPath(`work/prs/${prSlug(id)}`)} className="grade rp-ai" title={`내부 ${id}`}>AI · {id}</a>
 }
 
 /** 지우기·머지 같은 되돌리기 어려운 일 확인 창. 내용은 라벨·값 줄로만 */
@@ -121,10 +121,10 @@ export function PrsTab({ s, d, parts }: { s: S; d: Dispatch<Action>; parts: stri
     <>
       <div className="rp-bar">
         <nav className="seg rp-views" aria-label="작업·PR 보기">
-          <a href="#/work/prs" className={mode === 'work' ? 'on' : ''} aria-current={mode === 'work' ? 'page' : undefined}>작업</a>
+          <a href={toPath('work/prs')} className={mode === 'work' ? 'on' : ''} aria-current={mode === 'work' ? 'page' : undefined}>작업</a>
           <a href={repoHref()} className={mode === 'repo' ? 'on' : ''} aria-current={mode === 'repo' ? 'page' : undefined}>레포 PR</a>
-          <a href="#/work/prs/branches" className={mode === 'branches' ? 'on' : ''} aria-current={mode === 'branches' ? 'page' : undefined}>브랜치</a>
-          <a href={GRAPH_HREF} className={mode === 'graph' ? 'on' : ''} aria-current={mode === 'graph' ? 'page' : undefined}>커밋 그래프</a>
+          <a href={toPath('work/prs/branches')} className={mode === 'branches' ? 'on' : ''} aria-current={mode === 'branches' ? 'page' : undefined}>브랜치</a>
+          <a href={graphHref()} className={mode === 'graph' ? 'on' : ''} aria-current={mode === 'graph' ? 'page' : undefined}>커밋 그래프</a>
         </nav>
         {mode !== 'work' && conns.length > 1 && (
           <select className="select mono" value={conn} onChange={(e) => setConn(e.target.value)} aria-label="레포">
@@ -234,7 +234,7 @@ function PrView({ conn, number, tab }: { conn: string; number: number; tab?: str
       if (kind === 'revert') {
         const r = await api.revert(number)
         toast.show(`되돌리기 PR #${r.revert.number}을 열었어요`)
-        location.hash = repoHref(r.revert.number)
+        go(repoHref(r.revert.number))
       }
       det.reload()
     } catch (e) {
@@ -397,9 +397,9 @@ function Sidebar({ x, lines }: { x: RepoPrDetail; lines: number }) {
         <h3>연결된 작업</h3>
         {x.internal ? (
           <dl className="pairs">
-            <div><dt>내부 PR</dt><dd><a href={`#/work/prs/${prSlug(x.internal.id)}`}>{x.internal.id}</a></dd></div>
-            <div><dt>작업</dt><dd><a href={`#/work/prs/${encodeURIComponent(x.internal.task)}`}>{x.internal.task}</a></dd></div>
-            <div><dt>근거</dt><dd><a href={`#/work/prs/${prSlug(x.internal.id)}`}>근거 체인</a></dd></div>
+            <div><dt>내부 PR</dt><dd><a href={toPath(`work/prs/${prSlug(x.internal.id)}`)}>{x.internal.id}</a></dd></div>
+            <div><dt>작업</dt><dd><a href={toPath(`work/prs/${encodeURIComponent(x.internal.task)}`)}>{x.internal.task}</a></dd></div>
+            <div><dt>근거</dt><dd><a href={toPath(`work/prs/${prSlug(x.internal.id)}`)}>근거 체인</a></dd></div>
           </dl>
         ) : <span className="muted small">사람이 올린 PR</span>}
       </section>
@@ -410,7 +410,7 @@ function Sidebar({ x, lines }: { x: RepoPrDetail; lines: number }) {
           <div><dt>base</dt><dd><code>{x.pr.base}</code></dd></div>
           <div><dt>크기</dt><dd>{lines}줄 · {x.diff.total_files}파일</dd></div>
         </dl>
-        <a href="#/work/prs/branches" className="small">브랜치 목록</a>
+        <a href={toPath('work/prs/branches')} className="small">브랜치 목록</a>
       </section>
       <section>
         <h3>레포</h3>
@@ -552,8 +552,7 @@ function BranchTable({ conn }: { conn: string }) {
 
 // ---------------------------------------------------------------- 커밋 그래프 (SourceTree처럼: 줄 · 점 · 머지 선 · 브랜치·PR 꼬리표)
 
-const GRAPH_HREF = '#/work/prs/graph'
-const graphHref = (sha?: string) => (sha ? `${GRAPH_HREF}/${sha}` : GRAPH_HREF)
+const graphHref = (sha?: string) => toPath(sha ? `work/prs/graph/${sha}` : 'work/prs/graph')
 const LANE = 14
 const ROW = 30
 const GRAPH_LIMITS = [100, 200, 500] as const
@@ -585,7 +584,7 @@ function GraphView({ conn, sel }: { conn: string; sel?: string }) {
   }, [commits, data, base])
   const bySha = useMemo(() => new Map(commits.map((c) => [c.sha, c])), [commits])
 
-  const open = (sha?: string) => { location.hash = graphHref(sha) }
+  const open = (sha?: string) => { go(graphHref(sha)) }
   useEffect(() => {
     if (!sel) return
     // 브랜치 고르기 창이 열려 있으면 Esc는 그 창만 닫는다

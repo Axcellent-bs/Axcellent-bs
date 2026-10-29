@@ -2,10 +2,10 @@
 // 진행 상태는 Task.coding으로 SSE를 타고 온다
 import { useState, type FormEvent } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
-import type { CodingRun, CodingStatus, State as S, Task } from './data'
-import { DEV_API, PlanningApiError, devTaskApi, planningApi } from './api'
-import { State, Tag } from './parts'
-import { Step } from './flow'
+import type { CodingRun, CodingStatus, State as S, Task } from '@/lib/planningData'
+import { DEV_API, PlanningApiError, devTaskApi, planningApi } from '@/lib/planning'
+import { State, Tag } from '@/components/planning-common/parts'
+import { Step } from '@/components/planning-common/flow'
 
 const api = devTaskApi(DEV_API)
 const actions = planningApi(DEV_API)

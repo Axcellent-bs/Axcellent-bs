@@ -2,8 +2,8 @@
 // 기획개발이 보낸 메시지·데이터(outbox)를 부서별 창구에서 확인한다.
 import { useEffect, useState, type Dispatch } from 'react'
 import { Button, Card, Chip, Notice, PageHeader, Select, useToast } from '@dejafix/common-frontend'
-import { DEPT_ANSWER, DEPT_NAME, type Action, type Dept, type InboundKind, type State } from './data'
-import { Point } from './parts'
+import { DEPT_ANSWER, DEPT_NAME, type Action, type Dept, type InboundKind, type State } from '@/lib/planningData'
+import { Point } from '@/components/planning-common/parts'
 
 interface Sender { kind: InboundKind; point: string; label: string; what: string }
 const DEPTS: { dept: Dept; owner: string; senders: Sender[] }[] = [

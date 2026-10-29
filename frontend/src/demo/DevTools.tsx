@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from '@/lib/nav'
-import { DEV_API, vcsApi, type VcsConnection, type VcsTestResult } from '@/planning/api'
+import { DEV_API, vcsApi, type VcsConnection, type VcsTestResult } from '@/lib/planning'
 
 // 개발 도구 연결: 고객사 개발팀이 쓰는 형상관리·CI·배포 도구를 개발·배포 AI(dev)에 잇는 창구.
 // 형상관리 연결은 레포마다 1개, 여러 개. dev 서비스(`/api/planning/vcs/connections`)에 저장되고 토큰은 끝 4자리만 온다.

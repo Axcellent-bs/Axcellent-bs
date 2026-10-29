@@ -2,12 +2,12 @@
 // 대화는 REST(/dev-chat)로 주고받고, SSE에 chats가 있으면 그걸로 갱신한다. 없으면 2초마다 다시 읽는다
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Chip, useToast, type ChipTone } from '@dejafix/common-frontend'
-import type { ChatMessage, ChatStatus, ChatThread, CodingStatus, State as S, Task } from './data'
-import { DEV_API, PlanningApiError, chatApi, vcsApi, type VcsConnection } from './api'
-import { CODING_LABEL, CancelButton, isRunning } from './coding'
-import { State } from './parts'
-import { go } from './links'
-import { Tag } from './parts'
+import type { ChatMessage, ChatStatus, ChatThread, CodingStatus, State as S, Task } from '@/lib/planningData'
+import { DEV_API, PlanningApiError, chatApi, vcsApi, type VcsConnection } from '@/lib/planning'
+import { CODING_LABEL, CancelButton, isRunning } from '@/components/dev/coding'
+import { State } from '@/components/planning-common/parts'
+import { go, toPath } from '@/components/planning-common/links'
+import { Tag } from '@/components/planning-common/parts'
 
 const api = chatApi(DEV_API)
 
@@ -236,7 +236,7 @@ function Started({ m, s, onOpen }: { m: ChatMessage; s: S; onOpen: () => void })
           {id && (
             <span className="tags">
               <CancelButton taskId={id} status={c?.status} />
-              <button type="button" className="btn-ghost" onClick={() => { onOpen(); go(`#/work/prs/${encodeURIComponent(id)}`) }}>작업 보기</button>
+              <button type="button" className="btn-ghost" onClick={() => { onOpen(); go(toPath(`work/prs/${encodeURIComponent(id)}`)) }}>작업 보기</button>
             </span>
           )}
         </div>

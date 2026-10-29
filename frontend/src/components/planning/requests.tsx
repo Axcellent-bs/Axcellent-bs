@@ -3,10 +3,10 @@
 // 멈춘 요청(사람 확인·질문·교차검증·채택 대기)이 먼저. 블록 통째 클릭 = 다음 할 일, 제목 클릭 = 프로젝트.
 import { useEffect, useState, type Dispatch } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
-import { DEPT_NAME, TODAY, type Action, type Request, type State as S } from './data'
-import { Tag, rowNav } from './parts'
-import { Ref, convoHref, isFollowUp, nextOf, prSlug, reviewOf } from './links'
-import { gather } from './projects'
+import { DEPT_NAME, TODAY, type Action, type Request, type State as S } from '@/lib/planningData'
+import { Tag, rowNav } from '@/components/planning-common/parts'
+import { Ref, convoHref, isFollowUp, nextOf, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
+import { gather } from '@/components/planning/projects'
 
 // ---------------------------------------------------------------- 필터
 // 들어온 경로를 짧은 말로 (시스템 이름은 화면에 내지 않는다)
@@ -75,13 +75,13 @@ export function pipeline(s: S, r: Request): PipeRow {
     else {
       const xr = reviewOf(s, sp.id)
       c1.value = sp.id
-      c1.href = xr ? `#/work/reviews/${xr.id}` : `#/work/specs/${sp.id}`
+      c1.href = xr ? toPath(`work/reviews/${xr.id}`) : toPath(`work/specs/${sp.id}`)
       if (xr) { const w = waitOf(xr.lane); c1.meta = w.label; if (c1.kind === 'now') wait = w }
       else if (sp.status === '확정') c1.meta = sp.confirmedBy === 'auto' ? '자동 확정' : sp.confirmedBy === 'human' ? '사람 확인 후 확정' : '교차검증 후 확정'
       else if (sp.question) {
         c1.meta = '질문 대기'
         const th = s.threads.find((t) => t.on === sp.id)
-        if (th) c1.href = `#/talk/${th.id}`
+        if (th) c1.href = toPath(`talk/${th.id}`)
         if (c1.kind === 'now') wait = { label: '질문 대기', rank: 1 }
       } else c1.meta = '초안'
     }
@@ -100,7 +100,7 @@ export function pipeline(s: S, r: Request): PipeRow {
     else {
       c2.value = g.prs.length > 1 ? `${pr.id} 외 ${g.prs.length - 1}` : pr.id
       const xr = reviewOf(s, pr.id)
-      c2.href = xr ? `#/work/reviews/${xr.id}` : `#/work/prs/${prSlug(pr.id)}`
+      c2.href = xr ? toPath(`work/reviews/${xr.id}`) : toPath(`work/prs/${prSlug(pr.id)}`)
       if (xr) { const w = waitOf(xr.lane); c2.meta = w.label; if (c2.kind === 'now') wait = w }
       else if (pr === fix) { c2.meta = '수정 후 재검수'; if (c2.kind === 'now') wait = { label: '수정 후 재검수', rank: 2 } }
       else c2.meta = !pr.merged ? '머지 전' : pr.mergedBy === 'rule' ? '자동 머지' : pr.mergedBy === 'review' ? '교차검증 후 머지' : '사람 머지'
@@ -113,11 +113,11 @@ export function pipeline(s: S, r: Request): PipeRow {
   if (finished) {
     c3.value = g.replies.length ? '회신 완료' : '완료'
     c3.meta = shortTime(last)
-    c3.href = `#/projects/${r.id}`
+    c3.href = toPath(`projects/${r.id}`)
     if (g.incidents.length) {
       c3.meta = g.follow.length ? `장애 → ${g.follow.map((x) => x.id).join(', ')}` : '장애 연결'
       c3.warn = true
-      c3.href = `#/work/aftercare/${g.incidents[0].ctx}`
+      c3.href = toPath(`work/aftercare/${g.incidents[0].ctx}`)
     }
   }
 
@@ -166,7 +166,7 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
         {FILTERS.map((x) => {
           const n = s.requests.filter(x.match).length
           return (
-            <a key={x.id} href={x.id === 'all' ? '#/requests' : `#/requests/${x.id}`} className={x.id === f ? 'on' : undefined} aria-current={x.id === f ? 'page' : undefined}>
+            <a key={x.id} href={x.id === 'all' ? toPath('requests') : toPath(`requests/${x.id}`)} className={x.id === f ? 'on' : undefined} aria-current={x.id === f ? 'page' : undefined}>
               {x.label}<span className="rq-n">{n}</span>
             </a>
           )
@@ -184,13 +184,13 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
         {rows.map((row) => {
           const { r } = row
           const next = nextOf(s, r)
-          const href = row.finished || next.href.startsWith('#/requests') ? `#/projects/${r.id}` : next.href
+          const href = row.finished || next.href.startsWith(toPath('requests')) ? toPath(`projects/${r.id}`) : next.href
           const nav = rowNav(href, row.finished ? '프로젝트 보기' : next.label)
           const draft = !row.finished && (r.state === '접수' || (r.state === '기획 중' && !row.cells[1].href))
           return (
             <li key={r.id} id={`req-${r.id}`} {...nav} className={`rq-item ${nav.className ?? ''}${row.finished ? ' fin' : ''}${focus === r.id ? ' hl' : ''}${isFresh(r.id) ? ' fresh' : ''}`}>
               <div className="rq-title">
-                <a href={`#/projects/${r.id}`} className="rq-name plain-link">{r.title}</a>
+                <a href={toPath(`projects/${r.id}`)} className="rq-name plain-link">{r.title}</a>
                 <span className="rq-meta">
                   <span className="mono">{r.id}</span>
                   <span>{DEPT_NAME[r.from]}</span>
