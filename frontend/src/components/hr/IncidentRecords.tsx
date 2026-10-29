@@ -3,6 +3,7 @@ import { clockKo, incidentTitle, INCIDENT_STATUS_KO, type OrchIncident, type Orc
 import { dateStr } from "@/lib/format";
 import { hr, type AuditEntry } from "@/lib/hr";
 import { Link } from "@/lib/nav";
+import ResolutionForm from "@/components/hr/ResolutionForm";
 
 // 결정 기록 화면(실제 모드): 캣북스 사건이 나면 총괄 AI가 인사 AI에게 사건 기록(record_case)을 맡긴다.
 // 그 단계를 총괄 사건 목록(dashboard-api /incidents)에서 꺼내 "어느 사건을, 언제, 무엇으로, 어떤 상태로" 기록했는지 보여 주고,
@@ -121,6 +122,8 @@ export default function IncidentRecords({ initialCtx = null }: { initialCtx?: st
         {current && <Link href={`/orchestrator?ctx=${encodeURIComponent(current.context_id)}`} className="inline-block text-xs font-semibold text-brand-600 underline underline-offset-2">총괄 사건에서 보기 →</Link>}
         {current ? <Timeline inc={current} /> : <p className="text-xs text-ink-500">볼 사건이 없습니다.</p>}
       </section>
+
+      {current && <ResolutionForm inc={current} />}
     </div>
   );
 }

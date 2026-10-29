@@ -51,6 +51,13 @@ export interface HrCard {
   tags: string[];
   extra: Record<string, unknown>;
 }
+export interface ResolutionInput {
+  outcome: "resolved" | "workaround" | "unresolved";
+  root_cause?: string;
+  action?: string;
+  opened_at?: string | null;
+  prior_case_id?: string | null;
+}
 export interface RosterEntry { area: string; role: "owner" | "backup"; member_id: string; shift_start: string | null; shift_end: string | null }
 export interface Roster { entries: RosterEntry[]; gap_areas: string[]; collected_at: string }
 export interface AuditEntry { seq: number; at: string; kind: string; payload: Record<string, unknown> }
@@ -106,6 +113,9 @@ export const hr = {
     call<HrCard[]>(`/decision-cards?limit=${limit}${contextId ? `&context_id=${encodeURIComponent(contextId)}` : ""}`),
   decide: (cardId: string, decision: "approve" | "reject") =>
     post<{ card_id: string; status: string }>(`/candidate-cards/${encodeURIComponent(cardId)}/decision`, { decision }),
+  /** 사람이 사건의 해결 내용을 적는다. 소요 시간은 서버가 openedAt부터 잰다 */
+  recordResolution: (contextId: string, body: ResolutionInput) =>
+    post<{ outcome: string; card_id: string | null }>(`/incidents/${encodeURIComponent(contextId)}/resolution`, body),
   roster: () => call<Roster>("/roster"),
   activity: (contextId: string) => call<AuditEntry[]>(`/hr-activity/${encodeURIComponent(contextId)}`),
   checkPlan: (draft: PlanDraft) => post<PlanCheck>("/plan-checks", { draft }),

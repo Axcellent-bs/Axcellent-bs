@@ -40,6 +40,8 @@ export interface OrchIncident {
   summary: string[];
   metrics: Record<string, number>;
   pending_holds: { step_id: string; skill: string; label: string }[];
+  /** 비슷한 과거 사건에서 뽑은 참고 추천(총괄이 계산). 근거가 있으면 card_id가 그 과거 사건 카드 */
+  recommendation?: { status: string; card_id?: string } | null;
 }
 
 /** POST /api/demo/incidents 본문 (main.py DemoRequest). 모두 선택 */

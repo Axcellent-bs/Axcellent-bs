@@ -22,6 +22,7 @@ from ax_contracts.schemas.hr import (
     HandoverQuestion,
     HandoverStatus,
     HandoverView,
+    RecordResolutionOutput,
 )
 from ax_contracts.schemas.record import Card
 from ax_dashboard_api import (
@@ -60,6 +61,7 @@ from ax_dashboard_api.schemas import (
     OnboardingStepBody,
     QueueProcessBody,
     ReceiptAnalysisBody,
+    ResolutionBody,
     ReviewStatusBody,
     StatusBody,
     Summary,
@@ -613,6 +615,26 @@ async def decide_candidate_card(card_id: str, body: CandidateDecisionBody) -> di
         "decide_candidate_card", payload, target=f"card:{card_id}:{body.decision}"
     )
     return ok(DecideCandidateCardOutput.model_validate(out))
+
+
+@router.post("/incidents/{context_id}/resolution")
+async def record_incident_resolution(context_id: str, body: ResolutionBody) -> dict:
+    """사람이 사건의 해결 내용(결과·원인·조치)을 적는다. hr이 `record_resolution`(A)으로 남긴다.
+
+    소요 시간은 받지 않고 hr이 `opened_at`부터 지금까지로 잰다.
+    같은 내용을 다시 보내면 한 번만 남는다.
+    """
+    payload: dict = {"context_id": context_id, **body.model_dump(mode="json", exclude_none=True)}
+    out = await hr_client.call(
+        "record_resolution",
+        payload,
+        context_id=context_id,
+        target=f"resolution:{context_id}:{body.outcome}:{body.root_cause}:{body.action}",
+    )
+    result = RecordResolutionOutput.model_validate(out)
+    if result.outcome == "no_card":
+        raise ApiError(404, "NOT_FOUND", "이 사건에서 만든 결정 카드가 없어 남길 곳이 없다")
+    return ok(result)
 
 
 # ------------------- 폐기 예정: 온보딩·발령 (hr에서 기능을 뺐다, #374·#377)

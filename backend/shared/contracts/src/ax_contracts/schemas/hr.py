@@ -463,6 +463,8 @@ class CaseResolution(AxModel):
     action: str | None = None
     minutes_to_resolve: int | None = Field(default=None, ge=0)
     resolved_at: UtcDatetime | None = None
+    opened_at: UtcDatetime | None = None  # 사건이 열린 시각. 소요 시간 계산과 처음·반복 비교에 쓴다
+    prior_case_id: str | None = None  # 이 사건을 시작할 때 근거로 보여 준 과거 사건 카드(반복 장애)
 
 
 class RecordResolutionInput(AxModel):
@@ -474,6 +476,9 @@ class RecordResolutionInput(AxModel):
     action: str | None = None
     minutes_to_resolve: int | None = Field(default=None, ge=0)
     resolved_at: UtcDatetime | None = None  # 없으면 요청을 받은 시각
+    # 사건이 열린 시각. 소요 시간을 안 주면 resolved_at - opened_at 분으로 hr이 계산한다
+    opened_at: UtcDatetime | None = None
+    prior_case_id: str | None = None  # 이 사건을 시작할 때 근거로 보여 준 과거 사건 카드
 
 
 class RecordResolutionOutput(AxModel):

@@ -133,7 +133,8 @@
       "grade": "A",
       "allowed_requesters": [
         "orchestrator",
-        "infra"
+        "infra",
+        "dashboard-api"
       ],
       "verifier": null,
       "priority": "recommended"

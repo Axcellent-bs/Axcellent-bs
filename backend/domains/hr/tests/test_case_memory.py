@@ -168,6 +168,57 @@ async def test_resolution_needs_an_idempotency_key(svc) -> None:
     assert result.status.value in ("failed", "rejected")
 
 
+@pytest.mark.asyncio
+async def test_minutes_are_measured_from_opened_at_not_typed(svc) -> None:
+    card_id = await _incident(svc)
+    opened = svc.clock() - timedelta(minutes=37, seconds=20)
+    result = await record_resolution(
+        svc,
+        _req(
+            "record_resolution",
+            {
+                "context_id": CONTEXT,
+                "outcome": "resolved",
+                "action": "재시작",
+                "opened_at": opened.isoformat(),
+                "prior_case_id": "card_old",
+            },
+        ),
+    )
+    assert result.output["outcome"] == "recorded"
+    saved = (await svc.memory.get_card(card_id)).extra["resolution"]
+    assert saved["minutes_to_resolve"] in (37, 38) and saved["prior_case_id"] == "card_old"
+    assert saved["opened_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_opened_at_in_the_future_is_rejected(svc) -> None:
+    await _incident(svc)
+    future = svc.clock() + timedelta(hours=1)
+    result = await record_resolution(
+        svc,
+        _req(
+            "record_resolution",
+            {"context_id": CONTEXT, "outcome": "resolved", "opened_at": future.isoformat()},
+        ),
+    )
+    assert result.status.value in ("failed", "rejected")
+
+
+@pytest.mark.asyncio
+async def test_typed_minutes_win_over_the_measured_ones(svc) -> None:
+    card_id = await _incident(svc)
+    opened = svc.clock() - timedelta(minutes=10)
+    await record_resolution(
+        svc,
+        _req(
+            "record_resolution",
+            _resolution(minutes_to_resolve=5, opened_at=opened.isoformat()),
+        ),
+    )
+    assert (await svc.memory.get_card(card_id)).extra["resolution"]["minutes_to_resolve"] == 5
+
+
 # ---- find_similar_cases ---------------------------------------------------------------------
 
 
