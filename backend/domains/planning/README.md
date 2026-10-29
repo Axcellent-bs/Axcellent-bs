@@ -124,14 +124,14 @@ execute params (safety #171 `thresholds.toml` 규칙 키, 모두 도메인 상�
 - 오류: 400 `INVALID_INPUT`(형식, 모르는 연결, 연결이 여럿인데 `connection` 없음) · 409 `NO_VCS`(연결 없음) · 409 `LLM_NOT_CONFIGURED`(모델·주소 없음, 아무것도 만들지 않음) · 409 `WRONG_ROLE`(역할 planning 서비스) · 409 `GATE_REJECTED`.
 - 다시 시도: `POST /dev-tasks/{task_id}/retry` `{connection?}` → 같은 모양(`status: queued`). `failed`·`waiting_human`이고 PR을 아직 안 만든 작업만(관문 `dev_task_retry` A). 없으면 404 `NOT_FOUND`, 진행 중·끝남·PR 있음은 409 `NOT_RETRYABLE`(PR이 있으면 PR 화면 머지 버튼으로 판단).
 - 올릴 레포(v1): 코딩 작업에는 레포 제안·`approveRepo`를 쓰지 않는다. `connection`을 주거나 연결이 하나일 때만 받는다. 고른 연결은 PR `target`에 승인 상태(`decided_by` 개발팀)로 적는다.
-- 진행(작업 `coding`, SSE 상태로 나간다): `{status, model, files: [{path, additions, deletions, reason}], summary, review: {verdict, notes} | null, error, attempts, updated_at, connection, pr}`. status는 `queued → reading → writing → opened → reviewing → merged`, 멈추면 `waiting_human`·`failed`.
+- 진행(작업 `coding`, SSE 상태로 나간다): `{status, model, files: [{path, additions, deletions, reason}], summary, review: {verdict, notes} | null, error, attempts, updated_at, connection, pr}`. status는 `queued → reading → writing → reviewing → opened → merged`, 멈추면 `waiting_human`·`failed`.
 - 흐름 (상태 잠금 밖에서 돌고, 단계마다 작은 액션으로 상태를 적는다):
   1. 읽기: `list_files()` → 잠금 파일·`node_modules`·`dist`·이미지 등을 빼고 힌트 경로 안을 앞에 둬 400개까지. 활동 `code.read` "파일 n개 읽음".
   2. 고르기(LLM): 기획·완료 기준·힌트·목록 → 파일 5개 이하 `{path, action: modify|create, reason}`. `..`·절대 경로, 목록에 없는 modify는 뺀다. 보호 경로는 그대로 두고 머지 규칙이 사람 확인으로 보낸다. 활동 `code.plan` "고칠 파일 n개 선택".
   3. 쓰기(LLM, 파일마다 한 번): 지금 글(데이터 블록) → 파일 전체 새 글 + 이유 한 줄. 줄 수는 difflib로 센다. 활동 `code.write` "n개 파일 · +a −d줄".
-  4. 커밋·PR: 관문 `generate_pr`(B, 실제 줄·파일·경로) 뒤 `gen/<작업>-<실행 번호>` 브랜치에 생성 파일을 커밋하고 PR을 올린다(본문에 기획·완료 기준·파일별 이유, `요청`·`기획서`·`문단` 줄).
-  5. 리뷰(LLM): diff와 완료 기준 → `통과`·`불일치` + 노트(관문 `review_pr`, PR `reviews`에 추가). 활동 `code.review` "리뷰 통과/불일치 · 노트 n개". 불일치면 노트를 넣어 한 번 다시 쓰고 관문 `code_write`(A) 뒤 같은 브랜치에 수정 커밋(`update_change`), 다시 리뷰. 두 번째도 불일치면 `waiting_human`(대기열 `pr_review_mismatch`).
-  6. 머지: 통과면 기존 자동 머지 규칙(`merge_pr` 크기·보호 경로·장애 연결 등). 걸리면 `waiting_human`, 사람이 머지 버튼을 누르면 `merged`.
+  4. 리뷰(LLM, PR 전): diff와 완료 기준 → `통과`·`불일치` + 노트. 불일치면 노트를 넣어 짚은 파일만 한 번 다시 쓰고(짚은 새 파일은 더한다) 다시 리뷰. 커밋은 아직 없다.
+  5. 커밋·PR: 관문 `generate_pr`(B, 실제 줄·파일·경로) 뒤 `gen/<작업>-<실행 번호>` 브랜치에 마지막 결과만 커밋 하나로 올리고 PR을 연다(본문에 기획·완료 기준·파일별 이유, `요청`·`기획서`·`문단` 줄). 리뷰 결과를 관문 `review_pr` 뒤 PR `reviews`에 남긴다(PR 전 불일치도 앞에 붙인다). 활동 `code.review`. 두 번 다 불일치면 `waiting_human`(대기열 `pr_review_mismatch`).
+  6. 머지: 통과면 기존 자동 머지 규칙(`merge_pr` 크기·보호 경로·장애 연결 등). 걸리면 `waiting_human`, 사람이 머지 버튼을 누르면 `merged`. 형상관리에는 merge commit으로 합친다.
 - 한도: 파일 5개, 바뀐 줄 합 1500줄, 고칠 파일 600줄(넘으면 PR 없이 `waiting_human`, 작업 `C 보류`). LLM 오류·시간 초과(180초)·형상관리 오류는 `failed` + 짧은 이유(예외 내용·비밀 값 없음), 활동 `code.failed`.
 - LLM 설정: `PLANNING_LLM_MODEL`·`PLANNING_LLM_BASE_URL`·`PLANNING_LLM_API_KEY`(없으면 공통 `LLM_*`). 레포 이름·파일 글·기획 글만 보내고 토큰은 보내지 않는다. 테스트는 `coder.set_llm()`으로 가짜를 끼운다(`tests/test_coder.py`).
 - 아직: 실패 뒤 이미 PR이 있는 작업(리뷰 LLM 오류 등)은 다시 시도하지 않는다(PR 화면에서 머지·판단). 파일 하나를 통째로 다시 쓰므로 600줄 넘는 파일은 사람 몫이다.

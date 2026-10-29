@@ -2526,8 +2526,11 @@ class PlanningService:
         await self._apply(run)
         return opened
 
-    async def coding_review(self, job: coder.Job, verdict: str, notes: list[str]) -> bool:
+    async def coding_review(
+        self, job: coder.Job, verdict: str, notes: list[str], earlier: list[str] | None = None
+    ) -> bool:
         """리뷰 결과를 관문 review_pr 뒤 PR에 남긴다. 통과면 기존 자동 머지 규칙대로 잇는다.
+        earlier는 PR 전에 고치느라 지나간 리뷰 결과다 (PR 리뷰 기록 앞에 붙인다).
 
         돌려주는 값: 불일치라 한 번 더 고쳐야 하면 True."""
         fix = False
@@ -2538,6 +2541,7 @@ class PlanningService:
             p = next((x for x in s.prs if x.id == cr.pr), None)
             if p is None:
                 raise coder.CoderStop("failed", "PR이 없다")
+            p.reviews.extend(earlier or [])  # type: ignore[arg-type]
             text = f"{p.id} 리뷰 {verdict} · 노트 {len(notes)}개"
             await self._execute(
                 "review_pr",
@@ -2588,48 +2592,6 @@ class PlanningService:
 
         await self._apply(run)
         return fix
-
-    async def coding_fix(
-        self, job: coder.Job, changed: dict[str, str], rows: list[CodingFile]
-    ) -> bool:
-        """관문 code_write(A) 뒤 리뷰 지적을 고친 파일을 같은 PR 브랜치에 커밋한다."""
-        ok = False
-
-        async def run(s: State) -> None:
-            nonlocal ok
-            task, cr = self._coding_of(s, job)
-            p = next((x for x in s.prs if x.id == cr.pr), None)
-            if p is None:
-                raise coder.CoderStop("failed", "PR이 없다")
-            paths = sorted(r.path for r in rows)
-            lines, files = coder.total_lines(rows), len(rows)
-            text = f"{p.id} 리뷰 지적 반영 수정 커밋 ({len(changed)}개 파일)"
-            await self._execute(
-                "code_write",
-                job.ctx,
-                f"{p.id}:fix{cr.attempts}",
-                text,
-                _pr_size_params(lines, files, paths, task.id),
-            )
-            note = await vcs_bridge.update_pr(p, changed, f"리뷰 지적 반영: {job.title}")
-            if note is not None:
-                s.activity.append(
-                    self._act(self.clock(), job.ctx, "dev", "dev", note.point, "API", note.text)
-                )
-            if note is None or not note.ok:
-                cr.status = "failed"
-                cr.error = note.text if note else "형상관리 연결이 없다"
-                cr.updated_at = self.clock()
-                self._code_act(s, job, "code.failed", cr.error)
-                return
-            p.gate = PrGate(result="통과", lines=lines, files=files, paths=coder.area_of(paths))
-            p.changed_paths = paths
-            cr.files = rows
-            cr.updated_at = self.clock()
-            ok = True
-
-        await self._apply(run)
-        return ok
 
     # ---------------------------------------------------------------- 사람·에이전트 액션
 
