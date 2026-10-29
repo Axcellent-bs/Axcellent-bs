@@ -3,6 +3,7 @@ import { clockKo, incidentTitle, INCIDENT_STATUS_KO, type OrchIncident, type Orc
 import { dateStr } from "@/lib/format";
 import { hr, type AuditEntry } from "@/lib/hr";
 import { Link } from "@/lib/nav";
+import RepeatCompare from "@/components/hr/RepeatCompare";
 import ResolutionForm from "@/components/hr/ResolutionForm";
 
 // 결정 기록 화면(실제 모드): 캣북스 사건이 나면 총괄 AI가 인사 AI에게 사건 기록(record_case)을 맡긴다.
@@ -124,6 +125,8 @@ export default function IncidentRecords({ initialCtx = null }: { initialCtx?: st
       </section>
 
       {current && <ResolutionForm inc={current} />}
+
+      <RepeatCompare />
     </div>
   );
 }
