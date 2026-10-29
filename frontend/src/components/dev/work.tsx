@@ -3,6 +3,8 @@ import { useEffect, useState, type Dispatch, type ReactNode } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import { CROSS_CHECK_TIMEOUT_MIN, TARGET_LABEL, OBSERVE_MIN, type Action, type CrossReview, type PR, type State as S } from '@/lib/planningData'
 import { codeOf, traceOf, type CodeLine } from '@/components/dev/trace'
+import { DiffFiles } from '@/components/dev/diff'
+import { DEV_API, repoApi, type RepoFile } from '@/lib/planning'
 import { State, Tag } from '@/components/planning-common/parts'
 import { Linked, Ref, convoHref, hrefOf, prFromSlug, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
 import { Flow, Head, Layout, ListPane, Pairs, Side, Step, mergedLabel } from '@/components/planning-common/flow'
@@ -27,6 +29,37 @@ function useNow(ms = 30_000) {
     return () => window.clearInterval(id)
   }, [ms])
   return t
+}
+
+// 교차검증 건의 바뀐 파일. 레포에 열린 PR이면 레포 diff를, 예시 PR이면 바뀐 대표 줄로 만든 diff를 보여 준다
+function exampleFiles(s: S, pr: PR): RepoFile[] {
+  const by = new Map<string, CodeLine[]>()
+  for (const c of codeOf(s, pr)) by.set(c.path, [...(by.get(c.path) ?? []), c])
+  return [...by].map(([path, ls]) => ({
+    path, status: 'modified', additions: ls.length, deletions: 0, previous_path: null, truncated: false,
+    patch: [`@@ -${ls[0].line},0 +${ls[0].line},${ls.length} @@`, ...ls.map((l) => `+${l.text}`)].join('\n'),
+  }))
+}
+function Changes({ s, pr }: { s: S; pr: PR }) {
+  const conn = pr.target?.connectionId
+  const n = pr.vcsNumber ?? undefined
+  const [files, setFiles] = useState<RepoFile[] | null>(n != null && conn ? null : exampleFiles(s, pr))
+  const [err, setErr] = useState(false)
+  useEffect(() => {
+    if (n == null || !conn) return
+    let alive = true
+    repoApi(DEV_API, conn).pr(n).then((x) => alive && setFiles(x.diff.files)).catch(() => alive && setErr(true))
+    return () => { alive = false }
+  }, [conn, n])
+  const repoLink = n != null ? <a href={toPath(`work/prs/repo/${n}/files`)} className="plain-link small">레포 PR #{n} 변경 파일</a> : null
+  if (err) return <p className="muted small">레포 diff를 읽지 못했어요 {repoLink}</p>
+  if (!files) return <p className="muted small">읽는 중</p>
+  return (
+    <>
+      {repoLink}
+      <DiffFiles files={files} draftKey={n != null && conn ? `${conn}#${n}` : pr.id} editable={!pr.merged} compact />
+    </>
+  )
 }
 
 // 판단 전: 무엇을 기다리는지 · 얼마나 · 언제 사람에게 넘어가는지 · 지금 사람이 할 수 있는 것
@@ -205,6 +238,14 @@ export function Reviews({ s, d, item }: P & { item?: string }) {
         <Step name="규칙" on title={`통과 ${cnt('통과')} · 확인 필요 ${cnt('확인 필요')} · 걸림 ${cnt('걸림')}`}>
           <ul>{r.checks.map((c) => <li key={c.label}><State v={c.result} tone={c.result === '확인 필요' ? 'amber' : c.result === '통과' ? 'green' : undefined} /> <b>{c.label}</b> <span className="muted"><Linked s={s} text={c.detail} /></span></li>)}</ul>
         </Step>
+        {r.target === 'merge_pr' && (() => {
+          const pr = s.prs.find((p) => p.id === r.ref)
+          return pr ? (
+            <Step name="변경" on title={`${pr.gate.files}파일 · ${pr.gate.lines}줄 · ${pr.gate.paths}`}>
+              <Changes s={s} pr={pr} />
+            </Step>
+          ) : null
+        })()}
         <Step name="판단" on={!!r.result} title={r.result ? `${r.result} · ${r.decidedAt}` : <State v={waitLabel(r)} live />}>
           {r.result ? r.resultWhy && <p className="muted">{r.resultWhy}</p> : <Waiting s={s} d={d} r={r} />}
         </Step>

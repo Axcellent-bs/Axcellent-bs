@@ -4,7 +4,8 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { Button, Modal, useDismiss, useToast } from '@dejafix/common-frontend'
 import type { Action, State as S } from '@/lib/planningData'
-import { DEV_API, PlanningApiError, kst, repoApi, vcsApi, type MergeMethod, type RepoBranch, type RepoCheckState, type RepoFile, type RepoGraph, type RepoGraphCommit, type RepoPr, type RepoPrDetail, type RepoPrState, type VcsConnection } from '@/lib/planning'
+import { DiffFiles } from '@/components/dev/diff'
+import { DEV_API, PlanningApiError, kst, repoApi, vcsApi, type MergeMethod, type RepoBranch, type RepoCheckState, type RepoGraph, type RepoGraphCommit, type RepoPr, type RepoPrDetail, type RepoPrState, type VcsConnection } from '@/lib/planning'
 import { layoutGraph, laneColor, type GraphRow } from '@/components/dev/graphlayout'
 import { prSlug, toPath, go } from '@/components/planning-common/links'
 import { Work } from '@/components/dev/work'
@@ -14,7 +15,6 @@ import { Work } from '@/components/dev/work'
 const STATE_LABEL: Record<RepoPrState, string> = { open: '열림', merged: '머지됨', closed: '닫힘' }
 const CI_LABEL: Record<RepoCheckState, string> = { passed: 'CI 통과', failed: 'CI 실패', pending: 'CI 진행 중' }
 const METHOD_LABEL: Record<MergeMethod, string> = { merge: 'Merge commit', squash: 'Squash', rebase: 'Rebase' }
-const FILE_STATUS: Record<string, string> = { added: '추가', removed: '삭제', modified: '수정', renamed: '이름 바꿈', copied: '복사', changed: '수정' }
 
 // 오류 코드 → 해요체 알림 (백엔드 문장은 그대로 쓰지 않는다)
 const ERR: Record<string, string> = {
@@ -279,7 +279,7 @@ function PrView({ conn, number, tab }: { conn: string; number: number; tab?: str
       <div className={view === 'files' ? 'rp-files-wrap' : 'rp-body'}>
         {view === 'talk' && <Talk x={x} api={api} readOnly={ro} onDone={det.reload} />}
         {view === 'commits' && <Commits x={x} />}
-        {view === 'files' && <Files x={x} />}
+        {view === 'files' && <DiffFiles files={x.diff.files} truncated={x.diff.truncated} total={x.diff.total_files} draftKey={`${conn}#${number}`} editable={!ro && p.state === 'open'} />}
         {view !== 'files' && <Sidebar x={x} lines={lines} />}
       </div>
 
@@ -418,79 +418,6 @@ function Sidebar({ x, lines }: { x: RepoPrDetail; lines: number }) {
         {x.pr.url && /^https?:\/\//.test(x.pr.url) && <div><a href={x.pr.url} target="_blank" rel="noopener noreferrer" className="small">원본 열기 ↗</a></div>}
       </section>
     </aside>
-  )
-}
-
-// ---- 변경 파일: 왼쪽 파일 목록, 오른쪽 파일별 diff (머리 고정, 접기)
-
-interface DiffRow { kind: 'hunk' | 'add' | 'del' | 'ctx' | 'note'; old?: number; new?: number; text: string }
-const HUNK = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/
-function parsePatch(patch: string): DiffRow[] {
-  const out: DiffRow[] = []
-  let o = 0
-  let n = 0
-  for (const line of patch.split('\n')) {
-    const m = HUNK.exec(line)
-    if (m) { o = Number(m[1]); n = Number(m[2]); out.push({ kind: 'hunk', text: line }); continue }
-    if (line.startsWith('+')) out.push({ kind: 'add', new: n++, text: line.slice(1) })
-    else if (line.startsWith('-')) out.push({ kind: 'del', old: o++, text: line.slice(1) })
-    else if (line.startsWith('\\')) out.push({ kind: 'note', text: line })
-    else if (line !== '' || out.length) out.push({ kind: 'ctx', old: o++, new: n++, text: line.slice(1) })
-  }
-  // 끝의 빈 줄(마지막 줄바꿈)은 버린다
-  while (out.length && out[out.length - 1].kind === 'ctx' && out[out.length - 1].text === '') out.pop()
-  return out
-}
-
-function Files({ x }: { x: RepoPrDetail }) {
-  const [shut, setShut] = useState<Set<string>>(new Set())
-  const toggle = (p: string) => setShut((s) => { const t = new Set(s); if (t.has(p)) t.delete(p); else t.add(p); return t })
-  const files = x.diff.files
-  if (!files.length) return <div className="empty"><b>바뀐 파일 없음</b></div>
-  const jump = (i: number) => document.getElementById(`rp-f-${i}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  return (
-    <div className="rp-files">
-      <nav className="rp-tree" aria-label="바뀐 파일">
-        {files.map((f, i) => (
-          <button key={f.path} type="button" onClick={() => jump(i)} title={f.path}>
-            <span className="rp-tree-name">{f.path.split('/').pop()}<span className="muted small"> {f.path.split('/').slice(0, -1).join('/')}</span></span>
-            <span className="rp-tree-n"><span className="rp-add">+{f.additions}</span> <span className="rp-del">−{f.deletions}</span></span>
-          </button>
-        ))}
-        {x.diff.truncated && <span className="tag tag-amber">잘림 · {files.length}/{x.diff.total_files}</span>}
-      </nav>
-      <div className="rp-diffs">
-        {files.map((f, i) => <FileBlock key={f.path} f={f} i={i} open={!shut.has(f.path)} onToggle={() => toggle(f.path)} />)}
-      </div>
-    </div>
-  )
-}
-
-function FileBlock({ f, i, open, onToggle }: { f: RepoFile; i: number; open: boolean; onToggle: () => void }) {
-  const rows = useMemo(() => (f.patch ? parsePatch(f.patch) : []), [f.patch])
-  return (
-    <section className="rp-file" id={`rp-f-${i}`}>
-      <button type="button" className="rp-file-h" onClick={onToggle} aria-expanded={open}>
-        <span aria-hidden className="rp-caret">{open ? '▾' : '▸'}</span>
-        <code className="rp-file-path">{f.previous_path && f.previous_path !== f.path ? `${f.previous_path} → ` : ''}{f.path}</code>
-        <span className="tag">{FILE_STATUS[f.status] ?? f.status}</span>
-        {f.truncated && <span className="tag tag-amber">잘림</span>}
-        <span className="rp-tree-n"><span className="rp-add">+{f.additions}</span> <span className="rp-del">−{f.deletions}</span></span>
-      </button>
-      {open && (rows.length ? (
-        <div className="rp-code" role="table" aria-label={`${f.path} diff`}>
-          {rows.map((r, k) => (
-            <div key={k} className={`rp-ln rp-ln-${r.kind}`} role="row">
-              <span className="rp-no" role="cell">{r.old ?? ''}</span>
-              <span className="rp-no" role="cell">{r.new ?? ''}</span>
-              <span className="rp-sign" role="cell" aria-hidden>{r.kind === 'add' ? '+' : r.kind === 'del' ? '−' : ''}</span>
-              <span className="rp-txt" role="cell">{r.text}</span>
-            </div>
-          ))}
-          {f.truncated && <div className="rp-ln rp-ln-note"><span className="rp-no" /><span className="rp-no" /><span className="rp-sign" /><span className="rp-txt">… 잘림</span></div>}
-        </div>
-      ) : <div className="rp-nodiff muted small">{f.truncated ? '잘림' : 'diff 없음 (바이너리·큰 파일)'}</div>)}
-    </section>
   )
 }
 
