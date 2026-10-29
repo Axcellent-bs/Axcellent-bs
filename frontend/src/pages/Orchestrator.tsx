@@ -195,6 +195,34 @@ function SimilarCases({ incident }: { incident: Incident }) {
   );
 }
 
+/** 과거 해결 기록에서 가져온 원인 후보와 조치. 사람이 확인할 참고이고 자동으로 실행하지 않는다 */
+function PastRecommendation({ incident }: { incident: Incident }) {
+  const r = incident.recommendation;
+  if (!r) return null;
+  return (
+    <section className="card space-y-2 p-5">
+      <h3 className="text-[15px] font-semibold">과거 근거 기반 추천</h3>
+      {r.status !== "found" ? (
+        <p className="text-sm text-ink-500">추천할 과거 근거가 없습니다. {r.reason}.</p>
+      ) : (
+        <>
+          <p className="text-sm">
+            <span className="font-medium">{r.title}</span>
+            <span className="chip ml-2 bg-ink-100 text-ink-700 tabular-nums">유사도 {Math.round((r.similarity ?? 0) * 100)}%</span>
+          </p>
+          <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1 text-sm">
+            <dt className="text-ink-500">원인 후보</dt><dd>{r.root_cause ?? "확인할 수 없음"}</dd>
+            <dt className="text-ink-500">그때 한 조치</dt><dd>{r.action ?? "확인할 수 없음"}</dd>
+            <dt className="text-ink-500">그때 소요 시간</dt><dd>{r.minutes_to_resolve != null ? `${r.minutes_to_resolve}분` : "확인할 수 없음"}</dd>
+          </dl>
+          <p className="text-xs text-ink-500">{r.caveat}</p>
+        </>
+      )}
+      <p className="text-xs text-ink-500">참고용입니다. 이 추천으로 자동 조치하지 않고, 조치는 기존 안전 관문과 사람 승인을 따릅니다.</p>
+    </section>
+  );
+}
+
 function IncidentDetail({ incident }: { incident: Incident }) {
   const shared = Object.entries(incident.shared ?? {});
   const done = incident.steps.filter((s) => s.status === "completed").length;
@@ -230,6 +258,7 @@ function IncidentDetail({ incident }: { incident: Incident }) {
       </section>
 
       <SimilarCases incident={incident} />
+      <PastRecommendation incident={incident} />
 
       <section className="card overflow-x-auto p-5">
         <h3 className="mb-3 text-[15px] font-semibold">단계</h3>

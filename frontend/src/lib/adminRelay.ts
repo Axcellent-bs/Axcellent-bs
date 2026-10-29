@@ -24,6 +24,19 @@ export interface Step {
   /** 단계 결과. 스킬마다 모양이 다르다(예: 비슷한 과거 사건 찾기의 cases) */
   output?: Record<string, unknown>;
 }
+/** 비슷한 과거 사건에 남은 원인·조치를 이번 사건에 참고로 붙인 것 (총괄이 계산, 실행하지 않음) */
+export interface Recommendation {
+  status: "found" | "no_evidence";
+  reason?: string;
+  card_id?: string;
+  title?: string;
+  similarity?: number;
+  outcome?: string;
+  root_cause?: string | null;
+  action?: string | null;
+  minutes_to_resolve?: number | null;
+  caveat?: string;
+}
 export interface PendingHold { step_id: string; skill: string; label: string }
 export interface Incident {
   context_id: string;
@@ -34,6 +47,7 @@ export interface Incident {
   opened_at: string;
   closed_at: string | null;
   steps: Step[];
+  recommendation?: Recommendation | null;
   events: { at: string; message: string }[];
   summary: string[];
   metrics: { mttr_seconds?: number; steps_total?: number; steps_completed?: number; held?: number; transfers?: number; retries?: number };

@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from ax_orchestrator.recommend import recommend
+
 
 def now() -> datetime:
     return datetime.now(UTC)
@@ -138,6 +140,7 @@ class Incident:
             "summary": self.summary,
             "metrics": self.metrics,
             "shared": self.shared,
+            "recommendation": recommend(self.outputs.get("similar_cases")),
             "pending_holds": [
                 {"step_id": sid, "skill": self.steps[sid].skill, "label": self.steps[sid].label}
                 for sid, hold in self.holds.items()
