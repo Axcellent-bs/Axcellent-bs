@@ -47,7 +47,7 @@ def test_card_lists_find_active_incident(client) -> None:
     card = client.get("/.well-known/agent-card.json").json()
     skill = next(s for s in card["skills"] if s["id"] == "find_active_incident")
     assert skill["grade"] == "read"
-    assert skill["allowed_requesters"] == ["support"]
+    assert skill["allowed_requesters"] == ["support", "planning"]
 
 
 def test_no_manager_means_not_found(client) -> None:
