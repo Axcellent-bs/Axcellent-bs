@@ -96,6 +96,19 @@ seed `20261029` 분석 결론:
 - 장애를 넣은 시각은 03:20이지만 그 5분엔 주문이 없었다. 첫 실패는 03:25에 1건(low), 03:30은 주문 0건, 03:35에 2건이다. 03:40 감시에서 이상이 된다.
 - 첫 장애 쪽 실패(03:25)부터 재면 15분이다.
 
+## 설명 표기 (가짜 LLM `realistic_notation`, `llm.notation_fallback_rate`)
+
+평가용 가짜 LLM(`eval_llm.ScriptedLLM`)은 케이스의 `llm` 값으로 행동을 고른다: `grounded`(받은 값 그대로), `hallucinate`(지어낸 숫자 섞음), `fail`(늘 실패), `realistic_notation`(#133).
+
+- `realistic_notation`: 실제 LLM처럼 계산값의 **표기만** 바꿔 적는다. 지어낸 숫자는 없다
+  - 1보다 작은 비율 → 퍼센트 (0.42 → 42%)
+  - 그 밖의 소수 → 소수 첫째 자리 반올림 (2.747 → 2.7)
+  - 1000 이상 정수 → 천 단위 쉼표 (1234000 → 1,234,000)
+- 적용 케이스: `pay_half_20m_14h`, `pay_weak20_20m_10h`, `order_drop_70_30m_10h`, `usual_fault_pay_full_15m_11h` (예전 `grounded`)
+- `llm.notation_fallback_rate`: 이 케이스들의 설명(이상 탐지·영향 분석) 중 검증(`explain._numbers_valid`)이 버리고 템플릿으로 대체한 비율. 결과 파일 케이스의 `fallback_reason`·`fallback_numbers`로 이유를 본다
+  - **지금 높게 나오는 것이 정상이다.** 지금 검증은 표기만 바꾼 숫자(42%, 2.7)도 "계산에 없는 숫자"(`number_invalid`)로 본다. 쉼표는 지우고 읽어서 통과한다
+  - 이 지표는 나중에 검증을 고칠 때의 기준이다. 좋아지고 나빠지는 방향을 정하지 않는다(기준 비교에서 빼지 않고 값만 남긴다)
+
 ## 케이스 종류
 
 정답은 `make_cases.py`가 shop-api 코드로 데이터를 만든 뒤(`eval_world.build`) 그 결제 기록에서 센다. 명세를 바꾸면 `uv run python domains/data/eval/make_cases.py`로 다시 만든다.

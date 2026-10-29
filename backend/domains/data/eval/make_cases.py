@@ -143,8 +143,8 @@ SPECS: list[dict[str, Any]] = [
     _fault("pay_full_20m_10h", 1, 10, 20, 20, 1.0, DEPLOY),
     _fault("pay_full_10m_19h", 2, 19, 25, 10, 1.0, DEPLOY, "hallucinate"),
     _fault("pay_full_45m_10h_two_deploys", 3, 10, 10, 45, 1.0, DEPLOY_WITH_OLD),
-    _fault("pay_half_20m_14h", 4, 14, 20, 20, 0.5, NOTICE),
-    _fault("pay_weak20_20m_10h", 5, 10, 20, 20, 0.2, NONE),
+    _fault("pay_half_20m_14h", 4, 14, 20, 20, 0.5, NOTICE, "realistic_notation"),
+    _fault("pay_weak20_20m_10h", 5, 10, 20, 20, 0.2, NONE, "realistic_notation"),
     _fault("pay_weak20_45m_19h", 6, 19, 10, 45, 0.2, DEPLOY, "fail"),
     _fault(
         "pay_full_20m_03h_night", 7, 3, 20, 20, 1.0, DEPLOY, note="결제 장애 20분, 새벽(주문 적음)"
@@ -175,6 +175,7 @@ SPECS: list[dict[str, Any]] = [
         10,
         {"type": "order_drop", "start": 20, "minutes": 30, "factor": 0.3},
         DEPLOY,
+        "realistic_notation",
         note="주문 70% 급감 30분 (결제 정상)",
     ),
     _shape(
@@ -353,6 +354,7 @@ SPECS: list[dict[str, Any]] = [
             15,
             1.0,
             DEPLOY,
+            "realistic_notation",
             note="결제 장애 15분, 세기 100%, 11시 — 평소에도 장애 쪽 실패 5분에 1~3건",
         )
     ),

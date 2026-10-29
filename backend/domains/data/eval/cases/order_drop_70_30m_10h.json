@@ -20,7 +20,7 @@
     "minutes_before": 8,
     "pr_number": 710
   },
-  "llm": "grounded",
+  "llm": "realistic_notation",
   "expected": {
     "anomaly": {
       "expected": true,

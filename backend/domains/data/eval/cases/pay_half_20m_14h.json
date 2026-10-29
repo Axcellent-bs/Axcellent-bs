@@ -20,7 +20,7 @@
     "minutes_before": 12,
     "notice_id": "ntc_eval_03"
   },
-  "llm": "grounded",
+  "llm": "realistic_notation",
   "expected": {
     "anomaly": {
       "expected": true,
