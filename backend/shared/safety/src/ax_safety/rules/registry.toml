@@ -60,6 +60,12 @@ action = "set_inquiry_status"
 owner = "support"
 base_grade = "A"
 
+# 클레임 서비스가 문의 서비스에 알리는 클레임 처리 결과 기록 (문의의 AI 처리 내력). 돈은 움직이지 않는다
+[[actions]]
+action = "record_claim_activity"
+owner = "support"
+base_grade = "A"
+
 # 클레임 처리 기록 (#105). 돈이 나가지 않는 기록만. 환불 지급은 refund_request(A, 한도 넘으면 C)
 [[actions]]
 action = "create_claim"
@@ -297,3 +303,37 @@ action = "merge_pr"
 owner = "planning"
 base_grade = "B"
 verifier = "safety"
+
+# 레포 작업 공간 (개발 화면에서 사람이 PR·브랜치를 직접 다룬다, 사람 토큰).
+# 머지는 위 merge_pr(B) 관문 그대로. 되돌리기 PR은 병합된 변경을 뒤집는 새 PR이라 merge_pr처럼 B,
+# 검증자 = 같은 크기·경로 코드 규칙. 닫기·다시 열기·코멘트·브랜치 지우기는 병합된 코드를 바꾸지 않아 A
+[[actions]]
+action = "repo_revert_pr"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "B"
+verifier = "safety"
+
+[[actions]]
+action = "repo_close_pr"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+[[actions]]
+action = "repo_reopen_pr"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+[[actions]]
+action = "repo_comment"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+[[actions]]
+action = "repo_delete_branch"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"

@@ -12,8 +12,9 @@
 
 from __future__ import annotations
 
+import heapq
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Literal, Protocol, runtime_checkable
 
@@ -130,6 +131,246 @@ class OpenRequest:
     files: dict[str, str] = field(default_factory=dict)
 
 
+# ---- 레포 작업 공간 (개발 화면에서 PR·브랜치를 직접 다룬다)
+
+ChangeState = Literal["open", "merged", "closed"]
+# 목록·상세 한도 (응답 크기를 묶는다)
+CHANGE_LIST_LIMIT = 50
+DIFF_MAX_FILES = 300
+DIFF_FILE_CHARS = 20_000
+DIFF_TOTAL_CHARS = 300_000
+COMMIT_LIMIT = 100
+COMMENT_LIMIT = 100
+BRANCH_LIMIT = 200
+MERGE_METHODS = ("merge", "squash", "rebase")
+
+
+@dataclass(frozen=True)
+class ChangeSummary:
+    """병합 요청 하나의 머리 정보 (목록·상세 머리). 사람이 직접 올린 것도 같다."""
+
+    number: int
+    title: str
+    state: ChangeState
+    branch: str
+    base: str
+    author: str = ""
+    body: str = ""
+    draft: bool = False
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    merged_at: datetime | None = None
+    closed_at: datetime | None = None
+    url: str | None = None
+    comments: int | None = None
+    # CI 상태 (목록에서는 열린 것 몇 개만 본다. 모르면 None)
+    checks: CheckState | None = None
+
+
+@dataclass(frozen=True)
+class FileDiff:
+    """파일 하나의 unified diff. 너무 길면 자르고 truncated."""
+
+    path: str
+    status: str = "modified"  # added · modified · removed · renamed
+    additions: int = 0
+    deletions: int = 0
+    patch: str | None = None
+    previous_path: str | None = None
+    truncated: bool = False
+
+
+@dataclass(frozen=True)
+class Diff:
+    number: int
+    files: tuple[FileDiff, ...] = ()
+    # 파일 수·전체 글자 한도를 넘어 뒤를 뺐다
+    truncated: bool = False
+    total_files: int = 0
+
+
+@dataclass(frozen=True)
+class Commit:
+    sha: str
+    message: str
+    author: str = ""
+    at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class Comment:
+    id: str
+    author: str
+    body: str
+    at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class Branch:
+    name: str
+    sha: str = ""
+    protected: bool = False
+    default: bool = False
+    last_commit_at: datetime | None = None
+    ahead: int | None = None
+    behind: int | None = None
+
+
+# ---- 커밋 그래프 (SourceTree·`git log --graph`처럼 레포 상태를 한눈에)
+
+GRAPH_LIMIT = 200
+GRAPH_MAX = 500
+# 그래프에 올릴 브랜치 수 (GitHub는 브랜치마다 커밋 목록을 한 번씩 부른다)
+GRAPH_BRANCHES = 30
+GRAPH_MESSAGE_CHARS = 500
+
+
+@dataclass(frozen=True)
+class GraphCommit:
+    sha: str
+    parents: tuple[str, ...] = ()
+    message: str = ""
+    author: str = ""
+    at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class GraphPr:
+    """그래프 위 PR 꼬리표: head 끝 커밋·머지 커밋 → PR 번호."""
+
+    number: int
+    title: str
+    state: ChangeState
+    branch: str
+    head_sha: str = ""
+    merge_sha: str = ""
+
+
+@dataclass(frozen=True)
+class GraphBranch:
+    name: str
+    sha: str = ""
+    default: bool = False
+
+
+@dataclass(frozen=True)
+class Graph:
+    """커밋 그래프. commits는 최신이 먼저이고 자식이 늘 부모보다 앞이다."""
+
+    commits: tuple[GraphCommit, ...] = ()
+    # 그래프에 올린 브랜치의 끝 커밋 (이름 → sha)
+    heads: dict[str, str] = field(default_factory=dict)
+    # 고를 수 있는 브랜치 전체 (필터용)
+    branches: tuple[GraphBranch, ...] = ()
+    prs: tuple[GraphPr, ...] = ()
+    # 한도(커밋 수·브랜치 수)에 걸려 뒤를 뺐다
+    truncated: bool = False
+
+
+@dataclass(frozen=True)
+class CommitDetail:
+    sha: str
+    parents: tuple[str, ...] = ()
+    message: str = ""
+    author: str = ""
+    at: datetime | None = None
+    url: str | None = None
+    files: tuple[FileDiff, ...] = ()
+    total_files: int = 0
+
+
+def order_commits(commits: list[GraphCommit]) -> list[GraphCommit]:
+    """최신 순으로 늘어놓되 자식이 늘 부모보다 앞에 오게 한다 (시계가 어긋나도).
+
+    같은 시각이면 나중에 넣은 것이 먼저다. 목록에 없는 부모는 무시한다."""
+    if not commits:
+        return []
+    seq = {c.sha: i for i, c in enumerate(commits)}
+    by = {c.sha: c for c in commits}
+
+    def key(c: GraphCommit) -> tuple[float, int]:
+        stamp = c.at.timestamp() if c.at is not None else float("-inf")
+        return (-stamp, -seq[c.sha])
+
+    children: dict[str, int] = dict.fromkeys(by, 0)
+    for c in by.values():
+        for p in set(c.parents):
+            if p in children:
+                children[p] += 1
+
+    ready = [(key(c), c.sha) for c in by.values() if children[c.sha] == 0]
+    heapq.heapify(ready)
+    out: list[GraphCommit] = []
+    while ready:
+        _, sha = heapq.heappop(ready)
+        c = by[sha]
+        out.append(c)
+        for p in set(c.parents):
+            if p in children:
+                children[p] -= 1
+                if children[p] == 0:
+                    heapq.heappush(ready, (key(by[p]), p))
+    if len(out) < len(by):  # 고리가 있으면(있을 수 없지만) 남은 것을 뒤에 붙인다
+        seen = {c.sha for c in out}
+        out += sorted((c for c in by.values() if c.sha not in seen), key=key)
+    return out
+
+
+def reachable(commits: list[GraphCommit], tips: list[str]) -> set[str]:
+    by = {c.sha: c for c in commits}
+    seen: set[str] = set()
+    stack = [t for t in tips if t in by]
+    while stack:
+        sha = stack.pop()
+        if sha in seen:
+            continue
+        seen.add(sha)
+        stack.extend(p for p in by[sha].parents if p in by and p not in seen)
+    return seen
+
+
+def cap_diff(number: int, files: list[FileDiff]) -> Diff:
+    """diff 크기를 묶는다: 파일 300개, 파일당 2만 자, 합 30만 자. 넘으면 잘라 truncated."""
+    out: list[FileDiff] = []
+    used = 0
+    cut = False
+    for f in files[:DIFF_MAX_FILES]:
+        patch = f.patch
+        trunc = f.truncated
+        if patch is not None:
+            room = max(0, min(DIFF_FILE_CHARS, DIFF_TOTAL_CHARS - used))
+            if len(patch) > room:
+                patch = patch[:room]
+                # 줄 중간에서 끊지 않는다
+                patch = patch[: patch.rfind("\n") + 1] if "\n" in patch else ""
+                trunc = True
+            used += len(patch)
+        if used >= DIFF_TOTAL_CHARS:
+            cut = True
+        out.append(replace(f, patch=patch, truncated=trunc))
+    return Diff(
+        number=number,
+        files=tuple(out),
+        truncated=cut or len(files) > DIFF_MAX_FILES,
+        total_files=len(files),
+    )
+
+
+def match_query(c: ChangeSummary, query: str | None) -> bool:
+    """제목·브랜치·번호(`12`, `#12`)·작성자로 찾는다. 대소문자 무시."""
+    q = (query or "").strip().lower()
+    if not q:
+        return True
+    num = q.lstrip("#")
+    if num.isdigit() and int(num) == c.number:
+        return True
+    return any(q in (x or "").lower() for x in (c.title, c.branch, c.author))
+
+
+def state_of(merged: bool, closed: bool) -> ChangeState:
+    return "merged" if merged else ("closed" if closed else "open")
+
+
 @runtime_checkable
 class VcsAdapter(Protocol):
     """형상관리 연결 부품. 프로그램마다 하나씩 만든다."""
@@ -191,6 +432,54 @@ class VcsAdapter(Protocol):
         """CI 상태 (IF-CUS-002)."""
         ...
 
+    # ---- 레포 작업 공간 (읽기는 그냥, 쓰기는 `execute()` 뒤에만)
+
+    async def list_changes(
+        self, state: str = "open", query: str | None = None, limit: int = CHANGE_LIST_LIMIT
+    ) -> list[ChangeSummary]:
+        """병합 요청 목록 (사람이 직접 올린 것 포함, 최근 갱신 순). state open·merged·closed·all."""
+        ...
+
+    async def describe_change(self, number: int) -> ChangeSummary:
+        """병합 요청 하나의 머리 정보 (본문·작성자·상태)."""
+        ...
+
+    async def get_diff(self, number: int) -> Diff:
+        """파일별 unified diff (`cap_diff` 한도)."""
+        ...
+
+    async def list_commits(self, number: int, limit: int = COMMIT_LIMIT) -> list[Commit]: ...
+
+    async def list_comments(self, number: int, limit: int = COMMENT_LIMIT) -> list[Comment]:
+        """대화 코멘트 (줄 코멘트는 아직 안 본다)."""
+        ...
+
+    async def add_comment(self, number: int, body: str) -> Comment: ...
+
+    async def reopen_change(self, number: int) -> ChangeSummary:
+        """닫힌(병합 안 된) 변경을 다시 연다. 병합됐으면 conflict."""
+        ...
+
+    async def revert_change(self, number: int, title: str | None = None) -> OpenedChange:
+        """병합된 변경을 되돌리는 새 병합 요청을 연다. 병합 안 됐으면 conflict."""
+        ...
+
+    async def list_branches(self, limit: int = BRANCH_LIMIT) -> list[Branch]: ...
+
+    async def delete_branch(self, name: str) -> None:
+        """브랜치 지우기. 기준·기본 브랜치는 invalid."""
+        ...
+
+    async def list_graph(
+        self, branches: list[str] | None = None, limit: int = GRAPH_LIMIT
+    ) -> Graph:
+        """커밋 그래프 (고른 브랜치에서 닿는 커밋, 최신 순 limit개). None이면 브랜치 전체."""
+        ...
+
+    async def get_commit(self, sha: str) -> CommitDetail:
+        """커밋 하나의 전체 메시지·부모·바뀐 파일 (+/−만, diff 글은 빼도 된다)."""
+        ...
+
 
 # ---------------------------------------------------------------- 공용 도우미
 
@@ -228,6 +517,16 @@ def check_branch(branch: str) -> str:
     if ".." in branch or " " in branch:
         raise VcsError("invalid", f"쓸 수 없는 브랜치 이름: {branch}")
     return branch
+
+
+_SHA = re.compile(r"^[0-9A-Za-z]{4,64}$")
+
+
+def check_sha(sha: str) -> str:
+    s = (sha or "").strip()
+    if not _SHA.match(s):
+        raise VcsError("invalid", f"커밋 sha가 아니다: {sha[:80]}")
+    return s
 
 
 def check_path(path: str) -> str:

@@ -338,11 +338,24 @@ class ConversationListItem(BaseModel):
     awaiting_reply: bool
 
 
+class ActivityEntry(BaseModel):
+    """문의의 AI 처리 내력 한 줄 (고객지원이 코드로 남긴 사실. 고객 원문·답변 본문은 없다)."""
+
+    at: str
+    actor: Literal["ai", "agent", "customer", "system"]
+    kind: str
+    title: str
+    detail: str = ""
+    ref: str | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
 class Conversation(ConversationListItem):
     messages: list[Message] = Field(default_factory=list)
     summary: Summary | None = None
     order_no: str | None = None
     claims: list[Claim] = Field(default_factory=list)
+    activity: list[ActivityEntry] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------- 후기

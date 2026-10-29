@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from support_agent.schemas import (
+    ActivityEntry,
     Analysis,
     Conversation,
     ConversationListItem,
@@ -100,6 +101,34 @@ class InquiryStore:
     def add_agent_message(self, inquiry_id: int, text: str) -> Conversation:
         conversation = self._conversations[inquiry_id]
         self._append(conversation, "agent", text, None, now_iso())
+        return conversation
+
+    def log_activity(
+        self,
+        inquiry_id: int,
+        *,
+        kind: str,
+        title: str,
+        actor: str = "ai",
+        detail: str = "",
+        ref: str | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> Conversation | None:
+        """AI 처리 내력에 한 줄 남긴다. 없는 문의면 아무것도 하지 않는다."""
+        conversation = self._conversations.get(inquiry_id)
+        if conversation is None:
+            return None
+        conversation.activity.append(
+            ActivityEntry(
+                at=now_iso(),
+                actor=actor,  # type: ignore[arg-type]
+                kind=kind,
+                title=title,
+                detail=detail,
+                ref=ref,
+                data=data or {},
+            )
+        )
         return conversation
 
     def set_status(self, inquiry_id: int, status: InquiryStatus) -> Conversation:

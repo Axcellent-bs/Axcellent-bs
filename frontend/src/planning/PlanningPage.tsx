@@ -3,17 +3,19 @@
 // 공통 화면 컴포넌트(@dejafix/common-frontend)의 스타일은 .planning-scope 안에만 적용된다 (postcss.config.js).
 import '@dejafix/common-frontend/styles.css'
 import './planning.css'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useReducer, useRef, useState } from 'react'
 import { Chip, ToastOutlet, ToastProvider, useToast, type NavItem } from '@dejafix/common-frontend'
 import { ACTION_ERROR_EVENT, useSharedStore } from './store'
 import { apiBase } from './api'
+import { TODAY, initialState, reducer, type State as DemoState } from './data'
 import { DevToolsDialog } from '@/demo/DevTools'
 import { IconGear } from '@/components/icons'
 import { Dep, Point } from './parts'
-import { Activity, Aftercare, Audit, Autonomy, Links, Metrics, Ops, Reviews, Specs, Work } from './pages'
+import { Activity, Aftercare, Audit, Autonomy, Links, Metrics, Ops, Reviews, Specs } from './pages'
+import { PrsTab } from './repows'
 import { Requests, incomingCount } from './requests'
 import { Docs } from './docs'
-import { Talk } from './talk'
+import { AgentTalk, Talk } from './talk'
 import { Projects } from './projects'
 import { convoHref } from './links'
 import { Knowledge } from './knowledge'
@@ -22,7 +24,8 @@ import { ChatPanel, useDevChat } from './chat'
 import { prSlug } from './links'
 
 type IconName = NonNullable<NavItem['icon']>
-interface Section { label: string; icon: IconName; tabs: { id: string; label: string }[] }
+// hidden: 메뉴에는 안 보이지만 주소로는 열린다 (소통은 부서 공용 탭으로 뺄 때까지 숨김)
+interface Section { label: string; icon: IconName; tabs: { id: string; label: string }[]; hidden?: boolean }
 
 // 데모에서 기획(요청을 기획서로)과 개발(작업·검증·배포·사후관리)을 두 부서로 나눴다. 데이터는 같은 기획개발 서비스에서 받는다.
 export type PlanningPart = 'planning' | 'dev'
@@ -36,7 +39,8 @@ const PARTS: Record<PlanningPart, { title: string; desc: string; home: string; s
       requests: { label: '요청', icon: 'bell', tabs: [] }, // 들어온·진행 중·해결·후속은 화면 안 필터 (#/requests/<필터>)
       work: { label: '기획서', icon: 'plan', tabs: [{ id: 'specs', label: '기획서' }] },
       docs: { label: '정리', icon: 'report', tabs: [] },
-      talk: { label: '소통', icon: 'send', tabs: [] },
+      agents: { label: '에이전트 대화', icon: 'send', tabs: [] },
+      talk: { label: '소통', icon: 'send', tabs: [], hidden: true },
       knowledge: { label: '규정·자료', icon: 'admin', tabs: [] },
       metrics: { label: '지표', icon: 'dashboard', tabs: [
         { id: 'overview', label: '지표' },
@@ -55,7 +59,8 @@ const PARTS: Record<PlanningPart, { title: string; desc: string; home: string; s
         { id: 'ops', label: '운영·배포' },
         { id: 'aftercare', label: '사후관리' },
       ] },
-      talk: { label: '소통', icon: 'send', tabs: [] },
+      agents: { label: '에이전트 대화', icon: 'send', tabs: [] },
+      talk: { label: '소통', icon: 'send', tabs: [], hidden: true },
       metrics: { label: '지표', icon: 'dashboard', tabs: [
         { id: 'autonomy', label: '자동 처리 범위' },
         { id: 'audit', label: 'AI 승인 감사' },
@@ -86,12 +91,25 @@ export default function PlanningPage({ part = 'planning' }: { part?: PlanningPar
   )
 }
 
+const EXAMPLE_KEY = 'axcellent-planning-example'
+// 예시의 AI 승인 감사는 "오늘" 건만 보여서, 예시 기록 날짜를 오늘로 옮긴다
+const todayDemo = (s: DemoState): DemoState => ({ ...s, audit: s.audit.map((a) => ({ ...a, t: `${TODAY}${a.t.slice(5)}` })) })
+
 function Planning({ part }: { part: PlanningPart }) {
   const P = PARTS[part]
   const SECTIONS = P.sections
   const isSection = (x: string) => x in SECTIONS
   const route = useRoute(P.home)
-  const [state, dispatch, connected] = useSharedStore(apiBase(part))
+  const [live, liveDispatch, connected] = useSharedStore(apiBase(part))
+  // 예시 모드: 서버 대신 화면 안의 프로토타입 예시 데이터(data.ts)로 흐름을 보여 준다. 서버 데이터는 건드리지 않는다
+  const [example, setExample] = useState(() => { try { return localStorage.getItem(EXAMPLE_KEY) === '1' } catch { return false } })
+  const [demo, demoDispatch] = useReducer(reducer, initialState, todayDemo)
+  const state = example ? demo : live
+  const dispatch = example ? demoDispatch : liveDispatch
+  const pickExample = (on: boolean) => {
+    setExample(on)
+    try { localStorage.setItem(EXAMPLE_KEY, on ? '1' : '0') } catch { /* 저장이 막혀도 이번 화면에서는 바뀐다 */ }
+  }
   const [tools, setTools] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const toast = useToast()
@@ -133,7 +151,7 @@ function Planning({ part }: { part: PlanningPart }) {
 
   const badge: Record<string, number> = part === 'planning' ? { requests: newWork || incoming, talk: newTalk } : { talk: newTalk }
   const menu = [
-    ...Object.keys(SECTIONS).map((id) => ({
+    ...Object.keys(SECTIONS).filter((id) => !SECTIONS[id].hidden).map((id) => ({
       href: `#/${id}${SECTIONS[id].tabs[0] ? `/${SECTIONS[id].tabs[0].id}` : ''}`,
       label: SECTIONS[id].label,
       on: section === id,
@@ -149,9 +167,13 @@ function Planning({ part }: { part: PlanningPart }) {
           <p className="pl-desc">{P.desc}</p>
         </div>
         <div className="pl-tools">
-          <Chip tone={connected ? 'green' : 'amber'} title={`${P.title} 서버 ${apiBase(part)}`}>
-            {`${P.title} ${connected ? '켜짐' : '꺼짐'}`}
-          </Chip>
+          <div className="seg-toggle" role="group" aria-label="데이터 보기">
+            <button type="button" aria-pressed={!example} onClick={() => pickExample(false)}>실제 데이터</button>
+            <button type="button" aria-pressed={example} onClick={() => pickExample(true)}>예시 데이터</button>
+          </div>
+          {example
+            ? <Chip tone="amber" title="화면 안 예시 데이터. 서버에 반영되지 않아요">예시 모드</Chip>
+            : <Chip tone={connected ? 'green' : 'amber'} title={`${P.title} 서버 ${apiBase(part)}`}>{`${P.title} ${connected ? '켜짐' : '꺼짐'}`}</Chip>}
           {repoWait > 0 && firstRepoWait && (
             <a href={`#/work/prs/${prSlug(firstRepoWait.id)}`} className="chip amber" title="대상 레포 승인 대기 PR">레포 승인 대기 {repoWait}</a>
           )}
@@ -159,7 +181,7 @@ function Planning({ part }: { part: PlanningPart }) {
             <button type="button" className="chip amber" onClick={() => { chat.select(chat.working[0]); setChatOpen(true) }}>AI 작업 중 {chat.working.length}</button>
           )}
           {part === 'dev' && (
-            <button type="button" className="btn-primary px-3 py-1" disabled={!connected} title={connected ? '개발 에이전트' : '개발·배포 서버 꺼짐'} onClick={() => setChatOpen(true)}>AI와 대화</button>
+            <button type="button" className="btn-primary px-3 py-1" disabled={!connected || example} title={example ? '예시 모드에서는 쓸 수 없어요' : connected ? '개발 에이전트' : '개발·배포 서버 꺼짐'} onClick={() => setChatOpen(true)}>AI와 대화</button>
           )}
           {part === 'dev' && (
             <button type="button" className="btn-quiet px-2 py-1" title="개발 도구 연결" aria-label="개발 도구 연결" onClick={() => setTools(true)}>
@@ -211,12 +233,13 @@ function Planning({ part }: { part: PlanningPart }) {
           )}
           {section === 'requests' && <Requests s={state} d={dispatch} filter={sub} item={rest[0] ? decodeURIComponent(rest[0]) : undefined} />}
           {section === 'work' && tab === 'specs' && <Specs s={state} d={dispatch} item={item} item2={item2} />}
-          {section === 'work' && tab === 'prs' && <Work s={state} d={dispatch} item={item} />}
+          {section === 'work' && tab === 'prs' && <PrsTab s={state} d={dispatch} parts={rest.map((x) => decodeURIComponent(x))} />}
           {section === 'work' && tab === 'reviews' && <Reviews s={state} d={dispatch} item={item} />}
           {section === 'work' && tab === 'ops' && <Ops s={state} item={item} />}
           {section === 'work' && tab === 'aftercare' && <Aftercare s={state} item={item} />}
           {section === 'docs' && <Docs s={state} d={dispatch} item={item} />}
           {section === 'talk' && <Talk s={state} d={dispatch} item={item} />}
+          {section === 'agents' && <AgentTalk s={state} item={item} />}
           {section === 'knowledge' && <Knowledge />}
           {section === 'projects' && <Projects s={state} d={dispatch} sel={item} />}
           {section === 'metrics' && tab === 'overview' && <Metrics s={state} />}

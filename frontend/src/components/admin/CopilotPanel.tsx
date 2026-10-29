@@ -5,6 +5,7 @@ import { won } from "@/lib/format";
 import type { Conversation, Draft, Message, Source } from "@/lib/types";
 import { FindingList, ValidationBadge } from "../Findings";
 import { StatusChip } from "./bits";
+import { ActivityLog } from "./ActivityLog";
 import { ReceiptAnalysisCard } from "./ReceiptAnalysisCard";
 
 /** 가장 가까운 근거 정책의 유사도가 이 값 미만이면 "근거 정책 부족"으로 알린다.
@@ -124,6 +125,8 @@ export function CopilotPanel({ conv, onUseDraft, onRejectDraft }: { conv: Conver
           <ul className="space-y-2">{a.sources.map((s) => <SourceItem key={s.id} s={s} />)}</ul>
         </section>
       )}
+
+      <ActivityLog items={conv.activity ?? []} />
     </aside>
   );
 }

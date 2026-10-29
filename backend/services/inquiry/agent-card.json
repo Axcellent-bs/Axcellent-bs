@@ -132,6 +132,18 @@
       "priority": "required"
     },
     {
+      "id": "record_claim_activity",
+      "description": "클레임 서비스가 알려 준 클레임 처리 결과(접수·판단·입고·검수·지급)를 이어진 문의의 AI 처리 내력에 남긴다. 코드 값과 금액만 받고 고객 글은 받지 않는다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#RecordClaimActivityInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#RecordClaimActivityInput",
+      "grade": "A",
+      "allowed_requesters": [
+        "support"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "inquiry_overview",
       "description": "문의 KPI(초안 채택률·수정 정도·가드 적중·분류별 건수)와 답변 대기 문의를 코드로 집계해 돌려준다. 상태를 바꾸지 않는다.",
       "input_schema": "agents/support/src/support_agent/schemas.py#ListInquiriesInput",

@@ -237,6 +237,43 @@ async def test_merge_cross_check_missing_evidence_fails_closed(gate: Gate, act) 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("requester", ["planning", "dev"])
+@pytest.mark.parametrize(
+    "action", ["repo_close_pr", "repo_reopen_pr", "repo_comment", "repo_delete_branch"]
+)
+async def test_repo_workspace_actions_are_a(gate: Gate, act, action: str, requester: str) -> None:
+    """레포 작업 공간: 닫기·다시 열기·코멘트·브랜치 지우기는 A (planning·dev만)."""
+    ok = await gate.execute(act(action, requester, f"{action}-{requester}"))
+    assert (ok.grade, ok.status) == ("A", "executed")
+    other = await gate.execute(act(action, "support", f"{action}-support"))
+    assert other.status == "held"
+
+
+@pytest.mark.asyncio
+async def test_repo_revert_pr_rules_match_merge(gate: Gate, verifier: Any, act) -> None:
+    """되돌리기 PR은 merge_pr과 같은 크기·경로·보호 경로·되돌릴 수 없는 영역 기준 (B)."""
+    clean = dict(
+        changed_lines=100, changed_files=3, changed_paths=["docs/a.md"], irreversible_count=0
+    )
+    ok = await gate.execute(act("repo_revert_pr", "dev", "revert-ok", **clean))
+    assert (ok.grade, ok.status, ok.verifier) == ("B", "executed", "safety")
+    assert verifier.tasks == []
+    for key, bad in {
+        "revert_changed_lines": {"changed_lines": 301},
+        "revert_changed_files": {"changed_files": 21},
+        "revert_allowed_paths": {"changed_paths": ["scripts/x.sh"]},
+        "revert_protected_paths": {"changed_paths": ["shop-api/src/ax_shop_api/service.py"]},
+        "revert_irreversible": {"irreversible_count": 1},
+    }.items():
+        decision = await gate.execute(
+            act("repo_revert_pr", "planning", f"revert-{key}", **{**clean, **bad})
+        )
+        assert decision.status == "held"
+        review = gate.store.get_review(decision.review_id or "")
+        assert [hit["key"] for hit in review.report["rules"]] == [key]  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
 async def test_missing_rule_fields_fail_closed(gate: Gate, act) -> None:
     """금액이 아닌 규칙의 필드가 없으면 통과시키지 않는다."""
     decision = await gate.execute(act("generate_pr", "planning", "pr-none", changed_lines=10))

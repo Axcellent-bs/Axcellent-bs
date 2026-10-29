@@ -13,7 +13,7 @@ _service: PlanningService | None = None
 def get_service() -> PlanningService:
     global _service
     if _service is None:
-        _service = PlanningService()
+        _service = PlanningService(real_example=True)
     return _service
 
 

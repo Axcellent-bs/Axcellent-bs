@@ -44,6 +44,7 @@ from planning_agent.domain.service import (
     action_name,
 )
 from planning_agent.domain.trace import code_of, trace_of, trace_text
+from planning_agent.repo_api import add_repo_routes
 
 KEEPALIVE_SECONDS = 15.0
 # 코딩 작업 오류 중 409로 주는 것 (설정·상태 문제). 나머지 입력 오류는 400
@@ -688,5 +689,8 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
         except GateRefused as exc:
             return _gate_err(exc)
         return _ok(dump(th), svc)
+
+    # ---- 레포 작업 공간 (repo_api.py): PR 게시판·상세·머지·되돌리기·브랜치
+    add_repo_routes(router, get_service)
 
     return router
