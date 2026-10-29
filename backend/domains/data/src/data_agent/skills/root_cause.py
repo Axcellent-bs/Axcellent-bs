@@ -194,6 +194,33 @@ async def _ask_llm(facts: list[CauseFact], llm: LLMClient, context_id: str) -> l
     return result.hypotheses
 
 
+ORDER_RULE = (
+    "후보 정렬: 확신도 높은 순, 같은 확신도 안에서는 근거 사실 시각이 이상 시작과 가까운 순"
+    " (LLM이 준 순서는 쓰지 않음, 시각 없는 근거는 뒤)"
+)
+
+
+def _distance(hypothesis: CauseHypothesis, facts: dict[str, CauseFact], start: datetime) -> float:
+    """근거 사실 중 이상 시작과 가장 가까운 시각까지의 거리(초). 시각 있는 근거가 없으면 무한대."""
+    times = [
+        abs((facts[i].at - start).total_seconds())
+        for i in hypothesis.fact_ids
+        if i in facts and facts[i].at is not None and facts[i].kind != "anomaly"
+    ]
+    return min(times, default=float("inf"))
+
+
+def order_by_proximity(
+    hypotheses: list[CauseHypothesis], facts: list[CauseFact], start: datetime
+) -> list[CauseHypothesis]:
+    """확신도 높은 순, 같은 확신도 안에서는 이상 시작과 가까운 근거 순 (`ORDER_RULE`).
+
+    LLM이 준 순서는 쓰지 않는다. 거리가 같으면 원래 순서를 지킨다(안정 정렬).
+    """
+    by_id = {f.fact_id: f for f in facts}
+    return sorted(hypotheses, key=lambda h: (_RANK[h.confidence], _distance(h, by_id, start)))
+
+
 def _summary(hypotheses: list[CauseHypothesis], facts: list[CauseFact], fallback: bool) -> str:
     if not _evidence_ids(facts):
         return NO_FACTS
@@ -228,7 +255,7 @@ async def estimate_root_cause(
         if not hypotheses:
             hypotheses = rule_based(facts, data)
             fallback = True
-    hypotheses = sorted(hypotheses, key=lambda h: _RANK[h.confidence])[:MAX_HYPOTHESES]
+    hypotheses = order_by_proximity(hypotheses, facts, data.window_from)[:MAX_HYPOTHESES]
 
     summary = _summary(hypotheses, facts, fallback)
     output = RootCauseOutput(
@@ -239,7 +266,7 @@ async def estimate_root_cause(
     )
     evidence = Evidence(
         queries=sorted({f.source for f in facts if f.source != "input"}),
-        data_summary=summary,
+        data_summary=f"{summary}\n{ORDER_RULE} (이상 시작 {_iso(data.window_from)})",
         collected_at=datetime.now(UTC),
         ref_ids=[f.ref for f in facts if f.ref and f.kind not in ("anomaly", "unavailable")],
     )
