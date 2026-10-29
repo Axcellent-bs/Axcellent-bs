@@ -3,7 +3,7 @@ import { IconAgents, IconOffice } from '@/components/icons'
 import { homeOf, useSession } from './session'
 import { FAMILIES, agentName, usePublishedServices, type Service } from './services'
 
-// 로그인 전에 여는 메인 페이지 = 서비스 제품군 카탈로그. 어떤 서비스가 있는지 보고, 로그인 버튼으로 로그인 화면에 간다.
+// 로그인 전에 여는 메인 페이지 = 서비스 제품군 카탈로그. 어떤 서비스가 있는지 보고, 회원가입·로그인 화면으로 간다.
 // 회사가 실제로 켤 서비스는 로그인 뒤 시스템 관리자가 서비스 고르기(/system/services)에서 정한다.
 const WORDMARK = `${import.meta.env.BASE_URL}axcellent-wordmark.png`
 
@@ -55,8 +55,11 @@ export default function CatalogHome() {
                 내 화면으로
               </Link>
             )}
-            <Link to="/login" className="rounded-full bg-white px-5 py-2 text-sm font-semibold text-[#1d1d3a] hover:bg-white/90">
+            <Link to="/login" className="rounded-full px-4 py-2 text-sm text-white/80 hover:text-white">
               로그인
+            </Link>
+            <Link to="/signup" className="rounded-full bg-white px-5 py-2 text-sm font-semibold text-[#1d1d3a] hover:bg-white/90">
+              회원가입
             </Link>
           </div>
         </header>
@@ -70,7 +73,8 @@ export default function CatalogHome() {
               AXcellent는 회사 서버에 설치하는 AI 업무 서비스 모음이에요. 쓰고 싶은 서비스만 켜서 바로 써요.
             </p>
             <div className="flex flex-wrap gap-3">
-              <Link to="/login" className="rounded-full bg-[#e0a72c] px-6 py-3 text-sm font-semibold text-[#1d1d3a] hover:brightness-105">로그인</Link>
+              <Link to="/signup" className="rounded-full bg-[#e0a72c] px-6 py-3 text-sm font-semibold text-[#1d1d3a] hover:brightness-105">회원가입</Link>
+              <Link to="/login" className="rounded-full border border-white/30 px-6 py-3 text-sm font-semibold text-white hover:bg-white/10">로그인</Link>
               <a href="#families" className="rounded-full border border-white/30 px-6 py-3 text-sm font-semibold text-white hover:bg-white/10">서비스 둘러보기</a>
             </div>
           </div>

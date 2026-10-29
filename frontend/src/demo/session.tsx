@@ -24,11 +24,46 @@ export const ACCOUNTS: Account[] = [
 ]
 const ADMIN = ACCOUNTS[0]
 
+// 회원가입으로 만든 고객사 계정 (데모: 이 브라우저에만 저장, 비밀번호는 저장하지 않는다)
+const SIGNUP_KEY = 'axcellent-demo-signups'
+const loadSignups = (): Account[] => {
+  try {
+    const rows = JSON.parse(localStorage.getItem(SIGNUP_KEY) ?? '[]')
+    return Array.isArray(rows) ? (rows as Account[]).filter((a) => a && typeof a.id === 'string' && typeof a.email === 'string') : []
+  } catch {
+    return []
+  }
+}
+/** 로그인할 수 있는 고객사 계정: 데모 계정 + 회원가입한 계정 */
+export const customerAccounts = (): Account[] => [...ACCOUNTS, ...loadSignups()]
+
+export type SignupInput = { name: string; email: string; role: string }
+/** 회원가입. 회사 연결 전 첫 가입은 시스템 관리자(회사 연결을 맡는다), 연결 뒤에는 직원 계정이다 */
+export function registerAccount(x: SignupInput): Account {
+  const email = x.email.trim().toLowerCase()
+  if ([...customerAccounts(), ...OPERATORS].some((a) => a.email === email)) throw new Error('이미 가입된 이메일입니다.')
+  const admin = !getCompany()
+  const account: Account = {
+    id: `u-${Date.now().toString(36)}`,
+    name: x.name.trim(),
+    role: x.role.trim() || (admin ? '시스템 관리자' : '직원'),
+    email,
+    services: admin ? SERVICES.map((s) => s.id) : [],
+    ...(admin ? { admin: true } : {}),
+  }
+  try {
+    localStorage.setItem(SIGNUP_KEY, JSON.stringify([...loadSignups(), account]))
+  } catch {
+    throw new Error('이 브라우저에 계정을 저장할 수 없습니다.')
+  }
+  return account
+}
+
 // AXcellent 운영팀 계정. 고객사 로그인 화면에는 나오지 않고, 관제 로그인(/control/login)에서만 쓴다
 export const OPERATORS: Account[] = [
   { id: 'axc', name: 'AXcellent 운영팀', role: 'AXcellent 운영팀', email: 'ops@axcellent.dev', services: [], operator: true },
 ]
-const ALL = [...ACCOUNTS, ...OPERATORS]
+const all = () => [...customerAccounts(), ...OPERATORS]
 
 
 const SYSTEM_PATHS = ['/system']
@@ -65,14 +100,14 @@ const load = (): Account | null => {
   // ?as=<계정 id> 로 열면 그 계정으로 바로 들어간다 (팀원에게 화면 링크를 줄 때)
   const as = new URLSearchParams(window.location.search).get('as')
   // 없어진 직무 계정 id(infra·support 등)로 와도 시스템 관리자로 연다
-  const direct = as ? ALL.find((a) => a.id === as) ?? ADMIN : null
+  const direct = as ? all().find((a) => a.id === as) ?? ADMIN : null
   if (direct) {
     save(direct.id)
     return direct
   }
   try {
     const id = localStorage.getItem(KEY)
-    return id ? ALL.find((a) => a.id === id) ?? ADMIN : null
+    return id ? all().find((a) => a.id === id) ?? ADMIN : null
   } catch {
     return null
   }
@@ -92,7 +127,7 @@ const Ctx = createContext<Session | null>(null)
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [account, setAccount] = useState<Account | null>(load)
   const signIn = useCallback((id: string) => {
-    const next = ALL.find((a) => a.id === id) ?? null
+    const next = all().find((a) => a.id === id) ?? null
     setAccount(next)
     save(next?.id ?? null)
     return next

@@ -1,9 +1,48 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { ACCOUNTS, homeOf, useSession } from './session'
+import { ACCOUNTS, customerAccounts, homeOf, useSession } from './session'
 import { useCompany } from './company'
 
-// 사내망 안에서만 열리는 로그인 화면. 고객사 계정은 시스템 관리자 하나다(session.tsx).
+/** 로그인·회원가입 왼쪽 안내 칸 */
+export function AuthAside() {
+  const company = useCompany()
+  return (
+    <section className="hidden flex-col justify-between bg-[#1d1d3a] p-12 text-white lg:flex">
+      <div>
+        <h1><img src={`${import.meta.env.BASE_URL}axcellent-wordmark.png`} alt="AXcellent" className="h-10 w-auto" /></h1>
+        <p className="mt-1 text-sm text-white/70">사내 설치형 AX 솔루션</p>
+      </div>
+      <div className="space-y-6">
+        <p className="text-3xl font-semibold leading-snug">
+          필요한 AI 서비스만 골라
+          <br />
+          회사 안에서 쓰는 업무 시스템
+        </p>
+        <dl className="grid max-w-md grid-cols-2 gap-3 text-sm">
+          <div className="rounded-2xl bg-white/10 p-4">
+            <dt className="text-white/60">설치된 회사</dt>
+            <dd className="mt-1 font-semibold">{company?.name ?? '없음'}</dd>
+          </div>
+          <div className="rounded-2xl bg-white/10 p-4">
+            <dt className="text-white/60">접속 범위</dt>
+            <dd className="mt-1 font-semibold">{company ? `사내망 ${company.network}` : '—'}</dd>
+          </div>
+          <div className="rounded-2xl bg-white/10 p-4">
+            <dt className="text-white/60">외부 접근</dt>
+            <dd className="mt-1 font-semibold">차단</dd>
+          </div>
+          <div className="rounded-2xl bg-white/10 p-4">
+            <dt className="text-white/60">데이터 보관</dt>
+            <dd className="mt-1 font-semibold">회사 서버</dd>
+          </div>
+        </dl>
+      </div>
+      <p className="text-xs text-white/50">DejaFix 인프라 위에서 동작 · 데모 프로토타입</p>
+    </section>
+  )
+}
+
+// 사내망 안에서만 열리는 로그인 화면. 계정은 데모 계정 + 회원가입한 계정이다(session.tsx).
 // 데모라 비밀번호는 확인하지 않는다.
 export default function LoginPage() {
   const { signIn } = useSession()
@@ -19,7 +58,7 @@ export default function LoginPage() {
   }
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    const a = ACCOUNTS.find((x) => x.email === email.trim().toLowerCase())
+    const a = customerAccounts().find((x) => x.email === email.trim().toLowerCase())
     if (!a) return setError('등록되지 않은 계정입니다. 아래 데모 계정으로 들어가세요.')
     if (!company && !a.admin) return setError('회사 연결 전에는 시스템 관리자만 로그인할 수 있어요.')
     if (!password) return setError('비밀번호를 입력하세요.')
@@ -28,38 +67,7 @@ export default function LoginPage() {
 
   return (
     <div className="grid min-h-screen bg-app text-ink-900 lg:grid-cols-[1.1fr_1fr]">
-      <section className="hidden flex-col justify-between bg-[#1d1d3a] p-12 text-white lg:flex">
-        <div>
-          <h1><img src={`${import.meta.env.BASE_URL}axcellent-wordmark.png`} alt="AXcellent" className="h-10 w-auto" /></h1>
-          <p className="mt-1 text-sm text-white/70">사내 설치형 AX 솔루션</p>
-        </div>
-        <div className="space-y-6">
-          <p className="text-3xl font-semibold leading-snug">
-            필요한 AI 서비스만 골라
-            <br />
-            회사 안에서 쓰는 업무 시스템
-          </p>
-          <dl className="grid max-w-md grid-cols-2 gap-3 text-sm">
-            <div className="rounded-2xl bg-white/10 p-4">
-              <dt className="text-white/60">설치된 회사</dt>
-              <dd className="mt-1 font-semibold">{company?.name ?? '없음'}</dd>
-            </div>
-            <div className="rounded-2xl bg-white/10 p-4">
-              <dt className="text-white/60">접속 범위</dt>
-              <dd className="mt-1 font-semibold">{company ? `사내망 ${company.network}` : '—'}</dd>
-            </div>
-            <div className="rounded-2xl bg-white/10 p-4">
-              <dt className="text-white/60">외부 접근</dt>
-              <dd className="mt-1 font-semibold">차단</dd>
-            </div>
-            <div className="rounded-2xl bg-white/10 p-4">
-              <dt className="text-white/60">데이터 보관</dt>
-              <dd className="mt-1 font-semibold">회사 서버</dd>
-            </div>
-          </dl>
-        </div>
-        <p className="text-xs text-white/50">DejaFix 인프라 위에서 동작 · 데모 프로토타입</p>
-      </section>
+      <AuthAside />
 
       <section className="flex items-center justify-center px-6 py-12">
         <div className="w-full max-w-sm space-y-8">
@@ -88,6 +96,9 @@ export default function LoginPage() {
             {error && <p className="text-sm text-red-600">{error}</p>}
             <button className="btn-primary w-full py-2.5">로그인</button>
           </form>
+          <p className="text-center text-sm text-ink-500">
+            계정이 없나요? <Link to="/signup" className="font-semibold text-brand-600 hover:underline">회원가입</Link>
+          </p>
           <div className="space-y-2">
             <p className="text-xs font-medium text-ink-500">데모 계정</p>
             <div className="grid gap-2">
