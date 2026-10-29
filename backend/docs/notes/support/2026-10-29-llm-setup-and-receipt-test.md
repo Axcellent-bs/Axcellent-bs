@@ -1,0 +1,51 @@
+# 고객지원 LLM 연결·영수증 대조 로컬 테스트 (2026-10-29)
+
+로컬(`bash scripts/run_all.sh` + `run_web.sh`, 3090)에서 고객지원 AI의 답변 초안과 영수증 대조를 실제 모드로 확인한 기록이다. 비밀값은 적지 않는다.
+
+## 결과 요약
+
+| 항목 | 결과 |
+|---|---|
+| 새 문의 → 분류·근거 검색·초안 3개·가드 | 정상 (LLM 답변). 첫 초안까지 `gemini-3.1-flash-lite` 3.7~4.2초, `gemini-3.5-flash` 15.2초 |
+| 초안 선택 → 답변 보내기 | 정상. 가드 통과, 초안 채택률 100% |
+| 고객 후속 메시지 | 정상. 문의 분석과 초안이 새로 만들어지고 상태가 "답변 대기"로 돌아온다 |
+| 해결로 종료 | 정상 |
+| 영수증 사진 분석 (합친 모드) | 정상. 일치 영수증 `consistent`, 총액·날짜를 바꾼 영수증 `mismatch` (`RECEIPT_AMOUNT_MISMATCH`, `RECEIPT_DATE_MISMATCH`) |
+| 영수증 분석 (분리 서비스) | **불가**. 아래 "알려진 한계" 참고 |
+
+## 답변이 템플릿(고정 문구)으로 나올 때 확인할 순서
+
+답변이 "문의가 접수되었습니다. 확인 후 안내드리겠습니다." 같은 고정 문구면 LLM 호출이 실패해 폴백(`fallback=True`)으로 대체된 것이다. 원인은 `backend/.logs/inquiry.log`에 `LLM API가 <코드>를 돌려줬다`로 남는다. 응답 본문은 개인정보가 섞일 수 있어 상태 코드만 남는다.
+
+1. **`.env`를 바꿨으면 서버를 다시 띄운다.** `run_all.sh`는 시작할 때만 `.env`를 읽는다. `bash scripts/run_all.sh stop` 후 다시 실행한다.
+2. **재시작하면 사람·관리자 토큰이 새로 만들어진다.** 화면(3090)도 `run_web.sh`로 다시 띄워야 한다. 안 그러면 문의 접수가 "사용 토큰을 검증할 수 없다"로 거부된다. 3090 포트 프로세스만 끝낸다(`node.exe` 전체 종료 금지, 다른 개발 서버가 같이 죽는다).
+3. **`.env`의 `KEY=값`에서 `=` 뒤에 공백을 두지 않는다.** `run_all.sh`가 bash로 읽어서 `LLM_MODEL= gemini-3.5-flash`는 빈 값 + 명령 실행이 된다(`command not found`, "LLM_MODEL 가 없습니다" 경고).
+4. **HTTP 400 `credit balance is too low`**: Anthropic API는 Console 크레딧으로 청구된다. Max 요금제(claude.ai·Claude Code)와 별개다.
+5. **HTTP 404 `no longer available to new users`**: 모델 이름이 막힌 것이다. 목록은 `GET <LLM_BASE_URL>/models`로 확인한다.
+
+## Gemini(OpenAI 호환) 설정과 모델 선택
+
+`LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai`, `LLM_MODEL`은 아래 중 고른다 (같은 구조화 JSON 요청, 무료 키 기준).
+
+| 모델 | 결과 |
+|---|---|
+| `gemini-3.1-flash-lite` | 정상, 약 4~5초. 분류와 초안을 연달아 부르는 구조에 맞아 로컬 기본으로 썼다 |
+| `gemini-3.5-flash` | 정상, 약 14~15초 |
+| `gemini-3.8-flash` | 60초 안에 응답 없음(래퍼 제한 시간 초과) |
+| `gemini-2.5-flash` | 404 (신규 사용자에게 막힘) |
+| `gemini-flash-latest` | 503 (수요 폭주, 일시적) |
+
+`EMBED_MODEL`이 비어 있으면 회사 기억(memory) 검색이 실패한다. 고객지원 답변에는 영향이 없다 (예: `gemini-embedding-001`).
+
+## 영수증 사진 분석
+
+- 분석기(`receipt_vision.connect()`)는 `support_agent/main.py`가 불러올 때 꽂힌다. **목 모드가 아니고 `LLM_*`(또는 `SUPPORT_LLM_*`)가 있으면 켜진다.** 로컬은 `SUPPORT_VISION`을 따로 줄 필요가 없다. 목 모드 서버(`SUPPORT_MOCK=1`)에서는 `SUPPORT_VISION=on` 패치가 필요하다.
+- 합친 모드 확인 방법: `support_agent.main`을 불러 분석기를 연결하고, 연결된 문의(주문 `ord_0216`: 상품 24,000원 + 배송비 3,000원)에 `analyze_receipt`를 호출했다. 사진은 주문과 같은 값의 영수증과 금액·날짜를 바꾼 영수증 두 장을 썼다.
+- 금액이 다른 영수증은 바꾼 항목(총액·날짜)만 불일치로 잡았고, 배송비·주문번호·품목은 일치로 처리했다.
+
+## 알려진 한계 (후속 과제)
+
+- **분리 서비스에서는 영수증 대조가 안 된다.** `analyze_receipt`는 claims(8112)에 있는데, 문의는 inquiry(8102) 프로세스 메모리에 저장된다. `SUPPORT_PG_DSN`이 없으면 저장소를 공유하지 않아 claims가 "문의 N을 찾을 수 없다(`not_found`)"를 돌려준다. 해결은 Postgres 연결, 또는 문의 조회를 서비스 간에 넘기는 변경이다.
+- 화면에 영수증 사진을 올리는 UI가 없다. `analyze_receipt` 호출 경로는 A2A뿐이다.
+- 이번 영수증 검증은 안전 승인(`execute()`)을 거치지 않은 단일 프로세스 확인이다. 접수부터 대조까지의 통합 경로는 아직 시험하지 않았다.
+- 단계형 초안이 사이즈 불일치를 단순 변심으로 단정하는 경우가 있었다. 보내기 전에 상담원이 검토해야 한다.
