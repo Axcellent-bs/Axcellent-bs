@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel
+from support_agent.categories import Category, normalize_category
 from support_agent.claim_schemas import EntityId
 
 Urgency = Literal["low", "medium", "high"]
@@ -119,11 +120,16 @@ class Conversation(ConversationListItem):
 # ---------------------------------------------------------------- LLM 응답 스키마
 class LLMClassification(AxModel):
     intent_ko: str
-    category: str
+    category: Category  # 코드 집합으로 고정한다 (`categories.py`). 모델이 쓴 이름은 코드로 바꾼다
     sentiment: Sentiment
     urgency: Urgency
     search_query: str
     keywords: list[str] = Field(default_factory=list)
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def _to_code(cls, value: Any) -> str:
+        return normalize_category(value)
 
 
 class StyleReply(AxModel):
