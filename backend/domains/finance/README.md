@@ -25,6 +25,7 @@
 | `settlement_hold` | B (검증자 data) | orchestrator | recommended | 위험 판매자 정산 보류 요청 (DEP-FIN-04). 보류된 판매자는 정산 묶음에서 빠진다 |
 | `closing_report` | read | orchestrator, data | optional | 기간 손익 요약 (`ClosingReportInput`·`ClosingReportOutput`) |
 | `audit_report` | read | orchestrator, data | optional | 사후 감사 결과 (`AuditReportInput`·`AuditReportOutput`) |
+| `record_support_cost` | read | orchestrator | recommended | 고객지원이 닫은 문의의 처리 결과를 받아 주문 배송비·비용 기록을 확인하고 장부에 남김. 경비를 쓰지 않은 문의도 처리 결과를 기록, 같은 문의는 한 번만 (`SupportCostInput`·`SupportCostOutput`) |
 
 없앤 것: `verify_amount`(B 쿠폰·환불 교차검증), `review_hold`(C 보류 건 AI 1차 판단), `/api/finance/verifications`, `/api/finance/ai-reviews`.
 장애 흐름에서 빠지며 없앤 것(2026-10-27): `loss_aggregation`(손실 집계 skill), `/api/finance/loss-reports`, 사건 상세의 `loss`와 사건 단계(9·10·17) 계산. 재무는 장애 대응 흐름의 단계가 아니고(요구사항 DEP-FIN-01, 공통 구성안 결정 22) 장애 비용은 평상시 장부 → `closing_report`·`audit_report`에서 드러난다.

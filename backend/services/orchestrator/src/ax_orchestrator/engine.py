@@ -525,10 +525,14 @@ class Engine:
         problems = [
             r for r in inc.steps.values() if r.status in ("failed", "skipped", "rejected_by_human")
         ]
+        kind, area = RECORD_BY_PLAN.get(inc.kind, ("incident", "infra"))
+        # 재무가 남긴 기록처럼 앞 단계가 사건에 보관한 설명을 기록에 붙인다 (없으면 붙이지 않는다)
+        note = inc.shared.get("record_note")
         payload = {
             "context_id": inc.context_id,
-            "kind": "incident",
-            "summary": f"{inc.title} — 완료 {len(done)}단계, 미완료 {len(problems)}단계",
+            "kind": kind,
+            "summary": f"{inc.title} — 완료 {len(done)}단계, 미완료 {len(problems)}단계"
+            + (f" · {note}" if isinstance(note, str) and note else ""),
             "decision_reason": (
                 f"{inc.kind} plan 실행 결과 — 완료: {', '.join(r.skill for r in done) or '없음'}; "
                 f"미완료: {', '.join(r.skill for r in problems) or '없음'}"
@@ -543,7 +547,7 @@ class Engine:
             ],
             "source_refs": [f"step:{r.step_id}" for r in done],
             "author": self.author,
-            "area": "infra",
+            "area": area,
         }
         await self._call_and_handle(inc, step, run, entry.dept, payload)
 
@@ -594,6 +598,13 @@ class Engine:
     async def _publish(self, kind: str, inc: Incident) -> None:
         if self.publish is not None:
             await self.publish(kind, inc)
+
+
+# 사건 종류(plan 이름) → (기록 종류, 담당 영역). 인사 `record_case`로 보내는 값이다.
+# 없으면 장애 사건으로 기록한다.
+RECORD_BY_PLAN: dict[str, tuple[str, str]] = {
+    "support_resolved": ("case", "support-desk"),
+}
 
 
 def new_event_id() -> str:

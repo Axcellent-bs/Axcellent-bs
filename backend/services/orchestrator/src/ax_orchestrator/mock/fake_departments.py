@@ -43,7 +43,11 @@ CARDS: dict[str, list[tuple[str, str, str | None]]] = {
     ],
     "marketing": [("draft_notice", "read", None), ("publish_notice", "A", None)],
     "support": [("send_reply", "A", None), ("request_incident_compensation", "A", None)],
-    "finance": [("loss_aggregation", "read", None), ("audit_report", "read", None)],
+    "finance": [
+        ("loss_aggregation", "read", None),
+        ("audit_report", "read", None),
+        ("record_support_cost", "read", None),
+    ],
     "hr": [("record_case", "A", None)],
 }
 OWNERS = {
@@ -171,6 +175,21 @@ DEFAULT_OUTPUTS: dict[str, Callable[[AgentRequest], dict[str, Any]]] = {
         window_to="2026-10-16T00:00:00Z",
         stats={"refund_count": 0, "refund_amount": 0, "coupon_count": 87, "coupon_amount": 174000},
         findings=[],
+        unavailable=[],
+    ),
+    # 실제 재무 `SupportCostOutput` 모양(경비를 쓰지 않은 문의도 처리 결과를 기록한다)
+    "record_support_cost": lambda r: _ok(
+        record_id=f"sc_{r.input.get('inquiry_id')}",
+        inquiry_id=r.input.get("inquiry_id"),
+        order_id=r.input.get("order_id"),
+        status="recorded",
+        resolution=r.input.get("resolution"),
+        claim_decision=r.input.get("claim_decision"),
+        refund_amount=r.input.get("refund_amount") or 0,
+        coupon_issued=r.input.get("coupon_id") is not None,
+        expense_used=bool(r.input.get("refund_amount") or r.input.get("coupon_id")),
+        shipping_fee=3000,
+        note=f"문의 #{r.input.get('inquiry_id')} 처리 결과 기록",
         unavailable=[],
     ),
     # 실제 데이터 `KpiSummaryOutput` 모양
