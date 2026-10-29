@@ -48,7 +48,7 @@ from ax_contracts.schemas.data import (  # noqa: E402
     RootCauseInput,
 )
 from ax_shop_api.lookups import Lookups  # noqa: E402
-from data_agent import handlers  # noqa: E402
+from data_agent import detect, handlers  # noqa: E402
 from data_agent.clients.shop_client import (  # noqa: E402
     HttpMetricSource,
     HttpSellerClient,
@@ -57,6 +57,7 @@ from data_agent.clients.shop_client import (  # noqa: E402
     ShopUnavailable,
 )
 from data_agent.metrics.fraud import SellerFacts, low_price_ratio, score_seller  # noqa: E402
+from data_agent.metrics.judge import Settings  # noqa: E402
 from data_agent.skills.anomaly_detection import detect_anomalies  # noqa: E402
 from data_agent.skills.impact_analysis import analyze_impact  # noqa: E402
 from data_agent.skills.root_cause import estimate_root_cause  # noqa: E402
@@ -87,9 +88,21 @@ METRICS: dict[str, tuple[str, str | None]] = {
     ),
     "anomaly.payment_mean_delay_minutes": ("결제 장애 탐지 지연 평균 (분, 5분 간격 감시)", "lower"),
     "anomaly.payment_max_delay_minutes": ("결제 장애 탐지 지연 최대 (분)", "lower"),
+    "anomaly.payment_delay_from_first_fault_failure_max": (
+        "결제 장애 탐지 지연 최대 (분, 장애 시작이 아니라 첫 장애 쪽 실패가 든 5분부터)",
+        "lower",
+    ),
     "anomaly.drop_mean_delay_minutes": ("주문 급감 탐지 지연 평균 (분)", "lower"),
     "anomaly.drop_max_delay_minutes": ("주문 급감 탐지 지연 최대 (분)", "lower"),
     "anomaly.unknown_handled_rate": ("빈 구간을 '확인할 수 없음'으로 답한 비율", "higher"),
+    "anomaly.monitor_false_alarm_count": (
+        "감시 재현: 정답이 이상 아님인 케이스에서 5분마다 감시가 이상을 낸 횟수",
+        "lower",
+    ),
+    "anomaly.monitor_false_alarm_cases": (
+        "감시 재현: 감시가 이상을 낸 이상 아님 케이스 수",
+        "lower",
+    ),
     "anomaly.low_recorded_rate": (
         "낮은 등급(low)으로 남겨야 하는 케이스 중 사건 없이 low로 남긴 비율",
         "higher",
@@ -199,6 +212,39 @@ async def _delay(case: dict[str, Any], source: HttpMetricSource) -> float | None
     return None
 
 
+async def _monitor_replay(case: dict[str, Any], source: HttpMetricSource) -> list[dict[str, Any]]:
+    """주기 감시(monitor.py) 재현: 구간 안에서 5분마다 최근 15분을 감시와 같은 판정 함수
+    (`detect.judge_window`)와 같은 지표(`WATCHED_METRICS`)로 판정해, 이상이 나온 감시 시각을 센다.
+
+    같은 장애가 이어져도 감시마다 한 번씩 센다(감시가 이상이라고 말한 횟수). 실제 감시의 이벤트
+    중복 방지는 세지 않는다. 판정 설정은 기본값(`Settings()`)이다.
+    """
+    window_from = eval_world.parse(case["window"]["from"])
+    end = eval_world.parse(case["window"]["to"])
+    metrics = [name for name, _ in detect.WATCHED_METRICS]
+    alarms: list[dict[str, Any]] = []
+    moment = window_from + POLL_STEP
+    while moment <= end:
+        judged = await detect.judge_window(
+            source, moment - POLL_WINDOW, moment, metrics, Settings()
+        )
+        flagged = [j.metric for j in judged.judgements if j.status == "anomaly"]
+        if flagged:
+            alarms.append({"at": eval_world.iso(moment), "metrics": flagged})
+        moment += POLL_STEP
+    return alarms
+
+
+def _from_first_failure(case: dict[str, Any], delay: float | None) -> float | None:
+    """감시가 잡은 시각 − 첫 장애 쪽 실패가 든 5분 시작 (분). 못 잡았거나 실패가 없으면 None."""
+    expected = case["expected"]["anomaly"]
+    first = expected.get("first_failure_bucket")
+    if delay is None or not first or not expected.get("onset"):
+        return None
+    caught = eval_world.parse(expected["onset"]) + timedelta(minutes=delay)
+    return (caught - eval_world.parse(first)).total_seconds() / 60
+
+
 async def run_case(case: dict[str, Any]) -> dict[str, Any]:
     world = eval_world.build(case)
     truth = eval_world.truth(world)
@@ -255,7 +301,9 @@ async def run_case(case: dict[str, Any]) -> dict[str, Any]:
             "fabricated": _fabricated(anomaly.output.summary, allowed)
             if anomaly.output.any_anomaly
             else False,
-            "delay_minutes": await _delay(case, source) if metric else None,
+            "delay_minutes": (delay := await _delay(case, source) if metric else None),
+            "delay_from_first_fault_failure": _from_first_failure(case, delay),
+            "monitor_alarms": await _monitor_replay(case, source),
         }
 
         if case["kind"] in ("payment_fault", "empty"):
@@ -419,6 +467,13 @@ def summarize(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> dic
         ]
 
     pay_delays, drop_delays = _delays("payment_fault"), _delays("order_drop")
+    first_fault_delays = [
+        c["anomaly"]["delay_from_first_fault_failure"]
+        for c in faults
+        if c["kind"] == "payment_fault"
+        and c["anomaly"]["delay_from_first_fault_failure"] is not None
+    ]
+    false_alarms = [c for c in quiet if c["anomaly"]["monitor_alarms"]]
     impacts = [c["impact"] for c in cases if "impact" in c]
     # 금액 오차는 정답·결과가 둘 다 숫자인 케이스만 (확인할 수 없음 케이스는 일치율로만 본다)
     numeric = [i for i in impacts if "damage_amount" in i["got"] and "damage_amount" in i["want"]]
@@ -445,6 +500,13 @@ def summarize(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> dic
         ),
         "anomaly.payment_mean_delay_minutes": _mean(pay_delays),
         "anomaly.payment_max_delay_minutes": max(pay_delays) if pay_delays else None,
+        "anomaly.payment_delay_from_first_fault_failure_max": max(first_fault_delays)
+        if first_fault_delays
+        else None,
+        "anomaly.monitor_false_alarm_count": sum(
+            len(c["anomaly"]["monitor_alarms"]) for c in quiet
+        ),
+        "anomaly.monitor_false_alarm_cases": len(false_alarms),
         "anomaly.drop_mean_delay_minutes": _mean(drop_delays),
         "anomaly.drop_max_delay_minutes": max(drop_delays) if drop_delays else None,
         "anomaly.unknown_handled_rate": _rate(
@@ -502,6 +564,9 @@ def wrong_cases(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> l
                 "이상 탐지",
                 f"사건 없이 low로 '{LOW_NOTE}'을 남겨야 함 (잡은 지표: {a['flagged'] or '없음'})",
             )
+        if not a["expected"] and a["monitor_alarms"]:
+            times = ", ".join(x["at"][11:16] for x in a["monitor_alarms"])
+            add(c["id"], "감시 재현", f"장애가 아닌데 감시가 이상을 냄: {times}")
         if not a["expected"] and a["any_anomaly"]:
             add(c["id"], "이상 탐지", f"장애가 아닌데 이상이라고 함: {', '.join(a['flagged'])}")
         if c["kind"] == "empty" and not a["said_unknown"]:
