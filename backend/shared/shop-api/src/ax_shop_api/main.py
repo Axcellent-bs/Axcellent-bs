@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hmac
 import os
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime
@@ -168,6 +169,8 @@ DEFAULT_CORS_ORIGINS = (
 
 # 관리 API 허용 요청자. 장애 해제는 infra 롤백이 관문을 거쳐 부른다(후속 결정 15)
 INJECT_ALLOWED = {"admin"}
+# 상품 등록·수정(재고 보충 포함)은 운영자(admin)만
+PRODUCT_WRITERS = {"admin"}
 RELEASE_ALLOWED = {"admin", "infra"}
 # 공지·쿠폰 쓰기는 마케팅 관문 토큰만, 쿠폰 조회는 사후 검증·중복 확인을 하는 부서까지
 MARKETING_ONLY = {"marketing"}
@@ -180,6 +183,15 @@ DATA_READERS = {"data", "admin"}
 ORCHESTRATOR_VIEWERS = {"admin"}
 
 
+def _is_human_token(token: str) -> bool:
+    """사람 토큰(`SAFETY_HUMAN_TOKENS="이름:토큰,..."`)인가. 관리 API에는 쓸 수 없다(403)."""
+    for item in os.getenv("SAFETY_HUMAN_TOKENS", "").split(","):
+        name, sep, known = item.strip().partition(":")
+        if sep and name and known and hmac.compare_digest(known, token):
+            return True
+    return False
+
+
 def _caller(allowed: set[str]) -> Callable[..., str]:
     def dependency(authorization: str | None = Header(default=None)) -> str:
         scheme, _, token = (authorization or "").partition(" ")
@@ -188,6 +200,8 @@ def _caller(allowed: set[str]) -> Callable[..., str]:
         try:
             requester = verify_token(token.strip())  # 요청자는 토큰에서 꺼낸다
         except PermissionError as error:
+            if _is_human_token(token.strip()):
+                raise ShopError("FORBIDDEN", "에이전트 토큰이 필요하다", 403) from error
             raise ShopError("UNAUTHORIZED", "토큰을 검증할 수 없다", 401) from error
         # 서비스로 나뉜 에이전트(claims 등)는 원래 부서 이름(support)으로도 인정한다
         if requester not in allowed and department_of(requester) not in allowed:
@@ -304,11 +318,13 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
         return _ok(shop.get_product(product_id))
 
     @app.post("/api/shop/products", status_code=201)
-    async def create_product(body: ProductIn) -> dict:
+    async def create_product(body: ProductIn, _: str = Depends(_caller(PRODUCT_WRITERS))) -> dict:
         return _ok(shop.create_product(**body.model_dump()))
 
     @app.patch("/api/shop/products/{product_id}")
-    async def update_product(product_id: str, body: ProductPatch) -> dict:
+    async def update_product(
+        product_id: str, body: ProductPatch, _: str = Depends(_caller(PRODUCT_WRITERS))
+    ) -> dict:
         return _ok(shop.update_product(product_id, body.model_dump(exclude_none=True)))
 
     @app.get("/api/shop/orders")

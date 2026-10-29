@@ -9,6 +9,11 @@ from ax_orchestrator.main import app, state
 from ax_orchestrator.manager import IncidentManager
 from ax_orchestrator.plans.scenario_a import scenario_a
 
+# 쓰기 API 토큰. 명부는 conftest.py의 `_write_tokens`가 넣는다
+ADMIN = {"Authorization": "Bearer admin-test-token"}
+AGENT = {"Authorization": "Bearer shop-test-token"}
+HUMAN = {"Authorization": "Bearer human-test-token"}
+
 
 def event(event_id: str, type_: EventType, **data) -> EventEnvelope:
     return EventEnvelope(
@@ -68,7 +73,9 @@ def test_demo_api_runs_scenario_and_hold_decision(monkeypatch) -> None:
     monkeypatch.setattr(state, "hold_timeout", 5.0)
     monkeypatch.setattr(state, "manager", None)
     with TestClient(app) as client:
-        created = client.post("/api/demo/incidents", json={"hold_rollback": True}).json()["data"]
+        created = client.post(
+            "/api/demo/incidents", json={"hold_rollback": True}, headers=ADMIN
+        ).json()["data"]
         ctx = created["context_id"]
         for _ in range(200):
             data = client.get(f"/api/incidents/{ctx}").json()["data"]
@@ -76,7 +83,9 @@ def test_demo_api_runs_scenario_and_hold_decision(monkeypatch) -> None:
                 break
             time.sleep(0.01)
         assert data["pending_holds"][0]["step_id"] == "rollback"
-        ok = client.post(f"/api/incidents/{ctx}/holds/rollback", json={"approved": True})
+        ok = client.post(
+            f"/api/incidents/{ctx}/holds/rollback", json={"approved": True}, headers=HUMAN
+        )
         assert ok.status_code == 200
         for _ in range(200):
             data = client.get(f"/api/incidents/{ctx}").json()["data"]
@@ -93,9 +102,9 @@ def test_demo_wrong_owner_option_is_transferred_not_failed(monkeypatch) -> None:
     monkeypatch.setattr(state, "latency", 0.0)
     monkeypatch.setattr(state, "manager", None)
     with TestClient(app) as client:
-        ctx = client.post("/api/demo/incidents", json={"wrong_owner": True}).json()["data"][
-            "context_id"
-        ]
+        ctx = client.post("/api/demo/incidents", json={"wrong_owner": True}, headers=ADMIN).json()[
+            "data"
+        ]["context_id"]
         for _ in range(300):
             data = client.get(f"/api/incidents/{ctx}").json()["data"]
             if data["status"] != "open":
@@ -110,7 +119,9 @@ def test_hold_decision_endpoint_is_mock_only(monkeypatch) -> None:
     """사람 토큰 확인이 없어서(#265) 실제 모드에서는 열지 않는다."""
     monkeypatch.setattr(state, "mock", False)
     with TestClient(app) as client:
-        response = client.post("/api/incidents/ctx_inc_x/holds/rollback", json={"approved": True})
+        response = client.post(
+            "/api/incidents/ctx_inc_x/holds/rollback", json={"approved": True}, headers=HUMAN
+        )
     assert response.status_code == 501
 
 
@@ -130,27 +141,35 @@ def test_event_intake_reports_outcome(monkeypatch) -> None:
     monkeypatch.setattr(state, "latency", 0.2)
     monkeypatch.setattr(state, "manager", None)
     with TestClient(app) as client:
-        opened = client.post("/api/events", json=_event_json("evt_a", "shop.degraded")).json()
+        opened = client.post(
+            "/api/events", json=_event_json("evt_a", "shop.degraded"), headers=AGENT
+        ).json()
         assert opened["data"]["outcome"] == "opened"
         ctx = opened["data"]["context_id"]
         assert ctx.startswith("ctx_inc_")
-        same = client.post("/api/events", json=_event_json("evt_a", "shop.degraded")).json()
+        same = client.post(
+            "/api/events", json=_event_json("evt_a", "shop.degraded"), headers=AGENT
+        ).json()
         assert same["data"] == {"outcome": "duplicate", "context_id": None}
         merged = client.post(
-            "/api/events", json=_event_json("evt_b", "infra.anomaly_detected")
+            "/api/events", json=_event_json("evt_b", "infra.anomaly_detected"), headers=AGENT
         ).json()
         assert merged["data"] == {"outcome": "merged", "context_id": ctx}
         noted = client.post(
-            "/api/events", json=_event_json("evt_c", "support.inquiry_received")
+            "/api/events", json=_event_json("evt_c", "support.inquiry_received"), headers=AGENT
         ).json()
         assert noted["data"] == {"outcome": "noted", "context_id": ctx}
-        ignored = client.post("/api/events", json=_event_json("evt_d", "order.created")).json()
+        ignored = client.post(
+            "/api/events", json=_event_json("evt_d", "order.created"), headers=AGENT
+        ).json()
         assert ignored["data"]["outcome"] == "ignored"
         low = client.post(
-            "/api/events", json=_event_json("evt_e", "metric.anomaly", severity="low")
+            "/api/events",
+            json=_event_json("evt_e", "metric.anomaly", severity="low"),
+            headers=AGENT,
         ).json()
         assert low["data"]["outcome"] == "noted"
-        bad = client.post("/api/events", json={"event_id": "x"})
+        bad = client.post("/api/events", json={"event_id": "x"}, headers=AGENT)
         assert bad.status_code == 422
         for _ in range(300):
             data = client.get(f"/api/incidents/{ctx}").json()["data"]

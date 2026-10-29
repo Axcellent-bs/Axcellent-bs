@@ -108,7 +108,7 @@ function HoldBanner({ h, busy, canDecide, orchMock, onDecide }: {
   h: Extract<ChatItem, { kind: "hold" }>; busy: boolean; canDecide: boolean; orchMock: boolean; onDecide: (approved: boolean) => void;
 }) {
   // 결정 경로는 하나: 실제 C 보류는 안전 관문 보류 큐에서만. 총괄 보류 버튼은 목 모드 데모일 때만 보인다
-  // (총괄의 POST /api/incidents/{ctx}/holds/{step}은 사람 토큰을 확인하지 않음 — DSH-03)
+  // (총괄의 POST /api/incidents/{ctx}/holds/{step}은 사람 토큰을 받지만 목 모드에서만 열린다 — DSH-03)
   const orchHold = !h.link;
   const showButtons = orchHold && orchMock;
   const link = h.link ?? (orchMock ? undefined : "/finance");
