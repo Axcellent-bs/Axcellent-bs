@@ -12,8 +12,11 @@
   - 구간 합계 검정(유의수준 `alpha`)과 5분 구간별 검정(`alpha`를 구간 수로 나눔)을 함께 본다.
 - 장애 쪽 실패 절대 기준(`judge_payment`): 거래가 적은 시간대(새벽)·약한 장애를 잡는다.
   - 실패 코드 분류는 영향 분석과 같다(`impact.split_failures`, 장애 쪽 = `FAULT_REASONS`).
-  - 5분 구간 하나의 장애 쪽 실패 건수가 회사별 기준(`fault_failures`) 이상이면 기준선과
-    상관없이 결제 실패율 이상이다.
+  - 단계별 기준. 기준선과 상관없이 결제 실패율 이상이다.
+    - 5분 구간 하나의 장애 쪽 실패가 `fault_failures`건 이상
+    - 장애 쪽 실패가 1건 이상인 5분 구간이 `fault_consecutive`개 연속
+  - 1건짜리가 이어지지 않으면(지속 안 됨) 이상이 아니다. severity "low"와 이유만 남긴다.
+  - 연속은 구간 안에서만 본다. 앞 구간 자료가 없으면 연속이 아니다(추측하지 않는다).
   - 사용자 쪽 실패(카드 거절 등)·처음 보는 코드는 이 규칙에 넣지 않는다 (세일 오탐 방지).
 - 판정할 수 없으면 "이상 없음"이 아니라 "확인할 수 없음"(`unknown`)이다.
   - 기준선이 0 (지난 7일 같은 시간대 값이 모두 0, 실패 0건)
@@ -42,7 +45,8 @@ BUCKET = timedelta(minutes=5)
 # 기본값은 정확도 평가(domains/data/eval)로 정했다. 회사별로 바꿀 수 있다(`settings_for`)
 DEFAULT_MIN_PAYMENTS = 5
 DEFAULT_ALPHA = 0.001
-DEFAULT_FAULT_FAILURES = 1  # 5분 구간 하나의 장애 쪽 실패 건수 기준 (평가로 정함)
+DEFAULT_FAULT_FAILURES = 2  # 5분 구간 하나의 장애 쪽 실패 건수 기준 (평가로 정함)
+DEFAULT_FAULT_CONSECUTIVE = 2  # 장애 쪽 실패 1건 이상인 5분 구간이 이만큼 연속이면 이상
 
 RATE_METRICS = frozenset({"payment_fail_rate"})
 DROP_METRICS = frozenset({"order_count"})  # 감소만 이상
@@ -54,31 +58,38 @@ class Settings:
     min_payments: int = DEFAULT_MIN_PAYMENTS
     alpha: float = DEFAULT_ALPHA
     fault_failures: int = DEFAULT_FAULT_FAILURES
+    fault_consecutive: int = DEFAULT_FAULT_CONSECUTIVE
 
 
 def settings_for(tenant_id: str | None, env: Mapping[str, str]) -> Settings:
     """회사별 판정 설정.
 
-    - `DATA_ANOMALY_MIN_PAYMENTS`·`DATA_ANOMALY_ALPHA`·`DATA_ANOMALY_FAULT_FAILURES`:
-      모든 회사 기본값
-    - `DATA_ANOMALY_SETTINGS`: 회사별 덮어쓰기 (`tenant=min_payments:alpha[:fault_failures];…`,
-      예 `shop-demo=8:0.001;big-shop=20:0.0005:10`). 세 번째 값은 빼도 된다.
+    - `DATA_ANOMALY_MIN_PAYMENTS`·`DATA_ANOMALY_ALPHA`·`DATA_ANOMALY_FAULT_FAILURES`·
+      `DATA_ANOMALY_FAULT_CONSECUTIVE`: 모든 회사 기본값
+    - `DATA_ANOMALY_SETTINGS`: 회사별 덮어쓰기
+      (`tenant=min_payments:alpha[:fault_failures[:fault_consecutive]];…`,
+      예 `shop-demo=8:0.001;big-shop=20:0.0005:10:3`). 세 번째·네 번째 값은 빼도 된다.
       형식이 틀린 항목은 무시한다.
     """
     base = Settings(
         min_payments=_int(env.get("DATA_ANOMALY_MIN_PAYMENTS"), DEFAULT_MIN_PAYMENTS),
         alpha=_float(env.get("DATA_ANOMALY_ALPHA"), DEFAULT_ALPHA),
         fault_failures=_int(env.get("DATA_ANOMALY_FAULT_FAILURES"), DEFAULT_FAULT_FAILURES),
+        fault_consecutive=_int(
+            env.get("DATA_ANOMALY_FAULT_CONSECUTIVE"), DEFAULT_FAULT_CONSECUTIVE
+        ),
     )
     for item in (env.get("DATA_ANOMALY_SETTINGS") or "").split(";"):
         name, _, values = item.partition("=")
         if tenant_id and name.strip() == tenant_id:
             payments, _, rest = values.partition(":")
-            alpha, _, faults = rest.partition(":")
+            alpha, _, rest = rest.partition(":")
+            faults, _, consecutive = rest.partition(":")
             return Settings(
                 min_payments=_int(payments, base.min_payments),
                 alpha=_float(alpha, base.alpha),
                 fault_failures=_int(faults, base.fault_failures),
+                fault_consecutive=_int(consecutive, base.fault_consecutive),
             )
     return base
 
@@ -369,26 +380,43 @@ def judge_payment(
     payments: dict[datetime, float],
     faults: dict[datetime, float] | None,
     settings: Settings,
+    orders: dict[datetime, float] | None = None,
 ) -> Judgement:
-    """결제 실패율 = 통계 판정(`judge_rate`) + 장애 쪽 실패 절대 기준.
+    """결제 실패율 = 통계 판정(`judge_rate`) + 장애 쪽 실패 단계별 기준.
 
     `faults`는 5분 구간별 장애 쪽 실패 건수(`fault_buckets`)다. None이면 실패 코드를 읽지 못한
-    것이라 통계 판정만 한다. 5분 구간 하나라도 장애 쪽 실패가 `fault_failures`건 이상이면
-    기준선·표본 수와 상관없이 이상이다. 장애 쪽 실패가 기준 미만이고 표본도 모자라면 통계 판정의
-    "확인할 수 없음"이 그대로 남는다.
+    것이라 통계 판정만 한다. 아래 둘 중 하나면 기준선·표본 수와 상관없이 이상이다.
+    - 5분 구간 하나의 장애 쪽 실패가 `fault_failures`건 이상
+    - 장애 쪽 실패가 1건 이상인 5분 구간이 `fault_consecutive`개 연속
+    둘 다 아니고 장애 쪽 실패가 있으면(1건짜리가 이어지지 않음) 통계 판정을 그대로 두고
+    severity "low"와 "장애 쪽 실패 N건, 지속 안 됨"을 남긴다. 사건을 만들 이상이 아니다.
+    연속은 `window` 안에서만 본다. 앞 구간 자료는 읽지 않으므로 구간 첫 5분은 앞과 이어졌다고
+    보지 않는다. 실패가 0건인 5분이 끼면 연속이 끊긴다. 단, 주문 시도가 0건으로 기록된 5분
+    (`orders`에 값 0) 하나는 건너뛴다(새벽처럼 주문이 없어 실패할 기회도 없던 5분). 자료가 없는
+    5분(`orders`에 값이 없음, 조회 실패)은 건너뛰지 않고 연속을 끊는다(추측하지 않는다).
     """
     base = judge_rate(window, rate, payments, settings)
     if faults is None:
         return replace(base, note=base.note + "; 장애 쪽 실패 코드를 읽지 못해 통계 판정만 함")
     counts = [int(faults.get(b, 0)) for b in window]
     total, worst = sum(counts), max(counts, default=0)
-    hits = [b for b, c in zip(window, counts, strict=True) if c >= settings.fault_failures]
+    burst = [b for b, c in zip(window, counts, strict=True) if c >= settings.fault_failures]
+    runs = _runs(window, counts, orders)
+    lasting = [run for run in runs if len(run) >= settings.fault_consecutive]
+    longest = max((len(run) for run in runs), default=0)
     rule = (
-        f"장애 쪽 실패 {total}건 (5분 최대 {worst}건, "
-        f"5분에 {settings.fault_failures}건 이상이면 이상)"
+        f"장애 쪽 실패 {total}건 (5분 최대 {worst}건, 연속 최대 {longest}구간; "
+        f"5분에 {settings.fault_failures}건 이상이거나 "
+        f"{settings.fault_consecutive}구간 연속이면 이상)"
     )
+    hits = sorted({*burst, *(b for run in lasting for b in run)})
     if not hits:
-        return replace(base, note=f"{base.note}; {rule}")
+        if not total:
+            return replace(base, note=f"{base.note}; {rule}")
+        note = f"{base.note}; 장애 쪽 실패 {total}건, 지속 안 됨 — {rule}"
+        if base.status == "anomaly":  # 통계 판정이 이미 이상이면 그대로 둔다
+            return replace(base, note=note)
+        return replace(base, severity="low", note=note)
     severity: Literal["low", "mid", "high"] = (
         "high" if worst >= 3 * settings.fault_failures else "mid"
     )
@@ -411,6 +439,38 @@ def judge_payment(
         peak_ts=base.peak_ts if statistical else hits[0],
         peak_to=base.peak_to if statistical else hits[-1] + BUCKET,
     )
+
+
+MAX_SKIPPED_EMPTY = 1  # 연속을 셀 때 건너뛸 수 있는 주문 0건 5분 구간 수
+
+
+def _runs(
+    window: list[datetime], counts: list[int], orders: dict[datetime, float] | None = None
+) -> list[list[datetime]]:
+    """장애 쪽 실패가 1건 이상인 5분 구간의 연속 묶음 (구간 안에서만).
+
+    사이에 낀 5분이 주문 0건으로 기록돼 있으면 `MAX_SKIPPED_EMPTY`개까지 건너뛰고 이어 본다.
+    건너뛴 5분은 연속 길이에 세지 않는다. 자료가 없는 5분은 건너뛰지 않는다.
+    """
+    runs: list[list[datetime]] = []
+    for bucket, count in zip(window, counts, strict=True):
+        if count < 1:
+            continue
+        if runs and _joined(runs[-1][-1], bucket, orders):
+            runs[-1].append(bucket)
+        else:
+            runs.append([bucket])
+    return runs
+
+
+def _joined(last: datetime, bucket: datetime, orders: dict[datetime, float] | None) -> bool:
+    gap = int((bucket - last) / BUCKET) - 1  # 사이에 낀 5분 수
+    if gap == 0:
+        return True
+    if orders is None or gap > MAX_SKIPPED_EMPTY:
+        return False
+    between = [last + BUCKET * (i + 1) for i in range(gap)]
+    return all(b in orders and orders[b] == 0 for b in between)
 
 
 def _unknown(metric: str, reason: str, observed: float = 0.0) -> Judgement:
