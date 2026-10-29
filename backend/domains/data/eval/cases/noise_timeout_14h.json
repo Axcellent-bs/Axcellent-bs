@@ -1,0 +1,47 @@
+{
+  "id": "noise_timeout_14h",
+  "kind": "normal",
+  "description": "평소 14시, 매일 결제사 타임아웃이 가끔 1건씩 (정상)",
+  "window": {
+    "from": "2026-09-23T14:00:00Z",
+    "to": "2026-09-23T15:00:00Z"
+  },
+  "traffic": {
+    "orders_per_5m": 5
+  },
+  "injection": {
+    "type": "fault_noise",
+    "at_minutes": [
+      7,
+      38
+    ],
+    "fault_code": "PG_TIMEOUT",
+    "history": true
+  },
+  "cause": {
+    "type": "none"
+  },
+  "llm": "grounded",
+  "expected": {
+    "anomaly": {
+      "expected": false,
+      "metric": null,
+      "onset": null,
+      "first_failure_bucket": null,
+      "unknown_expected": false,
+      "noise_fault_failures": 2
+    },
+    "impact": {
+      "unknown_expected": false,
+      "failed_order_count": 0,
+      "affected_customer_count": 0,
+      "damage_amount": 0,
+      "all_failed_payments": 4,
+      "declined_payments": 2
+    },
+    "root_cause": {
+      "injected": "none",
+      "ref": null
+    }
+  }
+}

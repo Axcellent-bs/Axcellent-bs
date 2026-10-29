@@ -25,7 +25,8 @@
       "metric": "payment_fail_rate",
       "onset": "2026-09-08T03:30:00Z",
       "first_failure_bucket": "2026-09-08T03:35:00Z",
-      "unknown_expected": false
+      "unknown_expected": false,
+      "noise_fault_failures": 0
     },
     "impact": {
       "unknown_expected": false,
