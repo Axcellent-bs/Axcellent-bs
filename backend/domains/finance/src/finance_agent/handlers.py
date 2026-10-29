@@ -10,7 +10,7 @@
 `verify_amount`·`review_hold`는 재무 재설계(2026-10-23)로, `loss_aggregation`은 2026-10-27에
 없앴다 (재무는 장애 대응 흐름의 단계가 아니다 — 요구사항 DEP-FIN-01, 공통 구성안 결정 22).
 장애 비용은 평상시 장부로 들어가 `closing_report`·`audit_report`에서 드러난다. 금액 다시 계산 규칙은
-`recheck.py`에 남아 사후 감사가 쓴다. 캣북스 클레임 건별 확인과 `review_threshold_change`(AI가 기준
+`recheck.py`에 남아 사후 감사가 쓴다. 고객사 클레임 건별 확인과 `review_threshold_change`(AI가 기준
 변경을 판단)도 재무 일이 아니라 없앴다. 한도는 제안만 하고(`policy.py`) 사람이 기준표 PR로 바꾼다.
 
 - 숫자는 전부 코드로 계산한다. 요청 쪽이 적은 총액·등급은 믿지 않는다.

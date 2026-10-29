@@ -56,6 +56,14 @@ from ax_contracts.schemas.event import (
     SupportInquiryResolvedData,
 )
 from ax_contracts.schemas.execute import ExecuteDecision, ExecuteRequest, HoldReason
+from ax_contracts.schemas.finance import (
+    ReviewHoldDecision,
+    ReviewHoldInput,
+    ReviewHoldOutput,
+    VerifyAmountInput,
+    VerifyAmountOutput,
+    VerifyReason,
+)
 from ax_contracts.schemas.handoff import (
     HANDED_TO_HUMAN,
     INBOX_UNREACHABLE,
@@ -65,14 +73,6 @@ from ax_contracts.schemas.handoff import (
     HandoffCreate,
     HandoffStatus,
     HandoffTask,
-)
-from ax_contracts.schemas.finance import (
-    ReviewHoldDecision,
-    ReviewHoldInput,
-    ReviewHoldOutput,
-    VerifyAmountInput,
-    VerifyAmountOutput,
-    VerifyReason,
 )
 from ax_contracts.schemas.hr import (
     AnswerHandoverQuestionInput,
