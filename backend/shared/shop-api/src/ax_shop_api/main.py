@@ -539,6 +539,31 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
         receipt = {k: inquiry.get(k) for k in ("id", "status", "order_id", "updated_at")}
         return _ok(receipt, context_id=context_id)
 
+    # --- 내 문의 목록·상태: 쇼핑몰 → 고객지원 `list_inquiries`·`get_inquiry` (읽기) --------
+    # 고객지원이 `user_id`로 본인 문의만 골라 고객용으로 줄여 주고, 여기서 한 번 더 좁힌다.
+    @app.get("/api/shop/inquiries")
+    async def list_my_inquiries(
+        buyer_id: str, limit: Annotated[int, Query(ge=1, le=100)] = 50
+    ) -> dict:
+        user_id = inquiries.buyer_number(buyer_id)
+        out = await support_client.call(
+            "list_inquiries", support_client.new_context_id(), {"user_id": user_id}
+        )
+        items = [inquiries.customer_view(i) for i in out.get("items") or []]
+        return _ok(items[:limit], total=len(items))
+
+    @app.get("/api/shop/inquiries/{inquiry_id}")
+    async def get_my_inquiry(inquiry_id: Annotated[int, Path(ge=1)], buyer_id: str) -> dict:
+        user_id = inquiries.buyer_number(buyer_id)
+        out = await support_client.call(
+            "get_inquiry",
+            support_client.new_context_id(),
+            {"inquiry_id": inquiry_id, "user_id": user_id},
+        )
+        if "id" not in out:  # 문의가 아닌 응답은 성공으로 내보내지 않는다
+            raise ShopError("UPSTREAM_ERROR", "고객지원 응답이 문의 형식이 아니다", 502)
+        return _ok(inquiries.customer_view(out))
+
     # --- 해결 결과 평가: 쇼핑몰 → 고객지원 `submit_feedback` -----------------------------
     @app.post("/api/shop/inquiries/{inquiry_id}/feedback", status_code=201)
     async def submit_inquiry_feedback(
