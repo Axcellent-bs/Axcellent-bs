@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuditSection } from "@/components/finance/Audit";
 import { ClosingSection } from "@/components/finance/Closing";
+import { StatementsSection } from "@/components/finance/Statements";
 import { Chip, ErrorBox, MetaLine, MockBadge, TONE, Waiting, useResource } from "@/components/finance/bits";
 import { IncidentFinance } from "@/components/finance/Incident";
 import { SelfTestPanel } from "@/components/finance/Kept";
@@ -322,6 +323,7 @@ export default function FinancePage() {
         </div>
         <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
           {tab === "closing" && <ClosingSection tick={tick} onChanged={bump} />}
+          {tab === "closing" && <div className="mt-4"><StatementsSection tick={tick} /></div>}
           {tab === "reconciliation" && <ReconciliationSection tick={tick} />}
           {tab === "settlements" && <SettlementsSection tick={tick} onChanged={bump} onGoToQueue={goToQueue} />}
           {tab === "policy" && <PolicySection tick={tick} />}

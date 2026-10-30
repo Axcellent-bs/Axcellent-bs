@@ -39,7 +39,8 @@ from finance_agent.selftest import SELF_TEST_TTL_HOURS, is_fresh, run_self_test
 # 경로(`DECISION_PATHS`)만 POST·Authorization을 허용한다. A2A(`POST /a2a`)는 에이전트끼리만 쓴다
 DEFAULT_CORS_ORIGINS = "http://localhost:3001,http://127.0.0.1:3001"
 DECISION_PATHS = re.compile(
-    r"^/api/finance/(closing/confirm|reconciliation/[^/]+/note|settlements/batch)$"
+    r"^/api/finance/(closing/confirm|reconciliation/[^/]+/note|settlements/batch"
+    r"|anomalies/[^/]+/resolve)$"
 )
 
 logger = logging.getLogger("ax.finance")
@@ -218,7 +219,12 @@ class DashboardCORS:
     """출처는 `FINANCE_CORS_ORIGINS`. 사람 결정 경로만 POST를 열고, 나머지는 GET만 연다."""
 
     def __init__(self, app: ASGIApp, origins: list[str]) -> None:
-        self.get_only = CORSMiddleware(app, allow_origins=origins, allow_methods=["GET"])
+        self.get_only = CORSMiddleware(
+            app,
+            allow_origins=origins,
+            allow_methods=["GET"],
+            expose_headers=["Content-Disposition"],  # 재무제표 내려받기 파일 이름
+        )
         self.decisions = CORSMiddleware(
             app,
             allow_origins=origins,

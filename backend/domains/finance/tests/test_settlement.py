@@ -123,3 +123,12 @@ def test_apply_batch(fixed_now) -> None:
     assert "attempt" not in shown["batch"] and shown["batch"]["review_id"] == "rev_1"
     assert [r["seller_id"] for r in st.ready(shown)] == ["sel_0003"]
     assert date.fromisoformat(shown["pay_date"]).weekday() == 5
+
+
+def test_unpaid_payout_is_unknown_without_orders(fixed_now) -> None:
+    """정산 보류 금액: 주문을 못 받았으면 모름(None), 거래 없는 판매자는 0."""
+    books = bk.seed_books()
+    assert (st.unpaid_payout(books, "sel_0001") or 0) > 0
+    assert st.unpaid_payout(books, "sel_none") == 0
+    books.unavailable.append("orders")
+    assert st.unpaid_payout(books, "sel_0001") is None

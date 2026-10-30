@@ -10,7 +10,9 @@ from fastapi.testclient import TestClient
 
 from ax_agent_template import events
 from ax_contracts.schemas import EventEnvelope, EventType, ExecuteDecision, HoldReason
+from finance_agent import books as bk
 from finance_agent import handlers
+from finance_agent import settlement as st
 from finance_agent.main import app, load_card
 from finance_agent.recheck import VerifyAmountInput, recompute
 from finance_agent.sources import FraudScore, MockSources
@@ -395,6 +397,19 @@ def test_settlement_hold_states(client: TestClient, monkeypatch: pytest.MonkeyPa
     _fake_execute(monkeypatch, _decision("rejected", "C", hold_reason=HoldReason.VERIFY_REJECTED))
     rejected = _call(client, "settlement_hold", body, token="mock:orchestrator")
     assert (rejected["status"], rejected["outcome"]) == ("completed", "rejected_by_review")
+
+
+def test_settlement_hold_fills_the_unpaid_payout(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, fixed_now
+) -> None:
+    """금액을 안 주면 재무가 장부의 미지급 정산금(지난주+이번 주)을 채워 안전 관문에 보낸다."""
+    calls = _fake_execute(monkeypatch, _decision())
+    body = {"seller_id": "sel_0001", "reason_code": "fraud_risk"}
+    held = _call(client, "settlement_hold", body, token="mock:orchestrator")
+    expected = st.unpaid_payout(bk.seed_books(), "sel_0001")
+    assert expected is not None and expected > 0
+    assert calls[0]["params"]["hold_amount"] == expected
+    assert held["output"]["hold_amount"] == expected
 
 
 def test_execute_failure_does_not_record(

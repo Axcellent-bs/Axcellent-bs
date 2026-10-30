@@ -48,6 +48,7 @@ class SettlementHoldOutput(AxModel):
     seller_id: str
     status: Literal["held", "pending_review", "rejected"]
     reason_code: str
+    hold_amount: int | None = None  # 보류한 미지급 정산금. 모르면 None
     execution_id: str | None = None
     review_id: str | None = None
 
@@ -94,6 +95,7 @@ class ClosingReportOutput(AxModel):
 class AuditReportInput(AxModel):
     days: int = Field(default=7, ge=1, le=90)
     context_id: str | None = None  # 주면 그 사건의 쿠폰·실행 기록만 본다
+    finding_ref: str | None = None  # 주면 그 의심 건 하나만 (기간과 관계없이 처리 전 기록)
 
 
 class AuditFinding(AxModel):

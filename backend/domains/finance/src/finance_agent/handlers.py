@@ -41,7 +41,7 @@ from ax_contracts.schemas import (
     RequestMeta,
     TaskStatus,
 )
-from finance_agent import audit, chat_log, closing
+from finance_agent import anomalies, audit, chat_log, closing, settlement
 from finance_agent import books as bk
 from finance_agent import finance_config as fc
 from finance_agent import ledger as lg
@@ -115,6 +115,7 @@ class FinanceRecords:
         self.recon_notes: dict[str, str] = {}  # payment_id → 처리 메모
         self.recon_note_log: list[dict[str, Any]] = []
         self.batches: dict[str, dict[str, Any]] = {}  # 정산 기간 → 묶음 요청 상태
+        self.anomalies: dict[str, dict[str, Any]] = {}  # 의심 건 번호 → 처리 전·후 기록
 
 
 STATE: State | None = None
@@ -131,6 +132,14 @@ def reset_state(sources: Sources | None = None) -> None:
     """테스트 사이에 저장소를 비운다."""
     global STATE
     STATE = State(sources)
+
+
+async def note_audit(findings: list[dict[str, Any]], tenant_id: str) -> None:
+    """사후 감사가 찾은 의심 건을 처리할 때까지 남기고, 처음 본 열린 건만 총괄에 알린다."""
+    store = state().records.anomalies
+    pending = anomalies.note_findings(store, findings)
+    if pending:
+        anomalies.mark_announced(store, await chat_log.audit_findings(pending, tenant_id))
 
 
 # ---------------------------------------------------------------- 공통
@@ -381,6 +390,11 @@ async def settlement_hold(request: AgentRequest) -> AgentResult:
         ["settlement_hold"], f"{data.seller_id} 정산 보류: {data.reason_code}", [data.seller_id]
     )
     params = data.model_dump(mode="json", exclude_none=True)
+    if data.hold_amount is None:
+        # 금액을 안 주면 재무가 장부로 채운다. 못 구하면 비워 둬서 안전 관문이 사람에게 넘긴다
+        amount = settlement.unpaid_payout(await state().books(), data.seller_id)
+        if amount is not None:
+            params["hold_amount"] = amount
     decision, previous, key = await _gated(
         request, "settlement_hold", data.seller_id, params, evidence
     )
@@ -393,6 +407,7 @@ async def settlement_hold(request: AgentRequest) -> AgentResult:
         seller_id=data.seller_id,
         status=status,  # type: ignore[arg-type]
         reason_code=data.reason_code,
+        hold_amount=params.get("hold_amount"),
         execution_id=decision.execution_id,
         review_id=decision.review_id,
     )
@@ -456,7 +471,12 @@ async def audit_report(request: AgentRequest) -> AgentResult:
     report, missing = await audit.audit_report(
         books, data.days, impact_lookup=lookup, context_id=data.context_id
     )
-    await chat_log.audit_findings(report["findings"], request.meta.tenant_id)
+    await note_audit(report["findings"], request.meta.tenant_id)
+    if data.finding_ref:
+        # 알림받은 의심 건 하나: 기간이 지나도 목록에 남은 기록으로 본다
+        entry = state().records.anomalies.get(data.finding_ref)
+        found = [f for f in report["findings"] if anomalies.signature(f) == data.finding_ref]
+        report["findings"] = found or ([anomalies.finding_view(entry)] if entry else [])
     output = AuditReportOutput(
         window_from=report["from"],
         window_to=report["to"],

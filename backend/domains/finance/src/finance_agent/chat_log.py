@@ -15,7 +15,6 @@ payload에는 코드가 만든 사실(종류·금액·규칙 코드)만 담는�
 
 from __future__ import annotations
 
-import hashlib
 import re
 import uuid
 from datetime import UTC, datetime
@@ -24,6 +23,7 @@ from typing import Any
 from ax_agent_template import events
 from ax_agent_template.logging import log_event
 from ax_contracts.schemas import EventEnvelope, EventType
+from finance_agent.anomalies import signature
 
 AGENT = "finance"
 LEDGER_SKILL = "ledger_record"
@@ -47,22 +47,19 @@ def ledger_recorded(
     )
 
 
-def _signature(finding: dict[str, Any]) -> str:
-    raw = "|".join([str(finding.get("code")), *sorted(str(r) for r in finding.get("refs") or [])])
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
-
-
 BUYER_ID = re.compile(r"buy_\d+")
 
 
-async def audit_findings(findings: list[dict[str, Any]], tenant_id: str) -> None:
+async def audit_findings(findings: list[dict[str, Any]], tenant_id: str) -> list[str]:
     """새로 찾은 사후 감사 의심 건마다 `finance.anomaly_detected`를 발행한다.
 
-    총괄이 사건을 연다.
+    총괄이 사건을 연다. 알린(또는 이미 알린) 의심 건 번호를 돌려준다.
     """
+    sent: list[str] = []
     for finding in findings:
-        sig = _signature(finding)
+        sig = signature(finding)
         if sig in _seen_findings:
+            sent.append(sig)
             continue
         _seen_findings.add(sig)
         buyers = sorted(set(BUYER_ID.findall(str(finding.get("detail") or ""))))
@@ -87,3 +84,6 @@ async def audit_findings(findings: list[dict[str, Any]], tenant_id: str) -> None
             await events.publish(envelope)
         except Exception:  # noqa: BLE001 - 알리지 못해도 감사 결과는 화면에 그대로 보인다
             _seen_findings.discard(sig)
+        else:
+            sent.append(sig)
+    return sent

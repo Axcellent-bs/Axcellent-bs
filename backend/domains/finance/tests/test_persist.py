@@ -73,3 +73,22 @@ def test_broken_file_is_kept_aside(tmp_path: Path) -> None:
 def test_no_path_means_no_file(monkeypatch) -> None:
     monkeypatch.delenv("FINANCE_STATE_FILE", raising=False)
     assert persist.state_file() is None
+
+
+def test_open_anomalies_survive_a_restart(tmp_path) -> None:
+    """처리 전 의심 건은 다시 켜도 남는다. 예전 파일(목록 없음)도 읽는다."""
+    from finance_agent import anomalies
+
+    s = State(MockSources())
+    anomalies.note_findings(s.records.anomalies, [{"code": "repeat_refund", "refs": ["ord_1"]}])
+    path = tmp_path / "finance_state.json"
+    persist.save(s, path)
+    again = State(MockSources())
+    assert persist.load(again, path)
+    assert anomalies.listing(again.records.anomalies)["open_count"] == 1
+
+    old = persist.dump(again)
+    del old["records"]["anomalies"]
+    third = State(MockSources())
+    persist.restore(third, old)
+    assert third.records.anomalies == {}

@@ -165,3 +165,21 @@ def ready(result: dict[str, Any]) -> list[dict[str, Any]]:
         for r in result["statements"]
         if not r["hold_reasons"] and r["status"] in ("ready", "rejected")
     ]
+
+
+def unpaid_payout(books: Books, seller_id: str, today: date | None = None) -> int | None:
+    """정산 보류에 걸리는 금액: 지난주와 이번 주 정산금 합 (아직 지급 전인 몫).
+
+    주문 자료를 못 받았거나 일부만 받았으면 None (모르는 금액을 0으로 두지 않는다).
+    거래가 없으면 0, 정산금이 0원 이하이면 0.
+    """
+    if {"orders", "orders_partial"} & set(books.unavailable):
+        return None
+    today = today or fc.today()
+    total = 0
+    for ref in (today, today + timedelta(days=7)):  # 지난주, 이번 주
+        name, _, _ = fc.week_range(None, ref)
+        for row in statements(books, name, today=today)["statements"]:
+            if row["seller_id"] == seller_id:
+                total += row["payout"]
+    return max(total, 0)

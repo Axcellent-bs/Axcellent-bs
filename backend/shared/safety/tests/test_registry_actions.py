@@ -367,6 +367,21 @@ async def test_seller_review_risk_score(gate: Gate, verifier: Any, act) -> None:
 
 
 @pytest.mark.asyncio
+async def test_large_settlement_hold_goes_to_a_person(gate: Gate, verifier: Any, act) -> None:
+    """정산 보류: 100만 원 이상이거나 금액을 모르면 사람(C), 그보다 작으면 data 교차검증(B)."""
+    small = await gate.execute(
+        act("settlement_hold", "finance", "hold-1", seller_id="sel_1", hold_amount=999_999)
+    )
+    assert (small.grade, small.verifier) == ("B", "data")
+    large = await gate.execute(
+        act("settlement_hold", "finance", "hold-2", seller_id="sel_2", hold_amount=1_000_000)
+    )
+    assert (large.grade, large.status) == ("C", "held")
+    unknown = await gate.execute(act("settlement_hold", "finance", "hold-3", seller_id="sel_3"))
+    assert (unknown.grade, unknown.status) == ("C", "held")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "action", ["create_claim", "decide_claim", "receive_return", "inspect_return"]
 )
