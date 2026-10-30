@@ -33,7 +33,15 @@ from ax_agent_template import execute as gate_module
 from ax_contracts.schemas import TENANT_ID_DEFAULT, Evidence, ExecuteDecision, RequestMeta
 from ax_contracts.schemas.planning import ChangeResultInput, DevHandoffInput, DevResultInput
 from ax_contracts.schemas.record import RecordCase, RecordKind
-from planning_agent import coder, cross_check, related, repo_routing, vcs, vcs_bridge
+from planning_agent import (
+    cause_inbox,
+    coder,
+    cross_check,
+    related,
+    repo_routing,
+    vcs,
+    vcs_bridge,
+)
 from planning_agent.cross_check import CrossChecker, CrossEvidence
 from planning_agent.dev_handoff import (
     RECEIVE_DEV_RESULT,
@@ -442,6 +450,8 @@ class PlanningService:
         )
         self._gate = gate or template_gate
         self._send_result: ResultSender = result_sender or send_change_result
+        # 원인 확인 요청을 받은 요청에 올리는 곳 (시험에서 바꿔 끼운다, None이면 실제 할 일함)
+        self._cause_poster: cause_inbox.Poster | None = None
         # 새 요청이 오면 비슷한·충돌하는 요청을 찾는 곳 (None이면 찾지 않는다)
         self._relater: related.Relater | None = (
             related.default_relater() if relater == "default" else relater
@@ -1231,7 +1241,7 @@ class PlanningService:
                     seq,
                 )
             )
-            return ActionResult(output={"request_id": req_id, "auto": False})
+            return ActionResult(output={"request_id": req_id, "auto": False, "investigate": True})
         if auto is None:
             s.activity.append(
                 self._act(
@@ -2054,11 +2064,36 @@ class PlanningService:
                     "auto": result.output.get("auto"),
                     "via_context_id": context_id,
                 },
+            ), result.output.get("investigate", False)
+
+        async def apply(s: State) -> ActionResult:
+            out, investigate = await run(s)
+            nonlocal to_inbox
+            to_inbox = investigate
+            return out
+
+        to_inbox = False
+        result = await self._apply(apply)
+        self._idempotent[idempotency_key] = result
+        if to_inbox:
+            await self._cause_to_inbox(result.output["request_id"])
+        return result
+
+    async def _cause_to_inbox(self, req_id: str) -> None:
+        """원인 확인 요청을 받은 요청(사람 할 일함)에 올리고 활동에 남긴다 (잠금 밖에서 보낸다)."""
+        req = next((r for r in self.state.requests if r.id == req_id), None)
+        if req is None:
+            return
+        text = await cause_inbox.send(req, self.tenant_id, self._cause_poster)
+
+        async def log(s: State) -> None:
+            s.activity.append(
+                self._act(
+                    self.clock(), req.context_id, "planning", "human", "handoff", "A2A", text, "A"
+                )
             )
 
-        result = await self._apply(run)
-        self._idempotent[idempotency_key] = result
-        return result
+        await self._apply(log)
 
     async def link_incident(
         self,
