@@ -140,28 +140,31 @@ def _para_key(state: State, pr: PR) -> str | None:
     return f"{task.spec}:{task.para}" if task else None
 
 
-def _incident_paras(state: State) -> set[str]:
-    return {f"{s.id}:{p.id}" for s in state.specs for p in s.paras if p.incident}
+def _incident_paras(state: State) -> dict[str, str]:
+    """장애 표시가 있는 문단 → 사건 번호."""
+    return {f"{s.id}:{p.id}": p.incident for s in state.specs for p in s.paras if p.incident}
 
 
-def linked_incident_count(state: State, pr: PR) -> int:
-    """장애 표시 문단 연결 수.
-
-    이 PR의 문단 + 같은 파일을 바꾼 다른 PR의 문단 중 장애 표시(link_incident)가 있는 것.
-    """
+def linked_incident_paras(state: State, pr: PR) -> dict[str, str]:
+    """이 PR의 문단 + 같은 파일을 바꾼 다른 PR의 문단 중 장애 표시(link_incident)가 있는 것."""
     marked = _incident_paras(state)
-    linked: set[str] = set()
+    linked: dict[str, str] = {}
     own = _para_key(state, pr)
     if own in marked:
-        linked.add(own)
+        linked[own] = marked[own]
     paths = set(pr.changed_paths)
     for other in state.prs:
         if other.id == pr.id or not paths & set(other.changed_paths):
             continue
         key = _para_key(state, other)
         if key in marked:
-            linked.add(key)
-    return len(linked)
+            linked[key] = marked[key]
+    return linked
+
+
+def linked_incident_count(state: State, pr: PR) -> int:
+    """장애 표시 문단 연결 수."""
+    return len(linked_incident_paras(state, pr))
 
 
 def pr_params(state: State, pr: PR) -> dict[str, Any]:
@@ -196,4 +199,7 @@ def pr_check(state: State, pr: PR) -> Check:
 
 
 def pr_wait_state(check: Check) -> str:
-    return WAIT_HUMAN if "irreversible" in check.rules else WAIT_CROSS_CHECK
+    """되돌릴 수 없는 영역이나 교차검증 근거(`merge_cross_*`)에 걸리면 사람 확인."""
+    if "irreversible" in check.rules or any(r.startswith("merge_cross_") for r in check.rules):
+        return WAIT_HUMAN
+    return WAIT_CROSS_CHECK

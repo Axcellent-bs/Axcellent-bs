@@ -33,7 +33,8 @@ from ax_agent_template import execute as gate_module
 from ax_contracts.schemas import TENANT_ID_DEFAULT, Evidence, ExecuteDecision, RequestMeta
 from ax_contracts.schemas.planning import ChangeResultInput, DevHandoffInput, DevResultInput
 from ax_contracts.schemas.record import RecordCase, RecordKind
-from planning_agent import coder, repo_routing, vcs, vcs_bridge
+from planning_agent import coder, cross_check, repo_routing, vcs, vcs_bridge
+from planning_agent.cross_check import CrossChecker, CrossEvidence
 from planning_agent.dev_handoff import (
     RECEIVE_DEV_RESULT,
     ROLES,
@@ -420,6 +421,7 @@ class PlanningService:
         role: str | None = None,
         dev_sender: DevSender | None = None,
         real_example: bool = False,
+        cross_checker: CrossChecker | None | Literal["default"] = "default",
     ):
         # 서비스 역할: "" = 합친 모드(원래 동작), "planning" = 기획서까지, "dev" = PR·머지만
         self.role = (os.getenv("PLANNING_ROLE", "") if role is None else role).strip()
@@ -436,6 +438,10 @@ class PlanningService:
         )
         self._gate = gate or template_gate
         self._send_result: ResultSender = result_sender or send_change_result
+        # 교차검증 근거를 모으는 곳 (None이면 모으지 않고 safety 판정만)
+        self._cross_checker: CrossChecker | None = (
+            cross_check.default_checker() if cross_checker == "default" else cross_checker
+        )
         self.tenant_id = tenant_id
         self.gate_calls: list[GateCall] = []
         # 보류돼도 본 작업을 막지 않는 부수 기록 (SOFT_ACTIONS)
@@ -714,6 +720,7 @@ class PlanningService:
         state: str,
         check: Check,
         decision: ExecuteDecision | None = None,
+        evidence: CrossEvidence | None = None,
     ) -> AutoReview:
         """자동 확정·자동 머지를 멈추고 대기열에 올린다 (판단은 기존 사람 버튼)."""
         target.auto_review = AutoReview(
@@ -723,8 +730,36 @@ class PlanningService:
             at=self.clock(),
             gate_status=decision.status if decision else None,
             review_id=decision.review_id if decision else None,
+            evidence=[line.dump() for line in evidence.lines] if evidence else [],
         )
         return target.auto_review
+
+    async def _cross_check(
+        self, s: State, p: PR, check: Check, ctx: str
+    ) -> tuple[Check, CrossEvidence | None]:
+        """장애 났던 경로(`pr_linked_incident`)에 걸리면 다른 부서 근거로 그 규칙을 대신한다.
+
+        총괄·데이터분석에 묻고 `cross_check=true`와 근거를 params에 더한다. 근거에 걸리면
+        `merge_cross_*` 규칙이 남아 사람 확인으로 간다. 최종 판정은 safety가 다시 한다."""
+        if "pr_linked_incident" not in check.rules or self._cross_checker is None:
+            return check, None
+        ev = await self._cross_checker.gather(s, p, ctx, self.clock())
+        rules = [r for r in check.rules if r != "pr_linked_incident"] + ev.rules
+        s.activity.append(
+            self._act(
+                self.clock(),
+                ctx,
+                "planning",
+                "orchestrator",
+                "cross_check",
+                "A2A",
+                f"{p.id} 교차검증 근거: "
+                + " · ".join(f"{x.label} {x.value}" for x in ev.lines)
+                + (f" → 걸림 {', '.join(ev.rules)}" if ev.rules else " → 근거 통과"),
+                "read",
+            )
+        )
+        return Check(params={**check.params, **ev.params}, rules=rules), ev
 
     # ---- 화면 액션 진입점
 
@@ -1355,14 +1390,16 @@ class PlanningService:
             return
 
         merge_text = f"{pr_id} 간단 요청 규칙·검수·CI 통과 → 자동 머지 허용"
-        merge_rules = pr_check(s, pr)
+        merge_rules, ev = await self._cross_check(s, pr, pr_check(s, pr), ctx)
         try:
             await self._execute(
                 "merge_pr", ctx, pr_id, merge_text, {**merge_rules.params, "auto": True}
             )
         except GateRefused as exc:
-            # safety가 보류·거절하면 PR은 열어 두고 교차검증 대기로 둔다 (판단은 사람 머지 버튼)
-            self._hold(pr, WAIT_CROSS_CHECK, merge_rules, exc.decision)
+            # safety가 보류·거절하면 PR은 열어 두고 교차검증 대기로 둔다 (판단은 사람 머지 버튼).
+            # 근거를 이미 모았으면 사람 확인
+            state = WAIT_HUMAN if ev else WAIT_CROSS_CHECK
+            self._hold(pr, state, merge_rules, exc.decision, ev)
             for x in s.tasks:
                 if x.id == task_id:
                     x.state = "머지 대기"
@@ -3145,7 +3182,7 @@ class PlanningService:
         if self._repo_pending(p):
             s.activity.append(self._repo_wait_act(self._ctx_of_pr(s, p), p))
             return False
-        check = pr_check(s, p)
+        check, ev = await self._cross_check(s, p, pr_check(s, p), self._ctx_of_pr(s, p))
         if check.ok:
             try:
                 await self._do_merge(s, p, check, auto=True)
@@ -3153,9 +3190,11 @@ class PlanningService:
             except GateRefused as exc:
                 if exc.action != "merge_pr":
                     raise
-                hold = self._hold(p, WAIT_CROSS_CHECK, check, exc.decision)
+                # 근거를 모은 뒤에도 safety가 막으면 더 기다릴 곳이 없어 사람 확인
+                state = WAIT_HUMAN if ev else WAIT_CROSS_CHECK
+                hold = self._hold(p, state, check, exc.decision, ev)
         else:
-            hold = self._hold(p, pr_wait_state(check), check)
+            hold = self._hold(p, pr_wait_state(check), check, evidence=ev)
         why = ", ".join(hold.rules) or f"safety {hold.gate_status}"
         s.activity.append(
             self._act(
