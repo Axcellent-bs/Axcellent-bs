@@ -101,6 +101,11 @@ call_agent("finance", req)
 - **켠 서비스**: `backend/.env`의 `AX_ENABLED_SERVICES` (쉼표 목록, 예: `inquiry,claims`). 비어 있으면 전부 켠다(예전 동작).
   `run_all.sh`가 읽어서 모든 서버에 넘긴다. 서비스 13개만 이 목록을 따르고, 공통 서버(safety·memory·shop-api·dashboard-api)와
   주소로 부른 대상은 늘 켜져 있다. 서버는 목록과 관계없이 다 띄운다(꺼진 서비스로 가는 요청만 사람에게 간다).
+- **켠 서비스 파일**: `AX_ENABLED_SERVICES_FILE`(run_all.sh 기본값 `backend/.data/enabled_services.json`)이 가리키는 파일이 있으면
+  환경변수보다 먼저 쓴다. 형식은 `{"enabled": ["data", "finance"], "updated_at": "...", "updated_by": "..."}`이고, 빈 목록은 "모두 끔"이다.
+  라우터가 부를 때마다 바뀐 시각을 확인하므로 파일을 바꾸면 **재시작 없이** 반영된다. data `activity_report`도 같은 함수로 읽는다.
+  파일이 없거나 깨졌으면(경고 로그) 환경변수 `AX_ENABLED_SERVICES`를 쓴다(전부 켬으로 바꾸지 않는다).
+  `--only`로 띄울 때 이 파일이 있으면 파일이 먼저 쓰이므로, 안 띄운 서비스가 파일에 있으면 고치거나 지운다(run_all.sh가 경고한다).
 - **조직도**: `config/org.example.yaml`을 `config/org.yaml`로 복사해 고객사 부서 이름으로 고친다(커밋 안 함). `run_all.sh`가 있으면
   `AX_ORG_CONFIG`로 넘긴다. 키는 서비스 id 또는 skill id이고 skill 줄이 먼저다. 부서 이름은 이 파일에만 있다.
 - **할 일함 API** (dashboard-api 8020, 저장 `AX_HANDOFF_DB` = `.data/handoffs.db`)

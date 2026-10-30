@@ -4,7 +4,10 @@
 여러 개 사면 그 서비스 에이전트끼리 A2A로 협업한다.
 `call_agent()`가 `route_target()`으로 받는 서비스를 정한 뒤 여기서 묻는다.
 
-- 켠 서비스: 환경변수 `AX_ENABLED_SERVICES` (쉼표 목록, 비어 있으면 전부 켬).
+- 켠 서비스: `AX_ENABLED_SERVICES_FILE`이 가리키는 JSON 파일이 있으면 그 파일
+  (`{"enabled": ["data", ...], "updated_at": "...", "updated_by": "..."}`, 재시작 없이 반영),
+  없으면 환경변수 `AX_ENABLED_SERVICES` (쉼표 목록, 비어 있으면 전부 켬).
+  파일이 깨졌거나 읽을 수 없으면 환경변수 값을 쓴다(경고 로그).
   `services.py`의 서비스 13개만 이 목록을 따른다. 그 밖의 대상
   (safety·memory·shop-api·dashboard-api 같은 공통 서버, 주소로 부른 대상)은 늘 켜져 있다.
 - 조직도: `AX_ORG_CONFIG`가 가리키는 YAML 파일 (예시 `backend/config/org.example.yaml`).
@@ -35,6 +38,7 @@ import yaml
 from ax_agent_template.services import BY_ID
 
 ENABLED_ENV = "AX_ENABLED_SERVICES"
+ENABLED_FILE_ENV = "AX_ENABLED_SERVICES_FILE"
 ORG_ENV = "AX_ORG_CONFIG"
 CARDS_ENV = "AX_SERVICE_CARDS_DIR"
 # 서비스 카드 폴더 (`backend/services/<id>/agent-card.json`). 이 파일 기준 backend/ 아래
@@ -51,11 +55,64 @@ class Assignment:
     assignee: str | None = None
 
 
-def enabled_services() -> frozenset[str] | None:
-    """켠 서비스 id 목록. 환경변수가 비어 있으면 `None`(전부 켬)."""
+def _enabled_from_env() -> frozenset[str] | None:
     raw = os.getenv(ENABLED_ENV, "")
     names = frozenset(n.strip() for n in raw.split(",") if n.strip())
     return names or None
+
+
+# 켠 서비스 파일: 바뀐 시각·크기가 같으면 다시 읽지 않는다. 실패도 같은 상태면 경고를 한 번만 남긴다
+_enabled_cache: tuple[str, int, int, frozenset[str] | None] | None = None
+
+
+def _parse_enabled(raw: Any, path: str) -> frozenset[str]:
+    names = raw.get("enabled") if isinstance(raw, dict) else None
+    if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+        raise ValueError(f"{path}: enabled(서비스 id 문자열 목록)가 필요하다")
+    return frozenset(n.strip() for n in names if n.strip())
+
+
+def _enabled_from_file(path: str) -> frozenset[str] | None:
+    """파일의 켠 서비스. 읽을 수 없거나 형식이 틀리면 환경변수 값(경고 로그)이다.
+
+    전부 켬으로 바꾸지 않는다: 환경변수도 비어 있을 때만 전부 켬(지금과 같은 뜻)이다.
+    """
+    global _enabled_cache
+    try:
+        stat = os.stat(path)
+    except OSError as exc:
+        key = (path, -1, -1)
+        if _enabled_cache is None or _enabled_cache[:3] != key:
+            logger.warning(
+                "켠 서비스 파일을 읽을 수 없어 %s 값을 쓴다: %s (%s)", ENABLED_ENV, path, exc
+            )
+            _enabled_cache = (*key, None)
+        return _enabled_from_env()
+    key = (path, stat.st_mtime_ns, stat.st_size)
+    if _enabled_cache is not None and _enabled_cache[:3] == key:
+        cached = _enabled_cache[3]
+        return _enabled_from_env() if cached is None else cached
+    try:
+        names = _parse_enabled(json.loads(Path(path).read_text(encoding="utf-8")), path)
+    except (OSError, ValueError) as exc:  # json.JSONDecodeError는 ValueError다
+        logger.warning("켠 서비스 파일이 깨져 %s 값을 쓴다: %s (%s)", ENABLED_ENV, path, exc)
+        _enabled_cache = (*key, None)
+        return _enabled_from_env()
+    _enabled_cache = (*key, names)
+    return names
+
+
+def enabled_services() -> frozenset[str] | None:
+    """켠 서비스 id 목록. `None`이면 전부 켬.
+
+    `AX_ENABLED_SERVICES_FILE`이 있으면 그 파일(`{"enabled": [...], "updated_at", "updated_by"}`)을
+    부를 때마다 바뀐 시각으로 확인해 읽는다(재시작 없이 반영). 파일의 빈 목록은 "모두 끔"이다.
+    파일이 없거나 깨졌으면 환경변수 `AX_ENABLED_SERVICES`(쉼표 목록, 비어 있으면 전부 켬)를 쓴다.
+    """
+    path = os.getenv(ENABLED_FILE_ENV, "").strip()
+    if path:
+        return _enabled_from_file(path)
+    return _enabled_from_env()
 
 
 def is_enabled(target: str) -> bool:

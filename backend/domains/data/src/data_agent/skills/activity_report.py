@@ -131,7 +131,8 @@ def periods(period: str, start: date | None, now: datetime) -> Periods:
 
 # ------------------------------------------------------------------------------------- 범위
 def enabled_service_ids(enabled: Callable[[str], bool] = routing.is_enabled) -> list[str]:
-    """이 회사가 켠(AI를 쓰는) 서비스 id. 백엔드 `AX_ENABLED_SERVICES` 기준(비어 있으면 전부)."""
+    """이 회사가 켠(AI를 쓰는) 서비스 id. 라우터와 같은 함수(`routing.is_enabled`): 켠 서비스 파일
+    `AX_ENABLED_SERVICES_FILE`이 있으면 그 파일, 없으면 `AX_ENABLED_SERVICES`(비어 있으면 전부)."""
     return [s.id for s in SERVICES if s.skills and enabled(s.id)]
 
 
