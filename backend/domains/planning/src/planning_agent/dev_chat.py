@@ -397,11 +397,16 @@ async def turn(
                 connection=cid,
                 waiting_for=ids,
             )
-    return await _start(svc, tid, plan, cid, reply)
+    return await _start(svc, tid, plan, cid, reply, skip_queue=now(text))
 
 
 async def _start(
-    svc: PlanningService, tid: str, plan: ChatPlan, cid: str, reply: str = ""
+    svc: PlanningService,
+    tid: str,
+    plan: ChatPlan,
+    cid: str,
+    reply: str = "",
+    skip_queue: bool = False,
 ) -> ChatThread:
     """계획으로 코딩 작업을 띄우고 대화에 남긴다."""
     from planning_agent.domain.service import ActionError, GateRefused
@@ -413,6 +418,7 @@ async def _start(
             done="\n".join(plan.done) or None,
             paths=plan.paths,
             connection=cid,
+            skip_queue=skip_queue,
         )
     except ActionError as exc:
         return await svc.chat_add(

@@ -218,6 +218,7 @@ class Job:
     hints: tuple[str, ...]
     connection: str | None
     instruction: str | None = None  # 사람이 대기 중인 PR에 준 수정 지시
+    skip_queue: bool = False  # '지금 진행': 같은 파일 작업이 있어도 기다리지 않는다
 
 
 class CoderGone(Exception):
@@ -599,6 +600,43 @@ def drop_draft(svc: PlanningService, task_id: str) -> None:
     _drafts(svc).pop(task_id, None)
 
 
+QUEUE_POLL_SECONDS = 2.0  # 대기열 차례 확인 간격
+
+
+async def _wait_turn(svc: PlanningService, job: Job, paths: list[str]) -> bool:
+    """작업 대기열. 먼저 만든 작업이 같은 파일을 고치는 중이거나 아직 파일을 안 골랐으면
+    끝날(고를) 때까지 기다린다. 기다렸으면 True. 먼저 만든 작업은 뒤 작업을 기다리지 않아
+    서로 기다리다 멈추지 않는다. '지금 진행'(skip_queue)이면 기다리지 않는다."""
+    if job.skip_queue:
+        return False
+    waited = False
+    while True:
+        if not svc.coding_alive(job):
+            raise CoderGone(job.task_id)
+        same, undecided = svc.queue_blockers(job, paths)
+        if not same and not undecided:
+            break
+        ids = sorted({*same, *undecided})
+        if not waited:
+            why = (
+                f"앞 작업 {', '.join(same)}가 같은 파일을 고치는 중"
+                if same
+                else f"앞 작업 {', '.join(undecided)}가 아직 고칠 파일을 고르는 중"
+            )
+            await svc.coding_step(
+                job, "queued", point="code.queue", text=f"{why} → 끝나면 이어서",
+                error=f"{why} → 끝나면 최신 코드로 이어서 해요", waiting_for=ids,
+            )  # fmt: skip
+            waited = True
+        await asyncio.sleep(QUEUE_POLL_SECONDS)
+    if waited:
+        await svc.coding_step(
+            job, "writing", point="code.queue", text="앞 작업이 끝나 최신 코드로 이어서 씀",
+            error=None, waiting_for=[],
+        )  # fmt: skip
+    return waited
+
+
 async def run(svc: PlanningService, job: Job) -> None:
     """코딩 작업 하나를 끝까지 돌린다. 어떤 실패든 상태에 한 줄로 남기고 멈춘다."""
     from planning_agent.domain.service import GateRefused
@@ -697,6 +735,8 @@ async def _run(svc: PlanningService, job: Job) -> None:
     await svc.coding_step(
         job, "writing", point="code.plan", text=text, files=chosen, summary=summary
     )
+    if await _wait_turn(svc, job, [p.path for p in picks]):
+        bodies = {}  # 기다리는 동안 앞 작업이 같은 파일을 바꿨을 수 있어 최신 글을 다시 읽는다
 
     # 3. 쓰기
     originals = await _originals(adapter, picks, bodies)

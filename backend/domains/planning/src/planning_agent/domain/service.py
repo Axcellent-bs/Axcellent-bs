@@ -2283,6 +2283,7 @@ class PlanningService:
         done: str | None = None,
         paths: list[str] | None = None,
         connection: str | None = None,
+        skip_queue: bool = False,
     ) -> ActionResult:
         """개발팀원이 쓴 기획으로 요청·확정 기획서·작업 하나를 만들고 코딩 에이전트를 띄운다 (A).
 
@@ -2359,7 +2360,11 @@ class PlanningService:
                     owner="에이전트",
                     state="진행 중",
                     coding=CodingRun(
-                        status="queued", model=coder.model_name(llm), updated_at=t, connection=cid
+                        status="queued",
+                        model=coder.model_name(llm),
+                        updated_at=t,
+                        connection=cid,
+                        skip_queue=skip_queue,
                     ),
                 )
             )
@@ -2724,7 +2729,32 @@ class PlanningService:
             hints=tuple(r1.paths) if r1 else (),
             connection=task.coding.connection,
             instruction=task.coding.instruction,
+            skip_queue=task.coding.skip_queue,
         )
+
+    def coding_alive(self, job: coder.Job) -> bool:
+        """이 실행이 아직 살아 있나 (중단·초기화·새 실행이면 False)."""
+        return self._coding_live.get(job.task_id) == job.run_id
+
+    def queue_blockers(self, job: coder.Job, paths: list[str]) -> tuple[list[str], list[str]]:
+        """이 작업보다 먼저 만든, 같은 연결의 진행 중 코딩 작업 중
+        (같은 파일을 고치는 작업, 아직 고칠 파일을 안 고른 작업)."""
+        active = ("queued", "reading", "writing", "reviewing", "opened", "waiting_human")
+        mine = set(paths)
+        same: list[str] = []
+        undecided: list[str] = []
+        for t in self.state.tasks:
+            if t.id == job.task_id:
+                break  # 뒤에 만든 작업은 보지 않는다 (먼저 만든 쪽이 먼저 간다)
+            cr = t.coding
+            if cr is None or cr.status not in active or cr.connection != job.connection:
+                continue
+            files = {f.path for f in cr.files}
+            if not files:
+                undecided.append(t.id)
+            elif files & mine:
+                same.append(t.id)
+        return same, undecided
 
     def _coding_of(self, s: State, job: coder.Job) -> tuple[Task, CodingRun]:
         """이 실행의 작업. 초기화됐거나 새 실행으로 바뀌었으면 `CoderGone`."""

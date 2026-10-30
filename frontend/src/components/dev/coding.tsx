@@ -102,7 +102,8 @@ export function RelatedTags({ s, t }: { s: S; t?: Task }) {
 }
 
 /** 목록 줄·머리에 쓰는 코딩 상태 글자 */
-export const codingState = (c: CodingRun) => CODING_LABEL[c.status] ?? c.status
+export const codingState = (c: CodingRun) =>
+  c.status === 'queued' && c.waitingFor?.length ? `차례 기다림 (${c.waitingFor.join(', ')} 뒤)` : CODING_LABEL[c.status] ?? c.status
 
 /** 작업·PR 흐름 맨 위 "코딩 에이전트" 단계 */
 export function CodingStep({ task }: { task: Task }) {
