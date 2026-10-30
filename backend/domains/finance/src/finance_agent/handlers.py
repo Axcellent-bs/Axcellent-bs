@@ -99,6 +99,7 @@ class FinanceRecords:
         self.recon_note_log: list[dict[str, Any]] = []
         self.batches: dict[str, dict[str, Any]] = {}  # 정산 기간 → 묶음 요청 상태
         self.anomalies: dict[str, dict[str, Any]] = {}  # 의심 건 번호 → 처리 전·후 기록
+        self.policy_acks: dict[str, dict[str, Any]] = {}  # 규칙 키 → 경보 확인 기록
 
 
 STATE: State | None = None

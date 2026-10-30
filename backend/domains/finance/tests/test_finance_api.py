@@ -93,8 +93,24 @@ def test_overview_shape(client: TestClient) -> None:
         "policy_alert",
     ]
     for t in data["todo"]:
-        assert set(t) == {"kind", "title", "count", "amount", "link"}
+        assert {"kind", "title", "count", "amount", "link", "action"} <= set(t)
         assert t["count"] > 0
+    # 할 일마다 사람이 바로 누를 결정이 붙는다
+    actions = {t["kind"]: t["action"] for t in data["todo"]}
+    assert actions["settlement_batch"] == {"type": "settlement_request", "period": "2026-W42"}
+    assert actions["closing_confirm"] == {
+        "type": "closing_confirm",
+        "period": "day",
+        "date": "2026-10-22",
+    }
+    assert actions["recon_exception"]["type"] == "recon_note"
+    assert actions["audit_finding"]["type"] == "anomaly_resolve"
+    assert actions["policy_alert"]["type"] == "policy_ack"
+    for t in data["todo"]:
+        if t["kind"] in ("recon_exception", "audit_finding", "policy_alert"):
+            assert t["items"] and all(
+                {"ref", "title", "detail", "amount"} <= set(i) for i in t["items"]
+            )
     batch = data["todo"][0]
     assert (batch["count"], batch["link"]) == (2, "settlements")
     assert batch["title"] == "판매자 정산 2곳 지급 승인 요청 대기"
@@ -441,3 +457,56 @@ def test_support_costs_lists_recorded_inquiries_newest_first(client: TestClient)
     body = _get(client, "/api/finance/support-costs")
     assert [r["inquiry_id"] for r in body["data"]] == [2, 1]
     assert META_KEYS <= set(body["meta"])
+
+
+# ---------------------------------------------------------------- 할 일에서 바로 결정
+def _todo(client: TestClient, kind: str) -> dict | None:
+    todo = client.get("/api/finance/overview").json()["data"]["todo"]
+    return next((t for t in todo if t["kind"] == kind), None)
+
+
+def test_resolving_audit_items_clears_the_todo(client: TestClient) -> None:
+    """감사 할 일은 처리 전 의심 건이다. 사람이 모두 처리하면 할 일에서 빠진다."""
+    todo = _todo(client, "audit_finding")
+    assert todo is not None
+    for item in client.get("/api/finance/anomalies").json()["data"]["open"]:
+        url = f"/api/finance/anomalies/{item['finding_ref']}/resolve"
+        assert client.post(url, json={"note": "확인함"}, headers=HUMAN).status_code == 200
+    assert _todo(client, "audit_finding") is None
+
+
+def test_policy_alert_ack_needs_a_person_and_hides_until_it_gets_worse(
+    client: TestClient,
+) -> None:
+    todo = _todo(client, "policy_alert")
+    assert todo is not None
+    key = todo["items"][0]["ref"]
+    url = f"/api/finance/policy/{key}/ack"
+    assert client.post(url, json={"note": "이번 달 캠페인 때문"}).status_code == 401
+    assert client.post(url, json={"note": " "}, headers=HUMAN).status_code == 400
+    bad = client.post("/api/finance/policy/nope/ack", json={"note": "x"}, headers=HUMAN)
+    assert bad.status_code == 404
+    done = client.post(url, json={"note": "이번 달 캠페인 때문"}, headers=HUMAN).json()["data"]
+    assert (done["by"], done["month"], done["note"]) == (
+        "taeyoon",
+        "2026-10",
+        "이번 달 캠페인 때문",
+    )
+    after = _todo(client, "policy_alert")
+    assert after is None or key not in {i["ref"] for i in after["items"]}
+
+
+def test_policy_ack_is_kept_only_for_the_same_month_and_level() -> None:
+    from datetime import date
+
+    ack = {"alert": "warn", "month": "2026-10"}
+    assert finance_api.policy_acked(ack, "warn", date(2026, 10, 23))
+    assert not finance_api.policy_acked(ack, "over", date(2026, 10, 23))  # 더 세지면 다시
+    assert not finance_api.policy_acked(ack, "warn", date(2026, 11, 1))  # 다음 달이면 다시
+    assert not finance_api.policy_acked(None, "warn", date(2026, 10, 23))
+
+
+def test_ack_path_allows_post_from_the_dashboard() -> None:
+    from finance_agent.main import DECISION_PATHS
+
+    assert DECISION_PATHS.match("/api/finance/policy/coupon_total/ack")

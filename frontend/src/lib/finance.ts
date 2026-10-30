@@ -1,6 +1,7 @@
 import { ApiError } from "./apiError";
 import { FINANCE_AGENT_URL, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from "./env";
 import { humanizeIds, incidentNo } from "./format";
+import { ExampleMissing, exampleCall, exampleOn } from "./financeExample";
 
 // 재무 화면 → finance(8105) · safety(8001) API. 응답은 ax-backend 규약 {data, meta} / {error: {code, message}}.
 // 재무 AI = 고객사의 재무팀 (결산·대사·판매자 정산·예산 한도·사후 감사).
@@ -37,7 +38,20 @@ export interface SupportCostRecord {
 
 // ---------------------------------------------------------------- §11 overview
 export type TodoKind = "settlement_batch" | "closing_confirm" | "recon_exception" | "audit_finding" | "policy_alert";
-export interface FinanceTodo { kind: TodoKind; title: string; count: number | null; amount: number | null; link: string | null }
+/** 할 일에서 사람이 바로 누를 결정 */
+export type TodoActionType = "closing_confirm" | "settlement_request" | "review_decision" | "recon_note" | "anomaly_resolve" | "policy_ack";
+export interface TodoAction { type: TodoActionType; period?: string; date?: string; review_id?: string | null }
+/** 건마다 결정할 때의 한 건 (대사 불일치·감사 의심·한도 경보) */
+export interface TodoItem { ref: string; title: string; detail: string; amount: number | null }
+export interface FinanceTodo {
+  kind: TodoKind;
+  title: string;
+  count: number | null;
+  amount: number | null;
+  link: string | null;
+  action?: TodoAction;
+  items?: TodoItem[];
+}
 export interface FinanceKpis {
   gmv: number | null;
   commission_revenue: number | null;
@@ -326,11 +340,20 @@ export function serverName(base: string, name: string): string {
 export const FINANCE_SERVER = serverName(FINANCE_AGENT_URL, "재무 AI 서버");
 export const SAFETY_SERVER = serverName(SAFETY_API_URL, "안전 장치 서버");
 
-export const humanTokenSet = SAFETY_HUMAN_TOKEN.length > 0;
+/** 사람 결정 버튼을 켤지. 예시 데이터 모드는 서버에 보내지 않으므로 늘 켠다 (전환하면 화면을 다시 읽는다) */
+export const exampleMode = exampleOn();
+export const humanTokenSet = SAFETY_HUMAN_TOKEN.length > 0 || exampleMode;
 
 interface CallOptions { method?: "GET" | "POST"; body?: unknown; human?: boolean }
 
 async function call(base: string, server: string, path: string, opts: CallOptions = {}): Promise<unknown> {
+  if (exampleMode) {
+    try {
+      return await exampleCall(base === SAFETY_API_URL ? "safety" : "finance", path, opts.method ?? "GET", opts.body);
+    } catch (e) {
+      throw new FinanceApiError(e instanceof ExampleMissing ? e.message : "예시 데이터를 읽지 못했습니다.", 404, "example_missing");
+    }
+  }
   const headers: Record<string, string> = {};
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   if (opts.human && humanTokenSet) headers.Authorization = `Bearer ${SAFETY_HUMAN_TOKEN}`;
@@ -359,6 +382,7 @@ async function call(base: string, server: string, path: string, opts: CallOption
 
 /** 파일 응답을 받아 브라우저 내려받기로 넘긴다. 이름은 서버가 준 것(Content-Disposition), 없으면 `fallback` */
 async function download(path: string, fallback: string): Promise<void> {
+  if (exampleMode) throw new FinanceApiError("예시 데이터에서는 내려받지 않습니다. '실제 데이터'로 바꿔서 내려받으세요.", 0, "example_missing");
   let res: Response;
   try {
     res = await fetch(`${FINANCE_AGENT_URL}${path}`, { cache: "no-store" });
@@ -411,6 +435,9 @@ export const finance = {
   requestSettlementBatch: (period: string) =>
     fin<Envelope<Settlements | SettlementBatch>>("/api/finance/settlements/batch", { method: "POST", body: { period }, human: true }),
   policy: () => fin<Envelope<Policy>>("/api/finance/policy"),
+  /** 예산·한도 경보 확인 메모. 사람 토큰만. 한도는 바꾸지 않는다 */
+  ackPolicy: (key: string, note: string) =>
+    fin<Envelope<{ key: string; note: string; by: string; at: string }>>(`/api/finance/policy/${encodeURIComponent(key)}/ack`, { method: "POST", body: { note }, human: true }),
   audit: (days = 7) => fin<Envelope<AuditReport>>(`/api/finance/audit${query({ days })}`),
   /** 처리 전 의심 건 전부 (기간 제한 없음) */
   anomalies: () => fin<Envelope<AnomalyList>>("/api/finance/anomalies"),

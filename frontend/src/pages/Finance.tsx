@@ -12,12 +12,14 @@ import { ReconciliationSection } from "@/components/finance/Reconciliation";
 import { SafetyQueue } from "@/components/finance/SafetyQueue";
 import { SettlementsSection } from "@/components/finance/Settlements";
 import { SupportCostsSection } from "@/components/finance/SupportCosts";
+import { TodoCard } from "@/components/finance/Todo";
 import { Link } from "@/lib/nav";
 import {
-  FINANCE_SERVER, FINANCE_TABS, SAFETY_SERVER, finance, incidentName, krw, plainText, sortIncidents, todoTab,
-  type FinanceKpis, type FinanceTab, type FinanceTodo, type Review, type SelfTest, type SelfTestLastMeta,
+  FINANCE_SERVER, FINANCE_TABS, SAFETY_SERVER, exampleMode, finance, incidentName, krw, sortIncidents, todoTab,
+  type FinanceKpis, type FinanceTab, type Review, type SelfTest, type SelfTestLastMeta,
 } from "@/lib/finance";
 import { CompanyName } from "@/demo/CompanyName";
+import { setExampleOn } from "@/lib/financeExample";
 
 // 재무 AI 화면 = 고객사 재무팀. 기본 화면은 시나리오 A(결제 장애)의 "장애 사건 재무"(⑨ 쿠폰 장부 → ⑩ 손실 → ⑰ 사건 후 감사).
 // 평상시 업무(결산·대사·정산·한도 제안·감사)는 두 번째 탭에 둔다. 재무 AI 테스트는 서버가 10분마다 자동으로 한다.
@@ -45,12 +47,22 @@ const KPI: { key: keyof FinanceKpis; label: string; hint: string }[] = [
   { key: "net_result", label: "영업 결과", hint: "수수료 매출에서 비용을 뺀 값" },
 ];
 
-const TODO_TONE: Record<FinanceTodo["kind"], string> = {
-  settlement_batch: TONE.info, closing_confirm: TONE.info, recon_exception: TONE.bad, audit_finding: TONE.warn, policy_alert: TONE.warn,
-};
-const TODO_KO: Record<FinanceTodo["kind"], string> = {
-  settlement_batch: "판매자 정산", closing_confirm: "결산", recon_exception: "대사", audit_finding: "감사", policy_alert: "한도",
-};
+/** 실제 데이터 / 예시 데이터 전환. 기획·개발, 사람 할 일함 화면과 같은 방식으로 브라우저에 기억하고 화면을 다시 읽는다 */
+function DataToggle() {
+  const pick = (on: boolean) => {
+    if (on === exampleMode) return;
+    setExampleOn(on);
+    window.location.reload();
+  };
+  return (
+    <div className="flex gap-1 rounded-full bg-ink-50 p-0.5" role="group" aria-label="데이터 보기">
+      {([[false, "실제 데이터"], [true, "예시 데이터"]] as const).map(([on, label]) => (
+        <button key={label} type="button" aria-pressed={exampleMode === on} onClick={() => pick(on)}
+          className={`rounded-full px-3 py-1 text-xs font-medium ${exampleMode === on ? "bg-brand-600 text-white" : "text-ink-700 hover:bg-ink-100"}`}>{label}</button>
+      ))}
+    </div>
+  );
+}
 
 /** 한쪽 서버가 꺼져 있어도 나머지는 보이도록 따로 받는다 */
 async function settle<T>(p: Promise<T>): Promise<[T | null, string | null]> {
@@ -156,7 +168,9 @@ export default function FinancePage() {
   const failedIncidents = incidentList.filter((i) => i.checks_ok === false);
   // 보류 쿠폰으로 이미 보여 준 사건의 보류 건은 "보류 큐" 항목에서 빼 두 번 세지 않는다
   const heldCtx = new Set(heldIncidents.map((i) => i.context_id));
-  const otherPending = pendingReviews.filter((r) => !heldCtx.has(r.context_id));
+  // 정산 승인 대기는 판매자 정산 할 일에 결정 버튼이 있으므로 "보류 큐" 항목에서 다시 세지 않는다
+  const todoReviewIds = new Set(todo.map((t) => t.action?.review_id).filter(Boolean));
+  const otherPending = pendingReviews.filter((r) => !heldCtx.has(r.context_id) && !todoReviewIds.has(r.review_id));
   const todoCount = todo.length + (otherPending.length ? 1 : 0) + heldIncidents.length + failedIncidents.length;
   const anyTodoLoaded = overview.env || reviews || incidents.env;
 
@@ -172,6 +186,7 @@ export default function FinancePage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs sm:ml-auto">
+          <DataToggle />
           <button className="btn-ghost" onClick={bump}>새로고침</button>
           {safetyUp != null && <Chip label={safetyUp ? "안전 장치 켜짐" : "안전 장치 꺼짐"} tone={safetyUp ? TONE.ok : TONE.bad} />}
           {financeUp != null && <Chip label={financeUp ? "재무 AI 켜짐" : "재무 AI 꺼짐"} tone={financeUp ? TONE.ok : TONE.bad} />}
@@ -193,7 +208,15 @@ export default function FinancePage() {
         </p>
       </details>
 
-      <SelfTestPanel test={test} meta={testMeta} loaded={testLoaded} open={testOpen} running={testing} disabled={financeUp === false} onRunNow={runTest} />
+      {exampleMode && (
+        <p role="status" className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-800">
+          <b>예시 데이터</b>를 보고 있습니다. 재무 AI를 연습용 예시 장부로 돌린 결과이며 실제 쇼핑몰 숫자가 아닙니다.
+          여기서 누른 결정(결산 확정·메모·승인)은 이 화면 안에서만 바뀌고 서버에는 보내지 않습니다. 새로고침하면 처음으로 돌아갑니다.
+        </p>
+      )}
+
+      {/* 재무 AI 테스트는 실제 서버 상태를 보는 것이라 예시 모드에서는 숨긴다 */}
+      {!exampleMode && <SelfTestPanel test={test} meta={testMeta} loaded={testLoaded} open={testOpen} running={testing} disabled={financeUp === false} onRunNow={runTest} />}
 
       {(financeUp === false || safetyUp === false) && (
         <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
@@ -221,7 +244,7 @@ export default function FinancePage() {
                   className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-surface px-4 py-3 text-left shadow-sm transition hover:ring-2 hover:ring-brand-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
                   <Chip label="보류 쿠폰" tone={TONE.warn} />
                   <span className="min-w-0 flex-1 text-sm font-medium text-ink-900">{incidentName(i.context_id, i.component, i.opened_at)} 보상 쿠폰 {i.held_count}장이 보류 큐에서 결정을 기다림</span>
-                  <span className="text-xs font-medium text-brand-700">보류 큐로 →</span>
+                  <span className="text-xs font-medium text-brand-700">보류 큐에서 결정하기 →</span>
                 </button>
               </li>
             ))}
@@ -236,15 +259,8 @@ export default function FinancePage() {
               </li>
             ))}
             {todo.map((t, i) => (
-              <li key={`${t.kind}-${i}`}>
-                <button type="button" onClick={() => openTab(todoTab(t), true)}
-                  className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-surface px-4 py-3 text-left shadow-sm transition hover:ring-2 hover:ring-brand-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
-                  <Chip label={TODO_KO[t.kind] ?? "할 일"} tone={TODO_TONE[t.kind] ?? TONE.muted} />
-                  <span className="min-w-0 flex-1 text-sm font-medium text-ink-900">{plainText(t.title)}</span>
-                  {t.amount != null && <span className="text-sm tabular-nums text-ink-700">{krw(t.amount)}</span>}
-                  <span className="text-xs font-medium text-brand-700">보러 가기 →</span>
-                </button>
-              </li>
+              <TodoCard key={`${t.kind}-${i}`} todo={t} onDone={() => { bump(); void loadSide(); }}
+                onOpen={() => openTab(todoTab(t), true)} onGoToQueue={goToQueue} />
             ))}
             {otherPending.length > 0 && (
               <li>
@@ -252,7 +268,7 @@ export default function FinancePage() {
                   className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-surface px-4 py-3 text-left shadow-sm transition hover:ring-2 hover:ring-brand-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
                   <Chip label="보류 큐" tone={TONE.warn} />
                   <span className="min-w-0 flex-1 text-sm font-medium text-ink-900">안전 장치 보류 큐에서 결정 기다림 {otherPending.length}건</span>
-                  <span className="text-xs font-medium text-brand-700">보러 가기 →</span>
+                  <span className="text-xs font-medium text-brand-700">보류 큐에서 결정하기 →</span>
                 </button>
               </li>
             )}
@@ -336,7 +352,8 @@ export default function FinancePage() {
       </div>
       )}
 
-      <SafetyQueue reviews={reviews} error={reviewsError} highlight={highlight} reload={loadSide} />
+      {/* 보류 큐에서 결정하면 할 일(정산 승인 대기 등)도 새로 받는다 */}
+      <SafetyQueue reviews={reviews} error={reviewsError} highlight={highlight} reload={() => { bump(); return loadSide(); }} />
     </div>
   );
 }

@@ -1,0 +1,3614 @@
+{
+ "/api/finance/overview": {
+  "data": {
+   "date": "2026-10-30",
+   "kpis": {
+    "gmv": 322600,
+    "commission_revenue": 30368,
+    "refund_total": 0,
+    "coupon_cost": 13000,
+    "pg_fee": 10156,
+    "net_result": 7212
+   },
+   "todo": [
+    {
+     "kind": "settlement_batch",
+     "title": "판매자 정산 2곳 지급 승인 요청 대기",
+     "count": 2,
+     "amount": 2689140,
+     "link": "settlements",
+     "action": {
+      "type": "settlement_request",
+      "period": "2026-W43"
+     }
+    },
+    {
+     "kind": "closing_confirm",
+     "title": "어제(2026-10-29) 결산 확정 대기",
+     "count": 1,
+     "amount": -11251,
+     "link": "closing",
+     "action": {
+      "type": "closing_confirm",
+      "period": "day",
+      "date": "2026-10-29"
+     }
+    },
+    {
+     "kind": "recon_exception",
+     "title": "매출·PG 대사 불일치 4건",
+     "count": 4,
+     "amount": 48268,
+     "link": "reconciliation",
+     "action": {
+      "type": "recon_note"
+     },
+     "items": [
+      {
+       "ref": "pay_2135",
+       "title": "결제 금액과 PG 금액이 다름",
+       "detail": "주문 ord_2135",
+       "amount": 1000
+      },
+      {
+       "ref": "pay_2121",
+       "title": "PG 정산에 없음",
+       "detail": "주문 ord_2121",
+       "amount": 45000
+      },
+      {
+       "ref": "pay_2122",
+       "title": "PG 수수료가 기준과 다름",
+       "detail": "주문 ord_2122",
+       "amount": 268
+      },
+      {
+       "ref": "pay_2109",
+       "title": "결제 금액과 PG 금액이 다름",
+       "detail": "주문 ord_2109",
+       "amount": 2000
+      }
+     ]
+    },
+    {
+     "kind": "audit_finding",
+     "title": "처리 전 감사 의심 7건",
+     "count": 7,
+     "amount": null,
+     "link": "audit",
+     "action": {
+      "type": "anomaly_resolve"
+     },
+     "items": [
+      {
+       "ref": "5c23a9cfe3babd1e",
+       "title": "같은 고객에게 한도 바로 아래 쿠폰 3장",
+       "detail": "buy_0007에게 35분 안에 19,900원 쿠폰 3장 3번 (한 장 한도 20,000원)",
+       "amount": null
+      },
+      {
+       "ref": "159299a58bb31a28",
+       "title": "환불률 급변",
+       "detail": "최근 7일 환불률 4.1% (지난 7일 0.5%)",
+       "amount": null
+      },
+      {
+       "ref": "f03c0d629b32677b",
+       "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
+       "detail": "10-28 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
+       "amount": null
+      },
+      {
+       "ref": "c7f81886a850f4f7",
+       "title": "영향 고객이 아닌 구매자에게 보상 쿠폰 1건",
+       "detail": "사건 ctx_inc_0100: buy_0999에게 보상 쿠폰 1건 2,000원 (데이터 AI 영향 고객 2명 목록에 없음)",
+       "amount": null
+      },
+      {
+       "ref": "420aaa6abfe12a20",
+       "title": "같은 고객 환불 3번",
+       "detail": "buy_0013의 주문 3건 환불, 합계 64,000원 (최근 7일)",
+       "amount": null
+      },
+      {
+       "ref": "2743e7ba8a94ffb9",
+       "title": "같은 고객에게 같은 사건 보상 쿠폰 2번",
+       "detail": "buy_0011에게 사건 ctx_inc_0104 보상 쿠폰 2번, 합계 20,000원",
+       "amount": null
+      },
+      {
+       "ref": "17666e7e527681dd",
+       "title": "안전 장치 보류·거절 증가",
+       "detail": "최근 7일 안전 장치 보류 3건·거절 1건 (지난 7일 1건)",
+       "amount": null
+      }
+     ]
+    },
+    {
+     "kind": "policy_alert",
+     "title": "예산·한도 경보 1건 (이번 달 쿠폰 예산)",
+     "count": 1,
+     "amount": null,
+     "link": "policy",
+     "action": {
+      "type": "policy_ack"
+     },
+     "items": [
+      {
+       "ref": "coupon_budget_month",
+       "title": "이번 달 쿠폰 예산",
+       "detail": "한도에 가까움",
+       "amount": null
+      }
+     ]
+    }
+   ]
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.108849Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/closing?period=day": {
+  "data": {
+   "period": "day",
+   "date": "2026-10-30",
+   "from": "2026-10-30T00:00:00Z",
+   "to": "2026-10-31T00:00:00Z",
+   "lines": [
+    {
+     "code": "gmv",
+     "label": "총거래액",
+     "amount": 322600
+    },
+    {
+     "code": "commission_revenue",
+     "label": "판매 수수료 매출",
+     "amount": 30368
+    },
+    {
+     "code": "coupon_cost",
+     "label": "쿠폰 비용(회사 부담)",
+     "amount": -13000
+    },
+    {
+     "code": "refund_total",
+     "label": "환불",
+     "amount": 0
+    },
+    {
+     "code": "pg_fee",
+     "label": "PG 수수료",
+     "amount": -10156
+    },
+    {
+     "code": "net_result",
+     "label": "영업 결과",
+     "amount": 7212
+    }
+   ],
+   "journal": [
+    {
+     "account": "외상매출금(PG)",
+     "debit": 322600,
+     "credit": 0,
+     "memo": "카드 결제 매출"
+    },
+    {
+     "account": "수수료 매출",
+     "debit": 0,
+     "credit": 30368,
+     "memo": "판매 수수료"
+    },
+    {
+     "account": "판매자 예수금",
+     "debit": 0,
+     "credit": 292232,
+     "memo": "판매자에게 줄 판매 대금"
+    },
+    {
+     "account": "지급수수료(PG)",
+     "debit": 10156,
+     "credit": 0,
+     "memo": "PG 결제 수수료"
+    },
+    {
+     "account": "외상매출금(PG)",
+     "debit": 0,
+     "credit": 10156,
+     "memo": "PG 수수료 차감"
+    },
+    {
+     "account": "판매촉진비(쿠폰)",
+     "debit": 13000,
+     "credit": 0,
+     "memo": "회사 부담 쿠폰"
+    },
+    {
+     "account": "미지급금(쿠폰)",
+     "debit": 0,
+     "credit": 13000,
+     "memo": "쿠폰 사용분 정산 예정"
+    }
+   ],
+   "commentary": "오늘 총거래액은 322,600원(주문 6건)이고, 판매 수수료 매출은 30,368원입니다. 회사 부담 쿠폰 13,000원과 PG 수수료 10,156원을 빼면 영업 결과는 7,212원(흑자)입니다. 환불 0원은 판매자 정산에서 차감됩니다.",
+   "commentary_source": "template",
+   "status": "draft",
+   "confirmed_by": null,
+   "confirmed_at": null
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.168810Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/closing?period=month": {
+  "data": {
+   "period": "month",
+   "date": "2026-10-01",
+   "from": "2026-10-01T00:00:00Z",
+   "to": "2026-11-01T00:00:00Z",
+   "lines": [
+    {
+     "code": "gmv",
+     "label": "총거래액",
+     "amount": 7534800
+    },
+    {
+     "code": "commission_revenue",
+     "label": "판매 수수료 매출",
+     "amount": 684024
+    },
+    {
+     "code": "coupon_cost",
+     "label": "쿠폰 비용(회사 부담)",
+     "amount": -299700
+    },
+    {
+     "code": "refund_total",
+     "label": "환불",
+     "amount": -140100
+    },
+    {
+     "code": "pg_fee",
+     "label": "PG 수수료",
+     "amount": -240741
+    },
+    {
+     "code": "net_result",
+     "label": "영업 결과",
+     "amount": 143583
+    }
+   ],
+   "journal": [
+    {
+     "account": "외상매출금(PG)",
+     "debit": 7534800,
+     "credit": 0,
+     "memo": "카드 결제 매출"
+    },
+    {
+     "account": "수수료 매출",
+     "debit": 0,
+     "credit": 684024,
+     "memo": "판매 수수료"
+    },
+    {
+     "account": "판매자 예수금",
+     "debit": 0,
+     "credit": 6850776,
+     "memo": "판매자에게 줄 판매 대금"
+    },
+    {
+     "account": "지급수수료(PG)",
+     "debit": 240741,
+     "credit": 0,
+     "memo": "PG 결제 수수료"
+    },
+    {
+     "account": "외상매출금(PG)",
+     "debit": 0,
+     "credit": 240741,
+     "memo": "PG 수수료 차감"
+    },
+    {
+     "account": "판매촉진비(쿠폰)",
+     "debit": 299700,
+     "credit": 0,
+     "memo": "회사 부담 쿠폰"
+    },
+    {
+     "account": "미지급금(쿠폰)",
+     "debit": 0,
+     "credit": 299700,
+     "memo": "쿠폰 사용분 정산 예정"
+    },
+    {
+     "account": "판매자 예수금",
+     "debit": 140100,
+     "credit": 0,
+     "memo": "환불(판매자 정산에서 차감)"
+    },
+    {
+     "account": "외상매출금(PG)",
+     "debit": 0,
+     "credit": 140100,
+     "memo": "카드 결제 취소"
+    }
+   ],
+   "commentary": "2026년 10월 총거래액은 7,534,800원(주문 186건)이고, 판매 수수료 매출은 684,024원입니다. 회사 부담 쿠폰 299,700원과 PG 수수료 240,741원을 빼면 영업 결과는 143,583원(흑자)입니다. 환불 140,100원은 판매자 정산에서 차감됩니다.",
+   "commentary_source": "template",
+   "status": "draft",
+   "confirmed_by": null,
+   "confirmed_at": null
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.179017Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/statements?period=month": {
+  "data": {
+   "title": "손익계산서",
+   "company": null,
+   "period": "month",
+   "current": {
+    "name": "2026년 10월",
+    "from": "2026-10-01T00:00:00Z",
+    "to": "2026-11-01T00:00:00Z"
+   },
+   "previous": {
+    "name": "2026년 9월",
+    "from": "2026-09-01T00:00:00Z",
+    "to": "2026-10-01T00:00:00Z"
+   },
+   "unit": "원",
+   "rows": [
+    {
+     "code": "revenue",
+     "label": "Ⅰ. 매출액(영업수익)",
+     "level": 0,
+     "total": true,
+     "current": 384324,
+     "previous": 0,
+     "note": "중개 매출이라 순액(판매 수수료)으로 인식"
+    },
+    {
+     "code": "commission",
+     "label": "판매 수수료 수익",
+     "level": 1,
+     "total": false,
+     "current": 684024,
+     "previous": 0,
+     "note": "품목 판매가 × 카테고리 수수료율"
+    },
+    {
+     "code": "sales_discount",
+     "label": "매출에누리(회사 부담 쿠폰)",
+     "level": 1,
+     "total": false,
+     "current": -299700,
+     "previous": 0,
+     "note": "고객에게 준 쿠폰은 매출에서 뺀다"
+    },
+    {
+     "code": "cogs",
+     "label": "Ⅱ. 매출원가",
+     "level": 0,
+     "total": false,
+     "current": 0,
+     "previous": 0,
+     "note": "재고를 사서 팔지 않아 매출원가가 없음"
+    },
+    {
+     "code": "gross_profit",
+     "label": "Ⅲ. 매출총이익",
+     "level": 0,
+     "total": true,
+     "current": 384324,
+     "previous": 0,
+     "note": ""
+    },
+    {
+     "code": "sga",
+     "label": "Ⅳ. 판매비와관리비(장부 기준)",
+     "level": 0,
+     "total": false,
+     "current": -240741,
+     "previous": 0,
+     "note": "장부에 있는 비용만"
+    },
+    {
+     "code": "pg_fee",
+     "label": "지급수수료(PG 결제 수수료)",
+     "level": 1,
+     "total": false,
+     "current": -240741,
+     "previous": 0,
+     "note": "PG 정산 기록, 없으면 기본 수수료율"
+    },
+    {
+     "code": "other_sga",
+     "label": "급여·임차료 등 그 밖의 판관비",
+     "level": 1,
+     "total": false,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    },
+    {
+     "code": "operating_income",
+     "label": "Ⅴ. 영업이익(장부 기준)",
+     "level": 0,
+     "total": true,
+     "current": 143583,
+     "previous": 0,
+     "note": "그 밖의 판관비는 반영하지 않음"
+    },
+    {
+     "code": "non_operating_income",
+     "label": "Ⅵ. 영업외수익",
+     "level": 0,
+     "total": false,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    },
+    {
+     "code": "non_operating_expense",
+     "label": "Ⅶ. 영업외비용",
+     "level": 0,
+     "total": false,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    },
+    {
+     "code": "pretax_income",
+     "label": "Ⅷ. 법인세비용차감전순이익",
+     "level": 0,
+     "total": false,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    },
+    {
+     "code": "income_tax",
+     "label": "Ⅸ. 법인세비용",
+     "level": 0,
+     "total": false,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    },
+    {
+     "code": "net_income",
+     "label": "Ⅹ. 당기순이익",
+     "level": 0,
+     "total": true,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    }
+   ],
+   "notes": [
+    {
+     "code": "gmv",
+     "label": "총거래액(GMV)",
+     "current": 7534800,
+     "previous": 0,
+     "note": "결제된 주문의 품목 판매가 합계. 매출이 아님"
+    },
+    {
+     "code": "refund_total",
+     "label": "환불",
+     "current": 140100,
+     "previous": 0,
+     "note": "판매자 정산에서 차감되어 회사 손익에 넣지 않음"
+    },
+    {
+     "code": "order_count",
+     "label": "결제 주문 수(건)",
+     "current": 186,
+     "previous": 0,
+     "note": ""
+    }
+   ],
+   "basis": "K-IFRS 기능별 손익계산서. 장부(판매 사이트·안전 관문 기록)에 있는 항목만 계산"
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.190018Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/statements?period=quarter": {
+  "data": {
+   "title": "손익계산서",
+   "company": null,
+   "period": "quarter",
+   "current": {
+    "name": "2026년 4분기",
+    "from": "2026-10-01T00:00:00Z",
+    "to": "2027-01-01T00:00:00Z"
+   },
+   "previous": {
+    "name": "2026년 3분기",
+    "from": "2026-07-01T00:00:00Z",
+    "to": "2026-10-01T00:00:00Z"
+   },
+   "unit": "원",
+   "rows": [
+    {
+     "code": "revenue",
+     "label": "Ⅰ. 매출액(영업수익)",
+     "level": 0,
+     "total": true,
+     "current": 384324,
+     "previous": 0,
+     "note": "중개 매출이라 순액(판매 수수료)으로 인식"
+    },
+    {
+     "code": "commission",
+     "label": "판매 수수료 수익",
+     "level": 1,
+     "total": false,
+     "current": 684024,
+     "previous": 0,
+     "note": "품목 판매가 × 카테고리 수수료율"
+    },
+    {
+     "code": "sales_discount",
+     "label": "매출에누리(회사 부담 쿠폰)",
+     "level": 1,
+     "total": false,
+     "current": -299700,
+     "previous": 0,
+     "note": "고객에게 준 쿠폰은 매출에서 뺀다"
+    },
+    {
+     "code": "cogs",
+     "label": "Ⅱ. 매출원가",
+     "level": 0,
+     "total": false,
+     "current": 0,
+     "previous": 0,
+     "note": "재고를 사서 팔지 않아 매출원가가 없음"
+    },
+    {
+     "code": "gross_profit",
+     "label": "Ⅲ. 매출총이익",
+     "level": 0,
+     "total": true,
+     "current": 384324,
+     "previous": 0,
+     "note": ""
+    },
+    {
+     "code": "sga",
+     "label": "Ⅳ. 판매비와관리비(장부 기준)",
+     "level": 0,
+     "total": false,
+     "current": -240741,
+     "previous": 0,
+     "note": "장부에 있는 비용만"
+    },
+    {
+     "code": "pg_fee",
+     "label": "지급수수료(PG 결제 수수료)",
+     "level": 1,
+     "total": false,
+     "current": -240741,
+     "previous": 0,
+     "note": "PG 정산 기록, 없으면 기본 수수료율"
+    },
+    {
+     "code": "other_sga",
+     "label": "급여·임차료 등 그 밖의 판관비",
+     "level": 1,
+     "total": false,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    },
+    {
+     "code": "operating_income",
+     "label": "Ⅴ. 영업이익(장부 기준)",
+     "level": 0,
+     "total": true,
+     "current": 143583,
+     "previous": 0,
+     "note": "그 밖의 판관비는 반영하지 않음"
+    },
+    {
+     "code": "non_operating_income",
+     "label": "Ⅵ. 영업외수익",
+     "level": 0,
+     "total": false,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    },
+    {
+     "code": "non_operating_expense",
+     "label": "Ⅶ. 영업외비용",
+     "level": 0,
+     "total": false,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    },
+    {
+     "code": "pretax_income",
+     "label": "Ⅷ. 법인세비용차감전순이익",
+     "level": 0,
+     "total": false,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    },
+    {
+     "code": "income_tax",
+     "label": "Ⅸ. 법인세비용",
+     "level": 0,
+     "total": false,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    },
+    {
+     "code": "net_income",
+     "label": "Ⅹ. 당기순이익",
+     "level": 0,
+     "total": true,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    }
+   ],
+   "notes": [
+    {
+     "code": "gmv",
+     "label": "총거래액(GMV)",
+     "current": 7534800,
+     "previous": 0,
+     "note": "결제된 주문의 품목 판매가 합계. 매출이 아님"
+    },
+    {
+     "code": "refund_total",
+     "label": "환불",
+     "current": 140100,
+     "previous": 0,
+     "note": "판매자 정산에서 차감되어 회사 손익에 넣지 않음"
+    },
+    {
+     "code": "order_count",
+     "label": "결제 주문 수(건)",
+     "current": 186,
+     "previous": 0,
+     "note": ""
+    }
+   ],
+   "basis": "K-IFRS 기능별 손익계산서. 장부(판매 사이트·안전 관문 기록)에 있는 항목만 계산"
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.200902Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/statements?period=year": {
+  "data": {
+   "title": "손익계산서",
+   "company": null,
+   "period": "year",
+   "current": {
+    "name": "2026년",
+    "from": "2026-01-01T00:00:00Z",
+    "to": "2027-01-01T00:00:00Z"
+   },
+   "previous": {
+    "name": "2025년",
+    "from": "2025-01-01T00:00:00Z",
+    "to": "2026-01-01T00:00:00Z"
+   },
+   "unit": "원",
+   "rows": [
+    {
+     "code": "revenue",
+     "label": "Ⅰ. 매출액(영업수익)",
+     "level": 0,
+     "total": true,
+     "current": 384324,
+     "previous": 0,
+     "note": "중개 매출이라 순액(판매 수수료)으로 인식"
+    },
+    {
+     "code": "commission",
+     "label": "판매 수수료 수익",
+     "level": 1,
+     "total": false,
+     "current": 684024,
+     "previous": 0,
+     "note": "품목 판매가 × 카테고리 수수료율"
+    },
+    {
+     "code": "sales_discount",
+     "label": "매출에누리(회사 부담 쿠폰)",
+     "level": 1,
+     "total": false,
+     "current": -299700,
+     "previous": 0,
+     "note": "고객에게 준 쿠폰은 매출에서 뺀다"
+    },
+    {
+     "code": "cogs",
+     "label": "Ⅱ. 매출원가",
+     "level": 0,
+     "total": false,
+     "current": 0,
+     "previous": 0,
+     "note": "재고를 사서 팔지 않아 매출원가가 없음"
+    },
+    {
+     "code": "gross_profit",
+     "label": "Ⅲ. 매출총이익",
+     "level": 0,
+     "total": true,
+     "current": 384324,
+     "previous": 0,
+     "note": ""
+    },
+    {
+     "code": "sga",
+     "label": "Ⅳ. 판매비와관리비(장부 기준)",
+     "level": 0,
+     "total": false,
+     "current": -240741,
+     "previous": 0,
+     "note": "장부에 있는 비용만"
+    },
+    {
+     "code": "pg_fee",
+     "label": "지급수수료(PG 결제 수수료)",
+     "level": 1,
+     "total": false,
+     "current": -240741,
+     "previous": 0,
+     "note": "PG 정산 기록, 없으면 기본 수수료율"
+    },
+    {
+     "code": "other_sga",
+     "label": "급여·임차료 등 그 밖의 판관비",
+     "level": 1,
+     "total": false,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    },
+    {
+     "code": "operating_income",
+     "label": "Ⅴ. 영업이익(장부 기준)",
+     "level": 0,
+     "total": true,
+     "current": 143583,
+     "previous": 0,
+     "note": "그 밖의 판관비는 반영하지 않음"
+    },
+    {
+     "code": "non_operating_income",
+     "label": "Ⅵ. 영업외수익",
+     "level": 0,
+     "total": false,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    },
+    {
+     "code": "non_operating_expense",
+     "label": "Ⅶ. 영업외비용",
+     "level": 0,
+     "total": false,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    },
+    {
+     "code": "pretax_income",
+     "label": "Ⅷ. 법인세비용차감전순이익",
+     "level": 0,
+     "total": false,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    },
+    {
+     "code": "income_tax",
+     "label": "Ⅸ. 법인세비용",
+     "level": 0,
+     "total": false,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    },
+    {
+     "code": "net_income",
+     "label": "Ⅹ. 당기순이익",
+     "level": 0,
+     "total": true,
+     "current": null,
+     "previous": null,
+     "note": "이 장부에 없는 항목"
+    }
+   ],
+   "notes": [
+    {
+     "code": "gmv",
+     "label": "총거래액(GMV)",
+     "current": 7534800,
+     "previous": 0,
+     "note": "결제된 주문의 품목 판매가 합계. 매출이 아님"
+    },
+    {
+     "code": "refund_total",
+     "label": "환불",
+     "current": 140100,
+     "previous": 0,
+     "note": "판매자 정산에서 차감되어 회사 손익에 넣지 않음"
+    },
+    {
+     "code": "order_count",
+     "label": "결제 주문 수(건)",
+     "current": 186,
+     "previous": 0,
+     "note": ""
+    }
+   ],
+   "basis": "K-IFRS 기능별 손익계산서. 장부(판매 사이트·안전 관문 기록)에 있는 항목만 계산"
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.213442Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/reconciliation": {
+  "data": {
+   "from": "2026-10-24T00:00:00Z",
+   "to": "2026-10-31T00:00:00Z",
+   "counts": {
+    "matched": 56,
+    "mismatch": 2,
+    "missing_in_pg": 1,
+    "pending": 18,
+    "fee_anomaly": 1
+   },
+   "totals": {
+    "order_amount": 3100300,
+    "pg_amount": 3054300,
+    "pg_fee": 94957,
+    "pay_out": 2959343
+   },
+   "items": [
+    {
+     "order_id": "ord_2186",
+     "payment_id": "pay_2186",
+     "paid_at": "2026-10-30T00:45:00Z",
+     "order_amount": 87000,
+     "pg_amount": 87000,
+     "fee": 2697,
+     "expected_fee": 2697,
+     "pay_out_amount": 84303,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-11-01 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2185",
+     "payment_id": "pay_2185",
+     "paid_at": "2026-10-30T00:37:00Z",
+     "order_amount": 45000,
+     "pg_amount": 45000,
+     "fee": 1395,
+     "expected_fee": 1395,
+     "pay_out_amount": 43605,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-11-01 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2184",
+     "payment_id": "pay_2184",
+     "paid_at": "2026-10-30T00:29:00Z",
+     "order_amount": 18000,
+     "pg_amount": 18000,
+     "fee": 558,
+     "expected_fee": 558,
+     "pay_out_amount": 17442,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-11-01 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2183",
+     "payment_id": "pay_2183",
+     "paid_at": "2026-10-30T00:21:00Z",
+     "order_amount": 48000,
+     "pg_amount": 48000,
+     "fee": 1488,
+     "expected_fee": 1488,
+     "pay_out_amount": 46512,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-11-01 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2182",
+     "payment_id": "pay_2182",
+     "paid_at": "2026-10-30T00:13:00Z",
+     "order_amount": 107000,
+     "pg_amount": 107000,
+     "fee": 3317,
+     "expected_fee": 3317,
+     "pay_out_amount": 103683,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-11-01 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2181",
+     "payment_id": "pay_2181",
+     "paid_at": "2026-10-30T00:05:00Z",
+     "order_amount": 22600,
+     "pg_amount": 22600,
+     "fee": 701,
+     "expected_fee": 701,
+     "pay_out_amount": 21899,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-11-01 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2175",
+     "payment_id": "pay_2175",
+     "paid_at": "2026-10-29T22:56:00Z",
+     "order_amount": 10500,
+     "pg_amount": 10500,
+     "fee": 326,
+     "expected_fee": 326,
+     "pay_out_amount": 10174,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-10-31 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2172",
+     "payment_id": "pay_2172",
+     "paid_at": "2026-10-29T19:29:00Z",
+     "order_amount": 32300,
+     "pg_amount": 32300,
+     "fee": 1001,
+     "expected_fee": 1001,
+     "pay_out_amount": 31299,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-10-31 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2173",
+     "payment_id": "pay_2173",
+     "paid_at": "2026-10-29T18:02:00Z",
+     "order_amount": 10500,
+     "pg_amount": 10500,
+     "fee": 326,
+     "expected_fee": 326,
+     "pay_out_amount": 10174,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-10-31 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2174",
+     "payment_id": "pay_2174",
+     "paid_at": "2026-10-29T14:46:00Z",
+     "order_amount": 25500,
+     "pg_amount": 25500,
+     "fee": 791,
+     "expected_fee": 791,
+     "pay_out_amount": 24709,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-10-31 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2179",
+     "payment_id": "pay_2179",
+     "paid_at": "2026-10-29T13:19:00Z",
+     "order_amount": 32400,
+     "pg_amount": 32400,
+     "fee": 1004,
+     "expected_fee": 1004,
+     "pay_out_amount": 31396,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-10-31 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2177",
+     "payment_id": "pay_2177",
+     "paid_at": "2026-10-29T10:59:00Z",
+     "order_amount": 22600,
+     "pg_amount": 22600,
+     "fee": 701,
+     "expected_fee": 701,
+     "pay_out_amount": 21899,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-10-31 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2170",
+     "payment_id": "pay_2170",
+     "paid_at": "2026-10-29T10:17:00Z",
+     "order_amount": 18000,
+     "pg_amount": 18000,
+     "fee": 558,
+     "expected_fee": 558,
+     "pay_out_amount": 17442,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-10-31 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2180",
+     "payment_id": "pay_2180",
+     "paid_at": "2026-10-29T10:00:00Z",
+     "order_amount": 36900,
+     "pg_amount": 36900,
+     "fee": 1144,
+     "expected_fee": 1144,
+     "pay_out_amount": 35756,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-10-31 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2169",
+     "payment_id": "pay_2169",
+     "paid_at": "2026-10-29T07:45:00Z",
+     "order_amount": 25500,
+     "pg_amount": 25500,
+     "fee": 791,
+     "expected_fee": 791,
+     "pay_out_amount": 24709,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-10-31 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2171",
+     "payment_id": "pay_2171",
+     "paid_at": "2026-10-29T03:47:00Z",
+     "order_amount": 10500,
+     "pg_amount": 10500,
+     "fee": 326,
+     "expected_fee": 326,
+     "pay_out_amount": 10174,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-10-31 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2176",
+     "payment_id": "pay_2176",
+     "paid_at": "2026-10-29T03:35:00Z",
+     "order_amount": 10500,
+     "pg_amount": 10500,
+     "fee": 326,
+     "expected_fee": 326,
+     "pay_out_amount": 10174,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-10-31 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2178",
+     "payment_id": "pay_2178",
+     "paid_at": "2026-10-29T03:09:00Z",
+     "order_amount": 12800,
+     "pg_amount": 12800,
+     "fee": 397,
+     "expected_fee": 397,
+     "pay_out_amount": 12403,
+     "paid_out_date": null,
+     "status": "pending",
+     "reason": "2026-10-31 지급 예정",
+     "note": null
+    },
+    {
+     "order_id": "ord_2162",
+     "payment_id": "pay_2162",
+     "paid_at": "2026-10-28T21:37:00Z",
+     "order_amount": 27800,
+     "pg_amount": 27800,
+     "fee": 862,
+     "expected_fee": 862,
+     "pay_out_amount": 26938,
+     "paid_out_date": "2026-10-30",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2158",
+     "payment_id": "pay_2158",
+     "paid_at": "2026-10-28T21:21:00Z",
+     "order_amount": 54000,
+     "pg_amount": 54000,
+     "fee": 1674,
+     "expected_fee": 1674,
+     "pay_out_amount": 52326,
+     "paid_out_date": "2026-10-30",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2167",
+     "payment_id": "pay_2167",
+     "paid_at": "2026-10-28T19:03:00Z",
+     "order_amount": 60000,
+     "pg_amount": 60000,
+     "fee": 1860,
+     "expected_fee": 1860,
+     "pay_out_amount": 58140,
+     "paid_out_date": "2026-10-30",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2166",
+     "payment_id": "pay_2166",
+     "paid_at": "2026-10-28T17:37:00Z",
+     "order_amount": 91000,
+     "pg_amount": 91000,
+     "fee": 2821,
+     "expected_fee": 2821,
+     "pay_out_amount": 88179,
+     "paid_out_date": "2026-10-30",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2168",
+     "payment_id": "pay_2168",
+     "paid_at": "2026-10-28T15:52:00Z",
+     "order_amount": 24500,
+     "pg_amount": 24500,
+     "fee": 760,
+     "expected_fee": 760,
+     "pay_out_amount": 23740,
+     "paid_out_date": "2026-10-30",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2165",
+     "payment_id": "pay_2165",
+     "paid_at": "2026-10-28T14:29:00Z",
+     "order_amount": 12800,
+     "pg_amount": 12800,
+     "fee": 397,
+     "expected_fee": 397,
+     "pay_out_amount": 12403,
+     "paid_out_date": "2026-10-30",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2157",
+     "payment_id": "pay_2157",
+     "paid_at": "2026-10-28T13:08:00Z",
+     "order_amount": 87000,
+     "pg_amount": 87000,
+     "fee": 2697,
+     "expected_fee": 2697,
+     "pay_out_amount": 84303,
+     "paid_out_date": "2026-10-30",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2164",
+     "payment_id": "pay_2164",
+     "paid_at": "2026-10-28T05:18:00Z",
+     "order_amount": 54000,
+     "pg_amount": 54000,
+     "fee": 1674,
+     "expected_fee": 1674,
+     "pay_out_amount": 52326,
+     "paid_out_date": "2026-10-30",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2160",
+     "payment_id": "pay_2160",
+     "paid_at": "2026-10-28T02:35:00Z",
+     "order_amount": 77000,
+     "pg_amount": 77000,
+     "fee": 2387,
+     "expected_fee": 2387,
+     "pay_out_amount": 74613,
+     "paid_out_date": "2026-10-30",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2161",
+     "payment_id": "pay_2161",
+     "paid_at": "2026-10-28T02:25:00Z",
+     "order_amount": 15000,
+     "pg_amount": 15000,
+     "fee": 465,
+     "expected_fee": 465,
+     "pay_out_amount": 14535,
+     "paid_out_date": "2026-10-30",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2159",
+     "payment_id": "pay_2159",
+     "paid_at": "2026-10-28T01:27:00Z",
+     "order_amount": 12800,
+     "pg_amount": 12800,
+     "fee": 397,
+     "expected_fee": 397,
+     "pay_out_amount": 12403,
+     "paid_out_date": "2026-10-30",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2163",
+     "payment_id": "pay_2163",
+     "paid_at": "2026-10-28T01:22:00Z",
+     "order_amount": 59000,
+     "pg_amount": 59000,
+     "fee": 1829,
+     "expected_fee": 1829,
+     "pay_out_amount": 57171,
+     "paid_out_date": "2026-10-30",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2150",
+     "payment_id": "pay_2150",
+     "paid_at": "2026-10-27T19:24:00Z",
+     "order_amount": 60000,
+     "pg_amount": 60000,
+     "fee": 1860,
+     "expected_fee": 1860,
+     "pay_out_amount": 58140,
+     "paid_out_date": "2026-10-29",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2153",
+     "payment_id": "pay_2153",
+     "paid_at": "2026-10-27T18:58:00Z",
+     "order_amount": 31000,
+     "pg_amount": 31000,
+     "fee": 961,
+     "expected_fee": 961,
+     "pay_out_amount": 30039,
+     "paid_out_date": "2026-10-29",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2152",
+     "payment_id": "pay_2152",
+     "paid_at": "2026-10-27T16:51:00Z",
+     "order_amount": 122000,
+     "pg_amount": 122000,
+     "fee": 3782,
+     "expected_fee": 3782,
+     "pay_out_amount": 118218,
+     "paid_out_date": "2026-10-29",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2147",
+     "payment_id": "pay_2147",
+     "paid_at": "2026-10-27T12:55:00Z",
+     "order_amount": 20000,
+     "pg_amount": 20000,
+     "fee": 620,
+     "expected_fee": 620,
+     "pay_out_amount": 19380,
+     "paid_out_date": "2026-10-29",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2145",
+     "payment_id": "pay_2145",
+     "paid_at": "2026-10-27T12:17:00Z",
+     "order_amount": 51900,
+     "pg_amount": 51900,
+     "fee": 1609,
+     "expected_fee": 1609,
+     "pay_out_amount": 50291,
+     "paid_out_date": "2026-10-29",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2146",
+     "payment_id": "pay_2146",
+     "paid_at": "2026-10-27T10:58:00Z",
+     "order_amount": 58000,
+     "pg_amount": 58000,
+     "fee": 1798,
+     "expected_fee": 1798,
+     "pay_out_amount": 56202,
+     "paid_out_date": "2026-10-29",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2155",
+     "payment_id": "pay_2155",
+     "paid_at": "2026-10-27T08:46:00Z",
+     "order_amount": 92000,
+     "pg_amount": 92000,
+     "fee": 2852,
+     "expected_fee": 2852,
+     "pay_out_amount": 89148,
+     "paid_out_date": "2026-10-29",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2148",
+     "payment_id": "pay_2148",
+     "paid_at": "2026-10-27T08:44:00Z",
+     "order_amount": 18000,
+     "pg_amount": 18000,
+     "fee": 558,
+     "expected_fee": 558,
+     "pay_out_amount": 17442,
+     "paid_out_date": "2026-10-29",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2156",
+     "payment_id": "pay_2156",
+     "paid_at": "2026-10-27T06:22:00Z",
+     "order_amount": 21000,
+     "pg_amount": 21000,
+     "fee": 651,
+     "expected_fee": 651,
+     "pay_out_amount": 20349,
+     "paid_out_date": "2026-10-29",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2149",
+     "payment_id": "pay_2149",
+     "paid_at": "2026-10-27T02:13:00Z",
+     "order_amount": 30000,
+     "pg_amount": 30000,
+     "fee": 930,
+     "expected_fee": 930,
+     "pay_out_amount": 29070,
+     "paid_out_date": "2026-10-29",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2151",
+     "payment_id": "pay_2151",
+     "paid_at": "2026-10-27T01:53:00Z",
+     "order_amount": 18000,
+     "pg_amount": 18000,
+     "fee": 558,
+     "expected_fee": 558,
+     "pay_out_amount": 17442,
+     "paid_out_date": "2026-10-29",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2154",
+     "payment_id": "pay_2154",
+     "paid_at": "2026-10-27T01:43:00Z",
+     "order_amount": 33600,
+     "pg_amount": 33600,
+     "fee": 1042,
+     "expected_fee": 1042,
+     "pay_out_amount": 32558,
+     "paid_out_date": "2026-10-29",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2144",
+     "payment_id": "pay_2144",
+     "paid_at": "2026-10-26T22:24:00Z",
+     "order_amount": 31000,
+     "pg_amount": 31000,
+     "fee": 961,
+     "expected_fee": 961,
+     "pay_out_amount": 30039,
+     "paid_out_date": "2026-10-28",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2140",
+     "payment_id": "pay_2140",
+     "paid_at": "2026-10-26T21:34:00Z",
+     "order_amount": 24500,
+     "pg_amount": 24500,
+     "fee": 760,
+     "expected_fee": 760,
+     "pay_out_amount": 23740,
+     "paid_out_date": "2026-10-28",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2141",
+     "payment_id": "pay_2141",
+     "paid_at": "2026-10-26T12:33:00Z",
+     "order_amount": 18000,
+     "pg_amount": 18000,
+     "fee": 558,
+     "expected_fee": 558,
+     "pay_out_amount": 17442,
+     "paid_out_date": "2026-10-28",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2139",
+     "payment_id": "pay_2139",
+     "paid_at": "2026-10-26T12:16:00Z",
+     "order_amount": 27000,
+     "pg_amount": 27000,
+     "fee": 837,
+     "expected_fee": 837,
+     "pay_out_amount": 26163,
+     "paid_out_date": "2026-10-28",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2137",
+     "payment_id": "pay_2137",
+     "paid_at": "2026-10-26T11:11:00Z",
+     "order_amount": 10500,
+     "pg_amount": 10500,
+     "fee": 326,
+     "expected_fee": 326,
+     "pay_out_amount": 10174,
+     "paid_out_date": "2026-10-28",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2135",
+     "payment_id": "pay_2135",
+     "paid_at": "2026-10-26T09:04:00Z",
+     "order_amount": 31000,
+     "pg_amount": 32000,
+     "fee": 992,
+     "expected_fee": 992,
+     "pay_out_amount": 31008,
+     "paid_out_date": "2026-10-28",
+     "status": "mismatch",
+     "reason": "PG 금액이 주문보다 1,000원 많음",
+     "note": null
+    },
+    {
+     "order_id": "ord_2142",
+     "payment_id": "pay_2142",
+     "paid_at": "2026-10-26T08:31:00Z",
+     "order_amount": 21000,
+     "pg_amount": 21000,
+     "fee": 651,
+     "expected_fee": 651,
+     "pay_out_amount": 20349,
+     "paid_out_date": "2026-10-28",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2136",
+     "payment_id": "pay_2136",
+     "paid_at": "2026-10-26T08:29:00Z",
+     "order_amount": 39000,
+     "pg_amount": 39000,
+     "fee": 1209,
+     "expected_fee": 1209,
+     "pay_out_amount": 37791,
+     "paid_out_date": "2026-10-28",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2143",
+     "payment_id": "pay_2143",
+     "paid_at": "2026-10-26T07:49:00Z",
+     "order_amount": 12800,
+     "pg_amount": 12800,
+     "fee": 397,
+     "expected_fee": 397,
+     "pay_out_amount": 12403,
+     "paid_out_date": "2026-10-28",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2133",
+     "payment_id": "pay_2133",
+     "paid_at": "2026-10-26T05:53:00Z",
+     "order_amount": 38000,
+     "pg_amount": 38000,
+     "fee": 1178,
+     "expected_fee": 1178,
+     "pay_out_amount": 36822,
+     "paid_out_date": "2026-10-28",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2134",
+     "payment_id": "pay_2134",
+     "paid_at": "2026-10-26T04:05:00Z",
+     "order_amount": 20300,
+     "pg_amount": 20300,
+     "fee": 629,
+     "expected_fee": 629,
+     "pay_out_amount": 19671,
+     "paid_out_date": "2026-10-28",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2138",
+     "payment_id": "pay_2138",
+     "paid_at": "2026-10-26T03:40:00Z",
+     "order_amount": 122000,
+     "pg_amount": 122000,
+     "fee": 3782,
+     "expected_fee": 3782,
+     "pay_out_amount": 118218,
+     "paid_out_date": "2026-10-28",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2129",
+     "payment_id": "pay_2129",
+     "paid_at": "2026-10-25T21:46:00Z",
+     "order_amount": 18000,
+     "pg_amount": 18000,
+     "fee": 558,
+     "expected_fee": 558,
+     "pay_out_amount": 17442,
+     "paid_out_date": "2026-10-27",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2123",
+     "payment_id": "pay_2123",
+     "paid_at": "2026-10-25T18:37:00Z",
+     "order_amount": 34600,
+     "pg_amount": 34600,
+     "fee": 1073,
+     "expected_fee": 1073,
+     "pay_out_amount": 33527,
+     "paid_out_date": "2026-10-27",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2128",
+     "payment_id": "pay_2128",
+     "paid_at": "2026-10-25T18:27:00Z",
+     "order_amount": 16000,
+     "pg_amount": 16000,
+     "fee": 496,
+     "expected_fee": 496,
+     "pay_out_amount": 15504,
+     "paid_out_date": "2026-10-27",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2121",
+     "payment_id": "pay_2121",
+     "paid_at": "2026-10-25T17:59:00Z",
+     "order_amount": 45000,
+     "pg_amount": null,
+     "fee": null,
+     "expected_fee": 1395,
+     "pay_out_amount": null,
+     "paid_out_date": null,
+     "status": "missing_in_pg",
+     "reason": "지급 예정일(2026-10-27)이 지났는데 PG 정산에 없음",
+     "note": null
+    },
+    {
+     "order_id": "ord_2130",
+     "payment_id": "pay_2130",
+     "paid_at": "2026-10-25T14:08:00Z",
+     "order_amount": 93000,
+     "pg_amount": 93000,
+     "fee": 2883,
+     "expected_fee": 2883,
+     "pay_out_amount": 90117,
+     "paid_out_date": "2026-10-27",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2131",
+     "payment_id": "pay_2131",
+     "paid_at": "2026-10-25T12:12:00Z",
+     "order_amount": 67000,
+     "pg_amount": 67000,
+     "fee": 2077,
+     "expected_fee": 2077,
+     "pay_out_amount": 64923,
+     "paid_out_date": "2026-10-27",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2122",
+     "payment_id": "pay_2122",
+     "paid_at": "2026-10-25T10:42:00Z",
+     "order_amount": 67000,
+     "pg_amount": 67000,
+     "fee": 2345,
+     "expected_fee": 2077,
+     "pay_out_amount": 64655,
+     "paid_out_date": "2026-10-27",
+     "status": "fee_anomaly",
+     "reason": "PG 수수료 2,345원이 기본 3.1% 기준 2,077원보다 268원 많음",
+     "note": null
+    },
+    {
+     "order_id": "ord_2126",
+     "payment_id": "pay_2126",
+     "paid_at": "2026-10-25T09:29:00Z",
+     "order_amount": 31300,
+     "pg_amount": 31300,
+     "fee": 970,
+     "expected_fee": 970,
+     "pay_out_amount": 30330,
+     "paid_out_date": "2026-10-27",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2124",
+     "payment_id": "pay_2124",
+     "paid_at": "2026-10-25T09:29:00Z",
+     "order_amount": 30000,
+     "pg_amount": 30000,
+     "fee": 930,
+     "expected_fee": 930,
+     "pay_out_amount": 29070,
+     "paid_out_date": "2026-10-27",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2132",
+     "payment_id": "pay_2132",
+     "paid_at": "2026-10-25T06:28:00Z",
+     "order_amount": 32400,
+     "pg_amount": 32400,
+     "fee": 1004,
+     "expected_fee": 1004,
+     "pay_out_amount": 31396,
+     "paid_out_date": "2026-10-27",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2125",
+     "payment_id": "pay_2125",
+     "paid_at": "2026-10-25T06:17:00Z",
+     "order_amount": 31000,
+     "pg_amount": 31000,
+     "fee": 961,
+     "expected_fee": 961,
+     "pay_out_amount": 30039,
+     "paid_out_date": "2026-10-27",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2127",
+     "payment_id": "pay_2127",
+     "paid_at": "2026-10-25T04:29:00Z",
+     "order_amount": 62000,
+     "pg_amount": 62000,
+     "fee": 1922,
+     "expected_fee": 1922,
+     "pay_out_amount": 60078,
+     "paid_out_date": "2026-10-27",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2120",
+     "payment_id": "pay_2120",
+     "paid_at": "2026-10-24T21:16:00Z",
+     "order_amount": 50000,
+     "pg_amount": 50000,
+     "fee": 1550,
+     "expected_fee": 1550,
+     "pay_out_amount": 48450,
+     "paid_out_date": "2026-10-26",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2116",
+     "payment_id": "pay_2116",
+     "paid_at": "2026-10-24T20:19:00Z",
+     "order_amount": 44000,
+     "pg_amount": 44000,
+     "fee": 1364,
+     "expected_fee": 1364,
+     "pay_out_amount": 42636,
+     "paid_out_date": "2026-10-26",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2114",
+     "payment_id": "pay_2114",
+     "paid_at": "2026-10-24T14:45:00Z",
+     "order_amount": 63000,
+     "pg_amount": 63000,
+     "fee": 1953,
+     "expected_fee": 1953,
+     "pay_out_amount": 61047,
+     "paid_out_date": "2026-10-26",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2119",
+     "payment_id": "pay_2119",
+     "paid_at": "2026-10-24T14:08:00Z",
+     "order_amount": 73000,
+     "pg_amount": 73000,
+     "fee": 2263,
+     "expected_fee": 2263,
+     "pay_out_amount": 70737,
+     "paid_out_date": "2026-10-26",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2109",
+     "payment_id": "pay_2109",
+     "paid_at": "2026-10-24T14:08:00Z",
+     "order_amount": 20300,
+     "pg_amount": 18300,
+     "fee": 567,
+     "expected_fee": 567,
+     "pay_out_amount": 17733,
+     "paid_out_date": "2026-10-26",
+     "status": "mismatch",
+     "reason": "PG 금액이 주문보다 2,000원 적음",
+     "note": null
+    },
+    {
+     "order_id": "ord_2117",
+     "payment_id": "pay_2117",
+     "paid_at": "2026-10-24T13:06:00Z",
+     "order_amount": 74000,
+     "pg_amount": 74000,
+     "fee": 2294,
+     "expected_fee": 2294,
+     "pay_out_amount": 71706,
+     "paid_out_date": "2026-10-26",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2112",
+     "payment_id": "pay_2112",
+     "paid_at": "2026-10-24T12:13:00Z",
+     "order_amount": 10500,
+     "pg_amount": 10500,
+     "fee": 326,
+     "expected_fee": 326,
+     "pay_out_amount": 10174,
+     "paid_out_date": "2026-10-26",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2118",
+     "payment_id": "pay_2118",
+     "paid_at": "2026-10-24T10:06:00Z",
+     "order_amount": 20300,
+     "pg_amount": 20300,
+     "fee": 629,
+     "expected_fee": 629,
+     "pay_out_amount": 19671,
+     "paid_out_date": "2026-10-26",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2113",
+     "payment_id": "pay_2113",
+     "paid_at": "2026-10-24T06:18:00Z",
+     "order_amount": 30000,
+     "pg_amount": 30000,
+     "fee": 930,
+     "expected_fee": 930,
+     "pay_out_amount": 29070,
+     "paid_out_date": "2026-10-26",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2111",
+     "payment_id": "pay_2111",
+     "paid_at": "2026-10-24T05:42:00Z",
+     "order_amount": 29000,
+     "pg_amount": 29000,
+     "fee": 899,
+     "expected_fee": 899,
+     "pay_out_amount": 28101,
+     "paid_out_date": "2026-10-26",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2110",
+     "payment_id": "pay_2110",
+     "paid_at": "2026-10-24T04:34:00Z",
+     "order_amount": 30000,
+     "pg_amount": 30000,
+     "fee": 930,
+     "expected_fee": 930,
+     "pay_out_amount": 29070,
+     "paid_out_date": "2026-10-26",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    },
+    {
+     "order_id": "ord_2115",
+     "payment_id": "pay_2115",
+     "paid_at": "2026-10-24T02:40:00Z",
+     "order_amount": 27800,
+     "pg_amount": 27800,
+     "fee": 862,
+     "expected_fee": 862,
+     "pay_out_amount": 26938,
+     "paid_out_date": "2026-10-26",
+     "status": "matched",
+     "reason": null,
+     "note": null
+    }
+   ]
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.246813Z",
+   "source": "seed",
+   "unavailable": [],
+   "pg_source": "mock_toss_settlement"
+  }
+ },
+ "/api/finance/settlements": {
+  "data": {
+   "period": "2026-W43",
+   "from": "2026-10-19T00:00:00Z",
+   "to": "2026-10-26T00:00:00Z",
+   "pay_date": "2026-10-31",
+   "statements": [
+    {
+     "seller_id": "sel_0001",
+     "name": "책마루",
+     "orders": 28,
+     "gross": 1172000,
+     "commission_rate": 0.1,
+     "commission": 117200,
+     "seller_coupon": 6000,
+     "refunds": 0,
+     "payout": 1048800,
+     "hold_reasons": [],
+     "status": "ready",
+     "review_id": null
+    },
+    {
+     "seller_id": "sel_0002",
+     "name": "종이나라",
+     "orders": 28,
+     "gross": 537500,
+     "commission_rate": 0.08,
+     "commission": 43000,
+     "seller_coupon": 0,
+     "refunds": 17300,
+     "payout": 477200,
+     "hold_reasons": [
+      {
+       "code": "open_claim",
+       "label": "처리 중인 환불·교환 1건"
+      }
+     ],
+     "status": "held",
+     "review_id": null
+    },
+    {
+     "seller_id": "sel_0003",
+     "name": "북앤펜",
+     "orders": 28,
+     "gross": 1830000,
+     "commission_rate": 0.0878,
+     "commission": 160660,
+     "seller_coupon": 14000,
+     "refunds": 15000,
+     "payout": 1640340,
+     "hold_reasons": [],
+     "status": "ready",
+     "review_id": null
+    }
+   ],
+   "batch": {
+    "status": "none",
+    "review_id": null,
+    "execution_id": null,
+    "total_payout": 0,
+    "seller_ids": []
+   }
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.258279Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/policy": {
+  "data": {
+   "rules": [
+    {
+     "key": "coupon_total",
+     "label": "쿠폰 한 번 총액",
+     "limit": 300000,
+     "unit": "원",
+     "used_today": null,
+     "used_month": null,
+     "ratio": null,
+     "alert": null,
+     "source": "thresholds.toml"
+    },
+    {
+     "key": "coupon_unit",
+     "label": "쿠폰 한 장 금액",
+     "limit": 20000,
+     "unit": "원",
+     "used_today": null,
+     "used_month": null,
+     "ratio": null,
+     "alert": null,
+     "source": "thresholds.toml"
+    },
+    {
+     "key": "coupon_daily",
+     "label": "하루 쿠폰 합계",
+     "limit": 1000000,
+     "unit": "원",
+     "used_today": 13000,
+     "used_month": null,
+     "ratio": 0.013,
+     "alert": "ok",
+     "source": "thresholds.toml"
+    },
+    {
+     "key": "compensation_per_context",
+     "label": "장애 한 건 보상 합계",
+     "limit": 1000000,
+     "unit": "원",
+     "used_today": null,
+     "used_month": null,
+     "ratio": null,
+     "alert": null,
+     "source": "thresholds.toml"
+    },
+    {
+     "key": "compensation_per_customer",
+     "label": "고객 한 명 보상 합계",
+     "limit": 50000,
+     "unit": "원",
+     "used_today": null,
+     "used_month": null,
+     "ratio": null,
+     "alert": null,
+     "source": "thresholds.toml"
+    },
+    {
+     "key": "refund_single",
+     "label": "환불 한 건",
+     "limit": 100000,
+     "unit": "원",
+     "used_today": null,
+     "used_month": null,
+     "ratio": null,
+     "alert": null,
+     "source": "thresholds.toml"
+    },
+    {
+     "key": "coupon_budget_month",
+     "label": "이번 달 쿠폰 예산",
+     "limit": 300000,
+     "unit": "원",
+     "used_today": 13000,
+     "used_month": 299700,
+     "ratio": 0.999,
+     "alert": "warn",
+     "projected_month": 309690,
+     "source": "finance_policy.toml"
+    },
+    {
+     "key": "refund_budget_month",
+     "label": "이번 달 환불 예산",
+     "limit": 600000,
+     "unit": "원",
+     "used_today": 0,
+     "used_month": 140100,
+     "ratio": 0.2335,
+     "alert": "ok",
+     "projected_month": 144770,
+     "source": "finance_policy.toml"
+    }
+   ],
+   "proposals": [
+    {
+     "key": "refund_single",
+     "current": 100000,
+     "proposed": 70000,
+     "reason": "최근 14일 환불 95%가 31,000원 이하라 한도를 70,000원로 낮춰도 됩니다 (한 번에 30% 안).",
+     "evidence": {
+      "sample": 8,
+      "p95": 31000
+     }
+    }
+   ],
+   "how_to_change": "기준표(safety/.../thresholds.toml) PR로 사람이 바꿉니다."
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.268580Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/audit?days=7": {
+  "data": {
+   "from": "2026-10-24T00:00:00Z",
+   "to": "2026-10-31T00:00:00Z",
+   "stats": {
+    "refund_count": 6,
+    "refund_amount": 122800,
+    "refund_rate": 0.0409,
+    "refund_rate_prev": 0.0048,
+    "coupon_count": 33,
+    "coupon_amount": 200700,
+    "gate_held": 3,
+    "gate_rejected": 1
+   },
+   "findings": [
+    {
+     "code": "split_under_limit",
+     "severity": "high",
+     "title": "같은 고객에게 한도 바로 아래 쿠폰 3장",
+     "detail": "buy_0007에게 35분 안에 19,900원 쿠폰 3장 3번 (한 장 한도 20,000원)",
+     "refs": [
+      "cpn_3053",
+      "cpn_3054",
+      "cpn_3055",
+      "exe_s0042",
+      "exe_s0043",
+      "exe_s0044"
+     ]
+    },
+    {
+     "code": "refund_rate_jump",
+     "severity": "high",
+     "title": "환불률 급변",
+     "detail": "최근 7일 환불률 4.1% (지난 7일 0.5%)",
+     "refs": []
+    },
+    {
+     "code": "amount_recheck_failed",
+     "severity": "high",
+     "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
+     "detail": "10-28 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
+     "refs": [
+      "exe_s0009",
+      "ord_2156"
+     ]
+    },
+    {
+     "code": "compensation_outside_impact",
+     "severity": "high",
+     "title": "영향 고객이 아닌 구매자에게 보상 쿠폰 1건",
+     "detail": "사건 ctx_inc_0100: buy_0999에게 보상 쿠폰 1건 2,000원 (데이터 AI 영향 고객 2명 목록에 없음)",
+     "refs": [
+      "exe_s0065",
+      "cpn_3063"
+     ]
+    },
+    {
+     "code": "repeat_refund",
+     "severity": "medium",
+     "title": "같은 고객 환불 3번",
+     "detail": "buy_0013의 주문 3건 환불, 합계 64,000원 (최근 7일)",
+     "refs": [
+      "rfd_3003",
+      "rfd_3004",
+      "rfd_3005",
+      "ord_2110",
+      "ord_2122",
+      "ord_2135"
+     ]
+    },
+    {
+     "code": "duplicate_coupon",
+     "severity": "medium",
+     "title": "같은 고객에게 같은 사건 보상 쿠폰 2번",
+     "detail": "buy_0011에게 사건 ctx_inc_0104 보상 쿠폰 2번, 합계 20,000원",
+     "refs": [
+      "cpn_3056",
+      "cpn_3057",
+      "exe_s0045",
+      "exe_s0046"
+     ]
+    },
+    {
+     "code": "gate_hold_trend",
+     "severity": "medium",
+     "title": "안전 장치 보류·거절 증가",
+     "detail": "최근 7일 안전 장치 보류 3건·거절 1건 (지난 7일 1건)",
+     "refs": [
+      "exe_s0048",
+      "exe_s0050",
+      "exe_s0051",
+      "exe_s0049"
+     ]
+    }
+   ]
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.293340Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/audit?days=14": {
+  "data": {
+   "from": "2026-10-17T00:00:00Z",
+   "to": "2026-10-31T00:00:00Z",
+   "stats": {
+    "refund_count": 8,
+    "refund_amount": 140100,
+    "refund_rate": 0.0212,
+    "refund_rate_prev": 0.0,
+    "coupon_count": 56,
+    "coupon_amount": 311700,
+    "gate_held": 4,
+    "gate_rejected": 1
+   },
+   "findings": [
+    {
+     "code": "split_under_limit",
+     "severity": "high",
+     "title": "같은 고객에게 한도 바로 아래 쿠폰 3장",
+     "detail": "buy_0007에게 35분 안에 19,900원 쿠폰 3장 3번 (한 장 한도 20,000원)",
+     "refs": [
+      "cpn_3053",
+      "cpn_3054",
+      "cpn_3055",
+      "exe_s0042",
+      "exe_s0043",
+      "exe_s0044"
+     ]
+    },
+    {
+     "code": "refund_rate_jump",
+     "severity": "high",
+     "title": "환불률 급변",
+     "detail": "최근 14일 환불률 2.1% (지난 14일 0.0%)",
+     "refs": []
+    },
+    {
+     "code": "amount_recheck_failed",
+     "severity": "high",
+     "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
+     "detail": "10-28 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
+     "refs": [
+      "exe_s0009",
+      "ord_2156"
+     ]
+    },
+    {
+     "code": "compensation_outside_impact",
+     "severity": "high",
+     "title": "영향 고객이 아닌 구매자에게 보상 쿠폰 1건",
+     "detail": "사건 ctx_inc_0100: buy_0999에게 보상 쿠폰 1건 2,000원 (데이터 AI 영향 고객 2명 목록에 없음)",
+     "refs": [
+      "exe_s0065",
+      "cpn_3063"
+     ]
+    },
+    {
+     "code": "repeat_refund",
+     "severity": "medium",
+     "title": "같은 고객 환불 3번",
+     "detail": "buy_0013의 주문 3건 환불, 합계 64,000원 (최근 14일)",
+     "refs": [
+      "rfd_3003",
+      "rfd_3004",
+      "rfd_3005",
+      "ord_2110",
+      "ord_2122",
+      "ord_2135"
+     ]
+    },
+    {
+     "code": "duplicate_coupon",
+     "severity": "medium",
+     "title": "같은 고객에게 같은 사건 보상 쿠폰 2번",
+     "detail": "buy_0011에게 사건 ctx_inc_0104 보상 쿠폰 2번, 합계 20,000원",
+     "refs": [
+      "cpn_3056",
+      "cpn_3057",
+      "exe_s0045",
+      "exe_s0046"
+     ]
+    },
+    {
+     "code": "gate_hold_trend",
+     "severity": "medium",
+     "title": "안전 장치 보류·거절 증가",
+     "detail": "최근 14일 안전 장치 보류 4건·거절 1건 (지난 14일 0건)",
+     "refs": [
+      "exe_s0047",
+      "exe_s0048",
+      "exe_s0050",
+      "exe_s0051",
+      "exe_s0049"
+     ]
+    }
+   ]
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.343710Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/audit?days=30": {
+  "data": {
+   "from": "2026-10-01T00:00:00Z",
+   "to": "2026-10-31T00:00:00Z",
+   "stats": {
+    "refund_count": 8,
+    "refund_amount": 140100,
+    "refund_rate": 0.0186,
+    "refund_rate_prev": null,
+    "coupon_count": 63,
+    "coupon_amount": 344700,
+    "gate_held": 4,
+    "gate_rejected": 1
+   },
+   "findings": [
+    {
+     "code": "split_under_limit",
+     "severity": "high",
+     "title": "같은 고객에게 한도 바로 아래 쿠폰 3장",
+     "detail": "buy_0007에게 35분 안에 19,900원 쿠폰 3장 3번 (한 장 한도 20,000원)",
+     "refs": [
+      "cpn_3053",
+      "cpn_3054",
+      "cpn_3055",
+      "exe_s0042",
+      "exe_s0043",
+      "exe_s0044"
+     ]
+    },
+    {
+     "code": "amount_recheck_failed",
+     "severity": "high",
+     "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
+     "detail": "10-28 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
+     "refs": [
+      "exe_s0009",
+      "ord_2156"
+     ]
+    },
+    {
+     "code": "compensation_outside_impact",
+     "severity": "high",
+     "title": "영향 고객이 아닌 구매자에게 보상 쿠폰 1건",
+     "detail": "사건 ctx_inc_0100: buy_0999에게 보상 쿠폰 1건 2,000원 (데이터 AI 영향 고객 2명 목록에 없음)",
+     "refs": [
+      "exe_s0065",
+      "cpn_3063"
+     ]
+    },
+    {
+     "code": "repeat_refund",
+     "severity": "medium",
+     "title": "같은 고객 환불 3번",
+     "detail": "buy_0013의 주문 3건 환불, 합계 64,000원 (최근 30일)",
+     "refs": [
+      "rfd_3003",
+      "rfd_3004",
+      "rfd_3005",
+      "ord_2110",
+      "ord_2122",
+      "ord_2135"
+     ]
+    },
+    {
+     "code": "duplicate_coupon",
+     "severity": "medium",
+     "title": "같은 고객에게 같은 사건 보상 쿠폰 2번",
+     "detail": "buy_0011에게 사건 ctx_inc_0104 보상 쿠폰 2번, 합계 20,000원",
+     "refs": [
+      "cpn_3056",
+      "cpn_3057",
+      "exe_s0045",
+      "exe_s0046"
+     ]
+    },
+    {
+     "code": "gate_hold_trend",
+     "severity": "medium",
+     "title": "안전 장치 보류·거절 증가",
+     "detail": "최근 30일 안전 장치 보류 4건·거절 1건 (지난 30일 0건)",
+     "refs": [
+      "exe_s0047",
+      "exe_s0048",
+      "exe_s0050",
+      "exe_s0051",
+      "exe_s0049"
+     ]
+    }
+   ]
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.368938Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/anomalies": {
+  "data": {
+   "open": [
+    {
+     "finding_ref": "5c23a9cfe3babd1e",
+     "code": "split_under_limit",
+     "severity": "high",
+     "title": "같은 고객에게 한도 바로 아래 쿠폰 3장",
+     "detail": "buy_0007에게 35분 안에 19,900원 쿠폰 3장 3번 (한 장 한도 20,000원)",
+     "refs": [
+      "cpn_3053",
+      "cpn_3054",
+      "cpn_3055",
+      "exe_s0042",
+      "exe_s0043",
+      "exe_s0044"
+     ],
+     "status": "open",
+     "first_seen": "2026-10-30T06:14:50.133185Z",
+     "last_seen": "2026-10-30T06:14:50.384195Z",
+     "resolved_by": null,
+     "resolved_at": null,
+     "note": null
+    },
+    {
+     "finding_ref": "159299a58bb31a28",
+     "code": "refund_rate_jump",
+     "severity": "high",
+     "title": "환불률 급변",
+     "detail": "최근 7일 환불률 4.1% (지난 7일 0.5%)",
+     "refs": [],
+     "status": "open",
+     "first_seen": "2026-10-30T06:14:50.133185Z",
+     "last_seen": "2026-10-30T06:14:50.359878Z",
+     "resolved_by": null,
+     "resolved_at": null,
+     "note": null
+    },
+    {
+     "finding_ref": "f03c0d629b32677b",
+     "code": "amount_recheck_failed",
+     "severity": "high",
+     "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
+     "detail": "10-28 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
+     "refs": [
+      "exe_s0009",
+      "ord_2156"
+     ],
+     "status": "open",
+     "first_seen": "2026-10-30T06:14:50.133185Z",
+     "last_seen": "2026-10-30T06:14:50.384195Z",
+     "resolved_by": null,
+     "resolved_at": null,
+     "note": null
+    },
+    {
+     "finding_ref": "c7f81886a850f4f7",
+     "code": "compensation_outside_impact",
+     "severity": "high",
+     "title": "영향 고객이 아닌 구매자에게 보상 쿠폰 1건",
+     "detail": "사건 ctx_inc_0100: buy_0999에게 보상 쿠폰 1건 2,000원 (데이터 AI 영향 고객 2명 목록에 없음)",
+     "refs": [
+      "exe_s0065",
+      "cpn_3063"
+     ],
+     "status": "open",
+     "first_seen": "2026-10-30T06:14:50.133185Z",
+     "last_seen": "2026-10-30T06:14:50.384195Z",
+     "resolved_by": null,
+     "resolved_at": null,
+     "note": null
+    },
+    {
+     "finding_ref": "420aaa6abfe12a20",
+     "code": "repeat_refund",
+     "severity": "medium",
+     "title": "같은 고객 환불 3번",
+     "detail": "buy_0013의 주문 3건 환불, 합계 64,000원 (최근 7일)",
+     "refs": [
+      "rfd_3003",
+      "rfd_3004",
+      "rfd_3005",
+      "ord_2110",
+      "ord_2122",
+      "ord_2135"
+     ],
+     "status": "open",
+     "first_seen": "2026-10-30T06:14:50.133185Z",
+     "last_seen": "2026-10-30T06:14:50.384195Z",
+     "resolved_by": null,
+     "resolved_at": null,
+     "note": null
+    },
+    {
+     "finding_ref": "2743e7ba8a94ffb9",
+     "code": "duplicate_coupon",
+     "severity": "medium",
+     "title": "같은 고객에게 같은 사건 보상 쿠폰 2번",
+     "detail": "buy_0011에게 사건 ctx_inc_0104 보상 쿠폰 2번, 합계 20,000원",
+     "refs": [
+      "cpn_3056",
+      "cpn_3057",
+      "exe_s0045",
+      "exe_s0046"
+     ],
+     "status": "open",
+     "first_seen": "2026-10-30T06:14:50.133185Z",
+     "last_seen": "2026-10-30T06:14:50.384195Z",
+     "resolved_by": null,
+     "resolved_at": null,
+     "note": null
+    },
+    {
+     "finding_ref": "17666e7e527681dd",
+     "code": "gate_hold_trend",
+     "severity": "medium",
+     "title": "안전 장치 보류·거절 증가",
+     "detail": "최근 7일 안전 장치 보류 3건·거절 1건 (지난 7일 1건)",
+     "refs": [
+      "exe_s0048",
+      "exe_s0050",
+      "exe_s0051",
+      "exe_s0049"
+     ],
+     "status": "open",
+     "first_seen": "2026-10-30T06:14:50.133185Z",
+     "last_seen": "2026-10-30T06:14:50.309973Z",
+     "resolved_by": null,
+     "resolved_at": null,
+     "note": null
+    },
+    {
+     "finding_ref": "4b8601c77571f2f4",
+     "code": "gate_hold_trend",
+     "severity": "medium",
+     "title": "안전 장치 보류·거절 증가",
+     "detail": "최근 14일 안전 장치 보류 4건·거절 1건 (지난 14일 0건)",
+     "refs": [
+      "exe_s0047",
+      "exe_s0048",
+      "exe_s0050",
+      "exe_s0051",
+      "exe_s0049"
+     ],
+     "status": "open",
+     "first_seen": "2026-10-30T06:14:50.359878Z",
+     "last_seen": "2026-10-30T06:14:50.384195Z",
+     "resolved_by": null,
+     "resolved_at": null,
+     "note": null
+    }
+   ],
+   "open_count": 8,
+   "resolved": []
+  },
+  "meta": {
+   "mock": true,
+   "source": "finance_records"
+  }
+ },
+ "/api/finance/incidents": {
+  "data": [
+   {
+    "context_id": "ctx_inc_scn_a_0001",
+    "component": "payment",
+    "opened_at": "2026-10-29T05:00:00Z",
+    "damage_amount": 95000,
+    "compensation_total": 8000,
+    "coupon_count": 4,
+    "held_count": 0,
+    "refund_total": 0,
+    "money_out_total": 8000,
+    "checks_ok": true
+   },
+   {
+    "context_id": "ctx_inc_0103",
+    "component": "payment",
+    "opened_at": "2026-10-28T03:00:00Z",
+    "damage_amount": 35500,
+    "compensation_total": 19900,
+    "coupon_count": 1,
+    "held_count": 0,
+    "refund_total": 0,
+    "money_out_total": 19900,
+    "checks_ok": true
+   },
+   {
+    "context_id": "ctx_inc_0102",
+    "component": "payment",
+    "opened_at": "2026-10-28T02:30:00Z",
+    "damage_amount": 23000,
+    "compensation_total": 19900,
+    "coupon_count": 1,
+    "held_count": 0,
+    "refund_total": 0,
+    "money_out_total": 19900,
+    "checks_ok": true
+   },
+   {
+    "context_id": "ctx_inc_0101",
+    "component": "payment",
+    "opened_at": "2026-10-28T02:00:00Z",
+    "damage_amount": 41000,
+    "compensation_total": 19900,
+    "coupon_count": 1,
+    "held_count": 0,
+    "refund_total": 0,
+    "money_out_total": 19900,
+    "checks_ok": true
+   },
+   {
+    "context_id": "ctx_inc_0104",
+    "component": "payment",
+    "opened_at": "2026-10-27T10:00:00Z",
+    "damage_amount": 52000,
+    "compensation_total": 20000,
+    "coupon_count": 2,
+    "held_count": 0,
+    "refund_total": 0,
+    "money_out_total": 20000,
+    "checks_ok": false
+   },
+   {
+    "context_id": "ctx_inc_0100",
+    "component": "payment",
+    "opened_at": "2026-10-25T03:00:00Z",
+    "damage_amount": 30000,
+    "compensation_total": 4000,
+    "coupon_count": 2,
+    "held_count": 0,
+    "refund_total": 0,
+    "money_out_total": 4000,
+    "checks_ok": false
+   }
+  ],
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.416489Z",
+   "ledger_source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/support-costs": {
+  "data": [],
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.425652Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/ledger": {
+  "data": {
+   "compensation": [],
+   "refunds": []
+  },
+  "meta": {}
+ },
+ "/api/finance/closing?period=day&date=2026-10-29": {
+  "data": {
+   "period": "day",
+   "date": "2026-10-29",
+   "from": "2026-10-29T00:00:00Z",
+   "to": "2026-10-30T00:00:00Z",
+   "lines": [
+    {
+     "code": "gmv",
+     "label": "총거래액",
+     "amount": 218000
+    },
+    {
+     "code": "commission_revenue",
+     "label": "판매 수수료 매출",
+     "amount": 17440
+    },
+    {
+     "code": "coupon_cost",
+     "label": "쿠폰 비용(회사 부담)",
+     "amount": -21000
+    },
+    {
+     "code": "refund_total",
+     "label": "환불",
+     "amount": 0
+    },
+    {
+     "code": "pg_fee",
+     "label": "PG 수수료",
+     "amount": -7691
+    },
+    {
+     "code": "net_result",
+     "label": "영업 결과",
+     "amount": -11251
+    }
+   ],
+   "journal": [
+    {
+     "account": "외상매출금(PG)",
+     "debit": 218000,
+     "credit": 0,
+     "memo": "카드 결제 매출"
+    },
+    {
+     "account": "수수료 매출",
+     "debit": 0,
+     "credit": 17440,
+     "memo": "판매 수수료"
+    },
+    {
+     "account": "판매자 예수금",
+     "debit": 0,
+     "credit": 200560,
+     "memo": "판매자에게 줄 판매 대금"
+    },
+    {
+     "account": "지급수수료(PG)",
+     "debit": 7691,
+     "credit": 0,
+     "memo": "PG 결제 수수료"
+    },
+    {
+     "account": "외상매출금(PG)",
+     "debit": 0,
+     "credit": 7691,
+     "memo": "PG 수수료 차감"
+    },
+    {
+     "account": "판매촉진비(쿠폰)",
+     "debit": 21000,
+     "credit": 0,
+     "memo": "회사 부담 쿠폰"
+    },
+    {
+     "account": "미지급금(쿠폰)",
+     "debit": 0,
+     "credit": 21000,
+     "memo": "쿠폰 사용분 정산 예정"
+    }
+   ],
+   "commentary": "어제 총거래액은 218,000원(주문 12건)이고, 판매 수수료 매출은 17,440원입니다. 회사 부담 쿠폰 21,000원과 PG 수수료 7,691원을 빼면 영업 결과는 -11,251원(적자)입니다. 환불 0원은 판매자 정산에서 차감됩니다.",
+   "commentary_source": "template",
+   "status": "draft",
+   "confirmed_by": null,
+   "confirmed_at": null
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.440414Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/incidents/ctx_inc_scn_a_0001": {
+  "data": {
+   "context_id": "ctx_inc_scn_a_0001",
+   "component": "payment",
+   "window": {
+    "from": "2026-10-29T05:00:00Z",
+    "to": "2026-10-29T05:30:00Z"
+   },
+   "impact": {
+    "failed_orders": 6,
+    "affected_customers": 4,
+    "damage_amount": 95000,
+    "by_category": [
+     {
+      "category": "books",
+      "orders": 4,
+      "amount": 82500
+     },
+     {
+      "category": "stationery",
+      "orders": 2,
+      "amount": 12500
+     }
+    ],
+    "affected_customer_ids": [
+     "buy_0001",
+     "buy_0002",
+     "buy_0003",
+     "buy_0004"
+    ],
+    "source": "data.impact_analysis",
+    "collected_at": "2026-10-30T06:14:50.459071Z"
+   },
+   "compensation": {
+    "coupons": [
+     {
+      "buyer_id": "buy_0001",
+      "execution_id": "exe_s0060",
+      "coupon_id": "cpn_3058",
+      "count": 1,
+      "unit_value": 2000,
+      "amount": 2000,
+      "purpose_code": "compensation",
+      "reason_code": "payment_failure",
+      "grade": "A",
+      "status": "executed",
+      "review_id": null,
+      "at": "2026-10-29T06:10:00Z",
+      "in_impact": true
+     },
+     {
+      "buyer_id": "buy_0002",
+      "execution_id": "exe_s0061",
+      "coupon_id": "cpn_3059",
+      "count": 1,
+      "unit_value": 2000,
+      "amount": 2000,
+      "purpose_code": "compensation",
+      "reason_code": "payment_failure",
+      "grade": "A",
+      "status": "executed",
+      "review_id": null,
+      "at": "2026-10-29T06:11:00Z",
+      "in_impact": true
+     },
+     {
+      "buyer_id": "buy_0003",
+      "execution_id": "exe_s0062",
+      "coupon_id": "cpn_3060",
+      "count": 1,
+      "unit_value": 2000,
+      "amount": 2000,
+      "purpose_code": "compensation",
+      "reason_code": "payment_failure",
+      "grade": "A",
+      "status": "executed",
+      "review_id": null,
+      "at": "2026-10-29T06:12:00Z",
+      "in_impact": true
+     },
+     {
+      "buyer_id": "buy_0004",
+      "execution_id": "exe_s0063",
+      "coupon_id": "cpn_3061",
+      "count": 1,
+      "unit_value": 2000,
+      "amount": 2000,
+      "purpose_code": "compensation",
+      "reason_code": "payment_failure",
+      "grade": "A",
+      "status": "executed",
+      "review_id": null,
+      "at": "2026-10-29T06:13:00Z",
+      "in_impact": true
+     }
+    ],
+    "total_executed": 8000,
+    "total_held": 0,
+    "count_executed": 4,
+    "count_held": 0
+   },
+   "refunds": {
+    "total": 0,
+    "count": 0
+   },
+   "money_out_total": 8000,
+   "limits": {
+    "per_customer": {
+     "limit": 50000,
+     "max_used": 2000,
+     "buyer_id": "buy_0001"
+    },
+    "per_incident": {
+     "limit": 1000000,
+     "used": 8000,
+     "remaining": 992000
+    }
+   },
+   "checks": [
+    {
+     "code": "recipients_in_impact",
+     "ok": true,
+     "title": "보상 받은 고객이 모두 영향 고객인지",
+     "detail": "보상 받은 고객 4명 모두 영향 고객 4명 안",
+     "refs": []
+    },
+    {
+     "code": "one_coupon_per_buyer",
+     "ok": true,
+     "title": "고객당 쿠폰 1건",
+     "detail": "같은 사건·같은 고객 보상 쿠폰은 1건씩",
+     "refs": []
+    },
+    {
+     "code": "per_customer_limit",
+     "ok": true,
+     "title": "고객당 보상 한도",
+     "detail": "고객 최대 2,000원 / 한도 50,000원 (buy_0001)",
+     "refs": []
+    },
+    {
+     "code": "per_incident_limit",
+     "ok": true,
+     "title": "사건당 보상 한도",
+     "detail": "사건 합계 8,000원 / 한도 1,000,000원",
+     "refs": []
+    },
+    {
+     "code": "amount_recheck",
+     "ok": true,
+     "title": "보상 금액 다시 계산",
+     "detail": "실행된 보상 쿠폰 4건 금액(장 수 × 단가)이 모두 맞음",
+     "refs": []
+    }
+   ],
+   "ledger_source": "seed"
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.459071Z",
+   "unavailable": []
+  }
+ },
+ "/api/finance/incidents/ctx_inc_0103": {
+  "data": {
+   "context_id": "ctx_inc_0103",
+   "component": "payment",
+   "window": {
+    "from": "2026-10-28T03:00:00Z",
+    "to": "2026-10-28T03:20:00Z"
+   },
+   "impact": {
+    "failed_orders": 2,
+    "affected_customers": 2,
+    "damage_amount": 35500,
+    "by_category": [
+     {
+      "category": "books",
+      "orders": 1,
+      "amount": 27000
+     },
+     {
+      "category": "stationery",
+      "orders": 1,
+      "amount": 8500
+     }
+    ],
+    "affected_customer_ids": [
+     "buy_0007",
+     "buy_0014"
+    ],
+    "source": "data.impact_analysis",
+    "collected_at": "2026-10-30T06:14:50.474094Z"
+   },
+   "compensation": {
+    "coupons": [
+     {
+      "buyer_id": "buy_0007",
+      "execution_id": "exe_s0044",
+      "coupon_id": null,
+      "count": 1,
+      "unit_value": 19900,
+      "amount": 19900,
+      "purpose_code": "compensation",
+      "reason_code": null,
+      "grade": "A",
+      "status": "executed",
+      "review_id": null,
+      "at": "2026-10-28T14:40:00Z",
+      "in_impact": true
+     }
+    ],
+    "total_executed": 19900,
+    "total_held": 0,
+    "count_executed": 1,
+    "count_held": 0
+   },
+   "refunds": {
+    "total": 0,
+    "count": 0
+   },
+   "money_out_total": 19900,
+   "limits": {
+    "per_customer": {
+     "limit": 50000,
+     "max_used": 19900,
+     "buyer_id": "buy_0007"
+    },
+    "per_incident": {
+     "limit": 1000000,
+     "used": 19900,
+     "remaining": 980100
+    }
+   },
+   "checks": [
+    {
+     "code": "recipients_in_impact",
+     "ok": true,
+     "title": "보상 받은 고객이 모두 영향 고객인지",
+     "detail": "보상 받은 고객 1명 모두 영향 고객 2명 안",
+     "refs": []
+    },
+    {
+     "code": "one_coupon_per_buyer",
+     "ok": true,
+     "title": "고객당 쿠폰 1건",
+     "detail": "같은 사건·같은 고객 보상 쿠폰은 1건씩",
+     "refs": []
+    },
+    {
+     "code": "per_customer_limit",
+     "ok": true,
+     "title": "고객당 보상 한도",
+     "detail": "고객 최대 19,900원 / 한도 50,000원 (buy_0007)",
+     "refs": []
+    },
+    {
+     "code": "per_incident_limit",
+     "ok": true,
+     "title": "사건당 보상 한도",
+     "detail": "사건 합계 19,900원 / 한도 1,000,000원",
+     "refs": []
+    },
+    {
+     "code": "amount_recheck",
+     "ok": true,
+     "title": "보상 금액 다시 계산",
+     "detail": "실행된 보상 쿠폰 1건 금액(장 수 × 단가)이 모두 맞음",
+     "refs": []
+    }
+   ],
+   "ledger_source": "seed"
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.474094Z",
+   "unavailable": []
+  }
+ },
+ "/api/finance/incidents/ctx_inc_0102": {
+  "data": {
+   "context_id": "ctx_inc_0102",
+   "component": "payment",
+   "window": {
+    "from": "2026-10-28T02:30:00Z",
+    "to": "2026-10-28T02:50:00Z"
+   },
+   "impact": {
+    "failed_orders": 1,
+    "affected_customers": 1,
+    "damage_amount": 23000,
+    "by_category": [
+     {
+      "category": "books",
+      "orders": 1,
+      "amount": 23000
+     }
+    ],
+    "affected_customer_ids": [
+     "buy_0007"
+    ],
+    "source": "data.impact_analysis",
+    "collected_at": "2026-10-30T06:14:50.503667Z"
+   },
+   "compensation": {
+    "coupons": [
+     {
+      "buyer_id": "buy_0007",
+      "execution_id": "exe_s0043",
+      "coupon_id": null,
+      "count": 1,
+      "unit_value": 19900,
+      "amount": 19900,
+      "purpose_code": "compensation",
+      "reason_code": null,
+      "grade": "A",
+      "status": "executed",
+      "review_id": null,
+      "at": "2026-10-28T14:20:00Z",
+      "in_impact": true
+     }
+    ],
+    "total_executed": 19900,
+    "total_held": 0,
+    "count_executed": 1,
+    "count_held": 0
+   },
+   "refunds": {
+    "total": 0,
+    "count": 0
+   },
+   "money_out_total": 19900,
+   "limits": {
+    "per_customer": {
+     "limit": 50000,
+     "max_used": 19900,
+     "buyer_id": "buy_0007"
+    },
+    "per_incident": {
+     "limit": 1000000,
+     "used": 19900,
+     "remaining": 980100
+    }
+   },
+   "checks": [
+    {
+     "code": "recipients_in_impact",
+     "ok": true,
+     "title": "보상 받은 고객이 모두 영향 고객인지",
+     "detail": "보상 받은 고객 1명 모두 영향 고객 1명 안",
+     "refs": []
+    },
+    {
+     "code": "one_coupon_per_buyer",
+     "ok": true,
+     "title": "고객당 쿠폰 1건",
+     "detail": "같은 사건·같은 고객 보상 쿠폰은 1건씩",
+     "refs": []
+    },
+    {
+     "code": "per_customer_limit",
+     "ok": true,
+     "title": "고객당 보상 한도",
+     "detail": "고객 최대 19,900원 / 한도 50,000원 (buy_0007)",
+     "refs": []
+    },
+    {
+     "code": "per_incident_limit",
+     "ok": true,
+     "title": "사건당 보상 한도",
+     "detail": "사건 합계 19,900원 / 한도 1,000,000원",
+     "refs": []
+    },
+    {
+     "code": "amount_recheck",
+     "ok": true,
+     "title": "보상 금액 다시 계산",
+     "detail": "실행된 보상 쿠폰 1건 금액(장 수 × 단가)이 모두 맞음",
+     "refs": []
+    }
+   ],
+   "ledger_source": "seed"
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.503667Z",
+   "unavailable": []
+  }
+ },
+ "/api/finance/incidents/ctx_inc_0101": {
+  "data": {
+   "context_id": "ctx_inc_0101",
+   "component": "payment",
+   "window": {
+    "from": "2026-10-28T02:00:00Z",
+    "to": "2026-10-28T02:20:00Z"
+   },
+   "impact": {
+    "failed_orders": 2,
+    "affected_customers": 2,
+    "damage_amount": 41000,
+    "by_category": [
+     {
+      "category": "books",
+      "orders": 2,
+      "amount": 41000
+     }
+    ],
+    "affected_customer_ids": [
+     "buy_0007",
+     "buy_0012"
+    ],
+    "source": "data.impact_analysis",
+    "collected_at": "2026-10-30T06:14:50.519676Z"
+   },
+   "compensation": {
+    "coupons": [
+     {
+      "buyer_id": "buy_0007",
+      "execution_id": "exe_s0042",
+      "coupon_id": null,
+      "count": 1,
+      "unit_value": 19900,
+      "amount": 19900,
+      "purpose_code": "compensation",
+      "reason_code": null,
+      "grade": "A",
+      "status": "executed",
+      "review_id": null,
+      "at": "2026-10-28T14:05:00Z",
+      "in_impact": true
+     }
+    ],
+    "total_executed": 19900,
+    "total_held": 0,
+    "count_executed": 1,
+    "count_held": 0
+   },
+   "refunds": {
+    "total": 0,
+    "count": 0
+   },
+   "money_out_total": 19900,
+   "limits": {
+    "per_customer": {
+     "limit": 50000,
+     "max_used": 19900,
+     "buyer_id": "buy_0007"
+    },
+    "per_incident": {
+     "limit": 1000000,
+     "used": 19900,
+     "remaining": 980100
+    }
+   },
+   "checks": [
+    {
+     "code": "recipients_in_impact",
+     "ok": true,
+     "title": "보상 받은 고객이 모두 영향 고객인지",
+     "detail": "보상 받은 고객 1명 모두 영향 고객 2명 안",
+     "refs": []
+    },
+    {
+     "code": "one_coupon_per_buyer",
+     "ok": true,
+     "title": "고객당 쿠폰 1건",
+     "detail": "같은 사건·같은 고객 보상 쿠폰은 1건씩",
+     "refs": []
+    },
+    {
+     "code": "per_customer_limit",
+     "ok": true,
+     "title": "고객당 보상 한도",
+     "detail": "고객 최대 19,900원 / 한도 50,000원 (buy_0007)",
+     "refs": []
+    },
+    {
+     "code": "per_incident_limit",
+     "ok": true,
+     "title": "사건당 보상 한도",
+     "detail": "사건 합계 19,900원 / 한도 1,000,000원",
+     "refs": []
+    },
+    {
+     "code": "amount_recheck",
+     "ok": true,
+     "title": "보상 금액 다시 계산",
+     "detail": "실행된 보상 쿠폰 1건 금액(장 수 × 단가)이 모두 맞음",
+     "refs": []
+    }
+   ],
+   "ledger_source": "seed"
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.519676Z",
+   "unavailable": []
+  }
+ },
+ "/api/finance/incidents/ctx_inc_0104": {
+  "data": {
+   "context_id": "ctx_inc_0104",
+   "component": "payment",
+   "window": {
+    "from": "2026-10-27T10:00:00Z",
+    "to": "2026-10-27T10:30:00Z"
+   },
+   "impact": {
+    "failed_orders": 3,
+    "affected_customers": 2,
+    "damage_amount": 52000,
+    "by_category": [
+     {
+      "category": "books",
+      "orders": 2,
+      "amount": 44000
+     },
+     {
+      "category": "stationery",
+      "orders": 1,
+      "amount": 8000
+     }
+    ],
+    "affected_customer_ids": [
+     "buy_0011",
+     "buy_0016"
+    ],
+    "source": "data.impact_analysis",
+    "collected_at": "2026-10-30T06:14:50.535373Z"
+   },
+   "compensation": {
+    "coupons": [
+     {
+      "buyer_id": "buy_0011",
+      "execution_id": "exe_s0045",
+      "coupon_id": null,
+      "count": 1,
+      "unit_value": 10000,
+      "amount": 10000,
+      "purpose_code": "compensation",
+      "reason_code": null,
+      "grade": "A",
+      "status": "executed",
+      "review_id": null,
+      "at": "2026-10-27T11:00:00Z",
+      "in_impact": true
+     },
+     {
+      "buyer_id": "buy_0011",
+      "execution_id": "exe_s0046",
+      "coupon_id": null,
+      "count": 1,
+      "unit_value": 10000,
+      "amount": 10000,
+      "purpose_code": "compensation",
+      "reason_code": null,
+      "grade": "A",
+      "status": "executed",
+      "review_id": null,
+      "at": "2026-10-27T11:30:00Z",
+      "in_impact": true
+     }
+    ],
+    "total_executed": 20000,
+    "total_held": 0,
+    "count_executed": 2,
+    "count_held": 0
+   },
+   "refunds": {
+    "total": 0,
+    "count": 0
+   },
+   "money_out_total": 20000,
+   "limits": {
+    "per_customer": {
+     "limit": 50000,
+     "max_used": 20000,
+     "buyer_id": "buy_0011"
+    },
+    "per_incident": {
+     "limit": 1000000,
+     "used": 20000,
+     "remaining": 980000
+    }
+   },
+   "checks": [
+    {
+     "code": "recipients_in_impact",
+     "ok": true,
+     "title": "보상 받은 고객이 모두 영향 고객인지",
+     "detail": "보상 받은 고객 1명 모두 영향 고객 2명 안",
+     "refs": []
+    },
+    {
+     "code": "one_coupon_per_buyer",
+     "ok": false,
+     "title": "고객당 쿠폰 1건",
+     "detail": "buy_0011 2건",
+     "refs": [
+      "exe_s0045",
+      "exe_s0046"
+     ]
+    },
+    {
+     "code": "per_customer_limit",
+     "ok": true,
+     "title": "고객당 보상 한도",
+     "detail": "고객 최대 20,000원 / 한도 50,000원 (buy_0011)",
+     "refs": []
+    },
+    {
+     "code": "per_incident_limit",
+     "ok": true,
+     "title": "사건당 보상 한도",
+     "detail": "사건 합계 20,000원 / 한도 1,000,000원",
+     "refs": []
+    },
+    {
+     "code": "amount_recheck",
+     "ok": true,
+     "title": "보상 금액 다시 계산",
+     "detail": "실행된 보상 쿠폰 2건 금액(장 수 × 단가)이 모두 맞음",
+     "refs": []
+    }
+   ],
+   "ledger_source": "seed"
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.535373Z",
+   "unavailable": []
+  }
+ },
+ "/api/finance/incidents/ctx_inc_0100": {
+  "data": {
+   "context_id": "ctx_inc_0100",
+   "component": "payment",
+   "window": {
+    "from": "2026-10-25T03:00:00Z",
+    "to": "2026-10-25T03:20:00Z"
+   },
+   "impact": {
+    "failed_orders": 2,
+    "affected_customers": 2,
+    "damage_amount": 30000,
+    "by_category": [
+     {
+      "category": "books",
+      "orders": 2,
+      "amount": 30000
+     }
+    ],
+    "affected_customer_ids": [
+     "buy_0005",
+     "buy_0006"
+    ],
+    "source": "data.impact_analysis",
+    "collected_at": "2026-10-30T06:14:50.551642Z"
+   },
+   "compensation": {
+    "coupons": [
+     {
+      "buyer_id": "buy_0005",
+      "execution_id": "exe_s0064",
+      "coupon_id": "cpn_3062",
+      "count": 1,
+      "unit_value": 2000,
+      "amount": 2000,
+      "purpose_code": "compensation",
+      "reason_code": "payment_failure",
+      "grade": "A",
+      "status": "executed",
+      "review_id": null,
+      "at": "2026-10-25T04:00:00Z",
+      "in_impact": true
+     },
+     {
+      "buyer_id": "buy_0999",
+      "execution_id": "exe_s0065",
+      "coupon_id": "cpn_3063",
+      "count": 1,
+      "unit_value": 2000,
+      "amount": 2000,
+      "purpose_code": "compensation",
+      "reason_code": "payment_failure",
+      "grade": "A",
+      "status": "executed",
+      "review_id": null,
+      "at": "2026-10-25T04:05:00Z",
+      "in_impact": false
+     }
+    ],
+    "total_executed": 4000,
+    "total_held": 0,
+    "count_executed": 2,
+    "count_held": 0
+   },
+   "refunds": {
+    "total": 0,
+    "count": 0
+   },
+   "money_out_total": 4000,
+   "limits": {
+    "per_customer": {
+     "limit": 50000,
+     "max_used": 2000,
+     "buyer_id": "buy_0005"
+    },
+    "per_incident": {
+     "limit": 1000000,
+     "used": 4000,
+     "remaining": 996000
+    }
+   },
+   "checks": [
+    {
+     "code": "recipients_in_impact",
+     "ok": false,
+     "title": "보상 받은 고객이 모두 영향 고객인지",
+     "detail": "영향 고객이 아닌 buy_0999에게 보상 쿠폰",
+     "refs": [
+      "exe_s0065"
+     ]
+    },
+    {
+     "code": "one_coupon_per_buyer",
+     "ok": true,
+     "title": "고객당 쿠폰 1건",
+     "detail": "같은 사건·같은 고객 보상 쿠폰은 1건씩",
+     "refs": []
+    },
+    {
+     "code": "per_customer_limit",
+     "ok": true,
+     "title": "고객당 보상 한도",
+     "detail": "고객 최대 2,000원 / 한도 50,000원 (buy_0005)",
+     "refs": []
+    },
+    {
+     "code": "per_incident_limit",
+     "ok": true,
+     "title": "사건당 보상 한도",
+     "detail": "사건 합계 4,000원 / 한도 1,000,000원",
+     "refs": []
+    },
+    {
+     "code": "amount_recheck",
+     "ok": true,
+     "title": "보상 금액 다시 계산",
+     "detail": "실행된 보상 쿠폰 2건 금액(장 수 × 단가)이 모두 맞음",
+     "refs": []
+    }
+   ],
+   "ledger_source": "seed"
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T06:14:50.551642Z",
+   "unavailable": []
+  }
+ },
+ "/api/finance/self-test/last": {
+  "data": null,
+  "meta": {
+   "next_run_at": null
+  }
+ }
+}
