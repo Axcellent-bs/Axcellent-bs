@@ -552,6 +552,7 @@ class PlanningService:
         async with self._lock():
             s = self.state.model_copy(deep=True)
             before = len(s.activity)
+            held = {t.id for t in s.tasks if t.coding and t.coding.status == "waiting_human"}
             known = {r.id for r in s.requests}
             known_prs = {p.id for p in s.prs}
             result = await fn(s, **params) or ActionResult()
@@ -561,14 +562,21 @@ class PlanningService:
             outgoing = self._dev_outgoing(s)
             self._to_outbox(s, before)
             result.changed = s != self.state
+            new_holds: list[str] = []
             if result.changed:
                 self.state = s
                 self.version += 1
                 self._save()
                 self._notify()
+                new_holds = [
+                    t.id for t in s.tasks
+                    if t.coding and t.coding.status == "waiting_human" and t.id not in held
+                ]  # fmt: skip
         # 넘기기는 상태를 바꿔 끼운 뒤 잠금 밖에서 보낸다 (잠금을 쥔 채 네트워크를 부르지 않는다)
         for item in outgoing:
             self._spawn_send(*item)
+        for task_id in new_holds:  # 사람 확인으로 멈춘 코딩 작업 → 받은 요청에 개발팀 할 일
+            self._spawn_hold(task_id)
         self._kick_waiting()
         return result
 
@@ -752,6 +760,37 @@ class PlanningService:
                 (RECEIVE_DEV_RESULT, req.context_id, res, dev_result_key(req.context_id, sp.id, fp))
             )
         return out
+
+    def _spawn_hold(self, task_id: str) -> None:
+        if self.role == "planning":
+            return  # 기획 서비스는 코딩 작업을 돌리지 않는다
+        try:
+            task = asyncio.get_running_loop().create_task(self._hold_to_inbox(task_id))
+        except RuntimeError:
+            return
+        self._sending.add(task)
+        task.add_done_callback(self._sending.discard)
+
+    async def _hold_to_inbox(self, task_id: str) -> None:
+        """사람 확인으로 멈춘 코딩 작업을 받은 요청에 올리고 활동에 남긴다 (잠금 밖에서 보낸다)."""
+        task = next((t for t in self.state.tasks if t.id == task_id), None)
+        if task is None or task.coding is None:
+            return
+        pr = next((p for p in self.state.prs if p.id == task.coding.pr), None)
+        sp = next((x for x in self.state.specs if x.id == task.spec), None)
+        req = self._request_of_spec(self.state, sp) if sp else None
+        ctx = req.context_id if req else f"task:{task_id}"
+        body = cause_inbox.hold_handoff(task, pr, ctx, self.tenant_id)
+        text = await cause_inbox.send_hold(body, self._cause_poster)
+        if text is None:
+            return
+
+        async def log(s: State) -> None:
+            s.activity.append(
+                self._act(self.clock(), ctx, "dev", "human", "handoff", "A2A", text, "A")
+            )
+
+        await self._apply(log)
 
     def _spawn_send(self, skill: str, ctx: str, payload: BaseModel, key: str) -> None:
         task = asyncio.create_task(self._send_one(skill, ctx, payload, key))

@@ -6,6 +6,9 @@
 
 - 요청 부서가 보낸 근거 문장(evidence)은 외부 입력이라 `untrusted`에만 둔다.
 - 목 모드에서는 넣지 않는다(할 일함이 떠 있지 않다).
+
+개발 AI 코딩 작업이 사람 확인으로 멈춘 것도 같은 할 일함에 개발팀 일로 올린다(`hold_handoff`).
+멈출 때마다 한 번(멈춘 시각이 멱등 키), 맡을 부서는 조직도 `review_dev_task` → 없으면 개발팀.
 """
 
 from __future__ import annotations
@@ -20,9 +23,10 @@ from ax_agent_template import routing
 from ax_agent_template.client import INBOX, INBOX_PATH
 from ax_agent_template.config import agent_token, agent_url
 from ax_contracts.schemas import HandoffCreate, HandoffTask
-from planning_agent.domain.models import Request
+from planning_agent.domain.models import PR, Request, Task
 
 SKILL = "investigate_incident"
+HOLD_SKILL = "review_dev_task"
 DEFAULT_UNIT = "개발팀"
 TIMEOUT_SECONDS = 5.0
 
@@ -51,6 +55,32 @@ def handoff_of(req: Request, tenant_id: str) -> HandoffCreate:
     )
 
 
+def hold_handoff(task: Task, pr: PR | None, context_id: str, tenant_id: str) -> HandoffCreate:
+    """코딩 작업이 사람 확인으로 멈춘 것 → 개발팀 할 일 (머지·수정 지시·다시 시도 판단)."""
+    cr = task.coding
+    assert cr is not None
+    assignment = routing.assignment_for("planning", HOLD_SKILL)
+    return HandoffCreate(
+        tenant_id=tenant_id,
+        context_id=context_id,
+        from_service="planning",
+        to_service="planning",
+        skill=HOLD_SKILL,
+        input={
+            "task_id": task.id,
+            "spec_id": task.spec,
+            "title": task.title,
+            "pr": pr.id if pr else None,
+            "pr_url": pr.url if pr else None,
+            "why": cr.error,
+        },
+        reason=f"개발 AI가 사람 확인으로 멈춤: {cr.error or '이유 없음'}",
+        assignee_unit=assignment.unit if assignment else DEFAULT_UNIT,
+        assignee=assignment.assignee if assignment else None,
+        idempotency_key=f"dev_hold:{task.id}:{cr.updated_at.isoformat()}",
+    )
+
+
 async def post(body: HandoffCreate) -> HandoffTask:
     async with httpx.AsyncClient() as client:
         res = await client.post(
@@ -73,3 +103,15 @@ async def send(req: Request, tenant_id: str, poster: Poster | None = None) -> st
         why = type(exc).__name__
         return f"{req.id} 받은 요청에 올리지 못함 ({why}) → 기획 화면 요청 목록에서 확인"
     return f"{req.id} 받은 요청 {task.task_id}에 올림 → {task.assignee_unit} 원인 확인"
+
+
+async def send_hold(body: HandoffCreate, poster: Poster | None = None) -> str | None:
+    """사람 확인 멈춤을 할 일함에 넣고 활동 한 줄을 돌려준다. 목 모드면 None (남기지 않는다)."""
+    if poster is None and template_config.is_mock("planning"):
+        return None
+    task_id = body.input.get("task_id")
+    try:
+        task = await (poster or post)(body)
+    except (httpx.HTTPError, ValidationError, ValueError, KeyError, TypeError) as exc:
+        return f"{task_id} 받은 요청에 올리지 못함 ({type(exc).__name__}) → 개발 화면에서 확인"
+    return f"{task_id} 사람 확인 → 받은 요청 {task.task_id}에 올림 ({task.assignee_unit})"
