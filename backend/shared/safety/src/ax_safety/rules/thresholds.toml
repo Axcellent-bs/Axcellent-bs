@@ -73,6 +73,16 @@ field = "risk_score"
 op = ">="
 value = 70
 
+# 정산 보류 사유가 서류 미비(documents_missing)면 data가 볼 근거가 없으므로 교차검증 없이 바로 C(사람 확인).
+# 아래 세 사유만 B 교차검증으로 간다. 사유가 없거나 목록 밖 값이면 걸린 것으로 본다(fail-closed).
+# 사유 목록은 finance `SettlementHoldInput.reason_code`와 같다
+[[rules]]
+key = "settlement_documents_missing"
+action = "settlement_hold"
+metric = "param_in"
+field = "reason_code"
+allowed = ["fraud_risk", "dispute", "reconciliation_mismatch"]
+
 [[rules]]
 key = "pr_changed_lines"
 action = "generate_pr"
