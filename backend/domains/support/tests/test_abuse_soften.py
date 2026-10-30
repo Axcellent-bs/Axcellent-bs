@@ -204,3 +204,17 @@ def test_softening_starts_before_the_draft_analysis_finishes(
     created = create(TestClient(app), "씨발 쓰레기 같은 회사야 ORD-1 12,000원 환불해")
     assert order.index("soften") < order.index("analyze-end")
     assert created["messages"][0]["softened_text"].endswith("환불을 요청합니다.")
+
+
+def test_feedback_list_shows_the_masked_subject(monkeypatch: pytest.MonkeyPatch) -> None:
+    """후기 관리 한 줄에도 욕설이 든 제목 원문이 나가지 않는다."""
+    from support_agent import feedback_handlers
+
+    created = create(TestClient(app), "환불해 주세요", subject="씨발 환불")
+    conversation = handlers.STORE.get(created["id"])
+    assert conversation is not None
+    assert feedback_handlers._item(conversation)["subject"] == "[비속어] 환불"
+    polite = create(TestClient(app), "환불해 주세요", subject="환불 문의")
+    polite_conversation = handlers.STORE.get(polite["id"])
+    assert polite_conversation is not None
+    assert feedback_handlers._item(polite_conversation)["subject"] == "환불 문의"
