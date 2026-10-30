@@ -4,6 +4,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuditSection } from "@/components/finance/Audit";
 import { ClosingSection } from "@/components/finance/Closing";
 import { DeadlineSection, PayablesSection, VarianceSection } from "@/components/finance/CloseControls";
+import { BankSection, CashflowSection, ChecklistSection } from "@/components/finance/CashAndClose";
 import { StatementsSection } from "@/components/finance/Statements";
 import { Chip, ErrorBox, MetaLine, MockBadge, TONE, Waiting, useResource } from "@/components/finance/bits";
 import { IncidentFinance } from "@/components/finance/Incident";
@@ -339,13 +340,16 @@ export default function FinancePage() {
           ))}
         </div>
         <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
+          {tab === "closing" && <div className="mb-4"><ChecklistSection tick={tick} onOpen={(t) => openTab(todoTab({ kind: "closing_confirm", link: t }), true)} /></div>}
           {tab === "closing" && <ClosingSection tick={tick} onChanged={bump} />}
           {tab === "closing" && <div className="mt-4"><VarianceSection tick={tick} /></div>}
           {tab === "closing" && <div className="mt-4"><StatementsSection tick={tick} /></div>}
           {tab === "reconciliation" && <ReconciliationSection tick={tick} />}
+          {tab === "reconciliation" && <div className="mt-4"><BankSection tick={tick} /></div>}
           {tab === "settlements" && <SettlementsSection tick={tick} onChanged={bump} onGoToQueue={goToQueue} />}
           {tab === "settlements" && <div className="mt-4"><DeadlineSection tick={tick} /></div>}
           {tab === "settlements" && <div className="mt-4"><PayablesSection tick={tick} /></div>}
+          {tab === "settlements" && <div className="mt-4"><CashflowSection tick={tick} /></div>}
           {tab === "policy" && <PolicySection tick={tick} />}
           {tab === "audit" && <AuditSection tick={tick} />}
         </div>
