@@ -73,7 +73,8 @@ class RelatedItem(DomainModel):
     """비슷한·충돌하는 다른 요청 (related.py). 제안이고 묶기·보류는 사람이 정한다.
 
     - relation: same(같은 일) · conflict(반대 방향) · related(비슷함, 관계는 정하지 않음 포함)
-    - by: llm(LLM이 후보 안에서 판단) · embed(임베딩 검색만) · lexical(글자 검색만)
+    - by: llm(LLM이 후보 안에서 판단) · embed(임베딩 검색만) · lexical(글자 검색만) ·
+      path(열린 PR과 같은 파일을 고침, 코드 규칙)
     """
 
     id: str
@@ -81,7 +82,7 @@ class RelatedItem(DomainModel):
     score: float
     relation: Literal["same", "conflict", "related"]
     reason: str
-    by: Literal["llm", "embed", "lexical"]
+    by: Literal["llm", "embed", "lexical", "path"]
 
 
 class Request(DomainModel):

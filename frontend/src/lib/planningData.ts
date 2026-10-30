@@ -36,14 +36,14 @@ export interface Request {
   related?: RelatedReq[] // 비슷한·충돌하는 요청 (제안, 묶기·보류는 사람)
 }
 
-/** 비슷한·충돌하는 요청 (백엔드 related.py). by: llm이 판단 / embed·lexical은 검색만 */
+/** 비슷한·충돌하는 요청 (백엔드 related.py). by: llm이 판단 / embed·lexical은 검색만 / path는 열린 PR과 같은 파일 */
 export interface RelatedReq {
   id: string
   title: string
   score: number
   relation: 'same' | 'conflict' | 'related'
   reason: string
-  by: 'llm' | 'embed' | 'lexical'
+  by: 'llm' | 'embed' | 'lexical' | 'path'
 }
 export const RELATION_LABEL: Record<RelatedReq['relation'], string> = { same: '같은 일', conflict: '충돌 가능', related: '비슷함' }
 

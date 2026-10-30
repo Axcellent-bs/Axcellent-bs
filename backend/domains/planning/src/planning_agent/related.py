@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 
 from ax_agent_template import config as template_config
 from ax_agent_template.llm import LLMClient, LLMSettings
-from planning_agent.domain.models import RelatedItem, Request, State
+from planning_agent.domain.models import PR, RelatedItem, Request, State
 
 TOP_K = 5
 MIN_SCORE = {"embed": 0.6, "lexical": 0.3}  # 이 아래는 후보로 보지 않는다
@@ -190,6 +190,39 @@ class Relater:
             return None
         ids = {r.id for r, _ in found}
         return {j.id: j for j in got.items if j.id in ids}
+
+
+def path_overlaps(state: State, pr: PR) -> list[RelatedItem]:
+    """이 PR과 같은 파일을 고치는 다른 열린 PR의 요청 (검색 없이 경로 비교).
+
+    머지 순서에 따라 한쪽이 다른 쪽을 덮을 수 있어 충돌 가능으로 둔다."""
+    mine = set(pr.changed_paths)
+    out: list[RelatedItem] = []
+    for other in state.prs:
+        if other.id == pr.id or other.merged or other.closed:
+            continue
+        both = sorted(mine & set(other.changed_paths))
+        req = request_of_pr(state, other)
+        if not both or req is None or any(x.id == req.id for x in out):
+            continue
+        out.append(
+            RelatedItem(
+                id=req.id,
+                title=req.title,
+                score=1.0,
+                relation="conflict",
+                reason=f"{other.id}와 같은 파일 수정 중: {', '.join(both[:3])}"[:200],
+                by="path",
+            )
+        )
+    return out
+
+
+def request_of_pr(state: State, pr: PR) -> Request | None:
+    """PR → 작업 → 기획서 → 요청."""
+    task = next((t for t in state.tasks if t.id == pr.task), None)
+    spec = next((s for s in state.specs if task and s.id == task.spec), None)
+    return next((r for r in state.requests if spec and r.id == spec.request), None)
 
 
 def default_relater() -> Relater | None:

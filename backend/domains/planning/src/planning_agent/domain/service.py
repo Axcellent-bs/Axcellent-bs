@@ -514,8 +514,10 @@ class PlanningService:
             s = self.state.model_copy(deep=True)
             before = len(s.activity)
             known = {r.id for r in s.requests}
+            known_prs = {p.id for p in s.prs}
             result = await fn(s, **params) or ActionResult()
             await self._relate_new(s, known)
+            self._relate_paths(s, known_prs)
             await self._advance(s)
             outgoing = self._dev_outgoing(s)
             self._to_outbox(s, before)
@@ -551,6 +553,43 @@ class PlanningService:
                     "request.related",
                     "API",
                     f"{req.id} 비슷한 요청: {text}",
+                    "read",
+                )
+            )
+
+    def _relate_paths(self, s: State, known_prs: set[str]) -> None:
+        """새로 열린 PR이 다른 열린 PR과 같은 파일을 고치면 두 요청에 서로 충돌 가능으로 표시."""
+        for pr in [p for p in s.prs if p.id not in known_prs and not p.merged]:
+            mine = related.request_of_pr(s, pr)
+            hits = related.path_overlaps(s, pr)
+            if mine is None or not hits:
+                continue
+            for hit in hits:
+                if not any(x.id == hit.id and x.by == "path" for x in mine.related):
+                    mine.related.append(hit)
+                other = next((r for r in s.requests if r.id == hit.id), None)
+                if other is not None and not any(
+                    x.id == mine.id and x.by == "path" for x in other.related
+                ):
+                    other.related.append(
+                        hit.model_copy(
+                            update={
+                                "id": mine.id,
+                                "title": mine.title,
+                                "reason": f"{pr.id}가 " + hit.reason.split("와 ", 1)[-1],
+                            }
+                        )
+                    )
+            s.activity.append(
+                self._act(
+                    self.clock(),
+                    mine.context_id,
+                    "planning",
+                    "planning",
+                    "request.related",
+                    "API",
+                    f"{pr.id} 같은 파일을 고치는 열린 PR: "
+                    + ", ".join(f"{h.id} ({h.reason})" for h in hits),
                     "read",
                 )
             )
