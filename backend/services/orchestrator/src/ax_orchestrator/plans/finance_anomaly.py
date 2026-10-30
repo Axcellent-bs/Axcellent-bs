@@ -36,7 +36,7 @@ def _signals_gate(inc: Incident) -> tuple[str, str, str] | None:
 
 
 def _similar(inc: Incident) -> dict[str, Any]:
-    return {"query": inc.title, "limit": 3}
+    return {"query": inc.title, "event_type": inc.event_type, "limit": 3}
 
 
 def finance_anomaly() -> Plan:

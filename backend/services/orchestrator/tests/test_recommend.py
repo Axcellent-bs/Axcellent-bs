@@ -71,3 +71,24 @@ async def test_incident_view_carries_the_recommendation(harness) -> None:
         "status": "no_evidence",
         "reason": "비슷한 과거 이벤트가 없음",
     }
+
+
+def test_other_type_cases_are_not_recommended() -> None:
+    other = case("a", 0.9, "resolved", root_cause="배포 후 설정 누락", action="롤백")
+    other["same_type"] = False
+    out = recommend({"cases": [other]})
+    assert out["status"] == "no_evidence" and "같은 유형" in out["reason"]
+
+
+def test_same_type_wins_even_when_an_other_type_scores_higher() -> None:
+    other = case("a", 0.9, "resolved", root_cause="다른 유형 원인", action="롤백")
+    other["same_type"] = False
+    mine = case("b", 0.78, "resolved", root_cause="결제 대행사 응답 지연", action="타임아웃 조정")
+    mine["same_type"] = True
+    out = recommend({"cases": [other, mine]})
+    assert out["status"] == "found" and out["card_id"] == "b"
+
+
+def test_unknown_type_is_still_usable() -> None:
+    unknown = case("a", 0.8, "resolved", root_cause="원인", action="조치")
+    assert recommend({"cases": [unknown]})["status"] == "found"

@@ -18,22 +18,23 @@ def recommend(similar: dict[str, Any] | None) -> dict[str, Any] | None:
     """조회가 아직 없으면 None, 있으면 {status: found | no_evidence, ...}."""
     if similar is None:
         return None
+    cases = similar.get("cases") or []
+    # 유형이 다른 이벤트의 원인·조치는 추천하지 않는다(화면에는 "다른 유형"으로 보인다)
+    same = [c for c in cases if c.get("same_type") is not False]
     usable = [
         c
-        for c in similar.get("cases") or []
+        for c in same
         if (c.get("resolution") or {}).get("outcome") in USABLE
         and (c["resolution"].get("root_cause") or c["resolution"].get("action"))
     ]
     if not usable:
-        found = bool(similar.get("cases"))
-        return {
-            "status": "no_evidence",
-            "reason": (
-                "비슷한 과거 이벤트는 있으나 해결된 기록(원인·조치)이 없음"
-                if found
-                else "비슷한 과거 이벤트가 없음"
-            ),
-        }
+        if not cases:
+            reason = "비슷한 과거 이벤트가 없음"
+        elif not same:
+            reason = f"같은 유형의 과거 이벤트가 없음 (다른 유형 {len(cases)}건은 참고용)"
+        else:
+            reason = "비슷한 과거 이벤트는 있으나 해결된 기록(원인·조치)이 없음"
+        return {"status": "no_evidence", "reason": reason}
     best = max(usable, key=lambda c: c.get("similarity") or 0.0)
     resolution = best["resolution"]
     return {

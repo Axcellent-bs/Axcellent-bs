@@ -532,6 +532,7 @@ class Engine:
         payload = {
             "context_id": inc.context_id,
             "kind": kind,
+            "event_type": inc.event_type,
             "summary": inc.title + (f" · {note}" if isinstance(note, str) and note else ""),
             "decision_reason": (
                 f"{PLAN_KO.get(inc.kind, inc.kind)} 실행 결과 — "

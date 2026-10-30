@@ -52,6 +52,6 @@ def event_title(component: str, metric: str | None) -> str:
     return f"{comp}에 문제가 생겼어요"
 
 
-def event_type(component: str, metric: str | None) -> str:
-    """같은 유형의 이벤트인지 가르는 값. 예: `payment:p95_latency_ms`."""
-    return f"{component}:{metric or 'unknown'}"
+def event_type(component: str, metric: str | None) -> str | None:
+    """같은 유형의 이벤트인지 가르는 값. 예: `payment:p95_latency_ms`. 지표를 모르면 None."""
+    return f"{component}:{metric}" if metric else None

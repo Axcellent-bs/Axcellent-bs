@@ -1,0 +1,1661 @@
+{
+  "A": {
+    "summary": {
+      "S1": {
+        "typed_n": 15,
+        "same_type_top1": 13,
+        "no_result": 2,
+        "other_type_in_top3": 0,
+        "unrelated_n": 4,
+        "unrelated_no_result": 4
+      },
+      "S2": {
+        "n": 15,
+        "wrong_recommendation": 2,
+        "other_type_shown": 2
+      },
+      "embedding_texts_sent": 34,
+      "cards": 15
+    },
+    "S1": [
+      {
+        "truth": "fail",
+        "source": "총괄",
+        "query": "payment 장애 감지 (error_rate_5xx) payment",
+        "top3": [
+          [
+            "fail",
+            false,
+            0.85,
+            null
+          ],
+          [
+            "fail",
+            true,
+            0.84,
+            null
+          ],
+          [
+            "fail",
+            true,
+            0.836,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "slow",
+        "source": "총괄",
+        "query": "payment 장애 감지 (p95_latency_ms) payment",
+        "top3": [
+          [
+            "slow",
+            false,
+            0.855,
+            null
+          ],
+          [
+            "slow",
+            true,
+            0.836,
+            null
+          ],
+          [
+            "slow",
+            true,
+            0.835,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "refund",
+        "source": "총괄",
+        "query": "finance 장애 감지 finance",
+        "top3": [
+          [
+            "refund",
+            false,
+            0.747,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제가 서버 오류로 자꾸 실패해요",
+        "top3": []
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제 승인 5xx 오류율이 올랐어요",
+        "top3": [
+          [
+            "fail",
+            true,
+            0.772,
+            null
+          ],
+          [
+            "fail",
+            true,
+            0.768,
+            null
+          ],
+          [
+            "fail",
+            false,
+            0.759,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제 API가 500 에러를 반환합니다",
+        "top3": [
+          [
+            "fail",
+            true,
+            0.721,
+            null
+          ],
+          [
+            "fail",
+            true,
+            0.713,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "주문 결제가 계속 실패하는 장애",
+        "top3": [
+          [
+            "fail",
+            true,
+            0.712,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 응답이 너무 느려요",
+        "top3": [
+          [
+            "slow",
+            true,
+            0.723,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 승인 지연 p95 상승",
+        "top3": [
+          [
+            "slow",
+            true,
+            0.787,
+            null
+          ],
+          [
+            "slow",
+            false,
+            0.773,
+            null
+          ],
+          [
+            "slow",
+            true,
+            0.766,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 화면이 오래 걸리고 타임아웃이 나요",
+        "top3": [
+          [
+            "slow",
+            true,
+            0.734,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 API 응답 시간이 길어졌어요",
+        "top3": [
+          [
+            "slow",
+            true,
+            0.748,
+            null
+          ],
+          [
+            "slow",
+            true,
+            0.739,
+            null
+          ],
+          [
+            "slow",
+            true,
+            0.722,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "같은 고객이 환불을 반복해요",
+        "top3": [
+          [
+            "refund",
+            true,
+            0.72,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "환불 남용 의심 건이 나왔어요",
+        "top3": [
+          [
+            "refund",
+            true,
+            0.731,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "주문하고 바로 전부 환불하는 이상 거래",
+        "top3": []
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "재무 사후 감사에서 이상 환불이 감지됐어요",
+        "top3": [
+          [
+            "refund",
+            true,
+            0.727,
+            null
+          ],
+          [
+            "refund",
+            true,
+            0.721,
+            null
+          ],
+          [
+            "refund",
+            true,
+            0.712,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": null,
+        "source": "무관",
+        "query": "회의실 예약 화면 색상",
+        "top3": []
+      },
+      {
+        "truth": null,
+        "source": "무관",
+        "query": "신입 사원 교육 일정",
+        "top3": []
+      },
+      {
+        "truth": null,
+        "source": "무관",
+        "query": "사무실 에어컨 온도 조절",
+        "top3": []
+      },
+      {
+        "truth": null,
+        "source": "무관",
+        "query": "점심 메뉴 추천",
+        "top3": []
+      }
+    ],
+    "S2": [
+      {
+        "truth": "fail",
+        "source": "총괄",
+        "query": "payment 장애 감지 (error_rate_5xx) payment",
+        "shown": [
+          [
+            "slow",
+            0.789,
+            null
+          ],
+          [
+            "slow",
+            0.772,
+            null
+          ],
+          [
+            "slow",
+            0.771,
+            null
+          ]
+        ],
+        "recommendation": "found"
+      },
+      {
+        "truth": "slow",
+        "source": "총괄",
+        "query": "payment 장애 감지 (p95_latency_ms) payment",
+        "shown": [
+          [
+            "fail",
+            0.765,
+            null
+          ],
+          [
+            "fail",
+            0.759,
+            null
+          ],
+          [
+            "fail",
+            0.757,
+            null
+          ]
+        ],
+        "recommendation": "found"
+      },
+      {
+        "truth": "refund",
+        "source": "총괄",
+        "query": "finance 장애 감지 finance",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제가 서버 오류로 자꾸 실패해요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제 승인 5xx 오류율이 올랐어요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제 API가 500 에러를 반환합니다",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "주문 결제가 계속 실패하는 장애",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 응답이 너무 느려요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 승인 지연 p95 상승",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 화면이 오래 걸리고 타임아웃이 나요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 API 응답 시간이 길어졌어요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "같은 고객이 환불을 반복해요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "환불 남용 의심 건이 나왔어요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "주문하고 바로 전부 환불하는 이상 거래",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "재무 사후 감사에서 이상 환불이 감지됐어요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      }
+    ]
+  },
+  "B": {
+    "summary": {
+      "S1": {
+        "typed_n": 15,
+        "same_type_top1": 15,
+        "no_result": 0,
+        "other_type_in_top3": 0,
+        "unrelated_n": 4,
+        "unrelated_no_result": 4
+      },
+      "S2": {
+        "n": 15,
+        "wrong_recommendation": 5,
+        "other_type_shown": 6
+      },
+      "embedding_texts_sent": 32,
+      "cards": 15
+    },
+    "S1": [
+      {
+        "truth": "fail",
+        "source": "총괄",
+        "query": "결제가 서버 오류로 자꾸 실패해요",
+        "top3": [
+          [
+            "fail",
+            false,
+            0.881,
+            null
+          ],
+          [
+            "fail",
+            true,
+            0.866,
+            null
+          ],
+          [
+            "fail",
+            true,
+            0.859,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "slow",
+        "source": "총괄",
+        "query": "결제가 응답이 느려졌어요",
+        "top3": [
+          [
+            "slow",
+            false,
+            0.883,
+            null
+          ],
+          [
+            "slow",
+            true,
+            0.862,
+            null
+          ],
+          [
+            "slow",
+            true,
+            0.861,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "refund",
+        "source": "총괄",
+        "query": "같은 고객이 환불을 반복해요",
+        "top3": [
+          [
+            "refund",
+            true,
+            0.885,
+            null
+          ],
+          [
+            "refund",
+            false,
+            0.878,
+            null
+          ],
+          [
+            "refund",
+            true,
+            0.866,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제가 서버 오류로 자꾸 실패해요",
+        "top3": [
+          [
+            "fail",
+            false,
+            0.881,
+            null
+          ],
+          [
+            "fail",
+            true,
+            0.866,
+            null
+          ],
+          [
+            "fail",
+            true,
+            0.859,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제 승인 5xx 오류율이 올랐어요",
+        "top3": [
+          [
+            "fail",
+            false,
+            0.753,
+            null
+          ],
+          [
+            "fail",
+            true,
+            0.743,
+            null
+          ],
+          [
+            "fail",
+            true,
+            0.743,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제 API가 500 에러를 반환합니다",
+        "top3": [
+          [
+            "fail",
+            false,
+            0.76,
+            null
+          ],
+          [
+            "fail",
+            true,
+            0.757,
+            null
+          ],
+          [
+            "fail",
+            true,
+            0.745,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "주문 결제가 계속 실패하는 장애",
+        "top3": [
+          [
+            "fail",
+            false,
+            0.795,
+            null
+          ],
+          [
+            "fail",
+            true,
+            0.782,
+            null
+          ],
+          [
+            "fail",
+            true,
+            0.78,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 응답이 너무 느려요",
+        "top3": [
+          [
+            "slow",
+            false,
+            0.859,
+            null
+          ],
+          [
+            "slow",
+            true,
+            0.843,
+            null
+          ],
+          [
+            "slow",
+            true,
+            0.841,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 승인 지연 p95 상승",
+        "top3": [
+          [
+            "slow",
+            false,
+            0.758,
+            null
+          ],
+          [
+            "slow",
+            true,
+            0.75,
+            null
+          ],
+          [
+            "slow",
+            true,
+            0.744,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 화면이 오래 걸리고 타임아웃이 나요",
+        "top3": [
+          [
+            "slow",
+            true,
+            0.811,
+            null
+          ],
+          [
+            "slow",
+            true,
+            0.789,
+            null
+          ],
+          [
+            "slow",
+            false,
+            0.789,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 API 응답 시간이 길어졌어요",
+        "top3": [
+          [
+            "slow",
+            true,
+            0.852,
+            null
+          ],
+          [
+            "slow",
+            false,
+            0.837,
+            null
+          ],
+          [
+            "slow",
+            true,
+            0.836,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "같은 고객이 환불을 반복해요",
+        "top3": [
+          [
+            "refund",
+            true,
+            0.885,
+            null
+          ],
+          [
+            "refund",
+            false,
+            0.878,
+            null
+          ],
+          [
+            "refund",
+            true,
+            0.866,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "환불 남용 의심 건이 나왔어요",
+        "top3": [
+          [
+            "refund",
+            true,
+            0.794,
+            null
+          ],
+          [
+            "refund",
+            true,
+            0.79,
+            null
+          ],
+          [
+            "refund",
+            false,
+            0.785,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "주문하고 바로 전부 환불하는 이상 거래",
+        "top3": [
+          [
+            "refund",
+            true,
+            0.786,
+            null
+          ],
+          [
+            "refund",
+            false,
+            0.76,
+            null
+          ],
+          [
+            "refund",
+            true,
+            0.755,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "재무 사후 감사에서 이상 환불이 감지됐어요",
+        "top3": [
+          [
+            "refund",
+            false,
+            0.732,
+            null
+          ],
+          [
+            "refund",
+            true,
+            0.719,
+            null
+          ],
+          [
+            "refund",
+            true,
+            0.717,
+            null
+          ]
+        ]
+      },
+      {
+        "truth": null,
+        "source": "무관",
+        "query": "회의실 예약 화면 색상",
+        "top3": []
+      },
+      {
+        "truth": null,
+        "source": "무관",
+        "query": "신입 사원 교육 일정",
+        "top3": []
+      },
+      {
+        "truth": null,
+        "source": "무관",
+        "query": "사무실 에어컨 온도 조절",
+        "top3": []
+      },
+      {
+        "truth": null,
+        "source": "무관",
+        "query": "점심 메뉴 추천",
+        "top3": []
+      }
+    ],
+    "S2": [
+      {
+        "truth": "fail",
+        "source": "총괄",
+        "query": "결제가 서버 오류로 자꾸 실패해요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "slow",
+        "source": "총괄",
+        "query": "결제가 응답이 느려졌어요",
+        "shown": [
+          [
+            "fail",
+            0.727,
+            null
+          ],
+          [
+            "fail",
+            0.725,
+            null
+          ],
+          [
+            "fail",
+            0.72,
+            null
+          ]
+        ],
+        "recommendation": "found"
+      },
+      {
+        "truth": "refund",
+        "source": "총괄",
+        "query": "같은 고객이 환불을 반복해요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제가 서버 오류로 자꾸 실패해요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제 승인 5xx 오류율이 올랐어요",
+        "shown": [
+          [
+            "slow",
+            0.718,
+            null
+          ],
+          [
+            "slow",
+            0.715,
+            null
+          ],
+          [
+            "slow",
+            0.71,
+            null
+          ]
+        ],
+        "recommendation": "found"
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제 API가 500 에러를 반환합니다",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "주문 결제가 계속 실패하는 장애",
+        "shown": [
+          [
+            "slow",
+            0.722,
+            null
+          ],
+          [
+            "slow",
+            0.715,
+            null
+          ],
+          [
+            "slow",
+            0.71,
+            null
+          ]
+        ],
+        "recommendation": "found"
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 응답이 너무 느려요",
+        "shown": [
+          [
+            "fail",
+            0.715,
+            null
+          ]
+        ],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 승인 지연 p95 상승",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 화면이 오래 걸리고 타임아웃이 나요",
+        "shown": [
+          [
+            "fail",
+            0.713,
+            null
+          ],
+          [
+            "fail",
+            0.713,
+            null
+          ],
+          [
+            "fail",
+            0.711,
+            null
+          ]
+        ],
+        "recommendation": "found"
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 API 응답 시간이 길어졌어요",
+        "shown": [
+          [
+            "fail",
+            0.72,
+            null
+          ],
+          [
+            "fail",
+            0.715,
+            null
+          ]
+        ],
+        "recommendation": "found"
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "같은 고객이 환불을 반복해요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "환불 남용 의심 건이 나왔어요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "주문하고 바로 전부 환불하는 이상 거래",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "재무 사후 감사에서 이상 환불이 감지됐어요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      }
+    ]
+  },
+  "C": {
+    "summary": {
+      "S1": {
+        "typed_n": 15,
+        "same_type_top1": 15,
+        "no_result": 0,
+        "other_type_in_top3": 0,
+        "unrelated_n": 4,
+        "unrelated_no_result": 4
+      },
+      "S2": {
+        "n": 15,
+        "wrong_recommendation": 0,
+        "other_type_shown": 6
+      },
+      "embedding_texts_sent": 0,
+      "cards": 15
+    },
+    "S1": [
+      {
+        "truth": "fail",
+        "source": "총괄",
+        "query": "결제가 서버 오류로 자꾸 실패해요",
+        "top3": [
+          [
+            "fail",
+            false,
+            0.881,
+            true
+          ],
+          [
+            "fail",
+            true,
+            0.866,
+            true
+          ],
+          [
+            "fail",
+            true,
+            0.859,
+            true
+          ]
+        ]
+      },
+      {
+        "truth": "slow",
+        "source": "총괄",
+        "query": "결제가 응답이 느려졌어요",
+        "top3": [
+          [
+            "slow",
+            false,
+            0.883,
+            true
+          ],
+          [
+            "slow",
+            true,
+            0.862,
+            true
+          ],
+          [
+            "slow",
+            true,
+            0.861,
+            true
+          ]
+        ]
+      },
+      {
+        "truth": "refund",
+        "source": "총괄",
+        "query": "같은 고객이 환불을 반복해요",
+        "top3": [
+          [
+            "refund",
+            true,
+            0.885,
+            true
+          ],
+          [
+            "refund",
+            false,
+            0.878,
+            true
+          ],
+          [
+            "refund",
+            true,
+            0.866,
+            true
+          ]
+        ]
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제가 서버 오류로 자꾸 실패해요",
+        "top3": [
+          [
+            "fail",
+            false,
+            0.881,
+            true
+          ],
+          [
+            "fail",
+            true,
+            0.866,
+            true
+          ],
+          [
+            "fail",
+            true,
+            0.859,
+            true
+          ]
+        ]
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제 승인 5xx 오류율이 올랐어요",
+        "top3": [
+          [
+            "fail",
+            false,
+            0.753,
+            true
+          ],
+          [
+            "fail",
+            true,
+            0.743,
+            true
+          ],
+          [
+            "fail",
+            true,
+            0.743,
+            true
+          ]
+        ]
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제 API가 500 에러를 반환합니다",
+        "top3": [
+          [
+            "fail",
+            false,
+            0.76,
+            true
+          ],
+          [
+            "fail",
+            true,
+            0.757,
+            true
+          ],
+          [
+            "fail",
+            true,
+            0.745,
+            true
+          ]
+        ]
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "주문 결제가 계속 실패하는 장애",
+        "top3": [
+          [
+            "fail",
+            false,
+            0.795,
+            true
+          ],
+          [
+            "fail",
+            true,
+            0.782,
+            true
+          ],
+          [
+            "fail",
+            true,
+            0.78,
+            true
+          ]
+        ]
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 응답이 너무 느려요",
+        "top3": [
+          [
+            "slow",
+            false,
+            0.859,
+            true
+          ],
+          [
+            "slow",
+            true,
+            0.843,
+            true
+          ],
+          [
+            "slow",
+            true,
+            0.841,
+            true
+          ]
+        ]
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 승인 지연 p95 상승",
+        "top3": [
+          [
+            "slow",
+            false,
+            0.758,
+            true
+          ],
+          [
+            "slow",
+            true,
+            0.75,
+            true
+          ],
+          [
+            "slow",
+            true,
+            0.744,
+            true
+          ]
+        ]
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 화면이 오래 걸리고 타임아웃이 나요",
+        "top3": [
+          [
+            "slow",
+            true,
+            0.811,
+            true
+          ],
+          [
+            "slow",
+            true,
+            0.789,
+            true
+          ],
+          [
+            "slow",
+            false,
+            0.789,
+            true
+          ]
+        ]
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 API 응답 시간이 길어졌어요",
+        "top3": [
+          [
+            "slow",
+            true,
+            0.852,
+            true
+          ],
+          [
+            "slow",
+            false,
+            0.837,
+            true
+          ],
+          [
+            "slow",
+            true,
+            0.836,
+            true
+          ]
+        ]
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "같은 고객이 환불을 반복해요",
+        "top3": [
+          [
+            "refund",
+            true,
+            0.885,
+            true
+          ],
+          [
+            "refund",
+            false,
+            0.878,
+            true
+          ],
+          [
+            "refund",
+            true,
+            0.866,
+            true
+          ]
+        ]
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "환불 남용 의심 건이 나왔어요",
+        "top3": [
+          [
+            "refund",
+            true,
+            0.794,
+            true
+          ],
+          [
+            "refund",
+            true,
+            0.79,
+            true
+          ],
+          [
+            "refund",
+            false,
+            0.785,
+            true
+          ]
+        ]
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "주문하고 바로 전부 환불하는 이상 거래",
+        "top3": [
+          [
+            "refund",
+            true,
+            0.786,
+            true
+          ],
+          [
+            "refund",
+            false,
+            0.76,
+            true
+          ],
+          [
+            "refund",
+            true,
+            0.755,
+            true
+          ]
+        ]
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "재무 사후 감사에서 이상 환불이 감지됐어요",
+        "top3": [
+          [
+            "refund",
+            false,
+            0.732,
+            true
+          ],
+          [
+            "refund",
+            true,
+            0.719,
+            true
+          ],
+          [
+            "refund",
+            true,
+            0.717,
+            true
+          ]
+        ]
+      },
+      {
+        "truth": null,
+        "source": "무관",
+        "query": "회의실 예약 화면 색상",
+        "top3": []
+      },
+      {
+        "truth": null,
+        "source": "무관",
+        "query": "신입 사원 교육 일정",
+        "top3": []
+      },
+      {
+        "truth": null,
+        "source": "무관",
+        "query": "사무실 에어컨 온도 조절",
+        "top3": []
+      },
+      {
+        "truth": null,
+        "source": "무관",
+        "query": "점심 메뉴 추천",
+        "top3": []
+      }
+    ],
+    "S2": [
+      {
+        "truth": "fail",
+        "source": "총괄",
+        "query": "결제가 서버 오류로 자꾸 실패해요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "slow",
+        "source": "총괄",
+        "query": "결제가 응답이 느려졌어요",
+        "shown": [
+          [
+            "fail",
+            0.727,
+            false
+          ],
+          [
+            "fail",
+            0.725,
+            false
+          ],
+          [
+            "fail",
+            0.72,
+            false
+          ]
+        ],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "refund",
+        "source": "총괄",
+        "query": "같은 고객이 환불을 반복해요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제가 서버 오류로 자꾸 실패해요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제 승인 5xx 오류율이 올랐어요",
+        "shown": [
+          [
+            "slow",
+            0.718,
+            false
+          ],
+          [
+            "slow",
+            0.715,
+            false
+          ],
+          [
+            "slow",
+            0.71,
+            false
+          ]
+        ],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "결제 API가 500 에러를 반환합니다",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "fail",
+        "source": "사람말",
+        "query": "주문 결제가 계속 실패하는 장애",
+        "shown": [
+          [
+            "slow",
+            0.722,
+            false
+          ],
+          [
+            "slow",
+            0.715,
+            false
+          ],
+          [
+            "slow",
+            0.71,
+            false
+          ]
+        ],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 응답이 너무 느려요",
+        "shown": [
+          [
+            "fail",
+            0.715,
+            false
+          ]
+        ],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 승인 지연 p95 상승",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 화면이 오래 걸리고 타임아웃이 나요",
+        "shown": [
+          [
+            "fail",
+            0.713,
+            false
+          ],
+          [
+            "fail",
+            0.713,
+            false
+          ],
+          [
+            "fail",
+            0.711,
+            false
+          ]
+        ],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "slow",
+        "source": "사람말",
+        "query": "결제 API 응답 시간이 길어졌어요",
+        "shown": [
+          [
+            "fail",
+            0.72,
+            false
+          ],
+          [
+            "fail",
+            0.715,
+            false
+          ]
+        ],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "같은 고객이 환불을 반복해요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "환불 남용 의심 건이 나왔어요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "주문하고 바로 전부 환불하는 이상 거래",
+        "shown": [],
+        "recommendation": "no_evidence"
+      },
+      {
+        "truth": "refund",
+        "source": "사람말",
+        "query": "재무 사후 감사에서 이상 환불이 감지됐어요",
+        "shown": [],
+        "recommendation": "no_evidence"
+      }
+    ]
+  }
+}

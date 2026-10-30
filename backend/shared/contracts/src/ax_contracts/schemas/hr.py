@@ -503,6 +503,8 @@ class FindSimilarCasesInput(AxModel):
     query: str = Field(min_length=1)
     area: str | None = None
     only_resolved: bool = False  # true면 해결 내용이 기록된 카드만
+    # 현재 이벤트의 유형. 주면 카드의 유형과 견주어 `same_type`을 채우고 같은 유형을 앞에 둔다
+    event_type: str | None = None
     limit: int = Field(default=3, ge=1, le=10)
 
 
@@ -513,6 +515,8 @@ class SimilarCase(AxModel):
     similarity: float = Field(ge=0.0, le=1.0)  # 검색 점수 그대로
     resolved: bool
     resolution: CaseResolution | None = None
+    event_type: str | None = None  # 이 카드의 이벤트 유형(없으면 모름)
+    same_type: bool | None = None  # 질의 유형과 같은지. 어느 쪽이든 유형을 모르면 None
     created_at: UtcDatetime
 
 
