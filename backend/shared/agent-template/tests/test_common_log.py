@@ -37,9 +37,67 @@ def test_receiving_a_request_logs_received_and_sent(store, app, request_body) ->
         assert (record.source, record.skill, record.grade) == ("echo_agent", "echo", "read")
         assert record.requester == "orchestrator"  # 본문의 requester가 아니라 토큰에서
         assert record.context_id == "ctx_req_test" and record.tenant_id == "shop-demo"
-    assert received.payload == {"skill": "echo", "path": []}
+    request_id = received.payload["request_id"]
+    assert received.payload == {"skill": "echo", "path": [], "request_id": request_id}
     assert sent.task_status == "completed"
-    assert sent.payload == {"skill": "echo", "status": "completed", "outcome": None}
+    duration = sent.payload["duration_ms"]
+    assert sent.payload == {
+        "skill": "echo",
+        "status": "completed",
+        "outcome": None,
+        "request_id": request_id,
+        "duration_ms": duration,
+    }
+    # 기존 필드 순서는 그대로, 새 필드는 끝에
+    assert list(received.payload) == ["skill", "path", "request_id"]
+    assert list(sent.payload) == ["skill", "status", "outcome", "request_id", "duration_ms"]
+
+
+def test_one_request_shares_a_request_id_and_records_duration(store, app, request_body) -> None:
+    client = TestClient(app)
+    client.post("/a2a", json=request_body())
+    client.post("/a2a", json=request_body())
+    records = _all(store, context_ids=["ctx_req_test"])
+    received = [r for r in records if r.kind == "request_received"]
+    sent = [r for r in records if r.kind == "result_sent"]
+    assert len(received) == len(sent) == 2
+    ids = [r.payload["request_id"] for r in received]
+    assert ids == [r.payload["request_id"] for r in sent]  # 같은 요청의 두 기록은 같은 id
+    assert len(set(ids)) == 2  # 요청마다 다른 id
+    assert all(len(i) == 32 and int(i, 16) >= 0 for i in ids)  # uuid4 hex
+    for r in sent:
+        assert type(r.payload["duration_ms"]) is int and r.payload["duration_ms"] >= 0
+    assert all("duration_ms" not in r.payload for r in received)
+
+
+def test_duration_covers_the_handler_time(store, card, request_body) -> None:
+    import asyncio
+
+    from ax_agent_template.server import create_agent_app
+    from ax_contracts.schemas import AgentResult, TaskStatus
+
+    async def slow(request: AgentRequest) -> AgentResult:
+        await asyncio.sleep(0.05)
+        return AgentResult(meta=request.meta, status=TaskStatus.COMPLETED, output={})
+
+    app = create_agent_app(card, {"echo": slow, "boom": slow, "broken_output": slow})
+    TestClient(app).post("/a2a", json=request_body())
+    sent = [r for r in _all(store) if r.kind == "result_sent"][0]
+    # 50ms를 쉬었다. Windows 시계 해상도(약 15.6ms)만큼은 덜 잴 수 있다
+    assert sent.payload["duration_ms"] >= 30
+
+
+def test_failed_and_rejected_requests_record_duration_too(store, app, request_body) -> None:
+    client = TestClient(app)
+    client.post("/a2a", json=request_body(skill="boom"))  # 핸들러 오류 → failed
+    client.post("/a2a", json=request_body(token="plain-token"))  # 토큰 거부 → rejected
+    records = _all(store)
+    sent = [r for r in records if r.kind == "result_sent"]
+    assert [r.task_status for r in sent] == ["failed", "rejected"]
+    received_ids = [r.payload["request_id"] for r in records if r.kind == "request_received"]
+    for r in sent:
+        assert type(r.payload["duration_ms"]) is int and r.payload["duration_ms"] >= 0
+    assert [r.payload["request_id"] for r in sent] == received_ids
 
 
 def test_payload_never_contains_request_input_or_untrusted_text(store, app, request_body) -> None:
