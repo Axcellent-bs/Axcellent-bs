@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -415,3 +416,22 @@ def test_finished_conflict_does_not_ask(service: PlanningService, adapter) -> No
     with TestClient(app) as c:
         th = _post(c, message="메인 배너 문구를 '신간 배너'로 바꿔 줘").json()["data"]
         assert th["status"] == "started"
+
+
+def test_long_wait_is_noticed_once(service: PlanningService, adapter) -> None:
+    """앞 요청을 30분 넘게 기다리면 대화에 한 번 알리고 계속 기다린다."""
+    target = next(r for r in service.state.requests if r.state not in ("완료", "기각", "중복 연결"))
+    service._relater = ClashRelater(target.id)
+    dev_chat.set_llm(ChatLLM([START, ChatTurn(reply="", action="start")]))
+    with TestClient(app) as c:
+        th = _post(c, message="메인 배너 문구를 '신간 배너'로 바꿔 줘").json()["data"]
+        th = _post(c, thread_id=th["id"], message="진행해").json()["data"]
+    assert th["status"] == "waiting"
+    assert asyncio.run(dev_chat.notice_long_waits(service)) == 0  # 아직 30분 안 됨
+
+    base = service.clock()
+    service.clock = lambda: base + timedelta(minutes=dev_chat.WAIT_NOTICE_MINUTES + 1)
+    assert asyncio.run(dev_chat.notice_long_waits(service)) == 1
+    assert asyncio.run(dev_chat.notice_long_waits(service)) == 0  # 한 번만
+    got = service.chat_of(th["id"])
+    assert got.status == "waiting" and "지금 진행" in got.messages[-1].text
