@@ -575,7 +575,7 @@ def summarize(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> dic
         if i["want"]["damage_amount"]
     ]
     explanations = [c["anomaly"] for c in cases if c["anomaly"]["llm_used"]] + impacts
-    # 표기만 바꿔 적는 가짜 LLM 케이스의 설명 (#133). 지금 검증은 바꾼 표기도 없는 숫자로 본다
+    # 표기만 바꿔 적는 가짜 LLM 케이스의 설명 (#133). 검증이 같은 값의 표기로 통과시켜야 한다
     notation = [
         e
         for c in cases

@@ -169,7 +169,7 @@ ax-contracts, ax-agent-template
 
 - **승인·보류를 정하지 않는다.** `fraud_score`는 점수와 근거만 준다. 승인·보류는 재무·정산이 정한다(`handlers.py`, `metrics/fraud.py`)
 - **상태를 바꾸지 않는다.** skill은 모두 `grade: read`이고 `execute()`(안전 관문)를 부르지 않는다. 데이터를 쓰는 곳은 없다. 이 패키지가 내보내는 것은 감시의 `metric.anomaly` 이벤트뿐이다(공통 로그 기록은 agent-template이 한다)
-- **숫자를 LLM이 만들지 않는다.** 설명 문장에 계산에 없는 숫자가 있으면 버리고 템플릿으로 대체한다(`explain._bad_numbers`, `number_invalid`). 원인 후보도 근거 사실이 없거나 사실에 없는 숫자·시각을 쓰면 버린다(`skills/root_cause.validate`). LLM이 실패하면 템플릿·시간 순서 규칙으로 대체한다
+- **숫자를 LLM이 만들지 않는다.** 설명 문장에 계산에 없는 숫자가 있으면 버리고 템플릿으로 대체한다(`explain._bad_numbers`, `number_invalid`). 같은 값의 다른 표기는 통과한다: 비율→퍼센트(0.42 → 42%), 자릿수만 줄인 정확한 반올림(2.747 → 2.75, 2.7, 3), 천 단위 쉼표, 원·건·명 단위. "5분"·"5xx"처럼 단위·이름에 붙은 숫자는 facts의 구간 길이·코드에 그대로 있을 때만. facts 값끼리 계산한 합·차·비율은 막는다. 원인 후보도 근거 사실이 없거나 사실에 없는 숫자·시각을 쓰면 버린다(`skills/root_cause.validate`). LLM이 실패하면 템플릿·시간 순서 규칙으로 대체한다
 - **원인을 판정하지 않는다.** `anomaly_detection`은 이상 여부만, `root_cause_hypotheses`는 후보만 준다. 확신도 high 후보가 없으면 "확인 필요"다
 - **다른 부서 데이터를 직접 읽지 않는다.** 다른 `domains` 코드를 import하지 않고 다른 부서 저장소를 열지 않는다. 다른 부서 정보는 A2A(`call_agent`)로만 묻는다(`clients/fact_sources.py`, `clients/hr_cards.py`, `clients/planning_client.py`). 쇼핑몰 데이터는 shop-api 읽기 전용 API로만 읽는다
 - **읽지 못한 값을 0으로 채우지 않는다.** shop-api 응답 없음·401·403·5xx·형식 오류면 `failed`·`unavailable`과 "확인할 수 없음"으로 답한다(`ShopUnavailable`). 꺼진 서비스의 사실은 "확인할 수 없음(서비스 꺼짐)"으로 남긴다. 확인할 수 없는 사기 규칙은 0점이 아니라 점수에서 뺀다
