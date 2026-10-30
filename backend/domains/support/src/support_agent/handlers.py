@@ -31,6 +31,7 @@ from ax_contracts.schemas import (
     TaskStatus,
 )
 from support_agent import (
+    abuse_soften,
     buyer_ids,
     compensation,
     drafting,
@@ -174,6 +175,25 @@ ABUSE_TITLES = {
 }
 
 
+async def _refine_abuse(conversation: Conversation, analysis: Analysis) -> Conversation:
+    """2단계: 욕설로 찾았거나 화난 메시지는 LLM이 순화문을 만든다. 실패해도 접수는 그대로다."""
+    last = next((m for m in reversed(conversation.messages) if m.role == "customer"), None)
+    if last is None or not abuse_soften.enabled():
+        return conversation
+    sentiment = analysis.classification.sentiment if analysis.classification else None
+    if not abuse_soften.wanted(last.abuse_level, sentiment):
+        return conversation
+    result = await abuse_soften.soften(last.text, last.abuse_level)
+    if result is None:
+        return conversation
+    softened, level = result
+    kinds = list(last.abuse_kinds)
+    if last.abuse_level == "none":
+        kinds.append("llm")
+    updated = STORE.apply_softening(conversation.id, last.id, softened, level, kinds)
+    return updated or conversation
+
+
 def _log_abuse(conversation: Conversation) -> None:
     """방금 들어온 고객 메시지에 욕설·모욕·위협이 있으면 내력에 남긴다 (낱말·원문은 담지 않는다)."""
     last = next((m for m in reversed(conversation.messages) if m.role == "customer"), None)
@@ -184,7 +204,12 @@ def _log_abuse(conversation: Conversation) -> None:
         kind="abusive_message",
         actor="system",
         title=ABUSE_TITLES[last.abuse_level],
-        data={"level": last.abuse_level, "kinds": last.abuse_kinds, "message_id": last.id},
+        data={
+            "level": last.abuse_level,
+            "kinds": last.abuse_kinds,
+            "message_id": last.id,
+            "softened": last.softened_text is not None,
+        },
     )
 
 
@@ -370,6 +395,7 @@ async def create_inquiry(request: AgentRequest) -> AgentResult:
         )
         privacy_audit.record_message(STORE, conversation, fallback)
         await events.emit_inquiry_received(request, conversation)
+        conversation = await _refine_abuse(conversation, analysis)
         _log_abuse(conversation)
         log_activity(conversation.id, **_analysis_entry(analysis, fallback=fallback, first=True))
         return _view(conversation), fallback
@@ -401,6 +427,7 @@ async def add_customer_message(request: AgentRequest) -> AgentResult:
         updated = STORE.add_customer_message(parsed.inquiry_id, message, analysis)
         privacy_audit.record_message(STORE, updated, fallback)
         await events.emit_inquiry_received(request, updated)
+        updated = await _refine_abuse(updated, analysis)
         _log_abuse(updated)
         log_activity(parsed.inquiry_id, **_analysis_entry(analysis, fallback=fallback, first=False))
         return _view(updated), fallback

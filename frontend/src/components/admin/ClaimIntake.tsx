@@ -22,7 +22,8 @@ function CustomerMessage({ conv }: { conv: Conversation }) {
   const last = [...conv.messages].reverse().find((m) => m.role === "customer");
   if (!last) return null;
   const level = last.abuse_level ?? "none";
-  const masked = level !== "none" && last.display_text != null;
+  const safe = last.softened_text ?? last.display_text ?? null;
+  const masked = level !== "none" && safe != null;
   return (
     <div className="space-y-1 rounded-lg bg-surface-2 p-2" role="note" aria-label="고객 메시지">
       <div className="flex items-center gap-2">
@@ -30,11 +31,12 @@ function CustomerMessage({ conv }: { conv: Conversation }) {
         {masked && (
           <>
             <span className={`rounded-full px-2 py-0.5 font-medium ${level === "threat" ? "bg-red-50 text-red-800" : "bg-amber-50 text-amber-800"}`}>{ABUSE_LABEL[level]}</span>
+            {last.softened_text != null && <span className="text-ink-500">AI가 순화함</span>}
             <button type="button" className="ml-auto text-ink-500 underline" onClick={() => setShowOriginal((v) => !v)}>{showOriginal ? "가려서 보기" : "원문 보기"}</button>
           </>
         )}
       </div>
-      <p className="whitespace-pre-wrap text-ink-700">{masked && !showOriginal ? last.display_text : last.text}</p>
+      <p className="whitespace-pre-wrap text-ink-700">{masked && !showOriginal ? safe : last.text}</p>
     </div>
   );
 }

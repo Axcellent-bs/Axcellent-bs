@@ -79,7 +79,10 @@ class Message(AxModel):
     text: str  # 접수된 원문 (증거라 고치지 않는다)
     display_text: str | None = None  # 욕설·모욕·위협 표현을 가린 글. 가릴 것이 없으면 None
     abuse_level: Literal["none", "profanity", "insult", "threat"] = "none"
-    abuse_kinds: list[str] = Field(default_factory=list)
+    abuse_kinds: list[str] = Field(default_factory=list)  # profanity·insult·threat, llm=모델이 찾음
+    softened_text: str | None = (
+        None  # LLM이 요청만 남겨 정중하게 옮긴 글 (2단계, 코드가 검사한 것만)
+    )
     analysis: Analysis | None = None
     created_at: str
 
@@ -100,6 +103,7 @@ class ConversationListItem(AxModel):
     id: int
     customer_name: str
     subject: str
+    subject_display: str | None = None  # 제목에 욕설·모욕·위협이 있으면 가린 제목
     category: str | None = None
     sentiment: str | None = None
     urgency: Urgency | None = None

@@ -6,8 +6,9 @@ const ABUSE_LABEL = { profanity: "비속어 가림", insult: "모욕 표현 가�
 function Bubble({ m }: { m: Message }) {
   const customer = m.role === "customer";
   const [showOriginal, setShowOriginal] = useState(false);
-  const masked = customer && m.display_text != null && m.abuse_level !== undefined && m.abuse_level !== "none";
-  const body = masked && !showOriginal ? m.display_text : m.text;
+  const safe = m.softened_text ?? m.display_text ?? null; // AI 순화문이 있으면 그것, 없으면 규칙으로 가린 글
+  const masked = customer && safe != null && m.abuse_level !== undefined && m.abuse_level !== "none";
+  const body = masked && !showOriginal ? safe : m.text;
   const time = new Date(m.created_at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
   return (
     <div className={`flex ${customer ? "justify-start" : "justify-end"}`}>
@@ -18,6 +19,7 @@ function Bubble({ m }: { m: Message }) {
             <span className={`rounded-full px-2 py-0.5 font-medium ${m.abuse_level === "threat" ? "bg-red-50 text-red-800" : "bg-amber-50 text-amber-800"}`}>
               {ABUSE_LABEL[m.abuse_level as keyof typeof ABUSE_LABEL]}
             </span>
+            {m.softened_text != null && <span className="text-ink-500">AI가 순화함</span>}
             <button type="button" onClick={() => setShowOriginal((v) => !v)} className="text-ink-500 underline">
               {showOriginal ? "가려서 보기" : "원문 보기"}
             </button>

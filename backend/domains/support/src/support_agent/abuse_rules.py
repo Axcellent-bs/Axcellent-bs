@@ -78,6 +78,14 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("profanity", _pattern(PROFANITY)),
 )
 _EXCEPTION = _pattern(EXCEPTIONS)
+# 글자 사이에 숫자·기호를 끼운 표기("시1발", "씨.발"). 띄어쓰기는 "김씨 발송" 같은 낱말과 섞여 뺀다
+_GAP = r"[^\s가-힣A-Za-z]{1,2}"
+_EVASIVE = re.compile(
+    "|".join(
+        _GAP.join(re.escape(c) for c in word)
+        for word in ("씨발", "시발", "병신", "ㅅㅂ", "ㅂㅅ", "지랄", "존나")
+    )
+)
 
 
 def assess(text: str) -> tuple[str, AbuseLevel, list[str]]:
@@ -91,6 +99,11 @@ def assess(text: str) -> tuple[str, AbuseLevel, list[str]]:
     shown = _EXCEPTION.sub(_hold, text)
     level: AbuseLevel = "none"
     kinds: list[str] = []
+    shown = _EVASIVE.sub(LABELS["profanity"], shown) if _EVASIVE.search(shown) else shown
+    if LABELS["profanity"] in shown and "profanity" not in kinds:
+        kinds.append("profanity")
+        if LEVEL_ORDER["profanity"] > LEVEL_ORDER[level]:
+            level = "profanity"
     for kind, pattern in _PATTERNS:
         if pattern.search(shown):
             kinds.append(kind)
