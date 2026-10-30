@@ -256,7 +256,7 @@ async def test_record_case_carries_facts_not_fixed_text(harness) -> None:
     harness.fakes.script("marketing", "publish_notice", "fail", "fail", "fail")
     await run(harness)
     req = next(r for _, r in harness.fakes.calls if r.skill == "record_case")
-    assert "publish_notice" in req.input["decision_reason"]
+    assert "점검 공지 게시" in req.input["decision_reason"]  # 코드 이름이 아니라 한국어 단계 이름
     assert req.input["alternatives_considered"]
 
 

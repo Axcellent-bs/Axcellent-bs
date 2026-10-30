@@ -119,7 +119,8 @@ async def test_missing_values_are_not_invented(svc) -> None:
         _req("record_resolution", {"context_id": CONTEXT, "outcome": "unresolved"}),
     )
     card = await svc.memory.get_card(card_id)
-    assert card.body.count("확인할 수 없음") >= 3  # 원인, 조치, 소요 시간
+    assert card.body.count("확인할 수 없음") >= 2  # 원인, 조치
+    assert "소요 시간" not in card.body  # 시간은 타임라인이 맡고 없다고 쓰지 않는다
     assert "resolved" not in card.tags
     assert card.extra["resolution"]["root_cause"] is None
 

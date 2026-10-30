@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
@@ -65,6 +66,21 @@ class Hold:
         self.approved = approved
         self.reason = reason
         self.event.set()
+
+
+def _plain(label: str) -> str:
+    """단계 이름 끝의 담당 표시 "(infra)"를 뺀다."""
+    return re.sub(r"\s*\([^)]*\)$", "", label)
+
+
+STATUS_KO = {
+    "completed": "완료",
+    "failed": "실패",
+    "skipped": "건너뜀",
+    "rejected_by_human": "보류 후 거절",
+    "transfer_queued": "이관 큐로 넘김",
+    "waiting_human": "사람 처리 대기",
+}
 
 
 class HandoffWait:
@@ -542,13 +558,16 @@ class Engine:
             "summary": inc.title + (f" · {note}" if isinstance(note, str) and note else ""),
             "decision_reason": (
                 f"{PLAN_KO.get(inc.kind, inc.kind)} 실행 결과 — "
-                f"완료: {', '.join(r.skill for r in done) or '없음'}; "
-                f"미완료: {', '.join(r.skill for r in problems) or '없음'}"
+                f"완료: {', '.join(_plain(r.label) for r in done) or '없음'}; "
+                f"미완료: {', '.join(_plain(r.label) for r in problems) or '없음'}"
             ),
             "alternatives_considered": [
-                *(f"{r.skill}: {r.status} ({r.note})" for r in problems),
                 *(
-                    f"{r.skill}: {r.dept}로 이관 ({r.reason_code})"
+                    f"{_plain(r.label)}: {STATUS_KO.get(r.status, r.status)} ({r.note})"
+                    for r in problems
+                ),
+                *(
+                    f"{_plain(r.label)}: {r.dept}로 이관 ({r.reason_code})"
                     for r in done
                     if r.transferred_to
                 ),

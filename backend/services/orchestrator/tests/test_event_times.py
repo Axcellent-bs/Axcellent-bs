@@ -125,3 +125,33 @@ def test_a_same_type_past_case_becomes_the_hint_and_the_repeat_marker() -> None:
     assert prior_case_of(inc) == "card_old"
     hint = past_hint(inc)
     assert hint and "85%" in hint and "대행사 지연" in hint and "참고용" in hint
+
+
+@pytest.mark.asyncio
+async def test_latency_events_do_not_ask_the_data_ai_for_payment_failure_causes(harness) -> None:
+    engine = await harness.start()
+    inc = new_incident()
+    inc.signal = {"metric_code": "p95_latency_ms"}
+    await engine.run(inc, scenario_a())
+    assert inc.steps["root_cause"].status == "skipped"
+    assert "응답 지연" in inc.steps["root_cause"].note
+    assert "root_cause_hypotheses" not in [r.skill for _, r in harness.fakes.calls]
+
+
+@pytest.mark.asyncio
+async def test_failure_events_still_get_cause_candidates(harness) -> None:
+    engine = await harness.start()
+    inc = new_incident()
+    inc.signal = {"metric_code": "error_rate_5xx"}
+    await engine.run(inc, scenario_a())
+    assert inc.steps["root_cause"].status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_the_decision_card_reason_uses_korean_step_names(harness) -> None:
+    engine = await harness.start()
+    inc = new_incident()
+    await engine.run(inc, scenario_a())
+    record = next(r.input for _, r in harness.fakes.calls if r.skill == "record_case")
+    assert "diagnose_incident" not in record["decision_reason"]
+    assert "원인 진단" in record["decision_reason"] and "(infra)" not in record["decision_reason"]

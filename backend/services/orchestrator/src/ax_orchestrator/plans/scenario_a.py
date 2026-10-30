@@ -163,6 +163,22 @@ def _root_cause(inc: Incident) -> dict[str, Any]:
     }
 
 
+# 데이터분석 AI가 원인 후보를 낼 수 있는 업무 지표는 결제 실패율 등뿐이다(응답 지연은 없다)
+UNSUPPORTED_BY_DATA = {"p95_latency_ms": "응답 지연"}
+
+
+def _root_cause_gate(inc: Incident) -> tuple[str, str, str] | None:
+    """데이터분석 AI가 다루지 못하는 지표면 묻지 않는다(묻으면 결제 실패율 후보가 온다)."""
+    name = UNSUPPORTED_BY_DATA.get(str(inc.signal.get("metric_code")))
+    if name is None:
+        return None
+    return (
+        "skipped",
+        "metric_not_supported",
+        f"데이터분석 AI가 {name} 지표는 아직 분석하지 못해 원인 후보를 받지 않음",
+    )
+
+
 def _cause_check_gate(inc: Incident) -> tuple[str, str, str] | None:
     """원인 후보에 확신도 high가 있으면 원인 확인 업무를 넘기지 않는다."""
     found = _out(inc, "root_cause")
@@ -248,6 +264,7 @@ def scenario_a() -> Plan:
                 "원인 후보 추정 (data)",
                 after=("impact",),
                 build=_root_cause,
+                gate=_root_cause_gate,
                 required=False,
             ),
             Step(
