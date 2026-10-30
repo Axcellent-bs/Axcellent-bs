@@ -73,9 +73,39 @@ class MetricVerdict(AxModel):
     status: Literal["normal", "anomaly", "unknown"] | None = None
     direction: Literal["up", "down"] | None = None  # 이상이면 벗어난 방향
     note: str | None = None  # 판정 근거 한 줄 또는 확인할 수 없는 이유
+    # 회사 지표 카탈로그의 지표 id·한국어 이름 (캣북스는 metric과 같은 id). 예전 응답은 None
+    metric_id: str | None = None
+    metric_label: str | None = None
+
+
+class MetricIdVerdict(AxModel):
+    """회사 지표 카탈로그 id로 쓴 판정 (캣북스 4개 밖의 지표도 실을 수 있다).
+
+    칸의 뜻은 `MetricVerdict`와 같고, 지표를 `BusinessMetric` 대신 `metric_id`(카탈로그
+    `CatalogMetric.id`)로 적는다.
+    """
+
+    metric_id: str
+    metric_label: str | None = None  # 카탈로그 한국어 이름
+    observed: float
+    baseline: float
+    ratio: float | None = None
+    is_anomaly: bool
+    severity: Literal["low", "mid", "high"] | None = None
+    status: Literal["normal", "anomaly", "unknown"] | None = None
+    direction: Literal["up", "down"] | None = None
+    note: str | None = None
 
 
 class AnomalyDetectionOutput(AxModel):
+    """이상 탐지 결과.
+
+    지표는 두 목록으로 싣는다. `verdicts`·`unknown_metrics`는 캣북스 지표 4개(`BusinessMetric`)만
+    담는 예전 목록이고, `metric_verdicts`·`unknown_metric_ids`는 회사 카탈로그 id로 모든 지표를
+    담는다. 캣북스 지표는 두 목록에 다 들어가고(예전 소비자 호환), 다른 회사 지표는 새 목록에만
+    들어간다.
+    """
+
     verdicts: list[MetricVerdict] = Field(default_factory=list)
     any_anomaly: bool
     summary: str
@@ -83,6 +113,8 @@ class AnomalyDetectionOutput(AxModel):
     # 모든 지표를 판정할 수 없으면 unknown
     status: Literal["normal", "anomaly", "unknown"] | None = None
     unknown_metrics: list[BusinessMetric] = Field(default_factory=list)
+    metric_verdicts: list[MetricIdVerdict] = Field(default_factory=list)  # 모든 지표 (카탈로그 id)
+    unknown_metric_ids: list[str] = Field(default_factory=list)  # 판정할 수 없었던 지표 id
 
 
 # ---------- fraud_score ----------

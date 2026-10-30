@@ -22,6 +22,7 @@ from ax_contracts.schemas import (
     KpiSummaryOutput,
     LinkIncidentInput,
     LinkIncidentOutput,
+    MetricIdVerdict,
     MetricVerdict,
     RelatedPr,
     RollbackDeploymentParams,
@@ -221,6 +222,59 @@ def test_data_anomaly_detection() -> None:
         MetricVerdict.model_validate({**verdict, "metric": "cpu"})
     with pytest.raises(ValidationError):
         MetricVerdict.model_validate({**verdict, "severity": "critical"})
+
+
+def test_data_anomaly_detection_metric_ids() -> None:
+    """회사 카탈로그 id로 지표를 싣는 칸 (추가만, 예전 응답은 그대로 읽힌다)."""
+    old = {
+        "metric": "payment_fail_rate",
+        "observed": 0.3,
+        "baseline": 0.02,
+        "is_anomaly": True,
+    }
+    # 예전 응답: 새 칸은 비어 있다
+    parsed = AnomalyDetectionOutput.model_validate(
+        {"verdicts": [old], "any_anomaly": True, "summary": "이상"}
+    )
+    assert parsed.verdicts[0].metric_id is None and parsed.verdicts[0].metric_label is None
+    assert parsed.metric_verdicts == [] and parsed.unknown_metric_ids == []
+
+    # 캣북스 지표: 예전 칸과 새 칸 둘 다
+    both = MetricVerdict.model_validate(
+        {**old, "metric_id": "payment_fail_rate", "metric_label": "결제 실패율"}
+    )
+    assert (both.metric, both.metric_id, both.metric_label) == (
+        "payment_fail_rate",
+        "payment_fail_rate",
+        "결제 실패율",
+    )
+
+    # 다른 회사 지표: 예전 목록에는 못 싣고(지표 이름이 캣북스 4개뿐), 새 목록에만 싣는다
+    other = {
+        "metric_id": "shipment_delay_count",
+        "metric_label": "출고 지연 건수",
+        "observed": 12,
+        "baseline": 3,
+        "is_anomaly": True,
+        "status": "anomaly",
+        "direction": "up",
+    }
+    with pytest.raises(ValidationError):
+        MetricVerdict.model_validate({**other, "metric": "shipment_delay_count"})
+    out = AnomalyDetectionOutput.model_validate(
+        {
+            "metric_verdicts": [other, {**other, "metric_id": "pick_count", "is_anomaly": False}],
+            "unknown_metric_ids": ["return_count"],
+            "any_anomaly": True,
+            "summary": "이상",
+        }
+    )
+    assert out.verdicts == [] and out.unknown_metrics == []
+    assert [v.metric_id for v in out.metric_verdicts] == ["shipment_delay_count", "pick_count"]
+    assert isinstance(out.metric_verdicts[0], MetricIdVerdict)
+    assert out.unknown_metric_ids == ["return_count"]
+    with pytest.raises(ValidationError):  # metric_id는 필수
+        MetricIdVerdict.model_validate({k: v for k, v in other.items() if k != "metric_id"})
 
 
 def test_data_fraud_score() -> None:
