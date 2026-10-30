@@ -167,6 +167,8 @@ token_of() { echo "$AX_AGENT_TOKENS" | tr ',' '\n' | sed -n "s/^$1=//p"; }
   echo "VITE_SAFETY_HUMAN_TOKEN=$HUMAN_TOKEN"
   echo "VITE_SHOP_ADMIN_TOKEN=$(token_of admin)"
   echo "VITE_DATA_A2A_TOKEN=$(token_of dashboard-api)"
+  # 읽기 전용 열람 토큰(.env의 SHOP_VIEWER_TOKEN)이 있으면 화면에도 넘긴다. 쓰기는 못 하는 값이다
+  [ -z "${SHOP_VIEWER_TOKEN:-}" ] || echo "VITE_SHOP_VIEWER_TOKEN=$SHOP_VIEWER_TOKEN"
 } > "$DATA/web.env"
 
 stop_all
