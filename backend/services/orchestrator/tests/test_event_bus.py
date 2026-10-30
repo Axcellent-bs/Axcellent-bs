@@ -1,4 +1,4 @@
-"""총괄의 이벤트 버스 구독 (ORC-02): 버스에 올라온 이벤트로 사건이 열린다."""
+"""총괄의 이벤트 버스 구독 (ORC-02): 버스에 올라온 이벤트로 이벤트가 열린다."""
 
 from datetime import UTC, datetime
 
@@ -57,7 +57,7 @@ async def test_low_severity_is_only_noted_and_duplicates_are_ignored(bus) -> Non
     await events.publish(metric_anomaly("evt_bus_2", "low"))
     await events.publish(metric_anomaly("evt_bus_2", "low"))  # 같은 event_id는 한 번만 쌓인다
     assert await events.poll_once() == 1
-    assert state.manager.incidents == {}  # 심각도가 낮으면 사건을 열지 않는다
+    assert state.manager.incidents == {}  # 심각도가 낮으면 이벤트를 열지 않는다
 
 
 @pytest.mark.asyncio

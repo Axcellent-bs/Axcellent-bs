@@ -24,7 +24,6 @@
    ]
   }
  ],
- "risky_sellers": [],
  "orders": [
   {
    "order_id": "ord_2001",
@@ -6794,14 +6793,6 @@
     "metric": "amount",
     "op": ">=",
     "value": 100000
-   },
-   {
-    "key": "seller_risk",
-    "action": "seller_review",
-    "metric": "param",
-    "field": "risk_score",
-    "op": ">=",
-    "value": 70
    }
   ]
  },

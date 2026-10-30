@@ -552,7 +552,9 @@ class ResolutionBody(BaseModel):
     root_cause: str | None = Field(default=None, max_length=300)
     action: str | None = Field(default=None, max_length=300)
     opened_at: datetime | None = None
+    resolved_at: datetime | None = None  # 사람이 적은 실제 해결 시각. 없으면 저장한 시각
     prior_case_id: str | None = None
+    draft_source: Literal["written_by_person", "ai_draft_kept", "ai_draft_edited"] | None = None
 
 
 class AgentMessageBody(TextBody):

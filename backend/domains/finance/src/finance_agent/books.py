@@ -39,7 +39,6 @@ class Books:
     claims: list[dict[str, Any]] | None = None
     executions: list[dict[str, Any]] | None = None
     thresholds: dict[str, Any] | None = None
-    risky_sellers: set[str] = field(default_factory=set)
     pg_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
     source: str = "seed"
     mock: bool = True
@@ -199,7 +198,6 @@ def seed_books(today: date | None = None, seed: dict[str, Any] | None = None) ->
         claims=claims,
         executions=executions,
         thresholds=seed.get("thresholds"),
-        risky_sellers=set(seed.get("risky_sellers", [])),
         pg_overrides=dict(seed.get("pg_overrides", {})),
         source="seed",
         mock=True,

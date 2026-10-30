@@ -85,7 +85,7 @@ const PART = {
 
 export default function HrPage({ part = "hr" }: { part?: HrPart }) {
   const P = PART[part];
-  const ctxParam = useSearchParams().get("ctx"); // 총괄 사건 화면의 "결정 기록에서 보기"로 들어올 때
+  const ctxParam = useSearchParams().get("ctx"); // 총괄 이벤트 화면의 "결정 기록에서 보기"로 들어올 때
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [up, setUp] = useState(true);
@@ -179,7 +179,7 @@ export default function HrPage({ part = "hr" }: { part?: HrPart }) {
 
       {part === "ops" && <>
       {/* ④ 기록 도구 */}
-      {/* 인사 AI가 실제로 남긴 사건 기록과 고른 사건의 처리 내역 */}
+      {/* 인사 AI가 실제로 남긴 이벤트 기록과 고른 이벤트의 처리 내역 */}
       <IncidentRecords initialCtx={ctxParam} />
       <Section title="확정된 결정 카드" desc="후보가 아니라 기록으로 확정된 카드입니다. 최근 순으로 최대 50장을 보여 줍니다.">
         {view.decided === null

@@ -27,7 +27,7 @@ def _body(**extra) -> dict:
         "context_id": "ctx_req_h1",
         "from_service": "someone-else",
         "to_service": "finance",
-        "skill": "settlement_hold",
+        "skill": "closing_report",
         "input": {"seller_id": "sel_1"},
         "untrusted": {"memo": "고객이 적은 글"},
         "reason": "finance 서비스가 켜져 있지 않다",
@@ -118,7 +118,7 @@ def test_completing_publishes_handoff_completed(client) -> None:
         "status": "done",
         "from_service": "inquiry",
         "to_service": "finance",
-        "skill": "settlement_hold",
+        "skill": "closing_report",
     }
     assert event.untrusted == {"result": "보류 해제함"}  # 사람이 적은 글은 사실 필드가 아니다
     assert event.idempotency_key == f"handoff.completed:{task['task_id']}"
@@ -177,7 +177,7 @@ async def test_end_to_end_a_disabled_service_reaches_a_human_and_comes_back(
             token="ignored",
             deadline=datetime.now(UTC) + timedelta(seconds=30),
         ),
-        skill="settlement_hold",
+        skill="closing_report",
         input={"seller_id": "sel_1"},
     )
     transport = httpx.ASGITransport(app=app)

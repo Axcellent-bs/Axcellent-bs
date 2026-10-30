@@ -353,35 +353,6 @@ async def test_protected_paths_fail_closed(
 
 
 @pytest.mark.asyncio
-async def test_seller_review_risk_score(gate: Gate, verifier: Any, act) -> None:
-    """판매자 승인(마켓운영): 위험 점수 70 이상이면 C, 미만이면 data가 교차검증(B)."""
-    low = await gate.execute(
-        act("seller_review", "finance", "sel-1", seller_id="sel_1", risk_score=20)
-    )
-    assert (low.grade, low.status, low.verifier) == ("B", "executed", "data")
-    assert verifier.tasks[-1].skill == "fraud_score"
-    high = await gate.execute(
-        act("seller_review", "finance", "sel-2", seller_id="sel_2", risk_score=70)
-    )
-    assert (high.grade, high.status) == ("C", "held")
-
-
-@pytest.mark.asyncio
-async def test_large_settlement_hold_goes_to_a_person(gate: Gate, verifier: Any, act) -> None:
-    """정산 보류: 100만 원 이상이거나 금액을 모르면 사람(C), 그보다 작으면 data 교차검증(B)."""
-    small = await gate.execute(
-        act("settlement_hold", "finance", "hold-1", seller_id="sel_1", hold_amount=999_999)
-    )
-    assert (small.grade, small.verifier) == ("B", "data")
-    large = await gate.execute(
-        act("settlement_hold", "finance", "hold-2", seller_id="sel_2", hold_amount=1_000_000)
-    )
-    assert (large.grade, large.status) == ("C", "held")
-    unknown = await gate.execute(act("settlement_hold", "finance", "hold-3", seller_id="sel_3"))
-    assert (unknown.grade, unknown.status) == ("C", "held")
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "action", ["create_claim", "decide_claim", "receive_return", "inspect_return"]
 )

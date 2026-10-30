@@ -66,14 +66,6 @@ value = 100000
 
 # ---- 금액이 아닌 규칙. 아래 값은 모두 제안값(담당 확인 전)
 [[rules]]
-key = "seller_risk"
-action = "seller_review"
-metric = "param"
-field = "risk_score"
-op = ">="
-value = 70
-
-[[rules]]
 key = "pr_changed_lines"
 action = "generate_pr"
 metric = "param"
@@ -382,12 +374,3 @@ field = "prior_rollbacks"
 op = ">"
 value = 0
 
-# ---- 재무 정산 보류 (태윤). 큰 금액은 사람이 확인한다. 금액은 재무가 장부의 미지급 정산금으로
-# 채우고, 못 구하면 비어서(필드 없음) 사람에게 간다. 값은 제안값
-[[rules]]
-key = "settlement_hold_large"
-action = "settlement_hold"
-metric = "param"
-field = "hold_amount"
-op = ">="
-value = 1000000

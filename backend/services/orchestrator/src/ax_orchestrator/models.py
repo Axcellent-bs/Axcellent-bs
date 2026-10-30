@@ -1,4 +1,4 @@
-"""사건·단계 상태 모델과 plan 정의 (docs/notes/orchestrator/interface.md 3·5장)."""
+"""이벤트·단계 상태 모델과 plan 정의 (docs/notes/orchestrator/interface.md 3·5장)."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from ax_orchestrator.draft import resolution_draft
 from ax_orchestrator.recommend import recommend
 
 
@@ -31,8 +32,8 @@ class Step:
     build: Callable[[Incident], dict[str, Any]] = lambda inc: {}
     serial_group: str | None = None
     required: bool = True
-    kind: str = "call"  # call | record(사건 종료 기록)
-    keep: dict[str, str] = field(default_factory=dict)  # 결과 필드 → 사건에 보관할 이름
+    kind: str = "call"  # call | record(이벤트 종료 기록)
+    keep: dict[str, str] = field(default_factory=dict)  # 결과 필드 → 이벤트에 보관할 이름
     # 호출하기 전에 "지금은 하지 않는다"를 판단한다: (상태, 사유 코드, 메모) 또는 None(그대로 호출)
     gate: Callable[[Incident], tuple[str, str, str] | None] = lambda inc: None
     # 성공한 결과를 보고 사람이 봐야 하면 이관 큐로 돌린다: (사유 코드, 메모) 또는 None
@@ -116,7 +117,9 @@ class Incident:
     summary: list[str] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
     shared: dict[str, Any] = field(default_factory=dict)  # 부서가 준 값 중 다른 부서에 넘길 것
-    # 사건을 연 이벤트의 data (plan이 입력으로 쓴다)
+    # 같은 종류의 이벤트인지 가르는 값(구성요소:지표). 모르면 None
+    event_type: str | None = None
+    # 이벤트를 연 이벤트의 data (plan이 입력으로 쓴다)
     signal: dict[str, Any] = field(default_factory=dict)
 
     @staticmethod
@@ -131,6 +134,7 @@ class Incident:
             "context_id": self.context_id,
             "kind": self.kind,
             "title": self.title,
+            "event_type": self.event_type,
             "component": self.component,
             "status": self.status,
             "opened_at": iso(self.opened_at),
@@ -141,6 +145,7 @@ class Incident:
             "metrics": self.metrics,
             "shared": self.shared,
             "recommendation": recommend(self.outputs.get("similar_cases")),
+            "resolution_draft": resolution_draft(self),
             "pending_holds": [
                 {"step_id": sid, "skill": self.steps[sid].skill, "label": self.steps[sid].label}
                 for sid, hold in self.holds.items()

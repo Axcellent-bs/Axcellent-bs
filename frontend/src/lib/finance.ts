@@ -284,7 +284,6 @@ export interface Review {
 }
 
 // ---------------------------------------------------------------- 유지되는 기능
-export interface MarketOp { skill: "seller_review" | "settlement_hold"; seller_id: string; decision?: string; status?: string; risk_score?: number | null; confirmed_score?: number | null; unknown_rules?: string[]; reason_code: string; review_id: string | null; at: string }
 export interface SelfTestCheck { name: string; ok: boolean; detail: string; level: "fail" | "warn" }
 export interface SelfTest {
   result: "pass" | "warn" | "fail";
@@ -433,7 +432,6 @@ export const finance = {
   supportCosts: () => fin<Envelope<SupportCostRecord[]>>("/api/finance/support-costs"),
 
   // 유지
-  marketOps: () => data(fin<{ data: MarketOp[] }>("/api/finance/market-ops")),
   /** 재무 AI 테스트를 지금 한 번 더 한다(서버는 10분마다 자동으로 한다). 가짜 자료로 점검해 상태를 바꾸지 않음 */
   selfTest: () => data(fin<{ data: SelfTest }>("/api/finance/self-test")),
   /** 가장 최근 테스트 결과(자동·직접) + 다음 자동 테스트 시각 */
@@ -592,7 +590,7 @@ export const purposeKo = (...codes: (string | null | undefined)[]) => {
 
 export const ACTION_KO: Record<string, string> = {
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 지급",
-  seller_review: "판매자 입점 승인", settlement_hold: "판매자 정산 멈춤", publish_notice: "공지 올리기",
+  publish_notice: "공지 올리기",
   rollback_deployment: "배포 되돌리기", restart_service: "서비스 다시 켜기", generate_pr: "코드 변경 만들기",
 };
 

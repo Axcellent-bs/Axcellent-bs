@@ -17,7 +17,7 @@ from ax_contracts.schemas import AgentRequest, RequestMeta
 ORG = """
 assignments:
   finance: {unit: 재무/정산}
-  settlement_hold: {unit: 재무/정산, assignee: 정산 담당}
+  closing_report: {unit: 재무/정산, assignee: 정산 담당}
   claims: {unit: 고객지원}
 """
 
@@ -103,7 +103,7 @@ async def test_an_enabled_service_is_called_over_a2a(monkeypatch, org) -> None:
 async def test_with_no_enabled_list_every_service_is_on(monkeypatch) -> None:
     monkeypatch.delenv(routing.ENABLED_ENV, raising=False)
     recorder = Recorder()
-    result = await _call("finance", _request("settlement_hold"), recorder)
+    result = await _call("finance", _request("closing_report"), recorder)
     assert result.status == "completed"
     assert recorder.requests[0].url.path == "/a2a"
 
@@ -112,7 +112,7 @@ async def test_with_no_enabled_list_every_service_is_on(monkeypatch) -> None:
 async def test_a_disabled_service_becomes_a_human_task(monkeypatch, org, log_store) -> None:
     monkeypatch.setenv(routing.ENABLED_ENV, "inquiry")
     recorder = Recorder()
-    req = _request("settlement_hold", idempotency_key="ctx_req_route:settlement_hold:sel_1")
+    req = _request("closing_report", idempotency_key="ctx_req_route:closing_report:sel_1")
     result = await _call("finance", req, recorder)
 
     assert (result.status, result.outcome, result.reason_code) == (
@@ -132,7 +132,7 @@ async def test_a_disabled_service_becomes_a_human_task(monkeypatch, org, log_sto
     body = json.loads(sent.content)
     assert body["untrusted"] == {"memo": "고객이 적은 글"}  # 외부 입력 구획 유지
     assert body["input"] == {"seller_id": "sel_1"}
-    assert body["idempotency_key"] == "ctx_req_route:settlement_hold:sel_1"
+    assert body["idempotency_key"] == "ctx_req_route:closing_report:sel_1"
 
     [line] = log_store.query(CommonLogQuery(kinds=["task_status"])).records
     assert line.task_status == "input-required"
@@ -143,7 +143,7 @@ async def test_a_disabled_service_becomes_a_human_task(monkeypatch, org, log_sto
 @pytest.mark.asyncio
 async def test_the_service_line_is_used_when_the_skill_has_none(monkeypatch, org) -> None:
     monkeypatch.setenv(routing.ENABLED_ENV, "inquiry")
-    result = await _call("finance", _request("closing_report"), Recorder())
+    result = await _call("finance", _request("audit_report"), Recorder())
     assert result.output["assignee_unit"] == "재무/정산"
     assert result.output["assignee"] is None
 
@@ -167,7 +167,7 @@ async def test_a_disabled_service_missing_from_the_org_chart_is_no_assignee(
 async def test_without_an_org_chart_nothing_is_made_up(monkeypatch) -> None:
     monkeypatch.setenv(routing.ENABLED_ENV, "inquiry")
     monkeypatch.delenv(routing.ORG_ENV, raising=False)
-    result = await _call("finance", _request("settlement_hold"), Recorder())
+    result = await _call("finance", _request("closing_report"), Recorder())
     assert result.outcome == "no_assignee"
 
 
@@ -177,14 +177,14 @@ async def test_a_broken_org_chart_is_treated_as_empty(monkeypatch, tmp_path) -> 
     path.write_text("assignments:\n  finance: {assignee: 누군가}\n", encoding="utf-8")
     monkeypatch.setenv(routing.ORG_ENV, str(path))
     monkeypatch.setenv(routing.ENABLED_ENV, "inquiry")
-    result = await _call("finance", _request("settlement_hold"), Recorder())
+    result = await _call("finance", _request("closing_report"), Recorder())
     assert result.outcome == "no_assignee"
 
 
 @pytest.mark.asyncio
 async def test_an_unreachable_inbox_fails_instead_of_dropping_the_work(monkeypatch, org) -> None:
     monkeypatch.setenv(routing.ENABLED_ENV, "inquiry")
-    result = await _call("finance", _request("settlement_hold"), Recorder(inbox_status=503))
+    result = await _call("finance", _request("closing_report"), Recorder(inbox_status=503))
     assert (result.status, result.outcome) == ("failed", "inbox_unreachable")
 
 
@@ -235,7 +235,7 @@ async def test_read_work_like_a_notice_draft_is_still_handed_off(monkeypatch, tm
 async def test_an_action_skill_to_a_disabled_service_is_one_human_task(monkeypatch, org) -> None:
     monkeypatch.setenv(routing.ENABLED_ENV, "inquiry")
     recorder = Recorder()
-    result = await _call("finance", _request("settlement_hold"), recorder)
+    result = await _call("finance", _request("closing_report"), recorder)
     assert result.outcome == "handed_to_human"
     assert len(recorder.requests) == 1
 

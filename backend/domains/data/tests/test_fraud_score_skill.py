@@ -33,9 +33,6 @@ from data_agent.metrics.fraud import (
 )
 from data_agent.skills.fraud_score import score_fraud
 
-# 소비자 확인용: 재무 판매자 심사가 data 출력을 읽는 함수 (finance 코드는 고치지 않고 부르기만 한다)
-from finance_agent.sources import fraud_score_from
-
 
 def _iso(moment: datetime) -> str:
     return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -252,24 +249,3 @@ def test_max_possible_score_is_capped_at_100() -> None:
     assert max_possible_score(28, [DUP_BUSINESS, FRAUD_SIMILAR]) == 73
 
 
-def test_finance_reads_the_bound_from_this_output(shop: Db) -> None:
-    now = datetime.now(UTC)
-    old = now - timedelta(days=30)
-    _seller(shop, "sel_ref", now - timedelta(days=400), [(20000, old)] * 6)
-    recent = now - timedelta(hours=2)
-    products = [(5000, recent), (5000, recent), (20000, recent), (20000, recent)]
-    _seller(shop, "sel_new", now - timedelta(days=2, hours=1), products)
-
-    output = _call("sel_new").output  # A2A로 나가는 dict 그대로
-    assert output["complete"] is False
-    assert output["score"] == 28
-    # 재무는 불완전한 점수(28)가 아니라 보수적 상한(73)으로 심사한다
-    bound = fraud_score_from(output)
-    assert bound is not None and (bound.score, bound.confirmed) == (73, 28)
-    assert bound.unknown_rules == (DUP_BUSINESS, FRAUD_SIMILAR)
-
-    complete = {**output, "unknown_rules": [], "complete": True, "max_possible_score": 28}
-    full = fraud_score_from(complete)
-    assert full is not None and (full.score, full.confirmed, full.unknown_rules) == (28, 28, ())
-    legacy = {k: v for k, v in output.items() if k not in ("complete", "max_possible_score")}
-    assert fraud_score_from(legacy) is None  # 상한이 없는 예전 응답은 판단하지 않는다

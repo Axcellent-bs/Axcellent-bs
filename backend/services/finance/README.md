@@ -4,8 +4,6 @@
 
 | skill | 등급 |
 | --- | --- |
-| `seller_review` | B |
-| `settlement_hold` | B |
 | `closing_report` | read |
 | `audit_report` | read |
 | `record_support_cost` | read |

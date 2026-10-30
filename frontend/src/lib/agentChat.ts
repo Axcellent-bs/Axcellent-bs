@@ -2,7 +2,7 @@ import type { ExecutionRecord } from "./finance";
 import { COMM_OUTCOME_KO } from "./labels";
 import type { CommLine, CommOutcome } from "./types";
 
-// AI 대화방: 총괄(orchestrator)의 사건 기록, 안전 관문(safety)의 실행 기록, 공통 로그의 부서 간 소통(dashboard-api)을
+// AI 대화방: 총괄(orchestrator)의 이벤트 기록, 안전 관문(safety)의 실행 기록, 공통 로그의 부서 간 소통(dashboard-api)을
 // "누가 누구에게 무엇을 보냈나" 메시지로 바꾼다. 문장은 기록된 값(skill·상태·숫자·id)으로만 만들고
 // 부서가 돌려준 자유 문장(summary·note·untrusted 등)은 화면에 옮기지 않는다. 화면 없는 순수 함수만 둔다.
 
@@ -40,8 +40,10 @@ export interface OrchIncident {
   summary: string[];
   metrics: Record<string, number>;
   pending_holds: { step_id: string; skill: string; label: string }[];
-  /** 비슷한 과거 사건에서 뽑은 참고 추천(총괄이 계산). 근거가 있으면 card_id가 그 과거 사건 카드 */
+  /** 비슷한 과거 이벤트에서 뽑은 참고 추천(총괄이 계산). 근거가 있으면 card_id가 그 과거 이벤트 카드 */
   recommendation?: { status: string; card_id?: string } | null;
+  /** 총괄이 이미 아는 사실로 만든 해결 내용 초안(저장 전). 아는 게 없으면 null */
+  resolution_draft?: { outcome: "resolved" | null; root_cause: string | null; action: string | null; basis: string[] } | null;
 }
 
 /** POST /api/demo/incidents 본문 (main.py DemoRequest). 모두 선택 */
@@ -80,17 +82,17 @@ export const serviceKo = (name: string | null | undefined) => (name ? SERVICE_KO
 
 export const INCIDENT_STATUS_KO: Record<string, string> = { open: "AI가 처리 중", resolved: "해결됨", degraded: "사람 확인 필요" };
 
-// 사건 이름. 총괄은 "payment 장애 감지 (error_rate_5xx)"처럼 코드로 주므로 사람이 읽는 말로 바꾼다
+// 이벤트 이름. 총괄은 "payment 장애 감지 (error_rate_5xx)"처럼 코드로 주므로 사람이 읽는 말로 바꾼다
 const COMPONENT_KO: Record<string, string> = { payment: "결제", api: "판매 사이트", db: "주문 DB", search: "검색", shipping: "배송" };
 // 제목은 "결제가 서버 오류로 자꾸 실패해요"처럼 한 문장. 코드(5xx·p95)는 마우스를 올리면 보인다
 const METRIC_KO: Record<string, string> = {
   error_rate_5xx: "서버 오류로 자꾸 실패해요", p95_latency_ms: "응답이 느려졌어요", order_fail_rate: "주문 실패가 늘었어요", payment_fail_rate: "실패가 늘었어요",
 };
 const SUBJECT_KO: Record<string, string> = { payment: "결제가", api: "쇼핑몰이", db: "주문 DB가", search: "검색이", shipping: "배송이" };
-// 재무 이상 사건(finance.anomaly_detected)은 주어 없이 한 문장으로
+// 재무 이상 이벤트(finance.anomaly_detected)는 주어 없이 한 문장으로
 const FINANCE_KO: Record<string, string> = {
   repeat_refund: "같은 고객이 환불을 반복해요", refund_rate_jump: "환불이 갑자기 많아졌어요",
-  split_under_limit: "한도 바로 아래로 쪼갠 지급이 있어요", duplicate_coupon: "같은 사건 보상 쿠폰이 두 번 나갔어요",
+  split_under_limit: "한도 바로 아래로 쪼갠 지급이 있어요", duplicate_coupon: "같은 이벤트 보상 쿠폰이 두 번 나갔어요",
 };
 /** 총괄 제목 끝의 "(metric)"에서 지표 코드를 꺼낸다 */
 function metricOf(inc: Pick<OrchIncident, "title">): string | null {
@@ -109,8 +111,10 @@ const rawOf = (...parts: (string | null | undefined | false)[]) => parts.filter(
 
 /** 방 이름: "결제가 서버 오류로 자꾸 실패해요" */
 export function incidentTitle(inc: Pick<OrchIncident, "title" | "component">): string {
-  // 고객지원 처리 결과 사건은 총괄이 사람이 읽는 제목("고객 문의 #1 처리 결과 기록")을 이미 준다
+  // 고객지원 처리 결과 이벤트는 총괄이 사람이 읽는 제목("고객 문의 #1 처리 결과 기록")을 이미 준다
   if (inc.component.startsWith("support-inquiry-")) return inc.title;
+  // 지금 총괄은 사람이 읽는 제목을 바로 준다(옛 기록만 "payment 장애 감지 (error_rate_5xx)" 형식)
+  if (!inc.title.includes("장애 감지")) return inc.title;
   const comp = COMPONENT_KO[inc.component] ?? inc.component;
   const metric = metricOf(inc);
   if (inc.component === "finance") return (metric && FINANCE_KO[metric]) || "돈 흐름에서 이상한 점을 찾았어요";
@@ -123,12 +127,11 @@ const ACTION_KO: Record<string, string> = {
   // 총괄 시나리오 A
   diagnose_incident: "원인 진단", anomaly_detection: "이상 탐지", impact_analysis: "영향 분석",
   rollback_deployment: "배포 되돌리기", verify_recovery: "복구 확인", restart_service: "서비스 다시 켜기",
-  find_related_prs: "관련 코드 변경 찾기", link_incident: "사건에 코드 변경 연결", verify_rollback_target: "되돌릴 배포 확인",
+  find_related_prs: "관련 코드 변경 찾기", link_incident: "이벤트에 코드 변경 연결", verify_rollback_target: "되돌릴 배포 확인",
   draft_notice: "공지 초안 작성", publish_notice: "공지 게시", get_notice: "공지 조회",
-  loss_aggregation: "손실 리포트", record_support_cost: "배송비·비용 기록 확인", record_case: "사건 기록", check_plan: "예전 결정과 비교",
+  loss_aggregation: "손실 리포트", record_support_cost: "배송비·비용 기록 확인", record_case: "이벤트 기록", check_plan: "예전 결정과 비교",
   // 돈이 나가는 일·안전 관문
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 확정",
-  seller_review: "판매자 입점 심사", settlement_hold: "판매자 정산 멈춤", hold_settlement: "판매자 정산 멈춤",
   verify_amount: "금액 다시 계산", review_hold: "보류 건 1차 판단", review_threshold_change: "기준 변경 판단",
   // 고객지원·기획개발·인사
   send_reply: "고객 답변 보내기", request_compensation: "보상 요청", create_claim: "클레임 접수", decide_claim: "클레임 결정",
@@ -137,7 +140,7 @@ const ACTION_KO: Record<string, string> = {
   start_handover: "인수인계 시작", answer_handover_question: "인수인계 질문 답변", decide_candidate_card: "후보 기록 결정",
   request_incident_compensation: "피해 고객 한꺼번에 보상", suggest_compensation: "보상안 제안", diagnose_payment: "결제 기록 확인",
   kpi_summary: "핵심 지표 정리", "memory.card_write": "회사 기억에 남기기", "memory.card_link": "회사 기억 연결",
-  find_active_incident: "진행 중인 사건 찾기", create_inquiry: "고객 문의 접수", list_inquiries: "문의 목록 조회",
+  find_active_incident: "진행 중인 이벤트 찾기", create_inquiry: "고객 문의 접수", list_inquiries: "문의 목록 조회",
   get_inquiry: "문의 조회", inquiry_overview: "문의 현황 조회", list_claims: "클레임 목록 조회", claim_stats: "클레임 통계",
   claim_queue: "보상 대기열 조회", process_claim_queue: "보상 대기열 처리", customer_signals: "고객 이상 신호 조회",
   release_fault_injection: "쇼핑몰 장애 해제", receive_change_result: "변경 결과 받기",
@@ -170,7 +173,7 @@ export type ChatItem =
   | { kind: "separator"; id: string; at: string; room: string; text: string; raw?: string; variant: "day" | "topic" };
 
 export const SAFETY_ROOM = "safety";
-/** 총괄 사건에 묶이지 않는 공통 로그 소통 (부서끼리 직접 주고받은 A2A) */
+/** 총괄 이벤트에 묶이지 않는 공통 로그 소통 (부서끼리 직접 주고받은 A2A) */
 export const DIRECT_ROOM = "direct";
 export const ALL_ROOM = "all";
 
@@ -182,7 +185,7 @@ const FIELD_KO: Record<string, string> = {
   failed_orders: "실패 주문", affected_customers: "영향 고객", lost_amount: "매출 손실", compensation_coupon_count: "보상 쿠폰",
   compensation_total: "보상 합계", total_loss: "총 손실", recovered: "복구", infra_metrics_ok: "지표 정상", card_id: "기록 id",
   channel_code: "게시 위치", state: "상태", match: "금액 일치", pr_number: "코드 변경 번호", severity: "심각도", grade: "등급",
-  kind: "종류", incidents: "사건", auto_handled_rate: "자동 처리율", escalation_count: "사람에게 넘김", count: "건수",
+  kind: "종류", incidents: "이벤트", auto_handled_rate: "자동 처리율", escalation_count: "사람에게 넘김", count: "건수",
   requested: "요청", unit_value: "1건 금액", reason_code: "사유", coupon_count: "쿠폰", outcome: "결과",
   avg_handle_seconds: "평균 처리 시간(초)", related_prs: "관련 PR", by_category: "분류별",
 };
@@ -248,7 +251,7 @@ function pickToken(v: unknown): string | null {
   return svc ?? ver;
 }
 
-// ---------------------------------------------------------------- 총괄 사건 → 메시지
+// ---------------------------------------------------------------- 총괄 이벤트 → 메시지
 const CENTRAL = "orchestrator";
 
 function transferFrom(inc: OrchIncident, step: OrchStep): string | null {
@@ -302,10 +305,10 @@ export function incidentItems(inc: OrchIncident): ChatItem[] {
   const room = inc.context_id;
   const out: ChatItem[] = [];
   const opened = inc.opened_at ?? inc.events[0]?.at ?? "";
-  out.push({ kind: "separator", id: `${room}:sep`, at: opened, room, text: `${incidentTitle(inc)}${opened ? ` · ${clockKo(opened)} 시작` : ""}`, raw: `사건 번호 ${inc.context_id}`, variant: "topic" });
+  out.push({ kind: "separator", id: `${room}:sep`, at: opened, room, text: `${incidentTitle(inc)}${opened ? ` · ${clockKo(opened)} 시작` : ""}`, raw: `이벤트 번호 ${inc.context_id}`, variant: "topic" });
   out.push({ kind: "system", id: `${room}:open`, at: opened, room, text: inc.component.startsWith("support-inquiry-")
-      ? `고객지원 AI가 문의를 해결 종료해서 총괄 AI가 "${incidentTitle(inc)}" 사건을 열고 재무·인사에 넘겼어요.`
-      : `${inc.component === "finance" ? "재무 AI가 사후 감사에서" : "캣북스 쇼핑몰이"} "${incidentTitle(inc)}" 신호를 보내서 총괄 AI가 사건을 열었어요.` });
+      ? `고객지원 AI가 문의를 해결 종료해서 총괄 AI가 "${incidentTitle(inc)}" 이벤트를 열고 재무·인사에 넘겼어요.`
+      : `${inc.component === "finance" ? "재무 AI가 사후 감사에서" : "캣북스 쇼핑몰이"} "${incidentTitle(inc)}" 신호를 보내서 총괄 AI가 이벤트를 열었어요.` });
 
   for (const step of inc.steps) {
     const sid = `${room}:${step.step_id}`;
@@ -382,7 +385,7 @@ export function incidentItems(inc: OrchIncident): ChatItem[] {
       m.held ? `사람 판단 ${m.held}건` : null,
       m.mttr_seconds != null ? `걸린 시간 ${m.mttr_seconds}초` : null,
     ].filter(Boolean);
-    out.push({ kind: "system", id: `${room}:close`, at: inc.closed_at, room, text: `사건 종료 — ${INCIDENT_STATUS_KO[inc.status] ?? inc.status}${parts.length ? ` · ${parts.join(" · ")}` : ""}` });
+    out.push({ kind: "system", id: `${room}:close`, at: inc.closed_at, room, text: `이벤트 종료 — ${INCIDENT_STATUS_KO[inc.status] ?? inc.status}${parts.length ? ` · ${parts.join(" · ")}` : ""}` });
   }
   return out;
 }
@@ -395,10 +398,10 @@ function heldAt(inc: OrchIncident, step: OrchStep): string | null {
 export function incidentEventItems(inc: OrchIncident): ChatItem[] {
   return inc.events
     .map((e, i) => ({ e, i }))
-    .filter(({ e }) => / 재시도 \d+$/.test(e.message) || /: 사람이 승인 — 재개$/.test(e.message) || e.message.startsWith("같은 사건에 합침"))
+    .filter(({ e }) => / 재시도 \d+$/.test(e.message) || /: 사람이 승인 — 재개$/.test(e.message) || e.message.startsWith("같은 이벤트에 합침"))
     .map(({ e, i }) => {
-      if (e.message.startsWith("같은 사건에 합침")) {
-        return { kind: "system" as const, id: `${inc.context_id}:ev${i}`, at: e.at ?? inc.opened_at ?? "", room: inc.context_id, text: "같은 장애 신호가 다시 들어와 진행 중인 이 사건에 합쳤습니다" };
+      if (e.message.startsWith("같은 이벤트에 합침")) {
+        return { kind: "system" as const, id: `${inc.context_id}:ev${i}`, at: e.at ?? inc.opened_at ?? "", room: inc.context_id, text: "같은 장애 신호가 다시 들어와 진행 중인 이 이벤트에 합쳤습니다" };
       }
       const label = stepLabel(e.message.split(": ")[0]);
       const retry = e.message.match(/(마감 초과|실패)\(?[^)]*\)?, 재시도 (\d+)$/);
@@ -460,12 +463,12 @@ function verifierName(v: string) {
 // ---------------------------------------------------------------- 공통 로그 소통 → 메시지
 const COMM_TONE: Record<CommOutcome, Tone> = { completed: "ok", rejected: "fail", held: "warn", needs_human: "warn", in_progress: "request" };
 
-/** 소통 한 줄이 들어갈 방: 총괄 사건과 context_id가 같으면 그 사건 방, 아니면 "부서 간 직통" */
+/** 소통 한 줄이 들어갈 방: 총괄 이벤트와 context_id가 같으면 그 이벤트 방, 아니면 "부서 간 직통" */
 export function commRoom(line: CommLine, incidentIds: ReadonlySet<string>): string {
   return line.context_id && incidentIds.has(line.context_id) ? line.context_id : DIRECT_ROOM;
 }
 
-/** 총괄 사건 방에서 총괄이 보내거나 받은 줄인데 같은 skill 단계가 이미 있으면 총괄 기록이 같은 일을 보여 준다 */
+/** 총괄 이벤트 방에서 총괄이 보내거나 받은 줄인데 같은 skill 단계가 이미 있으면 총괄 기록이 같은 일을 보여 준다 */
 function coveredByIncident(line: CommLine, inc: OrchIncident | undefined): boolean {
   if (!inc || !line.skill) return false;
   if (line.from_agent !== CENTRAL && line.to_agent !== CENTRAL) return false;
@@ -474,7 +477,7 @@ function coveredByIncident(line: CommLine, inc: OrchIncident | undefined): boole
 
 /**
  * 공통 로그 한 줄 → 말풍선. 문장은 skill·결과 값으로만 만든다(payload는 dashboard-api가 이미 뺐다).
- * `execution_id`가 안전 관문 기록과 같으면 `dupOf`에 그 id를 넣는다 — 전체 방에서는 빼고, 사건 방에서는 연결 표시만 단다.
+ * `execution_id`가 안전 관문 기록과 같으면 `dupOf`에 그 id를 넣는다 — 전체 방에서는 빼고, 이벤트 방에서는 연결 표시만 단다.
  */
 export function commItem(line: CommLine, room: string, safetyIds: ReadonlySet<string>): Extract<ChatItem, { kind: "msg" }> & { dupOf?: string } {
   const skill = line.skill ?? "무슨 일인지 기록 없음";

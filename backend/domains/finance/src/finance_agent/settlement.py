@@ -10,7 +10,6 @@
 보류 사유 (하나라도 있으면 `held`, 정산 묶음에서 빠진다):
 - `open_claim`: 처리 중인 환불·교환 (클레임 자료를 못 받으면 `claims_unknown`, fail-closed)
 - `unconfirmed_purchase`: 기간 안 주문 중 아직 배송 완료 전 (구매 미확정)
-- `risky_seller`: 정산 보류(`settlement_hold`)가 걸린 위험 판매자
 - `negative_payout`: 정산금이 0원 이하
 
 지급 확정은 재무가 하지 않는다. 묶음을 `execute("confirm_settlement")`로 요청하면 안전 관문이
@@ -34,14 +33,12 @@ def _paid_at(order: dict[str, Any]):
 def statements(
     books: Books,
     period: str | None,
-    held_sellers: set[str] | None = None,
     today: date | None = None,
 ) -> dict[str, Any]:
     cfg = fc.load_config()
     today = today or fc.today()
     name, monday, sunday = fc.week_range(period, today)
     start, end = fc.day_start(monday), fc.day_start(sunday + timedelta(days=1))
-    risky = set(books.risky_sellers) | (held_sellers or set())
 
     sellers = [s["seller_id"] for s in books.sellers if s.get("seller_id")]
     for o in books.orders:  # 판매자 목록에 없는 판매자의 품목도 빠뜨리지 않는다
@@ -107,8 +104,6 @@ def statements(
             reasons.append(
                 {"code": "unconfirmed_purchase", "label": f"구매 미확정 주문 {len(unconfirmed)}건"}
             )
-        if seller_id in risky:
-            reasons.append({"code": "risky_seller", "label": "위험 판매자 정산 보류 중"})
         if order_ids and payout <= 0:
             reasons.append({"code": "negative_payout", "label": "정산금이 0원 이하"})
 
@@ -166,20 +161,3 @@ def ready(result: dict[str, Any]) -> list[dict[str, Any]]:
         if not r["hold_reasons"] and r["status"] in ("ready", "rejected")
     ]
 
-
-def unpaid_payout(books: Books, seller_id: str, today: date | None = None) -> int | None:
-    """정산 보류에 걸리는 금액: 지난주와 이번 주 정산금 합 (아직 지급 전인 몫).
-
-    주문 자료를 못 받았거나 일부만 받았으면 None (모르는 금액을 0으로 두지 않는다).
-    거래가 없으면 0, 정산금이 0원 이하이면 0.
-    """
-    if {"orders", "orders_partial"} & set(books.unavailable):
-        return None
-    today = today or fc.today()
-    total = 0
-    for ref in (today, today + timedelta(days=7)):  # 지난주, 이번 주
-        name, _, _ = fc.week_range(None, ref)
-        for row in statements(books, name, today=today)["statements"]:
-            if row["seller_id"] == seller_id:
-                total += row["payout"]
-    return max(total, 0)

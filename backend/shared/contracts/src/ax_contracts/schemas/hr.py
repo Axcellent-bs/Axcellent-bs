@@ -465,6 +465,8 @@ class CaseResolution(AxModel):
     resolved_at: UtcDatetime | None = None
     opened_at: UtcDatetime | None = None  # 사건이 열린 시각. 소요 시간 계산과 처음·반복 비교에 쓴다
     prior_case_id: str | None = None  # 이 사건을 시작할 때 근거로 보여 준 과거 사건 카드(반복 장애)
+    # 사람이 직접 적었는지, AI 초안을 그대로 썼는지·고쳤는지. 초안은 사람이 확인해야 저장된다
+    draft_source: Literal["written_by_person", "ai_draft_kept", "ai_draft_edited"] | None = None
 
 
 class RecordResolutionInput(AxModel):
@@ -479,6 +481,8 @@ class RecordResolutionInput(AxModel):
     # 사건이 열린 시각. 소요 시간을 안 주면 resolved_at - opened_at 분으로 hr이 계산한다
     opened_at: UtcDatetime | None = None
     prior_case_id: str | None = None  # 이 사건을 시작할 때 근거로 보여 준 과거 사건 카드
+    # 사람이 직접 적었는지, AI 초안을 그대로 썼는지·고쳤는지. 초안은 사람이 확인해야 저장된다
+    draft_source: Literal["written_by_person", "ai_draft_kept", "ai_draft_edited"] | None = None
 
 
 class RecordResolutionOutput(AxModel):
@@ -499,6 +503,8 @@ class FindSimilarCasesInput(AxModel):
     query: str = Field(min_length=1)
     area: str | None = None
     only_resolved: bool = False  # true면 해결 내용이 기록된 카드만
+    # 현재 이벤트의 유형. 주면 카드의 유형과 견주어 `same_type`을 채우고 같은 유형을 앞에 둔다
+    event_type: str | None = None
     limit: int = Field(default=3, ge=1, le=10)
 
 
@@ -509,6 +515,8 @@ class SimilarCase(AxModel):
     similarity: float = Field(ge=0.0, le=1.0)  # 검색 점수 그대로
     resolved: bool
     resolution: CaseResolution | None = None
+    event_type: str | None = None  # 이 카드의 이벤트 유형(없으면 모름)
+    same_type: bool | None = None  # 질의 유형과 같은지. 어느 쪽이든 유형을 모르면 None
     created_at: UtcDatetime
 
 

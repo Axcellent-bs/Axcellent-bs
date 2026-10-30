@@ -69,8 +69,6 @@ allowedRequesters는 시작 제안값이다. 각자 판단해서 조정한다.
 | hr | `incident_record` | 사건 기록 | A | orchestrator |
 | hr | `handover_doc` | 인수인계 문서 | A | orchestrator |
 | finance | `loss_aggregation` | 손실 집계 | read | orchestrator |
-| finance | `seller_review` | 판매자 심사 | B | orchestrator |
-| finance | `settlement_hold` | 정산 보류 | B | orchestrator |
 | data | `anomaly_detection` | 이상 탐지 | read | orchestrator, infra-dejafix |
 | data | `impact_analysis` | 영향 분석 | read | orchestrator, infra-dejafix, support, finance, planning |
 | data | `fraud_score` | 사기 위험 점수 | read | orchestrator, finance |

@@ -46,6 +46,8 @@ class RecordCase(AxModel):
     source_refs: list[str] = Field(default_factory=list)
     author: str
     area: str | None = None  # 담당 영역(`RosterEntry.area`와 같은 값 집합). 없으면 미지정
+    # 같은 종류의 이벤트인지 가르는 값(예: `payment:p95_latency_ms`). 없으면 유형을 비교하지 않는다
+    event_type: str | None = None
 
 
 class Card(AxModel):

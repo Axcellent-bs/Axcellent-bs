@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -130,6 +131,45 @@ def is_roster_area(area: str | None) -> bool:
 def _under(path: str, prefix: str) -> bool:
     path = path.strip().removeprefix("./")
     return path == prefix or path.startswith(prefix.rstrip("/") + "/")
+
+
+# 접두사 표에 없는 레포(예: 떼어 온 shop-web/src/pages/Cart.tsx)는 경로 낱말로 정한다.
+# 폴더·파일 이름을 낱말로 쪼개(CamelCase·-·_) 앞부분이 맞으면 그 영역 (앞에서부터 처음 맞는 것)
+AREA_BY_PATH_WORD: list[tuple[str, str]] = [
+    ("checkout", "payment"),
+    ("payment", "payment"),
+    ("cart", "payment"),
+    ("order", "payment"),
+    ("refund", "payment"),
+    ("settlement", "payment"),
+    ("search", "search"),
+    ("inventory", "inventory"),
+    ("stock", "inventory"),
+    ("product", "catalog"),
+    ("catalog", "catalog"),
+    ("categor", "catalog"),
+    ("support", "support-desk"),
+    ("claim", "support-desk"),
+    ("help", "support-desk"),
+]
+
+
+def _path_words(path: str) -> list[str]:
+    stem = re.sub(r"\.[A-Za-z0-9]+$", "", path)  # 확장자 빼기
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", stem)
+    return [w for w in re.split(r"[^A-Za-z0-9]+", spaced.lower()) if w]
+
+
+def area_of_path(path: str) -> str | None:
+    """경로 하나 → 영역(구성요소). 접두사 표가 먼저, 없으면 경로 낱말."""
+    for prefix, area in AREA_BY_PATH:
+        if _under(path, prefix):
+            return area
+    for word in _path_words(path):
+        for key, area in AREA_BY_PATH_WORD:
+            if word.startswith(key):
+                return area
+    return None
 
 
 def area_of_paths(paths: list[str]) -> str | None:

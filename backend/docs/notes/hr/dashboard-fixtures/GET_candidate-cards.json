@@ -14,6 +14,7 @@
         "candidate": true,
         "decided_at": "2026-10-22T09:00:00+00:00",
         "decision": "야간 알림 기준을 낮추기로 했다",
+        "event_type": null,
         "evidence": {
           "refs": [],
           "source_text_ref": null

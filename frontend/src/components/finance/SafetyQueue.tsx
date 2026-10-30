@@ -53,7 +53,6 @@ function tipOf(r: Review): string {
     case "unregistered_action": return "처음 보는 일입니다. 멈추고 재무 담당자에게 문의하세요.";
     case "over_threshold":
       if (r.action === "refund_request") return "쇼핑몰 관리 화면에서 주문·결제 금액을 확인한 뒤 결정하세요.";
-      if (r.action === "seller_review") return "판매자 서류와 정보를 본 뒤 결정하세요. 애매하면 멈추세요.";
       return "위 '장애 사건 재무'에서 그 사건의 피해 고객·피해 금액과 비교해 보상이 지나치지 않으면 진행하세요.";
     default: return "애매하면 멈추세요. 멈춘 일은 요청한 AI가 고쳐서 다시 요청할 수 있습니다.";
   }

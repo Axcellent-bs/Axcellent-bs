@@ -38,7 +38,7 @@ DECISION_KINDS: frozenset[RecordKind] = frozenset(
 )
 
 LABEL: dict[RecordKind, str] = {
-    RecordKind.INCIDENT: "사건",
+    RecordKind.INCIDENT: "이벤트",
     RecordKind.DECISION: "결정",
     RecordKind.CASE: "사례",
     RecordKind.NOTICE: "공지",

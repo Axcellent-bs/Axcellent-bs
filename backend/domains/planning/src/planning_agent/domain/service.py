@@ -93,6 +93,7 @@ from planning_agent.domain.models import (
 from planning_agent.domain.rules import (
     AUTO_LEVELS,
     PROMOTE_AFTER,
+    ROLLBACK_LOOKBACK,
     auto_limit,
     check_simple,
     deploy_of,
@@ -1587,15 +1588,34 @@ class PlanningService:
             pol: AutoPolicy = s.auto_policy
             label = ", ".join(p.id for p in auto_prs)
             ids = {p.id for p in auto_prs}
-            if pol.level > 0:
-                lv = pol.level
-                text = (
-                    f"자동 머지 {label}가 장애에 연결 → 자동 처리 범위 L{lv} → L{lv - 1} 축소"
-                    " (줄이는 쪽은 승인 없이)"
+            lv = pol.level
+            text = (
+                f"자동 머지 {label}가 장애에 연결 → 자동 처리 범위 L{lv} → L{lv - 1} 축소"
+                " (줄이는 쪽은 승인 없이)"
+            )
+            try:
+                if lv > 0:
+                    await self._execute(
+                        "auto_policy_update", ctx, f"L{lv}->L{lv - 1}", text, {"to": lv - 1}
+                    )
+            except GateRefused as exc:
+                # 범위 축소가 관문에서 막혀도 사건 연결(장애 표시)은 한다.
+                # 축소만 사람에게 남긴다
+                lv = 0
+                demote_acts.append(
+                    self._act(
+                        at,
+                        ctx,
+                        "planning",
+                        "safety",
+                        "auto_policy.update_held",
+                        "execute",
+                        f"자동 처리 범위 축소 보류 ({exc.decision.status}) → 사람이 범위를 확인",
+                        "B",
+                        seq,
+                    )
                 )
-                await self._execute(
-                    "auto_policy_update", ctx, f"L{lv}->L{lv - 1}", text, {"to": lv - 1}
-                )
+            if lv > 0:
                 pol.level = lv - 1
                 pol.log.append(
                     AutoLog(
@@ -1656,7 +1676,12 @@ class PlanningService:
         window_to: datetime,
         component: str | None,
     ) -> list[tuple[PR, str | None, str | None]]:
-        """구간 안 머지 PR 후보 (read). 원인은 판정하지 않는다. 활동 로그만 남긴다."""
+        """구간 안 머지 PR 후보 (read). 원인은 판정하지 않는다. 활동 로그만 남긴다.
+
+        배포는 증상보다 먼저 나가므로 구간 시작보다 `ROLLBACK_LOOKBACK`(30분) 앞부터 본다.
+        총괄은 영향 분석과 같은 구간(장애 시작 시각부터)을 보내서, 장애 직전에 머지된 PR이
+        빠졌다."""
+        window_from = window_from - ROLLBACK_LOOKBACK
         found = [
             (p, *para_of(self.state, p))
             for p in merged_in_window(self.state, window_from, window_to, component)
@@ -2368,6 +2393,7 @@ class PlanningService:
                     )
                 if note is None or note.ok:
                     pr.closed = True
+                    pr.auto_review = None  # 닫혔으니 사람 확인 대기에서 뺀다
             x.coding.status = "canceled"
             closed = pr is not None and pr.closed
             x.coding.error = "사람이 중단" + (f" · {pr.id} 닫음" if closed else "")
@@ -2444,9 +2470,7 @@ class PlanningService:
             t = self.clock()
             act = f"{task_id} 수정 지시: {text[:80]}"
             n = sum(1 for g in self.gate_calls if g.action == "dev_task_revise") + 1
-            await self._execute(
-                "dev_task_revise", ctx, f"{task_id}:{n}", act, {"chars": len(text)}
-            )
+            await self._execute("dev_task_revise", ctx, f"{task_id}:{n}", act, {"chars": len(text)})
             x.coding.status = "queued"
             x.coding.error = None
             x.coding.instruction = text

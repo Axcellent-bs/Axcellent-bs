@@ -95,7 +95,7 @@ def _batch_status(decision_status: str) -> str:
 
 async def settlements_view(period: str | None) -> tuple[dict[str, Any], dict[str, Any]]:
     books = await state().books()
-    result = settlement.statements(books, period, state().held_sellers())
+    result = settlement.statements(books, period)
     batch = state().records.batches.get(result["period"])
     if batch:
         await refresh_batch(batch)

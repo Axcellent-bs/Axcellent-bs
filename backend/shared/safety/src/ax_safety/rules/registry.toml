@@ -159,21 +159,6 @@ action = "confirm_settlement"
 owner = "finance"
 base_grade = "C"
 
-# ---- 재무 마켓운영 (태윤). 마켓운영은 재무 도메인 skill로 흡수(구성안 수정 요청). 판매자 위험은 data가 다시 본다
-[[actions]]
-action = "seller_review"
-owner = "finance"
-base_grade = "B"
-verifier = "data"
-verify_skill = "fraud_score"
-
-[[actions]]
-action = "settlement_hold"
-owner = "finance"
-base_grade = "B"
-verifier = "data"
-verify_skill = "fraud_score"
-
 # ---- 회사 기억 (재현, #41). 카드 쓰기는 여러 부서가, 대체·폐기 연결은 hr만 요청한다
 [[actions]]
 action = "memory.card_write"

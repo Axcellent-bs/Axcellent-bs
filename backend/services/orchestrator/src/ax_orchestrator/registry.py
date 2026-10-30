@@ -1,7 +1,7 @@
 """Agent Card 수집·skill 레지스트리 (ORC-04).
 
 시작 시 모든 부서 카드를 읽어 `skill → 부서` 표를 만든다. 수집에 실패한 부서는 `unavailable`로
-표시하고, 그 부서의 skill은 "확인할 수 없음"으로 처리한다(사건은 멈추지 않는다).
+표시하고, 그 부서의 skill은 "확인할 수 없음"으로 처리한다(이벤트는 멈추지 않는다).
 같은 skill을 여러 부서가 내면 부서 이름 순으로 첫 부서를 쓰고 충돌을 기록한다.
 """
 
@@ -42,7 +42,7 @@ class Registry:
         for dept in sorted(depts):
             try:
                 raw = await fetch(dept)
-            except Exception as exc:  # 연결 오류 등 — 사건을 멈추지 않는다
+            except Exception as exc:  # 연결 오류 등 — 이벤트를 멈추지 않는다
                 self.unavailable[dept] = f"수집 실패: {type(exc).__name__}"
                 continue
             if raw is None:

@@ -74,11 +74,8 @@ def test_hold_reasons(kit, fixed_now) -> None:
         }
     ]
     books = kit.books(orders=orders, refunds=refunds)
-    rows = {r["seller_id"]: r for r in st.statements(books, None, {"sel_a"})["statements"]}
-    assert [h["code"] for h in rows["sel_a"]["hold_reasons"]] == [
-        "unconfirmed_purchase",
-        "risky_seller",
-    ]
+    rows = {r["seller_id"]: r for r in st.statements(books, None)["statements"]}
+    assert [h["code"] for h in rows["sel_a"]["hold_reasons"]] == ["unconfirmed_purchase"]
     assert rows["sel_b"]["payout"] == 10000 - 1000 - 9500
     assert [h["code"] for h in rows["sel_b"]["hold_reasons"]] == ["negative_payout"]
     unknown = kit.books(orders=orders, claims=None)
@@ -125,10 +122,3 @@ def test_apply_batch(fixed_now) -> None:
     assert date.fromisoformat(shown["pay_date"]).weekday() == 5
 
 
-def test_unpaid_payout_is_unknown_without_orders(fixed_now) -> None:
-    """정산 보류 금액: 주문을 못 받았으면 모름(None), 거래 없는 판매자는 0."""
-    books = bk.seed_books()
-    assert (st.unpaid_payout(books, "sel_0001") or 0) > 0
-    assert st.unpaid_payout(books, "sel_none") == 0
-    books.unavailable.append("orders")
-    assert st.unpaid_payout(books, "sel_0001") is None

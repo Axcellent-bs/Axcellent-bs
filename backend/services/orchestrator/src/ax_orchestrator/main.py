@@ -1,10 +1,10 @@
 """ax-orchestrator 서버 진입점.
 
 목 모드(`ORCHESTRATOR_MOCK=1`)에서는 가짜 부서(`mock/fake_departments.py`)로 시나리오 A를
-끝까지 돌리고, `/demo` 목업 화면으로 사건 흐름을 보여 준다.
+끝까지 돌리고, `/demo` 목업 화면으로 이벤트 흐름을 보여 준다.
 
 실제 모드(`ORCHESTRATOR_MOCK`이 1이 아님)에서는 7개 부서를 모두 실제 서비스로 부르고, 이벤트 버스
-(`REDIS_URL`)로 판매 사이트의 `shop.degraded`를 받아 사건을 연다. 가짜 신호를 넣는 데모 입구와
+(`REDIS_URL`)로 판매 사이트의 `shop.degraded`를 받아 이벤트를 연다. 가짜 신호를 넣는 데모 입구와
 승인 흉내는 목 모드에서만 연다.
 """
 
@@ -67,7 +67,7 @@ class AppState:
         self.manager: IncidentManager | None = None
         self.published: list[dict[str, Any]] = []
         self.modes: dict[str, str] = {}
-        self.usage = UsageRecorder()  # 사건·옵션이 바뀌어도 부서별 사용량은 이어서 쌓는다
+        self.usage = UsageRecorder()  # 이벤트·옵션이 바뀌어도 부서별 사용량은 이어서 쌓는다
 
     async def build(self, demo: DemoRequest | None = None) -> IncidentManager:
         demo = demo or DemoRequest()
@@ -103,7 +103,7 @@ class AppState:
         self.fakes = fakes
         if self.manager is None:
             self.manager = IncidentManager(engine, scenario_a)
-        else:  # 같은 사건 목록을 유지하면서 부서 동작만 교체
+        else:  # 같은 이벤트 목록을 유지하면서 부서 동작만 교체
             self.manager.engine = engine
         return self.manager
 
@@ -233,7 +233,7 @@ def _dept_item(
 
 @app.get("/api/registry/real")
 async def registry_real() -> dict:
-    """실제 부서의 Agent Card를 HTTP로 수집해 결과를 보여 준다(읽기 전용, 사건은 열지 않음)."""
+    """실제 부서의 Agent Card를 HTTP로 수집해 결과를 보여 준다(읽기 전용, 이벤트는 열지 않음)."""
     from ax_orchestrator.real import http_card_fetcher
 
     real = Registry()
@@ -251,7 +251,7 @@ async def incidents() -> dict:
 async def incident(context_id: str) -> JSONResponse:
     inc = state.manager.incidents.get(context_id) if state.manager else None
     if inc is None:
-        return JSONResponse({"error": {"code": "NOT_FOUND", "message": "사건 없음"}}, 404)
+        return JSONResponse({"error": {"code": "NOT_FOUND", "message": "이벤트 없음"}}, 404)
     return JSONResponse({"data": inc.view(), "meta": {}})
 
 

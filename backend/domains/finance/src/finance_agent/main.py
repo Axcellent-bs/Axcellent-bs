@@ -296,11 +296,6 @@ def add_read_api(app: FastAPI) -> None:
             },
         }
 
-    @app.get("/api/finance/market-ops")
-    def market_ops() -> dict:
-        rows = state().ledger.market_ops
-        return {"data": list(reversed(rows)), "meta": {"count": len(rows)}}
-
 
 def create_app() -> FastAPI:
     app = create_agent_app(load_card(), HANDLERS)

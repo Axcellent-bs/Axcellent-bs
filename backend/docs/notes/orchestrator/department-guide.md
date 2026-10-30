@@ -16,7 +16,7 @@ ORCHESTRATOR_REAL_DEPTS=finance uv run python -m ax_orchestrator
    - 터미널에 나온 `http://localhost:<포트>/demo`를 연다. 포트를 직접 정하려면 `--port 8002`, 브라우저를 안 열려면 `--no-browser`.
    - 주소는 `AX_<부서>_URL`(없으면 기본 포트 표), 여러 부서는 쉼표로(`hr,finance`).
    - 내 에이전트도 목 모드(`AGENT_TEMPLATE_MOCK=1`)면 토큰 검증이 맞는다.
-3. `/demo`에서 장애를 주입한다. 부서 카드에 `실제`/`목` 표시가 나오고, 내 skill 호출이 사건 흐름에 보인다.
+3. `/demo`에서 장애를 주입한다. 부서 카드에 `실제`/`목` 표시가 나오고, 내 skill 호출이 이벤트 흐름에 보인다.
 4. `GET /api/registry`로 내 카드가 제대로 읽혔는지 확인한다(`unavailable`에 내 부서가 있으면 카드 수집 실패).
 
 ## 이벤트를 총괄에 보내 보는 법 (발행하는 부서용)
@@ -24,9 +24,9 @@ ORCHESTRATOR_REAL_DEPTS=finance uv run python -m ax_orchestrator
 
 | 이벤트 | 총괄의 판정 |
 |---|---|
-| `shop.degraded`, `infra.anomaly_detected` | 사건 열기. 같은 `component`의 열린 사건이 있으면 합침 |
-| `metric.anomaly` | `data.severity`가 high·critical이면 사건, 아니면 기록만 |
-| `shop.recovered`, `support.inquiry_received`, `support.inquiry_surge` | 사건 아님. 열린 사건이 있으면 근거로 기록 |
+| `shop.degraded`, `infra.anomaly_detected` | 이벤트 열기. 같은 `component`의 열린 이벤트가 있으면 합침 |
+| `metric.anomaly` | `data.severity`가 high·critical이면 이벤트, 아니면 기록만 |
+| `shop.recovered`, `support.inquiry_received`, `support.inquiry_surge` | 이벤트 아님. 열린 이벤트가 있으면 근거로 기록 |
 | 그 밖의 이벤트 | 무시 |
 
 ```
@@ -36,7 +36,7 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
   "source": "shop-api", "idempotency_key": "evt_demo01",
   "data": {"component": "payment", "metric_code": "error_rate_5xx", "value": 0.42}}'
 ```
-응답 `data.outcome`: `opened`(새 사건) · `merged`(열린 사건에 합침) · `noted`(기록만) · `ignored`(소관 아님) · `duplicate`(같은 `event_id`). 사건은 `GET /api/incidents`, `/api/incidents/{context_id}`와 `/demo`에서 본다.
+응답 `data.outcome`: `opened`(새 이벤트) · `merged`(열린 이벤트에 합침) · `noted`(기록만) · `ignored`(소관 아님) · `duplicate`(같은 `event_id`). 이벤트는 `GET /api/incidents`, `/api/incidents/{context_id}`와 `/demo`에서 본다.
 
 ## 총괄의 공통 규칙
 - 모든 요청 `meta.path`는 `["orchestrator"]`로 시작, `idempotency_key = <context_id>:<skill>:<단계 id>`, `deadline`은 호출 시각 + 30초.
@@ -51,7 +51,7 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
 
 | skill | 등급 | 단계 | 선행 단계 | 필수 | 입력 예시 |
 |---|---|---|---|---|---|
-| `diagnose_incident` | read | 원인 진단 (infra) | 없음 (사건 시작 즉시) | 예 | `{"component": "payment"}` |
+| `diagnose_incident` | read | 원인 진단 (infra) | 없음 (이벤트 시작 즉시) | 예 | `{"component": "payment"}` |
 | `rollback_deployment` | B | 원인 배포 롤백 (B) | diagnose, impact | 예 | `{"from_version": "v2.4.1", "release_fault_injection": true, "service": "payment-api", "to_version": "v2.4.0"}` |
 | `verify_recovery` | read | 복구 검증 (infra) | rollback | 예 | `{"component": "payment", "since": "2026-10-16T01:00:00Z"}` |
 
@@ -61,7 +61,7 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
 
 | skill | 등급 | 단계 | 선행 단계 | 필수 | 입력 예시 |
 |---|---|---|---|---|---|
-| `impact_analysis` | read | 영향 분석 (data) | 없음 (사건 시작 즉시) | 예 | `{"scope": "payment", "window_from": "2026-10-16T00:45:00Z", "window_to": "2026-10-16T01:15:00Z"}` |
+| `impact_analysis` | read | 영향 분석 (data) | 없음 (이벤트 시작 즉시) | 예 | `{"scope": "payment", "window_from": "2026-10-16T00:45:00Z", "window_to": "2026-10-16T01:15:00Z"}` |
 | `root_cause_hypotheses` | read | 원인 후보 추정 (data) | impact | 아니오 | `{"component": "payment", "context_id": "ctx_inc_guide", "metric": "payment_fail_rate", "window_from": "2026-10-16T00:45:00Z", "window_to": "2026-10-16T01:15:00Z"}` |
 | `kpi_summary` | read | 처리 시간 요약 (data) | recovered_notice(끝나면) | 아니오 | `{"context_ids": ["ctx_inc_guide"]}` |
 
@@ -70,7 +70,7 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
 | skill | 등급 | 단계 | 선행 단계 | 필수 | 입력 예시 |
 |---|---|---|---|---|---|
 | `find_related_prs` | read | 관련 PR 찾기 (planning) | diagnose, impact | 아니오 | `{"component": "payment", "window_from": "2026-10-16T00:45:00Z", "window_to": "2026-10-16T01:15:00Z"}` |
-| `link_incident` | A | 사건에 PR 연결 (planning) | related_prs | 아니오 | `{"incident_context_id": "ctx_inc_guide", "pr_numbers": [412, 418]}` |
+| `link_incident` | A | 이벤트에 PR 연결 (planning) | related_prs | 아니오 | `{"incident_context_id": "ctx_inc_guide", "pr_numbers": [412, 418]}` |
 
 ## marketing
 
@@ -91,12 +91,12 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
 
 ## finance
 
-> 재무는 사건 중에 총괄이 부르지 않는다(멘토 피드백). 장애 때 나간 쿠폰·환불은 이벤트로 재무 장부에 기록되고, 비용은 평상시 결산·사후 감사에서 다룬다. `verify_amount`는 폐지됐다.
+> 재무는 이벤트 중에 총괄이 부르지 않는다(멘토 피드백). 장애 때 나간 쿠폰·환불은 이벤트로 재무 장부에 기록되고, 비용은 평상시 결산·사후 감사에서 다룬다. `verify_amount`는 폐지됐다.
 
 ## hr
 
 | skill | 등급 | 단계 | 선행 단계 | 필수 | 입력 예시 |
 |---|---|---|---|---|---|
-| `find_similar_cases` | read | 비슷한 과거 사건 찾기 (hr) | 없음 (사건 시작 즉시) | 아니오 | `{"limit": 3, "query": "payment 장애 감지 payment"}` |
-| `record_case` | A | 사건 기록 (hr) | recovered_notice(끝나면), link_incident(끝나면), compensation(끝나면), kpi(끝나면), root_cause(끝나면) | 예 | `{"alternatives_considered": ["create_ticket: skipped (확신도 높은 원인 후보가 있어 원인 확인 요청 없음)"], "area": "infra", "author": "orchestrator", "context_id": "ctx_inc_guide", "decision_reason": "scenario_a plan 실행 결과 — 완료: diagnose_incident, find_similar_cases, impact_analy` |
+| `find_similar_cases` | read | 비슷한 과거 이벤트 찾기 (hr) | 없음 (이벤트 시작 즉시) | 아니오 | `{"event_type": null, "limit": 3, "query": "결제가 서버 오류로 자꾸 실패해요"}` |
+| `record_case` | A | 이벤트 기록 (hr) | recovered_notice(끝나면), link_incident(끝나면), compensation(끝나면), kpi(끝나면), root_cause(끝나면) | 예 | `{"alternatives_considered": ["create_ticket: skipped (확신도 높은 원인 후보가 있어 원인 확인 요청 없음)"], "area": "infra", "author": "orchestrator", "context_id": "ctx_inc_guide", "decision_reason": "결제 장애 대응 실행 결과 — 완료: diagnose_incident, find_similar_cases, impact_analysis, ro` |
 | `record_resolution` | A | 해결 내용 기록 (hr) | record(끝나면) | 아니오 | `{"action": "배포 롤백", "context_id": "ctx_inc_guide", "minutes_to_resolve": 0, "outcome": "resolved", "root_cause": "PR #412 배포가 원인일 수 있음"}` |

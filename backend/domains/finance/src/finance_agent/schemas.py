@@ -17,42 +17,6 @@ from pydantic import Field
 from ax_contracts.schemas import AxModel
 
 
-# ---------------------------------------------------- 마켓운영: seller_review, settlement_hold
-class SellerReviewInput(AxModel):
-    """판매자 심사. 판매자 소개 문장은 `untrusted`로만 오고 판단에 쓰지 않는다."""
-
-    seller_id: str
-    category_codes: list[str] = Field(default_factory=list)
-    documents_verified: bool
-
-
-class SellerReviewOutput(AxModel):
-    seller_id: str
-    decision: Literal["approved", "held", "rejected", "undetermined"]
-    risk_score: int | None = None
-    # 빠진 규칙이 있으면 risk_score는 상한이다. 확인한 규칙만의 점수와 빠진 규칙을 같이 남긴다
-    confirmed_score: int | None = None
-    unknown_rules: list[str] = Field(default_factory=list)
-    reason_code: str
-    execution_id: str | None = None
-    review_id: str | None = None
-
-
-class SettlementHoldInput(AxModel):
-    seller_id: str
-    reason_code: Literal["fraud_risk", "dispute", "documents_missing", "reconciliation_mismatch"]
-    hold_amount: int | None = Field(default=None, ge=0)
-
-
-class SettlementHoldOutput(AxModel):
-    seller_id: str
-    status: Literal["held", "pending_review", "rejected"]
-    reason_code: str
-    hold_amount: int | None = None  # 보류한 미지급 정산금. 모르면 None
-    execution_id: str | None = None
-    review_id: str | None = None
-
-
 # ---------------------------------------------- closing_report (orchestrator·data → finance, 읽기)
 class ClosingReportInput(AxModel):
     """기간 손익 요약. `date`가 없으면 오늘(UTC), `month`면 그 달."""

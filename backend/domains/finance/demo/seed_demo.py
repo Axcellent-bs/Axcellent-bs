@@ -5,12 +5,11 @@
 목 토큰(`mock:<이름>`)을 쓰므로 실제 운영 서버에서는 거부된다.
 
     uv run python agents/finance/demo/seed_demo.py
-    uv run python agents/finance/demo/seed_demo.py --safety http://localhost:8001 --finance http://localhost:8105
+    uv run python agents/finance/demo/seed_demo.py --safety http://localhost:8001
 
 가짜 데이터(finance `mock_seed.json`)
 - 사건 ctx_inc_0002: 영향 고객 buy_0904~buy_0909 6명, 실패 주문 8건, 피해 214,500원
 - 결제: ord_1003 32,000원, ord_1004 18,000원, ord_1005 150,000원
-- 판매자 위험 점수: sel_1 12, sel_3 85, sel_4 30, sel_5 72
 """
 
 from __future__ import annotations
@@ -19,7 +18,6 @@ import argparse
 import json
 import sys
 import uuid
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -48,20 +46,6 @@ def execute(
     return r.json()["data"]
 
 
-def ask_finance(base: str, skill: str, data: dict[str, Any], key: str | None = None) -> dict:
-    meta: dict[str, Any] = {
-        "context_id": CTX,
-        "token": "mock:orchestrator",
-        "path": [],
-        "deadline": (datetime.now(UTC) + timedelta(seconds=30)).isoformat(),
-    }
-    if key:
-        meta["idempotency_key"] = f"{key}:{RUN}"
-    r = httpx.post(f"{base}/a2a", json={"meta": meta, "skill": skill, "input": data}, timeout=40)
-    r.raise_for_status()
-    return r.json()
-
-
 def coupon(buyer: str, count: int, unit: int, total: int | None = None) -> dict:
     return {
         "purpose_code": "compensation",
@@ -77,9 +61,8 @@ def main() -> None:
         sys.stdout.reconfigure(encoding="utf-8")  # Windows 콘솔에서도 한글이 깨지지 않게
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--safety", default="http://localhost:8001")
-    parser.add_argument("--finance", default="http://localhost:8105")
     args = parser.parse_args()
-    s, f = args.safety, args.finance
+    s = args.safety
     lines: list[str] = []
 
     def show(title: str, result: dict) -> None:
@@ -158,26 +141,6 @@ def main() -> None:
             {"order_id": "ord_1005", "refund_amount": 150000},
         ),
     )
-
-    # 3) 마켓운영: 판매자 심사·정산 보류 (통합 에이전트 → 재무)
-    for seller, docs in (("sel_4", True), ("sel_5", False), ("sel_9", True)):
-        out = ask_finance(
-            f,
-            "seller_review",
-            {"seller_id": seller, "category_codes": ["book"], "documents_verified": docs},
-            key=f"rev-{seller}",
-        )
-        lines.append(
-            f"- 판매자 심사 {seller}: {out['output'].get('decision')} "
-            f"({out['output'].get('reason_code')})"
-        )
-    hold = ask_finance(
-        f,
-        "settlement_hold",
-        {"seller_id": "sel_3", "reason_code": "fraud_risk", "hold_amount": 320000},
-        key="hold-sel_3",
-    )
-    lines.append(f"- 정산 보류 sel_3: {hold['output'].get('status')}")
 
     # 5) 정책상 항상 사람이 보는 일: 판매자 정산 확정
     show(

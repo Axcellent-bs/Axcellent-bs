@@ -96,8 +96,6 @@ SERVICES: tuple[Service, ...] = (
         "finance",
         8105,
         (
-            "seller_review",
-            "settlement_hold",
             "closing_report",
             "audit_report",
             "record_support_cost",

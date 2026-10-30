@@ -1,6 +1,6 @@
 """고객지원 처리 결과 plan: 고객지원이 문의를 닫았을 때 (`support.inquiry_resolved`).
 
-문의 한 건마다 사건 하나가 열리고, 총괄이 처리 결과를 기록으로 남겨 다른 부서에 넘긴다.
+문의 한 건마다 이벤트 하나가 열리고, 총괄이 처리 결과를 기록으로 남겨 다른 부서에 넘긴다.
 1. 재무 AI가 처리 결과를 받아 주문 배송비·비용 기록을 확인하고 장부에 남긴다 (read).
    경비를 쓰지 않은 문의(답변만 한 문의 등)도 처리 결과는 기록한다.
 2. 인사 AI가 재무의 기록까지 붙여 처리 결과를 회사 기억에 기록한다.
@@ -9,7 +9,7 @@
 고객에게 돈을 돌려주거나 쿠폰을 내는 일은 하지 않는다. 그건 고객지원이 이미 처리한 일이고,
 이 plan은 그 결과를 기록하고 넘기기만 한다.
 
-3. 인사 AI의 감사 기록을 읽어, 이 사건의 기록이 실제로 남았는지 확인한다 (read).
+3. 인사 AI의 감사 기록을 읽어, 이 이벤트의 기록이 실제로 남았는지 확인한다 (read).
    남지 않았으면 이관 큐로 돌려 사람이 보게 한다 (기록이 남았다고 믿고 넘어가지 않는다).
 """
 
@@ -46,7 +46,7 @@ def _verify_record(output: dict[str, Any]) -> tuple[str, str] | None:
     entries = output.get("entries") or []
     if any(_recorded(e) for e in entries if isinstance(e, dict)):
         return None
-    return "record_not_found", "인사 기록에서 이 사건의 처리 결과 기록을 찾지 못함"
+    return "record_not_found", "인사 기록에서 이 이벤트의 처리 결과 기록을 찾지 못함"
 
 
 def support_resolved() -> Plan:
@@ -58,7 +58,7 @@ def support_resolved() -> Plan:
                 "record_support_cost",
                 "배송비·비용 기록 확인 (finance)",
                 build=_cost,
-                # 재무가 남긴 기록을 사건에 보관한다: 총괄 화면에서 보고, 인사 기록에 붙인다
+                # 재무가 남긴 기록을 이벤트에 보관한다: 총괄 화면에서 보고, 인사 기록에 붙인다
                 keep={
                     "note": "record_note",
                     "expense_used": "expense_used",

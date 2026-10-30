@@ -38,6 +38,8 @@ def test_rule_files_load_and_match_agreed_values() -> None:
     assert refund is not None and (refund.base_grade, refund.verifier) == ("A", None)
     assert issue.amount is not None and refund.amount is not None  # 금액 규칙은 그대로
     assert registry.get("confirm_settlement").base_grade == "C"  # type: ignore[union-attr]
+    # 재무는 마켓운영(입점 심사·정산 보류)을 하지 않는다 (2026-10-30)
+    assert registry.get("seller_review") is None and registry.get("settlement_hold") is None
     for spec in registry.actions:  # 자기 검증 금지
         assert spec.verifier != spec.owner
 

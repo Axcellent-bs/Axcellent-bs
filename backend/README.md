@@ -107,7 +107,7 @@ call_agent("finance", req)
 from ax_agent_template import call_agent, subscribe
 from ax_contracts.schemas import HANDED_TO_HUMAN, EventType
 
-result = await call_agent("finance", req)               # skill: settlement_hold
+result = await call_agent("finance", req)               # skill: closing_report
 if result.outcome == HANDED_TO_HUMAN:
     task_id = result.output["task_id"]                  # 재무/정산 부서 할 일함에 들어감
     save_waiting(req.meta.context_id, task_id)          # 이 서비스의 저장소에 "사람 처리 대기"로 남긴다

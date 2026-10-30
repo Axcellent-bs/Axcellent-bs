@@ -34,3 +34,6 @@ testpaths = [
     "services",
 ]
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "eval: data 정확도 평가를 실제로 돌리는 느린 테스트 (CI data-eval job에서만 돈다)",
+]
