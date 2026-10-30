@@ -1,5 +1,6 @@
 """욕설 순화 2단계: 규칙 보강, LLM 순화문 검사, 접수 흐름, 끄는 스위치, 원문 보존."""
 
+import asyncio
 import itertools
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -172,3 +173,34 @@ def test_an_abusive_subject_is_masked_for_the_list() -> None:
     assert created["subject_display"] == "[비속어] 이게 뭐냐"
     clean = create(TestClient(app), "환불해 주세요", subject="환불")
     assert clean["subject_display"] is None
+
+
+def test_softening_starts_before_the_draft_analysis_finishes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """규칙이 찾은 글은 초안 분석을 기다리지 않고 순화를 먼저 시작한다 (접수 시간 단축)."""
+    order: list[str] = []
+    fake = use_llm(
+        monkeypatch,
+        SoftenResult(abuse_level="insult", softened_text="주문 ORD-1 12,000원 환불을 요청합니다."),
+    )
+    original = fake.structured
+
+    async def structured(prompt: str, model: Any, untrusted: dict[str, Any]) -> Any:
+        order.append("soften")
+        return await original(prompt, model, untrusted)
+
+    fake.structured = structured  # type: ignore[method-assign]
+    real_analyze = handlers.drafting.analyze
+
+    async def analyze(*args: Any, **kwargs: Any) -> Any:
+        order.append("analyze-start")
+        await asyncio.sleep(0)  # 순화 작업이 돌 틈을 준다
+        await asyncio.sleep(0)
+        order.append("analyze-end")
+        return await real_analyze(*args, **kwargs)
+
+    monkeypatch.setattr(handlers.drafting, "analyze", analyze)
+    created = create(TestClient(app), "씨발 쓰레기 같은 회사야 ORD-1 12,000원 환불해")
+    assert order.index("soften") < order.index("analyze-end")
+    assert created["messages"][0]["softened_text"].endswith("환불을 요청합니다.")
