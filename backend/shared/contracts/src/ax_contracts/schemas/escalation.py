@@ -48,6 +48,8 @@ class FindActiveIncidentOutput(AxModel):
     status: Literal["open", "resolved", "degraded"] | None = None
     opened_at: UtcDatetime | None = None
     closed_at: UtcDatetime | None = None
+    # 쇼핑몰 복구 신호를 받은 시각. degraded인데 None이면 대응은 끝났어도 장애가 안 풀린 것
+    recovered_at: UtcDatetime | None = None
     # 점검 공지가 게시됐으면 마케팅 공지 번호(`ntc_…`), 아직 없으면 None.
     # 총괄이 사건에 보관한 값이다. 고객지원이 `get_notice`로 공지 사실을 읽을 때 쓰며,
     # 지어내지 않는다.
