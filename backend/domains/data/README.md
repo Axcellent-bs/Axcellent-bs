@@ -133,7 +133,7 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 | `outcomes` | `result_sent` + `execute_decided` + safety 사람 결정(`review_*`) | 확인할 수 없음(`unavailable`·`service_disabled`) / 실패 / 거절 / 보류(`input-required`) / 완료면 그 요청의 안전 관문 판정: executed→자동 완료, held→승인이면 사람 확인 후 실행·거절이면 거절·결정 없으면 보류, verifying(B 교차검증)→확인할 수 없음 |
 | `handoffs` | `task_status` `handed_to_human`, dashboard-api `handoff_done`·`handoff_rejected` | 받을 서비스(`to_service`) 부서로 센다. 처리 시간은 같은 task_id의 넘김 기록이 기간 안에 있을 때만 |
 | `quality.fallback` | `result_sent` payload `fallback`·`fallback_reason` | 완료 응답 중 템플릿 대체 비율(분모에 LLM을 안 쓰는 skill도 있다), 이유별 건수 |
-| `quality.avg_response_ms` | `request_received` ↔ `result_sent` | 같은 (source, context, skill, requester)의 가장 먼저 받은 요청과 짝. 받음이 기간 앞이면 뺀다 |
+| `quality.avg_response_ms` | `result_sent` payload `duration_ms`, 없으면 `request_received` ↔ `result_sent` | agent-template이 받은 직후부터 결과까지 잰 처리 시간(`duration_ms`)을 쓴다. 없는 예전 로그는 같은 (source, context, skill, requester)의 가장 먼저 받은 요청과 짝지어 시각 차이를 쓰고, 받음이 기간 앞이면 뺀다. 받음·보냄 짝은 payload `request_id`가 있으면 그것으로 정확히 맞춘다 |
 | `incidents` | 부서 `result_sent`의 `ctx_inc_` context | 참여한 사건 수, 맡은 skill, 그 사건들 MTTR 중앙값(분) |
 | `collaboration` | `request_received` | 요청한 부서(requester) → 받은 부서 → 횟수. 요청자가 없는 기록(토큰 거부)은 뺀다 |
 | `highlights` | 위 숫자 | 직전 대비 변화율이 큰 건수·금액 항목 최대 3개. 직전 값(분모) 3 미만·변화 없음은 뺀다 |

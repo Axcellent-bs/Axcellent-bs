@@ -528,3 +528,76 @@ async def test_handler_answers_with_contract_output(monkeypatch) -> None:
         assert bad.status == TaskStatus.FAILED and bad.outcome == "invalid_input"
     finally:
         common_log.set_store(None)
+
+
+# ---------------------------------------------------------------------------- 응답 시간 출처
+def _with_id(pair: list[LogRecord], request_id: str, duration_ms: int | None) -> list[LogRecord]:
+    """agent-template이 남기는 새 로그 형식: 두 기록에 request_id, 보냄에 duration_ms."""
+    received, sent = pair
+    extra = {"request_id": request_id}
+    if duration_ms is not None:
+        extra["duration_ms"] = duration_ms
+    return [
+        received.model_copy(update={"payload": {**received.payload, "request_id": request_id}}),
+        sent.model_copy(update={"payload": {**sent.payload, **extra}}),
+    ]
+
+
+@asyncio
+async def test_response_time_uses_duration_ms_when_logged() -> None:
+    at = T0 + timedelta(hours=1)
+    # 기록 시각 차이는 2초지만 서버가 잰 처리 시간은 0.5초·1.5초 → 평균 1000ms
+    records = _with_id(request(at, "inquiry", "summarize_inquiry"), "a" * 32, 500)
+    records += _with_id(
+        request(at + timedelta(minutes=1), "inquiry", "summarize_inquiry"), "b" * 32, 1500
+    )
+    support = _dept(await _report(records), "support")
+    assert support.quality.avg_response_ms == 1000.0
+    assert support.quality.response_samples == 2
+
+
+@asyncio
+async def test_old_logs_without_duration_use_pairing() -> None:
+    at = T0 + timedelta(hours=1)
+    records = request(at, "inquiry", "summarize_inquiry", took=2.0)
+    records += request(at + timedelta(minutes=1), "inquiry", "summarize_inquiry", took=4.0)
+    support = _dept(await _report(records), "support")
+    assert support.quality.avg_response_ms == 3000.0
+    assert support.quality.response_samples == 2
+
+
+@asyncio
+async def test_mixed_period_pairs_old_logs_without_taking_new_ones() -> None:
+    at = T0 + timedelta(hours=1)
+    old_received, old_sent = request(at, "inquiry", "summarize_inquiry", took=4.0)
+    new_received, new_sent = _with_id(
+        request(at + timedelta(seconds=1), "inquiry", "summarize_inquiry", took=1.0),
+        "c" * 32,
+        1000,
+    )
+    # 시각 순: 예전 받음(0초) → 새 받음(1초) → 새 보냄(2초) → 예전 보냄(4초). 같은 키다.
+    # 새 보냄은 duration_ms 1000을 쓰고, 예전 보냄은 예전 받음과 짝지어 4000ms다.
+    records = [old_received, new_received, new_sent, old_sent]
+    support = _dept(await _report(records), "support")
+    assert support.quality.avg_response_ms == 2500.0
+    assert support.quality.response_samples == 2
+
+
+@asyncio
+async def test_new_log_with_request_id_but_no_duration_pairs_by_id() -> None:
+    at = T0 + timedelta(hours=1)
+    first_received, first_sent = _with_id(
+        request(at, "inquiry", "summarize_inquiry", took=3.0), "d" * 32, None
+    )
+    # second는 받음이 기간 앞이라 보냄만 있다 (2초 시점)
+    _, second_sent = _with_id(
+        request(at - timedelta(seconds=10), "inquiry", "summarize_inquiry", took=12.0),
+        "e" * 32,
+        None,
+    )
+    # 순서 짝짓기라면 second 보냄이 first 받음을 가져가 2000ms가 된다. id로 짝지으면 first만 3000ms
+    records = [first_received, second_sent, first_sent]
+    assert [r.occurred_at for r in records] == sorted(r.occurred_at for r in records)
+    support = _dept(await _report(records), "support")
+    assert support.quality.avg_response_ms == 3000.0
+    assert support.quality.response_samples == 1

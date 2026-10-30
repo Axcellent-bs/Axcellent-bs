@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import hmac
 import logging
+import time
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -243,13 +245,20 @@ async def _handle(
 
     `source`는 이 에이전트, `requester`는 요청한 쪽이다. 로그 `payload`에는 skill·상태·ID 같은
     사실만 담고 `input`·`untrusted`·판단 문장은 넣지 않는다.
+
+    두 기록의 payload에 같은 `request_id`(요청마다 새로 만든 uuid4 hex)를 넣어 정확히 짝짓게 하고,
+    보낸 기록에는 받은 직후부터 결과까지 걸린 시간 `duration_ms`(정수, `time.monotonic`)를 넣는다.
+    거절·실패한 요청도 같다.
     """
+    started = time.monotonic()
+    request_id = uuid.uuid4().hex
     meta = request.meta
     requester = _verified_requester(meta)
     grade = _skill_grade(card, request.skill)
     received: dict[str, Any] = {"skill": request.skill, "path": list(meta.path)}
     if meta.idempotency_key:
         received["idempotency_key"] = meta.idempotency_key
+    received["request_id"] = request_id
     log_event(
         meta.context_id,
         meta.tenant_id,
@@ -274,6 +283,8 @@ async def _handle(
             sent["fallback_reason"] = result.fallback_reason
         if result.fallback_numbers:
             sent["fallback_numbers"] = result.fallback_numbers
+    sent["request_id"] = request_id
+    sent["duration_ms"] = int((time.monotonic() - started) * 1000)
     log_event(
         meta.context_id,
         meta.tenant_id,

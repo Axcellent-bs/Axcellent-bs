@@ -6,8 +6,10 @@
 - 부서: `ax_agent_template.services`의 `department`. 기록의 `source`(응답한 에이전트 = 서비스 id,
   예전 부서 이름도 인정)로 정한다. safety·dashboard-api·memory 같은 공용 서버는 부서가 아니다.
 - 요청: 부서 AI가 보낸 응답 `result_sent` 1건 = 요청 1건.
-- 응답 시간: 같은 (source, context_id, skill, requester)의 `request_received` 중 가장 먼저 남은 것과
-  `result_sent`를 짝짓는다. 받음이 기간 앞에 있으면 짝이 없어 응답 시간에서 빠진다.
+- 응답 시간: `result_sent` payload의 `duration_ms`(agent-template이 받은 직후부터 결과까지 잰 값)를
+  쓴다. 없으면(예전 로그) 같은 (source, context_id, skill, requester)의 `request_received` 중 가장
+  먼저 남은 것과 짝지어 시각 차이를 쓴다. 받음이 기간 앞에 있으면 짝이 없어 응답 시간에서 빠진다.
+- 받음·보냄 짝: payload `request_id`가 있으면 그것으로 정확히 짝짓는다. 없으면 위 순서 짝짓기.
 - 결과 6가지 (요청 1건마다 하나):
   1. 확인할 수 없음: outcome이 `unavailable`·`service_disabled`
   2. 실패: 상태 `failed`·`canceled`
@@ -120,16 +122,50 @@ def _key(r: LogRecord) -> tuple:
     return (r.source, r.context_id, r.skill, r.requester)
 
 
+def _request_id(r: LogRecord) -> str | None:
+    value = r.payload.get("request_id")
+    return value if isinstance(value, str) and value else None
+
+
+def _duration_ms(r: LogRecord) -> int | None:
+    """agent-template이 잰 처리 시간. 없거나 형식이 이상하면 None (예전 로그)."""
+    value = r.payload.get("duration_ms")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
 def _pair_received(records: list[LogRecord]) -> dict[str, datetime]:
-    """result_sent log_id → 짝이 되는 request_received 시각."""
+    """result_sent log_id → 짝이 되는 request_received 시각.
+
+    `request_id`가 있으면 같은 id끼리, 없으면(예전 로그) 같은 키에서 먼저 받은 것부터 짝짓는다.
+    """
+    by_id: dict[str, datetime] = {}
     pending: dict[tuple, list[datetime]] = defaultdict(list)
     pairs: dict[str, datetime] = {}
     for r in records:
+        request_id = _request_id(r)
         if r.kind == "request_received":
-            pending[_key(r)].append(r.occurred_at)
-        elif r.kind == "result_sent" and pending.get(_key(r)):
-            pairs[r.log_id] = pending[_key(r)].pop(0)
+            if request_id:
+                by_id[request_id] = r.occurred_at
+            else:
+                pending[_key(r)].append(r.occurred_at)
+        elif r.kind == "result_sent":
+            if request_id:
+                if request_id in by_id:
+                    pairs[r.log_id] = by_id.pop(request_id)
+            elif pending.get(_key(r)):
+                pairs[r.log_id] = pending[_key(r)].pop(0)
     return pairs
+
+
+def _response_ms(r: LogRecord, received_at: Mapping[str, datetime]) -> float | None:
+    """응답 시간(ms): `duration_ms`가 있으면 그것, 없으면 짝지은 받음과의 시각 차이."""
+    if (duration := _duration_ms(r)) is not None:
+        return float(duration)
+    if r.log_id in received_at:
+        return (r.occurred_at - received_at[r.log_id]).total_seconds() * 1000
+    return None
 
 
 def _reviews(records: Iterable[LogRecord]) -> dict[str, str]:
@@ -260,11 +296,7 @@ def compute_activity(
         completed = [r for r in sent if (r.task_status or r.payload.get("status")) == "completed"]
         replaced = [r for r in completed if r.payload.get("fallback") is True]
         reasons = Counter(str(r.payload.get("fallback_reason") or "unknown") for r in replaced)
-        waits = [
-            (r.occurred_at - received_at[r.log_id]).total_seconds() * 1000
-            for r in sent
-            if r.log_id in received_at
-        ]
+        waits = [w for r in sent if (w := _response_ms(r, received_at)) is not None]
 
         incident_skills: Counter[str] = Counter()
         incident_ids: set[str] = set()
