@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from difflib import SequenceMatcher
 from functools import wraps
 from typing import Any
@@ -265,6 +266,40 @@ async def _write(
     if key in STORE.results:
         return _done(request, STORE.results[key])
 
+    # 같은 키의 요청이 아직 처리 중이면 끝나길 기다렸다가 그 결과를 받는다. 결과는 처리가 끝난 뒤에
+    # 저장되므로, 이 대기가 없으면 504를 받고 다시 보낸 접수가 두 번 처리돼 문의가 둘 생긴다.
+    async with _inflight(key):
+        if key in STORE.results:
+            return _done(request, STORE.results[key])
+        return await _execute_write(request, key, action, target, params, apply)
+
+
+_INFLIGHT: dict[str, tuple[asyncio.Lock, int]] = {}
+
+
+@asynccontextmanager
+async def _inflight(key: str) -> AsyncIterator[None]:
+    lock, users = _INFLIGHT.get(key) or (asyncio.Lock(), 0)
+    _INFLIGHT[key] = (lock, users + 1)
+    try:
+        async with lock:
+            yield
+    finally:
+        lock, users = _INFLIGHT[key]
+        if users <= 1:
+            del _INFLIGHT[key]  # 쓰는 요청이 없으면 치운다 (요청마다 이벤트 루프가 다를 수 있다)
+        else:
+            _INFLIGHT[key] = (lock, users - 1)
+
+
+async def _execute_write(
+    request: AgentRequest,
+    key: str,
+    action: str,
+    target: str,
+    params: dict[str, Any],
+    apply: Callable[[], Awaitable[tuple[dict[str, Any], bool]]],
+) -> AgentResult:
     meta = request.meta.model_copy(update={"idempotency_key": key})
     decision = await execute(
         action,

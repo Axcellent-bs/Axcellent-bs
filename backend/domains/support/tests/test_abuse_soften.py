@@ -327,3 +327,43 @@ def test_timeouts_and_client_errors_are_not_retried(
     fake = _flaky(monkeypatch, [error])
     assert asyncio.run(abuse_soften.soften(ORIGINAL_TEXT, "profanity")) is None
     assert fake.calls == 1  # 시간 초과는 접수를 더 늘리고, 4xx는 다시 불러도 같다
+
+
+# ---- 같은 접수를 동시에 두 번 받을 때 ------------------------------------------------------
+def test_the_same_intake_sent_while_the_first_is_running_creates_one_inquiry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """504를 받은 고객이 다시 보내도(첫 요청은 아직 처리 중) 문의가 두 개 생기지 않는다."""
+    import httpx
+
+    real_analyze = handlers.drafting.analyze
+
+    async def slow_analyze(*args: Any, **kwargs: Any) -> Any:
+        await asyncio.sleep(0.2)  # 첫 요청이 끝나기 전에 두 번째가 들어온다
+        return await real_analyze(*args, **kwargs)
+
+    monkeypatch.setattr(handlers.drafting, "analyze", slow_analyze)
+    body = {
+        "meta": {
+            "context_id": "ctx_inq_0001",
+            "token": "mock:dashboard-api",
+            "path": [],
+            "deadline": (datetime.now(UTC) + timedelta(seconds=30)).isoformat(),
+            "idempotency_key": "same-intake-key",
+        },
+        "skill": "create_inquiry",
+        "input": {"user_id": 1, "customer_name": "김하늘", "order_id": "101", "order_no": "ORD-1"},
+        "untrusted": {"subject": "환불", "message": "환불해 주세요"},
+    }
+
+    async def run() -> list[Any]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://support") as client:
+            first = asyncio.create_task(client.post("/a2a", json=body))
+            await asyncio.sleep(0.05)
+            second = asyncio.create_task(client.post("/a2a", json=body))
+            return [r.json()["output"] for r in await asyncio.gather(first, second)]
+
+    first, second = asyncio.run(run())
+    assert len(handlers.STORE.list(None, None)) == 1
+    assert first["id"] == second["id"]
