@@ -39,6 +39,7 @@ from planning_agent import (
     cross_check,
     related,
     repo_routing,
+    state_store,
     vcs,
     vcs_bridge,
 )
@@ -474,16 +475,34 @@ class PlanningService:
 
     # ---- 상태·구독
 
-    def _init_state(self) -> None:
+    def _init_state(self, fresh: bool = False) -> None:
         self.clock: Clock = self._clock_factory()
         self.state: State = real_state() if self.real_example else initial_state()
         self.state.tenant_id = self.tenant_id
         self._idempotent: dict[str, ActionResult] = {}
         self._dev_sent: dict[str, str] = {}  # dev: 기획서 → 마지막으로 돌려준 결과 지문
+        # 상태 파일(PLANNING_STATE_DIR)이 있으면 이어서 시작한다. 초기화(fresh)면 시드로 덮어쓴다
+        self._state_path = state_store.path_for(self.role)
+        if self._state_path and not fresh:
+            saved = state_store.load(self._state_path)
+            if saved is not None:
+                self.state, idem, self._dev_sent = saved
+                self._idempotent = {k: ActionResult(**v) for k, v in idem.items()}
+        elif self._state_path:
+            self._save()
+
+    def _save(self) -> None:
+        """상태를 파일에 이어 쓴다 (파일 위치가 있을 때만). 실패해도 동작은 계속한다."""
+        if not self._state_path:
+            return
+        try:
+            state_store.save(self._state_path, self.state, self._idempotent, self._dev_sent)
+        except OSError:
+            pass
 
     def reset(self) -> None:
-        """초기 데이터로 되돌린다 (구독자는 유지하고 새 상태를 알린다)."""
-        self._init_state()
+        """초기 데이터로 되돌린다 (구독자는 유지하고 새 상태를 알린다). 상태 파일도 덮어쓴다."""
+        self._init_state(fresh=True)
         self._coding_live.clear()  # 돌던 코딩 실행은 다음 단계에서 멈춘다
         self.__dict__.pop("_coding_drafts", None)  # 작성해 둔 코드도 지운다
         self.gate_calls.clear()
@@ -538,6 +557,7 @@ class PlanningService:
             if result.changed:
                 self.state = s
                 self.version += 1
+                self._save()
                 self._notify()
         # 넘기기는 상태를 바꿔 끼운 뒤 잠금 밖에서 보낸다 (잠금을 쥔 채 네트워크를 부르지 않는다)
         for item in outgoing:
@@ -2099,6 +2119,7 @@ class PlanningService:
         to_inbox = False
         result = await self._apply(apply)
         self._idempotent[idempotency_key] = result
+        self._save()  # 중복 거르기 기록도 바로 남긴다 (재시작 뒤 같은 요청을 다시 처리하지 않게)
         if to_inbox:
             await self._cause_to_inbox(result.output["request_id"])
         return result
@@ -2184,6 +2205,7 @@ class PlanningService:
 
         result = await self._apply(run)
         self._idempotent[idempotency_key] = result
+        self._save()  # 중복 거르기 기록도 바로 남긴다 (재시작 뒤 같은 요청을 다시 처리하지 않게)
         return result
 
     async def start_dev(
@@ -2231,6 +2253,7 @@ class PlanningService:
 
         result = await self._apply(run)
         self._idempotent[idempotency_key] = result
+        self._save()  # 중복 거르기 기록도 바로 남긴다 (재시작 뒤 같은 요청을 다시 처리하지 않게)
         return result
 
     async def receive_dev_result(
@@ -2302,6 +2325,7 @@ class PlanningService:
 
         result = await self._apply(run)
         self._idempotent[idempotency_key] = result
+        self._save()  # 중복 거르기 기록도 바로 남긴다 (재시작 뒤 같은 요청을 다시 처리하지 않게)
         return result
 
     @staticmethod
