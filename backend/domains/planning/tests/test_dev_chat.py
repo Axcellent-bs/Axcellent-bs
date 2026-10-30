@@ -349,6 +349,7 @@ class ClashRelater:
     def __init__(self, target_id: str):
         self.target_id = target_id
         self.asked: list[str] = []
+        self.index = None
 
     async def relate(self, state, req):
         from planning_agent.domain.models import RelatedItem

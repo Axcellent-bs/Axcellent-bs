@@ -441,6 +441,7 @@ class PlanningService:
         self._send_dev: DevSender = dev_sender or send_to_service
         self._sending: set[asyncio.Task] = set()
         self._resuming = False  # 대기 대화를 깨우는 중 (다시 깨우지 않는다)
+        self._polling_wait = False  # 다른 서비스 요청을 기다리는 대화를 주기적으로 보는 중
         # 코딩 에이전트 실행 (작업 id → 실행 중인 태스크·실행 번호). 번호가 바뀐 실행은 버린다
         self._coding: dict[str, asyncio.Task] = {}
         self._coding_live: dict[str, int] = {}
@@ -454,7 +455,7 @@ class PlanningService:
         self._cause_poster: cause_inbox.Poster | None = None
         # 새 요청이 오면 비슷한·충돌하는 요청을 찾는 곳 (None이면 찾지 않는다)
         self._relater: related.Relater | None = (
-            related.default_relater() if relater == "default" else relater
+            related.default_relater(self.role) if relater == "default" else relater
         )
         # 교차검증 근거를 모으는 곳 (None이면 모으지 않고 safety 판정만)
         self._cross_checker: CrossChecker | None = (
@@ -556,6 +557,16 @@ class PlanningService:
                 await dev_chat.resume_waiting(self)
             finally:
                 self._resuming = False
+            # 다른 서비스 요청을 기다리면 이 서버 상태가 안 바뀌어도 풀려야 하니
+            # 주기적으로 다시 본다
+            if self._polling_wait or not self._remote_wait():
+                return
+            self._polling_wait = True
+            try:
+                await asyncio.sleep(WAIT_POLL_SECONDS)
+            finally:
+                self._polling_wait = False
+            self._kick_waiting()
 
         try:
             task = asyncio.get_running_loop().create_task(go())
@@ -563,6 +574,14 @@ class PlanningService:
             return
         self._sending.add(task)
         task.add_done_callback(self._sending.discard)
+
+    def _remote_wait(self) -> bool:
+        """기다리는 대화 중 이 서버에 없는(다른 서비스) 요청을 기다리는 것이 있나."""
+        mine = {r.id for r in self.state.requests}
+        return any(
+            c.status == "waiting" and any(rid not in mine for rid in c.waiting_for)
+            for c in self.state.chats
+        )
 
     async def _relate_new(self, s: State, known: set[str]) -> None:
         """이번 액션으로 새로 생긴 요청마다 비슷한·충돌하는 요청을 찾아 붙인다 (제안만)."""
@@ -573,6 +592,11 @@ class PlanningService:
                 req.related = await self._relater.relate(s, req)
             except Exception:  # noqa: BLE001 - 찾기가 실패해도 요청은 받는다
                 req.related = []
+            if self._relater.index is not None:
+                try:  # 다음 요청이 찾을 수 있게 memory 색인에 넣는다
+                    await self._relater.index.write(req, related.text_of(s, req))
+                except Exception:  # noqa: BLE001, S110 - 색인 실패가 요청 받기를 막지 않는다
+                    pass
             if not req.related:
                 continue
             label = {
@@ -4185,6 +4209,9 @@ __all__ = [
     "PlanningService",
     "action_name",
 ]
+
+
+WAIT_POLL_SECONDS = 30  # 다른 서비스 요청을 기다리는 대화를 다시 보는 간격
 
 
 def _cross_check_timeout_min() -> int:

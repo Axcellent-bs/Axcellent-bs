@@ -75,7 +75,7 @@ class RelatedItem(DomainModel):
     - relation: same(같은 일) · conflict(둘 다 진행 중인데 양립 불가) · update(앞 요청을 다시
       바꿈) · related(비슷함, 관계는 정하지 않음 포함)
     - by: llm(LLM이 후보 안에서 판단) · embed(임베딩 검색만) · lexical(글자 검색만) ·
-      path(열린 PR과 같은 파일을 고침, 코드 규칙)
+      path(열린 PR과 같은 파일을 고침, 코드 규칙) · memory(회사 기억 요청 색인)
     """
 
     id: str
@@ -83,7 +83,9 @@ class RelatedItem(DomainModel):
     score: float
     relation: Literal["same", "conflict", "update", "related"]
     reason: str
-    by: Literal["llm", "embed", "lexical", "path"]
+    by: Literal["llm", "embed", "lexical", "path", "memory"]
+    # 다른 서비스(기획↔개발)에만 있는 요청이면 찾을 때 읽은 그 요청의 상태 (이 서버에 있으면 None)
+    remote_state: str | None = None
 
 
 class Request(DomainModel):
