@@ -69,8 +69,9 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 - shop-api 응답 없음·401·403·5xx·형식 오류면 숫자를 0으로 내지 않고 `failed`·`unavailable`과 "확인할 수 없음" 근거로 답한다.
 
 ### fraud_score (판매자 사기 위험 점수)
+- **현재 호출하는 부서 없음. 마켓운영 담당이 정해지면 연결.** 재무에서 마켓운영(판매자 점검)이 빠져 `allowed_requesters`는 총괄(`orchestrator`)만 남겼다. skill과 평가(판매자 24명)는 그대로다.
 - **가중치: 재무 확정 (#99, 2026-10-29). 사업자 중복·유사 사기 카드 자료가 생기면 다시 잰다** (`metrics/fraud.py` `WEIGHTS`). 점수는 판단 재료이고 승인·보류는 정하지 않는다(grade read, 재무·정산이 정한다).
-- 재무는 상한 high(70 이상)를 사람 확인으로 보낸다(#99). 사기 확정 아님.
+- 상한 high(70 이상)는 사람 확인으로 보낸다는 규칙은 #99 때 재무가 정했다(그때 부르던 쪽). 사기 확정 아님.
 - 입력: `seller_id` (`FraudScoreInput`)
 - 사용하는 데이터 (shop-api 읽기 전용, 기존 `sellers`·`products` 테이블만)
   - `GET /api/shop/sellers/{seller_id}/profile` (`ShopSellerProfile`): `joined_at`(=`sellers.created_at`), `listings_last_24h`(최근 24시간에 만든 상품 수), `product_count`(판매 중 상품 수)
@@ -151,7 +152,7 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
   - 확인할 수 없던 칸은 이유와 함께 그대로 저장한다(0으로 바꾸지 않는다)
 - 만들기(`monitor.snapshot_tick`, 데이터 앱이 켜질 때 5분 주기로 시작):
   - 한국 시간 00:30 이후 처음 돌 때 어제를 만든다
-  - 돌 때마다 최근 N일 중 빠진 날을 **최근 날짜부터** 채운다. N은 `DATA_REPORT_BACKFILL_DAYS`(기본 14: 주간과 직전 주, 1~92). 데이터 앱이 켜지면 백그라운드로 바로 시작해, 채우는 동안에도 요청은 받는다. 하루씩 차례로 만든다(재무 호출 하루 한 번, 동시 상한 2 안)
+  - 돌 때마다 최근 N일 중 빠진 날을 **최근 날짜부터** 채운다. N은 `DATA_REPORT_BACKFILL_DAYS`(기본 20, 1~92). 20일이면 주간 기본(지난주 월~일)과 그 전 주가 요일과 상관없이 들어간다(일요일이면 그 전 주 월요일이 20일 전). 데이터 앱이 켜지면 백그라운드로 바로 시작해, 채우는 동안에도 요청은 받는다. 하루씩 차례로 만든다(재무 호출 하루 한 번, 동시 상한 2 안)
   - 이미 있는 날은 다시 만들지 않는다. 확인할 수 없음(재무·shop-api 실패, 조회 한도)이 있던 날은 다음 날 한 번만 다시 만든다
   - 재무 마감은 UTC 날짜라 그 UTC 날짜가 끝나기 전(한국 시간 다음 날 09시 전)에 만든 날은 매출을 확인할 수 없음으로 두고, 다음 날 다시 만든다
   - 지표 감시(`monitor.run_forever`)는 지금처럼 켜지 않는다. 저장 주기만 켠다

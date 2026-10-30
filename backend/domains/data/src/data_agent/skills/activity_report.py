@@ -195,6 +195,7 @@ class CompanyCounts:
     gmv: int | None = 0
     commission_revenue: int | None = 0
     finance_reason: str | None = None
+    finance_collected_at: str | None = None  # 재무 응답 시각(ISO). 여러 번이면 가장 이른 것
     orders: float | None = 0.0
     attempts: int | None = 0  # 결제 시도 수 (결제 성공률 분모)
     failed: int | None = 0  # 결제 실패 수
@@ -208,6 +209,10 @@ class CompanyCounts:
             gmv=add(self.gmv, other.gmv),
             commission_revenue=add(self.commission_revenue, other.commission_revenue),
             finance_reason=self.finance_reason or other.finance_reason,
+            finance_collected_at=min(
+                (x for x in (self.finance_collected_at, other.finance_collected_at) if x),
+                default=None,
+            ),
             orders=add(self.orders, other.orders),
             attempts=add(self.attempts, other.attempts),
             failed=add(self.failed, other.failed),
@@ -250,10 +255,20 @@ class PeriodCounts:
 
 
 def _finance_dates(start: date, end: date) -> list[tuple[str, date]]:
-    """재무에 물을 (period, UTC 날짜) 목록. 한 달을 통째로 물으면 month 한 번, 아니면 하루씩."""
+    """재무에 물을 (period, UTC 날짜) 목록.
+
+    한 달을 통째로 물으면 month 한 번, 월요일부터 7일이면 week 한 번(#190), 아니면 하루씩.
+    """
     if start.day == 1 and end == _month_start(start, 1):
         return [("month", start)]
+    if is_whole_week(start, end):
+        return [("week", start)]
     return [("day", d) for d in _days(start, end)]
+
+
+def is_whole_week(start: date, end: date) -> bool:
+    """월요일부터 일요일까지 7일인지 (재무 `period=week`와 같은 범위)."""
+    return start.weekday() == 0 and (end - start).days == 7
 
 
 def _finance_note(period: str, start: date, end: date) -> str:
@@ -262,9 +277,10 @@ def _finance_note(period: str, start: date, end: date) -> str:
     return f"재무 마감 기준(UTC 날짜 {span}). 한국 시간 기간보다 9시간 늦게 시작하고 끝남"
 
 
-async def _ask_finance(
-    send: SendFn, meta: RequestMeta, period: str, day: date
-) -> tuple[dict[str, int] | None, str | None]:
+FinanceAnswer = tuple[dict[str, int] | None, str | None, str | None]  # (금액, 이유, 응답 시각)
+
+
+async def _ask_finance(send: SendFn, meta: RequestMeta, period: str, day: date) -> FinanceAnswer:
     deadline = min(meta.deadline, datetime.now(UTC) + timedelta(seconds=FINANCE_TIMEOUT))
     request = AgentRequest(
         meta=meta.model_copy(update={"deadline": deadline}),
@@ -274,22 +290,30 @@ async def _ask_finance(
     try:
         result = await asyncio.wait_for(send("finance", request), timeout=FINANCE_TIMEOUT)
     except Exception as error:  # 보조 조회라 어떤 실패든 확인할 수 없음으로 남긴다
-        return None, f"재무 closing_report 호출 실패 ({type(error).__name__})"
+        return None, f"재무 closing_report 호출 실패 ({type(error).__name__})", None
     if result.status != TaskStatus.COMPLETED:
         if result.outcome == "service_disabled":
-            return None, "재무 서비스가 꺼져 있어 closing_report를 받지 못함"
-        return None, f"재무 closing_report 응답 {result.status.value} ({result.outcome or '-'})"
+            return None, "재무 서비스가 꺼져 있어 closing_report를 받지 못함", None
+        reason = f"재무 closing_report 응답 {result.status.value} ({result.outcome or '-'})"
+        return None, reason, None
+    at = result.evidence.collected_at.isoformat() if result.evidence.collected_at else None
     output = result.output or {}
-    lost = [u for u in output.get("unavailable") or [] if u in REVENUE_INPUTS]
-    if lost:  # 장부에 주문·상품이 없으면 재무는 0으로 계산한다. 0을 쓰지 않는다
-        return None, f"재무 장부에 {', '.join(lost)} 자료가 없어 매출을 확인할 수 없음"
+    unavailable = [str(u) for u in output.get("unavailable") or []]
+    lost = [u for u in unavailable if u in REVENUE_INPUTS]
+    if lost:  # 장부에 주문·상품이 없으면 매출을 믿을 수 없다 (예전 재무는 0으로 계산했다)
+        return None, f"재무 장부에 {', '.join(lost)} 자료가 없어 매출을 확인할 수 없음", at
     amounts: dict[str, int] = {}
     for line in output.get("lines") or []:
-        if isinstance(line, dict) and isinstance(line.get("amount"), int):
-            amounts[str(line.get("code"))] = line["amount"]
+        if not isinstance(line, dict) or line.get("code") not in ("gmv", "commission_revenue"):
+            continue
+        if line.get("amount") is None:  # 재무가 확인할 수 없다고 답함 (#190, 0원과 다르다)
+            why = f" ({', '.join(unavailable)})" if unavailable else ""
+            return None, f"재무가 {line.get('code')}를 확인할 수 없다고 답함{why}", at
+        if isinstance(line.get("amount"), int):
+            amounts[str(line["code"])] = line["amount"]
     if "gmv" not in amounts or "commission_revenue" not in amounts:
-        return None, "재무 closing_report에 gmv·commission_revenue 줄이 없음"
-    return amounts, None
+        return None, "재무 closing_report에 gmv·commission_revenue 줄이 없음", at
+    return amounts, None, at
 
 
 class FinanceAsker:
@@ -312,7 +336,7 @@ class FinanceAsker:
             self._asked[key] = asyncio.ensure_future(self._run(period, day))
         return self._asked[key]
 
-    async def _run(self, period: str, day: date) -> tuple[dict[str, int] | None, str | None]:
+    async def _run(self, period: str, day: date) -> FinanceAnswer:
         async with self._limit:
             self.calls += 1
             return await _ask_finance(self.send, self.meta, period, day)
@@ -321,12 +345,16 @@ class FinanceAsker:
 async def finance_counts(asker: FinanceAsker, start: date, end: date) -> CompanyCounts:
     """한 구간의 총거래액·수수료 매출. 하루라도 받지 못하면 None과 그 이유."""
     answers = await asyncio.gather(*(asker.ask(p, d) for p, d in _finance_dates(start, end)))
-    reason = next((why for _, why in answers if why), None)
+    at = min((when for _, _, when in answers if when), default=None)
+    reason = next((why for _, why, _ in answers if why), None)
     if reason:
-        return CompanyCounts(gmv=None, commission_revenue=None, finance_reason=reason)
+        return CompanyCounts(
+            gmv=None, commission_revenue=None, finance_reason=reason, finance_collected_at=at
+        )
     return CompanyCounts(
-        gmv=sum(a["gmv"] for a, _ in answers if a),
-        commission_revenue=sum(a["commission_revenue"] for a, _ in answers if a),
+        gmv=sum(a["gmv"] for a, _, _ in answers if a),
+        commission_revenue=sum(a["commission_revenue"] for a, _, _ in answers if a),
+        finance_collected_at=at,
     )
 
 
@@ -361,15 +389,20 @@ async def live_counts(
     metrics: MetricSource,
     asker: FinanceAsker,
     tenant_id: str,
+    skip_finance: set[tuple[date, date]] | None = None,
 ) -> list[PeriodCounts]:
     """구간마다 바로 센다. 이어진 구간은 공통 로그를 한 번에 읽고 메모리에서 나눈다.
 
     shop-api 지표를 먼저 받는다. 재무 호출이 shop-api에서 주문 전체를 읽는 동안 줄 서지 않게.
+    `skip_finance` 구간은 재무를 묻지 않는다(주 단위로 한 번에 묻는 주간 리포트).
     """
+    skip = skip_finance or set()
     runs = _runs([d for piece in pieces for d in _days(*piece)])
     read = await asyncio.gather(*(_logs(logs, run, tenant_id) for run in runs))
     shops = await asyncio.gather(*(shop_counts(metrics, piece) for piece in pieces))
-    finances = await asyncio.gather(*(finance_counts(asker, *piece) for piece in pieces))
+    finances = await asyncio.gather(
+        *(_no_finance() if piece in skip else finance_counts(asker, *piece) for piece in pieces)
+    )
     out: list[PeriodCounts] = []
     for piece, shop, finance in zip(pieces, shops, finances, strict=True):
         start, end = _window(piece)
@@ -381,6 +414,10 @@ async def live_counts(
                 truncated = cut
         out.append(PeriodCounts(count_activity(records, truncated), shop.merge(finance)))
     return out
+
+
+async def _no_finance() -> CompanyCounts:
+    return CompanyCounts()
 
 
 async def build_day_snapshot(
@@ -530,8 +567,20 @@ def _company_figures(c: CompanyCounts) -> dict[str, Figure]:
     }
 
 
-def _figure(now: Figure, before: Figure, source: str, note: str | None = None) -> CompanyFigure:
-    return CompanyFigure(value=now.value, previous_period=before.value, source=source, note=note)
+def _figure(
+    now: Figure,
+    before: Figure,
+    source: str,
+    note: str | None = None,
+    collected_at: str | None = None,
+) -> CompanyFigure:
+    return CompanyFigure(
+        value=now.value,
+        previous_period=before.value,
+        source=source,
+        note=note,
+        collected_at=datetime.fromisoformat(collected_at) if collected_at else None,
+    )
 
 
 def _merge(parts: list[PeriodCounts]) -> PeriodCounts:
@@ -573,13 +622,45 @@ async def build_report(
         pieces = _runs([d for d in prev_days if d not in saved]) + _runs(
             [d for d in cur_days if d not in saved]
         )
-    live = await live_counts(pieces, logs, metrics, FinanceAsker(send, meta), tenant)
+    asker = FinanceAsker(send, meta)
+
+    # 주간: 7일이 다 저장돼 있고 매출이 다 있으면 저장된 재무 값의 합.
+    # 아니면(저장 안 된 날, 또는 저장 때 매출을 확인할 수 없던 날이 있으면) 재무 week 한 번
+    def saved_revenue(d: date) -> bool:
+        snap = saved.get(d)
+        return snap is not None and (snap.payload.get("company") or {}).get("gmv") is not None
+
+    weekly = [
+        days
+        for days in (prev_days, cur_days)
+        if data.period == "week"
+        and is_whole_week(days[0], days[-1] + timedelta(days=1))
+        and not all(saved_revenue(d) for d in days)
+    ]
+    skip = {piece for piece in pieces if any(piece[0] in days for days in weekly)}
+    live = await live_counts(pieces, logs, metrics, asker, tenant, skip_finance=skip)
+    week_finance = dict(
+        zip(
+            [days[0] for days in weekly],
+            await asyncio.gather(
+                *(finance_counts(asker, days[0], days[-1] + timedelta(days=1)) for days in weekly)
+            ),
+            strict=True,
+        )
+    )
 
     def total(days: list[date]) -> PeriodCounts:
         inside = set(days)
         parts = [PeriodCounts.from_json(saved[d].payload) for d in days if d in saved]
         parts += [c for piece, c in zip(pieces, live, strict=True) if piece[0] in inside]
-        return _merge(parts)
+        merged = _merge(parts)
+        week = week_finance.get(days[0]) if days else None
+        if week is not None:  # 주 단위 재무 값으로 바꾼다 (저장된 날의 일간 재무 값은 쓰지 않는다)
+            merged.company.gmv = week.gmv
+            merged.company.commission_revenue = week.commission_revenue
+            merged.company.finance_reason = week.finance_reason
+            merged.company.finance_collected_at = week.finance_collected_at
+        return merged
 
     cur_counts, prev_counts = total(cur_days), total(prev_days)
     current = finish_activity(cur_counts.activity, scope)
@@ -593,14 +674,19 @@ async def build_report(
         unknown.append(UnknownSection(section=section, reason=reason))
 
     note = _finance_note(data.period, p.start, p.end)
+    finance_at = cur_counts.company.finance_collected_at  # 이번 기간 재무 응답 시각
     for key in ("gmv", "commission_revenue", "order_count", "payment_success_rate"):
         for label, figures in (("company", fin), ("company.previous_period", prev_fin)):
             if figures[key].value is None and figures[key].reason:
                 missing(f"{label}.{key}", figures[key].reason or "")
     company = ActivityCompany(
-        gmv=_figure(fin["gmv"], prev_fin["gmv"], FINANCE_SOURCE, note),
+        gmv=_figure(fin["gmv"], prev_fin["gmv"], FINANCE_SOURCE, note, finance_at),
         commission_revenue=_figure(
-            fin["commission_revenue"], prev_fin["commission_revenue"], FINANCE_SOURCE, note
+            fin["commission_revenue"],
+            prev_fin["commission_revenue"],
+            FINANCE_SOURCE,
+            note,
+            finance_at,
         ),
         order_count=_figure(fin["order_count"], prev_fin["order_count"], SHOP_SOURCE),
         payment_success_rate=_figure(
