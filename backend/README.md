@@ -49,7 +49,7 @@ AXcellent 에이전트들이 캣북스의 실제 주문·결제 데이터로 A2A
 ```bash
 cd backend
 uv sync --all-packages
-cp .env.example .env            # LLM_MODEL·LLM_BASE_URL·LLM_API_KEY(·EMBED_MODEL)를 채운다. 커밋하지 않는다
+cp .env.example .env            # LLM_MODEL·LLM_BASE_URL·LLM_API_KEY(·EMBED_MODEL)를 채운다. 커밋하지 않는다. 이미지를 읽는 모델이면 영수증 사진 대조도 켜진다
 bash scripts/run_all.sh         # 16개 서버 + 캣북스 고객 주문 트래픽. 로그 backend/.logs/, 데이터 backend/.data/
 bash scripts/run_web.sh         # 다른 터미널: 화면(frontend 3090)을 실제 모드 토큰으로 켠다
 bash scripts/run_all.sh stop
