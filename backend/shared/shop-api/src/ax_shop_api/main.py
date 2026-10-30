@@ -46,6 +46,22 @@ class ProductIn(BaseModel):
     stock: int = Field(ge=0)
 
 
+class SellerProductIn(BaseModel):
+    name: str
+    category_code: str
+    price: int = Field(ge=0)
+    stock: int = Field(ge=0)
+
+
+class SellerIn(BaseModel):
+    """판매자 입점 신청. 처음 올릴 상품을 같이 받는다 (입점 심사가 상품 가격·수를 본다)."""
+
+    name: str
+    category_codes: list[str] = Field(min_length=1)
+    documents_verified: bool = False
+    products: list[SellerProductIn] = Field(default_factory=list, max_length=500)
+
+
 class ProductPatch(BaseModel):
     name: str | None = None
     price: int | None = Field(default=None, ge=0)
@@ -318,6 +334,18 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
     @app.get("/api/shop/products/{product_id}")
     async def get_product(product_id: str) -> dict:
         return _ok(shop.get_product(product_id))
+
+    @app.post("/api/shop/sellers", status_code=201)
+    async def register_seller(body: SellerIn, _: str = Depends(_caller(PRODUCT_WRITERS))) -> dict:
+        """판매자 입점 (운영자만). `seller.registered`로 총괄이 입점 심사를 연다."""
+        created = shop.register_seller(
+            body.name,
+            body.category_codes,
+            body.documents_verified,
+            [p.model_dump() for p in body.products],
+        )
+        await outbox.flush(database)
+        return _ok(created)
 
     @app.post("/api/shop/products", status_code=201)
     async def create_product(body: ProductIn, _: str = Depends(_caller(PRODUCT_WRITERS))) -> dict:

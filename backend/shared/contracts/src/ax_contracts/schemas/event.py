@@ -176,6 +176,8 @@ class SellerRegisteredData(AxModel):
 
     seller_id: str
     category_codes: list[str]
+    # 제출 서류를 운영자가 확인했는가. 예전 이벤트(필드 없음)는 확인 안 함으로 본다
+    documents_verified: bool = False
 
 
 class ProductCreatedData(AxModel):
@@ -333,7 +335,6 @@ class SupportInquiryResolvedData(AxModel):
     claim_decision: Literal["approve", "reject"] | None = None
     coupon_id: str | None = None
     refund_amount: int | None = Field(default=None, ge=0)
-
 
 
 class HandoffCompletedData(AxModel):

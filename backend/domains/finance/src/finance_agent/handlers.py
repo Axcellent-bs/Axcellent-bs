@@ -16,7 +16,8 @@
 - 숫자는 전부 코드로 계산한다. 요청 쪽이 적은 총액·등급은 믿지 않는다.
 - 상태 변경(판매자 승인, 정산 보류)은 `execute()`가 `executed`를 돌려준 뒤에만 기록한다.
 - 외부 입력(`request.untrusted`, 판매자 소개 등)은 읽지 않는다.
-- 저장소는 메모리다. TODO: 정산·심사 기록을 shop-api 쓰기 API(관문 뒤)와 영속 저장소로 옮긴다.
+- 기록은 메모리에 두고 `FINANCE_STATE_FILE`이 있으면 파일에도 남긴다
+  (`persist.py`, 다시 켜도 이어짐).
 """
 
 from __future__ import annotations
@@ -107,7 +108,7 @@ class State:
 
 
 class FinanceRecords:
-    """사람의 결정 기록 (메모리, 데모용). TODO: 영속 저장소로 옮긴다."""
+    """사람의 결정 기록. `FINANCE_STATE_FILE`이 있으면 `persist.py`가 파일에 남긴다."""
 
     def __init__(self) -> None:
         self.closings: dict[tuple[str, str], dict[str, Any]] = {}  # (period, date) → {by, at}
