@@ -141,7 +141,7 @@ class CrossChecker:
     async def gather(self, state: State, pr: PR, ctx: str, now: datetime) -> CrossEvidence:
         ev = CrossEvidence(components=components_of(pr.changed_paths))
         incidents, data = await asyncio.gather(
-            self._incidents(ev.components, ctx),
+            self._incidents(ev.components, ctx, now),
             self._data(ctx, now),
             return_exceptions=True,
         )
@@ -195,8 +195,11 @@ class CrossChecker:
             raise EvidenceUnavailable(f"{out.status.value} {out.outcome or ''}".strip())
         return out.output or {}
 
-    async def _incidents(self, components: list[str], ctx: str) -> list[str]:
-        """구성요소마다 열린 사건을 묻고, 겹친 사건 번호를 돌려준다."""
+    async def _incidents(self, components: list[str], ctx: str, now: datetime) -> list[str]:
+        """구성요소마다 지금 걸쳐 있는 사건을 묻고, 겹친 사건 번호를 돌려준다.
+
+        시각(`occurred_at`)을 같이 보낸다. 시각 없이 물으면 총괄은 `open` 사건만 보고
+        `degraded`(장애 진행 중) 사건을 빼서, 장애 중인데 "없음"이 나왔다."""
         if not components:
             raise EvidenceUnavailable("바뀐 경로의 구성요소를 정하지 못함")
         found: list[str] = []
@@ -205,7 +208,9 @@ class CrossChecker:
                 "orchestrator",
                 "find_active_incident",
                 ctx,
-                FindActiveIncidentInput(component=component).model_dump(mode="json"),
+                FindActiveIncidentInput(component=component, occurred_at=now).model_dump(
+                    mode="json"
+                ),
             )
             try:
                 parsed = FindActiveIncidentOutput.model_validate(body)

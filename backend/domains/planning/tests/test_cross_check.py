@@ -133,12 +133,9 @@ def test_clean_evidence_auto_merges_with_cross_check_params() -> None:
     assert (params["active_incident_overlap"], params["data_verdict"]) == (0, "normal")
     assert (params["recent_incident_count"], params["evidence_missing"]) == (0, 0)
     assert pr.merged
-    # 총괄에는 구성요소로, 데이터분석에는 최근 24시간 창으로 묻는다
-    assert (
-        "orchestrator",
-        "find_active_incident",
-        {"component": "payment", "occurred_at": None},
-    ) in agents.asked
+    # 총괄에는 구성요소와 지금 시각으로 (degraded 사건도 잡게), 데이터분석에는 최근 24시간 창으로
+    asked = [i for t, k, i in agents.asked if k == "find_active_incident"]
+    assert asked and asked[0]["component"] == "payment" and asked[0]["occurred_at"]
     assert any(t == "data" and s == "anomaly_detection" for t, s, _ in agents.asked)
     assert any(a.point == "cross_check" and "근거 통과" in a.text for a in svc.state.activity)
 
