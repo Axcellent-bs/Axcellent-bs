@@ -19,6 +19,7 @@ from planning_agent.coder import CodePlan, CodeReview, FilePick, FileWrite
 from planning_agent.domain.service import ActionError, PlanningService
 from planning_agent.main import app
 from planning_agent.vcs import MockVcsAdapter, VcsError
+from planning_agent.vcs.base import CheckRun, Checks, combine_checks
 
 BANNER = "shop-web/src/components/Banner.tsx"
 NOTICE = "shop-web/src/components/Notice.tsx"
@@ -95,6 +96,13 @@ def adapter(monkeypatch: pytest.MonkeyPatch):
     vcs.set_vcs(None)
     coder.reset_llm()
     repo_routing.reset_llm()
+
+
+async def _retry(svc: PlanningService, task_id: str):
+    """다시 시도하고 같은 이벤트 루프에서 끝날 때까지 기다린다."""
+    out = await svc.retry_dev_task(task_id)
+    await svc.wait_coding()
+    return out
 
 
 async def _go(svc: PlanningService, **kw: Any):
@@ -479,8 +487,7 @@ def test_retry_reuses_written_code_without_llm(service: PlanningService, adapter
     assert wrote.count("CodePlan") == 2 and wrote.count("FileWrite") == 2  # 후보·확정
 
     vcs.set_vcs(adapter)  # 형상관리 권한을 고쳤다고 치고 다시 시도
-    run(service.retry_dev_task("T-D1"))
-    run(service.wait_coding())
+    run(_retry(service, "T-D1"))
     again = [c[0] for c in llm.calls]
     assert again.count("CodePlan") == 2 and again.count("FileWrite") == 2  # 다시 쓰지 않음
     c = _task(service).coding
@@ -783,3 +790,97 @@ def test_now_does_not_wait(service, adapter, monkeypatch) -> None:
 
     run(flow())
     assert _task(service, "T-D2").coding.skip_queue
+
+
+# ---------------------------------------------------------------- PR 직전 확인·CI·충돌 다시 쓰기
+
+
+class ChecksAdapter(MockVcsAdapter):
+    """PR CI 결과를 정해 둔다 (차례대로, 마지막 것은 계속)."""
+
+    def __init__(self, *states: str):
+        super().__init__()
+        self.states = list(states)
+        self.seed_files(FILES)
+
+    async def get_checks(self, number: int) -> Checks:
+        state = self.states.pop(0) if len(self.states) > 1 else self.states[0]
+        if state == "none":
+            return combine_checks([])
+        return combine_checks([CheckRun(name="build", state=state)])  # type: ignore[arg-type]
+
+
+def test_waits_for_ci_then_merges(service: PlanningService, adapter) -> None:
+    vcs.set_vcs(ChecksAdapter("pending", "pending", "passed"))
+    coder.set_llm(FakeLLM())
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "merged"
+    texts = [a.text for a in service.state.activity if a.point == "code.ci"]
+    assert any("CI 기다림" in t for t in texts) and any("CI 통과" in t for t in texts)
+
+
+def test_ci_failure_holds_for_human(service: PlanningService, adapter) -> None:
+    vcs.set_vcs(ChecksAdapter("failed"))
+    coder.set_llm(FakeLLM())
+    run(_go(service))
+    c = _task(service).coding
+    pr = next(p for p in service.state.prs if p.id == c.pr)
+    assert c.status == "waiting_human" and "CI 실패 (build)" in (c.error or "")
+    assert not pr.merged and pr.auto_review is not None
+
+
+def test_ci_timeout_holds_for_human(service: PlanningService, adapter, monkeypatch) -> None:
+    monkeypatch.setattr(coder, "CI_WAIT_SECONDS", 0.0)
+    vcs.set_vcs(ChecksAdapter("pending"))
+    coder.set_llm(FakeLLM())
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "waiting_human" and "안 끝남" in (c.error or "")
+
+
+def test_base_changed_before_pr_rewrites_once(service: PlanningService, adapter) -> None:
+    """쓰는 동안 기준 브랜치의 같은 파일이 바뀌면 PR 직전 한 곳에서 최신 글 위에 다시 쓴다."""
+    seen: list[str] = []
+
+    def write_banner(data: dict) -> str:
+        seen.append(data.get("current", data.get("content", "")))
+        if len(seen) == 1:
+            adapter.seed_files({BANNER: BANNER_OLD.replace("배너", "새 배너")})  # 사람이 먼저 머지
+        return BANNER_NEW
+
+    fake = FakeLLM(
+        writes={BANNER: write_banner, NOTICE: NOTICE_NEW},
+        reviews=[CodeReview(verdict="통과", notes=[]), CodeReview(verdict="통과", notes=[])],
+    )
+    coder.set_llm(fake)
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "merged"
+    assert "code.rebase" in _points(service)
+    assert [x[0] for x in fake.calls].count("CodeReview") == 2  # 다시 쓴 뒤 다시 리뷰
+
+
+def test_merge_conflict_retry_closes_pr_and_rewrites(service: PlanningService, adapter) -> None:
+    class Conflict(MockVcsAdapter):
+        clash = True
+
+        async def merge_change(self, number: int, method: str = "squash"):
+            if self.clash:
+                raise VcsError("conflict", "merge conflict")
+            return await super().merge_change(number, method)
+
+    broken = Conflict()
+    broken.seed_files(FILES)
+    vcs.set_vcs(broken)
+    coder.set_llm(FakeLLM(reviews=[CodeReview(verdict="통과", notes=[])] * 2))
+    run(_go(service))
+    c = _task(service).coding
+    first = c.pr
+    assert c.status == "failed" and c.merge_conflict and "충돌" in (c.error or "")
+
+    broken.clash = False  # 최신 코드로 다시 쓰면 충돌이 풀린다
+    run(_retry(service, "T-D1"))
+    old = next(p for p in service.state.prs if p.id == first)
+    c = _task(service).coding
+    assert old.closed and c.pr != first and c.status == "merged"

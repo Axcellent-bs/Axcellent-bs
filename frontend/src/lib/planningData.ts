@@ -101,6 +101,7 @@ export interface CodingRun {
   instruction?: string | null // 사람이 대기 중인 PR에 준 수정 지시
   skipQueue?: boolean // '지금 진행': 같은 파일 작업이 있어도 기다리지 않음
   waitingFor?: string[] // 작업 대기열: 같은 파일을 먼저 고치는 앞 작업
+  mergeConflict?: boolean // 머지 충돌: 다시 시도하면 PR을 닫고 최신 코드로 다시 씀
 }
 
 export interface PR {

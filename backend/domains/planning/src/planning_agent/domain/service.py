@@ -2619,6 +2619,7 @@ class PlanningService:
         """실패·사람 확인으로 멈췄거나 사람이 중단한 코딩 작업을 처음부터 다시 돌린다 (재개).
 
         열린 PR이 있으면 안 된다 (중단하면 PR은 닫히므로 중단한 작업은 재개할 수 있다).
+        머지가 충돌로 실패한 작업만 예외: 그 PR을 닫고 최신 코드로 다시 쓴다.
         다시 돌 때 레포의 최신 코드를 다시 읽는다."""
         task = next((t for t in self.state.tasks if t.id == task_id), None)
         if task is None or task.coding is None:
@@ -2626,7 +2627,9 @@ class PlanningService:
         resumable = ("failed", "waiting_human", "canceled")
         if task_id in self._coding or task.coding.status not in resumable:
             raise ActionError("NOT_RETRYABLE", f"{task_id}는 진행 중이거나 끝났다")
-        if any(p.task == task_id and not p.closed for p in self.state.prs):
+        conflict = task.coding.merge_conflict
+        if any(p.task == task_id and not p.closed and (p.merged or not conflict)
+               for p in self.state.prs):  # fmt: skip
             raise ActionError(
                 "NOT_RETRYABLE", f"{task_id}는 이미 PR이 있다 → PR 화면에서 머지·판단"
             )
@@ -2642,6 +2645,18 @@ class PlanningService:
             ctx = req.context_id if req else f"task:{task_id}"
             t = self.clock()
             how = "재개" if x.coding.status == "canceled" else "다시 시도"
+            if x.coding.merge_conflict:
+                how = "충돌 → 최신 코드로 다시 쓰기"
+                for pr in [p for p in s.prs if p.task == task_id and not p.closed]:
+                    note = await vcs_bridge.close_pr(pr)
+                    if note is not None:
+                        s.activity.append(
+                            self._act(self.clock(), ctx, "dev", "dev", note.point, "API", note.text)
+                        )
+                    if note is not None and not note.ok:
+                        raise ActionError("NOT_RETRYABLE", f"{pr.id}를 닫지 못해 다시 쓰지 않음")
+                    pr.closed = True
+                    pr.auto_review = None
             text = f"{task_id} 코딩 에이전트 {how} (연결 {cid})"
             n = sum(1 for g in self.gate_calls if g.action == "dev_task_retry") + 1
             await self._execute("dev_task_retry", ctx, f"{task_id}:{n}", text, {"connection": cid})
@@ -3063,10 +3078,16 @@ class PlanningService:
         return opened
 
     async def coding_review(
-        self, job: coder.Job, verdict: str, notes: list[str], earlier: list[str] | None = None
+        self,
+        job: coder.Job,
+        verdict: str,
+        notes: list[str],
+        earlier: list[str] | None = None,
+        ci_hold: str | None = None,
     ) -> bool:
         """리뷰 결과를 관문 review_pr 뒤 PR에 남긴다. 통과면 기존 자동 머지 규칙대로 잇는다.
         earlier는 PR 전에 고치느라 지나간 리뷰 결과다 (PR 리뷰 기록 앞에 붙인다).
+        ci_hold는 CI가 실패·시간 초과해 자동 머지하지 않고 사람 확인으로 둘 이유다.
 
         돌려주는 값: 불일치라 한 번 더 고쳐야 하면 True."""
         fix = False
@@ -3090,6 +3111,13 @@ class PlanningService:
             cr.review = CodingReview(verdict=verdict, notes=notes)  # type: ignore[arg-type]
             cr.updated_at = self.clock()
             self._code_act(s, job, "code.review", f"리뷰 {verdict} · 노트 {len(notes)}개")
+            if verdict == "통과" and ci_hold:
+                task.state = "머지 대기"
+                self._hold(p, WAIT_HUMAN, pr_check(s, p))
+                cr.status = "waiting_human"
+                cr.error = ci_hold
+                self._code_act(s, job, "code.ci", ci_hold)
+                return
             if verdict == "통과":
                 task.state = "머지 대기"
                 await self._try_auto_merge(s, p)
@@ -3101,7 +3129,18 @@ class PlanningService:
                     cr.error = f"자동 머지 안 함 → {p.auto_review.state} ({why})"
                 else:
                     cr.status = "failed"
-                    cr.error = "형상관리 병합 실패 → 사람 머지 버튼으로 다시 시도"
+                    fail = next(
+                        (a for a in reversed(s.activity)
+                         if a.point == "vcs.merge_failed" and a.text.startswith(f"{p.id} ")),
+                        None,
+                    )  # fmt: skip
+                    cr.merge_conflict = fail is not None and vcs_bridge.CONFLICT_MARK in fail.text
+                    if cr.merge_conflict:
+                        cr.error = f"{p.id} 머지 충돌 → 다시 시도하면 PR을 닫고 최신 코드로 다시 씀"
+                    elif fail is not None:
+                        cr.error = f"{fail.text} → 사람 머지 버튼으로 다시 시도"
+                    else:
+                        cr.error = "형상관리 병합 실패 → 사람 머지 버튼으로 다시 시도"
                     self._code_act(s, job, "code.failed", cr.error)
                 return
             task.state = "PR 검수"

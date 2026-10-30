@@ -208,6 +208,8 @@ class CodingRun(DomainModel):
     # skip_queue는 사람이 '지금 진행'으로 기다리지 않게 한 작업. 머지는 그래도 차례로 간다
     skip_queue: bool = False
     waiting_for: list[str] = Field(default_factory=list)  # 기다리는 앞 작업 id
+    # 머지가 충돌로 실패함: 다시 시도하면 PR을 닫고 최신 코드로 다시 쓴다
+    merge_conflict: bool = False
 
 
 class Task(DomainModel):
