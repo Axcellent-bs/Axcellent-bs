@@ -239,6 +239,19 @@ def merge_fail_reason(code: str) -> str:
     return code
 
 
+async def change_state(pr: PR) -> str | None:
+    """형상관리에서 본 PR 상태 (open·merged·closed). 목 설정·번호 없음·읽기 실패면 None."""
+    if pr.vcs_number is None:
+        return None
+    try:
+        adapter = active(_connection_of(pr))
+        if adapter is None:
+            return None
+        return (await adapter.describe_change(pr.vcs_number)).state
+    except VcsError:
+        return None
+
+
 async def close_pr(pr: PR) -> Note | None:
     """중단: 병합 안 된 PR을 닫고 브랜치를 지운다. 목 설정이면 None. 실패하면 ok False."""
     try:

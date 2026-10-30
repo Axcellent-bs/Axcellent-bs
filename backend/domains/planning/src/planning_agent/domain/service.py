@@ -444,6 +444,7 @@ class PlanningService:
         self._resuming = False  # 대기 대화를 깨우는 중 (다시 깨우지 않는다)
         self._retrying = False  # 못 보낸 넘기기를 다시 보내는 중
         self._retry_task: asyncio.Task | None = None
+        self._pr_sync: asyncio.Task | None = None  # 바깥에서 머지·닫은 PR 맞추기 루프
         self._polling_wait = False  # 다른 서비스 요청을 기다리는 대화를 주기적으로 보는 중
         # 코딩 에이전트 실행 (작업 id → 실행 중인 태스크·실행 번호). 번호가 바뀐 실행은 버린다
         self._coding: dict[str, asyncio.Task] = {}
@@ -821,6 +822,73 @@ class PlanningService:
         for item in self._dev_outgoing(self.state, full=True):
             await self._send_one(*item)
         self._save()
+
+    async def sync_prs(self) -> int:
+        """사람이 GitHub 등에서 직접 머지하거나 닫은 PR을 기록에 맞춘다. 맞춘 개수.
+
+        머지됐으면 사람 머지와 같은 길(기록·요청 닫기·작업 완료)로, 닫혔으면 작업을 중단으로
+        둔다 (재개하면 최신 코드로 다시 쓴다). 돌고 있는 코딩 작업의 PR은 건드리지 않는다."""
+        live = [
+            p for p in self.state.prs
+            if p.vcs_number is not None and not p.merged and not p.closed
+            and p.task not in self._coding
+        ]  # fmt: skip
+        seen = {p.id: await vcs_bridge.change_state(p) for p in live}
+        done = {k: v for k, v in seen.items() if v in ("merged", "closed")}
+        if not done:
+            return 0
+
+        async def run(s: State) -> None:
+            for p in s.prs:
+                how = done.get(p.id)
+                if how is None or p.merged or p.closed:
+                    continue
+                ctx = self._ctx_of_pr(s, p)
+                where = "형상관리에서 직접 " + ("머지됨" if how == "merged" else "닫힘")
+                s.activity.append(
+                    self._act(self.clock(), ctx, "human", "dev", "vcs.synced", "API",
+                              f"{p.id} {where} → 기록 맞춤")
+                )  # fmt: skip
+                task = next((t for t in s.tasks if t.id == p.task), None)
+                if how == "merged":
+                    try:
+                        await self._do_merge(s, p, pr_check(s, p), auto=False)
+                    except GateRefused:
+                        pass
+                    if not p.merged:  # 이미 머지된 사실은 관문·병합 호출 결과와 상관없이 맞춘다
+                        p.merged = True
+                        p.merged_at = self.clock()
+                        if task is not None:
+                            task.state = "완료"
+                    p.auto_review = None
+                    continue
+                p.closed = True
+                p.auto_review = None
+                if task is not None:
+                    task.state = "중단"
+                    cr = task.coding
+                    if cr is not None and cr.status not in ("merged", "canceled"):
+                        cr.status = "canceled"
+                        cr.error = f"{p.id} {where} → 재개하면 최신 코드로 다시 씀"
+                        cr.updated_at = self.clock()
+
+        await self._apply(run)
+        return len(done)
+
+    def start_pr_sync(self) -> None:
+        """PR_SYNC_SECONDS마다 sync_prs를 돈다 (한 번만 켠다). 기획 서비스는 PR이 없어 안 켠다."""
+        if self._pr_sync is not None or self.role == "planning":
+            return
+
+        async def loop() -> None:
+            while True:
+                await asyncio.sleep(PR_SYNC_SECONDS)
+                try:
+                    await self.sync_prs()
+                except Exception:  # noqa: BLE001 - 맞추기 실패로 루프가 멈추지 않게 한다
+                    continue  # 다음 차례에 다시
+
+        self._pr_sync = asyncio.get_running_loop().create_task(loop())
 
     async def wait_sent(self) -> None:
         """보내는 중인 넘기기가 끝날 때까지 기다린다 (테스트용)."""
@@ -4332,6 +4400,7 @@ __all__ = [
 
 WAIT_POLL_SECONDS = 30  # 다른 서비스 요청을 기다리는 대화를 다시 보는 간격
 RETRY_SECONDS = 30  # 못 보낸 넘기기를 다시 보내는 간격
+PR_SYNC_SECONDS = 60  # 형상관리에서 직접 머지·닫은 PR을 맞추는 간격
 
 
 def _cross_check_timeout_min() -> int:
