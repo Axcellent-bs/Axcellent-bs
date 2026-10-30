@@ -15,6 +15,29 @@
 
 - 숫자는 코드가 계산한다(`metrics/`, `impact.py`, `detect.py`). LLM은 계산이 끝난 숫자로 설명 문장만 쓴다(`explain.py`)
 - 주기 감시(`monitor.py`)는 `anomaly_detection`과 같은 판정 함수로 최근 구간을 보고 `metric.anomaly` 이벤트를 낸다. 사건은 열지 않는다(`context_id` 없음)
+### 새 회사를 붙일 때 필요한 것 (지금은 지표 카탈로그만)
+data 엔진에서 회사마다 다른 것은 **지표 카탈로그** 파일 하나에 모았다. 형식은 계약 `ax_contracts.schemas.data.MetricCatalog`이다.
+
+- 파일: `src/data_agent/catalogs/<회사>.toml` (캣북스는 `catbooks.toml`). 고르는 환경변수는 `DATA_TENANT_CATALOG`(기본 `catbooks`, `.toml` 경로도 받는다).
+- 들어가는 것:
+  - `metrics[]`: 감시할 지표. 순서대로 판정한다.
+    - `id`·`label`(한국어)·`bad_direction`(`up`|`down`)·`unit`
+    - `fault_codes`: 장애 쪽 실패 코드. 있으면 확률 기준도 본다
+    - `aggregate`(`sum`|`mean`)·`denominator`(비율 지표의 분모)·`scale_with_volume`(거래량만큼 기준 보정)
+  - `volume_metric`·`volume_label`: 거래량 지표와 그 이름(빈 구간 판단·기준 보정). 없으면 쓰지 않는다
+  - `impact`: `unit_label`(예: 주문·출고), `customer_label`(예: 고객·거래처), `money_field`, `money_unit`. 영향 설명 문장의 단위다
+  - `categories`: 카테고리 코드 → 한국어 이름
+- 카탈로그에서 읽는 곳(이번에 옮긴 것):
+  - 이상 탐지의 지표 목록·나쁜 방향·비율 지표·장애 쪽 코드(`detect`·`metrics/judge`·`impact`)
+  - 주기 감시의 지표 목록(`monitor`)
+  - 설명 문장의 지표 이름·영향 단위(`explain`·`anomaly_detection`)
+  - 리포트의 "회사 주문 수" 이름(`activity_report`)
+- 테스트 전용 가짜 회사 `tests/catalogs/coldchain.toml`(냉장 물류: 지표 2개, 단위 "출고", 고객 "거래처")로 판정·설명·리포트 이름이 캣북스 단어 없이 나오는지 본다(`tests/test_metric_catalog.py`).
+- **아직 안 된 것 (다음 PR):**
+  - 지표를 어디서 받는지(커넥터): 지금은 shop-api(`clients/shop_client.py`, `/metric-series`·`/failed-orders`)만 있다. 다른 회사는 커넥터가 있어야 실제로 돈다.
+  - 계약 `BusinessMetric`이 캣북스 지표 4개로 고정된 `Literal`이라, `anomaly_detection` skill의 입력·출력은 아직 다른 회사 지표를 담지 못한다. 계약은 추가만 해야 해서 새 칸이 필요하다.
+  - 비율 지표 안내 문장의 "결제 N건 미만", 사용자 쪽 실패 코드(`impact.USER_SIDE_REASONS`), 영향 분석 근거 문장, 판매자 사기 점수(`fraud_score`)는 아직 캣북스 말이다.
+
 ## 2. 실행 방법
 `docker compose -f infra/compose.yml up data` / 목 모드: `DATA_MOCK=1`
 

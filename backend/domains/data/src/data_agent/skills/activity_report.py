@@ -48,6 +48,7 @@ from ax_contracts.schemas.data import (
     UnknownSection,
     UnusedHandoff,
 )
+from data_agent import catalog
 from data_agent.clients.log_client import LogSource
 from data_agent.clients.shop_client import ShopUnavailable
 from data_agent.detect import MetricSource
@@ -510,7 +511,7 @@ def _candidates(company: ActivityCompany, departments: list[DepartmentReport]) -
     for key, label in (
         ("gmv", "회사 총거래액"),
         ("commission_revenue", "회사 수수료 매출"),
-        ("order_count", "회사 주문 수"),
+        ("order_count", f"회사 {catalog.current().impact.unit_label} 수"),  # 캣북스: 회사 주문 수
         ("incident_count", "회사 사건 수"),
     ):
         figure: CompanyFigure = getattr(company, key)

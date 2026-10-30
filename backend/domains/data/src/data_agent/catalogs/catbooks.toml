@@ -1,0 +1,62 @@
+# 캣북스(온라인 서점) 지표 카탈로그. data 엔진이 이 파일에서 지표·방향·장애 코드·이름을 읽는다.
+# 값은 카탈로그를 만들기 전 코드에 있던 것을 그대로 옮겼다 (detect.WATCHED_METRICS, judge의 방향,
+# impact.FAULT_REASONS, 설명 문장의 단위). 다른 회사는 같은 모양의 파일을 하나 더 만든다.
+# 형식: ax_contracts.schemas.data.MetricCatalog
+id = "catbooks"
+name = "캣북스"
+# 거래량 지표: 빈 구간 판단(이 지표와 분모가 모두 0이면 판정하지 않음), 거래량에 따른 기준 보정
+volume_metric = "order_count"
+# 거래량을 부르는 말: "구간에 주문·결제 기록이 하나도 없음"
+volume_label = "주문·결제"
+
+[[metrics]]
+id = "payment_fail_rate"
+label = "결제 실패율"
+bad_direction = "up"
+unit = "비율"
+aggregate = "mean"
+denominator = "payment_count"  # 비율 지표: 결제 시도 수
+# 장애(결제 서버·결제사 쪽) 실패 코드 (shop-api failure_code). 이 코드만 장애 피해로 센다
+fault_codes = [
+  "PG_UNAVAILABLE",  # shop-api 장애 주입(결제 서버 5xx)
+  "PG_TIMEOUT",
+  "PG_ERROR",
+  "PG_5XX",
+  "GATEWAY_TIMEOUT",
+  "PAYMENT_GATEWAY_TIMEOUT",
+  "TIMEOUT",
+  "SERVER_ERROR",
+  "NETWORK_ERROR",
+]
+
+[[metrics]]
+id = "order_fail_count"
+label = "주문 실패 건수"
+bad_direction = "up"
+unit = "건"
+aggregate = "sum"
+scale_with_volume = true  # 주문이 평소보다 많으면 그만큼 기준을 늘려 본다
+
+[[metrics]]
+id = "order_count"
+label = "주문 수"
+bad_direction = "down"  # 감소만 이상 (세일·캠페인으로 늘어난 것은 이상이 아님)
+unit = "건"
+aggregate = "sum"
+
+[[metrics]]
+id = "inquiry_count"
+label = "문의량"
+bad_direction = "up"
+unit = "건"
+aggregate = "sum"
+
+# 영향 분석·설명 문장의 단위 ("장애 구간 실패 주문 N건, 영향 고객 N명, 피해 금액 N원")
+[impact]
+unit_label = "주문"
+customer_label = "고객"
+money_field = "amount"  # 피해 금액으로 더하는 칸 (shop-api 실패 주문의 amount)
+money_unit = "원"
+
+# 카테고리 코드 → 한국어 이름. 지금 data 코드에는 캣북스 카테고리 이름이 없어 비워 둔다
+[categories]

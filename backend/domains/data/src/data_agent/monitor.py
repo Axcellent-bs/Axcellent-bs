@@ -27,7 +27,7 @@ from datetime import UTC, date, datetime, time, timedelta, timezone
 from ax_agent_template.events import publish
 from ax_contracts.schemas import EventEnvelope, EventType
 from ax_contracts.schemas.event import MetricAnomalyData
-from data_agent.detect import WATCHED_METRICS, MetricSource, judge_window
+from data_agent.detect import WATCHED_METRICS, MetricSource, judge_window, watched_metrics
 from data_agent.metrics.judge import Judgement, Settings, settings_for
 from data_agent.report_store import ReportStore, Snapshot
 
@@ -89,7 +89,8 @@ async def run_once(
     now = now.astimezone(UTC)
     window_from = now - lookback
     settings = settings or settings_for(None, os.environ)
-    judged = await judge_window(source, window_from, now, [m for m, _ in WATCHED_METRICS], settings)
+    watched = [m for m, _ in watched_metrics()]  # 회사 카탈로그의 지표
+    judged = await judge_window(source, window_from, now, watched, settings)
     emitted: list[EventEnvelope] = []
     for j in judged.judgements:
         if j.status != "anomaly":

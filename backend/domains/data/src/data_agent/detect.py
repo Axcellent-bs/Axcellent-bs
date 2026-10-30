@@ -12,12 +12,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol, runtime_checkable
 
 from ax_contracts.data_access.shop_failed_orders import FailedOrder
+from data_agent import catalog
 from data_agent.clients.shop_client import FAILED_ORDERS_LIMIT
 from data_agent.metrics.anomaly import Agg
 from data_agent.metrics.judge import (
     BASELINE_DAYS,
     FAULT_LAMBDA_SPAN,
-    RATE_METRICS,
     Judgement,
     Settings,
     empty_window,
@@ -31,14 +31,24 @@ from data_agent.metrics.judge import _unknown as unknown_judgement
 
 Point = tuple[datetime, float]
 
-# (지표, 예전 5분 버킷 집계 방식). 지표 목록은 skill 기본값과 감시가 같이 쓴다
-WATCHED_METRICS: list[tuple[str, Agg]] = [
-    ("payment_fail_rate", "mean"),
-    ("order_fail_count", "sum"),
-    ("order_count", "sum"),
-    ("inquiry_count", "sum"),
-]
-EMPTY_WINDOW = "구간에 주문·결제 기록이 하나도 없음 (자료가 빠졌는지 정말 0건인지 알 수 없음)"
+
+def watched_metrics() -> list[tuple[str, Agg]]:
+    """(지표, 5분 버킷 집계 방식). 회사 카탈로그 순서다. skill 기본값과 감시가 같이 쓴다."""
+    return [(m.id, m.aggregate) for m in catalog.current().metrics]
+
+
+# 예전 이름 (시작할 때의 카탈로그). 판정은 `watched_metrics()`를 쓴다
+WATCHED_METRICS: list[tuple[str, Agg]] = watched_metrics()
+
+
+def empty_reason() -> str:
+    """구간에 거래량·분모 기록이 하나도 없을 때의 이유. 이름은 카탈로그 `volume_label`."""
+    shown = catalog.current().volume_label or "거래"
+    return f"구간에 {shown} 기록이 하나도 없음 (자료가 빠졌는지 정말 0건인지 알 수 없음)"
+
+
+# 예전 이름 (시작할 때의 카탈로그). 캣북스: "구간에 주문·결제 기록이 하나도 없음 …"
+EMPTY_WINDOW = empty_reason()
 
 
 class MetricSource(Protocol):
@@ -219,42 +229,52 @@ async def judge_window(
     settings: Settings,
 ) -> WindowJudgement:
     """구간 [window_from, window_to)를 지난 7일 같은 시간대와 비교해 지표별 판정을 낸다."""
-    metrics = list(dict.fromkeys(metrics or [])) or [name for name, _ in WATCHED_METRICS]
+    cat = catalog.current()
+    metrics = list(dict.fromkeys(metrics or [])) or [name for name, _ in watched_metrics()]
     start = _floor_5m(window_from)
-    # λ의 자료 유무는 이 주문 수 시계열로 안다. 7일 전 날의 "같은 시각 − 1시간" 쪽은 이 범위 밖이라
+    # 거래량 지표(캣북스: 주문 수)와 비율 지표의 분모(캣북스: 결제 시도 수)를 같이 읽는다.
+    # λ의 자료 유무는 거래량 시계열로 안다. 7일 전 날의 "같은 시각 − 1시간" 쪽은 이 범위 밖이라
     # 그 날은 범위 안 구간만 센다(자료가 있는 구간만 평균)
     history_from = start - timedelta(days=BASELINE_DAYS)
-    needed = list(dict.fromkeys([*metrics, "order_count", "payment_count"]))
+    volume_metric = cat.volume_metric
+    rates = catalog.rate_metric_ids()
+    denominators = [m.denominator for m in cat.metrics if m.denominator]
+    needed = list(dict.fromkeys([*metrics, *filter(None, [volume_metric]), *denominators]))
     series = {m: await _series(source, m, history_from, window_to) for m in needed}
     window = window_buckets(window_from, window_to)
-    faults = await _faults(source, start, window_to) if RATE_METRICS & set(metrics) else None
+    with_faults = any((m := catalog.metric(x)) and m.fault_codes for x in metrics)
+    faults = await _faults(source, start, window_to) if with_faults else None
     fault_history = await _fault_history(source, start, window_to) if faults is not None else None
 
-    empty = empty_window(window, series["order_count"], series["payment_count"])
-    orders = judge_count("order_count", window, series["order_count"], settings)
+    volume_series = series.get(volume_metric or "", {})
+    first_denominator = series.get(denominators[0], {}) if denominators else {}
+    empty = bool(volume_metric) and empty_window(window, volume_series, first_denominator)
+    orders = judge_count(volume_metric, window, volume_series, settings) if volume_metric else None
     volume = 1.0
-    if orders.status != "unknown" and orders.baseline > 0:
+    if orders is not None and orders.status != "unknown" and orders.baseline > 0:
         volume = max(1.0, orders.observed / orders.baseline)
 
     judgements: list[Judgement] = []
     for metric in metrics:
+        spec = catalog.metric(metric)
         if empty:
-            judgements.append(unknown_judgement(metric, EMPTY_WINDOW))
-        elif metric in RATE_METRICS:
+            judgements.append(unknown_judgement(metric, empty_reason()))
+        elif metric in rates and spec is not None and spec.denominator:
             judgements.append(
                 judge_payment(
                     window,
                     series[metric],
-                    series["payment_count"],
-                    faults,
+                    series[spec.denominator],
+                    faults if spec.fault_codes else None,
                     settings,
-                    orders=series["order_count"],
+                    orders=volume_series,
                     fault_history=fault_history,
+                    metric=metric,
                 )
             )
-        elif metric == "order_count":
+        elif orders is not None and metric == volume_metric:
             judgements.append(orders)
-        elif metric == "order_fail_count":
+        elif spec is not None and spec.scale_with_volume:
             judgements.append(
                 judge_count(metric, window, series[metric], settings, volume_factor=volume)
             )

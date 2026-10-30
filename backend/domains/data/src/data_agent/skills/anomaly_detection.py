@@ -28,6 +28,7 @@ from datetime import UTC, datetime
 from ax_agent_template.llm import LLMClient
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import AnomalyDetectionInput, AnomalyDetectionOutput, MetricVerdict
+from data_agent import catalog
 from data_agent.clients.shop_client import HttpMetricSource, shop_api
 from data_agent.detect import EMPTY_WINDOW, MetricSource, judge_window
 from data_agent.explain import explain
@@ -104,7 +105,7 @@ async def detect_anomalies(
         explanation = await explain(
             "anomaly",
             {
-                "metric": worst.metric,
+                "metric": catalog.label(worst.metric),  # 회사 카탈로그의 한국어 이름
                 "baseline": worst.baseline,
                 "observed": worst.observed,
                 "ratio": worst.ratio if worst.ratio is not None else "-",

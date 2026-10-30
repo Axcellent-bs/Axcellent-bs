@@ -413,3 +413,42 @@ class ActivityReportOutput(AxModel):
     unused_handoffs: list[UnusedHandoff] = Field(
         default_factory=list
     )  # AI를 쓰지 않는 부서로 넘긴 일
+
+
+# --------------------------------------------------------------- 지표 카탈로그 (회사별 설정 형식)
+# data 엔진이 회사마다 다른 것(지표 이름·나쁜 방향·장애 쪽 코드·단위·카테고리 이름)을 이 형식의
+# 파일에서 읽는다. 캣북스는 data `catalogs/catbooks.toml`. 값은 회사 설정이고 숫자를 만들지 않는다.
+class CatalogMetric(AxModel):
+    id: str  # 커넥터가 주는 지표 이름 (예: payment_fail_rate)
+    label: str  # 한국어 표시명 (설명 문장·리포트)
+    bad_direction: Literal["up", "down"]  # 어느 쪽으로 움직이면 이상인지
+    unit: str  # 단위 (예: 건, 비율)
+    # 장애 쪽 실패 코드 (있으면 확률 기준도 본다)
+    fault_codes: list[str] = Field(default_factory=list)
+    aggregate: Literal["sum", "mean"] = "sum"  # 5분 구간으로 묶는 방법
+    denominator: str | None = None  # 비율 지표의 분모 지표 (예: 결제 시도 수)
+    scale_with_volume: bool = False  # 거래량이 평소보다 많으면 기준을 그만큼 늘려 볼지
+
+
+class CatalogImpact(AxModel):
+    unit_label: str  # 영향의 단위 (예: 주문, 출고)
+    customer_label: str  # 영향받은 사람 (예: 고객, 거래처)
+    money_field: str  # 피해 금액으로 더하는 칸
+    money_unit: str = "원"
+
+
+class MetricCatalog(AxModel):
+    id: str
+    name: str  # 회사 표시명
+    metrics: list[CatalogMetric] = Field(min_length=1)  # 감시하는 지표 (순서대로 판정)
+    impact: CatalogImpact
+    categories: dict[str, str] = Field(default_factory=dict)  # 카테고리 코드 → 한국어 이름
+    volume_metric: str | None = None  # 거래량 지표 (빈 구간 판단·기준 보정). 없으면 쓰지 않는다
+    volume_label: str | None = None  # 거래량을 부르는 말 (예: 주문·결제). 빈 구간 안내에 쓴다
+
+    @model_validator(mode="after")
+    def _unique_metric_ids(self) -> Self:
+        ids = [m.id for m in self.metrics]
+        if len(ids) != len(set(ids)):
+            raise ValueError("metric id가 겹친다")
+        return self
