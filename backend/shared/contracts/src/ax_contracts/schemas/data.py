@@ -459,6 +459,7 @@ class CatalogMetric(AxModel):
     fault_codes: list[str] = Field(default_factory=list)
     aggregate: Literal["sum", "mean"] = "sum"  # 5분 구간으로 묶는 방법
     denominator: str | None = None  # 비율 지표의 분모 지표 (예: 결제 시도 수)
+    denominator_label: str | None = None  # 분모를 부르는 말 (예: 결제). 판정 안내 문장에 쓴다
     scale_with_volume: bool = False  # 거래량이 평소보다 많으면 기준을 그만큼 늘려 볼지
 
 
@@ -475,6 +476,8 @@ class MetricCatalog(AxModel):
     metrics: list[CatalogMetric] = Field(min_length=1)  # 감시하는 지표 (순서대로 판정)
     impact: CatalogImpact
     categories: dict[str, str] = Field(default_factory=dict)  # 카테고리 코드 → 한국어 이름
+    # 사용자 쪽 실패 코드 → 한국어 이름 (장애와 무관해 영향에서 뺀다. 예: 카드 거절)
+    user_codes: dict[str, str] = Field(default_factory=dict)
     volume_metric: str | None = None  # 거래량 지표 (빈 구간 판단·기준 보정). 없으면 쓰지 않는다
     volume_label: str | None = None  # 거래량을 부르는 말 (예: 주문·결제). 빈 구간 안내에 쓴다
     # 지표·실패 이벤트·거래량을 읽는 커넥터 이름 (data `clients.shop_client.CONNECTORS`)

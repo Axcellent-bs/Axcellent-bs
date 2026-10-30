@@ -643,7 +643,8 @@ def _company_figures(c: CompanyCounts) -> dict[str, Figure]:
     if attempts is None or failed is None:
         success = Figure(None, c.shop_reason)
     elif attempts < MIN_DENOMINATOR:
-        success = Figure(None, f"결제 시도 {attempts}건: {SMALL_SAMPLE}")
+        word = catalog.denominator_label()  # 캣북스: 결제
+        success = Figure(None, f"{word} 시도 {attempts}건: {SMALL_SAMPLE}")
     else:
         success = Figure(round((attempts - failed) / attempts, 4))
     return {

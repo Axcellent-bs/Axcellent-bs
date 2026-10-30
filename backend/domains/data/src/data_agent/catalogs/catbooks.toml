@@ -18,6 +18,7 @@ bad_direction = "up"
 unit = "비율"
 aggregate = "mean"
 denominator = "payment_count"  # 비율 지표: 결제 시도 수
+denominator_label = "결제"  # "5분 결제가 N건 미만이라 …", "결제 시도 N건"
 # 장애(결제 서버·결제사 쪽) 실패 코드 (shop-api failure_code). 이 코드만 장애 피해로 센다
 fault_codes = [
   "PG_UNAVAILABLE",  # shop-api 장애 주입(결제 서버 5xx)
@@ -59,6 +60,17 @@ unit_label = "주문"
 customer_label = "고객"
 money_field = "amount"  # 피해 금액으로 더하는 칸 (shop-api 실패 주문의 amount)
 money_unit = "원"
+
+# 사용자 쪽 실패 코드 → 한국어 이름. 장애와 무관해 장애 피해에서 뺀다 (예전 impact.USER_SIDE_REASONS)
+[user_codes]
+PG_DECLINED = "카드 거절"
+CARD_DECLINED = "카드 거절"
+DECLINED = "카드 거절"
+LIMIT_EXCEEDED = "한도 초과"
+INSUFFICIENT_FUNDS = "잔액 부족"
+CARD_EXPIRED = "카드 만료"
+INVALID_CARD = "카드 정보 오류"
+USER_CANCELED = "결제 취소"
 
 # 카테고리 코드 → 한국어 이름. 지금 data 코드에는 캣북스 카테고리 이름이 없어 비워 둔다
 [categories]

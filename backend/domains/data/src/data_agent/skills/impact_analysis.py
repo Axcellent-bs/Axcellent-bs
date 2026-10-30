@@ -30,6 +30,7 @@ from ax_contracts.data_access.shop_failed_orders import (
 )
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import CategoryImpact, ImpactAnalysisInput, ImpactAnalysisOutput
+from data_agent import catalog
 from data_agent.clients.shop_client import ShopUnavailable, get_shop_client
 from data_agent.connectors import Connector, ConnectorUnavailable, as_connector
 from data_agent.explain import Explanation, explain
@@ -62,8 +63,9 @@ async def _usual(
             end = data.window_to - timedelta(days=day) + EXCESS_MARGIN
             volume = await connector.transactions_volume(start, end)
             if volume is None:
+                word = catalog.denominator_label()
                 return None, (
-                    "평소 비교: 확인할 수 없음 (지난 7일 결제 수를 읽을 수 없는 클라이언트)"
+                    f"평소 비교: 확인할 수 없음 (지난 7일 {word} 수를 읽을 수 없는 클라이언트)"
                 )
             payments.update(dict(volume))
             past = await connector.failure_events(
@@ -74,7 +76,8 @@ async def _usual(
         return None, f"평소 비교: 확인할 수 없음 (지난 7일 조회 실패 {error.code})"
     usual = usual_fault_failures(payments, fault_times, data.window_to - data.window_from)
     if usual is None:
-        return None, "평소 비교: 확인할 수 없음 (지난 7일 같은 시각 ±1시간에 결제 기록이 없음)"
+        word = catalog.denominator_label()
+        return None, f"평소 비교: 확인할 수 없음 (지난 7일 같은 시각 ±1시간에 {word} 기록이 없음)"
     return usual, (
         f"평소 비교: 지난 7일 같은 시각 ±1시간 장애 쪽 실패 {len(fault_times)}건, "
         f"구간 길이로 환산한 평소 {usual:.2f}건"
@@ -151,7 +154,8 @@ async def analyze_impact(
     if split.missing_reason:
         raise ShopUnavailable(
             "NO_FAILURE_REASON",
-            f"실패 사유가 없는 결제 {split.missing_reason}건이 있어 장애 피해인지 알 수 없다",
+            f"실패 사유가 없는 {catalog.denominator_label()} {split.missing_reason}건이 있어 "
+            "장애 피해인지 알 수 없다",
         )
     if split.unseen:
         codes = ", ".join(f"{code} {count}건" for code, count in sorted(split.unseen.items()))
@@ -184,9 +188,11 @@ async def analyze_impact(
         f"to={data.window_to.isoformat()} category={data.category or 'all'} "
         f"scope={data.scope or 'all'}"
     )
+    words = catalog.current().impact  # 캣북스: 주문·고객·원
     summary = (
-        f"실패 주문 {counts.failed_order_count}건, 영향 고객 {len(customer_ids)}명, "
-        f"피해 금액 {counts.damage_amount}원, 카테고리 {len(by_category)}개"
+        f"실패 {words.unit_label} {counts.failed_order_count}건, "
+        f"영향 {words.customer_label} {len(customer_ids)}명, "
+        f"피해 금액 {counts.damage_amount}{words.money_unit}, 카테고리 {len(by_category)}개"
     )
     summary += f"\n{usual_note}" + (f", 초과분 {excess}건" if excess is not None else "")
     for name, count in sorted(split.excluded.items()):
