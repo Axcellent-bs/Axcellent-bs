@@ -39,7 +39,7 @@ from ax_contracts.schemas import (
 )
 from ax_contracts.schemas.data import AnomalyDetectionInput, AnomalyDetectionOutput
 from planning_agent.domain.autocheck import linked_incident_paras
-from planning_agent.domain.handover import AREA_BY_PATH
+from planning_agent.domain.handover import area_of_path
 from planning_agent.domain.models import PR, State
 
 EVIDENCE_TIMEOUT_SECONDS = 30.0  # 근거별 대기 (#104 제안값)
@@ -107,14 +107,12 @@ class CrossEvidence:
 
 
 def components_of(paths: list[str]) -> list[str]:
-    """바뀐 경로 → 구성요소 코드 (총괄 사건 `component`와 같은 값, 경로 단위 비교)."""
+    """바뀐 경로 → 구성요소 코드 (총괄 사건 `component`와 같은 값, handover 영역 표)."""
     out: list[str] = []
     for path in paths:
-        for prefix, area in AREA_BY_PATH:
-            if path == prefix or path.startswith(prefix + "/"):
-                if area not in out:
-                    out.append(area)
-                break
+        area = area_of_path(path)
+        if area and area not in out:
+            out.append(area)
     return out
 
 

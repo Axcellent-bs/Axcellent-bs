@@ -114,8 +114,11 @@ def test_components_from_paths() -> None:
         "search",
         "payment",
     ]
-    # 경로 단위 비교: payments_old는 payment가 아니다
-    assert components_of(["shop-api/payments_old/a.py", "docs/a.md"]) == []
+    # 떼어 온 레포 경로는 폴더·파일 이름 낱말로 정한다 (CamelCase도 쪼갠다)
+    assert components_of(["shop-web/src/pages/Cart.tsx"]) == ["payment"]
+    assert components_of(["shop-web/src/pages/OrderDetail.tsx"]) == ["payment"]
+    assert components_of(["shop-web/src/pages/ProductDetail.tsx"]) == ["catalog"]
+    assert components_of(["shop-web/src/pages/Home.tsx", "docs/a.md"]) == []
 
 
 def test_clean_evidence_auto_merges_with_cross_check_params() -> None:
@@ -226,3 +229,25 @@ def test_unlinked_pr_does_not_ask_anyone() -> None:
     svc.state.prs.append(pr)
     assert run(svc._try_auto_merge(svc.state, pr)) is True
     assert agents.asked == []
+
+
+def test_related_prs_find_real_repo_path_by_component() -> None:
+    """총괄이 사건 component(payment)로 관련 PR을 물으면 떼어 온 레포 경로도 찾는다."""
+    from planning_agent.domain.rules import merged_in_window
+
+    svc = _service(None, Gate())
+    pr28 = next(p for p in svc.state.prs if p.id == "PR #28")
+    now = svc.clock()
+    pr = pr28.model_copy(
+        update={
+            "id": "PR #95",
+            "number": 95,
+            "task": "T-none",
+            "merged": True,
+            "merged_at": now,
+            "changed_paths": ["shop-web/src/pages/Cart.tsx"],
+        }
+    )
+    svc.state.prs.append(pr)
+    found = merged_in_window(svc.state, now - timedelta(minutes=15), now, "payment")
+    assert pr in found
