@@ -11,6 +11,7 @@
 | `GET /api/finance/settlements?period=YYYY-Www` | ③ 판매자 정산 내역서 (생략 = 지난주) | 없음 |
 | `POST /api/finance/settlements/batch` | ③ 묶음 → `execute(confirm_settlement)` | 선택 |
 | `GET /api/finance/policy` | ⑤ 정책표·소진율·한도 제안 | 없음 |
+| `POST /api/finance/policy/{key}/ack` | ⑤ 경보 확인 메모 (이번 달 숨김) | **사람** |
 | `GET /api/finance/audit?days=7&context_id=` | ⑦ 사후 감사 (사건 하나로 좁히기 선택) | 없음 |
 | `GET /api/finance/anomalies` | ⑦ 처리 전 의심 건 전부(기간 제한 없음) | 없음 |
 | `POST /api/finance/anomalies/{finding_ref}/resolve` | ⑦ 의심 건 처리 완료(메모) | **사람** |
@@ -47,6 +48,12 @@ from finance_agent import finance_config as fc
 from finance_agent.handlers import closing_key, incident_impact, note_audit, state
 from finance_agent.human import human_from_authorization
 
+TODO_ITEMS = 10  # 할 일 카드에 바로 보여 줄 건수
+RECON_KO = {
+    "mismatch": "결제 금액과 PG 금액이 다름",
+    "missing_in_pg": "PG 정산에 없음",
+    "fee_anomaly": "PG 수수료가 기준과 다름",
+}
 UNAVAILABLE_EXECUTION = "exe_unavailable"  # agent-template execute()가 safety에 못 닿았을 때
 REVIEW_CHECK_SECONDS = 3.0
 
@@ -120,6 +127,12 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
                 "count": len(batch["seller_ids"]),
                 "amount": batch["total_payout"],
                 "link": "settlements",
+                # 사람이 안전 장치 보류 큐에서 진행·멈춤을 누른다
+                "action": {
+                    "type": "review_decision",
+                    "period": sett["period"],
+                    "review_id": batch["review_id"],
+                },
             }
         )
     elif batch["status"] in ("none", "rejected"):
@@ -132,6 +145,8 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
                     "count": len(ready),
                     "amount": sum(r["payout"] for r in ready),
                     "link": "settlements",
+                    # 사람이 묶음 지급 승인을 요청한다 (안전 장치가 C로 보류 → 승인)
+                    "action": {"type": "settlement_request", "period": sett["period"]},
                 }
             )
 
@@ -145,6 +160,11 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
                 "count": 1,
                 "amount": y.net_result,
                 "link": "closing",
+                "action": {
+                    "type": "closing_confirm",
+                    "period": "day",
+                    "date": yesterday.isoformat(),
+                },
             }
         )
 
@@ -158,24 +178,58 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
                 "count": len(open_items),
                 "amount": sum(reconciliation.exception_amount(i) for i in open_items),
                 "link": "reconciliation",
+                # 사람이 건마다 확인 결과(메모)를 남긴다
+                "action": {"type": "recon_note"},
+                "items": [
+                    {
+                        "ref": i["payment_id"],
+                        "title": RECON_KO.get(i["status"], i["status"]),
+                        "detail": f"주문 {i.get('order_id')}",
+                        "amount": reconciliation.exception_amount(i),
+                    }
+                    for i in open_items[:TODO_ITEMS]
+                ],
             }
         )
 
+    # 사후 감사: 찾은 의심 건은 처리 전 목록에 남고, 사람이 처리 완료할 때까지 할 일로 보인다
     report, _ = await audit.audit_report(books, 7, impact_lookup=incident_impact)
-    serious = [f for f in report["findings"] if f["severity"] in ("high", "medium")]
+    await note_audit(report["findings"], TENANT_ID_DEFAULT)
+    serious = [
+        e
+        for e in anomalies.listing(state().records.anomalies)["open"]
+        if e["severity"] in ("high", "medium")
+    ]
     if serious:
         todo.append(
             {
                 "kind": "audit_finding",
-                "title": f"사후 감사 의심 {len(serious)}건",
+                "title": f"처리 전 감사 의심 {len(serious)}건",
                 "count": len(serious),
                 "amount": None,
                 "link": "audit",
+                # 사람이 조사 결과(메모)를 남기고 처리 완료한다
+                "action": {"type": "anomaly_resolve"},
+                "items": [
+                    {
+                        "ref": e["finding_ref"],
+                        "title": e["title"],
+                        "detail": e["detail"],
+                        "amount": None,
+                    }
+                    for e in serious[:TODO_ITEMS]
+                ],
             }
         )
 
     pol, _ = policy.policy_report(books)
-    alerts = [r for r in pol["rules"] if r["alert"] in ("warn", "over")]
+    acks = state().records.policy_acks
+    alerts = [
+        r
+        for r in pol["rules"]
+        if r["alert"] in ("warn", "over")
+        and not policy_acked(acks.get(r["key"]), r["alert"], today)
+    ]
     if alerts:
         labels = ", ".join(r["label"] for r in alerts)
         todo.append(
@@ -185,9 +239,30 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
                 "count": len(alerts),
                 "amount": None,
                 "link": "policy",
+                # 사람이 확인하고 조치를 메모로 남긴다(한도 변경은 기준표 PR). 이번 달에는 숨긴다
+                "action": {"type": "policy_ack"},
+                "items": [
+                    {
+                        "ref": r["key"],
+                        "title": r["label"],
+                        "detail": "한도를 넘음" if r["alert"] == "over" else "한도에 가까움",
+                        "amount": None,
+                    }
+                    for r in alerts
+                ],
             }
         )
     return {"date": today.isoformat(), "kpis": totals.as_kpis(), "todo": todo}, books.meta()
+
+
+ALERT_RANK = {"ok": 0, "warn": 1, "over": 2}
+
+
+def policy_acked(ack: dict[str, Any] | None, alert: str, today: Any) -> bool:
+    """이번 달에 같은 단계 이상을 확인했으면 할 일에서 숨긴다. 경보가 더 세지면 다시 보인다."""
+    if not ack or ack.get("month") != today.isoformat()[:7]:
+        return False
+    return ALERT_RANK.get(alert, 9) <= ALERT_RANK.get(str(ack.get("alert")), -1)
 
 
 # ---------------------------------------------------------------- 라우트
@@ -419,6 +494,33 @@ def add_finance_api(app: FastAPI) -> None:
         )
         await note_audit(data.get("findings") or [], TENANT_ID_DEFAULT)
         return ok(data, books.meta(missing))
+
+    @app.post("/api/finance/policy/{rule_key}/ack", response_model=None)
+    async def ack_policy(
+        rule_key: str, request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """예산·한도 경보를 사람이 확인했다고 남긴다. 한도는 바꾸지 않는다(기준표 PR로만 바꾼다)."""
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        note = (await _body(request)).get("note")
+        if not isinstance(note, str) or not note.strip() or len(note) > 500:
+            return error(400, "invalid_request", "note는 1~500자 문자열")
+        books = await state().books()
+        pol, _ = policy.policy_report(books)
+        rule = next((r for r in pol["rules"] if r["key"] == rule_key), None)
+        if rule is None:
+            return error(404, "not_found", f"규칙 {rule_key}이 정책표에 없다")
+        ack = {
+            "alert": rule["alert"],
+            "month": fc.today().isoformat()[:7],
+            "note": note.strip(),
+            "by": person,
+            "at": fc.iso(fc.now()),
+        }
+        state().records.policy_acks[rule_key] = ack
+        return ok(ack | {"key": rule_key}, books.meta() | {"acked_by": person})
 
     @app.get("/api/finance/anomalies")
     async def get_anomalies() -> dict:
