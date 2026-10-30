@@ -182,6 +182,16 @@ async def record_resolution(svc: Services, request: AgentRequest) -> AgentResult
     )
 
 
+def _type_of(card: Card) -> str | None:
+    value = card.extra.get("event_type")
+    return str(value) if value else None
+
+
+def _same_type(wanted: str | None, found: str | None) -> bool | None:
+    """어느 쪽이든 유형을 모르면 비교하지 않는다(None)."""
+    return None if not wanted or not found else wanted == found
+
+
 def _summary(card: Card) -> str:
     decision = card.extra.get("decision")
     return str(decision) if decision else card.title
@@ -237,10 +247,14 @@ async def find_similar_cases(svc: Services, request: AgentRequest) -> AgentResul
             similarity=min(max(s, 0.0), 1.0),
             resolved=resolution_of(c) is not None,
             resolution=resolution_of(c),
+            event_type=_type_of(c),
+            same_type=_same_type(params.event_type, _type_of(c)),
             created_at=c.created_at,
         )
         for c, s in pairs
     ]
+    # 다른 유형은 빼지 않고 뒤로 보낸다(표시만 붙인다). 같은 그룹 안의 순서는 유사도 그대로다
+    cases.sort(key=lambda c: c.same_type is False)
     output = FindSimilarCasesOutput(
         cases=cases,
         max_similarity=max((c.similarity for c in cases), default=0.0),

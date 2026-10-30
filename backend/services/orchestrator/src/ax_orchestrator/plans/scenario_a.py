@@ -202,7 +202,7 @@ def _kpi(inc: Incident) -> dict[str, Any]:
 
 def _similar(inc: Incident) -> dict[str, Any]:
     # 이벤트가 열린 시점에 아는 것(제목)만으로 찾는다. 해결 내용이 있는 사례를 우선 보여 준다.
-    return {"query": inc.title, "limit": 3}
+    return {"query": inc.title, "event_type": inc.event_type, "limit": 3}
 
 
 def _resolution(inc: Incident) -> dict[str, Any]:

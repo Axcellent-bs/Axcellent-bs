@@ -112,6 +112,8 @@ def build_card(
         tags.append("rejected")
     if candidate:
         tags.append("candidate")
+    if record.event_type:
+        tags.append(f"type:{record.event_type}")
     return Card(
         card_id=card_id_of(record),
         kind=CARD_KIND[record.kind],
@@ -138,6 +140,7 @@ def build_card(
             "candidate": candidate,
             "extracted": info.extracted,
             "record_kind": record.kind.value,
+            "event_type": record.event_type,
             "evidence": {"refs": refs, "source_text_ref": None},
         },
     )

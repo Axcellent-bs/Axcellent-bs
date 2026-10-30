@@ -15,7 +15,7 @@ from typing import Any
 from ax_contracts.schemas import EventEnvelope, EventType
 from ax_orchestrator.engine import Engine
 from ax_orchestrator.models import Incident, Plan, iso
-from ax_orchestrator.naming import event_title
+from ax_orchestrator.naming import event_title, event_type
 from ax_orchestrator.plans.finance_anomaly import finance_anomaly
 from ax_orchestrator.plans.seller_onboarding import seller_onboarding
 from ax_orchestrator.plans.support_resolved import support_resolved
@@ -145,6 +145,7 @@ class IncidentManager:
             context_id=Incident.new_context_id(),
             kind=PLANS[env.type][0] if env.type in PLANS else "scenario_a",
             title=self._title(env, component),
+            event_type=self._event_type(env, component),
             component=component,
             opened_at=env.occurred_at,
             since=_since(env),
@@ -182,6 +183,12 @@ class IncidentManager:
         if env.type == EventType.SELLER_REGISTERED:
             return f"seller-{env.data.get('seller_id')}"
         return str(env.data.get("component") or "api")
+
+    @staticmethod
+    def _event_type(env: EventEnvelope, component: str) -> str | None:
+        if env.type in CASE_EVENTS:
+            return None
+        return event_type(component, env.data.get("metric_code"))
 
     @staticmethod
     def _title(env: EventEnvelope, component: str) -> str:

@@ -97,6 +97,6 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
 
 | skill | 등급 | 단계 | 선행 단계 | 필수 | 입력 예시 |
 |---|---|---|---|---|---|
-| `find_similar_cases` | read | 비슷한 과거 이벤트 찾기 (hr) | 없음 (이벤트 시작 즉시) | 아니오 | `{"limit": 3, "query": "결제가 서버 오류로 자꾸 실패해요"}` |
+| `find_similar_cases` | read | 비슷한 과거 이벤트 찾기 (hr) | 없음 (이벤트 시작 즉시) | 아니오 | `{"event_type": null, "limit": 3, "query": "결제가 서버 오류로 자꾸 실패해요"}` |
 | `record_case` | A | 이벤트 기록 (hr) | recovered_notice(끝나면), link_incident(끝나면), compensation(끝나면), kpi(끝나면), root_cause(끝나면) | 예 | `{"alternatives_considered": ["create_ticket: skipped (확신도 높은 원인 후보가 있어 원인 확인 요청 없음)"], "area": "infra", "author": "orchestrator", "context_id": "ctx_inc_guide", "decision_reason": "결제 장애 대응 실행 결과 — 완료: diagnose_incident, find_similar_cases, impact_analysis, ro` |
 | `record_resolution` | A | 해결 내용 기록 (hr) | record(끝나면) | 아니오 | `{"action": "배포 롤백", "context_id": "ctx_inc_guide", "minutes_to_resolve": 0, "outcome": "resolved", "root_cause": "PR #412 배포가 원인일 수 있음"}` |

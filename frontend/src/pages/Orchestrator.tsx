@@ -153,6 +153,8 @@ export default function OrchestratorPage() {
 
 interface PastCase {
   card_id: string; title: string; summary: string; similarity: number; resolved: boolean;
+  /** false면 다른 유형의 이벤트(추천에는 쓰지 않는다). 유형을 모르면 null */
+  same_type?: boolean | null;
   resolution?: { outcome: string; root_cause: string | null; action: string | null; minutes_to_resolve: number | null } | null;
 }
 const OUTCOME_KO: Record<string, string> = { resolved: "해결됨", workaround: "임시 조치", unresolved: "미해결" };
@@ -172,10 +174,11 @@ function SimilarCases({ incident }: { incident: Incident }) {
       ) : (
         <ul className="space-y-3">
           {cases.map((c) => (
-            <li key={c.card_id} className="rounded-xl border border-ink-100 p-3 text-sm">
+            <li key={c.card_id} className={`rounded-xl border border-ink-100 p-3 text-sm ${c.same_type === false ? "opacity-70" : ""}`}>
               <p className="flex flex-wrap items-center gap-2">
                 <span className="font-medium">{c.title}</span>
                 <span className="chip bg-ink-100 text-ink-700 tabular-nums">유사도 {Math.round(c.similarity * 100)}%</span>
+                {c.same_type === false && <span className="chip bg-amber-50 text-amber-800" title="이 이벤트와 종류가 달라 원인·조치를 추천하지 않아요">다른 유형</span>}
                 <span className={`chip ${c.resolution?.outcome === "resolved" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{c.resolution ? OUTCOME_KO[c.resolution.outcome] ?? c.resolution.outcome : "해결 기록 없음"}</span>
               </p>
               {c.resolution && (

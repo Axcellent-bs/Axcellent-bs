@@ -47,7 +47,13 @@ def _req(skill: str, inp: dict, ctx: str = CONTEXT, key: str = "k") -> AgentRequ
     )
 
 
-async def _incident(svc, ctx: str = CONTEXT, summary: str = PAYMENT, area: str = "infra") -> str:
+async def _incident(
+    svc,
+    ctx: str = CONTEXT,
+    summary: str = PAYMENT,
+    area: str = "infra",
+    event_type: str | None = None,
+) -> str:
     record = RecordCase.model_validate(
         {
             "context_id": ctx,
@@ -57,6 +63,7 @@ async def _incident(svc, ctx: str = CONTEXT, summary: str = PAYMENT, area: str =
             "alternatives_considered": ["즉시 롤백"],
             "source_refs": [f"inc:{ctx}", f"area:{area}"],
             "author": "orchestrator",
+            "event_type": event_type,
         }
     )
     request = AgentRequest.model_validate(
@@ -371,3 +378,27 @@ async def test_person_entered_resolved_time_sets_the_minutes_and_draft_source_is
     assert result.output["outcome"] == "recorded"
     saved = (await svc.memory.get_card(card_id)).extra["resolution"]
     assert saved["minutes_to_resolve"] == 12 and saved["draft_source"] == "ai_draft_edited"
+
+
+@pytest.mark.asyncio
+async def test_other_type_is_marked_and_placed_after_the_same_type(svc, tmp_path) -> None:
+    _dense(svc, tmp_path)
+    await _incident(svc, "ctx_inc_f", PAYMENT, event_type="payment:error_rate_5xx")
+    await _incident(svc, "ctx_inc_s", PAYMENT + " 응답", event_type="payment:p95_latency_ms")
+    out = await _search(svc, PAYMENT, event_type="payment:p95_latency_ms", limit=5)
+    kinds = [(c.event_type, c.same_type) for c in out.cases]
+    assert ("payment:p95_latency_ms", True) in kinds and ("payment:error_rate_5xx", False) in kinds
+    assert out.cases[0].same_type is True  # 같은 유형이 앞, 다른 유형도 빠지지 않고 뒤에 있다
+    assert out.cases[-1].same_type is False
+
+
+@pytest.mark.asyncio
+async def test_unknown_type_is_never_compared(svc, tmp_path) -> None:
+    _dense(svc, tmp_path)
+    await _incident(svc, "ctx_inc_f", PAYMENT, event_type="payment:error_rate_5xx")
+    await _incident(svc, "ctx_inc_u", PAYMENT + " 응답")
+    out = await _search(svc, PAYMENT, event_type="payment:p95_latency_ms", limit=5)
+    by_type = {c.event_type: c.same_type for c in out.cases}
+    assert by_type[None] is None and by_type["payment:error_rate_5xx"] is False
+    none_asked = await _search(svc, PAYMENT, limit=5)
+    assert all(c.same_type is None for c in none_asked.cases)

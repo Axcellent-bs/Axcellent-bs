@@ -117,6 +117,8 @@ class Incident:
     summary: list[str] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
     shared: dict[str, Any] = field(default_factory=dict)  # 부서가 준 값 중 다른 부서에 넘길 것
+    # 같은 종류의 이벤트인지 가르는 값(구성요소:지표). 모르면 None
+    event_type: str | None = None
     # 이벤트를 연 이벤트의 data (plan이 입력으로 쓴다)
     signal: dict[str, Any] = field(default_factory=dict)
 
@@ -132,6 +134,7 @@ class Incident:
             "context_id": self.context_id,
             "kind": self.kind,
             "title": self.title,
+            "event_type": self.event_type,
             "component": self.component,
             "status": self.status,
             "opened_at": iso(self.opened_at),
