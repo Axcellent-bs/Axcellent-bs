@@ -321,6 +321,14 @@ class AddResolutionNoteInput(AxModel):
     author: str = Field(min_length=1, max_length=50)
 
 
+class RevealOriginalInput(AxModel):
+    """가린 고객 메시지의 원문 열기. `viewer`는 화면이 사람 토큰에서 채운 이름이다."""
+
+    inquiry_id: int
+    message_id: int
+    viewer: str = Field(min_length=1, max_length=50)
+
+
 class SetFeedbackStatusInput(AxModel):
     inquiry_id: int
     status: Literal["visible", "hidden"]

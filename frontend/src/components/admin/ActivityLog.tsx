@@ -48,8 +48,10 @@ function detailOf(e: ActivityEntry): string {
         ABUSE_KO[str(d.level) ?? ""],
         d.softened === true && "AI가 요청만 남겨 순화함",
         Array.isArray(d.kinds) && d.kinds.includes("llm") && "규칙이 놓친 표현을 AI가 찾음",
-        "원문은 보존돼 있고 '원문 보기'로 열 수 있음",
+        "원문은 보존돼 있고 '원문 보기'로 열 수 있음(열면 기록됨)",
       );
+    case "original_viewed":
+      return parts(str(d.viewer) && `연 사람 ${str(d.viewer)}`, "원문 글은 내력에 남기지 않음");
     case "reply_sent":
       return parts(HOW_KO[str(d.how) ?? ""], str(d.draft_style) && `${STYLE_KO[str(d.draft_style)!] ?? str(d.draft_style)} 초안`);
     case "draft_rejected":

@@ -250,8 +250,23 @@ async def _conversation(out: dict) -> Conversation:
             claims[c["id"]] = c
     ordered = sorted(claims.values(), key=lambda c: c["id"])
     return Conversation.model_validate(
-        {**out, "claims": [claim_mapping.to_claim(c) for c in ordered]}
+        {
+            **out,
+            "messages": [_without_abusive_original(m) for m in out.get("messages") or []],
+            "claims": [claim_mapping.to_claim(c) for c in ordered],
+        }
     )
+
+
+def _without_abusive_original(message: dict) -> dict:
+    """욕설·모욕·위협으로 가린 고객 메시지는 원문(`text`)을 응답에서 뺀다.
+
+    원문은 `POST /conversations/{id}/messages/{message_id}/original`로만 받고, 그때 연 사람이
+    문의의 AI 처리 내력에 남는다.
+    """
+    if message.get("role") == "customer" and message.get("abuse_level", "none") != "none":
+        return {**message, "text": ""}
+    return message
 
 
 # ---------------------------------------------------------------- 문의 (목 모드 또는 support A2A)
@@ -402,6 +417,19 @@ async def submit_conversation_feedback(conversation_id: int, body: FeedbackBody)
             await support_client.call("get_inquiry", {"inquiry_id": conversation_id})
         )
     )
+
+
+@router.post("/conversations/{conversation_id}/messages/{message_id}/original")
+async def reveal_original(conversation_id: int, message_id: int, request: Request) -> dict:
+    """가려진 고객 메시지의 원문을 연다. 연 사람은 사람 토큰에서만 채워 내력에 남는다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "원문 열기는 실제 모드에서만 된다")
+    out = await support_client.call(
+        "reveal_original",
+        {"inquiry_id": conversation_id, "message_id": message_id, "viewer": request.state.human},
+        target=f"inquiry:{conversation_id}:message:{message_id}",
+    )
+    return ok({"message_id": out["message_id"], "text": out["text"]})
 
 
 @router.post("/conversations/{conversation_id}/resolution-notes", status_code=201)

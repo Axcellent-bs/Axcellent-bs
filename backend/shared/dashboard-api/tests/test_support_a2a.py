@@ -279,7 +279,7 @@ def test_abuse_fields_reach_the_console(client: TestClient, fake: Fake) -> None:
     one = client.get(BASE + "/conversations/7").json()["data"]
     assert one["subject_display"] == "[비속어] 문의"
     got = one["messages"][0]
-    assert got["text"] == "씨발 환불해 주세요"
+    assert got["text"] == ""  # 가린 메시지의 원문은 응답에 없다 (원문 열기 호출로만 받는다)
     assert got["display_text"] == "[비속어] 환불해 주세요"
     assert (got["abuse_level"], got["abuse_kinds"]) == ("profanity", ["profanity"])
     assert got["softened_text"] == "환불을 요청합니다."
@@ -287,3 +287,32 @@ def test_abuse_fields_reach_the_console(client: TestClient, fake: Fake) -> None:
     fake.output = {"items": [{**ITEM, "subject_display": "[비속어] 문의"}]}
     listed = client.get(BASE + "/conversations").json()["data"][0]
     assert listed["subject_display"] == "[비속어] 문의"
+
+
+def test_abusive_original_is_left_out_and_opened_only_through_its_own_call(
+    client: TestClient, fake: Fake
+) -> None:
+    """가린 고객 메시지의 원문은 응답에서 빠지고, 원문 열기 호출로만 받는다 (연 사람은 토큰에서)."""
+    abusive = {
+        "id": 1,
+        "role": "customer",
+        "text": "씨발 환불해 주세요",
+        "display_text": "[비속어] 환불해 주세요",
+        "abuse_level": "profanity",
+        "abuse_kinds": ["profanity"],
+        "created_at": "2026-10-22T00:00:00Z",
+    }
+    polite = {**abusive, "id": 2, "text": "환불해 주세요", "abuse_level": "none"}
+    agent = {**polite, "id": 3, "role": "agent", "text": "안내드립니다"}
+    fake.output = {**ITEM, "messages": [abusive, polite, agent]}
+    texts = [m["text"] for m in client.get(BASE + "/conversations/7").json()["data"]["messages"]]
+    assert texts == ["", "환불해 주세요", "안내드립니다"]
+
+    fake.sent.clear()
+    fake.output = {"inquiry_id": 7, "message_id": 1, "text": "씨발 환불해 주세요"}
+    body = client.post(BASE + "/conversations/7/messages/1/original").json()["data"]
+    assert body == {"message_id": 1, "text": "씨발 환불해 주세요"}
+    sent = fake.sent[0]
+    assert sent.skill == "reveal_original"
+    assert (sent.input["inquiry_id"], sent.input["message_id"]) == (7, 1)
+    assert sent.input["viewer"]  # 사람 토큰에서 채운 이름

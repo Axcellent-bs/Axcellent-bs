@@ -327,3 +327,55 @@ def test_an_abusive_message_is_recorded_without_the_words(client: TestClient) ->
 def test_a_polite_message_leaves_no_abuse_entry(client: TestClient) -> None:
     created = create(client)
     assert "abusive_message" not in [a["kind"] for a in created["activity"]]
+
+
+# ---- 가려진 메시지의 원문 열기 ---------------------------------------------------------
+def _abusive(client: TestClient) -> dict[str, Any]:
+    return call(
+        client,
+        "create_inquiry",
+        {"user_id": 1, "customer_name": "김하늘", "order_id": "101", "order_no": "ORD-1"},
+        {"subject": "환불", "message": "씨발 표지가 찢어져 왔어요. 환불해 주세요."},
+        key="k-abuse-reveal",
+    )["output"]
+
+
+def _reveal(client: TestClient, inquiry_id: int, message_id: int, **kw: Any) -> dict[str, Any]:
+    return call(
+        client,
+        "reveal_original",
+        {"inquiry_id": inquiry_id, "message_id": message_id, "viewer": "김상담"},
+        key=kw.pop("key", "k-reveal"),
+        **kw,
+    )
+
+
+def test_revealing_an_original_returns_it_and_records_who_opened_it(client: TestClient) -> None:
+    created = _abusive(client)
+    message_id = created["messages"][0]["id"]
+    result = _reveal(client, created["id"], message_id)
+    assert result["output"]["text"].startswith("씨발")
+    got = call(client, "get_inquiry", {"inquiry_id": created["id"]})["output"]
+    entry = next(a for a in got["activity"] if a["kind"] == "original_viewed")
+    assert (entry["actor"], entry["data"]["viewer"], entry["data"]["message_id"]) == (
+        "agent",
+        "김상담",
+        message_id,
+    )
+    assert "씨발" not in str(entry)  # 원문은 내력에 싣지 않는다
+
+
+def test_a_polite_or_unknown_message_has_no_original_to_reveal(client: TestClient) -> None:
+    polite = create(client)
+    result = _reveal(client, polite["id"], polite["messages"][0]["id"])
+    assert result["outcome"] == "not_found" and "text" not in result["output"]
+    assert _reveal(client, polite["id"], 999, key="k-2")["outcome"] == "not_found"
+    assert "original_viewed" not in kinds(client, polite["id"])
+
+
+def test_only_the_console_may_reveal_an_original(client: TestClient) -> None:
+    created = _abusive(client)
+    denied = _reveal(
+        client, created["id"], created["messages"][0]["id"], token="mock:marketing", key="k-3"
+    )
+    assert denied["status"] != "completed"

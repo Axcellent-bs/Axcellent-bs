@@ -15,6 +15,7 @@
 | --- | --- | --- | --- |
 | `list_inquiries` | read | dashboard-api, orchestrator | 문의 목록 (상태 필터) |
 | `get_inquiry` | read | dashboard-api, orchestrator | 메시지·분석 포함 상세 |
+| `reveal_original` | A | dashboard-api | 욕설로 가린 고객 메시지의 원문 열기. 연 사람을 내력에 남긴다 |
 | `check_reply` | read | dashboard-api, orchestrator | 답변 가드 검사 (`untrusted.text`) |
 | `summarize_inquiry` | read | dashboard-api, orchestrator | 대화 요약 (저장 안 함) |
 | `create_inquiry` | A | dashboard-api, shop-api, orchestrator | 문의 접수 + 첫 메시지 분석 |
