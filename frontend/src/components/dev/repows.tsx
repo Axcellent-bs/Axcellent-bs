@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent
 import { Button, Modal, useDismiss, useToast } from '@dejafix/common-frontend'
 import type { Action, State as S } from '@/lib/planningData'
 import { DiffFiles } from '@/components/dev/diff'
-import { DEV_API, PlanningApiError, kst, repoApi, vcsApi, type MergeMethod, type RepoBranch, type RepoCheckState, type RepoGraph, type RepoGraphCommit, type RepoPr, type RepoPrDetail, type RepoPrState, type VcsConnection } from '@/lib/planning'
+import { DEV_API, PlanningApiError, kst, repoApi, vcsApi, type MergeMethod, type RepoBranch, type RepoCheckState, type RepoGraph, type RepoGraphCommit, type RepoPr, type RepoIssue, type RepoIssueState, type RepoPrDetail, type RepoPrState, type VcsConnection } from '@/lib/planning'
 import { layoutGraph, laneColor, type GraphRow } from '@/components/dev/graphlayout'
 import { prSlug, toPath, go } from '@/components/planning-common/links'
 import { Work } from '@/components/dev/work'
@@ -19,6 +19,7 @@ const METHOD_LABEL: Record<MergeMethod, string> = { merge: 'Merge commit', squas
 // 오류 코드 → 해요체 알림 (백엔드 문장은 그대로 쓰지 않는다)
 const ERR: Record<string, string> = {
   NO_VCS: '연결된 레포가 없어요',
+  NO_ISSUES: '이 형상관리 연결에는 이슈 칸이 없어요',
   NOT_FOUND: '찾지 못했어요',
   READ_ONLY: '읽기 전용 연결이라 바꿀 수 없어요',
   GATE_REJECTED: '실행 관문이 보류했어요. AI 교차검증 탭에서 확인해 주세요',
@@ -50,6 +51,7 @@ export function ago(iso?: string | null): string {
   return kst(iso).slice(0, 5)
 }
 
+const issueHref = (n?: number) => toPath(`work/prs/issues${n ? `/${n}` : ''}`)
 const repoHref = (n?: number, sub?: string) => toPath(`work/prs/repo${n ? `/${n}` : ''}${sub ? `/${sub}` : ''}`)
 
 function PrState({ v }: { v: RepoPrState }) {
@@ -110,11 +112,11 @@ function LoadError({ error }: { error: unknown }) {
   return <div className="empty"><b>{code === 'NO_VCS' ? '연결된 레포 없음' : errText(error)}</b>{code === 'NO_VCS' && <span>개발 도구 연결</span>}</div>
 }
 
-// ---------------------------------------------------------------- 탭 틀: 작업 · 레포 PR · 브랜치 · 커밋 그래프
+// ---------------------------------------------------------------- 탭 틀: 작업 · 레포 PR · 이슈 · 브랜치 · 커밋 그래프
 
 export function PrsTab({ s, d, parts }: { s: S; d: Dispatch<Action>; parts: string[] }) {
   const [view, a, b] = parts
-  const mode = view === 'repo' ? 'repo' : view === 'branches' ? 'branches' : view === 'graph' ? 'graph' : 'work'
+  const mode = view === 'repo' ? 'repo' : view === 'issues' ? 'issues' : view === 'branches' ? 'branches' : view === 'graph' ? 'graph' : 'work'
   const [conns, conn, setConn] = useConnection()
   const repo = conns.find((c) => c.id === conn)
   return (
@@ -123,6 +125,7 @@ export function PrsTab({ s, d, parts }: { s: S; d: Dispatch<Action>; parts: stri
         <nav className="seg rp-views" aria-label="작업·PR 보기">
           <a href={toPath('work/prs')} className={mode === 'work' ? 'on' : ''} aria-current={mode === 'work' ? 'page' : undefined}>작업</a>
           <a href={repoHref()} className={mode === 'repo' ? 'on' : ''} aria-current={mode === 'repo' ? 'page' : undefined}>레포 PR</a>
+          <a href={issueHref()} className={mode === 'issues' ? 'on' : ''} aria-current={mode === 'issues' ? 'page' : undefined}>이슈</a>
           <a href={toPath('work/prs/branches')} className={mode === 'branches' ? 'on' : ''} aria-current={mode === 'branches' ? 'page' : undefined}>브랜치</a>
           <a href={graphHref()} className={mode === 'graph' ? 'on' : ''} aria-current={mode === 'graph' ? 'page' : undefined}>커밋 그래프</a>
         </nav>
@@ -136,6 +139,8 @@ export function PrsTab({ s, d, parts }: { s: S; d: Dispatch<Action>; parts: stri
       {mode === 'work' && <Work s={s} d={d} item={view} />}
       {mode === 'repo' && !a && <Board key={conn} conn={conn} />}
       {mode === 'repo' && a && /^\d+$/.test(a) && <PrView key={`${conn}:${a}`} conn={conn} number={Number(a)} tab={b} />}
+      {mode === 'issues' && !a && <IssueBoard key={conn} conn={conn} />}
+      {mode === 'issues' && a && /^\d+$/.test(a) && <IssueView key={`${conn}:${a}`} conn={conn} number={Number(a)} />}
       {mode === 'branches' && <BranchTable key={conn} conn={conn} />}
       {mode === 'graph' && <GraphView key={conn} conn={conn} sel={a && /^[0-9A-Za-z]{4,64}$/.test(a) ? a : undefined} />}
     </>
@@ -204,6 +209,152 @@ function PrRow({ p }: { p: RepoPr }) {
         </span>
       </a>
     </li>
+  )
+}
+
+// ---------------------------------------------------------------- 이슈 (GitHub Issues 기준: 열림·닫힘, 라벨, 담당자, 코멘트)
+// 이슈 칸이 없는 형상관리(SVN·Perforce 등)는 409 NO_ISSUES. 그런 연결은 나중에 게시판·요청란으로 대신한다
+
+const ISSUE_LABEL: Record<RepoIssueState, string> = { open: '열림', closed: '닫힘' }
+const issueTone = (i: RepoIssue) => (i.state === 'open' ? 'rp-open' : i.reason === 'not_planned' ? 'rp-iss-skip' : 'rp-iss-done')
+
+function IssueBoard({ conn }: { conn: string }) {
+  const [tab, setTab] = useState<RepoIssueState | 'all'>('open')
+  const [label, setLabel] = useState('')
+  const [q, setQ] = useState('')
+  const [query, setQuery] = useState('')
+  useEffect(() => { const t = setTimeout(() => setQuery(q.trim()), 300); return () => clearTimeout(t) }, [q])
+  const list = useLoad(() => repoApi(DEV_API, conn).issues('all', query || undefined), [conn, query])
+  const items = list.data?.items ?? []
+  const labels = [...new Set(items.flatMap((i) => i.labels))].sort()
+  const byLabel = label ? items.filter((i) => i.labels.includes(label)) : items
+  const rows = tab === 'all' ? byLabel : byLabel.filter((i) => i.state === tab)
+  const count = (x: RepoIssueState) => byLabel.filter((i) => i.state === x).length
+  const tabs: [RepoIssueState | 'all', string, number][] = [['open', '열림', count('open')], ['closed', '닫힘', count('closed')], ['all', '전체', byLabel.length]]
+  return (
+    <section className="rp-board">
+      <div className="rp-board-head">
+        <div className="rp-tabs" role="tablist" aria-label="이슈 상태">
+          {tabs.map(([id, text, n]) => (
+            <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>
+              {id !== 'all' && <span className={`rp-dot ${id === 'open' ? 'rp-open' : 'rp-iss-done'}`} aria-hidden />}{text} <b>{n}</b>
+            </button>
+          ))}
+        </div>
+        {labels.length > 0 && (
+          <select className="select" value={label} onChange={(e) => setLabel(e.target.value)} aria-label="라벨">
+            <option value="">라벨 전체</option>
+            {labels.map((l) => <option key={l} value={l}>{l}</option>)}
+          </select>
+        )}
+        <label className="search rp-search">
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="제목 · #번호 · 작성자 · 라벨" aria-label="이슈 찾기" />
+        </label>
+        <Button size="small" onClick={list.reload} disabled={list.loading} aria-label="새로 읽기">새로 읽기</Button>
+      </div>
+      {list.error ? <LoadError error={list.error} /> : list.loading && !list.data ? <div className="empty"><b>읽는 중</b></div> : !rows.length ? <div className="empty"><b>이슈 없음</b></div> : (
+        <ul className="rp-list">
+          {rows.map((i) => <IssueRow key={i.number} i={i} onLabel={setLabel} />)}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+function IssueRow({ i, onLabel }: { i: RepoIssue; onLabel: (l: string) => void }) {
+  return (
+    <li>
+      <a href={issueHref(i.number)} className="rp-row">
+        <span className={`rp-icon ${issueTone(i)}`} title={ISSUE_LABEL[i.state]} aria-label={ISSUE_LABEL[i.state]} />
+        <span className="rp-main">
+          <span className="rp-title">
+            {i.title}
+            {i.labels.map((l) => (
+              <button key={l} type="button" className="rp-label" onClick={(e) => { e.preventDefault(); onLabel(l) }} title={`${l} 라벨만 보기`}>{l}</button>
+            ))}
+          </span>
+          <span className="rp-meta">
+            <span className="mono">#{i.number}</span>
+            {i.author && <span>{i.author}</span>}
+            <span>{i.state === 'closed' ? `닫힘 ${ago(i.closed_at)}` : `열림 ${ago(i.created_at)}`}</span>
+            {i.assignees.length > 0 && <span>담당 {i.assignees.join(', ')}</span>}
+          </span>
+        </span>
+        <span />
+        <span className="rp-cmt" aria-label={`코멘트 ${i.comments ?? 0}`}>
+          {!!i.comments && <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden><path d="M4 5h16v11H9l-5 4z" /></svg>{i.comments}</>}
+        </span>
+      </a>
+    </li>
+  )
+}
+
+function IssueView({ conn, number }: { conn: string; number: number }) {
+  const toast = useToast()
+  const api = useMemo(() => repoApi(DEV_API, conn), [conn])
+  const det = useLoad(() => api.issue(number), [api, number])
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const back = <a href={issueHref()} className="rp-back">‹ 이슈 목록</a>
+  if (det.error) return <>{back}<LoadError error={det.error} /></>
+  if (!det.data) return <>{back}<div className="empty"><b>읽는 중</b></div></>
+  const x = det.data
+  const i = x.issue
+  const send = async () => {
+    if (!text.trim()) return
+    setBusy(true)
+    try {
+      await api.commentIssue(number, text)
+      setText('')
+      toast.show('코멘트를 남겼어요')
+      det.reload()
+    } catch (e) {
+      toast.show(errText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <section className="rp-detail">
+      {back}
+      <header className="rp-head">
+        <div className="rp-head-main">
+          <h1 className="rp-h1">{i.title} <span className="rp-num">#{i.number}</span></h1>
+          <div className="rp-head-meta">
+            <span className={`rp-state ${issueTone(i)}`}>{i.state === 'closed' ? (i.reason === 'not_planned' ? '안 함' : '완료') : '열림'}</span>
+            {i.author && <span>{i.author}</span>}
+            <span>{ago(i.created_at)}</span>
+            {i.url && <a href={i.url} target="_blank" rel="noopener noreferrer" className="plain-link">레포에서 보기</a>}
+          </div>
+        </div>
+      </header>
+      <div className="rp-body">
+        <div className="rp-talk">
+          <article className="rp-cmt-box">
+            <div className="rp-cmt-h"><b>{i.author || '-'}</b><span>{ago(i.created_at)}</span></div>
+            <div className="rp-cmt-body">{i.body?.trim() ? i.body : <span className="muted">설명 없음</span>}</div>
+          </article>
+          {x.comments.map((c) => (
+            <article key={c.id} className="rp-cmt-box">
+              <div className="rp-cmt-h"><b>{c.author || '-'}</b><span>{ago(c.at)}</span></div>
+              <div className="rp-cmt-body">{c.body}</div>
+            </article>
+          ))}
+          {!x.read_only && (
+            <div className="rp-compose">
+              <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder="코멘트" aria-label="코멘트"
+                onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void send() }} />
+              <div><Button variant="primary" size="small" disabled={busy || !text.trim()} onClick={() => void send()}>코멘트</Button></div>
+            </div>
+          )}
+        </div>
+        <aside className="rp-side">
+          <section><h3>담당자</h3><p>{i.assignees.length ? i.assignees.join(', ') : <span className="muted">없음</span>}</p></section>
+          <section><h3>라벨</h3><p>{i.labels.length ? i.labels.map((l) => <span key={l} className="rp-label">{l}</span>) : <span className="muted">없음</span>}</p></section>
+          <section><h3>코멘트</h3><p>{x.comments.length}</p></section>
+        </aside>
+      </div>
+    </section>
   )
 }
 

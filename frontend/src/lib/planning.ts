@@ -189,8 +189,14 @@ export const deployApi = (base: string) => ({
 export interface VcsConnection {
   id: string; kind: string; repo: string; base_url: string; base_branch: string; description: string
   paths: string[]; mount?: string; token_set: boolean; token_hint: string; source: 'screen' | 'env'
+  // 인증: token(사람 토큰) · app(GitHub App). App 개인 키는 넣었는지만 온다
+  auth?: VcsAuth; app_id?: string; installation_id?: string; key_set?: boolean
 }
-export interface VcsConnectionInput { id?: string; kind: string; repo: string; base_url?: string; base_branch?: string; token?: string; description?: string; paths?: string[]; mount?: string }
+export type VcsAuth = 'token' | 'app'
+export interface VcsConnectionInput {
+  id?: string; kind: string; repo: string; base_url?: string; base_branch?: string; token?: string; description?: string; paths?: string[]; mount?: string
+  auth?: VcsAuth; app_id?: string; installation_id?: string; private_key?: string
+}
 export interface VcsTestResult { ok: boolean; code: string | null; message: string; checked_at: string; connection_id: string }
 
 // 녹화 데모(목)는 모르는 주소에 빈 배열·{ok:true}를 준다. 연결 모양이 아닌 값은 버린다
@@ -253,7 +259,14 @@ export interface RepoPr {
   created_at: string | null; updated_at: string | null; merged_at: string | null; closed_at: string | null; url: string | null
   comments: number | null; checks: RepoCheckState | null; internal?: RepoInternal | null
 }
-export interface RepoMeta { connection: string; repo: string; base_branch: string; read_only: boolean }
+export interface RepoMeta { connection: string; repo: string; base_branch: string; read_only: boolean; issues?: boolean }
+export type RepoIssueState = 'open' | 'closed'
+export interface RepoIssue {
+  number: number; title: string; state: RepoIssueState; author: string; body?: string; labels: string[]; assignees: string[]
+  comments: number | null; created_at: string | null; updated_at: string | null; closed_at: string | null; url: string | null
+  reason: string | null // completed · not_planned
+}
+export interface RepoIssueDetail extends RepoMeta { issue: RepoIssue; comments: RepoComment[] }
 export interface RepoFile { path: string; status: string; additions: number; deletions: number; patch: string | null; previous_path: string | null; truncated: boolean }
 export interface RepoCommit { sha: string; message: string; author: string; at: string | null }
 export interface RepoComment { id: string; author: string; body: string; at: string | null }
@@ -304,6 +317,10 @@ export const repoApi = (base: string, connection?: string) => {
       call<RepoGraph>(base, `/repo/graph${qs({ connection: c, branches: branches?.length ? branches.join(',') : undefined, limit })}`),
     commit: (sha: string) => call<RepoMeta & { commit: RepoCommitDetail }>(base, `/repo/commits/${encodeURIComponent(sha)}${qs({ connection: c })}`),
     deleteBranch: (name: string) => call<{ deleted: string }>(base, `/repo/branches/delete${qs({ connection: c })}`, post({ name })),
+    issues: (state: 'all' | RepoIssueState = 'all', q?: string, limit = 100) =>
+      call<RepoMeta & { items: RepoIssue[] }>(base, `/repo/issues${qs({ connection: c, state, q, limit })}`),
+    issue: (n: number) => call<RepoIssueDetail>(base, `/repo/issues/${n}${qs({ connection: c })}`),
+    commentIssue: (n: number, body: string) => call<{ comment: RepoComment }>(base, `/repo/issues/${n}/comment${qs({ connection: c })}`, post({ body })),
   }
 }
 

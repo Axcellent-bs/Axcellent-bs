@@ -21,6 +21,8 @@ from planning_agent.vcs.base import (
     COMMIT_LIMIT,
     GRAPH_LIMIT,
     GRAPH_MAX,
+    ISSUE_LIST_LIMIT,
+    ISSUE_STATES,
     LIST_LIMIT,
     Branch,
     Capabilities,
@@ -38,6 +40,7 @@ from planning_agent.vcs.base import (
     GraphBranch,
     GraphCommit,
     GraphPr,
+    IssueSummary,
     OpenedChange,
     TraceMeta,
     VcsError,
@@ -47,6 +50,7 @@ from planning_agent.vcs.base import (
     check_sha,
     combine_checks,
     decode_text,
+    match_issue,
     match_query,
     order_commits,
     parse_trace,
@@ -104,7 +108,10 @@ class MockVcsAdapter:
         self._gone: set[str] = set()  # 지운 브랜치
         self._comment_seq = 0
         self._files: dict[str, str] = {}  # 기준 브랜치 파일 (경로 → 글)
-        self._caps = Capabilities(kind="mock", read_only=read_only)
+        self._caps = Capabilities(kind="mock", read_only=read_only, issues=True)
+        # 이슈 (번호는 변경과 같이 센다). 코멘트는 _issue_comments
+        self._issues: dict[int, IssueSummary] = {}
+        self._issue_comments: dict[int, list[Comment]] = {}
         # 쓰기 호출 기록 (테스트에서 execute 뒤에만 불렀는지 본다)
         self.writes: list[tuple[str, int]] = []
 
@@ -397,13 +404,70 @@ class MockVcsAdapter:
         return list(self._entry(number).commits[:limit])
 
     async def list_comments(self, number: int, limit: int = COMMENT_LIMIT) -> list[Comment]:
+        if number in self._issues:
+            return list(self._issue_comments.get(number, [])[:limit])
         return list(self._entry(number).comments[:limit])
+
+    # ---- 이슈
+
+    def seed_issue(
+        self,
+        *,
+        title: str,
+        body: str = "",
+        state: str = "open",
+        labels: tuple[str, ...] = (),
+        assignees: tuple[str, ...] = (),
+        author: str = "dev-user",
+    ) -> int:
+        n = self._next
+        self._next += 1
+        now = self._clock()
+        self._issues[n] = IssueSummary(
+            number=n,
+            title=title,
+            state="closed" if state == "closed" else "open",
+            author=author,
+            body=body,
+            labels=labels,
+            assignees=assignees,
+            comments=0,
+            created_at=now,
+            updated_at=now,
+            closed_at=now if state == "closed" else None,
+        )
+        return n
+
+    async def list_issues(
+        self, state: str = "open", query: str | None = None, limit: int = ISSUE_LIST_LIMIT
+    ) -> list[IssueSummary]:
+        if state not in ISSUE_STATES:
+            raise VcsError("invalid", f"모르는 상태: {state}")
+        rows = [
+            replace(i, comments=len(self._issue_comments.get(i.number, [])))
+            for i in self._issues.values()
+            if (state == "all" or i.state == state) and match_issue(i, query)
+        ]
+        rows.sort(key=lambda i: i.number, reverse=True)
+        return rows[: max(1, limit)]
+
+    async def describe_issue(self, number: int) -> IssueSummary:
+        i = self._issues.get(number)
+        if i is None:
+            raise VcsError("not_found", f"없는 이슈: {number}")
+        return replace(i, comments=len(self._issue_comments.get(number, [])))
 
     async def add_comment(self, number: int, body: str) -> Comment:
         self._writable()
         text = (body or "").strip()
         if not text:
             raise VcsError("invalid", "코멘트가 비었다")
+        if number in self._issues:
+            self._comment_seq += 1
+            ic = Comment(id=str(self._comment_seq), author="human", body=text, at=self._clock())
+            self._issue_comments.setdefault(number, []).append(ic)
+            self.writes.append(("add_comment", number))
+            return ic
         e = self._entry(number)
         self._comment_seq += 1
         c = Comment(id=str(self._comment_seq), author="human", body=text, at=self._clock())

@@ -345,7 +345,11 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
 
     @router.post("/vcs/connections", response_model=None, dependencies=ADMIN)
     async def post_vcs_connection(request: Request) -> dict | JSONResponse:
-        """연결 넣기·바꾸기. id가 없으면 새 연결(`conn-n`), 토큰을 비우면 그 연결의 토큰을 둔다."""
+        """연결 넣기·바꾸기. id가 없으면 새 연결(`conn-n`).
+
+        토큰·App 개인 키를 비우면 이전 값을 둔다.
+
+        `auth`: token(사람 토큰) · app(GitHub App: `app_id`·`installation_id`·`private_key`)."""
         body = await _body(request)
         if body is None:
             return _err(400, "INVALID_VCS", "본문은 JSON 객체여야 한다")
@@ -363,6 +367,10 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
                 "token",
                 "description",
                 "mount",
+                "auth",
+                "app_id",
+                "installation_id",
+                "private_key",
             )
         }
         if any(v is not None and not isinstance(v, str) for v in text.values()):
@@ -378,6 +386,10 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
                 description=text["description"] or "",
                 paths=paths,
                 mount=text["mount"],
+                auth=text["auth"] or None,
+                app_id=text["app_id"],
+                installation_id=text["installation_id"],
+                private_key=text["private_key"] or None,
             )
         except vcs.VcsError as exc:
             return _err(400, "INVALID_VCS", exc.message)

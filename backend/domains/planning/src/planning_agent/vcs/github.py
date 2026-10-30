@@ -34,6 +34,8 @@ from planning_agent.vcs.base import (
     GRAPH_LIMIT,
     GRAPH_MAX,
     GRAPH_MESSAGE_CHARS,
+    ISSUE_LIST_LIMIT,
+    ISSUE_STATES,
     LIST_LIMIT,
     MAX_READ_BYTES,
     Branch,
@@ -53,6 +55,7 @@ from planning_agent.vcs.base import (
     GraphBranch,
     GraphCommit,
     GraphPr,
+    IssueSummary,
     OpenedChange,
     TraceMeta,
     VcsError,
@@ -62,11 +65,13 @@ from planning_agent.vcs.base import (
     check_sha,
     combine_checks,
     decode_text,
+    match_issue,
     match_query,
     order_commits,
     parse_trace,
     state_of,
 )
+from planning_agent.vcs.github_app import GithubAppAuth
 
 DEFAULT_BASE_URL = "https://api.github.com"
 MERGE_METHODS = ("merge", "squash", "rebase")
@@ -136,8 +141,9 @@ class GithubVcsAdapter:
     def __init__(
         self,
         repo: str,
-        token: str,
+        token: str = "",
         *,
+        app: GithubAppAuth | None = None,
         base_url: str = DEFAULT_BASE_URL,
         base_branch: str = "dev",
         client: httpx.AsyncClient | None = None,
@@ -145,14 +151,16 @@ class GithubVcsAdapter:
     ):
         if not _REPO.match(repo or ""):
             raise VcsError("config", "레포는 owner/name 형식이어야 한다")
-        if not token:
+        if not token and app is None:
             raise VcsError("config", "토큰이 비어 있다")
         self.repo = repo
         self.base_url = base_url.rstrip("/")
         self.base_branch = base_branch
         self.__token = token
+        # GitHub App 연결이면 사람 토큰 대신 설치 토큰을 받아 쓴다 (github_app.py)
+        self._app = app
         self._client = client or httpx.AsyncClient(timeout=timeout)
-        self._caps = Capabilities(kind="github")
+        self._caps = Capabilities(kind="github", issues=True)
 
     def __repr__(self) -> str:
         return (
@@ -169,15 +177,24 @@ class GithubVcsAdapter:
 
     # ---- HTTP
 
-    def _headers(self) -> dict[str, str]:
+    async def _auth(self) -> str:
+        if self._app is not None:
+            return await self._app.token(self._client, self.base_url)
+        return self.__token
+
+    @staticmethod
+    def _headers(token: str) -> dict[str, str]:
         return {
-            "Authorization": f"Bearer {self.__token}",
+            "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
 
     def _clean(self, text: str) -> str:
-        return text.replace(self.__token, "***")
+        for secret in [self.__token, *(self._app.secrets() if self._app else [])]:
+            if secret:
+                text = text.replace(secret, "***")
+        return text
 
     async def _call(
         self,
@@ -199,9 +216,10 @@ class GithubVcsAdapter:
         json: dict | None = None,
         params: dict | None = None,
     ) -> Any:
+        token = await self._auth()
         try:
             res = await self._client.request(
-                method, url, json=json, params=params, headers=self._headers()
+                method, url, json=json, params=params, headers=self._headers(token)
             )
         except UnicodeEncodeError:
             # 토큰·주소에 쓸 수 없는 글자가 있으면 머리글을 못 만든다. 값은 남기지 않는다
@@ -639,6 +657,72 @@ class GithubVcsAdapter:
             raise VcsError("invalid", "코멘트가 비었거나 너무 길다")
         got = await self._call("POST", f"/issues/{int(number)}/comments", json={"body": text})
         return self._comment(got or {})
+
+    # ---- 이슈 (GitHub /issues는 PR도 섞어 주므로 pull_request가 있는 줄은 뺀다)
+
+    @staticmethod
+    def _issue(r: dict) -> IssueSummary:
+        return IssueSummary(
+            number=int(r["number"]),
+            title=r.get("title") or "",
+            state="closed" if r.get("state") == "closed" else "open",
+            author=(r.get("user") or {}).get("login", "") or "",
+            body=r.get("body") or "",
+            labels=tuple(
+                str(x.get("name") or "") for x in r.get("labels") or [] if isinstance(x, dict)
+            ),
+            assignees=tuple(
+                str(x.get("login") or "") for x in r.get("assignees") or [] if isinstance(x, dict)
+            ),
+            comments=r.get("comments") if isinstance(r.get("comments"), int) else None,
+            created_at=_time(r.get("created_at")),
+            updated_at=_time(r.get("updated_at")),
+            closed_at=_time(r.get("closed_at")),
+            url=r.get("html_url"),
+            reason=r.get("state_reason"),
+        )
+
+    async def list_issues(
+        self, state: str = "open", query: str | None = None, limit: int = ISSUE_LIST_LIMIT
+    ) -> list[IssueSummary]:
+        if state not in ISSUE_STATES:
+            raise VcsError("invalid", f"모르는 상태: {state}")
+        limit = max(1, min(int(limit), PER_PAGE))
+        out: list[IssueSummary] = []
+        for page in range(1, LIST_PAGES + 1):
+            rows = await self._call(
+                "GET",
+                "/issues",
+                params={
+                    "state": state,
+                    "sort": "updated",
+                    "direction": "desc",
+                    "per_page": PER_PAGE,
+                    "page": page,
+                },
+            )
+            rows = rows if isinstance(rows, list) else []
+            for r in rows:
+                if (
+                    not isinstance(r, dict)
+                    or r.get("pull_request") is not None
+                    or "number" not in r
+                ):
+                    continue
+                i = self._issue(r)
+                if match_issue(i, query):
+                    out.append(i)
+                if len(out) >= limit:
+                    return out
+            if len(rows) < PER_PAGE:
+                break
+        return out
+
+    async def describe_issue(self, number: int) -> IssueSummary:
+        r = await self._call("GET", f"/issues/{int(number)}")
+        if not isinstance(r, dict) or r.get("pull_request") is not None:
+            raise VcsError("not_found", f"이슈가 아니다: {number}")
+        return self._issue(r)
 
     async def reopen_change(self, number: int) -> ChangeSummary:
         pr = await self._call("GET", f"/pulls/{int(number)}")

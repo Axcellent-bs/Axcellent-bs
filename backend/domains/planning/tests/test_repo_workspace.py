@@ -182,6 +182,21 @@ def _pr(number: int, *, state="open", merged=False, branch=None, title=None) -> 
     }
 
 
+ISSUE7 = {
+    "number": 7,
+    "title": "결제 버튼이 두 번 눌림",
+    "state": "open",
+    "body": "재현 방법",
+    "comments": 2,
+    "user": {"login": "lee"},
+    "labels": [{"name": "bug"}],
+    "assignees": [{"login": "kim"}],
+    "created_at": "2026-10-27T01:00:00Z",
+    "updated_at": "2026-10-28T01:00:00Z",
+    "html_url": f"https://github.example/{REPO}/issues/7",
+}
+
+
 class Fake:
     def __init__(self, base: str = "https://api.github.com") -> None:
         self.base = base
@@ -221,8 +236,12 @@ class Fake:
             return httpx.Response(200, json=sorted(rows, key=lambda p: -p["number"]))
         if m == "GET" and rest == "/issues":
             return httpx.Response(
-                200, json=[{"number": 1, "comments": 4, "pull_request": {}}, {"number": 7}]
+                200, json=[{"number": 1, "comments": 4, "pull_request": {}}, ISSUE7]
             )
+        if m == "GET" and rest == "/issues/7":
+            return httpx.Response(200, json=ISSUE7)
+        if m == "GET" and rest == "/issues/1":
+            return httpx.Response(200, json={"number": 1, "pull_request": {}})
         if rest.startswith("/pulls/"):
             parts = rest.split("/")
             n = int(parts[2])
@@ -349,6 +368,23 @@ def test_github_detail_diff_commits_comments() -> None:
     assert commits[0].author == "kim" and commits[0].message.startswith("fix: 고침")
     assert run(gh.list_comments(1))[0].body == "봤어요"
     assert run(gh.add_comment(1, "좋아요")).body == "좋아요"
+
+
+def test_github_issues_skip_prs_and_read_detail() -> None:
+    gh = _gh(Fake())
+    assert gh.capabilities.issues
+    rows = run(gh.list_issues("open"))
+    assert [i.number for i in rows] == [7]  # PR(#1)은 이슈 목록에서 뺀다
+    assert rows[0].labels == ("bug",) and rows[0].assignees == ("kim",) and rows[0].comments == 2
+    assert [i.number for i in run(gh.list_issues("all", "bug"))] == [7]
+    assert run(gh.list_issues("all", "없는 말")) == []
+    head = run(gh.describe_issue(7))
+    assert (head.title, head.author, head.body) == ("결제 버튼이 두 번 눌림", "lee", "재현 방법")
+    with pytest.raises(VcsError) as e:
+        run(gh.describe_issue(1))
+    assert e.value.code == "not_found"
+    with pytest.raises(VcsError):
+        run(gh.list_issues("merged"))
 
 
 def test_github_reopen_and_revert_uses_graphql() -> None:
@@ -495,6 +531,40 @@ def test_close_reopen_comment(client, repo) -> None:
     assert res.status_code == 200 and res.json()["data"]["comment"]["body"] == "봤어요"
     actions = [g.action for g in get_service().gate_calls]
     assert {"repo_close_pr", "repo_reopen_pr", "repo_comment"} <= set(actions)
+
+
+def test_issues_list_detail_comment(client, repo) -> None:
+    n = repo.seed_issue(title="장바구니 버그", body="재현", labels=("bug",), author="lee")
+    done = repo.seed_issue(title="끝난 일", state="closed")
+    res = client.get(f"{BASE}/issues")
+    assert res.status_code == 200
+    data = res.json()["data"]
+    assert data["issues"] is True and [x["number"] for x in data["items"]] == [n]
+    assert "body" not in data["items"][0]
+    assert [
+        x["number"]
+        for x in client.get(f"{BASE}/issues", params={"state": "closed"}).json()["data"]["items"]
+    ] == [done]
+    assert client.get(f"{BASE}/issues", params={"state": "merged"}).status_code == 400
+    d = client.get(f"{BASE}/issues/{n}").json()["data"]
+    assert d["issue"]["body"] == "재현" and d["issue"]["labels"] == ["bug"] and d["comments"] == []
+    assert client.post(f"{BASE}/issues/{n}/comment", json={"body": " "}).status_code == 400
+    res = client.post(f"{BASE}/issues/{n}/comment", json={"body": "봤어요"})
+    assert res.status_code == 200 and res.json()["data"]["comment"]["body"] == "봤어요"
+    assert client.get(f"{BASE}/issues/{n}").json()["data"]["comments"][0]["body"] == "봤어요"
+    assert client.get(f"{BASE}/issues/999").status_code == 404
+    assert "repo_comment" in [g.action for g in get_service().gate_calls]
+
+
+def test_issues_without_issue_support_is_409(client) -> None:
+    from planning_agent.vcs.base import Capabilities
+
+    m = _mock()
+    m._caps = Capabilities(kind="mock", issues=False)
+    vcs.set_vcs(m)
+    res = client.get(f"{BASE}/issues")
+    assert res.status_code == 409 and res.json()["error"]["code"] == "NO_ISSUES"
+    assert client.get(f"{BASE}/prs").json()["data"]["issues"] is False
 
 
 def test_revert_opens_new_pr(client, repo) -> None:

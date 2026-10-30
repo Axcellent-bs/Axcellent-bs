@@ -184,6 +184,7 @@ source = { editable = "domains/planning" }
 dependencies = [
     { name = "ax-agent-template" },
     { name = "ax-contracts" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "uvicorn" },
@@ -193,6 +194,7 @@ dependencies = [
 requires-dist = [
     { name = "ax-agent-template", editable = "shared/agent-template" },
     { name = "ax-contracts", editable = "shared/contracts" },
+    { name = "cryptography", specifier = ">=42" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "uvicorn", specifier = ">=0.30" },
