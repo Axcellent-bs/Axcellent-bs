@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from ax_contracts.schemas import EventEnvelope, EventType
 from ax_orchestrator.manager import _since
-from ax_orchestrator.models import Incident
+from ax_orchestrator.models import Incident, StepRun
 from ax_orchestrator.plans.scenario_a import _window
 
 OPENED = datetime(2026, 10, 28, 7, 24, 1, tzinfo=UTC)
@@ -49,3 +49,16 @@ def test_since_is_read_from_event() -> None:
     assert _since(env) == OPENED - timedelta(seconds=25)
     assert _since(_env({"component": "payment"})) is None
     assert _since(_env({"component": "payment", "since": "어제"})) is None
+
+
+def test_row_impact_window_matches_what_impact_analysis_gets() -> None:
+    inc = _incident(OPENED - timedelta(seconds=25))
+    inc.steps["impact"] = StepRun("impact", "impact_analysis", "영향 분석 (data)")
+    view = inc.view()
+    window = _window(inc)
+    assert (view["impact_from"], view["impact_to"]) == (window["window_from"], window["window_to"])
+
+
+def test_row_has_no_impact_window_without_the_impact_step() -> None:
+    view = _incident(None).view()
+    assert (view["impact_from"], view["impact_to"]) == (None, None)
