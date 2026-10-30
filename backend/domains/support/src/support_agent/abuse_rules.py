@@ -87,6 +87,17 @@ _EVASIVE = re.compile(
         for word in ("씨발", "시발", "병신", "ㅅㅂ", "ㅂㅅ", "지랄", "존나")
     )
 )
+_SPACED_WORDS = ("씨발", "시발", "병신", "ㅅㅂ", "ㅂㅅ", "지랄", "존나")
+_SPACED = re.compile("|".join(r"\s+".join(re.escape(c) for c in word) for word in _SPACED_WORDS))
+
+
+def maybe_evasive(text: str) -> bool:
+    """띄어 쓴 욕설("씨 발")이 의심되는가. 규칙은 이 표기를 가리지 않는다("김씨 발송"과 섞인다).
+
+    그래서 가리지 않고 모델 검토 대상으로만 올린다. 욕설인지는 모델이 문맥으로 가르고, 순화문은
+    코드가 다시 검사한다.
+    """
+    return _SPACED.search(text) is not None
 
 
 def assess(text: str) -> tuple[str, AbuseLevel, list[str]]:

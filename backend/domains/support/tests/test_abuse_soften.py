@@ -218,3 +218,45 @@ def test_feedback_list_shows_the_masked_subject(monkeypatch: pytest.MonkeyPatch)
     polite_conversation = handlers.STORE.get(polite["id"])
     assert polite_conversation is not None
     assert feedback_handlers._item(polite_conversation)["subject"] == "환불 문의"
+
+
+# ---- 띄어 쓴 욕설 의심 ----------------------------------------------------------------
+@pytest.mark.parametrize("text", ["씨 발 환불", "병   신 같은", "지\n랄 하네", "ㅅ ㅂ 진짜"])
+def test_a_spaced_curse_is_only_suspected_not_masked(text: str) -> None:
+    assert abuse_rules.maybe_evasive(text)
+    assert abuse_rules.assess(text)[1] == "none"  # 규칙은 가리지 않는다 (오탐 방지)
+
+
+@pytest.mark.parametrize("text", ["김씨 발송해 주세요", "환불 부탁드립니다", "씨앗 발아가 안 돼요"])
+def test_ordinary_text_is_not_suspected(text: str) -> None:
+    # "김씨 발송"은 의심하지만 모델이 걸러낸다: 아래 접수 흐름 테스트 참고
+    if "김씨" in text:
+        assert abuse_rules.maybe_evasive(text)
+    else:
+        assert not abuse_rules.maybe_evasive(text)
+
+
+def test_a_suspected_spaced_curse_is_softened_by_the_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = use_llm(
+        monkeypatch,
+        SoftenResult(
+            abuse_level="profanity", softened_text="주문 ORD-1 12,000원 환불을 요청합니다."
+        ),
+    )
+    created = create(TestClient(app), "씨 발 ORD-1 12,000원 환불해 주세요")  # 화난 말투가 아니어도
+    message = created["messages"][0]
+    assert fake.seen and message["abuse_level"] == "profanity"
+    assert "llm" in message["abuse_kinds"]
+    assert message["softened_text"].endswith("환불을 요청합니다.")
+
+
+def test_a_name_that_looks_like_a_spaced_curse_is_left_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """모델이 욕설이 아니라고 하면("김씨 발송") 아무것도 가리지 않는다."""
+    fake = use_llm(monkeypatch, SoftenResult(abuse_level="none", softened_text=""))
+    created = create(TestClient(app), "김씨 발송 일정을 알려 주세요")
+    message = created["messages"][0]
+    assert fake.seen  # 의심돼서 모델은 봤다
+    assert (message["abuse_level"], message["softened_text"]) == ("none", None)
+    assert "abusive_message" not in [a["kind"] for a in created["activity"]]
