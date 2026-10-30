@@ -10,6 +10,7 @@ from typing import Any
 
 from ax_orchestrator.draft import resolution_draft
 from ax_orchestrator.recommend import recommend
+from ax_orchestrator.timeline import timeline_view
 
 
 def now() -> datetime:
@@ -119,6 +120,10 @@ class Incident:
     shared: dict[str, Any] = field(default_factory=dict)  # 부서가 준 값 중 다른 부서에 넘길 것
     # 같은 종류의 이벤트인지 가르는 값(구성요소:지표). 모르면 None
     event_type: str | None = None
+    # 쇼핑몰이 정상 복귀를 알린 시각(shop.recovered). 닫힌 뒤에 와도 붙는다
+    recovered_at: datetime | None = None
+    # 인사 카드에 이미 남긴 시각(이름 → ISO). 같은 값을 다시 보내지 않는다
+    times_sent: dict[str, str] = field(default_factory=dict)
     # 이벤트를 연 이벤트의 data (plan이 입력으로 쓴다)
     signal: dict[str, Any] = field(default_factory=dict)
 
@@ -145,6 +150,7 @@ class Incident:
             "metrics": self.metrics,
             "shared": self.shared,
             "recommendation": recommend(self.outputs.get("similar_cases")),
+            "timeline": timeline_view(self),
             "resolution_draft": resolution_draft(self),
             "pending_holds": [
                 {"step_id": sid, "skill": self.steps[sid].skill, "label": self.steps[sid].label}

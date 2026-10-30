@@ -22,6 +22,7 @@ from datetime import timedelta
 from typing import Any
 
 from ax_orchestrator.models import Incident, Plan, Step, iso, now
+from ax_orchestrator.timeline import past_hint
 
 # 고객지원 `request_incident_compensation`이 한 호출에 받는 구매자 수 상한
 COMPENSATION_BATCH = 50
@@ -110,11 +111,9 @@ def _rollback_gate(inc: Incident) -> tuple[str, str, str] | None:
     diagnosis = _out(inc, "diagnose")
     if diagnosis.get("status") == "suspected" and diagnosis.get("suspects"):
         return None
-    return (
-        "transfer_queued",
-        "no_rollback_target",
-        "원인 미확정 — 롤백하지 않고 사람이 원인을 확인하도록 이관 큐로 넘김",
-    )
+    note = "원인 미확정 — 롤백하지 않고 사람이 원인을 확인하도록 이관 큐로 넘김"
+    hint = past_hint(inc)  # 같은 유형의 과거 이벤트가 있으면 사람이 먼저 볼 수 있게 붙인다(참고용)
+    return ("transfer_queued", "no_rollback_target", f"{note}. {hint}" if hint else note)
 
 
 def _recovery_verdict(output: dict[str, Any]) -> tuple[str, str] | None:
@@ -182,6 +181,9 @@ def _cause_check(inc: Incident) -> dict[str, Any]:
         lines += [f"후보({h.get('confidence')}): {h.get('explanation')}" for h in hypotheses]
     else:
         lines = ["원인 추정을 받지 못함 (확인할 수 없음)"]
+    hint = past_hint(inc)
+    if hint:
+        lines.append(hint)
     refs = [
         facts[i]["ref"]
         for h in hypotheses

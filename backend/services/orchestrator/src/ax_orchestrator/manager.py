@@ -83,6 +83,21 @@ class IncidentManager:
             return "note"
         return "ignore"
 
+    def _latest_unrecovered(self, component: str, occurred_at: datetime | None) -> Incident | None:
+        """정상 복귀를 붙일 이벤트: 같은 구성요소에서 복귀 시각이 없는 가장 최근 장애.
+
+        이벤트는 자동 처리가 끝나면 닫히지만 사람이 고치는 동안 장애는 계속되므로 닫힌 것도 본다.
+        """
+        found = [
+            inc
+            for inc in self.incidents.values()
+            if inc.component == component
+            and inc.recovered_at is None
+            and inc.event_type is not None
+            and (occurred_at is None or inc.opened_at <= occurred_at)
+        ]
+        return max(found, key=lambda inc: inc.opened_at, default=None)
+
     def open_for(self, component: str) -> Incident | None:
         return next(
             (i for i in self.incidents.values() if i.status == "open" and i.component == component),
@@ -128,7 +143,15 @@ class IncidentManager:
             return "duplicate", None
         self._seen.add(env.event_id)
         if env.type == EventType.HANDOFF_COMPLETED:
-            return self._resume_handoff(env)
+            return await self._resume_handoff(env)
+        if env.type == EventType.SHOP_RECOVERED:
+            target = self._latest_unrecovered(self._component(env), env.occurred_at)
+            if target is not None:
+                target.recovered_at = env.occurred_at
+                target.log(f"정상 복귀 신호 받음 ({env.source}, {iso(env.occurred_at)})")
+                if target.closed_at is not None:  # 열려 있으면 이벤트가 닫힐 때 함께 남긴다
+                    await self.engine.sync_times(target)
+                return "noted", target
         verdict = self.judge(env)
         component = self._component(env)
         existing = self.open_for(component)
@@ -157,7 +180,7 @@ class IncidentManager:
         self._tasks[inc.context_id] = asyncio.create_task(self.engine.run(inc, plan))
         return "opened", inc
 
-    def _resume_handoff(self, env: EventEnvelope) -> tuple[str, Incident | None]:
+    async def _resume_handoff(self, env: EventEnvelope) -> tuple[str, Incident | None]:
         """같은 context_id 이벤트에서 같은 task_id를 기다리는 단계를 찾아 사람 결과를 넣는다.
 
         이미 반영한 일이거나(다른 event_id로 다시 와도) 기다리는 단계가 없으면 `unmatched`.
@@ -173,6 +196,7 @@ class IncidentManager:
         if not self.engine.complete_handoff(inc, task_id, status, note):
             return "unmatched", inc
         inc.log(f"사람 할 일함 처리 결과 수신: {task_id} ({status}, {env.event_id})")
+        await self.engine.sync_times(inc)
         return "resumed", inc
 
     @staticmethod

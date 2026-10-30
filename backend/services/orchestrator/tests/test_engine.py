@@ -61,7 +61,9 @@ async def test_order_dependencies_respected(harness) -> None:
     order = [r.skill for _, r in harness.fakes.calls]
     assert order.index("publish_notice") > order.index("draft_notice")
     assert order.index("verify_recovery") > order.index("rollback_deployment")
-    assert order[-1] == "record_resolution"
+    plan_calls = [s for s in order if s != "record_event_times"]  # 시각 기록은 이벤트가 닫힌 뒤
+    assert plan_calls[-1] == "record_resolution"
+    assert order[-1] == "record_event_times"
 
 
 @pytest.mark.asyncio
