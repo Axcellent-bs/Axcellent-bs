@@ -227,6 +227,7 @@ export const RULE_LABEL: Record<string, string> = {
   spec_open_question: '열린 질문',
   spec_rejected_warning: '경고',
   spec_no_basis: '근거 없음',
+  spec_open_conflict: '충돌하는 요청 진행 중',
 }
 
 // 교차검증 대기를 사람 확인으로 넘기기까지 (분). 백엔드 PLANNING_CROSS_CHECK_TIMEOUT_MIN 기본값과 같다

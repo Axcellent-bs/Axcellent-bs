@@ -84,7 +84,7 @@ export default function OrchestratorPage() {
     return () => clearInterval(timer);
   }, [load]);
 
-  if (!relayEnabled) return <Loading error="총괄 읽기 연결이 꺼져 있습니다. 열람 토큰(VITE_SHOP_VIEWER_TOKEN) 또는 관리자 토큰(VITE_SHOP_ADMIN_TOKEN)이 없습니다. 화면을 bash backend/scripts/run_web.sh 로 다시 켜 주세요(run_all.sh가 만든 backend/.data/web.env 값을 넘깁니다)." />;
+  if (!relayEnabled) return <Loading error="총괄 읽기 연결이 꺼져 있습니다. 관리자 토큰(VITE_SHOP_ADMIN_TOKEN)이 없습니다. 화면을 bash backend/scripts/run_web.sh 로 다시 켜 주세요(run_all.sh가 만든 backend/.data/web.env 값을 넘깁니다)." />;
   if (!incidents) return <Loading error={error} what="총괄 이벤트를 불러오는 중…" />;
 
   const list = [...incidents].reverse();

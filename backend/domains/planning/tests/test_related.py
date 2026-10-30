@@ -183,3 +183,28 @@ def test_update_of_finished_request_is_not_conflict() -> None:
     cand = next(c for c in llm.data["candidates"] if c["id"] == target.id)
     assert cand["state"] == target.state and cand["from"] == target.from_
     assert any("이어서 바꿈" in a.text for a in svc.state.activity if a.point == "request.related")
+
+
+def _spec_of(svc: PlanningService, req_id: str):
+    req = next(r for r in svc.state.requests if r.id == req_id)
+    return next((s for s in svc.state.specs if s.id == req.spec), None)
+
+
+def test_open_conflict_holds_auto_confirm_for_human() -> None:
+    """아직 안 끝난 요청과 충돌할 수 있으면 기획서를 자동 확정하지 않고 사람 확인으로 둔다."""
+    svc = PlanningService(gate=_gate, relater=None)
+    open_ids = [r.id for r in svc.state.requests if r.state not in ("완료", "기각", "중복 연결")]
+    llm = FakeLLM([{"id": open_ids[0], "relation": "conflict", "reason": "같은 문구를 반대로"}])
+    svc._relater = Relater(LexicalEmbedder(), llm=llm)
+    out = _ticket(svc, "결제 실패하면 장바구니가 비워져요", "kc1")
+    sp = _spec_of(svc, out.output["request_id"])
+    assert sp is not None and sp.status != "확정"
+    assert sp.auto_review is not None and sp.auto_review.state == "사람 확인"
+    assert "spec_open_conflict" in sp.auto_review.rules
+
+
+def test_no_conflict_keeps_auto_confirm_rules() -> None:
+    svc = PlanningService(gate=_gate, relater=None)
+    out = _ticket(svc, "결제 실패하면 장바구니가 비워져요", "kc2")
+    sp = _spec_of(svc, out.output["request_id"])
+    assert sp is None or sp.auto_review is None or "spec_open_conflict" not in sp.auto_review.rules
