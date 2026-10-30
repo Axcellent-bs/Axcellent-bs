@@ -328,6 +328,19 @@
       "priority": "recommended"
     },
     {
+      "id": "get_privacy_audit",
+      "description": "문의 하나의 개인정보 처리 기록을 보여 준다(읽기, LLM 없음). 마스킹 감사 기록(단계 ingest·llm_input·event_untrusted·transfer, 종류별 탐지 건수, 조치, 마스킹 규칙 버전, 시각)과 답변 출처 기록(초안 스타일, 근거 문서 ID·점수, 경로 llm·template_fallback, 모델 이름, 가드 규칙 코드, 결과 generated·accepted·edited·rejected·blocked)을 시간순으로 돌려주고, 처리 활동 요약(범주·목적·받는 곳·보유·국외 이전)을 코드 상수에서 붙인다. 기록은 기존 쓰기 skill이 처리 중에 추가만 하며 이 skill은 아무것도 바꾸지 않는다. 고객 원문, 마스킹한 글, 값의 해시, 이름·연락처는 출력에 없다. 탐지한 것의 증빙이지 개인정보가 없었다는 증빙이 아니며 법적 판단이 아니다.",
+      "input_schema": "agents/support/src/support_agent/audit_schemas.py#GetPrivacyAuditInput",
+      "output_schema": "agents/support/src/support_agent/audit_schemas.py#PrivacyAudit",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "analyze_receipt",
       "description": "영수증 글(untrusted.receipt_text)과 사진(untrusted.images)에서 금액·날짜·주문번호·배송비·품목을 코드가 뽑아 문의에 붙은 주문과 대조한다(읽기). 개인정보는 가린 뒤 읽고 원문은 저장하지 않는다. 사진은 이미지 분석이 연결됐을 때만 읽고 아니면 읽지 못했다고 알린다. 같음·다름·확인할 수 없음만 말하고 환불 판정은 하지 않는다.",
       "input_schema": "agents/support/src/support_agent/analysis_schemas.py#AnalyzeReceiptInput",
