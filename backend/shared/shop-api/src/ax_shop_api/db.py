@@ -79,6 +79,12 @@ CREATE TABLE IF NOT EXISTS retention_daily_stats (
   amount_sum INTEGER, tenant_id TEXT NOT NULL,
   PRIMARY KEY (stat_date, kind, tenant_id)
 );
+-- 주문 목록·상세가 주문마다 품목·결제·환불을 order_id로 찾는다. 인덱스가 없으면 주문 수의
+-- 제곱만큼 느려져(13,000건에서 약 18초) 한 요청이 DB 잠금을 오래 쥔다.
+-- 이미 만들어진 DB 파일에도 시작할 때 붙는다.
+CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payments(order_id);
+CREATE INDEX IF NOT EXISTS idx_refunds_order_id ON refunds(order_id);
 """
 
 # 이미 만들어진 DB 파일에 뒤늦게 붙은 열(`CREATE TABLE IF NOT EXISTS`는 열을 더하지 않는다)
