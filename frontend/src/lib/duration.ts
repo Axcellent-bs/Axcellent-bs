@@ -23,3 +23,30 @@ export function durationKo(seconds: number): string {
   if (m === 0) return `${rest}초`;
   return rest === 0 ? `${m}분` : `${m}분 ${rest}초`;
 }
+
+// ---- 이벤트 시각(시스템이 잰 값). 사람이 적은 시각이 아니다 ----
+export interface EventTimes {
+  detected_at?: string | null;
+  cause_candidate_at?: string | null;
+  human_work_started_at?: string | null;
+  human_work_done_at?: string | null;
+  recovered_at?: string | null;
+  prior_case_id?: string | null;
+}
+
+export const secondsBetween = (from?: string | null, to?: string | null): number | null => {
+  if (!from || !to) return null;
+  const sec = Math.round((Date.parse(to) - Date.parse(from)) / 1000);
+  return Number.isFinite(sec) && sec >= 0 ? sec : null;
+};
+
+/** 구간(초). 알 수 없는 구간은 null */
+export function segmentsOf(t: EventTimes | null | undefined) {
+  if (!t) return { total: null, evidence: null, ai: null, human: null };
+  return {
+    total: secondsBetween(t.detected_at, t.recovered_at), // 감지 → 정상 복귀
+    evidence: secondsBetween(t.detected_at, t.cause_candidate_at), // 감지 → 원인 후보 도착(AI)
+    ai: secondsBetween(t.detected_at, t.human_work_started_at ?? t.recovered_at), // 감지 → 사람에게 넘김(없으면 복귀)
+    human: secondsBetween(t.human_work_started_at, t.recovered_at), // 사람에게 넘김 → 정상 복귀
+  };
+}
