@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -59,6 +60,16 @@ def _cors_origins() -> list[str]:
 vcs.load_saved()
 app = create_agent_app(load_card(), HANDLERS)
 app.include_router(create_api_router(get_service))
+
+
+async def _resync_on_start() -> None:
+    """켤 때 상대 서비스(기획↔개발)와 맞춘다.
+
+    상대가 아직 안 떴으면 못 보낸 것으로 남겨 다시 보낸다."""
+    asyncio.get_running_loop().create_task(get_service().resync_peer())
+
+
+app.router.on_startup.append(_resync_on_start)
 
 
 @app.exception_handler(AuthError)

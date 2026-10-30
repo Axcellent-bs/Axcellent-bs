@@ -4,7 +4,8 @@
 개발(8111)은 같은 코드를 쓰지만 서비스 역할마다 파일을 따로 둔다(`planning_state_<역할>.json`).
 같은 파일을 두 프로세스가 쓰면 서로 덮어쓰기 때문이다.
 
-- 상태와 함께 중복을 거르는 키 기록(`_idempotent`)·넘기기 지문(`_dev_sent`)도 남긴다.
+- 상태와 함께 중복을 거르는 키 기록(`_idempotent`)·넘기기 지문(`_dev_sent`)·못 보낸 넘기기
+  (`_unsent`)도 남긴다.
   재시작 뒤 같은 넘기기를 다시 처리하지 않게 하려는 것이다.
 - 쓰기는 임시 파일에 쓰고 바꿔 끼운다(쓰는 중에 꺼져도 앞 파일이 남는다).
 - 읽을 때 돌던 코딩 작업(읽기·쓰기·리뷰 중)은 실패로 바꾼다. 다시 켜면 그 실행은 없기 때문이다.
@@ -33,11 +34,18 @@ def path_for(role: str) -> str | None:
     return os.path.join(folder, f"planning_state_{role or 'all'}.json")
 
 
-def save(path: str, state: State, idempotent: dict[str, Any], dev_sent: dict[str, str]) -> None:
+def save(
+    path: str,
+    state: State,
+    idempotent: dict[str, Any],
+    dev_sent: dict[str, str],
+    unsent: dict[str, list] | None = None,
+) -> None:
     data = {
         "state": dump(state),
         "idempotent": {k: asdict(v) for k, v in idempotent.items()},
         "dev_sent": dict(dev_sent),
+        "unsent": dict(unsent or {}),
     }
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = f"{path}.tmp"
@@ -46,7 +54,7 @@ def save(path: str, state: State, idempotent: dict[str, Any], dev_sent: dict[str
     os.replace(tmp, path)
 
 
-def load(path: str) -> tuple[State, dict[str, dict], dict[str, str]] | None:
+def load(path: str) -> tuple[State, dict[str, dict], dict[str, str], dict[str, list]] | None:
     """저장한 상태. 없거나 읽지 못하면 None (시드로 시작)."""
     try:
         with open(path, encoding="utf-8") as f:
@@ -60,4 +68,9 @@ def load(path: str) -> tuple[State, dict[str, dict], dict[str, str]] | None:
             cr.status = "failed"
             cr.error = "서버를 다시 켜서 멈춤 → 다시 시도로 이어서"
             cr.waiting_for = []
-    return state, dict(data.get("idempotent") or {}), dict(data.get("dev_sent") or {})
+    return (
+        state,
+        dict(data.get("idempotent") or {}),
+        dict(data.get("dev_sent") or {}),
+        dict(data.get("unsent") or {}),
+    )
