@@ -12,6 +12,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from functools import lru_cache
 from importlib import resources
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -58,6 +59,15 @@ class ProposalConfig(_Strict):
     max_step_ratio: float = Field(gt=0, le=1)
 
 
+class TaxConfig(_Strict):
+    commission_vat: Literal["excluded", "included"] = "excluded"
+    pg_fee_vat: Literal["excluded", "included"] = "excluded"
+    shipping_supplier: Literal["seller", "platform"] = "seller"
+    coupon_reduces_commission_base: bool = False
+    default_tax: Literal["exempt", "taxable"] = "taxable"
+    category_tax: dict[str, Literal["exempt", "taxable"]] = Field(default_factory=dict)
+
+
 class BankConfig(_Strict):
     pg_memo: str = ""
 
@@ -90,6 +100,7 @@ class FinanceConfig(_Strict):
     pg: PgConfig
     variance: VarianceConfig = VarianceConfig()
     bank: BankConfig = BankConfig()
+    tax: TaxConfig = TaxConfig()
     cashflow: CashflowConfig = CashflowConfig()
     budget: BudgetConfig
     proposal: ProposalConfig

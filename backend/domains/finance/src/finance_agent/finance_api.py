@@ -17,6 +17,8 @@
 | `POST /api/finance/bank/statement` | ② 은행 입금 내역 올리기 | **사람** |
 | `GET /api/finance/cashflow` | ③ 13주 현금 흐름 (확정 + 추정) | 없음 |
 | `GET /api/finance/close-checklist?date=` | ① 월 마감 체크리스트 | 없음 |
+| `GET /api/finance/tax/vat?date=` | ⑥ 부가세 신고 보조 집계 (분기) | 없음 |
+| `GET /api/finance/tax/seller-report?date=&format=` | ⑥ 판매자별 판매 명세 (제75조 초안) | 없음 |
 | `GET /api/finance/policy` | ⑤ 정책표·소진율·한도 제안 | 없음 |
 | `POST /api/finance/policy/{key}/ack` | ⑤ 경보 확인 메모 (이번 달 숨김) | **사람** |
 | `GET /api/finance/audit?days=7&context_id=` | ⑦ 사후 감사 (사건 하나로 좁히기 선택) | 없음 |
@@ -55,6 +57,7 @@ from finance_agent import (
     reconciliation,
     settlement,
     statements,
+    tax,
     variance,
 )
 from finance_agent import finance_config as fc
@@ -628,6 +631,34 @@ def add_finance_api(app: FastAPI) -> None:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
         return ok(close_checklist.checklist(books, state().records, d), books.meta())
+
+    @app.get("/api/finance/tax/vat", response_model=None)
+    async def get_vat(date: str | None = None) -> dict | JSONResponse:
+        try:
+            d = fc.parse_date(date) or fc.today()
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        books = await state().books()
+        return ok(tax.vat_pack(books, d), books.meta())
+
+    @app.get("/api/finance/tax/seller-report", response_model=None)
+    async def get_seller_report(date: str | None = None, format: str = "json") -> dict | Response:
+        if format not in ("json", "csv"):
+            return error(400, "invalid_request", "format은 json 또는 csv")
+        try:
+            d = fc.parse_date(date) or fc.today()
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        books = await state().books()
+        report = tax.seller_report(books, d)
+        if format == "json":
+            return ok(report, books.meta())
+        name = f"seller-sales-{report['from'][:7]}.csv"
+        return Response(
+            content=tax.seller_report_csv(report).encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{name}"'},
+        )
 
     @app.get("/api/finance/anomalies")
     async def get_anomalies() -> dict:
