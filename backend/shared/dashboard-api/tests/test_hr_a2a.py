@@ -355,3 +355,64 @@ def test_resolution_time_in_the_future_is_rejected(client: TestClient, fake: Fak
         RESOLUTION_URL, json={"outcome": "resolved", "resolved_at": "2999-01-01T00:00:00Z"}
     )
     assert response.status_code == 422 and not fake.sent
+
+
+# ---------------------------------------------------------------- 중복 결정 병합 (15번)
+GROUP = "dup_abc123"
+
+
+def test_duplicate_groups_are_listed_from_hr(client: TestClient, fake: Fake) -> None:
+    fake.outputs["list_duplicate_groups"] = {"groups": [{"group_id": GROUP}], "merged": []}
+    body = client.get(BASE + "/duplicate-groups", params={"area": "infra"}).json()
+    assert body["data"]["groups"][0]["group_id"] == GROUP
+    assert fake.last("list_duplicate_groups").input == {"area": "infra"}
+
+
+def test_a_person_merges_a_group_with_a_confirmed_title(client: TestClient, fake: Fake) -> None:
+    fake.outputs["decide_duplicate_group"] = {"outcome": "merged", "merged_ids": ["card_old"]}
+    response = client.post(
+        f"{BASE}/duplicate-groups/{GROUP}/decision",
+        json={"representative_id": "card_new", "decision": "merge", "title": "평일에만 배포"},
+    )
+    assert response.status_code == 200 and response.json()["data"]["merged_ids"] == ["card_old"]
+    sent = fake.last("decide_duplicate_group")
+    assert sent.input == {
+        "group_id": GROUP,
+        "representative_id": "card_new",
+        "decision": "merge",
+        "title": "평일에만 배포",
+    }
+    assert sent.meta.idempotency_key and sent.meta.token == "test-token"
+
+
+def test_a_group_that_does_not_exist_is_404(client: TestClient, fake: Fake) -> None:
+    fake.outputs["decide_duplicate_group"] = {"outcome": "not_found"}
+    response = client.post(
+        f"{BASE}/duplicate-groups/{GROUP}/decision",
+        json={"representative_id": "card_new", "decision": "dismiss"},
+    )
+    assert response.status_code == 404
+
+
+def test_deciding_a_group_needs_a_human_token(client: TestClient, fake: Fake) -> None:
+    client.headers.pop("authorization", None)
+    response = client.post(
+        f"{BASE}/duplicate-groups/{GROUP}/decision",
+        json={"representative_id": "card_new", "decision": "merge"},
+    )
+    assert response.status_code == 401 and not fake.sent
+
+
+def test_an_unknown_decision_never_reaches_hr(client: TestClient, fake: Fake) -> None:
+    response = client.post(
+        f"{BASE}/duplicate-groups/{GROUP}/decision",
+        json={"representative_id": "card_new", "decision": "delete"},
+    )
+    assert response.status_code == 422 and not fake.sent
+
+
+def test_a_merged_card_can_be_restored(client: TestClient, fake: Fake) -> None:
+    fake.outputs["restore_merged_card"] = {"outcome": "restored", "card_id": "card_old"}
+    response = client.post(f"{BASE}/cards/card_old/restore-merge")
+    assert response.status_code == 200 and response.json()["data"]["outcome"] == "restored"
+    assert fake.last("restore_merged_card").input == {"card_id": "card_old"}

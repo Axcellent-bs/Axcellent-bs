@@ -18,6 +18,7 @@ from hr_agent.clients.safety import GateClient, MockGate, TemplateGate
 from hr_agent.config import Clock, HrSettings, system_clock
 from hr_agent.narrative import Narrator
 from hr_agent.retrieval.cards import DenseCardSearch, build_dense_search
+from hr_agent.retrieval.duplicates import SameDecisionJudge, TitleSuggester
 from hr_agent.retrieval.verify import RelevanceVerifier
 from hr_agent.store import Store
 from hr_agent.util import dumps, loads
@@ -107,6 +108,10 @@ def build_services(
         dense=dense,
         verifier=verifier,
     )
+    if llm is not None and dense is not None and not settings.mock:
+        # 같은 주제로 본 결정 쌍을 가르고(같은 결정/내용이 바뀜/별개) 묶음의 대표 제목을 제안한다
+        services.extras.setdefault("same_judge", SameDecisionJudge(llm))
+        services.extras.setdefault("title_suggester", TitleSuggester(llm))
     from hr_agent.handover.service import register_verifiers
 
     register_verifiers(services)

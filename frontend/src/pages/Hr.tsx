@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Loading } from "@/components/admin/bits";
 import { DecisionCard } from "@/components/hr/DecisionCards";
+import DuplicateGroups from "@/components/hr/DuplicateGroups";
 import IncidentRecords from "@/components/hr/IncidentRecords";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
 import { ago, shortDateTime } from "@/lib/format";
@@ -181,6 +182,7 @@ export default function HrPage({ part = "hr" }: { part?: HrPart }) {
       {/* ④ 기록 도구 */}
       {/* 인사 AI가 실제로 남긴 이벤트 기록과 고른 이벤트의 처리 내역 */}
       <IncidentRecords initialCtx={ctxParam} />
+      <DuplicateGroups />
       <Section title="확정된 결정 카드" desc="후보가 아니라 기록으로 확정된 카드입니다. 최근 순으로 최대 50장을 보여 줍니다.">
         {view.decided === null
           ? <p className="text-xs text-amber-800">확정 카드 목록을 받지 못했습니다. 서버가 이 조회를 아직 지원하지 않을 수 있습니다.</p>

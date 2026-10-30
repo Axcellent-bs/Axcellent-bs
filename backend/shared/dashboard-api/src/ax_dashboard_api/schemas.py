@@ -553,6 +553,14 @@ class CandidateDecisionBody(BaseModel):
     note: str | None = None
 
 
+class DuplicateDecisionBody(BaseModel):
+    """중복 결정 묶음 처리. `merge`는 병합, `dismiss`는 병합하지 않고 목록에서 뺀다."""
+
+    representative_id: str
+    decision: Literal["merge", "dismiss"]
+    title: str | None = Field(default=None, max_length=80)  # 사람이 확정한 대표 제목
+
+
 class ResolutionBody(BaseModel):
     """사건 해결 내용. 사람이 사건을 닫을 때 결과·원인·조치를 적는다. 소요 시간은 적지 않는다.
 

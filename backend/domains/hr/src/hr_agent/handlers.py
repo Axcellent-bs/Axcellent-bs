@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 
 from ax_contracts.schemas import AgentRequest, AgentResult
 from hr_agent.cards import decision as card_decision
+from hr_agent.cards import merge
 from hr_agent.cards import service as cards
 from hr_agent.case_memory import service as case_memory
 from hr_agent.clients.errors import UpstreamError, bind_meta
@@ -85,6 +86,9 @@ _HANDLERS = {
     "find_similar_cases": _with_services(case_memory.find_similar_cases),
     "record_resolution": _with_services(case_memory.record_resolution),
     "record_event_times": _with_services(case_memory.record_event_times),
+    "list_duplicate_groups": _with_services(merge.list_duplicate_groups),
+    "decide_duplicate_group": _with_services(merge.decide_duplicate_group),
+    "restore_merged_card": _with_services(merge.restore_merged_card),
     "record_case": record_case,
     "get_roster": get_roster,
     "start_handover": start_handover,

@@ -18,12 +18,14 @@ from ax_contracts.schemas.hr import (
     CheckPlanInput,
     CheckPlanOutput,
     DecideCandidateCardOutput,
+    DecideDuplicateGroupOutput,
     GetRosterOutput,
     HandoverAnswerRequest,
     HandoverQuestion,
     HandoverStatus,
     HandoverView,
     RecordResolutionOutput,
+    RestoreMergedCardOutput,
 )
 from ax_contracts.schemas.record import Card
 from ax_dashboard_api import (
@@ -52,6 +54,7 @@ from ax_dashboard_api.schemas import (
     ConversationCreate,
     ConversationListItem,
     DraftStyleBody,
+    DuplicateDecisionBody,
     FeedbackBody,
     FeedbackItem,
     FeedbackOverview,
@@ -641,6 +644,49 @@ async def decide_candidate_card(card_id: str, body: CandidateDecisionBody) -> di
         "decide_candidate_card", payload, target=f"card:{card_id}:{body.decision}"
     )
     return ok(DecideCandidateCardOutput.model_validate(out))
+
+
+@router.get("/duplicate-groups")
+async def duplicate_groups(area: str | None = None) -> dict:
+    """사람 승인을 기다리는 중복 결정 묶음과 최근 병합된 카드(되돌리기용)."""
+    if is_mock():
+        return ok({"groups": [], "merged": []})
+    out = await or_unavailable(
+        hr_client.call("list_duplicate_groups", {"area": area} if area else {}),
+        {"groups": [], "merged": []},
+    )
+    return ok({"groups": out.get("groups", []), "merged": out.get("merged", [])})
+
+
+@router.post("/duplicate-groups/{group_id}/decision")
+async def decide_duplicate_group(group_id: str, body: DuplicateDecisionBody) -> dict:
+    """중복 묶음을 병합하거나 그대로 둔다. hr이 `decide_duplicate_group`(A)으로 실행한다."""
+    if is_mock():
+        raise ApiError(404, "NOT_FOUND", "시연 데이터에는 중복 묶음이 없다")
+    payload: dict = {"group_id": group_id, **body.model_dump(exclude_none=True)}
+    out = await hr_client.call(
+        "decide_duplicate_group",
+        payload,
+        target=f"dup:{group_id}:{body.decision}:{body.representative_id}",
+    )
+    result = DecideDuplicateGroupOutput.model_validate(out)
+    if result.outcome == "not_found":
+        raise ApiError(404, "NOT_FOUND", "그 중복 묶음을 찾을 수 없다")
+    return ok(result)
+
+
+@router.post("/cards/{card_id}/restore-merge")
+async def restore_merged_card(card_id: str) -> dict:
+    """병합으로 대체됨이 된 카드를 되돌린다. hr이 `restore_merged_card`(A)로 실행한다."""
+    if is_mock():
+        raise ApiError(404, "NOT_FOUND", "시연 데이터에는 병합된 카드가 없다")
+    out = await hr_client.call(
+        "restore_merged_card", {"card_id": card_id}, target=f"restore:{card_id}"
+    )
+    result = RestoreMergedCardOutput.model_validate(out)
+    if result.outcome == "not_found":
+        raise ApiError(404, "NOT_FOUND", "그 카드를 찾을 수 없다")
+    return ok(result)
 
 
 @router.post("/incidents/{context_id}/resolution")
