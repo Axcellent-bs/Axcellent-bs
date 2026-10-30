@@ -2,7 +2,7 @@
 // 진행 상태는 Task.coding으로 SSE를 타고 온다
 import { useState, type FormEvent } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
-import { DEPT_NAME, RELATION_LABEL, type CodingRun, type CodingStatus, type Request, type State as S, type Task } from '@/lib/planningData'
+import { DEPT_NAME, RELATION_LABEL, byRelation, type CodingRun, type CodingStatus, type Request, type State as S, type Task } from '@/lib/planningData'
 import { DEV_API, PlanningApiError, devTaskApi, planningApi } from '@/lib/planning'
 import { State, Tag } from '@/components/planning-common/parts'
 import { Step } from '@/components/planning-common/flow'
@@ -72,7 +72,7 @@ export function OriginTag({ s, t }: { s: S; t?: Task }) {
 
 /** 작업의 요청과 비슷한·충돌하는 요청 (제안). 충돌만 주황, 마우스를 올리면 판단 근거 */
 export function RelatedTags({ s, t }: { s: S; t?: Task }) {
-  const rel = requestOfTask(s, t)?.related ?? []
+  const rel = byRelation(requestOfTask(s, t)?.related)
   return (
     <>
       {rel.slice(0, 3).map((x) => (

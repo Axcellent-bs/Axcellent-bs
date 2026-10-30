@@ -340,3 +340,54 @@ def test_list_get_and_state_contains_chats(service: PlanningService, adapter) ->
     # 초기화하면 대화도 비운다
     c.post("/api/planning/reset")
     assert service.state.chats == []
+
+
+class ClashRelater:
+    """진행 중인 요청 하나와 충돌한다고 답하는 가짜 (의미 검색·LLM 판단 대신)."""
+
+    def __init__(self, target_id: str):
+        self.target_id = target_id
+        self.asked: list[str] = []
+
+    async def relate(self, state, req):
+        from planning_agent.domain.models import RelatedItem
+
+        self.asked.append(req.title)
+        if req.id != "REQ-NEW":
+            return []
+        return [
+            RelatedItem(
+                id=self.target_id,
+                title="배너 문구를 여름 행사로",
+                score=0.8,
+                relation="conflict",
+                reason="같은 배너 문구를 다른 값으로 바꾸는 중",
+                by="llm",
+            )
+        ]
+
+
+def test_conflict_with_open_request_asks_before_starting(service: PlanningService, adapter) -> None:
+    """대화에서 작업을 띄우기 전에 진행 중인 요청과 충돌하면 먼저 묻고, '진행해'면 시작한다."""
+    target = next(r for r in service.state.requests if r.state not in ("완료", "기각", "중복 연결"))
+    clash = ClashRelater(target.id)
+    service._relater = clash
+    dev_chat.set_llm(ChatLLM([START, ChatTurn(reply="", action="start")]))
+    with TestClient(app) as c:
+        th = _post(c, message="메인 배너 문구를 '신간 배너'로 바꿔 줘").json()["data"]
+        last = th["messages"][-1]
+        assert th["status"] == "talking" and th["task_id"] is None
+        assert last["kind"] == "question" and "충돌" in last["text"] and target.id in last["text"]
+        assert clash.asked and PLAN.title in clash.asked[0]  # 계획 제목으로 미리 찾는다
+        th = _post(c, thread_id=th["id"], message="진행해").json()["data"]
+        assert th["status"] == "started" and th["task_id"] == "T-D1"
+
+
+def test_finished_conflict_does_not_ask(service: PlanningService, adapter) -> None:
+    """상대 요청이 이미 끝났으면 이어서 바꾸는 것이라 묻지 않고 시작한다."""
+    done = next(r for r in service.state.requests if r.state == "완료")
+    service._relater = ClashRelater(done.id)
+    dev_chat.set_llm(ChatLLM([START]))
+    with TestClient(app) as c:
+        th = _post(c, message="메인 배너 문구를 '신간 배너'로 바꿔 줘").json()["data"]
+        assert th["status"] == "started"

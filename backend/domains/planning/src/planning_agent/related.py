@@ -43,8 +43,9 @@ JUDGE_PROMPT = (
     "- same: 같은 일을 다른 말로 요청함. 하나로 묶어 처리할 수 있다.\n"
     "- conflict: 둘 다 아직 끝나지 않았고(state가 완료·기각이 아님), 같은 대상(화면·값·규칙)을 "
     "양립할 수 없게 바꾸려 한다. 누구 것을 따를지 사람이 정해야 한다.\n"
-    "- update: 새 요청이 후보 요청의 결과를 다시 바꾼다(예: 3만 원 → 5만 원으로 수정). 후보가 "
-    "완료됐거나, 같은 요청자(from)가 나중에 값을 고친 것이면 conflict가 아니라 update다.\n"
+    "- update: 새 요청이 이미 끝난(state 완료) 후보의 결과를 다시 바꾼다(예: 3만 원 → 5만 원으로 "
+    "수정). 후보가 아직 진행 중이면 update가 아니라 conflict다. from은 부서 단위라 같아도 같은 "
+    "사람인지 알 수 없다.\n"
     "- related: 같은 화면·기능을 다루지만 따로 처리해도 된다.\n"
     "- none: 관계없다.\n"
     "- id는 candidates에 있는 값만 쓴다. reason은 판단 근거 한 줄(어느 부분이 같거나 반대인지).\n"
@@ -195,6 +196,19 @@ class Relater:
             return None
         ids = {r.id for r, _ in found}
         return {j.id: j for j in got.items if j.id in ids}
+
+
+FINISHED = ("완료", "기각", "중복 연결")
+
+
+def open_conflicts(state: State, req: Request) -> list[RelatedItem]:
+    """이 요청의 충돌 가능 중 상대 요청이 아직 안 끝난 것 (끝났으면 이어서 바꾼 것과 같다)."""
+    states = {r.id: r.state for r in state.requests}
+    return [
+        x
+        for x in req.related
+        if x.relation == "conflict" and states.get(x.id) not in (*FINISHED, None)
+    ]
 
 
 def path_overlaps(state: State, pr: PR) -> list[RelatedItem]:

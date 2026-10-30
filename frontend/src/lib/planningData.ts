@@ -45,6 +45,9 @@ export interface RelatedReq {
   reason: string
   by: 'llm' | 'embed' | 'lexical' | 'path'
 }
+/** 충돌을 먼저, 그다음 같은 일·이어서 바꿈·비슷함 순으로 */
+export const byRelation = (xs: RelatedReq[] = []) => [...xs].sort((a, b) => ORDER[a.relation] - ORDER[b.relation])
+const ORDER: Record<RelatedReq['relation'], number> = { conflict: 0, same: 1, update: 2, related: 3 }
 export const RELATION_LABEL: Record<RelatedReq['relation'], string> = { same: '같은 일', conflict: '충돌 가능', update: '이어서 바꿈', related: '비슷함' }
 
 export interface Para {

@@ -359,6 +359,19 @@ async def turn(
             plan=plan,
             status="talking",
         )
+    if not go_ahead(text):
+        clash = await svc.preview_conflicts(plan.title, plan.plan)
+        if clash:
+            lines = "\n".join(f"- {x.id} {x.title}: {x.reason}" for x in clash)
+            return await svc.chat_add(
+                tid,
+                "assistant",
+                f"잠깐요. 아직 진행 중인 요청과 충돌할 수 있어요.\n{lines}\n"
+                "그래도 진행하려면 '진행해'라고 보내 주세요. 앞 요청이 끝난 뒤에 해도 돼요.",
+                kind="question",
+                plan=plan,
+                status="talking",
+            )
     try:
         result = await svc.create_dev_task(
             title=plan.title,

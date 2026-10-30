@@ -82,6 +82,7 @@ from planning_agent.domain.models import (
     OutMsg,
     Para,
     PrGate,
+    RelatedItem,
     RepoTarget,
     ReqState,
     Request,
@@ -561,6 +562,25 @@ class PlanningService:
                     "read",
                 )
             )
+
+    async def preview_conflicts(self, title: str, text: str) -> list[RelatedItem]:
+        """아직 만들지 않은 요청이 진행 중인 요청과 충돌하는지 미리 본다 (개발 AI 대화, 읽기만)."""
+        if self._relater is None:
+            return []
+        draft = Request(
+            id="REQ-NEW",
+            context_id="chat:preview",
+            from_="dev",
+            via=coder.DEV_TEAM,
+            title=f"{title}\n{text}"[:600],
+            evidence="개발 AI 대화",
+            state="접수",
+        )
+        try:
+            draft.related = await self._relater.relate(self.state, draft)
+        except Exception:  # noqa: BLE001 - 미리 보기가 안 되면 묻지 않고 진행한다
+            return []
+        return related.open_conflicts(self.state, draft)
 
     def _relate_paths(self, s: State, known_prs: set[str]) -> None:
         """새로 열린 PR이 다른 열린 PR과 같은 파일을 고치면 두 요청에 서로 충돌 가능으로 표시."""
