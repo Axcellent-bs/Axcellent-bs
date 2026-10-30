@@ -78,7 +78,7 @@ export default function DuplicateGroups() {
     <section className="card space-y-4 p-6">
       <div>
         <h2 className="text-lg font-semibold">중복 결정 정리</h2>
-        <p className="mt-1 text-xs text-ink-500">같은 결정을 다른 말로 다시 쓴 카드를 묶습니다. 확신이 매우 높은 것(유사도와 AI 판정이 모두 기준 이상)은 AI가 병합하고, 애매한 것은 아래에서 사람이 정합니다. 병합해도 옛 카드는 지워지지 않고 되돌릴 수 있습니다. 이벤트 기록 카드는 대상이 아닙니다.</p>
+        <p className="mt-1 text-xs text-ink-500">같은 결정을 다른 말로 다시 쓴 카드를 묶습니다. 확신이 매우 높은 것(유사도와 AI 판정이 모두 기준 이상)은 AI가 병합하고, 애매한 것은 아래에서 사람이 정합니다. 병합해도 옛 카드는 지워지지 않고 되돌릴 수 있습니다. 장애 대응 카드(이벤트 기록)는 대상이 아닙니다.</p>
       </div>
       {err && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{err}</p>}
       {!view ? (!err && <p className="text-xs text-ink-500">불러오는 중…</p>) : (

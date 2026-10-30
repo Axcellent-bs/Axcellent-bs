@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Loading } from "@/components/admin/bits";
-import { DecisionCard } from "@/components/hr/DecisionCards";
-import DuplicateGroups from "@/components/hr/DuplicateGroups";
+import CardSections from "@/components/hr/CardSections";
 import IncidentRecords from "@/components/hr/IncidentRecords";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
 import { ago, shortDateTime } from "@/lib/format";
@@ -95,7 +94,7 @@ export default function HrPage({ part = "hr" }: { part?: HrPart }) {
     try {
       const [handovers, cards, roster, decided] = await Promise.all([
         hr.handovers(), hr.candidateCards(), hr.roster(),
-        hr.decisionCards().catch(() => null), // 이 조회만 실패해도 화면 나머지는 보여 준다
+        hr.decisionCards(undefined, 200).catch(() => null), // 이 조회만 실패해도 화면 나머지는 보여 준다
       ]);
       setView({ handovers, cards, decided, roster }); setUp(true);
     } catch (e) { setUp(false); setError(errText(e)); }
@@ -182,14 +181,8 @@ export default function HrPage({ part = "hr" }: { part?: HrPart }) {
       {/* ④ 기록 도구 */}
       {/* 인사 AI가 실제로 남긴 이벤트 기록과 고른 이벤트의 처리 내역 */}
       <IncidentRecords initialCtx={ctxParam} />
-      <DuplicateGroups />
-      <Section title="확정된 결정 카드" desc="후보가 아니라 기록으로 확정된 카드입니다. 최근 순으로 최대 50장을 보여 줍니다.">
-        {view.decided === null
-          ? <p className="text-xs text-amber-800">확정 카드 목록을 받지 못했습니다. 서버가 이 조회를 아직 지원하지 않을 수 있습니다.</p>
-          : view.decided.length === 0
-            ? <p className="py-6 text-center text-sm text-ink-500">아직 확정된 결정 카드가 없습니다.</p>
-            : <div className="space-y-3">{view.decided.map((c) => <DecisionCard key={c.card_id} card={c} />)}</div>}
-      </Section>
+      {/* 확정된 카드는 장애 대응(보라)·업무 결정(민트)으로 나눠 보여 준다. 최근 순 최대 200장 */}
+      <CardSections cards={view.decided} />
       <Section title="계획 비교" desc="새 계획이 과거에 기각된 안과 겹치는지 확인합니다. 저장하지 않고 보기만 합니다."><PlanChecker /></Section>
       </>}
     </div>
