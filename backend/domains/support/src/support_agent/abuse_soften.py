@@ -83,7 +83,10 @@ def valid(original_masked: str, softened: str) -> bool:
         return False
     if abuse_rules.assess(text)[1] != "none":  # 욕설이 남았다
         return False
-    if not _numbers(original_masked) <= _numbers(text):  # 금액·날짜·주문번호가 사라졌다
+    # 욕설 사이에 낀 숫자("시1발")는 세지 않으려고 욕설을 가린 글에서 숫자를 뽑는다
+    if not _numbers(abuse_rules.assess(original_masked)[0]) <= _numbers(
+        text
+    ):  # 금액·날짜·주문번호가 사라졌다
         return False
     return set(_PLACEHOLDER.findall(original_masked)) <= set(_PLACEHOLDER.findall(text))
 
