@@ -302,6 +302,16 @@ action = "link_incident"
 owner = "planning"
 base_grade = "A"
 
+# 자동 처리 범위 바꾸기. 줄이기는 A(승인 없이), 넓히기는 C(사람 확인).
+# - 줄이기: 자동 머지 PR이 사건에 연결되면 한 단계 내린다 (예: L1 → L0). params {target, to}
+# - 넓히기: 관리자 승인으로 범위를 올린다. params {target, to, lines, files, paths}
+# 어느 쪽인지는 thresholds.toml의 auto_policy_* 규칙이 target("L1->L0" 형식)과 to로 가린다.
+# 목록에 없는 단계 이동이거나 target·to가 없거나 형식이 틀리면 C (fail-closed)
+[[actions]]
+action = "auto_policy_update"
+owner = "planning"
+base_grade = "A"
+
 # 기획서 확정은 A. 열린 질문·기각 경고·근거 없음·되돌릴 수 없는 영역이면 C (thresholds.toml)
 [[actions]]
 action = "confirm_spec"
