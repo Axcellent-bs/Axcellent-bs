@@ -22,6 +22,8 @@ SendFn = Callable[[str, AgentRequest], Awaitable[AgentResult]]
 Retriever = Callable[[str], Awaitable[list[Source]]]  # 질의 -> 근거 조각
 
 TOP_K = 3
+# memory에서는 넉넉히 받는다. 미확정 카드가 상위 자리를 차지해도 쓸 카드가 TOP_K장 남도록
+FETCH_K = 6
 _POLICY_TAG = "policy"
 
 
@@ -54,7 +56,7 @@ async def fetch_sources(
     search = AgentRequest(
         meta=request.meta.model_copy(update={"idempotency_key": None}),
         skill="card_search",
-        input={"query": query, "kind": ["policy"], "top_k": limit},
+        input={"query": query, "kind": ["policy"], "top_k": max(FETCH_K, limit)},
     )
     try:
         reply = await send("memory", search)

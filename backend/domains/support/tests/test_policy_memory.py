@@ -69,7 +69,7 @@ def test_policy_cards_become_sources_with_a_read_only_card_search() -> None:
     assert sources[0].score == 0.9
     target, req = sent[0]
     assert target == "memory" and req.skill == "card_search"
-    assert req.input == {"query": "배송 지연", "kind": ["policy"], "top_k": 3}
+    assert req.input == {"query": "배송 지연", "kind": ["policy"], "top_k": policy_memory.FETCH_K}
     assert req.meta.idempotency_key is None  # 읽기라 쓰기용 키를 싣지 않는다
 
 
@@ -108,3 +108,12 @@ def test_an_empty_query_does_not_call_memory() -> None:
     sent, send = _sender([_hit("crd_1")])
     assert asyncio.run(policy_memory.search(_request(), "   ", send)) == []
     assert sent == []
+
+
+def test_unconfirmed_cards_do_not_use_up_the_evidence_slots() -> None:
+    # memory는 넉넉히 보내고, 미확정 카드를 뺀 뒤에 limit장으로 자른다
+    hits = [_hit("low1", low=True), _hit("low2", low=True)]
+    hits += [_hit(f"ok{i}") for i in range(1, 6)]
+    _, send = _sender(hits)
+    found = asyncio.run(policy_memory.fetch_sources(_request(), "개인정보 삭제", send))
+    assert [s.id for s in found or []] == ["ok1", "ok2", "ok3"]
