@@ -2,7 +2,7 @@
 // 백엔드는 snake_case·ISO 시각, 화면은 camelCase·KST "MM-DD HH:mm"이라 여기서 한 번만 바꾼다.
 // 백엔드에 없는 값(학습 기준·감사 목록)은 빈 값으로 두고 지어내지 않는다.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { RELAY_TOKEN, SAFETY_HUMAN_TOKEN } from '@/lib/env'
+import { RELAY_TOKEN, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from '@/lib/env'
 import { RULE_LABEL, type Action, type Activity, type AuditItem, type ChatThread, type CrossEvidence, type CrossReview, type Doc, type Incident, type OutMsg, type PR, type Request, type State, type Thread } from '@/lib/planningData'
 
 export const PLANNING_API = (import.meta.env.VITE_PLANNING_API_URL as string | undefined) ?? 'http://localhost:8101'
@@ -138,9 +138,24 @@ export function fromBackend(raw: Json, queue: QueueItem[]): State {
 
 export class PlanningApiError extends Error {
   readonly code: string
-  constructor(code: string, message: string) {
+  readonly details?: { action?: string; status?: string; review_id?: string | null }
+  constructor(code: string, message: string, details?: PlanningApiError['details']) {
     super(message)
     this.code = code
+    this.details = details
+  }
+}
+
+/** 실행 관문이 보류(held)한 건을 사람이 승인한다 (safety 보류 건 결정, 재무 화면과 같은 방식) */
+async function approveReview(reviewId: string): Promise<void> {
+  const res = await fetch(`${SAFETY_API_URL}/api/safety/reviews/${encodeURIComponent(reviewId)}/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SAFETY_HUMAN_TOKEN}` },
+    body: JSON.stringify({ decision: 'approved', note: '교차검증 대기에서 사람이 확인하고 진행' }),
+  })
+  if (!res.ok) {
+    const err = ((await res.json().catch(() => ({}))) as { error?: { message?: string } }).error
+    throw new PlanningApiError('REVIEW_FAILED', `안전 관문 승인 실패: ${err?.message ?? res.status}`)
   }
 }
 
@@ -148,8 +163,8 @@ async function call<T>(base: string, path: string, init?: RequestInit): Promise<
   const res = await fetch(`${base}/api/planning${path}`, { cache: 'no-store', ...init })
   const body = await res.json().catch(() => ({}))
   if (!res.ok) {
-    const err = (body as { error?: { code?: string; message?: string } }).error
-    throw new PlanningApiError(err?.code ?? `HTTP_${res.status}`, err?.message ?? `기획개발 서버 응답 ${res.status}`)
+    const err = (body as { error?: { code?: string; message?: string; details?: PlanningApiError['details'] } }).error
+    throw new PlanningApiError(err?.code ?? `HTTP_${res.status}`, err?.message ?? `기획개발 서버 응답 ${res.status}`, err?.details)
   }
   return (body as { data: T }).data
 }
@@ -371,7 +386,21 @@ export function useSharedStore(base: string): [State, (a: Action) => void, boole
     } else if (a.type === 'humanDecide') {
       return report('보류는 아직 서버에서 받지 않습니다. 기다리면 대기열에 남습니다')
     }
-    api.action(send).catch((e: unknown) => {
+    const human = a.type === 'humanDecide' || a.type === 'decideReview'
+    const action = send
+    api.action(action).catch(async (e: unknown) => {
+      // 사람이 "확인하고 진행"을 눌렀는데 관문이 사람 승인(C)으로 보류하면, 그 보류 건을 사람 토큰으로
+      // 승인하고 같은 액션을 다시 보낸다 (같은 멱등성 키라 관문은 승인된 결정을 돌려준다)
+      const held = e instanceof PlanningApiError && e.code === 'GATE_REJECTED' && e.details?.status === 'held' && e.details.review_id
+      if (human && held) {
+        try {
+          await approveReview(String((e as PlanningApiError).details?.review_id))
+          await api.action(action)
+          return
+        } catch (again) {
+          e = again
+        }
+      }
       if (e instanceof PlanningApiError && e.code === 'UNKNOWN_ACTION') report('이 기능은 아직 기획개발 서버에 연결되지 않았습니다')
       else if (e instanceof PlanningApiError) report(e.message)
       else report('기획개발 서버에 연결할 수 없습니다')
