@@ -301,6 +301,9 @@ class PersistentInquiryStore(InquiryStore):
         conversation = super().log_activity(*args, **kwargs)
         return None if conversation is None else self._save(conversation)
 
+    def replace(self, conversation: Conversation) -> Conversation:
+        return self._save(super().replace(conversation))
+
 
 class PersistentClaimStore(ClaimStore):
     def __init__(self, repo: Repo) -> None:

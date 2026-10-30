@@ -157,6 +157,11 @@ class InquiryStore:
         conversation.updated_at = now_iso()
         return conversation
 
+    def replace(self, conversation: Conversation) -> Conversation:
+        """이미 있는 문의를 바뀐 모습으로 바꿔 둔다 (보유기간 삭제가 원문을 치환할 때 쓴다)."""
+        self._conversations[conversation.id] = conversation
+        return conversation
+
     def _append(
         self,
         conversation: Conversation,

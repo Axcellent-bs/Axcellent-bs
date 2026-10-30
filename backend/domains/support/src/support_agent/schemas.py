@@ -173,6 +173,9 @@ class Conversation(ConversationListItem):
     activity: list[ActivityEntry] = Field(default_factory=list)  # AI 처리 내력 (오래된 것부터)
     feedback: Feedback | None = None  # 해결 결과에 대한 고객 평가 (문의당 한 번)
     resolution_notes: list[ResolutionNote] = Field(default_factory=list)  # 해결 메모 (최신 먼저)
+    purged_at: str | None = (
+        None  # 원문을 지운 시각 (`retention.py`). 있으면 원문 필드는 [삭제됨]이다
+    )
 
 
 # ---------------------------------------------------------------- LLM 응답 스키마
