@@ -83,8 +83,11 @@ def _ok(data: Any, svc: PlanningService, **meta: Any) -> dict:
     return {"data": data, "meta": {"tenant_id": svc.tenant_id, "version": svc.version, **meta}}
 
 
-def _err(status: int, code: str, message: str) -> JSONResponse:
-    return JSONResponse(status_code=status, content={"error": {"code": code, "message": message}})
+def _err(status: int, code: str, message: str, details: dict | None = None) -> JSONResponse:
+    error: dict = {"code": code, "message": message}
+    if details:
+        error["details"] = details
+    return JSONResponse(status_code=status, content={"error": error})
 
 
 def _list(items: list, svc: PlanningService) -> dict:
@@ -249,11 +252,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             status = 403 if exc.code == "SIMULATOR_DISABLED" else 400
             return _err(status, exc.code, exc.message)
         except GateRefused as exc:
-            return _err(
-                409,
-                "GATE_REJECTED",
-                f"실행 관문이 {exc.action}을 허락하지 않아 실행하지 않았다 ({exc.decision.status})",
-            )
+            return _gate_err(exc)
         return _ok(
             svc.snapshot(),
             svc,
@@ -283,11 +282,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
         except ActionError as exc:
             return _err(400, exc.code, exc.message)
         except GateRefused as exc:
-            return _err(
-                409,
-                "GATE_REJECTED",
-                f"실행 관문이 {exc.action}을 허락하지 않아 실행하지 않았다 ({exc.decision.status})",
-            )
+            return _gate_err(exc)
         return _ok(
             svc.snapshot(),
             svc,
@@ -487,6 +482,12 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             409,
             "GATE_REJECTED",
             f"실행 관문이 {exc.action}을 허락하지 않아 실행하지 않았다 ({exc.decision.status})",
+            # 보류(held)면 사람 승인 대기 번호. 화면이 사람 토큰으로 safety에 승인하고 다시 보낸다
+            {
+                "action": exc.action,
+                "status": exc.decision.status,
+                "review_id": exc.decision.review_id,
+            },
         )
 
     async def _body(request: Request) -> dict | None:

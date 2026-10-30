@@ -521,3 +521,67 @@ async def test_rollback_multiple_rules_all_reported(rollback_gate: Gate, act) ->
     review = rollback_gate.store.get_review(decision.review_id or "")
     assert review is not None
     assert [hit["key"] for hit in review.report["rules"]] == [r["key"] for r in _ROLLBACK_RULES]
+
+
+# ---- 자동 처리 범위 (auto_policy_update). planning이 보내는 params 그대로:
+# target "L{지금}->L{바꿀 단계}", to 정수
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("target", "to"), [("L1->L0", 0), ("L2->L1", 1), ("L3->L2", 2)])
+async def test_auto_policy_shrink_is_grade_a(gate: Gate, act, target: str, to: int) -> None:
+    """자동 머지 PR이 사건에 연결되어 한 단계 줄이는 것은 승인 없이 A."""
+    decision = await gate.execute(
+        act("auto_policy_update", "planning", f"shrink-{target}", target=target, to=to)
+    )
+    assert (decision.grade, decision.status) == ("A", "executed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("target", "to"), [("L0->L1", 1), ("L1->L2", 2), ("L2->L3", 3)])
+async def test_auto_policy_expand_is_held_for_human(gate: Gate, act, target: str, to: int) -> None:
+    """관리자 승인으로 넓히는 것은 C (사람 확인). to가 줄이기와 같은 값이어도 target으로 가린다."""
+    decision = await gate.execute(
+        act(
+            "auto_policy_update",
+            "planning",
+            f"expand-{target}",
+            target=target,
+            to=to,
+            lines=60,
+            files=3,
+            paths="문구·표시",
+        )
+    )
+    assert (decision.grade, decision.status) == ("C", "held")
+    assert decision.hold_reason == HoldReason.OVER_THRESHOLD
+    review = gate.store.get_review(decision.review_id or "")
+    assert review is not None
+    assert "auto_policy_shrink_only" in [hit["key"] for hit in review.report["rules"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"target": "L1->L0"},  # to 없음
+        {"target": "L1->L0", "to": "L0"},  # to가 정수가 아님
+        {"target": "L1->L0", "to": 3},  # 줄이기 결과가 될 수 없는 단계
+        {"to": 0},  # target 없음
+        {"target": "L3->L0", "to": 0},  # 여러 단계 건너뛰기 (목록 밖)
+        {"target": "unknown", "to": 0},  # 모르는 형식
+    ],
+)
+async def test_auto_policy_missing_or_unknown_fails_closed(
+    gate: Gate, act, params: dict[str, Any]
+) -> None:
+    """단계가 없거나 모르는 값이면 줄이기로 보지 않고 C (fail-closed)."""
+    decision = await gate.execute(act("auto_policy_update", "planning", "policy-bad", **params))
+    assert (decision.grade, decision.status) == ("C", "held")
+
+
+@pytest.mark.asyncio
+async def test_auto_policy_update_only_planning(gate: Gate, act) -> None:
+    """다른 부서가 요청하면 미등록과 같다."""
+    other = await gate.execute(
+        act("auto_policy_update", "support", "policy-other", target="L1->L0", to=0)
+    )
+    assert other.hold_reason == HoldReason.UNREGISTERED_ACTION

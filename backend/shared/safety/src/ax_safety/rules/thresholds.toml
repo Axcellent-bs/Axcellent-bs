@@ -280,6 +280,26 @@ field = "irreversible_count"
 op = ">"
 value = 0
 
+# ---- auto_policy_update: 자동 처리 범위 (L0~L3, planning AUTO_LEVELS). 한 단계 줄이기만 A, 나머지는 C.
+# planning은 params에 target = "L{지금}->L{바꿀 단계}"와 to = 바꿀 단계(정수)를 보낸다.
+# to만으로는 줄이기(L2 → L1)와 넓히기(L0 → L1)가 같은 값이라, 한 단계 내리는 이동만 목록으로 허용한다.
+# 목록 밖 이동(넓히기, 여러 단계 건너뛰기, 모르는 형식)이거나 target이 없으면 C
+[[rules]]
+key = "auto_policy_shrink_only"
+action = "auto_policy_update"
+metric = "param_in"
+field = "target"
+allowed = ["L1->L0", "L2->L1", "L3->L2"]
+
+# 줄이기 결과는 0~2만 될 수 있다. to가 없거나 정수가 아니거나 2보다 크면 C
+[[rules]]
+key = "auto_policy_to_level"
+action = "auto_policy_update"
+metric = "param"
+field = "to"
+op = ">"
+value = 2
+
 # repo_revert_pr: 되돌리기 PR도 merge_pr과 같은 크기·경로·보호 경로·되돌릴 수 없는 영역 기준 (revert_ 접두사)
 [[rules]]
 key = "revert_changed_lines"
