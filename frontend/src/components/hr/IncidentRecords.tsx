@@ -4,6 +4,7 @@ import { dateStr } from "@/lib/format";
 import { hr, type AuditEntry } from "@/lib/hr";
 import { Link } from "@/lib/nav";
 import RepeatCompare from "@/components/hr/RepeatCompare";
+import EventTimes from "@/components/hr/EventTimes";
 import ResolutionForm from "@/components/hr/ResolutionForm";
 
 // 결정 기록 화면(실제 모드): 캣북스 이벤트가 나면 총괄 AI가 인사 AI에게 이벤트 기록(record_case)을 맡긴다.
@@ -123,6 +124,8 @@ export default function IncidentRecords({ initialCtx = null }: { initialCtx?: st
         {current && <Link href={`/orchestrator?ctx=${encodeURIComponent(current.context_id)}`} className="inline-block text-xs font-semibold text-brand-600 underline underline-offset-2">총괄 이벤트에서 보기 →</Link>}
         {current ? <Timeline inc={current} /> : <p className="text-xs text-ink-500">볼 이벤트가 없습니다.</p>}
       </section>
+
+      {current && <EventTimes inc={current} />}
 
       {current && <ResolutionForm inc={current} />}
 
