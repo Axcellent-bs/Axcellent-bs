@@ -30,7 +30,8 @@ from hr_agent.cards.builder import (
     target_key,
 )
 from hr_agent.cards.decide import detect_decision
-from hr_agent.cards.link import find_superseded
+from hr_agent.cards.link import plan_links
+from hr_agent.cards.merge import apply_merge, queue_candidates
 from hr_agent.results import (
     completed,
     gate_blocked,
@@ -50,9 +51,14 @@ def idempotency_key_of(record: RecordCase) -> str:
 async def link_older_cards(
     svc: Services, request: AgentRequest, card: Card, evidence: Evidence
 ) -> list[str]:
-    """새 카드가 대체하는 옛 카드를 `superseded`로 연결한다(연결마다 관문을 거친다)."""
+    """새 카드와 연결되는 옛 카드를 `superseded`로 돌린다(연결마다 관문을 거친다).
+
+    내용이 바뀐 결정은 대체하고, 같은 결정을 다시 쓴 것은 확신이 매우 높을 때만 자동 병합하며,
+    애매하면 사람 승인 목록에 올린다(`cards/merge.py`).
+    """
     superseded: list[str] = []
-    for old_id in await find_superseded(card, svc.memory, svc.dense):
+    plan = await plan_links(card, svc.memory, svc.dense, svc.extras.get("same_judge"))
+    for old_id in plan.supersede:
         link_decision = await svc.gate.execute(
             "memory.card_link",
             {
@@ -67,6 +73,12 @@ async def link_older_cards(
         if link_decision.status == "executed":
             await svc.memory.set_status(old_id, "superseded", card.card_id)
             superseded.append(old_id)
+    for old_id, cosine in plan.merge:
+        ok, _ = await apply_merge(svc, request, evidence, card, old_id, "auto", cosine)
+        if ok:
+            superseded.append(old_id)
+    if plan.queue:
+        await queue_candidates(svc, card, plan.queue)
     return superseded
 
 

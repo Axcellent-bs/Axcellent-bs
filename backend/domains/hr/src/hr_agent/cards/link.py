@@ -1,4 +1,4 @@
-"""기존 결정과 연결: 같은 영역의 새 결정이 옛 결정을 바꾸면 옛 카드를 `superseded`로 돌린다.
+"""기존 결정과 연결: 같은 영역의 새 결정이 옛 결정과 같은 주제면 옛 카드를 `superseded`로 돌린다.
 
 바꾼다고 보는 조건(규칙):
 - 새 카드와 옛 카드가 모두 영역(`area`)이 있고 같다.
@@ -6,19 +6,28 @@
 - 결정 문장이 같은 주제이지만(아래 유사도 하한 이상) 문장은 다르다.
 같은 주제 판단은 임베딩 코사인(Dense)으로 하고, 임베딩을 쓸 수 없으면 글자 겹침(Dice)으로 대체한다.
 기각한 안(`rejected`)은 다른 결정을 대체하지 않는다. 이벤트 기록 카드(`incident`)는 대상이 아니다.
+
+Dense로 같은 주제라고 본 쌍은 LLM이 한 번 더 가른다(`plan_links`).
+- 내용이 바뀐 결정(`changed`) → 지금까지처럼 옛 카드를 대체한다.
+- 같은 결정을 다시 쓴 것(`same`)이고 코사인이 아주 높음(`AUTO_MERGE_COSINE`) → AI가 자동 병합한다.
+- 같은 결정을 다시 쓴 것 같지만 확신이 모자라거나 판정이 없음 → 사람 승인 목록에 올린다.
+- 별개의 결정(`separate`) → 건드리지 않는다.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 from ax_contracts.schemas import Card
 from hr_agent.clients.memory import MemoryClient
 from hr_agent.retrieval.cards import DenseCardSearch
+from hr_agent.retrieval.duplicates import SameDecisionJudge
 from hr_agent.util import similarity
 
 SAME_TOPIC = 0.5  # Dice로 같은 주제로 보는 결정 문장 유사도 하한(임베딩이 없을 때)
 DENSE_SAME_TOPIC = 0.7786  # Dense 코사인 하한. 15번 평가(link-rules.md)의 개발용 쌍에서 정했다
 AUTO_MERGE_COSINE = (
-    0.8351  # 이 이상이고 LLM이 같은 결정이라 해야 자동 병합(개발용 최대 비중복 코사인 + 0.005)
+    0.8351  # 이 이상이고 LLM이 같은 결정이라 해야 자동 병합(개발용 최대 비중복 + 0.005)
 )
 
 
@@ -35,23 +44,30 @@ def eligible_old(card: Card, old: Card) -> bool:
     )
 
 
+async def dense_scores(
+    new_text: str, olders: list[Card], dense: DenseCardSearch | None
+) -> dict[str, float] | None:
+    """옛 카드마다 코사인. 임베딩을 쓸 수 없거나 실패하면 None(Dice로 대체한다)."""
+    if dense is None or not olders:
+        return None
+    try:
+        hits = await dense.search(new_text, olders, k=len(olders), min_cosine=-1.0)
+    except Exception:  # noqa: BLE001 - 임베딩 실패가 연결 판단을 막지 않게 Dice로 대체한다
+        return None
+    return {c.card_id: score for c, score in hits}
+
+
 async def topic_scores(
     new_text: str, olders: list[Card], dense: DenseCardSearch | None
 ) -> tuple[dict[str, float], float]:
     """옛 카드마다 "같은 주제" 점수와 그 하한. Dense가 안 되면 Dice 점수와 하한을 쓴다."""
-    if dense is not None and olders:
-        try:
-            hits = await dense.search(new_text, olders, k=len(olders), min_cosine=-1.0)
-            return {c.card_id: score for c, score in hits}, DENSE_SAME_TOPIC
-        except Exception:  # noqa: BLE001 - 임베딩 실패가 연결 판단을 막지 않게 Dice로 대체한다
-            pass
+    scores = await dense_scores(new_text, olders, dense)
+    if scores is not None:
+        return scores, DENSE_SAME_TOPIC
     return {o.card_id: similarity(_decision_text(o), new_text) for o in olders}, SAME_TOPIC
 
 
-async def find_superseded(
-    card: Card, memory: MemoryClient, dense: DenseCardSearch | None = None
-) -> list[str]:
-    """새 카드가 대체하는 옛 카드 ID 목록."""
+async def _olders(card: Card, memory: MemoryClient) -> list[Card]:
     area = card.extra.get("area")
     if (
         not area
@@ -60,9 +76,15 @@ async def find_superseded(
         or card.extra.get("candidate")
     ):
         return []
-    olders = [
-        o for o in await memory.list_cards(area=area, states=["active"]) if eligible_old(card, o)
-    ]
+    found = await memory.list_cards(area=area, states=["active"])
+    return [o for o in found if eligible_old(card, o)]
+
+
+async def find_superseded(
+    card: Card, memory: MemoryClient, dense: DenseCardSearch | None = None
+) -> list[str]:
+    """새 카드와 같은 주제인 옛 카드 ID 목록(내용이 바뀌었는지 같은 결정인지는 가르지 않는다)."""
+    olders = await _olders(card, memory)
     new_text = _decision_text(card)
     scores, floor = await topic_scores(new_text, olders, dense)
     return sorted(
@@ -70,3 +92,48 @@ async def find_superseded(
         for o in olders
         if _decision_text(o) != new_text and scores.get(o.card_id, 0.0) >= floor
     )
+
+
+@dataclass
+class QueueItem:
+    old_id: str
+    cosine: float
+    verdict: str | None  # LLM 판정. 없으면 None
+
+
+@dataclass
+class LinkPlan:
+    supersede: list[str] = field(default_factory=list)  # 내용이 바뀐 결정(또는 Dice 규칙)
+    merge: list[tuple[str, float]] = field(default_factory=list)  # 자동 병합(옛 카드, 코사인)
+    queue: list[QueueItem] = field(default_factory=list)  # 사람이 승인할 중복 후보
+
+
+async def plan_links(
+    card: Card,
+    memory: MemoryClient,
+    dense: DenseCardSearch | None = None,
+    judge: SameDecisionJudge | None = None,
+) -> LinkPlan:
+    plan = LinkPlan()
+    olders = await _olders(card, memory)
+    if not olders:
+        return plan
+    new_text = _decision_text(card)
+    scores = await dense_scores(new_text, olders, dense)
+    if scores is None:  # 임베딩이 없으면 지금까지의 Dice 규칙 그대로
+        plan.supersede = await find_superseded(card, memory, None)
+        return plan
+    for old in sorted(olders, key=lambda o: o.card_id):
+        cosine = scores.get(old.card_id, 0.0)
+        if cosine < DENSE_SAME_TOPIC or _decision_text(old) == new_text:
+            continue
+        verdict = await judge.judge(new_text, _decision_text(old)) if judge else None
+        if verdict == "separate":
+            continue
+        if verdict == "changed":
+            plan.supersede.append(old.card_id)
+        elif verdict == "same" and cosine >= AUTO_MERGE_COSINE:
+            plan.merge.append((old.card_id, cosine))
+        else:  # 같은 결정 같지만 확신이 모자라거나 판정을 못 받음 → 사람이 본다
+            plan.queue.append(QueueItem(old.card_id, cosine, verdict))
+    return plan

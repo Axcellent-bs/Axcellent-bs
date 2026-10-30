@@ -23,6 +23,9 @@ skill과 등급(등급 신고는 안전 레이어 레지스트리가 원본이�
 | `record_resolution` | A | 사건 카드에 해결 내용(원인·조치·결과·소요 시간) 기록 |
 | `find_similar_cases` | 읽기 | 비슷한 과거 사건·결정과 당시 해결 내용 |
 | `record_event_times` | A | 이벤트 카드에 감지·원인 후보 도착·사람 작업·정상 복귀 시각 기록 |
+| `list_duplicate_groups` | 읽기 | 사람 승인을 기다리는 중복 결정 묶음과 최근 병합(되돌리기용) |
+| `decide_duplicate_group` | A | 중복 묶음을 사람이 병합하거나 그대로 둠 |
+| `restore_merged_card` | A | 병합으로 대체됨이 된 카드를 되돌림 |
 
 `RecordCaseOutput`은 모델만 추가했고, hr의 출력 전환은 hr 담당 PR에서 한다.
 
@@ -566,6 +569,73 @@ class FindSimilarCasesOutput(AxModel):
     max_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
     method: Literal["dense", "dice"]
     collected_at: UtcDatetime
+
+
+# ---- 중복 결정 병합 (15번) -------------------------------------------------------------
+# 같은 결정을 다시 쓴 카드는 확신이 매우 높을 때만 AI가 자동으로 병합하고(원래 카드는 지우지 않고
+# 대체됨으로 표시, 복원 가능), 애매하면 사람 승인 목록에 올린다. 이벤트 기록 카드는 대상이 아니다.
+
+
+class DuplicateMember(AxModel):
+    card_id: str
+    title: str
+    decision: str  # 카드의 결정 문장
+    cosine: float | None = None  # 대표 카드와의 유사도(대표 카드는 None)
+    verdict: Literal["same", "changed", "separate"] | None = None  # LLM 판정(없으면 None)
+
+
+class DuplicateGroup(AxModel):
+    """사람이 병합할지 정하는 묶음. 대표 카드(`representative`)는 새 결정, 나머지는 옛 결정이다."""
+
+    group_id: str
+    area: str
+    representative: DuplicateMember
+    olders: list[DuplicateMember]
+    suggested_title: str | None = None  # LLM이 묶음 카드 내용으로만 만든 제안(검증 통과분)
+    created_at: UtcDatetime
+
+
+class MergedCard(AxModel):
+    card_id: str
+    title: str
+    merged_into: str
+    how: Literal["auto", "human"]
+    cosine: float | None = None
+    at: UtcDatetime
+
+
+class ListDuplicateGroupsInput(AxModel):
+    area: str | None = None
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+class ListDuplicateGroupsOutput(AxModel):
+    groups: list[DuplicateGroup] = Field(default_factory=list)
+    merged: list[MergedCard] = Field(default_factory=list)  # 병합된 카드(최근 순)
+    collected_at: UtcDatetime
+
+
+class DecideDuplicateGroupInput(AxModel):
+    """`merge`: 옛 카드들을 대표 카드로 병합(대체됨 표시). `dismiss`: 병합 없이 목록에서 뺀다."""
+
+    group_id: str
+    representative_id: str
+    decision: Literal["merge", "dismiss"]
+    title: str | None = Field(default=None, max_length=80)  # 사람이 확정한 대표 제목(없으면 그대로)
+
+
+class DecideDuplicateGroupOutput(AxModel):
+    outcome: Literal["merged", "dismissed", "duplicate", "not_found"]
+    merged_ids: list[str] = Field(default_factory=list)
+
+
+class RestoreMergedCardInput(AxModel):
+    card_id: str
+
+
+class RestoreMergedCardOutput(AxModel):
+    outcome: Literal["restored", "not_merged", "not_found"]
+    card_id: str | None = None
 
 
 class AuditEntry(AxModel):

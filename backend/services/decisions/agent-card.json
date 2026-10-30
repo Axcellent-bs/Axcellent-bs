@@ -149,6 +149,42 @@
       ],
       "verifier": null,
       "priority": "recommended"
+    },
+    {
+      "id": "list_duplicate_groups",
+      "description": "사람 승인을 기다리는 중복 결정 묶음과 최근에 병합된 카드를 조회한다. 저장된 값을 그대로 돌려주는 읽기 전용이다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListDuplicateGroupsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListDuplicateGroupsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "decide_duplicate_group",
+      "description": "같은 결정을 다시 쓴 카드 묶음을 사람이 병합하거나 그대로 두기로 정한다. 병합은 옛 카드를 지우지 않고 대체됨으로 표시한다. 같은 결정을 두 번 받으면 한 번만 처리한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideDuplicateGroupInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideDuplicateGroupOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "restore_merged_card",
+      "description": "병합으로 대체됨이 된 카드를 다시 유효 카드로 되돌린다. 같은 요청을 두 번 받으면 한 번만 처리한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RestoreMergedCardInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RestoreMergedCardOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
     }
   ]
 }

@@ -61,6 +61,11 @@ export interface ResolutionInput {
   prior_case_id?: string | null;
   draft_source?: "written_by_person" | "ai_draft_kept" | "ai_draft_edited";
 }
+export interface DuplicateMember { card_id: string; title: string; decision: string; cosine: number | null; verdict: "same" | "changed" | "separate" | null }
+/** 사람이 병합할지 정하는 중복 결정 묶음. representative가 새 결정이다 */
+export interface DuplicateGroup { group_id: string; area: string; representative: DuplicateMember; olders: DuplicateMember[]; suggested_title: string | null; created_at: string }
+export interface MergedCard { card_id: string; title: string; merged_into: string; how: "auto" | "human"; cosine: number | null; at: string }
+export interface DuplicateView { groups: DuplicateGroup[]; merged: MergedCard[] }
 export interface RosterEntry { area: string; role: "owner" | "backup"; member_id: string; shift_start: string | null; shift_end: string | null }
 export interface Roster { entries: RosterEntry[]; gap_areas: string[]; collected_at: string }
 export interface AuditEntry { seq: number; at: string; kind: string; payload: Record<string, unknown> }
@@ -119,6 +124,16 @@ export const hr = {
   /** 사람이 이벤트의 해결 내용을 적는다. 소요 시간은 서버가 openedAt부터 잰다 */
   recordResolution: (contextId: string, body: ResolutionInput) =>
     post<{ outcome: string; card_id: string | null }>(`/incidents/${encodeURIComponent(contextId)}/resolution`, body),
+  duplicateGroups: () => call<DuplicateView>("/duplicate-groups"),
+  /** 중복 묶음을 병합(title은 사람이 확정한 대표 제목)하거나 그대로 둔다 */
+  decideDuplicate: (g: DuplicateGroup, decision: "merge" | "dismiss", title?: string) =>
+    post<{ outcome: string; merged_ids: string[] }>(`/duplicate-groups/${encodeURIComponent(g.group_id)}/decision`, {
+      representative_id: g.representative.card_id,
+      decision,
+      ...(title?.trim() ? { title: title.trim() } : {}),
+    }),
+  restoreMerge: (cardId: string) =>
+    post<{ outcome: string; card_id: string | null }>(`/cards/${encodeURIComponent(cardId)}/restore-merge`, {}),
   roster: () => call<Roster>("/roster"),
   activity: (contextId: string) => call<AuditEntry[]>(`/hr-activity/${encodeURIComponent(contextId)}`),
   checkPlan: (draft: PlanDraft) => post<PlanCheck>("/plan-checks", { draft }),
