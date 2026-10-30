@@ -155,3 +155,43 @@ async def test_the_decision_card_reason_uses_korean_step_names(harness) -> None:
     record = next(r.input for _, r in harness.fakes.calls if r.skill == "record_case")
     assert "diagnose_incident" not in record["decision_reason"]
     assert "원인 진단" in record["decision_reason"] and "(infra)" not in record["decision_reason"]
+
+
+@pytest.mark.asyncio
+async def test_a_company_without_hr_does_not_get_time_records_sent_again(harness) -> None:
+    engine = await harness.start()
+    harness.fakes.script("hr", "record_event_times", "disabled", "disabled", "disabled")
+    inc = new_incident()
+    await engine.run(inc, scenario_a())
+    assert inc.closed_at is not None and inc.times_off and inc.times_sent == {}
+    assert len(times_calls(harness)) == 1  # 꺼진 걸 알았으면 같은 이벤트에서는 더 보내지 않는다
+    await engine.sync_times(inc)  # 정상 복귀 신호 같은 뒤늦은 시각이 와도
+    assert len(times_calls(harness)) == 1
+
+
+@pytest.mark.asyncio
+async def test_with_the_hr_service_off_nothing_is_sent_and_nothing_piles_up(
+    harness, monkeypatch
+) -> None:
+    """인사가 꺼진 회사: 시각 기록은 사람 할 일함으로도 가지 않게 아예 보내지 않는다."""
+    from ax_agent_template import routing
+
+    monkeypatch.setenv(routing.ENABLED_ENV, "planning,dev,inquiry")  # decisions(인사)는 끔
+    engine = await harness.start()
+    inc = new_incident()
+    await engine.run(inc, scenario_a())
+    assert inc.closed_at is not None and inc.times_off
+    assert times_calls(harness) == []
+    await engine.sync_times(inc)
+    assert times_calls(harness) == []
+
+
+@pytest.mark.asyncio
+async def test_with_the_hr_service_on_times_are_still_sent(harness, monkeypatch) -> None:
+    from ax_agent_template import routing
+
+    monkeypatch.setenv(routing.ENABLED_ENV, "decisions,planning")
+    engine = await harness.start()
+    inc = new_incident()
+    await engine.run(inc, scenario_a())
+    assert not inc.times_off and len(times_calls(harness)) == 1

@@ -17,6 +17,8 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Any
 
+from ax_agent_template import routing
+from ax_agent_template.services import route_target
 from ax_contracts.schemas import (
     HANDED_TO_HUMAN,
     AgentRequest,
@@ -611,7 +613,13 @@ class Engine:
         실패해도 이벤트 처리에는 영향이 없다(참고용 기록).
         """
         entry = self.registry.find("record_event_times")
-        if entry is None or not entry.callable_by_orchestrator:
+        if entry is None or not entry.callable_by_orchestrator or inc.times_off:
+            return
+        if not routing.is_enabled(route_target(entry.dept, "record_event_times")):
+            # 인사가 꺼진 회사: 시각 기록은 사람이 할 일이 아니라 참고 기록이라 보내지 않는다.
+            # (라우터는 읽기 조회가 아니면 꺼진 서비스 요청을 사람 할 일함에 넣으므로 여기서 멈춘다)
+            inc.times_off = True
+            inc.log("이벤트 시각 기록 건너뜀: 인사 서비스가 꺼져 있음")
             return
         fresh = {
             name: at.isoformat()
@@ -641,6 +649,11 @@ class Engine:
             outcome = (result.output or {}).get("outcome")
         except Exception as exc:  # noqa: BLE001 - 시각 기록 실패가 이벤트 처리를 막지 않게 한다
             inc.log(f"이벤트 시각 기록 실패: {type(exc).__name__}")
+            return
+        if getattr(result.outcome, "value", result.outcome) == ErrorCode.SERVICE_DISABLED.value:
+            # 인사가 꺼진 회사: 시각 기록은 사람이 할 일이 아니라 참고 기록이라 넘기지 않고 멈춘다
+            inc.times_off = True
+            inc.log("이벤트 시각 기록 건너뜀: 인사 서비스가 꺼져 있음")
             return
         if outcome in ("recorded", "duplicate"):
             inc.times_sent.update(fresh)
