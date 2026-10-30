@@ -137,6 +137,18 @@
       ],
       "verifier": null,
       "priority": "recommended"
+    },
+    {
+      "id": "record_event_times",
+      "description": "이벤트의 감지·원인 후보 도착·사람 작업 시작과 완료·정상 복귀 시각을 그 이벤트에서 만든 결정 카드에 채운다. 시스템이 잰 시각만 받고 이미 있는 시각은 덮어쓰지 않는다. 같은 내용을 두 번 받으면 한 번만 처리한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordEventTimesInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordEventTimesOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
     }
   ]
 }

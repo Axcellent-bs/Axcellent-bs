@@ -84,6 +84,7 @@ _HANDLERS = {
     "find_similar_fraud_cards": _with_services(fraud_similar.find_similar_fraud_cards),
     "find_similar_cases": _with_services(case_memory.find_similar_cases),
     "record_resolution": _with_services(case_memory.record_resolution),
+    "record_event_times": _with_services(case_memory.record_event_times),
     "record_case": record_case,
     "get_roster": get_roster,
     "start_handover": start_handover,

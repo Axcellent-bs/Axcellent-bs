@@ -15,7 +15,12 @@ from ax_contracts.schemas import (
     RecordResolutionOutput,
 )
 from hr_agent.cards.service import record_case
-from hr_agent.case_memory.service import BLOCK, find_similar_cases, record_resolution
+from hr_agent.case_memory.service import (
+    BLOCK,
+    find_similar_cases,
+    record_event_times,
+    record_resolution,
+)
 from hr_agent.clients.safety import MockGate
 from hr_agent.retrieval.cards import DenseCardSearch
 from hr_agent.retrieval.dense import DenseIndex
@@ -402,3 +407,107 @@ async def test_unknown_type_is_never_compared(svc, tmp_path) -> None:
     assert by_type[None] is None and by_type["payment:error_rate_5xx"] is False
     none_asked = await _search(svc, PAYMENT, limit=5)
     assert all(c.same_type is None for c in none_asked.cases)
+
+
+# ---- record_event_times ---------------------------------------------------------------------
+
+
+def _times(**kw) -> dict:
+    return {"context_id": CONTEXT, **kw}
+
+
+@pytest.mark.asyncio
+async def test_event_times_are_filled_on_the_card(svc) -> None:
+    card_id = await _incident(svc)
+    t0 = svc.clock()
+    result = await record_event_times(
+        svc,
+        _req(
+            "record_event_times",
+            _times(
+                detected_at=t0.isoformat(),
+                cause_candidate_at=(t0 + timedelta(seconds=3)).isoformat(),
+            ),
+        ),
+    )
+    assert result.output["outcome"] == "recorded"
+    saved = (await svc.memory.get_card(card_id)).extra["timeline"]
+    assert saved["detected_at"] and saved["cause_candidate_at"] and saved["recovered_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_time_that_is_already_set_is_never_overwritten(svc) -> None:
+    card_id = await _incident(svc)
+    first = svc.clock()
+    await record_event_times(
+        svc, _req("record_event_times", _times(recovered_at=first.isoformat()), key="a")
+    )
+    later = first + timedelta(minutes=5)
+    again = await record_event_times(
+        svc,
+        _req("record_event_times", _times(recovered_at=later.isoformat()), key="b"),
+    )
+    assert again.output["outcome"] == "duplicate"
+    saved = (await svc.memory.get_card(card_id)).extra["timeline"]
+    assert saved["recovered_at"].startswith(first.isoformat()[:19])
+
+
+@pytest.mark.asyncio
+async def test_later_times_fill_the_gaps_and_keep_the_earlier_ones(svc) -> None:
+    card_id = await _incident(svc)
+    t0 = svc.clock()
+    await record_event_times(
+        svc,
+        _req(
+            "record_event_times",
+            _times(detected_at=t0.isoformat(), prior_case_id="card_old"),
+            key="a",
+        ),
+    )
+    result = await record_event_times(
+        svc,
+        _req(
+            "record_event_times",
+            _times(recovered_at=(t0 + timedelta(seconds=90)).isoformat()),
+            key="b",
+        ),
+    )
+    assert result.output["outcome"] == "recorded"
+    saved = (await svc.memory.get_card(card_id)).extra["timeline"]
+    assert saved["detected_at"] and saved["recovered_at"] and saved["prior_case_id"] == "card_old"
+
+
+@pytest.mark.asyncio
+async def test_event_times_without_a_card_say_so(svc) -> None:
+    result = await record_event_times(
+        svc, _req("record_event_times", _times(recovered_at=svc.clock().isoformat()))
+    )
+    assert result.output["outcome"] == "no_card"
+
+
+@pytest.mark.asyncio
+async def test_event_times_need_an_idempotency_key(svc) -> None:
+    await _incident(svc)
+    request = _req("record_event_times", _times(recovered_at=svc.clock().isoformat()))
+    request.meta.idempotency_key = None
+    result = await record_event_times(svc, request)
+    assert result.status.value in ("failed", "rejected")
+
+
+@pytest.mark.asyncio
+async def test_similar_cases_carry_the_timeline(svc, tmp_path) -> None:
+    _dense(svc, tmp_path)
+    await _incident(svc)
+    await record_resolution(svc, _req("record_resolution", _resolution()))
+    t0 = svc.clock()
+    await record_event_times(
+        svc,
+        _req(
+            "record_event_times",
+            _times(
+                detected_at=t0.isoformat(), recovered_at=(t0 + timedelta(seconds=75)).isoformat()
+            ),
+        ),
+    )
+    out = await _search(svc, "결제가 서버 오류로 실패해요")
+    assert out.cases[0].timeline is not None and out.cases[0].timeline.recovered_at is not None
