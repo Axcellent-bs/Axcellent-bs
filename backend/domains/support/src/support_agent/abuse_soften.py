@@ -28,7 +28,7 @@ from support_agent.abuse_rules import LEVEL_ORDER, AbuseLevel
 
 logger = logging.getLogger(__name__)
 
-APOLOGY = "불편을 드려 죄송합니다."  # 순화문 맨 앞에 코드가 한 문장만 붙인다 (모델이 쓰지 않는다)
+APOLOGY = abuse_rules.APOLOGY  # 순화문 맨 앞에 코드가 한 문장만 붙인다 (모델이 쓰지 않는다)
 MAX_GROWTH = 1.5  # 순화문은 원문의 1.5배(+40자)보다 길지 않다
 SLACK_CHARS = 40
 _NUMBER = re.compile(r"\d[\d,.]*\d|\d")

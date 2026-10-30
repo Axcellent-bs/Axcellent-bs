@@ -129,7 +129,7 @@ def test_a_flagged_message_gets_a_softened_text(monkeypatch: pytest.MonkeyPatch)
     ]  # 개인정보만 가린 글
     entry = next(a for a in created["activity"] if a["kind"] == "abusive_message")
     assert entry["data"]["softened"] is True
-    assert created["preview"] == expected
+    assert created["preview"] == "주문 ORD-1 12,000원 환불을 요청합니다."  # 사과는 뺀다
 
 
 def test_a_bad_llm_answer_falls_back_to_the_rules(monkeypatch: pytest.MonkeyPatch) -> None:
