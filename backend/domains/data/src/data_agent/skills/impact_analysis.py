@@ -23,16 +23,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Protocol, runtime_checkable
 
 from ax_agent_template.llm import LLMClient
 from ax_contracts.data_access.shop_failed_orders import (
     ShopFailedOrdersQuery,
-    ShopFailedOrdersResult,
 )
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import CategoryImpact, ImpactAnalysisInput, ImpactAnalysisOutput
-from data_agent.clients.shop_client import ShopClient, ShopUnavailable, get_shop_client
+from data_agent.clients.shop_client import ShopUnavailable, get_shop_client
+from data_agent.connectors import Connector, ConnectorUnavailable, as_connector
 from data_agent.explain import Explanation, explain
 from data_agent.impact import (
     EXCESS_DAYS,
@@ -47,39 +46,31 @@ from data_agent.impact import (
 HISTORY_LIMIT = 5000  # 지난 7일 하루치 실패 주문 조회 한도 (shop-api 최대)
 
 
-@runtime_checkable
-class HistoryClient(Protocol):
-    """초과분 계산에 필요한 결제 수도 주는 클라이언트 (shop-api)."""
-
-    async def payment_counts(self, window_from: datetime, window_to: datetime) -> dict: ...
-
-    async def list_failed_orders(self, query: ShopFailedOrdersQuery) -> ShopFailedOrdersResult: ...
-
-
 async def _usual(
-    client: object, data: ImpactAnalysisInput, tenant_id: str
+    connector: Connector, data: ImpactAnalysisInput, tenant_id: str
 ) -> tuple[float | None, str]:
-    """평소 장애 쪽 실패(구간 길이만큼)와 근거 한 줄. 모르면 (None, 이유)."""
-    if not isinstance(client, HistoryClient):
-        return None, "평소 비교: 확인할 수 없음 (지난 7일 결제 수를 읽을 수 없는 클라이언트)"
+    """평소 장애 쪽 실패(구간 길이만큼)와 근거 한 줄. 모르면 (None, 이유).
+
+    커넥터의 거래 시도 수(`transactions_volume`)와 실패 이벤트로 센다. 거래 시도 수를 주지 않는
+    커넥터(목 등)면 확인할 수 없음이다.
+    """
     payments: dict = {}
     fault_times: list[datetime] = []
     try:
         for day in range(1, EXCESS_DAYS + 1):
             start = data.window_from - timedelta(days=day) - EXCESS_MARGIN
             end = data.window_to - timedelta(days=day) + EXCESS_MARGIN
-            payments.update(await client.payment_counts(start, end))
-            past = await client.list_failed_orders(
-                ShopFailedOrdersQuery(
-                    from_=start,
-                    to=end,
-                    category=data.category,
-                    limit=HISTORY_LIMIT,
-                    tenant_id=tenant_id,
+            volume = await connector.transactions_volume(start, end)
+            if volume is None:
+                return None, (
+                    "평소 비교: 확인할 수 없음 (지난 7일 결제 수를 읽을 수 없는 클라이언트)"
                 )
+            payments.update(dict(volume))
+            past = await connector.failure_events(
+                start, end, category=data.category, limit=HISTORY_LIMIT, tenant_id=tenant_id
             )
-            fault_times += [o.failed_at for o in split_failures(past).fault]
-    except ShopUnavailable as error:
+            fault_times += [o.at for o in split_failures(past).fault]
+    except ConnectorUnavailable as error:
         return None, f"평소 비교: 확인할 수 없음 (지난 7일 조회 실패 {error.code})"
     usual = usual_fault_failures(payments, fault_times, data.window_to - data.window_from)
     if usual is None:
@@ -138,14 +129,23 @@ async def analyze_impact(
     tenant_id: str,
     llm: LLMClient,
     env: Mapping[str, str] | None = None,
-    shop: ShopClient | None = None,
+    shop: object | None = None,
+    connector: Connector | None = None,
 ) -> ImpactResult:
-    """장애 구간의 영향을 계산한다. 외부 클라이언트가 없으면 `get_shop_client(env)`를 쓴다."""
-    client = shop or (get_shop_client(env) if env is not None else get_shop_client())
-    query = ShopFailedOrdersQuery(
-        from_=data.window_from, to=data.window_to, category=data.category, tenant_id=tenant_id
+    """장애 구간의 영향을 계산한다. 커넥터만 쓴다(`connector`, 예전 이름 `shop`).
+
+    둘 다 없으면 회사 카탈로그의 커넥터(`get_shop_client(env)`)다. 예전 공급자를 주면 감싼다.
+    """
+    source = connector or shop or (get_shop_client(env) if env is not None else get_shop_client())
+    conn = as_connector(source)
+    limit = ShopFailedOrdersQuery.model_fields["limit"].default
+    result = await conn.failure_events(
+        data.window_from,
+        data.window_to,
+        category=data.category,
+        limit=limit,
+        tenant_id=tenant_id,
     )
-    result = await client.list_failed_orders(query)
 
     split = split_failures(result)
     if split.missing_reason:
@@ -161,10 +161,10 @@ async def analyze_impact(
             "장애 피해인지 알 수 없다",
         )
     counts = aggregate_impact(split.fault)  # 음수 금액이면 ValueError
-    customer_ids = sorted({order.buyer_id for order in split.fault})
+    customer_ids = sorted({event.customer_id for event in split.fault})
     by_category = _category_distribution(split.fault)
 
-    usual, usual_note = await _usual(client, data, tenant_id)
+    usual, usual_note = await _usual(conn, data, tenant_id)
     excess = excess_failures(counts.failed_order_count, usual)
     explanation = await explain("impact", impact_facts(counts, excess, usual), llm)
     text = explanation.summary
@@ -192,7 +192,7 @@ async def analyze_impact(
     for name, count in sorted(split.excluded.items()):
         summary += f"\n{name} {count}건은 장애 피해에서 제외"
     if result.truncated:
-        summary += f"\n조회 한도 {query.limit}건에 걸려 일부만 반영됨(truncated)"
+        summary += f"\n조회 한도 {limit}건에 걸려 일부만 반영됨(truncated)"
     if note := explanation.note():
         summary += f"\n{note}"
     evidence = Evidence(

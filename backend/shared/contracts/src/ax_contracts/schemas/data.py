@@ -477,6 +477,8 @@ class MetricCatalog(AxModel):
     categories: dict[str, str] = Field(default_factory=dict)  # 카테고리 코드 → 한국어 이름
     volume_metric: str | None = None  # 거래량 지표 (빈 구간 판단·기준 보정). 없으면 쓰지 않는다
     volume_label: str | None = None  # 거래량을 부르는 말 (예: 주문·결제). 빈 구간 안내에 쓴다
+    # 지표·실패 이벤트·거래량을 읽는 커넥터 이름 (data `clients.shop_client.CONNECTORS`)
+    connector: str = "shop-api"
 
     @model_validator(mode="after")
     def _unique_metric_ids(self) -> Self:

@@ -50,7 +50,7 @@ from ax_contracts.schemas.data import (
 )
 from data_agent import catalog
 from data_agent.clients.log_client import LogSource
-from data_agent.clients.shop_client import ShopUnavailable
+from data_agent.connectors import ConnectorUnavailable, as_connector
 from data_agent.detect import MetricSource
 from data_agent.explain import explain
 from data_agent.labels import department_label, skill_label
@@ -410,14 +410,27 @@ async def finance_figures(
 
 
 async def shop_counts(source: MetricSource, piece: tuple[date, date]) -> CompanyCounts:
-    """한 구간의 주문 수·결제 시도·실패 (shop-api 5분 버킷 합)."""
+    """한 구간의 거래량(캣북스: 주문 수)·거래 시도·실패 (커넥터의 5분 버킷 합).
+
+    거래량은 카탈로그 `volume_metric`, 거래 시도는 커넥터 `transactions_volume`(주지 않으면 첫 비율
+    지표의 분모), 실패는 첫 비율 지표(캣북스: 결제 실패율) × 시도다.
+    """
     start, end = _window(piece)
+    cat = catalog.current()
+    conn = as_connector(source)
+    rate = next((m for m in cat.metrics if m.denominator), None)
+    if cat.volume_metric is None or rate is None or rate.denominator is None:
+        reason = f"카탈로그에 거래량·비율 지표가 없어 {cat.name} 거래 수를 셀 수 없음"
+        return CompanyCounts(orders=None, attempts=None, failed=None, shop_reason=reason)
     try:
-        orders = await source.fetch("order_count", start, end)
-        counts = dict(await source.fetch("payment_count", start, end))
-        fail_rates = dict(await source.fetch("payment_fail_rate", start, end))
-    except ShopUnavailable as error:
-        reason = f"shop-api 지표를 받지 못함 [{error.code}]"
+        orders = await conn.metric_series(cat.volume_metric, start, end)
+        volume = await conn.transactions_volume(start, end)
+        if volume is None:
+            volume = await conn.metric_series(rate.denominator, start, end)
+        counts = dict(volume)
+        fail_rates = dict(await conn.metric_series(rate.id, start, end))
+    except ConnectorUnavailable as error:
+        reason = f"{cat.connector} 지표를 받지 못함 [{error.code}]"
         return CompanyCounts(orders=None, attempts=None, failed=None, shop_reason=reason)
     return CompanyCounts(
         orders=float(sum(v for _, v in orders)),

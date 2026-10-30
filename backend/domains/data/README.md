@@ -15,7 +15,10 @@
 
 - 숫자는 코드가 계산한다(`metrics/`, `impact.py`, `detect.py`). LLM은 계산이 끝난 숫자로 설명 문장만 쓴다(`explain.py`)
 - 주기 감시(`monitor.py`)는 `anomaly_detection`과 같은 판정 함수로 최근 구간을 보고 `metric.anomaly` 이벤트를 낸다. 사건은 열지 않는다(`context_id` 없음)
-### 새 회사를 붙일 때 필요한 것 (지금은 지표 카탈로그만)
+### 새 회사를 붙일 때 필요한 것: 지표 카탈로그 + 커넥터
+회사마다 다른 것은 두 가지다. **무엇을 볼지**는 지표 카탈로그 파일, **어디서 읽을지**는 커넥터다.
+
+#### 1) 지표 카탈로그
 data 엔진에서 회사마다 다른 것은 **지표 카탈로그** 파일 하나에 모았다. 형식은 계약 `ax_contracts.schemas.data.MetricCatalog`이다.
 
 - 파일: `src/data_agent/catalogs/<회사>.toml` (캣북스는 `catbooks.toml`). 고르는 환경변수는 `DATA_TENANT_CATALOG`(기본 `catbooks`, `.toml` 경로도 받는다).
@@ -33,8 +36,39 @@ data 엔진에서 회사마다 다른 것은 **지표 카탈로그** 파일 하�
   - 설명 문장의 지표 이름·영향 단위(`explain`·`anomaly_detection`)
   - 리포트의 "회사 주문 수" 이름(`activity_report`)
 - 테스트 전용 가짜 회사 `tests/catalogs/coldchain.toml`(냉장 물류: 지표 2개, 단위 "출고", 고객 "거래처")로 판정·설명·리포트 이름이 캣북스 단어 없이 나오는지 본다(`tests/test_metric_catalog.py`).
+#### 2) 커넥터 (`src/data_agent/connectors/`)
+엔진(이상 탐지·영향 분석·주기 감시·리포트의 주문 수)은 커넥터만 쓴다. 회사 시스템 응답을 표준 형식으로 바꾸는 일은 커넥터 안에서만 한다.
+
+- 고르는 곳: 카탈로그 `connector`(캣북스 `shop-api`). 이름 → 커넥터 표는 `clients/shop_client.py`의 `CONNECTORS`다.
+- 구현할 메서드 3개 (`connectors.Connector`, 읽기만 한다. 못 읽으면 `ConnectorUnavailable`이고 0으로 채우지 않는다):
+
+| 메서드 | 돌려줄 것 | 엔진이 쓰는 곳 |
+| --- | --- | --- |
+| `metric_series(metric_id, from, to, bucket="5m")` | 카탈로그 지표의 5분 [(시각, 값)]. 모르는 지표는 빈 목록 | 이상 탐지·감시·리포트 거래 수 |
+| `failure_events(from, to, *, category, limit, tenant_id)` | `FailureEvents`(`FailureEvent`: 시각 `at`, 원인 쪽 코드 `code`, 고객 `customer_id`, 금액 `amount`, 분류 `category`, `event_id`)와 잘림 여부 | 장애 쪽 실패 확률 기준, 영향 분석 |
+| `transactions_volume(from, to)` | 5분 거래 시도 수 [(시각, 값)]. 주지 않으면 None | 비율 지표의 분모, 영향 분석의 "평소 실패" |
+
+- 거래량 보정(`scale_with_volume`)은 카탈로그 `volume_metric`(캣북스 주문 수)을 `metric_series`로 읽는다.
+- 예시 (테스트 전용 메모리 커넥터, `tests/test_connector.py`):
+
+```python
+class MemoryConnector:
+    async def metric_series(self, metric_id, window_from, window_to, bucket="5m"):
+        return [(ts, value) for ts, value in self.series[metric_id] if window_from <= ts < window_to]
+
+    async def failure_events(self, window_from, window_to, *, category=None, limit=5000, tenant_id="shop-demo"):
+        events = [e for e in self.events if window_from <= e.at <= window_to]
+        return FailureEvents(events[:limit], truncated=len(events) > limit)
+
+    async def transactions_volume(self, window_from, window_to):
+        return [(ts, n) for ts, n in self.attempts if window_from <= ts < window_to]
+```
+
+- 캣북스: `connectors/shop_api.py`의 `ShopApiConnector`다(`/api/shop/metric-series`·`/failed-orders`, 거래 시도 = `payment_count`). 예전 이름 `HttpMetricSource`·`HttpShopClient`는 이 커넥터의 하위 클래스다. 정확도 평가도 이 커넥터로 읽는다(`eval/run.py`). 평가 데이터 생성은 지금처럼 shop-api 코드로 한다(평가는 캣북스 전용).
+- 목 모드(`DATA_MOCK`, 테스트 전용)의 시드 공급자는 예전 모양 그대로이고, 엔진이 `connectors.as_connector`로 감싸 읽는다.
+- 판매자 정보·가격(사기 점수 전용)은 아직 커넥터에 넣지 않았다(`clients.shop_client.HttpSellerClient`).
+
 - **아직 안 된 것 (다음 PR):**
-  - 지표를 어디서 받는지(커넥터): 지금은 shop-api(`clients/shop_client.py`, `/metric-series`·`/failed-orders`)만 있다. 다른 회사는 커넥터가 있어야 실제로 돈다.
   - 계약 `BusinessMetric`이 캣북스 지표 4개로 고정된 `Literal`이라, `anomaly_detection` skill의 입력·출력은 아직 다른 회사 지표를 담지 못한다. 계약은 추가만 해야 해서 새 칸이 필요하다.
   - 비율 지표 안내 문장의 "결제 N건 미만", 사용자 쪽 실패 코드(`impact.USER_SIDE_REASONS`), 영향 분석 근거 문장, 판매자 사기 점수(`fraud_score`)는 아직 캣북스 말이다.
 

@@ -1,13 +1,17 @@
 # 테스트 전용 가짜 회사: 냉장 물류. data 엔진이 캣북스 단어 없이 돌아가는지 본다.
-# 거래량 지표·비율 지표·장애 쪽 코드가 없는 가장 단순한 카탈로그다.
+# 거래량 지표·비율 지표가 없는 단순한 카탈로그다.
 id = "coldchain"
 name = "냉장물류 테스트"
+# 테스트 전용 메모리 커넥터 (tests/test_connector.py가 직접 붙인다)
+connector = "memory"
 
 [[metrics]]
 id = "cold_chain_breach_count"
 label = "냉장 유통 이탈 건수"
 bad_direction = "up"
 unit = "건"
+# 장애 쪽 원인 코드 (냉장고 고장·문 열림). 영향 분석은 이 코드의 실패 이벤트만 센다
+fault_codes = ["REEFER_FAILURE", "DOOR_LEFT_OPEN"]
 
 [[metrics]]
 id = "shipment_delay_count"
