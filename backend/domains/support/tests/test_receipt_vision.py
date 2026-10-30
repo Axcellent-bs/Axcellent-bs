@@ -213,6 +213,79 @@ def test_nothing_is_connected_in_mock_mode() -> None:
     assert receipt_vision.connect() is False and receipts.get_vision_extractor() is None
 
 
+def _configure_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SUPPORT_LLM_MODEL", "gemini-test")
+    monkeypatch.setenv("SUPPORT_LLM_BASE_URL", "http://llm.invalid/v1")
+
+
+def test_mock_mode_stays_off_even_with_a_model_unless_vision_is_set_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_model(monkeypatch)
+    monkeypatch.delenv("SUPPORT_VISION", raising=False)
+    assert receipt_vision.configured() is False  # 목 모드 + 모델이 있어도 기본은 꺼짐
+    assert receipt_vision.connect() is False and receipts.get_vision_extractor() is None
+    monkeypatch.setenv("SUPPORT_VISION", "")  # 빈 값은 안 준 것과 같다
+    assert receipt_vision.configured() is False
+    monkeypatch.setenv("SUPPORT_MOCK", "1")  # 부서 목 스위치도 같다
+    monkeypatch.delenv("AGENT_TEMPLATE_MOCK")
+    assert receipt_vision.configured() is False
+
+
+@pytest.mark.parametrize("value", ["on", "ON", " on "])
+def test_mock_mode_connects_when_vision_is_explicitly_on_and_a_model_is_set(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    _configure_model(monkeypatch)
+    monkeypatch.setenv("SUPPORT_VISION", value)
+    assert receipt_vision.configured() is True
+    assert receipt_vision.connect() is True and receipts.get_vision_extractor() is not None
+
+
+def test_explicit_on_still_needs_a_model_and_off_always_wins_in_mock_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SUPPORT_LLM_MODEL", raising=False)
+    monkeypatch.delenv("SUPPORT_LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.setenv("SUPPORT_VISION", "on")
+    assert receipt_vision.connect() is False  # 모델이 없으면 꽂을 것이 없다
+    _configure_model(monkeypatch)
+    monkeypatch.setenv("SUPPORT_VISION", "off")
+    assert receipt_vision.connect() is False and receipts.get_vision_extractor() is None
+
+
+def test_in_mock_mode_the_photo_goes_to_the_real_client_not_the_canned_mock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """목 모드의 `get_llm()`은 가짜 LLM이다. 명시적 on이면 사진은 설정된 실제 클라이언트로 간다."""
+    _configure_model(monkeypatch)
+    monkeypatch.setenv("SUPPORT_VISION", "on")
+    seen: list[str] = []
+
+    class RealClient(MockLLMClient):
+        def __init__(self, dept: str) -> None:
+            super().__init__(responses={VisionReceipt: MATCHING})
+            seen.append(dept)
+
+    monkeypatch.setattr(receipt_vision, "LLMClient", RealClient)
+    assert receipt_vision.connect() is True
+    extractor = receipts.get_vision_extractor()
+    assert extractor is not None
+    facts = asyncio.run(extractor([receipts.EvidenceImage("img_1", "image/png", PNG_B64)]))
+    assert seen == ["support"] and facts.total == 33000  # 가짜 `get_llm()`이었다면 KeyError다
+
+
+def test_outside_mock_mode_nothing_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AGENT_TEMPLATE_MOCK")
+    _configure_model(monkeypatch)
+    monkeypatch.delenv("SUPPORT_VISION", raising=False)
+    assert receipt_vision.configured() is True  # 스위치를 안 줘도 모델이 있으면 켜진다(기존과 같다)
+    monkeypatch.setenv("SUPPORT_VISION", "off")
+    assert receipt_vision.configured() is False
+
+
 def test_connected_only_when_a_model_is_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
     monkeypatch.delenv("LLM_MODEL", raising=False)
