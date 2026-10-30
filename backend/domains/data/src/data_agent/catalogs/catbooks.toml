@@ -4,6 +4,8 @@
 # 형식: ax_contracts.schemas.data.MetricCatalog
 id = "catbooks"
 name = "캣북스"
+# 지표·실패 이벤트·거래량을 읽는 커넥터 (data `connectors.shop_api.ShopApiConnector`)
+connector = "shop-api"
 # 거래량 지표: 빈 구간 판단(이 지표와 분모가 모두 0이면 판정하지 않음), 거래량에 따른 기준 보정
 volume_metric = "order_count"
 # 거래량을 부르는 말: "구간에 주문·결제 기록이 하나도 없음"

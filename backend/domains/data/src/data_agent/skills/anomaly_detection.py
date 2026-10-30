@@ -29,7 +29,7 @@ from ax_agent_template.llm import LLMClient
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import AnomalyDetectionInput, AnomalyDetectionOutput, MetricVerdict
 from data_agent import catalog
-from data_agent.clients.shop_client import HttpMetricSource, shop_api
+from data_agent.clients.shop_client import get_connector
 from data_agent.detect import EMPTY_WINDOW, MetricSource, judge_window
 from data_agent.explain import explain
 from data_agent.metrics.judge import BASELINE_DAYS, Judgement, Settings, settings_for
@@ -50,10 +50,10 @@ class AnomalyResult:
 
 
 def get_metric_source(env: Mapping[str, str]) -> MetricSource:
-    """`DATA_MOCK=1`이면 목 공급자, 아니면 shop-api `/api/shop/metric-series` 공급자."""
+    """`DATA_MOCK=1`(테스트 전용)이면 목 공급자, 아니면 회사 카탈로그의 커넥터(캣북스: shop-api)."""
     if env.get("DATA_MOCK") == "1":
         return MockMetricSource()
-    return HttpMetricSource(shop_api(env))
+    return get_connector(env)
 
 
 def _verdict(j: Judgement) -> MetricVerdict:

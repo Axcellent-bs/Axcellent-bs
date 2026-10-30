@@ -35,8 +35,8 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from ax_contracts.data_access.shop_failed_orders import FailedOrder, ShopFailedOrdersResult
 from data_agent import catalog
+from data_agent.connectors import as_events
 from data_agent.impact import split_failures
 
 Status = Literal["normal", "anomaly", "unknown"]
@@ -396,14 +396,14 @@ def judge_count(
     )
 
 
-def fault_buckets(orders: list[FailedOrder]) -> dict[datetime, float]:
+def fault_buckets(orders: list) -> dict[datetime, float]:
     """실패 주문을 5분 구간별 **장애 쪽** 실패 건수로 센다.
 
     분류는 영향 분석과 같은 `impact.split_failures`다. 사용자 쪽 사유(카드 거절 등)·처음 보는
     코드·사유 없음은 세지 않는다.
     """
-    fault = split_failures(ShopFailedOrdersResult(orders=orders)).fault
-    return _by_bucket([(o.failed_at, 1.0) for o in fault])
+    fault = split_failures(as_events(orders)).fault  # 실패 이벤트 또는 실패 주문 목록
+    return _by_bucket([(o.at, 1.0) for o in fault])
 
 
 def fault_lambda(
