@@ -2393,6 +2393,7 @@ class PlanningService:
                     )
                 if note is None or note.ok:
                     pr.closed = True
+                    pr.auto_review = None  # 닫혔으니 사람 확인 대기에서 뺀다
             x.coding.status = "canceled"
             closed = pr is not None and pr.closed
             x.coding.error = "사람이 중단" + (f" · {pr.id} 닫음" if closed else "")

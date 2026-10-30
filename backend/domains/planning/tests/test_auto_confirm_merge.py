@@ -484,6 +484,18 @@ def test_review_queue_rest(service) -> None:
     assert client.get("/api/planning/review-queue").json()["data"] == []
 
 
+def test_review_queue_drops_closed_pr(service) -> None:
+    """레포에서 닫히거나 작업을 중단해 닫힌 PR은 사람 확인 대기에 남지 않는다."""
+    client = TestClient(app)
+    run(service.answer_question("SPEC-7", ANSWER))
+    run(service.confirm_spec("SPEC-7"))
+    run(service.generate_prs("SPEC-7"))
+    run(service.review_pr("PR #32"))
+    assert [r["id"] for r in client.get("/api/planning/review-queue").json()["data"]] == ["PR #32"]
+    _pr(service, "PR #32").closed = True
+    assert client.get("/api/planning/review-queue").json()["data"] == []
+
+
 def test_review_queue_spec_and_state_filter(service) -> None:
     client = TestClient(app)
     res = client.post("/api/planning/actions", json={"type": "checkSpec", "spec": "SPEC-7"})
