@@ -303,3 +303,27 @@ def test_only_the_support_department_may_record_claim_activity(client: TestClien
     )
     assert denied["status"] != "completed"
     assert kinds(client, inquiry_id) == ["inquiry_analyzed"]
+
+
+def test_an_abusive_message_is_recorded_without_the_words(client: TestClient) -> None:
+    created = call(
+        client,
+        "create_inquiry",
+        {"user_id": 1, "customer_name": "김하늘", "order_id": "101", "order_no": "ORD-1"},
+        {"subject": "환불", "message": "씨발 표지가 찢어져 왔어요. 환불해 주세요."},
+        key="k-abuse",
+    )["output"]
+    assert [a["kind"] for a in created["activity"]] == ["abusive_message", "inquiry_analyzed"]
+    entry = created["activity"][0]
+    assert (entry["actor"], entry["data"]["level"], entry["data"]["kinds"]) == (
+        "system",
+        "profanity",
+        ["profanity"],
+    )
+    assert "씨발" not in str(entry)  # 찾은 낱말도 원문도 담지 않는다
+    assert created["messages"][0]["display_text"].startswith("[비속어]")
+
+
+def test_a_polite_message_leaves_no_abuse_entry(client: TestClient) -> None:
+    created = create(client)
+    assert "abusive_message" not in [a["kind"] for a in created["activity"]]

@@ -14,6 +14,31 @@ const KIND_KO: Record<string, string> = {
   refund: "환불 요청", exchange: "교환 요청", cancel: "취소 요청", event_inquiry: "이벤트·쿠폰 문의", other: "클레임이 아닌 문의",
 };
 
+const ABUSE_LABEL: Record<string, string> = { profanity: "비속어 가림", insult: "모욕 표현 가림", threat: "위협 표현 있음" };
+
+/** 접수 창에서 보는 고객 메시지: 욕설·모욕·위협은 가려서 보여 주고 원문은 눌러야 연다 */
+function CustomerMessage({ conv }: { conv: Conversation }) {
+  const [showOriginal, setShowOriginal] = useState(false);
+  const last = [...conv.messages].reverse().find((m) => m.role === "customer");
+  if (!last) return null;
+  const level = last.abuse_level ?? "none";
+  const masked = level !== "none" && last.display_text != null;
+  return (
+    <div className="space-y-1 rounded-lg bg-surface-2 p-2" role="note" aria-label="고객 메시지">
+      <div className="flex items-center gap-2">
+        <b>고객 메시지</b>
+        {masked && (
+          <>
+            <span className={`rounded-full px-2 py-0.5 font-medium ${level === "threat" ? "bg-red-50 text-red-800" : "bg-amber-50 text-amber-800"}`}>{ABUSE_LABEL[level]}</span>
+            <button type="button" className="ml-auto text-ink-500 underline" onClick={() => setShowOriginal((v) => !v)}>{showOriginal ? "가려서 보기" : "원문 보기"}</button>
+          </>
+        )}
+      </div>
+      <p className="whitespace-pre-wrap text-ink-700">{masked && !showOriginal ? last.display_text : last.text}</p>
+    </div>
+  );
+}
+
 export function ClaimIntake({ conv, onCreated }: { conv: Conversation; onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<Intake["type"]>("return");
@@ -53,6 +78,7 @@ export function ClaimIntake({ conv, onCreated }: { conv: Conversation; onCreated
         <b>클레임 접수</b><span className="text-ink-500">문의 #{conv.id} · 주문 {conv.order_no ?? conv.order_id}</span>
         <button type="button" className="btn-quiet ml-auto px-2 py-0.5" onClick={() => { setOpen(false); setError(null); }}>닫기</button>
       </div>
+      <CustomerMessage conv={conv} />
       <button type="button" className="btn-ghost w-full py-1" disabled={busy !== null} onClick={suggest}>
         {busy === "suggest" ? "고객 메시지를 읽는 중…" : suggestion ? "AI 제안 다시 받기" : "AI 제안 받기 (접수하지 않고 읽기만)"}
       </button>
