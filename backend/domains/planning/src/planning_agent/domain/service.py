@@ -876,15 +876,20 @@ class PlanningService:
         return len(done)
 
     def start_pr_sync(self) -> None:
-        """PR_SYNC_SECONDS마다 sync_prs를 돈다 (한 번만 켠다). 기획 서비스는 PR이 없어 안 켠다."""
+        """PR_SYNC_SECONDS마다 sync_prs·오래 기다리는 대화 알림을 돈다 (한 번만 켠다).
+        기획 서비스는 PR·개발 대화가 없어 안 켠다."""
         if self._pr_sync is not None or self.role == "planning":
             return
+
+        from planning_agent import dev_chat
 
         async def loop() -> None:
             while True:
                 await asyncio.sleep(PR_SYNC_SECONDS)
                 try:
                     await self.sync_prs()
+                    # 앞 요청을 오래 기다리는 대화에 알린다 (상태가 안 바뀌어도 시간이 지나면)
+                    await dev_chat.notice_long_waits(self)
                 except Exception:  # noqa: BLE001 - 맞추기 실패로 루프가 멈추지 않게 한다
                     continue  # 다음 차례에 다시
 

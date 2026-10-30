@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
@@ -471,6 +472,39 @@ async def resume_waiting(svc: PlanningService) -> None:
             continue
         done = ", ".join(th.waiting_for)
         await _start(svc, th.id, plan, th.connection, f"{done}가 끝나서 시작할게요.")
+
+
+WAIT_NOTICE_MINUTES = 30  # 앞 요청을 이만큼 넘게 기다리면 대화에 한 번 알린다
+
+
+def _wait_since(th: ChatThread) -> tuple[datetime | None, int]:
+    """마지막 사람 메시지 뒤 기다림 안내가 처음 나온 때와 그 뒤 기다림 안내 수."""
+    last_user = max((i for i, m in enumerate(th.messages) if m.role == "user"), default=-1)
+    waits = [m for m in th.messages[last_user + 1 :] if m.kind == "waiting"]
+    return (waits[0].at if waits else None), len(waits)
+
+
+async def notice_long_waits(svc: PlanningService) -> int:
+    """앞 요청을 WAIT_NOTICE_MINUTES 넘게 기다리는 대화에 한 번 알린다 (계속 기다린다).
+
+    대화는 요청이 되기 전이라 다른 대화를 기다리지 않는다. 기다리는 쪽은 늘 이미 있는 요청이라
+    서로 기다리다 멈추는 일은 없고, 오래 걸리는 것만 사람이 알면 된다."""
+    now = svc.clock()
+    n = 0
+    for th in [c for c in svc.state.chats if c.status == "waiting"]:
+        since, count = _wait_since(th)
+        if since is None or count > 1 or now - since < timedelta(minutes=WAIT_NOTICE_MINUTES):
+            continue
+        await svc.chat_add(
+            th.id,
+            "assistant",
+            f"{', '.join(th.waiting_for)}가 {WAIT_NOTICE_MINUTES}분 넘게 안 끝났어요. "
+            "계속 기다릴게요. 바로 시작하려면 '지금 진행'이라고 보내 주세요.",
+            kind="waiting",
+            status="waiting",
+        )
+        n += 1
+    return n
 
 
 def coder_running(status: str) -> bool:
