@@ -187,7 +187,7 @@ export function CodingStep({ task }: { task: Task }) {
       )}
       <span className="tags">
         {waitingPr && <Button size="small" variant="primary" onClick={merge} disabled={busy}>머지</Button>}
-        {(STUCK.includes(c.status) || c.status === 'canceled') && !waitingPr && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.status === 'canceled' ? '재개' : '다시 시도'}</Button>}
+        {(STUCK.includes(c.status) || c.status === 'canceled') && !waitingPr && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.status === 'canceled' ? '재개' : c.mergeConflict ? '최신 코드로 다시 쓰기' : '다시 시도'}</Button>}
         <CancelButton taskId={task.id} status={c.status} />
       </span>
     </Step>

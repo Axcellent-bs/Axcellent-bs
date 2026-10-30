@@ -222,8 +222,21 @@ async def merge_pr(pr: PR, connection_id: str | None = None) -> Note | None:
     except VcsError as exc:
         # 앞선 시도에서 병합만 되고 상태 반영이 버려졌으면 이미 병합된 것으로 본다
         if exc.code != "conflict" or not await _already_merged(adapter, pr.vcs_number):
-            return Note(False, "vcs.merge_failed", f"{pr.id} 형상관리 병합 실패 ({exc.code})")
+            why = merge_fail_reason(exc.code)
+            return Note(False, "vcs.merge_failed", f"{pr.id} 형상관리 병합 실패 ({why})")
     return Note(True, "vcs.merged", f"{pr.id} → 형상관리 변경 #{pr.vcs_number} 병합")
+
+
+CONFLICT_MARK = "conflict · 충돌"  # 머지 실패 글에 이게 있으면 다시 쓰기로 풀린다
+
+
+def merge_fail_reason(code: str) -> str:
+    """머지 실패 이유: 충돌(다시 쓰기로 풀림) · 보호 규칙·필수 체크(사람 판단) · 그 밖."""
+    if code == "conflict":
+        return f"{CONFLICT_MARK} → 최신 코드로 다시 쓰기"
+    if code in ("invalid", "forbidden"):
+        return f"보호 규칙·필수 체크에 막힘 ({code})"
+    return code
 
 
 async def close_pr(pr: PR) -> Note | None:
