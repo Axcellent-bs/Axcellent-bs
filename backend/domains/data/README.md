@@ -125,7 +125,7 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 
 | 칸 | 출처 | 정의 |
 | --- | --- | --- |
-| `company.gmv`·`commission_revenue` | finance `closing_report`(A2A) | 총거래액·판매 수수료 매출. 재무 마감은 UTC 날짜 기준이라 한국 시간 기간보다 9시간 늦다(`note`). 주간은 하루씩 7번 더한다. 받지 못하면 null |
+| `company.gmv`·`commission_revenue` | finance `closing_report`(A2A) | 총거래액·판매 수수료 매출. 재무 마감은 UTC 날짜 기준이라 한국 시간 기간보다 9시간 늦다(`note`). 주간은 하루씩 7번 더한다. 받지 못하면 null. 재무 장부에 주문·상품(`orders`·`orders_partial`·`products`)이 빠졌다고 오면 재무가 0으로 계산하므로 그 날도 null. 한 요청에서 같은 날짜는 한 번만, 동시에 2개까지 부른다(재무가 호출마다 쇼핑몰 주문 전체를 5초 제한으로 다시 읽어서 더 보내면 재무 쪽 조회가 끊긴다) |
 | `company.order_count` | shop-api `metric-series` `order_count` | 기간의 5분 버킷 합 |
 | `company.payment_success_rate` | shop-api `payment_count`·`payment_fail_rate` | 1 − 실패/시도. 시도 3건 미만이면 null |
 | `company.incident_count` | 공통 로그 (`kpi_summary`와 같은 `compute_kpi`) | 기간 안 `ctx_inc_` 사건 수 |
