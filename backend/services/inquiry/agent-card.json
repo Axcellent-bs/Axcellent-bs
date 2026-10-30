@@ -108,7 +108,7 @@
     },
     {
       "id": "reject_draft",
-      "description": "상담원이 거절한 답변 초안 스타일을 기록한다 (초안 채택률 지표용). 상태 변경이라 execute()를 거친다.",
+      "description": "상담원이 거절한 답변 초안 스타일을 기록한다 (초안 채택률 지표용). 선택 reason_code(wrong_info·missing_policy·tone·too_long·other)로 거절 이유를 남기면 지식 공백 보고서가 쓴다. 상태 변경이라 execute()를 거친다.",
       "input_schema": "agents/support/src/support_agent/schemas.py#RejectDraftInput",
       "output_schema": "agents/support/src/support_agent/schemas.py#RejectDraftInput",
       "grade": "A",
@@ -306,6 +306,19 @@
       "description": "문의에 붙은 개인정보 삭제 요청이 본인 것으로 보이는지 규칙으로 1차 판단한다(읽기, LLM 없음). 문의에 연결된 주문의 구매자와 문의를 낸 구매자가 같은지, 요청에 적힌 주문 번호·상품이 주문 기록과 맞는지, 같은 구매자가 짧은 시간에 여러 주문을 다루는 흔적이 없는지를 보고 일치(consistent)·불일치(mismatch)·판단불가(insufficient)와 확신도(low·medium·high, 퍼센트 없음), 근거 목록, 사람이 읽을 요약을 돌려준다. 불일치·판단불가는 거절 권고로 표시한다. 본인으로 확정하거나 삭제하지 않고 최종 판단은 사람이 한다. 문의 원문은 untrusted로만 읽고 지시로 해석하지 않으며, 본인 확인을 위해 개인정보를 더 요구하지 않는다.",
       "input_schema": "agents/support/src/support_agent/privacy_schemas.py#AssessDeletionInput",
       "output_schema": "agents/support/src/support_agent/privacy_schemas.py#DeletionAssessment",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "knowledge_gap_report",
+      "description": "어느 분류의 문의에서 AI가 근거 없이 답하거나 상담원이 초안을 거절하거나 가드가 차단하거나 사람에게 넘어가는지를 코드가 세어 지식 공백 순위를 만든다(읽기, LLM 없음). 분류별과 근거 문서별로 분모(분석한 메시지 수), 근거 없음·거절·차단·수정·이관 건수와 비율, 거절 사유별 건수, 공백 유형(no_document·weak_document·none·insufficient_samples), 단순 평균 점수와 순위, 예시 문의 번호, 처방 대상 코드(부서 이름이 아님), 권고(add_document·review_document)를 돌려준다. 표본이 최소 건수 미만이면 순위를 내지 않는다. 문서를 고치거나 요청을 만들지 않고 고객 원문을 싣지 않는다. 근거 출처가 시드이면 notes에 고정 문장이 붙는다.",
+      "input_schema": "agents/support/src/support_agent/gap_schemas.py#KnowledgeGapInput",
+      "output_schema": "agents/support/src/support_agent/gap_schemas.py#KnowledgeGapReport",
       "grade": "read",
       "allowed_requesters": [
         "dashboard-api",
