@@ -97,7 +97,13 @@ class IncidentManager:
             for inc in self.incidents.values()
             if (component is None or inc.component == component) and self._covers(inc, occurred_at)
         ]
-        found.sort(key=lambda inc: (inc.status != "open", -inc.opened_at.timestamp()))
+        found.sort(
+            key=lambda inc: (
+                inc.status != "open",
+                inc.status != "degraded" or inc.recovered_at is not None,
+                -inc.opened_at.timestamp(),
+            )
+        )
         return found[0] if found else None
 
     @staticmethod
@@ -106,7 +112,10 @@ class IncidentManager:
             return inc.status == "open"
         if occurred_at < inc.opened_at - LOOKBACK:
             return False
-        return inc.closed_at is None or occurred_at <= inc.closed_at
+        if inc.status == "degraded" and inc.recovered_at is None:
+            return True  # 대응은 끝났지만 장애가 안 풀렸다: 구간이 열려 있다
+        end = inc.recovered_at or inc.closed_at
+        return end is None or occurred_at <= end
 
     async def handle(self, env: EventEnvelope) -> Incident | None:
         """이벤트 하나를 처리한다. 새로 연 이벤트 또는 합쳐진 이벤트를 돌려준다."""
@@ -132,6 +141,8 @@ class IncidentManager:
         if verdict == "ignore":
             return "ignored", None
         if verdict == "note":
+            if env.type == EventType.SHOP_RECOVERED:
+                self._mark_recovered(component, env.occurred_at)
             if existing is not None:
                 existing.log(f"이벤트 수신: {env.type.value} ({env.source})")
             return "noted", existing
@@ -153,6 +164,13 @@ class IncidentManager:
         plan = PLANS[env.type][1]() if env.type in PLANS else self.plan_factory()
         self._tasks[inc.context_id] = asyncio.create_task(self.engine.run(inc, plan))
         return "opened", inc
+
+    def _mark_recovered(self, component: str, at: datetime) -> None:
+        """복구 신호를 받으면 같은 구성요소의 degraded 이벤트가 장애 중이 아니게 된다."""
+        for inc in self.incidents.values():
+            if inc.component == component and inc.status == "degraded" and not inc.recovered_at:
+                inc.recovered_at = max(at, inc.closed_at or at)
+                inc.log(f"복구 신호 수신 ({iso(at)})")
 
     def _resume_handoff(self, env: EventEnvelope) -> tuple[str, Incident | None]:
         """같은 context_id 이벤트에서 같은 task_id를 기다리는 단계를 찾아 사람 결과를 넣는다.

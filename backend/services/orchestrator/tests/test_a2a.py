@@ -91,6 +91,23 @@ async def test_closed_incident_is_found_only_when_time_falls_inside(harness) -> 
     assert manager.find_active("payment", inc.opened_at - timedelta(minutes=30)) is None
 
 
+@pytest.mark.asyncio
+async def test_degraded_incident_stays_active_until_recovered(harness) -> None:
+    manager = IncidentManager(await harness.start(), scenario_a)
+    inc = await manager.handle(_event("evt_1"))
+    await manager.wait(inc.context_id)
+    inc.status = "degraded"  # 롤백이 사람에게 넘어가 필수 단계가 끝나지 않은 경우
+    later = inc.closed_at + timedelta(minutes=5)
+    assert manager.find_active("payment", later) is inc  # 장애가 안 풀렸다
+    recovered = _event("evt_2")
+    recovered.type = EventType.SHOP_RECOVERED
+    recovered.occurred_at = later
+    await manager.process(recovered)
+    assert inc.recovered_at == later
+    assert manager.find_active("payment", later) is inc
+    assert manager.find_active("payment", later + timedelta(minutes=1)) is None
+
+
 def test_only_support_may_ask(client) -> None:
     result = _call(client, "marketing", {"component": "payment"})
     assert result.status.value == "rejected"

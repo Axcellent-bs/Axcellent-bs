@@ -108,6 +108,9 @@ class Incident:
     # 신호가 알려 준 장애 시작 시각 (shop.degraded data.since). 없으면 None
     since: datetime | None = None
     closed_at: datetime | None = None
+    # 쇼핑몰이 복구됐다는 신호(shop.recovered)를 받은 시각. closed_at은 총괄 대응이 끝난 시각이라
+    # 장애가 풀린 때와 다르다. degraded로 끝난 이벤트는 이 값이 생길 때까지 장애 중으로 본다
+    recovered_at: datetime | None = None
     status: str = "open"
     steps: dict[str, StepRun] = field(default_factory=dict)
     events: list[dict[str, Any]] = field(default_factory=list)
@@ -139,6 +142,7 @@ class Incident:
             "status": self.status,
             "opened_at": iso(self.opened_at),
             "closed_at": iso(self.closed_at),
+            "recovered_at": iso(self.recovered_at),
             "steps": [s.view() for s in self.steps.values()],
             "events": self.events,
             "summary": self.summary,
