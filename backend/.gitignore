@@ -45,3 +45,6 @@ safe-test-out/
 # 로컬 실행 데이터·로그 (scripts/run_all.sh)
 .data/
 .logs/
+
+# data 평가 케이스 데이터 캐시 (DATA_EVAL_CACHE_DIR)
+.eval-cache/

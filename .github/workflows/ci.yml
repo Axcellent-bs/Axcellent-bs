@@ -101,5 +101,15 @@ jobs:
           cache-dependency-glob: backend/uv.lock
       - if: steps.changes.outputs.run == 'true'
         run: uv sync --all-packages --frozen
+      # 평가 케이스 데이터(eval_world.build) 캐시. 파일 이름에도 같은 해시가 들어가서(코드 + 케이스 명세)
+      # 예전 캐시를 복원해도 맞지 않는 파일은 쓰지 않고 새로 만든다. 캐시가 없으면 지금처럼 만든다
       - if: steps.changes.outputs.run == 'true'
-        run: uv run pytest -q -m eval
+        uses: actions/cache@v4
+        with:
+          path: backend/.eval-cache
+          key: data-eval-world-${{ hashFiles('backend/domains/data/eval/eval_world.py', 'backend/domains/data/eval/make_cases.py', 'backend/shared/shop-api/src/**', 'backend/domains/data/eval/cases/**', 'backend/domains/data/eval/holdout/**') }}
+          restore-keys: data-eval-world-
+      - if: steps.changes.outputs.run == 'true'
+        env:
+          DATA_EVAL_CACHE_DIR: ${{ github.workspace }}/backend/.eval-cache
+        run: uv run pytest -q -m eval --durations=8

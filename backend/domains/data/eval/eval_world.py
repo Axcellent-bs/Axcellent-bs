@@ -27,17 +27,27 @@
 
 5분마다 주문 수는 시간대 수준을 평균으로 한 포아송 분포다(실제 주문처럼 흔들린다).
 난수는 시나리오 id로 씨앗을 고정한 `random.Random`만 쓴다. 같은 시나리오면 늘 같은 데이터다.
+
+캐시: 환경변수 `DATA_EVAL_CACHE_DIR`가 있으면 만든 데이터(DB + 결제 기록)를 그 폴더에 파일로 두고,
+키가 같으면 다시 만들지 않고 읽는다. 키 = 생성기 코드(`eval_world.py`·`make_cases.py`) + shop-api
+소스(`shared/shop-api/src`) + 시나리오 명세(`expected` 제외)의 해시. 없으면 캐시하지 않는다.
+같은 시나리오면 늘 같은 데이터라서 캐시를 써도 결과가 같다(`tests/test_eval_cache.py`).
 """
 
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import math
+import os
 import random
+import shutil
+import sqlite3
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -181,8 +191,152 @@ def _noise_targets(injection: dict[str, Any], window_from: datetime) -> list[dat
     )
 
 
+CACHE_ENV = "DATA_EVAL_CACHE_DIR"
+_EVAL_DIR = Path(__file__).resolve().parent
+_BACKEND = _EVAL_DIR.parents[2]
+# 생성 결과를 바꿀 수 있는 코드. 하나라도 바뀌면 캐시 키가 바뀐다
+CODE_FILES = (_EVAL_DIR / "eval_world.py", _EVAL_DIR / "make_cases.py")
+SHOP_API_SRC = _BACKEND / "shared" / "shop-api" / "src"
+
+
+def _source_files() -> list[Path]:
+    shop = [
+        p
+        for p in SHOP_API_SRC.rglob("*")
+        if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"
+    ]
+    return [*CODE_FILES, *sorted(shop)]
+
+
+_code_hash: str | None = None
+
+
+def code_hash() -> str:
+    """생성기 코드 + shop-api 소스의 해시 (한 프로세스에서 한 번 센다)."""
+    global _code_hash
+    if _code_hash is None:
+        digest = hashlib.sha256()
+        for path in _source_files():
+            digest.update(path.relative_to(_BACKEND).as_posix().encode())
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+        _code_hash = digest.hexdigest()[:16]
+    return _code_hash
+
+
+def spec_hash(spec: dict[str, Any]) -> str:
+    """시나리오 명세의 해시. 정답(`expected`)은 생성에 쓰지 않으므로 뺀다."""
+    body = {k: v for k, v in spec.items() if k != "expected"}
+    text = json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(text.encode()).hexdigest()[:24]
+
+
+def cache_path(spec: dict[str, Any], cache_dir: str | Path) -> Path:
+    return Path(cache_dir) / code_hash() / f"{spec_hash(spec)}.sqlite"
+
+
+_pruned: set[Path] = set()
+
+
+def _prune(cache_dir: Path) -> None:
+    """키의 코드 부분이 다른 예전 캐시 폴더를 지운다 (한 프로세스에서 한 번)."""
+    if cache_dir in _pruned or not cache_dir.is_dir():
+        return
+    _pruned.add(cache_dir)
+    for child in cache_dir.iterdir():
+        if child.is_dir() and child.name != code_hash():
+            shutil.rmtree(child, ignore_errors=True)
+
+
+_PAYMENTS_TABLE = "_eval_cache_payments"
+
+
+def save(world: World, path: Path) -> None:
+    """만든 데이터를 파일 하나로 저장한다 (DB 전체 + 결제 기록). 다 쓴 뒤에 이름을 바꿔 넣는다."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.unlink(missing_ok=True)
+    out = sqlite3.connect(tmp)
+    try:
+        with world.db.tx() as conn:
+            conn.backup(out)
+        rows = [
+            (
+                p.order_id,
+                p.buyer_id,
+                p.amount,
+                p.at.isoformat(),
+                p.failure_code,
+                int(p.faulty),
+                int(p.noise),
+            )
+            for p in world.payments
+        ]
+        out.execute(
+            f"CREATE TABLE {_PAYMENTS_TABLE} (seq INTEGER PRIMARY KEY, order_id TEXT, "
+            "buyer_id TEXT, amount INTEGER, at TEXT, failure_code TEXT, faulty INTEGER, "
+            "noise INTEGER)"
+        )
+        out.executemany(
+            f"INSERT INTO {_PAYMENTS_TABLE} (order_id, buyer_id, amount, at, failure_code, "
+            "faulty, noise) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        out.commit()
+    finally:
+        out.close()
+    os.replace(tmp, path)
+
+
+def load(spec: dict[str, Any], path: Path) -> World:
+    """`save`한 파일에서 데이터를 읽어 새 메모리 DB로 만든다."""
+    db = Db(":memory:")
+    src = sqlite3.connect(path)
+    try:
+        rows = src.execute(
+            f"SELECT order_id, buyer_id, amount, at, failure_code, faulty, noise "
+            f"FROM {_PAYMENTS_TABLE} ORDER BY seq"
+        ).fetchall()
+        with db.tx() as conn:
+            src.backup(conn)
+            conn.execute(f"DROP TABLE {_PAYMENTS_TABLE}")
+    finally:
+        src.close()
+    payments = [
+        Payment(
+            order_id=order_id,
+            buyer_id=buyer_id,
+            amount=amount,
+            at=datetime.fromisoformat(at),
+            failure_code=failure_code,
+            faulty=bool(faulty),
+            noise=bool(noise),
+        )
+        for order_id, buyer_id, amount, at, failure_code, faulty, noise in rows
+    ]
+    return World(spec=spec, db=db, payments=payments)
+
+
 def build(spec: dict[str, Any]) -> World:
-    """시나리오 명세로 쇼핑몰 데이터를 만든다."""
+    """시나리오 명세로 쇼핑몰 데이터를 만든다. `DATA_EVAL_CACHE_DIR`가 있으면 캐시를 쓴다."""
+    cache_dir = os.getenv(CACHE_ENV)
+    if not cache_dir:
+        return generate(spec)
+    _prune(Path(cache_dir))
+    path = cache_path(spec, cache_dir)
+    if path.is_file():
+        try:
+            return load(spec, path)
+        except sqlite3.Error:  # 깨진 캐시 파일이면 지우고 새로 만든다
+            path.unlink(missing_ok=True)
+    world = generate(spec)
+    save(world, path)
+    return world
+
+
+def generate(spec: dict[str, Any]) -> World:
+    """시나리오 명세로 쇼핑몰 데이터를 새로 만든다 (캐시 없음)."""
     db = Db(":memory:")
     seed(db)
     with db.tx() as conn:  # 재고가 모자라 주문이 막히지 않게 늘린다 (가격·분류는 시드 그대로)
