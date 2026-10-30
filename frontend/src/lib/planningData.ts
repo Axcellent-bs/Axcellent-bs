@@ -294,8 +294,8 @@ export interface State {
 }
 
 // ---- AI와 대화: 개발 에이전트와 대화하다 필요한 것이 모이면 코딩 작업을 시작한다
-export type ChatStatus = 'talking' | 'started' | 'blocked'
-export type ChatKind = 'text' | 'question' | 'plan' | 'started' | 'error'
+export type ChatStatus = 'talking' | 'started' | 'blocked' | 'waiting'
+export type ChatKind = 'text' | 'question' | 'plan' | 'started' | 'waiting' | 'error'
 export interface ChatPlan { title: string; plan: string; done: string[]; paths: string[] }
 export interface ChatMessage {
   id: string
@@ -313,6 +313,7 @@ export interface ChatThread {
   messages: ChatMessage[]
   taskId: string | null
   connection: string | null
+  waitingFor?: string[] // 끝나기를 기다리는 요청 (충돌하는 요청이 끝나면 시작)
   createdAt: string
   updatedAt: string
 }

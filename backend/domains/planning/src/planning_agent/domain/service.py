@@ -432,6 +432,7 @@ class PlanningService:
             raise ValueError(f"모르는 PLANNING_ROLE: {self.role}")
         self._send_dev: DevSender = dev_sender or send_to_service
         self._sending: set[asyncio.Task] = set()
+        self._resuming = False  # 대기 대화를 깨우는 중 (다시 깨우지 않는다)
         # 코딩 에이전트 실행 (작업 id → 실행 중인 태스크·실행 번호). 번호가 바뀐 실행은 버린다
         self._coding: dict[str, asyncio.Task] = {}
         self._coding_live: dict[str, int] = {}
@@ -530,7 +531,28 @@ class PlanningService:
         # 넘기기는 상태를 바꿔 끼운 뒤 잠금 밖에서 보낸다 (잠금을 쥔 채 네트워크를 부르지 않는다)
         for item in outgoing:
             self._spawn_send(*item)
+        self._kick_waiting()
         return result
+
+    def _kick_waiting(self) -> None:
+        """충돌하는 요청이 끝나기를 기다리는 대화가 있으면 깨운다 (dev_chat.resume_waiting)."""
+        if self._resuming or not any(c.status == "waiting" for c in self.state.chats):
+            return
+        from planning_agent import dev_chat
+
+        async def go() -> None:
+            self._resuming = True
+            try:
+                await dev_chat.resume_waiting(self)
+            finally:
+                self._resuming = False
+
+        try:
+            task = asyncio.get_running_loop().create_task(go())
+        except RuntimeError:  # 돌고 있는 루프가 없으면(동기 시험) 깨우지 않는다
+            return
+        self._sending.add(task)
+        task.add_done_callback(self._sending.discard)
 
     async def _relate_new(self, s: State, known: set[str]) -> None:
         """이번 액션으로 새로 생긴 요청마다 비슷한·충돌하는 요청을 찾아 붙인다 (제안만)."""
@@ -2357,6 +2379,7 @@ class PlanningService:
         status: str | None = None,
         connection: str | None = None,
         title: str | None = None,
+        waiting_for: list[str] | None = None,
     ) -> ChatThread:
         """대화에 메시지 하나를 더한다. thread_id가 없으면 새 대화(`chat-n`)를 연다."""
 
@@ -2398,6 +2421,8 @@ class PlanningService:
                 th.connection = connection
             if title and thread_id is not None:
                 th.title = title
+            if waiting_for is not None:
+                th.waiting_for = list(waiting_for)
             th.updated_at = t
             return ActionResult(outcome="chat", output={"thread_id": th.id})
 

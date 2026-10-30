@@ -15,6 +15,7 @@ const STATUS: Record<ChatStatus, { label: string; tone: ChipTone }> = {
   talking: { label: '대화 중', tone: 'neutral' },
   started: { label: '작업 시작', tone: 'green' },
   blocked: { label: '막힘', tone: 'amber' },
+  waiting: { label: '앞 요청 대기', tone: 'amber' },
 }
 const RUNNING: CodingStatus[] = ['queued', 'reading', 'writing', 'reviewing']
 const EXAMPLES = [
@@ -198,7 +199,7 @@ const Tools = ({ onTools }: { onTools: () => void }) => (
 function Msg({ m, s, onOpen }: { m: ChatMessage; s: S; onOpen: () => void }) {
   if (m.role === 'user') return <div className="bubble user">{m.text}</div>
   if (m.kind === 'error') return <div className="bubble ai err">{m.text}</div>
-  if (m.kind === 'question') return <div className="bubble ai q">{m.text}</div>
+  if (m.kind === 'question' || m.kind === 'waiting') return <div className="bubble ai q">{m.text}</div>
   if (m.kind === 'plan') {
     const p = m.plan
     return (

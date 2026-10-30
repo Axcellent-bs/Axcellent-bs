@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 
@@ -368,7 +369,8 @@ class ClashRelater:
 
 
 def test_conflict_with_open_request_asks_before_starting(service: PlanningService, adapter) -> None:
-    """대화에서 작업을 띄우기 전에 진행 중인 요청과 충돌하면 먼저 묻고, '진행해'면 시작한다."""
+    """작업을 띄우기 전에 진행 중인 요청과 충돌하면 먼저 묻는다. '진행해'면 앞 요청이 끝난 뒤
+    시작하려고 기다리고, 앞 요청이 끝나면 마지막 계획으로 시작한다."""
     target = next(r for r in service.state.requests if r.state not in ("완료", "기각", "중복 연결"))
     clash = ClashRelater(target.id)
     service._relater = clash
@@ -380,6 +382,27 @@ def test_conflict_with_open_request_asks_before_starting(service: PlanningServic
         assert last["kind"] == "question" and "충돌" in last["text"] and target.id in last["text"]
         assert clash.asked and PLAN.title in clash.asked[0]  # 계획 제목으로 미리 찾는다
         th = _post(c, thread_id=th["id"], message="진행해").json()["data"]
+        assert th["status"] == "waiting" and th["waiting_for"] == [target.id]
+        assert th["task_id"] is None and th["messages"][-1]["kind"] == "waiting"
+
+    # 앞 요청이 끝나면 깨워서 시작한다
+    # 상태는 액션마다 새 복사본으로 바뀌므로 지금 상태에서 고친다
+    next(r for r in service.state.requests if r.id == target.id).state = "완료"
+    asyncio.run(dev_chat.resume_waiting(service))
+    th = service.chat_of(th["id"])
+    assert th.status == "started" and th.task_id == "T-D1" and th.waiting_for == []
+    assert target.id in th.messages[-1].text
+
+
+def test_now_starts_without_waiting(service: PlanningService, adapter) -> None:
+    """'지금 진행'이면 충돌이 있어도 기다리지 않고 바로 시작한다."""
+    target = next(r for r in service.state.requests if r.state not in ("완료", "기각", "중복 연결"))
+    service._relater = ClashRelater(target.id)
+    dev_chat.set_llm(ChatLLM([START, ChatTurn(reply="", action="start")]))
+    with TestClient(app) as c:
+        th = _post(c, message="메인 배너 문구를 '신간 배너'로 바꿔 줘").json()["data"]
+        assert th["status"] == "talking"
+        th = _post(c, thread_id=th["id"], message="지금 진행").json()["data"]
         assert th["status"] == "started" and th["task_id"] == "T-D1"
 
 

@@ -125,6 +125,15 @@ def go_ahead(text: str) -> bool:
     return any(p in low for p in GO_AHEAD)
 
 
+# 충돌하는 요청이 있어도 기다리지 않고 같이 시작 (기본은 앞 요청이 끝난 뒤 시작)
+NOW = ("지금 진행", "지금진행", "바로 진행", "바로진행", "같이 진행", "지금 시작", "바로 시작")
+
+
+def now(text: str) -> bool:
+    low = _norm(text).lower()
+    return any(p in low for p in NOW)
+
+
 def title_of(text: str) -> str:
     first = _norm(str(text).strip().splitlines()[0] if str(text).strip() else "")
     return (first[:40] + "…") if len(first) > 40 else (first or "새 대화")
@@ -269,7 +278,7 @@ async def turn(
     """사용자 메시지 하나를 받고 AI 답 하나를 적는다. 바뀐 대화를 돌려준다.
 
     오류(입력·없음·설정)는 `ActionError`. LLM·작업 띄우기 오류는 대화에 답으로 남긴다."""
-    from planning_agent.domain.service import ActionError, GateRefused
+    from planning_agent.domain.service import ActionError
 
     llm = get_llm()
     if llm is None:
@@ -322,9 +331,10 @@ async def turn(
 
     reply = str(out.reply or "").strip()[:MAX_REPLY_CHARS]
     new_plan = clean_plan(out.plan)
-    plan = new_plan or (last_plan(th) if go_ahead(text) else None)
+    ok = go_ahead(text) or now(text)
+    plan = new_plan or (last_plan(th) if ok else None)
     start = plan is not None and (
-        out.action == "start" or go_ahead(text) or questions_asked(th) >= MAX_QUESTIONS
+        out.action == "start" or ok or questions_asked(th) >= MAX_QUESTIONS
     )
     if not start:
         kind = "plan" if new_plan else "question"
@@ -359,19 +369,43 @@ async def turn(
             plan=plan,
             status="talking",
         )
-    if not go_ahead(text):
+    if not now(text):
         clash = await svc.preview_conflicts(plan.title, plan.plan)
-        if clash:
+        if clash and not go_ahead(text):
             lines = "\n".join(f"- {x.id} {x.title}: {x.reason}" for x in clash)
             return await svc.chat_add(
                 tid,
                 "assistant",
                 f"잠깐요. 아직 진행 중인 요청과 충돌할 수 있어요.\n{lines}\n"
-                "그래도 진행하려면 '진행해'라고 보내 주세요. 앞 요청이 끝난 뒤에 해도 돼요.",
+                "'진행해'라고 보내 주시면 앞 요청이 끝난 뒤에 시작할게요. "
+                "기다리지 않고 같이 하려면 '지금 진행'이라고 보내 주세요.",
                 kind="question",
                 plan=plan,
                 status="talking",
             )
+        if clash:
+            # 앞 요청이 끝나면(머지·실패·중단) 그때 최신 코드로 시작한다 (resume_waiting)
+            ids = [x.id for x in clash]
+            return await svc.chat_add(
+                tid,
+                "assistant",
+                f"{', '.join(ids)}가 끝나면 이 계획으로 작업을 시작할게요. "
+                "기다리지 않으려면 '지금 진행'이라고 보내 주세요.",
+                kind="waiting",
+                plan=plan,
+                status="waiting",
+                connection=cid,
+                waiting_for=ids,
+            )
+    return await _start(svc, tid, plan, cid, reply)
+
+
+async def _start(
+    svc: PlanningService, tid: str, plan: ChatPlan, cid: str, reply: str = ""
+) -> ChatThread:
+    """계획으로 코딩 작업을 띄우고 대화에 남긴다."""
+    from planning_agent.domain.service import ActionError, GateRefused
+
     try:
         result = await svc.create_dev_task(
             title=plan.title,
@@ -409,7 +443,26 @@ async def turn(
         status="started",
         connection=cid,
         title=plan.title[:60],
+        waiting_for=[],
     )
+
+
+async def resume_waiting(svc: PlanningService) -> None:
+    """기다리던 요청이 모두 끝난 대화를 마지막 계획으로 시작한다 (상태가 바뀔 때마다 부른다)."""
+    from planning_agent import related
+
+    for th in [c for c in svc.state.chats if c.status == "waiting"]:
+        if not all(related.settled(svc.state, rid) for rid in th.waiting_for):
+            continue
+        plan = last_plan(th)
+        if plan is None or th.connection is None:
+            await svc.chat_add(
+                th.id, "assistant", "기다리던 계획을 찾지 못했어요. 다시 말씀해 주세요.",
+                kind="error", status="talking", waiting_for=[],
+            )  # fmt: skip
+            continue
+        done = ", ".join(th.waiting_for)
+        await _start(svc, th.id, plan, th.connection, f"{done}가 끝나서 시작할게요.")
 
 
 def coder_running(status: str) -> bool:

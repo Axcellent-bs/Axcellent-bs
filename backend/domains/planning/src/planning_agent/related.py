@@ -201,14 +201,21 @@ class Relater:
 FINISHED = ("완료", "기각", "중복 연결")
 
 
+STOPPED = ("merged", "failed", "canceled")  # 코딩 작업이 더 바뀌지 않는 상태
+
+
+def settled(state: State, req_id: str) -> bool:
+    """요청이 끝났나: 완료·기각·중복 연결, 또는 그 기획서의 코딩 작업이 모두 머지·실패·중단."""
+    req = next((r for r in state.requests if r.id == req_id), None)
+    if req is None or req.state in FINISHED:
+        return True
+    tasks = [t for t in state.tasks if t.spec and t.spec == req.spec]
+    return bool(tasks) and all(t.coding and t.coding.status in STOPPED for t in tasks)
+
+
 def open_conflicts(state: State, req: Request) -> list[RelatedItem]:
     """이 요청의 충돌 가능 중 상대 요청이 아직 안 끝난 것 (끝났으면 이어서 바꾼 것과 같다)."""
-    states = {r.id: r.state for r in state.requests}
-    return [
-        x
-        for x in req.related
-        if x.relation == "conflict" and states.get(x.id) not in (*FINISHED, None)
-    ]
+    return [x for x in req.related if x.relation == "conflict" and not settled(state, x.id)]
 
 
 def path_overlaps(state: State, pr: PR) -> list[RelatedItem]:
