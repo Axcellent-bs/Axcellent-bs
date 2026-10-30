@@ -28,6 +28,11 @@ def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def _masked_subject(subject: str) -> str | None:
+    shown, level, _ = abuse_rules.assess(subject)
+    return shown if level != "none" else None
+
+
 def _preview(text: str) -> str:
     return text if len(text) <= 60 else text[:59] + "…"
 
@@ -89,6 +94,7 @@ class InquiryStore:
             user_id=user_id,
             customer_name=customer_name,
             subject=subject,
+            subject_display=_masked_subject(subject),
             order_id=order_id,
             order_no=order_no,
             status="open",
@@ -139,6 +145,25 @@ class InquiryStore:
                 data=data or {},
             )
         )
+        return conversation
+
+    def apply_softening(
+        self, inquiry_id: int, message_id: int, softened: str, level: str, kinds: list[str]
+    ) -> Conversation | None:
+        """2단계: 코드가 검사한 순화문과 단계(규칙·모델 중 높은 쪽)를 붙인다. 원문은 그대로."""
+        conversation = self._conversations.get(inquiry_id)
+        message = (
+            next((m for m in conversation.messages if m.id == message_id), None)
+            if conversation
+            else None
+        )
+        if conversation is None or message is None or message.role != "customer":
+            return None
+        message.softened_text = softened
+        message.abuse_level = level  # type: ignore[assignment]
+        message.abuse_kinds = kinds
+        if conversation.messages[-1].id == message_id:
+            conversation.preview = _preview(softened)
         return conversation
 
     def set_feedback(self, inquiry_id: int, feedback: Feedback) -> Conversation:

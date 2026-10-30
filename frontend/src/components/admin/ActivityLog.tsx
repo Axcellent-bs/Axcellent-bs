@@ -44,7 +44,12 @@ function detailOf(e: ActivityEntry): string {
       );
     }
     case "abusive_message":
-      return parts(ABUSE_KO[str(d.level) ?? ""], "원문은 보존돼 있고 '원문 보기'로 열 수 있음");
+      return parts(
+        ABUSE_KO[str(d.level) ?? ""],
+        d.softened === true && "AI가 요청만 남겨 순화함",
+        Array.isArray(d.kinds) && d.kinds.includes("llm") && "규칙이 놓친 표현을 AI가 찾음",
+        "원문은 보존돼 있고 '원문 보기'로 열 수 있음",
+      );
     case "reply_sent":
       return parts(HOW_KO[str(d.how) ?? ""], str(d.draft_style) && `${STYLE_KO[str(d.draft_style)!] ?? str(d.draft_style)} 초안`);
     case "draft_rejected":

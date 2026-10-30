@@ -309,6 +309,10 @@ class Message(BaseModel):
     id: int
     role: Literal["customer", "agent"]
     text: str
+    display_text: str | None = None  # 욕설·모욕·위협을 가린 글 (원문 text는 그대로)
+    abuse_level: Literal["none", "profanity", "insult", "threat"] = "none"
+    abuse_kinds: list[str] = Field(default_factory=list)
+    softened_text: str | None = None  # LLM이 요청만 남겨 옮긴 글 (코드가 검사한 것만)
     analysis: Analysis | None = None
     created_at: str
 
@@ -329,6 +333,7 @@ class ConversationListItem(BaseModel):
     id: int
     customer_name: str
     subject: str
+    subject_display: str | None = None  # 제목에 욕설이 있으면 가린 제목
     category: str | None = None
     sentiment: str | None = None
     urgency: Urgency | None = None

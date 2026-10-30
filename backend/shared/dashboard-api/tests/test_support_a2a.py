@@ -261,3 +261,29 @@ def test_skills_that_read_inquiries_are_served_by_the_inquiry_service() -> None:
         assert route_target("support", skill) == "inquiry"
         assert skill in BY_ID["inquiry"].skills
         assert skill not in BY_ID["claims"].skills
+
+
+def test_abuse_fields_reach_the_console(client: TestClient, fake: Fake) -> None:
+    """욕설을 가린 글·순화문·가린 제목은 상담 콘솔 응답에서 빠지지 않는다."""
+    message = {
+        "id": 1,
+        "role": "customer",
+        "text": "씨발 환불해 주세요",
+        "display_text": "[비속어] 환불해 주세요",
+        "abuse_level": "profanity",
+        "abuse_kinds": ["profanity"],
+        "softened_text": "환불을 요청합니다.",
+        "created_at": "2026-10-22T00:00:00Z",
+    }
+    fake.output = {**ITEM, "subject_display": "[비속어] 문의", "messages": [message]}
+    one = client.get(BASE + "/conversations/7").json()["data"]
+    assert one["subject_display"] == "[비속어] 문의"
+    got = one["messages"][0]
+    assert got["text"] == "씨발 환불해 주세요"
+    assert got["display_text"] == "[비속어] 환불해 주세요"
+    assert (got["abuse_level"], got["abuse_kinds"]) == ("profanity", ["profanity"])
+    assert got["softened_text"] == "환불을 요청합니다."
+
+    fake.output = {"items": [{**ITEM, "subject_display": "[비속어] 문의"}]}
+    listed = client.get(BASE + "/conversations").json()["data"][0]
+    assert listed["subject_display"] == "[비속어] 문의"

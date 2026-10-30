@@ -52,7 +52,7 @@ function Console() {
     setConv(c);
     setList((prev) => {
       const item: ConversationListItem = {
-        id: c.id, customer_name: c.customer_name, subject: c.subject, category: c.category, sentiment: c.sentiment,
+        id: c.id, customer_name: c.customer_name, subject: c.subject, subject_display: c.subject_display, category: c.category, sentiment: c.sentiment,
         urgency: c.urgency, status: c.status, order_id: c.order_id, updated_at: c.updated_at, preview: c.preview, awaiting_reply: c.awaiting_reply,
       };
       return prev.some((i) => i.id === c.id) ? prev.map((i) => (i.id === c.id ? item : i)) : [item, ...prev];
@@ -77,7 +77,7 @@ function Console() {
               <div className="flex shrink-0 items-center gap-3 border-b border-ink-100 bg-surface px-6 py-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2"><h1 className="truncate text-base font-semibold">{conv.customer_name}</h1><span className="chip bg-ink-100 text-ink-500">{STATUS_KO[conv.status]}</span></div>
-                  <p className="truncate text-xs text-ink-500">{conv.subject}{conv.order_no && ` · 주문 ${conv.order_no}`} · 문의 #{conv.id}</p>
+                  <p className="truncate text-xs text-ink-500">{conv.subject_display ?? conv.subject}{conv.order_no && ` · 주문 ${conv.order_no}`} · 문의 #{conv.id}</p>
                 </div>
                 <div className="ml-auto flex gap-2">
                   <button className="btn-ghost whitespace-nowrap text-xs" disabled={busy !== null} onClick={() => run("summary", async () => { await api.admin.summary(conv.id); await reload(conv.id); setShowSummary(true); })}>{busy === "summary" ? "정리 중…" : "상담 기록 정리"}</button>
