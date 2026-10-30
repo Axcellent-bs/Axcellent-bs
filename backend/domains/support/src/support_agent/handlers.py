@@ -814,8 +814,13 @@ def customer_message(message: dict[str, Any]) -> dict[str, Any]:
 
 
 def customer_inquiry(data: dict[str, Any]) -> dict[str, Any]:
-    """문의 한 건의 고객용 모양: 제목·상태·주문·메시지 글만 (분석·초안·분류·고객 이름 제외)."""
+    """문의 한 건의 고객용 모양: 제목·상태·주문·메시지 글과 평가 여부만(분석·초안·분류·이름 제외).
+
+    `rated`는 고객이 이미 해결 결과를 평가했는지다. 평가 내용(별점·글·공개 여부)은 싣지 않는다.
+    """
     view = {k: data.get(k) for k in ("id", "subject", "status", "order_id", "updated_at")}
+    stored = STORE.get(data["id"]) if isinstance(data.get("id"), int) else None
+    view["rated"] = stored is not None and stored.feedback is not None
     if "messages" in data:
         view["messages"] = [customer_message(m) for m in data["messages"]]
     else:
