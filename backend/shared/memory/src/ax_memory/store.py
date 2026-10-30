@@ -17,7 +17,7 @@ from ax_contracts.schemas.common import TENANT_ID_DEFAULT
 from ax_contracts.schemas.ids import IdPrefix
 from ax_contracts.schemas.record import Card, CardDraft
 
-CardKind = Literal["incident", "decision", "case", "notice", "policy", "fraud"]
+CardKind = Literal["incident", "decision", "case", "notice", "policy", "fraud", "request"]
 CardStatus = Literal["active", "superseded", "retired"]
 Confidence = Literal["low", "mid", "high"]
 

@@ -134,7 +134,12 @@ async def list_cards(svc: Services, request: AgentRequest) -> AgentResult:
     if isinstance(params, AgentResult):
         return params
     found = await svc.memory.list_cards(area=params.area, states=["active"])
-    cards = [c for c in found if params.context_id is None or c.context_id == params.context_id]
+    cards = [
+        c
+        for c in found
+        if c.kind != "request"  # 기획·개발 요청 카드는 결정 카드가 아니다
+        and (params.context_id is None or c.context_id == params.context_id)
+    ]
     cards.sort(key=lambda c: (c.created_at, c.card_id), reverse=True)
     cards = cards[: params.limit]
     output = ListCardsOutput(cards=cards, collected_at=svc.clock())
