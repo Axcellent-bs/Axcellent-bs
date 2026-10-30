@@ -1588,15 +1588,34 @@ class PlanningService:
             pol: AutoPolicy = s.auto_policy
             label = ", ".join(p.id for p in auto_prs)
             ids = {p.id for p in auto_prs}
-            if pol.level > 0:
-                lv = pol.level
-                text = (
-                    f"자동 머지 {label}가 장애에 연결 → 자동 처리 범위 L{lv} → L{lv - 1} 축소"
-                    " (줄이는 쪽은 승인 없이)"
+            lv = pol.level
+            text = (
+                f"자동 머지 {label}가 장애에 연결 → 자동 처리 범위 L{lv} → L{lv - 1} 축소"
+                " (줄이는 쪽은 승인 없이)"
+            )
+            try:
+                if lv > 0:
+                    await self._execute(
+                        "auto_policy_update", ctx, f"L{lv}->L{lv - 1}", text, {"to": lv - 1}
+                    )
+            except GateRefused as exc:
+                # 범위 축소가 관문에서 막혀도 사건 연결(장애 표시)은 한다.
+                # 축소만 사람에게 남긴다
+                lv = 0
+                demote_acts.append(
+                    self._act(
+                        at,
+                        ctx,
+                        "planning",
+                        "safety",
+                        "auto_policy.update_held",
+                        "execute",
+                        f"자동 처리 범위 축소 보류 ({exc.decision.status}) → 사람이 범위를 확인",
+                        "B",
+                        seq,
+                    )
                 )
-                await self._execute(
-                    "auto_policy_update", ctx, f"L{lv}->L{lv - 1}", text, {"to": lv - 1}
-                )
+            if lv > 0:
                 pol.level = lv - 1
                 pol.log.append(
                     AutoLog(
@@ -2450,9 +2469,7 @@ class PlanningService:
             t = self.clock()
             act = f"{task_id} 수정 지시: {text[:80]}"
             n = sum(1 for g in self.gate_calls if g.action == "dev_task_revise") + 1
-            await self._execute(
-                "dev_task_revise", ctx, f"{task_id}:{n}", act, {"chars": len(text)}
-            )
+            await self._execute("dev_task_revise", ctx, f"{task_id}:{n}", act, {"chars": len(text)})
             x.coding.status = "queued"
             x.coding.error = None
             x.coding.instruction = text

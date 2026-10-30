@@ -279,3 +279,39 @@ def test_related_prs_include_merge_just_before_symptoms() -> None:
         )
     )
     assert pr in [p for p, _, _ in found]
+
+
+def test_link_marks_incident_even_if_policy_demotion_is_held() -> None:
+    """자동 머지 PR이 사건에 연결되면 범위를 줄이는데, 그 관문(auto_policy_update)이 막혀도
+    장애 표시는 남아야 한다 (안 그러면 교차검증이 장애 경로를 모른다)."""
+
+    class HoldPolicy(Gate):
+        async def __call__(self, action, params, meta, evidence) -> ExecuteDecision:
+            self.calls.append((action, params))
+            if action == "auto_policy_update":
+                return ExecuteDecision(
+                    execution_id="exe_hold",
+                    grade="C",
+                    status="held",
+                    hold_reason="unregistered_action",
+                    review_id="rev_1",
+                )
+            return ExecuteDecision(execution_id="exe_ok", grade="A", status="executed")
+
+    svc = _service(None, HoldPolicy())
+    svc.state.auto_policy.level = 1
+    pr28 = next(p for p in svc.state.prs if p.id == "PR #28")
+    pr28.auto = True
+    out = run(
+        svc.link_incident(
+            context_id="ctx_inc_9",
+            requester="orchestrator",
+            incident_context_id="ctx_inc_9",
+            pr_numbers=[pr28.number],
+            follow_up_title=None,
+            idempotency_key="k-1",
+        )
+    )
+    assert out.output["linked_paras"]
+    assert svc.state.auto_policy.level == 1  # 축소는 보류
+    assert any(a.point == "auto_policy.update_held" for a in svc.state.activity)
