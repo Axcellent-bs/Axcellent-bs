@@ -70,7 +70,7 @@ export default function InfraHosts() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-sm text-ink-500">{asAdmin ? '시스템 관리' : 'DejaFix'}</p>
-          <h1 className="text-2xl font-semibold">{asAdmin ? '사내 PC 연결' : 'PC·서버 연결'}</h1>
+          <h1 className="text-2xl font-semibold">PC·서버 연결</h1>
           <p className="mt-1 text-sm text-ink-500">회사 PC와 서버를 사내 IP로 연결하고 연결 상태를 챙깁니다.</p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
