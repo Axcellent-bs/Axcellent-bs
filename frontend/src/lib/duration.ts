@@ -36,7 +36,7 @@ export interface EventTimes {
 
 export const secondsBetween = (from?: string | null, to?: string | null): number | null => {
   if (!from || !to) return null;
-  const sec = Math.round((Date.parse(to) - Date.parse(from)) / 1000);
+  const sec = Math.floor(Date.parse(to) / 1000) - Math.floor(Date.parse(from) / 1000);
   return Number.isFinite(sec) && sec >= 0 ? sec : null;
 };
 

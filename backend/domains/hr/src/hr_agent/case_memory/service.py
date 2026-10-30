@@ -52,16 +52,17 @@ OUTCOME_KO = {"resolved": "해결됨", "workaround": "임시 조치", "unresolve
 
 
 def resolution_block(resolution: CaseResolution) -> str:
+    # 시간은 이벤트 타임라인(감지~정상 복귀)이 맡는다. 값이 있을 때만 적고, 없다고 쓰지 않는다
     minutes = (
-        f"{resolution.minutes_to_resolve}분"
+        f"\n소요 시간: {resolution.minutes_to_resolve}분"
         if resolution.minutes_to_resolve is not None
-        else UNKNOWN
+        else ""
     )
     return (
         f"{BLOCK}\n결과: {OUTCOME_KO[resolution.outcome]}\n"
         f"원인: {resolution.root_cause or UNKNOWN}\n"
-        f"조치: {resolution.action or UNKNOWN}\n"
-        f"소요 시간: {minutes}"
+        f"조치: {resolution.action or UNKNOWN}"
+        f"{minutes}"
     )
 
 

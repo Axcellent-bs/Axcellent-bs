@@ -54,3 +54,18 @@ def test_rollback_that_did_not_finish_is_not_an_action() -> None:
     inc = incident(rollback="skipped")
     inc.outputs["rollback"] = {"service": "shop-api"}
     assert resolution_draft(inc) is None
+
+
+def test_utc_times_in_the_cause_are_shown_in_korean_time() -> None:
+    inc = incident()
+    inc.outputs["root_cause"] = {
+        "hypotheses": [
+            {
+                "confidence": "mid",
+                "explanation": "이상이 2026-10-30T06:17:54Z에 시작되었고 직전에 배포됨",
+            }
+        ]
+    }
+    draft = resolution_draft(inc)
+    assert draft is not None and "10월 30일 15:17:54(한국 시간)" in draft["root_cause"]
+    assert "T06:" not in draft["root_cause"]

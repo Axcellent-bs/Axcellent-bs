@@ -6,12 +6,28 @@
 
 from __future__ import annotations
 
+import re
+from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ax_orchestrator.models import Incident
 
 _RANK = {"high": 0, "mid": 1, "low": 2}
+_KST = timezone(timedelta(hours=9))
+_ISO_UTC = re.compile(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z")
+
+
+def _kst(text: str) -> str:
+    """원인 후보 문장 속 UTC 시각(2026-10-30T06:17:54Z)을 한국 시간으로 바꿔 읽기 쉽게 한다."""
+
+    def one(m: re.Match[str]) -> str:
+        at = datetime(*(int(g) for g in m.groups()), tzinfo=UTC).astimezone(_KST)
+        return f"{at.month}월 {at.day}일 {at:%H:%M:%S}(한국 시간)"
+
+    return _ISO_UTC.sub(one, text)
+
+
 _CONFIDENCE_KO = {"high": "높음", "mid": "보통", "low": "낮음"}
 
 
@@ -21,7 +37,7 @@ def resolution_draft(inc: Incident) -> dict[str, Any] | None:
     hypotheses = [h for h in found.get("hypotheses") or [] if h.get("explanation")]
     if hypotheses:
         top = min(hypotheses, key=lambda h: _RANK.get(str(h.get("confidence")), 3))
-        root_cause = str(top["explanation"])
+        root_cause = _kst(str(top["explanation"]))
         level = _CONFIDENCE_KO.get(str(top.get("confidence")), "알 수 없음")
         basis.append(f"원인은 데이터분석 AI의 원인 후보 중 확신이 가장 높은 것(확신도 {level})")
     action = None
