@@ -92,12 +92,20 @@ JUDGING_PHRASES = (
 )
 
 
+# 계획 점검이 비교하는 카드 종류. 기획·개발 요청(request) 카드는 결정이 아니라서 섞지 않는다
+CHECK_KINDS = ("decision", "policy")
+
+
 async def _dense_hits(svc: Services, draft_text: str, area: str) -> list[CardHit] | None:
     """임베딩으로 관련 카드를 찾는다. 쓸 수 없거나 실패하면 None이고 호출한 쪽이 Dice로 대체한다."""
     if svc.dense is None:
         return None
     try:
-        cards = await svc.memory.list_cards(area=area, states=["active", "candidate"])
+        cards = [
+            c
+            for c in await svc.memory.list_cards(area=area, states=["active", "candidate"])
+            if c.kind in CHECK_KINDS
+        ]
         found = await svc.dense.search(
             draft_text, cards, k=5, min_cosine=svc.settings.dense_min_cosine
         )
@@ -169,7 +177,11 @@ async def check_plan(svc: Services, request: AgentRequest) -> AgentResult:
         match_score, method = svc.settings.dense_match_cosine, "dense"
     else:
         found = await svc.memory.search_cards(
-            draft_text, area=draft.area, states=["active", "candidate"], limit=500
+            draft_text,
+            area=draft.area,
+            kinds=list(CHECK_KINDS),
+            states=["active", "candidate"],
+            limit=500,
         )
         rescored = [CardHit(h.card, _score(h.card, draft_text)) for h in found]
         hits = sorted(

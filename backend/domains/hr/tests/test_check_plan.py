@@ -188,3 +188,29 @@ def test_check_plan_changes_no_state(svc, client) -> None:
     before = (len(svc.gate.calls), len(svc.store.all("SELECT * FROM mock_cards")))
     _check(client, "결제 서버 캐시 도입", "서버 캐시 도입")
     assert (len(svc.gate.calls), len(svc.store.all("SELECT * FROM mock_cards"))) == before
+
+
+async def _write_request_card(svc, title: str, area: str = "payment") -> str:
+    from ax_contracts.schemas import Card
+
+    card = Card(
+        card_id="card_req_0001",
+        kind="request",
+        context_id="ctx_req_0001",
+        title=title,
+        body=title,
+        author="planning",
+        confidence="high",
+        created_at=datetime.now(UTC),
+        extra={"area": area},
+    )
+    return await svc.memory.write_card(card)
+
+
+@pytest.mark.asyncio
+async def test_request_cards_are_not_compared(svc, client) -> None:
+    await _write_request_card(svc, "결제 서버 캐시 도입 요청")
+    out = CheckPlanOutput.model_validate(
+        _check(client, "결제 서버 캐시 도입", "서버 캐시를 도입한다")["output"]
+    )
+    assert out.no_related_cards is True and out.similar_cards == []
