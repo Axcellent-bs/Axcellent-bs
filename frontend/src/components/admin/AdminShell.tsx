@@ -1,9 +1,10 @@
-import { Link } from "@/lib/nav";
+import { Link, useRouter } from "@/lib/nav";
 import { usePathname } from "@/lib/nav";
 import { useState, type ComponentType, type ReactNode } from "react";
 import { AccountSwitcher } from "@/demo/AccountSwitcher";
-import { canOpen, homeOf, servicesOf, useSession } from "@/demo/session";
+import { canOpen, homeOf, servicesOf, supportViewer, useSession, type Account } from "@/demo/session";
 import { useCompany } from "@/demo/company";
+import { endSupport, supportActive, useSupport } from "@/demo/support";
 import { AGENTS, activeChild, matchPath, useEnabledServices, type Service, type SubItem } from "@/demo/services";
 import { useOpenHandoffCount } from "@/lib/handoffs";
 import { IconAgents, IconBell, IconChart, IconGear, IconInbox, IconOffice, IconSearch } from "../icons";
@@ -80,10 +81,21 @@ function useNav(): NavItem[] {
   const { account } = useSession();
   const enabled = useEnabledServices();
   const company = useCompany();
+  const support = useSupport();
   if (!account) return [];
-  if (account.operator) return CONTROL_NAV;
+  if (account.operator) {
+    // 지원 모드: 관제 센터 아래에 들어간 고객사의 관리자 메뉴를 붙인다
+    if (!supportActive(support, company)) return CONTROL_NAV;
+    const [first, ...more] = customerNav(supportViewer(account), enabled);
+    return first ? [...CONTROL_NAV, { ...first, divider: true }, ...more] : CONTROL_NAV;
+  }
   // 회사 연결 전에는 회사 연결만 보인다
   if (!company) return account.admin ? [systemNav(SYSTEM_MENU.slice(0, 1))] : [];
+  return customerNav(account, enabled);
+}
+
+/** 회사에 연결된 고객사 계정의 메뉴 */
+function customerNav(account: Account, enabled: string[]): NavItem[] {
   const services = servicesOf(account, enabled);
   const agents = agentNav(services);
   const others = services.filter((s) => !s.agent && !(account.admin && s.id === "hosts"));
@@ -111,6 +123,12 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const nav = baseNav.map((n) => (n.href === HANDOFFS_HREF ? { ...n, badge: openHandoffs } : n));
   const home = account ? homeOf(account) : "/";
   const company = useCompany();
+  const router = useRouter();
+  // 지원 모드: 운영자가 고객사 화면을 보는 동안 위에 띠를 띄우고, 고객사 화면 안의 버튼·입력은 끈다(보기 전용)
+  const support = useSupport();
+  const supporting = !!account?.operator && supportActive(support, company);
+  const viewOnly = supporting && !matchPath("/control", path);
+  const leaveSupport = () => { endSupport(); router.push("/control/companies"); };
   const [collapsed, setCollapsed] = useState(readSide);
   const toggle = () => setCollapsed((v) => {
     try { localStorage.setItem(SIDE_KEY, v ? "open" : "collapsed"); } catch { /* 저장이 막혀도 화면은 동작한다 */ }
@@ -199,7 +217,17 @@ export function AdminShell({ children }: { children: ReactNode }) {
             <AccountSwitcher />
           </div>
         </header>
-        <main className="relative min-h-0 flex-1 overflow-y-auto pt-6">{children}</main>
+        {supporting && (
+          <div className="flex shrink-0 flex-wrap items-center gap-3 bg-brand-600 px-8 py-2 text-sm !text-white" role="status">
+            <span className="font-semibold">AXcellent 운영자로 {company?.name} 보는 중</span>
+            <span className="chip bg-white/15 !text-white">보기 전용</span>
+            <button type="button" onClick={leaveSupport} className="ml-auto bg-white px-3 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50">나가기</button>
+          </div>
+        )}
+        <main className="relative min-h-0 flex-1 overflow-y-auto pt-6">
+          {/* 보기 전용: fieldset disabled가 안의 버튼·입력을 모두 끈다. 링크(화면 이동)는 그대로 된다 */}
+          {viewOnly ? <fieldset disabled className="contents">{children}</fieldset> : children}
+        </main>
       </div>
     </div>
   );

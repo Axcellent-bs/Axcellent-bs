@@ -6,6 +6,8 @@ import { COMPANIES, COST_BY_SERVICE, COST_TREND, INCIDENTS, LATEST_VERSION, QUAL
 import KeyIssue from './KeyIssue'
 import ServiceOps from './ServiceOps'
 import { useCompany, useKeys } from '@/demo/company'
+import { startSupport } from '@/demo/support'
+import { useRouter } from '@/lib/nav'
 
 const HEALTH: Record<Health, { label: string; tone: string; dot: string }> = {
   ok: { label: '정상', tone: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-700' },
@@ -163,6 +165,13 @@ function Companies() {
     .flatMap((k) => (k.status === 'connected' && k.company && !COMPANIES.some((c) => c.id === k.company!.id) ? [k.company] : []))
     .map((company) => ({ ...COMPANIES[4], ...company, version: LATEST_VERSION, lastSeenMin: 0, health: 'ok' as Health, pcs: 1, services: 4, incidentsToday: 0 }))
   const rows = [...fresh, ...COMPANIES]
+  const router = useRouter()
+  // 지원 모드로 들어가기: 이 데모에 실제로 연결된 회사만 된다(나머지 행은 예시 데이터)
+  const enter = () => {
+    if (!current) return
+    startSupport(current)
+    router.push('/system/services')
+  }
   return (
     <Page title="고객사" desc="회사별 설치 버전, 켠 서비스, 마지막 연결 시각이에요.">
       <p className="bg-brand-50 px-4 py-3 text-sm text-brand-700">
@@ -179,6 +188,7 @@ function Companies() {
               <th className="px-3 py-3 text-right font-medium">PC</th>
               <th className="px-3 py-3 text-right font-medium">켠 서비스</th>
               <th className="px-3 py-3 text-right font-medium">오늘 사건</th>
+              <th className="px-5 py-3"><span className="sr-only">지원 모드</span></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-ink-100">
@@ -197,6 +207,11 @@ function Companies() {
                 <td className="px-3 py-3 text-right tabular-nums">{c.pcs}</td>
                 <td className="px-3 py-3 text-right tabular-nums">{c.services} / 13</td>
                 <td className="px-3 py-3 text-right tabular-nums">{c.incidentsToday}</td>
+                <td className="px-5 py-3 text-right">
+                  {current?.id === c.id && (
+                    <button type="button" className="btn-primary px-3 py-1 text-xs" onClick={enter} title="보기 전용으로 이 고객사 화면에 들어가요">들어가기</button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

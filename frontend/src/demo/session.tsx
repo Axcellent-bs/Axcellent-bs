@@ -1,12 +1,13 @@
 // 데모 로그인 세션. 실제 인증이 아니다: 데모 계정 + 회원가입한 계정을 브라우저에만 기억한다.
 // 회원 역할은 셋이다.
-// - 운영자: AXcellent 운영팀. 관제 센터(/control)만 연다
+// - 운영자: AXcellent 운영팀. 관제 센터(/control)만 연다. 지원 모드(support.ts)로 들어가면 고객사 화면을 보기 전용으로 연다
 // - 관리자(회사 계정): 고객사 시스템 관리자. 운영자에게 받은 키로 가입하고, 시스템 관리 메뉴와 회사가 켠 서비스를 연다
 // - 일반회원: 고객사 직원. 관리자가 계정(이메일)이나 PC IP를 회사에 연결해야 들어간다(members.ts)
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
 import { SERVICES, SHARED_PATHS, getEnabled, matchPath } from './services'
 import { getCompany } from './company'
 import { memberLinked, useProfiles, withProfile } from './members'
+import { endSupport, getSupport, supportActive } from './support'
 
 export type Account = {
   id: string
@@ -18,7 +19,7 @@ export type Account = {
   services: string[]
   /** 관리자(회사 계정): 서비스 고르기·회원 연결·회사 서비스 연결을 연다 */
   admin?: boolean
-  /** 운영자(AXcellent 운영팀): 관제 센터(/control)만 연다. 고객사 화면에는 들어가지 않는다 */
+  /** 운영자(AXcellent 운영팀): 관제 센터(/control)만 연다. 고객사 화면은 지원 모드에서 보기 전용으로만 연다 */
   operator?: boolean
   /** 부서. 받은 요청이 이 부서로 온다 */
   dept?: string
@@ -98,8 +99,16 @@ export const servicesOf = (account: Account, enabled = getEnabled()) =>
 export const assignedOf = (account: Account, enabled = getEnabled()) =>
   SERVICES.filter((s) => account.services.includes(s.id) && enabled.includes(s.id))
 
-export function canOpen(account: Account, path: string, enabled = getEnabled(), connected = !!getCompany()) {
-  if (account.operator) return matchPath('/control', path)
+/** 운영자가 지원 모드에서 고객사 화면을 볼 때의 모양: 그 회사 관리자와 같은 화면을 연다(바꾸는 버튼은 AdminShell이 끈다) */
+export const supportViewer = (account: Account): Account => ({ ...account, operator: false, admin: true, services: SERVICES.map((s) => s.id) })
+/** 이 운영자가 지금 지원 모드로 고객사에 들어가 있나 */
+export const isSupporting = (account: Account) => !!account.operator && supportActive(getSupport(), getCompany())
+
+export function canOpen(account: Account, path: string, enabled = getEnabled(), connected = !!getCompany()): boolean {
+  if (account.operator) {
+    if (matchPath('/control', path)) return true
+    return isSupporting(account) && canOpen(supportViewer(account), path, enabled, connected)
+  }
   // 회사 연결 전: 관리자는 AXcellent 연결만, 일반회원은 아무 화면도 못 연다
   if (!connected) return !!account.admin && matchPath('/system/connect', path)
   // 일반회원은 관리자가 계정·PC IP를 회사에 연결해야 연다
@@ -159,6 +168,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(() => {
     setAccount(null)
     save(null)
+    endSupport()
   }, [])
   // 관리자가 부서·확인 권한을 바꾸면 로그인한 계정에도 바로 보인다
   const profiles = useProfiles()
