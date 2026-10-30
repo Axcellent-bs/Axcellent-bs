@@ -1,2 +1,4 @@
 # 고객사 실제 조직도. 예시는 org.example.yaml
 org.yaml
+# 회사 설정 폴더의 조직도는 커밋한다 (비밀값 없음, README "새 회사를 붙일 때"). 위 규칙은 config/org.yaml 덮어쓰기용
+!tenants/*/org.yaml
