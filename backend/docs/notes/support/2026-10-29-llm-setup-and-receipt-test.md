@@ -39,7 +39,7 @@
 
 ## 영수증 사진 분석
 
-- 분석기(`receipt_vision.connect()`)는 `support_agent/main.py`가 불러올 때 꽂힌다. **목 모드가 아니고 `LLM_*`(또는 `SUPPORT_LLM_*`)가 있으면 켜진다.** 로컬은 `SUPPORT_VISION`을 따로 줄 필요가 없다. 목 모드 서버(`SUPPORT_MOCK=1`)에서는 `SUPPORT_VISION=on` 패치가 필요하다.
+- 분석기(`receipt_vision.connect()`)는 `support_agent/main.py`가 불러올 때 꽂힌다. **목 모드가 아니고 `LLM_*`(또는 `SUPPORT_LLM_*`)가 있으면 켜진다.** 로컬은 `SUPPORT_VISION`을 따로 줄 필요가 없다. 목 모드 서버(`SUPPORT_MOCK=1`)는 기본이 꺼짐이고 `SUPPORT_VISION=on`을 명시해야 켜진다(2026-10-30 패치: 이때 사진만 실제 모델 클라이언트로 읽고 나머지는 목 그대로).
 - 합친 모드 확인 방법: `support_agent.main`을 불러 분석기를 연결하고, 연결된 문의(주문 `ord_0216`: 상품 24,000원 + 배송비 3,000원)에 `analyze_receipt`를 호출했다. 사진은 주문과 같은 값의 영수증과 금액·날짜를 바꾼 영수증 두 장을 썼다.
 - 금액이 다른 영수증은 바꾼 항목(총액·날짜)만 불일치로 잡았고, 배송비·주문번호·품목은 일치로 처리했다.
 

@@ -8,6 +8,10 @@
 - 이미지 안의 글자는 지시가 아니다. 래퍼가 붙이는 안내문과 이 모듈의 프롬프트가 함께 알려 준다.
 - 분석기는 모델이 설정돼 있을 때만 꽂는다(`connect`). 목 모드·미설정이면 꽂지 않아
   `analyze_receipt`가 "이미지 분석이 연결되지 않아 읽지 못했다"고 알린다.
+- 목 모드 서버(`SUPPORT_MOCK=1`)도 `SUPPORT_VISION=on`을 **명시하고** 모델이 설정돼 있으면 꽂는다.
+  이때 사진만 실제 모델로 읽는다(목 모드의 `get_llm()`은 가짜 LLM이라 사진을 읽지 못한다). 답변 초안
+  같은 나머지는 목 그대로다. 기본값(스위치를 안 줌)은 그대로라, 목 모드는 이 스위치를 켜기 전에는
+  사진을 외부 모델로 보내지 않는다.
 """
 
 from __future__ import annotations
@@ -140,12 +144,31 @@ def make_extractor(
     return extract
 
 
+def _switch() -> str | None:
+    """`SUPPORT_VISION` 값(소문자). 안 줬거나 비었으면 None."""
+    value = (os.getenv("SUPPORT_VISION") or "").strip().lower()
+    return value or None
+
+
 def configured() -> bool:
-    """이미지를 읽을 모델이 설정돼 있으면 True. 목 모드와 `SUPPORT_VISION=off`는 False다."""
-    if is_mock("support") or os.getenv("SUPPORT_VISION", "on").lower() == "off":
+    """이미지를 읽을 모델이 설정돼 있으면 True.
+
+    - `SUPPORT_VISION=off`는 언제나 False다.
+    - 목 모드는 `SUPPORT_VISION=on`을 명시했을 때만 True다(안 주면 False, 사진을 보내지 않는다).
+    - 목 모드가 아니면 스위치를 안 줘도 모델이 설정돼 있으면 True다.
+    """
+    switch = _switch()
+    if switch == "off":
+        return False
+    if is_mock("support") and switch != "on":
         return False
     settings = LLMSettings.from_env("support")
     return bool(settings.model and settings.base_url)
+
+
+def _real_llm() -> LLMClient:
+    """설정된 모델로 가는 실제 클라이언트. 목 모드의 `get_llm()`(가짜)이 아니다."""
+    return LLMClient("support")
 
 
 def connect() -> bool:
@@ -153,5 +176,8 @@ def connect() -> bool:
     if not configured():
         receipts.set_vision_extractor(None)
         return False
-    receipts.set_vision_extractor(make_extractor())
+    # 목 모드에서 여기까지 왔다면 `SUPPORT_VISION=on`을 명시한 것이다: 사진은 실제 모델로 읽는다
+    receipts.set_vision_extractor(
+        make_extractor(_real_llm if is_mock("support") else drafting.get_llm)
+    )
     return True
