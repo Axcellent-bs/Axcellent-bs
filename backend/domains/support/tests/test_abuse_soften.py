@@ -119,14 +119,16 @@ def test_a_flagged_message_gets_a_softened_text(monkeypatch: pytest.MonkeyPatch)
     created = create(TestClient(app), "씨발 쓰레기 같은 회사야 ORD-1 12,000원 환불해")
     message = created["messages"][0]
     assert message["text"].startswith("씨발")  # 원문 그대로
-    assert message["softened_text"] == "주문 ORD-1 12,000원 환불을 요청합니다."
+    # 사과는 코드가 맨 앞에 한 문장만 붙이고, 뒤에는 모델이 옮긴 요청만 온다
+    expected = "불편을 드려 죄송합니다. 주문 ORD-1 12,000원 환불을 요청합니다."
+    assert message["softened_text"] == expected
     assert message["abuse_level"] == "insult"  # 규칙(비속어)과 모델(모욕) 중 높은 쪽
     assert fake.seen == [
         {"message": "씨발 쓰레기 같은 회사야 ORD-1 12,000원 환불해"}
     ]  # 개인정보만 가린 글
     entry = next(a for a in created["activity"] if a["kind"] == "abusive_message")
     assert entry["data"]["softened"] is True
-    assert created["preview"] == "주문 ORD-1 12,000원 환불을 요청합니다."
+    assert created["preview"] == expected
 
 
 def test_a_bad_llm_answer_falls_back_to_the_rules(monkeypatch: pytest.MonkeyPatch) -> None:
