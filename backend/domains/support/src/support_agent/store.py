@@ -163,7 +163,9 @@ class InquiryStore:
         message.abuse_level = level  # type: ignore[assignment]
         message.abuse_kinds = kinds
         if conversation.messages[-1].id == message_id:
-            conversation.preview = _preview(softened)
+            conversation.preview = _preview(
+                softened.removeprefix(abuse_rules.APOLOGY).strip() or softened
+            )
         return conversation
 
     def set_feedback(self, inquiry_id: int, feedback: Feedback) -> Conversation:

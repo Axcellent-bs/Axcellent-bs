@@ -58,6 +58,7 @@ THREAT = (
 # 욕설처럼 보이지만 일반 낱말인 것은 먼저 빼고 찾는다
 EXCEPTIONS = ("시발점", "시발역", "시발택시", "시발 전", "쓰레기통", "쓰레기봉투", "분리수거")
 
+APOLOGY = "불편을 드려 죄송합니다."  # 순화문 맨 앞에 코드가 붙이는 한 문장 (미리보기에서는 뺀다)
 LABELS: dict[str, str] = {"profanity": "[비속어]", "insult": "[모욕 표현]", "threat": "[위협 표현]"}
 
 MESSAGES: dict[AbuseLevel, str] = {
