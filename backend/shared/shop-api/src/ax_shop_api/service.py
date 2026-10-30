@@ -195,6 +195,59 @@ class Shop:
             "payments": [dict(p) for p in payments],
         }
 
+    # --- 판매자 입점 --------------------------------------------------------
+    def register_seller(
+        self,
+        name: str,
+        category_codes: list[str],
+        documents_verified: bool,
+        products: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """판매자와 처음 올릴 상품을 한 트랜잭션에 저장하고 `seller.registered`를 outbox에 넣는다.
+
+        총괄이 이 이벤트로 입점 심사 사건을 열고 재무 `seller_review`를 부른다. 판매자 이름은
+        사람이 쓴 문장이라 이벤트에 넣지 않는다 (심사는 위험 점수·서류로만 한다).
+        """
+        if not category_codes:
+            raise ShopError("INVALID_SELLER", "판매 분류가 하나 이상 필요하다")
+        with self.db.tx() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM sellers").fetchone()[0]
+            number = count + 1
+            while conn.execute(
+                "SELECT 1 FROM sellers WHERE seller_id = ?", (f"sel_{number:04d}",)
+            ).fetchone():
+                number += 1
+            seller_id = f"sel_{number:04d}"
+            now = _now()
+            conn.execute(
+                "INSERT INTO sellers VALUES (?, ?, ?, ?, NULL, ?)",
+                (seller_id, name, ",".join(category_codes), TENANT_ID, now),
+            )
+            for item in products:
+                product_id = self.db.next_id(conn, "product", "prd_")
+                conn.execute(
+                    "INSERT INTO products VALUES (?, ?, ?, ?, ?, ?, 1, ?, NULL, ?, ?)",
+                    (product_id, seller_id, item["name"], item["category_code"],
+                     item["price"], item["stock"], TENANT_ID, now, now),
+                )  # fmt: skip
+            outbox.enqueue(
+                conn,
+                EventType.SELLER_REGISTERED,
+                {
+                    "seller_id": seller_id,
+                    "category_codes": category_codes,
+                    "documents_verified": documents_verified,
+                },
+                f"seller.registered:{seller_id}",
+            )
+        return {
+            "seller_id": seller_id,
+            "name": name,
+            "category_codes": category_codes,
+            "documents_verified": documents_verified,
+            "product_count": len(products),
+        }
+
     # --- 상품 관리 ----------------------------------------------------------
     def create_product(
         self, seller_id: str, name: str, category_code: str, price: int, stock: int

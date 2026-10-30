@@ -117,6 +117,8 @@ class AutoReview(DomainModel):
     at: UtcDatetime
     gate_status: str | None = None
     review_id: str | None = None
+    # 교차검증 근거 (cross_check.EvidenceLine): 어느 부서에 무엇을 물어 어떤 답을 받았나
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class Spec(DomainModel):

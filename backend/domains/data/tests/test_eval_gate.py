@@ -17,6 +17,9 @@ import pytest
 
 EVAL = Path(__file__).resolve().parents[1] / "eval"
 
+# 평가를 실제로 돌려 느리다. 기본 backend job은 `-m "not eval"`로 빼고 data-eval job이 돌린다
+pytestmark = pytest.mark.eval
+
 
 def _load(name: str):  # noqa: ANN202
     sys.path.insert(0, str(EVAL))

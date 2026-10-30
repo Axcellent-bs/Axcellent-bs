@@ -17,6 +17,7 @@ from ax_orchestrator.engine import Engine
 from ax_orchestrator.models import Incident, Plan, iso
 from ax_orchestrator.naming import event_title
 from ax_orchestrator.plans.finance_anomaly import finance_anomaly
+from ax_orchestrator.plans.seller_onboarding import seller_onboarding
 from ax_orchestrator.plans.support_resolved import support_resolved
 
 
@@ -41,7 +42,10 @@ INCIDENT_EVENTS = {
 PLANS: dict[EventType, tuple[str, Callable[[], Plan]]] = {
     EventType.FINANCE_ANOMALY_DETECTED: ("finance_anomaly", finance_anomaly),
     EventType.SUPPORT_INQUIRY_RESOLVED: ("support_resolved", support_resolved),
+    EventType.SELLER_REGISTERED: ("seller_onboarding", seller_onboarding),
 }
+# 장애가 아니라 건마다 하나씩 여는 이벤트 (문의 처리 결과, 판매자 입점)
+CASE_EVENTS = {EventType.SUPPORT_INQUIRY_RESOLVED, EventType.SELLER_REGISTERED}
 SEVERITY_OPENS = {"high", "critical"}
 SUPPORT_EVENTS = {EventType.SUPPORT_INQUIRY_RECEIVED, EventType.SUPPORT_INQUIRY_SURGE}
 
@@ -54,6 +58,7 @@ SUBSCRIBED = [
     EventType.SUPPORT_INQUIRY_RECEIVED,
     EventType.SUPPORT_INQUIRY_SURGE,
     EventType.SUPPORT_INQUIRY_RESOLVED,
+    EventType.SELLER_REGISTERED,
     # 사람 할 일함에서 끝낸 일 → 기다리던 단계를 이어 간다 (업무 요청 라우터)
     EventType.HANDOFF_COMPLETED,
 ]
@@ -69,7 +74,7 @@ class IncidentManager:
 
     def judge(self, env: EventEnvelope) -> str:
         """`open` | `note` | `ignore`."""
-        if env.type in INCIDENT_EVENTS or env.type == EventType.SUPPORT_INQUIRY_RESOLVED:
+        if env.type in INCIDENT_EVENTS or env.type in CASE_EVENTS:
             return "open"
         if env.type == EventType.METRIC_ANOMALY:
             severity = str(env.data.get("severity", "")).lower()
@@ -174,12 +179,16 @@ class IncidentManager:
         """이벤트를 묶는 구성요소. 고객지원 처리 결과는 문의마다 따로 열어 합쳐지지 않게 한다."""
         if env.type == EventType.SUPPORT_INQUIRY_RESOLVED:
             return f"support-inquiry-{env.data.get('inquiry_id')}"
+        if env.type == EventType.SELLER_REGISTERED:
+            return f"seller-{env.data.get('seller_id')}"
         return str(env.data.get("component") or "api")
 
     @staticmethod
     def _title(env: EventEnvelope, component: str) -> str:
         if env.type == EventType.SUPPORT_INQUIRY_RESOLVED:
             return f"고객 문의 #{env.data.get('inquiry_id')} 처리 결과 기록"
+        if env.type == EventType.SELLER_REGISTERED:
+            return f"새 판매자 {env.data.get('seller_id')} 입점 심사"
         return event_title(component, env.data.get("metric_code"))
 
     async def wait(self, context_id: str) -> Incident:

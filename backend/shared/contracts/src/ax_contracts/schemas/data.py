@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import Literal, Self
 
 from pydantic import Field, model_validator
@@ -254,3 +255,139 @@ class RootCauseOutput(AxModel):
         if not any(h.confidence == "high" for h in self.hypotheses) and not self.needs_confirmation:
             raise ValueError("needs_confirmation must be true without a high-confidence hypothesis")
         return self
+
+
+# ------------------------------------------------ activity_report (부서별 AI 업무 리포트)
+# 숫자는 전부 data 코드가 센다. 공통 로그는 읽기만 한다.
+# 사람이 직접 한 일(로그에 없는 일)은 세지 않는다.
+# 비율은 분모가 3 미만이면 `rate`가 None이고 `note`가 "표본 부족"이다.
+ActivityPeriod = Literal["day", "week", "month"]
+
+
+class ActivityReportInput(AxModel):
+    period: ActivityPeriod = "day"
+    start: dt.date | None = None  # 한국 시간 날짜. 비우면 직전 기간(어제·지난주 월요일·지난달)
+    services: list[str] = Field(default_factory=list)  # 서비스 id. 비우면 전체
+
+
+class ActivityRate(AxModel):
+    count: int = Field(ge=0)
+    total: int = Field(ge=0)  # 분모
+    rate: float | None = Field(default=None, ge=0, le=1)  # 분모 3 미만이면 None
+    note: str | None = None  # "표본 부족" 등
+
+
+class CompanyFigure(AxModel):
+    """회사 숫자 하나. 값을 받지 못하면 None이고 이유는 `note`와 `unknown_sections`에 있다."""
+
+    value: float | None = None
+    previous_period: float | None = None
+    source: str  # 어디서 받았는지 (예: finance.closing_report)
+    note: str | None = None  # 기준 차이 등 (예: 재무 마감은 UTC 날짜 기준)
+
+
+class ActivityCompany(AxModel):
+    gmv: CompanyFigure  # 총거래액 (원)
+    commission_revenue: CompanyFigure  # 판매 수수료 매출 (원)
+    order_count: CompanyFigure  # 주문 수
+    payment_success_rate: CompanyFigure  # 결제 성공률 (0~1)
+    incident_count: CompanyFigure  # 사건 수
+
+
+class SkillCount(AxModel):
+    skill: str
+    label: str  # 한국어 표시명
+    count: int = Field(ge=0)
+
+
+class ActivityRequests(AxModel):
+    total: int = Field(ge=0)  # 이 부서 AI가 응답한 요청 수 (`result_sent`)
+    top_skills: list[SkillCount] = Field(default_factory=list)  # 상위 5개
+
+
+class ActivityOutcomes(AxModel):
+    """요청 결과 6가지. 분모는 모두 `requests.total`이다."""
+
+    auto_completed: ActivityRate  # 자동 완료
+    human_approved: ActivityRate  # 사람 확인 후 실행 (C 보류 → 승인)
+    held: ActivityRate  # 보류 (사람 판단·입력 대기, 승인 대기)
+    rejected: ActivityRate  # 거절 (요청 거부·안전 관문 거부·승인 거절)
+    unknown: ActivityRate  # 확인할 수 없음 (unavailable·service_disabled·교차검증 결과 없음)
+    failed: ActivityRate  # 실패
+
+
+class ActivityHandoffs(AxModel):
+    """이 부서 일이 서비스가 꺼져 사람 할 일함으로 간 것."""
+
+    handed: int = Field(ge=0)  # 넘긴 건수
+    done: int = Field(ge=0)  # 사람이 처리
+    rejected: int = Field(ge=0)  # 사람이 반려
+    avg_close_minutes: float | None = Field(default=None, ge=0)  # 넘김 → 끝남 평균 (분)
+
+
+class ActivityQuality(AxModel):
+    fallback: ActivityRate  # 설명 문장 템플릿 대체 / 완료 응답
+    fallback_reasons: dict[str, int] = Field(default_factory=dict)
+    avg_response_ms: float | None = Field(default=None, ge=0)  # 받음 → 보냄 평균
+    response_samples: int = Field(default=0, ge=0)
+
+
+class ActivityIncidents(AxModel):
+    count: int = Field(ge=0)  # 참여한 사건 수
+    skills: list[SkillCount] = Field(default_factory=list)  # 사건에서 맡은 skill
+    mttr_median_minutes: float | None = Field(default=None, ge=0)  # 그 사건들 MTTR 중앙값
+
+
+class DepartmentActivity(AxModel):
+    requests: ActivityRequests
+    outcomes: ActivityOutcomes
+    handoffs: ActivityHandoffs
+    quality: ActivityQuality
+    incidents: ActivityIncidents
+
+
+class DepartmentReport(DepartmentActivity):
+    department: str  # 부서 id (services.py department)
+    label: str  # 한국어 표시명
+    owners: list[str] = Field(default_factory=list)  # 서비스 카드 owner
+    services: list[str] = Field(default_factory=list)
+    enabled: bool  # 이 부서 서비스가 하나라도 켜져 있는지
+    previous_period: DepartmentActivity
+
+
+class CollaborationEdge(AxModel):
+    from_department: str
+    from_label: str
+    to_department: str
+    to_label: str
+    count: int = Field(ge=1)  # A2A 요청 수 (`request_received`)
+
+
+class ActivityHighlight(AxModel):
+    key: str  # 예: departments.support.requests.total
+    label: str  # 한국어 (예: 고객지원 처리한 요청)
+    current: float
+    previous: float  # 3 이상만 고른다
+    change_percent: float  # (current − previous) / previous × 100, 소수 1자리
+
+
+class UnknownSection(AxModel):
+    section: str
+    reason: str
+
+
+class ActivityReportOutput(AxModel):
+    period: ActivityPeriod
+    start: dt.date  # 한국 시간 날짜 (포함)
+    end: dt.date  # 한국 시간 날짜 (제외)
+    window_from: UtcDatetime
+    window_to: UtcDatetime
+    previous_from: UtcDatetime
+    previous_to: UtcDatetime
+    company: ActivityCompany
+    departments: list[DepartmentReport] = Field(default_factory=list)
+    collaboration: list[CollaborationEdge] = Field(default_factory=list)
+    highlights: list[ActivityHighlight] = Field(default_factory=list, max_length=3)
+    summary: str
+    summary_source: Literal["llm", "template", "none"]  # none: 특이사항 없음(LLM 호출 안 함)
+    unknown_sections: list[UnknownSection] = Field(default_factory=list)

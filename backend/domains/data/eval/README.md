@@ -16,6 +16,7 @@ uv run python domains/data/eval/run.py   # 결과: eval/results/latest.json
 - 평가 정의를 바꾼 PR은 기준값이 나빠져도 갱신한다. 대신 PR 본문에 "정의 변경으로 인한 하락"과 나빠진 케이스를 적는다.
 - 판정 코드를 고칠 때 holdout 케이스 내용을 보고 맞추지 않는다. holdout은 결과 숫자만 본다. holdout을 다시 만들 때는 seed를 바꾸고 이유를 적는다.
 - **평가 허용 숫자는 실서버 explain facts와 같은 함수로 만든다.** LLM 설명의 지어낸 숫자 검사(`llm.fabricated_number_rate`)가 허용하는 영향 설명 숫자는 실서버가 설명에 넘기는 facts를 만드는 함수(`skills/impact_analysis.impact_facts`)를 평가(`run.py _impact_allowed`)가 import해서 만든다(#130). 그래서 facts 목록을 바꾸는 코드 PR은 평가 허용 숫자도 함께 바뀐다. 이것은 평가 정의 변경이기도 하므로, 그런 PR은 본문에 평가 지표 전·후를 적고 지표가 바뀌면 이유를 적는다. 한쪽만 넓으면 평가가 진짜 계산 숫자를 "지어냄"으로 세거나, 지어낸 숫자를 놓친다.
+- **숫자 표기 규칙도 실서버 검증과 같은 함수를 쓴다.** 문장 속 숫자를 허용 숫자와 맞춰 보는 규칙(쉼표·단위·퍼센트·반올림 등)은 평가(`run.py _fabricated`)가 실서버 검증(`explain._bad_numbers`)을 import해서 쓴다. 허용 숫자 목록은 평가가 skill 출력에서 따로 만든다. 그래서 explain의 표기 규칙을 바꾸는 코드 PR은 `llm.fabricated_number_rate`의 판정도 함께 바뀐다. 그런 PR은 본문에 이 지표 전·후와 hallucinate 케이스가 계속 걸리는지를 적는다
   - 영향 설명: 실패 주문 수, 영향 고객 수, 피해 금액 + 초과분(`excess_failed_order_count`, skill 출력) + 평소 실패 수(소수 둘째 자리)
   - 평소 실패 수만은 실서버 계산값을 쓰지 않는다. 실서버 계산을 검증하려고 근거 문장을 읽지 않고, 평가가 케이스의 지난 7일 결제 기록으로 직접 센 값을 `impact_facts`에 넣는다(`eval_world.usual_fault_failures`). 방식은 영향 분석 초과분(#102)과 같다: 같은 시각 ±1시간, 결제가 기록된 5분의 장애 쪽 실패 평균 × 구간 길이
 

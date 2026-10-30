@@ -103,6 +103,8 @@ if [ -z "${AX_ORG_CONFIG:-}" ] && [ -f config/org.yaml ]; then
 fi
 # 사람 할 일함 저장 파일 (dashboard-api)
 export AX_HANDOFF_DB="$PWD/$DATA/handoffs.db"
+# 재무 기록(판매자 심사·정산 보류·장부·사람 결정). 다시 켜도 이어진다
+export FINANCE_STATE_FILE="$PWD/$DATA/finance_state.json"
 
 # .env (LLM 설정 등). 값은 출력하지 않는다
 if [ -f .env ]; then

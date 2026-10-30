@@ -25,6 +25,7 @@ def test_card_validates(card: AgentCard) -> None:
         "kpi_summary",
         "root_cause_hypotheses",
         "accuracy_report",
+        "activity_report",
     }
 
 
@@ -54,3 +55,10 @@ def test_root_cause_is_a_lookup_for_orchestrator(card: AgentCard) -> None:
     skill = next(s for s in card.skills if s.id == "root_cause_hypotheses")
     assert set(skill.allowed_requesters) == {"orchestrator", "dashboard-api"}
     assert skill.handoff is False  # 꺼져 있으면 사람에게 넘기지 않고 건너뛴다
+
+
+def test_activity_report_is_a_read_lookup_for_dashboard(card: AgentCard) -> None:
+    skill = next(s for s in card.skills if s.id == "activity_report")
+    assert skill.grade == "read"
+    assert set(skill.allowed_requesters) == {"dashboard-api", "orchestrator"}
+    assert skill.handoff is False

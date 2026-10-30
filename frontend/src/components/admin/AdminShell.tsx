@@ -6,11 +6,11 @@ import { canOpen, homeOf, servicesOf, useSession } from "@/demo/session";
 import { useCompany } from "@/demo/company";
 import { AGENTS, activeChild, matchPath, useEnabledServices, type Service, type SubItem } from "@/demo/services";
 import { useOpenHandoffCount } from "@/lib/handoffs";
-import { IconAgents, IconBell, IconBolt, IconBox, IconChart, IconDashboard, IconInbox, IconLayout, IconOffice, IconSearch, IconUsers } from "../icons";
+import { IconAgents, IconBell, IconChart, IconGear, IconInbox, IconOffice, IconSearch } from "../icons";
 
 // 메뉴: AI가 상위 탭이고, 그 AI가 맡은 서비스가 하위 탭이다. 서비스 안 화면(예: 고객 문의의 상담 콘솔)은 그 아래 한 단 더.
 // 고객사 계정은 시스템 관리자 하나이고, 회사가 켠 서비스는 전부 메뉴에 보인다(서비스 고르기에서 끈 서비스만 빠짐, src/demo/session.tsx).
-// AI가 맡지 않은 서비스(DejaFix 장애 대응·PC·서버 연결)와 공용 화면은 구분선 아래에 둔다.
+// AI가 맡지 않은 서비스(DejaFix 장애 대응 등)와 공용 화면은 구분선 아래에 둔다.
 type SubNav = { href: string; label: string; soon?: boolean; match: string[]; children?: SubItem[] };
 type NavItem = { href: string; label: string; Icon: ComponentType<{ size?: number }>; logo?: string; children?: SubNav[]; match: string[]; divider?: boolean; badge?: number | null };
 
@@ -66,13 +66,15 @@ const CONTROL_NAV: NavItem[] = [
   { href: "/control", label: "관제 센터", Icon: IconChart, children: subNav(CONTROL_MENU), match: ["/control"] },
 ];
 
-const SYSTEM_NAV: NavItem[] = [
-  { href: "/system/connect", label: "AXcellent 연결", Icon: IconBolt, match: ["/system/connect"] },
-  { href: "/system/services", label: "서비스 고르기", Icon: IconDashboard, match: ["/system/services"] },
-  { href: "/system/hosts", label: "사내 PC 연결", Icon: IconBox, match: ["/system/hosts"] },
-  { href: "/system/members", label: "회원 연결", Icon: IconUsers, match: ["/system/members"] },
-  { href: "/system/integrations", label: "회사 서비스 연결", Icon: IconLayout, match: ["/system/integrations"] },
+// 고객사 시스템 관리자의 관리 화면은 "시스템 관리" 탭 하나 아래에 모은다.
+// PC·서버 연결(DejaFix)은 기본 시스템으로 보고 여기 고정으로 둔다 (서비스 메뉴에서는 뺌)
+const SYSTEM_MENU: SubItem[] = [
+  { href: "/system/connect", label: "회사 연결" },
+  { href: "/system/services", label: "서비스 고르기" },
+  { href: "/system/members", label: "회원 연결" },
+  { href: "/system/hosts", label: "PC·서버 연결" },
 ];
+const systemNav = (menu: SubItem[]): NavItem => ({ href: menu[0].href, label: "시스템 관리", Icon: IconGear, children: subNav(menu), match: ["/system"] });
 
 function useNav(): NavItem[] {
   const { account } = useSession();
@@ -80,14 +82,15 @@ function useNav(): NavItem[] {
   const company = useCompany();
   if (!account) return [];
   if (account.operator) return CONTROL_NAV;
-  // 회사 연결 전에는 AXcellent 연결만 보인다
-  if (!company) return account.admin ? SYSTEM_NAV.filter((n) => n.href === "/system/connect") : [];
+  // 회사 연결 전에는 회사 연결만 보인다
+  if (!company) return account.admin ? [systemNav(SYSTEM_MENU.slice(0, 1))] : [];
   const services = servicesOf(account, enabled);
   const agents = agentNav(services);
-  const rest = [...services.filter((s) => !s.agent).map(serviceNav), ...SHARED_NAV];
+  const others = services.filter((s) => !s.agent && !(account.admin && s.id === "hosts"));
+  const rest = [...others.map(serviceNav), ...SHARED_NAV];
   if (agents.length) rest[0] = { ...rest[0], divider: true };
   // 고객사 시스템 관리자는 관리 메뉴를 맨 위에
-  return [...(account.admin ? SYSTEM_NAV : []), ...agents, ...rest];
+  return [...(account.admin ? [systemNav(SYSTEM_MENU)] : []), ...agents, ...rest];
 }
 
 const isOn = (path: string, item: NavItem) => item.match.some((m) => matchPath(m, path));

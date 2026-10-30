@@ -605,6 +605,7 @@ class Engine:
 # 없으면 장애 이벤트로 기록한다.
 RECORD_BY_PLAN: dict[str, tuple[str, str]] = {
     "support_resolved": ("case", "support-desk"),
+    "seller_onboarding": ("case", "catalog"),  # 인사 담당표의 분야 (판매자·상품)
 }
 
 

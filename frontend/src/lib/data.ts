@@ -182,6 +182,64 @@ export function evidenceLines(summary: string | null | undefined): { headline: s
   return { headline: lines[0] ?? null, notes: lines.slice(1) };
 }
 
+// ---------------------------------------------------------------- 부서별 AI 업무 리포트 (activity_report, #147)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py ActivityReportOutput. 숫자는 모두 서버가 센다.
+export type ActivityPeriod = "day" | "week" | "month";
+/** 비율. 분모 3 미만이면 rate가 null이고 note가 "표본 부족" */
+export interface ActivityRate { count: number; total: number; rate: number | null; note?: string | null }
+/** 회사 숫자 하나. 받지 못하면 value가 null */
+export interface CompanyFigure { value: number | null; previous_period: number | null; source: string; note?: string | null }
+export interface ActivityCompany {
+  gmv: CompanyFigure;
+  commission_revenue: CompanyFigure;
+  order_count: CompanyFigure;
+  payment_success_rate: CompanyFigure;
+  incident_count: CompanyFigure;
+}
+export interface SkillCount { skill: string; label: string; count: number }
+export interface ActivityOutcomes {
+  auto_completed: ActivityRate;
+  human_approved: ActivityRate;
+  held: ActivityRate;
+  rejected: ActivityRate;
+  unknown: ActivityRate;
+  failed: ActivityRate;
+}
+export interface DepartmentActivity {
+  requests: { total: number; top_skills: SkillCount[] };
+  outcomes: ActivityOutcomes;
+  handoffs: { handed: number; done: number; rejected: number; avg_close_minutes: number | null };
+  quality: { fallback: ActivityRate; fallback_reasons: Record<string, number>; avg_response_ms: number | null; response_samples: number };
+  incidents: { count: number; skills: SkillCount[]; mttr_median_minutes: number | null };
+}
+export interface DepartmentReport extends DepartmentActivity {
+  department: string;
+  label: string;
+  owners: string[];
+  services: string[];
+  enabled: boolean;
+  previous_period: DepartmentActivity;
+}
+export interface CollaborationEdge { from_department: string; from_label: string; to_department: string; to_label: string; count: number }
+export interface ActivityHighlight { key: string; label: string; current: number; previous: number; change_percent: number }
+export interface UnknownSection { section: string; reason: string }
+export interface ActivityReportOutput {
+  period: ActivityPeriod;
+  start: string;
+  end: string;
+  window_from: string;
+  window_to: string;
+  previous_from: string;
+  previous_to: string;
+  company: ActivityCompany;
+  departments: DepartmentReport[];
+  collaboration: CollaborationEdge[];
+  highlights: ActivityHighlight[];
+  summary: string;
+  summary_source: "llm" | "template" | "none";
+  unknown_sections: UnknownSection[];
+}
+
 /** 서버가 꺼졌을 때 무엇이 꺼졌는지 보여 주는 이름 */
 export const DATA_SERVER = "데이터 AI 서버(8106)";
 export const ORCH_SERVER = "총괄 서버(8000)";
@@ -195,13 +253,16 @@ export const dataAi = {
   },
   kpiSummary: () => askData<KpiSummaryOutput>("kpi_summary", "KPI"),
   accuracyReport: () => askData<AccuracyReportOutput>("accuracy_report", "정확도 평가 결과"),
+  /** start: 한국 시간 날짜(YYYY-MM-DD). 비우면 서버가 직전 기간을 고른다. services: 비우면 전체 */
+  activityReport: (period: ActivityPeriod, start: string | null, services: string[] = []) =>
+    askData<ActivityReportOutput>("activity_report", "업무 리포트", { period, ...(start ? { start } : {}), services }),
 };
 
-async function askData<T>(skill: string, what: string): Promise<A2AResult<T>> {
+async function askData<T>(skill: string, what: string, input: Record<string, unknown> = {}): Promise<A2AResult<T>> {
   const body = {
     meta: { context_id: "ctx_req_dashboard", token: DATA_A2A_TOKEN, path: [], deadline: new Date(Date.now() + 30_000).toISOString() },
     skill,
-    input: {},
+    input,
   };
   const res = await fetch(`${DATA_A2A_URL}/a2a`, { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const json = (await res.json().catch(() => null)) as A2AResult<T> | null;

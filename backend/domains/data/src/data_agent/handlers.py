@@ -2,6 +2,8 @@
 
 - impact_analysis, anomaly_detection은 읽기 전용(grade read)이라 `execute()`를 거치지 않는다.
 - kpi_summary는 공통 로그 저장소를 읽기만 한다(grade read).
+- activity_report는 공통 로그를 읽고, 회사 숫자는 재무 closing_report(A2A)와 shop-api 지표로 받는다
+  (grade read). 다른 부서 DB는 직접 열지 않는다.
 - root_cause_hypotheses는 다른 부서에 조회만 하고(A2A) 원인 후보를 고른다(grade read).
 - fraud_score는 shop-api 판매자 정보·가격을 읽어 규칙 점수를 낸다(grade read). 승인·보류는 정하지
   않는다. 확인할 수 없는 규칙은 점수에서 빼고 `unknown_rules`로 알린다. 없는 판매자는 `not_found`다.
@@ -22,6 +24,7 @@ from ax_agent_template.llm import LLMClient
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.data import (
     AccuracyReportInput,
+    ActivityReportInput,
     AnomalyDetectionInput,
     FraudScoreInput,
     ImpactAnalysisInput,
@@ -37,6 +40,7 @@ from data_agent.clients.shop_client import (
     shop_api,
 )
 from data_agent.skills.accuracy_report import eval_dir, load_report
+from data_agent.skills.activity_report import InvalidActivityInput, build_report
 from data_agent.skills.anomaly_detection import detect_anomalies, env_settings, get_metric_source
 from data_agent.skills.fraud_score import score_fraud
 from data_agent.skills.impact_analysis import analyze_impact
@@ -250,6 +254,43 @@ async def fraud_score(request: AgentRequest) -> AgentResult:
     )
 
 
+def get_activity_sender():  # noqa: ANN201 - 테스트가 바꿔 끼우는 자리
+    """재무 closing_report 조회에 쓰는 A2A 함수. 기본은 `call_agent`."""
+    return call_agent
+
+
+async def activity_report(request: AgentRequest) -> AgentResult:
+    """부서별 AI 업무 리포트. 공통 로그·재무·shop-api를 읽기만 한다(grade read)."""
+    data = _parse(request, ActivityReportInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        logs = get_log_source(os.environ)
+    except NotImplementedError as error:
+        return _unavailable(request, error)
+    try:
+        result = await build_report(
+            data,
+            request.meta,
+            get_llm(),
+            logs=logs,
+            metrics=get_metric_source(os.environ),
+            send=get_activity_sender(),
+        )
+    except InvalidActivityInput as error:
+        return _result(
+            request, TaskStatus.FAILED, outcome="invalid_input", output={"errors": [str(error)]}
+        )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+        fallback=result.fallback,
+        **_fallback_reason(result),
+    )
+
+
 HANDLERS = {
     "impact_analysis": impact_analysis,
     "anomaly_detection": anomaly_detection,
@@ -257,4 +298,5 @@ HANDLERS = {
     "kpi_summary": kpi_summary,
     "root_cause_hypotheses": root_cause_hypotheses,
     "accuracy_report": accuracy_report,
+    "activity_report": activity_report,
 }

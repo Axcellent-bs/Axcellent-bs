@@ -3,7 +3,7 @@ import { ago } from '@/lib/format'
 import { SCOPES, newId, now, useIntegrations, type Integration } from './store'
 
 // 회사가 운영하는 서비스(예: 캣북스 온라인 서점)를 연결하는 창구. URL·API·키를 넣으면 부서 AI가 그 서비스의 데이터를 받아 온다.
-// 솔루션은 서비스 안에 들어가지 않고, 여기서 연결만 한다.
+// 솔루션은 서비스 안에 들어가지 않고, 여기서 연결만 한다. 회사 연결 화면(CompanyConnect) 아래쪽에 들어간다.
 const STATUS: Record<Integration['status'], { label: string; tone: string }> = {
   connected: { label: '연결됨', tone: 'bg-emerald-50 text-emerald-700' },
   untested: { label: '연결 확인 전', tone: 'bg-amber-50 text-amber-700' },
@@ -43,11 +43,8 @@ export default function Integrations() {
   }
 
   return (
-    <div className="space-y-6 px-8 py-8">
-      <header>
-        <p className="text-sm text-ink-500">시스템 관리</p>
-        <h1 className="text-2xl font-semibold">회사 서비스 연결</h1>
-      </header>
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">회사 서비스</h2>
 
       <ul className="grid gap-4 lg:grid-cols-2">
         {items.map((x) => (

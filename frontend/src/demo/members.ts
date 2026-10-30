@@ -79,3 +79,40 @@ export function thisPcIp(): string {
 export const ipLinked = (ip: string, l = links) => l.ips.some((r) => ipMatches(ip, r))
 /** 일반회원이 회사에 연결돼 있나: 계정(이메일)이 묶였거나 이 PC IP가 묶였거나 */
 export const memberLinked = (email: string, ip = thisPcIp(), l = links) => l.emails.includes(norm(email)) || ipLinked(ip, l)
+
+// ---------------------------------------------------------------- 회원 부서·확인 권한
+// 관리자가 회원 연결(/system/members)에서 바꾼 부서·확인 권한. 이메일을 열쇠로 기억하고 데모 계정에도 덮어쓴다.
+// 확인 권한: 받은 요청 중 위험한 건(환불·롤백 등)을 승인할 수 있다.
+export type MemberProfile = { dept?: string; approver?: boolean }
+const PROFILE_KEY = 'axcellent-demo-member-profiles'
+const readProfiles = (): Record<string, MemberProfile> => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PROFILE_KEY) ?? '{}')
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
+  } catch {
+    return {}
+  }
+}
+let profiles = readProfiles()
+const profileListeners = new Set<() => void>()
+const subscribeProfiles = (l: () => void) => {
+  profileListeners.add(l)
+  return () => profileListeners.delete(l)
+}
+export const getProfiles = () => profiles
+export const useProfiles = () => useSyncExternalStore(subscribeProfiles, getProfiles)
+export function setProfile(email: string, patch: MemberProfile) {
+  const e = norm(email)
+  profiles = { ...profiles, [e]: { ...profiles[e], ...patch } }
+  try {
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(profiles))
+  } catch {
+    /* 저장이 막힌 브라우저는 새로고침하면 처음 상태로 돌아간다 */
+  }
+  profileListeners.forEach((l) => l())
+}
+/** 계정에 관리자가 바꾼 부서·확인 권한을 덮어쓴다 */
+export const withProfile = <T extends { email: string; dept?: string; approver?: boolean }>(a: T, p = profiles): T => {
+  const o = p[norm(a.email)]
+  return o ? { ...a, ...(o.dept !== undefined ? { dept: o.dept } : {}), ...(o.approver !== undefined ? { approver: o.approver } : {}) } : a
+}

@@ -167,9 +167,10 @@ def test_numbers_not_in_the_calculation_are_still_rejected() -> None:
     assert result.fallback is True  # 7은 계산에 없다 → 템플릿
     assert "7건" not in result.output.summary
     assert result.output.summary.startswith("장애 구간 실패 주문 6건")
-    # 평소 실패 수를 반올림해 바꿔 써도 막는다 (0.6 → 1)
-    rounded, _ = _explain(FakeShop(6, history_noise_per_day=3), "평소 1건보다 5건 많습니다.")
+    # 평소 실패 수를 반올림이 맞지 않는 값으로 바꿔 쓰면 막는다 (0.6 → 2)
+    rounded, _ = _explain(FakeShop(6, history_noise_per_day=3), "평소 2건보다 5건 많습니다.")
     assert rounded.fallback is True
+    assert rounded.fallback_numbers == (2.0,)
 
 
 def test_without_history_excess_and_usual_are_not_allowed() -> None:

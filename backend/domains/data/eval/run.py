@@ -58,6 +58,7 @@ from data_agent.clients.shop_client import (  # noqa: E402
     ShopApi,
     ShopUnavailable,
 )
+from data_agent.explain import _bad_numbers  # noqa: E402
 from data_agent.impact import ImpactCounts  # noqa: E402
 from data_agent.metrics.fraud import SellerFacts, low_price_ratio, score_seller  # noqa: E402
 from data_agent.metrics.judge import Settings  # noqa: E402
@@ -182,11 +183,7 @@ def load_cases() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     return scenarios, sellers
 
 
-def _numbers(text: str) -> set[float]:
-    return {float(n.replace(",", "")) for n in re.findall(r"\d+(?:,\d{3})*(?:\.\d+)?", text)}
-
-
-def _impact_allowed(got: ImpactAnalysisOutput, usual: float | None) -> set[float]:
+def _impact_allowed(got: ImpactAnalysisOutput, usual: float | None) -> dict[str, int | float | str]:
     """영향 설명에 써도 되는 숫자. 실서버가 영향 설명(explain)에 넘기는 facts를 만드는 함수
     (`impact_analysis.impact_facts`)를 그대로 써서 두 곳이 갈라지지 않게 한다.
 
@@ -199,13 +196,17 @@ def _impact_allowed(got: ImpactAnalysisOutput, usual: float | None) -> set[float
         affected_customer_count=got.affected_customer_count,
         damage_amount=got.damage_amount,
     )
-    facts = impact_facts(counts, got.excess_failed_order_count, usual)
-    return {float(v) for v in facts.values() if isinstance(v, int | float)}
+    return impact_facts(counts, got.excess_failed_order_count, usual)
 
 
-def _fabricated(summary: str, allowed: set[float]) -> bool:
-    """최종 설명 문장에 결과 숫자에 없는 숫자가 있는지 (평가 쪽에서 따로 확인한다)."""
-    return any(all(abs(n - a) > 1e-6 for a in allowed) for n in _numbers(summary))
+def _fabricated(summary: str, allowed: dict[str, int | float | str]) -> bool:
+    """최종 설명 문장에 결과 숫자에서 나오지 않은 숫자가 있는지.
+
+    허용 숫자(`allowed`)는 평가가 skill 출력에서 따로 만들고, 숫자를 읽는 표기 규칙(쉼표·퍼센트·
+    반올림 등)은 실서버 검증(`explain._bad_numbers`)을 그대로 쓴다. 두 곳의 표기 규칙이 갈라지면
+    평가가 허용된 표기를 "지어냄"으로 세거나 지어낸 숫자를 놓친다.
+    """
+    return bool(_bad_numbers(summary, allowed))
 
 
 def _meta(context_id: str) -> RequestMeta:
@@ -340,10 +341,11 @@ async def run_case(case: dict[str, Any]) -> dict[str, Any]:
             AnomalyDetectionInput(window_from=window_from, window_to=window_to), source, llm
         )
         flagged = [v.metric for v in anomaly.output.verdicts if v.is_anomaly]
-        allowed = {
-            float(x)
+        # 판정한 모든 지표의 관측값·기준선·비율 (실서버 facts는 가장 이상한 지표 하나라 더 넓다)
+        allowed: dict[str, int | float | str] = {
+            f"{v.metric}.{name}": x
             for v in anomaly.output.verdicts
-            for x in (v.observed, v.baseline, v.ratio)
+            for name, x in (("observed", v.observed), ("baseline", v.baseline), ("ratio", v.ratio))
             if x is not None
         }
         metric = expected["anomaly"]["metric"]
@@ -573,7 +575,7 @@ def summarize(cases: list[dict[str, Any]], sellers: list[dict[str, Any]]) -> dic
         if i["want"]["damage_amount"]
     ]
     explanations = [c["anomaly"] for c in cases if c["anomaly"]["llm_used"]] + impacts
-    # 표기만 바꿔 적는 가짜 LLM 케이스의 설명 (#133). 지금 검증은 바꾼 표기도 없는 숫자로 본다
+    # 표기만 바꿔 적는 가짜 LLM 케이스의 설명 (#133). 검증이 같은 값의 표기로 통과시켜야 한다
     notation = [
         e
         for c in cases
