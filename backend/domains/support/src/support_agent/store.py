@@ -10,6 +10,7 @@ import itertools
 from datetime import UTC, datetime
 from typing import Any
 
+from support_agent import abuse_rules
 from support_agent.schemas import (
     ActivityEntry,
     Analysis,
@@ -165,17 +166,21 @@ class InquiryStore:
         analysis: Analysis | None,
         stamp: str,
     ) -> None:
+        shown, level, kinds = abuse_rules.assess(text) if role == "customer" else (text, "none", [])
         conversation.messages.append(
             Message(
                 id=next(self._message_ids),
                 role=role,  # type: ignore[arg-type]
                 text=text,
+                display_text=shown if level != "none" else None,
+                abuse_level=level,  # type: ignore[arg-type]
+                abuse_kinds=kinds,
                 analysis=analysis,
                 created_at=stamp,
             )
         )
         conversation.updated_at = stamp
-        conversation.preview = _preview(text)
+        conversation.preview = _preview(shown)
         conversation.awaiting_reply = role == "customer"
 
     @staticmethod

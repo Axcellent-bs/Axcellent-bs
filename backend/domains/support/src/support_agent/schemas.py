@@ -76,7 +76,10 @@ class Analysis(AxModel):
 class Message(AxModel):
     id: int
     role: Literal["customer", "agent"]
-    text: str
+    text: str  # 접수된 원문 (증거라 고치지 않는다)
+    display_text: str | None = None  # 욕설·모욕·위협 표현을 가린 글. 가릴 것이 없으면 None
+    abuse_level: Literal["none", "profanity", "insult", "threat"] = "none"
+    abuse_kinds: list[str] = Field(default_factory=list)
     analysis: Analysis | None = None
     created_at: str
 

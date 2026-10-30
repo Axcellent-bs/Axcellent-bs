@@ -167,6 +167,27 @@ def log_activity(inquiry_id: int | None, **entry: Any) -> None:
         logger.warning("AI 처리 내력을 남기지 못했다 (inquiry %s)", inquiry_id, exc_info=True)
 
 
+ABUSE_TITLES = {
+    "profanity": "고객 메시지에 비속어가 있어 가려서 보여 줘요",
+    "insult": "고객 메시지에 모욕 표현이 있어 가려서 보여 줘요",
+    "threat": "고객 메시지에 위협 표현이 있어요. 담당자 확인을 권해요",
+}
+
+
+def _log_abuse(conversation: Conversation) -> None:
+    """방금 들어온 고객 메시지에 욕설·모욕·위협이 있으면 내력에 남긴다 (낱말·원문은 담지 않는다)."""
+    last = next((m for m in reversed(conversation.messages) if m.role == "customer"), None)
+    if last is None or last.abuse_level == "none":
+        return
+    log_activity(
+        conversation.id,
+        kind="abusive_message",
+        actor="system",
+        title=ABUSE_TITLES[last.abuse_level],
+        data={"level": last.abuse_level, "kinds": last.abuse_kinds, "message_id": last.id},
+    )
+
+
 def _analysis_entry(analysis: Analysis, *, fallback: bool, first: bool) -> dict[str, Any]:
     c = analysis.classification
     drafts = analysis.drafts or []
@@ -349,6 +370,7 @@ async def create_inquiry(request: AgentRequest) -> AgentResult:
         )
         privacy_audit.record_message(STORE, conversation, fallback)
         await events.emit_inquiry_received(request, conversation)
+        _log_abuse(conversation)
         log_activity(conversation.id, **_analysis_entry(analysis, fallback=fallback, first=True))
         return _view(conversation), fallback
 
@@ -379,6 +401,7 @@ async def add_customer_message(request: AgentRequest) -> AgentResult:
         updated = STORE.add_customer_message(parsed.inquiry_id, message, analysis)
         privacy_audit.record_message(STORE, updated, fallback)
         await events.emit_inquiry_received(request, updated)
+        _log_abuse(updated)
         log_activity(parsed.inquiry_id, **_analysis_entry(analysis, fallback=fallback, first=False))
         return _view(updated), fallback
 

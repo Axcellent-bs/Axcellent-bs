@@ -22,6 +22,8 @@ const STATUS_TO_KO: Record<string, string> = { open: "진행 중으로", resolve
 const FEEDBACK_STATUS_KO: Record<string, string> = { visible: "공개로", hidden: "숨김으로", flagged: "확인 대기로" };
 const INSPECTION_RESULT_KO: Record<string, string> = { pass: "정상", fail: "불합격", partial: "일부만 정상" };
 
+const ABUSE_KO: Record<string, string> = { profanity: "비속어", insult: "모욕 표현", threat: "위협 표현" };
+
 const str = (v: unknown) => (typeof v === "string" ? v : null);
 const num = (v: unknown) => (typeof v === "number" ? v : null);
 const parts = (...xs: (string | null | false | undefined)[]) => xs.filter(Boolean).join(" · ");
@@ -41,6 +43,8 @@ function detailOf(e: ActivityEntry): string {
         d.fallback === true && "AI 연결이 불안정해 대체 경로로 만듦",
       );
     }
+    case "abusive_message":
+      return parts(ABUSE_KO[str(d.level) ?? ""], "원문은 보존돼 있고 '원문 보기'로 열 수 있음");
     case "reply_sent":
       return parts(HOW_KO[str(d.how) ?? ""], str(d.draft_style) && `${STYLE_KO[str(d.draft_style)!] ?? str(d.draft_style)} 초안`);
     case "draft_rejected":
