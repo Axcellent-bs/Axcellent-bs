@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from ax_agent_template.llm import LLMResponseError
 from support_agent import abuse_rules, abuse_soften, claim_handlers, handlers
 from support_agent.abuse_soften import SoftenResult
 from support_agent.claims import ClaimStore
@@ -260,3 +261,69 @@ def test_a_name_that_looks_like_a_spaced_curse_is_left_alone(
     assert fake.seen  # 의심돼서 모델은 봤다
     assert (message["abuse_level"], message["softened_text"]) == ("none", None)
     assert "abusive_message" not in [a["kind"] for a in created["activity"]]
+
+
+# ---- 서버가 바쁠 때 한 번 다시 부르기 -----------------------------------------------------
+class FlakyLLM:
+    """앞의 몇 번은 지정한 오류로 실패하고 그다음부터 결과를 돌려준다."""
+
+    def __init__(self, failures: list[Exception], result: SoftenResult) -> None:
+        self.failures = failures
+        self.result = result
+        self.calls = 0
+
+    async def structured(self, prompt: str, model: Any, untrusted: dict[str, Any]) -> Any:
+        self.calls += 1
+        if self.failures:
+            raise self.failures.pop(0)
+        return self.result
+
+
+def _flaky(monkeypatch: pytest.MonkeyPatch, failures: list[Exception]) -> FlakyLLM:
+    fake = FlakyLLM(
+        failures,
+        SoftenResult(
+            abuse_level="profanity", softened_text="주문 ORD-1 12,000원 환불을 요청합니다."
+        ),
+    )
+    monkeypatch.setattr(abuse_soften, "_llm", lambda: fake)
+    monkeypatch.setattr(abuse_soften, "RETRY_DELAY", 0)
+    return fake
+
+
+ORIGINAL_TEXT = "씨발 ORD-1 12,000원 환불해"
+
+
+def test_a_busy_model_is_called_once_more(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _flaky(monkeypatch, [LLMResponseError("LLM API가 503를 돌려줬다")])
+    result = asyncio.run(abuse_soften.soften(ORIGINAL_TEXT, "profanity"))
+    assert fake.calls == 2 and result is not None
+    assert result[0].endswith("환불을 요청합니다.")
+
+
+def test_a_rate_limit_is_also_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _flaky(monkeypatch, [LLMResponseError("LLM API가 429를 돌려줬다")])
+    assert asyncio.run(abuse_soften.soften(ORIGINAL_TEXT, "profanity")) is not None
+    assert fake.calls == 2
+
+
+def test_it_gives_up_after_one_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    busy = LLMResponseError("LLM API가 503를 돌려줬다")
+    fake = _flaky(monkeypatch, [busy, busy, busy])
+    assert asyncio.run(abuse_soften.soften(ORIGINAL_TEXT, "profanity")) is None
+    assert fake.calls == 2  # 두 번까지만 부른다
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        LLMResponseError("LLM API 호출 실패: ReadTimeout"),
+        LLMResponseError("LLM API가 400를 돌려줬다"),
+    ],
+)
+def test_timeouts_and_client_errors_are_not_retried(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    fake = _flaky(monkeypatch, [error])
+    assert asyncio.run(abuse_soften.soften(ORIGINAL_TEXT, "profanity")) is None
+    assert fake.calls == 1  # 시간 초과는 접수를 더 늘리고, 4xx는 다시 불러도 같다

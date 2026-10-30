@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -22,7 +23,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from ax_agent_template.config import is_mock
-from ax_agent_template.llm import LLMClient, LLMSettings
+from ax_agent_template.llm import LLMClient, LLMResponseError, LLMSettings
 from support_agent import abuse_rules, guard
 from support_agent.abuse_rules import LEVEL_ORDER, AbuseLevel
 
@@ -31,6 +32,8 @@ logger = logging.getLogger(__name__)
 APOLOGY = abuse_rules.APOLOGY  # 순화문 맨 앞에 코드가 한 문장만 붙인다 (모델이 쓰지 않는다)
 MAX_GROWTH = 1.5  # 순화문은 원문의 1.5배(+40자)보다 길지 않다
 SLACK_CHARS = 40
+RETRY_DELAY = 1.0  # 서버가 잠깐 바쁠 때(5xx·429) 한 번만 다시 부른다
+_BUSY = re.compile(r"(?<!\d)(429|5\d\d)(?!\d)")  # "LLM API가 503를 돌려줬다"
 _NUMBER = re.compile(r"\d[\d,.]*\d|\d")
 _PLACEHOLDER = re.compile(r"\[[가-힣A-Za-z ]{1,12}\]")
 
@@ -95,10 +98,23 @@ def valid(original_masked: str, softened: str) -> bool:
 async def soften(text: str, rule_level: AbuseLevel) -> tuple[str, AbuseLevel] | None:
     """(순화문, 단계)를 돌려준다. 실패하거나 검사에 걸리면 None (1단계 결과를 그대로 쓴다)."""
     masked = guard.mask_pii(text)[0]
-    try:
-        result = await _llm().structured(PROMPT, SoftenResult, untrusted={"message": masked})
-    except Exception:  # noqa: BLE001 - 순화는 부가 기능이다
-        logger.warning("욕설 순화 LLM 실패, 규칙 결과를 쓴다", exc_info=True)
+    result = None
+    for attempt in range(2):
+        try:
+            result = await _llm().structured(PROMPT, SoftenResult, untrusted={"message": masked})
+            break
+        except LLMResponseError as exc:
+            # 시간 초과는 다시 부르지 않는다 (접수가 더 늘어진다)
+            if attempt == 0 and _BUSY.search(str(exc)):
+                logger.info("욕설 순화 LLM이 바빠서 한 번 다시 부른다: %s", exc)
+                await asyncio.sleep(RETRY_DELAY)
+                continue
+            logger.warning("욕설 순화 LLM 실패, 규칙 결과를 쓴다", exc_info=True)
+            return None
+        except Exception:  # noqa: BLE001 - 순화는 부가 기능이다
+            logger.warning("욕설 순화 LLM 실패, 규칙 결과를 쓴다", exc_info=True)
+            return None
+    if result is None:
         return None
     level: AbuseLevel = max((rule_level, result.abuse_level), key=lambda lv: LEVEL_ORDER[lv])
     if level == "none" or not valid(masked, result.softened_text):
