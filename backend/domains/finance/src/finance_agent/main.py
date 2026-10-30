@@ -20,7 +20,7 @@ from ax_agent_template import events
 from ax_agent_template.events import subscribe
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
-from finance_agent import closing
+from finance_agent import closing, persist
 from finance_agent import finance_config as fc
 from finance_agent.finance_api import add_finance_api
 from finance_agent.handlers import (
@@ -181,12 +181,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     (빠지면 실제 모드에서 coupon.issued·payment.refunded를 받지 못해 장부가 비고
     AI 대화방에도 안 나온다).
     """
+    saved_to = persist.state_file()
+    last_saved: str | None = None
+    if saved_to is not None and persist.load(state(), saved_to):
+        logger.info("재무 기록을 %s에서 이어 받았다", saved_to)
     events.start_consumer()
     interval = self_test_seconds()
     SELF_TEST_SCHEDULE.update(interval_seconds=interval, next_run_at=None)
     closing_interval = daily_closing_seconds()
     DAILY_CLOSING_SCHEDULE.update(interval_seconds=closing_interval, next_run_at=None)
     tasks = []
+    if saved_to is not None:
+        last_saved = persist.save(state(), saved_to)
+        tasks.append(asyncio.create_task(persist.save_loop(state, saved_to, last_saved)))
     if interval:
         tasks.append(asyncio.create_task(self_test_loop(interval, SELF_TEST_FIRST_DELAY)))
     if closing_interval:
@@ -202,6 +209,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await task
         SELF_TEST_SCHEDULE.update(interval_seconds=0, next_run_at=None)
         DAILY_CLOSING_SCHEDULE.update(interval_seconds=0, next_run_at=None)
+        if saved_to is not None:
+            persist.save(state(), saved_to)
         await events.stop_consumer()
 
 
