@@ -25,10 +25,10 @@ from hr_agent.retrieval.duplicates import SameDecisionJudge
 from hr_agent.util import similarity
 
 SAME_TOPIC = 0.5  # Dice로 같은 주제로 보는 결정 문장 유사도 하한(임베딩이 없을 때)
-DENSE_SAME_TOPIC = 0.7786  # Dense 코사인 하한. 15번 평가(link-rules.md)의 개발용 쌍에서 정했다
-AUTO_MERGE_COSINE = (
-    0.8351  # 이 이상이고 LLM이 같은 결정이라 해야 자동 병합(개발용 최대 비중복 + 0.005)
-)
+# 결정 문장끼리 코사인. 15번 평가 v2(link-rules.md 5장)의 개발용 쌍에서 정했다
+DENSE_SAME_TOPIC = 0.8184
+# 이 이상이고 LLM이 같은 결정이라 해야 자동 병합(개발용 최대 비중복 코사인 + 0.005)
+AUTO_MERGE_COSINE = 0.9101
 
 
 def _decision_text(card: Card) -> str:
@@ -44,17 +44,36 @@ def eligible_old(card: Card, old: Card) -> bool:
     )
 
 
+DECISION_VIEW = (
+    "dec:"  # 결정 문장만 담은 비교용 카드의 id 접두사(카드 전체 글의 벡터와 섞이지 않게)
+)
+
+
+def decision_view(card: Card) -> Card:
+    """같은 주제 비교용: 카드마다 다른 이유·교훈·근거 문단을 빼고 결정 문장만 남긴 카드."""
+    text = _decision_text(card)
+    return card.model_copy(
+        update={
+            "card_id": f"{DECISION_VIEW}{card.card_id}",
+            "title": f"[결정] {text}",
+            "body": f"결정: {text}",
+        }
+    )
+
+
 async def dense_scores(
     new_text: str, olders: list[Card], dense: DenseCardSearch | None
 ) -> dict[str, float] | None:
-    """옛 카드마다 코사인. 임베딩을 쓸 수 없거나 실패하면 None(Dice로 대체한다)."""
+    """옛 카드마다 코사인(결정 문장끼리 비교). 임베딩이 안 되거나 실패하면 None(Dice로 대체)."""
     if dense is None or not olders:
         return None
     try:
-        hits = await dense.search(new_text, olders, k=len(olders), min_cosine=-1.0)
+        hits = await dense.search(
+            new_text, [decision_view(o) for o in olders], k=len(olders), min_cosine=-1.0
+        )
     except Exception:  # noqa: BLE001 - 임베딩 실패가 연결 판단을 막지 않게 Dice로 대체한다
         return None
-    return {c.card_id: score for c, score in hits}
+    return {c.card_id.removeprefix(DECISION_VIEW): score for c, score in hits}
 
 
 async def topic_scores(
