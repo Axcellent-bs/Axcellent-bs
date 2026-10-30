@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from difflib import SequenceMatcher
@@ -31,6 +32,7 @@ from ax_contracts.schemas import (
     TaskStatus,
 )
 from support_agent import (
+    abuse_rules,
     abuse_soften,
     buyer_ids,
     compensation,
@@ -175,15 +177,30 @@ ABUSE_TITLES = {
 }
 
 
-async def _refine_abuse(conversation: Conversation, analysis: Analysis) -> Conversation:
+def _start_softening(message: str) -> asyncio.Task[Any] | None:
+    """규칙이 욕설로 찾은 글은 답변 초안을 만드는 동안 순화문도 함께 만든다 (접수 시간을 줄인다)."""
+    if not abuse_soften.enabled():
+        return None
+    level = abuse_rules.assess(message)[1]
+    if level == "none":
+        return None
+    return asyncio.create_task(abuse_soften.soften(message, level))
+
+
+async def _refine_abuse(
+    conversation: Conversation, analysis: Analysis, early: asyncio.Task[Any] | None = None
+) -> Conversation:
     """2단계: 욕설로 찾았거나 화난 메시지는 LLM이 순화문을 만든다. 실패해도 접수는 그대로다."""
     last = next((m for m in reversed(conversation.messages) if m.role == "customer"), None)
     if last is None or not abuse_soften.enabled():
         return conversation
     sentiment = analysis.classification.sentiment if analysis.classification else None
-    if not abuse_soften.wanted(last.abuse_level, sentiment):
+    if early is not None:  # 규칙이 찾은 글: 이미 돌고 있던 순화를 기다린다
+        result = await early
+    elif abuse_soften.wanted(last.abuse_level, sentiment):  # 화난 글만 초안 뒤에 따로 돌린다
+        result = await abuse_soften.soften(last.text, last.abuse_level)
+    else:
         return conversation
-    result = await abuse_soften.soften(last.text, last.abuse_level)
     if result is None:
         return conversation
     softened, level = result
@@ -379,9 +396,15 @@ async def create_inquiry(request: AgentRequest) -> AgentResult:
         extra = await _notice_sources(request, None, parsed.notice_component)
 
     async def apply() -> tuple[dict[str, Any], bool]:
-        analysis, fallback = await drafting.analyze(
-            message, subject, extra, policy_memory.retriever(request, SEND)
-        )
+        early = _start_softening(message)
+        try:
+            analysis, fallback = await drafting.analyze(
+                message, subject, extra, policy_memory.retriever(request, SEND)
+            )
+        except BaseException:
+            if early is not None:
+                early.cancel()
+            raise
         conversation = STORE.create(
             context_id=request.meta.context_id,
             tenant_id=request.meta.tenant_id,
@@ -395,7 +418,7 @@ async def create_inquiry(request: AgentRequest) -> AgentResult:
         )
         privacy_audit.record_message(STORE, conversation, fallback)
         await events.emit_inquiry_received(request, conversation)
-        conversation = await _refine_abuse(conversation, analysis)
+        conversation = await _refine_abuse(conversation, analysis, early)
         _log_abuse(conversation)
         log_activity(conversation.id, **_analysis_entry(analysis, fallback=fallback, first=True))
         return _view(conversation), fallback
@@ -421,13 +444,19 @@ async def add_customer_message(request: AgentRequest) -> AgentResult:
     extra = await _notice_sources(request, parsed.notice_id, parsed.notice_component)
 
     async def apply() -> tuple[dict[str, Any], bool]:
-        analysis, fallback = await drafting.analyze(
-            message, conversation.subject, extra, policy_memory.retriever(request, SEND)
-        )
+        early = _start_softening(message)
+        try:
+            analysis, fallback = await drafting.analyze(
+                message, conversation.subject, extra, policy_memory.retriever(request, SEND)
+            )
+        except BaseException:
+            if early is not None:
+                early.cancel()
+            raise
         updated = STORE.add_customer_message(parsed.inquiry_id, message, analysis)
         privacy_audit.record_message(STORE, updated, fallback)
         await events.emit_inquiry_received(request, updated)
-        updated = await _refine_abuse(updated, analysis)
+        updated = await _refine_abuse(updated, analysis, early)
         _log_abuse(updated)
         log_activity(parsed.inquiry_id, **_analysis_entry(analysis, fallback=fallback, first=False))
         return _view(updated), fallback
