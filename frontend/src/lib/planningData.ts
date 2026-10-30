@@ -182,6 +182,33 @@ export interface CrossReview {
   resultWhy?: string
   decidedAt?: string
   at?: string // 대기 시작 (ISO, 서버 대기열에서 옴). 없으면 t로 계산
+  evidence?: CrossEvidence[] // 다른 부서에서 받은 교차검증 근거
+}
+
+/** 교차검증 근거 한 줄 (백엔드 cross_check.EvidenceLine). ok가 false면 걸렸거나 못 모음 */
+export interface CrossEvidence {
+  source: 'orchestrator' | 'data' | 'planning'
+  label: string
+  value: string
+  ok: boolean
+}
+export const EVIDENCE_SOURCE: Record<CrossEvidence['source'], string> = { orchestrator: '총괄', data: '데이터분석', planning: '개발 AI' }
+
+// 자동 처리하지 않은 이유 (safety thresholds.toml 규칙 키 → 화면 이름)
+export const RULE_LABEL: Record<string, string> = {
+  pr_changed_lines: '300줄 초과',
+  pr_changed_files: '20파일 초과',
+  pr_allowed_paths: '허용 경로 밖',
+  pr_review_mismatch: '리뷰 불일치 2회',
+  pr_linked_incident: '장애 났던 경로',
+  irreversible: '되돌릴 수 없는 영역',
+  merge_cross_active_incident: '진행 중인 사건과 겹침',
+  merge_cross_data_verdict: '최근 이상 판정',
+  merge_cross_recent_incident: '최근 7일 같은 경로 장애',
+  merge_cross_evidence_missing: '근거 못 모음',
+  spec_open_question: '열린 질문',
+  spec_rejected_warning: '경고',
+  spec_no_basis: '근거 없음',
 }
 
 // 교차검증 대기를 사람 확인으로 넘기기까지 (분). 백엔드 PLANNING_CROSS_CHECK_TIMEOUT_MIN 기본값과 같다

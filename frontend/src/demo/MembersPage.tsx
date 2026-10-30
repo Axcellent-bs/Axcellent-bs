@@ -1,16 +1,30 @@
 import { useState, type FormEvent } from 'react'
 import { useCompany } from './company'
-import { ipMatches, linkEmail, linkIp, unlinkEmail, unlinkIp, useLinks, validRule } from './members'
-import { customerAccounts, kindOf } from './session'
+import { ipMatches, linkEmail, linkIp, setProfile, unlinkEmail, unlinkIp, useLinks, useProfiles, validRule } from './members'
+import { DeptPicker } from './DeptPicker'
+import { customerAccounts, kindOf, type Account } from './session'
 import { privateIp, useHosts } from './store'
 
 // 회원 연결 (관리자 /system/members). 일반회원을 회사 계정에 묶는다.
 // 계정 연결은 이메일로, IP 연결은 사내 PC IP나 대역으로. 둘 중 하나라도 맞으면 그 회원은 회사 회원이다.
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+/** 확인 권한 켜고 끄기 */
+function ApproverSwitch({ account }: { account: Account }) {
+  const on = !!account.approver
+  return (
+    <button type="button" role="switch" aria-checked={on} aria-label={`${account.name} 확인 권한`}
+      onClick={() => setProfile(account.email, { approver: !on })}
+      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition ${on ? 'bg-brand-600' : 'bg-ink-100'}`}>
+      <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition ${on ? 'translate-x-4' : 'translate-x-0.5'}`} />
+    </button>
+  )
+}
+
 export default function MembersPage() {
   const company = useCompany()
   const links = useLinks()
+  useProfiles() // 부서·확인 권한을 바꾸면 다시 그린다
   const [hosts] = useHosts()
   const [email, setEmail] = useState('')
   const [rule, setRule] = useState('')
@@ -90,6 +104,28 @@ export default function MembersPage() {
               {!members.length && !pending.length && (
                 <tr><td colSpan={4} className="px-4 py-6 text-center text-ink-500">가입한 일반회원이 없어요</td></tr>
               )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card space-y-4 p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-semibold">부서·확인 권한</h2>
+          <span className="chip bg-brand-50 text-brand-700">확인 권한 {customerAccounts().filter((a) => a.approver).length}</span>
+        </div>
+        <div className="overflow-x-auto rounded-xl border border-ink-100">
+          <table className="w-full text-sm">
+            <thead className="bg-app text-left text-xs text-ink-500"><tr><th className="px-4 py-2.5 font-medium">이름</th><th className="px-4 py-2.5 font-medium">구분</th><th className="px-4 py-2.5 font-medium">부서</th><th className="px-4 py-2.5 font-medium">확인 권한</th></tr></thead>
+            <tbody className="divide-y divide-ink-100">
+              {customerAccounts().map((m) => (
+                <tr key={m.id}>
+                  <td className="px-4 py-2.5">{m.name}<p className="font-mono text-xs text-ink-500">{m.email}</p></td>
+                  <td className="px-4 py-2.5"><span className="chip bg-ink-100 text-ink-700">{kindOf(m)}</span></td>
+                  <td className="px-4 py-2.5"><DeptPicker size="sm" label={`${m.name} 부서`} value={m.dept ?? ''} onChange={(d) => setProfile(m.email, { dept: d })} /></td>
+                  <td className="px-4 py-2.5"><ApproverSwitch account={m} /></td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
