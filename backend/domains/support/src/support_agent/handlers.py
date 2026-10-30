@@ -182,8 +182,8 @@ def _start_softening(message: str) -> asyncio.Task[Any] | None:
     if not abuse_soften.enabled():
         return None
     level = abuse_rules.assess(message)[1]
-    if level == "none":
-        return None
+    if level == "none" and not abuse_rules.maybe_evasive(message):
+        return None  # 띄어 쓴 욕설이 의심되면 규칙은 그대로 두고 모델이 가려서 본다
     return asyncio.create_task(abuse_soften.soften(message, level))
 
 
