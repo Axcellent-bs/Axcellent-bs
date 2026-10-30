@@ -148,6 +148,9 @@ if [ -z "${AX_ENABLED_SERVICES:-}" ] && [ -f .env ]; then
   AX_ENABLED_SERVICES=$(tr -d '\r' < .env | sed -n 's/^AX_ENABLED_SERVICES=//p' | tail -n 1 | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//; s/^"(.*)"$/\1/')
 fi
 export AX_ENABLED_SERVICES="${AX_ENABLED_SERVICES:-}"
+# 켠 서비스 파일 ({"enabled": [...], "updated_at", "updated_by"}). 있으면 위 환경변수보다 먼저 쓰고,
+# 바꾸면 재시작 없이 반영된다. 없거나 깨졌으면 환경변수를 쓴다 (ax_agent_template.routing)
+export AX_ENABLED_SERVICES_FILE="${AX_ENABLED_SERVICES_FILE:-$PWD/$DATA/enabled_services.json}"
 # 조직도(업무 → 맡은 부서·담당자). config/org.yaml 이 있으면 쓴다 (예시: config/org.example.yaml)
 if [ -z "${AX_ORG_CONFIG:-}" ] && [ -f config/org.yaml ]; then
   export AX_ORG_CONFIG="$PWD/config/org.yaml"
@@ -193,6 +196,10 @@ if [ -n "$ONLY" ]; then
   done
   # 비어 있으면 "전부 켬"이 되므로, 켤 서비스가 하나도 없으면 어느 서비스와도 맞지 않는 값을 둔다
   export AX_ENABLED_SERVICES="${enabled:-none}"
+  # 켠 서비스 파일이 있으면 라우터는 파일을 먼저 본다. 안 띄운 서비스가 파일에서 켜져 있으면 A2A가 실패한다
+  if [ -f "$AX_ENABLED_SERVICES_FILE" ]; then
+    echo "경고: 켠 서비스 파일($AX_ENABLED_SERVICES_FILE)이 있어 --only로 정한 켠 서비스($AX_ENABLED_SERVICES)보다 먼저 쓰입니다. 안 띄운 서비스가 파일에 있으면 그 파일을 고치거나 지우세요." >&2
+  fi
 fi
 
 # 이벤트 버스 (Redis Streams)
@@ -262,7 +269,11 @@ fi
 
 sleep 8
 echo "모드: 실제"
-echo "켠 서비스: ${AX_ENABLED_SERVICES:-전부}  조직도: ${AX_ORG_CONFIG:-없음}"
+if [ -f "$AX_ENABLED_SERVICES_FILE" ]; then
+  echo "켠 서비스: 파일 $AX_ENABLED_SERVICES_FILE (바꾸면 재시작 없이 반영)  조직도: ${AX_ORG_CONFIG:-없음}"
+else
+  echo "켠 서비스: ${AX_ENABLED_SERVICES:-전부}  조직도: ${AX_ORG_CONFIG:-없음}"
+fi
 while read -r name port _; do
   [ -n "$name" ] || continue
   code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port/health" || true)
