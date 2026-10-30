@@ -18,6 +18,7 @@ from support_agent.schemas import (
     Feedback,
     InquiryStatus,
     Message,
+    ResolutionNote,
     Urgency,
 )
 
@@ -135,6 +136,12 @@ class InquiryStore:
     def set_feedback(self, inquiry_id: int, feedback: Feedback) -> Conversation:
         conversation = self._conversations[inquiry_id]
         conversation.feedback = feedback
+        return conversation
+
+    def add_resolution_note(self, inquiry_id: int, note: ResolutionNote) -> Conversation:
+        """해결 메모를 맨 앞에 넣는다(최신 먼저). 메모는 지우거나 고치지 않는다."""
+        conversation = self._conversations[inquiry_id]
+        conversation.resolution_notes.insert(0, note)
         return conversation
 
     def set_status(self, inquiry_id: int, status: InquiryStatus) -> Conversation:

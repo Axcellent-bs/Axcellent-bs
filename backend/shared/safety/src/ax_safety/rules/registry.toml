@@ -77,6 +77,12 @@ action = "set_feedback_status"
 owner = "support"
 base_grade = "A"
 
+# 해결된 문의에 상담원이 해결 메모(원인·조치·결과)를 남기기. 돈은 움직이지 않고 메모만 쌓는다
+[[actions]]
+action = "add_resolution_note"
+owner = "support"
+base_grade = "A"
+
 # 클레임 처리 기록 (#105). 돈이 나가지 않는 기록만. 환불 지급은 refund_request(A, 한도 넘으면 C)
 [[actions]]
 action = "create_claim"

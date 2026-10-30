@@ -267,6 +267,9 @@ class PersistentInquiryStore(InquiryStore):
     def set_feedback(self, *args: Any, **kwargs: Any) -> Conversation:
         return self._save(super().set_feedback(*args, **kwargs))
 
+    def add_resolution_note(self, *args: Any, **kwargs: Any) -> Conversation:
+        return self._save(super().add_resolution_note(*args, **kwargs))
+
     def log_activity(self, *args: Any, **kwargs: Any) -> Conversation | None:
         conversation = super().log_activity(*args, **kwargs)
         return None if conversation is None else self._save(conversation)

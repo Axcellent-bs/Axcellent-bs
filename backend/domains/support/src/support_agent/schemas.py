@@ -148,6 +148,20 @@ class Feedback(AxModel):
     decided_at: str | None = None
 
 
+class ResolutionNote(AxModel):
+    """해결된 문의에 상담원이 남긴 해결 메모(원인·조치·결과). 글은 개인정보를 가려 저장한다.
+
+    작성자는 호출한 화면이 사람 토큰에서 채워 보낸 이름이다. 세 칸 중 비운 칸은 `None`이다.
+    """
+
+    id: int
+    author: str
+    root_cause: str | None = None
+    action_taken: str | None = None
+    result: str | None = None
+    created_at: str
+
+
 class Conversation(ConversationListItem):
     tenant_id: str = TENANT_ID_DEFAULT
     context_id: str
@@ -158,6 +172,7 @@ class Conversation(ConversationListItem):
     claims: list[dict[str, Any]] = Field(default_factory=list)  # 읽을 때 이어진 클레임으로 채운다
     activity: list[ActivityEntry] = Field(default_factory=list)  # AI 처리 내력 (오래된 것부터)
     feedback: Feedback | None = None  # 해결 결과에 대한 고객 평가 (문의당 한 번)
+    resolution_notes: list[ResolutionNote] = Field(default_factory=list)  # 해결 메모 (최신 먼저)
 
 
 # ---------------------------------------------------------------- LLM 응답 스키마
@@ -282,6 +297,16 @@ class ListFeedbackInput(AxModel):
     status: FeedbackStatus | None = None
     max_rating: int | None = Field(default=None, ge=1, le=5)
     limit: int = Field(default=100, ge=1, le=500)
+
+
+class AddResolutionNoteInput(AxModel):
+    """해결 메모 남기기. 메모 글(`root_cause`·`action_taken`·`result`)은 `untrusted`로만 받는다.
+
+    `author`는 화면(dashboard-api)이 사람 토큰에서 채운 이름이다. 화면 본문의 값은 쓰지 않는다.
+    """
+
+    inquiry_id: int
+    author: str = Field(min_length=1, max_length=50)
 
 
 class SetFeedbackStatusInput(AxModel):

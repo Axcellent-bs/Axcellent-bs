@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 Urgency = Literal["low", "medium", "high"]
 ConversationStatus = Literal["open", "resolved", "escalated"]
@@ -402,6 +402,17 @@ class FeedbackOverview(BaseModel):
     follow_up: int = 0
 
 
+class ResolutionNote(BaseModel):
+    """해결된 문의에 상담원이 남긴 해결 메모. 글은 개인정보를 가려 저장돼 온다. 비운 칸은 null."""
+
+    id: int
+    author: str
+    root_cause: str | None = None
+    action_taken: str | None = None
+    result: str | None = None
+    created_at: str
+
+
 class Conversation(ConversationListItem):
     messages: list[Message] = Field(default_factory=list)
     summary: Summary | None = None
@@ -409,6 +420,7 @@ class Conversation(ConversationListItem):
     claims: list[Claim] = Field(default_factory=list)
     activity: list[ActivityEntry] = Field(default_factory=list)
     feedback: Feedback | None = None
+    resolution_notes: list[ResolutionNote] = Field(default_factory=list)  # 최신 먼저
 
 
 # ---------------------------------------------------------------- 후기
@@ -606,6 +618,20 @@ class FeedbackBody(BaseModel):
     rating: int = Field(ge=1, le=5)
     resolved: bool
     comment: str = Field(default="", max_length=300)
+
+
+class ResolutionNoteBody(BaseModel):
+    """해결 메모 본문. 작성자는 받지 않는다(서버가 사람 토큰에서 채운다). 셋 다 비면 422."""
+
+    root_cause: str = Field(default="", max_length=1000)
+    action_taken: str = Field(default="", max_length=1000)
+    result: str = Field(default="", max_length=1000)
+
+    @model_validator(mode="after")
+    def _not_all_blank(self) -> ResolutionNoteBody:
+        if not (self.root_cause.strip() or self.action_taken.strip() or self.result.strip()):
+            raise ValueError("원인·조치·결과 중 하나는 적어야 한다")
+        return self
 
 
 class FeedbackStatusBody(BaseModel):

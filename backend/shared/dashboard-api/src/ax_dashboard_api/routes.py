@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from ax_contracts.schemas.hr import (
     AnswerHandoverQuestionOutput,
@@ -63,6 +63,7 @@ from ax_dashboard_api.schemas import (
     QueueProcessBody,
     ReceiptAnalysisBody,
     ResolutionBody,
+    ResolutionNoteBody,
     ReviewStatusBody,
     StatusBody,
     Summary,
@@ -391,6 +392,30 @@ async def submit_conversation_feedback(conversation_id: int, body: FeedbackBody)
             "source": "console",
         },
         {"comment": body.comment},
+        target=f"inquiry:{conversation_id}",
+    )
+    return ok(
+        await _conversation(
+            await support_client.call("get_inquiry", {"inquiry_id": conversation_id})
+        )
+    )
+
+
+@router.post("/conversations/{conversation_id}/resolution-notes", status_code=201)
+async def add_resolution_note(
+    conversation_id: int, body: ResolutionNoteBody, request: Request
+) -> dict:
+    """해결된 문의에 상담원이 해결 메모를 남긴다. 작성자는 사람 토큰에서만 채운다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "해결 메모는 실제 모드에서만 된다")
+    await support_client.call(
+        "add_resolution_note",
+        {"inquiry_id": conversation_id, "author": request.state.human},
+        {
+            "root_cause": body.root_cause,
+            "action_taken": body.action_taken,
+            "result": body.result,
+        },
         target=f"inquiry:{conversation_id}",
     )
     return ok(
