@@ -37,9 +37,9 @@ export interface SupportCostRecord {
 }
 
 // ---------------------------------------------------------------- §11 overview
-export type TodoKind = "settlement_batch" | "closing_confirm" | "recon_exception" | "audit_finding" | "policy_alert";
+export type TodoKind = "settlement_batch" | "settlement_deadline" | "closing_confirm" | "recon_exception" | "audit_finding" | "policy_alert";
 /** 할 일에서 사람이 바로 누를 결정 */
-export type TodoActionType = "closing_confirm" | "settlement_request" | "review_decision" | "recon_note" | "anomaly_resolve" | "policy_ack";
+export type TodoActionType = "closing_confirm" | "settlement_request" | "review_decision" | "recon_note" | "anomaly_resolve" | "policy_ack" | "open_tab";
 export interface TodoAction { type: TodoActionType; period?: string; date?: string; review_id?: string | null }
 /** 건마다 결정할 때의 한 건 (대사 불일치·감사 의심·한도 경보) */
 export interface TodoItem { ref: string; title: string; detail: string; amount: number | null }
@@ -124,6 +124,69 @@ export interface SellerStatement {
 }
 export interface SettlementBatch { status: BatchStatus; review_id: string | null; execution_id: string | null; total_payout: number; seller_ids: string[] }
 export interface Settlements { period: string; from: string; to: string; pay_date: string | null; statements: SellerStatement[]; batch: SettlementBatch }
+
+// ---------------------------------------------------------------- ③ 정산 기한 · 미지급금 롤포워드
+export type DeadlineStatus = "overdue" | "at_risk" | "due_soon" | "ok";
+export interface DeadlineSeller {
+  seller_id: string;
+  name: string;
+  orders: number;
+  /** 기한이 걸린 판매자 몫(쿠폰·환불 차감 전) */
+  amount: number;
+  oldest_confirmed: string;
+  deadline: string;
+  days_left: number;
+  /** 보류 사유가 있거나 예정일이 지났으면 null */
+  expected_pay_date: string | null;
+  status: DeadlineStatus;
+  status_label: string;
+  hold_reasons: HoldReason[];
+}
+export interface DeadlineReport {
+  today: string;
+  deadline_days: number;
+  basis: string;
+  warn_days: number;
+  since: string;
+  counts: Record<DeadlineStatus, number>;
+  waiting_orders: number;
+  sellers: DeadlineSeller[];
+}
+export interface PayableRow { seller_id: string; name: string; opening: number | null; accrued: number | null; paid: number; closing: number | null; overpaid: boolean }
+export interface Payables {
+  month: string;
+  from: string;
+  to: string;
+  totals: { opening: number | null; accrued: number | null; paid: number; closing: number | null };
+  balanced: boolean | null;
+  overpaid: string[];
+  sellers: PayableRow[];
+  basis: string;
+}
+
+// ---------------------------------------------------------------- ① 월간 변동 분석
+export interface VarianceLine {
+  code: string;
+  label: string;
+  current: number | null;
+  previous: number | null;
+  diff: number | null;
+  pct: number | null;
+  last_year: number | null;
+  yoy_diff: number | null;
+  yoy_pct: number | null;
+  flag: boolean;
+  note: string;
+}
+export interface VarianceCategory { category: string; gmv: number; gmv_prev: number; commission: number; commission_prev: number; commission_diff: number }
+export interface Variance {
+  month: string;
+  lines: VarianceLine[];
+  drivers: { commission_change: number; volume_effect: number; rate_mix_effect: number } | null;
+  categories: VarianceCategory[];
+  summary: string[];
+  thresholds: { flag_ratio: number; flag_min_amount: number };
+}
 
 // ---------------------------------------------------------------- ⑤ 예산·한도 정책
 export type PolicyAlert = "ok" | "warn" | "over";
@@ -435,6 +498,12 @@ export const finance = {
   requestSettlementBatch: (period: string) =>
     fin<Envelope<Settlements | SettlementBatch>>("/api/finance/settlements/batch", { method: "POST", body: { period }, human: true }),
   policy: () => fin<Envelope<Policy>>("/api/finance/policy"),
+  /** 판매 대금 지급 기한 점검 */
+  deadlines: () => fin<Envelope<DeadlineReport>>("/api/finance/settlements/deadlines"),
+  /** 판매자 미지급금 롤포워드 (그 달). 날짜가 없으면 이번 달 */
+  payables: (date?: string | null) => fin<Envelope<Payables>>(`/api/finance/payables${query({ date })}`),
+  /** 월간 변동 분석 (지난달·작년 같은 달 대비) */
+  variance: (date?: string | null) => fin<Envelope<Variance>>(`/api/finance/variance${query({ date })}`),
   /** 예산·한도 경보 확인 메모. 사람 토큰만. 한도는 바꾸지 않는다 */
   ackPolicy: (key: string, note: string) =>
     fin<Envelope<{ key: string; note: string; by: string; at: string }>>(`/api/finance/policy/${encodeURIComponent(key)}/ack`, { method: "POST", body: { note }, human: true }),
@@ -535,7 +604,7 @@ export function todayKst(now = new Date()): string {
 export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "audit";
 export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "audit"];
 const TODO_TAB: Record<TodoKind, FinanceTab> = {
-  settlement_batch: "settlements", closing_confirm: "closing", recon_exception: "reconciliation", audit_finding: "audit", policy_alert: "policy",
+  settlement_batch: "settlements", settlement_deadline: "settlements", closing_confirm: "closing", recon_exception: "reconciliation", audit_finding: "audit", policy_alert: "policy",
 };
 export function todoTab(t: Pick<FinanceTodo, "kind" | "link">): FinanceTab {
   const link = (t.link ?? "").replace(/^#/, "");

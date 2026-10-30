@@ -13,6 +13,11 @@ stationery = 0.08                   # 문구 8%
 [settlement]
 cycle = "weekly"                    # 주 정산 (월~일)
 pay_days_after_period_end = 6       # 지급일 = 정산 기간 마지막 날(일) + 6일
+# 정산 기한 점검 (deadline.py). 법이 정한 판매 대금 지급 기한을 넘기지 않게 경보만 낸다
+deadline_days = 20                  # 구매 확정일부터 이 날 안에 지급 (값은 법 확인 후 PR로)
+deadline_basis = "구매 확정일(배송 완료 시각으로 대신함)부터"
+deadline_warn_days = 5              # 기한까지 이 날 이하로 남으면 "임박"
+deadline_lookback_days = 70         # 이 기간 안에 결제된 주문을 본다
 
 [pg]
 fee_rate = 0.031                    # PG 수수료율 기본 3.1%
@@ -31,6 +36,10 @@ percentile = 0.95                   # 이 분위 값을 기준으로 제안
 round_to = 10000                    # 제안 값은 이 단위로 올림
 min_change_ratio = 0.1              # 지금 값과 10% 넘게 다를 때만 제안
 max_step_ratio = 0.3                # 한 번 제안에서 지금 값의 30% 넘게 바꾸지 않음 (적용은 기준표 PR)
+
+[variance]
+flag_ratio = 0.1                    # 지난달보다 10% 이상 움직이고
+flag_min_amount = 10000             # 변동액이 1만 원 이상이면 "크게 움직인 줄"
 
 [audit]
 near_limit_ratio = 0.9              # 한도의 90% 이상 ~ 한도 이하면 "한도 바로 아래"

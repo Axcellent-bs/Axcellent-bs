@@ -10,6 +10,9 @@
 | `POST /api/finance/reconciliation/{payment_id}/note` | ② 불일치 처리 메모 | **사람** |
 | `GET /api/finance/settlements?period=YYYY-Www` | ③ 판매자 정산 내역서 (생략 = 지난주) | 없음 |
 | `POST /api/finance/settlements/batch` | ③ 묶음 → `execute(confirm_settlement)` | 선택 |
+| `GET /api/finance/settlements/deadlines` | ③ 판매 대금 지급 기한 점검 | 없음 |
+| `GET /api/finance/payables?date=` | ③ 판매자 미지급금 롤포워드 (그 달) | 없음 |
+| `GET /api/finance/variance?date=` | ① 월간 변동 분석 (지난달·작년 같은 달 대비) | 없음 |
 | `GET /api/finance/policy` | ⑤ 정책표·소진율·한도 제안 | 없음 |
 | `POST /api/finance/policy/{key}/ack` | ⑤ 경보 확인 메모 (이번 달 숨김) | **사람** |
 | `GET /api/finance/audit?days=7&context_id=` | ⑦ 사후 감사 (사건 하나로 좁히기 선택) | 없음 |
@@ -39,10 +42,13 @@ from finance_agent import (
     anomalies,
     audit,
     closing,
+    deadline,
+    payables,
     policy,
     reconciliation,
     settlement,
     statements,
+    variance,
 )
 from finance_agent import finance_config as fc
 from finance_agent.handlers import closing_key, incident_impact, note_audit, state
@@ -90,6 +96,7 @@ async def refresh_batch(batch: dict[str, Any]) -> None:
         return
     if status == "approved":
         batch["status"] = "approved"
+        batch.setdefault("approved_at", fc.iso(fc.now()))
     elif status in ("rejected", "expired"):
         batch["status"] = "rejected"
 
@@ -150,6 +157,30 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
                     "action": {"type": "settlement_request", "period": sett["period"]},
                 }
             )
+
+    late = deadline.needs_attention(deadline.deadline_report(books, state().records.batches, today))
+    if late:
+        worst = late[0]
+        todo.append(
+            {
+                "kind": "settlement_deadline",
+                "title": f"정산 기한 확인 필요 판매자 {len(late)}곳 ({worst['status_label']} 포함)",
+                "count": len(late),
+                "amount": sum(r["amount"] for r in late),
+                "link": "settlements",
+                # 보류 사유를 풀거나 이번 묶음에 넣어 기한 안에 지급되게 한다 (지급은 보류 큐 승인)
+                "action": {"type": "open_tab"},
+                "items": [
+                    {
+                        "ref": r["seller_id"],
+                        "title": f"{r['name']} · {r['status_label']}",
+                        "detail": f"기한 {r['deadline']} (D{r['days_left']:+d})",
+                        "amount": r["amount"],
+                    }
+                    for r in late[:TODO_ITEMS]
+                ],
+            }
+        )
 
     yesterday = today - timedelta(days=1)
     if closing_key("day", yesterday) not in state().records.closings:
@@ -465,9 +496,11 @@ def add_finance_api(app: FastAPI) -> None:
             "execution_id": decision.execution_id,
             "total_payout": total,
             "seller_ids": seller_ids,
+            "payouts": {r["seller_id"]: r["payout"] for r in rows},
             "attempt": attempt,
             "requested_by": requested_by,
             "requested_at": fc.iso(fc.now()),
+            **({"approved_at": fc.iso(fc.now())} if decision.status == "executed" else {}),
         }
         data, meta = await settlements_view(name)
         return ok(data, meta)
@@ -528,6 +561,29 @@ def add_finance_api(app: FastAPI) -> None:
         }
         state().records.policy_acks[rule_key] = ack
         return ok(ack | {"key": rule_key}, books.meta() | {"acked_by": person})
+
+    @app.get("/api/finance/settlements/deadlines")
+    async def get_deadlines() -> dict:
+        books = await state().books()
+        return ok(deadline.deadline_report(books, state().records.batches), books.meta())
+
+    @app.get("/api/finance/payables", response_model=None)
+    async def get_payables(date: str | None = None) -> dict | JSONResponse:
+        try:
+            d = fc.parse_date(date) or fc.today()
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        books = await state().books()
+        return ok(payables.rollforward(books, state().records.batches, d), books.meta())
+
+    @app.get("/api/finance/variance", response_model=None)
+    async def get_variance(date: str | None = None) -> dict | JSONResponse:
+        try:
+            d = fc.parse_date(date) or fc.today()
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        books = await state().books()
+        return ok(variance.variance_report(books, d), books.meta())
 
     @app.get("/api/finance/anomalies")
     async def get_anomalies() -> dict:

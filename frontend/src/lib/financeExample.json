@@ -23,6 +23,36 @@
      }
     },
     {
+     "kind": "settlement_deadline",
+     "title": "정산 기한 확인 필요 판매자 3곳 (기한 넘길 위험 포함)",
+     "count": 3,
+     "amount": 6357984,
+     "link": "settlements",
+     "action": {
+      "type": "open_tab"
+     },
+     "items": [
+      {
+       "ref": "sel_0002",
+       "title": "종이나라 · 기한 넘길 위험",
+       "detail": "기한 2026-11-06 (D+7)",
+       "amount": 1066464
+      },
+      {
+       "ref": "sel_0003",
+       "title": "북앤펜 · 기한 넘길 위험",
+       "detail": "기한 2026-11-06 (D+7)",
+       "amount": 3208020
+      },
+      {
+       "ref": "sel_0001",
+       "title": "책마루 · 기한 넘길 위험",
+       "detail": "기한 2026-11-06 (D+7)",
+       "amount": 2083500
+      }
+     ]
+    },
+    {
      "kind": "closing_confirm",
      "title": "어제(2026-10-29) 결산 확정 대기",
      "count": 1,
@@ -146,7 +176,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.108849Z",
+   "collected_at": "2026-10-30T07:27:25.141901Z",
    "source": "seed",
    "unavailable": []
   }
@@ -241,7 +271,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.168810Z",
+   "collected_at": "2026-10-30T07:27:25.203476Z",
    "source": "seed",
    "unavailable": []
   }
@@ -348,7 +378,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.179017Z",
+   "collected_at": "2026-10-30T07:27:25.213186Z",
    "source": "seed",
    "unavailable": []
   }
@@ -524,7 +554,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.190018Z",
+   "collected_at": "2026-10-30T07:27:25.222909Z",
    "source": "seed",
    "unavailable": []
   }
@@ -700,7 +730,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.200902Z",
+   "collected_at": "2026-10-30T07:27:25.234649Z",
    "source": "seed",
    "unavailable": []
   }
@@ -876,7 +906,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.213442Z",
+   "collected_at": "2026-10-30T07:27:25.245103Z",
    "source": "seed",
    "unavailable": []
   }
@@ -1995,7 +2025,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.246813Z",
+   "collected_at": "2026-10-30T07:27:25.257662Z",
    "source": "seed",
    "unavailable": [],
    "pg_source": "mock_toss_settlement"
@@ -2066,7 +2096,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.258279Z",
+   "collected_at": "2026-10-30T07:27:25.274763Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2181,7 +2211,310 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.268580Z",
+   "collected_at": "2026-10-30T07:27:25.309587Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/settlements/deadlines": {
+  "data": {
+   "today": "2026-10-30",
+   "deadline_days": 20,
+   "basis": "구매 확정일(배송 완료 시각으로 대신함)부터",
+   "warn_days": 5,
+   "since": "2026-08-21",
+   "counts": {
+    "overdue": 0,
+    "at_risk": 3,
+    "due_soon": 0,
+    "ok": 0
+   },
+   "waiting_orders": 22,
+   "sellers": [
+    {
+     "seller_id": "sel_0002",
+     "name": "종이나라",
+     "orders": 56,
+     "amount": 1066464,
+     "oldest_confirmed": "2026-10-17",
+     "deadline": "2026-11-06",
+     "days_left": 7,
+     "expected_pay_date": null,
+     "status": "at_risk",
+     "status_label": "기한 넘길 위험",
+     "hold_reasons": [
+      {
+       "code": "open_claim",
+       "label": "처리 중인 환불·교환 1건"
+      },
+      {
+       "code": "unconfirmed_purchase",
+       "label": "구매 미확정 주문 14건"
+      }
+     ]
+    },
+    {
+     "seller_id": "sel_0003",
+     "name": "북앤펜",
+     "orders": 56,
+     "amount": 3208020,
+     "oldest_confirmed": "2026-10-17",
+     "deadline": "2026-11-06",
+     "days_left": 7,
+     "expected_pay_date": null,
+     "status": "at_risk",
+     "status_label": "기한 넘길 위험",
+     "hold_reasons": [
+      {
+       "code": "unconfirmed_purchase",
+       "label": "구매 미확정 주문 2건"
+      }
+     ]
+    },
+    {
+     "seller_id": "sel_0001",
+     "name": "책마루",
+     "orders": 56,
+     "amount": 2083500,
+     "oldest_confirmed": "2026-10-17",
+     "deadline": "2026-11-06",
+     "days_left": 7,
+     "expected_pay_date": null,
+     "status": "at_risk",
+     "status_label": "기한 넘길 위험",
+     "hold_reasons": [
+      {
+       "code": "unconfirmed_purchase",
+       "label": "구매 미확정 주문 2건"
+      }
+     ]
+    }
+   ]
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T07:27:25.340894Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/payables": {
+  "data": {
+   "month": "2026-10",
+   "from": "2026-10-01T00:00:00Z",
+   "to": "2026-11-01T00:00:00Z",
+   "totals": {
+    "opening": 0,
+    "accrued": 6665676,
+    "paid": 0,
+    "closing": 6665676
+   },
+   "balanced": true,
+   "overpaid": [],
+   "sellers": [
+    {
+     "seller_id": "sel_0003",
+     "name": "북앤펜",
+     "opening": 0,
+     "accrued": 3239920,
+     "paid": 0,
+     "closing": 3239920,
+     "overpaid": false
+    },
+    {
+     "seller_id": "sel_0001",
+     "name": "책마루",
+     "opening": 0,
+     "accrued": 2154000,
+     "paid": 0,
+     "closing": 2154000,
+     "overpaid": false
+    },
+    {
+     "seller_id": "sel_0002",
+     "name": "종이나라",
+     "opening": 0,
+     "accrued": 1271756,
+     "paid": 0,
+     "closing": 1271756,
+     "overpaid": false
+    }
+   ],
+   "basis": "지급 = 안전 장치가 승인한 정산 묶음 (실제 이체 결과 미연동)"
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T07:27:25.357209Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/variance": {
+  "data": {
+   "month": "2026-10",
+   "spans": {
+    "current": {
+     "from": "2026-10-01T00:00:00Z",
+     "to": "2026-11-01T00:00:00Z"
+    },
+    "previous": {
+     "from": "2026-09-01T00:00:00Z",
+     "to": "2026-10-01T00:00:00Z"
+    },
+    "last_year": {
+     "from": "2025-10-01T00:00:00Z",
+     "to": "2025-11-01T00:00:00Z"
+    }
+   },
+   "lines": [
+    {
+     "code": "gmv",
+     "label": "총거래액",
+     "current": 7534800,
+     "previous": 0,
+     "diff": 7534800,
+     "pct": null,
+     "last_year": 0,
+     "yoy_diff": 7534800,
+     "yoy_pct": null,
+     "flag": false,
+     "note": ""
+    },
+    {
+     "code": "order_count",
+     "label": "주문 수(건)",
+     "current": 186,
+     "previous": 0,
+     "diff": 186,
+     "pct": null,
+     "last_year": 0,
+     "yoy_diff": 186,
+     "yoy_pct": null,
+     "flag": false,
+     "note": ""
+    },
+    {
+     "code": "aov",
+     "label": "평균 주문 금액",
+     "current": 40510,
+     "previous": null,
+     "diff": null,
+     "pct": null,
+     "last_year": null,
+     "yoy_diff": null,
+     "yoy_pct": null,
+     "flag": false,
+     "note": ""
+    },
+    {
+     "code": "commission_revenue",
+     "label": "수수료 매출",
+     "current": 684024,
+     "previous": 0,
+     "diff": 684024,
+     "pct": null,
+     "last_year": 0,
+     "yoy_diff": 684024,
+     "yoy_pct": null,
+     "flag": false,
+     "note": ""
+    },
+    {
+     "code": "take_rate",
+     "label": "평균 수수료율",
+     "current": 0.0908,
+     "previous": null,
+     "diff": null,
+     "pct": null,
+     "last_year": null,
+     "yoy_diff": null,
+     "yoy_pct": null,
+     "flag": false,
+     "note": ""
+    },
+    {
+     "code": "coupon_cost",
+     "label": "회사 부담 쿠폰",
+     "current": 299700,
+     "previous": 0,
+     "diff": 299700,
+     "pct": null,
+     "last_year": 0,
+     "yoy_diff": 299700,
+     "yoy_pct": null,
+     "flag": false,
+     "note": ""
+    },
+    {
+     "code": "pg_fee",
+     "label": "PG 수수료",
+     "current": 240741,
+     "previous": 0,
+     "diff": 240741,
+     "pct": null,
+     "last_year": 0,
+     "yoy_diff": 240741,
+     "yoy_pct": null,
+     "flag": false,
+     "note": ""
+    },
+    {
+     "code": "refund_total",
+     "label": "환불",
+     "current": 140100,
+     "previous": 0,
+     "diff": 140100,
+     "pct": null,
+     "last_year": 0,
+     "yoy_diff": 140100,
+     "yoy_pct": null,
+     "flag": false,
+     "note": ""
+    },
+    {
+     "code": "net_result",
+     "label": "영업 결과",
+     "current": 143583,
+     "previous": 0,
+     "diff": 143583,
+     "pct": null,
+     "last_year": 0,
+     "yoy_diff": 143583,
+     "yoy_pct": null,
+     "flag": false,
+     "note": ""
+    }
+   ],
+   "drivers": null,
+   "categories": [
+    {
+     "category": "book",
+     "gmv": 4062000,
+     "gmv_prev": 0,
+     "commission": 406200,
+     "commission_prev": 0,
+     "commission_diff": 406200
+    },
+    {
+     "category": "stationery",
+     "gmv": 3472800,
+     "gmv_prev": 0,
+     "commission": 277824,
+     "commission_prev": 0,
+     "commission_diff": 277824
+    }
+   ],
+   "summary": [
+    "지난달과 비교해 크게 움직인 줄이 없습니다."
+   ],
+   "thresholds": {
+    "flag_ratio": 0.1,
+    "flag_min_amount": 10000
+   }
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T07:27:25.373428Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2284,7 +2617,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.293340Z",
+   "collected_at": "2026-10-30T07:27:25.393443Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2388,7 +2721,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.343710Z",
+   "collected_at": "2026-10-30T07:27:25.416143Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2485,7 +2818,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.368938Z",
+   "collected_at": "2026-10-30T07:27:25.442349Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2508,8 +2841,8 @@
       "exe_s0044"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T06:14:50.133185Z",
-     "last_seen": "2026-10-30T06:14:50.384195Z",
+     "first_seen": "2026-10-30T07:27:25.194865Z",
+     "last_seen": "2026-10-30T07:27:25.456171Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2522,8 +2855,8 @@
      "detail": "최근 7일 환불률 4.1% (지난 7일 0.5%)",
      "refs": [],
      "status": "open",
-     "first_seen": "2026-10-30T06:14:50.133185Z",
-     "last_seen": "2026-10-30T06:14:50.359878Z",
+     "first_seen": "2026-10-30T07:27:25.194865Z",
+     "last_seen": "2026-10-30T07:27:25.434933Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2539,8 +2872,8 @@
       "ord_2156"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T06:14:50.133185Z",
-     "last_seen": "2026-10-30T06:14:50.384195Z",
+     "first_seen": "2026-10-30T07:27:25.194865Z",
+     "last_seen": "2026-10-30T07:27:25.456171Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2556,8 +2889,8 @@
       "cpn_3063"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T06:14:50.133185Z",
-     "last_seen": "2026-10-30T06:14:50.384195Z",
+     "first_seen": "2026-10-30T07:27:25.194865Z",
+     "last_seen": "2026-10-30T07:27:25.456171Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2577,8 +2910,8 @@
       "ord_2135"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T06:14:50.133185Z",
-     "last_seen": "2026-10-30T06:14:50.384195Z",
+     "first_seen": "2026-10-30T07:27:25.194865Z",
+     "last_seen": "2026-10-30T07:27:25.456171Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2596,8 +2929,8 @@
       "exe_s0046"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T06:14:50.133185Z",
-     "last_seen": "2026-10-30T06:14:50.384195Z",
+     "first_seen": "2026-10-30T07:27:25.194865Z",
+     "last_seen": "2026-10-30T07:27:25.456171Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2615,8 +2948,8 @@
       "exe_s0049"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T06:14:50.133185Z",
-     "last_seen": "2026-10-30T06:14:50.309973Z",
+     "first_seen": "2026-10-30T07:27:25.194865Z",
+     "last_seen": "2026-10-30T07:27:25.406531Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2635,8 +2968,8 @@
       "exe_s0049"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T06:14:50.359878Z",
-     "last_seen": "2026-10-30T06:14:50.384195Z",
+     "first_seen": "2026-10-30T07:27:25.434933Z",
+     "last_seen": "2026-10-30T07:27:25.456171Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2727,7 +3060,7 @@
   ],
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.416489Z",
+   "collected_at": "2026-10-30T07:27:25.507002Z",
    "ledger_source": "seed",
    "unavailable": []
   }
@@ -2736,7 +3069,7 @@
   "data": [],
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.425652Z",
+   "collected_at": "2026-10-30T07:27:25.523734Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2838,7 +3171,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.440414Z",
+   "collected_at": "2026-10-30T07:27:25.540052Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2874,7 +3207,7 @@
      "buy_0004"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T06:14:50.459071Z"
+    "collected_at": "2026-10-30T07:27:25.556905Z"
    },
    "compensation": {
     "coupons": [
@@ -3002,7 +3335,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.459071Z",
+   "collected_at": "2026-10-30T07:27:25.556905Z",
    "unavailable": []
   }
  },
@@ -3035,7 +3368,7 @@
      "buy_0014"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T06:14:50.474094Z"
+    "collected_at": "2026-10-30T07:27:25.573317Z"
    },
    "compensation": {
     "coupons": [
@@ -3118,7 +3451,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.474094Z",
+   "collected_at": "2026-10-30T07:27:25.573317Z",
    "unavailable": []
   }
  },
@@ -3145,7 +3478,7 @@
      "buy_0007"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T06:14:50.503667Z"
+    "collected_at": "2026-10-30T07:27:25.590518Z"
    },
    "compensation": {
     "coupons": [
@@ -3228,7 +3561,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.503667Z",
+   "collected_at": "2026-10-30T07:27:25.590518Z",
    "unavailable": []
   }
  },
@@ -3256,7 +3589,7 @@
      "buy_0012"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T06:14:50.519676Z"
+    "collected_at": "2026-10-30T07:27:25.614681Z"
    },
    "compensation": {
     "coupons": [
@@ -3339,7 +3672,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.519676Z",
+   "collected_at": "2026-10-30T07:27:25.614681Z",
    "unavailable": []
   }
  },
@@ -3372,7 +3705,7 @@
      "buy_0016"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T06:14:50.535373Z"
+    "collected_at": "2026-10-30T07:27:25.624675Z"
    },
    "compensation": {
     "coupons": [
@@ -3473,7 +3806,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.535373Z",
+   "collected_at": "2026-10-30T07:27:25.624675Z",
    "unavailable": []
   }
  },
@@ -3501,7 +3834,7 @@
      "buy_0006"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T06:14:50.551642Z"
+    "collected_at": "2026-10-30T07:27:25.642573Z"
    },
    "compensation": {
     "coupons": [
@@ -3601,7 +3934,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T06:14:50.551642Z",
+   "collected_at": "2026-10-30T07:27:25.642573Z",
    "unavailable": []
   }
  },

@@ -10,6 +10,7 @@ import { Chip, TONE } from "./bits";
 
 const KIND: Record<FinanceTodo["kind"], { label: string; tone: string }> = {
   settlement_batch: { label: "판매자 정산", tone: TONE.info },
+  settlement_deadline: { label: "정산 기한", tone: TONE.bad },
   closing_confirm: { label: "결산", tone: TONE.info },
   recon_exception: { label: "대사", tone: TONE.bad },
   audit_finding: { label: "감사", tone: TONE.warn },
@@ -86,6 +87,22 @@ export function TodoCard({ todo, onDone, onOpen, onGoToQueue }: {
         <button type="button" className="btn-primary" onClick={() => onGoToQueue(reviewId)}>보류 큐에서 승인하기</button>
       </Decision>
     );
+  } else if (action?.type === "open_tab") {
+    decision = (
+      <div className="mt-3 space-y-2">
+        <p className="text-xs text-ink-500">판매 대금 지급 기한이 가까웠거나 지났습니다. 판매자 정산 탭에서 보류 사유를 풀거나 이번 지급 묶음에 넣으세요. 지급은 지금처럼 보류 큐 승인으로만 합니다.</p>
+        <ul className="space-y-1 text-sm">
+          {(todo.items ?? []).map((item) => (
+            <li key={item.ref} className="flex flex-wrap items-baseline gap-x-2 rounded-xl border border-ink-100 px-3 py-2">
+              <b className="text-ink-900">{plainText(item.title)}</b>
+              <span className="text-xs text-ink-500">{plainText(item.detail)}</span>
+              {item.amount != null && <span className="ml-auto text-xs tabular-nums text-ink-700">{krw(item.amount)}</span>}
+            </li>
+          ))}
+        </ul>
+        <button type="button" className="btn-primary" onClick={onOpen}>판매자 정산에서 처리하기</button>
+      </div>
+    );
   } else if (action && action.type in ITEM_ACTION) {
     const spec = ITEM_ACTION[action.type as ItemActionType];
     decision = (
@@ -113,7 +130,7 @@ export function TodoCard({ todo, onDone, onOpen, onGoToQueue }: {
         <button type="button" className="text-xs font-medium text-brand-700 hover:underline" onClick={onOpen}>탭에서 보기 →</button>
       </div>
       {decision}
-      {decision && !humanTokenSet && <p className="mt-2 text-xs text-amber-800">{NO_TOKEN}</p>}
+      {decision && action?.type !== "open_tab" && !humanTokenSet && <p className="mt-2 text-xs text-amber-800">{NO_TOKEN}</p>}
       {problem && <p role="alert" className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{problem}</p>}
     </li>
   );
