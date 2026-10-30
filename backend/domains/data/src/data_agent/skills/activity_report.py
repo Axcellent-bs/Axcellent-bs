@@ -9,7 +9,10 @@
     주간은 하루씩 7번 불러 더한다. 한국 시간 기간과 9시간 어긋난다는 것을 `note`에 적는다.
   - 주문 수·결제 성공률: shop-api `/api/shop/metric-series` (`order_count`, `payment_count`,
     `payment_fail_rate`). 다른 부서 DB는 직접 열지 않는다.
-  - 사건 수: `kpi_summary`와 같은 계산(`metrics.kpi.compute_kpi`)을 공통 로그에 돌린다.
+  - 사건 수: `kpi_summary`와 같은 정의로 공통 로그에서 센다 (`ctx_inc_` context).
+- 일간 저장(`report_store`, `DATA_REPORT_DB`): 하루치 "더할 수 있는 값"을 저장해 두고, 저장된 날은
+  그 값을, 오늘·저장 안 된 날은 바로 센 값을 쓴다. 주간·월간은 하루치를 더한 뒤 비율·평균·중앙값을
+  다시 계산한다(평균의 평균이 아니다). 저장은 `monitor.snapshot_tick`이 한다.
 - 특이사항(highlights): 직전 기간 대비 변화율이 큰 건수·금액 항목 최대 3개.
   직전 값이 3 미만이면 뺀다.
 - 요약: 특이사항으로 LLM이 3줄을 쓴다. 숫자 검증과 템플릿 대체 이유는 `explain`과 같다.
@@ -51,10 +54,12 @@ from data_agent.metrics.activity import (
     _PRIORITY,
     MIN_DENOMINATOR,
     SMALL_SAMPLE,
+    ActivityCounts,
     Scope,
-    compute_activity,
+    count_activity,
+    finish_activity,
 )
-from data_agent.metrics.kpi import compute_kpi
+from data_agent.report_store import ReportStore, Snapshot
 
 KST = timezone(timedelta(hours=9))
 QUERY_LIMIT = 5000  # 공통 로그 조회 계약 상한
@@ -147,16 +152,33 @@ def card_owner(service_id: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------------- 공통 로그
+def _days(start: date, end: date) -> list[date]:
+    return [start + timedelta(days=i) for i in range((end - start).days)]
+
+
+def _runs(days: list[date]) -> list[tuple[date, date]]:
+    """이어진 날짜끼리 묶은 (시작, 끝 다음 날) 목록."""
+    runs: list[tuple[date, date]] = []
+    for d in sorted(days):
+        if runs and runs[-1][1] == d:
+            runs[-1] = (runs[-1][0], d + timedelta(days=1))
+        else:
+            runs.append((d, d + timedelta(days=1)))
+    return runs
+
+
+def _window(piece: tuple[date, date]) -> tuple[datetime, datetime]:
+    return _kst_midnight(piece[0]), _kst_midnight(piece[1])
+
+
 async def _logs(
-    source: LogSource, p: Periods, tenant_id: str
-) -> tuple[list[LogRecord], list[LogRecord], bool]:
-    """직전 기간 시작 ~ 이번 기간 끝을 한 번에 읽어 (이번, 직전)으로 나눈다."""
-    (prev_start, start), (_, end) = p.window(previous=True), p.window()
-    query = CommonLogQuery(from_=prev_start, to=end, limit=QUERY_LIMIT, tenant_id=tenant_id)
+    source: LogSource, piece: tuple[date, date], tenant_id: str
+) -> tuple[list[LogRecord], bool]:
+    """한 구간(한국 시간 날짜)을 한 번에 읽는다."""
+    start, end = _window(piece)
+    query = CommonLogQuery(from_=start, to=end, limit=QUERY_LIMIT, tenant_id=tenant_id)
     result = await source.query(query)
-    current = [r for r in result.records if start <= r.occurred_at < end]
-    previous = [r for r in result.records if prev_start <= r.occurred_at < start]
-    return current, previous, result.truncated
+    return [r for r in result.records if start <= r.occurred_at < end], result.truncated
 
 
 # -------------------------------------------------------------------------------- 회사 숫자
@@ -166,11 +188,72 @@ class Figure:
     reason: str | None = None  # 값이 없을 때 이유
 
 
-def _finance_dates(period: str, start: date, end: date) -> list[tuple[str, date]]:
-    """재무에 물을 (period, UTC 날짜) 목록. 주간은 하루씩."""
-    if period == "month":
+@dataclass
+class CompanyCounts:
+    """회사 숫자의 더할 수 있는 값. 받지 못한 값은 None과 이유 (0으로 두지 않는다)."""
+
+    gmv: int | None = 0
+    commission_revenue: int | None = 0
+    finance_reason: str | None = None
+    orders: float | None = 0.0
+    attempts: int | None = 0  # 결제 시도 수 (결제 성공률 분모)
+    failed: int | None = 0  # 결제 실패 수
+    shop_reason: str | None = None
+
+    def merge(self, other: CompanyCounts) -> CompanyCounts:
+        def add(a, b):  # noqa: ANN001, ANN202
+            return None if a is None or b is None else a + b
+
+        return CompanyCounts(
+            gmv=add(self.gmv, other.gmv),
+            commission_revenue=add(self.commission_revenue, other.commission_revenue),
+            finance_reason=self.finance_reason or other.finance_reason,
+            orders=add(self.orders, other.orders),
+            attempts=add(self.attempts, other.attempts),
+            failed=add(self.failed, other.failed),
+            shop_reason=self.shop_reason or other.shop_reason,
+        )
+
+    def to_json(self) -> dict:
+        return dict(self.__dict__)
+
+    @classmethod
+    def from_json(cls, data: dict) -> CompanyCounts:
+        return cls(**{k: data.get(k) for k in cls().__dict__})
+
+
+@dataclass
+class PeriodCounts:
+    """한 구간(하루 또는 이어진 여러 날)의 더할 수 있는 값. 일간 저장소에 이 모양으로 둔다."""
+
+    activity: ActivityCounts
+    company: CompanyCounts
+
+    def merge(self, other: PeriodCounts) -> PeriodCounts:
+        return PeriodCounts(self.activity.merge(other.activity), self.company.merge(other.company))
+
+    @property
+    def has_unknown(self) -> bool:
+        """다시 만들 만한 확인할 수 없음 (재무·shop-api 실패, 조회 한도). 로그 0건은 아니다."""
+        c = self.company
+        return bool(c.finance_reason or c.shop_reason or self.activity.truncated)
+
+    def to_json(self) -> dict:
+        return {"activity": self.activity.to_json(), "company": self.company.to_json()}
+
+    @classmethod
+    def from_json(cls, data: dict) -> PeriodCounts:
+        return cls(
+            ActivityCounts.from_json(data.get("activity") or {}),
+            CompanyCounts.from_json(data.get("company") or {}),
+        )
+
+
+def _finance_dates(start: date, end: date) -> list[tuple[str, date]]:
+    """재무에 물을 (period, UTC 날짜) 목록. 한 달을 통째로 물으면 month 한 번, 아니면 하루씩."""
+    if start.day == 1 and end == _month_start(start, 1):
         return [("month", start)]
-    return [("day", start + timedelta(days=i)) for i in range((end - start).days)]
+    return [("day", d) for d in _days(start, end)]
 
 
 def _finance_note(period: str, start: date, end: date) -> str:
@@ -210,7 +293,7 @@ async def _ask_finance(
 
 
 class FinanceAsker:
-    """한 요청 안의 재무 closing_report 호출.
+    """한 요청(또는 한 번의 저장 작업) 안의 재무 closing_report 호출.
 
     (period, 날짜)마다 한 번만 부르고(이번·직전 기간이 겹쳐도 다시 부르지 않는다),
     동시에 `FINANCE_CONCURRENCY`개까지만 보낸다. 재무는 호출마다 쇼핑몰 주문 전체를 다시 읽어서,
@@ -235,43 +318,105 @@ class FinanceAsker:
             return await _ask_finance(self.send, self.meta, period, day)
 
 
-async def finance_figures(
-    asker: FinanceAsker, period: str, start: date, end: date
-) -> dict[str, Figure]:
-    answers = await asyncio.gather(
-        *(asker.ask(p, d) for p, d in _finance_dates(period, start, end))
-    )
+async def finance_counts(asker: FinanceAsker, start: date, end: date) -> CompanyCounts:
+    """한 구간의 총거래액·수수료 매출. 하루라도 받지 못하면 None과 그 이유."""
+    answers = await asyncio.gather(*(asker.ask(p, d) for p, d in _finance_dates(start, end)))
     reason = next((why for _, why in answers if why), None)
     if reason:
-        return {"gmv": Figure(None, reason), "commission_revenue": Figure(None, reason)}
-    return {
-        code: Figure(float(sum(a[code] for a, _ in answers if a)))
-        for code in ("gmv", "commission_revenue")
-    }
+        return CompanyCounts(gmv=None, commission_revenue=None, finance_reason=reason)
+    return CompanyCounts(
+        gmv=sum(a["gmv"] for a, _ in answers if a),
+        commission_revenue=sum(a["commission_revenue"] for a, _ in answers if a),
+    )
 
 
-async def shop_figures(
-    source: MetricSource, window: tuple[datetime, datetime]
-) -> dict[str, Figure]:
-    start, end = window
+async def finance_figures(
+    asker: FinanceAsker, period: str, start: date, end: date
+) -> CompanyCounts:
+    """예전 이름 (`period`는 구간으로 정해져서 쓰지 않는다)."""
+    del period
+    return await finance_counts(asker, start, end)
+
+
+async def shop_counts(source: MetricSource, piece: tuple[date, date]) -> CompanyCounts:
+    """한 구간의 주문 수·결제 시도·실패 (shop-api 5분 버킷 합)."""
+    start, end = _window(piece)
     try:
         orders = await source.fetch("order_count", start, end)
         counts = dict(await source.fetch("payment_count", start, end))
         fail_rates = dict(await source.fetch("payment_fail_rate", start, end))
     except ShopUnavailable as error:
         reason = f"shop-api 지표를 받지 못함 [{error.code}]"
-        return {"order_count": Figure(None, reason), "payment_success_rate": Figure(None, reason)}
-    attempts = int(sum(counts.values()))
-    failed = sum(round(c * fail_rates.get(ts, 0.0)) for ts, c in counts.items())
-    success = (
-        Figure(round((attempts - failed) / attempts, 4))
-        if attempts >= MIN_DENOMINATOR
-        else Figure(None, f"결제 시도 {attempts}건: {SMALL_SAMPLE}")
+        return CompanyCounts(orders=None, attempts=None, failed=None, shop_reason=reason)
+    return CompanyCounts(
+        orders=float(sum(v for _, v in orders)),
+        attempts=int(sum(counts.values())),
+        failed=sum(round(c * fail_rates.get(ts, 0.0)) for ts, c in counts.items()),
     )
-    return {
-        "order_count": Figure(float(sum(v for _, v in orders))),
-        "payment_success_rate": success,
-    }
+
+
+async def live_counts(
+    pieces: list[tuple[date, date]],
+    logs: LogSource,
+    metrics: MetricSource,
+    asker: FinanceAsker,
+    tenant_id: str,
+) -> list[PeriodCounts]:
+    """구간마다 바로 센다. 이어진 구간은 공통 로그를 한 번에 읽고 메모리에서 나눈다.
+
+    shop-api 지표를 먼저 받는다. 재무 호출이 shop-api에서 주문 전체를 읽는 동안 줄 서지 않게.
+    """
+    runs = _runs([d for piece in pieces for d in _days(*piece)])
+    read = await asyncio.gather(*(_logs(logs, run, tenant_id) for run in runs))
+    shops = await asyncio.gather(*(shop_counts(metrics, piece) for piece in pieces))
+    finances = await asyncio.gather(*(finance_counts(asker, *piece) for piece in pieces))
+    out: list[PeriodCounts] = []
+    for piece, shop, finance in zip(pieces, shops, finances, strict=True):
+        start, end = _window(piece)
+        records: list[LogRecord] = []
+        truncated = False
+        for run, (run_records, cut) in zip(runs, read, strict=True):
+            if run[0] <= piece[0] and piece[1] <= run[1]:
+                records = [r for r in run_records if start <= r.occurred_at < end]
+                truncated = cut
+        out.append(PeriodCounts(count_activity(records, truncated), shop.merge(finance)))
+    return out
+
+
+async def build_day_snapshot(
+    day: date,
+    meta: RequestMeta,
+    logs: LogSource,
+    metrics: MetricSource,
+    send: SendFn,
+    now: datetime | None = None,
+) -> Snapshot:
+    """한국 시간 하루의 저장할 값을 만든다 (LLM을 쓰지 않는다).
+
+    재무 마감은 UTC 날짜라 그 UTC 날짜가 아직 끝나지 않았으면(한국 시간 다음 날 09시 전)
+    매출을 확인할 수 없음으로 두고, 다음 날 한 번 다시 만든다.
+    """
+    now = now or datetime.now(UTC)
+    (counts,) = await live_counts(
+        [(day, day + timedelta(days=1))], logs, metrics, FinanceAsker(send, meta), meta.tenant_id
+    )
+    utc_day_end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=UTC)
+    if now < utc_day_end and counts.company.finance_reason is None:
+        counts.company = CompanyCounts.from_json(
+            counts.company.to_json()
+            | {
+                "gmv": None,
+                "commission_revenue": None,
+                "finance_reason": "재무 마감 기준 UTC 날짜가 아직 끝나지 않아 다음 날 다시 받음",
+            }
+        )
+    return Snapshot(
+        tenant_id=meta.tenant_id,
+        day=day,
+        created_at=now,
+        payload=counts.to_json(),
+        has_unknown=counts.has_unknown,
+    )
 
 
 # --------------------------------------------------------------------------------- 특이사항
@@ -365,8 +510,35 @@ class ActivityResult:
     fallback_numbers: tuple[float, ...] = ()
 
 
+def _company_figures(c: CompanyCounts) -> dict[str, Figure]:
+    """더한 회사 값 → 칸별 값. 결제 성공률은 더한 시도·실패로 다시 계산한다."""
+    attempts, failed = c.attempts, c.failed
+    if attempts is None or failed is None:
+        success = Figure(None, c.shop_reason)
+    elif attempts < MIN_DENOMINATOR:
+        success = Figure(None, f"결제 시도 {attempts}건: {SMALL_SAMPLE}")
+    else:
+        success = Figure(round((attempts - failed) / attempts, 4))
+    return {
+        "gmv": Figure(None if c.gmv is None else float(c.gmv), c.finance_reason),
+        "commission_revenue": Figure(
+            None if c.commission_revenue is None else float(c.commission_revenue),
+            c.finance_reason,
+        ),
+        "order_count": Figure(c.orders, c.shop_reason if c.orders is None else None),
+        "payment_success_rate": success,
+    }
+
+
 def _figure(now: Figure, before: Figure, source: str, note: str | None = None) -> CompanyFigure:
     return CompanyFigure(value=now.value, previous_period=before.value, source=source, note=note)
+
+
+def _merge(parts: list[PeriodCounts]) -> PeriodCounts:
+    total = PeriodCounts(ActivityCounts(), CompanyCounts())
+    for part in parts:
+        total = total.merge(part)
+    return total
 
 
 async def build_report(
@@ -379,53 +551,64 @@ async def build_report(
     now: datetime | None = None,
     enabled: Callable[[str], bool] = routing.is_enabled,
     owner: Callable[[str], str | None] = card_owner,
+    store: ReportStore | None = None,
 ) -> ActivityResult:
-    p = periods(data.period, data.start, now or datetime.now(UTC))
+    """리포트를 만든다. 저장된 날은 저장값을, 오늘·저장 안 된 날은 바로 센 값을 더한다.
+
+    주간·월간은 하루치 값(분자·분모, 합계·개수, 목록)을 더한 뒤 비율·평균·중앙값을 다시 계산한다.
+    저장소가 없으면 전부 바로 센다(기간마다 공통 로그를 한 번에 읽는다).
+    """
+    started = now or datetime.now(UTC)
+    p = periods(data.period, data.start, started)
     scope = scope_for(data.services)
     window, previous = p.window(), p.window(previous=True)
     tenant = meta.tenant_id
+    today = started.astimezone(KST).date()
+    cur_days, prev_days = _days(p.start, p.end), _days(p.previous_start, p.start)
 
-    # shop-api 지표를 먼저 받는다. 재무 호출이 shop-api에서 주문 전체를 읽는 동안 줄 서지 않게
-    (records, prev_records, cut), shop, prev_shop = await asyncio.gather(
-        _logs(logs, p, tenant), shop_figures(metrics, window), shop_figures(metrics, previous)
-    )
-    prev_cut = cut
-    kpi, prev_kpi = compute_kpi(records), compute_kpi(prev_records)
-    mttr = {i.context_id: i.mttr_seconds for i in kpi.output.incidents}
-    prev_mttr = {i.context_id: i.mttr_seconds for i in prev_kpi.output.incidents}
-    current = compute_activity(records, scope, mttr)
-    before = compute_activity(prev_records, scope, prev_mttr)
+    saved = store.get_many(tenant, [d for d in prev_days + cur_days if d < today]) if store else {}
+    if store is None:
+        pieces = [(p.previous_start, p.start), (p.start, p.end)]
+    else:
+        pieces = _runs([d for d in prev_days if d not in saved]) + _runs(
+            [d for d in cur_days if d not in saved]
+        )
+    live = await live_counts(pieces, logs, metrics, FinanceAsker(send, meta), tenant)
+
+    def total(days: list[date]) -> PeriodCounts:
+        inside = set(days)
+        parts = [PeriodCounts.from_json(saved[d].payload) for d in days if d in saved]
+        parts += [c for piece, c in zip(pieces, live, strict=True) if piece[0] in inside]
+        return _merge(parts)
+
+    cur_counts, prev_counts = total(cur_days), total(prev_days)
+    current = finish_activity(cur_counts.activity, scope)
+    before = finish_activity(prev_counts.activity, scope)
+    fin = _company_figures(cur_counts.company)
+    prev_fin = _company_figures(prev_counts.company)
 
     unknown: list[UnknownSection] = []
 
     def missing(section: str, reason: str) -> None:
         unknown.append(UnknownSection(section=section, reason=reason))
 
-    asker = FinanceAsker(send, meta)
-    fin, prev_fin = await asyncio.gather(
-        finance_figures(asker, data.period, p.start, p.end),
-        finance_figures(asker, data.period, p.previous_start, p.start),
-    )
     note = _finance_note(data.period, p.start, p.end)
     for key in ("gmv", "commission_revenue", "order_count", "payment_success_rate"):
-        for label, figures in (
-            ("company", fin | shop),
-            ("company.previous_period", prev_fin | prev_shop),
-        ):
-            if figures[key].reason:
+        for label, figures in (("company", fin), ("company.previous_period", prev_fin)):
+            if figures[key].value is None and figures[key].reason:
                 missing(f"{label}.{key}", figures[key].reason or "")
     company = ActivityCompany(
         gmv=_figure(fin["gmv"], prev_fin["gmv"], FINANCE_SOURCE, note),
         commission_revenue=_figure(
             fin["commission_revenue"], prev_fin["commission_revenue"], FINANCE_SOURCE, note
         ),
-        order_count=_figure(shop["order_count"], prev_shop["order_count"], SHOP_SOURCE),
+        order_count=_figure(fin["order_count"], prev_fin["order_count"], SHOP_SOURCE),
         payment_success_rate=_figure(
-            shop["payment_success_rate"], prev_shop["payment_success_rate"], SHOP_SOURCE
+            fin["payment_success_rate"], prev_fin["payment_success_rate"], SHOP_SOURCE
         ),
         incident_count=CompanyFigure(
-            value=float(len(kpi.output.incidents)),
-            previous_period=float(len(prev_kpi.output.incidents)),
+            value=float(current.incident_count),
+            previous_period=float(before.incident_count),
             source=KPI_SOURCE,
         ),
     )
@@ -454,12 +637,16 @@ async def build_report(
         missing(section, reason)
     for section, reason in before.notes:
         missing(section.replace("departments.", "departments.previous_period.", 1), reason)
-    if not records:
+    log_count, prev_log_count = cur_counts.activity.log_count, prev_counts.activity.log_count
+    if not log_count:
         missing("departments", "이 기간 공통 로그 0건 (AI를 거친 일이 없음)")
-    if not prev_records:
+    if not prev_log_count:
         missing("departments.previous_period", "직전 기간 공통 로그 0건")
-    for section, was_cut in (("departments", cut), ("departments.previous_period", prev_cut)):
-        if was_cut:
+    for section, cut in (
+        ("departments", cur_counts.activity.truncated),
+        ("departments.previous_period", prev_counts.activity.truncated),
+    ):
+        if cut:
             missing(section, f"공통 로그 조회 한도 {QUERY_LIMIT}건에 걸려 최근 기록만 셈")
 
     highlights = pick_highlights(company, departments)
@@ -470,6 +657,9 @@ async def build_report(
     else:
         summary, source = NOTHING_NOTABLE, "none"
 
+    stored_days = len(saved)
+    live_days = len(prev_days) + len(cur_days) - stored_days
+    snapshot_at = min((s.created_at for s in saved.values()), default=started)
     output = ActivityReportOutput(
         period=data.period,
         start=p.start,
@@ -485,17 +675,25 @@ async def build_report(
         summary=summary,
         summary_source=source,
         unknown_sections=unknown,
+        snapshot_at=snapshot_at,
+        stored_days=stored_days,
+        live_days=live_days,
+        snapshot_note=f"저장된 날 {stored_days}일 / 바로 계산 {live_days}일",
     )
-    lines = [summary, f"공통 로그 {len(records)}건 (직전 {len(prev_records)}건)"]
+    lines = [
+        summary,
+        f"공통 로그 {log_count}건 (직전 {prev_log_count}건)",
+        output.snapshot_note or "",
+    ]
     if explained and (line := explained.note()):
         lines.append(line)
     lines += [f"확인할 수 없음: {u.section}: {u.reason}" for u in unknown]
     evidence = Evidence(
         queries=[
-            f"common_log from={window[0].isoformat()} to={window[1].isoformat()}",
-            f"common_log from={previous[0].isoformat()} to={previous[1].isoformat()}",
+            f"common_log from={previous[0].isoformat()} to={window[1].isoformat()}",
             f"{FINANCE_SOURCE} period={data.period}",
             f"{SHOP_SOURCE} order_count,payment_count,payment_fail_rate",
+            f"data_reports days={stored_days}",
         ],
         data_summary="\n".join(lines),
         collected_at=datetime.now(UTC),

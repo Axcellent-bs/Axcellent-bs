@@ -282,6 +282,20 @@ function Collaboration({ o }: { o: ActivityReportOutput }) {
 }
 
 // ------------------------------------------------------------------- 화면
+/** 언제 만든 값인지: 한국 시간 "10월 29일 00시 31분" (오늘이면 날짜 없이 "00시 31분") */
+function snapshotTime(at: string | null | undefined): string | null {
+  if (!at) return null;
+  const when = new Date(at);
+  if (Number.isNaN(when.getTime())) return null;
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+      .formatToParts(when).map((x) => [x.type, x.value]),
+  );
+  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }) === when.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+  const time = `${parts.hour}시 ${parts.minute}분`;
+  return today ? time : `${parts.month}월 ${parts.day}일 ${time}`;
+}
+
 function Report({ res }: { res: A2AResult<ActivityReportOutput> }) {
   const o = res.output;
   const last = new Date(`${o.end}T00:00:00+09:00`);
@@ -289,8 +303,10 @@ function Report({ res }: { res: A2AResult<ActivityReportOutput> }) {
   const until = last.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
   return (
     <div className="space-y-5">
-      <p className="text-xs text-ink-500">
-        {PERIOD_LABEL[o.period]} · {o.start === until ? o.start : `${o.start} ~ ${until}`} (한국 시간)
+      <p className="flex flex-wrap items-center gap-x-2 text-xs text-ink-500">
+        <span>{PERIOD_LABEL[o.period]} · {o.start === until ? o.start : `${o.start} ~ ${until}`} (한국 시간)</span>
+        {snapshotTime(o.snapshot_at) && <span className="font-medium text-ink-700">{snapshotTime(o.snapshot_at)} 기준</span>}
+        {o.snapshot_note && <span>· {o.snapshot_note}</span>}
       </p>
       <Company o={o} />
       <Highlights res={res} />
