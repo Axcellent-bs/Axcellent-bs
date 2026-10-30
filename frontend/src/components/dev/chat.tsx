@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Chip, useToast, type ChipTone } from '@dejafix/common-frontend'
 import type { ChatMessage, ChatStatus, ChatThread, CodingStatus, State as S, Task } from '@/lib/planningData'
 import { DEV_API, PlanningApiError, chatApi, vcsApi, type VcsConnection } from '@/lib/planning'
-import { CODING_LABEL, CancelButton, isRunning } from '@/components/dev/coding'
+import { CODING_LABEL, CancelButton, ResumeButton, isRunning } from '@/components/dev/coding'
 import { State } from '@/components/planning-common/parts'
 import { go, toPath } from '@/components/planning-common/links'
 import { Tag } from '@/components/planning-common/parts'
@@ -15,6 +15,7 @@ const STATUS: Record<ChatStatus, { label: string; tone: ChipTone }> = {
   talking: { label: '대화 중', tone: 'neutral' },
   started: { label: '작업 시작', tone: 'green' },
   blocked: { label: '막힘', tone: 'amber' },
+  waiting: { label: '앞 요청 대기', tone: 'amber' },
 }
 const RUNNING: CodingStatus[] = ['queued', 'reading', 'writing', 'reviewing']
 const EXAMPLES = [
@@ -198,7 +199,7 @@ const Tools = ({ onTools }: { onTools: () => void }) => (
 function Msg({ m, s, onOpen }: { m: ChatMessage; s: S; onOpen: () => void }) {
   if (m.role === 'user') return <div className="bubble user">{m.text}</div>
   if (m.kind === 'error') return <div className="bubble ai err">{m.text}</div>
-  if (m.kind === 'question') return <div className="bubble ai q">{m.text}</div>
+  if (m.kind === 'question' || m.kind === 'waiting') return <div className="bubble ai q">{m.text}</div>
   if (m.kind === 'plan') {
     const p = m.plan
     return (
@@ -236,6 +237,7 @@ function Started({ m, s, onOpen }: { m: ChatMessage; s: S; onOpen: () => void })
           {id && (
             <span className="tags">
               <CancelButton taskId={id} status={c?.status} />
+              <ResumeButton taskId={id} status={c?.status} />
               <button type="button" className="btn-ghost" onClick={() => { onOpen(); go(toPath(`work/prs/${encodeURIComponent(id)}`)) }}>작업 보기</button>
             </span>
           )}

@@ -69,6 +69,23 @@ class AutoCheck(DomainModel):
     reasons: list[str]
 
 
+class RelatedItem(DomainModel):
+    """비슷한·충돌하는 다른 요청 (related.py). 제안이고 묶기·보류는 사람이 정한다.
+
+    - relation: same(같은 일) · conflict(둘 다 진행 중인데 양립 불가) · update(앞 요청을 다시
+      바꿈) · related(비슷함, 관계는 정하지 않음 포함)
+    - by: llm(LLM이 후보 안에서 판단) · embed(임베딩 검색만) · lexical(글자 검색만) ·
+      path(열린 PR과 같은 파일을 고침, 코드 규칙)
+    """
+
+    id: str
+    title: str
+    score: float
+    relation: Literal["same", "conflict", "update", "related"]
+    reason: str
+    by: Literal["llm", "embed", "lexical", "path"]
+
+
 class Request(DomainModel):
     id: str
     context_id: str
@@ -85,6 +102,7 @@ class Request(DomainModel):
     source_ref: str | None = None
     evidence_ids: list[str] = Field(default_factory=list)  # 요청 부서가 보낸 근거 ID
     flow: bool = False  # 들어온 뒤 사람 클릭 없이 다음 단계로 이어 간다 (일반 요청·개선 초안)
+    related: list[RelatedItem] = Field(default_factory=list)  # 비슷한·충돌하는 요청 (제안)
 
 
 class ParaWarn(DomainModel):
@@ -394,7 +412,7 @@ class ChatPlan(DomainModel):
     paths: list[str] = Field(default_factory=list)
 
 
-ChatKind = Literal["text", "question", "plan", "started", "error"]
+ChatKind = Literal["text", "question", "plan", "started", "waiting", "error"]
 
 
 class ChatMessage(DomainModel):
@@ -410,14 +428,16 @@ class ChatMessage(DomainModel):
 class ChatThread(DomainModel):
     """개발 화면에서 개발팀원이 개발 AI와 나눈 대화 하나. 계획이 서면 코딩 작업을 띄운다.
 
-    status: talking(대화 중) · started(작업 띄움, `task_id`) · blocked(연결이 없어 못 띄움)."""
+    status: talking(대화 중) · started(작업 띄움, `task_id`) · blocked(연결이 없어 못 띄움) ·
+    waiting(충돌하는 요청 `waiting_for`가 끝나면 마지막 계획으로 작업을 띄움)."""
 
     id: str  # chat-1 …
     title: str
-    status: Literal["talking", "started", "blocked"] = "talking"
+    status: Literal["talking", "started", "blocked", "waiting"] = "talking"
     messages: list[ChatMessage] = Field(default_factory=list)
     task_id: str | None = None
     connection: str | None = None
+    waiting_for: list[str] = Field(default_factory=list)  # 끝나기를 기다리는 요청 ID
     created_at: UtcDatetime
     updated_at: UtcDatetime
 

@@ -33,7 +33,22 @@ export interface Request {
   duplicateOf?: string
   auto?: AutoCheck // 간단 요청 판정 결과 (create_ticket으로 들어온 것만)
   flow?: boolean // 들어온 뒤 사람 클릭 없이 흐름을 이어 간다 (기획서 질문은 요청 부서 에이전트가 답함)
+  related?: RelatedReq[] // 비슷한·충돌하는 요청 (제안, 묶기·보류는 사람)
 }
+
+/** 비슷한·충돌하는 요청 (백엔드 related.py). by: llm이 판단 / embed·lexical은 검색만 / path는 열린 PR과 같은 파일 */
+export interface RelatedReq {
+  id: string
+  title: string
+  score: number
+  relation: 'same' | 'conflict' | 'update' | 'related'
+  reason: string
+  by: 'llm' | 'embed' | 'lexical' | 'path'
+}
+/** 충돌을 먼저, 그다음 같은 일·이어서 바꿈·비슷함 순으로 */
+export const byRelation = (xs: RelatedReq[] = []) => [...xs].sort((a, b) => ORDER[a.relation] - ORDER[b.relation])
+const ORDER: Record<RelatedReq['relation'], number> = { conflict: 0, same: 1, update: 2, related: 3 }
+export const RELATION_LABEL: Record<RelatedReq['relation'], string> = { same: '같은 일', conflict: '충돌 가능', update: '이어서 바꿈', related: '비슷함' }
 
 export interface Para {
   id: string // R1, C1 …
@@ -279,8 +294,8 @@ export interface State {
 }
 
 // ---- AI와 대화: 개발 에이전트와 대화하다 필요한 것이 모이면 코딩 작업을 시작한다
-export type ChatStatus = 'talking' | 'started' | 'blocked'
-export type ChatKind = 'text' | 'question' | 'plan' | 'started' | 'error'
+export type ChatStatus = 'talking' | 'started' | 'blocked' | 'waiting'
+export type ChatKind = 'text' | 'question' | 'plan' | 'started' | 'waiting' | 'error'
 export interface ChatPlan { title: string; plan: string; done: string[]; paths: string[] }
 export interface ChatMessage {
   id: string
@@ -298,6 +313,7 @@ export interface ChatThread {
   messages: ChatMessage[]
   taskId: string | null
   connection: string | null
+  waitingFor?: string[] // 끝나기를 기다리는 요청 (충돌하는 요청이 끝나면 시작)
   createdAt: string
   updatedAt: string
 }

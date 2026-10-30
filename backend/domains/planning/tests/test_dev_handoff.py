@@ -241,3 +241,46 @@ def test_handlers_need_key_and_acl(a2a_body) -> None:
         json=a2a_body(RECEIVE_DEV_RESULT, result, token="mock:infra", idempotency_key="k3"),
     ).json()
     assert other["outcome"] == "FORBIDDEN_SKILL"
+
+
+def test_dev_team_spec_is_sent_to_planning_with_request_and_spec() -> None:
+    """개발팀이 직접 낸 기획도 기획 서비스가 알도록 요청·기획서째 보낸다."""
+    w = Wire(forward=False)
+    w.dev = PlanningService(role="dev", dev_sender=w.send, real_example=True)  # SPEC-D1 (개발팀)
+    sp = next(x for x in w.dev.state.specs if x.origin == "dev_team")
+    out = [x for x in w.dev._dev_outgoing(w.dev.state) if x[2].spec_id == sp.id]
+    assert out and out[0][0] == RECEIVE_DEV_RESULT
+    payload = out[0][2]
+    assert payload.spec["id"] == sp.id and payload.request["id"] == payload.request_id
+    # 기획 서비스에서 온 기획서는 요청·기획서를 다시 싣지 않는다
+    other = [x for x in w.dev._dev_outgoing(w.dev.state) if x[2].spec_id != sp.id]
+    assert all(x[2].spec is None and x[2].request is None for x in other)
+
+
+def test_planning_stores_dev_team_request_and_spec() -> None:
+    w = Wire(forward=False)
+    w.dev = PlanningService(role="dev", dev_sender=w.send, real_example=True)  # SPEC-D1 (개발팀)
+    sp = next(x for x in w.dev.state.specs if x.origin == "dev_team")
+    req = next(r for r in w.dev.state.requests if r.id == sp.request)
+    new_req = req.model_copy(update={"id": "REQ-D9", "spec": "SPEC-D9", "state": "작업 중"})
+    new_sp = sp.model_copy(
+        update={"id": "SPEC-D9", "request": "REQ-D9", "title": "개발팀 자체 기획"}
+    )
+    asyncio.run(
+        w.planning.receive_dev_result(
+            context_id=new_req.context_id,
+            requester="dev",
+            spec_id="SPEC-D9",
+            request_id="REQ-D9",
+            request_state="작업 중",
+            tasks=[],
+            prs=[],
+            idempotency_key="k-d9",
+            request=dump(new_req),
+            spec=dump(new_sp),
+        )
+    )
+    st = w.planning.state
+    assert any(r.id == "REQ-D9" and r.via == "dev_team" for r in st.requests)
+    assert any(s.id == "SPEC-D9" for s in st.specs)
+    assert any("개발팀 기획 SPEC-D9 받음" in a.text for a in st.activity)

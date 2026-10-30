@@ -2,10 +2,11 @@
 // 진행 상태는 Task.coding으로 SSE를 타고 온다
 import { useState, type FormEvent } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
-import type { CodingRun, CodingStatus, State as S, Task } from '@/lib/planningData'
+import { DEPT_NAME, RELATION_LABEL, byRelation, type CodingRun, type CodingStatus, type Request, type State as S, type Task } from '@/lib/planningData'
 import { DEV_API, PlanningApiError, devTaskApi, planningApi } from '@/lib/planning'
 import { State, Tag } from '@/components/planning-common/parts'
 import { Step } from '@/components/planning-common/flow'
+import { Ref } from '@/components/planning-common/links'
 
 const api = devTaskApi(DEV_API)
 const actions = planningApi(DEV_API)
@@ -44,6 +45,25 @@ export function CancelButton({ taskId, status }: { taskId: string; status?: Codi
   return <Button size="small" onClick={cancel} disabled={busy}>{busy ? '중단하는 중…' : '작업 중단'}</Button>
 }
 
+/** 중단한 작업 재개 버튼. 레포의 최신 코드를 다시 읽고 처음부터 돈다 */
+export function ResumeButton({ taskId, status }: { taskId: string; status?: CodingStatus }) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  if (status !== 'canceled') return null
+  const resume = async () => {
+    setBusy(true)
+    try {
+      await api.retry(taskId)
+      toast.show(`${taskId} 재개`)
+    } catch (x) {
+      toast.show(x instanceof PlanningApiError ? x.message : '개발·배포 서버에 연결할 수 없어요')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return <Button size="small" onClick={resume} disabled={busy}>{busy ? '재개하는 중…' : '재개'}</Button>
+}
+
 /** 개발팀이 직접 넣은 기획에서 나온 작업인가 */
 export function fromDevTeam(s: S, t?: Task): boolean {
   if (!t) return false
@@ -54,6 +74,32 @@ export function fromDevTeam(s: S, t?: Task): boolean {
 }
 
 export const DevTeamTag = () => <Tag>개발팀 기획</Tag>
+
+/** 작업 → 기획서 → 요청 */
+export function requestOfTask(s: S, t?: Task): Request | undefined {
+  const spec = s.specs.find((x) => x.id === t?.spec)
+  return s.requests.find((r) => r.id === spec?.request)
+}
+
+/** 작업이 어디서 왔는지: 개발팀이 직접 넣은 기획이면 "개발팀 기획", 다른 팀 요청이면 "고객지원 요청" 같은 꼬리표 */
+export function OriginTag({ s, t }: { s: S; t?: Task }) {
+  if (!t) return null
+  if (fromDevTeam(s, t)) return <DevTeamTag />
+  const req = requestOfTask(s, t)
+  return req ? <Tag>{DEPT_NAME[req.from] ?? req.from} 요청</Tag> : null
+}
+
+/** 작업의 요청과 비슷한·충돌하는 요청 (제안). 충돌만 주황, 마우스를 올리면 판단 근거 */
+export function RelatedTags({ s, t }: { s: S; t?: Task }) {
+  const rel = byRelation(requestOfTask(s, t)?.related)
+  return (
+    <>
+      {rel.slice(0, 3).map((x) => (
+        <span key={x.id} title={x.reason}> · <Tag tone={x.relation === 'conflict' ? 'amber' : undefined}>{RELATION_LABEL[x.relation]}</Tag> <Ref s={s} id={x.id} /></span>
+      ))}
+    </>
+  )
+}
 
 /** 목록 줄·머리에 쓰는 코딩 상태 글자 */
 export const codingState = (c: CodingRun) => CODING_LABEL[c.status] ?? c.status
@@ -140,7 +186,7 @@ export function CodingStep({ task }: { task: Task }) {
       )}
       <span className="tags">
         {waitingPr && <Button size="small" variant="primary" onClick={merge} disabled={busy}>머지</Button>}
-        {STUCK.includes(c.status) && !waitingPr && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : '다시 시도'}</Button>}
+        {(STUCK.includes(c.status) || c.status === 'canceled') && !waitingPr && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.status === 'canceled' ? '재개' : '다시 시도'}</Button>}
         <CancelButton taskId={task.id} status={c.status} />
       </span>
     </Step>
