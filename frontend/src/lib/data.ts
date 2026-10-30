@@ -238,6 +238,11 @@ export interface ActivityReportOutput {
   summary: string;
   summary_source: "llm" | "template" | "none";
   unknown_sections: UnknownSection[];
+  /** 일간 저장을 쓴 값인지 (#data-report-snapshots). 예전 응답은 없다 */
+  snapshot_at?: string | null;
+  stored_days?: number | null;
+  live_days?: number | null;
+  snapshot_note?: string | null;
 }
 
 /** 서버가 꺼졌을 때 무엇이 꺼졌는지 보여 주는 이름 */

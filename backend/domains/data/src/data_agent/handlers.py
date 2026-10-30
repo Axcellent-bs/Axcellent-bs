@@ -39,6 +39,7 @@ from data_agent.clients.shop_client import (
     ShopUnavailable,
     shop_api,
 )
+from data_agent.report_store import ReportStore, get_report_store
 from data_agent.skills.accuracy_report import eval_dir, load_report
 from data_agent.skills.activity_report import InvalidActivityInput, build_report
 from data_agent.skills.anomaly_detection import detect_anomalies, env_settings, get_metric_source
@@ -254,6 +255,11 @@ async def fraud_score(request: AgentRequest) -> AgentResult:
     )
 
 
+def get_activity_store() -> ReportStore | None:
+    """업무 리포트 일간 저장소 (`DATA_REPORT_DB`). 없으면 None이고 리포트는 바로 계산한다."""
+    return get_report_store(os.environ)
+
+
 def get_activity_sender():  # noqa: ANN201 - 테스트가 바꿔 끼우는 자리
     """재무 closing_report 조회에 쓰는 A2A 함수. 기본은 `call_agent`."""
     return call_agent
@@ -276,6 +282,7 @@ async def activity_report(request: AgentRequest) -> AgentResult:
             logs=logs,
             metrics=get_metric_source(os.environ),
             send=get_activity_sender(),
+            store=get_activity_store(),
         )
     except InvalidActivityInput as error:
         return _result(

@@ -40,7 +40,7 @@ import statistics
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from ax_agent_template.services import BY_ID, department_of
 from ax_contracts.data_access.common_log import LogRecord
@@ -56,7 +56,12 @@ from ax_contracts.schemas.data import (
     SkillCount,
 )
 from data_agent.labels import department_label, skill_label
-from data_agent.metrics.kpi import INCIDENT_PREFIX, UNKNOWN_OUTCOMES
+from data_agent.metrics.kpi import (
+    INCIDENT_PREFIX,
+    RECOVERY_SKILL,
+    RESOLVED_EVENT,
+    UNKNOWN_OUTCOMES,
+)
 
 MIN_DENOMINATOR = 3
 SMALL_SAMPLE = "표본 부족"
@@ -116,6 +121,153 @@ class ActivityComputation:
     departments: dict[str, DepartmentActivity]
     collaboration: list[CollaborationEdge]
     notes: list[tuple[str, str]] = field(default_factory=list)  # (칸, 이유)
+    incident_count: int = 0  # 기간 안 사건(`ctx_inc_`) 수 (`kpi_summary`와 같은 정의)
+
+
+# ---------------------------------------------------------------- 더할 수 있는 값
+# 일간 저장(`report_store`)과 바로 계산이 같은 값을 쓴다. 비율·평균은 저장하지 않고
+# 분자·분모, 합계·개수, 중앙값용 목록만 둔다. 여러 날을 `merge`로 더한 뒤 `finish_activity`가
+# 비율·평균·중앙값을 다시 계산한다(평균의 평균이 아니다).
+
+
+def _iso(at: datetime) -> str:
+    return at.astimezone(UTC).isoformat()
+
+
+def _at(value: str | None) -> datetime | None:
+    return datetime.fromisoformat(value) if value else None
+
+
+def _earliest(a: datetime | None, b: datetime | None) -> datetime | None:
+    present = [x for x in (a, b) if x is not None]
+    return min(present) if present else None
+
+
+@dataclass
+class SourceCounts:
+    """응답한 에이전트(source = 서비스 id, 예전 부서 이름) 하나의 값."""
+
+    skills: Counter[str] = field(default_factory=Counter)  # 응답한 요청의 skill별 수
+    outcomes: Counter[str] = field(default_factory=Counter)  # 결과 6가지별 수
+    verifying: int = 0  # 결과를 확인할 수 없는 B 교차검증 수
+    completed: int = 0  # 완료 응답 수 (템플릿 대체 분모)
+    replaced: int = 0  # 템플릿으로 대체한 완료 응답 수
+    reasons: Counter[str] = field(default_factory=Counter)  # 대체 이유별 수
+    wait_sum_ms: float = 0.0  # 응답 시간 합계
+    wait_count: int = 0  # 응답 시간 개수
+    incident_skills: dict[str, Counter[str]] = field(default_factory=dict)  # 사건 → skill별 수
+
+    def add(self, other: SourceCounts) -> None:
+        self.skills.update(other.skills)
+        self.outcomes.update(other.outcomes)
+        self.verifying += other.verifying
+        self.completed += other.completed
+        self.replaced += other.replaced
+        self.reasons.update(other.reasons)
+        self.wait_sum_ms += other.wait_sum_ms
+        self.wait_count += other.wait_count
+        for ctx, skills in other.incident_skills.items():
+            self.incident_skills.setdefault(ctx, Counter()).update(skills)
+
+    def to_json(self) -> dict:
+        return {
+            "skills": dict(self.skills),
+            "outcomes": dict(self.outcomes),
+            "verifying": self.verifying,
+            "completed": self.completed,
+            "replaced": self.replaced,
+            "reasons": dict(self.reasons),
+            "wait_sum_ms": self.wait_sum_ms,
+            "wait_count": self.wait_count,
+            "incident_skills": {c: dict(s) for c, s in self.incident_skills.items()},
+        }
+
+    @classmethod
+    def from_json(cls, data: dict) -> SourceCounts:
+        return cls(
+            skills=Counter(data.get("skills") or {}),
+            outcomes=Counter(data.get("outcomes") or {}),
+            verifying=int(data.get("verifying") or 0),
+            completed=int(data.get("completed") or 0),
+            replaced=int(data.get("replaced") or 0),
+            reasons=Counter(data.get("reasons") or {}),
+            wait_sum_ms=float(data.get("wait_sum_ms") or 0.0),
+            wait_count=int(data.get("wait_count") or 0),
+            incident_skills={c: Counter(s) for c, s in (data.get("incident_skills") or {}).items()},
+        )
+
+
+@dataclass
+class ActivityCounts:
+    """기간(또는 하루)의 더할 수 있는 값. 부서로 묶는 것은 `finish_activity`가 한다."""
+
+    sources: dict[str, SourceCounts] = field(default_factory=dict)
+    # 받을 서비스 → [(task_id, 넘긴 시각)] / [(task_id, handoff_done|handoff_rejected, 끝낸 시각)]
+    handed: dict[str, list[tuple[str | None, datetime]]] = field(default_factory=dict)
+    closed: dict[str, list[tuple[str | None, str, datetime]]] = field(default_factory=dict)
+    # 사건 → [첫 기록, 첫 incident.resolved 발행, 첫 verify_recovery 완료] (MTTR 중앙값용 목록)
+    incidents: dict[str, list[datetime | None]] = field(default_factory=dict)
+    collab: Counter[tuple[str, str]] = field(default_factory=Counter)  # (요청 부서, 받은 source)
+    log_count: int = 0
+    truncated: bool = False
+
+    def merge(self, other: ActivityCounts) -> ActivityCounts:
+        """두 기간을 더한 새 값 (원래 값은 바꾸지 않는다)."""
+        merged = ActivityCounts.from_json(self.to_json())
+        for src, counts in other.sources.items():
+            merged.sources.setdefault(src, SourceCounts()).add(counts)
+        for svc, items in other.handed.items():
+            merged.handed.setdefault(svc, []).extend(items)
+        for svc, closes in other.closed.items():
+            merged.closed.setdefault(svc, []).extend(closes)
+        for ctx, (first, resolved, verified) in other.incidents.items():
+            have = merged.incidents.setdefault(ctx, [None, None, None])
+            have[0] = _earliest(have[0], first)
+            have[1] = _earliest(have[1], resolved)
+            have[2] = _earliest(have[2], verified)
+        merged.collab.update(other.collab)
+        merged.log_count += other.log_count
+        merged.truncated = merged.truncated or other.truncated
+        return merged
+
+    def mttr_seconds(self) -> dict[str, int | None]:
+        """사건별 MTTR (`compute_kpi`와 같다: resolved 발행 → 없으면 verify 완료, − 첫 기록)."""
+        out: dict[str, int | None] = {}
+        for ctx, (first, resolved, verified) in self.incidents.items():
+            recovered = resolved or verified
+            out[ctx] = int((recovered - first).total_seconds()) if recovered and first else None
+        return out
+
+    def to_json(self) -> dict:
+        return {
+            "sources": {s: c.to_json() for s, c in self.sources.items()},
+            "handed": {s: [[t, _iso(a)] for t, a in v] for s, v in self.handed.items()},
+            "closed": {s: [[t, o, _iso(a)] for t, o, a in v] for s, v in self.closed.items()},
+            "incidents": {
+                c: [_iso(x) if x else None for x in v] for c, v in self.incidents.items()
+            },
+            "collab": [[a, b, n] for (a, b), n in sorted(self.collab.items())],
+            "log_count": self.log_count,
+            "truncated": self.truncated,
+        }
+
+    @classmethod
+    def from_json(cls, data: dict) -> ActivityCounts:
+        handed: dict[str, list[tuple[str | None, datetime]]] = {}
+        for svc, items in (data.get("handed") or {}).items():
+            handed[svc] = [(t, a) for t, raw in items if (a := _at(raw)) is not None]
+        closed: dict[str, list[tuple[str | None, str, datetime]]] = {}
+        for svc, items in (data.get("closed") or {}).items():
+            closed[svc] = [(t, o, a) for t, o, raw in items if (a := _at(raw)) is not None]
+        return cls(
+            sources={s: SourceCounts.from_json(c) for s, c in (data.get("sources") or {}).items()},
+            handed=handed,
+            closed=closed,
+            incidents={c: [_at(x) for x in v] for c, v in (data.get("incidents") or {}).items()},
+            collab=Counter({(a, b): n for a, b, n in data.get("collab") or []}),
+            log_count=int(data.get("log_count") or 0),
+            truncated=bool(data.get("truncated")),
+        )
 
 
 def _key(r: LogRecord) -> tuple:
@@ -218,21 +370,14 @@ def _skills(counter: Counter[str], limit: int | None = None) -> list[SkillCount]
     return [SkillCount(skill=s, label=skill_label(s), count=n) for s, n in ordered[:limit]]
 
 
-def compute_activity(
-    records: list[LogRecord], scope: Scope, mttr_seconds: Mapping[str, int | None]
-) -> ActivityComputation:
-    """기간 안 기록(시각 오름차순)으로 부서별 숫자와 협업 목록을 센다."""
+def count_activity(records: list[LogRecord], truncated: bool = False) -> ActivityCounts:
+    """기록(한 기간)에서 더할 수 있는 값을 센다. 부서·범위로 거르지 않는다."""
     records = sorted(records, key=lambda r: r.occurred_at)
     received_at = _pair_received(records)
     reviews = _reviews(records)
     decisions = [r for r in records if r.kind == "execute_decided"]
     used: set[str] = set()
-    notes: list[tuple[str, str]] = []
-
-    results: dict[str, list[LogRecord]] = defaultdict(list)
-    for r in records:
-        if r.kind == "result_sent" and (dept := scope.department_of_source(r.source)):
-            results[dept].append(r)
+    counts = ActivityCounts(log_count=len(records), truncated=truncated)
 
     def linked(r: LogRecord) -> list[LogRecord]:
         exe = r.payload.get("execution_id")
@@ -252,105 +397,134 @@ def compute_activity(
                 found.append(d)
         return found
 
-    handed: dict[str, tuple[str, datetime]] = {}  # task_id → (부서, 넘긴 시각)
-    handoffs: dict[str, dict[str, list]] = defaultdict(
-        lambda: {"handed": [], "done": [], "rej": []}
-    )
     for r in records:
-        if r.kind != "task_status":
+        if r.context_id and r.context_id.startswith(INCIDENT_PREFIX):
+            times = counts.incidents.setdefault(r.context_id, [None, None, None])
+            times[0] = _earliest(times[0], r.occurred_at)
+            if r.kind == "event_published" and r.payload.get("event_type") == RESOLVED_EVENT:
+                times[1] = _earliest(times[1], r.occurred_at)
+            if r.kind == "result_sent" and r.skill == RECOVERY_SKILL:
+                if r.task_status == "completed":
+                    times[2] = _earliest(times[2], r.occurred_at)
+        if r.kind == "request_received" and r.requester:
+            counts.collab[(department_of(r.requester), r.source)] += 1
+        if r.kind == "task_status":
+            outcome = r.payload.get("outcome")
+            service = r.payload.get("to_service")
+            task_id = r.payload.get("task_id")
+            task = str(task_id) if task_id else None
+            if isinstance(service, str) and outcome == HANDED_TO_HUMAN:
+                counts.handed.setdefault(service, []).append((task, r.occurred_at))
+            elif isinstance(service, str) and outcome in (HANDOFF_DONE, HANDOFF_REJECTED):
+                counts.closed.setdefault(service, []).append((task, str(outcome), r.occurred_at))
+        if r.kind != "result_sent":
             continue
-        outcome = r.payload.get("outcome")
-        dept = scope.department_of_service(r.payload.get("to_service"))
-        if dept is None:
-            continue
-        task_id = r.payload.get("task_id")
-        if outcome == HANDED_TO_HUMAN:
-            handoffs[dept]["handed"].append(r)
-            if task_id:
-                handed[str(task_id)] = (dept, r.occurred_at)
-        elif outcome in (HANDOFF_DONE, HANDOFF_REJECTED):
-            handoffs[dept]["done" if outcome == HANDOFF_DONE else "rej"].append(r)
+        c = counts.sources.setdefault(r.source, SourceCounts())
+        if r.skill:
+            c.skills[r.skill] += 1
+        outcome = _base_outcome(r)
+        if outcome is None:
+            found = [_decision_outcome(d, reviews) for d in linked(r)]
+            outcome = next((p for p in _PRIORITY if p in found), AUTO)
+            if outcome == UNKNOWN:
+                c.verifying += 1
+        c.outcomes[outcome] += 1
+        if (r.task_status or r.payload.get("status")) == "completed":
+            c.completed += 1
+            if r.payload.get("fallback") is True:
+                c.replaced += 1
+                c.reasons[str(r.payload.get("fallback_reason") or "unknown")] += 1
+        if (wait := _response_ms(r, received_at)) is not None:
+            c.wait_sum_ms += wait
+            c.wait_count += 1
+        if r.context_id and r.context_id.startswith(INCIDENT_PREFIX):
+            skills = c.incident_skills.setdefault(r.context_id, Counter())
+            if r.skill:
+                skills[r.skill] += 1
+    return counts
 
+
+def finish_activity(counts: ActivityCounts, scope: Scope) -> ActivityComputation:
+    """더한 값으로 부서별 숫자·협업 목록을 만든다. 비율·평균·중앙값은 여기서 다시 계산한다."""
+    notes: list[tuple[str, str]] = []
+    mttr = counts.mttr_seconds()
+    handed_at = {
+        task: at for items in counts.handed.values() for task, at in items if task is not None
+    }
     departments: dict[str, DepartmentActivity] = {}
     for dept in scope.departments:
-        sent = results.get(dept, [])
-        outcomes: Counter[str] = Counter()
-        verifying = 0
-        for r in sent:
-            outcome = _base_outcome(r)
-            if outcome is None:
-                found = [_decision_outcome(d, reviews) for d in linked(r)]
-                outcome = next((p for p in _PRIORITY if p in found), AUTO)
-                if outcome == UNKNOWN:
-                    verifying += 1
-            outcomes[outcome] += 1
-        if verifying:
+        c = SourceCounts()
+        for src, part in counts.sources.items():
+            if scope.department_of_source(src) == dept:
+                c.add(part)
+        handed = [
+            item
+            for svc, items in counts.handed.items()
+            if scope.department_of_service(svc) == dept
+            for item in items
+        ]
+        closed = [
+            item
+            for svc, items in counts.closed.items()
+            if scope.department_of_service(svc) == dept
+            for item in items
+        ]
+        if c.verifying:
             notes.append(
                 (
                     f"departments.{dept}.outcomes.unknown",
-                    f"B 등급 교차검증 {verifying}건은 최종 결과가 공통 로그에 없어 확인할 수 없음",
+                    f"B 등급 교차검증 {c.verifying}건은 최종 결과가 "
+                    "공통 로그에 없어 확인할 수 없음",
                 )
             )
-        total = len(sent)
-
-        completed = [r for r in sent if (r.task_status or r.payload.get("status")) == "completed"]
-        replaced = [r for r in completed if r.payload.get("fallback") is True]
-        reasons = Counter(str(r.payload.get("fallback_reason") or "unknown") for r in replaced)
-        waits = [w for r in sent if (w := _response_ms(r, received_at)) is not None]
-
-        incident_skills: Counter[str] = Counter()
-        incident_ids: set[str] = set()
-        for r in sent:
-            if r.context_id and r.context_id.startswith(INCIDENT_PREFIX):
-                incident_ids.add(r.context_id)
-                if r.skill:
-                    incident_skills[r.skill] += 1
-        mttrs = [m for c in incident_ids if (m := mttr_seconds.get(c)) is not None]
-
-        h = handoffs.get(dept, {"handed": [], "done": [], "rej": []})
+        total = sum(c.outcomes.values())
         closes = [
-            (r.occurred_at - handed[str(r.payload.get("task_id"))][1]).total_seconds() / 60
-            for r in h["done"] + h["rej"]
-            if str(r.payload.get("task_id")) in handed
+            (at - handed_at[task]).total_seconds() / 60
+            for task, _, at in closed
+            if task is not None and task in handed_at
         ]
+        incident_skills: Counter[str] = Counter()
+        for skills in c.incident_skills.values():
+            incident_skills.update(skills)
+        mttrs = [m for ctx in c.incident_skills if (m := mttr.get(ctx)) is not None]
         departments[dept] = DepartmentActivity(
-            requests=ActivityRequests(
-                total=total,
-                top_skills=_skills(Counter(r.skill for r in sent if r.skill), TOP_SKILLS),
-            ),
-            outcomes=ActivityOutcomes(**{k: rate(outcomes[k], total) for k in _PRIORITY}),
+            requests=ActivityRequests(total=total, top_skills=_skills(c.skills, TOP_SKILLS)),
+            outcomes=ActivityOutcomes(**{k: rate(c.outcomes[k], total) for k in _PRIORITY}),
             handoffs=ActivityHandoffs(
-                handed=len(h["handed"]),
-                done=len(h["done"]),
-                rejected=len(h["rej"]),
+                handed=len(handed),
+                done=sum(1 for _, o, _ in closed if o == HANDOFF_DONE),
+                rejected=sum(1 for _, o, _ in closed if o == HANDOFF_REJECTED),
                 avg_close_minutes=round(sum(closes) / len(closes), 1) if closes else None,
             ),
             quality=ActivityQuality(
-                fallback=rate(len(replaced), len(completed)),
-                fallback_reasons=dict(sorted(reasons.items())),
-                avg_response_ms=round(sum(waits) / len(waits), 1) if waits else None,
-                response_samples=len(waits),
+                fallback=rate(c.replaced, c.completed),
+                fallback_reasons=dict(sorted(c.reasons.items())),
+                avg_response_ms=round(c.wait_sum_ms / c.wait_count, 1) if c.wait_count else None,
+                response_samples=c.wait_count,
             ),
             incidents=ActivityIncidents(
-                count=len(incident_ids),
+                count=len(c.incident_skills),
                 skills=_skills(incident_skills),
                 mttr_median_minutes=_median_minutes(mttrs),
             ),
         )
+    return ActivityComputation(
+        departments, collaboration(counts, scope), notes, incident_count=len(counts.incidents)
+    )
 
-    return ActivityComputation(departments, collaboration(records, scope), notes)
+
+def compute_activity(records: list[LogRecord], scope: Scope) -> ActivityComputation:
+    """기간 안 기록으로 부서별 숫자와 협업 목록을 센다 (`count_activity` → `finish_activity`)."""
+    return finish_activity(count_activity(records), scope)
 
 
-def collaboration(records: list[LogRecord], scope: Scope) -> list[CollaborationEdge]:
+def collaboration(counts: ActivityCounts, scope: Scope) -> list[CollaborationEdge]:
     """A2A 요청(`request_received`) 기준 요청한 부서 → 받은 부서 → 횟수 (많은 순)."""
     edges: Counter[tuple[str, str]] = Counter()
-    for r in records:
-        if r.kind != "request_received" or not r.requester:
-            continue
-        to_dept = scope.department_of_source(r.source)
-        if to_dept is None:
-            continue
-        edges[(department_of(r.requester), to_dept)] += 1
+    for (from_dept, source), n in counts.collab.items():
+        to_dept = scope.department_of_source(source)
+        if to_dept is not None:
+            edges[(from_dept, to_dept)] += n
     ordered = sorted(edges.items(), key=lambda kv: (-kv[1], kv[0]))
     return [
         CollaborationEdge(

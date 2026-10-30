@@ -93,6 +93,8 @@ export PLANNING_VCS_STORE="$PWD/$DATA/vcs_connections.json"
 export PLANNING_CLOCK=real
 # A2A 주고받은 기록(AI 대화방이 읽는다)
 export AX_COMMON_LOG_DB="$PWD/$DATA/common_log.db"
+# 데이터분석 업무 리포트 일간 저장 (data 자체 파일. 하루 한 번 미리 만들어 화면이 바로 읽는다)
+export DATA_REPORT_DB="$PWD/$DATA/data_reports.db"
 
 # 업무 요청 라우터 (README "업무 요청 라우터"): 켠 서비스면 에이전트로, 안 켠 서비스면 사람 할 일함으로
 # 켠 서비스는 backend/.env 의 AX_ENABLED_SERVICES (쉼표 목록). 없거나 비어 있으면 전부 켠다(예전 동작)

@@ -2,16 +2,32 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import logging
 import os
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI
 
+from ax_agent_template.client import call_agent
+from ax_agent_template.config import agent_token
 from ax_agent_template.llm import LLMSettings
 from ax_agent_template.server import create_agent_app
-from ax_contracts.schemas import AgentCard
+from ax_contracts.schemas import AgentCard, RequestMeta
+from ax_contracts.schemas.common import TENANT_ID_DEFAULT
+from data_agent.clients.log_client import get_log_source
 from data_agent.handlers import HANDLERS
+from data_agent.monitor import run_snapshots_forever
+from data_agent.report_store import Snapshot, get_report_store
+from data_agent.skills.activity_report import build_day_snapshot
+from data_agent.skills.anomaly_detection import get_metric_source
+
+logger = logging.getLogger("ax.data")
+SNAPSHOT_CONTEXT = "ctx_req_data_snapshot"
+SNAPSHOT_DEADLINE = timedelta(minutes=2)
 
 
 def _card_path() -> Path:
@@ -41,12 +57,54 @@ def llm_configured(env: Mapping[str, str] | None = None) -> bool:
     return bool(settings.model and settings.base_url)
 
 
+def start_report_snapshots(env: Mapping[str, str] | None = None) -> asyncio.Task | None:
+    """`DATA_REPORT_DB`가 있으면 업무 리포트 일간 저장 주기를 켠다. 없거나 읽을 곳이 없으면 None.
+
+    지표 감시(`monitor.run_forever`)는 켜지 않는다(지금처럼). 재무는 data 자신의 토큰으로 부른다.
+    """
+    env = os.environ if env is None else env
+    store = get_report_store(env)
+    if store is None:
+        return None
+    try:
+        logs = get_log_source(env)
+    except NotImplementedError as error:
+        logger.warning("업무 리포트 일간 저장을 켜지 않음: %s", error)
+        return None
+    metrics = get_metric_source(env)
+
+    async def build_day(day: date) -> Snapshot:
+        meta = RequestMeta(
+            context_id=SNAPSHOT_CONTEXT,
+            token=agent_token("data"),
+            tenant_id=TENANT_ID_DEFAULT,
+            deadline=datetime.now(UTC) + SNAPSHOT_DEADLINE,
+        )
+        return await build_day_snapshot(day, meta, logs, metrics, call_agent)
+
+    return asyncio.create_task(run_snapshots_forever(store, build_day, TENANT_ID_DEFAULT))
+
+
 def build_app() -> FastAPI:
     """카드로 A2A 앱을 만든다. 카드와 핸들러의 skill이 다르면 시작할 때 실패한다.
 
     `/health`는 템플릿 응답에 `llm_configured`(설명 LLM 설정 여부)를 더한다.
+    시작할 때 업무 리포트 일간 저장 주기를 켠다(`DATA_REPORT_DB`가 있을 때만).
     """
     app = create_agent_app(load_card(), HANDLERS)
+    template_lifespan = app.router.lifespan_context
+
+    @contextlib.asynccontextmanager
+    async def lifespan(a: FastAPI) -> AsyncIterator[None]:
+        async with template_lifespan(a):
+            task = start_report_snapshots()
+            try:
+                yield
+            finally:
+                if task:
+                    task.cancel()
+
+    app.router.lifespan_context = lifespan
     app.router.routes = [r for r in app.router.routes if getattr(r, "path", None) != "/health"]
 
     @app.get("/health")

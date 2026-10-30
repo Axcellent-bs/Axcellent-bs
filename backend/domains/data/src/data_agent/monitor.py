@@ -9,23 +9,38 @@
 - idempotency_key는 `metric.anomaly:<지표>:<이상 구간 시작>`이다.
 - 직전 감시에서 이상이던 지표가 계속 이상이면(구간 시작이 밀려도) 다시 발행하지 않는다.
   정상·확인할 수 없음으로 돌아온 뒤 다시 이상이 되면 새로 발행한다.
+
+같은 모듈에 업무 리포트 일간 저장(`snapshot_tick`)도 둔다. 데이터 앱은 `DATA_REPORT_DB`가 있으면
+저장 주기(`run_snapshots_forever`)만 켠다(지표 감시 `run_forever`는 지금처럼 켜지 않는다).
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import os
-from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from collections.abc import Awaitable, Callable
+from dataclasses import replace
+from datetime import UTC, date, datetime, time, timedelta, timezone
 
 from ax_agent_template.events import publish
 from ax_contracts.schemas import EventEnvelope, EventType
 from ax_contracts.schemas.event import MetricAnomalyData
 from data_agent.detect import WATCHED_METRICS, MetricSource, judge_window
 from data_agent.metrics.judge import Judgement, Settings, settings_for
+from data_agent.report_store import ReportStore, Snapshot
 
-__all__ = ["WATCHED_METRICS", "MetricSource", "reset_published", "run_forever", "run_once"]
+__all__ = [
+    "WATCHED_METRICS",
+    "MetricSource",
+    "days_to_snapshot",
+    "reset_published",
+    "run_forever",
+    "run_once",
+    "run_snapshots_forever",
+    "snapshot_tick",
+]
 
 # 프로세스 안에서 이미 발행한 idempotency_key
 _published_keys: set[str] = set()
@@ -97,4 +112,72 @@ async def run_forever(
     """`interval_seconds` 마다 `run_once`를 반복한다."""
     while True:
         await run_once(source, clock())
+        await asyncio.sleep(interval_seconds)
+
+
+# ------------------------------------------------ 업무 리포트 일간 저장 (activity_report)
+# 한국 시간 00:30 이후 처음 돌 때 어제를 만들고, 돌 때마다 최근 7일 중 빠진 날을 채운다.
+# 이미 있는 날은 다시 만들지 않는다. 확인할 수 없음이 있던 날은 다음 날 한 번만 다시 만든다.
+# 하루씩 차례로 만든다(재무 호출은 하루에 한 번, 동시 상한 안).
+SNAPSHOT_KST = timezone(timedelta(hours=9))
+SNAPSHOT_AFTER = time(0, 30)  # 한국 시간. 어제 일간을 만들기 시작하는 시각
+SNAPSHOT_BACKFILL_DAYS = 7
+SNAPSHOT_INTERVAL_SECONDS = 300
+
+logger = logging.getLogger("ax.data.monitor")
+
+BuildDay = Callable[[date], Awaitable[Snapshot]]
+
+
+def days_to_snapshot(store: ReportStore, tenant_id: str, now: datetime) -> list[tuple[date, bool]]:
+    """만들 날과 다시 만드는 날인지. 오늘은 만들지 않는다(하루가 끝나지 않았다)."""
+    local = now.astimezone(SNAPSHOT_KST)
+    today = local.date()
+    days = [today - timedelta(days=i) for i in range(SNAPSHOT_BACKFILL_DAYS, 0, -1)]
+    if local.time() < SNAPSHOT_AFTER:
+        days = days[:-1]  # 어제는 00:30이 지나야 만든다
+    have = store.get_many(tenant_id, days)
+    todo: list[tuple[date, bool]] = []
+    for day in days:
+        saved = have.get(day)
+        if saved is None:
+            todo.append((day, False))
+        elif (
+            saved.has_unknown
+            and not saved.retried
+            and saved.created_at.astimezone(SNAPSHOT_KST).date() < today
+        ):
+            todo.append((day, True))  # 확인할 수 없음이 있던 날: 다음 날 한 번만
+    return todo
+
+
+async def snapshot_tick(
+    store: ReportStore, build_day: BuildDay, tenant_id: str, now: datetime
+) -> list[date]:
+    """빠진 날을 만들어 저장한다. 만든 날 목록을 돌려준다. 하루가 실패해도 다음 날은 계속한다."""
+    built: list[date] = []
+    for day, retry in days_to_snapshot(store, tenant_id, now):
+        try:
+            snapshot = await build_day(day)
+        except Exception as error:  # noqa: BLE001 - 다음 주기에 다시 시도한다
+            logger.warning("업무 리포트 일간 저장 실패 %s: %s", day, type(error).__name__)
+            continue
+        store.put(replace(snapshot, retried=retry))
+        built.append(day)
+    return built
+
+
+async def run_snapshots_forever(
+    store: ReportStore,
+    build_day: BuildDay,
+    tenant_id: str,
+    interval_seconds: int = SNAPSHOT_INTERVAL_SECONDS,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+) -> None:
+    """`interval_seconds`마다 `snapshot_tick`을 돈다. 시작하자마자 한 번 돌아 빠진 날을 채운다."""
+    while True:
+        try:
+            await snapshot_tick(store, build_day, tenant_id, clock())
+        except Exception as error:  # noqa: BLE001 - 저장소 오류로 서버를 멈추지 않는다
+            logger.warning("업무 리포트 일간 저장 주기 오류: %s", type(error).__name__)
         await asyncio.sleep(interval_seconds)

@@ -391,3 +391,9 @@ class ActivityReportOutput(AxModel):
     summary: str
     summary_source: Literal["llm", "template", "none"]  # none: 특이사항 없음(LLM 호출 안 함)
     unknown_sections: list[UnknownSection] = Field(default_factory=list)
+    # 일간 저장(data DATA_REPORT_DB)을 쓴 값인지. 예전 응답은 None
+    # 언제 만든 값인지 (쓴 저장값 중 가장 이른 것, 저장값이 없으면 계산 시각)
+    snapshot_at: UtcDatetime | None = None
+    stored_days: int | None = Field(default=None, ge=0)  # 저장된 값을 쓴 날 수 (이번 + 직전 기간)
+    live_days: int | None = Field(default=None, ge=0)  # 바로 계산한 날 수 (이번 + 직전 기간)
+    snapshot_note: str | None = None  # "저장된 날 N일 / 바로 계산 M일"
