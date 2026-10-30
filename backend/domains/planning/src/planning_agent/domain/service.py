@@ -54,6 +54,7 @@ from planning_agent.dev_handoff import (
     start_dev_key,
 )
 from planning_agent.domain.autocheck import (
+    WAIT_ANSWER,
     WAIT_CROSS_CHECK,
     WAIT_HUMAN,
     Check,
@@ -3406,6 +3407,10 @@ class PlanningService:
         req = self._request_of_spec(s, sp)
         ctx = req.context_id if req else f"spec:{sp.id}"
         check = spec_check(sp)
+        # 아직 안 끝난 다른 요청과 충돌할 수 있으면 어느 쪽을 따를지 사람이 정한다 (planning 규칙)
+        clash = related.open_conflicts(s, req) if req else []
+        if clash:
+            check = Check(params=check.params, rules=[*check.rules, "spec_open_conflict"])
         if check.ok:
             try:
                 await self._do_confirm(s, sp, check, auto=True)
@@ -3415,8 +3420,13 @@ class PlanningService:
                     raise
                 hold = self._hold(sp, WAIT_CROSS_CHECK, check, exc.decision)
         else:
-            hold = self._hold(sp, spec_wait_state(check), check)
+            wait = spec_wait_state(check)
+            if clash and wait != WAIT_ANSWER:
+                wait = WAIT_HUMAN
+            hold = self._hold(sp, wait, check)
         why = ", ".join(hold.rules) or f"safety {hold.gate_status}"
+        if clash:
+            why += " · " + ", ".join(x.id for x in clash)
         s.activity.append(
             self._act(
                 hold.at,
