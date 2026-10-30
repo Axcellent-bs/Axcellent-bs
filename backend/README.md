@@ -55,6 +55,17 @@ bash scripts/run_web.sh         # 다른 터미널: 화면(frontend 3090)을 실
 bash scripts/run_all.sh stop
 ```
 
+- **일부 서버만 띄우기** (`--only`, 없으면 전부): 메모리가 모자라거나 한 부서만 볼 때 쓴다.
+  ```bash
+  bash scripts/run_all.sh --only data,finance,shop-api   # 이름은 run_all.sh의 APPS 목록 이름
+  bash scripts/run_all.sh --only core                    # safety, memory, shop-api, dashboard-api, orchestrator
+  bash scripts/run_all.sh --only data-demo               # core + data, finance, inquiry, coupon, handover, dev (data 업무 리포트가 부르는 곳)
+  bash scripts/run_all.sh --only data-demo,incident      # 묶음과 이름을 섞어도 된다
+  ```
+  - 시작할 때 `띄운 서버 N개: …, 안 띄움: …`을 출력한다. 모르는 이름이면 목록을 보여 주고 멈춘다.
+  - 안 띄운 서비스는 `AX_ENABLED_SERVICES`에서도 자동으로 빠진다. 그래서 라우터가 그쪽으로 A2A를 보내지 않고 사람 할 일함으로 넘긴다. 이미 `AX_ENABLED_SERVICES`를 줬으면 둘의 교집합이고, 남는 서비스가 없으면 `none`(모두 끔)이다.
+  - 캣북스 주문 트래픽은 shop-api를 띄웠을 때만 돈다. `stop`은 지금처럼 전체 포트를 끈다.
+  - 메모리(전용 메모리, Windows 로컬 측정): 전체 16개 서버 + 트래픽은 프로세스 36개·약 940MB, `data-demo`는 26개·약 680MB다.
 - Docker가 필요하다. 이벤트 버스(Redis)를 컨테이너 `ax-redis`로 띄운다 (`REDIS_URL`을 주면 그걸 쓴다).
 - 에이전트 토큰(`AX_AGENT_TOKENS`)·사람 토큰은 켤 때마다 새로 만들어 프로세스에만 넘긴다. 화면에 넘길 값만
   `backend/.data/web.env`에 쓴다 (커밋 안 함).
