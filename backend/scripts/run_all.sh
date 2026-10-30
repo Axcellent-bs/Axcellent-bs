@@ -3,6 +3,9 @@
 #   bash backend/scripts/run_all.sh          # 실제 LLM·실제 토큰·Redis·파일 DB, 캣북스 고객 주문 트래픽
 #   bash backend/scripts/run_all.sh stop     # 이 스크립트가 띄운 것 끄기
 #   bash backend/scripts/run_all.sh reset    # 끄고 테스트로 쌓인 기록(.data·이벤트 버스)을 지운다
+#   bash backend/scripts/run_all.sh --only data,finance,shop-api   # 고른 서버만 (이름은 아래 APPS)
+#   bash backend/scripts/run_all.sh --only data-demo              # 묶음: core, data-demo (아래 GROUP_*)
+#     안 띄운 서비스는 AX_ENABLED_SERVICES에서도 빠진다(이미 줬으면 교집합). stop은 늘 전체 포트를 끈다
 # 먼저 backend/ 에서 `uv sync --all-packages` 한 번. 로그는 backend/.logs/<이름>.log
 #
 # 실제 모드에 필요한 것
@@ -39,6 +42,47 @@ orchestrator 8000 ax_orchestrator.main:app
 "
 PORTS=$(echo "$APPS" | awk 'NF {print $2}' | tr '\n' ',' | sed 's/,$//')
 
+# --only 묶음 이름 (data-demo = core + data 업무 리포트가 부르는 서비스)
+GROUP_core="safety,memory,shop-api,dashboard-api,orchestrator"
+GROUP_data_demo="$GROUP_core,data,finance,inquiry,coupon,handover,dev"
+
+# 인자: stop | reset | mock 과 --only <목록> (--only=<목록>도 된다)
+CMD=""
+ONLY=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --only)
+      ONLY="${2:-}"
+      [ -n "$ONLY" ] || { echo "--only 뒤에 서버 이름(쉼표 목록)이나 묶음 이름이 필요합니다" >&2; exit 2; }
+      shift 2 ;;
+    --only=*) ONLY="${1#--only=}"; shift ;;
+    stop|reset|mock) CMD="$1"; shift ;;
+    *) echo "모르는 인자: $1 (쓸 수 있는 것: stop, reset, --only <목록>)" >&2; exit 2 ;;
+  esac
+done
+
+# 띄울 서버 목록 (APPS 순서 유지). --only가 없으면 전부
+RUN_APPS="$APPS"
+SKIPPED=""
+if [ -n "$ONLY" ]; then
+  wanted=","
+  for item in $(echo "$ONLY" | tr ',' ' '); do
+    var="GROUP_$(echo "$item" | tr '-' '_')"
+    if [ -n "${!var:-}" ]; then
+      wanted="$wanted${!var},"
+    elif echo "$APPS" | awk -v n="$item" '$1 == n {found=1} END {exit !found}'; then
+      wanted="$wanted$item,"
+    else
+      echo "모르는 서버·묶음 이름: $item" >&2
+      echo "  서버: $(echo "$APPS" | awk 'NF {print $1}' | tr '\n' ' ')" >&2
+      echo "  묶음: core data-demo" >&2
+      exit 2
+    fi
+  done
+  RUN_APPS=$(echo "$APPS" | awk -v w="$wanted" 'NF && index(w, "," $1 ",")')
+  SKIPPED=$(echo "$APPS" | awk -v w="$wanted" 'NF && !index(w, "," $1 ",") {print $1}' | tr '\n' ' ' | sed 's/ $//')
+fi
+
 stop_all() {
   # bash의 $!는 Windows 프로세스 번호가 아니라서, 포트를 쥔 프로세스를 찾아 끈다
   if command -v powershell.exe >/dev/null 2>&1; then
@@ -51,7 +95,7 @@ stop_all() {
   done
 }
 
-if [ "${1:-}" = "stop" ]; then
+if [ "$CMD" = "stop" ]; then
   stop_all
   echo "stopped"
   exit 0
@@ -59,7 +103,7 @@ fi
 
 # 테스트로 쌓인 기록을 지우고 처음부터: 캣북스 주문·AI 대화 기록·인사 기록·LLM 사용량·이벤트 버스
 # (캣북스 쇼핑몰은 비어 있으면 시드를 다시 넣는다)
-if [ "${1:-}" = "reset" ]; then
+if [ "$CMD" = "reset" ]; then
   stop_all
   rm -f "$DATA"/*.db "$DATA"/*.db-wal "$DATA"/*.db-shm "$DATA"/web.env
   docker exec ax-redis redis-cli FLUSHALL >/dev/null 2>&1 || true
@@ -67,7 +111,7 @@ if [ "${1:-}" = "reset" ]; then
   exit 0
 fi
 
-if [ "${1:-}" = "mock" ]; then
+if [ "$CMD" = "mock" ]; then
   echo "목 모드는 지웠습니다. 로컬도 실제 모드 하나로 돕니다 (*_MOCK 스위치는 CI 단위 테스트 전용)." >&2
   exit 2
 fi
@@ -137,6 +181,20 @@ for v in LLM_MODEL LLM_BASE_URL LLM_API_KEY; do
 done
 [ -n "${EMBED_MODEL:-}" ] || echo "경고: EMBED_MODEL 이 없습니다. 회사 기억(memory) 검색이 실패합니다 (예: gemini-embedding-001)." >&2
 
+# --only로 안 띄운 서비스는 켠 서비스에서도 뺀다 (라우터가 그쪽으로 A2A를 보내지 않고 사람 할 일함으로 넘긴다).
+# 대상은 서비스 13개(services.py)뿐이다. 이미 AX_ENABLED_SERVICES를 줬으면 둘의 교집합이다
+if [ -n "$ONLY" ]; then
+  svc_ids=" $("$PY" -c "from ax_agent_template.services import SERVICES; print(' '.join(s.id for s in SERVICES))") "
+  given=",$(echo "${AX_ENABLED_SERVICES:-}" | tr -d ' '),"
+  enabled=""
+  for n in $(echo "$RUN_APPS" | awk 'NF {print $1}'); do
+    case "$svc_ids" in *" $n "*) ;; *) continue ;; esac
+    case "$given" in ",,"|*",$n,"*) enabled="$enabled${enabled:+,}$n" ;; esac
+  done
+  # 비어 있으면 "전부 켬"이 되므로, 켤 서비스가 하나도 없으면 어느 서비스와도 맞지 않는 값을 둔다
+  export AX_ENABLED_SERVICES="${enabled:-none}"
+fi
+
 # 이벤트 버스 (Redis Streams)
 if [ -z "${REDIS_URL:-}" ]; then
   if docker inspect ax-redis >/dev/null 2>&1; then
@@ -173,6 +231,9 @@ token_of() { echo "$AX_AGENT_TOKENS" | tr ',' '\n' | sed -n "s/^$1=//p"; }
 
 stop_all
 
+RUN_COUNT=$(echo "$RUN_APPS" | awk 'NF' | wc -l | tr -d ' ')
+echo "띄운 서버 ${RUN_COUNT}개: $(echo "$RUN_APPS" | awk 'NF {print $1}' | tr '\n' ' ' | sed 's/ $//'), 안 띄움: ${SKIPPED:-없음}"
+
 started=0
 while read -r name port module; do
   [ -n "$name" ] || continue
@@ -183,7 +244,7 @@ while read -r name port module; do
       while read -r n p _; do
         [ -n "$n" ] && [ "$n" != "orchestrator" ] || continue
         [ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$p/health" || true)" = "200" ] && up=$((up + 1))
-      done <<< "$APPS"
+      done <<< "$RUN_APPS"
       [ "$up" -ge "$started" ] && break
       sleep 1
     done
@@ -191,11 +252,13 @@ while read -r name port module; do
   "$PY" -m uvicorn "$module" --host 127.0.0.1 --port "$port" > "$LOGS/$name.log" 2>&1 &
   echo $! > "$LOGS/$name.pid"
   started=$((started + 1))
-done <<< "$APPS"
+done <<< "$RUN_APPS"
 
-# 캣북스 고객 주문 트래픽
-SHOP_API_URL=http://127.0.0.1:8010 "$PY" scripts/shop_traffic.py > "$LOGS/shop-traffic.log" 2>&1 &
-echo $! > "$LOGS/shop-traffic.pid"
+# 캣북스 고객 주문 트래픽 (shop-api를 띄웠을 때만)
+if echo "$RUN_APPS" | awk '$1 == "shop-api" {found=1} END {exit !found}'; then
+  SHOP_API_URL=http://127.0.0.1:8010 "$PY" scripts/shop_traffic.py > "$LOGS/shop-traffic.log" 2>&1 &
+  echo $! > "$LOGS/shop-traffic.pid"
+fi
 
 sleep 8
 echo "모드: 실제"
@@ -204,6 +267,7 @@ while read -r name port _; do
   [ -n "$name" ] || continue
   code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port/health" || true)
   printf "%-14s %s  %s\n" "$name" "$port" "$code"
-done <<< "$APPS"
+done <<< "$RUN_APPS"
+[ -z "$SKIPPED" ] || echo "안 띄움: $SKIPPED"
 echo "화면: bash scripts/run_web.sh (backend/.data/web.env 값으로 프론트 개발 서버를 켠다)"
 wait
