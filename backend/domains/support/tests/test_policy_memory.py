@@ -82,13 +82,12 @@ def test_low_confidence_and_inactive_cards_are_not_evidence() -> None:
 @pytest.mark.parametrize(
     "hits,status",
     [
-        ([], TaskStatus.COMPLETED),  # 쓸 카드가 없다
-        ([_hit("x", low=True)], TaskStatus.COMPLETED),  # 전부 확신도 낮음
+        ([], TaskStatus.COMPLETED),  # 카드를 하나도 못 찾았다
         (None, TaskStatus.COMPLETED),  # 출력 모양이 다르다
         ([_hit("x")], TaskStatus.FAILED),  # memory가 거절했다
     ],
 )
-def test_falls_back_to_the_seed_when_memory_has_nothing_usable(hits: Any, status: Any) -> None:
+def test_falls_back_to_the_seed_when_memory_gives_no_cards(hits: Any, status: Any) -> None:
     _, send = _sender(hits, status)
     sources = asyncio.run(policy_memory.search(_request(), "불량 환불", send))
     assert sources == kb.search("불량 환불", limit=3)
@@ -117,3 +116,31 @@ def test_unconfirmed_cards_do_not_use_up_the_evidence_slots() -> None:
     _, send = _sender(hits)
     found = asyncio.run(policy_memory.fetch_sources(_request(), "개인정보 삭제", send))
     assert [s.id for s in found or []] == ["ok1", "ok2", "ok3"]
+
+
+def test_cards_found_but_unusable_mean_no_evidence_not_the_seed() -> None:
+    # 개인정보 삭제처럼 확정된 카드가 없는 분류: 미확정 카드와 점수 낮은 다른 분류 카드만 나온다
+    hits = [
+        _hit("pd1", low=True, score=0.62),
+        _hit("cancel1", score=0.616),
+        _hit("r1", score=0.588),
+    ]
+    _, send = _sender(hits)
+    assert asyncio.run(policy_memory.fetch_sources(_request(), "개인정보 삭제", send)) == []
+    assert asyncio.run(policy_memory.search(_request(), "개인정보 삭제", send)) == []
+
+
+def test_the_score_floor_keeps_good_cards_and_can_be_changed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hits = [_hit("a", score=0.867), _hit("b", score=0.694), _hit("c", score=0.64)]
+    _, send = _sender(hits)
+    found = asyncio.run(policy_memory.fetch_sources(_request(), "환불", send))
+    assert [s.id for s in found or []] == ["a", "b"]  # 기준(0.65) 미만인 c는 뺀다
+    monkeypatch.setenv(policy_memory.MIN_SCORE_ENV, "0.8")
+    found = asyncio.run(policy_memory.fetch_sources(_request(), "환불", send))
+    assert [s.id for s in found or []] == ["a"]
+    monkeypatch.setenv(policy_memory.MIN_SCORE_ENV, "abc")  # 잘못된 값은 기본값
+    assert policy_memory.min_score() == policy_memory.MIN_SCORE
+    monkeypatch.setenv(policy_memory.MIN_SCORE_ENV, "1.5")
+    assert policy_memory.min_score() == policy_memory.MIN_SCORE

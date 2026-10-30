@@ -3,12 +3,14 @@
 memory `card_search`(의미 검색, `kind=policy`)로 찾고, 카드는 읽기만 한다.
 정책 카드의 내용은 memory와 정책 담당이 소유한다.
 `low_confidence` 카드는 판정 근거로 쓰지 않으므로 제외한다.
-memory에 닿지 못했거나 쓸 만한 카드가 없으면 `kb.search`(시드 조각)로 대체한다.
+memory에 닿지 못했거나 카드를 하나도 못 찾으면 `kb.search`(시드 조각)로 대체한다.
+카드를 찾았지만 미확정이거나 점수가 낮으면 근거 없음이다(엉뚱한 분류의 카드로 채우지 않는다).
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -24,7 +26,20 @@ Retriever = Callable[[str], Awaitable[list[Source]]]  # 질의 -> 근거 조각
 TOP_K = 3
 # memory에서는 넉넉히 받는다. 미확정 카드가 상위 자리를 차지해도 쓸 카드가 TOP_K장 남도록
 FETCH_K = 6
+# 이 점수보다 낮은 카드는 근거로 쓰지 않는다. 확정된 카드가 없는 분류(예: 개인정보 삭제)에서
+# 엉뚱한 분류의 카드(취소·환불 0.59~0.62)가 근거로 들어오는 것을 막는다. 값은 시드(제안)다.
+MIN_SCORE = 0.65
+MIN_SCORE_ENV = "SUPPORT_POLICY_MIN_SCORE"
 _POLICY_TAG = "policy"
+
+
+def min_score() -> float:
+    """근거로 쓸 최소 점수. `SUPPORT_POLICY_MIN_SCORE`(0~1)로 바꾼다. 잘못된 값은 기본값을 쓴다."""
+    try:
+        value = float(os.getenv(MIN_SCORE_ENV, ""))
+    except ValueError:
+        return MIN_SCORE
+    return value if 0.0 <= value <= 1.0 else MIN_SCORE
 
 
 def to_source(hit: dict[str, Any]) -> Source | None:
@@ -50,7 +65,12 @@ def to_source(hit: dict[str, Any]) -> Source | None:
 async def fetch_sources(
     request: AgentRequest, query: str, send: SendFn, limit: int = TOP_K
 ) -> list[Source] | None:
-    """정책 카드를 찾아 근거로 돌려준다. memory에 닿지 못하면 None(대체 필요), 없으면 빈 목록."""
+    """정책 카드를 찾아 근거로 돌려준다.
+
+    None이면 시드로 대체해야 한다(memory에 닿지 못함, 응답 모양이 다름, 카드를 하나도 못 찾음).
+    빈 목록이면 memory가 카드를 찾았지만 쓸 만한 것이 없다는 뜻이라 근거 없음으로 둔다
+    (미확정 카드이거나 점수가 `min_score` 미만). 이때 시드로 채우지 않는다.
+    """
     if not query.strip():
         return []
     search = AgentRequest(
@@ -68,18 +88,28 @@ async def fetch_sources(
     hits = reply.output.get("hits")
     if not isinstance(hits, list):
         return None
-    sources = [s for h in hits if isinstance(h, dict) and (s := to_source(h)) is not None]
+    if not hits:
+        return None
+    floor = min_score()
+    sources = [
+        s
+        for h in hits
+        if isinstance(h, dict) and (s := to_source(h)) is not None and s.score >= floor
+    ]
     return sources[:limit]
 
 
 async def search(
     request: AgentRequest, query: str, send: SendFn, limit: int = TOP_K
 ) -> list[Source]:
-    """memory 정책 카드를 먼저 쓰고, 닿지 못했거나 쓸 카드가 없으면 시드 조각으로 대체한다."""
+    """memory 정책 카드를 먼저 쓴다. 닿지 못했거나 카드를 하나도 못 찾으면 시드 조각으로 대체한다.
+
+    카드를 찾았지만 미확정이거나 점수가 낮아 쓸 것이 없으면 근거 없음(빈 목록)이다.
+    """
     found = await fetch_sources(request, query, send, limit)
-    if found:
-        return found
-    return kb.search(query, limit=limit)
+    if found is None:
+        return kb.search(query, limit=limit)
+    return found
 
 
 def retriever(request: AgentRequest, send: SendFn) -> Retriever:
