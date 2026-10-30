@@ -202,6 +202,10 @@ class CodingRun(DomainModel):
     connection: str | None = None
     pr: str | None = None
     instruction: str | None = None  # 사람이 대기 중인 PR에 준 수정 지시 (마지막 것)
+    # 작업 대기열: 같은 파일을 먼저 고치는 작업이 있으면 끝날 때까지 기다린다 (coder._wait_turn).
+    # skip_queue는 사람이 '지금 진행'으로 기다리지 않게 한 작업. 머지는 그래도 차례로 간다
+    skip_queue: bool = False
+    waiting_for: list[str] = Field(default_factory=list)  # 기다리는 앞 작업 id
 
 
 class Task(DomainModel):

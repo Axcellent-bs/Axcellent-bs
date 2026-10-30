@@ -99,6 +99,8 @@ export interface CodingRun {
   updatedAt?: string
   pr?: string | null
   instruction?: string | null // 사람이 대기 중인 PR에 준 수정 지시
+  skipQueue?: boolean // '지금 진행': 같은 파일 작업이 있어도 기다리지 않음
+  waitingFor?: string[] // 작업 대기열: 같은 파일을 먼저 고치는 앞 작업
 }
 
 export interface PR {

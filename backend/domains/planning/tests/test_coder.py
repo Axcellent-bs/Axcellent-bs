@@ -697,3 +697,89 @@ def test_revise_only_for_waiting_task_with_open_pr(service: PlanningService, ada
     with pytest.raises(ActionError) as err:
         run(service.revise_dev_task("T-D1", "   "))
     assert err.value.code == "INVALID_INPUT"
+
+
+# ---------------------------------------------------------------- 작업 대기열 (같은 파일은 차례로)
+
+
+def _two_writes():
+    """첫 작업은 BANNER_NEW, 두 번째는 BANNER_FIX를 쓴다 (같은 파일을 차례로 고친다)."""
+    n = {"i": 0}
+
+    def write(_data):
+        n["i"] += 1
+        return BANNER_NEW if n["i"] == 1 else BANNER_FIX
+
+    return {BANNER: write, NOTICE: NOTICE_NEW}
+
+
+def _blocking_llm(gate: asyncio.Event):
+    class FirstReviewWaits(FakeLLM):
+        reviewed = 0
+
+        async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
+            if schema is CodeReview and self.reviewed == 0:
+                await gate.wait()
+            if schema is CodeReview:
+                self.reviewed += 1
+            return await super().structured(prompt, schema, untrusted, images, context_id)
+
+    return FirstReviewWaits(
+        writes=_two_writes(), reviews=[CodeReview(verdict="통과", notes=[])] * 2
+    )
+
+
+async def _until(cond, tries: int = 300) -> None:
+    for _ in range(tries):
+        if cond():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("기다린 상태가 오지 않음")
+
+
+def test_same_file_task_waits_for_earlier_one(service, adapter, monkeypatch) -> None:
+    """먼저 만든 작업이 같은 파일을 고치는 중이면 뒤 작업은 고칠 파일을 고른 뒤 기다리고,
+    앞 작업이 끝나면 최신 코드로 이어서 쓴다 (덮어쓰지 않는다)."""
+    monkeypatch.setattr(coder, "QUEUE_POLL_SECONDS", 0.01)
+    gate = asyncio.Event()
+    coder.set_llm(_blocking_llm(gate))
+
+    async def flow():
+        await service.create_dev_task(title="배너 1", plan="배너를 바꾼다", done=DONE)
+        await _until(lambda: _task(service).coding.status == "reviewing")
+        await service.create_dev_task(title="배너 2", plan="배너를 다시 바꾼다", done=DONE)
+        await _until(lambda: _task(service, "T-D2").coding.status == "queued"
+                     and _task(service, "T-D2").coding.waiting_for == ["T-D1"])  # fmt: skip
+        second = _task(service, "T-D2").coding
+        assert "같은 파일" in (second.error or "")
+        gate.set()
+        await service.wait_coding()
+
+    run(flow())
+    first, second = _task(service, "T-D1"), _task(service, "T-D2")
+    assert first.coding.status == "merged" and second.coding.status == "merged"
+    assert second.coding.waiting_for == [] and second.coding.error is None
+    assert "code.queue" in _points(service)
+    # 두 번째는 첫 번째가 머지된 뒤의 글 위에서 썼다 (덮어쓰지 않음)
+    assert run(adapter.read_file(BANNER)) == BANNER_FIX
+
+
+def test_now_does_not_wait(service, adapter, monkeypatch) -> None:
+    """'지금 진행'(skip_queue)은 같은 파일 작업이 있어도 기다리지 않는다."""
+    monkeypatch.setattr(coder, "QUEUE_POLL_SECONDS", 0.01)
+    gate = asyncio.Event()
+    coder.set_llm(_blocking_llm(gate))
+
+    async def flow():
+        await service.create_dev_task(title="배너 1", plan="배너를 바꾼다", done=DONE)
+        await _until(lambda: _task(service).coding.status == "reviewing")
+        await service.create_dev_task(
+            title="배너 2", plan="배너를 다시 바꾼다", done=DONE, skip_queue=True
+        )
+        await _until(lambda: _task(service, "T-D2").coding.status in ("reviewing", "merged"))
+        assert _task(service, "T-D2").coding.waiting_for == []
+        gate.set()
+        await service.wait_coding()
+
+    run(flow())
+    assert _task(service, "T-D2").coding.skip_queue
