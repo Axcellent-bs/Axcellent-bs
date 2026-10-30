@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator, Callable
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from fastapi import Depends, FastAPI, Header, Query, Request, Response
+from fastapi import Depends, FastAPI, Header, Path, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, Field
@@ -158,6 +158,17 @@ class InquiryIn(BaseModel):
     body: str
 
 
+class InquiryFeedbackIn(BaseModel):
+    """해결된 문의에 고객이 남기는 평가. 후기 글은 `untrusted`로만 넘긴다."""
+
+    model_config = {"extra": "forbid"}
+
+    buyer_id: str
+    rating: int = Field(ge=1, le=5)
+    resolved: bool  # 고객이 "문제가 해결됐다"고 답했는지
+    comment: str = Field(default="", max_length=300)
+
+
 class ReturnReceivedIn(BaseModel):
     order_id: str  # 클레임의 주문(고객지원 응답과 대조한다)
     inspection: Literal["pass", "fail", "partial"] | None = None
@@ -291,6 +302,7 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
     app.state.refunds = refunds
     inquiry_limiter = inquiries.InquiryRateLimiter()
     app.state.inquiry_limiter = inquiry_limiter
+    feedback_limiter = inquiries.InquiryRateLimiter()  # 문의 접수와 한도를 따로 센다
 
     @app.exception_handler(ShopError)
     async def _shop_error(_: Request, error: ShopError) -> JSONResponse:
@@ -525,6 +537,33 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
             raise ShopError("UPSTREAM_ERROR", "고객지원 응답이 문의 형식이 아니다", 502)
         # 응답은 가공하지 않고 접수 결과만 돌려준다
         receipt = {k: inquiry.get(k) for k in ("id", "status", "order_id", "updated_at")}
+        return _ok(receipt, context_id=context_id)
+
+    # --- 해결 결과 평가: 쇼핑몰 → 고객지원 `submit_feedback` -----------------------------
+    @app.post("/api/shop/inquiries/{inquiry_id}/feedback", status_code=201)
+    async def submit_inquiry_feedback(
+        inquiry_id: Annotated[int, Path(ge=1)], body: InquiryFeedbackIn
+    ) -> dict:
+        user_id = inquiries.buyer_number(body.buyer_id)
+        feedback_limiter.hit(body.buyer_id)
+        context_id = support_client.new_context_id()
+        # 본인 문의인지는 고객지원이 `user_id`로 확인한다. 남의 문의도 없는 문의와 같은 404다
+        done = await support_client.call(
+            "submit_feedback",
+            context_id,
+            {
+                "inquiry_id": inquiry_id,
+                "rating": body.rating,
+                "resolved": body.resolved,
+                "user_id": user_id,
+            },
+            {"comment": body.comment},
+            target=f"inquiry:{inquiry_id}",
+        )
+        if done.get("rated") is not True:  # 먼저 들어온 요청이 이미 남겼다
+            raise ShopError("INVALID_STATE", "이미 평가를 남긴 문의다", 409)
+        # 고객에게는 접수 사실만 돌려준다(공개·숨김 같은 내부 판단은 보이지 않는다)
+        receipt = {k: done.get(k) for k in ("inquiry_id", "rated", "rating")}
         return _ok(receipt, context_id=context_id)
 
     @app.post("/api/shop/admin/claims/{claim_id}/return-received")
