@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -87,7 +88,6 @@ class State:
 
     async def books(self) -> Books:
         return await self.books_loader()
-
 
 
 class FinanceRecords:
@@ -252,9 +252,12 @@ async def incident_impact(
     base = meta or RequestMeta(
         context_id=context_id, token="finance-dashboard", deadline=_now() + timedelta(seconds=15)
     )
-    return await state().sources.impact(
+    impact = await state().sources.impact(
         base.model_copy(update={"context_id": context_id}), context_id, window
     )
+    if impact is not None and info.get("window_exact") is False:
+        impact = dataclasses.replace(impact, window_exact=False)
+    return impact
 
 
 # ------------------------------------------------------- closing_report·audit_report (읽기)

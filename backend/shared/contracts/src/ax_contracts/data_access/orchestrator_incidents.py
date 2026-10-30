@@ -5,7 +5,11 @@
 
 재무는 서버 장애 대응 흐름의 단계가 아니다 (요구사항 DEP-FIN-01, 공통 구성안 결정 22).
 사건 **중**에는 총괄을 부르지 않고, 평상시 사후 감사(`audit_report`)·사건 조회에서만 읽는다.
-재무가 쓰는 필드는 `context_id`, `component`, `status`, `opened_at`, `closed_at` 다섯 개뿐이다.
+재무가 쓰는 필드는 `context_id`, `component`, `status`, `opened_at`, `closed_at`과
+`impact_from`, `impact_to`(총괄이 영향 분석에 쓴 구간, 2026-10-30 추가)다.
+`opened_at`·`closed_at`은 AI 처리가 시작·끝난 시각이라 장애 구간과 다를 수 있다(감시가 장애를
+몇십 초 지켜본 뒤 사건을 연다). 그래서 영향 고객 판정에는 `impact_from`·`impact_to`가 있으면
+그걸 쓴다.
 
 `GET /api/incidents`는 지금 질의 매개변수를 받지 않고 사건 전부를
 `{"data": [...], "meta": {...}}`로 돌려준다. 그래서 `OrchestratorIncidentsQuery`의 값은
@@ -43,6 +47,9 @@ class OrchestratorIncident(AxModel):
     status: str
     opened_at: UtcDatetime
     closed_at: UtcDatetime | None = None  # 아직 열려 있으면 None
+    # 총괄이 data `impact_analysis`에 넘긴 구간 (장애 시작 `since` ~ 끝). 아직 안 실으면 None
+    impact_from: UtcDatetime | None = None
+    impact_to: UtcDatetime | None = None
     tenant_id: str = TENANT_ID_DEFAULT
 
 

@@ -142,7 +142,10 @@ async def incident_view(
     info = await incident_info(context_id)  # 실제 모드 구간은 총괄 사건 목록에서 (읽기 전용)
     impact: Impact | None = await incident_impact(context_id, info=info)
     rows, ledger_source = await compensation_ledger(context_id, feed)
-    impact_ids = impact.affected_customer_ids if impact else frozenset()
+    # 근사 구간(AI 처리 시각)의 영향 고객 목록은 보상 대상 판정에 쓰지 않는다
+    # (앞부분 고객이 빠질 수 있다)
+    exact = impact is not None and impact.window_exact
+    impact_ids = impact.affected_customer_ids if impact and exact else frozenset()
 
     if impact is None:
         unavailable.append("impact")
@@ -189,6 +192,12 @@ async def incident_view(
         ok, detail, refs = None, "보상 쿠폰 장부를 읽을 수 없음", []
     elif not executed:
         ok, detail, refs = True, "실행된 보상 쿠폰 없음", []
+    elif impact is not None and not exact:
+        ok, detail, refs = (
+            None,
+            "사건 구간이 장애 구간이 아니라 AI 처리 시각이라 영향 고객을 판정하지 않음",
+            exe_refs,
+        )
     elif impact is None or not impact_ids or not buyers_known:
         ok, detail, refs = (
             None,
@@ -263,6 +272,9 @@ async def incident_view(
                 {"category": c, "orders": n, "amount": a} for c, n, a in impact.by_category
             ],
             "affected_customer_ids": sorted(impact.affected_customer_ids),
+            # False면 AI 처리 시각으로 대신한 근사 구간의 숫자
+            # (데이터 AI 화면 숫자보다 적을 수 있다)
+            "window_exact": impact.window_exact,
             "source": "data.impact_analysis",
             "collected_at": fc.iso(fc.now()),
         }

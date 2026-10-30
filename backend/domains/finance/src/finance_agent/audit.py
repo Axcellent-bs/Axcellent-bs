@@ -334,8 +334,8 @@ async def outside_impact(
     out = []
     for ctx in sorted({e["context_id"] for e in rows}):
         impact = await impact_lookup(ctx)
-        if impact is None or not impact.affected_customer_ids:
-            continue  # 영향 고객을 모르면 판정하지 않는다
+        if impact is None or not impact.affected_customer_ids or not impact.window_exact:
+            continue  # 영향 고객을 모르거나 구간이 근사(AI 처리 시각)면 판정하지 않는다
         bad = [
             e
             for e in rows
