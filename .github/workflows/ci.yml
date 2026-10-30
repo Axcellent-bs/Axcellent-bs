@@ -81,7 +81,8 @@ jobs:
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if echo "$files" | grep -qE '^(backend/domains/data/|backend/shared/|backend/pyproject\.toml$|backend/uv\.lock$|\.github/workflows/ci\.yml$)'; then
+          # shared는 data(src·eval·tests)가 import하는 패키지만: agent-template·contracts·shop-api
+          if echo "$files" | grep -qE '^(backend/domains/data/|backend/shared/(agent-template|contracts|shop-api)/|backend/pyproject\.toml$|backend/uv\.lock$|\.github/workflows/ci\.yml$)'; then
             echo "관련 파일이 바뀌었다 ($range): 평가를 돌린다"
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
