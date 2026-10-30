@@ -52,7 +52,7 @@ async def link_older_cards(
 ) -> list[str]:
     """새 카드가 대체하는 옛 카드를 `superseded`로 연결한다(연결마다 관문을 거친다)."""
     superseded: list[str] = []
-    for old_id in await find_superseded(card, svc.memory):
+    for old_id in await find_superseded(card, svc.memory, svc.dense):
         link_decision = await svc.gate.execute(
             "memory.card_link",
             {
