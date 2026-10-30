@@ -197,3 +197,37 @@ async def test_end_to_end_a_disabled_service_reaches_a_human_and_comes_back(
 
     [event] = [e for e in events.MOCK_PUBLISHED if e.type == EventType.HANDOFF_COMPLETED]
     assert (event.context_id, event.data["task_id"]) == ("ctx_req_e2e", task_id)
+
+
+def test_concurrent_first_requests_open_one_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    """첫 요청 두 개가 동시에 와도 저장소는 하나다 (#231 3). 예전에는 메모리 저장소가 둘 생겨
+    한쪽에 넣은 일이 다른 쪽 목록에 없었다."""
+    import threading
+    import time
+
+    monkeypatch.setenv(handoffs.DB_ENV, "")
+    handoffs.reset_store()
+    made: list[object] = []
+    original = handoffs.HandoffStore.__init__
+
+    def slow_init(self, path: str) -> None:  # noqa: ANN001
+        time.sleep(0.05)  # 만드는 사이에 다른 요청이 끼어들 틈을 넓힌다
+        original(self, path)
+        made.append(self)
+
+    monkeypatch.setattr(handoffs.HandoffStore, "__init__", slow_init)
+    got: list[object] = []
+    start = threading.Barrier(8)
+
+    def first_request() -> None:
+        start.wait()
+        got.append(handoffs.get_store())
+
+    threads = [threading.Thread(target=first_request) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(made) == 1
+    assert len({id(s) for s in got}) == 1
+    handoffs.reset_store()

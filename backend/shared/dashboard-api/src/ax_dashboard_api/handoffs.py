@@ -128,6 +128,8 @@ class HandoffStore:
 
 
 _store: HandoffStore | None = None
+# 첫 요청 두 개가 동시에 와도 저장소는 하나만 만든다(메모리 저장소면 둘이 생겨 한쪽 일이 사라졌다)
+_store_lock = threading.Lock()
 _store_key: str | None = None
 
 
@@ -135,16 +137,18 @@ def get_store() -> HandoffStore:
     """`AX_HANDOFF_DB`가 바뀌면 새로 연다. 비어 있으면 메모리 저장소."""
     global _store, _store_key
     path = os.getenv(DB_ENV) or ":memory:"
-    if _store is None or _store_key != path:
-        _store = HandoffStore(path)
-        _store_key = path
-    return _store
+    with _store_lock:
+        if _store is None or _store_key != path:
+            _store = HandoffStore(path)
+            _store_key = path
+        return _store
 
 
 def reset_store() -> None:
     """테스트 초기화용."""
     global _store, _store_key
-    _store, _store_key = None, None
+    with _store_lock:
+        _store, _store_key = None, None
 
 
 def _tenant() -> str:

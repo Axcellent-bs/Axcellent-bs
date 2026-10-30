@@ -18,9 +18,10 @@
   띄우지 않은 서비스는
   연결 실패다(실제로 서버가 없는 것과 같다).
 - 이벤트 버스는 목 모드(`AGENT_TEMPLATE_MOCK=1`, 테스트 전용)의 프로세스 안 버스다.
-- 총괄의 부서 카드: 띄운 data는 HTTP로 받고, 띄우지 않은 서비스는 `services/<id>/agent-card.json`
-  파일에서 읽는다. 실제 총괄은 띄운 서버의 카드만 받으므로 꺼진 서비스 단계를 사람에게 넘기지 못한다
-  (`test_without_cards_of_disabled_services_the_steps_are_not_handed_off`, PR 본문 "막히는 곳").
+- 총괄의 부서 카드: 실제 총괄과 같이 띄운 서버(data)의 카드만 HTTP로 받는다. 꺼진 서비스는 카드를
+  받으러 가지 않고, 총괄 레지스트리가 서비스 대응표(services.py)로 부서를 정해 라우터로 보낸다
+  (#231 "막히는 곳" 1을 고친 뒤. 예전에는 카드 파일을 읽어 우회했다).
+- 할 일함 저장소는 먼저 열지 않는다(동시 첫 요청에도 하나만 만든다, "막히는 곳" 3).
 """
 
 from __future__ import annotations
@@ -100,10 +101,7 @@ def tenant(monkeypatch, tmp_path):  # noqa: ANN001, ANN201
     monkeypatch.setenv("AX_DATA_URL", "http://data")
     monkeypatch.setenv("AX_DASHBOARD_API_URL", "http://dashboard-api")
     monkeypatch.setenv("AX_HANDOFF_DB", "")
-    handoffs.reset_store()
-    # 할 일함 저장소를 먼저 연다. 첫 요청 두 개가 동시에 오면 get_store()가 메모리 저장소를
-    # 둘 만들어 한쪽 일이 사라진다(잠금 없음, PR 본문 "막히는 곳" 3)
-    handoffs.get_store()
+    handoffs.reset_store()  # 먼저 열지 않는다: 첫 요청 두 개가 동시에 와도 저장소는 하나다
     OUTCOMES.clear()
     store = SqliteLogStore(":memory:")
     common_log.set_store(store)
@@ -162,21 +160,7 @@ def _router(monkeypatch, shop_transport: httpx.BaseTransport | None) -> Router: 
     return router
 
 
-def _file_cards(dept: str) -> dict[str, Any] | None:
-    """띄우지 않은 서비스의 카드 (`services/<id>/agent-card.json`). 부서가 여러 서비스면 합친다."""
-    from ax_agent_template.services import SERVICES
-
-    cards = [
-        json.loads((SERVICES_DIR / s.id / "agent-card.json").read_text(encoding="utf-8"))
-        for s in SERVICES
-        if s.department == dept and s.skills and (SERVICES_DIR / s.id / "agent-card.json").is_file()
-    ]
-    if not cards:
-        return None
-    return {**cards[0], "name": dept, "skills": [k for c in cards for k in c.get("skills", [])]}
-
-
-async def _orchestrator(cards_for_disabled: bool):  # noqa: ANN202
+async def _orchestrator():  # noqa: ANN202
     """실제 총괄 부품(Registry·Engine·IncidentManager·scenario_a)에 실제 `call_agent`를 붙인다."""
     from ax_agent_template import events
     from ax_agent_template.client import call_agent
@@ -189,16 +173,9 @@ async def _orchestrator(cards_for_disabled: bool):  # noqa: ANN202
     from ax_orchestrator.registry import Registry
 
     set_agent_name("orchestrator")
-    by_http = http_card_fetcher()
-
-    async def fetch(dept: str) -> dict[str, Any] | None:
-        card = await by_http(dept)  # 띄운 서버(data)만 HTTP로 받는다
-        if card is None and cards_for_disabled:
-            card = _file_cards(dept)
-        return card
-
     registry = Registry()
-    await registry.load(DEPTS, fetch)
+    # 실제 총괄과 같다: 띄운 서버의 카드만 HTTP로 받는다 (꺼진 서비스는 받으러 가지 않는다)
+    await registry.load(DEPTS, http_card_fetcher())
     published: list[str] = []
 
     async def publish(kind: str, inc: Any) -> None:
@@ -250,8 +227,19 @@ async def _detect(eval_world, built):  # noqa: ANN001, ANN202
     return emitted, anomaly
 
 
-async def _work_through_inbox(manager, router: Router, timeout: float = 25.0):  # noqa: ANN001, ANN202
-    """사람이 할 일함을 보고 열린 일을 하나씩 끝낸다. 이벤트가 닫힐 때까지."""
+async def _work_through_inbox(  # noqa: ANN202
+    manager,  # noqa: ANN001
+    router: Router,
+    timeout: float = 25.0,
+    *,
+    before_waiting: bool = False,
+):
+    """사람이 할 일함을 보고 열린 일을 하나씩 끝낸다. 이벤트가 닫힐 때까지.
+
+    `before_waiting`이면 총괄이 단계를 대기로 올리기 전이라도 보이는 즉시 끝낸다
+    (사람이 먼저 끝내는 경우, "막히는 곳" 2). 기다리는 단계가 없는 기록용 일(시각 기록)은
+    끝내지 않는다.
+    """
     done: list[dict[str, Any]] = []
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
@@ -261,15 +249,18 @@ async def _work_through_inbox(manager, router: Router, timeout: float = 25.0):  
             if incs and all(i.status != "open" for i in incs):
                 return incs[0], done
             listed = (await http.get(INBOX, params={"status": "open"})).json()["data"]
-            # 총괄이 그 단계를 "사람 처리 대기"로 올린 뒤에만 끝낸다. 그 전에 끝내면
-            # handoff.completed가 기다리는 단계를 못 찾아 버려진다(unmatched, PR 본문 "막히는 곳" 2)
             waiting = {
                 r.handoff_task_id
                 for i in incs
                 for r in i.steps.values()
                 if r.status == "waiting_human" and r.handoff_task_id
             }
-            for task in [t for t in listed if t["task_id"] in waiting]:
+            if before_waiting:
+                ready = [t for t in listed if t["skill"] != "record_event_times"]
+                ready = [t for t in ready if t["task_id"] not in {d["task_id"] for d in done}]
+            else:
+                ready = [t for t in listed if t["task_id"] in waiting]
+            for task in ready:
                 res = await http.post(
                     f"{INBOX}/{task['task_id']}/complete",
                     json={"result": f"{task['assignee_unit']}에서 처리함 ({task['skill']})"},
@@ -294,7 +285,7 @@ def test_data_only_tenant_end_to_end(tenant, world, monkeypatch) -> None:  # noq
     router = _router(monkeypatch, built.transport())
 
     async def scenario():  # noqa: ANN202
-        registry, manager, _ = await _orchestrator(cards_for_disabled=True)
+        registry, manager, _ = await _orchestrator()
         # 1·2. 결제 장애 → data 감시가 이상을 발행 → 총괄이 이벤트를 연다
         emitted, anomaly = await _detect(eval_world, built)
         # 3~5. 총괄 → data 영향 분석(A2A), 나머지는 사람 할 일함 → 사람이 끝냄 → 이어 감
@@ -378,39 +369,65 @@ def test_data_only_tenant_end_to_end(tenant, world, monkeypatch) -> None:  # noq
 KST = __import__("zoneinfo").ZoneInfo("Asia/Seoul")
 
 
-def test_without_cards_of_disabled_services_the_steps_are_not_handed_off(
+def test_disabled_services_are_handed_off_without_their_cards(
     tenant,
     world,
     monkeypatch,  # noqa: ANN001
 ) -> None:
-    """지금 막히는 곳: 실제 총괄은 띄운 서버의 카드만 받는다.
+    """꺼진 서비스 카드가 없어도 그 부서 단계는 조직도 부서의 받은 요청으로 간다 (#231 1).
 
-    data만 띄우면 다른 부서 카드를 받지 못해 그 부서 skill이 레지스트리에 없고, 단계는 사람에게
-    넘어가지 않고 "확인할 수 없음"으로 끝난다. 총괄 코드는 이 PR에서 고치지 않는다(요청할 것).
+    총괄은 꺼진 서비스 카드를 받으러 가지 않는다(서버가 없다). 레지스트리가 서비스 대응표로
+    부서를 정하고,
+    호출은 라우터가 사람 할 일함으로 넘긴다.
     """
     eval_world, built = world
     router = _router(monkeypatch, built.transport())
 
     async def scenario():  # noqa: ANN202
-        registry, manager, _ = await _orchestrator(cards_for_disabled=False)
+        registry, manager, _ = await _orchestrator()
         await _detect(eval_world, built)
-        for _ in range(300):
-            await asyncio.sleep(0.01)
-            incs = list(manager.incidents.values())
-            if incs and incs[0].status != "open":
-                break
-        return registry, manager
+        inc, done = await _work_through_inbox(manager, router)
+        return registry, inc, done
 
-    registry, manager = asyncio.run(scenario())
+    registry, inc, done = asyncio.run(scenario())
     assert set(registry.cards) == {"data"}
-    assert {"infra", "marketing", "planning"} <= set(registry.unavailable)
-    inc = next(iter(manager.incidents.values()))
+    assert {"infra", "marketing", "planning", "support", "hr"} <= set(registry.unavailable)
+    assert all("꺼진 서비스" in why for why in registry.unavailable.values())
+    skipped = [r.note for r in inc.steps.values() if "Agent Card에 skill 없음" in (r.note or "")]
+    assert skipped == []  # 예전에는 원인 진단·비슷한 사례·보상·기록 등이 여기서 건너뛰었다
     handed = [s for s, r in inc.steps.items() if r.handoff_task_id]
-    assert handed == []  # 사람에게 넘어간 단계가 없다
-    assert any(r.endswith("/.well-known/agent-card.json") for r in router.refused)
+    assert handed and len(done) == len(handed)
+    assert not [r for r in router.refused if r.endswith("/.well-known/agent-card.json")]
+    assert inc.status != "open"
 
 
-# ---------------------------------------------------------------- 가짜 회사 (data 부분만)
+def test_human_finishing_before_the_step_waits_is_not_lost(
+    tenant,
+    world,
+    monkeypatch,  # noqa: ANN001
+) -> None:
+    """사람이 총괄의 "사람 처리 대기"보다 먼저 끝내도 결과를 잃지 않는다 (#231 2).
+
+    받은 요청이 보이는 즉시 끝낸다. 대기 전에 온 결과는 보관(`kept`)했다가
+    단계가 대기로 오르면 이어 간다.
+    """
+    eval_world, built = world
+    router = _router(monkeypatch, built.transport())
+
+    async def scenario():  # noqa: ANN202
+        _, manager, _ = await _orchestrator()
+        await _detect(eval_world, built)
+        return await _work_through_inbox(manager, router, before_waiting=True)
+
+    inc, done = asyncio.run(scenario())
+    handed = {s: r for s, r in inc.steps.items() if r.handoff_task_id}
+    assert handed and {r.status for r in handed.values()} == {"completed"}
+    assert all(r.output.get("handled_by") == "human" for r in handed.values())
+    outcomes = [o for t, o in OUTCOMES if t == "handoff.completed"]
+    assert len(outcomes) == len(done) and set(outcomes) <= {"resumed", "kept"}
+    assert "unmatched" not in outcomes
+
+
 class MemoryConnector:
     """테스트 전용 냉장 물류 커넥터: 냉장 유통 이탈이 마지막 30분에 튄다."""
 
