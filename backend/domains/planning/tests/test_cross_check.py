@@ -251,3 +251,31 @@ def test_related_prs_find_real_repo_path_by_component() -> None:
     svc.state.prs.append(pr)
     found = merged_in_window(svc.state, now - timedelta(minutes=15), now, "payment")
     assert pr in found
+
+
+def test_related_prs_include_merge_just_before_symptoms() -> None:
+    """총괄은 장애 시작 시각부터 묻는다. 그 직전에 머지된 PR도 후보여야 한다 (30분 앞부터)."""
+    svc = _service(None, Gate())
+    pr28 = next(p for p in svc.state.prs if p.id == "PR #28")
+    start = svc.clock()
+    pr = pr28.model_copy(
+        update={
+            "id": "PR #94",
+            "number": 94,
+            "task": "T-none",
+            "merged": True,
+            "merged_at": start - timedelta(seconds=12),
+            "changed_paths": ["shop-web/src/pages/Cart.tsx"],
+        }
+    )
+    svc.state.prs.append(pr)
+    found = run(
+        svc.find_related_prs(
+            context_id="ctx_inc_x",
+            requester="orchestrator",
+            window_from=start,
+            window_to=start + timedelta(minutes=15),
+            component="payment",
+        )
+    )
+    assert pr in [p for p, _, _ in found]

@@ -93,6 +93,7 @@ from planning_agent.domain.models import (
 from planning_agent.domain.rules import (
     AUTO_LEVELS,
     PROMOTE_AFTER,
+    ROLLBACK_LOOKBACK,
     auto_limit,
     check_simple,
     deploy_of,
@@ -1656,7 +1657,12 @@ class PlanningService:
         window_to: datetime,
         component: str | None,
     ) -> list[tuple[PR, str | None, str | None]]:
-        """구간 안 머지 PR 후보 (read). 원인은 판정하지 않는다. 활동 로그만 남긴다."""
+        """구간 안 머지 PR 후보 (read). 원인은 판정하지 않는다. 활동 로그만 남긴다.
+
+        배포는 증상보다 먼저 나가므로 구간 시작보다 `ROLLBACK_LOOKBACK`(30분) 앞부터 본다.
+        총괄은 영향 분석과 같은 구간(장애 시작 시각부터)을 보내서, 장애 직전에 머지된 PR이
+        빠졌다."""
+        window_from = window_from - ROLLBACK_LOOKBACK
         found = [
             (p, *para_of(self.state, p))
             for p in merged_in_window(self.state, window_from, window_to, component)
