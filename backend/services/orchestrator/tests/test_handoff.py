@@ -204,8 +204,11 @@ async def test_completions_for_unknown_tasks_or_incidents_are_unmatched(harness)
     manager = IncidentManager(engine, scenario_a)
     manager.incidents[inc.context_id] = inc
 
+    # 아는 이벤트의 모르는 일은 보관한다: 그 일로 단계가 나중에 대기로 오를 수 있다(#231 2)
     other = completed_event(inc, "hof_nope", event_id="evt_x1")
-    assert (await manager.process(other))[0] == "unmatched"
+    assert (await manager.process(other))[0] == "kept"
+    again = completed_event(inc, "hof_nope", event_id="evt_x1b")
+    assert (await manager.process(again))[0] == "unmatched"  # 같은 일을 두 번 보관하지 않는다
     lost = completed_event(inc, "hof_notice", event_id="evt_x2").model_copy(
         update={"context_id": "ctx_inc_other"}
     )
@@ -236,3 +239,64 @@ async def test_a_handoff_without_a_task_id_fails_instead_of_waiting_forever(harn
 
 def test_the_orchestrator_subscribes_to_handoff_completed() -> None:
     assert EventType.HANDOFF_COMPLETED in SUBSCRIBED
+
+
+class FinishesFirst(DisabledService):
+    """꺼진 서비스로 넘긴 직후, 총괄이 단계를 대기로 올리기 전에 사람이 끝낸다 (#231 2)."""
+
+    def __init__(self, inner, skill: str, manager: IncidentManager, inc) -> None:  # noqa: ANN001
+        super().__init__(inner, skill)
+        self.manager, self.inc, self.outcomes = manager, inc, []
+
+    async def __call__(self, dept: str, req: AgentRequest) -> AgentResult:
+        first = req.skill == self.skill and not self.used
+        result = await super().__call__(dept, req)
+        if first:
+            event = completed_event(self.inc, result.output["task_id"], event_id="evt_early")
+            self.outcomes.append((await self.manager.process(event))[0])
+        return result
+
+
+@pytest.mark.asyncio
+async def test_a_human_finishing_before_the_step_waits_is_kept_and_resumed(harness) -> None:
+    engine = await harness.start()
+    inc = new_incident()
+    manager = IncidentManager(engine, scenario_a)
+    manager.incidents[inc.context_id] = inc
+    early = FinishesFirst(harness.fakes, "draft_notice", manager, inc)
+    engine.caller = early
+    await asyncio.wait_for(engine.run(inc, scenario_a()), timeout=5)
+    assert early.outcomes == ["kept"]  # 기다리는 단계가 아직 없어 보관
+    notice = inc.steps["notice"]
+    assert notice.status == "completed"  # 대기로 오르자마자 보관한 결과로 이어 감
+    assert notice.output["handled_by"] == "human"
+    assert notice.output["result"] == "점검 공지 초안을 사람이 작성함"
+    assert any(
+        "먼저 끝난 사람 처리 결과를 이어 받음" in line
+        for line in (e["message"] for e in inc.events)
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_early_rejection_is_kept_too(harness) -> None:
+    engine = await harness.start()
+    inc = new_incident()
+    manager = IncidentManager(engine, scenario_a)
+    manager.incidents[inc.context_id] = inc
+
+    class RejectsFirst(FinishesFirst):
+        async def __call__(self, dept: str, req: AgentRequest) -> AgentResult:
+            first = req.skill == self.skill and not self.used
+            result = await DisabledService.__call__(self, dept, req)
+            if first:
+                event = completed_event(
+                    self.inc, result.output["task_id"], status="rejected", event_id="evt_r"
+                )
+                self.outcomes.append((await self.manager.process(event))[0])
+            return result
+
+    early = RejectsFirst(harness.fakes, "draft_notice", manager, inc)
+    engine.caller = early
+    await asyncio.wait_for(engine.run(inc, scenario_a()), timeout=5)
+    assert early.outcomes == ["kept"]
+    assert inc.steps["notice"].status == "rejected_by_human"
