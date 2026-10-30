@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Chip, useToast, type ChipTone } from '@dejafix/common-frontend'
 import type { ChatMessage, ChatStatus, ChatThread, CodingStatus, State as S, Task } from '@/lib/planningData'
 import { DEV_API, PlanningApiError, chatApi, vcsApi, type VcsConnection } from '@/lib/planning'
-import { CODING_LABEL, CancelButton, isRunning } from '@/components/dev/coding'
+import { CODING_LABEL, CancelButton, ResumeButton, isRunning } from '@/components/dev/coding'
 import { State } from '@/components/planning-common/parts'
 import { go, toPath } from '@/components/planning-common/links'
 import { Tag } from '@/components/planning-common/parts'
@@ -237,6 +237,7 @@ function Started({ m, s, onOpen }: { m: ChatMessage; s: S; onOpen: () => void })
           {id && (
             <span className="tags">
               <CancelButton taskId={id} status={c?.status} />
+              <ResumeButton taskId={id} status={c?.status} />
               <button type="button" className="btn-ghost" onClick={() => { onOpen(); go(toPath(`work/prs/${encodeURIComponent(id)}`)) }}>작업 보기</button>
             </span>
           )}

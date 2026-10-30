@@ -2432,13 +2432,17 @@ class PlanningService:
         return found
 
     async def retry_dev_task(self, task_id: str, connection: str | None = None) -> ActionResult:
-        """실패·사람 확인으로 멈춘 코딩 작업을 처음부터 다시 돌린다 (PR을 아직 안 만든 것만)."""
+        """실패·사람 확인으로 멈췄거나 사람이 중단한 코딩 작업을 처음부터 다시 돌린다 (재개).
+
+        열린 PR이 있으면 안 된다 (중단하면 PR은 닫히므로 중단한 작업은 재개할 수 있다).
+        다시 돌 때 레포의 최신 코드를 다시 읽는다."""
         task = next((t for t in self.state.tasks if t.id == task_id), None)
         if task is None or task.coding is None:
             raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
-        if task_id in self._coding or task.coding.status not in ("failed", "waiting_human"):
+        resumable = ("failed", "waiting_human", "canceled")
+        if task_id in self._coding or task.coding.status not in resumable:
             raise ActionError("NOT_RETRYABLE", f"{task_id}는 진행 중이거나 끝났다")
-        if any(p.task == task_id for p in self.state.prs):
+        if any(p.task == task_id and not p.closed for p in self.state.prs):
             raise ActionError(
                 "NOT_RETRYABLE", f"{task_id}는 이미 PR이 있다 → PR 화면에서 머지·판단"
             )
@@ -2453,7 +2457,8 @@ class PlanningService:
             req = self._request_of_spec(s, sp) if sp else None
             ctx = req.context_id if req else f"task:{task_id}"
             t = self.clock()
-            text = f"{task_id} 코딩 에이전트 다시 시도 (연결 {cid})"
+            how = "재개" if x.coding.status == "canceled" else "다시 시도"
+            text = f"{task_id} 코딩 에이전트 {how} (연결 {cid})"
             n = sum(1 for g in self.gate_calls if g.action == "dev_task_retry") + 1
             await self._execute("dev_task_retry", ctx, f"{task_id}:{n}", text, {"connection": cid})
             x.coding = CodingRun(

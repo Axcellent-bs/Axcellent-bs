@@ -571,6 +571,20 @@ def test_cancel_running_task_and_close_open_pr(service: PlanningService, adapter
     assert pr.closed and not pr.merged and ("close_change", pr.vcs_number) in adapter.writes
     assert "vcs.closed" in _points(service)
 
+    # 4) 중단한 작업은 재개할 수 있다 (닫힌 PR은 막지 않는다, 처음부터 다시 돈다)
+    coder.set_llm(FakeLLM())
+    out = run(_resume(service, "T-D2"))
+    assert out.outcome == "queued"
+    task = _task(service, "T-D2")
+    assert task.coding.status in ("merged", "waiting_human", "opened") and task.state != "중단"
+    assert any("재개" in a.text for a in service.state.activity if a.point == "dev_task_retry")
+
+
+async def _resume(service, task_id: str):
+    out = await service.retry_dev_task(task_id)
+    await service.wait_coding()
+    return out
+
 
 # ---------------------------------------------------------------- 파일 확정·리뷰 추가 파일
 

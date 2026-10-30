@@ -45,6 +45,25 @@ export function CancelButton({ taskId, status }: { taskId: string; status?: Codi
   return <Button size="small" onClick={cancel} disabled={busy}>{busy ? '중단하는 중…' : '작업 중단'}</Button>
 }
 
+/** 중단한 작업 재개 버튼. 레포의 최신 코드를 다시 읽고 처음부터 돈다 */
+export function ResumeButton({ taskId, status }: { taskId: string; status?: CodingStatus }) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  if (status !== 'canceled') return null
+  const resume = async () => {
+    setBusy(true)
+    try {
+      await api.retry(taskId)
+      toast.show(`${taskId} 재개`)
+    } catch (x) {
+      toast.show(x instanceof PlanningApiError ? x.message : '개발·배포 서버에 연결할 수 없어요')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return <Button size="small" onClick={resume} disabled={busy}>{busy ? '재개하는 중…' : '재개'}</Button>
+}
+
 /** 개발팀이 직접 넣은 기획에서 나온 작업인가 */
 export function fromDevTeam(s: S, t?: Task): boolean {
   if (!t) return false
@@ -167,7 +186,7 @@ export function CodingStep({ task }: { task: Task }) {
       )}
       <span className="tags">
         {waitingPr && <Button size="small" variant="primary" onClick={merge} disabled={busy}>머지</Button>}
-        {STUCK.includes(c.status) && !waitingPr && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : '다시 시도'}</Button>}
+        {(STUCK.includes(c.status) || c.status === 'canceled') && !waitingPr && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.status === 'canceled' ? '재개' : '다시 시도'}</Button>}
         <CancelButton taskId={task.id} status={c.status} />
       </span>
     </Step>
