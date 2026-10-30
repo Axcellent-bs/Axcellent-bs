@@ -178,6 +178,10 @@ class Gate:
             grade = higher(grade, "C")
             report["rules"] = hits
         if grade == "C":
+            # 기준 금액이 없는데 기본 등급이 C인 건도 사유는 `over_threshold`로 나간다.
+            # 응답 enum에 값을 더하는 것은 하위 호환이 깨져서(contracts-compat) 사유를 쪼개지
+            # 않고, 대신 보고서 `rules`에 `base_grade` 표시를 남겨 사람이 읽는 쪽이 구분한다
+            # (요청 #180·#431, `docs/notes/safety/issue-431-data-deletion.md`)
             if not hits:
                 report["rules"] = [{"key": "base_grade", "value": "C"}]
             return await self._hold(
