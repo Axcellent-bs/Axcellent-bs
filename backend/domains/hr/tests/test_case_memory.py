@@ -347,3 +347,27 @@ async def test_policy_and_notice_cards_are_not_returned(svc, tmp_path) -> None:
     )
     await record_case(svc, request)
     assert (await _search(svc, "결제가 서버 오류로 실패해요")).cases == []
+
+
+@pytest.mark.asyncio
+async def test_person_entered_resolved_time_sets_the_minutes_and_draft_source_is_kept(svc) -> None:
+    card_id = await _incident(svc)
+    resolved = svc.clock() - timedelta(minutes=30)
+    opened = resolved - timedelta(minutes=12)
+    result = await record_resolution(
+        svc,
+        _req(
+            "record_resolution",
+            {
+                "context_id": CONTEXT,
+                "outcome": "resolved",
+                "action": "재시작",
+                "opened_at": opened.isoformat(),
+                "resolved_at": resolved.isoformat(),
+                "draft_source": "ai_draft_edited",
+            },
+        ),
+    )
+    assert result.output["outcome"] == "recorded"
+    saved = (await svc.memory.get_card(card_id)).extra["resolution"]
+    assert saved["minutes_to_resolve"] == 12 and saved["draft_source"] == "ai_draft_edited"

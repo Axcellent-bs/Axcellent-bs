@@ -56,7 +56,10 @@ export interface ResolutionInput {
   root_cause?: string;
   action?: string;
   opened_at?: string | null;
+  /** 사람이 적은 실제 해결 시각. 없으면 저장한 시각 */
+  resolved_at?: string | null;
   prior_case_id?: string | null;
+  draft_source?: "written_by_person" | "ai_draft_kept" | "ai_draft_edited";
 }
 export interface RosterEntry { area: string; role: "owner" | "backup"; member_id: string; shift_start: string | null; shift_end: string | null }
 export interface Roster { entries: RosterEntry[]; gap_areas: string[]; collected_at: string }

@@ -465,6 +465,8 @@ class CaseResolution(AxModel):
     resolved_at: UtcDatetime | None = None
     opened_at: UtcDatetime | None = None  # 사건이 열린 시각. 소요 시간 계산과 처음·반복 비교에 쓴다
     prior_case_id: str | None = None  # 이 사건을 시작할 때 근거로 보여 준 과거 사건 카드(반복 장애)
+    # 사람이 직접 적었는지, AI 초안을 그대로 썼는지·고쳤는지. 초안은 사람이 확인해야 저장된다
+    draft_source: Literal["written_by_person", "ai_draft_kept", "ai_draft_edited"] | None = None
 
 
 class RecordResolutionInput(AxModel):
@@ -479,6 +481,8 @@ class RecordResolutionInput(AxModel):
     # 사건이 열린 시각. 소요 시간을 안 주면 resolved_at - opened_at 분으로 hr이 계산한다
     opened_at: UtcDatetime | None = None
     prior_case_id: str | None = None  # 이 사건을 시작할 때 근거로 보여 준 과거 사건 카드
+    # 사람이 직접 적었는지, AI 초안을 그대로 썼는지·고쳤는지. 초안은 사람이 확인해야 저장된다
+    draft_source: Literal["written_by_person", "ai_draft_kept", "ai_draft_edited"] | None = None
 
 
 class RecordResolutionOutput(AxModel):

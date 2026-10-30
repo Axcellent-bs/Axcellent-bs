@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from ax_orchestrator.draft import resolution_draft
 from ax_orchestrator.recommend import recommend
 
 
@@ -141,6 +142,7 @@ class Incident:
             "metrics": self.metrics,
             "shared": self.shared,
             "recommendation": recommend(self.outputs.get("similar_cases")),
+            "resolution_draft": resolution_draft(self),
             "pending_holds": [
                 {"step_id": sid, "skill": self.steps[sid].skill, "label": self.steps[sid].label}
                 for sid, hold in self.holds.items()
