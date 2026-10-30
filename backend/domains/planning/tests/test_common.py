@@ -318,4 +318,7 @@ def test_rest_action_gate_refusal_is_409(service, monkeypatch) -> None:
     )
     assert res.status_code == 409
     assert res.json()["error"]["code"] == "GATE_REJECTED"
+    # 화면이 사람 승인으로 이어 가도록 관문 결과를 같이 준다 (보류면 review_id)
+    assert res.json()["error"]["details"]["action"] == "confirm_spec"
+    assert res.json()["error"]["details"]["status"] == "rejected"
     assert next(s for s in service.state.specs if s.id == "SPEC-7").status == "초안"
