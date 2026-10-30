@@ -7,6 +7,19 @@ cd backend
 uv run python domains/data/eval/run.py   # 결과: eval/results/latest.json
 ```
 
+### 케이스 데이터 캐시 (`DATA_EVAL_CACHE_DIR`)
+
+케이스 데이터 만들기(`eval_world.build`, 지난 7일 결제 기록)는 같은 명세면 늘 같은 결과라서 파일로 캐시할 수 있다. 환경변수 `DATA_EVAL_CACHE_DIR`에 폴더를 주면 거기에 저장하고 다음부터 읽는다. 없으면 캐시하지 않는다(기본).
+
+```bash
+DATA_EVAL_CACHE_DIR=.eval-cache uv run pytest -q -m eval   # backend/.eval-cache (git에 안 올라감)
+```
+
+- 키: 생성기 코드(`eval_world.py`·`make_cases.py`) + shop-api 소스(`shared/shop-api/src`) + 케이스 명세(`expected` 제외)의 해시. 폴더는 `<코드 해시>/<명세 해시>.sqlite`이고, 코드 해시가 다른 예전 폴더는 처음 쓸 때 지운다. 깨진 파일은 지우고 새로 만든다.
+- CI `data-eval` job은 이 폴더를 `actions/cache`로 저장·복원한다.
+- 캐시를 써도 결과는 완전히 같다(`tests/test_eval_cache.py`: DB 전체·결제 기록·케이스 결과 비교).
+- 시드·주문·outbox의 몇 칸(`created_at`, `promised_delivery_at` 등)에는 시나리오 시계가 아니라 만든 시각(벽시계)이 들어간다. 캐시와 상관없이 실행마다 다르며, 평가가 부르는 조회(failed-orders·metric-series)는 이 칸을 읽지 않는다.
+
 ## 규칙
 
 - **평가 정의 변경은 코드 수정과 별도 PR로 한다.** 평가 정의는 정답지(`cases/`, `make_cases.py`), 채점 방식(`run.py`의 `SIGNALS`·지표 계산), 데이터 생성(`eval_world.py`)이다. 같은 PR에서 둘 다 바꾸면 숫자가 좋아진 것이 코드 덕분인지 정의 덕분인지 가릴 수 없다.
