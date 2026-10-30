@@ -86,6 +86,12 @@ def test_ordinary_text_is_not_caught_by_the_evasion_rule(text: str) -> None:
 ORIGINAL = "씨발 주문 ORD-1 12,000원 환불해 주세요. 전화는 [전화번호]"
 
 
+def test_digits_inside_a_disguised_curse_are_not_counted_as_facts() -> None:
+    assert abuse_soften.valid(
+        "배송이 늦어요 시1발 언제 오나요", "배송이 늦습니다. 언제 오는지 알려 주세요."
+    )
+
+
 def test_a_good_softened_text_passes() -> None:
     assert abuse_soften.valid(ORIGINAL, "주문 ORD-1 12,000원 환불을 요청합니다. 전화는 [전화번호]")
 
