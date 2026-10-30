@@ -6,7 +6,8 @@
 | 관계 | 뜻 |
 |---|---|
 | `same` | 같은 일을 다른 말로 요청함 (하나로 처리할 수 있음) |
-| `conflict` | 같은 대상을 반대 방향으로 바꾸려 함 |
+| `conflict` | 둘 다 아직 진행 중인데 같은 대상을 양립할 수 없게 바꾸려 함 |
+| `update` | 앞 요청(끝났거나 같은 요청자)의 결과를 다시 바꿈. 나중 요청이 앞 요청을 대체 |
 | `related` | 같은 화면·기능을 다루지만 따로 처리해도 됨 |
 
 - 검색: 임베딩(`PLANNING_EMBED_MODEL`·`EMBED_MODEL`)이 있으면 그것, 없거나 실패하면 글자 2-gram
@@ -40,7 +41,10 @@ JUDGE_PROMPT = (
     "너는 기획개발팀의 요청 정리 담당이다. 아래 데이터의 새 요청(new)과 이미 있는 요청 후보"
     "(candidates)를 비교해 후보마다 관계를 정한다.\n"
     "- same: 같은 일을 다른 말로 요청함. 하나로 묶어 처리할 수 있다.\n"
-    "- conflict: 같은 대상(화면·값·규칙)을 서로 반대 방향이나 양립할 수 없게 바꾸려 한다.\n"
+    "- conflict: 둘 다 아직 끝나지 않았고(state가 완료·기각이 아님), 같은 대상(화면·값·규칙)을 "
+    "양립할 수 없게 바꾸려 한다. 누구 것을 따를지 사람이 정해야 한다.\n"
+    "- update: 새 요청이 후보 요청의 결과를 다시 바꾼다(예: 3만 원 → 5만 원으로 수정). 후보가 "
+    "완료됐거나, 같은 요청자(from)가 나중에 값을 고친 것이면 conflict가 아니라 update다.\n"
     "- related: 같은 화면·기능을 다루지만 따로 처리해도 된다.\n"
     "- none: 관계없다.\n"
     "- id는 candidates에 있는 값만 쓴다. reason은 판단 근거 한 줄(어느 부분이 같거나 반대인지).\n"
@@ -101,7 +105,7 @@ def text_of(state: State, req: Request) -> str:
 
 class _Judged(BaseModel):
     id: str
-    relation: Literal["same", "conflict", "related", "none"]
+    relation: Literal["same", "conflict", "update", "related", "none"]
     reason: str = ""
 
 
@@ -174,9 +178,10 @@ class Relater:
         if self._llm is None:
             return None
         data = {
-            "new": {"id": req.id, "text": text_of(state, req)},
+            "new": {"id": req.id, "from": req.from_, "text": text_of(state, req)},
             "candidates": [
-                {"id": r.id, "state": r.state, "text": text_of(state, r)} for r, _ in found
+                {"id": r.id, "state": r.state, "from": r.from_, "text": text_of(state, r)}
+                for r, _ in found
             ],
         }
         try:
@@ -233,7 +238,5 @@ def default_relater() -> Relater | None:
     embedder: Embedder | None = None
     if settings.embed_model and settings.base_url:
         embedder = LLMEmbedder(LLMClient("planning", settings=settings))
-    llm = (
-        LLMClient("planning", settings=settings) if settings.model and settings.base_url else None
-    )
+    llm = LLMClient("planning", settings=settings) if settings.model and settings.base_url else None
     return Relater(embedder=embedder, llm=llm)

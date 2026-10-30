@@ -542,7 +542,12 @@ class PlanningService:
                 req.related = []
             if not req.related:
                 continue
-            label = {"same": "같은 일", "conflict": "충돌 가능", "related": "비슷함"}
+            label = {
+                "same": "같은 일",
+                "conflict": "충돌 가능",
+                "update": "이어서 바꿈",
+                "related": "비슷함",
+            }
             text = ", ".join(f"{x.id}({label[x.relation]})" for x in req.related)
             s.activity.append(
                 self._act(

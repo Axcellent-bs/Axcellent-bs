@@ -41,11 +41,11 @@ export interface RelatedReq {
   id: string
   title: string
   score: number
-  relation: 'same' | 'conflict' | 'related'
+  relation: 'same' | 'conflict' | 'update' | 'related'
   reason: string
   by: 'llm' | 'embed' | 'lexical' | 'path'
 }
-export const RELATION_LABEL: Record<RelatedReq['relation'], string> = { same: '같은 일', conflict: '충돌 가능', related: '비슷함' }
+export const RELATION_LABEL: Record<RelatedReq['relation'], string> = { same: '같은 일', conflict: '충돌 가능', update: '이어서 바꿈', related: '비슷함' }
 
 export interface Para {
   id: string // R1, C1 …

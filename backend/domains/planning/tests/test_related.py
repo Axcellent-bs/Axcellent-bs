@@ -169,3 +169,17 @@ def test_open_prs_on_same_file_mark_each_request_as_conflict() -> None:
     back = next(x for x in theirs.related if x.by == "path")
     assert back.id == mine.id and back.reason.startswith("PR #91가")
     assert any(a.point == "request.related" and "PR #91" in a.text for a in st.activity)
+
+
+def test_update_of_finished_request_is_not_conflict() -> None:
+    """앞 요청을 다시 바꾸는 건(3만 원 → 5만 원) update로 남는다. LLM에 상태·요청자를 같이 준다."""
+    svc = PlanningService(gate=_gate, relater=None)
+    target = _req(svc, "결제 실패 뒤 장바구니가 비워진다")
+    llm = FakeLLM([{"id": target.id, "relation": "update", "reason": "앞 요청 값을 다시 바꿈"}])
+    svc._relater = Relater(LexicalEmbedder(), llm=llm)
+    _ticket(svc, "결제 실패하면 장바구니가 비워져요", "k8")
+    rel = _req(svc, "결제 실패하면 장바구니가 비워져요").related
+    assert [(x.id, x.relation) for x in rel] == [(target.id, "update")]
+    cand = next(c for c in llm.data["candidates"] if c["id"] == target.id)
+    assert cand["state"] == target.state and cand["from"] == target.from_
+    assert any("이어서 바꿈" in a.text for a in svc.state.activity if a.point == "request.related")
