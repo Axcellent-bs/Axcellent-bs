@@ -884,3 +884,35 @@ def test_merge_conflict_retry_closes_pr_and_rewrites(service: PlanningService, a
     old = next(p for p in service.state.prs if p.id == first)
     c = _task(service).coding
     assert old.closed and c.pr != first and c.status == "merged"
+
+
+def test_hold_goes_to_inbox_once(service: PlanningService, adapter) -> None:
+    """사람 확인으로 멈추면 받은 요청에 개발팀 할 일로 한 번 올린다."""
+    from types import SimpleNamespace
+
+    sent = []
+
+    async def poster(body):
+        sent.append(body)
+        return SimpleNamespace(task_id="hof_9", assignee_unit=body.assignee_unit)
+
+    service._cause_poster = poster
+    vcs.set_vcs(ChecksAdapter("failed"))
+    coder.set_llm(FakeLLM())
+
+    async def go() -> None:
+        await _go(service)
+        await service.wait_sent()
+
+    run(go())
+    c = _task(service).coding
+    assert c.status == "waiting_human" and len(sent) == 1
+    body = sent[0]
+    assert body.skill == "review_dev_task" and body.assignee_unit
+    assert body.input["task_id"] == "T-D1" and body.input["pr"] == c.pr
+    assert "CI 실패" in body.reason
+    assert any("hof_9" in a.text for a in service.state.activity if a.point == "handoff")
+
+    run(service.mark_read("support"))  # 다른 변경이 와도 멈춤이 그대로면 다시 안 올린다
+    run(service.wait_sent())
+    assert len(sent) == 1
