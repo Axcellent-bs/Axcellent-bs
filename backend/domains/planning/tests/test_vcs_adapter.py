@@ -995,3 +995,38 @@ def test_merge_blocked_reason_is_named(service: PlanningService) -> None:
     _req12_to_prs(service)
     failed = [a.text for a in service.state.activity if a.point == "vcs.merge_failed"]
     assert failed and "보호 규칙·필수 체크" in failed[0]
+
+
+def test_github_rate_limit_waits_once_then_retries(monkeypatch) -> None:
+    slept: list[float] = []
+
+    async def fake_sleep(sec: float) -> None:
+        slept.append(sec)
+
+    monkeypatch.setattr("planning_agent.vcs.github.asyncio.sleep", fake_sleep)
+    h = _github_harness()
+    h.server.fail[("GET", r"/pulls/\d+")] = httpx.Response(  # type: ignore[attr-defined]
+        429, json={"message": "slow down"}, headers={"retry-after": "3"}
+    )
+    with pytest.raises(VcsError) as err:  # 다시 불러도 한도면 실패 (한 번만 기다림)
+        run(h.adapter.get_trace_meta(1))
+    assert err.value.code == "rate_limited" and slept == [3.0]
+
+
+def test_rate_wait_reads_headers() -> None:
+    from planning_agent.vcs.github import RATE_WAIT_MAX, rate_wait
+
+    assert rate_wait({"retry-after": "5"}, 0) == 5
+    assert rate_wait({"x-ratelimit-reset": "110"}, 100) == 10
+    assert rate_wait({"x-ratelimit-reset": str(100 + RATE_WAIT_MAX + 1)}, 100) is None  # 너무 김
+    assert rate_wait({}, 100) is None
+
+
+def test_merge_405_split_conflict_and_protection() -> None:
+    from planning_agent.vcs_bridge import CONFLICT_MARK, merge_fail_reason
+
+    assert CONFLICT_MARK in merge_fail_reason(
+        "conflict", "PUT /pulls/1/merge → 405 Pull Request is not mergeable"
+    )
+    blocked = merge_fail_reason("conflict", '→ 405 Required status check "build" is expected.')
+    assert "보호 규칙" in blocked and CONFLICT_MARK not in blocked

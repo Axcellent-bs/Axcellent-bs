@@ -429,7 +429,18 @@ async def _vcs[R](step: str, call: Awaitable[R]) -> R:
     try:
         return await call
     except VcsError as exc:
-        raise CoderStop("failed", f"형상관리 {step} 실패 ({exc.code})") from None
+        raise CoderStop(
+            "failed", f"형상관리 {step} 실패 ({exc.code}){vcs_hint(exc.code)}"
+        ) from None
+
+
+def vcs_hint(code: str) -> str:
+    """형상관리 오류마다 사람이 할 일 (없으면 빈 글)."""
+    if code == "unauthorized":
+        return " → 토큰 만료·권한 확인, 레포 연결 화면에서 다시 연결"
+    if code == "rate_limited":
+        return " → 호출 한도, 잠시 뒤 다시 시도"
+    return ""
 
 
 def _adapter(connection: str | None) -> VcsAdapter:
