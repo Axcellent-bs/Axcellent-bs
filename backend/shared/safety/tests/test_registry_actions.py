@@ -367,6 +367,57 @@ async def test_seller_review_risk_score(gate: Gate, verifier: Any, act) -> None:
 
 
 @pytest.mark.asyncio
+async def test_settlement_hold_documents_missing_goes_to_human(
+    gate: Gate, verifier: Any, act
+) -> None:
+    """정산 보류 사유가 서류 미비면 data에 묻지 않고 바로 C(사람 확인). 다른 사유는 B 교차검증."""
+    asked = len(verifier.tasks)
+    missing = await gate.execute(
+        act(
+            "settlement_hold",
+            "finance",
+            "hold-1",
+            seller_id="sel_1",
+            reason_code="documents_missing",
+            hold_amount=50000,
+        )
+    )
+    assert (missing.grade, missing.status) == ("C", "held")
+    assert len(verifier.tasks) == asked  # 검증자에게 묻지 않는다
+    review = gate.store.get_review(missing.review_id or "")
+    hits = {hit["key"]: hit for hit in review.report["rules"]}  # type: ignore[union-attr]
+    assert hits["settlement_documents_missing"]["observed"] == "documents_missing"
+
+    fraud = await gate.execute(
+        act(
+            "settlement_hold",
+            "finance",
+            "hold-2",
+            seller_id="sel_2",
+            reason_code="fraud_risk",
+            hold_amount=50000,
+        )
+    )
+    assert (fraud.grade, fraud.status, fraud.verifier) == ("B", "executed", "data")
+    assert len(verifier.tasks) == asked + 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad", ["missing", "", "unknown_reason", 1, None])
+async def test_settlement_hold_reason_fails_closed(
+    gate: Gate, verifier: Any, act, bad: Any
+) -> None:
+    """사유가 없거나 목록 밖 값이면 사람 확인(C). 검증자에게 묻지 않는다."""
+    params: dict[str, Any] = {"seller_id": "sel_3", "hold_amount": 50000}
+    if bad != "missing":
+        params["reason_code"] = bad
+    asked = len(verifier.tasks)
+    decision = await gate.execute(act("settlement_hold", "finance", "hold-3", **params))
+    assert (decision.grade, decision.status) == ("C", "held")
+    assert len(verifier.tasks) == asked
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "action", ["create_claim", "decide_claim", "receive_return", "inspect_return"]
 )
