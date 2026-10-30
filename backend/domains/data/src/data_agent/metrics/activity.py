@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import statistics
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -210,6 +210,11 @@ class ActivityCounts:
     collab: Counter[tuple[str, str]] = field(default_factory=Counter)  # (요청 부서, 받은 source)
     log_count: int = 0
     truncated: bool = False
+    # 받을 서비스 → 넘긴 일의 skill별 수 (AI를 쓰지 않는 부서로 넘긴 일의 업무 이름에 쓴다)
+    handed_skills: dict[str, Counter[str]] = field(default_factory=dict)
+    # AI를 쓰지 않는 서비스로 넘긴 일 (`split_unused`가 그날 켠 서비스 기준으로 옮긴다)
+    unused_handed: Counter[str] = field(default_factory=Counter)  # 받을 서비스 → 건수
+    unused_skills: dict[str, Counter[str]] = field(default_factory=dict)  # 받을 서비스 → skill별 수
 
     def merge(self, other: ActivityCounts) -> ActivityCounts:
         """두 기간을 더한 새 값 (원래 값은 바꾸지 않는다)."""
@@ -228,7 +233,27 @@ class ActivityCounts:
         merged.collab.update(other.collab)
         merged.log_count += other.log_count
         merged.truncated = merged.truncated or other.truncated
+        for svc, skills in other.handed_skills.items():
+            merged.handed_skills.setdefault(svc, Counter()).update(skills)
+        merged.unused_handed.update(other.unused_handed)
+        for svc, skills in other.unused_skills.items():
+            merged.unused_skills.setdefault(svc, Counter()).update(skills)
         return merged
+
+    def split_unused(self, enabled: Callable[[str], bool]) -> ActivityCounts:
+        """AI를 쓰지 않는(켜지 않은) 서비스로 넘긴 일을 `unused_*`로 옮긴 새 값.
+
+        그날 켠 서비스 기준으로 나눠 두어, 나중에 서비스를 더 켜도 지난 날의 숫자가 바뀌지 않는다.
+        그 서비스로 넘긴 일의 처리·반려 기록도 부서 카드에 쓰지 않으니 함께 뺀다.
+        """
+        out = ActivityCounts.from_json(self.to_json())
+        for svc in [s for s in out.handed if not enabled(s)]:
+            items = out.handed.pop(svc)
+            out.unused_handed[svc] += len(items)
+            out.unused_skills.setdefault(svc, Counter()).update(out.handed_skills.pop(svc, {}))
+        for svc in [s for s in out.closed if not enabled(s)]:
+            out.closed.pop(svc)
+        return out
 
     def mttr_seconds(self) -> dict[str, int | None]:
         """사건별 MTTR (`compute_kpi`와 같다: resolved 발행 → 없으면 verify 완료, − 첫 기록)."""
@@ -249,6 +274,9 @@ class ActivityCounts:
             "collab": [[a, b, n] for (a, b), n in sorted(self.collab.items())],
             "log_count": self.log_count,
             "truncated": self.truncated,
+            "handed_skills": {s: dict(c) for s, c in self.handed_skills.items()},
+            "unused_handed": dict(self.unused_handed),
+            "unused_skills": {s: dict(c) for s, c in self.unused_skills.items()},
         }
 
     @classmethod
@@ -267,6 +295,9 @@ class ActivityCounts:
             collab=Counter({(a, b): n for a, b, n in data.get("collab") or []}),
             log_count=int(data.get("log_count") or 0),
             truncated=bool(data.get("truncated")),
+            handed_skills={s: Counter(c) for s, c in (data.get("handed_skills") or {}).items()},
+            unused_handed=Counter(data.get("unused_handed") or {}),
+            unused_skills={s: Counter(c) for s, c in (data.get("unused_skills") or {}).items()},
         )
 
 
@@ -415,6 +446,9 @@ def count_activity(records: list[LogRecord], truncated: bool = False) -> Activit
             task = str(task_id) if task_id else None
             if isinstance(service, str) and outcome == HANDED_TO_HUMAN:
                 counts.handed.setdefault(service, []).append((task, r.occurred_at))
+                skill = r.skill or r.payload.get("skill")
+                if isinstance(skill, str) and skill:
+                    counts.handed_skills.setdefault(service, Counter())[skill] += 1
             elif isinstance(service, str) and outcome in (HANDOFF_DONE, HANDOFF_REJECTED):
                 counts.closed.setdefault(service, []).append((task, str(outcome), r.occurred_at))
         if r.kind != "result_sent":

@@ -365,6 +365,15 @@ class CollaborationEdge(AxModel):
     count: int = Field(ge=1)  # A2A 요청 수 (`request_received`)
 
 
+class UnusedHandoff(AxModel):
+    """AI를 쓰지 않는(켜지 않은) 부서로 넘긴 일. 건수와 업무 상위 3개만 (예측 문구·숫자 없음)."""
+
+    department: str
+    label: str
+    count: int = Field(ge=1)
+    top_skills: list[SkillCount] = Field(default_factory=list, max_length=3)
+
+
 class ActivityHighlight(AxModel):
     key: str  # 예: departments.support.requests.total
     label: str  # 한국어 (예: 고객지원 처리한 요청)
@@ -399,3 +408,8 @@ class ActivityReportOutput(AxModel):
     stored_days: int | None = Field(default=None, ge=0)  # 저장된 값을 쓴 날 수 (이번 + 직전 기간)
     live_days: int | None = Field(default=None, ge=0)  # 바로 계산한 날 수 (이번 + 직전 기간)
     snapshot_note: str | None = None  # "저장된 날 N일 / 바로 계산 M일"
+    # 센 범위: 켠(AI를 쓰는) 서비스 id. 저장된 날은 그날 켠 서비스. 예전 응답은 None
+    enabled_services: list[str] | None = None
+    unused_handoffs: list[UnusedHandoff] = Field(
+        default_factory=list
+    )  # AI를 쓰지 않는 부서로 넘긴 일
