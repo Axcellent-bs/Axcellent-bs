@@ -58,7 +58,11 @@ from data_agent.metrics.kpi import compute_kpi
 
 KST = timezone(timedelta(hours=9))
 QUERY_LIMIT = 5000  # 공통 로그 조회 계약 상한
-FINANCE_TIMEOUT = 5.0
+FINANCE_TIMEOUT = 15.0  # 재무 호출 한 번. 동시 개수 상한 안에서 보낼 때부터 잰다
+FINANCE_CONCURRENCY = 2  # 재무 closing_report 동시 호출 상한
+# 재무 장부에서 빠지면 총거래액·수수료 매출을 믿을 수 없는 자료 (그때 재무는 0으로 계산한다).
+# 클레임·쿠폰·PG 정산은 이 두 줄 계산에 쓰지 않아서 빠져도 그대로 쓴다
+REVENUE_INPUTS = ("orders", "orders_partial", "products")
 MAX_HIGHLIGHTS = 3
 NOTHING_NOTABLE = "특이사항 없음"
 FINANCE_SOURCE = "finance.closing_report"
@@ -144,12 +148,15 @@ def card_owner(service_id: str) -> str | None:
 
 # ---------------------------------------------------------------------------------- 공통 로그
 async def _logs(
-    source: LogSource, window: tuple[datetime, datetime], tenant_id: str
-) -> tuple[list[LogRecord], bool]:
-    start, end = window
-    query = CommonLogQuery(from_=start, to=end, limit=QUERY_LIMIT, tenant_id=tenant_id)
+    source: LogSource, p: Periods, tenant_id: str
+) -> tuple[list[LogRecord], list[LogRecord], bool]:
+    """직전 기간 시작 ~ 이번 기간 끝을 한 번에 읽어 (이번, 직전)으로 나눈다."""
+    (prev_start, start), (_, end) = p.window(previous=True), p.window()
+    query = CommonLogQuery(from_=prev_start, to=end, limit=QUERY_LIMIT, tenant_id=tenant_id)
     result = await source.query(query)
-    return [r for r in result.records if start <= r.occurred_at < end], result.truncated
+    current = [r for r in result.records if start <= r.occurred_at < end]
+    previous = [r for r in result.records if prev_start <= r.occurred_at < start]
+    return current, previous, result.truncated
 
 
 # -------------------------------------------------------------------------------- 회사 숫자
@@ -189,8 +196,12 @@ async def _ask_finance(
         if result.outcome == "service_disabled":
             return None, "재무 서비스가 꺼져 있어 closing_report를 받지 못함"
         return None, f"재무 closing_report 응답 {result.status.value} ({result.outcome or '-'})"
+    output = result.output or {}
+    lost = [u for u in output.get("unavailable") or [] if u in REVENUE_INPUTS]
+    if lost:  # 장부에 주문·상품이 없으면 재무는 0으로 계산한다. 0을 쓰지 않는다
+        return None, f"재무 장부에 {', '.join(lost)} 자료가 없어 매출을 확인할 수 없음"
     amounts: dict[str, int] = {}
-    for line in (result.output or {}).get("lines") or []:
+    for line in output.get("lines") or []:
         if isinstance(line, dict) and isinstance(line.get("amount"), int):
             amounts[str(line.get("code"))] = line["amount"]
     if "gmv" not in amounts or "commission_revenue" not in amounts:
@@ -198,11 +209,38 @@ async def _ask_finance(
     return amounts, None
 
 
+class FinanceAsker:
+    """한 요청 안의 재무 closing_report 호출.
+
+    (period, 날짜)마다 한 번만 부르고(이번·직전 기간이 겹쳐도 다시 부르지 않는다),
+    동시에 `FINANCE_CONCURRENCY`개까지만 보낸다. 재무는 호출마다 쇼핑몰 주문 전체를 다시 읽어서,
+    한꺼번에 많이 보내면 재무·shop-api가 줄을 서고 시간 초과로 모두 실패한다.
+    """
+
+    def __init__(self, send: SendFn, meta: RequestMeta, limit: int = FINANCE_CONCURRENCY) -> None:
+        self.send, self.meta = send, meta
+        self._limit = asyncio.Semaphore(limit)
+        self._asked: dict[tuple[str, date], asyncio.Task] = {}
+        self.calls = 0  # 실제로 보낸 호출 수
+
+    def ask(self, period: str, day: date) -> asyncio.Task:
+        key = (period, day)
+        if key not in self._asked:
+            self._asked[key] = asyncio.ensure_future(self._run(period, day))
+        return self._asked[key]
+
+    async def _run(self, period: str, day: date) -> tuple[dict[str, int] | None, str | None]:
+        async with self._limit:
+            self.calls += 1
+            return await _ask_finance(self.send, self.meta, period, day)
+
+
 async def finance_figures(
-    send: SendFn, meta: RequestMeta, period: str, start: date, end: date
+    asker: FinanceAsker, period: str, start: date, end: date
 ) -> dict[str, Figure]:
-    asks = [_ask_finance(send, meta, p, d) for p, d in _finance_dates(period, start, end)]
-    answers = await asyncio.gather(*asks)
+    answers = await asyncio.gather(
+        *(asker.ask(p, d) for p, d in _finance_dates(period, start, end))
+    )
     reason = next((why for _, why in answers if why), None)
     if reason:
         return {"gmv": Figure(None, reason), "commission_revenue": Figure(None, reason)}
@@ -347,9 +385,11 @@ async def build_report(
     window, previous = p.window(), p.window(previous=True)
     tenant = meta.tenant_id
 
-    (records, cut), (prev_records, prev_cut) = await asyncio.gather(
-        _logs(logs, window, tenant), _logs(logs, previous, tenant)
+    # shop-api 지표를 먼저 받는다. 재무 호출이 shop-api에서 주문 전체를 읽는 동안 줄 서지 않게
+    (records, prev_records, cut), shop, prev_shop = await asyncio.gather(
+        _logs(logs, p, tenant), shop_figures(metrics, window), shop_figures(metrics, previous)
     )
+    prev_cut = cut
     kpi, prev_kpi = compute_kpi(records), compute_kpi(prev_records)
     mttr = {i.context_id: i.mttr_seconds for i in kpi.output.incidents}
     prev_mttr = {i.context_id: i.mttr_seconds for i in prev_kpi.output.incidents}
@@ -361,11 +401,10 @@ async def build_report(
     def missing(section: str, reason: str) -> None:
         unknown.append(UnknownSection(section=section, reason=reason))
 
-    (fin, prev_fin, shop, prev_shop) = await asyncio.gather(
-        finance_figures(send, meta, data.period, p.start, p.end),
-        finance_figures(send, meta, data.period, p.previous_start, p.start),
-        shop_figures(metrics, window),
-        shop_figures(metrics, previous),
+    asker = FinanceAsker(send, meta)
+    fin, prev_fin = await asyncio.gather(
+        finance_figures(asker, data.period, p.start, p.end),
+        finance_figures(asker, data.period, p.previous_start, p.start),
     )
     note = _finance_note(data.period, p.start, p.end)
     for key in ("gmv", "commission_revenue", "order_count", "payment_success_rate"):

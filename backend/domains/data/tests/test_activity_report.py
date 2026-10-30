@@ -245,27 +245,43 @@ class FakeMetrics:
         return []
 
 
-def finance_sender(gmv: dict[str, int] | None = None, disabled: bool = False):
-    calls: list[dict] = []
+class FinanceSender:
+    """가짜 재무 A2A. 받은 입력을 `calls`에 쌓는다."""
 
-    async def send(target: str, req: AgentRequest) -> AgentResult:
-        calls.append({"target": target, "skill": req.skill, **req.input})
-        if disabled:
+    def __init__(
+        self,
+        gmv: dict[str, int] | None = None,
+        disabled: bool = False,
+        unavailable: dict[str, list[str]] | None = None,
+    ) -> None:
+        self.gmv, self.disabled = gmv or {}, disabled
+        self.unavailable = unavailable or {}  # 날짜 → 재무 장부에서 빠진 자료
+        self.calls: list[dict] = []
+
+    async def __call__(self, target: str, req: AgentRequest) -> AgentResult:
+        self.calls.append({"target": target, "skill": req.skill, **req.input})
+        if self.disabled:
             return AgentResult(
                 meta=req.meta,
                 status=TaskStatus.REJECTED,
                 outcome="service_disabled",
                 output={"to_service": "finance"},
             )
-        amount = (gmv or {}).get(req.input["date"], 1000)
+        amount = self.gmv.get(req.input["date"], 1000)
         lines = [
             {"code": "gmv", "label": "총거래액", "amount": amount},
             {"code": "commission_revenue", "label": "판매 수수료 매출", "amount": amount // 10},
         ]
-        return AgentResult(meta=req.meta, status=TaskStatus.COMPLETED, output={"lines": lines})
+        missing = self.unavailable.get(req.input["date"], [])
+        return AgentResult(
+            meta=req.meta,
+            status=TaskStatus.COMPLETED,
+            outcome="partial" if missing else "reported",
+            output={"lines": lines, "unavailable": missing},
+        )
 
-    send.calls = calls  # type: ignore[attr-defined]
-    return send
+
+finance_sender = FinanceSender
 
 
 def _meta() -> RequestMeta:
@@ -601,3 +617,93 @@ async def test_new_log_with_request_id_but_no_duration_pairs_by_id() -> None:
     support = _dept(await _report(records), "support")
     assert support.quality.avg_response_ms == 3000.0
     assert support.quality.response_samples == 1
+
+
+# ------------------------------------------------------------------------ 속도
+@asyncio
+async def test_finance_calls_run_at_most_two_at_once() -> None:
+    import asyncio as aio
+
+    from data_agent.skills.activity_report import FINANCE_CONCURRENCY
+
+    running = peak = 0
+    base = finance_sender()
+
+    async def slow(target: str, req: AgentRequest) -> AgentResult:
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        await aio.sleep(0.01)
+        running -= 1
+        return await base(target, req)
+
+    result = await _report([], send=slow, period="week", start=date(2026, 10, 19))
+    assert peak == FINANCE_CONCURRENCY == 2  # 14번을 한꺼번에 보내지 않는다
+    assert result.output.company.gmv.value == 7000  # 결과는 같다
+
+
+@asyncio
+async def test_same_finance_date_is_asked_once_per_request() -> None:
+    from data_agent.skills.activity_report import FinanceAsker, finance_figures
+
+    send = finance_sender()
+    asker = FinanceAsker(send, _meta())
+    week = date(2026, 10, 19)
+    # 겹치는 두 기간 (10-19~10-25, 10-22~10-28): 겹치는 4일은 한 번만 부른다
+    await finance_figures(asker, "week", week, week + timedelta(days=7))
+    await finance_figures(asker, "week", week + timedelta(days=3), week + timedelta(days=10))
+    dates = [c["date"] for c in send.calls]
+    assert len(dates) == len(set(dates)) == 10
+    assert asker.calls == 10
+
+
+@asyncio
+async def test_common_log_is_read_once_for_both_periods() -> None:
+    real = _store(seeded_day(T0) + small_previous(PREV0))
+    queries = []
+
+    class Counted:
+        async def query(self, query):  # noqa: ANN001, ANN202
+            queries.append(query)
+            return await real.query(query)
+
+    source = Counted()
+    result = await build_report(
+        ActivityReportInput(start=DAY),
+        _meta(),
+        _llm(),
+        logs=source,
+        metrics=FakeMetrics(),
+        send=finance_sender(),
+        now=NOW,
+        enabled=lambda s: s != "finance",
+        owner=lambda s: None,
+    )
+    assert len(queries) == 1
+    assert (queries[0].from_, queries[0].to) == (PREV0, T0 + timedelta(days=1))
+    support = _dept(result, "support")
+    assert (support.requests.total, support.previous_period.requests.total) == (6, 3)
+
+
+def test_skill_without_korean_name_shows_other_work() -> None:
+    from data_agent.labels import skill_label
+
+    assert skill_label("receive_dev_result") == "개발 결과 받기"
+    assert skill_label("start_dev") == "개발 시작"
+    assert skill_label("brand_new_skill") == "기타 작업(brand_new_skill)"
+
+
+@asyncio
+async def test_finance_zero_from_missing_orders_is_unknown_not_zero() -> None:
+    """재무가 주문을 못 읽으면 0으로 계산한다. 그 0을 매출로 쓰지 않는다(클레임만 빠지면 그대로)."""
+    send = FinanceSender(
+        gmv={"2026-10-28": 0},
+        unavailable={"2026-10-28": ["orders", "claims"], "2026-10-29": ["claims"]},
+    )
+    result = await _report([], send=send)
+    gmv = result.output.company.gmv
+    assert gmv.value == 1000  # 10-29: 클레임만 빠짐 → 그대로
+    assert gmv.previous_period is None  # 10-28: 주문이 빠짐 → 0이 아니라 확인할 수 없음
+    reasons = {u.section: u.reason for u in result.output.unknown_sections}
+    assert "orders" in reasons["company.previous_period.gmv"]
+    assert "company.gmv" not in reasons
