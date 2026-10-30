@@ -1,14 +1,35 @@
 import { useEffect, useRef, useState } from "react";
+import { api } from "@/lib/api";
 import type { Conversation, Message } from "@/lib/types";
 
 const ABUSE_LABEL = { profanity: "비속어 가림", insult: "모욕 표현 가림", threat: "위협 표현 있음" } as const;
 
-function Bubble({ m }: { m: Message }) {
+function Bubble({ m, inquiryId }: { m: Message; inquiryId: number }) {
   const customer = m.role === "customer";
   const [showOriginal, setShowOriginal] = useState(false);
+  // 가린 메시지의 원문은 응답에 없다. 처음 열 때 서버에서 받고, 그때 연 사람이 내력에 남는다
+  const [original, setOriginal] = useState<string | null>(null);
+  const [opening, setOpening] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const toggle = async () => {
+    if (showOriginal) return setShowOriginal(false);
+    if (original == null) {
+      setOpening(true);
+      setFailed(false);
+      try {
+        setOriginal((await api.admin.revealOriginal(inquiryId, m.id)).text);
+      } catch {
+        setFailed(true);
+        return;
+      } finally {
+        setOpening(false);
+      }
+    }
+    setShowOriginal(true);
+  };
   const safe = m.softened_text ?? m.display_text ?? null; // AI 순화문이 있으면 그것, 없으면 규칙으로 가린 글
   const masked = customer && safe != null && m.abuse_level !== undefined && m.abuse_level !== "none";
-  const body = masked && !showOriginal ? safe : m.text;
+  const body = masked ? (showOriginal ? original : safe) : m.text;
   const time = new Date(m.created_at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
   return (
     <div className={`flex ${customer ? "justify-start" : "justify-end"}`}>
@@ -20,9 +41,10 @@ function Bubble({ m }: { m: Message }) {
               {ABUSE_LABEL[m.abuse_level as keyof typeof ABUSE_LABEL]}
             </span>
             {m.softened_text != null && <span className="text-ink-500">AI가 순화함</span>}
-            <button type="button" onClick={() => setShowOriginal((v) => !v)} className="text-ink-500 underline">
-              {showOriginal ? "가려서 보기" : "원문 보기"}
+            <button type="button" disabled={opening} onClick={toggle} className="text-ink-500 underline">
+              {showOriginal ? "가려서 보기" : opening ? "여는 중…" : "원문 보기"}
             </button>
+            {failed && <span className="text-red-700">원문을 열지 못했어요</span>}
           </div>
         )}
         <span className={`text-[10px] text-ink-500 ${customer ? "" : "text-right"}`}>{customer ? "고객" : "상담원"} · {time}</span>
@@ -37,7 +59,7 @@ export function Thread({ conv }: { conv: Conversation }) {
   useEffect(() => { end.current?.scrollIntoView({ behavior: "smooth" }); }, [conv.messages.length, conv.id]);
   return (
     <div className="scroll-thin flex-1 overflow-y-auto px-6 py-5">
-      <div className="space-y-4">{conv.messages.map((m) => <Bubble key={m.id} m={m} />)}</div>
+      <div className="space-y-4">{conv.messages.map((m) => <Bubble key={m.id} m={m} inquiryId={conv.id} />)}</div>
       <div ref={end} />
     </div>
   );

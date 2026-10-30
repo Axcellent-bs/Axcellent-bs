@@ -46,6 +46,7 @@ SERVICES: tuple[Service, ...] = (
             "submit_feedback",
             "set_feedback_status",
             "add_resolution_note",
+            "reveal_original",
             "list_feedback",
             "feedback_overview",
             "inquiry_overview",

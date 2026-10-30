@@ -83,6 +83,12 @@ action = "add_resolution_note"
 owner = "support"
 base_grade = "A"
 
+# 욕설로 가린 고객 메시지의 원문 열기. 돈은 움직이지 않고 "누가 열었는지"를 내력에 남긴다
+[[actions]]
+action = "reveal_original"
+owner = "support"
+base_grade = "A"
+
 # 클레임 처리 기록 (#105). 돈이 나가지 않는 기록만. 환불 지급은 refund_request(A, 한도 넘으면 C)
 [[actions]]
 action = "create_claim"
