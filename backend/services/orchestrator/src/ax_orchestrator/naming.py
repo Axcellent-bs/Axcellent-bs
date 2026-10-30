@@ -38,6 +38,7 @@ PLAN_KO = {
     "scenario_a": "결제 장애 대응",
     "finance_anomaly": "재무 이상 대응",
     "support_resolved": "고객 문의 처리 결과 기록",
+    "seller_onboarding": "새 판매자 입점 심사",
 }
 
 
