@@ -85,7 +85,7 @@ async def test_closed_incident_is_found_only_when_time_falls_inside(harness) -> 
     inc = await manager.handle(_event("evt_1"))
     await manager.wait(inc.context_id)
     assert inc.status == "resolved" and inc.closed_at is not None
-    assert manager.find_active("payment", None) is None  # 시각이 없으면 열린 사건만
+    assert manager.find_active("payment", None) is None  # 시각이 없으면 열린 이벤트만
     assert manager.find_active("payment", inc.opened_at) is inc
     assert manager.find_active("payment", inc.closed_at + timedelta(minutes=1)) is None
     assert manager.find_active("payment", inc.opened_at - timedelta(minutes=30)) is None

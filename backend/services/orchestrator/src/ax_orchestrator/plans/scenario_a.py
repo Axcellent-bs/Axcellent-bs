@@ -8,11 +8,11 @@
 - 원인 추정: 영향 분석 다음에 데이터 `root_cause_hypotheses`로 원인 후보를 받는다(사실만 근거).
   확신도 high 후보가 없거나 원인 추정을 받지 못했으면 원인 확인 업무를 기획개발 `create_ticket`으로
   넘긴다. 그 서비스가 꺼져 있으면 업무 요청 라우터가 사람 할 일함(받은 요청)으로 넘긴다.
-- 사건 후: 데이터 처리 시간 요약(`kpi_summary`)을 요청한다.
-- 반복 장애: 사건이 열리면 인사 `find_similar_cases`로 비슷한 과거 사건과 그때 해결 내용을 찾아
-  보여 준다(참고만, 다른 단계를 바꾸지 않는다). 사건 기록 뒤 인사 `record_resolution`으로 이번
-  해결 내용을 카드에 남겨 다음 사건이 찾게 한다. 값이 없으면 지어내지 않고 비운다.
-- 재무는 사건 중에 부르지 않는다(멘토 피드백, SCN-A). 장애 때 나간 쿠폰·환불은 이벤트로 재무 장부에
+- 이벤트 후: 데이터 처리 시간 요약(`kpi_summary`)을 요청한다.
+- 반복 장애: 이벤트가 열리면 인사 `find_similar_cases`로 비슷한 과거 이벤트와 그때 해결 내용을 찾아
+  보여 준다(참고만, 다른 단계를 바꾸지 않는다). 이벤트 기록 뒤 인사 `record_resolution`으로 이번
+  해결 내용을 카드에 남겨 다음 이벤트가 찾게 한다. 값이 없으면 지어내지 않고 비운다.
+- 재무는 이벤트 중에 부르지 않는다(멘토 피드백, SCN-A). 장애 때 나간 쿠폰·환불은 재무 장부에
   기록되고, 비용은 평상시 결산·사후 감사에서 다룬다.
 """
 
@@ -30,7 +30,7 @@ COMPENSATION_BATCH = 50
 def _window(inc: Incident) -> dict[str, Any]:
     """영향 분석 구간. 신호가 장애 시작 시각(since)을 주면 그때부터 센다.
 
-    없으면 예전처럼 사건이 열린 시각 앞 15분부터. 앞 장애(이미 지난 다른 사건)의 실패 주문이
+    없으면 예전처럼 이벤트가 열린 시각 앞 15분부터. 앞 장애(이미 지난 다른 이벤트)의 실패 주문이
     섞이지 않게 하려는 것이다.
     """
     start = inc.since if inc.since is not None else inc.opened_at - timedelta(minutes=15)
@@ -201,12 +201,12 @@ def _kpi(inc: Incident) -> dict[str, Any]:
 
 
 def _similar(inc: Incident) -> dict[str, Any]:
-    # 사건이 열린 시점에 아는 것만으로 찾는다(제목과 부품). 해결 내용이 있는 사례를 우선 보여 준다.
-    return {"query": f"{inc.title} {inc.component}".strip(), "limit": 3}
+    # 이벤트가 열린 시점에 아는 것(제목)만으로 찾는다. 해결 내용이 있는 사례를 우선 보여 준다.
+    return {"query": inc.title, "limit": 3}
 
 
 def _resolution(inc: Incident) -> dict[str, Any]:
-    """이번 사건의 해결 내용. 단계 결과에 있는 사실만 옮기고 없으면 비운다."""
+    """이번 이벤트의 해결 내용. 단계 결과에 있는 사실만 옮기고 없으면 비운다."""
     recovered = inc.steps["recovery"].status == "completed"
     rollback = inc.steps["rollback"]
     action = None
@@ -235,7 +235,7 @@ def scenario_a() -> Plan:
             Step(
                 "similar_cases",
                 "find_similar_cases",
-                "비슷한 과거 사건 찾기 (hr)",
+                "비슷한 과거 이벤트 찾기 (hr)",
                 build=_similar,
                 required=False,
             ),
@@ -276,7 +276,7 @@ def scenario_a() -> Plan:
             Step(
                 "link_incident",
                 "link_incident",
-                "사건에 PR 연결 (planning)",
+                "이벤트에 PR 연결 (planning)",
                 after=("related_prs",),
                 build=_link,
                 required=False,
@@ -342,7 +342,7 @@ def scenario_a() -> Plan:
             Step(
                 "record",
                 "record_case",
-                "사건 기록 (hr)",
+                "이벤트 기록 (hr)",
                 also_after=(
                     "recovered_notice",
                     "link_incident",

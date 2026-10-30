@@ -329,3 +329,29 @@ def test_resolution_without_a_card_is_404(client: TestClient, fake: Fake) -> Non
 def test_resolution_rejects_an_unknown_outcome(client: TestClient, fake: Fake) -> None:
     response = client.post(RESOLUTION_URL, json={"outcome": "great"})
     assert response.status_code == 422 and not fake.sent
+
+
+def test_resolution_passes_the_person_entered_time_and_draft_source(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.outputs["record_resolution"] = {"outcome": "recorded", "card_id": "card_x"}
+    response = client.post(
+        RESOLUTION_URL,
+        json={
+            "outcome": "resolved",
+            "opened_at": "2026-10-29T08:00:00Z",
+            "resolved_at": "2026-10-29T08:12:00Z",
+            "draft_source": "ai_draft_kept",
+        },
+    )
+    assert response.status_code == 200
+    sent = fake.last("record_resolution")
+    assert sent.input["resolved_at"].startswith("2026-10-29T08:12")
+    assert sent.input["draft_source"] == "ai_draft_kept"
+
+
+def test_resolution_time_in_the_future_is_rejected(client: TestClient, fake: Fake) -> None:
+    response = client.post(
+        RESOLUTION_URL, json={"outcome": "resolved", "resolved_at": "2999-01-01T00:00:00Z"}
+    )
+    assert response.status_code == 422 and not fake.sent

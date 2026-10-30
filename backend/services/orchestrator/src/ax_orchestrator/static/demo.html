@@ -90,11 +90,11 @@
 <body>
 <div class="banner"><div class="wrap">
   <span class="tag">MOCK</span><span>가짜 부서 7곳으로 돌리는 통합 에이전트 목업입니다. 값은 모두 지어낸 데이터예요.</span>
-  <a href="#flow">사건 흐름 보기 →</a>
+  <a href="#flow">이벤트 흐름 보기 →</a>
 </div></div>
 <nav><div class="wrap">
   <span class="logo">axcompany</span>
-  <a class="item" href="#flow">사건 흐름</a><a class="item" href="#registry">부서 에이전트</a>
+  <a class="item" href="#flow">이벤트 흐름</a><a class="item" href="#registry">부서 에이전트</a>
   <a class="item" href="#holds">승인 대기열</a><a class="item" href="#kpi">KPI</a>
   <span class="sp"></span>
   <button class="btn primary" id="go-top">장애 주입</button>
@@ -102,12 +102,12 @@
 
 <div class="wrap">
   <section class="hero">
-    <h1>사건 발생부터 기록까지<br>하나의 총괄 에이전트로</h1>
+    <h1>이벤트 발생부터 기록까지<br>하나의 총괄 에이전트로</h1>
     <div class="chips"><span class="chip">감지</span> 에서 <span class="chip">분배</span>
       <span class="chip">취합</span> <span class="chip">종료</span> 까지, 부서 에이전트가 알아서 움직여요</div>
     <div class="actions">
       <button class="btn primary" id="inject">결제 장애 주입 (시나리오 A)</button>
-      <button class="btn" id="reset-view">최신 사건 보기</button>
+      <button class="btn" id="reset-view">최신 이벤트 보기</button>
       <span class="pill" id="state">대기 중</span>
     </div>
     <div class="opts">
@@ -123,9 +123,9 @@
   <section class="stage" id="flow">
     <div class="grid">
       <div class="card">
-        <h3><span id="title">사건 흐름</span><span class="pill" id="ctx">-</span></h3>
+        <h3><span id="title">이벤트 흐름</span><span class="pill" id="ctx">-</span></h3>
         <table><thead><tr><th>단계</th><th>부서</th><th>상태</th><th>시도</th></tr></thead>
-          <tbody id="steps"><tr><td colspan="4" class="empty">장애를 주입하면 사건이 열려요.</td></tr></tbody></table>
+          <tbody id="steps"><tr><td colspan="4" class="empty">장애를 주입하면 이벤트가 열려요.</td></tr></tbody></table>
         <div class="label" style="margin-top:18px">진행 기록</div>
         <div class="log" id="log"></div>
       </div>
@@ -138,12 +138,12 @@
     <div class="grid2">
       <div class="card" id="holds"><h3><span>승인 대기열</span><span class="pill">C 등급</span></h3>
         <div id="holdlist"><div class="empty">보류된 단계가 없어요.</div></div></div>
-      <div class="card" id="kpi"><h3><span>사건 지표</span><span class="pill">실측</span></h3>
+      <div class="card" id="kpi"><h3><span>이벤트 지표</span><span class="pill">실측</span></h3>
         <div class="label">감지→종료 시간</div><div class="kpi" id="k-mttr">-</div>
         <div class="label" style="margin-top:14px">자동 처리율 · 재시도 · 이관</div>
         <div class="kpi" id="k-auto">-</div></div>
-      <div class="card"><h3><span>사건 요약</span><span class="pill">부서 결과 취합</span></h3>
-        <div class="log" id="summary"><div class="empty">사건이 끝나면 정리돼요.</div></div></div>
+      <div class="card"><h3><span>이벤트 요약</span><span class="pill">부서 결과 취합</span></h3>
+        <div class="log" id="summary"><div class="empty">이벤트가 끝나면 정리돼요.</div></div></div>
     </div>
   </section>
   <footer>목업 · 실제 부서 연동 전 단계. 총괄은 승인하지 않고, 승인 버튼은 사람이 누르는 대시보드 동작을 흉내 낸 것입니다.</footer>
@@ -224,7 +224,7 @@ function render(inc) {
   $('k-auto').innerHTML = m.auto_rate !== undefined
     ? `${Math.round(m.auto_rate * 100)}<small>% · 재시도 ${m.retries} · 이관 ${m.transfers}</small>` : '-';
   setHTML('summary', inc.summary.length ? inc.summary.map((x) => `<div>${esc(x)}</div>`).join('')
-    : '<div class="empty">사건이 끝나면 정리돼요.</div>');
+    : '<div class="empty">이벤트가 끝나면 정리돼요.</div>');
 }
 
 async function tick() {

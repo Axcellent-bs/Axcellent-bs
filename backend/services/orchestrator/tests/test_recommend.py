@@ -1,4 +1,4 @@
-"""과거 근거 기반 추천: 해결된 과거 사건의 원인·조치만 참고로 붙인다."""
+"""과거 근거 기반 추천: 해결된 과거 이벤트의 원인·조치만 참고로 붙인다."""
 
 import pytest
 
@@ -10,7 +10,7 @@ from ax_orchestrator.recommend import CAVEAT, recommend
 def case(card_id, similarity, outcome=None, **resolution):
     return {
         "card_id": card_id,
-        "title": f"사건 {card_id}",
+        "title": f"이벤트 {card_id}",
         "similarity": similarity,
         "resolved": outcome is not None,
         "resolution": {"outcome": outcome, **resolution} if outcome else None,
@@ -69,5 +69,5 @@ async def test_incident_view_carries_the_recommendation(harness) -> None:
     await engine.run(inc, scenario_a())
     assert inc.view()["recommendation"] == {
         "status": "no_evidence",
-        "reason": "비슷한 과거 사건이 없음",
+        "reason": "비슷한 과거 이벤트가 없음",
     }

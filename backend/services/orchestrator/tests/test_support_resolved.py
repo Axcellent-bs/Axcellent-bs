@@ -48,7 +48,7 @@ async def test_a_resolved_inquiry_goes_to_finance_then_hr(harness) -> None:
         "resolution": "claim_decided",
         "refund_amount": 24000,
     }
-    # 재무가 남긴 기록이 사건에 보관돼 총괄 화면에서 보이고 인사 기록에 붙는다
+    # 재무가 남긴 기록이 이벤트에 보관돼 총괄 화면에서 보이고 인사 기록에 붙는다
     assert inc.shared["expense_used"] is True
     assert inc.shared["refund_amount"] == 24000
     assert inc.shared["shipping_fee"] == 3000
@@ -86,7 +86,7 @@ async def test_the_record_is_still_made_when_finance_cannot_record(harness) -> N
 
 @pytest.mark.asyncio
 async def test_inquiries_closed_together_are_not_merged_into_one_incident(harness) -> None:
-    """component가 없는 해결 이벤트가 하나의 열린 사건에 합쳐지면 기록이 사라진다."""
+    """component가 없는 해결 이벤트가 하나의 열린 이벤트에 합쳐지면 기록이 사라진다."""
     harness.fakes.latency = 0.05
     mgr = IncidentManager(await harness.start(), scenario_a)
     first = await mgr.handle(resolved("evt_a", 1))
@@ -119,7 +119,7 @@ async def test_the_hr_record_is_read_back_by_this_incident(harness) -> None:
 
     verify_call = next(c for c in harness.fakes.calls if c[1].skill == "get_audit_timeline")
     assert verify_call[0] == "hr"
-    assert verify_call[1].input == {"context_id": inc.context_id}  # 이 사건의 기록만 읽는다
+    assert verify_call[1].input == {"context_id": inc.context_id}  # 이 이벤트의 기록만 읽는다
     assert inc.steps["verify"].status == "completed"
     assert inc.status == "resolved"
     # 기록을 쓴 뒤에 읽는다
@@ -137,4 +137,4 @@ async def test_a_missing_hr_record_is_sent_to_a_human_instead_of_assumed(harness
     verify = inc.steps["verify"]
     assert verify.status == "transfer_queued"
     assert verify.reason_code == "record_not_found"
-    assert inc.status == "degraded"  # 기록을 확인하지 못한 사건은 해결로 세지 않는다
+    assert inc.status == "degraded"  # 기록을 확인하지 못한 이벤트는 해결로 세지 않는다

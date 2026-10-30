@@ -6,6 +6,7 @@ dashboard-web 옛 경로와의 대응은 README "엔드포인트" 표를 본다.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
@@ -624,6 +625,10 @@ async def record_incident_resolution(context_id: str, body: ResolutionBody) -> d
     소요 시간은 받지 않고 hr이 `opened_at`부터 지금까지로 잰다.
     같은 내용을 다시 보내면 한 번만 남는다.
     """
+    if body.resolved_at is not None:
+        at = body.resolved_at if body.resolved_at.tzinfo else body.resolved_at.replace(tzinfo=UTC)
+        if at > datetime.now(UTC) + timedelta(minutes=1):
+            raise ApiError(422, "INVALID_INPUT", "해결 시각이 지금보다 늦을 수 없다")
     payload: dict = {"context_id": context_id, **body.model_dump(mode="json", exclude_none=True)}
     out = await hr_client.call(
         "record_resolution",

@@ -1,10 +1,10 @@
-"""재무 이상 사건 plan: 재무 AI 사후 감사가 새 의심 건(같은 고객 반복 환불 등)을 찾았을 때.
+"""재무 이상 이벤트 plan: 재무 AI 사후 감사가 새 의심 건(같은 고객 반복 환불 등)을 찾았을 때.
 
 `finance.anomaly_detected` 이벤트로 열린다. 재무 AI가 주인공이다.
-1. 재무 AI가 사후 감사를 다시 돌려 의심 건을 사건 기록으로 남긴다 (read)
+1. 재무 AI가 사후 감사를 다시 돌려 의심 건을 이벤트 기록으로 남긴다 (read)
 2. 고객지원 AI가 의심 고객의 이상 신호(문의·클레임·환불 이력)를 본다 (read, 고객이 없으면 건너뜀)
-3. 인사 AI가 사건을 회사 기억에 기록한다
-사건이 열릴 때 인사 AI `find_similar_cases`로 비슷한 과거 사건을 찾아 보여 준다(참고용, 필수 아님).
+3. 인사 AI가 이벤트를 회사 기억에 기록한다
+이벤트가 열릴 때 인사 AI `find_similar_cases`로 비슷한 과거 이벤트를 찾아 보여 준다(참고용).
 
 돈을 돌려받거나 고객을 막는 일은 하지 않는다. 사람이 재무 화면(/finance)에서 보고 판단한다.
 """
@@ -36,7 +36,7 @@ def _signals_gate(inc: Incident) -> tuple[str, str, str] | None:
 
 
 def _similar(inc: Incident) -> dict[str, Any]:
-    return {"query": f"{inc.title} {inc.component}".strip(), "limit": 3}
+    return {"query": inc.title, "limit": 3}
 
 
 def finance_anomaly() -> Plan:
@@ -46,7 +46,7 @@ def finance_anomaly() -> Plan:
             Step(
                 "similar_cases",
                 "find_similar_cases",
-                "비슷한 과거 사건 찾기 (hr)",
+                "비슷한 과거 이벤트 찾기 (hr)",
                 build=_similar,
                 required=False,
             ),
@@ -63,7 +63,7 @@ def finance_anomaly() -> Plan:
             Step(
                 "record",
                 "record_case",
-                "사건 기록 (hr)",
+                "이벤트 기록 (hr)",
                 also_after=("audit", "signals", "similar_cases"),
                 kind="record",
             ),

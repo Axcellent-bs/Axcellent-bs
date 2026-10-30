@@ -1,12 +1,12 @@
-"""사건 기억: 해결 내용을 카드에 채우고, 비슷한 과거 사건을 찾아 준다.
+"""이벤트 기억: 해결 내용을 카드에 채우고, 비슷한 과거 이벤트를 찾아 준다.
 
 `record_resolution`과 `find_similar_cases` 두 skill이 있다.
 
-- `record_resolution`: 사건(`context_id`)에서 만든 카드에 원인·조치·결과·소요 시간을 채운다.
+- `record_resolution`: 이벤트(`context_id`)에서 만든 카드에 원인·조치·결과·소요 시간을 채운다.
   카드 본문에도 적어서(`[해결 기록]` 블록) 나중에 임베딩 검색이 해결 내용까지 보고 찾게 한다.
   값이 없으면 지어내지 않고 "확인할 수 없음"으로 적는다.
   상태를 바꾸므로 `memory.card_write` 관문을 거친다.
-- `find_similar_cases`: 현재 사건을 설명하는 글로 비슷한 과거 사건·결정 카드를 찾는다(조회 전용).
+- `find_similar_cases`: 현재 이벤트 설명으로 비슷한 과거 이벤트·결정 카드를 찾는다(조회 전용).
   Dense로 찾고, 안 되면 Dice로 대체한다. 검증이 켜져 있으면 LLM이 관련 없는 후보를 거른다.
   카드가 가진 해결 내용을 그대로 돌려줄 뿐 해결 방법을 새로 만들지 않는다.
 """
@@ -39,7 +39,11 @@ from hr_agent.results import (
 from hr_agent.retrieval.verify import apply_verification
 from hr_agent.services import Services
 
-KINDS = ("incident", "decision", "case")  # 사건·결정·사례 카드만 찾는다(공지·정책·사기 카드는 제외)
+KINDS = (
+    "incident",
+    "decision",
+    "case",
+)  # 이벤트·결정·사례 카드만 찾는다(공지·정책·사기 카드는 제외)
 BLOCK = "\n[해결 기록]"  # 카드 본문에서 해결 내용을 시작하는 표시
 OUTCOME_KO = {"resolved": "해결됨", "workaround": "임시 조치", "unresolved": "미해결"}
 
@@ -118,9 +122,12 @@ async def record_resolution(svc: Services, request: AgentRequest) -> AgentResult
         resolved_at=resolved_at,
         opened_at=params.opened_at,
         prior_case_id=params.prior_case_id,
+        draft_source=params.draft_source,
     )
     key = f"record_resolution:{card.card_id}:{_payload_hash(resolution)}"
-    evidence = make_evidence(svc.clock, f"해결 내용 기록: 사건 {params.context_id}", [card.card_id])
+    evidence = make_evidence(
+        svc.clock, f"해결 내용 기록: 이벤트 {params.context_id}", [card.card_id]
+    )
     if svc.idem.get(key) is not None:
         svc.audit.record(
             params.context_id, "record_resolution.duplicate", {"card_id": card.card_id}
@@ -241,9 +248,9 @@ async def find_similar_cases(svc: Services, request: AgentRequest) -> AgentResul
         collected_at=svc.clock(),
     )
     summary = (
-        f"비슷한 과거 사건 {len(cases)}건 ({method})"
+        f"비슷한 과거 이벤트 {len(cases)}건 ({method})"
         if cases
-        else "비슷한 과거 사건 없음: 기록에 없음"
+        else "비슷한 과거 이벤트 없음: 기록에 없음"
     )
     return completed(
         request,

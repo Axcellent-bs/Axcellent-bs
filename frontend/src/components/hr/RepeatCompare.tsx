@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { hr, type HrCard } from "@/lib/hr";
 
-// 처음 겪은 장애와 반복된 장애(시작할 때 비슷한 과거 사건을 근거로 본 것)의 해결 시간을 나란히 본다.
-// 사람이 해결 내용을 적어 시간이 잰 사건만 센다. 건수가 적어서 통계가 아니라 사례 비교로만 읽는다.
+// 처음 겪은 장애와 반복된 장애(시작할 때 비슷한 과거 이벤트를 근거로 본 것)의 해결 시간을 나란히 본다.
+// 사람이 해결 내용을 적어 시간이 잰 이벤트만 센다. 건수가 적어서 통계가 아니라 사례 비교로만 읽는다.
 interface Row { cardId: string; title: string; minutes: number; repeat: boolean }
 
 const median = (xs: number[]) => {
@@ -36,14 +36,14 @@ export default function RepeatCompare() {
   }, []);
 
   const groups = [
-    { label: "처음 겪은 장애", note: "시작할 때 근거로 본 과거 사건이 없음", items: (rows ?? []).filter((r) => !r.repeat) },
-    { label: "반복된 장애", note: "시작할 때 비슷한 과거 사건을 근거로 봄", items: (rows ?? []).filter((r) => r.repeat) },
+    { label: "처음 겪은 장애", note: "시작할 때 근거로 본 과거 이벤트가 없음", items: (rows ?? []).filter((r) => !r.repeat) },
+    { label: "반복된 장애", note: "시작할 때 비슷한 과거 이벤트를 근거로 봄", items: (rows ?? []).filter((r) => r.repeat) },
   ];
   return (
     <section className="card space-y-3 p-6">
       <div>
         <h2 className="text-lg font-semibold">처음과 반복의 해결 시간</h2>
-        <p className="mt-1 text-xs text-ink-500">사람이 해결 내용을 적은 사건만 셉니다. 시간은 사건이 열린 때부터 적은 때까지입니다. 건수가 적어 통계가 아니라 사례 비교로만 보세요.</p>
+        <p className="mt-1 text-xs text-ink-500">사람이 해결 내용을 적은 이벤트만 셉니다. 시간은 이벤트가 열린 때부터 적은 때까지입니다. 건수가 적어 통계가 아니라 사례 비교로만 보세요.</p>
       </div>
       {err && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{err}</p>}
       {!rows ? (!err && <p className="text-xs text-ink-500">불러오는 중…</p>) : (

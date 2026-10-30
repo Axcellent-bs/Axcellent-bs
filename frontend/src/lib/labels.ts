@@ -78,7 +78,7 @@ export const COMM_OUTCOME_TONE: Record<CommOutcome, string> = {
 /** 에이전트 업무(skill) 이름을 사람이 읽는 말로. 할 일함이 쓴다. skill 목록은 backend agent-template services.py.
  *  여기 없는 skill은 skillLabel()이 원래 이름을 그대로 보여 준다(지어내지 않는다). */
 export const SKILL_KO: Record<string, string> = {
-  find_active_incident: "진행 중인 사건 찾기",
+  find_active_incident: "진행 중인 이벤트 찾기",
   list_inquiries: "문의 목록 보기", get_inquiry: "문의 보기", check_reply: "답변 점검", summarize_inquiry: "문의 요약",
   create_inquiry: "문의 만들기", add_customer_message: "고객 메시지 추가", send_reply: "답변 보내기", reject_draft: "답변 초안 버리기",
   set_inquiry_status: "문의 상태 바꾸기", inquiry_overview: "문의 현황 보기", detect_inquiry_surge: "문의 급증 감지",
@@ -95,11 +95,11 @@ export const SKILL_KO: Record<string, string> = {
   anomaly_detection: "이상 징후 찾기", impact_analysis: "영향 분석", fraud_score: "부정 거래 점수", kpi_summary: "지표 요약",
   get_roster: "담당 명부 보기", start_handover: "인수인계 시작", answer_handover_question: "인수인계 질문 답하기",
   confirm_handover: "인수인계 확인", list_handovers: "인수인계 목록 보기", list_open_questions: "남은 질문 보기",
-  find_similar_cases: "비슷한 과거 사건 찾기", record_resolution: "해결 내용 기록",
+  find_similar_cases: "비슷한 과거 이벤트 찾기", record_resolution: "해결 내용 기록",
   record_case: "결정 기록", check_plan: "계획 점검", list_candidate_cards: "후보 카드 보기", get_audit_timeline: "감사 기록 보기",
   decide_candidate_card: "후보 카드 결정",
   create_ticket: "요청 접수",
-  find_related_prs: "관련 PR 찾기", link_incident: "사건 연결", verify_rollback_target: "롤백 대상 확인",
+  find_related_prs: "관련 PR 찾기", link_incident: "이벤트 연결", verify_rollback_target: "롤백 대상 확인",
   list_in_progress: "진행 중인 작업 보기", verify_handover: "인계 확인",
   diagnose_incident: "장애 진단", rollback_deployment: "배포 롤백", verify_recovery: "복구 확인",
 };
