@@ -95,3 +95,16 @@ def with_subject(word: str) -> str:
     if "가" <= last <= "힣":
         return word + ("이" if (ord(last) - ord("가")) % 28 else "가")
     return word + "이(가)"
+
+
+def denominator_label(metric_id: str | None = None) -> str:
+    """비율 지표 분모를 부르는 말(캣북스: 결제). 지표를 비우면 첫 비율 지표. 없으면 "거래"."""
+    cat = current()
+    rates = [m for m in cat.metrics if m.denominator]
+    spec = metric(metric_id) if metric_id else (rates[0] if rates else None)
+    return (spec.denominator_label if spec and spec.denominator_label else None) or "거래"
+
+
+def user_codes() -> dict[str, str]:
+    """사용자 쪽 실패 코드 → 한국어 이름 (장애 피해에서 뺀다)."""
+    return dict(current().user_codes)

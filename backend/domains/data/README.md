@@ -26,7 +26,7 @@ data 엔진에서 회사마다 다른 것은 **지표 카탈로그** 파일 하�
   - `metrics[]`: 감시할 지표. 순서대로 판정한다.
     - `id`·`label`(한국어)·`bad_direction`(`up`|`down`)·`unit`
     - `fault_codes`: 장애 쪽 실패 코드. 있으면 확률 기준도 본다
-    - `aggregate`(`sum`|`mean`)·`denominator`(비율 지표의 분모)·`scale_with_volume`(거래량만큼 기준 보정)
+    - `aggregate`(`sum`|`mean`)·`denominator`(비율 지표의 분모)·`denominator_label`(분모를 부르는 말, 캣북스 "결제")·`scale_with_volume`(거래량만큼 기준 보정)
   - `volume_metric`·`volume_label`: 거래량 지표와 그 이름(빈 구간 판단·기준 보정). 없으면 쓰지 않는다
   - `impact`: `unit_label`(예: 주문·출고), `customer_label`(예: 고객·거래처), `money_field`, `money_unit`. 영향 설명 문장의 단위다
   - `categories`: 카테고리 코드 → 한국어 이름
@@ -68,9 +68,19 @@ class MemoryConnector:
 - 목 모드(`DATA_MOCK`, 테스트 전용)의 시드 공급자는 예전 모양 그대로이고, 엔진이 `connectors.as_connector`로 감싸 읽는다.
 - 판매자 정보·가격(사기 점수 전용)은 아직 커넥터에 넣지 않았다(`clients.shop_client.HttpSellerClient`).
 
-- **아직 안 된 것 (다음 PR):**
-  - 계약 `BusinessMetric`이 캣북스 지표 4개로 고정된 `Literal`이라, `anomaly_detection` skill의 입력·출력은 아직 다른 회사 지표를 담지 못한다. 계약은 추가만 해야 해서 새 칸이 필요하다.
-  - 비율 지표 안내 문장의 "결제 N건 미만", 사용자 쪽 실패 코드(`impact.USER_SIDE_REASONS`), 영향 분석 근거 문장, 판매자 사기 점수(`fraud_score`)는 아직 캣북스 말이다.
+- 엔진 문장의 회사 단어도 카탈로그에서 온다: 지표 이름(`label`), 영향 단위(`impact.unit_label`·`customer_label`·`money_unit`), 거래량(`volume_label`), 비율 지표 분모(`denominator_label`, 없으면 "거래"), 사용자 쪽 실패 코드 이름(`user_codes`, 캣북스 카드 거절 등). 테스트 가짜 회사로 이상 탐지·영향 분석·리포트를 돌려 "결제"·"주문"·"판매자"가 나오면 실패한다(`tests/test_catalog_wording.py`).
+- 다른 회사 지표는 `anomaly_detection` 출력의 `metric_verdicts`·`unknown_metric_ids`에 담긴다(#221·#227). 캣북스 지표는 예전 `verdicts`에도 들어간다.
+
+#### 캣북스 전용으로 남긴 것
+엔진이 아니라 캣북스에 묶인 기능이라 카탈로그로 옮기지 않았다. 다른 회사는 이 경로를 쓰지 않는다.
+
+| 남긴 것 | 위치 | 이유 |
+| --- | --- | --- |
+| "문의 급증" 사실·문장 | `clients/fact_sources.py`, `skills/root_cause.py` | 고객지원 부서 skill(`detect_inquiry_surge`)의 이름이다 |
+| 판매자 사기 점수(판매자 정보·가격, "판매자 … 사기 위험 점수") | `skills/fraud_score.py`, `metrics/fraud.py`, `handlers.py`(`fraud_score`), `clients/shop_client.py`(`HttpSellerClient`) | 판매자 전용 skill이다(마켓운영 담당이 정해지면 연결) |
+| shop-api 응답 오류 문장("실패 주문 응답 형식이 계약과 다르다" 등) | `connectors/shop_api.py` | 캣북스 커넥터 안 문장이다. 다른 회사는 자기 커넥터를 쓴다 |
+| skill 한국어 이름표("결제 문제 진단" 등) | `labels.py` | 부서 업무 이름이다(화면 `SKILL_KO`와 같은 말) |
+| 목 시드(`seed.py`·`seed_metrics.py`·`seed_logs.py`) | | 테스트 전용 |
 
 ## 2. 실행 방법
 `docker compose -f infra/compose.yml up data` / 목 모드: `DATA_MOCK=1`

@@ -18,17 +18,10 @@ from data_agent.connectors import FailureEvent, FailureEvents, as_events
 # 코드 목록은 회사 카탈로그(`catalogs/<회사>.toml`의 지표 `fault_codes`)에 있다.
 # 이 이름은 예전 코드가 읽던 값(시작할 때의 카탈로그)이고, 판정은 `catalog.fault_codes()`를 쓴다
 FAULT_REASONS = catalog.fault_codes()
-# 결제한 사람 쪽 사유. 장애와 무관하므로 장애 피해에서 뺀다
-USER_SIDE_REASONS: dict[str, str] = {
-    "PG_DECLINED": "카드 거절",
-    "CARD_DECLINED": "카드 거절",
-    "DECLINED": "카드 거절",
-    "LIMIT_EXCEEDED": "한도 초과",
-    "INSUFFICIENT_FUNDS": "잔액 부족",
-    "CARD_EXPIRED": "카드 만료",
-    "INVALID_CARD": "카드 정보 오류",
-    "USER_CANCELED": "결제 취소",
-}
+# 사용자 쪽 사유(캣북스: 카드 거절 등). 장애와 무관하므로 장애 피해에서 뺀다.
+# 코드 목록은 회사 카탈로그 `user_codes`에 있다. 이 이름은 예전 코드가 읽던 값
+# (시작할 때의 카탈로그)이고, 판정은 `catalog.user_codes()`를 쓴다
+USER_SIDE_REASONS: dict[str, str] = catalog.user_codes()
 # 실패 사유가 없다는 표시 (shop-api는 failure_code가 비면 "UNKNOWN"을 준다)
 MISSING_REASONS = frozenset({"", "UNKNOWN"})
 
@@ -60,8 +53,8 @@ def split_failures(result: ShopFailedOrdersResult | FailureEvents | list) -> Fai
         code = (order.code or "").strip().upper()
         if code in MISSING_REASONS:
             missing += 1
-        elif code in USER_SIDE_REASONS:
-            excluded[USER_SIDE_REASONS[code]] += 1
+        elif code in (user := catalog.user_codes()):
+            excluded[user[code]] += 1
         elif code in catalog.fault_codes():
             fault.append(order)
         else:

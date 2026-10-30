@@ -158,7 +158,8 @@ async def detect_anomalies(
         + (f" ({', '.join(j.metric for j in abnormal)})" if abnormal else ""),
         *(f"{j.metric}: {j.note}" for j in judgements),
         *notes,
-        f"판정 설정: 5분 결제 {settings.min_payments}건 이상만 실패율 판정, "
+        f"판정 설정: 5분 {catalog.denominator_label()} {settings.min_payments}건 이상만 "
+        "실패율 판정, "
         f"유의수준 {settings.alpha}, 장애 쪽 실패는 평소 이 시각에 그만큼 날 확률이 "
         f"{settings.fault_p_anomaly:g}보다 작으면 이상(이어진 두 구간은 곱, "
         f"{settings.fault_p_low:g}보다 작으면 low 기록, 평소 5분 실패 하한 "

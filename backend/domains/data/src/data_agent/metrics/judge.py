@@ -280,16 +280,19 @@ def judge_rate(
     total = sum(payments.get(b) or 0.0 for b in window)
     window_fails = sum(round(rate.get(b, 0.0) * (payments.get(b) or 0.0)) for b in window)
     seen = round(window_fails / total, 4) if total else 0.0
+    word = catalog.denominator_label(metric)  # 분모를 부르는 말 (캣북스: 결제)
     if n_hist == 0:
-        return _unknown(metric, "지난 7일 같은 시간대 결제 기록이 없어 기준선을 정할 수 없음", seen)
+        return _unknown(
+            metric, f"지난 7일 같은 시간대 {word} 기록이 없어 기준선을 정할 수 없음", seen
+        )
     p0 = fails_hist / n_hist
     if p0 == 0:
         return _unknown(metric, "기준선 0 (지난 7일 같은 시간대 실패 0건)이라 판정할 수 없음", seen)
     if not judged:
         return _unknown(
             metric,
-            f"5분 결제가 {settings.min_payments}건 미만이라 실패율을 판정하지 않음 "
-            f"(구간 결제 {int(total)}건)",
+            f"5분 {catalog.with_subject(word)} {settings.min_payments}건 미만이라 "
+            f"실패율을 판정하지 않음 (구간 {word} {int(total)}건)",
             seen,
         )
     ok = {b for b in judged}
@@ -311,7 +314,7 @@ def judge_rate(
     status: Status = "anomaly" if p_best < settings.alpha and observed > p0 else "normal"
     skipped = len(window) - len(judged)
     note = f"실패 {k}/{n}건 ({observed:.1%}), 기준 {p0:.1%}, p={p_best:.2g}" + (
-        f", 결제 {settings.min_payments}건 미만 5분 구간 {skipped}개는 판정 안 함"
+        f", {word} {settings.min_payments}건 미만 5분 구간 {skipped}개는 판정 안 함"
         if skipped
         else ""
     )
