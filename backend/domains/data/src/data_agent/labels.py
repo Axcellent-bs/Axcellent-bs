@@ -77,6 +77,7 @@ SKILL_KO: dict[str, str] = {
     "list_open_questions": "남은 질문 보기",
     "find_similar_cases": "비슷한 과거 사건 찾기",
     "record_resolution": "해결 내용 기록",
+    "record_event_times": "이벤트 시각 기록",
     "record_case": "결정 기록",
     "check_plan": "계획 점검",
     "list_candidate_cards": "후보 카드 보기",

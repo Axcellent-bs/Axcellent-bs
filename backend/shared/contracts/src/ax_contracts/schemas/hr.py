@@ -22,6 +22,7 @@ skill과 등급(등급 신고는 안전 레이어 레지스트리가 원본이�
 | `list_cards` | 읽기 | 확정된(후보가 아닌) 결정 카드 목록 |
 | `record_resolution` | A | 사건 카드에 해결 내용(원인·조치·결과·소요 시간) 기록 |
 | `find_similar_cases` | 읽기 | 비슷한 과거 사건·결정과 당시 해결 내용 |
+| `record_event_times` | A | 이벤트 카드에 감지·원인 후보 도착·사람 작업·정상 복귀 시각 기록 |
 
 `RecordCaseOutput`은 모델만 추가했고, hr의 출력 전환은 hr 담당 PR에서 한다.
 
@@ -469,6 +470,43 @@ class CaseResolution(AxModel):
     draft_source: Literal["written_by_person", "ai_draft_kept", "ai_draft_edited"] | None = None
 
 
+class EventTimeline(AxModel):
+    """이벤트가 어떻게 흘렀는지의 시각. 시스템이 재고 사람이 적지 않는다. 모르는 시각은 비워 둔다.
+
+    구간: AI 처리 = 감지 → 원인 후보 도착, 사람 작업 = 시작 → 완료, 복구 대기 = 완료 → 정상 복귀.
+    `prior_case_id`가 있으면 시작할 때 비슷한 과거 이벤트를 근거로 본 이벤트(반복 장애)다.
+    """
+
+    detected_at: UtcDatetime | None = None
+    cause_candidate_at: UtcDatetime | None = None  # AI가 원인 후보나 과거 근거를 처음 내놓은 시각
+    human_work_started_at: UtcDatetime | None = None  # 사람에게 원인 확인·조치를 요청한 시각
+    human_work_done_at: UtcDatetime | None = None  # 사람이 그 일을 끝낸 시각
+    recovered_at: UtcDatetime | None = None  # 쇼핑몰이 정상 복귀를 알린 시각
+    prior_case_id: str | None = None
+
+
+class RecordEventTimesInput(EventTimeline):
+    """`record_event_times` 입력. 이벤트(`context_id`)의 카드에 시각을 채운다.
+
+    이미 값이 있는 시각은 덮어쓰지 않고, 비어 있던 시각만 채운다.
+    """
+
+    context_id: str
+
+
+class RecordEventTimesOutput(AxModel):
+    """`record_event_times` 결과.
+
+    - `recorded`: 새 시각을 카드에 채웠다.
+    - `duplicate`: 채울 새 시각이 없다(이미 있는 값이거나 비어 있음).
+    - `no_card`: 그 이벤트에서 만든 카드가 없어 기록할 곳이 없다(호출한 쪽이 나중에 다시 보낸다).
+    """
+
+    outcome: Literal["recorded", "duplicate", "no_card"]
+    card_id: str | None = None
+    timeline: EventTimeline | None = None
+
+
 class RecordResolutionInput(AxModel):
     """`record_resolution` 입력. 사건(`context_id`)의 카드에 해결 내용을 채운다."""
 
@@ -515,6 +553,7 @@ class SimilarCase(AxModel):
     similarity: float = Field(ge=0.0, le=1.0)  # 검색 점수 그대로
     resolved: bool
     resolution: CaseResolution | None = None
+    timeline: EventTimeline | None = None  # 그 이벤트의 시각(시스템이 잰 값). 없으면 None
     event_type: str | None = None  # 이 카드의 이벤트 유형(없으면 모름)
     same_type: bool | None = None  # 질의 유형과 같은지. 어느 쪽이든 유형을 모르면 None
     created_at: UtcDatetime

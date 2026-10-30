@@ -55,6 +55,7 @@ CARDS: dict[str, list[tuple[str, str, str | None]]] = {
         ("get_audit_timeline", "read", None),
         ("find_similar_cases", "read", None),
         ("record_resolution", "A", None),
+        ("record_event_times", "A", None),
     ],
 }
 OWNERS = {
@@ -167,6 +168,7 @@ DEFAULT_OUTPUTS: dict[str, Callable[[AgentRequest], dict[str, Any]]] = {
         cases=[], max_similarity=0.0, method="dense", collected_at="2026-10-29T06:00:00Z"
     ),
     "record_resolution": lambda r: _ok(outcome="recorded", card_id="card_mock01"),
+    "record_event_times": lambda r: _ok(outcome="recorded", card_id="card_mock01"),
     # 실제 인사 `GetAuditTimelineOutput` 모양(`record_case`가 남긴 감사 기록)
     "get_audit_timeline": lambda r: _ok(
         context_id=r.input.get("context_id"),
