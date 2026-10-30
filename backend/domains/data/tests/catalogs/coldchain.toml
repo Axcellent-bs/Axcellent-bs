@@ -1,0 +1,26 @@
+# 테스트 전용 가짜 회사: 냉장 물류. data 엔진이 캣북스 단어 없이 돌아가는지 본다.
+# 거래량 지표·비율 지표·장애 쪽 코드가 없는 가장 단순한 카탈로그다.
+id = "coldchain"
+name = "냉장물류 테스트"
+
+[[metrics]]
+id = "cold_chain_breach_count"
+label = "냉장 유통 이탈 건수"
+bad_direction = "up"
+unit = "건"
+
+[[metrics]]
+id = "shipment_delay_count"
+label = "출고 지연 건수"
+bad_direction = "up"
+unit = "건"
+
+[impact]
+unit_label = "출고"
+customer_label = "거래처"
+money_field = "shipment_value"
+money_unit = "원"
+
+[categories]
+frozen = "냉동"
+chilled = "냉장"

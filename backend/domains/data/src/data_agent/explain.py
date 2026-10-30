@@ -20,6 +20,7 @@ from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal
 from pydantic import BaseModel, ValidationError
 
 from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
+from data_agent import catalog
 
 # 1,234 / 1234 / 0.5 / 12.5 형태. 숫자 뒤의 퍼센트 기호와 이름·단위 꼬리("xx", "분")도 같이 본다.
 _NUMBER_RE = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?")
@@ -219,10 +220,11 @@ def _template(kind: str, facts: dict[str, int | float | str]) -> str:
     if kind == "activity":
         return _activity_template(facts)
     if kind == "impact":
+        words = catalog.current().impact  # 회사 카탈로그의 단위 (캣북스: 주문·고객·원)
         return (
-            f"장애 구간 실패 주문 {_fmt(facts.get('failed_order_count'))}건, "
-            f"영향 고객 {_fmt(facts.get('affected_customer_count'))}명, "
-            f"피해 금액 {_fmt(facts.get('damage_amount'), comma=True)}원입니다."
+            f"장애 구간 실패 {words.unit_label} {_fmt(facts.get('failed_order_count'))}건, "
+            f"영향 {words.customer_label} {_fmt(facts.get('affected_customer_count'))}명, "
+            f"피해 금액 {_fmt(facts.get('damage_amount'), comma=True)}{words.money_unit}입니다."
         )
     if kind == "anomaly":
         return (

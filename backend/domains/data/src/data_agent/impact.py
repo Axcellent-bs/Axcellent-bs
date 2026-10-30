@@ -11,21 +11,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from ax_contracts.data_access.shop_failed_orders import FailedOrder, ShopFailedOrdersResult
+from data_agent import catalog
 
-# 장애(결제 서버·결제사 쪽) 사유. 이 코드만 장애 피해로 센다 (shop-api `failure_code`)
-FAULT_REASONS = frozenset(
-    {
-        "PG_UNAVAILABLE",  # shop-api 장애 주입(결제 서버 5xx)
-        "PG_TIMEOUT",
-        "PG_ERROR",
-        "PG_5XX",
-        "GATEWAY_TIMEOUT",
-        "PAYMENT_GATEWAY_TIMEOUT",
-        "TIMEOUT",
-        "SERVER_ERROR",
-        "NETWORK_ERROR",
-    }
-)
+# 장애(결제 서버·결제사 쪽) 사유. 이 코드만 장애 피해로 센다 (shop-api `failure_code`).
+# 코드 목록은 회사 카탈로그(`catalogs/<회사>.toml`의 지표 `fault_codes`)에 있다.
+# 이 이름은 예전 코드가 읽던 값(시작할 때의 카탈로그)이고, 판정은 `catalog.fault_codes()`를 쓴다
+FAULT_REASONS = catalog.fault_codes()
 # 결제한 사람 쪽 사유. 장애와 무관하므로 장애 피해에서 뺀다
 USER_SIDE_REASONS: dict[str, str] = {
     "PG_DECLINED": "카드 거절",
@@ -68,7 +59,7 @@ def split_failures(result: ShopFailedOrdersResult) -> FailureSplit:
             missing += 1
         elif code in USER_SIDE_REASONS:
             excluded[USER_SIDE_REASONS[code]] += 1
-        elif code in FAULT_REASONS:
+        elif code in catalog.fault_codes():
             fault.append(order)
         else:
             unseen[code] += 1
