@@ -21,6 +21,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
+from ax_orchestrator.draft import kst_text
 from ax_orchestrator.models import Incident, Plan, Step, iso, now
 from ax_orchestrator.timeline import past_hint
 
@@ -239,7 +240,7 @@ def _resolution(inc: Incident) -> dict[str, Any]:
     return {
         "context_id": inc.context_id,
         "outcome": "resolved" if recovered else "unresolved",
-        "root_cause": str(top["explanation"]) if top and top.get("explanation") else None,
+        "root_cause": kst_text(str(top["explanation"])) if top and top.get("explanation") else None,
         "action": action,
         "minutes_to_resolve": minutes if recovered else None,
     }
