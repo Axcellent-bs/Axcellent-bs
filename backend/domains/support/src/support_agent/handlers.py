@@ -40,6 +40,7 @@ from support_agent import (
     notices,
     payment_handlers,
     persistence,
+    policy_memory,
     privacy_audit,
     secure_transfer,
     shop_client,
@@ -332,7 +333,9 @@ async def create_inquiry(request: AgentRequest) -> AgentResult:
         extra = await _notice_sources(request, None, parsed.notice_component)
 
     async def apply() -> tuple[dict[str, Any], bool]:
-        analysis, fallback = await drafting.analyze(message, subject, extra)
+        analysis, fallback = await drafting.analyze(
+            message, subject, extra, policy_memory.retriever(request, SEND)
+        )
         conversation = STORE.create(
             context_id=request.meta.context_id,
             tenant_id=request.meta.tenant_id,
@@ -370,7 +373,9 @@ async def add_customer_message(request: AgentRequest) -> AgentResult:
     extra = await _notice_sources(request, parsed.notice_id, parsed.notice_component)
 
     async def apply() -> tuple[dict[str, Any], bool]:
-        analysis, fallback = await drafting.analyze(message, conversation.subject, extra)
+        analysis, fallback = await drafting.analyze(
+            message, conversation.subject, extra, policy_memory.retriever(request, SEND)
+        )
         updated = STORE.add_customer_message(parsed.inquiry_id, message, analysis)
         privacy_audit.record_message(STORE, updated, fallback)
         await events.emit_inquiry_received(request, updated)
