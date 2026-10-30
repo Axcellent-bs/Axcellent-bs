@@ -11,7 +11,7 @@ from typing import Literal
 
 from ax_contracts.schemas import RecordKind
 
-CardKind = Literal["incident", "decision", "case", "notice", "policy", "fraud"]
+CardKind = Literal["incident", "decision", "case", "notice", "policy", "fraud", "request"]
 
 CARD_KIND: dict[RecordKind, CardKind] = {
     RecordKind.INCIDENT: "incident",

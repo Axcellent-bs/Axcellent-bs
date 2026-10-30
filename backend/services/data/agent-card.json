@@ -45,8 +45,7 @@
       "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#FraudScoreOutput",
       "grade": "read",
       "allowed_requesters": [
-        "orchestrator",
-        "finance"
+        "orchestrator"
       ],
       "verifier": null,
       "priority": "recommended"

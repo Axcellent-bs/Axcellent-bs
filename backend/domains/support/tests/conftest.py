@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from ax_agent_template.testing import reset_state  # noqa: F401  autouse
+from support_agent import policy_memory
 from support_agent.persistence import BY_NAME, TABLES
 
 
@@ -37,3 +38,14 @@ class MemoryRepo:
 def memory_repo() -> type[MemoryRepo]:
     """영속 저장소 인터페이스의 메모리 구현. `memory_repo()`로 새 저장소(=새 DB)를 만든다."""
     return MemoryRepo
+
+
+@pytest.fixture(autouse=True)
+def _memory_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """기존 테스트의 가짜 `SEND`는 정해 둔 부서만 받는다. memory 정책 카드 조회(#193)는 기본으로
+    "닿지 못함"으로 두어 시드 조각을 쓰게 한다. memory를 쓰는 테스트는 `test_policy_memory.py`다."""
+
+    async def unavailable(*args: object, **kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(policy_memory, "fetch_sources", unavailable)

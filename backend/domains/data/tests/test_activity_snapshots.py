@@ -13,7 +13,7 @@ import pytest
 from ax_agent_template.common_log import SqliteLogStore
 from ax_agent_template.llm import MockLLMClient
 from ax_contracts.data_access.common_log import LogRecord
-from ax_contracts.schemas import AgentRequest, AgentResult, RequestMeta, TaskStatus
+from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, RequestMeta, TaskStatus
 from ax_contracts.schemas.data import ActivityReportInput
 from data_agent.clients.log_client import CommonLogSource
 from data_agent.explain import _Summary
@@ -26,6 +26,7 @@ TENANT = "shop-demo"
 WEEK = date(2026, 10, 19)  # 월요일. 직전 주는 10-12 ~ 10-18
 LATER = datetime(2026, 11, 3, 3, 0, tzinfo=UTC)  # 재무 UTC 날짜가 모두 끝난 뒤
 _ids = itertools.count()
+FINANCE_AT = datetime(2026, 11, 3, 2, 0, tzinfo=UTC)  # 가짜 재무 응답 시각
 
 
 def kst(day: date, hour: int, minute: int = 0) -> datetime:
@@ -158,20 +159,31 @@ class FinanceSender:
     def __init__(self, unavailable: dict[str, list[str]] | None = None) -> None:
         self.calls: list[dict] = []
         self.unavailable = unavailable or {}
+        self.null_dates: set[str] = set()
 
     async def __call__(self, target: str, req: AgentRequest) -> AgentResult:
         self.calls.append(dict(req.input))
         day = date.fromisoformat(req.input["date"])
-        amount = 1000 * day.day if req.input["period"] == "day" else 99999
+        period = req.input["period"]
+        # 재무와 같은 뜻: 일간은 1000×날짜, 주간(월~일)은 그 7일의 합, 그 밖은 정하지 않은 값
+        if period == "day":
+            amount = 1000 * day.day
+        elif period == "week":
+            amount = sum(1000 * (day + timedelta(days=i)).day for i in range(7))
+        else:
+            amount = 99999
+        if req.input["date"] in self.null_dates:  # #190: 재무가 확인할 수 없다고 답함
+            amount = None
         missing = self.unavailable.get(req.input["date"], [])
         lines = [
             {"code": "gmv", "amount": amount},
-            {"code": "commission_revenue", "amount": amount // 10},
+            {"code": "commission_revenue", "amount": None if amount is None else amount // 10},
         ]
         return AgentResult(
             meta=req.meta,
             status=TaskStatus.COMPLETED,
             output={"lines": lines, "unavailable": missing},
+            evidence=Evidence(collected_at=FINANCE_AT),  # 재무는 응답마다 근거 시각을 붙인다
         )
 
 
@@ -292,7 +304,8 @@ async def test_mixed_week_computes_only_unsaved_days_and_says_so() -> None:
     assert a == b
     assert (mixed.output.stored_days, mixed.output.live_days) == (12, 2)
     assert mixed.output.snapshot_note == "저장된 날 12일 / 바로 계산 2일"
-    assert sorted(c["date"] for c in send.calls) == ["2026-10-24", "2026-10-25"]  # 빠진 날만 재무
+    # 주에 빠진 날이 있으면 재무는 그 주를 week로 한 번 묻는다 (저장된 7일인 직전 주는 묻지 않음)
+    assert [(c["period"], c["date"]) for c in send.calls] == [("week", "2026-10-19")]
     first = min(s.created_at for s in store.get_many(TENANT, [WEEK]).values())
     assert mixed.output.snapshot_at == first
 
@@ -330,13 +343,13 @@ async def _builder(logs, send=None, now=LATER):
 
 
 @asyncio
-async def test_tick_fills_missing_last_fourteen_days_newest_first_and_skips_saved() -> None:
+async def test_tick_fills_missing_last_twenty_days_newest_first_and_skips_saved() -> None:
     logs = _logs(week_logs(WEEK))
     store = ReportStore(":memory:")
     now = kst(date(2026, 10, 30), 1)  # 00:30 이후
     built = await snapshot_tick(store, await _builder(logs), TENANT, now)
-    # 기본 14일(주간과 직전 주), 최근 날짜부터: 10-29, 10-28, …, 10-16
-    assert built == [date(2026, 10, 29) - timedelta(days=i) for i in range(14)]
+    # 기본 20일, 최근 날짜부터: 10-29, 10-28, …, 10-10
+    assert built == [date(2026, 10, 29) - timedelta(days=i) for i in range(20)]
     assert await snapshot_tick(store, await _builder(logs), TENANT, now) == []  # 이미 있음
 
 
@@ -345,7 +358,7 @@ async def test_yesterday_waits_until_0030_kst() -> None:
     store = ReportStore(":memory:")
     early = kst(date(2026, 10, 30), 0, 10)
     days = [d for d, _ in days_to_snapshot(store, TENANT, early)]
-    assert date(2026, 10, 29) not in days and len(days) == 13
+    assert date(2026, 10, 29) not in days and len(days) == 19
     assert days[0] == date(2026, 10, 28)  # 최근 날짜부터
     late = kst(date(2026, 10, 30), 0, 31)
     assert date(2026, 10, 29) in [d for d, _ in days_to_snapshot(store, TENANT, late)]
@@ -400,15 +413,15 @@ async def test_failed_build_does_not_stop_other_days() -> None:
         return await good(day)
 
     built = await snapshot_tick(store, flaky, TENANT, kst(date(2026, 10, 30), 1))
-    assert date(2026, 10, 25) not in built and len(built) == 13
+    assert date(2026, 10, 25) not in built and len(built) == 19
 
 
-def test_backfill_range_comes_from_env_with_default_14() -> None:
+def test_backfill_range_comes_from_env_with_default_20() -> None:
     from data_agent.monitor import BACKFILL_ENV, backfill_days
 
-    assert backfill_days({}) == 14
+    assert backfill_days({}) == 20
     assert backfill_days({BACKFILL_ENV: "21"}) == 21
-    assert backfill_days({BACKFILL_ENV: "주간"}) == 14  # 숫자가 아니면 기본값
+    assert backfill_days({BACKFILL_ENV: "주간"}) == 20  # 숫자가 아니면 기본값
     assert backfill_days({BACKFILL_ENV: "0"}) == 1
     assert backfill_days({BACKFILL_ENV: "1000"}) == 92  # 재무를 너무 많이 부르지 않게
 
@@ -421,3 +434,88 @@ async def test_backfill_range_from_env_is_used(monkeypatch) -> None:
     store = ReportStore(":memory:")
     days = [d for d, _ in days_to_snapshot(store, TENANT, kst(date(2026, 10, 30), 1))]
     assert days == [date(2026, 10, 29), date(2026, 10, 28), date(2026, 10, 27)]
+
+
+# ------------------------------------------------------------- 재무 period=week (#190)
+@asyncio
+async def test_fully_saved_week_does_not_ask_finance() -> None:
+    logs = _logs(week_logs(WEEK - timedelta(days=7)) + week_logs(WEEK))
+    store = ReportStore(":memory:")
+    await _fill(store, logs, [WEEK - timedelta(days=7 - i) for i in range(14)])
+    send = FinanceSender()
+    result = await _report(logs, store=store, send=send, period="week", start=WEEK)
+    assert send.calls == []  # 7일이 다 저장된 주는 저장값 합계
+    assert result.output.company.gmv.value == float(sum(1000 * (19 + i) for i in range(7)))
+    assert result.output.company.gmv.collected_at == FINANCE_AT  # 저장할 때 받은 재무 응답 시각
+
+
+@asyncio
+async def test_unsaved_week_asks_finance_week_once() -> None:
+    logs = _logs(week_logs(WEEK))
+    send = FinanceSender()
+    result = await _report(
+        logs, store=ReportStore(":memory:"), send=send, period="week", start=WEEK
+    )
+    assert sorted((c["period"], c["date"]) for c in send.calls) == [
+        ("week", "2026-10-12"),
+        ("week", "2026-10-19"),
+    ]
+    assert result.output.company.gmv.value == float(sum(1000 * (19 + i) for i in range(7)))
+    assert result.output.company.gmv.collected_at == FINANCE_AT  # 재무 응답 시각
+
+
+@asyncio
+async def test_finance_null_week_is_unknown_not_zero() -> None:
+    logs = _logs(week_logs(WEEK))
+    send = FinanceSender(unavailable={"2026-10-19": ["orders"]})
+    send.null_dates = {"2026-10-19"}
+    result = await _report(logs, send=send, period="week", start=WEEK)
+    gmv = result.output.company.gmv
+    assert gmv.value is None  # 0원이 아니라 확인할 수 없음
+    reasons = {u.section: u.reason for u in result.output.unknown_sections}
+    assert "orders" in reasons["company.gmv"]
+
+
+@asyncio
+async def test_finance_null_line_without_unavailable_is_unknown() -> None:
+    logs = _logs(week_logs(WEEK))
+    send = FinanceSender()
+    send.null_dates = {"2026-10-19"}
+    result = await _report(logs, send=send, period="week", start=WEEK)
+    assert result.output.company.gmv.value is None
+    reasons = {u.section: u.reason for u in result.output.unknown_sections}
+    assert "확인할 수 없다고 답함" in reasons["company.gmv"]
+
+
+@asyncio
+async def test_default_backfill_covers_last_week_and_the_week_before_on_any_weekday() -> None:
+    """주간 기본(지난주 + 그 전 주)이 요일과 상관없이 기본 범위(20일) 안에 들어간다."""
+    from data_agent.skills.activity_report import periods
+
+    store = ReportStore(":memory:")
+    for offset in range(7):  # 월요일 ~ 일요일
+        day = date(2026, 10, 26) + timedelta(days=offset)
+        now = kst(day, 1)
+        p = periods("week", None, now)
+        need = {p.previous_start + timedelta(days=i) for i in range(14)}
+        covered = {d for d, _ in days_to_snapshot(store, TENANT, now)}
+        assert need <= covered, day
+
+
+@asyncio
+async def test_saved_week_with_unknown_revenue_day_asks_finance_week_once() -> None:
+    """7일이 다 저장됐어도 저장 때 매출을 확인할 수 없던 날이 있으면 그 주만 week 한 번 묻는다."""
+    logs = _logs(week_logs(WEEK - timedelta(days=7)) + week_logs(WEEK))
+    store = ReportStore(":memory:")
+    await _fill(store, logs, [WEEK - timedelta(days=7 - i) for i in range(14)])
+    bad = FinanceSender(unavailable={"2026-10-21": ["orders"]})  # 수요일만 저장 때 실패
+    store.put(
+        await build_day_snapshot(date(2026, 10, 21), _meta(), logs, FakeMetrics(), bad, now=LATER)
+    )
+    send = FinanceSender()
+    result = await _report(logs, store=store, send=send, period="week", start=WEEK)
+    assert [(c["period"], c["date"]) for c in send.calls] == [
+        ("week", "2026-10-19")
+    ]  # 직전 주는 안 묻는다
+    assert result.output.company.gmv.value == float(sum(1000 * (19 + i) for i in range(7)))
+    assert result.output.stored_days == 14  # 부서 숫자는 저장값 그대로

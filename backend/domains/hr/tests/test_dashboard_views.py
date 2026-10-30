@@ -328,3 +328,28 @@ def test_read_views_do_not_use_the_gate_or_change_anything(svc, client) -> None:
     ]:
         assert post(client, skill, inp)["status"] == "completed"
     assert svc.gate.calls == calls
+
+
+async def _write_request_card(svc, title: str, area: str = "payment") -> str:
+    from ax_contracts.schemas import Card
+
+    card = Card(
+        card_id="card_req_0001",
+        kind="request",
+        context_id="ctx_req_0001",
+        title=title,
+        body=title,
+        author="planning",
+        confidence="high",
+        created_at=datetime.now(UTC),
+        extra={"area": area},
+    )
+    return await svc.memory.write_card(card)
+
+
+@pytest.mark.asyncio
+async def test_list_cards_does_not_show_request_cards(svc, client) -> None:
+    decided = confirmed_card(client, "ctx_old_0001")
+    await _write_request_card(svc, "결제 재시도 횟수 변경 요청")
+    out = ListCardsOutput.model_validate(post(client, "list_cards", {})["output"])
+    assert {c.card_id for c in out.cards} == {decided}
