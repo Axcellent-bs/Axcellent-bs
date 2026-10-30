@@ -176,7 +176,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.141901Z",
+   "collected_at": "2026-10-30T07:39:00.238355Z",
    "source": "seed",
    "unavailable": []
   }
@@ -271,7 +271,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.203476Z",
+   "collected_at": "2026-10-30T07:39:00.277688Z",
    "source": "seed",
    "unavailable": []
   }
@@ -378,7 +378,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.213186Z",
+   "collected_at": "2026-10-30T07:39:00.278248Z",
    "source": "seed",
    "unavailable": []
   }
@@ -554,7 +554,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.222909Z",
+   "collected_at": "2026-10-30T07:39:00.294068Z",
    "source": "seed",
    "unavailable": []
   }
@@ -730,7 +730,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.234649Z",
+   "collected_at": "2026-10-30T07:39:00.306933Z",
    "source": "seed",
    "unavailable": []
   }
@@ -906,7 +906,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.245103Z",
+   "collected_at": "2026-10-30T07:39:00.310719Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2025,7 +2025,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.257662Z",
+   "collected_at": "2026-10-30T07:39:00.329213Z",
    "source": "seed",
    "unavailable": [],
    "pg_source": "mock_toss_settlement"
@@ -2096,7 +2096,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.274763Z",
+   "collected_at": "2026-10-30T07:39:00.340540Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2211,7 +2211,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.309587Z",
+   "collected_at": "2026-10-30T07:39:00.344027Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2220,7 +2220,7 @@
   "data": {
    "today": "2026-10-30",
    "deadline_days": 20,
-   "basis": "구매 확정일(배송 완료 시각으로 대신함)부터",
+   "basis": "구매 확정일(배송 완료 시각으로 대신함)부터 (온라인플랫폼 정산 법안 계류 중, 선제 기준)",
    "warn_days": 5,
    "since": "2026-08-21",
    "counts": {
@@ -2293,7 +2293,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.340894Z",
+   "collected_at": "2026-10-30T07:39:00.358783Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2344,7 +2344,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.357209Z",
+   "collected_at": "2026-10-30T07:39:00.372359Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2514,7 +2514,338 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.373428Z",
+   "collected_at": "2026-10-30T07:39:00.379059Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/bank": {
+  "data": {
+   "uploaded": false,
+   "covered": null,
+   "counts": {},
+   "days": [],
+   "pg_memo": ""
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T07:39:00.395562Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/cashflow": {
+  "data": {
+   "today": "2026-10-30",
+   "weeks": [
+    {
+     "week_start": "2026-10-26",
+     "basis": "scheduled",
+     "inflow": 557753,
+     "outflow": 2689140,
+     "net": -2131387,
+     "cumulative": -2131387
+    },
+    {
+     "week_start": "2026-11-02",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": -1819774
+    },
+    {
+     "week_start": "2026-11-09",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": -1508161
+    },
+    {
+     "week_start": "2026-11-16",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": -1196548
+    },
+    {
+     "week_start": "2026-11-23",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": -884935
+    },
+    {
+     "week_start": "2026-11-30",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": -573322
+    },
+    {
+     "week_start": "2026-12-07",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": -261709
+    },
+    {
+     "week_start": "2026-12-14",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": 49904
+    },
+    {
+     "week_start": "2026-12-21",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": 361517
+    },
+    {
+     "week_start": "2026-12-28",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": 673130
+    },
+    {
+     "week_start": "2027-01-04",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": 984743
+    },
+    {
+     "week_start": "2027-01-11",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": 1296356
+    },
+    {
+     "week_start": "2027-01-18",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": 1607969
+    }
+   ],
+   "trailing_weeks": 1,
+   "average": {
+    "inflow": 3477953,
+    "outflow": 3166340
+   },
+   "negative_weeks": [
+    "2026-10-26"
+   ],
+   "note": "은행 잔액은 연동되지 않아 누적은 오늘을 0으로 둔 값입니다"
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T07:39:00.405147Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/close-checklist": {
+  "data": {
+   "month": "2026-10",
+   "items": [
+    {
+     "key": "daily_closing",
+     "label": "일 결산 확정",
+     "status": "pending",
+     "detail": "0/29일 확정 (남은 날: 10-01, 10-02, 10-03, 10-04, 10-05 외)",
+     "link": "closing"
+    },
+    {
+     "key": "reconciliation",
+     "label": "매출·PG 대사 메모",
+     "status": "pending",
+     "detail": "메모 없는 불일치 4건",
+     "link": "reconciliation"
+    },
+    {
+     "key": "bank",
+     "label": "은행 입금 대조",
+     "status": "pending",
+     "detail": "은행 거래내역을 아직 올리지 않음",
+     "link": "reconciliation"
+    },
+    {
+     "key": "settlement",
+     "label": "판매자 정산 지급 승인",
+     "status": "pending",
+     "detail": "승인 안 된 주: 2026-W42",
+     "link": "settlements"
+    },
+    {
+     "key": "payables",
+     "label": "판매자 미지급금 롤포워드",
+     "status": "done",
+     "detail": "기말 6,665,676원, 더 준 판매자 0곳",
+     "link": "settlements"
+    },
+    {
+     "key": "audit",
+     "label": "감사 의심 건 처리",
+     "status": "pending",
+     "detail": "처리 전 7건",
+     "link": "audit"
+    },
+    {
+     "key": "month_closing",
+     "label": "월 결산 확정 (사람)",
+     "status": "pending",
+     "detail": "결산 탭에서 '한 달'을 골라 확정",
+     "link": "closing"
+    }
+   ],
+   "done": 1,
+   "total": 7,
+   "ready": false,
+   "closed": false
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T07:39:00.415491Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/tax/vat": {
+  "data": {
+   "quarter": "2026년 4분기",
+   "from": "2026-10-01",
+   "to": "2026-12-31",
+   "filing": {
+    "kind": "확정신고",
+    "due": "2027-01-25"
+   },
+   "sales": [
+    {
+     "code": "commission",
+     "label": "판매 수수료(중개 용역)",
+     "supply": 684024,
+     "vat": 68402
+    }
+   ],
+   "purchases": [
+    {
+     "code": "pg_fee",
+     "label": "PG 결제 수수료",
+     "supply": 240741,
+     "vat": 24074
+    }
+   ],
+   "output_vat": 68402,
+   "input_vat": 24074,
+   "payable": 44328,
+   "coupon": {
+    "company_coupon": 299700,
+    "commission_before_coupon": 684024,
+    "commission_after_coupon": 384324,
+    "coupon_over_commission": 0,
+    "reduces_base": false
+   },
+   "seller_sales": {
+    "exempt": 4062000,
+    "taxable": 3472800
+   },
+   "settings": {
+    "commission_vat": "excluded",
+    "pg_fee_vat": "excluded",
+    "shipping_supplier": "seller"
+   },
+   "checks": [
+    "판매 수수료가 부가세 별도 금액인지 (약관 확인)",
+    "회사 부담 쿠폰을 약관상 수수료에서 공제하는 구조인지 (2014두298형이면 에누리)",
+    "배송비 공급자: 지금 설정은 '판매자'",
+    "PG 수수료가 부가세 별도로 세금계산서를 받는지",
+    "광고·기타 과세 매출, PG 외 매입세액(클라우드·광고 집행 등)은 이 장부에 없다"
+   ],
+   "basis": "신고서가 아니라 신고 보조 집계입니다. 신고는 세무 담당이 홈택스에서 합니다"
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T07:39:00.458810Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/tax/seller-report": {
+  "data": {
+   "quarter": "2026년 4분기",
+   "from": "2026-10-01",
+   "to": "2026-12-31",
+   "due": "2027-01-15",
+   "rows": [
+    {
+     "seller_id": "sel_0001",
+     "name": "책마루",
+     "business_no": null,
+     "month": "2026-10",
+     "total": 2450000,
+     "by_method": {
+      "카드": 2450000
+     },
+     "by_tax": {
+      "면세": 2450000
+     },
+     "orders": 58
+    },
+    {
+     "seller_id": "sel_0002",
+     "name": "종이나라",
+     "business_no": null,
+     "month": "2026-10",
+     "total": 1411800,
+     "by_method": {
+      "카드": 1411800
+     },
+     "by_tax": {
+      "과세": 1411800
+     },
+     "orders": 70
+    },
+    {
+     "seller_id": "sel_0003",
+     "name": "북앤펜",
+     "business_no": null,
+     "month": "2026-10",
+     "total": 3673000,
+     "by_method": {
+      "카드": 3673000
+     },
+     "by_tax": {
+      "과세": 2061000,
+      "면세": 1612000
+     },
+     "orders": 58
+    }
+   ],
+   "missing": [
+    "business_no"
+   ],
+   "basis": "부가가치세법 제75조 판매·중개 명세 초안. 제출 서식은 국세청 고시 확인 필요",
+   "unavailable": false
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T07:39:00.478763Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2617,7 +2948,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.393443Z",
+   "collected_at": "2026-10-30T07:39:00.490558Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2721,7 +3052,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.416143Z",
+   "collected_at": "2026-10-30T07:39:00.512220Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2818,7 +3149,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.442349Z",
+   "collected_at": "2026-10-30T07:39:00.533182Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2841,8 +3172,8 @@
       "exe_s0044"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:27:25.194865Z",
-     "last_seen": "2026-10-30T07:27:25.456171Z",
+     "first_seen": "2026-10-30T07:39:00.260825Z",
+     "last_seen": "2026-10-30T07:39:00.543955Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2855,8 +3186,8 @@
      "detail": "최근 7일 환불률 4.1% (지난 7일 0.5%)",
      "refs": [],
      "status": "open",
-     "first_seen": "2026-10-30T07:27:25.194865Z",
-     "last_seen": "2026-10-30T07:27:25.434933Z",
+     "first_seen": "2026-10-30T07:39:00.260825Z",
+     "last_seen": "2026-10-30T07:39:00.528120Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2872,8 +3203,8 @@
       "ord_2156"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:27:25.194865Z",
-     "last_seen": "2026-10-30T07:27:25.456171Z",
+     "first_seen": "2026-10-30T07:39:00.260825Z",
+     "last_seen": "2026-10-30T07:39:00.543955Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2889,8 +3220,8 @@
       "cpn_3063"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:27:25.194865Z",
-     "last_seen": "2026-10-30T07:27:25.456171Z",
+     "first_seen": "2026-10-30T07:39:00.260825Z",
+     "last_seen": "2026-10-30T07:39:00.543955Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2910,8 +3241,8 @@
       "ord_2135"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:27:25.194865Z",
-     "last_seen": "2026-10-30T07:27:25.456171Z",
+     "first_seen": "2026-10-30T07:39:00.260825Z",
+     "last_seen": "2026-10-30T07:39:00.543955Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2929,8 +3260,8 @@
       "exe_s0046"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:27:25.194865Z",
-     "last_seen": "2026-10-30T07:27:25.456171Z",
+     "first_seen": "2026-10-30T07:39:00.260825Z",
+     "last_seen": "2026-10-30T07:39:00.543955Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2948,8 +3279,8 @@
       "exe_s0049"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:27:25.194865Z",
-     "last_seen": "2026-10-30T07:27:25.406531Z",
+     "first_seen": "2026-10-30T07:39:00.260825Z",
+     "last_seen": "2026-10-30T07:39:00.502449Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2968,8 +3299,8 @@
       "exe_s0049"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:27:25.434933Z",
-     "last_seen": "2026-10-30T07:27:25.456171Z",
+     "first_seen": "2026-10-30T07:39:00.528120Z",
+     "last_seen": "2026-10-30T07:39:00.543955Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3060,7 +3391,7 @@
   ],
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.507002Z",
+   "collected_at": "2026-10-30T07:39:00.579114Z",
    "ledger_source": "seed",
    "unavailable": []
   }
@@ -3069,7 +3400,7 @@
   "data": [],
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.523734Z",
+   "collected_at": "2026-10-30T07:39:00.594618Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3171,7 +3502,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.540052Z",
+   "collected_at": "2026-10-30T07:39:00.608157Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3207,7 +3538,7 @@
      "buy_0004"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:27:25.556905Z"
+    "collected_at": "2026-10-30T07:39:00.638242Z"
    },
    "compensation": {
     "coupons": [
@@ -3335,7 +3666,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.556905Z",
+   "collected_at": "2026-10-30T07:39:00.638242Z",
    "unavailable": []
   }
  },
@@ -3368,7 +3699,7 @@
      "buy_0014"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:27:25.573317Z"
+    "collected_at": "2026-10-30T07:39:00.652767Z"
    },
    "compensation": {
     "coupons": [
@@ -3451,7 +3782,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.573317Z",
+   "collected_at": "2026-10-30T07:39:00.652767Z",
    "unavailable": []
   }
  },
@@ -3478,7 +3809,7 @@
      "buy_0007"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:27:25.590518Z"
+    "collected_at": "2026-10-30T07:39:00.660690Z"
    },
    "compensation": {
     "coupons": [
@@ -3561,7 +3892,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.590518Z",
+   "collected_at": "2026-10-30T07:39:00.660690Z",
    "unavailable": []
   }
  },
@@ -3589,7 +3920,7 @@
      "buy_0012"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:27:25.614681Z"
+    "collected_at": "2026-10-30T07:39:00.683249Z"
    },
    "compensation": {
     "coupons": [
@@ -3672,7 +4003,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.614681Z",
+   "collected_at": "2026-10-30T07:39:00.683249Z",
    "unavailable": []
   }
  },
@@ -3705,7 +4036,7 @@
      "buy_0016"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:27:25.624675Z"
+    "collected_at": "2026-10-30T07:39:00.695640Z"
    },
    "compensation": {
     "coupons": [
@@ -3806,7 +4137,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.624675Z",
+   "collected_at": "2026-10-30T07:39:00.695640Z",
    "unavailable": []
   }
  },
@@ -3834,7 +4165,7 @@
      "buy_0006"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:27:25.642573Z"
+    "collected_at": "2026-10-30T07:39:00.711260Z"
    },
    "compensation": {
     "coupons": [
@@ -3934,7 +4265,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.642573Z",
+   "collected_at": "2026-10-30T07:39:00.711260Z",
    "unavailable": []
   }
  },

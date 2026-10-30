@@ -164,6 +164,50 @@ export interface Payables {
   basis: string;
 }
 
+// ---------------------------------------------------------------- ② 은행 입금 대조 · ③ 13주 현금 흐름 · ① 월 마감
+export interface BankRowIn { date: string; amount: number; memo: string; balance?: number }
+export type BankStatus = "matched" | "short" | "over" | "missing" | "unexpected" | "not_covered";
+export interface BankDay { date: string; expected: number | null; deposited: number | null; diff: number | null; status: BankStatus; status_label: string }
+export interface BankMatch {
+  uploaded: boolean;
+  covered: { from: string; to: string; rows: number } | null;
+  counts: Partial<Record<BankStatus, number>>;
+  days: BankDay[];
+  pg_memo: string;
+}
+export interface CashWeek { week_start: string; basis: "scheduled" | "estimated"; inflow: number | null; outflow: number | null; net: number | null; cumulative: number | null }
+export interface Cashflow {
+  today: string;
+  weeks: CashWeek[];
+  trailing_weeks: number;
+  average: { inflow: number | null; outflow: number | null };
+  negative_weeks: string[];
+  note: string;
+}
+export interface CloseItem { key: string; label: string; status: "done" | "pending" | "unknown"; detail: string; link: string }
+export interface CloseChecklist { month: string; items: CloseItem[]; done: number; total: number; ready: boolean; closed: boolean }
+
+// ---------------------------------------------------------------- ⑥ 세무 지원
+export interface VatRow { code: string; label: string; supply: number; vat: number }
+export interface VatPack {
+  quarter: string;
+  from: string;
+  to: string;
+  filing: { kind: string; due: string };
+  sales: VatRow[];
+  purchases: VatRow[];
+  output_vat: number | null;
+  input_vat: number | null;
+  payable: number | null;
+  coupon: { company_coupon: number | null; commission_before_coupon: number | null; commission_after_coupon: number | null; coupon_over_commission: number | null; reduces_base: boolean };
+  seller_sales: { exempt: number; taxable: number } | null;
+  settings: { commission_vat: string; pg_fee_vat: string; shipping_supplier: string };
+  checks: string[];
+  basis: string;
+}
+export interface SellerSalesRow { seller_id: string; name: string; business_no: string | null; month: string; total: number; by_method: Record<string, number>; by_tax: Record<string, number>; orders: number }
+export interface SellerReport { quarter: string; from: string; to: string; due: string; rows: SellerSalesRow[]; missing: string[]; basis: string; unavailable: boolean }
+
 // ---------------------------------------------------------------- ① 월간 변동 분석
 export interface VarianceLine {
   code: string;
@@ -502,6 +546,20 @@ export const finance = {
   deadlines: () => fin<Envelope<DeadlineReport>>("/api/finance/settlements/deadlines"),
   /** 판매자 미지급금 롤포워드 (그 달). 날짜가 없으면 이번 달 */
   payables: (date?: string | null) => fin<Envelope<Payables>>(`/api/finance/payables${query({ date })}`),
+  /** 은행 입금 대조 (올린 거래내역 기간만) */
+  bank: () => fin<Envelope<BankMatch>>("/api/finance/bank"),
+  /** 은행 입금 내역 올리기. 사람 토큰만 */
+  uploadBank: (rows: BankRowIn[]) => fin<Envelope<BankMatch> & { meta: FinanceMeta & { added?: number } }>("/api/finance/bank/statement", { method: "POST", body: { rows }, human: true }),
+  /** 13주 현금 흐름 */
+  cashflow: () => fin<Envelope<Cashflow>>("/api/finance/cashflow"),
+  /** 월 마감 체크리스트 */
+  closeChecklist: (date?: string | null) => fin<Envelope<CloseChecklist>>(`/api/finance/close-checklist${query({ date })}`),
+  /** 부가세 신고 보조 집계 (분기) */
+  vat: (date?: string | null) => fin<Envelope<VatPack>>(`/api/finance/tax/vat${query({ date })}`),
+  /** 판매자별 판매 명세 (부가세법 제75조 초안) */
+  sellerReport: (date?: string | null) => fin<Envelope<SellerReport>>(`/api/finance/tax/seller-report${query({ date })}`),
+  downloadSellerReport: (date?: string | null) =>
+    download(`/api/finance/tax/seller-report${query({ date, format: "csv" })}`, "seller-sales.csv"),
   /** 월간 변동 분석 (지난달·작년 같은 달 대비) */
   variance: (date?: string | null) => fin<Envelope<Variance>>(`/api/finance/variance${query({ date })}`),
   /** 예산·한도 경보 확인 메모. 사람 토큰만. 한도는 바꾸지 않는다 */
@@ -601,8 +659,8 @@ export function todayKst(now = new Date()): string {
 }
 
 /** todo.link 또는 kind → 화면 탭 id */
-export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "audit";
-export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "audit"];
+export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "audit" | "tax";
+export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "tax", "audit"];
 const TODO_TAB: Record<TodoKind, FinanceTab> = {
   settlement_batch: "settlements", settlement_deadline: "settlements", closing_confirm: "closing", recon_exception: "reconciliation", audit_finding: "audit", policy_alert: "policy",
 };

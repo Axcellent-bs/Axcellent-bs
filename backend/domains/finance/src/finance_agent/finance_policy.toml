@@ -13,9 +13,12 @@ stationery = 0.08                   # 문구 8%
 [settlement]
 cycle = "weekly"                    # 주 정산 (월~일)
 pay_days_after_period_end = 6       # 지급일 = 정산 기간 마지막 날(일) + 6일
-# 정산 기한 점검 (deadline.py). 법이 정한 판매 대금 지급 기한을 넘기지 않게 경보만 낸다
-deadline_days = 20                  # 구매 확정일부터 이 날 안에 지급 (값은 법 확인 후 PR로)
-deadline_basis = "구매 확정일(배송 완료 시각으로 대신함)부터"
+# 정산 기한 점검 (deadline.py). 판매 대금 지급이 늦어지지 않게 경보만 낸다.
+# 근거(2026-10-30 확인): 오픈마켓(중개)은 대규모유통업법 개정(2026-09-17 본회의, 특약매입 등 월 판매마감일+20일)
+# 대상이 아니다. 중개 정산기한은 공정위 온라인플랫폼 법안(구매확정일+20일, 판매대금 50% 별도관리)이 계류 중이다.
+# 그래서 법이 시행되기 전에도 "구매 확정일부터 20일"을 선제 관리 기준으로 둔다. 법이 확정되면 PR로 바꾼다.
+deadline_days = 20                  # 구매 확정일부터 이 날 안에 지급
+deadline_basis = "구매 확정일(배송 완료 시각으로 대신함)부터 (온라인플랫폼 정산 법안 계류 중, 선제 기준)"
 deadline_warn_days = 5              # 기한까지 이 날 이하로 남으면 "임박"
 deadline_lookback_days = 70         # 이 기간 안에 결제된 주문을 본다
 
@@ -36,6 +39,23 @@ percentile = 0.95                   # 이 분위 값을 기준으로 제안
 round_to = 10000                    # 제안 값은 이 단위로 올림
 min_change_ratio = 0.1              # 지금 값과 10% 넘게 다를 때만 제안
 max_step_ratio = 0.3                # 한 번 제안에서 지금 값의 30% 넘게 바꾸지 않음 (적용은 기준표 PR)
+
+[tax]
+# 세무 지원 자료(tax.py). 아래 값은 2026-10-30 세무 관점 검토 기준이며, 표시한 항목은 세무사 확인 전이다
+commission_vat = "excluded"         # 판매 수수료가 부가세 별도(excluded)인지 포함(included)인지 — 약관 확인 필요
+pg_fee_vat = "excluded"             # PG 수수료 세금계산서가 부가세 별도인지 — 확인 필요
+shipping_supplier = "seller"        # 배송비 공급자: seller(판매자 매출, 도서면 면세 부수 용역) / platform(캣북스 과세 매출)
+coupon_reduces_commission_base = false  # 약관상 쿠폰을 수수료에서 공제하면 true (대법원 2014두298) — 확인 필요
+default_tax = "taxable"             # 분류에 없는 상품은 과세로 본다
+[tax.category_tax]
+book = "exempt"                     # 도서 면세 (부가세법 제26조①8). 판매자 매출 참고용
+stationery = "taxable"
+
+[bank]
+pg_memo = ""                        # 은행 거래내역 적요에 이 글자가 있는 입금만 PG 정산금으로 본다 (비우면 모든 입금)
+
+[cashflow]
+trailing_weeks = 8                  # 확정된 돈이 없는 뒤쪽 주는 최근 이 주수 평균으로 추정
 
 [variance]
 flag_ratio = 0.1                    # 지난달보다 10% 이상 움직이고

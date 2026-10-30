@@ -13,6 +13,12 @@
 | `GET /api/finance/settlements/deadlines` | ③ 판매 대금 지급 기한 점검 | 없음 |
 | `GET /api/finance/payables?date=` | ③ 판매자 미지급금 롤포워드 (그 달) | 없음 |
 | `GET /api/finance/variance?date=` | ① 월간 변동 분석 (지난달·작년 같은 달 대비) | 없음 |
+| `GET /api/finance/bank` | ② 은행 입금 대조 (올린 거래내역 기간만) | 없음 |
+| `POST /api/finance/bank/statement` | ② 은행 입금 내역 올리기 | **사람** |
+| `GET /api/finance/cashflow` | ③ 13주 현금 흐름 (확정 + 추정) | 없음 |
+| `GET /api/finance/close-checklist?date=` | ① 월 마감 체크리스트 | 없음 |
+| `GET /api/finance/tax/vat?date=` | ⑥ 부가세 신고 보조 집계 (분기) | 없음 |
+| `GET /api/finance/tax/seller-report?date=&format=` | ⑥ 판매자별 판매 명세 (제75조 초안) | 없음 |
 | `GET /api/finance/policy` | ⑤ 정책표·소진율·한도 제안 | 없음 |
 | `POST /api/finance/policy/{key}/ack` | ⑤ 경보 확인 메모 (이번 달 숨김) | **사람** |
 | `GET /api/finance/audit?days=7&context_id=` | ⑦ 사후 감사 (사건 하나로 좁히기 선택) | 없음 |
@@ -41,6 +47,9 @@ from ax_contracts.schemas.common import TENANT_ID_DEFAULT
 from finance_agent import (
     anomalies,
     audit,
+    bank,
+    cashflow,
+    close_checklist,
     closing,
     deadline,
     payables,
@@ -48,6 +57,7 @@ from finance_agent import (
     reconciliation,
     settlement,
     statements,
+    tax,
     variance,
 )
 from finance_agent import finance_config as fc
@@ -584,6 +594,71 @@ def add_finance_api(app: FastAPI) -> None:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
         return ok(variance.variance_report(books, d), books.meta())
+
+    @app.post("/api/finance/bank/statement", response_model=None)
+    async def upload_bank(
+        request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """사람이 은행에서 내려받은 입금 내역을 올린다. 겹치는 줄은 한 번만 센다."""
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        rows, problems = bank.parse_rows((await _body(request)).get("rows"))
+        if problems and not rows:
+            return error(400, "invalid_request", "; ".join(problems[:5]))
+        added = bank.merge_rows(state().records.bank_rows, rows)
+        books = await state().books()
+        result = bank.match(books, state().records.bank_rows)
+        meta = books.meta() | {"uploaded_by": person, "added": added, "skipped": problems[:20]}
+        return ok(result, meta)
+
+    @app.get("/api/finance/bank")
+    async def get_bank() -> dict:
+        books = await state().books()
+        return ok(bank.match(books, state().records.bank_rows), books.meta())
+
+    @app.get("/api/finance/cashflow")
+    async def get_cashflow() -> dict:
+        books = await state().books()
+        return ok(cashflow.forecast(books, state().records.batches), books.meta())
+
+    @app.get("/api/finance/close-checklist", response_model=None)
+    async def get_close_checklist(date: str | None = None) -> dict | JSONResponse:
+        try:
+            d = fc.parse_date(date) or fc.today()
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        books = await state().books()
+        return ok(close_checklist.checklist(books, state().records, d), books.meta())
+
+    @app.get("/api/finance/tax/vat", response_model=None)
+    async def get_vat(date: str | None = None) -> dict | JSONResponse:
+        try:
+            d = fc.parse_date(date) or fc.today()
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        books = await state().books()
+        return ok(tax.vat_pack(books, d), books.meta())
+
+    @app.get("/api/finance/tax/seller-report", response_model=None)
+    async def get_seller_report(date: str | None = None, format: str = "json") -> dict | Response:
+        if format not in ("json", "csv"):
+            return error(400, "invalid_request", "format은 json 또는 csv")
+        try:
+            d = fc.parse_date(date) or fc.today()
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        books = await state().books()
+        report = tax.seller_report(books, d)
+        if format == "json":
+            return ok(report, books.meta())
+        name = f"seller-sales-{report['from'][:7]}.csv"
+        return Response(
+            content=tax.seller_report_csv(report).encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{name}"'},
+        )
 
     @app.get("/api/finance/anomalies")
     async def get_anomalies() -> dict:

@@ -50,6 +50,7 @@ def dump(s: State) -> dict[str, Any]:
             "batches": records.batches,
             "anomalies": records.anomalies,
             "policy_acks": records.policy_acks,
+            "bank_rows": records.bank_rows,
         },
     }
 
@@ -69,6 +70,7 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.records.batches = dict(rec["batches"])
     s.records.anomalies = {k: dict(v) for k, v in rec.get("anomalies", {}).items()}
     s.records.policy_acks = {k: dict(v) for k, v in rec.get("policy_acks", {}).items()}
+    s.records.bank_rows = [dict(r) for r in rec.get("bank_rows", [])]
 
 
 def _text(s: State) -> str:
