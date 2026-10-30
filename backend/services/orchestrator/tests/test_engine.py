@@ -204,7 +204,7 @@ async def test_coupon_is_sent_once_with_sequence(harness) -> None:
     """쿠폰은 총괄이 보내지 않는다(#228 결정 A): 총괄이 보낸 쿠폰 요청은 0번이다.
 
     예전에는 총괄이 `issue_coupon`을 한 번 보내며 `sequence`를 붙였다. 지금은 고객지원이
-    사건별 `sequence`를 붙여 마케팅에 직접 요청한다. 총괄의 직렬 번호는 serial_group 테스트가 본다.
+    이벤트별 `sequence`를 붙여 마케팅에 직접 요청한다. 총괄의 직렬 번호는 serial_group 테스트.
     """
     inc = await run(harness)
     coupons = [r for _, r in harness.fakes.calls if r.skill == "issue_coupon"]
@@ -237,7 +237,7 @@ async def test_serial_group_gets_increasing_sequence(harness) -> None:
 
 @pytest.mark.asyncio
 async def test_finance_is_not_called_during_an_incident(harness) -> None:
-    await run(harness)  # 재무는 사건 중에 불리지 않는다(멘토 피드백): 손실 집계·사후 감사 단계 없음
+    await run(harness)  # 재무는 이벤트 중에 불리지 않는다(멘토 피드백): 손실 집계·감사 단계 없음
     assert [
         r.skill for _, r in harness.fakes.calls if r.skill in ("loss_aggregation", "audit_report")
     ] == []

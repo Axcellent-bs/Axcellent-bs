@@ -12,7 +12,7 @@ import type { CommLine } from "@/lib/types";
 
 // AI 대화방. 부서 AI들이 A2A로 주고받은 일을 메신저처럼 보여 준다.
 // 말풍선 문장은 lib/agentChat.ts가 기록된 값으로만 만든다. 이 파일은 화면과 새로고침만 맡는다.
-// 출처 세 곳: 총괄(사건·단계), 안전 관문(돈이 나가는 실행), dashboard-api 공통 로그(부서 간 소통).
+// 출처 세 곳: 총괄(이벤트·단계), 안전 관문(돈이 나가는 실행), dashboard-api 공통 로그(부서 간 소통).
 // 운영 환경에서는 총괄·안전 관문 기록도 dashboard-api를 거쳐 읽어야 한다 (지금은 개발용 직접 호출, 백엔드 후속 작업).
 // 장애는 이 화면에서 일으키지 않는다(사람이 요청하면 운영자가 캣북스에 넣는다). 화면은 캣북스 결제 상태만 읽어 보여 준다.
 
@@ -283,8 +283,8 @@ export default function AgentChat() {
 
   const items = useMemo(() => buildTimeline(incidents, executions, comms, room), [incidents, executions, comms, room]);
 
-  // ------------------------------------------------ 새 사건이 열리면 그 방으로 옮겨 처음부터 차례로 보여 준다
-  // 화면을 연 순간 이미 있던 사건은 옮기지 않는다
+  // ------------------------------------------------ 새 이벤트가 열리면 그 방으로 옮겨 처음부터 차례로 보여 준다
+  // 화면을 연 순간 이미 있던 이벤트는 옮기지 않는다
   const knownIncidents = useRef<Set<string> | null>(null);
   const replayRoom = useRef<string | null>(null);
   useEffect(() => {
@@ -481,7 +481,7 @@ function EmptyState({ orchConn, safetyConn, commConn, room }: { orchConn: Conn; 
   if (orchConn === "unknown") return <p className="py-16 text-center text-sm text-ink-500">불러오는 중…</p>;
   return (
     <div className="mx-auto max-w-md py-16 text-center text-sm text-ink-500">
-      아직 사건이 없습니다. 위의 <b className="text-ink-900">장애 시나리오 시작</b>을 눌러 보세요.
+      아직 이벤트가 없습니다. 위의 <b className="text-ink-900">장애 시나리오 시작</b>을 눌러 보세요.
       {commConn === "unready" && <p className="mt-4 text-xs">{COMM_503}</p>}
       <p className="mt-4 text-[11px]">{PROD_NOTE}</p>
     </div>

@@ -1,6 +1,6 @@
 """꺼진 서비스의 조회 단계(`service_disabled`)는 실패가 아니라 skipped + 이유로 남는다.
 
-사건은 계속된다.
+이벤트는 계속된다.
 """
 
 from __future__ import annotations

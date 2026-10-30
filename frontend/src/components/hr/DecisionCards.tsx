@@ -14,7 +14,7 @@ export function DecisionCard({ card }: { card: HrCard }) {
         {card.confidence && <Chip label={`확신 ${CONF_KO[card.confidence]}`} tone="bg-ink-100 text-ink-500" />}
       </div>
       <pre className="whitespace-pre-wrap rounded-lg bg-ink-50 px-3 py-2 text-xs leading-relaxed text-ink-700">{card.body}</pre>
-      <p className="text-xs text-ink-500" title={`카드 ${card.card_id} · 사건 ${card.context_id}`}>{card.author}가 {ago(card.created_at)} 남김</p>
+      <p className="text-xs text-ink-500" title={`카드 ${card.card_id} · 이벤트 ${card.context_id}`}>{card.author}가 {ago(card.created_at)} 남김</p>
     </article>
   );
 }

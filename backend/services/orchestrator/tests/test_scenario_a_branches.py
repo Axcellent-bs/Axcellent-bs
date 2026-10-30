@@ -1,4 +1,4 @@
-"""시나리오 A의 갈림길(계획대로 안 될 때)과 일괄 보상·사건 후 단계."""
+"""시나리오 A의 갈림길(계획대로 안 될 때)과 일괄 보상·이벤트 후 단계."""
 
 import asyncio
 
@@ -68,7 +68,7 @@ async def test_compensation_failure_does_not_break_the_incident(harness) -> None
     inc = await run(harness)
     assert inc.steps["compensation"].status == "failed"
     assert inc.status == "resolved"  # 일괄 보상은 필수 단계가 아니다
-    assert inc.steps["record"].status == "completed"  # 사건 기록은 끝나면 계속 진행
+    assert inc.steps["record"].status == "completed"  # 이벤트 기록은 끝나면 계속 진행
 
 
 def _many_customers(monkeypatch, count: int) -> list[str]:
@@ -118,7 +118,7 @@ async def test_a_failed_batch_stops_the_rest_and_keeps_the_incident_going(
     assert inc.steps["record"].status == "completed"  # 일괄 보상은 필수 단계가 아니다
 
 
-# ---------------------------------------------------------------- 사건 후 단계
+# ---------------------------------------------------------------- 이벤트 후 단계
 @pytest.mark.asyncio
 async def test_post_incident_kpi_is_requested_for_this_incident(harness) -> None:
     inc = await run(harness)
@@ -126,7 +126,7 @@ async def test_post_incident_kpi_is_requested_for_this_incident(harness) -> None
     assert kpi[0].input == {"context_ids": [inc.context_id]}
     order = [r.skill for _, r in harness.fakes.calls]
     assert order.index("kpi_summary") > order.index("publish_notice")
-    # 사건 기록은 모든 단계가 끝난 뒤 한 번, 그 뒤 해결 기록
+    # 이벤트 기록은 모든 단계가 끝난 뒤 한 번, 그 뒤 해결 기록
     assert order[-2:] == ["record_case", "record_resolution"]
 
 
@@ -165,7 +165,7 @@ async def test_recovery_not_confirmed_queues_for_a_human_without_resolved_notice
     assert inc.steps["recovered_notice"].status == "skipped"  # 아직 정상화가 아니다
     assert len(called(harness, "publish_notice")) == 1  # 점검 공지만 게시했다
     assert inc.status == "degraded"
-    assert inc.steps["record"].status == "completed"  # 그래도 사건 기록은 남긴다
+    assert inc.steps["record"].status == "completed"  # 그래도 이벤트 기록은 남긴다
 
 
 @pytest.mark.asyncio

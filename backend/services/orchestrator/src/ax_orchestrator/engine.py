@@ -1,7 +1,7 @@
 """plan 실행 엔진 (ORC-05·06·07·08·09·10).
 
 엔진은 시나리오를 모른다. plan(단계·선행·skill)을 받아 순차·병렬로 부서를 부르고,
-`input-required`를 중계하고, 규칙으로 이관하고, 실패를 재시도하고, 사건을 닫는다.
+`input-required`를 중계하고, 규칙으로 이관하고, 실패를 재시도하고, 이벤트를 닫는다.
 분석 문장·금액·등급은 만들지 않는다. 모든 값은 부서 결과에서 온 것이다.
 """
 
@@ -33,6 +33,7 @@ from ax_orchestrator.models import (
     iso,
     now,
 )
+from ax_orchestrator.naming import PLAN_KO
 from ax_orchestrator.registry import Registry
 
 Caller = Callable[[str, AgentRequest], Awaitable[AgentResult]]
@@ -118,7 +119,7 @@ class Engine:
     async def run(self, inc: Incident, plan: Plan) -> Incident:
         for step in plan.steps:
             inc.steps[step.id] = StepRun(step.id, step.skill, step.label)
-        inc.log(f"사건 시작: {inc.title}")
+        inc.log(f"이벤트 시작: {inc.title}")
         await self._publish("incident.opened", inc)
 
         by_id = {s.id: s for s in plan.steps}
@@ -249,7 +250,7 @@ class Engine:
 
     @staticmethod
     def _keep(inc: Incident, step: Step, run: StepRun) -> None:
-        """성공한 단계의 결과에서 다른 부서에 넘길 값(예: `notice_id`)을 사건에 보관한다.
+        """성공한 단계의 결과에서 다른 부서에 넘길 값(예: `notice_id`)을 이벤트에 보관한다.
 
         부서가 값을 주지 않았으면 만들어 내지 않고 비워 둔다.
         """
@@ -409,7 +410,7 @@ class Engine:
             run.output["_next_payload"] = {**payload, "answers": {q_skill: dict(answer.output)}}
             return False
         run.status = "skipped"
-        run.note = "고객 자료 대기 — 사건 요약에 남김"
+        run.note = "고객 자료 대기 — 이벤트 요약에 남김"
         run.finished_at = now()
         inc.log(f"{run.label}: 고객 입력 대기(보류)")
         return True
@@ -452,7 +453,7 @@ class Engine:
     async def _wait_handoff(
         self, inc: Incident, step: Step, run: StepRun, result: AgentResult
     ) -> bool:
-        """사람 할 일함 처리를 기다린다. 사건은 열린 채로, 이 단계에 기대지 않는 단계는 계속 돈다.
+        """사람 할 일함 처리를 기다린다. 이벤트는 열린 채로, 이 단계에 기대지 않는 단계는 계속 돈다.
 
         - done: 사람이 적은 결과를 이 단계의 결과로 넣고 완료 → 뒤 단계가 이어진다
         - rejected·시간 초과: C 등급 보류 거절과 같이 `rejected_by_human`
@@ -526,15 +527,15 @@ class Engine:
             r for r in inc.steps.values() if r.status in ("failed", "skipped", "rejected_by_human")
         ]
         kind, area = RECORD_BY_PLAN.get(inc.kind, ("incident", "infra"))
-        # 재무가 남긴 기록처럼 앞 단계가 사건에 보관한 설명을 기록에 붙인다 (없으면 붙이지 않는다)
+        # 재무가 남긴 기록처럼 앞 단계가 이벤트에 보관한 설명을 기록에 붙인다 (없으면 붙이지 않는다)
         note = inc.shared.get("record_note")
         payload = {
             "context_id": inc.context_id,
             "kind": kind,
-            "summary": f"{inc.title} — 완료 {len(done)}단계, 미완료 {len(problems)}단계"
-            + (f" · {note}" if isinstance(note, str) and note else ""),
+            "summary": inc.title + (f" · {note}" if isinstance(note, str) and note else ""),
             "decision_reason": (
-                f"{inc.kind} plan 실행 결과 — 완료: {', '.join(r.skill for r in done) or '없음'}; "
+                f"{PLAN_KO.get(inc.kind, inc.kind)} 실행 결과 — "
+                f"완료: {', '.join(r.skill for r in done) or '없음'}; "
                 f"미완료: {', '.join(r.skill for r in problems) or '없음'}"
             ),
             "alternatives_considered": [
@@ -579,7 +580,7 @@ class Engine:
                 2,
             ),
         }
-        inc.log(f"사건 종료: {inc.status}")
+        inc.log(f"이벤트 종료: {inc.status}")
         await self._publish("incident.resolved", inc)
 
     @staticmethod
@@ -600,8 +601,8 @@ class Engine:
             await self.publish(kind, inc)
 
 
-# 사건 종류(plan 이름) → (기록 종류, 담당 영역). 인사 `record_case`로 보내는 값이다.
-# 없으면 장애 사건으로 기록한다.
+# 이벤트 종류(plan 이름) → (기록 종류, 담당 영역). 인사 `record_case`로 보내는 값이다.
+# 없으면 장애 이벤트로 기록한다.
 RECORD_BY_PLAN: dict[str, tuple[str, str]] = {
     "support_resolved": ("case", "support-desk"),
 }

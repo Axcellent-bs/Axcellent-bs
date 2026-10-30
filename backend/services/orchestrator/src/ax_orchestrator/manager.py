@@ -1,7 +1,7 @@
-"""이벤트 수신과 사건 판단 (ORC-02·03).
+"""이벤트 수신과 이벤트 판단 (ORC-02·03).
 
-이벤트를 받아 `event_id` 중복을 거르고, 사건이면 `ctx_inc_`를 발급해 plan을 돌린다.
-같은 구성요소의 열린 사건이 있으면 새로 열지 않고 합친다.
+이벤트를 받아 `event_id` 중복을 거르고, 이벤트이면 `ctx_inc_`를 발급해 plan을 돌린다.
+같은 구성요소의 열린 이벤트가 있으면 새로 열지 않고 합친다.
 판단은 규칙(코드)이 한다. 원인·분석 문장은 만들지 않는다.
 """
 
@@ -15,6 +15,7 @@ from typing import Any
 from ax_contracts.schemas import EventEnvelope, EventType
 from ax_orchestrator.engine import Engine
 from ax_orchestrator.models import Incident, Plan, iso
+from ax_orchestrator.naming import event_title
 from ax_orchestrator.plans.finance_anomaly import finance_anomaly
 from ax_orchestrator.plans.support_resolved import support_resolved
 
@@ -29,7 +30,8 @@ def _since(env: EventEnvelope) -> datetime | None:
     except ValueError:
         return None
 
-LOOKBACK = timedelta(minutes=15)  # 사건이 열리기 직전 실패 주문·문의도 같은 사건으로 본다
+
+LOOKBACK = timedelta(minutes=15)  # 이벤트가 열리기 직전 실패 주문·문의도 같은 이벤트로 본다
 INCIDENT_EVENTS = {
     EventType.SHOP_DEGRADED,
     EventType.INFRA_ANOMALY_DETECTED,
@@ -83,10 +85,10 @@ class IncidentManager:
         )
 
     def find_active(self, component: str | None, occurred_at: datetime | None) -> Incident | None:
-        """문의·주문 시각에 해당하는 사건 하나를 찾는다 (`find_active_incident`, #272).
+        """문의·주문 시각에 해당하는 이벤트 하나를 찾는다 (`find_active_incident`, #272).
 
-        시각이 없으면 열린 사건만 본다. 시각이 있으면 사건 구간(시작 15분 전 ~ 종료)에
-        들어오는 사건을 본다. 열린 사건이 먼저이고, 그다음은 최근에 열린 순서다.
+        시각이 없으면 열린 이벤트만 본다. 시각이 있으면 이벤트 구간(시작 15분 전 ~ 종료)에
+        들어오는 이벤트를 본다. 열린 이벤트가 먼저이고, 그다음은 최근에 열린 순서다.
         """
         found = [
             inc
@@ -105,16 +107,16 @@ class IncidentManager:
         return inc.closed_at is None or occurred_at <= inc.closed_at
 
     async def handle(self, env: EventEnvelope) -> Incident | None:
-        """이벤트 하나를 처리한다. 새로 연 사건 또는 합쳐진 사건을 돌려준다."""
+        """이벤트 하나를 처리한다. 새로 연 이벤트 또는 합쳐진 이벤트를 돌려준다."""
         _, inc = await self.process(env)
         return inc
 
     async def process(self, env: EventEnvelope) -> tuple[str, Incident | None]:
-        """처리 결과를 `(outcome, 사건)`으로 돌려준다.
+        """처리 결과를 `(outcome, 이벤트)`으로 돌려준다.
 
         outcome: `duplicate`(같은 event_id) · `ignored`(총괄 소관 아님) ·
-        `noted`(기록만, 열린 사건이 있으면 거기에) · `merged`(열린 사건에 합침) ·
-        `opened`(새 사건) ·
+        `noted`(기록만, 열린 이벤트가 있으면 거기에) · `merged`(열린 이벤트에 합침) ·
+        `opened`(새 이벤트) ·
         `resumed`(사람 할 일함 처리 결과로 단계를 이어 감) · `unmatched`(기다리는 단계가 없음).
         """
         if env.event_id in self._seen:
@@ -132,7 +134,7 @@ class IncidentManager:
                 existing.log(f"이벤트 수신: {env.type.value} ({env.source})")
             return "noted", existing
         if existing is not None:
-            existing.log(f"같은 사건에 합침: {env.type.value} ({env.source}, {env.event_id})")
+            existing.log(f"같은 이벤트에 합침: {env.type.value} ({env.source}, {env.event_id})")
             return "merged", existing
         inc = Incident(
             context_id=Incident.new_context_id(),
@@ -150,7 +152,7 @@ class IncidentManager:
         return "opened", inc
 
     def _resume_handoff(self, env: EventEnvelope) -> tuple[str, Incident | None]:
-        """같은 context_id 사건에서 같은 task_id를 기다리는 단계를 찾아 사람 결과를 넣는다.
+        """같은 context_id 이벤트에서 같은 task_id를 기다리는 단계를 찾아 사람 결과를 넣는다.
 
         이미 반영한 일이거나(다른 event_id로 다시 와도) 기다리는 단계가 없으면 `unmatched`.
         사람이 적은 결과는 `untrusted.result`로 오고, 데이터로만 단계 결과에 넣는다.
@@ -169,7 +171,7 @@ class IncidentManager:
 
     @staticmethod
     def _component(env: EventEnvelope) -> str:
-        """사건을 묶는 구성요소. 고객지원 처리 결과는 문의마다 따로 열어 서로 합쳐지지 않게 한다."""
+        """이벤트를 묶는 구성요소. 고객지원 처리 결과는 문의마다 따로 열어 합쳐지지 않게 한다."""
         if env.type == EventType.SUPPORT_INQUIRY_RESOLVED:
             return f"support-inquiry-{env.data.get('inquiry_id')}"
         return str(env.data.get("component") or "api")
@@ -178,9 +180,7 @@ class IncidentManager:
     def _title(env: EventEnvelope, component: str) -> str:
         if env.type == EventType.SUPPORT_INQUIRY_RESOLVED:
             return f"고객 문의 #{env.data.get('inquiry_id')} 처리 결과 기록"
-        metric = env.data.get("metric_code")
-        suffix = f" ({metric})" if metric else ""
-        return f"{component} 장애 감지{suffix}"
+        return event_title(component, env.data.get("metric_code"))
 
     async def wait(self, context_id: str) -> Incident:
         return await self._tasks[context_id]

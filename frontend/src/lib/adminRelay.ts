@@ -1,7 +1,7 @@
 import { ApiError } from "./apiError";
 import { RELAY_API_URL, RELAY_TOKEN } from "./env";
 
-// 총괄 사건·부서 사용량 읽기. 화면은 총괄을 직접 부르지 않고 shop-api 관리 읽기 중계(GET만)를 부른다.
+// 총괄 이벤트·부서 사용량 읽기. 화면은 총괄을 직접 부르지 않고 shop-api 관리 읽기 중계(GET만)를 부른다.
 // 응답 모양은 ax-backend `orchestrator/src/ax_orchestrator/models.py`(`Incident.view()`)와
 // `main.py`(`departments()`) 기준이고, 중계 응답은 OpenAPI에 모양이 없어 손으로 적는다.
 // 토큰은 환경변수(개발용)에서만 오고 브라우저 저장소에는 두지 않는다. 진짜 로그인은 사람 인증 뒤에 붙는다.
@@ -21,10 +21,10 @@ export interface Step {
   finished_at: string | null;
   transferred_to: string | null;
   reason_code: string | null;
-  /** 단계 결과. 스킬마다 모양이 다르다(예: 비슷한 과거 사건 찾기의 cases) */
+  /** 단계 결과. 스킬마다 모양이 다르다(예: 비슷한 과거 이벤트 찾기의 cases) */
   output?: Record<string, unknown>;
 }
-/** 비슷한 과거 사건에 남은 원인·조치를 이번 사건에 참고로 붙인 것 (총괄이 계산, 실행하지 않음) */
+/** 비슷한 과거 이벤트에 남은 원인·조치를 이번 이벤트에 참고로 붙인 것 (총괄이 계산, 실행하지 않음) */
 export interface Recommendation {
   status: "found" | "no_evidence";
   reason?: string;

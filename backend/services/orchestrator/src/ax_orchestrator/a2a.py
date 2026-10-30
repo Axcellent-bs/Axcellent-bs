@@ -1,7 +1,7 @@
 """총괄 자신의 `/a2a` skill (ORC-01, #272).
 
-지금은 `find_active_incident` 하나다. 고객지원이 문의를 접수할 때 진행 중인 사건 번호
-(`ctx_inc_`)를 이어받게 하려고 부른다(#274). 읽기 전용이라 사건을 열거나 바꾸지 않는다.
+지금은 `find_active_incident` 하나다. 고객지원이 문의를 접수할 때 진행 중인 이벤트 번호
+(`ctx_inc_`)를 이어받게 하려고 부른다(#274). 읽기 전용이라 이벤트를 열거나 바꾸지 않는다.
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ def find_active_incident(get_manager: GetManager) -> Handler:
         inc = manager.find_active(parsed.component, parsed.occurred_at) if manager else None
         if inc is None:
             output = FindActiveIncidentOutput(found=False)
-            summary = "맞는 사건 없음"
+            summary = "맞는 이벤트 없음"
         else:
             output = FindActiveIncidentOutput(
                 found=True,
@@ -76,7 +76,7 @@ def find_active_incident(get_manager: GetManager) -> Handler:
                 closed_at=inc.closed_at,
                 notice_id=inc.shared.get("notice_id"),  # 점검 공지가 게시됐을 때만, 지어내지 않는다
             )
-            summary = f"{inc.component} 사건 {inc.status}"
+            summary = f"{inc.component} 이벤트 {inc.status}"
         return AgentResult(
             meta=request.meta,
             status=TaskStatus.COMPLETED,

@@ -108,17 +108,17 @@ export const hr = {
       idempotency_key: `ui:${questionId}:${hash(answer)}`, // 답변 전체의 해시라 앞부분만 같은 다른 답과는 구분된다
     }),
   candidateCards: () => call<HrCard[]>("/candidate-cards"),
-  /** 확정된(후보가 아닌) 결정 카드, 최근 순. 사건 번호를 주면 그 사건에서 만든 카드만 */
+  /** 확정된(후보가 아닌) 결정 카드, 최근 순. 이벤트 번호를 주면 그 이벤트에서 만든 카드만 */
   decisionCards: (contextId?: string, limit = 50) =>
     call<HrCard[]>(`/decision-cards?limit=${limit}${contextId ? `&context_id=${encodeURIComponent(contextId)}` : ""}`),
   decide: (cardId: string, decision: "approve" | "reject") =>
     post<{ card_id: string; status: string }>(`/candidate-cards/${encodeURIComponent(cardId)}/decision`, { decision }),
-  /** 사람이 사건의 해결 내용을 적는다. 소요 시간은 서버가 openedAt부터 잰다 */
+  /** 사람이 이벤트의 해결 내용을 적는다. 소요 시간은 서버가 openedAt부터 잰다 */
   recordResolution: (contextId: string, body: ResolutionInput) =>
     post<{ outcome: string; card_id: string | null }>(`/incidents/${encodeURIComponent(contextId)}/resolution`, body),
   roster: () => call<Roster>("/roster"),
   activity: (contextId: string) => call<AuditEntry[]>(`/hr-activity/${encodeURIComponent(contextId)}`),
   checkPlan: (draft: PlanDraft) => post<PlanCheck>("/plan-checks", { draft }),
-  /** 총괄 사건 목록(dashboard-api가 총괄 /api/incidents를 중계). 인사 AI의 사건 기록 단계(record_case)가 들어 있다 */
+  /** 총괄 이벤트 목록(dashboard-api가 총괄 /api/incidents를 중계). 인사 AI의 이벤트 기록 단계(record_case)가 들어 있다 */
   incidents: () => call<OrchIncident[]>("/incidents"),
 };

@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import type { OrchIncident } from "@/lib/agentChat";
 import { hr, type HrCard } from "@/lib/hr";
 
-// 사건을 고친 사람이 "무슨 일이었고 어떻게 고쳤는지"를 적는 칸. 비슷한 장애가 다시 나면 총괄이 이 기록을 근거로 보여 준다.
-// 소요 시간은 적지 않는다: 사건이 열린 시각부터 저장한 시각까지를 서버가 잰다.
+// 이벤트를 고친 사람이 "무슨 일이었고 어떻게 고쳤는지"를 적는 칸. 비슷한 장애가 다시 나면 총괄이 이 기록을 근거로 보여 준다.
+// 소요 시간은 적지 않는다: 이벤트가 열린 시각부터 저장한 시각까지를 서버가 잰다.
 const OUTCOME_KO = { resolved: "해결됨", workaround: "임시 조치", unresolved: "미해결" } as const;
 type Outcome = keyof typeof OUTCOME_KO;
 const MAX = 300;
@@ -55,8 +55,8 @@ export default function ResolutionForm({ inc }: { inc: OrchIncident }) {
   return (
     <section className="card space-y-3 p-6">
       <div>
-        <h2 className="text-lg font-semibold">이 사건의 해결 내용 적기</h2>
-        <p className="mt-1 text-xs text-ink-500">원인을 확인하고 고친 사람이 적습니다. 비워 두면 "확인할 수 없음"으로 남고, 소요 시간은 사건이 열린 때부터 저장할 때까지 자동으로 잽니다.</p>
+        <h2 className="text-lg font-semibold">이 이벤트의 해결 내용 적기</h2>
+        <p className="mt-1 text-xs text-ink-500">원인을 확인하고 고친 사람이 적습니다. 비워 두면 "확인할 수 없음"으로 남고, 소요 시간은 이벤트가 열린 때부터 저장할 때까지 자동으로 잽니다.</p>
       </div>
       {saved && (
         <p className="rounded-xl bg-emerald-50 px-4 py-2 text-xs text-emerald-800">
@@ -76,7 +76,7 @@ export default function ResolutionForm({ inc }: { inc: OrchIncident }) {
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" className="btn-primary" disabled={busy} onClick={save}>{busy ? "저장 중…" : "해결 내용 남기기"}</button>
-        {prior && <span className="text-xs text-ink-500">이 사건은 시작할 때 비슷한 과거 사건을 근거로 봤어요(반복 장애로 기록).</span>}
+        {prior && <span className="text-xs text-ink-500">이 이벤트는 시작할 때 비슷한 과거 이벤트를 근거로 봤어요(반복 장애로 기록).</span>}
         {msg && <span role={msg.ok ? "status" : "alert"} className={`text-xs ${msg.ok ? "text-emerald-700" : "text-red-700"}`}>{msg.text}</span>}
       </div>
     </section>

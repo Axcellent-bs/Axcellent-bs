@@ -177,7 +177,7 @@ async def test_a_rejected_handoff_is_handled_like_a_rejected_hold(harness) -> No
     assert inc.steps["notice"].status == "rejected_by_human"
     assert inc.steps["notice"].note == "사람이 처리하지 않기로 함"
     assert inc.steps["publish_notice"].status == "skipped"  # 선행이 완료되지 않음
-    assert inc.steps["record"].status == "completed"  # 사건 기록은 남긴다
+    assert inc.steps["record"].status == "completed"  # 이벤트 기록은 남긴다
     assert inc.status == "degraded" and inc.closed_at is not None
 
 
