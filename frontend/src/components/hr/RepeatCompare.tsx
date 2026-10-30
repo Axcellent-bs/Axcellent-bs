@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
+import { durationKo, secondsOf, type ResolutionTimes } from "@/lib/duration";
 import { hr, type HrCard } from "@/lib/hr";
 
 // 처음 겪은 장애와 반복된 장애(시작할 때 비슷한 과거 이벤트를 근거로 본 것)의 해결 시간을 나란히 본다.
 // 사람이 해결 내용을 적어 시간이 잰 이벤트만 센다. 건수가 적어서 통계가 아니라 사례 비교로만 읽는다.
-interface Row { cardId: string; title: string; minutes: number; repeat: boolean }
+interface Row { cardId: string; title: string; seconds: number; repeat: boolean }
 
 const median = (xs: number[]) => {
   const s = [...xs].sort((a, b) => a - b);
@@ -14,9 +15,10 @@ const median = (xs: number[]) => {
 function rowsOf(cards: HrCard[]): Row[] {
   const out: Row[] = [];
   for (const c of cards) {
-    const r = c.extra?.resolution as { outcome?: string; minutes_to_resolve?: number | null; prior_case_id?: string | null } | undefined;
-    if (!r || (r.outcome !== "resolved" && r.outcome !== "workaround") || typeof r.minutes_to_resolve !== "number") continue;
-    out.push({ cardId: c.card_id, title: c.title, minutes: r.minutes_to_resolve, repeat: !!r.prior_case_id });
+    const r = c.extra?.resolution as (ResolutionTimes & { outcome?: string; prior_case_id?: string | null }) | undefined;
+    const seconds = secondsOf(r);
+    if (!r || (r.outcome !== "resolved" && r.outcome !== "workaround") || seconds == null) continue;
+    out.push({ cardId: c.card_id, title: c.title, seconds, repeat: !!r.prior_case_id });
   }
   return out;
 }
@@ -54,8 +56,8 @@ export default function RepeatCompare() {
               <p className="text-xs text-ink-500">{g.note}</p>
               {g.items.length === 0 ? <p className="mt-2 text-sm text-ink-500">아직 없습니다.</p> : (
                 <>
-                  <p className="mt-2 text-2xl font-semibold tabular-nums">{median(g.items.map((i) => i.minutes))}분 <span className="text-xs font-normal text-ink-500">가운데 값</span></p>
-                  <p className="text-xs text-ink-500 tabular-nums">가장 짧음 {Math.min(...g.items.map((i) => i.minutes))}분 · 가장 김 {Math.max(...g.items.map((i) => i.minutes))}분</p>
+                  <p className="mt-2 text-2xl font-semibold tabular-nums">{durationKo(median(g.items.map((i) => i.seconds)))} <span className="text-xs font-normal text-ink-500">가운데 값</span></p>
+                  <p className="text-xs text-ink-500 tabular-nums">가장 짧음 {durationKo(Math.min(...g.items.map((i) => i.seconds)))} · 가장 김 {durationKo(Math.max(...g.items.map((i) => i.seconds)))}</p>
                 </>
               )}
             </div>
