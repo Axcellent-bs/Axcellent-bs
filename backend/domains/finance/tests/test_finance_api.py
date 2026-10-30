@@ -11,7 +11,9 @@ from fastapi.testclient import TestClient
 
 from ax_agent_template import events
 from ax_contracts.schemas import ExecuteDecision, HoldReason
+from finance_agent import books as bk
 from finance_agent import finance_api, handlers
+from finance_agent.books import Books
 from finance_agent.main import app
 from finance_agent.sources import MockSources
 
@@ -318,10 +320,13 @@ def test_batch_token_optional_but_must_be_human(client: TestClient, monkeypatch)
 
 def test_batch_with_nothing_ready_is_409(client: TestClient, monkeypatch) -> None:
     calls = _fake_safety(monkeypatch, HELD)
-    for seller in ("sel_0001", "sel_0003"):  # 위험 판매자 정산 보류 기록
-        handlers.state().ledger.market_ops.append(
-            {"skill": "settlement_hold", "seller_id": seller, "status": "held"}
-        )
+    books = bk.seed_books()
+    books.claims = None  # 처리 중 클레임을 확인할 수 없으면 모든 판매자가 보류된다(fail-closed)
+
+    async def load() -> Books:
+        return books
+
+    handlers.state().books_loader = load
     response = client.post("/api/finance/settlements/batch", json={})
     assert (response.status_code, response.json()["error"]["code"]) == (409, "nothing_to_settle")
     assert calls == []
@@ -402,11 +407,11 @@ def test_removed_endpoints(client: TestClient) -> None:
         "/api/finance/catbooks/items",
         "/api/finance/threshold-reviews",
         "/api/finance/loss-reports",  # 2026-10-27 장애 흐름에서 빠지며 없앰
+        "/api/finance/market-ops",  # 2026-10-30 마켓운영을 재무에서 뺌
     ):
         assert client.get(path).status_code == 404
     for path in (
         "/api/finance/ledger",
-        "/api/finance/market-ops",
         "/api/finance/self-test/last",
     ):
         assert client.get(path).status_code == 200, path

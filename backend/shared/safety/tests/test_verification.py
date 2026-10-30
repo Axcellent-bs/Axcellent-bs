@@ -13,11 +13,11 @@ from ax_safety.gate import Gate
 @pytest.mark.parametrize("result", ["unavailable", "raise"])
 @pytest.mark.asyncio
 async def test_verifier_silence_never_executes(
-    gate: Gate, verifier: Any, result: str, seller_review
+    gate: Gate, verifier: Any, result: str, verified_action
 ) -> None:
     """⑤ 검증자 무응답·오류 → 실행하지 않고 C(`verify_timeout`), fail-closed (SAF-08)."""
     verifier.result = result
-    decision = await gate.execute(seller_review("silent"))
+    decision = await gate.execute(verified_action("silent"))
     assert (decision.grade, decision.status) == ("C", "held")
     assert decision.hold_reason == HoldReason.VERIFY_TIMEOUT
     executed = [r for r in gate.store.list_executions() if r.decision.status == "executed"]
@@ -25,9 +25,9 @@ async def test_verifier_silence_never_executes(
 
 
 @pytest.mark.asyncio
-async def test_verifier_rejection(gate: Gate, verifier: Any, sent: Any, seller_review) -> None:
+async def test_verifier_rejection(gate: Gate, verifier: Any, sent: Any, verified_action) -> None:
     verifier.result = "rejected"
-    decision = await gate.execute(seller_review("rejected"))
+    decision = await gate.execute(verified_action("rejected"))
     assert (decision.status, decision.hold_reason) == ("rejected", HoldReason.VERIFY_REJECTED)
     assert gate.store.list_reviews() == []  # 검증자가 거절한 건은 보류 큐에 넣지 않는다
     assert sent.types() == []
@@ -53,7 +53,7 @@ async def test_verify_task_carries_code_amount_not_claims(
 
 @pytest.mark.asyncio
 async def test_slow_verifier_times_out(
-    gate: Gate, monkeypatch: pytest.MonkeyPatch, seller_review
+    gate: Gate, monkeypatch: pytest.MonkeyPatch, verified_action
 ) -> None:
     """검증자가 마감(기준표 verify_timeout_seconds)보다 늦으면 실행하지 않고 보류한다."""
     import asyncio
@@ -63,7 +63,7 @@ async def test_slow_verifier_times_out(
 
     gate._verifier = slow
     gate.thresholds = gate.thresholds.model_copy(update={"verify_timeout_seconds": 0.05})
-    decision = await gate.execute(seller_review("slow-verify"))
+    decision = await gate.execute(verified_action("slow-verify"))
     assert (decision.status, decision.hold_reason) == ("held", HoldReason.VERIFY_TIMEOUT)
     executed = [r for r in gate.store.list_executions() if r.decision.status == "executed"]
     assert executed == []

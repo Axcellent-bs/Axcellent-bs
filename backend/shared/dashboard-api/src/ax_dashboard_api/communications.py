@@ -110,7 +110,7 @@ def _mock_records() -> CommonLogResult:
                 2,
                 source="finance",
                 kind="execute_decided",
-                skill="hold_settlement",
+                skill="confirm_settlement",
                 grade="C",
                 task_status="input-required",
                 requester="orchestrator",

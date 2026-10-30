@@ -2,8 +2,6 @@
 
 | skill | 등급 | 요청자 | 하는 일 |
 | --- | --- | --- | --- |
-| `seller_review` | B | orchestrator | 마켓운영: 서류·위험 점수로 판매자 승인 요청 (DEP-FIN-03) |
-| `settlement_hold` | B | orchestrator | 마켓운영: 위험 판매자 정산 보류 요청 (DEP-FIN-04) |
 | `closing_report` | read | orchestrator, data | ① 기간 손익 요약 (`closing.py`) |
 | `audit_report` | read | orchestrator, data | ⑦ 사후 감사 결과 (`audit.py`) |
 
@@ -14,8 +12,9 @@
 변경을 판단)도 재무 일이 아니라 없앴다. 한도는 제안만 하고(`policy.py`) 사람이 기준표 PR로 바꾼다.
 
 - 숫자는 전부 코드로 계산한다. 요청 쪽이 적은 총액·등급은 믿지 않는다.
-- 상태 변경(판매자 승인, 정산 보류)은 `execute()`가 `executed`를 돌려준 뒤에만 기록한다.
-- 외부 입력(`request.untrusted`, 판매자 소개 등)은 읽지 않는다.
+- 외부 입력(`request.untrusted`)은 읽지 않는다.
+- 마켓운영(판매자 입점 심사·정산 보류)은 재무 일이 아니라 없앴다(2026-10-30). 재무는 판매자 정산
+  내역을 계산만 하고, 판매자를 받거나 돈을 묶는 결정은 하지 않는다.
 - 기록은 메모리에 두고 `FINANCE_STATE_FILE`이 있으면 파일에도 남긴다
   (`persist.py`, 다시 켜도 이어짐).
 """
@@ -29,19 +28,16 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from ax_agent_template.config import is_mock
-from ax_agent_template.execute import execute
 from ax_contracts.schemas import (
     AgentRequest,
     AgentResult,
     EventEnvelope,
     EventType,
     Evidence,
-    ExecuteDecision,
-    InputReason,
     RequestMeta,
     TaskStatus,
 )
-from finance_agent import audit, chat_log, closing
+from finance_agent import anomalies, audit, chat_log, closing
 from finance_agent import books as bk
 from finance_agent import finance_config as fc
 from finance_agent import ledger as lg
@@ -52,10 +48,6 @@ from finance_agent.schemas import (
     AuditReportOutput,
     ClosingReportInput,
     ClosingReportOutput,
-    SellerReviewInput,
-    SellerReviewOutput,
-    SettlementHoldInput,
-    SettlementHoldOutput,
     SupportCostInput,
     SupportCostOutput,
 )
@@ -71,8 +63,6 @@ class Ledger:
         self.coupons: dict[str, dict[str, int]] = {}  # context_id → {"count", "total"}
         self.refunds: dict[str, int] = {}  # order_id → 환불 누적
         self.seen_events: set[str] = set()
-        self.done: dict[str, AgentResult] = {}  # 멱등성 키 → 끝난 상태 변경 결과
-        self.market_ops: list[dict[str, Any]] = []  # 판매자 심사·정산 보류 결과 기록
         # 문의 번호 → 고객지원 처리 결과 비용 기록
         self.support_costs: dict[int, dict[str, Any]] = {}
         self.coupon_events: dict[str, list[dict[str, Any]]] = {}  # context_id → 보상 쿠폰 이벤트
@@ -98,13 +88,6 @@ class State:
     async def books(self) -> Books:
         return await self.books_loader()
 
-    def held_sellers(self) -> set[str]:
-        """정산 보류(`settlement_hold`)가 걸린 판매자."""
-        return {
-            op["seller_id"]
-            for op in self.ledger.market_ops
-            if op.get("skill") == "settlement_hold" and op.get("status") == "held"
-        }
 
 
 class FinanceRecords:
@@ -115,6 +98,7 @@ class FinanceRecords:
         self.recon_notes: dict[str, str] = {}  # payment_id → 처리 메모
         self.recon_note_log: list[dict[str, Any]] = []
         self.batches: dict[str, dict[str, Any]] = {}  # 정산 기간 → 묶음 요청 상태
+        self.anomalies: dict[str, dict[str, Any]] = {}  # 의심 건 번호 → 처리 전·후 기록
 
 
 STATE: State | None = None
@@ -131,6 +115,14 @@ def reset_state(sources: Sources | None = None) -> None:
     """테스트 사이에 저장소를 비운다."""
     global STATE
     STATE = State(sources)
+
+
+async def note_audit(findings: list[dict[str, Any]], tenant_id: str) -> None:
+    """사후 감사가 찾은 의심 건을 처리할 때까지 남기고, 처음 본 열린 건만 총괄에 알린다."""
+    store = state().records.anomalies
+    pending = anomalies.note_findings(store, findings)
+    if pending:
+        anomalies.mark_announced(store, await chat_log.audit_findings(pending, tenant_id))
 
 
 # ---------------------------------------------------------------- 공통
@@ -263,146 +255,6 @@ async def incident_impact(
     )
 
 
-# ---------------------------------------------------------------- 마켓운영 (관문 경유)
-async def _gated(
-    request: AgentRequest, action: str, target: str, params: dict[str, Any], evidence: Evidence
-) -> tuple[ExecuteDecision | None, AgentResult | None, str]:
-    """`execute()`를 부른다. 이미 끝난 같은 요청이면 (None, 이전 결과, 키)."""
-    key = request.meta.idempotency_key or f"{request.meta.context_id}:{action}:{target}"
-    previous = state().ledger.done.get(key)
-    if previous is not None:
-        return None, previous.model_copy(update={"meta": request.meta}), key
-    meta = request.meta.model_copy(update={"idempotency_key": key})
-    return await execute(action, params, meta, evidence), None, key
-
-
-def _decision_status(decision: ExecuteDecision) -> dict[str, Any]:
-    """판정을 Task 상태로 옮긴다 (공통 구성안 5장, 후속 결정 12)."""
-    if decision.status == "executed":
-        return {"status": TaskStatus.COMPLETED}
-    if decision.status == "held":
-        return {
-            "status": TaskStatus.INPUT_REQUIRED,
-            "reason_code": InputReason.HUMAN_INPUT,
-            "outcome": "held",
-        }
-    if decision.status == "verifying":
-        return {"status": TaskStatus.WORKING, "outcome": "verifying"}
-    if decision.status == "rejected":
-        return {"status": TaskStatus.COMPLETED, "outcome": "rejected_by_review"}
-    return {"status": TaskStatus.FAILED, "outcome": "execute_failed"}
-
-
-def _log_market_op(request: AgentRequest, skill: str, output: dict[str, Any]) -> None:
-    state().ledger.market_ops.append(
-        {"skill": skill, "context_id": request.meta.context_id, **output, "at": _now().isoformat()}
-    )
-
-
-async def seller_review(request: AgentRequest) -> AgentResult:
-    data = _parse(request, SellerReviewInput)
-    if isinstance(data, AgentResult):
-        return data
-
-    def done(output: SellerReviewOutput, evidence: Evidence, **status: Any) -> AgentResult:
-        _log_market_op(request, "seller_review", output.model_dump(mode="json"))
-        return _result(
-            request,
-            output=output.model_dump(mode="json"),
-            evidence=evidence,
-            **({"status": TaskStatus.COMPLETED} | status),
-        )
-
-    if not data.documents_verified:  # 서류 미확인은 승인 요청을 보내지 않는다
-        output = SellerReviewOutput(
-            seller_id=data.seller_id, decision="rejected", reason_code="documents_missing"
-        )
-        return done(output, _evidence(["documents"], "제출 서류 미확인"), outcome="auto_rejected")
-
-    fraud = await state().sources.fraud_score(request.meta, data.seller_id)
-    if fraud is None:  # 위험 점수 없이는 판단하지 않는다
-        output = SellerReviewOutput(
-            seller_id=data.seller_id, decision="undetermined", reason_code="risk_unavailable"
-        )
-        return done(
-            output,
-            _evidence(["data:fraud_score"], "위험 점수: 확인할 수 없음"),
-            outcome="undetermined",
-        )
-
-    score = fraud.score
-    summary = f"위험 점수 {score}"
-    params: dict[str, Any] = {
-        "seller_id": data.seller_id,
-        "risk_score": score,
-        "category_codes": data.category_codes,
-        "decision": "approve",
-    }
-    if fraud.is_bound:
-        # 빠진 규칙을 위험으로 본 상한이다. 상한이 보류 기준(70)을 넘어도 사기로 확정하지 않고
-        # safety 보류 → 사람 확인으로만 보낸다 (상한 high의 정밀도가 낮다: 24명 평가에서 64%)
-        summary = (
-            f"위험 점수 상한 {score} (확인한 점수 {fraud.confirmed}, "
-            f"확인 못 한 규칙 {', '.join(fraud.unknown_rules)}을 위험으로 봄). 사기 확정 아님"
-        )
-        params |= {"confirmed_score": fraud.confirmed, "unknown_rules": list(fraud.unknown_rules)}
-    evidence = _evidence(["data:fraud_score"], summary, [data.seller_id])
-    decision, previous, key = await _gated(
-        request, "seller_review", data.seller_id, params, evidence
-    )
-    if previous is not None:
-        return previous
-    assert decision is not None
-    mapped = _decision_status(decision)
-    label = {"executed": "approved", "held": "held", "rejected": "rejected"}.get(
-        decision.status, "undetermined"
-    )
-    output = SellerReviewOutput(
-        seller_id=data.seller_id,
-        decision=label,  # type: ignore[arg-type]
-        risk_score=score,
-        confirmed_score=fraud.confirmed,
-        unknown_rules=list(fraud.unknown_rules),
-        reason_code=decision.hold_reason.value if decision.hold_reason else "risk_checked",
-        execution_id=decision.execution_id,
-        review_id=decision.review_id,
-    )
-    result = done(output, evidence, **mapped)
-    if result.status == TaskStatus.COMPLETED:
-        state().ledger.done[key] = result
-    return result
-
-
-async def settlement_hold(request: AgentRequest) -> AgentResult:
-    data = _parse(request, SettlementHoldInput)
-    if isinstance(data, AgentResult):
-        return data
-    evidence = _evidence(
-        ["settlement_hold"], f"{data.seller_id} 정산 보류: {data.reason_code}", [data.seller_id]
-    )
-    params = data.model_dump(mode="json", exclude_none=True)
-    decision, previous, key = await _gated(
-        request, "settlement_hold", data.seller_id, params, evidence
-    )
-    if previous is not None:
-        return previous
-    assert decision is not None
-    mapped = _decision_status(decision)
-    status = {"executed": "held", "held": "pending_review"}.get(decision.status, "rejected")
-    output = SettlementHoldOutput(
-        seller_id=data.seller_id,
-        status=status,  # type: ignore[arg-type]
-        reason_code=data.reason_code,
-        execution_id=decision.execution_id,
-        review_id=decision.review_id,
-    )
-    result = _result(request, output=output.model_dump(mode="json"), evidence=evidence, **mapped)
-    if result.status == TaskStatus.COMPLETED:
-        state().ledger.done[key] = result
-    _log_market_op(request, "settlement_hold", output.model_dump(mode="json"))
-    return result
-
-
 # ------------------------------------------------------- closing_report·audit_report (읽기)
 BOOK_QUERIES = [
     "shop-api:/api/shop/orders",
@@ -456,7 +308,12 @@ async def audit_report(request: AgentRequest) -> AgentResult:
     report, missing = await audit.audit_report(
         books, data.days, impact_lookup=lookup, context_id=data.context_id
     )
-    await chat_log.audit_findings(report["findings"], request.meta.tenant_id)
+    await note_audit(report["findings"], request.meta.tenant_id)
+    if data.finding_ref:
+        # 알림받은 의심 건 하나: 기간이 지나도 목록에 남은 기록으로 본다
+        entry = state().records.anomalies.get(data.finding_ref)
+        found = [f for f in report["findings"] if anomalies.signature(f) == data.finding_ref]
+        report["findings"] = found or ([anomalies.finding_view(entry)] if entry else [])
     output = AuditReportOutput(
         window_from=report["from"],
         window_to=report["to"],
@@ -552,8 +409,6 @@ async def record_support_cost(request: AgentRequest) -> AgentResult:
 
 
 HANDLERS = {
-    "seller_review": seller_review,
-    "settlement_hold": settlement_hold,
     "closing_report": closing_report,
     "audit_report": audit_report,
     "record_support_cost": record_support_cost,

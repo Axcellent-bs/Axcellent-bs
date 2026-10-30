@@ -91,7 +91,7 @@ export const SKILL_KO: Record<string, string> = {
   customer_signals: "고객 신호 보기", list_at_risk_customers: "이탈 위험 고객 보기",
   draft_notice: "공지 초안 쓰기", publish_notice: "공지 올리기", get_notice: "공지 보기", list_active_notices: "게시 중인 공지 보기",
   issue_coupon: "쿠폰 발급",
-  seller_review: "판매자 점검", settlement_hold: "정산 보류", closing_report: "결산 보고서", audit_report: "감사 보고서",
+  closing_report: "결산 보고서", audit_report: "감사 보고서",
   anomaly_detection: "이상 징후 찾기", impact_analysis: "영향 분석", fraud_score: "부정 거래 점수", kpi_summary: "지표 요약",
   get_roster: "담당 명부 보기", start_handover: "인수인계 시작", answer_handover_question: "인수인계 질문 답하기",
   confirm_handover: "인수인계 확인", list_handovers: "인수인계 목록 보기", list_open_questions: "남은 질문 보기",

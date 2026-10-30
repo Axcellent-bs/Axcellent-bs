@@ -75,3 +75,21 @@ async def test_finance_anomaly_also_searches_similar_past_incidents(harness) -> 
     assert order.index("find_similar_cases") < order.index("record_case")
     assert inc.steps["similar_cases"].status == "completed"
     assert inc.view()["recommendation"]["status"] == "no_evidence"
+
+
+@pytest.mark.asyncio
+async def test_finance_anomaly_rechecks_the_announced_finding(harness) -> None:
+    """재무가 알린 의심 건 번호를 넘긴다. 재무는 처리 전까지 남겨 두므로 7일이 지나도 찾는다."""
+    engine = await harness.start()
+    inc = new_incident()
+    inc.signal["finding_ref"] = "abc123"
+    await engine.run(inc, finance_anomaly())
+    assert called(harness, "audit_report")[0].input == {"days": 7, "finding_ref": "abc123"}
+
+
+@pytest.mark.asyncio
+async def test_finance_anomaly_without_a_ref_audits_the_last_week(harness) -> None:
+    engine = await harness.start()
+    inc = new_incident()
+    await engine.run(inc, finance_anomaly())
+    assert called(harness, "audit_report")[0].input == {"days": 7}

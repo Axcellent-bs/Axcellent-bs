@@ -1,7 +1,7 @@
 """재무 기록을 파일에 남기고 다시 켤 때 읽는다 (`FINANCE_STATE_FILE`).
 
-메모리에만 있던 기록(판매자 심사·정산 보류, 이벤트로 쌓은 쿠폰·환불 장부, 사람의 결산 확정·
-대사 메모·정산 묶음 요청, 끝난 상태 변경 결과)을 JSON 하나에 담는다. 백엔드를 다시 켜도
+메모리에만 있던 기록(이벤트로 쌓은 쿠폰·환불 장부, 사람의 결산 확정·
+대사 메모·정산 묶음 요청, 처리 전 의심 건)을 JSON 하나에 담는다. 백엔드를 다시 켜도
 재무 화면과 멱등 처리(같은 요청을 두 번 실행하지 않음)가 이어진다.
 
 - 경로가 없으면(테스트·단독 실행) 아무것도 하지 않는다
@@ -19,7 +19,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-from ax_contracts.schemas import AgentResult
 from finance_agent.handlers import State
 
 logger = logging.getLogger(__name__)
@@ -41,8 +40,6 @@ def dump(s: State) -> dict[str, Any]:
             "coupons": ledger.coupons,
             "refunds": ledger.refunds,
             "seen_events": sorted(ledger.seen_events),
-            "done": {k: v.model_dump(mode="json") for k, v in ledger.done.items()},
-            "market_ops": ledger.market_ops,
             "support_costs": {str(k): v for k, v in ledger.support_costs.items()},
             "coupon_events": ledger.coupon_events,
         },
@@ -51,6 +48,7 @@ def dump(s: State) -> dict[str, Any]:
             "recon_notes": records.recon_notes,
             "recon_note_log": records.recon_note_log,
             "batches": records.batches,
+            "anomalies": records.anomalies,
         },
     }
 
@@ -62,14 +60,13 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.ledger.coupons = {k: dict(v) for k, v in led["coupons"].items()}
     s.ledger.refunds = dict(led["refunds"])
     s.ledger.seen_events = set(led["seen_events"])
-    s.ledger.done = {k: AgentResult.model_validate(v) for k, v in led["done"].items()}
-    s.ledger.market_ops = list(led["market_ops"])
     s.ledger.support_costs = {int(k): v for k, v in led["support_costs"].items()}
     s.ledger.coupon_events = {k: list(v) for k, v in led["coupon_events"].items()}
     s.records.closings = {(p, d): v for p, d, v in rec["closings"]}
     s.records.recon_notes = dict(rec["recon_notes"])
     s.records.recon_note_log = list(rec["recon_note_log"])
     s.records.batches = dict(rec["batches"])
+    s.records.anomalies = {k: dict(v) for k, v in rec.get("anomalies", {}).items()}
 
 
 def _text(s: State) -> str:

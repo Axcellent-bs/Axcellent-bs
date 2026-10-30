@@ -31,7 +31,6 @@ KEY_KO = {
     "compensation_per_context": "장애 한 건 보상 합계",
     "compensation_per_customer": "고객 한 명 보상 합계",
     "refund_single": "환불 한 건",
-    "seller_risk": "판매자 위험 점수",
     "pr_changed_lines": "PR 바뀐 줄 수",
     "pr_changed_files": "PR 바뀐 파일 수",
     "review_timeout_seconds": "사람 결정 마감(초)",
@@ -94,9 +93,7 @@ def policy_report(books: Books) -> tuple[dict[str, Any], list[str]]:
         if not isinstance(r, dict):
             continue
         metric = r.get("metric")
-        if r.get("key") == "seller_risk":
-            unit = "점"
-        elif metric in SHOWN_METRICS and r.get("action") in ("issue_coupon", "refund_request"):
+        if metric in SHOWN_METRICS and r.get("action") in ("issue_coupon", "refund_request"):
             unit = "원"
         else:
             continue

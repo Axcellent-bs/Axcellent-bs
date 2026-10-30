@@ -94,10 +94,10 @@ async def test_unit_value_limit(gate: Gate, coupon) -> None:
 
 
 @pytest.mark.asyncio
-async def test_idempotent_replay(gate: Gate, verifier: Any, sent: Any, seller_review) -> None:
+async def test_idempotent_replay(gate: Gate, verifier: Any, sent: Any, verified_action) -> None:
     """④ 같은 멱등성 키 두 번 → 판정·검증·이벤트는 한 번, 두 번째는 이전 결과."""
-    first = await gate.execute(seller_review("same"))
-    second = await gate.execute(seller_review("same"))
+    first = await gate.execute(verified_action("same"))
+    second = await gate.execute(verified_action("same"))
     assert first == second
     assert len(verifier.tasks) == 1
     assert sent.types() == ["safety.action_executed"]
@@ -171,12 +171,12 @@ async def test_refund_threshold(gate: Gate, verifier: Any, act) -> None:
 
 
 @pytest.mark.asyncio
-async def test_every_decision_is_audited_with_context(gate: Gate, coupon, seller_review) -> None:
+async def test_every_decision_is_audited_with_context(gate: Gate, coupon, verified_action) -> None:
     """SAF-06: 접수·(검증)·판정이 context_id와 함께 남는다. 쿠폰은 A라 검증 단계가 없다."""
     await gate.execute(coupon())
     steps = [(e.step, e.context_id) for e in gate.store.list_audit("ctx_inc_0001")]
     assert [s for s, _ in steps] == ["received", "decided"]
-    await gate.execute(seller_review("audit"))
+    await gate.execute(verified_action("audit"))
     steps = [e.step for e in gate.store.list_audit("ctx_inc_0001")][2:]
     assert steps == ["received", "verify_requested", "verify_result", "decided"]
 

@@ -5,12 +5,15 @@
 | `GET /api/finance/overview` | 오늘 요약(KPI)과 사람이 할 일 | 없음 |
 | `GET /api/finance/closing?period=&date=` | ① 손익·분개 미리보기·설명 | 없음 |
 | `POST /api/finance/closing/confirm` | ① 결산 확정 기록 | **사람** |
+| `GET /api/finance/statements?period=&date=&format=` | ① 손익계산서, `csv`면 내려받기 | 없음 |
 | `GET /api/finance/reconciliation?date=` | ② 결제별 PG 대사 (생략 = 최근 7일) | 없음 |
 | `POST /api/finance/reconciliation/{payment_id}/note` | ② 불일치 처리 메모 | **사람** |
 | `GET /api/finance/settlements?period=YYYY-Www` | ③ 판매자 정산 내역서 (생략 = 지난주) | 없음 |
 | `POST /api/finance/settlements/batch` | ③ 묶음 → `execute(confirm_settlement)` | 선택 |
 | `GET /api/finance/policy` | ⑤ 정책표·소진율·한도 제안 | 없음 |
 | `GET /api/finance/audit?days=7&context_id=` | ⑦ 사후 감사 (사건 하나로 좁히기 선택) | 없음 |
+| `GET /api/finance/anomalies` | ⑦ 처리 전 의심 건 전부(기간 제한 없음) | 없음 |
+| `POST /api/finance/anomalies/{finding_ref}/resolve` | ⑦ 의심 건 처리 완료(메모) | **사람** |
 
 `meta`: `mock`, `collected_at`, `source`(`seed`|`shop-api`), `unavailable`(못 받은 자료 이름).
 정산 묶음 지급은 안전 관문이 항상 C로 보류하고 사람이 승인한다. 안전 관문에 닿지 않으면 503
@@ -25,15 +28,23 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, Header, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from ax_agent_template.config import agent_name_scope, agent_url, is_mock
 from ax_agent_template.execute import execute
 from ax_contracts.schemas import Evidence, RequestMeta
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT
-from finance_agent import audit, chat_log, closing, policy, reconciliation, settlement
+from finance_agent import (
+    anomalies,
+    audit,
+    closing,
+    policy,
+    reconciliation,
+    settlement,
+    statements,
+)
 from finance_agent import finance_config as fc
-from finance_agent.handlers import closing_key, incident_impact, state
+from finance_agent.handlers import closing_key, incident_impact, note_audit, state
 from finance_agent.human import human_from_authorization
 
 UNAVAILABLE_EXECUTION = "exe_unavailable"  # agent-template execute()가 safety에 못 닿았을 때
@@ -84,7 +95,7 @@ def _batch_status(decision_status: str) -> str:
 
 async def settlements_view(period: str | None) -> tuple[dict[str, Any], dict[str, Any]]:
     books = await state().books()
-    result = settlement.statements(books, period, state().held_sellers())
+    result = settlement.statements(books, period)
     batch = state().records.batches.get(result["period"])
     if batch:
         await refresh_batch(batch)
@@ -198,6 +209,31 @@ def add_finance_api(app: FastAPI) -> None:
         confirmation = state().records.closings.get(closing_key(period, d))
         report = await closing.closing_report(books, period, d, confirmation)  # type: ignore[arg-type]
         return ok(report, books.meta())
+
+    @app.get("/api/finance/statements", response_model=None)
+    async def get_statements(
+        period: str = "month", date: str | None = None, format: str = "json"
+    ) -> dict | Response:
+        if period not in statements.PERIODS:
+            return error(400, "invalid_request", "period는 month, quarter, year 중 하나")
+        if format not in ("json", "csv"):
+            return error(400, "invalid_request", "format은 json 또는 csv")
+        try:
+            d = fc.parse_date(date) or fc.today()
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        books = await state().books()
+        report = statements.income_statement(books, period, d)  # type: ignore[arg-type]
+        meta = books.meta()
+        if format == "json":
+            return ok(report, meta)
+        return Response(
+            content=statements.to_csv(report, meta["unavailable"]).encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{statements.filename(report)}"'
+            },
+        )
 
     @app.post("/api/finance/closing/confirm", response_model=None)
     async def confirm_closing(
@@ -381,5 +417,30 @@ def add_finance_api(app: FastAPI) -> None:
         data, missing = await audit.audit_report(
             books, n, impact_lookup=incident_impact, context_id=context_id or None
         )
-        await chat_log.audit_findings(data.get("findings") or [], TENANT_ID_DEFAULT)
+        await note_audit(data.get("findings") or [], TENANT_ID_DEFAULT)
         return ok(data, books.meta(missing))
+
+    @app.get("/api/finance/anomalies")
+    async def get_anomalies() -> dict:
+        return ok(
+            anomalies.listing(state().records.anomalies),
+            {"mock": is_mock("finance"), "source": "finance_records"},
+        )
+
+    @app.post("/api/finance/anomalies/{finding_ref}/resolve", response_model=None)
+    async def resolve_anomaly(
+        finding_ref: str, request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        note = (await _body(request)).get("note")
+        if not isinstance(note, str) or not note.strip() or len(note) > 500:
+            return error(400, "invalid_request", "note는 1~500자 문자열")
+        entry = anomalies.resolve(state().records.anomalies, finding_ref, person, note.strip())
+        if entry is None:
+            return error(404, "not_found", f"의심 건 {finding_ref}이 목록에 없다")
+        return ok(
+            entry, {"mock": is_mock("finance"), "source": "finance_records", "resolved_by": person}
+        )

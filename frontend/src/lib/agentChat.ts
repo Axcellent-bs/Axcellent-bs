@@ -132,7 +132,6 @@ const ACTION_KO: Record<string, string> = {
   loss_aggregation: "손실 리포트", record_support_cost: "배송비·비용 기록 확인", record_case: "이벤트 기록", check_plan: "예전 결정과 비교",
   // 돈이 나가는 일·안전 관문
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 확정",
-  seller_review: "판매자 입점 심사", settlement_hold: "판매자 정산 멈춤", hold_settlement: "판매자 정산 멈춤",
   verify_amount: "금액 다시 계산", review_hold: "보류 건 1차 판단", review_threshold_change: "기준 변경 판단",
   // 고객지원·기획개발·인사
   send_reply: "고객 답변 보내기", request_compensation: "보상 요청", create_claim: "클레임 접수", decide_claim: "클레임 결정",

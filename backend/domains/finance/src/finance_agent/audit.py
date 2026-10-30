@@ -37,7 +37,7 @@ from finance_agent.books import Books, in_range
 from finance_agent.closing import compute_totals
 from finance_agent.policy import threshold_limits
 from finance_agent.recheck import recompute
-from finance_agent.sources import FraudScore, Impact
+from finance_agent.sources import Impact
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 RECHECK_FAILURES = {"amount_mismatch", "exceeds_paid", "invalid_params"}
@@ -56,9 +56,6 @@ class _BooksSource:
 
     async def paid_amount(self, meta: RequestMeta, order_id: str) -> int | None:
         return self.paid.get(order_id)
-
-    async def fraud_score(self, meta: RequestMeta, seller_id: str) -> FraudScore | None:
-        return None
 
     async def incident_window(self, context_id: str) -> dict[str, Any] | None:
         """사후 재계산은 사건 구간을 쓰지 않는다 (총괄을 읽지 않는다)."""

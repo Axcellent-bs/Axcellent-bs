@@ -74,11 +74,8 @@ def test_hold_reasons(kit, fixed_now) -> None:
         }
     ]
     books = kit.books(orders=orders, refunds=refunds)
-    rows = {r["seller_id"]: r for r in st.statements(books, None, {"sel_a"})["statements"]}
-    assert [h["code"] for h in rows["sel_a"]["hold_reasons"]] == [
-        "unconfirmed_purchase",
-        "risky_seller",
-    ]
+    rows = {r["seller_id"]: r for r in st.statements(books, None)["statements"]}
+    assert [h["code"] for h in rows["sel_a"]["hold_reasons"]] == ["unconfirmed_purchase"]
     assert rows["sel_b"]["payout"] == 10000 - 1000 - 9500
     assert [h["code"] for h in rows["sel_b"]["hold_reasons"]] == ["negative_payout"]
     unknown = kit.books(orders=orders, claims=None)
@@ -123,3 +120,5 @@ def test_apply_batch(fixed_now) -> None:
     assert "attempt" not in shown["batch"] and shown["batch"]["review_id"] == "rev_1"
     assert [r["seller_id"] for r in st.ready(shown)] == ["sel_0003"]
     assert date.fromisoformat(shown["pay_date"]).weekday() == 5
+
+

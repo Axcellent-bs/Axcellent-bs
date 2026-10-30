@@ -141,6 +141,35 @@ export interface AuditStats {
   gate_rejected: number | null;
 }
 export interface AuditReport { from: string; to: string; stats: AuditStats; findings: AuditFinding[] }
+/** 처리 전 의심 건. 감사 기간이 지나도 사람이 처리할 때까지 남는다 */
+export interface Anomaly extends AuditFinding {
+  finding_ref: string;
+  status: "open" | "resolved";
+  first_seen: string;
+  last_seen: string;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  note: string | null;
+}
+export interface AnomalyList { open: Anomaly[]; open_count: number; resolved: Anomaly[] }
+
+// ---------------------------------------------------------------- 재무제표 (손익계산서, 당기·전기)
+export type StatementPeriod = "month" | "quarter" | "year";
+/** 값이 null이면 장부에 없거나 못 받은 자료 (지어내지 않는다) */
+export interface StatementRow { code: string; label: string; level: number; total: boolean; current: number | null; previous: number | null; note: string }
+export interface StatementNote { code: string; label: string; current: number | null; previous: number | null; note: string }
+export interface StatementSpan { name: string; from: string; to: string }
+export interface IncomeStatement {
+  title: string;
+  company: string | null;
+  period: StatementPeriod;
+  current: StatementSpan;
+  previous: StatementSpan;
+  unit: string;
+  rows: StatementRow[];
+  notes: StatementNote[];
+  basis: string;
+}
 
 // ---------------------------------------------------------------- §12 시나리오 A: 장애 사건 재무
 // ⑨ 쿠폰 장부 기록 → ⑩ 손실 리포트(피해 + 보상) → ⑰ 사건 후 감사. 쿠폰 건별 승인은 안전 장치(A/C)가 한다.
@@ -255,7 +284,6 @@ export interface Review {
 }
 
 // ---------------------------------------------------------------- 유지되는 기능
-export interface MarketOp { skill: "seller_review" | "settlement_hold"; seller_id: string; decision?: string; status?: string; risk_score?: number | null; confirmed_score?: number | null; unknown_rules?: string[]; reason_code: string; review_id: string | null; at: string }
 export interface SelfTestCheck { name: string; ok: boolean; detail: string; level: "fail" | "warn" }
 export interface SelfTest {
   result: "pass" | "warn" | "fail";
@@ -329,6 +357,27 @@ async function call(base: string, server: string, path: string, opts: CallOption
   return body;
 }
 
+/** 파일 응답을 받아 브라우저 내려받기로 넘긴다. 이름은 서버가 준 것(Content-Disposition), 없으면 `fallback` */
+async function download(path: string, fallback: string): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`${FINANCE_AGENT_URL}${path}`, { cache: "no-store" });
+  } catch {
+    throw new FinanceApiError(`${FINANCE_SERVER}에 연결하지 못했습니다. 서버가 켜져 있는지 확인하세요.`, 0, "unreachable");
+  }
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null;
+    throw new FinanceApiError(body?.error?.message ?? `내려받지 못했습니다 (${res.status}).`, res.status, body?.error?.code ?? null);
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? fallback;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 const fin = <T>(path: string, opts?: CallOptions) => call(FINANCE_AGENT_URL, FINANCE_SERVER, path, opts) as Promise<T>;
 const saf = <T>(path: string, opts?: CallOptions) => call(SAFETY_API_URL, SAFETY_SERVER, path, opts) as Promise<T>;
 const data = async <T>(p: Promise<{ data: T }>) => (await p).data;
@@ -363,6 +412,16 @@ export const finance = {
     fin<Envelope<Settlements | SettlementBatch>>("/api/finance/settlements/batch", { method: "POST", body: { period }, human: true }),
   policy: () => fin<Envelope<Policy>>("/api/finance/policy"),
   audit: (days = 7) => fin<Envelope<AuditReport>>(`/api/finance/audit${query({ days })}`),
+  /** 처리 전 의심 건 전부 (기간 제한 없음) */
+  anomalies: () => fin<Envelope<AnomalyList>>("/api/finance/anomalies"),
+  /** 의심 건 처리 완료. 사람 토큰만, 메모 필수 */
+  resolveAnomaly: (ref: string, note: string) =>
+    fin<Envelope<Anomaly>>(`/api/finance/anomalies/${encodeURIComponent(ref)}/resolve`, { method: "POST", body: { note }, human: true }),
+  statements: (period: StatementPeriod, date?: string | null) =>
+    fin<Envelope<IncomeStatement>>(`/api/finance/statements${query({ period, date })}`),
+  /** 손익계산서 CSV 내려받기 (엑셀에서 열림) */
+  downloadStatement: (period: StatementPeriod, date?: string | null) =>
+    download(`/api/finance/statements${query({ period, date, format: "csv" })}`, `income-statement-${period}.csv`),
 
   // §12-1 장애 사건 재무 (시나리오 A)
   incidents: () => fin<Envelope<IncidentSummary[]>>("/api/finance/incidents"),
@@ -373,7 +432,6 @@ export const finance = {
   supportCosts: () => fin<Envelope<SupportCostRecord[]>>("/api/finance/support-costs"),
 
   // 유지
-  marketOps: () => data(fin<{ data: MarketOp[] }>("/api/finance/market-ops")),
   /** 재무 AI 테스트를 지금 한 번 더 한다(서버는 10분마다 자동으로 한다). 가짜 자료로 점검해 상태를 바꾸지 않음 */
   selfTest: () => data(fin<{ data: SelfTest }>("/api/finance/self-test")),
   /** 가장 최근 테스트 결과(자동·직접) + 다음 자동 테스트 시각 */
@@ -532,7 +590,7 @@ export const purposeKo = (...codes: (string | null | undefined)[]) => {
 
 export const ACTION_KO: Record<string, string> = {
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 지급",
-  seller_review: "판매자 입점 승인", settlement_hold: "판매자 정산 멈춤", publish_notice: "공지 올리기",
+  publish_notice: "공지 올리기",
   rollback_deployment: "배포 되돌리기", restart_service: "서비스 다시 켜기", generate_pr: "코드 변경 만들기",
 };
 

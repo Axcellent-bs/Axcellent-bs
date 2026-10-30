@@ -47,8 +47,6 @@ CARDS: dict[str, list[tuple[str, str, str | None]]] = {
         ("loss_aggregation", "read", None),
         ("audit_report", "read", None),
         ("record_support_cost", "read", None),
-        ("seller_review", "B", "data"),
-        ("settlement_hold", "B", "data"),
     ],
     "hr": [
         ("record_case", "A", None),
@@ -202,16 +200,6 @@ DEFAULT_OUTPUTS: dict[str, Callable[[AgentRequest], dict[str, Any]]] = {
         unavailable=[],
     ),
     # 실제 재무 `SupportCostOutput` 모양(경비를 쓰지 않은 문의도 처리 결과를 기록한다)
-    # 실제 재무 `SellerReviewOutput`·`SettlementHoldOutput` 모양
-    "seller_review": lambda r: _ok(
-        seller_id=r.input.get("seller_id"),
-        decision="approved" if r.input.get("documents_verified") else "rejected",
-        risk_score=20,
-        reason_code="risk_checked" if r.input.get("documents_verified") else "documents_missing",
-    ),
-    "settlement_hold": lambda r: _ok(
-        seller_id=r.input.get("seller_id"), status="held", reason_code=r.input.get("reason_code")
-    ),
     "record_support_cost": lambda r: _ok(
         record_id=f"sc_{r.input.get('inquiry_id')}",
         inquiry_id=r.input.get("inquiry_id"),

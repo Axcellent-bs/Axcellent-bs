@@ -65,10 +65,9 @@ SELFTEST_SOURCES = MockSources(
             }
         },
         "payments": {"test_order_1": 30000},
-        "fraud_scores": {},
     }
 )
-EMPTY_SOURCES = MockSources({"impacts": {}, "payments": {}, "fraud_scores": {}})
+EMPTY_SOURCES = MockSources({"impacts": {}, "payments": {}})
 
 Level = Literal["fail", "warn"]
 

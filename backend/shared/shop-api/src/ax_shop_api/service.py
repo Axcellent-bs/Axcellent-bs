@@ -205,8 +205,8 @@ class Shop:
     ) -> dict[str, Any]:
         """판매자와 처음 올릴 상품을 한 트랜잭션에 저장하고 `seller.registered`를 outbox에 넣는다.
 
-        총괄이 이 이벤트로 입점 심사 사건을 열고 재무 `seller_review`를 부른다. 판매자 이름은
-        사람이 쓴 문장이라 이벤트에 넣지 않는다 (심사는 위험 점수·서류로만 한다).
+        판매자 이름은 사람이 쓴 문장이라 이벤트에 넣지 않는다. 입점을 받을지는 판매자를 등록하는
+        관리자가 정한다(재무 AI는 마켓운영을 하지 않는다, 2026-10-30).
         """
         if not category_codes:
             raise ShopError("INVALID_SELLER", "판매 분류가 하나 이상 필요하다")

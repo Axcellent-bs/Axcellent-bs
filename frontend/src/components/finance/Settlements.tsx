@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
-import { humanId, shortDateTime } from "@/lib/format";
+import { useState } from "react";
 import {
   FinanceApiError, SAFETY_SERVER, batchOf, finance, krw, percent, periodKo, readyPayout,
-  type BatchStatus, type MarketOp, type SettlementBatch, type StatementStatus,
+  type BatchStatus, type SettlementBatch, type StatementStatus,
 } from "@/lib/finance";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
@@ -24,43 +23,6 @@ const BATCH_KO: Record<BatchStatus, string> = {
 };
 /** 빼는 금액: 54000 → "−54,000원", 0 → "0원", 없음 → "확인할 수 없음" */
 const minus = (n: number | null) => (n ? `−${krw(n)}` : krw(n));
-const SELLER_KO: Record<string, string> = { approved: "승인", rejected: "거절", held: "사람 확인 중", undetermined: "판단 보류" };
-const HOLD_KO: Record<string, string> = { held: "정산 멈춤", pending_review: "사람 확인 중", rejected: "멈추지 않음" };
-
-function MarketOps({ tick, sellers }: { tick: number; sellers: Record<string, string> }) {
-  const [ops, setOps] = useState<MarketOp[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let live = true;
-    finance.marketOps().then((o) => { if (live) { setOps(o); setError(null); } }).catch((e: Error) => { if (live) setError(e.message); });
-    return () => { live = false; };
-  }, [tick]);
-  return (
-    <details className="rounded-2xl border border-ink-100 px-4 py-3">
-      <summary className="cursor-pointer text-sm font-semibold text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">판매자 심사·정산 멈춤 기록</summary>
-      <p className="mt-1 text-xs text-ink-500">입점 심사 결과와, 문제가 있어 정산을 멈춘 판매자입니다. 정산을 멈춘 판매자는 정산 묶음에서 빠집니다.</p>
-      {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
-      {ops && (ops.length ? (
-        <ul className="mt-2 divide-y divide-ink-100 text-sm">
-          {ops.slice(0, 10).map((m, i) => (
-            <li key={i} className="flex flex-wrap items-center gap-2 py-2">
-              <span className="font-medium">{m.skill === "seller_review" ? "입점 심사" : "정산 멈춤"}</span>
-              <span className="text-ink-700" title={m.seller_id}>{humanId(m.seller_id, sellers)}{m.risk_score != null && (m.unknown_rules?.length && m.confirmed_score != null
-                ? ` · 위험 점수 상한 ${m.risk_score}점 (확인한 점수 ${m.confirmed_score}점, 확인 못 한 규칙 ${m.unknown_rules.length}개)`
-                : ` · 위험 점수 ${m.risk_score}점`)}</span>
-              <span className="ml-auto flex items-center gap-2 text-xs text-ink-500">
-                {shortDateTime(m.at)}
-                <Chip label={m.skill === "seller_review" ? SELLER_KO[m.decision ?? ""] ?? "확인 필요" : HOLD_KO[m.status ?? ""] ?? "확인 필요"}
-                  tone={m.decision === "approved" || m.status === "held" ? TONE.ok : m.decision === "rejected" ? TONE.bad : TONE.muted} />
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : <p className="mt-2 text-sm text-ink-500">아직 기록이 없습니다.</p>)}
-    </details>
-  );
-}
-
 export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: number; onChanged: () => void; onGoToQueue: (reviewId: string | null) => void }) {
   const res = useResource("settlements", () => finance.settlements(), tick);
   const [sending, setSending] = useState(false);
@@ -184,7 +146,6 @@ export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: num
               )}
               {problem && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">{problem}</p>}
 
-              <MarketOps tick={tick} sellers={Object.fromEntries(s.statements.map((x) => [x.seller_id, x.name]))} />
             </div>
           );
         }}

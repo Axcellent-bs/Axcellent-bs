@@ -1,7 +1,8 @@
 # agents/finance
 담당: 태윤 · 포트: 8105
 ## 1. 역할
-**캣북스 재무팀** + 마켓운영 에이전트 (재무 재설계 2026-10-23, `docs/notes/finance/2026-10-23-finance-redesign.md`).
+**캣북스 재무팀** 에이전트 (재무 재설계 2026-10-23, `docs/notes/finance/2026-10-23-finance-redesign.md`).
+마켓운영(판매자 입점 심사 `seller_review`·정산 보류 `settlement_hold`)은 재무 일이 아니라 2026-10-30에 없앴다.
 결산·리포트, 매출·PG 대사, 판매자 정산, 예산·한도 정책, 사후 감사를 한다. **건별 금액 승인은 하지 않는다**:
 쿠폰·환불 건별 검사는 안전 관문 코드 규칙(금액 계산, `claimed_fields` 불일치, 기준표 한도)이 한다.
 숫자는 전부 코드로 계산하고, LLM은 결산 설명 문장만 쓴다(목 모드·미설정·실패 때는 템플릿 문장).
@@ -21,8 +22,6 @@
 
 | skill | 등급 | 요청자 | 우선순위 | 하는 일 |
 | --- | --- | --- | --- | --- |
-| `seller_review` | B (검증자 data) | orchestrator | recommended | 서류 확인 + data 위험 점수로 판매자 승인 요청 (DEP-FIN-03) |
-| `settlement_hold` | B (검증자 data) | orchestrator | recommended | 위험 판매자 정산 보류 요청 (DEP-FIN-04). 보류된 판매자는 정산 묶음에서 빠진다 |
 | `closing_report` | read | orchestrator, data | optional | 기간 손익 요약 (`ClosingReportInput`·`ClosingReportOutput`) |
 | `audit_report` | read | orchestrator, data | optional | 사후 감사 결과 (`AuditReportInput`·`AuditReportOutput`) |
 | `record_support_cost` | read | orchestrator | recommended | 고객지원이 닫은 문의의 처리 결과를 받아 주문 배송비·비용 기록을 확인하고 장부에 남김. 경비를 쓰지 않은 문의도 처리 결과를 기록, 같은 문의는 한 번만 (`SupportCostInput`·`SupportCostOutput`) |
@@ -50,7 +49,7 @@ uv run ax-test-call --agent http://localhost:8105 --skill audit_report --input i
 ```
 
 ### 가짜 데이터로 돌려 보기 (목 모드)
-safety·finance를 목 모드로 띄운 뒤 `uv run python agents/finance/demo/seed_demo.py`를 실행하면 마케팅·고객지원·통합 에이전트인 척 18건을 보낸다(공지·기록, 보상 쿠폰, 환불, 판매자 심사, 정산 보류). 결과는 대시보드 `http://localhost:3001/finance`에서 본다. 가짜 데이터는 `src/finance_agent/mock_seed.json`이다.
+safety·finance를 목 모드로 띄운 뒤 `uv run python agents/finance/demo/seed_demo.py`를 실행하면 마케팅·고객지원·통합 에이전트인 척 가짜 요청을 보낸다(공지·기록, 보상 쿠폰, 환불, 정산 확정). 결과는 대시보드 `http://localhost:3001/finance`에서 본다. 가짜 데이터는 `src/finance_agent/mock_seed.json`이다.
 
 관리자 사용법(화면 보는 법, 결정 기준): `docs/notes/finance/admin-guide.md`
 
@@ -63,7 +62,9 @@ safety·finance를 목 모드로 띄운 뒤 `uv run python agents/finance/demo/s
   `GET /api/finance/policy`, `GET /api/finance/audit?days=7&context_id=`(사건 선택)
 - 사건별 API (시나리오 A, 재설계 문서 12-1, `incidents.py`): `GET /api/finance/incidents`(`meta.ledger_source`), `GET /api/finance/incidents/{context_id}`(없으면 404 `not_found`). 목 시드: `ctx_inc_scn_a_0001`(data 목과 같은 6건·4명·95,000원 + 보상 2,000원 × 4장), `ctx_inc_0100`(영향 밖 `buy_0999` 보상 → 감사 `compensation_outside_impact`)
 - 장애 구간(`window`)은 총괄 사건 목록 `GET /api/incidents`(8000)의 `opened_at`·`closed_at`을 **읽기 전용으로** 읽어서 안다 (계약 `contracts/src/ax_contracts/data_access/orchestrator_incidents.py`, [협업] #417 제안 A). 사건 **중**에 총괄을 부르는 것이 아니라 평상시 사후 감사·사건 조회에서만 읽는다. 주소는 `AX_ORCHESTRATOR_URL`(기본 `http://orchestrator:8000`). 못 읽거나 계약과 다르거나 아직 열린 사건이면 구간·영향 모두 `null`이고 data에 묻지 않는다(fail-closed). 목 모드는 장부 시드로 구간을 안다
-- 기존 조회 API: `/api/finance/ledger`(사건별 보상 지급·주문별 환불 누적), `/api/finance/market-ops`(판매자 심사·정산 보류 결과), `/api/finance/self-test`(재무 AI 테스트 버튼: 가짜 자료로 계산 규칙 점검 + 안전 장치·쇼핑몰·데이터 AI 연결 확인, 상태를 바꾸지 않음), `/api/finance/self-test/last`(마지막 결과, `data.trigger`=`auto`|`manual`, `meta.interval_seconds`·`meta.next_run_at`)
+- 재무제표: `GET /api/finance/statements?period=month|quarter|year&date=&format=json|csv` (K-IFRS 기능별 손익계산서, 당기·전기, `csv`는 내려받기). 장부에 없는 항목은 `null`(자료 없음)
+- 처리 전 의심 건: `GET /api/finance/anomalies`(기간 제한 없음), `POST /api/finance/anomalies/{finding_ref}/resolve`(사람, 메모 필수). 사후 감사가 찾은 건은 처리할 때까지 남는다
+- 기존 조회 API: `/api/finance/ledger`(사건별 보상 지급·주문별 환불 누적), `/api/finance/self-test`(재무 AI 테스트 버튼: 가짜 자료로 계산 규칙 점검 + 안전 장치·쇼핑몰·데이터 AI 연결 확인, 상태를 바꾸지 않음), `/api/finance/self-test/last`(마지막 결과, `data.trigger`=`auto`|`manual`, `meta.interval_seconds`·`meta.next_run_at`)
 - 재무 AI 테스트 자동 실행: 서버가 켜지고 5초 뒤 한 번, 그다음 `FINANCE_SELF_TEST_SECONDS`(기본 600초, 0이면 끔)마다 서버 안에서 돌려 `/self-test/last`에 남긴다. 테스트(`tests/conftest.py`)는 0으로 끈다
 - 매일 결산 자동 실행(①): 서버가 켜지고 10초 뒤 한 번, 그다음 `FINANCE_DAILY_CLOSING_SECONDS`(기본 86400초=하루, 0이면 끔)마다 **전날** 하루 결산을 계산해 `GET /api/finance/closing/last`에 남긴다(`data.date`·`data.report`·`data.trigger`=`auto`|`manual`·`data.ran_at`, `meta.interval_seconds`·`meta.next_run_at`). 조회만 한다 — 확정(`closing/confirm`)은 사람이 대시보드에서 누른다. 테스트는 0으로 끈다
 - 사람 토큰: 안전 관문과 같은 형식 `Authorization: Bearer human:<이름>`(목 모드) 또는 `FINANCE_HUMAN_TOKENS`/`SAFETY_HUMAN_TOKENS`의 토큰 (`human.py`)

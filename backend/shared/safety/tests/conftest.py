@@ -146,18 +146,19 @@ def act():
     return _request
 
 
-def _seller_review(key: str) -> ExecuteRequest:
-    """data가 교차검증하는 B 액션 (위험 점수 70 미만)."""
-    return _request("seller_review", "finance", key, seller_id="sel_1", risk_score=20)
+def _verified_action(key: str) -> ExecuteRequest:
+    """data가 교차검증하는 B 액션 (서비스 재시작, 걸리는 규칙 없음)."""
+    return _request("restart_service", "infra", key, service="payment")
 
 
 @pytest.fixture
-def seller_review():
-    """검증자가 있는 B 액션 요청을 만든다: `seller_review(key)`.
+def verified_action():
+    """검증자가 있는 B 액션 요청을 만든다: `verified_action(key)`.
 
     쿠폰·환불이 A가 되어(재무 재설계) 검증자 동작은 이 액션으로 확인한다.
+    재무 마켓운영(`seller_review`)을 없애(2026-10-30) 서비스 재시작으로 바꿨다.
     """
-    return _seller_review
+    return _verified_action
 
 
 # 쿠폰·환불이 A가 되어 실제 레지스트리에는 금액 있는 B 에이전트 검증 액션이 없다.

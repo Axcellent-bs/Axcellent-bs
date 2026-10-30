@@ -44,13 +44,12 @@ def test_seed_policy_rules_and_burn_rate() -> None:
         "coupon_unit",
         "coupon_daily",
         "refund_single",
-        "seller_risk",
         "compensation_per_customer",
         "coupon_budget_month",
         "refund_budget_month",
     } <= set(rules)
     assert (rules["refund_single"]["limit"], rules["refund_single"]["unit"]) == (100000, "원")
-    assert (rules["seller_risk"]["limit"], rules["seller_risk"]["unit"]) == (70, "점")
+    assert "seller_risk" not in rules  # 마켓운영은 재무 일이 아니다 (2026-10-30)
     per_request = rules["compensation_per_customer"]
     assert (per_request["used_today"], per_request["ratio"], per_request["alert"]) == (
         None,

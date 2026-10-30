@@ -1,7 +1,12 @@
 """재무 이상 이벤트 plan: 재무 AI 사후 감사가 새 의심 건(같은 고객 반복 환불 등)을 찾았을 때.
 
 `finance.anomaly_detected` 이벤트로 열린다. 재무 AI가 주인공이다.
+<<<<<<< HEAD
+1. 재무 AI가 알린 의심 건(`finding_ref`)을 다시 확인해 사건 기록으로 남긴다 (read).
+   재무는 그 건을 사람이 처리할 때까지 남겨 두므로 감사 기간(7일)이 지나도 찾는다
+=======
 1. 재무 AI가 사후 감사를 다시 돌려 의심 건을 이벤트 기록으로 남긴다 (read)
+>>>>>>> origin/dev
 2. 고객지원 AI가 의심 고객의 이상 신호(문의·클레임·환불 이력)를 본다 (read, 고객이 없으면 건너뜀)
 3. 인사 AI가 이벤트를 회사 기억에 기록한다
 이벤트가 열릴 때 인사 AI `find_similar_cases`로 비슷한 과거 이벤트를 찾아 보여 준다(참고용).
@@ -21,7 +26,9 @@ def _buyers(inc: Incident) -> list[str]:
 
 
 def _audit(inc: Incident) -> dict[str, Any]:
-    return {"days": 7}
+    """알림받은 의심 건 하나를 본다. 재무가 처리 전까지 남겨 두므로 7일이 지나도 찾는다."""
+    ref = inc.signal.get("finding_ref")
+    return {"days": 7, "finding_ref": ref} if isinstance(ref, str) and ref else {"days": 7}
 
 
 def _signals(inc: Incident) -> dict[str, Any]:
