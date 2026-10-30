@@ -330,12 +330,13 @@ async def _builder(logs, send=None, now=LATER):
 
 
 @asyncio
-async def test_tick_fills_missing_last_seven_days_and_skips_saved() -> None:
+async def test_tick_fills_missing_last_fourteen_days_newest_first_and_skips_saved() -> None:
     logs = _logs(week_logs(WEEK))
     store = ReportStore(":memory:")
     now = kst(date(2026, 10, 30), 1)  # 00:30 이후
     built = await snapshot_tick(store, await _builder(logs), TENANT, now)
-    assert built == [date(2026, 10, 23) + timedelta(days=i) for i in range(7)]  # 10-23 ~ 10-29
+    # 기본 14일(주간과 직전 주), 최근 날짜부터: 10-29, 10-28, …, 10-16
+    assert built == [date(2026, 10, 29) - timedelta(days=i) for i in range(14)]
     assert await snapshot_tick(store, await _builder(logs), TENANT, now) == []  # 이미 있음
 
 
@@ -344,7 +345,8 @@ async def test_yesterday_waits_until_0030_kst() -> None:
     store = ReportStore(":memory:")
     early = kst(date(2026, 10, 30), 0, 10)
     days = [d for d, _ in days_to_snapshot(store, TENANT, early)]
-    assert date(2026, 10, 29) not in days and len(days) == 6
+    assert date(2026, 10, 29) not in days and len(days) == 13
+    assert days[0] == date(2026, 10, 28)  # 최근 날짜부터
     late = kst(date(2026, 10, 30), 0, 31)
     assert date(2026, 10, 29) in [d for d, _ in days_to_snapshot(store, TENANT, late)]
 
@@ -398,4 +400,24 @@ async def test_failed_build_does_not_stop_other_days() -> None:
         return await good(day)
 
     built = await snapshot_tick(store, flaky, TENANT, kst(date(2026, 10, 30), 1))
-    assert date(2026, 10, 25) not in built and len(built) == 6
+    assert date(2026, 10, 25) not in built and len(built) == 13
+
+
+def test_backfill_range_comes_from_env_with_default_14() -> None:
+    from data_agent.monitor import BACKFILL_ENV, backfill_days
+
+    assert backfill_days({}) == 14
+    assert backfill_days({BACKFILL_ENV: "21"}) == 21
+    assert backfill_days({BACKFILL_ENV: "주간"}) == 14  # 숫자가 아니면 기본값
+    assert backfill_days({BACKFILL_ENV: "0"}) == 1
+    assert backfill_days({BACKFILL_ENV: "1000"}) == 92  # 재무를 너무 많이 부르지 않게
+
+
+@asyncio
+async def test_backfill_range_from_env_is_used(monkeypatch) -> None:
+    from data_agent.monitor import BACKFILL_ENV
+
+    monkeypatch.setenv(BACKFILL_ENV, "3")
+    store = ReportStore(":memory:")
+    days = [d for d, _ in days_to_snapshot(store, TENANT, kst(date(2026, 10, 30), 1))]
+    assert days == [date(2026, 10, 29), date(2026, 10, 28), date(2026, 10, 27)]

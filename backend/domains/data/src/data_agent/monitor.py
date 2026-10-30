@@ -20,7 +20,7 @@ import asyncio
 import hashlib
 import logging
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta, timezone
 
@@ -34,6 +34,7 @@ from data_agent.report_store import ReportStore, Snapshot
 __all__ = [
     "WATCHED_METRICS",
     "MetricSource",
+    "backfill_days",
     "days_to_snapshot",
     "reset_published",
     "run_forever",
@@ -116,12 +117,15 @@ async def run_forever(
 
 
 # ------------------------------------------------ 업무 리포트 일간 저장 (activity_report)
-# 한국 시간 00:30 이후 처음 돌 때 어제를 만들고, 돌 때마다 최근 7일 중 빠진 날을 채운다.
+# 한국 시간 00:30 이후 처음 돌 때 어제를 만들고, 돌 때마다 최근 N일(기본 14일: 주간과 직전 주) 중
+# 빠진 날을 최근 날짜부터 채운다. N은 `DATA_REPORT_BACKFILL_DAYS`.
 # 이미 있는 날은 다시 만들지 않는다. 확인할 수 없음이 있던 날은 다음 날 한 번만 다시 만든다.
 # 하루씩 차례로 만든다(재무 호출은 하루에 한 번, 동시 상한 안).
 SNAPSHOT_KST = timezone(timedelta(hours=9))
 SNAPSHOT_AFTER = time(0, 30)  # 한국 시간. 어제 일간을 만들기 시작하는 시각
-SNAPSHOT_BACKFILL_DAYS = 7
+BACKFILL_ENV = "DATA_REPORT_BACKFILL_DAYS"
+SNAPSHOT_BACKFILL_DAYS = 14  # 기본값. 주간 리포트와 직전 주
+MAX_BACKFILL_DAYS = 92  # 잘못 넣어도 재무를 너무 많이 부르지 않게
 SNAPSHOT_INTERVAL_SECONDS = 300
 
 logger = logging.getLogger("ax.data.monitor")
@@ -129,13 +133,26 @@ logger = logging.getLogger("ax.data.monitor")
 BuildDay = Callable[[date], Awaitable[Snapshot]]
 
 
-def days_to_snapshot(store: ReportStore, tenant_id: str, now: datetime) -> list[tuple[date, bool]]:
-    """만들 날과 다시 만드는 날인지. 오늘은 만들지 않는다(하루가 끝나지 않았다)."""
+def backfill_days(env: Mapping[str, str] | None = None) -> int:
+    """채울 범위(일). `DATA_REPORT_BACKFILL_DAYS`가 없거나 숫자가 아니면 기본 14, 1~92로 자른다."""
+    raw = (os.environ if env is None else env).get(BACKFILL_ENV, "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return SNAPSHOT_BACKFILL_DAYS
+    return max(1, min(value, MAX_BACKFILL_DAYS))
+
+
+def days_to_snapshot(
+    store: ReportStore, tenant_id: str, now: datetime, backfill: int | None = None
+) -> list[tuple[date, bool]]:
+    """만들 날과 다시 만드는 날인지. 최근 날짜부터. 오늘은 만들지 않는다(하루가 끝나지 않았다)."""
     local = now.astimezone(SNAPSHOT_KST)
     today = local.date()
-    days = [today - timedelta(days=i) for i in range(SNAPSHOT_BACKFILL_DAYS, 0, -1)]
+    span = backfill_days() if backfill is None else backfill
+    days = [today - timedelta(days=i) for i in range(1, span + 1)]  # 어제, 그제, …
     if local.time() < SNAPSHOT_AFTER:
-        days = days[:-1]  # 어제는 00:30이 지나야 만든다
+        days = days[1:]  # 어제는 00:30이 지나야 만든다
     have = store.get_many(tenant_id, days)
     todo: list[tuple[date, bool]] = []
     for day in days:
@@ -152,11 +169,18 @@ def days_to_snapshot(store: ReportStore, tenant_id: str, now: datetime) -> list[
 
 
 async def snapshot_tick(
-    store: ReportStore, build_day: BuildDay, tenant_id: str, now: datetime
+    store: ReportStore,
+    build_day: BuildDay,
+    tenant_id: str,
+    now: datetime,
+    backfill: int | None = None,
 ) -> list[date]:
-    """빠진 날을 만들어 저장한다. 만든 날 목록을 돌려준다. 하루가 실패해도 다음 날은 계속한다."""
+    """빠진 날을 최근 날짜부터 하루씩 만들어 저장한다. 만든 날 목록을 돌려준다.
+
+    하루씩 차례로 만들어 재무 호출은 동시 상한(2) 안이다. 하루가 실패해도 다음 날은 계속한다.
+    """
     built: list[date] = []
-    for day, retry in days_to_snapshot(store, tenant_id, now):
+    for day, retry in days_to_snapshot(store, tenant_id, now, backfill):
         try:
             snapshot = await build_day(day)
         except Exception as error:  # noqa: BLE001 - 다음 주기에 다시 시도한다
@@ -174,10 +198,14 @@ async def run_snapshots_forever(
     interval_seconds: int = SNAPSHOT_INTERVAL_SECONDS,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> None:
-    """`interval_seconds`마다 `snapshot_tick`을 돈다. 시작하자마자 한 번 돌아 빠진 날을 채운다."""
+    """`interval_seconds`마다 `snapshot_tick`을 돈다. 시작하자마자 한 번 돌아 빠진 날을 채운다.
+
+    데이터 앱이 백그라운드 작업으로 켜서, 채우는 동안에도 요청은 바로 받는다.
+    """
+    backfill = backfill_days()
     while True:
         try:
-            await snapshot_tick(store, build_day, tenant_id, clock())
+            await snapshot_tick(store, build_day, tenant_id, clock(), backfill)
         except Exception as error:  # noqa: BLE001 - 저장소 오류로 서버를 멈추지 않는다
             logger.warning("업무 리포트 일간 저장 주기 오류: %s", type(error).__name__)
         await asyncio.sleep(interval_seconds)
