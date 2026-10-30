@@ -19,12 +19,12 @@ export const FAMILIES: { id: Family; name: string; desc: string }[] = [
 ]
 
 /**
- * AXcellent가 관리하는 AI 7개. 예전 캣북스 대시보드(ax-frontend dashboard-web)에 있던 AI를 모두 이리로 옮겼다.
+ * AXcellent가 관리하는 AI 8개. 예전 캣북스 대시보드(ax-frontend dashboard-web)에 있던 AI를 모두 이리로 옮겼다.
  * id는 ax-backend .github/team.yml 부서 id, backend는 화면이 부르는 서버(src/lib/env.ts).
  * 왼쪽 메뉴는 이 순서대로 AI가 상위 탭이고, 그 AI가 맡은 서비스가 하위 탭이다 (AdminShell).
  * 안전 관문(safety)·회사 기억(memory)은 AI 화면이 아니라 뒤에서 도는 서버라 넣지 않는다. 인프라는 DejaFix가 맡는다.
  */
-export type AgentId = 'orchestrator' | 'support' | 'finance' | 'data' | 'hr' | 'marketing' | 'planning'
+export type AgentId = 'orchestrator' | 'support' | 'finance' | 'data' | 'hr' | 'marketing' | 'planning' | 'dev'
 export const AGENTS: { id: AgentId; name: string; Icon: ComponentType<{ size?: number }>; backend: string }[] = [
   { id: 'orchestrator', Icon: IconBolt, name: '총괄', backend: 'orchestrator (8000) · shop-api 관리 중계 (8010)' },
   { id: 'support', Icon: IconUser, name: '고객지원 AI', backend: 'dashboard-api (8020)' },
@@ -32,7 +32,8 @@ export const AGENTS: { id: AgentId; name: string; Icon: ComponentType<{ size?: n
   { id: 'data', Icon: IconChart, name: '데이터분석 AI', backend: 'data (8106)' },
   { id: 'hr', Icon: IconUsers, name: '인사 AI', backend: 'dashboard-api (8020)' },
   { id: 'marketing', Icon: IconMegaphone, name: '마케팅 AI', backend: '연결 전 (화면 안 시연 데이터)' },
-  { id: 'planning', Icon: IconPlan, name: '기획개발 AI', backend: 'planning (8101) · dashboard-api (8020)' },
+  { id: 'planning', Icon: IconPlan, name: '기획 AI', backend: 'planning (8101) · dashboard-api (8020)' },
+  { id: 'dev', Icon: IconCode, name: '개발 AI', backend: 'dev (8111)' },
 ]
 
 export type Service = {
@@ -115,7 +116,7 @@ export const SERVICES: Service[] = [
     desc: '들어온 요청을 정리해 기획서로 만들고, 결과를 요청한 곳에 알립니다.',
   },
   {
-    id: 'dev', agent: 'planning', family: 'product', name: '개발·배포', by: 'AXcellent', Icon: IconCode, entry: '/dev', paths: ['/dev'],
+    id: 'dev', agent: 'dev', family: 'product', name: '개발·배포', by: 'AXcellent', Icon: IconCode, entry: '/dev', paths: ['/dev'],
     desc: '기획서를 작업·PR로 만들고 교차검증·배포·사후관리까지 맡습니다.',
   },
   {
