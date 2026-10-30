@@ -1,7 +1,7 @@
 # agents/data
 담당: 재현 · 포트: 8106
 ## 1. 역할
-쇼핑몰 데이터를 **읽어서** 숫자를 계산하고 돌려준다. skill 6개는 모두 읽기 전용(`grade: read`, `services/data/agent-card.json`)이다.
+쇼핑몰 데이터를 **읽어서** 숫자를 계산하고 돌려준다. skill 7개는 모두 읽기 전용(`grade: read`, `services/data/agent-card.json`)이다.
 
 | skill | 무엇 | 읽는 것 |
 | --- | --- | --- |
@@ -11,6 +11,7 @@
 | `kpi_summary` | 사건별 MTTR, 자동 처리율, 등급별 처리·차단 건수, 이관 건수, 1차·2차 유사 사건 처리 시간 비교 | 공통 로그 저장소(agent-template `common_log`, `AX_COMMON_LOG_DB`) |
 | `root_cause_hypotheses` | 이상 구간 앞 30분~구간 끝의 사실만 근거로 원인 후보(설명·근거 사실 id·확신도) | planning `find_related_prs`, marketing `list_active_notices`, support `detect_inquiry_surge`, memory `card_search` (모두 A2A, `clients/fact_sources.py`) |
 | `accuracy_report` | 정확도 평가 결과 | `eval/results/latest.json`(없으면 `eval/baseline.json`). 다시 계산하지 않는다 |
+| `activity_report` | 부서별 AI 업무 리포트: 부서별 요청·결과·사람에게 넘긴 일·품질·사건 참여, 부서 간 협업, 회사 숫자, 직전 기간 비교 | 공통 로그 저장소, finance `closing_report`(A2A), shop-api `GET /api/shop/metric-series` |
 
 - 숫자는 코드가 계산한다(`metrics/`, `impact.py`, `detect.py`). LLM은 계산이 끝난 숫자로 설명 문장만 쓴다(`explain.py`)
 - 주기 감시(`monitor.py`)는 `anomaly_detection`과 같은 판정 함수로 최근 구간을 보고 `metric.anomaly` 이벤트를 낸다. 사건은 열지 않는다(`context_id` 없음)
@@ -116,9 +117,34 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 - LLM은 1차·2차 MTTR 비교 한 줄만 쓴다(`evidence.data_summary` 첫 줄). 숫자가 어긋나면 고정 문장.
 - 목 정답: 1차 MTTR 9분(기억 참조 없음, 이관 1) / 2차 6분(기억 참조) → "2차 사건은 회사 기억을 참조해 1차보다 3분 빨리 복구했습니다." 등급 A3·B2·C1, 차단 3, 이관 1, 자동 처리율 0.5.
 
+### activity_report (부서별 AI 업무 리포트)
+- **AI를 거친 일만 센다.** 공통 로그에 남은 일만 세고, 사람이 직접 한 일(로그에 없는 일)은 세지 않는다. "절약한 시간" 같은 추정치는 만들지 않는다(근거 없는 숫자).
+- 입력: `period`(day·week·month), `start`(한국 시간 날짜, 비우면 직전 기간: 어제·지난주 월~일·지난달), `services`(서비스 id, 비우면 전체). 직전 기간은 같은 길이의 바로 앞 기간이다.
+- 부서 = `ax_agent_template.services`의 `department`(총괄·고객지원·마케팅·재무·데이터분석·인사·기획개발·인프라). 카드 `owner`는 사람 이름이라(준하 = 총괄+인사 등) 부서마다 `owners`로 함께 보여 준다.
+- 비율은 분모가 3 미만이면 `rate: null` + `note: "표본 부족"`이다. 숫자는 `metrics/activity.py`가 센다.
+
+| 칸 | 출처 | 정의 |
+| --- | --- | --- |
+| `company.gmv`·`commission_revenue` | finance `closing_report`(A2A) | 총거래액·판매 수수료 매출. 재무 마감은 UTC 날짜 기준이라 한국 시간 기간보다 9시간 늦다(`note`). 주간은 하루씩 7번 더한다. 받지 못하면 null |
+| `company.order_count` | shop-api `metric-series` `order_count` | 기간의 5분 버킷 합 |
+| `company.payment_success_rate` | shop-api `payment_count`·`payment_fail_rate` | 1 − 실패/시도. 시도 3건 미만이면 null |
+| `company.incident_count` | 공통 로그 (`kpi_summary`와 같은 `compute_kpi`) | 기간 안 `ctx_inc_` 사건 수 |
+| `requests` | `result_sent` | 부서 서비스가 보낸 응답 1건 = 요청 1건. skill 상위 5개 |
+| `outcomes` | `result_sent` + `execute_decided` + safety 사람 결정(`review_*`) | 확인할 수 없음(`unavailable`·`service_disabled`) / 실패 / 거절 / 보류(`input-required`) / 완료면 그 요청의 안전 관문 판정: executed→자동 완료, held→승인이면 사람 확인 후 실행·거절이면 거절·결정 없으면 보류, verifying(B 교차검증)→확인할 수 없음 |
+| `handoffs` | `task_status` `handed_to_human`, dashboard-api `handoff_done`·`handoff_rejected` | 받을 서비스(`to_service`) 부서로 센다. 처리 시간은 같은 task_id의 넘김 기록이 기간 안에 있을 때만 |
+| `quality.fallback` | `result_sent` payload `fallback`·`fallback_reason` | 완료 응답 중 템플릿 대체 비율(분모에 LLM을 안 쓰는 skill도 있다), 이유별 건수 |
+| `quality.avg_response_ms` | `request_received` ↔ `result_sent` | 같은 (source, context, skill, requester)의 가장 먼저 받은 요청과 짝. 받음이 기간 앞이면 뺀다 |
+| `incidents` | 부서 `result_sent`의 `ctx_inc_` context | 참여한 사건 수, 맡은 skill, 그 사건들 MTTR 중앙값(분) |
+| `collaboration` | `request_received` | 요청한 부서(requester) → 받은 부서 → 횟수. 요청자가 없는 기록(토큰 거부)은 뺀다 |
+| `highlights` | 위 숫자 | 직전 대비 변화율이 큰 건수·금액 항목 최대 3개. 직전 값(분모) 3 미만·변화 없음은 뺀다 |
+| `summary` | `highlights` → LLM | 3줄. 숫자 검증·템플릿 대체 이유는 아래 절과 같다. 특이사항이 없으면 LLM을 부르지 않고 "특이사항 없음" |
+| `unknown_sections` | — | 셀 수 없는 칸과 이유 (서비스 꺼짐, 재무·shop-api 실패, 로그 0건, 조회 한도, B 교차검증 결과 없음) |
+
+- 꺼진 부서는 `enabled: false`이고 AI 응답이 없으니 요청 0건이다. 사람에게 넘긴 일만 센다. 재무가 꺼지면 매출은 0이 아니라 null + `unknown_sections`다.
+
 ### 설명 문장(LLM)과 템플릿 대체 이유
 - 숫자는 코드가 계산하고 LLM은 문장만 쓴다(`explain.py`). 문장에 넘긴 facts에 없는 숫자가 있거나 LLM이 실패하면 고정 템플릿으로 바꾸고 `fallback=true`다.
-- 바꾼 이유를 남긴다 (`AgentResult.fallback_reason`, 영향 분석·이상 탐지·KPI):
+- 바꾼 이유를 남긴다 (`AgentResult.fallback_reason`, 영향 분석·이상 탐지·KPI·업무 리포트):
 
 | 이유 | 언제 |
 | --- | --- |

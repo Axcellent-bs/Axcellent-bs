@@ -92,6 +92,20 @@
       "verifier": null,
       "priority": "recommended",
       "handoff": false
+    },
+    {
+      "id": "activity_report",
+      "description": "부서별 AI 업무 리포트. 기간(day·week·month, 한국 시간 날짜)의 공통 로그를 읽어 부서(서비스 대응표 department)별 처리한 요청·skill 상위 5개, 결과(자동 완료·사람 확인 후 실행·보류·거절·확인할 수 없음·실패), 사람에게 넘긴 일, 템플릿 대체 비율과 이유, 평균 응답 시간, 참여한 사건과 MTTR 중앙값, 부서 간 A2A 협업 횟수를 직전 기간과 함께 센다. 회사 숫자는 재무 closing_report(A2A), shop-api metric-series, 공통 로그 사건 수에서 받는다. 숫자는 코드가 세고, 비율은 분모 3 미만이면 null(표본 부족)이다. 직전 대비 변화가 큰 항목 최대 3개만 LLM이 3줄로 설명하며, 없으면 '특이사항 없음'이다. AI를 거친 일만 세고 절약 시간 같은 추정치는 내지 않는다. 셀 수 없는 칸은 unknown_sections에 이유를 남긴다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#ActivityReportInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#ActivityReportOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
     }
   ]
 }

@@ -28,6 +28,11 @@ _PROMPT = (
     "원인을 단정하지 말 것. 판단·추측·권고는 쓰지 말 것.\n"
     "kind: {kind}\nfacts: {facts}"
 )
+# kind별로 더 붙이는 규칙. 여기 없는 kind는 위 문장 그대로다(평가 프롬프트가 바뀌지 않게).
+_KIND_RULES = {
+    "activity": "\n추가 규칙: 한두 문장 대신 항목마다 한 줄씩, 최대 3줄로 쓸 것. "
+    "줄은 줄바꿈으로 나눌 것. 항목 이름은 facts의 한국어 이름 그대로 쓸 것.",
+}
 
 
 class _Summary(BaseModel):
@@ -115,7 +120,23 @@ def _kpi_template(facts: dict[str, int | float | str]) -> str:
     return f"2차 사건은 {memory}1차보다 {_fmt(diff)}분 빨리 복구했습니다."
 
 
+def _activity_template(facts: dict[str, int | float | str]) -> str:
+    """특이사항 한 줄씩 (activity_report). facts 키: 항목N·직전N·이번N·변화율N·방향N."""
+    lines = []
+    i = 1
+    while f"항목{i}" in facts:
+        lines.append(
+            f"{facts[f'항목{i}']}: 직전 {_fmt(facts.get(f'직전{i}'), comma=True)} → "
+            f"이번 {_fmt(facts.get(f'이번{i}'), comma=True)} "
+            f"({_fmt(facts.get(f'변화율{i}'))}% {_fmt(facts.get(f'방향{i}'))})"
+        )
+        i += 1
+    return "\n".join(lines) or "특이사항 없음"
+
+
 def _template(kind: str, facts: dict[str, int | float | str]) -> str:
+    if kind == "activity":
+        return _activity_template(facts)
     if kind == "impact":
         return (
             f"장애 구간 실패 주문 {_fmt(facts.get('failed_order_count'))}건, "
@@ -140,7 +161,8 @@ async def explain(kind: str, facts: dict[str, int | float | str], llm: LLMClient
         return Explanation(_template(kind, facts), True, reason, tuple(numbers or ()))
 
     try:
-        result = await llm.structured(_PROMPT.format(kind=kind, facts=facts), _Summary)
+        prompt = _PROMPT.format(kind=kind, facts=facts) + _KIND_RULES.get(kind, "")
+        result = await llm.structured(prompt, _Summary)
         summary = result.summary.strip()
     except LLMNotConfiguredError:
         return fallback(LLM_UNAVAILABLE)
