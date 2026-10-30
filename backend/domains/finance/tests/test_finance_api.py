@@ -87,6 +87,7 @@ def test_overview_shape(client: TestClient) -> None:
     kinds = [t["kind"] for t in data["todo"]]
     assert kinds == [
         "settlement_batch",
+        "settlement_deadline",
         "closing_confirm",
         "recon_exception",
         "audit_finding",

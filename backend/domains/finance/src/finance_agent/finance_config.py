@@ -31,6 +31,10 @@ class CommissionConfig(_Strict):
 class SettlementConfig(_Strict):
     cycle: str = "weekly"
     pay_days_after_period_end: int = Field(ge=0)
+    deadline_days: int = Field(default=20, ge=1)
+    deadline_basis: str = "구매 확정일부터"
+    deadline_warn_days: int = Field(default=5, ge=0)
+    deadline_lookback_days: int = Field(default=70, ge=7)
 
 
 class PgConfig(_Strict):
@@ -54,6 +58,11 @@ class ProposalConfig(_Strict):
     max_step_ratio: float = Field(gt=0, le=1)
 
 
+class VarianceConfig(_Strict):
+    flag_ratio: float = Field(default=0.1, gt=0)
+    flag_min_amount: int = Field(default=10000, ge=0)
+
+
 class AuditConfig(_Strict):
     near_limit_ratio: float = Field(gt=0, le=1)
     split_window_minutes: int = Field(ge=1)
@@ -71,6 +80,7 @@ class FinanceConfig(_Strict):
     commission: CommissionConfig
     settlement: SettlementConfig
     pg: PgConfig
+    variance: VarianceConfig = VarianceConfig()
     budget: BudgetConfig
     proposal: ProposalConfig
     audit: AuditConfig
