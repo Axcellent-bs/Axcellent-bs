@@ -7,6 +7,7 @@ import { KpiStrip } from "@/components/admin/KpiBar";
 import { NewInquiryModal } from "@/components/admin/NewInquiryModal";
 import { SummaryCard } from "@/components/admin/SummaryCard";
 import { Thread } from "@/components/admin/Thread";
+import { ORIGINAL_OPENED } from "@/lib/useOriginal";
 import { OFFLINE } from "@/components/admin/bits";
 import { api } from "@/lib/api";
 import { STATUS_KO } from "@/lib/labels";
@@ -34,6 +35,16 @@ function Console() {
     return l;
   }, []);
   const open = useCallback(async (id: number) => { setConv(await api.admin.get(id)); setShowSummary(true); }, []);
+
+  // 원문을 연 직후, 열람 기록이 AI 처리 내력에 바로 보이게 열린 문의만 다시 읽는다
+  useEffect(() => {
+    const onOpened = (e: Event) => {
+      const id = (e as CustomEvent<{ inquiryId: number }>).detail.inquiryId;
+      void api.admin.get(id).then((c) => setConv((cur) => (cur && cur.id === c.id ? c : cur))).catch(() => undefined);
+    };
+    window.addEventListener(ORIGINAL_OPENED, onOpened);
+    return () => window.removeEventListener(ORIGINAL_OPENED, onOpened);
+  }, []);
 
   useEffect(() => {
     (async () => {
