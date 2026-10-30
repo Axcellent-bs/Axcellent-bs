@@ -74,6 +74,8 @@ function detailOf(e: ActivityEntry): string {
       );
     case "feedback_status_changed":
       return FEEDBACK_STATUS_KO[str(d.status) ?? ""] ?? "";
+    case "resolution_note_added":
+      return "";
     case "claim_created":
     case "claim_decided":
     case "claim_return_received":

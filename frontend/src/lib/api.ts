@@ -96,6 +96,8 @@ export const api = {
       post<FeedbackItem>(`/api/dashboard/feedback/${inquiryId}/status`, { status }),
     submitFeedback: (id: number, b: { rating: number; resolved: boolean; comment: string }) =>
       post<Conversation>(`/api/dashboard/conversations/${id}/feedback`, b),
+    addResolutionNote: (id: number, b: { root_cause: string; action_taken: string; result: string }) =>
+      post<Conversation>(`/api/dashboard/conversations/${id}/resolution-notes`, b),
     claimSuggestion: (id: number) => post<ClaimSuggestion>(`/api/dashboard/conversations/${id}/claim-suggestion`),
     createClaim: (id: number, b: ClaimIntake) => post<ClaimDetail>(`/api/dashboard/conversations/${id}/claims`, b),
     summary: (id: number) => post<Summary>(`/api/dashboard/conversations/${id}/summary`),

@@ -169,6 +169,18 @@
       "priority": "recommended"
     },
     {
+      "id": "add_resolution_note",
+      "description": "해결된 문의에 상담원이 해결 메모(원인·조치·결과)를 남긴다. 글은 untrusted(root_cause·action_taken·result)로만 받고 개인정보는 가려 저장하며 칸마다 1000자까지, 셋 다 비면 받지 않는다. 작성자는 화면이 사람 토큰에서 채운 이름이다. 메모는 최신 순으로 쌓고 고치거나 지우지 않는다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#AddResolutionNoteInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#ResolutionNote",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "list_feedback",
       "description": "후기(해결 결과 평가) 목록을 최근 순으로 읽는다. 상태·별점으로 거를 수 있다.",
       "input_schema": "agents/support/src/support_agent/schemas.py#ListFeedbackInput",

@@ -172,7 +172,8 @@ export interface ActivityEntry {
   at: string; actor: "ai" | "agent" | "customer" | "system"; kind: string; title: string; detail: string;
   ref: string | null; data: Record<string, unknown>;
 }
-export interface Conversation extends ConversationListItem { messages: Message[]; summary: Summary | null; order_no: string | null; claims: Claim[]; activity: ActivityEntry[]; feedback: Feedback | null }
+export interface ResolutionNote { id: number; author: string; root_cause: string | null; action_taken: string | null; result: string | null; created_at: string }
+export interface Conversation extends ConversationListItem { messages: Message[]; summary: Summary | null; order_no: string | null; claims: Claim[]; activity: ActivityEntry[]; feedback: Feedback | null; resolution_notes: ResolutionNote[] }
 
 export interface Kpi {
   conversations: number; by_status: Record<string, number>; agent_replies: number; draft_adoption_rate: number | null;

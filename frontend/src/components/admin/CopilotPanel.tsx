@@ -8,6 +8,7 @@ import { StatusChip } from "./bits";
 import { ActivityLog } from "./ActivityLog";
 import { ClaimIntake } from "./ClaimIntake";
 import { FeedbackCard } from "./FeedbackCard";
+import { ResolutionNotesCard } from "./ResolutionNotesCard";
 import { ReceiptAnalysisCard } from "./ReceiptAnalysisCard";
 
 /** 가장 가까운 근거 정책의 유사도가 이 값 미만이면 "근거 정책 부족"으로 알린다.
@@ -130,6 +131,8 @@ export function CopilotPanel({ conv, onUseDraft, onRejectDraft, onClaimCreated, 
       )}
 
       <FeedbackCard conv={conv} onSaved={onFeedback} />
+
+      <ResolutionNotesCard conv={conv} onSaved={onFeedback} />
 
       <ActivityLog items={conv.activity ?? []} />
     </aside>

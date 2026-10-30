@@ -659,3 +659,70 @@ def test_rating_an_unresolved_inquiry_is_a_conflict(client: TestClient, fake: Fa
     fake.outcomes["submit_feedback"] = "invalid_state"
     response = client.post(BASE + "/conversations/7/feedback", json={"rating": 5, "resolved": True})
     assert response.status_code == 409 and response.json()["error"]["code"] == "INVALID_STATE"
+
+
+# ---------------------------------------------------------------- 해결 메모
+NOTE = {
+    "id": 1,
+    "author": "tester",
+    "root_cause": "택배사 분류 오류",
+    "action_taken": None,
+    "result": "다음 날 도착",
+    "created_at": "2026-10-30T01:00:00Z",
+}
+
+
+def test_console_adds_a_resolution_note_with_the_author_from_the_token(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.outputs["add_resolution_note"] = {"inquiry_id": 7, "note_id": 1}
+    fake.outputs["get_inquiry"] = {**INQUIRY, "status": "resolved", "resolution_notes": [NOTE]}
+    response = client.post(
+        BASE + "/conversations/7/resolution-notes",
+        json={
+            "root_cause": "택배사 분류 오류",
+            "result": "다음 날 도착",
+            "author": "남이 보낸 이름",  # 본문의 작성자는 쓰지 않는다
+        },
+    )
+    assert response.status_code == 201
+    notes = response.json()["data"]["resolution_notes"]
+    assert notes[0]["author"] == "tester" and notes[0]["action_taken"] is None
+    sent = next(r for r in fake.sent if r.skill == "add_resolution_note")
+    assert sent.input == {"inquiry_id": 7, "author": "tester"}  # 사람 토큰의 이름
+    assert sent.untrusted == {
+        "root_cause": "택배사 분류 오류",
+        "action_taken": "",
+        "result": "다음 날 도착",
+    }  # 상담원이 쓴 글은 untrusted로만
+    assert sent.meta.idempotency_key.endswith(":add_resolution_note:inquiry:7")
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"root_cause": "  ", "action_taken": "", "result": " "},
+        {"root_cause": "가" * 1001},
+    ],
+)
+def test_an_empty_or_too_long_note_is_a_422_and_support_is_not_called(
+    client: TestClient, fake: Fake, body: dict[str, str]
+) -> None:
+    response = client.post(BASE + "/conversations/7/resolution-notes", json=body)
+    assert response.status_code == 422
+    assert not [r for r in fake.sent if r.skill == "add_resolution_note"]
+
+
+def test_a_note_on_an_unresolved_inquiry_is_a_conflict(client: TestClient, fake: Fake) -> None:
+    fake.outputs["add_resolution_note"] = {"message": "해결된 문의에만 해결 메모를 남길 수 있다"}
+    fake.outcomes["add_resolution_note"] = "invalid_state"
+    response = client.post(BASE + "/conversations/7/resolution-notes", json={"result": "끝"})
+    assert response.status_code == 409 and response.json()["error"]["code"] == "INVALID_STATE"
+
+
+def test_a_note_needs_a_human_token(client: TestClient, fake: Fake) -> None:
+    client.headers.pop("authorization")
+    response = client.post(BASE + "/conversations/7/resolution-notes", json={"result": "끝"})
+    assert response.status_code == 401
+    assert not fake.sent
