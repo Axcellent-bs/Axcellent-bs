@@ -133,14 +133,14 @@ export function DevToolsPanel() {
               <select className="field" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })} aria-label="형상관리 종류">
                 {KINDS.map((k) => <option key={k.id} value={k.id} disabled={!k.ready}>{k.label}{k.ready ? '' : ' — 준비 중'}</option>)}
               </select>
-              <input className="field font-mono" placeholder="API 주소 (비우면 github.com, 사내 설치형은 https://<주소>/api/v3)" value={form.base_url}
+              <input className="field" placeholder="API 주소 (비우면 github.com, 사내 설치형은 https://<주소>/api/v3)" value={form.base_url}
                 onChange={(e) => setForm({ ...form, base_url: e.target.value })} aria-label="API 주소" />
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <input className="field font-mono" placeholder="레포 owner/name" value={form.repo} onChange={(e) => setForm({ ...form, repo: e.target.value })} aria-label="레포" />
-              <input className="field font-mono" placeholder="병합 대상 브랜치" value={form.base_branch} onChange={(e) => setForm({ ...form, base_branch: e.target.value })} aria-label="병합 대상 브랜치" />
+              <input className="field" placeholder="레포 owner/name" value={form.repo} onChange={(e) => setForm({ ...form, repo: e.target.value })} aria-label="레포" />
+              <input className="field" placeholder="병합 대상 브랜치" value={form.base_branch} onChange={(e) => setForm({ ...form, base_branch: e.target.value })} aria-label="병합 대상 브랜치" />
               {form.auth === 'token' && (
-                <input className="field font-mono" type="password" autoComplete="off" placeholder={editing?.token_set ? '접근 토큰 (비우면 기존 토큰 유지)' : '접근 토큰'} value={form.token}
+                <input className="field" type="password" autoComplete="off" placeholder={editing?.token_set ? '접근 토큰 (비우면 기존 토큰 유지)' : '접근 토큰'} value={form.token}
                   onChange={(e) => setForm({ ...form, token: e.target.value })} aria-label="접근 토큰" />
               )}
             </div>
@@ -154,8 +154,8 @@ export function DevToolsPanel() {
                 </div>
                 {form.auth === 'app' && (
                   <div className="grid gap-3 md:grid-cols-3">
-                    <input className="field font-mono" inputMode="numeric" placeholder="앱 ID (App ID)" value={form.app_id} onChange={(e) => setForm({ ...form, app_id: e.target.value })} aria-label="앱 ID" />
-                    <input className="field font-mono" inputMode="numeric" placeholder="설치 ID (Installation ID)" value={form.installation_id} onChange={(e) => setForm({ ...form, installation_id: e.target.value })} aria-label="설치 ID" />
+                    <input className="field" inputMode="numeric" placeholder="앱 ID (App ID)" value={form.app_id} onChange={(e) => setForm({ ...form, app_id: e.target.value })} aria-label="앱 ID" />
+                    <input className="field" inputMode="numeric" placeholder="설치 ID (Installation ID)" value={form.installation_id} onChange={(e) => setForm({ ...form, installation_id: e.target.value })} aria-label="설치 ID" />
                     <label className="field flex cursor-pointer items-center gap-2 text-sm">
                       <input type="file" accept=".pem,application/x-pem-file" className="sr-only" onChange={(e) => pickKey(e.target.files?.[0])} aria-label="개인 키 파일" />
                       <span className="chip bg-ink-100 text-ink-700">개인 키 .pem</span>
@@ -167,8 +167,8 @@ export function DevToolsPanel() {
             )}
             <div className="grid gap-3 md:grid-cols-2">
               <input className="field" placeholder="설명 (예: 쇼핑몰 웹)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} aria-label="설명" />
-              <textarea className="field font-mono" rows={2} placeholder="담당 경로 (예: shop-web/, src/)" value={form.paths} onChange={(e) => setForm({ ...form, paths: e.target.value })} aria-label="담당 경로" />
-              <input className="field font-mono md:col-span-2" placeholder="회사 코드 위치 (예: shop-web/ · 레포가 회사 코드의 한 폴더일 때. 비우면 레포 루트)" value={form.mount} onChange={(e) => setForm({ ...form, mount: e.target.value })} aria-label="회사 코드 위치" />
+              <textarea className="field" rows={2} placeholder="담당 경로 (예: shop-web/, src/)" value={form.paths} onChange={(e) => setForm({ ...form, paths: e.target.value })} aria-label="담당 경로" />
+              <input className="field md:col-span-2" placeholder="회사 코드 위치 (예: shop-web/ · 레포가 회사 코드의 한 폴더일 때. 비우면 레포 루트)" value={form.mount} onChange={(e) => setForm({ ...form, mount: e.target.value })} aria-label="회사 코드 위치" />
             </div>
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
               <span className="text-ink-500">{form.auth === 'app' ? '앱 권한 (설치할 때 이 레포만 고르기)' : '토큰 권한 (이 레포만)'}</span>
@@ -206,7 +206,7 @@ export function DevToolsPanel() {
               return (
                 <li key={c.id} className={`rounded-xl border p-4 ${form?.id === c.id ? 'border-ink-400' : 'border-ink-100'}`}>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono font-medium">{c.repo}</span>
+                    <span className="font-medium">{c.repo}</span>
                     <span className="chip bg-ink-100 text-ink-700">{KIND_LABEL[c.kind] ?? c.kind}</span>
                     <span className={`chip ${st.tone}`}>{st.label}</span>
                     <span className="chip bg-ink-100 text-ink-500">{SOURCE[c.source] ?? c.source}</span>
@@ -217,19 +217,19 @@ export function DevToolsPanel() {
                     </div>
                   </div>
                   <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                    <div><dt className="text-xs text-ink-500">병합 대상 브랜치</dt><dd className="mt-0.5 font-mono">{c.base_branch || '—'}</dd></div>
-                    <div><dt className="text-xs text-ink-500">API 주소</dt><dd className="mt-0.5 truncate font-mono text-xs leading-5">{c.base_url || '기본 주소'}</dd></div>
+                    <div><dt className="text-xs text-ink-500">병합 대상 브랜치</dt><dd className="mt-0.5">{c.base_branch || '—'}</dd></div>
+                    <div><dt className="text-xs text-ink-500">API 주소</dt><dd className="mt-0.5 truncate text-xs leading-5">{c.base_url || '기본 주소'}</dd></div>
                     {c.auth === 'app' ? (
-                      <div><dt className="text-xs text-ink-500">GitHub App</dt><dd className="mt-0.5 font-mono">앱 {c.app_id} · 설치 {c.installation_id}{c.key_set ? '' : ' · 키 없음'}</dd></div>
+                      <div><dt className="text-xs text-ink-500">GitHub App</dt><dd className="mt-0.5">앱 {c.app_id} · 설치 {c.installation_id}{c.key_set ? '' : ' · 키 없음'}</dd></div>
                     ) : (
-                      <div><dt className="text-xs text-ink-500">접근 토큰</dt><dd className="mt-0.5 font-mono">{c.token_set ? c.token_hint : '없음'}</dd></div>
+                      <div><dt className="text-xs text-ink-500">접근 토큰</dt><dd className="mt-0.5">{c.token_set ? c.token_hint : '없음'}</dd></div>
                     )}
                     <div><dt className="text-xs text-ink-500">설명</dt><dd className="mt-0.5">{c.description || '—'}</dd></div>
-                    <div><dt className="text-xs text-ink-500">회사 코드 위치</dt><dd className="mt-0.5 font-mono">{c.mount || '레포 루트'}</dd></div>
+                    <div><dt className="text-xs text-ink-500">회사 코드 위치</dt><dd className="mt-0.5">{c.mount || '레포 루트'}</dd></div>
                     <div className="sm:col-span-2 lg:col-span-4">
                       <dt className="text-xs text-ink-500">담당 경로</dt>
                       <dd className="mt-1 flex flex-wrap gap-1.5">
-                        {c.paths.length ? c.paths.map((p) => <span key={p} className="chip bg-ink-100 font-mono text-ink-700">{p}</span>) : <span className="text-ink-500">—</span>}
+                        {c.paths.length ? c.paths.map((p) => <span key={p} className="chip bg-ink-100 text-ink-700">{p}</span>) : <span className="text-ink-500">—</span>}
                       </dd>
                     </div>
                     {t && (
