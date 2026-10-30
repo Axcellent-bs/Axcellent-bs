@@ -442,6 +442,8 @@ class PlanningService:
         self._send_dev: DevSender = dev_sender or send_to_service
         self._sending: set[asyncio.Task] = set()
         self._resuming = False  # 대기 대화를 깨우는 중 (다시 깨우지 않는다)
+        self._retrying = False  # 못 보낸 넘기기를 다시 보내는 중
+        self._retry_task: asyncio.Task | None = None
         self._polling_wait = False  # 다른 서비스 요청을 기다리는 대화를 주기적으로 보는 중
         # 코딩 에이전트 실행 (작업 id → 실행 중인 태스크·실행 번호). 번호가 바뀐 실행은 버린다
         self._coding: dict[str, asyncio.Task] = {}
@@ -481,12 +483,14 @@ class PlanningService:
         self.state.tenant_id = self.tenant_id
         self._idempotent: dict[str, ActionResult] = {}
         self._dev_sent: dict[str, str] = {}  # dev: 기획서 → 마지막으로 돌려준 결과 지문
+        # 못 보낸 넘기기 (멱등 키 → [skill, context_id, 입력]). 주기적으로 다시 보낸다
+        self._unsent: dict[str, list] = {}
         # 상태 파일(PLANNING_STATE_DIR)이 있으면 이어서 시작한다. 초기화(fresh)면 시드로 덮어쓴다
         self._state_path = state_store.path_for(self.role)
         if self._state_path and not fresh:
             saved = state_store.load(self._state_path)
             if saved is not None:
-                self.state, idem, self._dev_sent = saved
+                self.state, idem, self._dev_sent, self._unsent = saved
                 self._idempotent = {k: ActionResult(**v) for k, v in idem.items()}
         elif self._state_path:
             self._save()
@@ -496,7 +500,9 @@ class PlanningService:
         if not self._state_path:
             return
         try:
-            state_store.save(self._state_path, self.state, self._idempotent, self._dev_sent)
+            state_store.save(
+                self._state_path, self.state, self._idempotent, self._dev_sent, self._unsent
+            )
         except OSError:
             pass
 
@@ -697,11 +703,13 @@ class PlanningService:
 
     # ---- 기획 → 개발 넘기기 (서비스 역할이 있을 때만)
 
-    def _dev_outgoing(self, s: State) -> list[tuple[str, str, BaseModel, str]]:
+    def _dev_outgoing(self, s: State, full: bool = False) -> list[tuple[str, str, BaseModel, str]]:
         """이번 액션으로 보낼 넘기기 목록 (skill, context_id, 입력, idempotency_key).
 
         planning: 이번에 넘김 표시가 붙은 기획서.
-        dev: 작업·PR·요청 상태가 지난번과 달라진 기획서."""
+        dev: 작업·PR·요청 상태가 지난번과 달라진 기획서.
+        full이면(다시 켰을 때 맞추기) 넘긴 기획서를 모두 다시 보낸다. 같은 멱등 키라 받는 쪽이
+        이미 가진 건 그대로 두고, 잃은 쪽만 다시 반영한다."""
         if not self.role:
             return []
         out: list[tuple[str, str, BaseModel, str]] = []
@@ -709,7 +717,7 @@ class PlanningService:
             was = {sp.id for sp in self.state.specs if sp.handed_to_dev}
             for sp in s.specs:
                 req = self._request_of_spec(s, sp)
-                if not sp.handed_to_dev or sp.id in was or req is None:
+                if not sp.handed_to_dev or (sp.id in was and not full) or req is None:
                     continue
                 inp = DevHandoffInput(
                     request=dump(req),
@@ -736,7 +744,7 @@ class PlanningService:
             )
             raw = json.dumps(res.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
             fp = hashlib.sha1(raw.encode()).hexdigest()[:12]
-            if self._dev_sent.get(sp.id) == fp:
+            if self._dev_sent.get(sp.id) == fp and not full:
                 continue
             self._dev_sent[sp.id] = fp
             out.append(
@@ -756,7 +764,18 @@ class PlanningService:
         except Exception:  # 넘기기 실패가 이미 바꾼 상태를 되돌리지 않게 한다
             how = "보내지 못함 (오류)"
         if how.startswith("보냄"):
+            if self._unsent.pop(key, None) is not None:
+                self._save()
             return
+        retry = "rejected" not in how  # 받는 쪽이 거절한 건 다시 보내도 같다
+        first = key not in self._unsent
+        if retry:
+            self._unsent[key] = [skill, ctx, payload.model_dump(mode="json")]
+            self._save()
+            self._schedule_retry()
+            how += " → 30초마다 다시 보냄"
+        if not first:
+            return  # 다시 보내기 실패는 활동에 거듭 남기지 않는다
         frm, to = ("planning", "dev") if self.role == "planning" else ("dev", "planning")
 
         async def log(s: State) -> None:
@@ -765,6 +784,43 @@ class PlanningService:
             )
 
         await self._apply(log)
+
+    def _schedule_retry(self) -> None:
+        """못 보낸 넘기기를 RETRY_SECONDS마다 다시 보낸다 (한 번에 하나만 돈다)."""
+        if self._retrying or not self._unsent:
+            return
+        self._retrying = True
+
+        async def loop() -> None:
+            try:
+                while self._unsent:
+                    await asyncio.sleep(RETRY_SECONDS)
+                    await self.resend_unsent()
+            finally:
+                self._retrying = False
+
+        try:
+            task = asyncio.get_running_loop().create_task(loop())
+        except RuntimeError:
+            self._retrying = False
+            return
+        self._retry_task = task  # wait_sent는 기다리지 않는다 (계속 도는 루프)
+
+    async def resend_unsent(self) -> None:
+        """못 보낸 넘기기를 한 번씩 다시 보낸다."""
+        for key, (skill, ctx, body) in list(self._unsent.items()):
+            model = DevHandoffInput if skill == START_DEV else DevResultInput
+            await self._send_one(skill, ctx, model.model_validate(body), key)
+
+    async def resync_peer(self) -> None:
+        """다시 켰을 때 상대 서비스와 맞춘다: 못 보낸 것을 다시 보내고, 넘긴 기획서를 모두
+        다시 보낸다 (같은 멱등 키라 상대가 이미 가진 건 그대로, 잃은 쪽만 다시 반영)."""
+        if not self.role:
+            return
+        await self.resend_unsent()
+        for item in self._dev_outgoing(self.state, full=True):
+            await self._send_one(*item)
+        self._save()
 
     async def wait_sent(self) -> None:
         """보내는 중인 넘기기가 끝날 때까지 기다린다 (테스트용)."""
@@ -4236,6 +4292,7 @@ __all__ = [
 
 
 WAIT_POLL_SECONDS = 30  # 다른 서비스 요청을 기다리는 대화를 다시 보는 간격
+RETRY_SECONDS = 30  # 못 보낸 넘기기를 다시 보내는 간격
 
 
 def _cross_check_timeout_min() -> int:

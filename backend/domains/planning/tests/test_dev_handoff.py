@@ -284,3 +284,106 @@ def test_planning_stores_dev_team_request_and_spec() -> None:
     assert any(r.id == "REQ-D9" and r.via == "dev_team" for r in st.requests)
     assert any(s.id == "SPEC-D9" for s in st.specs)
     assert any("개발팀 기획 SPEC-D9 받음" in a.text for a in st.activity)
+
+
+# ---- 넘기기 다시 보내기·다시 켰을 때 맞추기: 끊겨도 결국 같은 상태가 된다
+
+
+class Flaky:
+    """처음 n번은 못 보내고 그 뒤로는 보낸다."""
+
+    def __init__(self, fails: int, how: str = "보내지 못함 (failed 연결 안 됨)"):
+        self.fails = fails
+        self.how = how
+        self.sent: list[str] = []
+
+    async def __call__(self, skill: str, ctx: str, tenant: str, p: BaseModel, key: str) -> str:
+        self.sent.append(key)
+        if self.fails > 0:
+            self.fails -= 1
+            return self.how
+        return "보냄"
+
+
+def _failed_logs(svc: PlanningService) -> list[str]:
+    return [a.text for a in svc.state.activity if a.point == START_DEV and "보내지 못함" in a.text]
+
+
+def test_unsent_is_resent_until_it_goes() -> None:
+    send = Flaky(fails=2)
+
+    async def run() -> PlanningService:
+        svc = PlanningService(role="planning", dev_sender=send)
+        await svc.inbound("support_ticket")
+        await svc.wait_sent()
+        assert len(svc._unsent) == 1
+        await svc.resend_unsent()  # 또 실패
+        assert len(svc._unsent) == 1
+        await svc.resend_unsent()  # 이번엔 감
+        return svc
+
+    svc = asyncio.run(run())
+    assert svc._unsent == {}
+    assert len(set(send.sent)) == 1 and len(send.sent) == 3  # 같은 멱등 키로 다시 보냄
+    assert len(_failed_logs(svc)) == 1  # 실패는 활동에 한 번만
+
+
+def test_rejected_is_not_retried() -> None:
+    send = Flaky(fails=1, how="보내지 못함 (rejected invalid_input)")
+
+    async def run() -> PlanningService:
+        svc = PlanningService(role="planning", dev_sender=send)
+        await svc.inbound("support_ticket")
+        await svc.wait_sent()
+        return svc
+
+    svc = asyncio.run(run())
+    assert svc._unsent == {}
+    assert _failed_logs(svc)
+
+
+def test_unsent_survives_restart(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("PLANNING_STATE_DIR", str(tmp_path))
+    first = Flaky(fails=1)
+
+    async def down() -> PlanningService:
+        svc = PlanningService(role="planning", dev_sender=first)
+        await svc.inbound("support_ticket")
+        await svc.wait_sent()
+        return svc
+
+    key = next(iter(asyncio.run(down())._unsent))
+    later = Flaky(fails=0)
+
+    async def up() -> PlanningService:
+        svc = PlanningService(role="planning", dev_sender=later)  # 다시 켬
+        assert key in svc._unsent
+        await svc.resync_peer()
+        return svc
+
+    svc = asyncio.run(up())
+    assert svc._unsent == {}
+    assert key in later.sent
+
+
+def test_resync_restores_lost_peer() -> None:
+    """개발 서비스가 상태를 잃고 다시 떠도 기획이 다시 맞추면 기획서가 돌아온다."""
+
+    async def run() -> Wire:
+        w = Wire()
+        await w.planning.inbound("support_ticket")
+        await w.settle()
+        spec = w.planning.state.specs[-1].id
+        assert any(s.id == spec for s in w.dev.state.specs)
+        w.dev = PlanningService(role="dev", dev_sender=w.send)  # 상태 없이 다시 뜸
+        assert not any(s.id == spec for s in w.dev.state.specs)
+        await w.planning.resync_peer()
+        await w.settle()
+        assert any(s.id == spec for s in w.dev.state.specs)
+        n = len(w.dev.state.specs)
+        await w.planning.resync_peer()  # 또 맞춰도 늘지 않는다 (멱등)
+        await w.settle()
+        assert len(w.dev.state.specs) == n
+        return w
+
+    asyncio.run(run())
