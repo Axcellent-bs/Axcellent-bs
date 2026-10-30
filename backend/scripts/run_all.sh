@@ -105,7 +105,7 @@ fi
 # (캣북스 쇼핑몰은 비어 있으면 시드를 다시 넣는다)
 if [ "$CMD" = "reset" ]; then
   stop_all
-  rm -f "$DATA"/*.db "$DATA"/*.db-wal "$DATA"/*.db-shm "$DATA"/web.env
+  rm -f "$DATA"/*.db "$DATA"/*.db-wal "$DATA"/*.db-shm "$DATA"/web.env "$DATA"/tokens.env
   docker exec ax-redis redis-cli FLUSHALL >/dev/null 2>&1 || true
   echo "reset: backend/.data 와 이벤트 버스를 비웠습니다. 다시 켜려면 bash scripts/run_all.sh"
   exit 0
@@ -227,13 +227,28 @@ export AX_LLM_USAGE_DB="$PWD/$DATA/llm_usage.db"
 # 결제 장애 감지를 시연 시간에 맞춘다 (기본 1분 지속 → 20초, 5초마다 판정). .env 값이 있으면 그걸 쓴다
 export SHOP_DEGRADED_SUSTAIN_S="${SHOP_DEGRADED_SUSTAIN_S:-20}" SHOP_MONITOR_INTERVAL_S="${SHOP_MONITOR_INTERVAL_S:-5}"
 
-# 에이전트 토큰 명부: 이름마다 새 토큰. 서비스 이름과 원래 부서 이름, 사람 관리자(admin) 모두 넣는다
+# 에이전트 토큰 명부: 서비스 이름과 원래 부서 이름, 사람 관리자(admin) 모두 넣는다.
+# 토큰은 $DATA/tokens.env 에 두고 다시 켤 때 그대로 쓴다. 켤 때마다 새로 만들면 이미 떠 있는
+# 화면(run_web.sh)이 예전 사람 토큰을 들고 있어 "사람 토큰을 검증할 수 없다"로 막힌다.
+# 없는 이름만 새로 만든다. 새 토큰이 필요하면 bash scripts/run_all.sh reset
 NAMES="$(echo "$APPS" | awk 'NF {print $1}' | tr '\n' ' ') support marketing hr infra admin"
 read -r AX_AGENT_TOKENS HUMAN_TOKEN < <("$PY" -c "
-import secrets, sys
-names = sys.argv[1].split()
-print(','.join(f'{n}={secrets.token_urlsafe(24)}' for n in names), secrets.token_urlsafe(24))
-" "$NAMES")
+import os, secrets, sys
+names, path = sys.argv[1].split(), sys.argv[2]
+saved = {}
+if os.path.exists(path):
+    for line in open(path, encoding='utf-8'):
+        key, _, value = line.strip().partition('=')
+        saved[key] = value
+agents = dict(p.split('=', 1) for p in saved.get('AX_AGENT_TOKENS', '').split(',') if '=' in p)
+agents = {n: agents.get(n) or secrets.token_urlsafe(24) for n in names}
+human = saved.get('HUMAN_TOKEN') or secrets.token_urlsafe(24)
+line = ','.join(f'{n}={t}' for n, t in agents.items())
+with open(path, 'w', encoding='utf-8') as f:
+    f.write(f'AX_AGENT_TOKENS={line}\nHUMAN_TOKEN={human}\n')
+os.chmod(path, 0o600)
+print(line, human)
+" "$NAMES" "$DATA/tokens.env")
 export AX_AGENT_TOKENS
 # 사람(운영자) 토큰: 안전 관문 보류 결정·재무·dashboard-api 쓰기
 export SAFETY_HUMAN_TOKENS="운영자:$HUMAN_TOKEN" FINANCE_HUMAN_TOKENS="운영자:$HUMAN_TOKEN"
