@@ -23,7 +23,6 @@ import Queue from '@/pages/Queue'
 import Reviews from '@/pages/Reviews'
 import Support from '@/pages/Support'
 import InfraHosts from '@/demo/InfraHosts'
-import Integrations from '@/demo/Integrations'
 import DevTools from '@/demo/DevTools'
 import LoginPage from '@/demo/LoginPage'
 import SignupPage from '@/demo/SignupPage'
@@ -101,7 +100,8 @@ function Pages() {
           <Route path="/system/services" element={<ServiceCatalog />} />
           <Route path="/system/connect" element={<CompanyConnect />} />
           <Route path="/control/*" element={<ControlCenter />} />
-          <Route path="/system/integrations" element={<Integrations />} />
+          {/* 회사 서비스 연결은 회사 연결(/system/connect) 화면 아래쪽으로 합쳤다 */}
+          <Route path="/system/integrations" element={<Navigate to="/system/connect" replace />} />
           <Route path="/system/devtools" element={<DevTools />} />
           {/* 예전 관리자 대시보드(/admin/*) 주소 호환 */}
           <Route path="/admin/*" element={<LegacyAdminRedirect />} />

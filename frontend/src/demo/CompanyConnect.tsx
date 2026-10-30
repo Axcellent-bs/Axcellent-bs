@@ -2,8 +2,10 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { privateIp, useHosts } from './store'
 import { useEnabledServices } from './services'
 import { checkKey, connectWithKey, disconnect, updateCompanyInfo, useCompany, useKeys, type CompanyInfo, type IssuedKey } from './company'
+import Integrations from './Integrations'
 
-// AXcellent 연결 (고객사 시스템 관리자). 키를 넣어 확인하고 → 회사 정보를 직접 입력하면 → 이 워크스페이스가 그 회사로 연결된다.
+// 회사 연결 (고객사 시스템 관리자). 위: AXcellent 연결, 아래: 회사가 운영하는 서비스 연결(연결된 뒤에만).
+// AXcellent 연결은 키를 넣어 확인하고 → 회사 정보를 직접 입력하면 → 이 워크스페이스가 그 회사로 연결된다.
 // 키에는 회사 정보가 없다(연결 권한만). 키 발급은 AXcellent 운영팀이 하고, 연결·끊기는 여기서 고객사가 한다.
 const STEPS = ['회사 정보 저장', '사내망 확인', '첫 상태 신호 보내기', '연결 완료'] as const
 const STEP_MS = 1100
@@ -89,9 +91,10 @@ export default function CompanyConnect() {
     <div className="space-y-6 px-8 py-8">
       <header>
         <p className="text-sm text-ink-500">시스템 관리</p>
-        <h1 className="text-2xl font-semibold">AXcellent 연결</h1>
-        <p className="mt-1 text-sm text-ink-500">AXcellent에서 받은 연결 키를 넣고, 우리 회사 정보를 입력하면 연결돼요.</p>
+        <h1 className="text-2xl font-semibold">회사 연결</h1>
       </header>
+
+      <h2 className="text-lg font-semibold">AXcellent</h2>
 
       {company && phase.at === 'key' ? (
         <section className="card space-y-5 p-6">
@@ -267,6 +270,8 @@ export default function CompanyConnect() {
           </ol>
         </section>
       )}
+
+      {company && phase.at === 'key' && <Integrations />}
     </div>
   )
 }
