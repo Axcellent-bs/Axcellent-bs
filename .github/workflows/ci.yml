@@ -43,4 +43,61 @@ jobs:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
       - run: uv sync --all-packages --frozen
-      - run: uv run pytest -q
+      # data 정확도 평가(느린 테스트)는 아래 data-eval job이 돈다
+      - run: uv run pytest -q -m "not eval"
+
+  # data 정확도 평가 관문. 관련 파일이 바뀐 PR·dev push에서만 평가를 돌린다.
+  # 관련 없으면 평가 단계를 건너뛰고 바로 성공으로 끝난다(필수 체크가 대기에 걸리지 않게 job 자체는 늘 돈다).
+  # 비교 기준을 모르거나 git diff가 실패하면 건너뛰지 않고 평가를 돌린다.
+  data-eval:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 평가가 필요한 변경인지 판단
+        id: changes
+        working-directory: .
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            range="origin/$BASE_REF...HEAD"
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "비교할 이전 커밋이 없어 평가를 돌린다"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          else
+            range="$BEFORE...HEAD"
+          fi
+          if ! files="$(git diff --name-only "$range")"; then
+            echo "git diff $range 실패: 평가를 돌린다"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if echo "$files" | grep -qE '^(backend/domains/data/|backend/shared/|backend/pyproject\.toml$|backend/uv\.lock$|\.github/workflows/ci\.yml$)'; then
+            echo "관련 파일이 바뀌었다 ($range): 평가를 돌린다"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "data 평가와 관련된 변경이 없다 ($range): 건너뛴다"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.changes.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: backend/.python-version
+      - if: steps.changes.outputs.run == 'true'
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.13.1
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - if: steps.changes.outputs.run == 'true'
+        run: uv sync --all-packages --frozen
+      - if: steps.changes.outputs.run == 'true'
+        run: uv run pytest -q -m eval
