@@ -33,7 +33,7 @@ from ax_agent_template import execute as gate_module
 from ax_contracts.schemas import TENANT_ID_DEFAULT, Evidence, ExecuteDecision, RequestMeta
 from ax_contracts.schemas.planning import ChangeResultInput, DevHandoffInput, DevResultInput
 from ax_contracts.schemas.record import RecordCase, RecordKind
-from planning_agent import coder, cross_check, repo_routing, vcs, vcs_bridge
+from planning_agent import coder, cross_check, related, repo_routing, vcs, vcs_bridge
 from planning_agent.cross_check import CrossChecker, CrossEvidence
 from planning_agent.dev_handoff import (
     RECEIVE_DEV_RESULT,
@@ -423,6 +423,7 @@ class PlanningService:
         dev_sender: DevSender | None = None,
         real_example: bool = False,
         cross_checker: CrossChecker | None | Literal["default"] = "default",
+        relater: related.Relater | None | Literal["default"] = "default",
     ):
         # 서비스 역할: "" = 합친 모드(원래 동작), "planning" = 기획서까지, "dev" = PR·머지만
         self.role = (os.getenv("PLANNING_ROLE", "") if role is None else role).strip()
@@ -439,6 +440,10 @@ class PlanningService:
         )
         self._gate = gate or template_gate
         self._send_result: ResultSender = result_sender or send_change_result
+        # 새 요청이 오면 비슷한·충돌하는 요청을 찾는 곳 (None이면 찾지 않는다)
+        self._relater: related.Relater | None = (
+            related.default_relater() if relater == "default" else relater
+        )
         # 교차검증 근거를 모으는 곳 (None이면 모으지 않고 safety 판정만)
         self._cross_checker: CrossChecker | None = (
             cross_check.default_checker() if cross_checker == "default" else cross_checker
@@ -508,7 +513,9 @@ class PlanningService:
         async with self._lock():
             s = self.state.model_copy(deep=True)
             before = len(s.activity)
+            known = {r.id for r in s.requests}
             result = await fn(s, **params) or ActionResult()
+            await self._relate_new(s, known)
             await self._advance(s)
             outgoing = self._dev_outgoing(s)
             self._to_outbox(s, before)
@@ -521,6 +528,32 @@ class PlanningService:
         for item in outgoing:
             self._spawn_send(*item)
         return result
+
+    async def _relate_new(self, s: State, known: set[str]) -> None:
+        """이번 액션으로 새로 생긴 요청마다 비슷한·충돌하는 요청을 찾아 붙인다 (제안만)."""
+        if self._relater is None:
+            return
+        for req in [r for r in s.requests if r.id not in known]:
+            try:
+                req.related = await self._relater.relate(s, req)
+            except Exception:  # noqa: BLE001 - 찾기가 실패해도 요청은 받는다
+                req.related = []
+            if not req.related:
+                continue
+            label = {"same": "같은 일", "conflict": "충돌 가능", "related": "비슷함"}
+            text = ", ".join(f"{x.id}({label[x.relation]})" for x in req.related)
+            s.activity.append(
+                self._act(
+                    self.clock(),
+                    req.context_id,
+                    "planning",
+                    "planning",
+                    "request.related",
+                    "API",
+                    f"{req.id} 비슷한 요청: {text}",
+                    "read",
+                )
+            )
 
     # ---- 기획 → 개발 넘기기 (서비스 역할이 있을 때만)
 

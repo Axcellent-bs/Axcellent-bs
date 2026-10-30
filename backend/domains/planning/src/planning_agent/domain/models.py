@@ -69,6 +69,21 @@ class AutoCheck(DomainModel):
     reasons: list[str]
 
 
+class RelatedItem(DomainModel):
+    """비슷한·충돌하는 다른 요청 (related.py). 제안이고 묶기·보류는 사람이 정한다.
+
+    - relation: same(같은 일) · conflict(반대 방향) · related(비슷함, 관계는 정하지 않음 포함)
+    - by: llm(LLM이 후보 안에서 판단) · embed(임베딩 검색만) · lexical(글자 검색만)
+    """
+
+    id: str
+    title: str
+    score: float
+    relation: Literal["same", "conflict", "related"]
+    reason: str
+    by: Literal["llm", "embed", "lexical"]
+
+
 class Request(DomainModel):
     id: str
     context_id: str
@@ -85,6 +100,7 @@ class Request(DomainModel):
     source_ref: str | None = None
     evidence_ids: list[str] = Field(default_factory=list)  # 요청 부서가 보낸 근거 ID
     flow: bool = False  # 들어온 뒤 사람 클릭 없이 다음 단계로 이어 간다 (일반 요청·개선 초안)
+    related: list[RelatedItem] = Field(default_factory=list)  # 비슷한·충돌하는 요청 (제안)
 
 
 class ParaWarn(DomainModel):

@@ -3,7 +3,7 @@
 // 멈춘 요청(사람 확인·질문·교차검증·채택 대기)이 먼저. 블록 통째 클릭 = 다음 할 일, 제목 클릭 = 프로젝트.
 import { useEffect, useState, type Dispatch } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
-import { DEPT_NAME, TODAY, type Action, type Request, type State as S } from '@/lib/planningData'
+import { DEPT_NAME, RELATION_LABEL, TODAY, type Action, type Request, type State as S } from '@/lib/planningData'
 import { Tag, rowNav } from '@/components/planning-common/parts'
 import { Ref, convoHref, isFollowUp, nextOf, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
 import { gather } from '@/components/planning/projects'
@@ -196,6 +196,11 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
                   <span>{DEPT_NAME[r.from]}</span>
                   {isFollowUp(r) && <Tag tone="amber">후속</Tag>}
                   {row.dups.map((x) => <span key={x.id}>같은 요청 <Ref s={s} id={x.id} /> {DEPT_NAME[x.from]}</span>)}
+                  {(r.related ?? []).slice(0, 3).map((x) => (
+                    <span key={x.id} title={x.reason}>
+                      <Tag tone={x.relation === 'conflict' ? 'amber' : undefined}>{RELATION_LABEL[x.relation]}</Tag> <Ref s={s} id={x.id} />
+                    </span>
+                  ))}
                   {row.minutes > 0 && <span title={row.born ? `접수 ${row.born}` : undefined}>{row.finished ? `${duration(row.minutes)} 걸림` : `${duration(row.minutes)} 경과`}</span>}
                 </span>
               </div>

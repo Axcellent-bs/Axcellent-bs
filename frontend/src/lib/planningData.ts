@@ -33,7 +33,19 @@ export interface Request {
   duplicateOf?: string
   auto?: AutoCheck // 간단 요청 판정 결과 (create_ticket으로 들어온 것만)
   flow?: boolean // 들어온 뒤 사람 클릭 없이 흐름을 이어 간다 (기획서 질문은 요청 부서 에이전트가 답함)
+  related?: RelatedReq[] // 비슷한·충돌하는 요청 (제안, 묶기·보류는 사람)
 }
+
+/** 비슷한·충돌하는 요청 (백엔드 related.py). by: llm이 판단 / embed·lexical은 검색만 */
+export interface RelatedReq {
+  id: string
+  title: string
+  score: number
+  relation: 'same' | 'conflict' | 'related'
+  reason: string
+  by: 'llm' | 'embed' | 'lexical'
+}
+export const RELATION_LABEL: Record<RelatedReq['relation'], string> = { same: '같은 일', conflict: '충돌 가능', related: '비슷함' }
 
 export interface Para {
   id: string // R1, C1 …
