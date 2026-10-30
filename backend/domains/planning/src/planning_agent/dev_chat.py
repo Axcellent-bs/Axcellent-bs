@@ -458,7 +458,9 @@ async def resume_waiting(svc: PlanningService) -> None:
     from planning_agent import related
 
     for th in [c for c in svc.state.chats if c.status == "waiting"]:
-        if not all(related.settled(svc.state, rid) for rid in th.waiting_for):
+        index = svc._relater.index if svc._relater is not None else None
+        done = [await related.settled_now(svc.state, rid, index) for rid in th.waiting_for]
+        if not all(done):
             continue
         plan = last_plan(th)
         if plan is None or th.connection is None:
