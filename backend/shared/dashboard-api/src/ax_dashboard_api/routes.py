@@ -251,11 +251,17 @@ async def _conversation(out: dict) -> Conversation:
     ordered = sorted(claims.values(), key=lambda c: c["id"])
     return Conversation.model_validate(
         {
-            **out,
+            **_with_shown_subject(out),
             "messages": [_without_abusive_original(m) for m in out.get("messages") or []],
             "claims": [claim_mapping.to_claim(c) for c in ordered],
         }
     )
+
+
+def _with_shown_subject(item: dict) -> dict:
+    """제목에 욕설이 있으면 응답의 `subject`를 가린 제목으로 바꾼다 (원문 제목은 주지 않는다)."""
+    shown = item.get("subject_display")
+    return {**item, "subject": shown} if shown else item
 
 
 def _without_abusive_original(message: dict) -> dict:
@@ -277,7 +283,10 @@ async def conversations() -> dict:
         items = mock_data.list_conversations()
     else:
         out = await or_unavailable(support_client.call("list_inquiries"), {"items": []})
-        items = [ConversationListItem.model_validate(i) for i in out.get("items", [])]
+        items = [
+            ConversationListItem.model_validate(_with_shown_subject(i))
+            for i in out.get("items", [])
+        ]
     return ok(items, total=len(items))
 
 
@@ -544,7 +553,7 @@ async def conversation_status(conversation_id: int, body: StatusBody) -> dict:
         {"inquiry_id": conversation_id, "status": body.status},
         target=f"inquiry:{conversation_id}:{body.status}",
     )
-    return ok(ConversationListItem.model_validate(out))
+    return ok(ConversationListItem.model_validate(_with_shown_subject(out)))
 
 
 # ---------------------------------------------------------------- 쓰기 (목 모드)

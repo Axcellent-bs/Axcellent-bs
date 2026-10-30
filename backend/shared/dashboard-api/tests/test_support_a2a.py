@@ -316,3 +316,22 @@ def test_abusive_original_is_left_out_and_opened_only_through_its_own_call(
     assert sent.skill == "reveal_original"
     assert (sent.input["inquiry_id"], sent.input["message_id"]) == (7, 1)
     assert sent.input["viewer"]  # 사람 토큰에서 채운 이름
+
+
+def test_abusive_subject_is_replaced_by_the_masked_one_everywhere(
+    client: TestClient, fake: Fake
+) -> None:
+    """제목 원문도 응답에 없다: 목록·상세·상태 변경 모두 가린 제목을 `subject`로 준다."""
+    item = {**ITEM, "subject": "씨발 환불", "subject_display": "[비속어] 환불"}
+    fake.output = {"items": [item, ITEM]}
+    subjects = [c["subject"] for c in client.get(BASE + "/conversations").json()["data"]]
+    assert subjects == ["[비속어] 환불", "배송 문의"]  # 멀쩡한 제목은 그대로
+
+    fake.output = {**item, "messages": []}
+    assert client.get(BASE + "/conversations/7").json()["data"]["subject"] == "[비속어] 환불"
+
+    fake.output = item
+    body = {"status": "resolved"}
+    assert client.post(BASE + "/conversations/7/status", json=body).json()["data"]["subject"] == (
+        "[비속어] 환불"
+    )
