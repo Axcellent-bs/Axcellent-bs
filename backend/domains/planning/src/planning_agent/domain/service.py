@@ -1185,7 +1185,11 @@ class PlanningService:
         """
         dup_id = find_duplicate(s.requests, title)
         req_id = req_id or f"REQ-{20 + seq}"
-        auto = None if dup_id else check_simple(title, s.auto_policy)
+        # 사건(ctx_inc_)에서 온 원인 확인 요청은 사람이 원인을 볼 일이라
+        # 자동 기획·PR로 넘기지 않는다.
+        # 자동으로 돌리면 원인을 아무도 안 봤는데 문서 PR이 머지되고 '완료'가 됐다 (10/30)
+        investigate = not dup_id and (source_ref or "").startswith("ctx_inc_")
+        auto = None if dup_id or investigate else check_simple(title, s.auto_policy)
         text = (
             f'"{title}" → 같은 요청 {dup_id}에 연결 (linked_duplicate)'
             if dup_id
@@ -1212,6 +1216,22 @@ class PlanningService:
         s.activity.append(
             self._act(t, ctx_req, frm, "planning", "create_ticket", "A2A", text, "A", seq)
         )
+        if investigate:
+            s.activity.append(
+                self._act(
+                    t,
+                    ctx_req,
+                    "planning",
+                    frm,
+                    "get_request_status",
+                    "A2A",
+                    f"{req_id} 원인 확인 요청 접수 ({source_ref})"
+                    " → 자동 기획·PR 없이 사람이 원인 확인",
+                    "read",
+                    seq,
+                )
+            )
+            return ActionResult(output={"request_id": req_id, "auto": False})
         if auto is None:
             s.activity.append(
                 self._act(
