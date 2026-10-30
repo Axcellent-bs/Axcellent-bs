@@ -3,7 +3,7 @@
 // 백엔드에 없는 값(학습 기준·감사 목록)은 빈 값으로 두고 지어내지 않는다.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { RELAY_TOKEN, SAFETY_HUMAN_TOKEN } from '@/lib/env'
-import type { Action, Activity, AuditItem, ChatThread, CrossReview, Doc, Incident, OutMsg, PR, Request, State, Thread } from '@/lib/planningData'
+import { RULE_LABEL, type Action, type Activity, type AuditItem, type ChatThread, type CrossEvidence, type CrossReview, type Doc, type Incident, type OutMsg, type PR, type Request, type State, type Thread } from '@/lib/planningData'
 
 export const PLANNING_API = (import.meta.env.VITE_PLANNING_API_URL as string | undefined) ?? 'http://localhost:8101'
 /** 개발·배포 서비스 에이전트(dev, 8111). 업무 로직은 기획과 같은 planning 도메인이라 같은 REST(`/api/planning`)를 쓴다 */
@@ -58,12 +58,13 @@ export interface QueueItem {
   action: 'confirm_spec' | 'merge_pr'
   state: string
   rules: string[]
-  params: Record<string, number>
+  params: Record<string, number | string | boolean | string[]>
   at?: string
   decide_with?: Action
+  evidence?: CrossEvidence[] // 교차검증 근거 (merge_pr, 총괄·데이터분석에 물은 결과)
 }
 
-const VERIFIER: Record<QueueItem['action'], string> = { confirm_spec: '인사 check_plan', merge_pr: '데이터분석 · 통합 에이전트' }
+const VERIFIER: Record<QueueItem['action'], string> = { confirm_spec: '인사 check_plan', merge_pr: '총괄 · 데이터분석 근거 → 안전 관문' }
 
 function toReview(q: QueueItem, ctxOf: (ref: string) => string): CrossReview & { decideWith?: Action } {
   const done = /승인|확정|머지/.test(q.state) ? '승인' : /거절/.test(q.state) ? '거절' : undefined
@@ -74,9 +75,10 @@ function toReview(q: QueueItem, ctxOf: (ref: string) => string): CrossReview & {
     target: q.action,
     ref: q.id,
     title: q.title,
-    lane: (q.params.irreversible_count ?? 0) > 0 || q.state.includes('사람') ? 'human' : 'ai',
-    routeWhy: q.rules,
+    lane: Number(q.params.irreversible_count ?? 0) > 0 || q.state.includes('사람') ? 'human' : 'ai',
+    routeWhy: q.rules.map((k) => RULE_LABEL[k] ?? k),
     summary: Object.entries(q.params).map(([k, v]) => `${k} ${v}`).join(' · '),
+    evidence: q.evidence ?? [],
     checks: [],
     verifier: VERIFIER[q.action],
     result: done,

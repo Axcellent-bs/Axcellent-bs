@@ -1,7 +1,7 @@
 // 개발 작업·PR과 AI 교차검증. 프로젝트 탭과 같은 틀(왼쪽 목록 / 가운데 세로 흐름 / 오른쪽 곁 블록)
 import { useEffect, useState, type Dispatch, type ReactNode } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
-import { CROSS_CHECK_TIMEOUT_MIN, TARGET_LABEL, OBSERVE_MIN, type Action, type CrossReview, type PR, type State as S } from '@/lib/planningData'
+import { CROSS_CHECK_TIMEOUT_MIN, EVIDENCE_SOURCE, TARGET_LABEL, OBSERVE_MIN, type Action, type CrossReview, type PR, type State as S } from '@/lib/planningData'
 import { codeOf, traceOf, type CodeLine } from '@/components/dev/trace'
 import { DiffFiles } from '@/components/dev/diff'
 import { DEV_API, repoApi, type RepoFile } from '@/lib/planning'
@@ -78,6 +78,15 @@ function Waiting({ s, d, r }: P & { r: CrossReview }) {
         ...(r.lane === 'ai' ? [['사람 확인으로', left === undefined ? `${CROSS_CHECK_TIMEOUT_MIN}분 뒤 자동` : left > 0 ? `${left}분 뒤 자동` : '곧 넘어감'] as [string, string]] : []),
         ...(open.length ? [['걸린 항목', open.join(' · ')] as [string, string]] : r.routeWhy.length ? [['걸린 항목', r.routeWhy.join(' · ')] as [string, string]] : []),
       ]} />
+      {!!r.evidence?.length && (
+        <ul aria-label="교차검증 근거">
+          {r.evidence.map((e) => (
+            <li key={e.source + e.label}>
+              <State v={e.ok ? '통과' : '확인 필요'} tone={e.ok ? 'green' : 'amber'} /> <b>{e.label}</b> <span className="muted">{EVIDENCE_SOURCE[e.source] ?? e.source} · {e.value}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="actions">
         <Button variant="primary" onClick={() => { d({ type: 'humanDecide', review: r.id, ok: true }); toast.show(`${r.ref} 진행`) }}>확인하고 진행</Button>
         {r.lane === 'human' && <Button onClick={() => { d({ type: 'humanDecide', review: r.id, ok: false }); toast.show(`${r.ref} 보류`) }}>보류</Button>}
