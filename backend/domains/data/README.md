@@ -122,6 +122,12 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 - **AI를 거친 일만 센다.** 공통 로그에 남은 일만 세고, 사람이 직접 한 일(로그에 없는 일)은 세지 않는다. "절약한 시간" 같은 추정치는 만들지 않는다(근거 없는 숫자).
 - 입력: `period`(day·week·month), `start`(한국 시간 날짜, 비우면 직전 기간: 어제·지난주 월~일·지난달), `services`(서비스 id, 비우면 전체). 직전 기간은 같은 길이의 바로 앞 기간이다.
 - 부서 = `ax_agent_template.services`의 `department`(총괄·고객지원·마케팅·재무·데이터분석·인사·기획개발·인프라). 카드 `owner`는 사람 이름이라(준하 = 총괄+인사 등) 부서마다 `owners`로 함께 보여 준다.
+- **센 범위 = 이 회사가 켠(AI를 쓰는) 서비스.** 백엔드 `AX_ENABLED_SERVICES` 기준이다(비어 있으면 전부, `routing.is_enabled`).
+  - 화면의 서비스 고르기(`/system/services`, 브라우저 localStorage)와는 아직 연결돼 있지 않다.
+  - 켜지 않은 서비스의 부서는 카드·특이사항·협업에 넣지 않는다. 입력 `services`에 켜지 않은 서비스만 있으면 `invalid_input`이다.
+  - **AI를 쓰지 않는 부서로 넘긴 일**(`unused_handoffs`): 켠 AI가 켜지 않은 서비스로 보낸 일(사람 할 일함으로 넘어감)을 부서별 건수와 업무(skill 한국어 이름) 상위 3개로만 보여 준다. "도입하면 자동 처리" 같은 예측 문구·숫자는 넣지 않는다.
+  - **재무 AI를 쓰지 않으면 `closing_report`를 부르지 않는다.** 꺼진 서비스로 가는 요청은 조직도가 있으면 사람 할 일함에 쌓이기 때문이다(재무 카드의 `closing_report`가 조회로 표시돼 있지 않음). 매출 칸은 "재무 AI를 쓰지 않아 확인할 수 없음"이다. 일간 저장도 같다.
+  - 저장된 일간에는 그날 켠 서비스(`enabled_services`)를 같이 저장하고, 넘긴 일도 그날 기준으로 나눠 둔다. 그래서 나중에 서비스를 더 켜도 지난 리포트가 바뀌지 않는다. 리포트의 부서 범위는 저장된 날은 그날 켠 서비스, 바로 계산하는 날은 지금 켠 서비스의 합이다(출력 `enabled_services`).
 - 비율은 분모가 3 미만이면 `rate: null` + `note: "표본 부족"`이다. 숫자는 `metrics/activity.py`가 센다.
 
 | 칸 | 출처 | 정의 |
@@ -145,7 +151,7 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 
 #### 일간 저장 (`report_store.py`, `DATA_REPORT_DB`)
 - 일간 리포트를 하루 한 번 미리 만들어 data 자체 SQLite 파일에 저장한다. run_all.sh는 `.data/data_reports.db`다. 비어 있으면 저장하지 않고 지금처럼 바로 계산한다. 다른 부서 DB·memory는 쓰지 않는다.
-- 한국 시간 하루마다 한 줄이다: 날짜, 만든 시각, 코드 버전(`SNAPSHOT_VERSION`), 그날의 "더할 수 있는 값".
+- 한국 시간 하루마다 한 줄이다: 날짜, 만든 시각, 코드 버전(`SNAPSHOT_VERSION`, 지금 2), 그날 켠 서비스, 그날의 "더할 수 있는 값". 버전이 다른 예전 줄은 채우기 범위 안에서 다시 만든다.
   - 비율 대신 분자·분모: 결과별 건수, 완료·템플릿 대체 수, 결제 시도·실패
   - 평균 대신 합계·개수: 응답 시간 `duration_ms`. 처리 시간은 넘김·처리 시각 목록이라 기간을 합친 뒤 task_id로 잇는다
   - 중앙값(MTTR)은 사건별 첫 기록·복구 시각 목록이다. 자정을 넘긴 사건도 합친 뒤 계산하면 바로 계산과 같다

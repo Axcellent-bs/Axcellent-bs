@@ -22,7 +22,9 @@ from datetime import date, datetime
 from typing import Any
 
 DB_ENV = "DATA_REPORT_DB"
-SNAPSHOT_VERSION = 1  # 저장하는 값의 모양을 바꾸면 올린다 (예전 줄은 다시 만든다)
+# 저장하는 값의 모양을 바꾸면 올린다 (예전 줄은 다시 만든다)
+# 2: 그날 켠 서비스(`enabled_services`)와 AI를 쓰지 않는 부서로 넘긴 일(`unused_*`)
+SNAPSHOT_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS daily_reports (

@@ -310,7 +310,7 @@ async def _report(
     llm: MockLLMClient | None = None,
     send=None,
     metrics=None,
-    enabled=lambda s: s != "finance",
+    enabled=lambda s: True,  # 켠 서비스 (재무를 끈 경우는 test_activity_enabled_services.py)
     **inp,
 ):
     return await build_report(
@@ -390,10 +390,10 @@ async def test_counts_match_hand_count() -> None:
     assert mo.rejected.rate == 0.5
 
     finance = _dept(result, "finance")
-    assert finance.enabled is False and finance.requests.total == 0
+    assert finance.enabled is True and finance.requests.total == 0  # AI 응답은 없고 넘긴 일만
     assert (finance.handoffs.handed, finance.handoffs.done, finance.handoffs.rejected) == (2, 1, 1)
     assert finance.handoffs.avg_close_minutes == 45.0
-    assert any(u.section == "departments.finance" for u in result.output.unknown_sections)
+    assert result.output.unused_handoffs == []  # 다 켰으면 AI를 쓰지 않는 부서가 없다
 
     edges = {(e.from_department, e.to_department): e.count for e in result.output.collaboration}
     assert edges == {
