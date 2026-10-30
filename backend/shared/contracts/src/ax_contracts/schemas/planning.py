@@ -218,6 +218,10 @@ class DevResultInput(AxModel):
     request_state: str  # Request.state 값 (작업 중·완료 …)
     tasks: list[dict[str, Any]] = Field(default_factory=list)  # Task dump
     prs: list[dict[str, Any]] = Field(default_factory=list)  # PR dump
+    # 개발팀이 직접 낸 기획(기획 서비스를 거치지 않음)이면 요청·기획서 자체도 보낸다.
+    # 기획 서비스가 바뀌는 일을 모두 알도록 (planning 쪽은 없으면 새로 넣는다)
+    request: dict[str, Any] | None = None  # Request dump
+    spec: dict[str, Any] | None = None  # Spec dump
 
 
 class DevResultOutput(AxModel):

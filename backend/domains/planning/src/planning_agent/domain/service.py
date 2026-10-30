@@ -670,12 +670,15 @@ class PlanningService:
                 continue
             tasks = [t for t in s.tasks if t.spec == sp.id]
             ids = {t.id for t in tasks}
+            own = sp.origin == "dev_team"  # 개발팀 기획은 기획 서비스에 요청·기획서가 없다
             res = DevResultInput(
                 spec_id=sp.id,
                 request_id=req.id,
                 request_state=req.state,
                 tasks=[dump(t) for t in tasks],
                 prs=[dump(p) for p in s.prs if p.task in ids],
+                request=dump(req) if own else None,
+                spec=dump(sp) if own else None,
             )
             raw = json.dumps(res.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
             fp = hashlib.sha1(raw.encode()).hexdigest()[:12]
@@ -2162,10 +2165,13 @@ class PlanningService:
         tasks: list[dict],
         prs: list[dict],
         idempotency_key: str,
+        request: dict | None = None,
+        spec: dict | None = None,
     ) -> ActionResult:
         """planning 서비스: dev가 돌려준 작업·PR·요청 상태를 반영한다 (A).
 
-        작업·PR은 id로 덮어쓴다."""
+        작업·PR은 id로 덮어쓴다. 개발팀이 직접 낸 기획이면 요청·기획서도 같이 와서 없으면 넣고
+        있으면 덮어쓴다 (기획 쪽이 바뀌는 일을 모두 알도록)."""
         cached = self._idempotent.get(idempotency_key)
         if cached is not None:
             return ActionResult(changed=False, outcome=cached.outcome, output=dict(cached.output))
@@ -2173,9 +2179,16 @@ class PlanningService:
             raise ValueError(f"모르는 요청 상태: {request_state}")
         got_tasks = [Task.model_validate(t) for t in tasks]
         got_prs = [PR.model_validate(p) for p in prs]
+        got_req = Request.model_validate(request) if request else None
+        got_spec = Spec.model_validate(spec) if spec else None
 
         async def run(s: State) -> ActionResult:
             t = self.clock()
+            new_own = got_req is not None and not any(r.id == got_req.id for r in s.requests)
+            if got_req is not None:
+                self._upsert(s.requests, [got_req])
+            if got_spec is not None:
+                self._upsert(s.specs, [got_spec])
             req = next((r for r in s.requests if r.id == request_id), None)
             ctx = req.context_id if req else context_id
             merged = sum(1 for p in got_prs if p.merged)
@@ -2196,6 +2209,13 @@ class PlanningService:
             if req:
                 req.state = request_state  # type: ignore[assignment]
             frm = requester if requester in DEPT_NAME else "dev"
+            if new_own and got_spec is not None:
+                s.activity.append(
+                    self._act(
+                        t, ctx, frm, "planning", RECEIVE_DEV_RESULT, "A2A",
+                        f"개발팀 기획 {got_spec.id} 받음: {got_spec.title}", "A",
+                    )
+                )  # fmt: skip
             s.activity.append(
                 self._act(t, ctx, frm, "planning", RECEIVE_DEV_RESULT, "A2A", text, "A")
             )
