@@ -255,12 +255,16 @@ export const dataAi = {
   accuracyReport: () => askData<AccuracyReportOutput>("accuracy_report", "정확도 평가 결과"),
   /** start: 한국 시간 날짜(YYYY-MM-DD). 비우면 서버가 직전 기간을 고른다. services: 비우면 전체 */
   activityReport: (period: ActivityPeriod, start: string | null, services: string[] = []) =>
-    askData<ActivityReportOutput>("activity_report", "업무 리포트", { period, ...(start ? { start } : {}), services }),
+    // 주간·월간은 재무 마감을 날마다 물어 30초를 넘는다. 마감이 지나면 재무 호출이 취소되므로 이 skill만 2분
+    askData<ActivityReportOutput>("activity_report", "업무 리포트", { period, ...(start ? { start } : {}), services }, REPORT_DEADLINE_MS),
 };
 
-async function askData<T>(skill: string, what: string, input: Record<string, unknown> = {}): Promise<A2AResult<T>> {
+const DEADLINE_MS = 30_000;
+const REPORT_DEADLINE_MS = 120_000;
+
+async function askData<T>(skill: string, what: string, input: Record<string, unknown> = {}, deadlineMs = DEADLINE_MS): Promise<A2AResult<T>> {
   const body = {
-    meta: { context_id: "ctx_req_dashboard", token: DATA_A2A_TOKEN, path: [], deadline: new Date(Date.now() + 30_000).toISOString() },
+    meta: { context_id: "ctx_req_dashboard", token: DATA_A2A_TOKEN, path: [], deadline: new Date(Date.now() + deadlineMs).toISOString() },
     skill,
     input,
   };

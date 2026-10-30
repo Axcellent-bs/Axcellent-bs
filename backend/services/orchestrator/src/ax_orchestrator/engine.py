@@ -8,10 +8,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from ax_contracts.schemas import (
@@ -35,6 +37,7 @@ from ax_orchestrator.models import (
 )
 from ax_orchestrator.naming import PLAN_KO
 from ax_orchestrator.registry import Registry
+from ax_orchestrator.timeline import prior_case_of, times_of
 
 Caller = Callable[[str, AgentRequest], Awaitable[AgentResult]]
 Publisher = Callable[[str, Incident], Awaitable[None]]
@@ -76,6 +79,8 @@ class HandoffWait:
         self.assignee_unit = assignee_unit
         self.pending = True
         self.status: str | None = None  # done | rejected | timeout
+        self.started_at = now()
+        self.finished_at: datetime | None = None
         self.result: str | None = None  # 사람이 적은 결과 (외부 입력처럼 데이터로만 다룬다)
         self.event = asyncio.Event()
 
@@ -83,6 +88,7 @@ class HandoffWait:
         if not self.pending:
             return False
         self.pending = False
+        self.finished_at = now()
         self.status = status
         self.result = result
         self.event.set()
@@ -553,6 +559,50 @@ class Engine:
         }
         await self._call_and_handle(inc, step, run, entry.dept, payload)
 
+    async def sync_times(self, inc: Incident) -> None:
+        """이벤트에서 알게 된 시각을 인사 카드에 남긴다. 카드가 아직 없으면 다음에 다시 보낸다.
+
+        사람이 적는 값이 아니라 단계 완료 시각·사람 할 일함·쇼핑몰 복귀 신호만 쓴다.
+        실패해도 이벤트 처리에는 영향이 없다(참고용 기록).
+        """
+        entry = self.registry.find("record_event_times")
+        if entry is None or not entry.callable_by_orchestrator:
+            return
+        fresh = {
+            name: at.isoformat()
+            for name, at in times_of(inc).items()
+            if inc.times_sent.get(name) != at.isoformat()
+        }
+        prior = prior_case_of(inc)
+        if prior and inc.times_sent.get("prior_case_id") != prior:
+            fresh["prior_case_id"] = prior
+        if not fresh:
+            return
+        payload = {"context_id": inc.context_id, **fresh}
+        digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:10]
+        req = AgentRequest(
+            meta=RequestMeta(
+                context_id=inc.context_id,
+                token="orchestrator",
+                path=["orchestrator"],
+                deadline=now() + timedelta(seconds=self.step_timeout),
+                idempotency_key=f"{inc.context_id}:record_event_times:{digest}",
+            ),
+            skill="record_event_times",
+            input=payload,
+        )
+        try:
+            result = await self.caller(entry.dept, req)
+            outcome = (result.output or {}).get("outcome")
+        except Exception as exc:  # noqa: BLE001 - 시각 기록 실패가 이벤트 처리를 막지 않게 한다
+            inc.log(f"이벤트 시각 기록 실패: {type(exc).__name__}")
+            return
+        if outcome in ("recorded", "duplicate"):
+            inc.times_sent.update(fresh)
+            inc.log(f"이벤트 시각 기록: {', '.join(sorted(fresh))}")
+        else:
+            inc.log(f"이벤트 시각 기록 보류: {outcome or '결과 없음'}")
+
     async def _close(self, inc: Incident, plan: Plan) -> None:
         required = {s.id for s in plan.steps if s.required}
         ok = all(inc.steps[i].status == "completed" for i in required)
@@ -582,6 +632,7 @@ class Engine:
             ),
         }
         inc.log(f"이벤트 종료: {inc.status}")
+        await self.sync_times(inc)
         await self._publish("incident.resolved", inc)
 
     @staticmethod

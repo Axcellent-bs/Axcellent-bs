@@ -57,6 +57,7 @@ SERVICES: tuple[Service, ...] = (
             "prepare_handoff",
             "assess_deletion_request",
             "knowledge_gap_report",
+            "get_privacy_audit",
             # 문의 저장소를 읽는 skill은 문의를 가진 서비스에 둔다 (저장소가 프로세스마다 따로라서)
             "analyze_receipt",
             "analyze_claim_request",
@@ -143,6 +144,7 @@ SERVICES: tuple[Service, ...] = (
             "find_similar_fraud_cards",
             "find_similar_cases",
             "record_resolution",
+            "record_event_times",
             "list_candidate_cards",
             "list_cards",
             "get_audit_timeline",

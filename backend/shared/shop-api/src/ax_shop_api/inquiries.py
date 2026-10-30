@@ -84,6 +84,22 @@ def clean_text(subject: str | None, body: str, order_id: str) -> tuple[str, str]
     return title, text
 
 
+CUSTOMER_FIELDS = ("id", "subject", "status", "order_id", "updated_at", "rated", "preview")
+MESSAGE_FIELDS = ("id", "role", "text", "created_at")
+
+
+def customer_view(item: dict) -> dict:
+    """고객지원이 준 문의를 고객 화면용으로 한 번 더 좁힌다(허용한 키만, 모르는 키는 버린다).
+
+    `can_rate`는 평가 버튼을 보일지다: 해결된 문의이고 아직 평가하지 않았을 때만 참이다.
+    """
+    view = {k: item[k] for k in CUSTOMER_FIELDS if k in item}
+    view["can_rate"] = item.get("status") == "resolved" and item.get("rated") is False
+    if isinstance(item.get("messages"), list):
+        view["messages"] = [{k: m.get(k) for k in MESSAGE_FIELDS} for m in item["messages"]]
+    return view
+
+
 class InquiryRateLimiter:
     """구매자별·전체 1분 창 제한. 통과한 시도만 센다."""
 

@@ -6,7 +6,7 @@ import {
   type Incident,
 } from "@/lib/adminRelay";
 import { incidentTitle, stepLabel } from "@/lib/agentChat";
-import { durationKo, secondsOf } from "@/lib/duration";
+import { durationKo, segmentsOf, type EventTimes } from "@/lib/duration";
 import { ago } from "@/lib/format";
 import { recordState } from "@/lib/incidentRecord";
 import { Link, useSearchParams } from "@/lib/nav";
@@ -156,8 +156,15 @@ interface PastCase {
   card_id: string; title: string; summary: string; similarity: number; resolved: boolean;
   /** false면 다른 유형의 이벤트(추천에는 쓰지 않는다). 유형을 모르면 null */
   same_type?: boolean | null;
+  /** 그 이벤트의 시각(시스템이 잰 값). 정상 복귀가 있으면 감지부터 복귀까지를 보여 준다 */
+  timeline?: EventTimes | null;
   resolution?: { outcome: string; root_cause: string | null; action: string | null; minutes_to_resolve: number | null; opened_at?: string | null; resolved_at?: string | null } | null;
 }
+/** 감지부터 정상 복귀까지(시스템이 잰 값). 복귀 기록이 없으면 이유를 말한다 */
+const spanText = (t: EventTimes | null | undefined) => {
+  const total = segmentsOf(t).total;
+  return total != null ? durationKo(total) : "정상 복귀 기록 없음";
+};
 const OUTCOME_KO: Record<string, string> = { resolved: "해결됨", workaround: "임시 조치", unresolved: "미해결" };
 
 /** 이벤트가 열릴 때 인사 AI가 찾은 비슷한 과거 이벤트. 저장된 해결 내용만 보여 주고 추천은 하지 않는다 */
@@ -187,7 +194,7 @@ function SimilarCases({ incident }: { incident: Incident }) {
                   <dt className="text-ink-500">결과</dt><dd>{OUTCOME_KO[c.resolution.outcome] ?? c.resolution.outcome}</dd>
                   <dt className="text-ink-500">원인</dt><dd>{c.resolution.root_cause ?? "확인할 수 없음"}</dd>
                   <dt className="text-ink-500">조치</dt><dd>{c.resolution.action ?? "확인할 수 없음"}</dd>
-                  <dt className="text-ink-500">소요 시간</dt><dd>{secondsOf(c.resolution) != null ? durationKo(secondsOf(c.resolution) as number) : "확인할 수 없음"}</dd>
+                  <dt className="text-ink-500">복귀까지</dt><dd>{spanText(c.timeline)}</dd>
                 </dl>
               )}
             </li>
@@ -206,10 +213,9 @@ function SimilarCases({ incident }: { incident: Incident }) {
 function PastRecommendation({ incident }: { incident: Incident }) {
   const r = incident.recommendation;
   if (!r) return null;
-  // 추천은 분만 담고 있어서, 같은 카드의 해결 기록(열린·해결한 시각)에서 초까지 꺼낸다
+  // 추천은 시각을 담고 있지 않아서, 같은 카드의 타임라인에서 감지부터 복귀까지를 꺼낸다
   const past = ((incident.steps.find((s) => s.skill === "find_similar_cases")?.output?.cases as PastCase[] | undefined) ?? [])
     .find((c) => c.card_id === r.card_id);
-  const seconds = secondsOf(past?.resolution ?? { minutes_to_resolve: r.minutes_to_resolve });
   return (
     <section className="card space-y-2 p-5">
       <h3 className="text-[15px] font-semibold">과거 근거 기반 추천</h3>
@@ -224,7 +230,7 @@ function PastRecommendation({ incident }: { incident: Incident }) {
           <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1 text-sm">
             <dt className="text-ink-500">원인 후보</dt><dd>{r.root_cause ?? "확인할 수 없음"}</dd>
             <dt className="text-ink-500">그때 한 조치</dt><dd>{r.action ?? "확인할 수 없음"}</dd>
-            <dt className="text-ink-500">그때 소요 시간</dt><dd>{seconds != null ? durationKo(seconds) : "확인할 수 없음"}</dd>
+            <dt className="text-ink-500">그때 복귀까지</dt><dd>{spanText(past?.timeline)}</dd>
           </dl>
           <p className="text-xs text-ink-500">{r.caveat}</p>
         </>

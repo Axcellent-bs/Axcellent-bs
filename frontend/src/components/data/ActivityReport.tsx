@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Chip, Empty, ErrorBox, Panel, TONE, Waiting, useResource } from "@/components/finance/bits";
 import { won } from "@/lib/format";
 import {
@@ -50,8 +50,13 @@ function Unknown({ reasons }: { reasons: string[] }) {
   );
 }
 
-/** 직전 기간 대비: 화살표 + 직전 값. 둘 중 하나라도 없으면 비교하지 않는다 */
-function Trend({ now, before, text }: { now: number | null | undefined; before: number | null | undefined; text: string | null }) {
+/** 직전 기간 대비: 화살표 + 직전 값. 직전 값을 받지 못한 이유(previousReasons)는 "직전" 옆에 작게, 이 칸에만 */
+function Trend({ now, before, text, previousReasons = [] }: {
+  now: number | null | undefined; before: number | null | undefined; text: string | null; previousReasons?: string[];
+}) {
+  if (previousReasons.length && !isNum(before)) {
+    return <span className="text-[11px] text-amber-700">직전 {UNKNOWN} · {previousReasons.join(" · ")}</span>;
+  }
   if (!isNum(now) || !isNum(before) || text == null) return <span className="text-[11px] text-ink-500">직전 비교 {UNKNOWN}</span>;
   const [mark, tone, word] = now > before ? ["▲", "text-emerald-700", "늘었음"] : now < before ? ["▼", "text-red-700", "줄었음"] : ["–", "text-ink-500", "같음"];
   return (
@@ -68,14 +73,14 @@ function Value({ text, reasons = [] }: { text: string | null; reasons?: string[]
 }
 
 // ------------------------------------------------------------------- 회사 현황
-function CompanyCell({ label, figure, show, reasons, children }: {
-  label: string; figure: CompanyFigure; show: (v: number | null) => string | null; reasons: string[]; children?: ReactNode;
+function CompanyCell({ label, figure, show, reasons, previousReasons, children }: {
+  label: string; figure: CompanyFigure; show: (v: number | null) => string | null; reasons: string[]; previousReasons: string[]; children?: ReactNode;
 }) {
   return (
     <div className="rounded-2xl bg-surface-2 px-4 py-3">
       <p className="text-xs font-medium text-ink-700">{label}</p>
       <Value text={show(figure.value)} reasons={reasons} />
-      <Trend now={figure.value} before={figure.previous_period} text={show(figure.previous_period)} />
+      <Trend now={figure.value} before={figure.previous_period} text={show(figure.previous_period)} previousReasons={previousReasons} />
       {children}
     </div>
   );
@@ -83,20 +88,21 @@ function CompanyCell({ label, figure, show, reasons, children }: {
 
 function Company({ o }: { o: ActivityReportOutput }) {
   const c = o.company;
-  const r = (key: string) => reasonsFor(o.unknown_sections, `company.${key}`, `company.previous_period.${key}`);
+  // 이번 기간 이유는 값 아래, 직전 기간 이유는 "직전" 옆
+  const r = (key: string) => ({ reasons: reasonsFor(o.unknown_sections, `company.${key}`), previousReasons: reasonsFor(o.unknown_sections, `company.previous_period.${key}`) });
   const money = (v: number | null) => (isNum(v) ? won(v) : null);
   return (
     <Panel id="data-report-company" title="회사 현황" hint="매출·주문·결제는 재무 AI와 쇼핑몰 기록, 사건 수는 공통 로그에서 받은 값입니다.">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <CompanyCell label="총거래액" figure={c.gmv} show={money} reasons={r("gmv")}>
+        <CompanyCell label="총거래액" figure={c.gmv} show={money} {...r("gmv")}>
           {c.gmv.note && <p className="mt-1 text-[11px] leading-relaxed text-ink-500">{c.gmv.note}</p>}
         </CompanyCell>
-        <CompanyCell label="수수료 매출" figure={c.commission_revenue} show={money} reasons={r("commission_revenue")}>
+        <CompanyCell label="수수료 매출" figure={c.commission_revenue} show={money} {...r("commission_revenue")}>
           {c.commission_revenue.note && <p className="mt-1 text-[11px] leading-relaxed text-ink-500">{c.commission_revenue.note}</p>}
         </CompanyCell>
-        <CompanyCell label="주문 수" figure={c.order_count} show={(v) => plain(v, "건")} reasons={r("order_count")} />
-        <CompanyCell label="결제 성공률" figure={c.payment_success_rate} show={percent} reasons={r("payment_success_rate")} />
-        <CompanyCell label="사건 수" figure={c.incident_count} show={(v) => plain(v, "건")} reasons={r("incident_count")} />
+        <CompanyCell label="주문 수" figure={c.order_count} show={(v) => plain(v, "건")} {...r("order_count")} />
+        <CompanyCell label="결제 성공률" figure={c.payment_success_rate} show={percent} {...r("payment_success_rate")} />
+        <CompanyCell label="사건 수" figure={c.incident_count} show={(v) => plain(v, "건")} {...r("incident_count")} />
       </div>
     </Panel>
   );
@@ -174,15 +180,15 @@ function OutcomeBar({ outcomes, reasons }: { outcomes: ActivityOutcomes; reasons
   );
 }
 
-function Row({ label, now, before, show, reasons = [] }: {
-  label: string; now: number | null; before: number | null; show: (v: number | null) => string | null; reasons?: string[];
+function Row({ label, now, before, show, reasons = [], previousReasons = [] }: {
+  label: string; now: number | null; before: number | null; show: (v: number | null) => string | null; reasons?: string[]; previousReasons?: string[];
 }) {
   const text = show(now);
   return (
     <div className="flex flex-wrap items-baseline gap-x-2 border-t border-ink-100 py-1.5 first:border-t-0">
       <dt className="min-w-0 flex-1 text-xs text-ink-700">{label}</dt>
       <dd className="text-sm font-semibold tabular-nums text-ink-900">{text ?? <span className="text-ink-500">–</span>}</dd>
-      <dd className="w-full text-right"><Trend now={now} before={before} text={show(before)} /></dd>
+      <dd className="w-full text-right"><Trend now={now} before={before} text={show(before)} previousReasons={previousReasons} /></dd>
       {text == null && !reasons.length && <dd className="w-full text-right text-[11px] text-amber-700">{UNKNOWN}</dd>}
       {reasons.length > 0 && <dd className="w-full text-right"><Unknown reasons={reasons} /></dd>}
     </div>
@@ -194,7 +200,8 @@ function Department({ d, unknown }: { d: DepartmentReport; unknown: UnknownSecti
   const base = `departments.${d.department}`;
   const prevBase = `departments.previous_period.${d.department}`;
   const own = unknown.filter((u) => u.section === base).map((u) => u.reason);
-  const sub = (key: string) => reasonsFor(unknown, `${base}.${key}`, `${prevBase}.${key}`);
+  const sub = (key: string) => reasonsFor(unknown, `${base}.${key}`);
+  const prevSub = (key: string) => reasonsFor(unknown, `${prevBase}.${key}`);
   const count = (unit: string) => (v: number | null) => plain(v, unit);
   const reasons = Object.entries(d.quality.fallback_reasons);
   return (
@@ -215,16 +222,16 @@ function Department({ d, unknown }: { d: DepartmentReport; unknown: UnknownSecti
           많이 한 일: {d.requests.top_skills.map((s) => `${s.label} ${s.count}건`).join(" · ")}
         </p>
       )}
-      <div className="mt-3"><OutcomeBar outcomes={d.outcomes} reasons={sub("outcomes")} /></div>
+      <div className="mt-3"><OutcomeBar outcomes={d.outcomes} reasons={[...sub("outcomes"), ...prevSub("outcomes").map((r) => `직전 기간: ${r}`)]} /></div>
       <dl className="mt-3">
-        <Row label="사람에게 넘긴 일" now={d.handoffs.handed} before={p.handoffs.handed} show={count("건")} reasons={sub("handoffs")} />
+        <Row label="사람에게 넘긴 일" now={d.handoffs.handed} before={p.handoffs.handed} show={count("건")} reasons={sub("handoffs")} previousReasons={prevSub("handoffs")} />
         <Row label="└ 사람이 처리" now={d.handoffs.done} before={p.handoffs.done} show={count("건")} />
         <Row label="└ 사람이 반려" now={d.handoffs.rejected} before={p.handoffs.rejected} show={count("건")} />
         <Row label="└ 평균 처리 시간" now={d.handoffs.avg_close_minutes} before={p.handoffs.avg_close_minutes} show={minutesText} />
         <Row label="템플릿 대체 비율" now={d.quality.fallback.rate} before={p.quality.fallback.rate} show={percent}
-          reasons={d.quality.fallback.rate == null && d.quality.fallback.note ? [`${d.quality.fallback.note} (완료 응답 ${d.quality.fallback.total}건)`] : sub("quality")} />
+          reasons={d.quality.fallback.rate == null && d.quality.fallback.note ? [`${d.quality.fallback.note} (완료 응답 ${d.quality.fallback.total}건)`] : sub("quality")} previousReasons={prevSub("quality")} />
         <Row label="평균 응답 시간" now={d.quality.avg_response_ms} before={p.quality.avg_response_ms} show={seconds} />
-        <Row label="참여한 사건" now={d.incidents.count} before={p.incidents.count} show={count("건")} reasons={sub("incidents")} />
+        <Row label="참여한 사건" now={d.incidents.count} before={p.incidents.count} show={count("건")} reasons={sub("incidents")} previousReasons={prevSub("incidents")} />
       </dl>
       {reasons.length > 0 && (
         <p className="mt-1 text-[11px] text-ink-500">템플릿 대체 이유: {reasons.map(([k, n]) => `${k} ${n}건`).join(" · ")}</p>
@@ -296,7 +303,13 @@ function Report({ res }: { res: A2AResult<ActivityReportOutput> }) {
 export function ActivityReport({ tick }: { tick: number }) {
   const [period, setPeriod] = useState<ActivityPeriod>("day");
   const [start, setStart] = useState<string>(yesterdayKst());
-  const res = useResource(`activity-${period}-${start}`, () => dataAi.activityReport(period, start || null).then((r) => ({ data: r, meta: { mock: false } })), tick);
+  // 페이지는 30초마다 새로 받지만 주간·월간 리포트는 그보다 오래 걸린다. 받는 중이면 그 차례는 건너뛴다
+  // (안 그러면 응답이 오기 전에 새 요청이 나가 화면이 계속 "불러오는 중"이고 재무 호출만 쌓인다)
+  const busy = useRef(false);
+  const [refresh, setRefresh] = useState(tick);
+  useEffect(() => { if (!busy.current) setRefresh(tick); }, [tick]);
+  const res = useResource(`activity-${period}-${start}`, () => dataAi.activityReport(period, start || null).then((r) => ({ data: r, meta: { mock: false } })), refresh);
+  useEffect(() => { busy.current = res.loading; }, [res.loading]);
 
   if (!kpiLive) {
     return (

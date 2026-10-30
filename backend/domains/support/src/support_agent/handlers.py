@@ -40,6 +40,7 @@ from support_agent import (
     notices,
     payment_handlers,
     persistence,
+    privacy_audit,
     secure_transfer,
     shop_client,
 )
@@ -343,6 +344,7 @@ async def create_inquiry(request: AgentRequest) -> AgentResult:
             first_message=message,
             analysis=analysis,
         )
+        privacy_audit.record_message(STORE, conversation, fallback)
         await events.emit_inquiry_received(request, conversation)
         log_activity(conversation.id, **_analysis_entry(analysis, fallback=fallback, first=True))
         return _view(conversation), fallback
@@ -370,6 +372,7 @@ async def add_customer_message(request: AgentRequest) -> AgentResult:
     async def apply() -> tuple[dict[str, Any], bool]:
         analysis, fallback = await drafting.analyze(message, conversation.subject, extra)
         updated = STORE.add_customer_message(parsed.inquiry_id, message, analysis)
+        privacy_audit.record_message(STORE, updated, fallback)
         await events.emit_inquiry_received(request, updated)
         log_activity(parsed.inquiry_id, **_analysis_entry(analysis, fallback=fallback, first=False))
         return _view(updated), fallback
@@ -451,6 +454,9 @@ async def send_reply(request: AgentRequest) -> AgentResult:
                     **_draft_event_context(conversation, parsed.draft_style, validation),
                 }
             )
+            privacy_audit.record_decision(
+                STORE, conversation, parsed.draft_style, "blocked", validation
+            )
         return _done(
             request,
             {"validation": validation.model_dump(mode="json")},
@@ -474,6 +480,9 @@ async def send_reply(request: AgentRequest) -> AgentResult:
                     else None,
                     **_draft_event_context(conversation, parsed.draft_style),
                 }
+            )
+            privacy_audit.record_decision(
+                STORE, conversation, parsed.draft_style, "edited" if edited else "accepted"
             )
         how = "written" if not parsed.draft_style else ("edited" if edited else "accepted")
         log_activity(
@@ -512,6 +521,9 @@ async def reject_draft(request: AgentRequest) -> AgentResult:
                 **_draft_event_context(STORE.get(parsed.inquiry_id), parsed.draft_style),
             }
         )
+        conversation = STORE.get(parsed.inquiry_id)
+        if conversation is not None:
+            privacy_audit.record_decision(STORE, conversation, parsed.draft_style, "rejected")
         log_activity(
             parsed.inquiry_id,
             kind="draft_rejected",
@@ -814,8 +826,13 @@ def customer_message(message: dict[str, Any]) -> dict[str, Any]:
 
 
 def customer_inquiry(data: dict[str, Any]) -> dict[str, Any]:
-    """문의 한 건의 고객용 모양: 제목·상태·주문·메시지 글만 (분석·초안·분류·고객 이름 제외)."""
+    """문의 한 건의 고객용 모양: 제목·상태·주문·메시지 글과 평가 여부만(분석·초안·분류·이름 제외).
+
+    `rated`는 고객이 이미 해결 결과를 평가했는지다. 평가 내용(별점·글·공개 여부)은 싣지 않는다.
+    """
     view = {k: data.get(k) for k in ("id", "subject", "status", "order_id", "updated_at")}
+    stored = STORE.get(data["id"]) if isinstance(data.get("id"), int) else None
+    view["rated"] = stored is not None and stored.feedback is not None
     if "messages" in data:
         view["messages"] = [customer_message(m) for m in data["messages"]]
     else:

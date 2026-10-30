@@ -22,8 +22,11 @@ from ax_contracts.schemas import (
     AgentResult,
     Card,
     CaseResolution,
+    EventTimeline,
     FindSimilarCasesInput,
     FindSimilarCasesOutput,
+    RecordEventTimesInput,
+    RecordEventTimesOutput,
     RecordResolutionInput,
     RecordResolutionOutput,
     SimilarCase,
@@ -74,6 +77,25 @@ def resolution_of(card: Card) -> CaseResolution | None:
         return None
     try:
         return CaseResolution.model_validate(raw)
+    except ValidationError:
+        return None
+
+
+TIMES = (
+    "detected_at",
+    "cause_candidate_at",
+    "human_work_started_at",
+    "human_work_done_at",
+    "recovered_at",
+)
+
+
+def timeline_of(card: Card) -> EventTimeline | None:
+    raw = card.extra.get("timeline")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return EventTimeline.model_validate(raw)
     except ValidationError:
         return None
 
@@ -192,6 +214,76 @@ def _same_type(wanted: str | None, found: str | None) -> bool | None:
     return None if not wanted or not found else wanted == found
 
 
+async def record_event_times(svc: Services, request: AgentRequest) -> AgentResult:
+    """이벤트 카드에 시스템이 잰 시각을 채운다. 이미 있는 시각은 덮어쓰지 않는다."""
+    try:
+        params = RecordEventTimesInput.model_validate(request.input)
+    except ValidationError as exc:
+        return invalid_input(request, exc)
+    if not request.meta.idempotency_key:
+        return invalid_input(request, "상태를 바꾸는 요청에는 idempotency_key가 필요하다")
+
+    cards = [
+        c
+        for c in await svc.memory.list_cards(states=["active"])
+        if c.context_id == params.context_id and c.kind in KINDS
+    ]
+    if not cards:
+        svc.audit.record(params.context_id, "record_event_times.no_card", {})
+        return completed(
+            request,
+            RecordEventTimesOutput(outcome="no_card"),
+            outcome="no_card",
+            evidence=make_evidence(svc.clock, "시각을 기록할 카드가 없음: 확인할 수 없음", []),
+        )
+    card = max(cards, key=lambda c: c.created_at)
+    current = timeline_of(card) or EventTimeline()
+    fresh = {
+        name: getattr(params, name)
+        for name in (*TIMES, "prior_case_id")
+        if getattr(current, name) is None and getattr(params, name) is not None
+    }
+    evidence = make_evidence(svc.clock, f"이벤트 시각 기록: {params.context_id}", [card.card_id])
+    if not fresh:
+        return completed(
+            request,
+            RecordEventTimesOutput(outcome="duplicate", card_id=card.card_id, timeline=current),
+            outcome="duplicate",
+            evidence=evidence,
+        )
+    merged = current.model_copy(update=fresh)
+    digest = hashlib.sha256(merged.model_dump_json().encode("utf-8")).hexdigest()[:12]
+    decision = await svc.gate.execute(
+        "memory.card_write",
+        {
+            "card_id": card.card_id,
+            "summary": f"{card.title} 시각",
+            "confidence": card.confidence,
+            "target": card.card_id,
+        },
+        with_key(request.meta, f"memory.card_write:{card.card_id}:times:{digest}"),
+        evidence,
+    )
+    if decision.status != "executed":
+        svc.audit.record(
+            params.context_id, "record_event_times.blocked", {"status": decision.status}
+        )
+        return gate_blocked(request, decision)
+    updated = card.model_copy(
+        update={"extra": {**card.extra, "timeline": merged.model_dump(mode="json")}}
+    )
+    await svc.memory.write_card(updated)
+    svc.audit.record(
+        params.context_id, "record_event_times", {"card_id": card.card_id, "added": sorted(fresh)}
+    )
+    return completed(
+        request,
+        RecordEventTimesOutput(outcome="recorded", card_id=card.card_id, timeline=merged),
+        outcome="recorded",
+        evidence=evidence,
+    )
+
+
 def _summary(card: Card) -> str:
     decision = card.extra.get("decision")
     return str(decision) if decision else card.title
@@ -247,6 +339,7 @@ async def find_similar_cases(svc: Services, request: AgentRequest) -> AgentResul
             similarity=min(max(s, 0.0), 1.0),
             resolved=resolution_of(c) is not None,
             resolution=resolution_of(c),
+            timeline=timeline_of(c),
             event_type=_type_of(c),
             same_type=_same_type(params.event_type, _type_of(c)),
             created_at=c.created_at,

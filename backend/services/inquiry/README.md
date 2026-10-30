@@ -22,6 +22,7 @@
 | `prepare_handoff` | read |
 | `assess_deletion_request` | read |
 | `knowledge_gap_report` | read |
+| `get_privacy_audit` | read |
 | `analyze_receipt` | read |
 | `analyze_claim_request` | read |
 

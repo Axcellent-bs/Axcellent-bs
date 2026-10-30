@@ -12,7 +12,7 @@ from support_agent.schemas import Analysis, Classification, Draft, Validation
 from support_agent.store import InquiryStore
 
 INTERNAL_DRAFT = "내부 초안: 사전 승인된 보상 문구"
-CUSTOMER_KEYS = {"id", "subject", "status", "order_id", "updated_at"}
+CUSTOMER_KEYS = {"id", "subject", "status", "order_id", "updated_at", "rated"}
 
 
 def analysis(language: str = "ko", keywords: list[str] | None = None) -> Analysis:
@@ -106,6 +106,27 @@ def test_get_returns_messages_without_internal_analysis() -> None:
     assert [set(m) for m in output["messages"]] == [{"id", "role", "text", "created_at"}]
     assert output["messages"][0]["text"] == "환불해 주세요"
     assert INTERNAL_DRAFT not in str(output) and "analysis" not in output
+
+
+def test_rated_tells_whether_the_customer_already_rated_without_the_rating(
+    _fresh: InquiryStore,
+) -> None:
+    before = call("list_inquiries", {"user_id": 1})["output"]["items"]
+    assert [i["rated"] for i in before] == [False, False]
+    _fresh.set_status(1, "resolved")
+    done = call(
+        "submit_feedback",
+        {"inquiry_id": 1, "rating": 2, "resolved": False, "user_id": 1},
+        untrusted={"comment": "아직도 안 왔어요 010-1234-5678"},
+        key="k-rate",
+    )
+    assert done["status"] == "completed"
+    listed = {i["id"]: i for i in call("list_inquiries", {"user_id": 1})["output"]["items"]}
+    assert listed[1]["rated"] is True and listed[2]["rated"] is False
+    got = call("get_inquiry", {"inquiry_id": 1, "user_id": 1})["output"]
+    assert got["rated"] is True
+    for leaked in ("아직도 안 왔어요", "[전화번호]", "flagged", "CS_FOLLOW_UP", "rating"):
+        assert leaked not in str(listed[1]) + str(got)  # 평가 내용은 보이지 않는다
 
 
 def test_someone_elses_inquiry_is_not_found_not_forbidden() -> None:

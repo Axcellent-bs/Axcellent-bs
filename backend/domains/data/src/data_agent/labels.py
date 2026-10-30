@@ -2,7 +2,8 @@
 
 - skill 이름은 화면 `frontend/src/lib/labels.ts`의 `SKILL_KO`와 같은 말을 쓴다
   (두 곳이 어긋나지 않게).
-  화면 표에 없는 skill만 여기서 더한다. 여기도 없으면 원래 이름을 그대로 쓴다(지어내지 않는다).
+  화면 표에 없는 skill만 여기서 더한다.
+  여기도 없으면 "기타 작업(원래 이름)"이다(이름을 지어내지 않는다).
 - 서비스 이름은 `ax_agent_template.services`의 `Service.name`을 쓴다.
 """
 
@@ -77,6 +78,7 @@ SKILL_KO: dict[str, str] = {
     "list_open_questions": "남은 질문 보기",
     "find_similar_cases": "비슷한 과거 사건 찾기",
     "record_resolution": "해결 내용 기록",
+    "record_event_times": "이벤트 시각 기록",
     "record_case": "결정 기록",
     "check_plan": "계획 점검",
     "list_candidate_cards": "후보 카드 보기",
@@ -95,6 +97,8 @@ SKILL_KO: dict[str, str] = {
     "root_cause_hypotheses": "원인 후보 찾기",
     "accuracy_report": "정확도 보고서",
     "activity_report": "부서별 AI 업무 리포트",
+    "receive_dev_result": "개발 결과 받기",
+    "start_dev": "개발 시작",
 }
 
 
@@ -102,8 +106,12 @@ def department_label(department: str) -> str:
     return DEPARTMENT_KO.get(department, department)
 
 
+OTHER_WORK = "기타 작업"
+
+
 def skill_label(skill: str) -> str:
-    return SKILL_KO.get(skill, skill)
+    """한국어 이름. 표에 없으면 영어 이름만 내보이지 않고 "기타 작업(원래 이름)"이다."""
+    return SKILL_KO.get(skill) or f"{OTHER_WORK}({skill})"
 
 
 def service_label(service_id: str) -> str:
