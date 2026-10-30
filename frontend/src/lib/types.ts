@@ -126,7 +126,12 @@ export interface Analysis {
   classification?: Classification; sources?: Source[]; drafts?: Draft[]; timings_ms?: Record<string, number>; validation?: Validation;
   facts?: unknown;
 }
-export interface Message { id: number; role: "customer" | "agent"; text: string; analysis: Analysis | null; created_at: string }
+export type AbuseLevel = "none" | "profanity" | "insult" | "threat";
+/** `text`는 접수된 원문, `display_text`는 욕설·모욕·위협 표현을 가린 글(가릴 것이 없으면 null) */
+export interface Message {
+  id: number; role: "customer" | "agent"; text: string; display_text?: string | null;
+  abuse_level?: AbuseLevel; abuse_kinds?: string[]; analysis: Analysis | null; created_at: string;
+}
 export interface Summary {
   summary_ko: string; issue_ko: string; actions_ko: string[]; next_action_ko: string; category: string; resolved: boolean;
   escalate: boolean; escalate_reason_ko: string; tags: string[];
