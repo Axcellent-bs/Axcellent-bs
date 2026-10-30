@@ -17,7 +17,7 @@ Stage = Literal["ingest", "llm_input", "event_untrusted", "transfer"]
 MaskingAction = Literal["none", "masked", "blocked", "dropped"]
 ReplyPath = Literal["llm", "template_fallback", "rules"]
 ReplyOutcome = Literal["generated", "accepted", "edited", "rejected", "blocked"]
-RecordType = Literal["masking", "provenance"]
+RecordType = Literal["masking", "provenance", "retention_purge"]
 
 
 class MaskingAuditRecord(AxModel):
@@ -62,6 +62,21 @@ class ReplyProvenance(AxModel):
     occurred_at: str
 
 
+class RetentionPurgeRecord(AxModel):
+    """문의 원문을 지운(치환한) 사실. 기준·건수·실행자 역할·시각만 담고 문의 내용은 없다."""
+
+    audit_id: int
+    record_type: Literal["retention_purge"] = "retention_purge"
+    tenant_id: str
+    context_id: str
+    inquiry_id: int
+    criterion: str  # 왜 지웠나 (예: explicit_test_inquiry)
+    purged: dict[str, int]  # 비운 것의 건수 (messages·activity·feedback)
+    kept: dict[str, int]  # 남긴 것의 건수 (messages·activity·claims)
+    executor_role: str  # 사람 이름이 아니라 역할 코드 (예: operator)
+    occurred_at: str
+
+
 class GetPrivacyAuditInput(AxModel):
     inquiry_id: int
     kinds: list[RecordType] | None = None  # 비우면 둘 다
@@ -81,6 +96,7 @@ class PrivacyAudit(AxModel):
     inquiry_id: int
     masking: list[MaskingAuditRecord] = Field(default_factory=list)
     provenance: list[ReplyProvenance] = Field(default_factory=list)
+    retention_purge: list[RetentionPurgeRecord] = Field(default_factory=list)
     rules_version: str
     processing_activity: ProcessingActivity
     notes: list[str] = Field(default_factory=list)
