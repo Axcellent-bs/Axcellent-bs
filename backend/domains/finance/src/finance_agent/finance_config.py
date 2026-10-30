@@ -58,6 +58,14 @@ class ProposalConfig(_Strict):
     max_step_ratio: float = Field(gt=0, le=1)
 
 
+class BankConfig(_Strict):
+    pg_memo: str = ""
+
+
+class CashflowConfig(_Strict):
+    trailing_weeks: int = Field(default=8, ge=1, le=26)
+
+
 class VarianceConfig(_Strict):
     flag_ratio: float = Field(default=0.1, gt=0)
     flag_min_amount: int = Field(default=10000, ge=0)
@@ -81,6 +89,8 @@ class FinanceConfig(_Strict):
     settlement: SettlementConfig
     pg: PgConfig
     variance: VarianceConfig = VarianceConfig()
+    bank: BankConfig = BankConfig()
+    cashflow: CashflowConfig = CashflowConfig()
     budget: BudgetConfig
     proposal: ProposalConfig
     audit: AuditConfig

@@ -176,7 +176,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.141901Z",
+   "collected_at": "2026-10-30T07:33:21.806534Z",
    "source": "seed",
    "unavailable": []
   }
@@ -271,7 +271,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.203476Z",
+   "collected_at": "2026-10-30T07:33:21.844528Z",
    "source": "seed",
    "unavailable": []
   }
@@ -378,7 +378,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.213186Z",
+   "collected_at": "2026-10-30T07:33:21.850765Z",
    "source": "seed",
    "unavailable": []
   }
@@ -554,7 +554,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.222909Z",
+   "collected_at": "2026-10-30T07:33:21.867201Z",
    "source": "seed",
    "unavailable": []
   }
@@ -730,7 +730,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.234649Z",
+   "collected_at": "2026-10-30T07:33:21.897119Z",
    "source": "seed",
    "unavailable": []
   }
@@ -906,7 +906,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.245103Z",
+   "collected_at": "2026-10-30T07:33:21.909850Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2025,7 +2025,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.257662Z",
+   "collected_at": "2026-10-30T07:33:21.917491Z",
    "source": "seed",
    "unavailable": [],
    "pg_source": "mock_toss_settlement"
@@ -2096,7 +2096,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.274763Z",
+   "collected_at": "2026-10-30T07:33:21.947147Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2211,7 +2211,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.309587Z",
+   "collected_at": "2026-10-30T07:33:21.951184Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2220,7 +2220,7 @@
   "data": {
    "today": "2026-10-30",
    "deadline_days": 20,
-   "basis": "구매 확정일(배송 완료 시각으로 대신함)부터",
+   "basis": "구매 확정일(배송 완료 시각으로 대신함)부터 (온라인플랫폼 정산 법안 계류 중, 선제 기준)",
    "warn_days": 5,
    "since": "2026-08-21",
    "counts": {
@@ -2293,7 +2293,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.340894Z",
+   "collected_at": "2026-10-30T07:33:21.964401Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2344,7 +2344,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.357209Z",
+   "collected_at": "2026-10-30T07:33:21.977908Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2514,7 +2514,214 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.373428Z",
+   "collected_at": "2026-10-30T07:33:21.997840Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/bank": {
+  "data": {
+   "uploaded": false,
+   "covered": null,
+   "counts": {},
+   "days": [],
+   "pg_memo": ""
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T07:33:22.011180Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/cashflow": {
+  "data": {
+   "today": "2026-10-30",
+   "weeks": [
+    {
+     "week_start": "2026-10-26",
+     "basis": "scheduled",
+     "inflow": 557753,
+     "outflow": 2689140,
+     "net": -2131387,
+     "cumulative": -2131387
+    },
+    {
+     "week_start": "2026-11-02",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": -1819774
+    },
+    {
+     "week_start": "2026-11-09",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": -1508161
+    },
+    {
+     "week_start": "2026-11-16",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": -1196548
+    },
+    {
+     "week_start": "2026-11-23",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": -884935
+    },
+    {
+     "week_start": "2026-11-30",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": -573322
+    },
+    {
+     "week_start": "2026-12-07",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": -261709
+    },
+    {
+     "week_start": "2026-12-14",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": 49904
+    },
+    {
+     "week_start": "2026-12-21",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": 361517
+    },
+    {
+     "week_start": "2026-12-28",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": 673130
+    },
+    {
+     "week_start": "2027-01-04",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": 984743
+    },
+    {
+     "week_start": "2027-01-11",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": 1296356
+    },
+    {
+     "week_start": "2027-01-18",
+     "basis": "estimated",
+     "inflow": 3477953,
+     "outflow": 3166340,
+     "net": 311613,
+     "cumulative": 1607969
+    }
+   ],
+   "trailing_weeks": 1,
+   "average": {
+    "inflow": 3477953,
+    "outflow": 3166340
+   },
+   "negative_weeks": [
+    "2026-10-26"
+   ],
+   "note": "은행 잔액은 연동되지 않아 누적은 오늘을 0으로 둔 값입니다"
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T07:33:22.032120Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/close-checklist": {
+  "data": {
+   "month": "2026-10",
+   "items": [
+    {
+     "key": "daily_closing",
+     "label": "일 결산 확정",
+     "status": "pending",
+     "detail": "0/29일 확정 (남은 날: 10-01, 10-02, 10-03, 10-04, 10-05 외)",
+     "link": "closing"
+    },
+    {
+     "key": "reconciliation",
+     "label": "매출·PG 대사 메모",
+     "status": "pending",
+     "detail": "메모 없는 불일치 4건",
+     "link": "reconciliation"
+    },
+    {
+     "key": "bank",
+     "label": "은행 입금 대조",
+     "status": "pending",
+     "detail": "은행 거래내역을 아직 올리지 않음",
+     "link": "reconciliation"
+    },
+    {
+     "key": "settlement",
+     "label": "판매자 정산 지급 승인",
+     "status": "pending",
+     "detail": "승인 안 된 주: 2026-W42",
+     "link": "settlements"
+    },
+    {
+     "key": "payables",
+     "label": "판매자 미지급금 롤포워드",
+     "status": "done",
+     "detail": "기말 6,665,676원, 더 준 판매자 0곳",
+     "link": "settlements"
+    },
+    {
+     "key": "audit",
+     "label": "감사 의심 건 처리",
+     "status": "pending",
+     "detail": "처리 전 7건",
+     "link": "audit"
+    },
+    {
+     "key": "month_closing",
+     "label": "월 결산 확정 (사람)",
+     "status": "pending",
+     "detail": "결산 탭에서 '한 달'을 골라 확정",
+     "link": "closing"
+    }
+   ],
+   "done": 1,
+   "total": 7,
+   "ready": false,
+   "closed": false
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-10-30T07:33:22.045048Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2617,7 +2824,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.393443Z",
+   "collected_at": "2026-10-30T07:33:22.081197Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2721,7 +2928,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.416143Z",
+   "collected_at": "2026-10-30T07:33:22.115282Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2818,7 +3025,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.442349Z",
+   "collected_at": "2026-10-30T07:33:22.142041Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2841,8 +3048,8 @@
       "exe_s0044"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:27:25.194865Z",
-     "last_seen": "2026-10-30T07:27:25.456171Z",
+     "first_seen": "2026-10-30T07:33:21.833688Z",
+     "last_seen": "2026-10-30T07:33:22.154012Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2855,8 +3062,8 @@
      "detail": "최근 7일 환불률 4.1% (지난 7일 0.5%)",
      "refs": [],
      "status": "open",
-     "first_seen": "2026-10-30T07:27:25.194865Z",
-     "last_seen": "2026-10-30T07:27:25.434933Z",
+     "first_seen": "2026-10-30T07:33:21.833688Z",
+     "last_seen": "2026-10-30T07:33:22.131627Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2872,8 +3079,8 @@
       "ord_2156"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:27:25.194865Z",
-     "last_seen": "2026-10-30T07:27:25.456171Z",
+     "first_seen": "2026-10-30T07:33:21.833688Z",
+     "last_seen": "2026-10-30T07:33:22.154012Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2889,8 +3096,8 @@
       "cpn_3063"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:27:25.194865Z",
-     "last_seen": "2026-10-30T07:27:25.456171Z",
+     "first_seen": "2026-10-30T07:33:21.833688Z",
+     "last_seen": "2026-10-30T07:33:22.154012Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2910,8 +3117,8 @@
       "ord_2135"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:27:25.194865Z",
-     "last_seen": "2026-10-30T07:27:25.456171Z",
+     "first_seen": "2026-10-30T07:33:21.833688Z",
+     "last_seen": "2026-10-30T07:33:22.154012Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2929,8 +3136,8 @@
       "exe_s0046"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:27:25.194865Z",
-     "last_seen": "2026-10-30T07:27:25.456171Z",
+     "first_seen": "2026-10-30T07:33:21.833688Z",
+     "last_seen": "2026-10-30T07:33:22.154012Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2948,8 +3155,8 @@
       "exe_s0049"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:27:25.194865Z",
-     "last_seen": "2026-10-30T07:27:25.406531Z",
+     "first_seen": "2026-10-30T07:33:21.833688Z",
+     "last_seen": "2026-10-30T07:33:22.098380Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -2968,8 +3175,8 @@
       "exe_s0049"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:27:25.434933Z",
-     "last_seen": "2026-10-30T07:27:25.456171Z",
+     "first_seen": "2026-10-30T07:33:22.131627Z",
+     "last_seen": "2026-10-30T07:33:22.154012Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3060,7 +3267,7 @@
   ],
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.507002Z",
+   "collected_at": "2026-10-30T07:33:22.186848Z",
    "ledger_source": "seed",
    "unavailable": []
   }
@@ -3069,7 +3276,7 @@
   "data": [],
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.523734Z",
+   "collected_at": "2026-10-30T07:33:22.218980Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3171,7 +3378,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.540052Z",
+   "collected_at": "2026-10-30T07:33:22.231334Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3207,7 +3414,7 @@
      "buy_0004"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:27:25.556905Z"
+    "collected_at": "2026-10-30T07:33:22.250175Z"
    },
    "compensation": {
     "coupons": [
@@ -3335,7 +3542,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.556905Z",
+   "collected_at": "2026-10-30T07:33:22.250175Z",
    "unavailable": []
   }
  },
@@ -3368,7 +3575,7 @@
      "buy_0014"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:27:25.573317Z"
+    "collected_at": "2026-10-30T07:33:22.265133Z"
    },
    "compensation": {
     "coupons": [
@@ -3451,7 +3658,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.573317Z",
+   "collected_at": "2026-10-30T07:33:22.265133Z",
    "unavailable": []
   }
  },
@@ -3478,7 +3685,7 @@
      "buy_0007"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:27:25.590518Z"
+    "collected_at": "2026-10-30T07:33:22.281740Z"
    },
    "compensation": {
     "coupons": [
@@ -3561,7 +3768,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.590518Z",
+   "collected_at": "2026-10-30T07:33:22.281740Z",
    "unavailable": []
   }
  },
@@ -3589,7 +3796,7 @@
      "buy_0012"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:27:25.614681Z"
+    "collected_at": "2026-10-30T07:33:22.297480Z"
    },
    "compensation": {
     "coupons": [
@@ -3672,7 +3879,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.614681Z",
+   "collected_at": "2026-10-30T07:33:22.298552Z",
    "unavailable": []
   }
  },
@@ -3705,7 +3912,7 @@
      "buy_0016"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:27:25.624675Z"
+    "collected_at": "2026-10-30T07:33:22.314718Z"
    },
    "compensation": {
     "coupons": [
@@ -3806,7 +4013,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.624675Z",
+   "collected_at": "2026-10-30T07:33:22.314727Z",
    "unavailable": []
   }
  },
@@ -3834,7 +4041,7 @@
      "buy_0006"
     ],
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:27:25.642573Z"
+    "collected_at": "2026-10-30T07:33:22.329512Z"
    },
    "compensation": {
     "coupons": [
@@ -3934,7 +4141,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:27:25.642573Z",
+   "collected_at": "2026-10-30T07:33:22.329512Z",
    "unavailable": []
   }
  },

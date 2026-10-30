@@ -40,7 +40,7 @@ from finance_agent.selftest import SELF_TEST_TTL_HOURS, is_fresh, run_self_test
 DEFAULT_CORS_ORIGINS = "http://localhost:3001,http://127.0.0.1:3001"
 DECISION_PATHS = re.compile(
     r"^/api/finance/(closing/confirm|reconciliation/[^/]+/note|settlements/batch"
-    r"|anomalies/[^/]+/resolve|policy/[^/]+/ack)$"
+    r"|anomalies/[^/]+/resolve|policy/[^/]+/ack|bank/statement)$"
 )
 
 logger = logging.getLogger("ax.finance")
