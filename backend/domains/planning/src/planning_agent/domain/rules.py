@@ -10,6 +10,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Literal
 
+from planning_agent.domain.handover import area_of_path
 from planning_agent.domain.models import (
     PR,
     AutoCheck,
@@ -117,14 +118,23 @@ def para_of(state: State, pr: PR) -> tuple[str | None, str | None]:
 def merged_in_window(
     state: State, window_from: datetime, window_to: datetime, component: str | None = None
 ) -> list[PR]:
-    """구간 안에 머지된 PR. component가 있으면 바뀐 경로 접두사로 거른다. 최근 머지 순."""
+    """구간 안에 머지된 PR. 최근 머지 순.
+
+    component가 있으면 바뀐 경로 접두사나 경로의 구성요소(`area_of_path`, 총괄 사건 component
+    값)로 거른다."""
     found = [
         p
         for p in state.prs
         if p.merged
         and p.merged_at is not None
         and window_from <= p.merged_at <= window_to
-        and (not component or any(path.startswith(component) for path in p.changed_paths))
+        and (
+            not component
+            or any(
+                path.startswith(component) or area_of_path(path) == component
+                for path in p.changed_paths
+            )
+        )
     ]
     return sorted(found, key=lambda p: (p.merged_at, p.number), reverse=True)
 

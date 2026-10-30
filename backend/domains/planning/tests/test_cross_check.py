@@ -114,8 +114,11 @@ def test_components_from_paths() -> None:
         "search",
         "payment",
     ]
-    # 경로 단위 비교: payments_old는 payment가 아니다
-    assert components_of(["shop-api/payments_old/a.py", "docs/a.md"]) == []
+    # 떼어 온 레포 경로는 폴더·파일 이름 낱말로 정한다 (CamelCase도 쪼갠다)
+    assert components_of(["shop-web/src/pages/Cart.tsx"]) == ["payment"]
+    assert components_of(["shop-web/src/pages/OrderDetail.tsx"]) == ["payment"]
+    assert components_of(["shop-web/src/pages/ProductDetail.tsx"]) == ["catalog"]
+    assert components_of(["shop-web/src/pages/Home.tsx", "docs/a.md"]) == []
 
 
 def test_clean_evidence_auto_merges_with_cross_check_params() -> None:
@@ -130,12 +133,9 @@ def test_clean_evidence_auto_merges_with_cross_check_params() -> None:
     assert (params["active_incident_overlap"], params["data_verdict"]) == (0, "normal")
     assert (params["recent_incident_count"], params["evidence_missing"]) == (0, 0)
     assert pr.merged
-    # 총괄에는 구성요소로, 데이터분석에는 최근 24시간 창으로 묻는다
-    assert (
-        "orchestrator",
-        "find_active_incident",
-        {"component": "payment", "occurred_at": None},
-    ) in agents.asked
+    # 총괄에는 구성요소와 지금 시각으로 (degraded 사건도 잡게), 데이터분석에는 최근 24시간 창으로
+    asked = [i for t, k, i in agents.asked if k == "find_active_incident"]
+    assert asked and asked[0]["component"] == "payment" and asked[0]["occurred_at"]
     assert any(t == "data" and s == "anomaly_detection" for t, s, _ in agents.asked)
     assert any(a.point == "cross_check" and "근거 통과" in a.text for a in svc.state.activity)
 
@@ -226,3 +226,89 @@ def test_unlinked_pr_does_not_ask_anyone() -> None:
     svc.state.prs.append(pr)
     assert run(svc._try_auto_merge(svc.state, pr)) is True
     assert agents.asked == []
+
+
+def test_related_prs_find_real_repo_path_by_component() -> None:
+    """총괄이 사건 component(payment)로 관련 PR을 물으면 떼어 온 레포 경로도 찾는다."""
+    from planning_agent.domain.rules import merged_in_window
+
+    svc = _service(None, Gate())
+    pr28 = next(p for p in svc.state.prs if p.id == "PR #28")
+    now = svc.clock()
+    pr = pr28.model_copy(
+        update={
+            "id": "PR #95",
+            "number": 95,
+            "task": "T-none",
+            "merged": True,
+            "merged_at": now,
+            "changed_paths": ["shop-web/src/pages/Cart.tsx"],
+        }
+    )
+    svc.state.prs.append(pr)
+    found = merged_in_window(svc.state, now - timedelta(minutes=15), now, "payment")
+    assert pr in found
+
+
+def test_related_prs_include_merge_just_before_symptoms() -> None:
+    """총괄은 장애 시작 시각부터 묻는다. 그 직전에 머지된 PR도 후보여야 한다 (30분 앞부터)."""
+    svc = _service(None, Gate())
+    pr28 = next(p for p in svc.state.prs if p.id == "PR #28")
+    start = svc.clock()
+    pr = pr28.model_copy(
+        update={
+            "id": "PR #94",
+            "number": 94,
+            "task": "T-none",
+            "merged": True,
+            "merged_at": start - timedelta(seconds=12),
+            "changed_paths": ["shop-web/src/pages/Cart.tsx"],
+        }
+    )
+    svc.state.prs.append(pr)
+    found = run(
+        svc.find_related_prs(
+            context_id="ctx_inc_x",
+            requester="orchestrator",
+            window_from=start,
+            window_to=start + timedelta(minutes=15),
+            component="payment",
+        )
+    )
+    assert pr in [p for p, _, _ in found]
+
+
+def test_link_marks_incident_even_if_policy_demotion_is_held() -> None:
+    """자동 머지 PR이 사건에 연결되면 범위를 줄이는데, 그 관문(auto_policy_update)이 막혀도
+    장애 표시는 남아야 한다 (안 그러면 교차검증이 장애 경로를 모른다)."""
+
+    class HoldPolicy(Gate):
+        async def __call__(self, action, params, meta, evidence) -> ExecuteDecision:
+            self.calls.append((action, params))
+            if action == "auto_policy_update":
+                return ExecuteDecision(
+                    execution_id="exe_hold",
+                    grade="C",
+                    status="held",
+                    hold_reason="unregistered_action",
+                    review_id="rev_1",
+                )
+            return ExecuteDecision(execution_id="exe_ok", grade="A", status="executed")
+
+    svc = _service(None, HoldPolicy())
+    svc.state.auto_policy.level = 1
+    pr28 = next(p for p in svc.state.prs if p.id == "PR #28")
+    pr28.auto = True
+    out = run(
+        svc.link_incident(
+            context_id="ctx_inc_9",
+            requester="orchestrator",
+            incident_context_id="ctx_inc_9",
+            pr_numbers=[pr28.number],
+            follow_up_title=None,
+            idempotency_key="k-1",
+        )
+    )
+    assert out.output["linked_paras"]
+    assert svc.state.auto_policy.level == 1  # 축소는 보류
+    assert any(a.point == "auto_policy.update_held" for a in svc.state.activity)

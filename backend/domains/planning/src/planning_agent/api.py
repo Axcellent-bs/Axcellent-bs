@@ -201,7 +201,8 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
                     }
                 )
         for pr in svc.state.prs:
-            if not pr.merged and pr.auto_review is not None:
+            # 닫힌 PR(작업 중단·레포에서 닫음)은 더 판단할 게 없어 대기열에서 뺀다
+            if not pr.merged and not pr.closed and pr.auto_review is not None:
                 rows.append(
                     {
                         "kind": "pr",

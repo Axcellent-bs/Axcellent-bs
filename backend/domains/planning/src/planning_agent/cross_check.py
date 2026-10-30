@@ -39,7 +39,7 @@ from ax_contracts.schemas import (
 )
 from ax_contracts.schemas.data import AnomalyDetectionInput, AnomalyDetectionOutput
 from planning_agent.domain.autocheck import linked_incident_paras
-from planning_agent.domain.handover import AREA_BY_PATH
+from planning_agent.domain.handover import area_of_path
 from planning_agent.domain.models import PR, State
 
 EVIDENCE_TIMEOUT_SECONDS = 30.0  # 근거별 대기 (#104 제안값)
@@ -107,14 +107,12 @@ class CrossEvidence:
 
 
 def components_of(paths: list[str]) -> list[str]:
-    """바뀐 경로 → 구성요소 코드 (총괄 사건 `component`와 같은 값, 경로 단위 비교)."""
+    """바뀐 경로 → 구성요소 코드 (총괄 사건 `component`와 같은 값, handover 영역 표)."""
     out: list[str] = []
     for path in paths:
-        for prefix, area in AREA_BY_PATH:
-            if path == prefix or path.startswith(prefix + "/"):
-                if area not in out:
-                    out.append(area)
-                break
+        area = area_of_path(path)
+        if area and area not in out:
+            out.append(area)
     return out
 
 
@@ -143,7 +141,7 @@ class CrossChecker:
     async def gather(self, state: State, pr: PR, ctx: str, now: datetime) -> CrossEvidence:
         ev = CrossEvidence(components=components_of(pr.changed_paths))
         incidents, data = await asyncio.gather(
-            self._incidents(ev.components, ctx),
+            self._incidents(ev.components, ctx, now),
             self._data(ctx, now),
             return_exceptions=True,
         )
@@ -197,8 +195,11 @@ class CrossChecker:
             raise EvidenceUnavailable(f"{out.status.value} {out.outcome or ''}".strip())
         return out.output or {}
 
-    async def _incidents(self, components: list[str], ctx: str) -> list[str]:
-        """구성요소마다 열린 사건을 묻고, 겹친 사건 번호를 돌려준다."""
+    async def _incidents(self, components: list[str], ctx: str, now: datetime) -> list[str]:
+        """구성요소마다 지금 걸쳐 있는 사건을 묻고, 겹친 사건 번호를 돌려준다.
+
+        시각(`occurred_at`)을 같이 보낸다. 시각 없이 물으면 총괄은 `open` 사건만 보고
+        `degraded`(장애 진행 중) 사건을 빼서, 장애 중인데 "없음"이 나왔다."""
         if not components:
             raise EvidenceUnavailable("바뀐 경로의 구성요소를 정하지 못함")
         found: list[str] = []
@@ -207,7 +208,9 @@ class CrossChecker:
                 "orchestrator",
                 "find_active_incident",
                 ctx,
-                FindActiveIncidentInput(component=component).model_dump(mode="json"),
+                FindActiveIncidentInput(component=component, occurred_at=now).model_dump(
+                    mode="json"
+                ),
             )
             try:
                 parsed = FindActiveIncidentOutput.model_validate(body)
