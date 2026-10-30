@@ -20,7 +20,15 @@ from pydantic import ValidationError
 
 from ax_agent_template.server import error_result
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
-from support_agent import claim_handlers, claim_rules, drafting, guard, kb, receipts, shop_client
+from support_agent import (
+    claim_handlers,
+    claim_rules,
+    drafting,
+    guard,
+    policy_memory,
+    receipts,
+    shop_client,
+)
 from support_agent import handlers as h
 from support_agent.analysis_schemas import (
     MAX_IMAGE_BASE64,
@@ -356,6 +364,7 @@ async def analyze_claim_request(request: AgentRequest) -> AgentResult:
     text, _ = guard.mask_pii(customer[-1].text)
 
     result, source = await _classify(text)
+    policy_found = await policy_memory.search(request, text, h.SEND)
     notes: list[str] = []
     if source == "rules":
         notes.append("LLM을 쓸 수 없어 단어 규칙으로 분류했다. 담당자가 확인한다")
@@ -367,8 +376,7 @@ async def analyze_claim_request(request: AgentRequest) -> AgentResult:
         source=source,  # type: ignore[arg-type]
         notes=notes,
         policy_sources=[
-            PolicySource(id=s.id, title=s.title, section=s.section)
-            for s in kb.search(text, limit=3)
+            PolicySource(id=s.id, title=s.title, section=s.section) for s in policy_found
         ],
     )
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from ax_agent_template.config import is_mock
@@ -186,11 +187,15 @@ def _validated_drafts(
 
 
 async def analyze(
-    text: str, subject: str = "", extra_sources: list[Source] | None = None
+    text: str,
+    subject: str = "",
+    extra_sources: list[Source] | None = None,
+    retrieve: Callable[[str], Awaitable[list[Source]]] | None = None,
 ) -> tuple[Analysis, bool]:
     """고객 메시지를 분석한다. `(분석 결과, 대체 템플릿 사용 여부)`를 돌려준다.
 
-    `extra_sources`(예: 마케팅 공지)는 정책 검색 결과 앞에 붙는다.
+    `extra_sources`(예: 마케팅 공지)는 정책 검색 결과 앞에 붙는다. `retrieve`가 있으면
+    정책 근거를 그것으로 찾고(memory 정책 카드, 실패하면 시드로 대체), 없으면 시드 조각을 쓴다.
     """
     started = time.perf_counter()
     masked, pii_kinds = guard.mask_pii(text)
@@ -225,7 +230,9 @@ async def analyze(
     classification = Classification(
         **classified_data, pii_masked=pii_kinds, language=language, keywords=keywords
     )
-    sources = [*(extra_sources or []), *kb.search(classification.search_query or masked)]
+    query = classification.search_query or masked
+    found = await retrieve(query) if retrieve is not None else kb.search(query)
+    sources = [*(extra_sources or []), *found]
     classify_ms = int((time.perf_counter() - started) * 1000)
 
     drafting_started = time.perf_counter()
