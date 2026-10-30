@@ -470,6 +470,7 @@ def test_incident_detail_shape_matches_spec(mock_mode) -> None:
         "damage_amount",
         "by_category",
         "affected_customer_ids",
+        "window_exact",
         "source",
         "collected_at",
     }
@@ -484,6 +485,7 @@ def test_incident_detail_shape_matches_spec(mock_mode) -> None:
     ]
     assert impact["affected_customer_ids"] == ["buy_0001", "buy_0002", "buy_0003", "buy_0004"]
     assert impact["source"] == "data.impact_analysis"
+    assert impact["window_exact"] is True  # 목 모드 시드 구간은 장애 구간이다
     comp = data["compensation"]
     assert set(comp) == {"coupons", "total_executed", "total_held", "count_executed", "count_held"}
     assert (comp["total_executed"], comp["count_executed"], comp["total_held"]) == (8000, 4, 0)
@@ -619,7 +621,12 @@ def test_real_mode_incident_uses_gate_records_and_has_no_window(real_mode, fake_
 
 # ------------------------------------------- 사건 구간을 총괄에서 읽기 (#417 제안 A, #418)
 def test_real_mode_window_comes_from_orchestrator_incidents(real_mode, fake_data) -> None:
-    """총괄 사건 목록의 `opened_at`·`closed_at`이 재무의 장애 구간이 된다 (읽기 전용)."""
+    """영향 구간을 안 실은 사건은 `opened_at`·`closed_at`을 근사 구간으로 쓴다 (읽기 전용).
+
+    이 둘은 AI 처리가 시작·끝난 시각이라 장애 시작보다 늦을 수 있다
+    (감시가 장애를 지켜본 뒤 사건을 연다).
+    그래서 숫자는 보여 주되 "보상 대상 밖" 판정과 환불 귀속은 하지 않는다 (2026-10-30 시연 오탐).
+    """
     handlers.reset_state(LiveSources(_orchestrator([{"context_id": "ctx_inc_other"}, ORC_ROW])))
     _use_safety(_safety([_raw_record(e) for e in GOOD]))
     _use_books()
@@ -635,7 +642,11 @@ def test_real_mode_window_comes_from_orchestrator_incidents(real_mode, fake_data
         "window_to": "2026-10-22T05:30:00Z",
     }
     assert (data["impact"]["failed_orders"], data["impact"]["damage_amount"]) == (6, 95000)
-    assert body["meta"]["unavailable"] == []
+    assert data["impact"]["window_exact"] is False
+    assert body["meta"]["unavailable"] == ["refunds"]  # 근사 구간이라 환불을 사건에 묶지 않는다
+    check = next(c for c in data["checks"] if c["code"] == "recipients_in_impact")
+    assert check["ok"] is None and "AI 처리 시각" in check["detail"]
+    assert all(c["in_impact"] is None for c in data["compensation"]["coupons"])
     # 목록 행의 피해 금액도 같은 숫자다
     [row] = TestClient(app).get("/api/finance/incidents").json()["data"]
     assert (row["context_id"], row["damage_amount"]) == (CTX, 95000)
@@ -746,3 +757,22 @@ def test_audit_api_and_skill_show_new_finding(mock_mode) -> None:
         },
     ).json()
     assert [f["code"] for f in skill["output"]["findings"]] == ["compensation_outside_impact"]
+
+
+def test_impact_window_from_the_orchestrator_is_used_first(real_mode, fake_data) -> None:
+    """총괄이 영향 분석에 쓴 구간(`impact_from`·`impact_to`)을 실으면 그 구간이 정확한 구간이다."""
+    row = {**ORC_ROW, "impact_from": "2026-10-22T04:59:38Z", "impact_to": "2026-10-22T05:15:00Z"}
+    handlers.reset_state(LiveSources(_orchestrator([row])))
+    _use_safety(_safety([_raw_record(e) for e in GOOD]))
+    _use_books()
+    body = TestClient(app).get(f"/api/finance/incidents/{CTX}").json()
+    data = body["data"]
+    [sent] = fake_data
+    assert sent.input == {
+        "window_from": "2026-10-22T04:59:38Z",
+        "window_to": "2026-10-22T05:15:00Z",
+    }
+    assert data["impact"]["window_exact"] is True
+    assert body["meta"]["unavailable"] == []
+    check = next(c for c in data["checks"] if c["code"] == "recipients_in_impact")
+    assert check["ok"] is not None  # 정확한 구간이면 보상 대상을 판정한다
