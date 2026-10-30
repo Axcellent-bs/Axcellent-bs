@@ -56,9 +56,11 @@ export default function ResolutionForm({ inc }: { inc: OrchIncident }) {
     && action.trim() === (draft.action ?? "")
     && (draft.outcome == null || outcome === draft.outcome);
   const opened = new Date(inc.opened_at ?? Date.now());
+  // 입력칸은 분 단위라 같은 분 안이면 열린 시각과 같은 것으로 본다(초 단위로 견주면 열린 직후에 항상 오류가 난다)
+  const openedMinute = Math.floor(opened.getTime() / 60_000) * 60_000;
   const at = new Date(resolvedAt);
   const timeError = Number.isNaN(at.getTime()) ? "해결한 시각을 확인해 주세요"
-    : at < opened ? "해결한 시각이 이벤트가 열린 시각보다 이를 수 없어요"
+    : at.getTime() < openedMinute ? "해결한 시각이 이벤트가 열린 시각보다 이를 수 없어요"
     : at.getTime() > Date.now() + 60_000 ? "해결한 시각이 지금보다 늦을 수 없어요" : null;
 
   async function save() {
@@ -70,7 +72,8 @@ export default function ResolutionForm({ inc }: { inc: OrchIncident }) {
         root_cause: rootCause.trim() || undefined,
         action: action.trim() || undefined,
         opened_at: inc.opened_at,
-        resolved_at: at.toISOString(),
+        // 열린 시각보다 이르면 서버가 거부하므로, 같은 분 안이면 열린 시각으로 맞춘다
+        resolved_at: new Date(Math.max(at.getTime(), opened.getTime())).toISOString(),
         prior_case_id: prior,
         draft_source: !draft ? "written_by_person" : matchesDraft ? "ai_draft_kept" : "ai_draft_edited",
       });
