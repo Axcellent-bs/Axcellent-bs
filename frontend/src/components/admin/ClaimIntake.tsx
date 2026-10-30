@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { won } from "@/lib/format";
+import { useOriginal } from "@/lib/useOriginal";
 import { CLAIM_REASON_KO, CLAIM_TYPE_KO, OUTCOME_KO } from "@/lib/labels";
 import type { ClaimIntake as Intake, ClaimSuggestion, Conversation } from "@/lib/types";
 
@@ -18,8 +19,8 @@ const ABUSE_LABEL: Record<string, string> = { profanity: "비속어 가림", ins
 
 /** 접수 창에서 보는 고객 메시지: 욕설·모욕·위협은 가려서 보여 주고 원문은 눌러야 연다 */
 function CustomerMessage({ conv }: { conv: Conversation }) {
-  const [showOriginal, setShowOriginal] = useState(false);
   const last = [...conv.messages].reverse().find((m) => m.role === "customer");
+  const orig = useOriginal(conv.id, last?.id ?? 0);
   if (!last) return null;
   const level = last.abuse_level ?? "none";
   const safe = last.softened_text ?? last.display_text ?? null;
@@ -32,11 +33,12 @@ function CustomerMessage({ conv }: { conv: Conversation }) {
           <>
             <span className={`rounded-full px-2 py-0.5 font-medium ${level === "threat" ? "bg-red-50 text-red-800" : "bg-amber-50 text-amber-800"}`}>{ABUSE_LABEL[level]}</span>
             {last.softened_text != null && <span className="text-ink-500">AI가 순화함</span>}
-            <button type="button" className="ml-auto text-ink-500 underline" onClick={() => setShowOriginal((v) => !v)}>{showOriginal ? "가려서 보기" : "원문 보기"}</button>
+            <button type="button" className="ml-auto text-ink-500 underline" disabled={orig.opening} onClick={orig.toggle}>{orig.show ? "가려서 보기" : orig.opening ? "여는 중…" : "원문 보기"}</button>
+            {orig.failed && <span className="text-red-700">원문을 열지 못했어요</span>}
           </>
         )}
       </div>
-      <p className="whitespace-pre-wrap text-ink-700">{masked && !showOriginal ? safe : last.text}</p>
+      <p className="whitespace-pre-wrap text-ink-700">{masked ? (orig.show ? orig.text : safe) : last.text}</p>
     </div>
   );
 }
