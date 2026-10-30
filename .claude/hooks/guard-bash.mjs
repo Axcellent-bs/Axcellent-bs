@@ -6,6 +6,8 @@
 //  1) 명령 어디에든 `git` 토큰이 있고 push / send-pack / alias 토큰도 있으면,
 //     명령 전체가 정확히 `git push [-u] origin <종류>/<이름>` 한 줄일 때만 통과. dev·main 직접 push 는 막힌다.
 //     (오탐: `git commit -m "mention git push"` 도 차단된다. 의도된 보수적 동작.)
+//     예외: `git stash push` 의 push 토큰(바로 앞이 `git` `stash`)만 위험으로 보지 않는다. 같은 명령에
+//     다른 push·send-pack·alias 토큰이 있으면 지금처럼 막는다 (`git stash push && git push origin dev` 차단).
 //  2) `gh pr merge` 는 자동 머지 예약 한 줄만. `gh api` 의 /merge 호출·PUT pulls, GraphQL 머지 변이는 차단.
 import fs from 'node:fs';
 
@@ -59,8 +61,13 @@ function main() {
   const lower = toks.map((x) => x.toLowerCase());
   const has = (name) => toks.some((x) => exeName(x) === name);
 
+  // `git stash push` 의 push 토큰인지 (원격 업로드가 아니다)
+  const isStashPush = (i) => i >= 2 && lower[i - 1] === 'stash' && exeName(toks[i - 2]) === 'git';
+
   if (has('git')) {
-    const risky = lower.some((x) => x === 'push' || x === 'send-pack' || x.includes('alias'));
+    const risky = lower.some(
+      (x, i) => (x === 'push' && !isStashPush(i)) || x === 'send-pack' || x.includes('alias'),
+    );
     if (risky) checkExactPush(cmd);
   }
 
