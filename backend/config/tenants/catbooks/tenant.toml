@@ -1,0 +1,11 @@
+# 회사 한 곳 = 카탈로그 + 커넥터 + 조직도 (backend/README.md "새 회사를 붙일 때")
+# run_all.sh가 AX_TENANT(기본 catbooks)로 이 폴더를 읽는다 (scripts/tenant_env.py)
+# 비밀값을 두지 않는다. 토큰·주소는 backend/.env 에만 둔다
+
+name = "캣북스"
+# data 지표 카탈로그: 이름이면 domains/data/src/data_agent/catalogs/<이름>.toml, .toml이면 이 폴더 기준 경로
+catalog = "catbooks"
+# 커넥터 이름. 카탈로그의 connector와 같아야 한다 (data clients/shop_client.py CONNECTORS)
+connector = "shop-api"
+# 조직도 (이 폴더 기준). 꺼진 서비스로 가는 일을 맡는 부서
+org = "org.yaml"

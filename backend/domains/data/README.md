@@ -16,6 +16,8 @@
 - 숫자는 코드가 계산한다(`metrics/`, `impact.py`, `detect.py`). LLM은 계산이 끝난 숫자로 설명 문장만 쓴다(`explain.py`)
 - 주기 감시(`monitor.py`)는 `anomaly_detection`과 같은 판정 함수로 최근 구간을 보고 `metric.anomaly` 이벤트를 낸다. 사건은 열지 않는다(`context_id` 없음)
 ### 새 회사를 붙일 때 필요한 것: 지표 카탈로그 + 커넥터
+회사 한 곳을 붙이는 순서(카탈로그·커넥터·조직도를 묶는 `config/tenants/<회사>/tenant.toml`)는 `backend/README.md` "새 회사를 붙일 때"에 있다. 여기는 data 쪽 두 가지다.
+
 회사마다 다른 것은 두 가지다. **무엇을 볼지**는 지표 카탈로그 파일, **어디서 읽을지**는 커넥터다.
 
 #### 1) 지표 카탈로그
