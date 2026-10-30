@@ -71,7 +71,7 @@ allowedRequesters는 시작 제안값이다. 각자 판단해서 조정한다.
 | finance | `loss_aggregation` | 손실 집계 | read | orchestrator |
 | data | `anomaly_detection` | 이상 탐지 | read | orchestrator, infra-dejafix |
 | data | `impact_analysis` | 영향 분석 | read | orchestrator, infra-dejafix, support, finance, planning |
-| data | `fraud_score` | 사기 위험 점수 | read | orchestrator, finance |
+| data | `fraud_score` | 사기 위험 점수 | read | orchestrator |
 
 ## 제출
 

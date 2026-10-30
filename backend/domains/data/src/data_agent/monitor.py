@@ -117,14 +117,16 @@ async def run_forever(
 
 
 # ------------------------------------------------ 업무 리포트 일간 저장 (activity_report)
-# 한국 시간 00:30 이후 처음 돌 때 어제를 만들고, 돌 때마다 최근 N일(기본 14일: 주간과 직전 주) 중
+# 한국 시간 00:30 이후 처음 돌 때 어제를 만들고, 돌 때마다 최근 N일(기본 20일) 중
 # 빠진 날을 최근 날짜부터 채운다. N은 `DATA_REPORT_BACKFILL_DAYS`.
 # 이미 있는 날은 다시 만들지 않는다. 확인할 수 없음이 있던 날은 다음 날 한 번만 다시 만든다.
 # 하루씩 차례로 만든다(재무 호출은 하루에 한 번, 동시 상한 안).
 SNAPSHOT_KST = timezone(timedelta(hours=9))
 SNAPSHOT_AFTER = time(0, 30)  # 한국 시간. 어제 일간을 만들기 시작하는 시각
 BACKFILL_ENV = "DATA_REPORT_BACKFILL_DAYS"
-SNAPSHOT_BACKFILL_DAYS = 14  # 기본값. 주간 리포트와 직전 주
+# 기본값. 주간 기본(지난주 월~일)과 그 전 주가 요일과 상관없이 들어가는 길이:
+# 일요일이면 지난주 월요일이 13일 전, 그 전 주 월요일이 20일 전이다
+SNAPSHOT_BACKFILL_DAYS = 20
 MAX_BACKFILL_DAYS = 92  # 잘못 넣어도 재무를 너무 많이 부르지 않게
 SNAPSHOT_INTERVAL_SECONDS = 300
 
@@ -134,7 +136,7 @@ BuildDay = Callable[[date], Awaitable[Snapshot]]
 
 
 def backfill_days(env: Mapping[str, str] | None = None) -> int:
-    """채울 범위(일). `DATA_REPORT_BACKFILL_DAYS`가 없거나 숫자가 아니면 기본 14, 1~92로 자른다."""
+    """채울 범위(일). `DATA_REPORT_BACKFILL_DAYS`가 없거나 숫자가 아니면 기본 20, 1~92로 자른다."""
     raw = (os.environ if env is None else env).get(BACKFILL_ENV, "").strip()
     try:
         value = int(raw)

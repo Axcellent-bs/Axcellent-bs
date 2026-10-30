@@ -35,7 +35,7 @@
       "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#FraudScoreInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#FraudScoreOutput",
       "grade": "read",
-      "allowed_requesters": ["orchestrator", "finance"],
+      "allowed_requesters": ["orchestrator"],
       "verifier": null,
       "priority": "recommended"
     },

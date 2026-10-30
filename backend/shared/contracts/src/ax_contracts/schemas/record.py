@@ -61,7 +61,7 @@ class Card(AxModel):
     """
 
     card_id: str
-    kind: Literal["incident", "decision", "case", "notice", "policy", "fraud"]
+    kind: Literal["incident", "decision", "case", "notice", "policy", "fraud", "request"]
     tenant_id: str = TENANT_ID_DEFAULT
     context_id: str
     title: str
@@ -85,7 +85,7 @@ class Card(AxModel):
         return self
 
 
-CardKind = Literal["incident", "decision", "case", "notice", "policy", "fraud"]
+CardKind = Literal["incident", "decision", "case", "notice", "policy", "fraud", "request"]
 CardId = Annotated[str, StringConstraints(pattern=r"^card_")]
 
 

@@ -25,7 +25,8 @@ WEAK_DOCUMENT_RATE = 0.3  # 거절·차단 비율이 이 이상이면 문서를 
 OWNER_TARGETS: dict[str, str] = {}
 DEFAULT_OWNER_TARGET = "kb_owner"
 SEED_NOTE = (
-    "근거 출처가 시드(%d조각)이다. 정책 문서 출처(MEM-03)가 연결되기 전의 순위는 참고용이다."
+    "근거는 memory 정책 카드를 먼저 쓰고 못 찾으면 시드(%d조각)로 대체한다. "
+    "정책 카드가 없는 분류는 시드가 작아서 순위가 참고용일 수 있다."
 )
 
 Key = tuple[str, str | None]  # (분류, 근거 문서)

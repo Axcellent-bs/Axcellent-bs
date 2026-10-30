@@ -34,9 +34,12 @@ def test_all_skills_are_read(card: AgentCard) -> None:
 
 
 def test_fraud_score_requesters(card: AgentCard) -> None:
+    """재무에서 마켓운영이 빠져 지금 부르는 부서가 없다. 총괄만 남긴다.
+
+    마켓운영 담당이 정해지면 그 부서를 연결한다.
+    """
     skill = next(s for s in card.skills if s.id == "fraud_score")
-    assert set(skill.allowed_requesters) == {"orchestrator", "finance"}
-    assert len(skill.allowed_requesters) == 2
+    assert skill.allowed_requesters == ["orchestrator"]
 
 
 def test_impact_analysis_requesters(card: AgentCard) -> None:
