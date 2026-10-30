@@ -284,6 +284,8 @@ class CompanyFigure(AxModel):
     previous_period: float | None = None
     source: str  # 어디서 받았는지 (예: finance.closing_report)
     note: str | None = None  # 기준 차이 등 (예: 재무 마감은 UTC 날짜 기준)
+    # 이 값의 기준 시각 (재무 응답 시각 등). 예전 응답·모르는 값은 None
+    collected_at: UtcDatetime | None = None
 
 
 class ActivityCompany(AxModel):

@@ -36,7 +36,7 @@ Oct 21, 2026 · @재현
 | --- | --- | --- | --- | --- |
 | `anomaly_detection` | 업무 지표 이상 탐지 | read | 필수 | orchestrator, infra-dejafix |
 | `impact_analysis` | 장애 영향 분석 | read | 필수 | orchestrator, infra-dejafix, support, finance, planning |
-| `fraud_score` | 판매자 사기 위험 점수 | read | 권장 | orchestrator, finance |
+| `fraud_score` | 판매자 사기 위험 점수 | read | 권장 | orchestrator (지금 부르는 부서 없음. 마켓운영 담당이 정해지면 연결) |
 | `kpi_summary` | KPI 계산 | read | 권장 | orchestrator, dashboard-api |
 | `threshold_advise` | 패턴 감지 임계값 제안 | read | 선택 | support, marketing |
 
@@ -171,7 +171,7 @@ data는 대부분 "요청을 받아 숫자를 돌려주는" 쪽이고, 먼저 �
 A2A(수신)
   orchestrator / infra-dejafix ──▶ anomaly_detection, impact_analysis
   support / finance / planning  ──▶ impact_analysis
-  finance                        ──▶ fraud_score
+  orchestrator                   ──▶ fraud_score   (지금 부르는 곳 없음)
   dashboard-api                  ──▶ kpi_summary
 
 A2A(요청)
@@ -226,7 +226,7 @@ data는 네 시나리오 모두에 들어가며, SCN-A와 SCN-L에서는 흐름�
 | 실행 관문 `execute()` | memory `card_write`, `card_link`만 해당 (A 등급). data skill은 조회라 대상 없음 |
 | contextId 필수 | 모든 결과·이벤트·카드에 포함, 없으면 요청 거부 |
 | 루프 거부·홉 제한·타임아웃 | 템플릿 사용. 기획개발 질의(①)는 짧은 마감 시각을 둔다 |
-| 인증·ACL | Agent Card의 `allowedRequesters` 그대로. 특히 `fraud_score`는 finance·orchestrator만 |
+| 인증·ACL | Agent Card의 `allowedRequesters` 그대로. 특히 `fraud_score`는 orchestrator만 |
 | 신뢰 경계 | 문의 원문·판매자 입력 문구는 `untrusted`로만 받고, 숫자 계산에는 쓰지 않는다 |
 | 구조화 출력 | 결과는 pydantic 스키마로 검증, LLM 설명 문장 실패 시 템플릿 문장으로 대체 |
 | 계산은 코드로 | 모든 숫자는 SQL·pandas로 산출. LLM이 쓴 문장 속 숫자가 계산 결과와 다르면 문장을 버리고 템플릿 문장 사용 |

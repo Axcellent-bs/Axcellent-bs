@@ -442,11 +442,24 @@ async def test_previous_period_and_highlights() -> None:
 
 
 @asyncio
-async def test_weekly_revenue_sums_seven_finance_days() -> None:
-    send = finance_sender()
+async def test_weekly_revenue_asks_finance_week_once_per_week() -> None:
+    """월~일 주간은 재무 closing_report(period=week)를 주마다 한 번 (#190, 일간 7번 대신)."""
+    send = finance_sender(gmv={"2026-10-19": 7000, "2026-10-12": 6000})
     result = await _report([], send=send, period="week", start=date(2026, 10, 19))
-    days = [c["date"] for c in send.calls if c["period"] == "day"]
-    assert len(days) == 14  # 이번 주 7일 + 직전 주 7일
+    assert [(c["period"], c["date"]) for c in sorted(send.calls, key=lambda c: c["date"])] == [
+        ("week", "2026-10-12"),
+        ("week", "2026-10-19"),
+    ]
+    assert result.output.company.gmv.value == 7000
+    assert result.output.company.gmv.previous_period == 6000
+
+
+@asyncio
+async def test_week_not_starting_monday_asks_day_by_day() -> None:
+    """월요일로 시작하지 않는 7일은 재무 week와 범위가 달라 하루씩 묻는다."""
+    send = finance_sender()
+    result = await _report([], send=send, period="week", start=date(2026, 10, 21))
+    assert {c["period"] for c in send.calls} == {"day"} and len(send.calls) == 14
     assert result.output.company.gmv.value == 7000
 
 
@@ -637,7 +650,8 @@ async def test_finance_calls_run_at_most_two_at_once() -> None:
         running -= 1
         return await base(target, req)
 
-    result = await _report([], send=slow, period="week", start=date(2026, 10, 19))
+    # 수요일 시작 주간: 하루씩 14번 묻는다
+    result = await _report([], send=slow, period="week", start=date(2026, 10, 21))
     assert peak == FINANCE_CONCURRENCY == 2  # 14번을 한꺼번에 보내지 않는다
     assert result.output.company.gmv.value == 7000  # 결과는 같다
 
@@ -648,10 +662,10 @@ async def test_same_finance_date_is_asked_once_per_request() -> None:
 
     send = finance_sender()
     asker = FinanceAsker(send, _meta())
-    week = date(2026, 10, 19)
-    # 겹치는 두 기간 (10-19~10-25, 10-22~10-28): 겹치는 4일은 한 번만 부른다
-    await finance_figures(asker, "week", week, week + timedelta(days=7))
-    await finance_figures(asker, "week", week + timedelta(days=3), week + timedelta(days=10))
+    start = date(2026, 10, 20)  # 화요일 시작이라 하루씩 묻는다
+    # 겹치는 두 기간 (10-20~10-26, 10-23~10-29): 겹치는 4일은 한 번만 부른다
+    await finance_figures(asker, "week", start, start + timedelta(days=7))
+    await finance_figures(asker, "week", start + timedelta(days=3), start + timedelta(days=10))
     dates = [c["date"] for c in send.calls]
     assert len(dates) == len(set(dates)) == 10
     assert asker.calls == 10
