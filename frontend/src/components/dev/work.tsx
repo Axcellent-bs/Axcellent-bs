@@ -9,7 +9,7 @@ import { State, Tag } from '@/components/planning-common/parts'
 import { Linked, Ref, convoHref, hrefOf, prFromSlug, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
 import { Flow, Head, Layout, ListPane, Pairs, Side, Step, mergedLabel } from '@/components/planning-common/flow'
 import { RepoTargetBlock } from '@/components/planning-common/repo'
-import { CodingLabel, CodingStep, DevTeamTag, codingState, fromDevTeam, isRunning } from '@/components/dev/coding'
+import { CodingLabel, CodingStep, OriginTag, RelatedTags, codingState, isRunning } from '@/components/dev/coding'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -114,14 +114,14 @@ export function Work({ s, d, item }: P & { item?: string }) {
       href: p ? toPath(`work/prs/${prSlug(p.id)}`) : t.coding ? toPath(`work/prs/${encodeURIComponent(t.id)}`) : toPath(`work/specs/${t.spec}/${t.para}`),
       on: taskOnly ? t.id === taskOnly.id : !!p && p.id === sel?.id,
       title: t.title,
-      meta: <>{t.id}{p ? ` · ${p.id}` : ''} <State v={p?.target?.status === 'proposed' ? '레포 승인 대기' : xr ? waitLabel(xr) : coding ?? t.state} live={!!coding && !!t.coding && isRunning(t.coding.status)} />{fromDevTeam(s, t) && <> <DevTeamTag /></>}</>,
+      meta: <>{t.id}{p ? ` · ${p.id}` : ''} <State v={p?.target?.status === 'proposed' ? '레포 승인 대기' : xr ? waitLabel(xr) : coding ?? t.state} live={!!coding && !!t.coding && isRunning(t.coding.status)} /> <OriginTag s={s} t={t} /></>,
     }
   }
   const list = <ListPane empty="작업 없음" groups={(['진행 중', '교차검증·사람 확인', '완료'] as const).map((label, i) => ({ label, rows: tasks.filter((t) => groupOf(t.id, t.state) === i).map(row) }))} />
   if (taskOnly) {
     const text = s.specs.find((x) => x.id === taskOnly.spec)?.paras.find((p) => p.id === taskOnly.para)?.text
     return (
-      <Layout list={list} head={<Head kicker={<>{taskOnly.id} · {taskOnly.spec}{fromDevTeam(s, taskOnly) && <> · <DevTeamTag /></>}</>} title={taskOnly.title} side={taskOnly.coding ? <CodingLabel c={taskOnly.coding} /> : <State v={taskOnly.state} />} />}>
+      <Layout list={list} head={<Head kicker={<>{taskOnly.id} · {taskOnly.spec} · <OriginTag s={s} t={taskOnly} /><RelatedTags s={s} t={taskOnly} /></>} title={taskOnly.title} side={taskOnly.coding ? <CodingLabel c={taskOnly.coding} /> : <State v={taskOnly.state} />} />}>
         <Flow>
           <Step name="작업" on href={toPath(`work/specs/${taskOnly.spec}/${taskOnly.para}`)} title={`${taskOnly.id} · ${taskOnly.spec} ${taskOnly.para}`}>
             {text && <p>{text}</p>}
@@ -143,7 +143,7 @@ export function Work({ s, d, item }: P & { item?: string }) {
   return (
     <Layout
       list={list}
-      head={<Head kicker={<>{sel.id} · {task?.id} · <span className="mono">{sel.branch}</span>{sel.vcsNumber != null && <> · <a href={toPath(`work/prs/repo/${sel.vcsNumber}`)} className="plain-link">레포 #{sel.vcsNumber}</a></>}{fromDevTeam(s, task) && <> · <DevTeamTag /></>}</>} title={sel.title.replace(/^[A-Z]\d+: /, '')} side={<State v={sel.merged ? '완료' : xr ? waitLabel(xr) : last === '불일치' || rejected ? '불일치' : '머지 대기'} />} />}
+      head={<Head kicker={<>{sel.id} · {task?.id} · <span className="mono">{sel.branch}</span>{sel.vcsNumber != null && <> · <a href={toPath(`work/prs/repo/${sel.vcsNumber}`)} className="plain-link">레포 #{sel.vcsNumber}</a></>}{task && <> · <OriginTag s={s} t={task} /></>}<RelatedTags s={s} t={task} /></>} title={sel.title.replace(/^[A-Z]\d+: /, '')} side={<State v={sel.merged ? '완료' : xr ? waitLabel(xr) : last === '불일치' || rejected ? '불일치' : '머지 대기'} />} />}
       side={
         <Side title="근거 체인" sum={`${chain.length}단계`}>
           {chain.map((x, i) => <p key={i} className="pside-msg"><b>{x.kind}</b> {x.href ? <a href={x.kind === '문단' && spec && para ? toPath(`work/specs/${spec.id}/${para.id}`) : toPath(x.href)} className="plain-link">{x.title}</a> : x.title}</p>)}
