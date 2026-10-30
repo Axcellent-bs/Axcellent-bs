@@ -115,6 +115,7 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
     books = await state().books()
     today = fc.today()
     totals = closing.compute_totals(books, fc.day_start(today), fc.day_start(today + timedelta(1)))
+    unknown = closing.unknown_codes(books)
     todo: list[dict[str, Any]] = []
 
     sett, _ = await settlements_view(None)
@@ -158,7 +159,7 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
                 "kind": "closing_confirm",
                 "title": f"어제({yesterday.isoformat()}) 결산 확정 대기",
                 "count": 1,
-                "amount": y.net_result,
+                "amount": None if "net_result" in unknown else y.net_result,
                 "link": "closing",
                 "action": {
                     "type": "closing_confirm",
@@ -252,7 +253,7 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
                 ],
             }
         )
-    return {"date": today.isoformat(), "kpis": totals.as_kpis(), "todo": todo}, books.meta()
+    return {"date": today.isoformat(), "kpis": totals.as_kpis(unknown), "todo": todo}, books.meta()
 
 
 ALERT_RANK = {"ok": 0, "warn": 1, "over": 2}
@@ -274,8 +275,8 @@ def add_finance_api(app: FastAPI) -> None:
 
     @app.get("/api/finance/closing", response_model=None)
     async def get_closing(period: str = "day", date: str | None = None) -> dict | JSONResponse:
-        if period not in ("day", "month"):
-            return error(400, "invalid_request", "period는 day 또는 month")
+        if period not in ("day", "week", "month"):
+            return error(400, "invalid_request", "period는 day, week, month 중 하나")
         try:
             d = fc.parse_date(date) or fc.today()
         except ValueError as exc:
@@ -320,16 +321,22 @@ def add_finance_api(app: FastAPI) -> None:
             return error(401, "unauthorized", str(exc))
         body = await _body(request)
         period = body.get("period", "day")
-        if period not in ("day", "month"):
-            return error(400, "invalid_request", "period는 day 또는 month")
+        if period not in ("day", "week", "month"):
+            return error(400, "invalid_request", "period는 day, week, month 중 하나")
         try:
             d = fc.parse_date(body.get("date")) or fc.today()
         except (ValueError, TypeError) as exc:
             return error(400, "invalid_request", str(exc))
         key = closing_key(period, d)
         records = state().records.closings
-        records.setdefault(key, {"by": person, "at": fc.iso(fc.now())})
         books = await state().books()
+        if key not in records and closing.unknown_codes(books):
+            return error(
+                409,
+                "books_unavailable",
+                "받지 못한 장부 자료가 있어 확인할 수 없는 숫자로는 결산을 확정하지 않는다",
+            )
+        records.setdefault(key, {"by": person, "at": fc.iso(fc.now())})
         report = await closing.closing_report(books, period, d, records[key])
         return ok(report, books.meta())
 
