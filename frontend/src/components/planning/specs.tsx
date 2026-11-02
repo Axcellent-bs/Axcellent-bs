@@ -127,7 +127,7 @@ function ParaBox({ p, on, onClick, s, spec }: { p: S['specs'][number]['paras'][n
   return (
     <button type="button" className={`para${on ? ' on' : ''}`} onClick={onClick}>
       <div><span className="pid">{p.id}</span>{p.text}</div>
-      {p.warn && <div className="warnline">인사운영 ② 경고 ({p.warn.card}) · {p.warn.text}</div>}
+      {p.warn && <div className="warnline">인사총무 ② 경고 ({p.warn.card}) · {p.warn.text}</div>}
       {p.incident && <div className="incline">장애 표시 · {p.incident} (link_incident)</div>}
       {(tasks.length > 0 || done) && (
         <span className="tags">
