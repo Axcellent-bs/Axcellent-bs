@@ -11,8 +11,8 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
+from dev_agent.service import DevService
 from planning_agent.dev_handoff import RECEIVE_DEV_RESULT, START_DEV
-from planning_agent.dev_service import DevService
 from planning_agent.domain.models import dump
 from planning_agent.domain.service import PlanningService
 from planning_agent.main import app
@@ -143,17 +143,15 @@ def test_dev_sends_result_only_when_changed() -> None:
     asyncio.run(run())
 
 
-def test_runtime_picks_service_by_role(monkeypatch) -> None:
-    """서비스 역할(PLANNING_ROLE)로 기획·개발 서비스를 고른다 (합친 모드는 없다, 분리 4단계)."""
-    from planning_agent import runtime
+def test_each_service_has_its_own_runtime() -> None:
+    """기획·개발은 패키지도 런타임도 따로다 (분리 5단계: 합친 모드·역할 환경 변수 없음)."""
+    from dev_agent import runtime as dev_runtime
+    from planning_agent import runtime as planning_runtime
 
-    monkeypatch.setattr(runtime, "_service", None)
-    monkeypatch.setenv("PLANNING_ROLE", "dev")
-    assert type(runtime.get_service()) is DevService and runtime.get_service().role == "dev"
-    monkeypatch.setattr(runtime, "_service", None)
-    monkeypatch.delenv("PLANNING_ROLE")
-    assert type(runtime.get_service()) is PlanningService
-    assert runtime.get_service().role == "planning"
+    assert type(planning_runtime.get_service()) is PlanningService
+    assert type(dev_runtime.get_service()) is DevService
+    assert planning_runtime.get_service().role == "planning"
+    assert dev_runtime.get_service().role == "dev"
 
 
 def test_start_dev_is_idempotent() -> None:
@@ -198,22 +196,6 @@ def test_send_failure_keeps_state_and_logs() -> None:
     svc = asyncio.run(run())
     assert _new_spec(svc).handed_to_dev
     assert any(a.point == START_DEV and "보내지 못함" in a.text for a in svc.state.activity)
-
-
-@pytest.mark.role("dev")
-def test_start_dev_handler_needs_key_and_acl(a2a_body) -> None:
-    client = TestClient(app)
-    payload = {"request": {}, "spec": {}, "tasks": []}
-    no_key = client.post("/a2a", json=a2a_body(START_DEV, payload, token="mock:planning")).json()
-    assert (no_key["status"], no_key["outcome"]) == ("failed", "missing_idempotency_key")
-    denied = client.post(
-        "/a2a", json=a2a_body(START_DEV, payload, token="mock:support", idempotency_key="k")
-    ).json()
-    assert (denied["status"], denied["outcome"]) == ("rejected", "FORBIDDEN_SKILL")
-    bad = client.post(
-        "/a2a", json=a2a_body(START_DEV, payload, token="mock:planning", idempotency_key="k")
-    ).json()
-    assert (bad["status"], bad["outcome"]) == ("failed", "invalid_input")
 
 
 @pytest.mark.role("planning")

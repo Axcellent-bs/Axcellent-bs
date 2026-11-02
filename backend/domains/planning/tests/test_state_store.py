@@ -6,7 +6,7 @@ import asyncio
 import os
 
 from ax_contracts.schemas import ExecuteDecision
-from planning_agent.dev_service import DevService
+from dev_agent.service import DevService
 from planning_agent.domain.models import CodingRun
 from planning_agent.domain.service import PlanningService
 

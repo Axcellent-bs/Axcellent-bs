@@ -4,6 +4,7 @@
 [importlinter]
 root_packages =
     data_agent
+    dev_agent
     finance_agent
     hr_agent
     infra_agent
@@ -16,6 +17,7 @@ name = Domains do not import each other
 type = independence
 modules =
     data_agent
+    dev_agent
     finance_agent
     hr_agent
     infra_agent

@@ -1711,6 +1711,3 @@ __all__ = [
     "PlanningService",
     "action_name",
 ]
-
-
-from planning_agent.dev_service import DevService  # noqa: E402,F401  옛 경로 (시험·런타임)
