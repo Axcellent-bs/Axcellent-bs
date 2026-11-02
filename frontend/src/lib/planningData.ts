@@ -565,6 +565,7 @@ export type Action =
   | { type: 'acceptDraft'; request: string }
   | { type: 'writeSpec'; request: string }
   | { type: 'unlinkDuplicate'; request: string }
+  | { type: 'rejectSpec'; spec: string; reason: string } // 확인 대기 기획서 거절 (승인은 humanDecide)
   // 교차검증·학습 기준·사람 확인
   | { type: 'decideReview'; review: string } // 시연: 검증자(다른 부서)가 판단
   | { type: 'mergePr'; pr: string } // 사람 머지 (서버 액션, 누구나)

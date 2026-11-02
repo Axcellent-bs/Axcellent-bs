@@ -163,7 +163,7 @@ def test_reject_decision_records_rejected_alternative(gate) -> None:
         )
     )
     [case] = _rejected_cases(gate)
-    assert case.context_id == "ctx_req_0012" and case.summary == "[기각한 안] 재시도 버튼만 추가"
+    assert case.context_id == "ctx_req_0012" and case.summary == "재시도 버튼만 추가"
     assert result.output["decision_id"] == svc.state.decisions[-1].id
     assert svc.state.decisions[-1].spec == "SPEC-7"
 
