@@ -695,6 +695,9 @@ class DevService(PlanningCore):
             "agents_connected": self.agents_connected(s),
             "trial_used": self.trial_used(s),
             "trial_limit": self.trial_limit(),
+            # 코딩 실행 한 번의 한도 (화면이 작업마다 쓴 양을 비율로 보여 준다)
+            "run_max_calls": coder.limit("PLANNING_CODER_MAX_CALLS", coder.RUN_MAX_CALLS),
+            "run_max_tokens": coder.limit("PLANNING_CODER_MAX_TOKENS", coder.RUN_MAX_TOKENS),
         }
 
     async def mark_agent_seen(self, who: str) -> None:

@@ -263,7 +263,25 @@ export interface CodingSettings {
   agents_connected: string[] // 최근 본인 Claude(MCP)로 일감을 본 개발자
   trial_used: number // 서버 AI가 쓴 토큰
   trial_limit: number
+  run_max_calls?: number // 코딩 실행 한 번의 LLM 호출 한도
+  run_max_tokens?: number // 코딩 실행 한 번의 토큰 한도
 }
+// 토큰 한도 (비율 표시용). 한 번 읽어 화면들이 같이 쓴다. 못 읽으면 서버 기본값
+const LIMIT_DEFAULT = { trial: 1_000_000, runCalls: 40, runTokens: 600_000 }
+let limitCache: Promise<typeof LIMIT_DEFAULT> | null = null
+export function useCodingLimits(): typeof LIMIT_DEFAULT {
+  const [v, setV] = useState(LIMIT_DEFAULT)
+  useEffect(() => {
+    limitCache ??= codingSettingsApi(DEV_API).get()
+      .then((c) => ({ trial: c.trial_limit || LIMIT_DEFAULT.trial, runCalls: c.run_max_calls || LIMIT_DEFAULT.runCalls, runTokens: c.run_max_tokens || LIMIT_DEFAULT.runTokens }))
+      .catch(() => { limitCache = null; return LIMIT_DEFAULT })
+    let alive = true
+    void limitCache.then((x) => alive && setV(x))
+    return () => { alive = false }
+  }, [])
+  return v
+}
+
 export const codingSettingsApi = (base: string) => ({
   get: () => call<CodingSettings>(base, '/coding-settings'),
   set: (mode: CodingSetting) => call<CodingSettings>(base, '/coding-settings', post({ mode }, 'admin')),
