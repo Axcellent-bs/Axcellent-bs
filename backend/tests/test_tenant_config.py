@@ -67,6 +67,13 @@ def test_the_default_tenant_points_at_its_trend_keywords(tmp_path: Path) -> None
     assert "DATA_TREND_CONFIG" not in given  # 이미 준 값은 그대로
 
 
+def test_the_default_tenant_points_at_its_youtube_keywords(tmp_path: Path) -> None:
+    out, _ = tenant_env.resolve({}, local_org=tmp_path / "org.yaml")
+    assert Path(out["DATA_YOUTUBE_CONFIG"]) == (TENANTS / "catbooks" / "youtube.toml").resolve()
+    given, _ = tenant_env.resolve({"DATA_YOUTUBE_CONFIG": "mine.toml"}, local_org=tmp_path / "x")
+    assert "DATA_YOUTUBE_CONFIG" not in given  # 이미 준 값은 그대로
+
+
 def test_given_values_come_first(tmp_path: Path) -> None:
     """지금 쓰는 사람이 깨지지 않게: 환경변수와 config/org.yaml이 회사 폴더보다 먼저다."""
     mine = tmp_path / "org.yaml"

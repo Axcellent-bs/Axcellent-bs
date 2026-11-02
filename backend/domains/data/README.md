@@ -276,6 +276,42 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 | 기준선 최소 일수 | 28일 | 평가 정의(`eval/trend/README.md`)와 같다 |
 | 기준선 최소 값 | 0.01 | 개발 케이스로 재지 않은 안전장치(자릿수가 모자라는 값) |
 
+### YouTube 영상 통계 스냅샷 (`youtube_collect`, 판정 전 단계)
+
+**왜 스냅샷이 필요한가:** YouTube Data API는 영상의 **지금 누적값**(조회수·좋아요·댓글)만 주고 기간별 추이를 주지 않는다. 한 번 받은 값으로는 "게시 후 평균 속도"(조회수 ÷ 게시 후 시간)밖에 못 구하는데, 이 값은 지금 속도와 크게 다르다. 2026-11-02 실제 값(약 1.2시간 간격 두 번 수집):
+
+| 영상 | 게시 후 평균 속도 | 두 스냅샷으로 구한 지금 속도 |
+| --- | --- | --- |
+| 인기 영상 A (게시 40시간) | 81,788/시간 | 약 13,000/시간 (3,277,193 → 3,292,791) |
+| 인기 영상 B (게시 25시간) | 90,628/시간 | 약 1,200/시간 (2,282,272 → 2,283,722) |
+
+그래서 정해진 간격으로 받아 쌓아 두고, 두 시각의 차이로 지금 속도를 구한다. 급상승 판정·태그 정리는 스냅샷이 쌓인 뒤 별도 PR이다.
+
+```bash
+cd backend
+uv run python -m data_agent.youtube_collect              # 한 번
+uv run python -m data_agent.youtube_collect --every 3600 # 1시간마다 (최소 600초, Ctrl+C로 멈춤)
+```
+
+- 커넥터 `connectors/youtube.py`: 인기 목록(mostPopular, 50개씩 4쪽 = 200개, 순위 붙임), 추적 영상 통계(id 50개씩), 키워드 검색(검색 결과 통계는 videos.list로 한 번 더). 키 `YOUTUBE_API_KEY`는 URL이 아니라 헤더(`X-Goog-Api-Key`)로 보낸다. 주소는 `AX_YOUTUBE_API_URL`로 바꿀 수 있다
+- 숫자 칸이 응답에 없으면(좋아요 숨김·댓글 막음) None/NULL이다. 지워졌거나 비공개가 된 영상은 결과에 없다. 0으로 채우지 않는다
+- 못 읽으면 `ConnectorUnavailable`(403 할당량 초과는 `QUOTA_EXCEEDED`). 할당량 초과가 나면 그 실행의 남은 호출을 멈추고 받은 것까지 저장한다
+- 저장: `DATA_YOUTUBE_DB`(없으면 `backend/.data/youtube_snapshots.db`, 커밋 안 함). `snapshots`는 (수집 시각, 영상 id)가 기본 키라 같은 시각 같은 영상은 한 줄이다. 칸: 수집 시각, 영상 id, 조회수·좋아요·댓글, 인기 순위, 게시 시각, 카테고리, 채널 id, 태그(JSON), 어디서 받았는지. `runs`에 실행마다 쓴 할당량 단위·개수·실패 이유
+- 회사 키워드: `config/tenants/<회사>/youtube.toml`(`tenant.toml`의 `youtube` → `scripts/tenant_env.py`가 `DATA_YOUTUBE_CONFIG`로). 없으면 `config/tenants/<AX_TENANT, 기본 catbooks>/youtube.toml`. 코드에 키워드를 두지 않는다
+- 키는 환경변수가 먼저고, 없으면 `backend/.env`에서 읽는다(값은 출력하지 않는다)
+- `run_all.sh`에는 아직 넣지 않았다
+
+**하루 예상 할당량** (1시간마다, 기본 한도 10,000단위/일, 미국 태평양시 자정에 초기화):
+
+| 항목 | 계산 | 하루 |
+| --- | --- | --- |
+| 인기 목록 | 4쪽 × 24번 | 96 |
+| 추적 영상 | 최대 500개 = 10단위 × 24번 | 최대 240 |
+| 회사 키워드 검색 (한국 날짜 하루 1번) | 키워드 2개 × (검색 100 + 통계 1) | 202 |
+| **합계** | | **최대 약 538 (한도의 약 5%)** |
+
+키워드를 하나 늘리면 하루 101단위가 는다. 실행마다 쓴 단위는 로그 한 줄(`[youtube] … 할당량 N단위`)과 `runs` 표에 남는다.
+
 ### 설명 문장(LLM)과 템플릿 대체 이유
 - 숫자는 코드가 계산하고 LLM은 문장만 쓴다(`explain.py`). 문장에 넘긴 facts에 없는 숫자가 있거나 LLM이 실패하면 고정 템플릿으로 바꾸고 `fallback=true`다.
 - 바꾼 이유를 남긴다 (`AgentResult.fallback_reason`, 영향 분석·이상 탐지·KPI·업무 리포트):

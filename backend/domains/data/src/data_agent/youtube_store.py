@@ -1,0 +1,170 @@
+"""YouTube 영상 통계 스냅샷 저장소 (data 자체 SQLite 파일, 커밋하지 않음).
+
+YouTube는 지금 누적값만 주고 기간별 추이를 주지 않는다. 그래서 정해진 간격으로 받아 쌓아 두고,
+두 시각의 차이로 "지금 속도"를 구한다(판정은 별도 PR).
+
+- 위치: 환경변수 `DATA_YOUTUBE_DB`(없으면 `backend/.data/youtube_snapshots.db`)
+- `snapshots`: 수집 시각·영상 id마다 한 줄. **(수집 시각, 영상 id)가 기본 키**라
+  같은 시각 같은 영상은 두 번 들어가지 않는다(먼저 넣은 줄이 남는다).
+  숫자 칸이 응답에 없으면 NULL이다(0이 아님).
+- `runs`: 수집 한 번마다 한 줄. 쓴 할당량 단위, 개수, 검색을 했는지, 실패 이유.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta, timezone
+from pathlib import Path
+
+from data_agent.connectors.youtube import VideoStat
+
+DB_ENV = "DATA_YOUTUBE_DB"
+DEFAULT_DB = Path(__file__).resolve().parents[4] / ".data" / "youtube_snapshots.db"  # backend/.data
+KST = timezone(timedelta(hours=9))
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS snapshots (
+    collected_at  TEXT NOT NULL,      -- 수집 시각 (UTC, 초 단위)
+    video_id      TEXT NOT NULL,
+    view_count    INTEGER,            -- NULL = 응답에 없음
+    like_count    INTEGER,            -- NULL = 좋아요 숨김
+    comment_count INTEGER,            -- NULL = 댓글 막음
+    popular_rank  INTEGER,            -- 인기 순위 (인기 목록에 없으면 NULL)
+    published_at  TEXT NOT NULL,      -- 게시 시각 (UTC)
+    category_id   TEXT,
+    channel_id    TEXT NOT NULL,
+    tags          TEXT NOT NULL,      -- JSON 배열
+    sources       TEXT NOT NULL,      -- 어디서 받았는지: popular, tracked, search:<키워드> (쉼표)
+    PRIMARY KEY (collected_at, video_id)
+);
+CREATE INDEX IF NOT EXISTS snapshots_video ON snapshots (video_id, collected_at);
+CREATE TABLE IF NOT EXISTS runs (
+    collected_at  TEXT PRIMARY KEY,
+    quota_units   INTEGER NOT NULL,   -- 이 실행에서 쓴 할당량 (문서 단가, 실패한 호출 포함)
+    popular_count INTEGER NOT NULL,
+    tracked_count INTEGER NOT NULL,
+    search_count  INTEGER NOT NULL,
+    searched      INTEGER NOT NULL,   -- 회사 키워드 검색을 했는지 (한국 날짜 하루 1번)
+    errors        TEXT NOT NULL       -- 실패 이유 JSON 배열 (없으면 [])
+);
+"""
+
+
+@dataclass(frozen=True)
+class Row:
+    """저장할 한 줄: 영상 값 + 어디서 받았는지."""
+
+    stat: VideoStat
+    sources: tuple[str, ...]
+
+
+def iso(value: datetime) -> str:
+    return value.astimezone(UTC).replace(microsecond=0).isoformat()
+
+
+class SnapshotStore:
+    """SQLite 파일(또는 `:memory:`) 저장소."""
+
+    def __init__(self, path: str | Path) -> None:
+        if str(path) != ":memory:":
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.path = str(path)
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=5.0)
+        with self._lock:
+            self._conn.executescript(_SCHEMA)
+
+    def close(self) -> None:
+        self._conn.close()
+
+    def save(self, collected_at: datetime, rows: Iterable[Row]) -> int:
+        """한 시각의 영상들을 넣는다. 이미 있는 (시각, 영상)은 건너뛴다. 넣은 줄 수를 돌려준다."""
+        at = iso(collected_at)
+        values = [
+            (
+                at,
+                r.stat.video_id,
+                r.stat.view_count,
+                r.stat.like_count,
+                r.stat.comment_count,
+                r.stat.rank,
+                iso(r.stat.published_at),
+                r.stat.category_id,
+                r.stat.channel_id,
+                json.dumps(list(r.stat.tags), ensure_ascii=False),
+                ",".join(r.sources),
+            )
+            for r in rows
+        ]
+        with self._lock, self._conn:
+            before = self._conn.total_changes
+            self._conn.executemany(
+                "INSERT OR IGNORE INTO snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?)", values
+            )
+            return self._conn.total_changes - before
+
+    def log_run(
+        self,
+        collected_at: datetime,
+        *,
+        quota_units: int,
+        popular: int,
+        tracked: int,
+        searched_videos: int,
+        searched: bool,
+        errors: list[str],
+    ) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO runs VALUES (?,?,?,?,?,?,?)",
+                (iso(collected_at), quota_units, popular, tracked, searched_videos, int(searched),
+                 json.dumps(errors, ensure_ascii=False)),
+            )  # fmt: skip
+
+    def searched_on(self, day: date) -> bool:
+        """그 한국 날짜에 회사 키워드 검색을 이미 했는지."""
+        start = datetime(day.year, day.month, day.day, tzinfo=KST)
+        end = start + timedelta(days=1)
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM runs WHERE searched = 1 AND collected_at >= ? AND collected_at < ?",
+                (iso(start), iso(end)),
+            ).fetchone()
+        return row is not None
+
+    def recent_video_ids(self, since: datetime, limit: int) -> list[str]:
+        """`since` 뒤에 한 번이라도 저장한 영상 id (최근에 본 순서, 최대 `limit`개)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT video_id, MAX(collected_at) AS last FROM snapshots WHERE collected_at >= ?"
+                " GROUP BY video_id ORDER BY last DESC LIMIT ?",
+                (iso(since), limit),
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def count(self, video_id: str | None = None) -> int:
+        with self._lock:
+            if video_id is None:
+                return int(self._conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0])
+            return int(
+                self._conn.execute(
+                    "SELECT COUNT(*) FROM snapshots WHERE video_id = ?", (video_id,)
+                ).fetchone()[0]
+            )
+
+    def rows(self, video_id: str) -> list[sqlite3.Row]:
+        with self._lock:
+            self._conn.row_factory = sqlite3.Row
+            try:
+                return list(
+                    self._conn.execute(
+                        "SELECT * FROM snapshots WHERE video_id = ? ORDER BY collected_at",
+                        (video_id,),
+                    )
+                )
+            finally:
+                self._conn.row_factory = None
