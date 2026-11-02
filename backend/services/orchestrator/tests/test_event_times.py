@@ -195,3 +195,37 @@ async def test_with_the_hr_service_on_times_are_still_sent(harness, monkeypatch)
     inc = new_incident()
     await engine.run(inc, scenario_a())
     assert not inc.times_off and len(times_calls(harness)) == 1
+
+
+@pytest.mark.asyncio
+async def test_recovery_reruns_impact_to_the_recovery_time(harness, monkeypatch) -> None:
+    """첫 분석(이벤트를 열고 2초 뒤) 뒤의 실패가 복구 때 다시 센 결과에 들어온다."""
+    from ax_orchestrator.mock import fake_departments as fd
+
+    engine = await harness.start()
+    manager = IncidentManager(engine, scenario_a)
+    inc = await manager.handle(event(EventType.SHOP_DEGRADED, "evt_deg_1"))
+    await manager.wait(inc.context_id)
+    first = set(inc.outputs["impact"]["affected_customer_ids"])
+    sent = harness.fakes.calls
+    comp_before = len([1 for _, r in sent if r.skill == "request_incident_compensation"])
+    seen = []
+    more = [*first, "buyer-late-1", "buyer-late-2"]
+
+    def impact(r):
+        seen.append(r.input)
+        return fd._ok(affected_customer_ids=more, affected_customer_count=len(more))
+
+    monkeypatch.setitem(fd.DEFAULT_OUTPUTS, "impact_analysis", impact)
+    recovered_at = inc.opened_at + timedelta(seconds=40)
+    await manager.process(event(EventType.SHOP_RECOVERED, "evt_rec_1", at=recovered_at))
+
+    assert len(seen) == 1 and seen[0]["window_to"].endswith("Z")
+    assert seen[0]["window_to"] == recovered_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert inc.outputs["impact"]["added_customer_ids"] == ["buyer-late-1", "buyer-late-2"]
+    assert inc.steps["impact"].output is inc.outputs["impact"]
+    keys = [r.meta.idempotency_key for _, r in harness.fakes.calls if r.skill == "impact_analysis"]
+    assert len(keys) == 2 and len(set(keys)) == 2
+    # 보상은 자동으로 다시 보내지 않는다
+    comp = [r for _, r in harness.fakes.calls if r.skill == "request_incident_compensation"]
+    assert len(comp) == comp_before

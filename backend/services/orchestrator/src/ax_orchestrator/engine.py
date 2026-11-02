@@ -222,6 +222,35 @@ class Engine:
         self._judge(inc, step, run)
         self._keep(inc, step, run)
 
+    async def refresh_impact(self, inc: Incident, plan: Plan) -> bool:
+        """복구 신호를 받은 뒤 영향 분석을 같은 구간(복구 시각까지)으로 다시 돌려 결과를 갱신한다.
+
+        첫 분석은 이벤트를 열고 2초 뒤에 한 번만 돌아서 그 뒤 실패가 빠진다. 새 결과로 바꾸고,
+        새로 잡힌 고객은 `added_customer_ids`로 남긴다. 보상은 자동으로 다시 보내지 않는다.
+        실패하면 이전 결과를 그대로 둔다. 갱신했으면 True.
+        """
+        run = inc.steps.get("impact")
+        step = next((s for s in plan.steps if s.id == "impact"), None)
+        if run is None or step is None or run.status != "completed":
+            return False
+        entry = self.registry.find(step.skill)
+        if entry is None or not entry.callable_by_orchestrator:
+            return False
+        again = replace(step, id="impact_refresh")  # 멱등 키가 첫 분석과 달라야 다시 계산한다
+        result = await self._send(inc, again, step.skill, step.build(inc), entry.dept)
+        if result.status != TaskStatus.COMPLETED or result.outcome in TRANSFER_CODES:
+            inc.log(f"{step.label}: 복구 뒤 다시 계산하지 못해 이전 결과를 유지")
+            return False
+        old_ids = set(inc.outputs.get("impact", {}).get("affected_customer_ids") or [])
+        output = dict(result.output)
+        added = [c for c in output.get("affected_customer_ids") or [] if c not in old_ids]
+        output["added_customer_ids"] = added
+        run.output = output
+        run.finished_at = now()
+        inc.outputs["impact"] = output
+        inc.log(f"{step.label}: 복구 시각까지 다시 계산 (새로 잡힌 영향 고객 {len(added)}명)")
+        return True
+
     async def _call_in_batches(
         self, inc: Incident, step: Step, run: StepRun, dept: str, payload: dict[str, Any]
     ) -> None:
