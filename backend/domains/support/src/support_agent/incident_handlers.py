@@ -31,8 +31,12 @@ from support_agent import buyer_ids, compensation
 from support_agent import handlers as h
 from support_agent.incident_schemas import (
     BUYER_PATTERN,
+    CompensatedBuyer,
+    IncidentCompensation,
     IncidentCompensationOutput,
     IncidentCouponResult,
+    ListIncidentCompensationInput,
+    ListIncidentCompensationOutput,
     RequestIncidentCompensationInput,
 )
 
@@ -257,4 +261,87 @@ async def _hand_off_batch(
     )
 
 
-INCIDENT_HANDLERS = {"request_incident_compensation": request_incident_compensation}
+_KEY = re.compile(r"^(ctx_inc_[A-Za-z0-9]+):request_compensation:(buy_[0-9]{4}):([A-Za-z_]+)$")
+LIST_NOTES = [
+    "지급이 끝난 기록만 센다 (보류·거부·검증 중은 아직 기록이 없다).",
+    "쿠폰 서비스가 꺼진 고객사의 일괄 이관은 고객별 기록이 없어 여기에 나오지 않는다.",
+]
+
+
+def compensated_in_incidents(context_id: str | None = None) -> dict[str, list[CompensatedBuyer]]:
+    """멱등 기록(`LEDGER.results`)에서 사건별로 보상 쿠폰을 받은 고객을 모은다."""
+    found: dict[str, list[CompensatedBuyer]] = {}
+    for key, output in h.LEDGER.results.items():
+        match = _KEY.match(key)
+        if match is None or not isinstance(output, dict):
+            continue
+        context, buyer, reason = match.groups()
+        if context_id is not None and context != context_id:
+            continue
+        if output.get("marketing_status") != "completed":
+            continue
+        duplicate = output.get("marketing_outcome") == "linked_duplicate"
+        marketing = output.get("marketing_output") or {}
+        coupon_id = marketing.get("coupon_id")
+        found.setdefault(context, []).append(
+            CompensatedBuyer(
+                buyer_id=buyer,
+                status="linked_duplicate" if duplicate else "issued",
+                reason_code=reason,
+                coupon_id=coupon_id if isinstance(coupon_id, str) else None,
+                count=int(output.get("count") or 0),
+                unit_value=int(output.get("unit_value") or 0),
+                total_value=int(output.get("total_value") or 0),
+                marketing_outcome=output.get("marketing_outcome"),
+            )
+        )
+    for rows in found.values():
+        rows.sort(key=lambda r: r.buyer_id)
+    return found
+
+
+async def list_incident_compensation(request: AgentRequest) -> AgentResult:
+    """사건별로 보상 쿠폰을 받은 고객을 돌려준다 (읽기라 `execute()`를 안 거친다)."""
+    parsed = h._parse(request, ListIncidentCompensationInput)
+    if isinstance(parsed, AgentResult):
+        return parsed
+    compare: list[str] | None = None
+    if parsed.buyer_ids is not None:
+        compare = clean_buyers(parsed.buyer_ids)
+        if compare is None:
+            return error_result(
+                request.meta, TaskStatus.FAILED, "invalid_input", "구매자 ID 형식이 맞지 않는다"
+            )
+    found = compensated_in_incidents(parsed.incident_context_id)
+    if parsed.incident_context_id is not None:
+        found.setdefault(parsed.incident_context_id, [])  # 기록이 없는 사건도 빈 목록으로 답한다
+    incidents: list[IncidentCompensation] = []
+    for context, rows in sorted(found.items()):
+        issued = [r for r in rows if r.status == "issued"]
+        have = {r.buyer_id for r in rows}
+        incidents.append(
+            IncidentCompensation(
+                context_id=context,
+                buyers=rows,
+                issued_buyers=len(issued),
+                issued_total=sum(r.total_value for r in issued),
+                missing_buyer_ids=None
+                if compare is None
+                else [b for b in compare if b not in have],
+            )
+        )
+    output = ListIncidentCompensationOutput(incidents=incidents, notes=LIST_NOTES)
+    return h._done(
+        request,
+        output.model_dump(mode="json"),
+        evidence=Evidence(
+            ref_ids=[i.context_id for i in incidents],
+            data_summary=f"보상 기록이 있는 사건 {len(incidents)}건",
+        ),
+    )
+
+
+INCIDENT_HANDLERS = {
+    "request_incident_compensation": request_incident_compensation,
+    "list_incident_compensation": list_incident_compensation,
+}

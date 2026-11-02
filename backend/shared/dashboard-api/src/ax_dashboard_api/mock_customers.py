@@ -212,6 +212,36 @@ def change_proposals() -> dict[str, Any]:
     }
 
 
+def incident_compensation(incident_id: str | None) -> dict[str, Any]:
+    """사건별 보상 고객 (테스트 전용). 사건을 고르면 그 사건만, 아니면 사건 하나를 돌려준다."""
+    context = incident_id or "ctx_inc_0001"
+    buyers = [
+        {
+            "buyer_id": f"buy_000{n}",
+            "status": "issued",
+            "reason_code": "payment_failure",
+            "coupon_id": f"cpn_000{n}",
+            "count": 1,
+            "unit_value": 2000,
+            "total_value": 2000,
+            "marketing_outcome": None,
+        }
+        for n in (1, 2)
+    ]
+    return {
+        "incidents": [
+            {
+                "context_id": context,
+                "buyers": buyers,
+                "issued_buyers": 2,
+                "issued_total": 4000,
+                "missing_buyer_ids": None,
+            }
+        ],
+        "notes": ["지급이 끝난 기록만 센다 (보류·거부·검증 중은 아직 기록이 없다)."],
+    }
+
+
 def change_requests(inquiry_id: int | None, status: str | None) -> dict[str, Any]:
     items = [
         {

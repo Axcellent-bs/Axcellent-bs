@@ -373,6 +373,16 @@
       "priority": "required"
     },
     {
+      "id": "list_incident_compensation",
+      "description": "사건(ctx_inc_)마다 보상 쿠폰을 받은 고객을 돌려준다(읽기). 고객별 쿠폰 ID·건수·단가·합계와 사건별 지급 고객 수·합계를 담고, 영향 고객 목록(buyer_ids)을 함께 주면 보상 기록이 없는 고객을 missing_buyer_ids로 알려 준다. 누락을 찾기만 하고 보상을 요청하지 않는다(요청은 request_incident_compensation). 지급이 끝난 기록만 세며, 쿠폰 서비스가 꺼진 고객사의 일괄 이관은 고객별 기록이 없어 나오지 않는다.",
+      "input_schema": "agents/support/src/support_agent/incident_schemas.py#ListIncidentCompensationInput",
+      "output_schema": "agents/support/src/support_agent/incident_schemas.py#ListIncidentCompensationOutput",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "diagnose_payment",
       "description": "문의의 주문에서 결제가 어디서 막혔는지 주문 상태와 결제 시도 기록으로 코드가 정한다(읽기). 결제 완료·결제 실패(서버 문제인지 거절인지)·결제 시도 없음·중복 결제·기록 불일치·취소를 가르고 다음 할 일(재시도·대기·환불 검토·담당자 확인)을 돌려준다. 고객 원문은 읽지 않고, 재결제·취소·환불은 하지 않는다. 문의의 구매자와 주문의 구매자가 다르면 not_found다.",
       "input_schema": "agents/support/src/support_agent/payment_schemas.py#DiagnosePaymentInput",
