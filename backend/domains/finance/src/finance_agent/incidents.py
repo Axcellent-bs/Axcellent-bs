@@ -82,7 +82,11 @@ async def incident_view(
 
     window = None
     if info["window_from"] and info["window_to"]:
-        window = {"from": fc.iso(info["window_from"]), "to": fc.iso(info["window_to"])}
+        # 총괄이 준 끝은 영향 분석용이라 아직 오지 않은 시각일 수 있다
+        window = {
+            "from": fc.iso(info["window_from"]),
+            "to": fc.iso(min(info["window_to"], fc.now())),
+        }
     impact_out = None
     if impact is not None:
         impact_out = {

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { ActionQueue } from "@/components/finance/SafetyQueue";
 import { AtRisk } from "@/components/support/AtRisk";
 import { IncidentResponse } from "@/components/support/IncidentResponse";
 import { InquiryCheck } from "@/components/support/InquiryCheck";
@@ -59,8 +58,6 @@ export default function SupportPage() {
           <button className="btn-ghost" onClick={bump}>새로고침</button>
         </div>
       </header>
-
-      <ActionQueue action="refund_request" intro="안전 장치가 C로 보류한 환불(한도 초과·금액 불일치)이 여기 모입니다." />
 
       <div role="tablist" aria-label="고객지원 화면" className="flex w-full gap-1 rounded-2xl bg-surface p-1 ring-1 ring-ink-100 sm:w-auto sm:max-w-2xl">
         {MODES.map((m) => (

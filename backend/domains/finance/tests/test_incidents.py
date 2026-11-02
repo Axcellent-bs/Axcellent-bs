@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -605,3 +606,15 @@ def test_impact_window_from_the_orchestrator_is_used_first(real_mode, fake_data)
     assert data["impact"]["window_exact"] is True
     assert body["meta"]["unavailable"] == []
     assert data["refunds"] is not None  # 정확한 구간이면 환불을 사건에 묶는다
+
+
+def test_window_end_is_never_in_the_future(mock_mode, monkeypatch) -> None:
+    future = fc.now() + timedelta(minutes=15)
+    start = fc.now() - timedelta(minutes=1)
+    monkeypatch.setattr(
+        incidents,
+        "incident_info",
+        AsyncMock(return_value={"window_from": start, "window_to": future, "component": "payment"}),
+    )
+    data, _ = asyncio.run(incidents.incident_view(CTX, _feed(None)))
+    assert data["window"]["to"] <= fc.iso(fc.now())

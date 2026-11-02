@@ -104,7 +104,7 @@ const FINANCE_KO: Record<string, string> = {
 };
 /** 보류 건을 결정하는 화면. 환불은 고객지원, 쿠폰은 마케팅, 나머지는 재무 화면의 보류 큐다 */
 export function holdPage(action: string | null | undefined): string {
-  if (action === "refund_request") return "/support";
+  if (action === "refund_request") return "/queue";
   if (action === "issue_coupon") return "/marketing";
   return "/finance";
 }

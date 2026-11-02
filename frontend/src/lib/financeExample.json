@@ -143,7 +143,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.470687Z",
+   "collected_at": "2026-11-02T08:53:08.204379Z",
    "source": "seed",
    "unavailable": []
   }
@@ -238,7 +238,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.496334Z",
+   "collected_at": "2026-11-02T08:53:08.226383Z",
    "source": "seed",
    "unavailable": []
   }
@@ -333,7 +333,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.496334Z",
+   "collected_at": "2026-11-02T08:53:08.235800Z",
    "source": "seed",
    "unavailable": []
   }
@@ -509,7 +509,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.507409Z",
+   "collected_at": "2026-11-02T08:53:08.245303Z",
    "source": "seed",
    "unavailable": []
   }
@@ -685,7 +685,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.523046Z",
+   "collected_at": "2026-11-02T08:53:08.252476Z",
    "source": "seed",
    "unavailable": []
   }
@@ -861,7 +861,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.523046Z",
+   "collected_at": "2026-11-02T08:53:08.267513Z",
    "source": "seed",
    "unavailable": []
   }
@@ -1980,7 +1980,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.539887Z",
+   "collected_at": "2026-11-02T08:53:08.270228Z",
    "source": "seed",
    "unavailable": [],
    "pg_source": "mock_toss_settlement"
@@ -2051,7 +2051,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.555456Z",
+   "collected_at": "2026-11-02T08:53:08.285497Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2119,7 +2119,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.555456Z",
+   "collected_at": "2026-11-02T08:53:08.294510Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2170,7 +2170,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.571724Z",
+   "collected_at": "2026-11-02T08:53:08.302602Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2352,7 +2352,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.588690Z",
+   "collected_at": "2026-11-02T08:53:08.319264Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2367,7 +2367,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.601278Z",
+   "collected_at": "2026-11-02T08:53:08.334725Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2493,7 +2493,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.601278Z",
+   "collected_at": "2026-11-02T08:53:08.352028Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2559,7 +2559,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.627251Z",
+   "collected_at": "2026-11-02T08:53:08.369102Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2619,7 +2619,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.627251Z",
+   "collected_at": "2026-11-02T08:53:08.384971Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2726,7 +2726,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.665348Z",
+   "collected_at": "2026-11-02T08:53:08.395124Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2743,7 +2743,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.675358Z",
+   "collected_at": "2026-11-02T08:53:08.402114Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2760,7 +2760,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.675358Z",
+   "collected_at": "2026-11-02T08:53:08.402114Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2777,7 +2777,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.696890Z",
+   "collected_at": "2026-11-02T08:53:08.418244Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2864,7 +2864,7 @@
   ],
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.719138Z",
+   "collected_at": "2026-11-02T08:53:08.441320Z",
    "ledger_source": "seed",
    "unavailable": []
   }
@@ -2873,7 +2873,7 @@
   "data": [],
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.719138Z",
+   "collected_at": "2026-11-02T08:53:08.446132Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2975,7 +2975,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.740476Z",
+   "collected_at": "2026-11-02T08:53:08.452433Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3064,7 +3064,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.740476Z",
+   "collected_at": "2026-11-02T08:53:08.467655Z",
    "source": "hr.team_headcount",
    "unavailable": []
   }
@@ -3153,7 +3153,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.740476Z",
+   "collected_at": "2026-11-02T08:53:08.469679Z",
    "source": "hr.team_headcount",
    "unavailable": []
   }
@@ -3242,7 +3242,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.756175Z",
+   "collected_at": "2026-11-02T08:53:08.469679Z",
    "source": "hr.team_headcount",
    "unavailable": []
   }
@@ -3279,7 +3279,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T08:46:36.756175Z"
+    "collected_at": "2026-11-02T08:53:08.485765Z"
    },
    "compensation": {
     "coupons": [
@@ -3354,7 +3354,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.756175Z",
+   "collected_at": "2026-11-02T08:53:08.485765Z",
    "unavailable": []
   }
  },
@@ -3388,7 +3388,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T08:46:36.771811Z"
+    "collected_at": "2026-11-02T08:53:08.501609Z"
    },
    "compensation": {
     "coupons": [
@@ -3421,7 +3421,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.771811Z",
+   "collected_at": "2026-11-02T08:53:08.501609Z",
    "unavailable": []
   }
  },
@@ -3449,7 +3449,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T08:46:36.795169Z"
+    "collected_at": "2026-11-02T08:53:08.502746Z"
    },
    "compensation": {
     "coupons": [
@@ -3482,7 +3482,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.795169Z",
+   "collected_at": "2026-11-02T08:53:08.502746Z",
    "unavailable": []
   }
  },
@@ -3511,7 +3511,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T08:46:36.811962Z"
+    "collected_at": "2026-11-02T08:53:08.529137Z"
    },
    "compensation": {
     "coupons": [
@@ -3544,7 +3544,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.811962Z",
+   "collected_at": "2026-11-02T08:53:08.529137Z",
    "unavailable": []
   }
  },
@@ -3578,7 +3578,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T08:46:36.824027Z"
+    "collected_at": "2026-11-02T08:53:08.553428Z"
    },
    "compensation": {
     "coupons": [
@@ -3625,7 +3625,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.824027Z",
+   "collected_at": "2026-11-02T08:53:08.553428Z",
    "unavailable": []
   }
  },
@@ -3654,7 +3654,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T08:46:36.837438Z"
+    "collected_at": "2026-11-02T08:53:08.569785Z"
    },
    "compensation": {
     "coupons": [
@@ -3701,7 +3701,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T08:46:36.837438Z",
+   "collected_at": "2026-11-02T08:53:08.569785Z",
    "unavailable": []
   }
  },

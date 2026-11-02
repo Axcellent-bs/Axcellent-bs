@@ -11,7 +11,7 @@ import { Chip, Empty, ErrorBox, MetaLine, MockBadge, RefList, ResourceBody, TONE
 // 재무가 하는 일: 끝난 쿠폰·환불 금액을 사건별 장부에 적기. 재무는 장애 대응 흐름의 단계가 아니다(#415).
 // 건별 승인·한도·감사는 하지 않는다(안전 장치가 A/C로 판정). 숫자는 서버 값을 그대로 보여 준다.
 
-const CATEGORY_KO: Record<string, string> = { books: "도서", stationery: "문구", ebooks: "전자책", goods: "굿즈" };
+const CATEGORY_KO: Record<string, string> = { book: "도서", books: "도서", stationery: "문구", ebook: "전자책", ebooks: "전자책", goods: "굿즈" };
 const COUPON_STATUS: Record<CouponStatus, { label: string; tone: string }> = {
   executed: { label: "지급됨", tone: TONE.ok },
   held: { label: "보류 중 (사람 결정 기다림)", tone: TONE.warn },
@@ -274,7 +274,7 @@ function IncidentDetailView({ id, summary, tick }: { id: string; summary: Incide
         {res.loading && res.env && <span className="text-[11px] text-ink-500" aria-live="polite">새로 받는 중…</span>}
       </div>
       {res.env?.data.window && (
-        <p className="-mt-3 text-xs text-ink-500">장애 시간 {shortDateTime(res.env.data.window.from)} ~ {shortDateTime(res.env.data.window.to)}</p>
+        <p className="-mt-3 text-xs text-ink-500">영향 분석 구간 {shortDateTime(res.env.data.window.from)} ~ {shortDateTime(res.env.data.window.to)}</p>
       )}
       {summary && <SummaryStrip s={summary} />}
       <MetaLine meta={meta} />

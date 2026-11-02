@@ -5,7 +5,7 @@ import { Chip, TONE } from "./bits";
 
 // 안전 장치 보류 큐: 사람만 정할 수 있는 일(C 등급). 결정은 safety에 사람 토큰으로 보낸다.
 // 재무 화면(SafetyQueue)에는 정산 묶음 지급 승인과 아직 담당 화면이 없는 일이 온다.
-// 환불은 고객지원 화면, 쿠폰은 마케팅 화면(ActionQueue)에서 결정한다. 재무는 끝난 금액만 장부에 적는다.
+// 환불은 고객지원 보상 큐(RefundHolds), 쿠폰은 마케팅 화면(ActionQueue)에서 결정한다. 재무는 끝난 금액만 장부에 적는다.
 
 const WHO_KO: Record<string, string> = {
   marketing: "마케팅 AI", support: "고객지원 AI", finance: "재무 AI", hr: "인사 AI", orchestrator: "총괄 AI",
