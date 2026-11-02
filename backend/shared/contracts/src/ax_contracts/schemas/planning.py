@@ -294,6 +294,11 @@ class ReceivePlanningAnswerOutput(AxModel):
 #   planning은 코드 규칙으로 대조하고(LLM 아님) `ready` / `hold` / `needs_human`으로 답한다.
 #   대조 규칙(planning): 기획서가 확정돼 있다 · 요구사항 문단마다 작업이 있다 · 작업마다 머지된 PR이
 #   있다 · 기획서 밖 PR이 섞이지 않았다 · 문단에 열린 장애 표시가 없다 · 남은 질문이 없다.
+# - 내용 대조(11/2 추가): 위 규칙은 연결만 본다. PR이 기획서 문단·완료 기준대로 구현됐는지는
+#   개발이 PR마다 이미 하는 LLM 검수(`review_pr`) 결과를 `ReleasePr.review`로 실어 보내 쓴다
+#   (LLM을 두 번 부르지 않는다). 연결 규칙에 걸리면 검수와 상관없이 `hold`. 연결은 통과했는데
+#   검수가 하나라도 `mismatch`·`none`이면 `needs_human`. 전부 `match`일 때만 `ready`.
+#   LLM 검수 결과만으로 배포를 열지 않는다(코드 규칙이 먼저, 검수는 근거).
 # - `ready`면 planning이 바로 `receive_release_order`(dev, A)로 배포 지시를 보낸다.
 #   `needs_human`이면 사람이 기획 화면에서 확인한 뒤 같은 지시를 보낸다(`decided_by=human`).
 #   `hold`면 지시를 보내지 않고 이유 코드만 돌려준다.
@@ -321,6 +326,10 @@ class ReleasePr(AxModel):
     task_id: str | None = None  # T-n (없으면 기획서 밖 PR로 본다)
     merged: bool
     changed_paths: list[str] = Field(default_factory=list)
+    # 개발 검수(`review_pr`, 완료 기준 비교) 결과. 없으면 `none` → planning은 사람 확인으로 둔다
+    review: Literal["match", "mismatch", "none"] = "none"
+    review_note: str | None = None  # 검수 근거 한 줄 (LLM 문장이라 데이터로만 쓴다)
+    reviewed_paras: list[str] = Field(default_factory=list)  # 검수가 본 문단 id (R1 …)
 
 
 class RequestReleaseCheckInput(AxModel):
@@ -338,6 +347,10 @@ class ReleaseCheckItem(AxModel):
     status: Literal["covered", "missing_task", "not_merged", "incident_open"]
     task_ids: list[str] = Field(default_factory=list)
     pr_numbers: list[int] = Field(default_factory=list)
+    # 내용 대조: 이 문단을 본 PR 검수가 모두 match면 match, 하나라도 mismatch면 mismatch,
+    # 검수가 없으면 none (연결 status와 따로 본다)
+    content: Literal["match", "mismatch", "none"] = "none"
+    content_notes: list[str] = Field(default_factory=list)  # PR 검수 근거 (데이터)
 
 
 class RequestReleaseCheckOutput(AxModel):
