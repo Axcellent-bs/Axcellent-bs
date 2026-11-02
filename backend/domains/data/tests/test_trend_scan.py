@@ -29,6 +29,7 @@ from data_agent.explain import _Summary
 from data_agent.skills.trend_scan import (
     REQUEST_DAYS,
     NoTrendGroups,
+    Settings,
     default_groups,
     judge_series,
     scan_trends,
@@ -354,3 +355,42 @@ def test_handler_rejects_bad_input(monkeypatch: pytest.MonkeyPatch) -> None:
     result = _handle(monkeypatch, MemoryConnector({}), {"keyword_groups": []})
     assert result.status == TaskStatus.FAILED
     assert result.outcome == "invalid_input"
+
+
+# ---------------------------------------------------------------- 요일 보정 (기본은 끔)
+
+SATURDAY = 5
+
+
+def _weekly(day: date) -> float:
+    """토요일만 평소의 0.7배인 키워드 (요일 효과가 뚜렷하고 날마다 흔들림이 작다)."""
+    return _calm(day) * (0.7 if day.weekday() == SATURDAY else 1.0)
+
+
+def _saturday_spike(day: date) -> float:
+    last_saturday = END - timedelta(days=(END.weekday() - SATURDAY) % 7)
+    return _weekly(day) * (1.5 if day == last_saturday else 1.0)
+
+
+def test_default_has_no_weekday_correction() -> None:
+    """기본(요일 보정 끔): 토요일 1.5배는 평소의 약 1.05배로 보여 평범이다.
+
+    #263 공책 케이스와 같은 모양이다.
+    """
+    assert Settings().weekday == "none"
+    verdict = judge_series(_series(value=_saturday_spike), START, END)
+    assert verdict.status == "normal"
+
+
+@pytest.mark.parametrize("mode", ["ratio", "same_weekday"])
+def test_weekday_correction_sees_a_saturday_spike(mode: str) -> None:
+    """요일 보정을 켜면 같은 토요일 1.5배를 그 요일 평소와 비교해 잡는다 (깨끗한 자료에서)."""
+    verdict = judge_series(_series(value=_saturday_spike), START, END, Settings(weekday=mode))
+    assert verdict.status == "rising"
+    assert verdict.ratio == pytest.approx(1.5, rel=0.08)
+
+
+@pytest.mark.parametrize("mode", ["none", "ratio", "same_weekday"])
+def test_weekday_pattern_alone_is_not_rising(mode: str) -> None:
+    verdict = judge_series(_series(value=_weekly), START, END, Settings(weekday=mode))
+    assert verdict.status == "normal"
