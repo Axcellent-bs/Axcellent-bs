@@ -20,6 +20,10 @@
   구간 안에서 그 구매자의 주문은 `use_fraction` 확률로 쿠폰을 쓴다(shop-api `place_order`).
   `used_after`가 있으면 구간이 끝난 뒤 5분 간격으로 그만큼 더 쓴다
   (조회 시점 누적 사용률에 섞이는 몫). 그 장수는 구간 안에서 쓰지 않게 남겨 둔다.
+- 여러 날 캠페인(`eval/campaign/multiday/`): `traffic.history_days`가 있으면 지난 7일 같은
+  시간대 대신 구간 시작 `history_days`일 전부터 구간 끝까지 5분마다 빠짐없이 만든다(이어진 기록).
+  `traffic.weekday_levels`(월~일 7개)가 있으면 그 요일 배수를 주문 수준에 곱한다(주말 효과).
+  둘 다 없으면 예전과 똑같이 만든다.
   쿠폰 결정은 따로 씨앗을 둔 난수로 해서, `campaign`이 없는 시나리오의 데이터는 예전과 같다.
 
 정답(실패 주문 수·금액·영향 고객, 이상 시작 시각)은 data 에이전트 코드가 아니라 여기서 만든
@@ -173,6 +177,16 @@ def _slots(
         while moment < end:
             slots.append(moment)
             moment += BUCKET
+    return slots
+
+
+def _continuous_slots(window_from: datetime, window_to: datetime, days: int) -> list[datetime]:
+    """구간 시작 `days`일 전부터 구간 끝까지 빠짐없는 5분 버킷 시작 시각 (여러 날 캠페인)."""
+    slots: list[datetime] = []
+    moment = window_from - timedelta(days=days)
+    while moment < window_to:
+        slots.append(moment)
+        moment += BUCKET
     return slots
 
 
@@ -384,13 +398,20 @@ def generate(spec: dict[str, Any]) -> World:
         coupons = _issue_campaign_coupons(db, campaign, window_from)
         crng = random.Random(f"{spec['id']}:campaign")  # 기존 난수 순서를 바꾸지 않게 따로
         reserve = int(campaign.get("used_after", 0))
+    weekday_levels = traffic.get("weekday_levels")  # 요일 배수 (여러 날 캠페인)
     with _clock() as now:
         margin = timedelta(minutes=int(traffic.get("history_margin_minutes", 0)))
-        for slot in _slots(window_from, window_to, margin):
+        if traffic.get("history_days"):  # 이어진 기록 (여러 날 캠페인)
+            slots = _continuous_slots(window_from, window_to, int(traffic["history_days"]))
+        else:
+            slots = _slots(window_from, window_to, margin)
+        for slot in slots:
             in_window = window_from <= slot < window_to
             if kind == "empty" and (in_window or injection.get("history_empty")):
                 continue  # 이 버킷에는 주문이 하나도 없다
             level = per_bucket * HOUR_LEVEL[slot.hour]
+            if weekday_levels:
+                level *= float(weekday_levels[slot.weekday()])
             if in_window and kind == "order_drop" and _in(slot, injection):
                 level *= float(injection["factor"])
             if in_window and kind == "sale" and _in(slot, injection):
