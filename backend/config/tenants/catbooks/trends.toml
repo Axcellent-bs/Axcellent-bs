@@ -17,3 +17,18 @@ keywords = ["책 추천", "도서 추천"]
 [[groups]]
 name = "그림책"
 keywords = ["그림책"]
+
+# YouTube 후보(data trend_candidates): 최신 YouTube 인기 영상 스냅샷의 태그에서 후보 키워드를 뽑아
+# 후보마다 네이버 검색어 트렌드를 한 번씩 부른다(하루 한도 NAVER_DATALAB_DAILY_LIMIT). 그래서 후보 수는 작게 둔다
+[candidates]
+max_candidates = 5      # 후보 수 상한 (나온 영상 수 많은 순)
+min_videos = 2          # 이 수 이상의 인기 영상에 붙은 태그만 후보
+max_age_hours = 24      # 스냅샷이 이보다 오래되면 후보를 뽑지 않음 (unknown + 이유)
+rep_videos = 3          # 근거로 보여 줄 대표 영상 id 수
+# 너무 일반적인 태그 (정리한 뒤 값과 비교: 앞뒤 공백·# 제거, 영문 소문자)
+exclude_tags = [
+  "shorts", "쇼츠", "short", "브이로그", "vlog", "유튜브", "youtube",
+  "게임", "game", "gaming", "스트리머", "방송", "생방송", "live", "bj",
+  "치지직", "트위치", "twitch", "아프리카", "아프리카tv", "숲", "soop",
+  "먹방", "일상", "funny", "웃긴영상", "예능", "music", "뮤직", "kpop", "k-pop",
+]

@@ -168,3 +168,57 @@ class SnapshotStore:
                 )
             finally:
                 self._conn.row_factory = None
+
+
+# ---------------------------------------------------------------- 읽기 (trend_candidates)
+
+
+@dataclass(frozen=True)
+class PopularVideo:
+    """스냅샷 한 시각의 인기 영상 하나 (태그는 저장된 그대로)."""
+
+    video_id: str
+    rank: int
+    tags: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PopularSnapshot:
+    collected_at: datetime
+    videos: tuple[PopularVideo, ...]  # 인기 순위 순
+
+
+def latest_popular(path: str | Path) -> PopularSnapshot | None:
+    """가장 최근에 인기 목록을 받은 시각의 인기 영상들. 파일이 없거나 인기 영상이 없으면 None.
+
+    읽기 전용으로 연다(파일이 없을 때 새로 만들지 않는다).
+    """
+    if str(path) != ":memory:" and not Path(path).is_file():
+        return None
+    uri = f"file:{Path(path).as_posix()}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True, timeout=5.0)
+    try:
+        row = conn.execute(
+            "SELECT MAX(collected_at) FROM snapshots WHERE popular_rank IS NOT NULL"
+        ).fetchone()
+        if not row or not row[0]:
+            return None
+        rows = conn.execute(
+            "SELECT video_id, popular_rank, tags FROM snapshots"
+            " WHERE collected_at = ? AND popular_rank IS NOT NULL ORDER BY popular_rank",
+            (row[0],),
+        ).fetchall()
+    except sqlite3.DatabaseError:
+        return None  # 표가 없는 파일 등
+    finally:
+        conn.close()
+    videos = []
+    for video_id, rank, tags in rows:
+        try:
+            parsed = json.loads(tags)
+        except ValueError:
+            parsed = []
+        videos.append(
+            PopularVideo(video_id, int(rank), tuple(str(t) for t in parsed if isinstance(t, str)))
+        )
+    return PopularSnapshot(datetime.fromisoformat(row[0]).astimezone(UTC), tuple(videos))

@@ -34,6 +34,9 @@ from ax_contracts.schemas.data import (
     MetricVerdict,
     RootCauseInput,
     RootCauseOutput,
+    TrendCandidate,
+    TrendCandidatesOutput,
+    TrendCandidatesRequest,
     TrendEvidence,
     TrendKeywordGroup,
     TrendPoint,
@@ -43,6 +46,7 @@ from ax_contracts.schemas.data import (
     TrendStatus,
     TrendTimeUnit,
     TrendVerdict,
+    YouTubeTagEvidence,
 )
 from ax_contracts.schemas.escalation import (
     Escalation,
@@ -466,6 +470,9 @@ __all__ = [
     "CampaignEffectInput",
     "CampaignEffectOutput",
     "CampaignStatus",
+    "TrendCandidate",
+    "TrendCandidatesOutput",
+    "TrendCandidatesRequest",
     "TrendEvidence",
     "TrendKeywordGroup",
     "TrendPoint",
@@ -475,4 +482,5 @@ __all__ = [
     "TrendStatus",
     "TrendTimeUnit",
     "TrendVerdict",
+    "YouTubeTagEvidence",
 ]

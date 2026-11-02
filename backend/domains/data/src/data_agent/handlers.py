@@ -9,6 +9,9 @@
   않는다. 확인할 수 없는 규칙은 점수에서 빼고 `unknown_rules`로 알린다. 없는 판매자는 `not_found`다.
 - trend_scan은 네이버 검색어 트렌드를 읽어 키워드 그룹별 급상승을 판정한다(grade read). 그룹마다
   따로 부르고, 모든 그룹에서 못 읽으면 숫자 없이 `failed`·`unavailable`이다.
+- trend_candidates는 YouTube 인기 영상 스냅샷 태그에서 후보 키워드를 코드 규칙으로 뽑고, 후보마다
+  trend_scan과 같은 함수로 네이버 급상승을 붙인다(grade read). 스냅샷이 없거나 오래되면
+  `completed`에 status unknown + 이유, 네이버를 못 읽은 후보는 그 후보만 unknown이다.
 - answer_planning_question은 data가 보낸 요청의 기록으로만 기획 질문에 답한다(grade read,
   `planning_questions.py`). 기록에 없으면 `unknown`이다.
 - campaign_effect는 캠페인 기간 주문 증분·쿠폰 누적 사용률을 코드로 계산한다(grade read).
@@ -37,6 +40,7 @@ from ax_contracts.schemas.data import (
     ImpactAnalysisInput,
     KpiSummaryInput,
     RootCauseInput,
+    TrendCandidatesRequest,
     TrendScanRequest,
 )
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
@@ -61,6 +65,7 @@ from data_agent.skills.fraud_score import score_fraud
 from data_agent.skills.impact_analysis import analyze_impact
 from data_agent.skills.kpi_summary import summarize_kpi
 from data_agent.skills.root_cause import estimate_root_cause
+from data_agent.skills.trend_candidates import find_candidates
 from data_agent.skills.trend_scan import NoTrendGroups, scan_trends
 
 
@@ -350,6 +355,21 @@ async def trend_scan(request: AgentRequest) -> AgentResult:
     )
 
 
+async def trend_candidates(request: AgentRequest) -> AgentResult:
+    """YouTube 인기 태그 후보 + 네이버 급상승. 조회만 하고 상태를 바꾸지 않는다(grade read)."""
+    data = _parse(request, TrendCandidatesRequest)
+    if isinstance(data, AgentResult):
+        return data
+    result = await find_candidates(data, get_trend_connector(), env=os.environ)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=result.output.status,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
+
+
 async def answer_planning_question(request: AgentRequest) -> AgentResult:
     """기획이 되묻는 근거 질문에 data가 보낸 요청의 기록으로 답한다(grade read)."""
     data = _parse(request, AnswerPlanningQuestionInput)
@@ -408,6 +428,7 @@ HANDLERS = {
     "accuracy_report": accuracy_report,
     "activity_report": activity_report,
     "trend_scan": trend_scan,
+    "trend_candidates": trend_candidates,
     "answer_planning_question": answer_planning_question,
     "campaign_effect": campaign_effect,
 }

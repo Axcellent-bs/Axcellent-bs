@@ -13,6 +13,7 @@
 | `accuracy_report` | 정확도 평가 결과 | `eval/results/latest.json`(없으면 `eval/baseline.json`). 다시 계산하지 않는다 |
 | `activity_report` | 부서별 AI 업무 리포트: 부서별 요청·결과·사람에게 넘긴 일·품질·사건 참여, 부서 간 협업, 회사 숫자, 직전 기간 비교 | 공통 로그 저장소, finance `closing_report`(A2A), shop-api `GET /api/shop/metric-series` |
 | `trend_scan` | 키워드 그룹별 검색어 급상승(rising·normal·unknown), 기준선 대비 배수, 근거 숫자(z·기준선·흔들림), 판정 불가 이유. 최근 56일 대비 마지막 7일 | 네이버 검색어 트렌드(`connectors/naver_datalab.py`, 그룹마다 1번). 기본 키워드: 회사 폴더 `trends.toml` |
+| `trend_candidates` | YouTube 인기 영상 태그에서 뽑은 후보 키워드(최대 N개)와 후보마다 YouTube 근거(나온 영상 수·스냅샷 시각·대표 영상 id)·네이버 급상승 판정(trend_scan과 같은 함수). 스냅샷이 없거나 오래되면 unknown + 이유 | YouTube 스냅샷 DB(`youtube_store.latest_popular`, 읽기 전용), 네이버 검색어 트렌드(후보마다 1번). 설정: 회사 폴더 `trends.toml` `[candidates]` |
 | `answer_planning_question` | 기획이 되묻는 근거 질문의 답(answered·needs_human·unknown). 기획만 부른다 | data가 보낸 요청의 기록(`planning_questions.py`, 프로세스 안). 아직 요청을 보내는 코드가 없어 지금은 늘 unknown. 사람 답은 `human_answer_request`로 planning `receive_planning_answer`에 보낸다 |
 | `campaign_effect` | 캠페인 기간 주문 방향(늘었음·같음·줄었음)·증분(실제 − 지난 7일 같은 시간대 평균), 캠페인 쿠폰 조회 시점 누적 사용률. 매출은 매출 지표가 생기면 같은 방법(지금은 확인할 수 없음) | shop-api `GET /api/shop/metric-series`(`order_count`), `GET /api/shop/coupons?campaign_id=` |
 
@@ -407,6 +408,20 @@ uv run python -m data_agent.youtube_collect --every 3600 # 1시간마다 (최소
 | **합계** | | **최대 약 538 (한도의 약 5%)** |
 
 키워드를 하나 늘리면 하루 101단위가 는다. 실행마다 쓴 단위는 로그 한 줄(`[youtube] … 할당량 N단위`)과 `runs` 표에 남는다.
+
+### trend_candidates (YouTube 후보 → 네이버 급상승)
+
+YouTube에서 뜨는 소재가 검색에서도 뜨는지 본다. 후보 뽑기는 **코드 규칙**이고 LLM을 쓰지 않는다.
+
+1. 최신 스냅샷: YouTube 스냅샷 DB(`DATA_YOUTUBE_DB`)에서 인기 목록을 받은 가장 최근 시각의 인기 영상(순위 순). 파일을 읽기 전용으로 연다(없으면 만들지 않음)
+2. 태그 정리: 앞뒤 공백·`#` 제거, 영문 소문자(`T1`·`#t1 `·` t1` → `t1`). 한 영상에 같은 태그가 여러 번 붙어도 한 번만 센다
+3. 후보: `min_videos`개 이상 인기 영상에 붙은 태그 중 회사 제외 목록(`exclude_tags`, 정리한 값과 비교)을 빼고, 나온 영상 수 많은 순(같으면 더 높은 순위 영상에 붙은 것 먼저)으로 최대 `max_candidates`개. 요청의 `max_candidates`가 있으면 그 값
+4. 네이버: 후보마다 키워드 하나짜리 그룹으로 한 번씩 부르고 **trend_scan과 같은 함수(`trend_scan.judge`)**로 판정한다(기간·기준값도 같음). 판정 함수를 새로 만들지 않아 trend 평가 지표는 바뀌지 않는다
+5. 출력: 후보마다 키워드, YouTube 근거(나온 영상 수, 스냅샷 시각, 대표 영상 id `rep_videos`개), 네이버 판정(`TrendVerdict` 그대로). 그리고 네이버 부른 수(`naver_calls`, 실패 포함)와 숫자로 만든 한 문장
+
+- **확인할 수 없음:** 스냅샷이 없거나(인기 영상 기록 없음) `max_age_hours`보다 오래되면 후보를 뽑지 않고 `status: unknown` + 이유(마지막 수집 시각·몇 시간 전·기준). 네이버는 부르지 않는다. 네이버를 못 읽은 후보는 **그 후보만** `naver.status: unknown`("네이버 검색어 트렌드를 읽지 못함 [코드]")
+- 설정은 회사 폴더 `trends.toml`의 `[candidates]`(`max_candidates` 5, `min_videos` 2, `max_age_hours` 24, `rep_videos` 3, `exclude_tags`). 후보마다 네이버 1번이라 작게 둔다(하루 한도 `NAVER_DATALAB_DAILY_LIMIT`). 설정이 없으면 같은 숫자에 제외 목록 없음. 일반 태그 목록은 코드에 두지 않는다
+- **한계:** 같은 대상의 한글·영문·띄어쓰기 다른 이름(`t1`·`티원`, `lol`·`리그오브레전드`·`리그 오브 레전드`)을 묶지 않아 따로 후보가 되고 네이버도 따로 부른다. 태그는 올린 사람이 붙인 것이라 영상 내용과 다를 수 있다. 인기 목록(지역 `KR`) 태그만 보고, 회사 키워드 검색 결과·추적 영상은 보지 않는다. 스냅샷 한 시각만 보며 YouTube 쪽 속도(두 시각 차이)는 아직 보지 않는다
 
 ### 설명 문장(LLM)과 템플릿 대체 이유
 - 숫자는 코드가 계산하고 LLM은 문장만 쓴다(`explain.py`). 문장에 넘긴 facts에 없는 숫자가 있거나 LLM이 실패하면 고정 템플릿으로 바꾸고 `fallback=true`다.

@@ -596,6 +596,58 @@ class TrendScanRequest(AxModel):
         return self
 
 
+# --------------------------------------------------------------- trend_candidates (YouTube 후보)
+# YouTube 인기 영상 스냅샷의 태그에서 후보 키워드를 코드 규칙으로 뽑고, 후보마다 trend_scan과 같은
+# 판정 함수로 네이버 급상승 여부를 붙인다. 스냅샷이 없거나 오래되면 숫자 없이 unknown + 이유다.
+
+
+class TrendCandidatesRequest(AxModel):
+    """trend_candidates skill 입력.
+
+    비우면 회사 설정(trends.toml `[candidates]`)과 어제 날짜로 본다.
+    """
+
+    # 후보 수 상한. 없으면 회사 설정. 후보마다 네이버 호출 1번
+    max_candidates: int | None = Field(default=None, ge=1, le=20)
+    end_date: dt.date | None = None  # 네이버 판정할 마지막 날 (한국 날짜). 없으면 어제
+
+
+class YouTubeTagEvidence(AxModel):
+    """후보 키워드의 YouTube 근거 (스냅샷 한 시각의 인기 영상 목록 안에서 센 값)."""
+
+    video_count: int = Field(ge=1)  # 이 태그(정리한 뒤)가 붙은 인기 영상 수
+    snapshot_at: UtcDatetime  # 스냅샷 수집 시각
+    video_ids: list[str] = Field(default_factory=list)  # 대표 영상 id (인기 순위 순, 몇 개만)
+
+
+class TrendCandidate(AxModel):
+    keyword: str = Field(min_length=1)  # 정리한 태그 (앞뒤 공백·# 제거, 영문 소문자)
+    youtube: YouTubeTagEvidence
+    # 네이버 검색어 급상승 판정 (trend_scan과 같은 함수의 결과 그대로).
+    # 네이버를 못 읽으면 이 후보만 status unknown + 이유
+    naver: TrendVerdict
+
+
+class TrendCandidatesOutput(AxModel):
+    status: Literal["known", "unknown"]  # unknown = 스냅샷이 없거나 오래됨 (후보를 뽑지 않음)
+    unknown_reason: str | None = None
+    snapshot_at: UtcDatetime | None = None  # 쓴 스냅샷 시각 (없으면 None)
+    snapshot_videos: int = Field(default=0, ge=0)  # 그 스냅샷의 인기 영상 수
+    start_date: dt.date | None = None  # 네이버 요청 기간 (기준선 시작)
+    end_date: dt.date | None = None  # 네이버 판정 마지막 날
+    candidates: list[TrendCandidate] = Field(default_factory=list)  # 나온 영상 수 많은 순
+    naver_calls: int = Field(default=0, ge=0)  # 네이버 검색어 트렌드를 부른 수 (실패 포함)
+    summary: str  # 한 문장 (코드가 숫자로 만든 고정 문장)
+
+    @model_validator(mode="after")
+    def _known_or_reason(self) -> Self:
+        if self.status == "unknown" and not self.unknown_reason:
+            raise ValueError("unknown이면 unknown_reason이 있어야 한다")
+        if self.status == "unknown" and self.candidates:
+            raise ValueError("unknown이면 후보가 없어야 한다")
+        return self
+
+
 # --------------------------------------------------------------- campaign_effect (캠페인 효과)
 # 캠페인 기간 주문·매출을 지난 7일 같은 시간대 평균과 비교한 증분과, 캠페인 쿠폰 누적 사용률.
 # 항목마다 "앎(값·근거)" 또는 "모름 + 이유"다. 모르면 0으로 채우지 않는다.
