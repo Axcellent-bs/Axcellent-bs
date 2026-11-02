@@ -337,3 +337,59 @@ def test_handler_completes_with_the_contract_output(
 def test_handler_rejects_a_bad_input() -> None:
     result = asyncio.run(handlers.HANDLERS["content_recommend"](_request({"max_items": 0})))
     assert result.status == TaskStatus.FAILED and result.outcome == "invalid_input"
+
+
+# ---------------------------------------------------------------- 아이디어 프롬프트
+
+
+def _prompt_head(llm: MockLLMClient, i: int = 0) -> str:
+    """프롬프트 중 데이터 블록 앞부분 (지시문·코드가 정한 사실)."""
+    return llm.calls[i].partition("<untrusted")[0]
+
+
+def test_prompt_has_only_the_ratio_and_no_z(tmp_path: Path) -> None:
+    llm = _llm()
+    out = _run(_env(tmp_path), Naver({"t1": 3.0}), llm).output
+    [item] = out.items
+    head = _prompt_head(llm)
+    assert f"평소보다 {item.score.ratio}배" in head
+    assert str(item.score.z) not in head  # z 값은 순위 근거로만
+    assert "z:" not in head and "'z'" not in head
+    assert "영상 수 3" not in head and "YouTube 영상 수" not in head  # 영상 수도 넣지 않는다
+    assert "z·점수·통계" in head  # 통계 용어를 쓰지 말라는 규칙
+    assert "근거: 검색 급상승 + YouTube 인기 영상" in head  # 두 소스는 숫자 없이 말로만
+
+
+def test_company_intro_comes_from_the_config(tmp_path: Path) -> None:
+    intro = "테스트서점은 요리책과 앞치마를 파는 온라인 서점이다. 고객은 집에서 요리하는 사람이다."
+    config = _config(tmp_path, f'company_intro = "{intro}"\n')
+    llm = _llm()
+    _run(_env(tmp_path, config=config), Naver({"t1": 3.0}), llm)
+    head = _prompt_head(llm)
+    assert f"회사 소개: {intro}" in head
+    assert "회사 소개에 있는 상품·고객으로 구체적으로" in head
+    assert load_config({"DATA_TREND_CONFIG": str(config)}).company_intro == intro
+
+
+def test_without_a_company_intro_the_prompt_says_not_to_invent(tmp_path: Path) -> None:
+    llm = _llm()
+    _run(_env(tmp_path), Naver({"t1": 3.0}), llm)  # 테스트 설정에는 company_intro가 없다
+    assert "회사 소개: (회사 소개 설정이 없음. 상품·고객을 지어내지 말 것)" in _prompt_head(llm)
+
+
+def test_catbooks_intro_is_set_in_the_company_folder() -> None:
+    catbooks = Path(__file__).resolve().parents[3] / "config" / "tenants" / "catbooks"
+    intro = load_config({"DATA_TREND_CONFIG": str(catbooks / "trends.toml")}).company_intro
+    assert intro and "서점" in intro
+
+
+def test_writing_z_or_video_count_is_now_caught_by_the_number_check(tmp_path: Path) -> None:
+    """z·영상 수를 사실에서 뺐으니 문장에 쓰면 숫자 검증에 걸려 고정 문장이 된다.
+
+    검증 규칙(`_bad_numbers`)은 그대로다.
+    """
+    env, naver = _env(tmp_path), Naver({"t1": 3.0})
+    z = _run(env, naver, _llm()).output.items[0].score.z
+    [item] = _run(env, naver, _llm(f"t1 관심이 z {z}까지 올랐어요.")).output.items
+    assert item.fallback and item.fallback_reason == "number_invalid"
+    assert "YouTube 인기 영상 3개" in item.idea  # 영상 수는 고정 문장에만

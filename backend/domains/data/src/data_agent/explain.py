@@ -318,12 +318,19 @@ async def explain(kind: str, facts: dict[str, int | float | str], llm: LLMClient
 
 IDEA_FORMATS = ("숏폼", "롱폼")
 _IDEA_PROMPT = (
-    "트렌드 소재 하나로 회사가 만들 영상 아이디어를 한국어 한두 문장으로 제안하고, "
+    "회사 소개: {company}\n"
+    "트렌드 소재 하나로 이 회사가 만들 영상 아이디어를 한국어 한두 문장으로 제안하고, "
     "형식을 숏폼과 롱폼 중 하나로 골라라.\n"
-    "규칙: numbers에 있는 숫자만 쓰고 숫자를 바꾸거나 새로 만들지 말 것. "
-    "소재 이름은 데이터 블록의 이름만 쓸 것. 출연자·사건·날짜 같은 사실을 지어내지 말 것.\n"
-    "numbers: {numbers}"
+    "규칙:\n"
+    "- 숫자는 '평소보다 {ratio}배' 하나만 쓸 수 있다. 다른 숫자(영상 수·날짜·가격·순위·개수 등)는 "
+    "쓰지 말 것\n"
+    "- z·점수·통계·표준편차·수치 같은 통계 용어를 쓰지 말 것\n"
+    "- '우리 회사 제품', '회사 관점' 같은 막연한 말 대신 회사 소개에 있는 상품·고객으로 구체적으로 "
+    "쓸 것. 회사 소개에 없는 상품을 지어내지 말 것\n"
+    "- 소재 이름은 데이터 블록의 이름만 쓸 것. 출연자·사건·날짜 같은 사실을 지어내지 말 것\n"
+    "근거: {sources}"
 )
+NO_COMPANY = "(회사 소개 설정이 없음. 상품·고객을 지어내지 말 것)"
 
 
 class _Idea(BaseModel):
@@ -343,10 +350,11 @@ class Idea:
         return Explanation(self.idea, self.fallback, self.reason, self.bad_numbers).note()
 
 
-def _idea_template(numbers: dict[str, int | float | str], names: dict[str, str]) -> str:
+def _idea_template(
+    numbers: dict[str, int | float | str], names: dict[str, str], videos: int | None
+) -> str:
     keyword = names.get("키워드", "")
     head = f"{keyword} 검색이 평소의 {_fmt(numbers.get('배수'))}배로 올랐습니다"
-    videos = numbers.get("YouTube 영상 수")
     if videos is not None:
         head += f"(YouTube 인기 영상 {_fmt(videos)}개)"
     return head + ". 이 소재를 짧은 영상으로 다뤄 볼 만합니다."
@@ -357,20 +365,32 @@ async def explain_idea(
     names: dict[str, str],
     llm: LLMClient,
     context_id: str | None = None,
+    *,
+    company: str | None = None,
+    sources: str = "검색 급상승",
+    youtube_videos: int | None = None,
 ) -> Idea:
     """소재 하나의 영상 아이디어 문장과 형식.
 
-    숫자는 `numbers`만 프롬프트에 넣고, 이름(외부에서 온 태그 등)은 `names`로 데이터 블록에만
-    넣는다. 숫자 검증은 `explain`과 같은 규칙(`_bad_numbers`)이고 이름 속 숫자(예: t1)도
-    허용한다. 실패하면 고정 문장 + 숏폼, `fallback=True`와 이유.
+    - 숫자는 `numbers`의 배수 하나만 프롬프트에 넣는다("평소보다 N배"). z 같은 통계 값은 순위
+      근거로만 쓰고 넣지 않는다. 영상 수(`youtube_videos`)는 고정 문장에만 쓴다.
+    - 회사 소개(`company`, 회사 설정)는 코드가 정한 사실이라 프롬프트에 넣는다. 이름(외부 태그 등)은
+      `names`로 데이터 블록에만 넣는다.
+    - 숫자 검증은 `explain`과 같은 규칙(`_bad_numbers`)이고 이름 속 숫자(예: t1)도 허용한다.
+      실패하면 고정 문장 + 숏폼, `fallback=True`와 이유.
     """
     facts: dict[str, int | float | str] = {**numbers, **names}
 
     def fallback(reason: str, bad: list[float] | None = None) -> Idea:
-        return Idea(_idea_template(numbers, names), "숏폼", True, reason, tuple(bad or ()))
+        template = _idea_template(numbers, names, youtube_videos)
+        return Idea(template, "숏폼", True, reason, tuple(bad or ()))
 
     try:
-        prompt = _IDEA_PROMPT.format(numbers=numbers)
+        prompt = _IDEA_PROMPT.format(
+            company=(company or "").strip() or NO_COMPANY,
+            ratio=_fmt(numbers.get("배수")),
+            sources=sources,
+        )
         result = await llm.structured(prompt, _Idea, untrusted=dict(names), context_id=context_id)
         idea = result.idea.strip()
     except LLMNotConfiguredError:
