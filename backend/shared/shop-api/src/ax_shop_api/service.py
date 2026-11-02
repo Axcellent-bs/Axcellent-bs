@@ -297,11 +297,44 @@ class Shop:
         self, buyer_id: str, lines: list[tuple[str, int]], points_used: int = 0
     ) -> dict[str, Any]:
         """주문을 만든다. 결제(현금) 총액 = 품목 합계 − 포인트 + 배송비를 코드가 계산한다."""
+        return self.place_order(buyer_id, lines, points_used)[0]
+
+    def place_order(
+        self,
+        buyer_id: str,
+        lines: list[tuple[str, int]],
+        points_used: int = 0,
+        idempotency_key: str | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """`create_order`에 멱등 키를 더한 것. `(주문, 재전송 여부)`를 돌려준다.
+
+        같은 구매자의 같은 `idempotency_key`가 다시 오면 재고를 확인하거나 차감하기 전에 처음
+        주문을 그대로 돌려준다(`replayed=True`). 내용(상품·수량·포인트)이 다르면 409다.
+        키가 없으면 예전처럼 매번 새 주문이다.
+        """
         if not lines:
             raise ShopError("EMPTY_ORDER", "주문 상품이 없다")
         with self.db.tx() as conn:
             if not conn.execute("SELECT 1 FROM buyers WHERE buyer_id = ?", (buyer_id,)).fetchone():
                 raise ShopError("BUYER_NOT_FOUND", "구매자를 찾을 수 없다", 404)
+            if idempotency_key is not None:
+                existing = conn.execute(
+                    "SELECT * FROM orders WHERE buyer_id = ? AND idempotency_key = ?",
+                    (buyer_id, idempotency_key),
+                ).fetchone()
+                if existing is not None:
+                    stored = sorted(
+                        (r["product_id"], r["qty"])
+                        for r in conn.execute(
+                            "SELECT product_id, qty FROM order_items WHERE order_id = ?",
+                            (existing["order_id"],),
+                        )
+                    )
+                    if (stored, existing["points_used"]) != (sorted(lines), points_used):
+                        raise ShopError(
+                            "IDEMPOTENCY_MISMATCH", "같은 키로 다른 내용을 요청할 수 없다", 409
+                        )
+                    return self._order(conn, existing["order_id"]), True
             items, titles, total = [], [], 0
             for product_id, qty in lines:
                 product = conn.execute(
@@ -335,9 +368,19 @@ class Shop:
             now = _now()
             conn.execute(
                 "INSERT INTO orders (order_id, buyer_id, status, total_amount, tenant_id, "
-                "context_id, created_at, updated_at, shipping_fee, points_used) "
-                "VALUES (?, ?, 'pending_payment', ?, ?, NULL, ?, ?, ?, ?)",
-                (order_id, buyer_id, total, TENANT_ID, now, now, shipping_fee, points_used),
+                "context_id, created_at, updated_at, shipping_fee, points_used, idempotency_key) "
+                "VALUES (?, ?, 'pending_payment', ?, ?, NULL, ?, ?, ?, ?, ?)",
+                (
+                    order_id,
+                    buyer_id,
+                    total,
+                    TENANT_ID,
+                    now,
+                    now,
+                    shipping_fee,
+                    points_used,
+                    idempotency_key,
+                ),
             )
             for item, title, share in zip(items, titles, shares, strict=True):
                 conn.execute(
@@ -353,7 +396,7 @@ class Shop:
                 {"order_id": order_id, "buyer_id": buyer_id, "items": items, "total_amount": total},
                 f"order.created:{order_id}",
             )
-        return self.get_order(order_id)
+        return self.get_order(order_id), False
 
     def pay(self, order_id: str, method_code: str, simulate: str | None) -> dict[str, Any]:
         with self.db.tx() as conn:
