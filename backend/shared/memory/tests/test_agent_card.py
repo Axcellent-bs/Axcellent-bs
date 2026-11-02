@@ -43,6 +43,14 @@ def test_card_link는_hr만_요청할_수_있다() -> None:
     assert _skill(load_card(), "card_link").allowed_requesters == ["hr"]
 
 
+def test_card_review는_hr만_부르는_A등급이다() -> None:
+    """후보 카드 승인·폐기 반영 (#304)."""
+    skill = _skill(load_card(), "card_review")
+    assert (skill.grade, skill.allowed_requesters) == ("A", ["hr"])
+    assert skill.input_schema.endswith("#CardReviewInput")
+    assert skill.output_schema.endswith("#CardReviewOutput")
+
+
 def test_요청자_목록은_실제_에이전트_이름이다() -> None:
     card = load_card()
     known = set(DEFAULT_PORTS)

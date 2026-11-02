@@ -262,3 +262,96 @@ def test_untrusted는_본문에_섞이지_않고_extra에만_보관된다() -> N
     card = handlers.get_state().store.get(result["output"]["card_id"])
     assert injected not in card.title and injected not in card.body
     assert card.extra["untrusted"] == {"inquiry": injected}
+
+
+# ---------- 후보 카드 (#304)
+
+
+def _candidate(title: str = "후보 결정", key: str = "kc") -> str:
+    written = _write(title, key=key, kind="decision", confidence="low", candidate=True)
+    assert written["status"] == "completed"
+    return written["output"]["card_id"]
+
+
+def test_card_write는_후보_표시를_저장한다() -> None:
+    card_id = _candidate()
+    card = _call("card_get", {"card_id": card_id}, key=None)["output"]["card"]
+    assert card["candidate"] is True and card["status"] == "active"
+    plain = _write("확정 결정", key="kp")["output"]["card_id"]
+    assert _call("card_get", {"card_id": plain}, key=None)["output"]["card"]["candidate"] is False
+
+
+def test_search_결과에도_후보_표시가_있다() -> None:
+    _candidate("결제 장애 후보 결정")
+    hits = _call("card_search", {"query": "결제 장애", "kind": ["decision"]}, key=None)
+    assert hits["output"]["hits"][0]["card"]["candidate"] is True
+
+
+def test_review_승인하면_후보_표시가_꺼진다() -> None:
+    card_id = _candidate()
+    out = _call("card_review", {"card_id": card_id, "decision": "approve"}, key="r1")
+    assert out["status"] == "completed" and out["outcome"] == "approved"
+    card = out["output"]["card"]
+    assert (card["candidate"], card["status"], out["output"]["changed"]) == (False, "active", True)
+    got = _call("card_get", {"card_id": card_id}, key=None)["output"]["card"]
+    assert got["candidate"] is False
+
+
+def test_review_폐기하면_retired가_된다() -> None:
+    card_id = _candidate()
+    out = _call("card_review", {"card_id": card_id, "decision": "reject"}, key="r1")
+    assert out["outcome"] == "rejected"
+    card = out["output"]["card"]
+    assert (card["status"], card["superseded_by"]) == ("retired", None)
+
+
+def test_review_같은_결정을_다시_보내면_바꾸지_않는다() -> None:
+    card_id = _candidate()
+    _call("card_review", {"card_id": card_id, "decision": "approve"}, key="r1")
+    again = _call("card_review", {"card_id": card_id, "decision": "approve"}, key="r2")
+    assert again["status"] == "completed" and again["outcome"] == "duplicate"
+    assert again["output"]["changed"] is False
+
+
+def test_review_후보가_아닌_카드는_거부한다() -> None:
+    plain = _write("확정 결정", key="kp")["output"]["card_id"]
+    out = _call("card_review", {"card_id": plain, "decision": "reject"}, key="r1")
+    assert out["status"] == "failed" and out["outcome"] == "not_candidate"
+    card = _call("card_get", {"card_id": plain}, key=None)["output"]["card"]
+    assert card["status"] == "active"
+    # 승인된 카드를 폐기하는 것도 후보가 아니라 거부한다
+    card_id = _candidate()
+    _call("card_review", {"card_id": card_id, "decision": "approve"}, key="r2")
+    late = _call("card_review", {"card_id": card_id, "decision": "reject"}, key="r3")
+    assert late["outcome"] == "not_candidate"
+
+
+def test_review_없는_카드와_키_없는_요청은_거부한다() -> None:
+    missing = _call("card_review", {"card_id": "card_none", "decision": "approve"}, key="r1")
+    assert missing["outcome"] == "card_not_found"
+    card_id = _candidate()
+    no_key = _call("card_review", {"card_id": card_id, "decision": "approve"}, key=None)
+    assert no_key["outcome"] == "invalid_input"
+
+
+def test_review는_execute가_보류하면_바꾸지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    card_id = _candidate()
+    seen = _fake_execute(
+        monkeypatch,
+        decision=_decision(status="held", review_id="rev_1", hold_reason="over_threshold"),
+    )
+    out = _call("card_review", {"card_id": card_id, "decision": "approve"}, key="r1")
+    assert seen == ["memory.card_review"]
+    assert out["status"] == "input-required"
+    got = _call("card_get", {"card_id": card_id}, key=None)["output"]["card"]
+    assert got["candidate"] is True
+
+
+def test_review는_hr만_부를_수_있다() -> None:
+    card_id = _candidate()
+    out = _call(
+        "card_review", {"card_id": card_id, "decision": "approve"}, key="r1", token="mock:data"
+    )
+    assert out["status"] in ("rejected", "failed")
+    got = _call("card_get", {"card_id": card_id}, key=None)["output"]["card"]
+    assert got["candidate"] is True

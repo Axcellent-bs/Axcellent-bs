@@ -30,7 +30,16 @@ async def test_memory_card_link_only_hr(gate: Gate, act) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("action", ["memory.card_write", "memory.card_link"])
+async def test_memory_card_review_only_hr(gate: Gate, act) -> None:
+    """후보 카드 승인·폐기 반영 (#304): hr만, A."""
+    ok = await gate.execute(act("memory.card_review", "hr", "review-1"))
+    assert (ok.grade, ok.status) == ("A", "executed")
+    other = await gate.execute(act("memory.card_review", "data", "review-2"))
+    assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["memory.card_write", "memory.card_link", "memory.card_review"])
 async def test_memory_actions_reject_unlisted_requester(gate: Gate, act, action: str) -> None:
     decision = await gate.execute(act(action, "shop-api", f"x-{action}"))
     assert decision.status == "held"

@@ -108,3 +108,35 @@ def test_tenant_separation() -> None:
     assert other.created is True
     assert len(store.list()) == 1
     assert len(store.list(tenant_id="other")) == 1
+
+
+# ---------- 후보 카드 (#304)
+
+
+def test_candidate_is_saved_and_defaults_to_false() -> None:
+    store = _store()
+    plain = store.write(_draft(title="확정 카드")).card
+    candidate = store.write(_draft(title="후보 카드", candidate=True)).card
+    assert plain.candidate is False
+    assert candidate.candidate is True
+    assert store.get(candidate.card_id).candidate is True
+
+
+def test_update_candidate_changes_only_the_mark() -> None:
+    store = _store()
+    card = store.write(_draft(title="후보 카드", candidate=True)).card
+    updated = store.update_candidate(card.card_id, False)
+    assert updated.candidate is False
+    assert updated.model_dump(exclude={"candidate"}) == card.model_dump(exclude={"candidate"})
+    assert store.get(card.card_id).candidate is False
+    with pytest.raises(KeyError):
+        store.update_candidate("card_none", False)
+
+
+def test_same_key_keeps_the_first_candidate_mark() -> None:
+    """멱등: 같은 키로 다시 쓰면 기존 카드를 돌려준다(후보 표시도 바꾸지 않는다)."""
+    store = _store()
+    first = store.write(_draft(title="같은 제목", candidate=True)).card
+    again = store.write(_draft(title="같은 제목", candidate=False))
+    assert again.created is False and again.card.candidate is True
+    assert again.card.card_id == first.card_id

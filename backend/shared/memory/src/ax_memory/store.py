@@ -57,6 +57,10 @@ class CardStore(Protocol):
         superseded_by: str | None = None,
     ) -> Card: ...
 
+    def update_candidate(self, card_id: str, candidate: bool) -> Card:
+        """후보 표시(`Card.candidate`)만 바꾼다. 카드가 없으면 KeyError."""
+        ...
+
 
 def _default_id_factory() -> str:
     return f"{IdPrefix.CARD.value}{uuid.uuid4().hex}"
@@ -104,6 +108,7 @@ class InMemoryCardStore:
                 author=draft.author,
                 confidence=draft.confidence,
                 created_at=self._clock(),
+                candidate=draft.candidate,
                 extra=dict(draft.extra),
             )
             self._cards[card.card_id] = card
@@ -143,5 +148,14 @@ class InMemoryCardStore:
             updated = Card.model_validate(
                 {**current.model_dump(), "status": status, "superseded_by": superseded_by}
             )
+            self._cards[card_id] = updated
+            return updated
+
+    def update_candidate(self, card_id: str, candidate: bool) -> Card:
+        with self._lock:
+            current = self._cards.get(card_id)
+            if current is None:
+                raise KeyError(card_id)
+            updated = current.model_copy(update={"candidate": candidate})
             self._cards[card_id] = updated
             return updated

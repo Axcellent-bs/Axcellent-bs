@@ -48,6 +48,16 @@
       "allowed_requesters": ["hr"],
       "verifier": null,
       "priority": "recommended"
+    },
+    {
+      "id": "card_review",
+      "description": "후보 카드(candidate가 true)를 사람이 승인하거나 폐기한 결과를 반영한다. 승인이면 candidate가 false가 되어 판정 근거로 쓰이고(status는 active 그대로), 폐기면 status가 retired가 된다. 이미 반영된 결정이면 바꾸지 않고 changed=false, 후보가 아닌 카드는 거부한다(not_candidate). hr decide_candidate_card가 부른다.",
+      "input_schema": "contracts/src/ax_contracts/schemas/record.py#CardReviewInput",
+      "output_schema": "contracts/src/ax_contracts/schemas/record.py#CardReviewOutput",
+      "grade": "A",
+      "allowed_requesters": ["hr"],
+      "verifier": null,
+      "priority": "recommended"
     }
   ]
 }

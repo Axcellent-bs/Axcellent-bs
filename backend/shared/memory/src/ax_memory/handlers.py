@@ -1,4 +1,4 @@
-"""memory skill 핸들러 (card_write, card_search, card_get, card_link).
+"""memory skill 핸들러 (card_write, card_search, card_get, card_link, card_review).
 
 - 상태를 바꾸는 일(카드 저장·연결)은 `execute()`가 `executed`를 돌려준 뒤에만 한다.
 - 카드 문장은 쓰는 부서의 책임이다. memory는 title·body를 바꾸지 않는다.
@@ -30,6 +30,8 @@ from ax_contracts.schemas.record import (
     CardHit,
     CardLinkInput,
     CardLinkOutput,
+    CardReviewInput,
+    CardReviewOutput,
     CardSearchInput,
     CardSearchOutput,
     CardWriteInput,
@@ -296,9 +298,72 @@ async def card_link(request: AgentRequest) -> AgentResult:
     )
 
 
+async def card_review(request: AgentRequest) -> AgentResult:
+    """후보 카드를 사람이 승인(후보 표시 끄기)하거나 폐기(`retired`)한 결과를 반영한다 (#304).
+
+    이미 그 결정이 반영돼 있으면(승인: 후보가 아닌 `active`, 폐기: `retired`) 바꾸지 않고
+    `changed=false`다. 후보가 아닌 카드에 다른 결정을 보내면 거절(`not_candidate`)이다.
+    """
+    if (blocked := _missing_key(request)) is not None:
+        return blocked
+    data = _parse(request, CardReviewInput)
+    if isinstance(data, AgentResult):
+        return data
+    state = get_state()
+    card = state.store.get(data.card_id)
+    if card is None or card.tenant_id != request.meta.tenant_id:
+        return _not_found(request, data.card_id)
+
+    if data.decision == "approve":
+        done = card.status == "active" and not card.candidate
+    else:
+        done = card.status == "retired"
+    if done:
+        return _result(
+            request,
+            TaskStatus.COMPLETED,
+            outcome="duplicate",
+            output=CardReviewOutput(card=card, changed=False).model_dump(mode="json"),
+            evidence=_evidence(["card_review"], "이미 반영된 결정", [card.card_id]),
+        )
+    if not (card.status == "active" and card.candidate):
+        return _result(
+            request,
+            TaskStatus.FAILED,
+            outcome="not_candidate",
+            output={"card_id": card.card_id, "status": card.status, "candidate": card.candidate},
+            evidence=_evidence(["card_review"], "후보 카드가 아님", [card.card_id]),
+        )
+
+    evidence = _evidence(
+        ["card_review"], f"후보 카드 {data.decision}: {card.title}", [card.card_id]
+    )
+    decision = await execute(
+        "memory.card_review", data.model_dump(mode="json"), request.meta, evidence
+    )
+    blocked = _from_decision(request, decision, evidence)
+    if blocked:
+        return blocked
+
+    if data.decision == "approve":
+        updated = state.store.update_candidate(card.card_id, False)
+    else:
+        updated = state.store.update_status(card.card_id, "retired")
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome="approved" if data.decision == "approve" else "rejected",
+        output=CardReviewOutput(card=updated, changed=True).model_dump(mode="json"),
+        evidence=_evidence(
+            ["card_review"], f"후보 카드 {data.decision}", [card.card_id, decision.execution_id]
+        ),
+    )
+
+
 HANDLERS = {
     "card_write": card_write,
     "card_search": card_search,
     "card_get": card_get,
     "card_link": card_link,
+    "card_review": card_review,
 }
