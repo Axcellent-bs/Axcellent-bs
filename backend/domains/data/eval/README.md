@@ -142,3 +142,12 @@ seed `20261029` 분석 결론:
 | 새벽 약한 장애 (이상) | `pay_half_20m_03h_night` | 새벽 20분 50% 장애(03:40~04:00)로 장애 쪽 실패가 3건 나온다. 데이터로 장애라고 말할 수 있어 이상으로 잡는지 본다 |
 | 낮 평소 장애 쪽 실패 | `usual_fault_*` (장애 없음 3: `normal_10h`·`12h`·`15h`, 장애 3: `pay_full_15m_11h`·`pay_half_20m_13h`·`pay_weak20_30m_16h`) | 낮에 평소에도 장애 쪽 실패(`PG_TIMEOUT`)가 5분에 1~3건씩 나는 구간(#131). 시간대별 평소 실패율 λ 기준(#112)의 효과를 잰다. 예전 고정 기준(5분 2건·2구간 연속)이면 장애 없음 3개를 모두 이상으로 본다. 주문은 5분 20건 기준이고, λ가 보는 같은 시각 ±1시간에도 주문·평소 실패를 만든다(`traffic.history_margin_minutes`=60, 분석하는 날은 구간 앞쪽만). 장애 중 평소 실패가 장애 결제와 겹치면 `injected_*`에 들어가서, 초과분(평소 평균을 뺀 값)이 정답보다 5~8건 작게 나온다(`impact.excess_mean_abs_error`) |
 | 판매자 | `sellers.json` (24명: 사기 9, 정상 15) | 사기 점수 등급. 정상 쪽에 경계 케이스(신규인데 정상, 세일로 저가가 많은 정상, 대량 등록하는 큰 판매자)를 넣었다. 판매자마다 shop-api 코드로 임시 DB를 만들어 `facts` 중 shop-api에 넣을 수 있는 것(가입 일수·저가 비율·24시간 등록 수)을 넣고, fraud_score 핸들러가 실제 shop-api 조회 경로로 읽는다(`eval_sellers.py`). 사업자 중복·유사 카드는 넣을 수 없어 핸들러에서 "확인할 수 없음"이다. `fraud.precision`·`recall`은 그 핸들러 결과(`level` high=사기), `fraud.conservative_precision`·`conservative_recall`은 같은 결과의 보수적 상한(`max_possible_level` high=사기), `fraud.complete_rate`는 빠진 규칙 없이 답한 비율, `fraud.rule_*`는 `facts` 전부로 낸 참고 점수다 |
+
+## trend_scan 케이스 (`trend/`, 검색어 급상승)
+
+결제 이상 탐지와 따로 둔 정답지다. `run.py`·`baseline.json`에는 아직 넣지 않았다(skill이 생길 때 채점기와 함께 넣는다). 자세한 것은 `trend/README.md`.
+
+- `trend/cases/` 26개(seed `2026110201`), `trend/holdout/` 24개(seed `2026110202`)
+- 급상승은 실제 시계열에 정해진 날짜·기간·배수로 끼워 넣고, **정답은 넣은 조건에서 정한다**(그래프를 보고 정하지 않음)
+- 네이버 원본 응답은 커밋하지 않고 날짜와 값만 `trend/series/`에 둔다. 케이스 생성·평가는 네이버를 다시 부르지 않는다
+- **`trend/holdout/` 케이스 내용을 열지 않는다.** 위 holdout 규칙과 같다(결과 숫자만 본다, 열었으면 새 seed로 다시 만들고 이유를 적는다)
