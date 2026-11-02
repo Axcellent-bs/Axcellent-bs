@@ -12,6 +12,9 @@
   때만 채운다(시스템 자동 판정은 비운다). `refund_amount`는 환불까지 끝난(`completed`)
   클레임만 싣는다.
   `coupon_id`는 문의와 마케팅 쿠폰을 잇는 정보가 아직 없어 비운다.
+  문의를 닫은 뒤 환불이 끝나면 `refund_amount`를 채워 한 번 더 보낸다 (`emit_refund_completed`).
+  이때 멱등 키는 `...:<문의번호>:refund:<클레임번호>`라 같은 환불은 한 번만 나가고,
+  받는 쪽은 같은 문의의 기록에 금액을 갱신하면 된다.
 """
 
 from __future__ import annotations
@@ -68,8 +71,12 @@ def build_inquiry_received(request: AgentRequest, conversation: Conversation) ->
     )
 
 
-def inquiry_resolved_key(context_id: str, inquiry_id: int) -> str:
-    return f"{context_id}:{EventType.SUPPORT_INQUIRY_RESOLVED.value}:{inquiry_id}"
+def inquiry_resolved_key(
+    context_id: str, inquiry_id: int, refund_claim_id: int | None = None
+) -> str:
+    key = f"{context_id}:{EventType.SUPPORT_INQUIRY_RESOLVED.value}:{inquiry_id}"
+    # 문의를 닫은 뒤 환불이 끝나 다시 보내는 이벤트는 클레임마다 키가 달라야 한 번 더 전달된다
+    return key if refund_claim_id is None else f"{key}:refund:{refund_claim_id}"
 
 
 # 상담원 확인 전(판정 대기)인 클레임 상태. 이 밖이면 판정이 끝난 것이다
@@ -77,10 +84,22 @@ _UNDECIDED = ("needs_info", "needs_review")
 
 
 def build_inquiry_resolved(
-    request: AgentRequest, conversation: Conversation, claim: Claim | None = None
+    request: AgentRequest,
+    conversation: Conversation,
+    claim: Claim | None = None,
+    *,
+    refund_reissue: bool = False,
 ) -> EventEnvelope:
-    """닫힌 문의에서 이벤트 봉투를 만든다. 문의당 한 번이라 키에 문의 번호만 쓴다."""
-    key = inquiry_resolved_key(request.meta.context_id, conversation.id)
+    """닫힌 문의에서 이벤트 봉투를 만든다. 닫을 때는 문의당 한 번이라 키에 문의 번호만 쓴다.
+
+    `refund_reissue`는 문의를 닫은 뒤 환불이 끝나서 금액을 채워 다시 보내는 경우다.
+    키에 클레임 번호를 더해 같은 환불은 한 번만 나가게 한다.
+    """
+    key = inquiry_resolved_key(
+        request.meta.context_id,
+        conversation.id,
+        claim.id if refund_reissue and claim is not None else None,
+    )
     escalated = conversation.status == "escalated"
     order_id = conversation.order_id
     resolution = "escalated" if escalated else "answered"
@@ -140,3 +159,32 @@ async def emit_inquiry_resolved(
     """문의가 해결·이관으로 닫힐 때 한 번 발행한다 (`open`으로 되돌리면 발행하지 않는다)."""
     if conversation.status in ("resolved", "escalated"):
         await _publish(request, build_inquiry_resolved(request, conversation, claim))
+
+
+async def emit_refund_completed(
+    request: AgentRequest, conversation: Conversation | None, claim: Claim
+) -> bool:
+    """문의를 닫은 뒤 환불이 끝나면 `refund_amount`를 채워 `inquiry_resolved`를 한 번 더 보낸다.
+
+    - 문의가 아직 열려 있으면 보내지 않는다 (닫을 때 나가는 이벤트가 금액을 싣는다).
+    - 닫을 때 쓰는 클레임(문의에 붙은 가장 나중 클레임)과 같은 것만 보낸다.
+    - 사건(`context_id`)은 문의 것을 쓴다. 닫을 때 이벤트와 같은 사건이어야 재무가 같은 문의로 본다.
+    """
+    if conversation is None or conversation.status not in ("resolved", "escalated"):
+        return False
+    if claim.status != "completed" or claim.expected_refund <= 0:
+        return False
+    from support_agent import claim_handlers  # 순환 import를 피해 늦게 가져온다
+
+    linked = [c for c in claim_handlers.CLAIMS.list() if c.conversation_id == conversation.id]
+    latest = max(linked, key=lambda c: c.id, default=None)
+    if latest is None or latest.id != claim.id:
+        return False
+    meta = request.meta.model_copy(update={"context_id": conversation.context_id})
+    await _publish(
+        request.model_copy(update={"meta": meta}),
+        build_inquiry_resolved(
+            request.model_copy(update={"meta": meta}), conversation, claim, refund_reissue=True
+        ),
+    )
+    return True
