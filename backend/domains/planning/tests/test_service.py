@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from ax_agent_template import execute as gate_module
 from ax_contracts.schemas import ExecuteDecision
 from planning_agent.domain.models import Doc
@@ -27,6 +29,7 @@ def acts(service, ctx: str):
 # ---- 중복 연결
 
 
+@pytest.mark.role("planning")
 def test_same_title_twice_becomes_one_request_and_linked_duplicate(service) -> None:
     results = [run(service.inbound("support_ticket")) for _ in range(4)]
     coupon = [r for r in service.state.requests if r.title.startswith("쿠폰 적용 후")]
@@ -137,6 +140,7 @@ def test_auto_pr_incident_demotes_scope(service) -> None:
     assert any(a.point == "auto_policy.updated" for a in acts(service, "ctx_inc_0002"))
 
 
+@pytest.mark.role("planning")
 def test_whole_text_request_waits_for_human_at_l1(service) -> None:
     for _ in range(3):
         run(service.inbound("marketing_simple"))
@@ -154,6 +158,7 @@ def test_whole_text_request_waits_for_human_at_l1(service) -> None:
     assert check_simple(r.title, pol).ok
 
 
+@pytest.mark.role("planning")
 def test_l0_stops_auto_processing(service) -> None:
     service.state.auto_policy.level = 0
     run(service.inbound("support_simple"))
@@ -234,6 +239,7 @@ def test_req12_main_flow(service) -> None:
     assert service.state.first_pr_minutes == [38, 52]
 
 
+@pytest.mark.role("planning")
 def test_accept_draft_counts_adoption(service) -> None:
     run(service.accept_draft("REQ-13"))
     assert req(service, "REQ-13").state == "기획 중"
@@ -245,6 +251,7 @@ def test_accept_draft_counts_adoption(service) -> None:
 # ---- 역추적·프로젝트·문서
 
 
+@pytest.mark.role("dev")
 def test_trace_of_pr28_chain(service) -> None:
     steps = trace_of(service.state, "PR #28")
     assert [s.kind for s in steps] == [
@@ -290,6 +297,7 @@ def test_project_req9_six_stages(service) -> None:
     assert [s["done"] for s in summary["stages"]] == [True] * 6
 
 
+@pytest.mark.role("planning")
 def test_gather_doc_block_counts(service) -> None:
     result = run(service.gather_doc("REQ-12"))
     assert result.output == {"doc_id": "DOC-2", "blocks": 15}
@@ -310,6 +318,7 @@ def test_gather_doc_block_counts(service) -> None:
     assert last.text.startswith("AI 어시스턴트 요청으로 REQ-9")
 
 
+@pytest.mark.role("planning")
 def test_doc_editing_actions(service) -> None:
     run(service.new_doc("회의 메모"))
     run(service.add_block("DOC-2", "todo", "할 일"))
@@ -328,6 +337,7 @@ def test_doc_editing_actions(service) -> None:
 # ---- 소통·연동 창구
 
 
+@pytest.mark.role("planning")
 def test_messages_decisions_and_outbox(service) -> None:
     run(service.post_message("CH-support", "REQ-12 오늘 확정 예정입니다"))
     out = service.state.outbox[-1]
@@ -351,6 +361,7 @@ def test_messages_decisions_and_outbox(service) -> None:
     assert len(service.state.decisions) == 2
 
 
+@pytest.mark.role("dev")
 def test_queries_and_safety_verify_simulator(service) -> None:
     run(service.inbound("infra_query"))
     reply = service.state.activity[-1]
@@ -361,6 +372,7 @@ def test_queries_and_safety_verify_simulator(service) -> None:
     assert "deploy_before_incident" in service.state.activity[-1].text
 
 
+@pytest.mark.role("planning")
 def test_reset_restores_seed(service) -> None:
     run(service.inbound("support_simple"))
     service.reset()
@@ -386,6 +398,7 @@ def test_general_request_advances_without_clicks(service) -> None:
     assert points.index("write_spec") < points.index("split_tasks") < points.index("review_pr")
 
 
+@pytest.mark.role("planning")
 def test_draft_is_adopted_and_advances(service) -> None:
     run(service.inbound("hr_draft"))
     r = req(service, "REQ-21")
@@ -404,6 +417,7 @@ def test_mismatch_is_reviewed_again_once(service) -> None:
     assert [p.reviews for p in prs] == [["통과"], ["불일치", "통과"]]
 
 
+@pytest.mark.role("planning")
 def test_l0_keeps_general_request_at_intake(service) -> None:
     service.state.auto_policy.level = 0
     run(service.inbound("support_ticket"))
@@ -411,6 +425,7 @@ def test_l0_keeps_general_request_at_intake(service) -> None:
     assert (r.state, r.spec) == ("접수", None)
 
 
+@pytest.mark.role("planning")
 def test_seed_requests_are_not_advanced(service) -> None:
     before = {x.id: (x.state, x.spec) for x in service.state.requests}
     run(service.inbound("data_query"))
@@ -420,6 +435,7 @@ def test_seed_requests_are_not_advanced(service) -> None:
 # ---- 총괄 혼합 모드 시연: 실제 시각·PR 없는 연결
 
 
+@pytest.mark.role("dev")
 def test_link_without_prs_marks_nothing(service) -> None:
     result = run(
         service.link_incident(
@@ -437,6 +453,7 @@ def test_link_without_prs_marks_nothing(service) -> None:
     assert not any(p.incident == "ctx_inc_empty" for sp in service.state.specs for p in sp.paras)
 
 
+@pytest.mark.role("planning")
 def test_planning_clock_real_uses_wall_clock(monkeypatch) -> None:
     from datetime import UTC, datetime, timedelta
 

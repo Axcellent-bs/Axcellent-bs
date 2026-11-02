@@ -1,9 +1,12 @@
 """개발 도구 연결 화면용 형상관리 설정 API. 토큰은 돌려주지 않는다."""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from planning_agent import vcs
 from planning_agent.main import app
+
+pytestmark = pytest.mark.role("dev")  # 분리 3단계: 개발 서비스 역할로 돈다
 
 
 def setup_function() -> None:

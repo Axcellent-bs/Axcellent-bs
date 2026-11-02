@@ -93,6 +93,7 @@ def _clear_warn(svc: PlanningService) -> None:
 # ---------------------------------------------------------------- params 계산 (각 키)
 
 
+@pytest.mark.role("planning")
 def test_spec_params_each_key(service) -> None:
     sp = _spec(service)
     # 초기 SPEC-7: 질문 1, R2 인사 경고 1, 근거 3, 되돌릴 수 없는 영역 0
@@ -115,6 +116,7 @@ def test_spec_params_each_key(service) -> None:
     assert spec_check(sp).rules == ["spec_no_basis", "irreversible"]
 
 
+@pytest.mark.role("dev")
 def test_pr_params_each_key(service) -> None:
     pr28 = _pr(service, "PR #28")
     # PR #28: SPEC-5 R3(장애 표시 ctx_inc_0001)에 연결된 머지 PR
@@ -165,6 +167,7 @@ def test_request_cannot_supply_rule_numbers(service) -> None:
         run(service.dispatch({"type": "mergePr", "pr": "PR #28", "irreversible_count": 0}))
 
 
+@pytest.mark.role("planning")
 def test_human_confirm_sends_171_keys_and_keeps_warn_ignored(gate) -> None:
     svc = _svc()
     run(svc.confirm_spec("SPEC-7"))  # 질문·경고가 남은 채 사람 확정
@@ -176,6 +179,7 @@ def test_human_confirm_sends_171_keys_and_keeps_warn_ignored(gate) -> None:
     assert len(confirm["warn_ignored"]) == confirm["warnings"] == 1
 
 
+@pytest.mark.role("dev")
 def test_human_merge_sends_171_keys(gate) -> None:
     svc = _svc()
     gate.hold = ("merge_pr",)  # 자동 머지는 safety가 보류 → 사람 머지
@@ -240,6 +244,7 @@ def test_simple_flow_merge_held_by_safety_waits(gate) -> None:
 # ---------------------------------------------------------------- 기획서 자동 확정 / 대기
 
 
+@pytest.mark.role("planning")
 def test_auto_confirm_when_all_rules_pass(gate) -> None:
     svc = _svc()
     _clear_warn(svc)
@@ -274,6 +279,7 @@ def test_auto_confirm_when_all_rules_pass(gate) -> None:
     assert next(r for r in svc.state.requests if r.id == "REQ-12").state == "작업 중"
 
 
+@pytest.mark.role("planning")
 def test_open_question_waits_for_answer(gate) -> None:
     svc = _svc()
     result = run(svc.check_spec("SPEC-7"))
@@ -286,6 +292,7 @@ def test_open_question_waits_for_answer(gate) -> None:
     assert gate.params("confirm_spec") == []  # 걸리면 confirm_spec을 부르지 않는다
 
 
+@pytest.mark.role("planning")
 def test_warning_left_waits_for_cross_check(gate) -> None:
     svc = _svc()
     run(svc.answer_question("SPEC-7", ANSWER))
@@ -302,6 +309,7 @@ def test_warning_left_waits_for_cross_check(gate) -> None:
     assert (sp.status, sp.auto, sp.auto_review) == ("확정", False, None)
 
 
+@pytest.mark.role("planning")
 def test_no_basis_and_irreversible_wait_for_cross_check(gate) -> None:
     svc = _svc()
     _clear_warn(svc)
@@ -316,6 +324,7 @@ def test_no_basis_and_irreversible_wait_for_cross_check(gate) -> None:
     )
 
 
+@pytest.mark.role("planning")
 def test_safety_hold_on_auto_confirm_waits(gate) -> None:
     svc = _svc()
     _clear_warn(svc)
@@ -360,6 +369,7 @@ def test_auto_merge_and_close_request(gate) -> None:
     assert [a.point for a in flow].count("github_merge_pull") == 2
 
 
+@pytest.mark.role("planning")
 def test_rule_hit_waits_for_cross_check(gate) -> None:
     svc = _svc()
     _spec(svc).paras[1].paths = ["infra/ci/deploy.yml"]  # 허용 경로(shop-api·shop-web·docs) 밖
@@ -376,6 +386,7 @@ def test_rule_hit_waits_for_cross_check(gate) -> None:
     assert [m["auto"] for m in gate.params("merge_pr")] == [True]  # PR #31만, #32는 안 부름
 
 
+@pytest.mark.role("dev")
 def test_shop_web_is_allowed_but_checkout_needs_human(gate) -> None:
     """#200: shop-web/은 허용 경로지만 결제 화면(shop-web/checkout/)은 irreversible_count로 센다."""
     assert "shop-web/" in PR_ALLOWED_PATHS
@@ -399,6 +410,7 @@ def test_shop_web_is_allowed_but_checkout_needs_human(gate) -> None:
     assert _pr(svc, "PR #32").merged
 
 
+@pytest.mark.role("dev")
 def test_safety_protected_paths_count_as_merge_risk() -> None:
     """safety #203 보호 경로는 planning도 머지 위험으로 센다 (자동 머지를 시도하지 않는다)."""
     protected = [
@@ -412,6 +424,7 @@ def test_safety_protected_paths_count_as_merge_risk() -> None:
     assert merge_risk_paths(["shop-web/src/pages/Notice.tsx", "docs/a.md"]) == []
 
 
+@pytest.mark.role("dev")
 def test_plain_shop_web_path_passes_allowed_paths(service) -> None:
     pr = _pr(service, "PR #28").model_copy(
         update={
@@ -426,6 +439,7 @@ def test_plain_shop_web_path_passes_allowed_paths(service) -> None:
     assert "pr_allowed_paths" not in check.rules and check.params["irreversible_count"] == 0
 
 
+@pytest.mark.role("dev")
 def test_linked_incident_and_review_mismatch_wait(gate) -> None:
     svc = _svc()
     _spec(svc).paras[0].paths = ["shop-api/payment/config.py"]  # PR #28(장애 연결)과 같은 파일
@@ -441,6 +455,7 @@ def test_linked_incident_and_review_mismatch_wait(gate) -> None:
     assert "pr_review_mismatch" in _pr(svc, "PR #32").auto_review.rules
 
 
+@pytest.mark.role("dev")
 def test_irreversible_needs_human_and_human_can_merge(gate) -> None:
     svc = _svc()
     _spec(svc).paras[0].paths = [PAYMENT_MIGRATION]
@@ -484,6 +499,7 @@ def test_review_queue_rest(service) -> None:
     assert client.get("/api/planning/review-queue").json()["data"] == []
 
 
+@pytest.mark.role("dev")
 def test_review_queue_drops_closed_pr(service) -> None:
     """레포에서 닫히거나 작업을 중단해 닫힌 PR은 사람 확인 대기에 남지 않는다."""
     client = TestClient(app)
@@ -496,6 +512,7 @@ def test_review_queue_drops_closed_pr(service) -> None:
     assert client.get("/api/planning/review-queue").json()["data"] == []
 
 
+@pytest.mark.role("planning")
 def test_review_queue_spec_and_state_filter(service) -> None:
     client = TestClient(app)
     res = client.post("/api/planning/actions", json={"type": "checkSpec", "spec": "SPEC-7"})

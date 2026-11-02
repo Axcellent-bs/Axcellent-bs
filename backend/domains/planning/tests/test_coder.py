@@ -21,6 +21,8 @@ from planning_agent.main import app
 from planning_agent.vcs import MockVcsAdapter, VcsError
 from planning_agent.vcs.base import CheckRun, Checks, combine_checks
 
+pytestmark = pytest.mark.role("dev")  # 분리 3단계: 개발 서비스 역할로 돈다
+
 BANNER = "shop-web/src/components/Banner.tsx"
 NOTICE = "shop-web/src/components/Notice.tsx"
 CHECKOUT = "shop-web/src/pages/Checkout.tsx"

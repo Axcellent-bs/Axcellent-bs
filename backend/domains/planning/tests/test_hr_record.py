@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from ax_contracts.schemas import AgentRequest, AgentResult, ExecuteDecision, TaskStatus
 from ax_contracts.schemas.record import RecordCase, RecordKind
 from planning_agent.domain.service import PlanningService
 from planning_agent.hr_link import HrClient
+
+pytestmark = pytest.mark.role("planning")  # 분리 3단계: 기획 서비스 역할로 돈다
 
 
 def run(coro):

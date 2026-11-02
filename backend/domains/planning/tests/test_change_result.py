@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from ax_contracts.schemas.planning import ChangeResultInput
 from planning_agent.result_notify import RECEIVERS, idempotency_key, send_change_result
 
@@ -46,6 +48,7 @@ def test_draft_request_merge_notifies_with_spec(service) -> None:
     assert dept == "hr" and result.spec_id == req.spec and result.status == "completed"
 
 
+@pytest.mark.role("planning")
 def test_rejected_draft_notifies_declined(service) -> None:
     sent = _capture(service)
     service.state.requests.append(
@@ -80,6 +83,7 @@ def test_sender_failure_does_not_block_closing(service) -> None:
     )
 
 
+@pytest.mark.role("planning")
 def test_default_sender_skips_network_in_mock_and_non_receivers() -> None:
     result = ChangeResultInput(request_id="REQ-1", status="declined", summary="REQ-1 기각")
     assert run(send_change_result("marketing", "ctx_req_0001", "shop-demo", result)).startswith(

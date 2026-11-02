@@ -17,6 +17,8 @@ from planning_agent.main import app
 from planning_agent.repo_routing import Candidate, RepoPick, RouteInput, score_rules
 from planning_agent.runtime import set_service
 
+pytestmark = pytest.mark.role("dev")  # 분리 3단계: 개발 서비스 역할로 돈다
+
 API = "shop-api-conn"
 WEB = "shop-web-conn"
 

@@ -28,6 +28,7 @@ VERIFY = {
 # ---- 1. Agent Card 형식·서빙
 
 
+@pytest.mark.role("planning")
 def test_agent_card_format_and_served() -> None:
     card = load_card()
     assert (card.name, card.owner, card.url) == ("planning", "예진", "http://planning:8101/a2a")
@@ -75,6 +76,7 @@ def test_agent_card_format_and_served() -> None:
 # ---- 2. 결정성
 
 
+@pytest.mark.role("dev")
 def test_find_related_prs_is_deterministic(a2a_body) -> None:
     client = TestClient(app)
     first = client.post("/a2a", json=a2a_body("find_related_prs", WINDOW)).json()
@@ -84,6 +86,7 @@ def test_find_related_prs_is_deterministic(a2a_body) -> None:
     assert first["evidence"] == second["evidence"]
 
 
+@pytest.mark.role("dev")
 def test_verify_rollback_target_is_deterministic(a2a_body) -> None:
     client = TestClient(app)
     body = a2a_body("verify_rollback_target", VERIFY, token="mock:safety")
@@ -97,6 +100,7 @@ def test_verify_rollback_target_is_deterministic(a2a_body) -> None:
 # ---- 3. 루프 거부
 
 
+@pytest.mark.role("dev")
 def test_loop_is_rejected(a2a_body) -> None:
     body = a2a_body("find_related_prs", WINDOW, path=["infra", "planning"])
     result = TestClient(app).post("/a2a", json=body).json()
@@ -114,12 +118,14 @@ def test_loop_is_rejected(a2a_body) -> None:
         ("verify_rollback_target", VERIFY, "mock:infra"),
     ],
 )
+@pytest.mark.role("dev")
 def test_requester_outside_acl_is_rejected(a2a_body, skill, payload, token) -> None:
     body = a2a_body(skill, payload, token=token, idempotency_key="ctx_inc_0001:link:28")
     result = TestClient(app).post("/a2a", json=body).json()
     assert (result["status"], result["outcome"]) == ("rejected", "FORBIDDEN_SKILL")
 
 
+@pytest.mark.role("planning")
 def test_human_buttons_are_not_a2a_skills(a2a_body) -> None:
     """확정·머지·승급 승인은 REST로만 받는다."""
     client = TestClient(app)
@@ -132,6 +138,7 @@ def test_human_buttons_are_not_a2a_skills(a2a_body) -> None:
 # ---- 5. 멱등성
 
 
+@pytest.mark.role("dev")
 def test_link_incident_same_idempotency_key_twice(service, a2a_body) -> None:
     payload = {
         "incident_context_id": "ctx_inc_0007",
@@ -152,6 +159,7 @@ def test_link_incident_same_idempotency_key_twice(service, a2a_body) -> None:
     assert [c.action for c in service.gate_calls].count("link_incident") == 1
 
 
+@pytest.mark.role("dev")
 def test_state_changing_skill_needs_idempotency_key(service, a2a_body) -> None:
     payload = {"incident_context_id": "ctx_inc_0007", "pr_numbers": [28]}
     result = TestClient(app).post("/a2a", json=a2a_body("link_incident", payload)).json()
@@ -166,6 +174,7 @@ INJECTION = {
 }
 
 
+@pytest.mark.role("dev")
 def test_untrusted_text_does_not_change_read_skills(a2a_body) -> None:
     client = TestClient(app)
     for skill, payload, token in (
@@ -183,6 +192,7 @@ def test_untrusted_text_does_not_change_read_skills(a2a_body) -> None:
         assert (clean["output"], clean["outcome"]) == (dirty["output"], dirty["outcome"])
 
 
+@pytest.mark.role("dev")
 def test_untrusted_text_does_not_change_link_incident(service, a2a_body) -> None:
     from planning_agent.domain.service import PlanningService
     from planning_agent.runtime import set_service
@@ -264,6 +274,7 @@ async def _no_answer(request) -> ExecuteDecision:
     raise TimeoutError("safety 무응답")
 
 
+@pytest.mark.role("planning")
 @pytest.mark.parametrize("send", [_rejected, _no_answer])
 def test_gate_refusal_means_nothing_runs(service, monkeypatch, send) -> None:
     monkeypatch.setattr(gate_module, "_send_to_safety", send)
@@ -276,6 +287,7 @@ def test_gate_refusal_means_nothing_runs(service, monkeypatch, send) -> None:
     assert service.gate_calls and all(c.status == "rejected" for c in service.gate_calls)
 
 
+@pytest.mark.role("dev")
 def test_gate_refusal_in_merge_keeps_pr_open(service, monkeypatch) -> None:
     asyncio.run(service.confirm_spec("SPEC-7"))
 
@@ -297,6 +309,7 @@ def test_gate_refusal_in_merge_keeps_pr_open(service, monkeypatch) -> None:
     assert not pr.merged and pr.merged_at is None
 
 
+@pytest.mark.role("dev")
 def test_gate_refusal_in_link_incident_a2a(service, monkeypatch, a2a_body) -> None:
     monkeypatch.setattr(gate_module, "_send_to_safety", _no_answer)
     before = service.snapshot()
@@ -310,6 +323,7 @@ def test_gate_refusal_in_link_incident_a2a(service, monkeypatch, a2a_body) -> No
     assert service.snapshot() == before
 
 
+@pytest.mark.role("planning")
 def test_rest_action_gate_refusal_is_409(service, monkeypatch) -> None:
     monkeypatch.setattr(gate_module, "_send_to_safety", _rejected)
     res = TestClient(app).post("/api/planning/actions", json={"type": "mergePr", "pr": "PR #28"})

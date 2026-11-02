@@ -22,6 +22,8 @@ from planning_agent.vcs import MockVcsAdapter, VcsError
 from planning_agent.vcs.base import DIFF_FILE_CHARS, FileDiff, cap_diff
 from planning_agent.vcs.github import GithubVcsAdapter
 
+pytestmark = pytest.mark.role("dev")  # 분리 3단계: 개발 서비스 역할로 돈다
+
 FAKE_TOKEN = "fake-token-0123456789"
 REPO = "acme/shop"
 BASE = "/api/planning/repo"

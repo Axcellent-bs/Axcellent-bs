@@ -16,18 +16,41 @@ from planning_agent.domain.service import PlanningService, action_name
 from planning_agent.runtime import set_service
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers", "role(name): 서비스 역할 planning·dev로 띄운다 (없으면 합친 모드, 분리 3단계)"
+    )
+
+
+async def _no_handoff(
+    skill: str, context_id: str, tenant_id: str, payload: object, key: str
+) -> str:
+    """역할 시험에서 다른 서비스로 넘기는 것을 버린다 (두 서비스를 잇는 시험은 Wire를 쓴다)."""
+    return "보냄 (시험: 버림)"
+
+
 @pytest.fixture(autouse=True)
-def service(monkeypatch: pytest.MonkeyPatch, reset_state: None) -> PlanningService:  # noqa: F811
+def service(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    reset_state: None,  # noqa: F811
+) -> PlanningService:
     """모든 테스트는 목 모드(`AGENT_TEMPLATE_MOCK=1`)로 돌고, 초기 데이터에서 시작한다.
 
     템플릿 상태를 비우는 reset_state 뒤에 돌아야 에이전트 이름이 planning으로 남는다.
+    `@pytest.mark.role("dev")`·`role("planning")`이 붙은 시험은 그 서비스 역할로 띄우고,
+    없으면 합친 모드다 (분리 3단계: 시험을 역할별로 옮기는 중).
     """
     monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
-    monkeypatch.delenv("PLANNING_ROLE", raising=False)  # 서비스 역할 없이 합친 모드로 본다
+    monkeypatch.delenv("PLANNING_ROLE", raising=False)
+    mark = request.node.get_closest_marker("role")
+    role = mark.args[0] if mark else ""
     config.set_agent_name("planning")  # 다른 부서 테스트가 먼저 돌아도 execute 요청자는 planning
     # CI 기다리기: 테스트에선 기다리지 않는다 (검사가 없으면 바로 CI 없는 레포로 본다)
     monkeypatch.setattr(coder, "CI_POLL_SECONDS", 0.0)
     monkeypatch.setattr(coder, "NO_CI_GRACE_SECONDS", 0.0)
+    if role:
+        return set_service(PlanningService(role=role, dev_sender=_no_handoff))
     return set_service(PlanningService())
 
 

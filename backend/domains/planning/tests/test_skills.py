@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
 from fastapi.testclient import TestClient
 
 from ax_contracts.schemas.planning import (
@@ -13,6 +14,8 @@ from ax_contracts.schemas.planning import (
 )
 from planning_agent.domain.models import Incident
 from planning_agent.main import app
+
+pytestmark = pytest.mark.role("dev")  # 분리 3단계: 개발 서비스 역할로 돈다
 
 
 def _call(body: dict) -> dict:

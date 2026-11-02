@@ -21,6 +21,8 @@ from planning_agent.vcs import VcsError
 from planning_agent.vcs.github import GithubVcsAdapter
 from planning_agent.vcs.github_app import GithubAppAuth
 
+pytestmark = pytest.mark.role("dev")  # 분리 3단계: 개발 서비스 역할로 돈다
+
 KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 PEM = KEY.private_bytes(
     serialization.Encoding.PEM,

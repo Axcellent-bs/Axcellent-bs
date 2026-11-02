@@ -21,6 +21,8 @@ from planning_agent.domain.service import PlanningService
 from planning_agent.main import app
 from planning_agent.vcs import MockVcsAdapter
 
+pytestmark = pytest.mark.role("dev")  # 분리 3단계: 개발 서비스 역할로 돈다
+
 BANNER = "shop-web/src/components/Banner.tsx"
 FILES = {
     BANNER: "export function Banner() {\n  return <div>배너</div>\n}\n",

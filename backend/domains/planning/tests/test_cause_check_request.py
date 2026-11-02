@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from ax_contracts.schemas import ExecuteDecision
 from planning_agent.domain.service import PlanningService
+
+pytestmark = pytest.mark.role("planning")  # 분리 3단계: 기획 서비스 역할로 돈다
 
 
 async def _gate(action, params, meta, evidence) -> ExecuteDecision:
