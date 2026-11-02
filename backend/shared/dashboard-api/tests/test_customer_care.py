@@ -123,6 +123,19 @@ def test_single_lookups_pass_the_id_to_the_support_skill(
     assert fake.sent[0].skill == skill and fake.sent[0].input == payload
 
 
+def test_change_proposals_in_mock_mode(mock_client: TestClient) -> None:
+    body = mock_client.get(BASE + "/change-proposals").json()["data"]
+    proposal = body["proposals"][0]
+    assert proposal["topic_code"] == "payment" and proposal["inquiry_id"] == 1
+    assert proposal["evidence_ids"] == ["inq_3", "inq_4"]  # 대표 문의 빼고 나머지 샘플
+
+
+def test_change_proposals_call_support_read_only(fake: Fake) -> None:
+    fake.outputs["propose_change_requests"] = {"proposals": []}
+    assert TestClient(app).get(BASE + "/change-proposals").json()["data"] == {"proposals": []}
+    assert [s.skill for s in fake.sent] == ["propose_change_requests"]  # 보내는 skill은 안 부른다
+
+
 def test_surge_and_change_requests_call_support(fake: Fake) -> None:
     fake.outputs["detect_inquiry_surge"] = {"surges": [], "total_in_window": 0}
     fake.outputs["list_change_requests"] = {"items": [{"inquiry_id": 3}]}
