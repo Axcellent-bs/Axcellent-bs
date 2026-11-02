@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { Chip, Empty, ErrorBox, Panel, TONE, Waiting, useResource } from "@/components/finance/bits";
 import { PreparingChip } from "@/components/Preparing";
+import { ContentLoop, type LoopTrendState } from "@/components/data/ContentLoop";
+import { SEND_TO_MARKETING_BLOCKED } from "@/lib/contentLoop";
 import {
   DATA_SERVER, TREND_MAX_GROUPS, dataAi, evidenceLines, kpiLive,
   type TrendScanOutput, type TrendVerdict,
@@ -12,9 +14,7 @@ import {
 // - 출처는 네이버 검색어 트렌드뿐이다. YouTube는 판정 데이터가 아직 없어 표시하지 않는다.
 // - 판정마다 서버가 LLM으로 문장을 쓰므로 30초 새로고침을 따르지 않는다. 처음 한 번 + "판정"·"다시 판정"을 누를 때만 부른다.
 
-/** "마케팅에 소재로 보내기"를 아직 못 하는 이유 (dashboard-api POST /handoffs는 에이전트 토큰만 받는다) */
-const SEND_TO_MARKETING_BLOCKED =
-  "받은 요청(할 일)은 지금 에이전트 토큰으로만 넣을 수 있어서, 화면(사람 로그인)에서는 아직 보낼 수 없어요.";
+// "마케팅에 소재로 보내기"를 아직 못 하는 이유는 콘텐츠 루프 2단계와 같은 문장이다 (lib/contentLoop.ts)
 
 const fixed = (v: number | null | undefined, digits = 2) =>
   typeof v === "number" && Number.isFinite(v) ? v.toLocaleString("ko-KR", { maximumFractionDigits: digits }) : null;
@@ -206,18 +206,35 @@ export function TrendScan() {
 
   if (!kpiLive) {
     return (
+      <div className="space-y-5">
+      <ContentLoop trend={{ kind: "unknown", reason: "데이터 AI 토큰이 없어 트렌드를 받지 않아요" }} />
       <Panel id="data-trend" title="검색어 급상승">
         <Empty>데이터 AI 토큰(VITE_DATA_A2A_TOKEN)이 없어 트렌드를 받지 않아요. backend/의 scripts/run_web.sh로 화면을 켜면 토큰이 들어갑니다.</Empty>
       </Panel>
+      </div>
     );
   }
 
   const out = res.env?.data.output ?? null;
   const headline = evidenceLines(res.env?.data.evidence?.data_summary).headline;
   const windowFrom = out?.results.find((r) => r.window_from)?.window_from ?? null;
+  // 콘텐츠 루프 1단계: 이 탭이 이미 받은 응답의 판정 개수 (다시 부르지 않는다)
+  const loopTrend: LoopTrendState = out
+    ? {
+        kind: "counts",
+        counts: {
+          rising: out.results.filter((r) => r.status === "rising").length,
+          normal: out.results.filter((r) => r.status === "normal").length,
+          unknown: out.results.filter((r) => r.status === "unknown").length,
+        },
+      }
+    : res.loading
+      ? { kind: "loading" }
+      : { kind: "unknown", reason: res.error ?? "판정 결과를 받지 못했어요" };
 
   return (
     <div className="space-y-5">
+      <ContentLoop trend={loopTrend} />
       <div className="flex flex-wrap items-end gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-sm text-ink-500">
