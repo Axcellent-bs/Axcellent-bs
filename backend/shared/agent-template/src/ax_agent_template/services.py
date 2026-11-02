@@ -27,7 +27,13 @@ class Service:
 
 
 SERVICES: tuple[Service, ...] = (
-    Service("orchestrator", "orchestrator", 8000, ("find_active_incident",), "총괄·사건"),
+    Service(
+        "orchestrator",
+        "orchestrator",
+        8000,
+        ("find_active_incident", "answer_planning_question"),
+        "총괄·사건",
+    ),
     Service(
         "inquiry",
         "support",
@@ -134,6 +140,7 @@ SERVICES: tuple[Service, ...] = (
             "confirm_handover",
             "list_handovers",
             "list_open_questions",
+            "answer_planning_question",
         ),
         "인수인계",
     ),
@@ -155,6 +162,7 @@ SERVICES: tuple[Service, ...] = (
             "list_cards",
             "get_audit_timeline",
             "decide_candidate_card",
+            "answer_planning_question",
         ),
         "결정 기록",
     ),
