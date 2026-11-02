@@ -32,6 +32,43 @@ def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def coupon_used_units(conn: sqlite3.Connection, coupon_id: str) -> int:
+    """쿠폰이 이미 쓴 장수. 취소됐거나 전액 환불된 주문은 장수를 돌려주므로 세지 않는다.
+
+    남은 장수를 따로 저장하지 않고 주문에서 계산하므로 취소·환불 코드는 쿠폰을 몰라도 된다.
+    부분 환불은 장수를 돌려주지 않는다. 전액 환불은 `refunds` 합계가 결제 금액과 같을 때다.
+    """
+    row = conn.execute(
+        "SELECT COALESCE(SUM(o.coupon_units), 0) AS used FROM orders o "
+        "WHERE o.coupon_id = ? AND o.status != 'cancelled' AND NOT (o.total_amount > 0 AND "
+        "COALESCE((SELECT SUM(r.amount) FROM refunds r WHERE r.order_id = o.order_id), 0) "
+        ">= o.total_amount)",
+        (coupon_id,),
+    ).fetchone()
+    return int(row["used"])
+
+
+def use_coupon(
+    conn: sqlite3.Connection, buyer_id: str, coupon_id: str, units: int, subtotal: int
+) -> int:
+    """주문에 쓸 쿠폰을 검증하고 할인액(원)을 돌려준다. 할인은 상품 합계를 넘지 않는다.
+
+    본인의 쿠폰만 쓸 수 있고(`campaign`·`compensation` 모두), 만료됐거나 남은 장수보다 많이
+    쓰려 하면 거부한다. 배송비는 할인 대상이 아니다.
+    """
+    row = conn.execute("SELECT * FROM coupons WHERE coupon_id = ?", (coupon_id,)).fetchone()
+    if row is None:
+        raise ShopError("COUPON_NOT_FOUND", "쿠폰을 찾을 수 없다", 404)
+    if row["buyer_id"] != buyer_id:
+        raise ShopError("COUPON_NOT_YOURS", "본인의 쿠폰만 쓸 수 있다", 403)
+    if row["expires_at"] is not None and row["expires_at"] <= _now():
+        raise ShopError("COUPON_EXPIRED", "만료된 쿠폰이다", 409)
+    left = row["count"] - coupon_used_units(conn, coupon_id)
+    if units > left:
+        raise ShopError("COUPON_UNITS_EXCEEDED", f"남은 쿠폰이 {left}장이다", 409)
+    return min(units * row["unit_value"], subtotal)
+
+
 @dataclass
 class PaymentOutcome:
     ok: bool
@@ -153,7 +190,7 @@ class Shop:
             raise ShopError("ORDER_NOT_FOUND", "주문을 찾을 수 없다", 404)
         items = conn.execute(
             "SELECT i.rowid AS item_rowid, i.product_id, i.seller_id, i.qty, i.unit_price, "
-            "i.points_share, COALESCE(i.title, p.name) AS title FROM order_items i "
+            "i.points_share, i.coupon_share, COALESCE(i.title, p.name) AS title FROM order_items i "
             "LEFT JOIN products p ON p.product_id = i.product_id "
             "WHERE i.order_id = ? ORDER BY i.rowid",
             (order_id,),
@@ -175,6 +212,9 @@ class Shop:
             "refunded_amount": refunded,
             "shipping_fee": order["shipping_fee"],
             "points_used": order["points_used"],
+            "coupon_id": order["coupon_id"],
+            "coupon_units": order["coupon_units"],
+            "coupon_discount": order["coupon_discount"],
             "promised_delivery_at": order["promised_delivery_at"],
             "shipped_at": order["shipped_at"],
             "delivered_at": order["delivered_at"],
@@ -188,7 +228,10 @@ class Shop:
                     "qty": i["qty"],
                     "unit_price": i["unit_price"],
                     "points_share": i["points_share"],
-                    "paid_amount": i["qty"] * i["unit_price"] - i["points_share"],
+                    "coupon_share": i["coupon_share"],
+                    "paid_amount": i["qty"] * i["unit_price"]
+                    - i["points_share"]
+                    - i["coupon_share"],
                 }
                 for i in items
             ],
@@ -283,6 +326,8 @@ class Shop:
     def _split_points(points_used: int, amounts: list[int]) -> list[int]:
         """포인트를 품목 금액 비율로 나눈다. 반올림으로 남는 몫은 뒤 품목부터 1원씩 붙인다."""
         subtotal = sum(amounts)
+        if points_used == 0 or subtotal == 0:
+            return [0] * len(amounts)
         shares = [points_used * amount // subtotal for amount in amounts]
         left = points_used - sum(shares)
         for index in reversed(range(len(shares))):
@@ -305,11 +350,13 @@ class Shop:
         lines: list[tuple[str, int]],
         points_used: int = 0,
         idempotency_key: str | None = None,
+        coupon_id: str | None = None,
+        coupon_units: int = 1,
     ) -> tuple[dict[str, Any], bool]:
         """`create_order`에 멱등 키를 더한 것. `(주문, 재전송 여부)`를 돌려준다.
 
         같은 구매자의 같은 `idempotency_key`가 다시 오면 재고를 확인하거나 차감하기 전에 처음
-        주문을 그대로 돌려준다(`replayed=True`). 내용(상품·수량·포인트)이 다르면 409다.
+        주문을 그대로 돌려준다(`replayed=True`). 내용(상품·수량·포인트·쿠폰)이 다르면 409다.
         키가 없으면 예전처럼 매번 새 주문이다.
         """
         if not lines:
@@ -330,7 +377,13 @@ class Shop:
                             (existing["order_id"],),
                         )
                     )
-                    if (stored, existing["points_used"]) != (sorted(lines), points_used):
+                    same = (
+                        stored,
+                        existing["points_used"],
+                        existing["coupon_id"],
+                        existing["coupon_units"],
+                    ) == (sorted(lines), points_used, coupon_id, coupon_units if coupon_id else 0)
+                    if not same:
                         raise ShopError(
                             "IDEMPOTENCY_MISMATCH", "같은 키로 다른 내용을 요청할 수 없다", 409
                         )
@@ -357,19 +410,27 @@ class Shop:
                 conn.execute(
                     "UPDATE products SET stock = stock - ? WHERE product_id = ?", (qty, product_id)
                 )
-            if points_used > total:
+            discount = (
+                use_coupon(conn, buyer_id, coupon_id, coupon_units, total) if coupon_id else 0
+            )
+            if points_used > total - discount:
                 raise ShopError("POINTS_EXCEED_ITEMS", "포인트는 품목 합계를 넘을 수 없다")
             shipping_fee = 0 if total >= FREE_SHIPPING_FROM else SHIPPING_FEE
+            amounts = [item["qty"] * item["unit_price"] for item in items]
+            coupon_shares = self._split_points(
+                discount, amounts
+            )  # 쿠폰을 먼저, 포인트는 남은 금액에
             shares = self._split_points(
-                points_used, [item["qty"] * item["unit_price"] for item in items]
+                points_used, [a - c for a, c in zip(amounts, coupon_shares, strict=True)]
             )
-            total = total - points_used + shipping_fee  # 실제 결제(현금) 금액
+            total = total - discount - points_used + shipping_fee  # 실제 결제(현금) 금액
             order_id = self.db.next_id(conn, "order", "ord_")
             now = _now()
             conn.execute(
                 "INSERT INTO orders (order_id, buyer_id, status, total_amount, tenant_id, "
-                "context_id, created_at, updated_at, shipping_fee, points_used, idempotency_key) "
-                "VALUES (?, ?, 'pending_payment', ?, ?, NULL, ?, ?, ?, ?, ?)",
+                "context_id, created_at, updated_at, shipping_fee, points_used, idempotency_key, "
+                "coupon_id, coupon_units, coupon_discount) "
+                "VALUES (?, ?, 'pending_payment', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     order_id,
                     buyer_id,
@@ -380,15 +441,20 @@ class Shop:
                     shipping_fee,
                     points_used,
                     idempotency_key,
+                    coupon_id,
+                    coupon_units if coupon_id else 0,
+                    discount,
                 ),
             )
-            for item, title, share in zip(items, titles, shares, strict=True):
+            for item, title, share, c_share in zip(
+                items, titles, shares, coupon_shares, strict=True
+            ):
                 conn.execute(
                     "INSERT INTO order_items (order_id, product_id, seller_id, qty, unit_price, "
-                    "tenant_id, context_id, title, points_share) "
-                    "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+                    "tenant_id, context_id, title, points_share, coupon_share) "
+                    "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)",
                     (order_id, item["product_id"], item["seller_id"], item["qty"],
-                     item["unit_price"], TENANT_ID, title, share),
+                     item["unit_price"], TENANT_ID, title, share, c_share),
                 )  # fmt: skip
             outbox.enqueue(
                 conn,

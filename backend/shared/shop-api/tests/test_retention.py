@@ -90,7 +90,9 @@ def ret(db: Db, ret_id: str, claim: int, order_id: str, created: str) -> None:
 def coupon(db: Db, cid: str, buyer_id: str, created: str) -> None:
     with db.tx() as c:
         c.execute(
-            "INSERT INTO coupons VALUES (?, ?, 'compensation', NULL, 1, 500, 500, ?, ?, NULL, ?)",
+            "INSERT INTO coupons (coupon_id, buyer_id, purpose_code, campaign_id, count, "
+            "unit_value, total_value, idempotency_key, tenant_id, context_id, created_at) "
+            "VALUES (?, ?, 'compensation', NULL, 1, 500, 500, ?, ?, NULL, ?)",
             (cid, buyer_id, f"k-{cid}", TENANT_ID, created),
         )
 

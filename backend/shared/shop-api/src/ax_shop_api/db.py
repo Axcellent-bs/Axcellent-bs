@@ -33,13 +33,15 @@ CREATE TABLE IF NOT EXISTS orders (
   status TEXT NOT NULL, total_amount INTEGER NOT NULL, tenant_id TEXT NOT NULL,
   context_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   shipping_fee INTEGER NOT NULL DEFAULT 0, points_used INTEGER NOT NULL DEFAULT 0,
-  delivered_at TEXT, promised_delivery_at TEXT, shipped_at TEXT, idempotency_key TEXT
+  delivered_at TEXT, promised_delivery_at TEXT, shipped_at TEXT, idempotency_key TEXT,
+  coupon_id TEXT, coupon_units INTEGER NOT NULL DEFAULT 0,
+  coupon_discount INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS order_items (
   order_id TEXT NOT NULL REFERENCES orders(order_id), product_id TEXT NOT NULL,
   seller_id TEXT NOT NULL, qty INTEGER NOT NULL CHECK (qty > 0),
   unit_price INTEGER NOT NULL, tenant_id TEXT NOT NULL, context_id TEXT,
-  title TEXT, points_share INTEGER NOT NULL DEFAULT 0
+  title TEXT, points_share INTEGER NOT NULL DEFAULT 0, coupon_share INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS payments (
   payment_id TEXT PRIMARY KEY, order_id TEXT NOT NULL REFERENCES orders(order_id),
@@ -72,7 +74,7 @@ CREATE TABLE IF NOT EXISTS coupons (
   purpose_code TEXT NOT NULL, campaign_id TEXT, count INTEGER NOT NULL CHECK (count > 0),
   unit_value INTEGER NOT NULL CHECK (unit_value > 0), total_value INTEGER NOT NULL,
   idempotency_key TEXT NOT NULL UNIQUE, tenant_id TEXT NOT NULL, context_id TEXT,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL, expires_at TEXT
 );
 CREATE TABLE IF NOT EXISTS retention_daily_stats (
   stat_date TEXT NOT NULL, kind TEXT NOT NULL, rows_count INTEGER NOT NULL,
@@ -96,8 +98,16 @@ _ADDED_COLUMNS = {
         ("promised_delivery_at", "TEXT"),
         ("shipped_at", "TEXT"),
         ("idempotency_key", "TEXT"),
+        ("coupon_id", "TEXT"),
+        ("coupon_units", "INTEGER NOT NULL DEFAULT 0"),
+        ("coupon_discount", "INTEGER NOT NULL DEFAULT 0"),
     ),
-    "order_items": (("title", "TEXT"), ("points_share", "INTEGER NOT NULL DEFAULT 0")),
+    "order_items": (
+        ("title", "TEXT"),
+        ("points_share", "INTEGER NOT NULL DEFAULT 0"),
+        ("coupon_share", "INTEGER NOT NULL DEFAULT 0"),
+    ),
+    "coupons": (("expires_at", "TEXT"),),
 }
 
 # 새 열에 거는 인덱스는 열이 붙은 뒤에 만든다(옛 DB 파일에서는 `SCHEMA`를 돌릴 때 열이 아직 없다)
@@ -105,6 +115,9 @@ _ADDED_INDEXES = (
     # 같은 구매자의 같은 멱등 키는 주문 하나다. 키가 없는 주문은 서로 겹쳐도 된다
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_buyer_idempotency ON orders(buyer_id, "
     "idempotency_key) WHERE idempotency_key IS NOT NULL",
+    # 쿠폰별 사용 장수를 합산할 때 쓴다
+    "CREATE INDEX IF NOT EXISTS idx_orders_coupon_id ON orders(coupon_id) "
+    "WHERE coupon_id IS NOT NULL",
 )
 
 TENANT_ID = TENANT_ID_DEFAULT

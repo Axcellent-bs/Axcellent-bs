@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ax_shop_api.db import TENANT_ID, Db
-from ax_shop_api.service import ShopError
+from ax_shop_api.service import ShopError, coupon_used_units
 
 
 def _iso(moment: datetime) -> str:
@@ -103,16 +103,21 @@ class Promotions:
         unit_value: int,
         campaign_id: str | None,
         context_id: str | None = None,
+        expires_at: datetime | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """쿠폰을 발급한다. 총액은 건수×단가로 코드가 계산한다.
 
         같은 `idempotency_key`의 재요청은 이전 쿠폰을 돌려주고(`replayed=True`), 내용이 다르면
-        409다. 보상 쿠폰에는 `campaign_id`가 없고 캠페인 쿠폰에는 필수다.
+        409다. 보상 쿠폰에는 `campaign_id`가 없고 캠페인 쿠폰에는 필수다. 선택 `expires_at`이 있으면
+        그 시각 이후에는 주문에 쓸 수 없고(지금보다 뒤여야 한다), 없으면 무기한이다.
         """
         if purpose_code == "campaign" and not campaign_id:
             raise ShopError("INVALID_COUPON", "캠페인 쿠폰에는 campaign_id가 필요하다")
         if purpose_code == "compensation" and campaign_id:
             raise ShopError("INVALID_COUPON", "보상 쿠폰에는 campaign_id가 없어야 한다")
+        if expires_at is not None and expires_at <= self.now():
+            raise ShopError("INVALID_COUPON", "만료일은 지금보다 뒤여야 한다")
+        expires = _iso(expires_at) if expires_at is not None else None
         total = count * unit_value
         with self.db.tx() as conn:
             existing = conn.execute(
@@ -125,17 +130,20 @@ class Promotions:
                     existing["count"],
                     existing["unit_value"],
                     existing["campaign_id"],
-                ) == (purpose_code, buyer_id, count, unit_value, campaign_id)
+                    existing["expires_at"],
+                ) == (purpose_code, buyer_id, count, unit_value, campaign_id, expires)
                 if not same:
                     raise ShopError(
                         "IDEMPOTENCY_MISMATCH", "같은 키로 다른 내용을 요청할 수 없다", 409
                     )
-                return self._coupon(existing), True
+                return self._view(conn, existing), True
             if not conn.execute("SELECT 1 FROM buyers WHERE buyer_id = ?", (buyer_id,)).fetchone():
                 raise ShopError("BUYER_NOT_FOUND", "구매자를 찾을 수 없다", 404)
             coupon_id = self.db.next_id(conn, "coupon", "cpn_")
             conn.execute(
-                "INSERT INTO coupons VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO coupons (coupon_id, buyer_id, purpose_code, campaign_id, count, "
+                "unit_value, total_value, idempotency_key, tenant_id, context_id, created_at, "
+                "expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     coupon_id,
                     buyer_id,
@@ -148,32 +156,41 @@ class Promotions:
                     TENANT_ID,
                     context_id,
                     _iso(self.now()),
+                    expires,
                 ),
             )
             row = conn.execute("SELECT * FROM coupons WHERE coupon_id = ?", (coupon_id,)).fetchone()
-        return self._coupon(row), False
+            return self._view(conn, row), False
 
     def get_coupon(self, coupon_id: str) -> dict[str, Any]:
         with self.db.tx() as conn:
             row = conn.execute("SELECT * FROM coupons WHERE coupon_id = ?", (coupon_id,)).fetchone()
-        if row is None:
-            raise ShopError("COUPON_NOT_FOUND", "쿠폰을 찾을 수 없다", 404)
-        return self._coupon(row)
+            if row is None:
+                raise ShopError("COUPON_NOT_FOUND", "쿠폰을 찾을 수 없다", 404)
+            return self._view(conn, row)
 
     def list_coupons(
-        self, buyer_id: str | None = None, purpose_code: str | None = None
+        self,
+        buyer_id: str | None = None,
+        purpose_code: str | None = None,
+        campaign_id: str | None = None,
     ) -> list[dict[str, Any]]:
         sql, args = "SELECT * FROM coupons WHERE 1 = 1", []
-        for column, value in (("buyer_id", buyer_id), ("purpose_code", purpose_code)):
+        filters = (
+            ("buyer_id", buyer_id),
+            ("purpose_code", purpose_code),
+            ("campaign_id", campaign_id),
+        )
+        for column, value in filters:
             if value:
                 sql += f" AND {column} = ?"
                 args.append(value)
         with self.db.tx() as conn:
             rows = conn.execute(sql + " ORDER BY coupon_id", args).fetchall()
-        return [self._coupon(row) for row in rows]
+            return [self._view(conn, row) for row in rows]
 
-    @staticmethod
-    def _coupon(row: Any) -> dict[str, Any]:
+    def _view(self, conn: Any, row: Any) -> dict[str, Any]:
+        """쿠폰 한 건. 사용·남은 장수는 주문에서 계산한 값이다(사용률 계산용)."""
         keys = (
             "coupon_id",
             "buyer_id",
@@ -184,5 +201,11 @@ class Promotions:
             "total_value",
             "context_id",
             "created_at",
+            "expires_at",
         )
-        return {key: row[key] for key in keys}
+        out = {key: row[key] for key in keys}
+        used = coupon_used_units(conn, row["coupon_id"])
+        out["used_units"] = used
+        out["remaining_units"] = row["count"] - used
+        out["expired"] = row["expires_at"] is not None and row["expires_at"] <= _iso(self.now())
+        return out
