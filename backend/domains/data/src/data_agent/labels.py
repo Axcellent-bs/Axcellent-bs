@@ -102,6 +102,7 @@ SKILL_KO: dict[str, str] = {
     "activity_report": "부서별 AI 업무 리포트",
     "trend_scan": "검색어 급상승 보기",
     "trend_candidates": "YouTube 후보 급상승 보기",
+    "trend_history": "검색어 월별 흐름 보기",
     "content_recommend": "영상 소재 추천",
     "campaign_effect": "캠페인 효과 보기",
     "receive_dev_result": "개발 결과 받기",

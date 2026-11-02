@@ -15,6 +15,9 @@
 - content_recommend는 trend_scan·trend_candidates 판정에서 급상승한 것만 코드 점수로 순위를 매기고
   소재마다 영상 아이디어 문장을 LLM으로 쓴다(grade read, 숫자 검증). 급상승이 없으면
   빈 목록 + 이유다.
+- trend_history는 키워드 그룹별 네이버 월 단위 값과 작년 같은 달 대비 배수만 준다
+  (grade read, 판정 안 함).
+  그룹마다 따로 부르고, 모든 그룹에서 못 읽으면 숫자 없이 `failed`·`unavailable`이다.
 - answer_planning_question은 data가 보낸 요청의 기록으로만 기획 질문에 답한다(grade read,
   `planning_questions.py`). 기록에 없으면 `unknown`이다.
 - campaign_effect는 캠페인 기간 주문 증분·쿠폰 누적 사용률을 코드로 계산한다(grade read).
@@ -45,6 +48,7 @@ from ax_contracts.schemas.data import (
     KpiSummaryInput,
     RootCauseInput,
     TrendCandidatesRequest,
+    TrendHistoryRequest,
     TrendScanRequest,
 )
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
@@ -71,6 +75,7 @@ from data_agent.skills.impact_analysis import analyze_impact
 from data_agent.skills.kpi_summary import summarize_kpi
 from data_agent.skills.root_cause import estimate_root_cause
 from data_agent.skills.trend_candidates import find_candidates
+from data_agent.skills.trend_history import history
 from data_agent.skills.trend_scan import NoTrendGroups, scan_trends
 
 
@@ -397,6 +402,41 @@ async def content_recommend(request: AgentRequest) -> AgentResult:
     )
 
 
+async def trend_history(request: AgentRequest) -> AgentResult:
+    """키워드 그룹별 월별 흐름(작년 같은 달 대비). 조회만 하고 상태를 바꾸지 않는다(grade read)."""
+    data = _parse(request, TrendHistoryRequest)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        result = await history(data, get_trend_connector(), env=os.environ)
+    except NoTrendGroups as error:
+        return _result(
+            request, TaskStatus.FAILED, outcome="invalid_input", output={"message": str(error)}
+        )
+    groups = result.output.groups
+    if groups and all(
+        (g.unknown_reason or "").startswith("네이버 검색어 트렌드를 읽지 못함") for g in groups
+    ):
+        message = f"확인할 수 없음: {groups[0].unknown_reason}"
+        return _result(
+            request,
+            TaskStatus.FAILED,
+            outcome="unavailable",
+            output={"message": message},
+            evidence=Evidence(
+                queries=["naver search-trend month"],
+                data_summary=message,
+                collected_at=datetime.now(UTC),
+            ),
+        )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
+
+
 async def answer_planning_question(request: AgentRequest) -> AgentResult:
     """기획이 되묻는 근거 질문에 data가 보낸 요청의 기록으로 답한다(grade read)."""
     data = _parse(request, AnswerPlanningQuestionInput)
@@ -456,6 +496,7 @@ HANDLERS = {
     "activity_report": activity_report,
     "trend_scan": trend_scan,
     "trend_candidates": trend_candidates,
+    "trend_history": trend_history,
     "content_recommend": content_recommend,
     "answer_planning_question": answer_planning_question,
     "campaign_effect": campaign_effect,

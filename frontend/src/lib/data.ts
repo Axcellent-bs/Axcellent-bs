@@ -334,6 +334,39 @@ export interface TrendCandidatesOutput {
 /** 한 번에 판정할 수 있는 그룹 수 (화면 입력 한도) */
 export const TREND_MAX_GROUPS = 5;
 
+// ---------------------------------------------------------------- 월별 흐름 (trend_history)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py TrendHistoryOutput.
+// 판정하지 않는다: 달마다 값(그 그룹 요청 안 상대값, 최댓값 100)과 작년 같은 달 대비 배수만 서버가 계산한다.
+export interface TrendMonthPoint {
+  /** 그 달 1일 */
+  month: string;
+  value: number;
+  last_year_value: number | null;
+  /** 작년 같은 달 대비 배수. 작년 값이 없거나 0이면 null */
+  vs_last_year: number | null;
+}
+export interface TrendHistoryGroup {
+  group_name: string;
+  keywords: string[];
+  status: "known" | "unknown";
+  unknown_reason: string | null;
+  /** 달 순서. 네이버가 주지 않은 달은 빠져 있다(0 아님) */
+  points: TrendMonthPoint[];
+  latest_month: string | null;
+  latest_vs_last_year: number | null;
+}
+export interface TrendHistoryOutput {
+  start_month: string;
+  end_month: string;
+  months: number;
+  time_unit: "month";
+  source: string;
+  value_kind: "relative";
+  groups: TrendHistoryGroup[];
+  naver_calls: number;
+  summary: string;
+}
+
 // ---------------------------------------------------------------- 영상 소재 추천 (content_recommend)
 // 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py ContentRecommendOutput (#356, #370).
 // 급상승만 코드 점수로 순위를 매기고(두 소스 가산), 소재마다 아이디어 문장·형식은 LLM(숫자 검증, 실패하면 기본 문장).
@@ -454,6 +487,8 @@ export const dataAi = {
     ),
   /** YouTube 인기 태그 후보 + 후보마다 네이버 판정. 입력을 비우면 회사 설정(trends.toml [candidates])과 어제 날짜. 후보마다 네이버 1번 */
   trendCandidates: () => askData<TrendCandidatesOutput>("trend_candidates", "YouTube 후보 판정", {}, TREND_DEADLINE_MS),
+  /** 키워드 그룹별 월별 흐름(작년 같은 달 대비). 입력을 비우면 회사 기본 키워드·설정 개월 수(24)·지난달까지. 그룹마다 네이버 1번 */
+  trendHistory: () => askData<TrendHistoryOutput>("trend_history", "월별 흐름", {}, TREND_DEADLINE_MS),
   /** 영상 소재 추천 (콘텐츠 루프 2단계). 입력을 비우면 회사 설정(trends.toml [recommend])과 어제 날짜.
    *  네이버는 서버 하루 캐시를 같이 쓰고, 소재마다 아이디어 문장을 LLM이 쓴다 */
   contentRecommend: () => askData<ContentRecommendOutput>("content_recommend", "영상 소재 추천", {}, RECOMMEND_DEADLINE_MS),
