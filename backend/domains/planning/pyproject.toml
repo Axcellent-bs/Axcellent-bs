@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "ax-contracts",
     "ax-agent-template",
+    "ax-workflow-core",
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "httpx>=0.27",
@@ -16,6 +17,7 @@ dependencies = [
 [tool.uv.sources]
 ax-agent-template = { workspace = true }
 ax-contracts = { workspace = true }
+ax-workflow-core = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

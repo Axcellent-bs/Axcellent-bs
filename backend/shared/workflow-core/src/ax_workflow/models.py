@@ -1,0 +1,497 @@
+"""기획·개발 화면·서비스가 쓰는 상태 모델 (프로토타입 `data.ts`의 타입을 옮긴 것).
+
+- 필드는 snake_case다. 프로토타입의 `from`은 파이썬 예약어라 `from_` 필드에 별칭 `from`을 붙였다
+  (JSON에는 `from`으로 나간다). 직렬화는 항상 `by_alias=True`로 한다.
+- 시각은 UTC aware datetime으로 저장한다. KST 표시는 화면이 한다.
+- 상태 값(요청 상태·작업 상태 등)은 프로토타입과 같은 한국어 값을 쓴다 (화면이 그대로 쓴다).
+- 이 모델은 화면용 내부 모델이다. 부서 간 계약은 `contracts/`의 모델만 쓴다.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from ax_contracts.schemas import TENANT_ID_DEFAULT, UtcDatetime
+
+Dept = Literal[
+    "planning",
+    "hr",
+    "support",
+    "marketing",
+    "data",
+    "finance",
+    "infra",
+    "orchestrator",
+    "safety",
+    "shop",
+    "memory",
+    "human",
+    "dev",  # 같은 부서의 개발·배포 서비스 (planning 서비스와 따로 뜰 때)
+]
+
+DEPT_NAME: dict[str, str] = {
+    "planning": "기획",
+    "hr": "인사",
+    "support": "고객지원",
+    "marketing": "마케팅",
+    "data": "데이터분석",
+    "finance": "재무/정산",
+    "infra": "인프라(DejaFix)",
+    "orchestrator": "통합 에이전트",
+    "safety": "안전 레이어",
+    "shop": "판매 사이트",
+    "memory": "회사 기억",
+    "human": "사람",
+    "dev": "개발·배포",
+}
+
+ReqState = Literal["접수", "기획 중", "작업 중", "완료", "중복 연결", "기각"]
+TaskState = Literal["진행 중", "PR 검수", "머지 대기", "완료", "C 보류", "중단"]
+Review = Literal["통과", "불일치"]
+ActivityKind = Literal["A2A", "이벤트", "execute", "API", "사람"]
+Grade = Literal["A", "B", "C", "read"]
+BlockKind = Literal["h2", "p", "todo", "ref"]
+AutoWait = Literal["답 대기", "교차검증 대기", "사람 확인"]
+
+
+class DomainModel(BaseModel):
+    """도메인 모델 기반. 정의하지 않은 필드는 거부하고, 별칭·필드 이름 모두로 만들 수 있다."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class AutoCheck(DomainModel):
+    """간단 요청 판정 결과. 사유는 항상 4줄(민감 경로·표시 전용·기각 이력·크기)."""
+
+    ok: bool
+    reasons: list[str]
+
+
+class RelatedItem(DomainModel):
+    """비슷한·충돌하는 다른 요청 (related.py). 제안이고 묶기·보류는 사람이 정한다.
+
+    - relation: same(같은 일) · conflict(둘 다 진행 중인데 양립 불가) · update(앞 요청을 다시
+      바꿈) · related(비슷함, 관계는 정하지 않음 포함)
+    - by: llm(LLM이 후보 안에서 판단) · embed(임베딩 검색만) · lexical(글자 검색만) ·
+      path(열린 PR과 같은 파일을 고침, 코드 규칙) · memory(회사 기억 요청 색인)
+    """
+
+    id: str
+    title: str
+    score: float
+    relation: Literal["same", "conflict", "update", "related"]
+    reason: str
+    by: Literal["llm", "embed", "lexical", "path", "memory"]
+    # 다른 서비스(기획↔개발)에만 있는 요청이면 찾을 때 읽은 그 요청의 상태 (이 서버에 있으면 None)
+    remote_state: str | None = None
+
+
+class Request(DomainModel):
+    id: str
+    context_id: str
+    tenant_id: str = TENANT_ID_DEFAULT
+    from_: Dept = Field(alias="from")
+    via: str  # 들어온 연결 지점
+    title: str
+    evidence: str
+    state: ReqState
+    spec: str | None = None
+    duplicate_of: str | None = None
+    auto: AutoCheck | None = None  # 간단 요청 판정 결과 (create_ticket으로 들어온 것만)
+    # 요청 부서 쪽 참조 ID (예: 고객지원 문의 inq_12). 저장만 하고 판정(중복·간단 요청)에 안 쓴다
+    source_ref: str | None = None
+    evidence_ids: list[str] = Field(default_factory=list)  # 요청 부서가 보낸 근거 ID
+    flow: bool = False  # 들어온 뒤 사람 클릭 없이 다음 단계로 이어 간다 (일반 요청·개선 초안)
+    related: list[RelatedItem] = Field(default_factory=list)  # 비슷한·충돌하는 요청 (제안)
+    # 요청을 보낸 서비스 id (예: inquiry·coupon). `from_`은 부서, 되묻기·회신은 이 서비스로 보낸다
+    from_service: str | None = None
+
+
+class ParaWarn(DomainModel):
+    card: str
+    text: str
+
+
+class Para(DomainModel):
+    id: str  # R1, C1 …
+    kind: Literal["req", "done"]
+    text: str
+    warn: ParaWarn | None = None  # 인사 ② check_plan 결과
+    incident: str | None = None  # 장애 표시 (link_incident)
+    paths: list[str] = Field(default_factory=list)  # 바꿀 파일 경로 (비면 역추적 규칙으로 정함)
+
+
+class AutoReview(DomainModel):
+    """자동 확정·자동 머지를 하지 않고 멈춘 이유 (대기열 항목).
+
+    - `state`: 답 대기(질문 남음) · 교차검증 대기(#171 규칙에 걸림, safety 보류 포함) ·
+      사람 확인(되돌릴 수 없는 영역)
+    - `rules`: 걸린 #171 규칙 키. `params`: 판정에 쓴 execute params (코드 계산 값)
+    - `gate_status`·`review_id`: safety가 보류·거절했을 때 그 결과 (planning 사전 판정은 통과)
+    판단은 기존 사람 버튼(`confirmSpec`·`mergePr`)으로 한다. 실제 교차검증자 연결은 safety 협의 뒤.
+    """
+
+    state: AutoWait
+    rules: list[str] = Field(default_factory=list)
+    params: dict[str, Any] = Field(default_factory=dict)
+    at: UtcDatetime
+    gate_status: str | None = None
+    review_id: str | None = None
+    # 교차검증 근거 (cross_check.EvidenceLine): 어느 부서에 무엇을 물어 어떤 답을 받았나
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class Spec(DomainModel):
+    id: str
+    title: str
+    request: str
+    status: Literal["초안", "확정"]
+    problem: str
+    goal: str
+    paras: list[Para]
+    question: str | None = None
+    basis: list[str] = Field(default_factory=list)
+    human_sentences: int = 0
+    auto: bool = False  # 간단 요청 규칙·자동 확정 규칙으로 사람 확정 없이 처리됨
+    auto_review: AutoReview | None = None  # 자동 확정을 멈춘 이유 (확정되면 비움)
+    # planning 서비스가 dev 서비스로 넘긴 기획서 (start_dev). 합친 모드에서는 늘 False
+    handed_to_dev: bool = False
+    # 기획서를 쓴 곳. "dev_team" = 개발팀원이 개발 화면에서 직접 쓴 기획 (코딩 에이전트)
+    origin: str | None = None
+    # 인사 ② check_plan 실제 결과 (ok·warn·unknown). None = 묻지 않음 (목 모드·예전 기획서)
+    hr_check: Literal["ok", "warn", "unknown"] | None = None
+    # 요청 서비스에 되물은 질문 (answer_planning_question). 답을 받으면 `question`과 같이 비운다
+    question_id: str | None = None
+    question_to: str | None = None  # 질문을 보낸 서비스 id
+
+
+CodingStatus = Literal[
+    "queued",
+    "claimed",  # 개발자 본인 Claude가 가져감 (구독형, work_queue.py)
+    "reading",
+    "writing",
+    "reviewing",
+    "opened",
+    "merged",
+    "waiting_human",
+    "failed",
+    "canceled",  # 사람이 중단 (열린 PR은 닫고 브랜치를 지움)
+]
+
+
+class CodingFile(DomainModel):
+    """코딩 에이전트가 바꾼 파일 하나. 줄 수는 기준 브랜치 글과 비교해 코드로 센다."""
+
+    path: str
+    additions: int = 0
+    deletions: int = 0
+    reason: str = ""
+
+
+class CodingReview(DomainModel):
+    verdict: Review
+    notes: list[str] = Field(default_factory=list)
+
+
+class CodingRun(DomainModel):
+    """코딩 에이전트 진행 상태 (작업 하나). 단계마다 바뀌어 SSE로 나간다.
+
+    `attempts`는 파일을 쓴 횟수 (첫 작성 1, 리뷰 불일치 뒤 수정 2).
+    `connection`은 올릴 연결 id, `pr`은 만든 PR 표시 id (없으면 None)."""
+
+    status: CodingStatus = "queued"
+    model: str | None = None
+    files: list[CodingFile] = Field(default_factory=list)
+    summary: str | None = None
+    review: CodingReview | None = None
+    error: str | None = None
+    attempts: int = 0
+    updated_at: UtcDatetime
+    connection: str | None = None
+    pr: str | None = None
+    instruction: str | None = None  # 사람이 대기 중인 PR에 준 수정 지시 (마지막 것)
+    # 작업 대기열: 같은 파일을 먼저 고치는 작업이 있으면 끝날 때까지 기다린다 (coder._wait_turn).
+    # skip_queue는 사람이 '지금 진행'으로 기다리지 않게 한 작업. 머지는 그래도 차례로 간다
+    skip_queue: bool = False
+    waiting_for: list[str] = Field(default_factory=list)  # 기다리는 앞 작업 id
+    # 머지가 충돌로 실패함: 다시 시도하면 PR을 닫고 최신 코드로 다시 쓴다
+    merge_conflict: bool = False
+    # 이 작업이 지금까지 쓴 LLM 호출·토큰 (다시 시도해도 이어서 센다). 실행 한 번 상한은 coder
+    llm_calls: int = 0
+    llm_tokens: int = 0
+    # 누가 코딩하나: agent = 서버 코딩 에이전트(API 키), subscription = 개발자 본인 Claude가
+    # MCP로 가져가 코딩한다 (work_queue.py). 구독형은 서버 에이전트를 띄우지 않는다
+    mode: Literal["agent", "subscription"] = "agent"
+    claimed_by: str | None = None  # 가져간 사람 (사람 토큰 이름)
+    claimed_at: UtcDatetime | None = None
+    lease_until: UtcDatetime | None = None  # 이때까지 진행 보고가 없으면 대기열로 돌린다
+    progress: str | None = None  # 개발자 Claude가 마지막으로 보고한 진행 글
+
+
+class Task(DomainModel):
+    id: str
+    spec: str
+    para: str
+    title: str
+    owner: str
+    state: TaskState
+    coding: CodingRun | None = None  # 코딩 에이전트 작업만 (개발팀 기획)
+
+
+class PrGate(DomainModel):
+    """안전 레이어 코드 규칙 결과 (pr_changed_lines·files·allowed_paths)."""
+
+    result: Literal["통과", "C 보류"]
+    lines: int
+    files: int
+    paths: str
+
+
+class RepoCandidate(DomainModel):
+    connection_id: str
+    repo: str
+    score: int
+
+
+class RepoTarget(DomainModel):
+    """PR을 올릴 레포(연결). AI가 제안하고 사람이 승인한다 (연결이 하나면 자동 승인).
+
+    `candidates`는 규칙 점수 순, `reasons`는 짧은 근거 줄 (LLM 근거는 앞에 "AI: ")."""
+
+    connection_id: str
+    repo: str
+    status: Literal["proposed", "approved", "rejected"]
+    confidence: Literal["high", "mid", "low"]
+    reasons: list[str] = Field(default_factory=list)
+    candidates: list[RepoCandidate] = Field(default_factory=list)
+    decided_by: str | None = None
+    decided_at: UtcDatetime | None = None
+
+
+class PR(DomainModel):
+    id: str  # 표시용 "PR #28"
+    number: int  # 28 (계약 RelatedPr.pr_number)
+    task: str
+    title: str
+    branch: str
+    reviews: list[Review]
+    gate: PrGate
+    merged: bool
+    merged_at: UtcDatetime | None = None
+    changed_paths: list[str] = Field(default_factory=list)
+    # 이 머지로 나간 배포 "서비스 버전" (데모: 머지 = dev 배포). 대응을 모르면 None
+    deployed_version: str | None = None
+    auto: bool = False  # 간단 요청 규칙·자동 머지 규칙으로 자동 머지됨
+    auto_review: AutoReview | None = None  # 자동 머지를 멈춘 이유 (머지되면 비움)
+    # 형상관리 연결 계층으로 실제로 올린 변경 번호·주소 (목 설정이면 None)
+    vcs_number: int | None = None
+    url: str | None = None
+    # 올릴 레포 제안·승인 (형상관리 연결이 있을 때만. 목 설정이면 None)
+    target: RepoTarget | None = None
+    closed: bool = False  # 작업 중단으로 닫음 (병합 안 함)
+
+
+class Message(DomainModel):
+    who: str
+    dept: Dept
+    text: str
+    decision: str | None = None
+    at: UtcDatetime | None = None
+
+
+class Thread(DomainModel):
+    """소통 채널. spec = 문서에 붙는 스레드, team = 기획팀 채널, dept = 다른 부서 채널."""
+
+    id: str
+    on: str
+    title: str
+    messages: list[Message] = Field(default_factory=list)
+    kind: Literal["spec", "team", "dept"] | None = None
+    peer: Dept | None = None
+
+
+class DocBlock(DomainModel):
+    id: str
+    kind: BlockKind
+    text: str
+    done: bool | None = None
+
+
+class Doc(DomainModel):
+    """정리 문서: 요청·기획서·작업·PR·대화·결정을 한 장으로 모으고 사람이 고친다."""
+
+    id: str
+    title: str
+    about: str | None = None
+    updated_at: UtcDatetime
+    blocks: list[DocBlock] = Field(default_factory=list)
+    by: Literal["ai", "human"] | None = None
+
+
+class Decision(DomainModel):
+    id: str
+    spec: str
+    text: str
+    reason: str
+    alternatives: str
+    from_: str = Field(alias="from")
+    sent_to_hr: bool
+
+
+class IncidentCandidate(DomainModel):
+    pr: str
+    spec: str
+    para: str
+    merged_at: UtcDatetime
+
+
+class RollbackCheck(DomainModel):
+    target: str
+    result: Literal["승인", "거절"]
+    why: str
+
+
+class Incident(DomainModel):
+    context_id: str
+    tenant_id: str = TENANT_ID_DEFAULT
+    title: str
+    opened_at: UtcDatetime
+    candidates: list[IncidentCandidate] = Field(default_factory=list)
+    rollback_check: RollbackCheck | None = None
+    linked: bool = False
+    follow_up: str | None = None
+
+
+class Activity(DomainModel):
+    seq: int | None = None  # 시뮬레이터로 들어온 건의 순번 (새로 받은 것 표시용)
+    at: UtcDatetime
+    context_id: str
+    tenant_id: str = TENANT_ID_DEFAULT
+    from_: Dept = Field(alias="from")
+    to: Dept
+    point: str  # 연결 지점
+    kind: ActivityKind
+    grade: Grade | None = None
+    text: str
+
+
+class OutMsg(DomainModel):
+    """기획·개발 → 다른 부서로 나간 메시지 (다른 부서 화면의 "기획·개발에서 받은 것")."""
+
+    id: int
+    at: UtcDatetime
+    context_id: str
+    tenant_id: str = TENANT_ID_DEFAULT
+    to: Dept
+    point: str
+    text: str
+    read: bool = False
+
+
+class AutoLevel(DomainModel):
+    level: int
+    name: str
+    lines: int
+    files: int
+
+
+class AutoRun(DomainModel):
+    pr: str
+    req: str
+    at: UtcDatetime
+    lines: int
+    files: int
+    result: Literal["정상", "장애 연결"]
+
+
+class AutoProposal(DomainModel):
+    to: int
+    at: UtcDatetime
+    why: str
+
+
+class AutoLog(DomainModel):
+    at: UtcDatetime
+    text: str
+    by: Literal["사람", "자동"]
+
+
+class AutoPolicy(DomainModel):
+    """자동 처리 범위. 넓히기는 사람 승인, 줄이기는 자동."""
+
+    level: int
+    paths: str
+    streak: int = 0  # 마지막 단계 변경 뒤 연속 정상 건수
+    history: list[AutoRun] = Field(default_factory=list)
+    proposal: AutoProposal | None = None
+    log: list[AutoLog] = Field(default_factory=list)
+
+
+class ChatPlan(DomainModel):
+    """개발 AI가 대화로 정리한 구현 계획 (코딩 작업 입력)."""
+
+    title: str
+    plan: str
+    done: list[str] = Field(default_factory=list)
+    paths: list[str] = Field(default_factory=list)
+
+
+ChatKind = Literal["text", "question", "plan", "started", "waiting", "error"]
+
+
+class ChatMessage(DomainModel):
+    id: str  # m1, m2 … (대화 안에서)
+    role: Literal["user", "assistant"]
+    text: str
+    at: UtcDatetime
+    kind: ChatKind = "text"
+    plan: ChatPlan | None = None
+    task_id: str | None = None
+
+
+class ChatThread(DomainModel):
+    """개발 화면에서 개발팀원이 개발 AI와 나눈 대화 하나. 계획이 서면 코딩 작업을 띄운다.
+
+    status: talking(대화 중) · started(작업 띄움, `task_id`) · blocked(연결이 없어 못 띄움) ·
+    waiting(충돌하는 요청 `waiting_for`가 끝나면 마지막 계획으로 작업을 띄움)."""
+
+    id: str  # chat-1 …
+    title: str
+    status: Literal["talking", "started", "blocked", "waiting"] = "talking"
+    messages: list[ChatMessage] = Field(default_factory=list)
+    task_id: str | None = None
+    connection: str | None = None
+    waiting_for: list[str] = Field(default_factory=list)  # 끝나기를 기다리는 요청 ID
+    # 작업을 누가 코딩하나: agent(서버 AI, API 키) · subscription(개발자 본인 Claude, work_queue.py)
+    mode: Literal["agent", "subscription"] = "agent"
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+
+
+class State(DomainModel):
+    tenant_id: str = TENANT_ID_DEFAULT
+    seq: int = 0  # 들어오고 나간 연동 건마다 1씩 (새로 받은 것 표시용)
+    outbox: list[OutMsg] = Field(default_factory=list)
+    requests: list[Request] = Field(default_factory=list)
+    specs: list[Spec] = Field(default_factory=list)
+    tasks: list[Task] = Field(default_factory=list)
+    prs: list[PR] = Field(default_factory=list)
+    threads: list[Thread] = Field(default_factory=list)
+    docs: list[Doc] = Field(default_factory=list)
+    decisions: list[Decision] = Field(default_factory=list)
+    incidents: list[Incident] = Field(default_factory=list)
+    activity: list[Activity] = Field(default_factory=list)
+    # 지표 계산용 원자료 (코드로 계산)
+    drafts_in: int = 0
+    drafts_accepted: int = 0
+    warnings: int = 0
+    first_pr_minutes: list[int] = Field(default_factory=list)
+    auto_policy: AutoPolicy
+    chats: list[ChatThread] = Field(default_factory=list)  # 개발 AI 대화 (dev_chat.py)
+
+
+def dump(model: BaseModel) -> dict:
+    """화면·SSE로 내보내는 JSON 형태 (`from` 별칭, ISO8601 UTC)."""
+    return model.model_dump(mode="json", by_alias=True)
