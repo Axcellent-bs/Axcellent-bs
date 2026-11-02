@@ -6,7 +6,7 @@ import { ActivityList, Sec, State, Tag, rowNav } from '@/components/planning-com
 import { Linked, Ref, go, hrefOf, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
 import { CONFIRMED_BY, mergedLabel } from '@/components/planning-common/flow'
 import { RepoTag } from '@/components/planning-common/repo'
-import { useReleaseChecks } from '@/lib/planning'
+import { useReleaseChecks, type ReleaseCheck } from '@/lib/planning'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -33,30 +33,47 @@ function ReviewDecide({ d, spec, xr }: { d: Dispatch<Action>; spec: Spec; xr: No
   )
 }
 
-// ---------------------------------------------------------------- 배포 전 대조 (개발이 완료라고 하면 기획서와 맞춰 본 결과)
-const VERDICT = { ready: '배포 지시', hold: '보류', needs_human: '사람 확인' } as const
-const HOLD_LABEL: Record<string, string> = {
-  spec_not_confirmed: '기획서 미확정', para_without_task: '작업 없는 문단', task_not_merged: '머지 안 된 작업',
-  pr_outside_spec: '기획서 밖 PR', linked_incident_open: '열린 장애 표시', open_question: '남은 질문', spec_unknown: '모르는 기획서',
+// ---------------------------------------------------------------- 배포 전 확인 (개발이 다 됐다고 하면 기획서와 맞춰 본 결과)
+// 칩은 "무엇이 걸렸는지"만 보이고, 맞는 문단은 하나로 묶는다. 판정 코드는 화면에 내보내지 않는다
+const SPEC_BLOCK: Record<string, string> = {
+  spec_not_confirmed: '기획서 미확정', open_question: '질문 남음', spec_unknown: '기획서 없음', pr_outside_spec: '기획서 밖 PR',
 }
-const CONTENT = { match: '일치', mismatch: '불일치', none: '검수 없음' } as const
+const PARA_BLOCK = { missing_task: '작업 없음', not_merged: 'PR 머지 전', incident_open: '장애 열림' } as const
+function releaseState(rc: ReleaseCheck): { label: string; tone: 'green' | 'amber'; title?: string } {
+  if (rc.order_sent) return { label: '배포 지시 보냄', tone: 'green' }
+  if (rc.verdict === 'ready') return { label: '배포 가능 · 지시 못 보냄', tone: 'amber', title: rc.order_result ?? undefined }
+  if (rc.verdict === 'needs_human') return { label: '사람 확인 필요', tone: 'amber' }
+  return { label: '배포 전 남은 일', tone: 'amber' }
+}
 function ReleaseCheckBox({ d, spec }: { d: Dispatch<Action>; spec: string }) {
   const toast = useToast()
   const [rc] = useReleaseChecks(spec)
   if (!rc) return null
-  const canOrder = rc.verdict === 'needs_human' && !rc.order_sent
+  const st = releaseState(rc)
+  const ok = rc.items.filter((i) => i.status === 'covered' && i.content === 'match').map((i) => i.para_id)
+  const blocks: { key: string; label: string; title?: string }[] = [
+    ...rc.hold_reasons.filter((h) => SPEC_BLOCK[h]).map((h) => ({ key: h, label: SPEC_BLOCK[h] })),
+    ...rc.items.filter((i) => i.status !== 'covered').map((i) => ({ key: `${i.para_id}-s`, label: `${i.para_id} ${PARA_BLOCK[i.status as keyof typeof PARA_BLOCK]}` })),
+    ...rc.items.filter((i) => i.status === 'covered' && i.content === 'mismatch').map((i) => ({ key: `${i.para_id}-c`, label: `${i.para_id} 기획서와 다름`, title: i.content_notes.join('\n') })),
+    ...rc.items.filter((i) => i.status === 'covered' && i.content === 'none').map((i) => ({ key: `${i.para_id}-n`, label: `${i.para_id} 검수 결과 없음` })),
+  ]
   return (
-    <Notice tone={rc.verdict === 'hold' ? 'warn' : undefined}>
+    <Notice tone={st.tone === 'amber' ? 'warn' : undefined}>
       <div className="xr-decide">
-        <span>배포 전 대조 <span className="mono muted">{rc.check_id}</span> <State v={VERDICT[rc.verdict]} /> <span className="muted small">{rc.env} · PR {rc.pr_numbers.map((n) => `#${n}`).join(', ')}</span></span>
+        <b>배포 전 확인</b>
+        <Tag tone={st.tone} title={st.title}>{st.label}</Tag>
+        <span className="muted small">{rc.env} · PR {rc.pr_numbers.map((n) => `#${n}`).join(', ')} · {rc.check_id}</span>
         <span style={{ flex: 1 }} />
-        {rc.order_sent ? <Tag tone="green">지시 보냄</Tag> : rc.order_result ? <Tag tone="amber">{rc.order_result}</Tag> : null}
-        {canOrder && <Button variant="primary" onClick={() => { d({ type: 'sendReleaseOrder', check: rc.check_id }); toast.show(`${rc.check_id} 배포 지시`) }}>배포 지시</Button>}
+        {rc.verdict === 'needs_human' && !rc.order_sent && (
+          <Button variant="primary" onClick={() => { d({ type: 'sendReleaseOrder', check: rc.check_id }); toast.show(`${rc.check_id} 배포 지시`) }}>확인하고 배포 지시</Button>
+        )}
       </div>
-      {rc.hold_reasons.length > 0 && <div className="xr-decide">{rc.hold_reasons.map((h) => <Tag key={h} tone="amber">{HOLD_LABEL[h] ?? h}</Tag>)}</div>}
-      <div className="xr-decide" style={{ flexWrap: 'wrap' }}>
-        {rc.items.map((i) => <Tag key={i.para_id} tone={i.content === 'match' && i.status === 'covered' ? 'green' : 'amber'}>{i.para_id} {CONTENT[i.content]}</Tag>)}
-      </div>
+      {(blocks.length > 0 || ok.length > 0) && (
+        <div className="xr-decide" style={{ flexWrap: 'wrap' }}>
+          {blocks.map((b) => <Tag key={b.key} tone="amber" title={b.title}>{b.label}</Tag>)}
+          {ok.length > 0 && <Tag tone="green">{ok.join('·')} 기획서대로</Tag>}
+        </div>
+      )}
     </Notice>
   )
 }
