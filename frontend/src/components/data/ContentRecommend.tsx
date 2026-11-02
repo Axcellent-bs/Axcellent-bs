@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Chip, Empty, ErrorBox, Panel, TONE, Waiting } from "@/components/finance/bits";
 import { SEND_TO_MARKETING_BLOCKED, type LoopProbe } from "@/lib/contentLoop";
-import { DATA_SERVER, UNKNOWN, dataAi, kpiLive, type ContentRecommendOutput, type ContentRecommendation } from "@/lib/data";
+import { CANDIDATE_ORIGIN_LABEL, DATA_SERVER, UNKNOWN, dataAi, kpiLive, type ContentRecommendOutput, type ContentRecommendation } from "@/lib/data";
 import { strengthLabel } from "@/lib/trendWording";
 
 // 트렌드 탭 2단계 "영상 소재 추천" (#trend/recommend): 데이터 AI(8106) content_recommend 출력을 그대로 보여 준다.
@@ -53,6 +53,7 @@ function RecommendCard({ item }: { item: ContentRecommendation }) {
         ) : (
           <Chip label="회사 관련 낮음" tone={TONE.warn} />
         )}
+        {(item.origins ?? []).map((o) => <Chip key={o} label={`출처: ${CANDIDATE_ORIGIN_LABEL[o]}`} tone={TONE.muted} />)}
         <Chip label={item.format} tone={TONE.info} />
         {item.fallback && <Chip label="기본 문장" tone={TONE.muted} />}
       </div>

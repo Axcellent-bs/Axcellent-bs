@@ -66,3 +66,11 @@ months = 24   # 볼 개월 수 (작년 같은 달과 비교하려면 13개월 �
 # 판정은 하지 않는다 (스냅샷이 며칠 쌓이면 평소 속도와 비교한 판정을 붙일 예정)
 [velocity]
 top = 10
+
+# 인기 검색어(data trend_candidates 후보 출처): Google Trends 공개 RSS 스냅샷(data trending_collect)에서
+# 검색어를 후보로 쓴다. 정리·별칭·제외 규칙은 YouTube 태그와 같다. YouTube 후보와 이름이 겹치면 그 후보에
+# 근거로 붙고, 겹치지 않는 것만 따로 후보(최대 max_candidates개)가 된다. 후보마다 네이버 1번
+[trending]
+geo = "KR"               # 지역 (피드 geo)
+max_candidates = 5       # YouTube 후보와 겹치지 않는 인기 검색어 후보 수 상한 (피드 순위 순)
+max_age_hours = 24       # 스냅샷이 이보다 오래되면 이 출처만 unknown + 이유

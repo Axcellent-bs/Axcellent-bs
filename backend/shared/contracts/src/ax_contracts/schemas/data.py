@@ -623,6 +623,20 @@ class YouTubeTagEvidence(AxModel):
     matched_tags: list[str] = Field(default_factory=list)
 
 
+# 후보가 어디서 나왔는지 (화면 표시: youtube_tag = YouTube 태그, trending_search = 인기 검색어)
+CandidateOrigin = Literal["youtube_tag", "youtube_title", "trending_search"]
+
+
+class TrendingSearchEvidence(AxModel):
+    """인기 검색어 근거 (공개 피드 스냅샷 한 시각, 피드에 있는 값 그대로)."""
+
+    rank: int = Field(ge=1)  # 피드 안 순서
+    traffic: str | None = None  # 피드의 트래픽 표시값 (예: "500+", 검색 건수가 아님). 없으면 None
+    snapshot_at: UtcDatetime  # 스냅샷 수집 시각
+    source: str = "google_trends_rss"  # 피드 이름
+    keyword: str | None = None  # 피드에 나온 검색어 그대로 (정리 전)
+
+
 class TrendCandidate(AxModel):
     keyword: str = Field(min_length=1)  # 정리한 태그 (앞뒤 공백·# 제거, 영문 소문자)
     youtube: YouTubeTagEvidence
@@ -641,6 +655,23 @@ class TrendCandidate(AxModel):
     # `naver`가 어디서 왔는지: group = 묶음 그룹 판정,
     # name = 묶음은 급상승이 아닌데 이름 하나가 급상승 (그 이름들 중 z가 가장 큰 판정을 올림)
     naver_from: Literal["group", "name"] = "group"
+    # 아래는 출처 추가 (예전 응답은 없다). 이 후보가 나온 곳 (YouTube 태그는 늘, 인기 검색어에도
+    # 있으면 trending_search가 붙고 `trending`에 그 근거)
+    origins: list[CandidateOrigin] = Field(default_factory=list)
+    trending: TrendingSearchEvidence | None = None
+
+
+class TrendingCandidate(AxModel):
+    """인기 검색어에서만 나온 후보 (YouTube 근거 없음). 네이버 판정은 YouTube 후보와 같은 함수."""
+
+    keyword: str = Field(min_length=1)  # 정리한 검색어 (별칭 표가 있으면 대표 이름)
+    trending: TrendingSearchEvidence
+    naver: TrendVerdict
+    aliases: list[str] = Field(default_factory=list)
+    name_verdicts: list[TrendVerdict] = Field(default_factory=list)
+    rising_names: list[str] = Field(default_factory=list)
+    naver_from: Literal["group", "name"] = "group"
+    origins: list[CandidateOrigin] = Field(default_factory=lambda: ["trending_search"])
 
 
 class TrendCandidatesOutput(AxModel):
@@ -653,6 +684,12 @@ class TrendCandidatesOutput(AxModel):
     candidates: list[TrendCandidate] = Field(default_factory=list)  # 나온 영상 수 많은 순
     naver_calls: int = Field(default=0, ge=0)  # 네이버 검색어 트렌드를 부른 수 (실패 포함)
     summary: str  # 한 문장 (코드가 숫자로 만든 고정 문장)
+    # 아래는 인기 검색어 출처 (예전 응답은 없다). YouTube 후보와 이름이 겹치면 그 후보에 붙고
+    # (`TrendCandidate.trending`), 겹치지 않는 것만 여기 (피드 순위 순)
+    trending_candidates: list[TrendingCandidate] = Field(default_factory=list)
+    trending_status: Literal["known", "unknown"] = "unknown"  # 인기 검색어 스냅샷을 썼는지
+    trending_reason: str | None = None  # unknown이면 이유 (스냅샷 없음·오래됨)
+    trending_snapshot_at: UtcDatetime | None = None  # 쓴 인기 검색어 스냅샷 시각
 
     @model_validator(mode="after")
     def _known_or_reason(self) -> Self:
@@ -779,6 +816,7 @@ class YouTubeVelocityOutput(AxModel):
 
 ContentFormat = Literal["숏폼", "롱폼"]
 ContentSource = Literal["naver", "youtube"]  # 검색 급상승, YouTube 인기 태그
+RecommendOrigin = Literal["keyword_group", "youtube_tag", "youtube_title", "trending_search"]
 
 
 class ContentRecommendRequest(AxModel):
@@ -813,6 +851,8 @@ class ContentRecommendation(AxModel):
     format: ContentFormat  # 형식 제안
     fallback: bool  # 아이디어 문장을 고정 문장으로 바꿨는지
     fallback_reason: str | None = None  # llm_unavailable·llm_error·format_error·number_invalid
+    # 소재가 나온 곳 (예전 응답은 없다): keyword_group = 회사 기본 키워드 그룹, 그 밖은 후보 출처
+    origins: list[RecommendOrigin] = Field(default_factory=list)
 
 
 class ContentRecommendOutput(AxModel):

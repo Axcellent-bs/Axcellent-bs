@@ -315,6 +315,40 @@ export interface TrendCandidate {
   rising_names?: string[];
   /** naver 판정이 어디서 왔는지: group = 묶음 그룹, name = 묶음은 평범인데 이름 하나가 급상승. 예전 응답은 없다 */
   naver_from?: "group" | "name";
+  /** 후보가 나온 곳. 예전 응답은 없다 */
+  origins?: CandidateOrigin[];
+  /** 인기 검색어에도 있으면 그 근거. 예전 응답은 없다 */
+  trending?: TrendingSearchEvidence | null;
+}
+/** 후보가 나온 곳 (서버 값). 화면 이름: CANDIDATE_ORIGIN_LABEL */
+export type CandidateOrigin = "youtube_tag" | "youtube_title" | "trending_search";
+export const CANDIDATE_ORIGIN_LABEL: Record<CandidateOrigin | "keyword_group", string> = {
+  keyword_group: "회사 기본 키워드",
+  youtube_tag: "YouTube 태그",
+  youtube_title: "YouTube 제목",
+  trending_search: "인기 검색어",
+};
+/** 인기 검색어 근거 (Google Trends 공개 RSS 스냅샷, 피드 값 그대로) */
+export interface TrendingSearchEvidence {
+  /** 피드 안 순서 */
+  rank: number;
+  /** 피드의 트래픽 표시값 (예: "500+", 검색 건수가 아님) */
+  traffic: string | null;
+  snapshot_at: string;
+  source?: string;
+  /** 피드에 나온 검색어 그대로 */
+  keyword?: string | null;
+}
+/** 인기 검색어에서만 나온 후보 (YouTube 근거 없음) */
+export interface TrendingCandidate {
+  keyword: string;
+  trending: TrendingSearchEvidence;
+  naver: TrendVerdict;
+  aliases?: string[];
+  name_verdicts?: TrendVerdict[];
+  rising_names?: string[];
+  naver_from?: "group" | "name";
+  origins?: CandidateOrigin[];
 }
 export interface TrendCandidatesOutput {
   /** unknown = 스냅샷이 없거나 오래됨 (후보를 뽑지 않음) */
@@ -329,6 +363,11 @@ export interface TrendCandidatesOutput {
   naver_calls: number;
   /** 코드가 숫자로 만든 한 문장 */
   summary: string;
+  /** 인기 검색어에서만 나온 후보 (피드 순위 순). 예전 응답은 없다 */
+  trending_candidates?: TrendingCandidate[];
+  trending_status?: "known" | "unknown";
+  trending_reason?: string | null;
+  trending_snapshot_at?: string | null;
 }
 
 /** 한 번에 판정할 수 있는 그룹 수 (화면 입력 한도) */
@@ -429,6 +468,8 @@ export interface ContentRecommendation {
   /** 아이디어 문장을 서버 기본 문장으로 바꿨는지 */
   fallback: boolean;
   fallback_reason: string | null;
+  /** 소재가 나온 곳 (예전 응답은 없다) */
+  origins?: (CandidateOrigin | "keyword_group")[];
 }
 export interface ContentRecommendOutput {
   start_date: string | null;
