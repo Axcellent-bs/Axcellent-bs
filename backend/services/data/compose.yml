@@ -10,3 +10,9 @@ services:
         required: false
       - path: ./.env
         required: false
+    environment:
+      # 검색어 급상승(trend_scan) 기본 키워드 그룹. 이미지에 backend/가 /app으로 들어간다(COPY . .)
+      # 회사는 AX_TENANT(기본 catbooks). 바꾸려면 셸 환경변수 DATA_TREND_CONFIG·AX_TENANT로 준다
+      # (env_file .env에 적은 값은 이 줄에 덮인다)
+      # 이 블록은 scripts/split_services.py가 만드는 파일에 손으로 넣었다. 스크립트를 다시 돌리면 빠진다
+      DATA_TREND_CONFIG: ${DATA_TREND_CONFIG:-/app/config/tenants/${AX_TENANT:-catbooks}/trends.toml}
