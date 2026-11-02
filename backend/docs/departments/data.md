@@ -48,6 +48,7 @@ Oct 21, 2026 · @재현
 | `card_search` | 유사 카드 검색 | read | 필수 | 모든 에이전트 |
 | `card_get` | 카드 단건 조회 | read | 필수 | 모든 에이전트, dashboard-api |
 | `card_link` | 카드 대체·폐기 연결 | A | 권장 | hr |
+| `card_review` | 후보 카드 승인·폐기 반영 (#304) | A | 권장 | hr |
 
 `card_write`는 내부 기록이라 A 등급이지만, 규약대로 `execute()`를 거친다. 카드 문장은 쓰는 부서가 책임지고, memory는 저장·검색만 한다.
 
@@ -116,6 +117,7 @@ DejaFix가 서버 지표를 보고, data는 장사가 잘못되고 있는지(업
 | `card_search` | `query`, `kind` 필터, `status`(기본 active), `topK` | 카드 목록 + 유사도 점수 |
 | `card_get` | `cardId` | 카드 |
 | `card_link` | `oldCardId`, `newCardId`, 관계(superseded / retired) | 연결 결과 |
+| `card_review` | `cardId`, 결정(approve / reject) | 바뀐 카드, 바뀌었는지 |
 
 - 검색은 **벡터 유사도 + 필드 필터**를 함께 쓴다 (예: kind = decision, status = active, 최근 90일).
 - 확신도 낮은(`confidence: low`) 카드는 검색 결과에서 표시만 하고, 판정 근거로는 쓰지 않도록 응답에 표시한다.
@@ -223,7 +225,7 @@ data는 네 시나리오 모두에 들어가며, SCN-A와 SCN-L에서는 흐름�
 
 | 안전장치 | data / memory에서 할 일 |
 | --- | --- |
-| 실행 관문 `execute()` | memory `card_write`, `card_link`만 해당 (A 등급). data skill은 조회라 대상 없음 |
+| 실행 관문 `execute()` | memory `card_write`, `card_link`, `card_review`만 해당 (A 등급). data skill은 조회라 대상 없음 |
 | contextId 필수 | 모든 결과·이벤트·카드에 포함, 없으면 요청 거부 |
 | 루프 거부·홉 제한·타임아웃 | 템플릿 사용. 개발 질의(①)는 짧은 마감 시각을 둔다 |
 | 인증·ACL | Agent Card의 `allowedRequesters` 그대로. 특히 `fraud_score`는 orchestrator만 |

@@ -196,6 +196,13 @@ owner = "memory"
 requesters = ["hr"]
 base_grade = "A"
 
+# 후보 카드 승인·폐기 반영 (#304). 사람이 hr decide_candidate_card로 정한 결과를 memory에 쓴다
+[[actions]]
+action = "memory.card_review"
+owner = "memory"
+requesters = ["hr"]
+base_grade = "A"
+
 # ---- 변경 요청 결과 받기 (#280·#292). planning이 요청을 닫을 때 보낸 결과를 요청 부서가 자기 기록에 반영한다
 # 상태 변경은 요청 부서 쪽 기록뿐이고 돈·외부 시스템을 건드리지 않아 A. 멱등성 키 ctx_req_…:change_result:REQ-n
 [[actions]]

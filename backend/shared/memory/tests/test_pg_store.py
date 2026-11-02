@@ -14,6 +14,7 @@ import pytest
 from ax_contracts.schemas.record import Card
 from ax_memory import pg_store
 from ax_memory.pg_store import (
+    CARD_COLUMNS,
     PgCardStore,
     PgVectorIndex,
     card_to_row,
@@ -111,8 +112,21 @@ def test_row_card_roundtrip():
         row[11],
         row[12],
         json.loads(row[13]),
+        row[14],  # candidate
     )
     assert row_to_card(db_row) == card
+    # 후보 카드도 왕복한다 (#304)
+    candidate = card.model_copy(update={"candidate": True})
+    row = card_to_row(candidate, "key")
+    assert row[14] is True and row[-1] == "key"
+    assert row_to_card((*db_row[:14], row[14])) == candidate
+
+
+def test_schema_adds_the_candidate_column_to_old_tables():
+    """예전 테이블에도 후보 칸을 더한다 (기존 카드는 false)."""
+    sql = schema_sql(768)
+    assert "ADD COLUMN IF NOT EXISTS candidate boolean NOT NULL DEFAULT false" in sql
+    assert CARD_COLUMNS.endswith(", candidate")
 
 
 def test_vector_index_rejects_wrong_dim_without_db():
@@ -178,6 +192,18 @@ def test_update_status(conn):
     assert updated.status == "superseded"
     assert store.get(card.card_id).superseded_by == new.card_id
     assert store.list(status="active") == [new]
+
+
+@needs_db
+def test_candidate_is_saved_and_changed(conn):
+    """후보 카드 저장·변경 (#304)."""
+    store = PgCardStore(conn)
+    card = store.write(_draft(title="후보 결정", candidate=True)).card
+    assert card.candidate is True and store.get(card.card_id).candidate is True
+    assert store.update_candidate(card.card_id, False).candidate is False
+    assert store.get(card.card_id).candidate is False
+    with pytest.raises(KeyError):
+        store.update_candidate("card_none", False)
 
 
 @needs_db

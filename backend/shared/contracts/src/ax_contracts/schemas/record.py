@@ -103,6 +103,9 @@ class CardDraft(AxModel):
     author: str
     confidence: Literal["low", "mid", "high"]
     extra: dict[str, Any] = Field(default_factory=dict)
+    # 사람 확인을 기다리는 후보 카드로 저장한다(`Card.candidate`). 사람이 `card_review`로 승인하면
+    # false가 된다. 예전 요청에는 없다(false)
+    candidate: bool = False
 
 
 class CardWriteInput(AxModel):
@@ -165,3 +168,21 @@ class CardLinkInput(AxModel):
 
 class CardLinkOutput(AxModel):
     old_card: Card
+
+
+class CardReviewInput(AxModel):
+    """`card_review` 입력. 후보 카드(`candidate`가 true)를 사람이 승인하거나 폐기한 결과를 반영한다.
+
+    - `approve`: `candidate`가 false가 된다(`status`는 `active` 그대로). 판정 근거로 쓰인다.
+    - `reject`: `status`가 `retired`가 된다(`candidate`는 그대로). 판정 근거로 쓰이지 않는다.
+    """
+
+    card_id: CardId
+    decision: Literal["approve", "reject"]
+
+
+class CardReviewOutput(AxModel):
+    """바뀐 뒤의 카드. 이미 그 결정이 반영돼 있으면 `changed`가 false다."""
+
+    card: Card
+    changed: bool

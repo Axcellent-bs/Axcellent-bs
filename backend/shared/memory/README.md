@@ -3,11 +3,13 @@
 ## 1. 역할
 **회사 기억**. 부서들이 만든 카드(사건·결정·사례·공지·정책·사기·요청)를 저장하고, 의미가 가까운 카드를 찾아 주고, 옛 카드를 새 카드로 대체·폐기 연결한다. 카드 문장은 쓰는 부서가 만들고 memory는 `title`·`body`를 바꾸지 않는다.
 
-- skill 4개 (`src/ax_memory/handlers.py`, `agent-card.json`)
+- skill 5개 (`src/ax_memory/handlers.py`, `agent-card.json`)
   - `card_write` (등급 A): 카드 저장. 저장 전에 `execute("memory.card_write")`가 `executed`를 돌려줘야 한다. `meta.idempotency_key`가 없으면 `invalid_input`. `card.tenant_id`가 요청 `meta.tenant_id`와 다르면 `invalid_input`
   - `card_search` (read): 의미 검색. 상태를 바꾸지 않는다. 부를 때마다 공통 로그 `memory_referenced`(requester·card_ids·hit_count)를 남긴다
   - `card_get` (read): `card_id`로 한 장. 없거나 다른 회사 카드면 `failed` + `card_not_found`
   - `card_link` (등급 A): 옛 카드를 `superseded`(새 카드 id를 `superseded_by`에) 또는 `retired`로 바꾼다. `execute("memory.card_link")`를 거친다. 두 카드가 모두 같은 회사에 있어야 하고, 같은 카드끼리는 거부
+  - `card_review` (등급 A, #304): 후보 카드(`candidate: true`)를 사람이 승인·폐기한 결과를 반영한다. 승인이면 `candidate`가 false(`status`는 `active` 그대로), 폐기면 `status`가 `retired`. `execute("memory.card_review")`를 거친다. 이미 반영된 결정이면 바꾸지 않고 `outcome: duplicate`·`changed: false`, 후보가 아닌 카드는 `failed` + `not_candidate`
+- 후보 카드 (#304): `card_write`의 `card.candidate: true`로 저장한다(기본 false). 저장소 두 곳(`store.py` 메모리, `pg_store.py` `cards.candidate` 칸) 모두 저장한다. 예전 Postgres 테이블은 서버를 켤 때 칸을 더한다(기존 카드는 false). `card_search`·`card_get` 결과에 그대로 나오고, 판정 근거에서 빼는 것은 읽는 쪽이 정한다(data `past_incidents`는 뺀다)
 - 멱등 (`store.py`): 키 = `context_id + kind + sha256(title)`, 회사(`tenant_id`)마다 따로 본다. 같은 키로 다시 쓰면 새로 만들지 않고 기존 카드를 `created: false`로 돌려준다. 그래서 같은 제목은 다시 쓸 수 없고, 내용을 바꾸려면 새 제목으로 쓰고 `card_link`로 옛 카드를 대체한다
 - 외부 입력(`request.untrusted`)은 본문에 섞지 않고 `extra["untrusted"]`에만 둔다
 
@@ -22,10 +24,13 @@
 | `decision`·`case`·`notice` | 확인 필요 (아래 "인사 AI와의 관계") | 확인 필요 |
 | `fraud` | 확인 필요 | 확인 필요 |
 
-- `card_link`를 A2A로 부르는 코드는 찾지 못했다 (Agent Card상 요청 가능한 쪽은 hr뿐)
+- `card_link`·`card_review`를 A2A로 부르는 코드는 아직 없다 (Agent Card상 요청 가능한 쪽은 hr뿐). hr 전환 때 쓴다(#304)
 - `card_get`의 요청 가능 목록에는 dashboard-api가 있지만, 부르는 코드는 확인 필요
 
-### 인사 AI와의 관계 (확인 필요)
+### 인사 AI와의 관계 (#304)
+**결정 (2026-11-02, #304):** 사건·결정·사례 카드의 원본 저장소는 **이 memory 서버 하나**다. memory에 REST를 두지 않고, hr는 A2A `card_write`·`card_search`·`card_get`·`card_link`·`card_review`로 맞춘다(전환은 hr 담당). 그 전까지 hr는 자기 SQLite를 그대로 쓰고, 기존 hr SQLite 카드를 옮길지는 전환 때 정한다.
+
+지금 상태:
 인사 AI(hr)는 사건·결정·사례 카드를 만들고 관문 `memory.card_write`·`memory.card_link`를 거치지만, 저장은 memory A2A가 아니라 hr의 `MemoryClient`로 한다.
 - 기본 `HR_MEMORY_MODE=mock`: hr 자기 저장소(`HR_DB_PATH`의 SQLite)에 둔다. `scripts/run_all.sh`도 이 값을 바꾸지 않는다
 - `HR_MEMORY_MODE=http`: `clients/real.py`가 REST `POST /api/memory/cards`, `GET /api/memory/cards/search` 등을 부른다. 이 서버(`src/ax_memory/`)에는 그 REST 경로가 없다(`/a2a`·`/health`·Agent Card만 있음). 맞추는 일은 확인 필요
@@ -94,18 +99,19 @@ memory는 하한 없이 점수만 준다. 하한은 각 부서 코드에 있다.
 | `card_search` | `CardSearchInput{query, kind[], status, since, top_k}` → `CardSearchOutput{hits: CardHit[]}` | read | orchestrator, planning, support, marketing, hr, finance, data, infra, safety |
 | `card_get` | `CardGetInput{card_id}` → `CardGetOutput{card}` | read | 위 + dashboard-api |
 | `card_link` | `CardLinkInput{old_card_id, new_card_id, relation}` → `CardLinkOutput{old_card}` | A | hr |
+| `card_review` | `CardReviewInput{card_id, decision: approve\|reject}` → `CardReviewOutput{card, changed}` | A | hr |
 
 - 관문 결과에 따라: `held` → `input-required`(사람 승인 대기), `verifying` → `working`, 검증 거절 → `completed` + `rejected_by_review`, 검증 시간 초과 → `canceled` + `TIMEOUT`, 그 밖의 거부·실패 → `failed`
-- `Card.candidate`(사람 확인 전 후보)는 계약에 있지만 memory 저장소는 이 값을 저장·변경하지 않는다(항상 `false`). 후보 표시를 누가 채우는지는 확인 필요
+- `Card.candidate`(사람 확인 전 후보)는 `card_write`(`CardDraft.candidate`)로 저장하고 `card_review`로 바꾼다(#304)
 - MCP 도구 이름: `memory_write_card`·`memory_search_card`·`memory_get_card`·`memory_link_card` (Agent Card 설명)
 
 ## 4. 의존
-ax-contracts, ax-agent-template (`create_agent_app`, `execute`, `LLMClient.embed`, `log_event`), safety(관문 `memory.card_write`·`memory.card_link`), 임베딩 모델(LLM 엔드포인트), PostgreSQL + pgvector(선택, `psycopg`)
+ax-contracts, ax-agent-template (`create_agent_app`, `execute`, `LLMClient.embed`, `log_event`), safety(관문 `memory.card_write`·`memory.card_link`·`memory.card_review`), 임베딩 모델(LLM 엔드포인트), PostgreSQL + pgvector(선택, `psycopg`)
 
 ## 5. 하지 않는 것
 - 카드 문장을 쓰거나 고치지 않는다 (쓰는 부서 책임). 요약·생성에 LLM을 쓰지 않는다 (임베딩만)
 - 점수 하한·"관련 있음" 판정을 하지 않는다 (읽는 쪽이 정함). `low_confidence` 카드도 빼지 않고 표시만 한다
 - 정책 판정을 하지 않는다: 시드 정책은 조건과 사실만 담고, 보상 금액·등급은 고객지원·마케팅·안전 레이어, 사기 점수는 data, 심사는 finance
-- 카드를 지우지 않는다. 옛 카드는 `card_link`로 `superseded`·`retired`가 될 뿐이다
+- 카드를 지우지 않는다. 옛 카드는 `card_link`로 `superseded`·`retired`, 폐기한 후보 카드는 `card_review`로 `retired`가 될 뿐이다
 - 다른 회사 카드를 보여 주지 않는다 (`tenant_id`로 거름)
 - 관문(`execute()`) 없이 카드를 쓰거나 상태를 바꾸지 않는다

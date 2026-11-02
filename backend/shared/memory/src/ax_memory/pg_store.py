@@ -34,7 +34,7 @@ DEFAULT_EMBED_DIM = 768
 # SELECT·RETURNING에서 쓰는 카드 컬럼 순서. 행 -> Card 변환(`row_to_card`)과 맞춰야 한다.
 CARD_COLUMNS = (
     "card_id, tenant_id, context_id, kind, title, body, tags, status, "
-    "superseded_by, source_refs, author, confidence, created_at, extra"
+    "superseded_by, source_refs, author, confidence, created_at, extra, candidate"
 )
 
 
@@ -88,6 +88,9 @@ CREATE TABLE IF NOT EXISTS cards (
 
 CREATE INDEX IF NOT EXISTS cards_tenant_kind_status_idx
     ON cards (tenant_id, kind, status);
+
+-- 후보 카드 표시 (#304). 예전 테이블에는 없어서 칸을 더한다(기존 카드는 false)
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS candidate boolean NOT NULL DEFAULT false;
 """
 
 
@@ -120,6 +123,7 @@ def row_to_card(row: tuple[Any, ...]) -> Card:
         confidence,
         created_at,
         extra,
+        candidate,
     ) = row
     return Card(
         card_id=card_id,
@@ -136,6 +140,7 @@ def row_to_card(row: tuple[Any, ...]) -> Card:
         confidence=confidence,
         created_at=created_at,
         extra=dict(extra),
+        candidate=bool(candidate),
     )
 
 
@@ -156,6 +161,7 @@ def card_to_row(card: Card, key: str) -> tuple[Any, ...]:
         card.confidence,
         card.created_at,
         json.dumps(card.extra, ensure_ascii=False),
+        card.candidate,
         key,
     )
 
@@ -206,6 +212,7 @@ class PgCardStore:
             author=draft.author,
             confidence=draft.confidence,
             created_at=self._clock(),
+            candidate=draft.candidate,
             extra=dict(draft.extra),
         )
         with self._lock:
@@ -214,9 +221,9 @@ class PgCardStore:
                 INSERT INTO cards (
                     card_id, tenant_id, context_id, kind, title, body, tags, status,
                     superseded_by, source_refs, author, confidence, created_at, extra,
-                    idempotency_key
+                    candidate, idempotency_key
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s::jsonb, %s, %s, %s,
-                          %s::jsonb, %s)
+                          %s::jsonb, %s, %s)
                 ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
                 RETURNING {CARD_COLUMNS}
                 """,  # noqa: S608 - CARD_COLUMNS는 상수
@@ -281,6 +288,16 @@ class PgCardStore:
                 (updated.status, updated.superseded_by, card_id),
             )
             return updated
+
+    def update_candidate(self, card_id: str, candidate: bool) -> Card:
+        with self._lock:
+            row = self._conn.execute(
+                f"UPDATE cards SET candidate = %s WHERE card_id = %s RETURNING {CARD_COLUMNS}",  # noqa: S608
+                (candidate, card_id),
+            ).fetchone()
+        if row is None:
+            raise KeyError(card_id)
+        return row_to_card(row)
 
 
 class PgVectorIndex:
