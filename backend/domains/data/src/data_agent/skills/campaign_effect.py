@@ -17,8 +17,8 @@
 - 기록 공백은 "줄었음"이 아니라 unknown + 이유다(shop-api는 주문이 없는 5분을 0으로 준다):
   - 구간에 주문·결제 기록이 하나도 없음: 이상 탐지와 같은 함수(`judge.empty_window`)·문장
     (`detect.empty_reason`)
-  - 결제 시도 0인 5분 칸 비율이 지난 7일 같은 시간대보다 `GAP_SHARE` 이상 높고 `GAP_MIN_BUCKETS`칸
-    이상 많음: "기록 공백 의심 (N칸)". 통째로 빈 지난날은 비교에서 뺀다(그날도 공백이라서)
+  - 결제 시도 0인 5분 칸이 `GAP_MIN_RUN`칸 이상 이어지고, 비교 구간에서 가장 길게 이어진 것의
+    `GAP_RUN_FACTOR`배 이상: "기록 공백 의심 (N칸)". 통째로 빈 지난 구간은 비교에서 뺀다
 - 판정할 수 없으면 0으로 채우지 않고 unknown + 이유: 기준선 주문이 0건, 시작 전 기록 부족(N일),
   기준선에 쓸 지난 구간이 없음, 캠페인이 7일보다 김, campaign_id 없음, 캠페인 쿠폰 없음.
 - 주문 지표를 못 읽으면(shop-api 꺼짐) `ConnectorUnavailable`을 그대로 올린다
@@ -80,12 +80,14 @@ DIRECTION_KO = {"up": "늘었음", "none": "같음", "down": "줄었음"}
 NO_REVENUE = (
     "매출 지표가 없음 (shop-api metric-series에 매출이 없고 카탈로그 revenue_metric이 비어 있음)"
 )
-# 기록 공백 의심: 결제 시도 0인 5분 칸 비율이 비교 구간보다 이만큼 높고, 칸 수로도 이만큼 많을 때
-# 근거(README): 평소 새벽 1시간은 비율이 28.6%p까지 튀지만 칸은 3.4칸 이하,
-# 평소 24시간은 1.6%p·4.7칸 이하. 3시간 공백은 낮 10.5%p·30칸 이상, 새벽 7.3%p·21칸 이상.
-# 1시간보다 짧은 공백은 잡지 않는다
-GAP_SHARE = 0.05  # 5%p
-GAP_MIN_BUCKETS = 12  # 1시간
+# 기록 공백 의심: 결제 시도 0인 5분 칸이 "가장 길게 이어진 길이"가 이만큼 이상이고, 비교 구간의
+# 가장 긴 이어짐의 이만큼 배 이상일 때. 서버가 꺼지면 빈 칸이 한 덩어리로 이어지고,
+# 주문이 적은 가게의 실제 감소는 빈 칸이 흩어진다.
+# 예전 비율 규칙(5%p·12칸)은 둘을 구분하지 못했다(#306 → 이 규칙).
+# 근거(README "기록 공백 기준"): 평소 구간은 최장이 비교 구간 최장의 1.81배 이하, 바쁜 가게의
+# 3시간 공백은 6배 이상. 1시간보다 짧은 공백은 잡지 않는다
+GAP_MIN_RUN = 12  # 1시간
+GAP_RUN_FACTOR = 2.0  # 비교 구간 최장 이어짐의 2배
 
 
 # ---------------------------------------------------------------- 회사 시간대
@@ -143,6 +145,16 @@ class Span:
             return None
         return sum(1 for b in self.slots() if not self.payments.get(b))
 
+    def longest_zero_run(self) -> int | None:
+        """결제 시도 0인 5분 칸이 가장 길게 이어진 칸 수. 결제 시도를 주지 않으면 None."""
+        if self.payments is None:
+            return None
+        best = current = 0
+        for b in self.slots():
+            current = current + 1 if not self.payments.get(b) else 0
+            best = max(best, current)
+        return best
+
     def total(self) -> float | None:
         return float(sum(self.orders.values())) if self.has_points else None
 
@@ -177,17 +189,21 @@ def _cut(whole: Span, label: str, start: datetime, end: datetime) -> Span:
 
 
 def _gap(span: Span, others: list[Span]) -> str | None:
-    """`span`의 결제 0칸이 `others`(빈 구간 제외)보다 기준 이상 많으면 그 이유 (#306 규칙)."""
-    zeros = span.zeros()
-    usable = [o for o in others if not o.empty() and o.zeros() is not None]
-    if zeros is None or not usable:
+    """`span`의 결제 0칸이 `others`(빈 구간 제외)보다 길게 한 덩어리로 이어지면 그 이유.
+
+    가장 길게 이어진 0칸이 `GAP_MIN_RUN` 이상이고 비교 구간들 중 가장 긴 이어짐의 `GAP_RUN_FACTOR`배
+    이상이면 기록 공백 의심이다. 흩어진 빈 칸(주문이 적은 가게의 실제 감소)은 잡지 않는다.
+    """
+    run = span.longest_zero_run()
+    usable = [o for o in others if not o.empty() and o.longest_zero_run() is not None]
+    if run is None or not usable:
         return None
-    usual = sum(o.zeros() or 0 for o in usable) / sum(len(o.slots()) for o in usable)
-    slots = len(span.slots())
-    share = zeros / slots
-    if share - usual >= GAP_SHARE and zeros - usual * slots >= GAP_MIN_BUCKETS:
+    usual = max(o.longest_zero_run() or 0 for o in usable)
+    if run >= GAP_MIN_RUN and run >= GAP_RUN_FACTOR * usual:
+        zeros = span.zeros()
         return (
-            f"기록 공백 의심 ({zeros}칸): 결제 시도 0인 5분 칸 {share:.0%}, 비교 구간 {usual:.0%}"
+            f"기록 공백 의심 ({zeros}칸): 결제 시도 0인 5분 칸이 {run}칸 이어짐,"
+            f" 비교 구간에서 가장 길게 이어진 것은 {usual}칸"
         )
     return None
 

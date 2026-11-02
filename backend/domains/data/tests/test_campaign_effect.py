@@ -537,3 +537,37 @@ def test_tenant_timezone_comes_from_config_not_code() -> None:
     assert str(tenant_timezone({"DATA_TENANT_TIMEZONE": "Asia/Tokyo"})) == "Asia/Tokyo"
     assert str(tenant_timezone({})) == "Asia/Seoul"  # 회사 폴더 config/tenants/catbooks/tenant.toml
     assert tenant_timezone({"DATA_TENANT_TIMEZONE": "Not/AZone"}) == UTC
+
+
+# ---------------------------------------------------------------- 공백 = 이어진 0칸
+
+
+def test_a_real_drop_in_a_quiet_shop_is_a_drop_not_a_gap() -> None:
+    """주문이 적은 가게: 평소 결제 0칸이 절반, 감소하면 0칸이 3분의 2로 늘지만 흩어져 있다.
+
+    예전 비율 규칙(5%p·12칸)은 이걸 기록 공백으로 봤다.
+    이어진 길이로 보면 공백이 아니라 감소다.
+    """
+
+    def value(at: datetime) -> int:
+        if at >= DAY_START:
+            return 1 if at.minute % 15 == 0 else 0  # 감소: 15분에 1건 (0칸이 흩어짐)
+        return 1 if at.minute % 10 == 0 else 0  # 평소: 10분에 1건
+
+    out = asyncio.run(measure(_day_input(), Slots(value))).orders
+    assert out.status == "known" and out.direction == "down"
+
+
+def test_a_long_run_in_a_quiet_shop_is_still_a_gap() -> None:
+    """주문이 적은 가게라도 평소 이어진 0칸보다 훨씬 긴 덩어리(3시간)는 공백이다."""
+    gap_from, gap_to = DAY_START + timedelta(hours=10), DAY_START + timedelta(hours=13)
+
+    def value(at: datetime) -> int:
+        if gap_from <= at < gap_to:
+            return 0
+        return 1 if at.minute % 10 == 0 else 0
+
+    out = asyncio.run(measure(_day_input(), Slots(value))).orders
+    assert (out.unknown_reason or "").startswith("기록 공백 의심")
+    # 공백 3시간(36칸) + 바로 앞의 평소 빈 칸 1칸이 이어져 37칸
+    assert "37칸 이어짐" in (out.unknown_reason or "")
