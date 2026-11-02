@@ -299,9 +299,13 @@ export interface YouTubeTagEvidence {
   snapshot_at: string;
   /** 대표 영상 id (인기 순위 순) */
   video_ids: string[];
+  /** 이 후보로 센 태그 (스냅샷에 실제로 나온 것, #339). 예전 응답은 없다 */
+  matched_tags?: string[];
 }
 export interface TrendCandidate {
   keyword: string;
+  /** 대표 이름에 묶인 별칭 (회사 별칭 표, #339). 네이버 그룹에 함께 넣었다. 없으면 빈 목록, 예전 응답은 없다 */
+  aliases?: string[];
   youtube: YouTubeTagEvidence;
   /** 네이버 판정. 네이버를 못 읽으면 이 후보만 unknown + 이유 */
   naver: TrendVerdict;
@@ -410,6 +414,12 @@ const REPORT_DEADLINE_MS = 120_000;
 const TREND_DEADLINE_MS = 60_000; // 그룹마다 네이버 호출 + 급상승마다 설명 문장
 const CAMPAIGN_DEADLINE_MS = 60_000; // 지난 7일 같은 시간대 지표 + 쿠폰 + 설명 문장
 
+/** 목적격 조사: 마지막 글자에 받침이 있으면 "을", 없거나 한글이 아니면 "를" ("급상승 판정을", "캠페인 효과를") */
+function objectParticle(word: string): string {
+  const code = word.charCodeAt(word.length - 1);
+  return code >= 0xac00 && code <= 0xd7a3 && (code - 0xac00) % 28 !== 0 ? "을" : "를";
+}
+
 async function askData<T>(skill: string, what: string, input: Record<string, unknown> = {}, deadlineMs = DEADLINE_MS): Promise<A2AResult<T>> {
   const body = {
     meta: { context_id: "ctx_req_dashboard", token: DATA_A2A_TOKEN, path: [], deadline: new Date(Date.now() + deadlineMs).toISOString() },
@@ -418,7 +428,7 @@ async function askData<T>(skill: string, what: string, input: Record<string, unk
   };
   const res = await fetch(`${DATA_A2A_URL}/a2a`, { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const json = (await res.json().catch(() => null)) as A2AResult<T> | null;
-  if (!res.ok || !json) throw new ApiError(`${DATA_SERVER}에서 ${what}를 받지 못했습니다 (${res.status})`, res.status);
+  if (!res.ok || !json) throw new ApiError(`${DATA_SERVER}에서 ${what}${objectParticle(what)} 받지 못했습니다 (${res.status})`, res.status);
   if (json.status !== "completed") {
     // 서버가 이유를 주면 같이 보여 준다 (예: 네이버를 읽지 못함, 볼 키워드 없음)
     const message = (json.output as { message?: unknown } | null)?.message;
