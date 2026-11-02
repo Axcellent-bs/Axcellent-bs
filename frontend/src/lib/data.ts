@@ -292,6 +292,46 @@ export interface TrendScanOutput {
 /** 한 번에 판정할 수 있는 그룹 수 (화면 입력 한도) */
 export const TREND_MAX_GROUPS = 5;
 
+// ---------------------------------------------------------------- 캠페인 효과 (campaign_effect)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py CampaignEffectOutput. 계산·이유·설명 문장은 모두 서버 값이다.
+// 항목마다 "앎(값)" 또는 "모름 + 이유". 모르면 서버가 0을 채우지 않는다.
+export type CampaignDirection = "up" | "none" | "down";
+export interface CampaignChange {
+  status: "known" | "unknown";
+  direction?: CampaignDirection | null;
+  /** 캠페인 기간 합계 */
+  actual?: number | null;
+  /** 기준선 = 지난 7일 같은 시간대 합계의 평균 */
+  expected?: number | null;
+  /** 증분 = 실제 − 기준선 */
+  excess?: number | null;
+  ratio?: number | null;
+  p_value?: number | null;
+  /** 기준선에 쓴 날 수 */
+  baseline_days: number;
+  unknown_reason?: string | null;
+}
+export interface CampaignCoupons {
+  status: "known" | "unknown";
+  coupon_count?: number | null;
+  issued_units?: number | null;
+  used_units?: number | null;
+  use_rate?: number | null;
+  /** 서버의 고정 설명 문장 */
+  note?: string | null;
+  unknown_reason?: string | null;
+}
+export interface CampaignEffectOutput {
+  campaign_id: string | null;
+  window_from: string;
+  window_to: string;
+  orders: CampaignChange;
+  revenue: CampaignChange;
+  coupons: CampaignCoupons;
+  summary: string;
+}
+export const CAMPAIGN_DIRECTION_KO: Record<CampaignDirection, string> = { up: "늘었음", none: "같음", down: "줄었음" };
+
 /** 서버가 꺼졌을 때 무엇이 꺼졌는지 보여 주는 이름 */
 export const DATA_SERVER = "데이터 AI 서버(8106)";
 export const ORCH_SERVER = "총괄 서버(8000)";
@@ -317,11 +357,20 @@ export const dataAi = {
       groups.length ? { keyword_groups: groups.map((g) => ({ group_name: g, keywords: [g] })) } : {},
       TREND_DEADLINE_MS,
     ),
+  /** 캠페인 효과. from·to는 ISO 시각(UTC). campaignId가 없으면 쿠폰은 서버가 "확인할 수 없음"으로 답한다 */
+  campaignEffect: (from: string, to: string, campaignId: string | null) =>
+    askData<CampaignEffectOutput>(
+      "campaign_effect",
+      "캠페인 효과",
+      { window_from: from, window_to: to, ...(campaignId ? { campaign_id: campaignId } : {}) },
+      CAMPAIGN_DEADLINE_MS,
+    ),
 };
 
 const DEADLINE_MS = 30_000;
 const REPORT_DEADLINE_MS = 120_000;
 const TREND_DEADLINE_MS = 60_000; // 그룹마다 네이버 호출 + 급상승마다 설명 문장
+const CAMPAIGN_DEADLINE_MS = 60_000; // 지난 7일 같은 시간대 지표 + 쿠폰 + 설명 문장
 
 async function askData<T>(skill: string, what: string, input: Record<string, unknown> = {}, deadlineMs = DEADLINE_MS): Promise<A2AResult<T>> {
   const body = {
