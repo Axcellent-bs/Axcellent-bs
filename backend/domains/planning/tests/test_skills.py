@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -14,6 +12,7 @@ from ax_contracts.schemas.planning import (
 )
 from planning_agent.domain.models import Incident
 from planning_agent.main import app
+from planning_agent.testing import plan
 
 pytestmark = pytest.mark.role("dev")  # 분리 3단계: 개발 서비스 역할로 돈다
 
@@ -25,7 +24,7 @@ def _call(body: dict) -> dict:
 def _add_auto_prs(service, n: int = 2) -> None:
     """간단 요청을 n건 보내 자동 머지 PR을 만든다 (10-22 KST, shop-web/ 경로)."""
     for _ in range(n):
-        asyncio.run(service.inbound("support_simple"))
+        plan(service, "inbound", "support_simple")
 
 
 # ---- find_related_prs

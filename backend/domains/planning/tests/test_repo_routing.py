@@ -12,10 +12,11 @@ from fastapi.testclient import TestClient
 
 from ax_agent_template.llm import MockLLMClient
 from planning_agent import repo_routing, vcs, vcs_bridge
-from planning_agent.domain.service import ActionError, PlanningService
+from planning_agent.domain.service import ActionError, DevService, PlanningService
 from planning_agent.main import app
 from planning_agent.repo_routing import Candidate, RepoPick, RouteInput, score_rules
 from planning_agent.runtime import set_service
+from planning_agent.testing import plan
 
 pytestmark = pytest.mark.role("dev")  # 분리 3단계: 개발 서비스 역할로 돈다
 
@@ -54,8 +55,8 @@ def _writes(cid: str) -> list:
 
 
 def _req12_to_prs(service: PlanningService) -> None:
-    run(service.answer_question("SPEC-7", "품절 상품도 남겨 두고 품절 표시해 주세요"))
-    run(service.confirm_spec("SPEC-7"))
+    plan(service, "answer_question", "SPEC-7", "품절 상품도 남겨 두고 품절 표시해 주세요")
+    plan(service, "confirm_spec", "SPEC-7")
     run(service.generate_prs("SPEC-7"))
 
 
@@ -286,7 +287,7 @@ def test_llm_judge_used_in_domain(service: PlanningService) -> None:
 
 def test_simple_request_waits_for_repo(service: PlanningService) -> None:
     _two()
-    run(service.inbound("support_simple"))
+    plan(service, "inbound", "support_simple")
     pr = [p for p in service.state.prs if p.auto][-1]
     assert pr.target.status == "proposed" and not pr.merged
     task = next(t for t in service.state.tasks if t.id == pr.task)
@@ -316,7 +317,7 @@ def test_single_connection_auto_approved(service: PlanningService) -> None:
 def test_mock_default_unchanged() -> None:
     """연결이 없는 목 설정이면 제안·승인 없이 상태가 지금과 똑같다."""
     assert not vcs_bridge.enabled()
-    a, b = PlanningService(), PlanningService()
+    a, b = DevService(), DevService()
     for svc in (a, b):
         set_service(svc)
         _req12_to_prs(svc)

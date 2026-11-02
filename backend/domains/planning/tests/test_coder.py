@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from ax_agent_template.llm import LLMResponseError, LLMSettings
 from planning_agent import coder, repo_routing, vcs
 from planning_agent.coder import CodePlan, CodeReview, FilePick, FileWrite
-from planning_agent.domain.service import ActionError, PlanningService
+from planning_agent.domain.service import ActionError, DevService, PlanningService
 from planning_agent.main import app
 from planning_agent.vcs import MockVcsAdapter, VcsError
 from planning_agent.vcs.base import CheckRun, Checks, combine_checks
@@ -431,18 +431,16 @@ def test_api_creates_and_runs_in_background(service: PlanningService, adapter) -
         assert r.status_code == 409 and r.json()["error"]["code"] == "NOT_RETRYABLE"
 
 
-def test_planning_role_refuses(adapter) -> None:
-    svc = PlanningService(role="planning")
-    coder.set_llm(FakeLLM())
-    with pytest.raises(ActionError) as err:
-        run(svc.create_dev_task(title="t", plan="p"))
-    assert err.value.code == "WRONG_ROLE"
+def test_planning_service_has_no_coding_agent(adapter) -> None:
+    """코딩 에이전트는 개발 서비스에만 있다 (기획 서비스는 코딩 작업을 만들지 않는다)."""
+    svc = PlanningService()
+    assert not hasattr(svc, "create_dev_task") and not hasattr(svc, "retry_dev_task")
 
 
 def test_dev_role_reports_coding_result_to_planning(adapter) -> None:
     """나눠 띄우면 dev가 코딩 작업·PR을 receive_dev_result로 planning에 돌려준다."""
     sent: list[str] = []
-    planning = PlanningService(role="planning")
+    planning = PlanningService()
 
     async def send(skill: str, ctx: str, tenant: str, payload, key: str) -> str:
         sent.append(skill)
@@ -452,7 +450,7 @@ def test_dev_role_reports_coding_result_to_planning(adapter) -> None:
         )
         return "보냄"
 
-    dev = PlanningService(role="dev", dev_sender=send)
+    dev = DevService(dev_sender=send)
     coder.set_llm(FakeLLM())
 
     async def go() -> None:

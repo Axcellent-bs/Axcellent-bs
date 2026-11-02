@@ -15,6 +15,7 @@ from planning_agent.domain.metrics import compute_metrics
 from planning_agent.domain.rules import check_simple, estimate
 from planning_agent.domain.service import GateRefused
 from planning_agent.main import app, load_card
+from planning_agent.testing import plan
 
 WINDOW = {"window_from": "2026-10-21T04:50:00Z", "window_to": "2026-10-21T05:10:00Z"}
 VERIFY = {
@@ -194,7 +195,7 @@ def test_untrusted_text_does_not_change_read_skills(a2a_body) -> None:
 
 @pytest.mark.role("dev")
 def test_untrusted_text_does_not_change_link_incident(service, a2a_body) -> None:
-    from planning_agent.domain.service import PlanningService
+    from planning_agent.domain.service import DevService
     from planning_agent.runtime import set_service
 
     payload = {"incident_context_id": "ctx_inc_0008", "pr_numbers": [28], "follow_up_title": "X"}
@@ -204,7 +205,7 @@ def test_untrusted_text_does_not_change_link_incident(service, a2a_body) -> None
         .post("/a2a", json=a2a_body("link_incident", payload, idempotency_key=key))
         .json()
     )
-    set_service(PlanningService())
+    set_service(DevService())
     dirty = (
         TestClient(app)
         .post(
@@ -287,24 +288,23 @@ def test_gate_refusal_means_nothing_runs(service, monkeypatch, send) -> None:
     monkeypatch.setattr(gate_module, "_send_to_safety", send)
     before = service.snapshot()
     with pytest.raises(GateRefused):
-        asyncio.run(service.inbound("support_simple"))
+        plan(service, "inbound", "support_simple")
     with pytest.raises(GateRefused):
-        asyncio.run(service.confirm_spec("SPEC-7"))
+        plan(service, "confirm_spec", "SPEC-7")
     assert service.snapshot() == before  # 요청 등록·기획서·작업·PR 아무것도 생기지 않았다
     assert service.gate_calls and all(c.status == "rejected" for c in service.gate_calls)
 
 
 @pytest.mark.role("dev")
 def test_gate_refusal_in_merge_keeps_pr_open(service, monkeypatch) -> None:
-    asyncio.run(service.confirm_spec("SPEC-7"))
-
     async def reject_merge(request) -> ExecuteDecision:
         status = "rejected" if request.action == "merge_pr" else "executed"
         return ExecuteDecision(execution_id="exe_test", grade="B", status=status)
 
     monkeypatch.setattr(gate_module, "_send_to_safety", reject_merge)
-    # 자동 머지가 관문에서 거절되면 PR은 열어 두고 교차검증 대기 (PR 생성은 그대로)
-    asyncio.run(service.generate_prs("SPEC-7"))
+    # 확정본을 넘겨받으면 개발이 바로 PR을 만든다. 자동 머지가 관문에서 거절되면 PR은 열어 두고
+    # 교차검증 대기 (PR 생성은 그대로)
+    plan(service, "confirm_spec", "SPEC-7")
     pr = next(p for p in service.state.prs if p.id == "PR #31")
     assert not pr.merged and pr.merged_at is None
     assert pr.auto_review is not None
@@ -333,9 +333,6 @@ def test_gate_refusal_in_link_incident_a2a(service, monkeypatch, a2a_body) -> No
 @pytest.mark.role("planning")
 def test_rest_action_gate_refusal_is_409(service, monkeypatch) -> None:
     monkeypatch.setattr(gate_module, "_send_to_safety", _rejected)
-    res = TestClient(app).post("/api/planning/actions", json={"type": "mergePr", "pr": "PR #28"})
-    # PR #28은 이미 머지돼 no-op → 관문을 부르지 않는다
-    assert res.status_code == 200 and res.json()["meta"]["changed"] is False
     res = TestClient(app).post(
         "/api/planning/actions", json={"type": "confirmSpec", "spec": "SPEC-7"}
     )
@@ -345,3 +342,11 @@ def test_rest_action_gate_refusal_is_409(service, monkeypatch) -> None:
     assert res.json()["error"]["details"]["action"] == "confirm_spec"
     assert res.json()["error"]["details"]["status"] == "rejected"
     assert next(s for s in service.state.specs if s.id == "SPEC-7").status == "초안"
+
+
+@pytest.mark.role("dev")
+def test_rest_merge_of_merged_pr_is_noop_without_gate(service, monkeypatch) -> None:
+    monkeypatch.setattr(gate_module, "_send_to_safety", _rejected)
+    res = TestClient(app).post("/api/planning/actions", json={"type": "mergePr", "pr": "PR #28"})
+    # PR #28은 이미 머지돼 no-op → 관문을 부르지 않는다
+    assert res.status_code == 200 and res.json()["meta"]["changed"] is False

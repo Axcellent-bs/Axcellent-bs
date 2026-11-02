@@ -62,7 +62,6 @@ from planning_agent.ask_requester import Asker, missing_info_question
 from planning_agent.cross_check import CrossChecker, CrossEvidence
 from planning_agent.dev_handoff import (
     RECEIVE_DEV_RESULT,
-    ROLES,
     START_DEV,
     DevSender,
     dev_result_key,
@@ -354,6 +353,7 @@ ACTIONS: dict[str, tuple[str, type[_Params]]] = {
     "approve_repo": ("_approve_repo", RepoParams),
     "reject_repo": ("_reject_repo", PrParams),
     "accept_draft": ("_accept_draft", RequestParams),
+    "write_spec": ("_write_spec", RequestParams),
     "reject_draft": ("_reject_draft", RejectDraftParams),
     "reject_decision": ("_reject_decision", RejectDecisionParams),
     "approve_promotion": ("_approve_promotion", EmptyParams),
@@ -369,6 +369,19 @@ ACTIONS: dict[str, tuple[str, type[_Params]]] = {
     "toggle_todo": ("_toggle_todo", BlockParams),
     "remove_block": ("_remove_block", BlockParams),
 }
+# 서비스마다 받는 액션 (분리 4단계). 시뮬레이터·소통 창구(inbound·send·mark_read)는 둘 다 받는다
+BOTH_ACTIONS = ("inbound", "send", "mark_read")
+DEV_ONLY_ACTIONS = (
+    "generate_prs",
+    "review_pr",
+    "merge_pr",
+    "approve_repo",
+    "reject_repo",
+    "approve_promotion",
+    "reject_promotion",
+)
+DEV_ACTIONS = {k: ACTIONS[k] for k in (*BOTH_ACTIONS, *DEV_ONLY_ACTIONS)}
+PLANNING_ACTIONS = {k: v for k, v in ACTIONS.items() if k not in DEV_ONLY_ACTIONS}
 SIMULATOR_ACTIONS = {"inbound", "dept_chat"}
 
 
@@ -388,13 +401,16 @@ def _fmt(at: datetime) -> str:
 HR_EXECUTED_ACTIONS = frozenset({"record_case"})
 
 
-class PlanningService(StateService):
-    """프로세스 메모리에 상태 하나를 두고 액션을 적용한다 (목 모드 저장소).
+class PlanningCore(StateService):
+    """기획·개발 서비스가 같이 쓰는 뼈대 (분리 4단계). 역할마다 `PlanningService`·`DevService`.
 
-    상태·구독·적용 틀·실행 관문은 `ax_workflow.core.StateService` (분리 1단계)."""
+    상태·구독·적용 틀·실행 관문은 `ax_workflow.core.StateService` (분리 1단계). 여기에는 두
+    서비스 사이 넘기기(송신·재시도·다시 맞추기)·다음 단계 반복 틀·공용 조회가 있다."""
 
     agent_name = AGENT_NAME
     soft_actions = SOFT_ACTIONS
+    ROLE = ""  # 서비스 역할 (상태 파일 이름·요청 색인 owner·넘기기 방향)
+    ACTIONS: dict[str, tuple[str, type[_Params]]] = {}
 
     def __init__(
         self,
@@ -402,30 +418,15 @@ class PlanningService(StateService):
         gate: Gate | None = None,
         tenant_id: str = TENANT_ID_DEFAULT,
         result_sender: ResultSender | None = None,
-        role: str | None = None,
         dev_sender: DevSender | None = None,
         real_example: bool = False,
-        cross_checker: CrossChecker | None | Literal["default"] = "default",
         relater: related.Relater | None | Literal["default"] = "default",
-        hr_client: HrClient | None | Literal["default"] = "default",
-        asker: Asker | None | Literal["default"] = "default",
     ):
-        # 서비스 역할: "" = 합친 모드(원래 동작), "planning" = 기획서까지, "dev" = PR·머지만
-        role = (os.getenv("PLANNING_ROLE", "") if role is None else role).strip()
-        if role and role not in ROLES:
-            raise ValueError(f"모르는 PLANNING_ROLE: {role}")
-        super().__init__(clock, gate, tenant_id, role, real_example)
+        super().__init__(clock, gate, tenant_id, self.ROLE, real_example)
         self._send_dev: DevSender = dev_sender or send_to_service
         self._sending: set[asyncio.Task] = set()
-        self._resuming = False  # 대기 대화를 깨우는 중 (다시 깨우지 않는다)
         self._retrying = False  # 못 보낸 넘기기를 다시 보내는 중
         self._retry_task: asyncio.Task | None = None
-        self._pr_sync: asyncio.Task | None = None  # 바깥에서 머지·닫은 PR 맞추기 루프
-        self._polling_wait = False  # 다른 서비스 요청을 기다리는 대화를 주기적으로 보는 중
-        # 코딩 에이전트 실행 (작업 id → 실행 중인 태스크·실행 번호). 번호가 바뀐 실행은 버린다
-        self._coding: dict[str, asyncio.Task] = {}
-        self._coding_live: dict[str, int] = {}
-        self._coding_seq = 0
         self._send_result: ResultSender = result_sender or send_change_result
         # 원인 확인 요청을 받은 요청에 올리는 곳 (시험에서 바꿔 끼운다, None이면 실제 할 일함)
         self._cause_poster: cause_inbox.Poster | None = None
@@ -433,28 +434,44 @@ class PlanningService(StateService):
         self._relater: related.Relater | None = (
             related.default_relater(self.role) if relater == "default" else relater
         )
-        # 교차검증 근거를 모으는 곳 (None이면 모으지 않고 safety 판정만)
-        self._cross_checker: CrossChecker | None = (
-            cross_check.default_checker() if cross_checker == "default" else cross_checker
-        )
-        # 인사 record_case를 실제로 부르는 곳 (None이면 관문·활동 기록만, 목 모드 기본값)
-        self._hr: HrClient | None = (
-            hr_link.default_client() if hr_client == "default" else hr_client
-        )
-        # 요청 서비스에 되묻는 곳 (None이면 묻지 않음, 목 모드 기본값)
-        self._asker: Asker | None = ask_requester.default_asker() if asker == "default" else asker
-        self._init_state()
+        # 인사 record_case를 실제로 부르는 곳 (기획 서비스가 채운다. 관문 덮어쓰기가 본다)
+        self._hr: HrClient | None = None
+
+    # ---- 서비스마다 채우는 자리 (기본은 아무것도 안 함)
+
+    async def _relate_new(self, s: State, known: set[str]) -> None:
+        return None
+
+    def _relate_paths(self, s: State, known_prs: set[str]) -> None:
+        return None
+
+    def _spawn_hold(self, task_id: str) -> None:
+        return None
+
+    def _kick_waiting(self) -> None:
+        return None
+
+    def _dev_outgoing(self, s: State, full: bool = False) -> list[tuple[str, str, BaseModel, str]]:
+        return []
+
+    async def _advance_step(self, s: State) -> bool:
+        return False
+
+    def _inbound_start(self, s: State) -> tuple[int, datetime, str, PR | None]:
+        """시뮬레이터 한 건의 순번·시각·요청 ctx·마지막 머지 PR (순번은 올린다)."""
+        seq = s.seq + 1
+        merged = [p for p in s.prs if p.merged]
+        s.seq = seq
+        return seq, self.clock(), f"ctx_req_{20 + seq:04d}", merged[-1] if merged else None
+
+    @staticmethod
+    def _wrong_service(kind: str, other: str) -> ActionError:
+        return ActionError("WRONG_SERVICE", f"{kind} 시뮬레이터는 {other} 서비스가 받는다")
 
     # ---- 상태·구독
 
     def _seed(self) -> State:
         return real_state() if self.real_example else initial_state()
-
-    def reset(self) -> None:
-        """초기 데이터로 되돌린다. 돌던 코딩 실행은 다음 단계에서 멈추고 작성해 둔 코드도 지운다."""
-        self._coding_live.clear()
-        self.__dict__.pop("_coding_drafts", None)
-        super().reset()
 
     # ---- 적용 틀
 
@@ -483,255 +500,6 @@ class PlanningService(StateService):
                 if cr and cr.status == "waiting_human" and t.id not in mark["held"]:
                     self._spawn_hold(t.id)
         self._kick_waiting()
-
-    def _kick_waiting(self) -> None:
-        """충돌하는 요청이 끝나기를 기다리는 대화가 있으면 깨운다 (dev_chat.resume_waiting)."""
-        if self._resuming or not any(c.status == "waiting" for c in self.state.chats):
-            return
-        from planning_agent import dev_chat
-
-        async def go() -> None:
-            self._resuming = True
-            try:
-                await dev_chat.resume_waiting(self)
-            finally:
-                self._resuming = False
-            # 다른 서비스 요청을 기다리면 이 서버 상태가 안 바뀌어도 풀려야 하니
-            # 주기적으로 다시 본다
-            if self._polling_wait or not self._remote_wait():
-                return
-            self._polling_wait = True
-            try:
-                await asyncio.sleep(WAIT_POLL_SECONDS)
-            finally:
-                self._polling_wait = False
-            self._kick_waiting()
-
-        try:
-            task = asyncio.get_running_loop().create_task(go())
-        except RuntimeError:  # 돌고 있는 루프가 없으면(동기 시험) 깨우지 않는다
-            return
-        self._sending.add(task)
-        task.add_done_callback(self._sending.discard)
-
-    def _remote_wait(self) -> bool:
-        """기다리는 대화 중 이 서버에 없는(다른 서비스) 요청을 기다리는 것이 있나."""
-        mine = {r.id for r in self.state.requests}
-        return any(
-            c.status == "waiting" and any(rid not in mine for rid in c.waiting_for)
-            for c in self.state.chats
-        )
-
-    async def _relate_new(self, s: State, known: set[str]) -> None:
-        """이번 액션으로 새로 생긴 요청마다 비슷한·충돌하는 요청을 찾아 붙인다 (제안만)."""
-        if self._relater is None:
-            return
-        for req in [r for r in s.requests if r.id not in known]:
-            try:
-                req.related = await self._relater.relate(s, req)
-            except Exception:  # noqa: BLE001 - 찾기가 실패해도 요청은 받는다
-                req.related = []
-            if self._relater.index is not None:
-                try:  # 다음 요청이 찾을 수 있게 memory 색인에 넣는다
-                    await self._relater.index.write(req, related.text_of(s, req))
-                except Exception:  # noqa: BLE001, S110 - 색인 실패가 요청 받기를 막지 않는다
-                    pass
-            if not req.related:
-                continue
-            label = {
-                "same": "같은 일",
-                "conflict": "충돌 가능",
-                "update": "이어서 바꿈",
-                "related": "비슷함",
-            }
-            text = ", ".join(f"{x.id}({label[x.relation]})" for x in req.related)
-            s.activity.append(
-                self._act(
-                    self.clock(),
-                    req.context_id,
-                    "planning",
-                    "planning",
-                    "request.related",
-                    "API",
-                    f"{req.id} 비슷한 요청: {text}",
-                    "read",
-                )
-            )
-
-    async def preview_conflicts(self, title: str, text: str) -> list[RelatedItem]:
-        """아직 만들지 않은 요청이 진행 중인 요청과 충돌하는지 미리 본다 (개발 AI 대화, 읽기만)."""
-        if self._relater is None:
-            return []
-        draft = Request(
-            id="REQ-NEW",
-            context_id="chat:preview",
-            from_="dev",
-            via=coder.DEV_TEAM,
-            title=f"{title}\n{text}"[:600],
-            evidence="개발 AI 대화",
-            state="접수",
-        )
-        try:
-            draft.related = await self._relater.relate(self.state, draft)
-        except Exception:  # noqa: BLE001 - 미리 보기가 안 되면 묻지 않고 진행한다
-            return []
-        return related.open_conflicts(self.state, draft)
-
-    def _relate_paths(self, s: State, known_prs: set[str]) -> None:
-        """새로 열린 PR이 다른 열린 PR과 같은 파일을 고치면 두 요청에 서로 충돌 가능으로 표시."""
-        for pr in [p for p in s.prs if p.id not in known_prs and not p.merged]:
-            mine = related.request_of_pr(s, pr)
-            hits = related.path_overlaps(s, pr)
-            if mine is None or not hits:
-                continue
-            for hit in hits:
-                if not any(x.id == hit.id and x.by == "path" for x in mine.related):
-                    mine.related.append(hit)
-                other = next((r for r in s.requests if r.id == hit.id), None)
-                if other is not None and not any(
-                    x.id == mine.id and x.by == "path" for x in other.related
-                ):
-                    other.related.append(
-                        hit.model_copy(
-                            update={
-                                "id": mine.id,
-                                "title": mine.title,
-                                "reason": f"{pr.id}가 " + hit.reason.split("와 ", 1)[-1],
-                            }
-                        )
-                    )
-            s.activity.append(
-                self._act(
-                    self.clock(),
-                    mine.context_id,
-                    "planning",
-                    "planning",
-                    "request.related",
-                    "API",
-                    f"{pr.id} 같은 파일을 고치는 열린 PR: "
-                    + ", ".join(f"{h.id} ({h.reason})" for h in hits),
-                    "read",
-                )
-            )
-
-    # ---- 기획 → 개발 넘기기 (서비스 역할이 있을 때만)
-
-    def _dev_outgoing(self, s: State, full: bool = False) -> list[tuple[str, str, BaseModel, str]]:
-        """이번 액션으로 보낼 넘기기 목록 (skill, context_id, 입력, idempotency_key).
-
-        planning: 이번에 넘김 표시가 붙은 기획서.
-        dev: 작업·PR·요청 상태가 지난번과 달라진 기획서.
-        full이면(다시 켰을 때 맞추기) 넘긴 기획서를 모두 다시 보낸다. 같은 멱등 키라 받는 쪽이
-        이미 가진 건 그대로 두고, 잃은 쪽만 다시 반영한다."""
-        if not self.role:
-            return []
-        out: list[tuple[str, str, BaseModel, str]] = []
-        if self.role == "planning":
-            was = {sp.id for sp in self.state.specs if sp.handed_to_dev}
-            for sp in s.specs:
-                req = self._request_of_spec(s, sp)
-                if not sp.handed_to_dev or (sp.id in was and not full) or req is None:
-                    continue
-                inp = DevHandoffInput(
-                    request=dump(req),
-                    spec=dump(sp),
-                    tasks=[dump(t) for t in s.tasks if t.spec == sp.id],
-                )
-                out.append((START_DEV, req.context_id, inp, start_dev_key(req.context_id, sp.id)))
-            return out
-        for sp in s.specs:
-            req = self._request_of_spec(s, sp)
-            if not sp.handed_to_dev or req is None:
-                continue
-            tasks = [t for t in s.tasks if t.spec == sp.id]
-            ids = {t.id for t in tasks}
-            own = sp.origin == "dev_team"  # 개발팀 기획은 기획 서비스에 요청·기획서가 없다
-            res = DevResultInput(
-                spec_id=sp.id,
-                request_id=req.id,
-                request_state=req.state,
-                tasks=[dump(t) for t in tasks],
-                prs=[dump(p) for p in s.prs if p.task in ids],
-                request=dump(req) if own else None,
-                spec=dump(sp) if own else None,
-            )
-            raw = json.dumps(res.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
-            fp = hashlib.sha1(raw.encode()).hexdigest()[:12]
-            if self._dev_sent.get(sp.id) == fp and not full:
-                continue
-            self._dev_sent[sp.id] = fp
-            out.append(
-                (RECEIVE_DEV_RESULT, req.context_id, res, dev_result_key(req.context_id, sp.id, fp))
-            )
-        return self._with_policy(s, out, full)
-
-    def _with_policy(
-        self, s: State, out: list[tuple[str, str, BaseModel, str]], full: bool
-    ) -> list[tuple[str, str, BaseModel, str]]:
-        """dev: 자동 처리 범위가 지난번 보낸 것과 다르면 이번 결과 하나에 실어 보낸다.
-
-        보낼 결과가 없으면 마지막으로 넘겨받은 기획서의 결과를 다시 보낸다 (planning이 간단 요청
-        판정에 같은 범위를 쓰도록). 범위 지문은 `_dev_sent["auto_policy"]`에 남긴다."""
-        pol = dump(s.auto_policy)
-        fp = hashlib.sha1(json.dumps(pol, sort_keys=True).encode()).hexdigest()[:12]
-        if self._dev_sent.get(POLICY_SENT) == fp and not full:
-            return out
-        if not out:
-            last = next(
-                (sp for sp in reversed(s.specs)
-                 if sp.handed_to_dev and self._request_of_spec(s, sp) is not None),
-                None,
-            )  # fmt: skip
-            if last is None:
-                return out
-            req = self._request_of_spec(s, last)
-            assert req is not None
-            ids = {t.id for t in s.tasks if t.spec == last.id}
-            res = DevResultInput(
-                spec_id=last.id,
-                request_id=req.id,
-                request_state=req.state,
-                tasks=[dump(t) for t in s.tasks if t.spec == last.id],
-                prs=[dump(p) for p in s.prs if p.task in ids],
-            )
-            out.append((RECEIVE_DEV_RESULT, req.context_id, res, ""))
-        skill, ctx, res, key = out[-1]
-        assert isinstance(res, DevResultInput)
-        res.auto_policy = pol
-        out[-1] = (skill, ctx, res, dev_result_key(ctx, res.spec_id, f"policy-{fp}"))
-        self._dev_sent[POLICY_SENT] = fp
-        return out
-
-    def _spawn_hold(self, task_id: str) -> None:
-        if self.role == "planning":
-            return  # 기획 서비스는 코딩 작업을 돌리지 않는다
-        try:
-            task = asyncio.get_running_loop().create_task(self._hold_to_inbox(task_id))
-        except RuntimeError:
-            return
-        self._sending.add(task)
-        task.add_done_callback(self._sending.discard)
-
-    async def _hold_to_inbox(self, task_id: str) -> None:
-        """사람 확인으로 멈춘 코딩 작업을 받은 요청에 올리고 활동에 남긴다 (잠금 밖에서 보낸다)."""
-        task = next((t for t in self.state.tasks if t.id == task_id), None)
-        if task is None or task.coding is None:
-            return
-        pr = next((p for p in self.state.prs if p.id == task.coding.pr), None)
-        sp = next((x for x in self.state.specs if x.id == task.spec), None)
-        req = self._request_of_spec(self.state, sp) if sp else None
-        ctx = req.context_id if req else f"task:{task_id}"
-        body = cause_inbox.hold_handoff(task, pr, ctx, self.tenant_id)
-        text = await cause_inbox.send_hold(body, self._cause_poster)
-        if text is None:
-            return
-
-        async def log(s: State) -> None:
-            s.activity.append(
-                self._act(self.clock(), ctx, "dev", "human", "handoff", "A2A", text, "A")
-            )
-
-        await self._apply(log)
 
     def _spawn_send(self, skill: str, ctx: str, payload: BaseModel, key: str) -> None:
         task = asyncio.create_task(self._send_one(skill, ctx, payload, key))
@@ -803,104 +571,10 @@ class PlanningService(StateService):
             await self._send_one(*item)
         self._save()
 
-    async def sync_prs(self) -> int:
-        """사람이 GitHub 등에서 직접 머지하거나 닫은 PR을 기록에 맞춘다. 맞춘 개수.
-
-        머지됐으면 사람 머지와 같은 길(기록·요청 닫기·작업 완료)로, 닫혔으면 작업을 중단으로
-        둔다 (재개하면 최신 코드로 다시 쓴다). 돌고 있는 코딩 작업의 PR은 건드리지 않는다."""
-        live = [
-            p for p in self.state.prs
-            if p.vcs_number is not None and not p.merged and not p.closed
-            and p.task not in self._coding
-        ]  # fmt: skip
-        seen = {p.id: await vcs_bridge.change_state(p) for p in live}
-        done = {k: v for k, v in seen.items() if v in ("merged", "closed")}
-        if not done:
-            return 0
-
-        async def run(s: State) -> None:
-            for p in s.prs:
-                how = done.get(p.id)
-                if how is None or p.merged or p.closed:
-                    continue
-                ctx = self._ctx_of_pr(s, p)
-                where = "형상관리에서 직접 " + ("머지됨" if how == "merged" else "닫힘")
-                s.activity.append(
-                    self._act(self.clock(), ctx, "human", "dev", "vcs.synced", "API",
-                              f"{p.id} {where} → 기록 맞춤")
-                )  # fmt: skip
-                task = next((t for t in s.tasks if t.id == p.task), None)
-                if how == "merged":
-                    try:
-                        await self._do_merge(s, p, pr_check(s, p), auto=False)
-                    except GateRefused:
-                        pass
-                    if not p.merged:  # 이미 머지된 사실은 관문·병합 호출 결과와 상관없이 맞춘다
-                        p.merged = True
-                        p.merged_at = self.clock()
-                        if task is not None:
-                            task.state = "완료"
-                    p.auto_review = None
-                    continue
-                p.closed = True
-                p.auto_review = None
-                if task is not None:
-                    task.state = "중단"
-                    cr = task.coding
-                    if cr is not None and cr.status not in ("merged", "canceled"):
-                        cr.status = "canceled"
-                        cr.error = f"{p.id} {where} → 재개하면 최신 코드로 다시 씀"
-                        cr.updated_at = self.clock()
-
-        await self._apply(run)
-        return len(done)
-
-    def start_pr_sync(self) -> None:
-        """PR_SYNC_SECONDS마다 sync_prs·오래 기다리는 대화 알림을 돈다 (한 번만 켠다).
-        기획 서비스는 PR·개발 대화가 없어 안 켠다."""
-        if self._pr_sync is not None or self.role == "planning":
-            return
-
-        from planning_agent import dev_chat, work_queue
-
-        async def loop() -> None:
-            while True:
-                await asyncio.sleep(PR_SYNC_SECONDS)
-                try:
-                    await self.sync_prs()
-                    await work_queue.expire_leases(self)  # 진행 보고가 끊긴 구독형 작업 되돌리기
-                    # 앞 요청을 오래 기다리는 대화에 알린다 (상태가 안 바뀌어도 시간이 지나면)
-                    await dev_chat.notice_long_waits(self)
-                except Exception:  # noqa: BLE001 - 맞추기 실패로 루프가 멈추지 않게 한다
-                    continue  # 다음 차례에 다시
-
-        self._pr_sync = asyncio.get_running_loop().create_task(loop())
-
     async def wait_sent(self) -> None:
         """보내는 중인 넘기기가 끝날 때까지 기다린다 (테스트용)."""
         while self._sending:
             await asyncio.gather(*list(self._sending), return_exceptions=True)
-
-    def _hand_to_dev(self, s: State, sp: Spec, req: Request | None, ctx: str) -> None:
-        """planning 역할: 확정된 기획서를 dev 서비스로 넘긴다고 표시한다 (보내기는 바꿔 끼운 뒤)."""
-        if self.role != "planning" or req is None or sp.handed_to_dev:
-            return
-        ids = [t.id for t in s.tasks if t.spec == sp.id and t.state == "진행 중"]
-        if not ids:
-            return
-        sp.handed_to_dev = True
-        s.activity.append(
-            self._act(
-                self.clock(),
-                ctx,
-                "planning",
-                "dev",
-                START_DEV,
-                "A2A",
-                f"{sp.id} 작업 {', '.join(ids)} → 개발·배포 서비스로 넘김",
-                "A",
-            )
-        )
 
     def _to_outbox(self, s: State, before: int) -> None:
         """기획·개발이 다른 부서로 보낸 활동은 그 부서 창구(outbox)에도 쌓는다."""
@@ -919,20 +593,6 @@ class PlanningService(StateService):
                         text=a.text,
                     )
                 )
-
-    async def _check_plan(self, ctx: str, spec_id: str, req: Request) -> PlanCheck | None:
-        """기획서 초안을 인사 `check_plan`에 묻는다 (인사 연동 3단계). 목 모드면 None.
-
-        영역을 정하지 못하면 묻지 않고 확인 못 함으로 둔다 (지어낸 영역을 보내지 않는다).
-        요청 근거는 다른 부서가 쓴 외부 문구라 `untrusted`로 따로 보낸다.
-        """
-        if self._hr is None:
-            return None
-        area = area_of_text(req.title, req.evidence)
-        if area is None:
-            return PlanCheck("unknown", message="영역을 정하지 못함")
-        draft = PlanDraft(title=req.title, summary=req.title, area=area, kind="spec", ref=spec_id)
-        return await self._hr.check_plan(ctx, draft, {"요청 근거": req.evidence})
 
     async def _execute(
         self,
@@ -954,6 +614,351 @@ class PlanningService(StateService):
         if action in HR_EXECUTED_ACTIONS and self._hr is not None:
             return ExecuteDecision(execution_id="hr_gate", grade="A", status="executed")
         return await super()._execute(action, ctx, target, summary, params, refs, allow)
+
+    @staticmethod
+    def _request_of_spec(s: State, spec: Spec) -> Request | None:
+        return next((r for r in s.requests if r.spec == spec.id), None) or next(
+            (r for r in s.requests if r.id == spec.request), None
+        )
+
+    def _hold(
+        self,
+        target: Spec | PR,
+        state: str,
+        check: Check,
+        decision: ExecuteDecision | None = None,
+        evidence: CrossEvidence | None = None,
+    ) -> AutoReview:
+        """자동 확정·자동 머지를 멈추고 대기열에 올린다 (판단은 기존 사람 버튼)."""
+        target.auto_review = AutoReview(
+            state=state,
+            rules=list(check.rules),
+            params=dict(check.params),
+            at=self.clock(),
+            gate_status=decision.status if decision else None,
+            review_id=decision.review_id if decision else None,
+            evidence=[line.dump() for line in evidence.lines] if evidence else [],
+        )
+        return target.auto_review
+
+    # ---- 화면 액션 진입점
+
+    async def dispatch(self, action: dict) -> ActionResult:
+        """`{"type": "confirmSpec", "spec": "SPEC-7"}` 같은 프로토타입 Action을 적용한다."""
+        if not isinstance(action, dict) or not isinstance(action.get("type"), str):
+            raise ActionError("INVALID_ACTION", "type이 없다")
+        name = action_name(action["type"])
+        if name not in self.ACTIONS:
+            raise ActionError("UNKNOWN_ACTION", f"모르는 액션: {action['type']}")
+        if name in SIMULATOR_ACTIONS and not template_config.is_mock(AGENT_NAME):
+            raise ActionError("SIMULATOR_DISABLED", "시뮬레이터 액션은 목 모드에서만 받는다")
+        method, model = self.ACTIONS[name]
+        try:
+            params = model.model_validate({k: v for k, v in action.items() if k != "type"})
+        except ValidationError as exc:
+            raise ActionError("INVALID_ACTION", str(exc)) from exc
+        kwargs = {k: v for k, v in params.model_dump().items()}
+        return await self._apply(getattr(self, method), **kwargs)
+
+    # 이름이 있는 메서드 (테스트·내부 호출용). 모두 dispatch와 같은 길을 탄다.
+    async def inbound(self, kind: str) -> ActionResult:
+        return await self.dispatch({"type": "inbound", "kind": kind})
+
+    async def send(self, to: str, point: str, text: str) -> ActionResult:
+        return await self.dispatch({"type": "send", "to": to, "point": point, "text": text})
+
+    async def mark_read(self, to: str) -> ActionResult:
+        return await self.dispatch({"type": "mark_read", "to": to})
+
+    # ---- 사람 클릭 없이 다음 단계로 (flow 요청만, 시드 건은 그대로)
+
+    async def _advance(self, s: State) -> None:
+        """액션마다 더 진행할 게 없을 때까지 다음 단계를 돈다: 기획서 초안(개선 초안은 채택 먼저) →
+        자동 확정 검사 → PR 만들기 → 검수 불일치면 수정 후 재검수 → 자동 머지 검사.
+
+        멈추는 곳: 자동 확정·머지 규칙에 걸린 건(`auto_review` 대기열), 검수 불일치 2회,
+        safety 보류·거절. 관문이 거부하면 그 단계에서 멈추고 앞선 단계는 그대로 둔다."""
+        if s.auto_policy.level == 0:  # L0 = 자동 처리 중지: 접수에서 멈춘다
+            return
+        for _ in range(ADVANCE_LIMIT):
+            try:
+                if not await self._advance_step(s):
+                    return
+            except GateRefused:
+                return
+
+    @staticmethod
+    def _upsert(rows: list, items: list) -> None:
+        """id가 같으면 그 자리에서 바꾸고, 없으면 뒤에 붙인다."""
+        index = {r.id: i for i, r in enumerate(rows)}
+        for item in items:
+            if item.id in index:
+                rows[index[item.id]] = item
+            else:
+                index[item.id] = len(rows)
+                rows.append(item)
+
+    # ---------------------------------------------------------------- 사람·에이전트 액션
+
+    async def _send(self, s: State, to: str, point: str, text: str, ctx: str) -> None:
+        t = self.clock()
+        await self._execute("send_message", ctx, f"{to}:{point}:{len(s.activity)}", text)
+        s.seq += 1
+        s.activity.append(self._act(t, ctx, "planning", to, point, "A2A", text))
+
+    async def _mark_read(self, s: State, to: str) -> None:
+        for m in s.outbox:
+            if m.to == to:
+                m.read = True
+
+    async def _notify_result(
+        self,
+        s: State,
+        req: Request,
+        status: Literal["completed", "declined"],
+        *,
+        prs: list[PR] | None = None,
+        spec_id: str | None = None,
+        reason_code: str | None = None,
+    ) -> None:
+        """요청을 닫을 때 요청 부서에 `receive_change_result`를 보낸다(계약 #293).
+
+        같은 요청에 묶인 중복 요청(`duplicate_of`)의 부서에도 한 번씩 보낸다. summary는 코드가 만든
+        한 줄이고 고객 응대 문구로 쓰지 않는다(#293 리뷰). 보내기 실패는 요청 닫기를 막지 않는다.
+        """
+        merged = [p for p in (prs or []) if p.merged] if status == "completed" else []
+        times = [p.merged_at for p in merged if p.merged_at]
+        label = "완료" if status == "completed" else "기각"
+        summary = f"{req.id} {label}" + (
+            f" · {', '.join(p.id for p in merged)} 머지" if merged else ""
+        )
+        result = ChangeResultInput(
+            request_id=req.id,
+            status=status,
+            pr_numbers=[p.number for p in merged],
+            merged_at=max(times) if times else None,
+            spec_id=spec_id,
+            reason_code=reason_code if status == "declined" else None,
+            summary=summary,
+        )
+        seen: set[str] = set()
+        for r in [req, *(x for x in s.requests if x.duplicate_of == req.id)]:
+            if r.from_ in seen:
+                continue
+            seen.add(r.from_)
+            try:
+                how = await self._send_result(r.from_, req.context_id, self.tenant_id, result)
+            except Exception:  # 통지 실패가 요청 닫기를 되돌리지 않게 한다
+                how = "보내지 못함 (오류)"
+            s.activity.append(
+                self._act(
+                    self.clock(),
+                    req.context_id,
+                    "planning",
+                    r.from_,
+                    "receive_change_result",
+                    "A2A",
+                    f"{summary} 결과 통지 · {how}",
+                    "A",
+                )
+            )
+
+
+class PlanningService(PlanningCore):
+    """기획 서비스 (planning, 8101): 요청 접수·기획서 초안·확정·인사 연동·되묻기·소통·문서.
+
+    확정한 기획서는 개발 서비스로 넘기고(start_dev) 결과를 돌려받는다(receive_dev_result)."""
+
+    ROLE = "planning"
+    ACTIONS = PLANNING_ACTIONS
+
+    def __init__(
+        self,
+        clock: Clock | None = None,
+        gate: Gate | None = None,
+        tenant_id: str = TENANT_ID_DEFAULT,
+        result_sender: ResultSender | None = None,
+        dev_sender: DevSender | None = None,
+        real_example: bool = False,
+        relater: related.Relater | None | Literal["default"] = "default",
+        hr_client: HrClient | None | Literal["default"] = "default",
+        asker: Asker | None | Literal["default"] = "default",
+    ):
+        super().__init__(clock, gate, tenant_id, result_sender, dev_sender, real_example, relater)
+        # 인사 record_case를 실제로 부르는 곳 (None이면 관문·활동 기록만, 목 모드 기본값)
+        self._hr = hr_link.default_client() if hr_client == "default" else hr_client
+        # 요청 서비스에 되묻는 곳 (None이면 묻지 않음, 목 모드 기본값)
+        self._asker: Asker | None = ask_requester.default_asker() if asker == "default" else asker
+        self._init_state()
+
+    def _hand_to_dev(self, s: State, sp: Spec, req: Request | None, ctx: str) -> None:
+        """확정된 기획서를 dev 서비스로 넘긴다고 표시한다 (보내기는 바꿔 끼운 뒤)."""
+        if req is None or sp.handed_to_dev:
+            return
+        ids = [t.id for t in s.tasks if t.spec == sp.id and t.state == "진행 중"]
+        if not ids:
+            return
+        sp.handed_to_dev = True
+        s.activity.append(
+            self._act(
+                self.clock(),
+                ctx,
+                "planning",
+                "dev",
+                START_DEV,
+                "A2A",
+                f"{sp.id} 작업 {', '.join(ids)} → 개발·배포 서비스로 넘김",
+                "A",
+            )
+        )
+
+    # ---- 기획 → 개발 넘기기 (서비스 역할이 있을 때만)
+
+    def _dev_outgoing(self, s: State, full: bool = False) -> list[tuple[str, str, BaseModel, str]]:
+        """이번 액션으로 보낼 넘기기 목록 (skill, context_id, 입력, idempotency_key).
+
+        이번에 넘김 표시가 붙은 기획서 (start_dev).
+        full이면(다시 켰을 때 맞추기) 넘긴 기획서를 모두 다시 보낸다. 같은 멱등 키라 받는 쪽이
+        이미 가진 건 그대로 두고, 잃은 쪽만 다시 반영한다."""
+        out: list[tuple[str, str, BaseModel, str]] = []
+        was = {sp.id for sp in self.state.specs if sp.handed_to_dev}
+        for sp in s.specs:
+            req = self._request_of_spec(s, sp)
+            if not sp.handed_to_dev or (sp.id in was and not full) or req is None:
+                continue
+            inp = DevHandoffInput(
+                request=dump(req),
+                spec=dump(sp),
+                tasks=[dump(t) for t in s.tasks if t.spec == sp.id],
+            )
+            out.append((START_DEV, req.context_id, inp, start_dev_key(req.context_id, sp.id)))
+        return out
+
+    async def _inbound(self, s: State, kind: str) -> ActionResult | None:
+        """시뮬레이터: 다른 부서 요청·개선 초안이 들어온 것처럼 (목 모드)."""
+        if kind not in _TICKET_KINDS and kind not in ("hr_draft", "data_draft"):
+            raise self._wrong_service(kind, "개발")
+        seq, t, ctx_req, _last = self._inbound_start(s)
+
+        def act(ctx, frm, to, point, kind_, text, grade=None):
+            return self._act(t, ctx, frm, to, point, kind_, text, grade, seq)
+
+        if kind in _TICKET_KINDS:
+            frm = "support" if kind.startswith("support") else "marketing"
+            simple = kind.endswith("simple")
+            pool = SIMPLE_TICKETS[frm] if simple else SAMPLE_TICKETS[frm]
+            # 간단 요청은 아직 안 보낸 것부터, 일반 요청은 돌아가며 (중복 연결 시연용)
+            used = {r.title for r in s.requests}
+            if simple:
+                title = next(
+                    (x for x in pool if x not in used), f"{pool[seq % len(pool)]} ({seq}차)"
+                )
+            else:
+                title = pool[seq % len(pool)]
+            return await self._register_ticket(s, frm, title, ctx_req, t, seq)
+
+        if kind in ("hr_draft", "data_draft"):
+            frm = "hr" if kind == "hr_draft" else "data"
+            req_id = f"REQ-{20 + seq}"
+            title = (
+                "반복되는 인수인계 질문을 운영 매뉴얼에 반영"
+                if frm == "hr"
+                else "같은 시간대 결제 실패율 반복 상승 원인 개선"
+            )
+            via = "ticket_draft_propose (③)" if frm == "hr" else "개선 초안 (원인 추적 루프 ③)"
+            text = f"개선 초안 수신 → 요청함 {req_id}"
+            await self._execute(
+                "create_ticket", ctx_req, req_id, text, {"title": title, "via": via}
+            )
+            s.drafts_in += 1
+            s.requests.append(
+                Request(
+                    id=req_id,
+                    context_id=ctx_req,
+                    tenant_id=self.tenant_id,
+                    from_=frm,
+                    via=via,
+                    title=title,
+                    evidence=f"{DEPT_NAME[frm]} 시뮬레이터에서 보냄",
+                    state="접수",
+                    flow=True,
+                )
+            )
+            point = "ticket_draft_propose" if frm == "hr" else "개선 초안 (루프 ③)"
+            s.activity.append(act(ctx_req, frm, "planning", point, "A2A", text, "A"))
+            return ActionResult(output={"request_id": req_id})
+
+    async def _advance_step(self, s: State) -> bool:
+        """flow 요청은 사람 클릭 없이 기획서 초안·자동 확정까지 간다 (PR부터는 개발 서비스)."""
+        for r in s.requests:
+            if r.flow and r.state == "접수" and r.spec is None and r.duplicate_of is None:
+                if r.via != "create_ticket":
+                    await self._accept_draft(s, r.id)
+                await self._draft_spec(s, r)
+                return True
+        return False
+
+    async def _auto_complete(self, s: State, req: Request) -> None:
+        """간단 요청: write_spec → 자동 확정 → split_tasks까지 하고 개발 서비스로 넘긴다.
+
+        generate_pr(B) → review_pr → merge_pr(B) → record_case → 요청 부서 회신은 개발 서비스가
+        `_auto_build`로 한다. 사람 클릭 없음."""
+        sp, _task = await self._auto_plan(s, req, done=False)
+        for r in s.requests:
+            if r.id == req.id:
+                r.spec = sp.id
+                r.state = "작업 중"
+        self._hand_to_dev(s, sp, req, req.context_id)
+
+    async def _relate_new(self, s: State, known: set[str]) -> None:
+        """이번 액션으로 새로 생긴 요청마다 비슷한·충돌하는 요청을 찾아 붙인다 (제안만)."""
+        if self._relater is None:
+            return
+        for req in [r for r in s.requests if r.id not in known]:
+            try:
+                req.related = await self._relater.relate(s, req)
+            except Exception:  # noqa: BLE001 - 찾기가 실패해도 요청은 받는다
+                req.related = []
+            if self._relater.index is not None:
+                try:  # 다음 요청이 찾을 수 있게 memory 색인에 넣는다
+                    await self._relater.index.write(req, related.text_of(s, req))
+                except Exception:  # noqa: BLE001, S110 - 색인 실패가 요청 받기를 막지 않는다
+                    pass
+            if not req.related:
+                continue
+            label = {
+                "same": "같은 일",
+                "conflict": "충돌 가능",
+                "update": "이어서 바꿈",
+                "related": "비슷함",
+            }
+            text = ", ".join(f"{x.id}({label[x.relation]})" for x in req.related)
+            s.activity.append(
+                self._act(
+                    self.clock(),
+                    req.context_id,
+                    "planning",
+                    "planning",
+                    "request.related",
+                    "API",
+                    f"{req.id} 비슷한 요청: {text}",
+                    "read",
+                )
+            )
+
+    async def _check_plan(self, ctx: str, spec_id: str, req: Request) -> PlanCheck | None:
+        """기획서 초안을 인사 `check_plan`에 묻는다 (인사 연동 3단계). 목 모드면 None.
+
+        영역을 정하지 못하면 묻지 않고 확인 못 함으로 둔다 (지어낸 영역을 보내지 않는다).
+        요청 근거는 다른 부서가 쓴 외부 문구라 `untrusted`로 따로 보낸다.
+        """
+        if self._hr is None:
+            return None
+        area = area_of_text(req.title, req.evidence)
+        if area is None:
+            return PlanCheck("unknown", message="영역을 정하지 못함")
+        draft = PlanDraft(title=req.title, summary=req.title, area=area, kind="spec", ref=spec_id)
+        return await self._hr.check_plan(ctx, draft, {"요청 근거": req.evidence})
 
     async def _record_hr(
         self, decision: ExecuteDecision, record: RecordCase, key: str
@@ -1008,92 +1013,6 @@ class PlanningService(StateService):
             "A" if hr.ok else None,
         )
 
-    @staticmethod
-    def _request_of_spec(s: State, spec: Spec) -> Request | None:
-        return next((r for r in s.requests if r.spec == spec.id), None) or next(
-            (r for r in s.requests if r.id == spec.request), None
-        )
-
-    @staticmethod
-    def _find_pr(s: State, ref: str | int) -> PR | None:
-        if isinstance(ref, int):
-            return next((p for p in s.prs if p.number == ref), None)
-        found = next((p for p in s.prs if p.id == ref), None)
-        if found:
-            return found
-        digits = re.sub(r"\D", "", ref)
-        return next((p for p in s.prs if digits and p.number == int(digits)), None)
-
-    def _hold(
-        self,
-        target: Spec | PR,
-        state: str,
-        check: Check,
-        decision: ExecuteDecision | None = None,
-        evidence: CrossEvidence | None = None,
-    ) -> AutoReview:
-        """자동 확정·자동 머지를 멈추고 대기열에 올린다 (판단은 기존 사람 버튼)."""
-        target.auto_review = AutoReview(
-            state=state,
-            rules=list(check.rules),
-            params=dict(check.params),
-            at=self.clock(),
-            gate_status=decision.status if decision else None,
-            review_id=decision.review_id if decision else None,
-            evidence=[line.dump() for line in evidence.lines] if evidence else [],
-        )
-        return target.auto_review
-
-    async def _cross_check(
-        self, s: State, p: PR, check: Check, ctx: str
-    ) -> tuple[Check, CrossEvidence | None]:
-        """장애 났던 경로(`pr_linked_incident`)에 걸리면 다른 부서 근거로 그 규칙을 대신한다.
-
-        총괄·데이터분석에 묻고 `cross_check=true`와 근거를 params에 더한다. 근거에 걸리면
-        `merge_cross_*` 규칙이 남아 사람 확인으로 간다. 최종 판정은 safety가 다시 한다."""
-        if "pr_linked_incident" not in check.rules or self._cross_checker is None:
-            return check, None
-        ev = await self._cross_checker.gather(s, p, ctx, self.clock())
-        rules = [r for r in check.rules if r != "pr_linked_incident"] + ev.rules
-        s.activity.append(
-            self._act(
-                self.clock(),
-                ctx,
-                "planning",
-                "orchestrator",
-                "cross_check",
-                "A2A",
-                f"{p.id} 교차검증 근거: "
-                + " · ".join(f"{x.label} {x.value}" for x in ev.lines)
-                + (f" → 걸림 {', '.join(ev.rules)}" if ev.rules else " → 근거 통과"),
-                "read",
-            )
-        )
-        return Check(params={**check.params, **ev.params}, rules=rules), ev
-
-    # ---- 화면 액션 진입점
-
-    async def dispatch(self, action: dict) -> ActionResult:
-        """`{"type": "confirmSpec", "spec": "SPEC-7"}` 같은 프로토타입 Action을 적용한다."""
-        if not isinstance(action, dict) or not isinstance(action.get("type"), str):
-            raise ActionError("INVALID_ACTION", "type이 없다")
-        name = action_name(action["type"])
-        if name not in ACTIONS:
-            raise ActionError("UNKNOWN_ACTION", f"모르는 액션: {action['type']}")
-        if name in SIMULATOR_ACTIONS and not template_config.is_mock(AGENT_NAME):
-            raise ActionError("SIMULATOR_DISABLED", "시뮬레이터 액션은 목 모드에서만 받는다")
-        method, model = ACTIONS[name]
-        try:
-            params = model.model_validate({k: v for k, v in action.items() if k != "type"})
-        except ValidationError as exc:
-            raise ActionError("INVALID_ACTION", str(exc)) from exc
-        kwargs = {k: v for k, v in params.model_dump().items()}
-        return await self._apply(getattr(self, method), **kwargs)
-
-    # 이름이 있는 메서드 (테스트·내부 호출용). 모두 dispatch와 같은 길을 탄다.
-    async def inbound(self, kind: str) -> ActionResult:
-        return await self.dispatch({"type": "inbound", "kind": kind})
-
     async def confirm_spec(self, spec: str) -> ActionResult:
         return await self.dispatch({"type": "confirm_spec", "spec": spec})
 
@@ -1102,21 +1021,6 @@ class PlanningService(StateService):
 
     async def answer_question(self, spec: str, text: str) -> ActionResult:
         return await self.dispatch({"type": "answer_question", "spec": spec, "text": text})
-
-    async def generate_prs(self, spec: str) -> ActionResult:
-        return await self.dispatch({"type": "generate_prs", "spec": spec})
-
-    async def review_pr(self, pr: str) -> ActionResult:
-        return await self.dispatch({"type": "review_pr", "pr": pr})
-
-    async def merge_pr(self, pr: str) -> ActionResult:
-        return await self.dispatch({"type": "merge_pr", "pr": pr})
-
-    async def approve_repo(self, pr: str, connection: str | None = None) -> ActionResult:
-        return await self.dispatch({"type": "approve_repo", "pr": pr, "connection": connection})
-
-    async def reject_repo(self, pr: str) -> ActionResult:
-        return await self.dispatch({"type": "reject_repo", "pr": pr})
 
     async def accept_draft(self, request: str) -> ActionResult:
         return await self.dispatch({"type": "accept_draft", "request": request})
@@ -1153,12 +1057,6 @@ class PlanningService(StateService):
             }
         )
 
-    async def approve_promotion(self) -> ActionResult:
-        return await self.dispatch({"type": "approve_promotion"})
-
-    async def reject_promotion(self) -> ActionResult:
-        return await self.dispatch({"type": "reject_promotion"})
-
     async def post_message(self, thread: str, text: str) -> ActionResult:
         return await self.dispatch({"type": "post_message", "thread": thread, "text": text})
 
@@ -1188,169 +1086,6 @@ class PlanningService(StateService):
 
     async def remove_block(self, doc: str, block: str) -> ActionResult:
         return await self.dispatch({"type": "remove_block", "doc": doc, "block": block})
-
-    async def send(self, to: str, point: str, text: str) -> ActionResult:
-        return await self.dispatch({"type": "send", "to": to, "point": point, "text": text})
-
-    async def mark_read(self, to: str) -> ActionResult:
-        return await self.dispatch({"type": "mark_read", "to": to})
-
-    # ---------------------------------------------------------------- 들어오는 연동 (시뮬레이터)
-
-    async def _inbound(self, s: State, kind: str) -> ActionResult | None:
-        seq = s.seq + 1
-        t = self.clock()
-        ctx_req = f"ctx_req_{20 + seq:04d}"
-        merged = [p for p in s.prs if p.merged]
-        last_merged = merged[-1] if merged else None
-        s.seq = seq
-
-        def act(ctx, frm, to, point, kind_, text, grade=None):
-            return self._act(t, ctx, frm, to, point, kind_, text, grade, seq)
-
-        if kind in _TICKET_KINDS:
-            frm = "support" if kind.startswith("support") else "marketing"
-            simple = kind.endswith("simple")
-            pool = SIMPLE_TICKETS[frm] if simple else SAMPLE_TICKETS[frm]
-            # 간단 요청은 아직 안 보낸 것부터, 일반 요청은 돌아가며 (중복 연결 시연용)
-            used = {r.title for r in s.requests}
-            if simple:
-                title = next(
-                    (x for x in pool if x not in used), f"{pool[seq % len(pool)]} ({seq}차)"
-                )
-            else:
-                title = pool[seq % len(pool)]
-            return await self._register_ticket(s, frm, title, ctx_req, t, seq)
-
-        if kind in ("hr_draft", "data_draft"):
-            frm = "hr" if kind == "hr_draft" else "data"
-            req_id = f"REQ-{20 + seq}"
-            title = (
-                "반복되는 인수인계 질문을 운영 매뉴얼에 반영"
-                if frm == "hr"
-                else "같은 시간대 결제 실패율 반복 상승 원인 개선"
-            )
-            via = "ticket_draft_propose (③)" if frm == "hr" else "개선 초안 (원인 추적 루프 ③)"
-            text = f"개선 초안 수신 → 요청함 {req_id}"
-            await self._execute(
-                "create_ticket", ctx_req, req_id, text, {"title": title, "via": via}
-            )
-            s.drafts_in += 1
-            s.requests.append(
-                Request(
-                    id=req_id,
-                    context_id=ctx_req,
-                    tenant_id=self.tenant_id,
-                    from_=frm,
-                    via=via,
-                    title=title,
-                    evidence=f"{DEPT_NAME[frm]} 시뮬레이터에서 보냄",
-                    state="접수",
-                    flow=True,
-                )
-            )
-            point = "ticket_draft_propose" if frm == "hr" else "개선 초안 (루프 ③)"
-            s.activity.append(act(ctx_req, frm, "planning", point, "A2A", text, "A"))
-            return ActionResult(output={"request_id": req_id})
-
-        if kind in ("data_query", "infra_query"):
-            frm = "data" if kind == "data_query" else "infra"
-            ctx = s.incidents[0].context_id if s.incidents else "ctx_inc_0001"
-            found = f"{last_merged.id} ({last_merged.title})" if last_merged else "후보 없음"
-            ask = (
-                "이상 구간 직전 배포가 있었나 질의"
-                if frm == "data"
-                else "장애 시각 직전 머지 PR 질의"
-            )
-            s.activity.append(act(ctx, frm, "planning", "find_related_prs", "A2A", ask, "read"))
-            s.activity.append(
-                act(
-                    ctx,
-                    "planning",
-                    frm,
-                    "find_related_prs",
-                    "A2A",
-                    f"관련 PR 후보 회신: {found} · 원인 판정은 하지 않음",
-                    "read",
-                )
-            )
-            return None
-
-        if kind == "orch_incident":
-            n = len(s.incidents) + 1
-            while any(i.context_id == f"ctx_inc_{n:04d}" for i in s.incidents):
-                n += 1
-            ctx = f"ctx_inc_{n:04d}"
-            pr = last_merged or (s.prs[0] if s.prs else None)
-            if pr is None:
-                return None
-            s.activity.append(
-                act(
-                    ctx,
-                    "orchestrator",
-                    "planning",
-                    "incident.opened",
-                    "이벤트",
-                    f"사건 {ctx} 개시 (infra.anomaly_detected 감지)",
-                )
-            )
-            s.activity.append(
-                act(
-                    ctx,
-                    "orchestrator",
-                    "planning",
-                    "link_incident",
-                    "A2A",
-                    f"사건을 {pr.id}에 연결 요청",
-                    "A",
-                )
-            )
-            linked = await self._link(
-                s,
-                ctx,
-                [pr],
-                title=f"결제 API 응답 지연 (시뮬레이터 {n}회차)",
-                follow_up_title=f"{pr.id} 관련 재발 방지 검토",
-                follow_from="infra",
-                at=t,
-                seq=seq,
-            )
-            s.activity.append(
-                act(ctx, "planning", "orchestrator", "link_incident", "A2A", linked["reply"], "A")
-            )
-            s.activity.extend(linked["demote_acts"])
-            return ActionResult(
-                outcome="linked_duplicate" if linked["duplicate"] else None,
-                output={
-                    "incident": ctx,
-                    "linked_paras": linked["linked_paras"],
-                    "follow_up_request_id": linked["follow_id"],
-                },
-            )
-
-        # safety_verify: infra rollback_deployment(B)의 교차검증 (시뮬레이터는 마지막 머지 PR 기준)
-        ok = last_merged is not None
-        ctx = s.incidents[0].context_id if s.incidents else "ctx_inc_0001"
-        s.activity.append(
-            act(
-                ctx,
-                "safety",
-                "planning",
-                "verify_rollback_target",
-                "A2A",
-                "infra rollback_deployment(B) 교차검증 요청",
-                "read",
-            )
-        )
-        reply = (
-            f"승인 · 장애 직전 머지 {last_merged.id} 확인 (deploy_before_incident)"
-            if last_merged
-            else "거절 · 기간 안 배포 없음 (no_deploy_in_window) → completed + rejected_by_review"
-        )
-        s.activity.append(
-            act(ctx, "planning", "safety", "verify_rollback_target", "A2A", reply, "read")
-        )
-        return ActionResult(outcome=None if ok else "rejected_by_review", output={"approved": ok})
 
     async def _register_ticket(
         self,
@@ -1463,66 +1198,6 @@ class PlanningService(StateService):
             )
         )
         return ActionResult(output={"request_id": req_id, "auto": False})
-
-    # ---- 사람 클릭 없이 다음 단계로 (flow 요청만, 시드 건은 그대로)
-
-    async def _advance(self, s: State) -> None:
-        """액션마다 더 진행할 게 없을 때까지 다음 단계를 돈다: 기획서 초안(개선 초안은 채택 먼저) →
-        자동 확정 검사 → PR 만들기 → 검수 불일치면 수정 후 재검수 → 자동 머지 검사.
-
-        멈추는 곳: 자동 확정·머지 규칙에 걸린 건(`auto_review` 대기열), 검수 불일치 2회,
-        safety 보류·거절. 관문이 거부하면 그 단계에서 멈추고 앞선 단계는 그대로 둔다."""
-        if s.auto_policy.level == 0:  # L0 = 자동 처리 중지: 접수에서 멈춘다
-            return
-        for _ in range(ADVANCE_LIMIT):
-            try:
-                if not await self._advance_step(s):
-                    return
-            except GateRefused:
-                return
-
-    async def _advance_step(self, s: State) -> bool:
-        """역할 planning은 기획서 초안·자동 확정까지, 역할 dev는 PR 만들기부터 한다.
-
-        합친 모드(역할 없음)는 전부 한다."""
-        flow = {r.id for r in s.requests if r.flow}
-        for r in s.requests:
-            if self.role == "dev":
-                break  # dev는 요청으로 기획서를 쓰지 않는다 (start_dev로 확정본을 받는다)
-            if r.flow and r.state == "접수" and r.spec is None and r.duplicate_of is None:
-                if r.via != "create_ticket":
-                    await self._accept_draft(s, r.id)
-                await self._draft_spec(s, r)
-                return True
-        if self.role == "planning":
-            return False  # PR 만들기·재검수·머지는 dev 서비스 몫
-        for sp in s.specs:
-            if sp.request not in flow or sp.status != "확정":
-                continue
-            has_pr = {p.task for p in s.prs}
-            todo = [
-                t
-                for t in s.tasks
-                if t.spec == sp.id and t.state == "진행 중" and t.id not in has_pr
-            ]
-            if not todo:
-                continue
-            req = self._request_of_spec(s, sp)
-            if self.role == "dev" and sp.auto and req and req.auto and req.auto.ok:
-                # planning이 넘긴 간단 요청: 원래 간단 요청 경로대로 PR·머지까지 한 번에
-                await self._auto_build(s, req, sp, todo[0])
-            else:
-                await self._generate_prs(s, sp.id)
-            return True
-        for p in s.prs:
-            task = next((t for t in s.tasks if t.id == p.task), None)
-            sp = next((x for x in s.specs if task and x.id == task.spec), None)
-            if sp is None or sp.request not in flow or p.merged or p.auto_review is not None:
-                continue
-            if p.reviews and p.reviews[-1] == "불일치" and p.reviews.count("불일치") < 2:
-                await self._review_pr(s, p.id)
-                return True
-        return False
 
     async def _draft_spec(self, s: State, req: Request) -> None:
         """요청으로 기획서 초안을 쓰고(write_spec) 자동 확정 규칙으로 넘긴다."""
@@ -1734,35 +1409,6 @@ class PlanningService(StateService):
         self._save()
         return result
 
-    async def _auto_complete(self, s: State, req: Request) -> None:
-        """간단 요청 한 번에 처리: write_spec → 자동 확정 → split_tasks → generate_pr(B) →
-        review_pr → merge_pr(B) → record_case → 요청 부서 회신. 사람 클릭 없음.
-
-        역할 planning은 작업 분할까지 하고 dev 서비스로 넘긴다.
-        나머지는 dev가 `_auto_build`로 한다."""
-        split = self.role == "planning"
-        prelude = None if split else self._auto_prelude(s)
-        sp, task = await self._auto_plan(s, req, done=not split)
-        if split:
-            for r in s.requests:
-                if r.id == req.id:
-                    r.spec = sp.id
-                    r.state = "작업 중"
-            self._hand_to_dev(s, sp, req, req.context_id)
-            return
-        await self._auto_build(s, req, sp, task, prelude)
-
-    def _auto_prelude(self, s: State) -> tuple[datetime, datetime | None]:
-        """간단 요청 처리 시각과 승급 제안 시각 (시계를 부르는 순서를 원래대로 둔다)."""
-        pol = s.auto_policy
-        t = self.clock()
-        propose = (
-            pol.proposal is None
-            and pol.streak + 1 >= PROMOTE_AFTER
-            and pol.level < len(AUTO_LEVELS) - 1
-        )
-        return t, (self.clock() if propose else None)
-
     async def _auto_plan(self, s: State, req: Request, *, done: bool) -> tuple[Spec, Task]:
         """간단 요청 앞쪽: write_spec → 자동 확정 → split_tasks.
 
@@ -1821,6 +1467,1435 @@ class PlanningService(StateService):
         s.tasks.append(task)
         step("planning", "planning", "split_tasks", "A2A", f"R1 → 작업 {task_id}", "A")
         return sp, task
+
+    async def create_ticket(
+        self,
+        *,
+        context_id: str,
+        requester: str,
+        title: str,
+        evidence: str,
+        source_ref: str | None,
+        evidence_ids: list[str],
+        idempotency_key: str,
+    ) -> ActionResult:
+        """변경 요청 접수 (A, #174). 같은 요청이 있으면 묶고(linked_duplicate), 없으면 새 REQ와
+        `ctx_req_`를 발급한다(created). 같은 idempotency_key의 두 번째 요청은 이전 결과를 돌려준다.
+
+        - 중복 판정은 기존 도메인 규칙(`find_duplicate`, 같은 제목)만 쓴다. `source_ref`·
+          `evidence_ids`는 저장만 한다.
+        - 묶이면 원래 요청의 `context_id`를 돌려준다 (요청 부서는 그 사건에 문의를 잇는다).
+        - 결과 통지는 같은 `context_id`에 `path`를 비운 새 요청으로 보낸다(합의). 요청 부서의 수신
+          skill이 아직 없어 지금은 활동 기록(get_request_status)까지만 남긴다.
+        - 요청을 보낸 A2A `context_id`는 활동 근거로만 남기고 사건 ID로 쓰지 않는다.
+        """
+        cached = self._idempotent.get(idempotency_key)
+        if cached is not None:
+            return ActionResult(changed=False, outcome=cached.outcome, output=dict(cached.output))
+
+        async def run(s: State) -> ActionResult:
+            seq = s.seq + 1
+            s.seq = seq
+            t = self.clock()
+            dup_id = find_duplicate(s.requests, title)
+            original = next((r for r in s.requests if r.id == dup_id), None) if dup_id else None
+            used_ctx = {r.context_id for r in s.requests}
+            n = 20 + seq
+            while f"ctx_req_{n:04d}" in used_ctx:
+                n += 1
+            ctx_req = original.context_id if original else f"ctx_req_{n:04d}"
+            used_ids = {r.id for r in s.requests}
+            m = 20 + seq
+            while f"REQ-{m}" in used_ids:
+                m += 1
+            # 서비스 이름(inquiry 등)으로 와도 부서는 원래 부서로 남기고, 서비스 id는 따로 둔다
+            dept = department_of(requester)
+            frm = dept if dept in DEPT_NAME else "orchestrator"
+            result = await self._register_ticket(
+                s,
+                frm,
+                title,
+                ctx_req,
+                t,
+                seq,
+                evidence=evidence,
+                source_ref=source_ref,
+                evidence_ids=evidence_ids,
+                req_id=f"REQ-{m}",
+                from_service=requester if requester in SERVICE_BY_ID else None,
+            )
+            req_id = result.output["request_id"]
+            return ActionResult(
+                outcome="linked_duplicate" if dup_id else "created",
+                output={
+                    "request_id": req_id,
+                    "context_id": ctx_req,
+                    "duplicate_of": dup_id,
+                    "auto": result.output.get("auto"),
+                    "via_context_id": context_id,
+                },
+            ), result.output.get("investigate", False)
+
+        async def apply(s: State) -> ActionResult:
+            out, investigate = await run(s)
+            nonlocal to_inbox
+            to_inbox = investigate
+            return out
+
+        to_inbox = False
+        result = await self._apply(apply)
+        self._idempotent[idempotency_key] = result
+        self._save()  # 중복 거르기 기록도 바로 남긴다 (재시작 뒤 같은 요청을 다시 처리하지 않게)
+        if to_inbox:
+            await self._cause_to_inbox(result.output["request_id"])
+        return result
+
+    async def _cause_to_inbox(self, req_id: str) -> None:
+        """원인 확인 요청을 받은 요청(사람 할 일함)에 올리고 활동에 남긴다 (잠금 밖에서 보낸다)."""
+        req = next((r for r in self.state.requests if r.id == req_id), None)
+        if req is None:
+            return
+        text = await cause_inbox.send(req, self.tenant_id, self._cause_poster)
+
+        async def log(s: State) -> None:
+            s.activity.append(
+                self._act(
+                    self.clock(), req.context_id, "planning", "human", "handoff", "A2A", text, "A"
+                )
+            )
+
+        await self._apply(log)
+
+    async def receive_dev_result(
+        self,
+        *,
+        context_id: str,
+        requester: str,
+        spec_id: str,
+        request_id: str,
+        request_state: str,
+        tasks: list[dict],
+        prs: list[dict],
+        idempotency_key: str,
+        request: dict | None = None,
+        spec: dict | None = None,
+        auto_policy: dict | None = None,
+    ) -> ActionResult:
+        """planning 서비스: dev가 돌려준 작업·PR·요청 상태를 반영한다 (A).
+
+        자동 처리 범위(`auto_policy`)가 같이 오면 dev 것으로 맞춘다 (범위의 주인은 dev).
+
+        작업·PR은 id로 덮어쓴다. 개발팀이 직접 낸 기획이면 요청·기획서도 같이 와서 없으면 넣고
+        있으면 덮어쓴다 (기획 쪽이 바뀌는 일을 모두 알도록)."""
+        cached = self._idempotent.get(idempotency_key)
+        if cached is not None:
+            return ActionResult(changed=False, outcome=cached.outcome, output=dict(cached.output))
+        if request_state not in get_args(ReqState):
+            raise ValueError(f"모르는 요청 상태: {request_state}")
+        got_tasks = [Task.model_validate(t) for t in tasks]
+        got_prs = [PR.model_validate(p) for p in prs]
+        got_req = Request.model_validate(request) if request else None
+        got_spec = Spec.model_validate(spec) if spec else None
+        got_policy = AutoPolicy.model_validate(auto_policy) if auto_policy else None
+
+        async def run(s: State) -> ActionResult:
+            t = self.clock()
+            new_own = got_req is not None and not any(r.id == got_req.id for r in s.requests)
+            if got_req is not None:
+                self._upsert(s.requests, [got_req])
+            if got_spec is not None:
+                self._upsert(s.specs, [got_spec])
+            req = next((r for r in s.requests if r.id == request_id), None)
+            ctx = req.context_id if req else context_id
+            merged = sum(1 for p in got_prs if p.merged)
+            text = (
+                f"{spec_id} 작업 {len(got_tasks)}·PR {len(got_prs)}(머지 {merged}) 반영"
+                f" · {request_id} {request_state}"
+            )
+            await self._execute(
+                RECEIVE_DEV_RESULT,
+                ctx,
+                f"{spec_id}:{len(s.activity)}",
+                text,
+                {"request": request_id, "request_state": request_state},
+                [spec_id, request_id],
+            )
+            self._upsert(s.tasks, got_tasks)
+            self._upsert(s.prs, got_prs)
+            if req:
+                req.state = request_state  # type: ignore[assignment]
+            if got_policy is not None:
+                s.auto_policy = got_policy
+            frm = requester if requester in DEPT_NAME else "dev"
+            if new_own and got_spec is not None:
+                s.activity.append(
+                    self._act(
+                        t, ctx, frm, "planning", RECEIVE_DEV_RESULT, "A2A",
+                        f"개발팀 기획 {got_spec.id} 받음: {got_spec.title}", "A",
+                    )
+                )  # fmt: skip
+            s.activity.append(
+                self._act(t, ctx, frm, "planning", RECEIVE_DEV_RESULT, "A2A", text, "A")
+            )
+            return ActionResult(output={"applied": len(got_tasks) + len(got_prs)})
+
+        result = await self._apply(run)
+        self._idempotent[idempotency_key] = result
+        self._save()  # 중복 거르기 기록도 바로 남긴다 (재시작 뒤 같은 요청을 다시 처리하지 않게)
+        return result
+
+    async def _answer_question(self, s: State, spec: str, text: str) -> None:
+        sp = next((x for x in s.specs if x.id == spec), None)
+        if sp is None or not sp.question:
+            return
+        if sp.question_id:  # 요청 서비스에 되물은 질문을 기획 화면에서 사람이 대신 답함
+            await self._apply_answer(
+                s, sp, self._request_of_spec(s, sp), sp.question_id, text, "human", []
+            )
+            await self._try_auto_confirm(s, sp)
+            return
+        dec_id = f"D-{len(s.decisions)}"
+        req = self._request_of_spec(s, sp)
+        ctx = req.context_id if req else f"spec:{sp.id}"
+        th = next((x for x in s.threads if x.on == spec), None)
+        summary = f"스레드에서 결정 {dec_id} 추출, R1 반영, 질문 닫음"
+        await self._execute("extract_decision", ctx, dec_id, summary, {"spec": spec})
+        case = f"① kind decision_extracted · {dec_id} (결정·이유·대안)"
+        record = self._decision_record(
+            ctx,
+            dec_id,
+            ANSWER_DECISION["text"],
+            ANSWER_DECISION["reason"],
+            [ANSWER_DECISION["alternatives"]],
+            [f"spec:{spec}"] + ([f"thread:{th.id}"] if th else []),
+            sp.title,
+        )
+        hr_key = f"{dec_id}:decision_extracted"
+        gate = await self._execute(
+            "record_case",
+            ctx,
+            hr_key,
+            case,
+            {"record_case": record.model_dump(mode="json")},
+            record.source_refs,
+        )
+        hr = await self._record_hr(gate, record, hr_key)
+        for x in s.threads:
+            if x.on == spec:
+                x.messages.append(
+                    Message(who=ANSWER_WHO, dept="support", text=text, decision=dec_id)
+                )
+        sp.question = None
+        for p in sp.paras:
+            if p.id == "R1":
+                p.text = ANSWER_R1_TEXT
+        s.decisions.append(
+            Decision(
+                id=dec_id,
+                spec=spec,
+                from_=f"스레드 {th.id}" if th else "스레드",
+                sent_to_hr=hr is None or hr.ok,
+                **ANSWER_DECISION,
+            )
+        )
+        s.activity.append(
+            self._act(
+                self.clock(), ctx, "planning", "planning", "extract_decision", "A2A", summary, "A"
+            )
+        )
+        s.activity.append(self._hr_act(ctx, case, hr))
+        # 질문이 닫혔으면 자동 확정 규칙을 다시 본다 (통과하면 확정·작업 분할, 아니면 대기열)
+        await self._try_auto_confirm(s, sp)
+
+    async def _confirm_spec(self, s: State, spec: str) -> None:
+        """사람 확정 버튼 (교차검증 대기·답 대기 건의 판단도 여기서 한다)."""
+        sp = next((x for x in s.specs if x.id == spec), None)
+        if sp is None or sp.status == "확정":
+            return
+        await self._do_confirm(s, sp, spec_check(sp), auto=False)
+
+    async def _check_spec(self, s: State, spec: str) -> ActionResult | None:
+        """자동 확정 규칙을 다시 본다 (예: 인사 경고가 풀린 뒤). 통과하면 확정, 아니면 대기열."""
+        sp = next((x for x in s.specs if x.id == spec), None)
+        if sp is None or sp.status == "확정":
+            return None
+        confirmed = await self._try_auto_confirm(s, sp)
+        review = sp.auto_review
+        return ActionResult(
+            outcome="auto_confirmed" if confirmed else "waiting",
+            output={"spec": sp.id, "state": None if confirmed else review and review.state},
+        )
+
+    async def _try_auto_confirm(self, s: State, sp: Spec) -> bool:
+        """질문 0·경고 0·근거 1 이상·되돌릴 수 없음 0이면 자동 확정하고 작업 분할로 간다.
+
+        아니면 확정하지 않고 "답 대기"(질문 남음) 또는 "교차검증 대기"로 둔다.
+        safety가 confirm_spec을 보류·거절해도 "교차검증 대기" (앞선 단계는 그대로 남는다)."""
+        if sp.status == "확정":
+            return False
+        req = self._request_of_spec(s, sp)
+        ctx = req.context_id if req else f"spec:{sp.id}"
+        check = spec_check(sp)
+        # 아직 안 끝난 다른 요청과 충돌할 수 있으면 어느 쪽을 따를지 사람이 정한다 (planning 규칙)
+        clash = related.open_conflicts(s, req) if req else []
+        if clash:
+            check = Check(params=check.params, rules=[*check.rules, "spec_open_conflict"])
+        # 인사 ② check_plan을 못 받았으면 경고 없음으로 보지 않는다 (사람 확정, 인사 연동 3단계)
+        if sp.hr_check == "unknown":
+            check = Check(params=check.params, rules=[*check.rules, "spec_hr_unchecked"])
+        if check.ok:
+            try:
+                await self._do_confirm(s, sp, check, auto=True)
+                return True
+            except GateRefused as exc:
+                if exc.action != "confirm_spec":
+                    raise
+                hold = self._hold(sp, WAIT_CROSS_CHECK, check, exc.decision)
+        else:
+            wait = spec_wait_state(check)
+            if clash and wait != WAIT_ANSWER:
+                wait = WAIT_HUMAN
+            hold = self._hold(sp, wait, check)
+        why = ", ".join(hold.rules) or f"safety {hold.gate_status}"
+        if clash:
+            why += " · " + ", ".join(x.id for x in clash)
+        s.activity.append(
+            self._act(
+                hold.at,
+                ctx,
+                "planning",
+                "planning",
+                "auto_review",
+                "execute",
+                f"{sp.id} 자동 확정 안 함 → {hold.state} ({why})",
+                "A",
+            )
+        )
+        return False
+
+    async def _do_confirm(self, s: State, sp: Spec, check: Check, *, auto: bool) -> None:
+        req = self._request_of_spec(s, sp)
+        ctx = req.context_id if req else f"spec:{sp.id}"
+        reqs = [p for p in sp.paras if p.kind == "req"]
+        base = len(s.tasks) + 10
+        tasks = [
+            Task(
+                id=f"T-{base + i}",
+                spec=sp.id,
+                para=p.id,
+                title=p.text.split(" (")[0],
+                owner="백엔드" if i == 0 else "프론트",
+                state="진행 중",
+            )
+            for i, p in enumerate(reqs)
+        ]
+        # FR-SPEC-006: 인사 경고(warn)가 남은 문단을 둔 채 확정하면 "warn 무시 진행"을 감사 기록으로
+        # 남긴다 (execute params·record_case·활동 세 곳). 경고 수는 #171 `warnings`로도 보낸다.
+        warn_ignored = [
+            {"para": p.id, "card": p.warn.card, "text": p.warn.text} for p in sp.paras if p.warn
+        ]
+        audit: str | None = None
+        if warn_ignored:
+            where = ", ".join(f"{w['para']}({w['card']})" for w in warn_ignored)
+            audit = f"warn 무시 진행 · {sp.id} {where} 경고를 둔 채 확정 (팀장 {TEAM_LEAD})"
+        c = check.params
+        rule_text = (
+            f"질문 {c['open_questions']}·경고 {c['warnings']}·근거 {c['basis_count']}"
+            f"·되돌릴 수 없음 {c['irreversible_count']}"
+        )
+        if auto:
+            confirm_text = f"{sp.id} 자동 확정 ({rule_text} → confirm_spec 규칙 통과, 사후 감사)"
+        else:
+            confirm_text = f"{sp.id} 확정 (팀장 {TEAM_LEAD})" + (f" · {audit}" if audit else "")
+        params: dict[str, Any] = {**check.params, "auto": auto}
+        if warn_ignored:
+            params["warn_ignored"] = warn_ignored
+        await self._execute("confirm_spec", ctx, sp.id, confirm_text, params)
+        split = f"요구사항 {len(reqs)}개 → 작업 {', '.join(t.id for t in tasks)}"
+        await self._execute("split_tasks", ctx, sp.id, split, {"tasks": [t.id for t in tasks]})
+        case = f"① kind spec_confirmed · {sp.id}" + (" (자동 확정)" if auto else "")
+        if auto:
+            summary = f"{sp.id} {sp.title} 자동 확정 (사후 감사 대상)"
+        else:
+            summary = f"{sp.id} {sp.title} 확정" + (f" ({audit})" if audit else "")
+        record = RecordCase(
+            context_id=ctx,
+            tenant_id=self.tenant_id,
+            kind=RecordKind.SPEC_CONFIRMED,
+            summary=summary,
+            decision_reason=f"confirm_spec 규칙 통과: {rule_text}" if auto else None,
+            source_refs=[f"spec:{sp.id}"]
+            + [f"para:{sp.id}:{w['para']}" for w in warn_ignored]
+            + [f"card:{w['card']}" for w in warn_ignored],
+            author=AGENT_NAME,
+            area=area_of_text(sp.title, *(p.text for p in reqs)),
+        )
+        case_params: dict[str, Any] = {"record_case": record.model_dump(mode="json")}
+        if warn_ignored:
+            case_params["warn_ignored"] = warn_ignored
+        hr_key = f"{sp.id}:spec_confirmed"
+        gate = await self._execute(
+            "record_case", ctx, hr_key, case, case_params, record.source_refs
+        )
+        hr = await self._record_hr(gate, record, hr_key)
+        sp.status = "확정"
+        sp.auto_review = None
+        if auto:
+            sp.auto = True
+        s.tasks.extend(tasks)
+        for r in s.requests:
+            if r.spec == sp.id:
+                r.state = "작업 중"
+        if auto:
+            s.activity.append(
+                self._act(
+                    self.clock(),
+                    ctx,
+                    "planning",
+                    "planning",
+                    "audit.auto_confirmed",
+                    "execute",
+                    confirm_text,
+                    "A",
+                )
+            )
+        else:
+            s.activity.append(
+                self._act(
+                    self.clock(),
+                    ctx,
+                    "human",
+                    "planning",
+                    "기획서 확정",
+                    "사람",
+                    f"팀장 {TEAM_LEAD}이 {sp.id} 확정 (사람 클릭 1)",
+                )
+            )
+        if audit:
+            s.activity.append(
+                self._act(
+                    self.clock(),
+                    ctx,
+                    "planning",
+                    "planning",
+                    "audit.warn_ignored",
+                    "execute",
+                    audit,
+                    "A",
+                )
+            )
+        s.activity.append(
+            self._act(self.clock(), ctx, "planning", "planning", "split_tasks", "A2A", split, "A")
+        )
+        s.activity.append(self._hr_act(ctx, case, hr))
+        if audit:
+            s.activity.append(
+                self._act(
+                    self.clock(),
+                    ctx,
+                    "planning",
+                    "hr",
+                    "record_case",
+                    "A2A",
+                    f"{case} · {audit}",
+                    "A",
+                )
+            )
+        if req:
+            s.activity.append(
+                self._act(
+                    self.clock(),
+                    ctx,
+                    "planning",
+                    req.from_,
+                    "get_request_status",
+                    "A2A",
+                    f'{req.id} 상태 "작업 중"을 요청 부서가 조회',
+                    "read",
+                )
+            )
+        self._hand_to_dev(s, sp, req, ctx)
+
+    async def _write_spec(self, s: State, request: str) -> ActionResult | None:
+        """사람 버튼 "기획서 초안": 아직 기획서가 없는 요청으로 초안을 쓴다 (있으면 그대로)."""
+        req = next((r for r in s.requests if r.id == request), None)
+        if req is None:
+            raise ActionError("NOT_FOUND", f"요청 {request}가 없다")
+        if req.spec is not None or req.duplicate_of is not None:
+            return None
+        await self._draft_spec(s, req)
+        return ActionResult(output={"request_id": req.id, "spec_id": req.spec})
+
+    async def _accept_draft(self, s: State, request: str) -> None:
+        r = next((x for x in s.requests if x.id == request), None)
+        if r is None or r.state != "접수":
+            return
+        text = f"{r.id} 채택 → 기획서 작성 대기열"
+        await self._execute("review_ticket_draft", r.context_id, r.id, text)
+        s.drafts_accepted += 1
+        r.state = "기획 중"
+        s.activity.append(
+            self._act(
+                self.clock(),
+                r.context_id,
+                "planning",
+                "planning",
+                "review_ticket_draft",
+                "A2A",
+                text,
+                "A",
+            )
+        )
+
+    # ---- 기각 (hr record_case kind decision_rejected)
+
+    def _rejection_record(
+        self,
+        ctx: str,
+        summary: str,
+        decision_reason: str,
+        alternatives_considered: list[str],
+        source_refs: list[str],
+    ) -> RecordCase:
+        """`decision_rejected` 기록을 만든다. 이유·검토한 대안이 없으면 보내지 않고 오류.
+
+        hr `check_plan`이 "과거에 기각된 안"을 판정하는 재료라서 둘 다 필수로 둔다.
+        """
+        reason = decision_reason.strip()
+        alternatives = [a.strip() for a in alternatives_considered if a.strip()]
+        if not reason or not alternatives:
+            raise ActionError(
+                "MISSING_DECISION_REASON",
+                "decision_rejected에는 decision_reason과 alternatives_considered가 필요하다"
+                " (hr에 보내지 않았다)",
+            )
+        return RecordCase(
+            context_id=ctx,
+            tenant_id=self.tenant_id,
+            kind=RecordKind.DECISION_REJECTED,
+            summary=summary,
+            decision_reason=reason,
+            alternatives_considered=alternatives,
+            source_refs=source_refs,
+            author=AGENT_NAME,
+        )
+
+    async def _send_rejection(self, s: State, record: RecordCase, target: str) -> None:
+        """hr `record_case`(kind decision_rejected)를 execute로 보내고 활동에 남긴다."""
+        case = f"① kind decision_rejected · {target}"
+        await self._execute(
+            "record_case",
+            record.context_id,
+            f"{target}:decision_rejected",
+            case,
+            {"record_case": record.model_dump(mode="json")},
+            record.source_refs,
+        )
+        s.activity.append(
+            self._act(
+                self.clock(),
+                record.context_id,
+                "planning",
+                "hr",
+                "record_case",
+                "A2A",
+                f"{case} (이유: {record.decision_reason})",
+                "A",
+            )
+        )
+
+    async def _reject_draft(
+        self,
+        s: State,
+        request: str,
+        decision_reason: str,
+        alternatives_considered: list[str],
+    ) -> ActionResult | None:
+        """개선 초안 기각 → hr record_case(decision_rejected). 이유·대안이 없으면 하지 않는다."""
+        r = next((x for x in s.requests if x.id == request), None)
+        record = self._rejection_record(
+            r.context_id if r else f"req:{request}",
+            f"[기각한 안] {r.title if r else request}",
+            decision_reason,
+            alternatives_considered,
+            [f"req:{request}"],
+        )
+        if r is None or r.state != "접수":
+            return None
+        reason = record.decision_reason or ""
+        text = f"{r.id} 기각 (이유: {reason})"
+        await self._execute(
+            "review_ticket_draft", r.context_id, r.id, text, {"decision": "rejected"}
+        )
+        await self._send_rejection(s, record, r.id)
+        dec_id = f"D-{len(s.decisions)}"
+        s.decisions.append(
+            Decision(
+                id=dec_id,
+                spec=r.spec or "-",
+                text=f"[기각한 안] {r.title}",
+                reason=reason,
+                alternatives=", ".join(record.alternatives_considered),
+                from_=f"개선 초안 {r.id}",
+                sent_to_hr=True,
+            )
+        )
+        r.state = "기각"
+        await self._notify_result(s, r, "declined", reason_code="draft_rejected")
+        s.activity.append(
+            self._act(
+                self.clock(),
+                r.context_id,
+                "planning",
+                "planning",
+                "review_ticket_draft",
+                "A2A",
+                text,
+                "A",
+            )
+        )
+        s.activity.append(
+            self._act(
+                self.clock(),
+                r.context_id,
+                "planning",
+                r.from_,
+                "get_request_status",
+                "A2A",
+                f'{r.id} "{r.title}" 기각 (이유: {reason})',
+                "read",
+            )
+        )
+        return ActionResult(
+            output={"request_id": r.id, "decision_id": dec_id, "record_kind": "decision_rejected"}
+        )
+
+    async def _reject_decision(
+        self,
+        s: State,
+        spec: str,
+        text: str,
+        decision_reason: str,
+        alternatives_considered: list[str],
+    ) -> ActionResult | None:
+        """기획서 검토 중 기각한 안을 결정으로 남기고 hr에 decision_rejected로 보낸다."""
+        sp = next((x for x in s.specs if x.id == spec), None)
+        req = self._request_of_spec(s, sp) if sp else None
+        ctx = req.context_id if req else f"spec:{spec}"
+        record = self._rejection_record(
+            ctx,
+            f"[기각한 안] {text.strip()}",
+            decision_reason,
+            alternatives_considered,
+            [f"spec:{spec}"],
+        )
+        if sp is None or not text.strip():
+            return None
+        dec_id = f"D-{len(s.decisions)}"
+        await self._send_rejection(s, record, dec_id)
+        s.decisions.append(
+            Decision(
+                id=dec_id,
+                spec=sp.id,
+                text=f"[기각한 안] {text.strip()}",
+                reason=record.decision_reason or "",
+                alternatives=", ".join(record.alternatives_considered),
+                from_=f"기획서 {sp.id}",
+                sent_to_hr=True,
+            )
+        )
+        return ActionResult(output={"decision_id": dec_id, "record_kind": "decision_rejected"})
+
+    # ---- 소통
+
+    async def _post_message(self, s: State, thread: str, text: str) -> None:
+        th = next((x for x in s.threads if x.id == thread), None)
+        if th is None or not text.strip():
+            return
+        body = text.strip()
+        t = self.clock()
+        req = next((r for r in s.requests if th.on and r.spec == th.on), None)
+        ctx = req.context_id if req else f"thread:{th.id}"
+        if th.peer:
+            await self._execute("send_message", ctx, f"{th.id}:{len(th.messages)}", body)
+            s.seq += 1
+            s.activity.append(self._act(t, ctx, "planning", th.peer, "message", "A2A", body))
+        th.messages.append(Message(who=TEAM_LEAD, dept="planning", text=body, at=t))
+
+    async def _dept_chat(self, s: State, from_: str) -> None:
+        pool = DEPT_CHAT.get(from_)
+        th = next((x for x in s.threads if x.peer == from_), None)
+        if not pool or th is None:
+            return
+        seq = s.seq + 1
+        t = self.clock()
+        text = pool[sum(1 for m in th.messages if m.dept == from_) % len(pool)]
+        s.seq = seq
+        th.messages.append(Message(who=f"{DEPT_NAME[from_]} 에이전트", dept=from_, text=text, at=t))
+        s.activity.append(
+            self._act(t, f"thread:{th.id}", from_, "planning", "message", "A2A", text, None, seq)
+        )
+
+    async def _extract_decision(self, s: State, thread: str, index: int) -> None:
+        th = next((x for x in s.threads if x.id == thread), None)
+        if th is None or not 0 <= index < len(th.messages) or th.messages[index].decision:
+            return
+        m = th.messages[index]
+        dec_id = f"D-{len(s.decisions)}"
+        ctx = f"thread:{th.id}"
+        summary = f"{th.title} 메시지에서 결정 {dec_id} 추출"
+        await self._execute("extract_decision", ctx, dec_id, summary)
+        case = f"① kind decision_extracted · {dec_id}"
+        reason = f"{m.who} 의견 ({th.title})"
+        refs = [f"thread:{th.id}"] + ([f"spec:{th.on}"] if th.on else [])
+        record = self._decision_record(ctx, dec_id, m.text, reason, [], refs, th.title)
+        hr_key = f"{dec_id}:decision_extracted"
+        gate = await self._execute(
+            "record_case",
+            ctx,
+            hr_key,
+            case,
+            {"record_case": record.model_dump(mode="json")},
+            record.source_refs,
+        )
+        hr = await self._record_hr(gate, record, hr_key)
+        m.decision = dec_id
+        s.decisions.append(
+            Decision(
+                id=dec_id,
+                spec=th.on or "-",
+                text=m.text,
+                reason=reason,
+                alternatives="-",
+                from_=f"소통 {th.title}",
+                sent_to_hr=hr is None or hr.ok,
+            )
+        )
+        s.activity.append(
+            self._act(
+                self.clock(), ctx, "planning", "planning", "extract_decision", "A2A", summary, "A"
+            )
+        )
+        s.activity.append(self._hr_act(ctx, case, hr))
+
+    # ---- 문서 (사람이 고치는 정리 문서. 상태 변경 관문 대상 아님)
+
+    def _patch_doc(self, s: State, doc: str, fn: Callable[[Doc], None]) -> None:
+        d = next((x for x in s.docs if x.id == doc), None)
+        if d is None:
+            return
+        fn(d)
+        d.updated_at = self.clock()
+
+    async def _new_doc(self, s: State, title: str) -> ActionResult:
+        doc_id = f"DOC-{len(s.docs) + 1}"
+        s.docs.append(
+            Doc(
+                id=doc_id,
+                title=title or "제목 없는 문서",
+                updated_at=self.clock(),
+                blocks=[DocBlock(id="b1", kind="p", text="")],
+            )
+        )
+        return ActionResult(output={"doc_id": doc_id})
+
+    async def _gather_doc(self, s: State, about: str, by: str | None) -> ActionResult | None:
+        r = next((x for x in s.requests if x.id == about), None)
+        if r is None:
+            return None
+        doc_id = f"DOC-{len(s.docs) + 1}"
+        blocks = gather_blocks(s, about)
+        s.docs.append(
+            Doc(
+                id=doc_id,
+                title=f"{r.id} 관련 정리 · {r.title}",
+                about=r.id,
+                updated_at=self.clock(),
+                blocks=blocks,
+                by=by or "human",
+            )
+        )
+        ai = by == "ai"
+        prefix = "AI 어시스턴트 요청으로 " if ai else ""
+        s.activity.append(
+            self._act(
+                self.clock(),
+                r.context_id,
+                "planning" if ai else "human",
+                "planning",
+                "gather_doc",
+                "A2A" if ai else "사람",
+                f"{prefix}{r.id}에 걸린 문서·작업·PR·대화·결정을 {doc_id}로 정리"
+                f" (블록 {len(blocks)}개)",
+                "read",
+            )
+        )
+        return ActionResult(output={"doc_id": doc_id, "blocks": len(blocks)})
+
+    async def _rename_doc(self, s: State, doc: str, title: str) -> None:
+        self._patch_doc(s, doc, lambda d: setattr(d, "title", title))
+
+    async def _add_block(self, s: State, doc: str, kind: str, text: str | None) -> None:
+        def add(d: Doc) -> None:
+            d.blocks.append(
+                DocBlock(
+                    id=next_block_id(d),
+                    kind=kind,
+                    text=text or "",
+                    done=False if kind == "todo" else None,
+                )
+            )
+
+        self._patch_doc(s, doc, add)
+
+    async def _edit_block(self, s: State, doc: str, block: str, text: str) -> None:
+        def edit(d: Doc) -> None:
+            for b in d.blocks:
+                if b.id == block:
+                    b.text = text
+
+        self._patch_doc(s, doc, edit)
+
+    async def _toggle_todo(self, s: State, doc: str, block: str) -> None:
+        def toggle(d: Doc) -> None:
+            for b in d.blocks:
+                if b.id == block:
+                    b.done = not b.done
+
+        self._patch_doc(s, doc, toggle)
+
+    async def _remove_block(self, s: State, doc: str, block: str) -> None:
+        def remove(d: Doc) -> None:
+            d.blocks = [b for b in d.blocks if b.id != block]
+
+        self._patch_doc(s, doc, remove)
+
+
+class DevService(PlanningCore):
+    """개발 서비스 (dev, 8111): 넘겨받은 기획서로 PR·검수·머지·배포, 코딩 에이전트·개발 대화,
+    장애 연결·관련 PR·롤백 확인. 자동 처리 범위(auto_policy)의 주인이다."""
+
+    ROLE = "dev"
+    ACTIONS = DEV_ACTIONS
+
+    def __init__(
+        self,
+        clock: Clock | None = None,
+        gate: Gate | None = None,
+        tenant_id: str = TENANT_ID_DEFAULT,
+        result_sender: ResultSender | None = None,
+        dev_sender: DevSender | None = None,
+        real_example: bool = False,
+        relater: related.Relater | None | Literal["default"] = "default",
+        cross_checker: CrossChecker | None | Literal["default"] = "default",
+    ):
+        super().__init__(clock, gate, tenant_id, result_sender, dev_sender, real_example, relater)
+        self._resuming = False  # 대기 대화를 깨우는 중 (다시 깨우지 않는다)
+        self._pr_sync: asyncio.Task | None = None  # 바깥에서 머지·닫은 PR 맞추기 루프
+        self._polling_wait = False  # 다른 서비스 요청을 기다리는 대화를 주기적으로 보는 중
+        # 코딩 에이전트 실행 (작업 id → 실행 중인 태스크·실행 번호). 번호가 바뀐 실행은 버린다
+        self._coding: dict[str, asyncio.Task] = {}
+        self._coding_live: dict[str, int] = {}
+        self._coding_seq = 0
+        # 교차검증 근거를 모으는 곳 (None이면 모으지 않고 safety 판정만)
+        self._cross_checker: CrossChecker | None = (
+            cross_check.default_checker() if cross_checker == "default" else cross_checker
+        )
+        self._init_state()
+
+    def _spawn_hold(self, task_id: str) -> None:
+        try:
+            task = asyncio.get_running_loop().create_task(self._hold_to_inbox(task_id))
+        except RuntimeError:
+            return
+        self._sending.add(task)
+        task.add_done_callback(self._sending.discard)
+
+    def start_pr_sync(self) -> None:
+        """PR_SYNC_SECONDS마다 sync_prs·오래 기다리는 대화 알림을 돈다 (한 번만 켠다)."""
+        if self._pr_sync is not None:
+            return
+
+        from planning_agent import dev_chat, work_queue
+
+        async def loop() -> None:
+            while True:
+                await asyncio.sleep(PR_SYNC_SECONDS)
+                try:
+                    await self.sync_prs()
+                    await work_queue.expire_leases(self)  # 진행 보고가 끊긴 구독형 작업 되돌리기
+                    # 앞 요청을 오래 기다리는 대화에 알린다 (상태가 안 바뀌어도 시간이 지나면)
+                    await dev_chat.notice_long_waits(self)
+                except Exception:  # noqa: BLE001 - 맞추기 실패로 루프가 멈추지 않게 한다
+                    continue  # 다음 차례에 다시
+
+        self._pr_sync = asyncio.get_running_loop().create_task(loop())
+
+    # ---- 기획 → 개발 넘기기 (서비스 역할이 있을 때만)
+
+    def _dev_outgoing(self, s: State, full: bool = False) -> list[tuple[str, str, BaseModel, str]]:
+        """이번 액션으로 보낼 넘기기 목록 (skill, context_id, 입력, idempotency_key).
+
+        작업·PR·요청 상태가 지난번과 달라진 기획서 (receive_dev_result).
+        full이면(다시 켰을 때 맞추기) 넘긴 기획서를 모두 다시 보낸다. 같은 멱등 키라 받는 쪽이
+        이미 가진 건 그대로 두고, 잃은 쪽만 다시 반영한다."""
+        out: list[tuple[str, str, BaseModel, str]] = []
+        for sp in s.specs:
+            req = self._request_of_spec(s, sp)
+            if not sp.handed_to_dev or req is None:
+                continue
+            tasks = [t for t in s.tasks if t.spec == sp.id]
+            ids = {t.id for t in tasks}
+            own = sp.origin == "dev_team"  # 개발팀 기획은 기획 서비스에 요청·기획서가 없다
+            res = DevResultInput(
+                spec_id=sp.id,
+                request_id=req.id,
+                request_state=req.state,
+                tasks=[dump(t) for t in tasks],
+                prs=[dump(p) for p in s.prs if p.task in ids],
+                request=dump(req) if own else None,
+                spec=dump(sp) if own else None,
+            )
+            raw = json.dumps(res.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+            fp = hashlib.sha1(raw.encode()).hexdigest()[:12]
+            if self._dev_sent.get(sp.id) == fp and not full:
+                continue
+            self._dev_sent[sp.id] = fp
+            out.append(
+                (RECEIVE_DEV_RESULT, req.context_id, res, dev_result_key(req.context_id, sp.id, fp))
+            )
+        return self._with_policy(s, out, full)
+
+    async def _inbound(self, s: State, kind: str) -> ActionResult | None:
+        """시뮬레이터: 다른 부서가 관련 PR을 묻거나 사건 연결·롤백 확인을 요청한 것처럼 (목)."""
+        if kind in _TICKET_KINDS or kind in ("hr_draft", "data_draft"):
+            raise self._wrong_service(kind, "기획")
+        seq, t, _ctx_req, last_merged = self._inbound_start(s)
+
+        def act(ctx, frm, to, point, kind_, text, grade=None):
+            return self._act(t, ctx, frm, to, point, kind_, text, grade, seq)
+
+        if kind in ("data_query", "infra_query"):
+            frm = "data" if kind == "data_query" else "infra"
+            ctx = s.incidents[0].context_id if s.incidents else "ctx_inc_0001"
+            found = f"{last_merged.id} ({last_merged.title})" if last_merged else "후보 없음"
+            ask = (
+                "이상 구간 직전 배포가 있었나 질의"
+                if frm == "data"
+                else "장애 시각 직전 머지 PR 질의"
+            )
+            s.activity.append(act(ctx, frm, "planning", "find_related_prs", "A2A", ask, "read"))
+            s.activity.append(
+                act(
+                    ctx,
+                    "planning",
+                    frm,
+                    "find_related_prs",
+                    "A2A",
+                    f"관련 PR 후보 회신: {found} · 원인 판정은 하지 않음",
+                    "read",
+                )
+            )
+            return None
+
+        if kind == "orch_incident":
+            n = len(s.incidents) + 1
+            while any(i.context_id == f"ctx_inc_{n:04d}" for i in s.incidents):
+                n += 1
+            ctx = f"ctx_inc_{n:04d}"
+            pr = last_merged or (s.prs[0] if s.prs else None)
+            if pr is None:
+                return None
+            s.activity.append(
+                act(
+                    ctx,
+                    "orchestrator",
+                    "planning",
+                    "incident.opened",
+                    "이벤트",
+                    f"사건 {ctx} 개시 (infra.anomaly_detected 감지)",
+                )
+            )
+            s.activity.append(
+                act(
+                    ctx,
+                    "orchestrator",
+                    "planning",
+                    "link_incident",
+                    "A2A",
+                    f"사건을 {pr.id}에 연결 요청",
+                    "A",
+                )
+            )
+            linked = await self._link(
+                s,
+                ctx,
+                [pr],
+                title=f"결제 API 응답 지연 (시뮬레이터 {n}회차)",
+                follow_up_title=f"{pr.id} 관련 재발 방지 검토",
+                follow_from="infra",
+                at=t,
+                seq=seq,
+            )
+            s.activity.append(
+                act(ctx, "planning", "orchestrator", "link_incident", "A2A", linked["reply"], "A")
+            )
+            s.activity.extend(linked["demote_acts"])
+            return ActionResult(
+                outcome="linked_duplicate" if linked["duplicate"] else None,
+                output={
+                    "incident": ctx,
+                    "linked_paras": linked["linked_paras"],
+                    "follow_up_request_id": linked["follow_id"],
+                },
+            )
+
+        # safety_verify: infra rollback_deployment(B)의 교차검증 (시뮬레이터는 마지막 머지 PR 기준)
+        ok = last_merged is not None
+        ctx = s.incidents[0].context_id if s.incidents else "ctx_inc_0001"
+        s.activity.append(
+            act(
+                ctx,
+                "safety",
+                "planning",
+                "verify_rollback_target",
+                "A2A",
+                "infra rollback_deployment(B) 교차검증 요청",
+                "read",
+            )
+        )
+        reply = (
+            f"승인 · 장애 직전 머지 {last_merged.id} 확인 (deploy_before_incident)"
+            if last_merged
+            else "거절 · 기간 안 배포 없음 (no_deploy_in_window) → completed + rejected_by_review"
+        )
+        s.activity.append(
+            act(ctx, "planning", "safety", "verify_rollback_target", "A2A", reply, "read")
+        )
+        return ActionResult(outcome=None if ok else "rejected_by_review", output={"approved": ok})
+
+    async def _advance_step(self, s: State) -> bool:
+        """넘겨받은 flow 기획서는 사람 클릭 없이 PR 만들기·검수·재검수·자동 머지 검사까지 간다."""
+        flow = {r.id for r in s.requests if r.flow}
+        for sp in s.specs:
+            if sp.request not in flow or sp.status != "확정":
+                continue
+            has_pr = {p.task for p in s.prs}
+            todo = [
+                t
+                for t in s.tasks
+                if t.spec == sp.id and t.state == "진행 중" and t.id not in has_pr
+            ]
+            if not todo:
+                continue
+            req = self._request_of_spec(s, sp)
+            if sp.auto and req and req.auto and req.auto.ok:
+                # planning이 넘긴 간단 요청: 원래 간단 요청 경로대로 PR·머지까지 한 번에
+                await self._auto_build(s, req, sp, todo[0])
+            else:
+                await self._generate_prs(s, sp.id)
+            return True
+        for p in s.prs:
+            task = next((t for t in s.tasks if t.id == p.task), None)
+            sp = next((x for x in s.specs if task and x.id == task.spec), None)
+            if sp is None or sp.request not in flow or p.merged or p.auto_review is not None:
+                continue
+            if p.reviews and p.reviews[-1] == "불일치" and p.reviews.count("불일치") < 2:
+                await self._review_pr(s, p.id)
+                return True
+        return False
+
+    async def create_dev_task(
+        self,
+        *,
+        title: str,
+        plan: str,
+        done: str | None = None,
+        paths: list[str] | None = None,
+        connection: str | None = None,
+        skip_queue: bool = False,
+        mode: str = "agent",
+    ) -> ActionResult:
+        """개발팀원이 쓴 기획으로 요청·확정 기획서·작업 하나를 만들고 코딩 에이전트를 띄운다 (A).
+
+        에이전트는 바꿔 끼운 뒤 잠금 밖에서 돈다. 진행은 작업 `coding`에 적힌다.
+        `mode="subscription"`이면 서버 에이전트를 띄우지 않고 `queued`로 두어 개발자 본인 Claude가
+        MCP로 가져가기를 기다린다 (work_queue.py). LLM 설정도 필요 없다."""
+        if mode not in ("agent", "subscription"):
+            raise ActionError("INVALID_INPUT", "mode는 agent·subscription 중 하나다")
+        sub = mode == "subscription"
+        title = " ".join((title or "").split())
+        plan = (plan or "").strip()
+        if not title or not plan:
+            raise ActionError("INVALID_INPUT", "title과 plan은 비울 수 없다")
+        if len(plan) > coder.MAX_PLAN_CHARS:
+            raise ActionError("INVALID_INPUT", f"plan은 {coder.MAX_PLAN_CHARS}자까지다")
+        hints = vcs.clean_paths(paths)
+        cid = self._coding_connection(connection)
+        llm = None if sub else self._coding_llm()
+        done_lines = [x.strip() for x in (done or "").splitlines() if x.strip()]
+        done_lines = done_lines[: coder.MAX_DONE_LINES] or [coder.DEFAULT_DONE]
+
+        async def run(s: State) -> ActionResult:
+            req_id, spec_id, task_id, ctx = self._dev_ids(s)
+            t = self.clock()
+            who = "개발자 Claude" if sub else "코딩 에이전트"
+            text = (
+                f'{task_id} 개발팀 기획 "{title}" → {who} 대기 '
+                f"(완료 기준 {len(done_lines)}, 연결 {cid})"
+            )
+            params = {"request": req_id, "spec": spec_id, "connection": cid, "paths": list(hints)}
+            if sub:
+                params["mode"] = mode
+            await self._execute(
+                "dev_task_create", ctx, task_id, text, params, [req_id, spec_id, task_id]
+            )
+            s.requests.append(
+                Request(
+                    id=req_id,
+                    context_id=ctx,
+                    tenant_id=self.tenant_id,
+                    from_="dev",
+                    via=coder.DEV_TEAM,
+                    title=title,
+                    evidence="개발팀 기획 (개발 화면)",
+                    state="작업 중",
+                    spec=spec_id,
+                )
+            )
+            s.specs.append(
+                Spec(
+                    id=spec_id,
+                    title=title,
+                    request=req_id,
+                    status="확정",
+                    problem=plan,
+                    goal=title,
+                    paras=[
+                        Para(id="R1", kind="req", text=title, paths=list(hints)),
+                        *[
+                            Para(id=f"C{i}", kind="done", text=line)
+                            for i, line in enumerate(done_lines, 1)
+                        ],
+                    ],
+                    basis=["개발팀 기획 (개발 화면)"],
+                    human_sentences=1,
+                    handed_to_dev=True,
+                    origin=coder.DEV_TEAM,
+                )
+            )
+            s.tasks.append(
+                Task(
+                    id=task_id,
+                    spec=spec_id,
+                    para="R1",
+                    title=title,
+                    owner="개발자 Claude" if sub else "에이전트",
+                    state="진행 중",
+                    coding=CodingRun(
+                        status="queued",
+                        model=None if sub else coder.model_name(llm),
+                        updated_at=t,
+                        connection=cid,
+                        skip_queue=skip_queue,
+                        mode="subscription" if sub else "agent",
+                    ),
+                )
+            )
+            s.activity.append(self._act(t, ctx, "dev", "dev", "dev_task_create", "A2A", text, "A"))
+            return ActionResult(
+                outcome="queued",
+                output={
+                    "request_id": req_id,
+                    "spec_id": spec_id,
+                    "task_id": task_id,
+                    "status": "queued",
+                },
+            )
+
+        result = await self._apply(run)
+        if not sub:  # 구독형은 개발자 Claude가 가져갈 때까지 대기열에 둔다
+            self._spawn_coder(result.output["task_id"])
+        return result
+
+    def reset(self) -> None:
+        """초기 데이터로 되돌린다. 돌던 코딩 실행은 다음 단계에서 멈추고 작성해 둔 코드도 지운다."""
+        self._coding_live.clear()
+        self.__dict__.pop("_coding_drafts", None)
+        super().reset()
+
+    def _kick_waiting(self) -> None:
+        """충돌하는 요청이 끝나기를 기다리는 대화가 있으면 깨운다 (dev_chat.resume_waiting)."""
+        if self._resuming or not any(c.status == "waiting" for c in self.state.chats):
+            return
+        from planning_agent import dev_chat
+
+        async def go() -> None:
+            self._resuming = True
+            try:
+                await dev_chat.resume_waiting(self)
+            finally:
+                self._resuming = False
+            # 다른 서비스 요청을 기다리면 이 서버 상태가 안 바뀌어도 풀려야 하니
+            # 주기적으로 다시 본다
+            if self._polling_wait or not self._remote_wait():
+                return
+            self._polling_wait = True
+            try:
+                await asyncio.sleep(WAIT_POLL_SECONDS)
+            finally:
+                self._polling_wait = False
+            self._kick_waiting()
+
+        try:
+            task = asyncio.get_running_loop().create_task(go())
+        except RuntimeError:  # 돌고 있는 루프가 없으면(동기 시험) 깨우지 않는다
+            return
+        self._sending.add(task)
+        task.add_done_callback(self._sending.discard)
+
+    def _remote_wait(self) -> bool:
+        """기다리는 대화 중 이 서버에 없는(다른 서비스) 요청을 기다리는 것이 있나."""
+        mine = {r.id for r in self.state.requests}
+        return any(
+            c.status == "waiting" and any(rid not in mine for rid in c.waiting_for)
+            for c in self.state.chats
+        )
+
+    async def preview_conflicts(self, title: str, text: str) -> list[RelatedItem]:
+        """아직 만들지 않은 요청이 진행 중인 요청과 충돌하는지 미리 본다 (개발 AI 대화, 읽기만)."""
+        if self._relater is None:
+            return []
+        draft = Request(
+            id="REQ-NEW",
+            context_id="chat:preview",
+            from_="dev",
+            via=coder.DEV_TEAM,
+            title=f"{title}\n{text}"[:600],
+            evidence="개발 AI 대화",
+            state="접수",
+        )
+        try:
+            draft.related = await self._relater.relate(self.state, draft)
+        except Exception:  # noqa: BLE001 - 미리 보기가 안 되면 묻지 않고 진행한다
+            return []
+        return related.open_conflicts(self.state, draft)
+
+    def _relate_paths(self, s: State, known_prs: set[str]) -> None:
+        """새로 열린 PR이 다른 열린 PR과 같은 파일을 고치면 두 요청에 서로 충돌 가능으로 표시."""
+        for pr in [p for p in s.prs if p.id not in known_prs and not p.merged]:
+            mine = related.request_of_pr(s, pr)
+            hits = related.path_overlaps(s, pr)
+            if mine is None or not hits:
+                continue
+            for hit in hits:
+                if not any(x.id == hit.id and x.by == "path" for x in mine.related):
+                    mine.related.append(hit)
+                other = next((r for r in s.requests if r.id == hit.id), None)
+                if other is not None and not any(
+                    x.id == mine.id and x.by == "path" for x in other.related
+                ):
+                    other.related.append(
+                        hit.model_copy(
+                            update={
+                                "id": mine.id,
+                                "title": mine.title,
+                                "reason": f"{pr.id}가 " + hit.reason.split("와 ", 1)[-1],
+                            }
+                        )
+                    )
+            s.activity.append(
+                self._act(
+                    self.clock(),
+                    mine.context_id,
+                    "planning",
+                    "planning",
+                    "request.related",
+                    "API",
+                    f"{pr.id} 같은 파일을 고치는 열린 PR: "
+                    + ", ".join(f"{h.id} ({h.reason})" for h in hits),
+                    "read",
+                )
+            )
+
+    def _with_policy(
+        self, s: State, out: list[tuple[str, str, BaseModel, str]], full: bool
+    ) -> list[tuple[str, str, BaseModel, str]]:
+        """dev: 자동 처리 범위가 지난번 보낸 것과 다르면 이번 결과 하나에 실어 보낸다.
+
+        보낼 결과가 없으면 마지막으로 넘겨받은 기획서의 결과를 다시 보낸다 (planning이 간단 요청
+        판정에 같은 범위를 쓰도록). 범위 지문은 `_dev_sent["auto_policy"]`에 남긴다."""
+        pol = dump(s.auto_policy)
+        fp = hashlib.sha1(json.dumps(pol, sort_keys=True).encode()).hexdigest()[:12]
+        if self._dev_sent.get(POLICY_SENT) == fp and not full:
+            return out
+        if not out:
+            last = next(
+                (sp for sp in reversed(s.specs)
+                 if sp.handed_to_dev and self._request_of_spec(s, sp) is not None),
+                None,
+            )  # fmt: skip
+            if last is None:
+                return out
+            req = self._request_of_spec(s, last)
+            assert req is not None
+            ids = {t.id for t in s.tasks if t.spec == last.id}
+            res = DevResultInput(
+                spec_id=last.id,
+                request_id=req.id,
+                request_state=req.state,
+                tasks=[dump(t) for t in s.tasks if t.spec == last.id],
+                prs=[dump(p) for p in s.prs if p.task in ids],
+            )
+            out.append((RECEIVE_DEV_RESULT, req.context_id, res, ""))
+        skill, ctx, res, key = out[-1]
+        assert isinstance(res, DevResultInput)
+        res.auto_policy = pol
+        out[-1] = (skill, ctx, res, dev_result_key(ctx, res.spec_id, f"policy-{fp}"))
+        self._dev_sent[POLICY_SENT] = fp
+        return out
+
+    async def _hold_to_inbox(self, task_id: str) -> None:
+        """사람 확인으로 멈춘 코딩 작업을 받은 요청에 올리고 활동에 남긴다 (잠금 밖에서 보낸다)."""
+        task = next((t for t in self.state.tasks if t.id == task_id), None)
+        if task is None or task.coding is None:
+            return
+        pr = next((p for p in self.state.prs if p.id == task.coding.pr), None)
+        sp = next((x for x in self.state.specs if x.id == task.spec), None)
+        req = self._request_of_spec(self.state, sp) if sp else None
+        ctx = req.context_id if req else f"task:{task_id}"
+        body = cause_inbox.hold_handoff(task, pr, ctx, self.tenant_id)
+        text = await cause_inbox.send_hold(body, self._cause_poster)
+        if text is None:
+            return
+
+        async def log(s: State) -> None:
+            s.activity.append(
+                self._act(self.clock(), ctx, "dev", "human", "handoff", "A2A", text, "A")
+            )
+
+        await self._apply(log)
+
+    async def sync_prs(self) -> int:
+        """사람이 GitHub 등에서 직접 머지하거나 닫은 PR을 기록에 맞춘다. 맞춘 개수.
+
+        머지됐으면 사람 머지와 같은 길(기록·요청 닫기·작업 완료)로, 닫혔으면 작업을 중단으로
+        둔다 (재개하면 최신 코드로 다시 쓴다). 돌고 있는 코딩 작업의 PR은 건드리지 않는다."""
+        live = [
+            p for p in self.state.prs
+            if p.vcs_number is not None and not p.merged and not p.closed
+            and p.task not in self._coding
+        ]  # fmt: skip
+        seen = {p.id: await vcs_bridge.change_state(p) for p in live}
+        done = {k: v for k, v in seen.items() if v in ("merged", "closed")}
+        if not done:
+            return 0
+
+        async def run(s: State) -> None:
+            for p in s.prs:
+                how = done.get(p.id)
+                if how is None or p.merged or p.closed:
+                    continue
+                ctx = self._ctx_of_pr(s, p)
+                where = "형상관리에서 직접 " + ("머지됨" if how == "merged" else "닫힘")
+                s.activity.append(
+                    self._act(self.clock(), ctx, "human", "dev", "vcs.synced", "API",
+                              f"{p.id} {where} → 기록 맞춤")
+                )  # fmt: skip
+                task = next((t for t in s.tasks if t.id == p.task), None)
+                if how == "merged":
+                    try:
+                        await self._do_merge(s, p, pr_check(s, p), auto=False)
+                    except GateRefused:
+                        pass
+                    if not p.merged:  # 이미 머지된 사실은 관문·병합 호출 결과와 상관없이 맞춘다
+                        p.merged = True
+                        p.merged_at = self.clock()
+                        if task is not None:
+                            task.state = "완료"
+                    p.auto_review = None
+                    continue
+                p.closed = True
+                p.auto_review = None
+                if task is not None:
+                    task.state = "중단"
+                    cr = task.coding
+                    if cr is not None and cr.status not in ("merged", "canceled"):
+                        cr.status = "canceled"
+                        cr.error = f"{p.id} {where} → 재개하면 최신 코드로 다시 씀"
+                        cr.updated_at = self.clock()
+
+        await self._apply(run)
+        return len(done)
+
+    @staticmethod
+    def _find_pr(s: State, ref: str | int) -> PR | None:
+        if isinstance(ref, int):
+            return next((p for p in s.prs if p.number == ref), None)
+        found = next((p for p in s.prs if p.id == ref), None)
+        if found:
+            return found
+        digits = re.sub(r"\D", "", ref)
+        return next((p for p in s.prs if digits and p.number == int(digits)), None)
+
+    async def _cross_check(
+        self, s: State, p: PR, check: Check, ctx: str
+    ) -> tuple[Check, CrossEvidence | None]:
+        """장애 났던 경로(`pr_linked_incident`)에 걸리면 다른 부서 근거로 그 규칙을 대신한다.
+
+        총괄·데이터분석에 묻고 `cross_check=true`와 근거를 params에 더한다. 근거에 걸리면
+        `merge_cross_*` 규칙이 남아 사람 확인으로 간다. 최종 판정은 safety가 다시 한다."""
+        if "pr_linked_incident" not in check.rules or self._cross_checker is None:
+            return check, None
+        ev = await self._cross_checker.gather(s, p, ctx, self.clock())
+        rules = [r for r in check.rules if r != "pr_linked_incident"] + ev.rules
+        s.activity.append(
+            self._act(
+                self.clock(),
+                ctx,
+                "planning",
+                "orchestrator",
+                "cross_check",
+                "A2A",
+                f"{p.id} 교차검증 근거: "
+                + " · ".join(f"{x.label} {x.value}" for x in ev.lines)
+                + (f" → 걸림 {', '.join(ev.rules)}" if ev.rules else " → 근거 통과"),
+                "read",
+            )
+        )
+        return Check(params={**check.params, **ev.params}, rules=rules), ev
+
+    async def generate_prs(self, spec: str) -> ActionResult:
+        return await self.dispatch({"type": "generate_prs", "spec": spec})
+
+    async def review_pr(self, pr: str) -> ActionResult:
+        return await self.dispatch({"type": "review_pr", "pr": pr})
+
+    async def merge_pr(self, pr: str) -> ActionResult:
+        return await self.dispatch({"type": "merge_pr", "pr": pr})
+
+    async def approve_repo(self, pr: str, connection: str | None = None) -> ActionResult:
+        return await self.dispatch({"type": "approve_repo", "pr": pr, "connection": connection})
+
+    async def reject_repo(self, pr: str) -> ActionResult:
+        return await self.dispatch({"type": "reject_repo", "pr": pr})
+
+    async def approve_promotion(self) -> ActionResult:
+        return await self.dispatch({"type": "approve_promotion"})
+
+    async def reject_promotion(self) -> ActionResult:
+        return await self.dispatch({"type": "reject_promotion"})
+
+    def _auto_prelude(self, s: State) -> tuple[datetime, datetime | None]:
+        """간단 요청 처리 시각과 승급 제안 시각 (시계를 부르는 순서를 원래대로 둔다)."""
+        pol = s.auto_policy
+        t = self.clock()
+        propose = (
+            pol.proposal is None
+            and pol.streak + 1 >= PROMOTE_AFTER
+            and pol.level < len(AUTO_LEVELS) - 1
+        )
+        return t, (self.clock() if propose else None)
 
     async def _auto_build(
         self,
@@ -2359,104 +3434,6 @@ class PlanningService(StateService):
         await self._apply(log)
         return check, t
 
-    async def create_ticket(
-        self,
-        *,
-        context_id: str,
-        requester: str,
-        title: str,
-        evidence: str,
-        source_ref: str | None,
-        evidence_ids: list[str],
-        idempotency_key: str,
-    ) -> ActionResult:
-        """변경 요청 접수 (A, #174). 같은 요청이 있으면 묶고(linked_duplicate), 없으면 새 REQ와
-        `ctx_req_`를 발급한다(created). 같은 idempotency_key의 두 번째 요청은 이전 결과를 돌려준다.
-
-        - 중복 판정은 기존 도메인 규칙(`find_duplicate`, 같은 제목)만 쓴다. `source_ref`·
-          `evidence_ids`는 저장만 한다.
-        - 묶이면 원래 요청의 `context_id`를 돌려준다 (요청 부서는 그 사건에 문의를 잇는다).
-        - 결과 통지는 같은 `context_id`에 `path`를 비운 새 요청으로 보낸다(합의). 요청 부서의 수신
-          skill이 아직 없어 지금은 활동 기록(get_request_status)까지만 남긴다.
-        - 요청을 보낸 A2A `context_id`는 활동 근거로만 남기고 사건 ID로 쓰지 않는다.
-        """
-        cached = self._idempotent.get(idempotency_key)
-        if cached is not None:
-            return ActionResult(changed=False, outcome=cached.outcome, output=dict(cached.output))
-
-        async def run(s: State) -> ActionResult:
-            seq = s.seq + 1
-            s.seq = seq
-            t = self.clock()
-            dup_id = find_duplicate(s.requests, title)
-            original = next((r for r in s.requests if r.id == dup_id), None) if dup_id else None
-            used_ctx = {r.context_id for r in s.requests}
-            n = 20 + seq
-            while f"ctx_req_{n:04d}" in used_ctx:
-                n += 1
-            ctx_req = original.context_id if original else f"ctx_req_{n:04d}"
-            used_ids = {r.id for r in s.requests}
-            m = 20 + seq
-            while f"REQ-{m}" in used_ids:
-                m += 1
-            # 서비스 이름(inquiry 등)으로 와도 부서는 원래 부서로 남기고, 서비스 id는 따로 둔다
-            dept = department_of(requester)
-            frm = dept if dept in DEPT_NAME else "orchestrator"
-            result = await self._register_ticket(
-                s,
-                frm,
-                title,
-                ctx_req,
-                t,
-                seq,
-                evidence=evidence,
-                source_ref=source_ref,
-                evidence_ids=evidence_ids,
-                req_id=f"REQ-{m}",
-                from_service=requester if requester in SERVICE_BY_ID else None,
-            )
-            req_id = result.output["request_id"]
-            return ActionResult(
-                outcome="linked_duplicate" if dup_id else "created",
-                output={
-                    "request_id": req_id,
-                    "context_id": ctx_req,
-                    "duplicate_of": dup_id,
-                    "auto": result.output.get("auto"),
-                    "via_context_id": context_id,
-                },
-            ), result.output.get("investigate", False)
-
-        async def apply(s: State) -> ActionResult:
-            out, investigate = await run(s)
-            nonlocal to_inbox
-            to_inbox = investigate
-            return out
-
-        to_inbox = False
-        result = await self._apply(apply)
-        self._idempotent[idempotency_key] = result
-        self._save()  # 중복 거르기 기록도 바로 남긴다 (재시작 뒤 같은 요청을 다시 처리하지 않게)
-        if to_inbox:
-            await self._cause_to_inbox(result.output["request_id"])
-        return result
-
-    async def _cause_to_inbox(self, req_id: str) -> None:
-        """원인 확인 요청을 받은 요청(사람 할 일함)에 올리고 활동에 남긴다 (잠금 밖에서 보낸다)."""
-        req = next((r for r in self.state.requests if r.id == req_id), None)
-        if req is None:
-            return
-        text = await cause_inbox.send(req, self.tenant_id, self._cause_poster)
-
-        async def log(s: State) -> None:
-            s.activity.append(
-                self._act(
-                    self.clock(), req.context_id, "planning", "human", "handoff", "A2A", text, "A"
-                )
-            )
-
-        await self._apply(log)
-
     async def link_incident(
         self,
         *,
@@ -2573,95 +3550,6 @@ class PlanningService(StateService):
         self._save()  # 중복 거르기 기록도 바로 남긴다 (재시작 뒤 같은 요청을 다시 처리하지 않게)
         return result
 
-    async def receive_dev_result(
-        self,
-        *,
-        context_id: str,
-        requester: str,
-        spec_id: str,
-        request_id: str,
-        request_state: str,
-        tasks: list[dict],
-        prs: list[dict],
-        idempotency_key: str,
-        request: dict | None = None,
-        spec: dict | None = None,
-        auto_policy: dict | None = None,
-    ) -> ActionResult:
-        """planning 서비스: dev가 돌려준 작업·PR·요청 상태를 반영한다 (A).
-
-        자동 처리 범위(`auto_policy`)가 같이 오면 dev 것으로 맞춘다 (범위의 주인은 dev).
-
-        작업·PR은 id로 덮어쓴다. 개발팀이 직접 낸 기획이면 요청·기획서도 같이 와서 없으면 넣고
-        있으면 덮어쓴다 (기획 쪽이 바뀌는 일을 모두 알도록)."""
-        cached = self._idempotent.get(idempotency_key)
-        if cached is not None:
-            return ActionResult(changed=False, outcome=cached.outcome, output=dict(cached.output))
-        if request_state not in get_args(ReqState):
-            raise ValueError(f"모르는 요청 상태: {request_state}")
-        got_tasks = [Task.model_validate(t) for t in tasks]
-        got_prs = [PR.model_validate(p) for p in prs]
-        got_req = Request.model_validate(request) if request else None
-        got_spec = Spec.model_validate(spec) if spec else None
-        got_policy = AutoPolicy.model_validate(auto_policy) if auto_policy else None
-
-        async def run(s: State) -> ActionResult:
-            t = self.clock()
-            new_own = got_req is not None and not any(r.id == got_req.id for r in s.requests)
-            if got_req is not None:
-                self._upsert(s.requests, [got_req])
-            if got_spec is not None:
-                self._upsert(s.specs, [got_spec])
-            req = next((r for r in s.requests if r.id == request_id), None)
-            ctx = req.context_id if req else context_id
-            merged = sum(1 for p in got_prs if p.merged)
-            text = (
-                f"{spec_id} 작업 {len(got_tasks)}·PR {len(got_prs)}(머지 {merged}) 반영"
-                f" · {request_id} {request_state}"
-            )
-            await self._execute(
-                RECEIVE_DEV_RESULT,
-                ctx,
-                f"{spec_id}:{len(s.activity)}",
-                text,
-                {"request": request_id, "request_state": request_state},
-                [spec_id, request_id],
-            )
-            self._upsert(s.tasks, got_tasks)
-            self._upsert(s.prs, got_prs)
-            if req:
-                req.state = request_state  # type: ignore[assignment]
-            if got_policy is not None:
-                s.auto_policy = got_policy
-            frm = requester if requester in DEPT_NAME else "dev"
-            if new_own and got_spec is not None:
-                s.activity.append(
-                    self._act(
-                        t, ctx, frm, "planning", RECEIVE_DEV_RESULT, "A2A",
-                        f"개발팀 기획 {got_spec.id} 받음: {got_spec.title}", "A",
-                    )
-                )  # fmt: skip
-            s.activity.append(
-                self._act(t, ctx, frm, "planning", RECEIVE_DEV_RESULT, "A2A", text, "A")
-            )
-            return ActionResult(output={"applied": len(got_tasks) + len(got_prs)})
-
-        result = await self._apply(run)
-        self._idempotent[idempotency_key] = result
-        self._save()  # 중복 거르기 기록도 바로 남긴다 (재시작 뒤 같은 요청을 다시 처리하지 않게)
-        return result
-
-    @staticmethod
-    def _upsert(rows: list, items: list) -> None:
-        """id가 같으면 그 자리에서 바꾸고, 없으면 뒤에 붙인다."""
-        index = {r.id: i for i, r in enumerate(rows)}
-        for item in items:
-            if item.id in index:
-                rows[index[item.id]] = item
-            else:
-                index[item.id] = len(rows)
-                rows.append(item)
-
     # ---------------------------------------------------------------- 코딩 에이전트 (개발팀 기획)
 
     def _coding_connection(self, connection: str | None, keep: str | None = None) -> str:
@@ -2700,121 +3588,6 @@ class PlanningService(StateService):
         ):
             n += 1
         return f"REQ-D{n}", f"SPEC-D{n}", f"T-D{n}", f"ctx_dev_{n:04d}"
-
-    async def create_dev_task(
-        self,
-        *,
-        title: str,
-        plan: str,
-        done: str | None = None,
-        paths: list[str] | None = None,
-        connection: str | None = None,
-        skip_queue: bool = False,
-        mode: str = "agent",
-    ) -> ActionResult:
-        """개발팀원이 쓴 기획으로 요청·확정 기획서·작업 하나를 만들고 코딩 에이전트를 띄운다 (A).
-
-        에이전트는 바꿔 끼운 뒤 잠금 밖에서 돈다. 진행은 작업 `coding`에 적힌다.
-        `mode="subscription"`이면 서버 에이전트를 띄우지 않고 `queued`로 두어 개발자 본인 Claude가
-        MCP로 가져가기를 기다린다 (work_queue.py). LLM 설정도 필요 없다."""
-        if mode not in ("agent", "subscription"):
-            raise ActionError("INVALID_INPUT", "mode는 agent·subscription 중 하나다")
-        sub = mode == "subscription"
-        title = " ".join((title or "").split())
-        plan = (plan or "").strip()
-        if not title or not plan:
-            raise ActionError("INVALID_INPUT", "title과 plan은 비울 수 없다")
-        if len(plan) > coder.MAX_PLAN_CHARS:
-            raise ActionError("INVALID_INPUT", f"plan은 {coder.MAX_PLAN_CHARS}자까지다")
-        if self.role == "planning":
-            raise ActionError("WRONG_ROLE", "코딩 에이전트는 개발 서비스(dev)에서 돈다")
-        hints = vcs.clean_paths(paths)
-        cid = self._coding_connection(connection)
-        llm = None if sub else self._coding_llm()
-        done_lines = [x.strip() for x in (done or "").splitlines() if x.strip()]
-        done_lines = done_lines[: coder.MAX_DONE_LINES] or [coder.DEFAULT_DONE]
-
-        async def run(s: State) -> ActionResult:
-            req_id, spec_id, task_id, ctx = self._dev_ids(s)
-            t = self.clock()
-            who = "개발자 Claude" if sub else "코딩 에이전트"
-            text = (
-                f'{task_id} 개발팀 기획 "{title}" → {who} 대기 '
-                f"(완료 기준 {len(done_lines)}, 연결 {cid})"
-            )
-            params = {"request": req_id, "spec": spec_id, "connection": cid, "paths": list(hints)}
-            if sub:
-                params["mode"] = mode
-            await self._execute(
-                "dev_task_create", ctx, task_id, text, params, [req_id, spec_id, task_id]
-            )
-            s.requests.append(
-                Request(
-                    id=req_id,
-                    context_id=ctx,
-                    tenant_id=self.tenant_id,
-                    from_="dev",
-                    via=coder.DEV_TEAM,
-                    title=title,
-                    evidence="개발팀 기획 (개발 화면)",
-                    state="작업 중",
-                    spec=spec_id,
-                )
-            )
-            s.specs.append(
-                Spec(
-                    id=spec_id,
-                    title=title,
-                    request=req_id,
-                    status="확정",
-                    problem=plan,
-                    goal=title,
-                    paras=[
-                        Para(id="R1", kind="req", text=title, paths=list(hints)),
-                        *[
-                            Para(id=f"C{i}", kind="done", text=line)
-                            for i, line in enumerate(done_lines, 1)
-                        ],
-                    ],
-                    basis=["개발팀 기획 (개발 화면)"],
-                    human_sentences=1,
-                    handed_to_dev=True,
-                    origin=coder.DEV_TEAM,
-                )
-            )
-            s.tasks.append(
-                Task(
-                    id=task_id,
-                    spec=spec_id,
-                    para="R1",
-                    title=title,
-                    owner="개발자 Claude" if sub else "에이전트",
-                    state="진행 중",
-                    coding=CodingRun(
-                        status="queued",
-                        model=None if sub else coder.model_name(llm),
-                        updated_at=t,
-                        connection=cid,
-                        skip_queue=skip_queue,
-                        mode="subscription" if sub else "agent",
-                    ),
-                )
-            )
-            s.activity.append(self._act(t, ctx, "dev", "dev", "dev_task_create", "A2A", text, "A"))
-            return ActionResult(
-                outcome="queued",
-                output={
-                    "request_id": req_id,
-                    "spec_id": spec_id,
-                    "task_id": task_id,
-                    "status": "queued",
-                },
-            )
-
-        result = await self._apply(run)
-        if not sub:  # 구독형은 개발자 Claude가 가져갈 때까지 대기열에 둔다
-            self._spawn_coder(result.output["task_id"])
-        return result
 
     # ---- 개발 AI 대화 (dev_chat.py). 메시지 하나 = 작은 액션 하나 (관문 dev_chat A)
 
@@ -3502,291 +4275,6 @@ class PlanningService(StateService):
         await self._apply(run)
         return ok
 
-    # ---------------------------------------------------------------- 사람·에이전트 액션
-
-    async def _send(self, s: State, to: str, point: str, text: str, ctx: str) -> None:
-        t = self.clock()
-        await self._execute("send_message", ctx, f"{to}:{point}:{len(s.activity)}", text)
-        s.seq += 1
-        s.activity.append(self._act(t, ctx, "planning", to, point, "A2A", text))
-
-    async def _mark_read(self, s: State, to: str) -> None:
-        for m in s.outbox:
-            if m.to == to:
-                m.read = True
-
-    async def _answer_question(self, s: State, spec: str, text: str) -> None:
-        sp = next((x for x in s.specs if x.id == spec), None)
-        if sp is None or not sp.question:
-            return
-        if sp.question_id:  # 요청 서비스에 되물은 질문을 기획 화면에서 사람이 대신 답함
-            await self._apply_answer(
-                s, sp, self._request_of_spec(s, sp), sp.question_id, text, "human", []
-            )
-            await self._try_auto_confirm(s, sp)
-            return
-        dec_id = f"D-{len(s.decisions)}"
-        req = self._request_of_spec(s, sp)
-        ctx = req.context_id if req else f"spec:{sp.id}"
-        th = next((x for x in s.threads if x.on == spec), None)
-        summary = f"스레드에서 결정 {dec_id} 추출, R1 반영, 질문 닫음"
-        await self._execute("extract_decision", ctx, dec_id, summary, {"spec": spec})
-        case = f"① kind decision_extracted · {dec_id} (결정·이유·대안)"
-        record = self._decision_record(
-            ctx,
-            dec_id,
-            ANSWER_DECISION["text"],
-            ANSWER_DECISION["reason"],
-            [ANSWER_DECISION["alternatives"]],
-            [f"spec:{spec}"] + ([f"thread:{th.id}"] if th else []),
-            sp.title,
-        )
-        hr_key = f"{dec_id}:decision_extracted"
-        gate = await self._execute(
-            "record_case",
-            ctx,
-            hr_key,
-            case,
-            {"record_case": record.model_dump(mode="json")},
-            record.source_refs,
-        )
-        hr = await self._record_hr(gate, record, hr_key)
-        for x in s.threads:
-            if x.on == spec:
-                x.messages.append(
-                    Message(who=ANSWER_WHO, dept="support", text=text, decision=dec_id)
-                )
-        sp.question = None
-        for p in sp.paras:
-            if p.id == "R1":
-                p.text = ANSWER_R1_TEXT
-        s.decisions.append(
-            Decision(
-                id=dec_id,
-                spec=spec,
-                from_=f"스레드 {th.id}" if th else "스레드",
-                sent_to_hr=hr is None or hr.ok,
-                **ANSWER_DECISION,
-            )
-        )
-        s.activity.append(
-            self._act(
-                self.clock(), ctx, "planning", "planning", "extract_decision", "A2A", summary, "A"
-            )
-        )
-        s.activity.append(self._hr_act(ctx, case, hr))
-        # 질문이 닫혔으면 자동 확정 규칙을 다시 본다 (통과하면 확정·작업 분할, 아니면 대기열)
-        await self._try_auto_confirm(s, sp)
-
-    async def _confirm_spec(self, s: State, spec: str) -> None:
-        """사람 확정 버튼 (교차검증 대기·답 대기 건의 판단도 여기서 한다)."""
-        sp = next((x for x in s.specs if x.id == spec), None)
-        if sp is None or sp.status == "확정":
-            return
-        await self._do_confirm(s, sp, spec_check(sp), auto=False)
-
-    async def _check_spec(self, s: State, spec: str) -> ActionResult | None:
-        """자동 확정 규칙을 다시 본다 (예: 인사 경고가 풀린 뒤). 통과하면 확정, 아니면 대기열."""
-        sp = next((x for x in s.specs if x.id == spec), None)
-        if sp is None or sp.status == "확정":
-            return None
-        confirmed = await self._try_auto_confirm(s, sp)
-        review = sp.auto_review
-        return ActionResult(
-            outcome="auto_confirmed" if confirmed else "waiting",
-            output={"spec": sp.id, "state": None if confirmed else review and review.state},
-        )
-
-    async def _try_auto_confirm(self, s: State, sp: Spec) -> bool:
-        """질문 0·경고 0·근거 1 이상·되돌릴 수 없음 0이면 자동 확정하고 작업 분할로 간다.
-
-        아니면 확정하지 않고 "답 대기"(질문 남음) 또는 "교차검증 대기"로 둔다.
-        safety가 confirm_spec을 보류·거절해도 "교차검증 대기" (앞선 단계는 그대로 남는다)."""
-        if sp.status == "확정":
-            return False
-        req = self._request_of_spec(s, sp)
-        ctx = req.context_id if req else f"spec:{sp.id}"
-        check = spec_check(sp)
-        # 아직 안 끝난 다른 요청과 충돌할 수 있으면 어느 쪽을 따를지 사람이 정한다 (planning 규칙)
-        clash = related.open_conflicts(s, req) if req else []
-        if clash:
-            check = Check(params=check.params, rules=[*check.rules, "spec_open_conflict"])
-        # 인사 ② check_plan을 못 받았으면 경고 없음으로 보지 않는다 (사람 확정, 인사 연동 3단계)
-        if sp.hr_check == "unknown":
-            check = Check(params=check.params, rules=[*check.rules, "spec_hr_unchecked"])
-        if check.ok:
-            try:
-                await self._do_confirm(s, sp, check, auto=True)
-                return True
-            except GateRefused as exc:
-                if exc.action != "confirm_spec":
-                    raise
-                hold = self._hold(sp, WAIT_CROSS_CHECK, check, exc.decision)
-        else:
-            wait = spec_wait_state(check)
-            if clash and wait != WAIT_ANSWER:
-                wait = WAIT_HUMAN
-            hold = self._hold(sp, wait, check)
-        why = ", ".join(hold.rules) or f"safety {hold.gate_status}"
-        if clash:
-            why += " · " + ", ".join(x.id for x in clash)
-        s.activity.append(
-            self._act(
-                hold.at,
-                ctx,
-                "planning",
-                "planning",
-                "auto_review",
-                "execute",
-                f"{sp.id} 자동 확정 안 함 → {hold.state} ({why})",
-                "A",
-            )
-        )
-        return False
-
-    async def _do_confirm(self, s: State, sp: Spec, check: Check, *, auto: bool) -> None:
-        req = self._request_of_spec(s, sp)
-        ctx = req.context_id if req else f"spec:{sp.id}"
-        reqs = [p for p in sp.paras if p.kind == "req"]
-        base = len(s.tasks) + 10
-        tasks = [
-            Task(
-                id=f"T-{base + i}",
-                spec=sp.id,
-                para=p.id,
-                title=p.text.split(" (")[0],
-                owner="백엔드" if i == 0 else "프론트",
-                state="진행 중",
-            )
-            for i, p in enumerate(reqs)
-        ]
-        # FR-SPEC-006: 인사 경고(warn)가 남은 문단을 둔 채 확정하면 "warn 무시 진행"을 감사 기록으로
-        # 남긴다 (execute params·record_case·활동 세 곳). 경고 수는 #171 `warnings`로도 보낸다.
-        warn_ignored = [
-            {"para": p.id, "card": p.warn.card, "text": p.warn.text} for p in sp.paras if p.warn
-        ]
-        audit: str | None = None
-        if warn_ignored:
-            where = ", ".join(f"{w['para']}({w['card']})" for w in warn_ignored)
-            audit = f"warn 무시 진행 · {sp.id} {where} 경고를 둔 채 확정 (팀장 {TEAM_LEAD})"
-        c = check.params
-        rule_text = (
-            f"질문 {c['open_questions']}·경고 {c['warnings']}·근거 {c['basis_count']}"
-            f"·되돌릴 수 없음 {c['irreversible_count']}"
-        )
-        if auto:
-            confirm_text = f"{sp.id} 자동 확정 ({rule_text} → confirm_spec 규칙 통과, 사후 감사)"
-        else:
-            confirm_text = f"{sp.id} 확정 (팀장 {TEAM_LEAD})" + (f" · {audit}" if audit else "")
-        params: dict[str, Any] = {**check.params, "auto": auto}
-        if warn_ignored:
-            params["warn_ignored"] = warn_ignored
-        await self._execute("confirm_spec", ctx, sp.id, confirm_text, params)
-        split = f"요구사항 {len(reqs)}개 → 작업 {', '.join(t.id for t in tasks)}"
-        await self._execute("split_tasks", ctx, sp.id, split, {"tasks": [t.id for t in tasks]})
-        case = f"① kind spec_confirmed · {sp.id}" + (" (자동 확정)" if auto else "")
-        if auto:
-            summary = f"{sp.id} {sp.title} 자동 확정 (사후 감사 대상)"
-        else:
-            summary = f"{sp.id} {sp.title} 확정" + (f" ({audit})" if audit else "")
-        record = RecordCase(
-            context_id=ctx,
-            tenant_id=self.tenant_id,
-            kind=RecordKind.SPEC_CONFIRMED,
-            summary=summary,
-            decision_reason=f"confirm_spec 규칙 통과: {rule_text}" if auto else None,
-            source_refs=[f"spec:{sp.id}"]
-            + [f"para:{sp.id}:{w['para']}" for w in warn_ignored]
-            + [f"card:{w['card']}" for w in warn_ignored],
-            author=AGENT_NAME,
-            area=area_of_text(sp.title, *(p.text for p in reqs)),
-        )
-        case_params: dict[str, Any] = {"record_case": record.model_dump(mode="json")}
-        if warn_ignored:
-            case_params["warn_ignored"] = warn_ignored
-        hr_key = f"{sp.id}:spec_confirmed"
-        gate = await self._execute(
-            "record_case", ctx, hr_key, case, case_params, record.source_refs
-        )
-        hr = await self._record_hr(gate, record, hr_key)
-        sp.status = "확정"
-        sp.auto_review = None
-        if auto:
-            sp.auto = True
-        s.tasks.extend(tasks)
-        for r in s.requests:
-            if r.spec == sp.id:
-                r.state = "작업 중"
-        if auto:
-            s.activity.append(
-                self._act(
-                    self.clock(),
-                    ctx,
-                    "planning",
-                    "planning",
-                    "audit.auto_confirmed",
-                    "execute",
-                    confirm_text,
-                    "A",
-                )
-            )
-        else:
-            s.activity.append(
-                self._act(
-                    self.clock(),
-                    ctx,
-                    "human",
-                    "planning",
-                    "기획서 확정",
-                    "사람",
-                    f"팀장 {TEAM_LEAD}이 {sp.id} 확정 (사람 클릭 1)",
-                )
-            )
-        if audit:
-            s.activity.append(
-                self._act(
-                    self.clock(),
-                    ctx,
-                    "planning",
-                    "planning",
-                    "audit.warn_ignored",
-                    "execute",
-                    audit,
-                    "A",
-                )
-            )
-        s.activity.append(
-            self._act(self.clock(), ctx, "planning", "planning", "split_tasks", "A2A", split, "A")
-        )
-        s.activity.append(self._hr_act(ctx, case, hr))
-        if audit:
-            s.activity.append(
-                self._act(
-                    self.clock(),
-                    ctx,
-                    "planning",
-                    "hr",
-                    "record_case",
-                    "A2A",
-                    f"{case} · {audit}",
-                    "A",
-                )
-            )
-        if req:
-            s.activity.append(
-                self._act(
-                    self.clock(),
-                    ctx,
-                    "planning",
-                    req.from_,
-                    "get_request_status",
-                    "A2A",
-                    f'{req.id} 상태 "작업 중"을 요청 부서가 조회',
-                    "read",
-                )
-            )
-        self._hand_to_dev(s, sp, req, ctx)
-
     async def _generate_prs(self, s: State, spec: str) -> None:
         todo = [t for t in s.tasks if t.spec == spec and t.state == "진행 중"]
         if not todo:
@@ -4203,238 +4691,6 @@ class PlanningService(StateService):
                 )
             )
 
-    async def _accept_draft(self, s: State, request: str) -> None:
-        r = next((x for x in s.requests if x.id == request), None)
-        if r is None or r.state != "접수":
-            return
-        text = f"{r.id} 채택 → 기획서 작성 대기열"
-        await self._execute("review_ticket_draft", r.context_id, r.id, text)
-        s.drafts_accepted += 1
-        r.state = "기획 중"
-        s.activity.append(
-            self._act(
-                self.clock(),
-                r.context_id,
-                "planning",
-                "planning",
-                "review_ticket_draft",
-                "A2A",
-                text,
-                "A",
-            )
-        )
-
-    # ---- 기각 (hr record_case kind decision_rejected)
-
-    def _rejection_record(
-        self,
-        ctx: str,
-        summary: str,
-        decision_reason: str,
-        alternatives_considered: list[str],
-        source_refs: list[str],
-    ) -> RecordCase:
-        """`decision_rejected` 기록을 만든다. 이유·검토한 대안이 없으면 보내지 않고 오류.
-
-        hr `check_plan`이 "과거에 기각된 안"을 판정하는 재료라서 둘 다 필수로 둔다.
-        """
-        reason = decision_reason.strip()
-        alternatives = [a.strip() for a in alternatives_considered if a.strip()]
-        if not reason or not alternatives:
-            raise ActionError(
-                "MISSING_DECISION_REASON",
-                "decision_rejected에는 decision_reason과 alternatives_considered가 필요하다"
-                " (hr에 보내지 않았다)",
-            )
-        return RecordCase(
-            context_id=ctx,
-            tenant_id=self.tenant_id,
-            kind=RecordKind.DECISION_REJECTED,
-            summary=summary,
-            decision_reason=reason,
-            alternatives_considered=alternatives,
-            source_refs=source_refs,
-            author=AGENT_NAME,
-        )
-
-    async def _notify_result(
-        self,
-        s: State,
-        req: Request,
-        status: Literal["completed", "declined"],
-        *,
-        prs: list[PR] | None = None,
-        spec_id: str | None = None,
-        reason_code: str | None = None,
-    ) -> None:
-        """요청을 닫을 때 요청 부서에 `receive_change_result`를 보낸다(계약 #293).
-
-        같은 요청에 묶인 중복 요청(`duplicate_of`)의 부서에도 한 번씩 보낸다. summary는 코드가 만든
-        한 줄이고 고객 응대 문구로 쓰지 않는다(#293 리뷰). 보내기 실패는 요청 닫기를 막지 않는다.
-        """
-        merged = [p for p in (prs or []) if p.merged] if status == "completed" else []
-        times = [p.merged_at for p in merged if p.merged_at]
-        label = "완료" if status == "completed" else "기각"
-        summary = f"{req.id} {label}" + (
-            f" · {', '.join(p.id for p in merged)} 머지" if merged else ""
-        )
-        result = ChangeResultInput(
-            request_id=req.id,
-            status=status,
-            pr_numbers=[p.number for p in merged],
-            merged_at=max(times) if times else None,
-            spec_id=spec_id,
-            reason_code=reason_code if status == "declined" else None,
-            summary=summary,
-        )
-        seen: set[str] = set()
-        for r in [req, *(x for x in s.requests if x.duplicate_of == req.id)]:
-            if r.from_ in seen:
-                continue
-            seen.add(r.from_)
-            try:
-                how = await self._send_result(r.from_, req.context_id, self.tenant_id, result)
-            except Exception:  # 통지 실패가 요청 닫기를 되돌리지 않게 한다
-                how = "보내지 못함 (오류)"
-            s.activity.append(
-                self._act(
-                    self.clock(),
-                    req.context_id,
-                    "planning",
-                    r.from_,
-                    "receive_change_result",
-                    "A2A",
-                    f"{summary} 결과 통지 · {how}",
-                    "A",
-                )
-            )
-
-    async def _send_rejection(self, s: State, record: RecordCase, target: str) -> None:
-        """hr `record_case`(kind decision_rejected)를 execute로 보내고 활동에 남긴다."""
-        case = f"① kind decision_rejected · {target}"
-        await self._execute(
-            "record_case",
-            record.context_id,
-            f"{target}:decision_rejected",
-            case,
-            {"record_case": record.model_dump(mode="json")},
-            record.source_refs,
-        )
-        s.activity.append(
-            self._act(
-                self.clock(),
-                record.context_id,
-                "planning",
-                "hr",
-                "record_case",
-                "A2A",
-                f"{case} (이유: {record.decision_reason})",
-                "A",
-            )
-        )
-
-    async def _reject_draft(
-        self,
-        s: State,
-        request: str,
-        decision_reason: str,
-        alternatives_considered: list[str],
-    ) -> ActionResult | None:
-        """개선 초안 기각 → hr record_case(decision_rejected). 이유·대안이 없으면 하지 않는다."""
-        r = next((x for x in s.requests if x.id == request), None)
-        record = self._rejection_record(
-            r.context_id if r else f"req:{request}",
-            f"[기각한 안] {r.title if r else request}",
-            decision_reason,
-            alternatives_considered,
-            [f"req:{request}"],
-        )
-        if r is None or r.state != "접수":
-            return None
-        reason = record.decision_reason or ""
-        text = f"{r.id} 기각 (이유: {reason})"
-        await self._execute(
-            "review_ticket_draft", r.context_id, r.id, text, {"decision": "rejected"}
-        )
-        await self._send_rejection(s, record, r.id)
-        dec_id = f"D-{len(s.decisions)}"
-        s.decisions.append(
-            Decision(
-                id=dec_id,
-                spec=r.spec or "-",
-                text=f"[기각한 안] {r.title}",
-                reason=reason,
-                alternatives=", ".join(record.alternatives_considered),
-                from_=f"개선 초안 {r.id}",
-                sent_to_hr=True,
-            )
-        )
-        r.state = "기각"
-        await self._notify_result(s, r, "declined", reason_code="draft_rejected")
-        s.activity.append(
-            self._act(
-                self.clock(),
-                r.context_id,
-                "planning",
-                "planning",
-                "review_ticket_draft",
-                "A2A",
-                text,
-                "A",
-            )
-        )
-        s.activity.append(
-            self._act(
-                self.clock(),
-                r.context_id,
-                "planning",
-                r.from_,
-                "get_request_status",
-                "A2A",
-                f'{r.id} "{r.title}" 기각 (이유: {reason})',
-                "read",
-            )
-        )
-        return ActionResult(
-            output={"request_id": r.id, "decision_id": dec_id, "record_kind": "decision_rejected"}
-        )
-
-    async def _reject_decision(
-        self,
-        s: State,
-        spec: str,
-        text: str,
-        decision_reason: str,
-        alternatives_considered: list[str],
-    ) -> ActionResult | None:
-        """기획서 검토 중 기각한 안을 결정으로 남기고 hr에 decision_rejected로 보낸다."""
-        sp = next((x for x in s.specs if x.id == spec), None)
-        req = self._request_of_spec(s, sp) if sp else None
-        ctx = req.context_id if req else f"spec:{spec}"
-        record = self._rejection_record(
-            ctx,
-            f"[기각한 안] {text.strip()}",
-            decision_reason,
-            alternatives_considered,
-            [f"spec:{spec}"],
-        )
-        if sp is None or not text.strip():
-            return None
-        dec_id = f"D-{len(s.decisions)}"
-        await self._send_rejection(s, record, dec_id)
-        s.decisions.append(
-            Decision(
-                id=dec_id,
-                spec=sp.id,
-                text=f"[기각한 안] {text.strip()}",
-                reason=record.decision_reason or "",
-                alternatives=", ".join(record.alternatives_considered),
-                from_=f"기획서 {sp.id}",
-                sent_to_hr=True,
-            )
-        )
-        return ActionResult(output={"decision_id": dec_id, "record_kind": "decision_rejected"})
-
     async def _approve_promotion(self, s: State) -> None:
         pol = s.auto_policy
         if pol.proposal is None:
@@ -4488,170 +4744,6 @@ class PlanningService(StateService):
         )
         pol.streak = 0
         pol.proposal = None
-
-    # ---- 소통
-
-    async def _post_message(self, s: State, thread: str, text: str) -> None:
-        th = next((x for x in s.threads if x.id == thread), None)
-        if th is None or not text.strip():
-            return
-        body = text.strip()
-        t = self.clock()
-        req = next((r for r in s.requests if th.on and r.spec == th.on), None)
-        ctx = req.context_id if req else f"thread:{th.id}"
-        if th.peer:
-            await self._execute("send_message", ctx, f"{th.id}:{len(th.messages)}", body)
-            s.seq += 1
-            s.activity.append(self._act(t, ctx, "planning", th.peer, "message", "A2A", body))
-        th.messages.append(Message(who=TEAM_LEAD, dept="planning", text=body, at=t))
-
-    async def _dept_chat(self, s: State, from_: str) -> None:
-        pool = DEPT_CHAT.get(from_)
-        th = next((x for x in s.threads if x.peer == from_), None)
-        if not pool or th is None:
-            return
-        seq = s.seq + 1
-        t = self.clock()
-        text = pool[sum(1 for m in th.messages if m.dept == from_) % len(pool)]
-        s.seq = seq
-        th.messages.append(Message(who=f"{DEPT_NAME[from_]} 에이전트", dept=from_, text=text, at=t))
-        s.activity.append(
-            self._act(t, f"thread:{th.id}", from_, "planning", "message", "A2A", text, None, seq)
-        )
-
-    async def _extract_decision(self, s: State, thread: str, index: int) -> None:
-        th = next((x for x in s.threads if x.id == thread), None)
-        if th is None or not 0 <= index < len(th.messages) or th.messages[index].decision:
-            return
-        m = th.messages[index]
-        dec_id = f"D-{len(s.decisions)}"
-        ctx = f"thread:{th.id}"
-        summary = f"{th.title} 메시지에서 결정 {dec_id} 추출"
-        await self._execute("extract_decision", ctx, dec_id, summary)
-        case = f"① kind decision_extracted · {dec_id}"
-        reason = f"{m.who} 의견 ({th.title})"
-        refs = [f"thread:{th.id}"] + ([f"spec:{th.on}"] if th.on else [])
-        record = self._decision_record(ctx, dec_id, m.text, reason, [], refs, th.title)
-        hr_key = f"{dec_id}:decision_extracted"
-        gate = await self._execute(
-            "record_case",
-            ctx,
-            hr_key,
-            case,
-            {"record_case": record.model_dump(mode="json")},
-            record.source_refs,
-        )
-        hr = await self._record_hr(gate, record, hr_key)
-        m.decision = dec_id
-        s.decisions.append(
-            Decision(
-                id=dec_id,
-                spec=th.on or "-",
-                text=m.text,
-                reason=reason,
-                alternatives="-",
-                from_=f"소통 {th.title}",
-                sent_to_hr=hr is None or hr.ok,
-            )
-        )
-        s.activity.append(
-            self._act(
-                self.clock(), ctx, "planning", "planning", "extract_decision", "A2A", summary, "A"
-            )
-        )
-        s.activity.append(self._hr_act(ctx, case, hr))
-
-    # ---- 문서 (사람이 고치는 정리 문서. 상태 변경 관문 대상 아님)
-
-    def _patch_doc(self, s: State, doc: str, fn: Callable[[Doc], None]) -> None:
-        d = next((x for x in s.docs if x.id == doc), None)
-        if d is None:
-            return
-        fn(d)
-        d.updated_at = self.clock()
-
-    async def _new_doc(self, s: State, title: str) -> ActionResult:
-        doc_id = f"DOC-{len(s.docs) + 1}"
-        s.docs.append(
-            Doc(
-                id=doc_id,
-                title=title or "제목 없는 문서",
-                updated_at=self.clock(),
-                blocks=[DocBlock(id="b1", kind="p", text="")],
-            )
-        )
-        return ActionResult(output={"doc_id": doc_id})
-
-    async def _gather_doc(self, s: State, about: str, by: str | None) -> ActionResult | None:
-        r = next((x for x in s.requests if x.id == about), None)
-        if r is None:
-            return None
-        doc_id = f"DOC-{len(s.docs) + 1}"
-        blocks = gather_blocks(s, about)
-        s.docs.append(
-            Doc(
-                id=doc_id,
-                title=f"{r.id} 관련 정리 · {r.title}",
-                about=r.id,
-                updated_at=self.clock(),
-                blocks=blocks,
-                by=by or "human",
-            )
-        )
-        ai = by == "ai"
-        prefix = "AI 어시스턴트 요청으로 " if ai else ""
-        s.activity.append(
-            self._act(
-                self.clock(),
-                r.context_id,
-                "planning" if ai else "human",
-                "planning",
-                "gather_doc",
-                "A2A" if ai else "사람",
-                f"{prefix}{r.id}에 걸린 문서·작업·PR·대화·결정을 {doc_id}로 정리"
-                f" (블록 {len(blocks)}개)",
-                "read",
-            )
-        )
-        return ActionResult(output={"doc_id": doc_id, "blocks": len(blocks)})
-
-    async def _rename_doc(self, s: State, doc: str, title: str) -> None:
-        self._patch_doc(s, doc, lambda d: setattr(d, "title", title))
-
-    async def _add_block(self, s: State, doc: str, kind: str, text: str | None) -> None:
-        def add(d: Doc) -> None:
-            d.blocks.append(
-                DocBlock(
-                    id=next_block_id(d),
-                    kind=kind,
-                    text=text or "",
-                    done=False if kind == "todo" else None,
-                )
-            )
-
-        self._patch_doc(s, doc, add)
-
-    async def _edit_block(self, s: State, doc: str, block: str, text: str) -> None:
-        def edit(d: Doc) -> None:
-            for b in d.blocks:
-                if b.id == block:
-                    b.text = text
-
-        self._patch_doc(s, doc, edit)
-
-    async def _toggle_todo(self, s: State, doc: str, block: str) -> None:
-        def toggle(d: Doc) -> None:
-            for b in d.blocks:
-                if b.id == block:
-                    b.done = not b.done
-
-        self._patch_doc(s, doc, toggle)
-
-    async def _remove_block(self, s: State, doc: str, block: str) -> None:
-        def remove(d: Doc) -> None:
-            d.blocks = [b for b in d.blocks if b.id != block]
-
-        self._patch_doc(s, doc, remove)
 
 
 __all__ = [

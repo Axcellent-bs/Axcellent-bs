@@ -12,6 +12,7 @@ from planning_agent.domain.models import Doc
 from planning_agent.domain.projects import gather, project_summary, stage_done
 from planning_agent.domain.rules import check_simple
 from planning_agent.domain.trace import trace_of, trace_text
+from planning_agent.testing import plan
 
 
 def run(coro):
@@ -149,7 +150,7 @@ def test_auto_pr_incident_demotes_scope(wire) -> None:
 @pytest.mark.role("planning")
 def test_whole_text_request_waits_for_human_at_l1(service) -> None:
     for _ in range(3):
-        run(service.inbound("marketing_simple"))
+        plan(service, "inbound", "marketing_simple")
     r = next(x for x in service.state.requests if x.title == "기획전 페이지 안내 문구 전체 교체")
     # L1 기준을 넘으면 간단 요청 무인 처리(_auto_complete)는 안 하고, 일반 흐름(기획서 초안 →
     # 확정 규칙 → PR → 머지 규칙)으로 간다. 사람이 누를 차례는 규칙에 걸릴 때만이다
@@ -167,7 +168,7 @@ def test_whole_text_request_waits_for_human_at_l1(service) -> None:
 @pytest.mark.role("planning")
 def test_l0_stops_auto_processing(service) -> None:
     service.state.auto_policy.level = 0
-    run(service.inbound("support_simple"))
+    plan(service, "inbound", "support_simple")
     r = req(service, "REQ-21")
     assert r.state == "접수" and not r.auto.ok
     assert "L0" in r.auto.reasons[0]
@@ -250,7 +251,7 @@ def test_req12_main_flow(wire) -> None:
 
 @pytest.mark.role("planning")
 def test_accept_draft_counts_adoption(service) -> None:
-    run(service.accept_draft("REQ-13"))
+    plan(service, "accept_draft", "REQ-13")
     assert req(service, "REQ-13").state == "기획 중"
     assert service.state.drafts_accepted == 1
     run(service.accept_draft("REQ-13"))  # 이미 채택 → 변화 없음
@@ -349,7 +350,7 @@ def test_doc_editing_actions(service) -> None:
 
 @pytest.mark.role("planning")
 def test_messages_decisions_and_outbox(service) -> None:
-    run(service.post_message("CH-support", "REQ-12 오늘 확정 예정입니다"))
+    plan(service, "post_message", "CH-support", "REQ-12 오늘 확정 예정입니다")
     out = service.state.outbox[-1]
     assert (out.to, out.point, out.read) == ("support", "message", False)
     assert service.state.seq == 1
@@ -361,7 +362,7 @@ def test_messages_decisions_and_outbox(service) -> None:
     run(service.dept_chat("data"))
     th = next(t for t in service.state.threads if t.id == "CH-data")
     assert th.messages[-1].text.startswith("결제 실패율이 14:00~14:10에 또 올랐습니다")
-    run(service.extract_decision("CH-data", 0))
+    plan(service, "extract_decision", "CH-data", 0)
     d = service.state.decisions[-1]
     assert (d.id, d.spec, d.from_) == ("D-1", "-", "소통 데이터분석")
     assert th.messages[0].decision is None  # 위 th는 이전 상태
@@ -384,7 +385,7 @@ def test_queries_and_safety_verify_simulator(service) -> None:
 
 @pytest.mark.role("planning")
 def test_reset_restores_seed(service) -> None:
-    run(service.inbound("support_simple"))
+    plan(service, "inbound", "support_simple")
     service.reset()
     assert len(service.state.requests) == 6 and service.state.seq == 0
     assert service.gate_calls == []
@@ -411,7 +412,7 @@ def test_general_request_advances_without_clicks(wire) -> None:
 
 @pytest.mark.role("planning")
 def test_draft_is_adopted_and_advances(service) -> None:
-    run(service.inbound("hr_draft"))
+    plan(service, "inbound", "hr_draft")
     r = req(service, "REQ-21")
     assert r.flow and r.spec is not None and service.state.drafts_accepted == 1
     assert any(a.point == "review_ticket_draft" for a in acts(service, r.context_id))
@@ -431,12 +432,12 @@ def test_mismatch_is_reviewed_again_once(wire) -> None:
 @pytest.mark.role("planning")
 def test_l0_keeps_general_request_at_intake(service) -> None:
     service.state.auto_policy.level = 0
-    run(service.inbound("support_ticket"))
+    plan(service, "inbound", "support_ticket")
     r = req(service, "REQ-21")
     assert (r.state, r.spec) == ("접수", None)
 
 
-@pytest.mark.role("planning")
+@pytest.mark.role("dev")
 def test_seed_requests_are_not_advanced(service) -> None:
     before = {x.id: (x.state, x.spec) for x in service.state.requests}
     run(service.inbound("data_query"))
@@ -475,3 +476,15 @@ def test_planning_clock_real_uses_wall_clock(monkeypatch) -> None:
     monkeypatch.setenv("PLANNING_CLOCK", "real")
     clock = default_clock_factory()()
     assert abs(clock() - datetime.now(UTC)) < timedelta(seconds=5)
+
+
+@pytest.mark.role("planning")
+def test_write_spec_button_drafts_once(service) -> None:
+    """화면 "기획서 초안" 버튼(writeSpec): 기획서가 없는 요청만 초안을 쓰고, 다시 눌러도 그대로."""
+    r = next(x for x in service.state.requests if x.spec is None and x.duplicate_of is None)
+    out = run(service.dispatch({"type": "writeSpec", "request": r.id}))
+    after = req(service, r.id)
+    assert after.spec is not None and out.output == {"request_id": r.id, "spec_id": after.spec}
+    assert any(sp.id == after.spec for sp in service.state.specs)
+    again = run(service.dispatch({"type": "writeSpec", "request": r.id}))
+    assert not again.changed and req(service, r.id).spec == after.spec

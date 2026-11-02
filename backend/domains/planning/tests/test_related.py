@@ -10,7 +10,7 @@ import asyncio
 import pytest
 
 from ax_contracts.schemas import ExecuteDecision
-from planning_agent.domain.service import PlanningService
+from planning_agent.domain.service import DevService, PlanningService
 from planning_agent.related import LexicalEmbedder, Relater, _Judged, _Judgement
 
 
@@ -136,7 +136,7 @@ def test_no_relater_keeps_requests_untouched() -> None:
 @pytest.mark.role("dev")
 def test_open_prs_on_same_file_mark_each_request_as_conflict() -> None:
     """같은 파일을 고치는 열린 PR이 둘이면 (검색 없이) 두 요청에 서로 충돌 가능으로 표시한다."""
-    svc = PlanningService(gate=_gate, relater=None)
+    svc = DevService(gate=_gate, relater=None)
     s = svc.state
     base = next(p for p in s.prs if p.task and p.changed_paths)
     # 다른 요청(REQ-12 → SPEC-7)의 작업을 하나 더 둔다

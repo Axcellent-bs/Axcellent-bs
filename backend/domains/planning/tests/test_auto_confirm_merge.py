@@ -22,9 +22,10 @@ from planning_agent.domain.autocheck import (
     spec_check,
     spec_params,
 )
-from planning_agent.domain.service import ActionError, PlanningService
+from planning_agent.domain.service import ActionError, DevService, PlanningService
 from planning_agent.main import app
 from planning_agent.runtime import get_service, set_service
+from planning_agent.testing import feed, plan
 
 ANSWER = "품절 상품도 남겨 두고 품절 표시해 주세요"
 PAYMENT_MIGRATION = next(p for p in IRREVERSIBLE_PREFIXES if "migrations" in p) + "0042_drop.py"
@@ -67,9 +68,12 @@ class CaptureGate:
 
 
 @pytest.fixture
-def gate() -> CaptureGate:
+def gate(request: pytest.FixtureRequest) -> CaptureGate:
+    """기록용 관문을 끼운 서비스 (시험의 역할 표시대로 기획·개발 서비스)."""
     capture = CaptureGate()
-    set_service(PlanningService(gate=capture))
+    mark = request.node.get_closest_marker("role")
+    cls = DevService if mark and mark.args[0] == "dev" else PlanningService
+    set_service(cls(gate=capture))
     return capture
 
 
@@ -192,7 +196,7 @@ def test_human_confirm_sends_171_keys_and_keeps_warn_ignored(gate) -> None:
 def test_human_merge_sends_171_keys(gate) -> None:
     svc = _svc()
     gate.hold = ("merge_pr",)  # 자동 머지는 safety가 보류 → 사람 머지
-    run(svc.confirm_spec("SPEC-7"))
+    plan(svc, "confirm_spec", "SPEC-7")
     run(svc.generate_prs("SPEC-7"))
     gate.hold = ()
     run(svc.merge_pr("PR #31"))
@@ -305,7 +309,7 @@ def test_open_question_waits_for_answer(gate) -> None:
 @pytest.mark.role("planning")
 def test_warning_left_waits_for_cross_check(gate) -> None:
     svc = _svc()
-    run(svc.answer_question("SPEC-7", ANSWER))
+    plan(svc, "answer_question", "SPEC-7", ANSWER)
     sp = _spec(svc)
     assert sp.status == "초안" and sp.question is None
     assert (sp.auto_review.state, sp.auto_review.rules) == (
@@ -314,7 +318,7 @@ def test_warning_left_waits_for_cross_check(gate) -> None:
     )
     assert gate.params("confirm_spec") == []
     # 판단은 기존 사람 확정 버튼
-    run(svc.confirm_spec("SPEC-7"))
+    plan(svc, "confirm_spec", "SPEC-7")
     sp = _spec(svc)
     assert (sp.status, sp.auto, sp.auto_review) == ("확정", False, None)
 
@@ -325,7 +329,7 @@ def test_no_basis_and_irreversible_wait_for_cross_check(gate) -> None:
     _clear_warn(svc)
     _spec(svc).basis = []
     _spec(svc).paras[0].paths = [PAYMENT_MIGRATION]
-    run(svc.answer_question("SPEC-7", ANSWER))
+    plan(svc, "answer_question", "SPEC-7", ANSWER)
     sp = _spec(svc)
     assert sp.status == "초안"
     assert (sp.auto_review.state, sp.auto_review.rules) == (
@@ -339,7 +343,7 @@ def test_safety_hold_on_auto_confirm_waits(gate) -> None:
     svc = _svc()
     _clear_warn(svc)
     gate.hold = ("confirm_spec",)
-    run(svc.answer_question("SPEC-7", ANSWER))
+    plan(svc, "answer_question", "SPEC-7", ANSWER)
     sp = _spec(svc)
     assert sp.status == "초안" and sp.question is None  # 질문 답은 반영됨
     assert sp.auto_review.state == "교차검증 대기" and sp.auto_review.rules == []
@@ -378,12 +382,12 @@ def test_auto_merge_and_close_request(wired) -> None:
     assert [a.point for a in flow].count("github_merge_pull") == 2
 
 
-@pytest.mark.role("planning")
+@pytest.mark.role("dev")
 def test_rule_hit_waits_for_cross_check(gate) -> None:
     svc = _svc()
-    _spec(svc).paras[1].paths = ["infra/ci/deploy.yml"]  # 허용 경로(shop-api·shop-web·docs) 밖
-    run(svc.confirm_spec("SPEC-7"))
-    run(svc.generate_prs("SPEC-7"))
+    # 확정·넘기기는 기획 서비스 복사본 기준 (허용 경로(shop-api·shop-web·docs) 밖)
+    _spec(feed(svc).planning).paras[1].paths = ["infra/ci/deploy.yml"]
+    plan(svc, "confirm_spec", "SPEC-7")
     run(svc.review_pr("PR #32"))
     pr32 = _pr(svc, "PR #32")
     assert not pr32.merged
@@ -400,7 +404,7 @@ def test_shop_web_is_allowed_but_checkout_needs_human(gate) -> None:
     """#200: shop-web/은 허용 경로지만 결제 화면(shop-web/checkout/)은 irreversible_count로 센다."""
     assert "shop-web/" in PR_ALLOWED_PATHS
     svc = _svc()
-    run(svc.confirm_spec("SPEC-7"))
+    plan(svc, "confirm_spec", "SPEC-7")
     run(svc.generate_prs("SPEC-7"))
     run(svc.review_pr("PR #32"))
     pr32 = _pr(svc, "PR #32")
@@ -451,9 +455,9 @@ def test_plain_shop_web_path_passes_allowed_paths(service) -> None:
 @pytest.mark.role("dev")
 def test_linked_incident_and_review_mismatch_wait(gate) -> None:
     svc = _svc()
-    _spec(svc).paras[0].paths = ["shop-api/payment/config.py"]  # PR #28(장애 연결)과 같은 파일
-    run(svc.confirm_spec("SPEC-7"))
-    run(svc.generate_prs("SPEC-7"))
+    # 확정·넘기기는 기획 서비스 복사본 기준 (PR #28(장애 연결)과 같은 파일)
+    _spec(feed(svc).planning).paras[0].paths = ["shop-api/payment/config.py"]
+    plan(svc, "confirm_spec", "SPEC-7")
     pr31 = _pr(svc, "PR #31")
     assert not pr31.merged
     assert pr31.auto_review.rules == ["pr_linked_incident"]
@@ -467,9 +471,8 @@ def test_linked_incident_and_review_mismatch_wait(gate) -> None:
 @pytest.mark.role("dev")
 def test_irreversible_needs_human_and_human_can_merge(gate) -> None:
     svc = _svc()
-    _spec(svc).paras[0].paths = [PAYMENT_MIGRATION]
-    run(svc.confirm_spec("SPEC-7"))
-    run(svc.generate_prs("SPEC-7"))
+    _spec(feed(svc).planning).paras[0].paths = [PAYMENT_MIGRATION]
+    plan(svc, "confirm_spec", "SPEC-7")
     pr31 = _pr(svc, "PR #31")
     assert not pr31.merged
     assert pr31.auto_review.state == "사람 확인"
@@ -511,8 +514,8 @@ def test_review_queue_rest(wire) -> None:
 def test_review_queue_drops_closed_pr(service) -> None:
     """레포에서 닫히거나 작업을 중단해 닫힌 PR은 사람 확인 대기에 남지 않는다."""
     client = TestClient(app)
-    run(service.answer_question("SPEC-7", ANSWER))
-    run(service.confirm_spec("SPEC-7"))
+    plan(service, "answer_question", "SPEC-7", ANSWER)
+    plan(service, "confirm_spec", "SPEC-7")
     run(service.generate_prs("SPEC-7"))
     run(service.review_pr("PR #32"))
     assert [r["id"] for r in client.get("/api/planning/review-queue").json()["data"]] == ["PR #32"]

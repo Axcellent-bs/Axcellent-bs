@@ -2,22 +2,20 @@
 
 from __future__ import annotations
 
-import asyncio
-from collections.abc import Awaitable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import BaseModel
 
 from ax_agent_template import config
 from ax_agent_template.testing import reset_state  # noqa: F401  autouse, 템플릿 상태 초기화
 from planning_agent import coder
 from planning_agent.api import ADMIN_ACTIONS
-from planning_agent.dev_handoff import START_DEV
-from planning_agent.domain.service import PlanningService, action_name
+from planning_agent.domain import service as service_module
+from planning_agent.domain.service import DevService, PlanningService, action_name
 from planning_agent.runtime import set_service
+from planning_agent.testing import Wire
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -31,6 +29,12 @@ async def _no_handoff(
 ) -> str:
     """역할 시험에서 다른 서비스로 넘기는 것을 버린다 (두 서비스를 잇는 시험은 Wire를 쓴다)."""
     return "보냄 (시험: 버림)"
+
+
+@pytest.fixture(autouse=True)
+def _no_network_handoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    """따로 만든 서비스도 기획 ↔ 개발 넘기기를 네트워크로 보내지 않는다 (Wire는 자기 송신기)."""
+    monkeypatch.setattr(service_module, "send_to_service", _no_handoff)
 
 
 @pytest.fixture(autouse=True)
@@ -54,7 +58,8 @@ def service(
     monkeypatch.setattr(coder, "CI_POLL_SECONDS", 0.0)
     monkeypatch.setattr(coder, "NO_CI_GRACE_SECONDS", 0.0)
     if role:
-        return set_service(PlanningService(role=role, dev_sender=_no_handoff))
+        cls = DevService if role == "dev" else PlanningService
+        return set_service(cls(dev_sender=_no_handoff))
     return set_service(PlanningService())
 
 
@@ -120,67 +125,6 @@ def mock_write_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
 def a2a_body():
     """A2A 요청 본문을 만드는 함수 (기본 요청자 infra, 사건 ctx_inc_0001)."""
     return _a2a_body
-
-
-class Wire:
-    """기획(planning)·개발(dev) 서비스 둘을 메모리 안 가짜 송신기로 잇는다 (네트워크 없음).
-
-    요청 → 기획서 → PR → 머지처럼 두 서비스를 함께 도는 시험이 쓴다. `run`은 액션 하나를
-    돌리고 넘기기가 다 오갈 때까지 기다린다 (같은 이벤트 루프 안에서)."""
-
-    def __init__(self, forward: bool = True, real_example: bool = False, gate: Any = None):
-        self.forward = forward
-        self.sent: list[tuple[str, str]] = []
-        self.planning = PlanningService(
-            role="planning", dev_sender=self.send, real_example=real_example, gate=gate
-        )
-        self.dev = PlanningService(
-            role="dev", dev_sender=self.send, real_example=real_example, gate=gate
-        )
-
-    async def send(self, skill: str, ctx: str, tenant: str, payload: BaseModel, key: str) -> str:
-        self.sent.append((skill, key))
-        if not self.forward:
-            return "보냄"
-        body = payload.model_dump(mode="json")
-        if skill == START_DEV:
-            await self.dev.start_dev(
-                context_id=ctx, requester="planning", idempotency_key=key, **body
-            )
-        else:
-            await self.planning.receive_dev_result(
-                context_id=ctx, requester="dev", idempotency_key=key, **body
-            )
-        return "보냄"
-
-    async def settle(self) -> None:
-        for _ in range(10):
-            await self.planning.wait_sent()
-            await self.dev.wait_sent()
-
-    def run(self, aw: Awaitable[Any]) -> Any:
-        async def go() -> Any:
-            out = await aw
-            await self.settle()
-            return out
-
-        return asyncio.run(go())
-
-    def skills(self) -> list[str]:
-        return [k for k, _ in self.sent]
-
-    def activity(self, ctx: str | None = None) -> list:
-        """두 서비스의 활동을 시각 순으로 (넘기기로 같은 줄이 양쪽에 남으면 하나만)."""
-        seen: set[tuple] = set()
-        out = []
-        both = [*self.planning.state.activity, *self.dev.state.activity]
-        for a in sorted(both, key=lambda x: x.at):
-            key = (a.at, a.context_id, a.point, a.text)
-            if key in seen or (ctx is not None and a.context_id != ctx):
-                continue
-            seen.add(key)
-            out.append(a)
-        return out
 
 
 @pytest.fixture
