@@ -123,3 +123,35 @@ def test_llm_failure_falls_back_to_same_title() -> None:
     a = _ticket(svc, "가을 프로모션 배너 교체", "메인 배너", "k1")
     b = _ticket(svc, "가을 프로모션 배너 교체", "메인 배너 (다시)", "k2")
     assert b.outcome == "linked_duplicate" and b.output["duplicate_of"] == a.output["request_id"]
+
+
+@pytest.mark.role("planning")
+def test_follow_up_from_dev_is_not_bound() -> None:
+    """개발이 장애 연결로 만든 재발 방지 요청은 내용이 같아도 묶지 않는다 (사건 번호 유지)."""
+    from ax_workflow.models import RelatedItem, Request
+
+    llm = JudgeLLM("same")
+    svc = _svc(llm)
+    a = _ticket(
+        svc, "결제 실패 시 장바구니 유지", "결제 실패 뒤 장바구니가 비워진다는 문의 12건", "k1"
+    )
+    llm.first = a.output["request_id"]
+    req = Request(
+        id="REQ-90",
+        context_id="ctx_inc_0007",
+        from_="dev",
+        via="link_incident (재발 방지)",
+        title="결제 실패 시 장바구니 비워짐 재발 방지",
+        evidence="INC-7 장바구니 초기화 장애",
+        state="접수",
+    )
+    # LLM이 "같은 일"로 판단한 상태를 만든다 (막지 않으면 첫 요청에 묶인다)
+    first = next(r for r in svc.state.requests if r.id == llm.first)
+    req.related = [
+        RelatedItem(
+            id=first.id, title=first.title, score=0.9, relation="same", reason="같음", by="llm"
+        )
+    ]
+    svc.state.requests.append(req)
+    svc._bind_by_content(svc.state, req)
+    assert req.duplicate_of is None and req.context_id == "ctx_inc_0007"
