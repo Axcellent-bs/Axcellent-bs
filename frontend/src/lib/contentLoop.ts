@@ -43,9 +43,9 @@ export const LOOP_STAGES: LoopStage[] = [
   {
     no: 1,
     title: "트렌드·밈 감지",
-    owner: "데이터분석 AI · trend_scan",
+    owner: "데이터분석 AI · trend_scan · trend_candidates",
     live: true,
-    description: "네이버 검색어 급상승을 판정합니다.",
+    description: "네이버 검색어 급상승과 YouTube 인기 태그 후보를 판정합니다.",
     status: PROBE_STATUS.checking,
     source: "trend_scan",
     probe: "trend_scan",

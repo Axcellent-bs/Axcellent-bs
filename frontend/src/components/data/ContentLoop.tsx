@@ -9,8 +9,17 @@ import { UNKNOWN } from "@/lib/data";
 // 1·4단계 칩과 테두리는 트렌드 탭이 받은 trend_scan·campaign_effect 응답 결과(probes)로 정한다.
 // 테두리·칩·범례는 같은 말을 한다: 동작 중 = 파란 실선, 확인 중 = 회색 실선, 측정 대기·연결 확인 필요·준비 중 = 회색 점선.
 
-/** 1단계에 보여 줄 trend_scan 판정 개수. 화면이 응답의 results를 센 값이다 */
-export type TrendCounts = { rising: number; normal: number; unknown: number };
+/** 1단계에 보여 줄 판정 개수. 화면이 응답(trend_scan results + trend_candidates candidates)을 센 값이다.
+ *  youtube: YouTube 후보 수 (기본 판정에서만, 직접 입력이면 없음). confirmed: 급상승 중 YouTube 근거도 있는 것.
+ *  youtubeNote: YouTube 후보를 받지 못했거나 스냅샷이 없을 때 서버 이유 */
+export type TrendCounts = {
+  rising: number;
+  normal: number;
+  unknown: number;
+  youtube?: number;
+  confirmed?: number;
+  youtubeNote?: string;
+};
 export type LoopTrendState =
   | { kind: "loading" }
   | { kind: "counts"; counts: TrendCounts }
@@ -21,11 +30,18 @@ function TrendLine({ state }: { state: LoopTrendState }) {
   if (state.kind === "unknown") {
     return <p className="text-sm text-amber-700">{UNKNOWN} · {state.reason}</p>;
   }
-  const { rising, normal, unknown } = state.counts;
+  const { rising, normal, unknown, youtube, confirmed, youtubeNote } = state.counts;
   return (
-    <p className="text-sm text-ink-700">
-      이번 판정 급상승 <b className="text-ink-900">{rising}개</b> · 평범 {normal}개 · 판정 불가 {unknown}개
-    </p>
+    <div className="space-y-0.5">
+      <p className="text-sm text-ink-700">
+        이번 판정 급상승 <b className="text-ink-900">{rising}개</b> · 평범 {normal}개 · 판정 불가 {unknown}개
+        {youtube != null ? ` · YouTube 후보 ${youtube}개` : ""}
+      </p>
+      {confirmed != null && confirmed > 0 && (
+        <p className="text-xs text-ink-700">두 소스 확인 (검색 급상승 + YouTube 인기 태그) {confirmed}개</p>
+      )}
+      {youtubeNote && <p className="text-xs text-amber-700">YouTube 후보: {UNKNOWN} · {youtubeNote}</p>}
+    </div>
   );
 }
 
