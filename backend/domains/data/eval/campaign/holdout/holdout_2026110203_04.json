@@ -1,0 +1,68 @@
+{
+ "id": "holdout_2026110203_04",
+ "kind": "down",
+ "input": {
+  "campaign_id": "cmp_h04",
+  "window_from": "2026-10-04T15:00:00Z",
+  "window_to": "2026-10-04T16:00:00Z"
+ },
+ "spec": {
+  "id": "holdout_2026110203_04",
+  "window": {
+   "from": "2026-10-04T15:00:00Z",
+   "to": "2026-10-04T16:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "order_drop",
+   "factor": 0.5,
+   "from": "2026-10-04T15:00:00Z",
+   "to": "2026-10-04T16:00:00Z"
+  },
+  "campaign": {
+   "campaign_id": "cmp_h04",
+   "buyers": 13,
+   "units_each": 3,
+   "unit_value": 1000,
+   "use_fraction": 0.37,
+   "used_after": 0
+  }
+ },
+ "expected": {
+  "orders": {
+   "status": "known",
+   "direction": "down",
+   "multiplier": 0.5
+  },
+  "revenue": {
+   "status": "known",
+   "direction": "down"
+  },
+  "coupon": {
+   "status": "known",
+   "issued_units": 39,
+   "used_after_units": 0,
+   "note": "조회 시점 기준 누적 사용률이며 캠페인 뒤 사용분도 섞인다"
+  }
+ },
+ "counted": {
+  "orders_actual": 33,
+  "orders_baseline": 70.8571,
+  "revenue_actual": 869300,
+  "revenue_baseline": 1817214.2857,
+  "history_days_with_orders": 7,
+  "coupon_issued_units": 39,
+  "coupon_used_in_window": 7,
+  "coupon_used_after": 0,
+  "coupon_used_units": 7,
+  "coupon_use_rate": 0.1795
+ },
+ "memo": "",
+ "holdout": {
+  "seed": 2026110203,
+  "factor": 0.5,
+  "minutes": 60
+ }
+}
