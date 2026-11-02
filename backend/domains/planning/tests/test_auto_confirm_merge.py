@@ -225,7 +225,9 @@ def test_auto_confirm_when_all_rules_pass(gate) -> None:
         if "record_case" in p
     ]
     spec_case = next(c for c in cases if c.kind == RecordKind.SPEC_CONFIRMED)
-    assert "자동 확정" in spec_case.summary and spec_case.decision_reason
+    # 결정 문장은 내용만, 확정 방식은 이유로 (병합 판정이 틀 문구에 흔들리지 않게)
+    assert spec_case.summary == "결제 실패 후 장바구니 유지"
+    assert "자동 확정" in (spec_case.decision_reason or "")
     assert next(r for r in svc.state.requests if r.id == "REQ-12").state == "작업 중"
 
 
