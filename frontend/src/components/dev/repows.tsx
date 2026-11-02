@@ -2,6 +2,7 @@
 // 사람이 GitHub에 직접 올린 PR도 보이고, AI가 만든 PR은 내부 PR 화면으로 잇는다.
 // 화면 모양은 GitHub·GitLab의 PR 화면 순서를 따른다 (상태 탭 · 검색 · 줄 / 머리 · 버튼 · 탭 · 곁 칸).
 import { useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { useLocation } from 'react-router'
 import { Button, Modal, useDismiss, useToast } from '@dejafix/common-frontend'
 import type { Action, State as S } from '@/lib/planningData'
 import { DiffFiles } from '@/components/dev/diff'
@@ -84,14 +85,19 @@ function Confirm({ title, rows, ok, danger, busy, onOk, onClose }: { title: stri
 const CONN_KEY = 'ax.repo.connection'
 function useConnection(): [VcsConnection[], string, (id: string) => void] {
   const [list, setList] = useState<VcsConnection[]>([])
-  const [pick, setPick] = useState(() => { try { return localStorage.getItem(CONN_KEY) ?? '' } catch { return '' } })
+  // 작업의 PR 링크(?repo=)로 들어오면 그 PR이 열린 레포로 연다 (레포 여럿일 때 다른 레포의 같은 번호를 열지 않게)
+  const asked = new URLSearchParams(useLocation().search).get('repo')
+  const [pick, setPick] = useState(() => { try { return asked ?? localStorage.getItem(CONN_KEY) ?? '' } catch { return asked ?? '' } })
   useEffect(() => {
     let alive = true
     vcsApi(DEV_API).list().then((x) => alive && setList(x)).catch(() => {})
     return () => { alive = false }
   }, [])
-  const id = list.find((c) => c.id === pick)?.id ?? list[0]?.id ?? ''
   const set = (x: string) => { setPick(x); try { localStorage.setItem(CONN_KEY, x) } catch { /* 저장 못 해도 화면은 돈다 */ } }
+  useEffect(() => {
+    if (asked) set(asked)
+  }, [asked]) // eslint-disable-line react-hooks/exhaustive-deps
+  const id = list.find((c) => c.id === pick)?.id ?? list[0]?.id ?? ''
   return [list, id, set]
 }
 
