@@ -1,6 +1,6 @@
 // 프로젝트 탭의 레이아웃(왼쪽 목록 / 가운데 세로 흐름 / 오른쪽 곁 블록)을 다른 탭에서도 쓰는 조각.
 // 단계 머리는 짧은 라벨 + 값. 줄·단계·블록은 통째로 눌러 이동한다 (rowNav).
-import type { ReactNode } from 'react'
+import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode } from 'react'
 import type { PR, Spec, State as S } from '@/lib/planningData'
 import { reviewOf, toPath } from '@/components/planning-common/links'
 import { rowNav } from '@/components/planning-common/parts'
@@ -77,8 +77,15 @@ export function ListPane({ groups, empty }: { groups: { label: string; rows: Lis
   )
 }
 
+// 단계는 순서대로 켠다: 뒤 단계가 켜졌으면(지나갔으면) 그 앞 단계도 켠다. 중간이 비어 보이지 않게
 export function Flow({ children, label }: { children: ReactNode; label?: string }) {
-  return <ol className="pflow" aria-label={label ?? '진행 흐름'}>{children}</ol>
+  const items = Children.toArray(children).filter(isValidElement) as ReactElement<{ on?: boolean }>[]
+  const last = items.reduce((n, c, i) => (c.props.on ? i : n), -1)
+  return (
+    <ol className="pflow" aria-label={label ?? '진행 흐름'}>
+      {items.map((c, i) => (i < last && !c.props.on ? cloneElement(c, { on: true }) : c))}
+    </ol>
+  )
 }
 
 // 흐름 한 단계. name = 짧은 라벨, title = 값

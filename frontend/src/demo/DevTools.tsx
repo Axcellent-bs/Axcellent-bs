@@ -43,6 +43,52 @@ const CODING_MODES: { id: CodingSetting; label: string }[] = [
   { id: 'subscription', label: '내 Claude' },
 ]
 const codingApi = codingSettingsApi(DEV_API)
+const MCP_URL = `${DEV_API.replace(/\/$/, '')}/api/planning/mcp`
+const MCP_ADD = `claude mcp add --transport http axcellent-dev ${MCP_URL} --header "Authorization: Bearer <내 토큰>"`
+
+function CopyLine({ text }: { text: string }) {
+  const [done, setDone] = useState(false)
+  const copy = () => {
+    navigator.clipboard?.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500) }).catch(() => {})
+  }
+  return (
+    <div className="flex items-start gap-2">
+      <code className="mono min-w-0 flex-1 break-all rounded-md bg-ink-50 px-3 py-2 text-xs">{text}</code>
+      <button type="button" className="btn-ghost shrink-0 px-2 py-1 text-xs" onClick={copy}>{done ? '복사됨' : '복사'}</button>
+    </div>
+  )
+}
+
+/** 내 Claude(MCP 일감 서버) 연결하기: 내 PC의 Claude Code에 일감 서버를 붙이는 순서 */
+function ClaudeConnect({ connected }: { connected: string[] }) {
+  return (
+    <div className="space-y-3 rounded-lg border border-ink-100 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="font-medium">내 Claude 연결</h3>
+        <span className={`chip ${connected.length ? TONE.ok : TONE.none}`}>{connected.length ? `연결됨 ${connected.join(', ')}` : '연결 없음'}</span>
+        <span className="text-xs text-ink-500">최근 7일 안에 일감을 본 개발자</span>
+      </div>
+      <ol className="list-decimal space-y-3 pl-5 text-sm">
+        <li className="space-y-1">
+          <span>내 사람 토큰 받기</span>
+          <span className="block text-xs text-ink-500">운영자에게 받기 · 저장소에 커밋 금지</span>
+        </li>
+        <li className="space-y-1">
+          <span>내 PC 터미널에서 일감 서버 붙이기</span>
+          <CopyLine text={MCP_ADD} />
+        </li>
+        <li className="space-y-1">
+          <span>확인</span>
+          <CopyLine text="claude mcp list" />
+        </li>
+        <li className="space-y-1">
+          <span>레포 폴더에서 Claude Code로 일감 가져가기</span>
+          <CopyLine text="axcellent-dev에서 일감 목록 보여 줘. 하나 가져가서 명세대로 구현하고 PR 올려 줘." />
+        </li>
+      </ol>
+    </div>
+  )
+}
 const fmtTokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(0)}k` : `${n}`)
 
 /** 요청 작업 코딩 방식 + 서버 AI 체험 한도 */
@@ -72,7 +118,6 @@ function CodingModeSection() {
       {cfg && (
         <dl className="grid grid-cols-[120px_1fr] gap-x-3 gap-y-2 text-sm">
           <dt className="text-ink-500">이유</dt><dd>{cfg.why}</dd>
-          <dt className="text-ink-500">내 Claude 연결</dt><dd>{cfg.agents_connected.length ? cfg.agents_connected.join(', ') : '없음'}</dd>
           <dt className="text-ink-500">서버 AI 체험</dt>
           <dd className="flex items-center gap-3">
             <span className="h-2 w-40 overflow-hidden rounded-full bg-ink-100"><span className="block h-full bg-[rgb(var(--primary))]" style={{ width: `${pct}%` }} /></span>
@@ -80,6 +125,7 @@ function CodingModeSection() {
           </dd>
         </dl>
       )}
+      <ClaudeConnect connected={cfg?.agents_connected ?? []} />
     </section>
   )
 }

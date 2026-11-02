@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, RELATION_LABEL, byRelation, type CodingRun, type CodingStatus, type Request, type State as S, type Task } from '@/lib/planningData'
-import { DEV_API, PlanningApiError, approveReview, devTaskApi, planningApi } from '@/lib/planning'
+import { DEV_API, PlanningApiError, approveReview, devTaskApi, planningApi, useCodingLimits } from '@/lib/planning'
 import { State, Tag } from '@/components/planning-common/parts'
 import { Step } from '@/components/planning-common/flow'
 import { Ref } from '@/components/planning-common/links'
@@ -18,6 +18,20 @@ export const CODING_LABEL: Record<CodingStatus, string> = {
 const DONE: CodingStatus[] = ['opened', 'merged']
 /** 토큰 수를 짧게: 950 · 12.3k · 1.2M */
 export const tokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : `${n}`)
+export const pctOf = (used: number, limit: number) => Math.round((used / Math.max(limit, 1)) * 100)
+
+/** 쓴 양 / 한도 + 비율 막대. 80% 넘으면 경고색 */
+export function UsageBar({ used, limit, label, title }: { used: number; limit: number; label?: string; title?: string }) {
+  const pct = pctOf(used, limit)
+  return (
+    <span className={`usage${pct >= 80 ? ' warn' : ''}`} title={title}>
+      {label && <span>{label}</span>}
+      <span className="usage-bar" aria-hidden><span style={{ width: `${Math.min(100, pct)}%` }} /></span>
+      <b>{pct}%</b>
+      <span className="mono usage-n">{tokens(used)}/{tokens(limit)}</span>
+    </span>
+  )
+}
 /** 에이전트가 지금 일하는 중인 상태 (옆에 깜빡이는 점) */
 const RUNNING: CodingStatus[] = ['queued', 'claimed', 'reading', 'writing', 'reviewing']
 export const isRunning = (s?: CodingStatus | string) => RUNNING.includes(s as CodingStatus)
@@ -111,11 +125,12 @@ export const codingState = (c: CodingRun) =>
     : CODING_LABEL[c.status] ?? c.status
 
 /** 작업·PR 흐름 맨 위 "코딩 에이전트" 단계 */
-export function CodingStep({ task }: { task: Task }) {
+export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
   const toast = useToast()
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
   const c = task.coding
+  const lim = useCodingLimits()
   if (!c) return null
   // 열린 PR로 사람 확인을 기다리면: 다시 시도 대신 수정 지시·사람 머지
   const waitingPr = c.status === 'waiting_human' && !!c.pr
@@ -170,11 +185,11 @@ export function CodingStep({ task }: { task: Task }) {
     await api.retry(task.id, true)
   }, `${task.id} 보류 승인 → PR 여는 중`)
   return (
-    <Step name="코딩 에이전트" on={DONE.includes(c.status)} title={<CodingLabel c={c} />}>
+    <Step name="코딩 에이전트" on={!!on || DONE.includes(c.status)} title={<CodingLabel c={c} />}>
       <span className="tags">
         {c.mode === 'subscription' ? <Tag>내 Claude{c.claimedBy ? ` · ${c.claimedBy}` : ''}</Tag> : c.model && <Tag><span className="mono">{c.model}</span></Tag>}
         {c.attempts > 1 && <Tag>{c.attempts}회차</Tag>}
-        {!!c.llmCalls && <Tag>AI {c.llmCalls}회 · <span className="mono">{tokens(c.llmTokens ?? 0)}</span> 토큰</Tag>}
+        {!!c.llmCalls && <Tag><UsageBar used={c.llmTokens ?? 0} limit={lim.runTokens} label={`AI ${c.llmCalls}/${lim.runCalls}회 · 토큰`} title="코딩 실행 한 번의 한도 대비 (다시 시도까지 합친 양)" /></Tag>}
         {!!files.length && <Tag>{files.length}파일 · <span className="mono">+{add} −{del}</span></Tag>}
         {c.review && <Tag tone={c.review.verdict === '통과' ? 'green' : 'amber'}>리뷰 {c.review.verdict}</Tag>}
         {c.instruction && <Tag>사람 지시</Tag>}
