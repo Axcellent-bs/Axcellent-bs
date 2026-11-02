@@ -30,6 +30,7 @@ from data_agent.skills.trend_candidates import (
     find_candidates,
     load_config,
     pick_candidates,
+    pick_verdict,
 )
 from data_agent.skills.trend_scan import REQUEST_DAYS, judge
 from data_agent.youtube_store import (
@@ -296,10 +297,13 @@ def test_candidates_carry_youtube_evidence_and_the_naver_verdict(tmp_path: Path)
     assert t1.youtube.video_ids == ["v1", "v2", "v3"]
     assert t1.naver.status == "rising" and t1.naver.group_name == "t1"
     assert out.candidates[1].naver.status == "normal"
-    assert out.naver_calls == 3 == len(naver.queries)
-    # 회사 별칭 표에 t1 = ["티원"]이 있어 t1 그룹에는 별칭이 키워드로 함께 들어간다
+    # 회사 별칭 표에 t1 = ["티원"]이 있어 t1 그룹에는 별칭이 키워드로 함께 들어가고,
+    # 이름마다 따로도 판정한다(t1·티원 2번 더) → 묶음 3 + 이름 2 = 5번
+    assert out.naver_calls == 5 == len(naver.queries)
     assert [q.keyword_groups[0].keywords for q in naver.queries] == [
         ["t1", "티원"],
+        ["t1"],
+        ["티원"],
         ["롤"],
         ["젠지"],
     ]
@@ -321,7 +325,8 @@ def test_naver_verdict_is_exactly_the_trend_scan_judgement(tmp_path: Path) -> No
 def test_max_candidates_in_the_request_caps_naver_calls(tmp_path: Path) -> None:
     naver = Naver({})
     out = _run(_db(tmp_path, VIDEOS), naver, max_candidates=1).output
-    assert [c.keyword for c in out.candidates] == ["t1"] and out.naver_calls == 1
+    # 후보 1개(t1) = 묶음 1번 + 이름별(t1·티원) 2번
+    assert [c.keyword for c in out.candidates] == ["t1"] and out.naver_calls == 3
 
 
 def test_a_naver_failure_makes_only_that_candidate_unknown(tmp_path: Path) -> None:
@@ -331,7 +336,7 @@ def test_a_naver_failure_makes_only_that_candidate_unknown(tmp_path: Path) -> No
     assert by["롤"].status == "unknown"
     assert by["롤"].unknown_reason == "네이버 검색어 트렌드를 읽지 못함 [UNAVAILABLE]"
     assert by["젠지"].status == "normal"
-    assert result.output.naver_calls == 3  # 실패도 부른 수에 든다
+    assert result.output.naver_calls == 5  # 실패도 부른 수에 든다 (t1은 이름별 2번 더)
     assert "판정 불가 1개" in result.output.summary
     assert "네이버를 읽지 못한 후보: 롤" in result.evidence.data_summary
 
@@ -407,3 +412,81 @@ def test_handler_reports_unknown_snapshot_as_completed_unknown(
 def test_handler_rejects_a_bad_input(monkeypatch: pytest.MonkeyPatch) -> None:
     result = asyncio.run(handlers.HANDLERS["trend_candidates"](_request({"max_candidates": 0})))
     assert result.status == TaskStatus.FAILED and result.outcome == "invalid_input"
+
+
+# -------------------------------------------------- 이름별 판정 (작은 이름이 묻히지 않게)
+
+LOL_VIDEOS = [
+    ("a", 1, ("리그오브레전드", "lol")),
+    ("b", 2, ("리그오브레전드",)),
+    ("c", 3, ("lol", "젠지")),
+    ("d", 4, ("젠지",)),
+]
+
+
+def _lol_env(tmp_path: Path) -> dict[str, str]:
+    config = tmp_path / "trends.toml"
+    config.write_text(
+        '[candidates]\nmin_videos = 2\n\n[candidates.aliases]\n"리그오브레전드" = ["lol"]\n',
+        encoding="utf-8",
+    )
+    return {"DATA_YOUTUBE_DB": str(_db(tmp_path, LOL_VIDEOS)), "DATA_TREND_CONFIG": str(config)}
+
+
+def _lol_run(tmp_path: Path, naver: Naver):  # noqa: ANN202
+    request = TrendCandidatesRequest(end_date=END)
+    return asyncio.run(find_candidates(request, naver, env=_lol_env(tmp_path), now=NOW))
+
+
+def test_a_rising_alias_buried_in_the_group_is_raised(tmp_path: Path) -> None:
+    """묶음(리그오브레전드·lol)은 평범인데 lol만 급상승 → 급상승으로 올리고 올라간 이름을 남긴다."""
+    naver = Naver({"lol": 3.0})  # 묶음 그룹(이름 = 리그오브레전드)은 평범
+    out = _lol_run(tmp_path, naver).output
+    lol = next(c for c in out.candidates if c.keyword == "리그오브레전드")
+    assert lol.naver.status == "rising" and lol.naver.group_name == "lol"
+    assert lol.naver_from == "name" and lol.rising_names == ["lol"]
+    assert [v.group_name for v in lol.name_verdicts] == ["리그오브레전드", "lol"]
+    assert [v.status for v in lol.name_verdicts] == ["normal", "rising"]
+    # 묶음 1번 + 이름별 2번(리그오브레전드·lol) + 젠지 1번 = 4번
+    assert out.naver_calls == 4 == len(naver.queries)
+
+
+def test_a_rising_group_keeps_the_group_verdict(tmp_path: Path) -> None:
+    naver = Naver({"리그오브레전드": 3.0, "lol": 3.0})
+    lol = next(
+        c for c in _lol_run(tmp_path, naver).output.candidates if c.keyword == "리그오브레전드"
+    )
+    assert lol.naver.group_name == "리그오브레전드" and lol.naver_from == "group"
+    assert lol.rising_names == ["리그오브레전드", "lol"]
+
+
+def test_no_alias_means_no_extra_naver_calls(tmp_path: Path) -> None:
+    naver = Naver({})
+    out = _lol_run(tmp_path, naver).output
+    zenji = next(c for c in out.candidates if c.keyword == "젠지")
+    assert zenji.name_verdicts == [] and zenji.rising_names == [] and zenji.naver_from == "group"
+    assert sum(q.keyword_groups[0].group_name == "젠지" for q in naver.queries) == 1
+
+
+def test_a_failed_name_does_not_raise_and_the_group_stays(tmp_path: Path) -> None:
+    naver = Naver({}, fail={"lol"})
+    lol = next(
+        c for c in _lol_run(tmp_path, naver).output.candidates if c.keyword == "리그오브레전드"
+    )
+    assert lol.naver.status == "normal" and lol.naver_from == "group"
+    assert [v.status for v in lol.name_verdicts] == ["normal", "unknown"]
+    assert lol.rising_names == []
+
+
+def test_pick_verdict_takes_the_biggest_z_among_rising_names() -> None:
+    from ax_contracts.schemas.data import TrendEvidence, TrendVerdict
+
+    def v(name: str, status: str, z: float = 0.0) -> TrendVerdict:
+        return TrendVerdict(
+            group_name=name, status=status, ratio=1.0, evidence=TrendEvidence(score=z)
+        )  # type: ignore[arg-type]
+
+    group = v("묶음", "normal")
+    chosen, source, rising = pick_verdict(group, [v("가", "rising", 4.0), v("나", "rising", 6.0)])
+    assert (chosen.group_name, source, rising) == ("나", "name", ["가", "나"])
+    assert pick_verdict(group, [])[1] == "group"

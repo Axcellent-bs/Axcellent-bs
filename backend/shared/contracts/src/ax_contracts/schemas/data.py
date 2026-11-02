@@ -632,6 +632,15 @@ class TrendCandidate(AxModel):
     # 대표 이름(`keyword`)에 묶인 별칭 (회사 설정 별칭 표). 네이버 그룹에 대표 이름과 함께 키워드로
     # 넣었다. 별칭이 없으면 빈 목록. 예전 응답은 없다
     aliases: list[str] = Field(default_factory=list)
+    # 아래는 이름별 판정 (별칭이 있을 때만, 예전 응답은 없다). 묶음 그룹으로만 보면 작은 이름의
+    # 급상승이 큰 이름에 묻혀서 대표 이름·별칭을 하나씩 따로도 판정한다
+    name_verdicts: list[TrendVerdict] = Field(
+        default_factory=list
+    )  # 이름 하나씩 판정 (group_name = 그 이름)
+    rising_names: list[str] = Field(default_factory=list)  # 따로 판정해 급상승인 이름
+    # `naver`가 어디서 왔는지: group = 묶음 그룹 판정,
+    # name = 묶음은 급상승이 아닌데 이름 하나가 급상승 (그 이름들 중 z가 가장 큰 판정을 올림)
+    naver_from: Literal["group", "name"] = "group"
 
 
 class TrendCandidatesOutput(AxModel):

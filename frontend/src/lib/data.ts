@@ -307,8 +307,14 @@ export interface TrendCandidate {
   /** 대표 이름에 묶인 별칭 (회사 별칭 표, #339). 네이버 그룹에 함께 넣었다. 없으면 빈 목록, 예전 응답은 없다 */
   aliases?: string[];
   youtube: YouTubeTagEvidence;
-  /** 네이버 판정. 네이버를 못 읽으면 이 후보만 unknown + 이유 */
+  /** 네이버 판정. 네이버를 못 읽으면 이 후보만 unknown + 이유. 이름 하나가 올라 급상승이 됐으면(naver_from = name) group_name은 그 이름 */
   naver: TrendVerdict;
+  /** 이름마다 따로 판정한 결과 (별칭이 있을 때만). 예전 응답은 없다 */
+  name_verdicts?: TrendVerdict[];
+  /** 따로 판정해 급상승인 이름. 예전 응답은 없다 */
+  rising_names?: string[];
+  /** naver 판정이 어디서 왔는지: group = 묶음 그룹, name = 묶음은 평범인데 이름 하나가 급상승. 예전 응답은 없다 */
+  naver_from?: "group" | "name";
 }
 export interface TrendCandidatesOutput {
   /** unknown = 스냅샷이 없거나 오래됨 (후보를 뽑지 않음) */

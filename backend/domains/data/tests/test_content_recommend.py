@@ -242,9 +242,9 @@ def test_naver_calls_count_only_real_calls_and_reuse_the_cache(tmp_path: Path) -
     naver = Naver({"t1": 3.0})
     env = _env(tmp_path)
     first = _run(env, naver).output
-    # 기본 그룹 2개 + YouTube 후보 3개(t1·그림책·젠지). 후보 그림책은 기본 그룹 그림책과 요청이
-    # 같아 캐시에서 나온다 → 4번
-    assert first.naver_calls == 4
+    # 기본 그룹 2개 + YouTube 후보 3개(t1·그림책·젠지) + t1 이름별(t1·티원) 2개. 후보 그림책은
+    # 기본 그룹 그림책과 요청이 같아 캐시에서 나온다 → 6번
+    assert first.naver_calls == 6
     again = _run(env, naver).output
     assert again.naver_calls == 0  # 같은 날 같은 요청은 캐시
     assert [q.keyword_groups[0].keywords for q in naver.queries[:2]] == [

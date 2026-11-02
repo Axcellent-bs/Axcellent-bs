@@ -100,7 +100,8 @@ function TrendChart({ v }: { v: TrendVerdict }) {
 // ------------------------------------------------------------------- 급상승 카드
 
 /** 화면에 그릴 판정 하나. youtube가 있으면 YouTube 후보에서 온 것 */
-type Entry = { v: TrendVerdict; youtube?: YouTubeTagEvidence; aliases?: string[] };
+/** risingNames: 이름마다 따로 판정해 급상승인 이름 (별칭이 있는 YouTube 후보만, 서버 값) */
+type Entry = { v: TrendVerdict; youtube?: YouTubeTagEvidence; aliases?: string[]; risingNames?: string[] };
 
 /** 평범·판정 불가 한 줄 설명: 판정 불가는 "자료가 부족해 판단할 수 없어요 · 서버 이유" */
 function restLine(v: TrendVerdict): string {
@@ -109,7 +110,7 @@ function restLine(v: TrendVerdict): string {
   return `평소 수준${note ? ` · ${note}` : ""}`;
 }
 
-function RisingCard({ v, youtube, aliases, rank }: { v: TrendVerdict; youtube?: YouTubeTagEvidence; aliases?: string[]; rank: number }) {
+function RisingCard({ v, youtube, aliases, risingNames, rank }: { v: TrendVerdict; youtube?: YouTubeTagEvidence; aliases?: string[]; risingNames?: string[]; rank: number }) {
   const [open, setOpen] = useState(false);
   const e = v.evidence;
   const strength = strengthLabel(e.score);
@@ -121,6 +122,8 @@ function RisingCard({ v, youtube, aliases, rank }: { v: TrendVerdict; youtube?: 
         <h3 className="truncate text-lg font-bold text-ink-900">{v.group_name}</h3>
         {/* 서버가 묶은 별칭 (#339). 네이버 판정에 함께 넣은 이름이다. 없으면 표시하지 않는다 */}
         {aliases && aliases.length > 0 && <p className="text-[11px] text-ink-500">함께 본 이름: {aliases.join(", ")}</p>}
+        {/* 이름마다 따로 판정해 급상승인 이름 (서버 rising_names). 묶음은 평범이어도 이 이름이 올라 급상승이 될 수 있다 */}
+        {risingNames && risingNames.length > 0 && <p className="text-xs font-semibold text-red-700">올라간 이름: {risingNames.join(", ")}</p>}
       </div>
       <div>
         <p className="text-2xl font-bold leading-snug text-red-600">평소보다 {fixed(v.ratio) ?? "-"}배 많이 검색돼요</p>
@@ -162,7 +165,10 @@ function RisingCard({ v, youtube, aliases, rank }: { v: TrendVerdict; youtube?: 
 
 /** 기본 판정이면 trend_scan 결과와 YouTube 후보를 합친다. 같은 이름(대소문자 무시)은 후보 쪽을 쓴다 */
 function mergeEntries(out: TrendScanOutput, cands: TrendCandidatesOutput | null): Entry[] {
-  const fromYoutube: Entry[] = (cands?.candidates ?? []).map((c) => ({ v: c.naver, youtube: c.youtube, aliases: c.aliases }));
+  // 이름 하나가 올라 급상승이 된 후보(naver_from = name)는 판정의 group_name이 그 이름이라, 카드 제목은 후보 이름으로 둔다
+  const fromYoutube: Entry[] = (cands?.candidates ?? []).map((c) => ({
+    v: { ...c.naver, group_name: c.keyword }, youtube: c.youtube, aliases: c.aliases, risingNames: c.rising_names,
+  }));
   const names = new Set(fromYoutube.map((e) => e.v.group_name.toLowerCase()));
   return [...out.results.filter((r) => !names.has(r.group_name.toLowerCase())).map((v) => ({ v })), ...fromYoutube];
 }
@@ -244,7 +250,7 @@ function Result({ entries, headline, cands }: { entries: Entry[]; headline: stri
           <Empty>이번 판정 구간에 급상승한 키워드 그룹이 없어요.</Empty>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {rising.map((e, i) => <RisingCard key={`${e.youtube ? "yt" : "kw"}-${e.v.group_name}`} v={e.v} youtube={e.youtube} aliases={e.aliases} rank={i + 1} />)}
+            {rising.map((e, i) => <RisingCard key={`${e.youtube ? "yt" : "kw"}-${e.v.group_name}`} v={e.v} youtube={e.youtube} aliases={e.aliases} risingNames={e.risingNames} rank={i + 1} />)}
           </div>
         )}
         {rising.length > 0 && <p className="text-xs text-ink-500">마케팅에 소재로 보내기: {SEND_TO_MARKETING_BLOCKED}</p>}
