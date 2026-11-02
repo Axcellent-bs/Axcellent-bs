@@ -120,7 +120,7 @@ export default function DataPage() {
       )}
       {mode === "trend" && (
         <div role="tabpanel" id="data-mode-panel-trend" aria-labelledby="data-mode-trend">
-          <TrendScan />
+          <TrendScan dataUp={dataUp} />
         </div>
       )}
     </div>

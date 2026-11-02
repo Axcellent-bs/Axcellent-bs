@@ -91,7 +91,7 @@ function TrendChart({ v }: { v: TrendVerdict }) {
 // ------------------------------------------------------------------- 급상승 카드
 
 /** 화면에 그릴 판정 하나. youtube가 있으면 YouTube 후보에서 온 것 */
-type Entry = { v: TrendVerdict; youtube?: YouTubeTagEvidence };
+type Entry = { v: TrendVerdict; youtube?: YouTubeTagEvidence; aliases?: string[] };
 
 /** 배수와 z를 같은 크기로. 배수만 크게 보이면 "배수는 큰데 평범" 같은 경우가 헷갈린다 */
 function Stats({ v }: { v: TrendVerdict }) {
@@ -109,7 +109,7 @@ function Stats({ v }: { v: TrendVerdict }) {
   );
 }
 
-function RisingCard({ v, youtube, rank }: { v: TrendVerdict; youtube?: YouTubeTagEvidence; rank: number }) {
+function RisingCard({ v, youtube, aliases, rank }: { v: TrendVerdict; youtube?: YouTubeTagEvidence; aliases?: string[]; rank: number }) {
   const [open, setOpen] = useState(false);
   const e = v.evidence;
   return (
@@ -118,6 +118,8 @@ function RisingCard({ v, youtube, rank }: { v: TrendVerdict; youtube?: YouTubeTa
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-semibold text-ink-500">#{rank}</p>
           <h3 className="truncate text-lg font-bold text-ink-900">{v.group_name}</h3>
+          {/* 서버가 묶은 별칭 (#339). 네이버 판정에 함께 넣은 이름이다. 없으면 표시하지 않는다 */}
+          {aliases && aliases.length > 0 && <p className="text-[11px] text-ink-500">함께 본 이름: {aliases.join(", ")}</p>}
         </div>
         <Stats v={v} />
       </div>
@@ -155,7 +157,7 @@ function RisingCard({ v, youtube, rank }: { v: TrendVerdict; youtube?: YouTubeTa
 
 /** 기본 판정이면 trend_scan 결과와 YouTube 후보를 합친다. 같은 이름(대소문자 무시)은 후보 쪽을 쓴다 */
 function mergeEntries(out: TrendScanOutput, cands: TrendCandidatesOutput | null): Entry[] {
-  const fromYoutube: Entry[] = (cands?.candidates ?? []).map((c) => ({ v: c.naver, youtube: c.youtube }));
+  const fromYoutube: Entry[] = (cands?.candidates ?? []).map((c) => ({ v: c.naver, youtube: c.youtube, aliases: c.aliases }));
   const names = new Set(fromYoutube.map((e) => e.v.group_name.toLowerCase()));
   return [...out.results.filter((r) => !names.has(r.group_name.toLowerCase())).map((v) => ({ v })), ...fromYoutube];
 }
@@ -241,7 +243,7 @@ function Result({ entries, headline, cands }: { entries: Entry[]; headline: stri
           <Empty>이번 판정 구간에 급상승한 키워드 그룹이 없어요.</Empty>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {rising.map((e, i) => <RisingCard key={`${e.youtube ? "yt" : "kw"}-${e.v.group_name}`} v={e.v} youtube={e.youtube} rank={i + 1} />)}
+            {rising.map((e, i) => <RisingCard key={`${e.youtube ? "yt" : "kw"}-${e.v.group_name}`} v={e.v} youtube={e.youtube} aliases={e.aliases} rank={i + 1} />)}
           </div>
         )}
         {rising.length > 0 && <p className="text-xs text-ink-500">마케팅에 소재로 보내기: {SEND_TO_MARKETING_BLOCKED}</p>}
@@ -281,7 +283,8 @@ function Result({ entries, headline, cands }: { entries: Entry[]; headline: stri
   );
 }
 
-export function TrendScan() {
+/** dataUp: 화면(Data.tsx)이 이미 받은 데이터 AI 상태 확인(dataAi.health) 결과. null이면 아직 모름 */
+export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
   const [text, setText] = useState("");
   const [groups, setGroups] = useState<string[]>([]);
   const [inputError, setInputError] = useState<string | null>(null);
@@ -357,10 +360,12 @@ export function TrendScan() {
   const trendProbe: LoopProbe = res.loading
     ? (out && !res.error ? "ok" : "checking")
     : (out && !res.error ? "ok" : "failed");
+  // 콘텐츠 루프 4단계 칩: 측정 전(측정 대기)이라도 데이터 AI 상태 확인이 실패했으면 "연결 확인 필요"
+  const loopCampaignProbe: LoopProbe = campaignProbe === "idle" && dataUp === false ? "failed" : campaignProbe;
 
   return (
     <div className="space-y-5">
-      <ContentLoop trend={loopTrend} probes={{ trend_scan: trendProbe, campaign_effect: campaignProbe }} />
+      <ContentLoop trend={loopTrend} probes={{ trend_scan: trendProbe, campaign_effect: loopCampaignProbe }} />
       <div className="flex flex-wrap items-end gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-sm text-ink-500">
