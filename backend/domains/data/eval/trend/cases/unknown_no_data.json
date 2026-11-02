@@ -1,0 +1,36 @@
+{
+ "id": "unknown_no_data",
+ "kind": "unknown",
+ "input": {
+  "keyword_groups": [
+   {
+    "group_name": "캣북스",
+    "keywords": [
+     "캣북스"
+    ]
+   }
+  ],
+  "start_date": "2026-08-31",
+  "end_date": "2026-11-01",
+  "time_unit": "date"
+ },
+ "window": {
+  "from": "2026-10-26",
+  "to": "2026-11-01"
+ },
+ "series": {
+  "캣북스": []
+ },
+ "expected": {
+  "캣북스": {
+   "status": "unknown",
+   "unknown_reason": "no_data"
+  }
+ },
+ "injection": null,
+ "source": {
+  "series": "sparse_catbooks",
+  "segment_end": "2026-11-01"
+ },
+ "memo": "검색량이 적어 네이버가 data: [] 로 답했다(실제 응답)"
+}
