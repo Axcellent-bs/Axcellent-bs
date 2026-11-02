@@ -189,6 +189,27 @@ def inquiry_surge() -> dict[str, Any]:
     }
 
 
+def change_proposals() -> dict[str, Any]:
+    """`inquiry_surge()`와 같은 급증에서 만든 제안 (대표 문의는 샘플 중 가장 작은 번호)."""
+    return {
+        "window_minutes": 60,
+        "baseline_hours": 24,
+        "evaluated_at": _EVALUATED_AT,
+        "proposals": [
+            {
+                "topic_code": "payment",
+                "title": "결제 문의 급증 — 안내·화면 점검 검토",
+                "evidence": "최근 60분 결제 문의 7건 (평소 창당 1.5건의 4.7배)",
+                "inquiry_id": 1,
+                "evidence_ids": ["inq_3", "inq_4"],
+                "count": 7,
+                "ratio": 4.7,
+                "already_requested": True,  # mock 변경 요청이 문의 1에 이미 연결돼 있다
+            }
+        ],
+    }
+
+
 def change_requests(inquiry_id: int | None, status: str | None) -> dict[str, Any]:
     items = [
         {

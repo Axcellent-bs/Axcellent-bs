@@ -855,6 +855,14 @@ async def inquiry_surge() -> dict:
     return ok(await support_client.call("detect_inquiry_surge"))
 
 
+@router.get("/change-proposals")
+async def change_proposals() -> dict:
+    """문의 급증에서 만든 기획 변경 요청안. 제안만 돌려주고 아무것도 보내지 않는다."""
+    if is_mock():
+        return ok(mock_customers.change_proposals())
+    return ok(await support_client.call("propose_change_requests"))
+
+
 @router.get("/change-requests")
 async def change_requests(
     inquiry_id: int | None = None,

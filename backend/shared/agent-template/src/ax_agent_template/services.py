@@ -57,6 +57,7 @@ SERVICES: tuple[Service, ...] = (
             "feedback_overview",
             "inquiry_overview",
             "detect_inquiry_surge",
+            "propose_change_requests",
             "request_change",
             "list_change_requests",
             "receive_change_result",

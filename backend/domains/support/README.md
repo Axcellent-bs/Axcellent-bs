@@ -38,6 +38,7 @@
 | `list_claims`, `get_claim`, `claim_stats`, `claim_queue` | read | dashboard-api, orchestrator | 클레임 목록·상세(판정 근거·감사 기록)·건수·보상 큐 |
 | `inquiry_overview` | read | dashboard-api, orchestrator, data | KPI(초안 채택률·수정 정도·가드 적중·분류별 건수)와 답변 대기 문의 (긴급도·대기 시간 순) |
 | `detect_inquiry_surge` | read | dashboard-api, orchestrator, data | 분류별 문의 급증 감지 (DEP-CS-05): 최근 창 건수를 평소 창 평균(`baseline_method=median`이면 창별 건수의 중앙값)과 견줌 |
+| `propose_change_requests` | read | dashboard-api, orchestrator | 급증한 분류마다 기획에 보낼 변경 요청안을 코드 규칙으로 만든다(#281, LLM 없음): 제목 한 줄·근거 요약(건수·평소 대비 배수)·대표 문의(샘플 중 번호가 가장 작은 문의)·나머지 근거 ID(`inq_<번호>`)·이미 요청됨 여부. 만들기만 하고 보내거나 저장하지 않는다. 보내는 일은 사람이 고른 뒤 `request_change`가 한다(후속 PR) |
 | `create_claim` | A | dashboard-api, shop-api, orchestrator | 취소·반품·교환 접수 + 규칙 판정 |
 | `decide_claim` | A | dashboard-api | 사람 확인이 필요한 클레임 승인·거절 |
 | `receive_return`, `inspect_return` | A | dashboard-api (입고는 shop-api도) | 반품 입고, 검수 결과 기록 |

@@ -15,6 +15,7 @@
 | `set_inquiry_status` | A |
 | `inquiry_overview` | read |
 | `detect_inquiry_surge` | read |
+| `propose_change_requests` | read |
 | `request_change` | A |
 | `list_change_requests` | read |
 | `receive_change_result` | A |

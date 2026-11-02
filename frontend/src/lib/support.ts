@@ -69,6 +69,24 @@ export interface InquirySurge {
   surges: Surge[];
 }
 
+/** 문의 급증에서 코드가 만든 기획 변경 요청안. 만들기만 했고 아무것도 보내지 않았다. */
+export interface ChangeProposal {
+  topic_code: string;
+  title: string;
+  evidence: string;
+  inquiry_id: number; // 대표 문의 (급증 샘플 중 번호가 가장 작은 문의)
+  evidence_ids: string[]; // 나머지 샘플 문의 (inq_<번호>)
+  count: number;
+  ratio: number | null;
+  already_requested: boolean;
+}
+export interface ChangeProposals {
+  window_minutes: number;
+  baseline_hours: number;
+  evaluated_at: string | null;
+  proposals: ChangeProposal[];
+}
+
 export type ChangeStatus = "requested" | "completed" | "declined";
 export interface ChangeRequest {
   tenant_id: string;
@@ -125,6 +143,7 @@ export const support = {
   compensation: (inquiryId: number) => get<CompensationSuggestion>(`${BASE}/conversations/${inquiryId}/compensation-suggestion`),
   paymentDiagnosis: (inquiryId: number) => get<PaymentDiagnosis>(`${BASE}/conversations/${inquiryId}/payment-diagnosis`),
   inquirySurge: () => get<InquirySurge>(`${BASE}/inquiry-surge`),
+  changeProposals: () => get<ChangeProposals>(`${BASE}/change-proposals`),
   /** 한 사건 번호로 기록된 처리(안전 관문 실행 기록) */
   executions: (contextId: string) => get<ExecutionRow[]>(`${BASE}/executions${qs({ context_id: contextId })}`),
   changeRequests: (q: { inquiryId?: number; status?: ChangeStatus } = {}) =>
