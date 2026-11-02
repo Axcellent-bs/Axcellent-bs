@@ -383,6 +383,10 @@ def _fmt(at: datetime) -> str:
 # ---------------------------------------------------------------- 서비스
 
 
+# 다른 부서(인사)가 자기 관문으로 실행하는 기록. 실제 모드에서는 기획 관문에 묻지 않는다
+HR_EXECUTED_ACTIONS = frozenset({"record_case"})
+
+
 class PlanningService(StateService):
     """프로세스 메모리에 상태 하나를 두고 액션을 적용한다 (목 모드 저장소).
 
@@ -892,12 +896,33 @@ class PlanningService(StateService):
         draft = PlanDraft(title=req.title, summary=req.title, area=area, kind="spec", ref=spec_id)
         return await self._hr.check_plan(ctx, draft, {"요청 근거": req.evidence})
 
+    async def _execute(
+        self,
+        action: str,
+        ctx: str,
+        target: str,
+        summary: str,
+        params: dict | None = None,
+        refs: list[str] | None = None,
+        allow: tuple[str, ...] = ("executed",),
+    ) -> ExecuteDecision:
+        """인사가 실행하는 기록(`record_case`)은 실제 모드에서 기획 관문을 거치지 않는다.
+
+        안전 레이어 등록표에서 `record_case`의 owner는 hr이라, 기획이 관문에 물으면
+        `held / C / unregistered_action`으로 보류되고(사람 보류 큐에 쌓임) 인사를 부르지 못했다.
+        상태를 바꾸는 쪽은 인사이므로 인사가 자기 관문으로 실행한다 (총괄과 같은 방식, 11/2 준하 님
+        실서버 확인). 목 모드(`_hr` None)는 예전처럼 관문 기록을 남긴다.
+        """
+        if action in HR_EXECUTED_ACTIONS and self._hr is not None:
+            return ExecuteDecision(execution_id="hr_gate", grade="A", status="executed")
+        return await super()._execute(action, ctx, target, summary, params, refs, allow)
+
     async def _record_hr(
         self, decision: ExecuteDecision, record: RecordCase, key: str
     ) -> HrRecordResult | None:
-        """관문을 통과한 `record_case`를 인사에 실제로 보낸다 (인사 연동 1단계).
+        """`record_case`를 인사에 실제로 보낸다 (인사 연동 1단계). 인사가 자기 관문으로 실행한다.
 
-        목 모드(`_hr` None)나 관문 보류면 부르지 않는다. 실패해도 본 작업은 되돌리지
+        목 모드(`_hr` None)면 부르지 않는다. 실패해도 본 작업은 되돌리지
         않고 "인사 기록 실패"만 `soft_holds`에 남긴다.
         """
         if self._hr is None or decision.status != "executed":
