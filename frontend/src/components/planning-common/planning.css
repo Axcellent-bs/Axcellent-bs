@@ -71,6 +71,9 @@
 .live-strip-h { font-size: 12px; font-weight: 700; color: var(--text-3); }
 .live-item { display: inline-flex; gap: 6px; align-items: center; text-decoration: none; color: var(--text-2); font-size: 13px; padding: 4px 10px; border: 1px solid var(--border); background: var(--surface); max-width: 460px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .live-item.fresh { border-color: var(--warning); background: var(--warning-soft); }
+.live-link { display: inline-flex; gap: 6px; align-items: center; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-decoration: none; color: inherit; }
+.live-x { border: 0; background: transparent; color: var(--text-3); font-size: 15px; line-height: 1; padding: 0 0 0 4px; cursor: pointer; }
+.live-x:hover { color: var(--text); }
 
 /* 다른 부서 시뮬레이터 */
 .dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; margin-top: 16px; }
