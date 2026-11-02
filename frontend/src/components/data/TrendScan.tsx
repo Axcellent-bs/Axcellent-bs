@@ -9,8 +9,8 @@ import { YoutubeVelocity } from "@/components/data/YoutubeVelocity";
 import { ContentLoop, type LoopTrendState } from "@/components/data/ContentLoop";
 import { LOOP_STAGES, SEND_TO_MARKETING_BLOCKED, stageFromHash, trendHash, type LoopProbe, type LoopStage } from "@/lib/contentLoop";
 import {
-  DATA_SERVER, TREND_MAX_GROUPS, dataAi, evidenceLines, kpiLive,
-  type TrendCandidatesOutput, type TrendScanOutput, type TrendVerdict, type YouTubeTagEvidence,
+  CANDIDATE_ORIGIN_LABEL, DATA_SERVER, TREND_MAX_GROUPS, dataAi, evidenceLines, kpiLive,
+  type TrendCandidatesOutput, type TrendScanOutput, type TrendVerdict, type TrendingSearchEvidence, type YouTubeTagEvidence,
 } from "@/lib/data";
 import { UNKNOWN_TREND_TEXT, ratioNote, strengthLabel } from "@/lib/trendWording";
 
@@ -103,7 +103,11 @@ function TrendChart({ v }: { v: TrendVerdict }) {
 
 /** 화면에 그릴 판정 하나. youtube가 있으면 YouTube 후보에서 온 것 */
 /** risingNames: 이름마다 따로 판정해 급상승인 이름 (별칭이 있는 YouTube 후보만, 서버 값) */
-type Entry = { v: TrendVerdict; youtube?: YouTubeTagEvidence; aliases?: string[]; risingNames?: string[] };
+/** trending: 인기 검색어 근거 (서버 값). youtube 없이 trending만 있으면 인기 검색어에서만 나온 후보 */
+type Entry = { v: TrendVerdict; youtube?: YouTubeTagEvidence; trending?: TrendingSearchEvidence | null; aliases?: string[]; risingNames?: string[] };
+
+/** 인기 검색어 칩 글자: "인기 검색어 3위 · 500+" (피드 값 그대로) */
+const trendingLabel = (t: TrendingSearchEvidence) => `${CANDIDATE_ORIGIN_LABEL.trending_search} ${t.rank}위${t.traffic ? ` · ${t.traffic}` : ""}`;
 
 /** 평범·판정 불가 한 줄 설명: 판정 불가는 "자료가 부족해 판단할 수 없어요 · 서버 이유" */
 function restLine(v: TrendVerdict): string {
@@ -112,7 +116,7 @@ function restLine(v: TrendVerdict): string {
   return `평소 수준${note ? ` · ${note}` : ""}`;
 }
 
-function RisingCard({ v, youtube, aliases, risingNames, rank }: { v: TrendVerdict; youtube?: YouTubeTagEvidence; aliases?: string[]; risingNames?: string[]; rank: number }) {
+function RisingCard({ v, youtube, trending, aliases, risingNames, rank }: { v: TrendVerdict; youtube?: YouTubeTagEvidence; trending?: TrendingSearchEvidence | null; aliases?: string[]; risingNames?: string[]; rank: number }) {
   const [open, setOpen] = useState(false);
   const e = v.evidence;
   const strength = strengthLabel(e.score);
@@ -137,6 +141,7 @@ function RisingCard({ v, youtube, aliases, risingNames, rank }: { v: TrendVerdic
         <Chip label="급상승" tone={TONE.bad} />
         <Chip label="✓ 네이버 검색" tone={TONE.info} />
         {youtube && <Chip label={`✓ YouTube 인기 태그 (영상 ${youtube.video_count}개)`} tone={TONE.info} />}
+        {trending && <Chip label={`✓ ${trendingLabel(trending)}`} tone={TONE.info} />}
       </div>
       {v.summary && <p className="border-l-2 border-brand-500 bg-ink-50 px-3 py-2 text-sm leading-relaxed text-ink-700">{v.summary}</p>}
       {open && (
@@ -169,10 +174,15 @@ function RisingCard({ v, youtube, aliases, risingNames, rank }: { v: TrendVerdic
 function mergeEntries(out: TrendScanOutput, cands: TrendCandidatesOutput | null): Entry[] {
   // 이름 하나가 올라 급상승이 된 후보(naver_from = name)는 판정의 group_name이 그 이름이라, 카드 제목은 후보 이름으로 둔다
   const fromYoutube: Entry[] = (cands?.candidates ?? []).map((c) => ({
-    v: { ...c.naver, group_name: c.keyword }, youtube: c.youtube, aliases: c.aliases, risingNames: c.rising_names,
+    v: { ...c.naver, group_name: c.keyword }, youtube: c.youtube, trending: c.trending, aliases: c.aliases, risingNames: c.rising_names,
   }));
-  const names = new Set(fromYoutube.map((e) => e.v.group_name.toLowerCase()));
-  return [...out.results.filter((r) => !names.has(r.group_name.toLowerCase())).map((v) => ({ v })), ...fromYoutube];
+  // 인기 검색어에서만 나온 후보 (YouTube 후보와 겹치는 것은 서버가 이미 그 후보에 붙였다)
+  const fromTrending: Entry[] = (cands?.trending_candidates ?? []).map((c) => ({
+    v: { ...c.naver, group_name: c.keyword }, trending: c.trending, aliases: c.aliases, risingNames: c.rising_names,
+  }));
+  const cand = [...fromYoutube, ...fromTrending];
+  const names = new Set(cand.map((e) => e.v.group_name.toLowerCase()));
+  return [...out.results.filter((r) => !names.has(r.group_name.toLowerCase())).map((v) => ({ v })), ...cand];
 }
 
 /** 시각 → 이 컴퓨터 시간 */
@@ -236,10 +246,47 @@ function YoutubeOnly({ cands }: { cands: CandState }) {
   );
 }
 
+/** 인기 검색어 후보 중 검색 급상승이 아닌 것(평범·판정 불가)과 스냅샷 상태. 서버 값만 */
+function TrendingOnly({ cands }: { cands: CandState }) {
+  if (cands.kind !== "ok" || cands.out.trending_status === undefined) return null; // 예전 서버면 그리지 않는다
+  const out = cands.out;
+  const all = out.trending_candidates ?? [];
+  const list = all.filter((c) => c.naver.status !== "rising");
+  const known = out.trending_status === "known";
+  const hint = known
+    ? `인기 검색어 스냅샷 ${when(out.trending_snapshot_at) ?? "-"} · 후보 ${all.length}개`
+    : `인기 검색어: ${out.trending_reason ?? "서버가 이유를 주지 않았어요"}`;
+  let body;
+  if (!known) body = <Empty>{out.trending_reason ?? "서버가 이유를 주지 않았어요"}</Empty>;
+  else if (list.length === 0) body = <Empty>인기 검색어 후보가 없거나 모두 검색 급상승이에요.</Empty>;
+  else {
+    body = (
+      <ul className="divide-y divide-ink-100">
+        {list.map((c) => (
+          <li key={c.keyword} className="flex flex-wrap items-center gap-3 py-3">
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold text-ink-900">{c.keyword}</p>
+              <p className="text-xs text-ink-500">{trendingLabel(c.trending)} · 검색은 {restLine(c.naver)}</p>
+            </div>
+            {c.naver.status === "normal" && <span className="text-sm text-ink-500">평소 대비 {fixed(c.naver.ratio) ?? "-"}배</span>}
+            <Chip label={c.naver.status === "unknown" ? "판정 불가" : "평범"} tone={c.naver.status === "unknown" ? TONE.warn : TONE.ok} />
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  return (
+    <Panel id="data-trend-trending" title="인기 검색어지만 네이버 검색은 평소 수준"
+      hint={<span className={known ? undefined : "text-amber-700"}>{hint}</span>}>
+      {body}
+    </Panel>
+  );
+}
+
 function Result({ entries, headline, cands }: { entries: Entry[]; headline: string | null; cands: CandState }) {
   const rising = entries.filter((e) => e.v.status === "rising").sort((a, b) => (b.v.ratio ?? 0) - (a.v.ratio ?? 0));
   // 아래 "평소 수준 · 판정 불가"는 기본 키워드·직접 입력 그룹만. YouTube 후보는 YoutubeOnly에서 따로
-  const rest = entries.filter((e) => e.v.status !== "rising" && !e.youtube).map((e) => e.v);
+  const rest = entries.filter((e) => e.v.status !== "rising" && !e.youtube && !e.trending).map((e) => e.v);
   return (
     <div className="space-y-5">
       <section aria-labelledby="trend-rising-title" className="space-y-3">
@@ -252,13 +299,14 @@ function Result({ entries, headline, cands }: { entries: Entry[]; headline: stri
           <Empty>이번 판정 구간에 급상승한 키워드 그룹이 없어요.</Empty>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {rising.map((e, i) => <RisingCard key={`${e.youtube ? "yt" : "kw"}-${e.v.group_name}`} v={e.v} youtube={e.youtube} aliases={e.aliases} risingNames={e.risingNames} rank={i + 1} />)}
+            {rising.map((e, i) => <RisingCard key={`${e.youtube ? "yt" : e.trending ? "tr" : "kw"}-${e.v.group_name}`} v={e.v} youtube={e.youtube} trending={e.trending} aliases={e.aliases} risingNames={e.risingNames} rank={i + 1} />)}
           </div>
         )}
         {rising.length > 0 && <p className="text-xs text-ink-500">마케팅에 소재로 보내기: {SEND_TO_MARKETING_BLOCKED}</p>}
       </section>
 
       <YoutubeOnly cands={cands} />
+      <TrendingOnly cands={cands} />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">

@@ -433,6 +433,21 @@ uv run python -m data_agent.youtube_collect --every 3600 # 1시간마다 (최소
 
 키워드를 하나 늘리면 하루 101단위가 는다. 실행마다 쓴 단위는 로그 한 줄(`[youtube] … 할당량 N단위`)과 `runs` 표에 남는다.
 
+### 인기 검색어 스냅샷 (`trending_collect`, 후보 출처)
+
+Google Trends **공개 RSS** `https://trends.google.com/trending/rss?geo=KR`(키·로그인 없음)을 읽어 쌓는다. 2026-11-02 확인: 이 주소는 200·항목 10개, 예전 일별 주소(`/trends/trendingsearches/daily/rss`)는 404라 이 주소 하나만 쓴다.
+
+```bash
+cd backend
+uv run python -m data_agent.trending_collect              # 한 번
+uv run python -m data_agent.trending_collect --every 3600 # 1시간마다 (최소 600초, Ctrl+C로 멈춤)
+```
+
+- 커넥터 `connectors/google_trends.py`: 항목마다 검색어, 피드 안 순서(순위), 피드의 트래픽 표시값(`ht:approx_traffic`, 예: "500+". 검색 건수가 아니라 글자 그대로 둔다), 올라온 시각. DTD가 든 응답은 읽지 않는다. 주소는 `AX_GOOGLE_TRENDS_RSS_URL`로 바꿀 수 있다
+- 저장: `DATA_TRENDING_DB`(없으면 YouTube 스냅샷 DB와 같은 폴더의 `trending_snapshots.db`, 기본 `backend/.data/`, 커밋 안 함). (수집 시각, 지역, 순위)가 기본 키. 실패한 실행은 `runs`에만 남고 빈 스냅샷을 만들지 않는다
+- 지역: 회사 `trends.toml` `[trending] geo`(기본 KR)
+- `run_all.sh`에는 넣지 않았다
+
 ### trend_candidates (YouTube 후보 → 네이버 급상승)
 
 YouTube에서 뜨는 소재가 검색에서도 뜨는지 본다. 후보 뽑기는 **코드 규칙**이고 LLM을 쓰지 않는다.
@@ -448,6 +463,9 @@ YouTube에서 뜨는 소재가 검색에서도 뜨는지 본다. 후보 뽑기�
    - **이름별 판정**: 별칭이 있는 후보는 대표 이름·별칭을 하나씩 따로도 판정한다(이름마다 네이버 1번). 묶음 그룹이 급상승이면 그 판정, 묶음은 평범(또는 판정 불가)인데 이름 하나라도 급상승이면 **급상승으로 올리고** 그 이름들 중 z가 가장 큰 판정을 쓴다(`naver_from: name`). 따로 판정해 급상승인 이름은 `rising_names`, 이름별 판정은 `name_verdicts`. 별칭이 없는 후보는 더 부르지 않는다
    - 2026-11-02 실데이터: `lol`이 묶음(1.01배 평범)에 묻혔다가 이름별로 1.27배 급상승 → `리그오브레전드` 후보가 급상승(올라간 이름 `lol`). 10-25 기준도 같다(lol 1.73배). 네이버 요청은 실행마다 5번 → 16번(별칭이 있는 후보 4개 × 이름 수)
 6. 출력: 후보마다 대표 이름, 묶인 별칭(`aliases`, 네이버 그룹에 함께 넣은 것), YouTube 근거(나온 영상 수, 스냅샷 시각, 대표 영상 id `rep_videos`개, 스냅샷에 실제로 나온 태그 `matched_tags`), 네이버 판정(`TrendVerdict` 그대로). 그리고 네이버 부른 수(`naver_calls`, 실패 포함)와 숫자로 만든 한 문장
+
+7. **인기 검색어 출처**(`[trending]`): 최신 인기 검색어 스냅샷의 검색어를 태그와 같은 규칙(정리·별칭·제외 목록)으로 거른다. YouTube 후보와 이름(공백·대소문자 무시)이 겹치면 그 후보에 근거(`trending`: 피드 순위·트래픽 표시값·스냅샷 시각)를 붙이고 `origins`에 `trending_search`를 더한다(네이버는 더 부르지 않음). 겹치지 않는 것은 피드 순위 순으로 최대 `max_candidates`(5)개를 `trending_candidates`로 같은 판정 함수에 넣는다(후보마다 네이버 1번, 별칭이 있으면 이름별도). 인기 검색어 스냅샷이 없거나 `max_age_hours`(24)보다 오래되면 이 출처만 `trending_status: unknown` + 이유이고 YouTube 후보는 그대로다. 화면 출처 표시는 "인기 검색어"
+   - 한계: 피드는 **오늘** 뜨는 검색어인데 네이버 판정은 **어제까지**(하루 늦게 채워짐)라, 오늘 처음 뜬 검색어는 평범·자료 없음으로 나올 수 있다. 추천 점수의 두 소스 가산점은 검색 급상승 + YouTube일 때만이다(인기 검색어 + 네이버는 한 소스로 센다, 점수 규칙 그대로)
 
 - **확인할 수 없음:** 스냅샷이 없거나(인기 영상 기록 없음) `max_age_hours`보다 오래되면 후보를 뽑지 않고 `status: unknown` + 이유(마지막 수집 시각·몇 시간 전·기준). 네이버는 부르지 않는다. 네이버를 못 읽은 후보는 **그 후보만** `naver.status: unknown`("네이버 검색어 트렌드를 읽지 못함 [코드]")
 - 설정은 회사 폴더 `trends.toml`의 `[candidates]`(`max_candidates` 5, `min_videos` 2, `max_age_hours` 24, `rep_videos` 3, `exclude_tags`). 후보마다 네이버 1번이라 작게 둔다(하루 한도 `NAVER_DATALAB_DAILY_LIMIT`). 설정이 없으면 같은 숫자에 제외 목록·별칭 표 없음(별칭 표가 없으면 묶지 않고 예전과 같다). 일반 태그 목록·별칭은 코드에 두지 않는다

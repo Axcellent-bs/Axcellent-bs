@@ -34,8 +34,10 @@ from ax_contracts.schemas.data import (
     ContentRecommendRequest,
     ContentScore,
     ContentSource,
+    RecommendOrigin,
     TrendCandidate,
     TrendCandidatesRequest,
+    TrendingCandidate,
     TrendKeywordGroup,
     TrendScanInput,
     TrendVerdict,
@@ -119,6 +121,7 @@ class Topic:
     verdict: TrendVerdict
     youtube_videos: int | None = None  # YouTube 근거가 있으면 인기 영상 수
     sources: list[ContentSource] = field(default_factory=list)
+    origins: list[RecommendOrigin] = field(default_factory=list)  # 소재가 나온 곳
 
     @property
     def names(self) -> list[str]:
@@ -142,12 +145,23 @@ def rank_topics(topics: list[Topic], config: RecommendConfig, limit: int) -> lis
     return rising[:limit]
 
 
+def _add(origins: list[RecommendOrigin], more: list[str]) -> list[RecommendOrigin]:
+    out = list(origins)
+    for o in more:
+        if o not in out:
+            out.append(o)  # type: ignore[arg-type]  # CandidateOrigin ⊂ RecommendOrigin
+    return out
+
+
 def merge_topics(
-    groups: list[tuple[TrendKeywordGroup, TrendVerdict]], candidates: list[TrendCandidate]
+    groups: list[tuple[TrendKeywordGroup, TrendVerdict]],
+    candidates: list[TrendCandidate],
+    trending: list[TrendingCandidate] | None = None,
 ) -> list[Topic]:
-    """기본 키워드 그룹과 YouTube 후보를 소재로 합친다 (이름이 겹치면 한 소재).
+    """기본 키워드 그룹·YouTube 후보·인기 검색어 후보를 소재로 합친다 (이름이 겹치면 한 소재).
 
     그룹이 급상승이면 그 판정에 YouTube 근거를 붙인다. 그룹이 급상승이 아니면 후보 판정을 쓴다.
+    인기 검색어에서만 나온 후보는 YouTube 근거가 없어 한 소스(검색 급상승)로 센다(점수 규칙 그대로).
     """
     topics: list[Topic] = []
     used: set[str] = set()
@@ -160,17 +174,28 @@ def merge_topics(
         if match is not None and verdict.status != "rising":
             continue  # 후보 쪽 판정으로 아래에서 다룬다
         topic = Topic(group.group_name, aliases, verdict, sources=["naver"])
+        topic.origins = ["keyword_group"]
         if match is not None:
             used.add(match.keyword)
             topic.youtube_videos = match.youtube.video_count
             topic.sources.append("youtube")
+            topic.origins = _add(topic.origins, list(match.origins or ["youtube_tag"]))
             topic.aliases += [a for a in [match.keyword, *match.aliases] if _norm(a) not in names]
         topics.append(topic)
     for c in candidates:
         if c.keyword in used:
             continue
+        topic = Topic(
+            c.keyword, list(c.aliases), c.naver, c.youtube.video_count, ["naver", "youtube"]
+        )
+        topic.origins = _add([], list(c.origins or ["youtube_tag"]))
+        topics.append(topic)
+    taken = {_norm(n) for t in topics for n in t.names}
+    for t in trending or []:
+        if _norm(t.keyword) in taken:
+            continue  # 기본 그룹 이름과 겹치면 그 그룹 판정을 쓴다
         topics.append(
-            Topic(c.keyword, list(c.aliases), c.naver, c.youtube.video_count, ["naver", "youtube"])
+            Topic(t.keyword, list(t.aliases), t.naver, None, ["naver"], _add([], list(t.origins)))
         )
     return topics
 
@@ -242,7 +267,7 @@ async def recommend(
         now=now,
     )
     cand = found.output
-    topics = merge_topics(judged, cand.candidates)
+    topics = merge_topics(judged, cand.candidates, cand.trending_candidates)
     limit = request.max_items or config.max_items
     picked = rank_topics(topics, config, limit)
 
@@ -290,13 +315,14 @@ async def recommend(
                 format=idea.format,  # type: ignore[arg-type]  # IDEA_FORMATS
                 fallback=idea.fallback,
                 fallback_reason=idea.reason,
+                origins=topic.origins,
             )
         )
 
     failed = [g.group_name for g, v in judged if (v.unknown_reason or "").startswith(NAVER_FAILED)]
     failed += [
         c.keyword
-        for c in cand.candidates
+        for c in [*cand.candidates, *cand.trending_candidates]
         if (c.naver.unknown_reason or "").startswith(NAVER_FAILED)
     ]
     after = _calls(connector)
