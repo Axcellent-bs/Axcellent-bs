@@ -41,7 +41,8 @@ CORS 허용 출처는 `DASHBOARD_CORS_ORIGINS`(쉼표 구분, 기본 `http://loc
 ### 문의 API 연결 (목 모드가 아닐 때)
 | 경로 | support skill |
 | --- | --- |
-| GET `/conversations`, `/conversations/{id}` | `list_inquiries`, `get_inquiry` |
+| GET `/conversations`, `/conversations/{id}` | `list_inquiries`, `get_inquiry` (가린 고객 메시지의 `text`는 비워서 준다) |
+| POST `/conversations/{id}/messages/{message_id}/original` | `reveal_original` (사람 토큰 필요, 연 사람이 내력에 남는다) |
 | POST `/conversations` | `create_inquiry` (제목·본문은 `untrusted`) |
 | POST `/conversations/{id}/customer-messages` | `add_customer_message` |
 | POST `/conversations/{id}/check` | `check_reply` |

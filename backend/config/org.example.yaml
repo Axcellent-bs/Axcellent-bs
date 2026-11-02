@@ -1,6 +1,7 @@
 # 조직도: 업무 → 맡은 부서·담당자 (업무 요청 라우터, backend/README.md "업무 요청 라우터")
 #
-# 이 파일을 org.yaml 로 복사해서 고객사 부서 이름으로 고친다. org.yaml 은 커밋하지 않는다(.gitignore).
+# 회사 조직도는 config/tenants/<회사>/org.yaml 에 둔다(캣북스는 커밋됨, README "새 회사를 붙일 때").
+# 내 PC에서만 덮어쓰려면 이 파일을 org.yaml 로 복사해서 고친다. org.yaml 은 커밋하지 않고(.gitignore) 회사 폴더보다 먼저 쓰인다.
 #   cp config/org.example.yaml config/org.yaml
 #
 # 켜지 않은 서비스(AX_ENABLED_SERVICES에 없음)로 가는 요청은 여기 적힌 부서의 사람 할 일함으로 간다.

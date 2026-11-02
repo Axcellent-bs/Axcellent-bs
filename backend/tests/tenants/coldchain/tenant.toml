@@ -1,0 +1,5 @@
+# 테스트 전용 가짜 회사(냉장 물류). README "새 회사를 붙일 때"의 예시이고, tests/test_tenant_config.py가 읽는다
+name = "냉장물류 테스트"
+catalog = "../../../domains/data/tests/catalogs/coldchain.toml"
+connector = "memory"
+org = "org.yaml"

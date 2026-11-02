@@ -105,7 +105,7 @@ fi
 # (캣북스 쇼핑몰은 비어 있으면 시드를 다시 넣는다)
 if [ "$CMD" = "reset" ]; then
   stop_all
-  rm -f "$DATA"/*.db "$DATA"/*.db-wal "$DATA"/*.db-shm "$DATA"/web.env
+  rm -f "$DATA"/*.db "$DATA"/*.db-wal "$DATA"/*.db-shm "$DATA"/web.env "$DATA"/tokens.env
   docker exec ax-redis redis-cli FLUSHALL >/dev/null 2>&1 || true
   echo "reset: backend/.data 와 이벤트 버스를 비웠습니다. 다시 켜려면 bash scripts/run_all.sh"
   exit 0
@@ -151,10 +151,6 @@ export AX_ENABLED_SERVICES="${AX_ENABLED_SERVICES:-}"
 # 켠 서비스 파일 ({"enabled": [...], "updated_at", "updated_by"}). 있으면 위 환경변수보다 먼저 쓰고,
 # 바꾸면 재시작 없이 반영된다. 없거나 깨졌으면 환경변수를 쓴다 (ax_agent_template.routing)
 export AX_ENABLED_SERVICES_FILE="${AX_ENABLED_SERVICES_FILE:-$PWD/$DATA/enabled_services.json}"
-# 조직도(업무 → 맡은 부서·담당자). config/org.yaml 이 있으면 쓴다 (예시: config/org.example.yaml)
-if [ -z "${AX_ORG_CONFIG:-}" ] && [ -f config/org.yaml ]; then
-  export AX_ORG_CONFIG="$PWD/config/org.yaml"
-fi
 # 사람 할 일함 저장 파일 (dashboard-api)
 export AX_HANDOFF_DB="$PWD/$DATA/handoffs.db"
 # 재무 기록(판매자 심사·정산 보류·장부·사람 결정). 다시 켜도 이어진다
@@ -175,6 +171,19 @@ if [ -f ../.env ]; then
     val=$(tr -d '\r' < ../.env | sed -n "s/^$v=//p" | tail -n 1 | sed -E 's/^\xEF\xBB\xBF//; s/[[:space:]]+#.*$//; s/[[:space:]]+$//; s/^"(.*)"$/\1/')
     [ -n "$val" ] && export "$v=$val"
   done
+fi
+# 회사 설정 (config/tenants/<AX_TENANT>/tenant.toml, 기본 catbooks): 조직도 AX_ORG_CONFIG·data 카탈로그
+# DATA_TENANT_CATALOG를 정한다. 이미 준 환경변수(.env 포함)와 config/org.yaml(각자 덮어쓰기)이 먼저다
+if ! tenant_exports=$("$PY" scripts/tenant_env.py); then
+  echo "회사 설정을 읽지 못해 켜지 않습니다 (AX_TENANT=${AX_TENANT:-catbooks}, backend/README.md \"새 회사를 붙일 때\")" >&2
+  exit 2
+fi
+eval "$tenant_exports"
+if [ -z "${AX_ORG_CONFIG:-}" ] || [ ! -f "$AX_ORG_CONFIG" ]; then
+  echo "==================================================================" >&2
+  echo " 조직도 없음: 꺼진 서비스로 가는 일은 no_assignee로 실패합니다" >&2
+  echo " config/tenants/${AX_TENANT:-catbooks}/org.yaml 을 두거나 AX_ORG_CONFIG를 주세요" >&2
+  echo "==================================================================" >&2
 fi
 # 목 스위치(*_MOCK, 테스트 전용)는 남기지 않는다 (.env에 남아 있어도 끈다)
 for v in $(env | sed -n 's/^\([A-Z_]*_MOCK\)=.*/\1/p'); do unset "$v"; done
@@ -218,13 +227,28 @@ export AX_LLM_USAGE_DB="$PWD/$DATA/llm_usage.db"
 # 결제 장애 감지를 시연 시간에 맞춘다 (기본 1분 지속 → 20초, 5초마다 판정). .env 값이 있으면 그걸 쓴다
 export SHOP_DEGRADED_SUSTAIN_S="${SHOP_DEGRADED_SUSTAIN_S:-20}" SHOP_MONITOR_INTERVAL_S="${SHOP_MONITOR_INTERVAL_S:-5}"
 
-# 에이전트 토큰 명부: 이름마다 새 토큰. 서비스 이름과 원래 부서 이름, 사람 관리자(admin) 모두 넣는다
+# 에이전트 토큰 명부: 서비스 이름과 원래 부서 이름, 사람 관리자(admin) 모두 넣는다.
+# 토큰은 $DATA/tokens.env 에 두고 다시 켤 때 그대로 쓴다. 켤 때마다 새로 만들면 이미 떠 있는
+# 화면(run_web.sh)이 예전 사람 토큰을 들고 있어 "사람 토큰을 검증할 수 없다"로 막힌다.
+# 없는 이름만 새로 만든다. 새 토큰이 필요하면 bash scripts/run_all.sh reset
 NAMES="$(echo "$APPS" | awk 'NF {print $1}' | tr '\n' ' ') support marketing hr infra admin"
 read -r AX_AGENT_TOKENS HUMAN_TOKEN < <("$PY" -c "
-import secrets, sys
-names = sys.argv[1].split()
-print(','.join(f'{n}={secrets.token_urlsafe(24)}' for n in names), secrets.token_urlsafe(24))
-" "$NAMES")
+import os, secrets, sys
+names, path = sys.argv[1].split(), sys.argv[2]
+saved = {}
+if os.path.exists(path):
+    for line in open(path, encoding='utf-8'):
+        key, _, value = line.strip().partition('=')
+        saved[key] = value
+agents = dict(p.split('=', 1) for p in saved.get('AX_AGENT_TOKENS', '').split(',') if '=' in p)
+agents = {n: agents.get(n) or secrets.token_urlsafe(24) for n in names}
+human = saved.get('HUMAN_TOKEN') or secrets.token_urlsafe(24)
+line = ','.join(f'{n}={t}' for n, t in agents.items())
+with open(path, 'w', encoding='utf-8') as f:
+    f.write(f'AX_AGENT_TOKENS={line}\nHUMAN_TOKEN={human}\n')
+os.chmod(path, 0o600)
+print(line, human)
+" "$NAMES" "$DATA/tokens.env")
 export AX_AGENT_TOKENS
 # 사람(운영자) 토큰: 안전 관문 보류 결정·재무·dashboard-api 쓰기
 export SAFETY_HUMAN_TOKENS="운영자:$HUMAN_TOKEN" FINANCE_HUMAN_TOKENS="운영자:$HUMAN_TOKEN"
@@ -272,9 +296,9 @@ fi
 sleep 8
 echo "모드: 실제"
 if [ -f "$AX_ENABLED_SERVICES_FILE" ]; then
-  echo "켠 서비스: 파일 $AX_ENABLED_SERVICES_FILE (바꾸면 재시작 없이 반영)  조직도: ${AX_ORG_CONFIG:-없음}"
+  echo "켠 서비스: 파일 $AX_ENABLED_SERVICES_FILE (바꾸면 재시작 없이 반영)  조직도: ${AX_ORG_CONFIG:-없음 (꺼진 서비스로 가는 일은 no_assignee로 실패)}"
 else
-  echo "켠 서비스: ${AX_ENABLED_SERVICES:-전부}  조직도: ${AX_ORG_CONFIG:-없음}"
+  echo "켠 서비스: ${AX_ENABLED_SERVICES:-전부}  조직도: ${AX_ORG_CONFIG:-없음 (꺼진 서비스로 가는 일은 no_assignee로 실패)}"
 fi
 while read -r name port _; do
   [ -n "$name" ] || continue

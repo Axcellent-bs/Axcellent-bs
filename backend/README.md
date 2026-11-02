@@ -11,7 +11,8 @@ AXcellent AI 백엔드. ax-company-hq/ax-backend(dev `04f0e28`, 10/28)를 복사
 | `domains/` | 업무 로직. 원래 부서 패키지 그대로(support·hr·marketing·finance·data·planning·infra-dejafix). 직접 띄우지 않고 서비스가 가져다 쓴다 |
 | `services/` | 서비스 에이전트 13개. 각자 카드(`agent-card.json`)·포트·실행 설정을 가진다 |
 | `infra/` | docker compose (`infra/compose.yml`이 `shared/*`·`services/*` compose를 모은다) |
-| `scripts/` | `split_services.py`(서비스 폴더 생성), `run_all.sh`(로컬 전체 실행) |
+| `config/` | 회사 설정 폴더 `tenants/<회사>/`(카탈로그·커넥터·조직도, "새 회사를 붙일 때") |
+| `scripts/` | `split_services.py`(서비스 폴더 생성), `run_all.sh`(로컬 전체 실행), `tenant_env.py`(회사 설정 읽기) |
 | `docs/` | ax-backend 설계 문서 복사본 |
 
 ## 서비스 13개
@@ -110,8 +111,8 @@ call_agent("finance", req)
   라우터가 부를 때마다 바뀐 시각을 확인하므로 파일을 바꾸면 **재시작 없이** 반영된다. data `activity_report`도 같은 함수로 읽는다.
   파일이 없거나 깨졌으면(경고 로그) 환경변수 `AX_ENABLED_SERVICES`를 쓴다(전부 켬으로 바꾸지 않는다).
   `--only`로 띄울 때 이 파일이 있으면 파일이 먼저 쓰이므로, 안 띄운 서비스가 파일에 있으면 고치거나 지운다(run_all.sh가 경고한다).
-- **조직도**: `config/org.example.yaml`을 `config/org.yaml`로 복사해 고객사 부서 이름으로 고친다(커밋 안 함). `run_all.sh`가 있으면
-  `AX_ORG_CONFIG`로 넘긴다. 키는 서비스 id 또는 skill id이고 skill 줄이 먼저다. 부서 이름은 이 파일에만 있다.
+- **조직도**: 회사 설정 폴더의 `config/tenants/<회사>/org.yaml`(캣북스는 커밋함, "새 회사를 붙일 때")을 `run_all.sh`가
+  `AX_ORG_CONFIG`로 넘긴다. 내 PC에서만 바꾸려면 `config/org.example.yaml`을 `config/org.yaml`로 복사해 고친다(커밋 안 함, 그쪽이 먼저). 키는 서비스 id 또는 skill id이고 skill 줄이 먼저다. 부서 이름은 이 파일에만 있다.
 - **할 일함 API** (dashboard-api 8020, 저장 `AX_HANDOFF_DB` = `.data/handoffs.db`)
   - `POST /api/dashboard/handoffs`: 에이전트가 넣는다(에이전트 토큰). 에이전트는 dashboard-api를 import하지 않고 HTTP로만 넣는다
   - `GET /api/dashboard/handoffs?unit=<부서>&status=open|done|rejected`
@@ -142,6 +143,72 @@ async def on_handoff_completed(event):                  # 사람이 할 일함�
 
 subscribe([EventType.HANDOFF_COMPLETED], on_handoff_completed)
 ```
+
+## 새 회사를 붙일 때
+
+회사 한 곳 = **카탈로그 + 커넥터 + 조직도**다. 셋을 `config/tenants/<회사>/` 폴더 하나로 묶고,
+`tenant.toml` 한 장이 어느 카탈로그·커넥터·조직도를 쓰는지 가리킨다. 비밀값(토큰·주소)은 이 폴더에 두지 않고 `backend/.env`에만 둔다.
+
+```
+config/tenants/
+  catbooks/            # 캣북스 (기본, 커밋함)
+    tenant.toml
+    org.yaml
+tests/tenants/
+  coldchain/           # 테스트 전용 가짜 회사(냉장 물류), 아래 예시
+    tenant.toml
+    org.yaml
+```
+
+| 무엇 | 어디 | 정하는 것 |
+| --- | --- | --- |
+| `tenant.toml` | 회사 폴더 | `name`(한국어 이름), `catalog`, `connector`, `org` |
+| 카탈로그 | `catalog` 값. 이름이면 `domains/data/src/data_agent/catalogs/<이름>.toml`, `.toml`이면 회사 폴더 기준 경로 | data가 무엇을 볼지: 지표·단위·실패 코드 (`domains/data/README.md` "지표 카탈로그") |
+| 커넥터 | `connector` 값. 카탈로그의 `connector`와 같아야 한다 | data가 어디서 읽을지: 이름 → 구현은 data `clients/shop_client.py`의 `CONNECTORS` (`domains/data/README.md` "커넥터") |
+| 조직도 | `org` 값(회사 폴더 기준, 기본 `org.yaml`) | 꺼진 서비스로 가는 일을 맡을 부서·담당자 ("업무 요청 라우터"). **서비스 13개를 모두 적는다**. 빠진 서비스로 가는 일은 `no_assignee`로 실패한다 |
+
+### 예시: 냉장 물류 (테스트 전용 가짜 회사)
+
+`tests/tenants/coldchain/tenant.toml`
+
+```toml
+name = "냉장물류 테스트"
+catalog = "../../../domains/data/tests/catalogs/coldchain.toml"   # 회사 폴더 기준 경로
+connector = "memory"                                             # 카탈로그 connector와 같다 (테스트 메모리 커넥터)
+org = "org.yaml"
+```
+
+`tests/tenants/coldchain/org.yaml` (일부)
+
+```yaml
+assignments:
+  incident: {unit: 관제실, assignee: 야간 당직}
+  inquiry: {unit: 거래처지원}
+  finance: {unit: 경영지원}
+  # … 서비스 13개 모두
+```
+
+카탈로그 `coldchain.toml`은 지표 2개(냉장 유통 이탈 건수·출고 지연 건수), 단위 "출고", 고객 "거래처"다. 이 회사로 돌리면 data 문장에 캣북스 단어(결제·주문·판매자)가 나오지 않는다(`domains/data/tests/test_catalog_wording.py`).
+
+### 순서
+
+1. `config/tenants/<회사>/` 폴더를 만들고 `tenant.toml`·`org.yaml`을 둔다 (위 예시를 복사해 고친다)
+2. 카탈로그를 만든다. 실제 회사는 `domains/data/src/data_agent/catalogs/<회사>.toml`에 두고 `catalog = "<회사>"`
+3. 그 회사 시스템을 읽는 커넥터가 없으면 data에 만들고 `CONNECTORS`에 이름을 올린다 (메서드 3개, 못 읽으면 `ConnectorUnavailable`, 0으로 채우지 않음)
+4. `uv run pytest tests/test_tenant_config.py`: 회사 폴더 확인 (카탈로그 있음, 커넥터 일치, 조직도에 서비스 13개). 새 회사 폴더는 이 테스트의 목록에 더한다
+5. `AX_TENANT=<회사> bash scripts/run_all.sh`
+
+### run_all.sh가 정하는 것 (`scripts/tenant_env.py`)
+
+`AX_TENANT`(기본 `catbooks`)의 폴더를 읽어 아래 값을 정한다. **이미 준 값이 먼저다**(지금 쓰는 사람이 깨지지 않게).
+
+| 환경변수 | 순서 |
+| --- | --- |
+| `AX_ORG_CONFIG` | 환경변수(`.env` 포함) → `config/org.yaml`(각자 덮어쓰기, 커밋 안 함) → 회사 폴더 `org` |
+| `DATA_TENANT_CATALOG` | 환경변수(`.env` 포함) → 회사 폴더 `catalog` |
+
+- 회사 폴더가 없거나 틀리면(카탈로그 없음, 커넥터가 카탈로그와 다름) 서버를 켜지 않고 이유를 알려 준다.
+- 조직도를 찾지 못하면 켜면서 분명히 알린다: `조직도 없음: 꺼진 서비스로 가는 일은 no_assignee로 실패합니다`
 
 ## 알아 둘 것
 
