@@ -234,12 +234,18 @@ def _campaign_template(facts: dict[str, int | float | str]) -> str:
     if "주문 방향" in facts:
         excess = facts.get("주문 증분")
         sign = "+" if isinstance(excess, int | float) and excess > 0 else ""
-        orders = (
+        head = (
             f"캠페인 기간 주문 {_fmt(facts.get('캠페인 주문'), comma=True)}건으로, 지난 "
             f"{_fmt(facts.get('기준 일수'))}일 같은 시간대 평균 "
             f"{_fmt(facts.get('평소 주문'))}건 대비 "
-            f"{sign}{_fmt(excess)}건({_fmt(facts.get('주문 방향'))})입니다."
         )
+        direction = str(facts.get("주문 방향") or "")
+        # 같음인데 증분이 0이 아님: "증가 추정 +N건, 아직 통계적으로 확실하지 않음"
+        if "추정" in direction:
+            word, _, rest = direction.partition(" 추정")
+            orders = f"{head}{word} 추정 {sign}{_fmt(excess)}건{rest}입니다."
+        else:
+            orders = f"{head}{sign}{_fmt(excess)}건({_fmt(facts.get('주문 방향'))})입니다."
     else:
         orders = f"주문은 {_fmt(facts.get('주문'))}."
     if "쿠폰 사용률" in facts:
