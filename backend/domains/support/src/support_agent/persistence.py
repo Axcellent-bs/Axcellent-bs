@@ -118,6 +118,10 @@ class Repo(Protocol):
         """기본키·보조 컬럼 값(`values`)과 `doc`을 넣거나 덮어쓴다."""
         ...
 
+    def get(self, table: str, key: tuple[Any, ...]) -> dict[str, Any] | None:
+        """기본키(`pk` 순서)로 `doc` 한 건을 읽는다. 없으면 None."""
+        ...
+
 
 def _upsert_sql(table: Table) -> str:
     columns = [*table.pk, *table.columns, "doc"]
@@ -162,6 +166,13 @@ class PgRepo:
         sql = f"SELECT doc FROM {spec.name} ORDER BY {', '.join(spec.pk)}"
         rows = self._run(lambda conn: conn.execute(sql).fetchall())
         return [dict(row[0]) for row in rows]
+
+    def get(self, table: str, key: tuple[Any, ...]) -> dict[str, Any] | None:
+        spec = BY_NAME[table]
+        where = " AND ".join(f"{c} = %s" for c in spec.pk)
+        sql = f"SELECT doc FROM {spec.name} WHERE {where}"
+        row = self._run(lambda conn: conn.execute(sql, list(key)).fetchone())
+        return None if row is None else dict(row[0])
 
     def upsert(self, table: str, values: dict[str, Any], doc: dict[str, Any]) -> None:
         from psycopg.types.json import Jsonb
@@ -266,6 +277,18 @@ class PersistentInquiryStore(InquiryStore):
         )
 
     def _save(self, conversation: Conversation) -> Conversation:
+        stored = self._repo.get("inquiries", (conversation.id,))
+        if stored and stored.get("purged_at"):
+            # 원문을 지운 문의는 DB가 기준이다. 다른 프로세스(`retention` CLI)가 지웠는데
+            # 이 캐시본은 아직 원문을 들고 있을 수 있고, 지운 뒤의 쓰기가 새 원문을
+            # 보태는 것도 막는다. 캐시본을 저장하면 [삭제됨]이 되살아나므로 DB본을 받아들이고
+            # 쓰지 않는다.
+            purged = Conversation.model_validate(stored)
+            self._conversations[purged.id] = purged
+            logger.warning(
+                "원문을 지운 문의 %s에 대한 쓰기를 버리고 지운 모습을 받아들였다", purged.id
+            )
+            return purged
         self._repo.upsert(
             "inquiries",
             {
@@ -304,6 +327,9 @@ class PersistentInquiryStore(InquiryStore):
     def log_activity(self, *args: Any, **kwargs: Any) -> Conversation | None:
         conversation = super().log_activity(*args, **kwargs)
         return None if conversation is None else self._save(conversation)
+
+    def replace(self, conversation: Conversation) -> Conversation:
+        return self._save(super().replace(conversation))
 
 
 class PersistentClaimStore(ClaimStore):

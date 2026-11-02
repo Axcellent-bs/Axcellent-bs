@@ -23,6 +23,7 @@ from support_agent.audit_schemas import (
     ProcessingActivity,
     ReplyOutcome,
     ReplyProvenance,
+    RetentionPurgeRecord,
     SourceRef,
     Stage,
 )
@@ -34,7 +35,8 @@ MODEL_ENV = "SUPPORT_LLM_MODEL"
 NOTES = [
     "탐지한 개인정보의 증빙이다. 이름·주소·일반전화는 규칙이 가리지 못해 여기에 나오지 않으므로 "
     "문의에 개인정보가 없었다는 증빙이 아니다",
-    "원문을 지운 뒤에는 건수 기록만 남는다. 보유기간 삭제는 아직 구현되지 않았다",
+    "원문을 지운 뒤에는 건수 기록만 남는다. 지금은 운영자가 CLI로 지정한 시험 문의만 지울 수 있고, "
+    "기한이 지난 문의를 자동으로 지우는 보유기간 삭제는 아직 구현되지 않았다",
     "법적 판단이 아니다. 규제 관련 문구는 법무 확인이 필요하다",
 ]
 
@@ -50,7 +52,7 @@ PROCESSING_ACTIVITY = ProcessingActivity(
         "LLM 공급자(마스킹한 글만)",
         "DejaFix(필드 암호화, 평문 개인정보는 차단)",
     ],
-    retention="문의 원문 90일, 처리 중 5년은 시드(제안)이며 삭제 코드는 아직 없다",
+    retention="문의 원문 90일, 처리 중 5년은 시드(제안)이며 기한 삭제 코드는 아직 없다",
     cross_border="LLM 공급자 위치는 배포 설정에 따른다. 법무 확인 필요",
 )
 
@@ -252,10 +254,36 @@ def record_transfer_block(
     )
 
 
+def record_retention_purge(
+    store: InquiryStore,
+    conversation: Conversation,
+    *,
+    criterion: str,
+    purged: dict[str, int],
+    kept: dict[str, int],
+    executor_role: str,
+) -> None:
+    """원문을 지운 사실. 기준·건수·실행자 역할·시각만 남기고 문의 내용은 담지 않는다."""
+    _append(
+        store,
+        RetentionPurgeRecord(
+            audit_id=0,
+            tenant_id=conversation.tenant_id,
+            context_id=conversation.context_id,
+            inquiry_id=conversation.id,
+            criterion=criterion,
+            purged=purged,
+            kept=kept,
+            executor_role=executor_role,
+            occurred_at=now_iso(),
+        ).model_dump(mode="json", exclude={"audit_id"}),
+    )
+
+
 def build_audit(
     store: InquiryStore, inquiry_id: int, kinds: list[str] | None = None
 ) -> PrivacyAudit:
-    wanted = set(kinds or ("masking", "provenance"))
+    wanted = set(kinds or ("masking", "provenance", "retention_purge"))
     rows = [r for r in store.privacy_audit if r.get("inquiry_id") == inquiry_id]
     return PrivacyAudit(
         inquiry_id=inquiry_id,
@@ -268,6 +296,11 @@ def build_audit(
             ReplyProvenance.model_validate(r)
             for r in rows
             if r["record_type"] == "provenance" and "provenance" in wanted
+        ],
+        retention_purge=[
+            RetentionPurgeRecord.model_validate(r)
+            for r in rows
+            if r["record_type"] == "retention_purge" and "retention_purge" in wanted
         ],
         rules_version=RULES_VERSION,
         processing_activity=PROCESSING_ACTIVITY,
