@@ -147,11 +147,11 @@ export class PlanningApiError extends Error {
 }
 
 /** 실행 관문이 보류(held)한 건을 사람이 승인한다 (safety 보류 건 결정, 재무 화면과 같은 방식) */
-async function approveReview(reviewId: string): Promise<void> {
+export async function approveReview(reviewId: string, note = '교차검증 대기에서 사람이 확인하고 진행'): Promise<void> {
   const res = await fetch(`${SAFETY_API_URL}/api/safety/reviews/${encodeURIComponent(reviewId)}/decision`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SAFETY_HUMAN_TOKEN}` },
-    body: JSON.stringify({ decision: 'approved', note: '교차검증 대기에서 사람이 확인하고 진행' }),
+    body: JSON.stringify({ decision: 'approved', note }),
   })
   if (!res.ok) {
     const err = ((await res.json().catch(() => ({}))) as { error?: { message?: string } }).error
@@ -257,7 +257,9 @@ export const devTaskApi = (base: string) => ({
     if (!d || typeof d.task_id !== 'string') throw new PlanningApiError('NO_TASK', '개발·배포 서버가 작업을 만들지 않았어요')
     return d as DevTaskStarted
   }),
-  retry: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/retry`, post()),
+  retry: (taskId: string, approved = false) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/retry`, post(approved ? { approved } : {})),
+  // PR 열기 보류 건 새로 받기 (만료·모름). 받은 review_id를 사람이 승인한 뒤 retry(approved)
+  renewHold: (taskId: string) => call<{ review_id: string | null }>(base, `/dev-tasks/${encodeURIComponent(taskId)}/renew-hold`, post()),
   cancel: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/cancel`, post()),
   revise: (taskId: string, note: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/revise`, post({ note })),
 })

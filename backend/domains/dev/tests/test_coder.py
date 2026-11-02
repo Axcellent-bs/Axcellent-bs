@@ -946,7 +946,7 @@ def test_call_limit_stops_for_human_and_retry_counts_on(
     coder.set_llm(CountingLLM())
     run(_go(service))
     c = _task(service).coding
-    assert c.status == "waiting_human" and c.pr is None
+    assert c.status == "waiting_human" and c.pr is None, c.error
     assert "LLM 호출 2회 ≥ 한도 2회" in (c.error or "")
     assert c.llm_calls == 2 and c.llm_tokens == 200
     assert "code.budget" in _points(service)
@@ -1006,3 +1006,91 @@ def test_metered_llm_adds_recorded_tokens() -> None:
 
     run(go())
     assert m.tokens == 42
+
+
+class HoldingGate:
+    """generate_pr는 사람이 승인한 키만 실행하고 나머지는 보류(held)한다 (안전 레이어 대신)."""
+
+    def __init__(self) -> None:
+        self.reviews: dict[str, str] = {}  # 키 → 보류 건
+        self.approved: set[str] = set()
+        self.keys: list[str] = []
+
+    async def __call__(self, action, params, meta, evidence):
+        from ax_contracts.schemas import ExecuteDecision
+
+        if action == "generate_pr":
+            key = meta.idempotency_key
+            self.keys.append(key)
+            if key not in self.approved:
+                rid = self.reviews.setdefault(key, f"rev_{len(self.reviews) + 1}")
+                return ExecuteDecision(
+                    execution_id="x", grade="C", status="held", review_id=rid,
+                    hold_reason="over_threshold",
+                )  # fmt: skip
+        return ExecuteDecision(execution_id="ok", grade="A", status="executed")
+
+    def approve(self, rid: str) -> None:
+        self.approved.add(next(k for k, v in self.reviews.items() if v == rid))
+
+
+async def _approved(svc: PlanningService, task_id: str):
+    """승인하고 PR 열기 (retry approved) → 같은 이벤트 루프에서 끝날 때까지 기다린다."""
+    out = await svc.retry_dev_task(task_id, approved=True)
+    await svc.wait_coding()
+    return out
+
+
+def test_held_pr_opens_after_human_approves_same_key(service: PlanningService, adapter) -> None:
+    """generate_pr 보류 → 사람이 그 보류 건을 승인 → "승인하고 PR 열기"는 같은 키로 보내 PR을 연다.
+
+    LLM은 다시 부르지 않는다 (작성해 둔 코드)."""
+    gate = HoldingGate()
+    service._gate = gate
+    llm = FakeLLM()
+    coder.set_llm(llm)
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "waiting_human" and c.pr is None, c.error
+    assert c.hold_key and c.hold_review == "rev_1" and c.hold_paths
+    calls = len(llm.calls)
+
+    gate.approve("rev_1")
+    run(_approved(service, "T-D1"))
+    c = _task(service).coding
+    assert c.pr is not None and c.status in ("opened", "merged")
+    assert gate.keys[-1] == gate.keys[0]  # 보류 때 키 그대로
+    assert c.hold_key is None and len(llm.calls) == calls  # 작성해 둔 코드로 (LLM 다시 안 부름)
+    assert any("사람이 보류 건 승인" in a.text for a in service.state.activity)
+
+
+def test_renew_hold_gives_new_review_then_opens(service: PlanningService, adapter) -> None:
+    """보류 건이 만료됐거나 모르면 renew_hold로 새 보류 건을 받고, 승인 뒤 그 키로 연다.
+
+    서버가 다시 켜져 작성해 둔 코드가 없으면 다시 쓰고, 경로가 같으면 승인된 키를 쓴다."""
+    gate = HoldingGate()
+    service._gate = gate
+    passes = [CodeReview(verdict="통과", notes=[]) for _ in range(2)]
+    coder.set_llm(FakeLLM(reviews=passes))  # 다시 쓰면 리뷰도 다시
+    run(_go(service))
+    out = run(service.renew_hold("T-D1"))
+    assert out.outcome == "held" and out.output["review_id"] == "rev_2"
+    c = _task(service).coding
+    assert c.hold_review == "rev_2" and ":hold" in (c.hold_key or "")
+
+    coder.drop_draft(service, "T-D1")  # 서버 재시작으로 작성해 둔 코드가 없어짐
+    gate.approve("rev_2")
+    run(_approved(service, "T-D1"))
+    c = _task(service).coding
+    assert c.pr is not None and c.status in ("opened", "merged"), c.error
+    assert gate.keys[-1] == gate.keys[1]
+
+
+def test_renew_hold_only_for_held_task(service: PlanningService, adapter) -> None:
+    coder.set_llm(FakeLLM())
+    run(_go(service))  # 보류 없이 PR까지 감
+    with pytest.raises(ActionError) as err:
+        run(service.renew_hold("T-D1"))
+    assert err.value.code == "NOT_RETRYABLE"
+    res = TestClient(app).post("/api/planning/dev-tasks/T-D1/renew-hold")
+    assert res.status_code == 409 and res.json()["error"]["code"] == "NOT_RETRYABLE"

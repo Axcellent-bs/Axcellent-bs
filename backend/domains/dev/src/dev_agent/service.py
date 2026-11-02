@@ -1740,12 +1740,15 @@ class DevService(PlanningCore):
         assert found is not None
         return found
 
-    async def retry_dev_task(self, task_id: str, connection: str | None = None) -> ActionResult:
+    async def retry_dev_task(
+        self, task_id: str, connection: str | None = None, approved: bool = False
+    ) -> ActionResult:
         """실패·사람 확인으로 멈췄거나 사람이 중단한 코딩 작업을 처음부터 다시 돌린다 (재개).
 
         열린 PR이 있으면 안 된다 (중단하면 PR은 닫히므로 중단한 작업은 재개할 수 있다).
         머지가 충돌로 실패한 작업만 예외: 그 PR을 닫고 최신 코드로 다시 쓴다.
-        다시 돌 때 레포의 최신 코드를 다시 읽는다."""
+        다시 돌 때 레포의 최신 코드를 다시 읽는다.
+        `approved`: 사람이 generate_pr 보류 건을 승인함 → 보류 때 키로 보낸다 (같은 경로일 때)."""
         task = next((t for t in self.state.tasks if t.id == task_id), None)
         if task is None or task.coding is None:
             raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
@@ -1771,6 +1774,8 @@ class DevService(PlanningCore):
             ctx = req.context_id if req else f"task:{task_id}"
             t = self.clock()
             how = "재개" if x.coding.status == "canceled" else "다시 시도"
+            if approved and x.coding.hold_key:
+                how = "보류 승인 → PR 열기"
             if x.coding.merge_conflict:
                 how = "충돌 → 최신 코드로 다시 쓰기"
                 for pr in [p for p in s.prs if p.task == task_id and not p.closed]:
@@ -1790,7 +1795,8 @@ class DevService(PlanningCore):
             x.coding = CodingRun(
                 status="queued", model=coder.model_name(llm) if llm else None, updated_at=t,
                 connection=cid, llm_calls=x.coding.llm_calls, llm_tokens=x.coding.llm_tokens,
-                mode=x.coding.mode,
+                mode=x.coding.mode, hold_key=x.coding.hold_key, hold_review=x.coding.hold_review,
+                hold_paths=x.coding.hold_paths, hold_ok=approved and x.coding.hold_key is not None,
             )  # fmt: skip
             x.state = "진행 중"
             s.activity.append(self._act(t, ctx, "dev", "dev", "dev_task_retry", "A2A", text, "A"))
@@ -1808,6 +1814,60 @@ class DevService(PlanningCore):
         if not sub:
             self._spawn_coder(task_id)
         return result
+
+    async def renew_hold(self, task_id: str) -> ActionResult:
+        """generate_pr 보류 건을 새로 받는다 (보류가 만료됐거나 키를 모를 때).
+
+        코딩 결과(파일 목록)로 관문에 새 키로 다시 물어 새 보류 건(review_id)을 돌려준다. 사람이
+        그 건을 승인한 뒤 `retry_dev_task(approved=True)`로 같은 키를 보내 PR을 연다."""
+        task = next((t for t in self.state.tasks if t.id == task_id), None)
+        if task is None or task.coding is None:
+            raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+        busy = task_id in self._coding or task.coding.pr is not None
+        if busy or task.coding.status != "waiting_human":
+            raise ActionError("NOT_RETRYABLE", f"{task_id}는 PR 열기 보류 상태가 아니다")
+        if not task.coding.files:
+            raise ActionError("NOT_RETRYABLE", f"{task_id}는 코딩 결과가 없다 → 다시 시도")
+
+        async def run(s: State) -> ActionResult:
+            x = next((t for t in s.tasks if t.id == task_id), None)
+            if x is None or x.coding is None:
+                raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+            cr = x.coding
+            sp = next((p for p in s.specs if p.id == x.spec), None)
+            req = self._request_of_spec(s, sp) if sp else None
+            ctx = req.context_id if req else f"task:{task_id}"
+            paths = sorted(vcs.logical_paths(cr.connection, [f.path for f in cr.files]))
+            lines, files = coder.total_lines(cr.files), len(cr.files)
+            n = sum(1 for g in self.gate_calls if g.action == "generate_pr") + 1
+            key = f"{task_id}:hold{n}:{self.clock().strftime('%H%M%S')}"
+            text = f"{task_id} PR 열기 보류 다시 요청 ({lines}줄·{files}파일)"
+            cr.hold_key, cr.hold_paths, cr.hold_ok = key, paths, False
+            cr.updated_at = self.clock()
+            try:
+                await self._execute(
+                    "generate_pr", ctx, key, text,
+                    vcs_bridge.pr_size_params(lines, files, paths, x.id),
+                )  # fmt: skip
+            except GateRefused as exc:
+                if exc.decision.status != "held":
+                    raise ActionError(
+                        "NOT_RETRYABLE", f"관문이 generate_pr를 거절함 ({exc.decision.status})"
+                    ) from exc
+                cr.hold_review = exc.decision.review_id
+                s.activity.append(
+                    self._act(
+                        self.clock(), ctx, "dev", "safety", "execute(generate_pr)", "execute",
+                        f"{text} → 보류 {cr.hold_review}", "C",
+                    )
+                )  # fmt: skip
+                return ActionResult(
+                    outcome="held", output={"task_id": task_id, "review_id": cr.hold_review}
+                )
+            cr.hold_review = None  # 이번엔 관문이 바로 허락함 → 같은 키로 다시 돌리면 연다
+            return ActionResult(outcome="executed", output={"task_id": task_id, "review_id": None})
+
+        return await self._apply(run)
 
     async def cancel_dev_task(self, task_id: str) -> ActionResult:
         """코딩 작업을 사람이 중단한다. 돌던 실행은 멈추고, 열린(병합 안 된) PR은 닫고
@@ -2142,12 +2202,17 @@ class DevService(PlanningCore):
             area = coder.area_of(paths)
             gen_text = f"{pr_id} 변경 {lines}줄·{files}파일·{area} → 코드 규칙 확인"
             t = self.clock()
+            # 다시 시도마다 새 키로 보낸다. 같은 키면 관문이 처음 결정(보류)을 그대로 돌려준다.
+            # 사람이 보류 건을 승인하고 "승인하고 PR 열기"로 돌렸고 경로가 같으면 그 키로 보낸다
+            reuse = cr.hold_ok and cr.hold_key is not None and cr.hold_paths == paths
+            key = cr.hold_key if reuse and cr.hold_key else f"{pr_id}:run{job.run_id}"
+            if reuse:
+                gen_text += " (사람이 보류 건 승인)"
             try:
-                # 다시 시도마다 새 키로 보낸다. 같은 키면 관문이 처음 결정(보류)을 그대로 돌려준다
                 await self._execute(
                     "generate_pr",
                     job.ctx,
-                    f"{pr_id}:run{job.run_id}",
+                    key,
                     gen_text,
                     vcs_bridge.pr_size_params(lines, files, paths, task.id),
                 )
@@ -2155,6 +2220,9 @@ class DevService(PlanningCore):
                 held = exc.decision.status == "held"
                 cr.status = "waiting_human" if held else "failed"
                 cr.error = f"실행 관문이 generate_pr를 허락하지 않음 ({exc.decision.status})"
+                if held:
+                    cr.hold_key, cr.hold_review = key, exc.decision.review_id
+                    cr.hold_paths, cr.hold_ok = paths, False
                 conn = vcs.find_connection(cr.connection) if cr.connection else None
                 if held and conn is not None and not conn.mount:
                     # 떼어 온 레포는 경로가 src/…라서 회사 코드 기준 허용 경로 밖으로 보인다
@@ -2202,6 +2270,7 @@ class DevService(PlanningCore):
             task.state = "PR 검수"
             cr.status = "opened"
             cr.pr = pr.id
+            cr.hold_key, cr.hold_review, cr.hold_paths, cr.hold_ok = None, None, [], False
             cr.updated_at = self.clock()
             s.activity.append(
                 self._act(
