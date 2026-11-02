@@ -154,7 +154,7 @@ seed `20261029` 분석 결론:
 
 ## campaign_effect 케이스 (`campaign/`, 캠페인 효과)
 
-캠페인 기간 주문·매출 증분과 캠페인 쿠폰 누적 사용률의 정답지다. 채점기·기준값은 skill PR에서 처음 만든다. 자세한 것은 `campaign/README.md`.
+캠페인 기간 주문·매출 증분과 캠페인 쿠폰 누적 사용률의 정답지와 채점기(`campaign/score.py`, 판정 함수를 인자로 받음)다. 기준값은 skill PR에서 처음 만든다. 매출은 shop-api에 매출 지표가 아직 없어 본 지표에서 빼고 `campaign.revenue_*`로 따로 본다. 자세한 것은 `campaign/README.md`.
 
 - `campaign/cases/` 7개, `campaign/holdout/` 12개(seed `2026110203`)
 - 주문 증감(2배·변화 없음·절반 등)은 이 폴더의 생성기(`eval_world.py`)로 **합성 주입**하고, **정답은 주입 조건에서 정한다**
