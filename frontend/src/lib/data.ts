@@ -310,6 +310,10 @@ export interface CampaignChange {
   /** 기준선에 쓴 날 수 */
   baseline_days: number;
   unknown_reason?: string | null;
+  /** 기준선 정의 문장 (예: "지난 7일 같은 시간대", "시작 전 14일 같은 요일·시간대"). 예전 응답은 없다 */
+  baseline_rule?: string | null;
+  /** 기준선에서 뺀 지난 구간과 이유 (빈 구간·기록 공백). 뺀 게 없으면 없다 */
+  baseline_note?: string | null;
 }
 export interface CampaignCoupons {
   status: "known" | "unknown";

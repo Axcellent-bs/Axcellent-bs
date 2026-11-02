@@ -7,7 +7,7 @@ import { UNKNOWN } from "@/lib/data";
 // 1단계만 숫자를 보여 준다: 트렌드 탭이 이미 받은 trend_scan 응답의 판정 개수(다시 부르지 않는다).
 // 응답이 없거나 실패하면 숫자 없이 "확인할 수 없음". 2~5단계는 숫자 없이 상태 칩만 보여 준다.
 // 1·4단계 칩과 테두리는 트렌드 탭이 받은 trend_scan·campaign_effect 응답 결과(probes)로 정한다.
-// 테두리·칩·범례는 같은 말을 한다: 동작 중 = 파란 실선, 확인 중 = 회색 실선, 연결 확인 필요·준비 중 = 회색 점선.
+// 테두리·칩·범례는 같은 말을 한다: 동작 중 = 파란 실선, 확인 중 = 회색 실선, 측정 대기·연결 확인 필요·준비 중 = 회색 점선.
 
 /** 1단계에 보여 줄 trend_scan 판정 개수. 화면이 응답의 results를 센 값이다 */
 export type TrendCounts = { rising: number; normal: number; unknown: number };
@@ -36,7 +36,7 @@ type Frame = "live" | "checking" | "off";
 const FRAME: Record<Frame, { box: string; legend: string }> = {
   live: { box: "border-2 border-brand-500 bg-surface", legend: "실제 데이터로 동작 (동작 중)" },
   checking: { box: "border-2 border-ink-300 bg-surface", legend: "서버 응답 확인 중" },
-  off: { box: "border border-dashed border-ink-300 bg-ink-50", legend: "연결 확인 필요 · 아직 데이터 없음 (숫자를 만들지 않음)" },
+  off: { box: "border border-dashed border-ink-300 bg-ink-50", legend: "측정 대기 · 연결 확인 필요 · 아직 데이터 없음 (숫자를 만들지 않음)" },
 };
 
 /** 응답으로 상태를 정하는 단계(probe)는 응답 결과를, 나머지는 live 여부를 따른다 */
@@ -68,6 +68,7 @@ export function ContentLoop({ trend, probes }: { trend: LoopTrendState; probes: 
   const live = LOOP_STAGES.filter((s) => frameOf(s, probes) === "live").map((s) => s.no);
   const failed = LOOP_STAGES.filter((s) => s.live && s.probe && probes[s.probe] === "failed").map((s) => s.no);
   const checking = LOOP_STAGES.filter((s) => frameOf(s, probes) === "checking").map((s) => s.no);
+  const idle = LOOP_STAGES.filter((s) => s.live && s.probe && probes[s.probe] === "idle").map((s) => s.no);
   const first = LOOP_STAGES[0]?.no;
   const last = LOOP_STAGES[LOOP_STAGES.length - 1]?.no;
   return (
@@ -77,6 +78,7 @@ export function ContentLoop({ trend, probes }: { trend: LoopTrendState; probes: 
         <h2 id="content-loop-title" className="mt-1 text-base font-bold text-ink-900">
           {live.length ? `지금 실제 데이터로 도는 단계는 ${live.join("·")}번.` : "지금 실제 데이터로 도는 단계가 없어요."}
           {checking.length ? ` ${checking.join("·")}번은 확인 중.` : ""}
+          {idle.length ? ` ${idle.join("·")}번은 측정 대기.` : ""}
           {failed.length ? ` ${failed.join("·")}번은 연결 확인 필요.` : ""}
           {" "}나머지는 만드는 중이거나 준비 중
         </h2>

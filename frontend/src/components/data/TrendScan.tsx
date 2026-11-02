@@ -192,7 +192,7 @@ export function TrendScan() {
   const [groups, setGroups] = useState<string[]>([]);
   const [inputError, setInputError] = useState<string | null>(null);
   const [run, setRun] = useState(0);
-  const [campaignProbe, setCampaignProbe] = useState<LoopProbe>("checking");
+  const [campaignProbe, setCampaignProbe] = useState<LoopProbe>("idle");
   const res = useResource(`trend-${groups.join("|")}`, () => dataAi.trendScan(groups).then((r) => ({ data: r, meta: { mock: false } })), run);
 
   const submit = (event: FormEvent) => {
