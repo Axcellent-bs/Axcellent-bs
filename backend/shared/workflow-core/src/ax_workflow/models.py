@@ -228,6 +228,12 @@ class CodingRun(DomainModel):
     claimed_at: UtcDatetime | None = None
     lease_until: UtcDatetime | None = None  # 이때까지 진행 보고가 없으면 대기열로 돌린다
     progress: str | None = None  # 개발자 Claude가 마지막으로 보고한 진행 글
+    # 실행 관문이 generate_pr를 보류(held)했을 때: 그 멱등 키·보류 건·경로. 사람이 보류 건을
+    # 승인하고 "승인하고 PR 열기"(hold_ok)로 다시 돌리면 같은 키로 보내 승인된 결정을 받는다
+    hold_key: str | None = None
+    hold_review: str | None = None
+    hold_paths: list[str] = Field(default_factory=list)
+    hold_ok: bool = False
 
 
 class Task(DomainModel):

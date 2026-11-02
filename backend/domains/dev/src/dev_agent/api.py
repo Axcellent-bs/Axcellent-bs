@@ -316,8 +316,21 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         connection = body.get("connection")
         if connection is not None and not isinstance(connection, str):
             return _err(400, "INVALID_INPUT", "connection은 문자열이어야 한다")
+        approved = body.get("approved") is True  # 사람이 generate_pr 보류 건을 승인함
         try:
-            result = await svc.retry_dev_task(task_id, connection or None)
+            result = await svc.retry_dev_task(task_id, connection or None, approved=approved)
+        except ActionError as exc:
+            return _coding_err(exc)
+        except GateRefused as exc:
+            return _gate_err(exc)
+        return _ok(result.output, svc)
+
+    @router.post("/dev-tasks/{task_id}/renew-hold", response_model=None, dependencies=HUMAN)
+    async def post_dev_task_renew_hold(task_id: str) -> dict | JSONResponse:
+        """PR 열기 보류 건 새로 받기 (만료·모름). 사람이 review_id를 승인한 뒤 retry(approved)."""
+        svc = get_service()
+        try:
+            result = await svc.renew_hold(task_id)
         except ActionError as exc:
             return _coding_err(exc)
         except GateRefused as exc:

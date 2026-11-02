@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, RELATION_LABEL, byRelation, type CodingRun, type CodingStatus, type Request, type State as S, type Task } from '@/lib/planningData'
-import { DEV_API, PlanningApiError, devTaskApi, planningApi } from '@/lib/planning'
+import { DEV_API, PlanningApiError, approveReview, devTaskApi, planningApi } from '@/lib/planning'
 import { State, Tag } from '@/components/planning-common/parts'
 import { Step } from '@/components/planning-common/flow'
 import { Ref } from '@/components/planning-common/links'
@@ -155,6 +155,20 @@ export function CodingStep({ task }: { task: Task }) {
       setBusy(false)
     }
   }
+  // 실행 관문이 PR 열기를 보류함 (보호 경로·한도 등): 사람이 승인하면 같은 코드로 PR을 연다
+  const heldPr = c.status === 'waiting_human' && !c.pr && (!!c.holdKey || (c.error ?? '').includes('generate_pr를 허락하지 않음 (held)'))
+  const approveHold = () => act(async () => {
+    const note = `${task.id} PR 열기 보류를 사람이 확인하고 승인`
+    let ok = false
+    if (c.holdReview) {
+      try { await approveReview(c.holdReview, note); ok = true } catch { /* 만료됐으면 새로 받는다 */ }
+    }
+    if (!ok) {
+      const r = await api.renewHold(task.id)
+      if (r.review_id) await approveReview(r.review_id, note)
+    }
+    await api.retry(task.id, true)
+  }, `${task.id} 보류 승인 → PR 여는 중`)
   return (
     <Step name="코딩 에이전트" on={DONE.includes(c.status)} title={<CodingLabel c={c} />}>
       <span className="tags">
@@ -194,6 +208,7 @@ export function CodingStep({ task }: { task: Task }) {
       )}
       <span className="tags">
         {waitingPr && <Button size="small" variant="primary" onClick={merge} disabled={busy}>머지</Button>}
+        {heldPr && <Button size="small" variant="primary" onClick={() => void approveHold()} disabled={busy}>{busy ? '보내는 중…' : '승인하고 PR 열기'}</Button>}
         {(STUCK.includes(c.status) || c.status === 'canceled') && !waitingPr && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.status === 'canceled' ? '재개' : c.mergeConflict ? '최신 코드로 다시 쓰기' : '다시 시도'}</Button>}
         <CancelButton taskId={task.id} status={c.status} />
       </span>

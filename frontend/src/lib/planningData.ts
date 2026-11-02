@@ -110,6 +110,8 @@ export interface CodingRun {
   mode?: CodingMode
   connection?: string | null // 올릴 레포 연결
   claimedBy?: string | null // 구독형: 가져간 사람
+  holdKey?: string | null // 실행 관문이 PR 열기(generate_pr)를 보류한 키
+  holdReview?: string | null // 그 보류 건 (사람이 승인하면 같은 키로 PR을 연다)
   claimedAt?: string | null
   leaseUntil?: string | null // 이때까지 진행 보고가 없으면 대기열로 돌아간다
   progress?: string | null // 구독형: 개발자 Claude가 마지막으로 보고한 진행 글
