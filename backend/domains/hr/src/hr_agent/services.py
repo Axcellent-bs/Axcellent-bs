@@ -119,6 +119,10 @@ def build_services(
         from hr_agent.roster.seed import seed_roster
 
         seed_roster(store, clock)
+    elif seed and not settings.mock:
+        from hr_agent.roster.org_areas import load_org_areas, sync_areas
+
+        sync_areas(store, load_org_areas())
     return services
 
 
