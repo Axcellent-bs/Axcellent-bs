@@ -25,7 +25,11 @@ const FALLBACK_KO: Record<string, string> = {
   llm_error: "AI 문장을 받지 못해 기본 문장을 썼어요",
   format_error: "AI 문장 형식이 맞지 않아 기본 문장을 썼어요",
   number_invalid: "AI 문장에 계산에 없는 숫자가 있어 기본 문장을 썼어요",
+  product_invalid: "AI 문장에 연결되지 않은 상품이 있어 기본 문장을 썼어요",
 };
+
+/** 상품 연결 근거 (서버 match) → 쉬운 말 */
+const MATCH_KO: Record<string, string> = { name: "이름이 겹침", category: "카테고리가 겹침", embedding: "뜻이 가까움" };
 
 function RecommendCard({ item }: { item: ContentRecommendation }) {
   const s = item.score;
@@ -49,7 +53,8 @@ function RecommendCard({ item }: { item: ContentRecommendation }) {
           <Chip label="검색 급상승만" tone={TONE.muted} />
         )}
         {item.company_relevance === "related" ? (
-          <Chip label={`회사 관련 있음${item.company_match.length ? ` (${item.company_match.join(", ")})` : ""}`} tone={TONE.ok} />
+          <Chip label={item.relevance_from === "products" ? "회사 상품과 연결됨"
+            : `회사 관련 있음${item.company_match.length ? ` (${item.company_match.join(", ")})` : ""}`} tone={TONE.ok} />
         ) : (
           <Chip label="회사 관련 낮음" tone={TONE.warn} />
         )}
@@ -57,6 +62,19 @@ function RecommendCard({ item }: { item: ContentRecommendation }) {
         <Chip label={item.format} tone={TONE.info} />
         {item.fallback && <Chip label="기본 문장" tone={TONE.muted} />}
       </div>
+      {/* 연결할 실제 상품: 서버가 회사 상품 목록에서 고른 값 그대로 (없으면 표시 안 함) */}
+      {item.products && item.products.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-ink-500">연결할 상품</p>
+          <ul className="mt-1 space-y-0.5 text-sm text-ink-800">
+            {item.products.map((p) => (
+              <li key={p.product_id}>
+                <b>{p.name}</b> <span className="text-[11px] text-ink-500">{p.product_id}{p.category_name ? ` · ${p.category_name}` : ""} · {MATCH_KO[p.match] ?? p.match}{p.similarity != null ? ` (유사도 ${fixed(p.similarity)})` : ""}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div>
         <p className="text-xs font-semibold text-ink-500">영상 아이디어</p>
         <p className="mt-1 border-l-2 border-brand-500 bg-ink-50 px-3 py-2 text-sm leading-relaxed text-ink-700">{item.idea}</p>
@@ -125,6 +143,12 @@ export function ContentRecommend({ onProbe, dataUp = null }: { onProbe: (p: Loop
         {meta && <p className="text-[11px] text-ink-500">{meta}</p>}
         {out?.youtube_status === "unknown" && out.youtube_reason && (
           <p className="text-xs text-amber-700">YouTube 후보: {UNKNOWN} · {out.youtube_reason}</p>
+        )}
+        {out?.catalog_status === "unknown" && out.catalog_reason && out.items.length > 0 && (
+          <p className="text-xs text-amber-700">상품 연결: {UNKNOWN} · {out.catalog_reason}</p>
+        )}
+        {out?.catalog_status === "known" && out.similarity_status === "unknown" && out.similarity_reason && (
+          <p className="text-[11px] text-ink-500">상품 {out.catalog_products ?? 0}개와 이름·카테고리 글자만 맞춰 봤어요 (뜻 유사도: {out.similarity_reason})</p>
         )}
         {out && out.naver_failed.length > 0 && (
           <p className="text-xs text-amber-700">네이버를 읽지 못한 것: {out.naver_failed.join(", ")}</p>
