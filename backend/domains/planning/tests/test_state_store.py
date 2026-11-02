@@ -6,8 +6,9 @@ import asyncio
 import os
 
 from ax_contracts.schemas import ExecuteDecision
+from dev_agent.service import DevService
 from planning_agent.domain.models import CodingRun
-from planning_agent.domain.service import DevService, PlanningService
+from planning_agent.domain.service import PlanningService
 
 
 async def _gate(action, params, meta, evidence) -> ExecuteDecision:

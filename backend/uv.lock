@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 [manifest]
 members = [
     "ax-agent-data",
+    "ax-agent-dev",
     "ax-agent-finance",
     "ax-agent-hr",
     "ax-agent-infra",
@@ -31,6 +32,7 @@ members = [
     "ax-svc-planning",
     "ax-svc-reviews",
     "ax-workflow-core",
+    "ax-workflow-testing",
 ]
 
 [manifest.dependency-groups]
@@ -89,6 +91,31 @@ dependencies = [
 requires-dist = [
     { name = "ax-agent-template", editable = "shared/agent-template" },
     { name = "ax-contracts", editable = "shared/contracts" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "uvicorn", specifier = ">=0.30" },
+]
+
+[[package]]
+name = "ax-agent-dev"
+version = "0.1.0"
+source = { editable = "domains/dev" }
+dependencies = [
+    { name = "ax-agent-template" },
+    { name = "ax-contracts" },
+    { name = "ax-workflow-core" },
+    { name = "cryptography" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "ax-agent-template", editable = "shared/agent-template" },
+    { name = "ax-contracts", editable = "shared/contracts" },
+    { name = "ax-workflow-core", editable = "shared/workflow-core" },
+    { name = "cryptography", specifier = ">=42" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "uvicorn", specifier = ">=0.30" },
@@ -433,11 +460,11 @@ name = "ax-svc-dev"
 version = "0.1.0"
 source = { editable = "services/dev" }
 dependencies = [
-    { name = "ax-agent-planning" },
+    { name = "ax-agent-dev" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "ax-agent-planning", editable = "domains/planning" }]
+requires-dist = [{ name = "ax-agent-dev", editable = "domains/dev" }]
 
 [[package]]
 name = "ax-svc-finance"
@@ -512,6 +539,7 @@ source = { editable = "shared/workflow-core" }
 dependencies = [
     { name = "ax-agent-template" },
     { name = "ax-contracts" },
+    { name = "fastapi" },
     { name = "pydantic" },
 ]
 
@@ -519,7 +547,25 @@ dependencies = [
 requires-dist = [
     { name = "ax-agent-template", editable = "shared/agent-template" },
     { name = "ax-contracts", editable = "shared/contracts" },
+    { name = "fastapi", specifier = ">=0.115" },
     { name = "pydantic", specifier = ">=2.7" },
+]
+
+[[package]]
+name = "ax-workflow-testing"
+version = "0.1.0"
+source = { editable = "shared/workflow-testing" }
+dependencies = [
+    { name = "ax-agent-dev" },
+    { name = "ax-agent-planning" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "ax-agent-dev", editable = "domains/dev" },
+    { name = "ax-agent-planning", editable = "domains/planning" },
+    { name = "pytest", specifier = ">=8" },
 ]
 
 [[package]]

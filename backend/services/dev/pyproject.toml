@@ -1,12 +1,12 @@
 [project]
 name = "ax-svc-dev"
 version = "0.1.0"
-description = "services/dev — 개발·배포 (domains/planning)"
+description = "services/dev — 개발·배포 (domains/dev)"
 requires-python = ">=3.12"
-dependencies = ["ax-agent-planning"]
+dependencies = ["ax-agent-dev"]
 
 [tool.uv.sources]
-ax-agent-planning = { workspace = true }
+ax-agent-dev = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

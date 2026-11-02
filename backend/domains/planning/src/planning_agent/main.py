@@ -1,4 +1,4 @@
-"""ax-agent-planning 서버 진입점.
+"""ax-agent-planning 서버 진입점 (기획, 8101). 개발·배포(8111)는 `domains/dev`(dev_agent).
 
 - 템플릿 `create_agent_app(card, HANDLERS)`가 `/.well-known/agent-card.json`, `/health`,
   `POST /a2a`를 준다.
@@ -18,13 +18,12 @@ from fastapi.responses import JSONResponse
 
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
-from planning_agent import vcs
+from ax_workflow.auth import AuthError
 from planning_agent.api import create_api_router
-from planning_agent.auth import AuthError
-from planning_agent.handlers import HANDLERS
+from planning_agent.handlers import PLANNING_HANDLERS
 from planning_agent.runtime import get_service
 
-# 화면: 업무 시스템 dashboard-web 「기획·개발 AI」 탭(3001), 옛 planning-web(3002·5173)
+# 화면: 업무 시스템 dashboard-web 「기획 AI」 탭(3001), 옛 planning-web(3002·5173)
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:3001,http://127.0.0.1:3001,"
     "http://localhost:3002,http://localhost:5173,http://127.0.0.1:5173"
@@ -56,18 +55,13 @@ def _cors_origins() -> list[str]:
     return [o.strip() for o in raw.split(",") if o.strip()]
 
 
-# 화면에서 넣어 둔 형상관리 연결을 다시 읽는다 (PLANNING_VCS_STORE가 있을 때)
-vcs.load_saved()
-app = create_agent_app(load_card(), HANDLERS)
+app = create_agent_app(load_card(), PLANNING_HANDLERS)
 app.include_router(create_api_router(get_service))
 
 
 async def _resync_on_start() -> None:
-    """켤 때 상대 서비스(기획↔개발)와 맞춘다.
-
-    상대가 아직 안 떴으면 못 보낸 것으로 남겨 다시 보낸다."""
+    """켤 때 개발 서비스와 맞춘다. 상대가 아직 안 떴으면 못 보낸 것으로 남겨 다시 보낸다."""
     asyncio.get_running_loop().create_task(get_service().resync_peer())
-    get_service().start_pr_sync()  # 형상관리에서 직접 머지·닫은 PR을 주기적으로 맞춘다
 
 
 app.router.on_startup.append(_resync_on_start)

@@ -6,7 +6,8 @@ import asyncio
 from datetime import UTC, datetime
 
 from ax_contracts.schemas import AgentResult, ExecuteDecision, TaskStatus
-from planning_agent import dev_chat, related
+from dev_agent import dev_chat
+from planning_agent import related
 from planning_agent.domain.models import Request
 from planning_agent.domain.service import PlanningService
 from planning_agent.related import LexicalEmbedder, Relater, _Judged, _Judgement
