@@ -1386,16 +1386,21 @@ class PlanningService(PlanningCore):
         split = f"요구사항 {len(reqs)}개 → 작업 {', '.join(t.id for t in tasks)}"
         await self._execute("split_tasks", ctx, sp.id, split, {"tasks": [t.id for t in tasks]})
         case = f"① kind spec_confirmed · {sp.id}" + (" (자동 확정)" if auto else "")
+        # 결정 문장(summary)에는 결정 내용만 둔다. 기획서 번호·"자동 확정"·"warn 무시 진행" 같은
+        # 틀 문구가 붙으면 인사 병합 판정이 같은 결정을 "바뀜"으로 본다 (11/2 병합 재평가, 준하 님).
+        # 확정 방식과 경고 무시는 이유(decision_reason)로 옮기고, 기획서 번호는 근거에 있다.
         if auto:
-            summary = f"{sp.id} {sp.title} 자동 확정 (사후 감사 대상)"
+            reason = f"자동 확정 (사후 감사 대상): confirm_spec 규칙 통과 · {rule_text}"
         else:
-            summary = f"{sp.id} {sp.title} 확정" + (f" ({audit})" if audit else "")
+            reason = f"팀장 {TEAM_LEAD}이 기획서를 보고 확정"
+            if audit:
+                reason += f" · {audit}"
         record = RecordCase(
             context_id=ctx,
             tenant_id=self.tenant_id,
             kind=RecordKind.SPEC_CONFIRMED,
-            summary=summary,
-            decision_reason=f"confirm_spec 규칙 통과: {rule_text}" if auto else None,
+            summary=sp.title,
+            decision_reason=reason,
             source_refs=[f"spec:{sp.id}"]
             + [f"para:{sp.id}:{w['para']}" for w in warn_ignored]
             + [f"card:{w['card']}" for w in warn_ignored],
@@ -1729,8 +1734,9 @@ class PlanningService(PlanningCore):
     async def _reject_spec(self, s: State, spec: str, reason: str) -> ActionResult | None:
         """사람 버튼 "거절": 확인 대기(교차검증·사람 확인) 기획서를 확정하지 않는다.
 
-        기획서는 초안으로 남기고 대기열에서 내린다. 거절한 기획서는 결정 이력에 남기고 인사에
-        기각 기록(decision_rejected)으로 보낸다. 확정된 기획서·대기열에 없는 기획서는 바꾸지 않는다.
+        기획서는 초안으로 남기고 대기열에서 내린다. 요청은 기각으로 닫고 요청 부서에 알린다.
+        거절한 기획서는 결정 이력에 남기고 인사에 기각 기록(decision_rejected)으로 보낸다.
+        확정된 기획서·대기열에 없는 기획서는 바꾸지 않는다.
         """
         sp = next((x for x in s.specs if x.id == spec), None)
         if sp is None:
@@ -1746,6 +1752,24 @@ class PlanningService(PlanningCore):
         s.activity.append(
             self._act(self.clock(), ctx, "human", "planning", "reject_spec", "사람", text)
         )
+        # 요청은 기각으로 닫고 요청 부서에 알린다 (개선 초안 기각과 같게, 11/2 시연 F)
+        if req is not None and req.state not in CLOSED_REQUEST_STATES:
+            req.state = "기각"
+            await self._notify_result(
+                s, req, "declined", spec_id=sp.id, reason_code="spec_rejected"
+            )
+            s.activity.append(
+                self._act(
+                    self.clock(),
+                    ctx,
+                    "planning",
+                    req.from_,
+                    "get_request_status",
+                    "A2A",
+                    f'{req.id} "{req.title}" 기각 (기획서 {sp.id} 거절 · 이유: {reason.strip()})',
+                    "read",
+                )
+            )
         return ActionResult(output={"spec": sp.id, **(res.output if res else {})})
 
     # ---- 소통

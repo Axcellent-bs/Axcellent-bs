@@ -214,7 +214,8 @@ def test_confirm_with_warn_records_warn_ignored(gate) -> None:
     [case_params] = gate.params("record_case")
     case = RecordCase.model_validate(case_params["record_case"])
     assert case.kind == RecordKind.SPEC_CONFIRMED
-    assert "warn 무시 진행" in case.summary
+    assert case.summary == "결제 실패 후 장바구니 유지"
+    assert "warn 무시 진행" in (case.decision_reason or "") and "팀장" in case.decision_reason
     assert {"para:SPEC-7:R2", "card:DC-31"} <= set(case.source_refs)
     assert case_params["warn_ignored"] == confirm["warn_ignored"]
 
