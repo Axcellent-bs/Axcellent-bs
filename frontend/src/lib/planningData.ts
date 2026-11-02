@@ -54,7 +54,7 @@ export interface Para {
   id: string // R1, C1 …
   kind: 'req' | 'done'
   text: string
-  warn?: { card: string; text: string } // 인사운영 ② check_plan 결과
+  warn?: { card: string; text: string } // 인사총무 ② check_plan 결과
   incident?: string // 장애 표시 (link_incident)
 }
 // 누가 확정·머지했나: auto = 조건·기준으로 자동, review = AI 교차검증 승인 뒤 자동, human = 되돌릴 수 없는 일이라 사람
@@ -1471,9 +1471,9 @@ export const PORTS: Port[] = [
   { point: 'verify_rollback_target', dir: 'in', peer: 'safety', kind: 'A2A', grade: 'read', priority: 'required', what: 'infra rollback_deployment(B) 교차검증 승인·거절' },
   { point: 'cross_review.result', dir: 'in', peer: 'safety', kind: 'A2A', grade: 'read', priority: 'required', what: '기획서 확정·PR 머지 교차검증 결과 (검증자는 기획·개발이 아닌 부서)' },
   { point: 'incident.opened / resolved', dir: 'in', peer: 'orchestrator', kind: '이벤트', grade: '-', priority: 'required', what: '사건 개시·종료 알림' },
-  { point: 'create_ticket', dir: 'in', peer: 'support', kind: 'A2A', grade: 'A', priority: 'recommended', what: '변경 요청 등록, 같은 요청은 연결 (모든 부서가 호출 가능)' },
+  { point: 'create_ticket', dir: 'in', peer: 'support', kind: 'A2A', grade: 'A', priority: 'recommended', what: '변경 요청 등록, 같은 요청은 연결 (여러 부서가 호출 가능)' },
   { point: 'get_request_status', dir: 'in', peer: 'support', kind: 'A2A', grade: 'read', priority: 'recommended', what: '요청 부서가 처리 상태 조회' },
-  { point: 'ticket_draft_propose → review_ticket_draft', dir: 'in', peer: 'hr', kind: 'A2A', grade: 'A', priority: 'optional', what: '③ 인사운영 개선 초안 수신, 채택 결정' },
+  { point: 'ticket_draft_propose → review_ticket_draft', dir: 'in', peer: 'hr', kind: 'A2A', grade: 'A', priority: 'optional', what: '③ 인사총무 개선 초안 수신, 채택 결정' },
   { point: '개선 초안 (원인 추적 루프 ③)', dir: 'in', peer: 'data', kind: 'A2A', grade: 'A', priority: 'optional', what: '반복 지표 이상 → 개선 요청 초안' },
   { point: 'list_in_progress', dir: 'in', peer: 'hr', kind: 'A2A', grade: 'read', priority: 'optional', what: '④ 담당자의 진행 중 문서·작업·PR 조회 (인수인계)' },
   { point: 'record_case', dir: 'out', peer: 'hr', kind: 'A2A', grade: 'A', priority: 'recommended', what: '① spec_confirmed · pr_merged · decision_extracted · request_closed' },
