@@ -114,6 +114,7 @@ export interface PR {
   reviews: ('통과' | '불일치')[]
   gate: { result: '통과' | 'C 보류'; lines: number; files: number; paths: string }
   merged: boolean
+  closed?: boolean // 머지 없이 닫힘 (사람이 중단·형상관리에서 닫음)
   auto?: boolean // 사람 클릭 없이 머지됨 (기준 또는 교차검증)
   mergedBy?: 'rule' | 'review' | 'human'
   rule?: string // 자동 머지에 쓴 기준 (AR-n)
