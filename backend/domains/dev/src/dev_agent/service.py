@@ -52,6 +52,8 @@ from ax_workflow.dev_handoff import (
 from ax_workflow.handover import (
     HandoverCheck,
     Item,
+    area_of_paths,
+    area_of_text,
     check_handover,
     in_progress,
 )
@@ -491,6 +493,7 @@ class DevService(PlanningCore):
         summary: str,
         reason: str,
         refs: list[str],
+        area: str | None = None,
     ) -> HrRecordResult | None:
         """인사 `record_case`로 PR 머지·요청 완료를 보낸다 (인사 연동 2단계).
 
@@ -504,6 +507,7 @@ class DevService(PlanningCore):
             decision_reason=reason,
             source_refs=refs,
             author=AGENT_NAME,
+            area=area,
         )
         gate = await self._execute(
             "record_case", ctx, key, case, {"record_case": record.model_dump(mode="json")}, refs
@@ -514,6 +518,24 @@ class DevService(PlanningCore):
         if not res.ok:
             self.soft_holds.append(GateCall("record_case", key, "hr_failed", "-", res.reason or ""))
         return res
+
+    @staticmethod
+    def _hr_area(s: State, prs: list[PR], *texts: str) -> str | None:
+        """인사 기록 영역: PR이 바꾼 경로 → 없으면 기획서·요청 제목 (못 정하면 None)."""
+        return area_of_paths([x for p in prs for x in p.changed_paths]) or area_of_text(*texts)
+
+    @staticmethod
+    def _hr_titles(s: State, spec_id: str | None) -> list[str]:
+        """영역을 글로 정할 때 볼 제목: 기획서 제목, 그 기획서의 요청 제목."""
+        sp = next((x for x in s.specs if x.id == spec_id), None)
+        return [
+            x
+            for x in [
+                sp.title if sp else "",
+                *(r.title for r in s.requests if spec_id and r.spec == spec_id),
+            ]
+            if x
+        ]
 
     def _hr_act(self, ctx: str, case: str, hr: HrRecordResult | None) -> Activity:
         """인사 기록 활동 한 줄. 실제로 불렀으면 결과(카드·실패)를 붙인다."""
@@ -1065,6 +1087,7 @@ class DevService(PlanningCore):
             ctx, RecordKind.PR_MERGED, f"{pr_id}:pr_merged", merged_case,
             f"{pr_id} {pr.title} 자동 머지 (간단 요청, 사후 감사 대상)",
             merge_text, [f"pr:{pr.number}", f"request:{req.id}"],
+            self._hr_area(s, [pr], req.title),
         )  # fmt: skip
         s.activity.append(self._hr_act(ctx, merged_case, merged_hr))
         closed_case = f"① kind request_closed · {req.id}"
@@ -1073,6 +1096,7 @@ class DevService(PlanningCore):
             f'{req.id} "{req.title}" 완료 ({pr_id} 머지, 사람 승인 없이 자동 처리)',
             "간단 요청 규칙 통과 → 기획서 확정·PR 머지까지 자동",
             [f"request:{req.id}", f"spec:{spec_id}"],
+            self._hr_area(s, [pr], req.title),
         )  # fmt: skip
         s.activity.append(self._hr_act(ctx, closed_case, closed_hr))
         step(
@@ -2643,6 +2667,7 @@ class DevService(PlanningCore):
             f"{p.id} {p.title} " + ("자동 머지 (사후 감사 대상)" if auto else "사람 머지"),
             f"merge_pr 규칙 통과: {rule_text}" if auto else "사람이 머지 버튼으로 승인",
             [f"pr:{p.number}"],
+            self._hr_area(s, [p], *self._hr_titles(s, spec_id)),
         )  # fmt: skip
         if task:
             task.state = "완료"
@@ -2657,6 +2682,11 @@ class DevService(PlanningCore):
                 f"{closed_ids} 완료 (기획서 {spec_id} 작업 전부 머지)",
                 f"{spec_id} 작업 {sum(1 for x in s.tasks if x.spec == spec_id)}개 머지",
                 [f"request:{r.id}" for r in closed] + [f"spec:{spec_id}"],
+                self._hr_area(
+                    s,
+                    [x for x in s.prs if x.task in {t.id for t in s.tasks if t.spec == spec_id}],
+                    *self._hr_titles(s, spec_id),
+                ),
             )  # fmt: skip
         t = self.clock()
         p.merged = True
