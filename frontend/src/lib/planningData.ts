@@ -20,7 +20,7 @@ export const DEPT_NAME: Record<Dept, string> = {
   shop: '판매 사이트', memory: '회사 기억', human: '사람',
 }
 
-export type ReqState = '접수' | '기획 중' | '작업 중' | '완료' | '중복 연결'
+export type ReqState = '접수' | '기획 중' | '작업 중' | '완료' | '중복 연결' | '기각'
 export interface Request {
   id: string
   ctx: string

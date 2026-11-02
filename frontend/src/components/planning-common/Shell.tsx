@@ -85,6 +85,7 @@ export function PlanningShell(props: ShellProps) {
   )
 }
 
+const LIVE_DISMISS_KEY = 'planning.liveDismissed'
 const EXAMPLE_KEY = 'axcellent-planning-example'
 // 예시의 AI 승인 감사는 "오늘" 건만 보여서, 예시 기록 날짜를 오늘로 옮긴다
 const todayDemo = (s: State): State => ({ ...s, audit: s.audit.map((a) => ({ ...a, t: `${TODAY}${a.t.slice(5)}` })) })
@@ -133,7 +134,29 @@ function Frame({ part, title, desc, home, sections, tabCount, tools, children }:
   }, [section, state.seq]) // eslint-disable-line react-hooks/exhaustive-deps
   const newWork = inbound.filter((x) => x.point !== 'message' && (x.seq ?? 0) > seenSeq).length
   const newTalk = inbound.filter((x) => x.point === 'message' && (x.seq ?? 0) > talkSeen).length
-  const recentIn = inbound.filter((x) => x.point !== 'message').slice(-3).reverse()
+  // 띄울 것: 아직 끝나지 않은 요청에서 온 것 + 사람이 닫지 않은 것 (끝난 요청·머지 끝난 건은 자동으로 내린다)
+  const [dismissed, setDismissed] = useState<number[]>(() => {
+    try { return JSON.parse(localStorage.getItem(LIVE_DISMISS_KEY) ?? '[]') as number[] } catch { return [] }
+  })
+  const dismiss = (seq: number) => {
+    const next = [...dismissed.filter((n) => n !== seq), seq].slice(-200)
+    setDismissed(next)
+    try { localStorage.setItem(LIVE_DISMISS_KEY, JSON.stringify(next)) } catch { /* 저장이 막혀도 이번 화면에서는 닫힌다 */ }
+  }
+  // 끝난 요청: 완료·기각이거나, 기획서 작업의 PR이 전부 머지된 것
+  const allMerged = (spec?: string) => {
+    if (!spec) return false
+    const taskIds = new Set(state.tasks.filter((t) => t.spec === spec).map((t) => t.id))
+    const prs = state.prs.filter((p) => taskIds.has(p.task))
+    return prs.length > 0 && prs.every((p) => p.merged)
+  }
+  const finishedCtx = new Set(
+    state.requests.filter((r) => r.state === '완료' || r.state === '기각' || allMerged(r.spec)).map((r) => r.ctx),
+  )
+  const recentIn = inbound
+    .filter((x) => x.point !== 'message' && !finishedCtx.has(x.ctx) && !dismissed.includes(x.seq ?? -1))
+    .slice(-3)
+    .reverse()
 
   const view: View = { state, dispatch, connected, example, section, sub, tab, rest, item, item2, newWork, newTalk }
 
@@ -176,9 +199,12 @@ function Frame({ part, title, desc, home, sections, tabCount, tools, children }:
             <div className="live-strip" aria-live="polite">
               <span className="live-strip-h">새로 받은 연동</span>
               {recentIn.map((x, i) => (
-                <a key={i} href={convoHref(x.ctx)} className={`live-item${(x.seq ?? 0) > highlightFrom.current ? ' fresh' : ''}`}>
-                  <Dep d={x.from} /> <Point>{x.point}</Point> <span className="muted small">{x.text}</span>
-                </a>
+                <span key={x.seq ?? i} className={`live-item${(x.seq ?? 0) > highlightFrom.current ? ' fresh' : ''}`}>
+                  <a href={convoHref(x.ctx)} className="live-link">
+                    <Dep d={x.from} /> <Point>{x.point}</Point> <span className="muted small">{x.text}</span>
+                  </a>
+                  <button type="button" className="live-x" aria-label="알림 닫기" title="닫기" onClick={() => dismiss(x.seq ?? -1)}>×</button>
+                </span>
               ))}
             </div>
           )}
