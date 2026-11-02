@@ -73,13 +73,6 @@ class Books:
                     rows.append(p | {"order": o})
         return rows
 
-    def paid_by_order(self) -> dict[str, int]:
-        out: dict[str, int] = {}
-        for p in self.payments():
-            oid = p["order"]["order_id"]
-            out[oid] = out.get(oid, 0) + p["amount"]
-        return out
-
     def unavailable_core(self) -> bool:
         """주문·쿠폰처럼 숫자를 내는 데 꼭 필요한 자료를 못 받았는가."""
         return any(name in self.unavailable for name in ("orders", "coupons"))

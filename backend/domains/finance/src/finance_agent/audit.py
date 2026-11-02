@@ -1,17 +1,14 @@
 """⑦ 내부통제·이상 탐지: 사후 감사 리포트.
 
-건별 검사는 안전 관문 코드 규칙이 한다. 재무는 지나간 기록을 전수로 다시 본다.
+건별 검사는 안전 관문 코드 규칙이 한다. 재무는 지나간 쿠폰·안전 장치 기록을 전수로 다시 본다.
+환불은 감사하지 않는다: 환불 여부는 고객지원이 정하고, 재무는 끝난 환불 금액을 장부에 적을 뿐이다.
 기간은 오늘까지 `days`일, 비교 기간은 그 바로 앞 같은 길이. 모든 판정은 코드 규칙이다
 (기준값은 `finance_policy.toml [audit]`, 한도는 기준표).
 
 - `split_under_limit`: 같은 고객에게 한도 바로 아래(한도의 `near_limit_ratio` 이상) 쿠폰을
-  `split_window_minutes` 안에 여러 번 나눠 합계 `split_min_count`장 이상, 또는 한도 바로 아래
-  환불을 `refund_split_window_hours` 안에 `refund_split_min_count`번 이상
-- `repeat_refund`: 같은 고객 환불(주문 기준)이 기간 안에 `repeat_refund_min`번 이상
+  `split_window_minutes` 안에 여러 번 나눠 합계 `split_min_count`장 이상
 - `duplicate_coupon`: 같은 고객·같은 사건(context_id) 보상 쿠폰이 2번 이상
-- `refund_rate_jump`: 환불률(환불액 ÷ 총거래액)이 지난 기간의 `refund_rate_jump_ratio`배 이상이고
-  `refund_rate_jump_min_diff` 이상 오름
-- `amount_recheck_failed`: 관문을 통과한(executed) 쿠폰·환불을 원천 자료로 다시 계산하니 틀림
+- `amount_recheck_failed`: 관문을 통과한(executed) 쿠폰을 원천 자료로 다시 계산하니 틀림
   (`recheck.recompute`. 장애 피해 고객 확인은 사후에 자료가 없어 빼고 금액만 본다)
 - `gate_hold_trend`: 관문 보류·거절이 기간 안에 `gate_hold_min`건 이상이고 지난 기간의
   `gate_hold_jump_ratio`배 이상
@@ -19,8 +16,7 @@
   구매자가 그 사건의 data 영향 고객 목록(`affected_customer_ids`)에 없음. 영향 분석을 못 받은 사건은
   판정하지 않는다(확인할 수 없음은 의심으로 만들지 않는다)
 
-`context_id`를 주면 그 사건의 쿠폰·실행 기록(과 그 실행 기록에 묶인 환불)만 본다. 그때 환불률
-급변은 사건 단위로 의미가 없어 빼고 통계도 좁힌 자료 기준이다.
+`context_id`를 주면 그 사건의 쿠폰·실행 기록만 본다. 통계도 좁힌 자료 기준이다.
 """
 
 from __future__ import annotations
@@ -34,28 +30,19 @@ from typing import Any
 from ax_contracts.schemas import RequestMeta, VerifyAmountInput
 from finance_agent import finance_config as fc
 from finance_agent.books import Books, in_range
-from finance_agent.closing import compute_totals
 from finance_agent.policy import threshold_limits
 from finance_agent.recheck import recompute
 from finance_agent.sources import Impact
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
-RECHECK_FAILURES = {"amount_mismatch", "exceeds_paid", "invalid_params"}
-# 사람이 읽는 문장(title·detail)에는 코드 대신 쉬운 말을 쓴다. 코드는 `code`·`refs`에만 둔다.
-ACTION_KO = {"issue_coupon": "쿠폰 지급", "refund_request": "환불"}
+RECHECK_FAILURES = {"amount_mismatch", "invalid_params"}
 
 
 class _BooksSource:
-    """사후 재계산용 원천: 결제 금액은 장부, 장애 피해 고객은 사후에 알 수 없으니 None."""
-
-    def __init__(self, paid: dict[str, int]) -> None:
-        self.paid = paid
+    """사후 재계산용 원천: 장애 피해 고객은 사후에 알 수 없으니 None."""
 
     async def impact(self, meta: RequestMeta, context_id: str, window: Any) -> Impact | None:
         return None
-
-    async def paid_amount(self, meta: RequestMeta, order_id: str) -> int | None:
-        return self.paid.get(order_id)
 
     async def incident_window(self, context_id: str) -> dict[str, Any] | None:
         """사후 재계산은 사건 구간을 쓰지 않는다 (총괄을 읽지 않는다)."""
@@ -115,63 +102,6 @@ def split_coupons(books: Books, start, end, limit: int | None) -> list[dict]:
     return out
 
 
-def split_refunds(books: Books, start, end, limit: int | None) -> list[dict]:
-    cfg = fc.load_config().audit
-    if not limit:
-        return []
-    floor = math.ceil(limit * cfg.near_limit_ratio)
-    near = [
-        r
-        for r in books.refunds
-        if floor <= r["amount"] < limit  # 환불 한도(refund_single)는 "이상"이면 걸린다
-        and in_range(r.get("created_at"), start, end)
-        and r.get("buyer_id")
-    ]
-    window = timedelta(hours=cfg.refund_split_window_hours)
-    out = []
-    for buyer in sorted({r["buyer_id"] for r in near}):
-        rows = sorted((r for r in near if r["buyer_id"] == buyer), key=lambda r: r["created_at"])
-        for i, first in enumerate(rows):
-            group = [r for r in rows[i:] if r["created_at"] - first["created_at"] <= window]
-            if len(group) >= cfg.refund_split_min_count:
-                total = sum(r["amount"] for r in group)
-                out.append(
-                    _finding(
-                        "split_under_limit",
-                        "high",
-                        f"같은 고객 한도 바로 아래 환불 {len(group)}번",
-                        f"{buyer} 환불 {len(group)}번 합계 {fc.won(total)}, "
-                        f"건마다 한도 {fc.won(limit)} 바로 아래",
-                        [r["refund_id"] for r in group],
-                    )
-                )
-                break
-    return out
-
-
-def repeat_refunds(books: Books, start, end, days: int) -> list[dict]:
-    cfg = fc.load_config().audit
-    rows = [
-        r for r in books.refunds if in_range(r.get("created_at"), start, end) and r.get("buyer_id")
-    ]
-    out = []
-    for buyer in sorted({r["buyer_id"] for r in rows}):
-        mine = [r for r in rows if r["buyer_id"] == buyer]
-        orders = {r["order_id"] for r in mine}
-        if len(orders) >= cfg.repeat_refund_min:
-            total = sum(r["amount"] for r in mine)
-            out.append(
-                _finding(
-                    "repeat_refund",
-                    "medium",
-                    f"같은 고객 환불 {len(orders)}번",
-                    f"{buyer}의 주문 {len(orders)}건 환불, 합계 {fc.won(total)} (최근 {days}일)",
-                    [r["refund_id"] for r in mine] + sorted(orders),
-                )
-            )
-    return out
-
-
 def duplicate_coupons(books: Books, start, end) -> list[dict]:
     groups: dict[tuple, list[dict]] = {}
     for c in books.coupons:
@@ -200,41 +130,22 @@ def duplicate_coupons(books: Books, start, end) -> list[dict]:
     return out
 
 
-def refund_rate_jump(rate: float | None, prev: float | None, days: int) -> list[dict]:
-    cfg = fc.load_config().audit
-    if rate is None or prev is None:
-        return []
-    jumped = rate - prev >= cfg.refund_rate_jump_min_diff and (
-        prev == 0 or rate >= prev * cfg.refund_rate_jump_ratio
-    )
-    if not jumped:
-        return []
-    severity = "high" if prev == 0 or rate >= prev * 2 else "medium"
-    return [
-        _finding(
-            "refund_rate_jump",
-            severity,
-            "환불률 급변",
-            f"최근 {days}일 환불률 {rate * 100:.1f}% (지난 {days}일 {prev * 100:.1f}%)",
-            [],
-        )
-    ]
-
-
 async def recheck_failures(books: Books, start, end) -> list[dict]:
     if books.executions is None:
         return []
-    source = _BooksSource(books.paid_by_order())
-    refunded: dict[str, int] = {}
+    source = _BooksSource()
     out = []
     rows = sorted(
-        (e for e in books.executions if e.get("status") == "executed"),
+        (
+            e
+            for e in books.executions
+            if e.get("status") == "executed"
+            and e.get("action") == "issue_coupon"
+            and in_range(e["created_at"], start, end)
+        ),
         key=lambda e: (e["created_at"], str(e.get("execution_id"))),
     )
     for e in rows:
-        action = e.get("action")
-        if action not in ("issue_coupon", "refund_request") or e["created_at"] >= end:
-            continue
         params = e.get("params") or {}
         meta = RequestMeta(
             context_id=e.get("context_id") or "ctx_audit",
@@ -243,34 +154,22 @@ async def recheck_failures(books: Books, start, end) -> list[dict]:
         )
         data = VerifyAmountInput(
             execution_id=str(e.get("execution_id")),
-            action=action,
+            action="issue_coupon",
             requester=str(e.get("requester")),
             params=params,
             computed_amount=e.get("computed_amount"),
         )
-        result = await recompute(meta, data, source, refunded)
-        order_id = str(params.get("order_id")) if params.get("order_id") is not None else None
-        if action == "refund_request" and order_id and isinstance(params.get("refund_amount"), int):
-            refunded[order_id] = refunded.get(order_id, 0) + params["refund_amount"]
-        if not in_range(e["created_at"], start, end) or result.reason_code not in RECHECK_FAILURES:
+        result = await recompute(meta, data, source)
+        if result.reason_code not in RECHECK_FAILURES:
             continue
-        rc = result.recomputed
-        if result.reason_code == "exceeds_paid":
+        order_id = str(params.get("order_id")) if params.get("order_id") is not None else None
+        if result.reason_code == "amount_mismatch":
             detail = (
-                f"{_hhmm(e['created_at'])} 환불 {fc.won(rc.get('refund_amount'))}: 주문 {order_id} "
-                f"결제 {fc.won(rc.get('paid_amount'))} 중 이미 {fc.won(rc.get('refunded_before'))} "
-                "환불해서 결제 금액을 넘습니다"
-            )
-        elif result.reason_code == "amount_mismatch":
-            detail = (
-                f"{_hhmm(e['created_at'])} {ACTION_KO.get(str(action), '처리')} 요청 총액이 "
-                f"다시 계산한 금액 {fc.won(rc.get('total_value'))}과 다릅니다"
+                f"{_hhmm(e['created_at'])} 쿠폰 지급 요청 총액이 "
+                f"다시 계산한 금액 {fc.won(result.recomputed.get('total_value'))}과 다릅니다"
             )
         else:
-            detail = (
-                f"{_hhmm(e['created_at'])} {ACTION_KO.get(str(action), '처리')} 요청의 "
-                "금액 값이 잘못되었습니다"
-            )
+            detail = f"{_hhmm(e['created_at'])} 쿠폰 지급 요청의 금액 값이 잘못되었습니다"
         out.append(
             _finding(
                 "amount_recheck_failed",
@@ -361,18 +260,16 @@ async def outside_impact(
 
 
 def narrow(books: Books, context_id: str) -> Books:
-    """한 사건의 쿠폰·실행 기록·(그 실행 기록에 묶인) 환불만 남긴 장부."""
+    """한 사건의 쿠폰·실행 기록만 남긴 장부."""
     executions = (
         None
         if books.executions is None
         else [e for e in books.executions if e.get("context_id") == context_id]
     )
-    exe_ids = {e.get("execution_id") for e in executions or []}
     return dataclasses.replace(
         books,
         coupons=[c for c in books.coupons if c.get("context_id") == context_id],
         executions=executions,
-        refunds=[r for r in books.refunds if r.get("execution_id") in exe_ids],
     )
 
 
@@ -385,7 +282,6 @@ async def audit_report(
     context_id: str | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """`impact_lookup`(사건 → data 영향 분석)이 있으면 `compensation_outside_impact`도 본다."""
-    full = books
     if context_id:
         books = narrow(books, context_id)
     today = fc.today()
@@ -394,22 +290,11 @@ async def audit_report(
     prev_start = start - timedelta(days=days)
     limits = threshold_limits(books)
 
-    refunds = [r for r in books.refunds if in_range(r.get("created_at"), start, end)]
-    refund_amount = sum(r["amount"] for r in refunds)
-    prev_refund = sum(
-        r["amount"] for r in books.refunds if in_range(r.get("created_at"), prev_start, start)
-    )
-    gmv = compute_totals(full, start, end).gmv
-    prev_gmv = compute_totals(full, prev_start, start).gmv
-    rate, prev_rate = fc.ratio(refund_amount, gmv), fc.ratio(prev_refund, prev_gmv)
     coupons = [c for c in books.coupons if in_range(c.get("created_at"), start, end)]
 
     findings = (
         split_coupons(books, start, end, limits.get("coupon_unit"))
-        + split_refunds(books, start, end, limits.get("refund_single"))
-        + repeat_refunds(books, start, end, days)
         + duplicate_coupons(books, start, end)
-        + ([] if context_id else refund_rate_jump(rate, prev_rate, days))
         + await recheck_failures(books, start, end)
         + await outside_impact(books, start, end, impact_lookup)
     )
@@ -426,10 +311,6 @@ async def audit_report(
         "from": fc.iso(start),
         "to": fc.iso(end),
         "stats": {
-            "refund_count": len(refunds),
-            "refund_amount": refund_amount,
-            "refund_rate": rate,
-            "refund_rate_prev": prev_rate,
             "coupon_count": len(coupons),
             "coupon_amount": sum(c.get("total_value") or 0 for c in coupons),
             "gate_held": held,

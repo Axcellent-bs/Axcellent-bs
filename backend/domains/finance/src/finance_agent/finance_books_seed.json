@@ -6588,6 +6588,25 @@
    "review_id": "rev_s0051"
   },
   {
+   "execution_id": "exe_s0052",
+   "day": -2,
+   "time": "16:20",
+   "action": "issue_coupon",
+   "requester": "marketing",
+   "context_id": "ctx_req_issue_coupon_0052",
+   "params": {
+    "buyer_id": "buy_0020",
+    "purpose_code": "campaign",
+    "count": 2,
+    "unit_value": 5000,
+    "total_value": 12000
+   },
+   "status": "executed",
+   "grade": "A",
+   "hold_reason": null,
+   "computed_amount": 12000
+  },
+  {
    "execution_id": "exe_s0060",
    "day": -1,
    "time": "06:10",

@@ -100,7 +100,6 @@ const METRIC_KO: Record<string, string> = {
 const SUBJECT_KO: Record<string, string> = { payment: "결제가", api: "쇼핑몰이", db: "주문 DB가", search: "검색이", shipping: "배송이" };
 // 재무 이상 이벤트(finance.anomaly_detected)는 주어 없이 한 문장으로
 const FINANCE_KO: Record<string, string> = {
-  repeat_refund: "같은 고객이 환불을 반복해요", refund_rate_jump: "환불이 갑자기 많아졌어요",
   split_under_limit: "한도 바로 아래로 쪼갠 지급이 있어요", duplicate_coupon: "같은 이벤트 보상 쿠폰이 두 번 나갔어요",
 };
 /** 총괄 제목 끝의 "(metric)"에서 지표 코드를 꺼낸다 */
@@ -138,7 +137,7 @@ const ACTION_KO: Record<string, string> = {
   rollback_deployment: "배포 되돌리기", verify_recovery: "복구 확인", restart_service: "서비스 다시 켜기",
   find_related_prs: "관련 코드 변경 찾기", link_incident: "이벤트에 코드 변경 연결", verify_rollback_target: "되돌릴 배포 확인",
   draft_notice: "공지 초안 작성", publish_notice: "공지 게시", get_notice: "공지 조회",
-  loss_aggregation: "손실 리포트", record_support_cost: "배송비·비용 기록 확인", record_case: "이벤트 기록", check_plan: "예전 결정과 비교",
+  loss_aggregation: "손실 리포트", record_support_cost: "처리 결과 장부에 기록", record_case: "이벤트 기록", check_plan: "예전 결정과 비교",
   // 돈이 나가는 일·안전 관문
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 확정",
   verify_amount: "금액 다시 계산", review_hold: "보류 건 1차 판단", review_threshold_change: "기준 변경 판단",

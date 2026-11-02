@@ -5,7 +5,7 @@
 - 규칙 점검은 **테스트 전용 가짜 자료**로 돌린다. 실제 기록(결산 확정, 대사 메모, 정산 묶음,
   환불 누적)에는 아무것도 남기지 않는다. 숫자는 실제 리포트와 같은 코드가 계산한다.
   점검 대상: 금액 다시 계산(`recheck`, 사후 감사가 씀), ① 결산 공식, ② 대사 상태 분류,
-  ③ 정산 공식, ⑤ 예산 경보, ⑦ 감사 규칙(시드 장부에서 6가지 의심 코드가 모두 잡히는지).
+  ③ 정산 공식, ⑤ 예산 경보, ⑦ 감사 규칙(시드 장부에서 4가지 의심 코드가 모두 잡히는지).
 - 연결 점검은 실제 주소(`agent_url`)에 `GET`만 보낸다. 상태를 바꾸지 않는다.
 - 결과 수준: `fail`(계산이 틀리거나 안전 장치가 끊김 → 바로 확인 필요), `warn`(원천 데이터에 닿지
   않음 → 리포트 일부가 "확인할 수 없음"이 될 수 있음).
@@ -36,9 +36,7 @@ CALL_SECONDS = 3.0
 SELF_TEST_TTL_HOURS = 12  # 마지막 결과를 보여 주는 시간. 지나면 기록을 지우고 다시 테스트하게 한다
 AUDIT_CODES = {
     "split_under_limit",
-    "repeat_refund",
     "duplicate_coupon",
-    "refund_rate_jump",
     "amount_recheck_failed",
     "gate_hold_trend",
 }
@@ -53,7 +51,7 @@ def is_fresh(result: dict[str, Any], now: datetime | None = None) -> bool:
     return (now or datetime.now(UTC)) - ran_at < timedelta(hours=SELF_TEST_TTL_HOURS)
 
 
-# 테스트 전용 가짜 자료: 장애 피해 고객 2명(피해 100,000원), 결제 30,000원 주문 하나
+# 테스트 전용 가짜 자료: 장애 피해 고객 2명(피해 100,000원)
 SELFTEST_SOURCES = MockSources(
     {
         "impacts": {
@@ -64,10 +62,9 @@ SELFTEST_SOURCES = MockSources(
                 "affected_customer_ids": ["test_buyer_1", "test_buyer_2"],
             }
         },
-        "payments": {"test_order_1": 30000},
     }
 )
-EMPTY_SOURCES = MockSources({"impacts": {}, "payments": {}})
+EMPTY_SOURCES = MockSources({"impacts": {}})
 
 Level = Literal["fail", "warn"]
 
@@ -200,15 +197,6 @@ async def _recompute_checks(recompute: Any) -> list[Check]:
             "피해 고객 목록에 없는 사람의 보상을 잡아냄",
         ),
         (
-            "결제보다 큰 환불 막기",
-            "refund_request",
-            {"order_id": "test_order_1", "refund_amount": 40000},
-            40000,
-            SELFTEST_SOURCES,
-            ("rejected", "exceeds_paid"),
-            "결제 30,000원 주문에 40,000원 환불을 잡아냄",
-        ),
-        (
             "자료가 없으면 통과시키지 않기",
             "issue_coupon",
             _coupon("test_buyer_1", 1, 5000),
@@ -221,7 +209,7 @@ async def _recompute_checks(recompute: Any) -> list[Check]:
     checks: list[Check] = []
     for name, action, params, computed, sources, expected, good in cases:
         try:
-            out = await recompute(meta, _verify_input(action, params, computed), sources, {})
+            out = await recompute(meta, _verify_input(action, params, computed), sources)
             got = (out.decision, out.reason_code)
             checks.append(
                 Check(
@@ -299,7 +287,7 @@ async def _module_checks() -> list[Check]:
         found = {f["code"] for f in report["findings"]}
         missing = sorted(AUDIT_CODES - found)
         return not missing, (
-            "쪼개기·반복 환불·중복 쿠폰·환불률 급변·재계산 실패·안전 장치 보류 추이를 모두 잡음"
+            "쿠폰 쪼개기·중복 쿠폰·쿠폰 재계산 실패·안전 장치 보류 추이를 모두 잡음"
             if not missing
             else f"못 잡은 규칙: {', '.join(missing)}"
         )

@@ -5,6 +5,7 @@
 마켓운영(판매자 입점 심사 `seller_review`·정산 보류 `settlement_hold`)은 재무 일이 아니라 2026-10-30에 없앴다.
 결산·리포트, 매출·PG 대사, 판매자 정산, 예산·한도 정책, 사후 감사를 한다. **건별 금액 승인은 하지 않는다**:
 쿠폰·환불 건별 검사는 안전 관문 코드 규칙(금액 계산, `claimed_fields` 불일치, 기준표 한도)이 한다.
+환불 여부는 고객지원이 정한다. 재무는 고객지원이 끝낸 환불 금액을 받아 장부에 적을 뿐, 환불을 확인·검증·감사하지 않는다.
 숫자는 전부 코드로 계산하고, LLM은 결산 설명 문장만 쓴다(목 모드·미설정·실패 때는 템플릿 문장).
 
 | 모듈 | 파일 | 하는 일 |
@@ -14,7 +15,7 @@
 | ② 매출·PG 대사 | `reconciliation.py` | `matched`·`mismatch`·`missing_in_pg`·`pending`·`fee_anomaly` |
 | ③ 판매자 정산 | `settlement.py` | 정산금 = 판매액 − 수수료 − 판매자 부담 쿠폰 − 환불, 보류 사유. 묶음 지급은 `execute("confirm_settlement")`(항상 C) |
 | ⑤ 예산·한도 | `policy.py` | 정책표·소진율·경보, 한도 *제안*(적용은 기준표 PR) |
-| ⑦ 사후 감사 | `audit.py` | 쪼개기·반복 환불·쿠폰 중복·환불률 급변·재계산 실패·관문 보류 추이 |
+| ⑦ 사후 감사 | `audit.py` | 쿠폰 쪼개기·쿠폰 중복·쿠폰 재계산 실패·영향 고객 밖 보상·관문 보류 추이 (환불은 보지 않는다) |
 | 금액 다시 계산 | `recheck.py` | 예전 `verify_amount` 계산. 사후 감사가 쓴다 |
 | 사건 보상 장부 | `ledger.py` | 쿠폰 업무는 재무가 맡지 않는다(마케팅·고객지원 합의). 지급은 마케팅(`issue_coupon`), 판정은 고객지원이 하고 재무는 **빠져나간 돈**을 사건별로 적는다: 이벤트(`events`) 또는 safety 실행 기록(`safety_executions`, 이벤트를 못 받을 때)·시드(`seed`). 실행 기록이 있으면 그것이 원본이라 이벤트를 더하지 않는다. 둘 다 없으면 null |
 | 사건별 화면 | `incidents.py` | 사건 목록·상세: data 영향 그대로 + 보상 장부 + 환불 금액(`refunds`: 사건 구간·영향 고객으로 귀속, 금액·건수만) + 빠져나간 돈 합계(`money_out_total` = 보상 + 환불) + 기준표 한도 + 점검 5개 (재설계 문서 12-1). 재무 단계는 #415로 없앴다 |
@@ -24,7 +25,7 @@
 | --- | --- | --- | --- | --- |
 | `closing_report` | read | orchestrator, data | optional | 기간 손익 요약 (`ClosingReportInput`·`ClosingReportOutput`) |
 | `audit_report` | read | orchestrator, data | optional | 사후 감사 결과 (`AuditReportInput`·`AuditReportOutput`) |
-| `record_support_cost` | read | orchestrator | recommended | 고객지원이 닫은 문의의 처리 결과를 받아 주문 배송비·비용 기록을 확인하고 장부에 남김. 경비를 쓰지 않은 문의도 처리 결과를 기록, 같은 문의는 한 번만 (`SupportCostInput`·`SupportCostOutput`) |
+| `record_support_cost` | read | orchestrator | recommended | 고객지원이 끝낸 처리 결과(환불 금액·쿠폰)를 받아 주문 배송비와 함께 장부에 적음(환불 여부는 확인하지 않음). 경비를 쓰지 않은 문의도 처리 결과를 기록, 같은 문의는 한 번만 (`SupportCostInput`·`SupportCostOutput`) |
 
 없앤 것: `verify_amount`(B 쿠폰·환불 교차검증), `review_hold`(C 보류 건 AI 1차 판단), `/api/finance/verifications`, `/api/finance/ai-reviews`.
 장애 흐름에서 빠지며 없앤 것(2026-10-27): `loss_aggregation`(손실 집계 skill), `/api/finance/loss-reports`, 사건 상세의 `loss`와 사건 단계(9·10·17) 계산. 재무는 장애 대응 흐름의 단계가 아니고(요구사항 DEP-FIN-01, 공통 구성안 결정 22) 장애 비용은 평상시 장부 → `closing_report`·`audit_report`에서 드러난다.
@@ -32,6 +33,7 @@
 재무 일이 아니라 없앤 것(2026-10-26): 캣북스 클레임 연동(`catbooks.py`, 환불·교환 신청을 건별로 다시 확인 → 건별 검사는 안전 관문의 일, `/api/finance/catbooks/*`, `FINANCE_CATBOOKS_*`),
 `review_threshold_change`(AI가 기준 변경을 판단 → 재무는 제안만 하고 사람이 기준표 PR로 바꾼다, `/api/finance/threshold-reviews`).
 `ai_review_policy.toml`(사람 전용)은 이제 코드가 읽지 않는다. 사람이 지우는 PR을 올린다.
+환불은 고객지원 일이라 없앤 것(2026-11-02): 감사 규칙 `repeat_refund`·`refund_rate_jump`, 한도 바로 아래 환불 쪼개기, 환불 금액 재계산(`amount_recheck_failed`의 환불·결제 금액 비교, `Sources.paid_amount`), 감사 통계의 환불 건수·금액·환불률, 설정값 `refund_split_*`·`repeat_refund_min`·`refund_rate_jump_*`. 예전 저장 파일에 남은 처리 전 환불 의심 건은 다시 켤 때 뺀다. 장부 기록·결산 환불 합계·정산 환불 차감·사건별 환불 금액·처리 중 클레임 정산 보류는 그대로다.
 
 ## 2. 실행 방법
 `docker compose -f infra/compose.yml up finance` / 목 모드: `FINANCE_MOCK=1` (장부 시드 `src/finance_agent/finance_books_seed.json`, 영향 분석·심사 시드 `mock_seed.json`)

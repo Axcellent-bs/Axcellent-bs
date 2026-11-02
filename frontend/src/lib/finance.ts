@@ -277,10 +277,6 @@ export interface Policy { rules: PolicyRule[]; proposals: PolicyProposal[]; how_
 export type FindingSeverity = "high" | "medium" | "low";
 export interface AuditFinding { code: string; severity: FindingSeverity; title: string; detail: string; refs: string[] }
 export interface AuditStats {
-  refund_count: number | null;
-  refund_amount: number | null;
-  refund_rate: number | null;
-  refund_rate_prev: number | null;
   coupon_count: number | null;
   coupon_amount: number | null;
   gate_held: number | null;
@@ -656,14 +652,6 @@ export function withUnit(n: number | null | undefined, unit: string): string {
   return `${n.toLocaleString("ko-KR")}${unit}`;
 }
 
-/** 환불률 변화를 쉬운 말로: 5.2% vs 3.1% → "지난주보다 2.1%p 높음" */
-export function rateChange(now: number | null | undefined, prev: number | null | undefined): string {
-  if (now == null || prev == null) return "지난주와 비교할 수 없음";
-  const d = Math.round((now - prev) * 1000) / 10;
-  if (d === 0) return "지난주와 같음";
-  return `지난주보다 ${Math.abs(d).toFixed(1)}%p ${d > 0 ? "높음" : "낮음"}`;
-}
-
 /** 사용률 막대 폭 (0~100). 값이 없으면 0 */
 export const barWidth = (ratio: number | null | undefined) => (ratio == null || !Number.isFinite(ratio) ? 0 : Math.max(0, Math.min(100, ratio * 100)));
 
@@ -743,9 +731,7 @@ export const OTHER_CHECK = "기타 점검";
 /** ⑦ 사후 감사 의심 건 종류 */
 export const FINDING_KO: Record<string, string> = {
   split_under_limit: "한도 바로 아래로 쪼개기",
-  repeat_refund: "같은 고객 반복 환불",
   duplicate_coupon: "같은 고객 쿠폰 중복",
-  refund_rate_jump: "환불률 급변",
   amount_recheck_failed: "금액 재계산 불일치",
   gate_hold_trend: "안전 장치 보류·거절 증가",
   compensation_outside_impact: "영향 고객 밖 보상",

@@ -82,7 +82,7 @@ async def _amount_recheck(
         return _check(
             "amount_recheck", None, title, "실행 기록이 없는 쿠폰이 있어 확인할 수 없음", []
         )
-    source = _BooksSource({})
+    source = _BooksSource()
     meta = RequestMeta(
         context_id=context_id, token="audit", deadline=fc.now() + timedelta(seconds=10)
     )
@@ -96,7 +96,7 @@ async def _amount_recheck(
             params=e.get("params") or {},
             computed_amount=e.get("computed_amount"),
         )
-        result = await recompute(meta, data, source, {})
+        result = await recompute(meta, data, source)
         if result.reason_code in RECHECK_FAILURES:
             bad.append(str(e.get("execution_id")))
     detail = (

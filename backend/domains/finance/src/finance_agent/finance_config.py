@@ -92,11 +92,6 @@ class AuditConfig(_Strict):
     near_limit_ratio: float = Field(gt=0, le=1)
     split_window_minutes: int = Field(ge=1)
     split_min_count: int = Field(ge=2)
-    refund_split_window_hours: int = Field(ge=1)
-    refund_split_min_count: int = Field(ge=2)
-    repeat_refund_min: int = Field(ge=2)
-    refund_rate_jump_ratio: float = Field(gt=1)
-    refund_rate_jump_min_diff: float = Field(ge=0)
     gate_hold_min: int = Field(ge=1)
     gate_hold_jump_ratio: float = Field(gt=1)
 
