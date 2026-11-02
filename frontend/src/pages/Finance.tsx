@@ -354,7 +354,7 @@ export default function FinancePage() {
           {tab === "settlements" && <div className="mt-4"><PayablesSection tick={tick} /></div>}
           {tab === "settlements" && <div className="mt-4"><CashflowSection tick={tick} /></div>}
           {tab === "policy" && <><PolicySection tick={tick} /><TeamBudgetSection tick={tick} /></>}
-          {tab === "audit" && <AuditSection tick={tick} />}
+          {tab === "audit" && <AuditSection tick={tick} onChanged={bump} />}
           {tab === "tax" && <TaxSection tick={tick} />}
         </div>
       </div>

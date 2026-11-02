@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -91,6 +92,7 @@ COUPON_KEYS = {
 }
 CHECK_CODES = [
     "recipients_in_impact",
+    "impact_covered",
     "one_coupon_per_buyer",
     "per_customer_limit",
     "per_incident_limit",
@@ -543,6 +545,40 @@ def test_recipients_in_impact_false_and_unknown(mock_mode) -> None:
     assert checks["recipients_in_impact"]["refs"] == ["exe_9"]
     handlers.reset_state(MockSources({"impacts": {}}))  # 영향 분석을 못 받음
     assert _ok(GOOD)["recipients_in_impact"] is None
+
+
+def test_impact_covered_finds_buyers_left_out(mock_mode) -> None:
+    checks = _view(GOOD[:2])  # 영향 고객 4명 중 2명만 보상
+    assert checks["impact_covered"]["ok"] is False
+    assert checks["impact_covered"]["refs"] == ["buy_0003", "buy_0004"]
+    assert "4명 중 2명" in checks["impact_covered"]["detail"]
+    # 나간 돈을 보는 점검은 여전히 통과한다 (이 점검이 없으면 빠진 고객을 못 찾는다)
+    assert checks["recipients_in_impact"]["ok"] is True
+
+
+def test_impact_covered_counts_held_but_not_rejected(mock_mode) -> None:
+    held = {**GOOD[3], "status": "held"}
+    assert _ok([*GOOD[:3], held])["impact_covered"] is True
+    rejected = {**GOOD[3], "status": "rejected"}
+    assert _ok([*GOOD[:3], rejected])["impact_covered"] is False
+
+
+def test_impact_covered_unknown_without_impact_or_ledger(mock_mode) -> None:
+    assert _ok(None)["impact_covered"] is None
+    handlers.reset_state(MockSources({"impacts": {}}))  # 영향 분석을 못 받음
+    assert _ok(GOOD)["impact_covered"] is None
+
+
+def test_window_end_is_never_in_the_future(mock_mode, monkeypatch) -> None:
+    future = fc.now() + timedelta(minutes=15)
+    start = fc.now() - timedelta(minutes=1)
+    monkeypatch.setattr(
+        incidents,
+        "incident_info",
+        AsyncMock(return_value={"window_from": start, "window_to": future, "component": "payment"}),
+    )
+    data, _ = asyncio.run(incidents.incident_view(CTX, _feed(GOOD), THRESHOLDS))
+    assert data["window"]["to"] <= fc.iso(fc.now())
 
 
 def test_one_coupon_per_buyer_false(mock_mode) -> None:

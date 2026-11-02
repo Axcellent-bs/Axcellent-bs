@@ -374,7 +374,7 @@ export interface IncidentLimits {
   per_incident: { limit: number | null; used: number; remaining: number | null };
 }
 
-export type IncidentCheckCode = "recipients_in_impact" | "one_coupon_per_buyer" | "per_customer_limit" | "per_incident_limit" | "amount_recheck";
+export type IncidentCheckCode = "recipients_in_impact" | "impact_covered" | "one_coupon_per_buyer" | "per_customer_limit" | "per_incident_limit" | "amount_recheck";
 export interface IncidentCheck { code: IncidentCheckCode | string; ok: boolean | null; title: string; detail: string; refs: string[] }
 
 
@@ -755,6 +755,7 @@ export const findingKo = (code: string) => FINDING_KO[code] ?? OTHER_CHECK;
 /** ⑰ 사건 후 감사 점검 항목 */
 export const CHECK_KO: Record<IncidentCheckCode, string> = {
   recipients_in_impact: "보상 받은 고객이 모두 영향 고객인지",
+  impact_covered: "영향 고객이 모두 보상 대상에 들었는지",
   one_coupon_per_buyer: "고객당 쿠폰 1건",
   per_customer_limit: "고객당 보상 한도",
   per_incident_limit: "사건당 보상 한도",

@@ -107,6 +107,35 @@ async def _amount_recheck(
     return _check("amount_recheck", not bad, title, detail, bad)
 
 
+def _impact_covered_check(
+    rows: list[dict[str, Any]] | None,
+    impact: Impact | None,
+    exact: bool,
+    impact_ids: frozenset[str],
+) -> dict:
+    """영향 고객이 모두 보상 대상에 들었는지. 나간 돈만 보는 다른 점검은 빠진 고객을 못 찾는다.
+
+    보상 판정은 고객지원 일이라 재무는 판정을 바꾸지 않고 빠진 고객만 알린다.
+    사람 결정을 기다리는 보류 건은 보상 대상에 든 것으로 본다.
+    """
+    title = "영향 고객이 모두 보상 대상에 들었는지"
+    if rows is None or impact is None or not exact:
+        return _check(
+            "impact_covered", None, title, "영향 고객 목록 또는 쿠폰 장부를 확인할 수 없음", []
+        )
+    counted = [r for r in rows if r["status"] in ("executed", "held")]
+    if not all(r.get("buyer_id") for r in counted):
+        return _check("impact_covered", None, title, "쿠폰 수령자를 확인할 수 없음", [])
+    missing = sorted(impact_ids - {str(r["buyer_id"]) for r in counted})
+    total = len(impact_ids)
+    detail = (
+        f"영향 고객 {total}명 모두 보상 대상"
+        if not missing
+        else f"영향 고객 {total}명 중 {len(missing)}명 보상 대상에 없음"
+    )
+    return _check("impact_covered", not missing, title, detail, missing)
+
+
 def incident_refunds(
     books: Any, window: dict[str, Any] | None, impact_ids: frozenset[str] | set[str]
 ) -> dict[str, Any] | None:
@@ -217,6 +246,7 @@ async def incident_view(
     checks.append(
         _check("recipients_in_impact", ok, "보상 받은 고객이 모두 영향 고객인지", detail, refs)
     )
+    checks.append(_impact_covered_check(rows, impact, exact, impact_ids))
 
     if rows is None or (executed and not buyers_known):
         ok, detail, refs = None, "쿠폰 수령자를 확인할 수 없음", []
@@ -261,7 +291,11 @@ async def incident_view(
 
     window = None
     if info["window_from"] and info["window_to"]:
-        window = {"from": fc.iso(info["window_from"]), "to": fc.iso(info["window_to"])}
+        # 총괄이 준 끝은 영향 분석용(시작 + 15분)이라 아직 오지 않은 시각일 수 있다
+        window = {
+            "from": fc.iso(info["window_from"]),
+            "to": fc.iso(min(info["window_to"], fc.now())),
+        }
     impact_out = None
     if impact is not None:
         impact_out = {

@@ -14,7 +14,7 @@ const SEVERITY: Record<FindingSeverity, { label: string; tone: string; rank: num
 const DAYS = [7, 14, 30] as const;
 
 /** 처리 전 의심 건: 감사 기간과 관계없이 사람이 처리할 때까지 남는다. 처리하면 목록에서 빠진다 */
-function OpenAnomalies({ tick }: { tick: number }) {
+function OpenAnomalies({ tick, onChanged }: { tick: number; onChanged?: () => void }) {
   const res = useResource("anomalies", () => finance.anomalies(), tick);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -28,6 +28,7 @@ function OpenAnomalies({ tick }: { tick: number }) {
     try {
       await finance.resolveAnomaly(a.finding_ref, note);
       await res.reload();
+      onChanged?.(); // 맨 위 "지금 사람이 할 일"에서도 바로 빠지게 한다
     } catch (e) {
       setProblem((e as Error).message);
     } finally {
@@ -89,7 +90,7 @@ function OpenAnomalies({ tick }: { tick: number }) {
   );
 }
 
-export function AuditSection({ tick }: { tick: number }) {
+export function AuditSection({ tick, onChanged }: { tick: number; onChanged?: () => void }) {
   const [days, setDays] = useState<number>(7);
   const res = useResource(`audit:${days}`, () => finance.audit(days), tick);
 
@@ -106,7 +107,7 @@ export function AuditSection({ tick }: { tick: number }) {
 
   return (
     <div className="space-y-4">
-    <OpenAnomalies tick={tick} />
+    <OpenAnomalies tick={tick} onChanged={onChanged} />
     <Panel id="audit" title="⑦ 내부통제·감사" titleHidden meta={res.env?.meta} tools={tools}
       hint="한 건씩 막는 일은 안전 장치가 합니다. 재무 AI는 지난 기록을 전부 다시 훑어, 한도를 피하려고 쪼갠 쿠폰이나 같은 고객의 반복 환불 같은 수상한 패턴을 찾습니다. 의심 건은 조사해 보고 결론을 남기세요.">
       <ResourceBody res={res}>
