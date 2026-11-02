@@ -289,6 +289,38 @@ export interface TrendScanOutput {
   value_kind: "relative";
   results: TrendVerdict[];
 }
+// ---------------------------------------------------------------- YouTube 후보 (trend_candidates)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py TrendCandidatesOutput (#335).
+// 후보는 최신 YouTube 인기 영상 스냅샷의 태그에서 코드 규칙으로 뽑고, 네이버 판정은 trend_scan과 같은 함수 결과다.
+export interface YouTubeTagEvidence {
+  /** 이 태그가 붙은 인기 영상 수 */
+  video_count: number;
+  /** 스냅샷 수집 시각 */
+  snapshot_at: string;
+  /** 대표 영상 id (인기 순위 순) */
+  video_ids: string[];
+}
+export interface TrendCandidate {
+  keyword: string;
+  youtube: YouTubeTagEvidence;
+  /** 네이버 판정. 네이버를 못 읽으면 이 후보만 unknown + 이유 */
+  naver: TrendVerdict;
+}
+export interface TrendCandidatesOutput {
+  /** unknown = 스냅샷이 없거나 오래됨 (후보를 뽑지 않음) */
+  status: "known" | "unknown";
+  unknown_reason: string | null;
+  snapshot_at: string | null;
+  snapshot_videos: number;
+  start_date: string | null;
+  end_date: string | null;
+  /** 나온 영상 수 많은 순 */
+  candidates: TrendCandidate[];
+  naver_calls: number;
+  /** 코드가 숫자로 만든 한 문장 */
+  summary: string;
+}
+
 /** 한 번에 판정할 수 있는 그룹 수 (화면 입력 한도) */
 export const TREND_MAX_GROUPS = 5;
 
@@ -361,6 +393,8 @@ export const dataAi = {
       groups.length ? { keyword_groups: groups.map((g) => ({ group_name: g, keywords: [g] })) } : {},
       TREND_DEADLINE_MS,
     ),
+  /** YouTube 인기 태그 후보 + 후보마다 네이버 판정. 입력을 비우면 회사 설정(trends.toml [candidates])과 어제 날짜. 후보마다 네이버 1번 */
+  trendCandidates: () => askData<TrendCandidatesOutput>("trend_candidates", "YouTube 후보 판정", {}, TREND_DEADLINE_MS),
   /** 캠페인 효과. from·to는 ISO 시각(UTC). campaignId가 없으면 쿠폰은 서버가 "확인할 수 없음"으로 답한다 */
   campaignEffect: (from: string, to: string, campaignId: string | null) =>
     askData<CampaignEffectOutput>(

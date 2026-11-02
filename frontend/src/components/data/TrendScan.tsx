@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Chip, Empty, ErrorBox, Panel, TONE, Waiting, useResource } from "@/components/finance/bits";
 import { PreparingChip } from "@/components/Preparing";
 import { CampaignEffect } from "@/components/data/CampaignEffect";
@@ -6,13 +6,16 @@ import { ContentLoop, type LoopTrendState } from "@/components/data/ContentLoop"
 import { SEND_TO_MARKETING_BLOCKED, type LoopProbe } from "@/lib/contentLoop";
 import {
   DATA_SERVER, TREND_MAX_GROUPS, dataAi, evidenceLines, kpiLive,
-  type TrendScanOutput, type TrendVerdict,
+  type TrendCandidatesOutput, type TrendScanOutput, type TrendVerdict, type YouTubeTagEvidence,
 } from "@/lib/data";
 
-// 트렌드 탭 (#trend): 데이터 AI(8106) trend_scan 출력을 그대로 보여 준다.
+// 트렌드 탭 (#trend): 데이터 AI(8106) trend_scan·trend_candidates 출력을 그대로 보여 준다.
 // - 판정·배수·z·평소 범위·문장은 모두 서버 값이다. 화면은 순서(배수 큰 순)와 자릿수만 정한다.
 // - 값은 검색 건수가 아니라 "그 요청 안 최댓값 = 100"인 상대값이다. 그룹마다 따로 요청해서 그룹끼리 높이는 비교하지 않는다.
-// - 출처는 네이버 검색어 트렌드뿐이다. YouTube는 판정 데이터가 아직 없어 표시하지 않는다.
+// - 급상승은 배수가 아니라 평소 흔들림 대비(z)로 판정한다. 그래서 카드에 배수와 z를 같은 크기로 함께 보여 준다.
+// - 기본 판정(입력 비움) = 회사 기본 키워드(trend_scan) + YouTube 인기 태그 후보(trend_candidates, 후보마다 네이버 판정).
+//   같은 이름이면 YouTube 근거가 있는 후보 쪽 판정을 쓴다. 직접 입력이면 trend_scan만 부른다.
+// - YouTube 후보 중 검색이 평소 수준인 것(교차 확인에서 걸러진 것)은 카드 아래 목록에 따로 보여 준다.
 // - 판정마다 서버가 LLM으로 문장을 쓰므로 30초 새로고침을 따르지 않는다. 처음 한 번 + "판정"·"다시 판정"을 누를 때만 부른다.
 // - 맨 아래는 캠페인 효과(campaign_effect, 콘텐츠 루프 4단계). 루프 1·4단계 칩은 이 탭이 받은 두 응답의 정상·실패로 정한다.
 
@@ -87,7 +90,26 @@ function TrendChart({ v }: { v: TrendVerdict }) {
 
 // ------------------------------------------------------------------- 급상승 카드
 
-function RisingCard({ v, rank }: { v: TrendVerdict; rank: number }) {
+/** 화면에 그릴 판정 하나. youtube가 있으면 YouTube 후보에서 온 것 */
+type Entry = { v: TrendVerdict; youtube?: YouTubeTagEvidence };
+
+/** 배수와 z를 같은 크기로. 배수만 크게 보이면 "배수는 큰데 평범" 같은 경우가 헷갈린다 */
+function Stats({ v }: { v: TrendVerdict }) {
+  return (
+    <div className="flex gap-4 text-right">
+      <div>
+        <p className="text-2xl font-bold leading-none text-red-600">{fixed(v.ratio) ?? "-"}배</p>
+        <p className="mt-1 text-[11px] text-ink-500">평소 대비</p>
+      </div>
+      <div>
+        <p className="text-2xl font-bold leading-none text-red-600">z {fixed(v.evidence.score) ?? "-"}</p>
+        <p className="mt-1 text-[11px] text-ink-500">평소 흔들림 대비</p>
+      </div>
+    </div>
+  );
+}
+
+function RisingCard({ v, youtube, rank }: { v: TrendVerdict; youtube?: YouTubeTagEvidence; rank: number }) {
   const [open, setOpen] = useState(false);
   const e = v.evidence;
   return (
@@ -97,15 +119,13 @@ function RisingCard({ v, rank }: { v: TrendVerdict; rank: number }) {
           <p className="text-[11px] font-semibold text-ink-500">#{rank}</p>
           <h3 className="truncate text-lg font-bold text-ink-900">{v.group_name}</h3>
         </div>
-        <div className="text-right">
-          <p className="text-3xl font-bold leading-none text-red-600">{fixed(v.ratio) ?? "-"}배</p>
-          <p className="mt-1 text-[11px] text-ink-500">평소 대비{e.score != null ? ` · z ${fixed(e.score)}` : ""}</p>
-        </div>
+        <Stats v={v} />
       </div>
       <TrendChart v={v} />
       <div className="flex flex-wrap gap-1.5">
         <Chip label="급상승" tone={TONE.bad} />
         <Chip label="✓ 네이버 검색" tone={TONE.info} />
+        {youtube && <Chip label={`✓ YouTube 인기 태그 (영상 ${youtube.video_count}개)`} tone={TONE.info} />}
       </div>
       {v.summary && <p className="border-l-2 border-brand-500 bg-ink-50 px-3 py-2 text-sm leading-relaxed text-ink-700">{v.summary}</p>}
       {open && (
@@ -133,40 +153,114 @@ function RisingCard({ v, rank }: { v: TrendVerdict; rank: number }) {
 
 // ------------------------------------------------------------------- 본문
 
-function Result({ out, headline }: { out: TrendScanOutput; headline: string | null }) {
-  const rising = out.results.filter((r) => r.status === "rising").sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0));
-  const rest = out.results.filter((r) => r.status !== "rising");
+/** 기본 판정이면 trend_scan 결과와 YouTube 후보를 합친다. 같은 이름(대소문자 무시)은 후보 쪽을 쓴다 */
+function mergeEntries(out: TrendScanOutput, cands: TrendCandidatesOutput | null): Entry[] {
+  const fromYoutube: Entry[] = (cands?.candidates ?? []).map((c) => ({ v: c.naver, youtube: c.youtube }));
+  const names = new Set(fromYoutube.map((e) => e.v.group_name.toLowerCase()));
+  return [...out.results.filter((r) => !names.has(r.group_name.toLowerCase())).map((v) => ({ v })), ...fromYoutube];
+}
+
+/** 시각 → 이 컴퓨터 시간 */
+const when = (iso: string | null | undefined) => {
+  const t = iso ? Date.parse(iso) : Number.NaN;
+  return Number.isNaN(t) ? null : new Date(t).toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" });
+};
+
+type CandState =
+  | { kind: "off" }
+  | { kind: "loading" }
+  | { kind: "ok"; out: TrendCandidatesOutput }
+  | { kind: "failed"; reason: string };
+
+/** 스냅샷 줄: 시각·영상 수, 또는 서버 이유 그대로 */
+function snapshotLine(c: CandState): { text: string; warn: boolean } | null {
+  if (c.kind === "off") return null;
+  if (c.kind === "loading") return { text: "YouTube 후보를 판정하는 중…", warn: false };
+  if (c.kind === "failed") return { text: `YouTube 후보: ${c.reason}`, warn: true };
+  if (c.out.status === "unknown") return { text: `YouTube 후보: ${c.out.unknown_reason ?? "서버가 이유를 주지 않았어요"}`, warn: true };
+  return {
+    text: `YouTube 스냅샷 ${when(c.out.snapshot_at) ?? "-"} · 인기 영상 ${c.out.snapshot_videos}개 · 후보 ${c.out.candidates.length}개 · 네이버 호출 ${c.out.naver_calls}번`,
+    warn: false,
+  };
+}
+
+/** YouTube에서 뜨지만 검색은 평소 수준 (교차 확인에서 걸러진 것) + 검색 판정 불가 후보 */
+function YoutubeOnly({ cands }: { cands: CandState }) {
+  if (cands.kind === "off") return null;
+  const line = snapshotLine(cands);
+  const list = cands.kind === "ok" ? cands.out.candidates.filter((c) => c.naver.status !== "rising") : [];
+  let body;
+  if (cands.kind === "loading") body = <Waiting what="YouTube 후보를 판정하는 중…" />;
+  else if (cands.kind === "failed") body = <Empty>YouTube 후보를 받지 못했어요. {cands.reason}</Empty>;
+  else if (cands.out.status === "unknown") body = <Empty>{cands.out.unknown_reason}</Empty>;
+  else if (list.length === 0) body = <Empty>YouTube 후보가 모두 검색에서도 급상승이에요.</Empty>;
+  else {
+    body = (
+      <>
+        <ul className="divide-y divide-ink-100">
+          {list.map((c) => (
+            <li key={c.keyword} className="flex flex-wrap items-center gap-3 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-ink-900">{c.keyword}</p>
+                <p className="text-xs text-ink-500">
+                  YouTube 인기 영상 {c.youtube.video_count}개 · {c.naver.status === "unknown" ? `검색 판정 불가: ${c.naver.unknown_reason ?? ""}` : "검색은 평소 범위 안"}
+                </p>
+              </div>
+              {c.naver.status === "normal" && (
+                <span className="text-sm text-ink-500">{fixed(c.naver.ratio) ?? "-"}배 · z {fixed(c.naver.evidence.score) ?? "-"}</span>
+              )}
+              <Chip label={c.naver.status === "unknown" ? "판정 불가" : "평범"} tone={c.naver.status === "unknown" ? TONE.warn : TONE.ok} />
+            </li>
+          ))}
+        </ul>
+        {cands.out.summary && <p className="mt-2 text-xs text-ink-500">{cands.out.summary}</p>}
+      </>
+    );
+  }
+  return (
+    <Panel id="data-trend-youtube" title="YouTube에서 뜨지만 검색은 평소 수준"
+      hint={line && <span className={line.warn ? "text-amber-700" : undefined}>{line.text}</span>}>
+      {body}
+    </Panel>
+  );
+}
+
+function Result({ entries, headline, cands }: { entries: Entry[]; headline: string | null; cands: CandState }) {
+  const rising = entries.filter((e) => e.v.status === "rising").sort((a, b) => (b.v.ratio ?? 0) - (a.v.ratio ?? 0));
+  // 아래 "평소 수준 · 판정 불가"는 기본 키워드·직접 입력 그룹만. YouTube 후보는 YoutubeOnly에서 따로
+  const rest = entries.filter((e) => e.v.status !== "rising" && !e.youtube).map((e) => e.v);
   return (
     <div className="space-y-5">
       <section aria-labelledby="trend-rising-title" className="space-y-3">
         <div>
           <p className="panel-title">지금 뜨는 소재</p>
           <h2 id="trend-rising-title" className="mt-1 text-lg font-bold text-ink-900">{headline ?? `급상승 ${rising.length}개`}</h2>
+          <p className="mt-1 text-xs text-ink-500">급상승은 배수가 아니라 평소 흔들림 대비(z)로 판정해요. 평소에 많이 출렁이는 키워드는 배수가 커도 평범일 수 있어요.</p>
         </div>
         {rising.length === 0 ? (
           <Empty>이번 판정 구간에 급상승한 키워드 그룹이 없어요.</Empty>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {rising.map((v, i) => <RisingCard key={v.group_name} v={v} rank={i + 1} />)}
+            {rising.map((e, i) => <RisingCard key={`${e.youtube ? "yt" : "kw"}-${e.v.group_name}`} v={e.v} youtube={e.youtube} rank={i + 1} />)}
           </div>
         )}
         {rising.length > 0 && <p className="text-xs text-ink-500">마케팅에 소재로 보내기: {SEND_TO_MARKETING_BLOCKED}</p>}
       </section>
 
+      <YoutubeOnly cands={cands} />
+
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <Panel id="data-trend-rest" title="평소 수준 · 판정 불가">
-            {rest.length === 0 ? <Empty>모든 그룹이 급상승이에요.</Empty> : (
+            {rest.length === 0 ? <Empty>평소 수준이거나 판정 불가인 그룹이 없어요.</Empty> : (
               <ul className="divide-y divide-ink-100">
                 {rest.map((v) => (
                   <li key={v.group_name} className="flex flex-wrap items-center gap-3 py-3">
                     <div className="min-w-0 flex-1">
                       <p className="font-semibold text-ink-900">{v.group_name}</p>
-                      <p className="text-xs text-ink-500">
-                        {v.status === "unknown" ? v.unknown_reason : `평소 범위 안${v.evidence.score != null ? ` · z ${fixed(v.evidence.score)}` : ""}`}
-                      </p>
+                      <p className="text-xs text-ink-500">{v.status === "unknown" ? v.unknown_reason : "평소 범위 안"}</p>
                     </div>
-                    {v.status === "normal" && <span className="text-sm text-ink-500">{fixed(v.ratio) ?? "-"}배</span>}
+                    {v.status === "normal" && <span className="text-sm text-ink-500">{fixed(v.ratio) ?? "-"}배 · z {fixed(v.evidence.score) ?? "-"}</span>}
                     <Chip label={v.status === "unknown" ? "판정 불가" : "평범"} tone={v.status === "unknown" ? TONE.warn : TONE.ok} />
                   </li>
                 ))}
@@ -194,6 +288,21 @@ export function TrendScan() {
   const [run, setRun] = useState(0);
   const [campaignProbe, setCampaignProbe] = useState<LoopProbe>("idle");
   const res = useResource(`trend-${groups.join("|")}`, () => dataAi.trendScan(groups).then((r) => ({ data: r, meta: { mock: false } })), run);
+  // YouTube 후보는 기본 판정(입력 비움)에서만 부른다. 직접 입력이면 부르지 않는다
+  const useCandidates = groups.length === 0;
+  const [cands, setCands] = useState<CandState>({ kind: "off" });
+  useEffect(() => {
+    if (!kpiLive || !useCandidates) {
+      setCands({ kind: "off" });
+      return;
+    }
+    let live = true;
+    setCands({ kind: "loading" });
+    dataAi.trendCandidates()
+      .then((r) => live && setCands({ kind: "ok", out: r.output }))
+      .catch((e: Error) => live && setCands({ kind: "failed", reason: e.message }));
+    return () => { live = false; };
+  }, [useCandidates, run]);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -220,16 +329,25 @@ export function TrendScan() {
   }
 
   const out = res.env?.data.output ?? null;
-  const headline = evidenceLines(res.env?.data.evidence?.data_summary).headline;
+  const candOut = cands.kind === "ok" ? cands.out : null;
+  const entries = out ? mergeEntries(out, candOut) : [];
+  // 서버 headline은 trend_scan 결과만 센 문장이라, YouTube 후보를 합친 기본 판정에서는 쓰지 않는다
+  const headline = candOut?.candidates.length ? null : evidenceLines(res.env?.data.evidence?.data_summary).headline;
   const windowFrom = out?.results.find((r) => r.window_from)?.window_from ?? null;
+  const snapshot = snapshotLine(cands);
+  const youtubeNote = cands.kind === "failed" ? cands.reason
+    : candOut?.status === "unknown" ? (candOut.unknown_reason ?? "서버가 이유를 주지 않았어요") : undefined;
   // 콘텐츠 루프 1단계: 이 탭이 이미 받은 응답의 판정 개수 (다시 부르지 않는다)
   const loopTrend: LoopTrendState = out
     ? {
         kind: "counts",
         counts: {
-          rising: out.results.filter((r) => r.status === "rising").length,
-          normal: out.results.filter((r) => r.status === "normal").length,
-          unknown: out.results.filter((r) => r.status === "unknown").length,
+          rising: entries.filter((e) => e.v.status === "rising").length,
+          normal: entries.filter((e) => e.v.status === "normal").length,
+          unknown: entries.filter((e) => e.v.status === "unknown").length,
+          youtube: candOut?.status === "known" ? candOut.candidates.length : undefined,
+          confirmed: entries.filter((e) => e.v.status === "rising" && e.youtube).length,
+          youtubeNote,
         },
       }
     : res.loading
@@ -247,15 +365,19 @@ export function TrendScan() {
         <div className="min-w-0 flex-1">
           <p className="text-sm text-ink-500">
             {out ? `판정 ${windowFrom ?? out.start_date} ~ ${out.end_date} · 기준선 직전 56일 · ` : ""}
-            {groups.length ? `직접 고른 그룹 ${groups.length}개` : "기본 키워드 (회사 설정 trends.toml)"}
+            {groups.length ? `직접 고른 그룹 ${groups.length}개` : "기본 키워드 (회사 설정 trends.toml) + YouTube 인기 태그 후보"}
           </p>
-          <div className="mt-1 flex flex-wrap gap-1.5"><Chip label="네이버 검색" tone={TONE.info} /></div>
+          {snapshot && <p className={`mt-0.5 text-[11px] ${snapshot.warn ? "text-amber-700" : "text-ink-500"}`}>{snapshot.text}</p>}
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            <Chip label="네이버 검색" tone={TONE.info} />
+            {useCandidates && <Chip label="YouTube 인기 태그" tone={TONE.info} />}
+          </div>
         </div>
         <form onSubmit={submit} className="flex w-full flex-wrap items-start gap-2 sm:w-auto" aria-label="키워드 직접 판정">
           <div className="min-w-0 flex-1 sm:w-80">
             <label htmlFor="trend-groups" className="sr-only">키워드 직접 판정</label>
             <input id="trend-groups" className="field" value={text} onChange={(e) => setText(e.target.value)}
-              placeholder={`키워드 직접 판정 (쉼표로 최대 ${TREND_MAX_GROUPS}개, 비우면 기본 키워드)`} aria-describedby="trend-groups-help" />
+              placeholder={`키워드 직접 판정 (쉼표로 최대 ${TREND_MAX_GROUPS}개, 비우면 기본 키워드 + YouTube 후보)`} aria-describedby="trend-groups-help" />
             <p id="trend-groups-help" className={`mt-1 text-[11px] ${inputError ? "text-red-700" : "text-ink-500"}`}>
               {inputError ?? "그룹마다 네이버를 한 번씩 부릅니다."}
             </p>
@@ -273,7 +395,7 @@ export function TrendScan() {
       ) : (
         <>
           {res.error && <ErrorBox message={`새로 판정하지 못해 이전 결과를 보여 줍니다. ${res.error}`} onRetry={res.reload} />}
-          {out && <Result out={out} headline={headline} />}
+          {out && <Result entries={entries} headline={headline} cands={cands} />}
         </>
       )}
       <CampaignEffect onProbe={setCampaignProbe} />
