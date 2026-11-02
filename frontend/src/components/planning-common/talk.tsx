@@ -42,7 +42,7 @@ export function Talk({ s: state, d, item }: { s: State; d: Dispatch<Action>; ite
   return (
     <div className="slack">
       <aside className="sl-side" aria-label="채널">
-        <div className="sl-ws">기획·개발 소통</div>
+        <div className="sl-ws">소통</div>
         <Group label="채널" list={s.threads.filter((t) => t.kind === 'team')} cur={item} fallback={!convo} />
         <Group label="부서" list={s.threads.filter((t) => t.kind === 'dept')} cur={item} />
         <Group label="문서 스레드" list={s.threads.filter((t) => !t.kind || t.kind === 'spec')} cur={item} />

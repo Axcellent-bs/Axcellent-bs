@@ -35,7 +35,8 @@ ax-backend/
 ├─ shop-api/              # 판매 사이트 서버 — 재헌
 ├─ dashboard-api/         # 대시보드 서버 — 병환
 ├─ agents/
-│  ├─ planning/           # 기획·개발 — 예진
+│  ├─ planning/           # 기획 — 예진
+│  ├─ dev/                # 개발 (2026-11-02 기획에서 분리) — 예진
 │  ├─ infra-dejafix/      # DejaFix 어댑터 — 예진
 │  ├─ support/            # 고객지원 — 병환
 │  ├─ marketing/          # 마케팅 — 재헌

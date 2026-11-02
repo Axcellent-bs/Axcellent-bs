@@ -1,5 +1,5 @@
-// 다른 부서 시뮬레이터. 실제 부서 에이전트 대신 버튼으로 기획·개발에 데이터를 보내고,
-// 기획·개발이 보낸 메시지·데이터(outbox)를 부서별 창구에서 확인한다.
+// 다른 부서 시뮬레이터. 실제 부서 에이전트 대신 버튼으로 기획에 데이터를 보내고,
+// 기획이 보낸 메시지·데이터(outbox)를 부서별 창구에서 확인한다.
 import { useEffect, useState, type Dispatch } from 'react'
 import { Button, Card, Chip, Notice, PageHeader, Select, useToast } from '@dejafix/common-frontend'
 import { DEPT_ANSWER, DEPT_NAME, type Action, type Dept, type InboundKind, type State } from '@/lib/planningData'
@@ -52,8 +52,8 @@ export function DeptSimulator({ s, d }: { s: State; d: Dispatch<Action> }) {
   useDeptAgents(s, d)
   return (
     <main className="page page-wide">
-      <PageHeader title="다른 부서 (시뮬레이터)" sub="실제 부서 에이전트 대신 버튼으로 기획·개발에 데이터를 보낸다. 오른쪽 창구에는 기획·개발이 보낸 메시지·데이터가 쌓인다." />
-      <Notice icon="bell">버튼을 누르면 기획·개발 화면(5173)이 바로 바뀝니다. 요청은 사이드바 "요청", 메시지는 "소통" 배지에 새로 받은 건수가 뜹니다.</Notice>
+      <PageHeader title="다른 부서 (시뮬레이터)" sub="실제 부서 에이전트 대신 버튼으로 기획에 데이터를 보낸다. 오른쪽 창구에는 기획이 보낸 메시지·데이터가 쌓인다." />
+      <Notice icon="bell">버튼을 누르면 기획 화면이 바로 바뀝니다. 요청은 사이드바 "요청", 메시지는 "소통" 배지에 새로 받은 건수가 뜹니다.</Notice>
       <div className="dept-grid">
         {DEPTS.map(({ dept, owner, senders }) => {
           const inbox = s.outbox.filter((m) => m.to === dept).slice().reverse()
@@ -67,7 +67,7 @@ export function DeptSimulator({ s, d }: { s: State; d: Dispatch<Action> }) {
                       <Point>{x.point}</Point>
                       <div className="muted small">{x.what}</div>
                     </div>
-                    <Button size="small" variant="primary" onClick={() => { d({ type: 'inbound', kind: x.kind }); toast.show(`${DEPT_NAME[dept]} → 기획·개발 ${x.point} 보냄`) }}>{x.label}</Button>
+                    <Button size="small" variant="primary" onClick={() => { d({ type: 'inbound', kind: x.kind }); toast.show(`${DEPT_NAME[dept]} → 기획 ${x.point} 보냄`) }}>{x.label}</Button>
                   </div>
                 ))}
                 {dept === 'safety' && s.autoPolicy.rules.filter((r) => r.status === '승인 대기' && r.approver === '사람 (태윤)').map((r) => (
@@ -92,7 +92,7 @@ export function DeptSimulator({ s, d }: { s: State; d: Dispatch<Action> }) {
               </div>
               <div className="dept-inbox">
                 <div className="dept-inbox-h">
-                  기획·개발에서 받은 것 {unread > 0 && <Chip tone="amber">새로 {unread}</Chip>}
+                  기획에서 받은 것 {unread > 0 && <Chip tone="amber">새로 {unread}</Chip>}
                   <span style={{ flex: 1 }} />
                   {unread > 0 && <button type="button" className="linkish" onClick={() => d({ type: 'markRead', to: dept })}>모두 읽음</button>}
                 </div>
@@ -115,7 +115,7 @@ export function DeptSimulator({ s, d }: { s: State; d: Dispatch<Action> }) {
   )
 }
 
-// 기획·개발 → 다른 부서 보내기 창구 (연동 탭에 붙는다)
+// 기획 → 다른 부서 보내기 창구 (연동 탭에 붙는다)
 const KINDS = [
   { value: 'get_request_status', label: '처리 상태 회신' },
   { value: 'deploy_notice', label: '개발 완료·배포 알림' },

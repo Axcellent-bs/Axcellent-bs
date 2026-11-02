@@ -280,7 +280,7 @@ def initial_state() -> State:
         docs=[
             Doc(
                 id="DOC-1",
-                title="10/22 기획·개발 정리",
+                title="10/22 기획 정리",
                 updated_at=kst("10-22 09:30"),
                 blocks=[
                     DocBlock(id="b1", kind="h2", text="오늘 할 일"),

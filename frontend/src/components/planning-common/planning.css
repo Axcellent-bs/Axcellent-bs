@@ -1,4 +1,4 @@
-/* 기획·개발 탭 전용 배치. 색·모서리는 common-frontend 토큰만 쓴다 */
+/* 기획·개발 화면이 같이 쓰는 배치. 색·모서리는 common-frontend 토큰만 쓴다 */
 .subtabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 14px; flex-wrap: wrap; }
 .subtabs a { padding: 10px 14px; color: var(--text-2); text-decoration: none; border-bottom: 2px solid transparent; font-size: 14.5px; margin-bottom: -1px; }
 .subtabs a:hover { color: var(--text); }
@@ -455,7 +455,7 @@ a.plain-link:hover { color: var(--primary); }
 .rq-c .rq-dot { transition: background-color .5s ease, box-shadow .5s ease; }
 @media (prefers-reduced-motion: reduce) { .rq-item.fresh { animation: none; } .rq-c::before, .rq-c .rq-dot { transition: none; } }
 
-/* 업무 시스템 안의 기획·개발 화면. 색·모서리는 common-frontend 토큰을 그대로 쓴다. */
+/* 업무 시스템 안의 기획 화면·개발 화면. 색·모서리는 common-frontend 토큰을 그대로 쓴다. */
 .planning-scope { min-height: 100%; background: var(--bg); color: var(--text); }
 .pl-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 8px 32px 0; }
 .pl-title { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.3; }

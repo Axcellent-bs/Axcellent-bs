@@ -1,5 +1,5 @@
-// 기획·개발(planning) 화면의 목 데이터와 상태 변화.
-// 실제로는 기획·개발 에이전트의 /api/planning/... 응답이 들어올 자리다 (PLANNING_MOCK=1 과 같은 역할).
+// 기획(planning)·개발(dev) 화면의 목 데이터와 상태 변화.
+// 실제로는 기획·개발 서비스의 /api/planning/... 응답이 들어올 자리다 (PLANNING_MOCK=1 과 같은 역할).
 // 부서 간 연결 지점 이름은 공통 구성안(agent-common)과 10/22 부서별 수정 요청을 따른다.
 //
 // 승인 방식 (10/23 결정): "사람의 사전 승인" 대신 "AI 교차검증 + 사람 사후 감사".
@@ -175,7 +175,7 @@ export interface Activity {
   text: string
 }
 
-// 기획·개발 → 다른 부서로 나간 메시지·데이터 (다른 부서 페이지의 "기획·개발에서 받은 것")
+// 기획·개발 → 다른 부서로 나간 메시지·데이터 (다른 부서 페이지의 "기획에서 받은 것")
 export interface OutMsg {
   id: number
   t: string
@@ -454,7 +454,7 @@ export const initialState: State = {
     { id: 'CH-infra', on: '', kind: 'dept', peer: 'infra', title: '인프라(DejaFix)', messages: [] },
   ],
   docs: [
-    { id: 'DOC-1', title: '10/22 기획·개발 정리', updated: '10-22 09:30', blocks: [
+    { id: 'DOC-1', title: '10/22 기획 정리', updated: '10-22 09:30', blocks: [
       { id: 'b1', kind: 'h2', text: '오늘 할 일' },
       { id: 'b2', kind: 'todo', text: 'SPEC-7 품절 상품 처리 질문 답 받기 (고객지원)', done: false },
       { id: 'b3', kind: 'todo', text: 'SPEC-7 교차검증 결과 보고 PR 생성', done: false },
@@ -1395,7 +1395,7 @@ function inner(s: State, a: Action): State {
   }
 }
 
-// ---- 기획·개발의 연결 지점 대장 (연동 화면). 공통 구성안 4·8·9장 + 수정 요청 기준
+// ---- 기획·개발 서비스의 연결 지점 대장 (연동 화면). 공통 구성안 4·8·9장 + 수정 요청 기준
 export interface Port {
   point: string
   dir: 'in' | 'out'
