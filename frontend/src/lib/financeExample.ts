@@ -1,6 +1,6 @@
 // 재무 화면 "예시 데이터" 모드. 서버 대신 화면 안의 예시 응답(financeExample.json)으로 재무 AI 흐름을 보여 준다.
 // 예시 응답은 재무 백엔드를 목 시드로 돌린 결과다(`backend/domains/finance/demo/export_example.py`로 다시 만든다).
-// 사람이 누른 결정(결산 확정·대사 메모·정산 요청·감사 처리·경보 확인·보류 큐 결정)은 이 브라우저 화면 안에서만
+// 사람이 누른 결정(결산 확정·대사 메모·정산 요청·감사 처리·보류 큐 결정)은 이 브라우저 화면 안에서만
 // 바뀌고 서버에는 아무것도 보내지 않는다. 새로고침하면 처음 예시로 돌아간다.
 import raw from "./financeExample.json";
 import type {
@@ -133,12 +133,6 @@ async function financeCall(method: string, path: string, body: Record<string, un
     list.resolved = [done, ...list.resolved];
     dropTodoItem("audit_finding", ref);
     return { data: done, meta: { ...META, resolved_by: PERSON } };
-  }
-  const ack = /^\/api\/finance\/policy\/([^/]+)\/ack$/.exec(path);
-  if (ack) {
-    const key = decodeURIComponent(ack[1]);
-    dropTodoItem("policy_alert", key);
-    return { data: { key, note: String(body.note ?? ""), by: PERSON, at: now() }, meta: { ...META, acked_by: PERSON } };
   }
   const team = /^\/api\/finance\/team-budget\/([^/]+)\/approve$/.exec(path);
   if (team) {

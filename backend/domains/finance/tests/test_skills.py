@@ -12,7 +12,6 @@ from ax_agent_template import events
 from ax_contracts.schemas import EventEnvelope, EventType, ExecuteDecision
 from finance_agent import handlers
 from finance_agent.main import app, load_card
-from finance_agent.recheck import VerifyAmountInput, recompute
 from finance_agent.sources import MockSources
 
 CTX = "ctx_inc_0001"
@@ -59,54 +58,6 @@ def _call(client: TestClient, skill: str, data: dict, **kw: Any) -> dict:
     return response.json()
 
 
-def _verify(
-    params: dict,
-    *,
-    action: str = "issue_coupon",
-    execution_id: str = "exe_1",
-    computed: int | None = None,
-) -> dict:
-    return {
-        "execution_id": execution_id,
-        "action": action,
-        "requester": "marketing",
-        "params": params,
-        "computed_amount": computed,
-        "threshold_version": 1,
-    }
-
-
-def _recheck(data: dict, sources: MockSources | None = None) -> dict:
-    """금액 다시 계산 규칙(`recheck.recompute`). verify_amount skill은 없어졌고 계산은 남았다."""
-    import asyncio
-
-    from ax_contracts.schemas import RequestMeta
-
-    meta = RequestMeta(
-        context_id=CTX, token="x", deadline=datetime.now(UTC) + timedelta(seconds=30)
-    )
-    state = handlers.state()
-    out = asyncio.run(
-        recompute(
-            meta,
-            VerifyAmountInput.model_validate(data),
-            sources or state.sources,
-        )
-    )
-    return {"status": "completed", "output": out.model_dump(mode="json")}
-
-
-def _coupon(count: int = 1, unit: int = 5000, buyer: str = "buy_0901", **extra: Any) -> dict:
-    return {
-        "purpose_code": "compensation",
-        "buyer_id": buyer,
-        "count": count,
-        "unit_value": unit,
-        "total_value": count * unit,
-        **extra,
-    }
-
-
 def _fake_execute(monkeypatch: pytest.MonkeyPatch, decision: ExecuteDecision) -> list[dict]:
     calls: list[dict] = []
 
@@ -145,46 +96,6 @@ def test_agent_card(client: TestClient) -> None:
 
 
 # ------------------------------------------- 금액 다시 계산 (예전 verify_amount, recheck.py)
-def test_verify_approves_recomputed_match(client: TestClient) -> None:
-    result = _recheck(_verify(_coupon(2, 5000), computed=10_000))
-    assert result["status"] == "completed"
-    assert result["output"]["decision"] == "approved"
-    assert result["output"]["recomputed"] == {"count": 2, "unit_value": 5000, "total_value": 10_000}
-
-
-def test_verify_rejects_amount_mismatch(client: TestClient) -> None:
-    """⑦ 계산: 요청 총액 10,000원이어도 2 × 5,000 = 10,000이 아니라 3 × 5,000이면 거절."""
-    params = _coupon(3, 5000) | {"total_value": 10_000}
-    out = _recheck(_verify(params))["output"]
-    assert (out["decision"], out["reason_code"]) == ("rejected", "amount_mismatch")
-    assert out["recomputed"]["total_value"] == 15_000
-
-
-def test_verify_rejects_when_safety_amount_differs(client: TestClient) -> None:
-    out = _recheck(_verify(_coupon(1, 5000), computed=9_999))["output"]
-    assert out["reason_code"] == "amount_mismatch"
-
-
-def test_verify_rejects_unaffected_buyer(client: TestClient) -> None:
-    """보상 쿠폰은 data 영향 고객에게만. 시드의 영향 고객은 buy_0901·buy_0902·buy_0903."""
-    out = _recheck(_verify(_coupon(buyer="buy_0999")))["output"]
-    assert (out["decision"], out["reason_code"]) == ("rejected", "not_affected")
-
-
-def test_verify_fails_closed_without_source(client: TestClient) -> None:
-    handlers.reset_state(MockSources({"impacts": {}}))
-    out = _recheck(_verify(_coupon()))["output"]
-    assert (out["decision"], out["reason_code"]) == ("rejected", "source_unavailable")
-
-
-@pytest.mark.parametrize(
-    "bad", [{"count": "2"}, {"count": 0}, {"unit_value": True}, {"count": None}]
-)
-def test_verify_rejects_invalid_params(client: TestClient, bad: dict) -> None:
-    out = _recheck(_verify(_coupon() | bad))["output"]
-    assert out["reason_code"] == "invalid_params"
-
-
 def test_refunds_accumulate_from_events(client: TestClient) -> None:
     import asyncio
 
@@ -207,24 +118,6 @@ def test_refunds_accumulate_from_events(client: TestClient) -> None:
     )
     ledger = client.get("/api/finance/ledger").json()["data"]
     assert ledger["refunds"] == [{"order_id": "ord_1001", "refunded": 20_000}]
-
-
-def test_verify_unsupported_action(client: TestClient) -> None:
-    out = _recheck(_verify({}, action="publish_notice"))["output"]
-    assert out["reason_code"] == "unsupported_action"
-    # 환불은 재무가 다시 계산하지 않는다(고객지원 일)
-    refund = _verify({"order_id": "ord_1001", "refund_amount": 1_000}, action="refund_request")
-    assert _recheck(refund)["output"]["reason_code"] == "unsupported_action"
-
-
-def test_verify_is_deterministic_and_idempotent(client: TestClient) -> None:
-    """② 결정성: 같은 입력은 같은 재계산 결과. ⑤ 읽기 skill은 몇 번 불러도 결과가 같다."""
-    first = _recheck(_verify(_coupon()))
-    second = _recheck(_verify(_coupon()))
-    assert first["output"] == second["output"]
-    a = _call(client, "closing_report", {"period": "day"}, token="mock:orchestrator")
-    b = _call(client, "closing_report", {"period": "day"}, token="mock:orchestrator")
-    assert a["output"] == b["output"]
 
 
 # ---------------------------------------------------------------- 공통 안전장치
@@ -289,13 +182,6 @@ def test_dashboard_can_read_but_not_post(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------- 추가 테스트
-def test_campaign_coupon_skips_affected_check(client: TestClient) -> None:
-    """캠페인 쿠폰은 장애 피해 고객 확인을 하지 않고 금액만 다시 계산한다."""
-    params = _coupon(buyer="buy_0998") | {"purpose_code": "campaign", "campaign_id": "cmp_1"}
-    out = _recheck(_verify(params))["output"]
-    assert (out["decision"], out["reason_code"]) == ("approved", "recomputed_match")
-
-
 def test_partial_refunds_add_up(client: TestClient) -> None:
     """같은 주문 환불은 장부에 쌓인다. 결제 금액과 비교하지 않고 받은 금액을 그대로 적는다."""
     import asyncio
@@ -348,12 +234,3 @@ def test_card_descriptions_say_whether_state_changes() -> None:
             assert "상태를 바꾸지 않는다" in skill.description
         else:
             assert "execute" in skill.description
-
-
-def test_verify_amount_models_come_from_contracts() -> None:
-    """#90: safety와 함께 쓰는 형식은 contracts가 원본이다(중복 정의 없음)."""
-    from ax_contracts import schemas as contract
-    from finance_agent import recheck
-
-    assert recheck.VerifyAmountInput is contract.VerifyAmountInput
-    assert recheck.VerifyAmountOutput is contract.VerifyAmountOutput

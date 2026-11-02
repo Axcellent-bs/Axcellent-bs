@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
+import { ActionQueue } from "@/components/finance/SafetyQueue";
 import { AtRisk } from "@/components/support/AtRisk";
 import { IncidentResponse } from "@/components/support/IncidentResponse";
 import { InquiryCheck } from "@/components/support/InquiryCheck";
@@ -7,7 +8,8 @@ import { SurgeChanges } from "@/components/support/SurgeChanges";
 import { CompanyName } from "@/demo/CompanyName";
 
 // 고객지원 AI 화면 = 고객사 고객지원팀. 짜임은 데이터분석 AI(/data)·재무 AI(/finance)와 같다.
-// 세 탭: 위험 고객(기본) · 문의 진단(보상 후보·결제 진단) · 급증·변경 요청. 모두 읽기 전용이고, 숫자는 서버가 센 값만 보여 준다.
+// 탭: 위험 고객(기본) · 문의 진단(보상 후보·결제 진단) · 급증·변경 요청 · 사건 대응 기록. 탭은 읽기 전용이고, 숫자는 서버가 센 값만 보여 준다.
+// 안전 장치가 보류한 환불은 탭 위 보류 큐에서 사람이 결정한다(재무가 아니라 고객지원 일이다).
 
 const REFRESH_MS = 30_000;
 
@@ -50,13 +52,15 @@ export default function SupportPage() {
           <h1 className="text-2xl font-bold tracking-tight">AI 처리 내역</h1>
           <p className="mt-1 text-sm text-ink-500">
             <CompanyName />의 고객지원팀입니다. 이탈할 것 같은 고객을 먼저 찾고, 문의마다 보상 후보와 결제가 막힌 곳을 보여 주고, 문의가 갑자기 몰리는 분류와 기획으로 보낸 변경 요청을 봅니다.
-            이 화면은 보기만 하며, 보상·변경 요청을 보내는 일은 사람이 승인한 뒤 따로 합니다.
+            보류된 환불 결정 말고는 보기만 하며, 보상·변경 요청을 보내는 일은 사람이 승인한 뒤 따로 합니다.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs sm:ml-auto">
           <button className="btn-ghost" onClick={bump}>새로고침</button>
         </div>
       </header>
+
+      <ActionQueue action="refund_request" intro="안전 장치가 C로 보류한 환불(한도 초과·금액 불일치)이 여기 모입니다." />
 
       <div role="tablist" aria-label="고객지원 화면" className="flex w-full gap-1 rounded-2xl bg-surface p-1 ring-1 ring-ink-100 sm:w-auto sm:max-w-2xl">
         {MODES.map((m) => (

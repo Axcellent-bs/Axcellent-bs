@@ -72,7 +72,7 @@ def test_open_anomalies_survive_a_restart(tmp_path) -> None:
     from finance_agent import anomalies
 
     s = State(MockSources())
-    anomalies.note_findings(s.records.anomalies, [{"code": "duplicate_coupon", "refs": ["ord_1"]}])
+    anomalies.note_findings(s.records.anomalies, [{"code": "gate_hold_trend", "refs": ["exe_1"]}])
     path = tmp_path / "finance_state.json"
     persist.save(s, path)
     again = State(MockSources())
@@ -86,8 +86,8 @@ def test_open_anomalies_survive_a_restart(tmp_path) -> None:
     assert third.records.anomalies == {}
 
 
-def test_restart_drops_open_refund_audit_keeps_the_rest(tmp_path) -> None:
-    """예전 파일의 환불 의심 건은 처리 전이면 뺀다. 쿠폰 의심 건과 사람의 처리 기록은 남긴다."""
+def test_restart_drops_open_coupon_refund_audit_keeps_the_rest(tmp_path) -> None:
+    """예전 파일의 쿠폰·환불 의심 건은 처리 전이면 뺀다. 남은 규칙의 건과 사람의 메모는 남긴다."""
     from finance_agent import anomalies
 
     s = State(MockSources())
@@ -96,24 +96,47 @@ def test_restart_drops_open_refund_audit_keeps_the_rest(tmp_path) -> None:
         [
             {"code": "repeat_refund", "title": "같은 고객 환불 3번", "refs": ["rfd_1"]},
             {"code": "refund_rate_jump", "title": "환불률 급변", "refs": []},
-            {"code": "split_under_limit", "title": "한도 바로 아래 환불 2번", "refs": ["rfd_2"]},
-            {"code": "amount_recheck_failed", "detail": "환불 20,000원 넘음", "refs": ["exe_1"]},
             {"code": "split_under_limit", "title": "한도 바로 아래 쿠폰 3장", "refs": ["cpn_1"]},
             {"code": "amount_recheck_failed", "detail": "쿠폰 총액이 다릅니다", "refs": ["exe_2"]},
             {"code": "duplicate_coupon", "title": "같은 사건 보상 쿠폰 2번", "refs": ["cpn_2"]},
+            {"code": "compensation_outside_impact", "title": "영향 고객 밖", "refs": ["exe_3"]},
+            {"code": "gate_hold_trend", "title": "보류·거절 증가", "refs": ["exe_4"]},
             {"code": "repeat_refund", "title": "처리한 예전 건", "refs": ["rfd_9"]},
+            {"code": "duplicate_coupon", "title": "처리한 쿠폰 건", "refs": ["cpn_9"]},
         ],
     )
-    done = anomalies.signature({"code": "repeat_refund", "refs": ["rfd_9"]})
-    assert anomalies.resolve(s.records.anomalies, done, "태윤", "확인함")
+    for code, ref, note in (
+        ("repeat_refund", "rfd_9", "환불 확인함"),
+        ("duplicate_coupon", "cpn_9", "쿠폰 확인함"),
+    ):
+        sig = anomalies.signature({"code": code, "refs": [ref]})
+        assert anomalies.resolve(s.records.anomalies, sig, "태윤", note)
     path = tmp_path / "finance_state.json"
     persist.save(s, path)
     again = State(MockSources())
     assert persist.load(again, path)
     listed = anomalies.listing(again.records.anomalies)
-    assert {(e["code"], e["refs"][0]) for e in listed["open"]} == {
-        ("split_under_limit", "cpn_1"),
-        ("amount_recheck_failed", "exe_2"),
-        ("duplicate_coupon", "cpn_2"),
-    }
-    assert [e["note"] for e in listed["resolved"]] == ["확인함"]
+    assert [(e["code"], e["refs"][0]) for e in listed["open"]] == [("gate_hold_trend", "exe_4")]
+    assert sorted(e["note"] for e in listed["resolved"]) == ["쿠폰 확인함", "환불 확인함"]
+    # 다음 저장에도 사람의 메모가 남는다
+    persist.save(again, path)
+    third = State(MockSources())
+    assert persist.load(third, path)
+    assert len(anomalies.listing(third.records.anomalies)["resolved"]) == 2
+
+
+def test_an_old_state_file_with_removed_policy_records_still_loads(tmp_path) -> None:
+    """없앤 경보 기록이 든 예전 파일로 시작해도 깨지지 않고, 사람의 메모는 파일에 남는다."""
+    import json
+
+    path = tmp_path / "finance_state.json"
+    s = _filled()
+    persist.save(s, path)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    acks = {"old_rule": {"alert": "warn", "month": "2026-10", "note": "캠페인", "by": "태윤"}}
+    raw["records"]["policy_acks"] = acks
+    path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+    again = State(MockSources())
+    assert persist.load(again, path)
+    assert again.ledger.refunds == {"ord_7": 18000}
+    assert persist.dump(again)["records"]["policy_acks"] == acks

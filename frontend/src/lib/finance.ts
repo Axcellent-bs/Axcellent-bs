@@ -4,7 +4,7 @@ import { humanizeIds, incidentNo } from "./format";
 import { ExampleMissing, exampleCall, exampleOn } from "./financeExample";
 
 // 재무 화면 → finance(8105) · safety(8001) API. 응답은 ax-backend 규약 {data, meta} / {error: {code, message}}.
-// 재무 AI = 고객사의 재무팀 (결산·대사·판매자 정산·예산 한도·사후 감사).
+// 재무 AI = 고객사의 재무팀 (결산·대사·판매자 정산·팀 예산·쿠폰·환불 장부).
 // 형식 기준: ax-backend docs/notes/finance/2026-10-23-finance-redesign.md §11·§12-1. 필드 이름을 바꾸지 않는다.
 
 // ---------------------------------------------------------------- 공통 봉투
@@ -39,11 +39,11 @@ export interface SupportCostRecord {
 }
 
 // ---------------------------------------------------------------- §11 overview
-export type TodoKind = "settlement_batch" | "settlement_deadline" | "closing_confirm" | "recon_exception" | "audit_finding" | "policy_alert" | "team_budget";
+export type TodoKind = "settlement_batch" | "settlement_deadline" | "closing_confirm" | "recon_exception" | "audit_finding" | "team_budget";
 /** 할 일에서 사람이 바로 누를 결정 */
-export type TodoActionType = "closing_confirm" | "settlement_request" | "review_decision" | "recon_note" | "anomaly_resolve" | "policy_ack" | "open_tab" | "team_budget_approve";
+export type TodoActionType = "closing_confirm" | "settlement_request" | "review_decision" | "recon_note" | "anomaly_resolve" | "open_tab" | "team_budget_approve";
 export interface TodoAction { type: TodoActionType; period?: string; date?: string; review_id?: string | null; month?: string; signature?: string }
-/** 건마다 결정할 때의 한 건 (대사 불일치·감사 의심·한도 경보) */
+/** 건마다 결정할 때의 한 건 (대사 불일치·감사 의심) */
 export interface TodoItem { ref: string; title: string; detail: string; amount: number | null }
 export interface FinanceTodo {
   kind: TodoKind;
@@ -257,28 +257,10 @@ export interface Variance {
   thresholds: { flag_ratio: number; flag_min_amount: number };
 }
 
-// ---------------------------------------------------------------- ⑤ 예산·한도 정책
-export type PolicyAlert = "ok" | "warn" | "over";
-export interface PolicyRule {
-  key: string;
-  label: string;
-  limit: number | null;
-  unit: string;
-  used_today: number | null;
-  used_month: number | null;
-  ratio: number | null;
-  alert: PolicyAlert | null;
-  source?: string;
-}
-export interface PolicyProposal { key: string; current: number | null; proposed: number; reason: string; evidence?: Record<string, unknown> }
-export interface Policy { rules: PolicyRule[]; proposals: PolicyProposal[]; how_to_change: string }
-
 // ---------------------------------------------------------------- ⑦ 내부통제·감사
 export type FindingSeverity = "high" | "medium" | "low";
 export interface AuditFinding { code: string; severity: FindingSeverity; title: string; detail: string; refs: string[] }
 export interface AuditStats {
-  coupon_count: number | null;
-  coupon_amount: number | null;
   gate_held: number | null;
   gate_rejected: number | null;
 }
@@ -314,7 +296,7 @@ export interface IncomeStatement {
 }
 
 // ---------------------------------------------------------------- §12 시나리오 A: 장애 사건 재무
-// ⑨ 쿠폰 장부 기록 → ⑩ 손실 리포트(피해 + 보상) → ⑰ 사건 후 감사. 쿠폰 건별 승인은 안전 장치(A/C)가 한다.
+// 쿠폰·환불은 끝난 금액만 장부에 적는다. 쿠폰 건별 승인은 안전 장치(A/C)가 한다.
 /** 장부 출처: 이벤트 버스(coupon.issued) / 안전 장치 실행 기록(issue_coupon) / 목 시드 */
 export type LedgerSource = "events" | "safety_executions" | "seed";
 
@@ -326,7 +308,8 @@ export interface IncidentSummary {
   compensation_total: number;
   coupon_count: number;
   held_count: number;
-  checks_ok: boolean | null;
+  refund_total: number | null;
+  money_out_total: number | null;
 }
 
 export interface ImpactCategory { category: string; orders: number; amount: number }
@@ -365,14 +348,7 @@ export interface IncidentCompensation {
   count_held: number;
 }
 
-export interface IncidentLimits {
-  per_customer: { limit: number | null; max_used: number; buyer_id: string | null };
-  per_incident: { limit: number | null; used: number; remaining: number | null };
-}
-
-export type IncidentCheckCode = "recipients_in_impact" | "one_coupon_per_buyer" | "per_customer_limit" | "per_incident_limit" | "amount_recheck";
-export interface IncidentCheck { code: IncidentCheckCode | string; ok: boolean | null; title: string; detail: string; refs: string[] }
-
+export interface IncidentRefunds { total: number; count: number }
 
 export interface IncidentDetail {
   context_id: string;
@@ -380,8 +356,10 @@ export interface IncidentDetail {
   window: { from: string; to: string } | null;
   impact: IncidentImpact | null;
   compensation: IncidentCompensation;
-  limits: IncidentLimits;
-  checks: IncidentCheck[];
+  /** 사건 구간 안에 영향 고객에게 나간 환불. 구간·영향 고객을 모르면 null (0원과 다르다) */
+  refunds: IncidentRefunds | null;
+  /** 보상 + 환불. 둘 중 하나라도 모르면 null */
+  money_out_total: number | null;
   ledger_source: LedgerSource;
 }
 
@@ -471,11 +449,13 @@ export const SAFETY_SERVER = serverName(SAFETY_API_URL, "안전 장치 서버");
 /** 사람 결정 버튼을 켤지. 예시 데이터 모드는 서버에 보내지 않으므로 늘 켠다 (전환하면 화면을 다시 읽는다) */
 export const exampleMode = exampleOn();
 export const humanTokenSet = SAFETY_HUMAN_TOKEN.length > 0 || exampleMode;
+/** 재무 화면 밖(고객지원·마케팅)의 보류 결정용. 재무 화면의 예시 데이터 전환과 상관없이 늘 실제 서버를 본다 */
+export const liveHumanTokenSet = SAFETY_HUMAN_TOKEN.length > 0;
 
-interface CallOptions { method?: "GET" | "POST"; body?: unknown; human?: boolean }
+interface CallOptions { method?: "GET" | "POST"; body?: unknown; human?: boolean; live?: boolean }
 
 async function call(base: string, server: string, path: string, opts: CallOptions = {}): Promise<unknown> {
-  if (exampleMode) {
+  if (exampleMode && !opts.live) {
     try {
       return await exampleCall(base === SAFETY_API_URL ? "safety" : "finance", path, opts.method ?? "GET", opts.body);
     } catch (e) {
@@ -484,7 +464,7 @@ async function call(base: string, server: string, path: string, opts: CallOption
   }
   const headers: Record<string, string> = {};
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
-  if (opts.human && humanTokenSet) headers.Authorization = `Bearer ${SAFETY_HUMAN_TOKEN}`;
+  if (opts.human && SAFETY_HUMAN_TOKEN) headers.Authorization = `Bearer ${SAFETY_HUMAN_TOKEN}`;
   let res: Response;
   try {
     res = await fetch(`${base}${path}`, {
@@ -562,7 +542,6 @@ export const finance = {
   /** 보류 없는 판매자를 묶어 지급 승인 요청 → 안전 장치 보류 큐(C). 돈은 움직이지 않는다 */
   requestSettlementBatch: (period: string) =>
     fin<Envelope<Settlements | SettlementBatch>>("/api/finance/settlements/batch", { method: "POST", body: { period }, human: true }),
-  policy: () => fin<Envelope<Policy>>("/api/finance/policy"),
   /** 판매 대금 지급 기한 점검 */
   deadlines: () => fin<Envelope<DeadlineReport>>("/api/finance/settlements/deadlines"),
   /** 판매자 미지급금 롤포워드 (그 달). 날짜가 없으면 이번 달 */
@@ -583,9 +562,6 @@ export const finance = {
     download(`/api/finance/tax/seller-report${query({ date, format: "csv" })}`, "seller-sales.csv"),
   /** 월간 변동 분석 (지난달·작년 같은 달 대비) */
   variance: (date?: string | null) => fin<Envelope<Variance>>(`/api/finance/variance${query({ date })}`),
-  /** 예산·한도 경보 확인 메모. 사람 토큰만. 한도는 바꾸지 않는다 */
-  ackPolicy: (key: string, note: string) =>
-    fin<Envelope<{ key: string; note: string; by: string; at: string }>>(`/api/finance/policy/${encodeURIComponent(key)}/ack`, { method: "POST", body: { note }, human: true }),
   /** 팀 예산 (인사 팀 인원 × 인당 월 단가). month 생략 = 이번 달 */
   teamBudget: (month?: string | null) => fin<Envelope<TeamBudget>>(`/api/finance/team-budget${query({ month })}`),
   /** 팀 예산 확정. 사람 토큰만. 보던 숫자(signature)가 지금과 같아야 한다 */
@@ -617,10 +593,10 @@ export const finance = {
   /** 가장 최근 테스트 결과(자동·직접) + 다음 자동 테스트 시각 */
   lastSelfTest: () => fin<{ data: SelfTest | null; meta?: SelfTestLastMeta }>("/api/finance/self-test/last"),
   // 안전 장치 보류 큐 (정산 묶음 지급 승인 등 C 등급)
-  reviews: () => data(saf<{ data: Review[] }>("/api/safety/reviews")),
+  reviews: (live = false) => data(saf<{ data: Review[] }>("/api/safety/reviews", { live })),
   /** C 보류 결정. 사람 토큰만 받는다 (에이전트 토큰은 safety가 거부). */
-  decide: (reviewId: string, decision: "approved" | "rejected", note?: string) =>
-    data(saf<{ data: Review }>(`/api/safety/reviews/${encodeURIComponent(reviewId)}/decision`, { method: "POST", body: { decision, note: note || null }, human: true })),
+  decide: (reviewId: string, decision: "approved" | "rejected", note?: string, live = false) =>
+    data(saf<{ data: Review }>(`/api/safety/reviews/${encodeURIComponent(reviewId)}/decision`, { method: "POST", body: { decision, note: note || null }, human: true, live })),
 };
 
 // ---------------------------------------------------------------- 표시 도우미 (쉬운 말)
@@ -680,7 +656,7 @@ export function todayKst(now = new Date()): string {
 export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "audit" | "tax";
 export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "tax", "audit"];
 const TODO_TAB: Record<TodoKind, FinanceTab> = {
-  settlement_batch: "settlements", settlement_deadline: "settlements", closing_confirm: "closing", recon_exception: "reconciliation", audit_finding: "audit", policy_alert: "policy", team_budget: "policy",
+  settlement_batch: "settlements", settlement_deadline: "settlements", closing_confirm: "closing", recon_exception: "reconciliation", audit_finding: "audit", team_budget: "policy",
 };
 export function todoTab(t: Pick<FinanceTodo, "kind" | "link">): FinanceTab {
   const link = (t.link ?? "").replace(/^#/, "");
@@ -730,24 +706,9 @@ export const OTHER_CHECK = "기타 점검";
 
 /** ⑦ 사후 감사 의심 건 종류 */
 export const FINDING_KO: Record<string, string> = {
-  split_under_limit: "한도 바로 아래로 쪼개기",
-  duplicate_coupon: "같은 고객 쿠폰 중복",
-  amount_recheck_failed: "금액 재계산 불일치",
   gate_hold_trend: "안전 장치 보류·거절 증가",
-  compensation_outside_impact: "영향 고객 밖 보상",
 };
 export const findingKo = (code: string) => FINDING_KO[code] ?? OTHER_CHECK;
-
-/** ⑰ 사건 후 감사 점검 항목 */
-export const CHECK_KO: Record<IncidentCheckCode, string> = {
-  recipients_in_impact: "보상 받은 고객이 모두 영향 고객인지",
-  one_coupon_per_buyer: "고객당 쿠폰 1건",
-  per_customer_limit: "고객당 보상 한도",
-  per_incident_limit: "사건당 보상 한도",
-  amount_recheck: "보상 금액 다시 계산",
-};
-export const checkKo = (code: string, title?: string | null) =>
-  CHECK_KO[code as IncidentCheckCode] ?? (title && !/^[a-z0-9_]+$/.test(title) ? title : OTHER_CHECK);
 
 /** 쿠폰을 준 이유·목적 */
 export const PURPOSE_KO: Record<string, string> = {
@@ -758,15 +719,14 @@ export const purposeKo = (...codes: (string | null | undefined)[]) => {
   return "보상";
 };
 
+/** 재무 화면에서 결정하지 않는 보류 건. 환불은 고객지원 화면, 쿠폰은 마케팅 화면에서 결정한다 */
+export const NOT_FINANCE_ACTIONS = new Set(["refund_request", "issue_coupon"]);
+
 export const ACTION_KO: Record<string, string> = {
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 지급",
   publish_notice: "공지 올리기",
   rollback_deployment: "배포 되돌리기", restart_service: "서비스 다시 켜기", generate_pr: "코드 변경 만들기",
 };
-
-/** 설정 파일 이름 → 쉬운 말 */
-const SOURCE_FILE_KO: Record<string, string> = { "thresholds.toml": "안전 장치 기준표", "finance_policy.toml": "재무 정책표" };
-export const sourceFileKo = (s: string | null | undefined) => (s ? SOURCE_FILE_KO[s] ?? s : "");
 
 /** "2026-W43" → "2026년 43주차". 모양이 다르면 그대로 */
 export function periodKo(p: string): string {
@@ -776,7 +736,7 @@ export function periodKo(p: string): string {
 
 /**
  * 서버가 보낸 문장을 화면용으로: 기록 번호 → 쉬운 말, 남아 있는 개발자 말·코드 → 한국어.
- * (예전 서버가 보낸 "출처 seed", "data 영향 고객", "의심: per_incident_limit" 같은 문장도 고친다)
+ * (예전 서버가 보낸 "출처 seed", "data 영향 고객" 같은 문장도 고친다)
  */
 export function plainText(text: string | null | undefined, sellers?: Record<string, string>): string {
   if (!text) return "";
@@ -786,5 +746,5 @@ export function plainText(text: string | null | undefined, sellers?: Record<stri
     .replace(/출처:? (events|safety_executions|seed)\b/g, (_, src: string) => `출처: ${ledgerSourceKo(src).label}`)
     .replace(/\b(issue_coupon|refund_request|confirm_settlement)\b/g, (c: string) => ACTION_KO[c] ?? c)
     .replace(/\b(damage_amount|compensation_total)\b/g, (c: string) => (c === "damage_amount" ? "피해 금액" : "보상 합계"))
-    .replace(/\b[a-z]+(?:_[a-z]+)+\b/g, (c: string) => CHECK_KO[c as IncidentCheckCode] ?? FINDING_KO[c] ?? c);
+    .replace(/\b[a-z]+(?:_[a-z]+)+\b/g, (c: string) => FINDING_KO[c] ?? c);
 }

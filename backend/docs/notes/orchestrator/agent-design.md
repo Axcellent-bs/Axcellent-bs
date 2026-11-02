@@ -15,7 +15,7 @@
    - 이벤트 · shop-api(`shop.degraded`·`shop.recovered`), data(`metric.anomaly`), dejafix(`infra.anomaly_detected`), support(`support.inquiry_received`·`support.inquiry_surge`) · 사건 판단
    - support · 문의를 접수할 때 · `find_active_incident` (구현됨, 문의가 진행 중인 사건 번호를 이어받게 함. 응답에 점검 공지 번호 `notice_id`도 담는다)
    - (예정) finance, support · 이상을 찾았을 때 · 이상 보고 접수 (총괄이 받아 사건으로 열고 담당 부서에 배정, 계약 선행)
-   - finance(평상시) · 사후 감사에서 사건 구간을 알아야 할 때 · 총괄 `GET /api/incidents`를 읽기 전용으로 읽는다(`context_id`·`component`·`status`·`opened_at`·`closed_at`만, 새 skill 없음, 사건 중에는 부르지 않음). #417에서 합의, 접근 형식은 재무가 `contracts/data-access/`에 추가한다
+   - finance(평상시) · 사건 조회에서 사건 구간을 알아야 할 때 · 총괄 `GET /api/incidents`를 읽기 전용으로 읽는다(`context_id`·`component`·`status`·`opened_at`·`closed_at`만, 새 skill 없음, 사건 중에는 부르지 않음). #417에서 합의, 접근 형식은 재무가 `contracts/data-access/`에 추가한다
    - (예정) support · 문의를 닫았을 때 · 해결 보고 `support.inquiry_resolved` (계약 #327)
 4. 다른 부서에게 하는 요청 (누구에게·무엇을) = 필요한 skill 목록:
    - dejafix · `diagnose_incident`, `rollback_deployment`(B), `verify_recovery`

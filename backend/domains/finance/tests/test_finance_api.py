@@ -11,8 +11,8 @@ from fastapi.testclient import TestClient
 
 from ax_agent_template import events
 from ax_contracts.schemas import ExecuteDecision, HoldReason
+from finance_agent import anomalies, finance_api, handlers
 from finance_agent import books as bk
-from finance_agent import finance_api, handlers
 from finance_agent.books import Books
 from finance_agent.main import app
 from finance_agent.sources import MockSources
@@ -90,8 +90,6 @@ def test_overview_shape(client: TestClient) -> None:
         "settlement_deadline",
         "closing_confirm",
         "recon_exception",
-        "audit_finding",
-        "policy_alert",
         "team_budget",  # 이번 달
         "team_budget",  # 다음 달 (발령은 다음 달 1일부터)
     ]
@@ -107,17 +105,15 @@ def test_overview_shape(client: TestClient) -> None:
         "date": "2026-10-22",
     }
     assert actions["recon_exception"]["type"] == "recon_note"
-    assert actions["audit_finding"]["type"] == "anomaly_resolve"
-    assert actions["policy_alert"]["type"] == "policy_ack"
     assert actions["team_budget"]["type"] == "team_budget_approve"
     for t in data["todo"]:
-        if t["kind"] in ("recon_exception", "audit_finding", "policy_alert"):
+        if t["kind"] == "recon_exception":
             assert t["items"] and all(
                 {"ref", "title", "detail", "amount"} <= set(i) for i in t["items"]
             )
     batch = data["todo"][0]
-    assert (batch["count"], batch["link"]) == (2, "settlements")
-    assert batch["title"] == "판매자 정산 2곳 지급 승인 요청 대기"
+    assert (batch["count"], batch["link"]) == (3, "settlements")
+    assert batch["title"] == "판매자 정산 3곳 지급 승인 요청 대기"
 
 
 def test_closing_shape_and_params(client: TestClient) -> None:
@@ -160,11 +156,6 @@ def test_settlements_policy_audit_shapes(client: TestClient) -> None:
     )
     assert client.get("/api/finance/settlements", params={"period": "41"}).status_code == 400
 
-    pol = _get(client, "/api/finance/policy")["data"]
-    assert set(pol) == {"rules", "proposals", "how_to_change"}
-    for p in pol["proposals"]:
-        assert set(p) == {"key", "current", "proposed", "reason", "evidence"}
-
     aud = _get(client, "/api/finance/audit", days=7)["data"]
     assert set(aud) == {"from", "to", "stats", "findings"}
     assert _get(client, "/api/finance/audit", days=14)["data"]["from"] == "2026-10-10T00:00:00Z"
@@ -177,17 +168,16 @@ def test_missing_sources_are_reported_in_meta(client: TestClient, kit) -> None:
         return kit.books(
             mock=False,
             source="shop-api",
-            unavailable=["claims", "thresholds"],
-            thresholds=None,
-            claims=None,
+            unavailable=["executions"],
+            executions=None,
         )
 
     handlers.state().books_loader = live_like
-    body = client.get("/api/finance/policy").json()
-    assert body["meta"]["unavailable"] == ["claims", "thresholds"]
+    body = client.get("/api/finance/settlements").json()
+    assert body["meta"]["unavailable"] == ["executions"]
     assert (body["meta"]["mock"], body["meta"]["source"]) == (False, "shop-api")
-    sett = client.get("/api/finance/settlements").json()
-    assert "hold_reasons.open_claim" in sett["meta"]["unavailable"]
+    audit_body = client.get("/api/finance/audit").json()
+    assert {"stats.gate_held", "stats.gate_rejected"} <= set(audit_body["meta"]["unavailable"])
 
 
 def test_closing_without_orders_is_unknown_not_zero(client: TestClient, kit) -> None:
@@ -305,8 +295,22 @@ def test_reconciliation_note(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------- 정산 묶음 (execute → safety C)
+def _hold_sel_0002() -> None:
+    """판매자 sel_0002의 주문을 구매 미확정으로 바꿔 그 판매자만 보류시킨다."""
+    books = bk.seed_books()
+    for order in books.orders:
+        if all(i.get("seller_id") == "sel_0002" for i in order["items"]):
+            order["delivered_at"] = None
+
+    async def load() -> Books:
+        return books
+
+    handlers.state().books_loader = load
+
+
 def test_batch_goes_through_execute_and_is_held(client: TestClient, monkeypatch) -> None:
     calls = _fake_safety(monkeypatch, HELD)
+    _hold_sel_0002()
     response = client.post("/api/finance/settlements/batch", json={"period": "2026-W42"})
     assert response.status_code == 200, response.text
     data = response.json()["data"]
@@ -381,7 +385,8 @@ def test_batch_token_optional_but_must_be_human(client: TestClient, monkeypatch)
 def test_batch_with_nothing_ready_is_409(client: TestClient, monkeypatch) -> None:
     calls = _fake_safety(monkeypatch, HELD)
     books = bk.seed_books()
-    books.claims = None  # 처리 중 클레임을 확인할 수 없으면 모든 판매자가 보류된다(fail-closed)
+    for order in books.orders:  # 구매가 확정되지 않으면 모든 판매자가 보류된다
+        order["delivered_at"] = None
 
     async def load() -> Books:
         return books
@@ -410,6 +415,7 @@ def test_rejected_batch_can_be_requested_again(client: TestClient, monkeypatch) 
 
 def test_batch_status_follows_safety_review(client: TestClient, monkeypatch) -> None:
     _fake_safety(monkeypatch, HELD)
+    _hold_sel_0002()
     client.post("/api/finance/settlements/batch", json={})
     monkeypatch.setenv("AX_SAFETY_URL", "http://safety")
     seen: list[str] = []
@@ -468,6 +474,7 @@ def test_removed_endpoints(client: TestClient) -> None:
         "/api/finance/threshold-reviews",
         "/api/finance/loss-reports",  # 2026-10-27 장애 흐름에서 빠지며 없앰
         "/api/finance/market-ops",  # 2026-10-30 마켓운영을 재무에서 뺌
+        "/api/finance/policy",  # 2026-11-02 쿠폰·환불 예산·한도를 재무에서 뺌
     ):
         assert client.get(path).status_code == 404
     for path in (
@@ -511,46 +518,14 @@ def _todo(client: TestClient, kind: str) -> dict | None:
 
 def test_resolving_audit_items_clears_the_todo(client: TestClient) -> None:
     """감사 할 일은 처리 전 의심 건이다. 사람이 모두 처리하면 할 일에서 빠진다."""
+    assert _todo(client, "audit_finding") is None  # 시드의 쿠폰·환불 보류는 의심 건이 아니다
+    anomalies.note_findings(
+        handlers.state().records.anomalies,
+        [{"code": "gate_hold_trend", "severity": "medium", "title": "보류", "refs": ["exe_1"]}],
+    )
     todo = _todo(client, "audit_finding")
-    assert todo is not None
+    assert todo is not None and todo["action"]["type"] == "anomaly_resolve"
     for item in client.get("/api/finance/anomalies").json()["data"]["open"]:
         url = f"/api/finance/anomalies/{item['finding_ref']}/resolve"
         assert client.post(url, json={"note": "확인함"}, headers=HUMAN).status_code == 200
     assert _todo(client, "audit_finding") is None
-
-
-def test_policy_alert_ack_needs_a_person_and_hides_until_it_gets_worse(
-    client: TestClient,
-) -> None:
-    todo = _todo(client, "policy_alert")
-    assert todo is not None
-    key = todo["items"][0]["ref"]
-    url = f"/api/finance/policy/{key}/ack"
-    assert client.post(url, json={"note": "이번 달 캠페인 때문"}).status_code == 401
-    assert client.post(url, json={"note": " "}, headers=HUMAN).status_code == 400
-    bad = client.post("/api/finance/policy/nope/ack", json={"note": "x"}, headers=HUMAN)
-    assert bad.status_code == 404
-    done = client.post(url, json={"note": "이번 달 캠페인 때문"}, headers=HUMAN).json()["data"]
-    assert (done["by"], done["month"], done["note"]) == (
-        "taeyoon",
-        "2026-10",
-        "이번 달 캠페인 때문",
-    )
-    after = _todo(client, "policy_alert")
-    assert after is None or key not in {i["ref"] for i in after["items"]}
-
-
-def test_policy_ack_is_kept_only_for_the_same_month_and_level() -> None:
-    from datetime import date
-
-    ack = {"alert": "warn", "month": "2026-10"}
-    assert finance_api.policy_acked(ack, "warn", date(2026, 10, 23))
-    assert not finance_api.policy_acked(ack, "over", date(2026, 10, 23))  # 더 세지면 다시
-    assert not finance_api.policy_acked(ack, "warn", date(2026, 11, 1))  # 다음 달이면 다시
-    assert not finance_api.policy_acked(None, "warn", date(2026, 10, 23))
-
-
-def test_ack_path_allows_post_from_the_dashboard() -> None:
-    from finance_agent.main import DECISION_PATHS
-
-    assert DECISION_PATHS.match("/api/finance/policy/coupon_total/ack")

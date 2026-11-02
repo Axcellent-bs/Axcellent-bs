@@ -38,11 +38,8 @@ def test_seed_last_week_statements(fixed_now) -> None:
             "status",
             "review_id",
         }
-    assert rows["sel_0002"]["status"] == "held"
-    assert rows["sel_0002"]["hold_reasons"] == [
-        {"code": "open_claim", "label": "처리 중인 환불·교환 1건"}
-    ]
-    assert (rows["sel_0001"]["status"], rows["sel_0003"]["status"]) == ("ready", "ready")
+    assert {r["status"] for r in rows.values()} == {"ready"}
+    assert all(r["hold_reasons"] == [] for r in rows.values())
     assert (
         rows["sel_0001"]["commission_rate"] == 0.10 and rows["sel_0002"]["commission_rate"] == 0.08
     )
@@ -54,8 +51,11 @@ def test_seed_last_week_statements(fixed_now) -> None:
 def test_two_sellers_ready_on_any_weekday(monkeypatch: pytest.MonkeyPatch, offset: int) -> None:
     now = datetime(2026, 10, 19, 12, tzinfo=UTC) + timedelta(days=offset)
     monkeypatch.setattr(fc, "now", lambda: now)
-    rows = {r["seller_id"]: r["status"] for r in st.statements(bk.seed_books(), None)["statements"]}
-    assert rows == {"sel_0001": "ready", "sel_0002": "held", "sel_0003": "ready"}
+    result = st.statements(bk.seed_books(), None)["statements"]
+    rows = {r["seller_id"]: r["status"] for r in result}
+    assert (rows["sel_0001"], rows["sel_0003"]) == ("ready", "ready")
+    codes = {h["code"] for r in result for h in r["hold_reasons"]}
+    assert codes <= {"unconfirmed_purchase"}  # 처리 중 클레임으로는 보류하지 않는다
 
 
 def test_hold_reasons(kit, fixed_now) -> None:
@@ -78,9 +78,6 @@ def test_hold_reasons(kit, fixed_now) -> None:
     assert [h["code"] for h in rows["sel_a"]["hold_reasons"]] == ["unconfirmed_purchase"]
     assert rows["sel_b"]["payout"] == 10000 - 1000 - 9500
     assert [h["code"] for h in rows["sel_b"]["hold_reasons"]] == ["negative_payout"]
-    unknown = kit.books(orders=orders, claims=None)
-    rows = {r["seller_id"]: r for r in st.statements(unknown, None)["statements"]}
-    assert rows["sel_b"]["hold_reasons"][0]["code"] == "claims_unknown"  # fail-closed
     assert all(r["status"] == "held" for r in rows.values())
 
 
@@ -118,7 +115,7 @@ def test_apply_batch(fixed_now) -> None:
     assert (rows["sel_0001"]["status"], rows["sel_0001"]["review_id"]) == ("requested", "rev_1")
     assert rows["sel_0003"]["status"] == "ready"
     assert "attempt" not in shown["batch"] and shown["batch"]["review_id"] == "rev_1"
-    assert [r["seller_id"] for r in st.ready(shown)] == ["sel_0003"]
+    assert [r["seller_id"] for r in st.ready(shown)] == ["sel_0002", "sel_0003"]
     assert date.fromisoformat(shown["pay_date"]).weekday() == 5
 
 
