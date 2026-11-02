@@ -145,7 +145,7 @@ seed `20261029` 분석 결론:
 
 ## trend_scan 케이스 (`trend/`, 검색어 급상승)
 
-결제 이상 탐지와 따로 둔 정답지다. `run.py`·`baseline.json`에는 아직 넣지 않았다(skill이 생길 때 채점기와 함께 넣는다). 자세한 것은 `trend/README.md`.
+결제 이상 탐지와 따로 둔 정답지와 채점기(`trend/score.py`, 판정 함수를 인자로 받음)다. `run.py`·`baseline.json`(결제 평가)에는 넣지 않는다. trend 기준값은 skill PR에서 처음 만든다. 정의: trend_scan은 최근 56일 대비 급상승을 본다(계절 반복 구분은 범위 밖). 자세한 것은 `trend/README.md`.
 
 - `trend/cases/` 26개(seed `2026110201`), `trend/holdout/` 24개(seed `2026110202`)
 - 급상승은 실제 시계열에 정해진 날짜·기간·배수로 끼워 넣고, **정답은 넣은 조건에서 정한다**(그래프를 보고 정하지 않음)
