@@ -8,6 +8,7 @@ import { UNKNOWN } from "@/lib/data";
 // 응답이 없거나 실패하면 숫자 없이 "확인할 수 없음". 2~5단계는 숫자 없이 상태 칩만 보여 준다.
 // 1·4단계 칩과 테두리는 트렌드 탭이 받은 trend_scan·campaign_effect 응답 결과(probes)로 정한다.
 // 테두리·칩·범례는 같은 말을 한다: 동작 중 = 파란 실선, 확인 중 = 회색 실선, 측정 대기·연결 확인 필요·준비 중 = 회색 점선.
+// 단계를 누르면 트렌드 탭의 같은 이름 하위 탭으로 간다(onSelect). 지금 보는 단계는 바깥 고리(ring)로 표시한다.
 
 /** 1단계에 보여 줄 판정 개수. 화면이 응답(trend_scan results + trend_candidates candidates)을 센 값이다.
  *  youtube: YouTube 후보 수 (기본 판정에서만, 직접 입력이면 없음). confirmed: 급상승 중 YouTube 근거도 있는 것.
@@ -63,11 +64,14 @@ function frameOf(stage: LoopStage, probes: LoopProbes): Frame {
   return probe === "ok" ? "live" : probe === "checking" ? "checking" : "off";
 }
 
-function StageCard({ stage, trend, probes }: { stage: LoopStage; trend: LoopTrendState; probes: LoopProbes }) {
+/** 단계 카드. onSelect가 있으면 누르면 그 단계의 하위 탭으로 간다. active면 지금 보고 있는 하위 탭 */
+function StageCard({ stage, trend, probes, active, onSelect }: {
+  stage: LoopStage; trend: LoopTrendState; probes: LoopProbes; active: boolean; onSelect?: (stage: LoopStage) => void;
+}) {
   const status = stage.probe ? PROBE_STATUS[probes[stage.probe]] : stage.status;
   const frame = FRAME[frameOf(stage, probes)].box;
-  return (
-    <li className={`flex min-w-0 flex-1 flex-col gap-2 p-4 ${frame}`} aria-label={`${stage.no}단계 ${stage.title}`}>
+  const body = (
+    <>
       <p className="text-[11px] font-semibold text-ink-500">{stage.no}</p>
       <h3 className="text-base font-bold text-ink-900">{stage.title}</h3>
       <p className="text-xs text-ink-500">{stage.owner}</p>
@@ -76,11 +80,31 @@ function StageCard({ stage, trend, probes }: { stage: LoopStage; trend: LoopTren
         <Chip label={status.label} tone={TONE[status.tone]} />
         {stage.note && <p className="text-[11px] leading-relaxed text-ink-500">{stage.note}</p>}
       </div>
+    </>
+  );
+  const box = `flex min-w-0 flex-col gap-2 p-4 text-left ${frame} ${active ? "ring-2 ring-brand-600 ring-offset-2" : ""}`;
+  if (!onSelect) {
+    return <li className={`flex-1 ${box}`} aria-label={`${stage.no}단계 ${stage.title}`}>{body}</li>;
+  }
+  return (
+    <li className="flex min-w-0 flex-1">
+      <button type="button" onClick={() => onSelect(stage)} aria-current={active ? "step" : undefined}
+        aria-label={`${stage.no}단계 ${stage.title} 보기`}
+        className={`w-full transition hover:bg-ink-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${box}`}>
+        {body}
+      </button>
     </li>
   );
 }
 
-export function ContentLoop({ trend, probes }: { trend: LoopTrendState; probes: LoopProbes }) {
+export function ContentLoop({ trend, probes, active, onSelect }: {
+  trend: LoopTrendState;
+  probes: LoopProbes;
+  /** 지금 보고 있는 하위 탭의 단계 번호 */
+  active?: number;
+  /** 단계를 누르면 그 하위 탭으로 */
+  onSelect?: (stage: LoopStage) => void;
+}) {
   const live = LOOP_STAGES.filter((s) => frameOf(s, probes) === "live").map((s) => s.no);
   const failed = LOOP_STAGES.filter((s) => s.live && s.probe && probes[s.probe] === "failed").map((s) => s.no);
   const checking = LOOP_STAGES.filter((s) => frameOf(s, probes) === "checking").map((s) => s.no);
@@ -108,7 +132,7 @@ export function ContentLoop({ trend, probes }: { trend: LoopTrendState; probes: 
                 <span className="hidden lg:inline">→</span>
               </li>
             )}
-            <StageCard stage={stage} trend={trend} probes={probes} />
+            <StageCard stage={stage} trend={trend} probes={probes} active={stage.no === active} onSelect={onSelect} />
           </Fragment>
         ))}
       </ol>
@@ -121,6 +145,7 @@ export function ContentLoop({ trend, probes }: { trend: LoopTrendState; probes: 
         {(Object.keys(FRAME) as Frame[]).map((f) => (
           <span key={f} className="flex items-center gap-1.5"><span aria-hidden className={`inline-block h-3 w-3 ${FRAME[f].box}`} />{FRAME[f].legend}</span>
         ))}
+        {onSelect && <span>단계를 누르면 아래에서 그 단계를 봐요 (바깥 고리 = 지금 보는 단계)</span>}
       </p>
     </section>
   );
