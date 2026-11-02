@@ -5,6 +5,7 @@ import { PreparingChip } from "@/components/Preparing";
 import { CampaignEffect } from "@/components/data/CampaignEffect";
 import { ContentRecommend } from "@/components/data/ContentRecommend";
 import { TrendHistory } from "@/components/data/TrendHistory";
+import { YoutubeVelocity } from "@/components/data/YoutubeVelocity";
 import { ContentLoop, type LoopTrendState } from "@/components/data/ContentLoop";
 import { LOOP_STAGES, SEND_TO_MARKETING_BLOCKED, stageFromHash, trendHash, type LoopProbe, type LoopStage } from "@/lib/contentLoop";
 import {
@@ -495,6 +496,8 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
                   </div>
                 </Panel>
               )}
+              {/* YouTube 지금 속도: 판정 없이 보여 주기 (youtube_velocity). 보기와 상관없이 1단계 아래에 */}
+              <YoutubeVelocity />
             </div>
           ) : s.tab === "recommend" ? (
             // 추천 결과가 하위 탭을 오가도 남도록 늘 그려 두고 숨기기만 한다

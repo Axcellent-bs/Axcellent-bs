@@ -18,6 +18,8 @@
 - trend_history는 키워드 그룹별 네이버 월 단위 값과 작년 같은 달 대비 배수만 준다
   (grade read, 판정 안 함).
   그룹마다 따로 부르고, 모든 그룹에서 못 읽으면 숫자 없이 `failed`·`unavailable`이다.
+- youtube_velocity는 YouTube 스냅샷 최근 두 시각 사이 영상별 시간당 조회 증가(지금 속도)와 가속을
+  보여 준다(grade read, 판정 안 함). 스냅샷이 2개 미만이면 `completed`에 unknown + 이유다.
 - answer_planning_question은 data가 보낸 요청의 기록으로만 기획 질문에 답한다(grade read,
   `planning_questions.py`). 기록에 없으면 `unknown`이다.
 - campaign_effect는 캠페인 기간 주문 증분·쿠폰 누적 사용률을 코드로 계산한다(grade read).
@@ -50,6 +52,7 @@ from ax_contracts.schemas.data import (
     TrendCandidatesRequest,
     TrendHistoryRequest,
     TrendScanRequest,
+    YouTubeVelocityRequest,
 )
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
 from data_agent.clients.fact_sources import notices_at
@@ -77,6 +80,7 @@ from data_agent.skills.root_cause import estimate_root_cause
 from data_agent.skills.trend_candidates import find_candidates
 from data_agent.skills.trend_history import history
 from data_agent.skills.trend_scan import NoTrendGroups, scan_trends
+from data_agent.skills.youtube_velocity import measure_velocity
 
 
 def get_llm() -> LLMClient:
@@ -437,6 +441,21 @@ async def trend_history(request: AgentRequest) -> AgentResult:
     )
 
 
+async def youtube_velocity(request: AgentRequest) -> AgentResult:
+    """YouTube 영상 지금 속도(판정 없음). 조회만 하고 상태를 바꾸지 않는다(grade read)."""
+    data = _parse(request, YouTubeVelocityRequest)
+    if isinstance(data, AgentResult):
+        return data
+    result = measure_velocity(data, env=os.environ)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=result.output.status,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
+
+
 async def answer_planning_question(request: AgentRequest) -> AgentResult:
     """기획이 되묻는 근거 질문에 data가 보낸 요청의 기록으로 답한다(grade read)."""
     data = _parse(request, AnswerPlanningQuestionInput)
@@ -497,6 +516,7 @@ HANDLERS = {
     "trend_scan": trend_scan,
     "trend_candidates": trend_candidates,
     "trend_history": trend_history,
+    "youtube_velocity": youtube_velocity,
     "content_recommend": content_recommend,
     "answer_planning_question": answer_planning_question,
     "campaign_effect": campaign_effect,

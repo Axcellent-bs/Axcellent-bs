@@ -57,6 +57,9 @@ from ax_contracts.schemas.data import (
     TrendTimeUnit,
     TrendVerdict,
     YouTubeTagEvidence,
+    YouTubeVelocityOutput,
+    YouTubeVelocityRequest,
+    YouTubeVideoVelocity,
 )
 from ax_contracts.schemas.escalation import (
     Escalation,
@@ -507,4 +510,7 @@ __all__ = [
     "TrendTimeUnit",
     "TrendVerdict",
     "YouTubeTagEvidence",
+    "YouTubeVelocityOutput",
+    "YouTubeVelocityRequest",
+    "YouTubeVideoVelocity",
 ]

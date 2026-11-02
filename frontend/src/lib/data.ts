@@ -367,6 +367,37 @@ export interface TrendHistoryOutput {
   summary: string;
 }
 
+// ---------------------------------------------------------------- YouTube 지금 속도 (youtube_velocity)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py YouTubeVelocityOutput. 판정하지 않는다.
+// 지금 속도 = 최근 두 스냅샷 사이 시간당 조회 증가. 숫자 칸이 빠진 영상은 서버가 비워 둔다(0 아님).
+export interface YouTubeVideoVelocity {
+  video_id: string;
+  channel_id: string;
+  published_at: string;
+  popular_rank: number | null;
+  tags: string[];
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  views_per_hour: number | null;
+  prev_views_per_hour: number | null;
+  speed_change: number | null;
+  /** 그 전 구간보다 빨라졌는지 (그 전 구간이 없으면 null) */
+  faster: boolean | null;
+}
+export interface YouTubeVelocityOutput {
+  status: "known" | "unknown";
+  unknown_reason: string | null;
+  latest_at: string | null;
+  previous_at: string | null;
+  earlier_at: string | null;
+  compared_videos: number;
+  missing_views: number;
+  /** 지금 속도 큰 순, 상위 N개 */
+  videos: YouTubeVideoVelocity[];
+  summary: string;
+}
+
 // ---------------------------------------------------------------- 영상 소재 추천 (content_recommend)
 // 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py ContentRecommendOutput (#356, #370).
 // 급상승만 코드 점수로 순위를 매기고(두 소스 가산), 소재마다 아이디어 문장·형식은 LLM(숫자 검증, 실패하면 기본 문장).
@@ -489,6 +520,8 @@ export const dataAi = {
   trendCandidates: () => askData<TrendCandidatesOutput>("trend_candidates", "YouTube 후보 판정", {}, TREND_DEADLINE_MS),
   /** 키워드 그룹별 월별 흐름(작년 같은 달 대비). 입력을 비우면 회사 기본 키워드·설정 개월 수(24)·지난달까지. 그룹마다 네이버 1번 */
   trendHistory: () => askData<TrendHistoryOutput>("trend_history", "월별 흐름", {}, TREND_DEADLINE_MS),
+  /** YouTube 영상 지금 속도 (판정 없음). 스냅샷 DB만 읽고 외부 호출이 없다. 입력을 비우면 회사 설정 개수(10) */
+  youtubeVelocity: () => askData<YouTubeVelocityOutput>("youtube_velocity", "YouTube 지금 속도", {}),
   /** 영상 소재 추천 (콘텐츠 루프 2단계). 입력을 비우면 회사 설정(trends.toml [recommend])과 어제 날짜.
    *  네이버는 서버 하루 캐시를 같이 쓰고, 소재마다 아이디어 문장을 LLM이 쓴다 */
   contentRecommend: () => askData<ContentRecommendOutput>("content_recommend", "영상 소재 추천", {}, RECOMMEND_DEADLINE_MS),
