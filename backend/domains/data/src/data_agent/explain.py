@@ -331,7 +331,7 @@ _IDEA_PROMPT = (
     "이름을 쓰지 말고 회사 소개의 고객·분야만 참고할 것. 회사 소개는 보조 정보다\n"
     "- '우리 회사 제품', '회사 관점' 같은 막연한 말은 쓰지 말 것. 상품을 지어내지 말 것\n"
     "- 소재 이름은 데이터 블록의 이름만 쓸 것. 출연자·사건·날짜 같은 사실을 지어내지 말 것\n"
-    "근거: {sources}"
+    "근거: {sources}{meme}"
 )
 NO_COMPANY = "(회사 소개 설정이 없음. 상품·고객을 지어내지 말 것)"
 
@@ -373,6 +373,8 @@ async def explain_idea(
     sources: str = "검색 급상승",
     youtube_videos: int | None = None,
     catalog: Sequence[str] = (),
+    meme: str | None = None,
+    format_hint: str | None = None,
 ) -> Idea:
     """소재 하나의 영상 아이디어 문장과 형식.
 
@@ -382,6 +384,8 @@ async def explain_idea(
       `names`로 데이터 블록에만 넣는다.
     - 숫자 검증은 `explain`과 같은 규칙(`_bad_numbers`)이고 이름 속 숫자(예: t1)도 허용한다.
       실패하면 고정 문장 + 숏폼, `fallback=True`와 이유.
+    - 밈 형식(`meme`, 목록 안 값)과 권장 형식(`format_hint`)이 있으면 프롬프트에 넣고, 고정 문장의
+      형식도 권장 형식을 따른다.
     - 상품: 연결된 실제 상품은 `names["연결 상품"]`(데이터 블록)으로만 넣는다. 문장에 연결되지 않은
       회사 상품(`catalog`, 상품 이름 목록)이 나오면 버리고 고정 문장(`product_invalid`).
     """
@@ -389,13 +393,21 @@ async def explain_idea(
 
     def fallback(reason: str, bad: list[float] | None = None) -> Idea:
         template = _idea_template(numbers, names, youtube_videos)
-        return Idea(template, "숏폼", True, reason, tuple(bad or ()))
+        shape = format_hint if format_hint in IDEA_FORMATS else "숏폼"
+        return Idea(template, shape, True, reason, tuple(bad or ()))
+
+    meme_line = ""
+    if meme:  # 정해진 목록 안의 값만 온다 (meme_format.classify)
+        meme_line = f"\n밈 형식(대표 영상 제목으로 분류): {meme}. 이 형식에 맞는 영상으로 제안할 것"
+        if format_hint in IDEA_FORMATS:
+            meme_line += f"(권장 형식: {format_hint})"
 
     try:
         prompt = _IDEA_PROMPT.format(
             company=(company or "").strip() or NO_COMPANY,
             ratio=_fmt(numbers.get("배수")),
             sources=sources,
+            meme=meme_line,
         )
         result = await llm.structured(prompt, _Idea, untrusted=dict(names), context_id=context_id)
         idea = result.idea.strip()

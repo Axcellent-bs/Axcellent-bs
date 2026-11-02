@@ -852,6 +852,8 @@ class YouTubeVelocityOutput(AxModel):
 ContentFormat = Literal["숏폼", "롱폼"]
 ContentSource = Literal["naver", "youtube"]  # 검색 급상승, YouTube 인기 태그
 RecommendOrigin = Literal["keyword_group", "youtube_tag", "youtube_title", "trending_search"]
+# 밈 형식 (대표 영상 제목으로 LLM이 목록 안에서만 고름, 목록 밖 답은 기타). unknown = 분류하지 못함
+MemeFormat = Literal["챌린지", "패러디·밈", "리액션", "하이라이트", "정보·리뷰", "기타", "unknown"]
 
 
 class ContentRecommendRequest(AxModel):
@@ -906,6 +908,10 @@ class ContentRecommendation(AxModel):
     # 회사 관련성을 무엇으로 정했는지: products = 상품 연결, manual_keywords = 수동 회사 키워드
     # (덮어쓰기용), both = 둘 다, none = 둘 다 없음 (low)
     relevance_from: Literal["products", "manual_keywords", "both", "none"] | None = None
+    # 아래는 밈 형식 (예전 응답은 없다). YouTube 근거 영상이 없거나 분류하지 못하면 unknown + 이유
+    meme_format: MemeFormat | None = None
+    meme_reason: str | None = None
+    meme_titles: int = Field(default=0, ge=0)  # 분류에 쓴 대표 영상 제목 수 (최대 5)
 
 
 class ContentRecommendOutput(AxModel):
