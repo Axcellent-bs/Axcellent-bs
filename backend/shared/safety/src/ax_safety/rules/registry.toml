@@ -265,6 +265,20 @@ owner = "planning"
 requesters = ["planning", "dev"]
 base_grade = "A"
 
+# 구독형 일감: 개발자 본인 Claude가 작업을 가져가기·내려놓기(임대 만료 포함). 기록만 바뀌어 A.
+# 개발자가 올린 PR을 잇는 건 generate_pr(B), 머지는 merge_pr(B) 관문을 그대로 지난다
+[[actions]]
+action = "dev_task_claim"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+[[actions]]
+action = "dev_task_release"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
 # 개발 AI 대화 (개발 화면). 메시지 하나를 대화에 더하는 기록. 작업을 띄우는 건 dev_task_create
 [[actions]]
 action = "dev_chat"

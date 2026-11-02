@@ -45,6 +45,7 @@ from planning_agent.domain.service import (
 )
 from planning_agent.domain.trace import code_of, trace_of, trace_text
 from planning_agent.repo_api import add_repo_routes
+from planning_agent.work_api import add_work_routes
 
 KEEPALIVE_SECONDS = 15.0
 # 코딩 작업 오류 중 409로 주는 것 (설정·상태 문제). 나머지 입력 오류는 400
@@ -572,9 +573,11 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
 
     @router.post("/dev-tasks", response_model=None, dependencies=CALLER)
     async def post_dev_task(request: Request) -> dict | JSONResponse:
-        """`{title, plan, done?, paths?, connection?}` → `{request_id, spec_id, task_id, status}`.
+        """`{title, plan, done?, paths?, connection?, mode?}`
+        → `{request_id, spec_id, task_id, status}`.
 
-        진행은 작업 `coding`(SSE 상태)으로 본다."""
+        진행은 작업 `coding`(SSE 상태)으로 본다. `mode: "subscription"`이면 서버 에이전트 대신
+        개발자 본인 Claude가 MCP로 가져갈 때까지 대기열에 둔다 (work_api.py)."""
         svc = get_service()
         body = await _body(request)
         if body is None:
@@ -597,9 +600,17 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
             return _err(400, "INVALID_INPUT", "paths는 문자열 목록(20개 이하)이어야 한다")
         if connection is not None and not isinstance(connection, str):
             return _err(400, "INVALID_INPUT", "connection은 문자열이어야 한다")
+        mode = body.get("mode", "agent")
+        if mode not in ("agent", "subscription"):
+            return _err(400, "INVALID_INPUT", "mode는 agent·subscription 중 하나다")
         try:
             result = await svc.create_dev_task(
-                title=title, plan=plan, done=done, paths=paths, connection=connection or None
+                title=title,
+                plan=plan,
+                done=done,
+                paths=paths,
+                connection=connection or None,
+                mode=mode,
             )
         except ActionError as exc:
             return _coding_err(exc)
@@ -706,5 +717,7 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
 
     # ---- 레포 작업 공간 (repo_api.py): PR 게시판·상세·머지·되돌리기·브랜치
     add_repo_routes(router, get_service)
+    # ---- 구독형 일감 (work_api.py): 개발자 본인 Claude가 MCP로 일감을 가져간다
+    add_work_routes(router, get_service)
 
     return router
