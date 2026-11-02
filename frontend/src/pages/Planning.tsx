@@ -1,5 +1,5 @@
 // 기획 화면(/planning). 다른 부서의 요청을 받아 기획서로 정리하고, 결과를 요청한 부서에 알린다.
-// 메뉴 = 요청·기획서·에이전트 대화 (기획 AI 진행 상황만 본다). 프로젝트·정리·규정·자료·지표는 메뉴에서 숨기고 주소로만 연다.
+// 메뉴 = 요청·기획서·에이전트 대화 (기획 AI 진행 상황만 본다, 사이드바 하위 탭 demo/services.ts). 프로젝트·정리·규정·자료·지표는 메뉴에서 숨기고 주소로만 연다.
 // 틀은 개발 화면과 같이 쓴다(components/planning-common/Shell.tsx).
 import { PlanningShell, type Section } from '@/components/planning-common/Shell'
 import { AgentTalk, Talk } from '@/components/planning-common/talk'
@@ -7,7 +7,7 @@ import { Docs } from '@/components/planning/docs'
 import { Knowledge } from '@/components/planning/knowledge'
 import { Links, Metrics } from '@/components/planning/metrics'
 import { Projects } from '@/components/planning/projects'
-import { Requests, incomingCount } from '@/components/planning/requests'
+import { Requests } from '@/components/planning/requests'
 import { Specs } from '@/components/planning/specs'
 
 const SECTIONS: Record<string, Section> = {
@@ -32,7 +32,6 @@ export default function PlanningPage() {
       desc="다른 부서의 요청을 받아 기획서로 정리하고, 결과를 요청한 부서에 알립니다."
       home="requests"
       sections={SECTIONS}
-      badge={(v) => ({ requests: v.newWork || incomingCount(v.state), talk: v.newTalk })}
     >
       {({ state: s, dispatch: d, section, sub, tab, rest, item, item2 }) => (
         <>

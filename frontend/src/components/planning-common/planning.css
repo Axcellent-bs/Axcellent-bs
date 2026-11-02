@@ -460,12 +460,6 @@ a.plain-link:hover { color: var(--primary); }
 .pl-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 8px 32px 0; }
 .pl-title { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.3; }
 .pl-desc { margin-top: 4px; font-size: 14px; color: var(--text-3); }
-.pl-bar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 16px; padding: 0 32px; margin-top: 20px; background: var(--bg); border-bottom: 1px solid var(--border); }
-.pl-menu { display: flex; gap: 24px; flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; }
-.pl-menu a { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 12px 0; font-size: 14px; color: var(--text-3); text-decoration: none; white-space: nowrap; }
-.pl-menu a:hover { color: var(--text); }
-.pl-menu a.on { color: var(--text); font-weight: 600; }
-.pl-menu a.on::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; border-radius: 2px; background: var(--text); }
 .pl-tools { display: flex; align-items: center; gap: 10px; flex-shrink: 0; margin-left: auto; }
 .planning-scope .page { padding: 24px 32px 48px; }
 

@@ -43,8 +43,6 @@ export interface ShellProps {
   desc: string
   home: string
   sections: Record<string, Section>
-  /** 메뉴 옆 숫자 */
-  badge: (v: View) => Record<string, number>
   /** 가로탭 옆 숫자 */
   tabCount?: (v: View, section: string, tab: string) => number
   /** 제목 줄 오른쪽에 더 붙일 것 (개발: AI와 대화·개발 도구) */
@@ -91,7 +89,7 @@ const EXAMPLE_KEY = 'axcellent-planning-example'
 // 예시의 AI 승인 감사는 "오늘" 건만 보여서, 예시 기록 날짜를 오늘로 옮긴다
 const todayDemo = (s: State): State => ({ ...s, audit: s.audit.map((a) => ({ ...a, t: `${TODAY}${a.t.slice(5)}` })) })
 
-function Frame({ part, title, desc, home, sections, badge, tabCount, tools, children }: ShellProps) {
+function Frame({ part, title, desc, home, sections, tabCount, tools, children }: ShellProps) {
   const isSection = (x: string) => x in sections
   const route = useRoute(`/${part}`, home)
   const [live, liveDispatch, connected] = useSharedStore(apiBase(part))
@@ -138,13 +136,6 @@ function Frame({ part, title, desc, home, sections, badge, tabCount, tools, chil
   const recentIn = inbound.filter((x) => x.point !== 'message').slice(-3).reverse()
 
   const view: View = { state, dispatch, connected, example, section, sub, tab, rest, item, item2, newWork, newTalk }
-  const counts = badge(view)
-  const menu = Object.keys(sections).filter((id) => !sections[id].hidden).map((id) => ({
-    href: toPath(`${id}${sections[id].tabs[0] ? `/${sections[id].tabs[0].id}` : ''}`),
-    label: sections[id].label,
-    on: section === id,
-    badge: counts[id] || 0,
-  }))
 
   return (
     <div className="main">
@@ -165,16 +156,6 @@ function Frame({ part, title, desc, home, sections, badge, tabCount, tools, chil
           <ToastOutlet />
         </div>
       </header>
-      <div className="pl-bar">
-        <nav className="pl-menu" aria-label={`${title} 메뉴`}>
-          {menu.map((m) => (
-            <a key={m.href} href={m.href} className={m.on ? 'on' : ''} aria-current={m.on ? 'page' : undefined}>
-              {m.label}
-              {m.badge > 0 && <span className="nav-badge">{m.badge}</span>}
-            </a>
-          ))}
-        </nav>
-      </div>
 
       {known ? (
         <main className="page page-wide">
