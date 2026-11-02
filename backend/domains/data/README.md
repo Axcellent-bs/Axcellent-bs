@@ -262,6 +262,7 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
   - Docker(`services/data/compose.yml`)는 `DATA_TREND_CONFIG`를 `/app/config/tenants/${AX_TENANT:-catbooks}/trends.toml`로 넘긴다. 바꾸려면 셸 환경변수로 준다(`.env` 값은 이 줄에 덮인다)
   - **주의:** `services/*/compose.yml`·`agent-card.json`은 `scripts/split_services.py`가 만드는 파일이다. 이 줄은 손으로 넣어서 스크립트를 다시 돌리면 빠진다. 그 스크립트는 `--help` 같은 옵션을 읽지 않고 **바로 실행돼** 지금 dev에서도 `services/` 파일 66개를 다시 쓴다(줄바꿈 등). 확인하려고 옵션을 붙여 돌리지 말 것
 - 설명 문장은 LLM이 쓰고 `explain.py` 숫자 검증을 그대로 거친다(템플릿 `trend`)
+- 화면(`/data#trend`)용으로 그룹마다 받은 날짜별 값(`series`, 빠진 날은 빠진 채로), 판정 구간 시작일(`window_from`), 평소 범위 띠(`evidence.band_low`·`band_high` = exp(m ± σ)), 급상승 그룹의 설명 문장(`summary`, 그 그룹 숫자만으로, 템플릿 `trend_group`)도 준다
 - 요청 가능: orchestrator, marketing, dashboard-api
 
 #### 기준값 (평가 개발 케이스로 정함)

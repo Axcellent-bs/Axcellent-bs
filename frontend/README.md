@@ -116,6 +116,13 @@ cd backend && bash scripts/run_web.sh   # http://localhost:3090
    ```
    - 감지 시간은 `SHOP_DEGRADED_SUSTAIN_S`(run_all.sh 기본 20초)와 `SHOP_MONITOR_INTERVAL_S`(5초)로 정해져요
 4. http://localhost:3090/data 를 열어요. "장애 사건 데이터"에 사건이, "평상시 지표"(`/data#daily`)에 복구 시간·자동 처리율이 나와요. 사건을 하나 더 만들면 1차·2차 복구 시간이 비교돼요
+5. **트렌드 탭**(`/data#trend`, 검색어 급상승 `trend_scan`): 장애 주입 없이 데이터 AI 서버(8106)와 네이버 키(`backend/.env`의 `NAVER_HUB_CLIENT_ID`·`NAVER_HUB_CLIENT_SECRET`)만 있으면 돼요. 트렌드만 볼 때는 `bash scripts/run_all.sh --only data` + `bash scripts/run_web.sh`로 충분해요
+   - 처음 열면 회사 기본 키워드(`backend/config/tenants/<회사>/trends.toml`)로 한 번 판정해요. 오른쪽 위 입력에 쉼표로 최대 5개 그룹을 적고 "판정"을 누르면 그 그룹만 봐요(그룹마다 네이버 1번). 6개 이상이면 서버를 부르지 않고 안내만 해요
+   - 판정마다 서버가 급상승 그룹마다 설명 문장을 써서, 이 탭은 30초 새로고침을 따르지 않아요. "판정"·"다시 판정"을 누를 때만 다시 불러요
+   - 위: 급상승 카드(배수 큰 순, 배수·z·평소 범위 그래프·설명), 아래 왼쪽: 평소 수준·판정 불가(이유), 아래 오른쪽: 판정 방법. 그래프의 값·평소 범위 띠·판정 구간은 모두 서버 값(`series`·`band_low`·`band_high`·`window_from`)이에요
+   - "마케팅에 소재로 보내기"는 꺼 두고 "준비 중"으로 보여요. 받은 요청에 넣는 `POST /api/dashboard/handoffs`가 에이전트 토큰만 받아서, 화면(사람 로그인)에서는 넣을 수 없어요
+   - 출처 칩은 "네이버 검색"만 보여요. YouTube는 판정 데이터가 아직 없어요
+   - LLM 설정이 없으면 설명 문장은 규칙 기반 문장("○○ 검색이 직전 56일 평소의 N배입니다")으로 나와요. 데이터 AI가 꺼지면 숫자 없이 이유만 보여요
 
 화면이 부르는 주소:
 
@@ -126,6 +133,7 @@ cd backend && bash scripts/run_web.sh   # http://localhost:3090
 | 고른 사건 상세 | `GET /orch/api/incidents/{context_id}` | 총괄 8000 `/api/incidents/{context_id}` |
 | 데이터 AI 켜짐/꺼짐 칩 | `GET /data-a2a/health` | 데이터 AI data 8106 `/health` |
 | 평상시 지표 | `POST /data-a2a/a2a` (skill `kpi_summary`, 토큰 `VITE_DATA_A2A_TOKEN`) | 데이터 AI 8106 `/a2a` |
+| 트렌드 (`#trend`) | `POST /data-a2a/a2a` (skill `trend_scan`, 입력 비우면 회사 기본 키워드) | 데이터 AI 8106 `/a2a` → 네이버 검색어 트렌드 |
 
 `/orch`, `/data-a2a`는 개발 서버 프록시예요 (`vite.config.ts`, `ORCHESTRATOR_PROXY_TARGET`·`DATA_PROXY_TARGET`).
 

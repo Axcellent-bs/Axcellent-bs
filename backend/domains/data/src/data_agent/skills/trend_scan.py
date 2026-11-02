@@ -30,6 +30,7 @@ from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     TrendEvidence,
     TrendKeywordGroup,
+    TrendPoint,
     TrendScanInput,
     TrendScanOutput,
     TrendScanRequest,
@@ -113,7 +114,21 @@ def judge_series(
     end: date,
     settings: Settings = DEFAULT_SETTINGS,
 ) -> TrendVerdict:
-    """그룹 하나 판정. `start`~`end`는 그 응답의 요청 기간이다(같은 응답 안에서만 비교)."""
+    """그룹 하나 판정. `start`~`end`는 그 응답의 요청 기간이다(같은 응답 안에서만 비교).
+
+    판정과 상관없이 받은 날짜별 값(`series`)과 판정 구간 시작일(`window_from`)을 붙인다
+    (화면 그래프용).
+    """
+    verdict = _judge_core(series, start, end, settings)
+    return verdict.model_copy(
+        update={
+            "series": [TrendPoint(day=d, value=v) for d, v in series.points],
+            "window_from": end - timedelta(days=WINDOW_DAYS - 1),
+        }
+    )
+
+
+def _judge_core(series: TrendSeries, start: date, end: date, settings: Settings) -> TrendVerdict:
     group = series.group_name
     if not series.points:
         return _unknown(group, "자료 없음: 네이버가 이 기간 값을 주지 않음 (검색량이 적음)")
@@ -165,6 +180,8 @@ def judge_series(
                 "latest_period": last_day,
                 "latest_value": round(last_value, 4),
                 "score": round(peak.z, 2),
+                "band_low": round(math.exp(center - sigma), 4),
+                "band_high": round(math.exp(center + sigma), 4),
             }
         ),
     )
@@ -240,6 +257,21 @@ def _facts(results: list[TrendVerdict]) -> dict[str, int | float | str]:
     return facts
 
 
+def _group_facts(verdict: TrendVerdict) -> dict[str, int | float | str]:
+    """급상승 그룹 하나의 설명용 숫자 (LLM은 이 숫자만 쓸 수 있다)."""
+    e = verdict.evidence
+    facts: dict[str, int | float | str] = {
+        "키워드": verdict.group_name,
+        "배수": verdict.ratio or 0.0,
+        "기준선 일수": e.baseline_points,
+        "판정 구간 일수": WINDOW_DAYS,
+    }
+    for name, value in (("z", e.score), ("기준선", e.baseline_value), ("최근값", e.latest_value)):
+        if value is not None:
+            facts[name] = value
+    return facts
+
+
 async def scan_trends(
     request: TrendScanRequest,
     connector: NaverDatalabConnector,
@@ -272,6 +304,16 @@ async def scan_trends(
         results.extend(judge(query, response, settings).results)
     if last_error is not None and len(failed) == len(groups):
         raise last_error
+    group_notes: list[str] = []
+    group_fallback = False
+    for i, verdict in enumerate(results):
+        if verdict.status != "rising":
+            continue
+        said = await explain("trend_group", _group_facts(verdict), llm)
+        results[i] = verdict.model_copy(update={"summary": said.summary})
+        group_fallback = group_fallback or said.fallback
+        if note := said.note():
+            group_notes.append(f"{verdict.group_name}: {note}")
     output = TrendScanOutput(
         start_date=start, end_date=end, time_unit="date", source=SOURCE, results=results
     )
@@ -282,12 +324,13 @@ async def scan_trends(
         notes.append("읽지 못한 그룹: " + ", ".join(failed))
     if note := explained.note():
         notes.append(note)
+    notes.extend(group_notes)
     return TrendScanResult(
         output=output,
         evidence=Evidence(
             queries=queries, data_summary="\n".join(notes), collected_at=datetime.now(UTC)
         ),
-        fallback=explained.fallback,
+        fallback=explained.fallback or group_fallback,
         summary=explained.summary,
         fallback_reason=explained.reason,
         fallback_numbers=explained.bad_numbers,

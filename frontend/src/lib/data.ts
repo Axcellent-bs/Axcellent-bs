@@ -250,6 +250,48 @@ export interface ActivityReportOutput {
   unused_handoffs?: UnusedHandoff[];
 }
 
+// ---------------------------------------------------------------- 검색어 급상승 (trend_scan)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py TrendScanOutput. 판정·숫자는 모두 서버 값이다.
+// 값은 검색 건수가 아니라 "그 요청 안 최댓값 = 100"인 상대값이다(그룹마다 따로 요청).
+export type TrendStatus = "rising" | "normal" | "unknown";
+export interface TrendEvidence {
+  latest_period: string | null;
+  latest_value: number | null;
+  /** 기준선 = 판정 구간 전 56일 값의 중앙값 */
+  baseline_value: number | null;
+  baseline_points: number;
+  spread: number | null;
+  /** 평소 흔들림의 몇 배 위인지 (강건 z) */
+  score: number | null;
+  /** 평소 범위 띠 (예전 응답에는 없다) */
+  band_low?: number | null;
+  band_high?: number | null;
+}
+export interface TrendPoint { day: string; value: number }
+export interface TrendVerdict {
+  group_name: string;
+  status: TrendStatus;
+  ratio: number | null;
+  evidence: TrendEvidence;
+  unknown_reason: string | null;
+  /** 받은 날짜별 값. 네이버가 주지 않은 날은 빠져 있다(0 아님) */
+  series?: TrendPoint[];
+  /** 판정 구간 시작일 (그 앞은 기준선) */
+  window_from?: string | null;
+  /** 이 그룹 설명 문장 (급상승만, 숫자는 서버가 검증) */
+  summary?: string | null;
+}
+export interface TrendScanOutput {
+  start_date: string;
+  end_date: string;
+  time_unit: "date" | "week" | "month";
+  source: string;
+  value_kind: "relative";
+  results: TrendVerdict[];
+}
+/** 한 번에 판정할 수 있는 그룹 수 (화면 입력 한도) */
+export const TREND_MAX_GROUPS = 5;
+
 /** 서버가 꺼졌을 때 무엇이 꺼졌는지 보여 주는 이름 */
 export const DATA_SERVER = "데이터 AI 서버(8106)";
 export const ORCH_SERVER = "총괄 서버(8000)";
@@ -267,10 +309,19 @@ export const dataAi = {
   activityReport: (period: ActivityPeriod, start: string | null, services: string[] = []) =>
     // 주간·월간은 재무 마감을 날마다 물어 30초를 넘는다. 마감이 지나면 재무 호출이 취소되므로 이 skill만 2분
     askData<ActivityReportOutput>("activity_report", "업무 리포트", { period, ...(start ? { start } : {}), services }, REPORT_DEADLINE_MS),
+  /** 키워드 그룹별 검색어 급상승. groups를 비우면 서버가 회사 기본 키워드(trends.toml)를 본다. 그룹마다 네이버 1번 */
+  trendScan: (groups: string[] = []) =>
+    askData<TrendScanOutput>(
+      "trend_scan",
+      "검색어 급상승 판정",
+      groups.length ? { keyword_groups: groups.map((g) => ({ group_name: g, keywords: [g] })) } : {},
+      TREND_DEADLINE_MS,
+    ),
 };
 
 const DEADLINE_MS = 30_000;
 const REPORT_DEADLINE_MS = 120_000;
+const TREND_DEADLINE_MS = 60_000; // 그룹마다 네이버 호출 + 급상승마다 설명 문장
 
 async function askData<T>(skill: string, what: string, input: Record<string, unknown> = {}, deadlineMs = DEADLINE_MS): Promise<A2AResult<T>> {
   const body = {
@@ -281,6 +332,11 @@ async function askData<T>(skill: string, what: string, input: Record<string, unk
   const res = await fetch(`${DATA_A2A_URL}/a2a`, { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const json = (await res.json().catch(() => null)) as A2AResult<T> | null;
   if (!res.ok || !json) throw new ApiError(`${DATA_SERVER}에서 ${what}를 받지 못했습니다 (${res.status})`, res.status);
-  if (json.status !== "completed") throw new ApiError(`데이터 AI가 요청을 처리하지 않았습니다 (${json.outcome ?? json.status})`, res.status);
+  if (json.status !== "completed") {
+    // 서버가 이유를 주면 같이 보여 준다 (예: 네이버를 읽지 못함, 볼 키워드 없음)
+    const message = (json.output as { message?: unknown } | null)?.message;
+    const reason = typeof message === "string" && message ? ` · ${message}` : "";
+    throw new ApiError(`데이터 AI가 요청을 처리하지 않았습니다 (${json.outcome ?? json.status})${reason}`, res.status);
+  }
   return json;
 }

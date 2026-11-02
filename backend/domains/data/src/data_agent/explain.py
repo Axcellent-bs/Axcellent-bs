@@ -234,6 +234,11 @@ def _template(kind: str, facts: dict[str, int | float | str]) -> str:
         return _activity_template(facts)
     if kind == "trend":
         return _trend_template(facts)
+    if kind == "trend_group":
+        return (
+            f"{_fmt(facts.get('키워드'))} 검색이 직전 {_fmt(facts.get('기준선 일수'))}일 평소의 "
+            f"{_fmt(facts.get('배수'))}배입니다(z {_fmt(facts.get('z'))})."
+        )
     if kind == "impact":
         words = catalog.current().impact  # 회사 카탈로그의 단위 (캣북스: 주문·고객·원)
         return (
