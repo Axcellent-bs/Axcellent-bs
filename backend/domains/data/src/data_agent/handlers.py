@@ -395,6 +395,7 @@ async def content_recommend(request: AgentRequest) -> AgentResult:
         get_llm(),
         env=os.environ,
         context_id=request.meta.context_id,
+        catalog=get_catalog(),
     )
     return _result(
         request,
@@ -404,6 +405,14 @@ async def content_recommend(request: AgentRequest) -> AgentResult:
         evidence=result.evidence,
         fallback=result.fallback,
     )
+
+
+def get_catalog() -> object | None:
+    """회사 상품 목록 커넥터(캣북스 shop-api). 없으면 None. 테스트는 이 함수를 바꿔 끼운다."""
+    try:
+        return get_connector(os.environ)
+    except NotImplementedError:
+        return None
 
 
 async def trend_history(request: AgentRequest) -> AgentResult:

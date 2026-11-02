@@ -507,6 +507,22 @@ export interface ContentRecommendation {
   fallback_reason: string | null;
   /** 소재가 나온 곳 (예전 응답은 없다) */
   origins?: (CandidateOrigin | "keyword_group")[];
+  /** 연결할 회사 실제 상품 (회사 상품 목록 값 그대로). 예전 응답은 없다 */
+  products?: LinkedProduct[];
+  /** 회사 관련성 근거: 상품 연결·수동 회사 키워드·둘 다·없음. 예전 응답은 없다 */
+  relevance_from?: "products" | "manual_keywords" | "both" | "none" | null;
+}
+/** 소재와 연결한 회사 실제 상품 (서버 값) */
+export interface LinkedProduct {
+  product_id: string;
+  name: string;
+  category_code: string | null;
+  category_name: string | null;
+  /** name = 상품 이름 글자 일치, category = 카테고리 이름 일치, embedding = 임베딩 유사도 */
+  match: "name" | "category" | "embedding";
+  similarity: number | null;
+  /** 서버가 만든 한 줄 (예: 이름 일치: 파이썬) */
+  reason: string;
 }
 export interface ContentRecommendOutput {
   start_date: string | null;
@@ -523,6 +539,13 @@ export interface ContentRecommendOutput {
   snapshot_at: string | null;
   /** 코드가 숫자로 만든 한 문장 */
   summary: string;
+  /** 회사 상품 목록을 읽었는지 (예전 응답은 없다) */
+  catalog_status?: "known" | "unknown";
+  catalog_reason?: string | null;
+  catalog_products?: number;
+  /** 임베딩 유사도를 쟀는지. unknown이면 글자 일치만 썼다 */
+  similarity_status?: "known" | "unknown";
+  similarity_reason?: string | null;
 }
 
 // ---------------------------------------------------------------- 캠페인 효과 (campaign_effect)

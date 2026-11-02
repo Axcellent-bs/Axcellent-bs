@@ -369,7 +369,9 @@ def test_company_intro_comes_from_the_config(tmp_path: Path) -> None:
     _run(_env(tmp_path, config=config), Naver({"t1": 3.0}), llm)
     head = _prompt_head(llm)
     assert f"회사 소개: {intro}" in head
-    assert "회사 소개에 있는 상품·고객으로 구체적으로" in head
+    # 상품은 연결된 실제 상품만 (작업: 소재 ↔ 상품 연결), 회사 소개는 보조
+    assert "상품은 데이터 블록의 '연결 상품'에 있는 것만" in head
+    assert "회사 소개는 보조 정보다" in head
     assert load_config({"DATA_TREND_CONFIG": str(config)}).company_intro == intro
 
 

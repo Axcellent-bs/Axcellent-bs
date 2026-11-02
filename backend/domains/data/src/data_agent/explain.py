@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal
 from typing import Literal
@@ -48,6 +49,7 @@ LLM_UNAVAILABLE = "llm_unavailable"
 LLM_ERROR = "llm_error"
 FORMAT_ERROR = "format_error"
 NUMBER_INVALID = "number_invalid"
+PRODUCT_INVALID = "product_invalid"  # 아이디어 문장에 연결되지 않은 회사 상품
 FALLBACK_REASONS = (LLM_UNAVAILABLE, LLM_ERROR, FORMAT_ERROR, NUMBER_INVALID)
 
 
@@ -325,8 +327,9 @@ _IDEA_PROMPT = (
     "- 숫자는 '평소보다 {ratio}배' 하나만 쓸 수 있다. 다른 숫자(영상 수·날짜·가격·순위·개수 등)는 "
     "쓰지 말 것\n"
     "- z·점수·통계·표준편차·수치 같은 통계 용어를 쓰지 말 것\n"
-    "- '우리 회사 제품', '회사 관점' 같은 막연한 말 대신 회사 소개에 있는 상품·고객으로 구체적으로 "
-    "쓸 것. 회사 소개에 없는 상품을 지어내지 말 것\n"
+    "- 상품은 데이터 블록의 '연결 상품'에 있는 것만 이름 그대로 쓸 것. '연결 상품'이 없으면 상품 "
+    "이름을 쓰지 말고 회사 소개의 고객·분야만 참고할 것. 회사 소개는 보조 정보다\n"
+    "- '우리 회사 제품', '회사 관점' 같은 막연한 말은 쓰지 말 것. 상품을 지어내지 말 것\n"
     "- 소재 이름은 데이터 블록의 이름만 쓸 것. 출연자·사건·날짜 같은 사실을 지어내지 말 것\n"
     "근거: {sources}"
 )
@@ -369,6 +372,7 @@ async def explain_idea(
     company: str | None = None,
     sources: str = "검색 급상승",
     youtube_videos: int | None = None,
+    catalog: Sequence[str] = (),
 ) -> Idea:
     """소재 하나의 영상 아이디어 문장과 형식.
 
@@ -378,6 +382,8 @@ async def explain_idea(
       `names`로 데이터 블록에만 넣는다.
     - 숫자 검증은 `explain`과 같은 규칙(`_bad_numbers`)이고 이름 속 숫자(예: t1)도 허용한다.
       실패하면 고정 문장 + 숏폼, `fallback=True`와 이유.
+    - 상품: 연결된 실제 상품은 `names["연결 상품"]`(데이터 블록)으로만 넣는다. 문장에 연결되지 않은
+      회사 상품(`catalog`, 상품 이름 목록)이 나오면 버리고 고정 문장(`product_invalid`).
     """
     facts: dict[str, int | float | str] = {**numbers, **names}
 
@@ -403,4 +409,13 @@ async def explain_idea(
         return fallback(FORMAT_ERROR)
     if bad := _bad_numbers(idea, facts):
         return fallback(NUMBER_INVALID, bad)
+    linked = {n.strip() for n in names.get("연결 상품", "").split(",") if n.strip()}
+    if any(
+        name not in linked and _squash(name) in _squash(idea) for name in catalog if _squash(name)
+    ):
+        return fallback(PRODUCT_INVALID)
     return Idea(idea, result.format, False)
+
+
+def _squash(text: str) -> str:
+    return "".join(text.lower().split())

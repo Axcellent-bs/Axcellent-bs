@@ -5,8 +5,12 @@
   급상승이 없으면 빈 목록 + 이유("이번 기간 급상승한 소재가 없음")이고 억지로 채우지 않는다.
 - 순위(코드 규칙, LLM 안 씀): 점수 = `z_weight` × z + (검색 급상승 + YouTube 근거 두 소스면
   `two_source_bonus`). 같으면 z 큰 순 → 이름. 가중치·개수는 회사 `trends.toml` `[recommend]`.
-- 회사 관련성: 소재 이름(같이 본 이름 포함)이 회사 키워드(기본 키워드 그룹 이름·키워드 +
-  `company_keywords`)와 겹치면 related, 아니면 low. **표시만** 하고 순위에서 빼지 않는다.
+- 상품 연결(`product_link`): 급상승 소재마다 회사 실제 상품(커넥터 상품 목록)을 문자열 일치 +
+  임베딩 유사도로 최대 `max_products`개 잇는다. 아이디어 문장에는 연결된 상품만 쓰게 하고, 연결되지
+  않은 회사 상품이 나오면 고정 문장(`product_invalid`). 회사 소개(`company_intro`)는 보조.
+- 회사 관련성: 상품이 연결되면 related. 수동 회사 키워드(기본 키워드 그룹 이름·키워드 +
+  `company_keywords`, 덮어쓰기용)와 겹쳐도 related(`relevance_from`에 근거). 둘 다 없으면 low.
+  **표시만** 하고 순위에서 빼지 않는다.
 - 같은 소재: 기본 키워드 그룹과 YouTube 후보의 이름(같이 본 이름 포함)이 겹치면 한 소재로 본다.
   그 그룹이 급상승이면 그 판정을 쓰고 YouTube 근거를 붙인다(두 소스).
 - 아이디어 문장(LLM): 소재마다 `explain.explain_idea`. 프롬프트의 숫자는 배수 하나("평소보다 N배")
@@ -44,6 +48,7 @@ from ax_contracts.schemas.data import (
 )
 from data_agent.connectors.naver_datalab import NaverDatalabConnector
 from data_agent.explain import explain_idea
+from data_agent.skills.product_link import pick_links, read_catalog, similarities
 from data_agent.skills.trend_candidates import (
     NAVER_FAILED,
     clean_tag,
@@ -71,6 +76,9 @@ class RecommendConfig:
     two_source_bonus: float = 2.0
     company_keywords: tuple[str, ...] = ()
     company_intro: str = ""  # 아이디어 문장 프롬프트에 넣는 회사 소개 (무엇을 파는지, 고객)
+    max_products: int = 3  # 소재마다 연결할 실제 상품 수 상한
+    min_similarity: float = 0.6  # 임베딩 코사인이 이 이상이면 연결 (글자 일치는 늘 연결)
+    use_similarity: bool = True  # 임베딩 유사도를 쓸지 (끄면 글자 일치만)
 
 
 def load_config(env: Mapping[str, str]) -> RecommendConfig:
@@ -88,6 +96,9 @@ def load_config(env: Mapping[str, str]) -> RecommendConfig:
             two_source_bonus=float(raw.get("two_source_bonus", base.two_source_bonus)),
             company_keywords=tuple(str(k) for k in raw.get("company_keywords", [])),
             company_intro=str(raw.get("company_intro") or "").strip(),
+            max_products=int(raw.get("max_products", base.max_products)),
+            min_similarity=float(raw.get("min_similarity", base.min_similarity)),
+            use_similarity=bool(raw.get("use_similarity", base.use_similarity)),
         )
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return RecommendConfig()
@@ -247,8 +258,13 @@ async def recommend(
     settings: Settings = DEFAULT_SETTINGS,
     now: datetime | None = None,
     context_id: str | None = None,
+    catalog: Any = None,
 ) -> RecommendResult:
-    """급상승 소재를 순위대로 고르고 소재마다 아이디어 문장을 붙인다. 상태를 바꾸지 않는다."""
+    """급상승 소재를 순위대로 고르고 소재마다 상품 연결·아이디어 문장을 붙인다. 읽기만 한다.
+
+    `catalog`: 회사 상품 목록을 주는 커넥터(`products()`·`categories()`). 없으면 상품 연결은
+    확인할 수 없음 + 이유이고 관련성은 수동 회사 키워드로만 본다.
+    """
     now = now or datetime.now(UTC)
     config = load_config(env)
     before = _calls(connector)
@@ -273,6 +289,17 @@ async def recommend(
 
     company = [g.group_name for g in groups] + [k for g in groups for k in g.keywords]
     company += list(config.company_keywords)
+    shop = await read_catalog(catalog) if picked else None
+    products = shop.products if shop else []
+    sims = await similarities(
+        llm,
+        {t.keyword: ", ".join(t.names) for t in picked},
+        products,
+        shop.categories if shop else {},
+        enabled=config.use_similarity,
+        context_id=context_id,
+    )
+    names_of_catalog = [p.name for p in products]
     items: list[ContentRecommendation] = []
     notes: list[str] = []
     for rank, topic in enumerate(picked, start=1):
@@ -284,6 +311,16 @@ async def recommend(
         names = {"키워드": topic.keyword}
         if topic.aliases:
             names["같이 본 이름"] = ", ".join(topic.aliases)
+        linked = pick_links(
+            topic.names,
+            products,
+            shop.categories if shop else {},
+            sims.by_topic.get(topic.keyword) if not sims.reason else None,
+            min_similarity=config.min_similarity,
+            limit=config.max_products,
+        )
+        if linked:
+            names["연결 상품"] = ", ".join(p.name for p in linked)
         idea = await explain_idea(
             numbers,
             names,
@@ -292,10 +329,17 @@ async def recommend(
             company=config.company_intro,
             sources="검색 급상승 + YouTube 인기 영상" if topic.two_sources else "검색 급상승",
             youtube_videos=topic.youtube_videos,
+            catalog=names_of_catalog,
         )
         if note := idea.note():
             notes.append(f"{topic.keyword}: {note}")
         matched = company_match(topic.names, company)
+        relevance_from = (
+            "both" if linked and matched else
+            "products" if linked else
+            "manual_keywords" if matched else
+            "none"
+        )  # fmt: skip
         items.append(
             ContentRecommendation(
                 rank=rank,
@@ -309,13 +353,15 @@ async def recommend(
                     two_sources=topic.two_sources,
                     youtube_videos=topic.youtube_videos if topic.two_sources else None,
                 ),
-                company_relevance="related" if matched else "low",
+                company_relevance="related" if linked or matched else "low",
                 company_match=matched,
                 idea=idea.idea,
                 format=idea.format,  # type: ignore[arg-type]  # IDEA_FORMATS
                 fallback=idea.fallback,
                 fallback_reason=idea.reason,
                 origins=topic.origins,
+                products=linked,
+                relevance_from=relevance_from,  # type: ignore[arg-type]
             )
         )
 
@@ -343,6 +389,12 @@ async def recommend(
         youtube_reason=cand.unknown_reason,
         snapshot_at=cand.snapshot_at,
         summary=_summary(items, calls),
+        catalog_status="known" if shop and not shop.reason else "unknown",
+        catalog_reason=(shop.reason if shop else "추천할 소재가 없어 상품을 읽지 않음"),
+        catalog_products=len(products),
+        similarity_status="known" if picked and products and not sims.reason else "unknown",
+        similarity_reason=sims.reason
+        or (None if picked and products else "연결할 소재나 상품이 없음"),
     )
     queries = [f"naver search-trend group={g.group_name} {start}~{end} date" for g in groups]
     queries += found.evidence.queries
@@ -351,6 +403,14 @@ async def recommend(
         lines.append("네이버를 읽지 못한 것: " + ", ".join(failed))
     if cand.status == "unknown":
         lines.append(f"YouTube 후보 없음: {cand.unknown_reason}")
+    if shop and shop.reason:
+        lines.append(f"상품 연결 확인할 수 없음: {shop.reason}")
+    elif sims.reason and picked:
+        lines.append(f"상품 유사도 확인할 수 없음: {sims.reason} (글자 일치만 씀)")
+    linked_count = sum(bool(i.products) for i in items)
+    if items:
+        lines.append(f"회사 상품과 연결된 추천 {linked_count}/{len(items)}개")
+        queries.append("shop-api GET /api/shop/products, /api/shop/categories")
     lines += notes
     evidence = Evidence(queries=queries, data_summary="\n".join(lines), collected_at=now)
     return RecommendResult(output, evidence, any(i.fallback for i in items))

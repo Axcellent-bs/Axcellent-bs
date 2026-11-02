@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
+from pydantic import BaseModel, ConfigDict
+
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT
 
 Point = tuple[datetime, float]
@@ -36,6 +38,16 @@ class ConnectorUnavailable(Exception):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+class CatalogProduct(BaseModel):
+    """회사 상품 하나 (표준 형식, 영상 소재 ↔ 상품 연결에 쓰는 칸만). 캣북스: shop-api 상품."""
+
+    model_config = ConfigDict(extra="ignore")
+    product_id: str
+    name: str
+    category_code: str | None = None
+    active: bool = True
 
 
 class ConnectorUnsupported(ConnectorUnavailable):

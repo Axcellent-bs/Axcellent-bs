@@ -871,6 +871,19 @@ class ContentScore(AxModel):
     youtube_videos: int | None = Field(default=None, ge=1)  # YouTube 인기 영상 수 (두 소스일 때)
 
 
+class LinkedProduct(AxModel):
+    """소재와 연결한 회사 실제 상품 하나 (회사 상품 목록에 있는 값 그대로)와 연결 근거."""
+
+    product_id: str
+    name: str
+    category_code: str | None = None
+    category_name: str | None = None
+    # name = 상품 이름 글자 일치, category = 카테고리 이름 일치, embedding = 임베딩 유사도만
+    match: Literal["name", "category", "embedding"]
+    similarity: float | None = None  # 임베딩 코사인 (재지 못했으면 None)
+    reason: str  # 코드가 만든 한 줄 (예: 이름 일치: 파이썬)
+
+
 class ContentRecommendation(AxModel):
     rank: int = Field(ge=1)
     keyword: str = Field(
@@ -888,6 +901,11 @@ class ContentRecommendation(AxModel):
     fallback_reason: str | None = None  # llm_unavailable·llm_error·format_error·number_invalid
     # 소재가 나온 곳 (예전 응답은 없다): keyword_group = 회사 기본 키워드 그룹, 그 밖은 후보 출처
     origins: list[RecommendOrigin] = Field(default_factory=list)
+    # 아래는 상품 연결 (예전 응답은 없다). 연결할 회사 실제 상품 (최대 N개, 회사 설정)
+    products: list[LinkedProduct] = Field(default_factory=list)
+    # 회사 관련성을 무엇으로 정했는지: products = 상품 연결, manual_keywords = 수동 회사 키워드
+    # (덮어쓰기용), both = 둘 다, none = 둘 다 없음 (low)
+    relevance_from: Literal["products", "manual_keywords", "both", "none"] | None = None
 
 
 class ContentRecommendOutput(AxModel):
@@ -901,6 +919,12 @@ class ContentRecommendOutput(AxModel):
     youtube_reason: str | None = None  # unknown이면 이유 (예: 스냅샷이 오래됨)
     snapshot_at: UtcDatetime | None = None  # 쓴 YouTube 스냅샷 시각
     summary: str  # 한 문장 (코드가 숫자로 만든 고정 문장)
+    # 아래는 상품 연결 (예전 응답은 없다): 회사 상품 목록을 읽었는지, 임베딩 유사도를 쟀는지
+    catalog_status: Literal["known", "unknown"] = "unknown"
+    catalog_reason: str | None = None
+    catalog_products: int = Field(default=0, ge=0)  # 읽은 판매 중 상품 수
+    similarity_status: Literal["known", "unknown"] = "unknown"
+    similarity_reason: str | None = None
 
     @model_validator(mode="after")
     def _reason_when_empty(self) -> Self:
