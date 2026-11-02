@@ -317,6 +317,10 @@ class PlanningCore(StateService):
     def _dev_outgoing(self, s: State, full: bool = False) -> list[tuple[str, str, BaseModel, str]]:
         return []
 
+    async def tick(self) -> None:
+        """화면이 열려 있는 동안 주기적으로 부른다 (SSE keepalive 때). 서비스마다 채운다."""
+        return None
+
     async def _advance_step(self, s: State) -> bool:
         return False
 

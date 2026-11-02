@@ -512,6 +512,7 @@ source = { editable = "shared/workflow-core" }
 dependencies = [
     { name = "ax-agent-template" },
     { name = "ax-contracts" },
+    { name = "fastapi" },
     { name = "pydantic" },
 ]
 
@@ -519,6 +520,7 @@ dependencies = [
 requires-dist = [
     { name = "ax-agent-template", editable = "shared/agent-template" },
     { name = "ax-contracts", editable = "shared/contracts" },
+    { name = "fastapi", specifier = ">=0.115" },
     { name = "pydantic", specifier = ">=2.7" },
 ]
 

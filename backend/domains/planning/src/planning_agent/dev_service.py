@@ -102,6 +102,7 @@ from planning_agent import (
     vcs_bridge,
 )
 from planning_agent.cross_check import CrossChecker, CrossEvidence
+from planning_agent.deploy_store import get_deploy_store
 from planning_agent.vcs.base import VcsError
 
 MAX_INSTRUCTION_CHARS = 1000  # 사람 수정 지시 길이
@@ -466,6 +467,11 @@ class DevService(PlanningCore):
         self._coding_live.clear()
         self.__dict__.pop("_coding_drafts", None)
         super().reset()
+        get_deploy_store().reset()  # 배포 기록도 시드로
+
+    async def tick(self) -> None:
+        """화면이 열려 있는 동안 오래된 교차검증 대기를 사람 확인으로 넘긴다."""
+        await self.escalate_waits()
 
     def _kick_waiting(self) -> None:
         """충돌하는 요청이 끝나기를 기다리는 대화가 있으면 깨운다 (dev_chat.resume_waiting)."""

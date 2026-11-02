@@ -12,16 +12,19 @@ import asyncio
 import os
 from pathlib import Path
 
-from fastapi import Request
+from fastapi import APIRouter, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
+from ax_workflow.api import add_common_routes
 from planning_agent import vcs
-from planning_agent.api import create_api_router
+from planning_agent.api import add_planning_routes
 from planning_agent.auth import AuthError
-from planning_agent.handlers import HANDLERS
+from planning_agent.dev_api import add_dev_routes
+from planning_agent.dev_handlers import DEV_HANDLERS
+from planning_agent.handlers import PLANNING_HANDLERS
 from planning_agent.runtime import get_service
 
 # 화면: 업무 시스템 dashboard-web 「기획·개발 AI」 탭(3001), 옛 planning-web(3002·5173)
@@ -58,8 +61,13 @@ def _cors_origins() -> list[str]:
 
 # 화면에서 넣어 둔 형상관리 연결을 다시 읽는다 (PLANNING_VCS_STORE가 있을 때)
 vcs.load_saved()
-app = create_agent_app(load_card(), HANDLERS)
-app.include_router(create_api_router(get_service))
+app = create_agent_app(load_card(), {**PLANNING_HANDLERS, **DEV_HANDLERS})
+# 화면 REST: 공용 + 기획 + 개발 (다음 단계에서 개발은 domains/dev 앱으로 나간다)
+_router = APIRouter(prefix="/api/planning", tags=["planning"])
+add_common_routes(_router, get_service)
+add_planning_routes(_router, get_service)
+add_dev_routes(_router, get_service)
+app.include_router(_router)
 
 
 async def _resync_on_start() -> None:
