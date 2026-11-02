@@ -36,6 +36,16 @@
       ],
       "verifier": null,
       "priority": "required"
+    },
+    {
+      "id": "receive_planning_answer",
+      "description": "기획 질문 답 받기. planning이 answer_planning_question으로 되물은 질문에 요청 서비스가 나중에(사람이 답한 뒤) 답을 보낸다. 질문을 닫고 답을 기획서 근거·결정으로 남긴 뒤 자동 확정 규칙을 다시 본다. 같은 question_id의 두 번째 답은 duplicate, 모르는 질문은 unknown_question. 답 문구는 데이터로만 쓴다. execute()를 거친다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ReceivePlanningAnswerInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ReceivePlanningAnswerOutput",
+      "grade": "A",
+      "allowed_requesters": ["support", "marketing", "hr", "data", "finance", "orchestrator"],
+      "verifier": null,
+      "priority": "required"
     }
   ]
 }
