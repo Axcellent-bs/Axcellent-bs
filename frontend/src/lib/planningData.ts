@@ -87,7 +87,9 @@ export interface Task {
 }
 
 // 코딩 에이전트 한 번의 실행. SSE로 단계가 바뀐다
-export type CodingStatus = 'queued' | 'reading' | 'writing' | 'reviewing' | 'opened' | 'merged' | 'waiting_human' | 'failed' | 'canceled'
+export type CodingStatus = 'queued' | 'claimed' | 'reading' | 'writing' | 'reviewing' | 'opened' | 'merged' | 'waiting_human' | 'failed' | 'canceled'
+// 작업을 누가 코딩하나: 서버 AI(API 키) · 개발자 본인 Claude(구독, MCP로 가져감)
+export type CodingMode = 'agent' | 'subscription'
 export interface CodingFile { path: string; additions: number; deletions: number; reason: string }
 export interface CodingRun {
   status: CodingStatus
@@ -105,6 +107,11 @@ export interface CodingRun {
   mergeConflict?: boolean // 머지 충돌: 다시 시도하면 PR을 닫고 최신 코드로 다시 씀
   llmCalls?: number // 이 작업이 지금까지 부른 LLM 횟수 (다시 시도 포함)
   llmTokens?: number // 이 작업이 지금까지 쓴 토큰 (입력 + 출력)
+  mode?: CodingMode
+  claimedBy?: string | null // 구독형: 가져간 사람
+  claimedAt?: string | null
+  leaseUntil?: string | null // 이때까지 진행 보고가 없으면 대기열로 돌아간다
+  progress?: string | null // 구독형: 개발자 Claude가 마지막으로 보고한 진행 글
 }
 
 export interface PR {
@@ -323,6 +330,7 @@ export interface ChatThread {
   taskId: string | null
   connection: string | null
   waitingFor?: string[] // 끝나기를 기다리는 요청 (충돌하는 요청이 끝나면 시작)
+  mode?: CodingMode // 이 대화가 띄울 작업을 누가 코딩하나
   createdAt: string
   updatedAt: string
 }

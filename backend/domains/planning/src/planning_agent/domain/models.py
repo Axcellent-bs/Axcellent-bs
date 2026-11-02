@@ -459,6 +459,8 @@ class ChatThread(DomainModel):
     task_id: str | None = None
     connection: str | None = None
     waiting_for: list[str] = Field(default_factory=list)  # 끝나기를 기다리는 요청 ID
+    # 작업을 누가 코딩하나: agent(서버 AI, API 키) · subscription(개발자 본인 Claude, work_queue.py)
+    mode: Literal["agent", "subscription"] = "agent"
     created_at: UtcDatetime
     updated_at: UtcDatetime
 

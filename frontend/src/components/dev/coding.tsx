@@ -12,14 +12,14 @@ const api = devTaskApi(DEV_API)
 const actions = planningApi(DEV_API)
 
 export const CODING_LABEL: Record<CodingStatus, string> = {
-  queued: '대기', reading: '파일 읽는 중', writing: '코드 작성 중', reviewing: '리뷰 중',
+  queued: '대기', claimed: '가져감', reading: '파일 읽는 중', writing: '코드 작성 중', reviewing: '리뷰 중',
   opened: 'PR 열림', merged: '머지됨', waiting_human: '사람 확인', failed: '실패', canceled: '중단됨',
 }
 const DONE: CodingStatus[] = ['opened', 'merged']
 /** 토큰 수를 짧게: 950 · 12.3k · 1.2M */
 export const tokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : `${n}`)
 /** 에이전트가 지금 일하는 중인 상태 (옆에 깜빡이는 점) */
-const RUNNING: CodingStatus[] = ['queued', 'reading', 'writing', 'reviewing']
+const RUNNING: CodingStatus[] = ['queued', 'claimed', 'reading', 'writing', 'reviewing']
 export const isRunning = (s?: CodingStatus | string) => RUNNING.includes(s as CodingStatus)
 /** 상태 글자. 진행 중이면 앞 점이 깜빡인다 */
 export const CodingLabel = ({ c }: { c: CodingRun }) => <State v={codingState(c)} live={isRunning(c.status)} />
@@ -105,7 +105,10 @@ export function RelatedTags({ s, t }: { s: S; t?: Task }) {
 
 /** 목록 줄·머리에 쓰는 코딩 상태 글자 */
 export const codingState = (c: CodingRun) =>
-  c.status === 'queued' && c.waitingFor?.length ? `차례 기다림 (${c.waitingFor.join(', ')} 뒤)` : CODING_LABEL[c.status] ?? c.status
+  c.status === 'queued' && c.waitingFor?.length ? `차례 기다림 (${c.waitingFor.join(', ')} 뒤)`
+    : c.status === 'queued' && c.mode === 'subscription' ? '내 Claude 대기'
+    : c.status === 'claimed' ? `가져감 · ${c.claimedBy ?? '개발자'}`
+    : CODING_LABEL[c.status] ?? c.status
 
 /** 작업·PR 흐름 맨 위 "코딩 에이전트" 단계 */
 export function CodingStep({ task }: { task: Task }) {
@@ -155,7 +158,7 @@ export function CodingStep({ task }: { task: Task }) {
   return (
     <Step name="코딩 에이전트" on={DONE.includes(c.status)} title={<CodingLabel c={c} />}>
       <span className="tags">
-        {c.model && <Tag><span className="mono">{c.model}</span></Tag>}
+        {c.mode === 'subscription' ? <Tag>내 Claude{c.claimedBy ? ` · ${c.claimedBy}` : ''}</Tag> : c.model && <Tag><span className="mono">{c.model}</span></Tag>}
         {c.attempts > 1 && <Tag>{c.attempts}회차</Tag>}
         {!!c.llmCalls && <Tag>AI {c.llmCalls}회 · <span className="mono">{tokens(c.llmTokens ?? 0)}</span> 토큰</Tag>}
         {!!files.length && <Tag>{files.length}파일 · <span className="mono">+{add} −{del}</span></Tag>}
@@ -163,6 +166,7 @@ export function CodingStep({ task }: { task: Task }) {
         {c.instruction && <Tag>사람 지시</Tag>}
       </span>
       {c.summary && <p>{c.summary}</p>}
+      {c.mode === 'subscription' && c.progress && <p className="muted">{c.progress}</p>}
       {!!files.length && (
         <div className="table-wrap">
           <table className="data">

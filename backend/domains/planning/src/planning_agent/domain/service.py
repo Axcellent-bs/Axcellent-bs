@@ -2785,6 +2785,7 @@ class PlanningService:
         connection: str | None = None,
         title: str | None = None,
         waiting_for: list[str] | None = None,
+        mode: str | None = None,
     ) -> ChatThread:
         """대화에 메시지 하나를 더한다. thread_id가 없으면 새 대화(`chat-n`)를 연다."""
 
@@ -2828,6 +2829,8 @@ class PlanningService:
                 th.title = title
             if waiting_for is not None:
                 th.waiting_for = list(waiting_for)
+            if mode:
+                th.mode = mode  # type: ignore[assignment]
             th.updated_at = t
             return ActionResult(outcome="chat", output={"thread_id": th.id})
 
