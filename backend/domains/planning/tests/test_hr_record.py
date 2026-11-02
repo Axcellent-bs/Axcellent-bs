@@ -142,14 +142,31 @@ def test_hr_timeout_is_failure_not_made_up() -> None:
     assert any("응답 없음" in t for t in _hr_acts(svc))
 
 
-def test_gate_hold_does_not_call_hr() -> None:
+def test_record_case_skips_planning_gate_in_real_mode() -> None:
+    """등록표 owner가 hr이라 기획 관문은 record_case를 보류한다(실서버 11/2). 인사가 자기 관문으로
+    실행하므로 실제 모드(인사 연결)에서는 기획 관문에 묻지 않고 인사를 부른다."""
     hr = Hr()
-    svc = _service(hr, gate=_hold_record_gate)
+    asked: list[str] = []
+
+    async def gate(action, params, meta, evidence):
+        asked.append(action)
+        return await _hold_record_gate(action, params, meta, evidence)
+
+    svc = _service(hr, gate=gate)
     run(svc.answer_question("SPEC-7", "품절 상품도 남겨 두고 품절 표시해 주세요"))
     run(svc.confirm_spec("SPEC-7"))
 
-    assert hr.asked == []
-    assert all(h.status == "held" for h in svc.soft_holds)
+    assert "record_case" not in asked  # 사람 보류 큐에 C 건이 쌓이지 않는다
+    assert [r.kind for r in hr.records()] == [
+        RecordKind.DECISION_EXTRACTED,
+        RecordKind.SPEC_CONFIRMED,
+    ]
+    assert svc.soft_holds == []
+
+
+def test_mock_mode_still_records_record_case_gate(service) -> None:
+    run(service.answer_question("SPEC-7", "품절 상품도 남겨 두고 품절 표시해 주세요"))
+    assert any(c.action == "record_case" for c in service.gate_calls)
 
 
 # ---- 3단계: 기획서 초안 → 인사 check_plan
