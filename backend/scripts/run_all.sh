@@ -3,6 +3,9 @@
 #   bash backend/scripts/run_all.sh          # 실제 LLM·실제 토큰·Redis·파일 DB, 캣북스 고객 주문 트래픽
 #   bash backend/scripts/run_all.sh stop     # 이 스크립트가 띄운 것 끄기
 #   bash backend/scripts/run_all.sh reset    # 끄고 테스트로 쌓인 기록(.data·이벤트 버스)을 지운다
+#   bash backend/scripts/run_all.sh --only data,finance,shop-api   # 고른 서버만 (이름은 아래 APPS)
+#   bash backend/scripts/run_all.sh --only data-demo              # 묶음: core, data-demo (아래 GROUP_*)
+#     안 띄운 서비스는 AX_ENABLED_SERVICES에서도 빠진다(이미 줬으면 교집합). stop은 늘 전체 포트를 끈다
 # 먼저 backend/ 에서 `uv sync --all-packages` 한 번. 로그는 backend/.logs/<이름>.log
 #
 # 실제 모드에 필요한 것
@@ -39,6 +42,47 @@ orchestrator 8000 ax_orchestrator.main:app
 "
 PORTS=$(echo "$APPS" | awk 'NF {print $2}' | tr '\n' ',' | sed 's/,$//')
 
+# --only 묶음 이름 (data-demo = core + data 업무 리포트가 부르는 서비스)
+GROUP_core="safety,memory,shop-api,dashboard-api,orchestrator"
+GROUP_data_demo="$GROUP_core,data,finance,inquiry,coupon,handover,dev"
+
+# 인자: stop | reset | mock 과 --only <목록> (--only=<목록>도 된다)
+CMD=""
+ONLY=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --only)
+      ONLY="${2:-}"
+      [ -n "$ONLY" ] || { echo "--only 뒤에 서버 이름(쉼표 목록)이나 묶음 이름이 필요합니다" >&2; exit 2; }
+      shift 2 ;;
+    --only=*) ONLY="${1#--only=}"; shift ;;
+    stop|reset|mock) CMD="$1"; shift ;;
+    *) echo "모르는 인자: $1 (쓸 수 있는 것: stop, reset, --only <목록>)" >&2; exit 2 ;;
+  esac
+done
+
+# 띄울 서버 목록 (APPS 순서 유지). --only가 없으면 전부
+RUN_APPS="$APPS"
+SKIPPED=""
+if [ -n "$ONLY" ]; then
+  wanted=","
+  for item in $(echo "$ONLY" | tr ',' ' '); do
+    var="GROUP_$(echo "$item" | tr '-' '_')"
+    if [ -n "${!var:-}" ]; then
+      wanted="$wanted${!var},"
+    elif echo "$APPS" | awk -v n="$item" '$1 == n {found=1} END {exit !found}'; then
+      wanted="$wanted$item,"
+    else
+      echo "모르는 서버·묶음 이름: $item" >&2
+      echo "  서버: $(echo "$APPS" | awk 'NF {print $1}' | tr '\n' ' ')" >&2
+      echo "  묶음: core data-demo" >&2
+      exit 2
+    fi
+  done
+  RUN_APPS=$(echo "$APPS" | awk -v w="$wanted" 'NF && index(w, "," $1 ",")')
+  SKIPPED=$(echo "$APPS" | awk -v w="$wanted" 'NF && !index(w, "," $1 ",") {print $1}' | tr '\n' ' ' | sed 's/ $//')
+fi
+
 stop_all() {
   # bash의 $!는 Windows 프로세스 번호가 아니라서, 포트를 쥔 프로세스를 찾아 끈다
   if command -v powershell.exe >/dev/null 2>&1; then
@@ -51,7 +95,7 @@ stop_all() {
   done
 }
 
-if [ "${1:-}" = "stop" ]; then
+if [ "$CMD" = "stop" ]; then
   stop_all
   echo "stopped"
   exit 0
@@ -59,15 +103,15 @@ fi
 
 # 테스트로 쌓인 기록을 지우고 처음부터: 캣북스 주문·AI 대화 기록·인사 기록·LLM 사용량·이벤트 버스
 # (캣북스 쇼핑몰은 비어 있으면 시드를 다시 넣는다)
-if [ "${1:-}" = "reset" ]; then
+if [ "$CMD" = "reset" ]; then
   stop_all
-  rm -f "$DATA"/*.db "$DATA"/*.db-wal "$DATA"/*.db-shm "$DATA"/web.env
+  rm -f "$DATA"/*.db "$DATA"/*.db-wal "$DATA"/*.db-shm "$DATA"/web.env "$DATA"/tokens.env
   docker exec ax-redis redis-cli FLUSHALL >/dev/null 2>&1 || true
   echo "reset: backend/.data 와 이벤트 버스를 비웠습니다. 다시 켜려면 bash scripts/run_all.sh"
   exit 0
 fi
 
-if [ "${1:-}" = "mock" ]; then
+if [ "$CMD" = "mock" ]; then
   echo "목 모드는 지웠습니다. 로컬도 실제 모드 하나로 돕니다 (*_MOCK 스위치는 CI 단위 테스트 전용)." >&2
   exit 2
 fi
@@ -88,6 +132,8 @@ export DASHBOARD_CORS_ORIGINS="$WEB" FINANCE_CORS_ORIGINS="$WEB" SHOP_CORS_ORIGI
 export SAFETY_CORS_ORIGINS="$WEB" PLANNING_CORS_ORIGINS="$WEB"
 # 화면에서 넣은 형상관리 연결(토큰 포함)을 다시 켜도 남게 저장한다. .data/는 git에 안 올라간다
 export PLANNING_VCS_STORE="$PWD/$DATA/vcs_connections.json"
+# 기획·개발 상태를 서비스 역할마다 파일에 이어 쓴다 (다시 켜도 요청·작업·PR·대화가 남음)
+export PLANNING_STATE_DIR="$PWD/$DATA"
 # 기획·개발은 실제 시각으로 (기본은 10-22에서 1분씩 가는 시연 시계라 총괄이 사건 구간으로 묻는
 # 관련 PR 찾기·교차검증 최근 7일 장애가 실제 머지를 못 잡는다)
 export PLANNING_CLOCK=real
@@ -102,10 +148,9 @@ if [ -z "${AX_ENABLED_SERVICES:-}" ] && [ -f .env ]; then
   AX_ENABLED_SERVICES=$(tr -d '\r' < .env | sed -n 's/^AX_ENABLED_SERVICES=//p' | tail -n 1 | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//; s/^"(.*)"$/\1/')
 fi
 export AX_ENABLED_SERVICES="${AX_ENABLED_SERVICES:-}"
-# 조직도(업무 → 맡은 부서·담당자). config/org.yaml 이 있으면 쓴다 (예시: config/org.example.yaml)
-if [ -z "${AX_ORG_CONFIG:-}" ] && [ -f config/org.yaml ]; then
-  export AX_ORG_CONFIG="$PWD/config/org.yaml"
-fi
+# 켠 서비스 파일 ({"enabled": [...], "updated_at", "updated_by"}). 있으면 위 환경변수보다 먼저 쓰고,
+# 바꾸면 재시작 없이 반영된다. 없거나 깨졌으면 환경변수를 쓴다 (ax_agent_template.routing)
+export AX_ENABLED_SERVICES_FILE="${AX_ENABLED_SERVICES_FILE:-$PWD/$DATA/enabled_services.json}"
 # 사람 할 일함 저장 파일 (dashboard-api)
 export AX_HANDOFF_DB="$PWD/$DATA/handoffs.db"
 # 재무 기록(판매자 심사·정산 보류·장부·사람 결정). 다시 켜도 이어진다
@@ -127,6 +172,19 @@ if [ -f ../.env ]; then
     [ -n "$val" ] && export "$v=$val"
   done
 fi
+# 회사 설정 (config/tenants/<AX_TENANT>/tenant.toml, 기본 catbooks): 조직도 AX_ORG_CONFIG·data 카탈로그
+# DATA_TENANT_CATALOG를 정한다. 이미 준 환경변수(.env 포함)와 config/org.yaml(각자 덮어쓰기)이 먼저다
+if ! tenant_exports=$("$PY" scripts/tenant_env.py); then
+  echo "회사 설정을 읽지 못해 켜지 않습니다 (AX_TENANT=${AX_TENANT:-catbooks}, backend/README.md \"새 회사를 붙일 때\")" >&2
+  exit 2
+fi
+eval "$tenant_exports"
+if [ -z "${AX_ORG_CONFIG:-}" ] || [ ! -f "$AX_ORG_CONFIG" ]; then
+  echo "==================================================================" >&2
+  echo " 조직도 없음: 꺼진 서비스로 가는 일은 no_assignee로 실패합니다" >&2
+  echo " config/tenants/${AX_TENANT:-catbooks}/org.yaml 을 두거나 AX_ORG_CONFIG를 주세요" >&2
+  echo "==================================================================" >&2
+fi
 # 목 스위치(*_MOCK, 테스트 전용)는 남기지 않는다 (.env에 남아 있어도 끈다)
 for v in $(env | sed -n 's/^\([A-Z_]*_MOCK\)=.*/\1/p'); do unset "$v"; done
 unset ORCHESTRATOR_REAL_DEPTS
@@ -134,6 +192,24 @@ for v in LLM_MODEL LLM_BASE_URL LLM_API_KEY; do
   [ -n "${!v:-}" ] || echo "경고: backend/.env 와 레포 맨 위 .env 에 $v 가 없습니다. LLM을 쓰는 skill은 규칙 기반 대체 답을 냅니다." >&2
 done
 [ -n "${EMBED_MODEL:-}" ] || echo "경고: EMBED_MODEL 이 없습니다. 회사 기억(memory) 검색이 실패합니다 (예: gemini-embedding-001)." >&2
+
+# --only로 안 띄운 서비스는 켠 서비스에서도 뺀다 (라우터가 그쪽으로 A2A를 보내지 않고 사람 할 일함으로 넘긴다).
+# 대상은 서비스 13개(services.py)뿐이다. 이미 AX_ENABLED_SERVICES를 줬으면 둘의 교집합이다
+if [ -n "$ONLY" ]; then
+  svc_ids=" $("$PY" -c "from ax_agent_template.services import SERVICES; print(' '.join(s.id for s in SERVICES))") "
+  given=",$(echo "${AX_ENABLED_SERVICES:-}" | tr -d ' '),"
+  enabled=""
+  for n in $(echo "$RUN_APPS" | awk 'NF {print $1}'); do
+    case "$svc_ids" in *" $n "*) ;; *) continue ;; esac
+    case "$given" in ",,"|*",$n,"*) enabled="$enabled${enabled:+,}$n" ;; esac
+  done
+  # 비어 있으면 "전부 켬"이 되므로, 켤 서비스가 하나도 없으면 어느 서비스와도 맞지 않는 값을 둔다
+  export AX_ENABLED_SERVICES="${enabled:-none}"
+  # 켠 서비스 파일이 있으면 라우터는 파일을 먼저 본다. 안 띄운 서비스가 파일에서 켜져 있으면 A2A가 실패한다
+  if [ -f "$AX_ENABLED_SERVICES_FILE" ]; then
+    echo "경고: 켠 서비스 파일($AX_ENABLED_SERVICES_FILE)이 있어 --only로 정한 켠 서비스($AX_ENABLED_SERVICES)보다 먼저 쓰입니다. 안 띄운 서비스가 파일에 있으면 그 파일을 고치거나 지우세요." >&2
+  fi
+fi
 
 # 이벤트 버스 (Redis Streams)
 if [ -z "${REDIS_URL:-}" ]; then
@@ -151,13 +227,28 @@ export AX_LLM_USAGE_DB="$PWD/$DATA/llm_usage.db"
 # 결제 장애 감지를 시연 시간에 맞춘다 (기본 1분 지속 → 20초, 5초마다 판정). .env 값이 있으면 그걸 쓴다
 export SHOP_DEGRADED_SUSTAIN_S="${SHOP_DEGRADED_SUSTAIN_S:-20}" SHOP_MONITOR_INTERVAL_S="${SHOP_MONITOR_INTERVAL_S:-5}"
 
-# 에이전트 토큰 명부: 이름마다 새 토큰. 서비스 이름과 원래 부서 이름, 사람 관리자(admin) 모두 넣는다
+# 에이전트 토큰 명부: 서비스 이름과 원래 부서 이름, 사람 관리자(admin) 모두 넣는다.
+# 토큰은 $DATA/tokens.env 에 두고 다시 켤 때 그대로 쓴다. 켤 때마다 새로 만들면 이미 떠 있는
+# 화면(run_web.sh)이 예전 사람 토큰을 들고 있어 "사람 토큰을 검증할 수 없다"로 막힌다.
+# 없는 이름만 새로 만든다. 새 토큰이 필요하면 bash scripts/run_all.sh reset
 NAMES="$(echo "$APPS" | awk 'NF {print $1}' | tr '\n' ' ') support marketing hr infra admin"
 read -r AX_AGENT_TOKENS HUMAN_TOKEN < <("$PY" -c "
-import secrets, sys
-names = sys.argv[1].split()
-print(','.join(f'{n}={secrets.token_urlsafe(24)}' for n in names), secrets.token_urlsafe(24))
-" "$NAMES")
+import os, secrets, sys
+names, path = sys.argv[1].split(), sys.argv[2]
+saved = {}
+if os.path.exists(path):
+    for line in open(path, encoding='utf-8'):
+        key, _, value = line.strip().partition('=')
+        saved[key] = value
+agents = dict(p.split('=', 1) for p in saved.get('AX_AGENT_TOKENS', '').split(',') if '=' in p)
+agents = {n: agents.get(n) or secrets.token_urlsafe(24) for n in names}
+human = saved.get('HUMAN_TOKEN') or secrets.token_urlsafe(24)
+line = ','.join(f'{n}={t}' for n, t in agents.items())
+with open(path, 'w', encoding='utf-8') as f:
+    f.write(f'AX_AGENT_TOKENS={line}\nHUMAN_TOKEN={human}\n')
+os.chmod(path, 0o600)
+print(line, human)
+" "$NAMES" "$DATA/tokens.env")
 export AX_AGENT_TOKENS
 # 사람(운영자) 토큰: 안전 관문 보류 결정·재무·dashboard-api 쓰기
 export SAFETY_HUMAN_TOKENS="운영자:$HUMAN_TOKEN" FINANCE_HUMAN_TOKENS="운영자:$HUMAN_TOKEN"
@@ -167,9 +258,14 @@ token_of() { echo "$AX_AGENT_TOKENS" | tr ',' '\n' | sed -n "s/^$1=//p"; }
   echo "VITE_SAFETY_HUMAN_TOKEN=$HUMAN_TOKEN"
   echo "VITE_SHOP_ADMIN_TOKEN=$(token_of admin)"
   echo "VITE_DATA_A2A_TOKEN=$(token_of dashboard-api)"
+  # 읽기 전용 열람 토큰(.env의 SHOP_VIEWER_TOKEN)이 있으면 화면에도 넘긴다. 쓰기는 못 하는 값이다
+  [ -z "${SHOP_VIEWER_TOKEN:-}" ] || echo "VITE_SHOP_VIEWER_TOKEN=$SHOP_VIEWER_TOKEN"
 } > "$DATA/web.env"
 
 stop_all
+
+RUN_COUNT=$(echo "$RUN_APPS" | awk 'NF' | wc -l | tr -d ' ')
+echo "띄운 서버 ${RUN_COUNT}개: $(echo "$RUN_APPS" | awk 'NF {print $1}' | tr '\n' ' ' | sed 's/ $//'), 안 띄움: ${SKIPPED:-없음}"
 
 started=0
 while read -r name port module; do
@@ -181,7 +277,7 @@ while read -r name port module; do
       while read -r n p _; do
         [ -n "$n" ] && [ "$n" != "orchestrator" ] || continue
         [ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$p/health" || true)" = "200" ] && up=$((up + 1))
-      done <<< "$APPS"
+      done <<< "$RUN_APPS"
       [ "$up" -ge "$started" ] && break
       sleep 1
     done
@@ -189,19 +285,26 @@ while read -r name port module; do
   "$PY" -m uvicorn "$module" --host 127.0.0.1 --port "$port" > "$LOGS/$name.log" 2>&1 &
   echo $! > "$LOGS/$name.pid"
   started=$((started + 1))
-done <<< "$APPS"
+done <<< "$RUN_APPS"
 
-# 캣북스 고객 주문 트래픽
-SHOP_API_URL=http://127.0.0.1:8010 "$PY" scripts/shop_traffic.py > "$LOGS/shop-traffic.log" 2>&1 &
-echo $! > "$LOGS/shop-traffic.pid"
+# 캣북스 고객 주문 트래픽 (shop-api를 띄웠을 때만)
+if echo "$RUN_APPS" | awk '$1 == "shop-api" {found=1} END {exit !found}'; then
+  SHOP_API_URL=http://127.0.0.1:8010 "$PY" scripts/shop_traffic.py > "$LOGS/shop-traffic.log" 2>&1 &
+  echo $! > "$LOGS/shop-traffic.pid"
+fi
 
 sleep 8
 echo "모드: 실제"
-echo "켠 서비스: ${AX_ENABLED_SERVICES:-전부}  조직도: ${AX_ORG_CONFIG:-없음}"
+if [ -f "$AX_ENABLED_SERVICES_FILE" ]; then
+  echo "켠 서비스: 파일 $AX_ENABLED_SERVICES_FILE (바꾸면 재시작 없이 반영)  조직도: ${AX_ORG_CONFIG:-없음 (꺼진 서비스로 가는 일은 no_assignee로 실패)}"
+else
+  echo "켠 서비스: ${AX_ENABLED_SERVICES:-전부}  조직도: ${AX_ORG_CONFIG:-없음 (꺼진 서비스로 가는 일은 no_assignee로 실패)}"
+fi
 while read -r name port _; do
   [ -n "$name" ] || continue
   code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port/health" || true)
   printf "%-14s %s  %s\n" "$name" "$port" "$code"
-done <<< "$APPS"
+done <<< "$RUN_APPS"
+[ -z "$SKIPPED" ] || echo "안 띄움: $SKIPPED"
 echo "화면: bash scripts/run_web.sh (backend/.data/web.env 값으로 프론트 개발 서버를 켠다)"
 wait

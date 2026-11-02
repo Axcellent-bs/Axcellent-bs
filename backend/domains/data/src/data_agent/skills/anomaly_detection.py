@@ -24,11 +24,19 @@ import os
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import get_args
 
 from ax_agent_template.llm import LLMClient
 from ax_contracts.schemas import Evidence
-from ax_contracts.schemas.data import AnomalyDetectionInput, AnomalyDetectionOutput, MetricVerdict
-from data_agent.clients.shop_client import HttpMetricSource, shop_api
+from ax_contracts.schemas.data import (
+    AnomalyDetectionInput,
+    AnomalyDetectionOutput,
+    BusinessMetric,
+    MetricIdVerdict,
+    MetricVerdict,
+)
+from data_agent import catalog
+from data_agent.clients.shop_client import get_connector
 from data_agent.detect import EMPTY_WINDOW, MetricSource, judge_window
 from data_agent.explain import explain
 from data_agent.metrics.judge import BASELINE_DAYS, Judgement, Settings, settings_for
@@ -49,15 +57,21 @@ class AnomalyResult:
 
 
 def get_metric_source(env: Mapping[str, str]) -> MetricSource:
-    """`DATA_MOCK=1`이면 목 공급자, 아니면 shop-api `/api/shop/metric-series` 공급자."""
+    """`DATA_MOCK=1`(테스트 전용)이면 목 공급자, 아니면 회사 카탈로그의 커넥터(캣북스: shop-api)."""
     if env.get("DATA_MOCK") == "1":
         return MockMetricSource()
-    return HttpMetricSource(shop_api(env))
+    return get_connector(env)
 
 
-def _verdict(j: Judgement) -> MetricVerdict:
-    return MetricVerdict(
-        metric=j.metric,  # type: ignore[arg-type]
+# 예전 목록(`verdicts`·`unknown_metrics`)에 실을 수 있는 지표: 계약의 캣북스 지표 4개
+LEGACY_METRICS: frozenset[str] = frozenset(get_args(BusinessMetric))
+
+
+def _metric_verdict(j: Judgement) -> MetricIdVerdict:
+    """모든 지표의 판정 (회사 카탈로그 id·이름)."""
+    return MetricIdVerdict(
+        metric_id=j.metric,
+        metric_label=catalog.label(j.metric),
         observed=j.observed,
         baseline=j.baseline,
         ratio=j.ratio,
@@ -67,6 +81,14 @@ def _verdict(j: Judgement) -> MetricVerdict:
         direction=j.direction,
         note=j.note,
     )
+
+
+def _verdict(j: Judgement) -> MetricVerdict | None:
+    """예전 목록의 판정. 캣북스 지표 4개만이고 그 밖의 지표는 None (새 목록에만 싣는다)."""
+    if j.metric not in LEGACY_METRICS:
+        return None
+    by_id = _metric_verdict(j)
+    return MetricVerdict(metric=j.metric, **by_id.model_dump())  # type: ignore[arg-type]
 
 
 async def detect_anomalies(
@@ -92,7 +114,8 @@ async def detect_anomalies(
             "게시 중 공지·캠페인: " + "; ".join(found) if found else "게시 중 공지·캠페인 없음"
         )
 
-    verdicts = [_verdict(j) for j in judgements]
+    metric_verdicts = [_metric_verdict(j) for j in judgements]
+    verdicts = [v for j in judgements if (v := _verdict(j)) is not None]
     abnormal = [j for j in judgements if j.status == "anomaly"]
     unknown = [j for j in judgements if j.status == "unknown"]
     any_anomaly = bool(abnormal)
@@ -104,7 +127,7 @@ async def detect_anomalies(
         explanation = await explain(
             "anomaly",
             {
-                "metric": worst.metric,
+                "metric": catalog.label(worst.metric),  # 회사 카탈로그의 한국어 이름
                 "baseline": worst.baseline,
                 "observed": worst.observed,
                 "ratio": worst.ratio if worst.ratio is not None else "-",
@@ -126,14 +149,17 @@ async def detect_anomalies(
         any_anomaly=any_anomaly,
         summary=summary,
         status=status,
-        unknown_metrics=[j.metric for j in unknown],  # type: ignore[misc]
+        unknown_metrics=[j.metric for j in unknown if j.metric in LEGACY_METRICS],  # type: ignore[misc]
+        metric_verdicts=metric_verdicts,
+        unknown_metric_ids=[j.metric for j in unknown],
     )
     lines = [
-        f"지표 {len(verdicts)}개 중 이상 {len(abnormal)}개, 확인할 수 없음 {len(unknown)}개"
+        f"지표 {len(metric_verdicts)}개 중 이상 {len(abnormal)}개, 확인할 수 없음 {len(unknown)}개"
         + (f" ({', '.join(j.metric for j in abnormal)})" if abnormal else ""),
         *(f"{j.metric}: {j.note}" for j in judgements),
         *notes,
-        f"판정 설정: 5분 결제 {settings.min_payments}건 이상만 실패율 판정, "
+        f"판정 설정: 5분 {catalog.denominator_label()} {settings.min_payments}건 이상만 "
+        "실패율 판정, "
         f"유의수준 {settings.alpha}, 장애 쪽 실패는 평소 이 시각에 그만큼 날 확률이 "
         f"{settings.fault_p_anomaly:g}보다 작으면 이상(이어진 두 구간은 곱, "
         f"{settings.fault_p_low:g}보다 작으면 low 기록, 평소 5분 실패 하한 "

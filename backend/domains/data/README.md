@@ -15,6 +15,87 @@
 
 - 숫자는 코드가 계산한다(`metrics/`, `impact.py`, `detect.py`). LLM은 계산이 끝난 숫자로 설명 문장만 쓴다(`explain.py`)
 - 주기 감시(`monitor.py`)는 `anomaly_detection`과 같은 판정 함수로 최근 구간을 보고 `metric.anomaly` 이벤트를 낸다. 사건은 열지 않는다(`context_id` 없음)
+### 새 회사를 붙일 때 필요한 것: 지표 카탈로그 + 커넥터
+회사 한 곳을 붙이는 순서(카탈로그·커넥터·조직도를 묶는 `config/tenants/<회사>/tenant.toml`)는 `backend/README.md` "새 회사를 붙일 때"에 있다. 여기는 data 쪽 두 가지다.
+
+회사마다 다른 것은 두 가지다. **무엇을 볼지**는 지표 카탈로그 파일, **어디서 읽을지**는 커넥터다.
+
+#### 1) 지표 카탈로그
+data 엔진에서 회사마다 다른 것은 **지표 카탈로그** 파일 하나에 모았다. 형식은 계약 `ax_contracts.schemas.data.MetricCatalog`이다.
+
+- 파일: `src/data_agent/catalogs/<회사>.toml` (캣북스는 `catbooks.toml`). 고르는 환경변수는 `DATA_TENANT_CATALOG`(기본 `catbooks`, `.toml` 경로도 받는다).
+- 들어가는 것:
+  - `metrics[]`: 감시할 지표. 순서대로 판정한다.
+    - `id`·`label`(한국어)·`bad_direction`(`up`|`down`)·`unit`
+    - `fault_codes`: 장애 쪽 실패 코드. 있으면 확률 기준도 본다
+    - `aggregate`(`sum`|`mean`)·`denominator`(비율 지표의 분모)·`denominator_label`(분모를 부르는 말, 캣북스 "결제")·`scale_with_volume`(거래량만큼 기준 보정)
+  - `volume_metric`·`volume_label`: 거래량 지표와 그 이름(빈 구간 판단·기준 보정). 없으면 쓰지 않는다
+  - `impact`: `unit_label`(예: 주문·출고), `customer_label`(예: 고객·거래처), `money_field`, `money_unit`. 영향 설명 문장의 단위다
+  - `categories`: 카테고리 코드 → 한국어 이름
+- 카탈로그에서 읽는 곳(이번에 옮긴 것):
+  - 이상 탐지의 지표 목록·나쁜 방향·비율 지표·장애 쪽 코드(`detect`·`metrics/judge`·`impact`)
+  - 주기 감시의 지표 목록(`monitor`)
+  - 설명 문장의 지표 이름·영향 단위(`explain`·`anomaly_detection`)
+  - 리포트의 "회사 주문 수" 이름(`activity_report`)
+- 테스트 전용 가짜 회사 `tests/catalogs/coldchain.toml`(냉장 물류: 지표 2개, 단위 "출고", 고객 "거래처")로 판정·설명·리포트 이름이 캣북스 단어 없이 나오는지 본다(`tests/test_metric_catalog.py`).
+#### 2) 커넥터 (`src/data_agent/connectors/`)
+엔진(이상 탐지·영향 분석·주기 감시·리포트의 주문 수)은 커넥터만 쓴다. 회사 시스템 응답을 표준 형식으로 바꾸는 일은 커넥터 안에서만 한다.
+
+- 고르는 곳: 카탈로그 `connector`(캣북스 `shop-api`). 이름 → 커넥터 표는 `clients/shop_client.py`의 `CONNECTORS`다.
+- 구현할 메서드 3개 (`connectors.Connector`, 읽기만 한다. 못 읽으면 `ConnectorUnavailable`이고 0으로 채우지 않는다):
+
+| 메서드 | 돌려줄 것 | 엔진이 쓰는 곳 |
+| --- | --- | --- |
+| `metric_series(metric_id, from, to, bucket="5m")` | 카탈로그 지표의 5분 [(시각, 값)]. 모르는 지표는 빈 목록 | 이상 탐지·감시·리포트 거래 수 |
+| `failure_events(from, to, *, category, limit, tenant_id)` | `FailureEvents`(`FailureEvent`: 시각 `at`, 원인 쪽 코드 `code`, 고객 `customer_id`, 금액 `amount`, 분류 `category`, `event_id`)와 잘림 여부 | 장애 쪽 실패 확률 기준, 영향 분석 |
+| `transactions_volume(from, to)` | 5분 거래 시도 수 [(시각, 값)]. 주지 않으면 None | 비율 지표의 분모, 영향 분석의 "평소 실패" |
+
+- 거래량 보정(`scale_with_volume`)은 카탈로그 `volume_metric`(캣북스 주문 수)을 `metric_series`로 읽는다.
+- 예시 (테스트 전용 메모리 커넥터, `tests/test_connector.py`):
+
+```python
+class MemoryConnector:
+    async def metric_series(self, metric_id, window_from, window_to, bucket="5m"):
+        return [(ts, value) for ts, value in self.series[metric_id] if window_from <= ts < window_to]
+
+    async def failure_events(self, window_from, window_to, *, category=None, limit=5000, tenant_id="shop-demo"):
+        events = [e for e in self.events if window_from <= e.at <= window_to]
+        return FailureEvents(events[:limit], truncated=len(events) > limit)
+
+    async def transactions_volume(self, window_from, window_to):
+        return [(ts, n) for ts, n in self.attempts if window_from <= ts < window_to]
+```
+
+- 캣북스: `connectors/shop_api.py`의 `ShopApiConnector`다(`/api/shop/metric-series`·`/failed-orders`, 거래 시도 = `payment_count`). 예전 이름 `HttpMetricSource`·`HttpShopClient`는 이 커넥터의 하위 클래스다. 정확도 평가도 이 커넥터로 읽는다(`eval/run.py`). 평가 데이터 생성은 지금처럼 shop-api 코드로 한다(평가는 캣북스 전용).
+- 목 모드(`DATA_MOCK`, 테스트 전용)의 시드 공급자는 예전 모양 그대로이고, 엔진이 `connectors.as_connector`로 감싸 읽는다.
+- 판매자 정보·가격(사기 점수 전용)은 아직 커넥터에 넣지 않았다(`clients.shop_client.HttpSellerClient`).
+
+#### 외부 트렌드 커넥터: 네이버 검색어 트렌드 (`connectors/naver_datalab.py`)
+회사 시스템이 아니라 외부 검색 트렌드를 읽는다. 5분 지표·실패 이벤트가 아니어서 위 `Connector` 인터페이스를 구현하지 않고 `NaverDatalabConnector.search_trend(TrendScanInput) -> TrendResponse` 하나만 있다. 급상승 판정(`TrendScanOutput`)과 skill 연결은 아직 없다.
+
+- 주소: NAVER API HUB `https://naverapihub.apigw.ntruss.com/search-trend/v1/search` (POST). 예전 `openapi.naver.com/v1/datalab/search`가 아니다. `AX_NAVER_DATALAB_URL`로 바꿀 수 있다.
+- 키: `NAVER_HUB_CLIENT_ID`·`NAVER_HUB_CLIENT_SECRET`(`.env`)를 헤더 `X-NCP-APIGW-API-KEY-ID`·`X-NCP-APIGW-API-KEY`로 보낸다. 키 값은 로그·오류 문장·`repr`에 넣지 않는다. 키가 없으면 부르지 않고 `UNAUTHORIZED`다.
+- 값: 검색 건수가 아니라 **그 요청 안 최댓값 = 100인 상대값**이다. 같은 키워드도 어떤 그룹과 같이 묻느냐에 따라 일정한 배수만큼 달라진다(실제 호출: 고양이 단독 62.0 → 날씨와 함께 0.0907, 모든 날 683.5배). 그래서 기준선과 판정 구간은 한 요청으로 받아 그 안에서만 비교한다.
+- 한도(실제 호출로 확인): 그룹 5개, 그룹당 키워드 20개, 가장 작은 단위 하루(`hour`는 400), 하루 늦게 채워진다. `TrendScanInput`이 같은 한도를 검사한다.
+- 못 읽으면 `ConnectorUnavailable`: 연결 실패·5xx `UNAVAILABLE`, 400 `BAD_REQUEST`, 401·403 `UNAUTHORIZED`, 429·하루 한도 `RATE_LIMITED`, JSON 아님·형식 다름·요청과 다른 그룹 `BAD_RESPONSE`.
+- 0으로 채우지 않는다: 네이버가 자료를 주지 않은 그룹(검색량이 적은 키워드)은 빈 시계열, 빠진 날은 빠진 채로 둔다. 판정 쪽이 "확인할 수 없음"으로 다룬다.
+- 호출 한도: 같은 요청은 한국 날짜가 바뀔 때까지 메모리 캐시한다(실패는 캐시하지 않는다). 하루 호출 수가 `NAVER_DATALAB_DAILY_LIMIT`(기본 1000)에 닿으면 부르지 않고 `RATE_LIMITED`다. 캐시는 프로세스 메모리라 서버를 다시 띄우면 비워진다.
+- 테스트: `tests/test_naver_datalab.py` (httpx MockTransport 메모리 응답, 실제 API를 부르지 않는다). 계약은 `shared/contracts/tests/test_trend_scan.py`.
+
+- 엔진 문장의 회사 단어도 카탈로그에서 온다: 지표 이름(`label`), 영향 단위(`impact.unit_label`·`customer_label`·`money_unit`), 거래량(`volume_label`), 비율 지표 분모(`denominator_label`, 없으면 "거래"), 사용자 쪽 실패 코드 이름(`user_codes`, 캣북스 카드 거절 등). 테스트 가짜 회사로 이상 탐지·영향 분석·리포트를 돌려 "결제"·"주문"·"판매자"가 나오면 실패한다(`tests/test_catalog_wording.py`).
+- 다른 회사 지표는 `anomaly_detection` 출력의 `metric_verdicts`·`unknown_metric_ids`에 담긴다(#221·#227). 캣북스 지표는 예전 `verdicts`에도 들어간다.
+
+#### 캣북스 전용으로 남긴 것
+엔진이 아니라 캣북스에 묶인 기능이라 카탈로그로 옮기지 않았다. 다른 회사는 이 경로를 쓰지 않는다.
+
+| 남긴 것 | 위치 | 이유 |
+| --- | --- | --- |
+| "문의 급증" 사실·문장 | `clients/fact_sources.py`, `skills/root_cause.py` | 고객지원 부서 skill(`detect_inquiry_surge`)의 이름이다 |
+| 판매자 사기 점수(판매자 정보·가격, "판매자 … 사기 위험 점수") | `skills/fraud_score.py`, `metrics/fraud.py`, `handlers.py`(`fraud_score`), `clients/shop_client.py`(`HttpSellerClient`) | 판매자 전용 skill이다(마켓운영 담당이 정해지면 연결) |
+| shop-api 응답 오류 문장("실패 주문 응답 형식이 계약과 다르다" 등) | `connectors/shop_api.py` | 캣북스 커넥터 안 문장이다. 다른 회사는 자기 커넥터를 쓴다 |
+| skill 한국어 이름표("결제 문제 진단" 등) | `labels.py` | 부서 업무 이름이다(화면 `SKILL_KO`와 같은 말) |
+| 목 시드(`seed.py`·`seed_metrics.py`·`seed_logs.py`) | | 테스트 전용 |
+
 ## 2. 실행 방법
 `docker compose -f infra/compose.yml up data` / 목 모드: `DATA_MOCK=1`
 
@@ -122,6 +203,12 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 - **AI를 거친 일만 센다.** 공통 로그에 남은 일만 세고, 사람이 직접 한 일(로그에 없는 일)은 세지 않는다. "절약한 시간" 같은 추정치는 만들지 않는다(근거 없는 숫자).
 - 입력: `period`(day·week·month), `start`(한국 시간 날짜, 비우면 직전 기간: 어제·지난주 월~일·지난달), `services`(서비스 id, 비우면 전체). 직전 기간은 같은 길이의 바로 앞 기간이다.
 - 부서 = `ax_agent_template.services`의 `department`(총괄·고객지원·마케팅·재무·데이터분석·인사·기획개발·인프라). 카드 `owner`는 사람 이름이라(준하 = 총괄+인사 등) 부서마다 `owners`로 함께 보여 준다.
+- **센 범위 = 이 회사가 켠(AI를 쓰는) 서비스.** 백엔드 `AX_ENABLED_SERVICES` 기준이다(비어 있으면 전부, `routing.is_enabled`).
+  - 화면의 서비스 고르기(`/system/services`, 브라우저 localStorage)와는 아직 연결돼 있지 않다.
+  - 켜지 않은 서비스의 부서는 카드·특이사항·협업에 넣지 않는다. 입력 `services`에 켜지 않은 서비스만 있으면 `invalid_input`이다.
+  - **AI를 쓰지 않는 부서로 넘긴 일**(`unused_handoffs`): 켠 AI가 켜지 않은 서비스로 보낸 일(사람 할 일함으로 넘어감)을 부서별 건수와 업무(skill 한국어 이름) 상위 3개로만 보여 준다. "도입하면 자동 처리" 같은 예측 문구·숫자는 넣지 않는다.
+  - **재무 AI를 쓰지 않으면 `closing_report`를 부르지 않는다.** 꺼진 서비스로 가는 요청은 조직도가 있으면 사람 할 일함에 쌓이기 때문이다(재무 카드의 `closing_report`가 조회로 표시돼 있지 않음). 매출 칸은 "재무 AI를 쓰지 않아 확인할 수 없음"이다. 일간 저장도 같다.
+  - 저장된 일간에는 그날 켠 서비스(`enabled_services`)를 같이 저장하고, 넘긴 일도 그날 기준으로 나눠 둔다. 그래서 나중에 서비스를 더 켜도 지난 리포트가 바뀌지 않는다. 리포트의 부서 범위는 저장된 날은 그날 켠 서비스, 바로 계산하는 날은 지금 켠 서비스의 합이다(출력 `enabled_services`).
 - 비율은 분모가 3 미만이면 `rate: null` + `note: "표본 부족"`이다. 숫자는 `metrics/activity.py`가 센다.
 
 | 칸 | 출처 | 정의 |
@@ -145,7 +232,7 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 
 #### 일간 저장 (`report_store.py`, `DATA_REPORT_DB`)
 - 일간 리포트를 하루 한 번 미리 만들어 data 자체 SQLite 파일에 저장한다. run_all.sh는 `.data/data_reports.db`다. 비어 있으면 저장하지 않고 지금처럼 바로 계산한다. 다른 부서 DB·memory는 쓰지 않는다.
-- 한국 시간 하루마다 한 줄이다: 날짜, 만든 시각, 코드 버전(`SNAPSHOT_VERSION`), 그날의 "더할 수 있는 값".
+- 한국 시간 하루마다 한 줄이다: 날짜, 만든 시각, 코드 버전(`SNAPSHOT_VERSION`, 지금 2), 그날 켠 서비스, 그날의 "더할 수 있는 값". 버전이 다른 예전 줄은 채우기 범위 안에서 다시 만든다.
   - 비율 대신 분자·분모: 결과별 건수, 완료·템플릿 대체 수, 결제 시도·실패
   - 평균 대신 합계·개수: 응답 시간 `duration_ms`. 처리 시간은 넘김·처리 시각 목록이라 기간을 합친 뒤 task_id로 잇는다
   - 중앙값(MTTR)은 사건별 첫 기록·복구 시각 목록이다. 자정을 넘긴 사건도 합친 뒤 계산하면 바로 계산과 같다

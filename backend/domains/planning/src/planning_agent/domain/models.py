@@ -75,7 +75,7 @@ class RelatedItem(DomainModel):
     - relation: same(같은 일) · conflict(둘 다 진행 중인데 양립 불가) · update(앞 요청을 다시
       바꿈) · related(비슷함, 관계는 정하지 않음 포함)
     - by: llm(LLM이 후보 안에서 판단) · embed(임베딩 검색만) · lexical(글자 검색만) ·
-      path(열린 PR과 같은 파일을 고침, 코드 규칙)
+      path(열린 PR과 같은 파일을 고침, 코드 규칙) · memory(회사 기억 요청 색인)
     """
 
     id: str
@@ -83,7 +83,9 @@ class RelatedItem(DomainModel):
     score: float
     relation: Literal["same", "conflict", "update", "related"]
     reason: str
-    by: Literal["llm", "embed", "lexical", "path"]
+    by: Literal["llm", "embed", "lexical", "path", "memory"]
+    # 다른 서비스(기획↔개발)에만 있는 요청이면 찾을 때 읽은 그 요청의 상태 (이 서버에 있으면 None)
+    remote_state: str | None = None
 
 
 class Request(DomainModel):
@@ -160,6 +162,7 @@ class Spec(DomainModel):
 
 CodingStatus = Literal[
     "queued",
+    "claimed",  # 개발자 본인 Claude가 가져감 (구독형, work_queue.py)
     "reading",
     "writing",
     "reviewing",
@@ -202,6 +205,22 @@ class CodingRun(DomainModel):
     connection: str | None = None
     pr: str | None = None
     instruction: str | None = None  # 사람이 대기 중인 PR에 준 수정 지시 (마지막 것)
+    # 작업 대기열: 같은 파일을 먼저 고치는 작업이 있으면 끝날 때까지 기다린다 (coder._wait_turn).
+    # skip_queue는 사람이 '지금 진행'으로 기다리지 않게 한 작업. 머지는 그래도 차례로 간다
+    skip_queue: bool = False
+    waiting_for: list[str] = Field(default_factory=list)  # 기다리는 앞 작업 id
+    # 머지가 충돌로 실패함: 다시 시도하면 PR을 닫고 최신 코드로 다시 쓴다
+    merge_conflict: bool = False
+    # 이 작업이 지금까지 쓴 LLM 호출·토큰 (다시 시도해도 이어서 센다). 실행 한 번 상한은 coder
+    llm_calls: int = 0
+    llm_tokens: int = 0
+    # 누가 코딩하나: agent = 서버 코딩 에이전트(API 키), subscription = 개발자 본인 Claude가
+    # MCP로 가져가 코딩한다 (work_queue.py). 구독형은 서버 에이전트를 띄우지 않는다
+    mode: Literal["agent", "subscription"] = "agent"
+    claimed_by: str | None = None  # 가져간 사람 (사람 토큰 이름)
+    claimed_at: UtcDatetime | None = None
+    lease_until: UtcDatetime | None = None  # 이때까지 진행 보고가 없으면 대기열로 돌린다
+    progress: str | None = None  # 개발자 Claude가 마지막으로 보고한 진행 글
 
 
 class Task(DomainModel):

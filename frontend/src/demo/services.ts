@@ -112,12 +112,25 @@ export const SERVICES: Service[] = [
     desc: '회사의 결정을 기록하고, 새 계획이 과거에 기각된 안과 겹치는지 봅니다.',
   },
   {
-    id: 'planning', agent: 'planning', family: 'product', name: '요청·기획서', by: 'AXcellent', Icon: IconPlan, entry: '/planning', paths: ['/planning'],
+    id: 'planning', agent: 'planning', family: 'product', name: '요청·기획서', by: 'AXcellent', Icon: IconPlan, entry: '/planning/requests', paths: ['/planning'],
     desc: '들어온 요청을 정리해 기획서로 만들고, 결과를 요청한 곳에 알립니다.',
+    // 화면 안 메뉴(pages/Planning.tsx SECTIONS)를 사이드바 하위 탭으로 연다
+    children: [
+      { href: '/planning/requests', label: '요청' },
+      { href: '/planning/work', label: '기획서' },
+      { href: '/planning/agents', label: '에이전트 대화' },
+    ],
   },
   {
-    id: 'dev', agent: 'dev', family: 'product', name: '개발·배포', by: 'AXcellent', Icon: IconCode, entry: '/dev', paths: ['/dev'],
+    id: 'dev', agent: 'dev', family: 'product', name: '개발·배포', by: 'AXcellent', Icon: IconCode, entry: '/dev/tasks', paths: ['/dev'],
     desc: '기획서를 작업·PR로 만들고 교차검증·배포·사후관리까지 맡습니다.',
+    // 화면 안 메뉴(pages/Dev.tsx SECTIONS)를 사이드바 하위 탭으로 연다
+    children: [
+      { href: '/dev/tasks', label: '작업 현황' },
+      { href: '/dev/work', label: '작업' },
+      { href: '/dev/agents', label: '에이전트 대화' },
+      { href: '/dev/metrics', label: '지표' },
+    ],
   },
   {
     id: 'orchestrator', agent: 'orchestrator', family: 'together', name: '총괄·사건', by: 'AXcellent', Icon: IconBolt, entry: '/orchestrator', paths: ['/orchestrator'],

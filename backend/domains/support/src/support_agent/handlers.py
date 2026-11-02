@@ -12,8 +12,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from difflib import SequenceMatcher
 from functools import wraps
 from typing import Any
@@ -31,6 +33,8 @@ from ax_contracts.schemas import (
     TaskStatus,
 )
 from support_agent import (
+    abuse_rules,
+    abuse_soften,
     buyer_ids,
     compensation,
     drafting,
@@ -167,6 +171,66 @@ def log_activity(inquiry_id: int | None, **entry: Any) -> None:
         logger.warning("AI 처리 내력을 남기지 못했다 (inquiry %s)", inquiry_id, exc_info=True)
 
 
+ABUSE_TITLES = {
+    "profanity": "고객 메시지에 비속어가 있어 가려서 보여 줘요",
+    "insult": "고객 메시지에 모욕 표현이 있어 가려서 보여 줘요",
+    "threat": "고객 메시지에 위협 표현이 있어요. 담당자 확인을 권해요",
+}
+
+
+def _start_softening(message: str) -> asyncio.Task[Any] | None:
+    """규칙이 욕설로 찾은 글은 답변 초안을 만드는 동안 순화문도 함께 만든다 (접수 시간을 줄인다)."""
+    if not abuse_soften.enabled():
+        return None
+    level = abuse_rules.assess(message)[1]
+    if level == "none" and not abuse_rules.maybe_evasive(message):
+        return None  # 띄어 쓴 욕설이 의심되면 규칙은 그대로 두고 모델이 가려서 본다
+    return asyncio.create_task(abuse_soften.soften(message, level))
+
+
+async def _refine_abuse(
+    conversation: Conversation, analysis: Analysis, early: asyncio.Task[Any] | None = None
+) -> Conversation:
+    """2단계: 욕설로 찾았거나 화난 메시지는 LLM이 순화문을 만든다. 실패해도 접수는 그대로다."""
+    last = next((m for m in reversed(conversation.messages) if m.role == "customer"), None)
+    if last is None or not abuse_soften.enabled():
+        return conversation
+    sentiment = analysis.classification.sentiment if analysis.classification else None
+    if early is not None:  # 규칙이 찾은 글: 이미 돌고 있던 순화를 기다린다
+        result = await early
+    elif abuse_soften.wanted(last.abuse_level, sentiment):  # 화난 글만 초안 뒤에 따로 돌린다
+        result = await abuse_soften.soften(last.text, last.abuse_level)
+    else:
+        return conversation
+    if result is None:
+        return conversation
+    softened, level = result
+    kinds = list(last.abuse_kinds)
+    if last.abuse_level == "none":
+        kinds.append("llm")
+    updated = STORE.apply_softening(conversation.id, last.id, softened, level, kinds)
+    return updated or conversation
+
+
+def _log_abuse(conversation: Conversation) -> None:
+    """방금 들어온 고객 메시지에 욕설·모욕·위협이 있으면 내력에 남긴다 (낱말·원문은 담지 않는다)."""
+    last = next((m for m in reversed(conversation.messages) if m.role == "customer"), None)
+    if last is None or last.abuse_level == "none":
+        return
+    log_activity(
+        conversation.id,
+        kind="abusive_message",
+        actor="system",
+        title=ABUSE_TITLES[last.abuse_level],
+        data={
+            "level": last.abuse_level,
+            "kinds": last.abuse_kinds,
+            "message_id": last.id,
+            "softened": last.softened_text is not None,
+        },
+    )
+
+
 def _analysis_entry(analysis: Analysis, *, fallback: bool, first: bool) -> dict[str, Any]:
     c = analysis.classification
     drafts = analysis.drafts or []
@@ -202,6 +266,40 @@ async def _write(
     if key in STORE.results:
         return _done(request, STORE.results[key])
 
+    # 같은 키의 요청이 아직 처리 중이면 끝나길 기다렸다가 그 결과를 받는다. 결과는 처리가 끝난 뒤에
+    # 저장되므로, 이 대기가 없으면 504를 받고 다시 보낸 접수가 두 번 처리돼 문의가 둘 생긴다.
+    async with _inflight(key):
+        if key in STORE.results:
+            return _done(request, STORE.results[key])
+        return await _execute_write(request, key, action, target, params, apply)
+
+
+_INFLIGHT: dict[str, tuple[asyncio.Lock, int]] = {}
+
+
+@asynccontextmanager
+async def _inflight(key: str) -> AsyncIterator[None]:
+    lock, users = _INFLIGHT.get(key) or (asyncio.Lock(), 0)
+    _INFLIGHT[key] = (lock, users + 1)
+    try:
+        async with lock:
+            yield
+    finally:
+        lock, users = _INFLIGHT[key]
+        if users <= 1:
+            del _INFLIGHT[key]  # 쓰는 요청이 없으면 치운다 (요청마다 이벤트 루프가 다를 수 있다)
+        else:
+            _INFLIGHT[key] = (lock, users - 1)
+
+
+async def _execute_write(
+    request: AgentRequest,
+    key: str,
+    action: str,
+    target: str,
+    params: dict[str, Any],
+    apply: Callable[[], Awaitable[tuple[dict[str, Any], bool]]],
+) -> AgentResult:
     meta = request.meta.model_copy(update={"idempotency_key": key})
     decision = await execute(
         action,
@@ -333,9 +431,15 @@ async def create_inquiry(request: AgentRequest) -> AgentResult:
         extra = await _notice_sources(request, None, parsed.notice_component)
 
     async def apply() -> tuple[dict[str, Any], bool]:
-        analysis, fallback = await drafting.analyze(
-            message, subject, extra, policy_memory.retriever(request, SEND)
-        )
+        early = _start_softening(message)
+        try:
+            analysis, fallback = await drafting.analyze(
+                message, subject, extra, policy_memory.retriever(request, SEND)
+            )
+        except BaseException:
+            if early is not None:
+                early.cancel()
+            raise
         conversation = STORE.create(
             context_id=request.meta.context_id,
             tenant_id=request.meta.tenant_id,
@@ -349,6 +453,8 @@ async def create_inquiry(request: AgentRequest) -> AgentResult:
         )
         privacy_audit.record_message(STORE, conversation, fallback)
         await events.emit_inquiry_received(request, conversation)
+        conversation = await _refine_abuse(conversation, analysis, early)
+        _log_abuse(conversation)
         log_activity(conversation.id, **_analysis_entry(analysis, fallback=fallback, first=True))
         return _view(conversation), fallback
 
@@ -373,12 +479,20 @@ async def add_customer_message(request: AgentRequest) -> AgentResult:
     extra = await _notice_sources(request, parsed.notice_id, parsed.notice_component)
 
     async def apply() -> tuple[dict[str, Any], bool]:
-        analysis, fallback = await drafting.analyze(
-            message, conversation.subject, extra, policy_memory.retriever(request, SEND)
-        )
+        early = _start_softening(message)
+        try:
+            analysis, fallback = await drafting.analyze(
+                message, conversation.subject, extra, policy_memory.retriever(request, SEND)
+            )
+        except BaseException:
+            if early is not None:
+                early.cancel()
+            raise
         updated = STORE.add_customer_message(parsed.inquiry_id, message, analysis)
         privacy_audit.record_message(STORE, updated, fallback)
         await events.emit_inquiry_received(request, updated)
+        updated = await _refine_abuse(updated, analysis, early)
+        _log_abuse(updated)
         log_activity(parsed.inquiry_id, **_analysis_entry(analysis, fallback=fallback, first=False))
         return _view(updated), fallback
 

@@ -25,14 +25,15 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from collections import Counter
+from collections.abc import Awaitable, Callable, Iterable
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 from ax_agent_template import routing
 from ax_agent_template.llm import LLMClient
-from ax_agent_template.services import SERVICES
+from ax_agent_template.services import SERVICES, department_of
 from ax_contracts.data_access.common_log import CommonLogQuery, LogRecord
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, RequestMeta, TaskStatus
 from ax_contracts.schemas.data import (
@@ -43,13 +44,16 @@ from ax_contracts.schemas.data import (
     CompanyFigure,
     DepartmentActivity,
     DepartmentReport,
+    SkillCount,
     UnknownSection,
+    UnusedHandoff,
 )
+from data_agent import catalog
 from data_agent.clients.log_client import LogSource
-from data_agent.clients.shop_client import ShopUnavailable
+from data_agent.connectors import ConnectorUnavailable, as_connector
 from data_agent.detect import MetricSource
 from data_agent.explain import explain
-from data_agent.labels import department_label
+from data_agent.labels import department_label, skill_label
 from data_agent.metrics.activity import (
     _PRIORITY,
     MIN_DENOMINATOR,
@@ -71,6 +75,7 @@ REVENUE_INPUTS = ("orders", "orders_partial", "products")
 MAX_HIGHLIGHTS = 3
 NOTHING_NOTABLE = "특이사항 없음"
 FINANCE_SOURCE = "finance.closing_report"
+FINANCE_UNUSED = "재무 AI를 쓰지 않아 확인할 수 없음"
 SHOP_SOURCE = "shop-api.metric-series"
 KPI_SOURCE = "data.kpi_summary(공통 로그)"
 
@@ -125,13 +130,29 @@ def periods(period: str, start: date | None, now: datetime) -> Periods:
 
 
 # ------------------------------------------------------------------------------------- 범위
-def scope_for(services: list[str]) -> Scope:
-    """서비스 id → 부서별 서비스. 비우면 skill이 있는 서비스 전체."""
+def enabled_service_ids(enabled: Callable[[str], bool] = routing.is_enabled) -> list[str]:
+    """이 회사가 켠(AI를 쓰는) 서비스 id. 라우터와 같은 함수(`routing.is_enabled`): 켠 서비스 파일
+    `AX_ENABLED_SERVICES_FILE`이 있으면 그 파일, 없으면 `AX_ENABLED_SERVICES`(비어 있으면 전부)."""
+    return [s.id for s in SERVICES if s.skills and enabled(s.id)]
+
+
+def scope_for(services: list[str], allowed: Iterable[str] | None = None) -> Scope:
+    """서비스 id → 부서별 서비스.
+
+    `allowed`(켠 서비스)가 있으면 그 안에서만 센다.
+    비우면 켠 서비스 전체이고, 켠 서비스가 아닌 id는 뺀다.
+    """
     known = {s.id: s for s in SERVICES}
     unknown = [s for s in services if s not in known]
     if unknown:
         raise InvalidActivityInput(f"모르는 서비스 id: {', '.join(unknown)}")
-    chosen = [known[s] for s in services] if services else [s for s in SERVICES if s.skills]
+    usable = {s.id for s in SERVICES if s.skills} if allowed is None else set(allowed)
+    if services:
+        chosen = [known[s] for s in services if s in usable]
+        if not chosen:
+            raise InvalidActivityInput(f"이 회사가 AI를 쓰지 않는 서비스: {', '.join(services)}")
+    else:
+        chosen = [s for s in SERVICES if s.id in usable]
     departments: dict[str, tuple[str, ...]] = {}
     for service in chosen:
         departments[service.department] = (*departments.get(service.department, ()), service.id)
@@ -233,9 +254,15 @@ class PeriodCounts:
 
     activity: ActivityCounts
     company: CompanyCounts
+    # 그때 켠(AI를 쓰는) 서비스 id. 나중에 서비스를 더 켜도 지난 날의 부서·숫자가 바뀌지 않게 둔다
+    enabled_services: list[str] = field(default_factory=list)
 
     def merge(self, other: PeriodCounts) -> PeriodCounts:
-        return PeriodCounts(self.activity.merge(other.activity), self.company.merge(other.company))
+        return PeriodCounts(
+            self.activity.merge(other.activity),
+            self.company.merge(other.company),
+            sorted(set(self.enabled_services) | set(other.enabled_services)),
+        )
 
     @property
     def has_unknown(self) -> bool:
@@ -244,13 +271,18 @@ class PeriodCounts:
         return bool(c.finance_reason or c.shop_reason or self.activity.truncated)
 
     def to_json(self) -> dict:
-        return {"activity": self.activity.to_json(), "company": self.company.to_json()}
+        return {
+            "activity": self.activity.to_json(),
+            "company": self.company.to_json(),
+            "enabled_services": list(self.enabled_services),
+        }
 
     @classmethod
     def from_json(cls, data: dict) -> PeriodCounts:
         return cls(
             ActivityCounts.from_json(data.get("activity") or {}),
             CompanyCounts.from_json(data.get("company") or {}),
+            [str(s) for s in data.get("enabled_services") or []],
         )
 
 
@@ -324,8 +356,17 @@ class FinanceAsker:
     한꺼번에 많이 보내면 재무·shop-api가 줄을 서고 시간 초과로 모두 실패한다.
     """
 
-    def __init__(self, send: SendFn, meta: RequestMeta, limit: int = FINANCE_CONCURRENCY) -> None:
+    def __init__(
+        self,
+        send: SendFn,
+        meta: RequestMeta,
+        limit: int = FINANCE_CONCURRENCY,
+        use_finance: bool = True,
+    ) -> None:
         self.send, self.meta = send, meta
+        # 재무 AI를 쓰지 않는 회사면 부르지 않는다.
+        # 꺼진 서비스로 가면 사람 할 일함에 쌓이기 때문이다
+        self.use_finance = use_finance
         self._limit = asyncio.Semaphore(limit)
         self._asked: dict[tuple[str, date], asyncio.Task] = {}
         self.calls = 0  # 실제로 보낸 호출 수
@@ -337,6 +378,8 @@ class FinanceAsker:
         return self._asked[key]
 
     async def _run(self, period: str, day: date) -> FinanceAnswer:
+        if not self.use_finance:
+            return None, FINANCE_UNUSED, None
         async with self._limit:
             self.calls += 1
             return await _ask_finance(self.send, self.meta, period, day)
@@ -367,14 +410,27 @@ async def finance_figures(
 
 
 async def shop_counts(source: MetricSource, piece: tuple[date, date]) -> CompanyCounts:
-    """한 구간의 주문 수·결제 시도·실패 (shop-api 5분 버킷 합)."""
+    """한 구간의 거래량(캣북스: 주문 수)·거래 시도·실패 (커넥터의 5분 버킷 합).
+
+    거래량은 카탈로그 `volume_metric`, 거래 시도는 커넥터 `transactions_volume`(주지 않으면 첫 비율
+    지표의 분모), 실패는 첫 비율 지표(캣북스: 결제 실패율) × 시도다.
+    """
     start, end = _window(piece)
+    cat = catalog.current()
+    conn = as_connector(source)
+    rate = next((m for m in cat.metrics if m.denominator), None)
+    if cat.volume_metric is None or rate is None or rate.denominator is None:
+        reason = f"카탈로그에 거래량·비율 지표가 없어 {cat.name} 거래 수를 셀 수 없음"
+        return CompanyCounts(orders=None, attempts=None, failed=None, shop_reason=reason)
     try:
-        orders = await source.fetch("order_count", start, end)
-        counts = dict(await source.fetch("payment_count", start, end))
-        fail_rates = dict(await source.fetch("payment_fail_rate", start, end))
-    except ShopUnavailable as error:
-        reason = f"shop-api 지표를 받지 못함 [{error.code}]"
+        orders = await conn.metric_series(cat.volume_metric, start, end)
+        volume = await conn.transactions_volume(start, end)
+        if volume is None:
+            volume = await conn.metric_series(rate.denominator, start, end)
+        counts = dict(volume)
+        fail_rates = dict(await conn.metric_series(rate.id, start, end))
+    except ConnectorUnavailable as error:
+        reason = f"{cat.connector} 지표를 받지 못함 [{error.code}]"
         return CompanyCounts(orders=None, attempts=None, failed=None, shop_reason=reason)
     return CompanyCounts(
         orders=float(sum(v for _, v in orders)),
@@ -390,6 +446,7 @@ async def live_counts(
     asker: FinanceAsker,
     tenant_id: str,
     skip_finance: set[tuple[date, date]] | None = None,
+    enabled: Callable[[str], bool] = routing.is_enabled,
 ) -> list[PeriodCounts]:
     """구간마다 바로 센다. 이어진 구간은 공통 로그를 한 번에 읽고 메모리에서 나눈다.
 
@@ -412,7 +469,8 @@ async def live_counts(
             if run[0] <= piece[0] and piece[1] <= run[1]:
                 records = [r for r in run_records if start <= r.occurred_at < end]
                 truncated = cut
-        out.append(PeriodCounts(count_activity(records, truncated), shop.merge(finance)))
+        counts = count_activity(records, truncated).split_unused(enabled)
+        out.append(PeriodCounts(counts, shop.merge(finance), enabled_service_ids(enabled)))
     return out
 
 
@@ -427,18 +485,22 @@ async def build_day_snapshot(
     metrics: MetricSource,
     send: SendFn,
     now: datetime | None = None,
+    enabled: Callable[[str], bool] = routing.is_enabled,
 ) -> Snapshot:
     """한국 시간 하루의 저장할 값을 만든다 (LLM을 쓰지 않는다).
+
+    만들 때 켠 서비스 목록을 같이 저장한다. 재무 AI를 쓰지 않으면 재무를 부르지 않는다.
 
     재무 마감은 UTC 날짜라 그 UTC 날짜가 아직 끝나지 않았으면(한국 시간 다음 날 09시 전)
     매출을 확인할 수 없음으로 두고, 다음 날 한 번 다시 만든다.
     """
     now = now or datetime.now(UTC)
+    asker = FinanceAsker(send, meta, use_finance=enabled("finance"))
     (counts,) = await live_counts(
-        [(day, day + timedelta(days=1))], logs, metrics, FinanceAsker(send, meta), meta.tenant_id
+        [(day, day + timedelta(days=1))], logs, metrics, asker, meta.tenant_id, enabled=enabled
     )
     utc_day_end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=UTC)
-    if now < utc_day_end and counts.company.finance_reason is None:
+    if asker.use_finance and now < utc_day_end and counts.company.finance_reason is None:
         counts.company = CompanyCounts.from_json(
             counts.company.to_json()
             | {
@@ -463,7 +525,7 @@ def _candidates(company: ActivityCompany, departments: list[DepartmentReport]) -
     for key, label in (
         ("gmv", "회사 총거래액"),
         ("commission_revenue", "회사 수수료 매출"),
-        ("order_count", "회사 주문 수"),
+        ("order_count", f"회사 {catalog.current().impact.unit_label} 수"),  # 캣북스: 회사 주문 수
         ("incident_count", "회사 사건 수"),
     ):
         figure: CompanyFigure = getattr(company, key)
@@ -538,6 +600,34 @@ def highlight_facts(highlights: list[ActivityHighlight]) -> dict[str, int | floa
 
 
 # ------------------------------------------------------------------------------------- 조립
+UNUSED_TOP_SKILLS = 3
+
+
+def unused_handoffs(counts: ActivityCounts) -> list[UnusedHandoff]:
+    """AI를 쓰지 않는 부서로 넘긴 일: 부서별 건수와 업무(skill 한국어 이름) 상위 3개.
+
+    건수만 센다. "도입하면 자동 처리" 같은 예측 문구·숫자는 만들지 않는다.
+    """
+    by_dept: dict[str, list[str]] = {}
+    for service in counts.unused_handed:
+        by_dept.setdefault(department_of(service), []).append(service)
+    out: list[UnusedHandoff] = []
+    for dept, services in by_dept.items():
+        skills: Counter[str] = Counter()
+        for service in services:
+            skills.update(counts.unused_skills.get(service, {}))
+        top = sorted(skills.items(), key=lambda kv: (-kv[1], kv[0]))[:UNUSED_TOP_SKILLS]
+        out.append(
+            UnusedHandoff(
+                department=dept,
+                label=department_label(dept),
+                count=sum(counts.unused_handed[s] for s in services),
+                top_skills=[SkillCount(skill=s, label=skill_label(s), count=n) for s, n in top],
+            )
+        )
+    return sorted(out, key=lambda u: (-u.count, u.department))
+
+
 @dataclass(frozen=True)
 class ActivityResult:
     output: ActivityReportOutput
@@ -553,7 +643,8 @@ def _company_figures(c: CompanyCounts) -> dict[str, Figure]:
     if attempts is None or failed is None:
         success = Figure(None, c.shop_reason)
     elif attempts < MIN_DENOMINATOR:
-        success = Figure(None, f"결제 시도 {attempts}건: {SMALL_SAMPLE}")
+        word = catalog.denominator_label()  # 캣북스: 결제
+        success = Figure(None, f"{word} 시도 {attempts}건: {SMALL_SAMPLE}")
     else:
         success = Figure(round((attempts - failed) / attempts, 4))
     return {
@@ -609,7 +700,7 @@ async def build_report(
     """
     started = now or datetime.now(UTC)
     p = periods(data.period, data.start, started)
-    scope = scope_for(data.services)
+    scope_for(data.services)  # 모르는 서비스 id는 저장소를 읽기 전에 거절한다
     window, previous = p.window(), p.window(previous=True)
     tenant = meta.tenant_id
     today = started.astimezone(KST).date()
@@ -622,7 +713,13 @@ async def build_report(
         pieces = _runs([d for d in prev_days if d not in saved]) + _runs(
             [d for d in cur_days if d not in saved]
         )
-    asker = FinanceAsker(send, meta)
+    # 부서 범위: 저장된 날은 그날 켠 서비스, 바로 계산하는 날은 지금 켠 서비스 (합집합)
+    now_enabled = enabled_service_ids(enabled)
+    allowed = set(now_enabled) if pieces else set()
+    for snap in saved.values():
+        allowed |= set(PeriodCounts.from_json(snap.payload).enabled_services)
+    scope = scope_for(data.services, allowed)
+    asker = FinanceAsker(send, meta, use_finance=enabled("finance"))
 
     # 주간: 7일이 다 저장돼 있고 매출이 다 있으면 저장된 재무 값의 합.
     # 아니면(저장 안 된 날, 또는 저장 때 매출을 확인할 수 없던 날이 있으면) 재무 week 한 번
@@ -638,7 +735,9 @@ async def build_report(
         and not all(saved_revenue(d) for d in days)
     ]
     skip = {piece for piece in pieces if any(piece[0] in days for days in weekly)}
-    live = await live_counts(pieces, logs, metrics, asker, tenant, skip_finance=skip)
+    live = await live_counts(
+        pieces, logs, metrics, asker, tenant, skip_finance=skip, enabled=enabled
+    )
     week_finance = dict(
         zip(
             [days[0] for days in weekly],
@@ -765,6 +864,8 @@ async def build_report(
         stored_days=stored_days,
         live_days=live_days,
         snapshot_note=f"저장된 날 {stored_days}일 / 바로 계산 {live_days}일",
+        enabled_services=sorted(allowed),
+        unused_handoffs=unused_handoffs(cur_counts.activity),
     )
     lines = [
         summary,

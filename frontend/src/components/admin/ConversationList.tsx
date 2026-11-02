@@ -37,7 +37,7 @@ export function ConversationList({ items, selectedId, onSelect, onNew }: {
                 <span className="truncate text-sm font-medium">{c.customer_name}</span>
                 {c.order_id && <span className="chip ml-auto shrink-0 bg-ink-100 text-ink-700">주문 연결</span>}
               </div>
-              <div className="mt-1 truncate text-xs font-medium text-ink-700">{c.subject}</div>
+              <div className="mt-1 truncate text-xs font-medium text-ink-700">{c.subject_display ?? c.subject}</div>
               <div className="mt-1 line-clamp-2 text-xs text-ink-500">{c.preview}</div>
               <div className="mt-1.5 flex flex-wrap gap-1">
                 {c.category && <span className="chip bg-brand-50 text-brand-700">{CATEGORY_KO[c.category] ?? c.category}</span>}

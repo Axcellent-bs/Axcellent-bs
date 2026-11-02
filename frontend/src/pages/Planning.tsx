@@ -1,23 +1,24 @@
 // 기획 화면(/planning). 다른 부서의 요청을 받아 기획서로 정리하고, 결과를 요청한 부서에 알린다.
-// 메뉴 = 프로젝트·요청·기획서·정리·에이전트 대화·규정·자료·지표. 틀은 개발 화면과 같이 쓴다(components/planning-common/Shell.tsx).
+// 메뉴 = 요청·기획서·에이전트 대화 (기획 AI 진행 상황만 본다, 사이드바 하위 탭 demo/services.ts). 프로젝트·정리·규정·자료·지표는 메뉴에서 숨기고 주소로만 연다.
+// 틀은 개발 화면과 같이 쓴다(components/planning-common/Shell.tsx).
 import { PlanningShell, type Section } from '@/components/planning-common/Shell'
 import { AgentTalk, Talk } from '@/components/planning-common/talk'
 import { Docs } from '@/components/planning/docs'
 import { Knowledge } from '@/components/planning/knowledge'
 import { Links, Metrics } from '@/components/planning/metrics'
 import { Projects } from '@/components/planning/projects'
-import { Requests, incomingCount } from '@/components/planning/requests'
+import { Requests } from '@/components/planning/requests'
 import { Specs } from '@/components/planning/specs'
 
 const SECTIONS: Record<string, Section> = {
-  projects: { label: '프로젝트', icon: 'menu', tabs: [] },
   requests: { label: '요청', icon: 'bell', tabs: [] }, // 들어온·진행 중·해결·후속은 화면 안 필터 (requests/<필터>)
   work: { label: '기획서', icon: 'plan', tabs: [{ id: 'specs', label: '기획서' }] },
-  docs: { label: '정리', icon: 'report', tabs: [] },
   agents: { label: '에이전트 대화', icon: 'send', tabs: [] },
   talk: { label: '소통', icon: 'send', tabs: [], hidden: true },
-  knowledge: { label: '규정·자료', icon: 'admin', tabs: [] },
-  metrics: { label: '지표', icon: 'dashboard', tabs: [
+  projects: { label: '프로젝트', icon: 'menu', tabs: [], hidden: true }, // 요청 줄 제목을 누르면 요청 1건을 깊게
+  docs: { label: '정리', icon: 'report', tabs: [], hidden: true },
+  knowledge: { label: '규정·자료', icon: 'admin', tabs: [], hidden: true },
+  metrics: { label: '지표', icon: 'dashboard', hidden: true, tabs: [
     { id: 'overview', label: '지표' },
     { id: 'links', label: '부서 연동' },
   ] },
@@ -31,7 +32,6 @@ export default function PlanningPage() {
       desc="다른 부서의 요청을 받아 기획서로 정리하고, 결과를 요청한 부서에 알립니다."
       home="requests"
       sections={SECTIONS}
-      badge={(v) => ({ requests: v.newWork || incomingCount(v.state), talk: v.newTalk })}
     >
       {({ state: s, dispatch: d, section, sub, tab, rest, item, item2 }) => (
         <>

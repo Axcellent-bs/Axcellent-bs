@@ -73,9 +73,39 @@ class MetricVerdict(AxModel):
     status: Literal["normal", "anomaly", "unknown"] | None = None
     direction: Literal["up", "down"] | None = None  # 이상이면 벗어난 방향
     note: str | None = None  # 판정 근거 한 줄 또는 확인할 수 없는 이유
+    # 회사 지표 카탈로그의 지표 id·한국어 이름 (캣북스는 metric과 같은 id). 예전 응답은 None
+    metric_id: str | None = None
+    metric_label: str | None = None
+
+
+class MetricIdVerdict(AxModel):
+    """회사 지표 카탈로그 id로 쓴 판정 (캣북스 4개 밖의 지표도 실을 수 있다).
+
+    칸의 뜻은 `MetricVerdict`와 같고, 지표를 `BusinessMetric` 대신 `metric_id`(카탈로그
+    `CatalogMetric.id`)로 적는다.
+    """
+
+    metric_id: str
+    metric_label: str | None = None  # 카탈로그 한국어 이름
+    observed: float
+    baseline: float
+    ratio: float | None = None
+    is_anomaly: bool
+    severity: Literal["low", "mid", "high"] | None = None
+    status: Literal["normal", "anomaly", "unknown"] | None = None
+    direction: Literal["up", "down"] | None = None
+    note: str | None = None
 
 
 class AnomalyDetectionOutput(AxModel):
+    """이상 탐지 결과.
+
+    지표는 두 목록으로 싣는다. `verdicts`·`unknown_metrics`는 캣북스 지표 4개(`BusinessMetric`)만
+    담는 예전 목록이고, `metric_verdicts`·`unknown_metric_ids`는 회사 카탈로그 id로 모든 지표를
+    담는다. 캣북스 지표는 두 목록에 다 들어가고(예전 소비자 호환), 다른 회사 지표는 새 목록에만
+    들어간다.
+    """
+
     verdicts: list[MetricVerdict] = Field(default_factory=list)
     any_anomaly: bool
     summary: str
@@ -83,6 +113,8 @@ class AnomalyDetectionOutput(AxModel):
     # 모든 지표를 판정할 수 없으면 unknown
     status: Literal["normal", "anomaly", "unknown"] | None = None
     unknown_metrics: list[BusinessMetric] = Field(default_factory=list)
+    metric_verdicts: list[MetricIdVerdict] = Field(default_factory=list)  # 모든 지표 (카탈로그 id)
+    unknown_metric_ids: list[str] = Field(default_factory=list)  # 판정할 수 없었던 지표 id
 
 
 # ---------- fraud_score ----------
@@ -365,6 +397,15 @@ class CollaborationEdge(AxModel):
     count: int = Field(ge=1)  # A2A 요청 수 (`request_received`)
 
 
+class UnusedHandoff(AxModel):
+    """AI를 쓰지 않는(켜지 않은) 부서로 넘긴 일. 건수와 업무 상위 3개만 (예측 문구·숫자 없음)."""
+
+    department: str
+    label: str
+    count: int = Field(ge=1)
+    top_skills: list[SkillCount] = Field(default_factory=list, max_length=3)
+
+
 class ActivityHighlight(AxModel):
     key: str  # 예: departments.support.requests.total
     label: str  # 한국어 (예: 고객지원 처리한 요청)
@@ -399,3 +440,119 @@ class ActivityReportOutput(AxModel):
     stored_days: int | None = Field(default=None, ge=0)  # 저장된 값을 쓴 날 수 (이번 + 직전 기간)
     live_days: int | None = Field(default=None, ge=0)  # 바로 계산한 날 수 (이번 + 직전 기간)
     snapshot_note: str | None = None  # "저장된 날 N일 / 바로 계산 M일"
+    # 센 범위: 켠(AI를 쓰는) 서비스 id. 저장된 날은 그날 켠 서비스. 예전 응답은 None
+    enabled_services: list[str] | None = None
+    unused_handoffs: list[UnusedHandoff] = Field(
+        default_factory=list
+    )  # AI를 쓰지 않는 부서로 넘긴 일
+
+
+# --------------------------------------------------------------- 지표 카탈로그 (회사별 설정 형식)
+# data 엔진이 회사마다 다른 것(지표 이름·나쁜 방향·장애 쪽 코드·단위·카테고리 이름)을 이 형식의
+# 파일에서 읽는다. 캣북스는 data `catalogs/catbooks.toml`. 값은 회사 설정이고 숫자를 만들지 않는다.
+class CatalogMetric(AxModel):
+    id: str  # 커넥터가 주는 지표 이름 (예: payment_fail_rate)
+    label: str  # 한국어 표시명 (설명 문장·리포트)
+    bad_direction: Literal["up", "down"]  # 어느 쪽으로 움직이면 이상인지
+    unit: str  # 단위 (예: 건, 비율)
+    # 장애 쪽 실패 코드 (있으면 확률 기준도 본다)
+    fault_codes: list[str] = Field(default_factory=list)
+    aggregate: Literal["sum", "mean"] = "sum"  # 5분 구간으로 묶는 방법
+    denominator: str | None = None  # 비율 지표의 분모 지표 (예: 결제 시도 수)
+    denominator_label: str | None = None  # 분모를 부르는 말 (예: 결제). 판정 안내 문장에 쓴다
+    scale_with_volume: bool = False  # 거래량이 평소보다 많으면 기준을 그만큼 늘려 볼지
+
+
+class CatalogImpact(AxModel):
+    unit_label: str  # 영향의 단위 (예: 주문, 출고)
+    customer_label: str  # 영향받은 사람 (예: 고객, 거래처)
+    money_field: str  # 피해 금액으로 더하는 칸
+    money_unit: str = "원"
+
+
+class MetricCatalog(AxModel):
+    id: str
+    name: str  # 회사 표시명
+    metrics: list[CatalogMetric] = Field(min_length=1)  # 감시하는 지표 (순서대로 판정)
+    impact: CatalogImpact
+    categories: dict[str, str] = Field(default_factory=dict)  # 카테고리 코드 → 한국어 이름
+    # 사용자 쪽 실패 코드 → 한국어 이름 (장애와 무관해 영향에서 뺀다. 예: 카드 거절)
+    user_codes: dict[str, str] = Field(default_factory=dict)
+    volume_metric: str | None = None  # 거래량 지표 (빈 구간 판단·기준 보정). 없으면 쓰지 않는다
+    volume_label: str | None = None  # 거래량을 부르는 말 (예: 주문·결제). 빈 구간 안내에 쓴다
+    # 지표·실패 이벤트·거래량을 읽는 커넥터 이름 (data `clients.shop_client.CONNECTORS`)
+    connector: str = "shop-api"
+
+    @model_validator(mode="after")
+    def _unique_metric_ids(self) -> Self:
+        ids = [m.id for m in self.metrics]
+        if len(ids) != len(set(ids)):
+            raise ValueError("metric id가 겹친다")
+        return self
+
+
+# --------------------------------------------------------------- trend_scan (검색어 급상승)
+# 외부 검색 트렌드(네이버 검색어 트렌드)에서 키워드 그룹별 급상승을 판정한다.
+# 네이버 값은 검색 건수가 아니라 "그 요청 안의 최댓값 = 100"인 상대값이고, 요청이 다르면 배수가
+# 달라진다. 그래서 기준선과 판정 구간은 한 요청으로 받은 값끼리만 비교하고, 출력도 건수가 아니라
+# 기준선 대비 배수로 낸다.
+
+TrendTimeUnit = Literal["date", "week", "month"]  # 네이버가 받는 단위 (가장 작은 단위 = 하루)
+TrendStatus = Literal["rising", "normal", "unknown"]
+
+
+class TrendKeywordGroup(AxModel):
+    group_name: str = Field(min_length=1)  # 결과에서 이 그룹을 부르는 이름
+    keywords: list[str] = Field(min_length=1, max_length=20)  # 같이 셀 검색어 (네이버 최대 20개)
+
+
+class TrendScanInput(AxModel):
+    keyword_groups: list[TrendKeywordGroup] = Field(min_length=1, max_length=5)  # 네이버 최대 5개
+    start_date: dt.date  # 기준선 시작 (한국 날짜)
+    end_date: dt.date  # 판정할 마지막 날 (한국 날짜, 네이버는 하루 늦게 채워진다)
+    time_unit: TrendTimeUnit = "date"
+
+    @model_validator(mode="after")
+    def _range(self) -> Self:
+        if self.end_date < self.start_date:
+            raise ValueError("end_date가 start_date보다 앞이다")
+        names = [g.group_name for g in self.keyword_groups]
+        if len(names) != len(set(names)):
+            raise ValueError("group_name이 겹친다")
+        return self
+
+
+class TrendEvidence(AxModel):
+    """판정 근거 숫자. 모두 같은 요청 안의 상대값(최댓값 100)이다."""
+
+    latest_period: dt.date | None = None  # 판정한 마지막 시점
+    latest_value: float | None = Field(default=None, ge=0)  # 그 시점 값
+    baseline_value: float | None = Field(default=None, ge=0)  # 기준선 (판정 구간 전 값의 중앙값)
+    baseline_points: int = Field(default=0, ge=0)  # 기준선에 쓴 시점 수
+    spread: float | None = Field(default=None, ge=0)  # 평소 흔들림 (log 값의 중앙 절대 편차)
+    score: float | None = None  # 평소 흔들림의 몇 배만큼 벗어났는지 (강건 z)
+
+
+class TrendVerdict(AxModel):
+    group_name: str
+    status: TrendStatus
+    ratio: float | None = Field(default=None, ge=0)  # 기준선 대비 배수 (판정 못 하면 None)
+    evidence: TrendEvidence = Field(default_factory=TrendEvidence)
+    unknown_reason: str | None = None  # status가 unknown이면 이유 (예: 자료 없음, 기준선 0)
+
+    @model_validator(mode="after")
+    def _reason_when_unknown(self) -> Self:
+        if self.status == "unknown" and not self.unknown_reason:
+            raise ValueError("unknown이면 unknown_reason이 있어야 한다")
+        if self.status != "unknown" and self.ratio is None:
+            raise ValueError("판정했으면 ratio가 있어야 한다")
+        return self
+
+
+class TrendScanOutput(AxModel):
+    start_date: dt.date
+    end_date: dt.date
+    time_unit: TrendTimeUnit
+    source: str  # 자료 출처 (예: naver_datalab)
+    value_kind: Literal["relative"] = "relative"  # 검색 건수가 아니라 요청 안 상대값
+    results: list[TrendVerdict] = Field(default_factory=list)  # 입력 그룹 순서

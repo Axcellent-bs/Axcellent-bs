@@ -45,7 +45,14 @@ export interface OrchIncident {
   /** 총괄이 이미 아는 사실로 만든 해결 내용 초안(저장 전). 아는 게 없으면 null */
   /** 시스템이 잰 이벤트 시각(감지·원인 후보 도착·사람에게 넘김·정상 복귀). 모르는 시각은 null */
   timeline?: import("./duration").EventTimes | null;
-  resolution_draft?: { outcome: "resolved" | null; root_cause: string | null; action: string | null; basis: string[] } | null;
+  resolution_draft?: {
+    outcome: "resolved" | null; root_cause: string | null; action: string | null; basis: string[];
+    /** past_case: 같은 유형의 과거 이벤트에서 가져옴(반복 장애), this_event: 이번 이벤트에서 알게 된 것 */
+    source?: "past_case" | "this_event";
+    past_card_id?: string | null; similarity?: number | null;
+    /** past_case일 때 이번 이벤트에서 AI(데이터분석)가 찾은 원인 후보. 칸에는 넣지 않고 참고로만 보여 준다 */
+    this_event_cause?: string | null;
+  } | null;
 }
 
 /** POST /api/demo/incidents 본문 (main.py DemoRequest). 모두 선택 */

@@ -18,9 +18,9 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import Any
 
+from ax_orchestrator.draft import kst_text
 from ax_orchestrator.models import Incident, Plan, Step, iso, now
 from ax_orchestrator.timeline import past_hint
 
@@ -34,11 +34,8 @@ def _window(inc: Incident) -> dict[str, Any]:
     없으면 예전처럼 이벤트가 열린 시각 앞 15분부터. 앞 장애(이미 지난 다른 이벤트)의 실패 주문이
     섞이지 않게 하려는 것이다.
     """
-    start = inc.since if inc.since is not None else inc.opened_at - timedelta(minutes=15)
-    return {
-        "window_from": iso(start),
-        "window_to": iso(inc.opened_at + timedelta(minutes=15)),
-    }
+    start, end = inc.impact_window()
+    return {"window_from": iso(start), "window_to": iso(end)}
 
 
 def _out(inc: Incident, step_id: str) -> dict[str, Any]:
@@ -239,7 +236,7 @@ def _resolution(inc: Incident) -> dict[str, Any]:
     return {
         "context_id": inc.context_id,
         "outcome": "resolved" if recovered else "unresolved",
-        "root_cause": str(top["explanation"]) if top and top.get("explanation") else None,
+        "root_cause": kst_text(str(top["explanation"])) if top and top.get("explanation") else None,
         "action": action,
         "minutes_to_resolve": minutes if recovered else None,
     }

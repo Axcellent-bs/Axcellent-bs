@@ -4,7 +4,7 @@ import { won } from "@/lib/format";
 import {
   DATA_SERVER, UNKNOWN, dataAi, kpiLive,
   type A2AResult, type ActivityOutcomes, type ActivityPeriod, type ActivityReportOutput,
-  type CompanyFigure, type DepartmentActivity, type DepartmentReport, type UnknownSection,
+  type CompanyFigure, type DepartmentActivity, type DepartmentReport, type UnknownSection, type UnusedHandoff,
 } from "@/lib/data";
 
 // 부서별 AI 업무 리포트: 데이터 AI(8106) activity_report 출력을 그대로 보여 준다.
@@ -243,6 +243,24 @@ function Department({ d, unknown }: { d: DepartmentReport; unknown: UnknownSecti
   );
 }
 
+/** AI를 쓰지 않는 부서로 넘긴 일: 부서별 건수와 업무 상위 3개. 예측 문구·숫자는 넣지 않는다 */
+function UnusedHandoffs({ items }: { items: UnusedHandoff[] }) {
+  if (!items.length) return null;
+  return (
+    <div className="mt-4 rounded-2xl bg-surface-2 px-4 py-3">
+      <p className="text-xs font-medium text-ink-700">AI를 쓰지 않는 부서로 넘긴 일</p>
+      <ul className="mt-1 space-y-0.5 text-[11px] text-ink-700">
+        {items.map((u) => (
+          <li key={u.department}>
+            <span className="font-medium">{u.label}</span> {u.count.toLocaleString("ko-KR")}건
+            {u.top_skills.length > 0 && <span className="text-ink-500"> · {u.top_skills.map((s) => `${s.label} ${s.count}건`).join(" · ")}</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function Departments({ o }: { o: ActivityReportOutput }) {
   const general = o.unknown_sections.filter((u) => u.section === "departments" || u.section === "departments.previous_period");
   return (
@@ -254,6 +272,7 @@ function Departments({ o }: { o: ActivityReportOutput }) {
           {o.departments.map((d) => <Department key={d.department} d={d} unknown={o.unknown_sections} />)}
         </div>
       )}
+      <UnusedHandoffs items={o.unused_handoffs ?? []} />
     </Panel>
   );
 }

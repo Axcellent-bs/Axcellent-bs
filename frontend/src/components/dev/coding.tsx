@@ -16,6 +16,8 @@ export const CODING_LABEL: Record<CodingStatus, string> = {
   opened: 'PR 열림', merged: '머지됨', waiting_human: '사람 확인', failed: '실패', canceled: '중단됨',
 }
 const DONE: CodingStatus[] = ['opened', 'merged']
+/** 토큰 수를 짧게: 950 · 12.3k · 1.2M */
+export const tokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : `${n}`)
 /** 에이전트가 지금 일하는 중인 상태 (옆에 깜빡이는 점) */
 const RUNNING: CodingStatus[] = ['queued', 'reading', 'writing', 'reviewing']
 export const isRunning = (s?: CodingStatus | string) => RUNNING.includes(s as CodingStatus)
@@ -102,7 +104,8 @@ export function RelatedTags({ s, t }: { s: S; t?: Task }) {
 }
 
 /** 목록 줄·머리에 쓰는 코딩 상태 글자 */
-export const codingState = (c: CodingRun) => CODING_LABEL[c.status] ?? c.status
+export const codingState = (c: CodingRun) =>
+  c.status === 'queued' && c.waitingFor?.length ? `차례 기다림 (${c.waitingFor.join(', ')} 뒤)` : CODING_LABEL[c.status] ?? c.status
 
 /** 작업·PR 흐름 맨 위 "코딩 에이전트" 단계 */
 export function CodingStep({ task }: { task: Task }) {
@@ -154,6 +157,7 @@ export function CodingStep({ task }: { task: Task }) {
       <span className="tags">
         {c.model && <Tag><span className="mono">{c.model}</span></Tag>}
         {c.attempts > 1 && <Tag>{c.attempts}회차</Tag>}
+        {!!c.llmCalls && <Tag>AI {c.llmCalls}회 · <span className="mono">{tokens(c.llmTokens ?? 0)}</span> 토큰</Tag>}
         {!!files.length && <Tag>{files.length}파일 · <span className="mono">+{add} −{del}</span></Tag>}
         {c.review && <Tag tone={c.review.verdict === '통과' ? 'green' : 'amber'}>리뷰 {c.review.verdict}</Tag>}
         {c.instruction && <Tag>사람 지시</Tag>}
@@ -186,7 +190,7 @@ export function CodingStep({ task }: { task: Task }) {
       )}
       <span className="tags">
         {waitingPr && <Button size="small" variant="primary" onClick={merge} disabled={busy}>머지</Button>}
-        {(STUCK.includes(c.status) || c.status === 'canceled') && !waitingPr && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.status === 'canceled' ? '재개' : '다시 시도'}</Button>}
+        {(STUCK.includes(c.status) || c.status === 'canceled') && !waitingPr && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.status === 'canceled' ? '재개' : c.mergeConflict ? '최신 코드로 다시 쓰기' : '다시 시도'}</Button>}
         <CancelButton taskId={task.id} status={c.status} />
       </span>
     </Step>

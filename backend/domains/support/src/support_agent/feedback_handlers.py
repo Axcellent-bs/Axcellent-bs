@@ -31,7 +31,7 @@ def _item(conversation: Conversation) -> dict[str, Any]:
     return {
         "inquiry_id": conversation.id,
         "customer_name": conversation.customer_name,
-        "subject": conversation.subject,
+        "subject": conversation.subject_display or conversation.subject,  # 욕설 제목은 가린 것
         "category": conversation.category,
         "order_id": conversation.order_id,
         "order_no": conversation.order_no,

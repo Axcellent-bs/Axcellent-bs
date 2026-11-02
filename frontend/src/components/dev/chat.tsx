@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Chip, useToast, type ChipTone } from '@dejafix/common-frontend'
 import type { ChatMessage, ChatStatus, ChatThread, CodingStatus, State as S, Task } from '@/lib/planningData'
 import { DEV_API, PlanningApiError, chatApi, vcsApi, type VcsConnection } from '@/lib/planning'
-import { CODING_LABEL, CancelButton, ResumeButton, isRunning } from '@/components/dev/coding'
+import { CODING_LABEL, CancelButton, ResumeButton, codingState, isRunning } from '@/components/dev/coding'
 import { State } from '@/components/planning-common/parts'
 import { go, toPath } from '@/components/planning-common/links'
 import { Tag } from '@/components/planning-common/parts'
@@ -230,7 +230,7 @@ function Started({ m, s, onOpen }: { m: ChatMessage; s: S; onOpen: () => void })
       <div className="chat-card">
         <div className="chat-card-h">
           <span className="mono">{id ?? '작업'}</span>
-          <State v={CODING_LABEL[status] ?? status} live={isRunning(status)} />
+          <State v={c ? codingState(c) : CODING_LABEL[status] ?? status} live={isRunning(status)} />
         </div>
         <div className="chat-card-row">
           {files > 0 ? <Tag>{files}파일</Tag> : <span />}

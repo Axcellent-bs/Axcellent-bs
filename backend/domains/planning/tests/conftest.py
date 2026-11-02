@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from ax_agent_template import config
 from ax_agent_template.testing import reset_state  # noqa: F401  autouse, 템플릿 상태 초기화
+from planning_agent import coder
 from planning_agent.api import ADMIN_ACTIONS
 from planning_agent.domain.service import PlanningService, action_name
 from planning_agent.runtime import set_service
@@ -24,6 +25,9 @@ def service(monkeypatch: pytest.MonkeyPatch, reset_state: None) -> PlanningServi
     monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
     monkeypatch.delenv("PLANNING_ROLE", raising=False)  # 서비스 역할 없이 합친 모드로 본다
     config.set_agent_name("planning")  # 다른 부서 테스트가 먼저 돌아도 execute 요청자는 planning
+    # CI 기다리기: 테스트에선 기다리지 않는다 (검사가 없으면 바로 CI 없는 레포로 본다)
+    monkeypatch.setattr(coder, "CI_POLL_SECONDS", 0.0)
+    monkeypatch.setattr(coder, "NO_CI_GRACE_SECONDS", 0.0)
     return set_service(PlanningService())
 
 

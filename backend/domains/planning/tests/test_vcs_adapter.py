@@ -13,7 +13,7 @@ import itertools
 import json
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -948,3 +948,85 @@ def test_open_conflict_with_other_tasks_branch_opens_new_branch() -> None:
         assert not run(adapter.get_change(5)).merged
     finally:
         vcs.set_vcs(None)
+
+
+# ---------------------------------------------------------------- 바깥에서 머지·닫은 PR 맞추기
+
+
+class HoldMerge(MockVcsAdapter):
+    """자동 머지만 막는다 (사람이 GitHub에서 직접 머지·닫는 상황을 만든다)."""
+
+    async def merge_change(self, number: int, method: str = "squash"):
+        if self._entry(number).change.merged:
+            raise VcsError("conflict", "이미 병합된 변경")  # GitHub 부품과 같은 답
+        raise VcsError("invalid", "required status check")
+
+
+def test_sync_marks_pr_merged_outside(service: PlanningService) -> None:
+    adapter = HoldMerge()
+    vcs.set_vcs(adapter)
+    _req12_to_prs(service)
+    pr31 = _prs(service)["PR #31"]
+    assert not pr31.merged
+    entry = adapter._entry(pr31.vcs_number)
+    entry.change = replace(entry.change, merged=True)  # 사람이 GitHub에서 직접 머지
+    assert run(service.sync_prs()) >= 1
+    pr31 = _prs(service)["PR #31"]
+    assert pr31.merged
+    assert next(t for t in service.state.tasks if t.id == "T-11").state == "완료"
+    assert any(a.point == "vcs.synced" and "머지됨" in a.text for a in service.state.activity)
+    assert run(service.sync_prs()) == 0  # 이미 맞춘 건 다시 안 본다
+
+
+def test_sync_marks_pr_closed_outside(service: PlanningService) -> None:
+    adapter = HoldMerge()
+    vcs.set_vcs(adapter)
+    _req12_to_prs(service)
+    pr31 = _prs(service)["PR #31"]
+    run(adapter.close_change(pr31.vcs_number))
+    run(service.sync_prs())
+    pr31 = _prs(service)["PR #31"]
+    assert pr31.closed and not pr31.merged and pr31.auto_review is None
+    assert next(t for t in service.state.tasks if t.id == "T-11").state == "중단"
+
+
+def test_merge_blocked_reason_is_named(service: PlanningService) -> None:
+    vcs.set_vcs(HoldMerge())
+    _req12_to_prs(service)
+    failed = [a.text for a in service.state.activity if a.point == "vcs.merge_failed"]
+    assert failed and "보호 규칙·필수 체크" in failed[0]
+
+
+def test_github_rate_limit_waits_once_then_retries(monkeypatch) -> None:
+    slept: list[float] = []
+
+    async def fake_sleep(sec: float) -> None:
+        slept.append(sec)
+
+    monkeypatch.setattr("planning_agent.vcs.github.asyncio.sleep", fake_sleep)
+    h = _github_harness()
+    h.server.fail[("GET", r"/pulls/\d+")] = httpx.Response(  # type: ignore[attr-defined]
+        429, json={"message": "slow down"}, headers={"retry-after": "3"}
+    )
+    with pytest.raises(VcsError) as err:  # 다시 불러도 한도면 실패 (한 번만 기다림)
+        run(h.adapter.get_trace_meta(1))
+    assert err.value.code == "rate_limited" and slept == [3.0]
+
+
+def test_rate_wait_reads_headers() -> None:
+    from planning_agent.vcs.github import RATE_WAIT_MAX, rate_wait
+
+    assert rate_wait({"retry-after": "5"}, 0) == 5
+    assert rate_wait({"x-ratelimit-reset": "110"}, 100) == 10
+    assert rate_wait({"x-ratelimit-reset": str(100 + RATE_WAIT_MAX + 1)}, 100) is None  # 너무 김
+    assert rate_wait({}, 100) is None
+
+
+def test_merge_405_split_conflict_and_protection() -> None:
+    from planning_agent.vcs_bridge import CONFLICT_MARK, merge_fail_reason
+
+    assert CONFLICT_MARK in merge_fail_reason(
+        "conflict", "PUT /pulls/1/merge → 405 Pull Request is not mergeable"
+    )
+    blocked = merge_fail_reason("conflict", '→ 405 Required status check "build" is expected.')
+    assert "보호 규칙" in blocked and CONFLICT_MARK not in blocked

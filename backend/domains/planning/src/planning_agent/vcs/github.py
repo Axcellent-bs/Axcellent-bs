@@ -16,6 +16,7 @@ import asyncio
 import base64
 import binascii
 import re
+import time
 from dataclasses import replace
 from datetime import datetime
 from typing import Any
@@ -215,6 +216,7 @@ class GithubVcsAdapter:
         *,
         json: dict | None = None,
         params: dict | None = None,
+        retry: bool = True,
     ) -> Any:
         token = await self._auth()
         try:
@@ -235,7 +237,14 @@ class GithubVcsAdapter:
         except ValueError:
             detail = ""
         message = self._clean(f"{where} → {res.status_code} {detail}".rstrip())
-        raise VcsError(self._code(res, detail), message)
+        code = self._code(res, detail)
+        if code == "rate_limited" and retry:
+            # 호출 한도: 알려 준 시간이 짧으면 그만큼 기다렸다 한 번만 다시 부른다
+            wait = rate_wait(res.headers, time.time())
+            if wait is not None:
+                await asyncio.sleep(wait)
+                return await self._send(method, url, where, json=json, params=params, retry=False)
+        raise VcsError(code, message)
 
     @staticmethod
     def _code(res: httpx.Response, detail: str) -> str:
@@ -988,3 +997,18 @@ class GithubVcsAdapter:
             ),
             total_files=len(files),
         )
+
+
+RATE_WAIT_MAX = 60.0  # 호출 한도에서 이보다 오래 기다려야 하면 기다리지 않고 실패로 돌려준다
+
+
+def rate_wait(headers: Any, now: float) -> float | None:
+    """호출 한도 응답에서 다시 부를 때까지 기다릴 초. 모르거나 RATE_WAIT_MAX보다 길면 None."""
+    raw = headers.get("retry-after")
+    try:
+        wait = float(raw) if raw else float(headers.get("x-ratelimit-reset") or "") - now
+    except ValueError:
+        return None
+    if wait > RATE_WAIT_MAX:
+        return None
+    return max(wait, 0.0)

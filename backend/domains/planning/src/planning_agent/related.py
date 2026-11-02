@@ -33,7 +33,7 @@ from ax_agent_template.llm import LLMClient, LLMSettings
 from planning_agent.domain.models import PR, RelatedItem, Request, State
 
 TOP_K = 5
-MIN_SCORE = {"embed": 0.6, "lexical": 0.3}  # 이 아래는 후보로 보지 않는다
+MIN_SCORE = {"embed": 0.6, "lexical": 0.3, "memory": 0.6}  # 이 아래는 후보로 보지 않는다
 LEXICAL_DIM = 512
 LLM_TIMEOUT_SECONDS = 60.0
 
@@ -117,9 +117,13 @@ class _Judgement(BaseModel):
 class Relater:
     """요청 하나에 대해 비슷한·충돌하는 요청을 찾는다. 벡터는 문장이 같으면 다시 만들지 않는다."""
 
-    def __init__(self, embedder: Embedder | None = None, llm: Any = None) -> None:
+    def __init__(
+        self, embedder: Embedder | None = None, llm: Any = None, index: Any = None
+    ) -> None:
         self._embedder: Embedder = embedder or LexicalEmbedder()
         self._llm = llm
+        # memory 요청 색인 (request_index.MemoryRequestIndex). 있으면 두 서버가 같은 색인을 쓴다
+        self.index = index
         self._cache: dict[str, list[float]] = {}
         self._fallback = LexicalEmbedder()
         self._fallback_cache: dict[str, list[float]] = {}
@@ -141,17 +145,56 @@ class Relater:
                 cache[text] = vec
         return [cache[t] for t in texts]
 
+    async def _from_index(
+        self, state: State, req: Request, pool: list[Request]
+    ) -> tuple[list[tuple[Request, float]], set[str]] | None:
+        """memory 색인으로 찾는다. 다른 서비스에만 있는 요청은 그 서비스에서 지금 상태를 읽는다.
+        (후보, 다른 서비스 요청 id). 색인을 못 쓰면 None (이 서버 안 검색으로 대신)."""
+        from planning_agent.request_index import IndexUnavailable
+
+        local = {r.id: r for r in pool}
+        skip = {req.id, req.duplicate_of}
+        try:
+            hits = await self.index.search(text_of(state, req), TOP_K * 2)
+            owners = {
+                h.owner
+                for h in hits
+                if h.request_id not in local
+                and h.request_id not in skip
+                and h.owner != self.index.owner
+            }
+            remote: dict[str, Request] = {}
+            for owner in owners:
+                for r in await self.index.peer_requests(owner):
+                    remote.setdefault(r.id, r)
+        except IndexUnavailable:
+            return None
+        found = [
+            (local.get(h.request_id) or remote[h.request_id], h.score)
+            for h in hits
+            if h.request_id not in skip
+            and (h.request_id in local or h.request_id in remote)
+            and h.score >= MIN_SCORE["memory"]
+        ]
+        return found[:TOP_K], {i for i in remote if i not in local}
+
     async def relate(self, state: State, req: Request) -> list[RelatedItem]:
         pool = [r for r in state.requests if r.id != req.id and r.id != req.duplicate_of]
-        if not pool:
-            return []
-        texts = [text_of(state, req), *(text_of(state, r) for r in pool)]
-        vecs, method = await self._vectors(texts)
-        scored = sorted(
-            ((r, _cosine(vecs[0], v)) for r, v in zip(pool, vecs[1:], strict=True)),
-            key=lambda x: -x[1],
-        )
-        found = [(r, sc) for r, sc in scored if sc >= MIN_SCORE[method]][:TOP_K]
+        found: list[tuple[Request, float]] = []
+        remote_ids: set[str] = set()
+        method = "lexical"
+        got = await self._from_index(state, req, pool) if self.index is not None else None
+        if got is not None:
+            found, remote_ids = got
+            method = "memory"
+        elif pool:
+            texts = [text_of(state, req), *(text_of(state, r) for r in pool)]
+            vecs, method = await self._vectors(texts)
+            scored = sorted(
+                ((r, _cosine(vecs[0], v)) for r, v in zip(pool, vecs[1:], strict=True)),
+                key=lambda x: -x[1],
+            )
+            found = [(r, sc) for r, sc in scored if sc >= MIN_SCORE[method]][:TOP_K]
         if not found:
             return []
         judged = await self._judge(state, req, found)
@@ -168,6 +211,7 @@ class Relater:
                     relation=j.relation if j else "related",
                     reason=(j.reason if j and j.reason else f"의미가 비슷함 ({sc:.2f})")[:200],
                     by="llm" if j else method,
+                    remote_state=r.state if r.id in remote_ids else None,
                 )
             )
         return out
@@ -213,9 +257,38 @@ def settled(state: State, req_id: str) -> bool:
     return bool(tasks) and all(t.coding and t.coding.status in STOPPED for t in tasks)
 
 
+def item_settled(state: State, item: RelatedItem) -> bool:
+    """판정 항목의 상대 요청이 끝났나. 다른 서비스 요청이면 찾을 때 읽은 상태로 본다."""
+    if item.remote_state is not None and not any(r.id == item.id for r in state.requests):
+        return item.remote_state in FINISHED
+    return settled(state, item.id)
+
+
 def open_conflicts(state: State, req: Request) -> list[RelatedItem]:
     """이 요청의 충돌 가능 중 상대 요청이 아직 안 끝난 것 (끝났으면 이어서 바꾼 것과 같다)."""
-    return [x for x in req.related if x.relation == "conflict" and not settled(state, x.id)]
+    return [x for x in req.related if x.relation == "conflict" and not item_settled(state, x)]
+
+
+async def settled_now(state: State, req_id: str, index: Any) -> bool:
+    """대기 대화를 풀 때: 이 서버에 있으면 그 상태, 없으면 다른 서비스에서 지금 상태를 읽는다.
+    읽지 못하면 끝나지 않은 것으로 본다 (기다림을 함부로 풀지 않는다)."""
+    if any(r.id == req_id for r in state.requests):
+        return settled(state, req_id)
+    if index is None:
+        return False
+    from planning_agent.request_index import IndexUnavailable
+
+    for owner in ("planning", "dev"):
+        if owner == index.owner:
+            continue
+        try:
+            rows = await index.peer_requests(owner)
+        except IndexUnavailable:
+            return False
+        found = next((r for r in rows if r.id == req_id), None)
+        if found is not None:
+            return found.state in FINISHED
+    return False
 
 
 def path_overlaps(state: State, pr: PR) -> list[RelatedItem]:
@@ -251,7 +324,7 @@ def request_of_pr(state: State, pr: PR) -> Request | None:
     return next((r for r in state.requests if spec and r.id == spec.request), None)
 
 
-def default_relater() -> Relater | None:
+def default_relater(role: str = "") -> Relater | None:
     """목 모드면 None (찾지 않는다). 아니면 planning 임베딩·LLM 설정이 있는 것만 쓴다."""
     if template_config.is_mock("planning"):
         return None
@@ -260,4 +333,6 @@ def default_relater() -> Relater | None:
     if settings.embed_model and settings.base_url:
         embedder = LLMEmbedder(LLMClient("planning", settings=settings))
     llm = LLMClient("planning", settings=settings) if settings.model and settings.base_url else None
-    return Relater(embedder=embedder, llm=llm)
+    from planning_agent.request_index import default_index
+
+    return Relater(embedder=embedder, llm=llm, index=default_index(role))

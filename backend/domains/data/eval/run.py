@@ -2,8 +2,8 @@
 
 - 정답지 `cases/*.json`의 시나리오마다 쇼핑몰 데이터를 실제 shop-api 코드로 다시 만들고
   (`eval_world`), data의 실제 skill 코드로 돌려 정답과 비교한다.
-  - 이상 탐지: `detect_anomalies` (shop-api 지표 시계열을 data의 `HttpMetricSource`로 읽는다)
-  - 영향 분석: `analyze_impact` (실패 주문을 data의 `HttpShopClient`로 읽는다)
+  - 이상 탐지: `detect_anomalies` (shop-api 지표 시계열을 data 커넥터 `ShopApiConnector`로 읽는다)
+  - 영향 분석: `analyze_impact` (실패 주문을 같은 커넥터 `ShopApiConnector`로 읽는다)
   - 사기 점수: `fraud_score` 핸들러. 판매자마다 shop-api 코드로 임시 DB를 만들고(`eval_sellers`)
     핸들러가 data의 `HttpSellerClient`로 읽는다. shop-api에 없는 사실(사업자 중복·유사 카드)은
     핸들러에서 "확인할 수 없음"이라 점수에서 빠진다(`fraud.precision`·`recall`). 빠진 규칙을
@@ -52,12 +52,11 @@ from ax_contracts.schemas.data import (  # noqa: E402
 from ax_shop_api.lookups import Lookups  # noqa: E402
 from data_agent import detect, handlers  # noqa: E402
 from data_agent.clients.shop_client import (  # noqa: E402
-    HttpMetricSource,
     HttpSellerClient,
-    HttpShopClient,
     ShopApi,
     ShopUnavailable,
 )
+from data_agent.connectors.shop_api import ShopApiConnector  # noqa: E402
 from data_agent.explain import _bad_numbers  # noqa: E402
 from data_agent.impact import ImpactCounts  # noqa: E402
 from data_agent.metrics.fraud import SellerFacts, low_price_ratio, score_seller  # noqa: E402
@@ -254,7 +253,7 @@ def _sources(case: dict[str, Any]):  # noqa: ANN202
     return send
 
 
-async def _delay(case: dict[str, Any], source: HttpMetricSource) -> float | None:
+async def _delay(case: dict[str, Any], source: ShopApiConnector) -> float | None:
     """5분마다 최근 15분을 묻는 감시로 처음 잡힌 시각 − 장애를 넣은 시각 (분). 못 잡으면 None."""
     expected = case["expected"]["anomaly"]
     onset = eval_world.parse(expected["onset"])
@@ -272,7 +271,7 @@ async def _delay(case: dict[str, Any], source: HttpMetricSource) -> float | None
     return None
 
 
-async def _monitor_replay(case: dict[str, Any], source: HttpMetricSource) -> list[dict[str, Any]]:
+async def _monitor_replay(case: dict[str, Any], source: ShopApiConnector) -> list[dict[str, Any]]:
     """주기 감시(monitor.py) 재현: 구간 안에서 5분마다 최근 15분을 감시와 같은 판정 함수
     (`detect.judge_window`)와 같은 지표(`WATCHED_METRICS`)로 판정해, 이상이 나온 감시 시각을 센다.
 
@@ -328,7 +327,8 @@ async def run_case(case: dict[str, Any]) -> dict[str, Any]:
     window_from, window_to = world.window
     async with httpx.AsyncClient(transport=world.transport(), base_url="http://shop") as client:
         api = ShopApi("http://shop", token="eval", client=client)
-        source, shop = HttpMetricSource(api), HttpShopClient(api)
+        # 실서버와 같은 캣북스 커넥터로 읽는다 (이상 탐지·영향 분석 각자 하나)
+        source, shop = ShopApiConnector(api), ShopApiConnector(api)
         llm = eval_llm.ScriptedLLM(case["llm"])
         out: dict[str, Any] = {
             "id": case["id"],

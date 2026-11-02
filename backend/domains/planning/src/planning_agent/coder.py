@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import os
 import re
 from collections.abc import Awaitable
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -47,6 +49,10 @@ MAX_OUTLINE_LINES = 60  # 긴 파일은 앞부분 + 뼈대 줄(선택자·함수
 LLM_TIMEOUT_SECONDS = 400.0  # 단계 하나 전체 (요청 재시도 포함)
 LLM_HTTP_TIMEOUT_SECONDS = 180.0  # 요청 하나. 기본 60초면 긴 파일을 쓰다 끊겨 다시 요청한다
 DEV_TEAM = "dev_team"
+# 토큰 관리: 실행 한 번의 LLM 사용 상한과 동시에 LLM을 부르는 실행 수 (env로 바꾼다)
+RUN_MAX_CALLS = 40  # PLANNING_CODER_MAX_CALLS
+RUN_MAX_TOKENS = 600_000  # PLANNING_CODER_MAX_TOKENS (입력 + 출력)
+PARALLEL = 2  # PLANNING_CODER_PARALLEL
 DEFAULT_DONE = "기획에 적은 동작이 그대로 구현되고 기존 동작은 바뀌지 않는다"
 
 # 고를 파일 목록에서 뺄 것 (잠금 파일·빌드 결과·의존성·이미지 등)
@@ -185,14 +191,82 @@ def reset_llm() -> None:
     _llm, _llm_set = None, False
 
 
+class MeteredLLM(LLMClient):
+    """사용량 기록(NFR-06)을 지금 실행의 계량기에도 더하는 클라이언트."""
+
+    def record_usage(  # type: ignore[override]
+        self, context_id: Any, model: Any, input_tokens: int, output_tokens: int, success: bool,
+        **kw: Any,
+    ) -> None:  # fmt: skip
+        super().record_usage(context_id, model, input_tokens, output_tokens, success, **kw)
+        count_tokens(input_tokens + output_tokens)
+
+
 def get_llm() -> LLMClient | None:
     """바꿔 끼운 것, 아니면 planning LLM 설정(`PLANNING_LLM_*`·`LLM_*`)이 있을 때만 클라이언트."""
     if _llm_set:
         return _llm
     settings = LLMSettings.from_env("planning")
     if settings.model and settings.base_url:
-        return LLMClient("planning", settings=settings, timeout=LLM_HTTP_TIMEOUT_SECONDS)
+        return MeteredLLM("planning", settings=settings, timeout=LLM_HTTP_TIMEOUT_SECONDS)
     return None
+
+
+# ---------------------------------------------------------------- LLM 사용량 (토큰 관리)
+
+
+@dataclass
+class Meter:
+    """실행 한 번이 쓴 LLM 호출·토큰. `base_*`는 같은 작업의 앞 실행들이 쓴 양 (화면 합계용)."""
+
+    base_calls: int = 0
+    base_tokens: int = 0
+    calls: int = 0
+    tokens: int = 0
+
+
+_meter: ContextVar[Meter | None] = ContextVar("coder_meter", default=None)
+_slots: tuple[asyncio.AbstractEventLoop, asyncio.Semaphore] | None = None
+
+
+def limit(name: str, default: int) -> int:
+    """양수 env 값, 없거나 이상하면 기본값."""
+    try:
+        value = int(os.getenv(name) or "")
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def meter_now() -> Meter | None:
+    return _meter.get()
+
+
+def count_tokens(n: int) -> None:
+    """지금 실행의 계량기에 토큰을 더한다 (실행 밖이면 무시)."""
+    m = _meter.get()
+    if m is not None and n > 0:
+        m.tokens += n
+
+
+def budget_over(m: Meter) -> str | None:
+    """실행 한 번의 상한을 넘었으면 이유 한 줄."""
+    calls = limit("PLANNING_CODER_MAX_CALLS", RUN_MAX_CALLS)
+    tokens = limit("PLANNING_CODER_MAX_TOKENS", RUN_MAX_TOKENS)
+    if m.calls >= calls:
+        return f"LLM 호출 {m.calls}회 ≥ 한도 {calls}회"
+    if m.tokens >= tokens:
+        return f"토큰 {m.tokens:,} ≥ 한도 {tokens:,}"
+    return None
+
+
+def _slot() -> asyncio.Semaphore:
+    """동시에 LLM을 부르는 실행 수를 묶는 자리 (이벤트 루프마다 하나)."""
+    global _slots
+    loop = asyncio.get_running_loop()
+    if _slots is None or _slots[0] is not loop:
+        _slots = (loop, asyncio.Semaphore(limit("PLANNING_CODER_PARALLEL", PARALLEL)))
+    return _slots[1]
 
 
 def model_name(client: Any) -> str | None:
@@ -218,6 +292,7 @@ class Job:
     hints: tuple[str, ...]
     connection: str | None
     instruction: str | None = None  # 사람이 대기 중인 PR에 준 수정 지시
+    skip_queue: bool = False  # '지금 진행': 같은 파일 작업이 있어도 기다리지 않는다
 
 
 class CoderGone(Exception):
@@ -413,11 +488,21 @@ def pr_body(job: Job, rows: list[CodingFile], summary: str) -> str:
 async def _ask[T: BaseModel](
     llm: Any, step: str, prompt: str, schema: type[T], data: dict, ctx: str
 ) -> T:
+    m = _meter.get()
+    if m is not None:
+        over = budget_over(m)
+        if over:
+            raise CoderStop(
+                "waiting_human", f"{over} → 사람 확인 (다시 시도하면 새로 셈)", "code.budget",
+                f"{step} 전에 멈춤 · {over}",
+            )  # fmt: skip
+        m.calls += 1
     try:
-        return await asyncio.wait_for(
-            llm.structured(prompt, schema, untrusted=data, context_id=ctx),
-            LLM_TIMEOUT_SECONDS,
-        )
+        async with _slot():
+            return await asyncio.wait_for(
+                llm.structured(prompt, schema, untrusted=data, context_id=ctx),
+                LLM_TIMEOUT_SECONDS,
+            )
     except TimeoutError:
         raise CoderStop("failed", f"LLM {step} 시간 초과") from None
     except Exception as exc:  # noqa: BLE001 - 예외 내용 대신 종류만 남긴다
@@ -428,7 +513,18 @@ async def _vcs[R](step: str, call: Awaitable[R]) -> R:
     try:
         return await call
     except VcsError as exc:
-        raise CoderStop("failed", f"형상관리 {step} 실패 ({exc.code})") from None
+        raise CoderStop(
+            "failed", f"형상관리 {step} 실패 ({exc.code}){vcs_hint(exc.code)}"
+        ) from None
+
+
+def vcs_hint(code: str) -> str:
+    """형상관리 오류마다 사람이 할 일 (없으면 빈 글)."""
+    if code == "unauthorized":
+        return " → 토큰 만료·권한 확인, 레포 연결 화면에서 다시 연결"
+    if code == "rate_limited":
+        return " → 호출 한도, 잠시 뒤 다시 시도"
+    return ""
 
 
 def _adapter(connection: str | None) -> VcsAdapter:
@@ -584,6 +680,7 @@ class Draft:
     verdicts: list[str] = field(default_factory=list)  # 리뷰 결과 차례대로
     notes: list[str] = field(default_factory=list)  # 마지막 리뷰의 지적
     attempts: int = 1
+    freshened: bool = False  # PR 직전 확인에서 최신 글로 한 번 다시 썼나
 
 
 def _drafts(svc: PlanningService) -> dict[str, Draft]:
@@ -599,10 +696,54 @@ def drop_draft(svc: PlanningService, task_id: str) -> None:
     _drafts(svc).pop(task_id, None)
 
 
+QUEUE_POLL_SECONDS = 2.0  # 대기열 차례 확인 간격
+CI_POLL_SECONDS = 10.0  # PR CI 결과 확인 간격
+CI_WAIT_SECONDS = 600.0  # CI를 기다리는 최대 시간 (넘으면 사람 확인)
+NO_CI_GRACE_SECONDS = 30.0  # 이만큼 지나도 검사가 하나도 없으면 CI 없는 레포로 본다
+
+
+async def _wait_turn(svc: PlanningService, job: Job, paths: list[str]) -> bool:
+    """작업 대기열. 먼저 만든 작업이 같은 파일을 고치는 중이거나 아직 파일을 안 골랐으면
+    끝날(고를) 때까지 기다린다. 기다렸으면 True. 먼저 만든 작업은 뒤 작업을 기다리지 않아
+    서로 기다리다 멈추지 않는다. '지금 진행'(skip_queue)이면 기다리지 않는다."""
+    if job.skip_queue:
+        return False
+    waited = False
+    while True:
+        if not svc.coding_alive(job):
+            raise CoderGone(job.task_id)
+        same, undecided = svc.queue_blockers(job, paths)
+        if not same and not undecided:
+            break
+        ids = sorted({*same, *undecided})
+        if not waited:
+            why = (
+                f"앞 작업 {', '.join(same)}가 같은 파일을 고치는 중"
+                if same
+                else f"앞 작업 {', '.join(undecided)}가 아직 고칠 파일을 고르는 중"
+            )
+            await svc.coding_step(
+                job, "queued", point="code.queue", text=f"{why} → 끝나면 이어서",
+                error=f"{why} → 끝나면 최신 코드로 이어서 해요", waiting_for=ids,
+            )  # fmt: skip
+            waited = True
+        await asyncio.sleep(QUEUE_POLL_SECONDS)
+    if waited:
+        await svc.coding_step(
+            job, "writing", point="code.queue", text="앞 작업이 끝나 최신 코드로 이어서 씀",
+            error=None, waiting_for=[],
+        )  # fmt: skip
+    return waited
+
+
 async def run(svc: PlanningService, job: Job) -> None:
     """코딩 작업 하나를 끝까지 돌린다. 어떤 실패든 상태에 한 줄로 남기고 멈춘다."""
     from planning_agent.domain.service import GateRefused
 
+    task = next((t for t in svc.state.tasks if t.id == job.task_id), None)
+    cr = task.coding if task else None
+    meter = Meter(cr.llm_calls, cr.llm_tokens) if cr else Meter()
+    _meter.set(meter)  # 이 실행(asyncio 작업) 안에서만 보인다
     try:
         try:
             await _run(svc, job)
@@ -697,6 +838,8 @@ async def _run(svc: PlanningService, job: Job) -> None:
     await svc.coding_step(
         job, "writing", point="code.plan", text=text, files=chosen, summary=summary
     )
+    if await _wait_turn(svc, job, [p.path for p in picks]):
+        bodies = {}  # 기다리는 동안 앞 작업이 같은 파일을 바꿨을 수 있어 최신 글을 다시 읽는다
 
     # 3. 쓰기
     originals = await _originals(adapter, picks, bodies)
@@ -772,14 +915,114 @@ async def _review(svc: PlanningService, job: Job, llm: Any, d: Draft) -> Draft:
         )
 
 
+async def _freshen(svc: PlanningService, job: Job, d: Draft) -> Draft:
+    """PR 올리기 직전 한 곳에서만 다시 쓴다: 읽었던 파일이 기준 브랜치에서 바뀌었으면 최신 글
+    위에서 그 파일만 다시 쓰고 다시 리뷰한다 (리뷰 결과가 옛 코드 기준으로 남지 않게).
+    한 번 다시 쓴 뒤에도 또 바뀌면 사람 확인. 고치기 횟수는 리뷰 고치기와 같이 센다."""
+    paths = [p.path for p in d.picks if p.action == "modify" and p.path in d.contents]
+    if not paths:
+        return d
+    latest = await _read_all(_adapter(job.connection), paths)
+    stale = [p for p in paths if latest[p] != d.originals.get(p)]
+    if not stale:
+        return d
+    if d.freshened:
+        raise CoderStop(
+            "waiting_human",
+            f"다시 쓴 뒤에도 기준 코드가 또 바뀜 ({', '.join(stale)}) → 사람 확인 (PR 없음)",
+            "code.rebase",
+        )
+    llm = get_llm()
+    if llm is None:
+        raise CoderStop("failed", "LLM 설정이 없다")
+    d.freshened = True
+    await svc.coding_step(
+        job, "writing", point="code.rebase",
+        text=f"기준 코드가 바뀐 파일 {len(stale)}개 → 최신 글 위에서 다시 씀",
+    )  # fmt: skip
+    reasons = {r.path: r.reason for r in d.rows}
+    d.originals.update({p: latest[p] for p in stale})
+    targets = [p for p in d.picks if p.path in stale]
+    fixed, fix_reasons = await _write_all(llm, job, targets, {p: latest[p] for p in stale}, [])
+    for path in stale:
+        if fixed.get(path, latest[path]) == latest[path]:
+            d.contents.pop(path, None)  # 최신 글에 이미 들어가 있으면 고칠 게 없다
+        else:
+            d.contents[path] = fixed[path]
+            reasons[path] = fix_reasons.get(path, reasons.get(path, ""))
+    if not d.contents:
+        raise CoderStop("failed", "최신 코드에 이미 반영돼 바뀐 내용이 없음", "code.rebase")
+    d.rows = file_rows(d.originals, d.contents, reasons)
+    if total_lines(d.rows) > MAX_TOTAL_LINES:
+        raise CoderStop(
+            "waiting_human",
+            f"다시 쓴 뒤 바뀐 줄 {total_lines(d.rows)}줄 > {MAX_TOTAL_LINES}줄"
+            " → 사람 확인 (PR 없음)",
+        )
+    await svc.coding_step(
+        job, "writing", point="code.write", text=f"최신 글 위에서 다시 씀 · {write_text(d.rows)}",
+        files=d.rows,
+    )  # fmt: skip
+    d.verdicts.append("다시 씀")
+    d = await _review(svc, job, llm, d)
+    return await _freshen(svc, job, d)
+
+
+async def _wait_ci(svc: PlanningService, job: Job) -> str | None:
+    """PR CI가 끝날 때까지 기다린다. 통과·CI 없는 레포면 None, 아니면 사람 확인 이유.
+
+    자동 머지·교차검증은 CI가 끝난 뒤에 본다 (교차검증 대기 시간도 그때부터 센다)."""
+    pr = svc.coding_pr(job)
+    if pr is None or pr.vcs_number is None:
+        return None  # 목 설정: 형상관리에 올리지 않았다
+    adapter = _adapter(job.connection)
+    await svc.coding_step(job, "reviewing", point="code.ci", text=f"{pr.id} CI 기다림")
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    while True:
+        if not svc.coding_alive(job):
+            raise CoderGone(job.task_id)
+        try:
+            checks = await adapter.get_checks(pr.vcs_number)
+        except VcsError as exc:
+            return f"{pr.id} CI 상태를 읽지 못함 ({exc.code}) → 사람 확인"
+        waited = loop.time() - start
+        if checks.state == "passed":
+            await svc.coding_step(
+                job, "reviewing", point="code.ci", text=f"{pr.id} CI 통과 ({len(checks.runs)}개)"
+            )
+            return None
+        if checks.state == "failed":
+            names = ", ".join(r.name for r in checks.runs if r.state == "failed")
+            return f"{pr.id} CI 실패 ({names[:120]}) → 사람 확인"
+        if not checks.runs and waited >= NO_CI_GRACE_SECONDS:
+            await svc.coding_step(
+                job, "reviewing", point="code.ci", text=f"{pr.id} CI 없음 → 검사 없이 이어감"
+            )
+            return None
+        if waited >= CI_WAIT_SECONDS:
+            return f"{pr.id} CI가 {int(CI_WAIT_SECONDS // 60)}분 넘게 안 끝남 → 사람 확인"
+        await asyncio.sleep(CI_POLL_SECONDS)
+
+
+async def _finish(svc: PlanningService, job: Job, d: Draft) -> None:
+    """PR에 리뷰 결과를 남긴다. 통과면 CI를 기다린 뒤 자동 머지 규칙으로 잇는다."""
+    verdict = d.verdicts[-1] if d.verdicts else "불일치"
+    hold = await _wait_ci(svc, job) if verdict == "통과" else None
+    earlier = [v for v in d.verdicts[:-1] if v != "다시 씀"]
+    if await svc.coding_review(job, verdict, d.notes, earlier=earlier, ci_hold=hold):
+        raise CoderStop("waiting_human", "리뷰 불일치 → 사람 확인")
+
+
 async def _open(svc: PlanningService, job: Job, d: Draft) -> None:
-    """관문 generate_pr 뒤 커밋 하나로 PR을 열고 리뷰 결과를 PR에 남긴다 (통과면 자동 머지)."""
+    """PR 직전 최신 코드 확인 → 관문 generate_pr 뒤 커밋 하나로 PR → CI 기다림 → 리뷰 결과
+    (통과·CI 통과면 자동 머지)."""
+    d = await _freshen(svc, job, d)
+    _drafts(svc)[job.task_id] = d
     if not await svc.coding_open(job, d.contents, d.rows, pr_body(job, d.rows, d.summary or "")):
         return
     drop_draft(svc, job.task_id)
-    verdict = d.verdicts[-1] if d.verdicts else "불일치"
-    if await svc.coding_review(job, verdict, d.notes, earlier=d.verdicts[:-1]):
-        raise CoderStop("waiting_human", "리뷰 불일치 → 사람 확인")
+    await _finish(svc, job, d)
 
 
 async def _read_or_empty(adapter: VcsAdapter, path: str, ref: str | None = None) -> str:
@@ -835,6 +1078,4 @@ async def _revise(svc: PlanningService, job: Job, llm: Any, adapter: VcsAdapter)
     message = f"사람 지시 반영: {_one_line(job.instruction or '')[:60]}"
     if not await svc.coding_commit(job, final, d.rows, message):
         return
-    verdict = d.verdicts[-1] if d.verdicts else "불일치"
-    if await svc.coding_review(job, verdict, d.notes, earlier=d.verdicts[:-1]):
-        raise CoderStop("waiting_human", "리뷰 불일치 → 사람 확인")
+    await _finish(svc, job, d)

@@ -20,14 +20,17 @@ export default function ResolutionForm({ inc }: { inc: OrchIncident }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  // 이벤트가 바뀌면 그 이벤트의 초안으로 다시 채운다
+  // 이벤트가 바뀌거나 초안이 새로 생기거나 바뀌면(사람이 아직 손대지 않았을 때만) 초안으로 채운다
+  const draftKey = JSON.stringify(draft);
+  const [touched, setTouched] = useState(false);
+  useEffect(() => { setTouched(false); setMsg(null); }, [inc.context_id]);
   useEffect(() => {
+    if (touched) return;
     setOutcome(draft?.outcome ?? "resolved");
     setRootCause(draft?.root_cause ?? "");
     setAction(draft?.action ?? "");
-    setMsg(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inc.context_id]);
+  }, [inc.context_id, draftKey, touched]);
 
   // 이미 적은 해결 내용이 있으면 보여 준다 (카드의 extra.resolution)
   useEffect(() => {
@@ -76,8 +79,18 @@ export default function ResolutionForm({ inc }: { inc: OrchIncident }) {
       {draft && (
         <div className="rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-900">
           <b>{matchesDraft ? "AI 초안 · 사람 확인 전" : "AI 초안을 고쳤어요"}</b>
-          <span className="ml-2">총괄이 아는 사실만 채웠어요. 맞는지 확인하거나 고친 뒤 남겨 주세요.</span>
+          <span className="ml-2">
+            {draft.source === "past_case"
+              ? "같은 유형의 과거 이벤트에서 가져왔어요. 이번 원인과 같은지 확인하거나 고친 뒤 남겨 주세요."
+              : "총괄이 아는 사실만 채웠어요. 맞는지 확인하거나 고친 뒤 남겨 주세요."}
+          </span>
           <ul className="mt-1 list-disc pl-5">{draft.basis.map((b) => <li key={b}>{b}</li>)}</ul>
+          {draft.source === "past_case" && draft.this_event_cause && (
+            <p className="mt-2 rounded-lg bg-white/60 px-3 py-2">
+              <b>이번 이벤트에서 AI가 찾은 후보(참고용, 칸에는 넣지 않았어요)</b>
+              <span className="mt-0.5 block">{draft.this_event_cause}</span>
+            </p>
+          )}
         </div>
       )}
       {saved && (
@@ -87,13 +100,13 @@ export default function ResolutionForm({ inc }: { inc: OrchIncident }) {
       )}
       <div className="grid gap-3 sm:grid-cols-[10rem_1fr]">
         <label className="text-sm font-medium" htmlFor="res-outcome">결과</label>
-        <select id="res-outcome" className="field" value={outcome} onChange={(e) => setOutcome(e.target.value as Outcome)}>
+        <select id="res-outcome" className="field" value={outcome} onChange={(e) => { setTouched(true); setOutcome(e.target.value as Outcome); }}>
           {(Object.keys(OUTCOME_KO) as Outcome[]).map((k) => <option key={k} value={k}>{OUTCOME_KO[k]}</option>)}
         </select>
         <label className="text-sm font-medium" htmlFor="res-cause">원인</label>
-        <input id="res-cause" className="field" maxLength={MAX} value={rootCause} onChange={(e) => setRootCause(e.target.value)} placeholder="예: 결제 대행사 응답 지연" />
+        <input id="res-cause" className="field" maxLength={MAX} value={rootCause} onChange={(e) => { setTouched(true); setRootCause(e.target.value); }} placeholder="예: 결제 대행사 응답 지연" />
         <label className="text-sm font-medium" htmlFor="res-action">한 조치</label>
-        <input id="res-action" className="field" maxLength={MAX} value={action} onChange={(e) => setAction(e.target.value)} placeholder="예: 타임아웃을 늘리고 재시도" />
+        <input id="res-action" className="field" maxLength={MAX} value={action} onChange={(e) => { setTouched(true); setAction(e.target.value); }} placeholder="예: 타임아웃을 늘리고 재시도" />
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" className="btn-primary" disabled={busy} onClick={save}>{busy ? "저장 중…" : "확인했어요, 해결 내용 남기기"}</button>

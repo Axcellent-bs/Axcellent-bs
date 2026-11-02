@@ -35,7 +35,8 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from ax_contracts.data_access.shop_failed_orders import FailedOrder, ShopFailedOrdersResult
+from data_agent import catalog
+from data_agent.connectors import as_events
 from data_agent.impact import split_failures
 
 Status = Literal["normal", "anomaly", "unknown"]
@@ -56,9 +57,11 @@ DEFAULT_FAULT_P_ANOMALY = 0.01  # 이 확률보다 드물면 이상
 DEFAULT_FAULT_P_LOW = 0.1  # 이 확률보다 드물면 low 기록, 이어진 두 구간이면 곱해서 다시 판정
 FAULT_LAMBDA_SPAN = timedelta(hours=1)  # λ를 구할 때 보는 같은 시각 앞뒤 범위
 
-RATE_METRICS = frozenset({"payment_fail_rate"})
-DROP_METRICS = frozenset({"order_count"})  # 감소만 이상
-RISE_METRICS = frozenset({"order_fail_count", "inquiry_count"})  # 증가만 이상
+# 지표의 나쁜 방향·비율 여부는 회사 카탈로그(`data_agent.catalog`)에 있다. 아래 이름은 예전 코드가
+# 읽던 값(시작할 때의 카탈로그)이고, 판정은 `catalog.is_drop()`·`catalog.rate_metric_ids()`를 쓴다
+RATE_METRICS = catalog.rate_metric_ids()
+DROP_METRICS = frozenset(m for m in catalog.metric_ids() if catalog.is_drop(m))  # 감소만 이상
+RISE_METRICS = frozenset(catalog.metric_ids()) - RATE_METRICS - DROP_METRICS  # 증가만 이상
 
 
 @dataclass(frozen=True)
@@ -258,9 +261,13 @@ def judge_rate(
     rate: dict[datetime, float],
     payments: dict[datetime, float],
     settings: Settings,
+    metric: str | None = None,
 ) -> Judgement:
-    """결제 실패율. 결제 `min_payments`건 이상인 5분 구간만 판정한다 (상승만)."""
-    metric = "payment_fail_rate"
+    """비율 지표(캣북스: 결제 실패율). 분모 `min_payments`건 이상인 5분 구간만 판정한다 (상승만).
+
+    `metric`을 비우면 카탈로그의 첫 비율 지표다.
+    """
+    metric = metric or next(m for m in catalog.metric_ids() if m in catalog.rate_metric_ids())
     fails_hist = n_hist = 0.0
     for slot in window:
         for day in range(1, BASELINE_DAYS + 1):
@@ -273,16 +280,19 @@ def judge_rate(
     total = sum(payments.get(b) or 0.0 for b in window)
     window_fails = sum(round(rate.get(b, 0.0) * (payments.get(b) or 0.0)) for b in window)
     seen = round(window_fails / total, 4) if total else 0.0
+    word = catalog.denominator_label(metric)  # 분모를 부르는 말 (캣북스: 결제)
     if n_hist == 0:
-        return _unknown(metric, "지난 7일 같은 시간대 결제 기록이 없어 기준선을 정할 수 없음", seen)
+        return _unknown(
+            metric, f"지난 7일 같은 시간대 {word} 기록이 없어 기준선을 정할 수 없음", seen
+        )
     p0 = fails_hist / n_hist
     if p0 == 0:
         return _unknown(metric, "기준선 0 (지난 7일 같은 시간대 실패 0건)이라 판정할 수 없음", seen)
     if not judged:
         return _unknown(
             metric,
-            f"5분 결제가 {settings.min_payments}건 미만이라 실패율을 판정하지 않음 "
-            f"(구간 결제 {int(total)}건)",
+            f"5분 {catalog.with_subject(word)} {settings.min_payments}건 미만이라 "
+            f"실패율을 판정하지 않음 (구간 {word} {int(total)}건)",
             seen,
         )
     ok = {b for b in judged}
@@ -304,7 +314,7 @@ def judge_rate(
     status: Status = "anomaly" if p_best < settings.alpha and observed > p0 else "normal"
     skipped = len(window) - len(judged)
     note = f"실패 {k}/{n}건 ({observed:.1%}), 기준 {p0:.1%}, p={p_best:.2g}" + (
-        f", 결제 {settings.min_payments}건 미만 5분 구간 {skipped}개는 판정 안 함"
+        f", {word} {settings.min_payments}건 미만 5분 구간 {skipped}개는 판정 안 함"
         if skipped
         else ""
     )
@@ -349,7 +359,7 @@ def judge_count(
             "기준선 0 (지난 7일 같은 시간대 값이 모두 0)이라 판정할 수 없음",
             float(obs_total),
         )
-    falling = metric in DROP_METRICS
+    falling = catalog.is_drop(metric)
     tail = poisson_lower if falling else poisson_upper
     tests = []
     for i, j in segments(len(window)):
@@ -365,13 +375,10 @@ def judge_count(
     direction: Direction | None = ("down" if falling else "up") if status == "anomaly" else None
     note = f"구간 합계 {obs_total} (기준 {lam_total:.1f}), p={p_best:.2g}"
     if volume_factor > 1:
-        note += f", 주문이 평소의 {volume_factor:.2f}배라 기준도 같이 늘려 봄"
+        unit = catalog.with_subject(catalog.current().impact.unit_label)
+        note += f", {unit} 평소의 {volume_factor:.2f}배라 기준도 같이 늘려 봄"
     notes = []
-    if (
-        metric in DROP_METRICS
-        and obs_total > lam_total
-        and poisson_upper(obs_total, lam_total) < settings.alpha
-    ):
+    if falling and obs_total > lam_total and poisson_upper(obs_total, lam_total) < settings.alpha:
         notes.append(
             f"{metric} 평소보다 많음 (합계 {obs_total}, 기준 {lam_total:.1f})"
             " — 증가만으로는 이상이 아님"
@@ -392,14 +399,14 @@ def judge_count(
     )
 
 
-def fault_buckets(orders: list[FailedOrder]) -> dict[datetime, float]:
+def fault_buckets(orders: list) -> dict[datetime, float]:
     """실패 주문을 5분 구간별 **장애 쪽** 실패 건수로 센다.
 
     분류는 영향 분석과 같은 `impact.split_failures`다. 사용자 쪽 사유(카드 거절 등)·처음 보는
     코드·사유 없음은 세지 않는다.
     """
-    fault = split_failures(ShopFailedOrdersResult(orders=orders)).fault
-    return _by_bucket([(o.failed_at, 1.0) for o in fault])
+    fault = split_failures(as_events(orders)).fault  # 실패 이벤트 또는 실패 주문 목록
+    return _by_bucket([(o.at, 1.0) for o in fault])
 
 
 def fault_lambda(
@@ -436,8 +443,9 @@ def judge_payment(
     settings: Settings,
     orders: dict[datetime, float] | None = None,
     fault_history: dict[datetime, float] | None = None,
+    metric: str | None = None,
 ) -> Judgement:
-    """결제 실패율 = 통계 판정(`judge_rate`) + 장애 쪽 실패 확률 기준.
+    """비율 지표(캣북스: 결제 실패율) = 통계 판정(`judge_rate`) + 장애 쪽 실패 확률 기준.
 
     `faults`는 구간 안 5분 구간별 장애 쪽 실패 건수(`fault_buckets`)다. None이면 실패 코드를 읽지
     못한 것이라 통계 판정만 한다. `fault_history`는 지난 7일 같은 시각 ±1시간의 장애 쪽 실패
@@ -453,7 +461,7 @@ def judge_payment(
     - 지난 7일 자료가 없어 λ를 정할 수 없으면 이 기준은 판정하지 않는다(통계 판정 그대로).
       장애 쪽 실패가 있으면 severity "low"로 남긴다.
     """
-    base = judge_rate(window, rate, payments, settings)
+    base = judge_rate(window, rate, payments, settings, metric)
     if faults is None:
         return replace(base, note=base.note + "; 장애 쪽 실패 코드를 읽지 못해 통계 판정만 함")
     counts = [int(faults.get(b, 0)) for b in window]

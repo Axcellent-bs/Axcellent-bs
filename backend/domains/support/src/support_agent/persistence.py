@@ -297,6 +297,10 @@ class PersistentInquiryStore(InquiryStore):
     def add_resolution_note(self, *args: Any, **kwargs: Any) -> Conversation:
         return self._save(super().add_resolution_note(*args, **kwargs))
 
+    def apply_softening(self, *args: Any, **kwargs: Any) -> Conversation | None:
+        conversation = super().apply_softening(*args, **kwargs)
+        return None if conversation is None else self._save(conversation)
+
     def log_activity(self, *args: Any, **kwargs: Any) -> Conversation | None:
         conversation = super().log_activity(*args, **kwargs)
         return None if conversation is None else self._save(conversation)

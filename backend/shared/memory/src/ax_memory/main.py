@@ -7,7 +7,8 @@ from pathlib import Path
 
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
-from ax_memory.handlers import HANDLERS
+from ax_memory.handlers import HANDLERS, get_state
+from ax_memory.seed.startup import seed_on_start
 
 
 def _card_path() -> Path:
@@ -30,3 +31,4 @@ def load_card() -> AgentCard:
 
 # /health, /.well-known/agent-card.json, /a2a 는 템플릿이 만든다.
 app = create_agent_app(load_card(), HANDLERS)
+seed_on_start(app, get_state)  # 서버를 켤 때 정책 시드 카드를 넣고 검색에 올린다

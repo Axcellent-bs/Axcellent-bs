@@ -221,6 +221,8 @@ export interface DepartmentReport extends DepartmentActivity {
   previous_period: DepartmentActivity;
 }
 export interface CollaborationEdge { from_department: string; from_label: string; to_department: string; to_label: string; count: number }
+/** AI를 쓰지 않는(켜지 않은) 부서로 넘긴 일: 부서별 건수와 업무 상위 3개 (예측 문구·숫자 없음) */
+export interface UnusedHandoff { department: string; label: string; count: number; top_skills: SkillCount[] }
 export interface ActivityHighlight { key: string; label: string; current: number; previous: number; change_percent: number }
 export interface UnknownSection { section: string; reason: string }
 export interface ActivityReportOutput {
@@ -243,6 +245,9 @@ export interface ActivityReportOutput {
   stored_days?: number | null;
   live_days?: number | null;
   snapshot_note?: string | null;
+  /** 센 범위: 켠(AI를 쓰는) 서비스 id. 백엔드 AX_ENABLED_SERVICES 기준 */
+  enabled_services?: string[] | null;
+  unused_handoffs?: UnusedHandoff[];
 }
 
 /** 서버가 꺼졌을 때 무엇이 꺼졌는지 보여 주는 이름 */

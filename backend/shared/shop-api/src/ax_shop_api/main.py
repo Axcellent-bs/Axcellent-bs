@@ -208,8 +208,17 @@ COUPON_READERS = {"marketing", "support", "finance", "orchestrator"}
 REFUND_ALLOWED = {"support"}
 # 데이터 조회(읽기 전용)는 분석을 하는 data와 관리자만
 DATA_READERS = {"data", "admin"}
-# 총괄 사건 읽기 중계는 관리자만. 사람 로그인(소유자·공동소유자·분야 관리자)은 사람 인증 뒤에 붙인다
-ORCHESTRATOR_VIEWERS = {"admin"}
+# 총괄 사건 읽기 중계는 관리자와 읽기 전용 열람자(`viewer`)만.
+# 사람 로그인(소유자·공동소유자·분야 관리자)은 사람 인증 뒤에 붙인다
+ORCHESTRATOR_VIEWERS = {"admin", "viewer"}
+# 장애 주입 상태 읽기(GET)는 열람자도 본다. 주입·해제는 그대로 admin·infra만
+FAULT_STATE_READERS = INJECT_ALLOWED | RELEASE_ALLOWED | {"viewer"}
+# 읽기 전용 열람 토큰(`SHOP_VIEWER_TOKEN`). 에이전트 토큰 명부(`AX_AGENT_TOKENS`)와 따로 둔다.
+# 명부에 넣으면 총괄 등 다른 서버가 명부의 모든 에이전트를 받아 주는 길(`require_agent()`)이
+# 같이 열린다.
+# 이 서버의 `ORCHESTRATOR_VIEWERS`·`FAULT_STATE_READERS`에서만 통하고 그 밖은 403이다.
+VIEWER_TOKEN_ENV = "SHOP_VIEWER_TOKEN"
+VIEWER_TOKEN_MIN_LENGTH = 24  # 짧은 값은 켜지 않는다
 
 
 def _is_human_token(token: str) -> bool:
@@ -221,11 +230,21 @@ def _is_human_token(token: str) -> bool:
     return False
 
 
+def _is_viewer_token(token: str) -> bool:
+    """읽기 전용 열람 토큰인가. 설정이 없거나 너무 짧으면 꺼져 있다."""
+    known = os.getenv(VIEWER_TOKEN_ENV, "").strip()
+    return len(known) >= VIEWER_TOKEN_MIN_LENGTH and hmac.compare_digest(known, token)
+
+
 def _caller(allowed: set[str]) -> Callable[..., str]:
     def dependency(authorization: str | None = Header(default=None)) -> str:
         scheme, _, token = (authorization or "").partition(" ")
         if scheme.lower() != "bearer" or not token.strip():
             raise ShopError("UNAUTHORIZED", "토큰이 필요하다", 401)
+        if _is_viewer_token(token.strip()):
+            if "viewer" not in allowed:
+                raise ShopError("FORBIDDEN", "읽기 전용 토큰으로는 호출할 수 없는 API다", 403)
+            return "viewer"
         try:
             requester = verify_token(token.strip())  # 요청자는 토큰에서 꺼낸다
         except PermissionError as error:
@@ -411,7 +430,7 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
         return _ok(shop.mark_delivered(order_id, body.delivered_at))
 
     @app.get("/api/shop/admin/faults")
-    async def fault_state(_: str = Depends(_caller(INJECT_ALLOWED | RELEASE_ALLOWED))) -> dict:
+    async def fault_state(_: str = Depends(_caller(FAULT_STATE_READERS))) -> dict:
         return _ok(shop.fault_state())
 
     @app.post("/api/shop/admin/faults", status_code=201)

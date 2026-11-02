@@ -18,6 +18,11 @@ export const ORCHESTRATOR_URL = import.meta.env.VITE_ORCHESTRATOR_URL ?? '/orch'
  */
 export const RELAY_API_URL = import.meta.env.VITE_SHOP_ADMIN_API_URL || 'http://localhost:8010'
 export const RELAY_TOKEN = import.meta.env.VITE_SHOP_ADMIN_TOKEN || ''
+/**
+ * 읽기에만 쓰는 열람 토큰(총괄 사건·부서 읽기, 장애 상태). 쓰기는 못 한다(shop-api `SHOP_VIEWER_TOKEN`).
+ * 사내망 서버처럼 관리자 토큰을 화면에 넣을 수 없는 곳은 이것만 넣는다. 없으면 관리자 토큰을 쓴다
+ */
+export const RELAY_VIEW_TOKEN = import.meta.env.VITE_SHOP_VIEWER_TOKEN || RELAY_TOKEN
 /** 데이터분석 AI: 데이터 AI(data, 8106). 기본값 /data-a2a는 Vite 개발 프록시(vite.config.ts, DATA_PROXY_TARGET) */
 export const DATA_A2A_URL = import.meta.env.VITE_DATA_A2A_URL ?? '/data-a2a'
 /** 데이터 AI 직접 조회 토큰. 비어 있으면 KPI 실시간 조회를 하지 않는다. 브라우저 저장소에 두지 않는다 */

@@ -44,10 +44,12 @@ class Dense:
     async def search(self, query, cards, k=5, min_cosine=0.0):
         if self.fail:
             raise RuntimeError("embedding down")
+        self.seen = [c for c in cards]
+        key = lambda c: c.card_id.removeprefix("dec:")  # noqa: E731
         return [
-            (c, self.scores.get(c.card_id, 0.0))
+            (c, self.scores.get(key(c), 0.0))
             for c in cards
-            if self.scores.get(c.card_id, 0.0) >= min_cosine
+            if self.scores.get(key(c), 0.0) >= min_cosine
         ]
 
 
@@ -91,3 +93,15 @@ async def test_event_cards_and_rejected_decisions_are_never_replaced() -> None:
     rejected = decision("rej", "배포 시간을 늘리지 않는다", outcome="rejected")
     dense = Dense({"event": 0.99, "rej": 0.99})
     assert await find_superseded(NEW, Memory([event, rejected]), dense) == []
+
+
+@pytest.mark.asyncio
+async def test_only_the_decision_sentence_is_compared_not_the_long_card_body() -> None:
+    long_old = decision("old", OLD.extra["decision"]).model_copy(
+        update={"body": "결정: ...\n이유: 시연\n교훈: 카드마다 다르게 쓰는 아주 긴 문단 " * 5}
+    )
+    dense = Dense({"old": DENSE_SAME_TOPIC + 0.05})
+    assert await find_superseded(NEW, Memory([long_old]), dense) == ["old"]
+    (seen,) = dense.seen
+    assert seen.body == f"결정: {OLD.extra['decision']}" and "교훈" not in seen.body
+    assert seen.card_id == "dec:old"  # 카드 전체 글의 벡터와 섞이지 않는 따로 된 id

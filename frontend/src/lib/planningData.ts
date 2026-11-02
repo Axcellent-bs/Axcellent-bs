@@ -99,6 +99,11 @@ export interface CodingRun {
   updatedAt?: string
   pr?: string | null
   instruction?: string | null // 사람이 대기 중인 PR에 준 수정 지시
+  skipQueue?: boolean // '지금 진행': 같은 파일 작업이 있어도 기다리지 않음
+  waitingFor?: string[] // 작업 대기열: 같은 파일을 먼저 고치는 앞 작업
+  mergeConflict?: boolean // 머지 충돌: 다시 시도하면 PR을 닫고 최신 코드로 다시 씀
+  llmCalls?: number // 이 작업이 지금까지 부른 LLM 횟수 (다시 시도 포함)
+  llmTokens?: number // 이 작업이 지금까지 쓴 토큰 (입력 + 출력)
 }
 
 export interface PR {
@@ -109,6 +114,7 @@ export interface PR {
   reviews: ('통과' | '불일치')[]
   gate: { result: '통과' | 'C 보류'; lines: number; files: number; paths: string }
   merged: boolean
+  closed?: boolean // 머지 없이 닫힘 (사람이 중단·형상관리에서 닫음)
   auto?: boolean // 사람 클릭 없이 머지됨 (기준 또는 교차검증)
   mergedBy?: 'rule' | 'review' | 'human'
   rule?: string // 자동 머지에 쓴 기준 (AR-n)
@@ -224,6 +230,7 @@ export const RULE_LABEL: Record<string, string> = {
   spec_open_question: '열린 질문',
   spec_rejected_warning: '경고',
   spec_no_basis: '근거 없음',
+  spec_open_conflict: '충돌하는 요청 진행 중',
 }
 
 // 교차검증 대기를 사람 확인으로 넘기기까지 (분). 백엔드 PLANNING_CROSS_CHECK_TIMEOUT_MIN 기본값과 같다

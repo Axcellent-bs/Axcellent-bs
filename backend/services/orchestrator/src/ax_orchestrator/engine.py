@@ -136,6 +136,8 @@ class Engine:
         self.author = author
         self._locks: dict[str, asyncio.Lock] = {}
         self._sequence: dict[str, int] = {}
+        # 사람이 대기 상태보다 먼저 끝낸 결과: (context_id, task_id) → (status, 결과)
+        self._early_handoffs: dict[tuple[str, str], tuple[str, str | None]] = {}
 
     # ---------- 실행 ----------
     async def run(self, inc: Incident, plan: Plan) -> Incident:
@@ -493,6 +495,10 @@ class Engine:
         run.output = output
         run.note = f"{wait.assignee_unit or '맡은 부서'} 할 일함에서 사람 처리 대기 ({task_id})"
         inc.log(f"{run.label}: {run.note}")
+        early = self._early_handoffs.pop((inc.context_id, task_id), None)
+        if early is not None:  # 대기로 올리기 전에 사람이 이미 끝냈다: 보관한 결과로 바로 이어 간다
+            wait.finish(*early)
+            inc.log(f"{run.label}: 먼저 끝난 사람 처리 결과를 이어 받음 ({task_id}, {early[0]})")
         try:
             await asyncio.wait_for(wait.event.wait(), timeout=self.handoff_timeout)
         except TimeoutError:
@@ -529,6 +535,26 @@ class Engine:
             if wait.task_id == task_id:
                 return wait.finish(status, result)
         return False
+
+    def keep_early_handoff(
+        self, inc: Incident, task_id: str, status: str, result: str | None
+    ) -> bool:
+        """기다리는 단계가 아직 없을 때 온 `handoff.completed`를 보관한다.
+
+        그 단계가 대기로 오르면(`_wait_handoff`) 보관한 결과로 바로 이어 간다.
+
+        라우터가 할 일함에 넣은 직후, 총괄이 단계를 대기로 올리기 전에 사람이 끝내면 생긴다.
+        이미 그 일로 기다린 적이 있거나(반영됨) 같은 일을 이미 보관했으면 False.
+        """
+        if status not in ("done", "rejected"):
+            return False
+        if any(wait.task_id == task_id for wait in inc.handoffs.values()):
+            return False
+        key = (inc.context_id, task_id)
+        if key in self._early_handoffs:
+            return False
+        self._early_handoffs[key] = (status, result)
+        return True
 
     def decide_hold(self, inc: Incident, step_id: str, approved: bool) -> bool:
         hold = inc.holds.get(step_id)

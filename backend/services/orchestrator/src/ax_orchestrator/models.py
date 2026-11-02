@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ax_orchestrator.draft import resolution_draft
@@ -134,6 +134,18 @@ class Incident:
     def new_context_id() -> str:
         return f"ctx_inc_{uuid.uuid4().hex[:12]}"
 
+    def impact_window(self) -> tuple[datetime, datetime]:
+        """영향 분석 구간. 장애 시작(since)부터, 없으면 열린 시각 앞 15분부터 뒤 15분까지."""
+        start = self.since if self.since is not None else self.opened_at - timedelta(minutes=15)
+        return start, self.opened_at + timedelta(minutes=15)
+
+    def _impact_window_view(self) -> dict[str, str | None]:
+        """재무 등 다른 부서가 같은 구간으로 영향을 다시 셀 수 있게 이벤트 행에 싣는다."""
+        if "impact" not in self.steps:
+            return {"impact_from": None, "impact_to": None}
+        start, end = self.impact_window()
+        return {"impact_from": iso(start), "impact_to": iso(end)}
+
     def log(self, message: str) -> None:
         self.events.append({"at": iso(now()), "message": message})
 
@@ -148,6 +160,7 @@ class Incident:
             "opened_at": iso(self.opened_at),
             "closed_at": iso(self.closed_at),
             "recovered_at": iso(self.recovered_at),
+            **self._impact_window_view(),
             "steps": [s.view() for s in self.steps.values()],
             "events": self.events,
             "summary": self.summary,

@@ -33,7 +33,16 @@ from ax_agent_template import execute as gate_module
 from ax_contracts.schemas import TENANT_ID_DEFAULT, Evidence, ExecuteDecision, RequestMeta
 from ax_contracts.schemas.planning import ChangeResultInput, DevHandoffInput, DevResultInput
 from ax_contracts.schemas.record import RecordCase, RecordKind
-from planning_agent import coder, cross_check, related, repo_routing, vcs, vcs_bridge
+from planning_agent import (
+    cause_inbox,
+    coder,
+    cross_check,
+    related,
+    repo_routing,
+    state_store,
+    vcs,
+    vcs_bridge,
+)
 from planning_agent.cross_check import CrossChecker, CrossEvidence
 from planning_agent.dev_handoff import (
     RECEIVE_DEV_RESULT,
@@ -45,6 +54,7 @@ from planning_agent.dev_handoff import (
     start_dev_key,
 )
 from planning_agent.domain.autocheck import (
+    WAIT_ANSWER,
     WAIT_CROSS_CHECK,
     WAIT_HUMAN,
     Check,
@@ -433,6 +443,10 @@ class PlanningService:
         self._send_dev: DevSender = dev_sender or send_to_service
         self._sending: set[asyncio.Task] = set()
         self._resuming = False  # 대기 대화를 깨우는 중 (다시 깨우지 않는다)
+        self._retrying = False  # 못 보낸 넘기기를 다시 보내는 중
+        self._retry_task: asyncio.Task | None = None
+        self._pr_sync: asyncio.Task | None = None  # 바깥에서 머지·닫은 PR 맞추기 루프
+        self._polling_wait = False  # 다른 서비스 요청을 기다리는 대화를 주기적으로 보는 중
         # 코딩 에이전트 실행 (작업 id → 실행 중인 태스크·실행 번호). 번호가 바뀐 실행은 버린다
         self._coding: dict[str, asyncio.Task] = {}
         self._coding_live: dict[str, int] = {}
@@ -442,9 +456,11 @@ class PlanningService:
         )
         self._gate = gate or template_gate
         self._send_result: ResultSender = result_sender or send_change_result
+        # 원인 확인 요청을 받은 요청에 올리는 곳 (시험에서 바꿔 끼운다, None이면 실제 할 일함)
+        self._cause_poster: cause_inbox.Poster | None = None
         # 새 요청이 오면 비슷한·충돌하는 요청을 찾는 곳 (None이면 찾지 않는다)
         self._relater: related.Relater | None = (
-            related.default_relater() if relater == "default" else relater
+            related.default_relater(self.role) if relater == "default" else relater
         )
         # 교차검증 근거를 모으는 곳 (None이면 모으지 않고 safety 판정만)
         self._cross_checker: CrossChecker | None = (
@@ -463,16 +479,38 @@ class PlanningService:
 
     # ---- 상태·구독
 
-    def _init_state(self) -> None:
+    def _init_state(self, fresh: bool = False) -> None:
         self.clock: Clock = self._clock_factory()
         self.state: State = real_state() if self.real_example else initial_state()
         self.state.tenant_id = self.tenant_id
         self._idempotent: dict[str, ActionResult] = {}
         self._dev_sent: dict[str, str] = {}  # dev: 기획서 → 마지막으로 돌려준 결과 지문
+        # 못 보낸 넘기기 (멱등 키 → [skill, context_id, 입력]). 주기적으로 다시 보낸다
+        self._unsent: dict[str, list] = {}
+        # 상태 파일(PLANNING_STATE_DIR)이 있으면 이어서 시작한다. 초기화(fresh)면 시드로 덮어쓴다
+        self._state_path = state_store.path_for(self.role)
+        if self._state_path and not fresh:
+            saved = state_store.load(self._state_path)
+            if saved is not None:
+                self.state, idem, self._dev_sent, self._unsent = saved
+                self._idempotent = {k: ActionResult(**v) for k, v in idem.items()}
+        elif self._state_path:
+            self._save()
+
+    def _save(self) -> None:
+        """상태를 파일에 이어 쓴다 (파일 위치가 있을 때만). 실패해도 동작은 계속한다."""
+        if not self._state_path:
+            return
+        try:
+            state_store.save(
+                self._state_path, self.state, self._idempotent, self._dev_sent, self._unsent
+            )
+        except OSError:
+            pass
 
     def reset(self) -> None:
-        """초기 데이터로 되돌린다 (구독자는 유지하고 새 상태를 알린다)."""
-        self._init_state()
+        """초기 데이터로 되돌린다 (구독자는 유지하고 새 상태를 알린다). 상태 파일도 덮어쓴다."""
+        self._init_state(fresh=True)
         self._coding_live.clear()  # 돌던 코딩 실행은 다음 단계에서 멈춘다
         self.__dict__.pop("_coding_drafts", None)  # 작성해 둔 코드도 지운다
         self.gate_calls.clear()
@@ -515,6 +553,7 @@ class PlanningService:
         async with self._lock():
             s = self.state.model_copy(deep=True)
             before = len(s.activity)
+            held = {t.id for t in s.tasks if t.coding and t.coding.status == "waiting_human"}
             known = {r.id for r in s.requests}
             known_prs = {p.id for p in s.prs}
             result = await fn(s, **params) or ActionResult()
@@ -524,13 +563,21 @@ class PlanningService:
             outgoing = self._dev_outgoing(s)
             self._to_outbox(s, before)
             result.changed = s != self.state
+            new_holds: list[str] = []
             if result.changed:
                 self.state = s
                 self.version += 1
+                self._save()
                 self._notify()
+                new_holds = [
+                    t.id for t in s.tasks
+                    if t.coding and t.coding.status == "waiting_human" and t.id not in held
+                ]  # fmt: skip
         # 넘기기는 상태를 바꿔 끼운 뒤 잠금 밖에서 보낸다 (잠금을 쥔 채 네트워크를 부르지 않는다)
         for item in outgoing:
             self._spawn_send(*item)
+        for task_id in new_holds:  # 사람 확인으로 멈춘 코딩 작업 → 받은 요청에 개발팀 할 일
+            self._spawn_hold(task_id)
         self._kick_waiting()
         return result
 
@@ -546,6 +593,16 @@ class PlanningService:
                 await dev_chat.resume_waiting(self)
             finally:
                 self._resuming = False
+            # 다른 서비스 요청을 기다리면 이 서버 상태가 안 바뀌어도 풀려야 하니
+            # 주기적으로 다시 본다
+            if self._polling_wait or not self._remote_wait():
+                return
+            self._polling_wait = True
+            try:
+                await asyncio.sleep(WAIT_POLL_SECONDS)
+            finally:
+                self._polling_wait = False
+            self._kick_waiting()
 
         try:
             task = asyncio.get_running_loop().create_task(go())
@@ -553,6 +610,14 @@ class PlanningService:
             return
         self._sending.add(task)
         task.add_done_callback(self._sending.discard)
+
+    def _remote_wait(self) -> bool:
+        """기다리는 대화 중 이 서버에 없는(다른 서비스) 요청을 기다리는 것이 있나."""
+        mine = {r.id for r in self.state.requests}
+        return any(
+            c.status == "waiting" and any(rid not in mine for rid in c.waiting_for)
+            for c in self.state.chats
+        )
 
     async def _relate_new(self, s: State, known: set[str]) -> None:
         """이번 액션으로 새로 생긴 요청마다 비슷한·충돌하는 요청을 찾아 붙인다 (제안만)."""
@@ -563,6 +628,11 @@ class PlanningService:
                 req.related = await self._relater.relate(s, req)
             except Exception:  # noqa: BLE001 - 찾기가 실패해도 요청은 받는다
                 req.related = []
+            if self._relater.index is not None:
+                try:  # 다음 요청이 찾을 수 있게 memory 색인에 넣는다
+                    await self._relater.index.write(req, related.text_of(s, req))
+                except Exception:  # noqa: BLE001, S110 - 색인 실패가 요청 받기를 막지 않는다
+                    pass
             if not req.related:
                 continue
             label = {
@@ -643,11 +713,13 @@ class PlanningService:
 
     # ---- 기획 → 개발 넘기기 (서비스 역할이 있을 때만)
 
-    def _dev_outgoing(self, s: State) -> list[tuple[str, str, BaseModel, str]]:
+    def _dev_outgoing(self, s: State, full: bool = False) -> list[tuple[str, str, BaseModel, str]]:
         """이번 액션으로 보낼 넘기기 목록 (skill, context_id, 입력, idempotency_key).
 
         planning: 이번에 넘김 표시가 붙은 기획서.
-        dev: 작업·PR·요청 상태가 지난번과 달라진 기획서."""
+        dev: 작업·PR·요청 상태가 지난번과 달라진 기획서.
+        full이면(다시 켰을 때 맞추기) 넘긴 기획서를 모두 다시 보낸다. 같은 멱등 키라 받는 쪽이
+        이미 가진 건 그대로 두고, 잃은 쪽만 다시 반영한다."""
         if not self.role:
             return []
         out: list[tuple[str, str, BaseModel, str]] = []
@@ -655,7 +727,7 @@ class PlanningService:
             was = {sp.id for sp in self.state.specs if sp.handed_to_dev}
             for sp in s.specs:
                 req = self._request_of_spec(s, sp)
-                if not sp.handed_to_dev or sp.id in was or req is None:
+                if not sp.handed_to_dev or (sp.id in was and not full) or req is None:
                     continue
                 inp = DevHandoffInput(
                     request=dump(req),
@@ -682,13 +754,44 @@ class PlanningService:
             )
             raw = json.dumps(res.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
             fp = hashlib.sha1(raw.encode()).hexdigest()[:12]
-            if self._dev_sent.get(sp.id) == fp:
+            if self._dev_sent.get(sp.id) == fp and not full:
                 continue
             self._dev_sent[sp.id] = fp
             out.append(
                 (RECEIVE_DEV_RESULT, req.context_id, res, dev_result_key(req.context_id, sp.id, fp))
             )
         return out
+
+    def _spawn_hold(self, task_id: str) -> None:
+        if self.role == "planning":
+            return  # 기획 서비스는 코딩 작업을 돌리지 않는다
+        try:
+            task = asyncio.get_running_loop().create_task(self._hold_to_inbox(task_id))
+        except RuntimeError:
+            return
+        self._sending.add(task)
+        task.add_done_callback(self._sending.discard)
+
+    async def _hold_to_inbox(self, task_id: str) -> None:
+        """사람 확인으로 멈춘 코딩 작업을 받은 요청에 올리고 활동에 남긴다 (잠금 밖에서 보낸다)."""
+        task = next((t for t in self.state.tasks if t.id == task_id), None)
+        if task is None or task.coding is None:
+            return
+        pr = next((p for p in self.state.prs if p.id == task.coding.pr), None)
+        sp = next((x for x in self.state.specs if x.id == task.spec), None)
+        req = self._request_of_spec(self.state, sp) if sp else None
+        ctx = req.context_id if req else f"task:{task_id}"
+        body = cause_inbox.hold_handoff(task, pr, ctx, self.tenant_id)
+        text = await cause_inbox.send_hold(body, self._cause_poster)
+        if text is None:
+            return
+
+        async def log(s: State) -> None:
+            s.activity.append(
+                self._act(self.clock(), ctx, "dev", "human", "handoff", "A2A", text, "A")
+            )
+
+        await self._apply(log)
 
     def _spawn_send(self, skill: str, ctx: str, payload: BaseModel, key: str) -> None:
         task = asyncio.create_task(self._send_one(skill, ctx, payload, key))
@@ -702,7 +805,18 @@ class PlanningService:
         except Exception:  # 넘기기 실패가 이미 바꾼 상태를 되돌리지 않게 한다
             how = "보내지 못함 (오류)"
         if how.startswith("보냄"):
+            if self._unsent.pop(key, None) is not None:
+                self._save()
             return
+        retry = "rejected" not in how  # 받는 쪽이 거절한 건 다시 보내도 같다
+        first = key not in self._unsent
+        if retry:
+            self._unsent[key] = [skill, ctx, payload.model_dump(mode="json")]
+            self._save()
+            self._schedule_retry()
+            how += " → 30초마다 다시 보냄"
+        if not first:
+            return  # 다시 보내기 실패는 활동에 거듭 남기지 않는다
         frm, to = ("planning", "dev") if self.role == "planning" else ("dev", "planning")
 
         async def log(s: State) -> None:
@@ -711,6 +825,116 @@ class PlanningService:
             )
 
         await self._apply(log)
+
+    def _schedule_retry(self) -> None:
+        """못 보낸 넘기기를 RETRY_SECONDS마다 다시 보낸다 (한 번에 하나만 돈다)."""
+        if self._retrying or not self._unsent:
+            return
+        self._retrying = True
+
+        async def loop() -> None:
+            try:
+                while self._unsent:
+                    await asyncio.sleep(RETRY_SECONDS)
+                    await self.resend_unsent()
+            finally:
+                self._retrying = False
+
+        try:
+            task = asyncio.get_running_loop().create_task(loop())
+        except RuntimeError:
+            self._retrying = False
+            return
+        self._retry_task = task  # wait_sent는 기다리지 않는다 (계속 도는 루프)
+
+    async def resend_unsent(self) -> None:
+        """못 보낸 넘기기를 한 번씩 다시 보낸다."""
+        for key, (skill, ctx, body) in list(self._unsent.items()):
+            model = DevHandoffInput if skill == START_DEV else DevResultInput
+            await self._send_one(skill, ctx, model.model_validate(body), key)
+
+    async def resync_peer(self) -> None:
+        """다시 켰을 때 상대 서비스와 맞춘다: 못 보낸 것을 다시 보내고, 넘긴 기획서를 모두
+        다시 보낸다 (같은 멱등 키라 상대가 이미 가진 건 그대로, 잃은 쪽만 다시 반영)."""
+        if not self.role:
+            return
+        await self.resend_unsent()
+        for item in self._dev_outgoing(self.state, full=True):
+            await self._send_one(*item)
+        self._save()
+
+    async def sync_prs(self) -> int:
+        """사람이 GitHub 등에서 직접 머지하거나 닫은 PR을 기록에 맞춘다. 맞춘 개수.
+
+        머지됐으면 사람 머지와 같은 길(기록·요청 닫기·작업 완료)로, 닫혔으면 작업을 중단으로
+        둔다 (재개하면 최신 코드로 다시 쓴다). 돌고 있는 코딩 작업의 PR은 건드리지 않는다."""
+        live = [
+            p for p in self.state.prs
+            if p.vcs_number is not None and not p.merged and not p.closed
+            and p.task not in self._coding
+        ]  # fmt: skip
+        seen = {p.id: await vcs_bridge.change_state(p) for p in live}
+        done = {k: v for k, v in seen.items() if v in ("merged", "closed")}
+        if not done:
+            return 0
+
+        async def run(s: State) -> None:
+            for p in s.prs:
+                how = done.get(p.id)
+                if how is None or p.merged or p.closed:
+                    continue
+                ctx = self._ctx_of_pr(s, p)
+                where = "형상관리에서 직접 " + ("머지됨" if how == "merged" else "닫힘")
+                s.activity.append(
+                    self._act(self.clock(), ctx, "human", "dev", "vcs.synced", "API",
+                              f"{p.id} {where} → 기록 맞춤")
+                )  # fmt: skip
+                task = next((t for t in s.tasks if t.id == p.task), None)
+                if how == "merged":
+                    try:
+                        await self._do_merge(s, p, pr_check(s, p), auto=False)
+                    except GateRefused:
+                        pass
+                    if not p.merged:  # 이미 머지된 사실은 관문·병합 호출 결과와 상관없이 맞춘다
+                        p.merged = True
+                        p.merged_at = self.clock()
+                        if task is not None:
+                            task.state = "완료"
+                    p.auto_review = None
+                    continue
+                p.closed = True
+                p.auto_review = None
+                if task is not None:
+                    task.state = "중단"
+                    cr = task.coding
+                    if cr is not None and cr.status not in ("merged", "canceled"):
+                        cr.status = "canceled"
+                        cr.error = f"{p.id} {where} → 재개하면 최신 코드로 다시 씀"
+                        cr.updated_at = self.clock()
+
+        await self._apply(run)
+        return len(done)
+
+    def start_pr_sync(self) -> None:
+        """PR_SYNC_SECONDS마다 sync_prs·오래 기다리는 대화 알림을 돈다 (한 번만 켠다).
+        기획 서비스는 PR·개발 대화가 없어 안 켠다."""
+        if self._pr_sync is not None or self.role == "planning":
+            return
+
+        from planning_agent import dev_chat, work_queue
+
+        async def loop() -> None:
+            while True:
+                await asyncio.sleep(PR_SYNC_SECONDS)
+                try:
+                    await self.sync_prs()
+                    await work_queue.expire_leases(self)  # 진행 보고가 끊긴 구독형 작업 되돌리기
+                    # 앞 요청을 오래 기다리는 대화에 알린다 (상태가 안 바뀌어도 시간이 지나면)
+                    await dev_chat.notice_long_waits(self)
+                except Exception:  # noqa: BLE001 - 맞추기 실패로 루프가 멈추지 않게 한다
+                    continue  # 다음 차례에 다시
+
+        self._pr_sync = asyncio.get_running_loop().create_task(loop())
 
     async def wait_sent(self) -> None:
         """보내는 중인 넘기기가 끝날 때까지 기다린다 (테스트용)."""
@@ -1185,7 +1409,11 @@ class PlanningService:
         """
         dup_id = find_duplicate(s.requests, title)
         req_id = req_id or f"REQ-{20 + seq}"
-        auto = None if dup_id else check_simple(title, s.auto_policy)
+        # 사건(ctx_inc_)에서 온 원인 확인 요청은 사람이 원인을 볼 일이라
+        # 자동 기획·PR로 넘기지 않는다.
+        # 자동으로 돌리면 원인을 아무도 안 봤는데 문서 PR이 머지되고 '완료'가 됐다 (10/30)
+        investigate = not dup_id and (source_ref or "").startswith("ctx_inc_")
+        auto = None if dup_id or investigate else check_simple(title, s.auto_policy)
         text = (
             f'"{title}" → 같은 요청 {dup_id}에 연결 (linked_duplicate)'
             if dup_id
@@ -1212,6 +1440,22 @@ class PlanningService:
         s.activity.append(
             self._act(t, ctx_req, frm, "planning", "create_ticket", "A2A", text, "A", seq)
         )
+        if investigate:
+            s.activity.append(
+                self._act(
+                    t,
+                    ctx_req,
+                    "planning",
+                    frm,
+                    "get_request_status",
+                    "A2A",
+                    f"{req_id} 원인 확인 요청 접수 ({source_ref})"
+                    " → 자동 기획·PR 없이 사람이 원인 확인",
+                    "read",
+                    seq,
+                )
+            )
+            return ActionResult(output={"request_id": req_id, "auto": False, "investigate": True})
         if auto is None:
             s.activity.append(
                 self._act(
@@ -2034,11 +2278,37 @@ class PlanningService:
                     "auto": result.output.get("auto"),
                     "via_context_id": context_id,
                 },
+            ), result.output.get("investigate", False)
+
+        async def apply(s: State) -> ActionResult:
+            out, investigate = await run(s)
+            nonlocal to_inbox
+            to_inbox = investigate
+            return out
+
+        to_inbox = False
+        result = await self._apply(apply)
+        self._idempotent[idempotency_key] = result
+        self._save()  # 중복 거르기 기록도 바로 남긴다 (재시작 뒤 같은 요청을 다시 처리하지 않게)
+        if to_inbox:
+            await self._cause_to_inbox(result.output["request_id"])
+        return result
+
+    async def _cause_to_inbox(self, req_id: str) -> None:
+        """원인 확인 요청을 받은 요청(사람 할 일함)에 올리고 활동에 남긴다 (잠금 밖에서 보낸다)."""
+        req = next((r for r in self.state.requests if r.id == req_id), None)
+        if req is None:
+            return
+        text = await cause_inbox.send(req, self.tenant_id, self._cause_poster)
+
+        async def log(s: State) -> None:
+            s.activity.append(
+                self._act(
+                    self.clock(), req.context_id, "planning", "human", "handoff", "A2A", text, "A"
+                )
             )
 
-        result = await self._apply(run)
-        self._idempotent[idempotency_key] = result
-        return result
+        await self._apply(log)
 
     async def link_incident(
         self,
@@ -2105,6 +2375,7 @@ class PlanningService:
 
         result = await self._apply(run)
         self._idempotent[idempotency_key] = result
+        self._save()  # 중복 거르기 기록도 바로 남긴다 (재시작 뒤 같은 요청을 다시 처리하지 않게)
         return result
 
     async def start_dev(
@@ -2152,6 +2423,7 @@ class PlanningService:
 
         result = await self._apply(run)
         self._idempotent[idempotency_key] = result
+        self._save()  # 중복 거르기 기록도 바로 남긴다 (재시작 뒤 같은 요청을 다시 처리하지 않게)
         return result
 
     async def receive_dev_result(
@@ -2223,6 +2495,7 @@ class PlanningService:
 
         result = await self._apply(run)
         self._idempotent[idempotency_key] = result
+        self._save()  # 중복 거르기 기록도 바로 남긴다 (재시작 뒤 같은 요청을 다시 처리하지 않게)
         return result
 
     @staticmethod
@@ -2283,10 +2556,17 @@ class PlanningService:
         done: str | None = None,
         paths: list[str] | None = None,
         connection: str | None = None,
+        skip_queue: bool = False,
+        mode: str = "agent",
     ) -> ActionResult:
         """개발팀원이 쓴 기획으로 요청·확정 기획서·작업 하나를 만들고 코딩 에이전트를 띄운다 (A).
 
-        에이전트는 바꿔 끼운 뒤 잠금 밖에서 돈다. 진행은 작업 `coding`에 적힌다."""
+        에이전트는 바꿔 끼운 뒤 잠금 밖에서 돈다. 진행은 작업 `coding`에 적힌다.
+        `mode="subscription"`이면 서버 에이전트를 띄우지 않고 `queued`로 두어 개발자 본인 Claude가
+        MCP로 가져가기를 기다린다 (work_queue.py). LLM 설정도 필요 없다."""
+        if mode not in ("agent", "subscription"):
+            raise ActionError("INVALID_INPUT", "mode는 agent·subscription 중 하나다")
+        sub = mode == "subscription"
         title = " ".join((title or "").split())
         plan = (plan or "").strip()
         if not title or not plan:
@@ -2297,24 +2577,23 @@ class PlanningService:
             raise ActionError("WRONG_ROLE", "코딩 에이전트는 개발 서비스(dev)에서 돈다")
         hints = vcs.clean_paths(paths)
         cid = self._coding_connection(connection)
-        llm = self._coding_llm()
+        llm = None if sub else self._coding_llm()
         done_lines = [x.strip() for x in (done or "").splitlines() if x.strip()]
         done_lines = done_lines[: coder.MAX_DONE_LINES] or [coder.DEFAULT_DONE]
 
         async def run(s: State) -> ActionResult:
             req_id, spec_id, task_id, ctx = self._dev_ids(s)
             t = self.clock()
+            who = "개발자 Claude" if sub else "코딩 에이전트"
             text = (
-                f'{task_id} 개발팀 기획 "{title}" → 코딩 에이전트 대기 '
+                f'{task_id} 개발팀 기획 "{title}" → {who} 대기 '
                 f"(완료 기준 {len(done_lines)}, 연결 {cid})"
             )
+            params = {"request": req_id, "spec": spec_id, "connection": cid, "paths": list(hints)}
+            if sub:
+                params["mode"] = mode
             await self._execute(
-                "dev_task_create",
-                ctx,
-                task_id,
-                text,
-                {"request": req_id, "spec": spec_id, "connection": cid, "paths": list(hints)},
-                [req_id, spec_id, task_id],
+                "dev_task_create", ctx, task_id, text, params, [req_id, spec_id, task_id]
             )
             s.requests.append(
                 Request(
@@ -2356,10 +2635,15 @@ class PlanningService:
                     spec=spec_id,
                     para="R1",
                     title=title,
-                    owner="에이전트",
+                    owner="개발자 Claude" if sub else "에이전트",
                     state="진행 중",
                     coding=CodingRun(
-                        status="queued", model=coder.model_name(llm), updated_at=t, connection=cid
+                        status="queued",
+                        model=None if sub else coder.model_name(llm),
+                        updated_at=t,
+                        connection=cid,
+                        skip_queue=skip_queue,
+                        mode="subscription" if sub else "agent",
                     ),
                 )
             )
@@ -2375,7 +2659,8 @@ class PlanningService:
             )
 
         result = await self._apply(run)
-        self._spawn_coder(result.output["task_id"])
+        if not sub:  # 구독형은 개발자 Claude가 가져갈 때까지 대기열에 둔다
+            self._spawn_coder(result.output["task_id"])
         return result
 
     # ---- 개발 AI 대화 (dev_chat.py). 메시지 하나 = 작은 액션 하나 (관문 dev_chat A)
@@ -2455,6 +2740,7 @@ class PlanningService:
         """실패·사람 확인으로 멈췄거나 사람이 중단한 코딩 작업을 처음부터 다시 돌린다 (재개).
 
         열린 PR이 있으면 안 된다 (중단하면 PR은 닫히므로 중단한 작업은 재개할 수 있다).
+        머지가 충돌로 실패한 작업만 예외: 그 PR을 닫고 최신 코드로 다시 쓴다.
         다시 돌 때 레포의 최신 코드를 다시 읽는다."""
         task = next((t for t in self.state.tasks if t.id == task_id), None)
         if task is None or task.coding is None:
@@ -2462,12 +2748,15 @@ class PlanningService:
         resumable = ("failed", "waiting_human", "canceled")
         if task_id in self._coding or task.coding.status not in resumable:
             raise ActionError("NOT_RETRYABLE", f"{task_id}는 진행 중이거나 끝났다")
-        if any(p.task == task_id and not p.closed for p in self.state.prs):
+        conflict = task.coding.merge_conflict
+        if any(p.task == task_id and not p.closed and (p.merged or not conflict)
+               for p in self.state.prs):  # fmt: skip
             raise ActionError(
                 "NOT_RETRYABLE", f"{task_id}는 이미 PR이 있다 → PR 화면에서 머지·판단"
             )
         cid = self._coding_connection(connection, task.coding.connection)
-        llm = self._coding_llm()
+        sub = task.coding.mode == "subscription"  # 구독형은 다시 대기열에만 올린다
+        llm = None if sub else self._coding_llm()
 
         async def run(s: State) -> ActionResult:
             x = next((t for t in s.tasks if t.id == task_id), None)
@@ -2478,12 +2767,27 @@ class PlanningService:
             ctx = req.context_id if req else f"task:{task_id}"
             t = self.clock()
             how = "재개" if x.coding.status == "canceled" else "다시 시도"
-            text = f"{task_id} 코딩 에이전트 {how} (연결 {cid})"
+            if x.coding.merge_conflict:
+                how = "충돌 → 최신 코드로 다시 쓰기"
+                for pr in [p for p in s.prs if p.task == task_id and not p.closed]:
+                    note = await vcs_bridge.close_pr(pr)
+                    if note is not None:
+                        s.activity.append(
+                            self._act(self.clock(), ctx, "dev", "dev", note.point, "API", note.text)
+                        )
+                    if note is not None and not note.ok:
+                        raise ActionError("NOT_RETRYABLE", f"{pr.id}를 닫지 못해 다시 쓰지 않음")
+                    pr.closed = True
+                    pr.auto_review = None
+            who = "개발자 Claude 대기열" if sub else "코딩 에이전트"
+            text = f"{task_id} {who} {how} (연결 {cid})"
             n = sum(1 for g in self.gate_calls if g.action == "dev_task_retry") + 1
             await self._execute("dev_task_retry", ctx, f"{task_id}:{n}", text, {"connection": cid})
             x.coding = CodingRun(
-                status="queued", model=coder.model_name(llm), updated_at=t, connection=cid
-            )
+                status="queued", model=coder.model_name(llm) if llm else None, updated_at=t,
+                connection=cid, llm_calls=x.coding.llm_calls, llm_tokens=x.coding.llm_tokens,
+                mode=x.coding.mode,
+            )  # fmt: skip
             x.state = "진행 중"
             s.activity.append(self._act(t, ctx, "dev", "dev", "dev_task_retry", "A2A", text, "A"))
             return ActionResult(
@@ -2497,7 +2801,8 @@ class PlanningService:
             )
 
         result = await self._apply(run)
-        self._spawn_coder(task_id)
+        if not sub:
+            self._spawn_coder(task_id)
         return result
 
     async def cancel_dev_task(self, task_id: str) -> ActionResult:
@@ -2594,6 +2899,10 @@ class PlanningService:
         task = next((t for t in self.state.tasks if t.id == task_id), None)
         if task is None or task.coding is None:
             raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+        if task.coding.mode == "subscription":
+            raise ActionError(
+                "NOT_REVISABLE", f"{task_id}는 개발자 Claude 작업이다 → PR에 직접 코멘트로 지시"
+            )
         pr = next((p for p in self.state.prs if p.task == task_id), None)
         if (
             task_id in self._coding
@@ -2724,7 +3033,34 @@ class PlanningService:
             hints=tuple(r1.paths) if r1 else (),
             connection=task.coding.connection,
             instruction=task.coding.instruction,
+            skip_queue=task.coding.skip_queue,
         )
+
+    def coding_alive(self, job: coder.Job) -> bool:
+        """이 실행이 아직 살아 있나 (중단·초기화·새 실행이면 False)."""
+        return self._coding_live.get(job.task_id) == job.run_id
+
+    def queue_blockers(self, job: coder.Job, paths: list[str]) -> tuple[list[str], list[str]]:
+        """이 작업보다 먼저 만든, 같은 연결의 진행 중 코딩 작업 중
+        (같은 파일을 고치는 작업, 아직 고칠 파일을 안 고른 작업)."""
+        active = ("queued", "reading", "writing", "reviewing", "opened", "waiting_human")
+        mine = set(paths)
+        same: list[str] = []
+        undecided: list[str] = []
+        for t in self.state.tasks:
+            if t.id == job.task_id:
+                break  # 뒤에 만든 작업은 보지 않는다 (먼저 만든 쪽이 먼저 간다)
+            cr = t.coding
+            if cr is None or cr.status not in active or cr.connection != job.connection:
+                continue
+            if cr.mode == "subscription":  # 개발자 Claude 작업은 언제 끝날지 몰라 기다리지 않는다
+                continue
+            files = {f.path for f in cr.files}
+            if not files:
+                undecided.append(t.id)
+            elif files & mine:
+                same.append(t.id)
+        return same, undecided
 
     def _coding_of(self, s: State, job: coder.Job) -> tuple[Task, CodingRun]:
         """이 실행의 작업. 초기화됐거나 새 실행으로 바뀌었으면 `CoderGone`."""
@@ -2759,6 +3095,9 @@ class PlanningService:
             cr.status = status  # type: ignore[assignment]
             for key, value in fields.items():
                 setattr(cr, key, value)
+            m = coder.meter_now()
+            if m is not None:  # 단계마다 쓴 양을 적는다 (화면에 보인다)
+                cr.llm_calls, cr.llm_tokens = m.base_calls + m.calls, m.base_tokens + m.tokens
             cr.updated_at = self.clock()
             if status == "waiting_human" and cr.pr is None:
                 task.state = "C 보류"
@@ -2874,10 +3213,16 @@ class PlanningService:
         return opened
 
     async def coding_review(
-        self, job: coder.Job, verdict: str, notes: list[str], earlier: list[str] | None = None
+        self,
+        job: coder.Job,
+        verdict: str,
+        notes: list[str],
+        earlier: list[str] | None = None,
+        ci_hold: str | None = None,
     ) -> bool:
         """리뷰 결과를 관문 review_pr 뒤 PR에 남긴다. 통과면 기존 자동 머지 규칙대로 잇는다.
         earlier는 PR 전에 고치느라 지나간 리뷰 결과다 (PR 리뷰 기록 앞에 붙인다).
+        ci_hold는 CI가 실패·시간 초과해 자동 머지하지 않고 사람 확인으로 둘 이유다.
 
         돌려주는 값: 불일치라 한 번 더 고쳐야 하면 True."""
         fix = False
@@ -2901,6 +3246,13 @@ class PlanningService:
             cr.review = CodingReview(verdict=verdict, notes=notes)  # type: ignore[arg-type]
             cr.updated_at = self.clock()
             self._code_act(s, job, "code.review", f"리뷰 {verdict} · 노트 {len(notes)}개")
+            if verdict == "통과" and ci_hold:
+                task.state = "머지 대기"
+                self._hold(p, WAIT_HUMAN, pr_check(s, p))
+                cr.status = "waiting_human"
+                cr.error = ci_hold
+                self._code_act(s, job, "code.ci", ci_hold)
+                return
             if verdict == "통과":
                 task.state = "머지 대기"
                 await self._try_auto_merge(s, p)
@@ -2912,7 +3264,18 @@ class PlanningService:
                     cr.error = f"자동 머지 안 함 → {p.auto_review.state} ({why})"
                 else:
                     cr.status = "failed"
-                    cr.error = "형상관리 병합 실패 → 사람 머지 버튼으로 다시 시도"
+                    fail = next(
+                        (a for a in reversed(s.activity)
+                         if a.point == "vcs.merge_failed" and a.text.startswith(f"{p.id} ")),
+                        None,
+                    )  # fmt: skip
+                    cr.merge_conflict = fail is not None and vcs_bridge.CONFLICT_MARK in fail.text
+                    if cr.merge_conflict:
+                        cr.error = f"{p.id} 머지 충돌 → 다시 시도하면 PR을 닫고 최신 코드로 다시 씀"
+                    elif fail is not None:
+                        cr.error = f"{fail.text} → 사람 머지 버튼으로 다시 시도"
+                    else:
+                        cr.error = "형상관리 병합 실패 → 사람 머지 버튼으로 다시 시도"
                     self._code_act(s, job, "code.failed", cr.error)
                 return
             task.state = "PR 검수"
@@ -3066,6 +3429,10 @@ class PlanningService:
         req = self._request_of_spec(s, sp)
         ctx = req.context_id if req else f"spec:{sp.id}"
         check = spec_check(sp)
+        # 아직 안 끝난 다른 요청과 충돌할 수 있으면 어느 쪽을 따를지 사람이 정한다 (planning 규칙)
+        clash = related.open_conflicts(s, req) if req else []
+        if clash:
+            check = Check(params=check.params, rules=[*check.rules, "spec_open_conflict"])
         if check.ok:
             try:
                 await self._do_confirm(s, sp, check, auto=True)
@@ -3075,8 +3442,13 @@ class PlanningService:
                     raise
                 hold = self._hold(sp, WAIT_CROSS_CHECK, check, exc.decision)
         else:
-            hold = self._hold(sp, spec_wait_state(check), check)
+            wait = spec_wait_state(check)
+            if clash and wait != WAIT_ANSWER:
+                wait = WAIT_HUMAN
+            hold = self._hold(sp, wait, check)
         why = ", ".join(hold.rules) or f"safety {hold.gate_status}"
+        if clash:
+            why += " · " + ", ".join(x.id for x in clash)
         s.activity.append(
             self._act(
                 hold.at,
@@ -4100,6 +4472,11 @@ __all__ = [
     "PlanningService",
     "action_name",
 ]
+
+
+WAIT_POLL_SECONDS = 30  # 다른 서비스 요청을 기다리는 대화를 다시 보는 간격
+RETRY_SECONDS = 30  # 못 보낸 넘기기를 다시 보내는 간격
+PR_SYNC_SECONDS = 60  # 형상관리에서 직접 머지·닫은 PR을 맞추는 간격
 
 
 def _cross_check_timeout_min() -> int:

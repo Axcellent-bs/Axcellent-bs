@@ -42,7 +42,15 @@ DATA_CALL_SECONDS = 10.0
 SHOP_CALL_SECONDS = 5.0
 ORCHESTRATOR_CALL_SECONDS = 5.0
 # 총괄 사건 행에서 재무가 읽는 필드 ([협업] #417에서 합의한 다섯 개). 나머지 키는 보지 않는다
-INCIDENT_FIELDS = ("context_id", "component", "status", "opened_at", "closed_at")
+INCIDENT_FIELDS = (
+    "context_id",
+    "component",
+    "status",
+    "opened_at",
+    "closed_at",
+    "impact_from",
+    "impact_to",
+)
 
 
 def order_key(order_id: object) -> str | None:
@@ -84,6 +92,9 @@ class Impact:
     affected_customer_ids: frozenset[str] = field(default_factory=frozenset)
     ref: str = ""
     by_category: tuple[tuple[str, int, int], ...] = ()  # (category, 실패 주문 수, 피해 금액)
+    # 구간이 총괄이 영향 분석에 쓴 구간과 같은지. False면 AI 처리 시각으로 대신한 근사 구간이라
+    # 영향 고객 목록으로 "보상 대상 밖"을 판정하지 않는다
+    window_exact: bool = True
 
 
 class Sources(Protocol):
@@ -96,12 +107,8 @@ class Sources(Protocol):
     async def paid_amount(self, meta: RequestMeta, order_id: str) -> int | None: ...
 
 
-
 def _int(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
-
-
-
 
 
 def _impact_from(output: dict[str, Any], ref: str) -> Impact | None:
@@ -160,7 +167,6 @@ class MockSources:
 
     async def paid_amount(self, meta: RequestMeta, order_id: str) -> int | None:
         return _int(self.seed.get("payments", {}).get(str(order_id)))
-
 
 
 # 같은 사건·같은 구간의 영향 분석은 이 시간 동안 다시 묻지 않는다. 재무 화면이 몇 초마다 다시 불러도
@@ -252,11 +258,22 @@ class LiveSources:
                 )
             except ValidationError:
                 return None
+            if found.impact_from and found.impact_to:  # 총괄이 영향 분석에 쓴 구간 (정확)
+                return {
+                    "component": found.component,
+                    "window_from": found.impact_from,
+                    "window_to": found.impact_to,
+                    "window_exact": True,
+                    "category": None,  # 총괄은 분류를 주지 않는다
+                }
+            # 영향 구간을 안 실은 사건: AI 처리 시각으로 대신한다. 장애 시작보다 늦게 시작할 수 있어
+            # 앞부분 영향 고객이 빠진다 → 근사로 표시하고 보상 대상 판정에 쓰지 않는다
             return {
                 "component": found.component,
                 "window_from": found.opened_at,
                 "window_to": found.closed_at,
-                "category": None,  # 총괄은 분류를 주지 않는다
+                "window_exact": False,
+                "category": None,
             }
         return None
 
@@ -267,4 +284,3 @@ class LiveSources:
         )
         order = body.get("data") if isinstance(body, dict) else None
         return paid_total(order) if isinstance(order, dict) else None
-

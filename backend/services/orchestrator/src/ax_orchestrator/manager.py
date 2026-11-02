@@ -143,7 +143,9 @@ class IncidentManager:
         outcome: `duplicate`(같은 event_id) · `ignored`(총괄 소관 아님) ·
         `noted`(기록만, 열린 이벤트가 있으면 거기에) · `merged`(열린 이벤트에 합침) ·
         `opened`(새 이벤트) ·
-        `resumed`(사람 할 일함 처리 결과로 단계를 이어 감) · `unmatched`(기다리는 단계가 없음).
+        `resumed`(사람 할 일함 처리 결과로 단계를 이어 감) ·
+        `kept`(기다리는 단계가 아직 없어 보관, 그 단계가 대기로 오르면 이어 감) ·
+        `unmatched`(이미 반영했거나 받을 이벤트가 없음).
         """
         if env.event_id in self._seen:
             return "duplicate", None
@@ -209,6 +211,11 @@ class IncidentManager:
             return "unmatched", inc
         note = result if isinstance(result, str) else None
         if not self.engine.complete_handoff(inc, task_id, status, note):
+            if self.engine.keep_early_handoff(inc, task_id, status, note):
+                inc.log(
+                    f"사람 할 일함 처리 결과를 먼저 받아 보관: {task_id} ({status}, {env.event_id})"
+                )
+                return "kept", inc
             return "unmatched", inc
         inc.log(f"사람 할 일함 처리 결과 수신: {task_id} ({status}, {env.event_id})")
         await self.engine.sync_times(inc)

@@ -11,32 +11,17 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from ax_contracts.data_access.shop_failed_orders import FailedOrder, ShopFailedOrdersResult
+from data_agent import catalog
+from data_agent.connectors import FailureEvent, FailureEvents, as_events
 
-# 장애(결제 서버·결제사 쪽) 사유. 이 코드만 장애 피해로 센다 (shop-api `failure_code`)
-FAULT_REASONS = frozenset(
-    {
-        "PG_UNAVAILABLE",  # shop-api 장애 주입(결제 서버 5xx)
-        "PG_TIMEOUT",
-        "PG_ERROR",
-        "PG_5XX",
-        "GATEWAY_TIMEOUT",
-        "PAYMENT_GATEWAY_TIMEOUT",
-        "TIMEOUT",
-        "SERVER_ERROR",
-        "NETWORK_ERROR",
-    }
-)
-# 결제한 사람 쪽 사유. 장애와 무관하므로 장애 피해에서 뺀다
-USER_SIDE_REASONS: dict[str, str] = {
-    "PG_DECLINED": "카드 거절",
-    "CARD_DECLINED": "카드 거절",
-    "DECLINED": "카드 거절",
-    "LIMIT_EXCEEDED": "한도 초과",
-    "INSUFFICIENT_FUNDS": "잔액 부족",
-    "CARD_EXPIRED": "카드 만료",
-    "INVALID_CARD": "카드 정보 오류",
-    "USER_CANCELED": "결제 취소",
-}
+# 장애(결제 서버·결제사 쪽) 사유. 이 코드만 장애 피해로 센다 (shop-api `failure_code`).
+# 코드 목록은 회사 카탈로그(`catalogs/<회사>.toml`의 지표 `fault_codes`)에 있다.
+# 이 이름은 예전 코드가 읽던 값(시작할 때의 카탈로그)이고, 판정은 `catalog.fault_codes()`를 쓴다
+FAULT_REASONS = catalog.fault_codes()
+# 사용자 쪽 사유(캣북스: 카드 거절 등). 장애와 무관하므로 장애 피해에서 뺀다.
+# 코드 목록은 회사 카탈로그 `user_codes`에 있다. 이 이름은 예전 코드가 읽던 값
+# (시작할 때의 카탈로그)이고, 판정은 `catalog.user_codes()`를 쓴다
+USER_SIDE_REASONS: dict[str, str] = catalog.user_codes()
 # 실패 사유가 없다는 표시 (shop-api는 failure_code가 비면 "UNKNOWN"을 준다)
 MISSING_REASONS = frozenset({"", "UNKNOWN"})
 
@@ -45,30 +30,32 @@ MISSING_REASONS = frozenset({"", "UNKNOWN"})
 class FailureSplit:
     """실패 결제를 장애 피해와 제외 대상으로 나눈 결과."""
 
-    fault: list[FailedOrder]  # 장애로 실패한 결제 (`FAULT_REASONS`)
+    fault: list[FailureEvent]  # 장애로 실패한 결제 (카탈로그 장애 쪽 코드)
     excluded: dict[str, int]  # 사용자 쪽 사유 이름(카드 거절 등) → 건수
     missing_reason: int  # 실패 사유가 없는 결제 수 (있으면 장애인지 알 수 없다)
     unseen: dict[str, int] = field(default_factory=dict)  # 처음 보는 실패 코드 → 건수
 
 
-def split_failures(result: ShopFailedOrdersResult) -> FailureSplit:
+def split_failures(result: ShopFailedOrdersResult | FailureEvents | list) -> FailureSplit:
     """실패 사유로 장애 피해와 사용자 쪽 실패를 나눈다.
 
     장애 쪽 사유(`FAULT_REASONS`)만 장애로 세고, 사용자 쪽 사유(`USER_SIDE_REASONS`)는 뺀다.
     둘 다 아닌 처음 보는 코드와 사유가 없는 결제는 어느 쪽인지 알 수 없어 따로 센다
     (있으면 영향 분석은 숫자를 내지 않는다).
+
+    커넥터의 실패 이벤트(`FailureEvents`·목록)와 shop-api 실패 주문 조회 결과를 모두 받는다.
     """
-    fault: list[FailedOrder] = []
+    fault: list[FailureEvent] = []
     excluded: Counter[str] = Counter()
     unseen: Counter[str] = Counter()
     missing = 0
-    for order in result.orders:
-        code = (order.reason or "").strip().upper()
+    for order in as_events(result):
+        code = (order.code or "").strip().upper()
         if code in MISSING_REASONS:
             missing += 1
-        elif code in USER_SIDE_REASONS:
-            excluded[USER_SIDE_REASONS[code]] += 1
-        elif code in FAULT_REASONS:
+        elif code in (user := catalog.user_codes()):
+            excluded[user[code]] += 1
+        elif code in catalog.fault_codes():
             fault.append(order)
         else:
             unseen[code] += 1
@@ -84,19 +71,21 @@ class ImpactCounts:
     damage_amount: int  # 정수 원
 
 
-def aggregate_impact(result: ShopFailedOrdersResult | list[FailedOrder]) -> ImpactCounts:
+def aggregate_impact(
+    result: ShopFailedOrdersResult | list[FailedOrder] | list[FailureEvent],
+) -> ImpactCounts:
     """실패 주문 수, 영향 고객 수(같은 buyer_id는 한 번), 피해 금액 합계를 계산한다.
 
     주문 목록(장애로 실패한 것만 고른 목록)도 받는다.
     금액이 음수인 주문이 있으면 ValueError를 낸다 (음수 피해 금액은 없다).
     """
-    orders = result if isinstance(result, list) else result.orders
+    orders = as_events(result)
     for order in orders:
         if order.amount < 0:
-            raise ValueError(f"negative amount: order_id={order.order_id}")
+            raise ValueError(f"negative amount: order_id={order.event_id}")
     return ImpactCounts(
         failed_order_count=len(orders),
-        affected_customer_count=len({o.buyer_id for o in orders}),
+        affected_customer_count=len({o.customer_id for o in orders}),
         damage_amount=sum(o.amount for o in orders),
     )
 

@@ -1,5 +1,5 @@
 import { ApiError } from "./apiError";
-import { RELAY_API_URL, RELAY_TOKEN } from "./env";
+import { RELAY_API_URL, RELAY_VIEW_TOKEN } from "./env";
 
 // 총괄 이벤트·부서 사용량 읽기. 화면은 총괄을 직접 부르지 않고 shop-api 관리 읽기 중계(GET만)를 부른다.
 // 응답 모양은 ax-backend `orchestrator/src/ax_orchestrator/models.py`(`Incident.view()`)와
@@ -75,11 +75,11 @@ export interface Department {
 export interface DepartmentsMeta { mock?: boolean; window_seconds?: number; bucket_seconds?: number }
 
 /** 토큰이 없으면(운영 빌드 기본) 총괄 화면과 부서 사용량이 꺼진다 */
-export const relayEnabled = Boolean(RELAY_TOKEN && RELAY_API_URL);
+export const relayEnabled = Boolean(RELAY_VIEW_TOKEN && RELAY_API_URL);
 
 async function get<T, M = Record<string, unknown>>(path: string): Promise<{ data: T; meta: M }> {
   if (!relayEnabled) throw new ApiError("총괄 읽기 연결이 꺼져 있습니다", 403);
-  const res = await fetch(`${RELAY_API_URL}${path}`, { headers: { Authorization: `Bearer ${RELAY_TOKEN}` }, cache: "no-store" });
+  const res = await fetch(`${RELAY_API_URL}${path}`, { headers: { Authorization: `Bearer ${RELAY_VIEW_TOKEN}` }, cache: "no-store" });
   let body: { data?: T; meta?: M; error?: { message?: string } } = {};
   try { body = await res.json(); } catch { /* 본문이 JSON이 아님 */ }
   if (!res.ok || body.data === undefined) throw new ApiError(body.error?.message ?? `요청 실패 (${res.status})`, res.status);

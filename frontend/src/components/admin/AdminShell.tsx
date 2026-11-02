@@ -7,12 +7,13 @@ import { useCompany } from "@/demo/company";
 import { endSupport, supportActive, useSupport } from "@/demo/support";
 import { AGENTS, activeChild, matchPath, useEnabledServices, type Service, type SubItem } from "@/demo/services";
 import { useOpenHandoffCount } from "@/lib/handoffs";
+import { DEV_TASKS_HREF, PLANNING_REQUESTS_HREF, useNavCounts } from "@/lib/navCounts";
 import { IconAgents, IconBell, IconChart, IconGear, IconInbox, IconOffice, IconSearch } from "../icons";
 
 // 메뉴: AI가 상위 탭이고, 그 AI가 맡은 서비스가 하위 탭이다. 서비스 안 화면(예: 고객 문의의 상담 콘솔)은 그 아래 한 단 더.
 // 고객사 계정은 시스템 관리자 하나이고, 회사가 켠 서비스는 전부 메뉴에 보인다(서비스 고르기에서 끈 서비스만 빠짐, src/demo/session.tsx).
 // AI가 맡지 않은 서비스(DejaFix 장애 대응 등)와 공용 화면은 구분선 아래에 둔다.
-type SubNav = { href: string; label: string; soon?: boolean; match: string[]; children?: SubItem[] };
+type SubNav = { href: string; label: string; soon?: boolean; match: string[]; children?: SubItem[]; badge?: number };
 type NavItem = { href: string; label: string; Icon: ComponentType<{ size?: number }>; logo?: string; children?: SubNav[]; match: string[]; divider?: boolean; badge?: number | null };
 
 const subNav = (items?: SubItem[]): SubNav[] | undefined => items?.map((c) => ({ ...c, match: [c.href] }));
@@ -120,7 +121,15 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const baseNav = useNav();
   const hasInbox = baseNav.some((n) => n.href === HANDOFFS_HREF);
   const openHandoffs = useOpenHandoffCount(hasInbox);
-  const nav = baseNav.map((n) => (n.href === HANDOFFS_HREF ? { ...n, badge: openHandoffs } : n));
+  // 하위 탭 숫자(기획 들어온 요청·개발 사람 확인)는 하위 탭 옆에, AI 탭에는 그 합을 늘 단다 (열고 닫아도 자리가 그대로)
+  const hasSub = (href: string) => baseNav.some((n) => n.children?.some((c) => c.href === href));
+  const subCounts = useNavCounts(hasSub(PLANNING_REQUESTS_HREF), hasSub(DEV_TASKS_HREF));
+  const nav = baseNav.map((n) => {
+    if (n.href === HANDOFFS_HREF) return { ...n, badge: openHandoffs };
+    if (!n.children?.some((c) => subCounts[c.href])) return n;
+    const children = n.children.map((c) => ({ ...c, badge: subCounts[c.href] }));
+    return { ...n, children, badge: children.reduce((sum, c) => sum + (c.badge ?? 0), 0) };
+  });
   const home = account ? homeOf(account) : "/";
   const company = useCompany();
   const router = useRouter();
@@ -175,6 +184,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
                     <Link href={c.href} aria-current={sub && !inner ? "page" : undefined}
                       className={`flex items-center gap-2 py-2.5 pl-[50px] pr-[18px] text-[13px] transition ${sub ? (inner ? "font-semibold text-white" : "bg-[#5b5bd6] font-semibold text-white") : "text-[#c9c9e6] hover:bg-white/10"}`}>
                       <span className="truncate">{c.label}</span>
+                      {!!c.badge && <span className="ml-auto shrink-0 rounded-full bg-amber-400 px-1.5 text-[11px] font-semibold leading-[18px] text-[#1d1d3a]" aria-label={`${c.badge}건`}>{c.badge > 99 ? "99+" : c.badge}</span>}
                       {c.soon && <span className="ml-auto shrink-0 bg-white/10 px-1.5 text-[11px] text-[#9a9ac4]">준비 중</span>}
                     </Link>
                     {inner?.map((g) => (
