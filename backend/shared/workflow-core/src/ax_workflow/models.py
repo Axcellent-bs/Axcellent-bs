@@ -378,7 +378,7 @@ class Activity(DomainModel):
 
 
 class OutMsg(DomainModel):
-    """기획·개발 → 다른 부서로 나간 메시지 (다른 부서 화면의 "기획·개발에서 받은 것")."""
+    """기획·개발 → 다른 부서로 나간 메시지 (다른 부서 화면의 "기획에서 받은 것")."""
 
     id: int
     at: UtcDatetime
