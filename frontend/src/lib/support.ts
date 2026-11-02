@@ -143,6 +143,7 @@ export interface IncidentCompensation {
   issued_buyers: number;
   issued_total: number;
   missing_buyer_ids: string[] | null;
+  outside_buyer_ids: string[] | null;
 }
 export interface IncidentCompensationList { incidents: IncidentCompensation[]; notes: string[] }
 

@@ -236,6 +236,7 @@ def incident_compensation(incident_id: str | None) -> dict[str, Any]:
                 "issued_buyers": 2,
                 "issued_total": 4000,
                 "missing_buyer_ids": None,
+                "outside_buyer_ids": None,
             }
         ],
         "notes": ["지급이 끝난 기록만 센다 (보류·거부·검증 중은 아직 기록이 없다)."],

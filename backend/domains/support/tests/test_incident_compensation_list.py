@@ -99,6 +99,7 @@ def test_one_incident_can_be_asked_for_and_an_unknown_one_is_empty() -> None:
             "issued_buyers": 0,
             "issued_total": 0,
             "missing_buyer_ids": None,
+            "outside_buyer_ids": None,
         }
     ]
 
@@ -110,6 +111,18 @@ def test_buyer_ids_to_compare_come_back_as_the_missing_ones() -> None:
     assert incident["missing_buyer_ids"] == ["buy_0004", "buy_0010"]
     # 비교하지 않으면 누락 목록을 만들지 않는다
     assert listing(incident_context_id=CTX)["output"]["incidents"][0]["missing_buyer_ids"] is None
+
+
+def test_buyers_paid_but_not_in_the_compare_list_come_back_as_outside() -> None:
+    compensate(FOUR[:3])
+    out = listing(incident_context_id=CTX, buyer_ids=[FOUR[0], "buy_0010"])["output"]
+    (incident,) = out["incidents"]
+    assert incident["outside_buyer_ids"] == [FOUR[1], FOUR[2]]
+    assert incident["missing_buyer_ids"] == ["buy_0010"]
+    # 목록과 같으면 둘 다 빈 목록, 비교하지 않으면 만들지 않는다
+    same = listing(incident_context_id=CTX, buyer_ids=FOUR[:3])["output"]["incidents"][0]
+    assert same["outside_buyer_ids"] == [] and same["missing_buyer_ids"] == []
+    assert listing(incident_context_id=CTX)["output"]["incidents"][0]["outside_buyer_ids"] is None
 
 
 def test_compare_ids_are_normalized_and_a_malformed_one_is_rejected() -> None:

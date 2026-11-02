@@ -55,7 +55,8 @@ class ListIncidentCompensationInput(AxModel):
 
     `incident_context_id`를 주면 그 사건만, 안 주면 보상 기록이 있는 모든 사건을 돌려준다.
     `buyer_ids`(예: 데이터분석 영향 분석의 영향 고객)를 주면 보상 기록이 없는 고객을
-    `missing_buyer_ids`로 알려 준다. 이 skill은 누락을 찾기만 하고 보상을 요청하지 않는다.
+    `missing_buyer_ids`로, 반대로 보상은 받았는데 목록에 없는 고객은 `outside_buyer_ids`로
+    알려 준다. 이 skill은 찾기만 하고 보상을 요청하지 않는다.
     """
 
     incident_context_id: str | None = Field(default=None, pattern=INCIDENT_CONTEXT_PATTERN)
@@ -79,6 +80,7 @@ class IncidentCompensation(AxModel):
     issued_buyers: int  # 쿠폰이 실제로 지급된 고객 수 (`linked_duplicate`는 뺀다)
     issued_total: int  # 그 합계 원
     missing_buyer_ids: list[str] | None = None  # `buyer_ids`를 줬을 때만: 보상 기록이 없는 고객
+    outside_buyer_ids: list[str] | None = None  # `buyer_ids`를 줬을 때만: 목록 밖인데 보상받은 고객
 
 
 class ListIncidentCompensationOutput(AxModel):

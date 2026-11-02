@@ -50,6 +50,11 @@ export function IncidentCompensationList({ contextId, tick }: { contextId: strin
                 영향 고객 중 보상 기록이 없는 고객: {incident.missing_buyer_ids.join(", ")}
               </p>
             )}
+            {incident?.outside_buyer_ids && incident.outside_buyer_ids.length > 0 && (
+              <p role="status" className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                영향 고객 목록에 없는데 보상받은 고객: {incident.outside_buyer_ids.join(", ")}
+              </p>
+            )}
             <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-ink-500">
               {list.notes.map((n) => <li key={n}>{n}</li>)}
             </ul>

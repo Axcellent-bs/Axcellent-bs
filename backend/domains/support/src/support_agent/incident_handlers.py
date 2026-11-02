@@ -328,6 +328,9 @@ async def list_incident_compensation(request: AgentRequest) -> AgentResult:
                 missing_buyer_ids=None
                 if compare is None
                 else [b for b in compare if b not in have],
+                outside_buyer_ids=None
+                if compare is None
+                else [r.buyer_id for r in rows if r.buyer_id not in set(compare)],
             )
         )
     output = ListIncidentCompensationOutput(incidents=incidents, notes=LIST_NOTES)
