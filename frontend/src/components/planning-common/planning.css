@@ -778,3 +778,25 @@ button.chip { cursor: pointer; font: inherit; }
 .rp-label { display: inline-flex; align-items: center; margin-left: 6px; padding: 0 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); font: inherit; font-size: 11.5px; font-weight: 500; line-height: 18px; border-radius: var(--radius-pill) !important; cursor: pointer; vertical-align: middle; }
 .rp-side .rp-label { margin: 0 4px 4px 0; cursor: default; }
 .rp-label:hover { border-color: var(--primary); color: var(--text); }
+
+/* 사후관리: 사건 카드 4열 + 오른쪽 사건 패널 */
+.inc-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 1400px) { .inc-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1000px) { .inc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .inc-grid { grid-template-columns: 1fr; } }
+.inc-card { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); text-decoration: none; min-height: 150px; }
+.inc-card:hover { border-color: var(--border-strong); background: var(--hover); }
+.inc-card.on { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+.inc-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.inc-card-top { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-3); }
+.inc-card-title { font-size: 15px; line-height: 1.4; }
+.inc-card-meta { margin-top: auto; font-size: 12px; color: var(--text-3); }
+.inc-steps { display: flex; gap: 4px; list-style: none; margin: 0; padding: 0; }
+.inc-steps li { flex: 1; padding-top: 6px; border-top: 3px solid var(--border); font-size: 11px; color: var(--text-3); text-align: center; }
+.inc-steps li.on { border-top-color: var(--primary); color: var(--text); font-weight: 600; }
+.inc-drawer { width: min(560px, 100vw); }
+.inc-drawer-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+.inc-drawer-head h2 { margin: 4px 0 0; font-size: 17px; font-weight: 700; }
+.inc-drawer-body { flex: 1; overflow-y: auto; padding: 8px 18px 24px; }
+.inc-drawer-sub { display: flex; justify-content: space-between; align-items: center; margin: 18px 0 8px; }
+.inc-drawer-sub h3 { margin: 0; font-size: 13px; font-weight: 700; color: var(--text-2); }

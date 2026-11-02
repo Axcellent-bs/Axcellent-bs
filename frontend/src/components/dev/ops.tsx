@@ -3,8 +3,8 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Button, Notice, useToast } from '@dejafix/common-frontend'
 import { type State as S } from '@/lib/planningData'
 import { ActivityList, Grade, State, Stats } from '@/components/planning-common/parts'
-import { Ref, convoHref, hrefOf, prSlug, toPath } from '@/components/planning-common/links'
-import { Flow, Head, Pairs, Step, mergedLabel } from '@/components/planning-common/flow'
+import { Ref, convoHref, go, hrefOf, prSlug, toPath } from '@/components/planning-common/links'
+import { Flow, Pairs, Step, mergedLabel } from '@/components/planning-common/flow'
 import { apiBase, deployApi, kst, type DeployCheck, type Deployment } from '@/lib/planning'
 
 
@@ -109,39 +109,76 @@ function Deployments({ s }: { s: S }) {
 }
 
 // ---------------------------------------------------------------- 사후관리 (DejaFix 연동). 사건마다 세로 흐름
+const INC_STEPS = ['개시', '후보', '롤백', '문단', '후속'] as const
+
 export function Aftercare({ s, item }: { s: S; item?: string }) {
+  // 사건 카드 4열(최신이 위). 카드를 누르면 오른쪽에 그 사건의 흐름·활동이 뜬다
+  const incidents = s.incidents.slice().sort((a, b) => b.at.localeCompare(a.at))
+  const sel = incidents.find((i) => i.ctx === item)
   useEffect(() => {
-    if (item) document.getElementById(`inc-${item}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, [item])
-  const acts = s.activity.filter((a) => a.ctx.startsWith('ctx_inc_'))
+    if (!sel) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && go('work/aftercare')
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sel])
   return (
-    <div className="flow-col">
-      {s.incidents.map((i) => {
-        const follow = s.requests.find((r) => r.id === i.followUp)
-        const c0 = i.candidates[0]
-        return (
-          <section key={i.ctx} id={`inc-${i.ctx}`} className={`flow-sec${item === i.ctx ? ' card-focus' : ''}`}>
-            <Head kicker={<><a href={convoHref(i.ctx)} className="mono plain-link">{i.ctx}</a> · {i.at}</>} title={i.title} side={<State v={i.linked ? '완료' : '접수'} />} />
-            <Flow>
-              <Step name="개시" on href={convoHref(i.ctx)} title={`${i.at} · 통합 에이전트`} />
-              <Step name="후보" on={i.candidates.length > 0} title={i.candidates.map((c) => c.pr).join(', ') || '없음'}>
-                <ul>{i.candidates.map((c) => <li key={c.pr}><Ref s={s} id={c.pr} /> · <a href={toPath(`work/specs/${c.spec}/${c.para}`)} className="plain-link">{c.spec} {c.para}</a> · {c.mergedAt} 머지</li>)}</ul>
-              </Step>
-              <Step name="롤백" on={!!i.rollbackCheck} title={i.rollbackCheck ? `${i.rollbackCheck.result} · ${i.rollbackCheck.target}` : '없음'}>
-                {i.rollbackCheck && <p className="muted">{i.rollbackCheck.why}</p>}
-              </Step>
-              <Step name="문단" on={i.linked} href={c0 ? toPath(`work/specs/${c0.spec}/${c0.para}`) : undefined} title={i.candidates.map((c) => `${c.spec} ${c.para}`).join(', ') || '-'} />
-              <Step name="후속" on={!!follow} href={follow ? hrefOf(s, follow.id) : undefined} title={follow ? `${follow.id} · ${follow.state}` : '없음'}>
-                {follow && <p>{follow.title}</p>}
-              </Step>
-            </Flow>
-          </section>
-        )
-      })}
-      <details className="proj-activity">
-        <summary>사건 활동 {acts.length}</summary>
-        <ActivityList s={s} items={acts.slice().reverse()} />
-      </details>
-    </div>
+    <>
+      {!incidents.length ? <div className="empty"><b>사건 없음</b></div> : (
+        <div className="inc-grid">
+          {incidents.map((i) => {
+            const done = [true, i.candidates.length > 0, !!i.rollbackCheck, i.linked, !!i.followUp]
+            return (
+              <a key={i.ctx} href={toPath(`work/aftercare/${i.ctx}`)} className={`inc-card${sel?.ctx === i.ctx ? ' on' : ''}`}>
+                <span className="inc-card-top"><span className="mono">{i.ctx}</span><State v={i.linked ? '완료' : '접수'} /></span>
+                <b className="inc-card-title">{i.title}</b>
+                <ol className="inc-steps" aria-label="흐름">
+                  {INC_STEPS.map((x, n) => <li key={x} className={done[n] ? 'on' : ''}>{x}</li>)}
+                </ol>
+                <span className="inc-card-meta">{i.at} · 후보 {i.candidates.map((c) => c.pr).join(', ') || '없음'}{i.rollbackCheck ? ` · 롤백 ${i.rollbackCheck.result}` : ''}</span>
+              </a>
+            )
+          })}
+        </div>
+      )}
+      {sel && <IncidentPanel s={s} i={sel} />}
+    </>
+  )
+}
+
+function IncidentPanel({ s, i }: { s: S; i: S['incidents'][number] }) {
+  const follow = s.requests.find((r) => r.id === i.followUp)
+  const c0 = i.candidates[0]
+  const acts = s.activity.filter((a) => a.ctx === i.ctx)
+  const [newest, setNewest] = useState(true) // 활동 순서: 최신순 · 오래된순
+  return (
+    <aside className="chat-drawer inc-drawer" aria-label={`${i.ctx} 사건`}>
+      <div className="inc-drawer-head">
+        <div><span className="mono small"><a href={convoHref(i.ctx)} className="plain-link">{i.ctx}</a> · {i.at}</span><h2>{i.title}</h2></div>
+        <a href={toPath('work/aftercare')} className="btn-quiet px-2 py-1" aria-label="닫기">✕</a>
+      </div>
+      <div className="inc-drawer-body">
+        <Flow>
+          <Step name="개시" on href={convoHref(i.ctx)} title={`${i.at} · 통합 에이전트`} />
+          <Step name="후보" on={i.candidates.length > 0} title={i.candidates.map((c) => c.pr).join(', ') || '없음'}>
+            <ul>{i.candidates.map((c) => <li key={c.pr}><Ref s={s} id={c.pr} /> · <a href={toPath(`work/specs/${c.spec}/${c.para}`)} className="plain-link">{c.spec} {c.para}</a> · {c.mergedAt} 머지</li>)}</ul>
+          </Step>
+          <Step name="롤백" on={!!i.rollbackCheck} title={i.rollbackCheck ? `${i.rollbackCheck.result} · ${i.rollbackCheck.target}` : '없음'}>
+            {i.rollbackCheck && <p className="muted">{i.rollbackCheck.why}</p>}
+          </Step>
+          <Step name="문단" on={i.linked} href={c0 && i.linked ? toPath(`work/specs/${c0.spec}/${c0.para}`) : undefined} title={i.linked ? i.candidates.map((c) => `${c.spec} ${c.para}`).join(', ') || '-' : '연결 보류'} />
+          <Step name="후속" on={!!follow} href={follow ? hrefOf(s, follow.id) : undefined} title={follow ? `${follow.id} · ${follow.state}` : '없음'}>
+            {follow && <p>{follow.title}</p>}
+          </Step>
+        </Flow>
+        <div className="inc-drawer-sub">
+          <h3>활동 {acts.length}</h3>
+          <div className="seg-toggle" role="group" aria-label="활동 순서">
+            <button type="button" aria-pressed={newest} onClick={() => setNewest(true)}>최신순</button>
+            <button type="button" aria-pressed={!newest} onClick={() => setNewest(false)}>오래된순</button>
+          </div>
+        </div>
+        <ActivityList s={s} items={newest ? acts.slice().reverse() : acts} />
+      </div>
+    </aside>
   )
 }
