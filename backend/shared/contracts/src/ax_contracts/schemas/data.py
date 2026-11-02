@@ -531,6 +531,17 @@ class TrendEvidence(AxModel):
     baseline_points: int = Field(default=0, ge=0)  # 기준선에 쓴 시점 수
     spread: float | None = Field(default=None, ge=0)  # 평소 흔들림 (log 값의 중앙 절대 편차)
     score: float | None = None  # 평소 흔들림의 몇 배만큼 벗어났는지 (강건 z)
+    # 평소 범위(화면의 띠): 기준선 log 중앙값 ± σ(= 1.4826 × MAD, 하한 적용)를 되돌린 값.
+    # 예전 응답은 없다
+    band_low: float | None = Field(default=None, ge=0)
+    band_high: float | None = Field(default=None, ge=0)
+
+
+class TrendPoint(AxModel):
+    """날짜별 값 하나 (같은 요청 안 상대값, 최댓값 100). 네이버가 주지 않은 날은 빠진다(0 아님)."""
+
+    day: dt.date
+    value: float = Field(ge=0)
 
 
 class TrendVerdict(AxModel):
@@ -539,6 +550,10 @@ class TrendVerdict(AxModel):
     ratio: float | None = Field(default=None, ge=0)  # 기준선 대비 배수 (판정 못 하면 None)
     evidence: TrendEvidence = Field(default_factory=TrendEvidence)
     unknown_reason: str | None = None  # status가 unknown이면 이유 (예: 자료 없음, 기준선 0)
+    # 아래는 화면(그래프·설명)용으로 추가. 예전 응답에는 없다
+    series: list[TrendPoint] = Field(default_factory=list)  # 이 그룹이 받은 날짜별 값 (기간 전체)
+    window_from: dt.date | None = None  # 판정 구간 시작일 (그 앞은 기준선)
+    summary: str | None = None  # 이 그룹 설명 한두 문장 (급상승만, 숫자는 근거에서 검증)
 
     @model_validator(mode="after")
     def _reason_when_unknown(self) -> Self:

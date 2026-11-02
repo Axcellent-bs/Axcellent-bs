@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 import { ActivityReport } from "@/components/data/ActivityReport";
 import { IncidentData } from "@/components/data/IncidentData";
 import { LearningKpi } from "@/components/data/LearningKpi";
+import { TrendScan } from "@/components/data/TrendScan";
 import { Chip, TONE, useResource } from "@/components/finance/bits";
 import { DATA_SERVER, ORCH_SERVER, dataAi, sortRecent } from "@/lib/data";
 import { orchestrator } from "@/lib/orchestrator";
@@ -10,19 +11,20 @@ import { useCompany } from "@/demo/company";
 
 // 데이터분석 AI 화면 = 고객사 데이터분석팀. 짜임은 재무 AI(/finance)와 같다.
 // 기본 화면은 결제 장애의 "장애 사건 데이터": 이상 감지 → 영향 분석 → 복구 확인 → 처리 시간 요약.
-// 두 번째 탭 "평상시 지표"는 학습 효과·KPI. 세 번째 탭 "리포트"(#report)는 부서별 AI 업무 리포트(activity_report). 숫자는 서버가 계산한 값만 보여 주고, 없으면 빈 상태를 보여 준다(예시 숫자를 만들지 않는다).
+// 두 번째 탭 "평상시 지표"는 학습 효과·KPI. 세 번째 탭 "리포트"(#report)는 부서별 AI 업무 리포트(activity_report). 네 번째 탭 "트렌드"(#trend)는 검색어 급상승(trend_scan). 숫자는 서버가 계산한 값만 보여 주고, 없으면 빈 상태를 보여 준다(예시 숫자를 만들지 않는다).
 // 실서버 연결 방법과 화면이 부르는 주소: frontend/README.md "데이터 분석 화면 확인 방법"
 
 const REFRESH_MS = 30_000;
 
-type Mode = "incident" | "daily" | "report";
-const MODE_LABEL: Record<Mode, string> = { incident: "장애 사건 데이터", daily: "평상시 지표", report: "리포트" };
-const MODE_HASH: Record<Mode, string> = { incident: "", daily: "#daily", report: "#report" };
+type Mode = "incident" | "daily" | "report" | "trend";
+const MODE_LABEL: Record<Mode, string> = { incident: "장애 사건 데이터", daily: "평상시 지표", report: "리포트", trend: "트렌드" };
+const MODE_HASH: Record<Mode, string> = { incident: "", daily: "#daily", report: "#report", trend: "#trend" };
+const MODES = Object.keys(MODE_LABEL) as Mode[];
 
 export default function DataPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const mode: Mode = location.hash === "#daily" ? "daily" : location.hash === "#report" ? "report" : "incident";
+  const mode: Mode = MODES.find((m) => MODE_HASH[m] && MODE_HASH[m] === location.hash) ?? "incident";
   const urlIncident = new URLSearchParams(location.search).get("incident");
 
   const openMode = useCallback((m: Mode) => {
@@ -87,15 +89,15 @@ export default function DataPage() {
       )}
       {dataUp === false && (
         <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
-          {DATA_SERVER}에 연결할 수 없어요. 평상시 지표와 리포트를 받을 수 없습니다.{orchUp ? " 장애 사건 데이터는 총괄 기록으로 계속 보입니다." : ""}
+          {DATA_SERVER}에 연결할 수 없어요. 평상시 지표·리포트·트렌드를 받을 수 없습니다.{orchUp ? " 장애 사건 데이터는 총괄 기록으로 계속 보입니다." : ""}
         </p>
       )}
 
-      {/* 맨 위 전환: 장애 사건 데이터 | 평상시 지표 | 리포트 */}
-      <div role="tablist" aria-label="데이터분석 화면" className="flex w-full gap-1 rounded-2xl bg-surface p-1 ring-1 ring-ink-100 sm:w-auto sm:max-w-xl">
-        {(["incident", "daily", "report"] as Mode[]).map((m) => (
+      {/* 맨 위 전환: 장애 사건 데이터 | 평상시 지표 | 리포트 | 트렌드 */}
+      <div role="tablist" aria-label="데이터분석 화면" className="flex w-full gap-1 overflow-x-auto rounded-2xl bg-surface p-1 ring-1 ring-ink-100 sm:w-auto sm:max-w-2xl">
+        {MODES.map((m) => (
           <button key={m} type="button" role="tab" id={`data-mode-${m}`} aria-selected={mode === m} aria-controls={`data-mode-panel-${m}`} onClick={() => openMode(m)}
-            className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${mode === m ? "bg-brand-600 text-white" : "text-ink-700 hover:bg-ink-100"}`}>
+            className={`flex-1 whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${mode === m ? "bg-brand-600 text-white" : "text-ink-700 hover:bg-ink-100"}`}>
             {MODE_LABEL[m]}
           </button>
         ))}
@@ -114,6 +116,11 @@ export default function DataPage() {
       {mode === "report" && (
         <div role="tabpanel" id="data-mode-panel-report" aria-labelledby="data-mode-report">
           <ActivityReport tick={tick} />
+        </div>
+      )}
+      {mode === "trend" && (
+        <div role="tabpanel" id="data-mode-panel-trend" aria-labelledby="data-mode-trend">
+          <TrendScan />
         </div>
       )}
     </div>

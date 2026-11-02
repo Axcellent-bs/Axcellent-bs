@@ -141,6 +141,28 @@ def test_tiny_baseline_is_unknown() -> None:
     assert "기준선 값이 너무 작음" in (verdict.unknown_reason or "")
 
 
+# ---------------------------------------------------------------- 화면용 값 (series·평소 범위)
+
+
+def test_every_verdict_carries_its_series_and_window_start() -> None:
+    series = _series(spike=2.0, spike_days=3)
+    verdict = judge_series(series, START, END)
+    assert [(p.day, p.value) for p in verdict.series] == list(series.points)  # 받은 값 그대로
+    assert verdict.window_from == END - timedelta(days=6)
+    empty = judge_series(_series(keep=lambda d: False), START, END)
+    assert empty.status == "unknown" and empty.series == [] and empty.window_from is not None
+    sparse = judge_series(_series(keep=lambda d: d.toordinal() % 3 == 0), START, END)
+    assert len(sparse.series) == len(
+        _series(keep=lambda d: d.toordinal() % 3 == 0).points
+    )  # 빈 날을 채우지 않음
+
+
+def test_usual_band_brackets_the_baseline() -> None:
+    e = judge_series(_series(), START, END).evidence
+    assert e.band_low is not None and e.band_high is not None and e.baseline_value is not None
+    assert e.band_low < e.baseline_value < e.band_high
+
+
 # ---------------------------------------------------------------- skill
 
 
@@ -232,6 +254,38 @@ def test_connector_failure_for_every_group_raises() -> None:
     connector = MemoryConnector({}, fail={"고양이"})
     with pytest.raises(ConnectorUnavailable):
         _scan(connector, TrendScanRequest(keyword_groups=_groups("고양이"), end_date=END))
+
+
+def test_rising_groups_get_their_own_sentence() -> None:
+    connector = MemoryConnector(
+        {"고양이": _series("고양이", spike=3.0, spike_days=2), "그림책": _series("그림책")}
+    )
+    result = _scan(
+        connector, TrendScanRequest(keyword_groups=_groups("고양이", "그림책"), end_date=END)
+    )
+    by_group = {r.group_name: r for r in result.output.results}
+    rising = by_group["고양이"]
+    assert rising.summary and rising.summary.startswith(
+        "고양이 검색이 직전 56일 평소의"
+    )  # LLM 없음 → 템플릿
+    assert f"{rising.ratio}배" in rising.summary
+    assert by_group["그림책"].summary is None  # 평범한 그룹엔 문장을 만들지 않는다
+
+
+def test_group_sentence_with_invented_numbers_falls_back() -> None:
+    connector = MemoryConnector({"고양이": _series("고양이", spike=3.0, spike_days=2)})
+    llm = MockLLMClient(responses={_Summary: _Summary(summary="고양이가 77배 뛰었습니다.")})
+    result = asyncio.run(
+        scan_trends(
+            TrendScanRequest(keyword_groups=_groups("고양이"), end_date=END),
+            connector,  # type: ignore[arg-type]
+            llm,
+            env={},
+        )
+    )
+    (verdict,) = result.output.results
+    assert "77" not in (verdict.summary or "") and result.fallback
+    assert "고양이: 설명 문장을 템플릿으로 대체함: number_invalid" in result.evidence.data_summary
 
 
 def test_llm_numbers_outside_the_facts_fall_back_to_the_template() -> None:
