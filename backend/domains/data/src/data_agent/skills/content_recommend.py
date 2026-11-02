@@ -233,7 +233,13 @@ async def recommend(
     groups = default_groups(env)
     judged = await _judge_groups(groups, connector, start, end, settings)
     found = await find_candidates(
-        TrendCandidatesRequest(end_date=end), connector, env=env, settings=settings, now=now
+        # 요청에 end_date가 없으면(지금) 그대로 비워서, 지금 가장 최근 스냅샷을 쓰게 한다.
+        # 지난 기간이면 그 기간 끝 이전 스냅샷을 쓴다(trend_candidates)
+        TrendCandidatesRequest(end_date=request.end_date),
+        connector,
+        env=env,
+        settings=settings,
+        now=now,
     )
     cand = found.output
     topics = merge_topics(judged, cand.candidates)

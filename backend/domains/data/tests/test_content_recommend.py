@@ -45,7 +45,9 @@ from data_agent.skills.trend_scan import REQUEST_DAYS
 from data_agent.youtube_store import Row, SnapshotStore
 
 NOW = datetime(2026, 11, 2, 6, 0, tzinfo=UTC)
-SNAP_AT = NOW - timedelta(hours=1)
+# 판정 마지막 날(END = 11-01) 한국 시간 23시. 지난 기간(end_date) 판정은 그 기간 끝(11-02 0시 KST)
+# 이전 스냅샷만 쓴다
+SNAP_AT = datetime(2026, 11, 1, 14, 0, tzinfo=UTC)
 END = date(2026, 11, 1)
 START = END - timedelta(days=REQUEST_DAYS - 1)
 
@@ -393,3 +395,29 @@ def test_writing_z_or_video_count_is_now_caught_by_the_number_check(tmp_path: Pa
     [item] = _run(env, naver, _llm(f"t1 관심이 z {z}까지 올랐어요.")).output.items
     assert item.fallback and item.fallback_reason == "number_invalid"
     assert "YouTube 인기 영상 3개" in item.idea  # 영상 수는 고정 문장에만
+
+
+def test_a_past_period_without_a_snapshot_keeps_the_search_judgement(tmp_path: Path) -> None:
+    """지난 기간에 그때 스냅샷이 없으면 YouTube 후보만 unknown + 이유.
+
+    기본 키워드 검색 판정은 그대로다.
+    """
+    naver = Naver({"그림책": 3.0})
+    env = _env(tmp_path, videos=[])  # 스냅샷이 하나도 없음
+    out = asyncio.run(
+        recommend(ContentRecommendRequest(end_date=END), naver, _llm(), env=env, now=NOW)
+    ).output
+    assert out.youtube_status == "unknown"
+    reason = out.youtube_reason or ""
+    assert reason.startswith("그 시점(2026-11-02 0시 KST) 이전 YouTube 스냅샷이 없음")
+    assert [i.keyword for i in out.items] == ["그림책"]
+    assert out.items[0].sources == ["naver"] and not out.items[0].score.two_sources
+
+
+def test_the_default_period_uses_the_latest_snapshot(tmp_path: Path) -> None:
+    out = asyncio.run(
+        recommend(
+            ContentRecommendRequest(), Naver({"t1": 3.0}), _llm(), env=_env(tmp_path), now=NOW
+        )
+    ).output
+    assert out.youtube_status == "known" and out.snapshot_at == SNAP_AT

@@ -42,7 +42,9 @@ from data_agent.youtube_store import (
 )
 
 NOW = datetime(2026, 11, 2, 6, 0, tzinfo=UTC)
-SNAP_AT = NOW - timedelta(hours=1)
+# 판정 마지막 날(END = 11-01) 한국 시간 23시. 지난 기간(end_date) 판정은 그 기간 끝(11-02 0시 KST)
+# 이전 스냅샷만 쓴다
+SNAP_AT = datetime(2026, 11, 1, 14, 0, tzinfo=UTC)
 END = date(2026, 11, 1)
 START = END - timedelta(days=REQUEST_DAYS - 1)
 CATBOOKS_TRENDS = (
@@ -345,24 +347,25 @@ def test_no_snapshot_is_unknown_with_a_reason(tmp_path: Path) -> None:
     naver = Naver({})
     out = _run(tmp_path / "missing.db", naver).output
     assert out.status == "unknown" and out.candidates == [] and out.snapshot_at is None
-    assert (out.unknown_reason or "").startswith("YouTube 스냅샷이 없음")
+    assert "스냅샷이 없음" in (out.unknown_reason or "")
     assert naver.queries == []  # 네이버를 부르지 않는다
 
 
 def test_a_db_with_only_tracked_videos_has_no_popular_snapshot(tmp_path: Path) -> None:
     out = _run(_db(tmp_path, [("tr", None, ("t1",))]), Naver({})).output
     assert out.status == "unknown"
-    assert (out.unknown_reason or "").startswith("YouTube 스냅샷이 없음")
+    assert "스냅샷이 없음" in (out.unknown_reason or "")
 
 
 def test_an_old_snapshot_is_unknown_with_its_age(tmp_path: Path) -> None:
     naver = Naver({})
-    old = NOW - timedelta(hours=30)
+    old = datetime(2026, 10, 31, 9, 0, tzinfo=UTC)  # 판정 기간 끝(11-01 15시 UTC)보다 30시간 전
     out = _run(_db(tmp_path, VIDEOS, at=old), naver).output
     assert out.status == "unknown" and out.candidates == []
     assert out.snapshot_at == old
     assert out.unknown_reason == (
-        "YouTube 스냅샷이 오래됨: 마지막 수집 2026-11-01T00:00:00+00:00 (30.0시간 전, 기준 24시간)"
+        "YouTube 스냅샷이 오래됨: 마지막 수집 2026-10-31T09:00:00+00:00"
+        " (판정 기간 끝보다 30.0시간 전, 기준 24시간)"
     )
     assert naver.queries == []
 
@@ -390,7 +393,7 @@ def test_handler_completes_with_the_contract_output(
     monkeypatch.setenv("DATA_TREND_CONFIG", str(CATBOOKS_TRENDS))
     monkeypatch.setattr(handlers, "get_trend_connector", lambda: Naver({"t1": 3.0}))
     result = asyncio.run(
-        handlers.HANDLERS["trend_candidates"](_request({"end_date": "2026-11-01"}))
+        handlers.HANDLERS["trend_candidates"](_request({}))  # 지금 기준 (가장 최근 스냅샷)
     )
     assert result.status == TaskStatus.COMPLETED and result.outcome == "known"
     assert [c["keyword"] for c in result.output["candidates"]] == ["t1", "롤", "젠지"]
@@ -490,3 +493,60 @@ def test_pick_verdict_takes_the_biggest_z_among_rising_names() -> None:
     chosen, source, rising = pick_verdict(group, [v("가", "rising", 4.0), v("나", "rising", 6.0)])
     assert (chosen.group_name, source, rising) == ("나", "name", ["가", "나"])
     assert pick_verdict(group, [])[1] == "group"
+
+
+# -------------------------------------------------- 지난 기간 판정 = 그 시점 스냅샷
+
+
+def test_latest_popular_can_look_back_to_a_time(tmp_path: Path) -> None:
+    path = _db(tmp_path, [("old", 1, ("옛날",))], at=SNAP_AT - timedelta(days=2))
+    store = SnapshotStore(path)
+    store.save(SNAP_AT, [Row(_stat("new", 1, ("요즘",)), ("popular",))])
+    store.close()
+    assert latest_popular(path).collected_at == SNAP_AT  # type: ignore[union-attr]
+    back = latest_popular(path, SNAP_AT - timedelta(days=1))
+    assert back is not None and [v.video_id for v in back.videos] == ["old"]
+    assert latest_popular(path, SNAP_AT - timedelta(days=3)) is None
+
+
+def _two_snapshots(tmp_path: Path) -> Path:
+    """10-24 23시 KST(그 주 끝)와 11-01 23시 KST 두 번 받은 DB. 태그가 다르다."""
+    first = datetime(2026, 10, 24, 14, 0, tzinfo=UTC)
+    path = _db(tmp_path, [("a", 1, ("가을",)), ("b", 2, ("가을",))], at=first)
+    store = SnapshotStore(path)
+    store.save(SNAP_AT, [Row(_stat("c", 1, ("t1",)), ("popular",)),
+                         Row(_stat("d", 2, ("t1",)), ("popular",))])  # fmt: skip
+    store.close()
+    return path
+
+
+def test_a_past_period_uses_the_snapshot_from_that_time(tmp_path: Path) -> None:
+    path = _two_snapshots(tmp_path)
+    env = {"DATA_YOUTUBE_DB": str(path), "DATA_TREND_CONFIG": str(CATBOOKS_TRENDS)}
+    past = TrendCandidatesRequest(end_date=date(2026, 10, 24))
+    out = asyncio.run(find_candidates(past, Naver({}), env=env, now=NOW)).output
+    assert out.snapshot_at == datetime(2026, 10, 24, 14, 0, tzinfo=UTC)
+    assert [c.keyword for c in out.candidates] == ["가을"]
+    now = asyncio.run(find_candidates(TrendCandidatesRequest(), Naver({}), env=env, now=NOW)).output
+    assert now.snapshot_at == SNAP_AT and [c.keyword for c in now.candidates] == ["t1"]
+
+
+def test_a_past_period_without_a_snapshot_then_is_unknown(tmp_path: Path) -> None:
+    path = _two_snapshots(tmp_path)
+    env = {"DATA_YOUTUBE_DB": str(path), "DATA_TREND_CONFIG": str(CATBOOKS_TRENDS)}
+    naver = Naver({})
+    early = TrendCandidatesRequest(end_date=date(2026, 10, 11))
+    out = asyncio.run(find_candidates(early, naver, env=env, now=NOW)).output
+    assert out.status == "unknown" and out.candidates == [] and naver.queries == []
+    assert out.unknown_reason == (
+        "그 시점(2026-10-12 0시 KST) 이전 YouTube 스냅샷이 없음"
+        " (지난 기간은 그때 스냅샷의 태그로만 본다)"
+    )
+
+
+def test_a_past_period_snapshot_too_far_before_is_old(tmp_path: Path) -> None:
+    path = _two_snapshots(tmp_path)
+    env = {"DATA_YOUTUBE_DB": str(path), "DATA_TREND_CONFIG": str(CATBOOKS_TRENDS)}
+    later = TrendCandidatesRequest(end_date=date(2026, 10, 28))  # 10-24 스냅샷은 4일 전
+    out = asyncio.run(find_candidates(later, Naver({}), env=env, now=NOW)).output
+    assert out.status == "unknown" and "판정 기간 끝보다" in (out.unknown_reason or "")
