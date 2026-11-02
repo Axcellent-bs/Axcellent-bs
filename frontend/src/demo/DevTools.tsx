@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from '@/lib/nav'
-import { DEV_API, vcsApi, type VcsAuth, type VcsConnection, type VcsTestResult } from '@/lib/planning'
+import { DEV_API, codingSettingsApi, vcsApi, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsTestResult } from '@/lib/planning'
 
 // 개발 도구 연결: 고객사 개발팀이 쓰는 형상관리·CI·배포 도구를 개발·배포 AI(dev)에 잇는 창구.
 // 형상관리 연결은 레포마다 1개, 여러 개. dev 서비스(`/api/planning/vcs/connections`)에 저장되고 토큰은 끝 4자리만 온다.
@@ -35,6 +35,54 @@ const splitPaths = (x: string) => x.split(/[,\n]/).map((p) => p.trim()).filter(B
 const failed = (id: string, message: string): VcsTestResult => ({ ok: false, code: 'unavailable', message, checked_at: new Date().toISOString(), connection_id: id })
 
 const TONE = { ok: 'bg-emerald-50 text-emerald-700', bad: 'bg-red-50 text-red-700', wait: 'bg-amber-50 text-amber-700', none: 'bg-ink-100 text-ink-700' }
+
+// 요청 작업 코딩 방식: 기획에서 넘어온 작업을 누가 코딩하나 (회사 설정)
+const CODING_MODES: { id: CodingSetting; label: string }[] = [
+  { id: 'auto', label: '자동' },
+  { id: 'agent', label: '서버 AI' },
+  { id: 'subscription', label: '내 Claude' },
+]
+const codingApi = codingSettingsApi(DEV_API)
+const fmtTokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(0)}k` : `${n}`)
+
+/** 요청 작업 코딩 방식 + 서버 AI 체험 한도 */
+function CodingModeSection() {
+  const [cfg, setCfg] = useState<CodingSettings | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { codingApi.get().then(setCfg).catch(() => setError('개발 AI에 연결할 수 없음')) }, [])
+  const choose = async (mode: CodingSetting) => {
+    setBusy(true)
+    setError(null)
+    try { setCfg(await codingApi.set(mode)) } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+  }
+  const pct = cfg ? Math.min(100, Math.round((cfg.trial_used / Math.max(cfg.trial_limit, 1)) * 100)) : 0
+  return (
+    <section className="card space-y-4 p-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="card-title text-lg">요청 작업 코딩</h2>
+        {cfg && <span className={`chip ${cfg.resolved === 'agent' ? TONE.none : TONE.ok}`}>지금: {cfg.resolved === 'agent' ? '서버 AI' : '내 Claude'}</span>}
+        {error && <span className="chip bg-amber-50 text-amber-700">{error}</span>}
+      </div>
+      <div className="seg-toggle" role="group" aria-label="요청 작업 코딩 방식">
+        {CODING_MODES.map((m) => (
+          <button key={m.id} type="button" aria-pressed={cfg?.mode === m.id} disabled={!cfg || busy} onClick={() => void choose(m.id)}>{m.label}</button>
+        ))}
+      </div>
+      {cfg && (
+        <dl className="grid grid-cols-[120px_1fr] gap-x-3 gap-y-2 text-sm">
+          <dt className="text-ink-500">이유</dt><dd>{cfg.why}</dd>
+          <dt className="text-ink-500">내 Claude 연결</dt><dd>{cfg.agents_connected.length ? cfg.agents_connected.join(', ') : '없음'}</dd>
+          <dt className="text-ink-500">서버 AI 체험</dt>
+          <dd className="flex items-center gap-3">
+            <span className="h-2 w-40 overflow-hidden rounded-full bg-ink-100"><span className="block h-full bg-[rgb(var(--primary))]" style={{ width: `${pct}%` }} /></span>
+            <span className="mono">{fmtTokens(cfg.trial_used)} / {fmtTokens(cfg.trial_limit)} 토큰</span>
+          </dd>
+        </dl>
+      )}
+    </section>
+  )
+}
 
 /** 형상관리 연결 목록 + 다른 개발 도구. 개발·배포 화면의 톱니바퀴 창과 시스템 관리 화면이 같이 쓴다 */
 export function DevToolsPanel() {
@@ -184,6 +232,7 @@ export function DevToolsPanel() {
 
   return (
     <div className="space-y-6">
+      <CodingModeSection />
       <section className="card space-y-4 p-6">
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="card-title text-lg">형상관리</h2>

@@ -18,6 +18,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from ax_agent_template import config as template_config
 from ax_contracts.schemas import TENANT_ID_DEFAULT
 from ax_contracts.schemas.planning import (
     DevResultInput,
@@ -139,6 +140,8 @@ class DevService(PlanningCore):
         self._cross_checker: CrossChecker | None = (
             cross_check.default_checker() if cross_checker == "default" else cross_checker
         )
+        # 넘겨받은 요청 작업 중 서버 AI로 띄울 것 (바꿔 끼운 뒤 잠금 밖에서 띄운다)
+        self._pending_spawn: list[str] = []
         self._init_state()
 
     def _spawn_hold(self, task_id: str) -> None:
@@ -322,12 +325,18 @@ class DevService(PlanningCore):
             todo = [
                 t
                 for t in s.tasks
-                if t.spec == sp.id and t.state == "진행 중" and t.id not in has_pr
+                if t.spec == sp.id
+                and t.state == "진행 중"
+                and t.id not in has_pr
+                and t.coding is None
             ]
             if not todo:
                 continue
             req = self._request_of_spec(s, sp)
-            if sp.auto and req and req.auto and req.auto.ok:
+            if self._real_coding():
+                # 실제 레포에 올릴 때: 작업마다 코딩 작업을 만든다 (회사 설정대로 서버 AI·내 Claude)
+                await self._queue_coding(s, sp, req, todo)
+            elif sp.auto and req and req.auto and req.auto.ok:
                 # planning이 넘긴 간단 요청: 원래 간단 요청 경로대로 PR·머지까지 한 번에
                 await self._auto_build(s, req, sp, todo[0])
             else:
@@ -362,6 +371,11 @@ class DevService(PlanningCore):
         if mode not in ("agent", "subscription"):
             raise ActionError("INVALID_INPUT", "mode는 agent·subscription 중 하나다")
         sub = mode == "subscription"
+        if not sub and self.trial_used(self.state) >= self.trial_limit():
+            raise ActionError(
+                "TRIAL_EXHAUSTED",
+                f"서버 AI 체험 한도({self.trial_limit():,} 토큰)를 다 썼어요. 내 Claude로",
+            )
         title = " ".join((title or "").split())
         plan = (plan or "").strip()
         if not title or not plan:
@@ -466,6 +480,144 @@ class DevService(PlanningCore):
     async def tick(self) -> None:
         """화면이 열려 있는 동안 오래된 교차검증 대기를 사람 확인으로 넘긴다."""
         await self.escalate_waits()
+
+    def _after(self, s: State, mark: dict[str, Any], changed: bool) -> None:
+        super()._after(s, mark, changed)
+        spawn, self._pending_spawn = self._pending_spawn, []
+        for task_id in spawn if changed else []:  # 넘겨받은 요청 작업 → 서버 AI 코딩
+            self._spawn_coder(task_id)
+
+    # ---- 요청 작업 코딩 방식 (회사 설정) · 서버 AI 체험 한도
+
+    @staticmethod
+    def _real_coding() -> bool:
+        """넘겨받은 요청 작업을 실제 코딩 작업으로 돌리나 (아니면 시연용 PR 기록).
+
+        목 모드가 아니고 형상관리 연결이 있으면 돌린다. `PLANNING_REQUEST_CODING=1`이면 늘."""
+        if os.getenv("PLANNING_REQUEST_CODING", "").strip().lower() in ("1", "true", "on"):
+            return True
+        return not template_config.is_mock(AGENT_NAME) and bool(vcs_bridge.targets())
+
+    @staticmethod
+    def trial_limit() -> int:
+        """서버 AI 체험 한도 (회사 전체, 입력+출력 토큰). `PLANNING_TRIAL_TOKENS`."""
+        return coder.limit("PLANNING_TRIAL_TOKENS", TRIAL_TOKENS)
+
+    @staticmethod
+    def trial_used(s: State) -> int:
+        """서버 AI(회사 키)로 돈 코딩 작업이 지금까지 쓴 토큰."""
+        return sum(t.coding.llm_tokens for t in s.tasks if t.coding and t.coding.mode == "agent")
+
+    def agents_connected(self, s: State) -> list[str]:
+        """최근 본인 Claude(MCP)로 일감을 본 개발자."""
+        since = self.clock() - timedelta(days=AGENT_SEEN_DAYS)
+        return sorted(who for who, at in s.agents_seen.items() if at >= since)
+
+    def coding_choice(self, s: State) -> tuple[str, str]:
+        """넘겨받은 요청 작업을 누가 코딩하나 (agent·subscription)와 그 이유 한 줄."""
+        if s.coding_mode == "subscription":
+            return "subscription", "회사 설정: 내 Claude"
+        seen = self.agents_connected(s)
+        if s.coding_mode == "auto" and seen:
+            return "subscription", f"본인 Claude 연결 {len(seen)}명 → 내 Claude"
+        used, limit = self.trial_used(s), self.trial_limit()
+        if used >= limit:
+            return (
+                "subscription",
+                f"서버 AI 체험 한도를 다 씀 ({used:,}/{limit:,} 토큰) → 내 Claude",
+            )
+        if s.coding_mode == "agent":
+            return "agent", "회사 설정: 서버 AI"
+        return "agent", "본인 Claude 연결 없음 → 서버 AI (체험)"
+
+    def _task_connection(self, sp: Spec, req: Request | None, t: Task) -> str | None:
+        """작업을 올릴 연결: 하나면 그것, 여럿이면 규칙 점수로 하나 (없으면 None)."""
+        conns = vcs_bridge.targets()
+        if len(conns) <= 1:
+            return conns[0].id if conns else None
+        para = next((p for p in sp.paras if p.id == t.para), None)
+        inp = repo_routing.RouteInput(
+            title=t.title,
+            text=para.text if para else "",
+            changed_paths=tuple(para.paths) if para else (),
+            request_title=req.title if req else "",
+        )
+        cands = [repo_routing.Candidate(c.id, c.repo, c.description, tuple(c.paths)) for c in conns]
+        return repo_routing.score_rules(inp, cands).connection_id
+
+    async def _queue_coding(
+        self, s: State, sp: Spec, req: Request | None, todo: list[Task]
+    ) -> None:
+        """넘겨받은 기획서의 작업마다 코딩 작업을 만든다. 서버 AI면 바꿔 끼운 뒤 띄우고,
+        내 Claude면 대기열에 둔다 (개발자 본인 Claude가 MCP로 가져감)."""
+        mode, why = self.coding_choice(s)
+        llm = coder.get_llm() if mode == "agent" else None
+        if mode == "agent" and llm is None:
+            mode, why = "subscription", "서버 AI 설정(LLM) 없음 → 내 Claude"
+        ctx = req.context_id if req else f"spec:{sp.id}"
+        for t in todo:
+            cid = self._task_connection(sp, req, t)
+            who = "코딩 에이전트" if mode == "agent" else "개발자 Claude"
+            text = f"{t.id} 요청 작업 → {who} 대기 ({why}, 연결 {cid or '-'})"
+            await self._execute(
+                "dev_task_create", ctx, t.id, text,
+                {"spec": sp.id, "connection": cid, "mode": mode, "from_request": True},
+                [sp.id, t.id],
+            )  # fmt: skip
+            t.coding = CodingRun(
+                status="queued",
+                model=coder.model_name(llm) if llm else None,
+                updated_at=self.clock(),
+                connection=cid,
+                mode=mode,  # type: ignore[arg-type]
+            )
+            if mode == "agent":
+                self._pending_spawn.append(t.id)
+            s.activity.append(
+                self._act(self.clock(), ctx, "dev", "dev", "dev_task_create", "A2A", text, "A")
+            )
+
+    async def set_coding_mode(self, mode: str) -> ActionResult:
+        """회사 설정: 넘겨받은 요청 작업을 누가 코딩하나 (auto·agent·subscription, 관리자)."""
+        if mode not in ("auto", "agent", "subscription"):
+            raise ActionError("INVALID_INPUT", "mode는 auto·agent·subscription 중 하나다")
+
+        async def run(s: State) -> ActionResult:
+            if s.coding_mode != mode:
+                text = f"요청 작업 코딩 방식 {s.coding_mode} → {mode}"
+                s.coding_mode = mode  # type: ignore[assignment]
+                s.activity.append(
+                    self._act(
+                        self.clock(), "dev_settings", "human", "dev", "dev.settings", "사람", text
+                    )
+                )
+            return ActionResult(output=self.coding_settings(s))
+
+        return await self._apply(run)
+
+    def coding_settings(self, s: State | None = None) -> dict[str, Any]:
+        s = s or self.state
+        mode, why = self.coding_choice(s)
+        return {
+            "mode": s.coding_mode,
+            "resolved": mode,
+            "why": why,
+            "agents_connected": self.agents_connected(s),
+            "trial_used": self.trial_used(s),
+            "trial_limit": self.trial_limit(),
+        }
+
+    async def mark_agent_seen(self, who: str) -> None:
+        """본인 Claude(MCP 일감 서버)로 일감을 본 개발자를 적는다 (10분에 한 번만)."""
+        now = self.clock()
+        last = self.state.agents_seen.get(who)
+        if last is not None and now - last < timedelta(minutes=10):
+            return
+
+        async def run(s: State) -> None:
+            s.agents_seen[who] = now
+
+        await self._apply(run)
 
     def _kick_waiting(self) -> None:
         """충돌하는 요청이 끝나기를 기다리는 대화가 있으면 깨운다 (dev_chat.resume_waiting)."""
@@ -1792,7 +1944,10 @@ class DevService(PlanningCore):
         if task is None or task.coding is None or sp is None:
             return None
         req = self._request_of_spec(self.state, sp)
-        r1 = next((p for p in sp.paras if p.id == "R1"), None)
+        para = next((p for p in sp.paras if p.id == task.para), None)
+        plan = (
+            sp.problem if para is None or para.text in sp.problem else f"{sp.problem}\n{para.text}"
+        )
         return coder.Job(
             run_id=run_id,
             task_id=task.id,
@@ -1800,9 +1955,9 @@ class DevService(PlanningCore):
             request_id=req.id if req else sp.request,
             ctx=req.context_id if req else f"task:{task.id}",
             title=task.title,
-            plan=sp.problem,
+            plan=plan,
             done=tuple(p.text for p in sp.paras if p.kind == "done"),
-            hints=tuple(r1.paths) if r1 else (),
+            hints=tuple(para.paths) if para else (),
             connection=task.coding.connection,
             instruction=task.coding.instruction,
             skip_queue=task.coding.skip_queue,
@@ -2589,6 +2744,8 @@ class DevService(PlanningCore):
         pol.proposal = None
 
 
+TRIAL_TOKENS = 1_000_000  # 서버 AI 체험 한도 기본값 (PLANNING_TRIAL_TOKENS)
+AGENT_SEEN_DAYS = 7  # 이 기간 안에 본인 Claude로 일감을 본 개발자가 있으면 '연결됨'
 WAIT_POLL_SECONDS = 30  # 다른 서비스 요청을 기다리는 대화를 다시 보는 간격
 
 

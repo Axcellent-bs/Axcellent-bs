@@ -37,6 +37,7 @@ CODING_CONFLICT = {
     "NOT_CANCELABLE",
     "NOT_REVISABLE",
     "WRONG_ROLE",
+    "TRIAL_EXHAUSTED",  # 서버 AI 체험 한도를 다 씀
 }
 MAX_CHATS_LISTED = 20
 
@@ -414,9 +415,32 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
     add_work_routes(router, get_service)
 
 
+def add_settings_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
+    """요청 작업 코딩 방식(회사 설정)·서버 AI 체험 한도."""
+
+    @router.get("/coding-settings")
+    def get_coding_settings() -> dict:
+        svc = get_service()
+        return _ok(svc.coding_settings(), svc)
+
+    @router.post("/coding-settings", response_model=None, dependencies=ADMIN)
+    async def post_coding_settings(request: Request) -> dict | JSONResponse:
+        """`{mode: auto|agent|subscription}` (관리자)."""
+        svc = get_service()
+        body = await _body(request)
+        if body is None:
+            return _err(400, "INVALID_INPUT", "본문은 JSON 객체여야 한다")
+        try:
+            result = await svc.set_coding_mode(str(body.get("mode", "")))
+        except ActionError as exc:
+            return _err(400, exc.code, exc.message)
+        return _ok(result.output, svc)
+
+
 def create_dev_router(get_service: Callable[[], Any]) -> APIRouter:
     """개발 서비스 화면 REST (공용 + 개발)."""
     router = APIRouter(prefix="/api/planning", tags=["dev"])
     add_common_routes(router, get_service)
     add_dev_routes(router, get_service)
+    add_settings_routes(router, get_service)
     return router

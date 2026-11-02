@@ -101,7 +101,8 @@ def _str(args: dict, key: str, *, required: bool = True, limit: int = 2000) -> s
 
 
 async def _run(svc: DevService, who: str, name: str, args: dict) -> Any:
-    """도구 하나를 부른다. REST와 MCP가 같이 쓴다."""
+    """도구 하나를 부른다. REST와 MCP가 같이 쓴다. 부른 개발자는 '본인 Claude 연결됨'으로 적는다."""
+    await svc.mark_agent_seen(who)
     if name == "list_tasks":
         await work_queue.expire_leases(svc)
         return work_queue.available(svc, who)
