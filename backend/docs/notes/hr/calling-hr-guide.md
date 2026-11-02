@@ -86,3 +86,9 @@ hr에게 "이 일이 있었다"고 알리는 가장 흔한 방법은 `record_cas
 uv run ax-test-call --agent http://localhost:8104 --skill record_case --input input.json --as planning
 ```
 눈으로 확인하려면 데모(`uv run --package ax-agent-hr python -m hr_agent.demo` → http://localhost:8114)의 **카드 덱** 탭에서 같은 입력을 보낼 수 있다.
+
+## 7. 기획 AI 카드와 시연 카드 구분
+- 기획 AI가 보낸 카드는 작성자(`author`)가 `planning`이다. 화면에 **기획 AI** 표식이 붙는다.
+- 시연 주입 카드도 기획 AI 신원으로 들어가므로 작성자로는 구분되지 않는다. 이유 칸에 `시연 주입`이 들어가 있어 그 표식으로 구분하고, 화면에 **시연 주입** 표식이 붙는다.
+- 실제 결정을 보낼 때는 이유 칸에 `시연 주입`이라는 말을 쓰지 않는다. 그 말이 있으면 시연 카드로 보인다.
+- 시연 기록은 실제 결정이 아니므로 시연이 끝나면 화면에서 구분해 보고, 실제 결정 집계에서 빼서 본다.
