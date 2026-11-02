@@ -19,7 +19,7 @@ export function Metrics({ s }: { s: S }) {
   return (
     <div className="flow-col">
       <section className="flow-sec">
-        <h2>기획·개발</h2>
+        <h2>기획</h2>
         <Stats items={[
           { label: '요청 → 첫 PR', value: avgPr, hint: '평균', href: toPath('work/prs') },
           { label: '완료 기준 일치', value: pct(prs.filter((p) => p.reviews[p.reviews.length - 1] === '통과').length, prs.length), hint: `PR ${prs.length}`, href: toPath('work/prs') },
