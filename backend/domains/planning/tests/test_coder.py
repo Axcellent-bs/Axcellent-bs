@@ -16,7 +16,8 @@ from fastapi.testclient import TestClient
 from ax_agent_template.llm import LLMResponseError, LLMSettings
 from planning_agent import coder, repo_routing, vcs
 from planning_agent.coder import CodePlan, CodeReview, FilePick, FileWrite
-from planning_agent.domain.service import ActionError, DevService, PlanningService
+from planning_agent.dev_service import DevService
+from planning_agent.domain.service import ActionError, PlanningService
 from planning_agent.main import app
 from planning_agent.vcs import MockVcsAdapter, VcsError
 from planning_agent.vcs.base import CheckRun, Checks, combine_checks

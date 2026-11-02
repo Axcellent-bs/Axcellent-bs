@@ -12,8 +12,9 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from planning_agent.dev_handoff import RECEIVE_DEV_RESULT, START_DEV
+from planning_agent.dev_service import DevService
 from planning_agent.domain.models import dump
-from planning_agent.domain.service import DevService, PlanningService
+from planning_agent.domain.service import PlanningService
 from planning_agent.main import app
 
 

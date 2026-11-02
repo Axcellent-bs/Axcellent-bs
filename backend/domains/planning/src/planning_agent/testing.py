@@ -13,7 +13,8 @@ from typing import Any
 from pydantic import BaseModel
 
 from planning_agent.dev_handoff import START_DEV
-from planning_agent.domain.service import DevService, PlanningService
+from planning_agent.dev_service import DevService
+from planning_agent.domain.service import PlanningService
 
 
 class Wire:

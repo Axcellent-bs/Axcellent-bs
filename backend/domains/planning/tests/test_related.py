@@ -10,7 +10,8 @@ import asyncio
 import pytest
 
 from ax_contracts.schemas import ExecuteDecision
-from planning_agent.domain.service import DevService, PlanningService
+from planning_agent.dev_service import DevService
+from planning_agent.domain.service import PlanningService
 from planning_agent.related import LexicalEmbedder, Relater, _Judged, _Judgement
 
 

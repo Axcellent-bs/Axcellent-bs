@@ -21,7 +21,8 @@ import httpx
 import pytest
 
 from planning_agent import vcs, vcs_bridge
-from planning_agent.domain.service import DevService, PlanningService
+from planning_agent.dev_service import DevService
+from planning_agent.domain.service import PlanningService
 from planning_agent.runtime import set_service
 from planning_agent.testing import plan
 from planning_agent.vcs import CheckRun, MockVcsAdapter, VcsError, parse_trace

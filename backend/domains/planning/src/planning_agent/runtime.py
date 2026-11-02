@@ -9,7 +9,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from planning_agent.domain.service import DevService, PlanningCore, PlanningService
+from planning_agent.dev_service import DevService
+from planning_agent.domain.service import PlanningCore, PlanningService
 
 _service: PlanningCore | None = None
 

@@ -10,10 +10,11 @@ from fastapi.testclient import TestClient
 
 from ax_agent_template import config
 from ax_agent_template.testing import reset_state  # noqa: F401  autouse, 템플릿 상태 초기화
+from ax_workflow import base as workflow_base
 from planning_agent import coder
 from planning_agent.api import ADMIN_ACTIONS
-from planning_agent.domain import service as service_module
-from planning_agent.domain.service import DevService, PlanningService, action_name
+from planning_agent.dev_service import DevService
+from planning_agent.domain.service import PlanningService, action_name
 from planning_agent.runtime import set_service
 from planning_agent.testing import Wire
 
@@ -34,7 +35,7 @@ async def _no_handoff(
 @pytest.fixture(autouse=True)
 def _no_network_handoff(monkeypatch: pytest.MonkeyPatch) -> None:
     """따로 만든 서비스도 기획 ↔ 개발 넘기기를 네트워크로 보내지 않는다 (Wire는 자기 송신기)."""
-    monkeypatch.setattr(service_module, "send_to_service", _no_handoff)
+    monkeypatch.setattr(workflow_base, "send_to_service", _no_handoff)
 
 
 @pytest.fixture(autouse=True)

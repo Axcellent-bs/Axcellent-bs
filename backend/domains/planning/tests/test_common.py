@@ -195,7 +195,7 @@ def test_untrusted_text_does_not_change_read_skills(a2a_body) -> None:
 
 @pytest.mark.role("dev")
 def test_untrusted_text_does_not_change_link_incident(service, a2a_body) -> None:
-    from planning_agent.domain.service import DevService
+    from planning_agent.dev_service import DevService
     from planning_agent.runtime import set_service
 
     payload = {"incident_context_id": "ctx_inc_0008", "pr_numbers": [28], "follow_up_title": "X"}

@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from ax_contracts.schemas import ExecuteDecision
 from ax_contracts.schemas.record import RecordCase, RecordKind
+from planning_agent.dev_service import DevService
 from planning_agent.domain.autocheck import (
     IRREVERSIBLE_PREFIXES,
     PR_ALLOWED_PATHS,
@@ -22,7 +23,7 @@ from planning_agent.domain.autocheck import (
     spec_check,
     spec_params,
 )
-from planning_agent.domain.service import ActionError, DevService, PlanningService
+from planning_agent.domain.service import ActionError, PlanningService
 from planning_agent.main import app
 from planning_agent.runtime import get_service, set_service
 from planning_agent.testing import feed, plan
