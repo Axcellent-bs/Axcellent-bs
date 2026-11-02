@@ -103,7 +103,10 @@ def test_simple_request_merged_by_dev() -> None:
     assert "generate_pr" not in [c.action for c in w.planning.gate_calls]
     assert "merge_pr" not in [c.action for c in w.planning.gate_calls]
     dev_actions = [c.action for c in w.dev.gate_calls]
-    assert dev_actions == ["start_dev", "generate_pr", "review_pr", "merge_pr", "record_case"]
+    # 인사 기록은 PR 머지·요청 완료 두 건 (인사 연동 2단계)
+    assert dev_actions == [
+        "start_dev", "generate_pr", "review_pr", "merge_pr", "record_case", "record_case",
+    ]  # fmt: skip
     # dev가 간단 요청 규칙대로 자동 머지하고, planning에 완료가 돌아온다
     pr = next(p for p in w.planning.state.prs if p.task.startswith("T-") and p.auto)
     assert pr.merged and pr.auto
