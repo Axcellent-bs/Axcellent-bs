@@ -9,21 +9,9 @@ import {
 // 캠페인 효과 (트렌드 탭 아래쪽): 데이터 AI(8106) campaign_effect 출력을 그대로 보여 준다.
 // - 주문 방향·증분·기준선, 쿠폰 누적 사용률·설명 문장, "확인할 수 없음" 이유는 모두 서버 값이다. 화면은 자릿수만 정한다.
 // - 방향이 "같음"인데 증분이 0이 아니면 "같음" 대신 "증가(감소) 추정 ±N건, 아직 통계적으로 확실하지 않음"으로 쓴다.
-// - 서버가 설명 문장을 LLM으로 쓰므로 30초 새로고침을 따르지 않는다. 처음 한 번 + "측정"을 누를 때만 부른다.
-// - 응답 결과(정상·실패)는 콘텐츠 루프 4단계 칩으로 올린다(onProbe). 칩을 위해 따로 부르지 않는다.
-
-/** Date → datetime-local 입력 값 (이 컴퓨터 시간) */
-function toLocalInput(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-/** 기본 입력: 지금 시(정각)까지 24시간 */
-function defaultWindow(): { from: string; to: string } {
-  const end = new Date();
-  end.setMinutes(0, 0, 0);
-  return { from: toLocalInput(new Date(end.getTime() - 86_400_000)), to: toLocalInput(end) };
-}
+// - 처음 열 때는 부르지 않는다. 사람이 기간을 넣고 "측정"을 눌러야 부른다 (30초 새로고침도 따르지 않는다).
+// - 기준선 정의(baseline_rule)와 뺀 구간(baseline_note)은 서버 문장을 그대로 보여 준다. 화면에 기준선 정의를 따로 적지 않는다.
+// - 응답 결과(측정 대기·정상·실패)는 콘텐츠 루프 4단계 칩으로 올린다(onProbe). 칩을 위해 따로 부르지 않는다.
 
 const fixed = (v: number | null | undefined, digits = 2) =>
   typeof v === "number" && Number.isFinite(v) ? v.toLocaleString("ko-KR", { maximumFractionDigits: digits }) : null;
@@ -35,17 +23,20 @@ const when = (iso: string) => {
 
 type Query = { from: string; to: string; campaignId: string | null };
 type State =
+  | { kind: "idle" }
   | { kind: "loading" }
   | { kind: "ok"; out: CampaignEffectOutput }
   | { kind: "failed"; reason: string };
 
 // ------------------------------------------------------------------- 항목 카드
 
-function Unknown({ reason }: { reason: string | null | undefined }) {
+function Unknown({ reason, rule, note }: { reason: string | null | undefined; rule?: string | null; note?: string | null }) {
   return (
     <div className="space-y-1">
       <p className="text-2xl font-bold text-ink-500">{UNKNOWN}</p>
       <p className="text-sm text-amber-700">{reason ?? "서버가 이유를 주지 않았어요"}</p>
+      {rule && <p className="text-xs text-ink-500">기준선: {rule}</p>}
+      {note && <p className="text-xs text-ink-500">기준선에서 뺀 구간: {note}</p>}
     </div>
   );
 }
@@ -66,7 +57,7 @@ function ChangeCard({ title, c, unit, isOrders }: { title: string; c: CampaignCh
   return (
     <article className="card flex flex-col gap-3 p-4" aria-label={title}>
       <p className="panel-title">{title}</p>
-      {c.status !== "known" ? <Unknown reason={c.unknown_reason} /> : (() => {
+      {c.status !== "known" ? <Unknown reason={c.unknown_reason} rule={c.baseline_rule} note={c.baseline_note} /> : (() => {
         const line = directionLine(c, unit, isOrders);
         return (
           <>
@@ -80,7 +71,9 @@ function ChangeCard({ title, c, unit, isOrders }: { title: string; c: CampaignCh
             <dl className="grid grid-cols-2 gap-x-3 gap-y-1 bg-ink-50 px-3 py-2 text-xs text-ink-700">
               <dt className="text-ink-500">캠페인 기간</dt><dd>{fixed(c.actual) ?? UNKNOWN}{c.actual != null ? unit : ""}</dd>
               <dt className="text-ink-500">기준선</dt><dd>{fixed(c.expected) ?? UNKNOWN}{c.expected != null ? unit : ""}</dd>
-              <dt className="text-ink-500">기준선에 쓴 날</dt><dd>지난 {c.baseline_days}일 같은 시간대 평균</dd>
+              <dt className="text-ink-500">기준선 정의</dt><dd>{c.baseline_rule ?? "서버가 알려 주지 않음"}</dd>
+              {c.baseline_note && <><dt className="text-ink-500">기준선에서 뺀 구간</dt><dd className="break-words">{c.baseline_note}</dd></>}
+              <dt className="text-ink-500">기준선에 쓴 구간</dt><dd>{c.baseline_days}개</dd>
               {c.ratio != null && <><dt className="text-ink-500">기준선 대비</dt><dd>{fixed(c.ratio)}배</dd></>}
               {c.p_value != null && <><dt className="text-ink-500">꼬리확률(p)</dt><dd>{fixed(c.p_value, 4)}</dd></>}
             </dl>
@@ -128,19 +121,17 @@ function Result({ out }: { out: CampaignEffectOutput }) {
 // ------------------------------------------------------------------- 본문
 
 export function CampaignEffect({ onProbe }: { onProbe: (p: LoopProbe) => void }) {
-  const [form, setForm] = useState(() => ({ ...defaultWindow(), campaignId: "" }));
-  const [query, setQuery] = useState<Query>(() => {
-    const w = defaultWindow();
-    return { from: new Date(w.from).toISOString(), to: new Date(w.to).toISOString(), campaignId: null };
-  });
+  const [form, setForm] = useState({ from: "", to: "", campaignId: "" });
+  // 사람이 "측정"을 누르기 전에는 null → 부르지 않는다
+  const [query, setQuery] = useState<Query | null>(null);
   const [run, setRun] = useState(0);
   const [inputError, setInputError] = useState<string | null>(null);
   const [state, setState] = useState<State>(() =>
-    kpiLive ? { kind: "loading" } : { kind: "failed", reason: "데이터 AI 토큰(VITE_DATA_A2A_TOKEN)이 없어 캠페인 효과를 받지 않아요. backend/의 scripts/run_web.sh로 화면을 켜면 토큰이 들어갑니다." },
+    kpiLive ? { kind: "idle" } : { kind: "failed", reason: "데이터 AI 토큰(VITE_DATA_A2A_TOKEN)이 없어 캠페인 효과를 받지 않아요. backend/의 scripts/run_web.sh로 화면을 켜면 토큰이 들어갑니다." },
   );
 
   useEffect(() => {
-    if (!kpiLive) return;
+    if (!kpiLive || !query) return;
     let live = true;
     setState({ kind: "loading" });
     dataAi.campaignEffect(query.from, query.to, query.campaignId)
@@ -150,7 +141,7 @@ export function CampaignEffect({ onProbe }: { onProbe: (p: LoopProbe) => void })
   }, [query, run]);
 
   useEffect(() => {
-    onProbe(state.kind === "ok" ? "ok" : state.kind === "failed" ? "failed" : "checking");
+    onProbe(state.kind === "ok" ? "ok" : state.kind === "failed" ? "failed" : state.kind === "idle" ? "idle" : "checking");
   }, [state.kind, onProbe]);
 
   const submit = (event: FormEvent) => {
@@ -166,7 +157,7 @@ export function CampaignEffect({ onProbe }: { onProbe: (p: LoopProbe) => void })
 
   return (
     <Panel id="data-campaign" title="캠페인 효과"
-      hint="캠페인 기간 주문을 지난 7일 같은 시간대 평균(기준선)과 비교하고, 캠페인 쿠폰 누적 사용률을 봅니다. 숫자·이유·문장은 모두 데이터 AI 서버 값입니다.">
+      hint="캠페인 기간 주문을 서버가 정한 기준선과 비교하고, 캠페인 쿠폰 누적 사용률을 봅니다. 어떤 기준선을 썼는지는 결과에 함께 나옵니다. 숫자·이유·문장은 모두 데이터 AI 서버 값입니다.">
       <form onSubmit={submit} className="mb-4 flex flex-wrap items-end gap-2" aria-label="캠페인 효과 측정">
         <label className="min-w-0 flex-1 text-xs text-ink-500 sm:max-w-48">
           campaign_id (선택)
@@ -182,11 +173,14 @@ export function CampaignEffect({ onProbe }: { onProbe: (p: LoopProbe) => void })
         </label>
         <button type="submit" className="btn-primary" disabled={!kpiLive || state.kind === "loading"}>측정</button>
         <p className={`w-full text-[11px] ${inputError ? "text-red-700" : "text-ink-500"}`}>
-          {inputError ?? "시각은 이 컴퓨터 시간 기준입니다. 처음에는 지금 정각까지 24시간을 봅니다."}
+          {inputError ?? "시각은 이 컴퓨터 시간 기준입니다. 기간을 넣고 \"측정\"을 누르면 데이터 AI를 부릅니다."}
         </p>
       </form>
 
-      {state.kind === "loading" && <Waiting what="측정하는 중… (지난 7일 같은 시간대 주문을 읽고 설명을 씁니다)" />}
+      {state.kind === "idle" && (
+        <Empty>캠페인 시작·끝 시각을 넣고 "측정"을 누르면 결과가 나와요. campaign_id를 넣으면 쿠폰 누적 사용률도 봅니다.</Empty>
+      )}
+      {state.kind === "loading" && <Waiting what="측정하는 중… (기준선 주문을 읽고 설명을 씁니다)" />}
       {state.kind === "failed" && (
         <Empty>
           캠페인 효과를 받지 못했어요. {state.reason}

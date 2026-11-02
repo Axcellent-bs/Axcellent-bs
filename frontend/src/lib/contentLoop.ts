@@ -30,8 +30,10 @@ export interface LoopStage {
 
 /** 트렌드 탭이 이미 받은 응답의 결과. 칩을 위해 따로 부르지 않는다 */
 export type LoopProbeSkill = "trend_scan" | "campaign_effect";
-export type LoopProbe = "checking" | "ok" | "failed";
+/** idle = 아직 부르지 않음 (캠페인 효과는 사람이 "측정"을 눌러야 부른다) */
+export type LoopProbe = "idle" | "checking" | "ok" | "failed";
 export const PROBE_STATUS: Record<LoopProbe, { label: string; tone: LoopTone }> = {
+  idle: { label: "측정 대기", tone: "muted" },
   checking: { label: "확인 중", tone: "muted" },
   ok: { label: "동작 중", tone: "ok" },
   failed: { label: "연결 확인 필요", tone: "muted" },
