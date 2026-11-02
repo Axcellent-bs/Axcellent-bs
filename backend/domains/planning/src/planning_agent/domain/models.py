@@ -158,6 +158,8 @@ class Spec(DomainModel):
     handed_to_dev: bool = False
     # 기획서를 쓴 곳. "dev_team" = 개발팀원이 개발 화면에서 직접 쓴 기획 (코딩 에이전트)
     origin: str | None = None
+    # 인사 ② check_plan 실제 결과 (ok·warn·unknown). None = 묻지 않음 (목 모드·예전 기획서)
+    hr_check: Literal["ok", "warn", "unknown"] | None = None
 
 
 CodingStatus = Literal[
