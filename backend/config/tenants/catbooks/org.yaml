@@ -29,3 +29,14 @@ assignments:
 
   # skill 단위 (예시): 배포 롤백은 서비스운영이 아니라 개발팀 배포 담당이 맡는다
   rollback_deployment: {unit: 개발팀, assignee: 배포 담당}
+
+# 업무 영역: 인사 AI 명부의 영역이다. 인사 AI가 시작할 때 읽어 명부에 없는 영역만 더한다 (담당자는 넣지 않는다).
+# 기획 AI가 기획서 초안의 영역을 정할 때(domain/handover.py)와 같은 이름이어야 한다.
+# 영문 소문자·숫자·'-'만 쓴다. 영역이 없으면 인사 AI의 check_plan이 UNKNOWN_AREA로 거절한다.
+areas:
+  - payment
+  - search
+  - catalog
+  - support-desk
+  - infra-ops
+  - inventory
