@@ -8,6 +8,7 @@
 출력은 `export 이름=값` 줄이다. 이미 정한 값이 먼저다(지금 쓰는 사람이 깨지지 않게):
 - 조직도 `AX_ORG_CONFIG`: 환경변수 → `config/org.yaml`(각자 덮어쓰기, 커밋 안 함) → 회사 폴더 `org`
 - 카탈로그 `DATA_TENANT_CATALOG`: 환경변수 → 회사 폴더 `catalog`
+- 검색어 급상승 기본 키워드 `DATA_TREND_CONFIG`: 환경변수 → 회사 폴더 `trends`(있을 때만)
 설정이 틀리면(폴더·카탈로그 없음, 커넥터가 카탈로그와 다름) 이유를 stderr에 쓰고 2로 끝난다.
 """
 
@@ -62,11 +63,15 @@ def read_tenant(folder: Path) -> dict[str, str]:
             f"{path}: 커넥터 {raw['connector']!r}가 카탈로그의 connector {in_catalog!r}와 다릅니다"
         )
     org = raw.get("org", "org.yaml")
+    trends = raw.get("trends")
     return {
         "name": str(raw.get("name") or folder.name),
         "catalog": raw["catalog"] if not raw["catalog"].endswith(".toml") else catalog.as_posix(),
         "connector": raw["connector"],
         "org": (folder / org).resolve().as_posix() if isinstance(org, str) and org else "",
+        "trends": (folder / trends).resolve().as_posix()
+        if isinstance(trends, str) and trends
+        else "",
     }
 
 
@@ -105,6 +110,12 @@ def resolve(
     else:
         out["DATA_TENANT_CATALOG"] = tenant["catalog"]
         notes.append(f"카탈로그: {tenant['catalog']} (회사 폴더)")
+
+    if env.get("DATA_TREND_CONFIG"):
+        notes.append(f"검색어 급상승 키워드: {env['DATA_TREND_CONFIG']} (환경변수)")
+    elif tenant["trends"] and Path(tenant["trends"]).is_file():
+        out["DATA_TREND_CONFIG"] = tenant["trends"]
+        notes.append(f"검색어 급상승 키워드: {tenant['trends']} (회사 폴더)")
     return out, notes
 
 

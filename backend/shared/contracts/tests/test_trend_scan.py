@@ -5,7 +5,7 @@ from datetime import date
 import pytest
 from pydantic import ValidationError
 
-from ax_contracts.schemas import TrendScanInput, TrendScanOutput, TrendVerdict
+from ax_contracts.schemas import TrendScanInput, TrendScanOutput, TrendScanRequest, TrendVerdict
 
 
 def test_input_limits_match_naver() -> None:
@@ -36,3 +36,12 @@ def test_verdict_needs_reason_when_unknown() -> None:
         ],
     )  # fmt: skip
     assert out.value_kind == "relative"
+
+
+def test_request_can_leave_groups_and_date_to_defaults() -> None:
+    assert TrendScanRequest().keyword_groups is None  # 회사 기본 그룹, 어제
+    group = {"group_name": "고양이", "keywords": ["고양이"]}
+    with pytest.raises(ValidationError):  # 빈 목록은 "기본값"이 아니라 잘못된 입력
+        TrendScanRequest.model_validate({"keyword_groups": []})
+    with pytest.raises(ValidationError):
+        TrendScanRequest.model_validate({"keyword_groups": [group, group]})
