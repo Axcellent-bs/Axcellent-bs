@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Loading } from "@/components/admin/bits";
 import { SupportOverviewCard } from "@/components/admin/SupportOverviewCard";
 import {
-  GRADE, INCIDENT_STATUS, STEP_STATUS, adminRelay, clock, deptKo, relayEnabled, relayError,
+  GRADE, STEP_STATUS, adminRelay, clock, deptKo, incidentStatus, relayEnabled, relayError,
   type Incident,
 } from "@/lib/adminRelay";
 import { incidentTitle, stepLabel } from "@/lib/agentChat";
@@ -136,7 +136,7 @@ export default function OrchestratorPage() {
                 <button onClick={() => setSelected(i.context_id)}
                   className={`w-full rounded-2xl border p-3 text-left text-sm transition ${i.context_id === selected ? "border-brand-500 bg-brand-50" : "border-ink-100 bg-surface hover:border-brand-500"}`}>
                   <span className="flex items-center justify-between gap-2">
-                    <span className={`chip ${INCIDENT_STATUS[i.status].tone}`}>{INCIDENT_STATUS[i.status].label}</span>
+                    <span className={`chip ${incidentStatus(i.status).tone}`}>{incidentStatus(i.status).label}</span>
                     <span className="text-xs text-ink-500">{ago(i.opened_at)}</span>
                   </span>
                   <span className="mt-1.5 block truncate font-semibold" title={i.title}>{incidentTitle(i)}</span>
@@ -249,7 +249,7 @@ function IncidentDetail({ incident }: { incident: Incident }) {
       <section className="card space-y-3 p-5">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-lg font-semibold" title={incident.title}>{incidentTitle(incident)}</h2>
-          <span className={`chip ${INCIDENT_STATUS[incident.status].tone}`}>{INCIDENT_STATUS[incident.status].label}</span>
+          <span className={`chip ${incidentStatus(incident.status).tone}`}>{incidentStatus(incident.status).label}</span>
           <span className="ml-auto text-xs tabular-nums text-ink-500">단계 {done}/{incident.steps.length} 완료</span>
         </div>
         <p className="text-xs text-ink-500" title={`이벤트 번호 ${incident.context_id}`}>시작 {clock(incident.opened_at)} · 종료 {clock(incident.closed_at)}</p>

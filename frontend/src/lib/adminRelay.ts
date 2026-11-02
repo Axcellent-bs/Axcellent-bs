@@ -121,6 +121,12 @@ export const INCIDENT_STATUS: Record<Incident["status"], { label: string; tone: 
   resolved: { label: "해결됨", tone: "bg-emerald-50 text-emerald-700" },
   degraded: { label: "사람 확인 필요", tone: "bg-amber-50 text-amber-700" },
 };
+// 총괄이 정의 밖의 상태를 주어도 화면이 깨지지 않게 한다(지어내지 않고 "확인할 수 없음"으로 그린다)
+export const incidentStatus = (status: string | null | undefined): { label: string; tone: string } =>
+  (status ? INCIDENT_STATUS[status as Incident["status"]] : undefined) ?? {
+    label: "확인할 수 없음",
+    tone: "bg-ink-100 text-ink-700",
+  };
 export const SHARED_KO: Record<string, string> = { notice_id: "점검 공지 번호", recovered_notice_id: "정상화 공지 번호" };
 export const GRADE: Record<string, { label: string; tone: string }> = {
   read: { label: "조회", tone: "bg-ink-100 text-ink-700" },
