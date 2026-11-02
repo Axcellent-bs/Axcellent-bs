@@ -14,6 +14,7 @@
 | `activity_report` | 부서별 AI 업무 리포트: 부서별 요청·결과·사람에게 넘긴 일·품질·사건 참여, 부서 간 협업, 회사 숫자, 직전 기간 비교 | 공통 로그 저장소, finance `closing_report`(A2A), shop-api `GET /api/shop/metric-series` |
 | `trend_scan` | 키워드 그룹별 검색어 급상승(rising·normal·unknown), 기준선 대비 배수, 근거 숫자(z·기준선·흔들림), 판정 불가 이유. 최근 56일 대비 마지막 7일 | 네이버 검색어 트렌드(`connectors/naver_datalab.py`, 그룹마다 1번). 기본 키워드: 회사 폴더 `trends.toml` |
 | `answer_planning_question` | 기획이 되묻는 근거 질문의 답(answered·needs_human·unknown). 기획만 부른다 | data가 보낸 요청의 기록(`planning_questions.py`, 프로세스 안). 아직 요청을 보내는 코드가 없어 지금은 늘 unknown. 사람 답은 `human_answer_request`로 planning `receive_planning_answer`에 보낸다 |
+| `campaign_effect` | 캠페인 기간 주문 방향(늘었음·같음·줄었음)·증분(실제 − 지난 7일 같은 시간대 평균), 캠페인 쿠폰 조회 시점 누적 사용률. 매출은 매출 지표가 생기면 같은 방법(지금은 확인할 수 없음) | shop-api `GET /api/shop/metric-series`(`order_count`), `GET /api/shop/coupons?campaign_id=` |
 
 - 숫자는 코드가 계산한다(`metrics/`, `impact.py`, `detect.py`). LLM은 계산이 끝난 숫자로 설명 문장만 쓴다(`explain.py`)
 - 주기 감시(`monitor.py`)는 `anomaly_detection`과 같은 판정 함수로 최근 구간을 보고 `metric.anomaly` 이벤트를 낸다. 사건은 열지 않는다(`context_id` 없음)
@@ -276,6 +277,29 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 | MAD 하한 | 0.05 | 0.03~0.1에서 개발 케이스 결과가 같아 중간값. 너무 잔잔한 키워드의 작은 흔들림 방지 |
 | 기준선 최소 일수 | 28일 | 평가 정의(`eval/trend/README.md`)와 같다 |
 | 기준선 최소 값 | 0.01 | 개발 케이스로 재지 않은 안전장치(자릿수가 모자라는 값) |
+
+### campaign_effect (캠페인 효과)
+
+- 입력: `campaign_id`(선택), 캠페인 시작·끝(`window_from`·`window_to`). 출력: 주문·매출·쿠폰 각각 "앎(값·근거)" 또는 "확인할 수 없음 + 이유", 요약 문장
+- 주문(`skills/campaign_effect.py`, 코드 계산): 캠페인 기간 `order_count` 합계(실제)와 지난 7일 같은 시간대 합계의 평균(기대). **증분 = 실제 − 기대**(평가 채점기와 같은 정의). 방향은 기대를 평균으로 한 포아송 꼬리확률(`metrics/judge.py`의 `poisson_upper`·`poisson_lower`)이 0.001보다 작으면 늘었음·줄었음, 아니면 같음. 지표는 커넥터 `metric_series`로 읽는다
+- 매출: 카탈로그 `revenue_metric`(회사 카탈로그 한 줄)이 있으면 같은 방법으로 합계·기대·증분을 낸다(방향은 기대 대비 ±10% 임시 기준, 평가로 정하지 않음). **캣북스는 비어 있다**: shop-api metric-series에 매출이 없어 "확인할 수 없음 + 이유(지표 없음)"가 지금 정상이다
+- 쿠폰: `GET /api/shop/coupons?campaign_id=`(커넥터 `campaign_coupons`, data는 `COUPON_READERS`에 있다)의 발급(`count`)·사용(`used_units`) 장수 합으로 누적 사용률 = 사용 ÷ 발급. 설명은 LLM이 아니라 고정 문장 "조회 시점 기준 누적 사용률이며, 캠페인 뒤 사용분도 섞여 있다"(평가 채점기가 이 글자를 본다)
+- 확인할 수 없음(0으로 채우지 않음): 지난 7일 같은 시간대 주문이 0건(기준선 없음), 캠페인이 하루보다 김(지난날 같은 시간대가 캠페인과 겹침, 1단계는 하루 이하만), campaign_id 없음, 그 캠페인 쿠폰 없음, 쿠폰을 읽지 못함
+- 주문 지표를 읽지 못하면(shop-api 꺼짐) 숫자 없이 `failed`·`unavailable`
+- LLM은 전체 요약 문장만 쓰고 `explain.py` 숫자 검증을 그대로 거친다(템플릿 `campaign`)
+- 요청 가능: orchestrator, marketing, dashboard-api
+
+#### 기준값 (평가 개발 케이스로 정함)
+
+`eval/campaign/cases/` 결과만 보고 정했다. holdout은 고른 뒤 결과 숫자만 봤고, 그 숫자로 다시 맞추지 않았다. 기준값 파일은 `eval/campaign/baseline.json`.
+
+| 방향 유의수준 | 방향 | 증분 오차 | 판정 불가 | 쿠폰 |
+| --- | --- | --- | --- | --- |
+| 0.05 · 0.01 · **0.001** · 0.0001 · 0.000001 | 모두 1.0 | 모두 0 | 모두 1.0 | 모두 1.0 |
+
+- 개발 케이스로는 후보가 갈리지 않는다: 변화 없는 케이스 p ≈ 0.25·0.27, 늘거나 준 케이스 p ≤ 1.5×10⁻¹¹
+- **0.001**을 고른 이유: 이상 탐지(`judge.py` `DEFAULT_ALPHA`)와 같은 값이고, 실제 주문은 포아송보다 더 흔들려 0.05면 평범한 날을 늘었음·줄었음으로 말하기 쉽다
+- 대가: 작은 효과는 같음으로 나온다. 예: 기대 150건에 +20%(180건)면 p ≈ 0.009 → 같음
 
 ### YouTube 영상 통계 스냅샷 (`youtube_collect`, 판정 전 단계)
 

@@ -480,6 +480,8 @@ class MetricCatalog(AxModel):
     user_codes: dict[str, str] = Field(default_factory=dict)
     volume_metric: str | None = None  # 거래량 지표 (빈 구간 판단·기준 보정). 없으면 쓰지 않는다
     volume_label: str | None = None  # 거래량을 부르는 말 (예: 주문·결제). 빈 구간 안내에 쓴다
+    # 매출 지표 (campaign_effect 매출 증분). 커넥터가 주는 지표 이름. 없으면 매출은 확인할 수 없음
+    revenue_metric: str | None = None
     # 지표·실패 이벤트·거래량을 읽는 커넥터 이름 (data `clients.shop_client.CONNECTORS`)
     connector: str = "shop-api"
 
@@ -592,3 +594,76 @@ class TrendScanRequest(AxModel):
         if len(names) != len(set(names)):
             raise ValueError("group_name이 겹친다")
         return self
+
+
+# --------------------------------------------------------------- campaign_effect (캠페인 효과)
+# 캠페인 기간 주문·매출을 지난 7일 같은 시간대 평균과 비교한 증분과, 캠페인 쿠폰 누적 사용률.
+# 항목마다 "앎(값·근거)" 또는 "모름 + 이유"다. 모르면 0으로 채우지 않는다.
+
+CampaignDirection = Literal["up", "none", "down"]  # 늘었음·같음·줄었음
+CampaignStatus = Literal["known", "unknown"]
+
+
+class CampaignEffectInput(AxModel):
+    campaign_id: str | None = None  # 없으면 쿠폰은 확인할 수 없음 (주문·매출은 본다)
+    window_from: UtcDatetime  # 캠페인 시작
+    window_to: UtcDatetime  # 캠페인 끝
+
+    @model_validator(mode="after")
+    def _range(self) -> Self:
+        if self.window_to <= self.window_from:
+            raise ValueError("window_to가 window_from보다 뒤여야 한다")
+        return self
+
+
+class CampaignChange(AxModel):
+    """주문 수 또는 매출의 캠페인 기간 변화."""
+
+    status: CampaignStatus
+    direction: CampaignDirection | None = None
+    actual: float | None = None  # 캠페인 기간 합계
+    expected: float | None = None  # 기대 = 지난 7일 같은 시간대 합계의 평균
+    excess: float | None = None  # 증분 = 실제 − 기대
+    ratio: float | None = Field(default=None, ge=0)  # 실제 ÷ 기대
+    p_value: float | None = Field(default=None, ge=0, le=1)  # 방향 판정에 쓴 포아송 꼬리확률
+    baseline_days: int = Field(default=0, ge=0)  # 기대에 쓴 날 수 (지난 7일 중 자료가 있는 날)
+    unknown_reason: str | None = None
+
+    @model_validator(mode="after")
+    def _known_or_reason(self) -> Self:
+        if self.status == "unknown" and not self.unknown_reason:
+            raise ValueError("unknown이면 unknown_reason이 있어야 한다")
+        if self.status == "known" and (self.direction is None or self.excess is None):
+            raise ValueError("known이면 direction과 excess가 있어야 한다")
+        return self
+
+
+class CampaignCoupons(AxModel):
+    """캠페인 쿠폰 누적 사용률 (조회 시점 기준, 캠페인 뒤 사용분도 섞인다)."""
+
+    status: CampaignStatus
+    coupon_count: int | None = Field(default=None, ge=0)  # 쿠폰 수 (사람마다 한 장씩 발급된 쿠폰)
+    issued_units: int | None = Field(default=None, ge=0)  # 발급 장수 합
+    used_units: int | None = Field(default=None, ge=0)  # 사용 장수 합 (조회 시점)
+    use_rate: float | None = Field(default=None, ge=0, le=1)  # 사용 ÷ 발급
+    note: str | None = None  # 고정 설명 문장 (코드)
+    unknown_reason: str | None = None
+
+    @model_validator(mode="after")
+    def _known_or_reason(self) -> Self:
+        if self.status == "unknown" and not self.unknown_reason:
+            raise ValueError("unknown이면 unknown_reason이 있어야 한다")
+        if self.status == "known" and self.use_rate is None:
+            raise ValueError("known이면 use_rate가 있어야 한다")
+        return self
+
+
+class CampaignEffectOutput(AxModel):
+    campaign_id: str | None = None
+    window_from: UtcDatetime
+    window_to: UtcDatetime
+    orders: CampaignChange
+    revenue: CampaignChange
+    coupons: CampaignCoupons
+    summary: str  # 한두 문장 (LLM, 숫자 검증 실패면 고정 문장)
+
