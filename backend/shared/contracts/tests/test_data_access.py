@@ -6,6 +6,7 @@ from ax_contracts.data_access.orchestrator_incidents import (
     OrchestratorIncidentsQuery,
     OrchestratorIncidentsResult,
 )
+from ax_contracts.data_access.shop_coupons import ShopCoupon, ShopCouponsQuery
 from ax_contracts.data_access.shop_failed_orders import ShopFailedOrdersQuery
 from ax_contracts.data_access.shop_metric_series import (
     ShopMetricSeriesQuery,
@@ -168,3 +169,52 @@ def test_orchestrator_incidents_result() -> None:
     assert result.incidents[0].context_id == "ctx_inc_0001" and result.truncated is True
     with pytest.raises(ValidationError):
         OrchestratorIncidentsResult.model_validate({"incidents": [INCIDENT], "unknown": 1})
+
+
+COUPON = {
+    "coupon_id": "cpn_0001",
+    "buyer_id": "buy_0001",
+    "purpose_code": "campaign",
+    "campaign_id": "cmp_0001",
+    "count": 3,
+    "unit_value": 2000,
+    "total_value": 6000,
+    "context_id": "ctx_1",
+    "created_at": "2026-11-02T01:00:00Z",
+    "expires_at": None,
+    "used_units": 1,
+    "remaining_units": 2,
+    "expired": False,
+}
+
+
+def test_shop_coupon_accepts_the_shop_api_response() -> None:
+    coupon = ShopCoupon.model_validate(COUPON)
+    assert (coupon.count, coupon.used_units, coupon.remaining_units) == (3, 1, 2)
+    assert coupon.expires_at is None and coupon.expired is False
+    dated = ShopCoupon.model_validate({**COUPON, "expires_at": "2026-12-01T00:00:00Z"})
+    assert dated.expires_at is not None
+
+
+def test_shop_coupon_rejects_bad_values() -> None:
+    for bad in (
+        {**COUPON, "purpose_code": "gift"},
+        {**COUPON, "count": -1},
+        {**COUPON, "created_at": "2026-11-02T01:00:00"},  # 시간대 없음
+        {**COUPON, "extra": 1},
+    ):
+        with pytest.raises(ValidationError):
+            ShopCoupon.model_validate(bad)
+
+
+def test_shop_coupons_query_is_all_optional() -> None:
+    assert ShopCouponsQuery.model_validate({}).campaign_id is None
+    assert ShopCouponsQuery.model_validate({"campaign_id": "cmp_1"}).campaign_id == "cmp_1"
+    with pytest.raises(ValidationError):
+        ShopCouponsQuery.model_validate({"purpose_code": "gift"})
+
+
+def test_metric_series_accepts_the_order_value_metrics() -> None:
+    base = {"from": "2026-10-22T05:00:00Z", "to": "2026-10-22T06:00:00Z"}
+    for metric in ("order_amount", "coupon_order_count", "coupon_discount_amount"):
+        assert ShopMetricSeriesQuery.model_validate({**base, "metric": metric}).metric == metric
