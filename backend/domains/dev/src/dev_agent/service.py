@@ -480,7 +480,7 @@ class DevService(PlanningCore):
     def reset(self) -> None:
         """초기 데이터로 되돌린다. 돌던 코딩 실행은 다음 단계에서 멈추고 작성해 둔 코드도 지운다."""
         self._coding_live.clear()
-        self.__dict__.pop("_coding_drafts", None)
+        coder.clear_drafts(self)
         super().reset()
         get_deploy_store().reset()  # 배포 기록도 시드로
 
