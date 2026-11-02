@@ -105,6 +105,8 @@ class Request(DomainModel):
     evidence_ids: list[str] = Field(default_factory=list)  # 요청 부서가 보낸 근거 ID
     flow: bool = False  # 들어온 뒤 사람 클릭 없이 다음 단계로 이어 간다 (일반 요청·개선 초안)
     related: list[RelatedItem] = Field(default_factory=list)  # 비슷한·충돌하는 요청 (제안)
+    # 요청을 보낸 서비스 id (예: inquiry·coupon). `from_`은 부서, 되묻기·회신은 이 서비스로 보낸다
+    from_service: str | None = None
 
 
 class ParaWarn(DomainModel):
@@ -160,6 +162,9 @@ class Spec(DomainModel):
     origin: str | None = None
     # 인사 ② check_plan 실제 결과 (ok·warn·unknown). None = 묻지 않음 (목 모드·예전 기획서)
     hr_check: Literal["ok", "warn", "unknown"] | None = None
+    # 요청 서비스에 되물은 질문 (answer_planning_question). 답을 받으면 `question`과 같이 비운다
+    question_id: str | None = None
+    question_to: str | None = None  # 질문을 보낸 서비스 id
 
 
 CodingStatus = Literal[

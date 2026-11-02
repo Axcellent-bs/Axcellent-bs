@@ -226,3 +226,58 @@ class DevResultInput(AxModel):
 
 class DevResultOutput(AxModel):
     applied: int  # planning 쪽에 반영한 작업·PR 수
+
+
+# ---- 기획 → 요청 서비스 되묻기 (planning, 2026-11-02)
+#
+# 기획서를 쓰다가 정보가 모자라면 요청을 보낸 **서비스**에 되묻는다 (부서가 아니라 서비스 단위).
+#
+# - `answer_planning_question`: planning → 요청 서비스(예: inquiry·coupon·data), 등급 read.
+#   받은 서비스는 자기 기록으로 답할 수 있으면 `answered`, 사람에게 물어야 하면 `needs_human`,
+#   모르면 `unknown`으로 답한다. 지어내지 않는다. 서비스는 상태를 바꾸지 않는다.
+# - `receive_planning_answer`: 요청 서비스 → planning, 등급 A. `needs_human`으로 답한 질문에
+#   사람이 나중에 답하면 이것으로 보낸다. 같은 `question_id`의 두 번째 답은 `duplicate`.
+# - 질문은 요청의 `ctx_req_` 사건으로 보낸다. 답이 없거나 창구가 없으면 planning은 기다리지 않고
+#   예전처럼 기획서를 이어 쓴다 (`needs_human`일 때만 답 대기).
+# - 질문 문구는 planning 코드가 만든 것이다. 답의 `answer`는 외부 문구라 planning은 데이터로만 쓴다.
+
+
+class PlanningQuestion(AxModel):
+    question_id: str  # Q-<REQ>-n (planning 발급)
+    request_id: str  # REQ-n
+    spec_id: str | None = None  # 쓰고 있는 기획서 (없으면 아직 초안 전)
+    question: str
+    about: str | None = None  # 묻는 칸 (예: evidence·done·R1)
+    options: list[str] = Field(default_factory=list)  # 고를 답이 있으면
+
+
+class AnswerPlanningQuestionInput(PlanningQuestion):
+    """planning이 요청 서비스에 보내는 질문."""
+
+
+class AnswerPlanningQuestionOutput(AxModel):
+    status: Literal["answered", "needs_human", "unknown"]
+    answer: str | None = None
+    answered_by: Literal["agent", "human"] | None = None
+    evidence_ids: list[str] = Field(default_factory=list)  # 답의 근거 ID (문의 ID 등)
+
+    @model_validator(mode="after")
+    def _answer_is_consistent(self) -> AnswerPlanningQuestionOutput:
+        if (self.status == "answered") != bool(self.answer):
+            raise ValueError("answer는 status가 answered일 때만 채운다")
+        return self
+
+
+class ReceivePlanningAnswerInput(AxModel):
+    """요청 서비스가 나중에 보내는 답 (사람이 답한 것)."""
+
+    question_id: str
+    request_id: str
+    answer: str = Field(min_length=1)
+    answered_by: Literal["agent", "human"] = "human"
+    evidence_ids: list[str] = Field(default_factory=list)
+
+
+class ReceivePlanningAnswerOutput(AxModel):
+    outcome: Literal["applied", "duplicate", "unknown_question"]
+    spec_id: str | None = None
