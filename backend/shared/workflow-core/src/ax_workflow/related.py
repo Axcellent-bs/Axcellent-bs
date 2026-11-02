@@ -47,6 +47,8 @@ JUDGE_PROMPT = (
     "수정). 후보가 아직 진행 중이면 update가 아니라 conflict다. from은 부서 단위라 같아도 같은 "
     "사람인지 알 수 없다.\n"
     "- related: 같은 화면·기능을 다루지만 따로 처리해도 된다.\n"
+    "- 제목이 아니라 text 전체(요청 근거·기획서 내용)로 판단한다. 제목이 같아도 대상·원인·바꿀 "
+    "값이 다르면 same이 아니고, 제목이 달라도 같은 대상을 같은 방향으로 바꾸면 same이다.\n"
     "- none: 관계없다.\n"
     "- id는 candidates에 있는 값만 쓴다. reason은 판단 근거 한 줄(어느 부분이 같거나 반대인지).\n"
     '- JSON {"items": [{"id": "...", "relation": "same", "reason": "..."}]} 로만 답한다.'
@@ -96,8 +98,11 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 def text_of(state: State, req: Request) -> str:
-    """검색 대상 문장: 요청 제목, 기획서가 있으면 문제·목표와 요구 문단."""
-    parts = [req.title]
+    """검색·판단 대상 문장: 요청 제목과 근거(요청 내용), 기획서가 있으면 문제·목표와 요구 문단.
+
+    제목만 보면 같은 제목의 다른 일을 묶고, 다른 말로 쓴 같은 일을 놓친다. 근거는 다른 부서가
+    쓴 외부 문장이라 LLM에는 데이터 블록(`untrusted`)으로만 넣는다."""
+    parts = [req.title, req.evidence]
     spec = next((s for s in state.specs if s.id == req.spec), None)
     if spec is not None:
         parts += [spec.problem, spec.goal, *(p.text for p in spec.paras if p.kind == "req")]
