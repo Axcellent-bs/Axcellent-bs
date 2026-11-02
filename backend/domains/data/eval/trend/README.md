@@ -1,12 +1,15 @@
 # trend_scan 평가 케이스 (검색어 급상승)
 
-data 에이전트 `trend_scan`(아직 없음)의 정답지다. 계약은 `shared/contracts` `TrendScanInput`·`TrendScanOutput`, 데이터는 네이버 검색어 트렌드 커넥터(`connectors/naver_datalab.py`)가 주는 모양 그대로다. 채점기(run)는 skill이 생길 때 같이 만든다.
+data 에이전트 `trend_scan`(아직 없음)의 정답지와 채점기다. 계약은 `shared/contracts` `TrendScanInput`·`TrendScanOutput`, 데이터는 네이버 검색어 트렌드 커넥터(`connectors/naver_datalab.py`)가 주는 모양 그대로다.
+
+**정의: trend_scan은 최근 56일 대비 급상승을 본다. 계절 반복 구분은 범위 밖이다.** (판정 구간 = 요청의 마지막 7일, 기준선 = 그 앞 56일)
 
 ```bash
 cd backend
 uv run python domains/data/eval/trend/make_cases.py            # cases/ 다시 만들기
 uv run python domains/data/eval/trend/make_cases.py --holdout  # holdout/ 다시 만들기
 uv run pytest -q domains/data/tests/test_trend_eval_cases.py   # 약속 검사
+uv run python domains/data/eval/trend/score.py --judge <모듈>:<함수>   # 채점
 ```
 
 ## 폴더
@@ -18,6 +21,7 @@ uv run pytest -q domains/data/tests/test_trend_eval_cases.py   # 약속 검사
 | `make_cases.py` | `series/`와 seed만 읽어 `cases/`·`holdout/`을 만든다. 네이버를 부르지 않는다 |
 | `cases/` | 규칙을 고치며 보는 케이스 26개 |
 | `holdout/` | 처음 보는 케이스 24개 (결과 숫자만 본다) |
+| `score.py` | 채점기. 판정 함수를 인자로 받는다(아래 "채점") |
 
 평가와 케이스 생성은 저장된 값만 쓴다. 네이버를 다시 부르는 곳은 `collect_series.py` 하나뿐이고, `make_cases.py`는 네트워크 코드를 import하지 않는다(테스트가 본다).
 
@@ -49,6 +53,35 @@ uv run pytest -q domains/data/tests/test_trend_eval_cases.py   # 약속 검사
 
 - 판정 불가 기준: 기준선 시점이 28개 미만이면 `unknown`이 정답이다(`MIN_BASELINE_POINTS`).
 - `real_event`는 "그 사건에 검색이 는다"는 가정이 들어간다. 주력 지표는 합성 주입으로 보고, 실제 사례는 참고로 본다.
+
+## 한계
+
+- 바탕 구간은 잔잔한 구간만 골라서, 원래 출렁이는 키워드의 오탐은 재지 않는다.
+
+## 채점 (`score.py`)
+
+판정 함수를 인자로 받아서 skill이 없어도 돈다(테스트는 가짜 판정 함수, `tests/test_trend_eval_scorer.py`). 네이버를 부르지 않고 케이스에 저장된 값만 쓴다.
+
+```python
+judge(query: TrendScanInput, response: TrendResponse) -> TrendScanOutput   # async여도 된다
+```
+
+- `response`는 커넥터가 돌려주는 모양(`connectors.naver_datalab.TrendResponse`) 그대로라 skill을 그대로 끼울 수 있다.
+- 그룹 단위로 센다. 판정 함수가 오류를 내거나 그룹을 빠뜨리면 그 그룹은 틀린 것(`missing`)이다.
+
+| 지표 | 대상 | 계산 |
+| --- | --- | --- |
+| `trend.detection_rate` | 정답 rising 그룹 (`injected`, `joint`의 넣은 그룹) | rising으로 답한 비율 (높을수록 좋음) |
+| `trend.false_positive_rate` | 정답 normal 그룹 (`none`, `past_spike`, `joint`의 안 넣은 그룹) | rising으로 답한 비율 (낮을수록 좋음) |
+| `trend.unknown_handled_rate` | 정답 unknown 그룹 | unknown으로 답한 비율 |
+| `trend.group_isolation` | `joint` 케이스 | 넣은 그룹만 rising이고 나머지는 rising이 아닌 케이스 비율 |
+| `trend.seasonal_false_positive_rate` | `seasonal` 3개 (**본 지표에서 뺌**) | rising으로 답한 비율. 정의상 범위 밖이라 참고로만 본다 |
+| `trend.real_detection_rate` | `real_event` 3개 (**본 지표에서 뺌**) | rising으로 답한 비율. 외부 날짜 기반 보조 지표 |
+| `holdout.trend.*` | `holdout/` | 위 본 지표 4개를 holdout으로 따로. holdout에는 주입·평범만 있어 `unknown_handled_rate`·`group_isolation`은 None |
+
+- 화면에는 `cases/`의 틀린 그룹 목록과 holdout의 **틀린 개수만** 나온다(holdout 케이스 이름·내용은 보여 주지 않는다).
+- 기존 결제 평가(`eval/run.py`·`baseline.json`)에는 넣지 않는다. trend 기준값(baseline)은 skill PR에서 처음 만든다.
+- 배수(`ratio`)가 맞는지는 아직 채점하지 않는다. 상태만 본다.
 
 ## holdout (처음 보는 케이스)
 
