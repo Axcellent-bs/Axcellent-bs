@@ -175,7 +175,12 @@ SERVICES: tuple[Service, ...] = (
         "planning",
         "planning",
         8101,
-        ("create_ticket", "receive_dev_result", "receive_planning_answer"),
+        (
+            "create_ticket",
+            "receive_dev_result",
+            "receive_planning_answer",
+            "request_release_check",
+        ),
         "요청·기획서",
     ),
     Service(
