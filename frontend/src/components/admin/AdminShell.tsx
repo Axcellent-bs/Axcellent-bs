@@ -121,7 +121,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const baseNav = useNav();
   const hasInbox = baseNav.some((n) => n.href === HANDOFFS_HREF);
   const openHandoffs = useOpenHandoffCount(hasInbox);
-  // 하위 탭 숫자(기획 들어온 요청·개발 사람 확인)는 하위 탭 옆에, 닫혀 있을 때도 보이게 AI 탭에는 합을 단다
+  // 하위 탭 숫자(기획 들어온 요청·개발 사람 확인)는 하위 탭 옆에, AI 탭에는 그 합을 늘 단다 (열고 닫아도 자리가 그대로)
   const hasSub = (href: string) => baseNav.some((n) => n.children?.some((c) => c.href === href));
   const subCounts = useNavCounts(hasSub(PLANNING_REQUESTS_HREF), hasSub(DEV_TASKS_HREF));
   const nav = baseNav.map((n) => {
@@ -170,7 +170,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
                 className={`relative flex items-center gap-3.5 py-[13px] text-sm font-semibold transition ${collapsed ? "justify-center" : "px-[18px]"} ${on ? (open ? "text-white" : "bg-[#5b5bd6] text-white") : "hover:bg-white/10"}`}>
                 <NavIcon item={item} size={item.logo ? 22 : 18} />
                 {!collapsed && <span className="truncate">{label}</span>}
-                {!!item.badge && !open && (collapsed
+                {!!item.badge && (collapsed
                   ? <span className="absolute right-3 top-2.5 h-2 w-2 rounded-full bg-amber-400" aria-label={`열린 일 ${item.badge}건`} />
                   : <span className="ml-auto shrink-0 rounded-full bg-amber-400 px-1.5 text-[11px] font-semibold leading-[18px] text-[#1d1d3a]" aria-label={`열린 일 ${item.badge}건`}>{item.badge > 99 ? "99+" : item.badge}</span>)}
               </Link>
