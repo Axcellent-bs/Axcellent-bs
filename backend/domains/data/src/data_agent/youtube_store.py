@@ -232,3 +232,67 @@ def latest_popular(
             PopularVideo(video_id, int(rank), tuple(str(t) for t in parsed if isinstance(t, str)))
         )
     return PopularSnapshot(datetime.fromisoformat(row[0]).astimezone(UTC), tuple(videos))
+
+
+@dataclass(frozen=True)
+class StoredVideo:
+    """스냅샷 한 시각의 영상 한 줄 (숫자 칸이 응답에 없었으면 None)."""
+
+    video_id: str
+    channel_id: str
+    published_at: datetime
+    view_count: int | None
+    like_count: int | None
+    comment_count: int | None
+    popular_rank: int | None
+    tags: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class StoredSnapshot:
+    collected_at: datetime
+    videos: dict[str, StoredVideo]  # 영상 id → 그 시각의 값
+
+
+def recent_snapshots(path: str | Path, count: int = 3) -> list[StoredSnapshot]:
+    """가장 최근 수집 시각 `count`개(최근 것부터)의 영상 값. 파일이 없으면 빈 목록. 읽기 전용."""
+    if str(path) != ":memory:" and not Path(path).is_file():
+        return []
+    conn = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True, timeout=5.0)
+    try:
+        times = [
+            r[0]
+            for r in conn.execute(
+                "SELECT DISTINCT collected_at FROM snapshots ORDER BY collected_at DESC LIMIT ?",
+                (count,),
+            )
+        ]
+        out = []
+        for at in times:
+            rows = conn.execute(
+                "SELECT video_id, channel_id, published_at, view_count, like_count, comment_count,"
+                " popular_rank, tags FROM snapshots WHERE collected_at = ?",
+                (at,),
+            ).fetchall()
+            videos = {}
+            for vid, ch, pub, views, likes, comments, rank, tags in rows:
+                try:
+                    parsed = json.loads(tags)
+                except ValueError:
+                    parsed = []
+                videos[vid] = StoredVideo(
+                    vid,
+                    ch,
+                    datetime.fromisoformat(pub).astimezone(UTC),
+                    views,
+                    likes,
+                    comments,
+                    rank,
+                    tuple(str(t) for t in parsed if isinstance(t, str)),
+                )
+            out.append(StoredSnapshot(datetime.fromisoformat(at).astimezone(UTC), videos))
+        return out
+    except sqlite3.DatabaseError:
+        return []
+    finally:
+        conn.close()

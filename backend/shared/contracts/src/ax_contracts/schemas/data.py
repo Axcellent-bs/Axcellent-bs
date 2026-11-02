@@ -724,6 +724,54 @@ class TrendHistoryOutput(AxModel):
     summary: str  # 한 문장 (코드가 숫자로 만든 고정 문장)
 
 
+# ---------------------------------------------------------- youtube_velocity (YouTube 지금 속도)
+# 최근 두 스냅샷 사이 영상별 시간당 조회 증가(지금 속도)와 그 전 구간 대비 빨라졌는지(가속).
+# 판정하지 않는다(평소 속도 기준이 아직 없음). 숫자 칸이 빠진 영상은 빈 값, 지워진 영상은 뺀다.
+
+
+class YouTubeVelocityRequest(AxModel):
+    """youtube_velocity skill 입력. 비우면 회사 설정(trends.toml `[velocity] top`) 개수."""
+
+    top: int | None = Field(default=None, ge=1, le=50)  # 지금 속도 상위 몇 개. 없으면 회사 설정
+
+
+class YouTubeVideoVelocity(AxModel):
+    video_id: str
+    channel_id: str
+    published_at: UtcDatetime
+    popular_rank: int | None = Field(
+        default=None, ge=1
+    )  # 최근 스냅샷의 인기 순위 (인기 목록에 없으면 None)
+    tags: list[str] = Field(default_factory=list)  # 저장된 태그 그대로
+    views: int | None = Field(default=None, ge=0)  # 최근 스냅샷 조회수
+    likes: int | None = Field(default=None, ge=0)  # 최근 스냅샷 좋아요 (숨김이면 None)
+    comments: int | None = Field(default=None, ge=0)  # 최근 스냅샷 댓글 (막음이면 None)
+    views_per_hour: float | None = None  # 지금 속도: 최근 두 스냅샷 사이 시간당 조회 증가
+    prev_views_per_hour: float | None = None  # 그 전 구간(셋째·둘째 스냅샷 사이) 시간당 조회 증가
+    speed_change: float | None = (
+        None  # 지금 속도 − 그 전 속도 (시간당 조회). 그 전 구간이 없으면 None
+    )
+    faster: bool | None = None  # 그 전 구간보다 빨라졌는지 (그 전 구간이 없으면 None)
+
+
+class YouTubeVelocityOutput(AxModel):
+    status: Literal["known", "unknown"]  # unknown = 스냅샷이 2개 미만 등
+    unknown_reason: str | None = None
+    latest_at: UtcDatetime | None = None  # 최근 스냅샷 시각
+    previous_at: UtcDatetime | None = None  # 그 앞 스냅샷 시각 (지금 속도 구간 시작)
+    earlier_at: UtcDatetime | None = None  # 셋째 스냅샷 시각 (그 전 구간 시작, 없으면 None)
+    compared_videos: int = Field(default=0, ge=0)  # 두 스냅샷 모두에 있어 속도를 잰 영상 수
+    missing_views: int = Field(default=0, ge=0)  # 조회수가 빠져 속도를 못 잰 영상 수
+    videos: list[YouTubeVideoVelocity] = Field(default_factory=list)  # 지금 속도 큰 순, 상위 N개
+    summary: str  # 한 문장 (코드가 숫자로 만든 고정 문장)
+
+    @model_validator(mode="after")
+    def _reason_when_unknown(self) -> Self:
+        if self.status == "unknown" and not self.unknown_reason:
+            raise ValueError("unknown이면 unknown_reason이 있어야 한다")
+        return self
+
+
 # --------------------------------------------------------------- content_recommend (영상 소재 추천)
 # trend_scan(회사 기본 키워드) + trend_candidates(YouTube 인기 태그) 판정에서 급상승한 것만 골라
 # 코드 규칙 점수로 순위를 매기고, 소재마다 LLM이 영상 아이디어 문장·형식을 쓴다(숫자 검증).
