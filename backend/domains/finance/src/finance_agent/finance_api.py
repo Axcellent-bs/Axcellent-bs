@@ -19,8 +19,6 @@
 | `GET /api/finance/close-checklist?date=` | ① 월 마감 체크리스트 | 없음 |
 | `GET /api/finance/tax/vat?date=` | ⑥ 부가세 신고 보조 집계 (분기) | 없음 |
 | `GET /api/finance/tax/seller-report?date=&format=` | ⑥ 판매자별 판매 명세 (제75조 초안) | 없음 |
-| `GET /api/finance/policy` | ⑤ 정책표·소진율·한도 제안 | 없음 |
-| `POST /api/finance/policy/{key}/ack` | ⑤ 경보 확인 메모 (이번 달 숨김) | **사람** |
 | `GET /api/finance/team-budget?month=YYYY-MM` | ⑤ 팀 예산 (팀 인원 × 인당 월 단가) | 없음 |
 | `POST /api/finance/team-budget/{month}/approve` | ⑤ 팀 예산 확정 (`signature` 일치) | **사람** |
 | `GET /api/finance/audit?days=7&context_id=` | ⑦ 사후 감사 (사건 하나로 좁히기 선택) | 없음 |
@@ -55,7 +53,6 @@ from finance_agent import (
     closing,
     deadline,
     payables,
-    policy,
     reconciliation,
     settlement,
     statements,
@@ -66,7 +63,6 @@ from finance_agent import (
 from finance_agent import finance_config as fc
 from finance_agent.handlers import (
     closing_key,
-    incident_impact,
     note_audit,
     state,
     team_budget_data,
@@ -132,8 +128,7 @@ async def settlements_view(period: str | None) -> tuple[dict[str, Any], dict[str
     batch = state().records.batches.get(result["period"])
     if batch:
         await refresh_batch(batch)
-    unavailable = ["hold_reasons.open_claim"] if books.claims is None else []
-    return settlement.apply_batch(result, batch), books.meta(unavailable)
+    return settlement.apply_batch(result, batch), books.meta()
 
 
 # ---------------------------------------------------------------- 사람이 할 일
@@ -244,7 +239,7 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
         )
 
     # 사후 감사: 찾은 의심 건은 처리 전 목록에 남고, 사람이 처리 완료할 때까지 할 일로 보인다
-    report, _ = await audit.audit_report(books, 7, impact_lookup=incident_impact)
+    report, _ = await audit.audit_report(books, 7)
     await note_audit(report["findings"], TENANT_ID_DEFAULT)
     serious = [
         e
@@ -273,36 +268,6 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
             }
         )
 
-    pol, _ = policy.policy_report(books)
-    acks = state().records.policy_acks
-    alerts = [
-        r
-        for r in pol["rules"]
-        if r["alert"] in ("warn", "over")
-        and not policy_acked(acks.get(r["key"]), r["alert"], today)
-    ]
-    if alerts:
-        labels = ", ".join(r["label"] for r in alerts)
-        todo.append(
-            {
-                "kind": "policy_alert",
-                "title": f"예산·한도 경보 {len(alerts)}건 ({labels})",
-                "count": len(alerts),
-                "amount": None,
-                "link": "policy",
-                # 사람이 확인하고 조치를 메모로 남긴다(한도 변경은 기준표 PR). 이번 달에는 숨긴다
-                "action": {"type": "policy_ack"},
-                "items": [
-                    {
-                        "ref": r["key"],
-                        "title": r["label"],
-                        "detail": "한도를 넘음" if r["alert"] == "over" else "한도에 가까움",
-                        "amount": None,
-                    }
-                    for r in alerts
-                ],
-            }
-        )
     # 팀 예산: 이번 달과 다음 달(발령은 다음 달 1일부터 반영) 중 확정이 안 됐거나 숫자가 바뀐 달
     this_month = team_budget.month_of(today)
     for month in (this_month, team_budget.shift_month(this_month, 1)):
@@ -341,9 +306,6 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
     return {"date": today.isoformat(), "kpis": totals.as_kpis(unknown), "todo": todo}, books.meta()
 
 
-ALERT_RANK = {"ok": 0, "warn": 1, "over": 2}
-
-
 def _team_budget_meta(missing: list[str]) -> dict[str, Any]:
     return {
         "mock": is_mock("finance"),
@@ -351,13 +313,6 @@ def _team_budget_meta(missing: list[str]) -> dict[str, Any]:
         "source": "hr.team_headcount",
         "unavailable": missing,
     }
-
-
-def policy_acked(ack: dict[str, Any] | None, alert: str, today: Any) -> bool:
-    """이번 달에 같은 단계 이상을 확인했으면 할 일에서 숨긴다. 경보가 더 세지면 다시 보인다."""
-    if not ack or ack.get("month") != today.isoformat()[:7]:
-        return False
-    return ALERT_RANK.get(alert, 9) <= ALERT_RANK.get(str(ack.get("alert")), -1)
 
 
 # ---------------------------------------------------------------- 라우트
@@ -577,12 +532,6 @@ def add_finance_api(app: FastAPI) -> None:
         )
         return ok(rows, books.meta())
 
-    @app.get("/api/finance/policy")
-    async def get_policy() -> dict:
-        books = await state().books()
-        data, missing = policy.policy_report(books)
-        return ok(data, books.meta(missing))
-
     @app.get("/api/finance/audit", response_model=None)
     async def get_audit(days: str = "7", context_id: str | None = None) -> dict | JSONResponse:
         try:
@@ -592,38 +541,9 @@ def add_finance_api(app: FastAPI) -> None:
         if not 1 <= n <= 90:
             return error(400, "invalid_request", "days는 1~90")
         books = await state().books()
-        data, missing = await audit.audit_report(
-            books, n, impact_lookup=incident_impact, context_id=context_id or None
-        )
+        data, missing = await audit.audit_report(books, n, context_id=context_id or None)
         await note_audit(data.get("findings") or [], TENANT_ID_DEFAULT)
         return ok(data, books.meta(missing))
-
-    @app.post("/api/finance/policy/{rule_key}/ack", response_model=None)
-    async def ack_policy(
-        rule_key: str, request: Request, authorization: str | None = Header(default=None)
-    ) -> dict | JSONResponse:
-        """예산·한도 경보를 사람이 확인했다고 남긴다. 한도는 바꾸지 않는다(기준표 PR로만 바꾼다)."""
-        try:
-            person = human_from_authorization(authorization)
-        except PermissionError as exc:
-            return error(401, "unauthorized", str(exc))
-        note = (await _body(request)).get("note")
-        if not isinstance(note, str) or not note.strip() or len(note) > 500:
-            return error(400, "invalid_request", "note는 1~500자 문자열")
-        books = await state().books()
-        pol, _ = policy.policy_report(books)
-        rule = next((r for r in pol["rules"] if r["key"] == rule_key), None)
-        if rule is None:
-            return error(404, "not_found", f"규칙 {rule_key}이 정책표에 없다")
-        ack = {
-            "alert": rule["alert"],
-            "month": fc.today().isoformat()[:7],
-            "note": note.strip(),
-            "by": person,
-            "at": fc.iso(fc.now()),
-        }
-        state().records.policy_acks[rule_key] = ack
-        return ok(ack | {"key": rule_key}, books.meta() | {"acked_by": person})
 
     @app.get("/api/finance/team-budget", response_model=None)
     async def get_team_budget(month: str | None = None) -> dict | JSONResponse:

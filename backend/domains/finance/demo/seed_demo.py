@@ -86,7 +86,7 @@ def main() -> None:
     )
     show("장애 기록 남기기", execute(s, "hr", "memory.card_write", "card-1", {"kind": "incident"}))
 
-    # 1) 장애 보상 쿠폰 (마케팅 → 안전 레이어 → 재무가 다시 계산)
+    # 1) 장애 보상 쿠폰 (마케팅 → 안전 레이어 기준표 검사. 재무는 끝난 금액을 장부에 적기만 한다)
     for buyer in ("buy_0904", "buy_0905", "buy_0906"):
         show(
             f"보상 쿠폰 {buyer} 1장×5,000원",
@@ -106,7 +106,7 @@ def main() -> None:
     )
 
     show(
-        "한 번에 50만 원 쿠폰(재무 AI 재량 한도 45만 원도 넘음 → 사람 확인)",
+        "한 번에 50만 원 쿠폰(기준표 넘음 → 사람 확인)",
         execute(s, "marketing", "issue_coupon", "cpn-huge", coupon("buy_0909", 25, 20000)),
     )
 

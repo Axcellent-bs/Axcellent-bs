@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ago, shortDateTime, won } from "@/lib/format";
-import { ACTION_KO, SAFETY_SERVER, finance, humanTokenSet, krw, type Review, type RuleHit } from "@/lib/finance";
+import { ACTION_KO, SAFETY_SERVER, finance, humanTokenSet, krw, liveHumanTokenSet, type Review, type RuleHit } from "@/lib/finance";
 import { Chip, TONE } from "./bits";
 
-// 안전 장치 보류 큐: 사람만 정할 수 있는 일(C 등급). 정산 묶음 지급 승인도 여기로 온다.
-// 대시보드에 따로 보류 큐 화면이 없어서 재무 화면에 둔다. 결정은 safety에 사람 토큰으로 보낸다.
+// 안전 장치 보류 큐: 사람만 정할 수 있는 일(C 등급). 결정은 safety에 사람 토큰으로 보낸다.
+// 재무 화면(SafetyQueue)에는 정산 묶음 지급 승인과 아직 담당 화면이 없는 일이 온다.
+// 환불은 고객지원 보상 큐(RefundHolds), 쿠폰은 마케팅 화면(ActionQueue)에서 결정한다. 재무는 끝난 금액만 장부에 적는다.
 
 const WHO_KO: Record<string, string> = {
   marketing: "마케팅 AI", support: "고객지원 AI", finance: "재무 AI", hr: "인사 AI", orchestrator: "총괄 AI",
@@ -50,15 +51,26 @@ function tipOf(r: Review): string {
   if (r.action === "confirm_settlement") return "위 ③ 판매자 정산 표의 판매자·기간·금액과 같으면 진행하세요.";
   switch (r.report.hold_reason) {
     case "amount_mismatch": return "요청한 AI가 금액을 잘못 적었다는 뜻입니다. 보통 멈추고 담당자에게 알리세요.";
-    case "unregistered_action": return "처음 보는 일입니다. 멈추고 재무 담당자에게 문의하세요.";
+    case "unregistered_action": return "처음 보는 일입니다. 멈추고 담당자에게 문의하세요.";
     case "over_threshold":
       if (r.action === "refund_request") return "쇼핑몰 관리 화면에서 주문·결제 금액을 확인한 뒤 결정하세요.";
-      return "위 '장애 사건 재무'에서 그 사건의 피해 고객·피해 금액과 비교해 보상이 지나치지 않으면 진행하세요.";
+      return "그 사건의 피해 고객·피해 금액과 비교해 보상이 지나치지 않으면 진행하세요.";
     default: return "애매하면 멈추세요. 멈춘 일은 요청한 AI가 고쳐서 다시 요청할 수 있습니다.";
   }
 }
 
-export function SafetyQueue({ reviews, error, highlight, reload }: { reviews: Review[] | null; error: string | null; highlight: string | null; reload: () => Promise<void> }) {
+const FINANCE_INTRO = "판매자 정산 지급처럼 사람만 정할 수 있는 일이 여기 모입니다. 환불은 고객지원 화면, 쿠폰은 마케팅 화면에서 결정합니다.";
+
+export function SafetyQueue({ reviews, error, highlight, reload, intro = FINANCE_INTRO, live = false }: {
+  reviews: Review[] | null;
+  error: string | null;
+  highlight: string | null;
+  reload: () => Promise<void>;
+  intro?: string;
+  /** 재무 화면의 예시 데이터 전환과 상관없이 실제 서버로 결정한다 */
+  live?: boolean;
+}) {
+  const canDecide = live ? liveHumanTokenSet : humanTokenSet;
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const pending = (reviews ?? []).filter((r) => r.status === "pending").sort((a, b) => a.expires_at.localeCompare(b.expires_at));
@@ -67,7 +79,7 @@ export function SafetyQueue({ reviews, error, highlight, reload }: { reviews: Re
   async function decide(id: string, decision: "approved" | "rejected") {
     setBusy(id + decision);
     setProblem(null);
-    try { await finance.decide(id, decision); await reload(); }
+    try { await finance.decide(id, decision, undefined, live); await reload(); }
     catch (e) { setProblem((e as Error).message); }
     finally { setBusy(null); }
   }
@@ -79,10 +91,10 @@ export function SafetyQueue({ reviews, error, highlight, reload }: { reviews: Re
         <p className={`text-sm font-semibold ${pending.length ? "text-amber-800" : "text-emerald-800"}`}>{pending.length ? `결정 기다림 ${pending.length}건` : "기다리는 일 없음"}</p>
       </div>
       <p className="mt-0.5 text-xs leading-relaxed text-ink-500">
-        판매자 정산 지급처럼 사람만 정할 수 있는 일과, 안전 장치가 C로 보류한 보상 쿠폰·환불(한도 초과·금액 불일치)이 여기 모입니다. 금액과 이유를 보고 진행 또는 멈춤을 누르세요. 진행은 되돌릴 수 없고, 애매하면 멈춤을 누르세요. 정한 시간 안에 아무도 누르지 않으면 자동으로 멈춥니다.
+        {intro} 금액과 이유를 보고 진행 또는 멈춤을 누르세요. 진행은 되돌릴 수 없고, 애매하면 멈춤을 누르세요. 정한 시간 안에 아무도 누르지 않으면 자동으로 멈춥니다.
       </p>
       {error && <p role="alert" className="mt-3 rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{SAFETY_SERVER}에서 보류 큐를 받지 못했습니다. {error}</p>}
-      {!humanTokenSet && pending.length > 0 && <p className="mt-3 text-xs text-amber-800">결정 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 버튼이 꺼져 있습니다.</p>}
+      {!canDecide && pending.length > 0 && <p className="mt-3 text-xs text-amber-800">결정 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 버튼이 꺼져 있습니다.</p>}
       {problem && <p role="alert" className="mt-3 rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{problem}</p>}
 
       {pending.length > 0 && (
@@ -112,8 +124,8 @@ export function SafetyQueue({ reviews, error, highlight, reload }: { reviews: Re
                   </p>
                 </div>
                 <div className="flex gap-2 sm:flex-col">
-                  <button className="btn-primary" disabled={!humanTokenSet || busy !== null} onClick={() => decide(r.review_id, "approved")}>진행</button>
-                  <button className="btn-ghost" disabled={!humanTokenSet || busy !== null} onClick={() => decide(r.review_id, "rejected")}>멈춤</button>
+                  <button className="btn-primary" disabled={!canDecide || busy !== null} onClick={() => decide(r.review_id, "approved")}>진행</button>
+                  <button className="btn-ghost" disabled={!canDecide || busy !== null} onClick={() => decide(r.review_id, "rejected")}>멈춤</button>
                 </div>
               </li>
             );
@@ -136,4 +148,25 @@ export function SafetyQueue({ reviews, error, highlight, reload }: { reviews: Re
       )}
     </section>
   );
+}
+
+const QUEUE_REFRESH_MS = 30_000;
+
+/** 재무 화면 밖에 두는 보류 큐: 한 가지 일의 보류 건만 스스로 받아 결정한다 */
+export function ActionQueue({ action, intro }: { action: string; intro: string }) {
+  const [reviews, setReviews] = useState<Review[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    try {
+      const all = await finance.reviews(true);
+      setReviews(all.filter((r) => r.action === action));
+      setError(null);
+    } catch (e) { setError((e as Error).message); }
+  }, [action]);
+  useEffect(() => {
+    void load();
+    const t = setInterval(() => void load(), QUEUE_REFRESH_MS);
+    return () => clearInterval(t);
+  }, [load]);
+  return <SafetyQueue reviews={reviews} error={error} highlight={null} reload={load} intro={intro} live />;
 }

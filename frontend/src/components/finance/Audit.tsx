@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { shortDateTime } from "@/lib/format";
-import { finance, findingKo, humanTokenSet, krw, plainText, type Anomaly, type FindingSeverity } from "@/lib/finance";
+import { finance, findingKo, humanTokenSet, plainText, type Anomaly, type FindingSeverity } from "@/lib/finance";
 import { Chip, Empty, Panel, RefList, ResourceBody, TONE, useResource } from "./bits";
 
-// ⑦ 내부통제·감사: 지난 며칠 동안의 쿠폰·안전 장치 기록을 전부 다시 훑어 수상한 패턴을 찾는다. 환불은 감사하지 않는다.
-// 건마다 막는 것이 아니라 나중에 점검하는 것(사후 감사)이다.
+// ⑦ 사후 감사: 지난 며칠 동안의 안전 장치 기록에서 보류·거절이 늘었는지 본다. 쿠폰·환불은 세지 않는다
+// (재무는 끝난 금액만 장부에 적는다). 건마다 막는 것이 아니라 나중에 점검하는 것이다.
 
 const SEVERITY: Record<FindingSeverity, { label: string; tone: string; rank: number }> = {
   high: { label: "높음", tone: TONE.bad, rank: 0 },
@@ -14,7 +14,7 @@ const SEVERITY: Record<FindingSeverity, { label: string; tone: string; rank: num
 const DAYS = [7, 14, 30] as const;
 
 /** 처리 전 의심 건: 감사 기간과 관계없이 사람이 처리할 때까지 남는다. 처리하면 목록에서 빠진다 */
-function OpenAnomalies({ tick }: { tick: number }) {
+function OpenAnomalies({ tick, onChanged }: { tick: number; onChanged?: () => void }) {
   const res = useResource("anomalies", () => finance.anomalies(), tick);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -28,6 +28,7 @@ function OpenAnomalies({ tick }: { tick: number }) {
     try {
       await finance.resolveAnomaly(a.finding_ref, note);
       await res.reload();
+      onChanged?.(); // 맨 위 "지금 사람이 할 일"에서도 바로 빠지게 한다
     } catch (e) {
       setProblem((e as Error).message);
     } finally {
@@ -56,7 +57,7 @@ function OpenAnomalies({ tick }: { tick: number }) {
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <label className="min-w-0 flex-1">
                         <span className="sr-only">처리 메모</span>
-                        <input className="field py-1" maxLength={500} placeholder="조사 결과 (예: 담당 팀에 확인, 정상 지급)"
+                        <input className="field py-1" maxLength={500} placeholder="조사 결과 (예: 담당 팀에 확인, 정상 처리)"
                           value={notes[a.finding_ref] ?? ""} onChange={(e) => setNotes((n) => ({ ...n, [a.finding_ref]: e.target.value }))} />
                       </label>
                       <button type="button" className="btn-primary" onClick={() => resolve(a)}
@@ -89,7 +90,7 @@ function OpenAnomalies({ tick }: { tick: number }) {
   );
 }
 
-export function AuditSection({ tick }: { tick: number }) {
+export function AuditSection({ tick, onChanged }: { tick: number; onChanged?: () => void }) {
   const [days, setDays] = useState<number>(7);
   const res = useResource(`audit:${days}`, () => finance.audit(days), tick);
 
@@ -106,15 +107,14 @@ export function AuditSection({ tick }: { tick: number }) {
 
   return (
     <div className="space-y-4">
-    <OpenAnomalies tick={tick} />
-    <Panel id="audit" title="⑦ 내부통제·감사" titleHidden meta={res.env?.meta} tools={tools}
-      hint="한 건씩 막는 일은 안전 장치가 합니다. 재무 AI는 지난 쿠폰·안전 장치 기록을 다시 훑어, 한도를 피하려고 쪼갠 쿠폰이나 같은 사건에 두 번 나간 보상 쿠폰 같은 수상한 패턴을 찾습니다. 환불은 고객지원 일이라 감사하지 않고, 끝난 금액을 장부에 적기만 합니다. 의심 건은 조사해 보고 결론을 남기세요.">
+    <OpenAnomalies tick={tick} onChanged={onChanged} />
+    <Panel id="audit" title="⑦ 사후 감사" titleHidden meta={res.env?.meta} tools={tools}
+      hint="한 건씩 막는 일은 안전 장치가 합니다. 재무 AI는 지난 안전 장치 기록을 다시 훑어 보류·거절이 갑자기 늘었는지 봅니다. 쿠폰·환불은 세지 않습니다. 재무는 끝난 금액을 장부에 적기만 합니다. 의심 건은 조사해 보고 결론을 남기세요.">
       <ResourceBody res={res}>
         {(a) => {
           const s = a.stats;
           const findings = [...a.findings].sort((x, y) => (SEVERITY[x.severity]?.rank ?? 9) - (SEVERITY[y.severity]?.rank ?? 9));
           const stats: [string, string, string][] = [
-            ["쿠폰", s.coupon_count == null ? "확인할 수 없음" : `${s.coupon_count.toLocaleString("ko-KR")}장`, krw(s.coupon_amount)],
             ["안전 장치 보류·거절", s.gate_held == null && s.gate_rejected == null ? "확인할 수 없음" : `${s.gate_held ?? "–"}건 · ${s.gate_rejected ?? "–"}건`, "사람 확인으로 간 건 · 막힌 건"],
           ];
           return (

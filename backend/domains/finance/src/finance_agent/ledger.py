@@ -2,7 +2,7 @@
 
 쿠폰 업무는 재무가 맡지 않는다 (마케팅·고객지원 합의). 누구에게 얼마를 줄지는 고객지원이
 정하고(`request_compensation`), 지급은 마케팅(`issue_coupon`)이 안전 관문을 거쳐 한다.
-재무는 그렇게 빠져나간 돈을 사건별로 적고, 사후 감사에서 근거로 쓴다.
+재무는 그렇게 빠져나간 돈을 사건별로 적기만 한다.
 
 장부 출처(`ledger_source`)는 셋이다.
 
@@ -76,19 +76,6 @@ async def load_executions(
         return ExecutionFeed(None, LEDGER_SAFETY)
     rows = [bk.normalize_execution(r) for r in raw if isinstance(r, dict)]
     return ExecutionFeed([r for r in rows if r is not None], LEDGER_SAFETY)
-
-
-async def load_thresholds(http_client: httpx.AsyncClient | None = None) -> dict[str, Any] | None:
-    """기준표. 목 모드는 시드에 옮겨 둔 기본값, 실제 모드는 safety `GET /api/safety/thresholds`."""
-    if is_mock("finance"):
-        return bk.read_seed().get("thresholds")
-    client = http_client or httpx.AsyncClient()
-    try:
-        raw = await bk._get(client, f"{agent_url('safety')}/api/safety/thresholds")
-    finally:
-        if http_client is None:
-            await client.aclose()
-    return raw if isinstance(raw, dict) else None
 
 
 # ---------------------------------------------------------------- 줄 만들기

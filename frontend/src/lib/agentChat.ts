@@ -100,8 +100,14 @@ const METRIC_KO: Record<string, string> = {
 const SUBJECT_KO: Record<string, string> = { payment: "결제가", api: "쇼핑몰이", db: "주문 DB가", search: "검색이", shipping: "배송이" };
 // 재무 이상 이벤트(finance.anomaly_detected)는 주어 없이 한 문장으로
 const FINANCE_KO: Record<string, string> = {
-  split_under_limit: "한도 바로 아래로 쪼갠 지급이 있어요", duplicate_coupon: "같은 이벤트 보상 쿠폰이 두 번 나갔어요",
+  gate_hold_trend: "안전 장치 보류·거절이 늘었어요",
 };
+/** 보류 건을 결정하는 화면. 환불은 고객지원, 쿠폰은 마케팅, 나머지는 재무 화면의 보류 큐다 */
+export function holdPage(action: string | null | undefined): string {
+  if (action === "refund_request") return "/queue";
+  if (action === "issue_coupon") return "/marketing";
+  return "/finance";
+}
 /** 총괄 제목 끝의 "(metric)"에서 지표 코드를 꺼낸다 */
 function metricOf(inc: Pick<OrchIncident, "title">): string | null {
   return /\(([^)]+)\)\s*$/.exec(inc.title)?.[1] ?? null;
@@ -177,7 +183,7 @@ export interface Fact { label: string; value: string }
 export type ChatItem =
   | { kind: "msg"; id: string; at: string; room: string; from: string; to: string; fromKey: string; central: boolean; text: string; tag?: string; raw?: string; tone: Tone; facts: Fact[]; repeat?: number; lastAt?: string }
   | { kind: "system"; id: string; at: string; room: string; text: string }
-  | { kind: "hold"; id: string; at: string; room: string; title: string; detail: string; state: "pending" | "approved" | "rejected" | "timeout"; contextId?: string; stepId?: string; link?: string }
+  | { kind: "hold"; id: string; at: string; room: string; title: string; detail: string; state: "pending" | "approved" | "rejected" | "timeout"; contextId?: string; stepId?: string; link?: string; decideAt?: string }
   | { kind: "separator"; id: string; at: string; room: string; text: string; raw?: string; variant: "day" | "topic" };
 
 export const SAFETY_ROOM = "safety";
@@ -360,7 +366,7 @@ export function incidentItems(inc: OrchIncident): ChatItem[] {
           ? step.note === "시간 초과로 자동 거절" ? "timeout" : "rejected"
           : "approved";
       out.push({
-        kind: "hold", id: `${sid}:hold`, at: holdAt, room, contextId: inc.context_id, stepId: step.step_id, state,
+        kind: "hold", id: `${sid}:hold`, at: holdAt, room, contextId: inc.context_id, stepId: step.step_id, state, decideAt: holdPage(step.skill),
         title: stepLabel(step.label), detail: `${speaker(step.dept)} · ${skillKo(step.skill)}`,
       });
       if (pending) continue;
@@ -457,8 +463,8 @@ export function executionItems(rec: ExecutionRecord): ChatItem[] {
   });
   if (d.status === "held") {
     out.push({
-      kind: "hold", id: `${id}:hold`, at: rec.created_at, room, state: "pending", link: "/finance",
-      title: `${speaker(req.requester)}의 ${actionKo(req.action)}${amount}`, detail: "재무 AI 화면(/finance)에서 결정합니다",
+      kind: "hold", id: `${id}:hold`, at: rec.created_at, room, state: "pending", link: holdPage(req.action),
+      title: `${speaker(req.requester)}의 ${actionKo(req.action)}${amount}`, detail: `담당 화면(${holdPage(req.action)})에서 결정합니다`,
     });
   }
   return out;
@@ -498,7 +504,7 @@ export function commItem(line: CommLine, room: string, safetyIds: ReadonlySet<st
     line.execution_id,
     line.context_id,
   );
-  const holdHint = line.outcome === "held" && !dupOf ? " — 안전 관문 보류 큐(/finance)에서 결정" : "";
+  const holdHint = line.outcome === "held" && !dupOf ? ` — 안전 관문 보류 큐(${holdPage(line.skill)})에서 결정` : "";
   return {
     kind: "msg", id: `log:${line.log_id}`, at: line.occurred_at, room,
     from: speaker(line.from_agent), to: line.to_agent ? speaker(line.to_agent) : "받는 쪽 미기록",

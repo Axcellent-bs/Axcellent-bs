@@ -2,8 +2,6 @@
 
 `verify_amount`·`review_hold`·`loss_aggregation` skill은 재무 재설계로 없앴다
 (`loss_aggregation`은 2026-10-27, 재무가 장애 대응 흐름의 단계가 아니게 되면서).
-금액 다시 계산 규칙은 `recheck.py`에 남아 있고 형식은
-contracts 원본(`VerifyAmountInput`·`VerifyAmountOutput`)을 쓴다.
 금액은 모두 정수 원, 시각은 UTC ISO8601 문자열이다.
 """
 
@@ -58,18 +56,12 @@ class ClosingReportOutput(AxModel):
 # ------------------------------------------------ audit_report (orchestrator·data → finance, 읽기)
 class AuditReportInput(AxModel):
     days: int = Field(default=7, ge=1, le=90)
-    context_id: str | None = None  # 주면 그 사건의 쿠폰·실행 기록만 본다
+    context_id: str | None = None  # 주면 그 사건의 실행 기록만 본다
     finding_ref: str | None = None  # 주면 그 의심 건 하나만 (기간과 관계없이 처리 전 기록)
 
 
 class AuditFinding(AxModel):
-    code: Literal[
-        "split_under_limit",
-        "duplicate_coupon",
-        "amount_recheck_failed",
-        "gate_hold_trend",
-        "compensation_outside_impact",
-    ]
+    code: Literal["gate_hold_trend"]
     severity: Literal["high", "medium", "low"]
     title: str
     detail: str
@@ -77,8 +69,6 @@ class AuditFinding(AxModel):
 
 
 class AuditStats(AxModel):
-    coupon_count: int
-    coupon_amount: int
     gate_held: int | None = None
     gate_rejected: int | None = None
 

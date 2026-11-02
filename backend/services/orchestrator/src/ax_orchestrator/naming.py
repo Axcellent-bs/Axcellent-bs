@@ -28,8 +28,7 @@ METRIC_KO = {
     "payment_fail_rate": "실패가 늘었어요",
 }
 FINANCE_KO = {
-    "split_under_limit": "한도 바로 아래로 쪼갠 지급이 있어요",
-    "duplicate_coupon": "같은 이벤트 보상 쿠폰이 두 번 나갔어요",
+    "gate_hold_trend": "안전 장치 보류·거절이 늘었어요",
 }
 FINANCE_DEFAULT = "돈 흐름에서 이상한 점을 찾았어요"
 PLAN_KO = {

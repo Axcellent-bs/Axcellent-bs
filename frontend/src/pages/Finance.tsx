@@ -10,7 +10,6 @@ import { StatementsSection } from "@/components/finance/Statements";
 import { Chip, ErrorBox, MetaLine, MockBadge, TONE, Waiting, useResource } from "@/components/finance/bits";
 import { IncidentFinance } from "@/components/finance/Incident";
 import { SelfTestPanel } from "@/components/finance/Kept";
-import { PolicySection } from "@/components/finance/Policy";
 import { TeamBudgetSection } from "@/components/finance/TeamBudget";
 import { ReconciliationSection } from "@/components/finance/Reconciliation";
 import { SafetyQueue } from "@/components/finance/SafetyQueue";
@@ -19,15 +18,16 @@ import { SupportCostsSection } from "@/components/finance/SupportCosts";
 import { TodoCard } from "@/components/finance/Todo";
 import { Link } from "@/lib/nav";
 import {
-  FINANCE_SERVER, FINANCE_TABS, SAFETY_SERVER, exampleMode, finance, incidentName, krw, sortIncidents, todoTab,
+  FINANCE_SERVER, FINANCE_TABS, NOT_FINANCE_ACTIONS, SAFETY_SERVER, exampleMode, finance, krw, sortIncidents, todoTab,
   type FinanceKpis, type FinanceTab, type Review, type SelfTest, type SelfTestLastMeta,
 } from "@/lib/finance";
 import { CompanyName } from "@/demo/CompanyName";
 import { setExampleOn } from "@/lib/financeExample";
 
-// 재무 AI 화면 = 고객사 재무팀. 기본 화면은 시나리오 A(결제 장애)의 "장애 사건 재무"(⑨ 쿠폰 장부 → ⑩ 손실 → ⑰ 사건 후 감사).
-// 평상시 업무(결산·대사·정산·한도 제안·감사)는 두 번째 탭에 둔다. 재무 AI 테스트는 서버가 10분마다 자동으로 한다.
-// 건별 금액 승인은 하지 않는다(건별 검사는 안전 장치). 숫자는 서버가 계산한 값을 그대로 보여 주고, 말만 쉽게 바꾼다.
+// 재무 AI 화면 = 고객사 재무팀. 기본 화면은 시나리오 A(결제 장애)의 "장애 사건 재무"(사건별 쿠폰·환불 장부).
+// 평상시 업무(결산·대사·정산·팀 예산·보류 추이)는 두 번째 탭에 둔다. 재무 AI 테스트는 서버가 10분마다 자동으로 한다.
+// 재무는 쿠폰·환불을 끝난 금액만 장부에 적는다. 보류 결정은 환불은 고객지원, 쿠폰은 마케팅 화면에서 한다.
+// 숫자는 서버가 계산한 값을 그대로 보여 주고, 말만 쉽게 바꾼다.
 // 기준: ax-backend docs/notes/finance/2026-10-23-finance-redesign.md §8·§11·§12
 
 const REFRESH_MS = 30_000;
@@ -38,8 +38,8 @@ const TAB_LABEL: Record<FinanceTab, string> = {
   closing: "① 결산·리포트",
   reconciliation: "② 매출·PG 대사",
   settlements: "③ 판매자 정산",
-  policy: "⑤ 예산·한도",
-  audit: "⑦ 내부통제·감사",
+  policy: "⑤ 팀 예산",
+  audit: "⑦ 사후 감사",
   tax: "⑥ 세무 지원",
 };
 
@@ -114,7 +114,7 @@ export default function FinancePage() {
   const incidentList = sortIncidents(incidents.env?.data ?? []);
   const selectedIncident = urlIncident ?? incidentList[0]?.context_id ?? null;
 
-  // 서버 상태 · 보류 큐 · 손실
+  // 서버 상태 · 보류 큐 (환불·쿠폰 보류는 고객지원·마케팅 화면에서 결정해 여기서 뺀다)
   const [financeUp, setFinanceUp] = useState<boolean | null>(null);
   const [safetyUp, setSafetyUp] = useState<boolean | null>(null);
   const [reviews, setReviews] = useState<Review[] | null>(null);
@@ -126,7 +126,7 @@ export default function FinancePage() {
     ]);
     setFinanceUp(fh != null);
     setSafetyUp(sh != null);
-    if (rv) setReviews(rv);
+    if (rv) setReviews(rv.filter((r) => !NOT_FINANCE_ACTIONS.has(r.action)));
     setReviewsError(rvErr);
   }, []);
   useEffect(() => { void loadSide(); }, [loadSide, tick]);
@@ -168,16 +168,11 @@ export default function FinancePage() {
 
   const pendingReviews = (reviews ?? []).filter((r) => r.status === "pending");
   const todo = overview.env?.data.todo ?? [];
-  // 장애 사건: 보류 쿠폰이 있거나 사건 후 감사에서 문제가 나온 사건
-  const heldIncidents = incidentList.filter((i) => i.held_count > 0);
-  const failedIncidents = incidentList.filter((i) => i.checks_ok === false);
-  // 보류 쿠폰으로 이미 보여 준 사건의 보류 건은 "보류 큐" 항목에서 빼 두 번 세지 않는다
-  const heldCtx = new Set(heldIncidents.map((i) => i.context_id));
   // 정산 승인 대기는 판매자 정산 할 일에 결정 버튼이 있으므로 "보류 큐" 항목에서 다시 세지 않는다
   const todoReviewIds = new Set(todo.map((t) => t.action?.review_id).filter(Boolean));
-  const otherPending = pendingReviews.filter((r) => !heldCtx.has(r.context_id) && !todoReviewIds.has(r.review_id));
-  const todoCount = todo.length + (otherPending.length ? 1 : 0) + heldIncidents.length + failedIncidents.length;
-  const anyTodoLoaded = overview.env || reviews || incidents.env;
+  const otherPending = pendingReviews.filter((r) => !todoReviewIds.has(r.review_id));
+  const todoCount = todo.length + (otherPending.length ? 1 : 0);
+  const anyTodoLoaded = overview.env || reviews;
 
   return (
     <div className="w-full space-y-6 px-4 pb-12 pt-2 sm:space-y-8 sm:px-8">
@@ -186,8 +181,8 @@ export default function FinancePage() {
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">재무 관리</h1>
           <p className="mt-1 text-sm text-ink-500">
-            <CompanyName />의 재무팀입니다. 장애가 나면 보상 쿠폰을 사건별 장부에 적고, 피해와 보상을 더해 손실을 정리하고, 끝난 뒤 보상이 규칙대로 나갔는지 감사합니다.
-            평소에는 결산·대사·정산·한도·감사를 합니다. 쿠폰·환불을 한 건씩 승인하지는 않습니다(그건 안전 장치가 기준표로 검사합니다).
+            <CompanyName />의 재무팀입니다. 쿠폰·환불은 끝난 금액만 장부에 적습니다.
+            평소에는 결산·대사·판매자 정산·팀 예산을 합니다. 쿠폰·환불을 결정하거나 감사하지는 않습니다(한 건씩 검사는 안전 장치가, 보류 결정은 고객지원·마케팅 화면에서 사람이 합니다).
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs sm:ml-auto">
@@ -203,10 +198,9 @@ export default function FinancePage() {
         <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-ink-700">
           <li><b>재무 AI 테스트 확인</b>: 맨 위 <b>재무 AI 테스트</b>가 초록색(정상)인지 봅니다. 서버가 10분마다 스스로 테스트하므로 누를 필요는 없습니다. "늦어지고 있습니다" 경고가 보이면 재무 AI 서버를 확인합니다.</li>
           <li><b>사건 고르기</b>: <b>장애 사건 재무</b> 탭 위쪽 사건 탭에서 살펴볼 사건을 고릅니다. 가장 최근 사건이 먼저 열려 있고, 오래된 사건은 끝의 <b>이전 사건</b> 목록에 있습니다.</li>
-          <li><b>손실 확인</b>: 피해(데이터 AI가 센 숫자), 보상 쿠폰, <b>총 손실 = 피해 + 보상</b>, 보상 한도를 얼마나 썼는지 봅니다. 재무 단계 ⑨·⑩이 <b>끝남</b>이면 장부와 손실 리포트가 준비된 것입니다.</li>
-          <li><b>감사 결과 확인</b>: ⑰ 사건 후 감사에 ✗가 있으면 관련 기록 번호를 재무 담당자에게 알립니다. 영향 고객이 아닌 사람이 쿠폰을 받았거나, 한 사람이 두 번 받았거나, 한도를 넘었다는 뜻입니다.</li>
-          <li><b>보류 큐 결정</b>: 판정이 <b>C</b>인 쿠폰은 아래 <b>안전 장치 보류 큐</b>에서 진행 또는 멈춤을 누릅니다. 10분 안에 아무도 정하지 않으면 자동으로 취소됩니다.</li>
-          <li><b>평상시 업무</b>: <b>평상시 재무 업무</b> 탭에서 결산 확정, 대사 메모, 판매자 정산 묶음 요청, 한도 제안 확인, 감사를 합니다.</li>
+          <li><b>장부 확인</b>: 피해(데이터 AI가 센 숫자), 보상 쿠폰, 환불로 빠져나간 돈을 봅니다.</li>
+          <li><b>보류 큐 결정</b>: 판매자 정산 지급은 아래 <b>안전 장치 보류 큐</b>에서 진행 또는 멈춤을 누릅니다. 환불은 고객지원 화면, 쿠폰은 마케팅 화면에서 결정합니다.</li>
+          <li><b>평상시 업무</b>: <b>평상시 재무 업무</b> 탭에서 결산 확정, 대사 메모, 판매자 정산 묶음 요청, 팀 예산 확정을 합니다.</li>
         </ol>
         <p className="mt-3 text-xs text-ink-500">
           단계별 설명과 자주 묻는 질문은 <Link href="/finance/guide" className="font-medium text-brand-700 underline">재무 AI 관리자 사용법</Link>에 있습니다.
@@ -243,26 +237,6 @@ export default function FinancePage() {
         {!overview.env && !overview.error && <Waiting />}
         {todoCount > 0 && (
           <ul className="mt-4 space-y-2">
-            {heldIncidents.map((i) => (
-              <li key={`held-${i.context_id}`}>
-                <button type="button" onClick={() => goToQueue(null)}
-                  className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-surface px-4 py-3 text-left shadow-sm transition hover:ring-2 hover:ring-brand-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
-                  <Chip label="보류 쿠폰" tone={TONE.warn} />
-                  <span className="min-w-0 flex-1 text-sm font-medium text-ink-900">{incidentName(i.context_id, i.component, i.opened_at)} 보상 쿠폰 {i.held_count}장이 보류 큐에서 결정을 기다림</span>
-                  <span className="text-xs font-medium text-brand-700">보류 큐에서 결정하기 →</span>
-                </button>
-              </li>
-            ))}
-            {failedIncidents.map((i) => (
-              <li key={`audit-${i.context_id}`}>
-                <button type="button" onClick={() => openIncident(i.context_id, true)}
-                  className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-surface px-4 py-3 text-left shadow-sm transition hover:ring-2 hover:ring-brand-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
-                  <Chip label="사건 감사" tone={TONE.bad} />
-                  <span className="min-w-0 flex-1 text-sm font-medium text-ink-900">{incidentName(i.context_id, i.component, i.opened_at)} 사건 후 감사에서 확인할 점이 나옴</span>
-                  <span className="text-xs font-medium text-brand-700">보러 가기 →</span>
-                </button>
-              </li>
-            ))}
             {todo.map((t, i) => (
               <TodoCard key={`${t.kind}-${i}`} todo={t} onDone={() => { bump(); void loadSide(); }}
                 onOpen={() => openTab(todoTab(t), true)} onGoToQueue={goToQueue} />
@@ -280,7 +254,6 @@ export default function FinancePage() {
           </ul>
         )}
         {overview.env && todoCount === 0 && <p className="mt-2 text-sm text-emerald-800">재무 AI가 맞춰 본 결과, 지금 사람이 볼 예외가 없습니다.</p>}
-        {incidents.error && !incidents.env && <p className="mt-2 text-xs text-amber-800">장애 사건 목록을 받지 못해 보류 쿠폰·사건 감사 항목은 빠져 있을 수 있습니다.</p>}
       </section>
 
       {/* 맨 위 전환: 장애 사건 재무 | 평상시 재무 업무 */}
@@ -289,7 +262,6 @@ export default function FinancePage() {
           <button key={m} type="button" role="tab" id={`mode-${m}`} aria-selected={mode === m} aria-controls={`mode-panel-${m}`} onClick={() => openMode(m)}
             className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${mode === m ? "bg-brand-600 text-white" : "text-ink-700 hover:bg-ink-100"}`}>
             {MODE_LABEL[m]}
-            {m === "incident" && mode !== m && heldIncidents.length + failedIncidents.length > 0 && <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-amber-500 align-middle" role="img" aria-label="확인할 일 있음" />}
           </button>
         ))}
       </div>
@@ -297,7 +269,7 @@ export default function FinancePage() {
       {mode === "incident" && (
         <div role="tabpanel" id="mode-panel-incident" aria-labelledby="mode-incident">
           <ErrorBoundary title="사건 화면을 그리지 못했습니다">
-            <IncidentFinance list={incidents} selected={selectedIncident} onSelect={(id) => openIncident(id)} tick={tick} onGoToQueue={goToQueue} />
+            <IncidentFinance list={incidents} selected={selectedIncident} onSelect={(id) => openIncident(id)} tick={tick} />
           </ErrorBoundary>
         </div>
       )}
@@ -353,8 +325,8 @@ export default function FinancePage() {
           {tab === "settlements" && <div className="mt-4"><DeadlineSection tick={tick} /></div>}
           {tab === "settlements" && <div className="mt-4"><PayablesSection tick={tick} /></div>}
           {tab === "settlements" && <div className="mt-4"><CashflowSection tick={tick} /></div>}
-          {tab === "policy" && <><PolicySection tick={tick} /><TeamBudgetSection tick={tick} /></>}
-          {tab === "audit" && <AuditSection tick={tick} />}
+          {tab === "policy" && <TeamBudgetSection tick={tick} />}
+          {tab === "audit" && <AuditSection tick={tick} onChanged={bump} />}
           {tab === "tax" && <TaxSection tick={tick} />}
         </div>
       </div>

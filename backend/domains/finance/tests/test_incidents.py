@@ -1,4 +1,4 @@
-"""시나리오 A 재무 몫 테스트: 사건별 쿠폰 장부(⑨)·손실 리포트(⑩)·사건 후 감사(⑰), 재설계 문서 12장.
+"""시나리오 A 재무 몫 테스트: 사건별 쿠폰 장부(⑨)와 환불 금액, 재설계 문서 12장.
 
 네트워크 없음. 실제 모드는 가짜 안전 관문·가짜 총괄(httpx MockTransport)과
 가짜 data(`call_agent`)로 본다.
@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -22,9 +23,9 @@ from ax_contracts.schemas import (
     EventType,
     TaskStatus,
 )
-from finance_agent import audit, handlers, incidents, sources
 from finance_agent import books as bk
 from finance_agent import finance_config as fc
+from finance_agent import handlers, incidents, sources
 from finance_agent import ledger as lg
 from finance_agent.main import app
 from finance_agent.sources import LiveSources, MockSources
@@ -32,13 +33,6 @@ from finance_agent.sources import LiveSources, MockSources
 CTX = "ctx_inc_scn_a_0001"
 OLD = "ctx_inc_0100"
 NOW = datetime(2026, 10, 23, 12, 0, tzinfo=UTC)
-THRESHOLDS = {
-    "version": 1,
-    "rules": [
-        {"key": "compensation_per_context", "action": "issue_coupon", "op": ">=", "value": 1000000},
-        {"key": "compensation_per_customer", "action": "issue_coupon", "op": ">=", "value": 50000},
-    ],
-}
 IMPACT = {
     "failed_order_count": 6,
     "affected_customer_count": 4,
@@ -60,7 +54,6 @@ LIST_KEYS = {
     "held_count",
     "refund_total",
     "money_out_total",
-    "checks_ok",
 }
 DETAIL_KEYS = {
     "context_id",
@@ -70,8 +63,6 @@ DETAIL_KEYS = {
     "compensation",
     "refunds",
     "money_out_total",
-    "limits",
-    "checks",
     "ledger_source",
 }
 COUPON_KEYS = {
@@ -87,15 +78,7 @@ COUPON_KEYS = {
     "status",
     "review_id",
     "at",
-    "in_impact",
 }
-CHECK_CODES = [
-    "recipients_in_impact",
-    "one_coupon_per_buyer",
-    "per_customer_limit",
-    "per_incident_limit",
-    "amount_recheck",
-]
 
 
 def _exe(
@@ -223,8 +206,6 @@ def _safety(
             ctx = request.url.params.get("context_id")
             rows = [r for r in records if ctx is None or r["request"]["context_id"] == ctx]
             return httpx.Response(200, json={"data": rows, "meta": {}})
-        if request.url.path == "/api/safety/thresholds":
-            return httpx.Response(200, json={"data": THRESHOLDS, "meta": {}})
         return httpx.Response(404)
 
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
@@ -236,11 +217,7 @@ def _use_safety(client: httpx.AsyncClient) -> None:
     async def executions(ctx: str | None) -> lg.ExecutionFeed:
         return await lg.load_executions(ctx, http_client=client)
 
-    async def thresholds() -> dict[str, Any] | None:
-        return await lg.load_thresholds(http_client=client)
-
     s.executions_loader = executions
-    s.thresholds_loader = thresholds
 
 
 ORC_ROW = {  # 총괄 `GET /api/incidents` 행 (재무가 쓰지 않는 키도 들어 있다)
@@ -299,7 +276,7 @@ def fake_data(monkeypatch: pytest.MonkeyPatch) -> list[AgentRequest]:
 def _detail(ctx: str = CTX) -> dict[str, Any]:
     """지금 상태의 실행 기록으로 만든 사건 상세 data."""
     feed = asyncio.run(handlers.state().executions_loader(ctx))
-    data, _ = asyncio.run(incidents.incident_view(ctx, feed, None))
+    data, _ = asyncio.run(incidents.incident_view(ctx, feed))
     return data
 
 
@@ -389,7 +366,6 @@ def test_load_executions_reads_gate_records(real_mode) -> None:
     assert (row["coupon_id"], row["buyer_id"], row["amount"]) == ("cpn_9", "buy_0001", 2000)
     down = asyncio.run(lg.load_executions(CTX, http_client=_safety(None)))
     assert down.rows is None
-    assert asyncio.run(lg.load_thresholds(http_client=_safety(None))) is None
 
 
 # ------------------------------------------------------------ 보상 쿠폰 장부 (실제 모드)
@@ -411,12 +387,11 @@ def test_compensation_total_in_real_mode_comes_from_gate_records(real_mode, fake
 def test_compensation_without_any_ledger_source_is_unknown(real_mode, fake_data) -> None:
     handlers.reset_state(LiveSources(_orchestrator(None)))  # 총괄도 꺼짐
     _use_safety(_safety(None))  # 안전 관문 꺼짐 + 이벤트 버스 없음
-    data, unavailable = asyncio.run(incidents.incident_view(CTX, _feed(None), None))
+    data, unavailable = asyncio.run(incidents.incident_view(CTX, _feed(None)))
     comp = data["compensation"]
     # 0으로 바꾸지 않고 "확인할 수 없음"(None)으로 둔다
     assert (comp["count_executed"], comp["total_executed"]) == (None, None)
     assert "compensation" in unavailable and data["ledger_source"] is None
-    assert all(c["ok"] is None for c in data["checks"])
 
 
 def test_compensation_uses_events_when_no_gate_record_and_does_not_double_count(mock_mode) -> None:
@@ -451,9 +426,7 @@ def test_incident_list_shape_and_numbers(mock_mode) -> None:
         # 이 사건 구간(05:00~05:30)에 영향 고객에게 나간 환불은 시드에 없다
         "refund_total": 0,
         "money_out_total": 8000,
-        "checks_ok": True,
     }
-    assert rows[OLD]["checks_ok"] is False  # 영향 고객이 아닌 buy_0999
     assert body["data"][0]["context_id"] == CTX  # 최근 사건 먼저
 
 
@@ -497,21 +470,13 @@ def test_incident_detail_shape_matches_spec(mock_mode) -> None:
             "A",
             "executed",
         )
-        assert c["in_impact"] is True and c["coupon_id"].startswith("cpn_")
-    assert data["limits"] == {
-        "per_customer": {"limit": 50000, "max_used": 2000, "buyer_id": "buy_0001"},
-        "per_incident": {"limit": 1000000, "used": 8000, "remaining": 992000},
-    }
+        assert c["coupon_id"].startswith("cpn_")
     # 재무는 장애 대응 흐름의 단계가 아니다 (2026-10-27): 손실 집계·사건 단계를 뺐다.
     # 화면 호환으로 남겨 뒀던 두 키도 화면 정리(ax-frontend#61) 뒤에 지웠다
     assert "loss" not in data
     assert "steps" not in data
-    assert [c["code"] for c in data["checks"]] == CHECK_CODES
-    for c in data["checks"]:
-        assert set(c) == {"code", "ok", "title", "detail", "refs"} and c["ok"] is True
-    # 사람이 읽는 문장에는 영어 코드 대신 쉬운 말 (코드는 code·ledger_source에만)
-    for c in data["checks"]:
-        assert c["code"] not in c["title"] + c["detail"] and "⊂" not in c["title"]
+    # 쿠폰·환불 한도 사용률과 점검은 재무 일이 아니다 (2026-11-02). 금액 합계와 내역만 남는다
+    assert "limits" not in data and "checks" not in data
 
 
 def test_unknown_incident_is_404(mock_mode) -> None:
@@ -520,81 +485,23 @@ def test_unknown_incident_is_404(mock_mode) -> None:
     assert response.json()["error"]["code"] == "not_found"
 
 
-# ---------------------------------------------------------------- 점검 하나씩 (참·거짓)
-def _view(rows: list[dict[str, Any]] | None, thresholds: dict | None = THRESHOLDS) -> dict:
-    data, _ = asyncio.run(incidents.incident_view(CTX, _feed(rows), thresholds))
-    return {c["code"]: c for c in data["checks"]}
-
-
-def _ok(rows: list[dict[str, Any]] | None, thresholds: dict | None = THRESHOLDS) -> dict:
-    return {code: c["ok"] for code, c in _view(rows, thresholds).items()}
-
-
 GOOD = [_exe(f"exe_{n}", f"buy_000{n}", minute=n) for n in range(1, 5)]
-
-
-def test_all_checks_pass_for_clean_incident(mock_mode) -> None:
-    assert _ok(GOOD) == dict.fromkeys(CHECK_CODES, True)
-
-
-def test_recipients_in_impact_false_and_unknown(mock_mode) -> None:
-    checks = _view([*GOOD, _exe("exe_9", "buy_0999")])
-    assert checks["recipients_in_impact"]["ok"] is False
-    assert checks["recipients_in_impact"]["refs"] == ["exe_9"]
-    handlers.reset_state(MockSources({"impacts": {}}))  # 영향 분석을 못 받음
-    assert _ok(GOOD)["recipients_in_impact"] is None
-
-
-def test_one_coupon_per_buyer_false(mock_mode) -> None:
-    checks = _view([*GOOD, _exe("exe_5", "buy_0001", minute=9)])
-    assert checks["one_coupon_per_buyer"]["ok"] is False
-    assert set(checks["one_coupon_per_buyer"]["refs"]) == {"exe_1", "exe_5"}
-
-
-def test_per_customer_limit_false_at_threshold_and_unknown_without_thresholds(mock_mode) -> None:
-    big = [_exe("exe_1", "buy_0001", count=25, unit=2000)]  # 50,000원 = 기준표 `>=` 한도
-    checks = _view(big)
-    assert checks["per_customer_limit"]["ok"] is False
-    assert checks["per_customer_limit"]["refs"] == ["exe_1"]
-    assert _ok(big, None)["per_customer_limit"] is None
-    assert _ok(big, None)["per_incident_limit"] is None
-
-
-def test_per_incident_limit_false(mock_mode) -> None:
-    tight = {
-        "rules": [
-            {"key": "compensation_per_context", "op": ">=", "value": 8000},
-            {"key": "compensation_per_customer", "op": ">=", "value": 50000},
-        ]
-    }
-    assert _ok(GOOD, tight)["per_incident_limit"] is False
-    loose = {"rules": [{"key": "compensation_per_context", "op": ">", "value": 8000}]}
-    assert _ok(GOOD, loose)["per_incident_limit"] is True  # `>`면 같은 금액은 통과
-
-
-def test_amount_recheck_false(mock_mode) -> None:
-    wrong = [*GOOD[:3], _exe("exe_4", "buy_0004", total=3000)]  # 1장 × 2,000원인데 총액 3,000원
-    checks = _view(wrong)
-    assert checks["amount_recheck"]["ok"] is False and checks["amount_recheck"]["refs"] == ["exe_4"]
 
 
 def test_held_coupons_are_listed_but_not_paid(mock_mode) -> None:
     rows = [*GOOD, _exe("exe_5", "buy_0001", status="held", grade="C", review_id="rev_5")]
-    data, _ = asyncio.run(incidents.incident_view(CTX, _feed(rows), THRESHOLDS))
+    data, _ = asyncio.run(incidents.incident_view(CTX, _feed(rows)))
     comp = data["compensation"]
     assert (comp["total_executed"], comp["count_held"], comp["total_held"]) == (8000, 1, 2000)
-    assert data["checks"][1]["ok"] is True  # 보류 건은 지급이 아니라 중복으로 치지 않는다
 
 
 def test_no_ledger_source_makes_everything_unknown(real_mode) -> None:
     handlers.reset_state(MockSources())
-    data, unavailable = asyncio.run(incidents.incident_view(CTX, _feed(None), None))
-    assert {"compensation", "limits"} <= set(unavailable)
+    data, unavailable = asyncio.run(incidents.incident_view(CTX, _feed(None)))
+    assert "compensation" in unavailable
     assert data["compensation"]["total_executed"] is None and data["ledger_source"] is None
-    assert all(c["ok"] is None for c in data["checks"])
+    assert data["money_out_total"] is None  # 모르는 돈을 0원으로 더하지 않는다
     assert "loss" not in data and "steps" not in data  # 손실 집계·사건 단계 없음
-    assert "장부" in data["checks"][0]["detail"]  # 사람이 읽는 쉬운 말
-    assert incidents.checks_ok(data["checks"]) is None
 
 
 # ---------------------------------------------------------------- 실제 모드 사건 API
@@ -611,7 +518,6 @@ def test_real_mode_incident_uses_gate_records_and_has_no_window(real_mode, fake_
     # 재무는 장애 대응 흐름의 단계가 아니다 (요구사항 DEP-FIN-01)
     assert data["window"] is None
     assert data["impact"] is None and "impact" in body["meta"]["unavailable"] and fake_data == []
-    assert data["limits"]["per_customer"]["limit"] == 50000  # 안전 관문 기준표에서 읽음
     assert data["compensation"]["count_executed"] == 4
     listing = client.get("/api/finance/incidents").json()
     assert listing["meta"]["ledger_source"] == "safety_executions"
@@ -625,7 +531,7 @@ def test_real_mode_window_comes_from_orchestrator_incidents(real_mode, fake_data
 
     이 둘은 AI 처리가 시작·끝난 시각이라 장애 시작보다 늦을 수 있다
     (감시가 장애를 지켜본 뒤 사건을 연다).
-    그래서 숫자는 보여 주되 "보상 대상 밖" 판정과 환불 귀속은 하지 않는다 (2026-10-30 시연 오탐).
+    그래서 숫자는 보여 주되 환불 귀속은 하지 않는다 (2026-10-30 시연 오탐).
     """
     handlers.reset_state(LiveSources(_orchestrator([{"context_id": "ctx_inc_other"}, ORC_ROW])))
     _use_safety(_safety([_raw_record(e) for e in GOOD]))
@@ -644,9 +550,6 @@ def test_real_mode_window_comes_from_orchestrator_incidents(real_mode, fake_data
     assert (data["impact"]["failed_orders"], data["impact"]["damage_amount"]) == (6, 95000)
     assert data["impact"]["window_exact"] is False
     assert body["meta"]["unavailable"] == ["refunds"]  # 근사 구간이라 환불을 사건에 묶지 않는다
-    check = next(c for c in data["checks"] if c["code"] == "recipients_in_impact")
-    assert check["ok"] is None and "AI 처리 시각" in check["detail"]
-    assert all(c["in_impact"] is None for c in data["compensation"]["coupons"])
     # 목록 행의 피해 금액도 같은 숫자다
     [row] = TestClient(app).get("/api/finance/incidents").json()["data"]
     assert (row["context_id"], row["damage_amount"]) == (CTX, 95000)
@@ -687,78 +590,6 @@ def test_orchestrator_is_not_read_in_mock_mode(mock_mode, fake_data) -> None:
     )
 
 
-# ---------------------------------------------------------------- ⑰ 감사 finding
-def _lookup(ids: list[str] | None):
-    async def lookup(ctx: str):
-        if ids is None:
-            return None
-        return sources.Impact(
-            failed_orders=len(ids),
-            affected_customers=len(ids),
-            lost_amount=1000,
-            affected_customer_ids=frozenset(ids),
-        )
-
-    return lookup
-
-
-def test_audit_compensation_outside_impact(kit) -> None:
-    rows = [
-        _exe("exe_1", "buy_0001", ref="cpn_1"),
-        _exe("exe_2", "buy_0999", ref="cpn_2"),
-        _exe("exe_3", "buy_0888", status="held", grade="C"),  # 보류 건은 지급이 아니다
-    ]
-    books = kit.books(executions=rows)
-    data, _ = asyncio.run(audit.audit_report(books, 7, impact_lookup=_lookup(["buy_0001"])))
-    [found] = [f for f in data["findings"] if f["code"] == "compensation_outside_impact"]
-    assert found["severity"] == "high" and "buy_0999" in found["detail"] and CTX in found["detail"]
-    assert "buy_0888" not in found["detail"]
-    assert "데이터 AI 영향 고객" in found["detail"] and "data " not in found["detail"]
-    assert "compensation_outside_impact" not in found["title"] + found["detail"]
-    assert found["refs"] == ["exe_2", "cpn_2"]
-    assert data["findings"][0]["severity"] == "high"
-    # 영향 분석이 없거나 lookup이 없으면 의심으로 만들지 않는다
-    for lookup in (_lookup(None), None):
-        data, _ = asyncio.run(audit.audit_report(books, 7, impact_lookup=lookup))
-        assert "compensation_outside_impact" not in {f["code"] for f in data["findings"]}
-
-
-def test_audit_context_filter(kit) -> None:
-    rows = [_exe("exe_1", "buy_0999"), _exe("exe_2", "buy_0999", ctx=OLD)]
-    books = kit.books(executions=rows)
-    data, _ = asyncio.run(
-        audit.audit_report(books, 7, impact_lookup=_lookup(["buy_0001"]), context_id=OLD)
-    )
-    [found] = data["findings"]
-    assert OLD in found["detail"] and found["refs"] == ["exe_2"]
-
-
-def test_audit_api_and_skill_show_new_finding(mock_mode) -> None:
-    client = TestClient(app)
-    body = client.get("/api/finance/audit", params={"days": 7, "context_id": OLD}).json()
-    codes = {f["code"] for f in body["data"]["findings"]}
-    assert codes == {"compensation_outside_impact"}
-    [found] = body["data"]["findings"]
-    assert "buy_0999" in found["detail"] and "exe_s0065" in found["refs"]
-    clean = client.get("/api/finance/audit", params={"days": 7, "context_id": CTX}).json()
-    assert clean["data"]["findings"] == []
-    skill = client.post(
-        "/a2a",
-        json={
-            "meta": {
-                "context_id": OLD,
-                "token": "mock:orchestrator",
-                "path": [],
-                "deadline": (datetime.now(UTC) + timedelta(seconds=30)).isoformat(),
-            },
-            "skill": "audit_report",
-            "input": {"days": 7, "context_id": OLD},
-            "untrusted": {},
-        },
-    ).json()
-    assert [f["code"] for f in skill["output"]["findings"]] == ["compensation_outside_impact"]
-
-
 def test_impact_window_from_the_orchestrator_is_used_first(real_mode, fake_data) -> None:
     """총괄이 영향 분석에 쓴 구간(`impact_from`·`impact_to`)을 실으면 그 구간이 정확한 구간이다."""
     row = {**ORC_ROW, "impact_from": "2026-10-22T04:59:38Z", "impact_to": "2026-10-22T05:15:00Z"}
@@ -774,5 +605,16 @@ def test_impact_window_from_the_orchestrator_is_used_first(real_mode, fake_data)
     }
     assert data["impact"]["window_exact"] is True
     assert body["meta"]["unavailable"] == []
-    check = next(c for c in data["checks"] if c["code"] == "recipients_in_impact")
-    assert check["ok"] is not None  # 정확한 구간이면 보상 대상을 판정한다
+    assert data["refunds"] is not None  # 정확한 구간이면 환불을 사건에 묶는다
+
+
+def test_window_end_is_never_in_the_future(mock_mode, monkeypatch) -> None:
+    future = fc.now() + timedelta(minutes=15)
+    start = fc.now() - timedelta(minutes=1)
+    monkeypatch.setattr(
+        incidents,
+        "incident_info",
+        AsyncMock(return_value={"window_from": start, "window_to": future, "component": "payment"}),
+    )
+    data, _ = asyncio.run(incidents.incident_view(CTX, _feed(None)))
+    assert data["window"]["to"] <= fc.iso(fc.now())

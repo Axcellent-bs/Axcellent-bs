@@ -36,7 +36,7 @@ export const orchestrator = {
   /** 목 모드 전용: 판매 사이트 결제 장애를 주입한다. 관리자(admin) 토큰을 보낸다 */
   startDemo: (req: DemoRequest = {}) => post<{ context_id: string }>("/api/demo/incidents", req, RELAY_TOKEN),
   /** C 등급 보류에 대한 사람 결정을 전달한다. 총괄이 승인하는 것이 아니다.
-   *  사람 토큰을 보낸다. 총괄은 이 경로를 목 모드에서만 연다. 실제 C 보류는 안전 관문 보류 큐(/finance)에서 결정 */
+   *  사람 토큰을 보낸다. 총괄은 이 경로를 목 모드에서만 연다. 실제 C 보류는 안전 관문 보류 큐에서 결정(환불 /support, 쿠폰 /marketing, 나머지 /finance) */
   decideHold: (contextId: string, stepId: string, approved: boolean) =>
     post<{ ok: boolean }>(`/api/incidents/${encodeURIComponent(contextId)}/holds/${encodeURIComponent(stepId)}`, { approved }, SAFETY_HUMAN_TOKEN),
 };

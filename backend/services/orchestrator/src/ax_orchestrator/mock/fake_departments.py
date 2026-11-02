@@ -197,7 +197,7 @@ DEFAULT_OUTPUTS: dict[str, Callable[[AgentRequest], dict[str, Any]]] = {
     "audit_report": lambda r: _ok(
         window_from="2026-10-09T00:00:00Z",
         window_to="2026-10-16T00:00:00Z",
-        stats={"coupon_count": 87, "coupon_amount": 174000},
+        stats={"gate_held": 0, "gate_rejected": 0},
         findings=[],
         unavailable=[],
     ),

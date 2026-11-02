@@ -15,7 +15,7 @@ data `impact_analysis`의 입력·출력은 계약(`ImpactAnalysisInput`·`Impac
 
 장애 구간은 총괄 사건 목록(`GET /api/incidents`)을 읽기 전용으로 읽어서 안다
 (계약 `data_access/orchestrator_incidents.py`, [협업] #417 제안 A, 요청 #418).
-사건 **중**에 총괄을 부르는 게 아니다 — 평상시 사후 감사·사건 조회에서만 읽는다.
+사건 **중**에 총괄을 부르는 게 아니다 — 평상시 사건 조회에서만 읽는다.
 """
 
 from __future__ import annotations
@@ -276,7 +276,7 @@ class LiveSources:
     async def incident_window(self, context_id: str) -> dict[str, Any] | None:
         """총괄 사건 목록에서 이 사건의 구간·부품을 읽는다 (읽기 전용, 상태를 바꾸지 않음).
 
-        사건 중에 부르지 않는다 — 평상시 사후 감사·사건 조회 경로에서만 읽는다
+        사건 중에 부르지 않는다 — 평상시 사건 조회 경로에서만 읽는다
         ([협업] #417 제안 A, 요청 #418). 계약은 `data_access/orchestrator_incidents.py`.
         못 받거나 형식이 다르거나 그 사건이 없으면 None(확인할 수 없음)이고 추정하지 않는다.
         아직 열린 사건은 `window_to`가 None이라 구간이 되지 않는다(그때는 data에 묻지 않는다).

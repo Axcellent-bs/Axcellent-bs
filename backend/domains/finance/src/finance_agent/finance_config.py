@@ -45,21 +45,6 @@ class PgConfig(_Strict):
     fee_tolerance: int = Field(ge=0)
 
 
-class BudgetConfig(_Strict):
-    coupon_month: int = Field(ge=0)
-    refund_month: int = Field(ge=0)
-    warn_ratio: float = Field(gt=0)
-    over_ratio: float = Field(gt=0)
-
-
-class ProposalConfig(_Strict):
-    window_days: int = Field(ge=1)
-    percentile: float = Field(gt=0, le=1)
-    round_to: int = Field(ge=1)
-    min_change_ratio: float = Field(ge=0)
-    max_step_ratio: float = Field(gt=0, le=1)
-
-
 class TaxConfig(_Strict):
     commission_vat: Literal["excluded", "included"] = "excluded"
     pg_fee_vat: Literal["excluded", "included"] = "excluded"
@@ -89,9 +74,6 @@ class TeamBudgetConfig(_Strict):
 
 
 class AuditConfig(_Strict):
-    near_limit_ratio: float = Field(gt=0, le=1)
-    split_window_minutes: int = Field(ge=1)
-    split_min_count: int = Field(ge=2)
     gate_hold_min: int = Field(ge=1)
     gate_hold_jump_ratio: float = Field(gt=1)
 
@@ -105,8 +87,6 @@ class FinanceConfig(_Strict):
     tax: TaxConfig = TaxConfig()
     cashflow: CashflowConfig = CashflowConfig()
     team_budget: TeamBudgetConfig = TeamBudgetConfig()
-    budget: BudgetConfig
-    proposal: ProposalConfig
     audit: AuditConfig
 
 
@@ -197,7 +177,3 @@ def rate_amount(amount: int, rate: float) -> int:
 
 def won(n: int | None) -> str:
     return "확인할 수 없음" if n is None else f"{n:,}원"
-
-
-def ratio(part: int, whole: int) -> float | None:
-    return round(part / whole, 4) if whole else None

@@ -71,7 +71,7 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.records.recon_note_log = list(rec["recon_note_log"])
     s.records.batches = dict(rec["batches"])
     s.records.anomalies = {k: dict(v) for k, v in rec.get("anomalies", {}).items()}
-    anomalies.drop_open_refund_audit(s.records.anomalies)
+    anomalies.drop_open_retired_audit(s.records.anomalies)
     s.records.policy_acks = {k: dict(v) for k, v in rec.get("policy_acks", {}).items()}
     s.records.bank_rows = [dict(r) for r in rec.get("bank_rows", [])]
     s.records.team_budgets = {k: dict(v) for k, v in rec.get("team_budgets", {}).items()}
