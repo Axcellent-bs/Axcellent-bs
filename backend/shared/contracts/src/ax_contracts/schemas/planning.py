@@ -222,6 +222,9 @@ class DevResultInput(AxModel):
     # 기획 서비스가 바뀌는 일을 모두 알도록 (planning 쪽은 없으면 새로 넣는다)
     request: dict[str, Any] | None = None  # Request dump
     spec: dict[str, Any] | None = None  # Spec dump
+    # 자동 처리 범위(AutoPolicy dump). 넓히기·줄이기는 dev가 하고(간단 요청 연속 성공·장애 연결),
+    # 간단 요청 판정은 planning이 하니 바뀌었을 때 실어 보낸다 (2026-11-02 기획·개발 분리)
+    auto_policy: dict[str, Any] | None = None
 
 
 class DevResultOutput(AxModel):

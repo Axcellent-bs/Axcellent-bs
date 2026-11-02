@@ -590,6 +590,7 @@ async def receive_dev_result(request: AgentRequest) -> AgentResult:
             idempotency_key=request.meta.idempotency_key,
             request=inp.request,
             spec=inp.spec,
+            auto_policy=inp.auto_policy,
         )
     except ValidationError as exc:
         return _invalid(request, exc)

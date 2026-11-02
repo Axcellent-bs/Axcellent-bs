@@ -159,6 +159,7 @@ INBOUND_KINDS = (
     "support_simple",
     "marketing_simple",
 )
+POLICY_SENT = "auto_policy"  # dev: 마지막으로 보낸 자동 처리 범위 지문 (`_dev_sent` 키)
 ADVANCE_LIMIT = 40  # 다음 단계 반복 상한 (무한 반복 방지)
 _TICKET_KINDS = ("support_ticket", "marketing_ticket", "support_simple", "marketing_simple")
 
@@ -658,6 +659,43 @@ class PlanningService(StateService):
             out.append(
                 (RECEIVE_DEV_RESULT, req.context_id, res, dev_result_key(req.context_id, sp.id, fp))
             )
+        return self._with_policy(s, out, full)
+
+    def _with_policy(
+        self, s: State, out: list[tuple[str, str, BaseModel, str]], full: bool
+    ) -> list[tuple[str, str, BaseModel, str]]:
+        """dev: 자동 처리 범위가 지난번 보낸 것과 다르면 이번 결과 하나에 실어 보낸다.
+
+        보낼 결과가 없으면 마지막으로 넘겨받은 기획서의 결과를 다시 보낸다 (planning이 간단 요청
+        판정에 같은 범위를 쓰도록). 범위 지문은 `_dev_sent["auto_policy"]`에 남긴다."""
+        pol = dump(s.auto_policy)
+        fp = hashlib.sha1(json.dumps(pol, sort_keys=True).encode()).hexdigest()[:12]
+        if self._dev_sent.get(POLICY_SENT) == fp and not full:
+            return out
+        if not out:
+            last = next(
+                (sp for sp in reversed(s.specs)
+                 if sp.handed_to_dev and self._request_of_spec(s, sp) is not None),
+                None,
+            )  # fmt: skip
+            if last is None:
+                return out
+            req = self._request_of_spec(s, last)
+            assert req is not None
+            ids = {t.id for t in s.tasks if t.spec == last.id}
+            res = DevResultInput(
+                spec_id=last.id,
+                request_id=req.id,
+                request_state=req.state,
+                tasks=[dump(t) for t in s.tasks if t.spec == last.id],
+                prs=[dump(p) for p in s.prs if p.task in ids],
+            )
+            out.append((RECEIVE_DEV_RESULT, req.context_id, res, ""))
+        skill, ctx, res, key = out[-1]
+        assert isinstance(res, DevResultInput)
+        res.auto_policy = pol
+        out[-1] = (skill, ctx, res, dev_result_key(ctx, res.spec_id, f"policy-{fp}"))
+        self._dev_sent[POLICY_SENT] = fp
         return out
 
     def _spawn_hold(self, task_id: str) -> None:
@@ -2523,8 +2561,11 @@ class PlanningService(StateService):
         idempotency_key: str,
         request: dict | None = None,
         spec: dict | None = None,
+        auto_policy: dict | None = None,
     ) -> ActionResult:
         """planning 서비스: dev가 돌려준 작업·PR·요청 상태를 반영한다 (A).
+
+        자동 처리 범위(`auto_policy`)가 같이 오면 dev 것으로 맞춘다 (범위의 주인은 dev).
 
         작업·PR은 id로 덮어쓴다. 개발팀이 직접 낸 기획이면 요청·기획서도 같이 와서 없으면 넣고
         있으면 덮어쓴다 (기획 쪽이 바뀌는 일을 모두 알도록)."""
@@ -2537,6 +2578,7 @@ class PlanningService(StateService):
         got_prs = [PR.model_validate(p) for p in prs]
         got_req = Request.model_validate(request) if request else None
         got_spec = Spec.model_validate(spec) if spec else None
+        got_policy = AutoPolicy.model_validate(auto_policy) if auto_policy else None
 
         async def run(s: State) -> ActionResult:
             t = self.clock()
@@ -2564,6 +2606,8 @@ class PlanningService(StateService):
             self._upsert(s.prs, got_prs)
             if req:
                 req.state = request_state  # type: ignore[assignment]
+            if got_policy is not None:
+                s.auto_policy = got_policy
             frm = requester if requester in DEPT_NAME else "dev"
             if new_own and got_spec is not None:
                 s.activity.append(
