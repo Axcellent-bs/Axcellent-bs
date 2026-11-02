@@ -39,11 +39,28 @@ const SPEC_BLOCK: Record<string, string> = {
   spec_not_confirmed: '기획서 미확정', open_question: '질문 남음', spec_unknown: '기획서 없음', pr_outside_spec: '기획서 밖 PR',
 }
 const PARA_BLOCK = { missing_task: '작업 없음', not_merged: 'PR 머지 전', incident_open: '장애 열림' } as const
+// 상태 칩은 "왜 멈췄는지"를 바로 말한다. 여러 개면 먼저 풀어야 할 것 하나 + "외 N"
+const HOLD_STATE: [string, string][] = [
+  ['spec_unknown', '기획서 없음'],
+  ['spec_not_confirmed', '기획서 확정 전'],
+  ['open_question', '질문 답 대기'],
+  ['linked_incident_open', '장애 처리 대기'],
+  ['para_without_task', '작업 빠짐'],
+  ['task_not_merged', 'PR 머지 대기'],
+  ['pr_outside_spec', '기획서 밖 PR 섞임'],
+]
 function releaseState(rc: ReleaseCheck): { label: string; tone: 'green' | 'amber'; title?: string } {
   if (rc.order_sent) return { label: '배포 지시 보냄', tone: 'green' }
-  if (rc.verdict === 'ready') return { label: '배포 가능 · 지시 못 보냄', tone: 'amber', title: rc.order_result ?? undefined }
-  if (rc.verdict === 'needs_human') return { label: '사람 확인 필요', tone: 'amber' }
-  return { label: '배포 전 남은 일', tone: 'amber' }
+  if (rc.verdict === 'ready') return { label: '배포 지시 전송 실패', tone: 'amber', title: rc.order_result ?? undefined }
+  if (rc.verdict === 'needs_human') {
+    const diff = rc.items.filter((i) => i.content === 'mismatch').length
+    const none = rc.items.filter((i) => i.content === 'none').length
+    const label = diff ? '기획서와 다른 PR 확인' : '검수 안 된 PR 확인'
+    return { label: diff && none ? `${label} 외 1` : label, tone: 'amber' }
+  }
+  const hits = HOLD_STATE.filter(([code]) => rc.hold_reasons.includes(code)).map(([, label]) => label)
+  if (!hits.length) return { label: '배포 보류', tone: 'amber' }
+  return { label: hits.length > 1 ? `${hits[0]} 외 ${hits.length - 1}` : hits[0], tone: 'amber', title: hits.join(', ') }
 }
 function ReleaseCheckBox({ d, spec }: { d: Dispatch<Action>; spec: string }) {
   const toast = useToast()
