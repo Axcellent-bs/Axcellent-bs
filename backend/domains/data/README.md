@@ -1,7 +1,7 @@
 # agents/data
 담당: 재현 · 포트: 8106
 ## 1. 역할
-쇼핑몰 데이터를 **읽어서** 숫자를 계산하고 돌려준다. skill 7개는 모두 읽기 전용(`grade: read`, `services/data/agent-card.json`)이다.
+쇼핑몰 데이터와 외부 트렌드(네이버 검색어 트렌드·YouTube 스냅샷)를 **읽어서** 숫자를 계산하고 돌려준다. skill 14개는 모두 읽기 전용(`grade: read`, `services/data/agent-card.json`)이다.
 
 | skill | 무엇 | 읽는 것 |
 | --- | --- | --- |
@@ -19,6 +19,27 @@
 | `content_recommend` | 지금 만들 만한 영상 소재(급상승만, 최대 N개): 순위·점수 근거(z·배수·두 소스)·회사 관련성(표시만)·영상 아이디어 1~2문장·형식(숏폼·롱폼)·fallback. 콘텐츠 루프 2단계 | trend_scan(회사 기본 키워드 그룹)·trend_candidates(YouTube 후보)와 같은 네이버 요청(하루 캐시 같이 씀), LLM(아이디어 문장만). 설정: 회사 폴더 `trends.toml` `[recommend]` |
 | `answer_planning_question` | 기획이 되묻는 근거 질문의 답(answered·needs_human·unknown). 기획만 부른다 | data가 보낸 요청의 기록(`planning_questions.py`, 프로세스 안). 아직 요청을 보내는 코드가 없어 지금은 늘 unknown. 사람 답은 `human_answer_request`로 planning `receive_planning_answer`에 보낸다 |
 | `campaign_effect` | 캠페인 기간 주문 방향(늘었음·같음·줄었음)·증분(실제 − 지난 7일 같은 시간대 평균), 캠페인 쿠폰 조회 시점 누적 사용률. 매출은 매출 지표가 생기면 같은 방법(지금은 확인할 수 없음) | shop-api `GET /api/shop/metric-series`(`order_count`), `GET /api/shop/coupons?campaign_id=` |
+
+### skill별 평가와 알려진 한계 (2026-11-02 기준)
+
+평가는 정답지로 숫자를 재는 것이다(`eval/README.md`). "없음"은 단위 테스트만 있고 정확도를 재는 평가셋이 없다는 뜻이다.
+
+| skill | 평가 | 알려진 한계 |
+| --- | --- | --- |
+| `anomaly_detection` | 있음: `eval/` 기본(`anomaly.*` 탐지율·오탐·지연, holdout) | 지난 7일 같은 시간대와만 비교한다. 비교할 기록이 없으면 판정하지 않고 unknown |
+| `impact_analysis` | 있음: `eval/` 기본(`impact.*` 일치율·금액 오차, holdout) | shop-api 실패 주문 기록만 센다(기록에 없는 실패는 모른다) |
+| `fraud_score` | 있음: `eval/` 기본(`fraud.*` 정밀도·재현율) | 확인할 수 없는 규칙은 점수에서 빼고 `unknown_rules`로만 알린다. 승인·보류는 정하지 않는다 |
+| `kpi_summary` | 없음 | 공통 로그에 남은 일만 센다 |
+| `root_cause_hypotheses` | 있음: `eval/` 기본(`root_cause.*` 1순위 적중·근거 없는 후보) | 다른 부서 조회가 실패하면 그 근거 없이 고른다. memory "지난 비슷한 사건" 카드는 아직 쓰는 쪽이 없어 비어 있다(#304) |
+| `accuracy_report` | 해당 없음(평가 결과를 보여 줄 뿐) | 다시 계산하지 않는다(`eval/results/latest.json`, 없으면 baseline) |
+| `activity_report` | 없음 | AI를 거친 일만 센다. 일간 저장분은 일부 서버만 켜진 때 만들어지면 "확인할 수 없음"으로 남고 다음 날 한 번만 다시 만든다 |
+| `trend_scan` | 있음: `eval/trend/`(개발 탐지 0.909·오탐 0, holdout 탐지 0.8125·오탐 0) | 계절 반복을 구분하지 않는다(계절 오탐 0.667). 요일 영향이 큰 하루짜리 작은 급상승은 놓친다(요일 보정은 비교했고 오탐이 생겨 쓰지 않음) |
+| `trend_candidates` | 판정은 trend_scan과 같은 함수(위 평가). 후보 뽑기·별칭 묶기는 평가 없음 | 별칭 표에 없는 이름은 묶지 않는다. 별칭이 많을수록 네이버 호출이 는다(이름별 판정). 스냅샷이 쌓이기 전 날짜로 판정하면 YouTube 후보는 unknown |
+| `trend_history` | 없음(판정하지 않음) | 그룹마다 상대값이라 그룹끼리 높이를 비교할 수 없다. 계절 반복 판정은 평가 케이스부터 만들어야 한다 |
+| `youtube_velocity` | 없음(판정하지 않음) | 평소 속도 기준이 없어 빠른 순서만 보여 준다. 스냅샷 간격이 짧으면 속도가 흔들린다 |
+| `content_recommend` | 없음(순위 규칙·숫자 검증만 테스트) | 추천 품질은 나중에 게시 성과로 잰다. 회사와 거리가 먼 소재도 회사 상품에 잇는 문장이 나온다(관련성 low를 같이 본다) |
+| `answer_planning_question` | 없음 | 아직 data가 요청을 보내는 코드가 없어 늘 unknown이다 |
+| `campaign_effect` | 있음: `eval/campaign/`(기존·여러 날, 개발 방향 1.0, holdout 0.9167·0.8) | 매출 지표가 없어 매출은 unknown. 7일 넘는 캠페인은 unknown. 주문이 아주 적은 가게의 새벽 기록 공백은 못 잡는다 |
 
 - 숫자는 코드가 계산한다(`metrics/`, `impact.py`, `detect.py`). LLM은 계산이 끝난 숫자로 설명 문장만 쓴다(`explain.py`)
 - 주기 감시(`monitor.py`)는 `anomaly_detection`과 같은 판정 함수로 최근 구간을 보고 `metric.anomaly` 이벤트를 낸다. 사건은 열지 않는다(`context_id` 없음)
