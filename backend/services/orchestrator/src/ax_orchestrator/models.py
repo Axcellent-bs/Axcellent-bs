@@ -125,6 +125,8 @@ class Incident:
     event_type: str | None = None
     # 쇼핑몰이 정상 복귀를 알린 시각(shop.recovered). 닫힌 뒤에 와도 붙는다
     recovered_at: datetime | None = None
+    # 인사 서비스가 꺼져 있으면(service_disabled) 이 이벤트에서는 시각 기록을 더 보내지 않는다
+    times_off: bool = False
     # 인사 카드에 이미 남긴 시각(이름 → ISO). 같은 값을 다시 보내지 않는다
     times_sent: dict[str, str] = field(default_factory=dict)
     # 이벤트를 연 이벤트의 data (plan이 입력으로 쓴다)

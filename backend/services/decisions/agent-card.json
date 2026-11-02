@@ -122,7 +122,8 @@
         "dashboard-api"
       ],
       "verifier": null,
-      "priority": "recommended"
+      "priority": "recommended",
+      "handoff": false
     },
     {
       "id": "record_resolution",
