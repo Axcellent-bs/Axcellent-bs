@@ -9,7 +9,8 @@
   `company_keywords`)와 겹치면 related, 아니면 low. **표시만** 하고 순위에서 빼지 않는다.
 - 같은 소재: 기본 키워드 그룹과 YouTube 후보의 이름(같이 본 이름 포함)이 겹치면 한 소재로 본다.
   그 그룹이 급상승이면 그 판정을 쓰고 YouTube 근거를 붙인다(두 소스).
-- 아이디어 문장(LLM): 소재마다 `explain.explain_idea`. 숫자(배수·z·YouTube 영상 수)만 프롬프트에,
+- 아이디어 문장(LLM): 소재마다 `explain.explain_idea`. 프롬프트의 숫자는 배수 하나("평소보다 N배")
+  뿐이고 z·영상 수는 넣지 않는다. 회사 소개(`company_intro`)를 넣어 구체적으로 쓰게 한다.
   이름(외부 태그 등)은 데이터 블록에만 넣는다. 숫자 검증에 걸리면 고정 문장 + fallback.
 - 네이버: trend_scan·trend_candidates와 같은 요청 모양이라 오늘 이미 부른 요청은 커넥터의 하루
   캐시에서 나온다. 이번 실행에서 실제로 부른 수(`naver_calls`)를 출력에 남긴다.
@@ -67,6 +68,7 @@ class RecommendConfig:
     z_weight: float = 1.0
     two_source_bonus: float = 2.0
     company_keywords: tuple[str, ...] = ()
+    company_intro: str = ""  # 아이디어 문장 프롬프트에 넣는 회사 소개 (무엇을 파는지, 고객)
 
 
 def load_config(env: Mapping[str, str]) -> RecommendConfig:
@@ -83,6 +85,7 @@ def load_config(env: Mapping[str, str]) -> RecommendConfig:
             z_weight=float(raw.get("z_weight", base.z_weight)),
             two_source_bonus=float(raw.get("two_source_bonus", base.two_source_bonus)),
             company_keywords=tuple(str(k) for k in raw.get("company_keywords", [])),
+            company_intro=str(raw.get("company_intro") or "").strip(),
         )
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return RecommendConfig()
@@ -245,13 +248,20 @@ async def recommend(
         v = topic.verdict
         z = float(v.evidence.score or 0.0)
         ratio = float(v.ratio or 0.0)
-        numbers: dict[str, int | float | str] = {"배수": ratio, "z": z}
-        if topic.youtube_videos is not None:
-            numbers["YouTube 영상 수"] = topic.youtube_videos
+        # 문장에 쓸 수 있는 숫자는 배수 하나뿐이다(z는 순위 근거로만, 영상 수는 고정 문장에만)
+        numbers: dict[str, int | float | str] = {"배수": ratio}
         names = {"키워드": topic.keyword}
         if topic.aliases:
             names["같이 본 이름"] = ", ".join(topic.aliases)
-        idea = await explain_idea(numbers, names, llm, context_id=context_id)
+        idea = await explain_idea(
+            numbers,
+            names,
+            llm,
+            context_id=context_id,
+            company=config.company_intro,
+            sources="검색 급상승 + YouTube 인기 영상" if topic.two_sources else "검색 급상승",
+            youtube_videos=topic.youtube_videos,
+        )
         if note := idea.note():
             notes.append(f"{topic.keyword}: {note}")
         matched = company_match(topic.names, company)
