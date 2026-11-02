@@ -79,7 +79,7 @@ class RetentionPurgeRecord(AxModel):
 
 class GetPrivacyAuditInput(AxModel):
     inquiry_id: int
-    kinds: list[RecordType] | None = None  # 비우면 둘 다
+    kinds: list[RecordType] | None = None  # 비우면 모두
 
 
 class ProcessingActivity(AxModel):

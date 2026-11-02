@@ -26,6 +26,10 @@ class MemoryRepo:
         rows = self.tables[table]
         return [json.loads(rows[key]) for key in sorted(rows)]
 
+    def get(self, table: str, key: tuple) -> dict[str, Any] | None:
+        raw = self.tables[table].get(tuple(key))
+        return None if raw is None else json.loads(raw)
+
     def upsert(self, table: str, values: dict[str, Any], doc: dict[str, Any]) -> None:
         if self.fail:
             raise RuntimeError("db down")

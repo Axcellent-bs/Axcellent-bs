@@ -9,10 +9,12 @@
 - 막는 것: 열린(`open`)·이관(`escalated`) 문의, 클레임이 이어진 문의(법정 보존 대상일 수 있다),
   시험 표시가 없는 문의. 이미 지운 문의는 아무것도 하지 않는다(멱등).
 - 남기는 것: 분류·감정·긴급도·상태·시각·메시지 수·피드백 점수·이어진 클레임 ID·감사 기록.
-  메시지 본문·활동 상세·피드백 글은 비우고 건수와 시각만 남긴다.
+  메시지 본문·활동 상세·피드백 글·해결 메모 본문은 비우고 건수·시각·작성자만 남긴다.
 - 기본은 dry-run(건수만 센다). `--apply`로 집행한다. 출력과 감사 기록에는 문의 내용이 없다.
 - 외부에 열린 삭제 경로는 만들지 않는다. 운영자가 CLI로만 실행한다
   (`python -m support_agent.retention --inquiry-id 5 [--apply]`).
+- 제목 접두어는 고객도 쓸 수 있어서 안전장치가 아니라 실수 방지용이다. 실행 전에 운영자가
+  지울 문의 ID를 직접 확인한다(dry-run으로 건수를 보고 `--apply`).
 - `SUPPORT_PG_DSN`이 있어야 한다. 이 CLI는 별도 프로세스라 DSN이 없으면 서비스가 들고 있는 메모리를
   바꿀 수 없다. 집행한 뒤에는 support 서비스를 다시 시작해야 서비스의 캐시에도 반영된다.
 """
@@ -33,6 +35,7 @@ from support_agent.store import InquiryStore
 PURGED = "[삭제됨]"
 TEST_MARKERS = ("[시험]", "[test]")
 CRITERION = "explicit_test_inquiry"
+BACKFILL_CRITERION = "audit_backfill"  # 지운 뒤 기록이 빠진 문의의 기록만 보충한다
 EXECUTOR_ROLE = "operator"  # 사람 이름이 아니라 역할 코드. 감사 기록에도 이것만 남긴다
 
 
@@ -43,6 +46,7 @@ class Plan:
     reasons: list[str] = field(default_factory=list)
     purged: dict[str, int] = field(default_factory=dict)
     kept: dict[str, int] = field(default_factory=dict)
+    note: str = ""
 
 
 def _is_test_data(conversation: Conversation) -> bool:
@@ -50,13 +54,14 @@ def _is_test_data(conversation: Conversation) -> bool:
 
 
 def _linked_claims(conversation: Conversation, claims: ClaimStore) -> list[int]:
-    """이 문의에 이어진 클레임 ID. 활동 기록의 `claim:<id>` 참조와 같은 주문의 클레임을 본다."""
+    """이 문의에 이어진 클레임 ID. 활동 기록의 `claim:<id>`, 클레임의 문의 번호, 주문을 본다."""
     ids = {
         int(entry.ref.removeprefix("claim:"))
         for entry in conversation.activity
         if entry.ref and entry.ref.startswith("claim:") and entry.ref[6:].isdigit()
     }
     ids.update(int(c["id"]) for c in conversation.claims if str(c.get("id", "")).isdigit())
+    ids.update(c.id for c in claims.list() if c.conversation_id == conversation.id)
     if conversation.order_id is not None:
         ids.update(c.id for c in claims.list() if c.order_id == conversation.order_id)
     return sorted(ids)
@@ -80,9 +85,17 @@ def redact(conversation: Conversation, stamp: str) -> tuple[Conversation, dict[s
     out = conversation.model_copy(deep=True)
     out.customer_name = PURGED
     out.subject = PURGED
+    if out.subject_display is not None:
+        out.subject_display = PURGED
     out.preview = PURGED
     for message in out.messages:
         message.text = PURGED
+        if (
+            message.display_text is not None
+        ):  # 욕설을 가린 글과 순화한 글도 고객 원문에서 나온 것이다
+            message.display_text = PURGED
+        if message.softened_text is not None:
+            message.softened_text = PURGED
         analysis = message.analysis
         if analysis is None:
             continue
@@ -111,8 +124,47 @@ def redact(conversation: Conversation, stamp: str) -> tuple[Conversation, dict[s
     if out.feedback and out.feedback.comment:
         out.feedback.comment = ""
         feedback = 1
+    notes = 0
+    for (
+        note
+    ) in out.resolution_notes:  # 업무 메모라도 이름·연락처가 적힐 수 있다. 작성자·시각은 남긴다
+        written = [n for n in (note.root_cause, note.action_taken, note.result) if n]
+        notes += 1 if written else 0
+        note.root_cause = PURGED if note.root_cause else note.root_cause
+        note.action_taken = PURGED if note.action_taken else note.action_taken
+        note.result = PURGED if note.result else note.result
     out.purged_at = stamp
-    return out, {"messages": len(out.messages), "activity": activity, "feedback": feedback}
+    counts = {"messages": len(out.messages), "activity": activity, "feedback": feedback}
+    counts["resolution_notes"] = notes
+    return out, counts
+
+
+def _has_purge_record(store: InquiryStore, inquiry_id: int) -> bool:
+    return any(
+        r.get("record_type") == "retention_purge" and r.get("inquiry_id") == inquiry_id
+        for r in store.privacy_audit
+    )
+
+
+def _already_purged(store: InquiryStore, conversation: Conversation, apply: bool) -> Plan:
+    """이미 지운 문의. 지운 뒤 감사 기록 전에 중단됐다면 기록만 보충한다(건수는 알 수 없다)."""
+    if _has_purge_record(store, conversation.id):
+        return Plan(conversation.id, "already_purged")
+    kept = {
+        "messages": len(conversation.messages),
+        "activity": len(conversation.activity),
+        "claims": 0,
+    }
+    if apply:
+        privacy_audit.record_retention_purge(
+            store,
+            conversation,
+            criterion=BACKFILL_CRITERION,
+            purged={},
+            kept=kept,
+            executor_role=EXECUTOR_ROLE,
+        )
+    return Plan(conversation.id, "already_purged", kept=kept, note="audit_backfill")
 
 
 def plan_one(
@@ -122,7 +174,7 @@ def plan_one(
     if conversation is None:
         return Plan(inquiry_id, "not_found")
     if conversation.purged_at:
-        return Plan(inquiry_id, "already_purged")
+        return _already_purged(store, conversation, apply)
     reasons = blockers(conversation, claims)
     if reasons:
         return Plan(inquiry_id, "blocked", reasons)
@@ -160,6 +212,9 @@ def _line(plan: Plan, apply: bool) -> str:
     if plan.action == "blocked":
         return f"문의 {plan.inquiry_id}: 막힘 ({', '.join(plan.reasons)})"
     if plan.action == "already_purged":
+        if plan.note == "audit_backfill":
+            verb = "보충함" if apply else "보충할 예정"
+            return f"문의 {plan.inquiry_id}: 이미 지웠지만 감사 기록이 없어 {verb}"
         return f"문의 {plan.inquiry_id}: 이미 지움"
     return f"문의 {plan.inquiry_id}: 찾을 수 없음"
 
