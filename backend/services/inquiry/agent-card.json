@@ -181,6 +181,18 @@
       "priority": "recommended"
     },
     {
+      "id": "reveal_original",
+      "description": "욕설·모욕·위협으로 가려진 고객 메시지의 원문을 연다. 상담 콘솔은 가려진 메시지의 원문을 응답에서 빼므로 이 skill로만 받는다. 열 때마다 연 사람(화면이 사람 토큰에서 채운 이름)을 문의의 AI 처리 내력에 남기고 원문은 내력에 싣지 않는다. 가려진 고객 메시지가 아니면 not_found. 기록이 남아서 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#RevealOriginalInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Message",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "list_feedback",
       "description": "후기(해결 결과 평가) 목록을 최근 순으로 읽는다. 상태·별점으로 거를 수 있다.",
       "input_schema": "agents/support/src/support_agent/schemas.py#ListFeedbackInput",

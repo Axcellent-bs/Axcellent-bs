@@ -42,19 +42,8 @@ SERVICES_DIR = BACKEND / "services"
 FAKE_CATALOG = BACKEND / "domains" / "data" / "tests" / "catalogs" / "coldchain.toml"
 CASE = EVAL / "cases" / "pay_full_10m_19h.json"  # 19:25~19:35 결제 전부 실패, 실패 주문 22건
 
-ORG = """
-assignments:
-  incident: {unit: 서비스운영, assignee: 당직 담당}
-  planning: {unit: 기획개발}
-  dev: {unit: 기획개발}
-  coupon: {unit: 마케팅}
-  inquiry: {unit: 고객지원}
-  claims: {unit: 고객지원}
-  reviews: {unit: 고객지원}
-  handover: {unit: 인사}
-  decisions: {unit: 인사}
-  finance: {unit: 재무}
-"""
+# 실제 배치와 같은 캣북스 조직도 (회사 설정 폴더, run_all.sh가 AX_ORG_CONFIG로 넘기는 파일)
+ORG = BACKEND / "config" / "tenants" / "catbooks" / "org.yaml"
 OUTCOMES: list[tuple[str, str]] = []  # 총괄이 받은 이벤트와 처리 결과 (opened·merged·resumed…)
 HUMAN = {"Authorization": "Bearer human:operator"}  # 목 모드 사람 토큰 (헤더라 ASCII)
 INBOX = "http://dashboard-api/api/dashboard/handoffs"
@@ -94,9 +83,7 @@ def tenant(monkeypatch, tmp_path):  # noqa: ANN001, ANN201
     )
     monkeypatch.setenv(routing.ENABLED_FILE_ENV, str(enabled))
     monkeypatch.setattr(routing, "_enabled_cache", None)
-    org = tmp_path / "org.yaml"
-    org.write_text(ORG, encoding="utf-8")
-    monkeypatch.setenv(routing.ORG_ENV, str(org))
+    monkeypatch.setenv(routing.ORG_ENV, str(ORG))
     monkeypatch.setattr(routing, "_cache", None)
     monkeypatch.setenv("AX_DATA_URL", "http://data")
     monkeypatch.setenv("AX_DASHBOARD_API_URL", "http://dashboard-api")
@@ -329,14 +316,10 @@ def test_data_only_tenant_end_to_end(tenant, world, monkeypatch) -> None:  # noq
         assert run.output["handled_by"] == "human" and run.output["result"], steps
     # 꺼진 서비스는 A2A로 부르지 않았다 (연결 시도 없음), 할 일은 조직도 부서로 갔다
     assert not [r for r in router.refused if r.endswith("/a2a")], router.refused
-    assert {t["assignee_unit"] for t in done} <= {
-        "서비스운영",
-        "기획개발",
-        "마케팅",
-        "고객지원",
-        "인사",
-        "재무",
-    }
+    from ax_agent_template import routing
+
+    units = {a.unit for a in routing.load_org(str(ORG)).values()}
+    assert {t["assignee_unit"] for t in done} <= units
     assert {t["to_service"] for t in done} >= {"incident", "coupon"}
     assert "data" in registry.cards and "data" not in {t["to_service"] for t in done}
 

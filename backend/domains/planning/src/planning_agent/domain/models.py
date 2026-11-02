@@ -158,10 +158,13 @@ class Spec(DomainModel):
     handed_to_dev: bool = False
     # 기획서를 쓴 곳. "dev_team" = 개발팀원이 개발 화면에서 직접 쓴 기획 (코딩 에이전트)
     origin: str | None = None
+    # 인사 ② check_plan 실제 결과 (ok·warn·unknown). None = 묻지 않음 (목 모드·예전 기획서)
+    hr_check: Literal["ok", "warn", "unknown"] | None = None
 
 
 CodingStatus = Literal[
     "queued",
+    "claimed",  # 개발자 본인 Claude가 가져감 (구독형, work_queue.py)
     "reading",
     "writing",
     "reviewing",
@@ -210,6 +213,16 @@ class CodingRun(DomainModel):
     waiting_for: list[str] = Field(default_factory=list)  # 기다리는 앞 작업 id
     # 머지가 충돌로 실패함: 다시 시도하면 PR을 닫고 최신 코드로 다시 쓴다
     merge_conflict: bool = False
+    # 이 작업이 지금까지 쓴 LLM 호출·토큰 (다시 시도해도 이어서 센다). 실행 한 번 상한은 coder
+    llm_calls: int = 0
+    llm_tokens: int = 0
+    # 누가 코딩하나: agent = 서버 코딩 에이전트(API 키), subscription = 개발자 본인 Claude가
+    # MCP로 가져가 코딩한다 (work_queue.py). 구독형은 서버 에이전트를 띄우지 않는다
+    mode: Literal["agent", "subscription"] = "agent"
+    claimed_by: str | None = None  # 가져간 사람 (사람 토큰 이름)
+    claimed_at: UtcDatetime | None = None
+    lease_until: UtcDatetime | None = None  # 이때까지 진행 보고가 없으면 대기열로 돌린다
+    progress: str | None = None  # 개발자 Claude가 마지막으로 보고한 진행 글
 
 
 class Task(DomainModel):

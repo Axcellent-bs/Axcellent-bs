@@ -31,12 +31,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from ax_agent_template import config as template_config
 from ax_agent_template import execute as gate_module
 from ax_contracts.schemas import TENANT_ID_DEFAULT, Evidence, ExecuteDecision, RequestMeta
+from ax_contracts.schemas.hr import PlanDraft
 from ax_contracts.schemas.planning import ChangeResultInput, DevHandoffInput, DevResultInput
 from ax_contracts.schemas.record import RecordCase, RecordKind
 from planning_agent import (
     cause_inbox,
     coder,
     cross_check,
+    hr_link,
     related,
     repo_routing,
     state_store,
@@ -67,7 +69,13 @@ from planning_agent.domain.autocheck import (
 )
 from planning_agent.domain.clock import Clock, default_clock_factory
 from planning_agent.domain.docs import gather_blocks, next_block_id
-from planning_agent.domain.handover import HandoverCheck, Item, check_handover, in_progress
+from planning_agent.domain.handover import (
+    HandoverCheck,
+    Item,
+    area_of_text,
+    check_handover,
+    in_progress,
+)
 from planning_agent.domain.models import (
     DEPT_NAME,
     PR,
@@ -91,6 +99,7 @@ from planning_agent.domain.models import (
     Message,
     OutMsg,
     Para,
+    ParaWarn,
     PrGate,
     RelatedItem,
     RepoTarget,
@@ -117,6 +126,7 @@ from planning_agent.domain.rules import (
 )
 from planning_agent.domain.seed import initial_state, real_state
 from planning_agent.domain.trace import changed_paths_for
+from planning_agent.hr_link import HrClient, HrRecordResult, PlanCheck
 from planning_agent.result_notify import ResultSender, send_change_result
 from planning_agent.vcs.base import VcsError
 
@@ -435,6 +445,7 @@ class PlanningService:
         real_example: bool = False,
         cross_checker: CrossChecker | None | Literal["default"] = "default",
         relater: related.Relater | None | Literal["default"] = "default",
+        hr_client: HrClient | None | Literal["default"] = "default",
     ):
         # 서비스 역할: "" = 합친 모드(원래 동작), "planning" = 기획서까지, "dev" = PR·머지만
         self.role = (os.getenv("PLANNING_ROLE", "") if role is None else role).strip()
@@ -465,6 +476,10 @@ class PlanningService:
         # 교차검증 근거를 모으는 곳 (None이면 모으지 않고 safety 판정만)
         self._cross_checker: CrossChecker | None = (
             cross_check.default_checker() if cross_checker == "default" else cross_checker
+        )
+        # 인사 record_case를 실제로 부르는 곳 (None이면 관문·활동 기록만, 목 모드 기본값)
+        self._hr: HrClient | None = (
+            hr_link.default_client() if hr_client == "default" else hr_client
         )
         self.tenant_id = tenant_id
         self.gate_calls: list[GateCall] = []
@@ -921,13 +936,14 @@ class PlanningService:
         if self._pr_sync is not None or self.role == "planning":
             return
 
-        from planning_agent import dev_chat
+        from planning_agent import dev_chat, work_queue
 
         async def loop() -> None:
             while True:
                 await asyncio.sleep(PR_SYNC_SECONDS)
                 try:
                     await self.sync_prs()
+                    await work_queue.expire_leases(self)  # 진행 보고가 끊긴 구독형 작업 되돌리기
                     # 앞 요청을 오래 기다리는 대화에 알린다 (상태가 안 바뀌어도 시간이 지나면)
                     await dev_chat.notice_long_waits(self)
                 except Exception:  # noqa: BLE001 - 맞추기 실패로 루프가 멈추지 않게 한다
@@ -1018,6 +1034,73 @@ class PlanningService:
                 return decision
             raise GateRefused(action, key, decision)
         return decision
+
+    async def _check_plan(self, ctx: str, spec_id: str, req: Request) -> PlanCheck | None:
+        """기획서 초안을 인사 `check_plan`에 묻는다 (인사 연동 3단계). 목 모드면 None.
+
+        영역을 정하지 못하면 묻지 않고 확인 못 함으로 둔다 (지어낸 영역을 보내지 않는다).
+        요청 근거는 다른 부서가 쓴 외부 문구라 `untrusted`로 따로 보낸다.
+        """
+        if self._hr is None:
+            return None
+        area = area_of_text(req.title, req.evidence)
+        if area is None:
+            return PlanCheck("unknown", message="영역을 정하지 못함")
+        draft = PlanDraft(title=req.title, summary=req.title, area=area, kind="spec", ref=spec_id)
+        return await self._hr.check_plan(ctx, draft, {"요청 근거": req.evidence})
+
+    async def _record_hr(
+        self, decision: ExecuteDecision, record: RecordCase, key: str
+    ) -> HrRecordResult | None:
+        """관문을 통과한 `record_case`를 인사에 실제로 보낸다 (인사 연동 1단계).
+
+        목 모드(`_hr` None)나 관문 보류면 부르지 않는다. 실패해도 본 작업은 되돌리지
+        않고 "인사 기록 실패"만 `soft_holds`에 남긴다.
+        """
+        if self._hr is None or decision.status != "executed":
+            return None
+        res = await self._hr.record(record, key)
+        if not res.ok:
+            self.soft_holds.append(GateCall("record_case", key, "hr_failed", "-", res.reason or ""))
+        return res
+
+    def _decision_record(
+        self,
+        ctx: str,
+        dec_id: str,
+        text: str,
+        reason: str,
+        alternatives: list[str],
+        refs: list[str],
+        *area_hints: str,
+    ) -> RecordCase:
+        """결정 추출 → 인사 `record_case` 입력. 결정 번호를 첫 근거로 둔다 (인사 중복 키)."""
+        return RecordCase(
+            context_id=ctx,
+            tenant_id=self.tenant_id,
+            kind=RecordKind.DECISION_EXTRACTED,
+            summary=text,
+            decision_reason=reason,
+            alternatives_considered=[a for a in alternatives if a and a != "-"],
+            source_refs=[f"decision:{dec_id}", *refs],
+            author=AGENT_NAME,
+            area=area_of_text(*area_hints, text),
+        )
+
+    def _hr_act(self, ctx: str, case: str, hr: HrRecordResult | None) -> Activity:
+        """인사 기록 활동 한 줄. 실제로 불렀으면 결과(카드·실패)를 붙인다."""
+        if hr is None:
+            return self._act(self.clock(), ctx, "planning", "hr", "record_case", "A2A", case, "A")
+        return self._act(
+            self.clock(),
+            ctx,
+            "planning",
+            "hr",
+            "record_case",
+            "A2A",
+            f"{case} → {hr.text}",
+            "A" if hr.ok else None,
+        )
 
     def _act(
         self,
@@ -1563,9 +1646,17 @@ class PlanningService:
         spec_id = f"SPEC-{len(s.specs) + 6}"
         ctx = req.context_id
         t = self.clock()
+        plan = await self._check_plan(ctx, spec_id, req)
         s.activity.append(
             self._act(
-                t, ctx, "planning", "hr", "check_plan", "A2A", "② 기각 이력 질의 → 없음", "read"
+                t,
+                ctx,
+                "planning",
+                "hr",
+                "check_plan",
+                "A2A",
+                plan.text if plan else "② 기각 이력 질의 → 없음",
+                "read",
             )
         )
         text = f"{spec_id} 초안 작성 (요구사항 1, 완료 기준 1, 질문 0) → 확정 조건 확인"
@@ -1578,10 +1669,20 @@ class PlanningService:
             problem=f"{DEPT_NAME[req.from_]}에서 받은 요청: {req.evidence}",
             goal=req.title,
             paras=[
-                Para(id="R1", kind="req", text=req.title),
+                Para(
+                    id="R1",
+                    kind="req",
+                    text=req.title,
+                    warn=(
+                        ParaWarn(card=plan.card or "-", text=plan.message or "기각 이력 경고")
+                        if plan and plan.verdict == "warn"
+                        else None
+                    ),
+                ),
                 Para(id="C1", kind="done", text="바뀐 뒤 같은 문의·이상 신호가 다시 생기지 않는다"),
             ],
             basis=[f"{req.id} ({DEPT_NAME[req.from_]})", req.evidence],
+            hr_check=plan.verdict if plan else None,
         )
         s.specs.append(sp)
         req.spec = spec_id
@@ -2556,10 +2657,16 @@ class PlanningService:
         paths: list[str] | None = None,
         connection: str | None = None,
         skip_queue: bool = False,
+        mode: str = "agent",
     ) -> ActionResult:
         """개발팀원이 쓴 기획으로 요청·확정 기획서·작업 하나를 만들고 코딩 에이전트를 띄운다 (A).
 
-        에이전트는 바꿔 끼운 뒤 잠금 밖에서 돈다. 진행은 작업 `coding`에 적힌다."""
+        에이전트는 바꿔 끼운 뒤 잠금 밖에서 돈다. 진행은 작업 `coding`에 적힌다.
+        `mode="subscription"`이면 서버 에이전트를 띄우지 않고 `queued`로 두어 개발자 본인 Claude가
+        MCP로 가져가기를 기다린다 (work_queue.py). LLM 설정도 필요 없다."""
+        if mode not in ("agent", "subscription"):
+            raise ActionError("INVALID_INPUT", "mode는 agent·subscription 중 하나다")
+        sub = mode == "subscription"
         title = " ".join((title or "").split())
         plan = (plan or "").strip()
         if not title or not plan:
@@ -2570,24 +2677,23 @@ class PlanningService:
             raise ActionError("WRONG_ROLE", "코딩 에이전트는 개발 서비스(dev)에서 돈다")
         hints = vcs.clean_paths(paths)
         cid = self._coding_connection(connection)
-        llm = self._coding_llm()
+        llm = None if sub else self._coding_llm()
         done_lines = [x.strip() for x in (done or "").splitlines() if x.strip()]
         done_lines = done_lines[: coder.MAX_DONE_LINES] or [coder.DEFAULT_DONE]
 
         async def run(s: State) -> ActionResult:
             req_id, spec_id, task_id, ctx = self._dev_ids(s)
             t = self.clock()
+            who = "개발자 Claude" if sub else "코딩 에이전트"
             text = (
-                f'{task_id} 개발팀 기획 "{title}" → 코딩 에이전트 대기 '
+                f'{task_id} 개발팀 기획 "{title}" → {who} 대기 '
                 f"(완료 기준 {len(done_lines)}, 연결 {cid})"
             )
+            params = {"request": req_id, "spec": spec_id, "connection": cid, "paths": list(hints)}
+            if sub:
+                params["mode"] = mode
             await self._execute(
-                "dev_task_create",
-                ctx,
-                task_id,
-                text,
-                {"request": req_id, "spec": spec_id, "connection": cid, "paths": list(hints)},
-                [req_id, spec_id, task_id],
+                "dev_task_create", ctx, task_id, text, params, [req_id, spec_id, task_id]
             )
             s.requests.append(
                 Request(
@@ -2629,14 +2735,15 @@ class PlanningService:
                     spec=spec_id,
                     para="R1",
                     title=title,
-                    owner="에이전트",
+                    owner="개발자 Claude" if sub else "에이전트",
                     state="진행 중",
                     coding=CodingRun(
                         status="queued",
-                        model=coder.model_name(llm),
+                        model=None if sub else coder.model_name(llm),
                         updated_at=t,
                         connection=cid,
                         skip_queue=skip_queue,
+                        mode="subscription" if sub else "agent",
                     ),
                 )
             )
@@ -2652,7 +2759,8 @@ class PlanningService:
             )
 
         result = await self._apply(run)
-        self._spawn_coder(result.output["task_id"])
+        if not sub:  # 구독형은 개발자 Claude가 가져갈 때까지 대기열에 둔다
+            self._spawn_coder(result.output["task_id"])
         return result
 
     # ---- 개발 AI 대화 (dev_chat.py). 메시지 하나 = 작은 액션 하나 (관문 dev_chat A)
@@ -2747,7 +2855,8 @@ class PlanningService:
                 "NOT_RETRYABLE", f"{task_id}는 이미 PR이 있다 → PR 화면에서 머지·판단"
             )
         cid = self._coding_connection(connection, task.coding.connection)
-        llm = self._coding_llm()
+        sub = task.coding.mode == "subscription"  # 구독형은 다시 대기열에만 올린다
+        llm = None if sub else self._coding_llm()
 
         async def run(s: State) -> ActionResult:
             x = next((t for t in s.tasks if t.id == task_id), None)
@@ -2770,12 +2879,15 @@ class PlanningService:
                         raise ActionError("NOT_RETRYABLE", f"{pr.id}를 닫지 못해 다시 쓰지 않음")
                     pr.closed = True
                     pr.auto_review = None
-            text = f"{task_id} 코딩 에이전트 {how} (연결 {cid})"
+            who = "개발자 Claude 대기열" if sub else "코딩 에이전트"
+            text = f"{task_id} {who} {how} (연결 {cid})"
             n = sum(1 for g in self.gate_calls if g.action == "dev_task_retry") + 1
             await self._execute("dev_task_retry", ctx, f"{task_id}:{n}", text, {"connection": cid})
             x.coding = CodingRun(
-                status="queued", model=coder.model_name(llm), updated_at=t, connection=cid
-            )
+                status="queued", model=coder.model_name(llm) if llm else None, updated_at=t,
+                connection=cid, llm_calls=x.coding.llm_calls, llm_tokens=x.coding.llm_tokens,
+                mode=x.coding.mode,
+            )  # fmt: skip
             x.state = "진행 중"
             s.activity.append(self._act(t, ctx, "dev", "dev", "dev_task_retry", "A2A", text, "A"))
             return ActionResult(
@@ -2789,7 +2901,8 @@ class PlanningService:
             )
 
         result = await self._apply(run)
-        self._spawn_coder(task_id)
+        if not sub:
+            self._spawn_coder(task_id)
         return result
 
     async def cancel_dev_task(self, task_id: str) -> ActionResult:
@@ -2886,6 +2999,10 @@ class PlanningService:
         task = next((t for t in self.state.tasks if t.id == task_id), None)
         if task is None or task.coding is None:
             raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+        if task.coding.mode == "subscription":
+            raise ActionError(
+                "NOT_REVISABLE", f"{task_id}는 개발자 Claude 작업이다 → PR에 직접 코멘트로 지시"
+            )
         pr = next((p for p in self.state.prs if p.task == task_id), None)
         if (
             task_id in self._coding
@@ -3036,6 +3153,8 @@ class PlanningService:
             cr = t.coding
             if cr is None or cr.status not in active or cr.connection != job.connection:
                 continue
+            if cr.mode == "subscription":  # 개발자 Claude 작업은 언제 끝날지 몰라 기다리지 않는다
+                continue
             files = {f.path for f in cr.files}
             if not files:
                 undecided.append(t.id)
@@ -3076,6 +3195,9 @@ class PlanningService:
             cr.status = status  # type: ignore[assignment]
             for key, value in fields.items():
                 setattr(cr, key, value)
+            m = coder.meter_now()
+            if m is not None:  # 단계마다 쓴 양을 적는다 (화면에 보인다)
+                cr.llm_calls, cr.llm_tokens = m.base_calls + m.calls, m.base_tokens + m.tokens
             cr.updated_at = self.clock()
             if status == "waiting_human" and cr.pr is None:
                 task.state = "C 보류"
@@ -3348,7 +3470,25 @@ class PlanningService:
         summary = f"스레드에서 결정 {dec_id} 추출, R1 반영, 질문 닫음"
         await self._execute("extract_decision", ctx, dec_id, summary, {"spec": spec})
         case = f"① kind decision_extracted · {dec_id} (결정·이유·대안)"
-        await self._execute("record_case", ctx, f"{dec_id}:decision_extracted", case)
+        record = self._decision_record(
+            ctx,
+            dec_id,
+            ANSWER_DECISION["text"],
+            ANSWER_DECISION["reason"],
+            [ANSWER_DECISION["alternatives"]],
+            [f"spec:{spec}"] + ([f"thread:{th.id}"] if th else []),
+            sp.title,
+        )
+        hr_key = f"{dec_id}:decision_extracted"
+        gate = await self._execute(
+            "record_case",
+            ctx,
+            hr_key,
+            case,
+            {"record_case": record.model_dump(mode="json")},
+            record.source_refs,
+        )
+        hr = await self._record_hr(gate, record, hr_key)
         for x in s.threads:
             if x.on == spec:
                 x.messages.append(
@@ -3363,7 +3503,7 @@ class PlanningService:
                 id=dec_id,
                 spec=spec,
                 from_=f"스레드 {th.id}" if th else "스레드",
-                sent_to_hr=True,
+                sent_to_hr=hr is None or hr.ok,
                 **ANSWER_DECISION,
             )
         )
@@ -3372,9 +3512,7 @@ class PlanningService:
                 self.clock(), ctx, "planning", "planning", "extract_decision", "A2A", summary, "A"
             )
         )
-        s.activity.append(
-            self._act(self.clock(), ctx, "planning", "hr", "record_case", "A2A", case, "A")
-        )
+        s.activity.append(self._hr_act(ctx, case, hr))
         # 질문이 닫혔으면 자동 확정 규칙을 다시 본다 (통과하면 확정·작업 분할, 아니면 대기열)
         await self._try_auto_confirm(s, sp)
 
@@ -3411,6 +3549,9 @@ class PlanningService:
         clash = related.open_conflicts(s, req) if req else []
         if clash:
             check = Check(params=check.params, rules=[*check.rules, "spec_open_conflict"])
+        # 인사 ② check_plan을 못 받았으면 경고 없음으로 보지 않는다 (사람 확정, 인사 연동 3단계)
+        if sp.hr_check == "unknown":
+            check = Check(params=check.params, rules=[*check.rules, "spec_hr_unchecked"])
         if check.ok:
             try:
                 await self._do_confirm(s, sp, check, auto=True)
@@ -3496,13 +3637,16 @@ class PlanningService:
             + [f"para:{sp.id}:{w['para']}" for w in warn_ignored]
             + [f"card:{w['card']}" for w in warn_ignored],
             author=AGENT_NAME,
+            area=area_of_text(sp.title, *(p.text for p in reqs)),
         )
         case_params: dict[str, Any] = {"record_case": record.model_dump(mode="json")}
         if warn_ignored:
             case_params["warn_ignored"] = warn_ignored
-        await self._execute(
-            "record_case", ctx, f"{sp.id}:spec_confirmed", case, case_params, record.source_refs
+        hr_key = f"{sp.id}:spec_confirmed"
+        gate = await self._execute(
+            "record_case", ctx, hr_key, case, case_params, record.source_refs
         )
+        hr = await self._record_hr(gate, record, hr_key)
         sp.status = "확정"
         sp.auto_review = None
         if auto:
@@ -3552,9 +3696,7 @@ class PlanningService:
         s.activity.append(
             self._act(self.clock(), ctx, "planning", "planning", "split_tasks", "A2A", split, "A")
         )
-        s.activity.append(
-            self._act(self.clock(), ctx, "planning", "hr", "record_case", "A2A", case, "A")
-        )
+        s.activity.append(self._hr_act(ctx, case, hr))
         if audit:
             s.activity.append(
                 self._act(
@@ -4325,17 +4467,29 @@ class PlanningService:
         summary = f"{th.title} 메시지에서 결정 {dec_id} 추출"
         await self._execute("extract_decision", ctx, dec_id, summary)
         case = f"① kind decision_extracted · {dec_id}"
-        await self._execute("record_case", ctx, f"{dec_id}:decision_extracted", case)
+        reason = f"{m.who} 의견 ({th.title})"
+        refs = [f"thread:{th.id}"] + ([f"spec:{th.on}"] if th.on else [])
+        record = self._decision_record(ctx, dec_id, m.text, reason, [], refs, th.title)
+        hr_key = f"{dec_id}:decision_extracted"
+        gate = await self._execute(
+            "record_case",
+            ctx,
+            hr_key,
+            case,
+            {"record_case": record.model_dump(mode="json")},
+            record.source_refs,
+        )
+        hr = await self._record_hr(gate, record, hr_key)
         m.decision = dec_id
         s.decisions.append(
             Decision(
                 id=dec_id,
                 spec=th.on or "-",
                 text=m.text,
-                reason=f"{m.who} 의견 ({th.title})",
+                reason=reason,
                 alternatives="-",
                 from_=f"소통 {th.title}",
-                sent_to_hr=True,
+                sent_to_hr=hr is None or hr.ok,
             )
         )
         s.activity.append(
@@ -4343,9 +4497,7 @@ class PlanningService:
                 self.clock(), ctx, "planning", "planning", "extract_decision", "A2A", summary, "A"
             )
         )
-        s.activity.append(
-            self._act(self.clock(), ctx, "planning", "hr", "record_case", "A2A", case, "A")
-        )
+        s.activity.append(self._hr_act(ctx, case, hr))
 
     # ---- 문서 (사람이 고치는 정리 문서. 상태 변경 관문 대상 아님)
 

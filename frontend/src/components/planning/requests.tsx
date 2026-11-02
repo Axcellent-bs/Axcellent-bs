@@ -15,6 +15,7 @@ function viaLabel(via: string): string {
   if (via.startsWith('ticket_draft_propose')) return '개선 초안'
   if (via.startsWith('개선 초안')) return '개선 초안'
   if (via.startsWith('link_incident')) return '장애 후속'
+  if (via === 'dev_team') return '개발팀 기획'
   return via.replace(/\s*\(.*\)$/, '')
 }
 
@@ -35,7 +36,7 @@ export interface Cell { kind: 'past' | 'now' | 'next'; value?: string; meta?: st
 export interface Wait { label: string; rank: number } // rank 작을수록 먼저 (사람 확인 0 · 질문 1 · 교차검증 2 · 채택·초안 3)
 export interface PipeRow { r: Request; stage: number; finished: boolean; cells: Cell[]; wait?: Wait; born?: string; last?: string; minutes: number; dups: Request[] }
 
-const toMin = (t: string) => {
+export const toMin = (t: string) => {
   const m = /^(\d+)-(\d+) (\d+):(\d+)$/.exec(t)
   return m ? ((+m[1] * 31 + +m[2]) * 24 + +m[3]) * 60 + +m[4] : 0
 }

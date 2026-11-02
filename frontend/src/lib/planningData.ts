@@ -72,6 +72,7 @@ export interface Spec {
   humanSentences: number
   confirmedBy?: Approver
   origin?: string // 'dev_team' = 개발팀이 직접 넣은 기획
+  hrCheck?: 'ok' | 'warn' | 'unknown' // 인사 ② check_plan 실제 결과 (없으면 묻지 않음)
 }
 
 export type TaskState = '진행 중' | 'PR 검수' | '머지 대기' | '완료' | 'C 보류'
@@ -102,6 +103,8 @@ export interface CodingRun {
   skipQueue?: boolean // '지금 진행': 같은 파일 작업이 있어도 기다리지 않음
   waitingFor?: string[] // 작업 대기열: 같은 파일을 먼저 고치는 앞 작업
   mergeConflict?: boolean // 머지 충돌: 다시 시도하면 PR을 닫고 최신 코드로 다시 씀
+  llmCalls?: number // 이 작업이 지금까지 부른 LLM 횟수 (다시 시도 포함)
+  llmTokens?: number // 이 작업이 지금까지 쓴 토큰 (입력 + 출력)
 }
 
 export interface PR {
@@ -112,6 +115,7 @@ export interface PR {
   reviews: ('통과' | '불일치')[]
   gate: { result: '통과' | 'C 보류'; lines: number; files: number; paths: string }
   merged: boolean
+  closed?: boolean // 머지 없이 닫힘 (사람이 중단·형상관리에서 닫음)
   auto?: boolean // 사람 클릭 없이 머지됨 (기준 또는 교차검증)
   mergedBy?: 'rule' | 'review' | 'human'
   rule?: string // 자동 머지에 쓴 기준 (AR-n)
@@ -228,6 +232,7 @@ export const RULE_LABEL: Record<string, string> = {
   spec_rejected_warning: '경고',
   spec_no_basis: '근거 없음',
   spec_open_conflict: '충돌하는 요청 진행 중',
+  spec_hr_unchecked: '인사 기록 확인 못 함',
 }
 
 // 교차검증 대기를 사람 확인으로 넘기기까지 (분). 백엔드 PLANNING_CROSS_CHECK_TIMEOUT_MIN 기본값과 같다
@@ -642,10 +647,11 @@ const NO_IRREVERSIBLE: RuleCheck = { label: '되돌릴 수 없는 일', result: 
 // 기획서 확정 조건: 질문 없음 + 인사 기각 경고 없음 + 근거 있음
 function specChecks(sp: Spec): { autoOk: boolean; checks: RuleCheck[]; route: string[] } {
   const warned = sp.paras.filter((p) => p.warn)
+  const unchecked = sp.hrCheck === 'unknown'
   const checks: RuleCheck[] = [
     { label: '남은 질문', result: sp.question ? '걸림' : '통과', detail: sp.question ? `답을 받지 않은 질문: ${sp.question}` : '남은 질문 없음' },
     { label: '근거', result: sp.basis.length ? '통과' : '걸림', detail: sp.basis.length ? `근거 ${sp.basis.length}개 · ${sp.basis.join(', ')}` : '근거 없음' },
-    { label: '인사 기각 경고', result: warned.length ? '확인 필요' : '통과', detail: warned.length ? warned.map((p) => `${p.id} ${p.warn!.card}: ${p.warn!.text}`).join(' / ') : '인사 ② check_plan 경고 없음' },
+    { label: '인사 기각 경고', result: warned.length || unchecked ? '확인 필요' : '통과', detail: warned.length ? warned.map((p) => `${p.id} ${p.warn!.card}: ${p.warn!.text}`).join(' / ') : unchecked ? '인사 ② check_plan 확인 못 함' : '인사 ② check_plan 경고 없음' },
   ]
   for (const p of warned) {
     const need = p.warn!.text.match(/(R\d+)과 함께/)?.[1]
@@ -655,9 +661,10 @@ function specChecks(sp: Spec): { autoOk: boolean; checks: RuleCheck[]; route: st
   checks.push(NO_IRREVERSIBLE)
   const route = [
     ...(warned.length ? [`${warned.map((p) => p.id).join(', ')}에 인사 기각 경고가 붙어 있음`] : []),
+    ...(unchecked ? ['인사 기록을 확인하지 못함'] : []),
     ...(sp.basis.length ? [] : ['근거가 없음']),
   ]
-  return { autoOk: !sp.question && !warned.length && sp.basis.length > 0, checks, route }
+  return { autoOk: !sp.question && !warned.length && !unchecked && sp.basis.length > 0, checks, route }
 }
 
 function prChecks(s: State, pr: PR): { checks: RuleCheck[]; route: string[] } {

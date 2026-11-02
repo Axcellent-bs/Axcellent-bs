@@ -76,7 +76,13 @@ class Analysis(AxModel):
 class Message(AxModel):
     id: int
     role: Literal["customer", "agent"]
-    text: str
+    text: str  # 접수된 원문 (증거라 고치지 않는다)
+    display_text: str | None = None  # 욕설·모욕·위협 표현을 가린 글. 가릴 것이 없으면 None
+    abuse_level: Literal["none", "profanity", "insult", "threat"] = "none"
+    abuse_kinds: list[str] = Field(default_factory=list)  # profanity·insult·threat, llm=모델이 찾음
+    softened_text: str | None = (
+        None  # LLM이 요청만 남겨 정중하게 옮긴 글 (2단계, 코드가 검사한 것만)
+    )
     analysis: Analysis | None = None
     created_at: str
 
@@ -97,6 +103,7 @@ class ConversationListItem(AxModel):
     id: int
     customer_name: str
     subject: str
+    subject_display: str | None = None  # 제목에 욕설·모욕·위협이 있으면 가린 제목
     category: str | None = None
     sentiment: str | None = None
     urgency: Urgency | None = None
@@ -173,6 +180,9 @@ class Conversation(ConversationListItem):
     activity: list[ActivityEntry] = Field(default_factory=list)  # AI 처리 내력 (오래된 것부터)
     feedback: Feedback | None = None  # 해결 결과에 대한 고객 평가 (문의당 한 번)
     resolution_notes: list[ResolutionNote] = Field(default_factory=list)  # 해결 메모 (최신 먼저)
+    purged_at: str | None = (
+        None  # 원문을 지운 시각 (`retention.py`). 있으면 원문 필드는 [삭제됨]이다
+    )
 
 
 # ---------------------------------------------------------------- LLM 응답 스키마
@@ -312,6 +322,14 @@ class AddResolutionNoteInput(AxModel):
 
     inquiry_id: int
     author: str = Field(min_length=1, max_length=50)
+
+
+class RevealOriginalInput(AxModel):
+    """가린 고객 메시지의 원문 열기. `viewer`는 화면이 사람 토큰에서 채운 이름이다."""
+
+    inquiry_id: int
+    message_id: int
+    viewer: str = Field(min_length=1, max_length=50)
 
 
 class SetFeedbackStatusInput(AxModel):

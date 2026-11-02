@@ -16,6 +16,8 @@
 - 숫자는 코드가 계산한다(`metrics/`, `impact.py`, `detect.py`). LLM은 계산이 끝난 숫자로 설명 문장만 쓴다(`explain.py`)
 - 주기 감시(`monitor.py`)는 `anomaly_detection`과 같은 판정 함수로 최근 구간을 보고 `metric.anomaly` 이벤트를 낸다. 사건은 열지 않는다(`context_id` 없음)
 ### 새 회사를 붙일 때 필요한 것: 지표 카탈로그 + 커넥터
+회사 한 곳을 붙이는 순서(카탈로그·커넥터·조직도를 묶는 `config/tenants/<회사>/tenant.toml`)는 `backend/README.md` "새 회사를 붙일 때"에 있다. 여기는 data 쪽 두 가지다.
+
 회사마다 다른 것은 두 가지다. **무엇을 볼지**는 지표 카탈로그 파일, **어디서 읽을지**는 커넥터다.
 
 #### 1) 지표 카탈로그
@@ -67,6 +69,18 @@ class MemoryConnector:
 - 캣북스: `connectors/shop_api.py`의 `ShopApiConnector`다(`/api/shop/metric-series`·`/failed-orders`, 거래 시도 = `payment_count`). 예전 이름 `HttpMetricSource`·`HttpShopClient`는 이 커넥터의 하위 클래스다. 정확도 평가도 이 커넥터로 읽는다(`eval/run.py`). 평가 데이터 생성은 지금처럼 shop-api 코드로 한다(평가는 캣북스 전용).
 - 목 모드(`DATA_MOCK`, 테스트 전용)의 시드 공급자는 예전 모양 그대로이고, 엔진이 `connectors.as_connector`로 감싸 읽는다.
 - 판매자 정보·가격(사기 점수 전용)은 아직 커넥터에 넣지 않았다(`clients.shop_client.HttpSellerClient`).
+
+#### 외부 트렌드 커넥터: 네이버 검색어 트렌드 (`connectors/naver_datalab.py`)
+회사 시스템이 아니라 외부 검색 트렌드를 읽는다. 5분 지표·실패 이벤트가 아니어서 위 `Connector` 인터페이스를 구현하지 않고 `NaverDatalabConnector.search_trend(TrendScanInput) -> TrendResponse` 하나만 있다. 급상승 판정(`TrendScanOutput`)과 skill 연결은 아직 없다.
+
+- 주소: NAVER API HUB `https://naverapihub.apigw.ntruss.com/search-trend/v1/search` (POST). 예전 `openapi.naver.com/v1/datalab/search`가 아니다. `AX_NAVER_DATALAB_URL`로 바꿀 수 있다.
+- 키: `NAVER_HUB_CLIENT_ID`·`NAVER_HUB_CLIENT_SECRET`(`.env`)를 헤더 `X-NCP-APIGW-API-KEY-ID`·`X-NCP-APIGW-API-KEY`로 보낸다. 키 값은 로그·오류 문장·`repr`에 넣지 않는다. 키가 없으면 부르지 않고 `UNAUTHORIZED`다.
+- 값: 검색 건수가 아니라 **그 요청 안 최댓값 = 100인 상대값**이다. 같은 키워드도 어떤 그룹과 같이 묻느냐에 따라 일정한 배수만큼 달라진다(실제 호출: 고양이 단독 62.0 → 날씨와 함께 0.0907, 모든 날 683.5배). 그래서 기준선과 판정 구간은 한 요청으로 받아 그 안에서만 비교한다.
+- 한도(실제 호출로 확인): 그룹 5개, 그룹당 키워드 20개, 가장 작은 단위 하루(`hour`는 400), 하루 늦게 채워진다. `TrendScanInput`이 같은 한도를 검사한다.
+- 못 읽으면 `ConnectorUnavailable`: 연결 실패·5xx `UNAVAILABLE`, 400 `BAD_REQUEST`, 401·403 `UNAUTHORIZED`, 429·하루 한도 `RATE_LIMITED`, JSON 아님·형식 다름·요청과 다른 그룹 `BAD_RESPONSE`.
+- 0으로 채우지 않는다: 네이버가 자료를 주지 않은 그룹(검색량이 적은 키워드)은 빈 시계열, 빠진 날은 빠진 채로 둔다. 판정 쪽이 "확인할 수 없음"으로 다룬다.
+- 호출 한도: 같은 요청은 한국 날짜가 바뀔 때까지 메모리 캐시한다(실패는 캐시하지 않는다). 하루 호출 수가 `NAVER_DATALAB_DAILY_LIMIT`(기본 1000)에 닿으면 부르지 않고 `RATE_LIMITED`다. 캐시는 프로세스 메모리라 서버를 다시 띄우면 비워진다.
+- 테스트: `tests/test_naver_datalab.py` (httpx MockTransport 메모리 응답, 실제 API를 부르지 않는다). 계약은 `shared/contracts/tests/test_trend_scan.py`.
 
 - 엔진 문장의 회사 단어도 카탈로그에서 온다: 지표 이름(`label`), 영향 단위(`impact.unit_label`·`customer_label`·`money_unit`), 거래량(`volume_label`), 비율 지표 분모(`denominator_label`, 없으면 "거래"), 사용자 쪽 실패 코드 이름(`user_codes`, 캣북스 카드 거절 등). 테스트 가짜 회사로 이상 탐지·영향 분석·리포트를 돌려 "결제"·"주문"·"판매자"가 나오면 실패한다(`tests/test_catalog_wording.py`).
 - 다른 회사 지표는 `anomaly_detection` 출력의 `metric_verdicts`·`unknown_metric_ids`에 담긴다(#221·#227). 캣북스 지표는 예전 `verdicts`에도 들어간다.

@@ -45,6 +45,8 @@ PATHS = [
     "/api/finance/bank",
     "/api/finance/cashflow",
     "/api/finance/close-checklist",
+    "/api/finance/tax/vat",
+    "/api/finance/tax/seller-report",
     "/api/finance/audit?days=7",
     "/api/finance/audit?days=14",
     "/api/finance/audit?days=30",

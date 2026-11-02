@@ -40,6 +40,17 @@ round_to = 10000                    # 제안 값은 이 단위로 올림
 min_change_ratio = 0.1              # 지금 값과 10% 넘게 다를 때만 제안
 max_step_ratio = 0.3                # 한 번 제안에서 지금 값의 30% 넘게 바꾸지 않음 (적용은 기준표 PR)
 
+[tax]
+# 세무 지원 자료(tax.py). 아래 값은 2026-10-30 세무 관점 검토 기준이며, 표시한 항목은 세무사 확인 전이다
+commission_vat = "excluded"         # 판매 수수료가 부가세 별도(excluded)인지 포함(included)인지 — 약관 확인 필요
+pg_fee_vat = "excluded"             # PG 수수료 세금계산서가 부가세 별도인지 — 확인 필요
+shipping_supplier = "seller"        # 배송비 공급자: seller(판매자 매출, 도서면 면세 부수 용역) / platform(캣북스 과세 매출)
+coupon_reduces_commission_base = false  # 약관상 쿠폰을 수수료에서 공제하면 true (대법원 2014두298) — 확인 필요
+default_tax = "taxable"             # 분류에 없는 상품은 과세로 본다
+[tax.category_tax]
+book = "exempt"                     # 도서 면세 (부가세법 제26조①8). 판매자 매출 참고용
+stationery = "taxable"
+
 [bank]
 pg_memo = ""                        # 은행 거래내역 적요에 이 글자가 있는 입금만 PG 정산금으로 본다 (비우면 모든 입금)
 

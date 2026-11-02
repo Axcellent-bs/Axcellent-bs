@@ -1,0 +1,20 @@
+{
+ "source": "naver_datalab",
+ "fetched": "2026-11-02",
+ "time_unit": "date",
+ "start_date": "2025-08-01",
+ "end_date": "2026-11-01",
+ "groups": {
+  "고양이 독서대": {
+   "keywords": [
+    "고양이 독서대"
+   ],
+   "points": [
+    [
+     "2026-05-04",
+     100.0
+    ]
+   ]
+  }
+ }
+}

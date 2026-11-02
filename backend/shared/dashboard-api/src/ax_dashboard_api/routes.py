@@ -250,8 +250,29 @@ async def _conversation(out: dict) -> Conversation:
             claims[c["id"]] = c
     ordered = sorted(claims.values(), key=lambda c: c["id"])
     return Conversation.model_validate(
-        {**out, "claims": [claim_mapping.to_claim(c) for c in ordered]}
+        {
+            **_with_shown_subject(out),
+            "messages": [_without_abusive_original(m) for m in out.get("messages") or []],
+            "claims": [claim_mapping.to_claim(c) for c in ordered],
+        }
     )
+
+
+def _with_shown_subject(item: dict) -> dict:
+    """제목에 욕설이 있으면 응답의 `subject`를 가린 제목으로 바꾼다 (원문 제목은 주지 않는다)."""
+    shown = item.get("subject_display")
+    return {**item, "subject": shown} if shown else item
+
+
+def _without_abusive_original(message: dict) -> dict:
+    """욕설·모욕·위협으로 가린 고객 메시지는 원문(`text`)을 응답에서 뺀다.
+
+    원문은 `POST /conversations/{id}/messages/{message_id}/original`로만 받고, 그때 연 사람이
+    문의의 AI 처리 내력에 남는다.
+    """
+    if message.get("role") == "customer" and message.get("abuse_level", "none") != "none":
+        return {**message, "text": ""}
+    return message
 
 
 # ---------------------------------------------------------------- 문의 (목 모드 또는 support A2A)
@@ -262,7 +283,10 @@ async def conversations() -> dict:
         items = mock_data.list_conversations()
     else:
         out = await or_unavailable(support_client.call("list_inquiries"), {"items": []})
-        items = [ConversationListItem.model_validate(i) for i in out.get("items", [])]
+        items = [
+            ConversationListItem.model_validate(_with_shown_subject(i))
+            for i in out.get("items", [])
+        ]
     return ok(items, total=len(items))
 
 
@@ -404,6 +428,19 @@ async def submit_conversation_feedback(conversation_id: int, body: FeedbackBody)
     )
 
 
+@router.post("/conversations/{conversation_id}/messages/{message_id}/original")
+async def reveal_original(conversation_id: int, message_id: int, request: Request) -> dict:
+    """가려진 고객 메시지의 원문을 연다. 연 사람은 사람 토큰에서만 채워 내력에 남는다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "원문 열기는 실제 모드에서만 된다")
+    out = await support_client.call(
+        "reveal_original",
+        {"inquiry_id": conversation_id, "message_id": message_id, "viewer": request.state.human},
+        target=f"inquiry:{conversation_id}:message:{message_id}",
+    )
+    return ok({"message_id": out["message_id"], "text": out["text"]})
+
+
 @router.post("/conversations/{conversation_id}/resolution-notes", status_code=201)
 async def add_resolution_note(
     conversation_id: int, body: ResolutionNoteBody, request: Request
@@ -516,7 +553,7 @@ async def conversation_status(conversation_id: int, body: StatusBody) -> dict:
         {"inquiry_id": conversation_id, "status": body.status},
         target=f"inquiry:{conversation_id}:{body.status}",
     )
-    return ok(ConversationListItem.model_validate(out))
+    return ok(ConversationListItem.model_validate(_with_shown_subject(out)))
 
 
 # ---------------------------------------------------------------- 쓰기 (목 모드)

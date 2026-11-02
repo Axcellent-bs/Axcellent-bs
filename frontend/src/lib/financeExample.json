@@ -1,7 +1,7 @@
 {
  "/api/finance/overview": {
   "data": {
-   "date": "2026-10-30",
+   "date": "2026-11-02",
    "kpis": {
     "gmv": 322600,
     "commission_revenue": 30368,
@@ -15,11 +15,11 @@
      "kind": "settlement_batch",
      "title": "판매자 정산 2곳 지급 승인 요청 대기",
      "count": 2,
-     "amount": 2689140,
+     "amount": 1948380,
      "link": "settlements",
      "action": {
       "type": "settlement_request",
-      "period": "2026-W43"
+      "period": "2026-W44"
      }
     },
     {
@@ -35,33 +35,33 @@
       {
        "ref": "sel_0002",
        "title": "종이나라 · 기한 넘길 위험",
-       "detail": "기한 2026-11-06 (D+7)",
+       "detail": "기한 2026-11-09 (D+7)",
        "amount": 1066464
       },
       {
        "ref": "sel_0003",
        "title": "북앤펜 · 기한 넘길 위험",
-       "detail": "기한 2026-11-06 (D+7)",
+       "detail": "기한 2026-11-09 (D+7)",
        "amount": 3208020
       },
       {
        "ref": "sel_0001",
        "title": "책마루 · 기한 넘길 위험",
-       "detail": "기한 2026-11-06 (D+7)",
+       "detail": "기한 2026-11-09 (D+7)",
        "amount": 2083500
       }
      ]
     },
     {
      "kind": "closing_confirm",
-     "title": "어제(2026-10-29) 결산 확정 대기",
+     "title": "어제(2026-11-01) 결산 확정 대기",
      "count": 1,
      "amount": -11251,
      "link": "closing",
      "action": {
       "type": "closing_confirm",
       "period": "day",
-      "date": "2026-10-29"
+      "date": "2026-11-01"
      }
     },
     {
@@ -125,7 +125,7 @@
       {
        "ref": "f03c0d629b32677b",
        "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
-       "detail": "10-28 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
+       "detail": "10-31 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
        "amount": null
       },
       {
@@ -176,7 +176,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:21.806534Z",
+   "collected_at": "2026-11-02T00:48:44.430714Z",
    "source": "seed",
    "unavailable": []
   }
@@ -184,9 +184,9 @@
  "/api/finance/closing?period=day": {
   "data": {
    "period": "day",
-   "date": "2026-10-30",
-   "from": "2026-10-30T00:00:00Z",
-   "to": "2026-10-31T00:00:00Z",
+   "date": "2026-11-02",
+   "from": "2026-11-02T00:00:00Z",
+   "to": "2026-11-03T00:00:00Z",
    "lines": [
     {
      "code": "gmv",
@@ -271,7 +271,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:21.844528Z",
+   "collected_at": "2026-11-02T00:48:44.470764Z",
    "source": "seed",
    "unavailable": []
   }
@@ -279,98 +279,86 @@
  "/api/finance/closing?period=month": {
   "data": {
    "period": "month",
-   "date": "2026-10-01",
-   "from": "2026-10-01T00:00:00Z",
-   "to": "2026-11-01T00:00:00Z",
+   "date": "2026-11-01",
+   "from": "2026-11-01T00:00:00Z",
+   "to": "2026-12-01T00:00:00Z",
    "lines": [
     {
      "code": "gmv",
      "label": "총거래액",
-     "amount": 7534800
+     "amount": 540600
     },
     {
      "code": "commission_revenue",
      "label": "판매 수수료 매출",
-     "amount": 684024
+     "amount": 47808
     },
     {
      "code": "coupon_cost",
      "label": "쿠폰 비용(회사 부담)",
-     "amount": -299700
+     "amount": -34000
     },
     {
      "code": "refund_total",
      "label": "환불",
-     "amount": -140100
+     "amount": 0
     },
     {
      "code": "pg_fee",
      "label": "PG 수수료",
-     "amount": -240741
+     "amount": -17847
     },
     {
      "code": "net_result",
      "label": "영업 결과",
-     "amount": 143583
+     "amount": -4039
     }
    ],
    "journal": [
     {
      "account": "외상매출금(PG)",
-     "debit": 7534800,
+     "debit": 540600,
      "credit": 0,
      "memo": "카드 결제 매출"
     },
     {
      "account": "수수료 매출",
      "debit": 0,
-     "credit": 684024,
+     "credit": 47808,
      "memo": "판매 수수료"
     },
     {
      "account": "판매자 예수금",
      "debit": 0,
-     "credit": 6850776,
+     "credit": 492792,
      "memo": "판매자에게 줄 판매 대금"
     },
     {
      "account": "지급수수료(PG)",
-     "debit": 240741,
+     "debit": 17847,
      "credit": 0,
      "memo": "PG 결제 수수료"
     },
     {
      "account": "외상매출금(PG)",
      "debit": 0,
-     "credit": 240741,
+     "credit": 17847,
      "memo": "PG 수수료 차감"
     },
     {
      "account": "판매촉진비(쿠폰)",
-     "debit": 299700,
+     "debit": 34000,
      "credit": 0,
      "memo": "회사 부담 쿠폰"
     },
     {
      "account": "미지급금(쿠폰)",
      "debit": 0,
-     "credit": 299700,
+     "credit": 34000,
      "memo": "쿠폰 사용분 정산 예정"
-    },
-    {
-     "account": "판매자 예수금",
-     "debit": 140100,
-     "credit": 0,
-     "memo": "환불(판매자 정산에서 차감)"
-    },
-    {
-     "account": "외상매출금(PG)",
-     "debit": 0,
-     "credit": 140100,
-     "memo": "카드 결제 취소"
     }
    ],
-   "commentary": "2026년 10월 총거래액은 7,534,800원(주문 186건)이고, 판매 수수료 매출은 684,024원입니다. 회사 부담 쿠폰 299,700원과 PG 수수료 240,741원을 빼면 영업 결과는 143,583원(흑자)입니다. 환불 140,100원은 판매자 정산에서 차감됩니다.",
+   "commentary": "2026년 11월 총거래액은 540,600원(주문 18건)이고, 판매 수수료 매출은 47,808원입니다. 회사 부담 쿠폰 34,000원과 PG 수수료 17,847원을 빼면 영업 결과는 -4,039원(적자)입니다. 환불 0원은 판매자 정산에서 차감됩니다.",
    "commentary_source": "template",
    "status": "draft",
    "confirmed_by": null,
@@ -378,7 +366,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:21.850765Z",
+   "collected_at": "2026-11-02T00:48:44.480846Z",
    "source": "seed",
    "unavailable": []
   }
@@ -389,14 +377,14 @@
    "company": null,
    "period": "month",
    "current": {
+    "name": "2026년 11월",
+    "from": "2026-11-01T00:00:00Z",
+    "to": "2026-12-01T00:00:00Z"
+   },
+   "previous": {
     "name": "2026년 10월",
     "from": "2026-10-01T00:00:00Z",
     "to": "2026-11-01T00:00:00Z"
-   },
-   "previous": {
-    "name": "2026년 9월",
-    "from": "2026-09-01T00:00:00Z",
-    "to": "2026-10-01T00:00:00Z"
    },
    "unit": "원",
    "rows": [
@@ -405,8 +393,8 @@
      "label": "Ⅰ. 매출액(영업수익)",
      "level": 0,
      "total": true,
-     "current": 384324,
-     "previous": 0,
+     "current": 13808,
+     "previous": 370516,
      "note": "중개 매출이라 순액(판매 수수료)으로 인식"
     },
     {
@@ -414,8 +402,8 @@
      "label": "판매 수수료 수익",
      "level": 1,
      "total": false,
-     "current": 684024,
-     "previous": 0,
+     "current": 47808,
+     "previous": 636216,
      "note": "품목 판매가 × 카테고리 수수료율"
     },
     {
@@ -423,8 +411,8 @@
      "label": "매출에누리(회사 부담 쿠폰)",
      "level": 1,
      "total": false,
-     "current": -299700,
-     "previous": 0,
+     "current": -34000,
+     "previous": -265700,
      "note": "고객에게 준 쿠폰은 매출에서 뺀다"
     },
     {
@@ -441,8 +429,8 @@
      "label": "Ⅲ. 매출총이익",
      "level": 0,
      "total": true,
-     "current": 384324,
-     "previous": 0,
+     "current": 13808,
+     "previous": 370516,
      "note": ""
     },
     {
@@ -450,8 +438,8 @@
      "label": "Ⅳ. 판매비와관리비(장부 기준)",
      "level": 0,
      "total": false,
-     "current": -240741,
-     "previous": 0,
+     "current": -17847,
+     "previous": -222894,
      "note": "장부에 있는 비용만"
     },
     {
@@ -459,8 +447,8 @@
      "label": "지급수수료(PG 결제 수수료)",
      "level": 1,
      "total": false,
-     "current": -240741,
-     "previous": 0,
+     "current": -17847,
+     "previous": -222894,
      "note": "PG 정산 기록, 없으면 기본 수수료율"
     },
     {
@@ -477,8 +465,8 @@
      "label": "Ⅴ. 영업이익(장부 기준)",
      "level": 0,
      "total": true,
-     "current": 143583,
-     "previous": 0,
+     "current": -4039,
+     "previous": 147622,
      "note": "그 밖의 판관비는 반영하지 않음"
     },
     {
@@ -531,22 +519,22 @@
     {
      "code": "gmv",
      "label": "총거래액(GMV)",
-     "current": 7534800,
-     "previous": 0,
+     "current": 540600,
+     "previous": 6994200,
      "note": "결제된 주문의 품목 판매가 합계. 매출이 아님"
     },
     {
      "code": "refund_total",
      "label": "환불",
-     "current": 140100,
-     "previous": 0,
+     "current": 0,
+     "previous": 140100,
      "note": "판매자 정산에서 차감되어 회사 손익에 넣지 않음"
     },
     {
      "code": "order_count",
      "label": "결제 주문 수(건)",
-     "current": 186,
-     "previous": 0,
+     "current": 18,
+     "previous": 168,
      "note": ""
     }
    ],
@@ -554,7 +542,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:21.867201Z",
+   "collected_at": "2026-11-02T00:48:44.482068Z",
    "source": "seed",
    "unavailable": []
   }
@@ -730,7 +718,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:21.897119Z",
+   "collected_at": "2026-11-02T00:48:44.516509Z",
    "source": "seed",
    "unavailable": []
   }
@@ -906,15 +894,15 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:21.909850Z",
+   "collected_at": "2026-11-02T00:48:44.533596Z",
    "source": "seed",
    "unavailable": []
   }
  },
  "/api/finance/reconciliation": {
   "data": {
-   "from": "2026-10-24T00:00:00Z",
-   "to": "2026-10-31T00:00:00Z",
+   "from": "2026-10-27T00:00:00Z",
+   "to": "2026-11-03T00:00:00Z",
    "counts": {
     "matched": 56,
     "mismatch": 2,
@@ -932,7 +920,7 @@
     {
      "order_id": "ord_2186",
      "payment_id": "pay_2186",
-     "paid_at": "2026-10-30T00:45:00Z",
+     "paid_at": "2026-11-02T00:45:00Z",
      "order_amount": 87000,
      "pg_amount": 87000,
      "fee": 2697,
@@ -940,13 +928,13 @@
      "pay_out_amount": 84303,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-11-01 지급 예정",
+     "reason": "2026-11-04 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2185",
      "payment_id": "pay_2185",
-     "paid_at": "2026-10-30T00:37:00Z",
+     "paid_at": "2026-11-02T00:37:00Z",
      "order_amount": 45000,
      "pg_amount": 45000,
      "fee": 1395,
@@ -954,13 +942,13 @@
      "pay_out_amount": 43605,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-11-01 지급 예정",
+     "reason": "2026-11-04 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2184",
      "payment_id": "pay_2184",
-     "paid_at": "2026-10-30T00:29:00Z",
+     "paid_at": "2026-11-02T00:29:00Z",
      "order_amount": 18000,
      "pg_amount": 18000,
      "fee": 558,
@@ -968,13 +956,13 @@
      "pay_out_amount": 17442,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-11-01 지급 예정",
+     "reason": "2026-11-04 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2183",
      "payment_id": "pay_2183",
-     "paid_at": "2026-10-30T00:21:00Z",
+     "paid_at": "2026-11-02T00:21:00Z",
      "order_amount": 48000,
      "pg_amount": 48000,
      "fee": 1488,
@@ -982,13 +970,13 @@
      "pay_out_amount": 46512,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-11-01 지급 예정",
+     "reason": "2026-11-04 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2182",
      "payment_id": "pay_2182",
-     "paid_at": "2026-10-30T00:13:00Z",
+     "paid_at": "2026-11-02T00:13:00Z",
      "order_amount": 107000,
      "pg_amount": 107000,
      "fee": 3317,
@@ -996,13 +984,13 @@
      "pay_out_amount": 103683,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-11-01 지급 예정",
+     "reason": "2026-11-04 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2181",
      "payment_id": "pay_2181",
-     "paid_at": "2026-10-30T00:05:00Z",
+     "paid_at": "2026-11-02T00:05:00Z",
      "order_amount": 22600,
      "pg_amount": 22600,
      "fee": 701,
@@ -1010,13 +998,13 @@
      "pay_out_amount": 21899,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-11-01 지급 예정",
+     "reason": "2026-11-04 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2175",
      "payment_id": "pay_2175",
-     "paid_at": "2026-10-29T22:56:00Z",
+     "paid_at": "2026-11-01T22:56:00Z",
      "order_amount": 10500,
      "pg_amount": 10500,
      "fee": 326,
@@ -1024,13 +1012,13 @@
      "pay_out_amount": 10174,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-10-31 지급 예정",
+     "reason": "2026-11-03 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2172",
      "payment_id": "pay_2172",
-     "paid_at": "2026-10-29T19:29:00Z",
+     "paid_at": "2026-11-01T19:29:00Z",
      "order_amount": 32300,
      "pg_amount": 32300,
      "fee": 1001,
@@ -1038,13 +1026,13 @@
      "pay_out_amount": 31299,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-10-31 지급 예정",
+     "reason": "2026-11-03 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2173",
      "payment_id": "pay_2173",
-     "paid_at": "2026-10-29T18:02:00Z",
+     "paid_at": "2026-11-01T18:02:00Z",
      "order_amount": 10500,
      "pg_amount": 10500,
      "fee": 326,
@@ -1052,13 +1040,13 @@
      "pay_out_amount": 10174,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-10-31 지급 예정",
+     "reason": "2026-11-03 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2174",
      "payment_id": "pay_2174",
-     "paid_at": "2026-10-29T14:46:00Z",
+     "paid_at": "2026-11-01T14:46:00Z",
      "order_amount": 25500,
      "pg_amount": 25500,
      "fee": 791,
@@ -1066,13 +1054,13 @@
      "pay_out_amount": 24709,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-10-31 지급 예정",
+     "reason": "2026-11-03 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2179",
      "payment_id": "pay_2179",
-     "paid_at": "2026-10-29T13:19:00Z",
+     "paid_at": "2026-11-01T13:19:00Z",
      "order_amount": 32400,
      "pg_amount": 32400,
      "fee": 1004,
@@ -1080,13 +1068,13 @@
      "pay_out_amount": 31396,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-10-31 지급 예정",
+     "reason": "2026-11-03 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2177",
      "payment_id": "pay_2177",
-     "paid_at": "2026-10-29T10:59:00Z",
+     "paid_at": "2026-11-01T10:59:00Z",
      "order_amount": 22600,
      "pg_amount": 22600,
      "fee": 701,
@@ -1094,13 +1082,13 @@
      "pay_out_amount": 21899,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-10-31 지급 예정",
+     "reason": "2026-11-03 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2170",
      "payment_id": "pay_2170",
-     "paid_at": "2026-10-29T10:17:00Z",
+     "paid_at": "2026-11-01T10:17:00Z",
      "order_amount": 18000,
      "pg_amount": 18000,
      "fee": 558,
@@ -1108,13 +1096,13 @@
      "pay_out_amount": 17442,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-10-31 지급 예정",
+     "reason": "2026-11-03 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2180",
      "payment_id": "pay_2180",
-     "paid_at": "2026-10-29T10:00:00Z",
+     "paid_at": "2026-11-01T10:00:00Z",
      "order_amount": 36900,
      "pg_amount": 36900,
      "fee": 1144,
@@ -1122,13 +1110,13 @@
      "pay_out_amount": 35756,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-10-31 지급 예정",
+     "reason": "2026-11-03 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2169",
      "payment_id": "pay_2169",
-     "paid_at": "2026-10-29T07:45:00Z",
+     "paid_at": "2026-11-01T07:45:00Z",
      "order_amount": 25500,
      "pg_amount": 25500,
      "fee": 791,
@@ -1136,13 +1124,13 @@
      "pay_out_amount": 24709,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-10-31 지급 예정",
+     "reason": "2026-11-03 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2171",
      "payment_id": "pay_2171",
-     "paid_at": "2026-10-29T03:47:00Z",
+     "paid_at": "2026-11-01T03:47:00Z",
      "order_amount": 10500,
      "pg_amount": 10500,
      "fee": 326,
@@ -1150,13 +1138,13 @@
      "pay_out_amount": 10174,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-10-31 지급 예정",
+     "reason": "2026-11-03 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2176",
      "payment_id": "pay_2176",
-     "paid_at": "2026-10-29T03:35:00Z",
+     "paid_at": "2026-11-01T03:35:00Z",
      "order_amount": 10500,
      "pg_amount": 10500,
      "fee": 326,
@@ -1164,13 +1152,13 @@
      "pay_out_amount": 10174,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-10-31 지급 예정",
+     "reason": "2026-11-03 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2178",
      "payment_id": "pay_2178",
-     "paid_at": "2026-10-29T03:09:00Z",
+     "paid_at": "2026-11-01T03:09:00Z",
      "order_amount": 12800,
      "pg_amount": 12800,
      "fee": 397,
@@ -1178,19 +1166,19 @@
      "pay_out_amount": 12403,
      "paid_out_date": null,
      "status": "pending",
-     "reason": "2026-10-31 지급 예정",
+     "reason": "2026-11-03 지급 예정",
      "note": null
     },
     {
      "order_id": "ord_2162",
      "payment_id": "pay_2162",
-     "paid_at": "2026-10-28T21:37:00Z",
+     "paid_at": "2026-10-31T21:37:00Z",
      "order_amount": 27800,
      "pg_amount": 27800,
      "fee": 862,
      "expected_fee": 862,
      "pay_out_amount": 26938,
-     "paid_out_date": "2026-10-30",
+     "paid_out_date": "2026-11-02",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1198,13 +1186,13 @@
     {
      "order_id": "ord_2158",
      "payment_id": "pay_2158",
-     "paid_at": "2026-10-28T21:21:00Z",
+     "paid_at": "2026-10-31T21:21:00Z",
      "order_amount": 54000,
      "pg_amount": 54000,
      "fee": 1674,
      "expected_fee": 1674,
      "pay_out_amount": 52326,
-     "paid_out_date": "2026-10-30",
+     "paid_out_date": "2026-11-02",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1212,13 +1200,13 @@
     {
      "order_id": "ord_2167",
      "payment_id": "pay_2167",
-     "paid_at": "2026-10-28T19:03:00Z",
+     "paid_at": "2026-10-31T19:03:00Z",
      "order_amount": 60000,
      "pg_amount": 60000,
      "fee": 1860,
      "expected_fee": 1860,
      "pay_out_amount": 58140,
-     "paid_out_date": "2026-10-30",
+     "paid_out_date": "2026-11-02",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1226,13 +1214,13 @@
     {
      "order_id": "ord_2166",
      "payment_id": "pay_2166",
-     "paid_at": "2026-10-28T17:37:00Z",
+     "paid_at": "2026-10-31T17:37:00Z",
      "order_amount": 91000,
      "pg_amount": 91000,
      "fee": 2821,
      "expected_fee": 2821,
      "pay_out_amount": 88179,
-     "paid_out_date": "2026-10-30",
+     "paid_out_date": "2026-11-02",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1240,13 +1228,13 @@
     {
      "order_id": "ord_2168",
      "payment_id": "pay_2168",
-     "paid_at": "2026-10-28T15:52:00Z",
+     "paid_at": "2026-10-31T15:52:00Z",
      "order_amount": 24500,
      "pg_amount": 24500,
      "fee": 760,
      "expected_fee": 760,
      "pay_out_amount": 23740,
-     "paid_out_date": "2026-10-30",
+     "paid_out_date": "2026-11-02",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1254,13 +1242,13 @@
     {
      "order_id": "ord_2165",
      "payment_id": "pay_2165",
-     "paid_at": "2026-10-28T14:29:00Z",
+     "paid_at": "2026-10-31T14:29:00Z",
      "order_amount": 12800,
      "pg_amount": 12800,
      "fee": 397,
      "expected_fee": 397,
      "pay_out_amount": 12403,
-     "paid_out_date": "2026-10-30",
+     "paid_out_date": "2026-11-02",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1268,13 +1256,13 @@
     {
      "order_id": "ord_2157",
      "payment_id": "pay_2157",
-     "paid_at": "2026-10-28T13:08:00Z",
+     "paid_at": "2026-10-31T13:08:00Z",
      "order_amount": 87000,
      "pg_amount": 87000,
      "fee": 2697,
      "expected_fee": 2697,
      "pay_out_amount": 84303,
-     "paid_out_date": "2026-10-30",
+     "paid_out_date": "2026-11-02",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1282,13 +1270,13 @@
     {
      "order_id": "ord_2164",
      "payment_id": "pay_2164",
-     "paid_at": "2026-10-28T05:18:00Z",
+     "paid_at": "2026-10-31T05:18:00Z",
      "order_amount": 54000,
      "pg_amount": 54000,
      "fee": 1674,
      "expected_fee": 1674,
      "pay_out_amount": 52326,
-     "paid_out_date": "2026-10-30",
+     "paid_out_date": "2026-11-02",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1296,13 +1284,13 @@
     {
      "order_id": "ord_2160",
      "payment_id": "pay_2160",
-     "paid_at": "2026-10-28T02:35:00Z",
+     "paid_at": "2026-10-31T02:35:00Z",
      "order_amount": 77000,
      "pg_amount": 77000,
      "fee": 2387,
      "expected_fee": 2387,
      "pay_out_amount": 74613,
-     "paid_out_date": "2026-10-30",
+     "paid_out_date": "2026-11-02",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1310,13 +1298,13 @@
     {
      "order_id": "ord_2161",
      "payment_id": "pay_2161",
-     "paid_at": "2026-10-28T02:25:00Z",
+     "paid_at": "2026-10-31T02:25:00Z",
      "order_amount": 15000,
      "pg_amount": 15000,
      "fee": 465,
      "expected_fee": 465,
      "pay_out_amount": 14535,
-     "paid_out_date": "2026-10-30",
+     "paid_out_date": "2026-11-02",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1324,13 +1312,13 @@
     {
      "order_id": "ord_2159",
      "payment_id": "pay_2159",
-     "paid_at": "2026-10-28T01:27:00Z",
+     "paid_at": "2026-10-31T01:27:00Z",
      "order_amount": 12800,
      "pg_amount": 12800,
      "fee": 397,
      "expected_fee": 397,
      "pay_out_amount": 12403,
-     "paid_out_date": "2026-10-30",
+     "paid_out_date": "2026-11-02",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1338,13 +1326,13 @@
     {
      "order_id": "ord_2163",
      "payment_id": "pay_2163",
-     "paid_at": "2026-10-28T01:22:00Z",
+     "paid_at": "2026-10-31T01:22:00Z",
      "order_amount": 59000,
      "pg_amount": 59000,
      "fee": 1829,
      "expected_fee": 1829,
      "pay_out_amount": 57171,
-     "paid_out_date": "2026-10-30",
+     "paid_out_date": "2026-11-02",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1352,13 +1340,13 @@
     {
      "order_id": "ord_2150",
      "payment_id": "pay_2150",
-     "paid_at": "2026-10-27T19:24:00Z",
+     "paid_at": "2026-10-30T19:24:00Z",
      "order_amount": 60000,
      "pg_amount": 60000,
      "fee": 1860,
      "expected_fee": 1860,
      "pay_out_amount": 58140,
-     "paid_out_date": "2026-10-29",
+     "paid_out_date": "2026-11-01",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1366,13 +1354,13 @@
     {
      "order_id": "ord_2153",
      "payment_id": "pay_2153",
-     "paid_at": "2026-10-27T18:58:00Z",
+     "paid_at": "2026-10-30T18:58:00Z",
      "order_amount": 31000,
      "pg_amount": 31000,
      "fee": 961,
      "expected_fee": 961,
      "pay_out_amount": 30039,
-     "paid_out_date": "2026-10-29",
+     "paid_out_date": "2026-11-01",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1380,13 +1368,13 @@
     {
      "order_id": "ord_2152",
      "payment_id": "pay_2152",
-     "paid_at": "2026-10-27T16:51:00Z",
+     "paid_at": "2026-10-30T16:51:00Z",
      "order_amount": 122000,
      "pg_amount": 122000,
      "fee": 3782,
      "expected_fee": 3782,
      "pay_out_amount": 118218,
-     "paid_out_date": "2026-10-29",
+     "paid_out_date": "2026-11-01",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1394,13 +1382,13 @@
     {
      "order_id": "ord_2147",
      "payment_id": "pay_2147",
-     "paid_at": "2026-10-27T12:55:00Z",
+     "paid_at": "2026-10-30T12:55:00Z",
      "order_amount": 20000,
      "pg_amount": 20000,
      "fee": 620,
      "expected_fee": 620,
      "pay_out_amount": 19380,
-     "paid_out_date": "2026-10-29",
+     "paid_out_date": "2026-11-01",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1408,13 +1396,13 @@
     {
      "order_id": "ord_2145",
      "payment_id": "pay_2145",
-     "paid_at": "2026-10-27T12:17:00Z",
+     "paid_at": "2026-10-30T12:17:00Z",
      "order_amount": 51900,
      "pg_amount": 51900,
      "fee": 1609,
      "expected_fee": 1609,
      "pay_out_amount": 50291,
-     "paid_out_date": "2026-10-29",
+     "paid_out_date": "2026-11-01",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1422,13 +1410,13 @@
     {
      "order_id": "ord_2146",
      "payment_id": "pay_2146",
-     "paid_at": "2026-10-27T10:58:00Z",
+     "paid_at": "2026-10-30T10:58:00Z",
      "order_amount": 58000,
      "pg_amount": 58000,
      "fee": 1798,
      "expected_fee": 1798,
      "pay_out_amount": 56202,
-     "paid_out_date": "2026-10-29",
+     "paid_out_date": "2026-11-01",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1436,13 +1424,13 @@
     {
      "order_id": "ord_2155",
      "payment_id": "pay_2155",
-     "paid_at": "2026-10-27T08:46:00Z",
+     "paid_at": "2026-10-30T08:46:00Z",
      "order_amount": 92000,
      "pg_amount": 92000,
      "fee": 2852,
      "expected_fee": 2852,
      "pay_out_amount": 89148,
-     "paid_out_date": "2026-10-29",
+     "paid_out_date": "2026-11-01",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1450,13 +1438,13 @@
     {
      "order_id": "ord_2148",
      "payment_id": "pay_2148",
-     "paid_at": "2026-10-27T08:44:00Z",
+     "paid_at": "2026-10-30T08:44:00Z",
      "order_amount": 18000,
      "pg_amount": 18000,
      "fee": 558,
      "expected_fee": 558,
      "pay_out_amount": 17442,
-     "paid_out_date": "2026-10-29",
+     "paid_out_date": "2026-11-01",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1464,13 +1452,13 @@
     {
      "order_id": "ord_2156",
      "payment_id": "pay_2156",
-     "paid_at": "2026-10-27T06:22:00Z",
+     "paid_at": "2026-10-30T06:22:00Z",
      "order_amount": 21000,
      "pg_amount": 21000,
      "fee": 651,
      "expected_fee": 651,
      "pay_out_amount": 20349,
-     "paid_out_date": "2026-10-29",
+     "paid_out_date": "2026-11-01",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1478,13 +1466,13 @@
     {
      "order_id": "ord_2149",
      "payment_id": "pay_2149",
-     "paid_at": "2026-10-27T02:13:00Z",
+     "paid_at": "2026-10-30T02:13:00Z",
      "order_amount": 30000,
      "pg_amount": 30000,
      "fee": 930,
      "expected_fee": 930,
      "pay_out_amount": 29070,
-     "paid_out_date": "2026-10-29",
+     "paid_out_date": "2026-11-01",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1492,13 +1480,13 @@
     {
      "order_id": "ord_2151",
      "payment_id": "pay_2151",
-     "paid_at": "2026-10-27T01:53:00Z",
+     "paid_at": "2026-10-30T01:53:00Z",
      "order_amount": 18000,
      "pg_amount": 18000,
      "fee": 558,
      "expected_fee": 558,
      "pay_out_amount": 17442,
-     "paid_out_date": "2026-10-29",
+     "paid_out_date": "2026-11-01",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1506,13 +1494,13 @@
     {
      "order_id": "ord_2154",
      "payment_id": "pay_2154",
-     "paid_at": "2026-10-27T01:43:00Z",
+     "paid_at": "2026-10-30T01:43:00Z",
      "order_amount": 33600,
      "pg_amount": 33600,
      "fee": 1042,
      "expected_fee": 1042,
      "pay_out_amount": 32558,
-     "paid_out_date": "2026-10-29",
+     "paid_out_date": "2026-11-01",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1520,13 +1508,13 @@
     {
      "order_id": "ord_2144",
      "payment_id": "pay_2144",
-     "paid_at": "2026-10-26T22:24:00Z",
+     "paid_at": "2026-10-29T22:24:00Z",
      "order_amount": 31000,
      "pg_amount": 31000,
      "fee": 961,
      "expected_fee": 961,
      "pay_out_amount": 30039,
-     "paid_out_date": "2026-10-28",
+     "paid_out_date": "2026-10-31",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1534,13 +1522,13 @@
     {
      "order_id": "ord_2140",
      "payment_id": "pay_2140",
-     "paid_at": "2026-10-26T21:34:00Z",
+     "paid_at": "2026-10-29T21:34:00Z",
      "order_amount": 24500,
      "pg_amount": 24500,
      "fee": 760,
      "expected_fee": 760,
      "pay_out_amount": 23740,
-     "paid_out_date": "2026-10-28",
+     "paid_out_date": "2026-10-31",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1548,13 +1536,13 @@
     {
      "order_id": "ord_2141",
      "payment_id": "pay_2141",
-     "paid_at": "2026-10-26T12:33:00Z",
+     "paid_at": "2026-10-29T12:33:00Z",
      "order_amount": 18000,
      "pg_amount": 18000,
      "fee": 558,
      "expected_fee": 558,
      "pay_out_amount": 17442,
-     "paid_out_date": "2026-10-28",
+     "paid_out_date": "2026-10-31",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1562,13 +1550,13 @@
     {
      "order_id": "ord_2139",
      "payment_id": "pay_2139",
-     "paid_at": "2026-10-26T12:16:00Z",
+     "paid_at": "2026-10-29T12:16:00Z",
      "order_amount": 27000,
      "pg_amount": 27000,
      "fee": 837,
      "expected_fee": 837,
      "pay_out_amount": 26163,
-     "paid_out_date": "2026-10-28",
+     "paid_out_date": "2026-10-31",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1576,13 +1564,13 @@
     {
      "order_id": "ord_2137",
      "payment_id": "pay_2137",
-     "paid_at": "2026-10-26T11:11:00Z",
+     "paid_at": "2026-10-29T11:11:00Z",
      "order_amount": 10500,
      "pg_amount": 10500,
      "fee": 326,
      "expected_fee": 326,
      "pay_out_amount": 10174,
-     "paid_out_date": "2026-10-28",
+     "paid_out_date": "2026-10-31",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1590,13 +1578,13 @@
     {
      "order_id": "ord_2135",
      "payment_id": "pay_2135",
-     "paid_at": "2026-10-26T09:04:00Z",
+     "paid_at": "2026-10-29T09:04:00Z",
      "order_amount": 31000,
      "pg_amount": 32000,
      "fee": 992,
      "expected_fee": 992,
      "pay_out_amount": 31008,
-     "paid_out_date": "2026-10-28",
+     "paid_out_date": "2026-10-31",
      "status": "mismatch",
      "reason": "PG 금액이 주문보다 1,000원 많음",
      "note": null
@@ -1604,13 +1592,13 @@
     {
      "order_id": "ord_2142",
      "payment_id": "pay_2142",
-     "paid_at": "2026-10-26T08:31:00Z",
+     "paid_at": "2026-10-29T08:31:00Z",
      "order_amount": 21000,
      "pg_amount": 21000,
      "fee": 651,
      "expected_fee": 651,
      "pay_out_amount": 20349,
-     "paid_out_date": "2026-10-28",
+     "paid_out_date": "2026-10-31",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1618,13 +1606,13 @@
     {
      "order_id": "ord_2136",
      "payment_id": "pay_2136",
-     "paid_at": "2026-10-26T08:29:00Z",
+     "paid_at": "2026-10-29T08:29:00Z",
      "order_amount": 39000,
      "pg_amount": 39000,
      "fee": 1209,
      "expected_fee": 1209,
      "pay_out_amount": 37791,
-     "paid_out_date": "2026-10-28",
+     "paid_out_date": "2026-10-31",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1632,13 +1620,13 @@
     {
      "order_id": "ord_2143",
      "payment_id": "pay_2143",
-     "paid_at": "2026-10-26T07:49:00Z",
+     "paid_at": "2026-10-29T07:49:00Z",
      "order_amount": 12800,
      "pg_amount": 12800,
      "fee": 397,
      "expected_fee": 397,
      "pay_out_amount": 12403,
-     "paid_out_date": "2026-10-28",
+     "paid_out_date": "2026-10-31",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1646,13 +1634,13 @@
     {
      "order_id": "ord_2133",
      "payment_id": "pay_2133",
-     "paid_at": "2026-10-26T05:53:00Z",
+     "paid_at": "2026-10-29T05:53:00Z",
      "order_amount": 38000,
      "pg_amount": 38000,
      "fee": 1178,
      "expected_fee": 1178,
      "pay_out_amount": 36822,
-     "paid_out_date": "2026-10-28",
+     "paid_out_date": "2026-10-31",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1660,13 +1648,13 @@
     {
      "order_id": "ord_2134",
      "payment_id": "pay_2134",
-     "paid_at": "2026-10-26T04:05:00Z",
+     "paid_at": "2026-10-29T04:05:00Z",
      "order_amount": 20300,
      "pg_amount": 20300,
      "fee": 629,
      "expected_fee": 629,
      "pay_out_amount": 19671,
-     "paid_out_date": "2026-10-28",
+     "paid_out_date": "2026-10-31",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1674,13 +1662,13 @@
     {
      "order_id": "ord_2138",
      "payment_id": "pay_2138",
-     "paid_at": "2026-10-26T03:40:00Z",
+     "paid_at": "2026-10-29T03:40:00Z",
      "order_amount": 122000,
      "pg_amount": 122000,
      "fee": 3782,
      "expected_fee": 3782,
      "pay_out_amount": 118218,
-     "paid_out_date": "2026-10-28",
+     "paid_out_date": "2026-10-31",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1688,13 +1676,13 @@
     {
      "order_id": "ord_2129",
      "payment_id": "pay_2129",
-     "paid_at": "2026-10-25T21:46:00Z",
+     "paid_at": "2026-10-28T21:46:00Z",
      "order_amount": 18000,
      "pg_amount": 18000,
      "fee": 558,
      "expected_fee": 558,
      "pay_out_amount": 17442,
-     "paid_out_date": "2026-10-27",
+     "paid_out_date": "2026-10-30",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1702,13 +1690,13 @@
     {
      "order_id": "ord_2123",
      "payment_id": "pay_2123",
-     "paid_at": "2026-10-25T18:37:00Z",
+     "paid_at": "2026-10-28T18:37:00Z",
      "order_amount": 34600,
      "pg_amount": 34600,
      "fee": 1073,
      "expected_fee": 1073,
      "pay_out_amount": 33527,
-     "paid_out_date": "2026-10-27",
+     "paid_out_date": "2026-10-30",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1716,13 +1704,13 @@
     {
      "order_id": "ord_2128",
      "payment_id": "pay_2128",
-     "paid_at": "2026-10-25T18:27:00Z",
+     "paid_at": "2026-10-28T18:27:00Z",
      "order_amount": 16000,
      "pg_amount": 16000,
      "fee": 496,
      "expected_fee": 496,
      "pay_out_amount": 15504,
-     "paid_out_date": "2026-10-27",
+     "paid_out_date": "2026-10-30",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1730,7 +1718,7 @@
     {
      "order_id": "ord_2121",
      "payment_id": "pay_2121",
-     "paid_at": "2026-10-25T17:59:00Z",
+     "paid_at": "2026-10-28T17:59:00Z",
      "order_amount": 45000,
      "pg_amount": null,
      "fee": null,
@@ -1738,19 +1726,19 @@
      "pay_out_amount": null,
      "paid_out_date": null,
      "status": "missing_in_pg",
-     "reason": "지급 예정일(2026-10-27)이 지났는데 PG 정산에 없음",
+     "reason": "지급 예정일(2026-10-30)이 지났는데 PG 정산에 없음",
      "note": null
     },
     {
      "order_id": "ord_2130",
      "payment_id": "pay_2130",
-     "paid_at": "2026-10-25T14:08:00Z",
+     "paid_at": "2026-10-28T14:08:00Z",
      "order_amount": 93000,
      "pg_amount": 93000,
      "fee": 2883,
      "expected_fee": 2883,
      "pay_out_amount": 90117,
-     "paid_out_date": "2026-10-27",
+     "paid_out_date": "2026-10-30",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1758,13 +1746,13 @@
     {
      "order_id": "ord_2131",
      "payment_id": "pay_2131",
-     "paid_at": "2026-10-25T12:12:00Z",
+     "paid_at": "2026-10-28T12:12:00Z",
      "order_amount": 67000,
      "pg_amount": 67000,
      "fee": 2077,
      "expected_fee": 2077,
      "pay_out_amount": 64923,
-     "paid_out_date": "2026-10-27",
+     "paid_out_date": "2026-10-30",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1772,13 +1760,13 @@
     {
      "order_id": "ord_2122",
      "payment_id": "pay_2122",
-     "paid_at": "2026-10-25T10:42:00Z",
+     "paid_at": "2026-10-28T10:42:00Z",
      "order_amount": 67000,
      "pg_amount": 67000,
      "fee": 2345,
      "expected_fee": 2077,
      "pay_out_amount": 64655,
-     "paid_out_date": "2026-10-27",
+     "paid_out_date": "2026-10-30",
      "status": "fee_anomaly",
      "reason": "PG 수수료 2,345원이 기본 3.1% 기준 2,077원보다 268원 많음",
      "note": null
@@ -1786,13 +1774,13 @@
     {
      "order_id": "ord_2126",
      "payment_id": "pay_2126",
-     "paid_at": "2026-10-25T09:29:00Z",
+     "paid_at": "2026-10-28T09:29:00Z",
      "order_amount": 31300,
      "pg_amount": 31300,
      "fee": 970,
      "expected_fee": 970,
      "pay_out_amount": 30330,
-     "paid_out_date": "2026-10-27",
+     "paid_out_date": "2026-10-30",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1800,13 +1788,13 @@
     {
      "order_id": "ord_2124",
      "payment_id": "pay_2124",
-     "paid_at": "2026-10-25T09:29:00Z",
+     "paid_at": "2026-10-28T09:29:00Z",
      "order_amount": 30000,
      "pg_amount": 30000,
      "fee": 930,
      "expected_fee": 930,
      "pay_out_amount": 29070,
-     "paid_out_date": "2026-10-27",
+     "paid_out_date": "2026-10-30",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1814,13 +1802,13 @@
     {
      "order_id": "ord_2132",
      "payment_id": "pay_2132",
-     "paid_at": "2026-10-25T06:28:00Z",
+     "paid_at": "2026-10-28T06:28:00Z",
      "order_amount": 32400,
      "pg_amount": 32400,
      "fee": 1004,
      "expected_fee": 1004,
      "pay_out_amount": 31396,
-     "paid_out_date": "2026-10-27",
+     "paid_out_date": "2026-10-30",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1828,13 +1816,13 @@
     {
      "order_id": "ord_2125",
      "payment_id": "pay_2125",
-     "paid_at": "2026-10-25T06:17:00Z",
+     "paid_at": "2026-10-28T06:17:00Z",
      "order_amount": 31000,
      "pg_amount": 31000,
      "fee": 961,
      "expected_fee": 961,
      "pay_out_amount": 30039,
-     "paid_out_date": "2026-10-27",
+     "paid_out_date": "2026-10-30",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1842,13 +1830,13 @@
     {
      "order_id": "ord_2127",
      "payment_id": "pay_2127",
-     "paid_at": "2026-10-25T04:29:00Z",
+     "paid_at": "2026-10-28T04:29:00Z",
      "order_amount": 62000,
      "pg_amount": 62000,
      "fee": 1922,
      "expected_fee": 1922,
      "pay_out_amount": 60078,
-     "paid_out_date": "2026-10-27",
+     "paid_out_date": "2026-10-30",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1856,13 +1844,13 @@
     {
      "order_id": "ord_2120",
      "payment_id": "pay_2120",
-     "paid_at": "2026-10-24T21:16:00Z",
+     "paid_at": "2026-10-27T21:16:00Z",
      "order_amount": 50000,
      "pg_amount": 50000,
      "fee": 1550,
      "expected_fee": 1550,
      "pay_out_amount": 48450,
-     "paid_out_date": "2026-10-26",
+     "paid_out_date": "2026-10-29",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1870,13 +1858,13 @@
     {
      "order_id": "ord_2116",
      "payment_id": "pay_2116",
-     "paid_at": "2026-10-24T20:19:00Z",
+     "paid_at": "2026-10-27T20:19:00Z",
      "order_amount": 44000,
      "pg_amount": 44000,
      "fee": 1364,
      "expected_fee": 1364,
      "pay_out_amount": 42636,
-     "paid_out_date": "2026-10-26",
+     "paid_out_date": "2026-10-29",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1884,13 +1872,13 @@
     {
      "order_id": "ord_2114",
      "payment_id": "pay_2114",
-     "paid_at": "2026-10-24T14:45:00Z",
+     "paid_at": "2026-10-27T14:45:00Z",
      "order_amount": 63000,
      "pg_amount": 63000,
      "fee": 1953,
      "expected_fee": 1953,
      "pay_out_amount": 61047,
-     "paid_out_date": "2026-10-26",
+     "paid_out_date": "2026-10-29",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1898,13 +1886,13 @@
     {
      "order_id": "ord_2119",
      "payment_id": "pay_2119",
-     "paid_at": "2026-10-24T14:08:00Z",
+     "paid_at": "2026-10-27T14:08:00Z",
      "order_amount": 73000,
      "pg_amount": 73000,
      "fee": 2263,
      "expected_fee": 2263,
      "pay_out_amount": 70737,
-     "paid_out_date": "2026-10-26",
+     "paid_out_date": "2026-10-29",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1912,13 +1900,13 @@
     {
      "order_id": "ord_2109",
      "payment_id": "pay_2109",
-     "paid_at": "2026-10-24T14:08:00Z",
+     "paid_at": "2026-10-27T14:08:00Z",
      "order_amount": 20300,
      "pg_amount": 18300,
      "fee": 567,
      "expected_fee": 567,
      "pay_out_amount": 17733,
-     "paid_out_date": "2026-10-26",
+     "paid_out_date": "2026-10-29",
      "status": "mismatch",
      "reason": "PG 금액이 주문보다 2,000원 적음",
      "note": null
@@ -1926,13 +1914,13 @@
     {
      "order_id": "ord_2117",
      "payment_id": "pay_2117",
-     "paid_at": "2026-10-24T13:06:00Z",
+     "paid_at": "2026-10-27T13:06:00Z",
      "order_amount": 74000,
      "pg_amount": 74000,
      "fee": 2294,
      "expected_fee": 2294,
      "pay_out_amount": 71706,
-     "paid_out_date": "2026-10-26",
+     "paid_out_date": "2026-10-29",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1940,13 +1928,13 @@
     {
      "order_id": "ord_2112",
      "payment_id": "pay_2112",
-     "paid_at": "2026-10-24T12:13:00Z",
+     "paid_at": "2026-10-27T12:13:00Z",
      "order_amount": 10500,
      "pg_amount": 10500,
      "fee": 326,
      "expected_fee": 326,
      "pay_out_amount": 10174,
-     "paid_out_date": "2026-10-26",
+     "paid_out_date": "2026-10-29",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1954,13 +1942,13 @@
     {
      "order_id": "ord_2118",
      "payment_id": "pay_2118",
-     "paid_at": "2026-10-24T10:06:00Z",
+     "paid_at": "2026-10-27T10:06:00Z",
      "order_amount": 20300,
      "pg_amount": 20300,
      "fee": 629,
      "expected_fee": 629,
      "pay_out_amount": 19671,
-     "paid_out_date": "2026-10-26",
+     "paid_out_date": "2026-10-29",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1968,13 +1956,13 @@
     {
      "order_id": "ord_2113",
      "payment_id": "pay_2113",
-     "paid_at": "2026-10-24T06:18:00Z",
+     "paid_at": "2026-10-27T06:18:00Z",
      "order_amount": 30000,
      "pg_amount": 30000,
      "fee": 930,
      "expected_fee": 930,
      "pay_out_amount": 29070,
-     "paid_out_date": "2026-10-26",
+     "paid_out_date": "2026-10-29",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1982,13 +1970,13 @@
     {
      "order_id": "ord_2111",
      "payment_id": "pay_2111",
-     "paid_at": "2026-10-24T05:42:00Z",
+     "paid_at": "2026-10-27T05:42:00Z",
      "order_amount": 29000,
      "pg_amount": 29000,
      "fee": 899,
      "expected_fee": 899,
      "pay_out_amount": 28101,
-     "paid_out_date": "2026-10-26",
+     "paid_out_date": "2026-10-29",
      "status": "matched",
      "reason": null,
      "note": null
@@ -1996,13 +1984,13 @@
     {
      "order_id": "ord_2110",
      "payment_id": "pay_2110",
-     "paid_at": "2026-10-24T04:34:00Z",
+     "paid_at": "2026-10-27T04:34:00Z",
      "order_amount": 30000,
      "pg_amount": 30000,
      "fee": 930,
      "expected_fee": 930,
      "pay_out_amount": 29070,
-     "paid_out_date": "2026-10-26",
+     "paid_out_date": "2026-10-29",
      "status": "matched",
      "reason": null,
      "note": null
@@ -2010,13 +1998,13 @@
     {
      "order_id": "ord_2115",
      "payment_id": "pay_2115",
-     "paid_at": "2026-10-24T02:40:00Z",
+     "paid_at": "2026-10-27T02:40:00Z",
      "order_amount": 27800,
      "pg_amount": 27800,
      "fee": 862,
      "expected_fee": 862,
      "pay_out_amount": 26938,
-     "paid_out_date": "2026-10-26",
+     "paid_out_date": "2026-10-29",
      "status": "matched",
      "reason": null,
      "note": null
@@ -2025,7 +2013,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:21.917491Z",
+   "collected_at": "2026-11-02T00:48:44.545223Z",
    "source": "seed",
    "unavailable": [],
    "pg_source": "mock_toss_settlement"
@@ -2033,21 +2021,21 @@
  },
  "/api/finance/settlements": {
   "data": {
-   "period": "2026-W43",
-   "from": "2026-10-19T00:00:00Z",
-   "to": "2026-10-26T00:00:00Z",
-   "pay_date": "2026-10-31",
+   "period": "2026-W44",
+   "from": "2026-10-26T00:00:00Z",
+   "to": "2026-11-02T00:00:00Z",
+   "pay_date": "2026-11-07",
    "statements": [
     {
      "seller_id": "sel_0001",
      "name": "책마루",
-     "orders": 28,
-     "gross": 1172000,
+     "orders": 24,
+     "gross": 912000,
      "commission_rate": 0.1,
-     "commission": 117200,
+     "commission": 91200,
      "seller_coupon": 6000,
-     "refunds": 0,
-     "payout": 1048800,
+     "refunds": 36000,
+     "payout": 778800,
      "hold_reasons": [],
      "status": "ready",
      "review_id": null
@@ -2055,17 +2043,21 @@
     {
      "seller_id": "sel_0002",
      "name": "종이나라",
-     "orders": 28,
-     "gross": 537500,
+     "orders": 36,
+     "gross": 693800,
      "commission_rate": 0.08,
-     "commission": 43000,
+     "commission": 55504,
      "seller_coupon": 0,
-     "refunds": 17300,
-     "payout": 477200,
+     "refunds": 9800,
+     "payout": 628496,
      "hold_reasons": [
       {
        "code": "open_claim",
        "label": "처리 중인 환불·교환 1건"
+      },
+      {
+       "code": "unconfirmed_purchase",
+       "label": "구매 미확정 주문 12건"
       }
      ],
      "status": "held",
@@ -2074,13 +2066,13 @@
     {
      "seller_id": "sel_0003",
      "name": "북앤펜",
-     "orders": 28,
-     "gross": 1830000,
-     "commission_rate": 0.0878,
-     "commission": 160660,
+     "orders": 24,
+     "gross": 1383000,
+     "commission_rate": 0.0885,
+     "commission": 122420,
      "seller_coupon": 14000,
-     "refunds": 15000,
-     "payout": 1640340,
+     "refunds": 77000,
+     "payout": 1169580,
      "hold_reasons": [],
      "status": "ready",
      "review_id": null
@@ -2096,7 +2088,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:21.947147Z",
+   "collected_at": "2026-11-02T00:48:44.555863Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2176,10 +2168,10 @@
      "limit": 300000,
      "unit": "원",
      "used_today": 13000,
-     "used_month": 299700,
-     "ratio": 0.999,
+     "used_month": 34000,
+     "ratio": 0.1133,
      "alert": "warn",
-     "projected_month": 309690,
+     "projected_month": 510000,
      "source": "finance_policy.toml"
     },
     {
@@ -2188,10 +2180,10 @@
      "limit": 600000,
      "unit": "원",
      "used_today": 0,
-     "used_month": 140100,
-     "ratio": 0.2335,
+     "used_month": 0,
+     "ratio": 0.0,
      "alert": "ok",
-     "projected_month": 144770,
+     "projected_month": 0,
      "source": "finance_policy.toml"
     }
    ],
@@ -2211,18 +2203,18 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:21.951184Z",
+   "collected_at": "2026-11-02T00:48:44.586097Z",
    "source": "seed",
    "unavailable": []
   }
  },
  "/api/finance/settlements/deadlines": {
   "data": {
-   "today": "2026-10-30",
+   "today": "2026-11-02",
    "deadline_days": 20,
    "basis": "구매 확정일(배송 완료 시각으로 대신함)부터 (온라인플랫폼 정산 법안 계류 중, 선제 기준)",
    "warn_days": 5,
-   "since": "2026-08-21",
+   "since": "2026-08-24",
    "counts": {
     "overdue": 0,
     "at_risk": 3,
@@ -2236,8 +2228,8 @@
      "name": "종이나라",
      "orders": 56,
      "amount": 1066464,
-     "oldest_confirmed": "2026-10-17",
-     "deadline": "2026-11-06",
+     "oldest_confirmed": "2026-10-20",
+     "deadline": "2026-11-09",
      "days_left": 7,
      "expected_pay_date": null,
      "status": "at_risk",
@@ -2249,7 +2241,7 @@
       },
       {
        "code": "unconfirmed_purchase",
-       "label": "구매 미확정 주문 14건"
+       "label": "구매 미확정 주문 12건"
       }
      ]
     },
@@ -2258,54 +2250,44 @@
      "name": "북앤펜",
      "orders": 56,
      "amount": 3208020,
-     "oldest_confirmed": "2026-10-17",
-     "deadline": "2026-11-06",
+     "oldest_confirmed": "2026-10-20",
+     "deadline": "2026-11-09",
      "days_left": 7,
      "expected_pay_date": null,
      "status": "at_risk",
      "status_label": "기한 넘길 위험",
-     "hold_reasons": [
-      {
-       "code": "unconfirmed_purchase",
-       "label": "구매 미확정 주문 2건"
-      }
-     ]
+     "hold_reasons": []
     },
     {
      "seller_id": "sel_0001",
      "name": "책마루",
      "orders": 56,
      "amount": 2083500,
-     "oldest_confirmed": "2026-10-17",
-     "deadline": "2026-11-06",
+     "oldest_confirmed": "2026-10-20",
+     "deadline": "2026-11-09",
      "days_left": 7,
      "expected_pay_date": null,
      "status": "at_risk",
      "status_label": "기한 넘길 위험",
-     "hold_reasons": [
-      {
-       "code": "unconfirmed_purchase",
-       "label": "구매 미확정 주문 2건"
-      }
-     ]
+     "hold_reasons": []
     }
    ]
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:21.964401Z",
+   "collected_at": "2026-11-02T00:48:44.593533Z",
    "source": "seed",
    "unavailable": []
   }
  },
  "/api/finance/payables": {
   "data": {
-   "month": "2026-10",
-   "from": "2026-10-01T00:00:00Z",
-   "to": "2026-11-01T00:00:00Z",
+   "month": "2026-11",
+   "from": "2026-11-01T00:00:00Z",
+   "to": "2026-12-01T00:00:00Z",
    "totals": {
-    "opening": 0,
-    "accrued": 6665676,
+    "opening": 6174884,
+    "accrued": 490792,
     "paid": 0,
     "closing": 6665676
    },
@@ -2315,8 +2297,8 @@
     {
      "seller_id": "sel_0003",
      "name": "북앤펜",
-     "opening": 0,
-     "accrued": 3239920,
+     "opening": 3103020,
+     "accrued": 136900,
      "paid": 0,
      "closing": 3239920,
      "overpaid": false
@@ -2324,8 +2306,8 @@
     {
      "seller_id": "sel_0001",
      "name": "책마루",
-     "opening": 0,
-     "accrued": 2154000,
+     "opening": 2032500,
+     "accrued": 121500,
      "paid": 0,
      "closing": 2154000,
      "overpaid": false
@@ -2333,8 +2315,8 @@
     {
      "seller_id": "sel_0002",
      "name": "종이나라",
-     "opening": 0,
-     "accrued": 1271756,
+     "opening": 1039364,
+     "accrued": 232392,
      "paid": 0,
      "closing": 1271756,
      "overpaid": false
@@ -2344,88 +2326,88 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:21.977908Z",
+   "collected_at": "2026-11-02T00:48:44.608069Z",
    "source": "seed",
    "unavailable": []
   }
  },
  "/api/finance/variance": {
   "data": {
-   "month": "2026-10",
+   "month": "2026-11",
    "spans": {
     "current": {
+     "from": "2026-11-01T00:00:00Z",
+     "to": "2026-12-01T00:00:00Z"
+    },
+    "previous": {
      "from": "2026-10-01T00:00:00Z",
      "to": "2026-11-01T00:00:00Z"
     },
-    "previous": {
-     "from": "2026-09-01T00:00:00Z",
-     "to": "2026-10-01T00:00:00Z"
-    },
     "last_year": {
-     "from": "2025-10-01T00:00:00Z",
-     "to": "2025-11-01T00:00:00Z"
+     "from": "2025-11-01T00:00:00Z",
+     "to": "2025-12-01T00:00:00Z"
     }
    },
    "lines": [
     {
      "code": "gmv",
      "label": "총거래액",
-     "current": 7534800,
-     "previous": 0,
-     "diff": 7534800,
-     "pct": null,
+     "current": 540600,
+     "previous": 6994200,
+     "diff": -6453600,
+     "pct": -0.9227,
      "last_year": 0,
-     "yoy_diff": 7534800,
+     "yoy_diff": 540600,
      "yoy_pct": null,
-     "flag": false,
-     "note": ""
+     "flag": true,
+     "note": "총거래액이 6,453,600원 (92%) 줄었습니다 (6,994,200원 → 540,600원)."
     },
     {
      "code": "order_count",
      "label": "주문 수(건)",
-     "current": 186,
-     "previous": 0,
-     "diff": 186,
-     "pct": null,
+     "current": 18,
+     "previous": 168,
+     "diff": -150,
+     "pct": -0.8929,
      "last_year": 0,
-     "yoy_diff": 186,
+     "yoy_diff": 18,
      "yoy_pct": null,
-     "flag": false,
-     "note": ""
+     "flag": true,
+     "note": "주문 수가 150건 (89%) 줄었습니다 (168건 → 18건)."
     },
     {
      "code": "aov",
      "label": "평균 주문 금액",
-     "current": 40510,
-     "previous": null,
-     "diff": null,
-     "pct": null,
+     "current": 30033,
+     "previous": 41632,
+     "diff": -11599,
+     "pct": -0.2786,
      "last_year": null,
      "yoy_diff": null,
      "yoy_pct": null,
-     "flag": false,
-     "note": ""
+     "flag": true,
+     "note": "평균 주문 금액이 11,599원 (28%) 줄었습니다 (41,632원 → 30,033원)."
     },
     {
      "code": "commission_revenue",
      "label": "수수료 매출",
-     "current": 684024,
-     "previous": 0,
-     "diff": 684024,
-     "pct": null,
+     "current": 47808,
+     "previous": 636216,
+     "diff": -588408,
+     "pct": -0.9249,
      "last_year": 0,
-     "yoy_diff": 684024,
+     "yoy_diff": 47808,
      "yoy_pct": null,
-     "flag": false,
-     "note": ""
+     "flag": true,
+     "note": "수수료 매출이 588,408원 (92%) 줄었습니다 (636,216원 → 47,808원)."
     },
     {
      "code": "take_rate",
      "label": "평균 수수료율",
-     "current": 0.0908,
-     "previous": null,
-     "diff": null,
-     "pct": null,
+     "current": 0.0884,
+     "previous": 0.091,
+     "diff": -0.0026,
+     "pct": -0.0286,
      "last_year": null,
      "yoy_diff": null,
      "yoy_pct": null,
@@ -2435,77 +2417,89 @@
     {
      "code": "coupon_cost",
      "label": "회사 부담 쿠폰",
-     "current": 299700,
-     "previous": 0,
-     "diff": 299700,
-     "pct": null,
+     "current": 34000,
+     "previous": 265700,
+     "diff": -231700,
+     "pct": -0.872,
      "last_year": 0,
-     "yoy_diff": 299700,
+     "yoy_diff": 34000,
      "yoy_pct": null,
-     "flag": false,
-     "note": ""
+     "flag": true,
+     "note": "회사 부담 쿠폰이 231,700원 (87%) 줄었습니다 (265,700원 → 34,000원). 비용이 줄어 영업 결과를 늘렸습니다."
     },
     {
      "code": "pg_fee",
      "label": "PG 수수료",
-     "current": 240741,
-     "previous": 0,
-     "diff": 240741,
-     "pct": null,
+     "current": 17847,
+     "previous": 222894,
+     "diff": -205047,
+     "pct": -0.9199,
      "last_year": 0,
-     "yoy_diff": 240741,
+     "yoy_diff": 17847,
      "yoy_pct": null,
-     "flag": false,
-     "note": ""
+     "flag": true,
+     "note": "PG 수수료가 205,047원 (92%) 줄었습니다 (222,894원 → 17,847원). 비용이 줄어 영업 결과를 늘렸습니다."
     },
     {
      "code": "refund_total",
      "label": "환불",
-     "current": 140100,
-     "previous": 0,
-     "diff": 140100,
-     "pct": null,
+     "current": 0,
+     "previous": 140100,
+     "diff": -140100,
+     "pct": -1.0,
      "last_year": 0,
-     "yoy_diff": 140100,
+     "yoy_diff": 0,
      "yoy_pct": null,
-     "flag": false,
-     "note": ""
+     "flag": true,
+     "note": "환불이 140,100원 (100%) 줄었습니다 (140,100원 → 0원). 비용이 줄어 영업 결과를 늘렸습니다."
     },
     {
      "code": "net_result",
      "label": "영업 결과",
-     "current": 143583,
-     "previous": 0,
-     "diff": 143583,
-     "pct": null,
+     "current": -4039,
+     "previous": 147622,
+     "diff": -151661,
+     "pct": -1.0274,
      "last_year": 0,
-     "yoy_diff": 143583,
+     "yoy_diff": -4039,
      "yoy_pct": null,
-     "flag": false,
-     "note": ""
+     "flag": true,
+     "note": "영업 결과가 151,661원 (103%) 줄었습니다 (147,622원 → -4,039원)."
     }
    ],
-   "drivers": null,
+   "drivers": {
+    "commission_change": -588408,
+    "volume_effect": -587278,
+    "rate_mix_effect": -1130
+   },
    "categories": [
     {
      "category": "book",
-     "gmv": 4062000,
-     "gmv_prev": 0,
-     "commission": 406200,
-     "commission_prev": 0,
-     "commission_diff": 406200
+     "gmv": 228000,
+     "gmv_prev": 3834000,
+     "commission": 22800,
+     "commission_prev": 383400,
+     "commission_diff": -360600
     },
     {
      "category": "stationery",
-     "gmv": 3472800,
-     "gmv_prev": 0,
-     "commission": 277824,
-     "commission_prev": 0,
-     "commission_diff": 277824
+     "gmv": 312600,
+     "gmv_prev": 3160200,
+     "commission": 25008,
+     "commission_prev": 252816,
+     "commission_diff": -227808
     }
    ],
    "summary": [
-    "지난달과 비교해 크게 움직인 줄이 없습니다."
+    "총거래액이 6,453,600원 (92%) 줄었습니다 (6,994,200원 → 540,600원).",
+    "주문 수가 150건 (89%) 줄었습니다 (168건 → 18건).",
+    "평균 주문 금액이 11,599원 (28%) 줄었습니다 (41,632원 → 30,033원).",
+    "수수료 매출이 588,408원 (92%) 줄었습니다 (636,216원 → 47,808원).",
+    "회사 부담 쿠폰이 231,700원 (87%) 줄었습니다 (265,700원 → 34,000원). 비용이 줄어 영업 결과를 늘렸습니다.",
+    "PG 수수료가 205,047원 (92%) 줄었습니다 (222,894원 → 17,847원). 비용이 줄어 영업 결과를 늘렸습니다.",
+    "환불이 140,100원 (100%) 줄었습니다 (140,100원 → 0원). 비용이 줄어 영업 결과를 늘렸습니다.",
+    "영업 결과가 151,661원 (103%) 줄었습니다 (147,622원 → -4,039원).",
+    "수수료 매출 변동 -588,408원 중 거래량 효과 -587,278원, 수수료율·구성 효과 -1,130원입니다."
    ],
    "thresholds": {
     "flag_ratio": 0.1,
@@ -2514,7 +2508,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:21.997840Z",
+   "collected_at": "2026-11-02T00:48:44.614687Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2529,153 +2523,153 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:22.011180Z",
+   "collected_at": "2026-11-02T00:48:44.632068Z",
    "source": "seed",
    "unavailable": []
   }
  },
  "/api/finance/cashflow": {
   "data": {
-   "today": "2026-10-30",
+   "today": "2026-11-02",
    "weeks": [
     {
-     "week_start": "2026-10-26",
+     "week_start": "2026-11-02",
      "basis": "scheduled",
      "inflow": 557753,
-     "outflow": 2689140,
-     "net": -2131387,
-     "cumulative": -2131387
-    },
-    {
-     "week_start": "2026-11-02",
-     "basis": "estimated",
-     "inflow": 3477953,
-     "outflow": 3166340,
-     "net": 311613,
-     "cumulative": -1819774
+     "outflow": 1948380,
+     "net": -1390627,
+     "cumulative": -1390627
     },
     {
      "week_start": "2026-11-09",
      "basis": "estimated",
-     "inflow": 3477953,
-     "outflow": 3166340,
-     "net": 311613,
-     "cumulative": -1508161
+     "inflow": 3361612,
+     "outflow": 2991386,
+     "net": 370226,
+     "cumulative": -1020401
     },
     {
      "week_start": "2026-11-16",
      "basis": "estimated",
-     "inflow": 3477953,
-     "outflow": 3166340,
-     "net": 311613,
-     "cumulative": -1196548
+     "inflow": 3361612,
+     "outflow": 2991386,
+     "net": 370226,
+     "cumulative": -650175
     },
     {
      "week_start": "2026-11-23",
      "basis": "estimated",
-     "inflow": 3477953,
-     "outflow": 3166340,
-     "net": 311613,
-     "cumulative": -884935
+     "inflow": 3361612,
+     "outflow": 2991386,
+     "net": 370226,
+     "cumulative": -279949
     },
     {
      "week_start": "2026-11-30",
      "basis": "estimated",
-     "inflow": 3477953,
-     "outflow": 3166340,
-     "net": 311613,
-     "cumulative": -573322
+     "inflow": 3361612,
+     "outflow": 2991386,
+     "net": 370226,
+     "cumulative": 90277
     },
     {
      "week_start": "2026-12-07",
      "basis": "estimated",
-     "inflow": 3477953,
-     "outflow": 3166340,
-     "net": 311613,
-     "cumulative": -261709
+     "inflow": 3361612,
+     "outflow": 2991386,
+     "net": 370226,
+     "cumulative": 460503
     },
     {
      "week_start": "2026-12-14",
      "basis": "estimated",
-     "inflow": 3477953,
-     "outflow": 3166340,
-     "net": 311613,
-     "cumulative": 49904
+     "inflow": 3361612,
+     "outflow": 2991386,
+     "net": 370226,
+     "cumulative": 830729
     },
     {
      "week_start": "2026-12-21",
      "basis": "estimated",
-     "inflow": 3477953,
-     "outflow": 3166340,
-     "net": 311613,
-     "cumulative": 361517
+     "inflow": 3361612,
+     "outflow": 2991386,
+     "net": 370226,
+     "cumulative": 1200955
     },
     {
      "week_start": "2026-12-28",
      "basis": "estimated",
-     "inflow": 3477953,
-     "outflow": 3166340,
-     "net": 311613,
-     "cumulative": 673130
+     "inflow": 3361612,
+     "outflow": 2991386,
+     "net": 370226,
+     "cumulative": 1571181
     },
     {
      "week_start": "2027-01-04",
      "basis": "estimated",
-     "inflow": 3477953,
-     "outflow": 3166340,
-     "net": 311613,
-     "cumulative": 984743
+     "inflow": 3361612,
+     "outflow": 2991386,
+     "net": 370226,
+     "cumulative": 1941407
     },
     {
      "week_start": "2027-01-11",
      "basis": "estimated",
-     "inflow": 3477953,
-     "outflow": 3166340,
-     "net": 311613,
-     "cumulative": 1296356
+     "inflow": 3361612,
+     "outflow": 2991386,
+     "net": 370226,
+     "cumulative": 2311633
     },
     {
      "week_start": "2027-01-18",
      "basis": "estimated",
-     "inflow": 3477953,
-     "outflow": 3166340,
-     "net": 311613,
-     "cumulative": 1607969
+     "inflow": 3361612,
+     "outflow": 2991386,
+     "net": 370226,
+     "cumulative": 2681859
+    },
+    {
+     "week_start": "2027-01-25",
+     "basis": "estimated",
+     "inflow": 3361612,
+     "outflow": 2991386,
+     "net": 370226,
+     "cumulative": 3052085
     }
    ],
-   "trailing_weeks": 1,
+   "trailing_weeks": 2,
    "average": {
-    "inflow": 3477953,
-    "outflow": 3166340
+    "inflow": 3361612,
+    "outflow": 2991386
    },
    "negative_weeks": [
-    "2026-10-26"
+    "2026-11-02"
    ],
    "note": "은행 잔액은 연동되지 않아 누적은 오늘을 0으로 둔 값입니다"
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:22.032120Z",
+   "collected_at": "2026-11-02T00:48:44.641197Z",
    "source": "seed",
    "unavailable": []
   }
  },
  "/api/finance/close-checklist": {
   "data": {
-   "month": "2026-10",
+   "month": "2026-11",
    "items": [
     {
      "key": "daily_closing",
      "label": "일 결산 확정",
      "status": "pending",
-     "detail": "0/29일 확정 (남은 날: 10-01, 10-02, 10-03, 10-04, 10-05 외)",
+     "detail": "0/1일 확정 (남은 날: 11-01)",
      "link": "closing"
     },
     {
      "key": "reconciliation",
      "label": "매출·PG 대사 메모",
-     "status": "pending",
-     "detail": "메모 없는 불일치 4건",
+     "status": "done",
+     "detail": "메모 없는 불일치 0건",
      "link": "reconciliation"
     },
     {
@@ -2688,8 +2682,8 @@
     {
      "key": "settlement",
      "label": "판매자 정산 지급 승인",
-     "status": "pending",
-     "detail": "승인 안 된 주: 2026-W42",
+     "status": "done",
+     "detail": "지급일이 지난 주는 모두 승인됨",
      "link": "settlements"
     },
     {
@@ -2714,22 +2708,189 @@
      "link": "closing"
     }
    ],
-   "done": 1,
+   "done": 3,
    "total": 7,
    "ready": false,
    "closed": false
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:22.045048Z",
+   "collected_at": "2026-11-02T00:48:44.657704Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/tax/vat": {
+  "data": {
+   "quarter": "2026년 4분기",
+   "from": "2026-10-01",
+   "to": "2026-12-31",
+   "filing": {
+    "kind": "확정신고",
+    "due": "2027-01-25"
+   },
+   "sales": [
+    {
+     "code": "commission",
+     "label": "판매 수수료(중개 용역)",
+     "supply": 684024,
+     "vat": 68402
+    }
+   ],
+   "purchases": [
+    {
+     "code": "pg_fee",
+     "label": "PG 결제 수수료",
+     "supply": 240741,
+     "vat": 24074
+    }
+   ],
+   "output_vat": 68402,
+   "input_vat": 24074,
+   "payable": 44328,
+   "coupon": {
+    "company_coupon": 299700,
+    "commission_before_coupon": 684024,
+    "commission_after_coupon": 384324,
+    "coupon_over_commission": 0,
+    "reduces_base": false
+   },
+   "seller_sales": {
+    "exempt": 4062000,
+    "taxable": 3472800
+   },
+   "settings": {
+    "commission_vat": "excluded",
+    "pg_fee_vat": "excluded",
+    "shipping_supplier": "seller"
+   },
+   "checks": [
+    "판매 수수료가 부가세 별도 금액인지 (약관 확인)",
+    "회사 부담 쿠폰을 약관상 수수료에서 공제하는 구조인지 (2014두298형이면 에누리)",
+    "배송비 공급자: 지금 설정은 '판매자'",
+    "PG 수수료가 부가세 별도로 세금계산서를 받는지",
+    "광고·기타 과세 매출, PG 외 매입세액(클라우드·광고 집행 등)은 이 장부에 없다"
+   ],
+   "basis": "신고서가 아니라 신고 보조 집계입니다. 신고는 세무 담당이 홈택스에서 합니다"
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-11-02T00:48:44.667868Z",
+   "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/tax/seller-report": {
+  "data": {
+   "quarter": "2026년 4분기",
+   "from": "2026-10-01",
+   "to": "2026-12-31",
+   "due": "2027-01-15",
+   "rows": [
+    {
+     "seller_id": "sel_0001",
+     "name": "책마루",
+     "business_no": null,
+     "month": "2026-10",
+     "total": 2315000,
+     "by_method": {
+      "카드": 2315000
+     },
+     "by_tax": {
+      "면세": 2315000
+     },
+     "orders": 56
+    },
+    {
+     "seller_id": "sel_0001",
+     "name": "책마루",
+     "business_no": null,
+     "month": "2026-11",
+     "total": 135000,
+     "by_method": {
+      "카드": 135000
+     },
+     "by_tax": {
+      "면세": 135000
+     },
+     "orders": 2
+    },
+    {
+     "seller_id": "sel_0002",
+     "name": "종이나라",
+     "business_no": null,
+     "month": "2026-10",
+     "total": 1159200,
+     "by_method": {
+      "카드": 1159200
+     },
+     "by_tax": {
+      "과세": 1159200
+     },
+     "orders": 56
+    },
+    {
+     "seller_id": "sel_0002",
+     "name": "종이나라",
+     "business_no": null,
+     "month": "2026-11",
+     "total": 252600,
+     "by_method": {
+      "카드": 252600
+     },
+     "by_tax": {
+      "과세": 252600
+     },
+     "orders": 14
+    },
+    {
+     "seller_id": "sel_0003",
+     "name": "북앤펜",
+     "business_no": null,
+     "month": "2026-10",
+     "total": 3520000,
+     "by_method": {
+      "카드": 3520000
+     },
+     "by_tax": {
+      "과세": 2001000,
+      "면세": 1519000
+     },
+     "orders": 56
+    },
+    {
+     "seller_id": "sel_0003",
+     "name": "북앤펜",
+     "business_no": null,
+     "month": "2026-11",
+     "total": 153000,
+     "by_method": {
+      "카드": 153000
+     },
+     "by_tax": {
+      "과세": 60000,
+      "면세": 93000
+     },
+     "orders": 2
+    }
+   ],
+   "missing": [
+    "business_no"
+   ],
+   "basis": "부가가치세법 제75조 판매·중개 명세 초안. 제출 서식은 국세청 고시 확인 필요",
+   "unavailable": false
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-11-02T00:48:44.674220Z",
    "source": "seed",
    "unavailable": []
   }
  },
  "/api/finance/audit?days=7": {
   "data": {
-   "from": "2026-10-24T00:00:00Z",
-   "to": "2026-10-31T00:00:00Z",
+   "from": "2026-10-27T00:00:00Z",
+   "to": "2026-11-03T00:00:00Z",
    "stats": {
     "refund_count": 6,
     "refund_amount": 122800,
@@ -2766,7 +2927,7 @@
      "code": "amount_recheck_failed",
      "severity": "high",
      "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
-     "detail": "10-28 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
+     "detail": "10-31 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
      "refs": [
       "exe_s0009",
       "ord_2156"
@@ -2824,15 +2985,15 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:22.081197Z",
+   "collected_at": "2026-11-02T00:48:44.685120Z",
    "source": "seed",
    "unavailable": []
   }
  },
  "/api/finance/audit?days=14": {
   "data": {
-   "from": "2026-10-17T00:00:00Z",
-   "to": "2026-10-31T00:00:00Z",
+   "from": "2026-10-20T00:00:00Z",
+   "to": "2026-11-03T00:00:00Z",
    "stats": {
     "refund_count": 8,
     "refund_amount": 140100,
@@ -2869,7 +3030,7 @@
      "code": "amount_recheck_failed",
      "severity": "high",
      "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
-     "detail": "10-28 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
+     "detail": "10-31 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
      "refs": [
       "exe_s0009",
       "ord_2156"
@@ -2928,15 +3089,15 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:22.115282Z",
+   "collected_at": "2026-11-02T00:48:44.708043Z",
    "source": "seed",
    "unavailable": []
   }
  },
  "/api/finance/audit?days=30": {
   "data": {
-   "from": "2026-10-01T00:00:00Z",
-   "to": "2026-10-31T00:00:00Z",
+   "from": "2026-10-04T00:00:00Z",
+   "to": "2026-11-03T00:00:00Z",
    "stats": {
     "refund_count": 8,
     "refund_amount": 140100,
@@ -2966,7 +3127,7 @@
      "code": "amount_recheck_failed",
      "severity": "high",
      "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
-     "detail": "10-28 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
+     "detail": "10-31 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
      "refs": [
       "exe_s0009",
       "ord_2156"
@@ -3025,7 +3186,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:22.142041Z",
+   "collected_at": "2026-11-02T00:48:44.729456Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3048,8 +3209,8 @@
       "exe_s0044"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:33:21.833688Z",
-     "last_seen": "2026-10-30T07:33:22.154012Z",
+     "first_seen": "2026-11-02T00:48:44.451395Z",
+     "last_seen": "2026-11-02T00:48:44.745918Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3062,8 +3223,8 @@
      "detail": "최근 7일 환불률 4.1% (지난 7일 0.5%)",
      "refs": [],
      "status": "open",
-     "first_seen": "2026-10-30T07:33:21.833688Z",
-     "last_seen": "2026-10-30T07:33:22.131627Z",
+     "first_seen": "2026-11-02T00:48:44.451395Z",
+     "last_seen": "2026-11-02T00:48:44.725200Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3073,14 +3234,14 @@
      "code": "amount_recheck_failed",
      "severity": "high",
      "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
-     "detail": "10-28 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
+     "detail": "10-31 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
      "refs": [
       "exe_s0009",
       "ord_2156"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:33:21.833688Z",
-     "last_seen": "2026-10-30T07:33:22.154012Z",
+     "first_seen": "2026-11-02T00:48:44.451395Z",
+     "last_seen": "2026-11-02T00:48:44.745918Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3096,8 +3257,8 @@
       "cpn_3063"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:33:21.833688Z",
-     "last_seen": "2026-10-30T07:33:22.154012Z",
+     "first_seen": "2026-11-02T00:48:44.451395Z",
+     "last_seen": "2026-11-02T00:48:44.745918Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3117,8 +3278,8 @@
       "ord_2135"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:33:21.833688Z",
-     "last_seen": "2026-10-30T07:33:22.154012Z",
+     "first_seen": "2026-11-02T00:48:44.451395Z",
+     "last_seen": "2026-11-02T00:48:44.745918Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3136,8 +3297,8 @@
       "exe_s0046"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:33:21.833688Z",
-     "last_seen": "2026-10-30T07:33:22.154012Z",
+     "first_seen": "2026-11-02T00:48:44.451395Z",
+     "last_seen": "2026-11-02T00:48:44.745918Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3155,8 +3316,8 @@
       "exe_s0049"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:33:21.833688Z",
-     "last_seen": "2026-10-30T07:33:22.098380Z",
+     "first_seen": "2026-11-02T00:48:44.451395Z",
+     "last_seen": "2026-11-02T00:48:44.700466Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3175,8 +3336,8 @@
       "exe_s0049"
      ],
      "status": "open",
-     "first_seen": "2026-10-30T07:33:22.131627Z",
-     "last_seen": "2026-10-30T07:33:22.154012Z",
+     "first_seen": "2026-11-02T00:48:44.725200Z",
+     "last_seen": "2026-11-02T00:48:44.745918Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3195,7 +3356,7 @@
    {
     "context_id": "ctx_inc_scn_a_0001",
     "component": "payment",
-    "opened_at": "2026-10-29T05:00:00Z",
+    "opened_at": "2026-11-01T05:00:00Z",
     "damage_amount": 95000,
     "compensation_total": 8000,
     "coupon_count": 4,
@@ -3207,7 +3368,7 @@
    {
     "context_id": "ctx_inc_0103",
     "component": "payment",
-    "opened_at": "2026-10-28T03:00:00Z",
+    "opened_at": "2026-10-31T03:00:00Z",
     "damage_amount": 35500,
     "compensation_total": 19900,
     "coupon_count": 1,
@@ -3219,7 +3380,7 @@
    {
     "context_id": "ctx_inc_0102",
     "component": "payment",
-    "opened_at": "2026-10-28T02:30:00Z",
+    "opened_at": "2026-10-31T02:30:00Z",
     "damage_amount": 23000,
     "compensation_total": 19900,
     "coupon_count": 1,
@@ -3231,7 +3392,7 @@
    {
     "context_id": "ctx_inc_0101",
     "component": "payment",
-    "opened_at": "2026-10-28T02:00:00Z",
+    "opened_at": "2026-10-31T02:00:00Z",
     "damage_amount": 41000,
     "compensation_total": 19900,
     "coupon_count": 1,
@@ -3243,7 +3404,7 @@
    {
     "context_id": "ctx_inc_0104",
     "component": "payment",
-    "opened_at": "2026-10-27T10:00:00Z",
+    "opened_at": "2026-10-30T10:00:00Z",
     "damage_amount": 52000,
     "compensation_total": 20000,
     "coupon_count": 2,
@@ -3255,7 +3416,7 @@
    {
     "context_id": "ctx_inc_0100",
     "component": "payment",
-    "opened_at": "2026-10-25T03:00:00Z",
+    "opened_at": "2026-10-28T03:00:00Z",
     "damage_amount": 30000,
     "compensation_total": 4000,
     "coupon_count": 2,
@@ -3267,7 +3428,7 @@
   ],
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:22.186848Z",
+   "collected_at": "2026-11-02T00:48:44.778513Z",
    "ledger_source": "seed",
    "unavailable": []
   }
@@ -3276,7 +3437,7 @@
   "data": [],
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:22.218980Z",
+   "collected_at": "2026-11-02T00:48:44.787138Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3288,12 +3449,12 @@
   },
   "meta": {}
  },
- "/api/finance/closing?period=day&date=2026-10-29": {
+ "/api/finance/closing?period=day&date=2026-11-01": {
   "data": {
    "period": "day",
-   "date": "2026-10-29",
-   "from": "2026-10-29T00:00:00Z",
-   "to": "2026-10-30T00:00:00Z",
+   "date": "2026-11-01",
+   "from": "2026-11-01T00:00:00Z",
+   "to": "2026-11-02T00:00:00Z",
    "lines": [
     {
      "code": "gmv",
@@ -3378,7 +3539,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:22.231334Z",
+   "collected_at": "2026-11-02T00:48:44.807234Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3388,8 +3549,8 @@
    "context_id": "ctx_inc_scn_a_0001",
    "component": "payment",
    "window": {
-    "from": "2026-10-29T05:00:00Z",
-    "to": "2026-10-29T05:30:00Z"
+    "from": "2026-11-01T05:00:00Z",
+    "to": "2026-11-01T05:30:00Z"
    },
    "impact": {
     "failed_orders": 6,
@@ -3413,8 +3574,9 @@
      "buy_0003",
      "buy_0004"
     ],
+    "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:33:22.250175Z"
+    "collected_at": "2026-11-02T00:48:44.823380Z"
    },
    "compensation": {
     "coupons": [
@@ -3430,7 +3592,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-29T06:10:00Z",
+      "at": "2026-11-01T06:10:00Z",
       "in_impact": true
      },
      {
@@ -3445,7 +3607,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-29T06:11:00Z",
+      "at": "2026-11-01T06:11:00Z",
       "in_impact": true
      },
      {
@@ -3460,7 +3622,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-29T06:12:00Z",
+      "at": "2026-11-01T06:12:00Z",
       "in_impact": true
      },
      {
@@ -3475,7 +3637,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-29T06:13:00Z",
+      "at": "2026-11-01T06:13:00Z",
       "in_impact": true
      }
     ],
@@ -3542,7 +3704,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:22.250175Z",
+   "collected_at": "2026-11-02T00:48:44.823380Z",
    "unavailable": []
   }
  },
@@ -3551,8 +3713,8 @@
    "context_id": "ctx_inc_0103",
    "component": "payment",
    "window": {
-    "from": "2026-10-28T03:00:00Z",
-    "to": "2026-10-28T03:20:00Z"
+    "from": "2026-10-31T03:00:00Z",
+    "to": "2026-10-31T03:20:00Z"
    },
    "impact": {
     "failed_orders": 2,
@@ -3574,8 +3736,9 @@
      "buy_0007",
      "buy_0014"
     ],
+    "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:33:22.265133Z"
+    "collected_at": "2026-11-02T00:48:44.839609Z"
    },
    "compensation": {
     "coupons": [
@@ -3591,7 +3754,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-28T14:40:00Z",
+      "at": "2026-10-31T14:40:00Z",
       "in_impact": true
      }
     ],
@@ -3658,7 +3821,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:22.265133Z",
+   "collected_at": "2026-11-02T00:48:44.839609Z",
    "unavailable": []
   }
  },
@@ -3667,8 +3830,8 @@
    "context_id": "ctx_inc_0102",
    "component": "payment",
    "window": {
-    "from": "2026-10-28T02:30:00Z",
-    "to": "2026-10-28T02:50:00Z"
+    "from": "2026-10-31T02:30:00Z",
+    "to": "2026-10-31T02:50:00Z"
    },
    "impact": {
     "failed_orders": 1,
@@ -3684,8 +3847,9 @@
     "affected_customer_ids": [
      "buy_0007"
     ],
+    "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:33:22.281740Z"
+    "collected_at": "2026-11-02T00:48:44.843787Z"
    },
    "compensation": {
     "coupons": [
@@ -3701,7 +3865,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-28T14:20:00Z",
+      "at": "2026-10-31T14:20:00Z",
       "in_impact": true
      }
     ],
@@ -3768,7 +3932,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:22.281740Z",
+   "collected_at": "2026-11-02T00:48:44.843787Z",
    "unavailable": []
   }
  },
@@ -3777,8 +3941,8 @@
    "context_id": "ctx_inc_0101",
    "component": "payment",
    "window": {
-    "from": "2026-10-28T02:00:00Z",
-    "to": "2026-10-28T02:20:00Z"
+    "from": "2026-10-31T02:00:00Z",
+    "to": "2026-10-31T02:20:00Z"
    },
    "impact": {
     "failed_orders": 2,
@@ -3795,8 +3959,9 @@
      "buy_0007",
      "buy_0012"
     ],
+    "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:33:22.297480Z"
+    "collected_at": "2026-11-02T00:48:44.872696Z"
    },
    "compensation": {
     "coupons": [
@@ -3812,7 +3977,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-28T14:05:00Z",
+      "at": "2026-10-31T14:05:00Z",
       "in_impact": true
      }
     ],
@@ -3879,7 +4044,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:22.298552Z",
+   "collected_at": "2026-11-02T00:48:44.872696Z",
    "unavailable": []
   }
  },
@@ -3888,8 +4053,8 @@
    "context_id": "ctx_inc_0104",
    "component": "payment",
    "window": {
-    "from": "2026-10-27T10:00:00Z",
-    "to": "2026-10-27T10:30:00Z"
+    "from": "2026-10-30T10:00:00Z",
+    "to": "2026-10-30T10:30:00Z"
    },
    "impact": {
     "failed_orders": 3,
@@ -3911,8 +4076,9 @@
      "buy_0011",
      "buy_0016"
     ],
+    "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:33:22.314718Z"
+    "collected_at": "2026-11-02T00:48:44.885890Z"
    },
    "compensation": {
     "coupons": [
@@ -3928,7 +4094,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-27T11:00:00Z",
+      "at": "2026-10-30T11:00:00Z",
       "in_impact": true
      },
      {
@@ -3943,7 +4109,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-27T11:30:00Z",
+      "at": "2026-10-30T11:30:00Z",
       "in_impact": true
      }
     ],
@@ -4013,7 +4179,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:22.314727Z",
+   "collected_at": "2026-11-02T00:48:44.885890Z",
    "unavailable": []
   }
  },
@@ -4022,8 +4188,8 @@
    "context_id": "ctx_inc_0100",
    "component": "payment",
    "window": {
-    "from": "2026-10-25T03:00:00Z",
-    "to": "2026-10-25T03:20:00Z"
+    "from": "2026-10-28T03:00:00Z",
+    "to": "2026-10-28T03:20:00Z"
    },
    "impact": {
     "failed_orders": 2,
@@ -4040,8 +4206,9 @@
      "buy_0005",
      "buy_0006"
     ],
+    "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-10-30T07:33:22.329512Z"
+    "collected_at": "2026-11-02T00:48:44.923272Z"
    },
    "compensation": {
     "coupons": [
@@ -4057,7 +4224,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-25T04:00:00Z",
+      "at": "2026-10-28T04:00:00Z",
       "in_impact": true
      },
      {
@@ -4072,7 +4239,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-25T04:05:00Z",
+      "at": "2026-10-28T04:05:00Z",
       "in_impact": false
      }
     ],
@@ -4141,7 +4308,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-10-30T07:33:22.329512Z",
+   "collected_at": "2026-11-02T00:48:44.923272Z",
    "unavailable": []
   }
  },

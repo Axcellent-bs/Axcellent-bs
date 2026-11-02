@@ -1,0 +1,15 @@
+# 테스트 전용 가짜 회사(냉장 물류) 조직도
+assignments:
+  orchestrator: {unit: 관제실}
+  incident: {unit: 관제실, assignee: 야간 당직}
+  hosts: {unit: 관제실}
+  planning: {unit: 물류기획}
+  dev: {unit: 물류기획}
+  inquiry: {unit: 거래처지원}
+  claims: {unit: 거래처지원}
+  reviews: {unit: 거래처지원}
+  coupon: {unit: 영업}
+  finance: {unit: 경영지원}
+  data: {unit: 물류기획}
+  handover: {unit: 경영지원}
+  decisions: {unit: 경영지원}

@@ -916,3 +916,92 @@ def test_hold_goes_to_inbox_once(service: PlanningService, adapter) -> None:
     run(service.mark_read("support"))  # 다른 변경이 와도 멈춤이 그대로면 다시 안 올린다
     run(service.wait_sent())
     assert len(sent) == 1
+
+
+# ---------------------------------------------------------------- 토큰 관리
+
+
+class CountingLLM(FakeLLM):
+    """부를 때마다 토큰 100개를 쓴 것으로 센다 (MeteredLLM.record_usage 대신)."""
+
+    async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
+        coder.count_tokens(100)
+        return await super().structured(prompt, schema, untrusted, images, context_id)
+
+
+def test_usage_is_counted_per_task(service: PlanningService, adapter) -> None:
+    fake = CountingLLM()
+    coder.set_llm(fake)
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "merged"
+    assert c.llm_calls == len(fake.calls) and c.llm_tokens == 100 * len(fake.calls)
+
+
+def test_call_limit_stops_for_human_and_retry_counts_on(
+    service: PlanningService, adapter, monkeypatch
+) -> None:
+    monkeypatch.setenv("PLANNING_CODER_MAX_CALLS", "2")
+    coder.set_llm(CountingLLM())
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "waiting_human" and c.pr is None
+    assert "LLM 호출 2회 ≥ 한도 2회" in (c.error or "")
+    assert c.llm_calls == 2 and c.llm_tokens == 200
+    assert "code.budget" in _points(service)
+
+    monkeypatch.delenv("PLANNING_CODER_MAX_CALLS")
+    run(_retry(service, "T-D1"))  # 다시 시도하면 새 실행은 새로 세고, 합계는 이어서 센다
+    c = _task(service).coding
+    assert c.status == "merged" and c.llm_calls > 2 and c.llm_tokens == 100 * c.llm_calls
+
+
+def test_token_limit_and_env_fallback(monkeypatch) -> None:
+    monkeypatch.setenv("PLANNING_CODER_MAX_TOKENS", "500")
+    assert coder.budget_over(coder.Meter(tokens=499)) is None
+    assert "토큰 500 ≥ 한도 500" in (coder.budget_over(coder.Meter(tokens=500)) or "")
+    monkeypatch.setenv("PLANNING_CODER_MAX_TOKENS", "x")
+    assert coder.limit("PLANNING_CODER_MAX_TOKENS", 7) == 7
+    monkeypatch.setenv("PLANNING_CODER_MAX_TOKENS", "0")
+    assert coder.limit("PLANNING_CODER_MAX_TOKENS", 7) == 7
+    coder.count_tokens(10)  # 실행 밖에서는 아무 일도 없다
+
+
+def test_parallel_limit_holds_llm_calls(monkeypatch) -> None:
+    monkeypatch.setenv("PLANNING_CODER_PARALLEL", "1")
+    coder._slots = None
+    live = 0
+    peak = 0
+
+    class Slow:
+        settings = LLMSettings(model="slow", base_url="http://llm.invalid")
+
+        async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
+            nonlocal live, peak
+            live += 1
+            peak = max(peak, live)
+            await asyncio.sleep(0.01)
+            live -= 1
+            return CodeReview(verdict="통과", notes=[])
+
+    async def go() -> None:
+        llm = Slow()
+        await asyncio.gather(
+            *[coder._ask(llm, "리뷰", "p", CodeReview, {}, "ctx") for _ in range(3)]
+        )
+
+    run(go())
+    coder._slots = None
+    assert peak == 1
+
+
+def test_metered_llm_adds_recorded_tokens() -> None:
+    llm = coder.MeteredLLM("planning", settings=LLMSettings(model="m", base_url="http://x"))
+    m = coder.Meter()
+
+    async def go() -> None:
+        coder._meter.set(m)
+        llm.record_usage("ctx", "m", 30, 12, True)
+
+    run(go())
+    assert m.tokens == 42

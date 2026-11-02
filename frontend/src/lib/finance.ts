@@ -187,6 +187,27 @@ export interface Cashflow {
 export interface CloseItem { key: string; label: string; status: "done" | "pending" | "unknown"; detail: string; link: string }
 export interface CloseChecklist { month: string; items: CloseItem[]; done: number; total: number; ready: boolean; closed: boolean }
 
+// ---------------------------------------------------------------- ⑥ 세무 지원
+export interface VatRow { code: string; label: string; supply: number; vat: number }
+export interface VatPack {
+  quarter: string;
+  from: string;
+  to: string;
+  filing: { kind: string; due: string };
+  sales: VatRow[];
+  purchases: VatRow[];
+  output_vat: number | null;
+  input_vat: number | null;
+  payable: number | null;
+  coupon: { company_coupon: number | null; commission_before_coupon: number | null; commission_after_coupon: number | null; coupon_over_commission: number | null; reduces_base: boolean };
+  seller_sales: { exempt: number; taxable: number } | null;
+  settings: { commission_vat: string; pg_fee_vat: string; shipping_supplier: string };
+  checks: string[];
+  basis: string;
+}
+export interface SellerSalesRow { seller_id: string; name: string; business_no: string | null; month: string; total: number; by_method: Record<string, number>; by_tax: Record<string, number>; orders: number }
+export interface SellerReport { quarter: string; from: string; to: string; due: string; rows: SellerSalesRow[]; missing: string[]; basis: string; unavailable: boolean }
+
 // ---------------------------------------------------------------- ① 월간 변동 분석
 export interface VarianceLine {
   code: string;
@@ -533,6 +554,12 @@ export const finance = {
   cashflow: () => fin<Envelope<Cashflow>>("/api/finance/cashflow"),
   /** 월 마감 체크리스트 */
   closeChecklist: (date?: string | null) => fin<Envelope<CloseChecklist>>(`/api/finance/close-checklist${query({ date })}`),
+  /** 부가세 신고 보조 집계 (분기) */
+  vat: (date?: string | null) => fin<Envelope<VatPack>>(`/api/finance/tax/vat${query({ date })}`),
+  /** 판매자별 판매 명세 (부가세법 제75조 초안) */
+  sellerReport: (date?: string | null) => fin<Envelope<SellerReport>>(`/api/finance/tax/seller-report${query({ date })}`),
+  downloadSellerReport: (date?: string | null) =>
+    download(`/api/finance/tax/seller-report${query({ date, format: "csv" })}`, "seller-sales.csv"),
   /** 월간 변동 분석 (지난달·작년 같은 달 대비) */
   variance: (date?: string | null) => fin<Envelope<Variance>>(`/api/finance/variance${query({ date })}`),
   /** 예산·한도 경보 확인 메모. 사람 토큰만. 한도는 바꾸지 않는다 */
@@ -632,8 +659,8 @@ export function todayKst(now = new Date()): string {
 }
 
 /** todo.link 또는 kind → 화면 탭 id */
-export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "audit";
-export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "audit"];
+export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "audit" | "tax";
+export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "tax", "audit"];
 const TODO_TAB: Record<TodoKind, FinanceTab> = {
   settlement_batch: "settlements", settlement_deadline: "settlements", closing_confirm: "closing", recon_exception: "reconciliation", audit_finding: "audit", policy_alert: "policy",
 };

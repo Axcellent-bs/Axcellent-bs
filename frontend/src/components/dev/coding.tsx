@@ -16,6 +16,8 @@ export const CODING_LABEL: Record<CodingStatus, string> = {
   opened: 'PR 열림', merged: '머지됨', waiting_human: '사람 확인', failed: '실패', canceled: '중단됨',
 }
 const DONE: CodingStatus[] = ['opened', 'merged']
+/** 토큰 수를 짧게: 950 · 12.3k · 1.2M */
+export const tokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : `${n}`)
 /** 에이전트가 지금 일하는 중인 상태 (옆에 깜빡이는 점) */
 const RUNNING: CodingStatus[] = ['queued', 'reading', 'writing', 'reviewing']
 export const isRunning = (s?: CodingStatus | string) => RUNNING.includes(s as CodingStatus)
@@ -155,6 +157,7 @@ export function CodingStep({ task }: { task: Task }) {
       <span className="tags">
         {c.model && <Tag><span className="mono">{c.model}</span></Tag>}
         {c.attempts > 1 && <Tag>{c.attempts}회차</Tag>}
+        {!!c.llmCalls && <Tag>AI {c.llmCalls}회 · <span className="mono">{tokens(c.llmTokens ?? 0)}</span> 토큰</Tag>}
         {!!files.length && <Tag>{files.length}파일 · <span className="mono">+{add} −{del}</span></Tag>}
         {c.review && <Tag tone={c.review.verdict === '통과' ? 'green' : 'amber'}>리뷰 {c.review.verdict}</Tag>}
         {c.instruction && <Tag>사람 지시</Tag>}

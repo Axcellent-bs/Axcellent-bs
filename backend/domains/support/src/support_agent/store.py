@@ -10,6 +10,7 @@ import itertools
 from datetime import UTC, datetime
 from typing import Any
 
+from support_agent import abuse_rules
 from support_agent.schemas import (
     ActivityEntry,
     Analysis,
@@ -25,6 +26,11 @@ from support_agent.schemas import (
 
 def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _masked_subject(subject: str) -> str | None:
+    shown, level, _ = abuse_rules.assess(subject)
+    return shown if level != "none" else None
 
 
 def _preview(text: str) -> str:
@@ -88,6 +94,7 @@ class InquiryStore:
             user_id=user_id,
             customer_name=customer_name,
             subject=subject,
+            subject_display=_masked_subject(subject),
             order_id=order_id,
             order_no=order_no,
             status="open",
@@ -140,6 +147,27 @@ class InquiryStore:
         )
         return conversation
 
+    def apply_softening(
+        self, inquiry_id: int, message_id: int, softened: str, level: str, kinds: list[str]
+    ) -> Conversation | None:
+        """2단계: 코드가 검사한 순화문과 단계(규칙·모델 중 높은 쪽)를 붙인다. 원문은 그대로."""
+        conversation = self._conversations.get(inquiry_id)
+        message = (
+            next((m for m in conversation.messages if m.id == message_id), None)
+            if conversation
+            else None
+        )
+        if conversation is None or message is None or message.role != "customer":
+            return None
+        message.softened_text = softened
+        message.abuse_level = level  # type: ignore[assignment]
+        message.abuse_kinds = kinds
+        if conversation.messages[-1].id == message_id:
+            conversation.preview = _preview(
+                softened.removeprefix(abuse_rules.APOLOGY).strip() or softened
+            )
+        return conversation
+
     def set_feedback(self, inquiry_id: int, feedback: Feedback) -> Conversation:
         conversation = self._conversations[inquiry_id]
         conversation.feedback = feedback
@@ -157,6 +185,11 @@ class InquiryStore:
         conversation.updated_at = now_iso()
         return conversation
 
+    def replace(self, conversation: Conversation) -> Conversation:
+        """이미 있는 문의를 바뀐 모습으로 바꿔 둔다 (보유기간 삭제가 원문을 치환할 때 쓴다)."""
+        self._conversations[conversation.id] = conversation
+        return conversation
+
     def _append(
         self,
         conversation: Conversation,
@@ -165,17 +198,21 @@ class InquiryStore:
         analysis: Analysis | None,
         stamp: str,
     ) -> None:
+        shown, level, kinds = abuse_rules.assess(text) if role == "customer" else (text, "none", [])
         conversation.messages.append(
             Message(
                 id=next(self._message_ids),
                 role=role,  # type: ignore[arg-type]
                 text=text,
+                display_text=shown if level != "none" else None,
+                abuse_level=level,  # type: ignore[arg-type]
+                abuse_kinds=kinds,
                 analysis=analysis,
                 created_at=stamp,
             )
         )
         conversation.updated_at = stamp
-        conversation.preview = _preview(text)
+        conversation.preview = _preview(shown)
         conversation.awaiting_reply = role == "customer"
 
     @staticmethod
