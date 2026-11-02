@@ -109,7 +109,7 @@ export function AuditSection({ tick, onChanged }: { tick: number; onChanged?: ()
     <div className="space-y-4">
     <OpenAnomalies tick={tick} onChanged={onChanged} />
     <Panel id="audit" title="⑦ 내부통제·감사" titleHidden meta={res.env?.meta} tools={tools}
-      hint="한 건씩 막는 일은 안전 장치가 합니다. 재무 AI는 지난 기록을 전부 다시 훑어, 한도를 피하려고 쪼갠 쿠폰이나 같은 고객의 반복 환불 같은 수상한 패턴을 찾습니다. 의심 건은 조사해 보고 결론을 남기세요.">
+      hint="한 건씩 막는 일은 안전 장치가 합니다. 재무 AI는 지난 기록을 전부 다시 훑어, 한도를 피하려고 쪼갠 환불이나 같은 고객의 반복 환불 같은 수상한 패턴을 찾습니다. 의심 건은 조사해 보고 결론을 남기세요.">
       <ResourceBody res={res}>
         {(a) => {
           const s = a.stats;

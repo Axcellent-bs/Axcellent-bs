@@ -14,10 +14,10 @@
 | ② 매출·PG 대사 | `reconciliation.py` | `matched`·`mismatch`·`missing_in_pg`·`pending`·`fee_anomaly` |
 | ③ 판매자 정산 | `settlement.py` | 정산금 = 판매액 − 수수료 − 판매자 부담 쿠폰 − 환불, 보류 사유. 묶음 지급은 `execute("confirm_settlement")`(항상 C) |
 | ⑤ 예산·한도 | `policy.py` | 정책표·소진율·경보, 한도 *제안*(적용은 기준표 PR) |
-| ⑦ 사후 감사 | `audit.py` | 쪼개기·반복 환불·쿠폰 중복·환불률 급변·재계산 실패·관문 보류 추이 |
+| ⑦ 사후 감사 | `audit.py` | 환불 쪼개기·반복 환불·환불률 급변·관문 보류 추이. 쿠폰 쪼개기·쿠폰 중복·영향 고객 밖 보상은 재무 일이 아니라 코드 정리 전까지 남은 규칙이다 |
 | 금액 다시 계산 | `recheck.py` | 예전 `verify_amount` 계산. 사후 감사가 쓴다 |
 | 사건 보상 장부 | `ledger.py` | 쿠폰 업무는 재무가 맡지 않는다(마케팅·고객지원 합의). 지급은 마케팅(`issue_coupon`), 판정은 고객지원이 하고 재무는 **빠져나간 돈**을 사건별로 적는다: 이벤트(`events`) 또는 safety 실행 기록(`safety_executions`, 이벤트를 못 받을 때)·시드(`seed`). 실행 기록이 있으면 그것이 원본이라 이벤트를 더하지 않는다. 둘 다 없으면 null |
-| 사건별 화면 | `incidents.py` | 사건 목록·상세: data 영향 그대로 + 보상 장부 + 환불 금액(`refunds`: 사건 구간·영향 고객으로 귀속, 금액·건수만) + 빠져나간 돈 합계(`money_out_total` = 보상 + 환불) + 기준표 한도 + 점검 6개 (재설계 문서 12-1). 재무 단계는 #415로 없앴다 |
+| 사건별 화면 | `incidents.py` | 사건 목록·상세: data 영향 그대로 + 보상 장부 + 환불 금액(`refunds`: 사건 구간·영향 고객으로 귀속, 금액·건수만) + 빠져나간 돈 합계(`money_out_total` = 보상 + 환불) + 기준표 한도 + 점검 5개(쿠폰을 보는 점검은 코드 정리 전까지 남은 것) (재설계 문서 12-1). 재무 단계는 #415로 없앴다 |
 | 설정 | `finance_policy.toml` | 수수료율(기본 10%, 문구 8%), 주 정산, PG 3.1%, 예산, 한도 제안(한 번에 30% 안), 감사 기준 |
 
 | skill | 등급 | 요청자 | 우선순위 | 하는 일 |
@@ -78,6 +78,7 @@ safety·finance를 목 모드로 띄운 뒤 `uv run python agents/finance/demo/s
 ax-contracts, ax-agent-template, data 에이전트(`impact_analysis`, `fraud_score`), 고객지원(`list_claims`, 처리 중 클레임으로 정산 보류), safety
 
 ## 5. 하지 않는 것
+- 쿠폰을 판단하지 않는다. 대상·금액은 고객지원, 지급은 마케팅이 정하고 재무는 나간 금액을 장부에 적기만 한다
 - 영향 숫자(실패 주문·영향 고객·피해 금액)를 다시 계산하지 않는다 (원천은 data)
 - 실제 송금·정산 확정을 하지 않는다 (정산 확정은 safety 레지스트리상 항상 C)
 - 판매 사이트 DB에 직접 붙지 않는다 (shop-api·data를 거친다)
