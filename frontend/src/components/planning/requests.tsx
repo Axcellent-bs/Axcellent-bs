@@ -5,7 +5,7 @@ import { useEffect, useState, type Dispatch } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, RELATION_LABEL, TODAY, byRelation, type Action, type Request, type State as S } from '@/lib/planningData'
 import { Tag, rowNav } from '@/components/planning-common/parts'
-import { Ref, convoHref, isFollowUp, nextOf, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
+import { Ref, convoHref, isFollowUp, nextOf, prName, prSlug, reviewHref, reviewOf, toPath } from '@/components/planning-common/links'
 import { gather } from '@/components/planning/projects'
 
 // ---------------------------------------------------------------- 필터
@@ -76,7 +76,7 @@ export function pipeline(s: S, r: Request): PipeRow {
     else {
       const xr = reviewOf(s, sp.id)
       c1.value = sp.id
-      c1.href = xr ? toPath(`work/reviews/${xr.id}`) : toPath(`work/specs/${sp.id}`)
+      c1.href = xr ? reviewHref(xr) : toPath(`work/specs/${sp.id}`)
       if (xr) { const w = waitOf(xr.lane); c1.meta = w.label; if (c1.kind === 'now') wait = w }
       else if (sp.status === '확정') c1.meta = sp.confirmedBy === 'auto' ? '자동 확정' : sp.confirmedBy === 'human' ? '사람 확인 후 확정' : '교차검증 후 확정'
       else if (sp.question) {
@@ -99,9 +99,9 @@ export function pipeline(s: S, r: Request): PipeRow {
     const pr = xrPr ?? fix ?? open[0] ?? g.prs[g.prs.length - 1]
     if (!pr) { c2.value = g.tasks.length ? `작업 ${g.tasks.length}` : '작업 없음'; c2.meta = g.tasks.length ? 'PR 전' : undefined }
     else {
-      c2.value = g.prs.length > 1 ? `${pr.id} 외 ${g.prs.length - 1}` : pr.id
+      c2.value = g.prs.length > 1 ? `${prName(pr)} 외 ${g.prs.length - 1}` : prName(pr)
       const xr = reviewOf(s, pr.id)
-      c2.href = xr ? toPath(`work/reviews/${xr.id}`) : toPath(`work/prs/${prSlug(pr.id)}`)
+      c2.href = xr ? reviewHref(xr) : toPath(`work/prs/${prSlug(pr.id)}`)
       if (xr) { const w = waitOf(xr.lane); c2.meta = w.label; if (c2.kind === 'now') wait = w }
       else if (pr === fix) { c2.meta = '수정 후 재검수'; if (c2.kind === 'now') wait = { label: '수정 후 재검수', rank: 2 } }
       else c2.meta = !pr.merged ? '머지 전' : pr.mergedBy === 'rule' ? '자동 머지' : pr.mergedBy === 'review' ? '교차검증 후 머지' : '사람 머지'
