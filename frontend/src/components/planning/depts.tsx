@@ -1,5 +1,5 @@
-// 다른 부서 시뮬레이터. 실제 부서 에이전트 대신 버튼으로 기획개발에 데이터를 보내고,
-// 기획개발이 보낸 메시지·데이터(outbox)를 부서별 창구에서 확인한다.
+// 다른 부서 시뮬레이터. 실제 부서 에이전트 대신 버튼으로 기획·개발에 데이터를 보내고,
+// 기획·개발이 보낸 메시지·데이터(outbox)를 부서별 창구에서 확인한다.
 import { useEffect, useState, type Dispatch } from 'react'
 import { Button, Card, Chip, Notice, PageHeader, Select, useToast } from '@dejafix/common-frontend'
 import { DEPT_ANSWER, DEPT_NAME, type Action, type Dept, type InboundKind, type State } from '@/lib/planningData'
@@ -8,7 +8,7 @@ import { Point } from '@/components/planning-common/parts'
 interface Sender { kind: InboundKind; point: string; label: string; what: string }
 const DEPTS: { dept: Dept; owner: string; senders: Sender[] }[] = [
   { dept: 'support', owner: '병환', senders: [
-    { kind: 'support_ticket', point: 'create_ticket', label: '변경 요청 보내기', what: '반복 문의·버그를 기획개발 요청함에 등록' },
+    { kind: 'support_ticket', point: 'create_ticket', label: '변경 요청 보내기', what: '반복 문의·버그를 기획 요청함에 등록' },
     { kind: 'support_simple', point: 'create_ticket', label: '간단 요청 보내기', what: '문구·표시만 고치는 요청 → 기준 안이면 머지까지 자동, 밖이면 교차검증' },
   ] },
   { dept: 'marketing', owner: '재헌', senders: [
@@ -26,8 +26,8 @@ const DEPTS: { dept: Dept; owner: string; senders: Sender[] }[] = [
   { dept: 'safety', owner: '태윤', senders: [{ kind: 'safety_verify', point: 'verify_rollback_target', label: '롤백 교차검증 요청', what: 'infra rollback_deployment(B)의 검증' }] },
 ]
 
-// 이 화면이 열려 있는 동안 다른 부서 에이전트 몫을 한다: 기획개발이 보낸 질문에 요청 부서가 답하고,
-// 교차검증 요청은 검증 부서가 판단해 돌려준다. 기획개발은 남의 답·판단을 스스로 만들지 않는다
+// 이 화면이 열려 있는 동안 다른 부서 에이전트 몫을 한다: 기획이 보낸 질문에 요청 부서가 답하고,
+// 교차검증 요청은 검증 부서가 판단해 돌려준다. 기획·개발은 남의 답·판단을 스스로 만들지 않는다
 const AGENT_DELAY_MS = 1500
 function useDeptAgents(s: State, d: Dispatch<Action>) {
   useEffect(() => {
@@ -52,8 +52,8 @@ export function DeptSimulator({ s, d }: { s: State; d: Dispatch<Action> }) {
   useDeptAgents(s, d)
   return (
     <main className="page page-wide">
-      <PageHeader title="다른 부서 (시뮬레이터)" sub="실제 부서 에이전트 대신 버튼으로 기획개발에 데이터를 보낸다. 오른쪽 창구에는 기획개발이 보낸 메시지·데이터가 쌓인다." />
-      <Notice icon="bell">버튼을 누르면 기획개발 화면(5173)이 바로 바뀝니다. 요청은 사이드바 "요청", 메시지는 "소통" 배지에 새로 받은 건수가 뜹니다.</Notice>
+      <PageHeader title="다른 부서 (시뮬레이터)" sub="실제 부서 에이전트 대신 버튼으로 기획·개발에 데이터를 보낸다. 오른쪽 창구에는 기획·개발이 보낸 메시지·데이터가 쌓인다." />
+      <Notice icon="bell">버튼을 누르면 기획·개발 화면(5173)이 바로 바뀝니다. 요청은 사이드바 "요청", 메시지는 "소통" 배지에 새로 받은 건수가 뜹니다.</Notice>
       <div className="dept-grid">
         {DEPTS.map(({ dept, owner, senders }) => {
           const inbox = s.outbox.filter((m) => m.to === dept).slice().reverse()
@@ -67,7 +67,7 @@ export function DeptSimulator({ s, d }: { s: State; d: Dispatch<Action> }) {
                       <Point>{x.point}</Point>
                       <div className="muted small">{x.what}</div>
                     </div>
-                    <Button size="small" variant="primary" onClick={() => { d({ type: 'inbound', kind: x.kind }); toast.show(`${DEPT_NAME[dept]} → 기획개발 ${x.point} 보냄`) }}>{x.label}</Button>
+                    <Button size="small" variant="primary" onClick={() => { d({ type: 'inbound', kind: x.kind }); toast.show(`${DEPT_NAME[dept]} → 기획·개발 ${x.point} 보냄`) }}>{x.label}</Button>
                   </div>
                 ))}
                 {dept === 'safety' && s.autoPolicy.rules.filter((r) => r.status === '승인 대기' && r.approver === '사람 (태윤)').map((r) => (
@@ -84,15 +84,15 @@ export function DeptSimulator({ s, d }: { s: State; d: Dispatch<Action> }) {
                   <div className="dept-send-row">
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <Point>message</Point>
-                      <div className="muted small">기획개발 소통 채널에 메시지</div>
+                      <div className="muted small">기획 소통 채널에 메시지</div>
                     </div>
-                    <Button size="small" onClick={() => { d({ type: 'deptChat', from: dept }); toast.show(`${DEPT_NAME[dept]} → 기획개발 소통 채널`) }}>메시지 보내기</Button>
+                    <Button size="small" onClick={() => { d({ type: 'deptChat', from: dept }); toast.show(`${DEPT_NAME[dept]} → 기획 소통 채널`) }}>메시지 보내기</Button>
                   </div>
                 )}
               </div>
               <div className="dept-inbox">
                 <div className="dept-inbox-h">
-                  기획개발에서 받은 것 {unread > 0 && <Chip tone="amber">새로 {unread}</Chip>}
+                  기획·개발에서 받은 것 {unread > 0 && <Chip tone="amber">새로 {unread}</Chip>}
                   <span style={{ flex: 1 }} />
                   {unread > 0 && <button type="button" className="linkish" onClick={() => d({ type: 'markRead', to: dept })}>모두 읽음</button>}
                 </div>
@@ -115,7 +115,7 @@ export function DeptSimulator({ s, d }: { s: State; d: Dispatch<Action> }) {
   )
 }
 
-// 기획개발 → 다른 부서 보내기 창구 (연동 탭에 붙는다)
+// 기획·개발 → 다른 부서 보내기 창구 (연동 탭에 붙는다)
 const KINDS = [
   { value: 'get_request_status', label: '처리 상태 회신' },
   { value: 'deploy_notice', label: '개발 완료·배포 알림' },

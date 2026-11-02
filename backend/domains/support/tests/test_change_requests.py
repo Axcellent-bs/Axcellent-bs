@@ -1,4 +1,4 @@
-"""문의와 기획개발 변경 요청의 연결 저장소 (한 변경 요청에 문의가 여러 개 붙을 수 있다)."""
+"""문의와 기획 변경 요청의 연결 저장소 (한 변경 요청에 문의가 여러 개 붙을 수 있다)."""
 
 import os
 
@@ -30,7 +30,7 @@ def test_link_stores_the_request_for_an_inquiry() -> None:
     store = ChangeRequestStore()
     link = store.link(CTX, 7, request_id="REQ-12")
     assert (link.context_id, link.inquiry_id, link.status) == (CTX, 7, "requested")
-    assert link.source_ref == "inq_7"  # 기획개발에 보낸 참조 ID와 같다
+    assert link.source_ref == "inq_7"  # 기획에 보낸 참조 ID와 같다
     assert link.request_id == "REQ-12" and link.result is None and link.notice_id is None
     assert store.get(CTX, 7) == link
     assert store.get(CTX, 8) is None and store.get("ctx_req_9999", 7) is None
@@ -52,7 +52,7 @@ def test_linking_the_same_pair_again_is_idempotent() -> None:
 
 
 def test_one_request_can_serve_several_inquiries() -> None:
-    """기획개발이 같은 요청으로 묶어(linked_duplicate) 같은 context_id를 돌려주는 경우."""
+    """기획이 같은 요청으로 묶어(linked_duplicate) 같은 context_id를 돌려주는 경우."""
     store = ChangeRequestStore()
     store.link(CTX, 7, request_id="REQ-12")
     second = store.link(CTX, 8, request_id="REQ-12", duplicate_of="REQ-12")
@@ -91,7 +91,7 @@ def test_an_inquiry_joining_a_finished_request_inherits_the_result() -> None:
     store.link(CTX, 7)
     store.record_result(CTX, "completed", result={"pr": "pr_52"})
     store.attach_notice(CTX, "ntc_0001")
-    late = store.link(CTX, 8)  # 기획개발이 이미 끝난 요청으로 묶었다
+    late = store.link(CTX, 8)  # 기획이 이미 끝난 요청으로 묶었다
     assert (late.status, late.result, late.notice_id) == ("completed", {"pr": "pr_52"}, "ntc_0001")
     assert store.pending() == []  # 결과 통지를 다시 기다리지 않는다
 

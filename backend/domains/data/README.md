@@ -202,7 +202,7 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 ### activity_report (부서별 AI 업무 리포트)
 - **AI를 거친 일만 센다.** 공통 로그에 남은 일만 세고, 사람이 직접 한 일(로그에 없는 일)은 세지 않는다. "절약한 시간" 같은 추정치는 만들지 않는다(근거 없는 숫자).
 - 입력: `period`(day·week·month), `start`(한국 시간 날짜, 비우면 직전 기간: 어제·지난주 월~일·지난달), `services`(서비스 id, 비우면 전체). 직전 기간은 같은 길이의 바로 앞 기간이다.
-- 부서 = `ax_agent_template.services`의 `department`(총괄·고객지원·마케팅·재무·데이터분석·인사·기획개발·인프라). 카드 `owner`는 사람 이름이라(준하 = 총괄+인사 등) 부서마다 `owners`로 함께 보여 준다.
+- 부서 = `ax_agent_template.services`의 `department`(총괄·고객지원·마케팅·재무·데이터분석·인사·기획·개발·인프라). 카드 `owner`는 사람 이름이라(준하 = 총괄+인사 등) 부서마다 `owners`로 함께 보여 준다.
 - **센 범위 = 이 회사가 켠(AI를 쓰는) 서비스.** 백엔드 `AX_ENABLED_SERVICES` 기준이다(비어 있으면 전부, `routing.is_enabled`).
   - 화면의 서비스 고르기(`/system/services`, 브라우저 localStorage)와는 아직 연결돼 있지 않다.
   - 켜지 않은 서비스의 부서는 카드·특이사항·협업에 넣지 않는다. 입력 `services`에 켜지 않은 서비스만 있으면 `invalid_input`이다.

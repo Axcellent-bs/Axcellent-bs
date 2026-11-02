@@ -294,7 +294,7 @@ claude-review.yml — 트리거: pull_request_target [opened, synchronize, reope
 
 ### 7. 머지·dev 건강
 - auto-merge.yml (pull_request_target opened/reopened/ready_for_review, base dev만): 작성자 is-trusted, external 없음 → ax-bot으로 `gh pr merge --auto --squash`
-  제외: planning 에이전트의 제품 기능(`generate_pr`)이 만든 PR(브랜치 `gen/` 접두사, 라벨 `generated-pr`)은 자동 머지하지 않는다. "머지는 사람이 누른다"가 기획개발 설계의 핵심 (공통 구성안 13장 7번). sweeper의 자동 머지 예약도 같은 제외
+  제외: planning 에이전트의 제품 기능(`generate_pr`)이 만든 PR(브랜치 `gen/` 접두사, 라벨 `generated-pr`)은 자동 머지하지 않는다. "머지는 사람이 누른다"가 개발 설계의 핵심 (공통 구성안 13장 7번). sweeper의 자동 머지 예약도 같은 제외
   (스위치와 무관하게 동작. 워크플로를 바꾼 사람 PR도 code owner 승인이 있으면 자동 머지)
   (실제 머지 조건: ci·contracts-compat·automation-tests·folder-guard·test-guard·dev-health·agent-review 전부 초록 + human_paths면 code owner 승인)
 - dev-health.yml — workflow_run(ci, completed, event push, branch dev). 스위치 무관. concurrency `dev-health` (cancel false).

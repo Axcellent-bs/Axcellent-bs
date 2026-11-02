@@ -705,7 +705,7 @@
     },
     "/api/dashboard/change-requests": {
       "get": {
-        "description": "문의에서 기획개발로 보낸 변경 요청과 처리 상태.",
+        "description": "문의에서 기획으로 보낸 변경 요청과 처리 상태.",
         "operationId": "change_requests_api_dashboard_change_requests_get",
         "parameters": [
           {

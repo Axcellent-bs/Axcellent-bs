@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => {
     '^/orch/': { target: env.ORCHESTRATOR_PROXY_TARGET || 'http://127.0.0.1:8000', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/orch/, '') },
     // 데이터 AI(8106). 데이터분석 AI 화면의 KPI 직접 조회용
     '/data-a2a': { target: env.DATA_PROXY_TARGET || 'http://127.0.0.1:8106', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/data-a2a/, '') },
-    // 기획개발 AI(8101). VITE_PLANNING_API_URL=/planning-api 로 두면 화면이 여기로 부른다
+    // 기획 AI(8101). VITE_PLANNING_API_URL=/planning-api 로 두면 화면이 여기로 부른다
     '/planning-api': { target: env.PLANNING_PROXY_TARGET || 'http://127.0.0.1:8101', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/planning-api/, '') },
     // 개발·배포 서비스(dev, 8111)
     '/dev-api': { target: env.DEV_PROXY_TARGET || 'http://127.0.0.1:8111', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/dev-api/, '') },

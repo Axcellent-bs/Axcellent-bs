@@ -1,8 +1,8 @@
-"""문의와 기획개발 변경 요청의 연결 저장소 (메모리, `persistence`가 DB로 영속화한다).
+"""문의와 기획 변경 요청의 연결 저장소 (메모리, `persistence`가 DB로 영속화한다).
 
-고객지원이 기획개발에 변경을 요청하면(2-2, 통합 에이전트를 거치지 않는 직통) 기획개발이 변경 요청
+고객지원이 기획에 변경을 요청하면(2-2, 통합 에이전트를 거치지 않는 직통) 기획이 변경 요청
 사건 `ctx_req_…`를 **발급**해 돌려준다 (`ContextPrefix.REQUEST`). 같은 요청을 여러 부서·여러 문의가
-보내면 기획개발이 하나로 묶으므로(`linked_duplicate`) **한 변경 요청에 문의가 여러 개** 연결될 수
+보내면 기획이 하나로 묶으므로(`linked_duplicate`) **한 변경 요청에 문의가 여러 개** 연결될 수
 있다. 한 문의에 요청이 여러 건일 수도 있다. 그래서 연결은 (`context_id`, `inquiry_id`) 한 쌍이 한
 행이다.
 
@@ -32,7 +32,7 @@ TERMINAL = ("completed", "declined")
 
 
 def source_ref_for(inquiry_id: int) -> str:
-    """기획개발에 보내는 요청 부서 쪽 참조 ID (`inq_<번호>`)."""
+    """기획에 보내는 요청 부서 쪽 참조 ID (`inq_<번호>`)."""
     return f"{IdPrefix.INQUIRY.value}{inquiry_id}"
 
 
@@ -50,13 +50,13 @@ class ChangeRequestConflict(Exception):
 
 class ChangeRequestLink(AxModel):
     tenant_id: str = TENANT_ID_DEFAULT
-    context_id: str  # 기획개발이 발급한 변경 요청 사건 (ctx_req_…)
+    context_id: str  # 기획이 발급한 변경 요청 사건 (ctx_req_…)
     inquiry_id: int
     source_ref: str  # 이 문의를 가리켜 보낸 참조 ID (inq_<번호>)
     status: ChangeStatus = "requested"
-    request_id: str | None = None  # 기획개발 쪽 요청 번호 (REQ-n)
+    request_id: str | None = None  # 기획 쪽 요청 번호 (REQ-n)
     duplicate_of: str | None = None  # 같은 요청이 이미 있어 묶였다면 그 요청 번호
-    result: dict[str, Any] | None = None  # 기획개발이 알려 준 처리 결과 (그대로 보관)
+    result: dict[str, Any] | None = None  # 기획이 알려 준 처리 결과 (그대로 보관)
     notice_id: str | None = None  # 고객 공지가 필요했다면 마케팅 공지 ID
     seq: int  # 연결한 순서. 시각은 초 단위라 같은 초에 만든 것의 순서를 알 수 없다
     created_at: str
@@ -105,7 +105,7 @@ class ChangeRequestStore:
     ) -> ChangeRequestLink:
         """문의와 변경 요청을 잇는다. 같은 연결을 다시 요청하면 기존 것을 돌려준다.
 
-        이미 끝난 요청에 새 문의가 묶이면(기획개발이 같은 요청으로 판단) 그 결과를 이어받는다.
+        이미 끝난 요청에 새 문의가 묶이면(기획이 같은 요청으로 판단) 그 결과를 이어받는다.
         그래야 결과 통지를 다시 받을 일 없이 바로 그 문의에 답할 수 있다.
         """
         if not context_id.startswith(ContextPrefix.REQUEST.value):

@@ -101,7 +101,7 @@ export function relayError(error: { status?: number; message: string }): string 
 }
 
 // 부서 이름(영문 id) → 한글. 부서 id는 총괄 Agent Card 레지스트리의 이름이다.
-const DEPT_KO: Record<string, string> = { infra: "인프라", data: "데이터분석", planning: "기획개발", marketing: "마케팅", support: "고객지원", finance: "재무·정산", hr: "인사운영" };
+const DEPT_KO: Record<string, string> = { infra: "인프라", data: "데이터분석", planning: "기획", dev: "개발", marketing: "마케팅", support: "고객지원", finance: "재무·정산", hr: "인사운영" };
 export const deptKo = (name: string | null) => (name ? DEPT_KO[name] ?? name : "미정");
 
 export const STEP_STATUS: Record<StepStatus, { label: string; tone: string }> = {

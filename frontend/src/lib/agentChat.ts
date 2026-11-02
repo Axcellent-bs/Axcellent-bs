@@ -65,7 +65,7 @@ export interface DemoRequest {
 
 // ---------------------------------------------------------------- 이름표
 export const DEPT_KO: Record<string, string> = {
-  orchestrator: "총괄 AI", planning: "기획개발", support: "고객지원", marketing: "마케팅", hr: "인사",
+  orchestrator: "총괄 AI", planning: "기획", dev: "개발", support: "고객지원", marketing: "마케팅", hr: "인사",
   finance: "재무", data: "데이터분석", infra: "장애 대응", safety: "안전 관문", memory: "회사 기억", "shop-api": "캣북스 쇼핑몰",
   "dashboard-api": "AXcellent 화면", operator: "운영자(사람)",
 };
@@ -142,7 +142,7 @@ const ACTION_KO: Record<string, string> = {
   // 돈이 나가는 일·안전 관문
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 확정",
   verify_amount: "금액 다시 계산", review_hold: "보류 건 1차 판단", review_threshold_change: "기준 변경 판단",
-  // 고객지원·기획개발·인사
+  // 고객지원·기획·개발·인사
   send_reply: "고객 답변 보내기", request_compensation: "보상 요청", create_claim: "클레임 접수", decide_claim: "클레임 결정",
   get_claim: "클레임 조회", receive_return: "반품 입고", inspect_return: "반품 검수", create_ticket: "변경 요청 접수",
   generate_pr: "코드 변경 만들기", merge_pr: "코드 변경 합치기", confirm_spec: "기획서 확정",

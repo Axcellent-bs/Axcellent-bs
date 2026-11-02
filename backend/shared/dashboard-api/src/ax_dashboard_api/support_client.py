@@ -1,7 +1,7 @@
 """support 에이전트 skill 호출 (A2A). 목 모드가 아닐 때 문의 API가 쓴다.
 
 - 요청마다 새 사건 ID `ctx_ui_<hex>`를 붙인다 (`UI_CONTEXT_PREFIX`). 계약에 정해진 접두사는
-  쓰지 않는다: `ctx_inc_`는 통합 에이전트, `ctx_req_`는 기획개발(변경 요청), `ctx_cmp_`는
+  쓰지 않는다: `ctx_inc_`는 통합 에이전트, `ctx_req_`는 기획(변경 요청), `ctx_cmp_`는
   마케팅이 발급한다. 화면 호출용 접두사는 아직 계약에 없어 요청 이슈를 올려 뒀다 (README "사건 ID").
 - 고객·상담원 원문은 `untrusted`로만 넘긴다.
 - 결과의 `outcome`·`status`를 API 오류로 바꾼다 (`unwrap`).

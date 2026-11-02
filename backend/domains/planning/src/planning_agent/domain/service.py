@@ -1,4 +1,4 @@
-"""기획개발 상태 변화 (프로토타입 `data.ts` 리듀서의 모든 액션을 메서드로 옮긴 것).
+"""기획·개발 상태 변화 (프로토타입 `data.ts` 리듀서의 모든 액션을 메서드로 옮긴 것).
 
 규칙:
 
@@ -8,7 +8,7 @@
   승급 제안(`auto_policy_propose`, C)만은 보류(`held`)가 정상 결과다 (팀장 승인 대기).
 - 액션은 상태 복사본 위에서 계산하고, 끝까지 성공했을 때만 바꿔 끼운다
   (중간 실패 시 원래 상태 유지).
-- 기획개발이 다른 부서로 보낸 활동은 모두 그 부서 창구(outbox)에도 쌓는다.
+- 기획·개발이 다른 부서로 보낸 활동은 모두 그 부서 창구(outbox)에도 쌓는다.
 - 숫자·중복·판정은 `rules.py`의 코드로만 계산한다. ID·시각은 주입한 시계와 상태 길이로 만든다.
 - 시뮬레이터 액션(`inbound`, `dept_chat`)은 목 모드에서만 받는다.
 """
@@ -978,7 +978,7 @@ class PlanningService:
         )
 
     def _to_outbox(self, s: State, before: int) -> None:
-        """기획개발이 다른 부서로 보낸 활동은 그 부서 창구(outbox)에도 쌓는다."""
+        """기획·개발이 다른 부서로 보낸 활동은 그 부서 창구(outbox)에도 쌓는다."""
         next_id = len(s.outbox)
         for a in s.activity[before:]:
             if a.from_ == "planning" and a.to not in ("planning", "dev"):
