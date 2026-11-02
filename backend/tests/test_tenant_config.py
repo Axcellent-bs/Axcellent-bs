@@ -104,3 +104,13 @@ def test_a_connector_that_differs_from_the_catalog_is_refused(tmp_path: Path) ->
 def test_an_unknown_tenant_is_refused(tmp_path: Path) -> None:
     with pytest.raises(tenant_env.TenantError, match="폴더가 없습니다"):
         tenant_env.resolve({"AX_TENANT": "nope"}, root=tmp_path)
+
+
+def test_data_container_points_at_the_tenant_trend_keywords() -> None:
+    """Docker data 서비스의 기본 키워드 경로(이미지 /app = backend/)가 실제 파일을 가리킨다."""
+    compose = (BACKEND / "services" / "data" / "compose.yml").read_text(encoding="utf-8")
+    line = next(ln for ln in compose.splitlines() if ln.strip().startswith("DATA_TREND_CONFIG:"))
+    assert "${AX_TENANT:-catbooks}" in line
+    default = line.split(":-", 1)[1].rsplit("}", 1)[0].replace("${AX_TENANT:-catbooks}", "catbooks")
+    assert default.startswith("/app/")
+    assert (BACKEND / default.removeprefix("/app/")).is_file()
