@@ -34,6 +34,8 @@ export interface SupportCostRecord {
   shipping_fee: number | null;
   context_id: string;
   recorded_at: string;
+  /** 문의를 닫은 뒤 끝난 환불·쿠폰으로 금액이 바뀐 시각 */
+  updated_at?: string;
 }
 
 // ---------------------------------------------------------------- §11 overview

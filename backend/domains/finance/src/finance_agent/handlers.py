@@ -375,19 +375,42 @@ async def audit_report(request: AgentRequest) -> AgentResult:
 SUPPORT_COST_QUERIES = ["shop-api:/api/shop/orders"]
 
 
+def _with_new_expense(
+    record: dict[str, Any], data: SupportCostInput
+) -> tuple[dict[str, Any], bool]:
+    """이미 있는 기록에 나중에 끝난 환불·쿠폰을 반영한다. 처음 기록한 시각과 사건은 그대로 둔다.
+
+    금액·쿠폰이 없는 이벤트(닫을 때 이벤트의 재전송 등)는 아무것도 바꾸지 않는다.
+    """
+    if data.refund_amount is None and data.coupon_id is None:
+        return record, False
+    refund = record["refund_amount"] if data.refund_amount is None else data.refund_amount
+    coupon = record["coupon_issued"] or data.coupon_id is not None
+    updated = record | {
+        "resolution": data.resolution,
+        "claim_decision": data.claim_decision or record["claim_decision"],
+        "refund_amount": refund,
+        "coupon_issued": coupon,
+        "expense_used": refund > 0 or coupon,
+    }
+    if updated == record:
+        return record, False
+    return updated | {"updated_at": _now().isoformat()}, True
+
+
 async def record_support_cost(request: AgentRequest) -> AgentResult:
     """고객지원이 닫은 문의의 처리 결과를 받아 배송비·비용 기록을 확인하고 재무 장부에 남긴다.
 
     돈을 움직이거나 외부 상태를 바꾸지 않는다(그래서 읽기 등급이다). 경비를 쓰지 않은 문의
     (답변만 한 문의, 환불·쿠폰이 없는 문의)도 상담 처리 결과를 기록으로 남긴다.
-    같은 문의는 한 번만 기록한다. 주문을 장부에서 찾지 못하면 배송비를 비우고 이유를 적는다.
+    같은 문의는 기록 하나만 둔다. 문의를 닫은 뒤 환불이 끝나면 고객지원이 금액을 채워 한 번 더
+    보내므로(`refund_amount`는 그 문의의 환불 금액 전체) 그때는 기록을 갱신한다. 금액·쿠폰이 없는
+    재전송은 기록을 바꾸지 않는다. 주문을 장부에서 찾지 못하면 배송비를 비우고 이유를 적는다.
     """
     data = _parse(request, SupportCostInput)
     if isinstance(data, AgentResult):
         return data
     ledger = state().ledger
-    refund = data.refund_amount or 0
-    coupon = data.coupon_id is not None
     unavailable: list[str] = []
     shipping_fee: int | None = None
     if data.order_id is not None:
@@ -400,31 +423,38 @@ async def record_support_cost(request: AgentRequest) -> AgentResult:
         unavailable.extend(books.meta([])["unavailable"])
     else:
         unavailable.append("문의에 주문이 연결되지 않아 배송비를 확인하지 못함")
-    expense = refund > 0 or coupon
     previous = ledger.support_costs.get(data.inquiry_id)
-    record = previous or {
-        "record_id": f"sc_{data.inquiry_id}",
-        "inquiry_id": data.inquiry_id,
-        "order_id": data.order_id,
-        "resolution": data.resolution,
-        "claim_decision": data.claim_decision,
-        "refund_amount": refund,
-        "coupon_issued": coupon,
-        "expense_used": expense,
-        "shipping_fee": shipping_fee,
-        "context_id": request.meta.context_id,
-        "recorded_at": _now().isoformat(),
-    }
+    if previous is None:
+        refund = data.refund_amount or 0
+        coupon = data.coupon_id is not None
+        record = {
+            "record_id": f"sc_{data.inquiry_id}",
+            "inquiry_id": data.inquiry_id,
+            "order_id": data.order_id,
+            "resolution": data.resolution,
+            "claim_decision": data.claim_decision,
+            "refund_amount": refund,
+            "coupon_issued": coupon,
+            "expense_used": refund > 0 or coupon,
+            "shipping_fee": shipping_fee,
+            "context_id": request.meta.context_id,
+            "recorded_at": _now().isoformat(),
+        }
+        status = "recorded"
+    else:
+        record, changed = _with_new_expense(previous, data)
+        status = "updated" if changed else "already_recorded"
     ledger.support_costs[data.inquiry_id] = record
     spent = "경비 사용 없음"
-    if expense:
-        spent = f"환불 {refund:,}원" + (", 쿠폰 지급" if coupon else "")
+    if record["expense_used"]:
+        parts = [f"환불 {record['refund_amount']:,}원"] if record["refund_amount"] else []
+        spent = ", ".join(parts + (["쿠폰 지급"] if record["coupon_issued"] else []))
     note = f"문의 #{data.inquiry_id} 처리 결과 기록: {data.resolution}, {spent}"
     output = SupportCostOutput(
         record_id=record["record_id"],
         inquiry_id=data.inquiry_id,
         order_id=record["order_id"],
-        status="already_recorded" if previous is not None else "recorded",
+        status=status,
         resolution=record["resolution"],
         claim_decision=record["claim_decision"],
         refund_amount=record["refund_amount"],

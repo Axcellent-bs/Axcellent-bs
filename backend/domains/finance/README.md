@@ -75,7 +75,7 @@ safety·finance를 목 모드로 띄운 뒤 `uv run python agents/finance/demo/s
 - 부르는 것: data `impact_analysis`(`failed_order_count`·`affected_customer_count`·`damage_amount` + 영향 고객 ID `affected_customer_ids`), data `fraud_score`(`risk_score` 0~100), safety `execute()`(판매자 승인·정산 보류·정산 묶음 `confirm_settlement`), shop-api·safety 조회 API(장부)
 
 ## 4. 의존
-ax-contracts, ax-agent-template, data 에이전트(`impact_analysis`, `fraud_score`), safety
+ax-contracts, ax-agent-template, data 에이전트(`impact_analysis`, `fraud_score`), 고객지원(`list_claims`, 처리 중 클레임으로 정산 보류), safety
 
 ## 5. 하지 않는 것
 - 영향 숫자(실패 주문·영향 고객·피해 금액)를 다시 계산하지 않는다 (원천은 data)

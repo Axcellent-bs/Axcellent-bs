@@ -120,7 +120,7 @@ class SupportCostOutput(AxModel):
     record_id: str
     inquiry_id: int
     order_id: str | None = None
-    status: Literal["recorded", "already_recorded"]
+    status: Literal["recorded", "already_recorded", "updated"]
     resolution: str
     claim_decision: str | None = None
     refund_amount: int
