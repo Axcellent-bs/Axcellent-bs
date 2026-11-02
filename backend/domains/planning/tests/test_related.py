@@ -93,6 +93,8 @@ def test_llm_decides_relation_only_within_candidates() -> None:
     _ticket(svc, "결제 실패하면 장바구니가 비워져요", "k3")
     req = _req(svc, "결제 실패하면 장바구니가 비워져요")
     assert [(x.id, x.relation, x.by) for x in req.related] == [(target.id, "same", "llm")]
+    # 내용이 같은 일로 판단되면 그 요청에 묶는다 (사람이 "풀기"로 되돌린다)
+    assert req.duplicate_of == target.id and req.context_id == target.context_id
     # LLM에는 후보만 데이터로 보낸다
     assert {c["id"] for c in llm.data["candidates"]} >= {target.id}
     assert "REQ-999" not in {c["id"] for c in llm.data["candidates"]}

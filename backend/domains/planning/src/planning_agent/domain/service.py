@@ -116,6 +116,7 @@ from ax_workflow.models import (
 )
 from ax_workflow.result_notify import ResultSender
 from ax_workflow.rules import (
+    CLOSED_REQUEST_STATES,
     check_simple,
     find_duplicate,
 )
@@ -244,6 +245,8 @@ class PlanningService(PlanningCore):
         # 요청 서비스에 되묻는 곳 (None이면 묻지 않음, 목 모드 기본값)
         self._asker: Asker | None = ask_requester.default_asker() if asker == "default" else asker
         # 기획서 초안을 LLM으로 쓰는 곳 (None이면 규칙 초안, 목 모드 기본값)
+        # 접수할 때 이미 비슷한 요청을 찾은 요청 id (_relate_new가 다시 찾지 않게)
+        self._pre_related: set[str] = set()
         self._spec_writer: SpecWriter | None = (
             default_writer() if spec_writer == "default" else spec_writer
         )
@@ -373,33 +376,96 @@ class PlanningService(PlanningCore):
         if self._relater is None:
             return
         for req in [r for r in s.requests if r.id not in known]:
-            try:
-                req.related = await self._relater.relate(s, req)
-            except Exception:  # noqa: BLE001 - 찾기가 실패해도 요청은 받는다
-                req.related = []
-            if self._relater.index is not None:
-                try:  # 다음 요청이 찾을 수 있게 memory 색인에 넣는다
-                    await self._relater.index.write(req, related.text_of(s, req))
-                except Exception:  # noqa: BLE001, S110 - 색인 실패가 요청 받기를 막지 않는다
-                    pass
-            if not req.related:
+            if req.id in self._pre_related:  # 접수할 때 이미 찾았다 (내용으로 묶기)
+                self._pre_related.discard(req.id)
                 continue
-            label = {
-                "same": "같은 일",
-                "conflict": "충돌 가능",
-                "update": "이어서 바꿈",
-                "related": "비슷함",
-            }
-            text = ", ".join(f"{x.id}({label[x.relation]})" for x in req.related)
+            await self._relate_one(s, req)
+
+    async def _relate_one(self, s: State, req: Request) -> None:
+        """요청 하나의 비슷한·충돌하는 요청을 찾아 붙이고, 내용이 같은 열린 요청이면 묶는다."""
+        if self._relater is None:
+            return
+        try:
+            req.related = await self._relater.relate(s, req)
+        except Exception:  # noqa: BLE001 - 찾기가 실패해도 요청은 받는다
+            req.related = []
+        self._bind_by_content(s, req)
+        if self._relater.index is not None:
+            try:  # 다음 요청이 찾을 수 있게 memory 색인에 넣는다
+                await self._relater.index.write(req, related.text_of(s, req))
+            except Exception:  # noqa: BLE001, S110 - 색인 실패가 요청 받기를 막지 않는다
+                pass
+        if not req.related:
+            return
+        label = {
+            "same": "같은 일",
+            "conflict": "충돌 가능",
+            "update": "이어서 바꿈",
+            "related": "비슷함",
+        }
+        text = ", ".join(f"{x.id}({label[x.relation]})" for x in req.related)
+        s.activity.append(
+            self._act(
+                self.clock(),
+                req.context_id,
+                "planning",
+                "planning",
+                "request.related",
+                "API",
+                f"{req.id} 비슷한 요청: {text}",
+                "read",
+            )
+        )
+
+    @property
+    def _content_match(self) -> bool:
+        """요청 묶기를 내용(LLM 판단)으로 하나. 아니면 예전 같은 제목 규칙."""
+        return self._relater is not None and getattr(self._relater, "_llm", None) is not None
+
+    def _bind_by_content(self, s: State, req: Request) -> None:
+        """새 요청을 내용이 같은 열린 요청에 묶는다 (사람이 "풀기"로 되돌릴 수 있다).
+
+        - LLM이 "같은 일"(same)로 본 이 서버의 열린 요청만 묶는다. 다른 서비스에만 있는 요청은
+          비슷한 요청 표시로만 둔다.
+        - LLM 판단이 하나도 없으면(실패) 같은 제목 규칙으로 대신한다.
+        - 이미 묶였거나 접수 뒤 다른 단계로 간 요청은 그대로 둔다.
+        """
+        if not self._content_match or req.duplicate_of or req.state != "접수":
+            return
+        others = [r for r in s.requests if r.id != req.id]
+        by_id = {r.id: r for r in others}
+        origin: Request | None = None
+        why = ""
+        if any(x.by == "llm" for x in req.related):
+            for x in req.related:
+                r = by_id.get(x.id)
+                if x.relation != "same" or r is None:
+                    continue
+                top = by_id.get(r.duplicate_of) if r.duplicate_of else r
+                if top is not None and top.state not in CLOSED_REQUEST_STATES:
+                    origin, why = top, x.reason
+                    break
+        else:
+            dup = find_duplicate(others, req.title)
+            origin, why = by_id.get(dup) if dup else None, "같은 제목 (내용 판단 실패)"
+        if origin is None:
+            return
+        old_ctx = req.context_id
+        req.duplicate_of = origin.id
+        req.context_id = origin.context_id
+        req.state = "중복 연결"
+        req.auto = None
+        text = f"{req.id} → 같은 요청 {origin.id}에 연결 (내용 판단: {why})"[:240]
+        for ctx in dict.fromkeys([origin.context_id, old_ctx]):
             s.activity.append(
                 self._act(
                     self.clock(),
-                    req.context_id,
+                    ctx,
                     "planning",
-                    "planning",
-                    "request.related",
-                    "API",
-                    f"{req.id} 비슷한 요청: {text}",
+                    req.from_,
+                    "get_request_status",
+                    "A2A",
+                    text,
                     "read",
                 )
             )
@@ -560,11 +626,13 @@ class PlanningService(PlanningCore):
         req_id: str | None = None,
         from_service: str | None = None,
     ) -> ActionResult:
-        """create_ticket: 같은 제목이면 중복 연결, 아니면 등록 후 간단 요청 판정.
+        """create_ticket: 묶을 요청이 있으면 중복 연결, 아니면 등록 후 간단 요청 판정.
+
+        기획 LLM이 있으면 여기서는 묶지 않고 `_relate_new`가 내용으로 판단해 묶는다.
 
         `source_ref`·`evidence_ids`는 저장만 한다 (중복·간단 요청 판정에 쓰지 않는다).
         """
-        dup_id = find_duplicate(s.requests, title)
+        dup_id = None if self._content_match else find_duplicate(s.requests, title)
         req_id = req_id or f"REQ-{20 + seq}"
         # 사건(ctx_inc_)에서 온 원인 확인 요청은 사람이 원인을 볼 일이라
         # 자동 기획·PR로 넘기지 않는다.
@@ -598,6 +666,12 @@ class PlanningService(PlanningCore):
         s.activity.append(
             self._act(t, ctx_req, frm, "planning", "create_ticket", "A2A", text, "A", seq)
         )
+        if self._content_match:
+            # 간단 요청은 아래에서 바로 처리되므로 그 전에 내용으로 비교해 묶는다
+            await self._relate_one(s, req)
+            self._pre_related.add(req.id)
+            if req.duplicate_of:
+                dup_id, ctx_req, investigate, auto = req.duplicate_of, req.context_id, False, None
         if investigate:
             s.activity.append(
                 self._act(
@@ -961,8 +1035,10 @@ class PlanningService(PlanningCore):
         """변경 요청 접수 (A, #174). 같은 요청이 있으면 묶고(linked_duplicate), 없으면 새 REQ와
         `ctx_req_`를 발급한다(created). 같은 idempotency_key의 두 번째 요청은 이전 결과를 돌려준다.
 
-        - 중복 판정은 기존 도메인 규칙(`find_duplicate`, 같은 제목)만 쓴다. `source_ref`·
-          `evidence_ids`는 저장만 한다.
+        - 중복 판정은 내용으로 한다: 기획 LLM이 있으면 제목·근거(기획서가 있으면 문제·목표·요구)를
+          비교해 "같은 일"로 본 열린 요청에 묶는다(`_relate_new`). 제목이 같아도 내용이 다르면
+          묶지 않는다. LLM이 없거나 판단이 실패하면 예전 규칙(`find_duplicate`, 같은 제목).
+          `source_ref`·`evidence_ids`는 저장만 한다.
         - 묶이면 원래 요청의 `context_id`를 돌려준다 (요청 부서는 그 사건에 문의를 잇는다).
         - 결과 통지는 같은 `context_id`에 `path`를 비운 새 요청으로 보낸다(합의). 요청 부서의 수신
           skill이 아직 없어 지금은 활동 기록(get_request_status)까지만 남긴다.
@@ -976,7 +1052,7 @@ class PlanningService(PlanningCore):
             seq = s.seq + 1
             s.seq = seq
             t = self.clock()
-            dup_id = find_duplicate(s.requests, title)
+            dup_id = None if self._content_match else find_duplicate(s.requests, title)
             original = next((r for r in s.requests if r.id == dup_id), None) if dup_id else None
             used_ctx = {r.context_id for r in s.requests}
             n = 20 + seq
@@ -1023,6 +1099,22 @@ class PlanningService(PlanningCore):
 
         to_inbox = False
         result = await self._apply(apply)
+        # 내용 판단으로 묶였으면(_relate_new) 원래 요청의 사건 번호를 돌려준다
+        bound = next(
+            (r for r in self.state.requests if r.id == result.output.get("request_id")), None
+        )
+        if bound is not None and bound.duplicate_of and result.outcome != "linked_duplicate":
+            to_inbox = False
+            result = ActionResult(
+                changed=result.changed,
+                outcome="linked_duplicate",
+                output={
+                    **result.output,
+                    "context_id": bound.context_id,
+                    "duplicate_of": bound.duplicate_of,
+                    "auto": None,
+                },
+            )
         self._idempotent[idempotency_key] = result
         self._save()  # 중복 거르기 기록도 바로 남긴다 (재시작 뒤 같은 요청을 다시 처리하지 않게)
         if to_inbox:
