@@ -1,6 +1,6 @@
-"""구독형 일감 REST·MCP (`/api/planning/work/*`, `/api/planning/mcp`). 개발 서비스(dev)에서 돈다.
+"""구독형 작업 REST·MCP (`/api/planning/work/*`, `/api/planning/mcp`). 개발 서비스(dev)에서 돈다.
 
-- 개발자 본인 Claude Code가 MCP(streamable HTTP)로 붙어 일감을 가져가고 진행·PR을 알린다.
+- 개발자 본인 Claude Code가 MCP(streamable HTTP)로 붙어 작업을 가져가고 진행·PR을 알린다.
   MCP는 JSON-RPC 요청 하나에 JSON 응답 하나만 쓰는 작은 구현이다 (SSE 스트림·세션 없음,
   `initialize`·`tools/list`·`tools/call`·`ping`). 패키지를 더 넣지 않는다.
 - 모두 사람(개발자) 토큰만 받는다 (auth.py). 토큰 이름이 가져간 사람이 된다.
@@ -36,7 +36,7 @@ STATUS = {
     "NO_VCS": 409,
 }
 INSTRUCTIONS = (
-    "Axcellent 개발 서비스 일감 대기열. list_tasks로 고르고 claim_task로 가져간 뒤 "
+    "Axcellent 개발 서비스 작업 대기열. list_tasks로 고르고 claim_task로 가져간 뒤 "
     "명세(plan·done·paths·branch·commit_rule)대로 구현한다. 커밋 메시지와 PR 제목에 작업 id"
     "(예: T-D3)를 넣는다. 일하는 동안 report_progress로 진행을 알린다 (임대가 늘어난다). "
     "PR을 올리면 report_pr로 번호를 알리고, 못 하면 release_task로 내려놓는다."
@@ -45,12 +45,12 @@ _TASK_ID = {"task_id": {"type": "string", "description": "작업 id (예: T-D3)"
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "list_tasks",
-        "description": "가져갈 수 있는 코딩 일감(대기 중)과 내가 쥐고 있는 일감 목록.",
+        "description": "가져갈 수 있는 코딩 작업(대기 중)과 내가 쥐고 있는 작업 목록.",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "claim_task",
-        "description": "일감 하나를 가져간다. 기획·완료 기준·경로 힌트·레포·브랜치·커밋 규칙.",
+        "description": "작업 하나를 가져간다. 기획·완료 기준·경로 힌트·레포·브랜치·커밋 규칙.",
         "inputSchema": {"type": "object", "properties": _TASK_ID, "required": ["task_id"]},
     },
     {
@@ -77,7 +77,7 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "release_task",
-        "description": "가져간 일감을 내려놓는다 (대기열로 돌아가 다른 사람이 가져갈 수 있다).",
+        "description": "가져간 작업을 내려놓는다 (대기열로 돌아가 다른 사람이 가져갈 수 있다).",
         "inputSchema": {
             "type": "object",
             "properties": {**_TASK_ID, "reason": {"type": "string", "description": "이유"}},

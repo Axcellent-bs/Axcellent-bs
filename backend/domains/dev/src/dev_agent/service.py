@@ -1,4 +1,4 @@
-"""개발 서비스 (dev, 8111): PR·검수·머지·저장소·배포, 코딩 에이전트·개발 대화·구독형 일감,
+"""개발 서비스 (dev, 8111): PR·검수·머지·저장소·배포, 코딩 에이전트·개발 대화·구독형 작업,
 장애 연결·관련 PR·롤백 확인 (분리 5단계: `planning_agent.domain.service`에서 옮김).
 
 공용 뼈대는 `ax_workflow.base.PlanningCore`. 기획 서비스 코드는 import하지 않는다
@@ -599,7 +599,7 @@ class DevService(PlanningCore):
         return sum(t.coding.llm_tokens for t in s.tasks if t.coding and t.coding.mode == "agent")
 
     def agents_connected(self, s: State) -> list[str]:
-        """최근 본인 Claude(MCP)로 일감을 본 개발자."""
+        """최근 본인 Claude(MCP)로 작업을 본 개발자."""
         since = self.clock() - timedelta(days=AGENT_SEEN_DAYS)
         return sorted(who for who, at in s.agents_seen.items() if at >= since)
 
@@ -701,7 +701,7 @@ class DevService(PlanningCore):
         }
 
     async def mark_agent_seen(self, who: str) -> None:
-        """본인 Claude(MCP 일감 서버)로 일감을 본 개발자를 적는다 (10분에 한 번만)."""
+        """본인 Claude(MCP 작업 대기열 서버)로 작업을 본 개발자를 적는다 (10분에 한 번만)."""
         now = self.clock()
         last = self.state.agents_seen.get(who)
         if last is not None and now - last < timedelta(minutes=10):
@@ -2902,7 +2902,7 @@ class DevService(PlanningCore):
 
 
 TRIAL_TOKENS = 1_000_000  # 서버 AI 체험 한도 기본값 (PLANNING_TRIAL_TOKENS)
-AGENT_SEEN_DAYS = 7  # 이 기간 안에 본인 Claude로 일감을 본 개발자가 있으면 '연결됨'
+AGENT_SEEN_DAYS = 7  # 이 기간 안에 본인 Claude로 작업을 본 개발자가 있으면 '연결됨'
 WAIT_POLL_SECONDS = 30  # 다른 서비스 요청을 기다리는 대화를 다시 보는 간격
 
 

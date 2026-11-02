@@ -1,5 +1,5 @@
 """개발 서비스 화면 REST (`/api/planning/*`, dev 8111). 공용 라우트 + 형상관리 연결·배포 기록·
-코딩 작업·개발 대화·저장소 작업 공간·구독형 일감 (분리 5단계: api.py에서 옮김)."""
+코딩 작업·개발 대화·저장소 작업 공간·구독형 작업 (분리 5단계: api.py에서 옮김)."""
 
 from __future__ import annotations
 
@@ -424,7 +424,7 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
     # ---- 레포 작업 공간 (repo_api.py): PR 게시판·상세·머지·되돌리기·브랜치
     add_repo_routes(router, get_service)
 
-    # ---- 구독형 일감 (work_api.py): 개발자 본인 Claude가 MCP로 일감을 가져간다
+    # ---- 구독형 작업 (work_api.py): 개발자 본인 Claude가 MCP로 작업을 가져간다
     add_work_routes(router, get_service)
 
 

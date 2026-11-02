@@ -260,7 +260,7 @@ export interface CodingSettings {
   mode: CodingSetting // 회사 설정
   resolved: 'agent' | 'subscription' // 지금 넘겨받는 요청 작업을 실제로 누가 코딩하나
   why: string
-  agents_connected: string[] // 최근 본인 Claude(MCP)로 일감을 본 개발자
+  agents_connected: string[] // 최근 본인 Claude(MCP)로 작업을 본 개발자
   trial_used: number // 서버 AI가 쓴 토큰
   trial_limit: number
   run_max_calls?: number // 코딩 실행 한 번의 LLM 호출 한도

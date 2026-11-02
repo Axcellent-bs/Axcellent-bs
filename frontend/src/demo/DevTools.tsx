@@ -60,14 +60,14 @@ function CopyLine({ text }: { text: string }) {
   )
 }
 
-/** 내 Claude(MCP 일감 서버) 연결하기: 내 PC의 Claude Code에 일감 서버를 붙이는 순서 */
+/** 내 Claude(MCP 작업 대기열 서버) 연결하기: 내 PC의 Claude Code에 작업 대기열 서버를 붙이는 순서 */
 function ClaudeConnect({ connected }: { connected: string[] }) {
   return (
     <div className="space-y-3 rounded-lg border border-ink-100 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="font-medium">내 Claude 연결</h3>
         <span className={`chip ${connected.length ? TONE.ok : TONE.none}`}>{connected.length ? `연결됨 ${connected.join(', ')}` : '연결 없음'}</span>
-        <span className="text-xs text-ink-500">최근 7일 안에 일감을 본 개발자</span>
+        <span className="text-xs text-ink-500">최근 7일 안에 작업을 본 개발자</span>
       </div>
       <ol className="list-decimal space-y-3 pl-5 text-sm">
         <li className="space-y-1">
@@ -75,7 +75,7 @@ function ClaudeConnect({ connected }: { connected: string[] }) {
           <span className="block text-xs text-ink-500">운영자에게 받기 · 저장소에 커밋 금지</span>
         </li>
         <li className="space-y-1">
-          <span>내 PC 터미널에서 일감 서버 붙이기</span>
+          <span>내 PC 터미널에서 작업 대기열 서버 붙이기</span>
           <CopyLine text={MCP_ADD} />
         </li>
         <li className="space-y-1">
@@ -83,8 +83,8 @@ function ClaudeConnect({ connected }: { connected: string[] }) {
           <CopyLine text="claude mcp list" />
         </li>
         <li className="space-y-1">
-          <span>레포 폴더에서 Claude Code로 일감 가져가기</span>
-          <CopyLine text="axcellent-dev에서 일감 목록 보여 줘. 하나 가져가서 명세대로 구현하고 PR 올려 줘." />
+          <span>레포 폴더에서 Claude Code로 작업 가져가기</span>
+          <CopyLine text="axcellent-dev에서 작업 목록 보여 줘. 하나 가져가서 명세대로 구현하고 PR 올려 줘." />
         </li>
       </ol>
     </div>
