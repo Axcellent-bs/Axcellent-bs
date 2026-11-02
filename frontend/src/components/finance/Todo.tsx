@@ -15,6 +15,7 @@ const KIND: Record<FinanceTodo["kind"], { label: string; tone: string }> = {
   recon_exception: { label: "대사", tone: TONE.bad },
   audit_finding: { label: "감사", tone: TONE.warn },
   policy_alert: { label: "한도", tone: TONE.warn },
+  team_budget: { label: "팀 예산", tone: TONE.info },
 };
 
 /** 건마다 메모를 남기는 할 일의 버튼 이름·안내 */
@@ -86,6 +87,29 @@ export function TodoCard({ todo, onDone, onOpen, onGoToQueue }: {
       <Decision hint="지급 승인 요청이 안전 장치 보류 큐에서 기다립니다. 판매자·기간·금액이 정산 표와 같으면 진행을 누르세요.">
         <button type="button" className="btn-primary" onClick={() => onGoToQueue(reviewId)}>보류 큐에서 승인하기</button>
       </Decision>
+    );
+  } else if (action?.type === "team_budget_approve" && action.month && action.signature) {
+    const { month, signature } = action;
+    decision = (
+      <div className="mt-3 space-y-2">
+        <p className="text-xs text-ink-500">팀 예산 = 그달 1일 팀 인원 × 인당 월 단가입니다. 인원은 인사 AI가 알려 준 숫자이고, 발령은 다음 달 1일부터 반영됩니다. 숫자가 맞으면 확정하세요. 돈을 옮기지는 않습니다.</p>
+        {(todo.items ?? []).length > 0 && (
+          <ul className="space-y-1 text-sm">
+            {(todo.items ?? []).map((item) => (
+              <li key={item.ref} className="flex flex-wrap items-baseline gap-x-2 rounded-xl border border-ink-100 px-3 py-2">
+                <b className="text-ink-900">{plainText(item.title)}</b>
+                <span className="text-xs text-ink-500">{plainText(item.detail)}</span>
+                {item.amount != null && <span className="ml-auto text-xs tabular-nums text-ink-700">{item.amount > 0 ? `+${krw(item.amount)}` : signedKrw(item.amount)}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn-ghost" onClick={onOpen}>팀별 숫자 보기</button>
+          <button type="button" className="btn-primary" disabled={!humanTokenSet || busy}
+            onClick={() => run(() => finance.approveTeamBudget(month, signature))}>{busy ? "확정하는 중…" : `${month} 팀 예산 확정`}</button>
+        </div>
+      </div>
     );
   } else if (action?.type === "open_tab") {
     decision = (

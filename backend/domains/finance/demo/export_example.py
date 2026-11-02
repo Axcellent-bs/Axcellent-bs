@@ -23,7 +23,8 @@ os.environ.pop("FINANCE_STATE_FILE", None)
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from finance_agent import handlers  # noqa: E402
+from finance_agent import finance_config as fc  # noqa: E402
+from finance_agent import handlers, team_budget  # noqa: E402
 from finance_agent.main import app  # noqa: E402
 from finance_agent.sources import MockSources  # noqa: E402
 
@@ -71,6 +72,10 @@ def main() -> None:
         if action.get("type") == "closing_confirm":  # 할 일에서 바로 확정할 날의 결산
             path = f"/api/finance/closing?period={action['period']}&date={action['date']}"
             out[path] = client.get(path).json()
+    this_month = team_budget.month_of(fc.today())
+    for n in (-1, 0, 1):  # 팀 예산 화면의 지난달·이번 달·다음 달 버튼
+        path = f"/api/finance/team-budget?month={team_budget.shift_month(this_month, n)}"
+        out[path] = client.get(path).json()
     for row in out["/api/finance/incidents"]["data"]:  # type: ignore[index]
         path = f"/api/finance/incidents/{row['context_id']}"
         out[path] = client.get(path).json()

@@ -10,6 +10,9 @@ data `impact_analysis`의 입력·출력은 계약(`ImpactAnalysisInput`·`Impac
 만들고 확인한다.
 장애 구간(`window_from`·`window_to`)을 모르면 data에 묻지 않는다.
 
+팀 예산의 팀별 인원수는 인사 AI `team_headcount`(계약 `TeamHeadcountOutput`)를 A2A로 묻는다.
+이름·직원 ID는 받지 않는다. 못 받으면 None이고 예산을 0원으로 지어내지 않는다.
+
 장애 구간은 총괄 사건 목록(`GET /api/incidents`)을 읽기 전용으로 읽어서 안다
 (계약 `data_access/orchestrator_incidents.py`, [협업] #417 제안 A, 요청 #418).
 사건 **중**에 총괄을 부르는 게 아니다 — 평상시 사후 감사·사건 조회에서만 읽는다.
@@ -29,6 +32,7 @@ from pydantic import ValidationError
 
 from ax_agent_template import call_agent
 from ax_agent_template.config import agent_url
+from ax_agent_template.services import route_target
 from ax_contracts.data_access.orchestrator_incidents import OrchestratorIncident
 from ax_contracts.schemas import (
     AgentRequest,
@@ -36,6 +40,8 @@ from ax_contracts.schemas import (
     ImpactAnalysisOutput,
     RequestMeta,
     TaskStatus,
+    TeamHeadcountInput,
+    TeamHeadcountOutput,
 )
 
 DATA_CALL_SECONDS = 10.0
@@ -106,6 +112,8 @@ class Sources(Protocol):
 
     async def paid_amount(self, meta: RequestMeta, order_id: str) -> int | None: ...
 
+    async def team_headcount(self, meta: RequestMeta, month: str) -> TeamHeadcountOutput | None: ...
+
 
 def _int(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
@@ -168,6 +176,26 @@ class MockSources:
     async def paid_amount(self, meta: RequestMeta, order_id: str) -> int | None:
         return _int(self.seed.get("payments", {}).get(str(order_id)))
 
+    async def team_headcount(self, meta: RequestMeta, month: str) -> TeamHeadcountOutput | None:
+        """시드의 월별 팀 인원. 그 달이 없으면 그 전 가장 가까운 달(발령이 없던 달)을 쓴다."""
+        months = self.seed.get("team_headcount") or {}
+        known = sorted(m for m in months if m[:1].isdigit() and m <= month)
+        if not known:
+            return None
+        return TeamHeadcountOutput.model_validate(
+            {
+                "month": month,
+                "rows": [{"team": t, "headcount": n} for t, n in months[known[-1]].items()],
+                "basis": "목 시드(테스트용)",
+                "collected_at": datetime.now(UTC),
+            }
+        )
+
+
+# 팀 인원은 하루에 몇 번 바뀌지 않는다. 재무 화면이 몇 초마다 불러도 인사에 다시 묻지 않는다
+HEADCOUNT_CACHE_SECONDS = 300
+HEADCOUNT_FAILED_SECONDS = 60
+HR_CALL_SECONDS = 10.0
 
 # 같은 사건·같은 구간의 영향 분석은 이 시간 동안 다시 묻지 않는다. 재무 화면이 몇 초마다 다시 불러도
 # data에 같은 A2A 요청이 반복되지 않게 한다 (AI 대화방에 같은 대화가 쌓이지 않게)
@@ -217,6 +245,38 @@ class LiveSources:
     def __init__(self, http_client: httpx.AsyncClient | None = None) -> None:
         self._http = http_client  # 테스트용
         self._impact_cache: dict[tuple[str, str], tuple[float, Impact | None]] = {}
+        self._headcount_cache: dict[str, tuple[float, TeamHeadcountOutput | None]] = {}
+
+    async def team_headcount(self, meta: RequestMeta, month: str) -> TeamHeadcountOutput | None:
+        """인사 `team_headcount` (읽기). 응답이 없거나 계약과 다르면 None."""
+        # 인사에 아직 이 skill을 맡은 서비스가 없으면 묻지 않는다. 그대로 부르면 꺼진 서비스로 보고
+        # 사람 할 일함에 넘기기(hand-off) 때문이다. 인사가 services.py에 등록하면 그때부터 묻는다
+        if route_target("hr", "team_headcount") == "hr":
+            return None
+        hit = self._headcount_cache.get(month)
+        now = time.monotonic()
+        if hit is not None and now - hit[0] < (
+            HEADCOUNT_CACHE_SECONDS if hit[1] is not None else HEADCOUNT_FAILED_SECONDS
+        ):
+            return hit[1]
+        deadline = min(meta.deadline, datetime.now(UTC) + timedelta(seconds=HR_CALL_SECONDS))
+        request = AgentRequest(
+            meta=meta.model_copy(update={"deadline": deadline}),
+            skill="team_headcount",
+            input=TeamHeadcountInput(month=month).model_dump(mode="json"),
+        )
+        result = await call_agent("hr", request)
+        out: TeamHeadcountOutput | None = None
+        if result.status == TaskStatus.COMPLETED:
+            try:
+                out = TeamHeadcountOutput.model_validate(result.output)
+            except ValidationError:
+                out = None
+            if out is not None and out.month != month:
+                out = None
+        # 실패도 잠깐 기억한다. 화면이 몇 초마다 불러도 실패 기록이 AI 대화방에 쌓이지 않게
+        self._headcount_cache[month] = (now, out)
+        return out
 
     async def _read_json(self, url: str, timeout: float) -> Any | None:
         """읽기 전용 GET. 응답이 없거나 200이 아니거나 JSON이 아니면 None (fail-closed)."""

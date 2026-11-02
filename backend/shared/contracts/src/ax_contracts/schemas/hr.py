@@ -26,6 +26,7 @@ skill과 등급(등급 신고는 안전 레이어 레지스트리가 원본이�
 | `list_duplicate_groups` | 읽기 | 사람 승인을 기다리는 중복 결정 묶음과 최근 병합(되돌리기용) |
 | `decide_duplicate_group` | A | 중복 묶음을 사람이 병합하거나 그대로 둠 |
 | `restore_merged_card` | A | 병합으로 대체됨이 된 카드를 되돌림 |
+| `team_headcount` | 읽기 | 그 달 1일 기준 팀별 인원수 (이름·직원 ID 없음, 요청자 finance 팀 예산) |
 
 `RecordCaseOutput`은 모델만 추가했고, hr의 출력 전환은 hr 담당 PR에서 한다.
 
@@ -284,6 +285,35 @@ class GetRosterInput(AxModel):
 class GetRosterOutput(AxModel):
     entries: list[RosterEntry] = Field(default_factory=list)
     gap_areas: list[str] = Field(default_factory=list)  # 담당 공백 영역
+    collected_at: UtcDatetime
+
+
+# ---- 팀 인원수 (재무 팀 예산용, 2026-11-02 #2-재무 합의) ---------------------------------
+
+
+class TeamHeadcountInput(AxModel):
+    """`team_headcount` 입력. 그 달 1일에 어느 팀에 몇 명이 있었는지 묻는다."""
+
+    month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")  # YYYY-MM
+
+
+class TeamHeadcountRow(AxModel):
+    """팀 하나의 인원수. 이름·직원 ID는 넣지 않는다."""
+
+    team: str = Field(min_length=1)  # 조직도(회사 폴더 org.yaml)의 부서 이름
+    headcount: int = Field(ge=0)
+
+
+class TeamHeadcountOutput(AxModel):
+    """`team_headcount` 결과. 발령은 발령일이 1일이면 그 달부터, 아니면 다음 달 1일부터 센다.
+
+    파견은 세지 않는다(파견 중이어도 원래 팀). `basis`는 화면에 그대로 보여 줄 기준 문장
+    (예: "가상 명부(예시) 기준, 2026-11-01 소속").
+    """
+
+    month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    rows: list[TeamHeadcountRow] = Field(default_factory=list)
+    basis: str | None = None
     collected_at: UtcDatetime
 
 

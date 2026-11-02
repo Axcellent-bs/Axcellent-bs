@@ -97,3 +97,24 @@ def test_a_connector_that_differs_from_the_catalog_is_refused(tmp_path: Path) ->
 def test_an_unknown_tenant_is_refused(tmp_path: Path) -> None:
     with pytest.raises(tenant_env.TenantError, match="폴더가 없습니다"):
         tenant_env.resolve({"AX_TENANT": "nope"}, root=tmp_path)
+
+
+def test_the_finance_per_head_budget_comes_from_the_tenant_folder(tmp_path: Path) -> None:
+    """팀 예산 인당 월 단가는 회사마다 다르다: 회사 폴더 값을 쓰고, 환경변수가 먼저다."""
+    out, _ = tenant_env.resolve({}, local_org=tmp_path / "org.yaml")
+    assert out["FINANCE_PER_HEAD_MONTHLY"] == "100000"
+    out, _ = tenant_env.resolve(
+        {"FINANCE_PER_HEAD_MONTHLY": "70000"}, local_org=tmp_path / "org.yaml"
+    )
+    assert "FINANCE_PER_HEAD_MONTHLY" not in out
+
+
+def test_a_negative_per_head_budget_is_refused(tmp_path: Path) -> None:
+    folder = tmp_path / "shop"
+    folder.mkdir()
+    (folder / "tenant.toml").write_text(
+        'catalog = "catbooks"\nconnector = "shop-api"\n[finance]\nper_head_monthly = -1\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(tenant_env.TenantError, match="per_head_monthly"):
+        tenant_env.read_tenant(folder)

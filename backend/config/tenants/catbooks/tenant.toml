@@ -9,3 +9,7 @@ catalog = "catbooks"
 connector = "shop-api"
 # 조직도 (이 폴더 기준). 꺼진 서비스로 가는 일을 맡는 부서
 org = "org.yaml"
+
+[finance]
+# 팀 예산 = 그달 1일 팀 인원 × 인당 월 단가(원). 재무 AI가 계산하고 재무 담당이 승인한다
+per_head_monthly = 100000

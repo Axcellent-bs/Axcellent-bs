@@ -8,6 +8,8 @@
 출력은 `export 이름=값` 줄이다. 이미 정한 값이 먼저다(지금 쓰는 사람이 깨지지 않게):
 - 조직도 `AX_ORG_CONFIG`: 환경변수 → `config/org.yaml`(각자 덮어쓰기, 커밋 안 함) → 회사 폴더 `org`
 - 카탈로그 `DATA_TENANT_CATALOG`: 환경변수 → 회사 폴더 `catalog`
+- 재무 인당 월 단가 `FINANCE_PER_HEAD_MONTHLY`: 환경변수 → 회사 폴더 `[finance] per_head_monthly`
+  (없으면 재무 기본값 `finance_policy.toml`)
 설정이 틀리면(폴더·카탈로그 없음, 커넥터가 카탈로그와 다름) 이유를 stderr에 쓰고 2로 끝난다.
 """
 
@@ -62,11 +64,18 @@ def read_tenant(folder: Path) -> dict[str, str]:
             f"{path}: 커넥터 {raw['connector']!r}가 카탈로그의 connector {in_catalog!r}와 다릅니다"
         )
     org = raw.get("org", "org.yaml")
+    finance = raw.get("finance") or {}
+    per_head = finance.get("per_head_monthly") if isinstance(finance, dict) else None
+    if per_head is not None and (
+        isinstance(per_head, bool) or not isinstance(per_head, int) or per_head < 0
+    ):
+        raise TenantError(f"{path}: [finance] per_head_monthly는 0 이상 정수여야 합니다")
     return {
         "name": str(raw.get("name") or folder.name),
         "catalog": raw["catalog"] if not raw["catalog"].endswith(".toml") else catalog.as_posix(),
         "connector": raw["connector"],
         "org": (folder / org).resolve().as_posix() if isinstance(org, str) and org else "",
+        "per_head_monthly": "" if per_head is None else str(per_head),
     }
 
 
@@ -105,6 +114,12 @@ def resolve(
     else:
         out["DATA_TENANT_CATALOG"] = tenant["catalog"]
         notes.append(f"카탈로그: {tenant['catalog']} (회사 폴더)")
+
+    if env.get("FINANCE_PER_HEAD_MONTHLY"):
+        notes.append(f"재무 인당 월 단가: {env['FINANCE_PER_HEAD_MONTHLY']}원 (환경변수)")
+    elif tenant["per_head_monthly"]:
+        out["FINANCE_PER_HEAD_MONTHLY"] = tenant["per_head_monthly"]
+        notes.append(f"재무 인당 월 단가: {tenant['per_head_monthly']}원 (회사 폴더)")
     return out, notes
 
 

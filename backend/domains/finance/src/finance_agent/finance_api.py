@@ -21,6 +21,8 @@
 | `GET /api/finance/tax/seller-report?date=&format=` | ⑥ 판매자별 판매 명세 (제75조 초안) | 없음 |
 | `GET /api/finance/policy` | ⑤ 정책표·소진율·한도 제안 | 없음 |
 | `POST /api/finance/policy/{key}/ack` | ⑤ 경보 확인 메모 (이번 달 숨김) | **사람** |
+| `GET /api/finance/team-budget?month=YYYY-MM` | ⑤ 팀 예산 (팀 인원 × 인당 월 단가) | 없음 |
+| `POST /api/finance/team-budget/{month}/approve` | ⑤ 팀 예산 확정 (`signature` 일치) | **사람** |
 | `GET /api/finance/audit?days=7&context_id=` | ⑦ 사후 감사 (사건 하나로 좁히기 선택) | 없음 |
 | `GET /api/finance/anomalies` | ⑦ 처리 전 의심 건 전부(기간 제한 없음) | 없음 |
 | `POST /api/finance/anomalies/{finding_ref}/resolve` | ⑦ 의심 건 처리 완료(메모) | **사람** |
@@ -58,10 +60,17 @@ from finance_agent import (
     settlement,
     statements,
     tax,
+    team_budget,
     variance,
 )
 from finance_agent import finance_config as fc
-from finance_agent.handlers import closing_key, incident_impact, note_audit, state
+from finance_agent.handlers import (
+    closing_key,
+    incident_impact,
+    note_audit,
+    state,
+    team_budget_data,
+)
 from finance_agent.human import human_from_authorization
 
 TODO_ITEMS = 10  # 할 일 카드에 바로 보여 줄 건수
@@ -294,10 +303,54 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
                 ],
             }
         )
+    # 팀 예산: 이번 달과 다음 달(발령은 다음 달 1일부터 반영) 중 확정이 안 됐거나 숫자가 바뀐 달
+    this_month = team_budget.month_of(today)
+    for month in (this_month, team_budget.shift_month(this_month, 1)):
+        tb, _ = await team_budget_data(month)
+        if tb["status"] not in ("pending", "changed"):
+            continue
+        changed = [r for r in tb["rows"] if r["change"]]
+        todo.append(
+            {
+                "kind": "team_budget",
+                "title": (
+                    f"{month} 팀 예산 다시 확인 필요 (확정 뒤 인원·단가가 바뀜)"
+                    if tb["status"] == "changed"
+                    else f"{month} 팀 예산 확정 대기"
+                ),
+                "count": len(tb["rows"]),
+                "amount": tb["total"],
+                "link": "policy",
+                # 재무 담당이 숫자를 보고 확정한다. 재무 AI는 예산을 혼자 바꾸지 않는다
+                "action": {
+                    "type": "team_budget_approve",
+                    "month": month,
+                    "signature": tb["signature"],
+                },
+                "items": [
+                    {
+                        "ref": r["team"],
+                        "title": r["team"],
+                        "detail": f"{r['prev_headcount']}명 → {r['headcount']}명",
+                        "amount": r["change"],
+                    }
+                    for r in changed[:TODO_ITEMS]
+                ],
+            }
+        )
     return {"date": today.isoformat(), "kpis": totals.as_kpis(unknown), "todo": todo}, books.meta()
 
 
 ALERT_RANK = {"ok": 0, "warn": 1, "over": 2}
+
+
+def _team_budget_meta(missing: list[str]) -> dict[str, Any]:
+    return {
+        "mock": is_mock("finance"),
+        "collected_at": fc.iso(fc.now()),
+        "source": "hr.team_headcount",
+        "unavailable": missing,
+    }
 
 
 def policy_acked(ack: dict[str, Any] | None, alert: str, today: Any) -> bool:
@@ -571,6 +624,48 @@ def add_finance_api(app: FastAPI) -> None:
         }
         state().records.policy_acks[rule_key] = ack
         return ok(ack | {"key": rule_key}, books.meta() | {"acked_by": person})
+
+    @app.get("/api/finance/team-budget", response_model=None)
+    async def get_team_budget(month: str | None = None) -> dict | JSONResponse:
+        try:
+            m = team_budget.parse_month(month, fc.today())
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        data, missing = await team_budget_data(m)
+        return ok(data, _team_budget_meta(missing))
+
+    @app.post("/api/finance/team-budget/{month}/approve", response_model=None)
+    async def approve_team_budget(
+        month: str, request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """재무 담당이 그 달 팀 예산을 확정한다. 보던 숫자(`signature`)와 지금이 같아야 한다."""
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        try:
+            m = team_budget.parse_month(month, fc.today())
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        body = await _body(request)
+        sig, note = body.get("signature"), body.get("note")
+        if not isinstance(sig, str) or not sig:
+            return error(400, "invalid_request", "signature(확정할 때 보던 숫자)가 필요하다")
+        if note is not None and (not isinstance(note, str) or len(note) > 500):
+            return error(400, "invalid_request", "note는 500자 이하 문자열")
+        data, missing = await team_budget_data(m)
+        if data["status"] == "unavailable":
+            return error(
+                503, "team_headcount_unavailable", "인사 AI에서 팀 인원을 받지 못해 확정할 수 없다"
+            )
+        if data["signature"] != sig:
+            return error(
+                409, "stale", "그사이 인원이나 단가가 바뀌었다. 다시 불러와 확인하고 확정한다"
+            )
+        record = team_budget.approval(data, person, fc.iso(fc.now()), (note or "").strip() or None)
+        state().records.team_budgets[m] = record
+        data, missing = await team_budget_data(m)
+        return ok(data, _team_budget_meta(missing) | {"approved_by": person})
 
     @app.get("/api/finance/settlements/deadlines")
     async def get_deadlines() -> dict:

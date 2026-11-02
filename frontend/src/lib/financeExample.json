@@ -171,12 +171,51 @@
        "amount": null
       }
      ]
+    },
+    {
+     "kind": "team_budget",
+     "title": "2026-11 팀 예산 확정 대기",
+     "count": 8,
+     "amount": 2700000,
+     "link": "policy",
+     "action": {
+      "type": "team_budget_approve",
+      "month": "2026-11",
+      "signature": "2f02fc5fc057a433"
+     },
+     "items": []
+    },
+    {
+     "kind": "team_budget",
+     "title": "2026-12 팀 예산 확정 대기",
+     "count": 8,
+     "amount": 2700000,
+     "link": "policy",
+     "action": {
+      "type": "team_budget_approve",
+      "month": "2026-12",
+      "signature": "2bcc6fde1cf5282e"
+     },
+     "items": [
+      {
+       "ref": "개발팀",
+       "title": "개발팀",
+       "detail": "6명 → 5명",
+       "amount": -100000
+      },
+      {
+       "ref": "기획팀",
+       "title": "기획팀",
+       "detail": "4명 → 5명",
+       "amount": 100000
+      }
+     ]
     }
    ]
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.430714Z",
+   "collected_at": "2026-11-02T01:24:56.370618Z",
    "source": "seed",
    "unavailable": []
   }
@@ -271,7 +310,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.470764Z",
+   "collected_at": "2026-11-02T01:24:56.399550Z",
    "source": "seed",
    "unavailable": []
   }
@@ -366,7 +405,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.480846Z",
+   "collected_at": "2026-11-02T01:24:56.430168Z",
    "source": "seed",
    "unavailable": []
   }
@@ -542,7 +581,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.482068Z",
+   "collected_at": "2026-11-02T01:24:56.446604Z",
    "source": "seed",
    "unavailable": []
   }
@@ -718,7 +757,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.516509Z",
+   "collected_at": "2026-11-02T01:24:56.461934Z",
    "source": "seed",
    "unavailable": []
   }
@@ -894,7 +933,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.533596Z",
+   "collected_at": "2026-11-02T01:24:56.472779Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2013,7 +2052,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.545223Z",
+   "collected_at": "2026-11-02T01:24:56.483885Z",
    "source": "seed",
    "unavailable": [],
    "pg_source": "mock_toss_settlement"
@@ -2088,7 +2127,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.555863Z",
+   "collected_at": "2026-11-02T01:24:56.494959Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2203,7 +2242,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.586097Z",
+   "collected_at": "2026-11-02T01:24:56.503703Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2275,7 +2314,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.593533Z",
+   "collected_at": "2026-11-02T01:24:56.529667Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2326,7 +2365,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.608069Z",
+   "collected_at": "2026-11-02T01:24:56.546410Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2508,7 +2547,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.614687Z",
+   "collected_at": "2026-11-02T01:24:56.555426Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2523,7 +2562,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.632068Z",
+   "collected_at": "2026-11-02T01:24:56.571620Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2649,7 +2688,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.641197Z",
+   "collected_at": "2026-11-02T01:24:56.579768Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2715,7 +2754,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.657704Z",
+   "collected_at": "2026-11-02T01:24:56.595367Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2775,7 +2814,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.667868Z",
+   "collected_at": "2026-11-02T01:24:56.604783Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2882,7 +2921,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.674220Z",
+   "collected_at": "2026-11-02T01:24:56.613140Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2985,7 +3024,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.685120Z",
+   "collected_at": "2026-11-02T01:24:56.626431Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3089,7 +3128,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.708043Z",
+   "collected_at": "2026-11-02T01:24:56.650407Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3186,7 +3225,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.729456Z",
+   "collected_at": "2026-11-02T01:24:56.668799Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3209,8 +3248,8 @@
       "exe_s0044"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T00:48:44.451395Z",
-     "last_seen": "2026-11-02T00:48:44.745918Z",
+     "first_seen": "2026-11-02T01:24:56.399550Z",
+     "last_seen": "2026-11-02T01:24:56.686081Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3223,8 +3262,8 @@
      "detail": "최근 7일 환불률 4.1% (지난 7일 0.5%)",
      "refs": [],
      "status": "open",
-     "first_seen": "2026-11-02T00:48:44.451395Z",
-     "last_seen": "2026-11-02T00:48:44.725200Z",
+     "first_seen": "2026-11-02T01:24:56.399550Z",
+     "last_seen": "2026-11-02T01:24:56.662787Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3240,8 +3279,8 @@
       "ord_2156"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T00:48:44.451395Z",
-     "last_seen": "2026-11-02T00:48:44.745918Z",
+     "first_seen": "2026-11-02T01:24:56.399550Z",
+     "last_seen": "2026-11-02T01:24:56.686081Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3257,8 +3296,8 @@
       "cpn_3063"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T00:48:44.451395Z",
-     "last_seen": "2026-11-02T00:48:44.745918Z",
+     "first_seen": "2026-11-02T01:24:56.399550Z",
+     "last_seen": "2026-11-02T01:24:56.686081Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3278,8 +3317,8 @@
       "ord_2135"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T00:48:44.451395Z",
-     "last_seen": "2026-11-02T00:48:44.745918Z",
+     "first_seen": "2026-11-02T01:24:56.399550Z",
+     "last_seen": "2026-11-02T01:24:56.686081Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3297,8 +3336,8 @@
       "exe_s0046"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T00:48:44.451395Z",
-     "last_seen": "2026-11-02T00:48:44.745918Z",
+     "first_seen": "2026-11-02T01:24:56.399550Z",
+     "last_seen": "2026-11-02T01:24:56.686081Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3316,8 +3355,8 @@
       "exe_s0049"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T00:48:44.451395Z",
-     "last_seen": "2026-11-02T00:48:44.700466Z",
+     "first_seen": "2026-11-02T01:24:56.399550Z",
+     "last_seen": "2026-11-02T01:24:56.641853Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3336,8 +3375,8 @@
       "exe_s0049"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T00:48:44.725200Z",
-     "last_seen": "2026-11-02T00:48:44.745918Z",
+     "first_seen": "2026-11-02T01:24:56.662787Z",
+     "last_seen": "2026-11-02T01:24:56.686081Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3428,7 +3467,7 @@
   ],
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.778513Z",
+   "collected_at": "2026-11-02T01:24:56.713959Z",
    "ledger_source": "seed",
    "unavailable": []
   }
@@ -3437,7 +3476,7 @@
   "data": [],
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.787138Z",
+   "collected_at": "2026-11-02T01:24:56.723399Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3539,8 +3578,272 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.807234Z",
+   "collected_at": "2026-11-02T01:24:56.736805Z",
    "source": "seed",
+   "unavailable": []
+  }
+ },
+ "/api/finance/team-budget?month=2026-10": {
+  "data": {
+   "month": "2026-10",
+   "prev_month": "2026-09",
+   "per_head_monthly": 100000,
+   "basis": "목 시드(테스트용)",
+   "approved": null,
+   "actual_spend": null,
+   "status": "pending",
+   "rows": [
+    {
+     "team": "개발팀",
+     "headcount": 6,
+     "budget": 600000,
+     "prev_headcount": 6,
+     "prev_budget": 600000,
+     "change": 0
+    },
+    {
+     "team": "고객지원",
+     "headcount": 5,
+     "budget": 500000,
+     "prev_headcount": 5,
+     "prev_budget": 500000,
+     "change": 0
+    },
+    {
+     "team": "기획팀",
+     "headcount": 4,
+     "budget": 400000,
+     "prev_headcount": 4,
+     "prev_budget": 400000,
+     "change": 0
+    },
+    {
+     "team": "데이터분석",
+     "headcount": 2,
+     "budget": 200000,
+     "prev_headcount": 2,
+     "prev_budget": 200000,
+     "change": 0
+    },
+    {
+     "team": "마케팅",
+     "headcount": 3,
+     "budget": 300000,
+     "prev_headcount": 3,
+     "prev_budget": 300000,
+     "change": 0
+    },
+    {
+     "team": "서비스운영",
+     "headcount": 3,
+     "budget": 300000,
+     "prev_headcount": 3,
+     "prev_budget": 300000,
+     "change": 0
+    },
+    {
+     "team": "인사총무",
+     "headcount": 2,
+     "budget": 200000,
+     "prev_headcount": 2,
+     "prev_budget": 200000,
+     "change": 0
+    },
+    {
+     "team": "재무/정산",
+     "headcount": 2,
+     "budget": 200000,
+     "prev_headcount": 2,
+     "prev_budget": 200000,
+     "change": 0
+    }
+   ],
+   "total": 2700000,
+   "prev_total": 2700000,
+   "change_total": 0,
+   "headcount_total": 27,
+   "signature": "3d26d16f239d185a"
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-11-02T01:24:56.757060Z",
+   "source": "hr.team_headcount",
+   "unavailable": []
+  }
+ },
+ "/api/finance/team-budget?month=2026-11": {
+  "data": {
+   "month": "2026-11",
+   "prev_month": "2026-10",
+   "per_head_monthly": 100000,
+   "basis": "목 시드(테스트용)",
+   "approved": null,
+   "actual_spend": null,
+   "status": "pending",
+   "rows": [
+    {
+     "team": "개발팀",
+     "headcount": 6,
+     "budget": 600000,
+     "prev_headcount": 6,
+     "prev_budget": 600000,
+     "change": 0
+    },
+    {
+     "team": "고객지원",
+     "headcount": 5,
+     "budget": 500000,
+     "prev_headcount": 5,
+     "prev_budget": 500000,
+     "change": 0
+    },
+    {
+     "team": "기획팀",
+     "headcount": 4,
+     "budget": 400000,
+     "prev_headcount": 4,
+     "prev_budget": 400000,
+     "change": 0
+    },
+    {
+     "team": "데이터분석",
+     "headcount": 2,
+     "budget": 200000,
+     "prev_headcount": 2,
+     "prev_budget": 200000,
+     "change": 0
+    },
+    {
+     "team": "마케팅",
+     "headcount": 3,
+     "budget": 300000,
+     "prev_headcount": 3,
+     "prev_budget": 300000,
+     "change": 0
+    },
+    {
+     "team": "서비스운영",
+     "headcount": 3,
+     "budget": 300000,
+     "prev_headcount": 3,
+     "prev_budget": 300000,
+     "change": 0
+    },
+    {
+     "team": "인사총무",
+     "headcount": 2,
+     "budget": 200000,
+     "prev_headcount": 2,
+     "prev_budget": 200000,
+     "change": 0
+    },
+    {
+     "team": "재무/정산",
+     "headcount": 2,
+     "budget": 200000,
+     "prev_headcount": 2,
+     "prev_budget": 200000,
+     "change": 0
+    }
+   ],
+   "total": 2700000,
+   "prev_total": 2700000,
+   "change_total": 0,
+   "headcount_total": 27,
+   "signature": "2f02fc5fc057a433"
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-11-02T01:24:56.761610Z",
+   "source": "hr.team_headcount",
+   "unavailable": []
+  }
+ },
+ "/api/finance/team-budget?month=2026-12": {
+  "data": {
+   "month": "2026-12",
+   "prev_month": "2026-11",
+   "per_head_monthly": 100000,
+   "basis": "목 시드(테스트용)",
+   "approved": null,
+   "actual_spend": null,
+   "status": "pending",
+   "rows": [
+    {
+     "team": "개발팀",
+     "headcount": 5,
+     "budget": 500000,
+     "prev_headcount": 6,
+     "prev_budget": 600000,
+     "change": -100000
+    },
+    {
+     "team": "고객지원",
+     "headcount": 5,
+     "budget": 500000,
+     "prev_headcount": 5,
+     "prev_budget": 500000,
+     "change": 0
+    },
+    {
+     "team": "기획팀",
+     "headcount": 5,
+     "budget": 500000,
+     "prev_headcount": 4,
+     "prev_budget": 400000,
+     "change": 100000
+    },
+    {
+     "team": "데이터분석",
+     "headcount": 2,
+     "budget": 200000,
+     "prev_headcount": 2,
+     "prev_budget": 200000,
+     "change": 0
+    },
+    {
+     "team": "마케팅",
+     "headcount": 3,
+     "budget": 300000,
+     "prev_headcount": 3,
+     "prev_budget": 300000,
+     "change": 0
+    },
+    {
+     "team": "서비스운영",
+     "headcount": 3,
+     "budget": 300000,
+     "prev_headcount": 3,
+     "prev_budget": 300000,
+     "change": 0
+    },
+    {
+     "team": "인사총무",
+     "headcount": 2,
+     "budget": 200000,
+     "prev_headcount": 2,
+     "prev_budget": 200000,
+     "change": 0
+    },
+    {
+     "team": "재무/정산",
+     "headcount": 2,
+     "budget": 200000,
+     "prev_headcount": 2,
+     "prev_budget": 200000,
+     "change": 0
+    }
+   ],
+   "total": 2700000,
+   "prev_total": 2700000,
+   "change_total": 0,
+   "headcount_total": 27,
+   "signature": "2bcc6fde1cf5282e"
+  },
+  "meta": {
+   "mock": true,
+   "collected_at": "2026-11-02T01:24:56.765525Z",
+   "source": "hr.team_headcount",
    "unavailable": []
   }
  },
@@ -3576,7 +3879,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T00:48:44.823380Z"
+    "collected_at": "2026-11-02T01:24:56.788488Z"
    },
    "compensation": {
     "coupons": [
@@ -3704,7 +4007,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.823380Z",
+   "collected_at": "2026-11-02T01:24:56.788488Z",
    "unavailable": []
   }
  },
@@ -3738,7 +4041,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T00:48:44.839609Z"
+    "collected_at": "2026-11-02T01:24:56.803275Z"
    },
    "compensation": {
     "coupons": [
@@ -3821,7 +4124,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.839609Z",
+   "collected_at": "2026-11-02T01:24:56.803275Z",
    "unavailable": []
   }
  },
@@ -3849,7 +4152,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T00:48:44.843787Z"
+    "collected_at": "2026-11-02T01:24:56.815802Z"
    },
    "compensation": {
     "coupons": [
@@ -3932,7 +4235,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.843787Z",
+   "collected_at": "2026-11-02T01:24:56.815802Z",
    "unavailable": []
   }
  },
@@ -3961,7 +4264,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T00:48:44.872696Z"
+    "collected_at": "2026-11-02T01:24:56.849662Z"
    },
    "compensation": {
     "coupons": [
@@ -4044,7 +4347,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.872696Z",
+   "collected_at": "2026-11-02T01:24:56.849662Z",
    "unavailable": []
   }
  },
@@ -4078,7 +4381,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T00:48:44.885890Z"
+    "collected_at": "2026-11-02T01:24:56.866754Z"
    },
    "compensation": {
     "coupons": [
@@ -4179,7 +4482,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.885890Z",
+   "collected_at": "2026-11-02T01:24:56.866754Z",
    "unavailable": []
   }
  },
@@ -4208,7 +4511,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T00:48:44.923272Z"
+    "collected_at": "2026-11-02T01:24:56.887539Z"
    },
    "compensation": {
     "coupons": [
@@ -4308,7 +4611,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T00:48:44.923272Z",
+   "collected_at": "2026-11-02T01:24:56.887539Z",
    "unavailable": []
   }
  },
