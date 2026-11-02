@@ -79,6 +79,49 @@ def test_the_total_before_points_also_matches() -> None:
     assert receipts.compare(facts, order).matched_basis == "gross"
 
 
+def _coupon_order() -> orders.Order:
+    """정가 15,000원 품목에 쿠폰 2,000원, 배송비 3,000원: 실결제 16,000원 (shop-api #280 이후)."""
+    return orders.Order(
+        id="ord_9",
+        order_no="ord_9",
+        buyer_id="buy_9",
+        status="delivered",
+        paid_at=datetime(2026, 10, 10, 3, 0, tzinfo=UTC),
+        shipping_fee=3000,
+        coupon_discount=2000,
+        items=[
+            orders.OrderItem(
+                id="oit_9", title="고양이의 하루", qty=1, paid_amount=13000, coupon_share=2000
+            )
+        ],
+    )
+
+
+@pytest.mark.parametrize("line_amount", [15000, 13000])
+def test_a_coupon_order_matches_item_lines_before_or_after_the_coupon(line_amount: int) -> None:
+    """영수증 품목 줄이 쿠폰 적용 전 정가든 적용 후 금액이든 같은 주문으로 본다."""
+    order = _coupon_order()
+    assert receipts.order_totals(order)[0] == 16000  # 실결제는 쿠폰을 뺀 값
+    facts = receipts.ReceiptFacts(
+        total=16000, items=[receipts.ReceiptItem("고양이의 하루", 1, line_amount)]
+    )
+    check = receipts.compare(facts, order)
+    assert check.verdict == "consistent" and check.mismatches == []
+
+
+def test_a_coupon_order_still_reports_an_item_amount_that_matches_neither() -> None:
+    facts = receipts.ReceiptFacts(items=[receipts.ReceiptItem("고양이의 하루", 1, 14000)])
+    check = receipts.compare(facts, _coupon_order())
+    assert check.verdict == "mismatch" and "RECEIPT_ITEM_AMOUNT_MISMATCH" in check.mismatches
+
+
+def test_without_a_coupon_only_the_paid_amount_matches_an_item_line() -> None:
+    """쿠폰을 쓰지 않은 주문(coupon_share 0)에서는 기존과 같이 금액이 어긋나면 불일치다."""
+    facts = receipts.ReceiptFacts(items=[receipts.ReceiptItem("고양이의 하루", 1, 15001)])
+    check = receipts.compare(facts, seed_order())
+    assert "RECEIPT_ITEM_AMOUNT_MISMATCH" in check.mismatches
+
+
 @pytest.mark.parametrize(
     ("changes", "code"),
     [

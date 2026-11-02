@@ -17,8 +17,9 @@ class OrderItem(AxModel):
     id: str  # 주문 품목 ID (shop-api `order_item_id`)
     title: str
     qty: int
-    paid_amount: int  # 이 품목에 실제 낸 현금(포인트 제외)
+    paid_amount: int  # 이 품목에 실제 낸 현금(포인트·쿠폰 제외)
     points_share: int = 0
+    coupon_share: int = 0  # 이 품목이 받은 쿠폰 할인 몫 (shop-api `coupon_share`, 없던 주문은 0)
     refunded_qty: int = 0
 
 
@@ -33,6 +34,7 @@ class Order(AxModel):
     delivered_at: datetime | None = None
     shipping_fee: int = 0
     points_used: int = 0
+    coupon_discount: int = 0  # 주문에 쓴 쿠폰 할인 합계 (shop-api `coupon_discount`, 없던 주문은 0)
     payment_id: str | None = None  # 환불할 결제 (shop-api `payment_id`, 시드는 없음)
     items: list[OrderItem] = Field(default_factory=list)
 
