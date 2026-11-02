@@ -79,6 +79,8 @@ def test_merge_and_close_send_record_case() -> None:
     assert "자동 머지" in auto.summary and auto.decision_reason.startswith("merge_pr 규칙 통과")
     assert "사람 머지" in human.summary and human.decision_reason == "사람이 머지 버튼으로 승인"
     assert closed.source_refs == ["request:REQ-12", "spec:SPEC-7"]
+    # 영역: PR 경로(shop-api/cart/ 등)로 정함 → 인사 check_plan 겹침 비교에 쓴다
+    assert (auto.area, human.area, closed.area) == ("payment", "payment", "payment")
     assert all(r.author == "planning" and r.context_id == "ctx_req_0012" for r in recs)
     texts = _hr_texts(dev)
     assert "① kind pr_merged · PR #31 (자동 머지) → 인사 카드 생성 card_1" in texts
