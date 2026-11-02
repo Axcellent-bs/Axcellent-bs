@@ -11,6 +11,7 @@ import { Chip, ErrorBox, MetaLine, MockBadge, TONE, Waiting, useResource } from 
 import { IncidentFinance } from "@/components/finance/Incident";
 import { SelfTestPanel } from "@/components/finance/Kept";
 import { PolicySection } from "@/components/finance/Policy";
+import { TeamBudgetSection } from "@/components/finance/TeamBudget";
 import { ReconciliationSection } from "@/components/finance/Reconciliation";
 import { SafetyQueue } from "@/components/finance/SafetyQueue";
 import { SettlementsSection } from "@/components/finance/Settlements";
@@ -352,7 +353,7 @@ export default function FinancePage() {
           {tab === "settlements" && <div className="mt-4"><DeadlineSection tick={tick} /></div>}
           {tab === "settlements" && <div className="mt-4"><PayablesSection tick={tick} /></div>}
           {tab === "settlements" && <div className="mt-4"><CashflowSection tick={tick} /></div>}
-          {tab === "policy" && <PolicySection tick={tick} />}
+          {tab === "policy" && <><PolicySection tick={tick} /><TeamBudgetSection tick={tick} /></>}
           {tab === "audit" && <AuditSection tick={tick} />}
           {tab === "tax" && <TaxSection tick={tick} />}
         </div>

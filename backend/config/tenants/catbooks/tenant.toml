@@ -13,3 +13,7 @@ org = "org.yaml"
 trends = "trends.toml"
 # YouTube 영상 통계 스냅샷이 검색하는 회사 키워드 (이 폴더 기준)
 youtube = "youtube.toml"
+
+[finance]
+# 팀 예산 = 그달 1일 팀 인원 × 인당 월 단가(원). 재무 AI가 계산하고 재무 담당이 승인한다
+per_head_monthly = 100000

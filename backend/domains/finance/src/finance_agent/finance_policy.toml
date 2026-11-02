@@ -72,3 +72,8 @@ refund_rate_jump_ratio = 1.5        # 환불률이 지난 기간의 1.5배 이�
 refund_rate_jump_min_diff = 0.01    # 1%p 이상 올랐으면 급변
 gate_hold_min = 3                   # 관문 보류·거절이 기간 안에 이 수 이상이고
 gate_hold_jump_ratio = 2.0          # 지난 기간의 2배 이상이면 추이 경보
+
+[team_budget]
+# 팀 예산 = 그달 1일 팀 인원(인사 AI team_headcount) × 인당 월 단가. 파견은 세지 않는다(원래 팀)
+# 회사마다 다르면 회사 폴더 tenant.toml [finance] per_head_monthly 로 덮는다
+per_head_monthly = 100000

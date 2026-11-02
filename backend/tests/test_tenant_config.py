@@ -113,6 +113,27 @@ def test_an_unknown_tenant_is_refused(tmp_path: Path) -> None:
         tenant_env.resolve({"AX_TENANT": "nope"}, root=tmp_path)
 
 
+def test_the_finance_per_head_budget_comes_from_the_tenant_folder(tmp_path: Path) -> None:
+    """팀 예산 인당 월 단가는 회사마다 다르다: 회사 폴더 값을 쓰고, 환경변수가 먼저다."""
+    out, _ = tenant_env.resolve({}, local_org=tmp_path / "org.yaml")
+    assert out["FINANCE_PER_HEAD_MONTHLY"] == "100000"
+    out, _ = tenant_env.resolve(
+        {"FINANCE_PER_HEAD_MONTHLY": "70000"}, local_org=tmp_path / "org.yaml"
+    )
+    assert "FINANCE_PER_HEAD_MONTHLY" not in out
+
+
+def test_a_negative_per_head_budget_is_refused(tmp_path: Path) -> None:
+    folder = tmp_path / "shop"
+    folder.mkdir()
+    (folder / "tenant.toml").write_text(
+        'catalog = "catbooks"\nconnector = "shop-api"\n[finance]\nper_head_monthly = -1\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(tenant_env.TenantError, match="per_head_monthly"):
+        tenant_env.read_tenant(folder)
+
+
 def test_data_container_points_at_the_tenant_trend_keywords() -> None:
     """Docker data 서비스의 기본 키워드 경로(이미지 /app = backend/)가 실제 파일을 가리킨다."""
     compose = (BACKEND / "services" / "data" / "compose.yml").read_text(encoding="utf-8")

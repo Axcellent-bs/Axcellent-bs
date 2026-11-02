@@ -359,3 +359,34 @@ def test_dashboard_view_models_parse_and_reject_bad_values() -> None:
     assert GetAuditTimelineOutput(context_id="c", entries=[entry], collected_at=T0).entries
     with pytest.raises(ValidationError):  # seq는 1부터
         AuditEntry(seq=0, at=T0, kind="x")
+
+
+def test_team_headcount_carries_only_team_and_count() -> None:
+    """재무 팀 예산용 인원수: 팀과 숫자만 오가고, 월 형식이 틀리면 막는다."""
+    from ax_contracts.schemas import TeamHeadcountInput, TeamHeadcountOutput
+
+    assert TeamHeadcountInput(month="2026-11").month == "2026-11"
+    for bad in ("2026-13", "2026-1", "26-11", "2026-11-01"):
+        with pytest.raises(ValidationError):
+            TeamHeadcountInput(month=bad)
+    out = TeamHeadcountOutput.model_validate(
+        {
+            "month": "2026-11",
+            "rows": [{"team": "개발팀", "headcount": 5}, {"team": "기획팀", "headcount": 0}],
+            "collected_at": T0,
+        }
+    )
+    assert [(r.team, r.headcount) for r in out.rows] == [("개발팀", 5), ("기획팀", 0)]
+    assert set(out.rows[0].model_dump()) == {"team", "headcount"}
+    with pytest.raises(ValidationError):
+        TeamHeadcountOutput.model_validate(
+            {"month": "2026-11", "rows": [{"team": "개발팀", "headcount": -1}], "collected_at": T0}
+        )
+    with pytest.raises(ValidationError):  # 이름 같은 다른 필드는 받지 않는다
+        TeamHeadcountOutput.model_validate(
+            {
+                "month": "2026-11",
+                "rows": [{"team": "개발팀", "headcount": 1, "names": ["x"]}],
+                "collected_at": T0,
+            }
+        )

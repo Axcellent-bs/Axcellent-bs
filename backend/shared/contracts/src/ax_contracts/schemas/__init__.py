@@ -164,6 +164,9 @@ from ax_contracts.schemas.hr import (
     StartHandoverOutput,
     StartOnboardingInput,
     StartOnboardingOutput,
+    TeamHeadcountInput,
+    TeamHeadcountOutput,
+    TeamHeadcountRow,
     UpdateOnboardingStepInput,
 )
 from ax_contracts.schemas.ids import ContextPrefix, IdPrefix
@@ -332,6 +335,9 @@ __all__ = [
     "StartHandoverOutput",
     "StartOnboardingInput",
     "StartOnboardingOutput",
+    "TeamHeadcountInput",
+    "TeamHeadcountOutput",
+    "TeamHeadcountRow",
     "SupportInquiryReceivedData",
     "SupportInquiryResolvedData",
     "TaskStatus",

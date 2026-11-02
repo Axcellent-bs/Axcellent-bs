@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import tomllib
 from datetime import UTC, date, datetime, time, timedelta
@@ -81,6 +82,12 @@ class VarianceConfig(_Strict):
     flag_min_amount: int = Field(default=10000, ge=0)
 
 
+class TeamBudgetConfig(_Strict):
+    # 팀 예산 = 그달 1일 팀 인원 × 인당 월 단가 (2026-11-02 #2-재무 합의, 멘토링 "1명당 월 10만원").
+    # 회사마다 다르면 회사 폴더 tenant.toml `[finance] per_head_monthly`가 이 값을 덮는다
+    per_head_monthly: int = Field(default=100000, ge=0)
+
+
 class AuditConfig(_Strict):
     near_limit_ratio: float = Field(gt=0, le=1)
     split_window_minutes: int = Field(ge=1)
@@ -102,6 +109,7 @@ class FinanceConfig(_Strict):
     bank: BankConfig = BankConfig()
     tax: TaxConfig = TaxConfig()
     cashflow: CashflowConfig = CashflowConfig()
+    team_budget: TeamBudgetConfig = TeamBudgetConfig()
     budget: BudgetConfig
     proposal: ProposalConfig
     audit: AuditConfig
@@ -110,7 +118,15 @@ class FinanceConfig(_Strict):
 @lru_cache(maxsize=1)
 def load_config() -> FinanceConfig:
     text = resources.files("finance_agent").joinpath("finance_policy.toml").read_text("utf-8")
-    return FinanceConfig.model_validate(tomllib.loads(text))
+    raw = tomllib.loads(text)
+    # 회사 폴더(tenant.toml `[finance]`)에서 run_all.sh가 넘긴 값이 먼저다 (scripts/tenant_env.py)
+    per_head = os.getenv(PER_HEAD_ENV, "").strip()
+    if per_head:
+        raw.setdefault("team_budget", {})["per_head_monthly"] = int(per_head)
+    return FinanceConfig.model_validate(raw)
+
+
+PER_HEAD_ENV = "FINANCE_PER_HEAD_MONTHLY"
 
 
 # ---------------------------------------------------------------- 시각

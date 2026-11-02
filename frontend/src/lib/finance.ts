@@ -37,10 +37,10 @@ export interface SupportCostRecord {
 }
 
 // ---------------------------------------------------------------- §11 overview
-export type TodoKind = "settlement_batch" | "settlement_deadline" | "closing_confirm" | "recon_exception" | "audit_finding" | "policy_alert";
+export type TodoKind = "settlement_batch" | "settlement_deadline" | "closing_confirm" | "recon_exception" | "audit_finding" | "policy_alert" | "team_budget";
 /** 할 일에서 사람이 바로 누를 결정 */
-export type TodoActionType = "closing_confirm" | "settlement_request" | "review_decision" | "recon_note" | "anomaly_resolve" | "policy_ack" | "open_tab";
-export interface TodoAction { type: TodoActionType; period?: string; date?: string; review_id?: string | null }
+export type TodoActionType = "closing_confirm" | "settlement_request" | "review_decision" | "recon_note" | "anomaly_resolve" | "policy_ack" | "open_tab" | "team_budget_approve";
+export interface TodoAction { type: TodoActionType; period?: string; date?: string; review_id?: string | null; month?: string; signature?: string }
 /** 건마다 결정할 때의 한 건 (대사 불일치·감사 의심·한도 경보) */
 export interface TodoItem { ref: string; title: string; detail: string; amount: number | null }
 export interface FinanceTodo {
@@ -186,6 +186,27 @@ export interface Cashflow {
 }
 export interface CloseItem { key: string; label: string; status: "done" | "pending" | "unknown"; detail: string; link: string }
 export interface CloseChecklist { month: string; items: CloseItem[]; done: number; total: number; ready: boolean; closed: boolean }
+
+// ---------------------------------------------------------------- ⑤ 팀 예산 (인사 ↔ 재무)
+export interface TeamBudgetRow { team: string; headcount: number; budget: number; prev_headcount: number | null; prev_budget: number | null; change: number | null }
+export interface TeamBudgetApproval { month: string; per_head_monthly: number; total: number; signature: string; by: string; at: string; note: string | null; rows: { team: string; headcount: number; budget: number }[] }
+export interface TeamBudget {
+  month: string;
+  prev_month: string;
+  per_head_monthly: number;
+  basis: string | null;
+  /** pending 확정 전 · approved 확정됨 · changed 확정 뒤 인원·단가가 바뀜 · unavailable 인원을 못 받음 */
+  status: "pending" | "approved" | "changed" | "unavailable";
+  rows: TeamBudgetRow[];
+  total: number | null;
+  prev_total: number | null;
+  change_total: number | null;
+  headcount_total: number | null;
+  signature: string | null;
+  approved: TeamBudgetApproval | null;
+  /** 팀별 실제 지출 자료가 아직 없어 늘 null (화면은 "준비 중") */
+  actual_spend: null;
+}
 
 // ---------------------------------------------------------------- ⑥ 세무 지원
 export interface VatRow { code: string; label: string; supply: number; vat: number }
@@ -565,6 +586,11 @@ export const finance = {
   /** 예산·한도 경보 확인 메모. 사람 토큰만. 한도는 바꾸지 않는다 */
   ackPolicy: (key: string, note: string) =>
     fin<Envelope<{ key: string; note: string; by: string; at: string }>>(`/api/finance/policy/${encodeURIComponent(key)}/ack`, { method: "POST", body: { note }, human: true }),
+  /** 팀 예산 (인사 팀 인원 × 인당 월 단가). month 생략 = 이번 달 */
+  teamBudget: (month?: string | null) => fin<Envelope<TeamBudget>>(`/api/finance/team-budget${query({ month })}`),
+  /** 팀 예산 확정. 사람 토큰만. 보던 숫자(signature)가 지금과 같아야 한다 */
+  approveTeamBudget: (month: string, signature: string, note?: string) =>
+    fin<Envelope<TeamBudget>>(`/api/finance/team-budget/${encodeURIComponent(month)}/approve`, { method: "POST", body: { signature, note: note || null }, human: true }),
   audit: (days = 7) => fin<Envelope<AuditReport>>(`/api/finance/audit${query({ days })}`),
   /** 처리 전 의심 건 전부 (기간 제한 없음) */
   anomalies: () => fin<Envelope<AnomalyList>>("/api/finance/anomalies"),
@@ -662,7 +688,7 @@ export function todayKst(now = new Date()): string {
 export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "audit" | "tax";
 export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "tax", "audit"];
 const TODO_TAB: Record<TodoKind, FinanceTab> = {
-  settlement_batch: "settlements", settlement_deadline: "settlements", closing_confirm: "closing", recon_exception: "reconciliation", audit_finding: "audit", policy_alert: "policy",
+  settlement_batch: "settlements", settlement_deadline: "settlements", closing_confirm: "closing", recon_exception: "reconciliation", audit_finding: "audit", policy_alert: "policy", team_budget: "policy",
 };
 export function todoTab(t: Pick<FinanceTodo, "kind" | "link">): FinanceTab {
   const link = (t.link ?? "").replace(/^#/, "");

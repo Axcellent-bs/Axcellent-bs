@@ -92,6 +92,8 @@ def test_overview_shape(client: TestClient) -> None:
         "recon_exception",
         "audit_finding",
         "policy_alert",
+        "team_budget",  # 이번 달
+        "team_budget",  # 다음 달 (발령은 다음 달 1일부터)
     ]
     for t in data["todo"]:
         assert {"kind", "title", "count", "amount", "link", "action"} <= set(t)
@@ -107,6 +109,7 @@ def test_overview_shape(client: TestClient) -> None:
     assert actions["recon_exception"]["type"] == "recon_note"
     assert actions["audit_finding"]["type"] == "anomaly_resolve"
     assert actions["policy_alert"]["type"] == "policy_ack"
+    assert actions["team_budget"]["type"] == "team_budget_approve"
     for t in data["todo"]:
         if t["kind"] in ("recon_exception", "audit_finding", "policy_alert"):
             assert t["items"] and all(

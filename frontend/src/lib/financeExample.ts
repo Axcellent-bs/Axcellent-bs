@@ -4,7 +4,7 @@
 // 바뀌고 서버에는 아무것도 보내지 않는다. 새로고침하면 처음 예시로 돌아간다.
 import raw from "./financeExample.json";
 import type {
-  Anomaly, AnomalyList, ClosingReport, FinanceOverview, FinanceTodo, Reconciliation, Review, Settlements,
+  Anomaly, AnomalyList, ClosingReport, FinanceOverview, FinanceTodo, Reconciliation, Review, Settlements, TeamBudget,
 } from "./finance";
 
 const KEY = "axcellent-finance-example";
@@ -139,6 +139,22 @@ async function financeCall(method: string, path: string, body: Record<string, un
     const key = decodeURIComponent(ack[1]);
     dropTodoItem("policy_alert", key);
     return { data: { key, note: String(body.note ?? ""), by: PERSON, at: now() }, meta: { ...META, acked_by: PERSON } };
+  }
+  const team = /^\/api\/finance\/team-budget\/([^/]+)\/approve$/.exec(path);
+  if (team) {
+    const month = decodeURIComponent(team[1]);
+    const target = [`/api/finance/team-budget?month=${month}`, "/api/finance/team-budget"]
+      .map((p) => store[p]).find((b) => (b?.data as TeamBudget | undefined)?.month === month);
+    const tb = target?.data as TeamBudget | undefined;
+    if (!target || !tb || tb.total == null || !tb.signature) throw new ExampleMissing("예시 데이터에는 이 달 팀 예산이 없습니다.");
+    tb.approved = {
+      month, per_head_monthly: tb.per_head_monthly, total: tb.total, signature: tb.signature, by: PERSON, at: now(),
+      note: (body.note as string | null) || null, rows: tb.rows.map((r) => ({ team: r.team, headcount: r.headcount, budget: r.budget })),
+    };
+    tb.status = "approved";
+    const o = overview();
+    if (o) o.todo = o.todo.filter((t) => !(t.kind === "team_budget" && t.action?.month === month));
+    return { data: tb, meta: { ...META, approved_by: PERSON } };
   }
   throw new ExampleMissing("예시 데이터에서는 이 동작을 할 수 없습니다.");
 }

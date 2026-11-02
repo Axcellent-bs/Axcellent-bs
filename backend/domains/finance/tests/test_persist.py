@@ -20,6 +20,7 @@ def _filled() -> State:
     s.records.recon_notes["pay_1"] = "카드사 확인"
     s.records.recon_note_log.append({"payment_id": "pay_1"})
     s.records.batches["2026-10"] = {"status": "requested"}
+    s.records.team_budgets["2026-11"] = {"total": 2700000, "signature": "abc", "by": "태윤"}
     return s
 
 
@@ -33,6 +34,7 @@ def test_round_trip_keeps_everything(tmp_path: Path) -> None:
     assert persist.dump(after) == persist.dump(before)
     assert after.ledger.support_costs[7] == {"record_id": "sc_7"}  # 숫자 키 그대로
     assert after.records.closings[("day", "2026-10-28")]["by"] == "태윤"
+    assert after.records.team_budgets["2026-11"]["by"] == "태윤"  # 확정한 팀 예산도 남는다
     assert after.ledger.refunds == {"ord_7": 18000}
 
 

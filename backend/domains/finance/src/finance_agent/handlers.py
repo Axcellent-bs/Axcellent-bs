@@ -38,7 +38,7 @@ from ax_contracts.schemas import (
     RequestMeta,
     TaskStatus,
 )
-from finance_agent import anomalies, audit, chat_log, closing
+from finance_agent import anomalies, audit, chat_log, closing, team_budget
 from finance_agent import books as bk
 from finance_agent import finance_config as fc
 from finance_agent import ledger as lg
@@ -101,6 +101,7 @@ class FinanceRecords:
         self.anomalies: dict[str, dict[str, Any]] = {}  # 의심 건 번호 → 처리 전·후 기록
         self.policy_acks: dict[str, dict[str, Any]] = {}  # 규칙 키 → 경보 확인 기록
         self.bank_rows: list[dict[str, Any]] = []  # 사람이 올린 은행 입금 내역
+        self.team_budgets: dict[str, dict[str, Any]] = {}  # YYYY-MM → 재무 담당이 확정한 팀 예산
 
 
 STATE: State | None = None
@@ -231,6 +232,35 @@ async def incident_info(context_id: str) -> dict[str, Any]:
     if not found:
         return info
     return info | {k: v for k, v in found.items() if v is not None}
+
+
+async def team_budget_data(month: str) -> tuple[dict[str, Any], list[str]]:
+    """그 달 팀 예산(인사 인원 × 인당 월 단가)과 못 받은 자료 이름."""
+    meta = RequestMeta(
+        context_id=f"ctx_team_budget_{month}",
+        token="finance-dashboard",
+        deadline=_now() + timedelta(seconds=15),
+    )
+    now_out = await state().sources.team_headcount(meta, month)
+    prev_out = await state().sources.team_headcount(meta, team_budget.shift_month(month, -1))
+
+    def heads(out: Any) -> dict[str, int] | None:
+        if out is None:
+            return None
+        return team_budget.counts([(r.team, r.headcount) for r in out.rows])
+
+    data = team_budget.report(
+        month,
+        heads(now_out),
+        heads(prev_out),
+        fc.load_config().team_budget.per_head_monthly,
+        state().records.team_budgets.get(month),
+        basis=now_out.basis if now_out else None,
+    )
+    missing = ["team_headcount"] if now_out is None else []
+    if now_out is not None and prev_out is None:
+        missing.append("team_headcount_prev")
+    return data, missing
 
 
 async def incident_impact(
