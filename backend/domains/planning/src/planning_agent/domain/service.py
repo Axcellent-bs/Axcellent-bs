@@ -921,13 +921,14 @@ class PlanningService:
         if self._pr_sync is not None or self.role == "planning":
             return
 
-        from planning_agent import dev_chat
+        from planning_agent import dev_chat, work_queue
 
         async def loop() -> None:
             while True:
                 await asyncio.sleep(PR_SYNC_SECONDS)
                 try:
                     await self.sync_prs()
+                    await work_queue.expire_leases(self)  # 진행 보고가 끊긴 구독형 작업 되돌리기
                     # 앞 요청을 오래 기다리는 대화에 알린다 (상태가 안 바뀌어도 시간이 지나면)
                     await dev_chat.notice_long_waits(self)
                 except Exception:  # noqa: BLE001 - 맞추기 실패로 루프가 멈추지 않게 한다
@@ -2556,10 +2557,16 @@ class PlanningService:
         paths: list[str] | None = None,
         connection: str | None = None,
         skip_queue: bool = False,
+        mode: str = "agent",
     ) -> ActionResult:
         """개발팀원이 쓴 기획으로 요청·확정 기획서·작업 하나를 만들고 코딩 에이전트를 띄운다 (A).
 
-        에이전트는 바꿔 끼운 뒤 잠금 밖에서 돈다. 진행은 작업 `coding`에 적힌다."""
+        에이전트는 바꿔 끼운 뒤 잠금 밖에서 돈다. 진행은 작업 `coding`에 적힌다.
+        `mode="subscription"`이면 서버 에이전트를 띄우지 않고 `queued`로 두어 개발자 본인 Claude가
+        MCP로 가져가기를 기다린다 (work_queue.py). LLM 설정도 필요 없다."""
+        if mode not in ("agent", "subscription"):
+            raise ActionError("INVALID_INPUT", "mode는 agent·subscription 중 하나다")
+        sub = mode == "subscription"
         title = " ".join((title or "").split())
         plan = (plan or "").strip()
         if not title or not plan:
@@ -2570,24 +2577,23 @@ class PlanningService:
             raise ActionError("WRONG_ROLE", "코딩 에이전트는 개발 서비스(dev)에서 돈다")
         hints = vcs.clean_paths(paths)
         cid = self._coding_connection(connection)
-        llm = self._coding_llm()
+        llm = None if sub else self._coding_llm()
         done_lines = [x.strip() for x in (done or "").splitlines() if x.strip()]
         done_lines = done_lines[: coder.MAX_DONE_LINES] or [coder.DEFAULT_DONE]
 
         async def run(s: State) -> ActionResult:
             req_id, spec_id, task_id, ctx = self._dev_ids(s)
             t = self.clock()
+            who = "개발자 Claude" if sub else "코딩 에이전트"
             text = (
-                f'{task_id} 개발팀 기획 "{title}" → 코딩 에이전트 대기 '
+                f'{task_id} 개발팀 기획 "{title}" → {who} 대기 '
                 f"(완료 기준 {len(done_lines)}, 연결 {cid})"
             )
+            params = {"request": req_id, "spec": spec_id, "connection": cid, "paths": list(hints)}
+            if sub:
+                params["mode"] = mode
             await self._execute(
-                "dev_task_create",
-                ctx,
-                task_id,
-                text,
-                {"request": req_id, "spec": spec_id, "connection": cid, "paths": list(hints)},
-                [req_id, spec_id, task_id],
+                "dev_task_create", ctx, task_id, text, params, [req_id, spec_id, task_id]
             )
             s.requests.append(
                 Request(
@@ -2629,14 +2635,15 @@ class PlanningService:
                     spec=spec_id,
                     para="R1",
                     title=title,
-                    owner="에이전트",
+                    owner="개발자 Claude" if sub else "에이전트",
                     state="진행 중",
                     coding=CodingRun(
                         status="queued",
-                        model=coder.model_name(llm),
+                        model=None if sub else coder.model_name(llm),
                         updated_at=t,
                         connection=cid,
                         skip_queue=skip_queue,
+                        mode="subscription" if sub else "agent",
                     ),
                 )
             )
@@ -2652,7 +2659,8 @@ class PlanningService:
             )
 
         result = await self._apply(run)
-        self._spawn_coder(result.output["task_id"])
+        if not sub:  # 구독형은 개발자 Claude가 가져갈 때까지 대기열에 둔다
+            self._spawn_coder(result.output["task_id"])
         return result
 
     # ---- 개발 AI 대화 (dev_chat.py). 메시지 하나 = 작은 액션 하나 (관문 dev_chat A)
@@ -2747,7 +2755,8 @@ class PlanningService:
                 "NOT_RETRYABLE", f"{task_id}는 이미 PR이 있다 → PR 화면에서 머지·판단"
             )
         cid = self._coding_connection(connection, task.coding.connection)
-        llm = self._coding_llm()
+        sub = task.coding.mode == "subscription"  # 구독형은 다시 대기열에만 올린다
+        llm = None if sub else self._coding_llm()
 
         async def run(s: State) -> ActionResult:
             x = next((t for t in s.tasks if t.id == task_id), None)
@@ -2770,12 +2779,14 @@ class PlanningService:
                         raise ActionError("NOT_RETRYABLE", f"{pr.id}를 닫지 못해 다시 쓰지 않음")
                     pr.closed = True
                     pr.auto_review = None
-            text = f"{task_id} 코딩 에이전트 {how} (연결 {cid})"
+            who = "개발자 Claude 대기열" if sub else "코딩 에이전트"
+            text = f"{task_id} {who} {how} (연결 {cid})"
             n = sum(1 for g in self.gate_calls if g.action == "dev_task_retry") + 1
             await self._execute("dev_task_retry", ctx, f"{task_id}:{n}", text, {"connection": cid})
             x.coding = CodingRun(
-                status="queued", model=coder.model_name(llm), updated_at=t, connection=cid,
-                llm_calls=x.coding.llm_calls, llm_tokens=x.coding.llm_tokens,
+                status="queued", model=coder.model_name(llm) if llm else None, updated_at=t,
+                connection=cid, llm_calls=x.coding.llm_calls, llm_tokens=x.coding.llm_tokens,
+                mode=x.coding.mode,
             )  # fmt: skip
             x.state = "진행 중"
             s.activity.append(self._act(t, ctx, "dev", "dev", "dev_task_retry", "A2A", text, "A"))
@@ -2790,7 +2801,8 @@ class PlanningService:
             )
 
         result = await self._apply(run)
-        self._spawn_coder(task_id)
+        if not sub:
+            self._spawn_coder(task_id)
         return result
 
     async def cancel_dev_task(self, task_id: str) -> ActionResult:
@@ -2887,6 +2899,10 @@ class PlanningService:
         task = next((t for t in self.state.tasks if t.id == task_id), None)
         if task is None or task.coding is None:
             raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+        if task.coding.mode == "subscription":
+            raise ActionError(
+                "NOT_REVISABLE", f"{task_id}는 개발자 Claude 작업이다 → PR에 직접 코멘트로 지시"
+            )
         pr = next((p for p in self.state.prs if p.task == task_id), None)
         if (
             task_id in self._coding
@@ -3036,6 +3052,8 @@ class PlanningService:
                 break  # 뒤에 만든 작업은 보지 않는다 (먼저 만든 쪽이 먼저 간다)
             cr = t.coding
             if cr is None or cr.status not in active or cr.connection != job.connection:
+                continue
+            if cr.mode == "subscription":  # 개발자 Claude 작업은 언제 끝날지 몰라 기다리지 않는다
                 continue
             files = {f.path for f in cr.files}
             if not files:
