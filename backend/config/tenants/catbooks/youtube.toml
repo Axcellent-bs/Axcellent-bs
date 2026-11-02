@@ -1,0 +1,10 @@
+# YouTube 영상 통계 스냅샷(data youtube_collect)이 하루 1번 검색하는 회사 키워드
+# tenant.toml의 youtube로 이 파일을 찾아 DATA_YOUTUBE_CONFIG로 넘긴다 (scripts/tenant_env.py)
+# 키워드 하나에 할당량 101단위(검색 100 + 통계 1). 하루 기본 한도 10,000단위
+region = "KR"
+
+[[queries]]
+q = "고양이"
+
+[[queries]]
+q = "고양이 책"
