@@ -76,7 +76,7 @@ export function TeamBudgetSection({ tick }: { tick: number }) {
           return (
             <div className="space-y-4">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                <Chip label={s.label} tone={s.tone} />
+                {b.example ? <Chip label="예시 인원" tone={TONE.muted} /> : <Chip label={s.label} tone={s.tone} />}
                 <span className="text-ink-700">인당 월 <b className="tabular-nums">{krw(b.per_head_monthly)}</b> · 총 {people(b.headcount_total)}</span>
                 <span className="text-ink-900">합계 <b className="tabular-nums">{krw(b.total)}</b></span>
                 {b.change_total != null && <span className="text-xs tabular-nums text-ink-500">{b.prev_month} 대비 {b.change_total === 0 ? "변동 없음" : delta(b.change_total)}</span>}
@@ -118,7 +118,14 @@ export function TeamBudgetSection({ tick }: { tick: number }) {
                 </p>
               )}
 
-              {(b.status === "pending" || b.status === "changed") && (
+              {b.example && (
+                <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  인사 AI가 실제 명부가 아니라 가상 명부(예시) 인원을 보냈습니다. 계산과 증감만 보여 주고 팀 예산으로 확정하지 않습니다.
+                  실제 명부·발령 기록이 연결되면 확정할 수 있습니다.
+                </p>
+              )}
+
+              {!b.example && (b.status === "pending" || b.status === "changed") && (
                 <div className="space-y-2 rounded-2xl border border-ink-100 px-4 py-3">
                   <p className="text-xs text-ink-500">
                     {b.status === "changed"

@@ -378,6 +378,7 @@ def test_team_headcount_carries_only_team_and_count() -> None:
     )
     assert [(r.team, r.headcount) for r in out.rows] == [("개발팀", 5), ("기획팀", 0)]
     assert set(out.rows[0].model_dump()) == {"team", "headcount"}
+    assert out.example is False  # 안 적으면 실제 명부
     with pytest.raises(ValidationError):
         TeamHeadcountOutput.model_validate(
             {"month": "2026-11", "rows": [{"team": "개발팀", "headcount": -1}], "collected_at": T0}

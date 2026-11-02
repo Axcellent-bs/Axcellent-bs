@@ -195,6 +195,8 @@ export interface TeamBudget {
   prev_month: string;
   per_head_monthly: number;
   basis: string | null;
+  /** 인사 AI가 가상 명부(예시) 인원을 줬으면 true. 계산만 보여 주고 확정하지 않는다 (옛 응답은 없음) */
+  example?: boolean;
   /** pending 확정 전 · approved 확정됨 · changed 확정 뒤 인원·단가가 바뀜 · unavailable 인원을 못 받음 */
   status: "pending" | "approved" | "changed" | "unavailable";
   rows: TeamBudgetRow[];

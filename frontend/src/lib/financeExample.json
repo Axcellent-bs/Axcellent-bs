@@ -215,7 +215,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.370618Z",
+   "collected_at": "2026-11-02T05:32:47.670246Z",
    "source": "seed",
    "unavailable": []
   }
@@ -310,7 +310,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.399550Z",
+   "collected_at": "2026-11-02T05:32:47.711720Z",
    "source": "seed",
    "unavailable": []
   }
@@ -405,7 +405,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.430168Z",
+   "collected_at": "2026-11-02T05:32:47.721562Z",
    "source": "seed",
    "unavailable": []
   }
@@ -581,7 +581,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.446604Z",
+   "collected_at": "2026-11-02T05:32:47.728757Z",
    "source": "seed",
    "unavailable": []
   }
@@ -757,7 +757,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.461934Z",
+   "collected_at": "2026-11-02T05:32:47.745513Z",
    "source": "seed",
    "unavailable": []
   }
@@ -933,7 +933,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.472779Z",
+   "collected_at": "2026-11-02T05:32:47.760381Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2052,7 +2052,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.483885Z",
+   "collected_at": "2026-11-02T05:32:47.762225Z",
    "source": "seed",
    "unavailable": [],
    "pg_source": "mock_toss_settlement"
@@ -2127,7 +2127,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.494959Z",
+   "collected_at": "2026-11-02T05:32:47.778878Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2242,7 +2242,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.503703Z",
+   "collected_at": "2026-11-02T05:32:47.812240Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2314,7 +2314,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.529667Z",
+   "collected_at": "2026-11-02T05:32:47.812240Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2365,7 +2365,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.546410Z",
+   "collected_at": "2026-11-02T05:32:47.837734Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2547,7 +2547,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.555426Z",
+   "collected_at": "2026-11-02T05:32:47.862955Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2562,7 +2562,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.571620Z",
+   "collected_at": "2026-11-02T05:32:47.899596Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2688,7 +2688,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.579768Z",
+   "collected_at": "2026-11-02T05:32:47.907786Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2754,7 +2754,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.595367Z",
+   "collected_at": "2026-11-02T05:32:47.922883Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2814,7 +2814,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.604783Z",
+   "collected_at": "2026-11-02T05:32:47.930826Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2921,7 +2921,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.613140Z",
+   "collected_at": "2026-11-02T05:32:47.945156Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3024,7 +3024,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.626431Z",
+   "collected_at": "2026-11-02T05:32:47.963919Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3128,7 +3128,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.650407Z",
+   "collected_at": "2026-11-02T05:32:47.991725Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3225,7 +3225,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.668799Z",
+   "collected_at": "2026-11-02T05:32:48.015783Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3248,8 +3248,8 @@
       "exe_s0044"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T01:24:56.399550Z",
-     "last_seen": "2026-11-02T01:24:56.686081Z",
+     "first_seen": "2026-11-02T05:32:47.700960Z",
+     "last_seen": "2026-11-02T05:32:48.027008Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3262,8 +3262,8 @@
      "detail": "최근 7일 환불률 4.1% (지난 7일 0.5%)",
      "refs": [],
      "status": "open",
-     "first_seen": "2026-11-02T01:24:56.399550Z",
-     "last_seen": "2026-11-02T01:24:56.662787Z",
+     "first_seen": "2026-11-02T05:32:47.700960Z",
+     "last_seen": "2026-11-02T05:32:48.007581Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3279,8 +3279,8 @@
       "ord_2156"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T01:24:56.399550Z",
-     "last_seen": "2026-11-02T01:24:56.686081Z",
+     "first_seen": "2026-11-02T05:32:47.700960Z",
+     "last_seen": "2026-11-02T05:32:48.027008Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3296,8 +3296,8 @@
       "cpn_3063"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T01:24:56.399550Z",
-     "last_seen": "2026-11-02T01:24:56.686081Z",
+     "first_seen": "2026-11-02T05:32:47.700960Z",
+     "last_seen": "2026-11-02T05:32:48.027008Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3317,8 +3317,8 @@
       "ord_2135"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T01:24:56.399550Z",
-     "last_seen": "2026-11-02T01:24:56.686081Z",
+     "first_seen": "2026-11-02T05:32:47.700960Z",
+     "last_seen": "2026-11-02T05:32:48.027008Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3336,8 +3336,8 @@
       "exe_s0046"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T01:24:56.399550Z",
-     "last_seen": "2026-11-02T01:24:56.686081Z",
+     "first_seen": "2026-11-02T05:32:47.700960Z",
+     "last_seen": "2026-11-02T05:32:48.027008Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3355,8 +3355,8 @@
       "exe_s0049"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T01:24:56.399550Z",
-     "last_seen": "2026-11-02T01:24:56.641853Z",
+     "first_seen": "2026-11-02T05:32:47.700960Z",
+     "last_seen": "2026-11-02T05:32:47.982660Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3375,8 +3375,8 @@
       "exe_s0049"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T01:24:56.662787Z",
-     "last_seen": "2026-11-02T01:24:56.686081Z",
+     "first_seen": "2026-11-02T05:32:48.007581Z",
+     "last_seen": "2026-11-02T05:32:48.027008Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3467,7 +3467,7 @@
   ],
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.713959Z",
+   "collected_at": "2026-11-02T05:32:48.065557Z",
    "ledger_source": "seed",
    "unavailable": []
   }
@@ -3476,7 +3476,7 @@
   "data": [],
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.723399Z",
+   "collected_at": "2026-11-02T05:32:48.065557Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3578,7 +3578,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.736805Z",
+   "collected_at": "2026-11-02T05:32:48.104943Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3589,6 +3589,7 @@
    "prev_month": "2026-09",
    "per_head_monthly": 100000,
    "basis": "목 시드(테스트용)",
+   "example": false,
    "approved": null,
    "actual_spend": null,
    "status": "pending",
@@ -3666,7 +3667,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.757060Z",
+   "collected_at": "2026-11-02T05:32:48.110316Z",
    "source": "hr.team_headcount",
    "unavailable": []
   }
@@ -3677,6 +3678,7 @@
    "prev_month": "2026-10",
    "per_head_monthly": 100000,
    "basis": "목 시드(테스트용)",
+   "example": false,
    "approved": null,
    "actual_spend": null,
    "status": "pending",
@@ -3754,7 +3756,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.761610Z",
+   "collected_at": "2026-11-02T05:32:48.115782Z",
    "source": "hr.team_headcount",
    "unavailable": []
   }
@@ -3765,6 +3767,7 @@
    "prev_month": "2026-11",
    "per_head_monthly": 100000,
    "basis": "목 시드(테스트용)",
+   "example": false,
    "approved": null,
    "actual_spend": null,
    "status": "pending",
@@ -3842,7 +3845,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.765525Z",
+   "collected_at": "2026-11-02T05:32:48.115782Z",
    "source": "hr.team_headcount",
    "unavailable": []
   }
@@ -3879,7 +3882,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T01:24:56.788488Z"
+    "collected_at": "2026-11-02T05:32:48.132795Z"
    },
    "compensation": {
     "coupons": [
@@ -4007,7 +4010,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.788488Z",
+   "collected_at": "2026-11-02T05:32:48.132795Z",
    "unavailable": []
   }
  },
@@ -4041,7 +4044,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T01:24:56.803275Z"
+    "collected_at": "2026-11-02T05:32:48.150044Z"
    },
    "compensation": {
     "coupons": [
@@ -4124,7 +4127,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.803275Z",
+   "collected_at": "2026-11-02T05:32:48.150044Z",
    "unavailable": []
   }
  },
@@ -4152,7 +4155,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T01:24:56.815802Z"
+    "collected_at": "2026-11-02T05:32:48.163511Z"
    },
    "compensation": {
     "coupons": [
@@ -4235,7 +4238,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.815802Z",
+   "collected_at": "2026-11-02T05:32:48.163511Z",
    "unavailable": []
   }
  },
@@ -4264,7 +4267,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T01:24:56.849662Z"
+    "collected_at": "2026-11-02T05:32:48.205249Z"
    },
    "compensation": {
     "coupons": [
@@ -4347,7 +4350,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.849662Z",
+   "collected_at": "2026-11-02T05:32:48.205249Z",
    "unavailable": []
   }
  },
@@ -4381,7 +4384,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T01:24:56.866754Z"
+    "collected_at": "2026-11-02T05:32:48.221074Z"
    },
    "compensation": {
     "coupons": [
@@ -4482,7 +4485,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.866754Z",
+   "collected_at": "2026-11-02T05:32:48.221074Z",
    "unavailable": []
   }
  },
@@ -4511,7 +4514,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T01:24:56.887539Z"
+    "collected_at": "2026-11-02T05:32:48.254177Z"
    },
    "compensation": {
     "coupons": [
@@ -4611,7 +4614,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T01:24:56.887539Z",
+   "collected_at": "2026-11-02T05:32:48.254177Z",
    "unavailable": []
   }
  },

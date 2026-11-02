@@ -178,3 +178,26 @@ def test_live_reads_the_contract_and_caches(monkeypatch: pytest.MonkeyPatch) -> 
         "collected_at": "2026-12-01T00:00:00Z",
     }
     assert asyncio.run(live.team_headcount(_meta(), "2026-12")) is None  # 계약과 다르면 받지 않는다
+
+
+class _ExampleHr(MockSources):
+    """인사가 가상 명부(예시) 인원을 준다 (실제 명부·발령 기록이 생기기 전)."""
+
+    async def team_headcount(self, meta: RequestMeta, month: str) -> TeamHeadcountOutput | None:
+        out = await super().team_headcount(meta, month)
+        return None if out is None else out.model_copy(update={"example": True})
+
+
+def test_example_headcount_is_shown_but_never_approved() -> None:
+    handlers.reset_state(_ExampleHr())
+    client = TestClient(app)
+    d = client.get("/api/finance/team-budget?month=2026-11").json()["data"]
+    assert d["example"] is True and d["total"] == d["headcount_total"] * 100000
+    post = client.post(
+        "/api/finance/team-budget/2026-11/approve",
+        json={"signature": d["signature"]},
+        headers=HUMAN,
+    )
+    assert post.status_code == 409 and post.json()["error"]["code"] == "example_headcount"
+    assert "2026-11" not in handlers.state().records.team_budgets
+    assert _todo(client) == []  # 예시 인원으로 사람에게 확정을 부탁하지 않는다

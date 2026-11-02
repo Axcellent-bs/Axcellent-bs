@@ -309,12 +309,15 @@ class TeamHeadcountOutput(AxModel):
 
     파견은 세지 않는다(파견 중이어도 원래 팀). `basis`는 화면에 그대로 보여 줄 기준 문장
     (예: "가상 명부(예시) 기준, 2026-11-01 소속").
+    `example`: 실제 명부가 아니라 가상 명부(예시) 인원이면 True.
+    재무는 보여 주기만 하고 확정하지 않는다.
     """
 
     month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     rows: list[TeamHeadcountRow] = Field(default_factory=list)
     basis: str | None = None
     collected_at: UtcDatetime
+    example: bool = False
 
 
 # ---- 유사 사기 카드 조회 (data의 사기 점수 FRAUD_SIMILAR 규칙용) ------------------------------
