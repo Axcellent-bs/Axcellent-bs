@@ -77,3 +77,43 @@ def test_release_order_round_trip() -> None:
         ReceiveReleaseOrderOutput.model_validate({"outcome": "accepted"})
     with pytest.raises(ValidationError):
         ReceiveReleaseOrderOutput.model_validate({"outcome": "rejected"})
+
+
+def test_review_fields_default_and_values() -> None:
+    pr = RequestReleaseCheckInput.model_validate(
+        {
+            "spec_id": "SPEC-8",
+            "request_id": "REQ-22",
+            "prs": [
+                {"number": 31, "task_id": "T-11", "merged": True},
+                {
+                    "number": 32,
+                    "task_id": "T-12",
+                    "merged": True,
+                    "review": "mismatch",
+                    "review_note": "C1 완료 기준의 품절 표시가 빠짐",
+                    "reviewed_paras": ["R2"],
+                },
+            ],
+        }
+    ).prs
+    assert pr[0].review == "none" and pr[0].reviewed_paras == []  # 예전 모양도 그대로 받는다
+    assert pr[1].review == "mismatch"
+    with pytest.raises(ValidationError):
+        RequestReleaseCheckInput.model_validate(
+            {
+                "spec_id": "SPEC-8",
+                "request_id": "REQ-22",
+                "prs": [{"number": 31, "merged": True, "review": "looks_fine"}],
+            }
+        )
+    item = RequestReleaseCheckOutput.model_validate(
+        {
+            "check_id": "RC-6",
+            "verdict": "needs_human",
+            "items": [
+                {"para_id": "R2", "status": "covered", "pr_numbers": [32], "content": "mismatch"}
+            ],
+        }
+    ).items[0]
+    assert item.content == "mismatch" and item.content_notes == []
