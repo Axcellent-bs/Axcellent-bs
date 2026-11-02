@@ -29,12 +29,13 @@ VERIFY = {
 
 @pytest.mark.role("planning")
 def test_agent_card_format_and_served() -> None:
-    """기획 카드: 요청 접수·되묻기 답·개발 결과 받기 (개발 skill은 domains/dev 카드)."""
+    """기획 카드: 요청 접수·되묻기 답·개발 결과·배포 전 대조 (개발 skill은 domains/dev 카드)."""
     card = load_card()
     assert (card.name, card.owner, card.url) == ("planning", "예진", "http://planning:8101/a2a")
     skills = {s.id: s for s in card.skills}
     intake = {"create_ticket", "receive_planning_answer"}  # 요청 접수 (#174)·되묻기 답
-    assert set(skills) == intake | {"receive_dev_result"}
+    assert set(skills) == intake | {"receive_dev_result", "request_release_check"}
+    assert skills["request_release_check"].allowed_requesters == ["dev"]
     assert skills["create_ticket"].grade == "A"
     assert skills["create_ticket"].allowed_requesters == [
         "support",

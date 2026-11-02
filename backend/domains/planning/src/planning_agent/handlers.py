@@ -25,6 +25,8 @@ from ax_contracts.schemas.planning import (
     DevResultOutput,
     ReceivePlanningAnswerInput,
     ReceivePlanningAnswerOutput,
+    RequestReleaseCheckInput,
+    RequestReleaseCheckOutput,
 )
 from ax_workflow.a2a import _gate_rejected, _invalid, _missing_key, _requester
 from ax_workflow.core import GateRefused
@@ -177,9 +179,43 @@ async def receive_planning_answer(request: AgentRequest) -> AgentResult:
     )
 
 
+async def request_release_check(request: AgentRequest) -> AgentResult:
+    """배포 전 기획서 대조 (A, dev → planning). 코드 규칙으로 ready / hold / needs_human."""
+    try:
+        inp = RequestReleaseCheckInput.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    if not request.meta.idempotency_key:
+        return _missing_key(request)
+    try:
+        result = await get_service().request_release_check(
+            context_id=request.meta.context_id,
+            requester=_requester(request),
+            inp=inp,
+            idempotency_key=request.meta.idempotency_key,
+        )
+    except GateRefused as exc:
+        return _gate_rejected(request, exc)
+    out = RequestReleaseCheckOutput.model_validate(result.output)
+    why = f" ({', '.join(out.hold_reasons)})" if out.hold_reasons else ""
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        outcome=out.verdict,
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(
+            data_summary=f"{out.check_id} {inp.spec_id} 대조 {out.verdict}{why}"
+            + (" · 배포 지시 보냄" if out.order_sent else ""),
+            ref_ids=[f"spec:{inp.spec_id}", f"req:{inp.request_id}"]
+            + [f"pr:{p.number}" for p in inp.prs],
+        ),
+    )
+
+
 # 기획 서비스(planning 8101)가 받는 skill
 PLANNING_HANDLERS = {
     "create_ticket": create_ticket,
     "receive_dev_result": receive_dev_result,
     "receive_planning_answer": receive_planning_answer,
+    "request_release_check": request_release_check,
 }
