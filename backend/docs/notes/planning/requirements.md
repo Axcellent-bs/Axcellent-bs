@@ -5,7 +5,7 @@
 | 항목 | 내용 |
 |---|---|
 | 문서명 | 기획·개발팀 프로젝트 매니징 자동화(`planning` 에이전트 + 기획·개발 화면) 요구사항정의서 |
-| 버전 | **v0.9 (형상관리 연결 계층 + 고객사 도입 연결 지점)** — v0.8 위에 사용자 결정(AS-T16, 10/26) 반영: 형상관리 연결 계층(FR-AG-011~013, NFR-EXT-003, IF-EXT-005·006), 고객사 도입 연결 지점·입력 창구(6-6 IF-CUS), 고객사 형상관리·배포 도구 미결(AS-B18). (v0.8: 일반 요청 무클릭 진행 + 관찰 기반 학습 — v0.7 위에 사용자 결정(AS-T15, 10/23) 반영: 일반 요청·개선 초안 무클릭 진행(FR-PR-010), 단계별 실시간 진행 표시(FR-FE-017), 다른 부서 몫은 다른 부서가 보냄(FR-SPEC-009, NFR-SAFE-020), 관찰 기반 학습·시험 단계 삭제(FR-ATL-007~009 수정), 보호 경로는 항상 사람(NFR-SAFE-021), 요청 탭 필터·흐름바(FR-REQ-007, FR-FE-002 수정). 백엔드 #223, 프로토타입 ax-frontend#12. (v0.7: AS-T14 사람 사전 승인 → AI 교차검증 + 사람 사후 감사 — v0.6 위에 사용자 결정(AS-T14, 10/23) 반영: 기획서 자동 확정(FR-SPEC-008), 생성 PR 자동 머지(FR-PR-008), 위험 건 교차검증(FR-PR-009), 한 번 학습·백테스트·시험 기간·사후 감사(FR-ATL-007~009), 자기 승인 금지·되돌릴 수 없는 일은 사람(NFR-SAFE-018·019). (v0.6: AS-T13 다음 할 일·채택 초안·프로젝트 흐름·화면 정리, 백엔드 #101) |
+| 버전 | **v1.0 (인사 실제 연동 + 요청 서비스 되묻기)** — v0.9 위에 11/2 구현 반영: 인사 `record_case`·`check_plan` 실제 A2A 호출(FR-HR-001·FR-SPEC-002·003, 백엔드 #257), 요청을 보낸 서비스에 근거 되묻기(FR-SPEC-009·IF-INT-OUT-005·IF-INT-A2A-009, 백엔드 #262), 재무도 `create_ticket` 허용(IF-INT-A2A-004, #283), 기획·개발 이름 분리(#271). (v0.9 형상관리 연결 계층 + 고객사 도입 연결 지점 — v0.8 위에 사용자 결정(AS-T16, 10/26) 반영: 형상관리 연결 계층(FR-AG-011~013, NFR-EXT-003, IF-EXT-005·006), 고객사 도입 연결 지점·입력 창구(6-6 IF-CUS), 고객사 형상관리·배포 도구 미결(AS-B18). (v0.8: 일반 요청 무클릭 진행 + 관찰 기반 학습 — v0.7 위에 사용자 결정(AS-T15, 10/23) 반영: 일반 요청·개선 초안 무클릭 진행(FR-PR-010), 단계별 실시간 진행 표시(FR-FE-017), 다른 부서 몫은 다른 부서가 보냄(FR-SPEC-009, NFR-SAFE-020), 관찰 기반 학습·시험 단계 삭제(FR-ATL-007~009 수정), 보호 경로는 항상 사람(NFR-SAFE-021), 요청 탭 필터·흐름바(FR-REQ-007, FR-FE-002 수정). 백엔드 #223, 프로토타입 ax-frontend#12. (v0.7: AS-T14 사람 사전 승인 → AI 교차검증 + 사람 사후 감사 — v0.6 위에 사용자 결정(AS-T14, 10/23) 반영: 기획서 자동 확정(FR-SPEC-008), 생성 PR 자동 머지(FR-PR-008), 위험 건 교차검증(FR-PR-009), 한 번 학습·백테스트·시험 기간·사후 감사(FR-ATL-007~009), 자기 승인 금지·되돌릴 수 없는 일은 사람(NFR-SAFE-018·019). (v0.6: AS-T13 다음 할 일·채택 초안·프로젝트 흐름·화면 정리, 백엔드 #101) |
 | 작성일 | 2026-10-22 |
 | 작성 | 노예진 (기획·개발 담당) |
 | 문서 상태 | v0.2 — 프로토타입(`planning-web`)으로 만든 기능을 MVP(필수)로 확정하고 **완료(프로토타입)** 로 표시한 판. **[v0.2]** 사용자 결정(AS-T09)으로 코드 역추적·자동 처리 범위 학습을 추가하고 프로토타입에 구현. **[v0.3]** 사용자 결정(AS-T10)으로 프로젝트별 보기를 추가하고 프로토타입에 구현. **[v0.4]** 인사운영과 합의(AS-T11)한 4건을 반영(계약 PR 대기, 미착수). **[v0.5]** 사용자 결정(AS-T12)으로 에이전트 대화 보기·페이지 간 이동·규정·자료 올리기를 추가하고 프로토타입에 구현(RAG 연동·서버 저장은 이후). **[v0.6]** 사용자 결정(AS-T13)으로 다음 할 일 이동·채택 시 기획서 초안·프로젝트 세로 흐름·화면 정리를 프로토타입에 구현, 백엔드 #101로 필수 skill 3개·REST·SSE 반영. **[v0.7]** 사용자 결정(AS-T14)으로 "사람의 사전 승인"을 "AI 교차검증 + 사람 사후 감사"로 바꿈(새 FR 미착수). **[v0.8]** 사용자 결정(AS-T15)으로 일반 요청 무클릭 진행·실시간 진행 표시·다른 부서 응답·관찰 기반 학습·요청 탭 개편을 백엔드 #223과 프로토타입(ax-frontend#12)에 구현. **[v0.9]** 사용자 결정(AS-T16)으로 형상관리 연결 계층과 고객사 도입 연결 지점(6-6)을 추가(전부 미착수, 다른 부서 몫은 [제안]) |
@@ -227,14 +227,14 @@ L0 프로토타입(완료) → L1 시나리오 A 필수 skill 3개 + 공통 8항
 | ID | 요구사항명 | 상세 설명 | 우선순위 | 입력·출력 | 수용 기준 | 근거 | 담당 | 상태 |
 |---|---|---|---|---|---|---|---|---|
 | FR-SPEC-001 | 기획서 초안 작성 | `write_spec`: 요청 1건 → 요구사항(R)·완료 기준(C)·질문을 가진 기획서 초안. 문장마다 근거 | 필수 | 입력: REQ → 출력: `SPEC-n` | G REQ-12 / W 대표 흐름 진행 / T SPEC-7에 R1·R2·C1·C2, 질문 1개가 보이고 활동 로그에 `write_spec` A | 구성안 5-2, 8장 5 | 노예진 | ✅ 완료(프로토타입) |
-| FR-SPEC-002 | 기각 이력 질의·경고 첨부 | 저장 전 hr ② `check_plan`. `warn`이면 해당 문단에 경고와 근거 카드 ID를 붙인다. 판정 문장은 hr 것만 쓴다 [DIF-3a] | 필수 | 입력: 기획 안 → 출력: 문단 경고(`DC-n`) | G hr 목이 `warn`(DC-31) / W SPEC-7 열람 / T R2에 경고와 DC-31이 표시되고 활동 로그에 `check_plan` read | 구성안 8장 3·4 | 노예진 | ✅ 완료(프로토타입) |
-| FR-SPEC-003 | ② 무응답 처리 | ② 마감까지 답이 없으면 "기각 여부 미확인"을 표시하고 초안은 진행. 마감값 (TODO: 추후결정) | 선택 | — | G hr 목이 응답 안 함 / W `write_spec` / T 초안이 나오고 "기각 여부 미확인" 문구가 보임 | 구성안 9-2, 14장 hr 2 | 노예진 | ⬜ 미착수 |
+| FR-SPEC-002 | 기각 이력 질의·경고 첨부 | 저장 전 hr ② `check_plan`. `warn`이면 해당 문단에 경고와 근거 카드 ID를 붙인다. 판정 문장은 hr 것만 쓴다 [DIF-3a] | 필수 | 입력: 기획 안 → 출력: 문단 경고(`DC-n`) | G hr 목이 `warn`(DC-31) / W SPEC-7 열람 / T R2에 경고와 DC-31이 표시되고 활동 로그에 `check_plan` read. **[v1.0]** 실제 모드는 hr `check_plan`을 A2A로 부른다(요청 근거는 `untrusted`로 따로, 영역은 인사 6개 값). `warn`이면 R1에 근거 카드, 판정은 기획 자동 확정 규칙이 한다 | 구성안 8장 3·4, 인사 연동 기획안(11/2) | 노예진 | ✅ 완료(백엔드 #257) |
+| FR-SPEC-003 | ② 무응답 처리 | ② 마감까지 답이 없으면 "기각 여부 미확인"을 표시하고 초안은 진행. **[v1.0]** 마감 30초. 응답 없음·실패·영역을 못 정함이면 `hr_check=unknown`, 자동 확정하지 않고(`spec_hr_unchecked`) 사람에게 넘긴다. 경고를 지어내지 않는다 | 선택 | — | G hr 목이 응답 안 함 / W `write_spec` / T 초안이 나오고 확정 조건 '인사 기각 경고' 칸이 "확인 못 함", 자동 확정 안 됨 | 구성안 9-2, 14장 hr 2, 인사 연동 기획안(11/2) | 노예진 | ✅ 완료(백엔드 #257) |
 | FR-SPEC-004 | 질문 답변 반영 | 기획서 질문에 요청 부서가 답하면 결정으로 기록하고 문단에 반영하고 질문을 닫는다 (`supplement_spec`의 MVP 범위, AS-M02) | 필수 | 입력: 답변 → 출력: 결정 `D-n`, 질문 닫힘 | G SPEC-7 질문 열림 / W 소통 spec-7 스레드 "시연: 고객지원이 답함" / T 질문이 사라지고 결정 D-n이 생기고 `record_case` decision_extracted가 남음. [v0.8] `flow` 요청은 답을 요청 부서 에이전트가 보냄(FR-SPEC-009) | 구성안 5-2 | 노예진 | ✅ 완료(프로토타입) |
 | FR-SPEC-005 | 기획서 확정(사람) | 팀장이 확정 버튼을 누른다(클릭 1). 확정 시 ① `spec_confirmed` 전송. **[v0.7]** 기본 경로는 자동 확정(FR-SPEC-008)·교차검증(FR-PR-009)이고 이 버튼은 사람이 직접 개입할 때 쓴다 | 필수 | 입력: 클릭 → 출력: 상태 확정 | G 질문 없는 SPEC-7 / W "기획서 확정" / T 확정 표시, 작업 생성, 활동 로그에 "사람 클릭 1"과 `record_case` spec_confirmed | 구성안 5-2, 8장 6 | 노예진 | ✅ 완료(프로토타입) |
 | FR-SPEC-006 | warn 무시 확정 기록 | 경고를 둔 채 확정하면 감사 로그에 "warn 무시 진행". **[v0.4] 필수 승격**: hr 요청 ①(AS-T11) | 필수 | — | G R2 경고 / W 확정 / T `audit_logs`에 "warn 무시 진행" 1행 | 구성안 14장 hr 1, AS-T11 | 노예진 | ✅ 완료(백엔드 #184) |
 | FR-SPEC-007 | LLM 실패 시 기획서 틀 | LLM 실패 시 요청 필드로 문제·목표·요구사항·완료 기준 빈칸 틀을 만든다 | 필수(조건부) | — | G LLM 목이 오류 / W `write_spec` / T 빈칸 틀 기획서가 저장되고 Task가 `failed`가 아님 | 구성안 2장 16 | 노예진 | ⬜ 미착수 |
 | FR-SPEC-008 | 기획서 자동 확정 **[v0.7]** | 빈 항목 질문 없음 + 인사 기각 이력 경고 없음 + 모든 문장에 근거가 붙음이면 `confirm_spec`(A)으로 자동 확정하고 ① `spec_confirmed`를 보낸다. 하나라도 어긋나면 위험 건으로 넘긴다(FR-PR-009와 같은 교차검증, 검토자 hr `check_plan`) | 필수 | 입력: SPEC → 출력: 상태 확정(자동) 또는 교차검증 요청 | G 질문 0·경고 0·근거 다 붙은 기획서, 경고 1개인 SPEC-7 / W `write_spec` 직후 / T 앞의 것은 사람 클릭 없이 확정되고 활동 로그에 `execute(confirm_spec)` A와 `record_case` spec_confirmed; SPEC-7은 확정되지 않고 교차검증 요청 1건 | AS-T14 | 노예진 | ✅ 완료(백엔드 #196, 검토자 연결·학습은 #190·#191 대기) |
-| FR-SPEC-009 | 다른 부서 몫은 다른 부서가 보냄 **[v0.8]** | 기획서 빈 항목 질문은 요청 부서로 `spec_question`(A2A)으로 보내고 답은 요청 부서 에이전트가 보낸다(FR-SPEC-004로 반영). AI 교차검증 판단(FR-PR-009)과 기준 넓히기 판단(FR-ATL-008)도 검증 부서가 보낸다. 프로토타입은 시뮬레이터 화면이 열려 있는 동안 다른 부서 에이전트 몫을 대신한다. 기획·개발은 남의 답·판단을 스스로 만들지 않고, 답이 없으면 그 단계에서 멈춘다(NFR-SAFE-020) | 필수 | 입력: 질문·교차검증 요청·넓히기 요청 → 출력: 다른 부서의 답·판단 | G `flow` 요청의 기획서에 질문 1개, 시뮬레이터 열림 / W 흐름 진행 / T 활동 로그에 planning → 요청 부서 `spec_question` 1건, 요청 부서가 보낸 답 1건, 질문이 닫힌 뒤 자동 확정 검사로 넘어감; 시뮬레이터가 닫혀 있으면 질문 단계에서 멈추고 planning이 만든 답이 없음 | AS-T15, `depts.tsx` `useDeptAgents` | 노예진 | ✅ 완료(프로토타입) |
+| FR-SPEC-009 | 다른 부서 몫은 다른 부서가 보냄 **[v0.8]** | 기획서 빈 항목 질문은 요청 부서로 `spec_question`(A2A)으로 보내고 답은 요청 부서 에이전트가 보낸다(FR-SPEC-004로 반영). AI 교차검증 판단(FR-PR-009)과 기준 넓히기 판단(FR-ATL-008)도 검증 부서가 보낸다. 프로토타입은 시뮬레이터 화면이 열려 있는 동안 다른 부서 에이전트 몫을 대신한다. 기획·개발은 남의 답·판단을 스스로 만들지 않고, 답이 없으면 그 단계에서 멈춘다(NFR-SAFE-020) | 필수 | 입력: 질문·교차검증 요청·넓히기 요청 → 출력: 다른 부서의 답·판단 | G `flow` 요청의 기획서에 질문 1개, 시뮬레이터 열림 / W 흐름 진행 / T 활동 로그에 planning → 요청 부서 `spec_question` 1건, 요청 부서가 보낸 답 1건, 질문이 닫힌 뒤 자동 확정 검사로 넘어감; 시뮬레이터가 닫혀 있으면 질문 단계에서 멈추고 planning이 만든 답이 없음. **[v1.0]** 실제 모드: 근거 ID도 숫자도 없으면 요청을 보낸 **서비스**(부서가 아니라 `inquiry` 등 서비스 id, `Request.from_service`)에 `answer_planning_question`(read)으로 묻는다. `answered` → 근거·결정·`record_case`, `needs_human` → 질문 열어 둠(답 대기, 나중 답은 `receive_planning_answer`), 창구 없음·30초 무응답·`unknown` → 질문 없이 진행. 기획 화면에서 사람이 대신 답해도 같은 경로 | AS-T15, `depts.tsx` `useDeptAgents`, 서비스 단위 제공(10/28) | 노예진 | ✅ 완료(프로토타입, 실제 A2A 백엔드 #262, 서비스 창구는 #264~#269) |
 
 ### 4-3. FR-DOC 문서·문단·정리 (담당: 노예진)
 
@@ -296,7 +296,7 @@ L0 프로토타입(완료) → L1 시나리오 A 필수 skill 3개 + 공통 8항
 
 | ID | 요구사항명 | 상세 설명 | 우선순위 | 입력·출력 | 수용 기준 | 근거 | 담당 | 상태 |
 |---|---|---|---|---|---|---|---|---|
-| FR-HR-001 | ① 결정 이벤트 | `record_case` kind `spec_confirmed`·`pr_merged`·`decision_extracted`·`request_closed`, `decision_reason`·`alternatives_considered` 필수 [DIF-3a] | 필수 | 출력: hr 창구 이벤트 | G 대표 흐름 / W 확정·머지·결정 기록 / T 5174 인사 창구에 kind별 이벤트가 각 1건 이상 | 구성안 14장 4 | 노예진(김준하) | ✅ 완료(프로토타입) |
+| FR-HR-001 | ① 결정 이벤트 | `record_case` kind `spec_confirmed`·`pr_merged`·`decision_extracted`·`request_closed`, `decision_reason`·`alternatives_considered` 필수 [DIF-3a] | 필수 | 출력: hr 창구 이벤트 | G 대표 흐름 / W 확정·머지·결정 기록 / T 5174 인사 창구에 kind별 이벤트가 각 1건 이상. **[v1.0]** `decision_extracted`·`spec_confirmed`는 관문 통과 뒤 hr `record_case`를 A2A로 실제 호출(결정 번호 `decision:D-n`을 첫 근거, 멱등 키 `<id>:<종류>`, 30초). 실패해도 확정은 되돌리지 않고 "인사 기록 실패"만 남김. `pr_merged`·`decision_rejected`는 2단계(서비스 분리 뒤) | 구성안 14장 4, 인사 연동 기획안(11/2) | 노예진(김준하) | ✅ 완료(프로토타입, 실제 호출 일부 백엔드 #257) |
 | FR-HR-002 | ④ 진행 중 조회 | `list_in_progress`(read): 담당자·영역의 **진행 중 배포 + 미완료 티켓 + 열린 PR**. "공지된 제약"은 1차에서 뺀다. **[v0.4] 필수 승격**(AS-T11). 입출력은 준하 님 계약 PR | 필수 | 입력: 담당·영역 → 출력: 진행 중 배포·미완료 티켓·열린 PR 목록 | G 담당자 A에게 진행 중 작업 2개·열린 PR 1개 / W hr이 담당자 A로 조회 / T 3건과 근거 ID 반환, 상태 변경 없음, 다른 담당자 항목 없음 | 구성안 5-1, AS-T11 | 노예진(김준하) | ✅ 완료(백엔드 #184) |
 | FR-HR-003 | 인수인계 검증(B 검증자) **[v0.4]** | hr `confirm_handover`(B)의 교차검증. FR-HR-002 결과와 인계 목록을 코드로 비교해 누락 0이면 승인, 있으면 거절하고 누락 목록을 돌려준다. 사실만 확인하고 내용 판단은 하지 않는다. skill 이름·입출력은 계약 PR (TODO: 추후결정) | 필수 | 입력: 담당·영역, 인계 목록 → 출력: 승인 여부, 누락 목록 | G 진행 중 항목 3개 중 인계 목록에 2개 / W 안전 레이어가 검증 요청 / T 거절, 누락 1개(ID)가 결과에 있고 상태 변경 없음; 3개 모두 있으면 승인·누락 0 | AS-T11 | 노예진(김준하) | ✅ 완료(백엔드 #184) |
 | FR-HR-004 | 기각 결정 전송 **[v0.4]** | 개선 초안 기각, 기각 안으로 처리한 결정을 `record_case` kind `decision_rejected`로 보낸다. 기각 이유(`decision_reason`)와 검토한 대안(`alternatives_considered`) 필수 | 필수 | 출력: hr 이벤트 | G 개선 초안 REQ-13 / W 기각(이유·대안 입력) / T hr에 `decision_rejected` 1건, `decision_reason`·`alternatives_considered`가 비어 있지 않음; 이유가 없으면 보내지 않고 오류 | AS-T11 | 노예진(김준하) | ✅ 완료(백엔드 #184) |
@@ -401,7 +401,7 @@ L0 프로토타입(완료) → L1 시나리오 A 필수 skill 3개 + 공통 8항
 
 | ID | 요구사항 | 수치·수용 기준 | 우선순위 | 근거 |
 |---|---|---|---|---|
-| NFR-PERF-001 | ② `check_plan` 마감 | (TODO: 추후결정 — "짧게") 안에 응답 없으면 FR-SPEC-003 | 선택 | 구성안 9-2 |
+| NFR-PERF-001 | ② `check_plan` 마감 | **[v1.0]** 30초 안에 응답 없으면 FR-SPEC-003 (`record_case`·되묻기도 30초) | 선택 | 구성안 9-2, 인사 연동 기획안(11/2) |
 | NFR-PERF-002 | PR 생성 단계별 마감 | 단계마다 마감, 초과 시 Task `canceled` (값 TODO: 추후결정) | 선택 | 구성안 10장 |
 | NFR-PERF-003 | 화면 실시간 반영 | 버스 상태 변경 후 두 화면 갱신 2초 이내 [가정] | 필수 | AS-G01 |
 | NFR-PERF-004 | 결정성 | 같은 입력 2번 → 같은 결과 (`find_related_prs`, `verify_rollback_target`) | 필수 | 구성안 12장 공통 2 |
@@ -519,11 +519,12 @@ L0 프로토타입(완료) → L1 시나리오 A 필수 skill 3개 + 공통 8항
 | IF-INT-A2A-001 | `find_related_prs` | orchestrator, infra, data | `window_from`, `window_to`, `component?` | `candidates[]`(`pr_number`, `title`, `merged_at`, `spec_id`, `para_id`, `changed_paths`) | read | 필수 |
 | IF-INT-A2A-002 | `link_incident` | orchestrator, infra | `incident_context_id`, `pr_numbers[]`, `follow_up_title?` | `linked_paras[]`, `follow_up_request_id?` | A | 필수 |
 | IF-INT-A2A-003 | `verify_rollback_target` | safety | `service`, `target_version`, `deployed_at`, `incident_opened_at` | `approved`, `reason_code`, `related_prs[]` | read | 필수 |
-| IF-INT-A2A-004 | `create_ticket` | support, marketing, hr, data, orchestrator | `CreateTicketInput`(계약 #175) [v0.8] | `REQ-n`(created) 또는 `linked_duplicate`. 백엔드 #207, 고객지원 `request_change`(#233)가 호출 | A | 선택 |
+| IF-INT-A2A-004 | `create_ticket` | support, marketing, hr, data, finance [v1.0], orchestrator | `CreateTicketInput`(계약 #175) [v0.8] | `REQ-n`(created) 또는 `linked_duplicate`. 백엔드 #207, 고객지원 `request_change`(#233)가 호출. **[v1.0]** 서비스 이름으로 와도 부서는 `department_of`, 보낸 서비스 id는 `from_service`로 남김(#262). 문의 → 사람 확인 → 전송은 #281 | A | 선택 |
 | IF-INT-A2A-005 | `get_request_status` | 모든 부서, 통합 | 요청 ID | 상태 | read | 선택 |
 | IF-INT-A2A-006 | `ticket_draft_propose` (③ 수신) | hr | 초안 | `REQ-n` | A | 선택 |
 | IF-INT-A2A-007 | `list_in_progress` (④) | hr, 통합 | 담당·영역 | 진행 중 배포·미완료 티켓·열린 PR [v0.4] | read | 필수 |
 | IF-INT-A2A-008 | 인수인계 검증 [v0.4] (이름 TODO: 추후결정) | safety(교차검증 라우팅) | 담당·영역, 인계 목록 | `approved`, 누락 목록 | read | 필수 |
+| IF-INT-A2A-009 | `receive_planning_answer` **[v1.0]** | support, marketing, hr, data, finance, orchestrator | `ReceivePlanningAnswerInput`(question_id·request_id·answer·answered_by·evidence_ids), 멱등 키 필수 | `applied` / `duplicate` / `unknown_question` (백엔드 #262) | A | 필수 |
 
 ### 6-3. IF-INT-OUT planning이 보내는 것
 
@@ -531,11 +532,11 @@ L0 프로토타입(완료) → L1 시나리오 A 필수 skill 3개 + 공통 8항
 
 | ID | 대상 | 지점 | 요청 핵심 | 응답 핵심 | 우선순위 |
 |---|---|---|---|---|---|
-| IF-INT-OUT-001 | hr | ② `check_plan` | 기획 안 | `ok`/`warn` + 근거 카드 | 선택 |
-| IF-INT-OUT-002 | hr | ① `record_case` | kind(`spec_confirmed`·`pr_merged`·`decision_extracted`·`request_closed`·`decision_rejected` [v0.4]), `decision_reason`, `alternatives_considered` | 결정 카드 ID | 선택 |
+| IF-INT-OUT-001 | hr | ② `check_plan` | 기획 안 (`PlanDraft`: 제목·요약·영역·kind spec, 근거는 `untrusted`) | `ok`/`warn` + 근거 카드. **[v1.0]** 실제 호출(#257) | 필수 |
+| IF-INT-OUT-002 | hr | ① `record_case` | kind(`spec_confirmed`·`pr_merged`·`decision_extracted`·`request_closed`·`decision_rejected` [v0.4]), `decision_reason`, `alternatives_considered` | 결정 카드 ID. **[v1.0]** `decision_extracted`·`spec_confirmed` 실제 호출(#257), 나머지 kind는 2단계 | 필수 |
 | IF-INT-OUT-003 | safety | `execute()` | 액션·등급·멱등성 키 | 실행 결과(`held` 포함) | 필수 |
 | IF-INT-OUT-004 | 이벤트 버스 | 구독 `incident.opened`, `safety.review_decided` | — | — | 선택 |
-| IF-INT-OUT-005 | 요청 부서 | `spec_question` **[v0.8]** | 기획서 id, 빈 항목 질문 | 요청 부서 에이전트의 답(FR-SPEC-004로 반영) | 필수 |
+| IF-INT-OUT-005 | 요청 서비스 | `spec_question` **[v0.8]** → **[v1.0]** `answer_planning_question`(read) | `AnswerPlanningQuestionInput`(question_id·request_id·spec_id·question·about) | `answered`(+답·근거 ID) / `needs_human` / `unknown` (FR-SPEC-009, #262. data 창구 #273) | 필수 |
 
 ### 6-4. IF-INT-BE 화면 ↔ planning REST (`/api/planning/*`, JWT)
 
@@ -594,7 +595,7 @@ L0 프로토타입(완료) → L1 시나리오 A 필수 skill 3개 + 공통 8항
 
 | ID | 창구 | 누가 | 무엇을 넣나 | 지금 상태 | 우선순위 | 담당 |
 |---|---|---|---|---|---|---|
-| IF-CUS-101 | 다른 부서 에이전트 A2A | 부서 에이전트 | 변경 요청(`create_ticket`), 결과 확인 | 구현됨 | 필수 | planning |
+| IF-CUS-101 | 다른 서비스 에이전트 A2A | 서비스 에이전트 | 변경 요청(`create_ticket`), 결과 확인, **[v1.0]** 기획 질문 답(`receive_planning_answer`) | 구현됨 | 필수 | planning |
 | IF-CUS-102 | 기획·개발 화면 직접 입력 | 기획·개발 담당자 | 요청 등록, 기획서 보완 답, 사후 감사 결정 | 프로토타입 완료 | 필수 | planning |
 | IF-CUS-103 | 외부 도구 가져오기 | 이슈 관리·문서·메신저(IF-CUS-003~005) | 이슈·문서·스레드를 요청·자료로 | 없음 | 이후 | planning |
 | IF-CUS-104 | 규정·자료 올리기 | 담당자 | 사내 규정·기획 자료 파일(PDF·DOCX·HWP·XLSX·CSV) | 화면만(FR-KB) | 필수(목록) / 이후(색인) | planning |
@@ -801,6 +802,7 @@ L0 프로토타입(완료) → L1 시나리오 A 필수 skill 3개 + 공통 8항
 
 | 버전 | 날짜 | 작성 | 내용 |
 |---|---|---|---|
+| v1.0 | 2026-11-02 | 노예진 | 인사 연동 기획안(준하 11/2, 최종안 합의) 1·3단계 구현: FR-HR-001(결정 추출·기획서 확정 `record_case` 실제 호출), FR-SPEC-002(`check_plan` 실제 호출)·003(무응답 30초 → 확인 못 함, 자동 확정 안 함) ✅ 백엔드 #257. 요청 서비스 되묻기: FR-SPEC-009 실제 A2A, IF-INT-OUT-005 `answer_planning_question`, IF-INT-A2A-009 `receive_planning_answer` 신설 ✅ 백엔드 #262. IF-INT-A2A-004 요청자에 finance(#283), IF-INT-OUT-001·002 선택→필수, NFR-PERF-001 마감 30초. 이름 "기획개발"을 기획·개발로 나눔(#271) |
 | v0.9 | 2026-10-26 | 노예진 | 사용자 결정 AS-T16(형상관리 연결 계층): FR-AG-011(공통 인터페이스 5가지 + 프로그램별 연결 부품, 선택)·012(GitLab, 이후)·013(PR 없는 형상관리 읽기 전용 모드, 이후), NFR-EXT-003(형상관리 교체는 설정·부품 추가만), IF-EXT-005(GitLab)·006(SVN 등) 신설, FR-AG-008·IF-EXT-001에 첫 연결 부품 메모. 사용자 지시로 FR-FE-001에 업무 시스템 「기획·개발 AI」 탭 이동(ax-frontend #43) 반영. 사용자 지시로 6-6 IF-CUS(고객사 도입 연결 지점 16개·입력 창구 8개·공통 규칙) 신설: ax-backend dev 전체 조사(10/26) 기준 상태 표시, planning 소관 9건은 요구사항, 나머지는 담당 부서 [제안]. AS-B18(고객사 형상관리·배포 도구 종류, 조사 후 결정) |
 | v0.8 | 2026-10-23 | 노예진 | 사용자 결정 AS-T15: FR-PR-010(일반 요청 무클릭 진행, 백엔드 #223·프로토타입), FR-FE-017(단계별 실시간 진행 표시), FR-SPEC-009(다른 부서 몫은 다른 부서가 보냄), NFR-SAFE-020(남의 몫을 대신 만들지 않음)·021(보호 경로는 항상 사람), IF-INT-OUT-005(`spec_question`) 신설. FR-ATL-007(관찰 기반 학습·백테스트)·008(넓히기 승인·정식 기준, 시험 단계 삭제)·009 수정(#191 재현·태윤 님 동의), FR-REQ-007·FR-FE-002(요청 탭 필터 5개 + 흐름바) 수정, FR-REQ-003·006·FR-SPEC-004·FR-PR-001·003·009·FR-FE-001·016·FR-ATL-003~005 v0.8 메모, FR-AG-004에 백엔드 #218(롤백 시각 조회) 반영. IF-INT-A2A-004·AS-B09는 계약 #175·백엔드 #207로 해결. 프로토타입(ax-frontend#12, 10/23 dev 머지)으로 FR-PR-009·FR-ATL-007~009 ✅ 완료(프로토타입). 사용자 결정으로 FR-ATL-001~004(L0~L3 단계·승급 제안)는 ⏸ 대체됨(FR-ATL-007~009로), 백엔드 L0~L3 정리는 후속 작업. 용어 4개(관찰 기간·보호 경로·흐름바·`flow` 표시), AS-B04·B14·B15·B16 보강(1회 자동 재검수, 액션별 검토자 safety #110 확장, N건·관찰 기간은 safety 기준표 #202, 시연값 N=2·2분·안전 장치 100줄·5파일) |
 | v0.7 | 2026-10-23 | 노예진 | 사용자 결정 AS-T14(사람 사전 승인 → AI 교차검증 + 사람 사후 감사): FR-SPEC-008(자동 확정), FR-PR-008(자동 머지)·009(위험 건 교차검증), FR-ATL-007(한 번 학습·백테스트)·008(시험 기간)·009(사후 감사·기준 끄기), NFR-SAFE-018(자기 승인 금지)·019(되돌릴 수 없는 일은 사람), AS-B14(안전 레이어 기준표, 태윤 님 협의)·B15(되돌릴 수 없는 일 목록·K) 신설(새 FR 미착수). 용어 3개, "사람 클릭 2번" 문구 교체(1-2·2-1·2-7), 3-1 팀장·교차검증 AI 역할, FR-SPEC-005·FR-PR-004·006·FR-ATL-003~005 v0.7 메모. 같은 v0.7 보강(10/23 태윤 님 답·사용자 결정): AS-B14 부분 확정(#171·#189, `merge_*` 키), 검토자 `confirm_spec` → hr `check_plan`·`merge_pr` → data + orchestrator(#190), 재무 `review_hold` 검토자 불가, AS-B15 목록·최대 범위는 safety(300줄·20파일·`shop-api/`·`docs/`), AS-B16 학습 C→B 팀 결정 신설(#124·#191), FR-HR-002~004·FR-SPEC-006 ✅ 완료(백엔드 #184), AS-B09 계약 요청 #172. 백엔드 #196(params #171 키, 자동 확정·자동 머지·교차검증 대기열 REST, 테스트 109)으로 FR-SPEC-008·FR-PR-008 ✅ 완료(검토자 연결·학습은 #190·#191 대기), AS-B15에 `shop-web/` 허용 경로 확인 필요. 10/23 재현 님 조건 수용: FR-ATL-007·008·AS-B16 학습 근거 = 머지 뒤 장애·revert 없음 + 관찰 기간, 시험 N건 + 관찰 기간, 넓히기 #124 방식(재무 AI `review_threshold_change`/태윤 님)·줄이기 자동(#191 댓글, #206); 검토자 #190 보류(#195, 선행 #191 → #110), data 검토자 근거 2가지·부족 시 escalate; 보호 경로 #203 항상 C, `shop-web/` 허용 #201; 공통 결정 7 변경(조건 충족 시 자동 머지 B, 위험·보호 경로 C)을 1장·FR-PR-002·CON-004·AS-B01에 반영; AS-B17(자동 머지 주체·토큰 필수 체크 통과) 신설 |
@@ -811,13 +813,13 @@ L0 프로토타입(완료) → L1 시나리오 A 필수 skill 3개 + 공통 8항
 | v0.2 | 2026-10-22 | 노예진 | 사용자 결정 AS-T09: FR-TRC-001~004(코드 역추적), FR-ATL-001~006(자동 처리 범위 학습) 신설, DIF-1a·DIF-2c, 용어 3개, AS-B11, FR-FE-001·006 지표 4탭. FR-AG → 4-12, FR-LT → 4-13으로 절 번호만 이동 |
 | v0.1 | 2026-10-22 | 노예진 | 최초 작성. 구성안 rev 68과 프로토타입을 FR 70건, NFR 46건, IF 28건, DR 12건, CON 13건, AS 28건으로 정리. AS-T01에 따라 프로토타입 기능 50건을 필수·완료(프로토타입)로 표시 |
 
-### 요구사항 집계 (v0.9)
+### 요구사항 집계 (v1.0)
 
 | 유형 | 필수 | 선택 | 이후 | 합계 | 완료(프로토타입·백엔드) |
 |---|---|---|---|---|---|
-| 기능 FR | 90 (조건부 1 포함) | 13 | 6 | 109 | 86 (대체됨 4 별도) |
+| 기능 FR | 90 (조건부 1 포함) | 13 | 6 | 109 | 87 (대체됨 4 별도) |
 | ├ FR-REQ | 10 | 0 | 0 | 10 | 10 |
-| ├ FR-SPEC | 8 | 1 | 0 | 9 | 7 |
+| ├ FR-SPEC | 8 | 1 | 0 | 9 | 8 |
 | ├ FR-DOC | 5 | 2 | 0 | 7 | 5 |
 | ├ FR-TASK | 2 | 1 | 0 | 3 | 2 |
 | ├ FR-PR | 10 | 0 | 0 | 10 | 10 |
@@ -832,7 +834,7 @@ L0 프로토타입(완료) → L1 시나리오 A 필수 skill 3개 + 공통 8항
 | ├ FR-AG | 5 | 6 | 2 | 13 | 6 |
 | └ FR-LT | 0 | 0 | 2 | 2 | 0 |
 | 비기능 NFR | 37 (조건부 1 포함) | 15 | 1 | 53 | — |
-| 인터페이스 IF | 14 | 19 | 8 | 41 (IF-CUS [제안] 15건은 세지 않음) | — |
+| 인터페이스 IF | 17 | 17 | 8 | 42 (IF-CUS [제안] 15건은 세지 않음) | — |
 | 데이터 DR | 2 | 10 | 0 | 12 | — |
 | 제약 CON | — | — | — | 13 | — |
 | 가정·미결 AS | T 16 + B 18 + G 3 + M 7 | | | 44 | — |
