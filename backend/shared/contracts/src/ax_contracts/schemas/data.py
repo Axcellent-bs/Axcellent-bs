@@ -661,6 +661,8 @@ class TrendCandidate(AxModel):
     # 있으면 trending_search가 붙고 `trending`에 그 근거)
     origins: list[CandidateOrigin] = Field(default_factory=list)
     trending: TrendingSearchEvidence | None = None
+    # 데이터로 자동 묶은 다른 이름 (`aliases`에도 들어 있다). 예전 응답은 없다
+    auto_grouped: list[str] = Field(default_factory=list)
 
 
 class AutoExcludedTerm(AxModel):
@@ -676,6 +678,16 @@ class AutoExcludedTerm(AxModel):
     days: int = Field(ge=0)  # 이 이름이 나온 한국 날짜 수
     total_days: int = Field(ge=0)  # 기록이 있는 한국 날짜 수
     reason: str  # 코드가 숫자로 만든 한 줄
+
+
+class NamePairEvidence(AxModel):
+    """후보 이름 두 개를 같은 대상으로 볼지의 근거 (자동 묶음 또는 묶음 제안)."""
+
+    names: list[str] = Field(min_length=2, max_length=2)
+    correlation: float = Field(ge=-1, le=1)  # 두 이름 네이버 일별 값(로그)의 같은 날 피어슨 상관
+    days: int = Field(ge=0)  # 상관에 쓴 날 수 (둘 다 값이 있는 날)
+    shared_videos: int = Field(ge=0)  # 쌓인 인기 영상 중 두 이름이 함께 나온 영상 수
+    applied: bool  # true = 기준을 넘어 자동으로 묶음, false = 제안만 (자동 적용 안 함)
 
 
 class TrendingCandidate(AxModel):
@@ -710,6 +722,9 @@ class TrendCandidatesOutput(AxModel):
     # 자동 제외 (예전 응답은 없다): 이번 스냅샷에서 빠진 늘 붙는 말과 근거, 무엇으로 쟀는지 한 줄
     auto_excluded: list[AutoExcludedTerm] = Field(default_factory=list)
     exclusion_basis: str | None = None
+    # 이름 자동 묶기 (예전 응답은 없다): 자동으로 묶은 쌍, 제안만 하는 쌍 (상관 큰 순)
+    auto_groups: list[NamePairEvidence] = Field(default_factory=list)
+    group_suggestions: list[NamePairEvidence] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _known_or_reason(self) -> Self:

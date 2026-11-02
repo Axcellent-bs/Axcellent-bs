@@ -21,6 +21,10 @@
   나오는 태그·구(문서 빈도)를 늘 붙는 말로 보고 뺀다(`[candidates.auto_exclude]` 기준값).
   수동 `exclude_tags`는 그대로 늘 빼고, `keep_tags`는 자동 제외에서 살린다(덮어쓰기용).
   빠진 것은 출력 `auto_excluded`에 이유와 숫자로 남긴다.
+- 이름 자동 묶기(`[candidates.auto_group]`): 네이버로 판정한 YouTube 후보끼리, 쌓인 스냅샷에서
+  같은 영상에 함께 나온 적이 있고 두 이름의 네이버 일별 값(로그) 상관이 `merge_corr` 이상이면 같은
+  대상으로 묶는다. 묶음은 별칭 표와 같은 규칙(#375: 묶음 그룹 + 이름별 판정, 하나라도 급상승이면
+  올림)으로 다시 판정한다(묶음마다 네이버 1번 더). `suggest_corr` 이상이면 묶음 제안만 남긴다.
 - 인기 검색어(Google Trends 공개 RSS 스냅샷, `trending_store`)도 후보 출처다. 정리·별칭·제외 규칙은
   태그와 같고, YouTube 후보와 이름이 겹치면 그 후보에 근거(`trending`)를 붙인다. 겹치지 않는 것은
   `trending_candidates`(최대 `[trending] max_candidates`개)로 따로 네이버 판정한다(같은 함수).
@@ -31,6 +35,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import tomllib
 from collections.abc import Mapping, Sequence
@@ -42,6 +47,7 @@ from typing import Literal
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     AutoExcludedTerm,
+    NamePairEvidence,
     TrendCandidate,
     TrendCandidatesOutput,
     TrendCandidatesRequest,
@@ -103,6 +109,13 @@ class CandidateConfig:
     auto_min_categories: int = 3
     auto_min_day_ratio: float = 0.5
     keep_tags: frozenset[str] = field(default_factory=frozenset)  # 자동 제외하지 않을 이름
+    # 이름 자동 묶기 `[candidates.auto_group]`: 같은 영상에 함께 나온 영상 수 ≥ `group_min_shared`,
+    # 두 이름의 네이버 일별 로그값 상관 ≥ `group_merge_corr`(값이 둘 다 있는 날 ≥ `group_min_days`)
+    auto_group: bool = False
+    group_merge_corr: float = 0.9
+    group_suggest_corr: float = 0.7
+    group_min_days: int = 28
+    group_min_shared: int = 1
 
     def canonical(self, tag: str) -> str:
         """정리한 태그의 대표 이름 (별칭이 아니면 그대로)."""
@@ -162,8 +175,14 @@ def load_config(env: Mapping[str, str]) -> CandidateConfig:
         raw = whole.get("candidates") or {}
         trending = whole.get("trending") or {}
         auto = raw.get("auto_exclude") or {}
+        grouping = raw.get("auto_group") or {}
         base = CandidateConfig()
         return CandidateConfig(
+            auto_group=bool(grouping.get("enabled", bool(grouping))),
+            group_merge_corr=float(grouping.get("merge_corr", base.group_merge_corr)),
+            group_suggest_corr=float(grouping.get("suggest_corr", base.group_suggest_corr)),
+            group_min_days=int(grouping.get("min_days", base.group_min_days)),
+            group_min_shared=int(grouping.get("min_shared_videos", base.group_min_shared)),
             titles=bool(raw.get("titles", base.titles)),
             title_min_words=int(raw.get("title_min_words", base.title_min_words)),
             title_max_words=int(raw.get("title_max_words", base.title_max_words)),
@@ -563,6 +582,7 @@ class Judged:
     source: Literal["group", "name"]
     rising: list[str]
     names: list[TrendVerdict]
+    group: TrendVerdict | None = None  # 묶음 그룹 판정 (상관을 잴 때 이 시계열을 쓴다)
 
 
 async def judge_name(
@@ -598,7 +618,111 @@ async def judge_name(
             names.append(await naver_verdict(one, connector, settings))
             requests += 1
     verdict, source, rising = pick_verdict(group, names)
-    return Judged(keywords, verdict, source, rising, names), requests
+    return Judged(keywords, verdict, source, rising, names, group), requests
+
+
+# ---------------------------------------------------------------- 이름 자동 묶기
+
+
+def log_correlation(a: TrendVerdict, b: TrendVerdict) -> tuple[float | None, int]:
+    """두 판정 시계열의 같은 날 로그값 피어슨 상관과 쓴 날 수. 값이 0이거나 없는 날은 뺀다.
+
+    네이버 값은 요청마다 배수만 다르다(로그에서는 더하기라 상관이 바뀌지 않음). 그래서 따로 받은
+    두 요청을 비교할 수 있다. 날이 2일 미만이거나 한쪽이 평평하면 None.
+    """
+    left = {p.day: p.value for p in a.series if p.value > 0}
+    right = {p.day: p.value for p in b.series if p.value > 0}
+    days = sorted(set(left) & set(right))
+    if len(days) < 2:
+        return None, len(days)
+    xs = [math.log(left[d]) for d in days]
+    ys = [math.log(right[d]) for d in days]
+    mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+    sx = math.sqrt(sum((x - mx) ** 2 for x in xs))
+    sy = math.sqrt(sum((y - my) ** 2 for y in ys))
+    if sx == 0 or sy == 0:
+        return None, len(days)
+    r = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True)) / (sx * sy)
+    return round(r, 4), len(days)
+
+
+def shared_videos(
+    history: Sequence[HistoryVideo], names: Sequence[str], config: CandidateConfig
+) -> dict[frozenset[str], int]:
+    """쌓인 인기 영상에서 후보 이름 두 개가 같은 영상(태그·제목 구)에 함께 나온 영상 수.
+
+    태그는 정리·별칭 표를 거친 이름이 후보 이름과 같을 때, 제목 구는 공백만 다를 때도 센다
+    (`pick_names`가 구를 태그 후보에 합치는 규칙과 같다). 공백만 다른 후보가 둘이면 둘 다에 센다.
+    """
+    wanted = set(names)
+    by_norm: dict[str, list[str]] = {}
+    for n in names:
+        by_norm.setdefault(_norm(n), []).append(n)
+    out: dict[frozenset[str], int] = {}
+    for video in history:
+        found = {
+            name for name in (config.canonical(clean_tag(t)) for t in video.tags) if name in wanted
+        }
+        if config.titles:
+            words = (config.title_min_words, config.title_max_words)
+            for phrase in title_phrases(video.title, *words):
+                found.update(by_norm.get(_norm(config.canonical(phrase)), []))
+        ordered = sorted(found)
+        for i, a in enumerate(ordered):
+            for b in ordered[i + 1 :]:
+                pair = frozenset((a, b))
+                out[pair] = out.get(pair, 0) + 1
+    return out
+
+
+def name_pairs(
+    judged: Sequence[tuple[str, Judged]],
+    shared: Mapping[frozenset[str], int],
+    config: CandidateConfig,
+) -> list[NamePairEvidence]:
+    """함께 나온 적이 있는 후보 쌍마다 상관을 재서 묶음(applied)·제안을 고른다. 상관 큰 순."""
+    out: list[NamePairEvidence] = []
+    for i, (a, ja) in enumerate(judged):
+        for b, jb in judged[i + 1 :]:
+            together = shared.get(frozenset((a, b)), 0)
+            if together < config.group_min_shared or ja.group is None or jb.group is None:
+                continue
+            r, days = log_correlation(ja.group, jb.group)
+            if r is None or days < config.group_min_days or r < config.group_suggest_corr:
+                continue
+            out.append(
+                NamePairEvidence(
+                    names=[a, b],
+                    correlation=r,
+                    days=days,
+                    shared_videos=together,
+                    applied=r >= config.group_merge_corr,
+                )
+            )
+    out.sort(key=lambda e: (-e.correlation, e.names))
+    return out
+
+
+def components(names: Sequence[str], pairs: Sequence[NamePairEvidence]) -> list[list[str]]:
+    """묶음(applied) 쌍으로 이어진 이름 덩어리 (2개 이상만, 원래 순서)."""
+    parent = {n: n for n in names}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for pair in pairs:
+        if pair.applied:
+            a, b = pair.names
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+    groups: dict[str, list[str]] = {}
+    for n in names:
+        groups.setdefault(find(n), []).append(n)
+    return [g for g in groups.values() if len(g) > 1]
 
 
 def _trending_summary(found: list[TrendingCandidate], attached: int) -> str:
@@ -684,10 +808,65 @@ async def find_candidates(
             rank=pick.rank, traffic=pick.traffic, snapshot_at=at, keyword=pick.item_keyword
         )
 
-    candidates: list[TrendCandidate] = []
+    judged_tags: list[tuple[TagCount, Judged]] = []
     for tag in tags:
         judged, n = await judge_name(tag.keyword, config, connector, settings, start, end, queries)
         requests += n
+        judged_tags.append((tag, judged))
+
+    pairs: list[NamePairEvidence] = []
+    merged_names: dict[str, list[str]] = {}  # 대표 이름 → 자동으로 묶인 다른 이름
+    if config.auto_group and snapshot is not None and len(judged_tags) > 1:
+        history = popular_history(db, snapshot.collected_at)
+        names = [t.keyword for t, _ in judged_tags]
+        pairs = name_pairs(
+            [(t.keyword, j) for t, j in judged_tags], shared_videos(history, names, config), config
+        )
+        rank_of = {v.video_id: v.rank for v in snapshot.videos}
+        by_name = {t.keyword: (t, j) for t, j in judged_tags}
+        for group in components(names, pairs):
+            head, rest = group[0], group[1:]  # 앞(영상 많은 순)이 대표 이름
+            parts = [by_name[n] for n in group]
+            keywords: list[str] = []
+            for _, j in parts:
+                keywords.extend(k for k in j.keywords if k not in keywords)
+            keywords = keywords[:MAX_KEYWORDS]
+            query = TrendScanInput(
+                keyword_groups=[TrendKeywordGroup(group_name=head, keywords=keywords)],
+                start_date=start,
+                end_date=end,
+            )
+            queries.append(
+                f"naver search-trend group={head} keywords={','.join(keywords)} {start}~{end} date"
+                " (자동 묶음)"
+            )
+            combined = await naver_verdict(query, connector, settings)
+            requests += 1
+            # 이름별 판정: 각 후보의 이름별 판정(별칭이 있으면) 또는 그 후보 그룹 판정
+            one_by_one: list[TrendVerdict] = []
+            for _, j in parts:
+                one_by_one.extend(j.names or ([j.group] if j.group else []))
+            verdict, source, rising = pick_verdict(combined, one_by_one)
+            ids: list[str] = []
+            matched: list[str] = []
+            phrases: list[str] = []
+            origins: list[str] = []
+            for t, _ in parts:
+                ids.extend(v for v in t.video_ids if v not in ids)
+                matched.extend(m for m in t.matched if m not in matched)
+                phrases.extend(m for m in t.phrases if m not in phrases)
+                origins.extend(o for o in t.origins if o not in origins)
+            ids.sort(key=lambda v: rank_of.get(v, 10**9))
+            tag = TagCount(head, tuple(ids), tuple(matched), tuple(phrases), tuple(origins))
+            judged = Judged(keywords, verdict, source, rising, one_by_one, combined)
+            by_name[head] = (tag, judged)
+            for n in rest:
+                by_name.pop(n)
+            merged_names[head] = rest
+        judged_tags = [by_name[n] for n in names if n in by_name]
+
+    candidates: list[TrendCandidate] = []
+    for tag, judged in judged_tags:
         hit = attach.get(_norm(tag.keyword))
         candidates.append(
             TrendCandidate(
@@ -706,6 +885,7 @@ async def find_candidates(
                 naver_from=judged.source,
                 origins=[*tag.origins, "trending_search"] if hit else list(tag.origins),  # type: ignore[list-item]
                 trending=evidence_of(hit, tsnap.collected_at) if hit and tsnap else None,
+                auto_grouped=merged_names.get(tag.keyword, []),
             )
         )
     trending: list[TrendingCandidate] = []
@@ -750,7 +930,12 @@ async def find_candidates(
             summary += (
                 f" 자동 제외 {len(auto_excluded)}개 ({', '.join(a.name for a in auto_excluded)})."
             )
+        applied = [e for e in pairs if e.applied]
+        if applied:
+            summary += f" 자동 묶음 {len(applied)}쌍."
         output = TrendCandidatesOutput(
+            auto_groups=applied,
+            group_suggestions=[e for e in pairs if not e.applied],
             auto_excluded=auto_excluded,
             exclusion_basis=basis,
             status="known",

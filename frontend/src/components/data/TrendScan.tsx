@@ -104,7 +104,7 @@ function TrendChart({ v }: { v: TrendVerdict }) {
 /** 화면에 그릴 판정 하나. youtube가 있으면 YouTube 후보에서 온 것 */
 /** risingNames: 이름마다 따로 판정해 급상승인 이름 (별칭이 있는 YouTube 후보만, 서버 값) */
 /** trending: 인기 검색어 근거 (서버 값). youtube 없이 trending만 있으면 인기 검색어에서만 나온 후보 */
-type Entry = { v: TrendVerdict; youtube?: YouTubeTagEvidence; trending?: TrendingSearchEvidence | null; aliases?: string[]; risingNames?: string[] };
+type Entry = { v: TrendVerdict; youtube?: YouTubeTagEvidence; trending?: TrendingSearchEvidence | null; aliases?: string[]; autoGrouped?: string[]; risingNames?: string[] };
 
 /** 인기 검색어 칩 글자: "인기 검색어 3위 · 500+" (피드 값 그대로) */
 const trendingLabel = (t: TrendingSearchEvidence) => `${CANDIDATE_ORIGIN_LABEL.trending_search} ${t.rank}위${t.traffic ? ` · ${t.traffic}` : ""}`;
@@ -116,7 +116,7 @@ function restLine(v: TrendVerdict): string {
   return `평소 수준${note ? ` · ${note}` : ""}`;
 }
 
-function RisingCard({ v, youtube, trending, aliases, risingNames, rank }: { v: TrendVerdict; youtube?: YouTubeTagEvidence; trending?: TrendingSearchEvidence | null; aliases?: string[]; risingNames?: string[]; rank: number }) {
+function RisingCard({ v, youtube, trending, aliases, autoGrouped, risingNames, rank }: { v: TrendVerdict; youtube?: YouTubeTagEvidence; trending?: TrendingSearchEvidence | null; aliases?: string[]; autoGrouped?: string[]; risingNames?: string[]; rank: number }) {
   const [open, setOpen] = useState(false);
   const e = v.evidence;
   const strength = strengthLabel(e.score);
@@ -128,6 +128,7 @@ function RisingCard({ v, youtube, trending, aliases, risingNames, rank }: { v: T
         <h3 className="truncate text-lg font-bold text-ink-900">{v.group_name}</h3>
         {/* 서버가 묶은 별칭 (#339). 네이버 판정에 함께 넣은 이름이다. 없으면 표시하지 않는다 */}
         {aliases && aliases.length > 0 && <p className="text-[11px] text-ink-500">함께 본 이름: {aliases.join(", ")}</p>}
+        {autoGrouped && autoGrouped.length > 0 && <p className="text-[11px] text-ink-500">데이터로 자동 묶은 이름: {autoGrouped.join(", ")}</p>}
         {/* 이름마다 따로 판정해 급상승인 이름 (서버 rising_names). 묶음은 평범이어도 이 이름이 올라 급상승이 될 수 있다 */}
         {risingNames && risingNames.length > 0 && <p className="text-xs font-semibold text-red-700">올라간 이름: {risingNames.join(", ")}</p>}
       </div>
@@ -175,7 +176,7 @@ function RisingCard({ v, youtube, trending, aliases, risingNames, rank }: { v: T
 function mergeEntries(out: TrendScanOutput, cands: TrendCandidatesOutput | null): Entry[] {
   // 이름 하나가 올라 급상승이 된 후보(naver_from = name)는 판정의 group_name이 그 이름이라, 카드 제목은 후보 이름으로 둔다
   const fromYoutube: Entry[] = (cands?.candidates ?? []).map((c) => ({
-    v: { ...c.naver, group_name: c.keyword }, youtube: c.youtube, trending: c.trending, aliases: c.aliases, risingNames: c.rising_names,
+    v: { ...c.naver, group_name: c.keyword }, youtube: c.youtube, trending: c.trending, aliases: c.aliases, autoGrouped: c.auto_grouped, risingNames: c.rising_names,
   }));
   // 인기 검색어에서만 나온 후보 (YouTube 후보와 겹치는 것은 서버가 이미 그 후보에 붙였다)
   const fromTrending: Entry[] = (cands?.trending_candidates ?? []).map((c) => ({
@@ -241,6 +242,7 @@ function YoutubeOnly({ cands }: { cands: CandState }) {
   }
   const auto = cands.kind === "ok" ? cands.out.auto_excluded ?? [] : [];
   const basis = cands.kind === "ok" ? cands.out.exclusion_basis : null;
+  const pairs = cands.kind === "ok" ? [...(cands.out.auto_groups ?? []), ...(cands.out.group_suggestions ?? [])] : [];
   return (
     <Panel id="data-trend-youtube" title="YouTube에서 뜨지만 검색은 평소 수준"
       hint={line && <span className={line.warn ? "text-amber-700" : undefined}>{line.text}</span>}>
@@ -251,6 +253,19 @@ function YoutubeOnly({ cands }: { cands: CandState }) {
           <summary className="cursor-pointer font-semibold">후보에서 자동으로 뺀 늘 붙는 말 {auto.length}개{basis ? ` · ${basis}` : ""}</summary>
           <ul className="mt-2 space-y-1">
             {auto.map((a) => <li key={`${a.source}-${a.name}`}><b className="text-ink-900">{a.name}</b> · 이번 스냅샷 영상 {a.snapshot_videos}개 · {a.reason}</li>)}
+          </ul>
+        </details>
+      )}
+      {/* 서버의 이름 자동 묶기: 묶은 쌍과 제안만 한 쌍 (상관·함께 나온 영상 수는 서버 값) */}
+      {pairs.length > 0 && (
+        <details className="mt-2 text-xs text-ink-600">
+          <summary className="cursor-pointer font-semibold">같은 대상으로 보이는 이름 {pairs.length}쌍</summary>
+          <ul className="mt-2 space-y-1">
+            {pairs.map((p) => (
+              <li key={p.names.join("|")}>
+                <b className="text-ink-900">{p.names.join(" · ")}</b> · {p.applied ? "자동으로 묶음" : "묶음 제안 (적용 안 함)"} · 검색 추이 상관 {fixed(p.correlation, 2) ?? "-"} ({p.days}일) · 함께 나온 영상 {p.shared_videos}개
+              </li>
+            ))}
           </ul>
         </details>
       )}
@@ -311,7 +326,7 @@ function Result({ entries, headline, cands }: { entries: Entry[]; headline: stri
           <Empty>이번 판정 구간에 급상승한 키워드 그룹이 없어요.</Empty>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {rising.map((e, i) => <RisingCard key={`${e.youtube ? "yt" : e.trending ? "tr" : "kw"}-${e.v.group_name}`} v={e.v} youtube={e.youtube} trending={e.trending} aliases={e.aliases} risingNames={e.risingNames} rank={i + 1} />)}
+            {rising.map((e, i) => <RisingCard key={`${e.youtube ? "yt" : e.trending ? "tr" : "kw"}-${e.v.group_name}`} v={e.v} youtube={e.youtube} trending={e.trending} aliases={e.aliases} autoGrouped={e.autoGrouped} risingNames={e.risingNames} rank={i + 1} />)}
           </div>
         )}
         {rising.length > 0 && <p className="text-xs text-ink-500">마케팅에 소재로 보내기: {SEND_TO_MARKETING_BLOCKED}</p>}

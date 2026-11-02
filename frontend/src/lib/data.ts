@@ -335,6 +335,19 @@ export interface TrendCandidate {
   origins?: CandidateOrigin[];
   /** 인기 검색어에도 있으면 그 근거. 예전 응답은 없다 */
   trending?: TrendingSearchEvidence | null;
+  /** 데이터로 자동 묶은 다른 이름 (aliases에도 들어 있다). 예전 응답은 없다 */
+  auto_grouped?: string[];
+}
+/** 후보 이름 두 개를 같은 대상으로 볼지의 근거 (서버 값) */
+export interface NamePairEvidence {
+  names: string[];
+  /** 두 이름 네이버 일별 값(로그)의 같은 날 상관 */
+  correlation: number;
+  days: number;
+  /** 쌓인 인기 영상 중 두 이름이 함께 나온 영상 수 */
+  shared_videos: number;
+  /** true = 자동으로 묶음, false = 제안만 */
+  applied: boolean;
 }
 /** 후보가 나온 곳 (서버 값). 화면 이름: CANDIDATE_ORIGIN_LABEL */
 export type CandidateOrigin = "youtube_tag" | "youtube_title" | "trending_search";
@@ -388,6 +401,10 @@ export interface TrendCandidatesOutput {
   auto_excluded?: AutoExcludedTerm[];
   /** 자동 제외를 무엇으로 쟀는지 한 줄 (예: 쌓인 인기 영상 275개, 기록이 있는 날 1일) */
   exclusion_basis?: string | null;
+  /** 자동으로 묶은 이름 쌍. 예전 응답은 없다 */
+  auto_groups?: NamePairEvidence[];
+  /** 기준에 못 미쳐 묶음 제안만 하는 쌍 (자동 적용 안 함). 예전 응답은 없다 */
+  group_suggestions?: NamePairEvidence[];
 }
 
 /** 한 번에 판정할 수 있는 그룹 수 (화면 입력 한도) */
