@@ -15,10 +15,10 @@ from finance_agent.sources import MockSources
 
 HUMAN = {"Authorization": "Bearer human:taeyoon"}
 FINDING = {
-    "code": "repeat_refund",
+    "code": "duplicate_coupon",
     "severity": "medium",
-    "title": "같은 고객 반복 환불",
-    "detail": "buy_0008의 주문 3건 환불",
+    "title": "같은 고객에게 같은 사건 보상 쿠폰 2번",
+    "detail": "buy_0008에게 사건 ctx_inc_1 보상 쿠폰 2번",
     "refs": ["ord_1", "ord_2"],
 }
 

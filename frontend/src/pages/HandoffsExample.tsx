@@ -38,7 +38,7 @@ type ExItem = {
 const ITEMS: ExItem[] = [
   { id: "ex-1", from: "개발·배포", dept: "개발팀", category: "PR 교차검증", kind: "사람 확인 요청", title: "PR #12 교차검증 사람 확인",
     reason: "진행 중 사건과 구성요소 겹침", status: "waiting", minutesAgo: 25, href: "/dev/work/prs", hrefLabel: "작업·PR" },
-  { id: "ex-2", from: "고객지원", dept: "재무팀", category: "환불 승인", kind: "사람 확인 요청", title: "환불 120,000원 승인",
+  { id: "ex-2", from: "고객지원", dept: "고객지원팀", category: "환불 승인", kind: "사람 확인 요청", title: "환불 120,000원 승인",
     reason: "주문 2310 파손 · 자동 환불 한도 50,000원 초과", risky: true, status: "waiting", minutesAgo: 40, href: "/claims", hrefLabel: "클레임·보상" },
   { id: "ex-3", from: "고객지원", dept: "고객지원팀", category: "고객 문의 답변", kind: "서비스 꺼짐 대신", title: "고객 문의 직접 답변",
     reason: "고객지원 서비스 꺼짐 · 배송 지연 문의 3건", status: "waiting", minutesAgo: 15, href: "/inquiry", hrefLabel: "고객 문의" },
@@ -62,7 +62,7 @@ const ESCALATE_MIN = 120;
 type Rule = { category: string; dept: string };
 const RULES_KEY = "axcellent-handoff-rules";
 const SEED_RULES: Rule[] = [
-  { category: "환불 승인", dept: "재무팀" },
+  { category: "환불 승인", dept: "고객지원팀" },
   { category: "롤백 승인", dept: "인프라팀" },
 ];
 const loadRules = (): Rule[] => {

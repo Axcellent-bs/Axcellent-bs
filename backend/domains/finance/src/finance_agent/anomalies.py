@@ -7,6 +7,7 @@
 - 처리한 건은 같은 의심 건이 다시 나와도 다시 열지 않는다 (처리 기록이 남아 있으므로)
 - 총괄에 알리는 이벤트(`finance.anomaly_detected`)는 건마다 한 번만 보낸다(`announced`)
 - 돈을 돌려받거나 고객을 막는 일은 하지 않는다. 기록과 처리 메모뿐이다
+- 재무는 환불을 감사하지 않는다. 예전에 저장한 환불 의심 건은 다시 켤 때 열린 목록에서 뺀다
 """
 
 from __future__ import annotations
@@ -20,12 +21,31 @@ from finance_agent import finance_config as fc
 OPEN, RESOLVED = "open", "resolved"
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 RESOLVED_SHOWN = 20
+# 없앤 환불 감사 규칙. 예전 저장 파일에 남은 건을 알아보려고만 쓴다
+RETIRED_REFUND_CODES = {"repeat_refund", "refund_rate_jump"}
+MIXED_CODES = {"split_under_limit", "amount_recheck_failed"}  # 예전에는 쿠폰·환불을 함께 봤다
 
 
 def signature(finding: dict[str, Any]) -> str:
     """의심 건 번호. 종류와 관련 번호가 같으면 같은 건이다."""
     raw = "|".join([str(finding.get("code")), *sorted(str(r) for r in finding.get("refs") or [])])
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def is_refund_audit(entry: dict[str, Any]) -> bool:
+    """없앤 환불 감사가 남긴 의심 건인가. 제목·내용은 코드가 쓴 문장이라 "환불"로 가른다."""
+    code = entry.get("code")
+    if code in RETIRED_REFUND_CODES:
+        return True
+    text = f"{entry.get('title') or ''} {entry.get('detail') or ''}"
+    return code in MIXED_CODES and "환불" in text
+
+
+def drop_open_refund_audit(store: dict[str, dict[str, Any]]) -> None:
+    """예전 환불 의심 건 중 처리 전인 것을 뺀다. 사람이 남긴 처리 기록은 그대로 둔다."""
+    for ref, entry in list(store.items()):
+        if entry.get("status") == OPEN and is_refund_audit(entry):
+            del store[ref]
 
 
 def note_findings(

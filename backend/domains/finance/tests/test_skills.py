@@ -76,7 +76,7 @@ def _verify(
     }
 
 
-def _recheck(data: dict, sources: MockSources | None = None, refunds: dict | None = None) -> dict:
+def _recheck(data: dict, sources: MockSources | None = None) -> dict:
     """금액 다시 계산 규칙(`recheck.recompute`). verify_amount skill은 없어졌고 계산은 남았다."""
     import asyncio
 
@@ -91,7 +91,6 @@ def _recheck(data: dict, sources: MockSources | None = None, refunds: dict | Non
             meta,
             VerifyAmountInput.model_validate(data),
             sources or state.sources,
-            state.ledger.refunds if refunds is None else refunds,
         )
     )
     return {"status": "completed", "output": out.model_dump(mode="json")}
@@ -186,29 +185,6 @@ def test_verify_rejects_invalid_params(client: TestClient, bad: dict) -> None:
     assert out["reason_code"] == "invalid_params"
 
 
-def test_verify_refund_against_paid_amount(client: TestClient) -> None:
-    ok = _recheck(
-        _verify({"order_id": "ord_1001", "refund_amount": 24_000}, action="refund_request"),
-    )["output"]
-    assert ok["decision"] == "approved"
-    over = _recheck(
-        _verify(
-            {"order_id": "ord_1001", "refund_amount": 24_001},
-            action="refund_request",
-            execution_id="exe_2",
-        ),
-    )["output"]
-    assert (over["decision"], over["reason_code"]) == ("rejected", "exceeds_paid")
-    unknown = _recheck(
-        _verify(
-            {"order_id": "ord_x", "refund_amount": 1000},
-            action="refund_request",
-            execution_id="exe_3",
-        ),
-    )["output"]
-    assert unknown["reason_code"] == "source_unavailable"
-
-
 def test_refunds_accumulate_from_events(client: TestClient) -> None:
     import asyncio
 
@@ -229,15 +205,16 @@ def test_refunds_accumulate_from_events(client: TestClient) -> None:
             )
         )
     )
-    out = _recheck(
-        _verify({"order_id": "ord_1001", "refund_amount": 5_000}, action="refund_request"),
-    )["output"]
-    assert (out["reason_code"], out["recomputed"]["refunded_before"]) == ("exceeds_paid", 20_000)
+    ledger = client.get("/api/finance/ledger").json()["data"]
+    assert ledger["refunds"] == [{"order_id": "ord_1001", "refunded": 20_000}]
 
 
 def test_verify_unsupported_action(client: TestClient) -> None:
     out = _recheck(_verify({}, action="publish_notice"))["output"]
     assert out["reason_code"] == "unsupported_action"
+    # 환불은 재무가 다시 계산하지 않는다(고객지원 일)
+    refund = _verify({"order_id": "ord_1001", "refund_amount": 1_000}, action="refund_request")
+    assert _recheck(refund)["output"]["reason_code"] == "unsupported_action"
 
 
 def test_verify_is_deterministic_and_idempotent(client: TestClient) -> None:
@@ -320,7 +297,7 @@ def test_campaign_coupon_skips_affected_check(client: TestClient) -> None:
 
 
 def test_partial_refunds_add_up(client: TestClient) -> None:
-    """같은 주문 환불이 쌓이면 결제 금액(ord_1002 50,000원)을 넘는 순간 거절."""
+    """같은 주문 환불은 장부에 쌓인다. 결제 금액과 비교하지 않고 받은 금액을 그대로 적는다."""
     import asyncio
 
     async def refunded(amount: int, n: int) -> None:
@@ -341,19 +318,9 @@ def test_partial_refunds_add_up(client: TestClient) -> None:
         )
 
     asyncio.run(refunded(30_000, 1))
-    ok = _recheck(
-        _verify({"order_id": "ord_1002", "refund_amount": 20_000}, action="refund_request"),
-    )["output"]
-    assert ok["decision"] == "approved"
+    assert handlers.state().ledger.refunds == {"ord_1002": 30_000}
     asyncio.run(refunded(20_000, 2))
-    over = _recheck(
-        _verify(
-            {"order_id": "ord_1002", "refund_amount": 1},
-            action="refund_request",
-            execution_id="exe_9",
-        ),
-    )["output"]
-    assert (over["reason_code"], over["recomputed"]["refunded_before"]) == ("exceeds_paid", 50_000)
+    assert handlers.state().ledger.refunds == {"ord_1002": 50_000}
 
 
 def test_expired_deadline_is_canceled(client: TestClient) -> None:

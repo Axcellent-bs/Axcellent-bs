@@ -91,7 +91,7 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
 
 ## finance
 
-> 재무는 이벤트 중에 총괄이 부르지 않는다(멘토 피드백). 장애 때 나간 쿠폰·환불은 이벤트로 재무 장부에 기록되고, 비용은 평상시 결산·사후 감사에서 다룬다. `verify_amount`는 폐지됐다.
+> 재무는 이벤트 중에 총괄이 부르지 않는다(멘토 피드백). 장애 때 나간 쿠폰·환불은 이벤트로 재무 장부에 기록되고, 비용은 평상시 결산에서 다룬다. `verify_amount`는 폐지됐다.
 
 ## hr
 

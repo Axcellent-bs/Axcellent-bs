@@ -1,7 +1,8 @@
 """금액 다시 계산 (순수 규칙). 예전 `verify_amount` skill의 계산 코드다.
 
 재무 재설계(2026-10-23)로 건별 교차검증 skill은 없어졌다. 같은 계산을 이제 사후 감사
-(`audit.py`, `amount_recheck_failed`)가 쓴다: 관문을 통과한 쿠폰·환불을 원천 자료로 다시 계산한다.
+(`audit.py`, `amount_recheck_failed`)가 쓴다: 관문을 통과한 쿠폰을 원천 자료로 다시 계산한다.
+환불은 다시 계산하지 않는다. 환불 여부는 고객지원 일이고 재무는 끝난 금액을 장부에 적을 뿐이다.
 
 입출력 형식(`VerifyAmountInput`·`VerifyAmountOutput`)은 contracts 원본을 그대로 쓴다.
 근거가 없으면 통과시키지 않는다(`source_unavailable`). 상태를 바꾸지 않는다.
@@ -12,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from ax_contracts.schemas import RequestMeta, VerifyAmountInput, VerifyAmountOutput
-from finance_agent.sources import Sources, order_key
+from finance_agent.sources import Sources
 
 CLAIMED_TOTAL_FIELDS = ("total_value", "claimed_total")
 
@@ -28,9 +29,8 @@ async def recompute(
     meta: RequestMeta,
     data: VerifyAmountInput,
     sources: Sources,
-    refunds: dict[str, int],
 ) -> VerifyAmountOutput:
-    """원천 자료(`sources`)와 이미 환불한 금액(`refunds`, 주문별)으로 다시 계산한다."""
+    """쿠폰 금액을 원천 자료(`sources`)로 다시 계산한다. 쿠폰이 아니면 `unsupported_action`."""
 
     def reject(reason: str, **recomputed: int) -> VerifyAmountOutput:
         return VerifyAmountOutput(
@@ -61,30 +61,6 @@ async def recompute(
             decision="approved",
             reason_code="recomputed_match",
             recomputed={"count": count, "unit_value": unit, "total_value": total},
-            threshold_version=data.threshold_version,
-        )
-
-    if data.action == "refund_request":
-        amount, order_id = (
-            _positive_int(params.get("refund_amount")),
-            order_key(params.get("order_id")),
-        )
-        if amount is None or order_id is None:
-            return reject("invalid_params")
-        if data.computed_amount is not None and data.computed_amount != amount:
-            return reject("amount_mismatch", refund_amount=amount)
-        paid = await sources.paid_amount(meta, order_id)
-        if paid is None:
-            return reject("source_unavailable", refund_amount=amount)
-        already = refunds.get(order_id, 0)
-        if already + amount > paid:
-            return reject(
-                "exceeds_paid", refund_amount=amount, paid_amount=paid, refunded_before=already
-            )
-        return VerifyAmountOutput(
-            decision="approved",
-            reason_code="recomputed_match",
-            recomputed={"refund_amount": amount, "paid_amount": paid, "refunded_before": already},
             threshold_version=data.threshold_version,
         )
 

@@ -102,8 +102,8 @@
     },
     {
      "kind": "audit_finding",
-     "title": "처리 전 감사 의심 7건",
-     "count": 7,
+     "title": "처리 전 감사 의심 5건",
+     "count": 5,
      "amount": null,
      "link": "audit",
      "action": {
@@ -117,27 +117,15 @@
        "amount": null
       },
       {
-       "ref": "159299a58bb31a28",
-       "title": "환불률 급변",
-       "detail": "최근 7일 환불률 4.1% (지난 7일 0.5%)",
-       "amount": null
-      },
-      {
-       "ref": "f03c0d629b32677b",
+       "ref": "50f1c28f97f7f980",
        "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
-       "detail": "10-31 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
+       "detail": "10-31 16:20 쿠폰 지급 요청 총액이 다시 계산한 금액 10,000원과 다릅니다",
        "amount": null
       },
       {
        "ref": "c7f81886a850f4f7",
        "title": "영향 고객이 아닌 구매자에게 보상 쿠폰 1건",
        "detail": "사건 ctx_inc_0100: buy_0999에게 보상 쿠폰 1건 2,000원 (데이터 AI 영향 고객 2명 목록에 없음)",
-       "amount": null
-      },
-      {
-       "ref": "420aaa6abfe12a20",
-       "title": "같은 고객 환불 3번",
-       "detail": "buy_0013의 주문 3건 환불, 합계 64,000원 (최근 7일)",
        "amount": null
       },
       {
@@ -215,7 +203,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.670246Z",
+   "collected_at": "2026-11-02T07:59:46.377577Z",
    "source": "seed",
    "unavailable": []
   }
@@ -310,7 +298,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.711720Z",
+   "collected_at": "2026-11-02T07:59:46.409904Z",
    "source": "seed",
    "unavailable": []
   }
@@ -405,7 +393,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.721562Z",
+   "collected_at": "2026-11-02T07:59:46.420318Z",
    "source": "seed",
    "unavailable": []
   }
@@ -581,7 +569,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.728757Z",
+   "collected_at": "2026-11-02T07:59:46.430742Z",
    "source": "seed",
    "unavailable": []
   }
@@ -757,7 +745,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.745513Z",
+   "collected_at": "2026-11-02T07:59:46.430742Z",
    "source": "seed",
    "unavailable": []
   }
@@ -933,7 +921,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.760381Z",
+   "collected_at": "2026-11-02T07:59:46.445852Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2052,7 +2040,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.762225Z",
+   "collected_at": "2026-11-02T07:59:46.456928Z",
    "source": "seed",
    "unavailable": [],
    "pg_source": "mock_toss_settlement"
@@ -2127,7 +2115,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.778878Z",
+   "collected_at": "2026-11-02T07:59:46.472565Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2242,7 +2230,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.812240Z",
+   "collected_at": "2026-11-02T07:59:46.472565Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2314,7 +2302,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.812240Z",
+   "collected_at": "2026-11-02T07:59:46.516956Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2365,7 +2353,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.837734Z",
+   "collected_at": "2026-11-02T07:59:46.518977Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2547,7 +2535,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.862955Z",
+   "collected_at": "2026-11-02T07:59:46.534714Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2562,7 +2550,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.899596Z",
+   "collected_at": "2026-11-02T07:59:46.544783Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2688,7 +2676,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.907786Z",
+   "collected_at": "2026-11-02T07:59:46.560417Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2736,7 +2724,7 @@
      "key": "audit",
      "label": "감사 의심 건 처리",
      "status": "pending",
-     "detail": "처리 전 7건",
+     "detail": "처리 전 5건",
      "link": "audit"
     },
     {
@@ -2754,7 +2742,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.922883Z",
+   "collected_at": "2026-11-02T07:59:46.572059Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2814,7 +2802,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.930826Z",
+   "collected_at": "2026-11-02T07:59:46.578187Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2921,7 +2909,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.945156Z",
+   "collected_at": "2026-11-02T07:59:46.589780Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2931,10 +2919,6 @@
    "from": "2026-10-27T00:00:00Z",
    "to": "2026-11-03T00:00:00Z",
    "stats": {
-    "refund_count": 6,
-    "refund_amount": 122800,
-    "refund_rate": 0.0409,
-    "refund_rate_prev": 0.0048,
     "coupon_count": 33,
     "coupon_amount": 200700,
     "gate_held": 3,
@@ -2956,20 +2940,12 @@
      ]
     },
     {
-     "code": "refund_rate_jump",
-     "severity": "high",
-     "title": "환불률 급변",
-     "detail": "최근 7일 환불률 4.1% (지난 7일 0.5%)",
-     "refs": []
-    },
-    {
      "code": "amount_recheck_failed",
      "severity": "high",
      "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
-     "detail": "10-31 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
+     "detail": "10-31 16:20 쿠폰 지급 요청 총액이 다시 계산한 금액 10,000원과 다릅니다",
      "refs": [
-      "exe_s0009",
-      "ord_2156"
+      "exe_s0052"
      ]
     },
     {
@@ -2980,20 +2956,6 @@
      "refs": [
       "exe_s0065",
       "cpn_3063"
-     ]
-    },
-    {
-     "code": "repeat_refund",
-     "severity": "medium",
-     "title": "같은 고객 환불 3번",
-     "detail": "buy_0013의 주문 3건 환불, 합계 64,000원 (최근 7일)",
-     "refs": [
-      "rfd_3003",
-      "rfd_3004",
-      "rfd_3005",
-      "ord_2110",
-      "ord_2122",
-      "ord_2135"
      ]
     },
     {
@@ -3024,7 +2986,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.963919Z",
+   "collected_at": "2026-11-02T07:59:46.603893Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3034,10 +2996,6 @@
    "from": "2026-10-20T00:00:00Z",
    "to": "2026-11-03T00:00:00Z",
    "stats": {
-    "refund_count": 8,
-    "refund_amount": 140100,
-    "refund_rate": 0.0212,
-    "refund_rate_prev": 0.0,
     "coupon_count": 56,
     "coupon_amount": 311700,
     "gate_held": 4,
@@ -3059,20 +3017,12 @@
      ]
     },
     {
-     "code": "refund_rate_jump",
-     "severity": "high",
-     "title": "환불률 급변",
-     "detail": "최근 14일 환불률 2.1% (지난 14일 0.0%)",
-     "refs": []
-    },
-    {
      "code": "amount_recheck_failed",
      "severity": "high",
      "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
-     "detail": "10-31 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
+     "detail": "10-31 16:20 쿠폰 지급 요청 총액이 다시 계산한 금액 10,000원과 다릅니다",
      "refs": [
-      "exe_s0009",
-      "ord_2156"
+      "exe_s0052"
      ]
     },
     {
@@ -3083,20 +3033,6 @@
      "refs": [
       "exe_s0065",
       "cpn_3063"
-     ]
-    },
-    {
-     "code": "repeat_refund",
-     "severity": "medium",
-     "title": "같은 고객 환불 3번",
-     "detail": "buy_0013의 주문 3건 환불, 합계 64,000원 (최근 14일)",
-     "refs": [
-      "rfd_3003",
-      "rfd_3004",
-      "rfd_3005",
-      "ord_2110",
-      "ord_2122",
-      "ord_2135"
      ]
     },
     {
@@ -3128,7 +3064,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.991725Z",
+   "collected_at": "2026-11-02T07:59:46.615545Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3138,10 +3074,6 @@
    "from": "2026-10-04T00:00:00Z",
    "to": "2026-11-03T00:00:00Z",
    "stats": {
-    "refund_count": 8,
-    "refund_amount": 140100,
-    "refund_rate": 0.0186,
-    "refund_rate_prev": null,
     "coupon_count": 63,
     "coupon_amount": 344700,
     "gate_held": 4,
@@ -3166,10 +3098,9 @@
      "code": "amount_recheck_failed",
      "severity": "high",
      "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
-     "detail": "10-31 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
+     "detail": "10-31 16:20 쿠폰 지급 요청 총액이 다시 계산한 금액 10,000원과 다릅니다",
      "refs": [
-      "exe_s0009",
-      "ord_2156"
+      "exe_s0052"
      ]
     },
     {
@@ -3180,20 +3111,6 @@
      "refs": [
       "exe_s0065",
       "cpn_3063"
-     ]
-    },
-    {
-     "code": "repeat_refund",
-     "severity": "medium",
-     "title": "같은 고객 환불 3번",
-     "detail": "buy_0013의 주문 3건 환불, 합계 64,000원 (최근 30일)",
-     "refs": [
-      "rfd_3003",
-      "rfd_3004",
-      "rfd_3005",
-      "ord_2110",
-      "ord_2122",
-      "ord_2135"
      ]
     },
     {
@@ -3225,7 +3142,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.015783Z",
+   "collected_at": "2026-11-02T07:59:46.631248Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3248,39 +3165,24 @@
       "exe_s0044"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T05:32:47.700960Z",
-     "last_seen": "2026-11-02T05:32:48.027008Z",
+     "first_seen": "2026-11-02T07:59:46.402793Z",
+     "last_seen": "2026-11-02T07:59:46.649816Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
     },
     {
-     "finding_ref": "159299a58bb31a28",
-     "code": "refund_rate_jump",
-     "severity": "high",
-     "title": "환불률 급변",
-     "detail": "최근 7일 환불률 4.1% (지난 7일 0.5%)",
-     "refs": [],
-     "status": "open",
-     "first_seen": "2026-11-02T05:32:47.700960Z",
-     "last_seen": "2026-11-02T05:32:48.007581Z",
-     "resolved_by": null,
-     "resolved_at": null,
-     "note": null
-    },
-    {
-     "finding_ref": "f03c0d629b32677b",
+     "finding_ref": "50f1c28f97f7f980",
      "code": "amount_recheck_failed",
      "severity": "high",
      "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
-     "detail": "10-31 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
+     "detail": "10-31 16:20 쿠폰 지급 요청 총액이 다시 계산한 금액 10,000원과 다릅니다",
      "refs": [
-      "exe_s0009",
-      "ord_2156"
+      "exe_s0052"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T05:32:47.700960Z",
-     "last_seen": "2026-11-02T05:32:48.027008Z",
+     "first_seen": "2026-11-02T07:59:46.402793Z",
+     "last_seen": "2026-11-02T07:59:46.649816Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3296,29 +3198,8 @@
       "cpn_3063"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T05:32:47.700960Z",
-     "last_seen": "2026-11-02T05:32:48.027008Z",
-     "resolved_by": null,
-     "resolved_at": null,
-     "note": null
-    },
-    {
-     "finding_ref": "420aaa6abfe12a20",
-     "code": "repeat_refund",
-     "severity": "medium",
-     "title": "같은 고객 환불 3번",
-     "detail": "buy_0013의 주문 3건 환불, 합계 64,000원 (최근 7일)",
-     "refs": [
-      "rfd_3003",
-      "rfd_3004",
-      "rfd_3005",
-      "ord_2110",
-      "ord_2122",
-      "ord_2135"
-     ],
-     "status": "open",
-     "first_seen": "2026-11-02T05:32:47.700960Z",
-     "last_seen": "2026-11-02T05:32:48.027008Z",
+     "first_seen": "2026-11-02T07:59:46.402793Z",
+     "last_seen": "2026-11-02T07:59:46.649816Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3336,8 +3217,8 @@
       "exe_s0046"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T05:32:47.700960Z",
-     "last_seen": "2026-11-02T05:32:48.027008Z",
+     "first_seen": "2026-11-02T07:59:46.402793Z",
+     "last_seen": "2026-11-02T07:59:46.649816Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3355,8 +3236,8 @@
       "exe_s0049"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T05:32:47.700960Z",
-     "last_seen": "2026-11-02T05:32:47.982660Z",
+     "first_seen": "2026-11-02T07:59:46.402793Z",
+     "last_seen": "2026-11-02T07:59:46.615545Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
@@ -3375,14 +3256,14 @@
       "exe_s0049"
      ],
      "status": "open",
-     "first_seen": "2026-11-02T05:32:48.007581Z",
-     "last_seen": "2026-11-02T05:32:48.027008Z",
+     "first_seen": "2026-11-02T07:59:46.631248Z",
+     "last_seen": "2026-11-02T07:59:46.649816Z",
      "resolved_by": null,
      "resolved_at": null,
      "note": null
     }
    ],
-   "open_count": 8,
+   "open_count": 6,
    "resolved": []
   },
   "meta": {
@@ -3467,7 +3348,7 @@
   ],
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.065557Z",
+   "collected_at": "2026-11-02T07:59:46.675642Z",
    "ledger_source": "seed",
    "unavailable": []
   }
@@ -3476,7 +3357,7 @@
   "data": [],
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.065557Z",
+   "collected_at": "2026-11-02T07:59:46.691279Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3578,7 +3459,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.104943Z",
+   "collected_at": "2026-11-02T07:59:46.704414Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3667,7 +3548,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.110316Z",
+   "collected_at": "2026-11-02T07:59:46.726399Z",
    "source": "hr.team_headcount",
    "unavailable": []
   }
@@ -3756,7 +3637,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.115782Z",
+   "collected_at": "2026-11-02T07:59:46.752815Z",
    "source": "hr.team_headcount",
    "unavailable": []
   }
@@ -3845,7 +3726,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.115782Z",
+   "collected_at": "2026-11-02T07:59:46.752815Z",
    "source": "hr.team_headcount",
    "unavailable": []
   }
@@ -3882,7 +3763,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T05:32:48.132795Z"
+    "collected_at": "2026-11-02T07:59:46.768015Z"
    },
    "compensation": {
     "coupons": [
@@ -4010,7 +3891,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.132795Z",
+   "collected_at": "2026-11-02T07:59:46.768015Z",
    "unavailable": []
   }
  },
@@ -4044,7 +3925,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T05:32:48.150044Z"
+    "collected_at": "2026-11-02T07:59:46.778525Z"
    },
    "compensation": {
     "coupons": [
@@ -4127,7 +4008,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.150044Z",
+   "collected_at": "2026-11-02T07:59:46.778525Z",
    "unavailable": []
   }
  },
@@ -4155,7 +4036,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T05:32:48.163511Z"
+    "collected_at": "2026-11-02T07:59:46.804901Z"
    },
    "compensation": {
     "coupons": [
@@ -4238,7 +4119,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.163511Z",
+   "collected_at": "2026-11-02T07:59:46.804901Z",
    "unavailable": []
   }
  },
@@ -4267,7 +4148,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T05:32:48.205249Z"
+    "collected_at": "2026-11-02T07:59:46.845157Z"
    },
    "compensation": {
     "coupons": [
@@ -4350,7 +4231,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.205249Z",
+   "collected_at": "2026-11-02T07:59:46.845157Z",
    "unavailable": []
   }
  },
@@ -4384,7 +4265,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T05:32:48.221074Z"
+    "collected_at": "2026-11-02T07:59:46.884769Z"
    },
    "compensation": {
     "coupons": [
@@ -4485,7 +4366,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.221074Z",
+   "collected_at": "2026-11-02T07:59:46.884769Z",
    "unavailable": []
   }
  },
@@ -4514,7 +4395,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T05:32:48.254177Z"
+    "collected_at": "2026-11-02T07:59:46.900406Z"
    },
    "compensation": {
     "coupons": [
@@ -4614,7 +4495,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.254177Z",
+   "collected_at": "2026-11-02T07:59:46.900406Z",
    "unavailable": []
   }
  },
