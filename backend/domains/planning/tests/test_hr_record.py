@@ -73,6 +73,7 @@ def test_mock_mode_has_no_recorder(service) -> None:
     run(service.answer_question("SPEC-7", "품절 상품도 남겨 두고 품절 표시해 주세요"))
     assert service.soft_holds == []
     assert service.state.decisions[-1].sent_to_hr is True
+    assert service.state.decisions[-1].hr_record is None  # 목 모드는 부르지 않음
 
 
 def test_answer_and_confirm_send_record_case() -> None:
@@ -266,3 +267,62 @@ def test_check_plan_mock_mode_keeps_old_text(service) -> None:
     sp = next(x for x in service.state.specs if x.id == r.spec)
     assert sp.hr_check is None
     assert _plan_act(service) == "② 기각 이력 질의 → 없음"
+
+
+# ---- 2단계: 기각 → 인사 record_case(decision_rejected) 실제 호출
+
+
+def test_reject_draft_calls_hr_with_area() -> None:
+    hr = Hr()
+    svc = _service(hr)
+    run(
+        svc.reject_draft(
+            "REQ-13",
+            decision_reason="안내 문구만 바꿔서는 반복 질문이 줄지 않는다",
+            alternatives_considered=["운영 매뉴얼에 FAQ 추가", "결제 실패 화면 개편"],
+        )
+    )
+    [rec] = [r for r in hr.records() if r.kind == RecordKind.DECISION_REJECTED]
+    assert rec.source_refs[0] == "req:REQ-13"
+    assert rec.area is not None  # 인사 check_plan이 같은 영역 초안과 비교할 수 있게
+    assert hr.asked[-1].meta.idempotency_key == "REQ-13:decision_rejected"
+    assert svc.state.decisions[-1].sent_to_hr is True
+    assert svc.state.decisions[-1].hr_record == "ok"
+    assert any("decision_rejected" in t and "인사 카드 생성" in t for t in _hr_acts(svc))
+
+
+def test_reject_draft_hr_failure_keeps_rejection() -> None:
+    svc = _service(Hr(fail=True))
+    run(
+        svc.reject_draft(
+            "REQ-13",
+            decision_reason="안내 문구만 바꿔서는 반복 질문이 줄지 않는다",
+            alternatives_considered=["운영 매뉴얼에 FAQ 추가"],
+        )
+    )
+    req = next(r for r in svc.state.requests if r.id == "REQ-13")
+    assert req.state == "기각"  # 기각은 되돌리지 않는다
+    assert svc.state.decisions[-1].sent_to_hr is False
+    assert svc.state.decisions[-1].hr_record == "failed"
+    assert any(h.status == "hr_failed" for h in svc.soft_holds)
+
+
+def test_reject_decision_each_rejection_is_its_own_card() -> None:
+    hr = Hr()
+    svc = _service(hr)
+    for text in ("재시도 버튼만 추가", "결제 수단 화면 전체 개편"):
+        run(
+            svc.dispatch(
+                {
+                    "type": "reject_decision",
+                    "spec": "SPEC-7",
+                    "text": text,
+                    "decision_reason": "범위가 맞지 않음",
+                    "alternatives_considered": ["R1과 함께 진행"],
+                }
+            )
+        )
+    recs = [r for r in hr.records() if r.kind == RecordKind.DECISION_REJECTED]
+    firsts = [r.source_refs[0] for r in recs]
+    assert len(recs) == 2 and len(set(firsts)) == 2  # 인사 중복 키가 겹치지 않는다
+    assert all(f.startswith("decision:") for f in firsts)

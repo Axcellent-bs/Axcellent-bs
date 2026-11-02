@@ -338,6 +338,8 @@ class Decision(DomainModel):
     alternatives: str
     from_: str = Field(alias="from")
     sent_to_hr: bool
+    # 인사 record_case 결과: ok 기록됨 · failed 실패 · held 인사 보류 · None 부르지 않음(목 모드)
+    hr_record: Literal["ok", "failed", "held"] | None = None
 
 
 class IncidentCandidate(DomainModel):
