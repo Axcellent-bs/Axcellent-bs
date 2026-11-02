@@ -30,6 +30,7 @@ from ax_contracts.schemas.planning import (
     DevHandoffInput,
 )
 from ax_contracts.schemas.record import RecordCase, RecordKind
+from ax_workflow import hr_link
 from ax_workflow.autocheck import (
     WAIT_ANSWER,
     WAIT_CROSS_CHECK,
@@ -94,6 +95,7 @@ from ax_workflow.dev_handoff import (
 from ax_workflow.handover import (
     area_of_text,
 )
+from ax_workflow.hr_link import HrClient, HrRecordResult, PlanCheck
 from ax_workflow.models import (
     DEPT_NAME,
     PR,
@@ -120,12 +122,10 @@ from ax_workflow.rules import (
 from planning_agent import (
     ask_requester,
     cause_inbox,
-    hr_link,
     related,
 )
 from planning_agent.ask_requester import Asker, missing_info_question
 from planning_agent.domain.docs import gather_blocks, next_block_id
-from planning_agent.hr_link import HrClient, HrRecordResult, PlanCheck
 
 SAMPLE_TICKETS = {
     "support": [

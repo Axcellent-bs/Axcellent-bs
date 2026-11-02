@@ -24,7 +24,7 @@ from ax_contracts.schemas.planning import (
     DevResultInput,
 )
 from ax_contracts.schemas.record import RecordCase, RecordKind
-from ax_workflow import cause_inbox, related
+from ax_workflow import cause_inbox, hr_link, related
 from ax_workflow.autocheck import (
     WAIT_CROSS_CHECK,
     WAIT_HUMAN,
@@ -40,6 +40,7 @@ from ax_workflow.core import (
     ActionError,
     ActionResult,
     Gate,
+    GateCall,
     GateRefused,
 )
 from ax_workflow.dev_handoff import (
@@ -54,6 +55,7 @@ from ax_workflow.handover import (
     check_handover,
     in_progress,
 )
+from ax_workflow.hr_link import HrClient, HrRecordResult
 from ax_workflow.models import (
     DEPT_NAME,
     PR,
@@ -127,8 +129,11 @@ class DevService(PlanningCore):
         real_example: bool = False,
         relater: related.Relater | None | Literal["default"] = "default",
         cross_checker: CrossChecker | None | Literal["default"] = "default",
+        hr_client: HrClient | None | Literal["default"] = "default",
     ):
         super().__init__(clock, gate, tenant_id, result_sender, dev_sender, real_example, relater)
+        # 인사 record_case (인사 연동 2단계: PR 머지·요청 완료). 목 모드면 None (부르지 않는다)
+        self._hr = hr_link.default_client() if hr_client == "default" else hr_client
         self._resuming = False  # 대기 대화를 깨우는 중 (다시 깨우지 않는다)
         self._pr_sync: asyncio.Task | None = None  # 바깥에서 머지·닫은 PR 맞추기 루프
         self._polling_wait = False  # 다른 서비스 요청을 기다리는 대화를 주기적으로 보는 중
@@ -476,6 +481,45 @@ class DevService(PlanningCore):
         self.__dict__.pop("_coding_drafts", None)
         super().reset()
         get_deploy_store().reset()  # 배포 기록도 시드로
+
+    async def _send_hr(
+        self,
+        ctx: str,
+        kind: RecordKind,
+        key: str,
+        case: str,
+        summary: str,
+        reason: str,
+        refs: list[str],
+    ) -> HrRecordResult | None:
+        """인사 `record_case`로 PR 머지·요청 완료를 보낸다 (인사 연동 2단계).
+
+        목 모드(`_hr` None)면 예전처럼 관문 기록만 남긴다. 실패해도 머지·완료는 되돌리지 않고
+        "인사 기록 실패"만 `soft_holds`·활동에 남긴다."""
+        record = RecordCase(
+            context_id=ctx,
+            tenant_id=self.tenant_id,
+            kind=kind,
+            summary=summary,
+            decision_reason=reason,
+            source_refs=refs,
+            author=AGENT_NAME,
+        )
+        gate = await self._execute(
+            "record_case", ctx, key, case, {"record_case": record.model_dump(mode="json")}, refs
+        )
+        if self._hr is None or gate.status != "executed":
+            return None
+        res = await self._hr.record(record, key)
+        if not res.ok:
+            self.soft_holds.append(GateCall("record_case", key, "hr_failed", "-", res.reason or ""))
+        return res
+
+    def _hr_act(self, ctx: str, case: str, hr: HrRecordResult | None) -> Activity:
+        """인사 기록 활동 한 줄. 실제로 불렀으면 결과(카드·실패)를 붙인다."""
+        text = case if hr is None else f"{case} → {hr.text}"
+        grade = "A" if hr is None or hr.ok else None
+        return self._act(self.clock(), ctx, "planning", "hr", "record_case", "A2A", text, grade)
 
     async def tick(self) -> None:
         """화면이 열려 있는 동안 오래된 교차검증 대기를 사람 확인으로 넘긴다."""
@@ -1016,9 +1060,21 @@ class DevService(PlanningCore):
         pr.merged_at = merged_act.at
         task.state = "완료"
 
-        case_text = f"① spec_confirmed·pr_merged·request_closed · {req.id} (자동 처리)"
-        await self._execute("record_case", ctx, f"{req.id}:auto_closed", case_text)
-        step("planning", "hr", "record_case", "A2A", case_text, "A")
+        merged_case = f"① kind pr_merged · {pr_id} (자동 머지)"
+        merged_hr = await self._send_hr(
+            ctx, RecordKind.PR_MERGED, f"{pr_id}:pr_merged", merged_case,
+            f"{pr_id} {pr.title} 자동 머지 (간단 요청, 사후 감사 대상)",
+            merge_text, [f"pr:{pr.number}", f"request:{req.id}"],
+        )  # fmt: skip
+        s.activity.append(self._hr_act(ctx, merged_case, merged_hr))
+        closed_case = f"① kind request_closed · {req.id}"
+        closed_hr = await self._send_hr(
+            ctx, RecordKind.REQUEST_CLOSED, f"{spec_id}:request_closed", closed_case,
+            f'{req.id} "{req.title}" 완료 ({pr_id} 머지, 사람 승인 없이 자동 처리)',
+            "간단 요청 규칙 통과 → 기획서 확정·PR 머지까지 자동",
+            [f"request:{req.id}", f"spec:{spec_id}"],
+        )  # fmt: skip
+        s.activity.append(self._hr_act(ctx, closed_case, closed_hr))
         step(
             "planning",
             req.from_,
@@ -2582,38 +2638,26 @@ class DevService(PlanningCore):
             if not note.ok:
                 return
         case = f"① kind pr_merged · {p.id}" + (" (자동 머지)" if auto else "")
-        if auto:
-            record = RecordCase(
-                context_id=ctx,
-                tenant_id=self.tenant_id,
-                kind=RecordKind.PR_MERGED,
-                summary=f"{p.id} {p.title} 자동 머지 (사후 감사 대상)",
-                decision_reason=f"merge_pr 규칙 통과: {rule_text}",
-                source_refs=[f"pr:{p.number}"],
-                author=AGENT_NAME,
-            )
-            await self._execute(
-                "record_case",
-                ctx,
-                f"{p.id}:pr_merged",
-                case,
-                {"record_case": record.model_dump(mode="json")},
-                record.source_refs,
-            )
-        else:
-            await self._execute("record_case", ctx, f"{p.id}:pr_merged", case)
+        merged_hr = await self._send_hr(
+            ctx, RecordKind.PR_MERGED, f"{p.id}:pr_merged", case,
+            f"{p.id} {p.title} " + ("자동 머지 (사후 감사 대상)" if auto else "사람 머지"),
+            f"merge_pr 규칙 통과: {rule_text}" if auto else "사람이 머지 버튼으로 승인",
+            [f"pr:{p.number}"],
+        )  # fmt: skip
         if task:
             task.state = "완료"
         all_done = bool(spec_id) and all(t.state == "완료" for t in s.tasks if t.spec == spec_id)
         closed = [r for r in s.requests if r.spec == spec_id] if all_done else []
         closed_ids = ", ".join(r.id for r in closed)
+        closed_case = f"① kind request_closed · {closed_ids}"
+        closed_hr = None
         if closed:
-            await self._execute(
-                "record_case",
-                ctx,
-                f"{spec_id}:request_closed",
-                f"① kind request_closed · {closed_ids}",
-            )
+            closed_hr = await self._send_hr(
+                ctx, RecordKind.REQUEST_CLOSED, f"{spec_id}:request_closed", closed_case,
+                f"{closed_ids} 완료 (기획서 {spec_id} 작업 전부 머지)",
+                f"{spec_id} 작업 {sum(1 for x in s.tasks if x.spec == spec_id)}개 머지",
+                [f"request:{r.id}" for r in closed] + [f"spec:{spec_id}"],
+            )  # fmt: skip
         t = self.clock()
         p.merged = True
         p.merged_at = t
@@ -2653,22 +2697,9 @@ class DevService(PlanningCore):
                     f"사람이 {p.id} 머지 (사람 클릭)",
                 )
             )
-        s.activity.append(
-            self._act(self.clock(), ctx, "planning", "hr", "record_case", "A2A", case, "A")
-        )
+        s.activity.append(self._hr_act(ctx, case, merged_hr))
         if closed:
-            s.activity.append(
-                self._act(
-                    self.clock(),
-                    ctx,
-                    "planning",
-                    "hr",
-                    "record_case",
-                    "A2A",
-                    f"① kind request_closed · {closed_ids}",
-                    "A",
-                )
-            )
+            s.activity.append(self._hr_act(ctx, closed_case, closed_hr))
             for r in closed:
                 r.state = "완료"
             spec_tasks = {x.id for x in s.tasks if x.spec == spec_id}

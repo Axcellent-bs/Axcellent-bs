@@ -124,7 +124,8 @@ def test_state_changes_go_through_execute(wire) -> None:
         "generate_pr",
         "review_pr",
         "merge_pr",
-        "record_case",
+        "record_case",  # pr_merged
+        "record_case",  # request_closed
     ]
     calls = [*wire.planning.gate_calls, *wire.dev.gate_calls]
     assert all(c.status == "executed" for c in calls)
