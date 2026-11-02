@@ -79,6 +79,21 @@ export interface ChangeProposal {
   count: number;
   ratio: number | null;
   already_requested: boolean;
+  declined: boolean; // 상담원이 "보내지 않기"를 골랐다
+  decline_reason: DeclineReason | null;
+}
+export type DeclineReason = "already_known" | "not_a_real_problem" | "other";
+export const DECLINE_REASON_KO: Record<DeclineReason, string> = {
+  already_known: "이미 알고 있는 문제예요",
+  not_a_real_problem: "실제 문제가 아니에요",
+  other: "그 밖의 이유",
+};
+/** 제안을 기획에 보낸 결과 (`request_change` 출력). linked_duplicate면 같은 요청이 이미 있어 거기에 묶인 것이다 */
+export interface ChangeProposalSent {
+  outcome: "created" | "linked_duplicate";
+  request_id: string;
+  context_id: string;
+  duplicate_of: string | null;
 }
 export interface ChangeProposals {
   window_minutes: number;

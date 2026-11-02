@@ -123,6 +123,129 @@ def test_single_lookups_pass_the_id_to_the_support_skill(
     assert fake.sent[0].skill == skill and fake.sent[0].input == payload
 
 
+SEND_BODY = {
+    "inquiry_id": 3,
+    "title": "배송 문의 급증 — 안내·화면 점검 검토",
+    "evidence": "최근 60분 배송 문의 7건 (평소 창당 1.4건의 5배)",
+    "evidence_ids": ["inq_5", "inq_9"],
+}
+SENT_OUTPUT = {"outcome": "created", "request_id": "REQ-1", "context_id": "ctx_req_0001"}
+
+
+def test_sending_a_proposal_calls_request_change_with_a_key_that_stays_the_same(
+    fake: Fake,
+) -> None:
+    fake.outputs["request_change"] = SENT_OUTPUT
+    client = TestClient(app)
+    first = client.post(BASE + "/change-proposals/send", json=SEND_BODY)
+    second = client.post(BASE + "/change-proposals/send", json=SEND_BODY)
+    assert first.status_code == 201 and first.json()["data"]["request_id"] == "REQ-1"
+    sent = [r for r in fake.sent if r.skill == "request_change"]
+    assert len(sent) == 2 and second.status_code == 201
+    assert sent[0].input == SEND_BODY  # 상담원이 본 그대로 보낸다
+    assert sent[0].meta.context_id != sent[1].meta.context_id  # 요청마다 새 사건 ID지만
+    assert sent[0].meta.idempotency_key == sent[1].meta.idempotency_key  # 키는 같아 한 번만 처리
+
+
+def test_an_edited_proposal_is_a_different_request(fake: Fake) -> None:
+    fake.outputs["request_change"] = SENT_OUTPUT
+    client = TestClient(app)
+    client.post(BASE + "/change-proposals/send", json=SEND_BODY)
+    client.post(BASE + "/change-proposals/send", json={**SEND_BODY, "title": "고쳐서 보낸 제목"})
+    keys = {r.meta.idempotency_key for r in fake.sent if r.skill == "request_change"}
+    assert len(keys) == 2
+
+
+def test_a_request_planning_did_not_accept_is_a_conflict_not_a_success(fake: Fake) -> None:
+    fake.outputs["request_change"] = {"planning_outcome": "rejected", "message": "받지 않았다"}
+    response = TestClient(app).post(BASE + "/change-proposals/send", json=SEND_BODY)
+    assert response.status_code == 409 and response.json()["error"]["code"] == "PLANNING_REFUSED"
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"title": ""},
+        {"title": "가" * 201},
+        {"evidence": ""},
+        {"evidence_ids": [f"inq_{i}" for i in range(21)]},
+    ],
+)
+def test_an_invalid_proposal_is_a_422_and_support_is_not_called(
+    fake: Fake, changes: dict[str, Any]
+) -> None:
+    response = TestClient(app).post(BASE + "/change-proposals/send", json={**SEND_BODY, **changes})
+    assert response.status_code == 422
+    assert not [r for r in fake.sent if r.skill == "request_change"]
+
+
+def test_declining_records_the_reason_with_the_author_from_the_token(fake: Fake) -> None:
+    fake.outputs["decline_change_proposal"] = {"topic_code": "shipping", "created": True}
+    response = TestClient(app).post(
+        BASE + "/change-proposals/decline",
+        json={
+            "topic_code": "shipping",
+            "inquiry_id": 3,
+            "reason": "already_known",
+            "note": "이미 개선 중",
+            "author": "남이 보낸 이름",  # 본문의 작성자는 쓰지 않는다
+        },
+    )
+    assert response.status_code == 201
+    sent = next(r for r in fake.sent if r.skill == "decline_change_proposal")
+    assert sent.input == {
+        "topic_code": "shipping",
+        "inquiry_id": 3,
+        "reason": "already_known",
+        "author": "tester",  # 사람 토큰의 이름
+    }
+    assert sent.untrusted == {"note": "이미 개선 중"}  # 상담원이 쓴 글은 untrusted로만
+    assert sent.meta.idempotency_key.endswith(":decline_change_proposal:inquiry:3:decline:shipping")
+    assert not [r for r in fake.sent if r.skill == "request_change"]  # 기획으로는 보내지 않는다
+
+
+def test_declining_without_a_note_sends_no_untrusted_text(fake: Fake) -> None:
+    TestClient(app).post(
+        BASE + "/change-proposals/decline",
+        json={"topic_code": "shipping", "inquiry_id": 3, "reason": "other"},
+    )
+    sent = next(r for r in fake.sent if r.skill == "decline_change_proposal")
+    assert sent.untrusted == {}
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [{"reason": "whatever"}, {"note": "가" * 201}, {"topic_code": ""}],
+)
+def test_an_invalid_decline_is_a_422_and_support_is_not_called(
+    fake: Fake, changes: dict[str, Any]
+) -> None:
+    body = {"topic_code": "shipping", "inquiry_id": 3, "reason": "other", **changes}
+    assert TestClient(app).post(BASE + "/change-proposals/decline", json=body).status_code == 422
+    assert not fake.sent
+
+
+def test_sending_and_declining_need_a_human_token(fake: Fake) -> None:
+    client = TestClient(app)
+    client.headers.pop("authorization")
+    send = client.post(BASE + "/change-proposals/send", json=SEND_BODY)
+    decline = client.post(
+        BASE + "/change-proposals/decline",
+        json={"topic_code": "shipping", "inquiry_id": 3, "reason": "other"},
+    )
+    assert send.status_code == 401 and decline.status_code == 401
+    assert not fake.sent
+
+
+def test_sending_and_declining_are_not_available_in_mock_mode(mock_client: TestClient) -> None:
+    send = mock_client.post(BASE + "/change-proposals/send", json=SEND_BODY)
+    decline = mock_client.post(
+        BASE + "/change-proposals/decline",
+        json={"topic_code": "shipping", "inquiry_id": 3, "reason": "other"},
+    )
+    assert send.status_code == 501 and decline.status_code == 501
+
+
 def test_change_proposals_in_mock_mode(mock_client: TestClient) -> None:
     body = mock_client.get(BASE + "/change-proposals").json()["data"]
     proposal = body["proposals"][0]

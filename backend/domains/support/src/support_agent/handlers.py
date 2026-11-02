@@ -74,6 +74,8 @@ STORE = persistence.build_inquiry_store()
 LEDGER = persistence.build_sequence_ledger()
 # 문의와 기획 변경 요청의 연결. 요청은 change_handlers.py, 결과 통지는 계약이 정해진 뒤 붙인다
 CHANGES = persistence.build_change_request_store()
+# 보내지 않기로 한 변경 요청 제안의 기록 (이유만 남긴다). 제안은 proposal_handlers.py
+DECISIONS = persistence.build_proposal_decision_store()
 # 다른 에이전트로 나가는 모든 요청이 지나간다. DejaFix로 가는 고객 개인정보는 여기서 암호화한다
 SEND = secure_transfer.send  # 테스트에서 바꿀 수 있다
 

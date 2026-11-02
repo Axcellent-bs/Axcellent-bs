@@ -83,6 +83,18 @@ action = "add_resolution_note"
 owner = "support"
 base_grade = "A"
 
+# 문의에서 나온 변경 요청을 기획에 보내기 (#281). 상담원이 제안을 보고 고른 것만 나간다. 돈은 움직이지 않는다
+[[actions]]
+action = "request_change"
+owner = "support"
+base_grade = "A"
+
+# 변경 요청 제안을 보내지 않기로 한 이유 남기기 (#281). 기획으로는 아무것도 나가지 않는다
+[[actions]]
+action = "decline_change_proposal"
+owner = "support"
+base_grade = "A"
+
 # 욕설로 가린 고객 메시지의 원문 열기. 돈은 움직이지 않고 "누가 열었는지"를 내력에 남긴다
 [[actions]]
 action = "reveal_original"

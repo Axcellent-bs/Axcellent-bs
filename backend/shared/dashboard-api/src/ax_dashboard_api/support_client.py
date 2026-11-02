@@ -78,10 +78,15 @@ async def call(
     untrusted: dict[str, Any] | None = None,
     *,
     target: str | None = None,
+    key: str | None = None,
 ) -> dict[str, Any]:
-    """support skill을 부른다. 상태를 바꾸는 skill에는 `target`(대상)을 줘 멱등 키를 만든다."""
+    """support skill을 부른다. 상태를 바꾸는 skill에는 `target`(대상)을 줘 멱등 키를 만든다.
+
+    요청마다 새 사건 ID가 붙으므로 `target`으로 만든 키는 호출마다 다르다. 같은 요청을 여러 번
+    눌러도 한 번만 처리돼야 하면 `key`로 호출 사이에 변하지 않는 키를 직접 준다.
+    """
     context_id = f"{UI_CONTEXT_PREFIX}{uuid.uuid4().hex[:12]}"
-    key = f"{context_id}:{skill}:{target}" if target else None
+    key = key or (f"{context_id}:{skill}:{target}" if target else None)
     request = AgentRequest(
         meta=_meta(context_id, key),
         skill=skill,

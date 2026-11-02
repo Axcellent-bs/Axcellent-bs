@@ -12,6 +12,7 @@ from collections.abc import Callable
 from support_agent import guard
 from support_agent.change_requests import source_ref_for
 from support_agent.insight_schemas import SurgeReport, TopicSurge
+from support_agent.proposal_decisions import ProposalDecision
 from support_agent.proposal_schemas import ChangeProposal, ProposeChangesReport
 
 # 분류 코드 → 사람이 읽는 말 (화면의 TOPIC_KO와 같은 값). 모르는 코드는 "기타"로 쓴다
@@ -39,8 +40,16 @@ def _times(ratio: float | None, baseline: float) -> str:
     return f"평소 창당 {baseline:g}건의 {ratio:g}배"
 
 
+def _no_decision(_topic: str, _inquiry_id: int) -> ProposalDecision | None:
+    return None
+
+
 def propose_one(
-    surge: TopicSurge, report: SurgeReport, *, has_request: Callable[[int], bool]
+    surge: TopicSurge,
+    report: SurgeReport,
+    *,
+    has_request: Callable[[int], bool],
+    decision_for: Callable[[str, int], ProposalDecision | None] = _no_decision,
 ) -> ChangeProposal | None:
     """급증 하나를 변경 요청안으로 바꾼다. 샘플 문의가 없으면 대표 문의를 정할 수 없어 None."""
     ids = sorted(set(surge.sample_inquiry_ids))
@@ -56,6 +65,7 @@ def propose_one(
     # 보내기 단계에서 `request_change`가 개인정보를 거부하므로, 만들 때 미리 걸러 둔다
     if guard.find_pii(title) or guard.find_pii(evidence):
         return None
+    decision = decision_for(surge.topic_code, representative)
     return ChangeProposal(
         topic_code=surge.topic_code,
         title=title,
@@ -65,11 +75,22 @@ def propose_one(
         count=surge.count,
         ratio=surge.ratio,
         already_requested=has_request(representative),
+        declined=decision is not None,
+        decline_reason=decision.reason if decision else None,
     )
 
 
-def build(report: SurgeReport, *, has_request: Callable[[int], bool]) -> ProposeChangesReport:
-    proposals = [p for s in report.surges if (p := propose_one(s, report, has_request=has_request))]
+def build(
+    report: SurgeReport,
+    *,
+    has_request: Callable[[int], bool],
+    decision_for: Callable[[str, int], ProposalDecision | None] = _no_decision,
+) -> ProposeChangesReport:
+    proposals = [
+        p
+        for s in report.surges
+        if (p := propose_one(s, report, has_request=has_request, decision_for=decision_for))
+    ]
     return ProposeChangesReport(
         window_minutes=report.window_minutes,
         baseline_hours=report.baseline_hours,

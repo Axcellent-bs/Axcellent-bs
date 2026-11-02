@@ -81,7 +81,7 @@ export const SKILL_KO: Record<string, string> = {
   find_active_incident: "진행 중인 이벤트 찾기",
   list_inquiries: "문의 목록 보기", get_inquiry: "문의 보기", check_reply: "답변 점검", summarize_inquiry: "문의 요약",
   create_inquiry: "문의 만들기", add_customer_message: "고객 메시지 추가", send_reply: "답변 보내기", reject_draft: "답변 초안 버리기",
-  set_inquiry_status: "문의 상태 바꾸기", inquiry_overview: "문의 현황 보기", detect_inquiry_surge: "문의 급증 감지", propose_change_requests: "변경 요청 제안 만들기",
+  set_inquiry_status: "문의 상태 바꾸기", inquiry_overview: "문의 현황 보기", detect_inquiry_surge: "문의 급증 감지", propose_change_requests: "변경 요청 제안 만들기", decline_change_proposal: "변경 요청 제안 보내지 않기",
   request_change: "변경 요청", list_change_requests: "변경 요청 목록 보기", receive_change_result: "변경 결과 받기",
   diagnose_payment: "결제 문제 진단", prepare_handoff: "인계 준비", assess_deletion_request: "삭제 요청 검토",
   request_compensation: "보상 요청", list_claims: "클레임 목록 보기", get_claim: "클레임 보기", claim_stats: "클레임 통계 보기",

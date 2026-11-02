@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from pydantic import Field
+
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel
 from ax_contracts.schemas.ids import ContextPrefix, IdPrefix
 from support_agent.store import now_iso
@@ -58,6 +60,11 @@ class ChangeRequestLink(AxModel):
     duplicate_of: str | None = None  # 같은 요청이 이미 있어 묶였다면 그 요청 번호
     result: dict[str, Any] | None = None  # 기획이 알려 준 처리 결과 (그대로 보관)
     notice_id: str | None = None  # 고객 공지가 필요했다면 마케팅 공지 ID
+    # 보낼 때 코드가 정리한 사실만 남긴다 (기획이 근거를 되물으면 이 기록으로 답한다, #264).
+    # 이전에 만든 기록에는 없으므로 모두 선택이다
+    sent_title: str | None = None  # 기획에 보낸 제목 (바꿀 내용 한 줄)
+    sent_evidence: str | None = None  # 기획에 보낸 근거 요약 (건수·배수 같은 사실)
+    sent_evidence_ids: list[str] = Field(default_factory=list)  # 기획에 보낸 근거 문의 ID
     seq: int  # 연결한 순서. 시각은 초 단위라 같은 초에 만든 것의 순서를 알 수 없다
     created_at: str
     updated_at: str
@@ -102,6 +109,9 @@ class ChangeRequestStore:
         request_id: str | None = None,
         duplicate_of: str | None = None,
         tenant_id: str = TENANT_ID_DEFAULT,
+        sent_title: str | None = None,
+        sent_evidence: str | None = None,
+        sent_evidence_ids: list[str] | None = None,
     ) -> ChangeRequestLink:
         """문의와 변경 요청을 잇는다. 같은 연결을 다시 요청하면 기존 것을 돌려준다.
 
@@ -131,6 +141,9 @@ class ChangeRequestStore:
             "source_ref": source_ref_for(inquiry_id),
             "request_id": request_id,
             "duplicate_of": duplicate_of,
+            "sent_title": sent_title,
+            "sent_evidence": sent_evidence,
+            "sent_evidence_ids": list(sent_evidence_ids or []),
             "seq": max((link.seq for link in self._links.values()), default=0) + 1,
             "created_at": stamp,
             "updated_at": stamp,

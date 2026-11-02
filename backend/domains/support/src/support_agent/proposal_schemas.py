@@ -6,6 +6,7 @@ from pydantic import Field
 
 from ax_contracts.schemas.common import AxModel
 from support_agent.insight_schemas import SurgeInput
+from support_agent.proposal_decisions import DeclineReason
 
 
 class ProposeChangesInput(SurgeInput):
@@ -26,6 +27,29 @@ class ChangeProposal(AxModel):
     count: int  # 최근 창의 이 분류 문의 수
     ratio: float | None = None  # 평소 대비 배수 (평소가 0이면 None)
     already_requested: bool = False  # 대표 문의에 이미 연결된 변경 요청이 있다
+    declined: bool = False  # 상담원이 "보내지 않기"를 골랐다 (이유는 decline_reason)
+    decline_reason: DeclineReason | None = None
+
+
+class DeclineProposalInput(AxModel):
+    """ "보내지 않기". 제안은 저장하지 않으므로 분류와 대표 문의로 가리킨다.
+
+    `author`는 서버가 사람 토큰에서 채운 이름이다 (상담원이 본문으로 정하지 않는다).
+    자유 글 `note`는 untrusted로 따로 받는다.
+    """
+
+    topic_code: str = Field(min_length=1, max_length=40)
+    inquiry_id: int
+    reason: DeclineReason
+    author: str = Field(min_length=1, max_length=60)
+
+
+class DeclineProposalOutput(AxModel):
+    topic_code: str
+    inquiry_id: int
+    reason: DeclineReason
+    decided_by: str
+    created: bool  # False면 이미 같은 제안에 기록이 있어 그것을 돌려준 것이다
 
 
 class ProposeChangesReport(AxModel):

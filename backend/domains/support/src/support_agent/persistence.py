@@ -27,6 +27,7 @@ from support_agent.change_requests import ChangeRequestLink, ChangeRequestStore
 from support_agent.claim_schemas import Claim
 from support_agent.claims import ClaimStore
 from support_agent.compensation import SequenceLedger
+from support_agent.proposal_decisions import ProposalDecision, ProposalDecisionStore
 from support_agent.schemas import Conversation
 from support_agent.store import InquiryStore
 
@@ -49,6 +50,11 @@ TABLES: tuple[Table, ...] = (
     Table("privacy_audits", ("audit_id",), ("tenant_id", "context_id", "inquiry_id")),
     Table("claims", ("claim_id",), ("tenant_id", "context_id", "order_id", "buyer_id", "status")),
     Table("change_requests", ("tenant_id", "context_id", "inquiry_id"), ("status",)),
+    Table(
+        "proposal_decisions",
+        ("tenant_id", "topic_code", "inquiry_id"),
+        ("context_id", "reason"),
+    ),
     Table("compensation_sequences", ("tenant_id", "context_id")),
     Table("compensation_results", ("tenant_id", "idempotency_key"), ("context_id",)),
 )
@@ -388,6 +394,31 @@ class PersistentChangeRequestStore(ChangeRequestStore):
         return super()._put(link)  # DB 쓰기에 성공한 뒤에 캐시에 넣는다
 
 
+class PersistentProposalDecisionStore(ProposalDecisionStore):
+    """보내지 않기로 한 변경 요청 제안의 기록을 DB에 둔다. `_put` 한 곳에서만 쓰면 된다."""
+
+    def __init__(self, repo: Repo) -> None:
+        super().__init__()
+        self._repo = repo
+        for doc in repo.load("proposal_decisions"):
+            decision = ProposalDecision.model_validate(doc)
+            self._items[(decision.topic_code, decision.inquiry_id)] = decision
+
+    def _put(self, decision: ProposalDecision) -> ProposalDecision:
+        self._repo.upsert(
+            "proposal_decisions",
+            {
+                "tenant_id": decision.tenant_id,
+                "topic_code": decision.topic_code,
+                "inquiry_id": decision.inquiry_id,
+                "context_id": decision.context_id,
+                "reason": decision.reason,
+            },
+            decision.model_dump(mode="json"),
+        )
+        return super()._put(decision)  # DB 쓰기에 성공한 뒤에 캐시에 넣는다
+
+
 class PersistentSequenceLedger(SequenceLedger):
     def __init__(self, repo: Repo) -> None:
         super().__init__()
@@ -441,3 +472,8 @@ def build_sequence_ledger() -> SequenceLedger:
 def build_change_request_store() -> ChangeRequestStore:
     repo = get_repo()
     return PersistentChangeRequestStore(repo) if repo else ChangeRequestStore()
+
+
+def build_proposal_decision_store() -> ProposalDecisionStore:
+    repo = get_repo()
+    return PersistentProposalDecisionStore(repo) if repo else ProposalDecisionStore()

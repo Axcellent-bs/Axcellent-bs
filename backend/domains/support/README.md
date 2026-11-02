@@ -33,12 +33,13 @@
 | `request_incident_compensation` | A | orchestrator | 사건(`ctx_inc_`) 영향 고객 전원에게 보상 쿠폰 요청 (문의를 안 낸 고객 포함, SCN-A 8단계) |
 | `customer_signals` | read | dashboard-api, orchestrator | 구매자 한 명의 이탈·재문의 위험 신호(미답 문의·감정·잦은 문의·거절/잦은 클레임)를 점수 기준표로 low·medium·high와 이유로 알려 줌 |
 | `list_at_risk_customers` | read | dashboard-api, orchestrator | 위험이 medium/high 이상인 구매자를 점수 높은 순으로 (리텐션·후속 연락 대상 목록) |
-| `request_change` | A | dashboard-api, orchestrator | 변경 요청을 기획 `create_ticket`으로 보내고 `ctx_req_`를 문의와 연결 |
+| `request_change` | A | dashboard-api, orchestrator | 변경 요청을 기획 `create_ticket`으로 보내고 `ctx_req_`를 문의와 연결. 안전 관문(`execute`)을 먼저 거치고(실행되지 않으면 아무것도 보내지 않는다), 보낸 제목·근거 요약·근거 ID를 연결 기록(`sent_title`·`sent_evidence`·`sent_evidence_ids`)에 남겨 기획이 되물을 때(#264) 쓴다 |
 | `list_change_requests` | read | dashboard-api, orchestrator | 문의·변경 요청 연결 목록 |
 | `list_claims`, `get_claim`, `claim_stats`, `claim_queue` | read | dashboard-api, orchestrator | 클레임 목록·상세(판정 근거·감사 기록)·건수·보상 큐 |
 | `inquiry_overview` | read | dashboard-api, orchestrator, data | KPI(초안 채택률·수정 정도·가드 적중·분류별 건수)와 답변 대기 문의 (긴급도·대기 시간 순) |
 | `detect_inquiry_surge` | read | dashboard-api, orchestrator, data | 분류별 문의 급증 감지 (DEP-CS-05): 최근 창 건수를 평소 창 평균(`baseline_method=median`이면 창별 건수의 중앙값)과 견줌 |
-| `propose_change_requests` | read | dashboard-api, orchestrator | 급증한 분류마다 기획에 보낼 변경 요청안을 코드 규칙으로 만든다(#281, LLM 없음): 제목 한 줄·근거 요약(건수·평소 대비 배수)·대표 문의(샘플 중 번호가 가장 작은 문의)·나머지 근거 ID(`inq_<번호>`)·이미 요청됨 여부. 만들기만 하고 보내거나 저장하지 않는다. 보내는 일은 사람이 고른 뒤 `request_change`가 한다(후속 PR) |
+| `propose_change_requests` | read | dashboard-api, orchestrator | 급증한 분류마다 기획에 보낼 변경 요청안을 코드 규칙으로 만든다(#281, LLM 없음): 제목 한 줄·근거 요약(건수·평소 대비 배수)·대표 문의(샘플 중 번호가 가장 작은 문의)·나머지 근거 ID(`inq_<번호>`)·이미 요청됨 여부. 만들기만 하고 보내거나 저장하지 않는다. 이미 "보내지 않기"를 고른 제안은 `declined`·`decline_reason`으로 표시한다. 보내는 일은 사람이 고른 뒤 `request_change`가 한다 |
+| `decline_change_proposal` | A | dashboard-api | 변경 요청 제안을 보내지 않기로 한 이유(`already_known`·`not_a_real_problem`·`other`)와 결정한 사람을 남긴다(#281). 제안은 저장하지 않으므로 분류와 대표 문의로 가리키고, 자유 메모는 untrusted `note`(200자 이하, 개인정보는 거부). 기획으로는 아무것도 보내지 않으며 같은 제안에 두 번 해도 한 번만 기록된다. `execute()`를 거친다 |
 | `create_claim` | A | dashboard-api, shop-api, orchestrator | 취소·반품·교환 접수 + 규칙 판정 |
 | `decide_claim` | A | dashboard-api | 사람 확인이 필요한 클레임 승인·거절 |
 | `receive_return`, `inspect_return` | A | dashboard-api (입고는 shop-api도) | 반품 입고, 검수 결과 기록 |

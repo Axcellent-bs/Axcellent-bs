@@ -15,6 +15,7 @@ import hashlib
 
 from pydantic import ValidationError
 
+from ax_agent_template.execute import execute
 from ax_agent_template.server import error_result
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.ids import ContextPrefix
@@ -58,6 +59,24 @@ async def request_change(request: AgentRequest) -> AgentResult:
     if key in h.STORE.results:  # 같은 요청의 재시도
         return h._done(request, h.STORE.results[key])
 
+    # 기획에 요청이 나가는 상태 변경이라 안전 관문을 먼저 거친다.
+    # 실행되지 않으면 아무것도 보내지 않는다
+    decision = await execute(
+        "request_change",
+        {"inquiry_id": parsed.inquiry_id, "evidence_count": len(parsed.evidence_ids)},
+        request.meta.model_copy(update={"idempotency_key": key}),
+        Evidence(
+            ref_ids=[f"inquiry:{parsed.inquiry_id}"],
+            data_summary=f"request_change inquiry:{parsed.inquiry_id}",
+        ),
+    )
+    if decision.status != "executed":
+        return h._done(
+            request,
+            {"execution": decision.model_dump(mode="json")},
+            outcome=f"not_executed_{decision.status}",
+        )
+
     ticket = AgentRequest(
         meta=request.meta.model_copy(update={"idempotency_key": key}),
         skill="create_ticket",
@@ -94,6 +113,9 @@ async def request_change(request: AgentRequest) -> AgentResult:
         request_id=ticket_out.request_id,
         duplicate_of=ticket_out.duplicate_of,
         tenant_id=request.meta.tenant_id,
+        sent_title=parsed.title,
+        sent_evidence=parsed.evidence,
+        sent_evidence_ids=parsed.evidence_ids,
     )
     output = RequestChangeOutput(
         outcome=ticket_out.outcome,
