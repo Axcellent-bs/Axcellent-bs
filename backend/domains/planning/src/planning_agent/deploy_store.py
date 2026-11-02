@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 
 from ax_agent_template import config as template_config
 from ax_contracts.schemas import Evidence, ExecuteDecision, RequestMeta
+from ax_workflow.core import GateCall, GateRefused
 from planning_agent.deploy_signals import (
     MockSignalSource,
     SignalSource,
@@ -35,7 +36,7 @@ from planning_agent.domain.deploy import (
     evaluate_check,
 )
 from planning_agent.domain.seed import initial_state
-from planning_agent.domain.service import AGENT_NAME, GateCall, GateRefused, PlanningService
+from planning_agent.domain.service import AGENT_NAME, PlanningService
 
 # 시드 이상 지표 (TH-5: 14:04부터 결제 실패율 4배)
 SEED_ANOMALIES = [

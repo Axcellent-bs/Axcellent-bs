@@ -42,10 +42,10 @@ from ax_contracts.schemas.planning import (
     VerifyRollbackTargetInput,
     VerifyRollbackTargetOutput,
 )
+from ax_workflow.core import GateRefused
 from planning_agent.domain.handover import ROSTER_AREAS, Item, is_roster_area
 from planning_agent.domain.models import PR
 from planning_agent.domain.rules import ROLLBACK_LOOKBACK
-from planning_agent.domain.service import GateRefused
 from planning_agent.runtime import get_service
 
 

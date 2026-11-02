@@ -279,3 +279,13 @@ async def _already_merged(adapter: VcsAdapter, number: int) -> bool:
         return (await adapter.get_change(number)).merged
     except VcsError:
         return False
+
+
+def pr_size_params(lines: int, files: int, paths: list[str], task: str) -> dict:
+    """`generate_pr` execute params. 안전 레이어 코드 규칙(#83)이 읽는 키 이름을 쓴다."""
+    return {
+        "changed_lines": lines,
+        "changed_files": files,
+        "changed_paths": sorted(set(paths)),
+        "task": task,
+    }

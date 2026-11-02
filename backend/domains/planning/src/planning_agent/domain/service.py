@@ -222,16 +222,6 @@ ANSWER_WHO = "박지아 (고객지원)"
 # ---------------------------------------------------------------- 관문·결과 타입
 
 
-def _pr_size_params(lines: int, files: int, paths: list[str], task: str) -> dict:
-    """`generate_pr` execute params. 안전 레이어 코드 규칙(#83)이 읽는 키 이름을 쓴다."""
-    return {
-        "changed_lines": lines,
-        "changed_files": files,
-        "changed_paths": sorted(set(paths)),
-        "task": task,
-    }
-
-
 # 관문이 보류해도 본 작업을 되돌리지 않는 부수 기록. 인사 기록은 인사가 실행하는 일이라
 # 기획·개발 쪽 관문에서는 보류될 수 있다 (등록표 owner hr)
 SOFT_ACTIONS = frozenset({"record_case"})
@@ -1805,7 +1795,7 @@ class PlanningService(StateService):
             ctx,
             pr_id,
             gen_text,
-            _pr_size_params(lines, files, auto_paths, task_id),
+            vcs_bridge.pr_size_params(lines, files, auto_paths, task_id),
         )
         pr = PR(
             id=pr_id,
@@ -3239,7 +3229,7 @@ class PlanningService(StateService):
                     job.ctx,
                     f"{pr_id}:run{job.run_id}",
                     gen_text,
-                    _pr_size_params(lines, files, paths, task.id),
+                    vcs_bridge.pr_size_params(lines, files, paths, task.id),
                 )
             except GateRefused as exc:
                 held = exc.decision.status == "held"
@@ -3420,7 +3410,7 @@ class PlanningService(StateService):
                 job.ctx,
                 f"{p.id}:commit{n}",
                 f"{p.id} {message} ({len(changed)}개 파일)",
-                _pr_size_params(lines, files, paths, task.id),
+                vcs_bridge.pr_size_params(lines, files, paths, task.id),
             )
             note = await vcs_bridge.update_pr(p, changed, message)
             if note is not None:
@@ -3766,7 +3756,7 @@ class PlanningService(StateService):
                 ctx,
                 pr.id,
                 gen_text,
-                _pr_size_params(lines, files, pr.changed_paths, t.id),
+                vcs_bridge.pr_size_params(lines, files, pr.changed_paths, t.id),
             )
             review_text = f"{pr.id} 검수 {review}{' (완료 기준 C2)' if review == '불일치' else ''}"
             await self._execute("review_pr", ctx, f"{pr.id}:r1", review_text)
