@@ -1,4 +1,5 @@
 import { ApiError } from "./apiError";
+import type { ChangeProposalSent, DeclineReason } from "./support";
 import type { AdminReview, Claim, ClaimDetail, ClaimIntake, ClaimSuggestion, ClaimStats, CommLine, CommMeta, Conversation, ConversationListItem, Dashboard, FeedbackItem, FeedbackOverview, FeedbackStatus, Health, Kpi, Me, QueueRun, QueueView, ReceiptAnalysis, ReceiptImageInput, Summary, Validation } from "./types";
 
 import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN } from "./env";
@@ -98,6 +99,12 @@ export const api = {
       post<Conversation>(`/api/dashboard/conversations/${id}/feedback`, b),
     addResolutionNote: (id: number, b: { root_cause: string; action_taken: string; result: string }) =>
       post<Conversation>(`/api/dashboard/conversations/${id}/resolution-notes`, b),
+    // 문의 급증에서 만든 변경 요청 제안을 상담원이 고른 대로 기획에 보내거나 보내지 않는다 (사람 토큰 필요)
+    sendChangeProposal: (b: { inquiry_id: number; title: string; evidence: string; evidence_ids: string[] }) =>
+      post<ChangeProposalSent>(`/api/dashboard/change-proposals/send`, b),
+    declineChangeProposal: (b: { topic_code: string; inquiry_id: number; reason: DeclineReason; note?: string }) =>
+      post<{ topic_code: string; inquiry_id: number; reason: DeclineReason; decided_by: string; created: boolean }>(
+        `/api/dashboard/change-proposals/decline`, b),
     revealOriginal: (id: number, messageId: number) =>
       post<{ message_id: number; text: string }>(`/api/dashboard/conversations/${id}/messages/${messageId}/original`),
     claimSuggestion: (id: number) => post<ClaimSuggestion>(`/api/dashboard/conversations/${id}/claim-suggestion`),

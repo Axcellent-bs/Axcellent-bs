@@ -6,6 +6,7 @@ dashboard-web 옛 경로와의 대응은 README "엔드포인트" 표를 본다.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -48,6 +49,8 @@ from ax_dashboard_api.envelope import ApiError, is_mock, ok, or_unavailable, req
 from ax_dashboard_api.schemas import (
     AgentMessageBody,
     CandidateDecisionBody,
+    ChangeProposalDeclineBody,
+    ChangeProposalSendBody,
     ClaimIntakeBody,
     ClaimSuggestion,
     Conversation,
@@ -861,6 +864,53 @@ async def change_proposals() -> dict:
     if is_mock():
         return ok(mock_customers.change_proposals())
     return ok(await support_client.call("propose_change_requests"))
+
+
+@router.post("/change-proposals/send", status_code=201)
+async def send_change_proposal(body: ChangeProposalSendBody) -> dict:
+    """상담원이 고른 제안을 기획에 보낸다. 사람 토큰이 필요하다 (라우터 전체에 걸려 있다).
+
+    같은 제목·근거를 여러 번 눌러도 한 번만 처리되도록 호출 사이에 변하지 않는 키를 쓴다.
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "변경 요청 보내기는 실제 모드에서만 된다")
+    digest = hashlib.sha1(
+        f"{body.title}\n{body.evidence}\n{sorted(body.evidence_ids)}".encode()
+    ).hexdigest()[:12]
+    out = await support_client.call(
+        "request_change",
+        {
+            "inquiry_id": body.inquiry_id,
+            "title": body.title,
+            "evidence": body.evidence,
+            "evidence_ids": body.evidence_ids,
+        },
+        key=f"change-proposal:{body.inquiry_id}:{digest}",
+    )
+    if "planning_outcome" in out:  # 기획이 요청을 만들지 않았다 (support는 완료로 돌려준다)
+        raise ApiError(
+            409, "PLANNING_REFUSED", str(out.get("message") or "기획이 요청을 받지 않았다")
+        )
+    return ok(out)
+
+
+@router.post("/change-proposals/decline", status_code=201)
+async def decline_change_proposal(body: ChangeProposalDeclineBody, request: Request) -> dict:
+    """제안을 보내지 않기로 한 이유를 남긴다. 결정한 사람은 사람 토큰에서만 채운다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "보내지 않기는 실제 모드에서만 된다")
+    out = await support_client.call(
+        "decline_change_proposal",
+        {
+            "topic_code": body.topic_code,
+            "inquiry_id": body.inquiry_id,
+            "reason": body.reason,
+            "author": request.state.human,
+        },
+        {"note": body.note} if body.note else None,
+        target=f"inquiry:{body.inquiry_id}:decline:{body.topic_code}",
+    )
+    return ok(out)
 
 
 @router.get("/change-requests")

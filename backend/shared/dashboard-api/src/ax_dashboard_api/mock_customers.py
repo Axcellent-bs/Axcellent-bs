@@ -205,6 +205,8 @@ def change_proposals() -> dict[str, Any]:
                 "count": 7,
                 "ratio": 4.7,
                 "already_requested": True,  # mock 변경 요청이 문의 1에 이미 연결돼 있다
+                "declined": False,
+                "decline_reason": None,
             }
         ],
     }

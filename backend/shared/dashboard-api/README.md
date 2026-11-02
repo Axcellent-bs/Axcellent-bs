@@ -68,6 +68,8 @@ CORS 허용 출처는 `DASHBOARD_CORS_ORIGINS`(쉼표 구분, 기본 `http://loc
 | GET `/conversations/{id}/payment-diagnosis` | `diagnose_payment` (읽기) |
 | GET `/inquiry-surge` | `detect_inquiry_surge` |
 | GET `/change-proposals` | `propose_change_requests` (읽기. 급증에서 만든 변경 요청안, 보내지 않는다) |
+| POST `/change-proposals/send` | `request_change` (쓰기, 사람 토큰. 상담원이 고른 제안을 기획에 보낸다. 같은 제목·근거는 호출 사이에 변하지 않는 키로 한 번만 처리. 기획이 요청을 받지 않으면 409 `PLANNING_REFUSED`) |
+| POST `/change-proposals/decline` | `decline_change_proposal` (쓰기, 사람 토큰. 보내지 않기로 한 이유 기록. 결정한 사람은 토큰에서 채우고 기획으로는 아무것도 보내지 않는다) |
 | GET `/change-requests?inquiry_id&status` | `list_change_requests` (`items`) |
 
 고객관리 탭의 위 경로는 모두 읽기라 사람 토큰이 필요 없고, 응답은 support 출력을 그대로 둔다 (위험 단계·보상 후보는 코드가 사실에서 낸 값이다). 목 모드 값은 `mock_customers.py`에 있다.

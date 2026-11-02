@@ -585,3 +585,13 @@ async def test_auto_policy_update_only_planning(gate: Gate, act) -> None:
         act("auto_policy_update", "support", "policy-other", target="L1->L0", to=0)
     )
     assert other.hold_reason == HoldReason.UNREGISTERED_ACTION
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["request_change", "decline_change_proposal"])
+async def test_change_proposal_actions_are_a_for_support_only(gate: Gate, act, action: str) -> None:
+    """#281: 변경 요청 보내기·보내지 않기는 고객지원만 A로 실행한다. 다른 부서가 부르면 보류된다."""
+    ok = await gate.execute(act(action, "support", f"{action}-ok"))
+    assert (ok.grade, ok.status) == ("A", "executed")
+    other = await gate.execute(act(action, "marketing", f"{action}-other"))
+    assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)

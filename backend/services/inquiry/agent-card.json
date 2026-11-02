@@ -250,7 +250,7 @@
     },
     {
       "id": "propose_change_requests",
-      "description": "분류별 문의 급증(detect_inquiry_surge와 같은 입력)에서 기획에 보낼 변경 요청안을 코드 규칙으로 만든다 (LLM 없음). 제안마다 제목 한 줄·근거 요약(건수·평소 대비 배수)·대표 문의(샘플 중 번호가 가장 작은 문의)·나머지 근거 문의 ID(inq_<번호>)·이미 요청됨 여부를 담고, 고객 원문이나 개인정보는 담지 않는다. 만들기만 하고 아무것도 보내거나 저장하지 않는다. 보내는 일은 사람이 고른 뒤 request_change가 한다.",
+      "description": "분류별 문의 급증(detect_inquiry_surge와 같은 입력)에서 기획에 보낼 변경 요청안을 코드 규칙으로 만든다 (LLM 없음). 제안마다 제목 한 줄·근거 요약(건수·평소 대비 배수)·대표 문의(샘플 중 번호가 가장 작은 문의)·나머지 근거 문의 ID(inq_<번호>)·이미 요청됨 여부·보내지 않기로 한 제안의 이유를 담고, 고객 원문이나 개인정보는 담지 않는다. 만들기만 하고 아무것도 보내거나 저장하지 않는다. 보내는 일은 사람이 고른 뒤 request_change가 한다.",
       "input_schema": "agents/support/src/support_agent/proposal_schemas.py#ProposeChangesInput",
       "output_schema": "agents/support/src/support_agent/proposal_schemas.py#ProposeChangesReport",
       "grade": "read",
@@ -261,6 +261,18 @@
       "verifier": null,
       "priority": "recommended",
       "handoff": false
+    },
+    {
+      "id": "decline_change_proposal",
+      "description": "변경 요청 제안을 보내지 않기로 한 이유를 남긴다 (#281). 제안은 저장하지 않으므로 분류(topic_code)와 대표 문의(inquiry_id)로 가리킨다. 이유는 already_known·not_a_real_problem·other 중 하나이고, 자유 메모는 untrusted note(200자 이하, 개인정보가 있으면 거부)로 받는다. 결정한 사람(author)은 서버가 사람 토큰에서 채운다. 기획으로는 아무것도 보내지 않으며 같은 제안에 두 번 해도 한 번만 기록된다. execute()를 거치는 쓰기라 안전 관문에 등록돼 있다.",
+      "input_schema": "agents/support/src/support_agent/proposal_schemas.py#DeclineProposalInput",
+      "output_schema": "agents/support/src/support_agent/proposal_schemas.py#DeclineProposalOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
     },
     {
       "id": "request_change",

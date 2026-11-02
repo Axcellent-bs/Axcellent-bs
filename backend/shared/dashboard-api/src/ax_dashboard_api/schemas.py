@@ -633,6 +633,30 @@ class FeedbackBody(BaseModel):
     comment: str = Field(default="", max_length=300)
 
 
+class ChangeProposalSendBody(BaseModel):
+    """제안을 기획에 보낸다. 제목·근거는 제안 그대로이거나 상담원이 고친 값이다.
+
+    서버가 개인정보를 다시 검사해 있으면 거부한다. 보내는 사람(작성자)은 받지 않는다.
+    """
+
+    inquiry_id: int  # 대표 문의
+    title: str = Field(min_length=1, max_length=200)
+    evidence: str = Field(min_length=1, max_length=500)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=20)
+
+
+ProposalDeclineReason = Literal["already_known", "not_a_real_problem", "other"]
+
+
+class ChangeProposalDeclineBody(BaseModel):
+    """제안을 보내지 않기. 결정한 사람은 받지 않는다(서버가 사람 토큰에서 채운다)."""
+
+    topic_code: str = Field(min_length=1, max_length=40)
+    inquiry_id: int  # 제안의 대표 문의
+    reason: ProposalDeclineReason
+    note: str | None = Field(default=None, max_length=200)
+
+
 class ResolutionNoteBody(BaseModel):
     """해결 메모 본문. 작성자는 받지 않는다(서버가 사람 토큰에서 채운다). 셋 다 비면 422."""
 
