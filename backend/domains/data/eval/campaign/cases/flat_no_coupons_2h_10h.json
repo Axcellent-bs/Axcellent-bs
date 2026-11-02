@@ -1,0 +1,50 @@
+{
+ "id": "flat_no_coupons_2h_10h",
+ "kind": "none",
+ "input": {
+  "campaign_id": "cmp_nocoupon",
+  "window_from": "2026-10-14T10:00:00Z",
+  "window_to": "2026-10-14T12:00:00Z"
+ },
+ "spec": {
+  "id": "flat_no_coupons_2h_10h",
+  "window": {
+   "from": "2026-10-14T10:00:00Z",
+   "to": "2026-10-14T12:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "none"
+  }
+ },
+ "expected": {
+  "orders": {
+   "status": "known",
+   "direction": "none",
+   "multiplier": 1.0
+  },
+  "revenue": {
+   "status": "known",
+   "direction": "none"
+  },
+  "coupon": {
+   "status": "unknown",
+   "unknown_reason": "no_coupons"
+  }
+ },
+ "counted": {
+  "orders_actual": 173,
+  "orders_baseline": 182.7143,
+  "revenue_actual": 4302900,
+  "revenue_baseline": 4608842.8571,
+  "history_days_with_orders": 7,
+  "coupon_issued_units": 0,
+  "coupon_used_in_window": 0,
+  "coupon_used_after": 0,
+  "coupon_used_units": 0,
+  "coupon_use_rate": null
+ },
+ "memo": "campaign_id는 있지만 그 캠페인 쿠폰이 없음 → 쿠폰 확인할 수 없음"
+}

@@ -15,6 +15,12 @@
   없으면 잡음도 없다. 잡음은 장애가 아니라 정답의 장애 실패 수에 넣지 않는다.
 - 다른 상황에 얹는 잡음(holdout 생성기): `noise_at_minutes`·`noise_history`·`noise_code`.
 - 구간 전체 세일(holdout 생성기): `traffic.sale_factor`배로 주문이 늘어난다.
+- 캠페인 쿠폰(`campaign`, campaign_effect 평가 `eval/campaign/`): 지난 7일보다 먼저 구매자
+  `buyers`명에게 캠페인 쿠폰(`campaign_id`, `units_each`장)을 shop-api 쿠폰 발급 코드로 준다.
+  구간 안에서 그 구매자의 주문은 `use_fraction` 확률로 쿠폰을 쓴다(shop-api `place_order`).
+  `used_after`가 있으면 구간이 끝난 뒤 5분 간격으로 그만큼 더 쓴다
+  (조회 시점 누적 사용률에 섞이는 몫). 그 장수는 구간 안에서 쓰지 않게 남겨 둔다.
+  쿠폰 결정은 따로 씨앗을 둔 난수로 해서, `campaign`이 없는 시나리오의 데이터는 예전과 같다.
 
 정답(실패 주문 수·금액·영향 고객, 이상 시작 시각)은 data 에이전트 코드가 아니라 여기서 만든
 결제 기록에서 바로 센다(`Truth`).
@@ -57,6 +63,7 @@ from ax_contracts.data_access.shop_metric_series import ShopMetricSeriesQuery
 from ax_shop_api import service
 from ax_shop_api.db import Db
 from ax_shop_api.lookups import Lookups
+from ax_shop_api.promotions import Promotions
 from ax_shop_api.seed import BUYER_COUNT, PRODUCTS, seed, seed_buyer_id
 
 BUCKET = timedelta(minutes=5)
@@ -126,6 +133,10 @@ class World:
                     bucket=params.get("bucket", "5m"),
                 )
                 data = lookups.metric_series(query).model_dump(mode="json")
+            elif path.endswith("/coupons"):  # shop-api `GET /api/shop/coupons` (캠페인 평가)
+                data = Promotions(self.db).list_coupons(
+                    params.get("buyer_id"), params.get("purpose_code"), params.get("campaign_id")
+                )
             else:
                 return httpx.Response(404, json={"error": {"code": "NOT_FOUND"}})
             return httpx.Response(200, content=json.dumps({"data": data, "meta": {}}))
@@ -367,6 +378,12 @@ def generate(spec: dict[str, Any]) -> World:
     code = injection.get("failure_code") or injection.get("fault_code")
     noise_code = injection.get("noise_code") or code
     sale_factor = float(traffic.get("sale_factor", 1.0))  # 구간 전체 세일 (holdout 생성기)
+    campaign = spec.get("campaign")  # 캠페인 쿠폰 (없으면 예전과 똑같이 만든다)
+    coupons: dict[str, list[Any]] = {}  # 구매자 → [쿠폰 id, 남은 장수]
+    if campaign:
+        coupons = _issue_campaign_coupons(db, campaign, window_from)
+        crng = random.Random(f"{spec['id']}:campaign")  # 기존 난수 순서를 바꾸지 않게 따로
+        reserve = int(campaign.get("used_after", 0))
     with _clock() as now:
         margin = timedelta(minutes=int(traffic.get("history_margin_minutes", 0)))
         for slot in _slots(window_from, window_to, margin):
@@ -388,7 +405,20 @@ def generate(spec: dict[str, Any]) -> World:
                 order_no += 1
                 buyer = seed_buyer_id(rng.randint(1, BUYER_COUNT))
                 product = PRODUCTS[rng.randrange(len(PRODUCTS))][0]
-                order = shop.create_order(buyer, [(product, rng.choice((1, 1, 1, 2)))])
+                lines = [(product, rng.choice((1, 1, 1, 2)))]
+                held = coupons.get(buyer) if in_window else None
+                # 구간 뒤에 쓸 장수(`used_after`)는 남겨 둔다 (조건과 기록이 늘 같게)
+                spare = held is not None and sum(c[1] for c in coupons.values()) > reserve
+                if (
+                    held
+                    and held[1] > 0
+                    and spare
+                    and crng.random() < float(campaign["use_fraction"])
+                ):
+                    order = shop.place_order(buyer, lines, coupon_id=held[0])[0]
+                    held[1] -= 1
+                else:
+                    order = shop.create_order(buyer, lines)
                 faulty = (
                     in_window
                     and kind == "payment_failure"
@@ -431,7 +461,68 @@ def generate(spec: dict[str, Any]) -> World:
                         noise=blip,
                     )
                 )
+        if campaign and int(campaign.get("used_after", 0)) > 0:
+            _use_after_window(world, shop, coupons, int(campaign["used_after"]), now, clock_seconds)
     return world
+
+
+def _issue_campaign_coupons(
+    db: Db, campaign: dict[str, Any], window_from: datetime
+) -> dict[str, list[Any]]:
+    """구매자 1번부터 `buyers`명에게 캠페인 쿠폰을 발급한다 (지난 7일보다 먼저, 기한 없음)."""
+    issued_at = window_from - timedelta(days=HISTORY_DAYS + 1)
+    promotions = Promotions(db, now=lambda: issued_at)
+    out: dict[str, list[Any]] = {}
+    for n in range(1, int(campaign["buyers"]) + 1):
+        buyer = seed_buyer_id(n)
+        coupon, _ = promotions.issue_coupon(
+            idempotency_key=f"eval-{campaign['campaign_id']}-{n}",
+            purpose_code="campaign",
+            buyer_id=buyer,
+            count=int(campaign["units_each"]),
+            unit_value=int(campaign.get("unit_value", 1000)),
+            campaign_id=str(campaign["campaign_id"]),
+        )
+        out[buyer] = [coupon["coupon_id"], int(campaign["units_each"])]
+    return out
+
+
+def _use_after_window(
+    world: World,
+    shop: service.Shop,
+    coupons: dict[str, list[Any]],
+    uses: int,
+    now: list[datetime],
+    clock_seconds: list[float],
+) -> None:
+    """구간이 끝난 뒤 5분 간격으로 쿠폰을 `uses`장 더 쓴다 (남은 장수가 있는 구매자를 돌아가며)."""
+    moment = world.window[1]
+    for _ in range(uses):
+        holders = [(b, c) for b, c in coupons.items() if c[1] > 0]
+        if not holders:
+            break
+        buyer, held = holders[0]
+        now[0] = moment
+        clock_seconds[0] = moment.timestamp()
+        order = shop.place_order(buyer, [(PRODUCTS[0][0], 1)], coupon_id=held[0])[0]
+        held[1] -= 1
+        paid = shop.pay(order["order_id"], "card", None)
+        with world.db.tx() as conn:  # 방금 넣은 결제 기록 (구간 안 결제와 같은 방법으로 읽는다)
+            pay = conn.execute(
+                "SELECT amount, status, failure_code FROM payments "
+                "WHERE order_id = ? ORDER BY rowid DESC LIMIT 1",
+                (paid["order_id"],),
+            ).fetchone()
+        world.payments.append(
+            Payment(
+                order_id=paid["order_id"],
+                buyer_id=buyer,
+                amount=int(pay["amount"]),
+                at=moment,
+                failure_code=None if pay["status"] == "succeeded" else pay["failure_code"],
+            )
+        )
+        moment += BUCKET
 
 
 @dataclass(frozen=True)

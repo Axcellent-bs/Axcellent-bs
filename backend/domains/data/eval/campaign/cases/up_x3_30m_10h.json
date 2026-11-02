@@ -1,0 +1,63 @@
+{
+ "id": "up_x3_30m_10h",
+ "kind": "up",
+ "input": {
+  "campaign_id": "cmp_up3",
+  "window_from": "2026-10-14T10:00:00Z",
+  "window_to": "2026-10-14T10:30:00Z"
+ },
+ "spec": {
+  "id": "up_x3_30m_10h",
+  "window": {
+   "from": "2026-10-14T10:00:00Z",
+   "to": "2026-10-14T10:30:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "sale",
+   "factor": 3.0,
+   "from": "2026-10-14T10:00:00Z",
+   "to": "2026-10-14T10:30:00Z"
+  },
+  "campaign": {
+   "campaign_id": "cmp_up3",
+   "buyers": 10,
+   "units_each": 3,
+   "unit_value": 1000,
+   "use_fraction": 0.6,
+   "used_after": 0
+  }
+ },
+ "expected": {
+  "orders": {
+   "status": "known",
+   "direction": "up",
+   "multiplier": 3.0
+  },
+  "revenue": {
+   "status": "known",
+   "direction": "up"
+  },
+  "coupon": {
+   "status": "known",
+   "issued_units": 30,
+   "used_after_units": 0,
+   "note": "조회 시점 기준 누적 사용률이며 캠페인 뒤 사용분도 섞인다"
+  }
+ },
+ "counted": {
+  "orders_actual": 124,
+  "orders_baseline": 48.1429,
+  "revenue_actual": 2946400,
+  "revenue_baseline": 1228042.8571,
+  "history_days_with_orders": 7,
+  "coupon_issued_units": 30,
+  "coupon_used_in_window": 20,
+  "coupon_used_after": 0,
+  "coupon_used_units": 20,
+  "coupon_use_rate": 0.6667
+ },
+ "memo": "짧은 캠페인(30분) 주문 3배"
+}
