@@ -20,19 +20,16 @@ import hashlib
 import json
 import os
 import re
-import weakref
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ax_agent_template import config as template_config
-from ax_agent_template import execute as gate_module
 from ax_agent_template.services import BY_ID as SERVICE_BY_ID
 from ax_agent_template.services import department_of
-from ax_contracts.schemas import TENANT_ID_DEFAULT, Evidence, ExecuteDecision, RequestMeta
+from ax_contracts.schemas import TENANT_ID_DEFAULT, ExecuteDecision
 from ax_contracts.schemas.hr import PlanDraft
 from ax_contracts.schemas.planning import (
     AnswerPlanningQuestionInput,
@@ -41,6 +38,15 @@ from ax_contracts.schemas.planning import (
     DevResultInput,
 )
 from ax_contracts.schemas.record import RecordCase, RecordKind
+from ax_workflow.clock import Clock
+from ax_workflow.core import (
+    ActionError,
+    ActionResult,
+    Gate,
+    GateCall,
+    GateRefused,
+    StateService,
+)
 from planning_agent import (
     ask_requester,
     cause_inbox,
@@ -49,7 +55,6 @@ from planning_agent import (
     hr_link,
     related,
     repo_routing,
-    state_store,
     vcs,
     vcs_bridge,
 )
@@ -76,7 +81,6 @@ from planning_agent.domain.autocheck import (
     spec_check,
     spec_wait_state,
 )
-from planning_agent.domain.clock import Clock, default_clock_factory
 from planning_agent.domain.docs import gather_blocks, next_block_id
 from planning_agent.domain.handover import (
     HandoverCheck,
@@ -142,8 +146,6 @@ from planning_agent.vcs.base import VcsError
 AGENT_NAME = "planning"
 MAX_INSTRUCTION_CHARS = 1000  # 사람 수정 지시 길이
 TEAM_LEAD = "노예진"  # 확정·머지·승급 승인 버튼을 누르는 팀장 (목)
-
-Gate = Callable[[str, dict, RequestMeta, Evidence], Awaitable[ExecuteDecision]]
 
 INBOUND_KINDS = (
     "support_ticket",
@@ -220,13 +222,6 @@ ANSWER_WHO = "박지아 (고객지원)"
 # ---------------------------------------------------------------- 관문·결과 타입
 
 
-async def template_gate(
-    action: str, params: dict, context: RequestMeta, evidence: Evidence
-) -> ExecuteDecision:
-    """템플릿 실행 관문. 모듈 속성으로 찾아 부르므로 테스트에서 `_send_to_safety`를 바꿀 수 있다."""
-    return await gate_module.execute(action, params, context, evidence)
-
-
 def _pr_size_params(lines: int, files: int, paths: list[str], task: str) -> dict:
     """`generate_pr` execute params. 안전 레이어 코드 규칙(#83)이 읽는 키 이름을 쓴다."""
     return {
@@ -240,41 +235,6 @@ def _pr_size_params(lines: int, files: int, paths: list[str], task: str) -> dict
 # 관문이 보류해도 본 작업을 되돌리지 않는 부수 기록. 인사 기록은 인사가 실행하는 일이라
 # 기획·개발 쪽 관문에서는 보류될 수 있다 (등록표 owner hr)
 SOFT_ACTIONS = frozenset({"record_case"})
-
-
-class GateRefused(Exception):
-    """관문이 실행을 허락하지 않았다. 액션 전체를 버린다."""
-
-    def __init__(self, action: str, idempotency_key: str, decision: ExecuteDecision):
-        super().__init__(f"{action} 실행 거부 ({decision.status})")
-        self.action = action
-        self.idempotency_key = idempotency_key
-        self.decision = decision
-
-
-class ActionError(Exception):
-    """잘못된 액션 (모르는 type, 빠진 필드, 목 모드 밖 시뮬레이터)."""
-
-    def __init__(self, code: str, message: str):
-        super().__init__(message)
-        self.code = code
-        self.message = message
-
-
-@dataclass
-class GateCall:
-    action: str
-    idempotency_key: str
-    status: str
-    grade: str
-    execution_id: str
-
-
-@dataclass
-class ActionResult:
-    changed: bool = False
-    outcome: str | None = None
-    output: dict[str, Any] = field(default_factory=dict)
 
 
 # ---- 액션 입력 (프로토타입 Action과 같은 모양)
@@ -426,13 +386,6 @@ def action_name(raw: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", raw).lower()
 
 
-def _token() -> str:
-    try:
-        return template_config.agent_token(AGENT_NAME)
-    except RuntimeError:
-        return "unconfigured"  # 관문 쪽에서 거부된다 (fail-closed)
-
-
 def _fmt(at: datetime) -> str:
     return at.astimezone(UTC).strftime("%m-%d %H:%M UTC")
 
@@ -440,8 +393,13 @@ def _fmt(at: datetime) -> str:
 # ---------------------------------------------------------------- 서비스
 
 
-class PlanningService:
-    """프로세스 메모리에 상태 하나를 두고 액션을 적용한다 (목 모드 저장소)."""
+class PlanningService(StateService):
+    """프로세스 메모리에 상태 하나를 두고 액션을 적용한다 (목 모드 저장소).
+
+    상태·구독·적용 틀·실행 관문은 `ax_workflow.core.StateService` (분리 1단계)."""
+
+    agent_name = AGENT_NAME
+    soft_actions = SOFT_ACTIONS
 
     def __init__(
         self,
@@ -458,9 +416,10 @@ class PlanningService:
         asker: Asker | None | Literal["default"] = "default",
     ):
         # 서비스 역할: "" = 합친 모드(원래 동작), "planning" = 기획서까지, "dev" = PR·머지만
-        self.role = (os.getenv("PLANNING_ROLE", "") if role is None else role).strip()
-        if self.role and self.role not in ROLES:
-            raise ValueError(f"모르는 PLANNING_ROLE: {self.role}")
+        role = (os.getenv("PLANNING_ROLE", "") if role is None else role).strip()
+        if role and role not in ROLES:
+            raise ValueError(f"모르는 PLANNING_ROLE: {role}")
+        super().__init__(clock, gate, tenant_id, role, real_example)
         self._send_dev: DevSender = dev_sender or send_to_service
         self._sending: set[asyncio.Task] = set()
         self._resuming = False  # 대기 대화를 깨우는 중 (다시 깨우지 않는다)
@@ -472,10 +431,6 @@ class PlanningService:
         self._coding: dict[str, asyncio.Task] = {}
         self._coding_live: dict[str, int] = {}
         self._coding_seq = 0
-        self._clock_factory: Callable[[], Clock] = (
-            (lambda: clock) if clock else default_clock_factory()
-        )
-        self._gate = gate or template_gate
         self._send_result: ResultSender = result_sender or send_change_result
         # 원인 확인 요청을 받은 요청에 올리는 곳 (시험에서 바꿔 끼운다, None이면 실제 할 일함)
         self._cause_poster: cause_inbox.Poster | None = None
@@ -493,120 +448,46 @@ class PlanningService:
         )
         # 요청 서비스에 되묻는 곳 (None이면 묻지 않음, 목 모드 기본값)
         self._asker: Asker | None = ask_requester.default_asker() if asker == "default" else asker
-        self.tenant_id = tenant_id
-        self.gate_calls: list[GateCall] = []
-        # 보류돼도 본 작업을 막지 않는 부수 기록 (SOFT_ACTIONS)
-        self.soft_holds: list[GateCall] = []
-        self._subscribers: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = {}
-        self._locks: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
-        self.version = 0
-        # 실행 중인 서버는 예시 대신 실제 머지된 작업 하나로 시작한다 (seed.real_state)
-        self.real_example = real_example
         self._init_state()
 
     # ---- 상태·구독
 
-    def _init_state(self, fresh: bool = False) -> None:
-        self.clock: Clock = self._clock_factory()
-        self.state: State = real_state() if self.real_example else initial_state()
-        self.state.tenant_id = self.tenant_id
-        self._idempotent: dict[str, ActionResult] = {}
-        self._dev_sent: dict[str, str] = {}  # dev: 기획서 → 마지막으로 돌려준 결과 지문
-        # 못 보낸 넘기기 (멱등 키 → [skill, context_id, 입력]). 주기적으로 다시 보낸다
-        self._unsent: dict[str, list] = {}
-        # 상태 파일(PLANNING_STATE_DIR)이 있으면 이어서 시작한다. 초기화(fresh)면 시드로 덮어쓴다
-        self._state_path = state_store.path_for(self.role)
-        if self._state_path and not fresh:
-            saved = state_store.load(self._state_path)
-            if saved is not None:
-                self.state, idem, self._dev_sent, self._unsent = saved
-                self._idempotent = {k: ActionResult(**v) for k, v in idem.items()}
-        elif self._state_path:
-            self._save()
-
-    def _save(self) -> None:
-        """상태를 파일에 이어 쓴다 (파일 위치가 있을 때만). 실패해도 동작은 계속한다."""
-        if not self._state_path:
-            return
-        try:
-            state_store.save(
-                self._state_path, self.state, self._idempotent, self._dev_sent, self._unsent
-            )
-        except OSError:
-            pass
+    def _seed(self) -> State:
+        return real_state() if self.real_example else initial_state()
 
     def reset(self) -> None:
-        """초기 데이터로 되돌린다 (구독자는 유지하고 새 상태를 알린다). 상태 파일도 덮어쓴다."""
-        self._init_state(fresh=True)
-        self._coding_live.clear()  # 돌던 코딩 실행은 다음 단계에서 멈춘다
-        self.__dict__.pop("_coding_drafts", None)  # 작성해 둔 코드도 지운다
-        self.gate_calls.clear()
-        self.version += 1
-        self._notify()
-
-    def snapshot(self) -> dict:
-        return dump(self.state)
-
-    def subscribe(self) -> asyncio.Queue:
-        queue: asyncio.Queue = asyncio.Queue()
-        self._subscribers[id(queue)] = (asyncio.get_running_loop(), queue)
-        return queue
-
-    def unsubscribe(self, queue: asyncio.Queue) -> None:
-        self._subscribers.pop(id(queue), None)
-
-    @property
-    def subscriber_count(self) -> int:
-        return len(self._subscribers)
-
-    def _notify(self) -> None:
-        for key, (loop, queue) in list(self._subscribers.items()):
-            try:
-                loop.call_soon_threadsafe(queue.put_nowait, self.version)
-            except RuntimeError:  # 닫힌 이벤트 루프
-                self._subscribers.pop(key, None)
-
-    def _lock(self) -> asyncio.Lock:
-        loop = asyncio.get_running_loop()
-        lock = self._locks.get(loop)
-        if lock is None:
-            lock = self._locks[loop] = asyncio.Lock()
-        return lock
+        """초기 데이터로 되돌린다. 돌던 코딩 실행은 다음 단계에서 멈추고 작성해 둔 코드도 지운다."""
+        self._coding_live.clear()
+        self.__dict__.pop("_coding_drafts", None)
+        super().reset()
 
     # ---- 적용 틀
 
-    async def _apply(self, fn: Callable[..., Awaitable[ActionResult | None]], **params: Any):
-        """복사본에 액션을 적용하고, 끝까지 성공하면 바꿔 끼운다. 관문 거부면 원래 상태 유지."""
-        async with self._lock():
-            s = self.state.model_copy(deep=True)
-            before = len(s.activity)
-            held = {t.id for t in s.tasks if t.coding and t.coding.status == "waiting_human"}
-            known = {r.id for r in s.requests}
-            known_prs = {p.id for p in s.prs}
-            result = await fn(s, **params) or ActionResult()
-            await self._relate_new(s, known)
-            self._relate_paths(s, known_prs)
-            await self._advance(s)
-            outgoing = self._dev_outgoing(s)
-            self._to_outbox(s, before)
-            result.changed = s != self.state
-            new_holds: list[str] = []
-            if result.changed:
-                self.state = s
-                self.version += 1
-                self._save()
-                self._notify()
-                new_holds = [
-                    t.id for t in s.tasks
-                    if t.coding and t.coding.status == "waiting_human" and t.id not in held
-                ]  # fmt: skip
+    def _mark(self, s: State) -> dict[str, Any]:
+        return {
+            "before": len(s.activity),
+            "held": {t.id for t in s.tasks if t.coding and t.coding.status == "waiting_human"},
+            "known": {r.id for r in s.requests},
+            "known_prs": {p.id for p in s.prs},
+        }
+
+    async def _settle(self, s: State, mark: dict[str, Any]) -> None:
+        await self._relate_new(s, mark["known"])
+        self._relate_paths(s, mark["known_prs"])
+        await self._advance(s)
+        mark["outgoing"] = self._dev_outgoing(s)
+        self._to_outbox(s, mark["before"])
+
+    def _after(self, s: State, mark: dict[str, Any], changed: bool) -> None:
         # 넘기기는 상태를 바꿔 끼운 뒤 잠금 밖에서 보낸다 (잠금을 쥔 채 네트워크를 부르지 않는다)
-        for item in outgoing:
+        for item in mark["outgoing"]:
             self._spawn_send(*item)
-        for task_id in new_holds:  # 사람 확인으로 멈춘 코딩 작업 → 받은 요청에 개발팀 할 일
-            self._spawn_hold(task_id)
+        if changed:  # 사람 확인으로 새로 멈춘 코딩 작업 → 받은 요청에 개발팀 할 일
+            for t in s.tasks:
+                cr = t.coding
+                if cr and cr.status == "waiting_human" and t.id not in mark["held"]:
+                    self._spawn_hold(t.id)
         self._kick_waiting()
-        return result
 
     def _kick_waiting(self) -> None:
         """충돌하는 요청이 끝나기를 기다리는 대화가 있으면 깨운다 (dev_chat.resume_waiting)."""
@@ -1007,46 +888,6 @@ class PlanningService:
                     )
                 )
 
-    async def _execute(
-        self,
-        action: str,
-        ctx: str,
-        target: str,
-        summary: str,
-        params: dict | None = None,
-        refs: list[str] | None = None,
-        allow: tuple[str, ...] = ("executed",),
-    ) -> ExecuteDecision:
-        """실행 관문을 거친다. 허용 상태가 아니면 `GateRefused` (fail-closed)."""
-        key = f"{ctx}:{action}:{target}"
-        meta = RequestMeta(
-            context_id=ctx,
-            tenant_id=self.tenant_id,
-            token=_token(),
-            deadline=datetime.now(UTC) + timedelta(seconds=30),
-            idempotency_key=key,
-        )
-        evidence = Evidence(data_summary=summary, ref_ids=refs or [target])
-        try:
-            decision = await self._gate(
-                action, {"target": target, **(params or {})}, meta, evidence
-            )
-        except Exception:
-            decision = ExecuteDecision(execution_id="exe_unavailable", grade="C", status="rejected")
-        self.gate_calls.append(
-            GateCall(action, key, decision.status, decision.grade, decision.execution_id)
-        )
-        if decision.status not in allow:
-            # 인사 기록(record_case)은 인사(hr)가 실행하는 일이라 이쪽 관문이 보류할 수 있다.
-            # 머지·확정 같은 본 작업은 이미 끝났으니 되돌리지 않고 보류만 남긴다 (soft_holds)
-            if action in SOFT_ACTIONS:
-                self.soft_holds.append(
-                    GateCall(action, key, decision.status, decision.grade, decision.execution_id)
-                )
-                return decision
-            raise GateRefused(action, key, decision)
-        return decision
-
     async def _check_plan(self, ctx: str, spec_id: str, req: Request) -> PlanCheck | None:
         """기획서 초안을 인사 `check_plan`에 묻는다 (인사 연동 3단계). 목 모드면 None.
 
@@ -1112,31 +953,6 @@ class PlanningService:
             "A2A",
             f"{case} → {hr.text}",
             "A" if hr.ok else None,
-        )
-
-    def _act(
-        self,
-        at: datetime,
-        ctx: str,
-        frm: str,
-        to: str,
-        point: str,
-        kind: str,
-        text: str,
-        grade: str | None = None,
-        seq: int | None = None,
-    ) -> Activity:
-        return Activity(
-            seq=seq,
-            at=at,
-            context_id=ctx,
-            tenant_id=self.tenant_id,
-            from_=frm,
-            to=to,
-            point=point,
-            kind=kind,
-            grade=grade,
-            text=text,
         )
 
     @staticmethod
