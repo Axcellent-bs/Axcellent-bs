@@ -444,9 +444,13 @@ class PlanningService(PlanningCore):
         - LLM이 "같은 일"(same)로 본 이 서버의 열린 요청만 묶는다. 다른 서비스에만 있는 요청은
           비슷한 요청 표시로만 둔다.
         - LLM 판단이 하나도 없으면(실패) 같은 제목 규칙으로 대신한다.
-        - 이미 묶였거나 접수 뒤 다른 단계로 간 요청은 그대로 둔다.
+        - 이미 묶였거나 접수 뒤 다른 단계로 간 요청, 개발이 만든 재발 방지 요청은 그대로 둔다.
         """
         if not self._content_match or req.duplicate_of or req.state != "접수":
+            return
+        # 개발이 장애 연결로 만든 재발 방지 요청은 묶지 않는다. 사건 번호가 개발 사본과 같아야
+        # 사후관리(aftercare) 연결이 맞는다 (via "link_incident (재발 방지)", #363)
+        if req.via.startswith("link_incident"):
             return
         others = [r for r in s.requests if r.id != req.id]
         by_id = {r.id: r for r in others}
