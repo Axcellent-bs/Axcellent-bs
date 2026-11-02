@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from planning_agent.dev_handoff import RECEIVE_DEV_RESULT, START_DEV
 from planning_agent.domain.models import dump
-from planning_agent.domain.service import PlanningService
+from planning_agent.domain.service import DevService, PlanningService
 from planning_agent.main import app
 
 
@@ -22,8 +23,8 @@ class Wire:
     def __init__(self, forward: bool = True):
         self.forward = forward
         self.sent: list[tuple[str, str]] = []
-        self.planning = PlanningService(role="planning", dev_sender=self.send)
-        self.dev = PlanningService(role="dev", dev_sender=self.send)
+        self.planning = PlanningService(dev_sender=self.send)
+        self.dev = DevService(dev_sender=self.send)
 
     async def send(self, skill: str, ctx: str, tenant: str, payload: BaseModel, key: str) -> str:
         self.sent.append((skill, key))
@@ -141,36 +142,17 @@ def test_dev_sends_result_only_when_changed() -> None:
     asyncio.run(run())
 
 
-def test_combined_mode_sends_nothing() -> None:
-    sent: list[str] = []
+def test_runtime_picks_service_by_role(monkeypatch) -> None:
+    """서비스 역할(PLANNING_ROLE)로 기획·개발 서비스를 고른다 (합친 모드는 없다, 분리 4단계)."""
+    from planning_agent import runtime
 
-    async def record(skill: str, *_args) -> str:
-        sent.append(skill)
-        return "보냄"
-
-    svc = PlanningService(role="", dev_sender=record)
-    asyncio.run(svc.inbound("support_simple"))
-    asyncio.run(svc.inbound("support_ticket"))
-    assert sent == []
-    assert not any(sp.handed_to_dev for sp in svc.state.specs)
-    actions = [c.action for c in svc.gate_calls]
-    assert actions[:8] == [
-        "create_ticket",
-        "write_spec",
-        "confirm_spec",
-        "split_tasks",
-        "generate_pr",
-        "review_pr",
-        "merge_pr",
-        "record_case",
-    ]
-
-
-def test_role_from_env(monkeypatch) -> None:
+    monkeypatch.setattr(runtime, "_service", None)
     monkeypatch.setenv("PLANNING_ROLE", "dev")
-    assert PlanningService().role == "dev"
+    assert type(runtime.get_service()) is DevService and runtime.get_service().role == "dev"
+    monkeypatch.setattr(runtime, "_service", None)
     monkeypatch.delenv("PLANNING_ROLE")
-    assert PlanningService().role == ""
+    assert type(runtime.get_service()) is PlanningService
+    assert runtime.get_service().role == "planning"
 
 
 def test_start_dev_is_idempotent() -> None:
@@ -207,7 +189,7 @@ def test_send_failure_keeps_state_and_logs() -> None:
         raise RuntimeError("연결 안 됨")
 
     async def run() -> PlanningService:
-        svc = PlanningService(role="planning", dev_sender=boom)
+        svc = PlanningService(dev_sender=boom)
         await svc.inbound("support_ticket")
         await svc.wait_sent()
         return svc
@@ -217,7 +199,8 @@ def test_send_failure_keeps_state_and_logs() -> None:
     assert any(a.point == START_DEV and "보내지 못함" in a.text for a in svc.state.activity)
 
 
-def test_handlers_need_key_and_acl(a2a_body) -> None:
+@pytest.mark.role("dev")
+def test_start_dev_handler_needs_key_and_acl(a2a_body) -> None:
     client = TestClient(app)
     payload = {"request": {}, "spec": {}, "tasks": []}
     no_key = client.post("/a2a", json=a2a_body(START_DEV, payload, token="mock:planning")).json()
@@ -230,6 +213,11 @@ def test_handlers_need_key_and_acl(a2a_body) -> None:
         "/a2a", json=a2a_body(START_DEV, payload, token="mock:planning", idempotency_key="k")
     ).json()
     assert (bad["status"], bad["outcome"]) == ("failed", "invalid_input")
+
+
+@pytest.mark.role("planning")
+def test_receive_dev_result_handler_needs_valid_state_and_acl(a2a_body) -> None:
+    client = TestClient(app)
     result = {"spec_id": "SPEC-9", "request_id": "REQ-1", "request_state": "모름", "tasks": []}
     wrong = client.post(
         "/a2a",
@@ -246,7 +234,7 @@ def test_handlers_need_key_and_acl(a2a_body) -> None:
 def test_dev_team_spec_is_sent_to_planning_with_request_and_spec() -> None:
     """개발팀이 직접 낸 기획도 기획 서비스가 알도록 요청·기획서째 보낸다."""
     w = Wire(forward=False)
-    w.dev = PlanningService(role="dev", dev_sender=w.send, real_example=True)  # SPEC-D1 (개발팀)
+    w.dev = DevService(dev_sender=w.send, real_example=True)  # SPEC-D1 (개발팀)
     sp = next(x for x in w.dev.state.specs if x.origin == "dev_team")
     out = [x for x in w.dev._dev_outgoing(w.dev.state) if x[2].spec_id == sp.id]
     assert out and out[0][0] == RECEIVE_DEV_RESULT
@@ -259,7 +247,7 @@ def test_dev_team_spec_is_sent_to_planning_with_request_and_spec() -> None:
 
 def test_planning_stores_dev_team_request_and_spec() -> None:
     w = Wire(forward=False)
-    w.dev = PlanningService(role="dev", dev_sender=w.send, real_example=True)  # SPEC-D1 (개발팀)
+    w.dev = DevService(dev_sender=w.send, real_example=True)  # SPEC-D1 (개발팀)
     sp = next(x for x in w.dev.state.specs if x.origin == "dev_team")
     req = next(r for r in w.dev.state.requests if r.id == sp.request)
     new_req = req.model_copy(update={"id": "REQ-D9", "spec": "SPEC-D9", "state": "작업 중"})
@@ -313,7 +301,7 @@ def test_unsent_is_resent_until_it_goes() -> None:
     send = Flaky(fails=2)
 
     async def run() -> PlanningService:
-        svc = PlanningService(role="planning", dev_sender=send)
+        svc = PlanningService(dev_sender=send)
         await svc.inbound("support_ticket")
         await svc.wait_sent()
         assert len(svc._unsent) == 1
@@ -332,7 +320,7 @@ def test_rejected_is_not_retried() -> None:
     send = Flaky(fails=1, how="보내지 못함 (rejected invalid_input)")
 
     async def run() -> PlanningService:
-        svc = PlanningService(role="planning", dev_sender=send)
+        svc = PlanningService(dev_sender=send)
         await svc.inbound("support_ticket")
         await svc.wait_sent()
         return svc
@@ -347,7 +335,7 @@ def test_unsent_survives_restart(tmp_path, monkeypatch) -> None:
     first = Flaky(fails=1)
 
     async def down() -> PlanningService:
-        svc = PlanningService(role="planning", dev_sender=first)
+        svc = PlanningService(dev_sender=first)
         await svc.inbound("support_ticket")
         await svc.wait_sent()
         return svc
@@ -356,7 +344,7 @@ def test_unsent_survives_restart(tmp_path, monkeypatch) -> None:
     later = Flaky(fails=0)
 
     async def up() -> PlanningService:
-        svc = PlanningService(role="planning", dev_sender=later)  # 다시 켬
+        svc = PlanningService(dev_sender=later)  # 다시 켬
         assert key in svc._unsent
         await svc.resync_peer()
         return svc
@@ -375,7 +363,7 @@ def test_resync_restores_lost_peer() -> None:
         await w.settle()
         spec = w.planning.state.specs[-1].id
         assert any(s.id == spec for s in w.dev.state.specs)
-        w.dev = PlanningService(role="dev", dev_sender=w.send)  # 상태 없이 다시 뜸
+        w.dev = DevService(dev_sender=w.send)  # 상태 없이 다시 뜸
         assert not any(s.id == spec for s in w.dev.state.specs)
         await w.planning.resync_peer()
         await w.settle()

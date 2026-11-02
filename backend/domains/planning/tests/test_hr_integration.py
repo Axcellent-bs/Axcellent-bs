@@ -24,6 +24,7 @@ from planning_agent.domain.handover import (
 from planning_agent.domain.service import ActionError, PlanningService
 from planning_agent.main import app
 from planning_agent.runtime import get_service, set_service
+from planning_agent.testing import plan
 
 
 def run(coro):
@@ -62,12 +63,12 @@ def _start_spec7(service) -> None:
 
     PR #31의 자동 머지는 safety가 보류한 것으로 두어(교차검증 대기) 두 PR 모두 열려 있게 한다.
     """
-    run(service.answer_question("SPEC-7", "품절 상품도 남겨 두고 품절 표시해 주세요"))
-    run(service.confirm_spec("SPEC-7"))
+    plan(service, "answer_question", "SPEC-7", "품절 상품도 남겨 두고 품절 표시해 주세요")
+    # 확정본을 넘겨받으면 개발 서비스가 바로 PR을 만든다 (분리 모드). 그때 머지를 보류시킨다
     gate = service._gate
     service._gate = _hold_merge
     try:
-        run(service.generate_prs("SPEC-7"))
+        plan(service, "confirm_spec", "SPEC-7")
     finally:
         service._gate = gate
     pr31 = next(p for p in service.state.prs if p.id == "PR #31")
@@ -370,7 +371,7 @@ def test_reject_without_reason_or_alternatives_is_not_sent(gate, reason, alterna
         )
     assert err.value.code == "MISSING_DECISION_REASON"
     with pytest.raises(ActionError):
-        run(svc.reject_decision("SPEC-7", "재시도 버튼만 추가", reason, alternatives))
+        plan(svc, "reject_decision", "SPEC-7", "재시도 버튼만 추가", reason, alternatives)
     assert svc.snapshot() == before
     assert gate.params("record_case") == []  # hr에 보내지 않았다
 
@@ -448,7 +449,7 @@ def test_confirm_without_warn_has_no_warn_ignored(gate) -> None:
     svc = _svc()
     for p in next(s for s in svc.state.specs if s.id == "SPEC-7").paras:
         p.warn = None
-    run(svc.confirm_spec("SPEC-7"))
+    plan(svc, "confirm_spec", "SPEC-7")
     assert not [a for a in svc.state.activity if a.point == "audit.warn_ignored"]
     assert "warn_ignored" not in gate.params("confirm_spec")[0]
     [case_params] = gate.params("record_case")

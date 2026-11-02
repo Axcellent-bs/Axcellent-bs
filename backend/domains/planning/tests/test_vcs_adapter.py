@@ -21,8 +21,9 @@ import httpx
 import pytest
 
 from planning_agent import vcs, vcs_bridge
-from planning_agent.domain.service import PlanningService
+from planning_agent.domain.service import DevService, PlanningService
 from planning_agent.runtime import set_service
+from planning_agent.testing import plan
 from planning_agent.vcs import CheckRun, MockVcsAdapter, VcsError, parse_trace
 from planning_agent.vcs.github import GithubVcsAdapter, added_lines
 
@@ -744,8 +745,8 @@ def test_get_vcs_bad_config(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _req12_to_prs(service: PlanningService) -> None:
-    run(service.answer_question("SPEC-7", "품절 상품도 남겨 두고 품절 표시해 주세요"))
-    run(service.confirm_spec("SPEC-7"))
+    plan(service, "answer_question", "SPEC-7", "품절 상품도 남겨 두고 품절 표시해 주세요")
+    plan(service, "confirm_spec", "SPEC-7")
     run(service.generate_prs("SPEC-7"))
 
 
@@ -820,7 +821,7 @@ def test_domain_bad_config_fails_closed(service: PlanningService, monkeypatch) -
 def test_domain_mock_kind_unchanged(monkeypatch) -> None:
     """목 설정이면 부품을 부르지 않고 상태가 지금과 똑같다."""
     monkeypatch.delenv("PLANNING_VCS_KIND", raising=False)
-    a, b = PlanningService(), PlanningService()
+    a, b = DevService(), DevService()
     for svc in (a, b):
         set_service(svc)
         _req12_to_prs(svc)
@@ -856,7 +857,7 @@ def test_domain_simple_request_opens_and_merges(service: PlanningService) -> Non
     """간단 요청 자동 처리 경로도 관문 뒤에 부품으로 올리고 병합한다."""
     adapter = MockVcsAdapter(first_number=700)
     vcs.set_vcs(adapter)
-    run(service.inbound("support_simple"))
+    plan(service, "inbound", "support_simple")
     auto = [p for p in service.state.prs if p.auto]
     assert auto and auto[-1].vcs_number == 700 and auto[-1].merged
     assert adapter.writes == [("open_change", 700), ("merge_change", 700)]
@@ -868,7 +869,7 @@ def test_domain_simple_request_merge_failure_waits(service: PlanningService) -> 
             raise VcsError("conflict", "merge conflict")
 
     vcs.set_vcs(BrokenMerge())
-    run(service.inbound("support_simple"))
+    plan(service, "inbound", "support_simple")
     pr = [p for p in service.state.prs if p.auto][-1]
     task = next(t for t in service.state.tasks if t.id == pr.task)
     assert not pr.merged and task.state == "머지 대기"

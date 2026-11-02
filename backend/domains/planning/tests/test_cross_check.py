@@ -14,7 +14,7 @@ import pytest
 from ax_contracts.schemas import AgentRequest, AgentResult, ExecuteDecision, TaskStatus
 from planning_agent.cross_check import CrossChecker, components_of
 from planning_agent.domain.autocheck import WAIT_CROSS_CHECK, WAIT_HUMAN
-from planning_agent.domain.service import PlanningService
+from planning_agent.domain.service import DevService, PlanningService
 
 pytestmark = pytest.mark.role("dev")  # 분리 3단계: 개발 서비스 역할로 돈다
 
@@ -89,7 +89,7 @@ class Agents:
 
 def _service(agents: Agents | None, gate: Gate, timeout: float = 30.0) -> PlanningService:
     checker = CrossChecker(caller=agents, timeout=timeout) if agents else None
-    return PlanningService(gate=gate, cross_checker=checker)
+    return DevService(gate=gate, cross_checker=checker)
 
 
 def _linked_pr(svc: PlanningService, recent: bool = False):

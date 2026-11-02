@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from ax_agent_template.llm import LLMSettings
 from planning_agent import coder, repo_routing, vcs, work_queue
 from planning_agent.domain.clock import kst
-from planning_agent.domain.service import ActionError, PlanningService
+from planning_agent.domain.service import ActionError, DevService, PlanningService
 from planning_agent.main import app
 from planning_agent.runtime import set_service
 from planning_agent.vcs import MockVcsAdapter
@@ -45,7 +45,7 @@ def clock() -> Clock:
 
 @pytest.fixture
 def svc(clock: Clock) -> PlanningService:
-    return set_service(PlanningService(clock=clock))
+    return set_service(DevService(clock=clock))
 
 
 @pytest.fixture

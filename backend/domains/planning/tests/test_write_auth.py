@@ -50,7 +50,13 @@ def test_human_actions_need_human_token(client, headers, status) -> None:
     assert res.status_code == status
 
 
-@pytest.mark.parametrize("path", ["/dev-tasks/T-999/retry", "/requests/REQ-999/reject"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("/dev-tasks/T-999/retry", marks=pytest.mark.role("dev")),
+        "/requests/REQ-999/reject",
+    ],
+)
 def test_other_human_decisions_reject_agent(client, path) -> None:
     assert client.post(f"{BASE}{path}", json={}, headers=NONE).status_code == 401
     assert client.post(f"{BASE}{path}", json={}, headers=AGENT).status_code == 403
@@ -75,6 +81,7 @@ def test_vcs_writes_need_admin_token(client, headers, status) -> None:
     assert client.post(f"{BASE}/vcs/test", headers=headers).status_code == status
 
 
+@pytest.mark.role("dev")  # 자동 처리 범위의 주인은 개발 서비스
 @pytest.mark.parametrize(("headers", "status"), [(HUMAN, 403), (AGENT, 403), (ADMIN, 200)])
 def test_auto_policy_change_needs_admin_token(client, headers, status) -> None:
     res = client.post(f"{BASE}/actions", json={"type": "rejectPromotion"}, headers=headers)
