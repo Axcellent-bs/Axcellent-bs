@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Chip, useToast, type ChipTone } from '@dejafix/common-frontend'
 import type { ChatMessage, ChatStatus, ChatThread, CodingMode, CodingStatus, State as S, Task } from '@/lib/planningData'
-import { DEV_API, PlanningApiError, chatApi, vcsApi, type VcsConnection } from '@/lib/planning'
+import { DEV_API, PlanningApiError, chatApi, codingSettingsApi, vcsApi, type CodingSettings, type VcsConnection } from '@/lib/planning'
 import { CODING_LABEL, CancelButton, ResumeButton, codingState, isRunning } from '@/components/dev/coding'
 import { State } from '@/components/planning-common/parts'
 import { go, toPath } from '@/components/planning-common/links'
@@ -79,9 +79,13 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
   const [pending, setPending] = useState<string | null>(null) // 보낸 글 (답 기다리는 중)
   const [pick, setPick] = useState<CodingMode>(readMode)
   const [err, setErr] = useState<Err | null>(null)
+  const [setting, setSetting] = useState<CodingSettings | null>(null) // 본인 Claude 연결·서버 AI 체험 한도
   const box = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
 
+  useEffect(() => {
+    codingSettingsApi(DEV_API).get().then(setSetting).catch(() => setSetting(null))
+  }, [])
   useEffect(() => {
     vcsApi(DEV_API).list().then((c) => {
       setConns(c)
@@ -111,7 +115,10 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
 
   const repo = cur?.connection ?? conn
   // 작업을 띄운 대화는 그 대화의 모드 그대로, 새 대화는 고른 모드 (이 브라우저에 기억)
-  const mode: CodingMode = cur?.taskId ? cur.mode ?? 'agent' : pick
+  // 내 Claude는 본인 Claude(MCP)를 연결한 개발자가 있어야 가져간다. 없으면 고를 수 없고 서버 AI로 둔다
+  const noClaude = !!setting && setting.agents_connected.length === 0
+  const trialOut = !!setting && setting.trial_used >= setting.trial_limit
+  const mode: CodingMode = cur?.taskId ? cur.mode ?? 'agent' : noClaude && pick === 'subscription' ? 'agent' : trialOut && !noClaude ? 'subscription' : pick
   const choose = (m: CodingMode) => {
     setPick(m)
     try { localStorage.setItem(MODE_KEY, m) } catch { /* 저장이 막혀도 이번 화면에서는 바뀐다 */ }
@@ -195,8 +202,8 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
           placeholder={cur ? '답장' : '무엇을 바꿀까요'} aria-label="메시지" disabled={!!pending || !connected} />
         <div className="sl-composer-bar">
           <div className="seg-toggle" role="group" aria-label="누가 코딩하나" title={cur?.taskId ? '작업을 띄운 대화는 바꿀 수 없어요' : '서버 AI는 회사 토큰, 내 Claude는 내 구독으로 코딩해요'}>
-            <button type="button" aria-pressed={mode === 'agent'} onClick={() => choose('agent')} disabled={!!pending || !!cur?.taskId}>서버 AI</button>
-            <button type="button" aria-pressed={mode === 'subscription'} onClick={() => choose('subscription')} disabled={!!pending || !!cur?.taskId}>내 Claude</button>
+            <button type="button" aria-pressed={mode === 'agent'} onClick={() => choose('agent')} disabled={!!pending || !!cur?.taskId || (trialOut && !noClaude)} title={trialOut ? `서버 AI 체험 한도 다 씀 (${setting!.trial_used.toLocaleString()}/${setting!.trial_limit.toLocaleString()} 토큰)` : undefined}>서버 AI</button>
+            <button type="button" aria-pressed={mode === 'subscription'} onClick={() => choose('subscription')} disabled={!!pending || !!cur?.taskId || noClaude} title={noClaude ? '연결된 본인 Claude 없음 (개발 도구 연결 → MCP)' : undefined}>내 Claude</button>
           </div>
           <button type="button" className="send" onClick={() => void send()} disabled={!!pending || !connected || !draft.trim()} aria-label="보내기">↑</button>
         </div>
