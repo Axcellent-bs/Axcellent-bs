@@ -508,6 +508,9 @@ button.chip { cursor: pointer; font: inherit; }
 .rp-views a { padding: 5px 12px; font-size: 13px; font-weight: 600; border-radius: var(--radius-sm); color: var(--text-2); text-decoration: none; }
 .rp-views a.on { background: var(--surface); box-shadow: var(--shadow-sm); color: var(--text); }
 .rp-repo { font-size: 12.5px; color: var(--text-3); }
+/* 레포 선택: 보기 탭 줄 오른쪽 끝, 탭 글자와 같은 글꼴 */
+.rp-bar > .rp-pick, .rp-bar > .rp-repo { margin-left: auto; }
+.rp-bar > .rp-pick { font-family: inherit; font-size: 13px; font-weight: 600; color: var(--text); }
 .rp-row:focus-visible, .rp-tabs button:focus-visible, .rp-views a:focus-visible, .rp-file-h:focus-visible, .rp-tree button:focus-visible, .rp-menu button:focus-visible, .rp-back:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 
 /* 상태 표시: 열림 초록 · 머지 파랑 · 닫힘 빨강 */

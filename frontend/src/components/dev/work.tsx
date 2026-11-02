@@ -116,7 +116,7 @@ export function Work({ s, d, item, repo }: P & { item?: string; repo?: string })
       href: p ? toPath(`work/prs/${prSlug(p.id)}`) : t.coding ? toPath(`work/prs/${encodeURIComponent(t.id)}`) : toPath(`work/specs/${t.spec}/${t.para}`),
       on: taskOnly ? t.id === taskOnly.id : !!p && p.id === sel?.id,
       title: t.title,
-      meta: <>{t.id}{p ? ` · ${prName(p)}` : ''} <State v={p?.target?.status === 'proposed' ? '레포 승인 대기' : xr ? waitLabel(xr) : coding ?? t.state} live={!!coding && !!t.coding && isRunning(t.coding.status)} /> <OriginTag s={s} t={t} /></>,
+      meta: <>{t.id}{p ? ` · ${prName(p)}` : ''}{p?.target && p.vcsNumber == null ? ` · ${p.target.repo.split('/').pop()}` : ''} <State v={p?.target?.status === 'proposed' ? '레포 승인 대기' : xr ? waitLabel(xr) : coding ?? t.state} live={!!coding && !!t.coding && isRunning(t.coding.status)} /> <OriginTag s={s} t={t} /></>,
     }
   }
   const list = <ListPane empty="작업 없음" groups={(['진행 중', '교차검증·사람 확인', '완료'] as const).map((label, i) => ({ label, rows: tasks.filter((t) => groupOf(t.id, t.state) === i).map(row) }))} />

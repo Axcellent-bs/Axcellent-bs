@@ -129,7 +129,13 @@ export function PrsTab({ s, d, parts }: { s: S; d: Dispatch<Action>; parts: stri
   // 작업 목록 레포 거르기 (레포 여럿일 때, ''이면 전체). 레포 PR 화면 선택과 따로 기억한다
   const [workRepo, setWorkRepoState] = useState(() => { try { return localStorage.getItem(WORK_REPO_KEY) ?? '' } catch { return '' } })
   const setWorkRepo = (x: string) => { setWorkRepoState(x); try { localStorage.setItem(WORK_REPO_KEY, x) } catch { /* 이번 화면만 */ } }
-  const shownRepo = conns.some((c) => c.id === workRepo) ? workRepo : ''
+  // 작업 목록 레포: 연결 목록. 상태의 PR 대상 레포가 연결에 없으면(예시 데이터) 상태에 나온 레포로
+  const stateRepos = [...new Map(s.prs.filter((p) => p.target).map((p) => [p.target!.connectionId, { id: p.target!.connectionId, repo: p.target!.repo }])).values()]
+  const workRepos = stateRepos.some((r) => !conns.some((c) => c.id === r.id)) ? stateRepos : conns.map((c) => ({ id: c.id, repo: c.repo }))
+  const shownRepo = workRepos.some((c) => c.id === workRepo) ? workRepo : ''
+  // 예시 데이터: 레포 PR·이슈·브랜치·그래프도 예시 레포로 고른다 (실제 형상관리는 읽지 않는다)
+  const exampleRepos = stateRepos.some((r) => !conns.some((c) => c.id === r.id))
+  const exRepo = shownRepo || workRepos[0]?.id || ''
   return (
     <>
       <div className="rp-bar">
@@ -140,27 +146,80 @@ export function PrsTab({ s, d, parts }: { s: S; d: Dispatch<Action>; parts: stri
           <a href={toPath('work/prs/branches')} className={mode === 'branches' ? 'on' : ''} aria-current={mode === 'branches' ? 'page' : undefined}>브랜치</a>
           <a href={graphHref()} className={mode === 'graph' ? 'on' : ''} aria-current={mode === 'graph' ? 'page' : undefined}>커밋 그래프</a>
         </nav>
-        {mode !== 'work' && conns.length > 1 && (
-          <select className="select mono" value={conn} onChange={(e) => setConn(e.target.value)} aria-label="레포">
+        {mode !== 'work' && exampleRepos && workRepos.length > 1 && (
+          <select className="select rp-pick" value={exRepo} onChange={(e) => setWorkRepo(e.target.value)} aria-label="레포">
+            {workRepos.map((c) => <option key={c.id} value={c.id}>{c.repo || c.id}</option>)}
+          </select>
+        )}
+        {mode !== 'work' && !exampleRepos && conns.length > 1 && (
+          <select className="select rp-pick" value={conn} onChange={(e) => setConn(e.target.value)} aria-label="레포">
             {conns.map((c) => <option key={c.id} value={c.id}>{c.repo || c.id}</option>)}
           </select>
         )}
-        {mode === 'work' && conns.length > 1 && (
-          <select className="select mono" value={shownRepo} onChange={(e) => setWorkRepo(e.target.value)} aria-label="레포">
+        {mode === 'work' && workRepos.length > 1 && (
+          <select className="select rp-pick" value={shownRepo} onChange={(e) => setWorkRepo(e.target.value)} aria-label="레포">
             <option value="">전체 레포</option>
-            {conns.map((c) => <option key={c.id} value={c.id}>{c.repo || c.id}</option>)}
+            {workRepos.map((c) => <option key={c.id} value={c.id}>{c.repo || c.id}</option>)}
           </select>
         )}
-        {mode !== 'work' && conns.length === 1 && repo && <code className="rp-repo">{repo.repo}</code>}
+        {mode !== 'work' && !exampleRepos && conns.length === 1 && repo && <code className="rp-repo">{repo.repo}</code>}
       </div>
       {mode === 'work' && <Work s={s} d={d} item={view} repo={shownRepo || undefined} />}
+      {mode !== 'work' && exampleRepos && (mode === 'repo' ? <ExampleBoard s={s} repo={exRepo} /> : <div className="empty"><b>예시 레포 · {mode === 'issues' ? '이슈' : mode === 'branches' ? '브랜치' : '커밋'} 없음</b></div>)}
+      {!exampleRepos && <>
       {mode === 'repo' && !a && <Board key={conn} conn={conn} />}
       {mode === 'repo' && a && /^\d+$/.test(a) && <PrView key={`${conn}:${a}`} conn={conn} number={Number(a)} tab={b} />}
       {mode === 'issues' && !a && <IssueBoard key={conn} conn={conn} />}
       {mode === 'issues' && a && /^\d+$/.test(a) && <IssueView key={`${conn}:${a}`} conn={conn} number={Number(a)} />}
       {mode === 'branches' && <BranchTable key={conn} conn={conn} />}
       {mode === 'graph' && <GraphView key={conn} conn={conn} sel={a && /^[0-9A-Za-z]{4,64}$/.test(a) ? a : undefined} />}
+      </>}
     </>
+  )
+}
+
+// 예시 데이터의 레포 PR 게시판: 그 레포로 올린(올릴) PR을 상태별로. 줄을 누르면 작업 PR 상세로
+function ExampleBoard({ s, repo }: { s: S; repo: string }) {
+  const [tab, setTab] = useState<RepoPrState | 'all'>('open')
+  const items = s.prs.filter((p) => p.target?.connectionId === repo).map((p) => ({ p, state: (p.merged ? 'merged' : p.closed ? 'closed' : 'open') as RepoPrState }))
+  const count = (x: RepoPrState) => items.filter((i) => i.state === x).length
+  const rows = tab === 'all' ? items : items.filter((i) => i.state === tab)
+  const tabs: [RepoPrState | 'all', string, number][] = [['open', '열림', count('open')], ['merged', '머지', count('merged')], ['closed', '닫힘', count('closed')], ['all', '전체', items.length]]
+  return (
+    <section className="rp-board">
+      <div className="rp-board-head">
+        <div className="rp-tabs" role="tablist" aria-label="PR 상태">
+          {tabs.map(([id, label, n]) => (
+            <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>
+              {id !== 'all' && <span className={`rp-dot rp-${id}`} aria-hidden />}{label} <b>{n}</b>
+            </button>
+          ))}
+        </div>
+      </div>
+      {!rows.length ? <div className="empty"><b>PR 없음</b></div> : (
+        <ul className="rp-list">
+          {rows.map(({ p, state }) => (
+            <li key={p.id}>
+              <a href={toPath(`work/prs/${prSlug(p.id)}`)} className="rp-row">
+                <span className={`rp-icon rp-${state}`} title={STATE_LABEL[state]} aria-label={STATE_LABEL[state]} />
+                <span className="rp-main">
+                  <span className="rp-title">
+                    {p.title.replace(/^[A-Z]\d+: /, '')}
+                    <span className="grade rp-ai">AI · {p.task}</span>
+                    {p.target?.status === 'proposed' && <span className="tag">레포 승인 대기</span>}
+                  </span>
+                  <span className="rp-meta">
+                    <span className="mono">{p.id}</span>
+                    <Branches head={p.branch} base="main" />
+                    <span>{p.gate.lines}줄 · {p.gate.files}파일</span>
+                  </span>
+                </span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
