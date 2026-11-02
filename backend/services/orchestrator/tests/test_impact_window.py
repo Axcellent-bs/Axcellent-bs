@@ -62,3 +62,17 @@ def test_row_impact_window_matches_what_impact_analysis_gets() -> None:
 def test_row_has_no_impact_window_without_the_impact_step() -> None:
     view = _incident(None).view()
     assert (view["impact_from"], view["impact_to"]) == (None, None)
+
+
+def test_window_ends_at_recovery_when_it_comes_before_the_default_end() -> None:
+    inc = _incident(OPENED - timedelta(seconds=25))
+    inc.recovered_at = OPENED + timedelta(seconds=30)
+    assert _window(inc)["window_to"] == "2026-10-28T07:24:31Z"
+
+
+def test_window_ignores_a_recovery_outside_the_window() -> None:
+    inc = _incident(OPENED - timedelta(seconds=25))
+    inc.recovered_at = OPENED + timedelta(hours=1)  # 15분 뒤 끝보다 늦다
+    assert _window(inc)["window_to"] == "2026-10-28T07:39:01Z"
+    inc.recovered_at = OPENED - timedelta(minutes=5)  # 시작보다 이르다
+    assert _window(inc)["window_to"] == "2026-10-28T07:39:01Z"

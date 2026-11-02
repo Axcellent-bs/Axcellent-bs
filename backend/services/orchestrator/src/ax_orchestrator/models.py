@@ -137,9 +137,15 @@ class Incident:
         return f"ctx_inc_{uuid.uuid4().hex[:12]}"
 
     def impact_window(self) -> tuple[datetime, datetime]:
-        """영향 분석 구간. 장애 시작(since)부터, 없으면 열린 시각 앞 15분부터 뒤 15분까지."""
+        """영향 분석 구간. 장애 시작(since)부터, 없으면 열린 시각 앞 15분부터 뒤 15분까지.
+
+        복구 신호(recovered_at)가 구간 안에 있으면 거기서 끊는다. 복구 뒤 실패는 이 장애가 아니다.
+        """
         start = self.since if self.since is not None else self.opened_at - timedelta(minutes=15)
-        return start, self.opened_at + timedelta(minutes=15)
+        end = self.opened_at + timedelta(minutes=15)
+        if self.recovered_at is not None and start < self.recovered_at < end:
+            end = self.recovered_at
+        return start, end
 
     def _impact_window_view(self) -> dict[str, str | None]:
         """재무 등 다른 부서가 같은 구간으로 영향을 다시 셀 수 있게 이벤트 행에 싣는다."""
