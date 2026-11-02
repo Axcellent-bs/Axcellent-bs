@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import random
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -241,14 +242,22 @@ def test_latest_popular_does_not_create_a_missing_file(tmp_path: Path) -> None:
 # ---------------------------------------------------------------- skill
 
 
-def _calm(day: date) -> float:
-    return 50.0 * (1 + 0.05 * math.sin(day.toordinal() * 2.1))
+def _calm(day: date, phase: float = 0.0) -> float:
+    return 50.0 * (1 + 0.05 * math.sin(day.toordinal() * 2.1 + phase))
 
 
-def _points(spike: float = 1.0) -> tuple[tuple[date, float], ...]:
+def _phase(name: str) -> float:
+    """키워드마다 날짜별 흔들림 위상이 다르다 (실제 검색어처럼 서로 다른 모양).
+
+    모든 키워드가 같은 모양이면 상관이 1이라 이름 자동 묶기가 서로 다른 후보를 묶는다.
+    """
+    return random.Random(name).uniform(0.6, 2.5)
+
+
+def _points(spike: float = 1.0, phase: float = 0.0) -> tuple[tuple[date, float], ...]:
     out, day = [], START
     while day <= END:
-        v = _calm(day) * (spike if day > END - timedelta(days=3) else 1.0)
+        v = _calm(day, phase) * (spike if day > END - timedelta(days=3) else 1.0)
         out.append((day, v))
         day += timedelta(days=1)
     top = max(v for _, v in out)
@@ -268,7 +277,7 @@ class Naver:
         name = query.keyword_groups[0].group_name
         if name in self.fail:
             raise ConnectorUnavailable("UNAVAILABLE", "네이버 검색어 트렌드에 연결할 수 없다")
-        series = TrendSeries(name, (name,), _points(self.spikes.get(name, 1.0)))
+        series = TrendSeries(name, (name,), _points(self.spikes.get(name, 1.0), _phase(name)))
         return TrendResponse(query.start_date, query.end_date, query.time_unit, (series,))
 
 

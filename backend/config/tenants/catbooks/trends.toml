@@ -57,6 +57,17 @@ min_doc_ratio = 0.02     # 쌓인 인기 영상 중 이 비율 이상에 나옴
 min_categories = 3       # 서로 다른 카테고리 이 수 이상에 나옴
 min_day_ratio = 0.5      # 기록이 있는 날 중 이 비율 이상의 날에 나옴
 
+# 이름 자동 묶기: 판정한 YouTube 후보 둘이 쌓인 스냅샷에서 같은 영상에 함께 나온 적이 있고(min_shared_videos),
+# 두 이름의 네이버 일별 값(로그) 상관이 merge_corr 이상이면(둘 다 값이 있는 날 min_days 이상) 같은 대상으로 묶는다.
+# 묶음은 별칭 표와 같은 규칙으로 다시 판정한다(묶음마다 네이버 1번 더). suggest_corr 이상이면 묶음 제안만 낸다.
+# 위 [candidates.aliases] 표는 덮어쓰기용으로 남긴다(표에 있는 이름은 표대로 먼저 묶인다)
+[candidates.auto_group]
+enabled = true
+merge_corr = 0.95        # 보수적으로: 거의 같은 모양일 때만 자동 묶음
+suggest_corr = 0.8       # 이 이상이면 묶음 제안 (자동 적용 안 함)
+min_days = 28            # 상관에 쓸 날 수 하한 (trend 기준선 최소 일수와 같음)
+min_shared_videos = 1    # 같은 영상에 함께 나온 영상 수 하한
+
 # 영상 소재 추천(data content_recommend, 콘텐츠 루프 2단계): 기본 키워드 그룹(trend_scan)과 YouTube 후보
 # (trend_candidates)에서 급상승한 것만 골라 점수 순으로 추천한다. 점수 = z_weight × z + (두 소스면 two_source_bonus)
 [recommend]
