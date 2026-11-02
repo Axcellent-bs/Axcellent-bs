@@ -227,6 +227,13 @@ owner = "planning"
 requesters = ["planning"]
 base_grade = "A"
 
+# 확인 대기 기획서를 사람이 거절 (기획 기록만 바꾸고 인사에는 record_case로 따로 간다, 사람 버튼)
+[[actions]]
+action = "reject_spec"
+owner = "planning"
+requesters = ["planning"]
+base_grade = "A"
+
 [[actions]]
 action = "receive_planning_answer"
 owner = "planning"

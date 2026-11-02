@@ -1,6 +1,6 @@
 // 기획서 화면: 문서가 원본이고 문단에 작업·PR·결정이 붙는다
-import { type Dispatch } from 'react'
-import { Button, Notice } from '@dejafix/common-frontend'
+import { useState, type Dispatch } from 'react'
+import { Button, Notice, useToast } from '@dejafix/common-frontend'
 import { type Action, type Decision, type PR, type Spec, type State as S } from '@/lib/planningData'
 import { ActivityList, Sec, State, Tag, rowNav } from '@/components/planning-common/parts'
 import { Linked, Ref, go, hrefOf, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
@@ -8,6 +8,29 @@ import { CONFIRMED_BY, mergedLabel } from '@/components/planning-common/flow'
 import { RepoTag } from '@/components/planning-common/repo'
 
 interface P { s: S; d: Dispatch<Action> }
+
+// ---------------------------------------------------------------- 확인 대기 (승인 = 확정, 거절 = 이유 남기고 대기열에서 내림)
+function ReviewDecide({ d, spec, xr }: { d: Dispatch<Action>; spec: Spec; xr: NonNullable<ReturnType<typeof reviewOf>> }) {
+  const toast = useToast()
+  const [reason, setReason] = useState<string | null>(null)
+  const human = xr.lane === 'human'
+  return (
+    <Notice tone="warn">
+      <div className="xr-decide">
+        <span>{human ? `사람 확인 · 되돌릴 수 없음 ${xr.irreversible}` : `교차검증 · ${xr.routeWhy.join(', ')}`} <span className="mono muted">{xr.id}</span></span>
+        <span style={{ flex: 1 }} />
+        <Button variant="primary" onClick={() => { d({ type: 'humanDecide', review: xr.id, ok: true }); toast.show(`${spec.id} 승인`) }}>승인</Button>
+        <Button onClick={() => setReason(reason === null ? '' : null)}>거절</Button>
+      </div>
+      {reason !== null && (
+        <form className="xr-decide" onSubmit={(e) => { e.preventDefault(); if (!reason.trim()) return; d({ type: 'rejectSpec', spec: spec.id, reason: reason.trim() }); setReason(null); toast.show(`${spec.id} 거절`) }}>
+          <input className="input" style={{ flex: 1 }} autoFocus placeholder="거절 이유" value={reason} onChange={(e) => setReason(e.target.value)} />
+          <Button variant="primary" type="submit" disabled={!reason.trim()}>거절 보내기</Button>
+        </form>
+      )}
+    </Notice>
+  )
+}
 
 // ---------------------------------------------------------------- 기획 문서 (문서가 원본, 문단에 모든 것이 붙는다)
 export function Specs({ s, d, item, item2 }: P & { item?: string; item2?: string }) {
@@ -59,13 +82,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
           요청 <Ref s={s} id={spec.request} /> · <a href={toPath(`projects/${spec.request}`)}>프로젝트 보기</a> · 에이전트가 작성, 사람이 쓴 문장 {spec.humanSentences}개
         </p>
         {spec.status === '초안' && !xr && spec.question && <Notice tone="warn">빈 항목 질문이 남아 있습니다. 답이 오면 AI가 확정 조건(질문 없음·인사 경고 없음·근거 있음)을 다시 보고, 맞으면 바로 확정하고 아니면 AI 교차검증에 올립니다.</Notice>}
-        {xr && (
-          <Notice tone="warn">
-            {xr.lane === 'human'
-              ? <>되돌릴 수 없는 일({xr.irreversible})이라 AI가 정하지 않습니다. <a href={toPath(`work/reviews/${xr.id}`)}>사람 확인 대기열 {xr.id}</a>에서 팀장이 확인합니다.</>
-              : <>자동 확정 조건에 맞지 않아({xr.routeWhy.join(', ')}) <a href={toPath(`work/reviews/${xr.id}`)}>AI 교차검증 {xr.id}</a>에 올라가 있습니다. 판단은 {xr.verifier}가 합니다.</>}
-          </Notice>
-        )}
+        {xr && <ReviewDecide d={d} spec={spec} xr={xr} />}
         <h3 className="sec">문제</h3><p>{spec.problem}</p>
         <h3 className="sec">목표</h3><p>{spec.goal}</p>
         <h3 className="sec">요구사항</h3>

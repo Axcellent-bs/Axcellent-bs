@@ -19,7 +19,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Literal, get_args
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ax_agent_template.services import BY_ID as SERVICE_BY_ID
 from ax_agent_template.services import department_of
@@ -205,6 +205,12 @@ def _hr_state(hr: HrRecordResult | None) -> str | None:
     return "held" if reason.startswith(("input-required", "held")) else "failed"
 
 
+class RejectSpecParams(SpecParams):
+    """확인 대기 기획서 거절. 이유가 있어야 인사에 기각 기록으로 남긴다."""
+
+    reason: str = Field(min_length=1)
+
+
 class PlanningService(PlanningCore):
     """기획 서비스 (planning, 8101): 요청 접수·기획서 초안·확정·인사 연동·되묻기·소통·문서.
 
@@ -212,7 +218,12 @@ class PlanningService(PlanningCore):
 
     ROLE = "planning"
     # 기획 전용 사람 버튼: 같은 요청으로 묶인 것을 사람이 풀어 따로 기획한다
-    ACTIONS = {**PLANNING_ACTIONS, "unlink_duplicate": ("_unlink_duplicate", RequestParams)}
+    # 확인 대기 기획서를 사람이 거절한다 (승인은 기존 confirm_spec)
+    ACTIONS = {
+        **PLANNING_ACTIONS,
+        "unlink_duplicate": ("_unlink_duplicate", RequestParams),
+        "reject_spec": ("_reject_spec", RejectSpecParams),
+    }
 
     def __init__(
         self,
@@ -1527,7 +1538,8 @@ class PlanningService(PlanningCore):
         r = next((x for x in s.requests if x.id == request), None)
         record = self._rejection_record(
             r.context_id if r else f"req:{request}",
-            f"[기각한 안] {r.title if r else request}",
+            # 인사가 카드 제목에 "[기각한 안]"을 붙이므로 요약에는 붙이지 않는다 (11/2 준하 님)
+            r.title if r else request,
             decision_reason,
             alternatives_considered,
             [f"req:{request}"],
@@ -1597,7 +1609,7 @@ class PlanningService(PlanningCore):
         ctx = req.context_id if req else f"spec:{spec}"
         record = self._rejection_record(
             ctx,
-            f"[기각한 안] {text.strip()}",
+            text.strip(),
             decision_reason,
             alternatives_considered,
             [f"spec:{spec}"],
@@ -1621,6 +1633,28 @@ class PlanningService(PlanningCore):
             )
         )
         return ActionResult(output={"decision_id": dec_id, "record_kind": "decision_rejected"})
+
+    async def _reject_spec(self, s: State, spec: str, reason: str) -> ActionResult | None:
+        """사람 버튼 "거절": 확인 대기(교차검증·사람 확인) 기획서를 확정하지 않는다.
+
+        기획서는 초안으로 남기고 대기열에서 내린다. 거절한 기획서는 결정 이력에 남기고 인사에
+        기각 기록(decision_rejected)으로 보낸다. 확정된 기획서·대기열에 없는 기획서는 바꾸지 않는다.
+        """
+        sp = next((x for x in s.specs if x.id == spec), None)
+        if sp is None:
+            raise ActionError("NOT_FOUND", f"기획서 {spec}가 없습니다")
+        if sp.status == "확정" or sp.auto_review is None:
+            return None
+        # 검토한 대안은 "이대로 확정"이다 (인사 기각 기록에 대안이 꼭 있어야 한다)
+        res = await self._reject_decision(s, sp.id, sp.title, reason, ["이대로 확정"])
+        sp.auto_review = None
+        req = self._request_of_spec(s, sp)
+        ctx = req.context_id if req else f"spec:{sp.id}"
+        text = f"{sp.id} 기획서 거절 · {reason.strip()}"
+        s.activity.append(
+            self._act(self.clock(), ctx, "human", "planning", "reject_spec", "사람", text)
+        )
+        return ActionResult(output={"spec": sp.id, **(res.output if res else {})})
 
     # ---- 소통
 
