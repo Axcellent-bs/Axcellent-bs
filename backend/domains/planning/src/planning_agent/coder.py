@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, Field
 
 from ax_agent_template.llm import LLMClient, LLMSettings
+from ax_workflow.core import GateRefused
 from planning_agent import vcs_bridge
 from planning_agent.domain.models import CodingFile
 from planning_agent.vcs.base import VcsAdapter, VcsError, check_path
@@ -738,8 +739,6 @@ async def _wait_turn(svc: PlanningService, job: Job, paths: list[str]) -> bool:
 
 async def run(svc: PlanningService, job: Job) -> None:
     """코딩 작업 하나를 끝까지 돌린다. 어떤 실패든 상태에 한 줄로 남기고 멈춘다."""
-    from planning_agent.domain.service import GateRefused
-
     task = next((t for t in svc.state.tasks if t.id == job.task_id), None)
     cr = task.coding if task else None
     meter = Meter(cr.llm_calls, cr.llm_tokens) if cr else Meter()

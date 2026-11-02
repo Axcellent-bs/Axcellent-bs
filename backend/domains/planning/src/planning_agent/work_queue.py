@@ -27,6 +27,7 @@ import re
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from ax_workflow.core import ActionError, GateRefused
 from planning_agent import coder, vcs, vcs_bridge
 from planning_agent.domain.autocheck import WAIT_HUMAN, pr_check
 from planning_agent.domain.models import PR, CodingFile, CodingRun, PrGate, State, Task
@@ -54,8 +55,6 @@ def lease_minutes() -> int:
 
 
 def _error(code: str, message: str) -> Exception:
-    from planning_agent.domain.service import ActionError
-
     return ActionError(code, message)
 
 
@@ -211,8 +210,6 @@ async def report_pr(
 
     PR 표시 id·관문(`generate_pr` B)·대상 레포는 서버 에이전트 PR(`coding_open`)과 같은 모양이라
     PR 게시판·사람 머지·`sync_prs`가 그대로 다룬다."""
-    from planning_agent.domain.service import GateRefused, _pr_size_params
-
     x, cr = _task(svc.state, task_id)
     _mine(cr, who)
     if any(p.vcs_number == number and _same_conn(p, cr.connection) for p in svc.state.prs):
@@ -255,7 +252,7 @@ async def report_pr(
         try:
             await svc._execute(
                 "generate_pr", ctx, f"{pr_id}:sub{number}", gen_text,
-                _pr_size_params(lines, files, paths, x.id),
+                vcs_bridge.pr_size_params(lines, files, paths, x.id),
             )  # fmt: skip
         except GateRefused as exc:
             refused = exc.decision

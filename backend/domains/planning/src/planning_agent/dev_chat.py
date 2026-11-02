@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
+from ax_workflow.core import ActionError, GateRefused
 from planning_agent import coder, vcs, vcs_bridge
 from planning_agent.domain.models import ChatPlan, ChatThread
 
@@ -288,8 +289,6 @@ async def turn(
     `mode`는 작업을 누가 코딩하나 (agent 서버 AI · subscription 본인 Claude). 주면 대화에 남긴다.
 
     오류(입력·없음·설정)는 `ActionError`. LLM·작업 띄우기 오류는 대화에 답으로 남긴다."""
-    from planning_agent.domain.service import ActionError
-
     llm = get_llm()
     if llm is None:
         raise ActionError(
@@ -423,8 +422,6 @@ async def _start(
     mode: str = "agent",
 ) -> ChatThread:
     """계획으로 코딩 작업을 띄우고 대화에 남긴다. 구독형이면 대기열에 올리기만 한다."""
-    from planning_agent.domain.service import ActionError, GateRefused
-
     try:
         result = await svc.create_dev_task(
             title=plan.title,
@@ -529,8 +526,6 @@ def coder_running(status: str) -> bool:
 
 async def _revise(svc: PlanningService, th: ChatThread, text: str) -> ChatThread:
     """사람 확인을 기다리는 PR에 이어 말한 것을 수정 지시로 보낸다 (같은 PR에 커밋)."""
-    from planning_agent.domain.service import ActionError, GateRefused
-
     assert th.task_id is not None
     try:
         await svc.revise_dev_task(th.task_id, text)
