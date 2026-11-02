@@ -489,3 +489,70 @@ class MetricCatalog(AxModel):
         if len(ids) != len(set(ids)):
             raise ValueError("metric id가 겹친다")
         return self
+
+
+# --------------------------------------------------------------- trend_scan (검색어 급상승)
+# 외부 검색 트렌드(네이버 검색어 트렌드)에서 키워드 그룹별 급상승을 판정한다.
+# 네이버 값은 검색 건수가 아니라 "그 요청 안의 최댓값 = 100"인 상대값이고, 요청이 다르면 배수가
+# 달라진다. 그래서 기준선과 판정 구간은 한 요청으로 받은 값끼리만 비교하고, 출력도 건수가 아니라
+# 기준선 대비 배수로 낸다.
+
+TrendTimeUnit = Literal["date", "week", "month"]  # 네이버가 받는 단위 (가장 작은 단위 = 하루)
+TrendStatus = Literal["rising", "normal", "unknown"]
+
+
+class TrendKeywordGroup(AxModel):
+    group_name: str = Field(min_length=1)  # 결과에서 이 그룹을 부르는 이름
+    keywords: list[str] = Field(min_length=1, max_length=20)  # 같이 셀 검색어 (네이버 최대 20개)
+
+
+class TrendScanInput(AxModel):
+    keyword_groups: list[TrendKeywordGroup] = Field(min_length=1, max_length=5)  # 네이버 최대 5개
+    start_date: dt.date  # 기준선 시작 (한국 날짜)
+    end_date: dt.date  # 판정할 마지막 날 (한국 날짜, 네이버는 하루 늦게 채워진다)
+    time_unit: TrendTimeUnit = "date"
+
+    @model_validator(mode="after")
+    def _range(self) -> Self:
+        if self.end_date < self.start_date:
+            raise ValueError("end_date가 start_date보다 앞이다")
+        names = [g.group_name for g in self.keyword_groups]
+        if len(names) != len(set(names)):
+            raise ValueError("group_name이 겹친다")
+        return self
+
+
+class TrendEvidence(AxModel):
+    """판정 근거 숫자. 모두 같은 요청 안의 상대값(최댓값 100)이다."""
+
+    latest_period: dt.date | None = None  # 판정한 마지막 시점
+    latest_value: float | None = Field(default=None, ge=0)  # 그 시점 값
+    baseline_value: float | None = Field(default=None, ge=0)  # 기준선 (판정 구간 전 값의 중앙값)
+    baseline_points: int = Field(default=0, ge=0)  # 기준선에 쓴 시점 수
+    spread: float | None = Field(default=None, ge=0)  # 평소 흔들림 (log 값의 중앙 절대 편차)
+    score: float | None = None  # 평소 흔들림의 몇 배만큼 벗어났는지 (강건 z)
+
+
+class TrendVerdict(AxModel):
+    group_name: str
+    status: TrendStatus
+    ratio: float | None = Field(default=None, ge=0)  # 기준선 대비 배수 (판정 못 하면 None)
+    evidence: TrendEvidence = Field(default_factory=TrendEvidence)
+    unknown_reason: str | None = None  # status가 unknown이면 이유 (예: 자료 없음, 기준선 0)
+
+    @model_validator(mode="after")
+    def _reason_when_unknown(self) -> Self:
+        if self.status == "unknown" and not self.unknown_reason:
+            raise ValueError("unknown이면 unknown_reason이 있어야 한다")
+        if self.status != "unknown" and self.ratio is None:
+            raise ValueError("판정했으면 ratio가 있어야 한다")
+        return self
+
+
+class TrendScanOutput(AxModel):
+    start_date: dt.date
+    end_date: dt.date
+    time_unit: TrendTimeUnit
+    source: str  # 자료 출처 (예: naver_datalab)
+    value_kind: Literal["relative"] = "relative"  # 검색 건수가 아니라 요청 안 상대값
+    results: list[TrendVerdict] = Field(default_factory=list)  # 입력 그룹 순서

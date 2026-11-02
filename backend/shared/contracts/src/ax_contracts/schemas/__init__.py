@@ -28,6 +28,13 @@ from ax_contracts.schemas.data import (
     MetricVerdict,
     RootCauseInput,
     RootCauseOutput,
+    TrendEvidence,
+    TrendKeywordGroup,
+    TrendScanInput,
+    TrendScanOutput,
+    TrendStatus,
+    TrendTimeUnit,
+    TrendVerdict,
 )
 from ax_contracts.schemas.escalation import (
     Escalation,
@@ -417,4 +424,11 @@ __all__ = [
     "ListOpenQuestionsOutput",
     "OnboardingView",
     "UpdateOnboardingStepInput",
+    "TrendEvidence",
+    "TrendKeywordGroup",
+    "TrendScanInput",
+    "TrendScanOutput",
+    "TrendStatus",
+    "TrendTimeUnit",
+    "TrendVerdict",
 ]
