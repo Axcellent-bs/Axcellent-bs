@@ -6,7 +6,7 @@ import { codeOf, traceOf, type CodeLine } from '@/components/dev/trace'
 import { DiffFiles } from '@/components/dev/diff'
 import { DEV_API, repoApi, type RepoFile } from '@/lib/planning'
 import { State, Tag } from '@/components/planning-common/parts'
-import { Linked, Ref, convoHref, hrefOf, prFromSlug, prName, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
+import { Linked, Ref, convoHref, hrefOf, prFromSlug, prName, prSlug, repoPrHref, reviewOf, toPath } from '@/components/planning-common/links'
 import { Flow, Head, Layout, ListPane, Pairs, Side, Step, mergedLabel } from '@/components/planning-common/flow'
 import { RepoTargetBlock } from '@/components/planning-common/repo'
 import { CodingLabel, CodingStep, OriginTag, RelatedTags, codingState, isRunning } from '@/components/dev/coding'
@@ -51,7 +51,7 @@ function Changes({ s, pr }: { s: S; pr: PR }) {
     repoApi(DEV_API, conn).pr(n).then((x) => alive && setFiles(x.diff.files)).catch(() => alive && setErr(true))
     return () => { alive = false }
   }, [conn, n])
-  const repoLink = n != null ? <a href={toPath(`work/prs/repo/${n}/files`)} className="plain-link small">레포 PR #{n} 변경 파일</a> : null
+  const repoLink = n != null ? <a href={repoPrHref(n, conn, 'files')} className="plain-link small">{prName(pr)} 변경 파일</a> : null
   if (err) return <p className="muted small">레포 diff를 읽지 못했어요 {repoLink}</p>
   if (!files) return <p className="muted small">읽는 중</p>
   return (
@@ -143,7 +143,7 @@ export function Work({ s, d, item }: P & { item?: string }) {
   return (
     <Layout
       list={list}
-      head={<Head kicker={<>{sel.vcsNumber != null ? <a href={toPath(`work/prs/repo/${sel.vcsNumber}`)} className="plain-link">{prName(sel)}</a> : sel.id} · {task?.id} · <span className="mono">{sel.branch}</span>{task && <> · <OriginTag s={s} t={task} /></>}<RelatedTags s={s} t={task} /></>} title={sel.title.replace(/^[A-Z]\d+: /, '')} side={<State v={sel.merged ? '완료' : xr ? waitLabel(xr) : last === '불일치' || rejected ? '불일치' : '머지 대기'} />} />}
+      head={<Head kicker={<>{sel.vcsNumber != null ? <a href={repoPrHref(sel.vcsNumber, sel.target?.connectionId)} className="plain-link">{prName(sel)}</a> : sel.id} · {task?.id} · <span className="mono">{sel.branch}</span>{task && <> · <OriginTag s={s} t={task} /></>}<RelatedTags s={s} t={task} /></>} title={sel.title.replace(/^[A-Z]\d+: /, '')} side={<State v={sel.merged ? '완료' : xr ? waitLabel(xr) : last === '불일치' || rejected ? '불일치' : '머지 대기'} />} />}
       side={
         <Side title="근거 체인" sum={`${chain.length}단계`}>
           {chain.map((x, i) => <p key={i} className="pside-msg"><b>{x.kind}</b> {x.href ? <a href={x.kind === '문단' && spec && para ? toPath(`work/specs/${spec.id}/${para.id}`) : toPath(x.href)} className="plain-link">{x.title}</a> : x.title}</p>)}

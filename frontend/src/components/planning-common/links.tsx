@@ -25,6 +25,9 @@ export function prName(p: Pick<PR, 'id' | 'vcsNumber' | 'target' | 'url'>): stri
   const repo = p.target?.repo.split('/').pop() ?? repoOfUrl(p.url)
   return repo ? `${repo} #${p.vcsNumber}` : `#${p.vcsNumber}`
 }
+// 레포 PR 화면 주소. 레포가 여럿이면 그 PR이 열린 연결(?repo=)로 연다 (안 주면 마지막에 고른 레포)
+export const repoPrHref = (n: number, conn?: string | null, sub?: string) =>
+  toPath(`work/prs/repo/${n}${sub ? `/${sub}` : ''}`) + (conn ? `?repo=${encodeURIComponent(conn)}` : '')
 export const prNameOf = (s: State, id: string) => { const p = s.prs.find((x) => x.id === id); return p ? prName(p) : id }
 
 // 지금 열린 화면(/planning 또는 /dev)과 그 화면의 이동 함수. Planning 페이지가 그릴 때 정한다
