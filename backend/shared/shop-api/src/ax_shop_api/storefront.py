@@ -9,13 +9,10 @@ from __future__ import annotations
 from typing import Any
 
 from ax_shop_api.db import Db
-from ax_shop_api.service import FREE_SHIPPING_FROM, SHIPPING_FEE, ShopError
+from ax_shop_api.service import FREE_SHIPPING_FROM, SHIPPING_FEE, ShopError, use_coupon
 
 # 카테고리 코드 → 화면 표시 이름(시드의 도서·문구). 모르는 코드는 이름을 지어내지 않고 None이다
 CATEGORY_NAMES = {"book": "도서", "stationery": "문구"}
-
-# 가격 미리보기에서 값을 정할 수 없는 항목의 사유(0원으로 그리지 않고 명시한다)
-COUPON_UNRESOLVED = "쿠폰 입력·사용 규칙이 아직 정해지지 않아 계산하지 않는다(확인 필요)"
 
 
 class Storefront:
@@ -59,11 +56,18 @@ class Storefront:
         ]
 
     # --- 장바구니 가격 미리보기 ---------------------------------------------------
-    def price_cart(self, lines: list[tuple[str, int]], points_used: int = 0) -> dict[str, Any]:
+    def price_cart(
+        self,
+        lines: list[tuple[str, int]],
+        points_used: int = 0,
+        coupon_id: str | None = None,
+        coupon_units: int = 1,
+        buyer_id: str | None = None,
+    ) -> dict[str, Any]:
         """저장하지 않는 계산. 순서는 상품 합계 → 배송비 → (쿠폰) → 적립금이다.
 
-        배송비·적립금은 `create_order`와 같은 규칙이다. 쿠폰은 주문에 입력 경로가 없어
-        금액을 정하지 않고 `coupon_discount`를 null로 명시한다. 재고는 확인만 하고 차감하지 않는다.
+        배송비·쿠폰·적립금은 `create_order`와 같은 규칙이다. 쿠폰은 `coupon_id`와 `buyer_id`가
+        함께 있을 때만 검증해 할인액을 계산한다(없으면 0원). 재고·쿠폰 장수는 차감하지 않는다.
         """
         if not lines:
             raise ShopError("EMPTY_CART", "장바구니가 비어 있다")
@@ -88,7 +92,13 @@ class Storefront:
                         "line_amount": line_amount,
                     }
                 )
-        if points_used > subtotal:
+        discount = 0
+        if coupon_id:
+            if not buyer_id:
+                raise ShopError("BUYER_REQUIRED", "쿠폰을 계산하려면 buyer_id가 필요하다")
+            with self.db.tx() as conn:
+                discount = use_coupon(conn, buyer_id, coupon_id, coupon_units, subtotal)
+        if points_used > subtotal - discount:
             raise ShopError("POINTS_EXCEED_ITEMS", "포인트는 품목 합계를 넘을 수 없다")
         shipping_fee = 0 if subtotal >= FREE_SHIPPING_FROM else SHIPPING_FEE
         return {
@@ -96,8 +106,10 @@ class Storefront:
             "subtotal": subtotal,
             "shipping_fee": shipping_fee,
             "free_shipping_from": FREE_SHIPPING_FROM,
-            "coupon_discount": None,
-            "coupon_unknown_reason": COUPON_UNRESOLVED,
+            "coupon_id": coupon_id,
+            "coupon_units": coupon_units if coupon_id else 0,
+            "coupon_discount": discount,
+            "coupon_unknown_reason": None,
             "points_used": points_used,
-            "payable_amount": subtotal + shipping_fee - points_used,
+            "payable_amount": subtotal + shipping_fee - discount - points_used,
         }

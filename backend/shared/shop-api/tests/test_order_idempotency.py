@@ -50,7 +50,8 @@ def test_same_key_returns_the_first_order_and_deducts_stock_once(client: TestCli
     before = _stock(client)
     first = client.post("/api/shop/orders", json=_body("k-1"))
     again = client.post("/api/shop/orders", json=_body("k-1"))
-    assert first.status_code == again.status_code == 201
+    assert first.status_code == 201
+    assert again.status_code == 200  # 새로 만든 게 아니라 처음 주문을 돌려준다
     assert first.json()["meta"]["replayed"] is False
     assert again.json()["meta"]["replayed"] is True
     assert again.json()["data"] == first.json()["data"]

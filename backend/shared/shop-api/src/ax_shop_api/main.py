@@ -80,11 +80,17 @@ class OrderIn(BaseModel):
     points_used: int = Field(default=0, ge=0)  # 포인트 사용분(원). 품목 금액 비율로 나눠 기록한다
     # 같은 구매자의 같은 키는 주문 하나다. 재시도·중복 전송이 주문을 두 번 만들지 않게 한다
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
+    # 본인의 쿠폰 한 건과 쓸 장수. 할인은 상품 금액 범위 안이고 배송비는 제외한다
+    coupon_id: str | None = None
+    coupon_units: int = Field(default=1, ge=1)
 
 
 class CartPriceIn(BaseModel):
     items: list[OrderLine]
     points_used: int = Field(default=0, ge=0)
+    coupon_id: str | None = None
+    coupon_units: int = Field(default=1, ge=1)
+    buyer_id: str | None = None  # 쿠폰을 계산할 때만 필요하다(본인 쿠폰인지 확인한다)
 
 
 class SessionIn(BaseModel):
@@ -190,6 +196,7 @@ class CouponIn(BaseModel):
     unit_value: int = Field(gt=0)
     campaign_id: str | None = None
     context_id: str | None = None  # 사후 추적용 사건 번호(선택). 멱등 비교에는 쓰지 않는다
+    expires_at: AwareDatetime | None = None  # 이 시각부터 주문에 쓸 수 없다(없으면 무기한)
 
 
 # 브라우저(shop-web 3000, dashboard-web 3001)가 직접 부르므로 허용할 출처만 연다.
@@ -355,7 +362,11 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
     @app.post("/api/shop/cart/price")
     async def price_cart(body: CartPriceIn) -> dict:
         lines = [(i.product_id, i.qty) for i in body.items]
-        return _ok(storefront.price_cart(lines, body.points_used))
+        return _ok(
+            storefront.price_cart(
+                lines, body.points_used, body.coupon_id, body.coupon_units, body.buyer_id
+            )
+        )
 
     @app.get("/api/shop/sellers")
     async def list_sellers() -> dict:
@@ -400,13 +411,17 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
         return _ok(shop.get_order(order_id))
 
     @app.post("/api/shop/orders", status_code=201)
-    async def create_order(body: OrderIn) -> dict:
+    async def create_order(body: OrderIn, response: Response) -> dict:
         order, replayed = shop.place_order(
             body.buyer_id,
             [(i.product_id, i.qty) for i in body.items],
             body.points_used,
             body.idempotency_key,
+            body.coupon_id,
+            body.coupon_units,
         )
+        if replayed:
+            response.status_code = 200  # 새로 만든 게 아니라 처음 주문을 돌려준다
         await outbox.flush(database)
         return _ok(order, replayed=replayed)
 
@@ -498,9 +513,10 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
     async def list_coupons(
         buyer_id: str | None = None,
         purpose_code: str | None = None,
+        campaign_id: str | None = None,
         _: str = Depends(_caller(COUPON_READERS)),
     ) -> dict:
-        return _ok(promotions.list_coupons(buyer_id, purpose_code))
+        return _ok(promotions.list_coupons(buyer_id, purpose_code, campaign_id))
 
     @app.get("/api/shop/coupons/{coupon_id}")
     async def get_coupon(coupon_id: str, _: str = Depends(_caller(COUPON_READERS))) -> dict:

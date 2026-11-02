@@ -13,6 +13,8 @@ LOOKUPS = {
 }
 
 ADDED = ("idx_order_items_order_id", "idx_payments_order_id", "idx_refunds_order_id")
+# 나중에 열과 함께 붙은 인덱스(주문 멱등 키, 쿠폰별 사용 장수)
+LATER = ("idx_orders_buyer_idempotency", "idx_orders_coupon_id")
 
 
 def _plan(db: Db, sql: str) -> str:
@@ -38,7 +40,7 @@ def test_indexes_are_added_to_an_existing_db_file(tmp_path: Path) -> None:
             "INSERT INTO orders(order_id, buyer_id, status, total_amount, tenant_id, created_at,"
             " updated_at) VALUES ('ord_0001', 'buy_0001', 'paid', 12000, 't', 'x', 'x')"
         )
-        for index in (*ADDED, "idx_orders_buyer_idempotency"):
+        for index in (*ADDED, *LATER):
             conn.execute(f"DROP INDEX {index}")
     first._conn.close()
 
@@ -52,5 +54,5 @@ def test_indexes_are_added_to_an_existing_db_file(tmp_path: Path) -> None:
             r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")
         }
         count = conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
-    assert {*ADDED, "idx_orders_buyer_idempotency"} <= names
+    assert {*ADDED, *LATER} <= names
     assert count == 1

@@ -49,7 +49,7 @@ def test_cart_price_charges_shipping_below_threshold(client: TestClient) -> None
     data = client.post("/api/shop/cart/price", json=body).json()["data"]
     assert data["subtotal"] == 18000 and data["shipping_fee"] == 3000
     assert data["payable_amount"] == 21000
-    assert data["coupon_discount"] is None and data["coupon_unknown_reason"]
+    assert data["coupon_discount"] == 0 and data["coupon_unknown_reason"] is None
 
 
 def test_cart_price_matches_create_order_total(client: TestClient) -> None:
