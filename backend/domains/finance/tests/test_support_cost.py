@@ -123,3 +123,40 @@ def test_other_departments_and_bad_input_are_refused() -> None:
     )
     bad = _ask({"inquiry_id": 1, "resolution": "invented", "refund_amount": -5})
     assert (bad["status"], bad["outcome"]) == ("failed", "invalid_input")
+
+
+def test_a_refund_finished_after_closing_updates_the_same_record() -> None:
+    """문의를 닫은 뒤 환불이 끝나면 고객지원이 금액을 채워 한 번 더 보낸다 (#343)."""
+    base = {"inquiry_id": 20, "order_id": "ord_2001", "claim_id": 3}
+    first = _out(_ask(base | {"resolution": "answered"}))
+    assert (first.status, first.refund_amount, first.expense_used) == ("recorded", 0, False)
+    recorded_at = handlers.state().ledger.support_costs[20]["recorded_at"]
+
+    paid = base | {"resolution": "claim_decided", "claim_decision": "approve"}
+    again = _out(_ask(paid | {"refund_amount": 15000}))
+    assert (again.status, again.refund_amount, again.expense_used) == ("updated", 15000, True)
+    assert again.record_id == first.record_id and "환불 15,000원" in again.note
+    record = handlers.state().ledger.support_costs[20]
+    assert len(handlers.state().ledger.support_costs) == 1
+    assert record["recorded_at"] == recorded_at and record["updated_at"]
+    assert (record["resolution"], record["claim_decision"]) == ("claim_decided", "approve")
+
+
+def test_a_replay_without_new_money_changes_nothing() -> None:
+    base = {"inquiry_id": 21, "order_id": "ord_2001"}
+    _out(_ask(base | {"resolution": "claim_decided", "refund_amount": 9000}))
+    before = dict(handlers.state().ledger.support_costs[21])
+    # 닫을 때 이벤트가 늦게 다시 와도 금액을 0원으로 되돌리지 않는다
+    late = _out(_ask(base | {"resolution": "answered"}))
+    same = _out(_ask(base | {"resolution": "claim_decided", "refund_amount": 9000}))
+    assert (late.status, same.status) == ("already_recorded", "already_recorded")
+    assert late.refund_amount == 9000
+    assert handlers.state().ledger.support_costs[21] == before
+
+
+def test_a_coupon_after_closing_is_kept_with_the_refund() -> None:
+    base = {"inquiry_id": 22, "order_id": "ord_2001", "resolution": "compensated"}
+    _out(_ask(base | {"refund_amount": 5000}))
+    out = _out(_ask(base | {"coupon_id": "cpn_1"}))
+    assert (out.status, out.refund_amount, out.coupon_issued) == ("updated", 5000, True)
+    assert "환불 5,000원" in out.note and "쿠폰 지급" in out.note

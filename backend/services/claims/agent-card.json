@@ -30,6 +30,7 @@
       "grade": "read",
       "allowed_requesters": [
         "dashboard-api",
+        "finance",
         "orchestrator"
       ],
       "verifier": null,
