@@ -403,6 +403,93 @@ def test_fully_empty_past_days_are_left_out_of_the_usual_share() -> None:
     assert (out.orders.unknown_reason or "").startswith("기록 공백 의심 (36칸)")
 
 
+def _partly_off(days: tuple[int, ...], hours: int, window_off: int = 0):  # noqa: ANN202
+    """지난날 `days`가 하루씩 `hours`시간 꺼져 있고(꺼진 시각은 날마다 다름), 캠페인 구간은
+    처음 `window_off`시간 꺼져 있는 값. 로컬 실행처럼 비교할 지난날도 부분적으로 꺼진 상황."""
+
+    def value(at: datetime) -> int:
+        if at >= DAY_START:
+            return 0 if at < DAY_START + timedelta(hours=window_off) else _usual(at)
+        d = (DAY_START - at).days + 1  # at이 며칠 전 구간인지
+        off_from = DAY_START - timedelta(days=d) + timedelta(hours=2 * d)
+        if d in days and off_from <= at < off_from + timedelta(hours=hours):
+            return 0
+        return _usual(at)
+
+    return value
+
+
+def test_every_past_day_partly_off_leaves_no_usual_and_is_unknown() -> None:
+    """지난 7일이 모두 8시간씩 꺼져 있으면 평소 주문 수를 구할 정상 구간이 없다.
+
+    12시간 꺼진 오늘(144칸)을 줄었다고 하지 않고, 뺀 이유를 날마다 보여 준다.
+    """
+    value = _partly_off(tuple(range(1, 8)), 8, window_off=12)
+    out = asyncio.run(measure(_day_input(), Slots(value)))
+    assert out.orders.status == "unknown" and out.orders.direction is None
+    reason = out.orders.unknown_reason or ""
+    assert reason.startswith("기준선에 쓸 지난 구간이 없음")
+    assert reason.count("기록 공백 의심 (96칸)") == 7
+    assert "우연히 그럴 확률" in reason
+
+
+def _quiet_nights(at: datetime) -> int:
+    """새벽(UTC 15~21시)은 2시간에 한 번만 결제 → 평소에도 0칸이 23칸씩 이어진다."""
+    if 15 <= at.hour < 21:
+        return 1 if at.minute == 0 and at.hour % 2 == 0 else 0
+    return 5
+
+
+def test_a_day_gap_is_caught_when_usual_nights_have_long_quiet_runs() -> None:
+    """평소 새벽에 23칸씩 비는 가게: 낮 3시간 공백(36칸)은 2배 규칙(46칸)에 안 걸리지만
+    낮 평소 주문(5분 5건)으로는 우연일 수 없다 → 공백."""
+    gap_from, gap_to = DAY_START + timedelta(hours=2), DAY_START + timedelta(hours=5)
+    out = asyncio.run(
+        measure(_day_input(), Slots(lambda at: 0 if gap_from <= at < gap_to else _quiet_nights(at)))
+    )
+    assert out.orders.status == "unknown" and out.orders.direction is None
+    reason = out.orders.unknown_reason or ""
+    assert reason.startswith("기록 공백 의심 (")
+    assert "36칸 이어짐, 그 시간대 평소 주문으로는 우연히 그럴 확률" in reason
+    # 같은 가게의 평범한 날은 그대로 잰다 (긴 새벽 빈 칸은 평소와 같아 공백이 아님)
+    normal = asyncio.run(measure(_day_input(), Slots(_quiet_nights)))
+    assert normal.orders.status == "known" and normal.orders.direction == "none"
+
+
+def test_partly_off_past_days_are_left_out_and_a_normal_day_is_judged() -> None:
+    """부분적으로 꺼진 지난날(1·5·6일 전)끼리는 이어짐이 비슷해 2배 규칙에 안 걸리지만
+    평소 주문 수로 보면 공백 → 기준선에서 빼고, 평범한 오늘은 그대로 잰다."""
+    out = asyncio.run(measure(_day_input(), Slots(_partly_off((1, 5, 6), 8))))
+    assert out.orders.status == "known" and out.orders.direction == "none"
+    assert out.orders.baseline_days == 4
+    note = out.orders.baseline_note or ""
+    for day in ("1일 전", "5일 전", "6일 전"):
+        assert f"{day}: 기록 공백 의심 (96칸)" in note
+    assert "우연히 그럴 확률" in note
+
+
+class PaymentsOnlyToday(Slots):
+    """결제 시도 기록이 오늘 구간에만 있고 지난날은 전부 0인 커넥터."""
+
+    async def transactions_volume(self, window_from, window_to):  # noqa: ANN001, ANN201
+        return [
+            (at, v if at >= DAY_START else 0.0) for at, v in self._series(window_from, window_to)
+        ]
+
+
+def test_no_normal_past_span_for_usual_payments_is_unknown() -> None:
+    """이어진 0칸이 공백인지 보려면 그 시간대 평소 결제 시도 수가 필요하다.
+
+    없으면 판정하지 않는다.
+    """
+    gap_from, gap_to = DAY_START + timedelta(hours=10), DAY_START + timedelta(hours=13)
+    connector = PaymentsOnlyToday(lambda at: 0 if gap_from <= at < gap_to else _usual(at))
+    out = asyncio.run(measure(_day_input(), connector))
+    assert out.orders.status == "unknown" and out.orders.direction is None
+    assert (out.orders.unknown_reason or "").startswith("기록 공백인지 판단할 수 없음")
+    assert "정상 지난 구간" in (out.orders.unknown_reason or "")
+
+
 # ---------------------------------------------------------------- 요약: 같음 + 증분 = 추정
 
 

@@ -30,6 +30,7 @@ README "campaign_effect".
 
 from __future__ import annotations
 
+import math
 import os
 import tomllib
 from collections.abc import Mapping
@@ -88,6 +89,10 @@ NO_REVENUE = (
 # 3시간 공백은 6배 이상. 1시간보다 짧은 공백은 잡지 않는다
 GAP_MIN_RUN = 12  # 1시간
 GAP_RUN_FACTOR = 2.0  # 비교 구간 최장 이어짐의 2배
+# 확률 규칙(이어짐 규칙과 함께 본다): 그 시간대 평소 5분 결제 시도 수 λ(공백이 아닌 비교 구간)로
+# 12칸 이상 이어진 0칸이 우연히 나올 확률 e^(−Σλ)이 이보다 작으면 공백. 비교 구간도 부분적으로
+# 꺼져 있어 "평소 최장 이어짐"이 길어진 경우를 잡는다. 근거: README "기록 공백 기준"
+GAP_P_MAX = 1e-9
 
 
 # ---------------------------------------------------------------- 회사 시간대
@@ -188,35 +193,92 @@ def _cut(whole: Span, label: str, start: datetime, end: datetime) -> Span:
     return Span(label, start, end, orders, payments, has_points=bool(orders))
 
 
-def _gap(span: Span, others: list[Span]) -> str | None:
-    """`span`의 결제 0칸이 `others`(빈 구간 제외)보다 길게 한 덩어리로 이어지면 그 이유.
+def _hourly_lambda(spans: list[Span]) -> dict[int, float] | None:
+    """시간대(UTC 시)별 평소 5분 결제 시도 수 λ. 결제 시도 기록이 있는 구간이 없으면 None.
 
-    가장 길게 이어진 0칸이 `GAP_MIN_RUN` 이상이고 비교 구간들 중 가장 긴 이어짐의 `GAP_RUN_FACTOR`배
-    이상이면 기록 공백 의심이다. 흩어진 빈 칸(주문이 적은 가게의 실제 감소)은 잡지 않는다.
+    비교 구간은 회사 시간대 벽시계로 하루·한 주씩 옮긴 같은 시각이라 시각별로 모을 수 있다.
+    """
+    usable = [s for s in spans if not s.empty() and s.payments and any(s.payments.values())]
+    if not usable:
+        return None
+    totals: dict[int, float] = {}
+    counts: dict[int, int] = {}
+    for span in usable:
+        for b in span.slots():
+            totals[b.hour] = totals.get(b.hour, 0.0) + float((span.payments or {}).get(b) or 0)
+            counts[b.hour] = counts.get(b.hour, 0) + 1
+    return {h: totals[h] / counts[h] for h in totals}
+
+
+def _unlikely_run(span: Span, lam: dict[int, float]) -> tuple[int, float] | None:
+    """`GAP_MIN_RUN`칸 이상 이어진 0칸 중 평소라면 가장 나오기 어려운 것 (칸 수, 확률 e^(−Σλ))."""
+    if span.payments is None:
+        return None
+    best: tuple[int, float] | None = None
+    length, expected = 0, 0.0
+    for b in [*span.slots(), None]:  # 끝에 None을 붙여 마지막 이어짐도 닫는다
+        if b is not None and not span.payments.get(b):
+            length += 1
+            expected += lam.get(b.hour, 0.0)
+            continue
+        if length >= GAP_MIN_RUN and (best is None or expected > best[1]):
+            best = (length, expected)
+        length, expected = 0, 0.0
+    return None if best is None else (best[0], math.exp(-best[1]))
+
+
+def _chance(p: float) -> str:
+    return f"{p:.1e}" if p > 0 else "거의 0"
+
+
+def _gap(span: Span, others: list[Span], normal: list[Span] | None = None) -> str | None:
+    """`span`에 기록 공백이 의심되면 그 이유 (`others` = 비교 구간, 빈 구간은 쓰지 않음).
+
+    `normal`을 주면 평소 λ는 그 구간(공백이 아닌 비교 구간)으로만 구한다. 없으면 `others`.
+
+    둘 중 하나면 공백이다. 흩어진 빈 칸(주문이 적은 가게의 실제 감소)은 잡지 않는다.
+    - 이어짐: 가장 길게 이어진 0칸이 `GAP_MIN_RUN` 이상이고
+      비교 구간 최장 이어짐의 `GAP_RUN_FACTOR`배 이상
+    - 확률: `GAP_MIN_RUN`칸 이상 이어진 0칸이 그 시간대 평소 λ로 우연히 나올 확률이 `GAP_P_MAX` 미만
     """
     run = span.longest_zero_run()
     usable = [o for o in others if not o.empty() and o.longest_zero_run() is not None]
     if run is None or not usable:
         return None
+    zeros = span.zeros()
     usual = max(o.longest_zero_run() or 0 for o in usable)
     if run >= GAP_MIN_RUN and run >= GAP_RUN_FACTOR * usual:
-        zeros = span.zeros()
         return (
             f"기록 공백 의심 ({zeros}칸): 결제 시도 0인 5분 칸이 {run}칸 이어짐,"
             f" 비교 구간에서 가장 길게 이어진 것은 {usual}칸"
+        )
+    lam = _hourly_lambda(usable if normal is None else normal)
+    unlikely = _unlikely_run(span, lam) if lam else None
+    if unlikely and unlikely[1] < GAP_P_MAX:
+        return (
+            f"기록 공백 의심 ({zeros}칸): 결제 시도 0인 5분 칸이 {unlikely[0]}칸 이어짐,"
+            f" 그 시간대 평소 주문으로는 우연히 그럴 확률 {_chance(unlikely[1])}"
         )
     return None
 
 
 def _baseline(past: list[Span]) -> tuple[list[Span], list[str]]:
-    """기준선에 쓸 지난 구간과 뺀 구간의 이유. 빈 구간·기록 공백 의심(나머지와 비교)은 뺀다."""
+    """기준선에 쓸 지난 구간과 뺀 구간의 이유. 빈 구간·기록 공백 의심(나머지와 비교)은 뺀다.
+
+    두 번 본다: 먼저 나머지 지난 구간 전부와 비교해 공백 같은 구간을 찾고, 다시 판정할 때 평소 λ는
+    그런 구간을 뺀 나머지(정상 구간)로만 구한다(부분적으로 꺼진 날이 평소 λ를 낮추지 않게).
+    이어짐 규칙은 #313 그대로 나머지 지난 구간 전부와 비교한다.
+    """
+    nonempty = [s for s in past if not s.empty()]
+    suspect = {id(s) for s in nonempty if _gap(s, [o for o in nonempty if o is not s])}
     used: list[Span] = []
     dropped: list[str] = []
     for span in past:
         others = [o for o in past if o is not span]
+        normal = [o for o in others if not o.empty() and id(o) not in suspect]
         if span.empty():
             dropped.append(f"{span.label}: 주문·결제 기록이 하나도 없음")
-        elif why := _gap(span, others):
+        elif why := _gap(span, others, normal or None):
             dropped.append(f"{span.label}: {why}")
         else:
             used.append(span)
@@ -229,6 +291,12 @@ def _window_problem(window: Span, past: list[Span]) -> str | None:
         return empty_reason()  # 이상 탐지 빈 구간과 같은 문장
     if why := _gap(window, past):
         return f"{why} (자료가 빠졌을 수 있어 줄었다고 하지 않음)"
+    run = window.longest_zero_run()
+    if past and run is not None and run >= GAP_MIN_RUN and _hourly_lambda(past) is None:
+        return (
+            f"기록 공백인지 판단할 수 없음: 결제 시도 0인 5분 칸이 {run}칸 이어졌는데,"
+            " 그 시간대 평소 주문 수를 구할 정상 지난 구간(결제 시도 기록)이 없음"
+        )
     return None
 
 
