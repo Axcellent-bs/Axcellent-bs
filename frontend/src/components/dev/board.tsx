@@ -3,7 +3,7 @@
 // 멈춘 작업(사람 확인·실패·교차검증)이 먼저. 블록 통째 클릭 = 그 작업의 작업·PR 화면.
 import { DEPT_NAME, type PR, type State as S, type Task } from '@/lib/planningData'
 import { Tag, rowNav } from '@/components/planning-common/parts'
-import { prSlug, reviewOf, toPath } from '@/components/planning-common/links'
+import { prName, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
 import { duration, shortTime, toMin, type Cell } from '@/components/planning/requests'
 import { OriginTag, codingState, fromDevTeam, requestOfTask, tokens } from '@/components/dev/coding'
 
@@ -59,7 +59,7 @@ export function taskRow(s: S, t: Task): TaskRow {
   // PR·검증
   const c2: Cell = { kind: kind(2) }
   if (pr) {
-    c2.value = pr.id
+    c2.value = prName(pr)
     c2.href = xr ? toPath(`work/reviews/${xr.id}`) : toPath(`work/prs/${prSlug(pr.id)}`)
     c2.meta = pr.target?.status === 'proposed' ? '레포 승인 대기' : xr ? (xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기') : lastReview === '불일치' ? '리뷰 불일치' : pr.closed ? '닫힘' : merged ? lastReview ?? '통과' : c?.status === 'waiting_human' ? '사람 확인' : '머지 전'
     if (c2.kind === 'now' && group === 'stuck') c2.warn = true
