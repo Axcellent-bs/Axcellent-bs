@@ -556,3 +556,24 @@ class TrendScanOutput(AxModel):
     source: str  # 자료 출처 (예: naver_datalab)
     value_kind: Literal["relative"] = "relative"  # 검색 건수가 아니라 요청 안 상대값
     results: list[TrendVerdict] = Field(default_factory=list)  # 입력 그룹 순서
+
+
+class TrendScanRequest(AxModel):
+    """trend_scan skill 입력. 비우면 회사 기본 키워드 그룹·어제 날짜로 본다.
+
+    그룹마다 따로 요청한다(큰 키워드에 작은 키워드가 눌리지 않게). 기간은 정의로 정해진다:
+    판정 구간 = `end_date`까지 7일, 기준선 = 그 앞 56일.
+    """
+
+    # 없으면 회사 설정(config/tenants/<회사>/trends.toml)의 기본 그룹. 그룹마다 네이버 호출 1번
+    keyword_groups: list[TrendKeywordGroup] | None = Field(
+        default=None, min_length=1, max_length=20
+    )
+    end_date: dt.date | None = None  # 판정할 마지막 날 (한국 날짜). 없으면 어제
+
+    @model_validator(mode="after")
+    def _unique_names(self) -> Self:
+        names = [g.group_name for g in self.keyword_groups or []]
+        if len(names) != len(set(names)):
+            raise ValueError("group_name이 겹친다")
+        return self

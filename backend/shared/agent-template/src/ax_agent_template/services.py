@@ -118,6 +118,7 @@ SERVICES: tuple[Service, ...] = (
             "root_cause_hypotheses",
             "accuracy_report",
             "activity_report",
+            "trend_scan",
         ),
         "데이터 분석",
     ),

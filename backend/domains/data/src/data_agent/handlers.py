@@ -7,6 +7,8 @@
 - root_cause_hypotheses는 다른 부서에 조회만 하고(A2A) 원인 후보를 고른다(grade read).
 - fraud_score는 shop-api 판매자 정보·가격을 읽어 규칙 점수를 낸다(grade read). 승인·보류는 정하지
   않는다. 확인할 수 없는 규칙은 점수에서 빼고 `unknown_rules`로 알린다. 없는 판매자는 `not_found`다.
+- trend_scan은 네이버 검색어 트렌드를 읽어 키워드 그룹별 급상승을 판정한다(grade read). 그룹마다
+  따로 부르고, 모든 그룹에서 못 읽으면 숫자 없이 `failed`·`unavailable`이다.
 - 외부 입력(`request.untrusted`)은 읽지 않는다.
 - shop-api에서 데이터를 받지 못하면(`ShopUnavailable`) 숫자를 0으로 내지 않고 `failed`·`unavailable`
   과 "확인할 수 없음" 근거로 답한다.
@@ -30,6 +32,7 @@ from ax_contracts.schemas.data import (
     ImpactAnalysisInput,
     KpiSummaryInput,
     RootCauseInput,
+    TrendScanRequest,
 )
 from data_agent.clients.fact_sources import notices_at
 from data_agent.clients.log_client import get_log_source
@@ -39,6 +42,8 @@ from data_agent.clients.shop_client import (
     ShopUnavailable,
     shop_api,
 )
+from data_agent.connectors import ConnectorUnavailable
+from data_agent.connectors.naver_datalab import NaverDatalabConnector
 from data_agent.report_store import ReportStore, get_report_store
 from data_agent.skills.accuracy_report import eval_dir, load_report
 from data_agent.skills.activity_report import InvalidActivityInput, build_report
@@ -47,6 +52,7 @@ from data_agent.skills.fraud_score import score_fraud
 from data_agent.skills.impact_analysis import analyze_impact
 from data_agent.skills.kpi_summary import summarize_kpi
 from data_agent.skills.root_cause import estimate_root_cause
+from data_agent.skills.trend_scan import NoTrendGroups, scan_trends
 
 
 def get_llm() -> LLMClient:
@@ -298,6 +304,43 @@ async def activity_report(request: AgentRequest) -> AgentResult:
     )
 
 
+def get_trend_connector() -> NaverDatalabConnector:
+    """네이버 검색어 트렌드 커넥터. 테스트는 이 함수를 바꿔 끼운다(실제 API를 부르지 않게)."""
+    return NaverDatalabConnector(os.environ)
+
+
+async def trend_scan(request: AgentRequest) -> AgentResult:
+    """키워드 그룹별 검색어 급상승. 조회만 하고 상태를 바꾸지 않는다(grade read)."""
+    data = _parse(request, TrendScanRequest)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        result = await scan_trends(data, get_trend_connector(), get_llm(), env=os.environ)
+    except NoTrendGroups as error:
+        return _result(
+            request, TaskStatus.FAILED, outcome="invalid_input", output={"message": str(error)}
+        )
+    except ConnectorUnavailable as error:
+        message = f"확인할 수 없음: 네이버 검색어 트렌드를 읽지 못함 ({error}) [{error.code}]"
+        return _result(
+            request,
+            TaskStatus.FAILED,
+            outcome="unavailable",
+            output={"message": message, "code": error.code},
+            evidence=Evidence(
+                queries=["naver search-trend"], data_summary=message, collected_at=datetime.now(UTC)
+            ),
+        )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+        fallback=result.fallback,
+        **_fallback_reason(result),
+    )
+
+
 HANDLERS = {
     "impact_analysis": impact_analysis,
     "anomaly_detection": anomaly_detection,
@@ -306,4 +349,5 @@ HANDLERS = {
     "root_cause_hypotheses": root_cause_hypotheses,
     "accuracy_report": accuracy_report,
     "activity_report": activity_report,
+    "trend_scan": trend_scan,
 }

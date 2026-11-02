@@ -26,6 +26,7 @@ def test_card_validates(card: AgentCard) -> None:
         "root_cause_hypotheses",
         "accuracy_report",
         "activity_report",
+        "trend_scan",
     }
 
 
@@ -65,3 +66,11 @@ def test_activity_report_is_a_read_lookup_for_dashboard(card: AgentCard) -> None
     assert skill.grade == "read"
     assert set(skill.allowed_requesters) == {"dashboard-api", "orchestrator"}
     assert skill.handoff is False
+
+
+def test_trend_scan_is_a_read_for_orchestrator_marketing_and_dashboard(card: AgentCard) -> None:
+    skill = next(s for s in card.skills if s.id == "trend_scan")
+    assert skill.grade == "read"
+    assert set(skill.allowed_requesters) == {"orchestrator", "marketing", "dashboard-api"}
+    assert skill.input_schema.endswith("#TrendScanRequest")
+    assert skill.output_schema.endswith("#TrendScanOutput")

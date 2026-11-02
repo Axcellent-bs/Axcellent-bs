@@ -12,6 +12,7 @@
 | `root_cause_hypotheses` | 이상 구간 앞 30분~구간 끝의 사실만 근거로 원인 후보(설명·근거 사실 id·확신도) | planning `find_related_prs`, marketing `list_active_notices`, support `detect_inquiry_surge`, memory `card_search` (모두 A2A, `clients/fact_sources.py`) |
 | `accuracy_report` | 정확도 평가 결과 | `eval/results/latest.json`(없으면 `eval/baseline.json`). 다시 계산하지 않는다 |
 | `activity_report` | 부서별 AI 업무 리포트: 부서별 요청·결과·사람에게 넘긴 일·품질·사건 참여, 부서 간 협업, 회사 숫자, 직전 기간 비교 | 공통 로그 저장소, finance `closing_report`(A2A), shop-api `GET /api/shop/metric-series` |
+| `trend_scan` | 키워드 그룹별 검색어 급상승(rising·normal·unknown), 기준선 대비 배수, 근거 숫자(z·기준선·흔들림), 판정 불가 이유. 최근 56일 대비 마지막 7일 | 네이버 검색어 트렌드(`connectors/naver_datalab.py`, 그룹마다 1번). 기본 키워드: 회사 폴더 `trends.toml` |
 
 - 숫자는 코드가 계산한다(`metrics/`, `impact.py`, `detect.py`). LLM은 계산이 끝난 숫자로 설명 문장만 쓴다(`explain.py`)
 - 주기 감시(`monitor.py`)는 `anomaly_detection`과 같은 판정 함수로 최근 구간을 보고 `metric.anomaly` 이벤트를 낸다. 사건은 열지 않는다(`context_id` 없음)
@@ -247,6 +248,30 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
   - 일간: 저장된 날이면 저장값, 오늘이나 저장 안 된 날이면 바로 계산
   - 주간·월간: 저장된 하루치를 더한 뒤 비율·평균·중앙값을 다시 계산한다(평균의 평균이 아니다). 저장 안 된 날만 바로 계산한다
   - 출력: `snapshot_at`(쓴 저장값 중 가장 이른 만든 시각, 저장값이 없으면 계산 시각), `stored_days`·`live_days`, `snapshot_note`("저장된 날 N일 / 바로 계산 M일"). 이번·직전 기간을 합친 날 수다
+
+### trend_scan (검색어 급상승)
+
+- 정의: **최근 56일 대비 급상승을 본다. 계절 반복 구분은 범위 밖이다.** 판정 구간 = `end_date`(없으면 한국 날짜 어제)까지 7일, 기준선 = 그 앞 56일. 하락은 보지 않는다.
+- 기준선과 판정 구간은 **한 응답 안에서만** 비교한다. 네이버 값은 요청마다 배수가 달라 요청 사이 비교는 하지 않는다.
+- 키워드 그룹은 **한 요청에 하나씩** 보낸다. 여러 그룹을 한 요청에 넣으면 큰 키워드에 작은 키워드가 눌린다(실제 응답: 고양이 62.0 → 날씨와 함께 0.0907). 그룹마다 네이버 호출 1번이다.
+- 판정(`skills/trend_scan.py`, 코드 계산): 로그 강건 z. 기준선 log 값의 중앙값 m, 중앙 절대 편차 MAD로 σ = 1.4826 × max(MAD, 0.05). 판정 구간 안 이어진 1~7일 구간마다 z = (구간 log 평균 − m) ÷ (σ ÷ √일수)를 구해 가장 큰 z가 3.2 이상이면 rising. 배수 = exp(그 구간 log 평균 − m)
+- 판정 불가(normal이 아니라 unknown + 이유): 자료 없음, 기준선 56일 중 값이 있는 날 28일 미만(요청이 짧거나 빈 날·0이 많음), 기준선 중앙값 0.01 미만(요청 최댓값 100 기준), 판정 구간에 값 없음
+- 일부 그룹만 네이버를 못 읽으면 그 그룹은 unknown("읽지 못함 [코드]"), 모든 그룹을 못 읽으면 숫자 없이 `failed`·`unavailable`
+- 기본 키워드 그룹은 코드에 두지 않는다: `config/tenants/<회사>/trends.toml`(`tenant.toml`의 `trends`) → `scripts/tenant_env.py`가 `DATA_TREND_CONFIG`로 넘긴다. 입력에 그룹도 없고 설정도 없으면 `invalid_input`
+- 설명 문장은 LLM이 쓰고 `explain.py` 숫자 검증을 그대로 거친다(템플릿 `trend`)
+- 요청 가능: orchestrator, marketing, dashboard-api
+
+#### 기준값 (평가 개발 케이스로 정함)
+
+`eval/trend/cases/` 결과만 보고 정했다. holdout은 고른 뒤 결과 숫자만 봤고, 그 숫자로 다시 맞추지 않았다. 기준값 파일은 `eval/trend/baseline.json`.
+
+| 기준 | 값 | 이유 |
+| --- | --- | --- |
+| 연속 구간 | 1~7일 | 하루만 보는 것과 본 지표가 같고(탐지 0.909·오탐 0), 평범과 급상승의 z 틈이 더 넓다(평범 최대 2.86 / 잡은 급상승 최소 3.47, 하루만 보면 2.57 / 3.0) |
+| z 기준 | 3.2 | 위 틈의 가운데. 3.0은 평범 최대에, 3.5는 잡은 급상승 최소에 가깝다 |
+| MAD 하한 | 0.05 | 0.03~0.1에서 개발 케이스 결과가 같아 중간값. 너무 잔잔한 키워드의 작은 흔들림 방지 |
+| 기준선 최소 일수 | 28일 | 평가 정의(`eval/trend/README.md`)와 같다 |
+| 기준선 최소 값 | 0.01 | 개발 케이스로 재지 않은 안전장치(자릿수가 모자라는 값) |
 
 ### 설명 문장(LLM)과 템플릿 대체 이유
 - 숫자는 코드가 계산하고 LLM은 문장만 쓴다(`explain.py`). 문장에 넘긴 facts에 없는 숫자가 있거나 LLM이 실패하면 고정 템플릿으로 바꾸고 `fallback=true`다.
