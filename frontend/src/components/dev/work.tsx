@@ -95,7 +95,7 @@ function Waiting({ s, d, r }: P & { r: CrossReview }) {
     </>
   )
 }
-export function Work({ s, d, item }: P & { item?: string }) {
+export function Work({ s, d, item, repo }: P & { item?: string; repo?: string }) {
   const [line, setLine] = useState<CodeLine>()
   useEffect(() => { setLine(undefined) }, [item])
   const prOf = (taskId: string) => s.prs.find((p) => p.task === taskId)
@@ -104,7 +104,9 @@ export function Work({ s, d, item }: P & { item?: string }) {
   const taskOnly = byTask && !prOf(byTask.id) ? byTask : undefined
   const sel = (byTask && prOf(byTask.id)) ?? s.prs.find((p) => p.id === prFromSlug(item)) ?? s.prs.find((p) => p.target?.status === 'proposed') ?? s.prs.find((p) => reviewOf(s, p.id)) ?? s.prs[s.prs.length - 1]
   const groupOf = (taskId: string, state: string) => { const p = prOf(taskId); return state === '완료' || p?.merged ? 2 : p && reviewOf(s, p.id) ? 1 : 0 }
-  const tasks = s.tasks.slice().reverse()
+  // 레포를 고르면 그 레포로 올리는(올린) 작업만. 아직 레포가 안 정해진 작업은 전체에서만 보인다
+  const repoOf = (t: S['tasks'][number]) => prOf(t.id)?.target?.connectionId ?? t.coding?.connection ?? null
+  const tasks = s.tasks.slice().reverse().filter((t) => !repo || repoOf(t) === repo)
   const row = (t: S['tasks'][number]) => {
     const p = prOf(t.id)
     const xr = p && reviewOf(s, p.id)
