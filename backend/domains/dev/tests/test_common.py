@@ -218,7 +218,7 @@ def test_dev_agent_card_format_and_served() -> None:
     skills = {s.id: s for s in card.skills}
     required = {"find_related_prs", "link_incident", "verify_rollback_target"}
     hr_links = {"list_in_progress", "verify_handover"}
-    assert set(skills) == required | hr_links | {"start_dev"}
+    assert set(skills) == required | hr_links | {"start_dev", "receive_release_order"}
     assert skills["find_related_prs"].grade == "read"
     assert skills["link_incident"].grade == "A"
     assert skills["verify_rollback_target"].grade == "read"

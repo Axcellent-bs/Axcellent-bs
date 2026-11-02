@@ -20,6 +20,8 @@ from ax_contracts.schemas.planning import (
     LinkIncidentOutput,
     ListInProgressInput,
     ListInProgressOutput,
+    ReceiveReleaseOrderInput,
+    ReceiveReleaseOrderOutput,
     RelatedPr,
     VerifyHandoverInput,
     VerifyHandoverOutput,
@@ -453,6 +455,37 @@ async def start_dev(request: AgentRequest) -> AgentResult:
     )
 
 
+async def receive_release_order(request: AgentRequest) -> AgentResult:
+    """dev 서비스: 기획의 배포 지시를 받아 지금의 배포 요청 흐름을 탄다 (A, execute 경유)."""
+    try:
+        inp = ReceiveReleaseOrderInput.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    if not request.meta.idempotency_key:
+        return _missing_key(request)
+    try:
+        result = await get_service().receive_release_order(
+            context_id=request.meta.context_id,
+            requester=_requester(request),
+            inp=inp,
+            idempotency_key=request.meta.idempotency_key,
+        )
+    except GateRefused as exc:
+        return _gate_rejected(request, exc)
+    out = ReceiveReleaseOrderOutput.model_validate(result.output)
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        outcome=out.outcome,
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(
+            data_summary=f"{inp.check_id} 배포 지시 → {out.outcome}"
+            + (f" {out.deployment_id}" if out.deployment_id else ""),
+            ref_ids=[f"spec:{inp.spec_id}", *(f"pr:{n}" for n in inp.pr_numbers)],
+        ),
+    )
+
+
 # 개발 서비스(dev 8111)가 받는 skill
 DEV_HANDLERS = {
     "find_related_prs": find_related_prs,
@@ -461,4 +494,5 @@ DEV_HANDLERS = {
     "list_in_progress": list_in_progress,
     "verify_handover": verify_handover,
     "start_dev": start_dev,
+    "receive_release_order": receive_release_order,
 }

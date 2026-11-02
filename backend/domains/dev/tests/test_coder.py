@@ -445,6 +445,11 @@ def test_dev_role_reports_coding_result_to_planning(adapter) -> None:
 
     async def send(skill: str, ctx: str, tenant: str, payload, key: str) -> str:
         sent.append(skill)
+        if skill == "request_release_check":  # 작업이 다 머지되면 배포 전 대조도 묻는다
+            await planning.request_release_check(
+                context_id=ctx, requester="dev", inp=payload, idempotency_key=key
+            )
+            return "보냄"
         body = payload.model_dump(mode="json")
         await planning.receive_dev_result(
             context_id=ctx, requester="dev", idempotency_key=key, **body
@@ -461,7 +466,8 @@ def test_dev_role_reports_coding_result_to_planning(adapter) -> None:
 
     run(go())
     assert _task(dev).coding.status == "merged"
-    assert set(sent) == {"receive_dev_result"}
+    assert set(sent) == {"receive_dev_result", "request_release_check"}
+    assert sent[-1] == "request_release_check"  # 작업·PR 결과가 먼저 간 뒤
     got = _task(planning)
     assert got.coding is not None and got.coding.status == "merged"
     assert any(p.task == "T-D1" and p.merged for p in planning.state.prs)

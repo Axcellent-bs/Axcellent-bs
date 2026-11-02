@@ -237,7 +237,8 @@ def test_req12_main_flow(wire) -> None:
     assert "① kind pr_merged · PR #31 (자동 머지)" in texts
     assert "① kind pr_merged · PR #32" in texts
     assert "① kind request_closed · REQ-12" in texts
-    assert flow[-1].to == "support" and "완료" in flow[-1].text
+    done = [a for a in flow if a.to == "support" and "완료" in a.text]
+    assert done  # 요청 부서에 완료 알림 (그 뒤로 배포 전 대조·배포 지시가 이어진다)
     human = [a for a in flow if a.kind == "사람"]
     assert [a.point for a in human] == ["기획서 확정", "PR 머지"]  # PR #31은 자동 머지
     assert [a.point for a in flow if a.point == "audit.auto_confirmed"] == []
