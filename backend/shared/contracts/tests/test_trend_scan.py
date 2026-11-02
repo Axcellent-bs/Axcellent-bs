@@ -45,3 +45,31 @@ def test_request_can_leave_groups_and_date_to_defaults() -> None:
         TrendScanRequest.model_validate({"keyword_groups": []})
     with pytest.raises(ValidationError):
         TrendScanRequest.model_validate({"keyword_groups": [group, group]})
+
+
+# ---------------------------------------------------------------- trend_candidates (YouTube 후보)
+
+
+def test_candidates_output_needs_a_reason_and_no_candidates_when_unknown() -> None:
+    from ax_contracts.schemas import TrendCandidatesOutput, TrendCandidatesRequest
+
+    with pytest.raises(ValidationError):
+        TrendCandidatesOutput(status="unknown", summary="x")
+    verdict = TrendVerdict(group_name="t1", status="normal", ratio=1.0)
+    candidate = {
+        "keyword": "t1",
+        "youtube": {"video_count": 3, "snapshot_at": "2026-11-02T05:55:08Z", "video_ids": ["a"]},
+        "naver": verdict.model_dump(),
+    }
+    with pytest.raises(ValidationError):
+        TrendCandidatesOutput.model_validate(
+            {"status": "unknown", "unknown_reason": "스냅샷 없음", "summary": "x",
+             "candidates": [candidate]}
+        )  # fmt: skip
+    out = TrendCandidatesOutput.model_validate(
+        {"status": "known", "summary": "x", "candidates": [candidate], "naver_calls": 1}
+    )
+    assert out.candidates[0].youtube.snapshot_at.tzinfo is not None
+    with pytest.raises(ValidationError):  # 후보 수 상한 (후보마다 네이버 1번)
+        TrendCandidatesRequest(max_candidates=21)
+    assert TrendCandidatesRequest().max_candidates is None  # 비우면 회사 설정

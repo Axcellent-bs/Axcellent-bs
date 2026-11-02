@@ -27,6 +27,7 @@ def test_card_validates(card: AgentCard) -> None:
         "accuracy_report",
         "activity_report",
         "trend_scan",
+        "trend_candidates",
         "answer_planning_question",
         "campaign_effect",
     }
@@ -76,6 +77,17 @@ def test_trend_scan_is_a_read_for_orchestrator_marketing_and_dashboard(card: Age
     assert set(skill.allowed_requesters) == {"orchestrator", "marketing", "dashboard-api"}
     assert skill.input_schema.endswith("#TrendScanRequest")
     assert skill.output_schema.endswith("#TrendScanOutput")
+
+
+def test_trend_candidates_is_a_read_for_orchestrator_marketing_and_dashboard(
+    card: AgentCard,
+) -> None:
+    skill = next(s for s in card.skills if s.id == "trend_candidates")
+    assert skill.grade == "read"
+    assert set(skill.allowed_requesters) == {"orchestrator", "marketing", "dashboard-api"}
+    assert skill.input_schema.endswith("#TrendCandidatesRequest")
+    assert skill.output_schema.endswith("#TrendCandidatesOutput")
+    assert skill.handoff is False
 
 
 def test_answer_planning_question_is_for_planning(card: AgentCard) -> None:
