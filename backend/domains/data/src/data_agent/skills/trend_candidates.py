@@ -11,6 +11,8 @@
   합친다(한 영상에 lol·리그오브레전드가 같이 있어도 1개). 표에 없는 이름은 묶지 않는다.
 - 네이버 판정은 trend_scan과 같은 함수(`trend_scan.judge`)를 그대로 쓴다. 후보마다 한 그룹
   (대표 이름 + 별칭들을 키워드로)으로 한 번씩 부르고, 못 읽은 후보는 그 후보만 unknown이다.
+- 별칭이 있으면 대표 이름·별칭을 하나씩 따로도 판정한다(이름마다 네이버 1번). 묶음 그룹은 평범인데
+  이름 하나가 급상승이면 급상승으로 올리고, 어느 이름이 올랐는지(`rising_names`)를 남긴다.
 - 스냅샷이 없거나 `max_age_hours`보다 오래됐으면 후보를 뽑지 않고 unknown + 이유다.
 - 설정: 회사 `trends.toml`의 `[candidates]` (`DATA_TREND_CONFIG`). README "trend_candidates".
 """
@@ -22,6 +24,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
@@ -229,6 +232,24 @@ async def naver_verdict(
     return results[0]
 
 
+def pick_verdict(
+    group: TrendVerdict, names: list[TrendVerdict]
+) -> tuple[TrendVerdict, Literal["group", "name"], list[str]]:
+    """묶음 그룹 판정과 이름별 판정에서 후보의 판정을 고른다.
+
+    - 이름별로 급상승인 이름 목록(`rising`)은 늘 남긴다
+    - 묶음 그룹이 급상승이면 그 판정을 쓴다(`group`)
+    - 묶음은 급상승이 아닌데(평범·판정 불가) 이름 하나라도 급상승이면, 급상승인 이름 중 z가 가장
+      큰 판정을 올린다(`name`). 작은 이름의 급상승이 큰 이름에 묻히지 않게 한다
+    """
+    rising = [v for v in names if v.status == "rising"]
+    rising_names = [v.group_name for v in rising]
+    if group.status == "rising" or not rising:
+        return group, "group", rising_names
+    best = max(rising, key=lambda v: v.evidence.score or 0.0)
+    return best, "name", rising_names
+
+
 async def find_candidates(
     request: TrendCandidatesRequest,
     connector: NaverDatalabConnector,
@@ -260,6 +281,7 @@ async def find_candidates(
     start = end - timedelta(days=REQUEST_DAYS - 1)
     candidates: list[TrendCandidate] = []
     queries = [f"{snapshot_query} at={snapshot.collected_at.isoformat()}"]
+    requests = 0
     for tag in tags:
         keywords = config.keywords(tag.keyword)
         query = TrendScanInput(
@@ -271,6 +293,20 @@ async def find_candidates(
             f"naver search-trend group={tag.keyword} keywords={','.join(keywords)}"
             f" {start}~{end} date"
         )
+        group = await naver_verdict(query, connector, settings)
+        requests += 1
+        names: list[TrendVerdict] = []
+        if len(keywords) > 1:  # 별칭이 있으면 이름마다 따로도 판정한다 (작은 이름이 묻히지 않게)
+            for name in keywords:
+                one = TrendScanInput(
+                    keyword_groups=[TrendKeywordGroup(group_name=name, keywords=[name])],
+                    start_date=start,
+                    end_date=end,
+                )
+                queries.append(f"naver search-trend group={name} {start}~{end} date")
+                names.append(await naver_verdict(one, connector, settings))
+                requests += 1
+        verdict, source, rising = pick_verdict(group, names)
         candidates.append(
             TrendCandidate(
                 keyword=tag.keyword,
@@ -280,8 +316,11 @@ async def find_candidates(
                     video_ids=list(tag.video_ids[: config.rep_videos]),
                     matched_tags=list(tag.matched),
                 ),
-                naver=await naver_verdict(query, connector, settings),
+                naver=verdict,
                 aliases=keywords[1:],
+                name_verdicts=names,
+                rising_names=rising,
+                naver_from=source,
             )
         )
     summary = _summary(candidates, len(snapshot.videos))
@@ -292,7 +331,7 @@ async def find_candidates(
         start_date=start,
         end_date=end,
         candidates=candidates,
-        naver_calls=len(tags),
+        naver_calls=requests,
         summary=summary,
     )
     failed = [
