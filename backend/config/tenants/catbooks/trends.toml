@@ -24,7 +24,7 @@ keywords = ["그림책"]
 max_candidates = 5      # 후보 수 상한 (나온 영상 수 많은 순)
 min_videos = 2          # 이 수 이상의 인기 영상에 붙은 태그만 후보
 max_age_hours = 24      # 스냅샷이 이보다 오래되면 후보를 뽑지 않음 (unknown + 이유)
-rep_videos = 3          # 근거로 보여 줄 대표 영상 id 수
+rep_videos = 5          # 근거로 보여 줄 대표 영상 id 수 (밈 형식 분류도 이 영상 제목을 쓴다, 최대 5)
 titles = true           # YouTube 제목에서 뽑은 2~3어절 구도 후보로 (min_videos개 이상 영상 제목에 나온 것만)
 keep_tags = []          # (덮어쓰기용) 자동 제외에 걸려도 후보로 남길 이름
 # (덮어쓰기용) 늘 빼는 일반 태그. 자동 제외([candidates.auto_exclude])가 데이터로 찾고, 이 목록은 자동이 못

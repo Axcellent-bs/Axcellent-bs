@@ -394,3 +394,23 @@ def popular_history(path: str | Path, until: datetime | None = None) -> list[His
         HistoryVideo(vid, cat, tuple(sorted(seen)), title, frozenset(days))
         for vid, (cat, seen, title, days) in sorted(acc.items())
     ]
+
+
+def video_titles(path: str | Path, video_ids: list[str]) -> dict[str, str]:
+    """영상 id → 제목 (`video_titles` 표, 읽기 전용). 파일·표가 없거나 제목이 없으면 빠진다."""
+    if not video_ids or (str(path) != ":memory:" and not Path(path).is_file()):
+        return {}
+    conn = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True, timeout=5.0)
+    try:
+        if not _has_titles(conn):
+            return {}
+        marks = ",".join("?" * len(video_ids))
+        rows = conn.execute(
+            f"SELECT video_id, title FROM video_titles WHERE video_id IN ({marks})",  # noqa: S608
+            video_ids,
+        ).fetchall()
+    except sqlite3.DatabaseError:
+        return {}
+    finally:
+        conn.close()
+    return {vid: title for vid, title in rows if title}

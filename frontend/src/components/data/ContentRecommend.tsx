@@ -59,6 +59,12 @@ function RecommendCard({ item }: { item: ContentRecommendation }) {
           <Chip label="회사 관련 낮음" tone={TONE.warn} />
         )}
         {(item.origins ?? []).map((o) => <Chip key={o} label={`출처: ${CANDIDATE_ORIGIN_LABEL[o]}`} tone={TONE.muted} />)}
+        {/* 밈 형식: 서버 값 그대로. 분류하지 못했으면 이유를 마우스를 올리면 보여 준다 */}
+        {item.meme_format && (item.meme_format === "unknown" ? (
+          <span title={item.meme_reason ?? undefined}><Chip label="밈 형식: 확인할 수 없음" tone={TONE.muted} /></span>
+        ) : (
+          <span title={`대표 영상 제목 ${item.meme_titles ?? 0}개로 분류${item.meme_reason ? ` · ${item.meme_reason}` : ""}`}><Chip label={`밈 형식: ${item.meme_format}`} tone={TONE.info} /></span>
+        ))}
         <Chip label={item.format} tone={TONE.info} />
         {item.fallback && <Chip label="기본 문장" tone={TONE.muted} />}
       </div>

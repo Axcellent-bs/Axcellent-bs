@@ -8,6 +8,9 @@
 - 상품 연결(`product_link`): 급상승 소재마다 회사 실제 상품(커넥터 상품 목록)을 문자열 일치 +
   임베딩 유사도로 최대 `max_products`개 잇는다. 아이디어 문장에는 연결된 상품만 쓰게 하고, 연결되지
   않은 회사 상품이 나오면 고정 문장(`product_invalid`). 회사 소개(`company_intro`)는 보조.
+- 밈 형식(`meme_format`): YouTube 근거가 있는 소재는 대표 영상 제목 최대 5개로 LLM이 정해진 목록
+  (챌린지·패러디·밈·리액션·하이라이트·정보·리뷰·기타) 안에서 고른다. 근거가 없으면 unknown + 이유.
+  아이디어 문장 프롬프트와 형식 제안(정보·리뷰 롱폼, 그 밖 숏폼)에 반영한다.
 - 회사 관련성: 상품이 연결되면 related. 수동 회사 키워드(기본 키워드 그룹 이름·키워드 +
   `company_keywords`, 덮어쓰기용)와 겹쳐도 related(`relevance_from`에 근거). 둘 다 없으면 low.
   **표시만** 하고 순위에서 빼지 않는다.
@@ -23,6 +26,7 @@ README "content_recommend".
 
 from __future__ import annotations
 
+import dataclasses
 import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -48,6 +52,7 @@ from ax_contracts.schemas.data import (
 )
 from data_agent.connectors.naver_datalab import NaverDatalabConnector
 from data_agent.explain import explain_idea
+from data_agent.skills.meme_format import MAX_TITLES, classify
 from data_agent.skills.product_link import pick_links, read_catalog, similarities
 from data_agent.skills.trend_candidates import (
     NAVER_FAILED,
@@ -63,6 +68,9 @@ from data_agent.skills.trend_scan import (
     default_groups,
     yesterday_kst,
 )
+from data_agent.youtube_store import DB_ENV as YOUTUBE_DB_ENV
+from data_agent.youtube_store import DEFAULT_DB as YOUTUBE_DEFAULT_DB
+from data_agent.youtube_store import video_titles
 
 NO_RISING = "이번 기간 급상승한 소재가 없음"
 
@@ -133,6 +141,7 @@ class Topic:
     youtube_videos: int | None = None  # YouTube 근거가 있으면 인기 영상 수
     sources: list[ContentSource] = field(default_factory=list)
     origins: list[RecommendOrigin] = field(default_factory=list)  # 소재가 나온 곳
+    video_ids: list[str] = field(default_factory=list)  # YouTube 대표 영상 id (인기 순위 순)
 
     @property
     def names(self) -> list[str]:
@@ -189,6 +198,7 @@ def merge_topics(
         if match is not None:
             used.add(match.keyword)
             topic.youtube_videos = match.youtube.video_count
+            topic.video_ids = list(match.youtube.video_ids)
             topic.sources.append("youtube")
             topic.origins = _add(topic.origins, list(match.origins or ["youtube_tag"]))
             topic.aliases += [a for a in [match.keyword, *match.aliases] if _norm(a) not in names]
@@ -200,6 +210,7 @@ def merge_topics(
             c.keyword, list(c.aliases), c.naver, c.youtube.video_count, ["naver", "youtube"]
         )
         topic.origins = _add([], list(c.origins or ["youtube_tag"]))
+        topic.video_ids = list(c.youtube.video_ids)
         topics.append(topic)
     taken = {_norm(n) for t in topics for n in t.names}
     for t in trending or []:
@@ -300,6 +311,7 @@ async def recommend(
         context_id=context_id,
     )
     names_of_catalog = [p.name for p in products]
+    youtube_db = env.get(YOUTUBE_DB_ENV) or str(YOUTUBE_DEFAULT_DB)
     items: list[ContentRecommendation] = []
     notes: list[str] = []
     for rank, topic in enumerate(picked, start=1):
@@ -321,6 +333,13 @@ async def recommend(
         )
         if linked:
             names["연결 상품"] = ", ".join(p.name for p in linked)
+        ids = topic.video_ids[:MAX_TITLES]
+        titles = video_titles(youtube_db, ids)
+        meme = await classify(
+            topic.keyword, [titles[i] for i in ids if i in titles], llm, context_id
+        )
+        if not ids:
+            meme = dataclasses.replace(meme, reason="YouTube 근거 영상이 없음")
         idea = await explain_idea(
             numbers,
             names,
@@ -330,6 +349,8 @@ async def recommend(
             sources="검색 급상승 + YouTube 인기 영상" if topic.two_sources else "검색 급상승",
             youtube_videos=topic.youtube_videos,
             catalog=names_of_catalog,
+            meme=meme.format if meme.hint else None,
+            format_hint=meme.hint,
         )
         if note := idea.note():
             notes.append(f"{topic.keyword}: {note}")
@@ -362,6 +383,9 @@ async def recommend(
                 origins=topic.origins,
                 products=linked,
                 relevance_from=relevance_from,  # type: ignore[arg-type]
+                meme_format=meme.format,  # type: ignore[arg-type]  # MEME_FORMATS 또는 unknown
+                meme_reason=meme.reason,
+                meme_titles=meme.titles,
             )
         )
 

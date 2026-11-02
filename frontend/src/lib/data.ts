@@ -511,6 +511,11 @@ export interface ContentRecommendation {
   products?: LinkedProduct[];
   /** 회사 관련성 근거: 상품 연결·수동 회사 키워드·둘 다·없음. 예전 응답은 없다 */
   relevance_from?: "products" | "manual_keywords" | "both" | "none" | null;
+  /** 밈 형식 (대표 영상 제목으로 서버 LLM이 목록 안에서만 고름). unknown = 분류하지 못함. 예전 응답은 없다 */
+  meme_format?: "챌린지" | "패러디·밈" | "리액션" | "하이라이트" | "정보·리뷰" | "기타" | "unknown" | null;
+  meme_reason?: string | null;
+  /** 분류에 쓴 대표 영상 제목 수 */
+  meme_titles?: number;
 }
 /** 소재와 연결한 회사 실제 상품 (서버 값) */
 export interface LinkedProduct {
