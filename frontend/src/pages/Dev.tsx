@@ -1,5 +1,5 @@
 // 개발·배포 화면(/dev). 확정된 기획서를 작업·PR로 만들고, 교차검증·배포·사후관리까지 맡는다.
-// 메뉴 = 작업 현황(첫 화면)·작업(작업·PR·AI 교차검증·운영·배포·사후관리)·에이전트 대화·지표. 틀은 기획 화면과 같이 쓴다(components/planning-common/Shell.tsx).
+// 메뉴(사이드바 하위 탭 demo/services.ts) = 작업 현황(첫 화면)·작업(작업·PR·AI 교차검증·운영·배포·사후관리)·에이전트 대화·지표. 틀은 기획 화면과 같이 쓴다(components/planning-common/Shell.tsx).
 import { useState } from 'react'
 import { DevToolsDialog } from '@/demo/DevTools'
 import { IconGear } from '@/components/icons'
@@ -67,7 +67,6 @@ export default function DevPage() {
       desc="확정된 기획서를 작업·PR로 만들고, 교차검증·배포·사후관리까지 맡습니다."
       home="tasks"
       sections={SECTIONS}
-      badge={(v) => ({ talk: v.newTalk })}
       tabCount={(v, section, tab) => (section === 'work' && tab === 'reviews' ? v.state.reviews.filter((x) => !x.result).length : 0)}
       tools={(v) => <DevTools v={v} />}
     >
