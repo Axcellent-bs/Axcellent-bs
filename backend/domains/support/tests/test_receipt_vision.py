@@ -277,19 +277,40 @@ def test_in_mock_mode_the_photo_goes_to_the_real_client_not_the_canned_mock(
     assert seen == ["support"] and facts.total == 33000  # 가짜 `get_llm()`이었다면 KeyError다
 
 
-def test_outside_mock_mode_nothing_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_outside_mock_mode_a_model_alone_does_not_turn_it_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """사진이 외부 모델로 나가므로, 목 모드가 아니어도 모델 설정만으로는 켜지지 않는다."""
     monkeypatch.delenv("AGENT_TEMPLATE_MOCK")
     _configure_model(monkeypatch)
     monkeypatch.delenv("SUPPORT_VISION", raising=False)
-    assert receipt_vision.configured() is True  # 스위치를 안 줘도 모델이 있으면 켜진다(기존과 같다)
+    assert receipt_vision.configured() is False  # 스위치를 안 주면 모델이 있어도 꺼짐
+    assert receipt_vision.connect() is False and receipts.get_vision_extractor() is None
+    monkeypatch.setenv("SUPPORT_VISION", "")  # 빈 값은 안 준 것과 같다
+    assert receipt_vision.configured() is False
+    monkeypatch.setenv("SUPPORT_VISION", "on")
+    assert receipt_vision.configured() is True
     monkeypatch.setenv("SUPPORT_VISION", "off")
     assert receipt_vision.configured() is False
 
 
-def test_connected_only_when_a_model_is_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("value", ["1", "true", "yes", "enabled", "of"])
+def test_only_on_turns_it_on_unknown_values_stay_off(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """`on`이 아닌 값(오타 포함)은 꺼짐으로 본다. 잘못 적어도 사진이 나가지 않는 쪽이다."""
+    monkeypatch.delenv("AGENT_TEMPLATE_MOCK")
+    _configure_model(monkeypatch)
+    monkeypatch.setenv("SUPPORT_VISION", value)
+    assert receipt_vision.configured() is False
+    assert receipt_vision.connect() is False and receipts.get_vision_extractor() is None
+
+
+def test_connected_only_when_on_and_a_model_is_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
     monkeypatch.delenv("LLM_MODEL", raising=False)
     monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.setenv("SUPPORT_VISION", "on")
     assert receipt_vision.connect() is False  # 모델이 없으면 꽂지 않는다
 
     monkeypatch.setenv("SUPPORT_LLM_MODEL", "gemini-test")
