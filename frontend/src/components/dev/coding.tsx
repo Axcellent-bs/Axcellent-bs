@@ -17,7 +17,7 @@ export const CODING_LABEL: Record<CodingStatus, string> = {
 }
 const DONE: CodingStatus[] = ['opened', 'merged']
 /** 토큰 수를 짧게: 950 · 12.3k · 1.2M */
-const tokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : `${n}`)
+export const tokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : `${n}`)
 /** 에이전트가 지금 일하는 중인 상태 (옆에 깜빡이는 점) */
 const RUNNING: CodingStatus[] = ['queued', 'reading', 'writing', 'reviewing']
 export const isRunning = (s?: CodingStatus | string) => RUNNING.includes(s as CodingStatus)

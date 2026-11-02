@@ -404,6 +404,8 @@ a.plain-link:hover { color: var(--primary); }
 .rq-filter a.on .rq-n { color: var(--primary); }
 .rq-stuck { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--warning); padding: 0 4px; }
 .rq-stuck::before { content: ''; width: 7px; height: 7px; border-radius: 50% !important; background: var(--warning); }
+.rq-usage { margin-left: auto; font-size: 12.5px; color: var(--text-2); padding: 0 4px; white-space: nowrap; }
+.rq-stuck + .rq-usage { margin-left: 12px; }
 
 .rq-head, .rq-item { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) var(--rq-next); column-gap: 0; }
 .rq-head { padding: 10px 16px 8px; font-size: 12px; font-weight: 600; color: var(--text-3); border-bottom: 1px solid var(--border); }

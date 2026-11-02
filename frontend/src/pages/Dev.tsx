@@ -1,5 +1,5 @@
 // 개발·배포 화면(/dev). 확정된 기획서를 작업·PR로 만들고, 교차검증·배포·사후관리까지 맡는다.
-// 메뉴 = 작업(작업·PR·AI 교차검증·운영·배포·사후관리)·에이전트 대화·지표. 틀은 기획 화면과 같이 쓴다(components/planning-common/Shell.tsx).
+// 메뉴 = 작업 현황(첫 화면)·작업(작업·PR·AI 교차검증·운영·배포·사후관리)·에이전트 대화·지표. 틀은 기획 화면과 같이 쓴다(components/planning-common/Shell.tsx).
 import { useState } from 'react'
 import { DevToolsDialog } from '@/demo/DevTools'
 import { IconGear } from '@/components/icons'
@@ -11,9 +11,11 @@ import { ChatPanel, useDevChat } from '@/components/dev/chat'
 import { Activity, Audit, Autonomy } from '@/components/dev/metrics'
 import { Aftercare, Ops } from '@/components/dev/ops'
 import { PrsTab } from '@/components/dev/repows'
+import { TaskBoard } from '@/components/dev/board'
 import { Reviews } from '@/components/dev/work'
 
 const SECTIONS: Record<string, Section> = {
+  tasks: { label: '작업 현황', icon: 'menu', tabs: [] }, // 사람 확인·진행 중·머지됨·중단은 화면 안 필터 (tasks/<필터>)
   work: { label: '작업', icon: 'plan', tabs: [
     { id: 'prs', label: '작업·PR' },
     { id: 'reviews', label: 'AI 교차검증' },
@@ -63,14 +65,15 @@ export default function DevPage() {
       part="dev"
       title="개발·배포"
       desc="확정된 기획서를 작업·PR로 만들고, 교차검증·배포·사후관리까지 맡습니다."
-      home="work/prs"
+      home="tasks"
       sections={SECTIONS}
       badge={(v) => ({ talk: v.newTalk })}
       tabCount={(v, section, tab) => (section === 'work' && tab === 'reviews' ? v.state.reviews.filter((x) => !x.result).length : 0)}
       tools={(v) => <DevTools v={v} />}
     >
-      {({ state: s, dispatch: d, section, tab, rest, item }) => (
+      {({ state: s, dispatch: d, section, sub, tab, rest, item }) => (
         <>
+          {section === 'tasks' && <TaskBoard s={s} filter={sub} />}
           {section === 'work' && tab === 'prs' && <PrsTab s={s} d={d} parts={rest.map((x) => decodeURIComponent(x))} />}
           {section === 'work' && tab === 'reviews' && <Reviews s={s} d={d} item={item} />}
           {section === 'work' && tab === 'ops' && <Ops s={s} item={item} />}
