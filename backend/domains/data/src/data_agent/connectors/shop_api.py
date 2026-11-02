@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from typing import Any, get_args
 
 import httpx
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ax_agent_template import config
 from ax_contracts.data_access.shop_failed_orders import (
@@ -120,6 +120,8 @@ class ShopApiConnector:
     - `failure_events`: `GET /api/shop/failed-orders` → 표준 실패 이벤트
       (실패 주문 하나 = 이벤트 하나)
     - `transactions_volume`: 결제 시도 수(`payment_count`) 시계열
+    - `campaign_coupons`: `GET /api/shop/coupons?campaign_id=` (캠페인 효과 쿠폰 사용률). 회사 공통
+      인터페이스가 아니라 캣북스 커넥터에만 있다
     """
 
     def __init__(self, api: ShopApi) -> None:
@@ -182,3 +184,20 @@ class ShopApiConnector:
         self, window_from: datetime, window_to: datetime
     ) -> list[Point] | None:
         return await self.metric_series(TRANSACTIONS_METRIC, window_from, window_to)
+
+    async def campaign_coupons(self, campaign_id: str) -> list[CampaignCoupon]:
+        """그 캠페인 쿠폰 목록 (발급 장수·조회 시점 사용 장수). 없으면 빈 목록."""
+        data = await self.api.get("/coupons", {"campaign_id": campaign_id})
+        try:
+            return [CampaignCoupon.model_validate(item) for item in data]
+        except (ValidationError, TypeError) as exc:
+            raise ShopUnavailable("BAD_RESPONSE", "쿠폰 응답 형식이 예상과 다르다") from exc
+
+
+class CampaignCoupon(BaseModel):
+    """shop-api 쿠폰 한 장에서 캠페인 효과가 쓰는 칸 (응답 모양은 shop-api 코드에만 있다)."""
+
+    model_config = ConfigDict(extra="ignore")
+    coupon_id: str
+    count: int = Field(ge=0)  # 발급 장수
+    used_units: int = Field(ge=0)  # 사용 장수 (조회 시점, 취소·전액 환불은 빼고 셈)

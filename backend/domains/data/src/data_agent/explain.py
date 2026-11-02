@@ -229,7 +229,34 @@ def _trend_template(facts: dict[str, int | float | str]) -> str:
     return f"{head}{tail}" + (f": {', '.join(parts)}" if parts else "") + "."
 
 
+def _campaign_template(facts: dict[str, int | float | str]) -> str:
+    """캠페인 효과 한두 문장 (campaign_effect). 확인할 수 없는 항목은 그 이유를 그대로 쓴다."""
+    if "주문 방향" in facts:
+        excess = facts.get("주문 증분")
+        sign = "+" if isinstance(excess, int | float) and excess > 0 else ""
+        orders = (
+            f"캠페인 기간 주문 {_fmt(facts.get('캠페인 주문'), comma=True)}건으로, 지난 "
+            f"{_fmt(facts.get('기준 일수'))}일 같은 시간대 평균 "
+            f"{_fmt(facts.get('평소 주문'))}건 대비 "
+            f"{sign}{_fmt(excess)}건({_fmt(facts.get('주문 방향'))})입니다."
+        )
+    else:
+        orders = f"주문은 {_fmt(facts.get('주문'))}."
+    if "쿠폰 사용률" in facts:
+        rate = facts.get("쿠폰 사용률")
+        shown = f"{round(rate * 100, 1)}%" if isinstance(rate, int | float) else "-"
+        coupons = (
+            f" 캠페인 쿠폰 {_fmt(facts.get('쿠폰 발급'), comma=True)}장 중 "
+            f"{_fmt(facts.get('쿠폰 사용'), comma=True)}장 사용({shown}, 조회 시점 누적)."
+        )
+    else:
+        coupons = f" 쿠폰은 {_fmt(facts.get('쿠폰'))}."
+    return orders + coupons
+
+
 def _template(kind: str, facts: dict[str, int | float | str]) -> str:
+    if kind == "campaign":
+        return _campaign_template(facts)
     if kind == "activity":
         return _activity_template(facts)
     if kind == "trend":

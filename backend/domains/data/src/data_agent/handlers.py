@@ -11,6 +11,8 @@
   따로 부르고, 모든 그룹에서 못 읽으면 숫자 없이 `failed`·`unavailable`이다.
 - answer_planning_question은 data가 보낸 요청의 기록으로만 기획 질문에 답한다(grade read,
   `planning_questions.py`). 기록에 없으면 `unknown`이다.
+- campaign_effect는 캠페인 기간 주문 증분·쿠폰 누적 사용률을 코드로 계산한다(grade read).
+  주문 지표를 읽지 못하면 숫자 없이 `failed`·`unavailable`이다.
 - 외부 입력(`request.untrusted`)은 읽지 않는다.
 - shop-api에서 데이터를 받지 못하면(`ShopUnavailable`) 숫자를 0으로 내지 않고 `failed`·`unavailable`
   과 "확인할 수 없음" 근거로 답한다.
@@ -30,6 +32,7 @@ from ax_contracts.schemas.data import (
     AccuracyReportInput,
     ActivityReportInput,
     AnomalyDetectionInput,
+    CampaignEffectInput,
     FraudScoreInput,
     ImpactAnalysisInput,
     KpiSummaryInput,
@@ -43,6 +46,7 @@ from data_agent.clients.shop_client import (
     HttpSellerClient,
     SellerClient,
     ShopUnavailable,
+    get_connector,
     shop_api,
 )
 from data_agent.connectors import ConnectorUnavailable
@@ -52,6 +56,7 @@ from data_agent.report_store import ReportStore, get_report_store
 from data_agent.skills.accuracy_report import eval_dir, load_report
 from data_agent.skills.activity_report import InvalidActivityInput, build_report
 from data_agent.skills.anomaly_detection import detect_anomalies, env_settings, get_metric_source
+from data_agent.skills.campaign_effect import analyze_campaign
 from data_agent.skills.fraud_score import score_fraud
 from data_agent.skills.impact_analysis import analyze_impact
 from data_agent.skills.kpi_summary import summarize_kpi
@@ -365,6 +370,35 @@ async def answer_planning_question(request: AgentRequest) -> AgentResult:
     )
 
 
+def get_campaign_connector():  # noqa: ANN201 - 테스트·평가가 바꿔 끼우는 자리
+    """캠페인 효과가 읽는 커넥터 (회사 카탈로그의 커넥터, 캣북스는 shop-api)."""
+    return get_connector(os.environ)
+
+
+async def campaign_effect(request: AgentRequest) -> AgentResult:
+    """캠페인 효과(주문 증분·쿠폰 누적 사용률). 조회만 하고 상태를 바꾸지 않는다(grade read)."""
+    data = _parse(request, CampaignEffectInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        connector = get_campaign_connector()
+    except NotImplementedError as error:
+        return _unavailable(request, error)
+    try:
+        result = await analyze_campaign(data, connector, get_llm())
+    except ShopUnavailable as error:
+        span = f"{data.window_from.isoformat()}~{data.window_to.isoformat()}"
+        return _shop_unavailable(request, error, f"shop_metric_series metric=order_count {span}")
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+        fallback=result.fallback,
+        **_fallback_reason(result),
+    )
+
+
 HANDLERS = {
     "impact_analysis": impact_analysis,
     "anomaly_detection": anomaly_detection,
@@ -375,4 +409,5 @@ HANDLERS = {
     "activity_report": activity_report,
     "trend_scan": trend_scan,
     "answer_planning_question": answer_planning_question,
+    "campaign_effect": campaign_effect,
 }

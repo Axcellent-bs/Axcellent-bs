@@ -103,6 +103,17 @@
       "verifier": null,
       "priority": "recommended",
       "handoff": false
+    },
+    {
+      "id": "campaign_effect",
+      "description": "캠페인 기간 주문 수를 지난 7일 같은 시간대 평균과 비교해 방향(늘었음·같음·줄었음)과 증분(실제 − 기대)을 내고, campaign_id가 있으면 캠페인 쿠폰 발급·사용 장수로 조회 시점 누적 사용률(캠페인 뒤 사용분도 섞임)을 낸다. 매출은 매출 지표가 없으면 확인할 수 없음이다. 자료가 없거나 쿠폰이 없으면 0으로 채우지 않고 확인할 수 없음과 이유를 준다. 숫자는 코드가 산출하고 LLM은 요약 문장만 쓴다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#CampaignEffectInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#CampaignEffectOutput",
+      "grade": "read",
+      "allowed_requesters": ["orchestrator", "marketing", "dashboard-api"],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
     }
   ]
 }
