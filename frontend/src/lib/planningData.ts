@@ -367,6 +367,22 @@ export function matchRule(p: AutoPolicy, x: Size, warned: boolean): AutoRule | u
   return ok.find((r) => r.status === '정식') ?? ok[0]
 }
 
+// 예시: 레포 2개 연결 (API 서버 · 웹 화면). 바꾼 경로로 AI가 레포를 고른다
+export const EXAMPLE_REPOS = [
+  { connectionId: 'ex-shop-api', repo: 'catbooks/shop-api' },
+  { connectionId: 'ex-shop-web', repo: 'catbooks/shop-web' },
+]
+function exampleTarget(paths: string, status: RepoTarget['status'] = 'approved'): RepoTarget {
+  const [mine, other] = paths.startsWith('shop-web') ? [EXAMPLE_REPOS[1], EXAMPLE_REPOS[0]] : [EXAMPLE_REPOS[0], EXAMPLE_REPOS[1]]
+  const proposed = status === 'proposed'
+  return {
+    ...mine, status, confidence: proposed ? 'mid' : 'high',
+    reasons: proposed ? [`변경 경로 ${paths} → ${mine.repo}`, 'AI: 결제 화면이라 API 레포와 같이 바뀔 수 있음'] : [`변경 경로 ${paths} → ${mine.repo}`],
+    candidates: [{ ...mine, score: proposed ? 0.64 : 0.92 }, { ...other, score: proposed ? 0.41 : 0.12 }],
+    decidedBy: proposed ? null : '규칙(경로)', decidedAt: proposed ? null : '10-21 09:00',
+  }
+}
+
 export const initialState: State = {
   seq: 0,
   outbox: [],
@@ -429,9 +445,9 @@ export const initialState: State = {
     { id: 'T-10', spec: 'SPEC-6', para: 'R1', title: '결제 경로 설정 변경은 5% 카나리 배포 뒤 전체 적용', owner: '에이전트', state: '머지 대기' },
   ],
   prs: [
-    { id: 'PR #27', task: 'T-8', title: 'R1: 도서 상세의 출간일 표기 오타 수정', branch: 'gen/t-8', reviews: ['통과'], gate: { result: '통과', lines: 4, files: 1, paths: 'shop-web/product/' }, merged: true, auto: true, mergedBy: 'rule', rule: 'AR-1' },
-    { id: 'PR #28', task: 'T-9', title: 'R3: 결제 타임아웃 설정 변경', branch: 'gen/t-9-payment-timeout', reviews: ['통과'], gate: { result: '통과', lines: 14, files: 1, paths: 'shop-api/payment/' }, merged: true, mergedBy: 'human' },
-    { id: 'PR #29', task: 'T-10', title: 'R1: 결제 설정 변경 카나리 배포', branch: 'gen/t-10-payment-canary', reviews: ['통과'], gate: { result: '통과', lines: 24, files: 2, paths: 'shop-api/payment/' }, merged: false },
+    { id: 'PR #27', task: 'T-8', title: 'R1: 도서 상세의 출간일 표기 오타 수정', branch: 'gen/t-8', reviews: ['통과'], gate: { result: '통과', lines: 4, files: 1, paths: 'shop-web/product/' }, merged: true, auto: true, mergedBy: 'rule', rule: 'AR-1', target: exampleTarget('shop-web/product/') },
+    { id: 'PR #28', task: 'T-9', title: 'R3: 결제 타임아웃 설정 변경', branch: 'gen/t-9-payment-timeout', reviews: ['통과'], gate: { result: '통과', lines: 14, files: 1, paths: 'shop-api/payment/' }, merged: true, mergedBy: 'human', target: exampleTarget('shop-api/payment/') },
+    { id: 'PR #29', task: 'T-10', title: 'R1: 결제 설정 변경 카나리 배포', branch: 'gen/t-10-payment-canary', reviews: ['통과'], gate: { result: '통과', lines: 24, files: 2, paths: 'shop-api/payment/' }, merged: false, target: exampleTarget('shop-api/payment/') },
   ],
   threads: [
     { id: 'TH-7', on: 'SPEC-7', title: 'SPEC-7 · 결제 실패 후 장바구니 유지', messages: [
@@ -474,8 +490,27 @@ export const initialState: State = {
       rollbackCheck: { target: 'shop-api v2.4.1', result: '승인', why: '장애 2분 전 배포, 그 사이 PR #28 머지' },
       linked: true, followUp: 'REQ-101',
     },
+    // 예시: 사건 여러 건 (흐름 시연은 첫 사건 ctx_inc_0001을 쓴다)
+    {
+      ctx: 'ctx_inc_0002', title: '배송 조회 지연 (택배사 API 타임아웃)', at: '10-22 17:30',
+      candidates: [],
+      linked: false,
+    },
+    {
+      ctx: 'ctx_inc_0003', title: '도서 상세 이미지 깨짐 (shop-web 5xx 3%)', at: '10-23 09:12',
+      candidates: [{ pr: 'PR #27', spec: 'SPEC-4', para: 'R1', mergedAt: '10-20 16:40' }],
+      rollbackCheck: { target: 'shop-web v1.8.0', result: '거절', why: 'PR #27은 출간일 문구만 바꿈, 이미지 경로와 무관 → CDN 쪽 원인' },
+      linked: false,
+    },
   ],
   activity: [
+    { t: '10-22 17:30', ctx: 'ctx_inc_0002', from: 'orchestrator', to: 'planning', point: 'incident.opened', kind: '이벤트', text: '배송 조회 지연 사건 개시' },
+    { t: '10-22 17:31', ctx: 'ctx_inc_0002', from: 'infra', to: 'planning', point: 'find_related_prs', kind: 'A2A', grade: 'read', text: '장애 구간 직전 머지 PR 없음 (후보 0건)' },
+    { t: '10-22 17:33', ctx: 'ctx_inc_0002', from: 'data', to: 'planning', point: 'find_related_prs', kind: 'A2A', grade: 'read', text: '택배사 API 응답 시간만 늘어남 → 외부 원인으로 봄' },
+    { t: '10-23 09:12', ctx: 'ctx_inc_0003', from: 'orchestrator', to: 'planning', point: 'incident.opened', kind: '이벤트', text: '도서 상세 이미지 깨짐 사건 개시' },
+    { t: '10-23 09:13', ctx: 'ctx_inc_0003', from: 'infra', to: 'planning', point: 'find_related_prs', kind: 'A2A', grade: 'read', text: '장애 3일 전 머지 PR 후보 1건 회신 (PR #27, SPEC-4 R1)' },
+    { t: '10-23 09:15', ctx: 'ctx_inc_0003', from: 'safety', to: 'planning', point: 'verify_rollback_target', kind: 'A2A', grade: 'read', text: 'rollback_deployment(B) 교차검증 → 거절 (PR #27 변경 경로와 무관)' },
+    { t: '10-23 09:16', ctx: 'ctx_inc_0003', from: 'planning', to: 'orchestrator', point: 'link_incident', kind: 'A2A', grade: 'read', text: '연결할 문단 없음 → 사건 연결 보류' },
     { t: '10-21 14:04', ctx: 'ctx_inc_0001', from: 'orchestrator', to: 'planning', point: 'incident.opened', kind: '이벤트', text: '결제 API 장애 사건 개시' },
     { t: '10-21 14:05', ctx: 'ctx_inc_0001', from: 'infra', to: 'planning', point: 'find_related_prs', kind: 'A2A', grade: 'read', text: '장애 직전 머지 PR 후보 1건 회신 (PR #28, SPEC-5 R3)' },
     { t: '10-21 14:06', ctx: 'ctx_inc_0001', from: 'data', to: 'planning', point: 'find_related_prs', kind: 'A2A', grade: 'read', text: '이상 구간 14:00~14:10 직전 배포 질의 → PR #28' },
@@ -861,7 +896,7 @@ function mergeCore(s: State, prId: string, by: 'rule' | 'review' | 'human', rule
 // 검수 통과 PR: 기준 안이면 자동 머지, 아니면 교차검증(되돌릴 수 없는 일은 사람)으로
 function tryMerge(s: State, prId: string): State {
   const pr = s.prs.find((p) => p.id === prId)
-  if (!pr || pr.merged || pr.reviews[pr.reviews.length - 1] !== '통과' || pendingReview(s, pr.id)) return s
+  if (!pr || pr.merged || pr.target?.status === 'proposed' || pr.target?.status === 'rejected' || pr.reviews[pr.reviews.length - 1] !== '통과' || pendingReview(s, pr.id)) return s
   const info = prInfo(s, pr)
   const irr = irreversibleOf([info.spec ? specText(info.spec) : '', pr.title].join(' '))
   const miss = pr.reviews.filter((x) => x === '불일치').length
@@ -882,6 +917,8 @@ function genPrs(s: State, specId: string, merge = true): State {
     return {
       id: `PR #${n + i}`, task: t.id, title: `${t.para}: ${t.title}`, branch: `gen/${t.id.toLowerCase()}`,
       reviews: [special && i === 1 ? '불일치' : '통과'], gate: { result: '통과', lines: est.lines, files: est.files, paths: est.paths }, merged: false,
+      // 예시: 결제 화면 작업은 레포 판단이 애매해 사람 승인 대기
+      target: exampleTarget(est.paths, special && i === 1 ? 'proposed' : 'approved'),
     }
   })
   let next: State = {
@@ -1384,6 +1421,23 @@ function inner(s: State, a: Action): State {
       const r = s.requests.find((x) => x.id === a.request)
       if (!r || s.specs.some((x) => x.id === r.spec || x.request === r.id)) return s
       return draftSpecFor(s, r, false)
+    }
+    case 'approveRepo': {
+      const pr = s.prs.find((p) => p.id === a.pr)
+      if (!pr?.target || pr.target.status !== 'proposed') return s
+      const to = EXAMPLE_REPOS.find((x) => x.connectionId === (a.connection ?? pr.target!.connectionId)) ?? pr.target
+      const target: RepoTarget = { ...pr.target, connectionId: to.connectionId, repo: to.repo, status: 'approved', decidedBy: '사람', decidedAt: now() }
+      const next: State = {
+        ...s,
+        prs: s.prs.map((p) => (p.id === a.pr ? { ...p, target } : p)),
+        activity: [...s.activity, { t: now(), ctx: prInfo(s, pr).ctx, from: 'human', to: 'planning', point: 'approve_repo', kind: '사람', grade: 'A', text: `${a.pr} 대상 레포 ${to.repo} 승인` }],
+      }
+      return tryMerge(next, a.pr)
+    }
+    case 'rejectRepo': {
+      const pr = s.prs.find((p) => p.id === a.pr)
+      if (!pr?.target || pr.target.status !== 'proposed') return s
+      return { ...s, prs: s.prs.map((p) => (p.id === a.pr ? { ...p, target: { ...pr.target!, status: 'rejected', decidedBy: '사람', decidedAt: now() } } : p)) }
     }
     case 'decideReview':
       return decideReview(s, a.review)
