@@ -169,7 +169,11 @@ class ReceiptCheck:
 
 
 def order_totals(order: Order) -> tuple[int, int]:
-    """`(실결제 현금, 포인트 쓰기 전 총액)`. 배송비를 포함한다."""
+    """`(실결제 현금, 포인트 쓰기 전 총액)`. 배송비를 포함한다.
+
+    품목의 `paid_amount`는 쿠폰 할인(`coupon_share`)을 이미 뺀 값이라, 두 값 모두 쿠폰을 쓴 주문이면
+    쿠폰 할인 후 금액이다 (영수증의 "총 결제금액"과 맞는 값).
+    """
     gross = sum(i.paid_amount + i.points_share for i in order.items) + order.shipping_fee
     return gross - order.points_used, gross
 
@@ -221,7 +225,10 @@ def compare(facts: ReceiptFacts, order: Order) -> ReceiptCheck:
                 check.unmatched_receipt_items.append(line.title)
                 continue
             remaining.remove(best)
-            if line.amount != best.paid_amount + best.points_share:
+            # 영수증 품목 줄은 쿠폰 적용 후 금액일 수도, 적용 전 정가일 수도 있다.
+            # 둘 중 하나와 같으면 맞는 걸로 본다
+            after_coupon = best.paid_amount + best.points_share
+            if line.amount not in (after_coupon, after_coupon + best.coupon_share):
                 if "RECEIPT_ITEM_AMOUNT_MISMATCH" not in check.mismatches:
                     check.mismatches.append("RECEIPT_ITEM_AMOUNT_MISMATCH")
         check.missing_from_receipt = [i.title for i in remaining]

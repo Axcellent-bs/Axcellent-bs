@@ -101,6 +101,7 @@ def to_order(data: dict[str, Any]) -> Order | None:
         delivered_at=delivered_at,
         shipping_fee=data.get("shipping_fee", 0),
         points_used=data.get("points_used", 0),
+        coupon_discount=data.get("coupon_discount") or 0,
         payment_id=payment["payment_id"],
         items=[
             OrderItem(
@@ -109,6 +110,7 @@ def to_order(data: dict[str, Any]) -> Order | None:
                 qty=item["qty"],
                 paid_amount=item["paid_amount"],
                 points_share=item.get("points_share", 0),
+                coupon_share=item.get("coupon_share") or 0,
             )
             for item in data.get("items", [])
         ],

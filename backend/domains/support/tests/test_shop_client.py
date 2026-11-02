@@ -181,6 +181,20 @@ def test_shop_order_is_mapped_to_the_judging_model() -> None:
     assert before_delivery is not None and before_delivery.status == "preparing"
 
 
+def test_coupon_fields_are_mapped_and_missing_ones_default_to_zero() -> None:
+    """shop-api #280 이후 주문은 쿠폰 할인 필드를 담는다. 없던 주문이나 null은 0으로 읽는다."""
+    base = shop_order()
+    item = {**base["items"][0], "coupon_share": 2000, "paid_amount": 18000}
+    order = shop_client.to_order(shop_order(coupon_discount=2000, items=[item]))
+    assert order is not None and order.coupon_discount == 2000
+    assert [(i.paid_amount, i.coupon_share) for i in order.items] == [(18000, 2000)]
+    plain = shop_client.to_order(shop_order())  # 쿠폰 필드가 없는 주문
+    assert plain is not None and plain.coupon_discount == 0
+    assert [i.coupon_share for i in plain.items] == [0]
+    nulls = shop_client.to_order(shop_order(coupon_discount=None))
+    assert nulls is not None and nulls.coupon_discount == 0
+
+
 def test_unpaid_orders_are_not_mapped() -> None:
     assert shop_client.to_order(shop_order(status="pending_payment", payments=[])) is None
     failed = [{**shop_order()["payments"][0], "status": "failed"}]
