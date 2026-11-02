@@ -26,6 +26,8 @@ from planning_agent.runtime import set_service
 from planning_agent.vcs import CheckRun, MockVcsAdapter, VcsError, parse_trace
 from planning_agent.vcs.github import GithubVcsAdapter, added_lines
 
+pytestmark = pytest.mark.role("dev")  # 분리 3단계: 개발 서비스 역할로 돈다
+
 FAKE_TOKEN = "fake-token-0123456789"
 REPO = "acme/shop"
 T0 = datetime(2026, 10, 22, 1, 0, tzinfo=UTC)

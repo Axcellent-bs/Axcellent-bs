@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from ax_contracts.schemas import ExecuteDecision
 from planning_agent.domain.service import PlanningService
 from planning_agent.related import LexicalEmbedder, Relater, _Judged, _Judgement
@@ -58,6 +60,7 @@ def _req(svc: PlanningService, title: str):
     return next(r for r in svc.state.requests if r.title == title)
 
 
+@pytest.mark.role("planning")
 def test_lexical_search_finds_similar_without_llm() -> None:
     svc = PlanningService(gate=_gate, relater=Relater(LexicalEmbedder()))
     _ticket(svc, "결제 실패하면 장바구니가 비워져요", "k1")
@@ -69,12 +72,14 @@ def test_lexical_search_finds_similar_without_llm() -> None:
     assert any(a.point == "request.related" and req.id in a.text for a in svc.state.activity)
 
 
+@pytest.mark.role("planning")
 def test_unrelated_request_has_no_candidates() -> None:
     svc = PlanningService(gate=_gate, relater=Relater(LexicalEmbedder()))
     _ticket(svc, "회의실 예약 화면 글꼴 크기", "k2")
     assert _req(svc, "회의실 예약 화면 글꼴 크기").related == []
 
 
+@pytest.mark.role("planning")
 def test_llm_decides_relation_only_within_candidates() -> None:
     svc = PlanningService(gate=_gate, relater=None)
     target = _req(svc, "결제 실패 뒤 장바구니가 비워진다")
@@ -93,6 +98,7 @@ def test_llm_decides_relation_only_within_candidates() -> None:
     assert "REQ-999" not in {c["id"] for c in llm.data["candidates"]}
 
 
+@pytest.mark.role("planning")
 def test_conflict_is_kept_and_none_dropped() -> None:
     svc = PlanningService(gate=_gate, relater=None)
     pool = [r.id for r in svc.state.requests]
@@ -104,6 +110,7 @@ def test_conflict_is_kept_and_none_dropped() -> None:
     assert all(x.relation == "conflict" for x in rel)
 
 
+@pytest.mark.role("planning")
 def test_llm_failure_falls_back_to_search_only() -> None:
     svc = PlanningService(gate=_gate, relater=Relater(LexicalEmbedder(), llm=FakeLLM(fail=True)))
     _ticket(svc, "결제 실패하면 장바구니가 비워져요", "k5")
@@ -111,6 +118,7 @@ def test_llm_failure_falls_back_to_search_only() -> None:
     assert rel and all(x.by == "lexical" and x.relation == "related" for x in rel)
 
 
+@pytest.mark.role("planning")
 def test_embedding_failure_falls_back_to_lexical() -> None:
     svc = PlanningService(gate=_gate, relater=Relater(Broken()))
     _ticket(svc, "결제 실패하면 장바구니가 비워져요", "k6")
@@ -118,12 +126,14 @@ def test_embedding_failure_falls_back_to_lexical() -> None:
     assert rel and all(x.by == "lexical" for x in rel)
 
 
+@pytest.mark.role("planning")
 def test_no_relater_keeps_requests_untouched() -> None:
     svc = PlanningService(gate=_gate, relater=None)
     _ticket(svc, "결제 실패하면 장바구니가 비워져요", "k7")
     assert _req(svc, "결제 실패하면 장바구니가 비워져요").related == []
 
 
+@pytest.mark.role("dev")
 def test_open_prs_on_same_file_mark_each_request_as_conflict() -> None:
     """같은 파일을 고치는 열린 PR이 둘이면 (검색 없이) 두 요청에 서로 충돌 가능으로 표시한다."""
     svc = PlanningService(gate=_gate, relater=None)
@@ -171,6 +181,7 @@ def test_open_prs_on_same_file_mark_each_request_as_conflict() -> None:
     assert any(a.point == "request.related" and "PR #91" in a.text for a in st.activity)
 
 
+@pytest.mark.role("planning")
 def test_update_of_finished_request_is_not_conflict() -> None:
     """앞 요청을 다시 바꾸는 건(3만 원 → 5만 원) update로 남는다. LLM에 상태·요청자를 같이 준다."""
     svc = PlanningService(gate=_gate, relater=None)
@@ -190,6 +201,7 @@ def _spec_of(svc: PlanningService, req_id: str):
     return next((s for s in svc.state.specs if s.id == req.spec), None)
 
 
+@pytest.mark.role("planning")
 def test_open_conflict_holds_auto_confirm_for_human() -> None:
     """아직 안 끝난 요청과 충돌할 수 있으면 기획서를 자동 확정하지 않고 사람 확인으로 둔다."""
     svc = PlanningService(gate=_gate, relater=None)
@@ -203,6 +215,7 @@ def test_open_conflict_holds_auto_confirm_for_human() -> None:
     assert "spec_open_conflict" in sp.auto_review.rules
 
 
+@pytest.mark.role("planning")
 def test_no_conflict_keeps_auto_confirm_rules() -> None:
     svc = PlanningService(gate=_gate, relater=None)
     out = _ticket(svc, "결제 실패하면 장바구니가 비워져요", "kc2")

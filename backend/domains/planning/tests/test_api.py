@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 
 from planning_agent.main import app
 
+pytestmark = pytest.mark.role("planning")  # 분리 3단계: 기획 서비스 역할로 돈다
+
 BASE = "/api/planning"
 
 

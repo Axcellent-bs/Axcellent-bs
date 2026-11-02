@@ -29,6 +29,8 @@ from planning_agent.domain.deploy import (
 from planning_agent.domain.models import PR, PrGate
 from planning_agent.main import app
 
+pytestmark = pytest.mark.role("dev")  # 분리 3단계: 개발 서비스 역할로 돈다
+
 BASE = "/api/planning"
 T0 = kst("10-21 14:02")
 CAUSE_WORDS = ("원인", "때문", "탓", "로 인해", "유발")

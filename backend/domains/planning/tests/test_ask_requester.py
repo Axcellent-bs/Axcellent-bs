@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
 from fastapi.testclient import TestClient
 
 from ax_contracts.schemas import AgentRequest, AgentResult, TaskStatus
@@ -15,6 +16,8 @@ from planning_agent.ask_requester import Asker
 from planning_agent.domain.service import PlanningService
 from planning_agent.main import app
 from planning_agent.runtime import set_service
+
+pytestmark = pytest.mark.role("planning")  # 분리 3단계: 기획 서비스 역할로 돈다
 
 TITLE = "품절 상품 재입고 알림 기능 추가"
 

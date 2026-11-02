@@ -28,6 +28,7 @@ VERIFY = {
 # ---- 1. Agent Card 형식·서빙
 
 
+@pytest.mark.role("planning")
 def test_agent_card_format_and_served() -> None:
     card = load_card()
     assert (card.name, card.owner, card.url) == ("planning", "예진", "http://planning:8101/a2a")
@@ -75,6 +76,7 @@ def test_agent_card_format_and_served() -> None:
 # ---- 2. 결정성
 
 
+@pytest.mark.role("dev")
 def test_find_related_prs_is_deterministic(a2a_body) -> None:
     client = TestClient(app)
     first = client.post("/a2a", json=a2a_body("find_related_prs", WINDOW)).json()
@@ -84,6 +86,7 @@ def test_find_related_prs_is_deterministic(a2a_body) -> None:
     assert first["evidence"] == second["evidence"]
 
 
+@pytest.mark.role("dev")
 def test_verify_rollback_target_is_deterministic(a2a_body) -> None:
     client = TestClient(app)
     body = a2a_body("verify_rollback_target", VERIFY, token="mock:safety")
@@ -97,6 +100,7 @@ def test_verify_rollback_target_is_deterministic(a2a_body) -> None:
 # ---- 3. 루프 거부
 
 
+@pytest.mark.role("dev")
 def test_loop_is_rejected(a2a_body) -> None:
     body = a2a_body("find_related_prs", WINDOW, path=["infra", "planning"])
     result = TestClient(app).post("/a2a", json=body).json()
@@ -114,12 +118,14 @@ def test_loop_is_rejected(a2a_body) -> None:
         ("verify_rollback_target", VERIFY, "mock:infra"),
     ],
 )
+@pytest.mark.role("dev")
 def test_requester_outside_acl_is_rejected(a2a_body, skill, payload, token) -> None:
     body = a2a_body(skill, payload, token=token, idempotency_key="ctx_inc_0001:link:28")
     result = TestClient(app).post("/a2a", json=body).json()
     assert (result["status"], result["outcome"]) == ("rejected", "FORBIDDEN_SKILL")
 
 
+@pytest.mark.role("planning")
 def test_human_buttons_are_not_a2a_skills(a2a_body) -> None:
     """확정·머지·승급 승인은 REST로만 받는다."""
     client = TestClient(app)
@@ -132,6 +138,7 @@ def test_human_buttons_are_not_a2a_skills(a2a_body) -> None:
 # ---- 5. 멱등성
 
 
+@pytest.mark.role("dev")
 def test_link_incident_same_idempotency_key_twice(service, a2a_body) -> None:
     payload = {
         "incident_context_id": "ctx_inc_0007",
@@ -152,6 +159,7 @@ def test_link_incident_same_idempotency_key_twice(service, a2a_body) -> None:
     assert [c.action for c in service.gate_calls].count("link_incident") == 1
 
 
+@pytest.mark.role("dev")
 def test_state_changing_skill_needs_idempotency_key(service, a2a_body) -> None:
     payload = {"incident_context_id": "ctx_inc_0007", "pr_numbers": [28]}
     result = TestClient(app).post("/a2a", json=a2a_body("link_incident", payload)).json()
@@ -166,6 +174,7 @@ INJECTION = {
 }
 
 
+@pytest.mark.role("dev")
 def test_untrusted_text_does_not_change_read_skills(a2a_body) -> None:
     client = TestClient(app)
     for skill, payload, token in (
@@ -183,6 +192,7 @@ def test_untrusted_text_does_not_change_read_skills(a2a_body) -> None:
         assert (clean["output"], clean["outcome"]) == (dirty["output"], dirty["outcome"])
 
 
+@pytest.mark.role("dev")
 def test_untrusted_text_does_not_change_link_incident(service, a2a_body) -> None:
     from planning_agent.domain.service import PlanningService
     from planning_agent.runtime import set_service
@@ -209,51 +219,58 @@ def test_untrusted_text_does_not_change_link_incident(service, a2a_body) -> None
 # ---- 7. 계산은 코드로 (LLM을 부르지 않는다)
 
 
-def test_numbers_come_from_code_not_llm(service, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_numbers_come_from_code_not_llm(wire, monkeypatch: pytest.MonkeyPatch) -> None:
     def no_llm(*args, **kwargs):
         raise AssertionError("LLM을 부르면 안 된다")
 
     monkeypatch.setattr(llm.LLMClient, "__init__", no_llm)
     monkeypatch.setattr(llm.MockLLMClient, "__init__", no_llm)
+    P, D = wire.planning, wire.dev
 
     assert estimate("기획전 페이지 안내 문구 전체 교체") == (45, 3)
     assert estimate("마이페이지 메뉴 라벨 오타 수정") == (4, 1)
-    assert not check_simple("쿠폰 문구 수정", service.state.auto_policy).ok
+    assert not check_simple("쿠폰 문구 수정", P.state.auto_policy).ok
 
-    asyncio.run(service.inbound("support_simple"))
-    asyncio.run(service.inbound("hr_draft"))
-    asyncio.run(service.accept_draft("REQ-22"))  # 이미 자동 채택돼 바뀌지 않는다
-    m = compute_metrics(service.state)
-    prs = service.state.prs
-    assert m["done_criteria_match_rate"] == 100  # PR #28, 자동 PR 모두 마지막 검수 통과
-    assert m["first_review_pass_rate"] == 100
+    wire.run(P.inbound("support_simple"))
+    wire.run(P.inbound("hr_draft"))
+    wire.run(P.accept_draft("REQ-22"))  # 이미 자동 채택돼 바뀌지 않는다
+    # PR 지표는 PR을 만드는 개발 서비스, 초안·경고·사람 문장은 기획 서비스 숫자로 본다
+    dev_m, plan_m = compute_metrics(D.state), compute_metrics(P.state)
+    assert dev_m["done_criteria_match_rate"] == 100  # PR #28, 자동 PR 모두 마지막 검수 통과
+    assert dev_m["first_review_pass_rate"] == 100
     # (38 + 3 + 52) / 3 = 31. 개선 초안 REQ-22도 사람 클릭 없이 PR까지 간다 (generate_prs 52분)
-    assert m["first_pr_minutes_avg"] == 31
-    assert m["draft_adoption_rate"] == 33  # 3건 중 1건
-    assert m["warnings"] == 1
-    assert m["basis"]["pr_count"] == len(prs) == 3
+    assert dev_m["first_pr_minutes_avg"] == 31
+    assert dev_m["basis"]["pr_count"] == len(D.state.prs) == 3
+    assert P.state.prs == D.state.prs  # 기획은 개발이 돌려준 PR을 그대로 가진다
+    assert plan_m["draft_adoption_rate"] == 33  # 3건 중 1건
+    assert plan_m["warnings"] == 1
     # 사람 문장: SPEC-5의 2 + 기획·개발 밖 메시지(data·support·hr 각 1)
-    assert m["human_sentences"] == 2 + 3
+    assert plan_m["human_sentences"] == 2 + 3
 
 
 # ---- 8. 상태 변경은 execute 경유 (관문 거절·무응답이면 실행하지 않음)
 
 
-def test_state_changes_go_through_execute(service) -> None:
-    asyncio.run(service.inbound("support_simple"))
-    actions = [c.action for c in service.gate_calls]
-    assert actions == [
+def test_state_changes_go_through_execute(wire) -> None:
+    wire.run(wire.planning.inbound("support_simple"))
+    # 기획은 요청·기획서·작업까지, 개발은 넘겨받은 뒤 PR·머지·기록. 넘기기도 관문을 지난다
+    assert [c.action for c in wire.planning.gate_calls] == [
         "create_ticket",
         "write_spec",
         "confirm_spec",
         "split_tasks",
+        "receive_dev_result",
+    ]
+    assert [c.action for c in wire.dev.gate_calls] == [
+        "start_dev",
         "generate_pr",
         "review_pr",
         "merge_pr",
         "record_case",
     ]
-    assert all(c.status == "executed" for c in service.gate_calls)
-    assert all(c.idempotency_key.startswith("ctx_req_0021:") for c in service.gate_calls)
+    calls = [*wire.planning.gate_calls, *wire.dev.gate_calls]
+    assert all(c.status == "executed" for c in calls)
+    assert all(c.idempotency_key.startswith("ctx_req_0021:") for c in calls)
 
 
 async def _rejected(request) -> ExecuteDecision:
@@ -264,6 +281,7 @@ async def _no_answer(request) -> ExecuteDecision:
     raise TimeoutError("safety 무응답")
 
 
+@pytest.mark.role("planning")
 @pytest.mark.parametrize("send", [_rejected, _no_answer])
 def test_gate_refusal_means_nothing_runs(service, monkeypatch, send) -> None:
     monkeypatch.setattr(gate_module, "_send_to_safety", send)
@@ -276,6 +294,7 @@ def test_gate_refusal_means_nothing_runs(service, monkeypatch, send) -> None:
     assert service.gate_calls and all(c.status == "rejected" for c in service.gate_calls)
 
 
+@pytest.mark.role("dev")
 def test_gate_refusal_in_merge_keeps_pr_open(service, monkeypatch) -> None:
     asyncio.run(service.confirm_spec("SPEC-7"))
 
@@ -297,6 +316,7 @@ def test_gate_refusal_in_merge_keeps_pr_open(service, monkeypatch) -> None:
     assert not pr.merged and pr.merged_at is None
 
 
+@pytest.mark.role("dev")
 def test_gate_refusal_in_link_incident_a2a(service, monkeypatch, a2a_body) -> None:
     monkeypatch.setattr(gate_module, "_send_to_safety", _no_answer)
     before = service.snapshot()
@@ -310,6 +330,7 @@ def test_gate_refusal_in_link_incident_a2a(service, monkeypatch, a2a_body) -> No
     assert service.snapshot() == before
 
 
+@pytest.mark.role("planning")
 def test_rest_action_gate_refusal_is_409(service, monkeypatch) -> None:
     monkeypatch.setattr(gate_module, "_send_to_safety", _rejected)
     res = TestClient(app).post("/api/planning/actions", json={"type": "mergePr", "pr": "PR #28"})

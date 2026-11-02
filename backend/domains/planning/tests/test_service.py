@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from ax_agent_template import execute as gate_module
 from ax_contracts.schemas import ExecuteDecision
 from planning_agent.domain.models import Doc
@@ -27,6 +29,7 @@ def acts(service, ctx: str):
 # ---- 중복 연결
 
 
+@pytest.mark.role("planning")
 def test_same_title_twice_becomes_one_request_and_linked_duplicate(service) -> None:
     results = [run(service.inbound("support_ticket")) for _ in range(4)]
     coupon = [r for r in service.state.requests if r.title.startswith("쿠폰 적용 후")]
@@ -46,52 +49,56 @@ def test_same_title_twice_becomes_one_request_and_linked_duplicate(service) -> N
 # ---- 간단 요청 무인 처리
 
 
-def test_simple_request_completes_without_human(service) -> None:
-    result = run(service.inbound("support_simple"))
-    r = req(service, "REQ-21")
+def test_simple_request_completes_without_human(wire) -> None:
+    result = wire.run(wire.planning.inbound("support_simple"))
+    r = req(wire.planning, "REQ-21")
     assert r.title == "상품 상세의 배송 안내 문구 오타 수정"
     assert r.auto and r.auto.ok and r.state == "완료"
     assert result.output == {"request_id": "REQ-21", "auto": True}
-    spec = next(s for s in service.state.specs if s.id == r.spec)
+    spec = next(s for s in wire.planning.state.specs if s.id == r.spec)
     assert (spec.id, spec.status, spec.auto) == ("SPEC-8", "확정", True)
-    pr = service.state.prs[-1]
+    pr = wire.dev.state.prs[-1]
     assert (pr.id, pr.merged, pr.auto, pr.gate.paths) == ("PR #31", True, True, "shop-web/")
     assert pr.merged_at is not None
     assert pr.changed_paths == ["shop-web/pages/notice.tsx"]
-    steps = acts(service, r.context_id)
+    assert wire.planning.state.prs[-1] == pr  # 기획은 개발이 돌려준 PR을 그대로 가진다
+    steps = wire.activity(r.context_id)
     assert len(steps) >= 10
     points = [a.point for a in steps]
     assert "execute(merge_pr)" in points and "github_merge_pull" in points
     assert next(a for a in steps if a.point == "execute(merge_pr)").grade == "B"
     assert next(a for a in steps if a.point == "execute(generate_pr)").grade == "B"
     assert not any(a.kind == "사람" for a in steps)  # 사람 클릭 0번
-    assert steps[-1].to == "support" and "완료" in steps[-1].text
-    assert {m.to for m in service.state.outbox} >= {"hr", "support", "safety", "shop"}
-    assert service.state.first_pr_minutes[-1] == 3
-    assert service.state.auto_policy.history[-1].pr == "PR #31"
+    assert any(a.to == "support" and "완료" in a.text for a in steps)
+    outbox = {m.to for m in [*wire.planning.state.outbox, *wire.dev.state.outbox]}
+    assert outbox >= {"hr", "support", "safety", "shop"}
+    assert wire.dev.state.first_pr_minutes[-1] == 3
+    assert wire.dev.state.auto_policy.history[-1].pr == "PR #31"
 
 
-def test_three_simple_requests_propose_then_approve_promotion(service) -> None:
+def test_three_simple_requests_propose_then_approve_promotion(wire) -> None:
+    dev = wire.dev  # 자동 처리 범위의 주인은 개발 서비스 (기획은 받은 범위로 간단 요청을 가른다)
     for _ in range(2):
-        run(service.inbound("support_simple"))
-    assert service.state.auto_policy.proposal is None
-    run(service.inbound("support_simple"))
-    pol = service.state.auto_policy
+        wire.run(wire.planning.inbound("support_simple"))
+    assert dev.state.auto_policy.proposal is None
+    wire.run(wire.planning.inbound("support_simple"))
+    pol = dev.state.auto_policy
     assert pol.level == 1 and pol.streak == 3
     assert pol.proposal is not None and pol.proposal.to == 2
     assert pol.log[-1].by == "자동"
-    propose = [a for a in service.state.activity if a.point == "auto_policy.propose"]
+    propose = [a for a in dev.state.activity if a.point == "auto_policy.propose"]
     assert len(propose) == 1 and propose[0].grade == "C" and propose[0].kind == "execute"
-    assert "auto_policy_propose" in [c.action for c in service.gate_calls]
+    assert "auto_policy_propose" in [c.action for c in dev.gate_calls]
 
-    run(service.approve_promotion())
-    pol = service.state.auto_policy
+    wire.run(dev.approve_promotion())
+    pol = dev.state.auto_policy
     assert (pol.level, pol.streak, pol.proposal) == (2, 0, None)
     assert pol.log[-1].by == "사람" and "L1 → L2" in pol.log[-1].text
-    assert service.state.activity[-1].point == "auto_policy.updated"
+    assert dev.state.activity[-1].point == "auto_policy.updated"
+    assert wire.planning.state.auto_policy == pol
 
 
-def test_promotion_proposal_held_in_c_queue_is_normal(service, monkeypatch) -> None:
+def test_promotion_proposal_held_in_c_queue_is_normal(wire, monkeypatch) -> None:
     async def hold_c(request) -> ExecuteDecision:
         if request.action == "auto_policy_propose":
             return ExecuteDecision(
@@ -105,38 +112,41 @@ def test_promotion_proposal_held_in_c_queue_is_normal(service, monkeypatch) -> N
 
     monkeypatch.setattr(gate_module, "_send_to_safety", hold_c)
     for _ in range(3):
-        run(service.inbound("support_simple"))
-    assert service.state.auto_policy.proposal is not None
-    assert service.state.auto_policy.level == 1  # 승인 전에는 그대로
+        wire.run(wire.planning.inbound("support_simple"))
+    assert wire.dev.state.auto_policy.proposal is not None
+    assert wire.dev.state.auto_policy.level == 1  # 승인 전에는 그대로
 
 
-def test_reject_promotion_resets_streak(service) -> None:
+def test_reject_promotion_resets_streak(wire) -> None:
     for _ in range(3):
-        run(service.inbound("support_simple"))
-    run(service.reject_promotion())
-    pol = service.state.auto_policy
+        wire.run(wire.planning.inbound("support_simple"))
+    wire.run(wire.dev.reject_promotion())
+    pol = wire.dev.state.auto_policy
     assert (pol.level, pol.streak, pol.proposal) == (1, 0, None)
     assert "승급 보류" in pol.log[-1].text
 
 
-def test_auto_pr_incident_demotes_scope(service) -> None:
+def test_auto_pr_incident_demotes_scope(wire) -> None:
+    dev = wire.dev
     for _ in range(3):
-        run(service.inbound("support_simple"))
-    run(service.approve_promotion())
-    assert service.state.auto_policy.level == 2
-    result = run(service.inbound("orch_incident"))
-    pol = service.state.auto_policy
+        wire.run(wire.planning.inbound("support_simple"))
+    wire.run(dev.approve_promotion())
+    assert dev.state.auto_policy.level == 2
+    # 장애 연결(link_incident)은 개발 서비스 일이다
+    result = wire.run(dev.inbound("orch_incident"))
+    pol = dev.state.auto_policy
     assert pol.level == 1 and pol.streak == 0 and pol.proposal is None
-    last_pr = service.state.prs[-1].id
+    last_pr = dev.state.prs[-1].id
     assert next(h for h in pol.history if h.pr == last_pr).result == "장애 연결"
     assert pol.log[-1].by == "자동" and "L2 → L1" in pol.log[-1].text
     assert result.output["incident"] == "ctx_inc_0002"
-    assert service.state.incidents[0].context_id == "ctx_inc_0002"
-    follow = req(service, result.output["follow_up_request_id"])
+    assert dev.state.incidents[0].context_id == "ctx_inc_0002"
+    follow = req(dev, result.output["follow_up_request_id"])
     assert follow.title == f"{last_pr} 관련 재발 방지 검토"
-    assert any(a.point == "auto_policy.updated" for a in acts(service, "ctx_inc_0002"))
+    assert any(a.point == "auto_policy.updated" for a in acts(dev, "ctx_inc_0002"))
 
 
+@pytest.mark.role("planning")
 def test_whole_text_request_waits_for_human_at_l1(service) -> None:
     for _ in range(3):
         run(service.inbound("marketing_simple"))
@@ -154,6 +164,7 @@ def test_whole_text_request_waits_for_human_at_l1(service) -> None:
     assert check_simple(r.title, pol).ok
 
 
+@pytest.mark.role("planning")
 def test_l0_stops_auto_processing(service) -> None:
     service.state.auto_policy.level = 0
     run(service.inbound("support_simple"))
@@ -165,58 +176,62 @@ def test_l0_stops_auto_processing(service) -> None:
 # ---- 대표 흐름 REQ-12
 
 
-def test_req12_main_flow(service) -> None:
-    run(service.answer_question("SPEC-7", "품절 상품도 남겨 두고 품절 표시해 주세요"))
-    spec = next(s for s in service.state.specs if s.id == "SPEC-7")
+def test_req12_main_flow(wire) -> None:
+    P, D = wire.planning, wire.dev  # 질문 답·확정은 기획, PR·머지는 개발
+    wire.run(P.answer_question("SPEC-7", "품절 상품도 남겨 두고 품절 표시해 주세요"))
+    spec = next(s for s in P.state.specs if s.id == "SPEC-7")
     assert spec.question is None
     assert spec.paras[0].text == "결제 실패 시 장바구니 상태 보존 (품절 상품은 남기고 품절 표시)"
-    decision = service.state.decisions[-1]
+    decision = P.state.decisions[-1]
     assert (decision.id, decision.spec, decision.from_) == ("D-1", "SPEC-7", "스레드 TH-7")
 
     # 질문은 닫혔지만 R2 인사 경고(DC-31)가 남아 자동 확정하지 않는다 → 교차검증 대기
-    spec = next(s for s in service.state.specs if s.id == "SPEC-7")
+    spec = next(s for s in P.state.specs if s.id == "SPEC-7")
     assert spec.status == "초안" and spec.auto_review is not None
     assert (spec.auto_review.state, spec.auto_review.rules) == (
         "교차검증 대기",
         ["spec_rejected_warning"],
     )
 
-    run(service.confirm_spec("SPEC-7"))  # 판단은 기존 사람 확정 버튼
+    wire.run(P.confirm_spec("SPEC-7"))  # 판단은 기존 사람 확정 버튼
     assert spec.status == "초안"  # 바뀐 것은 서비스 상태 (복사본 교체)
-    spec = next(s for s in service.state.specs if s.id == "SPEC-7")
+    spec = next(s for s in P.state.specs if s.id == "SPEC-7")
     assert spec.status == "확정"
-    tasks = [t for t in service.state.tasks if t.spec == "SPEC-7"]
+    # 작업은 기획이 나누고, 상태는 개발이 PR을 만든 뒤 돌려준 것 (T-11 자동 머지, T-12 사람 확인)
+    tasks = [t for t in P.state.tasks if t.spec == "SPEC-7"]
     assert [(t.id, t.para, t.owner, t.state) for t in tasks] == [
-        ("T-11", "R1", "백엔드", "진행 중"),
-        ("T-12", "R2", "프론트", "진행 중"),
+        ("T-11", "R1", "백엔드", "완료"),
+        ("T-12", "R2", "프론트", "머지 대기"),
     ]
     assert tasks[0].title == "결제 실패 시 장바구니 상태 보존"
-    assert req(service, "REQ-12").state == "작업 중"
+    assert req(P, "REQ-12").state == "작업 중"
 
-    run(service.generate_prs("SPEC-7"))
-    prs = [p for p in service.state.prs if p.task in {"T-11", "T-12"}]
-    assert [(p.id, p.reviews) for p in prs] == [("PR #31", ["통과"]), ("PR #32", ["불일치"])]
-    # PR #31: 검수 통과 + merge_pr 규칙 통과 → 자동 머지. PR #32: 검수 불일치 → 수정 대기
-    assert [t.state for t in service.state.tasks if t.spec == "SPEC-7"] == ["완료", "PR 검수"]
+    # 기획은 확정본을 개발에 넘기고, 개발은 받은 즉시 사람 클릭 없이 PR까지 잇는다 (start_dev flow)
+    prs = [p for p in D.state.prs if p.task in {"T-11", "T-12"}]
+    assert [p.id for p in prs] == ["PR #31", "PR #32"]
     assert prs[0].changed_paths == ["shop-api/cart/service.py"]
-    assert (prs[0].merged, prs[0].auto, prs[0].auto_review) == (True, True, None)
-    assert req(service, "REQ-12").state == "작업 중"
-
-    run(service.review_pr("PR #32"))
-    pr32 = service.state.prs[-1]
+    # PR #31: 검수 통과 + merge_pr 규칙 통과 → 자동 머지
+    assert (prs[0].reviews, prs[0].merged, prs[0].auto, prs[0].auto_review) == (
+        ["통과"], True, True, None,
+    )  # fmt: skip
+    # PR #32: 첫 검수 불일치 → 수정 후 재검수 통과. 결제 화면(shop-web/checkout/)은 머지 위험
+    # 경로라 자동 머지하지 않고 사람 확인
+    pr32 = prs[1]
     assert pr32.reviews == ["불일치", "통과"]
-    # 재검수 통과지만 결제 화면(shop-web/checkout/)은 머지 위험 경로 → 자동 머지 안 함, 사람 확인
     assert not pr32.merged and pr32.auto_review is not None
     assert pr32.auto_review.state == "사람 확인"
     assert pr32.auto_review.rules == ["irreversible"]
+    assert [t.state for t in P.state.tasks if t.spec == "SPEC-7"] == ["완료", "머지 대기"]
+    assert req(P, "REQ-12").state == "작업 중"
+    assert P.state.prs[-2:] == prs  # 기획은 개발이 돌려준 PR을 그대로 가진다
 
-    run(service.merge_pr("PR #31"))  # 이미 자동 머지 → 변화 없음
-    assert req(service, "REQ-12").state == "작업 중"
-    run(service.merge_pr("PR #32"))  # 판단은 기존 사람 머지 버튼
-    assert req(service, "REQ-12").state == "완료"
-    assert all(p.merged and p.merged_at for p in service.state.prs)
+    wire.run(D.merge_pr("PR #31"))  # 이미 자동 머지 → 변화 없음
+    assert req(D, "REQ-12").state == "작업 중"
+    wire.run(D.merge_pr("PR #32"))  # 판단은 기존 사람 머지 버튼
+    assert req(D, "REQ-12").state == "완료" and req(P, "REQ-12").state == "완료"
+    assert all(p.merged and p.merged_at for p in D.state.prs)
 
-    flow = acts(service, "ctx_req_0012")
+    flow = wire.activity("ctx_req_0012")
     texts = [a.text for a in flow if a.point == "record_case"]
     assert "① kind spec_confirmed · SPEC-7" in texts
     assert "① kind pr_merged · PR #31 (자동 머지)" in texts
@@ -224,16 +239,16 @@ def test_req12_main_flow(service) -> None:
     assert "① kind request_closed · REQ-12" in texts
     assert flow[-1].to == "support" and "완료" in flow[-1].text
     human = [a for a in flow if a.kind == "사람"]
-    assert len(human) == 2  # 확정 1 + 머지 1 (PR #31은 자동 머지)
+    assert [a.point for a in human] == ["기획서 확정", "PR 머지"]  # PR #31은 자동 머지
     assert [a.point for a in flow if a.point == "audit.auto_confirmed"] == []
-    assert next(s for s in service.state.specs if s.id == "SPEC-7").auto_review is None
-    assert service.state.prs[-1].auto_review is None
-    gated = [c.action for c in service.gate_calls]
-    for action in ("confirm_spec", "split_tasks", "generate_pr", "merge_pr", "record_case"):
-        assert action in gated
-    assert service.state.first_pr_minutes == [38, 52]
+    assert next(s for s in P.state.specs if s.id == "SPEC-7").auto_review is None
+    assert D.state.prs[-1].auto_review is None
+    assert {"confirm_spec", "split_tasks"} <= {c.action for c in P.gate_calls}
+    assert {"generate_pr", "merge_pr", "record_case"} <= {c.action for c in D.gate_calls}
+    assert D.state.first_pr_minutes == [38, 52]
 
 
+@pytest.mark.role("planning")
 def test_accept_draft_counts_adoption(service) -> None:
     run(service.accept_draft("REQ-13"))
     assert req(service, "REQ-13").state == "기획 중"
@@ -245,6 +260,7 @@ def test_accept_draft_counts_adoption(service) -> None:
 # ---- 역추적·프로젝트·문서
 
 
+@pytest.mark.role("dev")
 def test_trace_of_pr28_chain(service) -> None:
     steps = trace_of(service.state, "PR #28")
     assert [s.kind for s in steps] == [
@@ -269,6 +285,7 @@ def test_trace_of_pr28_chain(service) -> None:
     assert "SPEC-5 R3" in text and "결제 실패 코드 집계 (데이터분석)" in text
 
 
+@pytest.mark.role("planning")
 def test_project_req9_six_stages(service) -> None:
     r = req(service, "REQ-9")
     g = gather(service.state, r)
@@ -290,6 +307,7 @@ def test_project_req9_six_stages(service) -> None:
     assert [s["done"] for s in summary["stages"]] == [True] * 6
 
 
+@pytest.mark.role("planning")
 def test_gather_doc_block_counts(service) -> None:
     result = run(service.gather_doc("REQ-12"))
     assert result.output == {"doc_id": "DOC-2", "blocks": 15}
@@ -310,6 +328,7 @@ def test_gather_doc_block_counts(service) -> None:
     assert last.text.startswith("AI 어시스턴트 요청으로 REQ-9")
 
 
+@pytest.mark.role("planning")
 def test_doc_editing_actions(service) -> None:
     run(service.new_doc("회의 메모"))
     run(service.add_block("DOC-2", "todo", "할 일"))
@@ -328,6 +347,7 @@ def test_doc_editing_actions(service) -> None:
 # ---- 소통·연동 창구
 
 
+@pytest.mark.role("planning")
 def test_messages_decisions_and_outbox(service) -> None:
     run(service.post_message("CH-support", "REQ-12 오늘 확정 예정입니다"))
     out = service.state.outbox[-1]
@@ -351,6 +371,7 @@ def test_messages_decisions_and_outbox(service) -> None:
     assert len(service.state.decisions) == 2
 
 
+@pytest.mark.role("dev")
 def test_queries_and_safety_verify_simulator(service) -> None:
     run(service.inbound("infra_query"))
     reply = service.state.activity[-1]
@@ -361,6 +382,7 @@ def test_queries_and_safety_verify_simulator(service) -> None:
     assert "deploy_before_incident" in service.state.activity[-1].text
 
 
+@pytest.mark.role("planning")
 def test_reset_restores_seed(service) -> None:
     run(service.inbound("support_simple"))
     service.reset()
@@ -371,21 +393,23 @@ def test_reset_restores_seed(service) -> None:
 # ---- 사람 클릭 없이 다음 단계로 (flow 요청)
 
 
-def test_general_request_advances_without_clicks(service) -> None:
-    run(service.inbound("support_ticket"))
-    r = req(service, "REQ-21")
+def test_general_request_advances_without_clicks(wire) -> None:
+    wire.run(wire.planning.inbound("support_ticket"))
+    r = req(wire.planning, "REQ-21")
     assert r.flow and r.spec is not None
-    sp = next(x for x in service.state.specs if x.id == r.spec)
-    assert sp.status == "확정" and sp.auto
-    tasks = [t for t in service.state.tasks if t.spec == sp.id]
-    prs = [p for p in service.state.prs if p.task in {t.id for t in tasks}]
+    sp = next(x for x in wire.planning.state.specs if x.id == r.spec)
+    assert sp.status == "확정" and sp.auto and sp.handed_to_dev
+    # PR은 개발 서비스가 만든다 (기획은 넘기기만)
+    tasks = [t for t in wire.dev.state.tasks if t.spec == sp.id]
+    prs = [p for p in wire.dev.state.prs if p.task in {t.id for t in tasks}]
     assert tasks and len(prs) == len(tasks)  # PR 만들기 버튼 없이 작업마다 PR
     # 각 PR은 자동 머지됐거나, 규칙에 걸려 대기열에 있다 (그때만 사람·교차검증 차례)
     assert all(p.merged or p.auto_review is not None for p in prs)
-    points = [a.point for a in acts(service, r.context_id)]
+    points = [a.point for a in wire.activity(r.context_id)]
     assert points.index("write_spec") < points.index("split_tasks") < points.index("review_pr")
 
 
+@pytest.mark.role("planning")
 def test_draft_is_adopted_and_advances(service) -> None:
     run(service.inbound("hr_draft"))
     r = req(service, "REQ-21")
@@ -393,17 +417,18 @@ def test_draft_is_adopted_and_advances(service) -> None:
     assert any(a.point == "review_ticket_draft" for a in acts(service, r.context_id))
 
 
-def test_mismatch_is_reviewed_again_once(service) -> None:
+def test_mismatch_is_reviewed_again_once(wire) -> None:
     # 시드 SPEC-7(요구사항 2개)을 flow 요청으로 두고 사람이 확정하면, PR 만들기부터는 자동이다.
     # 두 번째 PR은 첫 검수가 불일치 → 수정 후 재검수까지 버튼 없이 간다
-    req(service, "REQ-12").flow = True
-    run(service.confirm_spec("SPEC-7"))
-    tasks = {t.id for t in service.state.tasks if t.spec == "SPEC-7"}
-    prs = [p for p in service.state.prs if p.task in tasks]
+    req(wire.planning, "REQ-12").flow = True
+    wire.run(wire.planning.confirm_spec("SPEC-7"))
+    tasks = {t.id for t in wire.dev.state.tasks if t.spec == "SPEC-7"}
+    prs = [p for p in wire.dev.state.prs if p.task in tasks]
     assert len(prs) == 2
     assert [p.reviews for p in prs] == [["통과"], ["불일치", "통과"]]
 
 
+@pytest.mark.role("planning")
 def test_l0_keeps_general_request_at_intake(service) -> None:
     service.state.auto_policy.level = 0
     run(service.inbound("support_ticket"))
@@ -411,6 +436,7 @@ def test_l0_keeps_general_request_at_intake(service) -> None:
     assert (r.state, r.spec) == ("접수", None)
 
 
+@pytest.mark.role("planning")
 def test_seed_requests_are_not_advanced(service) -> None:
     before = {x.id: (x.state, x.spec) for x in service.state.requests}
     run(service.inbound("data_query"))
@@ -420,6 +446,7 @@ def test_seed_requests_are_not_advanced(service) -> None:
 # ---- 총괄 혼합 모드 시연: 실제 시각·PR 없는 연결
 
 
+@pytest.mark.role("dev")
 def test_link_without_prs_marks_nothing(service) -> None:
     result = run(
         service.link_incident(
@@ -437,6 +464,7 @@ def test_link_without_prs_marks_nothing(service) -> None:
     assert not any(p.incident == "ctx_inc_empty" for sp in service.state.specs for p in sp.paras)
 
 
+@pytest.mark.role("planning")
 def test_planning_clock_real_uses_wall_clock(monkeypatch) -> None:
     from datetime import UTC, datetime, timedelta
 

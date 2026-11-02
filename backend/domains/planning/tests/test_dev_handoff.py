@@ -387,3 +387,21 @@ def test_resync_restores_lost_peer() -> None:
         return w
 
     asyncio.run(run())
+
+
+def test_auto_policy_follows_dev_after_promotion() -> None:
+    """자동 처리 범위의 주인은 dev다. 승급을 승인하면 planning도 같은 범위로 간단 요청을 가른다."""
+
+    async def run() -> Wire:
+        w = Wire()
+        for _ in range(3):
+            await w.planning.inbound("support_simple")
+            await w.settle()
+        assert w.dev.state.auto_policy.proposal is not None
+        await w.dev.approve_promotion()
+        await w.settle()
+        return w
+
+    w = asyncio.run(run())
+    assert w.dev.state.auto_policy.level == 2
+    assert dump(w.planning.state.auto_policy) == dump(w.dev.state.auto_policy)

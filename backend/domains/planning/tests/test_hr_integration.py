@@ -108,6 +108,7 @@ def _svc() -> PlanningService:
 # ---- list_in_progress
 
 
+@pytest.mark.role("dev")
 def test_list_in_progress_seed_has_unconfirmed_deployment(service, a2a_body) -> None:
     before = _domain(service)
     result = _list(a2a_body, "emp_01")
@@ -129,6 +130,7 @@ def test_list_in_progress_seed_has_unconfirmed_deployment(service, a2a_body) -> 
     ]
 
 
+@pytest.mark.role("dev")
 def test_list_in_progress_tickets_prs_and_owner_filter(service, a2a_body) -> None:
     _start_spec7(service)
     mine = ListInProgressOutput.model_validate(_list(a2a_body, "emp_01")["output"])
@@ -145,6 +147,7 @@ def test_list_in_progress_tickets_prs_and_owner_filter(service, a2a_body) -> Non
     assert not {i.item_id for i in mine.items} & {i.item_id for i in other.items}
 
 
+@pytest.mark.role("dev")
 def test_list_in_progress_area_filter_and_unknown_owner(service, a2a_body) -> None:
     _start_spec7(service)
     assert len(_list(a2a_body, "emp_01", area="payment")["output"]["items"]) == 3
@@ -155,6 +158,7 @@ def test_list_in_progress_area_filter_and_unknown_owner(service, a2a_body) -> No
     assert nobody["output"]["items"] == []
 
 
+@pytest.mark.role("dev")
 def test_area_values_match_roster(service) -> None:
     """#179: area는 명부 영역 값(payment·search·catalog·support-desk·infra-ops·inventory)만 쓴다."""
     assert set(ROSTER_AREAS) == {
@@ -189,6 +193,7 @@ def test_area_values_match_roster(service) -> None:
         assert item.owner_id.startswith("emp_")
 
 
+@pytest.mark.role("dev")
 def test_list_in_progress_unknown_area_is_empty_not_guessed(service, a2a_body) -> None:
     _start_spec7(service)
     # 경로 접두사나 명부에 없는 값은 영역으로 받지 않는다 → 빈 목록 + 수집 시각
@@ -203,6 +208,7 @@ def test_list_in_progress_unknown_area_is_empty_not_guessed(service, a2a_body) -
         assert _list(a2a_body, "emp_01", area=area)["output"]["items"] == []
 
 
+@pytest.mark.role("dev")
 def test_verify_handover_unknown_area_is_not_approved(service, a2a_body) -> None:
     """명부에 없는 영역이면 비교할 수 없다 → 승인하지 않고 failed (safety는 무응답 → 보류)."""
     result = _verify(a2a_body, [], area="shop-api/payment")
@@ -210,6 +216,7 @@ def test_verify_handover_unknown_area_is_not_approved(service, a2a_body) -> None
     assert "approved" not in result["output"]
 
 
+@pytest.mark.role("dev")
 def test_list_in_progress_merged_pr_becomes_deployment_until_request_closed(
     service, a2a_body
 ) -> None:
@@ -226,6 +233,7 @@ def test_list_in_progress_merged_pr_becomes_deployment_until_request_closed(
     assert [i["item_id"] for i in items] == ["dep_pr_28"]
 
 
+@pytest.mark.role("dev")
 def test_list_in_progress_acl_and_invalid_input(a2a_body) -> None:
     denied = _list(a2a_body, "emp_01", token="mock:finance")
     assert (denied["status"], denied["outcome"]) == ("rejected", "FORBIDDEN_SKILL")
@@ -235,6 +243,7 @@ def test_list_in_progress_acl_and_invalid_input(a2a_body) -> None:
     assert (bad["status"], bad["outcome"]) == ("failed", "invalid_input")
 
 
+@pytest.mark.role("dev")
 def test_list_in_progress_is_deterministic(service, a2a_body) -> None:
     first = _list(a2a_body, "emp_01")
     second = _list(a2a_body, "emp_01")
@@ -245,6 +254,7 @@ def test_list_in_progress_is_deterministic(service, a2a_body) -> None:
 # ---- verify_handover
 
 
+@pytest.mark.role("dev")
 def test_verify_handover_complete(service, a2a_body) -> None:
     before = _domain(service)
     result = _verify(a2a_body, ["dep_pr_28", "card_9304adb5e780"])  # 결정 카드 ID는 비교 안 함
@@ -260,6 +270,7 @@ def test_verify_handover_complete(service, a2a_body) -> None:
     assert _domain(service) == before
 
 
+@pytest.mark.role("dev")
 def test_verify_handover_one_missing_is_rejected(service, a2a_body) -> None:
     result = _verify(a2a_body, [])
     assert (result["status"], result["outcome"]) == ("completed", "rejected_by_review")
@@ -272,6 +283,7 @@ def test_verify_handover_one_missing_is_rejected(service, a2a_body) -> None:
     assert "missing_items" in reply.text
 
 
+@pytest.mark.role("dev")
 def test_verify_handover_stale_items_are_info_only(service, a2a_body) -> None:
     _start_spec7(service)
     run(service.merge_pr("PR #31"))  # tkt_T-11·pr_31 끝남, dep_pr_31 생김
@@ -289,6 +301,7 @@ def test_verify_handover_stale_items_are_info_only(service, a2a_body) -> None:
     assert out.stale_item_ids == ["tkt_T-11", "pr_31"]
 
 
+@pytest.mark.role("dev")
 def test_verify_handover_other_owner_and_area(service, a2a_body) -> None:
     _start_spec7(service)
     # emp_02의 항목은 emp_01 인계 판정에 끼지 않는다
@@ -299,6 +312,7 @@ def test_verify_handover_other_owner_and_area(service, a2a_body) -> None:
     assert other_area["output"]["approved"] is True
 
 
+@pytest.mark.role("dev")
 def test_verify_handover_acl_and_invalid_input(a2a_body) -> None:
     payload = {"handover_id": "hnd_1", "owner_id": "emp_01"}
     denied = _call(a2a_body("verify_handover", payload, token="mock:hr"))
@@ -315,6 +329,7 @@ def _rejected_cases(gate: CaptureGate) -> list[RecordCase]:
     return [c for c in cases if c.kind == RecordKind.DECISION_REJECTED]
 
 
+@pytest.mark.role("planning")
 def test_reject_draft_sends_decision_rejected(gate) -> None:
     svc = _svc()
     result = run(
@@ -345,6 +360,7 @@ def test_reject_draft_sends_decision_rejected(gate) -> None:
     ("reason", "alternatives"),
     [("", ["대안"]), ("이유", []), ("   ", ["  "])],
 )
+@pytest.mark.role("planning")
 def test_reject_without_reason_or_alternatives_is_not_sent(gate, reason, alternatives) -> None:
     svc = _svc()
     before = svc.snapshot()
@@ -359,6 +375,7 @@ def test_reject_without_reason_or_alternatives_is_not_sent(gate, reason, alterna
     assert gate.params("record_case") == []  # hr에 보내지 않았다
 
 
+@pytest.mark.role("planning")
 def test_reject_decision_records_rejected_alternative(gate) -> None:
     svc = _svc()
     result = run(
@@ -375,6 +392,7 @@ def test_reject_decision_records_rejected_alternative(gate) -> None:
     assert svc.state.decisions[-1].spec == "SPEC-7"
 
 
+@pytest.mark.role("planning")
 def test_rest_reject_endpoint(service) -> None:
     client = TestClient(app)
     res = client.post("/api/planning/requests/REQ-14/reject", json={"decision_reason": "x"})
@@ -403,6 +421,7 @@ def test_rest_reject_endpoint(service) -> None:
 # ---- warn 무시 확정 (FR-SPEC-006)
 
 
+@pytest.mark.role("planning")
 def test_confirm_with_warn_records_warn_ignored(gate) -> None:
     svc = _svc()
     run(svc.confirm_spec("SPEC-7"))  # R2에 인사 경고(DC-31)가 남아 있다
@@ -424,6 +443,7 @@ def test_confirm_with_warn_records_warn_ignored(gate) -> None:
     assert case_params["warn_ignored"] == confirm["warn_ignored"]
 
 
+@pytest.mark.role("planning")
 def test_confirm_without_warn_has_no_warn_ignored(gate) -> None:
     svc = _svc()
     for p in next(s for s in svc.state.specs if s.id == "SPEC-7").paras:
@@ -484,6 +504,7 @@ HR_PARAMS = {
 }
 
 
+@pytest.mark.role("dev")
 def test_verify_handover_accepts_safety_review_format(service, a2a_body) -> None:
     before = _domain(service)
     ok = _verify_review(a2a_body, {**HR_PARAMS, "item_ids": ["dep_pr_28"]})
@@ -502,6 +523,7 @@ def test_verify_handover_accepts_safety_review_format(service, a2a_body) -> None
     assert same["output"] == ok["output"] | {"checked_at": same["output"]["checked_at"]}
 
 
+@pytest.mark.role("dev")
 def test_verify_handover_review_format_missing_is_rejected(service, a2a_body) -> None:
     result = _verify_review(a2a_body, {**HR_PARAMS, "item_ids": []})
     assert (result["status"], result["outcome"]) == ("completed", "rejected_by_review")
@@ -511,6 +533,7 @@ def test_verify_handover_review_format_missing_is_rejected(service, a2a_body) ->
     assert _safety_verdict(result) == "rejected"
 
 
+@pytest.mark.role("dev")
 def test_verify_handover_review_format_target_and_bad_input(service, a2a_body) -> None:
     # handover_id가 없으면 target(=handover_id)을 쓴다
     params = {k: v for k, v in HR_PARAMS.items() if k != "handover_id"} | {

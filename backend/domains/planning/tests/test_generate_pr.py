@@ -7,6 +7,8 @@ from ax_contracts.schemas import Evidence, ExecuteDecision, RequestMeta
 from planning_agent import generate_pr as mod
 from planning_agent.generate_pr import ChangedFile
 
+pytestmark = pytest.mark.role("dev")  # 분리 3단계: 개발 서비스 역할로 돈다
+
 
 def test_generate_pr_sends_change_size_to_execute(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, dict]] = []
