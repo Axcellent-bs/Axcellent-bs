@@ -168,6 +168,7 @@ SERVICES: tuple[Service, ...] = (
             "get_audit_timeline",
             "decide_candidate_card",
             "answer_planning_question",
+            "team_headcount",
         ),
         "결정 기록",
     ),
