@@ -3,6 +3,10 @@
     cd backend
     uv run python -m data_agent.youtube_collect              # 한 번
     uv run python -m data_agent.youtube_collect --every 3600 # 1시간마다 (Ctrl+C로 멈춤)
+    uv run python -m data_agent.youtube_collect --titles     # 제목 없는 인기 영상 제목만 채우기
+
+`--titles`: 제목 저장(`video_titles`) 전에 쌓인 인기 영상 중 제목이 없는 것만 `videos.list`로 받아
+제목을 채운다(50개당 1단위, 최대 `MAX_TITLE_BACKFILL`개). 스냅샷 표는 건드리지 않는다.
 
 한 번 실행하면:
 1. 인기 목록(매번): mostPopular 4쪽 = 200개, 4단위
@@ -17,6 +21,7 @@
   없으면 `config/tenants/<AX_TENANT, 기본 catbooks>/youtube.toml`. 코드에 키워드를 두지 않는다
 - 할당량 초과(`QUOTA_EXCEEDED`)가 나면 그 실행의 남은 호출을 멈춘다. 받은 것까지는 저장한다
 - 판정·태그 정리는 하지 않는다(스냅샷이 쌓인 뒤 별도 PR)
+- 제목은 스냅샷 표가 아니라 `video_titles`에 영상마다 한 줄로 저장한다(`youtube_store`)
 """
 
 from __future__ import annotations
@@ -41,6 +46,7 @@ TRACK_HOURS = 72  # 이 시간 안에 본 영상을 계속 추적한다
 MAX_TRACKED = 500  # 한 번에 추적하는 영상 수 상한 (10단위)
 SEARCH_DAYS = 7  # 회사 키워드 검색은 최근 게시 영상만
 MIN_EVERY_SECONDS = 600  # --every 하한 (할당량 보호)
+MAX_TITLE_BACKFILL = 1000  # --titles 한 번에 채우는 영상 수 상한 (20단위)
 
 
 @dataclass(frozen=True)
@@ -193,6 +199,44 @@ async def collect_once(
     return result
 
 
+async def backfill_titles(
+    connector: YouTubeConnector,
+    store: SnapshotStore,
+    *,
+    now: datetime | None = None,
+    limit: int = MAX_TITLE_BACKFILL,
+) -> tuple[int, int, list[str]]:
+    """제목 없는 인기 영상의 제목을 채운다. (찾은 수, 채운 수, 실패 이유).
+
+    지워졌거나 비공개가 된 영상은 응답에 없어 채우지 않는다(지어내지 않음).
+    """
+    ids = store.popular_ids_without_title()[:limit]
+    if not ids:
+        return 0, 0, []
+    try:
+        stats = await connector.videos(ids)
+    except ConnectorUnavailable as error:
+        return len(ids), 0, [f"제목 [{error.code}]"]
+    at = (now or datetime.now(UTC)).astimezone(UTC).replace(microsecond=0)
+    return len(ids), store.save_titles(at, [(s.video_id, s.title) for s in stats]), []
+
+
+async def run_titles(env: Mapping[str, str]) -> int:
+    store = SnapshotStore(env.get(DB_ENV) or DEFAULT_DB)
+    connector = YouTubeConnector(env)
+    try:
+        found, saved, errors = await backfill_titles(connector, store)
+    finally:
+        store.close()
+    tail = f" / 실패: {'; '.join(errors)}" if errors else ""
+    print(
+        f"[youtube] 제목 채우기: 제목 없는 인기 영상 {found}개, 채움 {saved}개,"
+        f" 할당량 {connector.quota_used}단위{tail}",
+        flush=True,
+    )
+    return 1 if errors else 0
+
+
 async def run(every: int | None, env: Mapping[str, str]) -> int:
     store = SnapshotStore(env.get(DB_ENV) or DEFAULT_DB)
     config = load_config(config_path(env))
@@ -220,7 +264,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--every", type=int, default=None, help=f"초마다 반복 (최소 {MIN_EVERY_SECONDS})"
     )
+    parser.add_argument(
+        "--titles", action="store_true", help="제목 없는 예전 인기 영상의 제목만 채우고 끝낸다"
+    )
     args = parser.parse_args(argv)
+    if args.titles:
+        return asyncio.run(run_titles(load_env(os.environ)))
     if args.every is not None and args.every < MIN_EVERY_SECONDS:
         parser.error(f"--every 는 {MIN_EVERY_SECONDS}초 이상 (할당량 보호)")
     try:

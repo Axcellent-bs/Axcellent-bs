@@ -301,6 +301,22 @@ export interface YouTubeTagEvidence {
   video_ids: string[];
   /** 이 후보로 센 태그 (스냅샷에 실제로 나온 것, #339). 예전 응답은 없다 */
   matched_tags?: string[];
+  /** 이 후보로 센 제목 구 (YouTube 제목 2~3어절). 예전 응답은 없다 */
+  matched_phrases?: string[];
+}
+/** 쌓인 스냅샷 전체에서 늘 붙는 말로 보고 자동으로 뺀 이름 (서버 값) */
+export interface AutoExcludedTerm {
+  name: string;
+  source: "youtube_tag" | "youtube_title";
+  snapshot_videos: number;
+  videos: number;
+  total_videos: number;
+  doc_ratio: number;
+  categories: number;
+  days: number;
+  total_days: number;
+  /** 코드가 숫자로 만든 한 줄 */
+  reason: string;
 }
 export interface TrendCandidate {
   keyword: string;
@@ -368,6 +384,10 @@ export interface TrendCandidatesOutput {
   trending_status?: "known" | "unknown";
   trending_reason?: string | null;
   trending_snapshot_at?: string | null;
+  /** 자동 제외된 늘 붙는 말과 근거. 예전 응답은 없다 */
+  auto_excluded?: AutoExcludedTerm[];
+  /** 자동 제외를 무엇으로 쟀는지 한 줄 (예: 쌓인 인기 영상 275개, 기록이 있는 날 1일) */
+  exclusion_basis?: string | null;
 }
 
 /** 한 번에 판정할 수 있는 그룹 수 (화면 입력 한도) */

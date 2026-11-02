@@ -140,7 +140,8 @@ function RisingCard({ v, youtube, trending, aliases, risingNames, rank }: { v: T
       <div className="flex flex-wrap gap-1.5">
         <Chip label="급상승" tone={TONE.bad} />
         <Chip label="✓ 네이버 검색" tone={TONE.info} />
-        {youtube && <Chip label={`✓ YouTube 인기 태그 (영상 ${youtube.video_count}개)`} tone={TONE.info} />}
+        {youtube && <Chip label={`✓ YouTube 인기 ${youtube.matched_tags?.length || !youtube.matched_phrases?.length ? "태그" : "영상 제목"} (영상 ${youtube.video_count}개)`} tone={TONE.info} />}
+        {youtube && (youtube.matched_phrases?.length ?? 0) > 0 && (youtube.matched_tags?.length ?? 0) > 0 && <Chip label={`✓ ${CANDIDATE_ORIGIN_LABEL.youtube_title}에도 나옴`} tone={TONE.info} />}
         {trending && <Chip label={`✓ ${trendingLabel(trending)}`} tone={TONE.info} />}
       </div>
       {v.summary && <p className="border-l-2 border-brand-500 bg-ink-50 px-3 py-2 text-sm leading-relaxed text-ink-700">{v.summary}</p>}
@@ -238,10 +239,21 @@ function YoutubeOnly({ cands }: { cands: CandState }) {
       </>
     );
   }
+  const auto = cands.kind === "ok" ? cands.out.auto_excluded ?? [] : [];
+  const basis = cands.kind === "ok" ? cands.out.exclusion_basis : null;
   return (
     <Panel id="data-trend-youtube" title="YouTube에서 뜨지만 검색은 평소 수준"
       hint={line && <span className={line.warn ? "text-amber-700" : undefined}>{line.text}</span>}>
       {body}
+      {/* 서버가 쌓인 스냅샷으로 찾은 늘 붙는 말 (자동 제외). 이유 문장은 서버 값 그대로 */}
+      {auto.length > 0 && (
+        <details className="mt-3 text-xs text-ink-600">
+          <summary className="cursor-pointer font-semibold">후보에서 자동으로 뺀 늘 붙는 말 {auto.length}개{basis ? ` · ${basis}` : ""}</summary>
+          <ul className="mt-2 space-y-1">
+            {auto.map((a) => <li key={`${a.source}-${a.name}`}><b className="text-ink-900">{a.name}</b> · 이번 스냅샷 영상 {a.snapshot_videos}개 · {a.reason}</li>)}
+          </ul>
+        </details>
+      )}
     </Panel>
   );
 }
