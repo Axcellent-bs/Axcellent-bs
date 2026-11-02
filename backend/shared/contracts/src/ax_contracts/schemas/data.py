@@ -663,6 +663,67 @@ class TrendCandidatesOutput(AxModel):
         return self
 
 
+# --------------------------------------------------------------- trend_history (월별 흐름)
+# 키워드 그룹별 네이버 월 단위 값(timeUnit=month)과 "작년 같은 달 대비" 배수만 돌려준다.
+# 급상승·계절 판정은 하지 않는다(평가가 없어서). 값은 그 그룹 요청 안 상대값(최댓값 = 100)이다.
+
+
+class TrendHistoryRequest(AxModel):
+    """trend_history skill 입력. 비우면 회사 기본 키워드 그룹·설정 개월 수·지난달까지."""
+
+    # 없으면 회사 설정(trends.toml)의 기본 그룹. 그룹마다 네이버 호출 1번
+    keyword_groups: list[TrendKeywordGroup] | None = Field(
+        default=None, min_length=1, max_length=20
+    )
+    months: int | None = Field(default=None, ge=13, le=60)  # 볼 개월 수. 없으면 회사 설정(기본 24)
+    end_month: dt.date | None = None  # 마지막 달(그 달의 아무 날). 없으면 지난달(다 채워진 달)
+
+    @model_validator(mode="after")
+    def _unique_names(self) -> Self:
+        names = [g.group_name for g in self.keyword_groups or []]
+        if len(names) != len(set(names)):
+            raise ValueError("group_name이 겹친다")
+        return self
+
+
+class TrendMonthPoint(AxModel):
+    month: dt.date  # 그 달 1일
+    value: float = Field(ge=0)  # 그 그룹 요청 안 상대값 (최댓값 100)
+    last_year_value: float | None = Field(default=None, ge=0)  # 작년 같은 달 값 (없으면 None)
+    # 작년 같은 달 대비 배수 = 값 ÷ 작년 같은 달 값. 작년 값이 없거나 0이면 None (0으로 채우지 않음)
+    vs_last_year: float | None = Field(default=None, ge=0)
+
+
+class TrendHistoryGroup(AxModel):
+    group_name: str
+    keywords: list[str] = Field(default_factory=list)
+    status: Literal["known", "unknown"]
+    unknown_reason: str | None = None  # 자료 없음·네이버를 읽지 못함 등
+    points: list[TrendMonthPoint] = Field(
+        default_factory=list
+    )  # 달 순서. 네이버가 주지 않은 달은 빠짐
+    latest_month: dt.date | None = None  # 마지막으로 값이 있는 달
+    latest_vs_last_year: float | None = Field(default=None, ge=0)  # 그 달의 작년 같은 달 대비
+
+    @model_validator(mode="after")
+    def _reason_when_unknown(self) -> Self:
+        if self.status == "unknown" and not self.unknown_reason:
+            raise ValueError("unknown이면 unknown_reason이 있어야 한다")
+        return self
+
+
+class TrendHistoryOutput(AxModel):
+    start_month: dt.date  # 첫 달 1일
+    end_month: dt.date  # 마지막 달 1일
+    months: int = Field(ge=1)
+    time_unit: Literal["month"] = "month"
+    source: str  # 자료 출처 (naver_datalab)
+    value_kind: Literal["relative"] = "relative"  # 검색 건수가 아니라 그룹 요청 안 상대값
+    groups: list[TrendHistoryGroup] = Field(default_factory=list)  # 입력 그룹 순서
+    naver_calls: int = Field(default=0, ge=0)  # 네이버 요청 수 (그룹마다 1번, 실패 포함)
+    summary: str  # 한 문장 (코드가 숫자로 만든 고정 문장)
+
+
 # --------------------------------------------------------------- content_recommend (영상 소재 추천)
 # trend_scan(회사 기본 키워드) + trend_candidates(YouTube 인기 태그) 판정에서 급상승한 것만 골라
 # 코드 규칙 점수로 순위를 매기고, 소재마다 LLM이 영상 아이디어 문장·형식을 쓴다(숫자 검증).

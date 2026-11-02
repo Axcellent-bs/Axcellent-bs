@@ -4,6 +4,7 @@ import { Chip, Empty, ErrorBox, Panel, TONE, Waiting, useResource } from "@/comp
 import { PreparingChip } from "@/components/Preparing";
 import { CampaignEffect } from "@/components/data/CampaignEffect";
 import { ContentRecommend } from "@/components/data/ContentRecommend";
+import { TrendHistory } from "@/components/data/TrendHistory";
 import { ContentLoop, type LoopTrendState } from "@/components/data/ContentLoop";
 import { LOOP_STAGES, SEND_TO_MARKETING_BLOCKED, stageFromHash, trendHash, type LoopProbe, type LoopStage } from "@/lib/contentLoop";
 import {
@@ -16,7 +17,7 @@ import { UNKNOWN_TREND_TEXT, ratioNote, strengthLabel } from "@/lib/trendWording
 // - 주소에 하위 탭을 남긴다: #trend/detect · #trend/recommend · #trend/video · #trend/campaign · #trend/feedback (없으면 1단계)
 // - 루프 띠의 단계를 누르면 그 하위 탭으로 간다. 루프 띠는 모든 하위 탭 위에 있다
 // - 1 트렌드·밈 감지: 데이터 AI(8106) trend_scan·trend_candidates 출력을 그대로. 보기 전환 "지금 급상승 / 월별 흐름 / 계절 패턴"
-//   (월별·계절은 서버 기능이 없어 준비 중)
+//   (월별 흐름은 trend_history, components/data/TrendHistory.tsx. 계절 패턴은 판정이 없어 준비 중)
 // - 2 영상 소재 추천: content_recommend 출력(components/data/ContentRecommend.tsx). 하위 탭을 오가도 남게 숨기기만 한다
 // - 3·5: 준비 중. 단계 정의의 할 일·필요한 것만 보여 준다(숫자·예시 없음)
 // - 4 게시·성과 측정: 캠페인 효과(campaign_effect). 하위 탭을 오가도 측정 결과가 남게 화면에서 내리지 않고 숨긴다
@@ -291,12 +292,12 @@ function Result({ entries, headline, cands }: { entries: Entry[]; headline: stri
   );
 }
 
-/** 1단계 보기 전환. 월별·계절은 서버 기능이 없어 준비 중 */
+/** 1단계 보기 전환. 월별 흐름은 trend_history(판정 없음), 계절 패턴은 서버 판정이 없어 준비 중 */
 type DetectView = "now" | "monthly" | "seasonal";
 const DETECT_VIEWS: { id: DetectView; label: string; todo?: string }[] = [
   { id: "now", label: "지금 급상승" },
-  { id: "monthly", label: "월별 흐름", todo: "키워드별 검색량을 달마다 이어서 보여 주기 (데이터 AI에 월 단위로 보는 기능이 아직 없어요)" },
-  { id: "seasonal", label: "계절 패턴", todo: "해마다 같은 때 오르는 키워드를 구분하기 (지금 급상승 판정은 계절 반복을 구분하지 않아요)" },
+  { id: "monthly", label: "월별 흐름" },
+  { id: "seasonal", label: "계절 패턴", todo: "작년 같은 시기와 비교한 계절 반복 판정 (평가 케이스 먼저 만들고 그다음 판정)" },
 ];
 
 // ------------------------------------------------------------------- 준비 중 하위 탭 (2·3·5)
@@ -338,6 +339,9 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
   }, [navigate, location.search]);
 
   const [view, setView] = useState<DetectView>("now");
+  // 월별 흐름은 처음 열 때 부르고, 다른 보기로 갔다 와도 결과가 남게 숨기기만 한다
+  const [monthlyOpened, setMonthlyOpened] = useState(false);
+  useEffect(() => { if (view === "monthly") setMonthlyOpened(true); }, [view]);
   const [text, setText] = useState("");
   const [groups, setGroups] = useState<string[]>([]);
   const [inputError, setInputError] = useState<string | null>(null);
@@ -482,7 +486,8 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
                   </button>
                 ))}
               </div>
-              {view === "now" ? detect : (
+              {monthlyOpened && <div hidden={view !== "monthly"}><TrendHistory /></div>}
+              {view === "now" ? detect : view === "monthly" ? null : (
                 <Panel id={`data-trend-${detectView.id}`} title={detectView.label} tools={<PreparingChip />}>
                   <div className="space-y-2 text-sm leading-relaxed text-ink-700">
                     <p><b className="text-ink-900">할 일</b> · {detectView.todo}</p>
