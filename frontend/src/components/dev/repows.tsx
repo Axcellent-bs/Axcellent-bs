@@ -83,6 +83,7 @@ function Confirm({ title, rows, ok, danger, busy, onOk, onClose }: { title: stri
 
 // 연결(레포) 고르기. 마지막에 고른 것은 이 브라우저에만 기억한다
 const CONN_KEY = 'ax.repo.connection'
+const WORK_REPO_KEY = 'ax.work.repo'
 function useConnection(): [VcsConnection[], string, (id: string) => void] {
   const [list, setList] = useState<VcsConnection[]>([])
   // 작업의 PR 링크(?repo=)로 들어오면 그 PR이 열린 레포로 연다 (레포 여럿일 때 다른 레포의 같은 번호를 열지 않게)
@@ -125,6 +126,10 @@ export function PrsTab({ s, d, parts }: { s: S; d: Dispatch<Action>; parts: stri
   const mode = view === 'repo' ? 'repo' : view === 'issues' ? 'issues' : view === 'branches' ? 'branches' : view === 'graph' ? 'graph' : 'work'
   const [conns, conn, setConn] = useConnection()
   const repo = conns.find((c) => c.id === conn)
+  // 작업 목록 레포 거르기 (레포 여럿일 때, ''이면 전체). 레포 PR 화면 선택과 따로 기억한다
+  const [workRepo, setWorkRepoState] = useState(() => { try { return localStorage.getItem(WORK_REPO_KEY) ?? '' } catch { return '' } })
+  const setWorkRepo = (x: string) => { setWorkRepoState(x); try { localStorage.setItem(WORK_REPO_KEY, x) } catch { /* 이번 화면만 */ } }
+  const shownRepo = conns.some((c) => c.id === workRepo) ? workRepo : ''
   return (
     <>
       <div className="rp-bar">
@@ -140,9 +145,15 @@ export function PrsTab({ s, d, parts }: { s: S; d: Dispatch<Action>; parts: stri
             {conns.map((c) => <option key={c.id} value={c.id}>{c.repo || c.id}</option>)}
           </select>
         )}
+        {mode === 'work' && conns.length > 1 && (
+          <select className="select mono" value={shownRepo} onChange={(e) => setWorkRepo(e.target.value)} aria-label="레포">
+            <option value="">전체 레포</option>
+            {conns.map((c) => <option key={c.id} value={c.id}>{c.repo || c.id}</option>)}
+          </select>
+        )}
         {mode !== 'work' && conns.length === 1 && repo && <code className="rp-repo">{repo.repo}</code>}
       </div>
-      {mode === 'work' && <Work s={s} d={d} item={view} />}
+      {mode === 'work' && <Work s={s} d={d} item={view} repo={shownRepo || undefined} />}
       {mode === 'repo' && !a && <Board key={conn} conn={conn} />}
       {mode === 'repo' && a && /^\d+$/.test(a) && <PrView key={`${conn}:${a}`} conn={conn} number={Number(a)} tab={b} />}
       {mode === 'issues' && !a && <IssueBoard key={conn} conn={conn} />}

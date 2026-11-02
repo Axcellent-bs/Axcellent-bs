@@ -108,6 +108,7 @@ export interface CodingRun {
   llmCalls?: number // 이 작업이 지금까지 부른 LLM 횟수 (다시 시도 포함)
   llmTokens?: number // 이 작업이 지금까지 쓴 토큰 (입력 + 출력)
   mode?: CodingMode
+  connection?: string | null // 올릴 레포 연결
   claimedBy?: string | null // 구독형: 가져간 사람
   claimedAt?: string | null
   leaseUntil?: string | null // 이때까지 진행 보고가 없으면 대기열로 돌아간다
