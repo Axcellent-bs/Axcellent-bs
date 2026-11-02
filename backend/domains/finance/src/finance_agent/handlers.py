@@ -8,8 +8,9 @@
 `verify_amount`·`review_hold`는 재무 재설계(2026-10-23)로, `loss_aggregation`은 2026-10-27에
 없앴다 (재무는 장애 대응 흐름의 단계가 아니다 — 요구사항 DEP-FIN-01, 공통 구성안 결정 22).
 장애 비용은 평상시 장부로 들어가 `closing_report`·`audit_report`에서 드러난다. 금액 다시 계산 규칙은
-`recheck.py`에 남아 사후 감사가 쓴다. 고객사 클레임 건별 확인과 `review_threshold_change`(AI가 기준
-변경을 판단)도 재무 일이 아니라 없앴다. 한도는 제안만 하고(`policy.py`) 사람이 기준표 PR로 바꾼다.
+`recheck.py`에 남아 쿠폰 사후 감사가 쓴다. 고객사 클레임 건별 확인과
+`review_threshold_change`(AI가 기준 변경을 판단)도 재무 일이 아니라 없앴다.
+한도는 제안만 하고(`policy.py`) 사람이 기준표 PR로 바꾼다.
 
 - 숫자는 전부 코드로 계산한다. 요청 쪽이 적은 총액·등급은 믿지 않는다.
 - 외부 입력(`request.untrusted`)은 읽지 않는다.
@@ -348,6 +349,8 @@ async def audit_report(request: AgentRequest) -> AgentResult:
     if data.finding_ref:
         # 알림받은 의심 건 하나: 기간이 지나도 목록에 남은 기록으로 본다
         entry = state().records.anomalies.get(data.finding_ref)
+        if entry and anomalies.is_refund_audit(entry):
+            entry = None  # 없앤 환불 감사가 남긴 처리 기록은 감사 결과로 내지 않는다
         found = [f for f in report["findings"] if anomalies.signature(f) == data.finding_ref]
         report["findings"] = found or ([anomalies.finding_view(entry)] if entry else [])
     output = AuditReportOutput(
@@ -399,7 +402,9 @@ def _with_new_expense(
 
 
 async def record_support_cost(request: AgentRequest) -> AgentResult:
-    """고객지원이 닫은 문의의 처리 결과를 받아 배송비·비용 기록을 확인하고 재무 장부에 남긴다.
+    """고객지원이 끝낸 처리 결과(환불 금액·쿠폰)를 받아 주문 배송비와 함께 재무 장부에 적는다.
+
+    환불 여부를 확인·검증하지 않는다. 받은 금액을 그대로 적는다.
 
     돈을 움직이거나 외부 상태를 바꾸지 않는다(그래서 읽기 등급이다). 경비를 쓰지 않은 문의
     (답변만 한 문의, 환불·쿠폰이 없는 문의)도 상담 처리 결과를 기록으로 남긴다.

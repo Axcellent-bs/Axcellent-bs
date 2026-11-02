@@ -28,8 +28,6 @@ METRIC_KO = {
     "payment_fail_rate": "실패가 늘었어요",
 }
 FINANCE_KO = {
-    "repeat_refund": "같은 고객이 환불을 반복해요",
-    "refund_rate_jump": "환불이 갑자기 많아졌어요",
     "split_under_limit": "한도 바로 아래로 쪼갠 지급이 있어요",
     "duplicate_coupon": "같은 이벤트 보상 쿠폰이 두 번 나갔어요",
 }

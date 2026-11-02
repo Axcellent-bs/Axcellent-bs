@@ -22,6 +22,7 @@ Agent Card: `agent-card.json` (`/.well-known/agent-card.json`으로 공개). 입
 |---|---|---|---|
 | `record_case` | A | 기록을 결정 카드로 정리해 저장 (결정 없으면 기록만, 확신 낮으면 후보) | orchestrator·planning·support·marketing·finance·data·infra |
 | `get_roster` | 조회 | 영역별 담당·교대, 담당 없음·교대 공백 영역 | orchestrator·dashboard-api·planning·support·marketing·finance·data·infra |
+| `team_headcount` | 조회 | 그달 1일 기준 팀별 인원수(이름·직원 ID 없음). 지금은 가상 명부(예시)라 `example: true` | orchestrator·finance |
 | `start_handover` | A | 인수인계 초안, 빈 자리 질문, 완성도(코드 계산) | orchestrator |
 | `answer_handover_question` | A | 인계자 답변 반영, 같은 답은 한 번만 | orchestrator·dashboard-api |
 | `confirm_handover` | B(planning 검증) / 완성도 미달 C | 인수인계 확정 | orchestrator |

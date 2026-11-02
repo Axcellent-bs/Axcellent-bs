@@ -59,7 +59,7 @@
 
 ## 6. 호출 규칙 보충
 - 모든 새 요청의 `meta.path`는 `["orchestrator"]`로 시작한다(루프·3홉 판단 기준).
-- 재무 skill(`loss_aggregation`·`audit_report`)은 사건 중에 부르지 않는다. 장애 때 나간 쿠폰·환불은 이벤트로 재무 장부에 기록되고 비용은 평상시 결산·사후 감사에서 다룬다.
+- 재무 skill(`loss_aggregation`·`audit_report`)은 사건 중에 부르지 않는다. 장애 때 나간 쿠폰·환불은 이벤트로 재무 장부에 기록되고 비용은 평상시 결산에서 다룬다.
 - `verify_amount`는 총괄이 부르지 않는다(요청 가능 부서가 safety뿐). 쿠폰 교차검증은 마케팅 `execute()` → safety → finance 경로다.
 
 ## 7. 연동·확인

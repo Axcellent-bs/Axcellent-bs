@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ValidationError
 
@@ -311,3 +312,75 @@ async def explain(kind: str, facts: dict[str, int | float | str], llm: LLMClient
     if bad := _bad_numbers(summary, facts):
         return fallback(NUMBER_INVALID, bad)
     return Explanation(summary, False)
+
+
+# ---------------------------------------------------------- 영상 소재 아이디어 (content_recommend)
+
+IDEA_FORMATS = ("숏폼", "롱폼")
+_IDEA_PROMPT = (
+    "트렌드 소재 하나로 회사가 만들 영상 아이디어를 한국어 한두 문장으로 제안하고, "
+    "형식을 숏폼과 롱폼 중 하나로 골라라.\n"
+    "규칙: numbers에 있는 숫자만 쓰고 숫자를 바꾸거나 새로 만들지 말 것. "
+    "소재 이름은 데이터 블록의 이름만 쓸 것. 출연자·사건·날짜 같은 사실을 지어내지 말 것.\n"
+    "numbers: {numbers}"
+)
+
+
+class _Idea(BaseModel):
+    idea: str
+    format: Literal["숏폼", "롱폼"]
+
+
+@dataclass(frozen=True)
+class Idea:
+    idea: str
+    format: str  # IDEA_FORMATS 중 하나
+    fallback: bool
+    reason: str | None = None
+    bad_numbers: tuple[float, ...] = ()
+
+    def note(self) -> str | None:
+        return Explanation(self.idea, self.fallback, self.reason, self.bad_numbers).note()
+
+
+def _idea_template(numbers: dict[str, int | float | str], names: dict[str, str]) -> str:
+    keyword = names.get("키워드", "")
+    head = f"{keyword} 검색이 평소의 {_fmt(numbers.get('배수'))}배로 올랐습니다"
+    videos = numbers.get("YouTube 영상 수")
+    if videos is not None:
+        head += f"(YouTube 인기 영상 {_fmt(videos)}개)"
+    return head + ". 이 소재를 짧은 영상으로 다뤄 볼 만합니다."
+
+
+async def explain_idea(
+    numbers: dict[str, int | float | str],
+    names: dict[str, str],
+    llm: LLMClient,
+    context_id: str | None = None,
+) -> Idea:
+    """소재 하나의 영상 아이디어 문장과 형식.
+
+    숫자는 `numbers`만 프롬프트에 넣고, 이름(외부에서 온 태그 등)은 `names`로 데이터 블록에만
+    넣는다. 숫자 검증은 `explain`과 같은 규칙(`_bad_numbers`)이고 이름 속 숫자(예: t1)도
+    허용한다. 실패하면 고정 문장 + 숏폼, `fallback=True`와 이유.
+    """
+    facts: dict[str, int | float | str] = {**numbers, **names}
+
+    def fallback(reason: str, bad: list[float] | None = None) -> Idea:
+        return Idea(_idea_template(numbers, names), "숏폼", True, reason, tuple(bad or ()))
+
+    try:
+        prompt = _IDEA_PROMPT.format(numbers=numbers)
+        result = await llm.structured(prompt, _Idea, untrusted=dict(names), context_id=context_id)
+        idea = result.idea.strip()
+    except LLMNotConfiguredError:
+        return fallback(LLM_UNAVAILABLE)
+    except (LLMFormatError, ValidationError):
+        return fallback(FORMAT_ERROR)
+    except Exception:  # 호출 실패(HTTP 오류·시간 초과 등) 모두 고정 문장으로 대체
+        return fallback(LLM_ERROR)
+    if not idea or result.format not in IDEA_FORMATS:
+        return fallback(FORMAT_ERROR)
+    if bad := _bad_numbers(idea, facts):
+        return fallback(NUMBER_INVALID, bad)
+    return Idea(idea, result.format, False)

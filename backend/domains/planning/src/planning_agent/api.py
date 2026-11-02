@@ -29,6 +29,13 @@ from planning_agent.domain.service import (
 def add_planning_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
     """기획 서비스만: 프로젝트(요청 1건 깊게), 개선 초안 기각."""
 
+    @router.get("/release-checks")
+    def list_release_checks() -> dict:
+        """배포 전 대조 기록 (최근 순). 서버 메모리라 다시 켜면 비어 있다."""
+        svc = get_service()
+        rows = list(reversed(list(svc.release_checks.values())))
+        return _ok(rows, svc, count=len(rows))
+
     @router.get("/projects")
     def list_projects() -> dict:
         svc = get_service()

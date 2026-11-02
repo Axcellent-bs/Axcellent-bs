@@ -28,6 +28,7 @@ def test_card_validates(card: AgentCard) -> None:
         "activity_report",
         "trend_scan",
         "trend_candidates",
+        "content_recommend",
         "answer_planning_question",
         "campaign_effect",
     }
@@ -87,6 +88,17 @@ def test_trend_candidates_is_a_read_for_orchestrator_marketing_and_dashboard(
     assert set(skill.allowed_requesters) == {"orchestrator", "marketing", "dashboard-api"}
     assert skill.input_schema.endswith("#TrendCandidatesRequest")
     assert skill.output_schema.endswith("#TrendCandidatesOutput")
+    assert skill.handoff is False
+
+
+def test_content_recommend_is_a_read_for_orchestrator_marketing_and_dashboard(
+    card: AgentCard,
+) -> None:
+    skill = next(s for s in card.skills if s.id == "content_recommend")
+    assert skill.grade == "read"
+    assert set(skill.allowed_requesters) == {"orchestrator", "marketing", "dashboard-api"}
+    assert skill.input_schema.endswith("#ContentRecommendRequest")
+    assert skill.output_schema.endswith("#ContentRecommendOutput")
     assert skill.handoff is False
 
 

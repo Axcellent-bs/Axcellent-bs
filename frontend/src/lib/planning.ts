@@ -187,6 +187,28 @@ export const planningApi = (base: string) => ({
   eventsUrl: () => `${base}/api/planning/events`,
 })
 
+// ---- 배포 전 기획서 대조 (planning `/api/planning/release-checks`). SSE 상태와 따로 읽는다
+export interface ReleaseCheckItem { para_id: string; status: 'covered' | 'missing_task' | 'not_merged' | 'incident_open'; pr_numbers: number[]; content: 'match' | 'mismatch' | 'none'; content_notes: string[] }
+export interface ReleaseCheck {
+  check_id: string; spec_id: string; request_id: string; env: 'dev' | 'prod'; at: string
+  verdict: 'ready' | 'hold' | 'needs_human'; hold_reasons: string[]; items: ReleaseCheckItem[]
+  pr_numbers: number[]; order_sent: boolean; order_result: string | null
+}
+/** 기획서 하나의 배포 전 대조 기록 (최근 순). 10초마다 다시 읽는다. 서버가 꺼져 있으면 빈 목록 */
+export function useReleaseChecks(spec: string): ReleaseCheck[] {
+  const [rows, setRows] = useState<ReleaseCheck[]>([])
+  useEffect(() => {
+    let alive = true
+    const load = () => call<ReleaseCheck[]>(PLANNING_API, '/release-checks')
+      .then((all) => { if (alive) setRows(all.filter((x) => x.spec_id === spec)) })
+      .catch(() => { if (alive) setRows([]) })
+    void load()
+    const t = setInterval(load, 10_000)
+    return () => { alive = false; clearInterval(t) }
+  }, [spec])
+  return rows
+}
+
 // ---- 배포 기록·배포 후 확인 (dev 서비스 `/api/planning/deployments`). SSE 상태와 따로 읽는다
 export interface RollbackSuggestion { suspect_count: number; low_confidence: number; irreversible_count: number; prior_rollbacks: number; grade: 'B' | 'C'; rules: string[] }
 export interface DeployCheck { deployment: string; at: string; window_minutes: number; verdict: 'ok' | 'watch' | 'suspect'; evidence: string[]; candidate_prs: string[]; rollback: RollbackSuggestion | null }

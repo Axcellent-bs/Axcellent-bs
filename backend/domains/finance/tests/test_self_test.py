@@ -58,7 +58,7 @@ async def test_all_green_when_everything_is_up() -> None:
     assert result["result"] == "pass", [c for c in result["checks"] if not c["ok"]]
     assert result["passed"] == result["total"] >= 14
     names = {c["name"] for c in result["checks"]}
-    assert {"금액을 틀리게 적은 쿠폰 막기", "결제보다 큰 환불 막기", "안전 장치 연결"} <= names
+    assert {"금액을 틀리게 적은 쿠폰 막기", "안전 장치 연결"} <= names
     assert {"결산 계산 공식", "대사 상태 나누기", "판매자 정산 공식", "사후 감사 규칙"} <= names
 
 
@@ -136,7 +136,7 @@ async def test_broken_judgement_is_caught(monkeypatch: pytest.MonkeyPatch) -> No
         http_client=_network({"safety", "shop-api", "data"}),
     )
     failed = {c["name"] for c in result["checks"] if not c["ok"]}
-    assert "금액을 틀리게 적은 쿠폰 막기" in failed and "결제보다 큰 환불 막기" in failed
+    assert "금액을 틀리게 적은 쿠폰 막기" in failed
     assert result["result"] == "fail"
 
 

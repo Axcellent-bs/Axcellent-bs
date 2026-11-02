@@ -1094,3 +1094,29 @@ def test_renew_hold_only_for_held_task(service: PlanningService, adapter) -> Non
     assert err.value.code == "NOT_RETRYABLE"
     res = TestClient(app).post("/api/planning/dev-tasks/T-D1/renew-hold")
     assert res.status_code == 409 and res.json()["error"]["code"] == "NOT_RETRYABLE"
+
+
+def test_draft_survives_restart_and_approve_needs_no_llm(tmp_path, monkeypatch, adapter) -> None:
+    """작성해 둔 코드는 상태 파일 옆에 남는다. 다시 켠 뒤 보류 승인도 LLM 없이 같은 코드로 연다."""
+    monkeypatch.setenv("PLANNING_STATE_DIR", str(tmp_path))
+    gate = HoldingGate()
+    svc = DevService(gate=gate, relater=None)
+    llm = FakeLLM()
+    coder.set_llm(llm)
+    run(_go(svc))
+    assert _task(svc).coding.status == "waiting_human"
+    assert (tmp_path / "coding_drafts_dev.json").exists()
+    calls = len(llm.calls)
+
+    again = DevService(gate=gate, relater=None)  # 다시 켬
+    d = coder.draft_of(again, "T-D1")
+    assert d is not None and set(d.contents) == {BANNER, NOTICE} and d.rows
+    gate.approve(_task(again).coding.hold_review or "")
+    run(_approved(again, "T-D1"))
+    c = _task(again).coding
+    assert c.pr is not None and c.status in ("opened", "merged")
+    assert len(llm.calls) == calls  # 다시 쓰지 않음
+    assert coder.draft_of(again, "T-D1") is None  # PR이 열리면 지운다
+
+    again.reset()
+    assert coder.draft_of(DevService(gate=gate, relater=None), "T-D1") is None

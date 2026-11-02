@@ -6,6 +6,7 @@ import { ActivityList, Sec, State, Tag, rowNav } from '@/components/planning-com
 import { Linked, Ref, go, hrefOf, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
 import { CONFIRMED_BY, mergedLabel } from '@/components/planning-common/flow'
 import { RepoTag } from '@/components/planning-common/repo'
+import { useReleaseChecks, type ReleaseCheck } from '@/lib/planning'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -27,6 +28,51 @@ function ReviewDecide({ d, spec, xr }: { d: Dispatch<Action>; spec: Spec; xr: No
           <input className="input" style={{ flex: 1 }} autoFocus placeholder="거절 이유" value={reason} onChange={(e) => setReason(e.target.value)} />
           <Button variant="primary" type="submit" disabled={!reason.trim()}>거절 보내기</Button>
         </form>
+      )}
+    </Notice>
+  )
+}
+
+// ---------------------------------------------------------------- 배포 전 확인 (개발이 다 됐다고 하면 기획서와 맞춰 본 결과)
+// 칩은 "무엇이 걸렸는지"만 보이고, 맞는 문단은 하나로 묶는다. 판정 코드는 화면에 내보내지 않는다
+const SPEC_BLOCK: Record<string, string> = {
+  spec_not_confirmed: '기획서 미확정', open_question: '질문 남음', spec_unknown: '기획서 없음', pr_outside_spec: '기획서 밖 PR',
+}
+const PARA_BLOCK = { missing_task: '작업 없음', not_merged: 'PR 머지 전', incident_open: '장애 열림' } as const
+function releaseState(rc: ReleaseCheck): { label: string; tone: 'green' | 'amber'; title?: string } {
+  if (rc.order_sent) return { label: '배포 지시 보냄', tone: 'green' }
+  if (rc.verdict === 'ready') return { label: '배포 가능 · 지시 못 보냄', tone: 'amber', title: rc.order_result ?? undefined }
+  if (rc.verdict === 'needs_human') return { label: '사람 확인 필요', tone: 'amber' }
+  return { label: '배포 전 남은 일', tone: 'amber' }
+}
+function ReleaseCheckBox({ d, spec }: { d: Dispatch<Action>; spec: string }) {
+  const toast = useToast()
+  const [rc] = useReleaseChecks(spec)
+  if (!rc) return null
+  const st = releaseState(rc)
+  const ok = rc.items.filter((i) => i.status === 'covered' && i.content === 'match').map((i) => i.para_id)
+  const blocks: { key: string; label: string; title?: string }[] = [
+    ...rc.hold_reasons.filter((h) => SPEC_BLOCK[h]).map((h) => ({ key: h, label: SPEC_BLOCK[h] })),
+    ...rc.items.filter((i) => i.status !== 'covered').map((i) => ({ key: `${i.para_id}-s`, label: `${i.para_id} ${PARA_BLOCK[i.status as keyof typeof PARA_BLOCK]}` })),
+    ...rc.items.filter((i) => i.status === 'covered' && i.content === 'mismatch').map((i) => ({ key: `${i.para_id}-c`, label: `${i.para_id} 기획서와 다름`, title: i.content_notes.join('\n') })),
+    ...rc.items.filter((i) => i.status === 'covered' && i.content === 'none').map((i) => ({ key: `${i.para_id}-n`, label: `${i.para_id} 검수 결과 없음` })),
+  ]
+  return (
+    <Notice tone={st.tone === 'amber' ? 'warn' : undefined}>
+      <div className="xr-decide">
+        <b>배포 전 확인</b>
+        <Tag tone={st.tone} title={st.title}>{st.label}</Tag>
+        <span className="muted small">{rc.env} · PR {rc.pr_numbers.map((n) => `#${n}`).join(', ')} · {rc.check_id}</span>
+        <span style={{ flex: 1 }} />
+        {rc.verdict === 'needs_human' && !rc.order_sent && (
+          <Button variant="primary" onClick={() => { d({ type: 'sendReleaseOrder', check: rc.check_id }); toast.show(`${rc.check_id} 배포 지시`) }}>확인하고 배포 지시</Button>
+        )}
+      </div>
+      {(blocks.length > 0 || ok.length > 0) && (
+        <div className="xr-decide" style={{ flexWrap: 'wrap' }}>
+          {blocks.map((b) => <Tag key={b.key} tone="amber" title={b.title}>{b.label}</Tag>)}
+          {ok.length > 0 && <Tag tone="green">{ok.join('·')} 기획서대로</Tag>}
+        </div>
       )}
     </Notice>
   )
@@ -83,6 +129,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
         </p>
         {spec.status === '초안' && !xr && spec.question && <Notice tone="warn">빈 항목 질문이 남아 있습니다. 답이 오면 AI가 확정 조건(질문 없음·인사 경고 없음·근거 있음)을 다시 보고, 맞으면 바로 확정하고 아니면 AI 교차검증에 올립니다.</Notice>}
         {xr && <ReviewDecide d={d} spec={spec} xr={xr} />}
+        {spec.status === '확정' && <ReleaseCheckBox d={d} spec={spec.id} />}
         <h3 className="sec">문제</h3><p>{spec.problem}</p>
         <h3 className="sec">목표</h3><p>{spec.goal}</p>
         <h3 className="sec">요구사항</h3>
@@ -127,7 +174,7 @@ function ParaBox({ p, on, onClick, s, spec }: { p: S['specs'][number]['paras'][n
   return (
     <button type="button" className={`para${on ? ' on' : ''}`} onClick={onClick}>
       <div><span className="pid">{p.id}</span>{p.text}</div>
-      {p.warn && <div className="warnline">인사운영 ② 경고 ({p.warn.card}) · {p.warn.text}</div>}
+      {p.warn && <div className="warnline">인사총무 ② 경고 ({p.warn.card}) · {p.warn.text}</div>}
       {p.incident && <div className="incline">장애 표시 · {p.incident} (link_incident)</div>}
       {(tasks.length > 0 || done) && (
         <span className="tags">

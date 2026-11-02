@@ -3,7 +3,7 @@ import { shortDateTime } from "@/lib/format";
 import { finance, krw, type SupportCostRecord } from "@/lib/finance";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
-// 고객지원 비용 기록: 고객지원이 문의를 닫으면 총괄이 재무 AI에 넘기고, 재무 AI가 배송비·환불·쿠폰을 확인해 장부에 남긴 기록.
+// 고객지원 비용 기록: 고객지원이 문의를 닫으면 총괄이 재무 AI에 넘기고, 재무 AI가 끝난 환불 금액·쿠폰을 받아 주문 배송비와 함께 장부에 적은 기록.
 // 읽기 전용이다. 경비를 쓰지 않은 문의(답변만 한 문의)도 처리 결과는 기록으로 남는다.
 
 const RESOLUTION_KO: Record<string, string> = {
@@ -37,7 +37,7 @@ export function SupportCostsSection({ tick }: { tick: number }) {
   const res = useResource("support-costs", () => finance.supportCosts(), tick);
   return (
     <Panel id="support-costs" title="고객지원 비용 기록" meta={res.env?.meta}
-      hint="고객지원이 문의를 해결 종료하면 총괄 AI가 재무 AI에 넘기고, 재무 AI가 주문 배송비와 환불·쿠폰을 확인해 장부에 남긴 기록입니다. 이 화면은 읽기 전용이며 돈을 움직이지 않습니다.">
+      hint="고객지원이 문의를 해결 종료하면 총괄 AI가 재무 AI에 넘기고, 재무 AI가 고객지원이 끝낸 환불 금액과 쿠폰을 받아 주문 배송비와 함께 장부에 적은 기록입니다. 환불 여부는 고객지원이 정하고 재무는 확인하지 않습니다. 이 화면은 읽기 전용이며 돈을 움직이지 않습니다.">
       <ResourceBody res={res}>
         {(rows) => rows.length === 0 ? (
           <Empty>아직 기록이 없습니다. 고객지원에서 문의를 해결 종료하면 여기에 쌓입니다.</Empty>

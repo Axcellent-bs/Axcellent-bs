@@ -28,7 +28,7 @@ const ITEM_ACTION = {
   },
   anomaly_resolve: {
     button: "처리 완료",
-    placeholder: "예: 고객에게 확인, 정상 환불",
+    placeholder: "예: 담당 팀에 확인, 정상 지급",
     hint: "조사한 결론을 적고 처리 완료를 누르면 목록에서 빠집니다. 돈을 돌려받거나 고객을 막지는 않습니다.",
     send: (ref: string, note: string) => finance.resolveAnomaly(ref, note),
   },

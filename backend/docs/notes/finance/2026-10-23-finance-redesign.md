@@ -2,6 +2,8 @@
 
 담당: 태윤 (finance·safety·contracts). 상태: **확정 (태윤 결정, 2026-10-23)**. 기준 문서 개정안은 `docs-change-finance-redesign.md`.
 
+**2026-11-02 개정 (담당 태윤):** 환불은 고객지원 일이다. 재무는 끝난 환불 금액을 장부에 적을 뿐 환불을 확인·검증·감사하지 않는다. 이 문서의 ⑦ 감사에서 환불 규칙(`repeat_refund`, `refund_rate_jump`, 환불 쪼개기, 환불 재계산)과 환불 통계를 없앴다.
+
 ## 1. 한 줄 요약
 
 재무 AI는 **캣북스의 재무팀**이다. 실제 회사 재무팀이 하는 일(결산, 대사, 판매자 정산, 예산·한도 정책, 사후 감사)을
@@ -25,7 +27,7 @@
 | ② 매출·PG 대사 | 주문 ↔ 결제·환불 ↔ PG 정산을 건별로 맞춤. 상태 `matched`(일치)·`mismatch`(금액 다름)·`missing_in_pg`(PG에 없음)·`pending`(아직 정산 전)·`fee_anomaly`(수수료율 이상) | 불일치 건 처리 메모 | 포트원 거래대사, 토스 정산 API |
 | ③ 판매자 정산 | 판매자별 정산금 = 판매액 − 판매 수수료 − 판매자 부담 쿠폰 − 환불. 보류 사유 자동 표시(진행 중 클레임, 구매 미확정, 위험 판매자). 정산 내역서 | 정산 묶음 지급 승인(C, 안전 관문 보류 큐) | 포트원 파트너 정산, 쿠팡·스마트스토어 |
 | ⑤ 예산·한도 정책 | 정책표 보기(쿠폰 한도, 환불 한도, 보상 한도, 판매자 위험), 오늘·이번 달 소진율과 경보, 데이터 근거로 한도 변경 *제안* | 정책 변경(기준표 PR) | Ramp, Pigment |
-| ⑦ 내부통제·이상 탐지 | 사후 감사 리포트: 한도 바로 아래로 쪼개기, 같은 고객 반복 환불, 같은 고객 쿠폰 중복, 환불률 급변, 실행 관문 보류·거절 추이 | 조사 결론 메모 | 비즈플레이 모니터링, Ramp |
+| ⑦ 내부통제·이상 탐지 | 사후 감사 리포트: 쿠폰 한도 바로 아래로 쪼개기, 같은 고객 쿠폰 중복, 쿠폰 금액 재계산 실패, 실행 관문 보류·거절 추이 | 조사 결론 메모 | 비즈플레이 모니터링, Ramp |
 
 나중에: ④ 비용·영수증(영수증 읽기, AI 사용비), ⑥ 세무(부가세·세금계산서), ⑧ 현금흐름 예측.
 
@@ -68,7 +70,7 @@
 - `GET /api/finance/settlements?period=` → 판매자별 `SellerStatement[]` = {seller_id, name, gross, commission_rate, commission, seller_coupon, refunds, payout, hold_reasons[], status(`ready`|`held`|`requested`|`approved`|`rejected`)}
 - `POST /api/finance/settlements/batch` → 보류 아닌 판매자들을 묶어 `confirm_settlement`를 `execute()`로 요청(C → 안전 관문 보류 큐). 응답에 `review_id`
 - `GET /api/finance/policy` → 정책표(`rules[]` = {key, label, limit, used_today, used_month, ratio, alert}), 한도 *제안* `proposals[]` = {key, current, proposed, reason}
-- `GET /api/finance/audit?days=7` → `AuditReport`: `findings[]` = {code, severity, title, detail, refs[]}, `stats`(환불 건수·금액, 환불률 지난주 대비, 쿠폰 건수, 관문 보류·거절 수)
+- `GET /api/finance/audit?days=7` → `AuditReport`: `findings[]` = {code, severity, title, detail, refs[]}, `stats`(쿠폰 건수·금액, 관문 보류·거절 수)
 - 유지: `GET /api/finance/ledger`, `/loss-reports`, `/self-test`, `/self-test/last`, `/market-ops`
 - 삭제: `/api/finance/verifications`, `/api/finance/ai-reviews`, `/catbooks/sync`·`/catbooks/items`·`/threshold-reviews`(2026-10-26, 4장)
 
@@ -170,9 +172,8 @@
 
 // GET /api/finance/audit?days=7
 {"from": "...", "to": "...",
- "stats": {"refund_count": 12, "refund_amount": 384000, "refund_rate": 0.052, "refund_rate_prev": 0.031,
-           "coupon_count": 40, "coupon_amount": 210000, "gate_held": 3, "gate_rejected": 1},
- "findings": [ {"code": "split_under_limit"|"repeat_refund"|"duplicate_coupon"|"refund_rate_jump"|"amount_recheck_failed"|"gate_hold_trend",
+ "stats": {"coupon_count": 40, "coupon_amount": 210000, "gate_held": 3, "gate_rejected": 1},
+ "findings": [ {"code": "split_under_limit"|"duplicate_coupon"|"amount_recheck_failed"|"gate_hold_trend",
                 "severity": "high"|"medium"|"low", "title": "같은 고객에게 한도 바로 아래 쿠폰 3번",
                 "detail": "buyer_0007에게 1시간 안에 9,900원 쿠폰 3장 (한도 10,000원)", "refs": ["cpn_...", "exe_..."]} ]}
 ```

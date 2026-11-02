@@ -44,3 +44,12 @@ exclude_tags = [
 "마인크래프트" = ["minecraft"]
 "배틀그라운드" = ["배그", "pubg"]
 "메이플스토리" = ["maplestory"]
+
+# 영상 소재 추천(data content_recommend, 콘텐츠 루프 2단계): 기본 키워드 그룹(trend_scan)과 YouTube 후보
+# (trend_candidates)에서 급상승한 것만 골라 점수 순으로 추천한다. 점수 = z_weight × z + (두 소스면 two_source_bonus)
+[recommend]
+max_items = 5            # 추천 수 상한. 급상승이 이보다 적으면 있는 만큼만(억지로 채우지 않음)
+z_weight = 1.0           # 변화 정도(z) 가중치
+two_source_bonus = 2.0   # 검색 급상승 + YouTube 인기 태그 근거가 둘 다 있으면 더하는 점수
+# 회사 관련성 표시용 키워드 (위 기본 키워드 그룹의 이름·키워드는 자동으로 포함). 순위에서 빼지는 않는다
+company_keywords = ["책", "도서", "출판", "캣북스", "반려묘", "집사"]

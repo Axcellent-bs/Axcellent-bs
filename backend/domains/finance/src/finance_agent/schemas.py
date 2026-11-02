@@ -65,9 +65,7 @@ class AuditReportInput(AxModel):
 class AuditFinding(AxModel):
     code: Literal[
         "split_under_limit",
-        "repeat_refund",
         "duplicate_coupon",
-        "refund_rate_jump",
         "amount_recheck_failed",
         "gate_hold_trend",
         "compensation_outside_impact",
@@ -79,10 +77,6 @@ class AuditFinding(AxModel):
 
 
 class AuditStats(AxModel):
-    refund_count: int
-    refund_amount: int
-    refund_rate: float | None = None
-    refund_rate_prev: float | None = None
     coupon_count: int
     coupon_amount: int
     gate_held: int | None = None

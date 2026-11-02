@@ -253,6 +253,20 @@ owner = "planning"
 requesters = ["planning"]
 base_grade = "A"
 
+# 배포 전 기획서 대조 (dev → planning). 기획 기록에 대조 결과만 남긴다. 배포 실행은 개발 관문
+[[actions]]
+action = "request_release_check"
+owner = "planning"
+requesters = ["dev"]
+base_grade = "A"
+
+# 사람 확인으로 끝난 대조 건에 사람이 배포 지시 (배포 실행·prod 승인은 개발·안전 레이어가 그대로)
+[[actions]]
+action = "send_release_order"
+owner = "planning"
+requesters = ["planning"]
+base_grade = "A"
+
 [[actions]]
 action = "receive_planning_answer"
 owner = "planning"

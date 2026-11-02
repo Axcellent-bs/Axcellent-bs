@@ -27,7 +27,7 @@ const STEP_KO: Record<string, string> = {
   rollback: "배포 되돌리기", recovery: "복구 확인", recovered_draft: "정상화 공지 초안", diagnose: "원인 진단",
   impact: "영향 분석", notice: "점검 공지", compensation: "피해 고객 보상",
   similar_cases: "비슷한 과거 이벤트 찾기", resolution: "해결 내용 기록",
-  cost: "배송비·비용 기록 확인", record: "처리 결과 기록", verify: "인사 기록 읽어 확인",
+  cost: "처리 결과 장부에 기록", record: "처리 결과 기록", verify: "인사 기록 읽어 확인",
 };
 const NOTE_KO: Record<string, string> = {
   undetermined: "원인을 특정하지 못함", requested: "보상을 요청함", card_created: "기록을 남김",

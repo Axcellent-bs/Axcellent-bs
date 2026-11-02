@@ -110,7 +110,7 @@ def main() -> None:
         execute(s, "marketing", "issue_coupon", "cpn-huge", coupon("buy_0909", 25, 20000)),
     )
 
-    # 2) 환불 (고객지원 → 안전 레이어 → 재무가 결제 금액과 비교)
+    # 2) 환불 (고객지원 → 안전 레이어 기준표 검사. 재무는 끝난 환불 금액을 장부에 적기만 한다)
     show(
         "ord_1003 환불 20,000원(결제 32,000원)",
         execute(
