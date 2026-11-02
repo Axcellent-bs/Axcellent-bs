@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import os
 import re
 from collections.abc import Awaitable
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -47,6 +49,10 @@ MAX_OUTLINE_LINES = 60  # 긴 파일은 앞부분 + 뼈대 줄(선택자·함수
 LLM_TIMEOUT_SECONDS = 400.0  # 단계 하나 전체 (요청 재시도 포함)
 LLM_HTTP_TIMEOUT_SECONDS = 180.0  # 요청 하나. 기본 60초면 긴 파일을 쓰다 끊겨 다시 요청한다
 DEV_TEAM = "dev_team"
+# 토큰 관리: 실행 한 번의 LLM 사용 상한과 동시에 LLM을 부르는 실행 수 (env로 바꾼다)
+RUN_MAX_CALLS = 40  # PLANNING_CODER_MAX_CALLS
+RUN_MAX_TOKENS = 600_000  # PLANNING_CODER_MAX_TOKENS (입력 + 출력)
+PARALLEL = 2  # PLANNING_CODER_PARALLEL
 DEFAULT_DONE = "기획에 적은 동작이 그대로 구현되고 기존 동작은 바뀌지 않는다"
 
 # 고를 파일 목록에서 뺄 것 (잠금 파일·빌드 결과·의존성·이미지 등)
@@ -185,14 +191,82 @@ def reset_llm() -> None:
     _llm, _llm_set = None, False
 
 
+class MeteredLLM(LLMClient):
+    """사용량 기록(NFR-06)을 지금 실행의 계량기에도 더하는 클라이언트."""
+
+    def record_usage(  # type: ignore[override]
+        self, context_id: Any, model: Any, input_tokens: int, output_tokens: int, success: bool,
+        **kw: Any,
+    ) -> None:  # fmt: skip
+        super().record_usage(context_id, model, input_tokens, output_tokens, success, **kw)
+        count_tokens(input_tokens + output_tokens)
+
+
 def get_llm() -> LLMClient | None:
     """바꿔 끼운 것, 아니면 planning LLM 설정(`PLANNING_LLM_*`·`LLM_*`)이 있을 때만 클라이언트."""
     if _llm_set:
         return _llm
     settings = LLMSettings.from_env("planning")
     if settings.model and settings.base_url:
-        return LLMClient("planning", settings=settings, timeout=LLM_HTTP_TIMEOUT_SECONDS)
+        return MeteredLLM("planning", settings=settings, timeout=LLM_HTTP_TIMEOUT_SECONDS)
     return None
+
+
+# ---------------------------------------------------------------- LLM 사용량 (토큰 관리)
+
+
+@dataclass
+class Meter:
+    """실행 한 번이 쓴 LLM 호출·토큰. `base_*`는 같은 작업의 앞 실행들이 쓴 양 (화면 합계용)."""
+
+    base_calls: int = 0
+    base_tokens: int = 0
+    calls: int = 0
+    tokens: int = 0
+
+
+_meter: ContextVar[Meter | None] = ContextVar("coder_meter", default=None)
+_slots: tuple[asyncio.AbstractEventLoop, asyncio.Semaphore] | None = None
+
+
+def limit(name: str, default: int) -> int:
+    """양수 env 값, 없거나 이상하면 기본값."""
+    try:
+        value = int(os.getenv(name) or "")
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def meter_now() -> Meter | None:
+    return _meter.get()
+
+
+def count_tokens(n: int) -> None:
+    """지금 실행의 계량기에 토큰을 더한다 (실행 밖이면 무시)."""
+    m = _meter.get()
+    if m is not None and n > 0:
+        m.tokens += n
+
+
+def budget_over(m: Meter) -> str | None:
+    """실행 한 번의 상한을 넘었으면 이유 한 줄."""
+    calls = limit("PLANNING_CODER_MAX_CALLS", RUN_MAX_CALLS)
+    tokens = limit("PLANNING_CODER_MAX_TOKENS", RUN_MAX_TOKENS)
+    if m.calls >= calls:
+        return f"LLM 호출 {m.calls}회 ≥ 한도 {calls}회"
+    if m.tokens >= tokens:
+        return f"토큰 {m.tokens:,} ≥ 한도 {tokens:,}"
+    return None
+
+
+def _slot() -> asyncio.Semaphore:
+    """동시에 LLM을 부르는 실행 수를 묶는 자리 (이벤트 루프마다 하나)."""
+    global _slots
+    loop = asyncio.get_running_loop()
+    if _slots is None or _slots[0] is not loop:
+        _slots = (loop, asyncio.Semaphore(limit("PLANNING_CODER_PARALLEL", PARALLEL)))
+    return _slots[1]
 
 
 def model_name(client: Any) -> str | None:
@@ -414,11 +488,21 @@ def pr_body(job: Job, rows: list[CodingFile], summary: str) -> str:
 async def _ask[T: BaseModel](
     llm: Any, step: str, prompt: str, schema: type[T], data: dict, ctx: str
 ) -> T:
+    m = _meter.get()
+    if m is not None:
+        over = budget_over(m)
+        if over:
+            raise CoderStop(
+                "waiting_human", f"{over} → 사람 확인 (다시 시도하면 새로 셈)", "code.budget",
+                f"{step} 전에 멈춤 · {over}",
+            )  # fmt: skip
+        m.calls += 1
     try:
-        return await asyncio.wait_for(
-            llm.structured(prompt, schema, untrusted=data, context_id=ctx),
-            LLM_TIMEOUT_SECONDS,
-        )
+        async with _slot():
+            return await asyncio.wait_for(
+                llm.structured(prompt, schema, untrusted=data, context_id=ctx),
+                LLM_TIMEOUT_SECONDS,
+            )
     except TimeoutError:
         raise CoderStop("failed", f"LLM {step} 시간 초과") from None
     except Exception as exc:  # noqa: BLE001 - 예외 내용 대신 종류만 남긴다
@@ -656,6 +740,10 @@ async def run(svc: PlanningService, job: Job) -> None:
     """코딩 작업 하나를 끝까지 돌린다. 어떤 실패든 상태에 한 줄로 남기고 멈춘다."""
     from planning_agent.domain.service import GateRefused
 
+    task = next((t for t in svc.state.tasks if t.id == job.task_id), None)
+    cr = task.coding if task else None
+    meter = Meter(cr.llm_calls, cr.llm_tokens) if cr else Meter()
+    _meter.set(meter)  # 이 실행(asyncio 작업) 안에서만 보인다
     try:
         try:
             await _run(svc, job)

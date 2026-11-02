@@ -2774,8 +2774,9 @@ class PlanningService:
             n = sum(1 for g in self.gate_calls if g.action == "dev_task_retry") + 1
             await self._execute("dev_task_retry", ctx, f"{task_id}:{n}", text, {"connection": cid})
             x.coding = CodingRun(
-                status="queued", model=coder.model_name(llm), updated_at=t, connection=cid
-            )
+                status="queued", model=coder.model_name(llm), updated_at=t, connection=cid,
+                llm_calls=x.coding.llm_calls, llm_tokens=x.coding.llm_tokens,
+            )  # fmt: skip
             x.state = "진행 중"
             s.activity.append(self._act(t, ctx, "dev", "dev", "dev_task_retry", "A2A", text, "A"))
             return ActionResult(
@@ -3076,6 +3077,9 @@ class PlanningService:
             cr.status = status  # type: ignore[assignment]
             for key, value in fields.items():
                 setattr(cr, key, value)
+            m = coder.meter_now()
+            if m is not None:  # 단계마다 쓴 양을 적는다 (화면에 보인다)
+                cr.llm_calls, cr.llm_tokens = m.base_calls + m.calls, m.base_tokens + m.tokens
             cr.updated_at = self.clock()
             if status == "waiting_human" and cr.pr is None:
                 task.state = "C 보류"

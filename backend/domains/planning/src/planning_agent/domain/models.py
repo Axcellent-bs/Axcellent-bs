@@ -210,6 +210,9 @@ class CodingRun(DomainModel):
     waiting_for: list[str] = Field(default_factory=list)  # 기다리는 앞 작업 id
     # 머지가 충돌로 실패함: 다시 시도하면 PR을 닫고 최신 코드로 다시 쓴다
     merge_conflict: bool = False
+    # 이 작업이 지금까지 쓴 LLM 호출·토큰 (다시 시도해도 이어서 센다). 실행 한 번 상한은 coder
+    llm_calls: int = 0
+    llm_tokens: int = 0
 
 
 class Task(DomainModel):
