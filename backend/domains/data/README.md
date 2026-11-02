@@ -14,6 +14,7 @@
 | `activity_report` | 부서별 AI 업무 리포트: 부서별 요청·결과·사람에게 넘긴 일·품질·사건 참여, 부서 간 협업, 회사 숫자, 직전 기간 비교 | 공통 로그 저장소, finance `closing_report`(A2A), shop-api `GET /api/shop/metric-series` |
 | `trend_scan` | 키워드 그룹별 검색어 급상승(rising·normal·unknown), 기준선 대비 배수, 근거 숫자(z·기준선·흔들림), 판정 불가 이유. 최근 56일 대비 마지막 7일 | 네이버 검색어 트렌드(`connectors/naver_datalab.py`, 그룹마다 1번). 기본 키워드: 회사 폴더 `trends.toml` |
 | `trend_candidates` | YouTube 인기 영상 태그에서 뽑은 후보 키워드(최대 N개, 회사 별칭 표로 같은 대상을 묶음)와 후보마다 YouTube 근거(나온 영상 수·스냅샷 시각·대표 영상 id)·네이버 급상승 판정(trend_scan과 같은 함수). 스냅샷이 없거나 오래되면 unknown + 이유 | YouTube 스냅샷 DB(`youtube_store.latest_popular`, 읽기 전용), 네이버 검색어 트렌드(후보마다 1번). 설정: 회사 폴더 `trends.toml` `[candidates]` |
+| `content_recommend` | 지금 만들 만한 영상 소재(급상승만, 최대 N개): 순위·점수 근거(z·배수·두 소스)·회사 관련성(표시만)·영상 아이디어 1~2문장·형식(숏폼·롱폼)·fallback. 콘텐츠 루프 2단계 | trend_scan(회사 기본 키워드 그룹)·trend_candidates(YouTube 후보)와 같은 네이버 요청(하루 캐시 같이 씀), LLM(아이디어 문장만). 설정: 회사 폴더 `trends.toml` `[recommend]` |
 | `answer_planning_question` | 기획이 되묻는 근거 질문의 답(answered·needs_human·unknown). 기획만 부른다 | data가 보낸 요청의 기록(`planning_questions.py`, 프로세스 안). 아직 요청을 보내는 코드가 없어 지금은 늘 unknown. 사람 답은 `human_answer_request`로 planning `receive_planning_answer`에 보낸다 |
 | `campaign_effect` | 캠페인 기간 주문 방향(늘었음·같음·줄었음)·증분(실제 − 지난 7일 같은 시간대 평균), 캠페인 쿠폰 조회 시점 누적 사용률. 매출은 매출 지표가 생기면 같은 방법(지금은 확인할 수 없음) | shop-api `GET /api/shop/metric-series`(`order_count`), `GET /api/shop/coupons?campaign_id=` |
 
@@ -424,6 +425,22 @@ YouTube에서 뜨는 소재가 검색에서도 뜨는지 본다. 후보 뽑기�
 - 설정은 회사 폴더 `trends.toml`의 `[candidates]`(`max_candidates` 5, `min_videos` 2, `max_age_hours` 24, `rep_videos` 3, `exclude_tags`). 후보마다 네이버 1번이라 작게 둔다(하루 한도 `NAVER_DATALAB_DAILY_LIMIT`). 설정이 없으면 같은 숫자에 제외 목록·별칭 표 없음(별칭 표가 없으면 묶지 않고 예전과 같다). 일반 태그 목록·별칭은 코드에 두지 않는다
 - 별칭 표에는 **뜻이 하나인 이름만** 넣는다. 뜻이 여럿인 줄임말(`롤`·`마크`·`메이플`)을 넣으면 네이버 그룹에 다른 뜻의 검색량(롤케이크·mark·단풍나무)이 섞인다
 - **한계:** 별칭 표에 없는 이름은 묶지 않는다(자동으로 찾지 않음). 묶으면 네이버는 그룹 키워드를 합친 검색량으로 판정해서, **작은 이름의 급상승이 큰 이름에 묻힐 수 있다**(2026-11-02: 따로 보면 `lol` 1.27배 급상승, `리그오브레전드` 그룹으로 묶으면 1.05배 평범). 태그는 올린 사람이 붙인 것이라 영상 내용과 다를 수 있다. 인기 목록(지역 `KR`) 태그만 보고, 회사 키워드 검색 결과·추적 영상은 보지 않는다. 스냅샷 한 시각만 보며 YouTube 쪽 속도(두 시각 차이)는 아직 보지 않는다
+
+### content_recommend (영상 소재 추천, 콘텐츠 루프 2단계)
+
+트렌드 판정 결과로 "지금 만들 만한 영상 소재"를 순위대로 고른다. 순위는 **코드 규칙**, 아이디어 문장만 LLM이다.
+
+1. 판정: 회사 기본 키워드 그룹(`trends.toml` `[[groups]]`)을 trend_scan과 같은 요청(그룹마다 한 번)·같은 판정 함수로, YouTube 인기 태그 후보를 `trend_candidates`(`find_candidates`)로 본다
+2. 합치기: 기본 그룹과 YouTube 후보의 이름(같이 본 이름 포함, 공백·대소문자 무시)이 겹치면 한 소재다. 그 그룹이 급상승이면 그 판정에 YouTube 근거를 붙인다
+3. **급상승(rising)만** 후보다. 평범·판정 불가는 넣지 않는다. 급상승이 없으면 빈 목록 + 이유 `이번 기간 급상승한 소재가 없음`(네이버를 못 읽은 것이 있으면 그 이름도)이고 **억지로 채우지 않는다**
+4. 점수 = `z_weight` × z + (검색 급상승 + YouTube 근거 **두 소스**면 `two_source_bonus`). 큰 순, 같으면 z 큰 순 → 이름. 최대 `max_items`개(요청의 `max_items`가 있으면 그 값)
+5. 회사 관련성: 소재 이름(같이 본 이름 포함)이 회사 키워드(기본 키워드 그룹 이름·키워드 + `company_keywords`)를 품거나 그 안에 들면 `related`, 아니면 `low`. **표시만** 하고 순위에서 빼지 않는다
+6. 아이디어 문장(LLM, `explain.explain_idea`): 소재마다 1~2문장 + 형식(숏폼·롱폼). 프롬프트에는 숫자(배수·z·YouTube 영상 수)만 넣고, 이름(외부 태그·같이 본 이름)은 **데이터 블록(untrusted)에만** 넣는다. 숫자 검증은 `explain`과 같은 규칙(이름 속 숫자 t1의 1은 허용). 실패하면 고정 문장("〈키워드〉 검색이 평소의 N배로 올랐습니다… 짧은 영상으로 다뤄 볼 만합니다") + 숏폼, `fallback: true`와 이유
+
+- 네이버 호출: trend_scan·trend_candidates와 요청 모양이 같아 **같은 프로세스에서 오늘 이미 부른 요청은 커넥터 하루 캐시**에서 나온다(데이터 AI 서버 안에서는 화면이 트렌드 탭을 연 뒤라면 추가 호출이 거의 없다). 이번 실행에서 실제로 부른 수는 `naver_calls`(커넥터 `calls_today` 전후 차이). 기본 그룹과 YouTube 후보의 요청이 같으면(예: 그림책) 한 번만 부른다
+- 설정 `[recommend]`: `max_items` 5, `z_weight` 1.0, `two_source_bonus` 2.0, `company_keywords`(캣북스: 책·도서·출판·캣북스·반려묘·집사). 설정이 없으면 같은 숫자에 회사 키워드는 기본 그룹만
+- 출력: 소재마다 순위, 키워드, 같이 본 이름, 출처(`naver`·`youtube`), 점수 근거(점수·z·배수·두 소스·YouTube 영상 수), 회사 관련성·겹친 회사 키워드, 아이디어 문장, 형식, fallback·이유. 그리고 네이버 호출 수, 못 읽은 그룹·후보, YouTube 후보 상태(스냅샷이 없거나 오래되면 unknown + 이유, 이때는 기본 그룹만 본다)
+- **한계:** 추천 "품질"(실제로 만들 만한지, 영상이 잘 됐는지)은 **평가셋이 없어 재지 않는다**. 순위 규칙과 숫자 검증만 테스트한다. 나중에 게시 성과(콘텐츠 루프 4·5단계, `campaign_effect`)로 평가한다. 가중치(1.0·2.0)도 성과 자료가 없어 정한 값이다. 회사 관련성은 이름 겹침만 보며 뜻(예: 롤 = 게임/케이크)은 모른다. 한 글자 회사 키워드(`책`)는 넓게 겹칠 수 있다
 
 ### 설명 문장(LLM)과 템플릿 대체 이유
 - 숫자는 코드가 계산하고 LLM은 문장만 쓴다(`explain.py`). 문장에 넘긴 facts에 없는 숫자가 있거나 LLM이 실패하면 고정 템플릿으로 바꾸고 `fallback=true`다.

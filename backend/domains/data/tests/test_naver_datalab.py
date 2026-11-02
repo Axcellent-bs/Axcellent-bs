@@ -110,6 +110,15 @@ async def test_same_request_is_cached_for_the_day() -> None:
     assert len(seen.requests) == 1
 
 
+async def test_calls_today_counts_only_real_calls() -> None:
+    """content_recommend가 이번 실행에서 부른 수를 셀 때 쓴다 (캐시에서 나온 요청은 세지 않음)."""
+    connector, _ = _connector(_ok(_naver([_series("고양이", [1, 2, 3])])))
+    before = connector.calls_today
+    await connector.search_trend(_query())
+    await connector.search_trend(_query())
+    assert connector.calls_today - before == 1
+
+
 async def test_different_request_is_not_cached() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         names = [g["groupName"] for g in json.loads(request.content)["keywordGroups"]]

@@ -207,10 +207,10 @@ class CandidatesResult:
     evidence: Evidence
 
 
-async def _naver(
+async def naver_verdict(
     query: TrendScanInput, connector: NaverDatalabConnector, settings: Settings
 ) -> TrendVerdict:
-    """후보 하나를 네이버에서 읽어 trend_scan과 같은 함수로 판정한다.
+    """그룹 하나를 네이버에서 읽어 trend_scan과 같은 함수로 판정한다 (content_recommend도 쓴다).
 
     못 읽으면 이 후보만 unknown이다.
     """
@@ -280,7 +280,7 @@ async def find_candidates(
                     video_ids=list(tag.video_ids[: config.rep_videos]),
                     matched_tags=list(tag.matched),
                 ),
-                naver=await _naver(query, connector, settings),
+                naver=await naver_verdict(query, connector, settings),
                 aliases=keywords[1:],
             )
         )

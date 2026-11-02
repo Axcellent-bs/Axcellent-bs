@@ -654,6 +654,70 @@ class TrendCandidatesOutput(AxModel):
         return self
 
 
+# --------------------------------------------------------------- content_recommend (영상 소재 추천)
+# trend_scan(회사 기본 키워드) + trend_candidates(YouTube 인기 태그) 판정에서 급상승한 것만 골라
+# 코드 규칙 점수로 순위를 매기고, 소재마다 LLM이 영상 아이디어 문장·형식을 쓴다(숫자 검증).
+# 급상승이 없으면 빈 목록 + 이유다(억지로 채우지 않는다). 콘텐츠 루프 2단계용.
+
+ContentFormat = Literal["숏폼", "롱폼"]
+ContentSource = Literal["naver", "youtube"]  # 검색 급상승, YouTube 인기 태그
+
+
+class ContentRecommendRequest(AxModel):
+    """content_recommend skill 입력. 비우면 회사 설정(trends.toml `[recommend]`)과 어제 날짜."""
+
+    max_items: int | None = Field(default=None, ge=1, le=10)  # 추천 수 상한. 없으면 회사 설정
+    end_date: dt.date | None = None  # 네이버 판정할 마지막 날 (한국 날짜). 없으면 어제
+
+
+class ContentScore(AxModel):
+    """순위 점수와 그 근거 (점수 = z 가중치 × z + 두 소스면 가산점, 가중치는 회사 설정)."""
+
+    score: float
+    z: float  # 변화 정도 (trend_scan 판정의 강건 z)
+    ratio: float = Field(ge=0)  # 기준선 대비 배수
+    two_sources: bool  # 검색 급상승 + YouTube 인기 태그 근거가 둘 다 있음
+    youtube_videos: int | None = Field(default=None, ge=1)  # YouTube 인기 영상 수 (두 소스일 때)
+
+
+class ContentRecommendation(AxModel):
+    rank: int = Field(ge=1)
+    keyword: str = Field(
+        min_length=1
+    )  # 소재 이름 (기본 키워드 그룹 이름 또는 YouTube 후보 대표 이름)
+    aliases: list[str] = Field(default_factory=list)  # 같이 본 이름 (네이버 그룹의 다른 키워드)
+    sources: list[ContentSource]
+    score: ContentScore
+    # 회사 관련성 (표시만, 순위에서 빼지 않음): related = 회사 키워드와 겹침, low = 안 겹침
+    company_relevance: Literal["related", "low"]
+    company_match: list[str] = Field(default_factory=list)  # 겹친 회사 키워드
+    idea: str  # 영상 아이디어 1~2문장 (LLM, 숫자 검증. 실패하면 고정 문장)
+    format: ContentFormat  # 형식 제안
+    fallback: bool  # 아이디어 문장을 고정 문장으로 바꿨는지
+    fallback_reason: str | None = None  # llm_unavailable·llm_error·format_error·number_invalid
+
+
+class ContentRecommendOutput(AxModel):
+    start_date: dt.date | None = None  # 네이버 요청 기간 (기준선 시작)
+    end_date: dt.date | None = None  # 네이버 판정 마지막 날
+    items: list[ContentRecommendation] = Field(default_factory=list)  # 순위 순
+    empty_reason: str | None = None  # 추천이 없을 때 이유 (예: 이번 기간 급상승한 소재가 없음)
+    naver_calls: int = Field(default=0, ge=0)  # 이번 실행에서 네이버를 실제로 부른 수 (캐시 제외)
+    naver_failed: list[str] = Field(default_factory=list)  # 네이버를 읽지 못한 그룹·후보
+    youtube_status: Literal["known", "unknown"] = "unknown"  # YouTube 후보를 썼는지
+    youtube_reason: str | None = None  # unknown이면 이유 (예: 스냅샷이 오래됨)
+    snapshot_at: UtcDatetime | None = None  # 쓴 YouTube 스냅샷 시각
+    summary: str  # 한 문장 (코드가 숫자로 만든 고정 문장)
+
+    @model_validator(mode="after")
+    def _reason_when_empty(self) -> Self:
+        if not self.items and not self.empty_reason:
+            raise ValueError("추천이 없으면 empty_reason이 있어야 한다")
+        if [i.rank for i in self.items] != list(range(1, len(self.items) + 1)):
+            raise ValueError("rank는 1부터 차례로")
+        return self
+
+
 # --------------------------------------------------------------- campaign_effect (캠페인 효과)
 # 캠페인 기간 주문·매출을 지난 7일 같은 시간대 평균과 비교한 증분과, 캠페인 쿠폰 누적 사용률.
 # 항목마다 "앎(값·근거)" 또는 "모름 + 이유"다. 모르면 0으로 채우지 않는다.
