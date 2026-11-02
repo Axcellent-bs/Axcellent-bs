@@ -188,9 +188,12 @@ class PopularSnapshot:
     videos: tuple[PopularVideo, ...]  # 인기 순위 순
 
 
-def latest_popular(path: str | Path) -> PopularSnapshot | None:
+def latest_popular(
+    path: str | Path, at_or_before: datetime | None = None
+) -> PopularSnapshot | None:
     """가장 최근에 인기 목록을 받은 시각의 인기 영상들. 파일이 없거나 인기 영상이 없으면 None.
 
+    `at_or_before`를 주면 그 시각 이전(같은 시각 포함) 스냅샷 중 가장 최근 것이다(지난 기간 판정용).
     읽기 전용으로 연다(파일이 없을 때 새로 만들지 않는다).
     """
     if str(path) != ":memory:" and not Path(path).is_file():
@@ -198,9 +201,16 @@ def latest_popular(path: str | Path) -> PopularSnapshot | None:
     uri = f"file:{Path(path).as_posix()}?mode=ro"
     conn = sqlite3.connect(uri, uri=True, timeout=5.0)
     try:
-        row = conn.execute(
-            "SELECT MAX(collected_at) FROM snapshots WHERE popular_rank IS NOT NULL"
-        ).fetchone()
+        if at_or_before is None:
+            row = conn.execute(
+                "SELECT MAX(collected_at) FROM snapshots WHERE popular_rank IS NOT NULL"
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT MAX(collected_at) FROM snapshots"
+                " WHERE popular_rank IS NOT NULL AND collected_at <= ?",
+                (iso(at_or_before),),
+            ).fetchone()
         if not row or not row[0]:
             return None
         rows = conn.execute(

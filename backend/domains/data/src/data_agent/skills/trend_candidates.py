@@ -22,7 +22,7 @@ from __future__ import annotations
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -37,7 +37,7 @@ from ax_contracts.schemas.data import (
     YouTubeTagEvidence,
 )
 from data_agent.connectors import ConnectorUnavailable
-from data_agent.connectors.naver_datalab import NaverDatalabConnector
+from data_agent.connectors.naver_datalab import KST, NaverDatalabConnector
 from data_agent.skills.trend_scan import (
     DEFAULT_SETTINGS,
     REQUEST_DAYS,
@@ -173,17 +173,39 @@ def pick_candidates(
     return picked[:limit]
 
 
+def snapshot_cutoff(end_date: date | None) -> datetime | None:
+    """지난 기간 판정의 스냅샷 기준 시각.
+
+    판정 마지막 날(한국 날짜)이 끝나는 시각. `end_date`가 없으면 None(지금).
+    """
+    if end_date is None:
+        return None
+    day_end = datetime(end_date.year, end_date.month, end_date.day, tzinfo=KST) + timedelta(days=1)
+    return day_end.astimezone(UTC)
+
+
 def _snapshot_problem(
-    snapshot: PopularSnapshot | None, config: CandidateConfig, now: datetime
+    snapshot: PopularSnapshot | None,
+    config: CandidateConfig,
+    now: datetime,
+    cutoff: datetime | None = None,
 ) -> str | None:
+    """`cutoff`(지난 기간 판정)가 있으면 그 시각 기준으로 나이를 잰다. 없으면 지금 기준."""
+    when = cutoff or now
     if snapshot is None:
+        if cutoff is not None:
+            return (
+                f"그 시점({cutoff.astimezone(KST).date().isoformat()} 0시 KST) 이전"
+                " YouTube 스냅샷이 없음 (지난 기간은 그때 스냅샷의 태그로만 본다)"
+            )
         return "YouTube 스냅샷이 없음 (인기 영상을 저장한 기록이 없음, data youtube_collect)"
-    age = now - snapshot.collected_at
+    age = when - snapshot.collected_at
     if age > timedelta(hours=config.max_age_hours):
         hours = age.total_seconds() / 3600
+        base = "판정 기간 끝" if cutoff is not None else "지금"
         return (
             f"YouTube 스냅샷이 오래됨: 마지막 수집 {snapshot.collected_at.isoformat()}"
-            f" ({hours:.1f}시간 전, 기준 {config.max_age_hours:g}시간)"
+            f" ({base}보다 {hours:.1f}시간 전, 기준 {config.max_age_hours:g}시간)"
         )
     if not snapshot.videos:
         return "YouTube 스냅샷에 인기 영상이 없음"
@@ -262,9 +284,11 @@ async def find_candidates(
     now = now or datetime.now(UTC)
     config = load_config(env)
     db = env.get(DB_ENV) or str(DEFAULT_DB)
-    snapshot = latest_popular(db)
+    # 지난 기간(end_date를 준 요청)은 그 기간 끝 이전의 스냅샷을 쓴다. 비우면 지금 가장 최근 스냅샷
+    cutoff = snapshot_cutoff(request.end_date)
+    snapshot = latest_popular(db, cutoff)
     snapshot_query = f"youtube snapshot popular latest db={Path(db).name}"
-    why = _snapshot_problem(snapshot, config, now)
+    why = _snapshot_problem(snapshot, config, now, cutoff)
     if snapshot is None or why:
         why = why or ""
         output = TrendCandidatesOutput(
