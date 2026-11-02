@@ -131,7 +131,7 @@ def test_settings_api_and_work_call_marks_agent(service, monkeypatch) -> None:
     assert res.status_code == 200 and res.json()["data"]["resolved"] == "subscription"
     bad = client.post("/api/planning/coding-settings", json={"mode": "x"}, headers=admin)
     assert bad.status_code == 400
-    # 본인 Claude가 일감 목록을 보면 '연결됨'
+    # 본인 Claude가 작업 목록을 보면 '연결됨'
     assert client.get("/api/planning/work/tasks", headers=human).status_code == 200
     assert service.agents_connected(service.state) == ["operator"]
 
