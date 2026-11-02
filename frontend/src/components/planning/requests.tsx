@@ -196,7 +196,12 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
                   <span className="mono">{r.id}</span>
                   <span>{DEPT_NAME[r.from]}</span>
                   {isFollowUp(r) && <Tag tone="amber">후속</Tag>}
-                  {row.dups.map((x) => <span key={x.id}>같은 요청 <Ref s={s} id={x.id} /> {DEPT_NAME[x.from]}</span>)}
+                  {row.dups.map((x) => (
+                    <span key={x.id} className="rq-dup">
+                      같은 요청 <Ref s={s} id={x.id} /> {DEPT_NAME[x.from]}
+                      <button type="button" className="rq-unlink" title={`${x.id}을 따로 기획`} onClick={() => { d({ type: 'unlinkDuplicate', request: x.id }); toast.show(`${x.id} 따로 기획`) }}>풀기</button>
+                    </span>
+                  ))}
                   {byRelation(r.related).slice(0, 3).map((x) => (
                     <span key={x.id} title={x.reason}>
                       <Tag tone={x.relation === 'conflict' ? 'amber' : undefined}>{RELATION_LABEL[x.relation]}</Tag> <Ref s={s} id={x.id} />

@@ -220,6 +220,13 @@ base_grade = "A"
 
 # 요청 서비스가 기획 질문에 나중에 답한다 (answer_planning_question → needs_human 뒤). 답을 기획서에
 # 근거로 남길 뿐이라 A. 확정은 기존 confirm_spec 관문이 따로 본다
+# 같은 요청으로 묶인 요청을 사람이 풀어 따로 기획 (기획 기록만 바꾼다, 사람 버튼)
+[[actions]]
+action = "unlink_duplicate"
+owner = "planning"
+requesters = ["planning"]
+base_grade = "A"
+
 [[actions]]
 action = "receive_planning_answer"
 owner = "planning"
