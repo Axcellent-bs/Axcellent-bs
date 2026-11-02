@@ -1,4 +1,5 @@
 import asyncio
+from datetime import timedelta
 
 import pytest
 
@@ -83,6 +84,21 @@ async def test_failed_after_retries_degrades_and_skips_dependents(harness) -> No
     assert inc.steps["compensation"].status == "completed"  # 공지 실패와 무관하게 보상은 진행
     assert inc.steps["record"].status == "completed"  # 기록은 남긴다
     assert inc.steps["rollback"].status == "completed"  # 다른 갈래는 계속
+
+
+@pytest.mark.asyncio
+async def test_degraded_event_has_no_recovery_time_until_the_shop_recovers(harness) -> None:
+    """장애가 안 풀린 채 대응이 끝나면 복구 시간은 비어 있고, 복구 신호가 오면 채워진다."""
+    harness.fakes.script("marketing", "publish_notice", "fail", "fail", "fail")
+    inc = await run(harness)
+    assert inc.status == "degraded"
+    assert inc.metrics["mttr_seconds"] is None
+    assert inc.metrics["response_seconds"] >= 0  # AI 대응에 걸린 시간은 따로 남는다
+    inc.recovered_at = inc.closed_at + timedelta(seconds=90)
+    inc.refresh_mttr()
+    assert inc.metrics["mttr_seconds"] == round(
+        (inc.recovered_at - inc.opened_at).total_seconds(), 2
+    )
 
 
 @pytest.mark.asyncio

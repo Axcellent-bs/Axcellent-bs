@@ -67,3 +67,26 @@ async def test_registry_real_endpoint_reports_unreachable_depts(monkeypatch) -> 
         data = client.get("/api/registry/real").json()
     assert data["meta"]["mock"] is False
     assert set(data["data"]["unavailable"]) >= {"data", "hr"}
+
+
+@pytest.mark.asyncio
+async def test_merged_department_card_keeps_one_entry_per_skill() -> None:
+    """부서가 서비스 둘로 나뉘고 같은 skill id가 둘 다에 있어도 부서 카드에는 하나만 둔다."""
+    cards = iter(
+        [
+            {
+                "name": "handover",
+                "skills": [{"id": "get_roster"}, {"id": "answer_planning_question"}],
+            },
+            {
+                "name": "decisions",
+                "skills": [{"id": "record_case"}, {"id": "answer_planning_question"}],
+            },
+        ]
+    )
+    async with _client(lambda request: httpx.Response(200, json=next(cards))) as client:
+        card = await http_card_fetcher(client)("hr")
+    ids = [s["id"] for s in card["skills"]]
+    assert ids.count("answer_planning_question") == 1
+    assert set(ids) == {"get_roster", "record_case", "answer_planning_question"}
+    assert card["name"] == "hr"

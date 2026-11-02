@@ -145,7 +145,6 @@ SERVICES: tuple[Service, ...] = (
             "confirm_handover",
             "list_handovers",
             "list_open_questions",
-            "answer_planning_question",
         ),
         "인수인계",
     ),

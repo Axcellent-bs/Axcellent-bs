@@ -151,6 +151,12 @@ def test_orchestrator_incident_keeps_only_the_agreed_fields() -> None:
         {"context_id": "ctx_inc_0002", "status": "open", "opened_at": "2026-10-22T05:00:00Z"}
     )
     assert (open_row.closed_at, open_row.component) == (None, None)
+    # 복귀 신호가 오기 전에는 실제 종료 시각이 없다. 오면 시각으로 읽는다
+    assert open_row.recovered_at is None
+    recovered = OrchestratorIncident.model_validate(
+        {**INCIDENT, "recovered_at": "2026-10-22T05:12:00Z"}
+    )
+    assert recovered.recovered_at.utcoffset().total_seconds() == 0
     # 합의 밖의 키는 거부한다 (읽는 쪽이 다섯 키만 골라내고 검증하게 만든다)
     for extra in ("steps", "events", "summary", "metrics", "pending_holds"):
         with pytest.raises(ValidationError):

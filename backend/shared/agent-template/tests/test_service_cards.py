@@ -19,3 +19,12 @@ ROOT = Path(__file__).resolve().parents[3]
 def test_service_card_lists_exactly_the_routed_skills(service) -> None:
     card = json.loads((ROOT / "services" / service.id / "agent-card.json").read_text("utf-8"))
     assert {s["id"] for s in card["skills"]} == set(service.skills)
+
+
+def test_no_skill_is_listed_by_two_services_of_one_department() -> None:
+    """한 부서의 두 서비스가 같은 skill을 공개하면 합친 부서 카드가 "skill id 중복"으로 거부된다."""
+    owners: dict[tuple[str, str], list[str]] = {}
+    for service in SERVICES:
+        for skill in service.skills:
+            owners.setdefault((service.department, skill), []).append(service.id)
+    assert {key: ids for key, ids in owners.items() if len(ids) > 1} == {}
