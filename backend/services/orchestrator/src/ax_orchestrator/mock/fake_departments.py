@@ -289,9 +289,8 @@ class FakeDepartments:
             return AgentResult(meta=meta, status=TaskStatus.FAILED, outcome="upstream_error")
         if behavior == "timeout":
             return AgentResult(meta=meta, status=TaskStatus.CANCELED, outcome=ErrorCode.TIMEOUT)
-        if (
-            behavior == "disabled"
-        ):  # 꺼진 서비스: 사람 할 일함으로 넘기지 않는 skill은 이렇게 거절된다
+        # 꺼진 서비스: 사람 할 일함으로 넘기지 않는 skill은 이렇게 거절된다
+        if behavior == "disabled":
             return AgentResult(
                 meta=meta,
                 status=TaskStatus.REJECTED,
