@@ -1,7 +1,7 @@
 // 기획서 화면: 문서가 원본이고 문단에 작업·PR·결정이 붙는다
 import { type Dispatch } from 'react'
 import { Button, Notice } from '@dejafix/common-frontend'
-import { type Action, type PR, type Spec, type State as S } from '@/lib/planningData'
+import { type Action, type Decision, type PR, type Spec, type State as S } from '@/lib/planningData'
 import { ActivityList, Sec, State, Tag, rowNav } from '@/components/planning-common/parts'
 import { Linked, Ref, go, hrefOf, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
 import { CONFIRMED_BY, mergedLabel } from '@/components/planning-common/flow'
@@ -91,7 +91,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
         </Sec>
         <Sec title="스레드 · 결정" sub={thread ? <a href={toPath(`talk/${thread.id}`)}>스레드 전체 보기</a> : undefined}>
           {thread?.messages.slice(-2).map((m, i) => <div key={i} className="msg"><b>{m.who}</b> <Linked s={s} text={m.text} />{m.decision && <> <Tag tone="green">{m.decision}</Tag></>}</div>)}
-          {decisions.map((x) => <div key={x.id} className="msg"><span className="mono">{x.id}</span> {x.text} {x.sentToHr && <span className="muted">· 인사에 ① 전송</span>}</div>)}
+          {decisions.map((x) => <div key={x.id} className="msg"><span className="mono">{x.id}</span> {x.text} <HrRecord d={x} /></div>)}
         </Sec>
         <Sec title="장애 연결" sub="DejaFix 사후관리">
           {inc ? <div className="msg"><Ref s={s} id={inc.ctx} /> {inc.title} → 관련 PR {inc.candidates.map((c, i) => <span key={c.pr}>{i > 0 && ', '}<Ref s={s} id={c.pr} /></span>)}</div> : <span className="muted">연결된 사건 없음</span>}
@@ -140,4 +140,15 @@ function PrLine({ s, p, d }: { s: S; p: PR; d: Dispatch<Action> }) {
       {!p.merged && (last === '불일치' || rejected) && <Button size="small" onClick={() => d({ type: 'reviewPr', pr: p.id })}>다시 검수</Button>}
     </div>
   )
+}
+
+// 결정의 인사 기록 결과: 실제로 보냈으면 결과(기록됨·실패·보류), 목 모드면 예전처럼 "전송"
+const HR_RECORD: Record<NonNullable<Decision['hrRecord']>, { label: string; tone?: 'green' | 'amber' }> = {
+  ok: { label: '인사 기록됨', tone: 'green' },
+  failed: { label: '인사 기록 실패', tone: 'amber' },
+  held: { label: '인사 보류', tone: 'amber' },
+}
+function HrRecord({ d }: { d: Decision }) {
+  if (d.hrRecord) return <Tag tone={HR_RECORD[d.hrRecord].tone}>{HR_RECORD[d.hrRecord].label}</Tag>
+  return d.sentToHr ? <span className="muted">· 인사에 ① 전송</span> : null
 }

@@ -151,7 +151,7 @@ export interface Thread { id: string; on: string; title: string; messages: Messa
 export interface DocBlock { id: string; kind: 'h2' | 'p' | 'todo' | 'ref'; text: string; done?: boolean }
 export interface Doc { id: string; title: string; about?: string; updated: string; blocks: DocBlock[]; by?: 'ai' | 'human' }
 
-export interface Decision { id: string; spec: string; text: string; reason: string; alternatives: string; from: string; sentToHr: boolean }
+export interface Decision { id: string; spec: string; text: string; reason: string; alternatives: string; from: string; sentToHr: boolean; hrRecord?: 'ok' | 'failed' | 'held' }
 
 export interface Incident {
   ctx: string

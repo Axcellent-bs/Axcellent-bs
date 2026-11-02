@@ -194,6 +194,16 @@ ANSWER_DECISION = {
 ANSWER_WHO = "박지아 (고객지원)"
 
 
+def _hr_state(hr: HrRecordResult | None) -> str | None:
+    """결정 목록에 보일 인사 기록 결과. 인사가 보류로 답하면 held, 그 밖의 실패는 failed."""
+    if hr is None:
+        return None
+    if hr.ok:
+        return "ok"
+    reason = (hr.reason or "").lower()
+    return "held" if reason.startswith(("input-required", "held")) else "failed"
+
+
 class PlanningService(PlanningCore):
     """기획 서비스 (planning, 8101): 요청 접수·기획서 초안·확정·인사 연동·되묻기·소통·문서.
 
@@ -789,6 +799,7 @@ class PlanningService(PlanningCore):
                 alternatives="-",
                 from_=f"되묻기 {qid}",
                 sent_to_hr=hr is None or hr.ok,
+                hr_record=_hr_state(hr),
             )
         )
         s.activity.append(
@@ -1126,6 +1137,7 @@ class PlanningService(PlanningCore):
                 spec=spec,
                 from_=f"스레드 {th.id}" if th else "스레드",
                 sent_to_hr=hr is None or hr.ok,
+                hr_record=_hr_state(hr),
                 **ANSWER_DECISION,
             )
         )
@@ -1452,31 +1464,31 @@ class PlanningService(PlanningCore):
             alternatives_considered=alternatives,
             source_refs=source_refs,
             author=AGENT_NAME,
+            # 인사 check_plan은 영역이 같은 카드끼리만 비교한다 (영역이 없으면 경고가 안 뜸)
+            area=area_of_text(summary),
         )
 
-    async def _send_rejection(self, s: State, record: RecordCase, target: str) -> None:
-        """hr `record_case`(kind decision_rejected)를 execute로 보내고 활동에 남긴다."""
-        case = f"① kind decision_rejected · {target}"
-        await self._execute(
+    async def _send_rejection(
+        self, s: State, record: RecordCase, target: str
+    ) -> HrRecordResult | None:
+        """hr `record_case`(kind decision_rejected)를 보내고 활동에 남긴다 (인사 연동 2단계).
+
+        실제 모드(인사 연결)에서는 인사를 A2A로 실제로 부른다. 인사가 자기 관문으로 실행하고,
+        실패해도 기각은 되돌리지 않고 "인사 기록 실패"만 남긴다. 목 모드는 예전처럼 관문 기록만.
+        """
+        case = f"① kind decision_rejected · {target} (이유: {record.decision_reason})"
+        key = f"{target}:decision_rejected"
+        gate = await self._execute(
             "record_case",
             record.context_id,
-            f"{target}:decision_rejected",
+            key,
             case,
             {"record_case": record.model_dump(mode="json")},
             record.source_refs,
         )
-        s.activity.append(
-            self._act(
-                self.clock(),
-                record.context_id,
-                "planning",
-                "hr",
-                "record_case",
-                "A2A",
-                f"{case} (이유: {record.decision_reason})",
-                "A",
-            )
-        )
+        hr = await self._record_hr(gate, record, key)
+        s.activity.append(self._hr_act(record.context_id, case, hr))
+        return hr
 
     async def _reject_draft(
         self,
@@ -1501,7 +1513,7 @@ class PlanningService(PlanningCore):
         await self._execute(
             "review_ticket_draft", r.context_id, r.id, text, {"decision": "rejected"}
         )
-        await self._send_rejection(s, record, r.id)
+        hr = await self._send_rejection(s, record, r.id)
         dec_id = f"D-{len(s.decisions)}"
         s.decisions.append(
             Decision(
@@ -1511,7 +1523,8 @@ class PlanningService(PlanningCore):
                 reason=reason,
                 alternatives=", ".join(record.alternatives_considered),
                 from_=f"개선 초안 {r.id}",
-                sent_to_hr=True,
+                sent_to_hr=hr is None or hr.ok,
+                hr_record=_hr_state(hr),
             )
         )
         r.state = "기각"
@@ -1566,7 +1579,9 @@ class PlanningService(PlanningCore):
         if sp is None or not text.strip():
             return None
         dec_id = f"D-{len(s.decisions)}"
-        await self._send_rejection(s, record, dec_id)
+        # 같은 기획서에서 여러 안을 기각해도 인사가 하나로 합치지 않게 결정 번호를 첫 근거로 둔다
+        record = record.model_copy(update={"source_refs": [f"decision:{dec_id}", f"spec:{spec}"]})
+        hr = await self._send_rejection(s, record, dec_id)
         s.decisions.append(
             Decision(
                 id=dec_id,
@@ -1575,7 +1590,8 @@ class PlanningService(PlanningCore):
                 reason=record.decision_reason or "",
                 alternatives=", ".join(record.alternatives_considered),
                 from_=f"기획서 {sp.id}",
-                sent_to_hr=True,
+                sent_to_hr=hr is None or hr.ok,
+                hr_record=_hr_state(hr),
             )
         )
         return ActionResult(output={"decision_id": dec_id, "record_kind": "decision_rejected"})
@@ -1643,6 +1659,7 @@ class PlanningService(PlanningCore):
                 alternatives="-",
                 from_=f"소통 {th.title}",
                 sent_to_hr=hr is None or hr.ok,
+                hr_record=_hr_state(hr),
             )
         )
         s.activity.append(
