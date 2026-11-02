@@ -201,9 +201,10 @@ INJECT_ALLOWED = {"admin"}
 # 상품 등록·수정(재고 보충 포함)은 운영자(admin)만
 PRODUCT_WRITERS = {"admin"}
 RELEASE_ALLOWED = {"admin", "infra"}
-# 공지·쿠폰 쓰기는 마케팅 관문 토큰만, 쿠폰 조회는 사후 검증·중복 확인을 하는 부서까지
+# 공지·쿠폰 쓰기는 마케팅 관문 토큰만, 쿠폰 조회는 사후 검증·중복 확인을 하는 부서와
+# 캠페인 성과를 세는 data(읽기 전용)까지
 MARKETING_ONLY = {"marketing"}
-COUPON_READERS = {"marketing", "support", "finance", "orchestrator"}
+COUPON_READERS = {"marketing", "support", "finance", "orchestrator", "data"}
 # 현금 환불(SHOP-12)은 고객지원 관문 토큰만(마케팅 토큰 거부)
 REFUND_ALLOWED = {"support"}
 # 데이터 조회(읽기 전용)는 분석을 하는 data와 관리자만
