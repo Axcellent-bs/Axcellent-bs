@@ -11,6 +11,11 @@
   캣북스는 비어 있다(shop-api metric-series에 매출이 없음) → 확인할 수 없음 + 이유.
 - 쿠폰: 커넥터 `campaign_coupons`(shop-api `GET /api/shop/coupons?campaign_id=`)의 발급·사용 장수로
   누적 사용률 = 사용 ÷ 발급. 설명은 고정 문장(`COUPON_NOTE`)이다(LLM이 아님).
+- 기록 공백은 "줄었음"이 아니라 unknown + 이유다(shop-api는 주문이 없는 5분을 0으로 준다):
+  - 구간에 주문·결제 기록이 하나도 없음: 이상 탐지와 같은 함수(`judge.empty_window`)·문장
+    (`detect.empty_reason`)
+  - 결제 시도 0인 5분 칸 비율이 지난 7일 같은 시간대보다 `GAP_SHARE` 이상 높고 `GAP_MIN_BUCKETS`칸
+    이상 많음: "기록 공백 의심 (N칸)". 통째로 빈 지난날은 비교에서 뺀다(그날도 공백이라서)
 - 판정할 수 없으면 0으로 채우지 않고 unknown + 이유: 지난 7일 같은 시간대 주문이 0건(기준선 없음),
   캠페인이 하루보다 김(지난날 같은 시간대가 캠페인과 겹침), campaign_id 없음, 캠페인 쿠폰 없음.
 - 주문 지표를 못 읽으면(shop-api 꺼짐) `ConnectorUnavailable`을 그대로 올린다
@@ -39,8 +44,16 @@ from ax_contracts.schemas.data import (
 )
 from data_agent import catalog
 from data_agent.connectors import ConnectorUnavailable
+from data_agent.detect import empty_reason
 from data_agent.explain import explain
-from data_agent.metrics.judge import BASELINE_DAYS, poisson_lower, poisson_upper
+from data_agent.metrics.judge import (
+    BASELINE_DAYS,
+    empty_window,
+    poisson_lower,
+    poisson_upper,
+    to_buckets,
+    window_buckets,
+)
 
 ORDER_METRIC = "order_count"
 DIRECTION_ALPHA = 0.001  # 방향 판정 유의수준 (평가 개발 케이스로 정함, README)
@@ -48,6 +61,12 @@ REVENUE_RATIO_BAND = 0.10  # 매출 방향 임시 기준: 기대 대비 ±10% (�
 MAX_WINDOW = timedelta(days=1)  # 이보다 길면 지난날 같은 시간대가 캠페인과 겹친다
 COUPON_NOTE = "조회 시점 기준 누적 사용률이며, 캠페인 뒤 사용분도 섞여 있다"
 DIRECTION_KO = {"up": "늘었음", "none": "같음", "down": "줄었음"}
+# 기록 공백 의심: 결제 시도 0인 5분 칸 비율이 지난 7일보다 이만큼 높고, 칸 수로도 이만큼 많을 때
+# 근거(README): 평소 새벽 1시간은 비율이 28.6%p까지 튀지만 칸은 3.4칸 이하,
+# 평소 24시간은 1.6%p·4.7칸 이하. 3시간 공백은 낮 10.5%p·30칸 이상, 새벽 7.3%p·21칸 이상.
+# 1시간보다 짧은 공백은 잡지 않는다
+GAP_SHARE = 0.05  # 5%p
+GAP_MIN_BUCKETS = 12  # 1시간
 
 
 # ---------------------------------------------------------------- 계산 (코드)
@@ -72,6 +91,50 @@ async def _measure(
         if value is not None:
             past.append(value)
     return actual, past
+
+
+async def _payment_zero_share(
+    connector: Any, start: datetime, end: datetime
+) -> tuple[int, int] | None:
+    """(결제 시도 0인 5분 칸 수, 전체 칸 수). 결제 시도를 주지 않는 커넥터면 None."""
+    volume = getattr(connector, "transactions_volume", None)
+    points = await volume(start, end) if volume else None
+    if points is None:
+        return None
+    payments = to_buckets(points)
+    slots = window_buckets(start, end)
+    return sum(1 for b in slots if not payments.get(b)), len(slots)
+
+
+async def gap_reason(connector: Any, start: datetime, end: datetime) -> str | None:
+    """구간 기록이 비었거나 공백이 의심되면 그 이유, 아니면 None."""
+    slots = window_buckets(start, end)
+    orders = to_buckets(await connector.metric_series(ORDER_METRIC, start, end))
+    volume = getattr(connector, "transactions_volume", None)
+    points = await volume(start, end) if volume else None
+    if empty_window(slots, orders, to_buckets(points or [])):
+        return empty_reason()  # 이상 탐지 빈 구간과 같은 문장
+    if points is None:
+        return None  # 결제 시도를 주지 않는 커넥터: 공백 비율은 보지 않는다
+    zeros = sum(1 for b in slots if not to_buckets(points).get(b))
+    past_zeros = past_slots = 0
+    for day in range(1, BASELINE_DAYS + 1):
+        shift = timedelta(days=day)
+        past = await _payment_zero_share(connector, start - shift, end - shift)
+        if past is None or past[0] == past[1]:
+            continue  # 통째로 빈 날은 그날도 공백이라 평소 비율에 넣지 않는다
+        past_zeros += past[0]
+        past_slots += past[1]
+    if not past_slots:
+        return None  # 비교할 평소가 없으면 기준선 규칙(0건)이 판단한다
+    usual = past_zeros / past_slots
+    share = zeros / len(slots)
+    if share - usual >= GAP_SHARE and zeros - usual * len(slots) >= GAP_MIN_BUCKETS:
+        return (
+            f"기록 공백 의심 ({zeros}칸): 결제 시도 0인 5분 칸이 {share:.0%}로 지난 7일 같은 시간대"
+            f" {usual:.0%}보다 많음 (자료가 빠졌을 수 있어 줄었다고 하지 않음)"
+        )
+    return None
 
 
 def _unknown_change(reason: str, baseline_days: int = 0) -> CampaignChange:
@@ -167,6 +230,8 @@ async def measure(
     if end - start > MAX_WINDOW:
         reason = "캠페인이 하루보다 길어 지난 7일 같은 시간대가 캠페인과 겹침 (1단계는 하루 이하만)"
         orders, revenue = _unknown_change(reason), _unknown_change(reason)
+    elif gap := await gap_reason(connector, start, end):
+        orders, revenue = _unknown_change(gap), _unknown_change(gap)
     else:
         orders = judge_orders(*await _measure(connector, ORDER_METRIC, start, end), alpha=alpha)
         revenue_metric = catalog.current().revenue_metric
@@ -195,8 +260,11 @@ def _facts(out: CampaignEffectOutput) -> dict[str, int | float | str]:
     facts: dict[str, int | float | str] = {}
     o = out.orders
     if o.status == "known":
+        direction = DIRECTION_KO[o.direction or "none"]
+        if o.direction == "none" and o.excess:  # 화면(#294)과 같은 규칙
+            direction = f"{'증가' if o.excess > 0 else '감소'} 추정, 아직 통계적으로 확실하지 않음"
         facts |= {
-            "주문 방향": DIRECTION_KO[o.direction or "none"],
+            "주문 방향": direction,
             "캠페인 주문": int(o.actual or 0),
             "평소 주문": round(o.expected or 0, 1),
             "주문 증분": round(o.excess or 0, 1),

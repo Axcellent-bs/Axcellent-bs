@@ -15,7 +15,7 @@ import pytest
 from ax_agent_template.llm import MockLLMClient
 from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
 from ax_contracts.schemas.data import CampaignEffectInput, CampaignEffectOutput
-from data_agent import catalog, handlers
+from data_agent import catalog, detect, handlers
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.shop_api import CampaignCoupon, ShopApi, ShopApiConnector
 from data_agent.explain import _Summary
@@ -114,7 +114,8 @@ def test_no_baseline_is_unknown_not_zero() -> None:
     assert orders.status == "unknown" and orders.excess is None
     assert "기준선을 정할 수 없음" in (orders.unknown_reason or "")
     empty = _measure(Memory({})).orders
-    assert empty.status == "unknown" and "자료가 없음" in (empty.unknown_reason or "")
+    # 기록이 하나도 없으면 이상 탐지 빈 구간과 같은 이유 (0건으로 줄었다고 하지 않음)
+    assert empty.status == "unknown" and empty.unknown_reason == detect.empty_reason()
 
 
 def test_campaign_longer_than_a_day_is_unknown() -> None:
@@ -284,3 +285,138 @@ def test_to_answer_matches_the_scorer_shape() -> None:
     assert answer["orders"] == {"status": "known", "direction": "up", "excess": 100.0}
     assert answer["revenue"]["status"] == "unknown" and answer["revenue"]["unknown_reason"]
     assert answer["coupon"] == {"status": "known", "use_rate": round(2 / 3, 4), "note": COUPON_NOTE}
+
+
+# ---------------------------------------------------------------- 기록 공백 (줄었음이 아님)
+
+
+class Slots:
+    """5분 칸마다 주문·결제 시도 값을 주는 커넥터.
+
+    `value(시각)`이 0이면 그 칸은 기록 없음처럼 보인다.
+    """
+
+    def __init__(self, value) -> None:  # noqa: ANN001
+        self.value = value
+
+    def _series(self, start: datetime, end: datetime) -> list[tuple[datetime, float]]:
+        out, at = [], start
+        while at < end:
+            out.append((at, float(self.value(at))))
+            at += STEP
+        return out
+
+    async def metric_series(self, metric_id, window_from, window_to, bucket="5m"):  # noqa: ANN001, ANN201
+        return self._series(window_from, window_to)
+
+    async def transactions_volume(self, window_from, window_to):  # noqa: ANN001, ANN201
+        return self._series(window_from, window_to)
+
+    async def campaign_coupons(self, campaign_id: str) -> list[CampaignCoupon]:
+        return _coupons((3, 1))
+
+
+DAY_START = datetime(2026, 11, 1, 3, 0, tzinfo=UTC)  # 한국 12시
+DAY_END = DAY_START + timedelta(days=1)
+
+
+def _day_input() -> CampaignEffectInput:
+    return CampaignEffectInput(campaign_id="cmp_1", window_from=DAY_START, window_to=DAY_END)
+
+
+def _usual(at: datetime) -> int:
+    return 2 if 15 <= at.hour < 21 else 5  # UTC 15~21시(한국 새벽)는 적다
+
+
+def test_server_off_for_the_whole_window_is_unknown_not_a_drop() -> None:
+    """서버가 24시간 꺼져 있던 구간: 주문·결제 기록이 하나도 없다.
+
+    → 이상 탐지 빈 구간과 같은 이유.
+    """
+    connector = Slots(lambda at: 0 if at >= DAY_START else _usual(at))
+    out = asyncio.run(measure(_day_input(), connector))
+    assert out.orders.status == "unknown" and out.orders.direction is None
+    assert out.orders.unknown_reason == detect.empty_reason()
+    assert out.orders.unknown_reason.startswith("구간에 주문·결제 기록이 하나도 없음")
+    assert out.revenue.status == "unknown"
+    assert out.coupons.status == "known"  # 쿠폰은 따로 본다
+
+
+def test_a_three_hour_gap_is_suspected_not_a_drop() -> None:
+    gap_from, gap_to = DAY_START + timedelta(hours=10), DAY_START + timedelta(hours=13)
+    connector = Slots(lambda at: 0 if gap_from <= at < gap_to else _usual(at))
+    out = asyncio.run(measure(_day_input(), connector))
+    assert out.orders.status == "unknown"
+    assert (out.orders.unknown_reason or "").startswith("기록 공백 의심 (36칸)")
+
+
+def test_a_three_hour_gap_at_night_is_also_suspected() -> None:
+    """새벽은 원래 0칸이 많아도, 3시간이 통째로 비면 공백이다."""
+
+    def value(at: datetime) -> int:
+        night = 15 <= at.hour < 21
+        if at >= DAY_START and DAY_START + timedelta(hours=12) <= at < DAY_START + timedelta(
+            hours=15
+        ):
+            return 0
+        return (0 if at.minute % 15 == 0 else 1) if night else 5  # 새벽은 3칸 중 1칸이 원래 0
+
+    out = asyncio.run(measure(_day_input(), Slots(value)))
+    assert (out.orders.unknown_reason or "").startswith("기록 공백 의심")
+
+
+def test_a_normal_day_is_judged() -> None:
+    out = asyncio.run(measure(_day_input(), Slots(_usual)))
+    assert out.orders.status == "known" and out.orders.direction == "none"
+    assert out.orders.excess == 0.0
+
+
+def test_usual_empty_slots_at_night_are_not_a_gap() -> None:
+    """새벽에 원래 0칸이 많아도 지난 7일과 비슷하면 공백이 아니다 (평소 0칸 비율과 비교)."""
+
+    def value(at: datetime) -> int:
+        return (0 if at.minute % 10 == 0 else 1) if 15 <= at.hour < 21 else 5
+
+    out = asyncio.run(measure(_day_input(), Slots(value)))
+    assert out.orders.status == "known"
+
+
+def test_fully_empty_past_days_are_left_out_of_the_usual_share() -> None:
+    """지난날 중 통째로 빈 날(그날도 공백)은 평소 0칸 비율에 넣지 않는다.
+
+    → 오늘 공백을 가리지 않는다.
+    """
+    gap_from, gap_to = DAY_START + timedelta(hours=10), DAY_START + timedelta(hours=13)
+    off_days = {DAY_START.date() - timedelta(days=d) for d in (2, 3)}
+
+    def value(at: datetime) -> int:
+        if gap_from <= at < gap_to or (
+            at < DAY_START and (at - timedelta(hours=3)).date() in off_days
+        ):
+            return 0
+        return _usual(at)
+
+    out = asyncio.run(measure(_day_input(), Slots(value)))
+    assert (out.orders.unknown_reason or "").startswith("기록 공백 의심 (36칸)")
+
+
+# ---------------------------------------------------------------- 요약: 같음 + 증분 = 추정
+
+
+@pytest.mark.parametrize(
+    ("today", "phrase"),
+    [
+        (103.0, "증가 추정 +3.0건, 아직 통계적으로 확실하지 않음"),
+        (97.0, "감소 추정 -3.0건, 아직 통계적으로 확실하지 않음"),
+    ],
+)
+def test_summary_says_estimate_when_direction_is_flat(today: float, phrase: str) -> None:
+    result = asyncio.run(analyze_campaign(_input(), Memory(_week(today)), MockLLMClient()))
+    assert result.output.orders.direction == "none"
+    assert phrase in result.output.summary
+    assert "(같음)" not in result.output.summary
+
+
+def test_summary_keeps_flat_when_there_is_no_excess() -> None:
+    result = asyncio.run(analyze_campaign(_input(), Memory(_week(100.0)), MockLLMClient()))
+    assert "+0건(같음)" in result.output.summary or "0건(같음)" in result.output.summary
