@@ -20,6 +20,7 @@ from support_agent.incident_handlers import INCIDENT_HANDLERS
 from support_agent.insight_handlers import INSIGHT_HANDLERS
 from support_agent.original_handlers import ORIGINAL_HANDLERS
 from support_agent.payment_handlers import PAYMENT_HANDLERS
+from support_agent.planning_question_handlers import PLANNING_QUESTION_HANDLERS
 from support_agent.privacy_handlers import PRIVACY_HANDLERS
 from support_agent.proposal_handlers import PROPOSAL_HANDLERS
 from support_agent.resolution_note_handlers import RESOLUTION_NOTE_HANDLERS
@@ -53,6 +54,7 @@ ALL_HANDLERS = {
     **ORIGINAL_HANDLERS,
     **INSIGHT_HANDLERS,
     **PROPOSAL_HANDLERS,
+    **PLANNING_QUESTION_HANDLERS,
     **CHANGE_HANDLERS,
     **ANALYSIS_HANDLERS,
     **SUGGEST_HANDLERS,

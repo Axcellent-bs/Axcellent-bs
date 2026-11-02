@@ -213,6 +213,7 @@ class DevHandoffOutput(AxModel):
 
 
 class DevResultInput(AxModel):
+    # 빈 값이면 기획서 없이 요청만 보낸다 (개발이 장애 연결로 만든 재발 방지 요청 → `request`)
     spec_id: str
     request_id: str
     request_state: str  # Request.state 값 (작업 중·완료 …)

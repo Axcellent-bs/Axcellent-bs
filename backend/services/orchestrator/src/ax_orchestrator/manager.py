@@ -157,6 +157,7 @@ class IncidentManager:
             if target is not None:
                 target.recovered_at = env.occurred_at
                 target.log(f"정상 복귀 신호 받음 ({env.source}, {iso(env.occurred_at)})")
+                await self.engine.refresh_impact(target, self.plan_factory())
                 if target.closed_at is not None:  # 열려 있으면 이벤트가 닫힐 때 함께 남긴다
                     await self.engine.sync_times(target)
                 return "noted", target

@@ -383,3 +383,77 @@ def test_an_escalated_inquiry_keeps_its_resolution_even_with_a_claim(
     set_status(client, inquiry_id, "escalated", "s-1")
     (event,) = resolved()
     assert event.data["resolution"] == "escalated" and event.data["claim_id"] == claim.id
+
+
+# ------------------------------------------------ 닫은 뒤 끝난 환불 다시 알리기
+def _stored(inquiry_id: int):  # noqa: ANN202
+    conversation = handlers.STORE.get(inquiry_id)
+    assert conversation is not None
+    return conversation
+
+
+def test_refund_after_close_reissues_the_resolved_event_with_the_amount(
+    client: TestClient, claims: ClaimStore
+) -> None:
+    inquiry_id = create(client)["output"]["id"]
+    claim = add_claim(claims, inquiry_id, status="approved", actions=("approve",), refund=15000)
+    set_status(client, inquiry_id, "resolved", "s-1")
+    (closed,) = resolved()
+    assert closed.data["refund_amount"] is None  # 닫을 때는 환불 전이다
+
+    claim.status = "completed"
+    sent = asyncio.run(events.emit_refund_completed(_request(), _stored(inquiry_id), claim))
+    assert sent is True
+    first, again = resolved()
+    assert first is closed
+    assert again.data["refund_amount"] == 15000 and again.data["claim_id"] == claim.id
+    assert again.data["inquiry_id"] == inquiry_id
+    assert again.idempotency_key == (
+        f"ctx_req_0001:support.inquiry_resolved:{inquiry_id}:refund:{claim.id}"
+    )
+    assert again.event_id != closed.event_id
+
+
+def test_the_same_refund_is_delivered_once(client: TestClient, claims: ClaimStore) -> None:
+    inquiry_id = create(client)["output"]["id"]
+    claim = add_claim(claims, inquiry_id, status="completed", actions=("approve",), refund=9000)
+    set_status(client, inquiry_id, "resolved", "s-1")
+    for _ in range(2):
+        asyncio.run(events.emit_refund_completed(_request(), _stored(inquiry_id), claim))
+    assert [e.data["refund_amount"] for e in resolved()] == [9000, 9000]
+    assert len({e.event_id for e in resolved()}) == 2  # 닫을 때 1건 + 환불 재발행 1건
+
+
+def test_an_open_inquiry_gets_no_reissue(client: TestClient, claims: ClaimStore) -> None:
+    inquiry_id = create(client)["output"]["id"]
+    claim = add_claim(claims, inquiry_id, status="completed", refund=15000)
+    sent = asyncio.run(events.emit_refund_completed(_request(), _stored(inquiry_id), claim))
+    assert sent is False and resolved() == []  # 닫을 때 나가는 이벤트가 금액을 싣는다
+
+
+def test_no_reissue_without_a_paid_refund_or_for_an_older_claim(
+    client: TestClient, claims: ClaimStore
+) -> None:
+    inquiry_id = create(client)["output"]["id"]
+    older = add_claim(claims, inquiry_id, status="completed", refund=7000)
+    latest = add_claim(claims, inquiry_id, status="approved", refund=0)
+    set_status(client, inquiry_id, "resolved", "s-1")
+    before = len(resolved())
+    conversation = _stored(inquiry_id)
+    assert asyncio.run(events.emit_refund_completed(_request(), conversation, older)) is False
+    latest.status = "completed"  # 환불 0원이면 알릴 금액이 없다
+    assert asyncio.run(events.emit_refund_completed(_request(), conversation, latest)) is False
+    assert asyncio.run(events.emit_refund_completed(_request(), None, latest)) is False
+    assert len(resolved()) == before
+
+
+def test_processing_the_queue_after_closing_reissues_the_event(
+    client: TestClient, claims: ClaimStore
+) -> None:
+    inquiry_id = create(client)["output"]["id"]
+    claim = add_claim(claims, inquiry_id, status="approved", actions=("approve",), refund=12000)
+    claim.type, claim.reason, claim.requires_return = "cancel", "change_of_mind", False
+    set_status(client, inquiry_id, "resolved", "s-1")
+    run = call(client, "process_claim_queue", {}, {}, "k-pq")["output"]
+    assert run["paid"] == 1
+    assert [e.data["refund_amount"] for e in resolved()] == [None, 12000]

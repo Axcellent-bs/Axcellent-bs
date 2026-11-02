@@ -444,9 +444,13 @@ class PlanningService(PlanningCore):
         - LLM이 "같은 일"(same)로 본 이 서버의 열린 요청만 묶는다. 다른 서비스에만 있는 요청은
           비슷한 요청 표시로만 둔다.
         - LLM 판단이 하나도 없으면(실패) 같은 제목 규칙으로 대신한다.
-        - 이미 묶였거나 접수 뒤 다른 단계로 간 요청은 그대로 둔다.
+        - 이미 묶였거나 접수 뒤 다른 단계로 간 요청, 개발이 만든 재발 방지 요청은 그대로 둔다.
         """
         if not self._content_match or req.duplicate_of or req.state != "접수":
+            return
+        # 개발이 장애 연결로 만든 재발 방지 요청은 묶지 않는다. 사건 번호가 개발 사본과 같아야
+        # 사후관리(aftercare) 연결이 맞는다 (via "link_incident (재발 방지)", #363)
+        if req.via.startswith("link_incident"):
             return
         others = [r for r in s.requests if r.id != req.id]
         by_id = {r.id: r for r in others}
@@ -1353,6 +1357,10 @@ class PlanningService(PlanningCore):
         async def run(s: State) -> ActionResult:
             t = self.clock()
             new_own = got_req is not None and not any(r.id == got_req.id for r in s.requests)
+            if not spec_id and not new_own:
+                # 기획서 없는 요청(재발 방지 후속)은 처음 한 번만 받는다. 그 뒤로는 기획이 주인이라
+                # 다시 와도(재시작 뒤 맞추기 등) 기획서·상태를 덮어쓰지 않는다
+                return ActionResult(changed=False, output={"applied": 0})
             if got_req is not None:
                 self._upsert(s.requests, [got_req])
             if got_spec is not None:
@@ -1364,13 +1372,16 @@ class PlanningService(PlanningCore):
                 f"{spec_id} 작업 {len(got_tasks)}·PR {len(got_prs)}(머지 {merged}) 반영"
                 f" · {request_id} {request_state}"
             )
+            if not spec_id and req is not None:
+                # 기획서 없이 요청만 (개발이 장애 연결로 만든 재발 방지 요청) → 요청 목록에 받는다
+                text = f"{req.via} 요청 {request_id} 받음: {req.title}"
             await self._execute(
                 RECEIVE_DEV_RESULT,
                 ctx,
-                f"{spec_id}:{len(s.activity)}",
+                f"{spec_id or request_id}:{len(s.activity)}",
                 text,
                 {"request": request_id, "request_state": request_state},
-                [spec_id, request_id],
+                [x for x in (spec_id, request_id) if x],
             )
             self._upsert(s.tasks, got_tasks)
             self._upsert(s.prs, got_prs)
