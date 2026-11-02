@@ -232,6 +232,21 @@ export const vcsApi = (base: string) => {
   }
 }
 
+// ---- 요청 작업 코딩 방식 (dev 서비스 `/api/planning/coding-settings`). 회사 설정 + 서버 AI 체험 한도
+export type CodingSetting = 'auto' | 'agent' | 'subscription'
+export interface CodingSettings {
+  mode: CodingSetting // 회사 설정
+  resolved: 'agent' | 'subscription' // 지금 넘겨받는 요청 작업을 실제로 누가 코딩하나
+  why: string
+  agents_connected: string[] // 최근 본인 Claude(MCP)로 일감을 본 개발자
+  trial_used: number // 서버 AI가 쓴 토큰
+  trial_limit: number
+}
+export const codingSettingsApi = (base: string) => ({
+  get: () => call<CodingSettings>(base, '/coding-settings'),
+  set: (mode: CodingSetting) => call<CodingSettings>(base, '/coding-settings', post({ mode }, 'admin')),
+})
+
 // ---- 직접 개발 (dev 서비스 `/api/planning/dev-tasks`). 개발팀이 기획을 바로 넣으면 코딩 에이전트가 PR까지 만든다
 export interface DevTaskInput { title: string; plan: string; done?: string; paths?: string[]; connection?: string }
 export interface DevTaskStarted { request_id: string; spec_id: string; task_id: string; status: 'queued' }

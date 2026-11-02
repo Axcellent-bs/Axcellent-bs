@@ -490,6 +490,11 @@ class State(DomainModel):
     first_pr_minutes: list[int] = Field(default_factory=list)
     auto_policy: AutoPolicy
     chats: list[ChatThread] = Field(default_factory=list)  # 개발 AI 대화 (dev_chat.py)
+    # 개발: 넘겨받은 요청 작업을 누가 코딩하나 (회사 설정). auto = 본인 Claude(MCP) 연결한 개발자가
+    # 있으면 내 Claude, 없으면 서버 AI(체험 한도 안에서)
+    coding_mode: Literal["auto", "agent", "subscription"] = "auto"
+    # 개발: 본인 Claude(MCP 일감 서버)로 일감을 본 개발자 → 마지막으로 본 시각 (연결 여부 판단)
+    agents_seen: dict[str, UtcDatetime] = Field(default_factory=dict)
 
 
 def dump(model: BaseModel) -> dict:
