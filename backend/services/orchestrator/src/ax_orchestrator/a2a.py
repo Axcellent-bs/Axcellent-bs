@@ -24,7 +24,9 @@ from ax_contracts.schemas import (
     FindActiveIncidentOutput,
     TaskStatus,
 )
+from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
 from ax_orchestrator.manager import IncidentManager
+from ax_orchestrator.planning_questions import answer_question
 
 GetManager = Callable[[], IncidentManager | None]
 
@@ -94,8 +96,43 @@ def find_active_incident(get_manager: GetManager) -> Handler:
     return handler
 
 
+def answer_planning_question(get_manager: GetManager) -> Handler:
+    """기획이 되묻는 근거 질문에 총괄이 보낸 원인 확인 요청의 기록으로 답한다(grade read)."""
+
+    async def handler(request: AgentRequest) -> AgentResult:
+        try:
+            q = AnswerPlanningQuestionInput.model_validate(request.input)
+        except ValidationError as error:
+            errors = [f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in error.errors()]
+            return AgentResult(
+                meta=request.meta,
+                status=TaskStatus.FAILED,
+                outcome="invalid_input",
+                output={"errors": errors},
+            )
+        out = answer_question(get_manager(), q, request.meta.context_id)
+        return AgentResult(
+            meta=request.meta,
+            status=TaskStatus.COMPLETED,
+            outcome=out.status,
+            output=out.model_dump(mode="json"),
+            evidence=Evidence(
+                queries=[f"orchestrator.cause_check request_id={q.request_id}"],
+                data_summary=f"{q.question_id} → {out.status}",
+                collected_at=datetime.now(UTC),
+                ref_ids=out.evidence_ids,
+            ),
+        )
+
+    return handler
+
+
 def build_a2a_app(get_manager: GetManager) -> FastAPI:
     """`/a2a`와 `/.well-known/agent-card.json`을 가진 앱. 총괄 서버 맨 끝에 붙인다."""
     return create_agent_app(
-        load_card(), {"find_active_incident": find_active_incident(get_manager)}
+        load_card(),
+        {
+            "find_active_incident": find_active_incident(get_manager),
+            "answer_planning_question": answer_planning_question(get_manager),
+        },
     )

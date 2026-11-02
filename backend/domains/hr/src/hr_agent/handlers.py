@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from ax_contracts.schemas import AgentRequest, AgentResult
+from hr_agent import planning_questions
 from hr_agent.cards import decision as card_decision
 from hr_agent.cards import merge
 from hr_agent.cards import service as cards
@@ -82,6 +83,7 @@ _HANDLERS = {
     "get_audit_timeline": _with_services(views.get_audit_timeline),
     "decide_candidate_card": _with_services(card_decision.decide_candidate_card),
     "check_plan": check_plan,
+    "answer_planning_question": _with_services(planning_questions.answer_planning_question),
     "find_similar_fraud_cards": _with_services(fraud_similar.find_similar_fraud_cards),
     "find_similar_cases": _with_services(case_memory.find_similar_cases),
     "record_resolution": _with_services(case_memory.record_resolution),
