@@ -17,7 +17,7 @@ from typing import Any
 from ax_agent_template.execute import execute
 from ax_agent_template.server import error_result
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
-from support_agent import claim_rules, persistence, shop_client
+from support_agent import claim_rules, events, persistence, shop_client
 from support_agent import handlers as h
 from support_agent.claim_schemas import (
     ClaimReasonHit,
@@ -401,6 +401,9 @@ async def process_claim_queue(request: AgentRequest) -> AgentResult:
             execution=decision.execution_id,
         )
         await _record_activity(request, claim, "claim_paid", amount=claim.refund_paid)
+        # 문의를 이미 닫았다면 재무가 환불 0원으로 남기지 않게 금액을 채워 한 번 더 알린다
+        if claim.conversation_id is not None:
+            await events.emit_refund_completed(request, h.STORE.get(claim.conversation_id), claim)
         paid += 1
         results.append(QueueRunResult(claim_id=claim.id, result="paid", refund=claim.refund_paid))
     run = QueueRun(results=results, paid=paid, held=held, queue=CLAIMS.queue().queue)
