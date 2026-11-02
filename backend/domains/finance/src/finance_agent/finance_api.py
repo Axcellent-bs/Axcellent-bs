@@ -307,8 +307,8 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
     this_month = team_budget.month_of(today)
     for month in (this_month, team_budget.shift_month(this_month, 1)):
         tb, _ = await team_budget_data(month)
-        if tb["status"] not in ("pending", "changed"):
-            continue
+        if tb["status"] not in ("pending", "changed") or tb["example"]:
+            continue  # 예시 인원은 확정할 일이 아니다
         changed = [r for r in tb["rows"] if r["change"]]
         todo.append(
             {
@@ -657,6 +657,12 @@ def add_finance_api(app: FastAPI) -> None:
         if data["status"] == "unavailable":
             return error(
                 503, "team_headcount_unavailable", "인사 AI에서 팀 인원을 받지 못해 확정할 수 없다"
+            )
+        if data["example"]:
+            return error(
+                409,
+                "example_headcount",
+                "인사 AI가 준 인원이 가상 명부(예시)라 팀 예산으로 확정하지 않는다",
             )
         if data["signature"] != sig:
             return error(

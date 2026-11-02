@@ -6,6 +6,7 @@
 - 재무는 지난달과 비교해 팀별로 늘고 주는 금액을 보여 주고, 예산 확정은 **재무 담당(사람)**이 한다.
   재무 AI가 혼자 예산을 바꾸지 않는다. 확정한 뒤 인원·단가가 바뀌면 "다시 확인 필요"로 돌아간다
 - 인원을 못 받으면 0원으로 지어내지 않고 `unavailable`로 둔다
+- 인사가 가상 명부(예시) 인원을 주면(`example`) 계산·증감은 보여 주되 확정하지 않는다
 - 예산 대비 실제 지출은 팀별 지출 자료가 없어 아직 계산하지 않는다(`actual_spend: None`)
 
 숫자는 이 파일의 코드만 계산한다. LLM은 쓰지 않는다.
@@ -63,6 +64,7 @@ def report(
     per_head: int,
     approved: dict[str, Any] | None,
     basis: str | None = None,
+    example: bool = False,
 ) -> dict[str, Any]:
     """그 달 팀 예산과 지난달 대비 증감, 확정 상태."""
     base: dict[str, Any] = {
@@ -70,6 +72,7 @@ def report(
         "prev_month": shift_month(month, -1),
         "per_head_monthly": per_head,
         "basis": basis,
+        "example": example,  # 가상 명부(예시) 인원이면 True: 확정하지 않는다
         "approved": approved,
         "actual_spend": None,  # 팀별 지출 자료가 아직 없다 (화면은 "준비 중")
     }

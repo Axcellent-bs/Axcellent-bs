@@ -256,6 +256,7 @@ async def team_budget_data(month: str) -> tuple[dict[str, Any], list[str]]:
         fc.load_config().team_budget.per_head_monthly,
         state().records.team_budgets.get(month),
         basis=now_out.basis if now_out else None,
+        example=bool(now_out and now_out.example),
     )
     missing = ["team_headcount"] if now_out is None else []
     if now_out is not None and prev_out is None:
