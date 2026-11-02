@@ -284,3 +284,103 @@ class ReceivePlanningAnswerInput(AxModel):
 class ReceivePlanningAnswerOutput(AxModel):
     outcome: Literal["applied", "duplicate", "unknown_question"]
     spec_id: str | None = None
+
+
+# ---- 배포 전 기획서 대조 → 배포 지시 (planning·dev, 2026-11-02 초안)
+#
+# 개발이 "완료"라고 하면, 배포하기 전에 기획이 결과가 기획서와 맞는지 보고 개발에 배포를 지시한다.
+#
+# - `request_release_check`: dev → planning, 등급 A. 기획서 하나에 묶인 작업·PR을 보낸다.
+#   planning은 코드 규칙으로 대조하고(LLM 아님) `ready` / `hold` / `needs_human`으로 답한다.
+#   대조 규칙(planning): 기획서가 확정돼 있다 · 요구사항 문단마다 작업이 있다 · 작업마다 머지된 PR이
+#   있다 · 기획서 밖 PR이 섞이지 않았다 · 문단에 열린 장애 표시가 없다 · 남은 질문이 없다.
+# - `ready`면 planning이 바로 `receive_release_order`(dev, A)로 배포 지시를 보낸다.
+#   `needs_human`이면 사람이 기획 화면에서 확인한 뒤 같은 지시를 보낸다(`decided_by=human`).
+#   `hold`면 지시를 보내지 않고 이유 코드만 돌려준다.
+# - 배포 실행·prod 승인·보호 경로 승인은 지금처럼 개발 서비스와 안전 레이어가 한다. 배포 지시는
+#   "기획서와 맞으니 배포해도 된다"는 뜻이지, 사람 승인을 건너뛰라는 뜻이 아니다.
+# - 멱등성 키: 대조 `ctx_req_…:release_check:SPEC-n:<PR 지문>`,
+#   지시 `ctx_req_…:release_order:<check_id>`.
+
+ReleaseEnv = Literal["dev", "prod"]
+ReleaseVerdict = Literal["ready", "hold", "needs_human"]
+# 열어 둔 코드 값. 새 이유가 생기면 여기에 추가만 한다
+ReleaseHoldReason = Literal[
+    "spec_not_confirmed",  # 기획서가 확정되지 않음
+    "para_without_task",  # 작업이 없는 요구사항 문단
+    "task_not_merged",  # 머지된 PR이 없는 작업
+    "pr_outside_spec",  # 기획서 작업에 묶이지 않은 PR이 섞임
+    "linked_incident_open",  # 문단에 열린 장애 표시
+    "open_question",  # 기획서에 답 안 된 질문
+    "spec_unknown",  # 기획 쪽에 없는 기획서
+]
+
+
+class ReleasePr(AxModel):
+    number: int
+    task_id: str | None = None  # T-n (없으면 기획서 밖 PR로 본다)
+    merged: bool
+    changed_paths: list[str] = Field(default_factory=list)
+
+
+class RequestReleaseCheckInput(AxModel):
+    spec_id: str  # SPEC-n
+    request_id: str  # REQ-n
+    env: ReleaseEnv = "dev"
+    prs: list[ReleasePr] = Field(min_length=1)
+    summary: str | None = None  # 개발이 쓴 한 줄 (판정에 쓰지 않는다)
+
+
+class ReleaseCheckItem(AxModel):
+    """문단 하나의 대조 결과."""
+
+    para_id: str  # R1 …
+    status: Literal["covered", "missing_task", "not_merged", "incident_open"]
+    task_ids: list[str] = Field(default_factory=list)
+    pr_numbers: list[int] = Field(default_factory=list)
+
+
+class RequestReleaseCheckOutput(AxModel):
+    check_id: str  # RC-n (planning 발급)
+    verdict: ReleaseVerdict
+    items: list[ReleaseCheckItem] = Field(default_factory=list)
+    hold_reasons: list[ReleaseHoldReason] = Field(default_factory=list)
+    order_sent: bool = False  # ready여서 배포 지시를 바로 보냈는지
+
+    @model_validator(mode="after")
+    def _verdict_is_consistent(self) -> RequestReleaseCheckOutput:
+        if self.verdict == "hold" and not self.hold_reasons:
+            raise ValueError("hold면 hold_reasons가 하나 이상 있어야 한다")
+        if self.verdict != "ready" and self.order_sent:
+            raise ValueError("order_sent는 verdict가 ready일 때만 true")
+        return self
+
+
+class ReceiveReleaseOrderInput(AxModel):
+    """planning → dev 배포 지시.
+
+    dev는 지금의 배포 요청 흐름(prod·보호 경로는 사람 승인)을 그대로 탄다.
+    """
+
+    check_id: str
+    spec_id: str
+    request_id: str
+    env: ReleaseEnv
+    pr_numbers: list[int] = Field(min_length=1)
+    decided_by: Literal["agent", "human"]
+    note: str | None = None
+
+
+class ReceiveReleaseOrderOutput(AxModel):
+    outcome: Literal["accepted", "duplicate", "rejected"]
+    deployment_id: str | None = None  # DEP-n (accepted일 때)
+    needs_approval: bool = False  # prod·보호 경로라 사람 승인 대기
+    reason_code: str | None = None  # rejected일 때 (예: pr_not_merged, unknown_pr)
+
+    @model_validator(mode="after")
+    def _outcome_is_consistent(self) -> ReceiveReleaseOrderOutput:
+        if self.outcome == "accepted" and not self.deployment_id:
+            raise ValueError("accepted면 deployment_id가 있어야 한다")
+        if self.outcome == "rejected" and not self.reason_code:
+            raise ValueError("rejected면 reason_code가 있어야 한다")
+        return self
