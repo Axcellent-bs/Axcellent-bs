@@ -73,6 +73,13 @@ def gate() -> CaptureGate:
     return capture
 
 
+@pytest.fixture
+def wired(wire) -> tuple:
+    """기획·개발 두 서비스가 같은 기록용 관문을 쓴다 (요청 → PR 흐름 시험)."""
+    capture = CaptureGate()
+    return type(wire)(gate=capture), capture
+
+
 def _svc() -> PlanningService:
     return get_service()
 
@@ -158,13 +165,15 @@ def test_pr_params_each_key(service) -> None:
     ]
 
 
-def test_request_cannot_supply_rule_numbers(service) -> None:
+def test_request_cannot_supply_rule_numbers(wire) -> None:
     """화면·요청이 보낸 숫자는 받지 않는다 (값은 도메인 상태에서만)."""
     with pytest.raises(ActionError) as err:
-        run(service.dispatch({"type": "confirmSpec", "spec": "SPEC-7", "open_questions": 0}))
+        wire.run(
+            wire.planning.dispatch({"type": "confirmSpec", "spec": "SPEC-7", "open_questions": 0})
+        )
     assert err.value.code == "INVALID_ACTION"
     with pytest.raises(ActionError):
-        run(service.dispatch({"type": "mergePr", "pr": "PR #28", "irreversible_count": 0}))
+        wire.run(wire.dev.dispatch({"type": "mergePr", "pr": "PR #28", "irreversible_count": 0}))
 
 
 @pytest.mark.role("planning")
@@ -198,17 +207,17 @@ def test_human_merge_sends_171_keys(gate) -> None:
     assert _pr(svc, "PR #31").merged and _pr(svc, "PR #31").auto is False
 
 
-def test_simple_flow_sends_171_keys(gate) -> None:
-    svc = _svc()
-    run(svc.inbound("support_simple"))
-    [confirm] = gate.params("confirm_spec")
+def test_simple_flow_sends_171_keys(wired) -> None:
+    wire, gate = wired
+    wire.run(wire.planning.inbound("support_simple"))
+    [confirm] = gate.params("confirm_spec")  # 기획 서비스
     assert {k: confirm[k] for k in SPEC_KEYS} == {
         "open_questions": 0,
         "warnings": 0,
         "basis_count": 2,
         "irreversible_count": 0,
     }
-    [merge] = gate.params("merge_pr")
+    [merge] = gate.params("merge_pr")  # 개발 서비스
     assert {k: merge[k] for k in PR_KEYS} == {
         "changed_lines": 4,
         "changed_files": 1,
@@ -220,12 +229,13 @@ def test_simple_flow_sends_171_keys(gate) -> None:
     assert merge["auto"] is True
 
 
-def test_simple_flow_merge_held_by_safety_waits(gate) -> None:
-    svc = _svc()
+def test_simple_flow_merge_held_by_safety_waits(wired) -> None:
+    wire, gate = wired
+    P, D = wire.planning, wire.dev
     gate.hold = ("merge_pr",)
-    run(svc.inbound("support_simple"))
-    r = next(x for x in svc.state.requests if x.id == "REQ-21")
-    pr = svc.state.prs[-1]
+    wire.run(P.inbound("support_simple"))
+    r = next(x for x in P.state.requests if x.id == "REQ-21")
+    pr = D.state.prs[-1]
     assert r.state == "작업 중" and not pr.merged
     assert pr.auto_review is not None
     assert (pr.auto_review.state, pr.auto_review.gate_status, pr.auto_review.review_id) == (
@@ -233,12 +243,12 @@ def test_simple_flow_merge_held_by_safety_waits(gate) -> None:
         "held",
         "rev_7",
     )
-    assert svc.state.auto_policy.streak == 0  # 머지 안 됐으니 연속 정상에 안 센다
-    # 판단은 기존 사람 머지 버튼
+    assert D.state.auto_policy.streak == 0  # 머지 안 됐으니 연속 정상에 안 센다
+    # 판단은 기존 사람 머지 버튼 (개발 서비스)
     gate.hold = ()
-    run(svc.merge_pr(pr.id))
-    assert svc.state.prs[-1].merged and svc.state.prs[-1].auto_review is None
-    assert next(x for x in svc.state.requests if x.id == "REQ-21").state == "완료"
+    wire.run(D.merge_pr(pr.id))
+    assert D.state.prs[-1].merged and D.state.prs[-1].auto_review is None
+    assert next(x for x in P.state.requests if x.id == "REQ-21").state == "완료"
 
 
 # ---------------------------------------------------------------- 기획서 자동 확정 / 대기
@@ -340,20 +350,19 @@ def test_safety_hold_on_auto_confirm_waits(gate) -> None:
 # ---------------------------------------------------------------- PR 자동 머지 / 대기 / 사람 확인
 
 
-def test_auto_merge_and_close_request(gate) -> None:
-    svc = _svc()
-    _clear_warn(svc)
-    _spec(svc).paras[1].paths = ["shop-api/cart/notice.py"]  # R2도 허용 경로 안
-    run(svc.answer_question("SPEC-7", ANSWER))
-    run(svc.generate_prs("SPEC-7"))
-    pr31, pr32 = _pr(svc, "PR #31"), _pr(svc, "PR #32")
+def test_auto_merge_and_close_request(wired) -> None:
+    wire, gate = wired
+    P, D = wire.planning, wire.dev
+    _clear_warn(P)
+    _spec(P).paras[1].paths = ["shop-api/cart/notice.py"]  # R2도 허용 경로 안
+    # 경고가 없으면 자동 확정 → 개발로 넘김 → 개발은 PR·검수·재검수·머지까지 버튼 없이 간다
+    wire.run(P.answer_question("SPEC-7", ANSWER))
+    pr31, pr32 = _pr(D, "PR #31"), _pr(D, "PR #32")
     assert pr31.merged and pr31.auto and pr31.merged_at is not None
-    assert not pr32.merged and pr32.auto_review is None  # 검수 불일치 → 수정 대기(대기열 아님)
-    run(svc.review_pr("PR #32"))  # 재검수 통과, 불일치 1회(<2) → 자동 머지
-    pr32 = _pr(svc, "PR #32")
+    assert pr32.reviews == ["불일치", "통과"]  # 검수 불일치 1회(<2) → 수정 후 재검수 통과
     assert pr32.merged and pr32.auto
-    assert next(r for r in svc.state.requests if r.id == "REQ-12").state == "완료"
-    flow = [a for a in svc.state.activity if a.context_id == "ctx_req_0012"]
+    assert next(r for r in P.state.requests if r.id == "REQ-12").state == "완료"
+    flow = wire.activity("ctx_req_0012")
     assert not [a for a in flow if a.kind == "사람"]  # 요청부터 완료까지 사람 클릭 0
     merges = gate.params("merge_pr")
     assert [m["review_mismatch_count"] for m in merges] == [0, 1]
@@ -476,14 +485,13 @@ def test_irreversible_needs_human_and_human_can_merge(gate) -> None:
 # ---------------------------------------------------------------- 대기열 REST
 
 
-def test_review_queue_rest(service) -> None:
+def test_review_queue_rest(wire) -> None:
+    # PR 대기열은 개발 서비스 화면(/api/planning/review-queue, dev 8111)이 보여 준다
+    set_service(wire.dev)
     client = TestClient(app)
     assert client.get("/api/planning/review-queue").json()["data"] == []
-    run(service.answer_question("SPEC-7", ANSWER))
-    run(service.generate_prs("SPEC-7"))  # 아직 미확정 → 작업 없음, 변화 없음
-    run(service.confirm_spec("SPEC-7"))
-    run(service.generate_prs("SPEC-7"))
-    run(service.review_pr("PR #32"))
+    wire.run(wire.planning.answer_question("SPEC-7", ANSWER))
+    wire.run(wire.planning.confirm_spec("SPEC-7"))  # 확정 → 개발이 PR·재검수까지 잇는다
     body = client.get("/api/planning/review-queue").json()
     rows = body["data"]
     assert body["meta"]["count"] == 1

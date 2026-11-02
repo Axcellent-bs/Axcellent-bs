@@ -390,7 +390,7 @@ def test_resync_restores_lost_peer() -> None:
 
 
 def test_auto_policy_follows_dev_after_promotion() -> None:
-    """자동 처리 범위의 주인은 dev다. 승급을 승인하면 planning의 간단 요청 판정도 같은 범위를 쓴다."""
+    """자동 처리 범위의 주인은 dev다. 승급을 승인하면 planning도 같은 범위로 간단 요청을 가른다."""
 
     async def run() -> Wire:
         w = Wire()

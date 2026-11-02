@@ -163,15 +163,16 @@ def test_create_ticket_acl_key_and_invalid_input(a2a_body) -> None:
     assert (bad["status"], bad["outcome"]) == ("failed", "invalid_input")
 
 
+@pytest.mark.role("planning")
 def test_create_ticket_simple_request_runs_auto_flow(service, a2a_body) -> None:
-    """간단 요청 규칙을 통과하면 시뮬레이터와 같은 자동 처리 흐름을 탄다 (응답은 created)."""
+    """간단 요청 규칙을 통과하면 시뮬레이터와 같은 자동 처리 흐름을 탄다 (응답은 created).
+
+    기획 서비스는 기획서를 자동 확정해 개발로 넘긴다. PR·머지·완료 회신은 개발 서비스 몫이라
+    두 서비스를 잇는 시험(test_service의 간단 요청 시험)이 본다."""
     result = _ticket(a2a_body, "상품 상세의 배송 안내 문구 오타 수정", key="simple")
     out = CreateTicketOutput.model_validate(result["output"])
     assert out.outcome == "created"
     req = next(r for r in service.state.requests if r.id == out.request_id)
     assert req.auto is not None and req.auto.ok
-    assert req.state == "완료"
-    assert any(
-        a.context_id == out.context_id and a.to == "support" and "완료" in a.text
-        for a in service.state.activity
-    )
+    spec = next(s for s in service.state.specs if s.id == req.spec)
+    assert spec.status == "확정" and spec.auto and spec.handed_to_dev

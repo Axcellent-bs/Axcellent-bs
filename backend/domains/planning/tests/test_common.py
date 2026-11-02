@@ -219,51 +219,58 @@ def test_untrusted_text_does_not_change_link_incident(service, a2a_body) -> None
 # ---- 7. 계산은 코드로 (LLM을 부르지 않는다)
 
 
-def test_numbers_come_from_code_not_llm(service, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_numbers_come_from_code_not_llm(wire, monkeypatch: pytest.MonkeyPatch) -> None:
     def no_llm(*args, **kwargs):
         raise AssertionError("LLM을 부르면 안 된다")
 
     monkeypatch.setattr(llm.LLMClient, "__init__", no_llm)
     monkeypatch.setattr(llm.MockLLMClient, "__init__", no_llm)
+    P, D = wire.planning, wire.dev
 
     assert estimate("기획전 페이지 안내 문구 전체 교체") == (45, 3)
     assert estimate("마이페이지 메뉴 라벨 오타 수정") == (4, 1)
-    assert not check_simple("쿠폰 문구 수정", service.state.auto_policy).ok
+    assert not check_simple("쿠폰 문구 수정", P.state.auto_policy).ok
 
-    asyncio.run(service.inbound("support_simple"))
-    asyncio.run(service.inbound("hr_draft"))
-    asyncio.run(service.accept_draft("REQ-22"))  # 이미 자동 채택돼 바뀌지 않는다
-    m = compute_metrics(service.state)
-    prs = service.state.prs
-    assert m["done_criteria_match_rate"] == 100  # PR #28, 자동 PR 모두 마지막 검수 통과
-    assert m["first_review_pass_rate"] == 100
+    wire.run(P.inbound("support_simple"))
+    wire.run(P.inbound("hr_draft"))
+    wire.run(P.accept_draft("REQ-22"))  # 이미 자동 채택돼 바뀌지 않는다
+    # PR 지표는 PR을 만드는 개발 서비스, 초안·경고·사람 문장은 기획 서비스 숫자로 본다
+    dev_m, plan_m = compute_metrics(D.state), compute_metrics(P.state)
+    assert dev_m["done_criteria_match_rate"] == 100  # PR #28, 자동 PR 모두 마지막 검수 통과
+    assert dev_m["first_review_pass_rate"] == 100
     # (38 + 3 + 52) / 3 = 31. 개선 초안 REQ-22도 사람 클릭 없이 PR까지 간다 (generate_prs 52분)
-    assert m["first_pr_minutes_avg"] == 31
-    assert m["draft_adoption_rate"] == 33  # 3건 중 1건
-    assert m["warnings"] == 1
-    assert m["basis"]["pr_count"] == len(prs) == 3
+    assert dev_m["first_pr_minutes_avg"] == 31
+    assert dev_m["basis"]["pr_count"] == len(D.state.prs) == 3
+    assert P.state.prs == D.state.prs  # 기획은 개발이 돌려준 PR을 그대로 가진다
+    assert plan_m["draft_adoption_rate"] == 33  # 3건 중 1건
+    assert plan_m["warnings"] == 1
     # 사람 문장: SPEC-5의 2 + 기획·개발 밖 메시지(data·support·hr 각 1)
-    assert m["human_sentences"] == 2 + 3
+    assert plan_m["human_sentences"] == 2 + 3
 
 
 # ---- 8. 상태 변경은 execute 경유 (관문 거절·무응답이면 실행하지 않음)
 
 
-def test_state_changes_go_through_execute(service) -> None:
-    asyncio.run(service.inbound("support_simple"))
-    actions = [c.action for c in service.gate_calls]
-    assert actions == [
+def test_state_changes_go_through_execute(wire) -> None:
+    wire.run(wire.planning.inbound("support_simple"))
+    # 기획은 요청·기획서·작업까지, 개발은 넘겨받은 뒤 PR·머지·기록. 넘기기도 관문을 지난다
+    assert [c.action for c in wire.planning.gate_calls] == [
         "create_ticket",
         "write_spec",
         "confirm_spec",
         "split_tasks",
+        "receive_dev_result",
+    ]
+    assert [c.action for c in wire.dev.gate_calls] == [
+        "start_dev",
         "generate_pr",
         "review_pr",
         "merge_pr",
         "record_case",
     ]
-    assert all(c.status == "executed" for c in service.gate_calls)
-    assert all(c.idempotency_key.startswith("ctx_req_0021:") for c in service.gate_calls)
+    calls = [*wire.planning.gate_calls, *wire.dev.gate_calls]
+    assert all(c.status == "executed" for c in calls)
+    assert all(c.idempotency_key.startswith("ctx_req_0021:") for c in calls)
 
 
 async def _rejected(request) -> ExecuteDecision:
