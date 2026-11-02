@@ -9,6 +9,8 @@
   않는다. 확인할 수 없는 규칙은 점수에서 빼고 `unknown_rules`로 알린다. 없는 판매자는 `not_found`다.
 - trend_scan은 네이버 검색어 트렌드를 읽어 키워드 그룹별 급상승을 판정한다(grade read). 그룹마다
   따로 부르고, 모든 그룹에서 못 읽으면 숫자 없이 `failed`·`unavailable`이다.
+- answer_planning_question은 data가 보낸 요청의 기록으로만 기획 질문에 답한다(grade read,
+  `planning_questions.py`). 기록에 없으면 `unknown`이다.
 - 외부 입력(`request.untrusted`)은 읽지 않는다.
 - shop-api에서 데이터를 받지 못하면(`ShopUnavailable`) 숫자를 0으로 내지 않고 `failed`·`unavailable`
   과 "확인할 수 없음" 근거로 답한다.
@@ -34,6 +36,7 @@ from ax_contracts.schemas.data import (
     RootCauseInput,
     TrendScanRequest,
 )
+from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
 from data_agent.clients.fact_sources import notices_at
 from data_agent.clients.log_client import get_log_source
 from data_agent.clients.shop_client import (
@@ -44,6 +47,7 @@ from data_agent.clients.shop_client import (
 )
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.naver_datalab import NaverDatalabConnector
+from data_agent.planning_questions import answer_question
 from data_agent.report_store import ReportStore, get_report_store
 from data_agent.skills.accuracy_report import eval_dir, load_report
 from data_agent.skills.activity_report import InvalidActivityInput, build_report
@@ -341,6 +345,26 @@ async def trend_scan(request: AgentRequest) -> AgentResult:
     )
 
 
+async def answer_planning_question(request: AgentRequest) -> AgentResult:
+    """기획이 되묻는 근거 질문에 data가 보낸 요청의 기록으로 답한다(grade read)."""
+    data = _parse(request, AnswerPlanningQuestionInput)
+    if isinstance(data, AgentResult):
+        return data
+    out = answer_question(data, request.meta.tenant_id, request.meta.context_id)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=out.status,
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(
+            queries=[f"data.sent_requests request_id={data.request_id}"],
+            data_summary=f"{data.question_id} → {out.status}",
+            collected_at=datetime.now(UTC),
+            ref_ids=out.evidence_ids,
+        ),
+    )
+
+
 HANDLERS = {
     "impact_analysis": impact_analysis,
     "anomaly_detection": anomaly_detection,
@@ -350,4 +374,5 @@ HANDLERS = {
     "accuracy_report": accuracy_report,
     "activity_report": activity_report,
     "trend_scan": trend_scan,
+    "answer_planning_question": answer_planning_question,
 }

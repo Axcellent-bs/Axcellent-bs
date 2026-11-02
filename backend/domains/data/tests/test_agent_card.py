@@ -27,6 +27,7 @@ def test_card_validates(card: AgentCard) -> None:
         "accuracy_report",
         "activity_report",
         "trend_scan",
+        "answer_planning_question",
     }
 
 
@@ -74,3 +75,12 @@ def test_trend_scan_is_a_read_for_orchestrator_marketing_and_dashboard(card: Age
     assert set(skill.allowed_requesters) == {"orchestrator", "marketing", "dashboard-api"}
     assert skill.input_schema.endswith("#TrendScanRequest")
     assert skill.output_schema.endswith("#TrendScanOutput")
+
+
+def test_answer_planning_question_is_for_planning(card: AgentCard) -> None:
+    """기획 되묻기 창구 (이슈 #266). 기획만 부르고, 상태를 바꾸지 않는다."""
+    skill = next(s for s in card.skills if s.id == "answer_planning_question")
+    assert skill.allowed_requesters == ["planning"]
+    assert skill.grade == "read"
+    assert skill.input_schema.endswith("planning.py#AnswerPlanningQuestionInput")
+    assert skill.output_schema.endswith("planning.py#AnswerPlanningQuestionOutput")
