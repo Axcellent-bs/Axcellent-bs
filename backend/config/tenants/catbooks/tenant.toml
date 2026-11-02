@@ -11,3 +11,5 @@ connector = "shop-api"
 org = "org.yaml"
 # 검색어 급상승(data trend_scan) 기본 키워드 그룹 (이 폴더 기준)
 trends = "trends.toml"
+# YouTube 영상 통계 스냅샷이 검색하는 회사 키워드 (이 폴더 기준)
+youtube = "youtube.toml"
