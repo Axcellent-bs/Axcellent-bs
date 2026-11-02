@@ -684,7 +684,9 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
 
     @router.post("/dev-chat", response_model=None, dependencies=CALLER)
     async def post_dev_chat(request: Request) -> dict | JSONResponse:
-        """`{thread_id?, message, connection?}` → 바뀐 대화. AI 답 하나까지 기다린다."""
+        """`{thread_id?, message, connection?, mode?}` → 바뀐 대화. AI 답 하나까지 기다린다.
+
+        `mode`(agent·subscription)는 이 대화가 띄울 작업을 누가 코딩하나."""
         svc = get_service()
         if dev_chat.get_llm() is None:
             return _err(409, "LLM_NOT_CONFIGURED", "LLM 설정이 없다 (PLANNING_LLM_*·LLM_*)")
@@ -708,7 +710,8 @@ def create_api_router(get_service: Callable[[], PlanningService]) -> APIRouter:
         if connection is not None and not isinstance(connection, str):
             return _err(400, "INVALID_INPUT", "connection은 문자열이어야 한다")
         try:
-            th = await dev_chat.turn(svc, thread_id, message, connection or None)
+            mode = body.get("mode")
+            th = await dev_chat.turn(svc, thread_id, message, connection or None, mode)
         except ActionError as exc:
             return _coding_err(exc)
         except GateRefused as exc:

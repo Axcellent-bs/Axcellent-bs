@@ -435,3 +435,20 @@ def test_long_wait_is_noticed_once(service: PlanningService, adapter) -> None:
     assert asyncio.run(dev_chat.notice_long_waits(service)) == 0  # 한 번만
     got = service.chat_of(th["id"])
     assert got.status == "waiting" and "지금 진행" in got.messages[-1].text
+
+
+def test_subscription_chat_queues_for_own_claude(service: PlanningService, adapter) -> None:
+    """'내 Claude'로 고른 대화는 서버 코더 없이 대기열에 올린다 (work_queue.py가 가져감)."""
+    dev_chat.set_llm(ChatLLM([START]))
+    with TestClient(app) as c:
+        msg = "Banner.tsx 문구를 '신간 배너'로 바꾸고 PR 올려 줘"
+        r = _post(c, message=msg, mode="subscription")
+        th = r.json()["data"]
+        assert th["mode"] == "subscription" and th["task_id"] == "T-D1"
+        assert "내 Claude Code에서 가져가면" in th["messages"][-1]["text"]
+        cr = _task(service).coding
+        assert cr.mode == "subscription" and cr.status == "queued"
+        assert "T-D1" not in service._coding  # 서버 코더는 돌지 않는다
+
+        r = _post(c, message="배너 바꿔 줘", mode="robot")
+        assert r.status_code == 400 and r.json()["error"]["code"] == "INVALID_INPUT"
