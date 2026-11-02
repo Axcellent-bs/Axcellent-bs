@@ -42,6 +42,19 @@
       "priority": "recommended"
     },
     {
+      "id": "team_headcount",
+      "description": "그달 1일 기준 팀별 인원수를 돌려준다(조회 전용). 이름·직원 ID는 내보내지 않는다. 발령은 발령일이 1일이면 그 달부터, 아니면 다음 달 1일부터 센다. 지금은 발령 기록이 없어 가상 명부(예시)로 세고 example=true로 밝힌다. 팀을 알 수 없으면 0명으로 채우지 않고 실패로 답한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#TeamHeadcountInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#TeamHeadcountOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "finance"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "list_candidate_cards",
       "description": "확신이 낮아 사람 확인을 기다리는 후보 카드를 조회한다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCandidateCardsInput",
