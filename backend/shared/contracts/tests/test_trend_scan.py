@@ -70,6 +70,8 @@ def test_candidates_output_needs_a_reason_and_no_candidates_when_unknown() -> No
         {"status": "known", "summary": "x", "candidates": [candidate], "naver_calls": 1}
     )
     assert out.candidates[0].youtube.snapshot_at.tzinfo is not None
+    # 별칭 묶기 필드는 추가만: 예전 응답(필드 없음)도 읽히고 빈 목록이다
+    assert out.candidates[0].aliases == [] and out.candidates[0].youtube.matched_tags == []
     with pytest.raises(ValidationError):  # 후보 수 상한 (후보마다 네이버 1번)
         TrendCandidatesRequest(max_candidates=21)
     assert TrendCandidatesRequest().max_candidates is None  # 비우면 회사 설정

@@ -6,9 +6,11 @@
   인기 영상 태그를 정리(앞뒤 공백·# 제거, 영문 소문자)하고, `min_videos`개 이상 영상에 나온
   태그를 나온 영상 수 많은 순으로 최대 `max_candidates`개 고른다.
   회사 제외 목록(`exclude_tags`)은 뺀다.
-- 같은 대상의 한글·영문 이름(t1·티원)은 묶지 않는다(README 한계).
-- 네이버 판정은 trend_scan과 같은 함수(`trend_scan.judge`)를 그대로 쓴다. 후보마다 한 그룹(키워드
-  하나)으로 한 번씩 부르고, 못 읽은 후보는 그 후보만 unknown이다.
+- 별칭 묶기: 태그 정리 다음에 회사 별칭 표(`[candidates.aliases]`, 대표 이름 = [별칭…])로
+  별칭을 대표 이름으로 바꾼다(lol → 리그오브레전드). 나온 영상 수는 영상 기준으로 중복 없이
+  합친다(한 영상에 lol·리그오브레전드가 같이 있어도 1개). 표에 없는 이름은 묶지 않는다.
+- 네이버 판정은 trend_scan과 같은 함수(`trend_scan.judge`)를 그대로 쓴다. 후보마다 한 그룹
+  (대표 이름 + 별칭들을 키워드로)으로 한 번씩 부르고, 못 읽은 후보는 그 후보만 unknown이다.
 - 스냅샷이 없거나 `max_age_hours`보다 오래됐으면 후보를 뽑지 않고 unknown + 이유다.
 - 설정: 회사 `trends.toml`의 `[candidates]` (`DATA_TREND_CONFIG`). README "trend_candidates".
 """
@@ -44,22 +46,61 @@ from data_agent.skills.trend_scan import (
 from data_agent.youtube_store import DB_ENV, DEFAULT_DB, PopularSnapshot, latest_popular
 
 NAVER_FAILED = "네이버 검색어 트렌드를 읽지 못함"  # trend_scan과 같은 문장
+MAX_KEYWORDS = 20  # 네이버 그룹 하나에 넣을 수 있는 키워드 수 (TrendKeywordGroup)
 
 
 @dataclass(frozen=True)
 class CandidateConfig:
-    """회사 설정 `[candidates]`. 파일·표가 없으면 이 값(제외 목록은 비어 있음)."""
+    """회사 설정 `[candidates]`. 파일·표가 없으면 이 값(제외 목록·별칭 표는 비어 있음)."""
 
     max_candidates: int = 5
     min_videos: int = 2
     max_age_hours: float = 24.0
     rep_videos: int = 3
     exclude_tags: frozenset[str] = field(default_factory=frozenset)
+    # 대표 이름 → 별칭들 (정리한 값, 설정 순서). 별칭 → 대표 이름은 `canonical()`
+    aliases: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+
+    def canonical(self, tag: str) -> str:
+        """정리한 태그의 대표 이름 (별칭이 아니면 그대로)."""
+        for name, others in self.aliases.items():
+            if tag in others:
+                return name
+        return tag
+
+    def keywords(self, name: str) -> list[str]:
+        """네이버 그룹에 넣을 키워드: 대표 이름 + 별칭들 (최대 20개)."""
+        return [name, *self.aliases.get(name, ())][:MAX_KEYWORDS]
 
 
 def clean_tag(tag: str) -> str:
     """앞뒤 공백·#을 떼고 영문을 소문자로 바꾼다 ("  #T1 " → "t1"). 남는 게 없으면 ""."""
     return tag.strip().strip("#").strip().lower()
+
+
+def _load_aliases(raw: object) -> dict[str, tuple[str, ...]]:
+    """`[candidates.aliases]` (대표 이름 = [별칭…]). 이름·별칭은 태그처럼 정리한다.
+
+    별칭이 대표 이름과 같거나, 이미 다른 대표 이름의 별칭이거나, 그 자체가 대표 이름이면 뺀다
+    (앞에 적은 것이 이긴다). 틀린 모양이면 `TypeError`.
+    """
+    if not isinstance(raw, Mapping):
+        raise TypeError("aliases는 표여야 한다")
+    names = [clean_tag(str(k)) for k in raw]
+    taken: set[str] = set(n for n in names if n)
+    out: dict[str, tuple[str, ...]] = {}
+    for key, values in raw.items():
+        name = clean_tag(str(key))
+        if not name or not isinstance(values, list):
+            raise TypeError("aliases의 값은 별칭 목록이어야 한다")
+        mine: list[str] = []
+        for value in values:
+            other = clean_tag(str(value))
+            if other and other not in taken:
+                mine.append(other)
+                taken.add(other)
+        out[name] = tuple(mine[: MAX_KEYWORDS - 1])
+    return out
 
 
 def load_config(env: Mapping[str, str]) -> CandidateConfig:
@@ -79,6 +120,7 @@ def load_config(env: Mapping[str, str]) -> CandidateConfig:
             exclude_tags=frozenset(
                 t for t in (clean_tag(str(x)) for x in raw.get("exclude_tags", [])) if t
             ),
+            aliases=_load_aliases(raw.get("aliases", {})),
         )
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return CandidateConfig()
@@ -86,8 +128,9 @@ def load_config(env: Mapping[str, str]) -> CandidateConfig:
 
 @dataclass(frozen=True)
 class TagCount:
-    keyword: str
-    video_ids: tuple[str, ...]  # 인기 순위 순
+    keyword: str  # 대표 이름
+    video_ids: tuple[str, ...]  # 인기 순위 순, 중복 없음
+    matched: tuple[str, ...] = ()  # 이 후보로 센 정리된 태그 (처음 나온 순서)
 
     @property
     def video_count(self) -> int:
@@ -97,21 +140,31 @@ class TagCount:
 def pick_candidates(
     snapshot: PopularSnapshot, config: CandidateConfig, limit: int
 ) -> list[TagCount]:
-    """정리한 태그별로 붙은 인기 영상을 세어 후보를 고른다.
+    """정리한 태그를 대표 이름으로 바꿔 붙은 인기 영상을 세고 후보를 고른다.
 
-    한 영상에 같은 태그가 여러 번(대소문자·# 차이 포함) 붙어도 한 번만 센다. 순서: 나온 영상 수
-    많은 순 → 그 태그 영상 중 가장 높은 인기 순위 → 키워드 이름.
+    한 영상에 같은 이름이 여러 번(대소문자·# 차이, 별칭 포함) 붙어도 한 번만 센다. 정리한 태그나
+    대표 이름이 제외 목록에 있으면 뺀다. 순서: 나온 영상 수 많은 순 → 그 이름 영상 중 가장 높은
+    인기 순위 → 대표 이름.
     """
     videos: dict[str, list[str]] = {}
+    matched: dict[str, list[str]] = {}
     best_rank: dict[str, int] = {}
     for video in sorted(snapshot.videos, key=lambda v: v.rank):
+        names: dict[str, list[str]] = {}  # 이 영상에서 대표 이름 → 붙은 태그
         for tag in sorted({clean_tag(t) for t in video.tags}):
-            if not tag or tag in config.exclude_tags:
+            name = config.canonical(tag)
+            if not tag or tag in config.exclude_tags or name in config.exclude_tags:
                 continue
-            videos.setdefault(tag, []).append(video.video_id)
-            best_rank.setdefault(tag, video.rank)
+            names.setdefault(name, []).append(tag)
+        for name, tags in names.items():
+            videos.setdefault(name, []).append(video.video_id)
+            best_rank.setdefault(name, video.rank)
+            seen = matched.setdefault(name, [])
+            seen.extend(t for t in tags if t not in seen)
     picked = [
-        TagCount(tag, tuple(ids)) for tag, ids in videos.items() if len(ids) >= config.min_videos
+        TagCount(name, tuple(ids), tuple(matched[name]))
+        for name, ids in videos.items()
+        if len(ids) >= config.min_videos
     ]
     picked.sort(key=lambda c: (-c.video_count, best_rank[c.keyword], c.keyword))
     return picked[:limit]
@@ -208,12 +261,16 @@ async def find_candidates(
     candidates: list[TrendCandidate] = []
     queries = [f"{snapshot_query} at={snapshot.collected_at.isoformat()}"]
     for tag in tags:
+        keywords = config.keywords(tag.keyword)
         query = TrendScanInput(
-            keyword_groups=[TrendKeywordGroup(group_name=tag.keyword, keywords=[tag.keyword])],
+            keyword_groups=[TrendKeywordGroup(group_name=tag.keyword, keywords=keywords)],
             start_date=start,
             end_date=end,
         )
-        queries.append(f"naver search-trend group={tag.keyword} {start}~{end} date")
+        queries.append(
+            f"naver search-trend group={tag.keyword} keywords={','.join(keywords)}"
+            f" {start}~{end} date"
+        )
         candidates.append(
             TrendCandidate(
                 keyword=tag.keyword,
@@ -221,8 +278,10 @@ async def find_candidates(
                     video_count=tag.video_count,
                     snapshot_at=snapshot.collected_at,
                     video_ids=list(tag.video_ids[: config.rep_videos]),
+                    matched_tags=list(tag.matched),
                 ),
                 naver=await _naver(query, connector, settings),
+                aliases=keywords[1:],
             )
         )
     summary = _summary(candidates, len(snapshot.videos))
