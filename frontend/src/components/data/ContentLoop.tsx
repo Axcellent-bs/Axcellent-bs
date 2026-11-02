@@ -1,11 +1,12 @@
 import { Fragment } from "react";
 import { Chip, TONE } from "@/components/finance/bits";
-import { LOOP_BACK, LOOP_STAGES, type LoopStage } from "@/lib/contentLoop";
+import { LOOP_BACK, LOOP_STAGES, PROBE_STATUS, type LoopProbe, type LoopProbeSkill, type LoopStage } from "@/lib/contentLoop";
 import { UNKNOWN } from "@/lib/data";
 
 // 콘텐츠 루프 띠 (트렌드 탭 맨 위). 단계 이름·담당·상태는 lib/contentLoop.ts 한 곳에서 온다.
 // 1단계만 숫자를 보여 준다: 트렌드 탭이 이미 받은 trend_scan 응답의 판정 개수(다시 부르지 않는다).
 // 응답이 없거나 실패하면 숫자 없이 "확인할 수 없음". 2~5단계는 숫자 없이 상태 칩만 보여 준다.
+// 1·4단계 칩은 트렌드 탭이 받은 trend_scan·campaign_effect 응답 결과(probes)로 정한다.
 
 /** 1단계에 보여 줄 trend_scan 판정 개수. 화면이 응답의 results를 센 값이다 */
 export type TrendCounts = { rising: number; normal: number; unknown: number };
@@ -27,7 +28,10 @@ function TrendLine({ state }: { state: LoopTrendState }) {
   );
 }
 
-function StageCard({ stage, trend }: { stage: LoopStage; trend: LoopTrendState }) {
+export type LoopProbes = Record<LoopProbeSkill, LoopProbe>;
+
+function StageCard({ stage, trend, probes }: { stage: LoopStage; trend: LoopTrendState; probes: LoopProbes }) {
+  const status = stage.probe ? PROBE_STATUS[probes[stage.probe]] : stage.status;
   const frame = stage.live
     ? "border-2 border-brand-500 bg-surface"
     : "border border-dashed border-ink-300 bg-ink-50";
@@ -38,14 +42,14 @@ function StageCard({ stage, trend }: { stage: LoopStage; trend: LoopTrendState }
       <p className="text-xs text-ink-500">{stage.owner}</p>
       {stage.source === "trend_scan" ? <TrendLine state={trend} /> : <p className="text-sm text-ink-700">{stage.description}</p>}
       <div className="mt-auto space-y-1 pt-1">
-        <Chip label={stage.status.label} tone={TONE[stage.status.tone]} />
+        <Chip label={status.label} tone={TONE[status.tone]} />
         {stage.note && <p className="text-[11px] leading-relaxed text-ink-500">{stage.note}</p>}
       </div>
     </li>
   );
 }
 
-export function ContentLoop({ trend }: { trend: LoopTrendState }) {
+export function ContentLoop({ trend, probes }: { trend: LoopTrendState; probes: LoopProbes }) {
   const live = LOOP_STAGES.filter((s) => s.live).map((s) => s.no);
   const first = LOOP_STAGES[0]?.no;
   const last = LOOP_STAGES[LOOP_STAGES.length - 1]?.no;
@@ -66,7 +70,7 @@ export function ContentLoop({ trend }: { trend: LoopTrendState }) {
                 <span className="hidden lg:inline">→</span>
               </li>
             )}
-            <StageCard stage={stage} trend={trend} />
+            <StageCard stage={stage} trend={trend} probes={probes} />
           </Fragment>
         ))}
       </ol>

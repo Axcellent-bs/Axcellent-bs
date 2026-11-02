@@ -1,6 +1,7 @@
 // 콘텐츠 루프: 트렌드 감지 → 영상 소재 추천 → 영상 제작 → 게시·성과 측정 → 다음 추천에 반영 → (다시 1).
 // 단계 이름·담당·상태는 이 파일에만 둔다. 단계가 생기거나 동작하기 시작하면 이 파일만 고친다.
 // 숫자는 여기 두지 않는다: 1단계 개수는 트렌드 탭이 받은 trend_scan 응답에서 화면이 센다. 2~5단계는 상태 칩만.
+// 1·4단계 칩은 트렌드 탭이 받은 trend_scan·campaign_effect 응답으로 정한다: 정상이면 "동작 중", 실패면 "연결 확인 필요"(회색).
 
 /** "마케팅에 소재로 보내기"를 아직 못 하는 이유 (dashboard-api POST /handoffs는 에이전트 토큰만 받는다) */
 export const SEND_TO_MARKETING_BLOCKED =
@@ -22,7 +23,18 @@ export interface LoopStage {
   note?: string;
   /** 이 단계가 화면에서 받은 값으로 숫자를 보여 주는지 */
   source?: "trend_scan";
+  /** 상태 칩을 이 서버 응답으로 정하는 단계. status는 응답을 받기 전 기본값 */
+  probe?: LoopProbeSkill;
 }
+
+/** 트렌드 탭이 이미 받은 응답의 결과. 칩을 위해 따로 부르지 않는다 */
+export type LoopProbeSkill = "trend_scan" | "campaign_effect";
+export type LoopProbe = "checking" | "ok" | "failed";
+export const PROBE_STATUS: Record<LoopProbe, { label: string; tone: LoopTone }> = {
+  checking: { label: "확인 중", tone: "muted" },
+  ok: { label: "동작 중", tone: "ok" },
+  failed: { label: "연결 확인 필요", tone: "muted" },
+};
 
 export const LOOP_STAGES: LoopStage[] = [
   {
@@ -31,8 +43,9 @@ export const LOOP_STAGES: LoopStage[] = [
     owner: "데이터분석 AI · trend_scan",
     live: true,
     description: "네이버 검색어 급상승을 판정합니다.",
-    status: { label: "동작 중", tone: "ok" },
+    status: PROBE_STATUS.checking,
     source: "trend_scan",
+    probe: "trend_scan",
   },
   {
     no: 2,
@@ -57,8 +70,9 @@ export const LOOP_STAGES: LoopStage[] = [
     owner: "마케팅 → 데이터분석 AI · campaign_effect",
     live: true,
     description: "캠페인 기간 주문 증분과 캠페인 쿠폰 누적 사용률을 잽니다.",
-    status: { label: "일부 동작 (주문·쿠폰 효과 측정)", tone: "info" },
+    status: PROBE_STATUS.checking,
     note: "매출 효과와 하루 넘는 캠페인은 아직 재지 않아요.",
+    probe: "campaign_effect",
   },
   {
     no: 5,
