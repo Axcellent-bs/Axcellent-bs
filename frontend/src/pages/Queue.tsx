@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Blockers, Loading, OFFLINE, StatusChip } from "@/components/admin/bits";
+import RefundHolds from "@/components/support/RefundHolds";
 import { api } from "@/lib/api";
 import { shortDateTime, won } from "@/lib/format";
 import { CLAIM_REASON_KO, CLAIM_TYPE_KO, INSPECTION_KO } from "@/lib/labels";
@@ -48,6 +49,7 @@ export default function QueuePage() {
         </div>
       </div>
       {error && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-xs font-medium text-red-800">{error}</p>}
+      <RefundHolds key={run ? `after-${run.held}-${run.paid}` : "initial"} onDecided={load} />
       {run && (
         <div role="status" className="rounded-xl border border-brand-100 bg-brand-50 px-4 py-3 text-sm text-brand-700">
           방금 처리: 지급 <b>{run.paid}</b>건 · 보류 <b>{run.held}</b>건
