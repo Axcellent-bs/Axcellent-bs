@@ -12,6 +12,7 @@
   (없으면 재무 기본값 `finance_policy.toml`)
 - 검색어 급상승 기본 키워드 `DATA_TREND_CONFIG`: 환경변수 → 회사 폴더 `trends`(있을 때만)
 - YouTube 스냅샷 회사 키워드 `DATA_YOUTUBE_CONFIG`: 환경변수 → 회사 폴더 `youtube`(있을 때만)
+- 회사 시간대 `DATA_TENANT_TIMEZONE`: 환경변수 → 회사 폴더 `timezone`(있을 때만)
 설정이 틀리면(폴더·카탈로그 없음, 커넥터가 카탈로그와 다름) 이유를 stderr에 쓰고 2로 끝난다.
 """
 
@@ -74,6 +75,7 @@ def read_tenant(folder: Path) -> dict[str, str]:
         raise TenantError(f"{path}: [finance] per_head_monthly는 0 이상 정수여야 합니다")
     trends = raw.get("trends")
     youtube = raw.get("youtube")
+    timezone = raw.get("timezone")
     return {
         "name": str(raw.get("name") or folder.name),
         "catalog": raw["catalog"] if not raw["catalog"].endswith(".toml") else catalog.as_posix(),
@@ -86,6 +88,7 @@ def read_tenant(folder: Path) -> dict[str, str]:
         "youtube": (folder / youtube).resolve().as_posix()
         if isinstance(youtube, str) and youtube
         else "",
+        "timezone": timezone if isinstance(timezone, str) else "",
     }
 
 
@@ -142,6 +145,12 @@ def resolve(
     elif tenant["youtube"] and Path(tenant["youtube"]).is_file():
         out["DATA_YOUTUBE_CONFIG"] = tenant["youtube"]
         notes.append(f"YouTube 회사 키워드: {tenant['youtube']} (회사 폴더)")
+
+    if env.get("DATA_TENANT_TIMEZONE"):
+        notes.append(f"회사 시간대: {env['DATA_TENANT_TIMEZONE']} (환경변수)")
+    elif tenant["timezone"]:
+        out["DATA_TENANT_TIMEZONE"] = tenant["timezone"]
+        notes.append(f"회사 시간대: {tenant['timezone']} (회사 폴더)")
     return out, notes
 
 

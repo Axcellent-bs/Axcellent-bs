@@ -160,5 +160,5 @@ seed `20261029` 분석 결론:
 - 주문 증감(2배·변화 없음·절반 등)은 이 폴더의 생성기(`eval_world.py`)로 **합성 주입**하고, **정답은 주입 조건에서 정한다**
 - 생성기에 캠페인 쿠폰(`spec.campaign`)을 더했다. `campaign`이 없는 시나리오는 데이터가 예전과 같다(기존 결제 평가 케이스 73개의 기록 지문으로 확인)
 - **`campaign/holdout/` 케이스 내용을 열지 않는다.** 위 holdout 규칙과 같다
-- 여러 날 캠페인 케이스는 `campaign/multiday/`(cases 9개, holdout 10개 seed `2026110204`)에 따로 둔다. 기준선은 "캠페인 시작 전 14일의 같은 요일·같은 시간대"(다음 코드 PR). 지금 skill은 하루 넘는 캠페인을 판정하지 않아 관문·baseline에 넣지 않았다. **`campaign/multiday/holdout/` 내용도 열지 않는다**
+- 여러 날 캠페인 케이스는 `campaign/multiday/`(cases 9개, holdout 10개 seed `2026110204`)에 따로 둔다. 기준선은 "캠페인 시작 전 14일의 같은 요일·같은 시간대"(다음 코드 PR). 기준선 코드 PR부터 campaign 관문에 들어가고 기준값은 `campaign/baseline.json` `multiday_metrics`다. **`campaign/multiday/holdout/` 내용도 열지 않는다**
 
