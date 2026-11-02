@@ -196,6 +196,7 @@ SERVICES: tuple[Service, ...] = (
             "list_in_progress",
             "verify_handover",
             "start_dev",
+            "receive_release_order",
         ),
         "개발·배포",
     ),

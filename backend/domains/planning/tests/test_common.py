@@ -113,14 +113,17 @@ def test_numbers_come_from_code_not_llm(wire, monkeypatch: pytest.MonkeyPatch) -
 def test_state_changes_go_through_execute(wire) -> None:
     wire.run(wire.planning.inbound("support_simple"))
     # 기획은 요청·기획서·작업까지, 개발은 넘겨받은 뒤 PR·머지·기록. 넘기기도 관문을 지난다
-    assert [c.action for c in wire.planning.gate_calls] == [
+    plan = [c.action for c in wire.planning.gate_calls]
+    assert plan[:5] == [
         "create_ticket",
         "write_spec",
         "confirm_spec",
         "split_tasks",
         "receive_dev_result",
     ]
-    assert [c.action for c in wire.dev.gate_calls] == [
+    assert "request_release_check" in plan[5:]  # 작업이 다 머지되면 배포 전 대조
+    dev = [c.action for c in wire.dev.gate_calls]
+    assert dev[:6] == [
         "start_dev",
         "generate_pr",
         "review_pr",
@@ -128,9 +131,11 @@ def test_state_changes_go_through_execute(wire) -> None:
         "record_case",  # pr_merged
         "record_case",  # request_closed
     ]
+    assert set(dev[6:]) <= {"receive_release_order", "request_deploy"}  # 배포 지시 → 배포 요청
     calls = [*wire.planning.gate_calls, *wire.dev.gate_calls]
     assert all(c.status == "executed" for c in calls)
-    assert all(c.idempotency_key.startswith("ctx_req_0021:") for c in calls)
+    own = [c for c in calls if c.action != "request_deploy"]  # 배포는 배포 사건(ctx_dep_)으로 간다
+    assert all(c.idempotency_key.startswith("ctx_req_0021:") for c in own)
 
 
 async def _rejected(request) -> ExecuteDecision:

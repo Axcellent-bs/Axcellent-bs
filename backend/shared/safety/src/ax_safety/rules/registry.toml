@@ -260,6 +260,13 @@ owner = "planning"
 requesters = ["dev"]
 base_grade = "A"
 
+# 배포 지시 받기 (planning → dev). 개발은 지금의 배포 요청 흐름을 탄다 (prod·보호 경로는 사람 승인)
+[[actions]]
+action = "receive_release_order"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
 # 사람 확인으로 끝난 대조 건에 사람이 배포 지시 (배포 실행·prod 승인은 개발·안전 레이어가 그대로)
 [[actions]]
 action = "send_release_order"

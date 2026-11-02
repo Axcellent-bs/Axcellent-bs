@@ -22,6 +22,9 @@ from ax_agent_template import config as template_config
 from ax_contracts.schemas import TENANT_ID_DEFAULT
 from ax_contracts.schemas.planning import (
     DevResultInput,
+    ReceiveReleaseOrderInput,
+    ReleasePr,
+    RequestReleaseCheckInput,
 )
 from ax_contracts.schemas.record import RecordCase, RecordKind
 from ax_workflow import cause_inbox, hr_link, related
@@ -150,6 +153,7 @@ class DevService(PlanningCore):
         # 넘겨받은 요청 작업 중 서버 AI로 띄울 것 (바꿔 끼운 뒤 잠금 밖에서 띄운다)
         self._pending_spawn: list[str] = []
         self._init_state()
+        self._release_base = self._done_specs(self.state)
 
     def _spawn_hold(self, task_id: str) -> None:
         try:
@@ -213,7 +217,157 @@ class DevService(PlanningCore):
                 (RECEIVE_DEV_RESULT, req.context_id, res, dev_result_key(req.context_id, sp.id, fp))
             )
         out += self._follow_up_outgoing(s, full)
-        return self._with_policy(s, out, full)
+        return self._with_policy(s, out, full) + self._release_outgoing(s, full)
+
+    # ---- 배포 전 기획서 대조 (dev → planning `request_release_check`, planning → dev 배포 지시)
+
+    @staticmethod
+    def _release_prs(s: State, sp: Spec) -> list[ReleasePr]:
+        """기획서 하나에 묶인 PR과 개발 검수(review_pr) 결과. 닫힌 PR은 뺀다."""
+        tasks = {t.id: t for t in s.tasks if t.spec == sp.id}
+        out: list[ReleasePr] = []
+        for p in s.prs:
+            t = tasks.get(p.task)
+            if t is None or p.closed:
+                continue
+            last = p.reviews[-1] if p.reviews else None
+            review = "match" if last == "통과" else "mismatch" if last == "불일치" else "none"
+            notes = t.coding.review.notes if t.coding and t.coding.review else []
+            out.append(
+                ReleasePr(
+                    number=p.number,
+                    task_id=t.id,
+                    merged=p.merged,
+                    changed_paths=list(p.changed_paths),
+                    review=review,  # type: ignore[arg-type]
+                    review_note=(" / ".join(notes)[:300] or None) if notes else None,
+                    reviewed_paras=[t.para],
+                )
+            )
+        return out
+
+    @staticmethod
+    def _done_specs(s: State) -> set[str]:
+        """작업이 모두 끝난 기획서. 켤 때 이미 끝나 있던 것은 배포 전 대조를 묻지 않는다."""
+        return {
+            sp.id
+            for sp in s.specs
+            if (ts := [t for t in s.tasks if t.spec == sp.id])
+            and all(t.state == "완료" for t in ts)
+        }
+
+    def _release_outgoing(self, s: State, full: bool) -> list[tuple[str, str, BaseModel, str]]:
+        """작업이 모두 끝난(머지된) 기획서마다 배포 전 대조를 기획에 한 번 묻는다.
+
+        같은 PR 묶음(지문)이면 다시 묻지 않는다. 켤 때 이미 끝나 있던 기획서와 다시 켠 뒤 맞추기
+        (`full`)에서는 묻지 않는다 (상태 맞추기가 아니라 일이라서). 판정·배포 지시는 기획이 하고,
+        지시가 오면 `receive_release_order`로 지금의 배포 요청 흐름(prod·보호 경로는 사람 승인)을
+        탄다."""
+        out: list[tuple[str, str, BaseModel, str]] = []
+        if full:
+            return out
+        base = getattr(self, "_release_base", set())
+        for sp in s.specs:
+            tasks = [t for t in s.tasks if t.spec == sp.id]
+            req = self._request_of_spec(s, sp)
+            if sp.id in base or not tasks or req is None or any(t.state != "완료" for t in tasks):
+                continue
+            prs = self._release_prs(s, sp)
+            if not any(p.merged for p in prs):
+                continue
+            inp = RequestReleaseCheckInput(
+                spec_id=sp.id,
+                request_id=req.id,
+                prs=prs,
+                summary=f"{sp.id} 작업 {len(tasks)}개 머지 → 배포 전 대조",
+            )
+            raw = json.dumps(
+                [p.model_dump(mode="json") for p in prs], sort_keys=True, ensure_ascii=False
+            )
+            fp = hashlib.sha1(raw.encode()).hexdigest()[:12]
+            mark = f"release:{sp.id}"
+            if self._dev_sent.get(mark) == fp:
+                continue
+            self._dev_sent[mark] = fp
+            key = f"{req.context_id}:release_check:{sp.id}:{fp}"
+            out.append((RELEASE_CHECK, req.context_id, inp, key))
+        return out
+
+    def _spawn_send(self, skill: str, ctx: str, payload: BaseModel, key: str) -> None:
+        """배포 전 대조는 같이 나간 작업·PR 결과(receive_dev_result)가 기획에 닿은 뒤 보낸다
+        (기획이 작업·PR을 모르는 채로 대조하면 task_not_merged로 잘못 보류된다)."""
+        if skill != RELEASE_CHECK:
+            super()._spawn_send(skill, ctx, payload, key)
+            return
+        before = list(self._sending)
+
+        async def after() -> None:
+            if before:
+                await asyncio.gather(*before, return_exceptions=True)
+            await self._send_one(skill, ctx, payload, key)
+
+        task = asyncio.create_task(after())
+        self._sending.add(task)
+        task.add_done_callback(self._sending.discard)
+
+    async def receive_release_order(
+        self,
+        *,
+        context_id: str,
+        requester: str,
+        inp: ReceiveReleaseOrderInput,
+        idempotency_key: str,
+    ) -> ActionResult:
+        """기획의 배포 지시를 받아 지금의 배포 요청 흐름을 탄다 (A).
+
+        prod·보호 경로면 배포는 사람 승인 대기로 남는다(지시가 승인을 건너뛰지 않는다).
+        같은 멱등성 키의 두 번째 지시는 `duplicate`로 처음 결과를 돌려준다."""
+        cached = self._idempotent.get(idempotency_key)
+        if cached is not None:
+            return ActionResult(
+                changed=False, outcome="duplicate", output={**cached.output, "outcome": "duplicate"}
+            )
+
+        async def run(s: State) -> ActionResult:
+            req = next((r for r in s.requests if r.id == inp.request_id), None)
+            ctx = req.context_id if req else context_id
+            prs = {p.number: p for p in s.prs}
+            unknown = [n for n in inp.pr_numbers if n not in prs]
+            open_ = [n for n in inp.pr_numbers if n in prs and not prs[n].merged]
+            who = "사람" if inp.decided_by == "human" else "기획 AI"
+            nums = ", ".join(f"#{n}" for n in inp.pr_numbers)
+            if unknown or open_:
+                code = "unknown_pr" if unknown else "pr_not_merged"
+                text = f"{inp.check_id} 배포 지시 ({who}, {inp.env}, PR {nums}) 받지 않음: {code}"
+                s.activity.append(
+                    self._act(self.clock(), ctx, requester, "dev", "receive_release_order",
+                              "A2A", text, "A")
+                )  # fmt: skip
+                return ActionResult(
+                    outcome="rejected", output={"outcome": "rejected", "reason_code": code}
+                )
+            text = f"{inp.check_id} {inp.spec_id} 배포 지시 받음 ({who}, {inp.env}, PR {nums})"
+            await self._execute(
+                "receive_release_order", ctx, inp.check_id, text,
+                {"spec": inp.spec_id, "env": inp.env, "prs": inp.pr_numbers,
+                 "decided_by": inp.decided_by},
+            )  # fmt: skip
+            dep = await get_deploy_store().request(self, inp.pr_numbers, inp.env)
+            wait = dep.status == "requested"
+            how = f"{dep.id} 사람 승인 대기 ({', '.join(dep.approval_reasons)})" if wait else dep.id
+            s.activity.append(
+                self._act(self.clock(), ctx, requester, "dev", "receive_release_order", "A2A",
+                          f"{text} → 배포 요청 {how}", "A")
+            )  # fmt: skip
+            return ActionResult(
+                outcome="accepted",
+                output={"outcome": "accepted", "deployment_id": dep.id, "needs_approval": wait},
+            )
+
+        result = await self._apply(run)
+        self._idempotent[idempotency_key] = result
+        self._save()
+        return result
 
     def _follow_up_outgoing(self, s: State, full: bool) -> list[tuple[str, str, BaseModel, str]]:
         """장애 연결(link_incident)로 개발이 만든 재발 방지 요청을 기획 서비스에 넘긴다.
@@ -506,6 +660,7 @@ class DevService(PlanningCore):
         self._coding_live.clear()
         coder.clear_drafts(self)
         super().reset()
+        self._release_base = self._done_specs(self.state)
         get_deploy_store().reset()  # 배포 기록도 시드로
 
     async def _send_hr(
@@ -2901,6 +3056,7 @@ class DevService(PlanningCore):
         pol.proposal = None
 
 
+RELEASE_CHECK = "request_release_check"  # dev → planning 배포 전 대조
 TRIAL_TOKENS = 1_000_000  # 서버 AI 체험 한도 기본값 (PLANNING_TRIAL_TOKENS)
 AGENT_SEEN_DAYS = 7  # 이 기간 안에 본인 Claude로 작업을 본 개발자가 있으면 '연결됨'
 WAIT_POLL_SECONDS = 30  # 다른 서비스 요청을 기다리는 대화를 다시 보는 간격
