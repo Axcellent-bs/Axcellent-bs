@@ -101,12 +101,25 @@ def check_simple(title: str, policy: AutoPolicy) -> AutoCheck:
     )
 
 
+# 끝난 요청. 같은 제목이어도 여기에 묶지 않고 새 요청으로 받는다
+CLOSED_REQUEST_STATES = frozenset({"완료", "기각"})
+
+
 def find_duplicate(requests: list[Request], title: str) -> str | None:
-    """같은 제목 요청이 있으면 원본 요청 ID (중복 연결된 것이면 그 원본)."""
-    same = next((r for r in requests if r.title == title), None)
-    if same is None:
-        return None
-    return same.duplicate_of or same.id
+    """같은 제목의 **끝나지 않은** 요청이 있으면 원본 요청 ID (중복 연결된 것이면 그 원본).
+
+    원본이 이미 끝났으면(완료·기각) 묶지 않는다. 같은 분류 문의가 다시 급증하는 것처럼 제목이
+    같은 일이 나중에 다시 오면 새로 기획해야 해서다(고객지원 #300, 11/2). 개발 `link_incident`의
+    재발 방지 요청도 같은 규칙을 쓴다.
+    """
+    by_id = {r.id: r for r in requests}
+    for r in requests:
+        if r.title != title:
+            continue
+        origin = by_id.get(r.duplicate_of) if r.duplicate_of else r
+        if origin is not None and origin.state not in CLOSED_REQUEST_STATES:
+            return origin.id
+    return None
 
 
 def para_of(state: State, pr: PR) -> tuple[str | None, str | None]:
