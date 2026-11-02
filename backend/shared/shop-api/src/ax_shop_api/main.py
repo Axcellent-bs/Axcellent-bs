@@ -78,6 +78,8 @@ class OrderIn(BaseModel):
     buyer_id: str
     items: list[OrderLine]
     points_used: int = Field(default=0, ge=0)  # 포인트 사용분(원). 품목 금액 비율로 나눠 기록한다
+    # 같은 구매자의 같은 키는 주문 하나다. 재시도·중복 전송이 주문을 두 번 만들지 않게 한다
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class CartPriceIn(BaseModel):
@@ -399,11 +401,14 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
 
     @app.post("/api/shop/orders", status_code=201)
     async def create_order(body: OrderIn) -> dict:
-        order = shop.create_order(
-            body.buyer_id, [(i.product_id, i.qty) for i in body.items], body.points_used
+        order, replayed = shop.place_order(
+            body.buyer_id,
+            [(i.product_id, i.qty) for i in body.items],
+            body.points_used,
+            body.idempotency_key,
         )
         await outbox.flush(database)
-        return _ok(order)
+        return _ok(order, replayed=replayed)
 
     @app.post("/api/shop/orders/{order_id}/payments")
     async def pay(order_id: str, body: PaymentIn) -> dict:

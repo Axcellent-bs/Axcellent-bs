@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS orders (
   status TEXT NOT NULL, total_amount INTEGER NOT NULL, tenant_id TEXT NOT NULL,
   context_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   shipping_fee INTEGER NOT NULL DEFAULT 0, points_used INTEGER NOT NULL DEFAULT 0,
-  delivered_at TEXT, promised_delivery_at TEXT, shipped_at TEXT
+  delivered_at TEXT, promised_delivery_at TEXT, shipped_at TEXT, idempotency_key TEXT
 );
 CREATE TABLE IF NOT EXISTS order_items (
   order_id TEXT NOT NULL REFERENCES orders(order_id), product_id TEXT NOT NULL,
@@ -95,9 +95,17 @@ _ADDED_COLUMNS = {
         ("delivered_at", "TEXT"),
         ("promised_delivery_at", "TEXT"),
         ("shipped_at", "TEXT"),
+        ("idempotency_key", "TEXT"),
     ),
     "order_items": (("title", "TEXT"), ("points_share", "INTEGER NOT NULL DEFAULT 0")),
 }
+
+# 새 열에 거는 인덱스는 열이 붙은 뒤에 만든다(옛 DB 파일에서는 `SCHEMA`를 돌릴 때 열이 아직 없다)
+_ADDED_INDEXES = (
+    # 같은 구매자의 같은 멱등 키는 주문 하나다. 키가 없는 주문은 서로 겹쳐도 된다
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_buyer_idempotency ON orders(buyer_id, "
+    "idempotency_key) WHERE idempotency_key IS NOT NULL",
+)
 
 TENANT_ID = TENANT_ID_DEFAULT
 
@@ -114,6 +122,8 @@ class Db:
             for name, definition in columns:
                 if name not in have:
                     self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+        for statement in _ADDED_INDEXES:
+            self._conn.execute(statement)
         self._conn.commit()
         self._lock = threading.RLock()
 

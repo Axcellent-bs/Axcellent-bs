@@ -12,6 +12,8 @@ LOOKUPS = {
     "refunds": "SELECT COALESCE(SUM(amount), 0) FROM refunds WHERE order_id = ?",
 }
 
+ADDED = ("idx_order_items_order_id", "idx_payments_order_id", "idx_refunds_order_id")
+
 
 def _plan(db: Db, sql: str) -> str:
     with db.tx() as conn:
@@ -36,7 +38,7 @@ def test_indexes_are_added_to_an_existing_db_file(tmp_path: Path) -> None:
             "INSERT INTO orders(order_id, buyer_id, status, total_amount, tenant_id, created_at,"
             " updated_at) VALUES ('ord_0001', 'buy_0001', 'paid', 12000, 't', 'x', 'x')"
         )
-        for index in ("idx_order_items_order_id", "idx_payments_order_id", "idx_refunds_order_id"):
+        for index in (*ADDED, "idx_orders_buyer_idempotency"):
             conn.execute(f"DROP INDEX {index}")
     first._conn.close()
 
@@ -50,5 +52,5 @@ def test_indexes_are_added_to_an_existing_db_file(tmp_path: Path) -> None:
             r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")
         }
         count = conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
-    assert {"idx_order_items_order_id", "idx_payments_order_id", "idx_refunds_order_id"} <= names
+    assert {*ADDED, "idx_orders_buyer_idempotency"} <= names
     assert count == 1
