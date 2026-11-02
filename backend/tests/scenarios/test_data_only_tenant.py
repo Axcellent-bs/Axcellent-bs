@@ -353,13 +353,10 @@ def test_data_only_tenant_end_to_end(tenant, world, monkeypatch) -> None:  # noq
     recs = tenant.query(CommonLogQuery.model_validate({"kinds": ["task_status"], "limit": 500}))
     handed = [r for r in recs.records if r.payload.get("outcome") == "handed_to_human"]
     assert sum(u.count for u in unused.values()) == len(handed)  # 리포트 = 라우터가 넘긴 일 전부
-    # 넘긴 일 = 사람이 끝낸 단계 + 총괄의 이벤트 시각 기록(hr record_event_times).
-    # 시각 기록은 기다리는 단계가 없어 할 일함에 열린 채로 쌓인다 (PR 본문 "막히는 곳" 4)
-    side = [r for r in handed if r.skill == "record_event_times"]
-    assert len(handed) == len(done) + len(side)
-    # 같은 idempotency_key는 한 일로 합쳐져서, 열린 일은 시각 기록 요청 수 이하다
-    assert {t["skill"] for t in left_open} == {"record_event_times"}
-    assert 1 <= len(left_open) <= len(side)
+    # 넘긴 일 = 사람이 끝낸 단계뿐. 인사가 꺼진 회사에는 총괄이 시각 기록을 보내지 않는다 (#233)
+    assert not [r for r in handed if r.skill == "record_event_times"]
+    assert len(handed) == len(done)
+    assert left_open == [], left_open
     assert {"infra", "marketing"} <= set(unused)
     # 총괄: 이벤트 하나를 열고(나머지 이상은 합침), 사람이 끝낸 일마다 이어 갔다
     assert [o for _, o in OUTCOMES].count("opened") == 1
