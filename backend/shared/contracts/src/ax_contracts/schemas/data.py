@@ -618,6 +618,9 @@ class YouTubeTagEvidence(AxModel):
     video_count: int = Field(ge=1)  # 이 태그(정리한 뒤)가 붙은 인기 영상 수
     snapshot_at: UtcDatetime  # 스냅샷 수집 시각
     video_ids: list[str] = Field(default_factory=list)  # 대표 영상 id (인기 순위 순, 몇 개만)
+    # 이 후보로 센 태그 (정리한 값, 스냅샷에 실제로 나온 것. 별칭이 묶였으면 여러 개).
+    # 예전 응답은 없다
+    matched_tags: list[str] = Field(default_factory=list)
 
 
 class TrendCandidate(AxModel):
@@ -626,6 +629,9 @@ class TrendCandidate(AxModel):
     # 네이버 검색어 급상승 판정 (trend_scan과 같은 함수의 결과 그대로).
     # 네이버를 못 읽으면 이 후보만 status unknown + 이유
     naver: TrendVerdict
+    # 대표 이름(`keyword`)에 묶인 별칭 (회사 설정 별칭 표). 네이버 그룹에 대표 이름과 함께 키워드로
+    # 넣었다. 별칭이 없으면 빈 목록. 예전 응답은 없다
+    aliases: list[str] = Field(default_factory=list)
 
 
 class TrendCandidatesOutput(AxModel):
@@ -722,4 +728,3 @@ class CampaignEffectOutput(AxModel):
     revenue: CampaignChange
     coupons: CampaignCoupons
     summary: str  # 한두 문장 (LLM, 숫자 검증 실패면 고정 문장)
-

@@ -132,7 +132,86 @@ def test_company_config_has_small_defaults_and_an_exclude_list() -> None:
     assert 1 <= config.max_candidates <= 10  # 후보마다 네이버 1번
     assert config.min_videos == 2
     assert {"shorts", "브이로그"} <= config.exclude_tags
-    assert load_config({}) == CandidateConfig()  # 설정이 없으면 기본값, 제외 목록 없음
+    assert config.canonical("lol") == "리그오브레전드" and config.canonical("티원") == "t1"
+    assert load_config({}) == CandidateConfig()  # 설정이 없으면 기본값, 제외 목록·별칭 없음
+
+
+# ---------------------------------------------------------------- 별칭 묶기
+
+LOL = CandidateConfig(
+    aliases={"리그오브레전드": ("lol", "리그 오브 레전드"), "t1": ("티원",)},
+)
+
+
+def test_aliases_merge_into_the_main_name() -> None:
+    """lol·리그 오브 레전드가 리그오브레전드 하나로: 영상 수는 영상마다 한 번씩 합친다."""
+    snap = _snapshot(
+        ("a", 1, ("LoL",)),
+        ("b", 2, ("리그 오브 레전드",)),
+        ("c", 3, ("리그오브레전드",)),
+        ("d", 4, ("#티원",)),
+        ("e", 5, ("T1",)),
+    )
+    picked = pick_candidates(snap, LOL, 5)
+    assert [(c.keyword, c.video_ids) for c in picked] == [
+        ("리그오브레전드", ("a", "b", "c")),
+        ("t1", ("d", "e")),
+    ]
+    assert picked[0].matched == ("lol", "리그 오브 레전드", "리그오브레전드")
+    assert picked[1].matched == ("티원", "t1")
+    # 별칭 없이는 따로 세어 2개 이상인 것이 없다
+    assert pick_candidates(snap, CandidateConfig(), 5) == []
+
+
+def test_one_video_with_the_name_and_its_alias_counts_once() -> None:
+    snap = _snapshot(("a", 1, ("lol", "리그오브레전드", "#LOL")), ("b", 2, ("리그 오브 레전드",)))
+    [only] = pick_candidates(snap, LOL, 5)
+    assert only.keyword == "리그오브레전드"
+    assert only.video_ids == ("a", "b") and only.video_count == 2
+
+
+def test_an_excluded_main_name_drops_its_aliases_too() -> None:
+    config = CandidateConfig(aliases={"게임": ("game",)}, exclude_tags=frozenset({"게임"}))
+    snap = _snapshot(("a", 1, ("game", "x")), ("b", 2, ("GAME", "x")))
+    assert [c.keyword for c in pick_candidates(snap, config, 5)] == ["x"]
+
+
+def test_naver_keywords_are_the_main_name_then_aliases() -> None:
+    assert LOL.keywords("리그오브레전드") == ["리그오브레전드", "lol", "리그 오브 레전드"]
+    assert LOL.keywords("젠지") == ["젠지"]  # 별칭이 없으면 그 이름 하나
+
+
+def test_alias_table_is_cleaned_and_an_alias_belongs_to_one_name(tmp_path: Path) -> None:
+    path = tmp_path / "trends.toml"
+    path.write_text(
+        "[candidates.aliases]\n"
+        '"리그오브레전드" = ["LoL", " #lol ", "리그오브레전드", "티원"]\n'
+        '"T1" = ["티원", "t1"]\n'
+        '"롤드컵" = ["lol"]\n',
+        encoding="utf-8",
+    )
+    config = load_config({"DATA_TREND_CONFIG": str(path)})
+    # 같은 별칭 한 번만, 대표 이름 자신은 별칭이 아님, 다른 대표 이름(t1)도 별칭이 될 수 없음,
+    # 별칭은 앞에 적은 대표 이름 하나에만
+    assert config.aliases == {"리그오브레전드": ("lol", "티원"), "t1": (), "롤드컵": ()}
+
+
+def test_without_an_alias_table_candidates_are_the_same_as_before(tmp_path: Path) -> None:
+    """별칭 표가 없으면 예전과 같다: 태그마다 따로 세고, 네이버 그룹은 키워드 하나."""
+    path = tmp_path / "trends.toml"
+    path.write_text('[candidates]\nexclude_tags = ["shorts"]\n', encoding="utf-8")
+    naver = Naver({"t1": 3.0})
+    request = TrendCandidatesRequest(end_date=END)
+    env = {"DATA_YOUTUBE_DB": str(_db(tmp_path, VIDEOS)), "DATA_TREND_CONFIG": str(path)}
+    out = asyncio.run(find_candidates(request, naver, env=env, now=NOW)).output
+    assert [(c.keyword, c.youtube.video_count) for c in out.candidates] == [
+        ("t1", 3),
+        ("롤", 2),
+        ("젠지", 2),
+    ]
+    assert [q.keyword_groups[0].keywords for q in naver.queries] == [["t1"], ["롤"], ["젠지"]]
+    assert all(c.aliases == [] for c in out.candidates)
+    assert [c.youtube.matched_tags for c in out.candidates] == [["t1"], ["롤"], ["젠지"]]
 
 
 # ---------------------------------------------------------------- 스냅샷 읽기
@@ -218,7 +297,14 @@ def test_candidates_carry_youtube_evidence_and_the_naver_verdict(tmp_path: Path)
     assert t1.naver.status == "rising" and t1.naver.group_name == "t1"
     assert out.candidates[1].naver.status == "normal"
     assert out.naver_calls == 3 == len(naver.queries)
-    assert [q.keyword_groups[0].keywords for q in naver.queries] == [["t1"], ["롤"], ["젠지"]]
+    # 회사 별칭 표에 t1 = ["티원"]이 있어 t1 그룹에는 별칭이 키워드로 함께 들어간다
+    assert [q.keyword_groups[0].keywords for q in naver.queries] == [
+        ["t1", "티원"],
+        ["롤"],
+        ["젠지"],
+    ]
+    assert t1.aliases == ["티원"] and out.candidates[1].aliases == []
+    assert t1.youtube.matched_tags == ["t1"]  # 스냅샷에 실제로 나온 것은 t1뿐
     assert all((q.start_date, q.end_date) == (START, END) for q in naver.queries)
     assert out.summary == "YouTube 인기 영상 4개의 태그에서 후보 3개, 네이버 급상승 1개 (t1)."
 
