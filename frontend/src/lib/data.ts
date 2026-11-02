@@ -51,7 +51,7 @@ export const FACT_KIND_KO: Record<string, string> = {
 /** 사실 출처(skill) → 화면 이름 */
 export const FACT_SOURCE_KO: Record<string, string> = {
   input: "총괄이 준 이상 구간",
-  "planning.find_related_prs": "기획개발 AI · 관련 PR",
+  "planning.find_related_prs": "개발 AI · 관련 PR",
   "marketing.list_active_notices": "마케팅 AI · 게시 중 공지",
   "support.detect_inquiry_surge": "고객지원 AI · 문의 급증",
   "memory.card_search": "회사 기억 · 지난 사건",

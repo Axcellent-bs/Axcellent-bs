@@ -231,7 +231,7 @@ def test_numbers_come_from_code_not_llm(service, monkeypatch: pytest.MonkeyPatch
     assert m["draft_adoption_rate"] == 33  # 3건 중 1건
     assert m["warnings"] == 1
     assert m["basis"]["pr_count"] == len(prs) == 3
-    # 사람 문장: SPEC-5의 2 + 기획개발 밖 메시지(data·support·hr 각 1)
+    # 사람 문장: SPEC-5의 2 + 기획·개발 밖 메시지(data·support·hr 각 1)
     assert m["human_sentences"] == 2 + 3
 
 

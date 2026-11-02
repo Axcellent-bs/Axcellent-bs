@@ -127,7 +127,7 @@ class VerifyHandoverOutput(AxModel):
 # ---- 변경 요청 접수 (이슈 #172 요청, planning)
 #
 # - `create_ticket`: support·marketing·hr·data·orchestrator → planning, 등급 A.
-#   반복 문의 같은 근거로 기획개발에 변경 요청을 접수한다.
+#   반복 문의 같은 근거로 기획에 변경 요청을 접수한다.
 # - `ctx_req_`는 planning이 발급한다. 같은 요청을 여러 부서가 보내면 하나로 묶어야 해서다.
 #   요청 부서는 돌려받은 `context_id`로 자기 쪽 문의와 요청을 연결한다.
 # - 결과 통지(머지 뒤 요청 부서 회신)는 원래 요청의 meta를 재사용하지 않고, 같은 `context_id`에

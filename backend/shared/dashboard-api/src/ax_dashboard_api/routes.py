@@ -860,7 +860,7 @@ async def change_requests(
     inquiry_id: int | None = None,
     status: Literal["requested", "completed", "declined"] | None = None,
 ) -> dict:
-    """문의에서 기획개발로 보낸 변경 요청과 처리 상태."""
+    """문의에서 기획으로 보낸 변경 요청과 처리 상태."""
     if is_mock():
         out = mock_customers.change_requests(inquiry_id, status)
     else:

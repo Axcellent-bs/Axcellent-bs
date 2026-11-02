@@ -201,7 +201,7 @@ def initial_state() -> State:
                 title="SPEC-7 · 결제 실패 후 장바구니 유지",
                 messages=[
                     _msg(
-                        "기획개발 에이전트",
+                        "기획 에이전트",
                         "planning",
                         "빈 항목 질문: 재고가 없어진 상품도 장바구니에 남겨 둘까요?",
                     )
@@ -224,10 +224,10 @@ def initial_state() -> State:
                 id="CH-team",
                 on="",
                 kind="team",
-                title="기획개발팀",
+                title="기획팀",
                 messages=[
                     _msg(
-                        "기획개발 에이전트",
+                        "기획 에이전트",
                         "planning",
                         "REQ-12 기획서 SPEC-7 초안을 올렸습니다. "
                         "확정 전에 R2 경고(DC-31)를 확인해 주세요.",
@@ -280,7 +280,7 @@ def initial_state() -> State:
         docs=[
             Doc(
                 id="DOC-1",
-                title="10/22 기획개발 정리",
+                title="10/22 기획·개발 정리",
                 updated_at=kst("10-22 09:30"),
                 blocks=[
                     DocBlock(id="b1", kind="h2", text="오늘 할 일"),

@@ -1,4 +1,4 @@
-"""기획개발 쓰기 API 토큰: 없으면 401, 다른 종류면 403, 맞으면 통과. 형상관리 토큰은 숨긴다."""
+"""기획·개발 쓰기 API 토큰: 없으면 401, 다른 종류면 403, 맞으면 통과. 형상관리 토큰은 숨긴다."""
 
 import pytest
 from fastapi.testclient import TestClient

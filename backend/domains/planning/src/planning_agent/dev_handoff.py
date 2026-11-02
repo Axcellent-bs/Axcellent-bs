@@ -1,6 +1,6 @@
 """기획 → 개발 넘기기: planning `start_dev` → dev 서비스, dev `receive_dev_result` → planning.
 
-같은 기획개발 앱을 두 서비스(planning 8101, dev 8111)로 따로 띄우면 메모리가 나뉜다. 그래서 확정된
+같은 기획·개발 앱을 두 서비스(planning 8101, dev 8111)로 따로 띄우면 메모리가 나뉜다. 그래서 확정된
 기획서와 작업을 dev로 보내고, dev가 만든 PR·작업 상태·요청 상태를 planning으로 돌려준다.
 
 - 서비스 역할(`PLANNING_ROLE`)이 있을 때만 보낸다. 합친 모드(역할 없음)는 보내지 않는다.

@@ -1,8 +1,8 @@
-"""기획개발 변경 요청 skill: `request_change`(보내기), `list_change_requests`(읽기).
+"""기획 변경 요청 skill: `request_change`(보내기), `list_change_requests`(읽기).
 
-변경 요청은 고객지원이 기획개발에 직통으로 보낸다(2-2, 통합 에이전트를 거치지 않음). 기획개발이
+변경 요청은 고객지원이 기획에 직통으로 보낸다(2-2, 통합 에이전트를 거치지 않음). 기획이
 자기 `execute()`를 거쳐 요청을 만들고 `ctx_req_`를 발급해 돌려주면, 그 사건 번호를 문의와 연결해
-저장한다(`change_requests.py`). 같은 요청이 이미 있으면 기획개발이 묶어서(`linked_duplicate`) 같은
+저장한다(`change_requests.py`). 같은 요청이 이미 있으면 기획이 묶어서(`linked_duplicate`) 같은
 `ctx_req_`를 돌려주므로 한 사건에 문의가 여러 개 붙을 수 있다.
 
 결과 통지(처리됨·거절됨)를 받는 skill은 계약이 정해지면 붙인다. 지금은 저장소의
@@ -48,7 +48,7 @@ async def request_change(request: AgentRequest) -> AgentResult:
     if h.STORE.get(parsed.inquiry_id) is None:
         return h._not_found(request, parsed.inquiry_id)
     for field, text in (("title", parsed.title), ("evidence", parsed.evidence)):
-        if guard.find_pii(text):  # 기획개발 활동 기록에 개인정보가 남지 않게 막는다
+        if guard.find_pii(text):  # 기획 활동 기록에 개인정보가 남지 않게 막는다
             return error_result(
                 request.meta, TaskStatus.FAILED, "invalid_input", f"{field}에 개인정보가 있다"
             )
@@ -74,7 +74,7 @@ async def request_change(request: AgentRequest) -> AgentResult:
             request.meta,
             TaskStatus.FAILED,
             "planning_unavailable",
-            f"기획개발이 요청을 처리하지 못했다 ({reply.outcome or reply.status.value})",
+            f"기획이 요청을 처리하지 못했다 ({reply.outcome or reply.status.value})",
         )
     if reply.outcome not in ("created", "linked_duplicate"):
         message = str(reply.output.get("message", "")) if reply.output else ""
@@ -133,7 +133,7 @@ SUMMARY_LIMIT = 300
 
 
 async def receive_change_result(request: AgentRequest) -> AgentResult:
-    """기획개발이 변경 요청을 닫을 때(완료·거절) 보내는 결과를 연결된 모든 문의에 적용한다.
+    """기획이 변경 요청을 닫을 때(완료·거절) 보내는 결과를 연결된 모든 문의에 적용한다.
 
     통지는 `ctx_req_` 사건 하나당 한 번 온다(중복 연결된 요청은 원래 요청이 닫힐 때 같은 사건으로
     한 번에). 그 사건에 연결된 모든 문의에 같은 결과를 적용하고(`applied`는 그 문의 수), 같은

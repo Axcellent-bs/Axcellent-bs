@@ -11,9 +11,9 @@ import { useCommunications } from '@/components/planning-common/comms'
 // 채널마다 마지막으로 본 메시지 수 (화면을 옮겨도 유지)
 const seen = new Map<string, number>()
 
-const channelName = (t: Thread) => (t.kind === 'team' ? '기획개발팀' : t.kind === 'dept' ? t.title : t.on.toLowerCase())
+const channelName = (t: Thread) => (t.kind === 'team' ? '기획팀' : t.kind === 'dept' ? t.title : t.on.toLowerCase())
 const topic = (t: Thread) =>
-  t.kind === 'team' ? '기획개발팀 내부 대화. 에이전트 알림도 여기에 온다.'
+  t.kind === 'team' ? '기획팀 내부 대화. 에이전트 알림도 여기에 온다.'
     : t.kind === 'dept' ? `${t.title}와 주고받는 채널. 여기 쓴 메시지는 ${t.title} 창구로 간다.`
       : `${t.title} 문서 스레드. 여기서 나온 결정은 문서 결정 이력에 남는다.`
 
@@ -42,7 +42,7 @@ export function Talk({ s: state, d, item }: { s: State; d: Dispatch<Action>; ite
   return (
     <div className="slack">
       <aside className="sl-side" aria-label="채널">
-        <div className="sl-ws">기획개발 소통</div>
+        <div className="sl-ws">기획·개발 소통</div>
         <Group label="채널" list={s.threads.filter((t) => t.kind === 'team')} cur={item} fallback={!convo} />
         <Group label="부서" list={s.threads.filter((t) => t.kind === 'dept')} cur={item} />
         <Group label="문서 스레드" list={s.threads.filter((t) => !t.kind || t.kind === 'spec')} cur={item} />

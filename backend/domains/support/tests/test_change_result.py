@@ -1,4 +1,4 @@
-"""`receive_change_result`: 기획개발이 변경 요청을 닫으면 연결된 모든 문의에 결과를 적용한다."""
+"""`receive_change_result`: 기획이 변경 요청을 닫으면 연결된 모든 문의에 결과를 적용한다."""
 
 from datetime import UTC, datetime, timedelta
 from typing import Any

@@ -365,7 +365,7 @@ class PersistentClaimStore(ClaimStore):
 
 
 class PersistentChangeRequestStore(ChangeRequestStore):
-    """문의와 기획개발 변경 요청의 연결을 DB에 둔다. `_put` 한 곳에서만 쓰면 된다."""
+    """문의와 기획 변경 요청의 연결을 DB에 둔다. `_put` 한 곳에서만 쓰면 된다."""
 
     def __init__(self, repo: Repo) -> None:
         super().__init__()

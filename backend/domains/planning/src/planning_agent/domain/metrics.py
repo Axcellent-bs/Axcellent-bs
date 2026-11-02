@@ -31,7 +31,7 @@ def compute_metrics(s: State) -> dict:
         "first_pr_minutes_avg": avg_pr,
         # 완료 기준 일치율: 마지막 검수가 통과인 PR 비율 (%)
         "done_criteria_match_rate": pct(last_pass, len(prs)),
-        # 사람이 쓴 문장 수: 기획서 사람 문장 + 기획개발 밖 메시지 수 (확정·머지 클릭은 따로)
+        # 사람이 쓴 문장 수: 기획서 사람 문장 + 기획·개발 밖 메시지 수 (확정·머지 클릭은 따로)
         "human_sentences": human,
         # PR 검수 1회 통과율: 첫 검수가 통과인 PR 비율 (%)
         "first_review_pass_rate": pct(first_pass, len(prs)),

@@ -25,7 +25,7 @@ DEPARTMENTS = {
     "infra": ("infra-dejafix", "infra_agent", "INFRA_AGENT_CARD", "ax-agent-infra"),
 }
 # 부서 이름 → 서비스 역할 환경변수. 같은 부서 앱을 서비스마다 따로 띄울 때 맡은 몫을 알린다
-# (기획개발: planning = 기획서까지, dev = PR·머지, `planning_agent/dev_handoff.py`)
+# (기획·개발: planning = 기획서까지, dev = PR·머지, `planning_agent/dev_handoff.py`)
 ROLE_ENVS = {"planning": "PLANNING_ROLE"}
 # 직접 만든 서비스 (부서 패키지를 쪼개지 않음)
 STANDALONE = {"orchestrator", "hosts"}

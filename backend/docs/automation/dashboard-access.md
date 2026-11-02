@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | `/` | 캣북스 홈페이지 (shop-web) | 재헌 |
 | `/admin/` | 관리자: 회사 전체 · 승인 대기열 · 소통 · 부서 화면 (dashboard-web) | 병환 + 각 부서 담당 |
-| `/admin/planning/` | 기획개발 (planning-web) | 예진 |
+| `/admin/planning/` | 기획·개발 (planning-web) | 예진 |
 | `/api/` | dashboard-api (8020) 하나만. 브라우저는 총괄·safety·재무 에이전트를 직접 부르지 않는다 | 병환 |
 | `/shop-api/` | shop-api (8010). 고객 화면용 예외 | 재헌 |
 

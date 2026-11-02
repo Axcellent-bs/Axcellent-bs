@@ -230,7 +230,7 @@ export function Reviews({ s, d, item }: P & { item?: string }) {
           <Side title="판단">
             <Pairs items={[
               ['검증자', r.verifier],
-              ['자기 승인', r.lane === 'ai' ? '아님 · 기획개발 밖' : '해당 없음'],
+              ['자기 승인', r.lane === 'ai' ? '아님 · 기획·개발 밖' : '해당 없음'],
               ...(r.irreversible ? [['되돌릴 수 없음', r.irreversible] as [string, string]] : []),
             ]} />
           </Side>

@@ -1,4 +1,4 @@
-"""기획개발 화면·서비스가 쓰는 상태 모델 (프로토타입 `data.ts`의 타입을 옮긴 것).
+"""기획·개발 화면·서비스가 쓰는 상태 모델 (프로토타입 `data.ts`의 타입을 옮긴 것).
 
 - 필드는 snake_case다. 프로토타입의 `from`은 파이썬 예약어라 `from_` 필드에 별칭 `from`을 붙였다
   (JSON에는 `from`으로 나간다). 직렬화는 항상 `by_alias=True`로 한다.
@@ -32,7 +32,7 @@ Dept = Literal[
 ]
 
 DEPT_NAME: dict[str, str] = {
-    "planning": "기획개발",
+    "planning": "기획",
     "hr": "인사",
     "support": "고객지원",
     "marketing": "마케팅",
@@ -302,7 +302,7 @@ class Message(DomainModel):
 
 
 class Thread(DomainModel):
-    """소통 채널. spec = 문서에 붙는 스레드, team = 기획개발팀 채널, dept = 다른 부서 채널."""
+    """소통 채널. spec = 문서에 붙는 스레드, team = 기획팀 채널, dept = 다른 부서 채널."""
 
     id: str
     on: str
@@ -378,7 +378,7 @@ class Activity(DomainModel):
 
 
 class OutMsg(DomainModel):
-    """기획개발 → 다른 부서로 나간 메시지 (다른 부서 화면의 "기획개발에서 받은 것")."""
+    """기획·개발 → 다른 부서로 나간 메시지 (다른 부서 화면의 "기획·개발에서 받은 것")."""
 
     id: int
     at: UtcDatetime
