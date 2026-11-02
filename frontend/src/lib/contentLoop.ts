@@ -74,7 +74,7 @@ export const LOOP_STAGES: LoopStage[] = [
     live: true,
     description: "캠페인 기간 주문 증분과 캠페인 쿠폰 누적 사용률을 잽니다.",
     status: PROBE_STATUS.checking,
-    note: "매출 효과와 하루 넘는 캠페인은 아직 재지 않아요.",
+    note: "매출 효과와 7일 넘는 캠페인은 아직 재지 않아요.",
     probe: "campaign_effect",
   },
   {
