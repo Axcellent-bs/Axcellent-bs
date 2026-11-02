@@ -6,7 +6,8 @@ import { UNKNOWN } from "@/lib/data";
 // 콘텐츠 루프 띠 (트렌드 탭 맨 위). 단계 이름·담당·상태는 lib/contentLoop.ts 한 곳에서 온다.
 // 1단계만 숫자를 보여 준다: 트렌드 탭이 이미 받은 trend_scan 응답의 판정 개수(다시 부르지 않는다).
 // 응답이 없거나 실패하면 숫자 없이 "확인할 수 없음". 2~5단계는 숫자 없이 상태 칩만 보여 준다.
-// 1·4단계 칩은 트렌드 탭이 받은 trend_scan·campaign_effect 응답 결과(probes)로 정한다.
+// 1·4단계 칩과 테두리는 트렌드 탭이 받은 trend_scan·campaign_effect 응답 결과(probes)로 정한다.
+// 테두리·칩·범례는 같은 말을 한다: 동작 중 = 파란 실선, 확인 중 = 회색 실선, 연결 확인 필요·준비 중 = 회색 점선.
 
 /** 1단계에 보여 줄 trend_scan 판정 개수. 화면이 응답의 results를 센 값이다 */
 export type TrendCounts = { rising: number; normal: number; unknown: number };
@@ -30,11 +31,25 @@ function TrendLine({ state }: { state: LoopTrendState }) {
 
 export type LoopProbes = Record<LoopProbeSkill, LoopProbe>;
 
+/** 카드 테두리. 범례도 이 표에서 그린다 */
+type Frame = "live" | "checking" | "off";
+const FRAME: Record<Frame, { box: string; legend: string }> = {
+  live: { box: "border-2 border-brand-500 bg-surface", legend: "실제 데이터로 동작 (동작 중)" },
+  checking: { box: "border-2 border-ink-300 bg-surface", legend: "서버 응답 확인 중" },
+  off: { box: "border border-dashed border-ink-300 bg-ink-50", legend: "연결 확인 필요 · 아직 데이터 없음 (숫자를 만들지 않음)" },
+};
+
+/** 응답으로 상태를 정하는 단계(probe)는 응답 결과를, 나머지는 live 여부를 따른다 */
+function frameOf(stage: LoopStage, probes: LoopProbes): Frame {
+  if (!stage.live) return "off";
+  if (!stage.probe) return "live";
+  const probe = probes[stage.probe];
+  return probe === "ok" ? "live" : probe === "checking" ? "checking" : "off";
+}
+
 function StageCard({ stage, trend, probes }: { stage: LoopStage; trend: LoopTrendState; probes: LoopProbes }) {
   const status = stage.probe ? PROBE_STATUS[probes[stage.probe]] : stage.status;
-  const frame = stage.live
-    ? "border-2 border-brand-500 bg-surface"
-    : "border border-dashed border-ink-300 bg-ink-50";
+  const frame = FRAME[frameOf(stage, probes)].box;
   return (
     <li className={`flex min-w-0 flex-1 flex-col gap-2 p-4 ${frame}`} aria-label={`${stage.no}단계 ${stage.title}`}>
       <p className="text-[11px] font-semibold text-ink-500">{stage.no}</p>
@@ -50,7 +65,9 @@ function StageCard({ stage, trend, probes }: { stage: LoopStage; trend: LoopTren
 }
 
 export function ContentLoop({ trend, probes }: { trend: LoopTrendState; probes: LoopProbes }) {
-  const live = LOOP_STAGES.filter((s) => s.live).map((s) => s.no);
+  const live = LOOP_STAGES.filter((s) => frameOf(s, probes) === "live").map((s) => s.no);
+  const failed = LOOP_STAGES.filter((s) => s.live && s.probe && probes[s.probe] === "failed").map((s) => s.no);
+  const checking = LOOP_STAGES.filter((s) => frameOf(s, probes) === "checking").map((s) => s.no);
   const first = LOOP_STAGES[0]?.no;
   const last = LOOP_STAGES[LOOP_STAGES.length - 1]?.no;
   return (
@@ -58,7 +75,10 @@ export function ContentLoop({ trend, probes }: { trend: LoopTrendState; probes: 
       <div>
         <p className="panel-title">콘텐츠 루프</p>
         <h2 id="content-loop-title" className="mt-1 text-base font-bold text-ink-900">
-          지금 실제 데이터로 도는 단계는 {live.join("·")}번. 나머지는 만드는 중이거나 준비 중
+          {live.length ? `지금 실제 데이터로 도는 단계는 ${live.join("·")}번.` : "지금 실제 데이터로 도는 단계가 없어요."}
+          {checking.length ? ` ${checking.join("·")}번은 확인 중.` : ""}
+          {failed.length ? ` ${failed.join("·")}번은 연결 확인 필요.` : ""}
+          {" "}나머지는 만드는 중이거나 준비 중
         </h2>
       </div>
       <ol className="flex flex-col gap-2 lg:flex-row lg:items-stretch">
@@ -80,8 +100,9 @@ export function ContentLoop({ trend, probes }: { trend: LoopTrendState; probes: 
         <span className="text-right">{LOOP_BACK}</span>
       </div>
       <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-500">
-        <span className="flex items-center gap-1.5"><span aria-hidden className="inline-block h-3 w-3 border-2 border-brand-500 bg-surface" />실제 데이터로 동작</span>
-        <span className="flex items-center gap-1.5"><span aria-hidden className="inline-block h-3 w-3 border border-dashed border-ink-300 bg-ink-50" />아직 데이터 없음 (숫자를 만들지 않음)</span>
+        {(Object.keys(FRAME) as Frame[]).map((f) => (
+          <span key={f} className="flex items-center gap-1.5"><span aria-hidden className={`inline-block h-3 w-3 ${FRAME[f].box}`} />{FRAME[f].legend}</span>
+        ))}
       </p>
     </section>
   );
