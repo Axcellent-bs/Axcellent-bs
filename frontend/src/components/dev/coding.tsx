@@ -6,6 +6,7 @@ import { DEPT_NAME, RELATION_LABEL, byRelation, type CodingRun, type CodingStatu
 import { DEV_API, PlanningApiError, approveReview, devTaskApi, planningApi, useCodingLimits } from '@/lib/planning'
 import { State, Tag } from '@/components/planning-common/parts'
 import { Step } from '@/components/planning-common/flow'
+import './usage.css'
 import { Ref } from '@/components/planning-common/links'
 
 const api = devTaskApi(DEV_API)
@@ -21,12 +22,12 @@ export const tokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n 
 export const pctOf = (used: number, limit: number) => Math.round((used / Math.max(limit, 1)) * 100)
 
 /** 쓴 양 / 한도 + 비율 막대. 80% 넘으면 경고색 */
-export function UsageBar({ used, limit, label, title }: { used: number; limit: number; label?: string; title?: string }) {
+export function UsageBar({ used, limit, label, title, wide }: { used: number; limit: number; label?: string; title?: string; wide?: boolean }) {
   const pct = pctOf(used, limit)
   return (
-    <span className={`usage${pct >= 80 ? ' warn' : ''}`} title={title}>
+    <span className={`usage${pct >= 80 ? ' warn' : ''}${wide ? ' wide' : ''}`} title={title}>
       {label && <span>{label}</span>}
-      <span className="usage-bar" aria-hidden><span style={{ width: `${Math.min(100, pct)}%` }} /></span>
+      <span className="usage-bar" aria-hidden><span style={{ width: `${Math.min(100, pct)}%`, minWidth: used > 0 ? 3 : 0 }} /></span>
       <b>{pct}%</b>
       <span className="mono usage-n">{tokens(used)}/{tokens(limit)}</span>
     </span>

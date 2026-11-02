@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from '@/lib/nav'
 import { DEV_API, codingSettingsApi, vcsApi, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsTestResult } from '@/lib/planning'
+import { UsageBar } from '@/components/dev/coding'
 
 // 개발 도구 연결: 고객사 개발팀이 쓰는 형상관리·CI·배포 도구를 개발·배포 AI(dev)에 잇는 창구.
 // 형상관리 연결은 레포마다 1개, 여러 개. dev 서비스(`/api/planning/vcs/connections`)에 저장되고 토큰은 끝 4자리만 온다.
@@ -89,7 +90,6 @@ function ClaudeConnect({ connected }: { connected: string[] }) {
     </div>
   )
 }
-const fmtTokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(0)}k` : `${n}`)
 
 /** 요청 작업 코딩 방식 + 서버 AI 체험 한도 */
 function CodingModeSection() {
@@ -102,7 +102,6 @@ function CodingModeSection() {
     setError(null)
     try { setCfg(await codingApi.set(mode)) } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
-  const pct = cfg ? Math.min(100, Math.round((cfg.trial_used / Math.max(cfg.trial_limit, 1)) * 100)) : 0
   return (
     <section className="card space-y-4 p-6">
       <div className="flex flex-wrap items-center gap-3">
@@ -119,10 +118,7 @@ function CodingModeSection() {
         <dl className="grid grid-cols-[120px_1fr] gap-x-3 gap-y-2 text-sm">
           <dt className="text-ink-500">이유</dt><dd>{cfg.why}</dd>
           <dt className="text-ink-500">서버 AI 체험</dt>
-          <dd className="flex items-center gap-3">
-            <span className="h-2 w-40 overflow-hidden rounded-full bg-ink-100"><span className="block h-full bg-[rgb(var(--primary))]" style={{ width: `${pct}%` }} /></span>
-            <span className="mono">{fmtTokens(cfg.trial_used)} / {fmtTokens(cfg.trial_limit)} 토큰</span>
-          </dd>
+          <dd><UsageBar used={cfg.trial_used} limit={cfg.trial_limit} wide title="서버 AI(회사 키)가 코딩에 쓴 토큰 / 체험 한도" /></dd>
         </dl>
       )}
       <ClaudeConnect connected={cfg?.agents_connected ?? []} />
