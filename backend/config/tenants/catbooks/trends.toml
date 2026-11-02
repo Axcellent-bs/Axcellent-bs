@@ -25,7 +25,10 @@ max_candidates = 5      # 후보 수 상한 (나온 영상 수 많은 순)
 min_videos = 2          # 이 수 이상의 인기 영상에 붙은 태그만 후보
 max_age_hours = 24      # 스냅샷이 이보다 오래되면 후보를 뽑지 않음 (unknown + 이유)
 rep_videos = 3          # 근거로 보여 줄 대표 영상 id 수
-# 너무 일반적인 태그 (정리한 뒤 값과 비교: 앞뒤 공백·# 제거, 영문 소문자)
+titles = true           # YouTube 제목에서 뽑은 2~3어절 구도 후보로 (min_videos개 이상 영상 제목에 나온 것만)
+keep_tags = []          # (덮어쓰기용) 자동 제외에 걸려도 후보로 남길 이름
+# (덮어쓰기용) 늘 빼는 일반 태그. 자동 제외([candidates.auto_exclude])가 데이터로 찾고, 이 목록은 자동이 못
+# 잡는 것을 사람이 덧붙이는 용도로 남긴다 (정리한 뒤 값과 비교: 앞뒤 공백·# 제거, 영문 소문자)
 exclude_tags = [
   "shorts", "쇼츠", "short", "브이로그", "vlog", "유튜브", "youtube",
   "게임", "game", "gaming", "스트리머", "방송", "생방송", "live", "bj",
@@ -44,6 +47,15 @@ exclude_tags = [
 "마인크래프트" = ["minecraft"]
 "배틀그라운드" = ["배그", "pubg"]
 "메이플스토리" = ["maplestory"]
+
+# 자동 제외: 쌓인 YouTube 스냅샷 전체에서 여러 날·여러 카테고리에 고르게 나오는 태그·제목 구를 늘 붙는 말로 보고 뺀다.
+# 아래 셋을 모두 넘으면 제외 (문서 빈도). 2026-11-02 스냅샷(영상 275개, 1일)으로 본 값: 카테고리 2개로 낮추면
+# 로블록스·피파 같은 실제 소재도 빠져서 3개로 둔다(보수적)
+[candidates.auto_exclude]
+enabled = true
+min_doc_ratio = 0.02     # 쌓인 인기 영상 중 이 비율 이상에 나옴
+min_categories = 3       # 서로 다른 카테고리 이 수 이상에 나옴
+min_day_ratio = 0.5      # 기록이 있는 날 중 이 비율 이상의 날에 나옴
 
 # 영상 소재 추천(data content_recommend, 콘텐츠 루프 2단계): 기본 키워드 그룹(trend_scan)과 YouTube 후보
 # (trend_candidates)에서 급상승한 것만 골라 점수 순으로 추천한다. 점수 = z_weight × z + (두 소스면 two_source_bonus)

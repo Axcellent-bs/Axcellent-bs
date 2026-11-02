@@ -14,6 +14,13 @@
 - 별칭이 있으면 대표 이름·별칭을 하나씩 따로도 판정한다(이름마다 네이버 1번). 묶음 그룹은 평범인데
   이름 하나가 급상승이면 급상승으로 올리고, 어느 이름이 올랐는지(`rising_names`)를 남긴다.
 - 스냅샷이 없거나 `max_age_hours`보다 오래됐으면 후보를 뽑지 않고 unknown + 이유다.
+- YouTube 제목에서 뽑은 구(공백·문장부호로 나눈 2~3어절)도 후보 출처다(`[candidates] titles`).
+  `min_videos`개 이상 영상 제목에 나온 구만 쓰고, 더 긴 구와 영상 집합이 같은 짧은 구는 뺀다.
+  태그 이름과 공백만 다르면 그 태그 후보에 합친다(`origins`에 youtube_title).
+- 자동 제외: 쌓인 스냅샷 전체(`youtube_store.popular_history`)에서 여러 날·여러 카테고리에 고르게
+  나오는 태그·구(문서 빈도)를 늘 붙는 말로 보고 뺀다(`[candidates.auto_exclude]` 기준값).
+  수동 `exclude_tags`는 그대로 늘 빼고, `keep_tags`는 자동 제외에서 살린다(덮어쓰기용).
+  빠진 것은 출력 `auto_excluded`에 이유와 숫자로 남긴다.
 - 인기 검색어(Google Trends 공개 RSS 스냅샷, `trending_store`)도 후보 출처다. 정리·별칭·제외 규칙은
   태그와 같고, YouTube 후보와 이름이 겹치면 그 후보에 근거(`trending`)를 붙인다. 겹치지 않는 것은
   `trending_candidates`(최대 `[trending] max_candidates`개)로 따로 네이버 판정한다(같은 함수).
@@ -24,8 +31,9 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -33,6 +41,7 @@ from typing import Literal
 
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
+    AutoExcludedTerm,
     TrendCandidate,
     TrendCandidatesOutput,
     TrendCandidatesRequest,
@@ -55,7 +64,14 @@ from data_agent.skills.trend_scan import (
 )
 from data_agent.trending_store import DB_ENV as TRENDING_DB_ENV
 from data_agent.trending_store import TrendingSnapshot, latest_trending
-from data_agent.youtube_store import DB_ENV, DEFAULT_DB, PopularSnapshot, latest_popular
+from data_agent.youtube_store import (
+    DB_ENV,
+    DEFAULT_DB,
+    HistoryVideo,
+    PopularSnapshot,
+    latest_popular,
+    popular_history,
+)
 
 NAVER_FAILED = "네이버 검색어 트렌드를 읽지 못함"  # trend_scan과 같은 문장
 MAX_KEYWORDS = 20  # 네이버 그룹 하나에 넣을 수 있는 키워드 수 (TrendKeywordGroup)
@@ -76,6 +92,17 @@ class CandidateConfig:
     trending_geo: str = "KR"
     trending_max: int = 5
     trending_max_age_hours: float = 24.0
+    # YouTube 제목 구 (`titles`): 2~3어절, 이 수 이상 영상 제목에 나온 것만
+    titles: bool = False
+    title_min_words: int = 2
+    title_max_words: int = 3
+    # 자동 제외 `[candidates.auto_exclude]`: 쌓인 인기 영상 중 비율·카테고리 수·날짜 비율이
+    # 모두 이 이상이면 늘 붙는 말. 꺼져 있으면(`auto_exclude` false) 수동 목록만 쓴다
+    auto_exclude: bool = False
+    auto_min_doc_ratio: float = 0.02
+    auto_min_categories: int = 3
+    auto_min_day_ratio: float = 0.5
+    keep_tags: frozenset[str] = field(default_factory=frozenset)  # 자동 제외하지 않을 이름
 
     def canonical(self, tag: str) -> str:
         """정리한 태그의 대표 이름 (별칭이 아니면 그대로)."""
@@ -92,6 +119,11 @@ class CandidateConfig:
 def clean_tag(tag: str) -> str:
     """앞뒤 공백·#을 떼고 영문을 소문자로 바꾼다 ("  #T1 " → "t1"). 남는 게 없으면 ""."""
     return tag.strip().strip("#").strip().lower()
+
+
+def _norm(name: str) -> str:
+    """이름 비교용: 태그 정리 뒤 안쪽 공백도 뺀다 ("리그 오브 레전드" = "리그오브레전드")."""
+    return clean_tag(name).replace(" ", "")
 
 
 def _load_aliases(raw: object) -> dict[str, tuple[str, ...]]:
@@ -129,8 +161,19 @@ def load_config(env: Mapping[str, str]) -> CandidateConfig:
             whole = tomllib.load(f)
         raw = whole.get("candidates") or {}
         trending = whole.get("trending") or {}
+        auto = raw.get("auto_exclude") or {}
         base = CandidateConfig()
         return CandidateConfig(
+            titles=bool(raw.get("titles", base.titles)),
+            title_min_words=int(raw.get("title_min_words", base.title_min_words)),
+            title_max_words=int(raw.get("title_max_words", base.title_max_words)),
+            auto_exclude=bool(auto.get("enabled", bool(auto))),
+            auto_min_doc_ratio=float(auto.get("min_doc_ratio", base.auto_min_doc_ratio)),
+            auto_min_categories=int(auto.get("min_categories", base.auto_min_categories)),
+            auto_min_day_ratio=float(auto.get("min_day_ratio", base.auto_min_day_ratio)),
+            keep_tags=frozenset(
+                t for t in (clean_tag(str(x)) for x in raw.get("keep_tags", [])) if t
+            ),
             trending_geo=str(trending.get("geo") or base.trending_geo).strip().upper(),
             trending_max=int(trending.get("max_candidates", base.trending_max)),
             trending_max_age_hours=float(
@@ -154,29 +197,148 @@ class TagCount:
     keyword: str  # 대표 이름
     video_ids: tuple[str, ...]  # 인기 순위 순, 중복 없음
     matched: tuple[str, ...] = ()  # 이 후보로 센 정리된 태그 (처음 나온 순서)
+    phrases: tuple[str, ...] = ()  # 이 후보로 센 제목 구
+    origins: tuple[str, ...] = ("youtube_tag",)
 
     @property
     def video_count(self) -> int:
         return len(self.video_ids)
 
 
+_WORD = re.compile(r"[^\W_]+")
+
+
+def title_phrases(title: str, min_words: int = 2, max_words: int = 3) -> set[str]:
+    """제목 → 공백·문장부호로 나눈 낱말의 이어진 `min_words`~`max_words`어절 구 (영문 소문자).
+
+    숫자로만 된 구는 뺀다. 형태소 분석은 하지 않는다(조사가 붙은 채로 센다).
+    """
+    words = _WORD.findall(title.lower().replace("'", "").replace("’", ""))
+    out: set[str] = set()
+    for n in range(max(1, min_words), max_words + 1):
+        for i in range(len(words) - n + 1):
+            part = words[i : i + n]
+            if all(w.isdigit() for w in part):
+                continue
+            out.add(" ".join(part))
+    return out
+
+
+# ---------------------------------------------------------------- 자동 제외 (늘 붙는 말)
+
+
+@dataclass(frozen=True)
+class CommonTerm:
+    """쌓인 인기 영상 전체에서 잰 이름 하나의 퍼짐 (문서 빈도)."""
+
+    name: str
+    source: str  # youtube_tag | youtube_title
+    videos: int  # 이 이름이 붙은(제목에 나온) 영상 수
+    total_videos: int
+    categories: int
+    days: int
+    total_days: int
+
+    @property
+    def doc_ratio(self) -> float:
+        return self.videos / self.total_videos if self.total_videos else 0.0
+
+    def reason(self) -> str:
+        where = "태그" if self.source == "youtube_tag" else "제목"
+        return (
+            f"늘 붙는 말({where}): 쌓인 인기 영상 {self.total_videos}개 중 {self.videos}개"
+            f"({self.doc_ratio:.1%}), 카테고리 {self.categories}개, {self.days}/{self.total_days}일"
+        )
+
+
+def common_terms(history: Sequence[HistoryVideo], config: CandidateConfig) -> dict[str, CommonTerm]:
+    """여러 날·여러 카테고리에 고르게 나오는 이름 → 그 숫자. 꺼져 있거나 기록이 없으면 빈 표.
+
+    기준(모두 만족): 영상 비율 ≥ `auto_min_doc_ratio`, 카테고리 수 ≥ `auto_min_categories`,
+    나온 날 ÷ 기록이 있는 날 ≥ `auto_min_day_ratio`. 이름은 태그·구를 정리하고 별칭 표로 바꾼 값.
+    """
+    if not config.auto_exclude or not history:
+        return {}
+    total = len(history)
+    all_days = {d for v in history for d in v.days}
+    stats: dict[tuple[str, str], tuple[set[str], set[str | None], set[object]]] = {}
+    for video in history:
+        names = {("youtube_tag", config.canonical(clean_tag(t))) for t in video.tags}
+        if config.titles:
+            names |= {
+                ("youtube_title", config.canonical(p))
+                for p in title_phrases(video.title, config.title_min_words, config.title_max_words)
+            }
+        for key in names:
+            if not key[1]:
+                continue
+            vids, cats, days = stats.setdefault(key, (set(), set(), set()))
+            vids.add(video.video_id)
+            cats.add(video.category_id)
+            days.update(video.days)
+    out: dict[str, CommonTerm] = {}
+    for (source, name), (vids, cats, days) in sorted(stats.items()):
+        term = CommonTerm(name, source, len(vids), total, len(cats), len(days), len(all_days))
+        if (
+            term.doc_ratio >= config.auto_min_doc_ratio
+            and term.categories >= config.auto_min_categories
+            and term.days / max(1, term.total_days) >= config.auto_min_day_ratio
+            and name not in config.keep_tags
+            and name not in out
+        ):
+            out[name] = term
+    return out
+
+
+@dataclass(frozen=True)
+class Picked:
+    candidates: list[TagCount]
+    auto_dropped: list[tuple[CommonTerm, int]]  # 자동 제외로 빠진 이름과 이번 스냅샷 영상 수
+
+
 def pick_candidates(
     snapshot: PopularSnapshot, config: CandidateConfig, limit: int
 ) -> list[TagCount]:
-    """정리한 태그를 대표 이름으로 바꿔 붙은 인기 영상을 세고 후보를 고른다.
+    """`pick_names`의 후보만 (자동 제외 없이)."""
+    return pick_names(snapshot, config, limit).candidates
+
+
+def pick_names(
+    snapshot: PopularSnapshot,
+    config: CandidateConfig,
+    limit: int,
+    common: Mapping[str, CommonTerm] | None = None,
+) -> Picked:
+    """정리한 태그(와 제목 구)를 대표 이름으로 바꿔 붙은 인기 영상을 세고 후보를 고른다.
 
     한 영상에 같은 이름이 여러 번(대소문자·# 차이, 별칭 포함) 붙어도 한 번만 센다. 정리한 태그나
-    대표 이름이 제외 목록에 있으면 뺀다. 순서: 나온 영상 수 많은 순 → 그 이름 영상 중 가장 높은
-    인기 순위 → 대표 이름.
+    대표 이름이 제외 목록(수동)에 있거나 자동 제외(`common`)면 뺀다. 순서: 나온 영상 수 많은 순 →
+    그 이름 영상 중 가장 높은 인기 순위 → 대표 이름.
     """
+    common = common or {}
+    rank_of = {v.video_id: v.rank for v in snapshot.videos}
     videos: dict[str, list[str]] = {}
     matched: dict[str, list[str]] = {}
     best_rank: dict[str, int] = {}
+    dropped: dict[str, set[str]] = {}
+
+    def manual(tag: str, name: str) -> bool:
+        return tag in config.exclude_tags or name in config.exclude_tags
+
+    def auto(tag: str, name: str, vid: str) -> bool:
+        hit = name if name in common else tag if tag in common else None
+        if hit is None or name in config.keep_tags:
+            return False
+        dropped.setdefault(hit, set()).add(vid)
+        return True
+
+    phrase_videos: dict[str, list[str]] = {}
     for video in sorted(snapshot.videos, key=lambda v: v.rank):
         names: dict[str, list[str]] = {}  # 이 영상에서 대표 이름 → 붙은 태그
         for tag in sorted({clean_tag(t) for t in video.tags}):
             name = config.canonical(tag)
-            if not tag or tag in config.exclude_tags or name in config.exclude_tags:
+            # 자동 제외를 먼저 본다: 수동 목록에도 있는 이름도 자동으로 잡혔는지 남긴다
+            if not tag or (auto(tag, name, video.video_id) | manual(tag, name)):
                 continue
             names.setdefault(name, []).append(tag)
         for name, tags in names.items():
@@ -184,13 +346,53 @@ def pick_candidates(
             best_rank.setdefault(name, video.rank)
             seen = matched.setdefault(name, [])
             seen.extend(t for t in tags if t not in seen)
+        if config.titles:
+            words = (config.title_min_words, config.title_max_words)
+            for phrase in sorted(title_phrases(video.title, *words)):
+                name = config.canonical(phrase)
+                if auto(phrase, name, video.video_id) | manual(phrase, name):
+                    continue
+                phrase_videos.setdefault(name, []).append(video.video_id)
+
+    origins: dict[str, list[str]] = {n: ["youtube_tag"] for n in videos}
+    phrases: dict[str, list[str]] = {}
+    enough = {p: ids for p, ids in phrase_videos.items() if len(set(ids)) >= config.min_videos}
+    for phrase, ids in sorted(enough.items(), key=lambda kv: (-len(kv[0]), kv[0])):
+        same = set(ids)
+        # 더 긴 구가 같은 영상들에만 나오면 짧은 구는 그 긴 구의 조각이다
+        if any(
+            f" {phrase} " in f" {longer} " and set(other) == same
+            for longer, other in enough.items()
+            if len(longer) > len(phrase)
+        ):
+            continue
+        tag_name = next((n for n in videos if _norm(n) == _norm(phrase)), phrase)
+        mine = videos.setdefault(tag_name, [])
+        mine.extend(v for v in ids if v not in mine)
+        mine.sort(key=lambda v: rank_of.get(v, 10**9))
+        best_rank[tag_name] = rank_of.get(mine[0], 10**9)
+        matched.setdefault(tag_name, [])
+        phrases.setdefault(tag_name, []).append(phrase)
+        kinds = origins.setdefault(tag_name, [])
+        if "youtube_title" not in kinds:
+            kinds.append("youtube_title")
     picked = [
-        TagCount(name, tuple(ids), tuple(matched[name]))
+        TagCount(
+            name,
+            tuple(ids),
+            tuple(matched.get(name, [])),
+            tuple(phrases.get(name, [])),
+            tuple(origins.get(name, ["youtube_tag"])),
+        )
         for name, ids in videos.items()
         if len(ids) >= config.min_videos
     ]
     picked.sort(key=lambda c: (-c.video_count, best_rank[c.keyword], c.keyword))
-    return picked[:limit]
+    auto_dropped = sorted(
+        ((common[n], len(v)) for n, v in dropped.items() if len(v) >= config.min_videos),
+        key=lambda t: (-t[1], t[0].name),
+    )
+    return Picked(picked[:limit], auto_dropped)
 
 
 def snapshot_cutoff(end_date: date | None) -> datetime | None:
@@ -290,11 +492,6 @@ def pick_verdict(
         return group, "group", rising_names
     best = max(rising, key=lambda v: v.evidence.score or 0.0)
     return best, "name", rising_names
-
-
-def _norm(name: str) -> str:
-    """이름 비교용: 태그 정리 뒤 안쪽 공백도 뺀다 ("리그 오브 레전드" = "리그오브레전드")."""
-    return clean_tag(name).replace(" ", "")
 
 
 @dataclass(frozen=True)
@@ -452,8 +649,32 @@ async def find_candidates(
     requests = 0
 
     tags: list[TagCount] = []
+    auto_excluded: list[AutoExcludedTerm] = []
+    basis: str | None = None
     if snapshot is not None and not why:
-        tags = pick_candidates(snapshot, config, request.max_candidates or config.max_candidates)
+        history = popular_history(db, snapshot.collected_at) if config.auto_exclude else []
+        common = common_terms(history, config)
+        if config.auto_exclude:
+            days = len({d for v in history for d in v.days})
+            basis = f"쌓인 인기 영상 {len(history)}개, 기록이 있는 날 {days}일"
+        limit = request.max_candidates or config.max_candidates
+        found = pick_names(snapshot, config, limit, common)
+        tags = found.candidates
+        auto_excluded = [
+            AutoExcludedTerm(
+                name=term.name,
+                source=term.source,  # type: ignore[arg-type]  # youtube_tag | youtube_title
+                snapshot_videos=n,
+                videos=term.videos,
+                total_videos=term.total_videos,
+                doc_ratio=round(term.doc_ratio, 4),
+                categories=term.categories,
+                days=term.days,
+                total_days=term.total_days,
+                reason=term.reason(),
+            )
+            for term, n in found.auto_dropped
+        ]
     youtube_names = {_norm(t.keyword) for t in tags}
     attach = {_norm(p.keyword): p for p in tpicks if _norm(p.keyword) in youtube_names}
     alone = [p for p in tpicks if _norm(p.keyword) not in youtube_names][: config.trending_max]
@@ -476,13 +697,14 @@ async def find_candidates(
                     snapshot_at=snapshot.collected_at if snapshot else now,
                     video_ids=list(tag.video_ids[: config.rep_videos]),
                     matched_tags=list(tag.matched),
+                    matched_phrases=list(tag.phrases),
                 ),
                 naver=judged.verdict,
                 aliases=judged.keywords[1:],
                 name_verdicts=judged.names,
                 rising_names=judged.rising,
                 naver_from=judged.source,
-                origins=["youtube_tag", "trending_search"] if hit else ["youtube_tag"],
+                origins=[*tag.origins, "trending_search"] if hit else list(tag.origins),  # type: ignore[list-item]
                 trending=evidence_of(hit, tsnap.collected_at) if hit and tsnap else None,
             )
         )
@@ -524,7 +746,13 @@ async def find_candidates(
         )
     else:
         summary = _summary(candidates, len(snapshot.videos)) + tail
+        if auto_excluded:
+            summary += (
+                f" 자동 제외 {len(auto_excluded)}개 ({', '.join(a.name for a in auto_excluded)})."
+            )
         output = TrendCandidatesOutput(
+            auto_excluded=auto_excluded,
+            exclusion_basis=basis,
             status="known",
             snapshot_at=snapshot.collected_at,
             snapshot_videos=len(snapshot.videos),

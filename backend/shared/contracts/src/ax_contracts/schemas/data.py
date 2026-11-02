@@ -621,6 +621,8 @@ class YouTubeTagEvidence(AxModel):
     # 이 후보로 센 태그 (정리한 값, 스냅샷에 실제로 나온 것. 별칭이 묶였으면 여러 개).
     # 예전 응답은 없다
     matched_tags: list[str] = Field(default_factory=list)
+    # 이 후보로 센 제목 구 (YouTube 제목에서 뽑은 2~3어절). 예전 응답은 없다
+    matched_phrases: list[str] = Field(default_factory=list)
 
 
 # 후보가 어디서 나왔는지 (화면 표시: youtube_tag = YouTube 태그, trending_search = 인기 검색어)
@@ -661,6 +663,21 @@ class TrendCandidate(AxModel):
     trending: TrendingSearchEvidence | None = None
 
 
+class AutoExcludedTerm(AxModel):
+    """쌓인 스냅샷 전체에서 늘 붙는 말로 보고 후보에서 자동으로 뺀 이름 (문서 빈도 기준)."""
+
+    name: str
+    source: Literal["youtube_tag", "youtube_title"]  # 태그에서 / 제목 구에서
+    snapshot_videos: int = Field(ge=0)  # 이번 스냅샷에서 이 이름이 나온 영상 수 (빠지지 않았다면)
+    videos: int = Field(ge=0)  # 쌓인 인기 영상 중 이 이름이 나온 영상 수
+    total_videos: int = Field(ge=0)
+    doc_ratio: float = Field(ge=0, le=1)  # videos ÷ total_videos
+    categories: int = Field(ge=0)  # 이 이름이 나온 영상의 카테고리 수
+    days: int = Field(ge=0)  # 이 이름이 나온 한국 날짜 수
+    total_days: int = Field(ge=0)  # 기록이 있는 한국 날짜 수
+    reason: str  # 코드가 숫자로 만든 한 줄
+
+
 class TrendingCandidate(AxModel):
     """인기 검색어에서만 나온 후보 (YouTube 근거 없음). 네이버 판정은 YouTube 후보와 같은 함수."""
 
@@ -690,6 +707,9 @@ class TrendCandidatesOutput(AxModel):
     trending_status: Literal["known", "unknown"] = "unknown"  # 인기 검색어 스냅샷을 썼는지
     trending_reason: str | None = None  # unknown이면 이유 (스냅샷 없음·오래됨)
     trending_snapshot_at: UtcDatetime | None = None  # 쓴 인기 검색어 스냅샷 시각
+    # 자동 제외 (예전 응답은 없다): 이번 스냅샷에서 빠진 늘 붙는 말과 근거, 무엇으로 쟀는지 한 줄
+    auto_excluded: list[AutoExcludedTerm] = Field(default_factory=list)
+    exclusion_basis: str | None = None
 
     @model_validator(mode="after")
     def _known_or_reason(self) -> Self:
