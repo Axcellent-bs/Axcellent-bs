@@ -1353,6 +1353,10 @@ class PlanningService(PlanningCore):
         async def run(s: State) -> ActionResult:
             t = self.clock()
             new_own = got_req is not None and not any(r.id == got_req.id for r in s.requests)
+            if not spec_id and not new_own:
+                # 기획서 없는 요청(재발 방지 후속)은 처음 한 번만 받는다. 그 뒤로는 기획이 주인이라
+                # 다시 와도(재시작 뒤 맞추기 등) 기획서·상태를 덮어쓰지 않는다
+                return ActionResult(changed=False, output={"applied": 0})
             if got_req is not None:
                 self._upsert(s.requests, [got_req])
             if got_spec is not None:
@@ -1364,13 +1368,16 @@ class PlanningService(PlanningCore):
                 f"{spec_id} 작업 {len(got_tasks)}·PR {len(got_prs)}(머지 {merged}) 반영"
                 f" · {request_id} {request_state}"
             )
+            if not spec_id and req is not None:
+                # 기획서 없이 요청만 (개발이 장애 연결로 만든 재발 방지 요청) → 요청 목록에 받는다
+                text = f"{req.via} 요청 {request_id} 받음: {req.title}"
             await self._execute(
                 RECEIVE_DEV_RESULT,
                 ctx,
-                f"{spec_id}:{len(s.activity)}",
+                f"{spec_id or request_id}:{len(s.activity)}",
                 text,
                 {"request": request_id, "request_state": request_state},
-                [spec_id, request_id],
+                [x for x in (spec_id, request_id) if x],
             )
             self._upsert(s.tasks, got_tasks)
             self._upsert(s.prs, got_prs)

@@ -212,7 +212,31 @@ class DevService(PlanningCore):
             out.append(
                 (RECEIVE_DEV_RESULT, req.context_id, res, dev_result_key(req.context_id, sp.id, fp))
             )
+        out += self._follow_up_outgoing(s, full)
         return self._with_policy(s, out, full)
+
+    def _follow_up_outgoing(self, s: State, full: bool) -> list[tuple[str, str, BaseModel, str]]:
+        """장애 연결(link_incident)로 개발이 만든 재발 방지 요청을 기획 서비스에 넘긴다.
+
+        요청 목록·기획서 작성은 기획 서비스가 맡으니, 아직 기획서가 없는 후속 요청을 요청 자체로
+        보낸다 (`spec_id` 빈 값 = 기획서 없이 요청만). 기획서가 생기면 그 뒤로는 기획서 단위."""
+        out: list[tuple[str, str, BaseModel, str]] = []
+        for r in s.requests:
+            if not r.via.startswith("link_incident") or r.spec:
+                continue
+            res = DevResultInput(
+                spec_id="", request_id=r.id, request_state=r.state, request=dump(r)
+            )
+            raw = json.dumps(res.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+            fp = hashlib.sha1(raw.encode()).hexdigest()[:12]
+            mark = f"follow:{r.id}"
+            if self._dev_sent.get(mark) == fp and not full:
+                continue
+            self._dev_sent[mark] = fp
+            out.append(
+                (RECEIVE_DEV_RESULT, r.context_id, res, dev_result_key(r.context_id, mark, fp))
+            )
+        return out
 
     async def _inbound(self, s: State, kind: str) -> ActionResult | None:
         """시뮬레이터: 다른 부서가 관련 PR을 묻거나 사건 연결·롤백 확인을 요청한 것처럼 (목)."""
