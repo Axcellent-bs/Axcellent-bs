@@ -43,6 +43,7 @@ def test_agent_card_format_and_served() -> None:
         "marketing",
         "hr",
         "data",
+        "finance",
         "orchestrator",
     ]
     assert skills["find_related_prs"].grade == "read"

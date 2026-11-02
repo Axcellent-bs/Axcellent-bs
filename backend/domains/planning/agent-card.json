@@ -15,7 +15,7 @@
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#CreateTicketInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#CreateTicketOutput",
       "grade": "A",
-      "allowed_requesters": ["support", "marketing", "hr", "data", "orchestrator"],
+      "allowed_requesters": ["support", "marketing", "hr", "data", "finance", "orchestrator"],
       "verifier": null,
       "priority": "required"
     },

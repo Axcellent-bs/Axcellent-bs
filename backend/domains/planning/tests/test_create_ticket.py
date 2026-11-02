@@ -139,9 +139,10 @@ def test_create_ticket_gate_rejected_registers_nothing(a2a_body) -> None:
 
 
 def test_create_ticket_acl_key_and_invalid_input(a2a_body) -> None:
-    for token in ("mock:support", "mock:marketing", "mock:hr", "mock:data", "mock:orchestrator"):
+    allowed = ("support", "marketing", "hr", "data", "finance", "orchestrator")
+    for token in (f"mock:{d}" for d in allowed):
         assert _ticket(a2a_body, token=token, key=token)["status"] == "completed"
-    for token in ("mock:infra", "mock:finance", "mock:safety"):
+    for token in ("mock:infra", "mock:safety"):
         denied = _ticket(a2a_body, token=token, key=token)
         assert (denied["status"], denied["outcome"]) == ("rejected", "FORBIDDEN_SKILL")
     no_key = _ticket(a2a_body, key=None)
