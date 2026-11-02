@@ -80,6 +80,52 @@ judge(request: dict, transport: httpx.MockTransport) -> dict   # async여도 된
 | --- | --- | --- |
 | `2026110203` | 2026-11-02 | 처음 만듦 |
 
+## 여러 날 캠페인 (`multiday/`)
+
+지금 skill은 하루 넘는 캠페인을 "확인할 수 없음"으로 낸다(지난 7일 같은 시간대가 캠페인과 겹쳐서). 다음 코드 PR에서 기준선을 **캠페인 시작 전 14일의 같은 요일·같은 시간대**로 바꿀 예정이고, 그걸 재는 케이스다.
+
+```bash
+uv run python domains/data/eval/campaign/make_multiday.py            # multiday/cases/
+uv run python domains/data/eval/campaign/make_multiday.py --holdout  # multiday/holdout/
+uv run pytest -q domains/data/tests/test_campaign_multiday_cases.py  # 약속 검사 (다시 만들기 비교는 -m eval)
+```
+
+- **따로 둔 이유:** `cases/`·`holdout/`에 섞으면 지금 skill이 "확인할 수 없음"으로 답해 campaign 평가 관문(`tests/test_campaign_eval_gate.py`)이 실패한다. baseline은 이 평가 정의 PR에서 바꾸지 않는다. 다음 코드 PR에서 관문에 넣고 baseline을 올린다
+- 채점은 같은 `score.py`로, 폴더만 넘긴다: `score.run(judge, cases_dir=multiday/cases, holdout_dir=multiday/holdout)`
+- 데이터: 같은 생성기에 이번에 둘을 더했다(둘 다 없으면 예전과 똑같다, 기존 결제·campaign 시나리오 92개 기록 지문으로 확인)
+  - `traffic.history_days`: 구간 시작 N일 전부터 구간 끝까지 5분마다 빠짐없이 (여러 날이면 "지난 7일 같은 시간대" 방식이 서로 겹쳐서)
+  - `traffic.weekday_levels`(월~일): 요일 배수. 여기서는 `[1.0, 1.0, 1.0, 1.0, 1.1, 1.4, 1.3]`(금·토·일이 높음)
+  - 주문 수준은 5분 0.5건(평일 하루 약 140건). 7일 캠페인 + 14일 기록 한 케이스를 만드는 데 1.4초
+- **정답은 주입 조건에서** (방향·배수). 시작 전 기록이 14일보다 짧으면(`history_days` 10) 주문·매출은 `short_history`
+- **기대**(`counted.orders_baseline`·`revenue_baseline`) = (7일 전 같은 구간 + 14일 전 같은 구간) ÷ 2. 7일 이하 캠페인이라 둘 다 캠페인 시작 전이다. 채점기는 이 칸으로 증분 오차를 잰다. 짧은 기록 케이스는 None(반쯤 빈 평균을 넣지 않음)
+- 날짜·요일은 UTC 기준이다(구간은 UTC 0시에 시작)
+
+| 케이스 | 기간 | 주문 | 보는 것 |
+| --- | --- | --- | --- |
+| `up_x2_2d_tue` | 화~수 | 2배 | 기본 |
+| `up_x1_3_3d_fri_weekend` | 금~일 | 1.3배 | 주말 낀 증가 |
+| `flat_3d_fri_weekend` | 금~일 | 그대로 | **요일 효과**: 직전 3일(화~목)과 비교하면 1.198배로 늘어난 것처럼 보인다. 같은 요일 기대 509.5 vs 실제 526 |
+| `down_x0_6_2d_mon` | 월~화 | 0.6배 | 감소 |
+| `small_up_x1_15_7d_mon` | 7일 | 1.15배 | 작은 효과. 방향 정답은 조건대로(up), 크기는 증분 오차로 본다 |
+| `small_up_x1_2_3d_tue` | 화~목 | 1.2배 | 작은 효과 |
+| `flat_7d_mon` | 7일 | 그대로 | 7일 변화 없음 |
+| `up_x1_3_7d_thu` | 목~수 | 1.3배 | 주말 낀 7일, campaign_id 없음(쿠폰 확인할 수 없음) |
+| `short_history_2d_tue` | 화~수 | 2배 | 시작 전 기록 10일 → 주문·매출 확인할 수 없음, 쿠폰은 냄 |
+
+- 쿠폰은 기존 케이스처럼 캠페인 뒤 사용분을 넣는다(조건과 기록이 같음을 테스트가 본다)
+- holdout: seed **`2026110204`**, 10개 (기간 2·3·7일, 시작 요일, 배수 0.6~2.0, 쿠폰 조건 무작위). **내용을 열지 않는다** (위 holdout 규칙과 같다)
+
+### 코드 변경 전 기준 (지금 skill, 2026-11-02)
+
+| 지표 | `multiday/cases` | `multiday/holdout` |
+| --- | --- | --- |
+| `campaign.order_direction_rate` | 0.0 | 0.0 |
+| `campaign.order_excess_error` | 없음 (증분을 낸 케이스 없음) | 없음 |
+| `campaign.unknown_handled_rate` | 1.0 (짧은 기록 1개. 하루 넘는 캠페인이라 맞은 것이지 기록이 짧아서가 아니다) | 없음 |
+| `campaign.coupon_usage_match` | 1.0 | 1.0 |
+
+틀린 항목: cases 8개(주문 방향이 모두 "확인할 수 없음"), holdout 10개. 지금 skill은 하루 넘는 캠페인을 판정하지 않으므로 정상이다.
+
 ## skill PR에 넘길 것 (이 PR에서 확인한 것)
 
 - **매출 시계열이 없다.** shop-api `metric-series`는 `order_count`·`order_fail_count`·`payment_fail_rate`·`payment_count`만 준다. "매출을 metric_series로 기준선 비교"는 지금 그대로는 안 된다. 정답(`revenue.direction`)은 이 PR에 넣어 두고, skill에서 매출을 어디서 읽을지(shop-api에 매출 지표 추가 또는 확인할 수 없음)는 따로 정한다.
