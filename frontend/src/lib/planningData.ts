@@ -563,6 +563,7 @@ export type Action =
   | { type: 'rejectRepo'; pr: string }
   | { type: 'acceptDraft'; request: string }
   | { type: 'writeSpec'; request: string }
+  | { type: 'unlinkDuplicate'; request: string }
   // 교차검증·학습 기준·사람 확인
   | { type: 'decideReview'; review: string } // 시연: 검증자(다른 부서)가 판단
   | { type: 'mergePr'; pr: string } // 사람 머지 (서버 액션, 누구나)

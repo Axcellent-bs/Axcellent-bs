@@ -200,7 +200,8 @@ class PlanningService(PlanningCore):
     확정한 기획서는 개발 서비스로 넘기고(start_dev) 결과를 돌려받는다(receive_dev_result)."""
 
     ROLE = "planning"
-    ACTIONS = PLANNING_ACTIONS
+    # 기획 전용 사람 버튼: 같은 요청으로 묶인 것을 사람이 풀어 따로 기획한다
+    ACTIONS = {**PLANNING_ACTIONS, "unlink_duplicate": ("_unlink_duplicate", RequestParams)}
 
     def __init__(
         self,
@@ -1355,6 +1356,49 @@ class PlanningService(PlanningCore):
             return None
         await self._draft_spec(s, req)
         return ActionResult(output={"request_id": req.id, "spec_id": req.spec})
+
+    async def _unlink_duplicate(self, s: State, request: str) -> ActionResult | None:
+        """사람 버튼 "풀기": 같은 요청으로 묶인 요청을 따로 떼어 새 요청으로 기획한다.
+
+        제목이 같아 자동으로 묶였지만 실제로는 다른 일일 때 사람이 판단해 푼다. 새 사건 번호
+        (`ctx_req_`)를 발급하고 접수 상태로 되돌려, 다음 단계(기획서 초안)로 이어 간다. 요청을
+        보낸 부서에는 새 사건 번호를 메시지로 알린다 (결과 회신은 새 사건 번호로 간다).
+        묶인 요청이 아니면 바꾸지 않는다.
+        """
+        r = next((x for x in s.requests if x.id == request), None)
+        if r is None:
+            raise ActionError("NOT_FOUND", f"요청 {request}가 없다")
+        if r.duplicate_of is None:
+            return None
+        origin = r.duplicate_of
+        used = {x.context_id for x in s.requests}
+        n = 20 + s.seq + 1
+        while f"ctx_req_{n:04d}" in used:
+            n += 1
+        ctx = f"ctx_req_{n:04d}"
+        text = f"{r.id} 묶음 풀기: {origin}과 따로 기획 (사람 판단) → 새 사건 {ctx}"
+        await self._execute(
+            "unlink_duplicate", ctx, r.id, text, {"from": origin, "old_context_id": r.context_id}
+        )
+        old_ctx = r.context_id
+        r.duplicate_of = None
+        r.context_id = ctx
+        r.state = "접수"
+        r.flow = True  # 사람 클릭 없이 기획서 초안부터 이어 간다
+        t = self.clock()
+        s.activity.append(self._act(t, ctx, "human", "planning", "unlink_duplicate", "사람", text))
+        s.activity.append(
+            self._act(t, old_ctx, "human", "planning", "unlink_duplicate", "사람", text)
+        )
+        if r.from_ in DEPT_NAME and r.from_ not in ("planning", "human"):
+            await self._send(
+                s,
+                r.from_,
+                "request_unlinked",
+                f"{r.id}는 {origin}과 따로 기획해요. 새 사건 번호 {ctx}로 결과를 보내요",
+                ctx,
+            )
+        return ActionResult(output={"request_id": r.id, "context_id": ctx, "from": origin})
 
     async def _accept_draft(self, s: State, request: str) -> None:
         r = next((x for x in s.requests if x.id == request), None)
