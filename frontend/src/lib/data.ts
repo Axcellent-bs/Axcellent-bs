@@ -328,6 +328,55 @@ export interface TrendCandidatesOutput {
 /** 한 번에 판정할 수 있는 그룹 수 (화면 입력 한도) */
 export const TREND_MAX_GROUPS = 5;
 
+// ---------------------------------------------------------------- 영상 소재 추천 (content_recommend)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py ContentRecommendOutput (#356, #370).
+// 급상승만 코드 점수로 순위를 매기고(두 소스 가산), 소재마다 아이디어 문장·형식은 LLM(숫자 검증, 실패하면 기본 문장).
+export type ContentSource = "naver" | "youtube";
+export interface ContentScore {
+  score: number;
+  /** 변화 정도 (trend_scan 판정의 강건 z) */
+  z: number;
+  /** 기준선 대비 배수 */
+  ratio: number;
+  /** 검색 급상승 + YouTube 인기 태그 근거가 둘 다 있음 */
+  two_sources: boolean;
+  /** YouTube 인기 영상 수 (두 소스일 때) */
+  youtube_videos: number | null;
+}
+export interface ContentRecommendation {
+  rank: number;
+  keyword: string;
+  /** 같이 본 이름 (네이버 그룹의 다른 키워드) */
+  aliases: string[];
+  sources: ContentSource[];
+  score: ContentScore;
+  /** 회사 키워드와 겹치는지 (표시만, 순위에서 빼지 않음) */
+  company_relevance: "related" | "low";
+  company_match: string[];
+  /** 영상 아이디어 1~2문장 (LLM, 숫자 검증. 실패하면 서버 기본 문장) */
+  idea: string;
+  format: "숏폼" | "롱폼";
+  /** 아이디어 문장을 서버 기본 문장으로 바꿨는지 */
+  fallback: boolean;
+  fallback_reason: string | null;
+}
+export interface ContentRecommendOutput {
+  start_date: string | null;
+  end_date: string | null;
+  /** 순위 순 */
+  items: ContentRecommendation[];
+  /** 추천이 없을 때 서버 이유 (예: 이번 기간 급상승한 소재가 없음) */
+  empty_reason: string | null;
+  /** 이번 실행에서 네이버를 실제로 부른 수 (캐시 제외) */
+  naver_calls: number;
+  naver_failed: string[];
+  youtube_status: "known" | "unknown";
+  youtube_reason: string | null;
+  snapshot_at: string | null;
+  /** 코드가 숫자로 만든 한 문장 */
+  summary: string;
+}
+
 // ---------------------------------------------------------------- 캠페인 효과 (campaign_effect)
 // 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py CampaignEffectOutput. 계산·이유·설명 문장은 모두 서버 값이다.
 // 항목마다 "앎(값)" 또는 "모름 + 이유". 모르면 서버가 0을 채우지 않는다.
@@ -399,6 +448,9 @@ export const dataAi = {
     ),
   /** YouTube 인기 태그 후보 + 후보마다 네이버 판정. 입력을 비우면 회사 설정(trends.toml [candidates])과 어제 날짜. 후보마다 네이버 1번 */
   trendCandidates: () => askData<TrendCandidatesOutput>("trend_candidates", "YouTube 후보 판정", {}, TREND_DEADLINE_MS),
+  /** 영상 소재 추천 (콘텐츠 루프 2단계). 입력을 비우면 회사 설정(trends.toml [recommend])과 어제 날짜.
+   *  네이버는 서버 하루 캐시를 같이 쓰고, 소재마다 아이디어 문장을 LLM이 쓴다 */
+  contentRecommend: () => askData<ContentRecommendOutput>("content_recommend", "영상 소재 추천", {}, RECOMMEND_DEADLINE_MS),
   /** 캠페인 효과. from·to는 ISO 시각(UTC). campaignId가 없으면 쿠폰은 서버가 "확인할 수 없음"으로 답한다 */
   campaignEffect: (from: string, to: string, campaignId: string | null) =>
     askData<CampaignEffectOutput>(
@@ -413,6 +465,7 @@ const DEADLINE_MS = 30_000;
 const REPORT_DEADLINE_MS = 120_000;
 const TREND_DEADLINE_MS = 60_000; // 그룹마다 네이버 호출 + 급상승마다 설명 문장
 const CAMPAIGN_DEADLINE_MS = 60_000; // 지난 7일 같은 시간대 지표 + 쿠폰 + 설명 문장
+const RECOMMEND_DEADLINE_MS = 120_000; // 기본 그룹·YouTube 후보 네이버 판정(캐시가 없으면) + 소재마다 아이디어 문장
 
 /** 목적격 조사: 마지막 글자에 받침이 있으면 "을", 없거나 한글이 아니면 "를" ("급상승 판정을", "캠페인 효과를") */
 function objectParticle(word: string): string {
