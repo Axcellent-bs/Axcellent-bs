@@ -626,8 +626,12 @@ class CampaignChange(AxModel):
     excess: float | None = None  # 증분 = 실제 − 기대
     ratio: float | None = Field(default=None, ge=0)  # 실제 ÷ 기대
     p_value: float | None = Field(default=None, ge=0, le=1)  # 방향 판정에 쓴 포아송 꼬리확률
-    baseline_days: int = Field(default=0, ge=0)  # 기대에 쓴 날 수 (지난 7일 중 자료가 있는 날)
+    baseline_days: int = Field(default=0, ge=0)  # 기대에 쓴 지난 구간 수
     unknown_reason: str | None = None
+    # 기준선 정의 (예: "지난 7일 같은 시간대", "시작 전 14일 같은 요일·시간대"). 예전 응답은 없다
+    baseline_rule: str | None = None
+    # 기준선에서 뺀 지난 구간과 이유 (빈 구간·기록 공백). 뺀 게 없으면 None. 예전 응답은 없다
+    baseline_note: str | None = None
 
     @model_validator(mode="after")
     def _known_or_reason(self) -> Self:

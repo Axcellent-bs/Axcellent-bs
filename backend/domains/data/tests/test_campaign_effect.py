@@ -112,15 +112,18 @@ def test_expected_is_the_mean_of_days_with_data() -> None:
 def test_no_baseline_is_unknown_not_zero() -> None:
     orders = _measure(Memory(_week(40.0, usual=0.0))).orders
     assert orders.status == "unknown" and orders.excess is None
-    assert "기준선을 정할 수 없음" in (orders.unknown_reason or "")
+    # 지난날이 모두 0건(빈 구간)이면 기준선에서 빠져, 쓸 구간이 없다고 이유와 함께 답한다
+    assert (orders.unknown_reason or "").startswith(
+        "기준선에 쓸 지난 구간이 없음 (1일 전: 주문·결제"
+    )
     empty = _measure(Memory({})).orders
     # 기록이 하나도 없으면 이상 탐지 빈 구간과 같은 이유 (0건으로 줄었다고 하지 않음)
     assert empty.status == "unknown" and empty.unknown_reason == detect.empty_reason()
 
 
-def test_campaign_longer_than_a_day_is_unknown() -> None:
-    out = _measure(Memory(_week(200.0)), _input(end=START + timedelta(days=2)))
-    assert out.orders.status == "unknown" and "하루보다 길어" in (out.orders.unknown_reason or "")
+def test_campaign_longer_than_seven_days_is_unknown() -> None:
+    out = _measure(Memory(_week(200.0)), _input(end=START + timedelta(days=8)))
+    assert out.orders.status == "unknown" and "7일보다 길어" in (out.orders.unknown_reason or "")
     assert out.revenue.status == "unknown"
 
 
@@ -420,3 +423,117 @@ def test_summary_says_estimate_when_direction_is_flat(today: float, phrase: str)
 def test_summary_keeps_flat_when_there_is_no_excess() -> None:
     result = asyncio.run(analyze_campaign(_input(), Memory(_week(100.0)), MockLLMClient()))
     assert "+0건(같음)" in result.output.summary or "0건(같음)" in result.output.summary
+
+
+# ---------------------------------------------------------------- 기준선: 여러 날·뺀 구간·시간대
+
+
+MON = datetime(2026, 10, 12, 0, 0, tzinfo=UTC)  # 월요일 (UTC 0시)
+LEVEL = [100, 100, 100, 100, 110, 140, 130]  # 월~일 하루 주문 수준 (주말이 높다)
+SEOUL = {"DATA_TENANT_TIMEZONE": "Asia/Seoul"}
+
+
+def _daily(at: datetime) -> float:
+    return LEVEL[at.weekday()] / 288  # 5분 칸 값 (하루 288칸)
+
+
+def _multi(start: datetime, days: int, value) -> CampaignEffectOutput:  # noqa: ANN001
+    data = CampaignEffectInput(
+        campaign_id=None, window_from=start, window_to=start + timedelta(days=days)
+    )
+    return asyncio.run(measure(data, Slots(value), env=SEOUL))
+
+
+def test_multiday_baseline_is_the_same_weekday_two_weeks() -> None:
+    start = MON + timedelta(days=4)  # 금~일
+    out = _multi(start, 3, lambda at: _daily(at) * (2.0 if at >= start else 1.0)).orders
+    assert out.status == "known" and out.direction == "up"
+    assert out.baseline_rule and "같은 요일" in out.baseline_rule and out.baseline_days == 2
+    weekend = 110 + 140 + 130  # 금·토·일 수준 = 7일 전·14일 전 같은 구간
+    assert out.expected == pytest.approx(weekend) and out.actual == pytest.approx(2 * weekend)
+
+
+def test_flat_weekend_is_not_a_rise() -> None:
+    """주말은 원래 높다. 같은 요일과 비교하면 변화 없음이 늘었음으로 보이지 않는다."""
+    out = _multi(MON + timedelta(days=4), 3, _daily).orders
+    assert out.direction == "none" and out.excess == pytest.approx(0.0)
+
+
+def test_short_history_says_how_many_days() -> None:
+    start = MON + timedelta(days=1)
+    cutoff = start - timedelta(days=10)
+    out = _multi(start, 2, lambda at: 0.0 if at < cutoff else _daily(at)).orders
+    assert out.status == "unknown"
+    assert (out.unknown_reason or "").startswith("시작 전 기록 부족 (10일)")
+
+
+def test_an_empty_baseline_week_is_left_out() -> None:
+    """14일 전 같은 구간에 서버가 꺼져 있었으면 그 주는 빼고 7일 전만 쓴다 (0건으로 넣지 않음).
+
+    그 전(15일 전)에는 기록이 있어서 "시작 전 기록 부족"이 아니다.
+    """
+    start = MON + timedelta(days=1)
+    off_from, off_to = start - timedelta(days=14), start - timedelta(days=12)
+    out = _multi(start, 2, lambda at: 0.0 if off_from <= at < off_to else _daily(at)).orders
+    assert out.status == "known" and out.baseline_days == 1
+    assert out.expected == pytest.approx(200.0)  # 화·수 = 7일 전 구간만
+    assert out.baseline_note and "14일 전: 주문·결제 기록이 하나도 없음" in out.baseline_note
+
+
+def test_both_baseline_weeks_empty_is_unknown() -> None:
+    start = MON + timedelta(days=1)
+    off = [(start - timedelta(days=k), start - timedelta(days=k - 2)) for k in (7, 14)]
+    out = _multi(
+        start, 2, lambda at: 0.0 if any(a <= at < b for a, b in off) else _daily(at)
+    ).orders
+    assert out.status == "unknown"
+    assert (out.unknown_reason or "").startswith("기준선에 쓸 지난 구간이 없음 (7일 전:")
+
+
+def test_short_campaign_leaves_out_a_day_the_server_was_off() -> None:
+    """하루 이하 캠페인도 지난 7일 중 꺼졌던 날은 빼서 기대값이 낮아지지 않는다."""
+    off = DAY_START - timedelta(days=3)
+    out = asyncio.run(
+        measure(
+            _day_input(), Slots(lambda at: 0 if off <= at < off + timedelta(days=1) else _usual(at))
+        )
+    ).orders
+    assert out.status == "known" and out.baseline_days == 6 and out.excess == 0.0
+    assert out.baseline_note and "3일 전: 주문·결제 기록이 하나도 없음" in out.baseline_note
+
+
+def test_a_past_day_with_a_gap_is_left_out() -> None:
+    gap = DAY_START - timedelta(days=2) + timedelta(hours=10)
+    out = asyncio.run(
+        measure(
+            _day_input(),
+            Slots(lambda at: 0 if gap <= at < gap + timedelta(hours=3) else _usual(at)),
+        )
+    ).orders
+    assert out.status == "known" and out.baseline_days == 6 and out.excess == 0.0
+    assert out.baseline_note and "2일 전: 기록 공백 의심 (36칸)" in out.baseline_note
+
+
+def test_history_days_are_counted_in_the_company_timezone() -> None:
+    """시작 전 기록 일수는 회사 시간대 날짜로 센다.
+
+    한국 0시 시작 캠페인에서 UTC로 세면 하루가 모자란다.
+    """
+    start = datetime(2026, 11, 2, 15, 0, tzinfo=UTC)  # 한국 11-03 00:00
+    first = datetime(2026, 10, 20, 14, 0, tzinfo=UTC)  # 한국 10-20 23:00 (UTC 10-20 14:00)
+    data = CampaignEffectInput(
+        campaign_id=None, window_from=start, window_to=start + timedelta(days=2)
+    )
+    value = lambda at: 0.0 if at < first else _daily(at)  # noqa: E731
+    seoul = asyncio.run(measure(data, Slots(value), env=SEOUL)).orders
+    utc = asyncio.run(measure(data, Slots(value), env={"DATA_TENANT_TIMEZONE": "UTC"})).orders
+    assert seoul.status == "known"
+    assert (utc.unknown_reason or "").startswith("시작 전 기록 부족 (13일)")
+
+
+def test_tenant_timezone_comes_from_config_not_code() -> None:
+    from data_agent.skills.campaign_effect import tenant_timezone
+
+    assert str(tenant_timezone({"DATA_TENANT_TIMEZONE": "Asia/Tokyo"})) == "Asia/Tokyo"
+    assert str(tenant_timezone({})) == "Asia/Seoul"  # 회사 폴더 config/tenants/catbooks/tenant.toml
+    assert tenant_timezone({"DATA_TENANT_TIMEZONE": "Not/AZone"}) == UTC

@@ -90,7 +90,7 @@ uv run python domains/data/eval/campaign/make_multiday.py --holdout  # multiday/
 uv run pytest -q domains/data/tests/test_campaign_multiday_cases.py  # 약속 검사 (다시 만들기 비교는 -m eval)
 ```
 
-- **따로 둔 이유:** `cases/`·`holdout/`에 섞으면 지금 skill이 "확인할 수 없음"으로 답해 campaign 평가 관문(`tests/test_campaign_eval_gate.py`)이 실패한다. baseline은 이 평가 정의 PR에서 바꾸지 않는다. 다음 코드 PR에서 관문에 넣고 baseline을 올린다
+- **따로 둔 이유:** 케이스를 만든 PR(#296)에서는 skill이 하루 넘는 캠페인을 판정하지 않아 관문에 넣지 않았다. 기준선 코드 PR에서 관문(`tests/test_campaign_eval_gate.py` `test_multiday_campaigns_are_not_worse_than_the_baseline`)에 넣었고 기준값은 `baseline.json`의 `multiday_metrics`다
 - 채점은 같은 `score.py`로, 폴더만 넘긴다: `score.run(judge, cases_dir=multiday/cases, holdout_dir=multiday/holdout)`
 - 데이터: 같은 생성기에 이번에 둘을 더했다(둘 다 없으면 예전과 똑같다, 기존 결제·campaign 시나리오 92개 기록 지문으로 확인)
   - `traffic.history_days`: 구간 시작 N일 전부터 구간 끝까지 5분마다 빠짐없이 (여러 날이면 "지난 7일 같은 시간대" 방식이 서로 겹쳐서)

@@ -142,3 +142,10 @@ def test_data_container_points_at_the_tenant_trend_keywords() -> None:
     default = line.split(":-", 1)[1].rsplit("}", 1)[0].replace("${AX_TENANT:-catbooks}", "catbooks")
     assert default.startswith("/app/")
     assert (BACKEND / default.removeprefix("/app/")).is_file()
+
+
+def test_the_default_tenant_sets_its_timezone(tmp_path: Path) -> None:
+    out, _ = tenant_env.resolve({}, local_org=tmp_path / "org.yaml")
+    assert out["DATA_TENANT_TIMEZONE"] == "Asia/Seoul"
+    given, _ = tenant_env.resolve({"DATA_TENANT_TIMEZONE": "UTC"}, local_org=tmp_path / "x")
+    assert "DATA_TENANT_TIMEZONE" not in given  # 이미 준 값은 그대로
