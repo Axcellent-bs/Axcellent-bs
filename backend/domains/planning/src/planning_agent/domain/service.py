@@ -126,6 +126,7 @@ from planning_agent import (
 )
 from planning_agent.ask_requester import Asker, missing_info_question
 from planning_agent.domain.docs import gather_blocks, next_block_id
+from planning_agent.spec_writer import SpecWriter, default_writer
 
 SAMPLE_TICKETS = {
     "support": [
@@ -224,12 +225,17 @@ class PlanningService(PlanningCore):
         relater: related.Relater | None | Literal["default"] = "default",
         hr_client: HrClient | None | Literal["default"] = "default",
         asker: Asker | None | Literal["default"] = "default",
+        spec_writer: SpecWriter | None | Literal["default"] = "default",
     ):
         super().__init__(clock, gate, tenant_id, result_sender, dev_sender, real_example, relater)
         # 인사 record_case를 실제로 부르는 곳 (None이면 관문·활동 기록만, 목 모드 기본값)
         self._hr = hr_link.default_client() if hr_client == "default" else hr_client
         # 요청 서비스에 되묻는 곳 (None이면 묻지 않음, 목 모드 기본값)
         self._asker: Asker | None = ask_requester.default_asker() if asker == "default" else asker
+        # 기획서 초안을 LLM으로 쓰는 곳 (None이면 규칙 초안, 목 모드 기본값)
+        self._spec_writer: SpecWriter | None = (
+            default_writer() if spec_writer == "default" else spec_writer
+        )
         self._init_state()
 
     def _hand_to_dev(self, s: State, sp: Spec, req: Request | None, ctx: str) -> None:
@@ -658,28 +664,48 @@ class PlanningService(PlanningCore):
                 "read",
             )
         )
-        text = f"{spec_id} 초안 작성 (요구사항 1, 완료 기준 1, 질문 0) → 확정 조건 확인"
+        draft = (
+            await self._spec_writer.draft(
+                title=req.title,
+                evidence=req.evidence,
+                requester=DEPT_NAME.get(req.from_, req.from_),
+                context_id=ctx,
+            )
+            if self._spec_writer is not None
+            else None
+        )
+        if draft is not None:
+            problem, goal = draft.problem, draft.goal
+            reqs, done = draft.requirements, draft.done_criteria
+            how = f"AI 작성{f' {draft.model}' if draft.model else ''}"
+        else:
+            problem = f"{DEPT_NAME[req.from_]}에서 받은 요청: {req.evidence}"
+            goal = req.title
+            reqs, done = [req.title], ["바뀐 뒤 같은 문의·이상 신호가 다시 생기지 않는다"]
+            how = "규칙 작성"
+        text = (
+            f"{spec_id} 초안 작성 (요구사항 {len(reqs)}, 완료 기준 {len(done)}, 질문 0, {how})"
+            " → 확정 조건 확인"
+        )
         await self._execute("write_spec", ctx, spec_id, text, {"request": req.id})
+        warn = (
+            ParaWarn(card=plan.card or "-", text=plan.message or "기각 이력 경고")
+            if plan and plan.verdict == "warn"
+            else None
+        )
+        paras = [
+            Para(id=f"R{i}", kind="req", text=r, warn=warn if i == 1 else None)
+            for i, r in enumerate(reqs, 1)
+        ] + [Para(id=f"C{i}", kind="done", text=c) for i, c in enumerate(done, 1)]
         sp = Spec(
             id=spec_id,
             title=req.title,
             request=req.id,
             status="초안",
-            problem=f"{DEPT_NAME[req.from_]}에서 받은 요청: {req.evidence}",
-            goal=req.title,
-            paras=[
-                Para(
-                    id="R1",
-                    kind="req",
-                    text=req.title,
-                    warn=(
-                        ParaWarn(card=plan.card or "-", text=plan.message or "기각 이력 경고")
-                        if plan and plan.verdict == "warn"
-                        else None
-                    ),
-                ),
-                Para(id="C1", kind="done", text="바뀐 뒤 같은 문의·이상 신호가 다시 생기지 않는다"),
-            ],
+            problem=problem,
+            goal=goal,
+            paras=paras,
+            # 근거는 요청 쪽 사실만 (LLM 문장은 근거로 쓰지 않는다)
             basis=[f"{req.id} ({DEPT_NAME[req.from_]})", req.evidence],
             hr_check=plan.verdict if plan else None,
         )
