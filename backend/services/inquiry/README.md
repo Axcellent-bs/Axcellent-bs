@@ -17,6 +17,7 @@
 | `detect_inquiry_surge` | read |
 | `propose_change_requests` | read |
 | `decline_change_proposal` | A |
+| `answer_planning_question` | read |
 | `request_change` | A |
 | `list_change_requests` | read |
 | `receive_change_result` | A |

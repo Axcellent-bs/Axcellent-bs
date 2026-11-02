@@ -40,6 +40,7 @@
 | `detect_inquiry_surge` | read | dashboard-api, orchestrator, data | 분류별 문의 급증 감지 (DEP-CS-05): 최근 창 건수를 평소 창 평균(`baseline_method=median`이면 창별 건수의 중앙값)과 견줌 |
 | `propose_change_requests` | read | dashboard-api, orchestrator | 급증한 분류마다 기획에 보낼 변경 요청안을 코드 규칙으로 만든다(#281, LLM 없음): 제목 한 줄·근거 요약(건수·평소 대비 배수)·대표 문의(샘플 중 번호가 가장 작은 문의)·나머지 근거 ID(`inq_<번호>`)·이미 요청됨 여부. 만들기만 하고 보내거나 저장하지 않는다. 이미 "보내지 않기"를 고른 제안은 `declined`·`decline_reason`으로 표시한다. 보내는 일은 사람이 고른 뒤 `request_change`가 한다 |
 | `decline_change_proposal` | A | dashboard-api | 변경 요청 제안을 보내지 않기로 한 이유(`already_known`·`not_a_real_problem`·`other`)와 결정한 사람을 남긴다(#281). 제안은 저장하지 않으므로 분류와 대표 문의로 가리키고, 자유 메모는 untrusted `note`(200자 이하, 개인정보는 거부). 기획으로는 아무것도 보내지 않으며 같은 제안에 두 번 해도 한 번만 기록된다. `execute()`를 거친다 |
+| `answer_planning_question` | read | planning | 기획이 문의에서 보낸 변경 요청의 근거를 되물으면 **문의 서비스가 보낸 요청의 기록**(보낼 때 남긴 근거 요약·근거 문의 ID)으로만 코드 규칙으로 답한다(#264, LLM 없음). 사건·요청 번호·테넌트가 맞는 기록이 없으면 `unknown`, 근거 질문이고 기록이 있으면 `answered`, 우리 요청이지만 기록으로 답할 수 없으면 `needs_human`. 시각은 요청을 보낸 시각이다. 사람이 답하는 화면과 `receive_planning_answer`는 후속 |
 | `create_claim` | A | dashboard-api, shop-api, orchestrator | 취소·반품·교환 접수 + 규칙 판정 |
 | `decide_claim` | A | dashboard-api | 사람 확인이 필요한 클레임 승인·거절 |
 | `receive_return`, `inspect_return` | A | dashboard-api (입고는 shop-api도) | 반품 입고, 검수 결과 기록 |
