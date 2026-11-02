@@ -1,12 +1,13 @@
 # campaign_effect 평가 케이스 (캠페인 효과)
 
-data 에이전트 `campaign_effect`(아직 없음)의 정답지다. 채점기는 skill PR에서 같이 만든다. 평가 정의 변경은 코드 수정과 별도 PR로 한다(`eval/README.md` 규칙).
+data 에이전트 `campaign_effect`(아직 없음)의 정답지와 채점기(`score.py`)다. 기준값(baseline)은 skill PR에서 처음 만든다. 평가 정의 변경은 코드 수정과 별도 PR로 한다(`eval/README.md` 규칙).
 
 ```bash
 cd backend
 uv run python domains/data/eval/campaign/make_cases.py            # cases/ 다시 만들기
 uv run python domains/data/eval/campaign/make_cases.py --holdout  # holdout/ 다시 만들기
 uv run pytest -q domains/data/tests/test_campaign_eval_cases.py   # 약속 검사 (다시 만들기 비교는 -m eval)
+uv run python domains/data/eval/campaign/score.py --judge <모듈>:<함수>   # 채점
 ```
 
 ## 데이터
@@ -43,6 +44,31 @@ uv run pytest -q domains/data/tests/test_campaign_eval_cases.py   # 약속 검�
 | `up_x2_no_campaign_id_1h_14h` | 2배 | 없음 (campaign_id 없이 요청) | 쿠폰은 확인할 수 없음(`no_campaign_id`), 주문·매출은 냄 |
 | `flat_no_coupons_2h_10h` | 그대로 | 그 캠페인 쿠폰 없음 | 쿠폰 확인할 수 없음(`no_coupons`), 0%로 내지 않음 |
 | `no_history_1h_14h` | 기록 없음 | 없음 | 주문·매출 확인할 수 없음(`no_history`), 0으로 채우지 않음 |
+
+## 채점 (`score.py`)
+
+판정 함수를 인자로 받아서 skill이 없어도 돈다(테스트는 가짜 판정 함수, `tests/test_campaign_eval_scorer.py`).
+
+```python
+judge(request: dict, transport: httpx.MockTransport) -> dict   # async여도 된다
+```
+
+- `request`: 케이스 입력(`campaign_id`·`window_from`·`window_to`). `transport`: 그 케이스 데이터로 만든 shop-api 응답(`metric-series`·`failed-orders`·`coupons`). skill은 실제처럼 shop-api를 읽는다
+- 답 모양(`score.Answer`): `orders`·`revenue`·`coupon` 각각 `{"status": "known", ...}` 또는 `{"status": "unknown", "unknown_reason": ...}`. 주문·매출은 `direction`(up·none·down)·`excess`(실제 − 기대), 쿠폰은 `use_rate`(0~1)·`note`. skill의 계약 출력을 이 모양으로 옮기는 작은 함수는 skill PR에서 만든다
+- 판정 함수가 오류를 내거나 모양이 틀리면 그 케이스의 모든 항목은 틀린 것(`missing`)이다
+
+| 지표 | 대상 | 계산 |
+| --- | --- | --- |
+| `campaign.order_direction_rate` | 정답 주문 방향이 있는 케이스 | 주문 방향(up·none·down)을 맞힌 비율 (높을수록 좋음) |
+| `campaign.order_excess_error` | 주문 증분을 낸 케이스 | \|답 증분 − (구간 주문 − 지난 7일 평균)\| 평균, 건 (낮을수록 좋음). 기대는 `counted`에서 |
+| `campaign.unknown_handled_rate` | 정답이 확인할 수 없음인 주문·쿠폰 항목 (`no_history`·`no_campaign_id`·`no_coupons`) | unknown으로 답한 비율 |
+| `campaign.coupon_usage_match` | 정답 쿠폰이 known인 케이스 | 사용률이 `counted.coupon_use_rate`와 ±0.005 안이고, 설명에 "누적"과 "캠페인 뒤"(또는 "캠페인 이후")가 모두 있는 비율 |
+| `campaign.revenue_direction_rate`·`campaign.revenue_unknown_rate` | 정답 매출이 known인 케이스 (**본 지표에서 뺌**) | 매출 방향을 맞힌 비율 · 확인할 수 없음으로 답한 비율 |
+| `holdout.campaign.*` | `holdout/` | 본 지표 4개를 holdout으로 따로. 화면에는 틀린 개수만 |
+
+- **매출을 본 지표에서 뺀 이유:** shop-api에 매출 지표(metric-series)가 아직 없어서 skill이 매출을 "확인할 수 없음"으로 답하는 게 지금 정상이다. 매출 지표가 생기면 본 지표로 옮길지 다시 정한다.
+- 화면에는 `cases/`의 틀린 항목 목록과 holdout의 **틀린 개수만** 나온다(holdout 케이스 이름·내용은 보여 주지 않는다). 매출은 틀린 목록에도 넣지 않는다.
+- 결제 평가(`eval/run.py`·`baseline.json`)와 trend 평가(`eval/trend/`)는 건드리지 않는다.
 
 ## holdout (처음 보는 케이스)
 
