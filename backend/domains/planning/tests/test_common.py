@@ -135,7 +135,7 @@ def test_state_changes_go_through_execute(wire) -> None:
     calls = [*wire.planning.gate_calls, *wire.dev.gate_calls]
     assert all(c.status == "executed" for c in calls)
     own = [c for c in calls if c.action != "request_deploy"]  # 배포는 배포 사건(ctx_dep_)으로 간다
-    assert [c.idempotency_key for c in own if not c.idempotency_key.startswith("ctx_req_0021:")] == []
+    assert all(c.idempotency_key.startswith("ctx_req_0021:") for c in own)
 
 
 async def _rejected(request) -> ExecuteDecision:
