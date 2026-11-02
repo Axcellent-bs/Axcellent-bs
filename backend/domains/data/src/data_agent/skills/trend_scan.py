@@ -62,6 +62,12 @@ class Settings:
     min_baseline_level: float = 0.01  # 기준선 중앙값이 이보다 작으면(요청 최댓값 100 기준) unknown
     mad_floor: float = 0.05  # MAD 하한 (너무 잔잔한 키워드에서 작은 흔들림이 급상승이 되지 않게)
     max_segment_days: int = WINDOW_DAYS  # 평균 낼 연속 구간 최대 길이 (1이면 하루씩만 본다)
+    # 요일 보정: "none"(56일 전체 중앙값·흔들림), "ratio"(요일별 평균 차이를 빼고 비교),
+    # "same_weekday"(같은 요일 8일끼리만 비교). README "trend_scan 요일 보정"
+    weekday: str = "none"
+    min_weekday_points: int = (
+        4  # 요일 보정에 쓸 같은 요일 값이 이보다 적으면 그 요일은 보정하지 않음
+    )
 
 
 DEFAULT_SETTINGS = Settings()
@@ -87,13 +93,12 @@ def _unknown(group: str, reason: str, evidence: TrendEvidence | None = None) -> 
     )
 
 
-def _best_segment(
-    window: list[tuple[date, float]], center: float, sigma: float, max_days: int
-) -> _Peak | None:
+def _best_segment(window: list[tuple[date, float, float]], max_days: int) -> _Peak | None:
     """판정 구간 안 연속 구간(빠진 날 없이 이어진 1~7일) 중 z가 가장 큰 것.
 
-    z = (구간 log 평균 − 기준선 log 중앙값) ÷ (σ ÷ √일수). 여러 날 이어진 급상승은 평균을 내서
-    하루 흔들림보다 잘 드러나게 한다.
+    `window`는 (날짜, 평소와의 차이 r = log 값 − 평소 log, 그날 흔들림 σ). z = Σ(r ÷ σ) ÷ √일수.
+    σ가 모두 같으면 (구간 r 평균) ÷ (σ ÷ √일수)와 같다. 여러 날 이어진 급상승은 평균을 내서
+    하루 흔들림보다 잘 드러나게 한다. `_Peak.mean_log`에는 구간 r 평균을 담는다(배수 = e^평균).
     """
     best: _Peak | None = None
     for i in range(len(window)):
@@ -101,11 +106,49 @@ def _best_segment(
             part = window[i : j + 1]
             if (part[-1][0] - part[0][0]).days != len(part) - 1:
                 break  # 빠진 날이 있으면 이어진 구간이 아니다
-            mean_log = sum(math.log(v) for _, v in part) / len(part)
-            z = (mean_log - center) / (sigma / math.sqrt(len(part)))
+            z = sum(r / sd for _, r, sd in part) / math.sqrt(len(part))
+            mean_r = sum(r for _, r, _ in part) / len(part)
             if best is None or z > best.z:
-                best = _Peak(z, mean_log, part[0][0], part[-1][0])
+                best = _Peak(z, mean_r, part[0][0], part[-1][0])
     return best
+
+
+def _residuals(
+    baseline: list[tuple[date, float]],
+    window: list[tuple[date, float]],
+    center: float,
+    mad: float,
+    settings: Settings,
+) -> list[tuple[date, float, float]]:
+    """판정 구간 날마다 (날짜, 평소와의 log 차이, 그날 흔들림 σ). 요일 보정 방식에 따라 다르다."""
+    floor = settings.mad_floor
+    pooled = MAD_TO_SIGMA * max(mad, floor)
+    by_day: dict[int, list[float]] = {}
+    for d, v in baseline:
+        by_day.setdefault(d.weekday(), []).append(math.log(v))
+    if settings.weekday == "same_weekday":  # 같은 요일 값끼리만 중앙값·흔들림
+        out = []
+        for d, v in window:
+            same = by_day.get(d.weekday(), [])
+            if len(same) < settings.min_weekday_points:
+                out.append((d, math.log(v) - center, pooled))
+                continue
+            mid = statistics.median(same)
+            spread = statistics.median(abs(x - mid) for x in same)
+            out.append((d, math.log(v) - mid, MAD_TO_SIGMA * max(spread, floor)))
+        return out
+    if settings.weekday == "ratio":  # 요일별 평균 차이를 빼고 56일 전체로 비교
+        effect = {
+            wd: statistics.median(x - center for x in xs)
+            for wd, xs in by_day.items()
+            if len(xs) >= settings.min_weekday_points
+        }
+        adjusted = [math.log(v) - effect.get(d.weekday(), 0.0) for d, v in baseline]
+        mid = statistics.median(adjusted)
+        spread = statistics.median(abs(x - mid) for x in adjusted)
+        sd = MAD_TO_SIGMA * max(spread, floor)
+        return [(d, math.log(v) - effect.get(d.weekday(), 0.0) - mid, sd) for d, v in window]
+    return [(d, math.log(v) - center, pooled) for d, v in window]
 
 
 def judge_series(
@@ -134,7 +177,8 @@ def _judge_core(series: TrendSeries, start: date, end: date, settings: Settings)
         return _unknown(group, "자료 없음: 네이버가 이 기간 값을 주지 않음 (검색량이 적음)")
     window_from = end - timedelta(days=WINDOW_DAYS - 1)
     baseline_from = max(start, window_from - timedelta(days=BASELINE_DAYS))
-    baseline = [v for d, v in series.points if baseline_from <= d < window_from and v > 0]
+    baseline_days = [(d, v) for d, v in series.points if baseline_from <= d < window_from and v > 0]
+    baseline = [v for _, v in baseline_days]
     window = [(d, v) for d, v in series.points if window_from <= d <= end and v > 0]
     known_days = (window_from - baseline_from).days
     if len(baseline) < settings.min_baseline_points:
@@ -167,14 +211,15 @@ def _judge_core(series: TrendSeries, start: date, end: date, settings: Settings)
     if not window:
         return _unknown(group, "판정 구간 7일에 값이 없음", evidence)
     sigma = MAD_TO_SIGMA * max(mad, settings.mad_floor)
-    peak = _best_segment(window, center, sigma, settings.max_segment_days)
+    residuals = _residuals(baseline_days, window, center, mad, settings)
+    peak = _best_segment(residuals, settings.max_segment_days)
     assert peak is not None  # window가 비어 있지 않다
     last_day, last_value = window[-1]
     rising = peak.z >= settings.z_threshold
     return TrendVerdict(
         group_name=group,
         status="rising" if rising else "normal",
-        ratio=round(math.exp(peak.mean_log - center), 2),
+        ratio=round(math.exp(peak.mean_log), 2),
         evidence=evidence.model_copy(
             update={
                 "latest_period": last_day,
