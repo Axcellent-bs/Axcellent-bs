@@ -10,7 +10,8 @@ from ax_shop_api.main import create_app
 MARKETING = {"Authorization": "Bearer mock:marketing"}
 SUPPORT = {"Authorization": "Bearer mock:support"}
 FINANCE = {"Authorization": "Bearer mock:finance"}
-OTHER = {"Authorization": "Bearer mock:data"}
+DATA = {"Authorization": "Bearer mock:data"}
+OTHER = {"Authorization": "Bearer mock:hr"}
 
 
 class Now:
@@ -70,19 +71,21 @@ def test_writes_are_marketing_only(client: TestClient, method: str, url: str, bo
     send = getattr(client, method)
     kwargs = {"json": body} if body is not None else {}
     assert send(url, **kwargs).status_code == 401  # 토큰 없음
-    for caller in (SUPPORT, FINANCE, OTHER):  # 고객지원도 쿠폰·공지는 못 쓴다
+    for caller in (SUPPORT, FINANCE, DATA, OTHER):  # 고객지원·data도 쿠폰·공지는 못 쓴다
         assert send(url, headers=caller, **kwargs).status_code == 403
     assert client.get("/api/shop/coupons").status_code == 401  # 쿠폰 조회도 토큰이 필요하다
 
 
-def test_coupon_reads_are_limited_to_departments_that_verify_or_deduplicate(
+def test_coupon_reads_are_limited_to_departments_that_verify_deduplicate_or_measure(
     client: TestClient,
 ) -> None:
     issued = client.post("/api/shop/coupons", json=_coupon(), headers=MARKETING).json()["data"]
     url = f"/api/shop/coupons/{issued['coupon_id']}"
-    for caller in (MARKETING, SUPPORT, FINANCE):
+    for caller in (MARKETING, SUPPORT, FINANCE, DATA):
         assert client.get(url, headers=caller).status_code == 200
     assert client.get(url, headers=OTHER).status_code == 403
+    assert client.get("/api/shop/coupons", headers=DATA).status_code == 200  # 목록도 읽는다
+    assert client.get("/api/shop/coupons", headers=OTHER).status_code == 403
 
 
 # --- 공지 배너 -------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""`request_change`: 문의의 변경 요청을 기획개발에 보내고 `ctx_req_`를 문의와 연결한다."""
+"""`request_change`: 문의의 변경 요청을 기획에 보내고 `ctx_req_`를 문의와 연결한다."""
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -22,7 +22,7 @@ DEFAULT_INPUT = {
 
 
 class Sent(list):
-    """기획개발로 보낸 요청 목록. `replies`에 넣은 결과를 차례로 돌려준다."""
+    """기획으로 보낸 요청 목록. `replies`에 넣은 결과를 차례로 돌려준다."""
 
     def __init__(self) -> None:
         super().__init__()

@@ -118,6 +118,8 @@ SERVICES: tuple[Service, ...] = (
             "root_cause_hypotheses",
             "accuracy_report",
             "activity_report",
+            "trend_scan",
+            "answer_planning_question",
         ),
         "데이터 분석",
     ),
@@ -156,7 +158,13 @@ SERVICES: tuple[Service, ...] = (
         ),
         "결정 기록",
     ),
-    Service("planning", "planning", 8101, ("create_ticket", "receive_dev_result"), "요청·기획서"),
+    Service(
+        "planning",
+        "planning",
+        8101,
+        ("create_ticket", "receive_dev_result", "receive_planning_answer"),
+        "요청·기획서",
+    ),
     Service(
         "dev",
         "planning",

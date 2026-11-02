@@ -1,11 +1,11 @@
-// 기획개발(planning) 화면의 목 데이터와 상태 변화.
-// 실제로는 기획개발 에이전트의 /api/planning/... 응답이 들어올 자리다 (PLANNING_MOCK=1 과 같은 역할).
+// 기획·개발(planning) 화면의 목 데이터와 상태 변화.
+// 실제로는 기획·개발 에이전트의 /api/planning/... 응답이 들어올 자리다 (PLANNING_MOCK=1 과 같은 역할).
 // 부서 간 연결 지점 이름은 공통 구성안(agent-common)과 10/22 부서별 수정 요청을 따른다.
 //
 // 승인 방식 (10/23 결정): "사람의 사전 승인" 대신 "AI 교차검증 + 사람 사후 감사".
 //   - 기획서: 질문 없음 + 인사 기각 경고 없음 + 근거 있음 → 자동 확정. 아니면 AI 교차검증 대기열.
 //   - PR: 검수 통과 + 학습된 기준(경로·줄·파일·경고 없음) 안 → 자동 머지. 아니면 AI 교차검증 대기열.
-//   - 교차검증은 기획개발이 아닌 쪽(안전 레이어가 다른 부서로 보냄)이 판단한다. 기획개발은 자기 건을 승인하지 않는다.
+//   - 교차검증은 기획·개발이 아닌 쪽(안전 레이어가 다른 부서로 보냄)이 판단한다. 기획·개발은 자기 건을 승인하지 않는다.
 //   - 교차검증 뒤 머지 → 관찰 기간 장애·revert 없음 → 같은 경로 N건이면 기준 제안·백테스트 → 안전 장치 안 재무 AI, 밖 사람(태윤) 승인 → 정식.
 //   - 되돌릴 수 없는 일(IRREVERSIBLE)은 교차검증 대신 항상 사람이 확인한다.
 //   - 사람은 사후 감사 화면에서 AI가 스스로 승인한 건을 보고, 기준을 바로 끌 수 있다.
@@ -87,7 +87,9 @@ export interface Task {
 }
 
 // 코딩 에이전트 한 번의 실행. SSE로 단계가 바뀐다
-export type CodingStatus = 'queued' | 'reading' | 'writing' | 'reviewing' | 'opened' | 'merged' | 'waiting_human' | 'failed' | 'canceled'
+export type CodingStatus = 'queued' | 'claimed' | 'reading' | 'writing' | 'reviewing' | 'opened' | 'merged' | 'waiting_human' | 'failed' | 'canceled'
+// 작업을 누가 코딩하나: 서버 AI(API 키) · 개발자 본인 Claude(구독, MCP로 가져감)
+export type CodingMode = 'agent' | 'subscription'
 export interface CodingFile { path: string; additions: number; deletions: number; reason: string }
 export interface CodingRun {
   status: CodingStatus
@@ -105,6 +107,11 @@ export interface CodingRun {
   mergeConflict?: boolean // 머지 충돌: 다시 시도하면 PR을 닫고 최신 코드로 다시 씀
   llmCalls?: number // 이 작업이 지금까지 부른 LLM 횟수 (다시 시도 포함)
   llmTokens?: number // 이 작업이 지금까지 쓴 토큰 (입력 + 출력)
+  mode?: CodingMode
+  claimedBy?: string | null // 구독형: 가져간 사람
+  claimedAt?: string | null
+  leaseUntil?: string | null // 이때까지 진행 보고가 없으면 대기열로 돌아간다
+  progress?: string | null // 구독형: 개발자 Claude가 마지막으로 보고한 진행 글
 }
 
 export interface PR {
@@ -137,7 +144,7 @@ export interface RepoTarget {
 }
 
 export interface Message { who: string; dept: Dept; text: string; decision?: string; t?: string }
-// 소통 채널. spec = 문서에 붙는 스레드, team = 기획개발팀 채널, dept = 다른 부서와 주고받는 채널
+// 소통 채널. spec = 문서에 붙는 스레드, team = 기획팀 채널, dept = 다른 부서와 주고받는 채널
 export interface Thread { id: string; on: string; title: string; messages: Message[]; kind?: 'spec' | 'team' | 'dept'; peer?: Dept }
 
 // 정리 문서: 요청·기획서·작업·PR·대화·결정을 한 장으로 모으고 사람이 고친다
@@ -168,7 +175,7 @@ export interface Activity {
   text: string
 }
 
-// 기획개발 → 다른 부서로 나간 메시지·데이터 (다른 부서 페이지의 "기획개발에서 받은 것")
+// 기획·개발 → 다른 부서로 나간 메시지·데이터 (다른 부서 페이지의 "기획·개발에서 받은 것")
 export interface OutMsg {
   id: number
   t: string
@@ -195,11 +202,11 @@ export interface CrossReview {
   lane: 'ai' | 'human'
   irreversible?: string // 되돌릴 수 없는 일 항목 이름 (lane human)
   routeWhy: string[] // 자동으로 처리하지 않고 여기로 온 이유
-  summary: string // 기획개발 AI가 정리한 근거
-  recommend?: '승인' | '거절' // 기획개발 AI의 추천 (결정 아님)
+  summary: string // 기획·개발 AI가 정리한 근거
+  recommend?: '승인' | '거절' // 기획·개발 AI의 추천 (결정 아님)
   recommendWhy?: string
   checks: RuleCheck[] // 코드 규칙 검사 결과
-  verifier: string // 판단하는 쪽 (기획개발이 아님)
+  verifier: string // 판단하는 쪽 (기획·개발이 아님)
   result?: '승인' | '거절'
   resultWhy?: string
   decidedAt?: string
@@ -323,6 +330,7 @@ export interface ChatThread {
   taskId: string | null
   connection: string | null
   waitingFor?: string[] // 끝나기를 기다리는 요청 (충돌하는 요청이 끝나면 시작)
+  mode?: CodingMode // 이 대화가 띄울 작업을 누가 코딩하나
   createdAt: string
   updatedAt: string
 }
@@ -426,13 +434,13 @@ export const initialState: State = {
   ],
   threads: [
     { id: 'TH-7', on: 'SPEC-7', title: 'SPEC-7 · 결제 실패 후 장바구니 유지', messages: [
-      { who: '기획개발 에이전트', dept: 'planning', text: '빈 항목 질문: 재고가 없어진 상품도 장바구니에 남겨 둘까요?' },
+      { who: '기획 에이전트', dept: 'planning', text: '빈 항목 질문: 재고가 없어진 상품도 장바구니에 남겨 둘까요?' },
     ] },
     { id: 'TH-5', on: 'SPEC-5', title: 'SPEC-5 · 결제 타임아웃 설정 조정', messages: [
       { who: '장재현 (데이터분석)', dept: 'data', text: '설정 변경 뒤 14:04부터 결제 실패율이 4배로 올랐습니다. 원인 판정은 인프라 쪽에서 해 주세요.' },
     ] },
-    { id: 'CH-team', on: '', kind: 'team', title: '기획개발팀', messages: [
-      { who: '기획개발 에이전트', dept: 'planning', t: '10-22 09:15', text: 'REQ-12 기획서 SPEC-7 초안을 올렸습니다. R2에 인사 기각 경고(DC-31)가 있어 질문 답을 받은 뒤 AI 교차검증을 거쳐 확정합니다.' },
+    { id: 'CH-team', on: '', kind: 'team', title: '기획팀', messages: [
+      { who: '기획 에이전트', dept: 'planning', t: '10-22 09:15', text: 'REQ-12 기획서 SPEC-7 초안을 올렸습니다. R2에 인사 기각 경고(DC-31)가 있어 질문 답을 받은 뒤 AI 교차검증을 거쳐 확정합니다.' },
       { who: '노예진', dept: 'planning', t: '10-22 09:18', text: '확인했어요. 확정은 교차검증에 맡기고, 저녁에 AI 승인 감사에서 한 번에 볼게요.' },
     ] },
     { id: 'CH-support', on: '', kind: 'dept', peer: 'support', title: '고객지원', messages: [
@@ -446,7 +454,7 @@ export const initialState: State = {
     { id: 'CH-infra', on: '', kind: 'dept', peer: 'infra', title: '인프라(DejaFix)', messages: [] },
   ],
   docs: [
-    { id: 'DOC-1', title: '10/22 기획개발 정리', updated: '10-22 09:30', blocks: [
+    { id: 'DOC-1', title: '10/22 기획·개발 정리', updated: '10-22 09:30', blocks: [
       { id: 'b1', kind: 'h2', text: '오늘 할 일' },
       { id: 'b2', kind: 'todo', text: 'SPEC-7 품절 상품 처리 질문 답 받기 (고객지원)', done: false },
       { id: 'b3', kind: 'todo', text: 'SPEC-7 교차검증 결과 보고 PR 생성', done: false },
@@ -574,7 +582,7 @@ export type Action =
   | { type: 'toggleTodo'; doc: string; block: string }
   | { type: 'removeBlock'; doc: string; block: string }
 
-// 기획개발이 다른 부서로 보낸 활동은 모두 그 부서 창구(outbox)에도 쌓는다
+// 기획·개발이 다른 부서로 보낸 활동은 모두 그 부서 창구(outbox)에도 쌓는다
 export function reducer(s: State, a: Action): State {
   const next = inner(s, a)
   const added = next.activity.slice(s.activity.length).filter((x) => x.from === 'planning' && x.to !== 'planning')
@@ -695,7 +703,7 @@ function prChecks(s: State, pr: PR): { checks: RuleCheck[]; route: string[] } {
   return { checks, route }
 }
 
-// 검증자: 기획개발이 아닌 쪽. 돈이 걸린 경로는 재무, 기획서는 인사, 나머지 PR은 인프라 agent-review
+// 검증자: 기획·개발이 아닌 쪽. 돈이 걸린 경로는 재무, 기획서는 인사, 나머지 PR은 인프라 agent-review
 function verifierFor(target: ReviewTarget, paths: string): string {
   if (target === 'confirm_spec') return '안전 레이어 → 인사 check_plan 재확인'
   if (/payment|order|refund|settle/.test(paths)) return '안전 레이어 → 재무/정산 review_hold'
@@ -720,7 +728,7 @@ export function prReviewOf(s: State, prId: string, id: string, t: string): Cross
     summary: `${info.req ? `${info.req.id} "${info.req.title}"` : ''}의 ${info.para ? `${info.para.id} "${info.para.text}"` : pr.task} 구현. 변경 ${pr.gate.lines}줄·${pr.gate.files}파일(${pr.gate.paths}), 검수 ${pr.reviews.join(' → ')}, CI 통과.`,
   }
   if (irr) {
-    return { ...base, lane: 'human', irreversible: irr.label, routeWhy: [`되돌릴 수 없는 일: ${irr.label}`], checks: [...checks.filter((c) => c !== NO_IRREVERSIBLE), { label: '되돌릴 수 없는 일', result: '걸림', detail: `${irr.label} → AI가 판단하지 않고 사람이 확인` }], verifier: '사람 (기획개발팀 팀장)' }
+    return { ...base, lane: 'human', irreversible: irr.label, routeWhy: [`되돌릴 수 없는 일: ${irr.label}`], checks: [...checks.filter((c) => c !== NO_IRREVERSIBLE), { label: '되돌릴 수 없는 일', result: '걸림', detail: `${irr.label} → AI가 판단하지 않고 사람이 확인` }], verifier: '사람 (기획·개발팀 팀장)' }
   }
   const prot = protectedOf(pr.gate.paths)
   if (prot) {
@@ -744,7 +752,7 @@ function specReviewOf(s: State, specId: string, id: string, t: string): CrossRev
     summary: `${req ? `${req.id} "${req.title}"` : sp.request} 기획서. 요구사항 ${sp.paras.filter((p) => p.kind === 'req').length}개·완료 기준 ${sp.paras.filter((p) => p.kind === 'done').length}개, 근거 ${sp.basis.length}개${decisions.length ? `, 결정 ${decisions.map((x) => `${x.id} "${x.text}"`).join(', ')}` : ''}.`,
   }
   if (irr) {
-    return { ...base, lane: 'human', irreversible: irr.label, routeWhy: [`되돌릴 수 없는 일: ${irr.label}`], checks: [...checks.filter((c) => c !== NO_IRREVERSIBLE), { label: '되돌릴 수 없는 일', result: '걸림', detail: `${irr.label} → AI가 판단하지 않고 사람이 확인` }], verifier: '사람 (기획개발팀 팀장)' }
+    return { ...base, lane: 'human', irreversible: irr.label, routeWhy: [`되돌릴 수 없는 일: ${irr.label}`], checks: [...checks.filter((c) => c !== NO_IRREVERSIBLE), { label: '되돌릴 수 없는 일', result: '걸림', detail: `${irr.label} → AI가 판단하지 않고 사람이 확인` }], verifier: '사람 (기획·개발팀 팀장)' }
   }
   return { ...base, lane: 'ai', routeWhy: route, checks, verifier: verifierFor('confirm_spec', ''), ...recommendOf(checks) }
 }
@@ -956,7 +964,7 @@ function decideRule(s: State, ruleId: string, ok: boolean): State {
   }
 }
 
-// 시연: 검증자(기획개발이 아닌 쪽)가 규칙 검사 결과로 판단한다. 걸린 항목이 하나라도 있으면 거절
+// 시연: 검증자(기획·개발이 아닌 쪽)가 규칙 검사 결과로 판단한다. 걸린 항목이 하나라도 있으면 거절
 function decideReview(s: State, reviewId: string): State {
   const r = s.reviews.find((x) => x.id === reviewId)
   if (!r || r.result || r.lane !== 'ai') return s
@@ -968,7 +976,7 @@ function decideReview(s: State, reviewId: string): State {
     ...s,
     reviews: s.reviews.map((x) => (x.id === r.id ? { ...x, result, resultWhy: why, decidedAt: t } : x)),
     audit: [...s.audit, { t, ctx: r.ctx, kind: result === '승인' ? '교차검증 승인' : '교차검증 거절', ref: r.ref, what: `${TARGET_LABEL[r.target]} · ${r.title}`, basis: r.routeWhy.join(', ') || '-', verifier: r.verifier, result: `${result} · ${why}` }],
-    activity: [...s.activity, { t, ctx: r.ctx, from: 'safety', to: 'planning', point: 'cross_review.result', kind: 'A2A', grade: 'read', text: `${r.id} ${r.ref} ${TARGET_LABEL[r.target]} → ${r.verifier} 판단 ${result} (${why}) · 기획개발은 자기 건을 승인하지 않음` }],
+    activity: [...s.activity, { t, ctx: r.ctx, from: 'safety', to: 'planning', point: 'cross_review.result', kind: 'A2A', grade: 'read', text: `${r.id} ${r.ref} ${TARGET_LABEL[r.target]} → ${r.verifier} 판단 ${result} (${why}) · 기획·개발은 자기 건을 승인하지 않음` }],
   }
   if (result === '거절') {
     if (r.target === 'merge_pr') next = { ...next, tasks: next.tasks.map((x) => (x.id === next.prs.find((p) => p.id === r.ref)?.task ? { ...x, state: 'PR 검수' } : x)) }
@@ -1029,7 +1037,7 @@ function draftSpecFor(s: State, r: Request, adopted: boolean): State {
     draftsAccepted: s.draftsAccepted + (adopted ? 1 : 0),
     specs: [...s.specs, spec],
     requests: s.requests.map((x) => (x.id === r.id ? { ...x, state: '기획 중', spec: specId } : x)),
-    threads: [...s.threads, { id: `TH-${n}`, on: specId, title: `${specId} · ${r.title}`, kind: 'spec', messages: [{ who: '기획개발 에이전트', dept: 'planning', t, text: `빈 항목 질문: ${spec.question}` }] }],
+    threads: [...s.threads, { id: `TH-${n}`, on: specId, title: `${specId} · ${r.title}`, kind: 'spec', messages: [{ who: '기획 에이전트', dept: 'planning', t, text: `빈 항목 질문: ${spec.question}` }] }],
     activity: [
       ...s.activity,
       ...(adopted ? [{ t, ctx: r.ctx, from: 'planning' as const, to: 'planning' as const, point: 'review_ticket_draft', kind: 'A2A' as const, grade: 'A' as const, text: `${r.id} 채택` }] : []),
@@ -1387,7 +1395,7 @@ function inner(s: State, a: Action): State {
   }
 }
 
-// ---- 기획개발의 연결 지점 대장 (연동 화면). 공통 구성안 4·8·9장 + 수정 요청 기준
+// ---- 기획·개발의 연결 지점 대장 (연동 화면). 공통 구성안 4·8·9장 + 수정 요청 기준
 export interface Port {
   point: string
   dir: 'in' | 'out'
@@ -1402,7 +1410,7 @@ export const PORTS: Port[] = [
   { point: 'find_related_prs', dir: 'in', peer: 'data', kind: 'A2A', grade: 'read', priority: 'required', what: '이상 구간 직전 배포가 있었나' },
   { point: 'link_incident', dir: 'in', peer: 'orchestrator', kind: 'A2A', grade: 'A', priority: 'required', what: '사건을 PR·문단에 연결, 재발 방지 요청 등록. 자동 머지 PR이면 그 기준을 바로 해제' },
   { point: 'verify_rollback_target', dir: 'in', peer: 'safety', kind: 'A2A', grade: 'read', priority: 'required', what: 'infra rollback_deployment(B) 교차검증 승인·거절' },
-  { point: 'cross_review.result', dir: 'in', peer: 'safety', kind: 'A2A', grade: 'read', priority: 'required', what: '기획서 확정·PR 머지 교차검증 결과 (검증자는 기획개발이 아닌 부서)' },
+  { point: 'cross_review.result', dir: 'in', peer: 'safety', kind: 'A2A', grade: 'read', priority: 'required', what: '기획서 확정·PR 머지 교차검증 결과 (검증자는 기획·개발이 아닌 부서)' },
   { point: 'incident.opened / resolved', dir: 'in', peer: 'orchestrator', kind: '이벤트', grade: '-', priority: 'required', what: '사건 개시·종료 알림' },
   { point: 'create_ticket', dir: 'in', peer: 'support', kind: 'A2A', grade: 'A', priority: 'recommended', what: '변경 요청 등록, 같은 요청은 연결 (모든 부서가 호출 가능)' },
   { point: 'get_request_status', dir: 'in', peer: 'support', kind: 'A2A', grade: 'read', priority: 'recommended', what: '요청 부서가 처리 상태 조회' },

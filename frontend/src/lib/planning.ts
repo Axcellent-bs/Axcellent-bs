@@ -1,9 +1,9 @@
-// 기획개발 백엔드(planning 에이전트, 8101) REST·SSE와 화면 상태(State)를 잇는다.
+// 기획·개발 백엔드(planning 에이전트, 8101) REST·SSE와 화면 상태(State)를 잇는다.
 // 백엔드는 snake_case·ISO 시각, 화면은 camelCase·KST "MM-DD HH:mm"이라 여기서 한 번만 바꾼다.
 // 백엔드에 없는 값(학습 기준·감사 목록)은 빈 값으로 두고 지어내지 않는다.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { RELAY_TOKEN, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from '@/lib/env'
-import { RULE_LABEL, type Action, type Activity, type AuditItem, type ChatThread, type CrossEvidence, type CrossReview, type Doc, type Incident, type OutMsg, type PR, type Request, type State, type Thread } from '@/lib/planningData'
+import { RULE_LABEL, type Action, type Activity, type AuditItem, type ChatThread, type CodingMode, type CrossEvidence, type CrossReview, type Doc, type Incident, type OutMsg, type PR, type Request, type State, type Thread } from '@/lib/planningData'
 
 export const PLANNING_API = (import.meta.env.VITE_PLANNING_API_URL as string | undefined) ?? 'http://localhost:8101'
 /** 개발·배포 서비스 에이전트(dev, 8111). 업무 로직은 기획과 같은 planning 도메인이라 같은 REST(`/api/planning`)를 쓴다 */
@@ -164,7 +164,7 @@ async function call<T>(base: string, path: string, init?: RequestInit): Promise<
   const body = await res.json().catch(() => ({}))
   if (!res.ok) {
     const err = (body as { error?: { code?: string; message?: string; details?: PlanningApiError['details'] } }).error
-    throw new PlanningApiError(err?.code ?? `HTTP_${res.status}`, err?.message ?? `기획개발 서버 응답 ${res.status}`, err?.details)
+    throw new PlanningApiError(err?.code ?? `HTTP_${res.status}`, err?.message ?? `기획·개발 서버 응답 ${res.status}`, err?.details)
   }
   return (body as { data: T }).data
 }
@@ -248,7 +248,7 @@ export const devTaskApi = (base: string) => ({
 })
 
 // ---- AI와 대화 (dev 서비스 `/api/planning/dev-chat`). 답이 오면 바뀐 대화 전체를 돌려준다 (5~30초)
-export interface ChatSend { thread_id?: string; message: string; connection?: string }
+export interface ChatSend { thread_id?: string; message: string; connection?: string; mode?: CodingMode }
 
 // 대화 모양이 아닌 값(목의 {ok:true} 등)은 버린다
 const isThread = (x: unknown): x is Json => !!x && typeof x === 'object' && typeof (x as Json).id === 'string' && Array.isArray((x as Json).messages)
@@ -342,7 +342,7 @@ export const repoApi = (base: string, connection?: string) => {
 }
 
 // ── 화면 상태 (예전 store.ts) ──
-// 기획개발 화면 상태는 기획개발 백엔드(planning 에이전트) 한 곳에서 온다.
+// 기획·개발 화면 상태는 기획·개발 백엔드(planning 에이전트) 한 곳에서 온다.
 // SSE `GET /api/planning/events`로 바뀔 때마다 전체 상태를 받고, 사람 버튼은 `POST /api/planning/actions`로 보낸다.
 // 화면 안에서 상태를 지어내거나 혼자 진행시키지 않는다. 서버가 꺼져 있으면 빈 화면과 "연결 안 됨"을 보여 준다.
 
@@ -401,9 +401,9 @@ export function useSharedStore(base: string): [State, (a: Action) => void, boole
           e = again
         }
       }
-      if (e instanceof PlanningApiError && e.code === 'UNKNOWN_ACTION') report('이 기능은 아직 기획개발 서버에 연결되지 않았습니다')
+      if (e instanceof PlanningApiError && e.code === 'UNKNOWN_ACTION') report('이 기능은 아직 기획·개발 서버에 연결되지 않았습니다')
       else if (e instanceof PlanningApiError) report(e.message)
-      else report('기획개발 서버에 연결할 수 없습니다')
+      else report('기획·개발 서버에 연결할 수 없습니다')
     })
   }, [base]) // eslint-disable-line react-hooks/exhaustive-deps
 

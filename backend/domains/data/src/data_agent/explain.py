@@ -216,9 +216,24 @@ def _activity_template(facts: dict[str, int | float | str]) -> str:
     return "\n".join(lines) or "특이사항 없음"
 
 
+def _trend_template(facts: dict[str, int | float | str]) -> str:
+    """검색어 급상승 한 줄 (trend_scan). facts 키: 급상승 수·그룹 수·판정 불가 수·키워드N·배수N."""
+    parts = []
+    i = 1
+    while f"키워드{i}" in facts:
+        parts.append(f"{facts[f'키워드{i}']}({_fmt(facts.get(f'배수{i}'))}배)")
+        i += 1
+    head = f"키워드 그룹 {_fmt(facts.get('그룹 수'))}개 중 급상승 {_fmt(facts.get('급상승 수'))}개"
+    unknown = facts.get("판정 불가 수")
+    tail = f", 판정 불가 {_fmt(unknown)}개" if unknown else ""
+    return f"{head}{tail}" + (f": {', '.join(parts)}" if parts else "") + "."
+
+
 def _template(kind: str, facts: dict[str, int | float | str]) -> str:
     if kind == "activity":
         return _activity_template(facts)
+    if kind == "trend":
+        return _trend_template(facts)
     if kind == "impact":
         words = catalog.current().impact  # 회사 카탈로그의 단위 (캣북스: 주문·고객·원)
         return (

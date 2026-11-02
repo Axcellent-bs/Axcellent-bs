@@ -12,6 +12,8 @@
 | `root_cause_hypotheses` | 이상 구간 앞 30분~구간 끝의 사실만 근거로 원인 후보(설명·근거 사실 id·확신도) | planning `find_related_prs`, marketing `list_active_notices`, support `detect_inquiry_surge`, memory `card_search` (모두 A2A, `clients/fact_sources.py`) |
 | `accuracy_report` | 정확도 평가 결과 | `eval/results/latest.json`(없으면 `eval/baseline.json`). 다시 계산하지 않는다 |
 | `activity_report` | 부서별 AI 업무 리포트: 부서별 요청·결과·사람에게 넘긴 일·품질·사건 참여, 부서 간 협업, 회사 숫자, 직전 기간 비교 | 공통 로그 저장소, finance `closing_report`(A2A), shop-api `GET /api/shop/metric-series` |
+| `trend_scan` | 키워드 그룹별 검색어 급상승(rising·normal·unknown), 기준선 대비 배수, 근거 숫자(z·기준선·흔들림), 판정 불가 이유. 최근 56일 대비 마지막 7일 | 네이버 검색어 트렌드(`connectors/naver_datalab.py`, 그룹마다 1번). 기본 키워드: 회사 폴더 `trends.toml` |
+| `answer_planning_question` | 기획이 되묻는 근거 질문의 답(answered·needs_human·unknown). 기획만 부른다 | data가 보낸 요청의 기록(`planning_questions.py`, 프로세스 안). 아직 요청을 보내는 코드가 없어 지금은 늘 unknown. 사람 답은 `human_answer_request`로 planning `receive_planning_answer`에 보낸다 |
 
 - 숫자는 코드가 계산한다(`metrics/`, `impact.py`, `detect.py`). LLM은 계산이 끝난 숫자로 설명 문장만 쓴다(`explain.py`)
 - 주기 감시(`monitor.py`)는 `anomaly_detection`과 같은 판정 함수로 최근 구간을 보고 `metric.anomaly` 이벤트를 낸다. 사건은 열지 않는다(`context_id` 없음)
@@ -202,7 +204,7 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 ### activity_report (부서별 AI 업무 리포트)
 - **AI를 거친 일만 센다.** 공통 로그에 남은 일만 세고, 사람이 직접 한 일(로그에 없는 일)은 세지 않는다. "절약한 시간" 같은 추정치는 만들지 않는다(근거 없는 숫자).
 - 입력: `period`(day·week·month), `start`(한국 시간 날짜, 비우면 직전 기간: 어제·지난주 월~일·지난달), `services`(서비스 id, 비우면 전체). 직전 기간은 같은 길이의 바로 앞 기간이다.
-- 부서 = `ax_agent_template.services`의 `department`(총괄·고객지원·마케팅·재무·데이터분석·인사·기획개발·인프라). 카드 `owner`는 사람 이름이라(준하 = 총괄+인사 등) 부서마다 `owners`로 함께 보여 준다.
+- 부서 = `ax_agent_template.services`의 `department`(총괄·고객지원·마케팅·재무·데이터분석·인사·기획·개발·인프라). 카드 `owner`는 사람 이름이라(준하 = 총괄+인사 등) 부서마다 `owners`로 함께 보여 준다.
 - **센 범위 = 이 회사가 켠(AI를 쓰는) 서비스.** 백엔드 `AX_ENABLED_SERVICES` 기준이다(비어 있으면 전부, `routing.is_enabled`).
   - 화면의 서비스 고르기(`/system/services`, 브라우저 localStorage)와는 아직 연결돼 있지 않다.
   - 켜지 않은 서비스의 부서는 카드·특이사항·협업에 넣지 않는다. 입력 `services`에 켜지 않은 서비스만 있으면 `invalid_input`이다.
@@ -247,6 +249,68 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
   - 일간: 저장된 날이면 저장값, 오늘이나 저장 안 된 날이면 바로 계산
   - 주간·월간: 저장된 하루치를 더한 뒤 비율·평균·중앙값을 다시 계산한다(평균의 평균이 아니다). 저장 안 된 날만 바로 계산한다
   - 출력: `snapshot_at`(쓴 저장값 중 가장 이른 만든 시각, 저장값이 없으면 계산 시각), `stored_days`·`live_days`, `snapshot_note`("저장된 날 N일 / 바로 계산 M일"). 이번·직전 기간을 합친 날 수다
+
+### trend_scan (검색어 급상승)
+
+- 정의: **최근 56일 대비 급상승을 본다. 계절 반복 구분은 범위 밖이다.** 판정 구간 = `end_date`(없으면 한국 날짜 어제)까지 7일, 기준선 = 그 앞 56일. 하락은 보지 않는다.
+- 기준선과 판정 구간은 **한 응답 안에서만** 비교한다. 네이버 값은 요청마다 배수가 달라 요청 사이 비교는 하지 않는다.
+- 키워드 그룹은 **한 요청에 하나씩** 보낸다. 여러 그룹을 한 요청에 넣으면 큰 키워드에 작은 키워드가 눌린다(실제 응답: 고양이 62.0 → 날씨와 함께 0.0907). 그룹마다 네이버 호출 1번이다.
+- 판정(`skills/trend_scan.py`, 코드 계산): 로그 강건 z. 기준선 log 값의 중앙값 m, 중앙 절대 편차 MAD로 σ = 1.4826 × max(MAD, 0.05). 판정 구간 안 이어진 1~7일 구간마다 z = (구간 log 평균 − m) ÷ (σ ÷ √일수)를 구해 가장 큰 z가 3.2 이상이면 rising. 배수 = exp(그 구간 log 평균 − m)
+- 판정 불가(normal이 아니라 unknown + 이유): 자료 없음, 기준선 56일 중 값이 있는 날 28일 미만(요청이 짧거나 빈 날·0이 많음), 기준선 중앙값 0.01 미만(요청 최댓값 100 기준), 판정 구간에 값 없음
+- 일부 그룹만 네이버를 못 읽으면 그 그룹은 unknown("읽지 못함 [코드]"), 모든 그룹을 못 읽으면 숫자 없이 `failed`·`unavailable`
+- 기본 키워드 그룹은 코드에 두지 않는다: `config/tenants/<회사>/trends.toml`(`tenant.toml`의 `trends`) → `scripts/tenant_env.py`가 `DATA_TREND_CONFIG`로 넘긴다. 입력에 그룹도 없고 설정도 없으면 `invalid_input`
+  - Docker(`services/data/compose.yml`)는 `DATA_TREND_CONFIG`를 `/app/config/tenants/${AX_TENANT:-catbooks}/trends.toml`로 넘긴다. 바꾸려면 셸 환경변수로 준다(`.env` 값은 이 줄에 덮인다)
+  - **주의:** `services/*/compose.yml`·`agent-card.json`은 `scripts/split_services.py`가 만드는 파일이다. 이 줄은 손으로 넣어서 스크립트를 다시 돌리면 빠진다. 그 스크립트는 `--help` 같은 옵션을 읽지 않고 **바로 실행돼** 지금 dev에서도 `services/` 파일 66개를 다시 쓴다(줄바꿈 등). 확인하려고 옵션을 붙여 돌리지 말 것
+- 설명 문장은 LLM이 쓰고 `explain.py` 숫자 검증을 그대로 거친다(템플릿 `trend`)
+- 요청 가능: orchestrator, marketing, dashboard-api
+
+#### 기준값 (평가 개발 케이스로 정함)
+
+`eval/trend/cases/` 결과만 보고 정했다. holdout은 고른 뒤 결과 숫자만 봤고, 그 숫자로 다시 맞추지 않았다. 기준값 파일은 `eval/trend/baseline.json`.
+
+| 기준 | 값 | 이유 |
+| --- | --- | --- |
+| 연속 구간 | 1~7일 | 하루만 보는 것과 본 지표가 같고(탐지 0.909·오탐 0), 평범과 급상승의 z 틈이 더 넓다(평범 최대 2.86 / 잡은 급상승 최소 3.47, 하루만 보면 2.57 / 3.0) |
+| z 기준 | 3.2 | 위 틈의 가운데. 3.0은 평범 최대에, 3.5는 잡은 급상승 최소에 가깝다 |
+| MAD 하한 | 0.05 | 0.03~0.1에서 개발 케이스 결과가 같아 중간값. 너무 잔잔한 키워드의 작은 흔들림 방지 |
+| 기준선 최소 일수 | 28일 | 평가 정의(`eval/trend/README.md`)와 같다 |
+| 기준선 최소 값 | 0.01 | 개발 케이스로 재지 않은 안전장치(자릿수가 모자라는 값) |
+
+### YouTube 영상 통계 스냅샷 (`youtube_collect`, 판정 전 단계)
+
+**왜 스냅샷이 필요한가:** YouTube Data API는 영상의 **지금 누적값**(조회수·좋아요·댓글)만 주고 기간별 추이를 주지 않는다. 한 번 받은 값으로는 "게시 후 평균 속도"(조회수 ÷ 게시 후 시간)밖에 못 구하는데, 이 값은 지금 속도와 크게 다르다. 2026-11-02 실제 값(약 1.2시간 간격 두 번 수집):
+
+| 영상 | 게시 후 평균 속도 | 두 스냅샷으로 구한 지금 속도 |
+| --- | --- | --- |
+| 인기 영상 A (게시 40시간) | 81,788/시간 | 약 13,000/시간 (3,277,193 → 3,292,791) |
+| 인기 영상 B (게시 25시간) | 90,628/시간 | 약 1,200/시간 (2,282,272 → 2,283,722) |
+
+그래서 정해진 간격으로 받아 쌓아 두고, 두 시각의 차이로 지금 속도를 구한다. 급상승 판정·태그 정리는 스냅샷이 쌓인 뒤 별도 PR이다.
+
+```bash
+cd backend
+uv run python -m data_agent.youtube_collect              # 한 번
+uv run python -m data_agent.youtube_collect --every 3600 # 1시간마다 (최소 600초, Ctrl+C로 멈춤)
+```
+
+- 커넥터 `connectors/youtube.py`: 인기 목록(mostPopular, 50개씩 4쪽 = 200개, 순위 붙임), 추적 영상 통계(id 50개씩), 키워드 검색(검색 결과 통계는 videos.list로 한 번 더). 키 `YOUTUBE_API_KEY`는 URL이 아니라 헤더(`X-Goog-Api-Key`)로 보낸다. 주소는 `AX_YOUTUBE_API_URL`로 바꿀 수 있다
+- 숫자 칸이 응답에 없으면(좋아요 숨김·댓글 막음) None/NULL이다. 지워졌거나 비공개가 된 영상은 결과에 없다. 0으로 채우지 않는다
+- 못 읽으면 `ConnectorUnavailable`(403 할당량 초과는 `QUOTA_EXCEEDED`). 할당량 초과가 나면 그 실행의 남은 호출을 멈추고 받은 것까지 저장한다
+- 저장: `DATA_YOUTUBE_DB`(없으면 `backend/.data/youtube_snapshots.db`, 커밋 안 함). `snapshots`는 (수집 시각, 영상 id)가 기본 키라 같은 시각 같은 영상은 한 줄이다. 칸: 수집 시각, 영상 id, 조회수·좋아요·댓글, 인기 순위, 게시 시각, 카테고리, 채널 id, 태그(JSON), 어디서 받았는지. `runs`에 실행마다 쓴 할당량 단위·개수·실패 이유
+- 회사 키워드: `config/tenants/<회사>/youtube.toml`(`tenant.toml`의 `youtube` → `scripts/tenant_env.py`가 `DATA_YOUTUBE_CONFIG`로). 없으면 `config/tenants/<AX_TENANT, 기본 catbooks>/youtube.toml`. 코드에 키워드를 두지 않는다
+- 키는 환경변수가 먼저고, 없으면 `backend/.env`에서 읽는다(값은 출력하지 않는다)
+- `run_all.sh`에는 아직 넣지 않았다
+
+**하루 예상 할당량** (1시간마다, 기본 한도 10,000단위/일, 미국 태평양시 자정에 초기화):
+
+| 항목 | 계산 | 하루 |
+| --- | --- | --- |
+| 인기 목록 | 4쪽 × 24번 | 96 |
+| 추적 영상 | 최대 500개 = 10단위 × 24번 | 최대 240 |
+| 회사 키워드 검색 (한국 날짜 하루 1번) | 키워드 2개 × (검색 100 + 통계 1) | 202 |
+| **합계** | | **최대 약 538 (한도의 약 5%)** |
+
+키워드를 하나 늘리면 하루 101단위가 는다. 실행마다 쓴 단위는 로그 한 줄(`[youtube] … 할당량 N단위`)과 `runs` 표에 남는다.
 
 ### 설명 문장(LLM)과 템플릿 대체 이유
 - 숫자는 코드가 계산하고 LLM은 문장만 쓴다(`explain.py`). 문장에 넘긴 facts에 없는 숫자가 있거나 LLM이 실패하면 고정 템플릿으로 바꾸고 `fallback=true`다.

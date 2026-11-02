@@ -49,7 +49,7 @@ export function taskRow(s: S, t: Task): TaskRow {
   const c1: Cell = { kind: kind(1) }
   if (c) {
     c1.value = codingState(c)
-    c1.meta = c.llmCalls ? `AI ${c.llmCalls}회 · ${tokens(c.llmTokens ?? 0)}` : c.model ?? undefined
+    c1.meta = c.mode === 'subscription' ? c.progress ?? '내 Claude' : c.llmCalls ? `AI ${c.llmCalls}회 · ${tokens(c.llmTokens ?? 0)}` : c.model ?? undefined
     if (c1.kind === 'now' && (held || canceled)) { c1.warn = true; c1.meta = c.error ?? c1.meta }
   } else {
     c1.value = t.owner

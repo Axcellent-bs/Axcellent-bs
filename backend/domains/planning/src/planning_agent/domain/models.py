@@ -1,4 +1,4 @@
-"""기획개발 화면·서비스가 쓰는 상태 모델 (프로토타입 `data.ts`의 타입을 옮긴 것).
+"""기획·개발 화면·서비스가 쓰는 상태 모델 (프로토타입 `data.ts`의 타입을 옮긴 것).
 
 - 필드는 snake_case다. 프로토타입의 `from`은 파이썬 예약어라 `from_` 필드에 별칭 `from`을 붙였다
   (JSON에는 `from`으로 나간다). 직렬화는 항상 `by_alias=True`로 한다.
@@ -32,7 +32,7 @@ Dept = Literal[
 ]
 
 DEPT_NAME: dict[str, str] = {
-    "planning": "기획개발",
+    "planning": "기획",
     "hr": "인사",
     "support": "고객지원",
     "marketing": "마케팅",
@@ -105,6 +105,8 @@ class Request(DomainModel):
     evidence_ids: list[str] = Field(default_factory=list)  # 요청 부서가 보낸 근거 ID
     flow: bool = False  # 들어온 뒤 사람 클릭 없이 다음 단계로 이어 간다 (일반 요청·개선 초안)
     related: list[RelatedItem] = Field(default_factory=list)  # 비슷한·충돌하는 요청 (제안)
+    # 요청을 보낸 서비스 id (예: inquiry·coupon). `from_`은 부서, 되묻기·회신은 이 서비스로 보낸다
+    from_service: str | None = None
 
 
 class ParaWarn(DomainModel):
@@ -160,6 +162,9 @@ class Spec(DomainModel):
     origin: str | None = None
     # 인사 ② check_plan 실제 결과 (ok·warn·unknown). None = 묻지 않음 (목 모드·예전 기획서)
     hr_check: Literal["ok", "warn", "unknown"] | None = None
+    # 요청 서비스에 되물은 질문 (answer_planning_question). 답을 받으면 `question`과 같이 비운다
+    question_id: str | None = None
+    question_to: str | None = None  # 질문을 보낸 서비스 id
 
 
 CodingStatus = Literal[
@@ -297,7 +302,7 @@ class Message(DomainModel):
 
 
 class Thread(DomainModel):
-    """소통 채널. spec = 문서에 붙는 스레드, team = 기획개발팀 채널, dept = 다른 부서 채널."""
+    """소통 채널. spec = 문서에 붙는 스레드, team = 기획팀 채널, dept = 다른 부서 채널."""
 
     id: str
     on: str
@@ -373,7 +378,7 @@ class Activity(DomainModel):
 
 
 class OutMsg(DomainModel):
-    """기획개발 → 다른 부서로 나간 메시지 (다른 부서 화면의 "기획개발에서 받은 것")."""
+    """기획·개발 → 다른 부서로 나간 메시지 (다른 부서 화면의 "기획·개발에서 받은 것")."""
 
     id: int
     at: UtcDatetime
@@ -459,6 +464,8 @@ class ChatThread(DomainModel):
     task_id: str | None = None
     connection: str | None = None
     waiting_for: list[str] = Field(default_factory=list)  # 끝나기를 기다리는 요청 ID
+    # 작업을 누가 코딩하나: agent(서버 AI, API 키) · subscription(개발자 본인 Claude, work_queue.py)
+    mode: Literal["agent", "subscription"] = "agent"
     created_at: UtcDatetime
     updated_at: UtcDatetime
 

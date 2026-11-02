@@ -34,6 +34,8 @@ from ax_contracts.schemas.planning import (
     LinkIncidentOutput,
     ListInProgressInput,
     ListInProgressOutput,
+    ReceivePlanningAnswerInput,
+    ReceivePlanningAnswerOutput,
     RelatedPr,
     VerifyHandoverInput,
     VerifyHandoverOutput,
@@ -613,6 +615,39 @@ async def receive_dev_result(request: AgentRequest) -> AgentResult:
     )
 
 
+async def receive_planning_answer(request: AgentRequest) -> AgentResult:
+    """planning 서비스: 요청 서비스가 나중에 보낸 기획 질문 답 (A, execute 경유)."""
+    try:
+        inp = ReceivePlanningAnswerInput.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    if not request.meta.idempotency_key:
+        return _missing_key(request)
+    try:
+        result = await get_service().receive_planning_answer(
+            question_id=inp.question_id,
+            request_id=inp.request_id,
+            answer=inp.answer,
+            answered_by=inp.answered_by,
+            evidence_ids=inp.evidence_ids,
+            idempotency_key=request.meta.idempotency_key,
+        )
+    except GateRefused as exc:
+        return _gate_rejected(request, exc)
+    out = ReceivePlanningAnswerOutput.model_validate(result.output)
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        outcome=out.outcome,
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(
+            data_summary=f"{inp.question_id} 답 {out.outcome}"
+            + (f" · {out.spec_id}" if out.spec_id else ""),
+            ref_ids=[f"question:{inp.question_id}", f"req:{inp.request_id}"],
+        ),
+    )
+
+
 HANDLERS = {
     "create_ticket": create_ticket,
     "find_related_prs": find_related_prs,
@@ -622,4 +657,5 @@ HANDLERS = {
     "verify_handover": verify_handover,
     "start_dev": start_dev,
     "receive_dev_result": receive_dev_result,
+    "receive_planning_answer": receive_planning_answer,
 }

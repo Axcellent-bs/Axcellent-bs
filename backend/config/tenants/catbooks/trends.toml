@@ -1,0 +1,19 @@
+# 검색어 급상승(data trend_scan)이 기본으로 보는 키워드 그룹. 요청에 그룹이 없으면 이 목록을 본다
+# run_all.sh가 tenant.toml의 trends로 이 파일을 찾아 DATA_TREND_CONFIG로 넘긴다 (scripts/tenant_env.py)
+# 그룹마다 네이버 검색어 트렌드를 한 번씩 부른다(하루 한도 NAVER_DATALAB_DAILY_LIMIT). 키워드는 그룹당 20개까지
+
+[[groups]]
+name = "고양이"
+keywords = ["고양이"]
+
+[[groups]]
+name = "고양이 책"
+keywords = ["고양이 책", "고양이 도서", "고양이 그림책"]
+
+[[groups]]
+name = "책 추천"
+keywords = ["책 추천", "도서 추천"]
+
+[[groups]]
+name = "그림책"
+keywords = ["그림책"]

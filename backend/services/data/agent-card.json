@@ -105,6 +105,34 @@
       "verifier": null,
       "priority": "recommended",
       "handoff": false
+    },
+    {
+      "id": "trend_scan",
+      "description": "네이버 검색어 트렌드로 키워드 그룹별 급상승을 판정한다. 최근 56일 대비 마지막 7일을 같은 응답 안에서만 비교하고(로그 강건 z), 그룹마다 따로 요청한다. 계절 반복 구분은 범위 밖이다. 자료가 없거나 짧거나 너무 작으면 unknown과 이유를 준다. 그룹을 비우면 회사 기본 키워드(config/tenants/<회사>/trends.toml)를 본다. 숫자는 코드가 산출하고 LLM은 설명 문장만 쓴다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendScanRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendScanOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "marketing",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "answer_planning_question",
+      "description": "기획 질문에 답한다. 기획이 data가 보낸 요청(create_ticket)의 근거를 되물으면, data가 보낸 요청의 기록(보낼 때 코드가 만든 사실 문장·근거 ID)으로만 답한다. 근거 질문이고 기록에 사실이 있으면 answered, data가 보낸 요청이지만 기록으로 답할 수 없으면 needs_human(사람이 답하면 planning receive_planning_answer로 보낸다), 보낸 기록이 없으면 unknown. 지어내지 않는다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
     }
   ]
 }

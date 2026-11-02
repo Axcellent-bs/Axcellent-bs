@@ -197,7 +197,7 @@ function RootCauseCard({ inc }: { inc: OrchIncident }) {
           )}
           {check && checkSt && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-surface-2 px-4 py-3 text-sm">
-              <span className="text-ink-700">원인 확인 요청 (기획개발)</span>
+              <span className="text-ink-700">원인 확인 요청 (기획)</span>
               <span className="flex flex-wrap items-center gap-2">
                 <Chip label={checkSt.label} tone={TONE[checkSt.tone]} />
                 {check.handoff_task_id && <span className="text-xs text-ink-500">받은 요청 {check.handoff_task_id}</span>}

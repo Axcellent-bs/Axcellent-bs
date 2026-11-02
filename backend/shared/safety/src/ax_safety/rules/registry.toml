@@ -192,7 +192,7 @@ owner = "support"
 requesters = ["support", "hr", "data"]
 base_grade = "A"
 
-# ---- 기획개발 (예진). 검증자 = 안전 레이어 코드 규칙(변경 크기·허용 경로, thresholds.toml)
+# ---- 기획·개발 (예진). 검증자 = 안전 레이어 코드 규칙(변경 크기·허용 경로, thresholds.toml)
 [[actions]]
 action = "generate_pr"
 owner = "planning"
@@ -216,6 +216,14 @@ base_grade = "A"
 action = "receive_dev_result"
 owner = "planning"
 requesters = ["planning", "dev"]
+base_grade = "A"
+
+# 요청 서비스가 기획 질문에 나중에 답한다 (answer_planning_question → needs_human 뒤). 답을 기획서에
+# 근거로 남길 뿐이라 A. 확정은 기존 confirm_spec 관문이 따로 본다
+[[actions]]
+action = "receive_planning_answer"
+owner = "planning"
+requesters = ["planning", "support", "marketing", "hr", "data", "finance", "orchestrator"]
 base_grade = "A"
 
 # 올릴 레포 승인·기각 (연결이 여럿일 때 AI 제안 → 사람 판단). PR 생성·머지는 따로 관문을 지난다
@@ -307,7 +315,7 @@ action = "send_message"
 owner = "planning"
 base_grade = "A"
 
-# 사건을 PR·기획서에 연결 (SCN-A 대응 단계). 기획개발 기록만 바꾸고 돈·배포에 닿지 않아 A (Agent Card grade A)
+# 사건을 PR·기획서에 연결 (SCN-A 대응 단계). 개발 기록만 바꾸고 돈·배포에 닿지 않아 A (Agent Card grade A)
 [[actions]]
 action = "link_incident"
 owner = "planning"

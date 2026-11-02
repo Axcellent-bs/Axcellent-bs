@@ -114,7 +114,7 @@ protected = [
   "contracts/",
 ]
 
-# ---- 기획개발 자동화 (#166). 값은 제안값. params 키는 planning이 맞춰 보낸다.
+# ---- 기획·개발 자동화 (#166). 값은 제안값. params 키는 planning이 맞춰 보낸다.
 # 필드가 없거나 정수가 아니면 걸린 것으로 본다(fail-closed).
 [[rules]]
 key = "spec_open_question"

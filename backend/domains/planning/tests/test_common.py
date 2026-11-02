@@ -34,7 +34,7 @@ def test_agent_card_format_and_served() -> None:
     skills = {s.id: s for s in card.skills}
     required = {"find_related_prs", "link_incident", "verify_rollback_target"}
     hr_links = {"list_in_progress", "verify_handover"}
-    intake = {"create_ticket"}  # 부서 변경 요청 접수 (#174)
+    intake = {"create_ticket", "receive_planning_answer"}  # 요청 접수 (#174)·되묻기 답
     handoff = {"start_dev", "receive_dev_result"}  # planning·dev 서비스 사이 넘기기
     assert set(skills) == required | hr_links | intake | handoff
     assert skills["create_ticket"].grade == "A"
@@ -57,6 +57,7 @@ def test_agent_card_format_and_served() -> None:
     assert skills["verify_handover"].allowed_requesters == ["safety"]
     assert skills["start_dev"].allowed_requesters == ["planning"]
     assert skills["receive_dev_result"].allowed_requesters == ["dev"]
+    assert skills["receive_planning_answer"].grade == "A"
     assert all(skills[k].grade == "A" for k in handoff)
     for skill in card.skills:
         need = required | intake | handoff
@@ -230,7 +231,7 @@ def test_numbers_come_from_code_not_llm(service, monkeypatch: pytest.MonkeyPatch
     assert m["draft_adoption_rate"] == 33  # 3건 중 1건
     assert m["warnings"] == 1
     assert m["basis"]["pr_count"] == len(prs) == 3
-    # 사람 문장: SPEC-5의 2 + 기획개발 밖 메시지(data·support·hr 각 1)
+    # 사람 문장: SPEC-5의 2 + 기획·개발 밖 메시지(data·support·hr 각 1)
     assert m["human_sentences"] == 2 + 3
 
 

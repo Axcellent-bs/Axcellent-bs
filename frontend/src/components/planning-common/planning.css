@@ -1,4 +1,4 @@
-/* 기획개발 탭 전용 배치. 색·모서리는 common-frontend 토큰만 쓴다 */
+/* 기획·개발 탭 전용 배치. 색·모서리는 common-frontend 토큰만 쓴다 */
 .subtabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 14px; flex-wrap: wrap; }
 .subtabs a { padding: 10px 14px; color: var(--text-2); text-decoration: none; border-bottom: 2px solid transparent; font-size: 14.5px; margin-bottom: -1px; }
 .subtabs a:hover { color: var(--text); }

@@ -20,7 +20,7 @@ const POLL_MS = 10_000;
 // 총괄은 단계 이름·메모·진행 기록을 코드 섞인 문장으로 준다("원인 진단 (infra): infra에 요청"). 화면에서는 사람 말로 바꾸고
 // 코드는 마우스를 올리면(title) 보이게 둔다.
 const DEPT_SAY: Record<string, string> = {
-  infra: "장애 대응 AI", data: "데이터분석 AI", planning: "기획개발 AI", marketing: "마케팅 AI",
+  infra: "장애 대응 AI", data: "데이터분석 AI", planning: "기획 AI", dev: "개발 AI", marketing: "마케팅 AI",
   support: "고객지원 AI", finance: "재무 AI", hr: "인사 AI", orchestrator: "총괄 AI",
 };
 const STEP_KO: Record<string, string> = {

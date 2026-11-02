@@ -8,7 +8,7 @@
 
 ## 지금 방향
 
-- 캣북스 대시보드(ax-frontend `dashboard-web`)는 없앤다. 거기 있던 AI 7개(총괄·고객지원·재무·데이터분석·인사·마케팅·기획개발)는 AXcellent에서 관리하고 디자인도 AXcellent로 맞춘다
+- 캣북스 대시보드(ax-frontend `dashboard-web`)는 없앤다. 거기 있던 AI 7개(총괄·고객지원·재무·데이터분석·인사·마케팅·기획·개발)는 AXcellent에서 관리하고 디자인도 AXcellent로 맞춘다
 - DejaFix는 그대로 둔다. AXcellent 장애 대응 탭은 DejaFix API(`GET /api/incidents?status=problem`)로 현재 장애만 받아 AXcellent가 그린다
 - 원칙: 다른 시스템의 화면(iframe·DOM 긁기)을 가져오지 않는다. 데이터만 받고 화면은 AXcellent가 그린다
 

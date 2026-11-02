@@ -1,4 +1,4 @@
-"""기획개발 상태 변화 (프로토타입 `data.ts` 리듀서의 모든 액션을 메서드로 옮긴 것).
+"""기획·개발 상태 변화 (프로토타입 `data.ts` 리듀서의 모든 액션을 메서드로 옮긴 것).
 
 규칙:
 
@@ -8,7 +8,7 @@
   승급 제안(`auto_policy_propose`, C)만은 보류(`held`)가 정상 결과다 (팀장 승인 대기).
 - 액션은 상태 복사본 위에서 계산하고, 끝까지 성공했을 때만 바꿔 끼운다
   (중간 실패 시 원래 상태 유지).
-- 기획개발이 다른 부서로 보낸 활동은 모두 그 부서 창구(outbox)에도 쌓는다.
+- 기획·개발이 다른 부서로 보낸 활동은 모두 그 부서 창구(outbox)에도 쌓는다.
 - 숫자·중복·판정은 `rules.py`의 코드로만 계산한다. ID·시각은 주입한 시계와 상태 길이로 만든다.
 - 시뮬레이터 액션(`inbound`, `dept_chat`)은 목 모드에서만 받는다.
 """
@@ -30,11 +30,19 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ax_agent_template import config as template_config
 from ax_agent_template import execute as gate_module
+from ax_agent_template.services import BY_ID as SERVICE_BY_ID
+from ax_agent_template.services import department_of
 from ax_contracts.schemas import TENANT_ID_DEFAULT, Evidence, ExecuteDecision, RequestMeta
 from ax_contracts.schemas.hr import PlanDraft
-from ax_contracts.schemas.planning import ChangeResultInput, DevHandoffInput, DevResultInput
+from ax_contracts.schemas.planning import (
+    AnswerPlanningQuestionInput,
+    ChangeResultInput,
+    DevHandoffInput,
+    DevResultInput,
+)
 from ax_contracts.schemas.record import RecordCase, RecordKind
 from planning_agent import (
+    ask_requester,
     cause_inbox,
     coder,
     cross_check,
@@ -45,6 +53,7 @@ from planning_agent import (
     vcs,
     vcs_bridge,
 )
+from planning_agent.ask_requester import Asker, missing_info_question
 from planning_agent.cross_check import CrossChecker, CrossEvidence
 from planning_agent.dev_handoff import (
     RECEIVE_DEV_RESULT,
@@ -446,6 +455,7 @@ class PlanningService:
         cross_checker: CrossChecker | None | Literal["default"] = "default",
         relater: related.Relater | None | Literal["default"] = "default",
         hr_client: HrClient | None | Literal["default"] = "default",
+        asker: Asker | None | Literal["default"] = "default",
     ):
         # 서비스 역할: "" = 합친 모드(원래 동작), "planning" = 기획서까지, "dev" = PR·머지만
         self.role = (os.getenv("PLANNING_ROLE", "") if role is None else role).strip()
@@ -481,6 +491,8 @@ class PlanningService:
         self._hr: HrClient | None = (
             hr_link.default_client() if hr_client == "default" else hr_client
         )
+        # 요청 서비스에 되묻는 곳 (None이면 묻지 않음, 목 모드 기본값)
+        self._asker: Asker | None = ask_requester.default_asker() if asker == "default" else asker
         self.tenant_id = tenant_id
         self.gate_calls: list[GateCall] = []
         # 보류돼도 본 작업을 막지 않는 부수 기록 (SOFT_ACTIONS)
@@ -978,7 +990,7 @@ class PlanningService:
         )
 
     def _to_outbox(self, s: State, before: int) -> None:
-        """기획개발이 다른 부서로 보낸 활동은 그 부서 창구(outbox)에도 쌓는다."""
+        """기획·개발이 다른 부서로 보낸 활동은 그 부서 창구(outbox)에도 쌓는다."""
         next_id = len(s.outbox)
         for a in s.activity[before:]:
             if a.from_ == "planning" and a.to not in ("planning", "dev"):
@@ -1484,6 +1496,7 @@ class PlanningService:
         source_ref: str | None = None,
         evidence_ids: list[str] | None = None,
         req_id: str | None = None,
+        from_service: str | None = None,
     ) -> ActionResult:
         """create_ticket: 같은 제목이면 중복 연결, 아니면 등록 후 간단 요청 판정.
 
@@ -1517,6 +1530,7 @@ class PlanningService:
             auto=auto,
             source_ref=source_ref,
             evidence_ids=list(evidence_ids or []),
+            from_service=from_service,
         )
         s.requests.append(req)
         s.activity.append(
@@ -1688,7 +1702,168 @@ class PlanningService:
         req.spec = spec_id
         req.state = "기획 중"
         s.activity.append(self._act(t, ctx, "planning", "planning", "write_spec", "A2A", text, "A"))
+        await self._ask_requester(s, sp, req)
         await self._try_auto_confirm(s, sp)
+
+    async def _ask_requester(self, s: State, sp: Spec, req: Request) -> None:
+        """근거가 모자라면 요청을 보낸 서비스에 되묻는다 (answer_planning_question).
+
+        - 답하면 바로 기획서 근거·결정으로 남긴다.
+        - 사람에게 물어야 한다(`needs_human`)면 질문을 열어 둔다 → 자동 확정 규칙이 답 대기로 둔다.
+        - 모르거나·창구가 없거나·응답이 없으면 활동에만 남기고 예전처럼 이어 간다 (지어내지 않음).
+        목 모드(`_asker` None)나 서비스를 모르는 요청(시뮬레이터·부서 이름으로 온 것)은 묻지 않는다.
+        """
+        if self._asker is None or not req.from_service:
+            return
+        need = missing_info_question(req.evidence, req.evidence_ids)
+        if need is None:
+            return
+        about, question = need
+        qid = f"Q-{req.id}-1"
+        q = AnswerPlanningQuestionInput(
+            question_id=qid, request_id=req.id, spec_id=sp.id, question=question, about=about
+        )
+        ctx = req.context_id
+        svc = req.from_service
+        asked = await self._asker.ask(svc, ctx, q)
+        if not asked.ok or asked.out is None:
+            text = f"{qid} {svc}에 근거 질문 → 확인 못 함 ({asked.reason}), 질문 없이 진행"
+            self._ask_act(s, ctx, req, text)
+            return
+        out = asked.out
+        if out.status == "answered" and out.answer:
+            self._ask_act(s, ctx, req, f"{qid} {svc}에 근거 질문 → 답 받음")
+            await self._apply_answer(
+                s, sp, req, qid, out.answer, out.answered_by or "agent", out.evidence_ids
+            )
+            return
+        if out.status == "needs_human":
+            sp.question = question
+            sp.question_id = qid
+            sp.question_to = svc
+            self._ask_act(s, ctx, req, f"{qid} {svc}에 근거 질문 → 사람 답 대기")
+            return
+        self._ask_act(s, ctx, req, f"{qid} {svc}에 근거 질문 → 기록에 없음, 질문 없이 진행")
+
+    def _ask_act(self, s: State, ctx: str, req: Request, text: str) -> None:
+        s.activity.append(
+            self._act(
+                self.clock(),
+                ctx,
+                "planning",
+                req.from_,
+                "answer_planning_question",
+                "A2A",
+                text,
+                "read",
+            )
+        )
+
+    async def _apply_answer(
+        self,
+        s: State,
+        sp: Spec,
+        req: Request | None,
+        qid: str,
+        answer: str,
+        answered_by: str,
+        evidence_ids: list[str],
+    ) -> None:
+        """되물은 질문의 답을 기획서에 남긴다: 질문 닫기 → 근거 추가 → 결정 → 인사 기록.
+
+        답은 외부 문구라 근거·결정 문장으로만 넣는다 (문단·완료 기준은 고치지 않는다).
+        """
+        ctx = req.context_id if req else f"spec:{sp.id}"
+        svc = sp.question_to or (req.from_service if req else None) or "요청 서비스"
+        who = "사람" if answered_by == "human" else "에이전트"
+        dec_id = f"D-{len(s.decisions)}"
+        short = " ".join(answer.split())[:120]
+        summary = f"{qid} 답 반영 ({svc} {who}) → 결정 {dec_id}"
+        await self._execute(
+            "receive_planning_answer",
+            ctx,
+            qid,
+            summary,
+            {"spec": sp.id, "answered_by": answered_by},
+            [qid, *evidence_ids],
+        )
+        sp.question = None
+        sp.question_id = None
+        sp.question_to = None
+        sp.basis.append(f"{svc} 답변 ({qid}): {short}")
+        reason = f"{svc} {who} 답변 ({qid})"
+        refs = [f"spec:{sp.id}", f"question:{qid}", *evidence_ids]
+        record = self._decision_record(ctx, dec_id, short, reason, [], refs, sp.title)
+        hr_key = f"{dec_id}:decision_extracted"
+        case = f"① kind decision_extracted · {dec_id} (되묻기 답)"
+        gate = await self._execute(
+            "record_case",
+            ctx,
+            hr_key,
+            case,
+            {"record_case": record.model_dump(mode="json")},
+            record.source_refs,
+        )
+        hr = await self._record_hr(gate, record, hr_key)
+        s.decisions.append(
+            Decision(
+                id=dec_id,
+                spec=sp.id,
+                text=short,
+                reason=reason,
+                alternatives="-",
+                from_=f"되묻기 {qid}",
+                sent_to_hr=hr is None or hr.ok,
+            )
+        )
+        s.activity.append(
+            self._act(
+                self.clock(),
+                ctx,
+                "planning",
+                "planning",
+                "receive_planning_answer",
+                "A2A",
+                summary,
+                "A",
+            )
+        )
+        s.activity.append(self._hr_act(ctx, case, hr))
+
+    async def receive_planning_answer(
+        self,
+        *,
+        question_id: str,
+        request_id: str,
+        answer: str,
+        answered_by: str,
+        evidence_ids: list[str],
+        idempotency_key: str,
+    ) -> ActionResult:
+        """요청 서비스가 나중에 보낸 답 (A). 질문을 닫고 자동 확정 규칙을 다시 본다."""
+        cached = self._idempotent.get(idempotency_key)
+        if cached is not None:
+            return ActionResult(changed=False, outcome=cached.outcome, output=dict(cached.output))
+
+        async def run(s: State) -> ActionResult:
+            sp = next((x for x in s.specs if x.question_id == question_id), None)
+            req = self._request_of_spec(s, sp) if sp else None
+            if sp is None or (req is not None and req.id != request_id):
+                done = next((d for d in s.decisions if d.from_ == f"되묻기 {question_id}"), None)
+                outcome = "duplicate" if done else "unknown_question"
+                return ActionResult(
+                    changed=False,
+                    outcome=outcome,
+                    output={"outcome": outcome, "spec_id": done.spec if done else None},
+                )
+            await self._apply_answer(s, sp, req, question_id, answer, answered_by, evidence_ids)
+            await self._try_auto_confirm(s, sp)
+            return ActionResult(outcome="applied", output={"outcome": "applied", "spec_id": sp.id})
+
+        result = await self._apply(run)
+        self._idempotent[idempotency_key] = result
+        self._save()
+        return result
 
     async def _auto_complete(self, s: State, req: Request) -> None:
         """간단 요청 한 번에 처리: write_spec → 자동 확정 → split_tasks → generate_pr(B) →
@@ -2355,7 +2530,9 @@ class PlanningService:
             m = 20 + seq
             while f"REQ-{m}" in used_ids:
                 m += 1
-            frm = requester if requester in DEPT_NAME else "orchestrator"
+            # 서비스 이름(inquiry 등)으로 와도 부서는 원래 부서로 남기고, 서비스 id는 따로 둔다
+            dept = department_of(requester)
+            frm = dept if dept in DEPT_NAME else "orchestrator"
             result = await self._register_ticket(
                 s,
                 frm,
@@ -2367,6 +2544,7 @@ class PlanningService:
                 source_ref=source_ref,
                 evidence_ids=evidence_ids,
                 req_id=f"REQ-{m}",
+                from_service=requester if requester in SERVICE_BY_ID else None,
             )
             req_id = result.output["request_id"]
             return ActionResult(
@@ -2785,6 +2963,7 @@ class PlanningService:
         connection: str | None = None,
         title: str | None = None,
         waiting_for: list[str] | None = None,
+        mode: str | None = None,
     ) -> ChatThread:
         """대화에 메시지 하나를 더한다. thread_id가 없으면 새 대화(`chat-n`)를 연다."""
 
@@ -2828,6 +3007,8 @@ class PlanningService:
                 th.title = title
             if waiting_for is not None:
                 th.waiting_for = list(waiting_for)
+            if mode:
+                th.mode = mode  # type: ignore[assignment]
             th.updated_at = t
             return ActionResult(outcome="chat", output={"thread_id": th.id})
 
@@ -3462,6 +3643,12 @@ class PlanningService:
     async def _answer_question(self, s: State, spec: str, text: str) -> None:
         sp = next((x for x in s.specs if x.id == spec), None)
         if sp is None or not sp.question:
+            return
+        if sp.question_id:  # 요청 서비스에 되물은 질문을 기획 화면에서 사람이 대신 답함
+            await self._apply_answer(
+                s, sp, self._request_of_spec(s, sp), sp.question_id, text, "human", []
+            )
+            await self._try_auto_confirm(s, sp)
             return
         dec_id = f"D-{len(s.decisions)}"
         req = self._request_of_spec(s, sp)

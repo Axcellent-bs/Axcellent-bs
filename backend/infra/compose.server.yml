@@ -84,7 +84,7 @@ services:
   support-db:
     restart: unless-stopped
 
-  # 고객 홈페이지(/), 관리자(/admin/), 기획개발(/admin/planning/) 정적 파일과
+  # 고객 홈페이지(/), 관리자(/admin/), 기획·개발(/admin/planning/) 정적 파일과
   # /api/ -> dashboard-api, /shop-api/ -> shop-api 프록시. 이미지는 ax-frontend의 nginx/Dockerfile로 만든다
   # (두 레포를 같은 폴더에 나란히 clone. 다른 위치면 AX_FRONTEND_DIR).
   gateway:

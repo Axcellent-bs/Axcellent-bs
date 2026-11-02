@@ -6,7 +6,7 @@ import { Link } from "@/lib/nav";
 import { shortDateTime } from "@/lib/format";
 import { CHANGE_STATUS_KO, TOPIC_KO, ko, support, type ChangeStatus } from "@/lib/support";
 
-// 문의 급증: 최근 창의 분류별 문의 수를 평소와 견준다. 변경 요청: 문의에서 기획개발로 보낸 요청과 처리 상태.
+// 문의 급증: 최근 창의 분류별 문의 수를 평소와 견준다. 변경 요청: 문의에서 기획으로 보낸 요청과 처리 상태.
 
 function Surge({ tick }: { tick: number }) {
   const res = useResource("inquiry-surge", () => support.inquirySurge(), tick);
@@ -62,7 +62,7 @@ function Changes({ tick }: { tick: number }) {
   const res = useResource(`changes-${status}`, () => support.changeRequests({ status: status || undefined }), tick);
   return (
     <Panel id="support-changes" title="변경 요청" meta={res.env?.meta}
-      hint="문의를 받다가 상품·화면을 고쳐야 한다고 판단해 기획개발에 보낸 요청입니다. 보내는 일은 이 화면에서 하지 않습니다."
+      hint="문의를 받다가 상품·화면을 고쳐야 한다고 판단해 기획에 보낸 요청입니다. 보내는 일은 이 화면에서 하지 않습니다."
       tools={
         <div role="group" aria-label="처리 상태" className="flex gap-1 rounded-full bg-surface p-1 ring-1 ring-ink-100">
           {FILTERS.map((f) => (

@@ -68,7 +68,7 @@
 | kind | 채우는 법 | 비고 |
 | --- | --- | --- |
 | `claim` | `conversation_id`로 이은 클레임: `claim_id`, 상태, 판정 주체(`agent`·`system`), 완료된 환불 금액(정수 원) | 이미 있음 (#387과 같은 연결) |
-| `change_request` | `for_inquiry`: 기획개발 요청 번호(`REQ-n`), 상태 | 이미 있음 |
+| `change_request` | `for_inquiry`: 기획 요청 번호(`REQ-n`), 상태 | 이미 있음 |
 | `payment_diagnosis` | `include_payment`일 때 상황 코드 | 선택 |
 | `compensation` | **지금은 불가** — 쿠폰 요청이 문의 번호로 남지 않는다 | 후속: `request_compensation`이 요청 결과를 `inquiry_id`로 기록하게 추가(마케팅 `coupon_id` 포함). 이 기록이 생기면 `inquiry_resolved.coupon_id`도 채운다 |
 

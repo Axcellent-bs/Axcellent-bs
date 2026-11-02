@@ -1,4 +1,4 @@
-"""기획개발 쓰기 API(`/api/planning/*`) 토큰 확인.
+"""기획·개발 쓰기 API(`/api/planning/*`) 토큰 확인.
 
 nginx에만 기대지 않고 서버가 직접 막는다. 형식은 `Authorization: Bearer <토큰>`.
 - 에이전트 토큰: `AX_AGENT_TOKENS`(agent-template `verify_token`).

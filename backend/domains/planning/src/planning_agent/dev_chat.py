@@ -48,6 +48,7 @@ GO_AHEAD = (
 
 STATUS_TEXT = {
     "queued": "대기 중",
+    "claimed": "개발자 Claude가 가져감",
     "reading": "레포 읽는 중",
     "writing": "코드 작성 중",
     "opened": "PR 올림",
@@ -125,6 +126,8 @@ def go_ahead(text: str) -> bool:
     low = _norm(text).lower()
     return any(p in low for p in GO_AHEAD)
 
+
+MODES = ("agent", "subscription")  # 작업을 누가 코딩하나 (서버 AI · 개발자 본인 Claude)
 
 # 충돌하는 요청이 있어도 기다리지 않고 같이 시작 (기본은 앞 요청이 끝난 뒤 시작)
 NOW = ("지금 진행", "지금진행", "바로 진행", "바로진행", "같이 진행", "지금 시작", "바로 시작")
@@ -274,9 +277,15 @@ async def _ask_llm(
 
 
 async def turn(
-    svc: PlanningService, thread_id: str | None, message: str, connection: str | None = None
+    svc: PlanningService,
+    thread_id: str | None,
+    message: str,
+    connection: str | None = None,
+    mode: str | None = None,
 ) -> ChatThread:
     """사용자 메시지 하나를 받고 AI 답 하나를 적는다. 바뀐 대화를 돌려준다.
+
+    `mode`는 작업을 누가 코딩하나 (agent 서버 AI · subscription 본인 Claude). 주면 대화에 남긴다.
 
     오류(입력·없음·설정)는 `ActionError`. LLM·작업 띄우기 오류는 대화에 답으로 남긴다."""
     from planning_agent.domain.service import ActionError
@@ -296,6 +305,8 @@ async def turn(
     conns = vcs_bridge.targets()
     if connection is not None and connection not in [c.id for c in conns]:
         raise ActionError("INVALID_INPUT", f"모르는 연결: {connection}")
+    if mode is not None and mode not in MODES:
+        raise ActionError("INVALID_INPUT", "mode는 agent·subscription 중 하나다")
 
     th = await svc.chat_add(
         thread_id,
@@ -303,6 +314,7 @@ async def turn(
         text,
         connection=connection,
         title=title_of(text) if thread_id is None else None,
+        mode=mode,
     )
     tid = th.id
 
@@ -398,7 +410,7 @@ async def turn(
                 connection=cid,
                 waiting_for=ids,
             )
-    return await _start(svc, tid, plan, cid, reply, skip_queue=now(text))
+    return await _start(svc, tid, plan, cid, reply, skip_queue=now(text), mode=th.mode)
 
 
 async def _start(
@@ -408,8 +420,9 @@ async def _start(
     cid: str,
     reply: str = "",
     skip_queue: bool = False,
+    mode: str = "agent",
 ) -> ChatThread:
-    """계획으로 코딩 작업을 띄우고 대화에 남긴다."""
+    """계획으로 코딩 작업을 띄우고 대화에 남긴다. 구독형이면 대기열에 올리기만 한다."""
     from planning_agent.domain.service import ActionError, GateRefused
 
     try:
@@ -420,6 +433,7 @@ async def _start(
             paths=plan.paths,
             connection=cid,
             skip_queue=skip_queue,
+            mode=mode,
         )
     except ActionError as exc:
         return await svc.chat_add(
@@ -443,7 +457,9 @@ async def _start(
     return await svc.chat_add(
         tid,
         "assistant",
-        f"{head}\n작업 {task_id}을 시작했어요. 진행은 여기서 볼 수 있어요.",
+        f"{head}\n작업 {task_id}을 대기열에 올렸어요. 내 Claude Code에서 가져가면 시작돼요."
+        if mode == "subscription"
+        else f"{head}\n작업 {task_id}을 시작했어요. 진행은 여기서 볼 수 있어요.",
         kind="started",
         plan=plan,
         task_id=task_id,
@@ -471,7 +487,7 @@ async def resume_waiting(svc: PlanningService) -> None:
             )  # fmt: skip
             continue
         done = ", ".join(th.waiting_for)
-        await _start(svc, th.id, plan, th.connection, f"{done}가 끝나서 시작할게요.")
+        await _start(svc, th.id, plan, th.connection, f"{done}가 끝나서 시작할게요.", mode=th.mode)
 
 
 WAIT_NOTICE_MINUTES = 30  # 앞 요청을 이만큼 넘게 기다리면 대화에 한 번 알린다

@@ -1,4 +1,4 @@
-"""기획개발 변경 요청 skill의 입출력. 기획개발 쪽 모델은 계약(`CreateTicketInput/Output`)을 쓴다."""
+"""기획 변경 요청 skill의 입출력. 기획 쪽 모델은 계약(`CreateTicketInput/Output`)을 쓴다."""
 
 from __future__ import annotations
 
@@ -27,8 +27,8 @@ class RequestChangeOutput(AxModel):
     """`created`: 새 요청 / `linked_duplicate`: 같은 요청이 있어 거기에 묶였다."""
 
     outcome: Literal["created", "linked_duplicate"]
-    request_id: str  # REQ-n (기획개발)
-    context_id: str  # 기획개발이 발급한 ctx_req_
+    request_id: str  # REQ-n (기획)
+    context_id: str  # 기획이 발급한 ctx_req_
     duplicate_of: str | None = None
     link: ChangeRequestLink
 

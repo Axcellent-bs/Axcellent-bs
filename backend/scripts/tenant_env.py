@@ -10,6 +10,8 @@
 - 카탈로그 `DATA_TENANT_CATALOG`: 환경변수 → 회사 폴더 `catalog`
 - 재무 인당 월 단가 `FINANCE_PER_HEAD_MONTHLY`: 환경변수 → 회사 폴더 `[finance] per_head_monthly`
   (없으면 재무 기본값 `finance_policy.toml`)
+- 검색어 급상승 기본 키워드 `DATA_TREND_CONFIG`: 환경변수 → 회사 폴더 `trends`(있을 때만)
+- YouTube 스냅샷 회사 키워드 `DATA_YOUTUBE_CONFIG`: 환경변수 → 회사 폴더 `youtube`(있을 때만)
 설정이 틀리면(폴더·카탈로그 없음, 커넥터가 카탈로그와 다름) 이유를 stderr에 쓰고 2로 끝난다.
 """
 
@@ -70,12 +72,20 @@ def read_tenant(folder: Path) -> dict[str, str]:
         isinstance(per_head, bool) or not isinstance(per_head, int) or per_head < 0
     ):
         raise TenantError(f"{path}: [finance] per_head_monthly는 0 이상 정수여야 합니다")
+    trends = raw.get("trends")
+    youtube = raw.get("youtube")
     return {
         "name": str(raw.get("name") or folder.name),
         "catalog": raw["catalog"] if not raw["catalog"].endswith(".toml") else catalog.as_posix(),
         "connector": raw["connector"],
         "org": (folder / org).resolve().as_posix() if isinstance(org, str) and org else "",
         "per_head_monthly": "" if per_head is None else str(per_head),
+        "trends": (folder / trends).resolve().as_posix()
+        if isinstance(trends, str) and trends
+        else "",
+        "youtube": (folder / youtube).resolve().as_posix()
+        if isinstance(youtube, str) and youtube
+        else "",
     }
 
 
@@ -120,6 +130,18 @@ def resolve(
     elif tenant["per_head_monthly"]:
         out["FINANCE_PER_HEAD_MONTHLY"] = tenant["per_head_monthly"]
         notes.append(f"재무 인당 월 단가: {tenant['per_head_monthly']}원 (회사 폴더)")
+
+    if env.get("DATA_TREND_CONFIG"):
+        notes.append(f"검색어 급상승 키워드: {env['DATA_TREND_CONFIG']} (환경변수)")
+    elif tenant["trends"] and Path(tenant["trends"]).is_file():
+        out["DATA_TREND_CONFIG"] = tenant["trends"]
+        notes.append(f"검색어 급상승 키워드: {tenant['trends']} (회사 폴더)")
+
+    if env.get("DATA_YOUTUBE_CONFIG"):
+        notes.append(f"YouTube 회사 키워드: {env['DATA_YOUTUBE_CONFIG']} (환경변수)")
+    elif tenant["youtube"] and Path(tenant["youtube"]).is_file():
+        out["DATA_YOUTUBE_CONFIG"] = tenant["youtube"]
+        notes.append(f"YouTube 회사 키워드: {tenant['youtube']} (회사 폴더)")
     return out, notes
 
 

@@ -18,7 +18,7 @@ DEPARTMENT_KO: dict[str, str] = {
     "finance": "재무",
     "data": "데이터분석",
     "hr": "인사",
-    "planning": "기획개발",
+    "planning": "기획·개발",
     "infra": "인프라",
 }
 
@@ -100,6 +100,7 @@ SKILL_KO: dict[str, str] = {
     "root_cause_hypotheses": "원인 후보 찾기",
     "accuracy_report": "정확도 보고서",
     "activity_report": "부서별 AI 업무 리포트",
+    "trend_scan": "검색어 급상승 보기",
     "receive_dev_result": "개발 결과 받기",
     "start_dev": "개발 시작",
 }

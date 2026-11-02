@@ -152,7 +152,7 @@ def test_other_routes_still_require_mock(client: TestClient, fake: Fake) -> None
 def test_ui_contexts_never_use_a_prefix_owned_by_another_department(
     client: TestClient, fake: Fake
 ) -> None:
-    """`ctx_req_`는 기획개발이 발급하는 변경 요청 사건이다. 화면 호출이 이를 흉내 내면 안 된다."""
+    """`ctx_req_`는 기획이 발급하는 변경 요청 사건이다. 화면 호출이 이를 흉내 내면 안 된다."""
     from ax_contracts.schemas.ids import ContextPrefix
 
     fake.output = {"items": []}

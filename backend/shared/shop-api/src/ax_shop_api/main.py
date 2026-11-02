@@ -78,6 +78,8 @@ class OrderIn(BaseModel):
     buyer_id: str
     items: list[OrderLine]
     points_used: int = Field(default=0, ge=0)  # 포인트 사용분(원). 품목 금액 비율로 나눠 기록한다
+    # 같은 구매자의 같은 키는 주문 하나다. 재시도·중복 전송이 주문을 두 번 만들지 않게 한다
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class CartPriceIn(BaseModel):
@@ -201,9 +203,10 @@ INJECT_ALLOWED = {"admin"}
 # 상품 등록·수정(재고 보충 포함)은 운영자(admin)만
 PRODUCT_WRITERS = {"admin"}
 RELEASE_ALLOWED = {"admin", "infra"}
-# 공지·쿠폰 쓰기는 마케팅 관문 토큰만, 쿠폰 조회는 사후 검증·중복 확인을 하는 부서까지
+# 공지·쿠폰 쓰기는 마케팅 관문 토큰만, 쿠폰 조회는 사후 검증·중복 확인을 하는 부서와
+# 캠페인 성과를 세는 data(읽기 전용)까지
 MARKETING_ONLY = {"marketing"}
-COUPON_READERS = {"marketing", "support", "finance", "orchestrator"}
+COUPON_READERS = {"marketing", "support", "finance", "orchestrator", "data"}
 # 현금 환불(SHOP-12)은 고객지원 관문 토큰만(마케팅 토큰 거부)
 REFUND_ALLOWED = {"support"}
 # 데이터 조회(읽기 전용)는 분석을 하는 data와 관리자만
@@ -398,11 +401,14 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
 
     @app.post("/api/shop/orders", status_code=201)
     async def create_order(body: OrderIn) -> dict:
-        order = shop.create_order(
-            body.buyer_id, [(i.product_id, i.qty) for i in body.items], body.points_used
+        order, replayed = shop.place_order(
+            body.buyer_id,
+            [(i.product_id, i.qty) for i in body.items],
+            body.points_used,
+            body.idempotency_key,
         )
         await outbox.flush(database)
-        return _ok(order)
+        return _ok(order, replayed=replayed)
 
     @app.post("/api/shop/orders/{order_id}/payments")
     async def pay(order_id: str, body: PaymentIn) -> dict:

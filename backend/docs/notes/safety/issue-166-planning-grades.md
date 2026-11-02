@@ -1,4 +1,4 @@
-# #166 기획개발 액션 등급·자동 기준
+# #166 기획·개발 액션 등급·자동 기준
 
 ## 반영한 것
 - `registry.toml`: `write_spec`·`split_tasks`·`review_pr`·`send_message`·`confirm_spec`은 A, `merge_pr`은 B(검증자 = safety 코드 규칙).

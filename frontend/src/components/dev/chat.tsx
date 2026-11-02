@@ -2,7 +2,7 @@
 // 대화는 REST(/dev-chat)로 주고받고, SSE에 chats가 있으면 그걸로 갱신한다. 없으면 2초마다 다시 읽는다
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Chip, useToast, type ChipTone } from '@dejafix/common-frontend'
-import type { ChatMessage, ChatStatus, ChatThread, CodingStatus, State as S, Task } from '@/lib/planningData'
+import type { ChatMessage, ChatStatus, ChatThread, CodingMode, CodingStatus, State as S, Task } from '@/lib/planningData'
 import { DEV_API, PlanningApiError, chatApi, vcsApi, type VcsConnection } from '@/lib/planning'
 import { CODING_LABEL, CancelButton, ResumeButton, codingState, isRunning } from '@/components/dev/coding'
 import { State } from '@/components/planning-common/parts'
@@ -68,12 +68,16 @@ export type DevChat = ReturnType<typeof useDevChat>
 type Err = { code: string; message: string }
 
 /** 오른쪽 대화 패널 */
+const MODE_KEY = 'axcellent-dev-chat-mode'
+const readMode = (): CodingMode => { try { return localStorage.getItem(MODE_KEY) === 'subscription' ? 'subscription' : 'agent' } catch { return 'agent' } }
+
 export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat: DevChat; connected: boolean; onClose: () => void; onTools: () => void }) {
   const toast = useToast()
   const { cur, threads, draft, setDraft } = chat
   const [conns, setConns] = useState<VcsConnection[]>([])
   const [conn, setConn] = useState('')
   const [pending, setPending] = useState<string | null>(null) // 보낸 글 (답 기다리는 중)
+  const [pick, setPick] = useState<CodingMode>(readMode)
   const [err, setErr] = useState<Err | null>(null)
   const box = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
@@ -106,6 +110,12 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
   }, [msgs.length, pending, err])
 
   const repo = cur?.connection ?? conn
+  // 작업을 띄운 대화는 그 대화의 모드 그대로, 새 대화는 고른 모드 (이 브라우저에 기억)
+  const mode: CodingMode = cur?.taskId ? cur.mode ?? 'agent' : pick
+  const choose = (m: CodingMode) => {
+    setPick(m)
+    try { localStorage.setItem(MODE_KEY, m) } catch { /* 저장이 막혀도 이번 화면에서는 바뀐다 */ }
+  }
   const send = async (text = draft) => {
     const message = text.trim()
     if (!message || pending) return
@@ -113,7 +123,7 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
     setErr(null)
     setDraft('')
     try {
-      const t = await api.send({ ...(cur ? { thread_id: cur.id } : {}), message, ...(repo ? { connection: repo } : {}) })
+      const t = await api.send({ ...(cur ? { thread_id: cur.id } : {}), message, ...(repo ? { connection: repo } : {}), mode })
       chat.upsert(t)
       chat.select(t.id)
     } catch (x) {
@@ -184,7 +194,10 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
         <textarea ref={input} rows={3} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey}
           placeholder={cur ? '답장' : '무엇을 바꿀까요'} aria-label="메시지" disabled={!!pending || !connected} />
         <div className="sl-composer-bar">
-          <span />
+          <div className="seg-toggle" role="group" aria-label="누가 코딩하나" title={cur?.taskId ? '작업을 띄운 대화는 바꿀 수 없어요' : '서버 AI는 회사 토큰, 내 Claude는 내 구독으로 코딩해요'}>
+            <button type="button" aria-pressed={mode === 'agent'} onClick={() => choose('agent')} disabled={!!pending || !!cur?.taskId}>서버 AI</button>
+            <button type="button" aria-pressed={mode === 'subscription'} onClick={() => choose('subscription')} disabled={!!pending || !!cur?.taskId}>내 Claude</button>
+          </div>
           <button type="button" className="send" onClick={() => void send()} disabled={!!pending || !connected || !draft.trim()} aria-label="보내기">↑</button>
         </div>
       </div>

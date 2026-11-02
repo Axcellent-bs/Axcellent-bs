@@ -14,7 +14,7 @@ export const DESKS: DeskDef[] = [
   { key: "data", label: "데이터분석", x: 74, y: 62, shirt: "#6d28d9", hair: "#2b1d14", skin: "#f5d0b0" },
   { key: "support", label: "고객지원", x: 134, y: 62, shirt: "#047857", hair: "#6b3e26", skin: "#f2c9a0" },
   { key: "finance", label: "재무", x: 194, y: 62, shirt: "#b45309", hair: "#3a2a1a", skin: "#e8b98f" },
-  { key: "planning", label: "기획개발", x: 14, y: 128, shirt: "#5b4fd0", hair: "#191919", skin: "#f5d0b0" },
+  { key: "planning", label: "기획", x: 14, y: 128, shirt: "#5b4fd0", hair: "#191919", skin: "#f5d0b0" },
   { key: "marketing", label: "마케팅", x: 74, y: 128, shirt: "#ec7452", hair: "#7a4a2a", skin: "#f2c9a0" },
   { key: "hr", label: "인사", x: 134, y: 128, shirt: "#b91c1c", hair: "#4a2f1b", skin: "#e8b98f" },
   { key: "orchestrator", label: "총괄", x: 194, y: 128, shirt: "#2e2688", hair: "#222222", skin: "#f5d0b0" },
