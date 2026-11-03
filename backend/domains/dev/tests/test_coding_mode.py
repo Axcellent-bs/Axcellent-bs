@@ -229,3 +229,41 @@ def test_estimate_uses_median_of_finished_agent_runs(service) -> None:
         )  # fmt: skip
     est = service.coding_settings()["estimate"]
     assert est == {"samples": 3, "tokens": 40_000, "tokens_max": 90_000, "calls": 9, "files": 2}
+
+
+def test_step_models_pick_client_per_step(monkeypatch) -> None:
+    from ax_agent_template.llm import LLMSettings
+
+    assert [coder.step_of(x) for x in ("후보 고르기", "파일 확정", "파일 쓰기 a.ts", "리뷰")] == [
+        "plan", "plan", "write", "review",
+    ]  # fmt: skip
+    monkeypatch.setenv("PLANNING_CODER_MODEL_REVIEW", "env-review")
+    assert coder.step_models({"write": "big"}) == {"write": "big", "review": "env-review"}
+    assert coder.step_models({"review": "saved"})["review"] == "saved"  # 화면 설정이 먼저
+    base = coder.MeteredLLM(
+        "planning", settings=LLMSettings(model="base", base_url="http://llm.invalid")
+    )
+    token = coder._models.set({"write": "big"})
+    try:
+        w = coder._client_for(base, "파일 쓰기 a.ts")
+        assert w is not base and w.settings.model == "big"
+        assert w.settings.base_url == "http://llm.invalid"
+        assert coder._client_for(base, "후보 고르기") is base  # 정하지 않은 단계는 기본
+        assert coder._client_for(_NoLLM(), "파일 쓰기 a.ts").__class__ is _NoLLM  # 가짜는 그대로
+    finally:
+        coder._models.reset(token)
+
+
+def test_set_coding_models_validates_and_shows(service, monkeypatch) -> None:
+    monkeypatch.setenv("AX_AGENT_TOKENS", "admin=admin-test-token")
+    out = run(service.set_coding_models({"plan": "small", "review": ""}))
+    assert out.output["models"] == {"plan": "small"}
+    with pytest.raises(ActionError):
+        run(service.set_coding_models({"deploy": "x"}))
+    with pytest.raises(ActionError):
+        run(service.set_coding_models({"write": "two words"}))
+    c = TestClient(app)
+    admin = {"Authorization": "Bearer admin-test-token"}
+    r = c.post("/api/planning/coding-settings", json={"models": {"write": "big"}}, headers=admin)
+    assert r.status_code == 200 and r.json()["data"]["models"] == {"write": "big"}
+    assert r.json()["data"]["mode"] == "auto"  # 모드는 그대로

@@ -489,13 +489,19 @@ def add_settings_routes(router: APIRouter, get_service: Callable[[], Any]) -> No
 
     @router.post("/coding-settings", response_model=None, dependencies=ADMIN)
     async def post_coding_settings(request: Request) -> dict | JSONResponse:
-        """`{mode: auto|agent|subscription}` (관리자)."""
+        """`{mode?: auto|agent|subscription, models?: {plan, write, review}}` (관리자)."""
         svc = get_service()
         body = await _body(request)
         if body is None:
             return _err(400, "INVALID_INPUT", "본문은 JSON 객체여야 한다")
+        models = body.get("models")
+        if models is not None and not isinstance(models, dict):
+            return _err(400, "INVALID_INPUT", "models는 {단계: 모델} 객체여야 한다")
         try:
-            result = await svc.set_coding_mode(str(body.get("mode", "")))
+            if models is not None:
+                result = await svc.set_coding_models(models)
+            if "mode" in body or models is None:
+                result = await svc.set_coding_mode(str(body.get("mode", "")))
         except ActionError as exc:
             return _err(400, exc.code, exc.message)
         return _ok(result.output, svc)

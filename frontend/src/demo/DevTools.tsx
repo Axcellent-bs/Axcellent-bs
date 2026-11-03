@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from '@/lib/nav'
-import { DEV_API, codingSettingsApi, useMe, vcsApi, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsInventory, type VcsTestResult } from '@/lib/planning'
+import { DEV_API, codingSettingsApi, useMe, vcsApi, type CodingStep, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsInventory, type VcsTestResult } from '@/lib/planning'
 import { UsageBar } from '@/components/dev/coding'
 
 // 개발 도구 연결: 고객사 개발팀이 쓰는 형상관리·CI·배포 도구를 개발·배포 AI(dev)에 잇는 창구.
@@ -147,6 +147,45 @@ function ClaudeConnect({ connected }: { connected: string[] }) {
 }
 
 /** 요청 작업 코딩 방식 + 서버 AI 체험 한도 */
+// 서버 AI 코딩 단계별 모델: 비우면 기본 모델
+const STEP_LABEL: { id: CodingStep; label: string }[] = [
+  { id: 'plan', label: '파일 고르기' },
+  { id: 'write', label: '코드 쓰기' },
+  { id: 'review', label: '리뷰' },
+]
+
+function StepModels({ cfg, onSaved }: { cfg: CodingSettings; onSaved: (c: CodingSettings) => void }) {
+  const [draft, setDraft] = useState<Partial<Record<CodingStep, string>>>(cfg.models ?? {})
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const changed = STEP_LABEL.some((s) => (draft[s.id] ?? '') !== (cfg.models?.[s.id] ?? ''))
+  const save = async (e: FormEvent) => {
+    e.preventDefault()
+    setBusy(true)
+    setError(null)
+    try { onSaved(await codingApi.setModels(draft)) } catch (x) { setError((x as Error).message) } finally { setBusy(false) }
+  }
+  return (
+    <form className="space-y-2 rounded-lg border border-ink-100 p-4" onSubmit={save}>
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="font-medium">단계별 모델</h3>
+        <span className="text-xs text-ink-500">서버 AI만 · 비우면 기본 {cfg.model_default ? <span className="mono">{cfg.model_default}</span> : '모델'}</span>
+        <button type="submit" className="btn-ghost ml-auto px-3 py-1 text-xs" disabled={busy || !changed}>{busy ? '저장 중…' : '저장'}</button>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {STEP_LABEL.map((s) => (
+          <label key={s.id} className="space-y-1 text-sm">
+            <span className="text-xs text-ink-500">{s.label}</span>
+            <input className="field mono w-full text-xs" value={draft[s.id] ?? ''} placeholder={cfg.model_default ?? '기본 모델'}
+              onChange={(e) => setDraft((d) => ({ ...d, [s.id]: e.target.value.trim() }))} maxLength={100} />
+          </label>
+        ))}
+      </div>
+      {error && <p className="text-sm text-red-700">{error}</p>}
+    </form>
+  )
+}
+
 function CodingModeSection() {
   const [cfg, setCfg] = useState<CodingSettings | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -176,6 +215,7 @@ function CodingModeSection() {
           <dd><UsageBar used={cfg.trial_used} limit={cfg.trial_limit} wide title="서버 AI(회사 키)가 코딩에 쓴 토큰 / 체험 한도" /></dd>
         </dl>
       )}
+      {cfg && <StepModels cfg={cfg} onSaved={setCfg} />}
       <ClaudeConnect connected={cfg?.agents_connected ?? []} />
     </section>
   )
