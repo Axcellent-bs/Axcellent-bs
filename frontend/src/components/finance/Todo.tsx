@@ -78,14 +78,14 @@ export function TodoCard({ todo, onDone, onOpen, onGoToQueue }: {
     const { month, signature } = action;
     decision = (
       <div className="mt-3 space-y-2">
-        <p className="text-xs text-ink-500">팀 예산 = 그달 1일 팀 인원 × 인당 월 단가입니다. 인원은 인사 AI가 알려 준 숫자이고, 발령은 다음 달 1일부터 반영됩니다. 숫자가 맞으면 확정하세요. 돈을 옮기지는 않습니다.</p>
+        <p className="text-sm text-ink-500">팀 예산 = 그달 1일 팀 인원 × 인당 월 단가입니다. 인원은 인사 AI가 알려 준 숫자이고, 발령은 다음 달 1일부터 반영됩니다. 숫자가 맞으면 확정하세요. 돈을 옮기지는 않습니다.</p>
         {(todo.items ?? []).length > 0 && (
           <ul className="space-y-1 text-sm">
             {(todo.items ?? []).map((item) => (
               <li key={item.ref} className="flex flex-wrap items-baseline gap-x-2 rounded-xl border border-ink-100 px-3 py-2">
                 <b className="text-ink-900">{plainText(item.title)}</b>
-                <span className="text-xs text-ink-500">{plainText(item.detail)}</span>
-                {item.amount != null && <span className="ml-auto text-xs tabular-nums text-ink-700">{item.amount > 0 ? `+${krw(item.amount)}` : signedKrw(item.amount)}</span>}
+                <span className="text-sm text-ink-500">{plainText(item.detail)}</span>
+                {item.amount != null && <span className="ml-auto text-sm tabular-nums text-ink-700">{item.amount > 0 ? `+${krw(item.amount)}` : signedKrw(item.amount)}</span>}
               </li>
             ))}
           </ul>
@@ -100,13 +100,13 @@ export function TodoCard({ todo, onDone, onOpen, onGoToQueue }: {
   } else if (action?.type === "open_tab") {
     decision = (
       <div className="mt-3 space-y-2">
-        <p className="text-xs text-ink-500">판매 대금 지급 기한이 가까웠거나 지났습니다. 판매자 정산 탭에서 보류 사유를 풀거나 이번 지급 묶음에 넣으세요. 지급은 지금처럼 보류 큐 승인으로만 합니다.</p>
+        <p className="text-sm text-ink-500">판매 대금 지급 기한이 가까웠거나 지났습니다. 판매자 정산 탭에서 보류 사유를 풀거나 이번 지급 묶음에 넣으세요. 지급은 지금처럼 보류 큐 승인으로만 합니다.</p>
         <ul className="space-y-1 text-sm">
           {(todo.items ?? []).map((item) => (
             <li key={item.ref} className="flex flex-wrap items-baseline gap-x-2 rounded-xl border border-ink-100 px-3 py-2">
               <b className="text-ink-900">{plainText(item.title)}</b>
-              <span className="text-xs text-ink-500">{plainText(item.detail)}</span>
-              {item.amount != null && <span className="ml-auto text-xs tabular-nums text-ink-700">{krw(item.amount)}</span>}
+              <span className="text-sm text-ink-500">{plainText(item.detail)}</span>
+              {item.amount != null && <span className="ml-auto text-sm tabular-nums text-ink-700">{krw(item.amount)}</span>}
             </li>
           ))}
         </ul>
@@ -117,7 +117,7 @@ export function TodoCard({ todo, onDone, onOpen, onGoToQueue }: {
     const spec = ITEM_ACTION[action.type as ItemActionType];
     decision = (
       <div className="mt-3 space-y-2">
-        <p className="text-xs text-ink-500">{spec.hint}</p>
+        <p className="text-sm text-ink-500">{spec.hint}</p>
         <ul className="space-y-2">
           {(todo.items ?? []).map((item) => (
             <ItemRow key={item.ref} item={item} button={spec.button} placeholder={spec.placeholder}
@@ -125,7 +125,7 @@ export function TodoCard({ todo, onDone, onOpen, onGoToQueue }: {
           ))}
         </ul>
         {(todo.count ?? 0) > (todo.items?.length ?? 0) && (
-          <button type="button" className="btn-quiet text-xs" onClick={onOpen}>나머지 {(todo.count ?? 0) - (todo.items?.length ?? 0)}건은 탭에서 보기 →</button>
+          <button type="button" className="btn-quiet text-sm" onClick={onOpen}>나머지 {(todo.count ?? 0) - (todo.items?.length ?? 0)}건은 탭에서 보기 →</button>
         )}
       </div>
     );
@@ -137,10 +137,10 @@ export function TodoCard({ todo, onDone, onOpen, onGoToQueue }: {
         <Chip label={kind.label} tone={kind.tone} />
         <span className="min-w-0 flex-1 text-sm font-medium text-ink-900">{plainText(todo.title)}</span>
         {todo.amount != null && <span className="text-sm tabular-nums text-ink-700">{todo.kind === "closing_confirm" ? `영업 결과 ${signedKrw(todo.amount)}` : krw(todo.amount)}</span>}
-        <button type="button" className="text-xs font-medium text-brand-700 hover:underline" onClick={onOpen}>탭에서 보기 →</button>
+        <button type="button" className="text-sm font-medium text-brand-700 hover:underline" onClick={onOpen}>탭에서 보기 →</button>
       </div>
       {decision}
-      {decision && action?.type !== "open_tab" && !humanTokenSet && <p className="mt-2 text-xs text-amber-800">{NO_TOKEN}</p>}
+      {decision && action?.type !== "open_tab" && !humanTokenSet && <p className="mt-2 text-sm text-amber-800">{NO_TOKEN}</p>}
       {problem && <p role="alert" className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{problem}</p>}
     </li>
   );
@@ -149,7 +149,7 @@ export function TodoCard({ todo, onDone, onOpen, onGoToQueue }: {
 function Decision({ hint, children }: { hint: string; children: ReactNode }) {
   return (
     <div className="mt-3 flex flex-wrap items-center gap-2">
-      <p className="w-full text-xs text-ink-500">{hint}</p>
+      <p className="w-full text-sm text-ink-500">{hint}</p>
       {children}
     </div>
   );
@@ -163,8 +163,8 @@ function ItemRow({ item, button, placeholder, onSend, busy }: {
     <li className="rounded-xl border border-ink-100 px-3 py-2 text-sm">
       <div className="flex flex-wrap items-baseline gap-x-2">
         <b className="text-ink-900">{plainText(item.title)}</b>
-        <span className="text-xs text-ink-500">{plainText(item.detail)}</span>
-        {item.amount != null && <span className="ml-auto text-xs tabular-nums text-ink-700">{krw(item.amount)}</span>}
+        <span className="text-sm text-ink-500">{plainText(item.detail)}</span>
+        {item.amount != null && <span className="ml-auto text-sm tabular-nums text-ink-700">{krw(item.amount)}</span>}
       </div>
       <form className="mt-2 flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (note.trim()) onSend(note.trim()); }}>
         <label className="min-w-0 flex-1">

@@ -3,7 +3,7 @@
 // 출처가 연결되면 이 표시를 뗀다.
 
 export function PreparingChip() {
-  return <span className="chip bg-violet-50 text-violet-700">준비 중</span>;
+  return <span className="chip text-sm bg-violet-50 text-violet-700">준비 중</span>;
 }
 
 export function PreparingNotice({ what, source }: { what: string; source: string }) {

@@ -16,10 +16,10 @@ export function DeadlineSection({ tick }: { tick: number }) {
       <ResourceBody res={res}>
         {(r) => (
           <div className="space-y-3">
-            <p className="text-xs text-ink-500">
+            <p className="text-sm text-ink-500">
               기준: {r.basis} {r.deadline_days}일 안 · 임박 {r.warn_days}일 이하 · {r.since} 이후 결제분 · 배송 전이라 기한이 시작되지 않은 주문 {r.waiting_orders.toLocaleString("ko-KR")}건
             </p>
-            <div className="flex flex-wrap gap-2 text-xs">
+            <div className="flex flex-wrap gap-2 text-sm">
               {(["overdue", "at_risk", "due_soon", "ok"] as const).map((k) => (
                 <Chip key={k} label={`${{ overdue: "기한 지남", at_risk: "기한 넘길 위험", due_soon: "기한 임박", ok: "정상" }[k]} ${r.counts[k]}곳`} tone={r.counts[k] && k !== "ok" ? DEADLINE_TONE[k] : TONE.muted} />
               ))}
@@ -27,7 +27,7 @@ export function DeadlineSection({ tick }: { tick: number }) {
             {r.sellers.length ? (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[640px] text-sm">
-                  <thead className="text-left text-xs text-ink-500">
+                  <thead className="text-left text-sm text-ink-500">
                     <tr>
                       <th className="pb-1 font-medium">판매자</th><th className="pb-1 font-medium">상태</th>
                       <th className="pb-1 text-right font-medium">미지급 판매 대금</th><th className="pb-1 font-medium">가장 이른 기한</th>
@@ -37,12 +37,12 @@ export function DeadlineSection({ tick }: { tick: number }) {
                   <tbody>
                     {r.sellers.map((s) => (
                       <tr key={s.seller_id} className="border-t border-ink-100 align-top">
-                        <td className="py-1.5">{s.name}<span className="ml-1 text-xs text-ink-500">주문 {s.orders}건</span></td>
+                        <td className="py-1.5">{s.name}<span className="ml-1 text-sm text-ink-500">주문 {s.orders}건</span></td>
                         <td className="py-1.5"><Chip label={s.status_label} tone={DEADLINE_TONE[s.status]} /></td>
                         <td className="py-1.5 text-right tabular-nums">{krw(s.amount)}</td>
-                        <td className="py-1.5 tabular-nums">{s.deadline} <span className={`text-xs ${s.days_left < 0 ? "text-red-700" : "text-ink-500"}`}>({s.days_left < 0 ? `${-s.days_left}일 지남` : `${s.days_left}일 남음`})</span></td>
-                        <td className="py-1.5 tabular-nums">{s.expected_pay_date ?? <span className="text-xs text-amber-800">예정 없음</span>}</td>
-                        <td className="py-1.5 text-xs text-ink-700">{s.hold_reasons.map((h) => plainText(h.label)).join(", ") || "–"}</td>
+                        <td className="py-1.5 tabular-nums">{s.deadline} <span className={`text-sm ${s.days_left < 0 ? "text-red-700" : "text-ink-500"}`}>({s.days_left < 0 ? `${-s.days_left}일 지남` : `${s.days_left}일 남음`})</span></td>
+                        <td className="py-1.5 tabular-nums">{s.expected_pay_date ?? <span className="text-sm text-amber-800">예정 없음</span>}</td>
+                        <td className="py-1.5 text-sm text-ink-700">{s.hold_reasons.map((h) => plainText(h.label)).join(", ") || "–"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -67,19 +67,19 @@ export function PayablesSection({ tick }: { tick: number }) {
             <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
               {([["기초", p.totals.opening], ["발생 (+)", p.totals.accrued], ["지급 (−)", p.totals.paid], ["기말", p.totals.closing]] as const).map(([label, v]) => (
                 <div key={label} className="rounded-2xl bg-surface-2 px-3 py-2">
-                  <dt className="text-[11px] text-ink-500">{p.month} {label}</dt>
+                  <dt className="text-sm text-ink-500">{p.month} {label}</dt>
                   <dd className="text-base font-semibold tabular-nums">{krw(v)}</dd>
                 </div>
               ))}
             </dl>
-            <p className="text-xs text-ink-500">
+            <p className="text-sm text-ink-500">
               {p.balanced === true ? "기초 + 발생 − 지급 = 기말이 맞습니다." : p.balanced === false ? "합계가 맞지 않습니다. 재무 담당자에게 알리세요." : "주문·쿠폰 자료를 받지 못해 맞는지 확인할 수 없습니다."} {p.basis}
             </p>
             {p.overpaid.length > 0 && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">기말이 음수인 판매자 {p.overpaid.length}곳: 지급액이 발생액보다 많습니다. 환불·상계가 빠졌는지 확인하세요.</p>}
             {p.sellers.length ? (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[520px] text-sm">
-                  <thead className="text-left text-xs text-ink-500">
+                  <thead className="text-left text-sm text-ink-500">
                     <tr><th className="pb-1 font-medium">판매자</th><th className="pb-1 text-right font-medium">기초</th><th className="pb-1 text-right font-medium">발생</th><th className="pb-1 text-right font-medium">지급</th><th className="pb-1 text-right font-medium">기말</th></tr>
                   </thead>
                   <tbody>
@@ -123,18 +123,18 @@ export function VarianceSection({ tick }: { tick: number }) {
             </ul>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[600px] text-sm">
-                <thead className="text-left text-xs text-ink-500">
+                <thead className="text-left text-sm text-ink-500">
                   <tr><th className="pb-1 pl-3 font-medium">항목 ({v.month})</th><th className="pb-1 text-right font-medium">이번 달</th><th className="pb-1 text-right font-medium">지난달</th><th className="pb-1 text-right font-medium">변동</th><th className="pb-1 pr-3 text-right font-medium">작년 같은 달</th></tr>
                 </thead>
                 <tbody>
                   {v.lines.map((l) => (
                     <tr key={l.code} className={`border-t border-ink-100 ${l.flag ? "bg-amber-50" : ""}`}>
-                      <th scope="row" className="py-1.5 pl-3 pr-3 text-left font-normal">{l.label}{l.flag && <span className="ml-1 text-xs text-amber-800">크게 움직임</span>}</th>
+                      <th scope="row" className="py-1.5 pl-3 pr-3 text-left font-normal">{l.label}{l.flag && <span className="ml-1 text-sm text-amber-800">크게 움직임</span>}</th>
                       <td className="py-1.5 text-right tabular-nums">{valueOf(l, l.current)}</td>
                       <td className="py-1.5 text-right tabular-nums text-ink-500">{valueOf(l, l.previous)}</td>
                       <td className="py-1.5 text-right tabular-nums">
                         {l.diff == null ? "–" : l.code === "take_rate" ? `${l.diff > 0 ? "+" : ""}${(l.diff * 100).toFixed(1)}%p` : l.code === "order_count" ? `${l.diff > 0 ? "+" : ""}${l.diff.toLocaleString("ko-KR")}건` : signedKrw(l.diff)}
-                        {l.pct != null && l.code !== "take_rate" && <span className="ml-1 text-xs text-ink-500">({l.pct > 0 ? "+" : ""}{(l.pct * 100).toFixed(0)}%)</span>}
+                        {l.pct != null && l.code !== "take_rate" && <span className="ml-1 text-sm text-ink-500">({l.pct > 0 ? "+" : ""}{(l.pct * 100).toFixed(0)}%)</span>}
                       </td>
                       <td className="py-1.5 pr-3 text-right tabular-nums text-ink-500">{valueOf(l, l.last_year)}</td>
                     </tr>
@@ -150,15 +150,15 @@ export function VarianceSection({ tick }: { tick: number }) {
             {v.categories.length > 0 && (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[480px] text-sm">
-                  <thead className="text-left text-xs text-ink-500">
+                  <thead className="text-left text-sm text-ink-500">
                     <tr><th className="pb-1 pl-3 font-medium">분류</th><th className="pb-1 text-right font-medium">총거래액 (지난달)</th><th className="pb-1 text-right font-medium">수수료 매출 (지난달)</th><th className="pb-1 pr-3 text-right font-medium">수수료 변동</th></tr>
                   </thead>
                   <tbody>
                     {v.categories.map((c) => (
                       <tr key={c.category} className="border-t border-ink-100">
                         <td className="py-1.5 pl-3">{CATEGORY_KO[c.category] ?? c.category}</td>
-                        <td className="py-1.5 text-right tabular-nums">{krw(c.gmv)} <span className="text-xs text-ink-500">({krw(c.gmv_prev)})</span></td>
-                        <td className="py-1.5 text-right tabular-nums">{krw(c.commission)} <span className="text-xs text-ink-500">({krw(c.commission_prev)})</span></td>
+                        <td className="py-1.5 text-right tabular-nums">{krw(c.gmv)} <span className="text-sm text-ink-500">({krw(c.gmv_prev)})</span></td>
+                        <td className="py-1.5 text-right tabular-nums">{krw(c.commission)} <span className="text-sm text-ink-500">({krw(c.commission_prev)})</span></td>
                         <td className="py-1.5 pr-3 text-right tabular-nums">{signedKrw(c.commission_diff)}</td>
                       </tr>
                     ))}

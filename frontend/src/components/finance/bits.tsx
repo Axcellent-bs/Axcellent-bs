@@ -4,7 +4,7 @@ import type { Envelope, FinanceMeta } from "@/lib/finance";
 
 // 재무 화면 공통 부품: 칩, 예시 데이터 표시, 불러오기·오류·빈 상태, 섹션 틀, 데이터 훅.
 
-export const Chip = ({ label, tone }: { label: string; tone: string }) => <span className={`chip ${tone}`}>{label}</span>;
+export const Chip = ({ label, tone }: { label: string; tone: string }) => <span className={`chip text-sm ${tone}`}>{label}</span>;
 
 export const TONE = {
   ok: "bg-emerald-50 text-emerald-700",
@@ -17,14 +17,14 @@ export const TONE = {
 /** 목 모드 응답이면 "예시 데이터" 표시 */
 export function MockBadge({ meta }: { meta: FinanceMeta | null | undefined }) {
   if (!meta?.mock) return null;
-  return <span className="chip bg-violet-50 text-violet-700" title="실제 쇼핑몰 자료가 아니라 연습용 예시 자료입니다">예시 데이터</span>;
+  return <span className="chip bg-violet-50 text-sm text-violet-700" title="실제 쇼핑몰 자료가 아니라 연습용 예시 자료입니다">예시 데이터</span>;
 }
 
 /** 받은 시각과 못 받은 값 안내 */
 export function MetaLine({ meta }: { meta: FinanceMeta | null | undefined }) {
   if (!meta) return null;
   return (
-    <p className="text-[11px] text-ink-500">
+    <p className="text-sm text-ink-500">
       {meta.collected_at && `${shortDateTime(meta.collected_at)} 기준`}
       {meta.unavailable && meta.unavailable.length > 0 && ` · 받지 못한 값 ${meta.unavailable.length}개는 "확인할 수 없음"으로 표시합니다`}
     </p>
@@ -56,14 +56,14 @@ export function RefList({ refs, sellers, label = "기록 번호 보기" }: { ref
   const ids = [...new Set(refs.filter((r): r is string => !!r))];
   if (!ids.length) return null;
   return (
-    <details className="mt-1 text-[11px] text-ink-500">
+    <details className="mt-1 text-sm text-ink-500">
       <summary className="cursor-pointer select-none hover:text-ink-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">{label} ({ids.length})</summary>
       <ul className="mt-1 flex flex-wrap gap-1">
         {ids.map((r) => {
           const word = humanId(r, sellers);
           return (
             <li key={r} className="rounded bg-ink-100 px-1.5 py-0.5">
-              {word === r ? <code className="font-mono">{r}</code> : <>{word} <code className="font-mono text-[10px] text-ink-500">({r})</code></>}
+              {word === r ? <code className="font-mono">{r}</code> : <>{word} <code className="font-mono text-sm text-ink-500">({r})</code></>}
             </li>
           );
         })}
@@ -84,7 +84,7 @@ export function Panel({ id, title, titleHidden, hint, meta, tools, children }: {
           <h2 id={id ? `${id}-title` : undefined} className="flex flex-wrap items-center gap-2 text-base font-semibold text-ink-900">
             <span className={titleHidden ? "sr-only" : undefined}>{title}</span> <MockBadge meta={meta} />
           </h2>
-          {hint && <p className="mt-0.5 text-xs leading-relaxed text-ink-500">{hint}</p>}
+          {hint && <p className="mt-0.5 text-sm leading-relaxed text-ink-500">{hint}</p>}
           <MetaLine meta={meta} />
         </div>
         {tools && <div className="flex flex-wrap items-center gap-2">{tools}</div>}

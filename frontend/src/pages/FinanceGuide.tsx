@@ -20,7 +20,7 @@ function Table({ head, rows }: { head: string[]; rows: ReactNode[][] }) {
   return (
     <div className="card overflow-x-auto p-1">
       <table className="w-full min-w-[520px] text-sm">
-        <thead className="text-left text-xs text-ink-500">
+        <thead className="text-left text-sm text-ink-500">
           <tr>{head.map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr>
         </thead>
         <tbody>
@@ -133,7 +133,7 @@ export default function FinanceGuidePage() {
         <Q q="&quot;재무 AI 서버(8105)에 연결하지 못했습니다&quot;가 보여요.">ax-backend에서 <code>docker compose -f infra/compose.yml up -d safety finance</code>로 켭니다. 안전 장치가 꺼져 있는 동안 돈이 나가는 일은 모두 멈춥니다.</Q>
       </Part>
 
-      <p className="text-xs text-ink-500">문의: 재무/정산 담당 태윤</p>
+      <p className="text-sm text-ink-500">문의: 재무/정산 담당 태윤</p>
     </div>
   );
 }

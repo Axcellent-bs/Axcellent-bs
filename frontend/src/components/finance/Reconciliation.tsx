@@ -46,8 +46,8 @@ function NoteForm({ item, onSaved }: { item: ReconItem; onSaved: (next: ReconIte
           onChange={(e) => { setText(e.target.value); setSaved(false); }} disabled={!humanTokenSet} />
         <button type="submit" className="btn-ghost shrink-0" disabled={!humanTokenSet || !changed || saving}>{saving ? "저장 중…" : "메모 저장"}</button>
       </div>
-      {saved && <p className="mt-1 text-xs text-emerald-700" aria-live="polite">메모를 저장했습니다.</p>}
-      {problem && <p role="alert" className="mt-1 text-xs text-red-700">{problem}</p>}
+      {saved && <p className="mt-1 text-sm text-emerald-700" aria-live="polite">메모를 저장했습니다.</p>}
+      {problem && <p role="alert" className="mt-1 text-sm text-red-700">{problem}</p>}
     </form>
   );
 }
@@ -67,11 +67,11 @@ export function ReconciliationSection({ tick }: { tick: number }) {
 
   const tools = (
     <>
-      <label className="flex items-center gap-1 text-xs text-ink-500">
+      <label className="flex items-center gap-1 text-sm text-ink-500">
         <span className="sr-only">날짜</span>
         <input type="date" className="field w-auto py-1" value={date} onChange={(e) => setDate(e.target.value)} />
       </label>
-      {date ? <button type="button" className="btn-quiet" onClick={() => setDate("")}>최근 7일</button> : <span className="text-xs text-ink-500">최근 7일</span>}
+      {date ? <button type="button" className="btn-quiet" onClick={() => setDate("")}>최근 7일</button> : <span className="text-sm text-ink-500">최근 7일</span>}
     </>
   );
 
@@ -90,7 +90,7 @@ export function ReconciliationSection({ tick }: { tick: number }) {
                   const on = shown.includes(s);
                   return (
                     <button key={s} type="button" aria-pressed={on} onClick={() => toggle(s)} title={RECON_KO[s].hint}
-                      className={`chip py-1 text-xs ring-1 transition ${on ? `${RECON_KO[s].tone} ring-current` : "bg-surface text-ink-500 ring-ink-100 hover:bg-ink-100"}`}>
+                      className={`chip py-1 text-sm ring-1 transition ${on ? `${RECON_KO[s].tone} ring-current` : "bg-surface text-ink-500 ring-ink-100 hover:bg-ink-100"}`}>
                       {RECON_KO[s].label} <b className="tabular-nums">{r.counts[s] ?? 0}</b>
                     </button>
                   );
@@ -98,7 +98,7 @@ export function ReconciliationSection({ tick }: { tick: number }) {
               </div>
 
               {!shown.includes("pending") && (r.counts.pending ?? 0) > 0 && (
-                <p className="text-xs text-ink-500">
+                <p className="text-sm text-ink-500">
                   정산 전 {(r.counts.pending ?? 0).toLocaleString("ko-KR")}건은 PG가 아직 돈을 보내기 전이라 할 일이 아닙니다. 보려면 위 "정산 전"을 누르세요.
                 </p>
               )}
@@ -111,9 +111,9 @@ export function ReconciliationSection({ tick }: { tick: number }) {
                   ["입금 예정액", r.totals.pay_out, "수수료를 빼고 받을 돈"],
                 ] as const).map(([label, v, sub]) => (
                   <div key={label} className="rounded-2xl bg-surface-2 px-3 py-2">
-                    <dt className="text-[11px] text-ink-500">{label}</dt>
+                    <dt className="text-sm text-ink-500">{label}</dt>
                     <dd className={`text-base font-semibold tabular-nums ${v == null ? "text-ink-500" : ""}`}>{krw(v)}</dd>
-                    <dd className="text-[11px] text-ink-500">{sub}</dd>
+                    <dd className="text-sm text-ink-500">{sub}</dd>
                   </div>
                 ))}
               </dl>
@@ -124,23 +124,23 @@ export function ReconciliationSection({ tick }: { tick: number }) {
                     <li key={i.payment_id} className="grid gap-2 py-3 md:grid-cols-[150px_1fr_minmax(240px,320px)] md:items-start md:gap-4">
                       <div>
                         <Chip label={RECON_KO[i.status]?.label ?? "확인 필요"} tone={RECON_KO[i.status]?.tone ?? TONE.muted} />
-                        <p className="mt-1 break-all text-xs text-ink-500" title={i.order_id}>{humanId(i.order_id)}</p>
-                        <p className="break-all text-xs text-ink-500" title={i.payment_id}>{humanId(i.payment_id)}</p>
-                        {i.paid_at && <p className="text-xs text-ink-500">{shortDateTime(i.paid_at)} 결제</p>}
+                        <p className="mt-1 break-all text-sm text-ink-500" title={i.order_id}>{humanId(i.order_id)}</p>
+                        <p className="break-all text-sm text-ink-500" title={i.payment_id}>{humanId(i.payment_id)}</p>
+                        {i.paid_at && <p className="text-sm text-ink-500">{shortDateTime(i.paid_at)} 결제</p>}
                       </div>
                       <div className="min-w-0 text-sm">
                         <p className="text-ink-900">{i.reason ? plainText(i.reason) : RECON_KO[i.status]?.hint}</p>
-                        <p className="mt-1 text-xs tabular-nums text-ink-500">
+                        <p className="mt-1 text-sm tabular-nums text-ink-500">
                           주문 {krw(i.order_amount)} · PG {krw(i.pg_amount)} · 수수료 {krw(i.fee)}
                           {i.expected_fee != null && i.expected_fee !== i.fee && ` (원래 ${krw(i.expected_fee)})`}
                         </p>
-                        <p className="text-xs tabular-nums text-ink-500">
+                        <p className="text-sm tabular-nums text-ink-500">
                           입금 {krw(i.pay_out_amount)} · {i.paid_out_date ? `${i.paid_out_date} 입금` : "입금일 아직 없음"}
                         </p>
                       </div>
                       <div>
                         {i.status === "matched" || i.status === "pending" ? (
-                          i.note && <p className="text-xs text-ink-500">메모: {plainText(i.note)}</p>
+                          i.note && <p className="text-sm text-ink-500">메모: {plainText(i.note)}</p>
                         ) : (
                           <NoteForm key={i.payment_id} item={i} onSaved={saveItem} />
                         )}
@@ -160,7 +160,7 @@ export function ReconciliationSection({ tick }: { tick: number }) {
                   {Math.min(PAGE, items.length - limit)}건 더 보기 (남은 {(items.length - limit).toLocaleString("ko-KR")}건)
                 </button>
               )}
-              {!humanTokenSet && <p className="text-xs text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 메모를 저장할 수 없습니다.</p>}
+              {!humanTokenSet && <p className="text-sm text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 메모를 저장할 수 없습니다.</p>}
             </div>
           );
         }}
