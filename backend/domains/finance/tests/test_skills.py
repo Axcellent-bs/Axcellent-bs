@@ -83,6 +83,8 @@ def test_agent_card(client: TestClient) -> None:
         "record_support_cost",
         "answer_planning_question",
     }
+    assert skills["answer_planning_question"].allowed_requesters == ["planning"]
+    assert skills["answer_planning_question"].grade == "read"
     assert skills["closing_report"].allowed_requesters == ["orchestrator", "data"]
     assert "review_threshold_change" not in skills  # 한도는 제안만, 사람이 기준표 PR로 바꾼다
     # 재무는 장애 대응 흐름의 단계가 아니다 (2026-10-27, 요구사항 DEP-FIN-01)
