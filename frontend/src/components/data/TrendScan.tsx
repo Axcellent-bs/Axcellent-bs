@@ -4,6 +4,7 @@ import { Chip, Empty, ErrorBox, Panel, TONE, Waiting, useResource } from "@/comp
 import { PreparingChip } from "@/components/Preparing";
 import { CampaignEffect } from "@/components/data/CampaignEffect";
 import { ContentRecommend } from "@/components/data/ContentRecommend";
+import { PromoConcepts } from "@/components/data/PromoConcepts";
 import { TrendHistory } from "@/components/data/TrendHistory";
 import { TrendPopular } from "@/components/data/TrendPopular";
 import { YoutubeVelocity } from "@/components/data/YoutubeVelocity";
@@ -20,7 +21,7 @@ import { UNKNOWN_TREND_TEXT, ratioNote, strengthLabel } from "@/lib/trendWording
 // - 루프 띠의 단계를 누르면 그 하위 탭으로 간다. 루프 띠는 모든 하위 탭 위에 있다
 // - 1 트렌드·밈 감지: 데이터 AI(8106) trend_scan·trend_candidates 출력을 그대로. 보기 전환 "지금 급상승 / 월별 흐름 / 계절 패턴"
 //   (월별 흐름은 trend_history, components/data/TrendHistory.tsx. 계절 패턴은 판정이 없어 준비 중)
-// - 2 영상 소재 추천: content_recommend 출력(components/data/ContentRecommend.tsx). 하위 탭을 오가도 남게 숨기기만 한다
+// - 2 영상 소재 추천: 맨 위 홍보 영상 기획안(promo_concepts, components/data/PromoConcepts.tsx) + content_recommend 출력(components/data/ContentRecommend.tsx). 하위 탭을 오가도 남게 숨기기만 한다
 // - 3·5: 준비 중. 단계 정의의 할 일·필요한 것만 보여 준다(숫자·예시 없음)
 // - 4 게시·성과 측정: 캠페인 효과(campaign_effect). 하위 탭을 오가도 측정 결과가 남게 화면에서 내리지 않고 숨긴다
 //
@@ -425,6 +426,7 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
   const [run, setRun] = useState(0);
   const [campaignProbe, setCampaignProbe] = useState<LoopProbe>("idle");
   const [recommendProbe, setRecommendProbe] = useState<LoopProbe>("checking");
+  const [promoProbe, setPromoProbe] = useState<LoopProbe>("checking");
   const res = useResource(`trend-${groups.join("|")}`, () => dataAi.trendScan(groups).then((r) => ({ data: r, meta: { mock: false } })), run);
   // YouTube 후보는 기본 판정(입력 비움)에서만 부른다. 직접 입력이면 부르지 않는다
   const useCandidates = groups.length === 0;
@@ -485,6 +487,9 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
   const trendProbe: LoopProbe = !kpiLive ? "failed"
     : res.loading ? (out && !res.error ? "ok" : "checking")
     : (out && !res.error ? "ok" : "failed");
+  // 콘텐츠 루프 2단계 칩: 기획안·소재 추천 중 하나라도 정상이면 "동작 중"
+  const stage2Probe: LoopProbe = [promoProbe, recommendProbe].includes("ok") ? "ok"
+    : [promoProbe, recommendProbe].includes("checking") ? "checking" : "failed";
   // 콘텐츠 루프 4단계 칩: 측정 전(측정 대기)이라도 데이터 AI 상태 확인이 실패했으면 "연결 확인 필요"
   const loopCampaignProbe: LoopProbe = !kpiLive ? "failed"
     : campaignProbe === "idle" && dataUp === false ? "failed" : campaignProbe;
@@ -538,7 +543,7 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
 
   return (
     <div className="space-y-5">
-      <ContentLoop trend={loopTrend} probes={{ trend_scan: trendProbe, content_recommend: recommendProbe, campaign_effect: loopCampaignProbe }} active={stage.no} onSelect={openStage} />
+      <ContentLoop trend={loopTrend} probes={{ trend_scan: trendProbe, content_recommend: stage2Probe, campaign_effect: loopCampaignProbe }} active={stage.no} onSelect={openStage} />
 
       {/* 하위 탭: 루프 5단계와 같은 이름·순서 */}
       <div role="tablist" aria-label="콘텐츠 루프 단계" className="flex w-full gap-1 overflow-x-auto rounded-2xl bg-surface p-1 ring-1 ring-ink-100">
@@ -579,7 +584,11 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
             </div>
           ) : s.tab === "recommend" ? (
             // 추천 결과가 하위 탭을 오가도 남도록 늘 그려 두고 숨기기만 한다
-            <ContentRecommend onProbe={setRecommendProbe} dataUp={dataUp} />
+            <div className="space-y-5">
+              {/* 홍보 영상 기획안 (promo_concepts): 2단계 맨 위 */}
+              <PromoConcepts onProbe={setPromoProbe} />
+              <ContentRecommend onProbe={setRecommendProbe} dataUp={dataUp} />
+            </div>
           ) : s.tab === "campaign" ? (
             // 측정 결과가 하위 탭을 오가도 남도록 늘 그려 두고 숨기기만 한다
             <CampaignEffect onProbe={setCampaignProbe} />
