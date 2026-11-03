@@ -2,16 +2,22 @@
 
 v0은 프로세스 메모리에 둔다(재시작하면 비워진다). TODO: postgres 테이블
 (`executions`, `pending_reviews`, `audit_logs`)로 옮긴다. 감사 로그는 추가만 한다.
+
+외부 연결 쓰기 보류만은 `SAFETY_CONNECTION_HOLDS_FILE`이 있으면 파일에도 남긴다. 개발 서비스는
+보류를 한 번만 보내므로, 재시작으로 잊으면 취약한 연결의 쓰기가 그대로 나간다.
 """
 
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ax_contracts.schemas import ExecuteDecision, ExecuteRequest
+from ax_contracts.schemas import ConnectionHoldNotice, ExecuteDecision, ExecuteRequest
 
 ReviewStatus = Literal["pending", "approved", "rejected", "expired"]
 
@@ -65,6 +71,35 @@ class Store:
         self._by_key: dict[tuple[str, str], str] = {}
         self._reviews: dict[str, Review] = {}
         self._audit: list[AuditEntry] = []
+        raw_path = os.getenv("SAFETY_CONNECTION_HOLDS_FILE")
+        self._holds_file = Path(raw_path) if raw_path else None
+        self._holds: dict[str, ConnectionHoldNotice] = {}
+        if self._holds_file is not None and self._holds_file.exists():
+            # 못 읽으면 켜지 않는다. 보류를 잊은 채 쓰기를 통과시키지 않는다 (fail-closed)
+            rows = json.loads(self._holds_file.read_text(encoding="utf-8"))
+            self._holds = {
+                n.connection_id: n for n in map(ConnectionHoldNotice.model_validate, rows)
+            }
+
+    # ---- 외부 연결 쓰기 보류
+    def set_connection_hold(self, notice: ConnectionHoldNotice) -> None:
+        if notice.hold:
+            self._holds[notice.connection_id] = notice
+        else:
+            self._holds.pop(notice.connection_id, None)
+        if self._holds_file is None:
+            return
+        rows = [n.model_dump(mode="json") for n in self._holds.values()]
+        tmp = self._holds_file.with_suffix(self._holds_file.suffix + ".tmp")
+        tmp.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(self._holds_file)
+
+    def connection_hold(self, connection_id: str | None) -> ConnectionHoldNotice | None:
+        return self._holds.get(connection_id) if connection_id else None
+
+    def list_connection_holds(self) -> list[ConnectionHoldNotice]:
+        return list(self._holds.values())
 
     # ---- 실행 기록·멱등성
     def by_key(self, tenant_id: str, idempotency_key: str) -> ExecutionRecord | None:

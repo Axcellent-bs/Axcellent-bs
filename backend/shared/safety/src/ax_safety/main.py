@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ax_agent_template.config import set_agent_name
 from ax_agent_template.logging import log_event
-from ax_contracts.schemas import ExecuteRequest
+from ax_contracts.schemas import ConnectionHoldNotice, ExecuteRequest
 from ax_safety.auth import agent_from_token, bearer, human_from_token
 from ax_safety.gate import Gate, Publisher, Verifier
 from ax_safety.rules import load_registry, load_thresholds
@@ -156,6 +156,35 @@ def create_app(
             requester=request.requester,
         )
         return JSONResponse(content=_ok(decision.model_dump(mode="json")))
+
+    @app.post("/api/safety/connection-holds")
+    async def connection_hold(
+        http_request: Request, authorization: str | None = Header(default=None)
+    ) -> JSONResponse:
+        """개발 서비스의 긴급 취약 판정: 이 연결의 쓰기를 보류하거나 해제한다."""
+        try:
+            sender = agent_from_token(bearer(authorization))
+        except PermissionError as exc:
+            return _error(401, "UNAUTHORIZED", str(exc))
+        if sender != "dev":
+            return _error(403, "FORBIDDEN", "연결 쓰기 보류는 개발 서비스만 알린다")
+        try:
+            notice = ConnectionHoldNotice.model_validate(await http_request.json())
+        except (ValueError, ValidationError) as exc:
+            return _error(400, "INVALID_REQUEST", str(exc)[:500])
+        gate.store.set_connection_hold(notice)
+        gate.store.append_audit(
+            gate._now(),
+            f"connection:{notice.connection_id}",
+            "default",
+            "connection_hold" if notice.hold else "connection_release",
+            detail=notice.model_dump(mode="json"),
+        )
+        return JSONResponse(content=_ok(notice.model_dump(mode="json")))
+
+    @app.get("/api/safety/connection-holds")
+    def connection_holds() -> dict:
+        return _ok([n.model_dump(mode="json") for n in gate.store.list_connection_holds()])
 
     @app.get("/api/safety/executions")
     def list_executions(context_id: str | None = None) -> dict:

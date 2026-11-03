@@ -337,7 +337,7 @@ export interface IncidentDetail {
 }
 
 // ---------------------------------------------------------------- 안전 장치 보류 큐 (safety)
-export interface RuleHit { key: string; observed?: number; op?: string; value?: number | string; outside?: string[]; invalid?: string }
+export interface RuleHit { key: string; product?: string; version?: string; kev_cves?: string[]; observed?: number; op?: string; value?: number | string; outside?: string[]; invalid?: string }
 // 안전 장치 실행 기록 (AI 대화방이 부서 간 실행 흐름을 그릴 때 읽는다. safety README 형식)
 export type Grade = "A" | "B" | "C";
 export type ExecStatus = "executed" | "verifying" | "held" | "rejected" | "failed";

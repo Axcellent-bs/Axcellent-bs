@@ -19,6 +19,7 @@ const RULE_KO: Record<string, string> = {
   coupon_total: "쿠폰 한 번에 주는 총액", coupon_unit: "쿠폰 한 장 금액", coupon_daily: "하루 동안 준 쿠폰 합계",
   compensation_per_context: "장애 한 건에 준 보상 합계", compensation_per_customer: "한 고객에게 준 보상 합계",
   refund_single: "환불 한 건 금액", seller_risk: "판매자 위험 점수", base_grade: "항상 사람이 확인하는 일",
+  connection_kev_hold: "연결 서버의 긴급 취약점",
 };
 const MONEY_RULES = new Set(["coupon_total", "coupon_unit", "coupon_daily", "compensation_per_context", "compensation_per_customer", "refund_single"]);
 const action = (a: string) => ACTION_KO[a] ?? "기타 작업";
@@ -38,6 +39,7 @@ function duration(sec: number): string {
 function ruleSentence(h: RuleHit): string {
   const name = RULE_KO[h.key] ?? "기타 기준";
   if (h.key === "base_grade") return "판매자 정산 지급처럼 항상 사람이 확인하는 일";
+  if (h.key === "connection_kev_hold") return `연결 서버(${h.product ?? "?"} ${h.version ?? "?"})에 실제 악용 중인 취약점이 있음: ${(h.kev_cves ?? []).join(", ")}`;
   if (h.outside) return `${name}가 아닌 곳을 바꿈: ${h.outside.join(", ")}`;
   if (h.invalid) return `${name} 정보가 없음`;
   if (h.observed != null && typeof h.value === "number") {
@@ -48,6 +50,7 @@ function ruleSentence(h: RuleHit): string {
 }
 
 function tipOf(r: Review): string {
+  if (r.report.rules?.some((h) => h.key === "connection_kev_hold")) return "서버를 패치하면 보류가 풀립니다. 그때까지는 멈추세요. 장애 복구처럼 급한 일이면 위험을 알고 진행하세요.";
   if (r.action === "confirm_settlement") return "위 ③ 판매자 정산 표의 판매자·기간·금액과 같으면 진행하세요.";
   switch (r.report.hold_reason) {
     case "amount_mismatch": return "요청한 AI가 금액을 잘못 적었다는 뜻입니다. 보통 멈추고 담당자에게 알리세요.";

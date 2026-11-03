@@ -13,7 +13,7 @@
 - 클라우드(github.com 등, 제공사가 패치)와 버전을 모르는 연결은 맞춰 보지 않는다.
 - 긴급이던 연결이 패치되어 긴급이 아니게 되면 "보류 해제"를 알린다.
 - 안전 서비스 알림: `POST {safety}/api/safety/connection-holds` (`ConnectionHoldNotice`).
-  받는 쪽은 태윤 님이 만든다. 받지 못하면(창구 없음·연결 실패) 대기로 두고 다음 점검 때 다시 보낸다.
+  받지 못하면(창구 없음·연결 실패) 대기로 두고 다음 점검 때 다시 보낸다.
   총괄 사건으로는 열지 않고 안전 서비스의 보류 흐름(`safety.action_held`)으로 사람에게 간다
   (준하 합의).
 - 소식 출처: CISA KEV JSON(하루 한 번), NVD CVE API 2.0 (`NVD_API_KEY`가 있으면 더 빨리 부른다).
@@ -30,7 +30,8 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 import httpx
-from pydantic import BaseModel, Field
+
+from ax_contracts.schemas import ConnectionHoldNotice
 
 Verdict = Literal["emergency", "warning", "clear", "feed_failed", ""]
 
@@ -54,20 +55,6 @@ PRODUCTS: dict[str, Product] = {
     "jenkins": Product("Jenkins", "Jenkins", "cpe:2.3:a:jenkins:jenkins"),
     "argocd": Product("Argo", "Argo CD", "cpe:2.3:a:argoproj:argo_cd"),
 }
-
-
-class ConnectionHoldNotice(BaseModel):
-    """개발 → 안전 서비스: 이 연결의 쓰기를 보류(또는 해제)해 달라.
-
-    받는 쪽(안전 서비스)이 생기면 `ax_contracts`로 옮긴다. 비밀 값은 넣지 않는다."""
-
-    connection_id: str
-    hold: bool  # True = 보류, False = 해제
-    product: str
-    version: str
-    kev_cves: list[str] = Field(default_factory=list)  # 근거 CVE (KEV + 취약 범위)
-    judged_at: str  # 판정 시각 (ISO)
-    reason: str
 
 
 @dataclass
