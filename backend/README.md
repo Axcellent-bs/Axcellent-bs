@@ -56,6 +56,12 @@ bash scripts/run_web.sh         # 다른 터미널: 화면(frontend 3090)을 실
 bash scripts/run_all.sh stop
 ```
 
+- **임베딩 설정** (memory 카드 검색, data 소재↔상품 연결): 모델은 `<부서>_EMBED_MODEL` → `EMBED_MODEL`.
+  주소·키는 `<부서>_EMBED_BASE_URL`·`<부서>_EMBED_API_KEY` → `EMBED_BASE_URL`·`EMBED_API_KEY` → 없으면 LLM 주소·키
+  (`<부서>_LLM_*` → `LLM_*`, 예전 동작). 문장 생성은 늘 LLM 주소로 가고, 임베딩 주소를 넣으면 임베딩 요청만 그리로 간다.
+  주소와 키는 따로 이어받으므로 임베딩 주소를 바꾸면 그 주소용 키도 같이 넣는다. 레포 맨 위 `.env`에서도
+  `EMBED_MODEL`·`EMBED_BASE_URL`·`EMBED_API_KEY`를 읽는다(`backend/.env`에 없을 때만)
+
 - **일부 서버만 띄우기** (`--only`, 없으면 전부): 메모리가 모자라거나 한 부서만 볼 때 쓴다.
   ```bash
   bash scripts/run_all.sh --only data,finance,shop-api   # 이름은 run_all.sh의 APPS 목록 이름
