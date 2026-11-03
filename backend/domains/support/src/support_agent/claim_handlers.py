@@ -87,6 +87,7 @@ HELD_MESSAGE = {
     "held": "안전 레이어 보류 (사람 확인 대기)",
     "rejected": "실행이 거부됨",
     "failed": "실행에 실패함",
+    "refund_rejected": "환불이 안전 장치에서 거절돼 지급하지 않는다",
     "shop_refund_failed": "shop-api 환불 실패 (다시 처리하면 같은 키로 재시도)",
 }
 
@@ -346,6 +347,27 @@ async def process_claim_queue(request: AgentRequest) -> AgentResult:
                 ],
             ),
         )
+        if decision.status == "rejected" and decision.hold_reason is not None:
+            # 사람이 거절했거나 보류가 만료됐거나 검증이 거부한 환불이다.
+            # 감사 기록 실패 같은 일시 오류는 사유가 없어 여기에 오지 않는다.
+            # 같은 키로 다시 불러도 같은 거절이 오므로 기억해 큐에서 뺀다
+            claim.refund_rejected = str(decision.hold_reason)
+            CLAIMS.set_status(claim, claim.status, "refund_rejected", reason=claim.refund_rejected)
+            results.append(
+                QueueRunResult(
+                    claim_id=claim.id,
+                    result="skipped",
+                    detail=f"refund_rejected:{claim.refund_rejected}",
+                    blockers=[
+                        ClaimReasonHit(
+                            code="REFUND_REJECTED",
+                            level="block",
+                            message=HELD_MESSAGE["refund_rejected"],
+                        )
+                    ],
+                )
+            )
+            continue
         if decision.status != "executed":
             held += 1
             results.append(

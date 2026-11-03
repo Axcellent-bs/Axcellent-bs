@@ -79,6 +79,16 @@ class ClaimStore:
             if claim.status not in ("approved", "return_received") or claim.expected_refund <= 0:
                 continue
             blockers: list[ClaimReasonHit] = []
+            if claim.refund_rejected:
+                # 안전 장치가 이 환불을 거절·만료로 닫았다.
+                # 같은 키로 다시 부르면 같은 거절이 돌아오므로 지급 대상에서 뺀다
+                blockers.append(
+                    ClaimReasonHit(
+                        code="REFUND_REJECTED",
+                        level="block",
+                        message="환불이 안전 장치에서 거절돼 지급하지 않는다",
+                    )
+                )
             if claim.status == "return_received" and claim.inspection != "pass":
                 # 화면(BLOCKER_KO)과 같은 코드: NOT_INSPECTED 검수 대기, ON_HOLD 상담원 확인
                 if claim.inspection is None:

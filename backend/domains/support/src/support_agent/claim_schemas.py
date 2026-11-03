@@ -121,6 +121,8 @@ class Claim(AxModel):
     inspection: Inspection | None = None
     return_received_at: str | None = None
     refund_paid: int = 0
+    # 안전 장치가 환불을 거절·만료로 닫았을 때의 사유 코드. 있으면 큐에서 지급 대상에서 뺀다
+    refund_rejected: str | None = None
     processed_at: str | None = None
     decided_by: str | None = None
     agent_note: str | None = None  # 상담원 결정 메모 (`untrusted.note`)

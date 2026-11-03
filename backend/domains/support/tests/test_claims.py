@@ -363,6 +363,55 @@ def test_refund_request_summary_has_only_code_computed_facts(
         assert leaked not in summary
 
 
+def test_refund_rejected_by_safety_leaves_the_payable_queue_and_is_not_counted_as_held(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """사람이 환불 보류를 거절하면 지급 대상에서 빠지고, 다시 처리해도 안전 레이어를 안 부른다."""
+    create(client, order_id="102", buyer_id="buy_0002", type="cancel", reason="change_of_mind")
+    calls: list[str] = []
+
+    async def rejected(action: str, params: dict, meta: Any, evidence: Any) -> ExecuteDecision:
+        calls.append(meta.idempotency_key)
+        return ExecuteDecision(
+            execution_id="exe_1", grade="C", status="rejected", hold_reason="over_threshold"
+        )
+
+    monkeypatch.setattr(claim_handlers, "execute", rejected)
+    run = call(client, "process_claim_queue", {}, key="k-1")["output"]
+    assert run["held"] == 0 and run["paid"] == 0
+    assert run["results"][0]["result"] == "skipped"
+    assert run["results"][0]["detail"] == "refund_rejected:over_threshold"
+    entry = run["queue"][0]
+    assert entry["ready"] is False and [b["code"] for b in entry["blockers"]] == ["REFUND_REJECTED"]
+    claim = call(client, "get_claim", {"claim_id": 1})["output"]
+    assert claim["status"] != "completed" and claim["refund_paid"] == 0
+    assert claim["refund_rejected"] == "over_threshold"
+
+    again = call(client, "process_claim_queue", {}, key="k-2")["output"]
+    assert again["results"][0]["result"] == "skipped" and again["held"] == 0
+    assert len(calls) == 1  # 두 번째 처리는 안전 레이어를 다시 부르지 않았다
+
+
+def test_a_rejection_without_a_reason_is_not_remembered(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """감사 기록 실패 같은 일시 오류는 사유 없이 rejected로 온다. 다시 처리하면 지급돼야 한다."""
+    create(client, order_id="102", buyer_id="buy_0002", type="cancel", reason="change_of_mind")
+    state = {"ok": False}
+
+    async def flaky(action: str, params: dict, meta: Any, evidence: Any) -> ExecuteDecision:
+        status = "executed" if state["ok"] else "rejected"
+        return ExecuteDecision(execution_id="exe_1", grade="A", status=status)
+
+    monkeypatch.setattr(claim_handlers, "execute", flaky)
+    first = call(client, "process_claim_queue", {}, key="k-1")["output"]
+    assert first["held"] == 1 and first["paid"] == 0
+    assert call(client, "get_claim", {"claim_id": 1})["output"]["refund_rejected"] is None
+    state["ok"] = True
+    second = call(client, "process_claim_queue", {}, key="k-2")["output"]
+    assert second["paid"] == 1
+
+
 def test_held_refund_is_paid_when_retried_after_approval_even_from_a_new_request(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
