@@ -252,3 +252,12 @@ async def test_same_key_different_tenant_is_separate(gate: Gate, coupon) -> None
     a = await gate.execute(coupon(key="shared-key"))
     b = await gate.execute(coupon(key="shared-key").model_copy(update={"tenant_id": "other-shop"}))
     assert a.execution_id != b.execution_id
+
+
+@pytest.mark.parametrize("action", ["request_deploy", "approve_deploy"])
+@pytest.mark.asyncio
+async def test_dev_deploy_actions_are_registered(gate: Gate, act, action: str) -> None:
+    """개발이 배포 지시(receive_release_order) 뒤 부르는 배포 요청·승인은 등록돼 있어 A로 지난다.
+    prod·보호 경로의 사람 승인은 개발 배포 기록(requested → approve_deploy)이 맡는다."""
+    decision = await gate.execute(act(action, "dev", f"k-{action}", env="prod"))
+    assert (decision.grade, decision.status) == ("A", "executed")
