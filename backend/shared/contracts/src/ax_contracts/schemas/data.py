@@ -824,6 +824,10 @@ class YouTubeVideoVelocity(AxModel):
         None  # 지금 속도 − 그 전 속도 (시간당 조회). 그 전 구간이 없으면 None
     )
     faster: bool | None = None  # 그 전 구간보다 빨라졌는지 (그 전 구간이 없으면 None)
+    # 아래는 화면 표시용 (예전 응답은 없다). 스냅샷에 저장된 값이 없으면 None
+    title: str | None = None  # 영상 제목
+    channel_title: str | None = None  # 채널 이름
+    duration_seconds: int | None = Field(default=None, ge=0)  # 영상 길이(초)
 
 
 class YouTubeVelocityOutput(AxModel):
@@ -1029,6 +1033,16 @@ class PopularTopic(AxModel):
     # 실존 인물·팀·리그·상표가 주제에 들어 있는지와 그 이름 (분류하지 못했으면 None)
     real_entity: bool | None = None
     entity_names: list[str] = Field(default_factory=list)
+    category_rank: int | None = Field(default=None, ge=1)  # 화면 카테고리 안 순위 (1~5)
+
+
+class PopularCategory(AxModel):
+    """화면용 카테고리 하나의 "지금 인기" 1~N위 (회사 설정 [popular] categories)."""
+
+    category: TopicCategory
+    items: list[PopularTopic] = Field(default_factory=list)  # 점수 순, 최대 per_category개
+    # N개를 못 채웠으면 이유 (예: 이 카테고리로 분류된 주제가 3개뿐)
+    shortage_reason: str | None = None
 
 
 class TrendPopularOutput(AxModel):
@@ -1047,6 +1061,12 @@ class TrendPopularOutput(AxModel):
     weights: dict[str, float] = Field(default_factory=dict)  # video·velocity·trending 가중치
     excluded_categories: list[str] = Field(default_factory=list)  # brand_safe에 쓴 추천 안 함 분류
     summary: str = ""  # 코드가 만든 한 문장
+    # 아래는 카테고리별 보기 (예전 응답은 없다). 화면 카테고리마다 1~N위.
+    # 화면 카테고리가 아닌 주제는
+    # 응답(items 포함)에서 뺀다
+    by_category: list[PopularCategory] = Field(default_factory=list)
+    display_categories: list[str] = Field(default_factory=list)  # 회사 설정의 화면 카테고리 순서
+    score_method: str | None = None  # 점수 방식 (예: rank = 출처별 순위 몫)
 
 
 # --------------------------------------------------------------- promo_concepts (홍보 영상 기획안)
