@@ -266,8 +266,8 @@ async def test_serial_group_gets_increasing_sequence(harness) -> None:
 
 
 @pytest.mark.asyncio
-async def test_finance_is_not_called_during_an_incident(harness) -> None:
-    await run(harness)  # 재무는 이벤트 중에 불리지 않는다(멘토 피드백): 손실 집계·감사 단계 없음
+async def test_scenario_a_has_no_loss_or_audit_step(harness) -> None:
+    await run(harness)  # 손실 집계·감사 단계 없음
     assert [
         r.skill for _, r in harness.fakes.calls if r.skill in ("loss_aggregation", "audit_report")
     ] == []

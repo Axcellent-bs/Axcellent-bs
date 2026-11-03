@@ -14,9 +14,9 @@ from fastapi.testclient import TestClient
 
 from ax_agent_template import events
 from ax_contracts.schemas import EventEnvelope, EventType
-from finance_agent import audit, handlers, incidents, settlement
 from finance_agent import books as bk
 from finance_agent import finance_config as fc
+from finance_agent import handlers, incidents, settlement
 from finance_agent.closing import compute_totals
 from finance_agent.main import app
 from finance_agent.sources import MockSources
@@ -87,32 +87,6 @@ def _suspicious_books(kit) -> bk.Books:
     return kit.books(orders=orders, refunds=refunds, coupons=coupons, executions=executions)
 
 
-def test_coupons_and_refunds_make_no_findings(kit) -> None:
-    data, missing = asyncio.run(audit.audit_report(_suspicious_books(kit), 7))
-    assert data["findings"] == [] and missing == []
-    assert data["stats"] == {"gate_held": 0, "gate_rejected": 0}  # 쿠폰·환불은 세지 않는다
-    assert set(data["stats"]).isdisjoint({"coupon_count", "coupon_amount"})
-
-
-def test_other_actions_are_still_counted_beside_coupons_and_refunds(kit) -> None:
-    books = _suspicious_books(kit)
-    assert books.executions is not None
-    books.executions += [
-        {
-            "execution_id": f"exe_settle_{i}",
-            "created_at": kit.at("2026-10-22"),
-            "action": "confirm_settlement",
-            "status": "held",
-            "params": {},
-        }
-        for i in range(3)
-    ]
-    data, _ = asyncio.run(audit.audit_report(books, 7))
-    [found] = data["findings"]
-    assert found["code"] == "gate_hold_trend" and data["stats"]["gate_held"] == 3
-    assert all(r.startswith("exe_settle_") for r in found["refs"])  # 쿠폰·환불 기록을 섞지 않는다
-
-
 def test_coupons_and_refunds_make_no_todo_or_alert(kit) -> None:
     books = _suspicious_books(kit)
 
@@ -123,8 +97,7 @@ def test_coupons_and_refunds_make_no_todo_or_alert(kit) -> None:
     client = TestClient(app)
     kinds = {t["kind"] for t in client.get("/api/finance/overview").json()["data"]["todo"]}
     assert kinds.isdisjoint({"audit_finding", "policy_alert"})
-    assert handlers.state().records.anomalies == {}
-    assert client.get("/api/finance/anomalies").json()["data"]["open_count"] == 0
+    assert client.get("/api/finance/anomalies").status_code == 404
     assert client.get("/api/finance/policy").status_code == 404
 
 
@@ -166,7 +139,6 @@ def test_events_still_add_up_in_the_ledger(kit) -> None:
     ledger = handlers.state().ledger
     assert ledger.compensation("ctx_inc_1") == {"count": 2, "total": 4000}
     assert ledger.refunds == {"ord_7": 18000}
-    assert handlers.state().records.anomalies == {}
 
 
 def test_incident_keeps_amounts_and_rows_without_limits_or_checks(kit) -> None:

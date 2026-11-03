@@ -9,8 +9,7 @@
 4. 판매자 정산: 그 달에 지급일이 있는 주의 정산 묶음이 모두 승인됐나
    (지급할 판매자가 없는 주는 제외)
 5. 판매자 미지급금: 롤포워드가 맞고 더 준 판매자가 없나
-6. 감사 의심 건: 처리 전 의심 건이 없나
-7. 월 결산 확정: 사람이 그 달 결산을 확정했나
+6. 월 결산 확정: 사람이 그 달 결산을 확정했나
 """
 
 from __future__ import annotations
@@ -144,15 +143,7 @@ def checklist(
         )
     )
 
-    # 6. 감사 의심 건
-    open_findings = sum(1 for e in records.anomalies.values() if e["status"] == "open")
-    items.append(
-        _item(
-            "audit", "감사 의심 건 처리", open_findings == 0, f"처리 전 {open_findings}건", "audit"
-        )
-    )
-
-    # 7. 월 결산 확정 (사람)
+    # 6. 월 결산 확정 (사람)
     confirmed = ("month", start.isoformat()) in records.closings
     items.append(
         _item(

@@ -143,7 +143,7 @@ async def test_a_disabled_service_becomes_a_human_task(monkeypatch, org, log_sto
 @pytest.mark.asyncio
 async def test_the_service_line_is_used_when_the_skill_has_none(monkeypatch, org) -> None:
     monkeypatch.setenv(routing.ENABLED_ENV, "inquiry")
-    result = await _call("finance", _request("audit_report"), Recorder())
+    result = await _call("finance", _request("record_support_cost"), Recorder())
     assert result.output["assignee_unit"] == "재무/정산"
     assert result.output["assignee"] is None
 

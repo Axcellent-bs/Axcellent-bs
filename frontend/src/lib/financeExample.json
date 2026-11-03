@@ -143,7 +143,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.418547Z",
+   "collected_at": "2026-11-03T03:20:54.575704Z",
    "source": "seed",
    "unavailable": []
   }
@@ -238,7 +238,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.439883Z",
+   "collected_at": "2026-11-03T03:20:54.600966Z",
    "source": "seed",
    "unavailable": []
   }
@@ -345,7 +345,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.448890Z",
+   "collected_at": "2026-11-03T03:20:54.611561Z",
    "source": "seed",
    "unavailable": []
   }
@@ -521,7 +521,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.451453Z",
+   "collected_at": "2026-11-03T03:20:54.620210Z",
    "source": "seed",
    "unavailable": []
   }
@@ -697,7 +697,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.467124Z",
+   "collected_at": "2026-11-03T03:20:54.631775Z",
    "source": "seed",
    "unavailable": []
   }
@@ -873,7 +873,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.474502Z",
+   "collected_at": "2026-11-03T03:20:54.643321Z",
    "source": "seed",
    "unavailable": []
   }
@@ -1992,7 +1992,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.492050Z",
+   "collected_at": "2026-11-03T03:20:54.655057Z",
    "source": "seed",
    "unavailable": [],
    "pg_source": "mock_toss_settlement"
@@ -2058,7 +2058,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.502778Z",
+   "collected_at": "2026-11-03T03:20:54.676721Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2121,7 +2121,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.511195Z",
+   "collected_at": "2026-11-03T03:20:54.685087Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2172,7 +2172,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.525370Z",
+   "collected_at": "2026-11-03T03:20:54.697622Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2351,7 +2351,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.533733Z",
+   "collected_at": "2026-11-03T03:20:54.705370Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2366,7 +2366,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.544201Z",
+   "collected_at": "2026-11-03T03:20:54.721310Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2492,7 +2492,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.570276Z",
+   "collected_at": "2026-11-03T03:20:54.729257Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2537,13 +2537,6 @@
      "link": "settlements"
     },
     {
-     "key": "audit",
-     "label": "감사 의심 건 처리",
-     "status": "done",
-     "detail": "처리 전 0건",
-     "link": "audit"
-    },
-    {
      "key": "month_closing",
      "label": "월 결산 확정 (사람)",
      "status": "pending",
@@ -2551,14 +2544,14 @@
      "link": "closing"
     }
    ],
-   "done": 4,
-   "total": 7,
+   "done": 3,
+   "total": 6,
    "ready": false,
    "closed": false
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.584150Z",
+   "collected_at": "2026-11-03T03:20:54.760676Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2618,7 +2611,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.604324Z",
+   "collected_at": "2026-11-03T03:20:54.773306Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2725,71 +2718,9 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.616749Z",
+   "collected_at": "2026-11-03T03:20:54.781205Z",
    "source": "seed",
    "unavailable": []
-  }
- },
- "/api/finance/audit?days=7": {
-  "data": {
-   "from": "2026-10-28T00:00:00Z",
-   "to": "2026-11-04T00:00:00Z",
-   "stats": {
-    "gate_held": 0,
-    "gate_rejected": 0
-   },
-   "findings": []
-  },
-  "meta": {
-   "mock": true,
-   "collected_at": "2026-11-03T03:04:08.625876Z",
-   "source": "seed",
-   "unavailable": []
-  }
- },
- "/api/finance/audit?days=14": {
-  "data": {
-   "from": "2026-10-21T00:00:00Z",
-   "to": "2026-11-04T00:00:00Z",
-   "stats": {
-    "gate_held": 0,
-    "gate_rejected": 0
-   },
-   "findings": []
-  },
-  "meta": {
-   "mock": true,
-   "collected_at": "2026-11-03T03:04:08.634452Z",
-   "source": "seed",
-   "unavailable": []
-  }
- },
- "/api/finance/audit?days=30": {
-  "data": {
-   "from": "2026-10-05T00:00:00Z",
-   "to": "2026-11-04T00:00:00Z",
-   "stats": {
-    "gate_held": 0,
-    "gate_rejected": 0
-   },
-   "findings": []
-  },
-  "meta": {
-   "mock": true,
-   "collected_at": "2026-11-03T03:04:08.634452Z",
-   "source": "seed",
-   "unavailable": []
-  }
- },
- "/api/finance/anomalies": {
-  "data": {
-   "open": [],
-   "open_count": 0,
-   "resolved": []
-  },
-  "meta": {
-   "mock": true,
-   "source": "finance_records"
   }
  },
  "/api/finance/incidents": {
@@ -2857,7 +2788,7 @@
   ],
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.673885Z",
+   "collected_at": "2026-11-03T03:20:54.823906Z",
    "ledger_source": "seed",
    "unavailable": []
   }
@@ -2866,7 +2797,7 @@
   "data": [],
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.683277Z",
+   "collected_at": "2026-11-03T03:20:54.831262Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2968,7 +2899,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.685585Z",
+   "collected_at": "2026-11-03T03:20:54.838422Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3057,7 +2988,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.719001Z",
+   "collected_at": "2026-11-03T03:20:54.847651Z",
    "source": "hr.team_headcount",
    "unavailable": []
   }
@@ -3146,7 +3077,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.719001Z",
+   "collected_at": "2026-11-03T03:20:54.855344Z",
    "source": "hr.team_headcount",
    "unavailable": []
   }
@@ -3235,7 +3166,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.719001Z",
+   "collected_at": "2026-11-03T03:20:54.855344Z",
    "source": "hr.team_headcount",
    "unavailable": []
   }
@@ -3273,7 +3204,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-03T03:04:08.735036Z"
+    "collected_at": "2026-11-03T03:20:54.873872Z"
    },
    "compensation": {
     "coupons": [
@@ -3334,7 +3265,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.735036Z",
+   "collected_at": "2026-11-03T03:20:54.873872Z",
    "unavailable": []
   }
  },
@@ -3369,7 +3300,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-03T03:04:08.752596Z"
+    "collected_at": "2026-11-03T03:20:54.888507Z"
    },
    "compensation": {
     "coupons": [
@@ -3397,7 +3328,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.752596Z",
+   "collected_at": "2026-11-03T03:20:54.888507Z",
    "unavailable": []
   }
  },
@@ -3426,7 +3357,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-03T03:04:08.770478Z"
+    "collected_at": "2026-11-03T03:20:54.901210Z"
    },
    "compensation": {
     "coupons": [
@@ -3454,7 +3385,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.770478Z",
+   "collected_at": "2026-11-03T03:20:54.901210Z",
    "unavailable": []
   }
  },
@@ -3484,7 +3415,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-03T03:04:08.783969Z"
+    "collected_at": "2026-11-03T03:20:54.913961Z"
    },
    "compensation": {
     "coupons": [
@@ -3512,7 +3443,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.783969Z",
+   "collected_at": "2026-11-03T03:20:54.913961Z",
    "unavailable": []
   }
  },
@@ -3547,7 +3478,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-03T03:04:08.796568Z"
+    "collected_at": "2026-11-03T03:20:54.950624Z"
    },
    "compensation": {
     "coupons": [
@@ -3586,7 +3517,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.796568Z",
+   "collected_at": "2026-11-03T03:20:54.950624Z",
    "unavailable": []
   }
  },
@@ -3616,7 +3547,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-03T03:04:08.828218Z"
+    "collected_at": "2026-11-03T03:20:54.963975Z"
    },
    "compensation": {
     "coupons": [
@@ -3655,7 +3586,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-03T03:04:08.828218Z",
+   "collected_at": "2026-11-03T03:20:54.963975Z",
    "unavailable": []
   }
  },

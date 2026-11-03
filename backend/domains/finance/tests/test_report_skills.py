@@ -1,4 +1,4 @@
-"""A2A 읽기 skill `closing_report`·`audit_report` 테스트."""
+"""A2A 읽기 skill `closing_report` 테스트."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from ax_agent_template import events
 from finance_agent import handlers
 from finance_agent.main import app
-from finance_agent.schemas import AuditReportOutput, ClosingReportOutput
+from finance_agent.schemas import ClosingReportOutput
 from finance_agent.sources import MockSources
 
 
@@ -57,47 +57,3 @@ def test_closing_report_defaults_and_confirmation() -> None:
     assert (out["date"], out["status"], out["confirmed_by"]) == ("2026-10-01", "confirmed", "태윤")
     bad = _ask("closing_report", {"period": "year"})
     assert (bad["status"], bad["outcome"]) == ("failed", "invalid_input")
-
-
-def test_audit_report_lists_findings_with_evidence(kit) -> None:
-    held = [
-        {
-            "execution_id": f"exe_{i}",
-            "created_at": kit.at("2026-10-22"),
-            "action": "confirm_settlement",
-            "status": "held",
-            "params": {},
-        }
-        for i in range(3)
-    ]
-
-    async def books():
-        return kit.books(executions=held)
-
-    handlers.state().books_loader = books
-    result = _ask("audit_report", {"days": 7})
-    assert result["status"] == "completed"
-    out = AuditReportOutput.model_validate(result["output"])
-    assert {f.code for f in out.findings} == {"gate_hold_trend"}
-    assert out.stats.gate_held == 3 and out.unavailable == []
-    assert result["evidence"]["ref_ids"] and "감사 의심 1건" in result["evidence"]["data_summary"]
-    for bad in ({"days": 0}, {"days": 91}, {"days": "x"}):
-        failed = _ask("audit_report", bad)
-        assert (failed["status"], failed["outcome"]) == ("failed", "invalid_input")
-
-
-def test_audit_report_on_the_seed_books_has_no_coupon_or_refund_findings() -> None:
-    """시드 장부의 쿠폰·환불 보류는 감사 대상이 아니다. skill과 응답 모양은 그대로다."""
-    out = AuditReportOutput.model_validate(_ask("audit_report", {"days": 7})["output"])
-    assert out.findings == [] and out.stats.gate_held == 0 and out.stats.gate_rejected == 0
-
-
-def test_partial_when_sources_missing(kit) -> None:
-    async def live_like():
-        return kit.books(mock=False, source="shop-api", unavailable=["executions"], executions=None)
-
-    handlers.state().books_loader = live_like
-    result = _ask("audit_report", {})
-    assert result["outcome"] == "partial"
-    assert result["output"]["stats"]["gate_held"] is None
-    assert "executions" in result["output"]["unavailable"]

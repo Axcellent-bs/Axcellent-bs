@@ -5,9 +5,7 @@
 | `GET /api/finance/incidents` | 재무가 아는 사건 목록 (장부·관문 기록의 `ctx_inc_`) |
 | `GET /api/finance/incidents/{context_id}` | 영향·보상 쿠폰 내역·환불 금액 합계 |
 
-- 재무는 장애 대응 흐름의 단계가 아니다 (요구사항 DEP-FIN-01, 공통 구성안 결정 22).
-  2026-10-27에 손실 집계(`loss`)와 사건 단계 표시(`steps` 9·10·17)를 뺐다. 장애 비용은
-  평상시 장부로 들어가 결산(`closing_report`)에서 드러난다.
+- 재무는 장부에 기록만 한다. 장애 비용은 평상시 장부로 들어가 결산(`closing_report`)에서 드러난다.
   화면 호환으로 한 단계 남겨 뒀던 `steps`·`loss_total` 키도 지웠다 (화면 정리 ax-frontend#61).
 - 쿠폰·환불 한도 사용률(`limits`)과 점검(`checks`)은 재무 일이 아니라 2026-11-02에 뺐다.
 - 영향(`impact`)은 data `impact_analysis` 결과 그대로다(실제 모드 A2A, 목 모드 시드).

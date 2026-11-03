@@ -1,7 +1,7 @@
 """재무 기록을 파일에 남기고 다시 켤 때 읽는다 (`FINANCE_STATE_FILE`).
 
 메모리에만 있던 기록(이벤트로 쌓은 쿠폰·환불 장부, 사람의 결산 확정·
-대사 메모·정산 묶음 요청, 처리 전 의심 건)을 JSON 하나에 담는다. 백엔드를 다시 켜도
+대사 메모·정산 묶음 요청)을 JSON 하나에 담는다. 백엔드를 다시 켜도
 재무 화면과 멱등 처리(같은 요청을 두 번 실행하지 않음)가 이어진다.
 
 - 경로가 없으면(테스트·단독 실행) 아무것도 하지 않는다
@@ -48,7 +48,6 @@ def dump(s: State) -> dict[str, Any]:
             "recon_notes": records.recon_notes,
             "recon_note_log": records.recon_note_log,
             "batches": records.batches,
-            "anomalies": records.anomalies,
             "policy_acks": records.policy_acks,
             "bank_rows": records.bank_rows,
             "team_budgets": records.team_budgets,
@@ -69,7 +68,6 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.records.recon_notes = dict(rec["recon_notes"])
     s.records.recon_note_log = list(rec["recon_note_log"])
     s.records.batches = dict(rec["batches"])
-    s.records.anomalies = {k: dict(v) for k, v in rec.get("anomalies", {}).items()}
     s.records.policy_acks = {k: dict(v) for k, v in rec.get("policy_acks", {}).items()}
     s.records.bank_rows = [dict(r) for r in rec.get("bank_rows", [])]
     s.records.team_budgets = {k: dict(v) for k, v in rec.get("team_budgets", {}).items()}

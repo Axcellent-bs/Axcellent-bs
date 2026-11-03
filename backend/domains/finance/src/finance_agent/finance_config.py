@@ -73,11 +73,6 @@ class TeamBudgetConfig(_Strict):
     per_head_monthly: int = Field(default=100000, ge=0)
 
 
-class AuditConfig(_Strict):
-    gate_hold_min: int = Field(ge=1)
-    gate_hold_jump_ratio: float = Field(gt=1)
-
-
 class FinanceConfig(_Strict):
     commission: CommissionConfig
     settlement: SettlementConfig
@@ -87,7 +82,6 @@ class FinanceConfig(_Strict):
     tax: TaxConfig = TaxConfig()
     cashflow: CashflowConfig = CashflowConfig()
     team_budget: TeamBudgetConfig = TeamBudgetConfig()
-    audit: AuditConfig
 
 
 @lru_cache(maxsize=1)

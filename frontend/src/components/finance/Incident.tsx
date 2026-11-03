@@ -7,7 +7,7 @@ import {
 import { Empty, ErrorBox, MetaLine, MockBadge, RefList, ResourceBody, Waiting, useResource, type Resource } from "./bits";
 
 // 장애 사건 재무 (시나리오 A). 기준: ax-backend docs/notes/finance/2026-10-23-finance-redesign.md §12·§12-1
-// 재무가 하는 일: 끝난 쿠폰·환불 금액을 사건별 장부에 적기. 재무는 장애 대응 흐름의 단계가 아니다(#415).
+// 재무가 하는 일: 끝난 쿠폰·환불 금액을 사건별 장부에 적기.
 // 숫자는 서버 값을 그대로 보여 준다.
 
 const CATEGORY_KO: Record<string, string> = { book: "도서", books: "도서", stationery: "문구", ebook: "전자책", ebooks: "전자책", goods: "굿즈" };

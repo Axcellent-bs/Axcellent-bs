@@ -3,11 +3,10 @@
 | skill | 등급 | 요청자 | 하는 일 |
 | --- | --- | --- | --- |
 | `closing_report` | read | orchestrator, data | ① 기간 손익 요약 (`closing.py`) |
-| `audit_report` | read | orchestrator, data | ⑦ 사후 감사 결과 (`audit.py`) |
 | `answer_planning_question` | read | planning | 기획 질문에 답함 (`planning_questions.py`) |
 
 `verify_amount`·`review_hold`는 재무 재설계(2026-10-23)로, `loss_aggregation`은 2026-10-27에
-없앴다 (재무는 장애 대응 흐름의 단계가 아니다 — 요구사항 DEP-FIN-01, 공통 구성안 결정 22).
+없앴다.
 장애 비용은 평상시 장부로 들어가 `closing_report`에서 드러난다. 고객사 클레임 건별 확인과
 `review_threshold_change`(AI가 기준 변경을 판단)도 재무 일이 아니라 없앴다.
 재무는 쿠폰·환불의 끝난 금액을 장부에 기록만 한다.
@@ -40,15 +39,13 @@ from ax_contracts.schemas import (
     TaskStatus,
 )
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
-from finance_agent import anomalies, audit, chat_log, closing, team_budget
 from finance_agent import books as bk
+from finance_agent import chat_log, closing, team_budget
 from finance_agent import finance_config as fc
 from finance_agent import ledger as lg
 from finance_agent.books import Books, load_books
 from finance_agent.planning_questions import answer_question
 from finance_agent.schemas import (
-    AuditReportInput,
-    AuditReportOutput,
     ClosingReportInput,
     ClosingReportOutput,
     SupportCostInput,
@@ -99,7 +96,6 @@ class FinanceRecords:
         self.recon_notes: dict[str, str] = {}  # payment_id → 처리 메모
         self.recon_note_log: list[dict[str, Any]] = []
         self.batches: dict[str, dict[str, Any]] = {}  # 정산 기간 → 묶음 요청 상태
-        self.anomalies: dict[str, dict[str, Any]] = {}  # 의심 건 번호 → 처리 전·후 기록
         # 없앤 예산·한도 경보의 확인 메모. 쓰지 않지만 사람이 쓴 기록이라 저장 파일에 그대로 둔다
         self.policy_acks: dict[str, dict[str, Any]] = {}
         self.bank_rows: list[dict[str, Any]] = []  # 사람이 올린 은행 입금 내역
@@ -120,14 +116,6 @@ def reset_state(sources: Sources | None = None) -> None:
     """테스트 사이에 저장소를 비운다."""
     global STATE
     STATE = State(sources)
-
-
-async def note_audit(findings: list[dict[str, Any]], tenant_id: str) -> None:
-    """사후 감사가 찾은 의심 건을 처리할 때까지 남기고, 처음 본 열린 건만 총괄에 알린다."""
-    store = state().records.anomalies
-    pending = anomalies.note_findings(store, findings)
-    if pending:
-        anomalies.mark_announced(store, await chat_log.audit_findings(pending, tenant_id))
 
 
 # ---------------------------------------------------------------- 공통
@@ -210,7 +198,7 @@ def incident_meta(context_id: str) -> dict[str, Any]:
     """사건의 장애 구간·부품 중 재무가 혼자 아는 것. (목 모드) 시드 → 모름.
 
     실제 모드에서는 모름이다. 구간을 알려 주던 총괄의 `loss_aggregation` 요청을 2026-10-27에
-    없앴다(재무는 장애 대응 흐름의 단계가 아니다). 실제 모드 구간은 `incident_info`가
+    없앴다. 실제 모드 구간은 `incident_info`가
     총괄 사건 목록을 읽어서 채운다.
     """
     if is_mock("finance"):
@@ -293,7 +281,7 @@ async def incident_impact(
     return impact
 
 
-# ------------------------------------------------------- closing_report·audit_report (읽기)
+# ---------------------------------------------------------------- closing_report (읽기)
 BOOK_QUERIES = [
     "shop-api:/api/shop/orders",
     "shop-api:/api/shop/coupons",
@@ -330,40 +318,6 @@ async def closing_report(request: AgentRequest) -> AgentResult:
         evidence=_evidence(
             [*BOOK_QUERIES[:2], f"closing:{data.period}:{key[1]}"], report["commentary"]
         ),
-    )
-
-
-async def audit_report(request: AgentRequest) -> AgentResult:
-    """⑦ 사후 감사 결과. 대시보드 `GET /api/finance/audit`과 같은 계산이다."""
-    data = _parse(request, AuditReportInput)
-    if isinstance(data, AgentResult):
-        return data
-    books = await state().books()
-    report, missing = await audit.audit_report(books, data.days, context_id=data.context_id)
-    await note_audit(report["findings"], request.meta.tenant_id)
-    if data.finding_ref:
-        # 알림받은 의심 건 하나: 기간이 지나도 목록에 남은 기록으로 본다
-        entry = state().records.anomalies.get(data.finding_ref)
-        found = [f for f in report["findings"] if anomalies.signature(f) == data.finding_ref]
-        report["findings"] = found or ([anomalies.finding_view(entry)] if entry else [])
-    output = AuditReportOutput(
-        window_from=report["from"],
-        window_to=report["to"],
-        stats=report["stats"],
-        findings=report["findings"],
-        unavailable=books.meta(missing)["unavailable"],
-    )
-    codes = sorted({f.code for f in output.findings})
-    summary = (
-        f"최근 {data.days}일 감사 의심 {len(output.findings)}건 ({', '.join(codes) or '없음'})"
-    )
-    refs = [r for f in output.findings for r in f.refs][:20]
-    return _result(
-        request,
-        TaskStatus.COMPLETED,
-        outcome="partial" if output.unavailable else "reported",
-        output=output.model_dump(mode="json"),
-        evidence=_evidence([BOOK_QUERIES[2], f"audit:{data.days}d"], summary, refs),
     )
 
 
@@ -494,7 +448,6 @@ async def answer_planning_question(request: AgentRequest) -> AgentResult:
 
 HANDLERS = {
     "closing_report": closing_report,
-    "audit_report": audit_report,
     "record_support_cost": record_support_cost,
     "answer_planning_question": answer_planning_question,
 }

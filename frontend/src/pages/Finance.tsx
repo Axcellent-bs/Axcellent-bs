@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { AuditSection } from "@/components/finance/Audit";
 import { ClosingSection } from "@/components/finance/Closing";
 import { DeadlineSection, PayablesSection, VarianceSection } from "@/components/finance/CloseControls";
 import { BankSection, CashflowSection, ChecklistSection } from "@/components/finance/CashAndClose";
@@ -39,7 +38,6 @@ const TAB_LABEL: Record<FinanceTab, string> = {
   reconciliation: "② 매출·PG 대사",
   settlements: "③ 판매자 정산",
   policy: "⑤ 팀 예산",
-  audit: "⑦ 사후 감사",
   tax: "⑥ 세무 지원",
 };
 
@@ -326,7 +324,6 @@ export default function FinancePage() {
           {tab === "settlements" && <div className="mt-4"><PayablesSection tick={tick} /></div>}
           {tab === "settlements" && <div className="mt-4"><CashflowSection tick={tick} /></div>}
           {tab === "policy" && <TeamBudgetSection tick={tick} />}
-          {tab === "audit" && <AuditSection tick={tick} onChanged={bump} />}
           {tab === "tax" && <TaxSection tick={tick} />}
         </div>
       </div>

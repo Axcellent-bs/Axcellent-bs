@@ -79,7 +79,6 @@ def test_agent_card(client: TestClient) -> None:
     skills = {s.id: s for s in card.skills}
     assert set(skills) == {
         "closing_report",
-        "audit_report",
         "record_support_cost",
         "answer_planning_question",
     }
@@ -89,13 +88,8 @@ def test_agent_card(client: TestClient) -> None:
     assert "review_threshold_change" not in skills  # 한도는 제안만, 사람이 기준표 PR로 바꾼다
     # 재무는 장애 대응 흐름의 단계가 아니다 (2026-10-27, 요구사항 DEP-FIN-01)
     assert "loss_aggregation" not in skills
-    assert skills["audit_report"].allowed_requesters == ["orchestrator", "data"]
-    assert (skills["audit_report"].grade, skills["audit_report"].priority) == (
-        "read",
-        "optional",
-    )
     served = client.get("/.well-known/agent-card.json").json()
-    assert served["name"] == "finance" and len(served["skills"]) == 4
+    assert served["name"] == "finance" and len(served["skills"]) == 3
 
 
 # ------------------------------------------- 금액 다시 계산 (예전 verify_amount, recheck.py)
@@ -132,14 +126,13 @@ def test_loop_is_rejected(client: TestClient) -> None:
 
 @pytest.mark.parametrize("token", ["mock:marketing", "mock:support", "mock:safety"])
 def test_only_orchestrator_and_data_can_ask_reports(client: TestClient, token: str) -> None:
-    """④ 권한: 결산·감사 리포트는 통합 에이전트와 데이터 AI만 부른다."""
-    for skill in ("closing_report", "audit_report"):
-        result = _call(client, skill, {}, token=token)
-        assert (result["status"], result["outcome"]) == ("rejected", "FORBIDDEN_SKILL")
+    """④ 권한: 결산 리포트는 통합 에이전트와 데이터 AI만 부른다."""
+    result = _call(client, "closing_report", {}, token=token)
+    assert (result["status"], result["outcome"]) == ("rejected", "FORBIDDEN_SKILL")
 
 
 @pytest.mark.parametrize(
-    "skill", ["verify_amount", "review_hold", "seller_review", "settlement_hold"]
+    "skill", ["verify_amount", "review_hold", "seller_review", "settlement_hold", "audit_report"]
 )
 def test_removed_skills_are_not_served(client: TestClient, skill: str) -> None:
     """재무 재설계: 건별 교차검증·AI 1차 판단 skill은 없다(안전 장치가 불러도 거부).
@@ -222,7 +215,7 @@ def test_expired_deadline_is_canceled(client: TestClient) -> None:
 def test_too_many_hops_are_refused(client: TestClient) -> None:
     result = _call(
         client,
-        "audit_report",
+        "closing_report",
         {},
         token="mock:orchestrator",
         path=["orchestrator", "support", "marketing", "data"],

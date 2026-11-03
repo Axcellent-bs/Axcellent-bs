@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from finance_agent import persist
@@ -67,23 +68,20 @@ def test_no_path_means_no_file(monkeypatch) -> None:
     assert persist.state_file() is None
 
 
-def test_open_anomalies_survive_a_restart(tmp_path) -> None:
-    """처리 전 의심 건은 다시 켜도 남는다. 예전 파일(목록 없음)도 읽는다."""
-    from finance_agent import anomalies
-
-    s = State(MockSources())
-    anomalies.note_findings(s.records.anomalies, [{"code": "gate_hold_trend", "refs": ["exe_1"]}])
+def test_old_suspicion_records_are_gone_after_a_restart(tmp_path) -> None:
+    """예전 파일에 남은 의심 건은 읽지 않고, 다음 저장 때 파일에서도 사라진다."""
     path = tmp_path / "finance_state.json"
-    persist.save(s, path)
+    s = State(MockSources())
+    old = persist.dump(s)
+    old["records"]["anomalies"] = {
+        "abc": {"finding_ref": "abc", "code": "duplicate_coupon", "status": "open", "refs": []}
+    }
+    path.write_text(json.dumps(old), encoding="utf-8")
     again = State(MockSources())
     assert persist.load(again, path)
-    assert anomalies.listing(again.records.anomalies)["open_count"] == 1
-
-    old = persist.dump(again)
-    del old["records"]["anomalies"]
-    third = State(MockSources())
-    persist.restore(third, old)
-    assert third.records.anomalies == {}
+    assert not hasattr(again.records, "anomalies")
+    persist.save(again, path)
+    assert "anomalies" not in json.loads(path.read_text("utf-8"))["records"]
 
 
 def test_an_old_state_file_with_removed_policy_records_still_loads(tmp_path) -> None:

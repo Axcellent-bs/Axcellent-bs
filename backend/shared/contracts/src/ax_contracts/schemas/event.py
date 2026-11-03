@@ -44,7 +44,7 @@ class EventType(StrEnum):
     METRIC_ANOMALY = "metric.anomaly"
     # 인프라(DejaFix 어댑터)
     INFRA_ANOMALY_DETECTED = "infra.anomaly_detected"
-    # 재무 (사후 감사가 새 의심 건을 찾음: 재무 일의 보류·거절 증가)
+    # 재무: 더 이상 발행하지 않는다 (재무 감사를 없앴다). 값은 계약 호환으로만 남긴다
     FINANCE_ANOMALY_DETECTED = "finance.anomaly_detected"
     # 통합 에이전트
     INCIDENT_OPENED = "incident.opened"

@@ -21,9 +21,6 @@
 | `GET /api/finance/tax/seller-report?date=&format=` | ⑥ 판매자별 판매 명세 (제75조 초안) | 없음 |
 | `GET /api/finance/team-budget?month=YYYY-MM` | ⑤ 팀 예산 (팀 인원 × 인당 월 단가) | 없음 |
 | `POST /api/finance/team-budget/{month}/approve` | ⑤ 팀 예산 확정 (`signature` 일치) | **사람** |
-| `GET /api/finance/audit?days=7&context_id=` | ⑦ 사후 감사 (사건 하나로 좁히기 선택) | 없음 |
-| `GET /api/finance/anomalies` | ⑦ 처리 전 의심 건 전부(기간 제한 없음) | 없음 |
-| `POST /api/finance/anomalies/{finding_ref}/resolve` | ⑦ 의심 건 처리 완료(메모) | **사람** |
 
 `meta`: `mock`, `collected_at`, `source`(`seed`|`shop-api`), `unavailable`(못 받은 자료 이름).
 정산 묶음 지급은 안전 관문이 항상 C로 보류하고 사람이 승인한다. 안전 관문에 닿지 않으면 503
@@ -43,10 +40,7 @@ from fastapi.responses import JSONResponse, Response
 from ax_agent_template.config import agent_name_scope, agent_url, is_mock
 from ax_agent_template.execute import execute
 from ax_contracts.schemas import Evidence, RequestMeta
-from ax_contracts.schemas.common import TENANT_ID_DEFAULT
 from finance_agent import (
-    anomalies,
-    audit,
     bank,
     cashflow,
     close_checklist,
@@ -63,7 +57,6 @@ from finance_agent import (
 from finance_agent import finance_config as fc
 from finance_agent.handlers import (
     closing_key,
-    note_audit,
     state,
     team_budget_data,
 )
@@ -234,36 +227,6 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
                         "amount": reconciliation.exception_amount(i),
                     }
                     for i in open_items[:TODO_ITEMS]
-                ],
-            }
-        )
-
-    # 사후 감사: 찾은 의심 건은 처리 전 목록에 남고, 사람이 처리 완료할 때까지 할 일로 보인다
-    report, _ = await audit.audit_report(books, 7)
-    await note_audit(report["findings"], TENANT_ID_DEFAULT)
-    serious = [
-        e
-        for e in anomalies.listing(state().records.anomalies)["open"]
-        if e["severity"] in ("high", "medium")
-    ]
-    if serious:
-        todo.append(
-            {
-                "kind": "audit_finding",
-                "title": f"처리 전 감사 의심 {len(serious)}건",
-                "count": len(serious),
-                "amount": None,
-                "link": "audit",
-                # 사람이 조사 결과(메모)를 남기고 처리 완료한다
-                "action": {"type": "anomaly_resolve"},
-                "items": [
-                    {
-                        "ref": e["finding_ref"],
-                        "title": e["title"],
-                        "detail": e["detail"],
-                        "amount": None,
-                    }
-                    for e in serious[:TODO_ITEMS]
                 ],
             }
         )
@@ -532,19 +495,6 @@ def add_finance_api(app: FastAPI) -> None:
         )
         return ok(rows, books.meta())
 
-    @app.get("/api/finance/audit", response_model=None)
-    async def get_audit(days: str = "7", context_id: str | None = None) -> dict | JSONResponse:
-        try:
-            n = int(days)
-        except ValueError:
-            n = 0
-        if not 1 <= n <= 90:
-            return error(400, "invalid_request", "days는 1~90")
-        books = await state().books()
-        data, missing = await audit.audit_report(books, n, context_id=context_id or None)
-        await note_audit(data.get("findings") or [], TENANT_ID_DEFAULT)
-        return ok(data, books.meta(missing))
-
     @app.get("/api/finance/team-budget", response_model=None)
     async def get_team_budget(month: str | None = None) -> dict | JSONResponse:
         try:
@@ -679,29 +629,4 @@ def add_finance_api(app: FastAPI) -> None:
             content=tax.seller_report_csv(report).encode("utf-8"),
             media_type="text/csv; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="{name}"'},
-        )
-
-    @app.get("/api/finance/anomalies")
-    async def get_anomalies() -> dict:
-        return ok(
-            anomalies.listing(state().records.anomalies),
-            {"mock": is_mock("finance"), "source": "finance_records"},
-        )
-
-    @app.post("/api/finance/anomalies/{finding_ref}/resolve", response_model=None)
-    async def resolve_anomaly(
-        finding_ref: str, request: Request, authorization: str | None = Header(default=None)
-    ) -> dict | JSONResponse:
-        try:
-            person = human_from_authorization(authorization)
-        except PermissionError as exc:
-            return error(401, "unauthorized", str(exc))
-        note = (await _body(request)).get("note")
-        if not isinstance(note, str) or not note.strip() or len(note) > 500:
-            return error(400, "invalid_request", "note는 1~500자 문자열")
-        entry = anomalies.resolve(state().records.anomalies, finding_ref, person, note.strip())
-        if entry is None:
-            return error(404, "not_found", f"의심 건 {finding_ref}이 목록에 없다")
-        return ok(
-            entry, {"mock": is_mock("finance"), "source": "finance_records", "resolved_by": person}
         )

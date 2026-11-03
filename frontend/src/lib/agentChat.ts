@@ -98,10 +98,6 @@ const METRIC_KO: Record<string, string> = {
   error_rate_5xx: "서버 오류로 자꾸 실패해요", p95_latency_ms: "응답이 느려졌어요", order_fail_rate: "주문 실패가 늘었어요", payment_fail_rate: "실패가 늘었어요",
 };
 const SUBJECT_KO: Record<string, string> = { payment: "결제가", api: "쇼핑몰이", db: "주문 DB가", search: "검색이", shipping: "배송이" };
-// 재무 이상 이벤트(finance.anomaly_detected)는 주어 없이 한 문장으로
-const FINANCE_KO: Record<string, string> = {
-  gate_hold_trend: "안전 장치 보류·거절이 늘었어요",
-};
 /** 보류 건을 결정하는 화면. 환불은 고객지원, 쿠폰은 마케팅, 나머지는 재무 화면의 보류 큐다 */
 export function holdPage(action: string | null | undefined): string {
   if (action === "refund_request") return "/queue";
@@ -131,7 +127,6 @@ export function incidentTitle(inc: Pick<OrchIncident, "title" | "component">): s
   if (!inc.title.includes("장애 감지")) return inc.title;
   const comp = COMPONENT_KO[inc.component] ?? inc.component;
   const metric = metricOf(inc);
-  if (inc.component === "finance") return (metric && FINANCE_KO[metric]) || "돈 흐름에서 이상한 점을 찾았어요";
   const subject = SUBJECT_KO[inc.component] ?? `${comp}이(가)`;
   return metric && METRIC_KO[metric] ? `${subject} ${METRIC_KO[metric]}` : `${comp}에 문제가 생겼어요`;
 }
@@ -158,7 +153,7 @@ const ACTION_KO: Record<string, string> = {
   get_inquiry: "문의 조회", inquiry_overview: "문의 현황 조회", list_claims: "클레임 목록 조회", claim_stats: "클레임 통계",
   claim_queue: "보상 대기열 조회", process_claim_queue: "보상 대기열 처리", customer_signals: "고객 이상 신호 조회",
   release_fault_injection: "쇼핑몰 장애 해제", receive_change_result: "변경 결과 받기",
-  ledger_record: "장부에 기록", audit_report: "사후 감사", closing_report: "기간 손익 정리",
+  ledger_record: "장부에 기록", closing_report: "기간 손익 정리",
 };
 export const actionKo = (a: string) => ACTION_KO[a] ?? a;
 /** 코드 이름 → 사람이 읽는 이름. 모르는 이름은 밑줄을 띄어 쓴다 */
@@ -322,7 +317,7 @@ export function incidentItems(inc: OrchIncident): ChatItem[] {
   out.push({ kind: "separator", id: `${room}:sep`, at: opened, room, text: `${incidentTitle(inc)}${opened ? ` · ${clockKo(opened)} 시작` : ""}`, raw: `이벤트 번호 ${inc.context_id}`, variant: "topic" });
   out.push({ kind: "system", id: `${room}:open`, at: opened, room, text: inc.component.startsWith("support-inquiry-")
       ? `고객지원 AI가 문의를 해결 종료해서 총괄 AI가 "${incidentTitle(inc)}" 이벤트를 열고 재무·인사에 넘겼어요.`
-      : `${inc.component === "finance" ? "재무 AI가 사후 감사에서" : "캣북스 쇼핑몰이"} "${incidentTitle(inc)}" 신호를 보내서 총괄 AI가 이벤트를 열었어요.` });
+      : `캣북스 쇼핑몰이 "${incidentTitle(inc)}" 신호를 보내서 총괄 AI가 이벤트를 열었어요.` });
 
   for (const step of inc.steps) {
     const sid = `${room}:${step.step_id}`;

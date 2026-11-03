@@ -28,7 +28,6 @@
 | ② 매출·PG 대사 | 주문 ↔ 결제·환불 ↔ PG 정산을 건별로 맞춤. 상태 `matched`(일치)·`mismatch`(금액 다름)·`missing_in_pg`(PG에 없음)·`pending`(아직 정산 전)·`fee_anomaly`(수수료율 이상) | 불일치 건 처리 메모 | 포트원 거래대사, 토스 정산 API |
 | ③ 판매자 정산 | 판매자별 정산금 = 판매액 − 판매 수수료 − 판매자 부담 쿠폰 − 환불. 보류 사유 자동 표시(구매 미확정, 정산금 0원 이하). 정산 내역서 | 정산 묶음 지급 승인(C, 안전 관문 보류 큐) | 포트원 파트너 정산, 쿠팡·스마트스토어 |
 | ⑤ 팀 예산 | 팀 예산 = 그달 1일 팀 인원 × 인당 월 단가, 지난달 대비 증감 | 팀 예산 확정 | Ramp, Pigment |
-| ⑦ 사후 감사 | 재무 자기 일의 실행 관문 보류·거절 추이 | 조사 결론 메모 | 비즈플레이 모니터링, Ramp |
 
 나중에: ④ 비용·영수증(영수증 읽기, AI 사용비), ⑥ 세무(부가세·세금계산서), ⑧ 현금흐름 예측.
 
@@ -38,7 +37,7 @@
 |---|---|---|
 | `verify_amount` (재무 skill) | 쿠폰·환불 B 건마다 안전 관문이 재무에 재계산 요청 | **삭제.** 건별 검사는 안전 관문 코드 규칙(금액 계산·`claimed_fields` 불일치·기준표 한도) |
 | `issue_coupon`, `refund_request` (registry) | B, verifier finance | **A**, verifier 없음. 금액이 기준표 기준 이상이면 C. 요청 총액이 계산값과 다를 때의 C(`amount_mismatch`)는 `claimed_fields`가 있는 `issue_coupon`에만 걸린다(`refund_request`는 금액 필드 하나라 해당 없음) |
-| `review_hold` (재무 skill, #110) | C 보류 건 AI 1차 판단 | **삭제.** #110·#266은 닫는다. ⑦ 사후 감사로 대신 |
+| `review_hold` (재무 skill, #110) | C 보류 건 AI 1차 판단 | **삭제.** #110·#266은 닫는다 |
 | `review_threshold_change` (#124·#276) | AI가 기준 변경 판단 | **삭제 (2026-10-26).** 한도는 사람이 기준표 PR로 바꾼다 |
 | `loss_aggregation` | 손실 리포트 | ~~유지~~ → **장애 흐름에서 뺌 (2026-10-27, 12장).** 총괄이 사건 중에 부르지 않는다. skill·API 정리는 후속 코드 PR |
 | `seller_review`, `settlement_hold` | 판매자 심사, 정산 보류 | **유지**(③의 일부). 보류된 판매자는 정산 묶음에서 빠진다 |
@@ -63,7 +62,7 @@
 
 모두 `{data, meta}` 봉투. `meta.mock`, `meta.collected_at`.
 
-- `GET /api/finance/overview` → 오늘 요약: `gmv`, `net_revenue`, `refund_total`, `coupon_cost`, `recon_exceptions`, `settlement_pending`, `audit_findings`, `todo[]`(사람이 할 일).
+- `GET /api/finance/overview` → 오늘 요약: `gmv`, `net_revenue`, `refund_total`, `coupon_cost`, `recon_exceptions`, `settlement_pending`, `todo[]`(사람이 할 일).
 - `GET /api/finance/closing?period=day|month&date=YYYY-MM-DD` → `ClosingReport`: 기간, 손익 줄(`lines[]` = {code, label, amount}), 분개 미리보기(`journal[]` = {account, debit, credit, memo}), `commentary`(설명 문장), `status`(`draft`|`confirmed`), `confirmed_by`
 - `POST /api/finance/closing/confirm` (사람 토큰) `{period, date}` → 확정 기록
 - `GET /api/finance/reconciliation?date=` → `ReconciliationResult`: `counts`(상태별), `items[]` = {order_id, payment_id, order_amount, pg_amount, fee, expected_fee, status, note}
@@ -71,7 +70,6 @@
 - `GET /api/finance/settlements?period=` → 판매자별 `SellerStatement[]` = {seller_id, name, gross, commission_rate, commission, seller_coupon, refunds, payout, hold_reasons[], status(`ready`|`held`|`requested`|`approved`|`rejected`)}
 - `POST /api/finance/settlements/batch` → 보류 아닌 판매자들을 묶어 `confirm_settlement`를 `execute()`로 요청(C → 안전 관문 보류 큐). 응답에 `review_id`
 - `GET /api/finance/team-budget?month=` → 팀 예산. `GET /api/finance/policy`는 없앴다(2026-11-02)
-- `GET /api/finance/audit?days=7` → `AuditReport`: `findings[]` = {code, severity, title, detail, refs[]}, `stats`(재무 자기 일의 관문 보류·거절 수)
 - 유지: `GET /api/finance/ledger`, `/loss-reports`, `/self-test`, `/self-test/last`, `/market-ops`
 - 삭제: `/api/finance/verifications`, `/api/finance/ai-reviews`, `/catbooks/sync`·`/catbooks/items`·`/threshold-reviews`(2026-10-26, 4장)
 
@@ -85,7 +83,6 @@
 | `seller_review` | B | orchestrator | 유지 |
 | `settlement_hold` | B | orchestrator | 유지 |
 | `closing_report` | read | orchestrator, data | 새로. 기간 손익 요약 |
-| `audit_report` | read | orchestrator, data | 사후 감사 결과. 2026-11-02부터 보류·거절 추이만 돌려준다 |
 | ~~`verify_amount`~~, ~~`review_hold`~~ | | | 삭제 |
 | ~~`review_threshold_change`~~ | | | 삭제 (2026-10-26): 한도는 사람이 기준표 PR로 바꾼다 |
 
@@ -93,9 +90,9 @@
 
 위에서 아래로:
 1. 머리말 + 재무 AI 테스트 버튼(유지) + "처음이라면: 관리자가 할 일"(새 흐름으로 고침)
-2. **지금 사람이 할 일**: 정산 묶음 승인 대기, 결산 확정 대기, 대사 불일치, 감사 의심 건
+2. **지금 사람이 할 일**: 정산 묶음 승인 대기, 결산 확정 대기, 대사 불일치
 3. **오늘의 재무** 카드: 총거래액, 순매출(수수료), 환불, 쿠폰 비용, PG 수수료
-4. 탭 또는 섹션 5개: ① 결산·리포트 ② 매출·PG 대사 ③ 판매자 정산 ⑤ 예산·한도 정책 ⑦ 내부통제·감사
+4. 탭 또는 섹션 5개: ① 결산·리포트 ② 매출·PG 대사 ③ 판매자 정산 ⑤ 예산·한도 정책
 5. 장애 손실 리포트: 장애 흐름에서 뺌(2026-10-27, 12장), 화면 정리 후속. 캣북스에서 들어온 일은 삭제(2026-10-26, 4장)
 
 없애는 화면: 거래별 검증 목록, AI가 결정한 건 목록, 네 갈래 처리 흐름 막대(건별 승인 중심이라).
@@ -103,12 +100,12 @@
 ## 9. 영향받는 다른 부서
 
 - 마케팅·고객지원: 쿠폰·환불이 B → A. 한도 안이면 바로 실행되고, 넘으면 지금처럼 C 보류. 응답 상태 `verifying`이 더 이상 오지 않는다.
-- 총괄: 장애 중에 재무를 부르지 않는다 (2026-10-27, 12장). 플랜의 `loss_aggregation`·`audit_report` 노드 제거는 후속. `closing_report`·`audit_report`는 평상시 조회용 선택.
+- 총괄: 총괄은 고객지원이 문의를 닫으면 재무를 불러(`record_support_cost`) 처리 결과를 장부에 기록하게 한다. `closing_report`는 평상시 조회용 선택.
 - 대시보드(병환): 재무 화면은 재무가 고친다. 보류 큐에 `confirm_settlement`가 나타난다.
 
 ## 10. 테스트
 
-- 재무: 모듈별 단위 테스트(계산식, 대사 상태 분류, 정산 공식, 감사 규칙), API 테스트, 실제 모드 원천 호출 형식 테스트(계약·응답 형식)
+- 재무: 모듈별 단위 테스트(계산식, 대사 상태 분류, 정산 공식), API 테스트, 실제 모드 원천 호출 형식 테스트(계약·응답 형식)
 - 안전 관문: 쿠폰·환불 A·executed(한도 안), C(한도 초과·금액 불일치), finance 교차검증 호출이 없음
 - 화면: 타입 검사·빌드, 브라우저로 5개 섹션과 정산 묶음 요청 확인
 
@@ -121,7 +118,7 @@
 // GET /api/finance/overview
 {"date": "2026-10-23",
  "kpis": {"gmv": 1250000, "commission_revenue": 118000, "refund_total": 64000, "coupon_cost": 42000, "pg_fee": 38750, "net_result": 37250},
- "todo": [ {"kind": "settlement_batch"|"closing_confirm"|"recon_exception"|"audit_finding"|"policy_alert",
+ "todo": [ {"kind": "settlement_batch"|"closing_confirm"|"recon_exception",
             "title": "판매자 정산 3곳 지급 승인 대기", "count": 3, "amount": 980000, "link": "settlements"} ]}
 
 // GET /api/finance/closing?period=day|month&date=YYYY-MM-DD   (date 생략 = 오늘, month면 그 달)
@@ -162,17 +159,11 @@
 // → 보류 없는(ready) 판매자만 묶어 execute(confirm_settlement) 요청. safety C 보류 → batch.status="requested", review_id 채움.
 //   safety가 꺼져 있으면 503 {"error": {"code": "safety_unavailable", ...}} (fail-closed, 지급 기록 없음)
 
-// GET /api/finance/audit?days=7
-{"from": "...", "to": "...",
- "stats": {"gate_held": 3, "gate_rejected": 1},
- "findings": [ {"code": "gate_hold_trend",
-                "severity": "medium", "title": "안전 장치 보류·거절 증가",
-                "detail": "최근 7일 안전 장치 보류 3건·거절 1건 (지난 7일 1건)", "refs": ["exe_..."]} ]}
 ```
 
 ## 12. 시나리오 A(결제 장애)와 재무 (2026-10-26 추가, 2026-10-27 개정)
 
-**2026-10-27 개정 (멘토 피드백 2026-10-26):** 재무는 서버 장애 대응 흐름의 노드가 아니다. 이전 판의 ⑨ 쿠폰 장부·⑩ 손실 리포트·⑰ 사건 후 감사 단계는 시나리오에서 지웠다 (`docs/scenarios/scn-a-server-incident.md`, 공통 구성안 후속 결정 22).
+**2026-10-27 개정 (멘토 피드백 2026-10-26):** 재무는 장부에 기록만 한다. 이전 판의 ⑨ 쿠폰 장부·⑩ 손실 리포트·⑰ 사건 후 감사 단계는 시나리오에서 지웠다 (`docs/scenarios/scn-a-server-incident.md`, 공통 구성안 후속 결정 22).
 
 | 이전 단계 | 지금 |
 |---|---|

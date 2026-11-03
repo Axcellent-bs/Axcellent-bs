@@ -16,7 +16,6 @@ from ax_contracts.schemas import EventEnvelope, EventType
 from ax_orchestrator.engine import Engine
 from ax_orchestrator.models import Incident, Plan, iso
 from ax_orchestrator.naming import event_title, event_type
-from ax_orchestrator.plans.finance_anomaly import finance_anomaly
 from ax_orchestrator.plans.support_resolved import support_resolved
 
 
@@ -35,11 +34,9 @@ LOOKBACK = timedelta(minutes=15)  # 이벤트가 열리기 직전 실패 주문�
 INCIDENT_EVENTS = {
     EventType.SHOP_DEGRADED,
     EventType.INFRA_ANOMALY_DETECTED,
-    EventType.FINANCE_ANOMALY_DETECTED,
 }
 # 이벤트 종류별 plan. 없는 종류는 기본 plan(시나리오 A)
 PLANS: dict[EventType, tuple[str, Callable[[], Plan]]] = {
-    EventType.FINANCE_ANOMALY_DETECTED: ("finance_anomaly", finance_anomaly),
     EventType.SUPPORT_INQUIRY_RESOLVED: ("support_resolved", support_resolved),
 }
 # 장애가 아니라 건마다 하나씩 여는 이벤트 (문의 처리 결과, 판매자 입점)
@@ -51,7 +48,6 @@ SUBSCRIBED = [
     EventType.SHOP_DEGRADED,
     EventType.SHOP_RECOVERED,
     EventType.INFRA_ANOMALY_DETECTED,
-    EventType.FINANCE_ANOMALY_DETECTED,
     EventType.METRIC_ANOMALY,
     EventType.SUPPORT_INQUIRY_RECEIVED,
     EventType.SUPPORT_INQUIRY_SURGE,

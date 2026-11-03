@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from ax_contracts.schemas import EventEnvelope, EventType
+from ax_contracts.schemas import EventEnvelope
 from finance_agent import chat_log
 
 
@@ -29,7 +29,6 @@ def published(monkeypatch: pytest.MonkeyPatch) -> list[EventEnvelope]:
         sent.append(envelope)
 
     monkeypatch.setattr(chat_log.events, "publish", fake)
-    monkeypatch.setattr(chat_log, "_seen_findings", set())
     return sent
 
 
@@ -47,22 +46,3 @@ def test_ledger_without_incident_is_not_a_chat(logged: list[dict[str, Any]]) -> 
     """대화방은 사건마다 방이 있다. 사건 번호 없는 기록은 대화로 남기지 않는다(장부에는 적힌다)."""
     chat_log.ledger_recorded(None, "shop-demo", "shop-api", "refund", 18000)
     assert logged == []
-
-
-@pytest.mark.asyncio
-async def test_new_audit_finding_opens_finance_incident(published: list[EventEnvelope]) -> None:
-    finding = {
-        "code": "gate_hold_trend", "severity": "medium",
-        "detail": "buy_0008 관련 안전 장치 보류 3건",
-        "refs": ["ref_1", "ord_1"],
-    }
-    await chat_log.audit_findings([finding], "shop-demo")
-    await chat_log.audit_findings([dict(finding)], "shop-demo")  # 화면이 감사를 다시 불러도
-    assert len(published) == 1
-    env = published[0]
-    assert env.type == EventType.FINANCE_ANOMALY_DETECTED and env.source == "finance"
-    assert env.data["component"] == "finance" and env.data["metric_code"] == "gate_hold_trend"
-    assert env.data["buyer_ids"] == ["buy_0008"]
-    # 다른 의심 건은 새로
-    await chat_log.audit_findings([{**finding, "refs": ["ref_9"]}], "shop-demo")
-    assert len(published) == 2
