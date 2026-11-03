@@ -189,3 +189,17 @@ def test_product_create_and_update(client: TestClient) -> None:
         "stock": 1,
     }
     assert client.post("/api/shop/products", json=unknown_seller, headers=ADMIN).status_code == 404
+
+
+def test_orders_can_be_listed_by_period(client: TestClient) -> None:
+    """since 이상 until 미만으로 거른다. 안 주면 전체, 형식이 틀리면 400."""
+    first = _order(client)
+    all_ids = [o["order_id"] for o in client.get("/api/shop/orders").json()["data"]]
+    created = first["created_at"]
+    in_range = client.get(f"/api/shop/orders?since={created}&until=2999-01-01T00:00:00Z")
+    assert [o["order_id"] for o in in_range.json()["data"]] == all_ids
+    assert client.get("/api/shop/orders?until=2000-01-01T00:00:00Z").json()["data"] == []
+    assert client.get(f"/api/shop/orders?until={created}").json()["data"] == []
+    assert client.get("/api/shop/orders?since=2999-01-01").json()["data"] == []
+    bad = client.get("/api/shop/orders?since=어제")
+    assert bad.status_code == 400

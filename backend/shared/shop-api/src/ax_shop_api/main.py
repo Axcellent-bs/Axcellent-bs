@@ -403,8 +403,10 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
         return _ok(shop.update_product(product_id, body.model_dump(exclude_none=True)))
 
     @app.get("/api/shop/orders")
-    async def list_orders(buyer_id: str | None = None) -> dict:
-        return _ok(shop.list_orders(buyer_id))
+    async def list_orders(
+        buyer_id: str | None = None, since: str | None = None, until: str | None = None
+    ) -> dict:
+        return _ok(shop.list_orders(buyer_id, since, until))
 
     @app.get("/api/shop/orders/{order_id}")
     async def get_order(order_id: str) -> dict:
