@@ -69,6 +69,8 @@ class VideoStat:
     rank: int | None = None  # 인기 순위 (인기 목록에서 받았을 때만, 1부터)
     channel_title: str = ""  # 채널 이름 (snippet.channelTitle)
     duration_seconds: int | None = None  # 길이(초, contentDetails.duration). 못 읽으면 None
+    # 영상 언어 (snippet.defaultAudioLanguage, 없으면 defaultLanguage). 채널이 안 적었으면 None
+    language: str | None = None
 
 
 # ---------------------------------------------------------------- YouTube 응답 형식 (여기서만 쓴다)
@@ -89,6 +91,8 @@ class _Snippet(BaseModel):
     categoryId: str | None = None  # noqa: N815
     tags: list[str] = Field(default_factory=list)
     channelTitle: str = ""  # noqa: N815
+    defaultAudioLanguage: str | None = None  # noqa: N815
+    defaultLanguage: str | None = None  # noqa: N815
 
 
 class _Details(BaseModel):
@@ -137,6 +141,7 @@ class _SearchItem(BaseModel):
 class _SearchPage(BaseModel):
     model_config = ConfigDict(extra="ignore")
     items: list[_SearchItem]
+    nextPageToken: str | None = None  # noqa: N815
 
 
 def _stat(video: _Video, rank: int | None = None) -> VideoStat:
@@ -154,6 +159,7 @@ def _stat(video: _Video, rank: int | None = None) -> VideoStat:
         rank=rank,
         channel_title=sn.channelTitle,
         duration_seconds=duration_seconds(video.contentDetails.duration),
+        language=sn.defaultAudioLanguage or sn.defaultLanguage,
     )
 
 
@@ -174,6 +180,7 @@ class YouTubeConnector:
         self._key = env.get(KEY_ENV) or ""
         self._client = client
         self.quota_used = 0
+        self.next_page_tokens: dict[str, str | None] = {}  # 숏츠 검색 카테고리마다 다음 페이지
 
     def __repr__(self) -> str:  # 키를 담지 않는다
         return f"YouTubeConnector(url={self.url!r}, quota_used={self.quota_used})"
@@ -233,8 +240,12 @@ class YouTubeConnector:
         published_after: datetime,
         region: str = "KR",
         max_results: int = PAGE_SIZE,
+        language: str | None = None,
+        page_token: str | None = None,
     ) -> list[VideoStat]:
         """YouTube 카테고리 하나의 짧은 영상(4분 미만) 검색 → 결과 영상의 통계.
+
+        `language`(예: ko)를 주면 `relevanceLanguage`로 그 언어 영상을 앞에 둔다(거르지는 않는다).
 
         `videoDuration=short`, 조회수 순, 최근 게시. 검색 100단위 + 통계 1단위(50개마다).
         """
@@ -248,7 +259,12 @@ class YouTubeConnector:
             "maxResults": max(1, min(max_results, PAGE_SIZE)),
             "publishedAfter": published_after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
+        if language:
+            params["relevanceLanguage"] = language
+        if page_token:
+            params["pageToken"] = page_token
         page = _parse(_SearchPage, await self._get("search", params), "숏츠 검색")
+        self.next_page_tokens[category_id] = page.nextPageToken
         ids = [item.id.videoId for item in page.items if item.id.videoId]
         return await self.videos(ids) if ids else []
 
