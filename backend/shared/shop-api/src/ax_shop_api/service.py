@@ -32,6 +32,17 @@ def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _period_bound(value: str) -> str:
+    """기간 경계(ISO 8601)를 저장 형식(UTC, 초 단위)으로 맞춘다. 시간대가 없으면 UTC로 본다."""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise ShopError("INVALID_PERIOD", "기간은 ISO 8601 시각이어야 한다", 400) from None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def coupon_used_units(conn: sqlite3.Connection, coupon_id: str) -> int:
     """쿠폰이 이미 쓴 장수. 취소됐거나 전액 환불된 주문은 장수를 돌려주므로 세지 않는다.
 
@@ -176,11 +187,22 @@ class Shop:
         with self.db.tx() as conn:
             return self._order(conn, order_id)
 
-    def list_orders(self, buyer_id: str | None = None) -> list[dict[str, Any]]:
+    def list_orders(
+        self, buyer_id: str | None = None, since: str | None = None, until: str | None = None
+    ) -> list[dict[str, Any]]:
+        """접수 시각(created_at)이 `since` 이상, `until` 미만인 주문. 둘 다 없으면 전체."""
+        where, args = [], []
+        if buyer_id:
+            where.append("buyer_id = ?")
+            args.append(buyer_id)
+        if since:
+            where.append("created_at >= ?")
+            args.append(_period_bound(since))
+        if until:
+            where.append("created_at < ?")
+            args.append(_period_bound(until))
         with self.db.tx() as conn:
-            sql, args = "SELECT order_id FROM orders", []
-            if buyer_id:
-                sql, args = sql + " WHERE buyer_id = ?", [buyer_id]
+            sql = "SELECT order_id FROM orders" + (" WHERE " + " AND ".join(where) if where else "")
             ids = [r["order_id"] for r in conn.execute(sql + " ORDER BY order_id", args)]
             return [self._order(conn, order_id) for order_id in ids]
 
