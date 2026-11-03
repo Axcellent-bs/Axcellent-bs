@@ -523,6 +523,8 @@ def add_finance_api(app: FastAPI) -> None:
             return error(400, "invalid_request", "signature(확정할 때 보던 숫자)가 필요하다")
         if note is not None and (not isinstance(note, str) or len(note) > 500):
             return error(400, "invalid_request", "note는 500자 이하 문자열")
+        # 확정은 지금 인원과 맞춰 본다. 화면용으로 기억해 둔 인원이면 그사이 확정된 발령을 놓친다
+        state().sources.forget_headcount(m)
         data, missing = await team_budget_data(m)
         if data["status"] == "unavailable":
             return error(

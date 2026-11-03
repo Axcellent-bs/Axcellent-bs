@@ -201,3 +201,81 @@ def test_example_headcount_is_shown_but_never_approved() -> None:
     assert post.status_code == 409 and post.json()["error"]["code"] == "example_headcount"
     assert "2026-11" not in handlers.state().records.team_budgets
     assert _todo(client) == []  # 예시 인원으로 사람에게 확정을 부탁하지 않는다
+
+
+def _hr_reply(month: str, heads: int, *, example: bool = False) -> dict[str, Any]:
+    return {
+        "month": month,
+        "rows": [{"team": "개발팀", "headcount": heads}],
+        "basis": f"확정된 발령 기록 1건 기준, {month}-01 소속",
+        "example": example,
+        "collected_at": "2026-11-01T00:00:00Z",
+    }
+
+
+def _live_hr(monkeypatch: pytest.MonkeyPatch, heads: dict[str, Any]) -> None:
+    """인사 `team_headcount` 응답 흉내. 달에 값이 없으면 `NO_HEADCOUNT_RECORD` 같은 실패다."""
+
+    async def fake(target: str, req: Any) -> Any:
+        reply = heads.get(req.input["month"])
+        if reply is None:
+            return SimpleNamespace(status=TaskStatus.FAILED, output=None)
+        return SimpleNamespace(status=TaskStatus.COMPLETED, output=reply)
+
+    monkeypatch.setattr(sources, "call_agent", fake)
+    monkeypatch.setattr(sources, "route_target", lambda target, skill: "decisions")
+    handlers.reset_state(LiveSources())
+
+
+def test_approve_checks_hr_again_not_the_remembered_headcount(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """화면을 본 뒤 발령이 확정되면, 기억해 둔 5분 안이어도 옛 인원으로 확정하지 않는다."""
+    heads: dict[str, Any] = {"2026-11": _hr_reply("2026-11", 5), "2026-10": _hr_reply("2026-10", 5)}
+    _live_hr(monkeypatch, heads)
+    client = TestClient(app)
+    seen = client.get("/api/finance/team-budget?month=2026-11").json()["data"]
+
+    heads["2026-11"] = _hr_reply("2026-11", 6)
+    # 화면 조회는 아직 기억해 둔 값을 쓴다
+    assert client.get("/api/finance/team-budget?month=2026-11").json()["data"]["total"] == 500000
+    url = "/api/finance/team-budget/2026-11/approve"
+    stale = client.post(url, json={"signature": seen["signature"]}, headers=HUMAN)
+    assert stale.status_code == 409 and stale.json()["error"]["code"] == "stale"
+    assert "2026-11" not in handlers.state().records.team_budgets
+
+    now = client.get("/api/finance/team-budget?month=2026-11").json()["data"]
+    assert now["total"] == 600000  # 다시 불러오면 새 인원이 보인다
+    ok = client.post(url, json={"signature": now["signature"]}, headers=HUMAN)
+    assert ok.status_code == 200 and ok.json()["data"]["approved"]["total"] == 600000
+
+
+def test_month_before_hr_records_is_not_zero_won(monkeypatch: pytest.MonkeyPatch) -> None:
+    """기록 시작 전 달은 인사가 실패로 답한다. 0원이 아니라 "받지 못함"이고 확정할 수 없다."""
+    _live_hr(monkeypatch, {"2026-11": _hr_reply("2026-11", 5)})
+    client = TestClient(app)
+    body = client.get("/api/finance/team-budget?month=2026-10").json()
+    assert body["data"]["status"] == "unavailable" and body["data"]["total"] is None
+    post = client.post(
+        "/api/finance/team-budget/2026-10/approve", json={"signature": "x"}, headers=HUMAN
+    )
+    assert post.status_code == 503
+
+
+def test_first_recorded_month_can_be_approved_without_last_month(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """기록이 시작된 달은 지난달 인원이 없어도 확정된다. 증감만 비운다."""
+    _live_hr(monkeypatch, {"2026-11": _hr_reply("2026-11", 5)})
+    client = TestClient(app)
+    body = client.get("/api/finance/team-budget?month=2026-11").json()
+    d = body["data"]
+    assert d["example"] is False and d["status"] == "pending" and d["total"] == 500000
+    assert d["prev_total"] is None and d["change_total"] is None
+    assert body["meta"]["unavailable"] == ["team_headcount_prev"]
+    ok = client.post(
+        "/api/finance/team-budget/2026-11/approve",
+        json={"signature": d["signature"]},
+        headers=HUMAN,
+    )
+    assert ok.status_code == 200 and ok.json()["data"]["status"] == "approved"
