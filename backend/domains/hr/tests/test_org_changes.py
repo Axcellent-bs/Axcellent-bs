@@ -95,7 +95,18 @@ def test_draft_is_saved_without_approval_and_not_counted(client) -> None:
     assert TeamHeadcountOutput.model_validate(hc["output"]).example is True
 
 
-def test_confirmed_records_replace_the_example_roster(client, monkeypatch) -> None:
+def test_confirmed_records_count_but_stay_example_until_baseline_is_complete(client) -> None:
+    confirm(client, "emp_a", "join", None, "기획팀", "2026-11-01")
+    confirm(client, "emp_b", "join", None, "기획팀", "2026-11-01")
+    confirm(client, "emp_c", "join", None, "개발팀", "2026-11-01")
+    res = headcount(client)
+    out = TeamHeadcountOutput.model_validate(res["output"])
+    assert out.example is True
+    assert rows(res) == {"기획팀": 2, "개발팀": 1, "재무/정산": 0}
+    assert out.basis == "확정된 발령 기록 3건 기준, 2026-11-01 소속 (전 직원 등록 전)"
+
+
+def test_marking_the_roster_complete_makes_the_count_real(client, monkeypatch) -> None:
     confirm(client, "emp_a", "join", None, "기획팀", "2026-11-01")
     confirm(client, "emp_b", "join", None, "기획팀", "2026-11-01")
     confirm(client, "emp_c", "join", None, "개발팀", "2026-11-01")
@@ -291,12 +302,11 @@ def test_ledger_applies_by_month_then_receipt_order() -> None:
 # ---- 전 직원 등록 완료 --------------------------------------------------------------
 
 
-def test_records_without_roster_complete_still_count_as_example(client) -> None:
+def test_records_without_roster_complete_are_marked_example(client) -> None:
     confirm(client, "emp_a", "join", None, "기획팀", "2026-11-01")
     out = TeamHeadcountOutput.model_validate(headcount(client)["output"])
-    assert out.example is True
-    assert "전 직원 등록 완료 전" in (out.basis or "")
-    assert sum(r.headcount for r in out.rows) == 10  # 일부만 등록된 인원이 나가지 않는다
+    assert out.example is True  # 일부만 등록된 인원은 재무가 확정하지 못한다
+    assert "전 직원 등록 전" in (out.basis or "")
 
 
 def test_complete_needs_the_whole_roster_registered(client) -> None:

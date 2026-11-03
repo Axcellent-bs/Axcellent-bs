@@ -884,6 +884,8 @@ class DevService(PlanningCore):
         if mode not in ("auto", "agent", "subscription"):
             raise ActionError("INVALID_INPUT", "mode는 auto·agent·subscription 중 하나다")
 
+        moved: list[str] = []
+
         async def run(s: State) -> ActionResult:
             if s.coding_mode != mode:
                 text = f"요청 작업 코딩 방식 {s.coding_mode} → {mode}"
@@ -893,9 +895,74 @@ class DevService(PlanningCore):
                         self.clock(), "dev_settings", "human", "dev", "dev.settings", "사람", text
                     )
                 )
-            return ActionResult(output=self.coding_settings(s))
+                # 이제 서버 AI가 코딩하면: 아직 아무도 안 가져간 개발자 Claude 대기 작업도 넘긴다
+                if self.coding_choice(s)[0] == "agent" and coder.get_llm() is not None:
+                    for t in self._unclaimed(s):
+                        await self._to_agent(s, t, f"코딩 방식 {mode} → 서버 AI로 넘김")
+                        moved.append(t.id)
+            return ActionResult(output={**self.coding_settings(s), "moved_to_agent": moved})
 
-        return await self._apply(run)
+        result = await self._apply(run)
+        for task_id in moved:
+            self._spawn_coder(task_id)
+        return result
+
+    @staticmethod
+    def _unclaimed(s: State) -> list[Task]:
+        """개발자 Claude 대기열에 있고 아직 아무도 안 가져간 작업."""
+        return [
+            t for t in s.tasks
+            if t.coding is not None and t.coding.mode == "subscription"
+            and t.coding.status == "queued" and not t.coding.claimed_by
+        ]  # fmt: skip
+
+    async def _to_agent(self, s: State, x: Task, why: str) -> None:
+        """구독형 대기 작업을 서버 코딩 에이전트로 넘긴다 (관문 dev_task_to_agent 뒤)."""
+        assert x.coding is not None
+        sp = next((p for p in s.specs if p.id == x.spec), None)
+        req = self._request_of_spec(s, sp) if sp else None
+        ctx = req.context_id if req else f"task:{x.id}"
+        llm = coder.get_llm()
+        text = f"{x.id} {why} (연결 {x.coding.connection})"
+        n = sum(1 for g in self.gate_calls if g.action == "dev_task_to_agent") + 1
+        await self._execute(
+            "dev_task_to_agent", ctx, f"{x.id}:{n}", text, {"connection": x.coding.connection}
+        )
+        x.coding.mode = "agent"
+        x.coding.model = coder.model_name(llm) if llm else None
+        x.coding.progress = None
+        x.coding.lease_until = None
+        x.coding.updated_at = self.clock()
+        s.activity.append(self._act(self.clock(), ctx, "dev", "dev", "dev_task_to_agent", "A2A",
+                                    text, "A"))  # fmt: skip
+
+    async def hand_to_agent(self, task_id: str) -> ActionResult:
+        """사람이 '서버 AI로 넘기기': 개발자 Claude 대기열에서 아무도 안 가져간 작업을 서버 코딩
+        에이전트가 맡는다. 이미 가져간 작업은 그 개발자가 놓거나 기한이 지나야 넘길 수 있다."""
+        task = next((t for t in self.state.tasks if t.id == task_id), None)
+        if task is None or task.coding is None:
+            raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+        if task.coding.mode != "subscription" or task.coding.status != "queued":
+            raise ActionError("NOT_MOVABLE", f"{task_id}는 개발자 Claude 대기 중이 아니다")
+        if task.coding.claimed_by:
+            raise ActionError(
+                "NOT_MOVABLE", f"{task_id}는 {task.coding.claimed_by}가 가져갔다 → 놓은 뒤 넘기기"
+            )
+        if coder.get_llm() is None:
+            raise ActionError("NOT_MOVABLE", "서버 AI 설정(LLM)이 없어 넘길 수 없다")
+
+        async def run(s: State) -> ActionResult:
+            x = next((t for t in s.tasks if t.id == task_id), None)
+            if x is None or x.coding is None:
+                raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+            await self._to_agent(s, x, "사람이 서버 AI로 넘김 (사람 클릭)")
+            return ActionResult(
+                outcome="queued", output={"task_id": task_id, "status": "queued", "mode": "agent"}
+            )
+
+        result = await self._apply(run)
+        self._spawn_coder(task_id)
+        return result
 
     def coding_settings(self, s: State | None = None) -> dict[str, Any]:
         s = s or self.state

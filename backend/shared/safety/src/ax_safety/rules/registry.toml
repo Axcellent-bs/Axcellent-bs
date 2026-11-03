@@ -278,6 +278,20 @@ owner = "planning"
 requesters = ["planning", "dev"]
 base_grade = "A"
 
+# 배포 요청·승인 (dev 배포 기록 deploy_store). 관문은 A로 기록만 하고, prod·보호 경로가 닿는 배포는
+# 배포 기록이 사람 승인 대기(requested)로 남겨 approve_deploy(사람 클릭) 전에는 나가지 않는다
+[[actions]]
+action = "request_deploy"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+[[actions]]
+action = "approve_deploy"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
 # 배포 지시 받기 (planning → dev). 개발은 지금의 배포 요청 흐름을 탄다 (prod·보호 경로는 사람 승인)
 [[actions]]
 action = "receive_release_order"
@@ -321,6 +335,13 @@ base_grade = "A"
 
 [[actions]]
 action = "dev_task_retry"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+# 개발자 Claude 대기 작업을 서버 AI로 넘기기 (아무도 안 가져간 것만). 코드를 안 바꿔 A
+[[actions]]
+action = "dev_task_to_agent"
 owner = "planning"
 requesters = ["planning", "dev"]
 base_grade = "A"

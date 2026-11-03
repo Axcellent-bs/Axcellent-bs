@@ -984,6 +984,135 @@ class ContentRecommendOutput(AxModel):
         return self
 
 
+# --------------------------------------------------------------- trend_popular (지금 인기)
+# 급상승 판정과 별개인 "지금 인기" 주제 순위. 점수는 코드(영상 수·조회 속도·인기 검색어 순위 몫의
+# 가중합). 출처 하나를 못 읽으면 그 몫만 None(unknown) + 이유이고 0으로 채우지 않는다.
+# 네이버를 부르지 않는다.
+
+
+class TrendPopularRequest(AxModel):
+    max_items: int | None = Field(default=None, ge=1, le=50)  # 없으면 회사 설정 [popular] top
+
+
+class PopularScore(AxModel):
+    score: float = 0.0  # 아는 몫만 가중합 (가중치는 출력 weights)
+    video_share: float | None = None  # 인기 영상 수 몫 (YouTube를 못 읽었으면 None)
+    velocity_share: float | None = None  # 지금 조회 속도 몫 (못 쟀으면 None)
+    trending_share: float | None = None  # 인기 검색어 순위 몫 (인기 검색어를 못 읽었으면 None)
+
+
+class PopularTopic(AxModel):
+    rank: int = Field(ge=1)
+    keyword: str = Field(min_length=1)  # 정리한 대표 이름
+    aliases: list[str] = Field(default_factory=list)  # 같이 센 이름 (태그·별칭·자동 묶음)
+    origins: list[CandidateOrigin] = Field(default_factory=list)
+    score: PopularScore = Field(default_factory=PopularScore)
+    youtube_videos: int | None = Field(default=None, ge=0)  # 이 주제가 나온 인기 영상 수
+    video_ids: list[str] = Field(default_factory=list)  # 인기 순위 순 (최대 5)
+    views_per_hour: float | None = None  # 그 영상들의 지금 시간당 조회 증가 합 (못 쟀으면 None)
+    velocity_videos: int = Field(default=0, ge=0)  # 속도를 잰 영상 수
+    velocity_reason: str | None = None  # 속도를 못 쟀으면 이유
+    trending_rank: int | None = Field(default=None, ge=1)  # 이번에 본 인기 검색어 중 순위
+    trending_traffic: str | None = None  # 피드의 트래픽 표시값 (예: "500+", 검색 건수 아님)
+    topic_category: TopicCategory | None = None  # 주제 분류 (unknown = 분류하지 못함)
+    topic_category_reason: str | None = None
+    # 회사 "추천 안 함" 분류가 아니면 true, 그 분류면 false, 분류 unknown이면 None
+    brand_safe: bool | None = None
+    # 오늘 이미 낸 네이버 판정이 급상승이면 true, 평범이면 false, 오늘 판정이 없으면 None
+    rising_now: bool | None = None
+    rising_ratio: float | None = Field(default=None, ge=0)  # 그 판정의 배수
+
+
+class TrendPopularOutput(AxModel):
+    items: list[PopularTopic] = Field(default_factory=list)  # 점수 순
+    empty_reason: str | None = None  # 주제가 없을 때 이유
+    youtube_status: Literal["known", "unknown"] = "unknown"
+    youtube_reason: str | None = None
+    snapshot_at: UtcDatetime | None = None  # 쓴 YouTube 인기 스냅샷 시각
+    velocity_status: Literal["known", "unknown"] = "unknown"
+    velocity_reason: str | None = None
+    velocity_from: UtcDatetime | None = None  # 조회 속도 구간 (최근 두 스냅샷)
+    velocity_to: UtcDatetime | None = None
+    trending_status: Literal["known", "unknown"] = "unknown"
+    trending_reason: str | None = None
+    trending_at: UtcDatetime | None = None  # 쓴 인기 검색어 스냅샷 시각
+    weights: dict[str, float] = Field(default_factory=dict)  # video·velocity·trending 가중치
+    excluded_categories: list[str] = Field(default_factory=list)  # brand_safe에 쓴 추천 안 함 분류
+    summary: str = ""  # 코드가 만든 한 문장
+
+
+# --------------------------------------------------------------- promo_concepts (홍보 영상 기획안)
+# 재료(회사 상품·안전한 지금 인기 트렌드·카탈로그 카테고리 시즌·회사 이벤트)는 코드가 모으고,
+# LLM은 정해진 스키마로 기획안 문장만 쓴다. 카탈로그에 없는 상품·재료 밖 트렌드·재료에 없는 숫자는
+# 코드가 버린다(이유 기록).
+
+PromoFormat = Literal["15초 숏폼", "30초 숏폼", "롱폼"]
+# 지금 인기 · 시즌(작년 같은 달) · 회사 이벤트
+PromoTrendKind = Literal["popular", "season", "event"]
+
+
+class PromoConceptsRequest(AxModel):
+    regenerate: bool = False  # true면 오늘 만든 기획안이 있어도 새로 만든다 (기본: 하루 캐시)
+
+
+class PromoProduct(AxModel):
+    """기획안에 나오는 회사 상품 (회사 상품 목록 값 그대로)."""
+
+    product_id: str
+    name: str
+    category_name: str | None = None
+    price: int | None = Field(default=None, ge=0)  # 판매가 (원)
+
+
+class PromoTrend(AxModel):
+    """재료 트렌드 하나 (코드가 고른 값)."""
+
+    name: str = Field(min_length=1)
+    kind: PromoTrendKind
+    topic_category: TopicCategory | None = None  # popular만 (주제 분류)
+    ip_risk: bool = False  # 게임·연예·스포츠·인물 분류 (이름이 제목·콘티에 그대로 있으면 경고)
+    detail: str = ""  # 코드가 만든 한 줄 (예: 지금 인기 3위, 작년 12월 검색이 평균의 1.6배)
+
+
+class PromoConcept(AxModel):
+    concept_id: str
+    title: str
+    concept: str = ""  # 컨셉 한 줄
+    borrowed_trend: str  # 빌려 온 트렌드 (재료 트렌드 이름 그대로)
+    trend_kind: PromoTrendKind | None = None
+    products: list[PromoProduct] = Field(default_factory=list)  # 등장 상품
+    format: PromoFormat | None = None
+    storyboard: list[str] = Field(default_factory=list)  # 콘티 3컷
+    cautions: list[str] = Field(default_factory=list)  # 주의사항 (LLM)
+    warnings: list[str] = Field(default_factory=list)  # 코드가 단 경고 (상표·초상권 확인 필요 등)
+
+
+class DroppedConcept(AxModel):
+    """검증에서 버린 기획안 (제목과 이유만, 내용은 남기지 않는다)."""
+
+    title: str
+    reason: str
+
+
+class PromoConceptsOutput(AxModel):
+    concepts: list[PromoConcept] = Field(default_factory=list)
+    dropped: list[DroppedConcept] = Field(default_factory=list)
+    empty_reason: str | None = None  # 기획안이 없을 때 이유 (LLM 실패·재료 없음 등)
+    trends: list[PromoTrend] = Field(default_factory=list)  # 쓴 재료 트렌드
+    products: int = Field(default=0, ge=0)  # 재료 상품 수
+    catalog_status: Literal["known", "unknown"] = "unknown"
+    catalog_reason: str | None = None
+    popular_status: Literal["known", "unknown"] = "unknown"  # 안전한 지금 인기 트렌드를 썼는지
+    popular_reason: str | None = None
+    season_status: Literal["known", "unknown"] = "unknown"  # 카테고리 월별 흐름을 읽었는지
+    season_reason: str | None = None
+    naver_calls: int = Field(default=0, ge=0)  # 이번 실행에서 네이버를 실제로 부른 수 (캐시 제외)
+    cached: bool = False  # 오늘 만든 기획안을 그대로 줬는지
+    run_id: str | None = None  # 기획안 기록 id
+    generated_at: UtcDatetime | None = None
+    summary: str = ""  # 코드가 만든 한 문장
+
+
 # --------------------------------------------------------------- campaign_effect (캠페인 효과)
 # 캠페인 기간 주문·매출을 지난 7일 같은 시간대 평균과 비교한 증분과, 캠페인 쿠폰 누적 사용률.
 # 항목마다 "앎(값·근거)" 또는 "모름 + 이유"다. 모르면 0으로 채우지 않는다.

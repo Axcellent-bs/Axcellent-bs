@@ -368,6 +368,18 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return _gate_err(exc)
         return _ok(result.output, svc)
 
+    @router.post("/dev-tasks/{task_id}/to-agent", response_model=None, dependencies=HUMAN)
+    async def post_dev_task_to_agent(task_id: str) -> dict | JSONResponse:
+        """서버 AI로 넘기기: 개발자 Claude 대기열에서 아무도 안 가져간 작업을 서버 AI가 맡는다."""
+        svc = get_service()
+        try:
+            result = await svc.hand_to_agent(task_id)
+        except ActionError as exc:
+            return _coding_err(exc)
+        except GateRefused as exc:
+            return _gate_err(exc)
+        return _ok(result.output, svc)
+
     @router.post("/dev-tasks/{task_id}/close-covered", response_model=None, dependencies=HUMAN)
     async def post_dev_task_close_covered(task_id: str) -> dict | JSONResponse:
         """반영됨으로 닫기: 바뀐 내용이 없어 멈춘 작업을 앞 작업이 반영한 것으로 완료 (PR 없음)."""

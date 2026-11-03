@@ -49,6 +49,7 @@ class CatalogProduct(BaseModel):
     category_code: str | None = None
     active: bool = True
     description: str | None = None  # 상품 설명 (커넥터가 주면). 임베딩 상품 글에 붙인다
+    price: int | None = None  # 판매가 (원, 커넥터가 주면). 홍보 기획안 재료
 
 
 class ConnectorUnsupported(ConnectorUnavailable):

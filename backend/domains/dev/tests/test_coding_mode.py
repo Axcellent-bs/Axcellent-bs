@@ -154,3 +154,61 @@ def test_handed_request_with_trial_left_queues_server_ai(service, adapter, monke
         t.coding and t.coding.mode == "agent" and t.coding.model == "fake-coder" for t in tasks
     )
     assert spawned == ["T-11", "T-12"]
+
+
+class _NoLLM:
+    """서버 AI가 있다고만 보이게 하는 자리 (부르면 실패)."""
+
+    settings = None
+
+    async def structured(self, *a, **k):
+        raise RuntimeError("부르지 않는다")
+
+
+def _queued_subscription(service, monkeypatch):
+    monkeypatch.setenv("PLANNING_REQUEST_CODING", "1")
+    run(service.set_coding_mode("subscription"))
+    plan(service, "answer_question", "SPEC-7", ANSWER)
+    plan(service, "confirm_spec", "SPEC-7")
+    return _spec7_tasks(service)
+
+
+def test_switching_to_agent_moves_unclaimed_queue(service, adapter, monkeypatch) -> None:
+    tasks = _queued_subscription(service, monkeypatch)
+    tasks[1].coding.claimed_by = "dev-kim"  # 가져간 작업은 그대로 둔다
+    coder.set_llm(None)
+    out = run(service.set_coding_mode("agent"))  # 서버 AI 설정이 없으면 넘기지 않는다
+    assert out.output["moved_to_agent"] == []
+    run(service.set_coding_mode("subscription"))
+    coder.set_llm(_NoLLM())
+
+    async def go():
+        out = await service.set_coding_mode("auto")
+        await service.wait_coding()
+        return out
+
+    out = run(go())
+    assert out.output["resolved"] == "agent" and out.output["moved_to_agent"] == ["T-11"]
+    t11, t12 = _spec7_tasks(service)
+    assert t11.coding.mode == "agent" and t12.coding.mode == "subscription"
+    assert any(a.point == "dev_task_to_agent" and "T-11" in a.text for a in service.state.activity)
+
+
+def test_hand_to_agent_button(service, adapter, monkeypatch) -> None:
+    _queued_subscription(service, monkeypatch)
+    coder.set_llm(None)
+    with pytest.raises(ActionError) as err:
+        run(service.hand_to_agent("T-11"))
+    assert err.value.code == "NOT_MOVABLE"
+    coder.set_llm(_NoLLM())
+
+    async def go():
+        out = await service.hand_to_agent("T-11")
+        await service.wait_coding()
+        return out
+
+    assert run(go()).output["mode"] == "agent"
+    assert _spec7_tasks(service)[0].coding.mode == "agent"
+    with pytest.raises(ActionError) as err:  # 이미 넘겼으면 안 된다
+        run(service.hand_to_agent("T-11"))
+    assert err.value.code == "NOT_MOVABLE"
