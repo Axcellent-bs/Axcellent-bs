@@ -5,6 +5,7 @@ import { PreparingChip } from "@/components/Preparing";
 import { CampaignEffect } from "@/components/data/CampaignEffect";
 import { ContentRecommend } from "@/components/data/ContentRecommend";
 import { TrendHistory } from "@/components/data/TrendHistory";
+import { TrendPopular } from "@/components/data/TrendPopular";
 import { YoutubeVelocity } from "@/components/data/YoutubeVelocity";
 import { ContentLoop, type LoopTrendState } from "@/components/data/ContentLoop";
 import { LOOP_STAGES, SEND_TO_MARKETING_BLOCKED, stageFromHash, trendHash, type LoopProbe, type LoopStage } from "@/lib/contentLoop";
@@ -554,6 +555,8 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
         <div key={s.tab} role="tabpanel" id={`trend-sub-panel-${s.tab}`} aria-labelledby={`trend-sub-${s.tab}`} hidden={stage.no !== s.no}>
           {s.tab === "detect" ? (
             <div className="space-y-5">
+              {/* 지금 인기 (trend_popular): 급상승 판정과 별개. 1단계 맨 위, 급상승 화면은 아래 */}
+              <TrendPopular />
               <div role="group" aria-label="보기 전환" className="flex flex-wrap gap-1.5">
                 {DETECT_VIEWS.map((d) => (
                   <button key={d.id} type="button" aria-pressed={view === d.id} onClick={() => setView(d.id)}
