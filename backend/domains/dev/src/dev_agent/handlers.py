@@ -23,6 +23,8 @@ from ax_contracts.schemas.planning import (
     ReceiveReleaseOrderInput,
     ReceiveReleaseOrderOutput,
     RelatedPr,
+    RequestPauseInput,
+    RequestPauseOutput,
     VerifyHandoverInput,
     VerifyHandoverOutput,
     VerifyRollbackTargetInput,
@@ -486,6 +488,38 @@ async def receive_release_order(request: AgentRequest) -> AgentResult:
     )
 
 
+async def receive_request_pause(request: AgentRequest) -> AgentResult:
+    """dev 서비스: 기획이 요청을 사람 중단·재개했다 (A, execute 경유)."""
+    try:
+        inp = RequestPauseInput.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    if not request.meta.idempotency_key:
+        return _missing_key(request)
+    try:
+        result = await get_service().receive_request_pause(
+            context_id=request.meta.context_id,
+            requester=_requester(request),
+            inp=inp,
+            idempotency_key=request.meta.idempotency_key,
+        )
+    except GateRefused as exc:
+        return _gate_rejected(request, exc)
+    out = RequestPauseOutput.model_validate(result.output)
+    how = "중단" if inp.paused else "재개"
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        outcome=out.outcome,
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(
+            data_summary=f"{inp.request_id} {how} → {out.outcome} · 멈춘 작업 "
+            f"{len(out.tasks_stopped)} · PR {len(out.prs_held)}",
+            ref_ids=[f"request:{inp.request_id}", *(f"pr:{n}" for n in out.prs_held)],
+        ),
+    )
+
+
 # 개발 서비스(dev 8111)가 받는 skill
 DEV_HANDLERS = {
     "find_related_prs": find_related_prs,
@@ -495,4 +529,5 @@ DEV_HANDLERS = {
     "verify_handover": verify_handover,
     "start_dev": start_dev,
     "receive_release_order": receive_release_order,
+    "receive_request_pause": receive_request_pause,
 }
