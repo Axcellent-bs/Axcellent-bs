@@ -4,7 +4,6 @@ import { Chip, ErrorBox, Panel, TONE, Waiting, useResource } from "@/components/
 import { PreparingChip } from "@/components/Preparing";
 import { CampaignEffect } from "@/components/data/CampaignEffect";
 import { PromoConcepts } from "@/components/data/PromoConcepts";
-import { ShortsStats } from "@/components/data/ShortsStats";
 import { TrendPopular, TrendSummary, materialOf } from "@/components/data/TrendPopular";
 import { okOut, useSkill } from "@/components/data/useSkill";
 import { ContentLoop, type LoopTrendState } from "@/components/data/ContentLoop";
@@ -21,7 +20,7 @@ import {
 // - 1 감지: 요약 카드 3개(오늘 가장 큰 화제·기획안에 쓸 수 있는 트렌드·다가오는 시즌) → 카테고리 버튼(지금 인기, 고른 칸만 그림)
 //   → 맨 아래 급상승 한 줄 목록(trend_scan·trend_candidates). 그래프 없음. YouTube 속도 목록은 화면을 줄이려고 뺐다
 // - trend_popular·promo_concepts는 이 화면이 한 번 받아 1단계 요약·칩 색과 2단계 기획안이 같이 쓴다 (useSkill)
-// - 2 추천: 인기 숏츠 형식(shorts_stats) + 기획안 초안(promo_concepts). 처음 열 때 그리고, 그 뒤에는 하위 탭을 오가도 남게 숨기기만 한다
+// - 2 추천: 숏츠 광고 기획안 초안(promo_concepts, 왼쪽 형식 막대 + shorts_stats 표본 한계). 처음 열 때 그리고, 그 뒤에는 하위 탭을 오가도 남게 숨기기만 한다
 // - 3 넘김: "기획팀이 초안을 확정하고 마케팅이 제작·게시하는 단계 (준비 중)". 루프 띠와 같은 단계 설명 문장만 보여 준다(숫자·예시 없음)
 // - 4 성과(게시·성과 측정, 다음 추천 반영은 준비 중): 캠페인 효과(campaign_effect). 측정 결과가 남게 숨기기만 한다
 //
@@ -310,8 +309,7 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
           ) : !seen.has(t.key) ? null : t.key === "recommend" ? (
             // 처음 열 때 그리고, 그 뒤에는 하위 탭을 오가도 남도록 숨기기만 한다
             <div className="space-y-5">
-              {/* 인기 숏츠 형식 (shorts_stats) → 광고·홍보 숏츠 기획안 초안 (promo_concepts) */}
-              <ShortsStats />
+              {/* 숏츠 광고 기획안 초안 (promo_concepts, 왼쪽 숏츠 형식 막대 + 표본 한계 shorts_stats) */}
               <PromoConcepts state={promoRes.state} onRegenerate={promoRes.reload} />
             </div>
           ) : t.key === "handoff" ? (
