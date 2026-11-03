@@ -96,6 +96,8 @@ class Sources(Protocol):
 
     async def team_headcount(self, meta: RequestMeta, month: str) -> TeamHeadcountOutput | None: ...
 
+    def forget_headcount(self, month: str) -> None: ...
+
 
 def _int(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
@@ -169,6 +171,9 @@ class MockSources:
                 "collected_at": datetime.now(UTC),
             }
         )
+
+    def forget_headcount(self, month: str) -> None:
+        """목 시드는 기억해 둔 값이 없다."""
 
 
 # 팀 인원은 하루에 몇 번 바뀌지 않는다. 재무 화면이 몇 초마다 불러도 인사에 다시 묻지 않는다
@@ -256,6 +261,10 @@ class LiveSources:
         # 실패도 잠깐 기억한다. 화면이 몇 초마다 불러도 실패 기록이 AI 대화방에 쌓이지 않게
         self._headcount_cache[month] = (now, out)
         return out
+
+    def forget_headcount(self, month: str) -> None:
+        """기억해 둔 그 달 인원을 버린다. 다음 조회는 인사에 다시 묻는다."""
+        self._headcount_cache.pop(month, None)
 
     async def _read_json(self, url: str, timeout: float) -> Any | None:
         """읽기 전용 GET. 응답이 없거나 200이 아니거나 JSON이 아니면 None (fail-closed)."""
