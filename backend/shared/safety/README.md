@@ -10,10 +10,11 @@
 - 감사 로그 (SAF-06): 접수·검증·판정·인증 거부·보류 결정을 `context_id`와 함께 남긴다
 - 공통 로그 (COM-08): 판정마다 `execute_decided`(grade·status·action·requester), 인증 거부는 `rejected`(`reason_code` = `UNAUTHORIZED`/`FORBIDDEN`)를 `AX_COMMON_LOG_DB`에 남긴다. 대시보드 "안전 관문 로그"와 data `kpi_summary`가 이것을 읽는다. 계약 `LogKind`에 없는 종류는 저장소에 남지 않는다
 - fail-closed (SAF-08): 미등록 액션·금액 필드 오류·총액 불일치·검증 무응답은 실행하지 않는다
+- 외부 연결 쓰기: 레지스트리에 `connection_field`가 있는 액션은 연결 id가 비어 있으면 C(`schema_invalid`). 긴급 취약 연결의 보류는 아직 없다(취약점 판정이 들어오면 붙인다)
 - 누적 한도 (SAF-10): 일일(UTC)·사건별·고객별 누적 금액 규칙
 - 규칙 기반 검증 (SAF-11): 금액은 코드가 건수 × 단가로 다시 계산한다
 
-판정 흐름: 멱등성 → 레지스트리(요청자 = owner) → 금액 계산·총액 대조 → 금액 규칙 → A 실행 / B 교차검증 / C 보류 → 감사 로그·`safety.*` 이벤트.
+판정 흐름: 멱등성 → 레지스트리(요청자 = owner) → 연결 id 확인 → 금액 계산·총액 대조 → 금액 규칙 → A 실행 / B 교차검증 / C 보류 → 감사 로그·`safety.*` 이벤트.
 `executed`는 "요청 에이전트가 이제 쓰기 도구를 불러도 된다"는 뜻이고, 실제 쓰기는 요청 쪽이 한다. C 건을 사람이 승인하면 같은 `idempotency_key`로 다시 요청할 때 `executed`를 받는다.
 
 ## 2. 실행 방법

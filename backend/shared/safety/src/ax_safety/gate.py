@@ -4,6 +4,7 @@
 
 1. 멱등성: 같은 `(tenant_id, idempotency_key)`면 이전 판정을 그대로 돌려준다.
 2. 레지스트리: 미등록 액션이거나 요청자가 액션 owner가 아니면 C(`unregistered_action`).
+   외부 연결에 쓰는 액션(`connection_field`)은 연결 id가 비어 있으면 C(`schema_invalid`).
 3. 금액은 코드가 계산한다(건수 × 단가 또는 금액 필드). 필드가 없거나 정수가 아니면
    C(`schema_invalid`), 요청 쪽이 적은 총액과 다르면 C(`amount_mismatch`).
 4. 등급 = 레지스트리 기본 등급과 금액 규칙(건별·일일·사건별·고객별 누적) 중 높은 쪽.
@@ -149,6 +150,10 @@ class Gate:
         if not allowed:
             report = {"reason": "미등록 액션이거나 요청자가 이 액션을 신고하지 않았다"}
             return await self._hold(request, execution_id, HoldReason.UNREGISTERED_ACTION, report)
+
+        if spec.connection_field and not self._param_str(spec.connection_field, request.params):
+            report = {"reason": f"외부 연결에 쓰는 액션인데 {spec.connection_field}가 없다"}
+            return await self._hold(request, execution_id, HoldReason.SCHEMA_INVALID, report)
 
         try:
             amount, unit, formula = compute_amount(spec, request.params)
