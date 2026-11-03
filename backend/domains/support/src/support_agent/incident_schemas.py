@@ -43,3 +43,46 @@ class IncidentCompensationOutput(AxModel):
     stopped_early: bool = False  # 마케팅에 닿지 않거나 거부·검증 중이라 남은 고객은 보내지 않았다
     limit_reached: bool = False  # 사건당 인원·합계 상한에 닿아 남은 고객은 보내지 않았다
     notes: list[str] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------- list_incident_compensation
+MAX_COMPARE_BUYERS = 200
+INCIDENT_CONTEXT_PATTERN = r"^ctx_inc_[A-Za-z0-9]+$"
+
+
+class ListIncidentCompensationInput(AxModel):
+    """사건(`ctx_inc_`)마다 보상 쿠폰을 받은 고객을 돌려준다 (읽기).
+
+    `incident_context_id`를 주면 그 사건만, 안 주면 보상 기록이 있는 모든 사건을 돌려준다.
+    `buyer_ids`(예: 데이터분석 영향 분석의 영향 고객)를 주면 보상 기록이 없는 고객을
+    `missing_buyer_ids`로, 반대로 보상은 받았는데 목록에 없는 고객은 `outside_buyer_ids`로
+    알려 준다. 이 skill은 찾기만 하고 보상을 요청하지 않는다.
+    """
+
+    incident_context_id: str | None = Field(default=None, pattern=INCIDENT_CONTEXT_PATTERN)
+    buyer_ids: list[str] | None = Field(default=None, max_length=MAX_COMPARE_BUYERS)
+
+
+class CompensatedBuyer(AxModel):
+    buyer_id: str
+    status: Literal["issued", "linked_duplicate"]
+    reason_code: str
+    coupon_id: str | None = None
+    count: int = 0
+    unit_value: int = 0
+    total_value: int = 0
+    marketing_outcome: str | None = None
+
+
+class IncidentCompensation(AxModel):
+    context_id: str
+    buyers: list[CompensatedBuyer]
+    issued_buyers: int  # 쿠폰이 실제로 지급된 고객 수 (`linked_duplicate`는 뺀다)
+    issued_total: int  # 그 합계 원
+    missing_buyer_ids: list[str] | None = None  # `buyer_ids`를 줬을 때만: 보상 기록이 없는 고객
+    outside_buyer_ids: list[str] | None = None  # `buyer_ids`를 줬을 때만: 목록 밖인데 보상받은 고객
+
+
+class ListIncidentCompensationOutput(AxModel):
+    incidents: list[IncidentCompensation]
+    notes: list[str] = Field(default_factory=list)

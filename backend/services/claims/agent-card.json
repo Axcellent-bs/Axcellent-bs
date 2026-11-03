@@ -165,6 +165,19 @@
       ],
       "verifier": null,
       "priority": "required"
+    },
+    {
+      "id": "list_incident_compensation",
+      "description": "사건(ctx_inc_)마다 보상 쿠폰을 받은 고객을 돌려준다(읽기). 영향 고객 목록(buyer_ids)을 함께 주면 보상 기록이 없는 고객을 missing_buyer_ids로, 목록에 없는데 보상받은 고객을 outside_buyer_ids로 알려 준다. 찾기만 하고 보상을 요청하지 않는다.",
+      "input_schema": "agents/support/src/support_agent/incident_schemas.py#ListIncidentCompensationInput",
+      "output_schema": "agents/support/src/support_agent/incident_schemas.py#ListIncidentCompensationOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
     }
   ]
 }

@@ -913,6 +913,17 @@ async def decline_change_proposal(body: ChangeProposalDeclineBody, request: Requ
     return ok(out)
 
 
+@router.get("/incident-compensation")
+async def incident_compensation(
+    incident_id: str | None = Query(default=None, pattern=r"^ctx_inc_[A-Za-z0-9]+$"),
+) -> dict:
+    """사건별로 보상 쿠폰을 받은 고객 (읽기). 없는 사건은 빈 목록이다."""
+    if is_mock():
+        return ok(mock_customers.incident_compensation(incident_id))
+    payload = {"incident_context_id": incident_id} if incident_id else {}
+    return ok(await support_client.call("list_incident_compensation", payload))
+
+
 @router.get("/change-requests")
 async def change_requests(
     inquiry_id: int | None = None,

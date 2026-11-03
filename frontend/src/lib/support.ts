@@ -126,6 +126,27 @@ export interface ExecutionRow {
   decision: { grade: "A" | "B" | "C"; status: "executed" | "verifying" | "held" | "rejected" | "failed"; hold_reason?: string | null };
 }
 
+/** 사건 하나에서 보상 쿠폰을 받은 고객 (dashboard-api GET /incident-compensation) */
+export interface CompensatedBuyer {
+  buyer_id: string;
+  status: "issued" | "linked_duplicate";
+  reason_code: string;
+  coupon_id: string | null;
+  count: number;
+  unit_value: number;
+  total_value: number;
+  marketing_outcome: string | null;
+}
+export interface IncidentCompensation {
+  context_id: string;
+  buyers: CompensatedBuyer[];
+  issued_buyers: number;
+  issued_total: number;
+  missing_buyer_ids: string[] | null;
+  outside_buyer_ids: string[] | null;
+}
+export interface IncidentCompensationList { incidents: IncidentCompensation[]; notes: string[] }
+
 // ---------------------------------------------------------------- 호출
 async function get<T>(path: string): Promise<Envelope<T> & { meta: { total?: number } }> {
   let res: Response;
@@ -158,6 +179,9 @@ export const support = {
   compensation: (inquiryId: number) => get<CompensationSuggestion>(`${BASE}/conversations/${inquiryId}/compensation-suggestion`),
   paymentDiagnosis: (inquiryId: number) => get<PaymentDiagnosis>(`${BASE}/conversations/${inquiryId}/payment-diagnosis`),
   inquirySurge: () => get<InquirySurge>(`${BASE}/inquiry-surge`),
+  /** 사건별로 보상 쿠폰을 받은 고객. 사건을 주면 그 사건만 */
+  incidentCompensation: (incidentId?: string) =>
+    get<IncidentCompensationList>(`${BASE}/incident-compensation${qs({ incident_id: incidentId })}`),
   changeProposals: () => get<ChangeProposals>(`${BASE}/change-proposals`),
   /** 한 사건 번호로 기록된 처리(안전 관문 실행 기록) */
   executions: (contextId: string) => get<ExecutionRow[]>(`${BASE}/executions${qs({ context_id: contextId })}`),
