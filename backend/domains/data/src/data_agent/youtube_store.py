@@ -22,6 +22,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from data_agent.connectors.youtube import VideoStat
 
@@ -53,6 +54,12 @@ CREATE TABLE IF NOT EXISTS runs (
     search_count  INTEGER NOT NULL,
     searched      INTEGER NOT NULL,   -- 회사 키워드 검색을 했는지 (한국 날짜 하루 1번)
     errors        TEXT NOT NULL       -- 실패 이유 JSON 배열 (없으면 [])
+);
+CREATE TABLE IF NOT EXISTS video_details (
+    video_id        TEXT PRIMARY KEY,
+    channel_title   TEXT,             -- 채널 이름 (snippet.channelTitle). NULL = 받은 적 없음
+    duration_s      INTEGER,          -- 길이(초, contentDetails.duration). NULL = 못 읽음
+    seen_at         TEXT NOT NULL     -- 받은 시각 (UTC)
 );
 CREATE TABLE IF NOT EXISTS video_titles (
     video_id      TEXT PRIMARY KEY,
@@ -116,7 +123,39 @@ class SnapshotStore:
             )
             saved = self._conn.total_changes - before
         self.save_titles(collected_at, [(r.stat.video_id, r.stat.title) for r in rows_list])
+        self.save_details(collected_at, [r.stat for r in rows_list])
         return saved
+
+    def save_details(self, seen_at: datetime, stats: Iterable[Any]) -> int:
+        """채널 이름·길이를 넣거나 바꾼다(둘 다 없는 영상은 건너뜀). 바꾼 줄 수."""
+        values = [
+            (s.video_id, (s.channel_title or "").strip() or None, s.duration_seconds, iso(seen_at))
+            for s in stats
+            if (getattr(s, "channel_title", "") or "").strip()
+            or getattr(s, "duration_seconds", None) is not None
+        ]
+        with self._lock, self._conn:
+            before = self._conn.total_changes
+            self._conn.executemany(
+                "INSERT INTO video_details VALUES (?,?,?,?) ON CONFLICT(video_id) DO UPDATE"
+                " SET channel_title ="
+                " COALESCE(excluded.channel_title, video_details.channel_title),"
+                " duration_s = COALESCE(excluded.duration_s, video_details.duration_s),"
+                " seen_at = excluded.seen_at WHERE excluded.seen_at >= video_details.seen_at",
+                values,
+            )
+            return self._conn.total_changes - before
+
+    def popular_ids_without_details(self) -> list[str]:
+        """인기 목록에 나온 적이 있는데 채널 이름·길이가 없는 영상 id (최근에 본 순서)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT s.video_id, MAX(s.collected_at) AS last FROM snapshots s"
+                " LEFT JOIN video_details d ON d.video_id = s.video_id"
+                " WHERE s.popular_rank IS NOT NULL AND d.video_id IS NULL"
+                " GROUP BY s.video_id ORDER BY last DESC"
+            ).fetchall()
+        return [r[0] for r in rows]
 
     def save_titles(self, seen_at: datetime, titles: Iterable[tuple[str, str]]) -> int:
         """영상 제목을 넣거나 바꾼다(빈 제목은 건너뜀). 바꾼 줄 수."""
@@ -414,3 +453,28 @@ def video_titles(path: str | Path, video_ids: list[str]) -> dict[str, str]:
     finally:
         conn.close()
     return {vid: title for vid, title in rows if title}
+
+
+@dataclass(frozen=True)
+class VideoDetail:
+    channel_title: str | None
+    duration_seconds: int | None
+
+
+def video_details(path: str | Path, video_ids: list[str]) -> dict[str, VideoDetail]:
+    """영상 id → 채널 이름·길이 (`video_details` 표, 읽기 전용). 없으면 빠진다."""
+    if not video_ids or (str(path) != ":memory:" and not Path(path).is_file()):
+        return {}
+    conn = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True, timeout=5.0)
+    try:
+        marks = ",".join("?" * len(video_ids))
+        rows = conn.execute(
+            "SELECT video_id, channel_title, duration_s FROM video_details"
+            f" WHERE video_id IN ({marks})",  # noqa: S608
+            video_ids,
+        ).fetchall()
+    except sqlite3.DatabaseError:
+        return {}  # 표가 없는 예전 파일
+    finally:
+        conn.close()
+    return {vid: VideoDetail(ch, dur) for vid, ch, dur in rows}

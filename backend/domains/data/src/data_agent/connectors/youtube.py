@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -66,6 +67,8 @@ class VideoStat:
     tags: tuple[str, ...]
     title: str = ""
     rank: int | None = None  # 인기 순위 (인기 목록에서 받았을 때만, 1부터)
+    channel_title: str = ""  # 채널 이름 (snippet.channelTitle)
+    duration_seconds: int | None = None  # 길이(초, contentDetails.duration). 못 읽으면 None
 
 
 # ---------------------------------------------------------------- YouTube 응답 형식 (여기서만 쓴다)
@@ -85,6 +88,26 @@ class _Snippet(BaseModel):
     title: str = ""
     categoryId: str | None = None  # noqa: N815
     tags: list[str] = Field(default_factory=list)
+    channelTitle: str = ""  # noqa: N815
+
+
+class _Details(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    duration: str | None = None  # ISO 8601 (예: PT1M5S)
+
+
+_DURATION = re.compile(r"^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$")
+
+
+def duration_seconds(text: str | None) -> int | None:
+    """ISO 8601 길이(PT1M5S) → 초. 못 읽으면 None (0으로 채우지 않음)."""
+    if not text:
+        return None
+    m = _DURATION.match(text.strip())
+    if not m or not any(m.groups()):
+        return None
+    d, h, mi, se = (int(x) if x else 0 for x in m.groups())
+    return ((d * 24 + h) * 60 + mi) * 60 + se
 
 
 class _Video(BaseModel):
@@ -92,6 +115,7 @@ class _Video(BaseModel):
     id: str
     snippet: _Snippet
     statistics: _Stats = Field(default_factory=_Stats)
+    contentDetails: _Details = Field(default_factory=_Details)  # noqa: N815
 
 
 class _VideoPage(BaseModel):
@@ -128,6 +152,8 @@ def _stat(video: _Video, rank: int | None = None) -> VideoStat:
         tags=tuple(t.strip() for t in sn.tags if t.strip()),
         title=sn.title,
         rank=rank,
+        channel_title=sn.channelTitle,
+        duration_seconds=duration_seconds(video.contentDetails.duration),
     )
 
 
@@ -157,7 +183,7 @@ class YouTubeConnector:
         out: list[VideoStat] = []
         token: str | None = None
         for _ in range(max(1, min(pages, MAX_POPULAR_PAGES))):
-            params = {"part": "snippet,statistics", "chart": "mostPopular",
+            params = {"part": "snippet,statistics,contentDetails", "chart": "mostPopular",
                       "regionCode": region, "maxResults": PAGE_SIZE}  # fmt: skip
             if token:
                 params["pageToken"] = token
@@ -175,7 +201,11 @@ class YouTubeConnector:
         out: list[VideoStat] = []
         for start in range(0, len(unique), PAGE_SIZE):
             chunk = unique[start : start + PAGE_SIZE]
-            params = {"part": "snippet,statistics", "id": ",".join(chunk), "maxResults": PAGE_SIZE}
+            params = {
+                "part": "snippet,statistics,contentDetails",
+                "id": ",".join(chunk),
+                "maxResults": PAGE_SIZE,
+            }
             page = _parse(_VideoPage, await self._get("videos", params), "영상 통계")
             out.extend(_stat(v) for v in page.items)
         return out

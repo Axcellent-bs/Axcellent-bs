@@ -120,7 +120,7 @@ def test_score_is_the_weighted_sum_of_known_shares() -> None:
     assert (sa.video_share, sa.velocity_share, sa.trending_share) == (1.0, 1.0, 0.5)
     assert sa.score == 1.0 + 2.0 + 0.25 and speed_a == 3000.0
     sb, _ = out["b"]
-    assert (sb.video_share, sb.velocity_share, sb.trending_share) == (0.5, 0.0333, 0.0)
+    assert (sb.video_share, sb.velocity_share, sb.trending_share) == (0.5, 0.5, 0.0)  # 순위 몫
     sc, speed_c = out["c"]
     assert (sc.video_share, sc.velocity_share, sc.trending_share) == (0.0, 0.0, 1.0)
     assert speed_c is None  # 영상이 없으면 속도는 비운다 (0이 아님)
@@ -211,6 +211,51 @@ def test_limits_come_from_the_config(tmp_path: Path) -> None:
     tmp2.mkdir()
     env = _env(tmp2)
     env_path = Path(env["DATA_TREND_CONFIG"])
-    env_path.write_text(env_path.read_text(encoding="utf-8").replace("top = 10", "top = 2"),
-                        encoding="utf-8")  # fmt: skip
+    text = env_path.read_text(encoding="utf-8").replace("top = 10", "per_category = 2")
+    env_path.write_text(text, encoding="utf-8")
     assert len(_run(env).items) == 2
+
+
+# ---------------------------------------------------------------- 순위 몫·카테고리별
+
+
+def test_rank_shares_are_outlier_proof_and_ties_share_a_rank() -> None:
+    from data_agent.skills.trend_popular import rank_shares
+
+    assert rank_shares({0: 28.0, 1: 12.0, 2: 9.0, 3: 9.0}) == {0: 1.0, 1: 0.75, 2: 0.5, 3: 0.5}
+    assert rank_shares({}) == {}
+
+
+def test_popular_is_grouped_by_display_category_and_hides_the_rest(tmp_path: Path) -> None:
+    answers = {"t1": "게임", "lck": "게임", "롤": "IT", "한국철강": "기부·재난"}
+    out = _run(_env(tmp_path), _llm(answers))
+    assert out.display_categories == ["게임", "뉴스·사건", "연예·스포츠", "IT"]
+    by = {g.category: g for g in out.by_category}
+    assert [i.keyword for i in by["게임"].items][:2] and all(
+        i.topic_category == "게임" for i in by["게임"].items
+    )
+    assert [i.category_rank for i in by["게임"].items] == list(range(1, len(by["게임"].items) + 1))
+    assert [i.keyword for i in by["IT"].items] == ["롤"]
+    assert by["IT"].shortage_reason is not None and "1개뿐" in by["IT"].shortage_reason
+    assert by["뉴스·사건"].items == [] and by["뉴스·사건"].shortage_reason
+    # 화면 카테고리가 아닌 분류(기부·재난)는 응답에서 뺀다
+    assert "한국철강" not in [i.keyword for i in out.items]
+    assert out.score_method == "rank"
+
+
+def test_todays_verdicts_survive_a_restart(tmp_path: Path) -> None:
+    from datetime import date
+
+    path = tmp_path / "board.db"
+    day = lambda: date(2026, 11, 3)  # noqa: E731
+    board = TodayBoard(today=day, path=path)
+    board.record_verdict(
+        ["t1"],
+        TrendVerdict(group_name="t1", status="rising", ratio=3.0, evidence=TrendEvidence(score=5)),
+    )
+    board.record_pair("롤", "lck")
+    again = TodayBoard(today=day, path=path)  # 서버를 다시 켠 것과 같다
+    got = again.verdict(["T1"])
+    assert got is not None and got.status == "rising" and again.pairs() == [("롤", "lck")]
+    tomorrow = TodayBoard(today=lambda: date(2026, 11, 4), path=path)
+    assert tomorrow.verdict(["t1"]) is None  # 다음 날은 그날 판정만

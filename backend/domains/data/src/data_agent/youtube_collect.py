@@ -4,6 +4,7 @@
     uv run python -m data_agent.youtube_collect              # 한 번
     uv run python -m data_agent.youtube_collect --every 3600 # 1시간마다 (Ctrl+C로 멈춤)
     uv run python -m data_agent.youtube_collect --titles     # 제목 없는 인기 영상 제목만 채우기
+    uv run python -m data_agent.youtube_collect --details    # 채널 이름·길이 없는 인기 영상 채우기
 
 `--titles`: 제목 저장(`video_titles`) 전에 쌓인 인기 영상 중 제목이 없는 것만 `videos.list`로 받아
 제목을 채운다(50개당 1단위, 최대 `MAX_TITLE_BACKFILL`개). 스냅샷 표는 건드리지 않는다.
@@ -218,7 +219,28 @@ async def backfill_titles(
     except ConnectorUnavailable as error:
         return len(ids), 0, [f"제목 [{error.code}]"]
     at = (now or datetime.now(UTC)).astimezone(UTC).replace(microsecond=0)
+    store.save_details(at, stats)
     return len(ids), store.save_titles(at, [(s.video_id, s.title) for s in stats]), []
+
+
+async def backfill_details(
+    connector: YouTubeConnector,
+    store: SnapshotStore,
+    *,
+    now: datetime | None = None,
+    limit: int = MAX_TITLE_BACKFILL,
+) -> tuple[int, int, list[str]]:
+    """채널 이름·길이가 없는 인기 영상을 채운다(제목도 같이). (찾은 수, 채운 수, 실패 이유)."""
+    ids = store.popular_ids_without_details()[:limit]
+    if not ids:
+        return 0, 0, []
+    try:
+        stats = await connector.videos(ids)
+    except ConnectorUnavailable as error:
+        return len(ids), 0, [f"채널·길이 [{error.code}]"]
+    at = (now or datetime.now(UTC)).astimezone(UTC).replace(microsecond=0)
+    store.save_titles(at, [(s.video_id, s.title) for s in stats])
+    return len(ids), store.save_details(at, stats), []
 
 
 async def run_titles(env: Mapping[str, str]) -> int:
@@ -231,6 +253,22 @@ async def run_titles(env: Mapping[str, str]) -> int:
     tail = f" / 실패: {'; '.join(errors)}" if errors else ""
     print(
         f"[youtube] 제목 채우기: 제목 없는 인기 영상 {found}개, 채움 {saved}개,"
+        f" 할당량 {connector.quota_used}단위{tail}",
+        flush=True,
+    )
+    return 1 if errors else 0
+
+
+async def run_details(env: Mapping[str, str]) -> int:
+    store = SnapshotStore(env.get(DB_ENV) or DEFAULT_DB)
+    connector = YouTubeConnector(env)
+    try:
+        found, saved, errors = await backfill_details(connector, store)
+    finally:
+        store.close()
+    tail = f" / 실패: {'; '.join(errors)}" if errors else ""
+    print(
+        f"[youtube] 채널·길이 채우기: 없는 인기 영상 {found}개, 채움 {saved}개,"
         f" 할당량 {connector.quota_used}단위{tail}",
         flush=True,
     )
@@ -267,7 +305,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--titles", action="store_true", help="제목 없는 예전 인기 영상의 제목만 채우고 끝낸다"
     )
+    parser.add_argument(
+        "--details",
+        action="store_true",
+        help="채널 이름·길이가 없는 예전 인기 영상의 채널 이름·길이(와 제목)만 채우고 끝낸다",
+    )
     args = parser.parse_args(argv)
+    if args.details:
+        return asyncio.run(run_details(load_env(os.environ)))
     if args.titles:
         return asyncio.run(run_titles(load_env(os.environ)))
     if args.every is not None and args.every < MIN_EVERY_SECONDS:

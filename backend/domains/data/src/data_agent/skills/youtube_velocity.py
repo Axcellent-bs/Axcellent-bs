@@ -26,7 +26,14 @@ from ax_contracts.schemas.data import (
     YouTubeVideoVelocity,
 )
 from data_agent.skills.trend_scan import TREND_CONFIG_ENV
-from data_agent.youtube_store import DB_ENV, DEFAULT_DB, StoredSnapshot, recent_snapshots
+from data_agent.youtube_store import (
+    DB_ENV,
+    DEFAULT_DB,
+    StoredSnapshot,
+    recent_snapshots,
+    video_details,
+    video_titles,
+)
 
 DEFAULT_TOP = 10
 
@@ -96,6 +103,26 @@ def velocities(snaps: list[StoredSnapshot]) -> tuple[list[YouTubeVideoVelocity],
     return out, compared, missing
 
 
+def with_names(db: str, rows: list[YouTubeVideoVelocity]) -> list[YouTubeVideoVelocity]:
+    """화면 표시용 제목·채널 이름·길이를 붙인다 (저장된 값이 없으면 None, 지어내지 않음)."""
+    ids = [r.video_id for r in rows]
+    titles = video_titles(db, ids)
+    details = video_details(db, ids)
+    out = []
+    for r in rows:
+        d = details.get(r.video_id)
+        out.append(
+            r.model_copy(
+                update={
+                    "title": titles.get(r.video_id) or None,
+                    "channel_title": d.channel_title if d else None,
+                    "duration_seconds": d.duration_seconds if d else None,
+                }
+            )
+        )
+    return out
+
+
 @dataclass(frozen=True)
 class VelocityResult:
     output: YouTubeVelocityOutput
@@ -130,7 +157,7 @@ def measure_velocity(
         key=lambda r: (-(r.views_per_hour or 0.0), r.video_id),
     )
     top = request.top or top_setting(env)
-    picked = ranked[:top]
+    picked = with_names(db, ranked[:top])
     hours = (snaps[0].collected_at - snaps[1].collected_at).total_seconds() / 3600
     summary = (
         f"최근 두 스냅샷({hours:.1f}시간 간격) 모두에 있는 영상 {compared}개 중"
