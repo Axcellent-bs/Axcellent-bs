@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 from ax_agent_template.llm import LLMClient, LLMSettings
 from ax_workflow.core import GateRefused
 from ax_workflow.models import CodingFile
-from dev_agent import vcs_bridge
+from dev_agent import llm_key, vcs_bridge
 from dev_agent.vcs.base import VcsAdapter, VcsError, check_path
 
 if TYPE_CHECKING:
@@ -208,7 +208,8 @@ def get_llm() -> LLMClient | None:
     """바꿔 끼운 것, 아니면 planning LLM 설정(`PLANNING_LLM_*`·`LLM_*`)이 있을 때만 클라이언트."""
     if _llm_set:
         return _llm
-    settings = LLMSettings.from_env("planning")
+    # 고객사 API 키(BYOK)가 있으면 그 키로 (주소·모델을 비우면 서버 설정 값)
+    settings = llm_key.apply(LLMSettings.from_env("planning"))
     if settings.model and settings.base_url:
         return MeteredLLM("planning", settings=settings, timeout=LLM_HTTP_TIMEOUT_SECONDS)
     return None
@@ -539,11 +540,11 @@ def _client_for(llm: Any, step: str) -> Any:
     settings = getattr(llm, "settings", None)
     if not name or not isinstance(llm, LLMClient) or settings is None or settings.model == name:
         return llm
+    # 주소·키가 바뀌면(고객사 키를 넣거나 바꿈) 새로 만든다
     hit = _step_clients.get(name)
-    if hit is None or hit.settings.base_url != settings.base_url:
-        hit = MeteredLLM(
-            "planning", settings=replace(settings, model=name), timeout=LLM_HTTP_TIMEOUT_SECONDS
-        )
+    want = replace(settings, model=name)
+    if hit is None or hit.settings != want:
+        hit = MeteredLLM("planning", settings=want, timeout=LLM_HTTP_TIMEOUT_SECONDS)
         _step_clients[name] = hit
     return hit
 

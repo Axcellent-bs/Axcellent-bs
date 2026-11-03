@@ -25,7 +25,7 @@ from ax_workflow.auth import AuthError, check_human
 from ax_workflow.base import TEAM_LEAD
 from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.models import dump
-from dev_agent import coder, dev_chat, vcs
+from dev_agent import coder, dev_chat, llm_key, vcs
 from dev_agent.deploy import DeployError
 from dev_agent.deploy_store import get_deploy_store
 from dev_agent.repo_api import add_repo_routes
@@ -487,9 +487,37 @@ def add_settings_routes(router: APIRouter, get_service: Callable[[], Any]) -> No
         svc = get_service()
         return _ok(svc.coding_settings(), svc)
 
+    async def post_company_key(request: Request) -> dict | JSONResponse:
+        """고객사 API 키(BYOK) 넣기·바꾸기 `{api_key?, base_url?, model?}` (관리자).
+
+        키를 비우면 이전 키를 그대로 두고 주소·모델만 바꾼다. 응답에는 끝 4자리만 준다."""
+        svc = get_service()
+        body = await _body(request)
+        if body is None:
+            return _err(400, "INVALID_INPUT", "본문은 JSON 객체여야 한다")
+        vals = {k: body.get(k) for k in ("api_key", "base_url", "model")}
+        if any(v is not None and not isinstance(v, str) for v in vals.values()):
+            return _err(400, "INVALID_INPUT", "문자열 필드에 다른 값이 들어 있다")
+        try:
+            llm_key.set_key(vals["api_key"], vals["base_url"] or "", vals["model"] or "")
+        except llm_key.LlmKeyError as exc:
+            return _err(400, "INVALID_INPUT", str(exc))
+        return _ok(svc.coding_settings(), svc)
+
+    async def post_company_key_delete() -> dict:
+        """고객사 API 키 지우기 (관리자). 그 뒤로는 서버 기본 키와 체험 한도로 돈다."""
+        svc = get_service()
+        llm_key.clear()
+        return _ok(svc.coding_settings(), svc)
+
+    router.post("/coding-settings/company-key", response_model=None, dependencies=ADMIN)(
+        post_company_key
+    )
+    router.post("/coding-settings/company-key/delete", dependencies=ADMIN)(post_company_key_delete)
+
     @router.post("/coding-settings", response_model=None, dependencies=ADMIN)
     async def post_coding_settings(request: Request) -> dict | JSONResponse:
-        """`{mode?: auto|agent|subscription, models?: {plan, write, review}}` (관리자)."""
+        """`{mode?, models?: {plan, write, review}, budget_tokens?: int|null}` (관리자)."""
         svc = get_service()
         body = await _body(request)
         if body is None:
@@ -500,7 +528,9 @@ def add_settings_routes(router: APIRouter, get_service: Callable[[], Any]) -> No
         try:
             if models is not None:
                 result = await svc.set_coding_models(models)
-            if "mode" in body or models is None:
+            if "budget_tokens" in body:
+                result = await svc.set_budget(body.get("budget_tokens"))
+            if "mode" in body or (models is None and "budget_tokens" not in body):
                 result = await svc.set_coding_mode(str(body.get("mode", "")))
         except ActionError as exc:
             return _err(400, exc.code, exc.message)

@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
 from ax_workflow.auth import AuthError
-from dev_agent import vcs
+from dev_agent import llm_key, vcs
 from dev_agent.api import create_dev_router
 from dev_agent.handlers import DEV_HANDLERS
 from dev_agent.runtime import get_service
@@ -58,6 +58,8 @@ def _cors_origins() -> list[str]:
 
 # 화면에서 넣어 둔 형상관리 연결을 다시 읽는다 (PLANNING_VCS_STORE가 있을 때)
 vcs.load_saved()
+# 화면에서 넣어 둔 고객사 API 키(BYOK)를 다시 읽는다 (PLANNING_LLM_KEY_STORE가 있을 때)
+llm_key.load_saved()
 app = create_agent_app(load_card(), DEV_HANDLERS)
 app.include_router(create_dev_router(get_service))
 
