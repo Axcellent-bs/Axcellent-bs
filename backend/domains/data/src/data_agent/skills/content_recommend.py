@@ -5,9 +5,18 @@
   급상승이 없으면 빈 목록 + 이유("이번 기간 급상승한 소재가 없음")이고 억지로 채우지 않는다.
 - 순위(코드 규칙, LLM 안 씀): 점수 = `z_weight` × z + (검색 급상승 + YouTube 근거 두 소스면
   `two_source_bonus`). 같으면 z 큰 순 → 이름. 가중치·개수는 회사 `trends.toml` `[recommend]`.
+- 주제 분류·브랜드 안전(`topic_category`): 순위대로 급상승 소재마다 LLM이 정해진 목록(뉴스·사건·
+  정치·사회·기부·재난·인물·게임·연예·스포츠·생활·취미·교육·책·기타) 안에서 고른다. 회사 설정
+  `exclude_categories`(추천 안 함 분류)에 들면 추천하지 않고 참고용(`reference_items`) + 이유로 따로
+  낸다. 그만큼 다음 순위 소재로 채운다(분류는 최대 `max_items + max_reference`번).
+  분류하지 못하면(unknown) 빼지 않고 추천에 두되 분류 칸에 unknown + 이유를 남긴다.
 - 상품 연결(`product_link`): 급상승 소재마다 회사 실제 상품(커넥터 상품 목록)을 문자열 일치 +
-  임베딩 유사도로 최대 `max_products`개 잇는다. 아이디어 문장에는 연결된 상품만 쓰게 하고, 연결되지
-  않은 회사 상품이 나오면 고정 문장(`product_invalid`). 회사 소개(`company_intro`)는 보조.
+  임베딩 유사도로 잇는다. 임베딩은 소재 글(이름 + 근거 글 최대 3개: YouTube 대표 영상 제목 또는
+  인기 검색어 관련 뉴스 제목)과 상품 글(이름 + 카테고리 + 설명)로 재고, 1등 상품 하나만
+  유사도 ≥ `min_similarity`(·여유 ≥ `min_margin`)일 때 잇는다. 기준은 `eval/product_link` 보정셋으로
+  고른 임시 값이다. 아이디어 문장에는 연결된 상품만 쓰게 하고, 연결되지 않은 회사 상품이 나오면
+  고정 문장(`product_invalid`). 회사 소개(`company_intro`)는 보조.
+- 묶음: 상품과 연결된 소재는 `group: product_linked`, 아니면 `general`(일반 화제). 순위는 그대로.
 - 밈 형식(`meme_format`): YouTube 근거가 있는 소재는 대표 영상 제목 최대 5개로 LLM이 정해진 목록
   (챌린지·패러디·밈·리액션·하이라이트·정보·리뷰·기타) 안에서 고른다. 근거가 없으면 unknown + 이유.
   아이디어 문장 프롬프트와 형식 제안(정보·리뷰 롱폼, 그 밖 숏폼)에 반영한다.
@@ -43,6 +52,7 @@ from ax_contracts.schemas.data import (
     ContentScore,
     ContentSource,
     RecommendOrigin,
+    ReferenceTopic,
     TrendCandidate,
     TrendCandidatesRequest,
     TrendingCandidate,
@@ -52,8 +62,16 @@ from ax_contracts.schemas.data import (
 )
 from data_agent.connectors.naver_datalab import NaverDatalabConnector
 from data_agent.explain import explain_idea
+from data_agent.skills import trend_candidates as candidates_mod
 from data_agent.skills.meme_format import MAX_TITLES, classify
-from data_agent.skills.product_link import pick_links, read_catalog, similarities
+from data_agent.skills.product_link import (
+    MAX_EVIDENCE,
+    pick_links,
+    read_catalog,
+    similarities,
+    topic_text,
+)
+from data_agent.skills.topic_category import TOPIC_CATEGORIES, CategoryResult, classify_topic
 from data_agent.skills.trend_candidates import (
     NAVER_FAILED,
     clean_tag,
@@ -68,11 +86,15 @@ from data_agent.skills.trend_scan import (
     default_groups,
     yesterday_kst,
 )
+from data_agent.trending_store import news_titles
 from data_agent.youtube_store import DB_ENV as YOUTUBE_DB_ENV
 from data_agent.youtube_store import DEFAULT_DB as YOUTUBE_DEFAULT_DB
 from data_agent.youtube_store import video_titles
 
 NO_RISING = "이번 기간 급상승한 소재가 없음"
+ALL_EXCLUDED = "급상승 소재가 모두 추천 안 함 분류라 참고용으로만 보여 줌"
+# 기본 "추천 안 함" 분류 (회사 설정 `exclude_categories`가 없을 때)
+DEFAULT_EXCLUDE: tuple[str, ...] = ("뉴스·사건", "정치·사회", "기부·재난", "인물")
 
 
 @dataclass(frozen=True)
@@ -85,8 +107,13 @@ class RecommendConfig:
     company_keywords: tuple[str, ...] = ()
     company_intro: str = ""  # 아이디어 문장 프롬프트에 넣는 회사 소개 (무엇을 파는지, 고객)
     max_products: int = 3  # 소재마다 연결할 실제 상품 수 상한
-    min_similarity: float = 0.6  # 임베딩 코사인이 이 이상이면 연결 (글자 일치는 늘 연결)
+    # 임베딩 연결 기준 (글자 일치는 늘 연결). eval/product_link 보정셋으로 고른 임시 값
+    min_similarity: float = 0.65
+    link_top_only: bool = True  # 임베딩으로는 1등 상품 하나만 잇는다
+    min_margin: float = 0.0  # 1등 − 2등 유사도가 이 이상일 때만 (link_top_only일 때)
     use_similarity: bool = True  # 임베딩 유사도를 쓸지 (끄면 글자 일치만)
+    exclude_categories: tuple[str, ...] = DEFAULT_EXCLUDE  # 추천 안 함 분류 (참고용으로만)
+    max_reference: int = 5  # 참고용으로 빼고 다음 순위로 채울 때 더 분류해 볼 소재 수
 
 
 def load_config(env: Mapping[str, str]) -> RecommendConfig:
@@ -106,7 +133,19 @@ def load_config(env: Mapping[str, str]) -> RecommendConfig:
             company_intro=str(raw.get("company_intro") or "").strip(),
             max_products=int(raw.get("max_products", base.max_products)),
             min_similarity=float(raw.get("min_similarity", base.min_similarity)),
+            link_top_only=bool(raw.get("link_top_only", base.link_top_only)),
+            min_margin=float(raw.get("min_margin", base.min_margin)),
             use_similarity=bool(raw.get("use_similarity", base.use_similarity)),
+            exclude_categories=(
+                tuple(
+                    str(c).strip()
+                    for c in raw["exclude_categories"]
+                    if str(c).strip() in TOPIC_CATEGORIES
+                )
+                if "exclude_categories" in raw
+                else base.exclude_categories
+            ),
+            max_reference=int(raw.get("max_reference", base.max_reference)),
         )
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return RecommendConfig()
@@ -142,6 +181,9 @@ class Topic:
     sources: list[ContentSource] = field(default_factory=list)
     origins: list[RecommendOrigin] = field(default_factory=list)  # 소재가 나온 곳
     video_ids: list[str] = field(default_factory=list)  # YouTube 대표 영상 id (인기 순위 순)
+    # 인기 검색어에서 나온 소재면 그 스냅샷 시각과 피드에 나온 검색어 그대로 (관련 뉴스 제목 찾기용)
+    trending_at: datetime | None = None
+    trending_raw: str | None = None
 
     @property
     def names(self) -> list[str]:
@@ -216,9 +258,12 @@ def merge_topics(
     for t in trending or []:
         if _norm(t.keyword) in taken:
             continue  # 기본 그룹 이름과 겹치면 그 그룹 판정을 쓴다
-        topics.append(
-            Topic(t.keyword, list(t.aliases), t.naver, None, ["naver"], _add([], list(t.origins)))
+        topic = Topic(
+            t.keyword, list(t.aliases), t.naver, None, ["naver"], _add([], list(t.origins))
         )
+        topic.trending_at = t.trending.snapshot_at
+        topic.trending_raw = t.trending.keyword or t.keyword
+        topics.append(topic)
     return topics
 
 
@@ -249,15 +294,30 @@ async def _judge_groups(
     return out
 
 
-def _summary(items: list[ContentRecommendation], calls: int) -> str:
+def _summary(items: list[ContentRecommendation], calls: int, reference: int = 0) -> str:
+    ref = f" 추천 안 함 분류라 참고용으로 뺀 소재 {reference}개." if reference else ""
     if not items:
-        return f"추천할 영상 소재가 없습니다 ({NO_RISING}). 네이버 호출 {calls}번."
+        why = ALL_EXCLUDED if reference else NO_RISING
+        return f"추천할 영상 소재가 없습니다 ({why}).{ref} 네이버 호출 {calls}번."
     both = sum(i.score.two_sources for i in items)
+    linked = sum(bool(i.products) for i in items)
     names = ", ".join(i.keyword for i in items)
     return (
-        f"영상 소재 {len(items)}개 추천 ({names}), 검색 급상승 + YouTube 근거 {both}개."
-        f" 네이버 호출 {calls}번."
+        f"영상 소재 {len(items)}개 추천 ({names}), 회사 상품과 연결 {linked}개,"
+        f" 검색 급상승 + YouTube 근거 {both}개.{ref} 네이버 호출 {calls}번."
     )
+
+
+def topic_evidence(topic: Topic, youtube_db: str, trending_path: str, geo: str) -> list[str]:
+    """소재의 근거 글 최대 3개: YouTube 대표 영상 제목, 없으면 인기 검색어 관련 뉴스 제목."""
+    if topic.video_ids:
+        ids = topic.video_ids[:MAX_EVIDENCE]
+        titles = video_titles(youtube_db, ids)
+        return [titles[i] for i in ids if titles.get(i)]
+    if topic.trending_at is not None and topic.trending_raw:
+        found = news_titles(trending_path, geo, topic.trending_at, [topic.trending_raw])
+        return found.get(topic.trending_raw, [])[:MAX_EVIDENCE]
+    return []
 
 
 async def recommend(
@@ -296,7 +356,40 @@ async def recommend(
     cand = found.output
     topics = merge_topics(judged, cand.candidates, cand.trending_candidates)
     limit = request.max_items or config.max_items
-    picked = rank_topics(topics, config, limit)
+    ranked = rank_topics(topics, config, len(topics))
+    youtube_db = env.get(YOUTUBE_DB_ENV) or str(YOUTUBE_DEFAULT_DB)
+    trending_path = candidates_mod.trending_db(env)
+    geo = candidates_mod.load_config(env).trending_geo
+    excluded = set(config.exclude_categories)
+
+    # 순위대로 분류하며 추천 안 함 분류는 참고용으로 빼고 다음 순위로 채운다
+    chosen: list[tuple[Topic, CategoryResult, list[str]]] = []
+    reference: list[ReferenceTopic] = []
+    budget = limit + max(config.max_reference, 0)
+    for classified, topic in enumerate(ranked):
+        if len(chosen) >= limit or classified >= budget:
+            break
+        evidence_texts = topic_evidence(topic, youtube_db, trending_path, geo)
+        category = await classify_topic(
+            topic.keyword, topic.aliases, evidence_texts, llm, context_id
+        )
+        if category.category in excluded:
+            reference.append(
+                ReferenceTopic(
+                    keyword=topic.keyword,
+                    aliases=topic.aliases,
+                    origins=topic.origins,
+                    ratio=float(topic.verdict.ratio or 0.0),
+                    z=float(topic.verdict.evidence.score or 0.0),
+                    two_sources=topic.two_sources,
+                    topic_category=category.category,  # type: ignore[arg-type]
+                    topic_category_reason=category.reason,
+                    reason=f"추천 안 함 분류: {category.category} (회사 설정)",
+                )
+            )
+        else:
+            chosen.append((topic, category, evidence_texts))
+    picked = [t for t, _, _ in chosen]
 
     company = [g.group_name for g in groups] + [k for g in groups for k in g.keywords]
     company += list(config.company_keywords)
@@ -304,17 +397,16 @@ async def recommend(
     products = shop.products if shop else []
     sims = await similarities(
         llm,
-        {t.keyword: ", ".join(t.names) for t in picked},
+        {t.keyword: topic_text(t.names, ev) for t, _, ev in chosen},
         products,
         shop.categories if shop else {},
         enabled=config.use_similarity,
         context_id=context_id,
     )
     names_of_catalog = [p.name for p in products]
-    youtube_db = env.get(YOUTUBE_DB_ENV) or str(YOUTUBE_DEFAULT_DB)
     items: list[ContentRecommendation] = []
     notes: list[str] = []
-    for rank, topic in enumerate(picked, start=1):
+    for rank, (topic, category, _) in enumerate(chosen, start=1):
         v = topic.verdict
         z = float(v.evidence.score or 0.0)
         ratio = float(v.ratio or 0.0)
@@ -330,6 +422,8 @@ async def recommend(
             sims.by_topic.get(topic.keyword) if not sims.reason else None,
             min_similarity=config.min_similarity,
             limit=config.max_products,
+            top_only=config.link_top_only,
+            min_margin=config.min_margin,
         )
         if linked:
             names["연결 상품"] = ", ".join(p.name for p in linked)
@@ -386,6 +480,9 @@ async def recommend(
                 meme_format=meme.format,  # type: ignore[arg-type]  # MEME_FORMATS 또는 unknown
                 meme_reason=meme.reason,
                 meme_titles=meme.titles,
+                topic_category=category.category,  # type: ignore[arg-type]  # TOPIC_CATEGORIES
+                topic_category_reason=category.reason,
+                group="product_linked" if linked else "general",
             )
         )
 
@@ -399,7 +496,7 @@ async def recommend(
     calls = (after - before) if before is not None and after is not None else 0
     empty_reason = None
     if not items:
-        empty_reason = NO_RISING
+        empty_reason = ALL_EXCLUDED if reference else NO_RISING
         if failed:
             empty_reason += f" (네이버를 읽지 못한 것: {', '.join(failed)})"
     output = ContentRecommendOutput(
@@ -412,13 +509,16 @@ async def recommend(
         youtube_status=cand.status,
         youtube_reason=cand.unknown_reason,
         snapshot_at=cand.snapshot_at,
-        summary=_summary(items, calls),
+        summary=_summary(items, calls, len(reference)),
         catalog_status="known" if shop and not shop.reason else "unknown",
         catalog_reason=(shop.reason if shop else "추천할 소재가 없어 상품을 읽지 않음"),
         catalog_products=len(products),
         similarity_status="known" if picked and products and not sims.reason else "unknown",
         similarity_reason=sims.reason
         or (None if picked and products else "연결할 소재나 상품이 없음"),
+        similarity_failure=sims.failure,
+        reference_items=reference,
+        excluded_categories=list(config.exclude_categories),
     )
     queries = [f"naver search-trend group={g.group_name} {start}~{end} date" for g in groups]
     queries += found.evidence.queries
@@ -435,6 +535,11 @@ async def recommend(
     if items:
         lines.append(f"회사 상품과 연결된 추천 {linked_count}/{len(items)}개")
         queries.append("shop-api GET /api/shop/products, /api/shop/categories")
+    if reference:
+        lines.append(
+            "참고용(추천 안 함): "
+            + ", ".join(f"{r.keyword}({r.topic_category})" for r in reference)
+        )
     lines += notes
     evidence = Evidence(queries=queries, data_summary="\n".join(lines), collected_at=now)
     return RecommendResult(output, evidence, any(i.fallback for i in items))

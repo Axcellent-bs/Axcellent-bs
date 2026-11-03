@@ -345,8 +345,12 @@ def test_handler_rejects_a_bad_input() -> None:
 
 
 def _prompt_head(llm: MockLLMClient, i: int = 0) -> str:
-    """프롬프트 중 데이터 블록 앞부분 (지시문·코드가 정한 사실)."""
-    return llm.calls[i].partition("<untrusted")[0]
+    """아이디어 문장 프롬프트 중 데이터 블록 앞부분 (지시문·코드가 정한 사실).
+
+    주제 분류 프롬프트(소재마다 먼저 부른다)는 건너뛴다.
+    """
+    heads = [c.partition("<untrusted")[0] for c in llm.calls]
+    return [h for h in heads if "무엇에 관한 화제인지" not in h][i]
 
 
 def test_prompt_has_only_the_ratio_and_no_z(tmp_path: Path) -> None:

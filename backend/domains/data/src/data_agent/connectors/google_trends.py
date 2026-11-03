@@ -27,6 +27,7 @@ import httpx
 from data_agent.connectors import ConnectorUnavailable
 
 DEFAULT_URL = "https://trends.google.com/trending/rss"
+MAX_NEWS = 3  # 검색어마다 남기는 관련 뉴스 제목 수
 URL_ENV = "AX_GOOGLE_TRENDS_RSS_URL"
 TIMEOUT_SECONDS = 15.0
 HT = "{https://trends.google.com/trending/rss}"  # 피드의 ht: 이름공간
@@ -49,6 +50,8 @@ class TrendingItem:
     rank: int  # 피드 안 순서 (1부터)
     traffic: str | None  # 피드의 트래픽 표시값 (예: "500+"). 없으면 None
     published_at: datetime | None  # 피드의 pubDate (UTC). 없거나 못 읽으면 None
+    # 피드가 함께 주는 관련 뉴스 제목 (`ht:news_item_title`, 최대 MAX_NEWS개). 없으면 ()
+    news_titles: tuple[str, ...] = ()
 
 
 def parse_feed(body: bytes) -> list[TrendingItem]:
@@ -77,7 +80,15 @@ def parse_feed(body: bytes) -> list[TrendingItem]:
                 published = parsedate_to_datetime(raw).astimezone(UTC)
             except (TypeError, ValueError):
                 published = None
-        out.append(TrendingItem(keyword, len(out) + 1, traffic, published))
+        news = tuple(
+            t
+            for t in (
+                (n.findtext(f"{HT}news_item_title") or "").strip()
+                for n in item.findall(f"{HT}news_item")
+            )
+            if t
+        )[:MAX_NEWS]
+        out.append(TrendingItem(keyword, len(out) + 1, traffic, published, news))
     return out
 
 

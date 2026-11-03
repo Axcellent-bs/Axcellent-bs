@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Chip, Empty, ErrorBox, Panel, TONE, Waiting } from "@/components/finance/bits";
 import { SEND_TO_MARKETING_BLOCKED, type LoopProbe } from "@/lib/contentLoop";
-import { CANDIDATE_ORIGIN_LABEL, DATA_SERVER, UNKNOWN, dataAi, kpiLive, type ContentRecommendOutput, type ContentRecommendation } from "@/lib/data";
+import { CANDIDATE_ORIGIN_LABEL, DATA_SERVER, UNKNOWN, dataAi, kpiLive, type ContentRecommendOutput, type ContentRecommendation, type ReferenceTopic } from "@/lib/data";
 import { strengthLabel } from "@/lib/trendWording";
 
 // 트렌드 탭 2단계 "영상 소재 추천" (#trend/recommend): 데이터 AI(8106) content_recommend 출력을 그대로 보여 준다.
@@ -11,6 +11,8 @@ import { strengthLabel } from "@/lib/trendWording";
 // - 추천이 없으면 서버 이유(empty_reason)를 그대로 보여 준다. 화면이 채우지 않는다
 // - "마케팅에 소재로 보내기"는 아직 못 해서 누를 수 없고, 이유는 콘텐츠 루프와 같은 문장이다
 // - 응답 결과(확인 중·정상·실패)는 콘텐츠 루프 2단계 칩으로 올린다(onProbe). 칩을 위해 따로 부르지 않는다
+// - 묶음은 서버 값(group) 그대로: "회사 상품과 연결된 소재"와 "일반 화제". 순위는 서버 순위 그대로
+// - 회사 설정의 "추천 안 함" 분류라 뺀 소재(reference_items)는 접어서 분류·이유와 함께 보여 준다
 // - 소재마다 LLM 문장을 쓰므로 30초 새로고침을 따르지 않는다. 처음 한 번 + "다시 추천"을 누를 때만 부른다
 
 const fixed = (v: number | null | undefined, digits = 2) =>
@@ -26,6 +28,13 @@ const FALLBACK_KO: Record<string, string> = {
   format_error: "AI 문장 형식이 맞지 않아 기본 문장을 썼어요",
   number_invalid: "AI 문장에 계산에 없는 숫자가 있어 기본 문장을 썼어요",
   product_invalid: "AI 문장에 연결되지 않은 상품이 있어 기본 문장을 썼어요",
+};
+
+/** 유사도를 재지 못한 까닭 (서버 similarity_failure) → 쉬운 말 */
+const SIM_FAILURE_KO: Record<string, string> = {
+  not_configured: "임베딩 설정이 없음",
+  config_error: "임베딩 설정 오류",
+  request_failed: "임베딩 요청 실패",
 };
 
 /** 상품 연결 근거 (서버 match) → 쉬운 말 */
@@ -65,6 +74,12 @@ function RecommendCard({ item }: { item: ContentRecommendation }) {
         ) : (
           <span title={`대표 영상 제목 ${item.meme_titles ?? 0}개로 분류${item.meme_reason ? ` · ${item.meme_reason}` : ""}`}><Chip label={`밈 형식: ${item.meme_format}`} tone={TONE.info} /></span>
         ))}
+        {/* 주제 분류: 서버 값 그대로. 분류하지 못했거나 목록 밖 답이었으면 이유를 마우스를 올리면 보여 준다 */}
+        {item.topic_category && (
+          <span title={item.topic_category_reason ?? undefined}>
+            <Chip label={`주제: ${item.topic_category === "unknown" ? "확인할 수 없음" : item.topic_category}`} tone={TONE.muted} />
+          </span>
+        )}
         <Chip label={item.format} tone={TONE.info} />
         {item.fallback && <Chip label="기본 문장" tone={TONE.muted} />}
       </div>
@@ -75,7 +90,7 @@ function RecommendCard({ item }: { item: ContentRecommendation }) {
           <ul className="mt-1 space-y-0.5 text-sm text-ink-800">
             {item.products.map((p) => (
               <li key={p.product_id}>
-                <b>{p.name}</b> <span className="text-[11px] text-ink-500">{p.product_id}{p.category_name ? ` · ${p.category_name}` : ""} · {MATCH_KO[p.match] ?? p.match}{p.similarity != null ? ` (유사도 ${fixed(p.similarity)})` : ""}</span>
+                <b>{p.name}</b> <span className="text-[11px] text-ink-500">{p.product_id}{p.category_name ? ` · ${p.category_name}` : ""} · {MATCH_KO[p.match] ?? p.match}{p.similarity != null ? ` (유사도 ${fixed(p.similarity)}${p.margin != null ? `, 2등과 차이 ${fixed(p.margin)}` : ""})` : ""}</span>
               </li>
             ))}
           </ul>
@@ -94,6 +109,38 @@ function RecommendCard({ item }: { item: ContentRecommendation }) {
     </article>
   );
 }
+
+/** 참고용(추천 안 함) 소재 한 줄: 서버 분류·이유 그대로 */
+function ReferenceRow({ item }: { item: ReferenceTopic }) {
+  return (
+    <li className="flex flex-wrap items-center gap-1.5 py-1.5">
+      <b className="text-sm text-ink-900">{item.keyword}</b>
+      <Chip label={`주제: ${item.topic_category}`} tone={TONE.warn} />
+      <span className="text-xs text-ink-600">평소보다 {fixed(item.ratio) ?? "-"}배 · {item.reason}</span>
+      {item.topic_category_reason && <span className="text-[11px] text-ink-500">({item.topic_category_reason})</span>}
+    </li>
+  );
+}
+
+/** 묶음 하나 (제목 + 카드 목록). 비었으면 서버 값이 없다는 한 줄 */
+function RecommendGroup({ title, hint, items, empty }: { title: string; hint: string; items: ContentRecommendation[]; empty: string }) {
+  return (
+    <section aria-label={title} className="space-y-2">
+      <h3 className="text-sm font-bold text-ink-900">{title} <span className="font-normal text-ink-500">{items.length}개</span></h3>
+      <p className="text-[11px] text-ink-500">{hint}</p>
+      {items.length === 0 ? (
+        <p className="text-xs text-ink-500">{empty}</p>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {items.map((item) => <RecommendCard key={`${item.rank}-${item.keyword}`} item={item} />)}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** 묶음: 서버 group 값. 예전 응답(group 없음)은 연결 상품 유무로 본다 */
+const groupOf = (i: ContentRecommendation) => i.group ?? ((i.products?.length ?? 0) > 0 ? "product_linked" : "general");
 
 type State =
   | { kind: "loading"; previous: ContentRecommendOutput | null }
@@ -132,6 +179,7 @@ export function ContentRecommend({ onProbe, dataUp = null }: { onProbe: (p: Loop
   }
 
   const out = state.kind === "ok" ? state.out : state.previous;
+  const references = out?.reference_items ?? [];
   const meta = out ? [
     out.end_date ? `판정 ${out.end_date}까지` : null,
     `네이버 호출 ${out.naver_calls}번`,
@@ -144,7 +192,7 @@ export function ContentRecommend({ onProbe, dataUp = null }: { onProbe: (p: Loop
       <div className="space-y-4">
         <p className="text-sm leading-relaxed text-ink-700">
           급상승한 소재만 순위대로 보여 줘요. 검색 급상승과 YouTube 인기 영상에 둘 다 나온 소재가 앞에 와요.
-          회사 관련성은 표시만 하고 순위에서 빼지 않아요.
+          회사 상품과 연결된 소재와 일반 화제로 나눠 보여 주고, 회사가 추천하지 않기로 한 주제는 참고용으로 접어 둬요.
         </p>
         {meta && <p className="text-[11px] text-ink-500">{meta}</p>}
         {out?.youtube_status === "unknown" && out.youtube_reason && (
@@ -154,7 +202,10 @@ export function ContentRecommend({ onProbe, dataUp = null }: { onProbe: (p: Loop
           <p className="text-xs text-amber-700">상품 연결: {UNKNOWN} · {out.catalog_reason}</p>
         )}
         {out?.catalog_status === "known" && out.similarity_status === "unknown" && out.similarity_reason && (
-          <p className="text-[11px] text-ink-500">상품 {out.catalog_products ?? 0}개와 이름·카테고리 글자만 맞춰 봤어요 (뜻 유사도: {out.similarity_reason})</p>
+          <p className="text-[11px] text-ink-500">
+            상품 {out.catalog_products ?? 0}개와 이름·카테고리 글자만 맞춰 봤어요 (뜻 유사도:{" "}
+            {out.similarity_failure ? `${SIM_FAILURE_KO[out.similarity_failure] ?? out.similarity_failure} · ` : ""}{out.similarity_reason})
+          </p>
         )}
         {out && out.naver_failed.length > 0 && (
           <p className="text-xs text-amber-700">네이버를 읽지 못한 것: {out.naver_failed.join(", ")}</p>
@@ -168,9 +219,33 @@ export function ContentRecommend({ onProbe, dataUp = null }: { onProbe: (p: Loop
         ) : out.items.length === 0 ? (
           <Empty>{out.empty_reason ?? "추천할 소재가 없어요"}</Empty>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {out.items.map((item) => <RecommendCard key={`${item.rank}-${item.keyword}`} item={item} />)}
+          <div className="space-y-6">
+            <RecommendGroup
+              title="회사 상품과 연결된 소재"
+              hint="회사 상품 이름·카테고리가 겹치거나 뜻이 가장 가까운 상품이 기준 이상인 소재예요."
+              items={out.items.filter((i) => groupOf(i) === "product_linked")}
+              empty="이번에는 회사 상품과 연결된 소재가 없어요."
+            />
+            <RecommendGroup
+              title="일반 화제"
+              hint="급상승했지만 회사 상품과는 연결되지 않은 소재예요."
+              items={out.items.filter((i) => groupOf(i) === "general")}
+              empty="일반 화제가 없어요."
+            />
           </div>
+        )}
+        {references.length > 0 && (
+          <details className="rounded-lg border border-ink-200 px-3 py-2">
+            <summary className="cursor-pointer text-sm font-semibold text-ink-700">
+              참고용 (추천 안 함) {references.length}개
+            </summary>
+            <p className="mt-1 text-[11px] text-ink-500">
+              급상승했지만 회사 설정에서 추천하지 않기로 한 주제예요{out?.excluded_categories?.length ? ` (${out.excluded_categories.join(", ")})` : ""}.
+            </p>
+            <ul className="divide-y divide-ink-100">
+              {references.map((r) => <ReferenceRow key={r.keyword} item={r} />)}
+            </ul>
+          </details>
         )}
         <p className="text-[11px] text-ink-500">마케팅에 소재로 보내기: {SEND_TO_MARKETING_BLOCKED}</p>
       </div>

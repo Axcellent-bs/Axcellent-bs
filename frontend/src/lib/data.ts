@@ -516,6 +516,26 @@ export interface ContentRecommendation {
   meme_reason?: string | null;
   /** 분류에 쓴 대표 영상 제목 수 */
   meme_titles?: number;
+  /** 주제 분류 (서버 LLM이 목록 안에서만 고름). unknown = 분류하지 못함. 예전 응답은 없다 */
+  topic_category?: TopicCategory | null;
+  topic_category_reason?: string | null;
+  /** 묶음: product_linked = 회사 상품과 연결된 소재, general = 일반 화제. 예전 응답은 없다 */
+  group?: "product_linked" | "general" | null;
+}
+export type TopicCategory =
+  | "뉴스·사건" | "정치·사회" | "기부·재난" | "인물" | "게임" | "연예·스포츠" | "생활·취미" | "교육·책" | "기타" | "unknown";
+/** 급상승했지만 회사 설정의 "추천 안 함" 분류라 추천하지 않은 소재 (참고용, 서버 값) */
+export interface ReferenceTopic {
+  keyword: string;
+  aliases: string[];
+  origins: (CandidateOrigin | "keyword_group")[];
+  ratio: number;
+  z: number;
+  two_sources: boolean;
+  topic_category: TopicCategory;
+  topic_category_reason: string | null;
+  /** 추천하지 않은 이유 (서버가 만든 한 줄) */
+  reason: string;
 }
 /** 소재와 연결한 회사 실제 상품 (서버 값) */
 export interface LinkedProduct {
@@ -528,6 +548,8 @@ export interface LinkedProduct {
   similarity: number | null;
   /** 서버가 만든 한 줄 (예: 이름 일치: 파이썬) */
   reason: string;
+  /** 임베딩으로 이었을 때 1등 − 2등 유사도 (예전 응답·글자 일치는 없다) */
+  margin?: number | null;
 }
 export interface ContentRecommendOutput {
   start_date: string | null;
@@ -551,6 +573,12 @@ export interface ContentRecommendOutput {
   /** 임베딩 유사도를 쟀는지. unknown이면 글자 일치만 썼다 */
   similarity_status?: "known" | "unknown";
   similarity_reason?: string | null;
+  /** 유사도를 재지 못한 까닭: 설정 없음·설정 오류(키 없음 등)·요청 실패 (예전 응답은 없다) */
+  similarity_failure?: "not_configured" | "config_error" | "request_failed" | null;
+  /** "추천 안 함" 분류라 뺀 소재 (참고용, 순위 순). 예전 응답은 없다 */
+  reference_items?: ReferenceTopic[];
+  /** 이번에 쓴 "추천 안 함" 분류 (회사 설정) */
+  excluded_categories?: string[];
 }
 
 // ---------------------------------------------------------------- 캠페인 효과 (campaign_effect)
