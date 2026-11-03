@@ -866,7 +866,7 @@ button.chip { cursor: pointer; font: inherit; }
 /* 문서 목록 */
 .dl-grid { grid-template-columns: minmax(0, 1fr) 200px 80px 120px; }
 .dl-make { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
-.col-left .dl-make { flex-direction: column; align-items: stretch; margin: 0; }
+.dl-make select, .dl-make .field { max-width: 420px; min-width: 0; }
 
 /* 목록 페이지 나누기 */
 .pager { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 12px 0; }
