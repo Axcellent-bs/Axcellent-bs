@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from "react-router";
 import { Chip, Empty, ErrorBox, Panel, TONE, Waiting, useResource } from "@/components/finance/bits";
 import { PreparingChip } from "@/components/Preparing";
 import { CampaignEffect } from "@/components/data/CampaignEffect";
-import { ContentRecommend } from "@/components/data/ContentRecommend";
 import { PromoConcepts } from "@/components/data/PromoConcepts";
 import { ShortsStats } from "@/components/data/ShortsStats";
 import { TrendPopular } from "@/components/data/TrendPopular";
@@ -15,21 +14,21 @@ import {
   type TrendCandidatesOutput, type TrendScanOutput, type TrendVerdict, type TrendingSearchEvidence, type YouTubeTagEvidence,
 } from "@/lib/data";
 
-// 트렌드&콘텐츠 화면 (/data/trend): 콘텐츠 루프 5단계를 하위 탭 4개로 묶어 보여 준다 (단계 정의·묶음은 lib/contentLoop.ts 한 곳).
+// 트렌드&콘텐츠 화면 (/data/trend): 콘텐츠 루프 4단계와 같은 하위 탭 4개 (단계 정의는 lib/contentLoop.ts 한 곳).
 // - 주소에 하위 탭을 남긴다: /data/trend#detect · #recommend · #handoff · #result (없으면 감지). 옛 #trend/<단계> 주소는 Data.tsx가 새 주소로 옮긴다
 // - 루프 띠의 단계를 누르면 그 단계가 속한 하위 탭으로 간다. 루프 띠는 모든 하위 탭 위에 있다
 // - 1 감지(1단계 트렌드·밈 감지): 맨 위 지금 인기(trend_popular), 그 아래 급상승 한 줄 목록(trend_scan·trend_candidates), YouTube 지금 속도.
 //   교차 출처 목록(평소 수준·판정 불가)·판정 방법 안내·월별 흐름·계절 패턴은 화면을 줄이려고 뺐다
-// - 2 추천(2단계 영상 소재 추천): 맨 위 인기 숏츠 형식(shorts_stats), 그 아래 광고·홍보 숏츠 기획안 초안(promo_concepts) + content_recommend 출력. 하위 탭을 오가도 남게 숨기기만 한다
-// - 3 넘김(3단계 AI 인플루언서·배우·캐릭터 영상으로 넘기기): 준비 중. 단계 정의의 할 일·필요한 것만 보여 준다(숫자·예시 없음)
-// - 4 성과(4단계 게시·성과 측정 + 5단계 다음 추천에 반영): 캠페인 효과(campaign_effect) 아래에 5단계 준비 중 안내. 측정 결과가 남게 숨기기만 한다
+// - 2 추천: 맨 위 인기 숏츠 형식(shorts_stats), 그 아래 광고·홍보 숏츠 기획안 초안(promo_concepts). 하위 탭을 오가도 남게 숨기기만 한다
+// - 3 넘김(기획안을 마케팅·영상 제작으로 넘기기): 준비 중. 단계 정의의 할 일·필요한 것만 보여 준다(숫자·예시 없음)
+// - 4 성과(게시·성과 측정, 다음 추천 반영은 준비 중): 캠페인 효과(campaign_effect). 측정 결과가 남게 숨기기만 한다
 //
 // 1단계 급상승 한 줄
 // - 주제 · "평소보다 N배 많이 검색돼요"(서버 배수) · 판정에 쓴 마지막 날. 순서는 배수 큰 순. 그래프는 없다
 // - 기본 판정(입력 비움) = 회사 기본 키워드(trend_scan) + YouTube 인기 태그 후보(trend_candidates, 후보마다 네이버 판정).
 //   같은 이름이면 YouTube 근거가 있는 후보 쪽 판정을 쓴다. 직접 입력이면 trend_scan만 부른다
 // - 판정마다 서버가 LLM으로 문장을 쓰므로 30초 새로고침을 따르지 않는다. 처음 한 번 + "판정"·"다시 판정"을 누를 때만 부른다
-// "마케팅에 소재로 보내기"를 아직 못 하는 이유는 콘텐츠 루프 2단계와 같은 문장이다 (lib/contentLoop.ts)
+// "마케팅에 넘기기"를 아직 못 하는 이유는 콘텐츠 루프 3단계와 같은 문장이다 (lib/contentLoop.ts)
 
 const fixed = (v: number | null | undefined, digits = 2) =>
   typeof v === "number" && Number.isFinite(v) ? v.toLocaleString("ko-KR", { maximumFractionDigits: digits }) : null;
@@ -168,7 +167,6 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
   const [inputError, setInputError] = useState<string | null>(null);
   const [run, setRun] = useState(0);
   const [campaignProbe, setCampaignProbe] = useState<LoopProbe>("idle");
-  const [recommendProbe, setRecommendProbe] = useState<LoopProbe>("checking");
   const [promoProbe, setPromoProbe] = useState<LoopProbe>("checking");
   const res = useResource(`trend-${groups.join("|")}`, () => dataAi.trendScan(groups).then((r) => ({ data: r, meta: { mock: false } })), run);
   // YouTube 후보는 기본 판정(입력 비움)에서만 부른다. 직접 입력이면 부르지 않는다
@@ -230,9 +228,6 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
   const trendProbe: LoopProbe = !kpiLive ? "failed"
     : res.loading ? (out && !res.error ? "ok" : "checking")
     : (out && !res.error ? "ok" : "failed");
-  // 콘텐츠 루프 2단계 칩: 기획안·소재 추천 중 하나라도 정상이면 "동작 중"
-  const stage2Probe: LoopProbe = [promoProbe, recommendProbe].includes("ok") ? "ok"
-    : [promoProbe, recommendProbe].includes("checking") ? "checking" : "failed";
   // 콘텐츠 루프 4단계 칩: 측정 전(측정 대기)이라도 데이터 AI 상태 확인이 실패했으면 "연결 확인 필요"
   const loopCampaignProbe: LoopProbe = !kpiLive ? "failed"
     : campaignProbe === "idle" && dataUp === false ? "failed" : campaignProbe;
@@ -285,9 +280,9 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
 
   return (
     <div className="space-y-5">
-      <ContentLoop trend={loopTrend} probes={{ trend_scan: trendProbe, content_recommend: stage2Probe, campaign_effect: loopCampaignProbe }} active={stageOf(tab.stages[0]).no} onSelect={openStage} />
+      <ContentLoop trend={loopTrend} probes={{ trend_scan: trendProbe, promo_concepts: promoProbe, campaign_effect: loopCampaignProbe }} active={stageOf(tab.stages[0]).no} onSelect={openStage} />
 
-      {/* 하위 탭 4개: 감지 → 추천 → 넘김 → 성과 (루프 5단계를 묶은 것, lib/contentLoop.ts TREND_TABS) */}
+      {/* 하위 탭 4개: 감지 → 추천 → 넘김 → 성과 (루프 4단계와 같다, lib/contentLoop.ts TREND_TABS) */}
       <div role="tablist" aria-label="트렌드&콘텐츠 단계" className="flex w-full gap-1 overflow-x-auto rounded-2xl bg-surface p-1 ring-1 ring-ink-100">
         {TREND_TABS.map((t, i) => (
           <button key={t.key} type="button" role="tab" id={`trend-sub-${t.key}`} aria-selected={tab.key === t.key} aria-controls={`trend-sub-panel-${t.key}`}
@@ -311,20 +306,16 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
           ) : t.key === "recommend" ? (
             // 추천 결과가 하위 탭을 오가도 남도록 늘 그려 두고 숨기기만 한다
             <div className="space-y-5">
-              {/* 인기 숏츠 형식 (shorts_stats) → 광고·홍보 숏츠 기획안 초안 (promo_concepts) → content_recommend */}
+              {/* 인기 숏츠 형식 (shorts_stats) → 광고·홍보 숏츠 기획안 초안 (promo_concepts) */}
               <ShortsStats />
               <PromoConcepts onProbe={setPromoProbe} />
-              <ContentRecommend onProbe={setRecommendProbe} dataUp={dataUp} />
             </div>
           ) : t.key === "handoff" ? (
-            // 영상 제작으로 넘기기: 아직 준비 중
-            <PreparingStage stage={stageOf("video")} />
+            // 마케팅·영상 제작으로 넘기기: 아직 준비 중
+            <PreparingStage stage={stageOf("handoff")} />
           ) : (
-            // 성과: 캠페인 효과 + 다음 추천 반영(준비 중). 측정 결과가 하위 탭을 오가도 남게 늘 그려 두고 숨기기만 한다
-            <div className="space-y-5">
-              <CampaignEffect onProbe={setCampaignProbe} />
-              <PreparingStage stage={stageOf("feedback")} />
-            </div>
+            // 성과: 캠페인 효과. 측정 결과가 하위 탭을 오가도 남게 늘 그려 두고 숨기기만 한다
+            <CampaignEffect onProbe={setCampaignProbe} />
           )}
         </div>
       ))}
