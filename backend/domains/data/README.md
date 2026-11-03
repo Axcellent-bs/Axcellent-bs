@@ -18,6 +18,7 @@
 | `youtube_velocity` | YouTube 영상 지금 속도(최근 두 스냅샷 사이 시간당 조회 증가)와 그 전 구간보다 빨라졌는지, 지금 속도 상위 N개(설정)와 태그·제목·채널 이름·길이(저장된 값이 없으면 비움). **판정하지 않음** | YouTube 스냅샷 DB(`youtube_store.recent_snapshots`, 읽기 전용, 외부 호출 없음). 개수: 회사 폴더 `trends.toml` `[velocity] top` |
 | `trend_popular` | "지금 인기" 주제 순위(급상승 판정과 별개): 점수(코드) = 인기 영상 수 몫 + 지금 조회 속도 몫 + 인기 검색어 순위 몫(가중치 설정), 출처별 몫·근거, 주제 분류·`brand_safe`, 오늘 판정이 급상승이면 "지금 급등 중"(`rising_now`) | YouTube 스냅샷 DB·인기 검색어 스냅샷 DB(읽기 전용), LLM(주제 분류만, 묶어서 1번·하루 캐시). **네이버를 부르지 않는다**. 설정: `trends.toml` `[popular]` |
 | `promo_concepts` | 회사 상품 홍보 영상 기획안 3~5개: 제목·컨셉·빌려 온 트렌드·등장 상품·형식(15초·30초 숏폼, 롱폼)·콘티 3컷·주의사항, 코드 경고(상표·초상권 확인 필요), 버린 기획안과 이유, 쓴 재료 | shop-api 상품·카테고리, trend_popular(안전한 것만), 카탈로그 카테고리 월별 흐름(trend_history, 네이버 카테고리 수만큼·하루 캐시), LLM(기획안 1번 + 분류). 하루 캐시·기획안 기록 `backend/.data/promo_concepts.db`. 설정: `trends.toml` `[promo]` |
+| `shorts_stats` | YouTube 숏츠 통계(카테고리별·형식별): 숏츠 수·평균 조회수·평균 시간당 조회 증가·조회수 상위 3개, 표본 부족은 unknown | YouTube 스냅샷 DB(길이 `video_details`), 숏츠 검색(`search.list`, 하루 1번·상한 8번, `backend/.data/shorts.db`), LLM(카테고리·형식 분류, 묶어서·저장). 설정: `trends.toml` `[shorts]` |
 | `content_recommend` | 지금 만들 만한 영상 소재(급상승만, 최대 N개): 순위·점수 근거(z·배수·두 소스)·출처·주제 분류·묶음(회사 상품과 연결된 소재·일반 화제)·연결할 실제 상품(근거)·회사 관련성(상품 연결로, 표시만)·밈 형식·영상 아이디어 1~2문장·형식(숏폼·롱폼)·fallback. 추천 안 함 분류(회사 설정)는 참고용 + 이유로 따로. 콘텐츠 루프 2단계 | trend_scan(회사 기본 키워드 그룹)·trend_candidates(후보 전체)와 같은 네이버 요청(하루 캐시 같이 씀), 회사 상품 목록(shop-api `GET /api/shop/products`·`/categories`), LLM(아이디어 문장·밈 형식·주제 분류만), 임베딩(설정이 있을 때만). 설정: 회사 폴더 `trends.toml` `[recommend]` |
 | `answer_planning_question` | 기획이 되묻는 근거 질문의 답(answered·needs_human·unknown). 기획만 부른다 | data가 보낸 요청의 기록(`planning_questions.py`, 프로세스 안). 아직 요청을 보내는 코드가 없어 지금은 늘 unknown. 사람 답은 `human_answer_request`로 planning `receive_planning_answer`에 보낸다 |
 | `campaign_effect` | 캠페인 기간 주문 방향(늘었음·같음·줄었음)·증분(실제 − 지난 7일 같은 시간대 평균), 캠페인 쿠폰 조회 시점 누적 사용률. 매출은 매출 지표가 생기면 같은 방법(지금은 확인할 수 없음) | shop-api `GET /api/shop/metric-series`(`order_count`), `GET /api/shop/coupons?campaign_id=` |
@@ -41,6 +42,7 @@
 | `youtube_velocity` | 없음(판정하지 않음) | 평소 속도 기준이 없어 빠른 순서만 보여 준다. 스냅샷 간격이 짧으면 속도가 흔들린다 |
 | `trend_popular` | 없음 | 평가셋이 없어 "인기 순위가 맞는지"를 재지 않는다. 가중치(1.0·1.0·1.0)는 성과 자료가 없어 정한 값이다. 주제 분류 정확도도 재지 않는다 |
 | `promo_concepts` | 없음 | 평가셋이 없어 기획안 품질을 재지 않는다. 👍/👎 피드백이 쌓이면 그것을 평가셋으로 쓴다(피드백 저장은 safety 레지스트리 등록이 필요해 아직 없음). 코드는 상품·트렌드·숫자·형식·콘티 수만 검증한다 |
+| `shorts_stats` | 없음 | 인기 영상 상위 200개 안(과 조회수 순 검색 결과)에서의 비교라 이미 뜬 영상끼리 비교한다. 숏츠 여부는 길이로 판단한다. 형식 분류 정확도는 재지 않는다 |
 | `content_recommend` | 상품 연결 기준만 보정셋 `eval/product_link/`(#403, 관문 아님) | 추천 품질은 나중에 게시 성과로 잰다. 상품 연결은 임베딩 설정이 없으면 글자 일치만 본다. 임베딩 기준(1등만, 0.65)은 **임시 기준**이다. **밈 형식·주제 분류 정확도는 평가셋이 없어 재지 않는다**. 인기 검색어에서만 나온 소재는 밈 형식이 늘 unknown |
 | `answer_planning_question` | 없음 | 아직 data가 요청을 보내는 코드가 없어 늘 unknown이다 |
 | `campaign_effect` | 있음: `eval/campaign/`(기존·여러 날, 개발 방향 1.0, holdout 0.9167·0.8) | 매출 지표가 없어 매출은 unknown. 7일 넘는 캠페인은 unknown. 주문이 아주 적은 가게의 새벽 기록 공백은 못 잡는다 |
@@ -561,6 +563,19 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 
 - 👍/👎 피드백 저장은 **아직 없다**. 상태 변경이라 `execute()`(안전 관문)와 safety 레지스트리 등록이 필요하고, 레지스트리는 사람만 바꾼다(PR 본문에 skill 이름·등급·레지스트리 항목 초안)
 - **한계:** 평가셋이 없어 기획안 품질을 재지 않는다. 👍/👎가 쌓이면 그것을 평가셋으로 쓴다. 시즌 기준(1.3배)과 기획안 수는 정한 값이다. 시즌 값은 그룹 요청 안 상대값이라 카테고리끼리 크기를 비교하지 않는다. LLM이 IP 이름을 피해도 연상되는 표현까지는 코드가 잡지 못한다(경고는 이름이 그대로 있을 때만)
+
+### shorts_stats (숏츠 통계)
+
+YouTube 숏츠를 카테고리별·형식별로 센다. 숫자는 코드, 분류는 LLM이 정해진 목록 안에서만.
+
+1. **숏츠 고르기: 길이로 판단한다.** YouTube API에는 숏츠 표시가 없어서, 길이(`contentDetails.duration`, `video_details` 표)가 `[shorts] max_seconds`(60초) 이하인 영상을 숏츠로 본다. 길이를 모르는 영상은 빼고 수(`unknown_length`)만 센다
+2. 표본
+   - 최신 YouTube 인기 스냅샷의 숏츠. 2026-11-03에는 인기 목록에 60초 이하 영상이 없었다(0개)
+   - **표본 넓히기**: 인기 스냅샷에 많이 나온 YouTube 카테고리(데이터에서 고름) 순으로 짧은 영상 검색(`search.list`, `videoDuration=short`, `regionCode=KR`, 최근 `search_days`(7)일, 조회수 순, 50개)을 **하루 1번**, 상한 `search_calls`(8번, 검색 1번 = 100단위). 결과는 `backend/.data/shorts.db`(`DATA_SHORTS_DB`)에 남겨 같은 날은 다시 부르지 않는다. 검색 실패는 그 카테고리만 unknown + 이유, 할당량 초과면 남은 검색은 하지 않고 unknown
+3. 분류(LLM, 묶어서 최대 20개씩, 저장해 재사용): 카테고리는 주제 분류기(`classify_topics`, 제목 + 태그), 형식은 **챌린지·상황극·스케치·리액션·정보·팁·비포애프터·브이로그·밈 패러디·기타**에서 하나(목록 밖은 기타, 실패는 unknown). 형식은 `shorts.db`에 `retention_days`(30)일 남긴다
+4. 계산(코드): 카테고리별·형식별 숏츠 수, 평균 조회수, 평균 시간당 조회 증가(최근 두 인기 스냅샷에 있는 숏츠만, 잰 수 `velocity_videos`), 조회수 상위 3개(제목·채널·조회수). **표본이 `min_sample`(5)개 미만이면 unknown + "표본 부족"**
+
+- **한계:** 인기 영상 상위 200개 안(과 조회수 순 검색 결과)에서의 비교라 **이미 뜬 영상끼리 비교**한다(응답 `limitation`에도). 검색 표본은 한 번만 봐서 시간당 조회 증가를 잴 수 없다. 형식 분류 정확도는 평가셋이 없어 재지 않는다
 
 ### content_recommend (영상 소재 추천, 콘텐츠 루프 2단계)
 

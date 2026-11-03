@@ -50,6 +50,7 @@ from ax_contracts.schemas.data import (
     KpiSummaryInput,
     PromoConceptsRequest,
     RootCauseInput,
+    ShortsStatsRequest,
     TrendCandidatesRequest,
     TrendHistoryRequest,
     TrendPopularRequest,
@@ -68,6 +69,7 @@ from data_agent.clients.shop_client import (
 )
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.naver_datalab import NaverDatalabConnector
+from data_agent.connectors.youtube import YouTubeConnector
 from data_agent.planning_questions import answer_question
 from data_agent.report_store import ReportStore, get_report_store
 from data_agent.skills import topic_category
@@ -81,6 +83,7 @@ from data_agent.skills.impact_analysis import analyze_impact
 from data_agent.skills.kpi_summary import summarize_kpi
 from data_agent.skills.promo_concepts import make_concepts
 from data_agent.skills.root_cause import estimate_root_cause
+from data_agent.skills.shorts_stats import shorts_stats as run_shorts_stats
 from data_agent.skills.trend_candidates import find_candidates
 from data_agent.skills.trend_history import history
 from data_agent.skills.trend_popular import popular
@@ -410,6 +413,33 @@ async def trend_popular(request: AgentRequest) -> AgentResult:
     )
 
 
+def get_youtube() -> YouTubeConnector:
+    """YouTube Data API 커넥터 (키는 .env). 테스트는 이 함수를 바꿔 끼운다."""
+    return YouTubeConnector(os.environ)
+
+
+async def shorts_stats(request: AgentRequest) -> AgentResult:
+    """숏츠 통계 (카테고리별·형식별). 검색은 하루 1번 저장, 조회만 한다(grade read)."""
+    data = _parse(request, ShortsStatsRequest)
+    if isinstance(data, AgentResult):
+        return data
+    result = await run_shorts_stats(
+        data,
+        get_youtube(),
+        get_llm(),
+        env=os.environ,
+        context_id=request.meta.context_id,
+        category_cache=get_category_cache(),
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=result.output.status,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
+
+
 async def promo_concepts(request: AgentRequest) -> AgentResult:
     """홍보 영상 기획안 3~5개 (하루 캐시, 기획안 기록만 남김). 상태를 바꾸지 않는다(grade read)."""
     data = _parse(request, PromoConceptsRequest)
@@ -590,6 +620,7 @@ HANDLERS = {
     "content_recommend": content_recommend,
     "trend_popular": trend_popular,
     "promo_concepts": promo_concepts,
+    "shorts_stats": shorts_stats,
     "answer_planning_question": answer_planning_question,
     "campaign_effect": campaign_effect,
 }

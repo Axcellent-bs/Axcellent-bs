@@ -148,3 +148,13 @@ events = []
 geo = "KR"               # 지역 (피드 geo)
 max_candidates = 5       # YouTube 후보와 겹치지 않는 인기 검색어 후보 수 상한 (피드 순위 순)
 max_age_hours = 24       # 스냅샷이 이보다 오래되면 이 출처만 unknown + 이유
+
+# 숏츠 통계(data shorts_stats): YouTube API에는 숏츠 표시가 없어 길이로 판단한다. 표본은 인기 스냅샷의 숏츠 +
+# 인기 스냅샷에 많이 나온 YouTube 카테고리마다 짧은 영상 검색(하루 1번, 검색 1번 = 할당량 100단위)
+[shorts]
+max_seconds = 60         # 이 길이(초) 이하를 숏츠로 본다
+min_sample = 5           # 묶음(카테고리·형식)의 숏츠가 이보다 적으면 unknown + 표본 부족
+search_calls = 8         # 하루 검색 호출 상한 (0이면 검색 안 함)
+search_days = 7          # 최근 며칠 안에 올라온 영상을 검색할지
+top_videos = 3           # 묶음마다 보여 줄 조회수 상위 숏츠 수
+retention_days = 30      # 숏츠 형식 분류를 다시 쓰는 기간(일)

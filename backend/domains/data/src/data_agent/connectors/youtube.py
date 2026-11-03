@@ -227,6 +227,31 @@ class YouTubeConnector:
         ids = [item.id.videoId for item in page.items if item.id.videoId]
         return await self.videos(ids) if ids else []
 
+    async def search_shorts(
+        self,
+        category_id: str,
+        published_after: datetime,
+        region: str = "KR",
+        max_results: int = PAGE_SIZE,
+    ) -> list[VideoStat]:
+        """YouTube 카테고리 하나의 짧은 영상(4분 미만) 검색 → 결과 영상의 통계.
+
+        `videoDuration=short`, 조회수 순, 최근 게시. 검색 100단위 + 통계 1단위(50개마다).
+        """
+        params = {
+            "part": "snippet",
+            "type": "video",
+            "videoDuration": "short",
+            "videoCategoryId": category_id,
+            "regionCode": region,
+            "order": "viewCount",
+            "maxResults": max(1, min(max_results, PAGE_SIZE)),
+            "publishedAfter": published_after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        page = _parse(_SearchPage, await self._get("search", params), "숏츠 검색")
+        ids = [item.id.videoId for item in page.items if item.id.videoId]
+        return await self.videos(ids) if ids else []
+
     async def _get(self, resource: str, params: dict[str, Any]) -> Any:
         if not self._key:
             raise ConnectorUnavailable(
