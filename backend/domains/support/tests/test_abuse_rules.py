@@ -14,6 +14,7 @@ from support_agent.store import InquiryStore
         ("씨발 배송이 왜 이래요", "profanity", ["profanity"]),
         ("너네 쓰레기 같은 회사야, 꺼져", "insult", ["insult"]),
         ("씨발 환불 안 해주면 찾아가서 가만 안 둔다", "threat", ["threat", "profanity"]),
+        ("배송 개같이 늦네", "profanity", ["profanity"]),
     ],
 )
 def test_level_and_kinds(text: str, level: str, kinds: list[str]) -> None:
@@ -34,6 +35,8 @@ def test_expressions_are_replaced_but_request_stays() -> None:
         "시발점이 어디인가요",
         "쓰레기통 모양 상품이 깨져서 왔어요",
         "소비자원에 신고하고 고소하겠습니다",  # 정당한 권리 행사는 위협이 아니다
+        "두개같이 보내 주세요",  # 개수 뒤의 "개같이"는 욕설이 아니다
+        "3개같이 주문했는데 한 개만 왔어요",
     ],
 )
 def test_ordinary_words_and_legitimate_threats_are_not_flagged(text: str) -> None:
@@ -63,3 +66,20 @@ def test_store_keeps_original_and_adds_display_text() -> None:
     store.add_customer_message(conversation.id, "정상 문의입니다", Analysis())
     later = conversation.messages[1]
     assert (later.display_text, later.abuse_level) == (None, "none")
+
+
+def test_a_curse_in_the_subject_is_masked_in_the_display_subject() -> None:
+    store = InquiryStore()
+    conversation = store.create(
+        tenant_id="t",
+        context_id="c",
+        user_id=1,
+        customer_name="고객",
+        subject="배송 개같이 늦네",
+        order_id=None,
+        order_no=None,
+        first_message="일주일째 배송이 오지 않아요",
+        analysis=Analysis(),
+    )
+    assert conversation.subject == "배송 개같이 늦네"  # 원문은 그대로 둔다
+    assert conversation.subject_display == "배송 [비속어] 늦네"
