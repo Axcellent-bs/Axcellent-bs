@@ -53,6 +53,7 @@ class ActionSpec(_Strict):
 
     `on_verify_reject`: 에이전트 검증자가 거절했을 때 처리. `reject`(기본)는 바로 `rejected`,
     `hold`는 사람 보류 큐(C, `verify_rejected`)로 보낸다. 에이전트 검증자가 있을 때만 의미가 있다.
+    `connection_field`: 외부 연결에 쓰는 액션의 연결 id 필드. 비어 있으면 C(`schema_invalid`)다.
     """
 
     action: str
@@ -64,6 +65,7 @@ class ActionSpec(_Strict):
     amount: AmountSpec | None = None
     customer_field: str | None = None
     purpose_field: str | None = None
+    connection_field: str | None = None
     on_verify_reject: Literal["reject", "hold"] = "reject"
 
     @property

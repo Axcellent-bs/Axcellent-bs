@@ -9,8 +9,23 @@ import pytest
 
 from ax_contracts.schemas import HoldReason
 from ax_safety.gate import Gate
+from ax_safety.rules import load_registry
 
 WRITERS = ["hr", "support", "marketing", "planning", "finance", "orchestrator", "data"]
+
+
+@pytest.fixture
+def act(act: Any) -> Any:
+    """외부 연결에 쓰는 액션에는 연결 id를 싣는다. 빠진 경우는 `test_connection_rule.py`가 본다."""
+    registry = load_registry()
+
+    def make(action: str, requester: str, key: str, **params: Any) -> Any:
+        spec = registry.get(action)
+        if spec is not None and spec.connection_field:
+            params.setdefault(spec.connection_field, "conn-1")
+        return act(action, requester, key, **params)
+
+    return make
 
 
 @pytest.mark.asyncio
