@@ -5,30 +5,26 @@ import { PreparingChip } from "@/components/Preparing";
 import { CampaignEffect } from "@/components/data/CampaignEffect";
 import { ContentRecommend } from "@/components/data/ContentRecommend";
 import { PromoConcepts } from "@/components/data/PromoConcepts";
-import { TrendHistory } from "@/components/data/TrendHistory";
 import { TrendPopular } from "@/components/data/TrendPopular";
 import { YoutubeVelocity } from "@/components/data/YoutubeVelocity";
 import { ContentLoop, type LoopTrendState } from "@/components/data/ContentLoop";
 import { LOOP_STAGES, SEND_TO_MARKETING_BLOCKED, stageFromHash, trendHash, type LoopProbe, type LoopStage } from "@/lib/contentLoop";
 import {
-  CANDIDATE_ORIGIN_LABEL, DATA_SERVER, TREND_MAX_GROUPS, dataAi, evidenceLines, kpiLive,
+  DATA_SERVER, TREND_MAX_GROUPS, dataAi, evidenceLines, kpiLive,
   type TrendCandidatesOutput, type TrendScanOutput, type TrendVerdict, type TrendingSearchEvidence, type YouTubeTagEvidence,
 } from "@/lib/data";
-import { UNKNOWN_TREND_TEXT, ratioNote, strengthLabel } from "@/lib/trendWording";
 
 // 트렌드 탭 (#trend): 콘텐츠 루프 5단계와 같은 이름·순서의 하위 탭 5개 (단계 정의는 lib/contentLoop.ts 한 곳).
 // - 주소에 하위 탭을 남긴다: #trend/detect · #trend/recommend · #trend/video · #trend/campaign · #trend/feedback (없으면 1단계)
 // - 루프 띠의 단계를 누르면 그 하위 탭으로 간다. 루프 띠는 모든 하위 탭 위에 있다
-// - 1 트렌드·밈 감지: 데이터 AI(8106) trend_scan·trend_candidates 출력을 그대로. 보기 전환 "지금 급상승 / 월별 흐름 / 계절 패턴"
-//   (월별 흐름은 trend_history, components/data/TrendHistory.tsx. 계절 패턴은 판정이 없어 준비 중)
+// - 1 트렌드·밈 감지: 맨 위 지금 인기(trend_popular), 그 아래 급상승 한 줄 목록(trend_scan·trend_candidates), YouTube 지금 속도.
+//   교차 출처 목록(평소 수준·판정 불가)·판정 방법 안내·월별 흐름·계절 패턴은 화면을 줄이려고 뺐다
 // - 2 영상 소재 추천: 맨 위 홍보 영상 기획안(promo_concepts, components/data/PromoConcepts.tsx) + content_recommend 출력(components/data/ContentRecommend.tsx). 하위 탭을 오가도 남게 숨기기만 한다
 // - 3·5: 준비 중. 단계 정의의 할 일·필요한 것만 보여 준다(숫자·예시 없음)
 // - 4 게시·성과 측정: 캠페인 효과(campaign_effect). 하위 탭을 오가도 측정 결과가 남게 화면에서 내리지 않고 숨긴다
 //
-// 1단계 카드 문구
-// - 판정·배수·z·평소 범위·문장은 모두 서버 값이다. 화면은 순서(배수 큰 순)·자릿수·쉬운 말만 정한다
-// - 큰 글씨는 "평소보다 N배 많이 검색돼요" + "변화 정도"(z 구간을 말로, lib/trendWording.ts). z 숫자는 "근거 보기" 안에만
-// - 값은 검색 건수가 아니라 "그 요청 안 최댓값 = 100"인 상대값이다. 그룹마다 따로 요청해서 그룹끼리 높이는 비교하지 않는다
+// 1단계 급상승 한 줄
+// - 주제 · "평소보다 N배 많이 검색돼요"(서버 배수) · 판정에 쓴 마지막 날. 순서는 배수 큰 순. 그래프는 없다
 // - 기본 판정(입력 비움) = 회사 기본 키워드(trend_scan) + YouTube 인기 태그 후보(trend_candidates, 후보마다 네이버 판정).
 //   같은 이름이면 YouTube 근거가 있는 후보 쪽 판정을 쓴다. 직접 입력이면 trend_scan만 부른다
 // - 판정마다 서버가 LLM으로 문장을 쓰므로 30초 새로고침을 따르지 않는다. 처음 한 번 + "판정"·"다시 판정"을 누를 때만 부른다
@@ -45,130 +41,23 @@ function parseGroups(text: string): string[] {
   return [...new Set(text.split(/[,，]/).map((t) => t.trim()).filter(Boolean))];
 }
 
-// ------------------------------------------------------------------- 평소 범위 그래프 (SVG)
-
-const W = 320;
-const H = 110;
-const PAD_TOP = 16;
-const PAD_BOTTOM = 6;
-
-function TrendChart({ v }: { v: TrendVerdict }) {
-  const points = v.series ?? [];
-  const e = v.evidence;
-  if (points.length < 2) return <p className="py-6 text-center text-xs text-ink-500">그래프로 그릴 날짜별 값이 없어요.</p>;
-  const t0 = Date.parse(points[0].day);
-  const span = Math.max(1, (Date.parse(points[points.length - 1].day) - t0) / 86_400_000);
-  const dayOf = (day: string) => (Date.parse(day) - t0) / 86_400_000;
-  const top = Math.max(...points.map((p) => p.value), e.band_high ?? 0, e.baseline_value ?? 0) * 1.08 || 1;
-  const x = (day: string) => (dayOf(day) / span) * W;
-  const y = (value: number) => H - PAD_BOTTOM - (value / top) * (H - PAD_TOP - PAD_BOTTOM);
-
-  // 빠진 날(하루 넘게 비는 곳)은 선을 끊는다. 빈 날을 0으로 잇지 않는다
-  const path = (list: typeof points) =>
-    list.map((p, i) => `${i > 0 && dayOf(p.day) - dayOf(list[i - 1].day) > 1 ? "M" : i === 0 ? "M" : "L"}${x(p.day).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
-  const windowFrom = v.window_from ?? null;
-  const windowX = windowFrom ? x(windowFrom) : null;
-  const firstWindow = windowFrom ? points.findIndex((p) => p.day >= windowFrom) : -1;
-  const windowPart = firstWindow >= 0 ? points.slice(Math.max(0, firstWindow - 1)) : [];
-  const baseEnd = windowX ?? W;
-  const hasBand = e.band_low != null && e.band_high != null;
-
-  // 그림은 카드 폭에 맞춰 늘린다(preserveAspectRatio="none"). 글자는 늘어나지 않게 SVG 밖 HTML로 올린다
-  return (
-    <div className="relative">
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-28 w-full" role="img"
-      aria-label={`${v.group_name} 날짜별 값. 평소 범위 ${fixed(e.band_low) ?? "-"}~${fixed(e.band_high) ?? "-"}, 판정 구간 ${shortDay(windowFrom)}부터`}>
-      {windowX != null && <rect x={windowX} y={0} width={W - windowX} height={H} className="fill-red-50" />}
-      {hasBand && (
-        <rect x={0} y={y(e.band_high as number)} width={baseEnd} height={Math.max(1, y(e.band_low as number) - y(e.band_high as number))}
-          className="fill-brand-100" opacity={0.7} />
-      )}
-      {e.baseline_value != null && (
-        <line x1={0} x2={baseEnd} y1={y(e.baseline_value)} y2={y(e.baseline_value)} className="stroke-brand-500" strokeWidth={1} strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
-      )}
-      <path d={path(points)} fill="none" className="stroke-ink-700" strokeWidth={1.4} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-      {windowPart.length > 1 && <path d={path(windowPart)} fill="none" className="stroke-red-600" strokeWidth={2} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />}
-    </svg>
-    {hasBand && (
-      <span aria-hidden className="pointer-events-none absolute left-1 text-[10px] text-brand-700"
-        style={{ top: `calc(${(Math.max(10, y(e.band_high as number) - 4) / H) * 100}% - 10px)` }}>평소 범위</span>
-    )}
-    {windowX != null && (
-      <span aria-hidden className="pointer-events-none absolute top-0 text-[10px] text-red-600"
-        style={{ right: `calc(${100 - (windowX / W) * 100}% + 4px)` }}>판정 구간 →</span>
-    )}
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------- 급상승 카드
+// ------------------------------------------------------------------- 급상승 한 줄
 
 /** 화면에 그릴 판정 하나. youtube가 있으면 YouTube 후보에서 온 것 */
 /** risingNames: 이름마다 따로 판정해 급상승인 이름 (별칭이 있는 YouTube 후보만, 서버 값) */
 /** trending: 인기 검색어 근거 (서버 값). youtube 없이 trending만 있으면 인기 검색어에서만 나온 후보 */
 type Entry = { v: TrendVerdict; youtube?: YouTubeTagEvidence; trending?: TrendingSearchEvidence | null; aliases?: string[]; autoGrouped?: string[]; risingNames?: string[] };
 
-/** 인기 검색어 칩 글자: "인기 검색어 3위 · 500+" (피드 값 그대로) */
-const trendingLabel = (t: TrendingSearchEvidence) => `${CANDIDATE_ORIGIN_LABEL.trending_search} ${t.rank}위${t.traffic ? ` · ${t.traffic}` : ""}`;
-
-/** 평범·판정 불가 한 줄 설명: 판정 불가는 "자료가 부족해 판단할 수 없어요 · 서버 이유" */
-function restLine(v: TrendVerdict): string {
-  if (v.status === "unknown") return `${UNKNOWN_TREND_TEXT}${v.unknown_reason ? ` · ${v.unknown_reason}` : ""}`;
-  const note = ratioNote(v.status, v.ratio);
-  return `평소 수준${note ? ` · ${note}` : ""}`;
-}
-
-function RisingCard({ v, youtube, trending, aliases, autoGrouped, risingNames, rank }: { v: TrendVerdict; youtube?: YouTubeTagEvidence; trending?: TrendingSearchEvidence | null; aliases?: string[]; autoGrouped?: string[]; risingNames?: string[]; rank: number }) {
-  const [open, setOpen] = useState(false);
-  const e = v.evidence;
-  const strength = strengthLabel(e.score);
-  const note = ratioNote(v.status, v.ratio);
+/** 급상승 한 줄: 주제 · 쉬운 말 근거 하나(서버 배수) · 시각(판정에 쓴 마지막 날) */
+function RisingRow({ v, rank }: { v: TrendVerdict; rank: number }) {
+  const day = v.evidence.latest_period;
   return (
-    <article className="card flex flex-col gap-3 p-4 sm:p-5" aria-label={`급상승 ${rank}위 ${v.group_name}`}>
-      <div className="min-w-0">
-        <p className="text-[11px] font-semibold text-ink-500">#{rank}</p>
-        <h3 className="truncate text-lg font-bold text-ink-900">{v.group_name}</h3>
-        {/* 서버가 묶은 별칭 (#339). 네이버 판정에 함께 넣은 이름이다. 없으면 표시하지 않는다 */}
-        {aliases && aliases.length > 0 && <p className="text-[11px] text-ink-500">함께 본 이름: {aliases.join(", ")}</p>}
-        {autoGrouped && autoGrouped.length > 0 && <p className="text-[11px] text-ink-500">데이터로 자동 묶은 이름: {autoGrouped.join(", ")}</p>}
-        {/* 이름마다 따로 판정해 급상승인 이름 (서버 rising_names). 묶음은 평범이어도 이 이름이 올라 급상승이 될 수 있다 */}
-        {risingNames && risingNames.length > 0 && <p className="text-xs font-semibold text-red-700">올라간 이름: {risingNames.join(", ")}</p>}
-      </div>
-      <div>
-        <p className="text-2xl font-bold leading-snug text-red-600">평소보다 {fixed(v.ratio) ?? "-"}배 많이 검색돼요</p>
-        {strength && <p className="mt-1 text-sm font-semibold text-ink-700">변화 정도: {strength}</p>}
-        {note && <p className="mt-1 text-xs text-ink-500">{note}</p>}
-      </div>
-      <TrendChart v={v} />
-      <div className="flex flex-wrap gap-1.5">
-        <Chip label="급상승" tone={TONE.bad} />
-        <Chip label="✓ 네이버 검색" tone={TONE.info} />
-        {youtube && <Chip label={`✓ YouTube 인기 ${youtube.matched_tags?.length || !youtube.matched_phrases?.length ? "태그" : "영상 제목"} (영상 ${youtube.video_count}개)`} tone={TONE.info} />}
-        {youtube && (youtube.matched_phrases?.length ?? 0) > 0 && (youtube.matched_tags?.length ?? 0) > 0 && <Chip label={`✓ ${CANDIDATE_ORIGIN_LABEL.youtube_title}에도 나옴`} tone={TONE.info} />}
-        {trending && <Chip label={`✓ ${trendingLabel(trending)}`} tone={TONE.info} />}
-      </div>
-      {v.summary && <p className="border-l-2 border-brand-500 bg-ink-50 px-3 py-2 text-sm leading-relaxed text-ink-700">{v.summary}</p>}
-      {open && (
-        <dl className="grid grid-cols-2 gap-x-3 gap-y-1 bg-ink-50 px-3 py-2 text-xs text-ink-700">
-          <dt className="text-ink-500">변화 정도 (z)</dt><dd>{fixed(e.score) ?? "-"} (평소 흔들림 대비)</dd>
-          <dt className="text-ink-500">기준선(중앙값)</dt><dd>{fixed(e.baseline_value, 4) ?? "-"}</dd>
-          <dt className="text-ink-500">평소 범위</dt><dd>{fixed(e.band_low, 4) ?? "-"} ~ {fixed(e.band_high, 4) ?? "-"}</dd>
-          <dt className="text-ink-500">기준선에 쓴 날</dt><dd>{e.baseline_points}일</dd>
-          <dt className="text-ink-500">최근값</dt><dd>{fixed(e.latest_value, 4) ?? "-"} ({shortDay(e.latest_period)})</dd>
-          <dt className="text-ink-500">흔들림(MAD)</dt><dd>{fixed(e.spread, 4) ?? "-"}</dd>
-          <dt className="text-ink-500">판정 구간</dt><dd>{shortDay(v.window_from)}부터</dd>
-        </dl>
-      )}
-      <div className="mt-auto flex flex-wrap items-center gap-2">
-        <button type="button" className="btn-primary disabled:cursor-not-allowed disabled:opacity-50" disabled title={SEND_TO_MARKETING_BLOCKED}>
-          마케팅에 소재로 보내기
-        </button>
-        <button type="button" className="btn-ghost" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-          {open ? "근거 접기" : "근거 보기"}
-        </button>
-        <PreparingChip />
-      </div>
-    </article>
+    <li className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-2.5">
+      <span className="w-6 text-sm font-semibold text-ink-500">{rank}</span>
+      <span className="font-semibold text-ink-900">{v.group_name}</span>
+      <span className="text-sm text-red-700">평소보다 {fixed(v.ratio) ?? "-"}배 많이 검색돼요</span>
+      {day && <span className="ml-auto text-xs text-ink-500">{shortDay(day)} 기준</span>}
+    </li>
   );
 }
 
@@ -213,170 +102,25 @@ function snapshotLine(c: CandState): { text: string; warn: boolean } | null {
   };
 }
 
-/** YouTube에서 뜨지만 검색은 평소 수준 (교차 확인에서 걸러진 것) + 검색 판정 불가 후보 */
-function YoutubeOnly({ cands }: { cands: CandState }) {
-  if (cands.kind === "off") return null;
-  const line = snapshotLine(cands);
-  const list = cands.kind === "ok" ? cands.out.candidates.filter((c) => c.naver.status !== "rising") : [];
-  let body;
-  if (cands.kind === "loading") body = <Waiting what="YouTube 후보를 판정하는 중…" />;
-  else if (cands.kind === "failed") body = <Empty>YouTube 후보를 받지 못했어요. {cands.reason}</Empty>;
-  else if (cands.out.status === "unknown") body = <Empty>{cands.out.unknown_reason}</Empty>;
-  else if (list.length === 0) body = <Empty>YouTube 후보가 모두 검색에서도 급상승이에요.</Empty>;
-  else {
-    body = (
-      <>
-        <ul className="divide-y divide-ink-100">
-          {list.map((c) => (
-            <li key={c.keyword} className="flex flex-wrap items-center gap-3 py-3">
-              <div className="min-w-0 flex-1">
-                <p className="font-semibold text-ink-900">{c.keyword}</p>
-                <p className="text-xs text-ink-500">YouTube 인기 영상 {c.youtube.video_count}개 · 검색은 {restLine(c.naver)}</p>
-              </div>
-              {c.naver.status === "normal" && <span className="text-sm text-ink-500">평소 대비 {fixed(c.naver.ratio) ?? "-"}배</span>}
-              <Chip label={c.naver.status === "unknown" ? "판정 불가" : "평범"} tone={c.naver.status === "unknown" ? TONE.warn : TONE.ok} />
-            </li>
-          ))}
-        </ul>
-        {cands.out.summary && <p className="mt-2 text-xs text-ink-500">{cands.out.summary}</p>}
-      </>
-    );
-  }
-  const auto = cands.kind === "ok" ? cands.out.auto_excluded ?? [] : [];
-  const basis = cands.kind === "ok" ? cands.out.exclusion_basis : null;
-  const pairs = cands.kind === "ok" ? [...(cands.out.auto_groups ?? []), ...(cands.out.group_suggestions ?? [])] : [];
-  return (
-    <Panel id="data-trend-youtube" title="YouTube에서 뜨지만 검색은 평소 수준"
-      hint={line && <span className={line.warn ? "text-amber-700" : undefined}>{line.text}</span>}>
-      {body}
-      {/* 서버가 쌓인 스냅샷으로 찾은 늘 붙는 말 (자동 제외). 이유 문장은 서버 값 그대로 */}
-      {auto.length > 0 && (
-        <details className="mt-3 text-xs text-ink-600">
-          <summary className="cursor-pointer font-semibold">후보에서 자동으로 뺀 늘 붙는 말 {auto.length}개{basis ? ` · ${basis}` : ""}</summary>
-          <ul className="mt-2 space-y-1">
-            {auto.map((a) => <li key={`${a.source}-${a.name}`}><b className="text-ink-900">{a.name}</b> · 이번 스냅샷 영상 {a.snapshot_videos}개 · {a.reason}</li>)}
-          </ul>
-        </details>
-      )}
-      {/* 서버의 이름 자동 묶기: 묶은 쌍과 제안만 한 쌍 (상관·함께 나온 영상 수는 서버 값) */}
-      {pairs.length > 0 && (
-        <details className="mt-2 text-xs text-ink-600">
-          <summary className="cursor-pointer font-semibold">같은 대상으로 보이는 이름 {pairs.length}쌍</summary>
-          <ul className="mt-2 space-y-1">
-            {pairs.map((p) => (
-              <li key={p.names.join("|")}>
-                <b className="text-ink-900">{p.names.join(" · ")}</b> · {p.applied ? "자동으로 묶음" : "묶음 제안 (적용 안 함)"} · 검색 추이 상관 {fixed(p.correlation, 2) ?? "-"} ({p.days}일) · 함께 나온 영상 {p.shared_videos}개
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-    </Panel>
-  );
-}
-
-/** 인기 검색어 후보 중 검색 급상승이 아닌 것(평범·판정 불가)과 스냅샷 상태. 서버 값만 */
-function TrendingOnly({ cands }: { cands: CandState }) {
-  if (cands.kind !== "ok" || cands.out.trending_status === undefined) return null; // 예전 서버면 그리지 않는다
-  const out = cands.out;
-  const all = out.trending_candidates ?? [];
-  const list = all.filter((c) => c.naver.status !== "rising");
-  const known = out.trending_status === "known";
-  const hint = known
-    ? `인기 검색어 스냅샷 ${when(out.trending_snapshot_at) ?? "-"} · 후보 ${all.length}개`
-    : `인기 검색어: ${out.trending_reason ?? "서버가 이유를 주지 않았어요"}`;
-  let body;
-  if (!known) body = <Empty>{out.trending_reason ?? "서버가 이유를 주지 않았어요"}</Empty>;
-  else if (list.length === 0) body = <Empty>인기 검색어 후보가 없거나 모두 검색 급상승이에요.</Empty>;
-  else {
-    body = (
-      <ul className="divide-y divide-ink-100">
-        {list.map((c) => (
-          <li key={c.keyword} className="flex flex-wrap items-center gap-3 py-3">
-            <div className="min-w-0 flex-1">
-              <p className="font-semibold text-ink-900">{c.keyword}</p>
-              <p className="text-xs text-ink-500">{trendingLabel(c.trending)} · 검색은 {restLine(c.naver)}</p>
-            </div>
-            {c.naver.status === "normal" && <span className="text-sm text-ink-500">평소 대비 {fixed(c.naver.ratio) ?? "-"}배</span>}
-            <Chip label={c.naver.status === "unknown" ? "판정 불가" : "평범"} tone={c.naver.status === "unknown" ? TONE.warn : TONE.ok} />
-          </li>
-        ))}
-      </ul>
-    );
-  }
-  return (
-    <Panel id="data-trend-trending" title="인기 검색어지만 네이버 검색은 평소 수준"
-      hint={<span className={known ? undefined : "text-amber-700"}>{hint}</span>}>
-      {body}
-    </Panel>
-  );
-}
-
-function Result({ entries, headline, cands }: { entries: Entry[]; headline: string | null; cands: CandState }) {
+function Result({ entries, headline }: { entries: Entry[]; headline: string | null }) {
   const rising = entries.filter((e) => e.v.status === "rising").sort((a, b) => (b.v.ratio ?? 0) - (a.v.ratio ?? 0));
-  // 아래 "평소 수준 · 판정 불가"는 기본 키워드·직접 입력 그룹만. YouTube 후보는 YoutubeOnly에서 따로
-  const rest = entries.filter((e) => e.v.status !== "rising" && !e.youtube && !e.trending).map((e) => e.v);
   return (
-    <div className="space-y-5">
-      <section aria-labelledby="trend-rising-title" className="space-y-3">
-        <div>
-          <p className="panel-title">지금 뜨는 소재</p>
-          <h2 id="trend-rising-title" className="mt-1 text-lg font-bold text-ink-900">{headline ?? `급상승 ${rising.length}개`}</h2>
-          <p className="mt-1 text-xs text-ink-500">급상승은 늘어난 배수만이 아니라, 그 키워드가 평소에 얼마나 오르내리는지와 비교해서 정해요.</p>
-        </div>
-        {rising.length === 0 ? (
-          <Empty>이번 판정 구간에 급상승한 키워드 그룹이 없어요.</Empty>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {rising.map((e, i) => <RisingCard key={`${e.youtube ? "yt" : e.trending ? "tr" : "kw"}-${e.v.group_name}`} v={e.v} youtube={e.youtube} trending={e.trending} aliases={e.aliases} autoGrouped={e.autoGrouped} risingNames={e.risingNames} rank={i + 1} />)}
-          </div>
-        )}
-        {rising.length > 0 && <p className="text-xs text-ink-500">마케팅에 소재로 보내기: {SEND_TO_MARKETING_BLOCKED}</p>}
-      </section>
-
-      <YoutubeOnly cands={cands} />
-      <TrendingOnly cands={cands} />
-
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <Panel id="data-trend-rest" title="평소 수준 · 판정 불가">
-            {rest.length === 0 ? <Empty>평소 수준이거나 판정 불가인 그룹이 없어요.</Empty> : (
-              <ul className="divide-y divide-ink-100">
-                {rest.map((v) => (
-                  <li key={v.group_name} className="flex flex-wrap items-center gap-3 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-ink-900">{v.group_name}</p>
-                      <p className="text-xs text-ink-500">{restLine(v)}</p>
-                    </div>
-                    {v.status === "normal" && <span className="text-sm text-ink-500">평소 대비 {fixed(v.ratio) ?? "-"}배</span>}
-                    <Chip label={v.status === "unknown" ? "판정 불가" : "평범"} tone={v.status === "unknown" ? TONE.warn : TONE.ok} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Panel>
-        </div>
-        <Panel id="data-trend-method" title="판정 방법">
-          <div className="space-y-2 text-sm leading-relaxed text-ink-700">
-            <p>네이버 검색량을 <b>직전 56일의 평소 범위</b>와 비교합니다. 마지막 7일 안에서 이어진 날들이 평소 흔들림보다 크게 벗어나면 급상승입니다.</p>
-            <p>그래서 평소에 아주 일정한 키워드는 작은 배수도 급상승이 되고, 원래 크게 오르내리는 키워드는 큰 배수도 평소 수준일 수 있어요.</p>
-            <p>값은 검색 건수가 아니라 그룹마다 따로 받은 상대값(그 요청의 최댓값 = 100)이라, 같은 그룹 안에서만 비교합니다. 계절 반복은 구분하지 않습니다.</p>
-            <p>자료가 없거나 기준선에 값이 있는 날이 모자라면 평범이 아니라 <b>판정 불가</b>와 이유를 보여 줍니다.</p>
-            <p className="text-xs text-ink-500">계산은 서버 코드가 하고, 문장만 AI가 씁니다. 기준값과 평가 결과: backend/domains/data/README.md "trend_scan".</p>
-          </div>
-        </Panel>
+    <section aria-labelledby="trend-rising-title" className="card space-y-2 p-4 sm:p-5">
+      <div>
+        <p className="panel-title">지금 뜨는 소재</p>
+        <h2 id="trend-rising-title" className="mt-1 text-lg font-bold text-ink-900">{headline ?? `급상승 ${rising.length}개`}</h2>
       </div>
-    </div>
+      {rising.length === 0 ? (
+        <Empty>이번 판정 구간에 급상승한 키워드 그룹이 없어요.</Empty>
+      ) : (
+        <ol className="divide-y divide-ink-100">
+          {rising.map((e, i) => <RisingRow key={`${e.youtube ? "yt" : e.trending ? "tr" : "kw"}-${e.v.group_name}`} v={e.v} rank={i + 1} />)}
+        </ol>
+      )}
+      {rising.length > 0 && <p className="text-xs text-ink-500">마케팅에 소재로 보내기: {SEND_TO_MARKETING_BLOCKED}</p>}
+    </section>
   );
 }
-
-/** 1단계 보기 전환. 월별 흐름은 trend_history(판정 없음), 계절 패턴은 서버 판정이 없어 준비 중 */
-type DetectView = "now" | "monthly" | "seasonal";
-const DETECT_VIEWS: { id: DetectView; label: string; todo?: string }[] = [
-  { id: "now", label: "지금 급상승" },
-  { id: "monthly", label: "월별 흐름" },
-  { id: "seasonal", label: "계절 패턴", todo: "작년 같은 시기와 비교한 계절 반복 판정 (평가 케이스 먼저 만들고 그다음 판정)" },
-];
 
 // ------------------------------------------------------------------- 준비 중 하위 탭 (2·3·5)
 
@@ -416,10 +160,6 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
     navigate({ search: location.search, hash: trendHash(s) }, { replace: true });
   }, [navigate, location.search]);
 
-  const [view, setView] = useState<DetectView>("now");
-  // 월별 흐름은 처음 열 때 부르고, 다른 보기로 갔다 와도 결과가 남게 숨기기만 한다
-  const [monthlyOpened, setMonthlyOpened] = useState(false);
-  useEffect(() => { if (view === "monthly") setMonthlyOpened(true); }, [view]);
   const [text, setText] = useState("");
   const [groups, setGroups] = useState<string[]>([]);
   const [inputError, setInputError] = useState<string | null>(null);
@@ -534,12 +274,11 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
       ) : (
         <>
           {res.error && <ErrorBox message={`새로 판정하지 못해 이전 결과를 보여 줍니다. ${res.error}`} onRetry={res.reload} />}
-          {out && <Result entries={entries} headline={headline} cands={cands} />}
+          {out && <Result entries={entries} headline={headline} />}
         </>
       )}
     </div>
   );
-  const detectView = DETECT_VIEWS.find((d) => d.id === view) ?? DETECT_VIEWS[0];
 
   return (
     <div className="space-y-5">
@@ -562,23 +301,7 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
             <div className="space-y-5">
               {/* 지금 인기 (trend_popular): 급상승 판정과 별개. 1단계 맨 위, 급상승 화면은 아래 */}
               <TrendPopular />
-              <div role="group" aria-label="보기 전환" className="flex flex-wrap gap-1.5">
-                {DETECT_VIEWS.map((d) => (
-                  <button key={d.id} type="button" aria-pressed={view === d.id} onClick={() => setView(d.id)}
-                    className={view === d.id ? "btn-primary" : "btn-ghost"}>
-                    {d.label}
-                  </button>
-                ))}
-              </div>
-              {monthlyOpened && <div hidden={view !== "monthly"}><TrendHistory /></div>}
-              {view === "now" ? detect : view === "monthly" ? null : (
-                <Panel id={`data-trend-${detectView.id}`} title={detectView.label} tools={<PreparingChip />}>
-                  <div className="space-y-2 text-sm leading-relaxed text-ink-700">
-                    <p><b className="text-ink-900">할 일</b> · {detectView.todo}</p>
-                    <p className="text-xs text-ink-500">서버 기능이 아직 없어서 숫자를 보여 주지 않아요.</p>
-                  </div>
-                </Panel>
-              )}
+              {detect}
               {/* YouTube 지금 속도: 판정 없이 보여 주기 (youtube_velocity). 보기와 상관없이 1단계 아래에 */}
               <YoutubeVelocity />
             </div>

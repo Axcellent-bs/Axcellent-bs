@@ -5,6 +5,7 @@ import { DATA_SERVER, UNKNOWN, dataAi, kpiLive, type YouTubeVelocityOutput, type
 // 트렌드 1단계 아래 "YouTube 지금 빨리 크는 영상": 데이터 AI(8106) youtube_velocity 출력을 그대로 보여 준다.
 // - 판정하지 않는다(평소 속도 기준이 아직 없음). "급상승" 같은 판정 말을 쓰지 않고 지금 속도 큰 순서만 보여 준다
 // - 지금 속도 = 최근 두 스냅샷 사이 시간당 조회 증가. 빨라졌는지는 그 전 구간과 비교(서버 값)
+// - 영상은 제목(+채널)으로 보여 준다. 제목이 없는 예전 응답은 영상 ID
 // - 숫자 칸이 빠진 영상(좋아요 숨김 등)은 서버가 비워 두고 화면은 "-"로 보여 준다(0 아님)
 // - 스냅샷 DB만 읽어서 외부 호출이 없다. 트렌드 탭을 열 때 한 번 + "다시 보기"
 
@@ -20,8 +21,9 @@ function Row({ v, rank }: { v: YouTubeVideoVelocity; rank: number }) {
       <div className="min-w-0 flex-1 space-y-1">
         <a className="font-semibold text-brand-700 underline-offset-2 hover:underline" href={`https://www.youtube.com/watch?v=${encodeURIComponent(v.video_id)}`}
           target="_blank" rel="noreferrer noopener">
-          영상 {v.video_id}
+          {v.title || `영상 ${v.video_id}`}
         </a>
+        {v.channel_title && <p className="text-xs text-ink-700">{v.channel_title}</p>}
         <p className="text-xs text-ink-500">
           조회 {num(v.views)} · 좋아요 {num(v.likes)} · 댓글 {num(v.comments)}
           {v.popular_rank != null ? ` · 인기 목록 ${v.popular_rank}위` : ""}
