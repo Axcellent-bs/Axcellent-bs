@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -33,6 +34,8 @@ from pydantic import BaseModel, ValidationError
 from ax_agent_template import llm_usage
 from ax_agent_template.config import env_prefix
 from ax_contracts.schemas import TENANT_ID_DEFAULT
+
+logger = logging.getLogger("ax.llm")
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -114,6 +117,13 @@ def validate_images(images: list[ImageInput] | None) -> list[ImageInput]:
     return items
 
 
+def _same_url(a: str | None, b: str | None) -> bool:
+    """끝 `/`만 다른 주소는 같은 주소로 본다. 어느 한쪽이 없으면 다르다."""
+    if not a or not b:
+        return False
+    return a.strip().rstrip("/") == b.strip().rstrip("/")
+
+
 @dataclass(frozen=True)
 class LLMSettings:
     model: str | None = None
@@ -130,9 +140,27 @@ class LLMSettings:
         return self.embed_base_url or self.base_url
 
     @property
+    def embed_key_missing(self) -> bool:
+        """임베딩 주소가 LLM 주소와 다른데 임베딩 키가 없고, 대신 보낼 LLM 키만 있는 경우.
+
+        이때 LLM 키를 다른 주소로 보내지 않는다(`embed()`가 설정 오류로 실패한다).
+        LLM 키도 없으면 보낼 키가 없어 새는 것이 없으니 키 없이 부른다(키가 필요 없는 주소).
+        """
+        if self.embed_api_key or not self.api_key or not self.embed_base_url:
+            return False
+        return not _same_url(self.embed_base_url, self.base_url)
+
+    @property
     def embed_key(self) -> str | None:
-        """임베딩 요청 키: 임베딩 전용 키, 없으면 LLM 키."""
-        return self.embed_api_key or self.api_key
+        """임베딩 요청 키: 임베딩 전용 키, 없으면 LLM 키.
+
+        단 임베딩 주소가 LLM 주소와 다르면 LLM 키를 쓰지 않는다(None).
+        """
+        if self.embed_api_key:
+            return self.embed_api_key
+        if self.embed_base_url and not _same_url(self.embed_base_url, self.base_url):
+            return None
+        return self.api_key
 
     @classmethod
     def from_env(cls, dept: str, env: Mapping[str, str] | None = None) -> LLMSettings:
@@ -365,7 +393,8 @@ class LLMClient:
 
         모델은 `<부서>_EMBED_MODEL`(없으면 `EMBED_MODEL`). 주소·키는
         `<부서>_EMBED_BASE_URL`·`<부서>_EMBED_API_KEY`(없으면 `EMBED_BASE_URL`·`EMBED_API_KEY`),
-        그것도 없으면 LLM 설정을 쓴다.
+        그것도 없으면 LLM 설정을 쓴다. 임베딩 주소가 LLM 주소와 다른데 임베딩 키가 없으면 LLM 키를
+        그 주소로 보내지 않고 `LLMNotConfiguredError`로 실패한다(요청을 보내지 않는다).
         호출 사용량은 `context_id`가 없어도 LLM 사용량 저장소에 남긴다.
         """
         if not self.settings.embed_model:
@@ -376,6 +405,17 @@ class LLMClient:
         if not base_url:
             raise LLMNotConfiguredError(
                 f"{env_prefix(self.dept)}_LLM_BASE_URL 또는 LLM_BASE_URL이 없다"
+            )
+        if self.settings.embed_key_missing:
+            prefix = env_prefix(self.dept)
+            # 빠진 이름만 남긴다. 주소·키 값은 남기지 않는다
+            logger.warning(
+                "임베딩 주소가 LLM 주소와 다른데 %s_EMBED_API_KEY 또는 EMBED_API_KEY가 없어 "
+                "LLM 키를 보내지 않고 임베딩을 멈춘다",
+                prefix,
+            )
+            raise LLMNotConfiguredError(
+                f"임베딩 주소가 LLM 주소와 다르다: {prefix}_EMBED_API_KEY 또는 EMBED_API_KEY가 없다"
             )
         if not texts:
             return []
