@@ -44,10 +44,10 @@ const TAB_LABEL: Record<FinanceTab, string> = {
 const KPI: { key: keyof FinanceKpis; label: string; hint: string }[] = [
   { key: "gmv", label: "총거래액", hint: "고객이 결제한 금액 전체" },
   { key: "commission_revenue", label: "판매 수수료 매출", hint: "판매자에게 받는 수수료. 회사의 매출" },
-  { key: "refund_total", label: "환불", hint: "고객에게 돌려준 돈" },
+  { key: "refund_total", label: "환불", hint: "고객에게 돌려준 돈. 판매자 정산에서 차감" },
   { key: "coupon_cost", label: "쿠폰 비용", hint: "회사가 부담한 쿠폰 할인" },
   { key: "pg_fee", label: "PG 수수료", hint: "결제대행사에 내는 수수료" },
-  { key: "net_result", label: "영업 결과", hint: "수수료 매출에서 비용을 뺀 값" },
+  { key: "net_result", label: "영업 결과", hint: "판매 수수료 매출에서 쿠폰 비용과 PG 수수료를 뺀 값" },
 ];
 
 /** 실제 데이터 / 예시 데이터 전환. 기획·개발, 사람 할 일함 화면과 같은 방식으로 브라우저에 기억하고 화면을 다시 읽는다 */

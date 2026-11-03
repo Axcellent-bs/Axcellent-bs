@@ -32,8 +32,10 @@ LABELS = {
 }
 RATE_CODES = {"take_rate"}
 COUNT_CODES = {"order_count"}
-# 늘어나면 나쁜 줄 (설명에서 "늘어 이익을 줄였다"로 쓴다)
-COST_CODES = {"coupon_cost", "pg_fee", "refund_total"}
+# 영업 결과에서 빼는 비용 (설명에서 "늘어 영업 결과를 줄였다"로 쓴다)
+COST_CODES = {"coupon_cost", "pg_fee"}
+# 환불은 판매자 정산에서 차감되고 영업 결과에서는 빼지 않는다 (`closing.Totals.net_result`)
+REFUND_NOTE = " 판매자 정산에서 차감되어 영업 결과에는 들어가지 않습니다."
 # 쿠폰·환불은 금액만 적는다. 크게 움직였다고 표시하거나 설명하지 않는다
 NOT_FLAGGED = {"coupon_cost", "refund_total"}
 
@@ -120,6 +122,8 @@ def _sentence(code: str, cur: Any, prev: Any, diff: Any, pct: float | None) -> s
             if diff > 0
             else " 비용이 줄어 영업 결과를 늘렸습니다."
         )
+    elif code == "refund_total":
+        tail = REFUND_NOTE
     return f"{label} {unit(abs(diff))}{rate} {way}습니다 ({unit(prev)} → {unit(cur)}).{tail}"
 
 

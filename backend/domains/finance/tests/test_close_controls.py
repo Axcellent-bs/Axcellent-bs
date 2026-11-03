@@ -247,3 +247,13 @@ def test_close_control_apis_and_todo() -> None:
     todo = client.get("/api/finance/overview").json()["data"]["todo"]
     late = next(t for t in todo if t["kind"] == "settlement_deadline")
     assert late["link"] == "settlements" and late["items"]
+
+
+def test_variance_summary_says_refunds_do_not_change_the_operating_result() -> None:
+    """환불은 영업 결과에서 빼지 않는다. 비용처럼 설명하지 않는다."""
+    from finance_agent import variance as variance_module
+
+    refund = variance_module._sentence("refund_total", 228500, 163000, 65500, 0.4)
+    assert "판매자 정산에서 차감" in refund and "영업 결과를 줄였" not in refund
+    pg = variance_module._sentence("pg_fee", 3282950, 1376449, 1906501, 1.39)
+    assert "비용이 늘어 영업 결과를 줄였습니다" in pg
