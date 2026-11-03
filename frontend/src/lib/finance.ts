@@ -189,7 +189,7 @@ export interface Cashflow {
 export interface CloseItem { key: string; label: string; status: "done" | "pending" | "unknown"; detail: string; link: string }
 export interface CloseChecklist { month: string; items: CloseItem[]; done: number; total: number; ready: boolean; closed: boolean }
 
-// ---------------------------------------------------------------- ⑤ 팀 예산 (인사 ↔ 재무)
+// ---------------------------------------------------------------- ④ 팀 예산 (인사 ↔ 재무)
 export interface TeamBudgetRow { team: string; headcount: number; budget: number; prev_headcount: number | null; prev_budget: number | null; change: number | null }
 export interface TeamBudgetApproval { month: string; per_head_monthly: number; total: number; signature: string; by: string; at: string; note: string | null; rows: { team: string; headcount: number; budget: number }[] }
 export interface TeamBudget {
@@ -212,7 +212,7 @@ export interface TeamBudget {
   actual_spend: null;
 }
 
-// ---------------------------------------------------------------- ⑥ 세무 지원
+// ---------------------------------------------------------------- ⑤ 세무 지원
 export interface VatRow { code: string; label: string; supply: number; vat: number }
 export interface VatPack {
   quarter: string;
@@ -531,8 +531,8 @@ export const finance = {
   vat: (date?: string | null) => fin<Envelope<VatPack>>(`/api/finance/tax/vat${query({ date })}`),
   /** 판매자별 판매 명세 (부가세법 제75조 초안) */
   sellerReport: (date?: string | null) => fin<Envelope<SellerReport>>(`/api/finance/tax/seller-report${query({ date })}`),
-  downloadSellerReport: (date?: string | null) =>
-    download(`/api/finance/tax/seller-report${query({ date, format: "csv" })}`, "seller-sales.csv"),
+  downloadSellerReport: (format: "csv" | "xlsx", date?: string | null) =>
+    download(`/api/finance/tax/seller-report${query({ date, format })}`, `seller-sales.${format}`),
   /** 월간 변동 분석 (지난달·작년 같은 달 대비) */
   variance: (date?: string | null) => fin<Envelope<Variance>>(`/api/finance/variance${query({ date })}`),
   /** 팀 예산 (인사 팀 인원 × 인당 월 단가). month 생략 = 이번 달 */
@@ -598,9 +598,12 @@ export function withUnit(n: number | null | undefined, unit: string): string {
 /** 사용률 막대 폭 (0~100). 값이 없으면 0 */
 export const barWidth = (ratio: number | null | undefined) => (ratio == null || !Number.isFinite(ratio) ? 0 : Math.max(0, Math.min(100, ratio * 100)));
 
-/** 화면에 기본으로 보여 줄 대사 상태: 일치(matched)는 숨긴다 */
+/** 분류 코드 → 이름 */
+export const CATEGORY_KO: Record<string, string> = { book: "도서", books: "도서", stationery: "문구", ebook: "전자책", ebooks: "전자책", goods: "굿즈" };
+
+/** 화면에 기본으로 보여 줄 대사 상태: 사람이 볼 불일치만. 정산 전·일치는 누르면 보인다 */
 export const RECON_ORDER: ReconStatus[] = ["mismatch", "missing_in_pg", "fee_anomaly", "pending", "matched"];
-export const DEFAULT_RECON_FILTER: ReconStatus[] = RECON_ORDER.filter((s) => s !== "matched");
+export const DEFAULT_RECON_FILTER: ReconStatus[] = RECON_ORDER.filter((s) => s !== "matched" && s !== "pending");
 
 /** 지급 준비된(보류 없는) 판매자 정산금 합계. 값이 없는 판매자가 있으면 null */
 export function readyPayout(statements: SellerStatement[]): number | null {

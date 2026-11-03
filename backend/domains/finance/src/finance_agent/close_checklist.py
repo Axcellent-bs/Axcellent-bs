@@ -70,7 +70,7 @@ def checklist(
             "reconciliation",
             "매출·PG 대사 메모",
             open_recon == 0,
-            f"메모 없는 불일치 {open_recon}건",
+            f"이 달 메모 없는 불일치 {open_recon}건",
             "reconciliation",
         )
     )

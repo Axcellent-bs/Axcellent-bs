@@ -65,6 +65,8 @@ async def incident_view(
     info = await incident_info(context_id)  # 실제 모드 구간은 총괄 사건 목록에서 (읽기 전용)
     impact: Impact | None = await incident_impact(context_id, info=info)
     rows, ledger_source = await compensation_ledger(context_id, feed)
+    if rows is not None and books is not None:
+        rows = lg.fill_buyers(rows, books.coupons, context_id)
     # 근사 구간(AI 처리 시각)의 영향 고객 목록으로는 환불을 사건에 묶지 않는다
     # (앞부분 고객이 빠질 수 있다)
     exact = impact is not None and impact.window_exact

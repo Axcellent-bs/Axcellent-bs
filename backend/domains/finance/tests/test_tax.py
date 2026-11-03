@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
 from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 
 from finance_agent import finance_config as fc
 from finance_agent import handlers, tax
@@ -126,3 +128,18 @@ def test_tax_apis() -> None:
         and 'filename="seller-sales-2026-10.csv"' in res.headers["content-disposition"]
     )
     assert client.get("/api/finance/tax/seller-report", params={"format": "pdf"}).status_code == 400
+
+
+def test_seller_report_xlsx_has_the_same_table_with_real_numbers() -> None:
+    client = TestClient(app)
+    res = client.get("/api/finance/tax/seller-report", params={"format": "xlsx"})
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("application/vnd.openxmlformats")
+    assert '.xlsx"' in res.headers["content-disposition"]
+    report = client.get("/api/finance/tax/seller-report").json()["data"]
+    ws = load_workbook(io.BytesIO(res.content)).active
+    assert ws["A1"].value == "판매자번호"
+    assert report["rows"], "시드에 판매자 명세가 있어야 한다"
+    first = report["rows"][0]
+    assert ws["A2"].value == first["seller_id"] and ws["F2"].value == first["total"]
+    assert isinstance(ws["F2"].value, int)

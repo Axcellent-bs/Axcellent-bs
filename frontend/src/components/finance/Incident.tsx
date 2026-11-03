@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { Link } from "react-router";
 import { humanId, shortDateTime } from "@/lib/format";
 import {
-  finance, incidentName, krw, ledgerSourceKo, purposeKo, sortIncidents,
+  CATEGORY_KO, finance, incidentName, krw, ledgerSourceKo, purposeKo, sortIncidents,
   type IncidentDetail, type IncidentSummary,
 } from "@/lib/finance";
 import { Empty, ErrorBox, MetaLine, MockBadge, RefList, ResourceBody, Waiting, useResource, type Resource } from "./bits";
@@ -11,7 +11,6 @@ import { Empty, ErrorBox, MetaLine, MockBadge, RefList, ResourceBody, Waiting, u
 // 재무가 하는 일: 끝난 쿠폰·환불 금액을 사건별 장부에 적기.
 // 숫자는 서버 값을 그대로 보여 준다.
 
-const CATEGORY_KO: Record<string, string> = { book: "도서", books: "도서", stationery: "문구", ebook: "전자책", ebooks: "전자책", goods: "굿즈" };
 const count = (n: number | null | undefined, unit: string) => (n == null ? "확인할 수 없음" : `${n.toLocaleString("ko-KR")}${unit}`);
 
 // ---------------------------------------------------------------- 사건 고르기 (탭 + 이전 사건 목록)
@@ -145,7 +144,7 @@ function Cards({ d }: { d: IncidentDetail }) {
             )}
             <p className="text-[11px] text-ink-500">재무는 이 숫자를 다시 계산하지 않습니다.{impact.collected_at && ` ${shortDateTime(impact.collected_at)} 분석`}</p>
           </>
-        ) : <p className="text-ink-500">데이터 AI의 영향 분석을 아직 받지 못했습니다.</p>}
+        ) : <p className="text-ink-500">{d.window ? "데이터 AI의 영향 분석을 아직 받지 못했습니다." : "장애 구간을 몰라 계산하지 못했습니다. 총괄 AI의 사건 기록은 서버를 다시 켜면 비워집니다."}</p>}
       </Card>
 
       <Card title="보상으로 나간 돈 (장부)" value={krw(c.total_executed)}>
@@ -205,8 +204,7 @@ function Recipients({ d }: { d: IncidentDetail }) {
       ) : <div className="mt-2"><Empty>이 사건으로 나간 보상 쿠폰이 아직 없습니다.</Empty></div>}
       {noCustomer > 0 && (
         <p className="mt-2 text-xs leading-relaxed text-ink-500">
-          "고객 정보 없음" {noCustomer}건: 쿠폰 지급 기록에 고객 번호가 남지 않은 줄입니다. 금액은 지급 기록 그대로입니다.
-          누가 받았는지는 <Link to="/support" className="underline hover:text-ink-700">고객지원 AI</Link> 화면의 장애 대응에서 확인합니다.
+          "고객 정보 없음" {noCustomer}건: 안전 장치와 쇼핑몰 기록에서 고객 번호를 찾지 못한 줄입니다. 금액은 지급 기록 그대로입니다.
         </p>
       )}
     </div>

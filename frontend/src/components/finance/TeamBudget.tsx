@@ -3,7 +3,7 @@ import { PreparingChip } from "@/components/Preparing";
 import { finance, humanTokenSet, krw, plainText, signedKrw, todayKst, type TeamBudget } from "@/lib/finance";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
-// ⑤ 팀 예산 (인사 ↔ 재무, 2026-11-02 #2-재무 합의).
+// ④ 팀 예산 (인사 ↔ 재무, 2026-11-02 #2-재무 합의).
 // 팀 예산 = 그달 1일 팀 인원(인사 AI) × 인당 월 단가(회사 설정). 발령은 다음 달 1일부터, 파견은 세지 않는다.
 // 재무 AI는 계산과 지난달 대비 증감만 보여 주고, 확정은 재무 담당(사람)이 누른다.
 

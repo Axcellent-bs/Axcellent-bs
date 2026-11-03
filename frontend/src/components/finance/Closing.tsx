@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { shortDateTime } from "@/lib/format";
 import { finance, humanTokenSet, krw, plainText, signedKrw, type ClosingPeriod, type ClosingReport } from "@/lib/finance";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
@@ -7,10 +7,21 @@ import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
 const toMonth = (date: string) => date.slice(0, 7);
 
-export function ClosingSection({ tick, onChanged }: { tick: number; onChanged: () => void }) {
+export function ClosingSection({ tick, onChanged, focus }: {
+  tick: number;
+  onChanged: () => void;
+  /** 할 일에서 "숫자 보기"로 온 날짜. 누를 때마다 새 객체라 같은 날짜도 다시 연다 */
+  focus?: { date: string } | null;
+}) {
   const [period, setPeriod] = useState<ClosingPeriod>("day");
   /** 비어 있으면 서버 기본값(오늘·이번 달) */
-  const [date, setDate] = useState("");
+  const [date, setDate] = useState(focus?.date ?? "");
+  useEffect(() => {
+    if (focus) {
+      setPeriod("day");
+      setDate(focus.date);
+    }
+  }, [focus]);
   const res = useResource(`${period}:${date}`, () => finance.closing(period, date || null), tick);
   const [confirming, setConfirming] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);

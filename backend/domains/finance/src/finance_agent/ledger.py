@@ -173,6 +173,27 @@ def merge(
     return None, None
 
 
+def fill_buyers(
+    rows: list[dict[str, Any]], coupons: list[dict[str, Any]], context_id: str
+) -> list[dict[str, Any]]:
+    """고객 번호가 빈 줄을 쇼핑몰 쿠폰 기록으로 채운다. 같은 사건의 같은 쿠폰만 쓴다.
+
+    쿠폰 이벤트에는 고객 번호가 없고, 안전 서비스 실행 기록은 재시작하면 비워진다.
+    쇼핑몰이 초기화되면 쿠폰 번호가 다시 쓰이므로 사건까지 맞아야 믿는다.
+    """
+    buyers = {
+        c.get("coupon_id"): c.get("buyer_id")
+        for c in coupons
+        if c.get("context_id") == context_id and c.get("buyer_id")
+    }
+    return [
+        r | {"buyer_id": buyers[r.get("coupon_id")]}
+        if not r.get("buyer_id") and r.get("coupon_id") in buyers
+        else r
+        for r in rows
+    ]
+
+
 def totals(rows: list[dict[str, Any]]) -> dict[str, int]:
     """나간 금액 합계. 장 수는 줄의 `count` 합(없으면 1장)."""
     return {
