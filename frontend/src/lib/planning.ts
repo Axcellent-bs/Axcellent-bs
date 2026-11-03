@@ -280,6 +280,8 @@ export interface CodingSettings {
   run_max_calls?: number // 코딩 실행 한 번의 LLM 호출 한도
   run_max_tokens?: number // 코딩 실행 한 번의 토큰 한도
   estimate?: CodingEstimate // 대기 작업 예상 규모 (지난 서버 AI 코딩의 중앙값)
+  models?: Partial<Record<CodingStep, string>> // 서버 AI 단계별 모델 (비운 단계는 기본 모델)
+  model_default?: string | null
 }
 // 토큰 한도 (비율 표시용). 한 번 읽어 화면들이 같이 쓴다. 못 읽으면 서버 기본값
 export interface CodingEstimate { samples: number; tokens: number; tokens_max: number; calls: number; files: number }
@@ -314,9 +316,11 @@ export function useMe(): Me | null {
   return v
 }
 
+export type CodingStep = 'plan' | 'write' | 'review'
 export const codingSettingsApi = (base: string) => ({
   get: () => call<CodingSettings>(base, '/coding-settings'),
   set: (mode: CodingSetting) => call<CodingSettings>(base, '/coding-settings', post({ mode }, 'admin')),
+  setModels: (models: Partial<Record<CodingStep, string>>) => call<CodingSettings>(base, '/coding-settings', post({ models }, 'admin')),
 })
 
 // ---- 직접 개발 (dev 서비스 `/api/planning/dev-tasks`). 개발팀이 기획을 바로 넣으면 코딩 에이전트가 PR까지 만든다

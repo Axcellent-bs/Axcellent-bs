@@ -512,6 +512,8 @@ class State(DomainModel):
     # 개발: 넘겨받은 요청 작업을 누가 코딩하나 (회사 설정). auto = 본인 Claude(MCP) 연결한 개발자가
     # 있으면 내 Claude, 없으면 서버 AI(체험 한도 안에서)
     coding_mode: Literal["auto", "agent", "subscription"] = "auto"
+    # 서버 AI 코딩 단계별 모델 (plan 파일 고르기 · write 쓰기 · review 리뷰). 비우면 기본 모델
+    coding_models: dict[str, str] = Field(default_factory=dict)
     # 개발: 본인 Claude(MCP 작업 대기열)로 작업을 본 개발자 → 마지막으로 본 시각 (연결 여부 판단)
     agents_seen: dict[str, UtcDatetime] = Field(default_factory=dict)
 

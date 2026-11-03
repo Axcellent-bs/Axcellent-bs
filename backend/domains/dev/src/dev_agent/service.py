@@ -907,6 +907,31 @@ class DevService(PlanningCore):
                 self._act(self.clock(), ctx, "dev", "dev", "dev_task_create", "A2A", text, "A")
             )
 
+    async def set_coding_models(self, models: dict[str, Any]) -> ActionResult:
+        """회사 설정: 서버 AI 코딩 단계별 모델 (관리자). 빈 값이면 그 단계는 기본 모델."""
+        bad = [k for k in models if k not in coder.STEPS]
+        if bad:
+            raise ActionError("INVALID_INPUT", f"단계는 {', '.join(coder.STEPS)} 중 하나다: {bad}")
+        clean: dict[str, str] = {}
+        for k, v in models.items():
+            name = str(v or "").strip()
+            if len(name) > 100 or any(ch.isspace() for ch in name):
+                raise ActionError("INVALID_INPUT", f"{k} 모델 이름이 올바르지 않다")
+            if name:
+                clean[k] = name
+
+        async def run(s: State) -> ActionResult:
+            if s.coding_models != clean:
+                shown = ", ".join(f"{k}={v}" for k, v in clean.items()) or "모두 기본 모델"
+                s.coding_models = clean
+                s.activity.append(
+                    self._act(self.clock(), "dev_settings", "human", "dev", "dev.settings", "사람",
+                              f"코딩 단계별 모델 → {shown}")
+                )  # fmt: skip
+            return ActionResult(output=self.coding_settings(s))
+
+        return await self._apply(run)
+
     async def set_coding_mode(self, mode: str) -> ActionResult:
         """회사 설정: 넘겨받은 요청 작업을 누가 코딩하나 (auto·agent·subscription, 관리자)."""
         if mode not in ("auto", "agent", "subscription"):
@@ -1005,6 +1030,9 @@ class DevService(PlanningCore):
             # 코딩 실행 한 번의 한도 (화면이 작업마다 쓴 양을 비율로 보여 준다)
             "run_max_calls": coder.limit("PLANNING_CODER_MAX_CALLS", coder.RUN_MAX_CALLS),
             "run_max_tokens": coder.limit("PLANNING_CODER_MAX_TOKENS", coder.RUN_MAX_TOKENS),
+            # 서버 AI 단계별 모델 (plan·write·review). 비운 단계는 기본 모델 `model_default`
+            "models": coder.step_models(s.coding_models),
+            "model_default": coder.model_name(coder.get_llm()),
             # 대기 중인 작업에 보여 줄 예상 규모 (지난 서버 AI 코딩의 중앙값)
             "estimate": self.coding_estimate(s),
         }

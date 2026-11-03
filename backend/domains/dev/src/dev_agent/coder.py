@@ -22,7 +22,7 @@ import os
 import re
 from collections.abc import Awaitable
 from contextvars import ContextVar
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
@@ -504,9 +504,54 @@ def pr_body(job: Job, rows: list[CodingFile], summary: str) -> str:
 # ---------------------------------------------------------------- LLM·형상관리 부르기
 
 
+# ---------------------------------------------------------------- 단계별 모델
+
+STEPS = ("plan", "write", "review")  # 파일 고르기 · 쓰기(다시 쓰기·수정 포함) · 리뷰
+_models: ContextVar[dict[str, str] | None] = ContextVar("coder_models", default=None)
+_step_clients: dict[str, Any] = {}
+
+
+def step_of(step: str) -> str:
+    """`_ask`의 단계 이름 → 모델을 고르는 단계 묶음."""
+    if step.startswith(("후보 고르기", "파일 확정")):
+        return "plan"
+    if "리뷰" in step:
+        return "review"
+    return "write"
+
+
+def step_models(saved: dict[str, str] | None = None) -> dict[str, str]:
+    """단계별 모델: 회사 설정(화면) → 환경변수 `PLANNING_CODER_MODEL_<단계>` 순서.
+
+    정하지 않은 단계는 뺀다 (기본 모델)."""
+    out: dict[str, str] = {}
+    for st in STEPS:
+        env = os.getenv(f"PLANNING_CODER_MODEL_{st.upper()}")
+        name = ((saved or {}).get(st) or env or "").strip()
+        if name:
+            out[st] = name
+    return out
+
+
+def _client_for(llm: Any, step: str) -> Any:
+    """이 단계에 정한 모델이 있으면 같은 주소·키로 그 모델을 쓰는 클라이언트 (없으면 그대로)."""
+    name = (_models.get() or {}).get(step_of(step))
+    settings = getattr(llm, "settings", None)
+    if not name or not isinstance(llm, LLMClient) or settings is None or settings.model == name:
+        return llm
+    hit = _step_clients.get(name)
+    if hit is None or hit.settings.base_url != settings.base_url:
+        hit = MeteredLLM(
+            "planning", settings=replace(settings, model=name), timeout=LLM_HTTP_TIMEOUT_SECONDS
+        )
+        _step_clients[name] = hit
+    return hit
+
+
 async def _ask[T: BaseModel](
     llm: Any, step: str, prompt: str, schema: type[T], data: dict, ctx: str
 ) -> T:
+    llm = _client_for(llm, step)
     m = _meter.get()
     if m is not None:
         over = budget_over(m)
@@ -830,6 +875,7 @@ async def run(svc: DevService, job: Job) -> None:
     cr = task.coding if task else None
     meter = Meter(cr.llm_calls, cr.llm_tokens) if cr else Meter()
     _meter.set(meter)  # 이 실행(asyncio 작업) 안에서만 보인다
+    _models.set(step_models(svc.state.coding_models))  # 단계별 모델 (이 실행 동안 고정)
     try:
         try:
             await _run(svc, job)
