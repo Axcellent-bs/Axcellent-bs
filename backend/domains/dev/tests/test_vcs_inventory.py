@@ -134,3 +134,29 @@ def test_inventory_api_lists_checks_and_forgets() -> None:
     assert rows[0]["status"] == "hosted" and rows[0]["checked_at"]
     c.post("/api/planning/vcs/connections/conn-1/delete")
     assert c.get("/api/planning/vcs/inventory").json()["data"] == []
+
+
+def test_other_connection_kind_registers_and_is_judged(monkeypatch: pytest.MonkeyPatch) -> None:
+    """배포 도구 같은 다른 연결 종류도 같은 인터페이스로 대장에 들어온다."""
+    monkeypatch.setenv("PLANNING_VCS_MIN_VERSIONS", "jenkins=2.462.3")
+
+    async def probe() -> vcs.base.ServerInfo:
+        return vcs.base.ServerInfo(product="jenkins", hosted=False, version="2.440.1")
+
+    inventory.register_source(
+        "deploy",
+        lambda: [
+            inventory.Target(
+                id="dep-1", category="deploy", name="ci.acme.local", kind="jenkins", probe=probe
+            )
+        ],
+    )
+    try:
+        e = _check("dep-1")
+        assert (e.category, e.status, e.min_version, e.policy_source) == (
+            "deploy", "outdated", "2.462.3", "env",
+        )  # fmt: skip
+        assert [r["connection_id"] for r in inventory.entries()] == ["dep-1"]
+    finally:
+        inventory.unregister_source("deploy")
+    assert inventory.entries() == []

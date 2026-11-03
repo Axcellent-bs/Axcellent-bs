@@ -19,7 +19,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from ax_agent_template import config as template_config
-from ax_contracts.schemas import TENANT_ID_DEFAULT
+from ax_contracts.schemas import TENANT_ID_DEFAULT, ExecuteDecision
 from ax_contracts.schemas.planning import (
     DevResultInput,
     ReceiveReleaseOrderInput,
@@ -105,6 +105,7 @@ from ax_workflow.trace import changed_paths_for
 from dev_agent import coder, cross_check, repo_routing, vcs, vcs_bridge
 from dev_agent.cross_check import CrossChecker, CrossEvidence
 from dev_agent.deploy_store import get_deploy_store
+from dev_agent.external_actions import MOCK_CONNECTION, VCS_WRITE_ACTIONS
 from dev_agent.vcs.base import VcsError
 
 MAX_INSTRUCTION_CHARS = 1000  # 사람 수정 지시 길이
@@ -162,6 +163,53 @@ class DevService(PlanningCore):
             return
         self._sending.add(task)
         task.add_done_callback(self._sending.discard)
+
+    # ---- 외부 연결 쓰기 액션: 관문에 연결 id를 싣는다 (external_actions.py)
+
+    async def _execute(
+        self,
+        action: str,
+        ctx: str,
+        target: str,
+        summary: str,
+        params: dict | None = None,
+        refs: list[str] | None = None,
+        allow: tuple[str, ...] = ("executed",),
+    ) -> ExecuteDecision:
+        """외부 연결에 쓰는 액션이면 params에 `connection_id`를 채워 관문에 보낸다."""
+        if action in VCS_WRITE_ACTIONS:
+            params = dict(params or {})
+            if not params.get("connection_id"):
+                params["connection_id"] = self._connection_for(target, params)
+        return await super()._execute(action, ctx, target, summary, params, refs, allow)
+
+    def _connection_for(self, target: str, params: dict) -> str:
+        """이 쓰기가 닿는 연결 id. 못 정하면 첫 연결, 연결이 없으면 `mock`."""
+        s = self.state
+        known = {c.id for c in vcs.routing_connections()}
+
+        def of_task(task_id: str | None) -> str | None:
+            t = next((x for x in s.tasks if x.id == task_id), None) if task_id else None
+            return t.coding.connection if t is not None and t.coding is not None else None
+
+        def of_pr(ref: str) -> str | None:
+            p = self._find_pr(s, ref)
+            if p is None:
+                return None
+            return (p.target.connection_id if p.target else None) or of_task(p.task)
+
+        head = target.split(":", 1)[0]
+        found = (
+            params.get("connection")
+            or of_task(params.get("task"))
+            or (of_pr(head) if head.startswith("PR") else None)
+            or next((c for c in known if target.startswith((f"{c}#", f"{c}:"))), None)
+            or of_task(head)
+        )
+        if found:
+            return str(found)
+        rows = vcs.routing_connections()
+        return rows[0].id if rows else MOCK_CONNECTION
 
     def start_pr_sync(self) -> None:
         """PR_SYNC_SECONDS마다 sync_prs·오래 기다리는 대화 알림을 돈다 (한 번만 켠다)."""
