@@ -30,6 +30,7 @@ from ax_contracts.schemas.planning import (
     AnswerPlanningQuestionInput,
     DevHandoffInput,
     ReceiveReleaseOrderInput,
+    RequestPauseInput,
     RequestReleaseCheckInput,
 )
 from ax_contracts.schemas.record import RecordCase, RecordKind
@@ -224,6 +225,20 @@ class RejectSpecParams(SpecParams):
     reason: str = Field(min_length=1)
 
 
+class PauseParams(RequestParams):
+    """사람이 요청을 중단한다. 이유는 활동에만 남긴다."""
+
+    reason: str = ""
+
+
+class EditSpecParams(SpecParams):
+    """확정 전 기획서를 사람이 고친다. 빈 값은 그대로 둔다."""
+
+    problem: str = ""
+    goal: str = ""
+    paras: dict[str, str] = Field(default_factory=dict)
+
+
 class PlanningService(PlanningCore):
     """기획 서비스 (planning, 8101): 요청 접수·기획서 초안·확정·인사 연동·되묻기·소통·문서.
 
@@ -236,6 +251,9 @@ class PlanningService(PlanningCore):
         **PLANNING_ACTIONS,
         "unlink_duplicate": ("_unlink_duplicate", RequestParams),
         "reject_spec": ("_reject_spec", RejectSpecParams),
+        "edit_spec": ("_edit_spec", EditSpecParams),
+        "pause_request": ("_pause_request", PauseParams),
+        "resume_request": ("_resume_request", RequestParams),
         "send_release_order": ("_send_release_order_action", ReleaseOrderParams),
     }
 
@@ -270,7 +288,7 @@ class PlanningService(PlanningCore):
 
     def _hand_to_dev(self, s: State, sp: Spec, req: Request | None, ctx: str) -> None:
         """확정된 기획서를 dev 서비스로 넘긴다고 표시한다 (보내기는 바꿔 끼운 뒤)."""
-        if req is None or sp.handed_to_dev:
+        if req is None or sp.handed_to_dev or req.paused:
             return
         ids = [t.id for t in s.tasks if t.spec == sp.id and t.state == "진행 중"]
         if not ids:
@@ -368,7 +386,13 @@ class PlanningService(PlanningCore):
     async def _advance_step(self, s: State) -> bool:
         """flow 요청은 사람 클릭 없이 기획서 초안·자동 확정까지 간다 (PR부터는 개발 서비스)."""
         for r in s.requests:
-            if r.flow and r.state == "접수" and r.spec is None and r.duplicate_of is None:
+            if (
+                r.flow
+                and not r.paused
+                and r.state == "접수"
+                and r.spec is None
+                and r.duplicate_of is None
+            ):
                 if r.via != "create_ticket":
                     await self._accept_draft(s, r.id)
                 await self._draft_spec(s, r)
@@ -1129,6 +1153,9 @@ class PlanningService(PlanningCore):
         rc = self.release_checks.get(check)
         if rc is None:
             raise ActionError("NOT_FOUND", f"대조 {check}가 없다")
+        req = next((r for r in s.requests if r.id == rc["request_id"]), None)
+        if req is not None and req.paused:
+            raise ActionError("REQUEST_PAUSED", f"{req.id}가 중단돼 있어 배포를 지시할 수 없습니다")
         if rc["verdict"] == "hold":
             raise ActionError("RELEASE_HELD", f"{check}는 연결 규칙에 걸려 배포를 지시할 수 없다")
         if rc["order_sent"]:
@@ -1476,6 +1503,11 @@ class PlanningService(PlanningCore):
         sp = next((x for x in s.specs if x.id == spec), None)
         if sp is None or sp.status == "확정":
             return
+        req = self._request_of_spec(s, sp)
+        if req is not None and req.paused:
+            raise ActionError(
+                "REQUEST_PAUSED", f"{req.id}가 중단돼 있어 확정할 수 없습니다 (재개 먼저)"
+            )
         await self._do_confirm(s, sp, spec_check(sp), auto=False)
 
     async def _check_spec(self, s: State, spec: str) -> ActionResult | None:
@@ -1498,6 +1530,8 @@ class PlanningService(PlanningCore):
         if sp.status == "확정":
             return False
         req = self._request_of_spec(s, sp)
+        if req is not None and req.paused:  # 사람이 중단함: 재개할 때 다시 본다
+            return False
         ctx = req.context_id if req else f"spec:{sp.id}"
         check = spec_check(sp)
         # 아직 안 끝난 다른 요청과 충돌할 수 있으면 어느 쪽을 따를지 사람이 정한다 (planning 규칙)
@@ -1922,6 +1956,121 @@ class PlanningService(PlanningCore):
             )
         )
         return ActionResult(output={"decision_id": dec_id, "record_kind": "decision_rejected"})
+
+    async def _pause_request(self, s: State, request: str, reason: str) -> ActionResult | None:
+        """사람 버튼 "중단": 이 요청은 재개 전까지 다음 단계로 가지 않는다.
+
+        기획서 초안·자동 확정·개발 전달·배포 지시를 멈춘다. 이미 개발로 넘어간 작업을 멈추는 건
+        개발 서비스 몫이다. 끝난(완료·기각) 요청은 바꾸지 않는다.
+        """
+        req = next((r for r in s.requests if r.id == request), None)
+        if req is None:
+            raise ActionError("NOT_FOUND", f"요청 {request}가 없습니다")
+        if req.paused or req.state in CLOSED_REQUEST_STATES:
+            return None
+        req.paused = True
+        why = f" · {reason.strip()}" if reason.strip() else ""
+        s.activity.append(
+            self._act(
+                self.clock(), req.context_id, "human", "planning", "pause_request", "사람",
+                f"{req.id} 사람이 중단 ({req.state}){why}",
+            )
+        )  # fmt: skip
+        self._tell_dev_pause(s, req, reason.strip() or None)
+        return ActionResult(output={"request": req.id, "paused": True})
+
+    async def _resume_request(self, s: State, request: str) -> ActionResult | None:
+        """사람 버튼 "재개": 멈춘 단계부터 다시 간다 (초안·자동 확정·개발 전달)."""
+        req = next((r for r in s.requests if r.id == request), None)
+        if req is None:
+            raise ActionError("NOT_FOUND", f"요청 {request}가 없습니다")
+        if not req.paused:
+            return None
+        req.paused = False
+        s.activity.append(
+            self._act(
+                self.clock(), req.context_id, "human", "planning", "resume_request", "사람",
+                f"{req.id} 사람이 재개 ({req.state})",
+            )
+        )  # fmt: skip
+        sp = next((x for x in s.specs if x.id == req.spec), None)
+        if sp is not None and sp.status != "확정":
+            await self._try_auto_confirm(s, sp)
+        elif sp is not None:
+            self._hand_to_dev(s, sp, req, req.context_id)
+        self._tell_dev_pause(s, req, None)
+        return ActionResult(output={"request": req.id, "paused": False})
+
+    def _tell_dev_pause(self, s: State, req: Request, reason: str | None) -> None:
+        """이미 개발로 넘어간 요청이면 개발에 중단·재개를 알린다 (보내기는 잠금 밖에서)."""
+        sp = next((x for x in s.specs if x.id == req.spec), None)
+        if sp is None or not sp.handed_to_dev:
+            return
+        n = sum(
+            1
+            for a in s.activity
+            if a.context_id == req.context_id and a.point in ("pause_request", "resume_request")
+        )
+        inp = RequestPauseInput(request_id=req.id, paused=req.paused, reason=reason)
+        key = f"{req.context_id}:request_pause:{req.id}:{n}"
+        ctx = req.context_id
+
+        async def send() -> None:
+            try:
+                how = await self._send_dev("receive_request_pause", ctx, self.tenant_id, inp, key)
+            except Exception as exc:  # noqa: BLE001 - 알림 실패가 중단·재개를 되돌리지 않는다
+                how = f"보내지 못함 ({exc.__class__.__name__})"
+            word = "중단" if inp.paused else "재개"
+            await self._apply(self._note_pause_sent, ctx=ctx, text=f"{req.id} {word} → 개발 {how}")
+
+        task = asyncio.get_running_loop().create_task(send())
+        self._sending.add(task)
+        task.add_done_callback(self._sending.discard)
+
+    async def _note_pause_sent(self, s: State, ctx: str, text: str) -> None:
+        s.activity.append(
+            self._act(
+                self.clock(), ctx, "planning", "dev", "receive_request_pause", "A2A", text, "A"
+            )
+        )
+
+    async def _edit_spec(
+        self, s: State, spec: str, problem: str, goal: str, paras: dict[str, str]
+    ) -> ActionResult | None:
+        """사람 버튼 "수정": 확정 전 기획서의 문제·목표·문단 글을 고친다.
+
+        확정된 기획서는 작업이 개발로 나가서 고치지 않는다(SPEC_CONFIRMED). 바뀐 곳마다 사람이 쓴
+        문장 수를 늘리고 활동에 남긴다. 확정 조건은 다음 진행에서 다시 본다.
+        """
+        sp = next((x for x in s.specs if x.id == spec), None)
+        if sp is None:
+            raise ActionError("NOT_FOUND", f"기획서 {spec}가 없습니다")
+        if sp.status == "확정":
+            raise ActionError("SPEC_CONFIRMED", f"{spec}는 확정돼서 고칠 수 없습니다")
+        changed: list[str] = []
+        if problem.strip() and problem.strip() != sp.problem:
+            sp.problem = problem.strip()
+            changed.append("문제")
+        if goal.strip() and goal.strip() != sp.goal:
+            sp.goal = goal.strip()
+            changed.append("목표")
+        for p in sp.paras:
+            text = (paras.get(p.id) or "").strip()
+            if text and text != p.text:
+                p.text = text
+                changed.append(p.id)
+        if not changed:
+            return None
+        sp.human_sentences += len(changed)
+        req = self._request_of_spec(s, sp)
+        ctx = req.context_id if req else f"spec:{sp.id}"
+        s.activity.append(
+            self._act(
+                self.clock(), ctx, "human", "planning", "edit_spec", "사람",
+                f"{sp.id} 사람이 고침 · {', '.join(changed)}",
+            )
+        )  # fmt: skip
+        return ActionResult(output={"spec": sp.id, "changed": changed})
 
     async def _reject_spec(self, s: State, spec: str, reason: str) -> ActionResult | None:
         """사람 버튼 "거절": 확인 대기(교차검증·사람 확인) 기획서를 확정하지 않는다.

@@ -319,6 +319,7 @@ ReleaseHoldReason = Literal[
     "linked_incident_open",  # 문단에 열린 장애 표시
     "open_question",  # 기획서에 답 안 된 질문
     "spec_unknown",  # 기획 쪽에 없는 기획서
+    "paused_by_human",  # 사람이 요청을 중단함 (재개 전까지 배포 지시 안 함)
 ]
 
 
@@ -383,6 +384,27 @@ class ReceiveReleaseOrderInput(AxModel):
     pr_numbers: list[int] = Field(min_length=1)
     decided_by: Literal["agent", "human"]
     note: str | None = None
+
+
+# ---- 사람 중단·재개 (planning → dev `receive_request_pause`, A, 11/3)
+# 사람이 요청을 중단하면 기획은 초안·확정·전달·배포 지시를 멈추고, 이미 개발로 넘어간 요청이면
+# 개발에 알린다. 개발은 그 요청의 코딩을 멈추고 열린 PR을 자동 머지하지 않는다. 재개하면 이어서.
+# 멱등성 키: `{ctx}:request_pause:{request_id}:{n}` (n = 그 요청의 중단·재개 차례)
+
+
+class RequestPauseInput(AxModel):
+    """planning → dev 요청 중단·재개 알림."""
+
+    request_id: str
+    paused: bool
+    decided_by: str = "human"
+    reason: str | None = None
+
+
+class RequestPauseOutput(AxModel):
+    outcome: Literal["applied", "duplicate", "unknown_request"]
+    tasks_stopped: list[str] = Field(default_factory=list)
+    prs_held: list[int] = Field(default_factory=list)
 
 
 class ReceiveReleaseOrderOutput(AxModel):

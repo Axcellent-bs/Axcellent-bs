@@ -34,6 +34,7 @@ export interface Request {
   auto?: AutoCheck // 간단 요청 판정 결과 (create_ticket으로 들어온 것만)
   flow?: boolean // 들어온 뒤 사람 클릭 없이 흐름을 이어 간다 (기획서 질문은 요청 부서 에이전트가 답함)
   related?: RelatedReq[] // 비슷한·충돌하는 요청 (제안, 묶기·보류는 사람)
+  paused?: boolean // 사람이 중단함: 재개 전까지 다음 단계로 가지 않는다
 }
 
 /** 비슷한·충돌하는 요청 (백엔드 related.py). by: llm이 판단 / embed·lexical은 검색만 / path는 열린 PR과 같은 파일 */
@@ -606,6 +607,9 @@ export type Action =
   | { type: 'writeSpec'; request: string }
   | { type: 'unlinkDuplicate'; request: string }
   | { type: 'rejectSpec'; spec: string; reason: string } // 확인 대기 기획서 거절 (승인은 humanDecide)
+  | { type: 'pauseRequest'; request: string; reason?: string } // 사람이 요청을 중단
+  | { type: 'resumeRequest'; request: string } // 중단한 요청 재개
+  | { type: 'editSpec'; spec: string; problem: string; goal: string; paras: Record<string, string> } // 확정 전 기획서를 사람이 고침
   | { type: 'sendReleaseOrder'; check: string; note?: string } // 배포 전 대조가 사람 확인이면 사람이 배포 지시
   // 교차검증·학습 기준·사람 확인
   | { type: 'decideReview'; review: string } // 시연: 검증자(다른 부서)가 판단
@@ -1375,6 +1379,39 @@ function inner(s: State, a: Action): State {
       return { ...s, seq: s.seq + 1, activity: [...s.activity, { t: now(), ctx: 'ctx_req_0012', from: 'planning', to: a.to, point: a.point, kind: 'A2A', text: a.text }] }
     case 'markRead':
       return { ...s, outbox: s.outbox.map((m) => (m.to === a.to ? { ...m, read: true } : m)) }
+    case 'pauseRequest':
+    case 'resumeRequest': {
+      const r = s.requests.find((x) => x.id === a.request)
+      const pause = a.type === 'pauseRequest'
+      if (!r || !!r.paused === pause || (pause && (r.state === '완료' || r.state === '기각'))) return s
+      return {
+        ...s,
+        requests: s.requests.map((x) => (x.id === r.id ? { ...x, paused: pause } : x)),
+        activity: [...s.activity, { t: now(), ctx: r.ctx, from: 'human', to: 'planning', point: pause ? 'pause_request' : 'resume_request', kind: '사람', text: `${r.id} 사람이 ${pause ? '중단' : '재개'} (${r.state})` }],
+      }
+    }
+    case 'editSpec': {
+      const spec = s.specs.find((x) => x.id === a.spec)
+      if (!spec || spec.status === '확정') return s
+      const changed = [
+        ...(a.problem.trim() && a.problem.trim() !== spec.problem ? ['문제'] : []),
+        ...(a.goal.trim() && a.goal.trim() !== spec.goal ? ['목표'] : []),
+        ...spec.paras.filter((p) => a.paras[p.id]?.trim() && a.paras[p.id].trim() !== p.text).map((p) => p.id),
+      ]
+      if (!changed.length) return s
+      const req = s.requests.find((r) => r.id === spec.request)
+      return {
+        ...s,
+        specs: s.specs.map((x) => (x.id !== spec.id ? x : {
+          ...x,
+          problem: a.problem.trim() || x.problem,
+          goal: a.goal.trim() || x.goal,
+          paras: x.paras.map((p) => (a.paras[p.id]?.trim() ? { ...p, text: a.paras[p.id].trim() } : p)),
+          humanSentences: x.humanSentences + changed.length,
+        })),
+        activity: [...s.activity, { t: now(), ctx: req?.ctx ?? `spec:${spec.id}`, from: 'human', to: 'planning', point: 'edit_spec', kind: '사람', text: `${spec.id} 사람이 고침 · ${changed.join(', ')}` }],
+      }
+    }
     case 'answerQuestion': {
       const spec = s.specs.find((x) => x.id === a.spec)
       if (!spec || !spec.question) return s

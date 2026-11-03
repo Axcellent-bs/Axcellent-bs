@@ -107,6 +107,8 @@ class Request(DomainModel):
     related: list[RelatedItem] = Field(default_factory=list)  # 비슷한·충돌하는 요청 (제안)
     # 요청을 보낸 서비스 id (예: inquiry·coupon). `from_`은 부서, 되묻기·회신은 이 서비스로 보낸다
     from_service: str | None = None
+    # 사람이 중단함: 기획서 초안·자동 확정·개발 전달·배포 지시를 재개 전까지 멈춘다
+    paused: bool = False
 
 
 class ParaWarn(DomainModel):

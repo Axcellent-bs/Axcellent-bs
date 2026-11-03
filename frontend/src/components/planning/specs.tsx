@@ -1,12 +1,13 @@
 // 기획서 화면: 문서가 원본이고 문단에 작업·PR·결정이 붙는다
 import { useState, type Dispatch } from 'react'
 import { Button, Notice, useToast } from '@dejafix/common-frontend'
-import { type Action, type Decision, type PR, type Spec, type State as S } from '@/lib/planningData'
+import { DEPT_NAME, type Action, type Decision, type PR, type Spec, type State as S } from '@/lib/planningData'
 import { ActivityList, Sec, State, Tag, rowNav } from '@/components/planning-common/parts'
 import { Linked, Ref, go, hrefOf, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
 import { CONFIRMED_BY, mergedLabel } from '@/components/planning-common/flow'
 import { RepoTag } from '@/components/planning-common/repo'
-import { useReleaseChecks, type ReleaseCheck } from '@/lib/planning'
+import { Pager, usePage } from '@/components/planning-common/pager'
+import { useAllReleaseChecks, useReleaseChecks, type ReleaseCheck } from '@/lib/planning'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -48,6 +49,7 @@ const HOLD_STATE: [string, string][] = [
   ['para_without_task', '작업 빠짐'],
   ['task_not_merged', 'PR 머지 대기'],
   ['pr_outside_spec', '기획서 밖 PR 섞임'],
+  ['paused_by_human', '사람이 중단'],
 ]
 export function releaseState(rc: ReleaseCheck): { label: string; tone: 'green' | 'amber'; title?: string } {
   if (rc.order_sent) return { label: '배포 지시 보냄', tone: 'green' }
@@ -96,40 +98,90 @@ function ReleaseCheckBox({ d, spec }: { d: Dispatch<Action>; spec: string }) {
 }
 
 // ---------------------------------------------------------------- 기획 문서 (문서가 원본, 문단에 모든 것이 붙는다)
+// 기획서 탭 첫 화면 = 기획서 목록 (최근 것이 위). 줄을 누르면 그 기획서 상세로
 export function Specs({ s, d, item, item2 }: P & { item?: string; item2?: string }) {
-  const spec = s.specs.find((x) => x.id === item) ?? s.specs.find((x) => x.id === 'SPEC-7') ?? s.specs[0]
-  if (!spec) return <div className="empty"><b>기획서 없음</b></div>
-  return <SpecView s={s} d={d} spec={spec} item2={item2} />
+  if (!item) return <SpecList s={s} />
+  const spec = s.specs.find((x) => x.id === item)
+  if (!spec) return <div className="empty"><b>{item} 없음</b> <a href={toPath('work/specs')}>기획서 목록</a></div>
+  return <SpecView key={spec.id} s={s} d={d} spec={spec} item2={item2} />
+}
+
+function SpecList({ s }: { s: S }) {
+  const checks = useAllReleaseChecks()
+  const pg = usePage(s.specs.slice().reverse(), 10)
+  const rows = pg.rows
+  if (!rows.length) return <div className="empty"><b>기획서 없음</b></div>
+  return (
+    <div className="sl">
+      <div className="sl-head" aria-hidden><span>상태</span><span>기획서</span><span>문단</span><span>배포 전 확인</span></div>
+      <ol className="sl-list">
+        {rows.map((sp) => {
+          const req = s.requests.find((r) => r.id === sp.request)
+          const xr = reviewOf(s, sp.id)
+          const rc = checks.find((c) => c.spec_id === sp.id)
+          const st = rc ? releaseState(rc) : undefined
+          const nav = rowNav(toPath(`work/specs/${sp.id}`), `${sp.id} 열기`)
+          return (
+            <li key={sp.id} {...nav} className={`sl-item ${nav.className ?? ''}`}>
+              <span><State v={xr ? (xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기') : sp.status} /></span>
+              <span className="sl-title">
+                {req && <span className={`rq-dept d-${req.from}`}>{DEPT_NAME[req.from]}</span>}
+                <span className="mono muted sl-id">{sp.id}</span>
+                <b title={sp.title}>{sp.title}</b>
+                {sp.question && <Tag tone="amber">질문 대기</Tag>}
+              </span>
+              <span className="muted small">요구사항 {sp.paras.filter((p) => p.kind === 'req').length} · 완료 기준 {sp.paras.filter((p) => p.kind === 'done').length}</span>
+              <span>{st ? <Tag tone={st.tone} title={st.title}>{st.label}</Tag> : <span className="muted small">—</span>}</span>
+            </li>
+          )
+        })}
+      </ol>
+      <Pager {...pg} />
+    </div>
+  )
 }
 
 function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
-  const para = spec.paras.find((p) => p.id === item2) ?? spec.paras.find((p) => p.id === (spec.id === 'SPEC-7' ? 'R2' : '')) ?? spec.paras[0]
+  // 작업·PR·장애가 연결된 문단만 눌러서 오른쪽에 본다. 연결이 없으면 글로만 보인다
+  const linked = (id: string) => s.tasks.some((t) => t.spec === spec.id && t.para === id) || s.incidents.some((i) => i.candidates.some((c) => c.spec === spec.id && c.para === id))
+  const para = spec.paras.find((p) => p.id === item2 && linked(p.id)) ?? spec.paras.find((p) => linked(p.id))
   const paraHref = (id: string) => toPath(`work/specs/${spec.id}/${id}`)
   const setParaId = (id: string) => go(paraHref(id))
-  const tasks = s.tasks.filter((t) => t.spec === spec.id && t.para === para.id)
+  // 개요 = 목차: 누르면 본문의 그 자리로 (연결된 문단이면 오른쪽도 그 문단으로)
+  const jump = (id: string) => setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0)
+  const tasks = para ? s.tasks.filter((t) => t.spec === spec.id && t.para === para.id) : []
   const prs = s.prs.filter((p) => tasks.some((t) => t.id === p.task))
   const decisions = s.decisions.filter((x) => x.spec === spec.id)
   const thread = s.threads.find((t) => t.on === spec.id)
-  const inc = s.incidents.find((i) => i.candidates.some((c) => c.spec === spec.id && c.para === para.id))
+  const inc = para ? s.incidents.find((i) => i.candidates.some((c) => c.spec === spec.id && c.para === para.id)) : undefined
   const xr = reviewOf(s, spec.id)
+  const toast = useToast()
+  // 확정 전 기획서는 사람이 고칠 수 있다 (확정되면 작업이 나가서 고치지 않는다)
+  const [edit, setEdit] = useState<{ problem: string; goal: string; paras: Record<string, string> } | null>(null)
+  const [answer, setAnswer] = useState('')
+  const startEdit = () => setEdit({ problem: spec.problem, goal: spec.goal, paras: Object.fromEntries(spec.paras.map((p) => [p.id, p.text])) })
+  const saveEdit = () => {
+    if (!edit) return
+    d({ type: 'editSpec', spec: spec.id, problem: edit.problem, goal: edit.goal, paras: edit.paras })
+    setEdit(null)
+    toast.show(`${spec.id} 수정 저장`)
+  }
+  const editPara = (id: string) => (
+    <textarea className="field spec-edit" rows={2} value={edit?.paras[id] ?? ''} onChange={(e) => setEdit((x) => (x ? { ...x, paras: { ...x.paras, [id]: e.target.value } } : x))} aria-label={`${id} 고치기`} />
+  )
 
   return (
     <div className="three">
       <aside className="col-left">
-        <div className="ph">기획 문서</div>
-        {s.specs.map((x) => (
-          <a key={x.id} href={toPath(`work/specs/${x.id}`)} className={`doc-li${x.id === spec.id ? ' on' : ''}`}>
-            <span className="mono">{x.id}</span> {x.title} <State v={x.status} />
-          </a>
-        ))}
-        <div className="ph" style={{ marginTop: 18 }}>{spec.id} 개요</div>
+        <a href={toPath('work/specs')} className="plain-link small">‹ 기획서 목록</a>
+        <div className="ph" style={{ marginTop: 10 }}>{spec.id} 개요</div>
         <ul className="outline">
-          <li>문제 · 목표</li>
+          <li><button type="button" onClick={() => jump('sec-problem')}>문제 · 목표</button></li>
           {spec.paras.map((p) => (
-            <li key={p.id}><a href={paraHref(p.id)} className={p.id === para.id ? 'on' : ''}>{p.id} {p.kind === 'req' ? '요구사항' : '완료 기준'}</a></li>
+            <li key={p.id}><button type="button" className={p.id === para?.id ? 'on' : ''} onClick={() => { if (linked(p.id)) setParaId(p.id); jump(`para-${p.id}`) }}>{p.id} {p.kind === 'req' ? '요구사항' : '완료 기준'}</button></li>
           ))}
-          {spec.question && <li>{thread ? <a href={toPath(`talk/${thread.id}`)}>질문 1개 남음</a> : '질문 1개 남음'}</li>}
-          <li>결정 이력 {decisions.length}건</li>
+          {spec.question && <li><button type="button" onClick={() => jump('sec-question')}>질문 1개 남음</button></li>}
+          <li><button type="button" onClick={() => jump('sec-decisions')}>결정 이력 {decisions.length}건</button></li>
           {thread && <li><a href={toPath(`talk/${thread.id}`)}>문서 스레드 열기</a></li>}
         </ul>
       </aside>
@@ -140,6 +192,14 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
           <State v={xr ? (xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기') : spec.status} />
           {spec.confirmedBy && <Tag>{CONFIRMED_BY[spec.confirmedBy]}</Tag>}
           <span style={{ flex: 1 }} />
+          {edit ? (
+            <>
+              <Button size="small" onClick={() => setEdit(null)}>취소</Button>
+              <Button size="small" variant="primary" onClick={saveEdit}>저장</Button>
+            </>
+          ) : (
+            <Button size="small" onClick={startEdit} disabled={spec.status === '확정'} title={spec.status === '확정' ? '확정된 기획서는 작업이 나가서 고칠 수 없어요' : undefined}>수정</Button>
+          )}
         </div>
         <p className="muted small">
           요청 <Ref s={s} id={spec.request} /> · <a href={toPath(`projects/${spec.request}`)}>프로젝트 보기</a> · 에이전트가 작성, 사람이 쓴 문장 {spec.humanSentences}개
@@ -147,15 +207,21 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
         {spec.status === '초안' && !xr && spec.question && <Notice tone="warn">빈 항목 질문이 남아 있습니다. 답이 오면 AI가 확정 조건(질문 없음·인사 경고 없음·근거 있음)을 다시 보고, 맞으면 바로 확정하고 아니면 AI 교차검증에 올립니다.</Notice>}
         {xr && <ReviewDecide d={d} spec={spec} xr={xr} />}
         {spec.status === '확정' && <ReleaseCheckBox d={d} spec={spec.id} />}
-        <h3 className="sec">문제</h3><p>{spec.problem}</p>
-        <h3 className="sec">목표</h3><p>{spec.goal}</p>
+        <h3 className="sec" id="sec-problem">문제</h3>
+        {edit ? <textarea className="field spec-edit" rows={2} value={edit.problem} onChange={(e) => setEdit({ ...edit, problem: e.target.value })} aria-label="문제 고치기" /> : <p>{spec.problem}</p>}
+        <h3 className="sec">목표</h3>
+        {edit ? <textarea className="field spec-edit" rows={2} value={edit.goal} onChange={(e) => setEdit({ ...edit, goal: e.target.value })} aria-label="목표 고치기" /> : <p>{spec.goal}</p>}
         <h3 className="sec">요구사항</h3>
-        {spec.paras.filter((p) => p.kind === 'req').map((p) => <ParaBox key={p.id} p={p} on={p.id === para.id} onClick={() => setParaId(p.id)} s={s} spec={spec.id} />)}
+        {spec.paras.filter((p) => p.kind === 'req').map((p) => edit ? <div key={p.id} id={`para-${p.id}`} className="spec-edit-row"><span className="pid">{p.id}</span>{editPara(p.id)}</div> : <ParaBox key={p.id} p={p} on={p.id === para?.id} onClick={linked(p.id) ? () => setParaId(p.id) : undefined} s={s} spec={spec.id} />)}
         <h3 className="sec">완료 기준</h3>
-        {spec.paras.filter((p) => p.kind === 'done').map((p) => <ParaBox key={p.id} p={p} on={p.id === para.id} onClick={() => setParaId(p.id)} s={s} spec={spec.id} />)}
+        {spec.paras.filter((p) => p.kind === 'done').map((p) => edit ? <div key={p.id} id={`para-${p.id}`} className="spec-edit-row"><span className="pid">{p.id}</span>{editPara(p.id)}</div> : <ParaBox key={p.id} p={p} on={p.id === para?.id} onClick={linked(p.id) ? () => setParaId(p.id) : undefined} s={s} spec={spec.id} />)}
         {spec.question && (
-          <div className="question">
+          <div className="question" id="sec-question">
             질문 · {spec.question}
+            <form className="spec-answer" onSubmit={(e) => { e.preventDefault(); if (!answer.trim()) return; d({ type: 'answerQuestion', spec: spec.id, text: answer.trim() }); setAnswer(''); toast.show(`${spec.id} 질문에 답함`) }}>
+              <input className="field" value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="답 적기" aria-label="질문에 답" />
+              <Button size="small" variant="primary" type="submit" disabled={!answer.trim()}>답하기</Button>
+            </form>
           </div>
         )}
         <h3 className="sec">근거</h3>
@@ -163,20 +229,23 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
       </section>
 
       <aside className="col-right">
-        <div className="ph">선택한 문단 {para.id}에 연결된 것</div>
+        {para && <>
+        <div className="ph">{para.id}에 연결된 작업·PR</div>
         <Sec title="작업" sub={`${tasks.length}건`}>
           {tasks.length ? tasks.map((t) => <div key={t.id} {...rowNav(hrefOf(s, t.id), '이 작업의 PR 보기')}><div className="mini-row"><span className="mono">{t.id}</span> {t.title} <State v={t.state} /></div></div>) : <span className="muted">기획서가 확정되면 split_tasks가 나눈다</span>}
         </Sec>
         <Sec title="PR" sub="작업 1개 = PR 1개">
           {prs.length ? prs.map((p) => <PrLine key={p.id} s={s} p={p} d={d} />) : <span className="muted">아직 없음</span>}
         </Sec>
+        </>}
+        <div id="sec-decisions" />
         <Sec title="스레드 · 결정" sub={thread ? <a href={toPath(`talk/${thread.id}`)}>스레드 전체 보기</a> : undefined}>
           {thread?.messages.slice(-2).map((m, i) => <div key={i} className="msg"><b>{m.who}</b> <Linked s={s} text={m.text} />{m.decision && <> <Tag tone="green">{m.decision}</Tag></>}</div>)}
           {decisions.map((x) => <div key={x.id} className="msg"><span className="mono">{x.id}</span> {x.text} <HrRecord d={x} /></div>)}
         </Sec>
-        <Sec title="장애 연결" sub="DejaFix 사후관리">
+        {para && <Sec title="장애 연결" sub="DejaFix 사후관리">
           {inc ? <div className="msg"><Ref s={s} id={inc.ctx} /> {inc.title} → 관련 PR {inc.candidates.map((c, i) => <span key={c.pr}>{i > 0 && ', '}<Ref s={s} id={c.pr} /></span>)}</div> : <span className="muted">연결된 사건 없음</span>}
-        </Sec>
+        </Sec>}
         <div className="ph" style={{ marginTop: 6 }}>최근 에이전트 활동</div>
         <ActivityList s={s} items={s.activity.filter((a) => a.ctx === (s.requests.find((r) => r.id === spec.request)?.ctx ?? 'ctx_req_0012')).slice(-4).reverse()} compact />
       </aside>
@@ -184,12 +253,13 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
   )
 }
 
-function ParaBox({ p, on, onClick, s, spec }: { p: S['specs'][number]['paras'][number]; on: boolean; onClick: () => void; s: S; spec: string }) {
+function ParaBox({ p, on, onClick, s, spec }: { p: S['specs'][number]['paras'][number]; on: boolean; onClick?: () => void; s: S; spec: string }) {
   const tasks = s.tasks.filter((t) => t.spec === spec && t.para === p.id)
   const prs = s.prs.filter((x) => tasks.some((t) => t.id === x.task))
   const done = tasks.length > 0 && tasks.every((t) => t.state === '완료')
+  const Box = onClick ? 'button' : 'div'
   return (
-    <button type="button" className={`para${on ? ' on' : ''}`} onClick={onClick}>
+    <Box id={`para-${p.id}`} type={onClick ? 'button' : undefined} className={`para${on ? ' on' : ''}${onClick ? '' : ' plain'}`} onClick={onClick}>
       <div><span className="pid">{p.id}</span>{p.text}</div>
       {p.warn && <div className="warnline">인사총무 ② 경고 ({p.warn.card}) · {p.warn.text}</div>}
       {p.incident && <div className="incline">장애 표시 · {p.incident} (link_incident)</div>}
@@ -200,7 +270,7 @@ function ParaBox({ p, on, onClick, s, spec }: { p: S['specs'][number]['paras'][n
           {done && <Tag tone="green">구현됨</Tag>}
         </span>
       )}
-    </button>
+    </Box>
   )
 }
 

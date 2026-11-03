@@ -44,6 +44,9 @@ def judge(state: State, inp: RequestReleaseCheckInput) -> ReleaseJudgement:
     if sp is None:
         return ReleaseJudgement("hold", hold_reasons=["spec_unknown"])
     reasons: list[str] = []
+    req = next((r for r in state.requests if r.id == inp.request_id), None)
+    if req is not None and req.paused:
+        _add(reasons, "paused_by_human")
     if sp.status != "확정":
         _add(reasons, "spec_not_confirmed")
     if sp.question:

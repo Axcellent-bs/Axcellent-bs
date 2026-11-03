@@ -192,7 +192,10 @@ class Relater:
         if got is not None:
             found, remote_ids = got
             method = "memory"
-        elif pool:
+        # 색인이 아무것도 못 찾으면(임베딩이 없어 카드가 검색에 안 잡힐 때 등)
+        # 이 서버 안에서 다시 찾는다.
+        # 색인만 믿으면 진행 중인 충돌 요청을 놓친다 (11/3 REQ-30 ↔ REQ-28)
+        if not found and pool:
             texts = [text_of(state, req), *(text_of(state, r) for r in pool)]
             vecs, method = await self._vectors(texts)
             scored = sorted(

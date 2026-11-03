@@ -5,7 +5,7 @@ import type { Dispatch } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, type Action, type Request, type State as S } from '@/lib/planningData'
 import { ActivityList, Dep, State, Tag } from '@/components/planning-common/parts'
-import { Linked, Ref, convoHref, hrefOf, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
+import { Linked, Ref, convoHref, go, hrefOf, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
 import { RepoTag } from '@/components/planning-common/repo'
 import { Flow, Head, Layout, ListPane, Side, Step, mergedLabel, prStatus, specStatus } from '@/components/planning-common/flow'
 
@@ -52,7 +52,7 @@ export function Projects({ s, d, sel }: { s: S; d: Dispatch<Action>; sel?: strin
   return (
     <Layout
       list={<ListPane groups={groups} />}
-      head={<Head kicker={<>{r.id} · {DEPT_NAME[r.from]}</>} title={r.title} side={<><State v={r.state} /><Button size="small" onClick={() => { d({ type: 'gatherDoc', about: r.id }); toast.show(`${r.id} 정리 문서를 만들었습니다`) }}>문서로 정리</Button></>} />}
+      head={<Head kicker={<><a href={toPath('requests')} className="plain-link proj-back">‹ 요청 목록</a>{r.id} · {DEPT_NAME[r.from]}</>} title={r.title} side={<><State v={r.state} />{r.paused && <Tag tone="amber">중단됨</Tag>}{r.state !== '완료' && r.state !== '기각' && <Button size="small" onClick={() => { d({ type: r.paused ? 'resumeRequest' : 'pauseRequest', request: r.id }); toast.show(`${r.id} ${r.paused ? '재개' : '중단'}`) }}>{r.paused ? '재개' : '중단'}</Button>}<Button size="small" onClick={() => { d({ type: 'gatherDoc', about: r.id }); toast.show(`${r.id} 정리 문서를 만들었습니다`); go(toPath('docs')) }}>문서로 정리</Button></>} />}
       side={
         <>
           <Side title="소통" href={g.threads[0] ? toPath(`talk/${g.threads[0].id}`) : convoHref(r.ctx)} sum={`대화 ${talks} · 결정 ${g.decisions.length}`}>
@@ -62,6 +62,7 @@ export function Projects({ s, d, sel }: { s: S; d: Dispatch<Action>; sel?: strin
           </Side>
           <Side title="문서" href={g.docs.length ? toPath(`docs/${g.docs[g.docs.length - 1].id}`) : undefined} sum={`정리 문서 ${g.docs.length}`}>
             {g.docs.map((x) => <p key={x.id} className="pside-msg"><Ref s={s} id={x.id} /> {x.title}</p>)}
+            <a href={toPath('docs')} className="pside-link">정리 문서 전체 보기</a>
           </Side>
         </>
       }

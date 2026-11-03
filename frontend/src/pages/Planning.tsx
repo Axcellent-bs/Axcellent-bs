@@ -16,7 +16,7 @@ const SECTIONS: Record<string, Section> = {
   agents: { label: '에이전트 대화', icon: 'send', tabs: [] },
   talk: { label: '소통', icon: 'send', tabs: [], hidden: true },
   projects: { label: '프로젝트', icon: 'menu', tabs: [], hidden: true }, // 요청 줄 제목을 누르면 요청 1건을 깊게
-  docs: { label: '정리', icon: 'report', tabs: [], hidden: true },
+  docs: { label: '문서', icon: 'report', tabs: [] },
   knowledge: { label: '규정·자료', icon: 'admin', tabs: [], hidden: true },
   metrics: { label: '지표', icon: 'dashboard', hidden: true, tabs: [
     { id: 'overview', label: '지표' },
