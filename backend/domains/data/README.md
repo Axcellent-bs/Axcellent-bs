@@ -580,6 +580,7 @@ YouTube 숏츠를 카테고리별·형식별로 센다. 숫자는 코드, 분류
 2. 표본
    - 최신 YouTube 인기 스냅샷의 숏츠. 2026-11-03에는 인기 목록에 60초 이하 영상이 없었다(0개)
    - **표본 넓히기**: 인기 스냅샷에 많이 나온 YouTube 카테고리(데이터에서 고름) 순으로 짧은 영상 검색(`search.list`, `videoDuration=short`, `regionCode=KR`, 최근 `search_days`(7)일, 조회수 순, 50개)을 **하루 1번**, 상한 `search_calls`(8번, 검색 1번 = 100단위). 결과는 `backend/.data/shorts.db`(`DATA_SHORTS_DB`)에 남겨 같은 날은 다시 부르지 않는다. 검색 실패는 그 카테고리만 unknown + 이유, 할당량 초과면 남은 검색은 하지 않고 unknown
+   - **한국 숏츠만**(`[shorts] language = "ko"`): `regionCode=KR`은 "한국에서 볼 수 있는 영상"이라 해외 영상이 대부분이었다(2026-11-03 검색 97개 중 한국 숏츠 몇 개). 그래서 검색에 `relevanceLanguage=ko`를 더하고, 인기·검색 숏츠 모두 **영상 언어(`defaultAudioLanguage`·`defaultLanguage`)가 한국어이거나 제목·채널 이름에 한글이 있는 것만** 남긴다. 뺀 수는 `foreign_excluded`. 언어 조건을 바꾸면 같은 날도 다시 검색한다
 3. 분류(LLM, 묶어서 최대 20개씩, 저장해 재사용): 카테고리는 주제 분류기(`classify_topics`, 제목 + 태그), 형식은 **챌린지·상황극·스케치·리액션·정보·팁·비포애프터·브이로그·밈 패러디·기타**에서 하나(목록 밖은 기타, 실패는 unknown). 형식은 `shorts.db`에 `retention_days`(30)일 남긴다
 4. 계산(코드): 카테고리별·형식별 숏츠 수, 평균 조회수, 평균 시간당 조회 증가(잰 수 `velocity_videos`), 조회수 상위 3개(제목·채널·조회수). **표본이 `min_sample`(5)개 미만이면 unknown + "표본 부족"**
 

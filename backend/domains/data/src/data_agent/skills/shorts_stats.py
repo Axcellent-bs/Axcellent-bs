@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 import tomllib
@@ -86,6 +87,9 @@ class ShortsConfig:
     # 시간당 조회 증가를 잰다
     recheck_videos: int = 200  # 한 번에 다시 조회할 숏츠 수 상한
     recheck_min_hours: float = 1.0  # 마지막으로 본 지 이 시간이 지난 숏츠만 다시 본다
+    # 표본 언어. ko면 한국 숏츠만 (제목·채널 이름에 한글이 있거나 영상 언어가 한국어). ""면 거르지
+    # 않음
+    language: str = "ko"
 
 
 def load_config(env: Mapping[str, str]) -> ShortsConfig:
@@ -105,6 +109,7 @@ def load_config(env: Mapping[str, str]) -> ShortsConfig:
             retention_days=max(1, int(raw.get("retention_days", base.retention_days))),
             recheck_videos=max(0, int(raw.get("recheck_videos", base.recheck_videos))),
             recheck_min_hours=max(0.1, float(raw.get("recheck_min_hours", base.recheck_min_hours))),
+            language=str(raw.get("language", base.language)).strip().lower(),
         )
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return ShortsConfig()
@@ -133,26 +138,41 @@ class ShortsStore:
                 "CREATE TABLE IF NOT EXISTS views (video_id TEXT NOT NULL, at TEXT NOT NULL,"
                 " views INTEGER NOT NULL, PRIMARY KEY (video_id, at));"
             )
+            for table in ("searches", "searched_videos"):
+                cols = [r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")]
+                if "language" not in cols:  # 예전 파일: 칸을 더한다 (예전 검색은 언어 조건 없음)
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN language TEXT")
 
     def close(self) -> None:
         self._conn.close()
 
-    def searched_today(self, day: date) -> bool:
+    def searched_today(self, day: date, language: str = "") -> bool:
+        """오늘 이 언어 조건으로 검색했는지 (언어 조건이 바뀌면 같은 날도 다시 검색한다)."""
         with self._lock:
             row = self._conn.execute(
-                "SELECT 1 FROM searches WHERE day = ? LIMIT 1", (day.isoformat(),)
+                "SELECT 1 FROM searches WHERE day = ? AND COALESCE(language, '') = ? LIMIT 1",
+                (day.isoformat(), language),
             ).fetchone()
         return row is not None
 
+    def clear_day(self, day: date) -> None:
+        """그날 검색 기록을 지운다 (언어 조건을 바꿔 다시 검색할 때)."""
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM searches WHERE day = ?", (day.isoformat(),))
+            self._conn.execute("DELETE FROM searched_videos WHERE day = ?", (day.isoformat(),))
+
     def save_search(self, day: date, category_id: str, status: str, reason: str | None,
-                    videos: Sequence[Any], at: datetime | None = None) -> None:  # fmt: skip
+                    videos: Sequence[Any], at: datetime | None = None,
+                    language: str = "") -> None:  # fmt: skip
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO searches VALUES (?,?,?,?,?)",
-                (day.isoformat(), category_id, status, reason, len(videos)),
+                "INSERT OR REPLACE INTO searches (day, category_id, status, reason, found,"
+                " language) VALUES (?,?,?,?,?,?)",
+                (day.isoformat(), category_id, status, reason, len(videos), language),
             )
             self._conn.executemany(
-                "INSERT OR REPLACE INTO searched_videos VALUES (?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO searched_videos (day, video_id, category_id, title,"
+                " channel_title, duration_s, views, tags, language) VALUES (?,?,?,?,?,?,?,?,?)",
                 [
                     (
                         day.isoformat(),
@@ -163,6 +183,7 @@ class ShortsStore:
                         v.duration_seconds,
                         v.view_count,
                         json.dumps(list(v.tags), ensure_ascii=False),
+                        getattr(v, "language", None),
                     )
                     for v in videos
                 ],
@@ -195,6 +216,32 @@ class ShortsStore:
             out.setdefault(vid, []).append((datetime.fromisoformat(at), int(views)))
         return out
 
+    def add_found(self, day: date, category_id: str, videos: Sequence[Any]) -> None:
+        """같은 카테고리 다음 페이지 결과를 더한다 (검색 수를 늘리고 영상을 남긴다)."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE searches SET found = found + ? WHERE day = ? AND category_id = ?",
+                (len(videos), day.isoformat(), category_id),
+            )
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO searched_videos (day, video_id, category_id, title,"
+                " channel_title, duration_s, views, tags, language) VALUES (?,?,?,?,?,?,?,?,?)",
+                [
+                    (
+                        day.isoformat(),
+                        v.video_id,
+                        category_id,
+                        v.title or None,
+                        v.channel_title or None,
+                        v.duration_seconds,
+                        v.view_count,
+                        json.dumps(list(v.tags), ensure_ascii=False),
+                        getattr(v, "language", None),
+                    )
+                    for v in videos
+                ],
+            )
+
     def searches(self, day: date) -> list[tuple[str, str, str | None, int]]:
         with self._lock:
             return self._conn.execute(
@@ -206,8 +253,8 @@ class ShortsStore:
     def searched_videos(self, day: date) -> list[tuple]:
         with self._lock:
             return self._conn.execute(
-                "SELECT video_id, category_id, title, channel_title, duration_s, views, tags"
-                " FROM searched_videos WHERE day = ?",
+                "SELECT video_id, category_id, title, channel_title, duration_s, views, tags,"
+                " language FROM searched_videos WHERE day = ?",
                 (day.isoformat(),),
             ).fetchall()
 
@@ -437,19 +484,25 @@ async def _run(
         if d is None or d.duration_seconds is None:
             out.unknown_length += 1
             continue
-        if d.duration_seconds <= config.max_seconds:
-            shorts[v.video_id] = _Short(v.video_id, v.title, d.channel_title,
+        if d.duration_seconds > config.max_seconds:
+            continue
+        if config.language and not is_language(config.language, v.title, d.channel_title, None):
+            out.foreign_excluded += 1
+            continue
+        shorts[v.video_id] = _Short(v.video_id, v.title, d.channel_title,
                                         views.get(v.video_id), speeds.get(v.video_id),
                                         tuple(v.tags), "popular")  # fmt: skip
     out.popular_shorts = len(shorts)
 
     # 2. 표본 넓히기: 카테고리별 숏츠 검색 하루 1번 (저장)
-    if store.searched_today(today):
+    out.language = config.language or None
+    if store.searched_today(today, config.language):
         out.search_status = "cached"
         out.search_reason = "오늘 이미 검색해 저장한 결과를 씀"
     elif config.search_calls <= 0:
         out.search_reason = "회사 설정에서 검색을 끔 (search_calls = 0)"
     else:
+        store.clear_day(today)  # 언어 조건이 다른 오늘 검색 기록은 지우고 새로 검색한다
         await _search(config, youtube, snapshot, store, now, today, out)
         queries.append(f"youtube search.list videoDuration=short x{len(out.search)}")
     if out.search_status == "cached" or out.search:
@@ -458,8 +511,11 @@ async def _run(
             for c, s, r, n in store.searches(today)
         ]
     searched = 0
-    for vid, cat_id, title, channel, dur, v_views, tags in store.searched_videos(today):
+    for vid, cat_id, title, channel, dur, v_views, tags, lang in store.searched_videos(today):
         if dur is None or dur > config.max_seconds or vid in shorts:
+            continue
+        if config.language and not is_language(config.language, title, channel, lang):
+            out.foreign_excluded += 1
             continue
         shorts[vid] = _Short(vid, title or "", channel, v_views, None,
                              tuple(json.loads(tags)), "search")  # fmt: skip
@@ -524,6 +580,18 @@ async def _run(
         lines.append(f"검색: {out.search_reason}")
     return ShortsResult(out, Evidence(queries=queries, data_summary="\n".join(lines),
                                       collected_at=now))  # fmt: skip
+
+
+_HANGUL = re.compile("[\uac00-\ud7a3]")
+
+
+def is_language(language: str, title: str | None, channel: str | None, lang: str | None) -> bool:
+    """숏츠가 그 언어인지. ko: 영상 언어가 한국어이거나, 제목·채널 이름에 한글이 있다."""
+    if lang and lang.lower().startswith(language):
+        return True
+    if language == "ko":
+        return bool(_HANGUL.search(title or "") or _HANGUL.search(channel or ""))
+    return False
 
 
 def speed_from(history: Sequence[tuple[datetime, int]]) -> float | None:
@@ -599,21 +667,54 @@ async def _search(
     order = sorted(counts, key=lambda c: (-counts[c], c))[: config.search_calls]
     before = getattr(youtube, "quota_used", 0)
     stopped: str | None = None
+    hits: dict[str, int] = {}  # 카테고리마다 그 언어 숏츠 수 (다음 페이지를 고를 때)
     for cat_id in order:
         if stopped:
-            store.save_search(today, cat_id, "unknown", stopped, [])
+            store.save_search(today, cat_id, "unknown", stopped, [], language=config.language)
             continue
         try:
-            videos = await youtube.search_shorts(cat_id, now - timedelta(days=config.search_days))
+            videos = await youtube.search_shorts(
+                cat_id,
+                now - timedelta(days=config.search_days),
+                language=config.language or None,
+            )
             store.record_views(now, videos)
         except ConnectorUnavailable as error:
             reason = f"검색 실패 [{error.code}]"
             if error.code == "QUOTA_EXCEEDED":
                 stopped = "할당량을 넘어 검색하지 않음"
                 reason = "할당량 초과 [QUOTA_EXCEEDED]"
-            store.save_search(today, cat_id, "unknown", reason, [])
+            store.save_search(today, cat_id, "unknown", reason, [], language=config.language)
             continue
-        store.save_search(today, cat_id, "known", None, videos)
+        store.save_search(today, cat_id, "known", None, videos, language=config.language)
+        hits[cat_id] = sum(
+            is_language(config.language, v.title, v.channel_title, getattr(v, "language", None))
+            for v in videos
+        ) if config.language else len(videos)  # fmt: skip
+    # 남은 호출: 그 언어 숏츠가 많이 나온 카테고리의 다음 페이지 (카테고리가 상한보다 적을 때)
+    tokens: dict[str, str | None] = getattr(youtube, "next_page_tokens", {}) or {}
+    extra = config.search_calls - len(order)
+    while extra > 0 and not stopped:
+        ready = [c for c in order if tokens.get(c) and hits.get(c, 0) > 0]
+        if not ready:
+            break
+        cat_id = max(ready, key=lambda c: (hits[c], c))
+        extra -= 1
+        try:
+            videos = await youtube.search_shorts(
+                cat_id,
+                now - timedelta(days=config.search_days),
+                language=config.language or None,
+                page_token=tokens[cat_id],
+            )
+        except ConnectorUnavailable as error:
+            if error.code == "QUOTA_EXCEEDED":
+                stopped = "할당량을 넘어 검색하지 않음"
+            tokens[cat_id] = None
+            continue
+        store.record_views(now, videos)
+        store.add_found(today, cat_id, videos)
+        hits[cat_id] = max(0, hits[cat_id] - 1)  # 같은 카테고리만 계속 보지 않게 조금 낮춘다
     out.quota_used = getattr(youtube, "quota_used", 0) - before
     out.search_status = "known"
     out.search = [ShortsSearch(youtube_category_id=c, status="known") for c in order]

@@ -171,3 +171,5 @@ top_videos = 3           # 묶음마다 보여 줄 조회수 상위 숏츠 수
 retention_days = 30      # 숏츠 형식 분류를 다시 쓰는 기간(일)
 recheck_videos = 200     # 검색 숏츠를 다음 실행 때 다시 조회(videos.list)해 시간당 조회 증가를 잰다. 한 번에 다시 볼 수 상한 (50개마다 1단위)
 recheck_min_hours = 1    # 마지막으로 본 지 이 시간이 지난 숏츠만 다시 본다
+# 표본 언어. ko면 한국 숏츠만 남긴다(제목·채널 이름에 한글이 있거나 영상 언어가 한국어). 검색도 한국어 우선(relevanceLanguage). ""면 거르지 않음
+language = "ko"

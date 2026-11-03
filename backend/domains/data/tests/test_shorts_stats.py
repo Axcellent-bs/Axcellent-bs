@@ -57,8 +57,12 @@ class FakeYouTube:
         self.fail = fail or {}
         self.quota_used = 0
         self.calls: list[str] = []
+        self.languages: list[str | None] = []
 
-    async def search_shorts(self, category_id: str, published_after: datetime) -> list[VideoStat]:
+    async def search_shorts(
+        self, category_id: str, published_after: datetime, language: str | None = None
+    ) -> list[VideoStat]:
+        self.languages.append(language)
         self.calls.append(category_id)
         self.quota_used += 101
         if category_id in self.fail:
@@ -236,3 +240,98 @@ def test_recheck_respects_the_cap(tmp_path: Path) -> None:
     out = _run_at(env, youtube, NOW + timedelta(hours=2))
     assert out.rechecked == 4 and len(youtube.rechecked[0]) == 4
     assert out.by_format[0].velocity_pending == 2  # 상한 밖 2개는 다음 조회 대기
+
+
+# ------------------------------------------------ 한국 숏츠만 (언어 기준)
+
+
+def test_only_korean_shorts_are_kept(tmp_path: Path) -> None:
+    from data_agent.skills.shorts_stats import is_language
+
+    assert is_language("ko", "유치원 학예회", None, None)
+    assert is_language("ko", "Funny cat", "캣채널", None)  # 채널 이름에 한글
+    assert is_language("ko", "Funny cat", "Cat", "ko-KR")  # 영상 언어가 한국어
+    assert not is_language("ko", "Funny cat", "Cat", "en")
+    popular = [
+        _stat("p0", 100, 30),
+        VideoStat(
+            "p1",
+            "ch",
+            "20",
+            NOW - timedelta(days=1),
+            100,
+            1,
+            1,
+            ("tag",),
+            title="Funny cat",
+            rank=2,
+            channel_title="Cat",
+            duration_seconds=30,
+        ),  # fmt: skip
+    ]
+    youtube = FakeYouTube()
+    out = _run(_env(tmp_path, popular, "search_calls = 1\n"), youtube)
+    assert out.language == "ko" and out.foreign_excluded == 1
+    assert out.popular_shorts == 1 and youtube.languages == ["ko"]  # 검색도 한국어 우선
+
+
+def test_changing_the_language_searches_again_the_same_day(tmp_path: Path) -> None:
+    popular = [_stat("p0", 100, 300)]
+    env = _env(tmp_path, popular, 'search_calls = 1\nlanguage = ""\n')
+    youtube = FakeYouTube()
+    _run(env, youtube)
+    config = Path(env["DATA_TREND_CONFIG"])
+    text = config.read_text(encoding="utf-8").replace('language = ""', 'language = "ko"')
+    config.write_text(text, encoding="utf-8")
+    out = _run(env, youtube)
+    assert youtube.calls == ["20", "20"] and youtube.languages == [None, "ko"]
+    assert out.search_status == "known"
+
+
+class PagedYouTube(FakeYouTube):
+    """카테고리마다 다음 페이지가 있는 가짜 검색. 20번 카테고리 첫 페이지만 한국 숏츠가 있다."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.next_page_tokens: dict[str, str | None] = {}
+        self.pages: list[tuple[str, str | None]] = []
+
+    async def search_shorts(
+        self,
+        category_id: str,
+        published_after: datetime,
+        language: str | None = None,
+        page_token: str | None = None,
+    ) -> list[VideoStat]:
+        self.calls.append(category_id)
+        self.pages.append((category_id, page_token))
+        self.quota_used += 101
+        self.next_page_tokens[category_id] = f"{category_id}-next"
+        page = 2 if page_token else 1
+        title = "숏츠" if category_id == "20" else "short"
+        return [
+            VideoStat(
+                f"s{category_id}_{page}{i}",
+                "ch",
+                category_id,
+                NOW - timedelta(days=1),
+                1000,
+                1,
+                1,
+                ("t",),
+                title=f"{title} {i}",
+                rank=None,
+                channel_title="ch",
+                duration_seconds=30,
+            )  # fmt: skip
+            for i in range(3)
+        ]
+
+
+def test_spare_search_calls_read_the_next_page_of_the_best_category(tmp_path: Path) -> None:
+    popular = [_stat("a", 1, 300, cat="20"), _stat("b", 1, 300, cat="24")]
+    youtube = PagedYouTube()
+    out = _run(_env(tmp_path, popular, "search_calls = 3\n"), youtube)
+    # 카테고리 2개를 먼저 보고, 남은 1번은 한국 숏츠가 나온 20번의 다음 페이지
+    assert youtube.pages == [("20", None), ("24", None), ("20", "20-next")]
+    assert out.searched_shorts == 6 and out.foreign_excluded == 3
