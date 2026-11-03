@@ -270,10 +270,12 @@ class FillYouTube:
 
     def __init__(self, fail: bool = False) -> None:
         self.calls: list[tuple[str, str | None]] = []
+        self.terms: list[str | None] = []
         self.fail = fail
 
-    async def search_category(self, category_id, published_after, language=None):  # noqa: ANN001, ANN201
+    async def search_category(self, category_id, published_after, language=None, query=None):  # noqa: ANN001, ANN201
         self.calls.append((category_id, language))
+        self.terms.append(query)
         if self.fail:
             raise ConnectorUnavailable("QUOTA_EXCEEDED", "할당량")
         return [
@@ -422,3 +424,38 @@ def test_fill_off_or_unmapped_category_makes_no_video_calls(tmp_path: Path) -> N
     assert _video_calls(llm) == 0  # 기획안 재료(promo)는 영상 칸을 쓰지 않는다
     out = _run_fill(_fill_env(tmp_path / "b", ""), FillYouTube(), _vllm())
     assert all(g.top_videos == [] for g in out.by_category)  # 설정 표가 없으면 채우지 않는다
+
+
+# ---------------------------------------------------------------- 게임 보충 검색에 검색어
+
+
+def test_game_search_uses_top_game_topic_names_and_results_still_pass_the_classifier(
+    tmp_path: Path,
+) -> None:
+    extra = 'fill_query_cells = ["게임"]\nfill_query_topics = 2\n'
+    env = _fill_env(tmp_path, FILL + extra)
+    youtube = FillYouTube()
+    out = _run_fill(env, youtube, _vllm())
+    # 소재 분류가 모두 게임인 가짜 LLM: 지금 인기 게임 칸 앞 2개 이름을 |로 묶는다
+    # (손으로 적지 않음)
+    game_topics = [i.keyword for i in sorted(out.items, key=lambda i: i.rank)
+                   if i.topic_category == "게임"][:2]  # fmt: skip
+    assert youtube.terms[0] == "|".join(game_topics) and youtube.terms[1:] == [None, None]
+    by = {g.category: g for g in out.by_category}
+    # 검색어로 받은 결과도 분류기를 통과해야 한다: 뉴스로 분류된 영상은 게임 칸에 안 들어간다
+    assert [v.video_id for v in by["게임"].top_videos] == ["c2"]
+    assert "검색어 '" in (by["게임"].top_videos_reason or "")
+
+
+def test_search_cap_leaves_only_that_cell_unknown(tmp_path: Path) -> None:
+    env = _fill_env(tmp_path, FILL + "fill_search_calls = 1\n")
+    youtube = FillYouTube()
+    out = _run_fill(env, youtube, _vllm())
+    by = {g.category: g for g in out.by_category}
+    assert youtube.calls == [("20", "ko")]  # 상한 1번
+    news = by["뉴스·사건"]
+    assert [v.video_id for v in news.top_videos] == ["c4"]  # 인기 목록 영상은 그대로
+    assert "확인할 수 없음(보충): 하루 보충 검색 상한(1번)에 닿아 검색하지 않음" in (
+        news.top_videos_reason or ""
+    )
+    assert "확인할 수 없음" not in (by["게임"].top_videos_reason or "")

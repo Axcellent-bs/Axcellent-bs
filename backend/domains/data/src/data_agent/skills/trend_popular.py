@@ -104,6 +104,11 @@ class PopularConfig:
     fill_always: bool = False  # 참이면 주제 수와 상관없이 늘 채운다 (화면은 영상만 보여 줌)
     fill_days: int = 7  # 최근 며칠 게시 영상에서 고를지
     fill_language: str = "ko"  # 그 언어 영상만 (""면 거르지 않음)
+    # 보충 검색에 검색어를 붙일 칸과 붙일 주제 수: 그 칸 지금 인기 주제 앞 N개 이름
+    # (사람 이름 제외)을 또는(|)으로 묶는다. 검색어 목록을 손으로 적지 않는다
+    fill_query_cells: tuple[str, ...] = ()
+    fill_query_topics: int = 2
+    fill_search_calls: int = 6  # 보충 검색 하루 호출 상한 (넘으면 그 칸 보충은 unknown + 이유)
 
 
 def load_config(env: Mapping[str, str]) -> PopularConfig:
@@ -140,6 +145,15 @@ def load_config(env: Mapping[str, str]) -> PopularConfig:
                 )  # fmt: skip
             ),
             fill_always=bool(raw.get("fill_always", base.fill_always)),
+            fill_query_cells=tuple(
+                str(c).strip()
+                for c in raw.get("fill_query_cells", base.fill_query_cells)
+                if str(c).strip() in TOPIC_CATEGORIES
+            ),
+            fill_query_topics=max(
+                1, min(5, int(raw.get("fill_query_topics", base.fill_query_topics)))
+            ),  # fmt: skip
+            fill_search_calls=max(0, int(raw.get("fill_search_calls", base.fill_search_calls))),
             fill_days=max(1, min(30, int(raw.get("fill_days", base.fill_days)))),
             fill_language=str(raw.get("fill_language", base.fill_language)).strip().lower(),
         )
@@ -179,6 +193,14 @@ class FillStore:
             ).fetchone()
         return json.loads(row[0]) if row else None
 
+    def count(self, day: date) -> int:
+        """그날 한 검색 수 (검색 한 번 = 한 줄)."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM fill WHERE day = ?", (day.isoformat(),)
+            ).fetchone()
+        return int(row[0])
+
     def put(self, day: date, cat: str, language: str, videos: list[dict[str, Any]]) -> None:
         with self._lock, self._conn:
             self._conn.execute(
@@ -216,6 +238,7 @@ async def fill_cells(
     limit: int,
     queries: list[str],
     context_id: str | None,
+    search_terms: Mapping[str, str] | None = None,
 ) -> dict[str, tuple[list[PopularVideo], str]]:
     """화면 칸마다 최근 조회수 높은 영상 (칸 → (영상, 고른 기준 또는 이유)).
 
@@ -258,12 +281,18 @@ async def fill_cells(
         if chart_n < limit and fill_map.get(cell):
             rows: list[dict[str, Any]] = []
             failed: list[str] = []
+            term = (search_terms or {}).get(cell)
             for yt in fill_map[cell]:
-                got = await _fill_rows(config, youtube, store, yt, now, today, queries)
+                got = await _fill_rows(config, youtube, store, yt, now, today, queries, term)
                 if isinstance(got, str):
                     failed.append(got)
                 else:
                     rows += [r for r in got if r["video_id"] not in used]
+            if failed and not rows and all(f.startswith(OVER_CAP) for f in failed):
+                note += f". 확인할 수 없음(보충): {failed[0]}"
+                videos.sort(key=lambda v: -(v.views or 0))
+                out[cell] = (videos, note)
+                continue
             fresh = [
                 r
                 for r in rows
@@ -285,9 +314,10 @@ async def fill_cells(
                 used.add(r["video_id"])
                 added += 1
             ids = "·".join(fill_map[cell])
+            what = f"검색어 '{term}'" if term else "검색어 없이"
             note += (
-                f". 5개 미만이라 YouTube 카테고리 {ids} 최근 {config.fill_days}일 검색으로 보충"
-                f" (검색 {len(rows)}개 중 한국 영상 {len(fresh)}개, 이 칸 {added}개)"
+                f". 5개 미만이라 YouTube 카테고리 {ids} 최근 {config.fill_days}일 {what} 검색으로"
+                f" 보충 (검색 {len(rows)}개 중 한국 영상 {len(fresh)}개, 이 칸 {added}개)"
             )
             if failed:
                 note += f". 검색 실패: {', '.join(failed)}"
@@ -342,22 +372,33 @@ async def _fill_rows(
     now: datetime,
     today: date,
     queries: list[str],
+    term: str | None = None,
 ) -> list[dict[str, Any]] | str:
-    """YouTube 카테고리 하나의 그날 검색 결과 (저장한 것이 있으면 그것). 실패면 이유 문자열."""
+    """YouTube 카테고리 하나의 그날 검색 결과 (저장한 것이 있으면 그것). 실패면 이유 문자열.
+
+    같은 카테고리·검색어는 하루 1번. 그날 검색 수가 `fill_search_calls`에 닿으면 더 부르지 않는다.
+    """
     lang = config.fill_language
-    rows = store.get(today, yt_category, lang)
+    key = f"{yt_category} q={term}" if term else yt_category
+    rows = store.get(today, key, lang)
     if rows is None:
         if youtube is None or not hasattr(youtube, "search_category"):
             return "YouTube 커넥터가 없어 최근 조회수 높은 영상을 받지 않음"
+        if store.count(today) >= config.fill_search_calls:
+            return f"{OVER_CAP}({config.fill_search_calls}번)에 닿아 검색하지 않음"
         try:
             stats = await youtube.search_category(
                 yt_category,
                 now - timedelta(days=config.fill_days),
                 language=lang or None,
+                **({"query": term} if term else {}),
             )
         except ConnectorUnavailable as error:
             return f"최근 조회수 높은 영상 검색 실패 [{error.code}]"
-        queries.append(f"youtube search.list videoCategoryId={yt_category} order=viewCount")
+        queries.append(
+            f"youtube search.list videoCategoryId={yt_category} order=viewCount"
+            + (f" q={term}" if term else "")
+        )
         rows = [
             {
                 "video_id": s.video_id,
@@ -372,8 +413,25 @@ async def _fill_rows(
             }
             for s in stats
         ]
-        store.put(today, yt_category, lang, rows)
+        store.put(today, key, lang, rows)
     return rows
+
+
+OVER_CAP = "하루 보충 검색 상한"
+
+
+def search_terms(config: PopularConfig, every: Sequence[PopularTopic]) -> dict[str, str]:
+    """검색어를 붙일 칸마다 그 칸 지금 인기 주제 앞 N개 이름(사람 이름 제외)을 |로 묶는다."""
+    out: dict[str, str] = {}
+    for cell in config.fill_query_cells:
+        names = [
+            i.keyword
+            for i in sorted(every, key=lambda i: i.rank)
+            if i.topic_category == cell and i.is_person is not True
+        ][: config.fill_query_topics]
+        if names:
+            out[cell] = "|".join(names)
+    return out
 
 
 # ---------------------------------------------------------------- 계산
@@ -651,6 +709,7 @@ async def popular(
         filled = await fill_cells(
             config, cells, chart, youtube=youtube, store=fill_store, llm=llm,
             cache=category_cache, now=now, limit=per, queries=queries, context_id=context_id,
+            search_terms=search_terms(config, every),
         )  # fmt: skip
     for category in config.categories:
         mine = [i for i in every if i.topic_category == category][:per]
