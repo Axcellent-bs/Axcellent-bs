@@ -210,6 +210,9 @@ def incident_meta(context_id: str) -> dict[str, Any]:
     return {"component": None, "window_from": None, "window_to": None, "category": None}
 
 
+_WINDOW_TIMES = ("window_from", "window_to", "recovered_at")
+
+
 async def incident_info(context_id: str) -> dict[str, Any]:
     """사건의 장애 구간·부품. 목 모드는 시드, 실제 모드는 총괄 사건 목록(읽기 전용).
 
@@ -231,7 +234,8 @@ async def incident_info(context_id: str) -> dict[str, Any]:
         saved = state().ledger.incident_windows.get(context_id)
         if not saved:
             return info
-        found = saved | {k: fc.parse_dt(saved.get(k)) for k in ("window_from", "window_to")}
+        # 시각은 글자로 저장돼 있다. 글자 그대로 쓰면 사건 화면 전체가 500이 된다
+        found = saved | {k: fc.parse_dt(saved.get(k)) for k in saved if k in _WINDOW_TIMES}
     return info | {k: v for k, v in found.items() if v is not None}
 
 
