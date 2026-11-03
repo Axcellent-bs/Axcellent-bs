@@ -289,7 +289,10 @@ done <<< "$RUN_APPS"
 
 # 캣북스 고객 주문 트래픽 (shop-api를 띄웠을 때만)
 if echo "$RUN_APPS" | awk '$1 == "shop-api" {found=1} END {exit !found}'; then
-  SHOP_API_URL=http://127.0.0.1:8010 "$PY" scripts/shop_traffic.py > "$LOGS/shop-traffic.log" 2>&1 &
+  # 재고가 0이 되면 주문이 조용히 멈춰 장애가 안 잡히는 것처럼 보인다. 자동 보충을 기본으로 켠다
+  # (끄려면 SHOP_TRAFFIC_REFILL=0). 보충에는 위에서 만든 admin 토큰을 쓴다
+  SHOP_API_URL=http://127.0.0.1:8010 SHOP_TRAFFIC_REFILL="${SHOP_TRAFFIC_REFILL:-1}" \
+    "$PY" scripts/shop_traffic.py > "$LOGS/shop-traffic.log" 2>&1 &
   echo $! > "$LOGS/shop-traffic.pid"
 fi
 
