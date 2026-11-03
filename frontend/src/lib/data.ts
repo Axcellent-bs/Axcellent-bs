@@ -522,6 +522,59 @@ export interface ContentRecommendation {
   /** 묶음: product_linked = 회사 상품과 연결된 소재, general = 일반 화제. 예전 응답은 없다 */
   group?: "product_linked" | "general" | null;
 }
+// ---------------------------------------------------------------- 지금 인기 (trend_popular)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py TrendPopularOutput (#411).
+// 급상승 판정과 별개인 "지금 인기" 주제 순위. 출처 하나를 못 읽으면 그 몫만 None + 이유(0으로 채우지 않음)
+export interface PopularScore {
+  score: number;
+  video_share: number | null;
+  velocity_share: number | null;
+  trending_share: number | null;
+}
+export interface PopularTopic {
+  rank: number;
+  keyword: string;
+  /** 같이 센 이름 (태그·별칭·자동 묶음) */
+  aliases: string[];
+  origins: CandidateOrigin[];
+  score: PopularScore;
+  /** 이 주제가 나온 인기 영상 수 (YouTube를 못 읽었으면 null) */
+  youtube_videos: number | null;
+  video_ids: string[];
+  /** 그 영상들의 지금 시간당 조회 증가 합 (못 쟀으면 null) */
+  views_per_hour: number | null;
+  velocity_videos: number;
+  velocity_reason: string | null;
+  /** 이번에 본 인기 검색어 중 순위 */
+  trending_rank: number | null;
+  /** 피드의 트래픽 표시값 (검색 건수 아님) */
+  trending_traffic: string | null;
+  topic_category: TopicCategory | null;
+  topic_category_reason: string | null;
+  brand_safe: boolean | null;
+  /** 오늘 낸 네이버 판정이 급상승이면 true, 평범이면 false, 판정이 없으면 null */
+  rising_now: boolean | null;
+  rising_ratio: number | null;
+}
+export interface TrendPopularOutput {
+  /** 점수 순 */
+  items: PopularTopic[];
+  empty_reason: string | null;
+  youtube_status: "known" | "unknown";
+  youtube_reason: string | null;
+  snapshot_at: string | null;
+  velocity_status: "known" | "unknown";
+  velocity_reason: string | null;
+  velocity_from: string | null;
+  velocity_to: string | null;
+  trending_status: "known" | "unknown";
+  trending_reason: string | null;
+  trending_at: string | null;
+  weights: Record<string, number>;
+  excluded_categories: string[];
+  summary: string;
+}
+
 export type TopicCategory =
   | "뉴스·사건" | "정치·사회" | "기부·재난" | "인물" | "게임" | "연예·스포츠" | "생활·취미" | "교육·책" | "기타" | "unknown";
 /** 급상승했지만 회사 설정의 "추천 안 함" 분류라 추천하지 않은 소재 (참고용, 서버 값) */
@@ -656,6 +709,8 @@ export const dataAi = {
   trendHistory: () => askData<TrendHistoryOutput>("trend_history", "월별 흐름", {}, TREND_DEADLINE_MS),
   /** YouTube 영상 지금 속도 (판정 없음). 스냅샷 DB만 읽고 외부 호출이 없다. 입력을 비우면 회사 설정 개수(10) */
   youtubeVelocity: () => askData<YouTubeVelocityOutput>("youtube_velocity", "YouTube 지금 속도", {}),
+  /** 지금 인기 주제 순위 (판정과 별개). 네이버를 부르지 않는다. 입력을 비우면 회사 설정 [popular] 개수 */
+  trendPopular: () => askData<TrendPopularOutput>("trend_popular", "지금 인기", {}),
   /** 영상 소재 추천 (콘텐츠 루프 2단계). 입력을 비우면 회사 설정(trends.toml [recommend])과 어제 날짜.
    *  네이버는 서버 하루 캐시를 같이 쓰고, 소재마다 아이디어 문장을 LLM이 쓴다 */
   contentRecommend: () => askData<ContentRecommendOutput>("content_recommend", "영상 소재 추천", {}, RECOMMEND_DEADLINE_MS),
