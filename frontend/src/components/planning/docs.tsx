@@ -63,7 +63,7 @@ export function Docs({ s, d, item }: { s: State; d: Dispatch<Action>; item?: str
     <PageHeader title="문서" sub="요청에 걸린 기획서·작업·PR·대화·결정을 한 장으로 모으고 사람이 고친다." />
     <div className="three">
       <aside className="col-left">
-        <a href={toPath('docs')} className="plain-link small">‹ 문서 목록</a>
+        <a href={toPath('work/specs')} className="plain-link small">‹ 문서·기획서 목록</a>
         <div className="ph" style={{ marginTop: 10 }}>문서 {s.docs.length}개</div>
         {make}
       </aside>

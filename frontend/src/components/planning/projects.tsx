@@ -1,5 +1,5 @@
 // 프로젝트별 보기: 변경 요청 1건(context_id 하나)을 프로젝트 하나로 본다. 왼쪽은 프로젝트 목록.
-// 가운데는 순서대로 진행되는 요청 → 작업 → 운영 → 처리를 세로 흐름으로, 오른쪽은 아무 때나 생기는 소통·문서.
+// 가운데는 순서대로 진행되는 요청 → 작업 → 운영 → 처리를 세로 흐름으로, 오른쪽은 아무 때나 생기는 소통.
 // 단계 한 줄·곁 블록은 통째로 눌러 그 내용을 다루는 화면(해당 프로젝트 항목)으로 간다.
 import type { Dispatch } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
@@ -52,17 +52,13 @@ export function Projects({ s, d, sel }: { s: S; d: Dispatch<Action>; sel?: strin
   return (
     <Layout
       list={<ListPane groups={groups} />}
-      head={<Head kicker={<><a href={toPath('requests')} className="plain-link proj-back">‹ 요청 목록</a>{r.id} · {DEPT_NAME[r.from]}</>} title={r.title} side={<><State v={r.state} />{r.paused && <Tag tone="amber">중단됨</Tag>}{r.state !== '완료' && r.state !== '기각' && <Button size="small" onClick={() => { d({ type: r.paused ? 'resumeRequest' : 'pauseRequest', request: r.id }); toast.show(`${r.id} ${r.paused ? '재개' : '중단'}`) }}>{r.paused ? '재개' : '중단'}</Button>}<Button size="small" onClick={() => { d({ type: 'gatherDoc', about: r.id }); toast.show(`${r.id} 정리 문서를 만들었습니다`); go(toPath('docs')) }}>문서로 정리</Button></>} />}
+      head={<Head kicker={<><a href={toPath('requests')} className="plain-link proj-back">‹ 요청 목록</a>{r.id} · {DEPT_NAME[r.from]}</>} title={r.title} side={<><State v={r.state} />{r.paused && <Tag tone="amber">중단됨</Tag>}{r.state !== '완료' && r.state !== '기각' && <Button size="small" onClick={() => { d({ type: r.paused ? 'resumeRequest' : 'pauseRequest', request: r.id }); toast.show(`${r.id} ${r.paused ? '재개' : '중단'}`) }}>{r.paused ? '재개' : '중단'}</Button>}{g.spec ? <Button size="small" onClick={() => go(toPath(`work/specs/${g.spec!.id}`))}>기획서 보기</Button> : r.state !== '기각' && r.state !== '중복 연결' && <Button size="small" onClick={() => { d({ type: 'writeSpec', request: r.id }); toast.show(`${r.id} 기획서로 저장`); go(toPath('work/specs')) }}>기획서로 저장</Button>}</>} />}
       side={
         <>
           <Side title="소통" href={g.threads[0] ? toPath(`talk/${g.threads[0].id}`) : convoHref(r.ctx)} sum={`대화 ${talks} · 결정 ${g.decisions.length}`}>
             {g.threads.flatMap((t) => t.messages.slice(-2).map((m, i) => <p key={`${t.id}-${i}`} className="pside-msg"><b>{m.who}</b> <Linked s={s} text={m.text} /></p>))}
             {g.decisions.map((x) => <p key={x.id} className="pside-msg"><Ref s={s} id={x.id} /> {x.text}</p>)}
             <a href={convoHref(r.ctx)} className="pside-link">에이전트 대화 {g.activity.length}</a>
-          </Side>
-          <Side title="문서" href={g.docs.length ? toPath(`docs/${g.docs[g.docs.length - 1].id}`) : undefined} sum={`정리 문서 ${g.docs.length}`}>
-            {g.docs.map((x) => <p key={x.id} className="pside-msg"><Ref s={s} id={x.id} /> {x.title}</p>)}
-            <a href={toPath('docs')} className="pside-link">정리 문서 전체 보기</a>
           </Side>
         </>
       }

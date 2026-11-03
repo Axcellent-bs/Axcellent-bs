@@ -127,8 +127,7 @@ export const SERVICES: Service[] = [
     // 화면 안 메뉴(pages/Planning.tsx SECTIONS)를 사이드바 하위 탭으로 연다
     children: [
       { href: '/planning/requests', label: '요청' },
-      { href: '/planning/work', label: '기획서' },
-      { href: '/planning/docs', label: '문서' },
+      { href: '/planning/work', label: '문서·기획서' },
       { href: '/planning/agents', label: '에이전트 대화' },
     ],
   },

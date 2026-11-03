@@ -65,12 +65,19 @@ def test_same_text_changes_nothing() -> None:
 
 
 @pytest.mark.role("planning")
-def test_confirmed_spec_cannot_be_edited() -> None:
+def test_confirmed_spec_edits_description_but_not_paras() -> None:
     svc = _svc()
     sp = next(x for x in svc.state.specs if x.status == "확정")
+    res = run(svc.dispatch({"type": "editSpec", "spec": sp.id, "problem": "설명만 고침"}))
+    assert res.output["changed"] == ["문제"]
     with pytest.raises(ActionError):
-        run(
-            svc.dispatch(
-                {"type": "editSpec", "spec": sp.id, "problem": "x", "goal": "", "paras": {}}
-            )
-        )
+        run(svc.dispatch({"type": "editSpec", "spec": sp.id, "paras": {sp.paras[0].id: "x"}}))
+
+
+@pytest.mark.role("planning")
+def test_person_edits_draft_title() -> None:
+    svc = _svc()
+    sp = _draft(svc)
+    res = run(svc.dispatch({"type": "editSpec", "spec": sp.id, "title": "새 제목"}))
+    assert res.output["changed"] == ["제목"]
+    assert next(x for x in svc.state.specs if x.id == sp.id).title == "새 제목"

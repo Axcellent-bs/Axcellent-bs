@@ -100,43 +100,74 @@ function ReleaseCheckBox({ d, spec }: { d: Dispatch<Action>; spec: string }) {
 // ---------------------------------------------------------------- 기획 문서 (문서가 원본, 문단에 모든 것이 붙는다)
 // 기획서 탭 첫 화면 = 기획서 목록 (최근 것이 위). 줄을 누르면 그 기획서 상세로
 export function Specs({ s, d, item, item2 }: P & { item?: string; item2?: string }) {
-  if (!item) return <SpecList s={s} />
+  if (!item) return <SpecList s={s} d={d} />
   const spec = s.specs.find((x) => x.id === item)
   if (!spec) return <div className="empty"><b>{item} 없음</b> <a href={toPath('work/specs')}>기획서 목록</a></div>
   return <SpecView key={spec.id} s={s} d={d} spec={spec} item2={item2} />
 }
 
-function SpecList({ s }: { s: S }) {
+type ListKind = 'all' | 'spec' | 'doc'
+type ListRow = { key: string; kind: 'spec' | 'doc'; href: string; id: string; title: string; from?: S['requests'][number]['from']; state: string; size: string; tail?: { label: string; tone: 'green' | 'amber'; title?: string }; note?: string }
+// 문서·기획서 목록 (탭 첫 화면). 기획서(요청에서 나온 것)와 사람이 쓴 문서를 한 목록에, 최근 것이 위
+function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
   const checks = useAllReleaseChecks()
-  const pg = usePage(s.specs.slice().reverse(), 10)
-  const rows = pg.rows
-  if (!rows.length) return <div className="empty"><b>기획서 없음</b></div>
+  const [kind, setKind] = useState<ListKind>('all')
+  const specRows: ListRow[] = s.specs.slice().reverse().map((sp) => {
+    const req = s.requests.find((r) => r.id === sp.request)
+    const xr = reviewOf(s, sp.id)
+    const rc = checks.find((c) => c.spec_id === sp.id)
+    return {
+      key: sp.id, kind: 'spec', href: toPath(`work/specs/${sp.id}`), id: sp.id, title: sp.title, from: req?.from,
+      state: xr ? (xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기') : sp.status,
+      size: `요구사항 ${sp.paras.filter((p) => p.kind === 'req').length} · 완료 기준 ${sp.paras.filter((p) => p.kind === 'done').length}`,
+      tail: rc ? releaseState(rc) : undefined, note: sp.question ? '질문 대기' : undefined,
+    }
+  })
+  const docRows: ListRow[] = s.docs.slice().reverse().map((x) => {
+    const todos = x.blocks.filter((b) => b.kind === 'todo')
+    return {
+      key: x.id, kind: 'doc', href: toPath(`docs/${x.id}`), id: x.id, title: x.title || '제목 없는 문서', from: s.requests.find((r) => r.id === x.about)?.from,
+      state: '문서', size: todos.length ? `할 일 ${todos.filter((b) => b.done).length}/${todos.length}` : `블록 ${x.blocks.length}`, note: x.updated,
+    }
+  })
+  const all = kind === 'spec' ? specRows : kind === 'doc' ? docRows : [...specRows, ...docRows]
+  const pg = usePage(all, 10)
+  const newDoc = () => { d({ type: 'newDoc', title: '' }); go(toPath(`docs/DOC-${s.docs.length + 1}`)) }
   return (
-    <div className="sl">
-      <div className="sl-head" aria-hidden><span>상태</span><span>기획서</span><span>문단</span><span>배포 전 확인</span></div>
-      <ol className="sl-list">
-        {rows.map((sp) => {
-          const req = s.requests.find((r) => r.id === sp.request)
-          const xr = reviewOf(s, sp.id)
-          const rc = checks.find((c) => c.spec_id === sp.id)
-          const st = rc ? releaseState(rc) : undefined
-          const nav = rowNav(toPath(`work/specs/${sp.id}`), `${sp.id} 열기`)
-          return (
-            <li key={sp.id} {...nav} className={`sl-item ${nav.className ?? ''}`}>
-              <span><State v={xr ? (xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기') : sp.status} /></span>
-              <span className="sl-title">
-                {req && <span className={`rq-dept d-${req.from}`}>{DEPT_NAME[req.from]}</span>}
-                <span className="mono muted sl-id">{sp.id}</span>
-                <b title={sp.title}>{sp.title}</b>
-                {sp.question && <Tag tone="amber">질문 대기</Tag>}
-              </span>
-              <span className="muted small">요구사항 {sp.paras.filter((p) => p.kind === 'req').length} · 완료 기준 {sp.paras.filter((p) => p.kind === 'done').length}</span>
-              <span>{st ? <Tag tone={st.tone} title={st.title}>{st.label}</Tag> : <span className="muted small">—</span>}</span>
-            </li>
-          )
-        })}
-      </ol>
-      <Pager {...pg} />
+    <div className="sl-wrap">
+      <div className="sl-top">
+        <div className="seg-toggle" role="group" aria-label="종류">
+          {([['all', `전체 ${specRows.length + docRows.length}`], ['spec', `기획서 ${specRows.length}`], ['doc', `문서 ${docRows.length}`]] as const).map(([k, label]) => (
+            <button key={k} type="button" aria-pressed={kind === k} onClick={() => { setKind(k); pg.setPage(0) }}>{label}</button>
+          ))}
+        </div>
+        <span style={{ flex: 1 }} />
+        <Button size="small" variant="primary" onClick={newDoc}>+ 새 문서</Button>
+      </div>
+      {!pg.rows.length ? <div className="empty"><b>없음</b></div> : (
+        <div className="sl">
+          <div className="sl-head" aria-hidden><span>상태</span><span>제목</span><span>내용</span><span>배포 전 확인</span></div>
+          <ol className="sl-list">
+            {pg.rows.map((r) => {
+              const nav = rowNav(r.href, `${r.id} 열기`)
+              return (
+                <li key={r.key} {...nav} className={`sl-item ${nav.className ?? ''}`}>
+                  <span>{r.kind === 'spec' ? <State v={r.state} /> : <Tag>문서</Tag>}</span>
+                  <span className="sl-title">
+                    {r.from && <span className={`rq-dept d-${r.from}`}>{DEPT_NAME[r.from]}</span>}
+                    <span className="mono muted sl-id">{r.id}</span>
+                    <b title={r.title}>{r.title}</b>
+                    {r.kind === 'spec' && r.note && <Tag tone="amber">{r.note}</Tag>}
+                  </span>
+                  <span className="muted small">{r.size}</span>
+                  <span>{r.tail ? <Tag tone={r.tail.tone} title={r.tail.title}>{r.tail.label}</Tag> : <span className="muted small">{r.kind === 'doc' ? r.note : '—'}</span>}</span>
+                </li>
+              )
+            })}
+          </ol>
+          <Pager {...pg} />
+        </div>
+      )}
     </div>
   )
 }
@@ -156,24 +187,23 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
   const inc = para ? s.incidents.find((i) => i.candidates.some((c) => c.spec === spec.id && c.para === para.id)) : undefined
   const xr = reviewOf(s, spec.id)
   const toast = useToast()
-  // 확정 전 기획서는 사람이 고칠 수 있다 (확정되면 작업이 나가서 고치지 않는다)
-  const [edit, setEdit] = useState<{ problem: string; goal: string; paras: Record<string, string> } | null>(null)
+  // 노션처럼 칸을 눌러 바로 고치고, 칸에서 벗어나면 저장한다. 확정되면 작업이 나가서 읽기 전용
+  // 제목·문제·목표는 언제든, 요구사항·완료 기준은 확정 전까지만 고친다
+  const editable = true
+  const parasEditable = spec.status !== '확정'
   const [answer, setAnswer] = useState('')
-  const startEdit = () => setEdit({ problem: spec.problem, goal: spec.goal, paras: Object.fromEntries(spec.paras.map((p) => [p.id, p.text])) })
-  const saveEdit = () => {
-    if (!edit) return
-    d({ type: 'editSpec', spec: spec.id, problem: edit.problem, goal: edit.goal, paras: edit.paras })
-    setEdit(null)
-    toast.show(`${spec.id} 수정 저장`)
+  const save = (patch: { title?: string; problem?: string; goal?: string; paras?: Record<string, string> }) => {
+    d({ type: 'editSpec', spec: spec.id, ...patch })
+    toast.show(`${spec.id} 저장`)
   }
-  const editPara = (id: string) => (
-    <textarea className="field spec-edit" rows={2} value={edit?.paras[id] ?? ''} onChange={(e) => setEdit((x) => (x ? { ...x, paras: { ...x.paras, [id]: e.target.value } } : x))} aria-label={`${id} 고치기`} />
+  const blockOf = (p: S['specs'][number]['paras'][number]) => (
+    <SpecPara key={`${p.id}-${p.text}`} p={p} on={p.id === para?.id} onPick={linked(p.id) ? () => setParaId(p.id) : undefined} s={s} spec={spec.id} editable={parasEditable} onSave={(text) => text.trim() !== p.text && save({ paras: { [p.id]: text } })} />
   )
 
   return (
     <div className="three">
       <aside className="col-left">
-        <a href={toPath('work/specs')} className="plain-link small">‹ 기획서 목록</a>
+        <a href={toPath('work/specs')} className="plain-link small">‹ 문서·기획서 목록</a>
         <div className="ph" style={{ marginTop: 10 }}>{spec.id} 개요</div>
         <ul className="outline">
           <li><button type="button" onClick={() => jump('sec-problem')}>문제 · 목표</button></li>
@@ -187,34 +217,29 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
       </aside>
 
       <section className="col-doc">
-        <div className="doc-head">
-          <h1 className="page-title" style={{ margin: 0 }}>{spec.title}</h1>
+        <input key={`t-${spec.title}`} className="doc-title-input" defaultValue={spec.title} readOnly={!editable} aria-label="기획서 제목"
+          onBlur={(e) => editable && e.target.value.trim() && e.target.value.trim() !== spec.title && save({ title: e.target.value })} />
+        <div className="doc-head" style={{ marginTop: 4 }}>
           <State v={xr ? (xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기') : spec.status} />
           {spec.confirmedBy && <Tag>{CONFIRMED_BY[spec.confirmedBy]}</Tag>}
-          <span style={{ flex: 1 }} />
-          {edit ? (
-            <>
-              <Button size="small" onClick={() => setEdit(null)}>취소</Button>
-              <Button size="small" variant="primary" onClick={saveEdit}>저장</Button>
-            </>
-          ) : (
-            <Button size="small" onClick={startEdit} disabled={spec.status === '확정'} title={spec.status === '확정' ? '확정된 기획서는 작업이 나가서 고칠 수 없어요' : undefined}>수정</Button>
-          )}
+          {!parasEditable && <Tag title="확정되면 작업이 개발로 나가서 요구사항·완료 기준은 고치지 않아요">문단 잠김</Tag>}
+          <span className="muted small">요청 <Ref s={s} id={spec.request} /> · <a href={toPath(`projects/${spec.request}`)}>프로젝트 보기</a> · 사람이 쓴 문장 {spec.humanSentences}개</span>
         </div>
-        <p className="muted small">
-          요청 <Ref s={s} id={spec.request} /> · <a href={toPath(`projects/${spec.request}`)}>프로젝트 보기</a> · 에이전트가 작성, 사람이 쓴 문장 {spec.humanSentences}개
-        </p>
         {spec.status === '초안' && !xr && spec.question && <Notice tone="warn">빈 항목 질문이 남아 있습니다. 답이 오면 AI가 확정 조건(질문 없음·인사 경고 없음·근거 있음)을 다시 보고, 맞으면 바로 확정하고 아니면 AI 교차검증에 올립니다.</Notice>}
         {xr && <ReviewDecide d={d} spec={spec} xr={xr} />}
         {spec.status === '확정' && <ReleaseCheckBox d={d} spec={spec.id} />}
-        <h3 className="sec" id="sec-problem">문제</h3>
-        {edit ? <textarea className="field spec-edit" rows={2} value={edit.problem} onChange={(e) => setEdit({ ...edit, problem: e.target.value })} aria-label="문제 고치기" /> : <p>{spec.problem}</p>}
-        <h3 className="sec">목표</h3>
-        {edit ? <textarea className="field spec-edit" rows={2} value={edit.goal} onChange={(e) => setEdit({ ...edit, goal: e.target.value })} aria-label="목표 고치기" /> : <p>{spec.goal}</p>}
-        <h3 className="sec">요구사항</h3>
-        {spec.paras.filter((p) => p.kind === 'req').map((p) => edit ? <div key={p.id} id={`para-${p.id}`} className="spec-edit-row"><span className="pid">{p.id}</span>{editPara(p.id)}</div> : <ParaBox key={p.id} p={p} on={p.id === para?.id} onClick={linked(p.id) ? () => setParaId(p.id) : undefined} s={s} spec={spec.id} />)}
-        <h3 className="sec">완료 기준</h3>
-        {spec.paras.filter((p) => p.kind === 'done').map((p) => edit ? <div key={p.id} id={`para-${p.id}`} className="spec-edit-row"><span className="pid">{p.id}</span>{editPara(p.id)}</div> : <ParaBox key={p.id} p={p} on={p.id === para?.id} onClick={linked(p.id) ? () => setParaId(p.id) : undefined} s={s} spec={spec.id} />)}
+        <div className="doc-blocks">
+          <h2 className="spec-h" id="sec-problem">문제</h2>
+          <textarea key={`p-${spec.problem}`} className="blk-p" defaultValue={spec.problem} readOnly={!editable} rows={Math.max(1, Math.ceil(spec.problem.length / 70))} aria-label="문제"
+            onBlur={(e) => editable && e.target.value.trim() !== spec.problem && save({ problem: e.target.value })} />
+          <h2 className="spec-h">목표</h2>
+          <textarea key={`g-${spec.goal}`} className="blk-p" defaultValue={spec.goal} readOnly={!editable} rows={Math.max(1, Math.ceil(spec.goal.length / 70))} aria-label="목표"
+            onBlur={(e) => editable && e.target.value.trim() !== spec.goal && save({ goal: e.target.value })} />
+          <h2 className="spec-h">요구사항</h2>
+          {spec.paras.filter((p) => p.kind === 'req').map(blockOf)}
+          <h2 className="spec-h">완료 기준</h2>
+          {spec.paras.filter((p) => p.kind === 'done').map(blockOf)}
+        </div>
         {spec.question && (
           <div className="question" id="sec-question">
             질문 · {spec.question}
@@ -253,24 +278,28 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
   )
 }
 
-function ParaBox({ p, on, onClick, s, spec }: { p: S['specs'][number]['paras'][number]; on: boolean; onClick?: () => void; s: S; spec: string }) {
+// 기획서 문단 한 줄 (노션 블록처럼): 번호 + 바로 고치는 글 칸 + 경고·연결 칩. 연결된 작업이 있으면 번호를 눌러 오른쪽에 본다
+function SpecPara({ p, on, onPick, s, spec, editable, onSave }: { p: S['specs'][number]['paras'][number]; on: boolean; onPick?: () => void; s: S; spec: string; editable: boolean; onSave: (text: string) => void }) {
   const tasks = s.tasks.filter((t) => t.spec === spec && t.para === p.id)
   const prs = s.prs.filter((x) => tasks.some((t) => t.id === x.task))
   const done = tasks.length > 0 && tasks.every((t) => t.state === '완료')
-  const Box = onClick ? 'button' : 'div'
   return (
-    <Box id={`para-${p.id}`} type={onClick ? 'button' : undefined} className={`para${on ? ' on' : ''}${onClick ? '' : ' plain'}`} onClick={onClick}>
-      <div><span className="pid">{p.id}</span>{p.text}</div>
+    <div id={`para-${p.id}`} className={`spec-blk${on ? ' on' : ''}`}>
+      <div className="blk">
+        {onPick ? <button type="button" className="pid spec-pid" onClick={onPick} title={`${p.id}에 연결된 작업·PR 보기`}>{p.id}</button> : <span className="pid spec-pid">{p.id}</span>}
+        <textarea className="blk-p" defaultValue={p.text} readOnly={!editable} rows={Math.max(1, Math.ceil(p.text.length / 70))} aria-label={`${p.id} 내용`}
+          onBlur={(e) => editable && onSave(e.target.value)} />
+      </div>
       {p.warn && <div className="warnline">인사총무 ② 경고 ({p.warn.card}) · {p.warn.text}</div>}
       {p.incident && <div className="incline">장애 표시 · {p.incident} (link_incident)</div>}
       {(tasks.length > 0 || done) && (
-        <span className="tags">
+        <span className="tags spec-tags">
           {tasks.map((t) => <Tag key={t.id}>{t.id}</Tag>)}
           {prs.map((x) => <Tag key={x.id}>{x.id}</Tag>)}
           {done && <Tag tone="green">구현됨</Tag>}
         </span>
       )}
-    </Box>
+    </div>
   )
 }
 

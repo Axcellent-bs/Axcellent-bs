@@ -44,7 +44,10 @@ export default function Integrations() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold">회사 서비스</h2>
+      <div className="flex items-center gap-2">
+        <h2 className="text-lg font-semibold">회사 서비스</h2>
+        <span className="chip bg-amber-50 text-amber-700" title="입력값은 이 브라우저에만 저장되고, 에이전트는 서버를 켤 때 정한 판매 서버(shop-api)를 읽어요">시연 화면 · 실제 연결 아님</span>
+      </div>
 
       <ul className="grid gap-4 lg:grid-cols-2">
         {items.map((x) => (
