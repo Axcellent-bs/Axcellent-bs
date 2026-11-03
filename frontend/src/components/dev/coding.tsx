@@ -171,6 +171,9 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
       setBusy(false)
     }
   }
+  // 개발자 Claude 대기열에서 아무도 안 가져감: 서버 AI로 넘길 수 있다
+  const unclaimed = c.mode === 'subscription' && c.status === 'queued' && !c.claimedBy
+  const toAgent = () => act(() => api.toAgent(task.id), `${task.id} 서버 AI로 넘김`)
   // 바뀐 내용이 없어 멈춤: 앞 작업이 이미 반영했으면 사람이 PR 없이 완료로 닫는다
   const noChange = !c.pr && (c.status === 'failed' || c.status === 'waiting_human') && (c.error ?? '').includes('바뀐 내용이 없음')
   const closeCovered = () => {
@@ -235,6 +238,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
         {waitingPr && <Button size="small" variant="primary" onClick={merge} disabled={busy}>머지</Button>}
         {heldPr && <Button size="small" variant="primary" onClick={() => void approveHold()} disabled={busy}>{busy ? '보내는 중…' : '승인하고 PR 열기'}</Button>}
         {(STUCK.includes(c.status) || c.status === 'canceled') && !waitingPr && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.status === 'canceled' ? '재개' : c.mergeConflict ? '최신 코드로 다시 쓰기' : '다시 시도'}</Button>}
+        {unclaimed && <Button size="small" onClick={() => void toAgent()} disabled={busy}>서버 AI로 넘기기</Button>}
         {noChange && <Button size="small" onClick={closeCovered} disabled={busy}>반영됨으로 닫기</Button>}
         <CancelButton taskId={task.id} status={c.status} />
       </span>

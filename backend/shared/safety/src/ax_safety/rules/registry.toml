@@ -319,6 +319,13 @@ owner = "planning"
 requesters = ["planning", "dev"]
 base_grade = "A"
 
+# 개발자 Claude 대기 작업을 서버 AI로 넘기기 (아무도 안 가져간 것만). 코드를 안 바꿔 A
+[[actions]]
+action = "dev_task_to_agent"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
 # 코딩 작업 반영됨으로 닫기 (바뀐 내용 없음 → 앞 작업 PR이 반영, PR 없이 완료). 코드를 안 바꿔 A
 [[actions]]
 action = "dev_task_covered"
