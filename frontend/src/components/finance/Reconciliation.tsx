@@ -52,7 +52,11 @@ function NoteForm({ item, onSaved }: { item: ReconItem; onSaved: (next: ReconIte
   );
 }
 
+/** 한 번에 그리는 줄 수. 정산 전까지 켜면 수천 줄이 될 수 있다 */
+const PAGE = 100;
+
 export function ReconciliationSection({ tick }: { tick: number }) {
+  const [limit, setLimit] = useState(PAGE);
   const [date, setDate] = useState("");
   const res = useResource(`recon:${date}`, () => finance.reconciliation(date || null), tick);
   const [shown, setShown] = useState<ReconStatus[]>(DEFAULT_RECON_FILTER);
@@ -93,6 +97,12 @@ export function ReconciliationSection({ tick }: { tick: number }) {
                 })}
               </div>
 
+              {!shown.includes("pending") && (r.counts.pending ?? 0) > 0 && (
+                <p className="text-xs text-ink-500">
+                  정산 전 {(r.counts.pending ?? 0).toLocaleString("ko-KR")}건은 PG가 아직 돈을 보내기 전이라 할 일이 아닙니다. 보려면 위 "정산 전"을 누르세요.
+                </p>
+              )}
+
               <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
                 {([
                   ["주문 금액 합계", r.totals.order_amount, "우리 쇼핑몰 기록"],
@@ -110,7 +120,7 @@ export function ReconciliationSection({ tick }: { tick: number }) {
 
               {items.length ? (
                 <ul className="divide-y divide-ink-100">
-                  {items.map((i) => (
+                  {items.slice(0, limit).map((i) => (
                     <li key={i.payment_id} className="grid gap-2 py-3 md:grid-cols-[150px_1fr_minmax(240px,320px)] md:items-start md:gap-4">
                       <div>
                         <Chip label={RECON_KO[i.status]?.label ?? "확인 필요"} tone={RECON_KO[i.status]?.tone ?? TONE.muted} />
@@ -129,7 +139,7 @@ export function ReconciliationSection({ tick }: { tick: number }) {
                         </p>
                       </div>
                       <div>
-                        {i.status === "matched" ? (
+                        {i.status === "matched" || i.status === "pending" ? (
                           i.note && <p className="text-xs text-ink-500">메모: {plainText(i.note)}</p>
                         ) : (
                           <NoteForm key={i.payment_id} item={i} onSaved={saveItem} />
@@ -144,6 +154,11 @@ export function ReconciliationSection({ tick }: { tick: number }) {
                     : shown.length === 0 ? "위에서 볼 상태를 하나 이상 고르세요."
                       : "고른 상태에 해당하는 건이 없습니다. 맞지 않는 건이 없다는 뜻입니다."}
                 </Empty>
+              )}
+              {items.length > limit && (
+                <button type="button" className="btn-ghost" onClick={() => setLimit((n) => n + PAGE)}>
+                  {Math.min(PAGE, items.length - limit)}건 더 보기 (남은 {(items.length - limit).toLocaleString("ko-KR")}건)
+                </button>
               )}
               {!humanTokenSet && <p className="text-xs text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 메모를 저장할 수 없습니다.</p>}
             </div>

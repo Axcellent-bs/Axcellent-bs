@@ -619,3 +619,38 @@ def test_window_end_is_never_in_the_future(mock_mode, monkeypatch) -> None:
     )
     data, _ = asyncio.run(incidents.incident_view(CTX, _feed(None)))
     assert data["window"]["to"] <= fc.iso(fc.now())
+
+
+def test_missing_buyer_is_filled_from_the_same_incident_shop_coupon() -> None:
+    rows = [{"coupon_id": "cpn_1", "buyer_id": None}, {"coupon_id": "cpn_2", "buyer_id": None}]
+    coupons = [
+        {"coupon_id": "cpn_1", "buyer_id": "buy_1", "context_id": "ctx_a"},
+        # 쇼핑몰 초기화로 번호가 다시 쓰인 다른 사건의 쿠폰은 믿지 않는다
+        {"coupon_id": "cpn_2", "buyer_id": "buy_9", "context_id": "ctx_other"},
+    ]
+    filled = lg.fill_buyers(rows, coupons, "ctx_a")
+    assert [r["buyer_id"] for r in filled] == ["buy_1", None]
+    assert (
+        lg.fill_buyers([{"coupon_id": "cpn_1", "buyer_id": "buy_0"}], coupons, "ctx_a")[0][
+            "buyer_id"
+        ]
+        == "buy_0"
+    )  # 이미 있는 값은 그대로
+
+
+def test_incident_window_survives_when_the_orchestrator_forgets(monkeypatch) -> None:
+    """총괄이 재시작으로 사건을 잊어도, 한 번 받은 구간은 재무가 기억해 피해·환불을 계속 본다."""
+    monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
+    monkeypatch.delenv("FINANCE_MOCK", raising=False)
+    start, end = fc.now() - timedelta(minutes=9), fc.now() - timedelta(minutes=1)
+    reply: dict[str, Any] = {"window_from": start, "window_to": end, "component": "payment"}
+    handlers.state().sources.incident_window = AsyncMock(return_value=reply)  # type: ignore[method-assign]
+    got = asyncio.run(handlers.incident_info("ctx_keep"))
+    assert got["window_from"] == start and got["component"] == "payment"
+
+    handlers.state().sources.incident_window = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    again = asyncio.run(handlers.incident_info("ctx_keep"))
+    assert again["window_from"] == start and again["window_to"] == end
+    assert again["component"] == "payment"
+    unknown = asyncio.run(handlers.incident_info("ctx_never"))
+    assert unknown["window_from"] is None  # 받은 적 없으면 지어내지 않는다

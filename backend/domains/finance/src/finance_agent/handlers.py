@@ -65,6 +65,8 @@ class Ledger:
         self.seen_events: set[str] = set()
         # 문의 번호 → 고객지원 처리 결과 비용 기록
         self.support_costs: dict[int, dict[str, Any]] = {}
+        # context_id → 사건 구간·부품. 총괄 사건 목록은 재시작하면 비워져서 받았을 때 남겨 둔다
+        self.incident_windows: dict[str, dict[str, Any]] = {}
         self.coupon_events: dict[str, list[dict[str, Any]]] = {}  # context_id → 보상 쿠폰 이벤트
 
     def compensation(self, context_id: str) -> dict[str, int]:
@@ -219,8 +221,17 @@ async def incident_info(context_id: str) -> dict[str, Any]:
     if info["window_from"] and info["window_to"]:
         return info
     found = await state().sources.incident_window(context_id)
-    if not found:
-        return info
+    if found and found.get("window_from") and found.get("window_to"):
+        state().ledger.incident_windows[context_id] = {
+            k: fc.iso(v) if isinstance(v, datetime) else v
+            for k, v in found.items()
+            if v is not None
+        }
+    elif not found:
+        saved = state().ledger.incident_windows.get(context_id)
+        if not saved:
+            return info
+        found = saved | {k: fc.parse_dt(saved.get(k)) for k in ("window_from", "window_to")}
     return info | {k: v for k, v in found.items() if v is not None}
 
 

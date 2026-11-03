@@ -66,7 +66,7 @@
     },
     {
      "kind": "recon_exception",
-     "title": "매출·PG 대사 불일치 4건",
+     "title": "최근 7일 매출·PG 대사 불일치 4건",
      "count": 4,
      "amount": 48268,
      "link": "reconciliation",
@@ -2512,7 +2512,7 @@
      "key": "reconciliation",
      "label": "매출·PG 대사 메모",
      "status": "done",
-     "detail": "메모 없는 불일치 0건",
+     "detail": "이 달 메모 없는 불일치 0건",
      "link": "reconciliation"
     },
     {

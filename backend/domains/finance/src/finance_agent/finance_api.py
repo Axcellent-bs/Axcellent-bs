@@ -17,10 +17,10 @@
 | `POST /api/finance/bank/statement` | ② 은행 입금 내역 올리기 | **사람** |
 | `GET /api/finance/cashflow` | ③ 13주 현금 흐름 (확정 + 추정) | 없음 |
 | `GET /api/finance/close-checklist?date=` | ① 월 마감 체크리스트 | 없음 |
-| `GET /api/finance/tax/vat?date=` | ⑥ 부가세 신고 보조 집계 (분기) | 없음 |
-| `GET /api/finance/tax/seller-report?date=&format=` | ⑥ 판매자별 판매 명세 (제75조 초안) | 없음 |
-| `GET /api/finance/team-budget?month=YYYY-MM` | ⑤ 팀 예산 (팀 인원 × 인당 월 단가) | 없음 |
-| `POST /api/finance/team-budget/{month}/approve` | ⑤ 팀 예산 확정 (`signature` 일치) | **사람** |
+| `GET /api/finance/tax/vat?date=` | ⑤ 부가세 신고 보조 집계 (분기) | 없음 |
+| `GET /api/finance/tax/seller-report?date=&format=` | ⑤ 판매자별 판매 명세 (제75조 초안) | 없음 |
+| `GET /api/finance/team-budget?month=YYYY-MM` | ④ 팀 예산 (팀 인원 × 인당 월 단가) | 없음 |
+| `POST /api/finance/team-budget/{month}/approve` | ④ 팀 예산 확정 (`signature` 일치) | **사람** |
 
 `meta`: `mock`, `collected_at`, `source`(`seed`|`shop-api`), `unavailable`(못 받은 자료 이름).
 정산 묶음 지급은 안전 관문이 항상 C로 보류하고 사람이 승인한다. 안전 관문에 닿지 않으면 503
@@ -213,7 +213,7 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
         todo.append(
             {
                 "kind": "recon_exception",
-                "title": f"매출·PG 대사 불일치 {len(open_items)}건",
+                "title": f"최근 7일 매출·PG 대사 불일치 {len(open_items)}건",
                 "count": len(open_items),
                 "amount": sum(reconciliation.exception_amount(i) for i in open_items),
                 "link": "reconciliation",
@@ -623,8 +623,8 @@ def add_finance_api(app: FastAPI) -> None:
 
     @app.get("/api/finance/tax/seller-report", response_model=None)
     async def get_seller_report(date: str | None = None, format: str = "json") -> dict | Response:
-        if format not in ("json", "csv"):
-            return error(400, "invalid_request", "format은 json 또는 csv")
+        if format not in ("json", "csv", "xlsx"):
+            return error(400, "invalid_request", "format은 json, csv, xlsx 중 하나")
         try:
             d = fc.parse_date(date) or fc.today()
         except ValueError as exc:
@@ -633,6 +633,13 @@ def add_finance_api(app: FastAPI) -> None:
         report = tax.seller_report(books, d)
         if format == "json":
             return ok(report, books.meta())
+        if format == "xlsx":
+            xlsx_name = f"seller-sales-{report['from'][:7]}.xlsx"
+            return Response(
+                content=tax.seller_report_xlsx(report),
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f'attachment; filename="{xlsx_name}"'},
+            )
         name = f"seller-sales-{report['from'][:7]}.csv"
         return Response(
             content=tax.seller_report_csv(report).encode("utf-8"),

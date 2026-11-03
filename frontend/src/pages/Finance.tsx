@@ -37,8 +37,8 @@ const TAB_LABEL: Record<FinanceTab, string> = {
   closing: "① 결산·리포트",
   reconciliation: "② 매출·PG 대사",
   settlements: "③ 판매자 정산",
-  policy: "⑤ 팀 예산",
-  tax: "⑥ 세무 지원",
+  policy: "④ 팀 예산",
+  tax: "⑤ 세무 지원",
 };
 
 const KPI: { key: keyof FinanceKpis; label: string; hint: string }[] = [
@@ -49,6 +49,37 @@ const KPI: { key: keyof FinanceKpis; label: string; hint: string }[] = [
   { key: "pg_fee", label: "PG 수수료", hint: "결제대행사에 내는 수수료" },
   { key: "net_result", label: "영업 결과", hint: "판매 수수료 매출에서 쿠폰 비용과 PG 수수료를 뺀 값" },
 ];
+
+const TERMS: [string, string][] = [
+  ["총거래액", "고객이 결제한 금액 전체입니다. 대부분 판매자 몫이라 회사 매출이 아닙니다."],
+  ["판매 수수료 매출", "판매자에게 받는 수수료입니다. 이것이 회사의 매출입니다."],
+  ["PG", "카드 결제를 처리해 주는 결제대행사입니다. 결제마다 수수료를 뗍니다."],
+  ["영업 결과", "판매 수수료 매출에서 쿠폰 비용과 PG 수수료를 뺀 값입니다. 급여·임차료는 들어가지 않습니다."],
+  ["결산 확정", "그날·그달 숫자를 확인하고 고정하는 일입니다. 돈은 움직이지 않습니다."],
+  ["대사", "우리 주문 기록과 PG 자료를 한 건씩 맞춰 보는 일입니다. 다른 건만 확인하고 메모를 남깁니다."],
+  ["정산", "판매자에게 줄 돈을 계산해 지급하는 일입니다. 판매액에서 수수료·판매자 부담 쿠폰·환불을 뺍니다."],
+  ["정산 보류", "구매가 확정되지 않은 것처럼 아직 지급할 수 없는 상태입니다. 이유가 함께 표시됩니다."],
+  ["미지급금", "판매자에게 줘야 하지만 아직 주지 않은 돈입니다."],
+  ["분개", "회계 장부에 적는 방식입니다. 회계 담당자가 참고하는 자료라 몰라도 결산 확정은 할 수 있습니다."],
+  ["안전 장치 보류", "사람이 정해야 해서 AI가 멈춰 둔 일입니다. 진행 또는 멈춤을 누릅니다."],
+];
+
+/** 재무를 처음 보는 사람을 위한 용어 풀이 */
+function Glossary() {
+  return (
+    <details className="rounded-2xl border border-ink-100 bg-surface px-4 py-3 text-sm sm:px-5">
+      <summary className="cursor-pointer font-semibold text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">용어 풀이</summary>
+      <dl className="mt-3 grid gap-x-6 gap-y-2 md:grid-cols-2">
+        {TERMS.map(([term, meaning]) => (
+          <div key={term}>
+            <dt className="font-medium text-ink-900">{term}</dt>
+            <dd className="text-xs leading-relaxed text-ink-700">{meaning}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
+}
 
 /** 실제 데이터 / 예시 데이터 전환. 기획·개발, 사람 할 일함 화면과 같은 방식으로 브라우저에 기억하고 화면을 다시 읽는다 */
 function DataToggle() {
@@ -86,6 +117,7 @@ export default function FinancePage() {
   const mode: Mode = isTab || hashTab === "daily" ? "daily" : "incident";
   const tab: FinanceTab = isTab ? (hashTab as FinanceTab) : "closing";
   const urlIncident = new URLSearchParams(location.search).get("incident");
+  const [closingFocus, setClosingFocus] = useState<{ date: string } | null>(null);
   const openTab = useCallback((t: FinanceTab, scroll = false) => {
     navigate({ search: location.search, hash: `#${t}` }, { replace: true });
     if (scroll) scrollToId("finance-modules");
@@ -205,6 +237,8 @@ export default function FinancePage() {
         </p>
       </details>
 
+      <Glossary />
+
       {exampleMode && (
         <p role="status" className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-800">
           <b>예시 데이터</b>를 보고 있습니다. 재무 AI를 연습용 예시 장부로 돌린 결과이며 실제 쇼핑몰 숫자가 아닙니다.
@@ -237,7 +271,10 @@ export default function FinancePage() {
           <ul className="mt-4 space-y-2">
             {todo.map((t, i) => (
               <TodoCard key={`${t.kind}-${i}`} todo={t} onDone={() => { bump(); void loadSide(); }}
-                onOpen={() => openTab(todoTab(t), true)} onGoToQueue={goToQueue} />
+                onOpen={() => {
+                  if (t.action?.type === "closing_confirm" && t.action.date) setClosingFocus({ date: t.action.date });
+                  openTab(todoTab(t), true);
+                }} onGoToQueue={goToQueue} />
             ))}
             {otherPending.length > 0 && (
               <li>
@@ -314,7 +351,7 @@ export default function FinancePage() {
         </div>
         <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
           {tab === "closing" && <div className="mb-4"><ChecklistSection tick={tick} onOpen={(t) => openTab(todoTab({ kind: "closing_confirm", link: t }), true)} /></div>}
-          {tab === "closing" && <ClosingSection tick={tick} onChanged={bump} />}
+          {tab === "closing" && <ClosingSection tick={tick} onChanged={bump} focus={closingFocus} />}
           {tab === "closing" && <div className="mt-4"><VarianceSection tick={tick} /></div>}
           {tab === "closing" && <div className="mt-4"><StatementsSection tick={tick} /></div>}
           {tab === "reconciliation" && <ReconciliationSection tick={tick} />}

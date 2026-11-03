@@ -2,7 +2,7 @@ import { useState } from "react";
 import { finance, krw } from "@/lib/finance";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
-// ⑥ 세무 지원: 부가세 신고 보조 집계와 판매자별 판매 명세(부가가치세법 제75조 초안).
+// ⑤ 세무 지원: 부가세 신고 보조 집계와 판매자별 판매 명세(부가가치세법 제75조 초안).
 // 재무 AI는 신고·제출을 하지 않는다. 세무 담당이 홈택스에서 신고할 때 쓸 숫자와 파일만 만든다.
 // 세무사 확인 전인 설정(수수료 부가세 별도/포함, 쿠폰 공제 구조, 배송비 공급자)은 화면에 그대로 드러낸다.
 
@@ -10,12 +10,12 @@ export function TaxSection({ tick }: { tick: number }) {
   const vat = useResource("tax-vat", () => finance.vat(), tick);
   const report = useResource("tax-seller-report", () => finance.sellerReport(), tick);
   const [problem, setProblem] = useState<string | null>(null);
-  const [downloading, setDownloading] = useState(false);
+  const [downloading, setDownloading] = useState<"csv" | "xlsx" | null>(null);
 
-  async function download() {
-    setDownloading(true);
+  async function download(format: "csv" | "xlsx") {
+    setDownloading(format);
     setProblem(null);
-    try { await finance.downloadSellerReport(); } catch (e) { setProblem((e as Error).message); } finally { setDownloading(false); }
+    try { await finance.downloadSellerReport(format); } catch (e) { setProblem((e as Error).message); } finally { setDownloading(null); }
   }
 
   return (
@@ -64,7 +64,10 @@ export function TaxSection({ tick }: { tick: number }) {
       </Panel>
 
       <Panel id="tax-seller-report" title="판매자별 판매 명세 (부가가치세법 제75조)" meta={report.env?.meta}
-        tools={<button type="button" className="btn-primary" disabled={downloading} onClick={download}>{downloading ? "내려받는 중…" : "CSV 내려받기"}</button>}
+        tools={<>
+          <button type="button" className="btn-primary" disabled={downloading !== null} onClick={() => download("xlsx")}>{downloading === "xlsx" ? "내려받는 중…" : "엑셀 내려받기"}</button>
+          <button type="button" className="btn-ghost" disabled={downloading !== null} onClick={() => download("csv")}>{downloading === "csv" ? "내려받는 중…" : "CSV 내려받기"}</button>
+        </>}
         hint="통신판매중개자는 판매자별 판매·중개 명세를 분기 말일의 다음 달 15일까지 국세청에 냅니다. 재무 AI는 초안 파일만 만들고 제출은 사람이 합니다.">
         {problem && <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{problem}</p>}
         <ResourceBody res={report}>

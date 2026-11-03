@@ -1,4 +1,4 @@
-import { finance, krw, percent, plainText, signedKrw, type DeadlineStatus, type VarianceLine } from "@/lib/finance";
+import { CATEGORY_KO, finance, krw, percent, plainText, signedKrw, type DeadlineStatus, type VarianceLine } from "@/lib/finance";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
 // 마감 통제 3종. 숫자는 모두 재무 AI 서버가 계산한 값을 그대로 보여 준다(화면에서 다시 계산하지 않음).
@@ -156,7 +156,7 @@ export function VarianceSection({ tick }: { tick: number }) {
                   <tbody>
                     {v.categories.map((c) => (
                       <tr key={c.category} className="border-t border-ink-100">
-                        <td className="py-1.5 pl-3">{c.category}</td>
+                        <td className="py-1.5 pl-3">{CATEGORY_KO[c.category] ?? c.category}</td>
                         <td className="py-1.5 text-right tabular-nums">{krw(c.gmv)} <span className="text-xs text-ink-500">({krw(c.gmv_prev)})</span></td>
                         <td className="py-1.5 text-right tabular-nums">{krw(c.commission)} <span className="text-xs text-ink-500">({krw(c.commission_prev)})</span></td>
                         <td className="py-1.5 pr-3 text-right tabular-nums">{signedKrw(c.commission_diff)}</td>

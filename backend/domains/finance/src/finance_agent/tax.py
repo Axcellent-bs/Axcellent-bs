@@ -246,38 +246,81 @@ def seller_report(books: Books, d: date | None = None) -> dict[str, Any]:
     }
 
 
+def _seller_report_table(report: dict[str, Any]) -> tuple[list[str], list[list[Any]]]:
+    methods = ["카드", "현금영수증", "기타"]
+    head = [
+        "판매자번호",
+        "상호",
+        "사업자등록번호",
+        "월",
+        "주문수",
+        "판매금액",
+        *methods,
+        "면세",
+        "과세",
+    ]
+    rows = [
+        [
+            r["seller_id"],
+            r["name"],
+            r["business_no"] or "자료 없음",
+            r["month"],
+            r["orders"],
+            r["total"],
+            *[r["by_method"].get(m, 0) for m in methods],
+            r["by_tax"].get("면세", 0),
+            r["by_tax"].get("과세", 0),
+        ]
+        for r in report["rows"]
+    ]
+    return head, rows
+
+
 def seller_report_csv(report: dict[str, Any]) -> str:
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\r\n")
-    methods = ["카드", "현금영수증", "기타"]
-    w.writerow(
-        [
-            "판매자번호",
-            "상호",
-            "사업자등록번호",
-            "월",
-            "주문수",
-            "판매금액",
-            *methods,
-            "면세",
-            "과세",
-        ]
-    )
-    for r in report["rows"]:
-        w.writerow(
-            [
-                r["seller_id"],
-                r["name"],
-                r["business_no"] or "자료 없음",
-                r["month"],
-                r["orders"],
-                r["total"],
-                *[r["by_method"].get(m, 0) for m in methods],
-                r["by_tax"].get("면세", 0),
-                r["by_tax"].get("과세", 0),
-            ]
-        )
+    head, rows = _seller_report_table(report)
+    w.writerow(head)
+    w.writerows(rows)
     w.writerow([])
     w.writerow(["작성 기준", report["basis"]])
     w.writerow(["제출 기한", report["due"]])
     return "﻿" + buf.getvalue()
+
+
+def seller_report_xlsx(report: dict[str, Any]) -> bytes:
+    """내려받기용 엑셀. CSV와 같은 내용이고, 숫자는 숫자 칸으로 넣는다."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "판매자별 판매 명세"
+    head, rows = _seller_report_table(report)
+
+    def text(row: int, col: int, value: Any) -> Any:
+        cell = ws.cell(row=row, column=col)
+        cell.value = str(value)
+        cell.data_type = "s"  # "="로 시작해도 수식으로 실행되지 않게 글자로 넣는다
+        return cell
+
+    for col, name in enumerate(head, start=1):
+        text(1, col, name).font = Font(bold=True)
+    for r, row in enumerate(rows, start=2):
+        for col, value in enumerate(row, start=1):
+            if isinstance(value, int) and not isinstance(value, bool):
+                ws.cell(row=r, column=col, value=value).number_format = "#,##0"
+            else:
+                text(r, col, value)
+    last = len(rows) + 3
+    text(last, 1, "작성 기준")
+    text(last, 2, report["basis"])
+    text(last + 1, 1, "제출 기한")
+    text(last + 1, 2, report["due"])
+    ws.freeze_panes = "A2"
+    for col, width in enumerate((14, 22, 16, 10, 8, 14, 14, 12, 10, 14, 14), start=1):
+        ws.column_dimensions[get_column_letter(col)].width = width
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
