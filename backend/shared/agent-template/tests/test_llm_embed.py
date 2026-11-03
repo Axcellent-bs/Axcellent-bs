@@ -1,4 +1,5 @@
 import json
+import logging
 import math
 
 import httpx
@@ -137,9 +138,13 @@ def test_embed_endpoint_prefers_department_then_common() -> None:
     assert (memory.embed_url, memory.embed_key) == ("http://common-embed/v1", "common-embed-key")
     # 문장 생성 설정은 그대로다
     assert (data.base_url, data.api_key, data.model) == ("http://llm/v1", "llm-key", "chat-model")
-    # 주소와 키는 따로 이어받는다: 주소만 주면 키는 LLM 키
+    # 주소만 다르고 임베딩 키가 없으면 LLM 키를 그 주소로 쓰지 않는다
     only_url = LLMSettings.from_env("data", LLM_ONLY_ENV | {"EMBED_BASE_URL": "http://e/v1"})
-    assert (only_url.embed_url, only_url.embed_key) == ("http://e/v1", "llm-key")
+    assert (only_url.embed_url, only_url.embed_key) == ("http://e/v1", None)
+    assert only_url.embed_key_missing is True
+    # 임베딩 주소가 LLM 주소와 같으면(끝 `/`만 달라도) LLM 키를 그대로 쓴다
+    same = LLMSettings.from_env("data", LLM_ONLY_ENV | {"EMBED_BASE_URL": "http://llm/v1/"})
+    assert (same.embed_key, same.embed_key_missing) == ("llm-key", False)
 
 
 class _Answer(BaseModel):
@@ -205,3 +210,46 @@ async def test_embed_endpoint_works_without_llm_endpoint(monkeypatch: pytest.Mon
         [1.0, 0.0]
     ]
     assert seen == [("http://embed/v1/embeddings", None)]
+
+
+# ── 임베딩 주소가 다른데 임베딩 키가 없으면 LLM 키를 보내지 않는다 ──
+
+
+@pytest.mark.asyncio
+async def test_different_embed_url_without_embed_key_sends_nothing(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    seen = _record_requests(monkeypatch)
+    env = LLM_ONLY_ENV | {"DATA_EMBED_BASE_URL": "http://embed/v1"}
+    client = LLMClient("data", LLMSettings.from_env("data", env))
+    with caplog.at_level(logging.WARNING, logger="ax.llm"):
+        with pytest.raises(LLMNotConfiguredError, match="DATA_EMBED_API_KEY 또는 EMBED_API_KEY"):
+            await client.embed(["a"])
+    assert seen == []  # 요청을 보내지 않았다
+    logs = " ".join(r.getMessage() for r in caplog.records)
+    assert "DATA_EMBED_API_KEY 또는 EMBED_API_KEY" in logs
+    # 로그에는 빠진 이름만 있고 주소·키 값은 없다
+    assert "llm-key" not in logs and "http://embed" not in logs and "http://llm" not in logs
+    # 문장 생성은 영향받지 않는다
+    assert (await client.structured("p", _Answer)).ok is True
+    assert seen == [("http://llm/v1/chat/completions", "Bearer llm-key")]
+
+
+@pytest.mark.asyncio
+async def test_different_embed_url_with_common_embed_key_works(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _record_requests(monkeypatch)
+    env = LLM_ONLY_ENV | {"EMBED_BASE_URL": "http://embed/v1", "EMBED_API_KEY": "embed-key"}
+    assert await LLMClient("data", LLMSettings.from_env("data", env)).embed(["a"]) == [[1.0, 0.0]]
+    assert seen == [("http://embed/v1/embeddings", "Bearer embed-key")]
+
+
+@pytest.mark.asyncio
+async def test_same_embed_url_without_embed_key_uses_llm_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _record_requests(monkeypatch)
+    env = LLM_ONLY_ENV | {"EMBED_BASE_URL": "http://llm/v1/"}
+    assert await LLMClient("data", LLMSettings.from_env("data", env)).embed(["a"]) == [[1.0, 0.0]]
+    assert seen == [("http://llm/v1/embeddings", "Bearer llm-key")]
