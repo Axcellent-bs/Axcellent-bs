@@ -575,6 +575,69 @@ export interface TrendPopularOutput {
   summary: string;
 }
 
+// ---------------------------------------------------------------- 홍보 영상 기획안 (promo_concepts)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py PromoConceptsOutput (#415).
+// 재료(상품·안전한 지금 인기·시즌·이벤트)는 코드가 모으고 LLM은 기획안 문장만. 재료 밖 상품·트렌드·숫자는 코드가 버린다(dropped)
+export type PromoFormat = "15초 숏폼" | "30초 숏폼" | "롱폼";
+export type PromoTrendKind = "popular" | "season" | "event";
+export interface PromoProduct {
+  product_id: string;
+  name: string;
+  category_name: string | null;
+  /** 판매가 (원) */
+  price: number | null;
+}
+export interface PromoTrend {
+  name: string;
+  kind: PromoTrendKind;
+  topic_category: TopicCategory | null;
+  /** 실존 인물·팀·리그·상표가 든 트렌드 */
+  ip_risk: boolean;
+  entity_names: string[];
+  /** 코드가 만든 한 줄 */
+  detail: string;
+}
+export interface PromoConcept {
+  concept_id: string;
+  title: string;
+  concept: string;
+  /** 빌려 온 트렌드 (재료 트렌드 이름 그대로) */
+  borrowed_trend: string;
+  trend_kind: PromoTrendKind | null;
+  products: PromoProduct[];
+  format: PromoFormat | null;
+  /** 콘티 3컷 */
+  storyboard: string[];
+  /** 주의사항 (LLM) */
+  cautions: string[];
+  /** 코드가 단 경고 (상표·초상권 확인 필요 등) */
+  warnings: string[];
+}
+export interface DroppedConcept {
+  title: string;
+  reason: string;
+}
+export interface PromoConceptsOutput {
+  concepts: PromoConcept[];
+  dropped: DroppedConcept[];
+  empty_reason: string | null;
+  trends: PromoTrend[];
+  /** 재료 상품 수 */
+  products: number;
+  catalog_status: "known" | "unknown";
+  catalog_reason: string | null;
+  popular_status: "known" | "unknown";
+  popular_reason: string | null;
+  season_status: "known" | "unknown";
+  season_reason: string | null;
+  naver_calls: number;
+  /** 오늘 만든 기획안을 그대로 줬는지 */
+  cached: boolean;
+  run_id: string | null;
+  generated_at: string | null;
+  summary: string;
+}
+
 export type TopicCategory =
   | "뉴스·사건" | "정치·사회" | "기부·재난" | "인물" | "게임" | "연예·스포츠" | "생활·취미" | "교육·책" | "IT" | "기타" | "unknown";
 /** 급상승했지만 회사 설정의 "추천 안 함" 분류라 추천하지 않은 소재 (참고용, 서버 값) */
@@ -714,6 +777,9 @@ export const dataAi = {
   /** 영상 소재 추천 (콘텐츠 루프 2단계). 입력을 비우면 회사 설정(trends.toml [recommend])과 어제 날짜.
    *  네이버는 서버 하루 캐시를 같이 쓰고, 소재마다 아이디어 문장을 LLM이 쓴다 */
   contentRecommend: () => askData<ContentRecommendOutput>("content_recommend", "영상 소재 추천", {}, RECOMMEND_DEADLINE_MS),
+  /** 홍보 영상 기획안. 서버 하루 캐시. regenerate = true면 오늘 만든 기획안이 있어도 새로 만든다(LLM·네이버를 다시 부름) */
+  promoConcepts: (regenerate = false) =>
+    askData<PromoConceptsOutput>("promo_concepts", "홍보 영상 기획안", regenerate ? { regenerate: true } : {}, RECOMMEND_DEADLINE_MS),
   /** 캠페인 효과. from·to는 ISO 시각(UTC). campaignId가 없으면 쿠폰은 서버가 "확인할 수 없음"으로 답한다 */
   campaignEffect: (from: string, to: string, campaignId: string | null) =>
     askData<CampaignEffectOutput>(
