@@ -113,6 +113,7 @@ SERVICES: tuple[Service, ...] = (
             "closing_report",
             "audit_report",
             "record_support_cost",
+            "answer_planning_question",
         ),
         "재무 관리",
     ),

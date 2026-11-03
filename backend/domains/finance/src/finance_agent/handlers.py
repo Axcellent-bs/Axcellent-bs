@@ -4,6 +4,7 @@
 | --- | --- | --- | --- |
 | `closing_report` | read | orchestrator, data | ① 기간 손익 요약 (`closing.py`) |
 | `audit_report` | read | orchestrator, data | ⑦ 사후 감사 결과 (`audit.py`) |
+| `answer_planning_question` | read | planning | 기획 질문에 답함 (`planning_questions.py`) |
 
 `verify_amount`·`review_hold`는 재무 재설계(2026-10-23)로, `loss_aggregation`은 2026-10-27에
 없앴다 (재무는 장애 대응 흐름의 단계가 아니다 — 요구사항 DEP-FIN-01, 공통 구성안 결정 22).
@@ -39,11 +40,13 @@ from ax_contracts.schemas import (
     RequestMeta,
     TaskStatus,
 )
+from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
 from finance_agent import anomalies, audit, chat_log, closing, team_budget
 from finance_agent import books as bk
 from finance_agent import finance_config as fc
 from finance_agent import ledger as lg
 from finance_agent.books import Books, load_books
+from finance_agent.planning_questions import answer_question
 from finance_agent.schemas import (
     AuditReportInput,
     AuditReportOutput,
@@ -472,8 +475,29 @@ async def record_support_cost(request: AgentRequest) -> AgentResult:
     )
 
 
+async def answer_planning_question(request: AgentRequest) -> AgentResult:
+    """기획이 되묻는 근거 질문에 재무가 보낸 요청의 기록으로만 답한다(읽기). 없으면 `unknown`."""
+    data = _parse(request, AnswerPlanningQuestionInput)
+    if isinstance(data, AgentResult):
+        return data
+    out = answer_question(data, request.meta.tenant_id, request.meta.context_id)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=out.status,
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(
+            queries=[f"finance.sent_requests request_id={data.request_id}"],
+            data_summary=f"{data.question_id} → {out.status}",
+            collected_at=datetime.now(UTC),
+            ref_ids=out.evidence_ids,
+        ),
+    )
+
+
 HANDLERS = {
     "closing_report": closing_report,
     "audit_report": audit_report,
     "record_support_cost": record_support_cost,
+    "answer_planning_question": answer_planning_question,
 }
