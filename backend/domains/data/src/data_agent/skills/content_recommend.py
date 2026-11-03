@@ -71,7 +71,13 @@ from data_agent.skills.product_link import (
     similarities,
     topic_text,
 )
-from data_agent.skills.topic_category import TOPIC_CATEGORIES, CategoryResult, classify_topic
+from data_agent.skills.topic_category import (
+    TOPIC_CATEGORIES,
+    CategoryCache,
+    CategoryResult,
+    TopicInput,
+    classify_topics,
+)
 from data_agent.skills.trend_candidates import (
     NAVER_FAILED,
     clean_tag,
@@ -330,11 +336,13 @@ async def recommend(
     now: datetime | None = None,
     context_id: str | None = None,
     catalog: Any = None,
+    category_cache: CategoryCache | None = None,
 ) -> RecommendResult:
     """급상승 소재를 순위대로 고르고 소재마다 상품 연결·아이디어 문장을 붙인다. 읽기만 한다.
 
     `catalog`: 회사 상품 목록을 주는 커넥터(`products()`·`categories()`). 없으면 상품 연결은
     확인할 수 없음 + 이유이고 관련성은 수동 회사 키워드로만 본다.
+    `category_cache`: 주제 분류 하루 캐시(서버는 `topic_category.DEFAULT_CACHE`). 없으면 늘 묻는다.
     """
     now = now or datetime.now(UTC)
     config = load_config(env)
@@ -362,17 +370,23 @@ async def recommend(
     geo = candidates_mod.load_config(env).trending_geo
     excluded = set(config.exclude_categories)
 
-    # 순위대로 분류하며 추천 안 함 분류는 참고용으로 빼고 다음 순위로 채운다
+    # 순위 앞에서 최대 max_items + max_reference개를 LLM 한 번에 묶어 분류하고(하루 캐시),
+    # 순위대로 보며 추천 안 함 분류는 참고용으로 빼고 다음 순위로 채운다
+    head = ranked[: limit + max(config.max_reference, 0)]
+    evidence_of = {t.keyword: topic_evidence(t, youtube_db, trending_path, geo) for t in head}
+    categories = await classify_topics(
+        [TopicInput(t.keyword, tuple(t.aliases), tuple(evidence_of[t.keyword])) for t in head],
+        llm,
+        cache=category_cache,
+        context_id=context_id,
+    )
     chosen: list[tuple[Topic, CategoryResult, list[str]]] = []
     reference: list[ReferenceTopic] = []
-    budget = limit + max(config.max_reference, 0)
-    for classified, topic in enumerate(ranked):
-        if len(chosen) >= limit or classified >= budget:
+    for topic in head:
+        if len(chosen) >= limit:
             break
-        evidence_texts = topic_evidence(topic, youtube_db, trending_path, geo)
-        category = await classify_topic(
-            topic.keyword, topic.aliases, evidence_texts, llm, context_id
-        )
+        evidence_texts = evidence_of[topic.keyword]
+        category = categories[topic.keyword]
         if category.category in excluded:
             reference.append(
                 ReferenceTopic(

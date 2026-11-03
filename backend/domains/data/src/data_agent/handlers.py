@@ -68,6 +68,7 @@ from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.naver_datalab import NaverDatalabConnector
 from data_agent.planning_questions import answer_question
 from data_agent.report_store import ReportStore, get_report_store
+from data_agent.skills import topic_category
 from data_agent.skills.accuracy_report import eval_dir, load_report
 from data_agent.skills.activity_report import InvalidActivityInput, build_report
 from data_agent.skills.anomaly_detection import detect_anomalies, env_settings, get_metric_source
@@ -396,6 +397,7 @@ async def content_recommend(request: AgentRequest) -> AgentResult:
         env=os.environ,
         context_id=request.meta.context_id,
         catalog=get_catalog(),
+        category_cache=topic_category.DEFAULT_CACHE,
     )
     return _result(
         request,
