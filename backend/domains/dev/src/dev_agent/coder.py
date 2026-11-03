@@ -312,6 +312,23 @@ class CoderStop(Exception):
     fields: dict[str, Any] = field(default_factory=dict)
 
 
+def _no_change(svc: DevService, job: Job, paths: list[str], why: str, point: str) -> CoderStop:
+    """바뀐 내용이 없을 때. 같은 기획서의 앞 작업이 같은 파일을 이미 머지했으면 그 PR이 반영한
+    것으로 보고 PR 없이 완료(`covered`)한다. 아니면 실패로 두고 사람이 '반영됨으로 닫기'를
+    고른다."""
+    prs = svc.covering_prs(job.task_id, paths)
+    if prs:
+        names = ", ".join(prs)
+        return CoderStop(
+            "covered",
+            f"앞 작업이 이미 반영함 ({names}) · PR 없음",
+            point,
+            f"바뀐 파일 0개 → {names}에 이미 반영돼 PR 없이 완료",
+            {"covered_by": prs},
+        )
+    return CoderStop("failed", f"{why} · 이미 반영됐으면 '반영됨으로 닫기'", point, "바뀐 파일 0개")
+
+
 # ---------------------------------------------------------------- 코드로 하는 일
 
 
@@ -915,7 +932,7 @@ async def _run(svc: DevService, job: Job) -> None:
     contents, reasons = await _write_all(llm, job, picks, originals, [])
     contents = {p: c for p, c in contents.items() if c != originals.get(p)}
     if not contents:
-        raise CoderStop("failed", "바뀐 내용이 없음", "code.write", "바뀐 파일 0개")
+        raise _no_change(svc, job, [p.path for p in picks], "바뀐 내용이 없음", "code.write")
     rows = file_rows(originals, contents, reasons)
     if total_lines(rows) > MAX_TOTAL_LINES:
         raise CoderStop(
@@ -1020,7 +1037,10 @@ async def _freshen(svc: DevService, job: Job, d: Draft) -> Draft:
             d.contents[path] = fixed[path]
             reasons[path] = fix_reasons.get(path, reasons.get(path, ""))
     if not d.contents:
-        raise CoderStop("failed", "최신 코드에 이미 반영돼 바뀐 내용이 없음", "code.rebase")
+        raise _no_change(
+            svc, job, [p.path for p in d.picks], "최신 코드에 이미 반영돼 바뀐 내용이 없음",
+            "code.rebase",
+        )  # fmt: skip
     d.rows = file_rows(d.originals, d.contents, reasons)
     if total_lines(d.rows) > MAX_TOTAL_LINES:
         raise CoderStop(

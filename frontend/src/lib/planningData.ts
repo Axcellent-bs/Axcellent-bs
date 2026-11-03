@@ -87,7 +87,7 @@ export interface Task {
 }
 
 // 코딩 에이전트 한 번의 실행. SSE로 단계가 바뀐다
-export type CodingStatus = 'queued' | 'claimed' | 'reading' | 'writing' | 'reviewing' | 'opened' | 'merged' | 'waiting_human' | 'failed' | 'canceled'
+export type CodingStatus = 'queued' | 'claimed' | 'reading' | 'writing' | 'reviewing' | 'opened' | 'merged' | 'waiting_human' | 'failed' | 'canceled' | 'covered'
 // 작업을 누가 코딩하나: 서버 AI(API 키) · 개발자 본인 Claude(구독, MCP로 가져감)
 export type CodingMode = 'agent' | 'subscription'
 export interface CodingFile { path: string; additions: number; deletions: number; reason: string }
@@ -111,6 +111,7 @@ export interface CodingRun {
   connection?: string | null // 올릴 레포 연결
   claimedBy?: string | null // 구독형: 가져간 사람
   holdKey?: string | null // 실행 관문이 PR 열기(generate_pr)를 보류한 키
+  coveredBy?: string[] // covered: 이 작업을 이미 반영한 앞 작업 PR (PR 없이 완료)
   holdReview?: string | null // 그 보류 건 (사람이 승인하면 같은 키로 PR을 연다)
   claimedAt?: string | null
   leaseUntil?: string | null // 이때까지 진행 보고가 없으면 대기열로 돌아간다

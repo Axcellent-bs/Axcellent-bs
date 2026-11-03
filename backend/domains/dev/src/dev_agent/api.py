@@ -368,6 +368,18 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return _gate_err(exc)
         return _ok(result.output, svc)
 
+    @router.post("/dev-tasks/{task_id}/close-covered", response_model=None, dependencies=HUMAN)
+    async def post_dev_task_close_covered(task_id: str) -> dict | JSONResponse:
+        """반영됨으로 닫기: 바뀐 내용이 없어 멈춘 작업을 앞 작업이 반영한 것으로 완료 (PR 없음)."""
+        svc = get_service()
+        try:
+            result = await svc.close_dev_task_covered(task_id)
+        except ActionError as exc:
+            return _coding_err(exc)
+        except GateRefused as exc:
+            return _gate_err(exc)
+        return _ok(result.output, svc)
+
     @router.post("/dev-tasks/{task_id}/revise", response_model=None, dependencies=HUMAN)
     async def post_dev_task_revise(task_id: str, request: Request) -> dict | JSONResponse:
         """사람 확인을 기다리는 코딩 PR에 수정 지시 `{note}`. 개발 AI가 고쳐 같은 PR에 커밋한다."""

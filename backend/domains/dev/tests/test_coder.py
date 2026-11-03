@@ -1126,3 +1126,69 @@ def test_draft_survives_restart_and_approve_needs_no_llm(tmp_path, monkeypatch, 
 
     again.reset()
     assert coder.draft_of(DevService(gate=gate, relater=None), "T-D1") is None
+
+
+# ---------------------------------------------------------------- 앞 작업이 이미 반영 (covered)
+
+
+def _same_file_only() -> FakeLLM:
+    """배너 하나만 고르고, 쓰기는 지금 글 그대로 준다 (바뀐 내용 없음)."""
+    return FakeLLM(
+        plan=CodePlan(
+            files=[FilePick(path=BANNER, action="modify", reason="배너 문구")], summary="배너"
+        ),
+        writes={BANNER: lambda d: d["current"]},
+    )
+
+
+def test_no_change_after_earlier_merge_is_covered(service: PlanningService, adapter) -> None:
+    from ax_workflow.models import CodingRun
+
+    coder.set_llm(FakeLLM())
+    run(_go(service, paths=["shop-web/src/components"]))
+    first = _task(service)
+    assert first.state == "완료"
+    # 같은 기획서의 두 번째 작업(R2): 앞 작업 PR #31이 이미 같은 파일을 바꿨다
+    second = first.model_copy(
+        update={
+            "id": "T-D2",
+            "para": "R2",
+            "state": "진행 중",
+            "coding": CodingRun(status="failed", updated_at=service.clock()),
+        }
+    )
+    service.state.tasks.append(second)
+    req = next(r for r in service.state.requests if r.id == "REQ-D1")
+    req.state = "작업 중"
+    coder.set_llm(_same_file_only())
+    run(_retry(service, "T-D2"))
+    t2 = _task(service, "T-D2")
+    assert t2.coding is not None and t2.coding.status == "covered"
+    assert t2.coding.covered_by == ["PR #31"] and t2.coding.error is None
+    req = next(r for r in service.state.requests if r.id == "REQ-D1")  # 상태는 새로 읽는다
+    assert t2.state == "완료" and req.state == "완료"
+    assert not any(p.task == "T-D2" for p in service.state.prs)  # PR 없음
+    # 배포 전 대조: R2는 반영한 PR #31이 맡는다
+    sp = next(s for s in service.state.specs if s.id == "SPEC-D1")
+    prs = DevService._release_prs(service.state, sp)
+    assert [(p.number, p.reviewed_paras) for p in prs] == [(31, ["R1", "R2"])]
+
+
+def test_no_change_without_earlier_pr_fails_then_human_closes(
+    service: PlanningService, adapter
+) -> None:
+    coder.set_llm(_same_file_only())
+    run(_go(service, paths=["shop-web/src/components"]))
+    t = _task(service)
+    assert t.coding is not None and t.coding.status == "failed"
+    assert "반영됨으로 닫기" in (t.coding.error or "")
+    out = run(service.close_dev_task_covered("T-D1"))
+    assert out.outcome == "covered" and out.output["covered_by"] == []
+    t = _task(service)
+    assert t.coding is not None and t.coding.status == "covered" and t.state == "완료"
+    req = next(r for r in service.state.requests if r.id == "REQ-D1")
+    assert req.state == "완료"
+    assert "dev_task_covered" in _points(service)
+    with pytest.raises(ActionError) as e:
+        run(service.close_dev_task_covered("T-D1"))
+    assert e.value.code == "NOT_CLOSABLE"

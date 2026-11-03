@@ -178,6 +178,8 @@ CodingStatus = Literal[
     "waiting_human",
     "failed",
     "canceled",  # 사람이 중단 (열린 PR은 닫고 브랜치를 지움)
+    # 앞 작업 PR이 이미 반영해 바뀐 내용이 없음 → PR 없이 완료 (`covered_by`가 반영한 PR)
+    "covered",
 ]
 
 
@@ -234,6 +236,8 @@ class CodingRun(DomainModel):
     hold_review: str | None = None
     hold_paths: list[str] = Field(default_factory=list)
     hold_ok: bool = False
+    # status covered: 이 작업 내용을 이미 반영한 PR 표시 id (배포 전 대조에서 그 PR이 맡는다)
+    covered_by: list[str] = Field(default_factory=list)
 
 
 class Task(DomainModel):
