@@ -26,6 +26,9 @@ skill과 등급(등급 신고는 안전 레이어 레지스트리가 원본이�
 | `list_duplicate_groups` | 읽기 | 사람 승인을 기다리는 중복 결정 묶음과 최근 병합(되돌리기용) |
 | `decide_duplicate_group` | A | 중복 묶음을 사람이 병합하거나 그대로 둠 |
 | `restore_merged_card` | A | 병합으로 대체됨이 된 카드를 되돌림 |
+| `record_org_change` | A | 조직 변동(발령) 초안 저장. 승인 전에는 인원에 세지 않는다 |
+| `decide_org_change` | A | 인사 담당자가 발령 초안을 확정·반려 (요청자 dashboard-api) |
+| `list_org_changes` | 읽기 | 발령 기록 목록 |
 | `team_headcount` | 읽기 | 그 달 1일 기준 팀별 인원수 (이름·직원 ID 없음, 요청자 finance 팀 예산) |
 
 `RecordCaseOutput`은 모델만 추가했고, hr의 출력 전환은 hr 담당 PR에서 한다.
@@ -39,7 +42,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from ax_contracts.schemas.common import AxModel, UtcDatetime
 from ax_contracts.schemas.record import Card
@@ -318,6 +321,79 @@ class TeamHeadcountOutput(AxModel):
     basis: str | None = None
     collected_at: UtcDatetime
     example: bool = False
+
+
+# ---- 조직 변동(발령) 기록 (재무 팀 예산용, 2026-11-03) ----------------------------------
+# 초안은 승인 없이 저장하고 인원에 세지 않는다. 인사 담당자가 확정해야 `team_headcount`에 센다.
+
+OrgChangeKind = Literal["transfer", "join", "leave"]  # 팀 이동 · 입사 · 퇴사
+OrgChangeStatus = Literal["draft", "confirmed", "rejected"]
+Date = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")  # YYYY-MM-DD
+
+
+class RecordOrgChangeInput(AxModel):
+    """`record_org_change` 입력. 팀 이동은 두 팀, 입사는 들어가는 팀, 퇴사는 나가는 팀을 적는다."""
+
+    member_id: str = Field(min_length=1, max_length=64)
+    kind: OrgChangeKind
+    from_team: str | None = None
+    to_team: str | None = None
+    effective_date: str = Date
+    note: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def _teams_match_kind(self) -> RecordOrgChangeInput:
+        if self.kind == "transfer":
+            ok = bool(self.from_team and self.to_team and self.from_team != self.to_team)
+        elif self.kind == "join":
+            ok = bool(self.to_team) and self.from_team is None
+        else:
+            ok = bool(self.from_team) and self.to_team is None
+        if not ok:
+            raise ValueError(f"{self.kind} 발령의 from_team·to_team이 맞지 않는다")
+        return self
+
+
+class OrgChangeView(AxModel):
+    """발령 기록 하나. 인원에 세는 첫 달(`counts_from_month`)을 같이 보여 준다."""
+
+    change_id: str
+    member_id: str
+    kind: OrgChangeKind
+    from_team: str | None = None
+    to_team: str | None = None
+    effective_date: str = Date
+    counts_from_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    status: OrgChangeStatus
+    note: str | None = None
+    created_at: UtcDatetime
+    decided_at: UtcDatetime | None = None
+
+
+class RecordOrgChangeOutput(AxModel):
+    change: OrgChangeView
+
+
+class DecideOrgChangeInput(AxModel):
+    """인사 담당자가 초안을 확정(`approve`)하거나 반려(`reject`)한다."""
+
+    change_id: str
+    decision: Literal["approve", "reject"]
+    note: str | None = Field(default=None, max_length=500)
+
+
+class DecideOrgChangeOutput(AxModel):
+    change: OrgChangeView
+
+
+class ListOrgChangesInput(AxModel):
+    status: OrgChangeStatus | None = None
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class ListOrgChangesOutput(AxModel):
+    changes: list[OrgChangeView] = Field(default_factory=list)
+    collected_at: UtcDatetime
 
 
 # ---- 유사 사기 카드 조회 (data의 사기 점수 FRAUD_SIMILAR 규칙용) ------------------------------

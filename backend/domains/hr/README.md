@@ -22,7 +22,10 @@ Agent Card: `agent-card.json` (`/.well-known/agent-card.json`으로 공개). 입
 |---|---|---|---|
 | `record_case` | A | 기록을 결정 카드로 정리해 저장 (결정 없으면 기록만, 확신 낮으면 후보) | orchestrator·planning·support·marketing·finance·data·infra |
 | `get_roster` | 조회 | 영역별 담당·교대, 담당 없음·교대 공백 영역 | orchestrator·dashboard-api·planning·support·marketing·finance·data·infra |
-| `team_headcount` | 조회 | 그달 1일 기준 팀별 인원수(이름·직원 ID 없음). 지금은 가상 명부(예시)라 `example: true` | orchestrator·finance |
+| `team_headcount` | 조회 | 그달 1일 기준 팀별 인원수(이름·직원 ID 없음). 확정된 발령 기록이 있으면 그 기록으로 세고(`example: false`), 하나도 없으면 가상 명부(예시)라 `example: true` | orchestrator·finance |
+| `record_org_change` | A | 조직 변동(팀 이동·입사·퇴사) 초안 저장. 승인 없이 저장하고 확정 전에는 인원에 세지 않는다 | dashboard-api |
+| `decide_org_change` | A | 인사 담당자가 초안을 확정·반려. 확정하면 그때부터 `team_headcount`에 센다 | dashboard-api |
+| `list_org_changes` | 조회 | 조직 변동 기록 목록(초안·확정·반려) | dashboard-api |
 | `start_handover` | A | 인수인계 초안, 빈 자리 질문, 완성도(코드 계산) | orchestrator |
 | `answer_handover_question` | A | 인계자 답변 반영, 같은 답은 한 번만 | orchestrator·dashboard-api |
 | `confirm_handover` | B(planning 검증) / 완성도 미달 C | 인수인계 확정 | orchestrator |

@@ -3,6 +3,7 @@
 - 인수인계: `handovers`, `handover_items`, `handover_fields`, `handover_questions`
 - 온보딩: `onboardings`, `onboarding_steps`
 - 발령·퇴직: `assignment_changes`
+- 조직 변동(팀 이동·입사·퇴사) 기록: `org_changes` (초안 → 확정·반려, 확정만 팀 인원에 센다)
 - 명부·교대: `roster_entries`, `shifts`
 - 공통: `audit_logs`, `idempotency`, `records`(결정이 없어 기록만 남긴 것)
 - 목 전용(실제에서는 다른 서비스가 가진다): `mock_cards`(memory), `gate_decisions`(안전 레이어)
@@ -159,6 +160,21 @@ CREATE TABLE IF NOT EXISTS assignment_changes (
   previous TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS org_changes (
+  change_id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL DEFAULT '{TENANT_ID_DEFAULT}',
+  context_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  from_team TEXT,
+  to_team TEXT,
+  effective_date TEXT NOT NULL,
+  counts_from_month TEXT NOT NULL,
+  status TEXT NOT NULL,
+  note TEXT,
+  created_at TEXT NOT NULL,
+  decided_at TEXT
 );
 CREATE TABLE IF NOT EXISTS members (
   member_id TEXT PRIMARY KEY,
