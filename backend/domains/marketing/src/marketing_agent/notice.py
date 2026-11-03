@@ -68,10 +68,21 @@ class NoticeStore:
     def get_draft(self, draft_id: str) -> NoticeDraft | None:
         return self._drafts.get(draft_id)
 
-    def publish(self, context_id: str, draft: NoticeDraft) -> str:
+    def open_incident_notice_ids(self, context_id: str) -> list[str]:
+        """같은 사건에서 게시한 장애 공지 중 아직 끝나지 않은 것 (복구 공지가 나가면 끝난다)."""
+        return [
+            notice_id
+            for notice_id, (earlier_context, earlier) in self._published.items()
+            if earlier_context == context_id
+            and earlier.kind == "incident_opened"
+            and notice_id not in self._ended
+        ]
+
+    def publish(self, context_id: str, draft: NoticeDraft, notice_id: str | None = None) -> str:
+        """게시한다. `notice_id`를 주면 그 번호를 쓴다(쇼핑몰 배너 번호라 겹치면 안 된다)."""
         if draft.draft_id in self._by_draft:
             return self._by_draft[draft.draft_id]
-        notice_id = f"ntc_{next(self._counter):04d}"
+        notice_id = notice_id or f"ntc_{next(self._counter):04d}"
         if draft.kind == "incident_resolved":  # 복구 공지가 나가면 같은 사건의 장애 공지는 끝난다
             for earlier_id, (earlier_context, earlier) in self._published.items():
                 if earlier_context == context_id and earlier.kind == "incident_opened":
