@@ -302,11 +302,14 @@ def _without_abusive_original(message: dict) -> dict:
 # ---------------------------------------------------------------- 문의 (목 모드 또는 support A2A)
 # 목 모드(`DASHBOARD_MOCK=1`)는 메모리 데이터, 아니면 support 에이전트 skill을 부른다.
 @router.get("/conversations")
-async def conversations() -> dict:
+async def conversations(language: str | None = None) -> dict:
     if is_mock():
         items = mock_data.list_conversations()
+        if language:
+            items = [i for i in items if getattr(i, "language", "ko") == language]
     else:
-        out = await or_unavailable(support_client.call("list_inquiries"), {"items": []})
+        args = {"language": language} if language else {}
+        out = await or_unavailable(support_client.call("list_inquiries", args), {"items": []})
         items = [
             ConversationListItem.model_validate(_with_shown_subject(i))
             for i in out.get("items", [])

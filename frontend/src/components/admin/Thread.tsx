@@ -1,8 +1,29 @@
 import { useEffect, useRef } from "react";
+import { LANGUAGE_KO } from "@/lib/labels";
 import { useOriginal } from "@/lib/useOriginal";
 import type { Conversation, Message } from "@/lib/types";
 
 const ABUSE_LABEL = { profanity: "비속어 가림", insult: "모욕 표현 가림", threat: "위협 표현 있음" } as const;
+
+/** 한국어가 아닌 고객 메시지 밑에 한국어 번역과 핵심 요청을 보여 준다 (AI 번역이라 원문과 함께 본다) */
+function Translation({ m }: { m: Message }) {
+  const c = m.analysis?.classification;
+  const points = c?.request_points_ko ?? [];
+  if (!c || (!c.message_ko && !points.length)) return null;
+  return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-ink-700" aria-label="한국어 번역">
+      <div className="mb-1 flex items-center gap-1.5 font-medium text-amber-800">
+        <span>한국어 번역</span><span className="font-normal text-ink-500">AI 번역 · 원문 {LANGUAGE_KO[c.language ?? "other"] ?? "기타"}</span>
+      </div>
+      {c.message_ko && <p className="whitespace-pre-wrap">{c.message_ko}</p>}
+      {points.length > 0 && (
+        <ul className="mt-1.5 list-disc space-y-0.5 pl-4 font-medium text-ink-900">
+          {points.map((p) => <li key={p}>{p}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 function Bubble({ m, inquiryId }: { m: Message; inquiryId: number }) {
   const customer = m.role === "customer";
@@ -15,6 +36,7 @@ function Bubble({ m, inquiryId }: { m: Message; inquiryId: number }) {
     <div className={`flex ${customer ? "justify-start" : "justify-end"}`}>
       <div className={`flex max-w-[78%] flex-col gap-1 ${customer ? "" : "items-end"}`}>
         <div className={`whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${customer ? "rounded-tl-sm border border-ink-100 bg-surface" : "rounded-tr-sm bg-brand-600 text-white"}`}>{body}</div>
+        {customer && <Translation m={m} />}
         {masked && (
           <div className="flex items-center gap-2 text-[11px]">
             <span className={`rounded-full px-2 py-0.5 font-medium ${m.abuse_level === "threat" ? "bg-red-50 text-red-800" : "bg-amber-50 text-amber-800"}`}>

@@ -16,7 +16,7 @@ from typing import Any
 
 from ax_agent_template.config import is_mock
 from ax_agent_template.llm import LLMClient, MockLLMClient
-from support_agent import categories, guard, kb, languages, privacy_rules
+from support_agent import abuse_rules, categories, guard, kb, languages, privacy_rules
 from support_agent.schemas import (
     STYLES,
     Analysis,
@@ -186,6 +186,25 @@ def _validated_drafts(
     return drafts
 
 
+MAX_TRANSLATION = 2000
+MAX_POINT = 120
+
+
+def _clean_ko(text: Any, limit: int) -> str:
+    """모델이 쓴 한국어 글에서 개인정보와 욕설을 다시 가린다 (번역이 원문의 우회로가 되지 않게)."""
+    if not isinstance(text, str):
+        return ""
+    return abuse_rules.assess(guard.mask_pii(text.strip())[0])[0][:limit]
+
+
+def _translation(language: str, message_ko: Any, points: Any) -> tuple[str, list[str]]:
+    """한국어가 아닌 문의의 번역과 핵심 요청. 한국어 문의는 늘 비운다."""
+    if language == "ko":
+        return "", []
+    cleaned = [_clean_ko(p, MAX_POINT) for p in points[:3]] if isinstance(points, list) else []
+    return _clean_ko(message_ko, MAX_TRANSLATION), [p for p in cleaned if p]
+
+
 async def analyze(
     text: str,
     subject: str = "",
@@ -212,7 +231,10 @@ async def analyze(
             "category는 다음 코드 중 하나만 쓰고 다른 이름을 만들지 않는다: "
             f"{categories.PROMPT_HINT}. "
             "정책 문서는 한국어이므로 search_query는 고객 언어와 관계없이 한국어로 쓴다. "
-            "keywords에는 고객 메시지의 핵심 단어를 최대 5개 넣고 개인정보는 넣지 않는다.",
+            "keywords에는 고객 메시지의 핵심 단어를 최대 5개 넣고 개인정보는 넣지 않는다. "
+            "고객 메시지가 한국어가 아니면 message_ko에 뜻을 바꾸지 않은 한국어 번역을 쓰고, "
+            "한국어이면 message_ko는 빈 문자열로 둔다. 번역에 약속·설명·의견을 더하지 않는다. "
+            "request_points_ko에는 고객이 바라는 핵심 요청을 한국어 짧은 문장으로 최대 3개 쓴다.",
             LLMClassification,
             untrusted=untrusted,
         )
@@ -224,11 +246,21 @@ async def analyze(
     classified_data = classified.model_dump()
     if privacy_rules.is_deletion_request(masked):  # LLM이 틀려도 코드가 바로잡는다 (#430)
         classified_data["category"] = privacy_rules.CATEGORY
+    message_ko, request_points = _translation(
+        language,
+        classified_data.pop("message_ko", ""),
+        classified_data.pop("request_points_ko", []),
+    )
     keywords = clean_keywords(classified_data.pop("keywords", []))
     if not keywords:  # LLM이 키워드를 못 줬으면 규칙으로 찾은 것을 쓴다
         keywords = keyword_classification(masked).keywords
     classification = Classification(
-        **classified_data, pii_masked=pii_kinds, language=language, keywords=keywords
+        **classified_data,
+        pii_masked=pii_kinds,
+        language=language,
+        keywords=keywords,
+        message_ko=message_ko,
+        request_points_ko=request_points,
     )
     query = classification.search_query or masked
     found = await retrieve(query) if retrieve is not None else kb.search(query)

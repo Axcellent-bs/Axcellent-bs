@@ -81,6 +81,11 @@ export function CopilotPanel({ conv, onUseDraft, onRejectDraft, onClaimCreated, 
           <h3 className="panel-title mb-2">문의 분석</h3>
           <div className="rounded-xl border border-ink-100 bg-surface p-3">
             <p className="text-sm font-medium leading-snug">{cls.intent_ko}</p>
+            {!!cls.request_points_ko?.length && (
+              <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-xs text-ink-700" aria-label="핵심 요청">
+                {cls.request_points_ko.map((p) => <li key={p}>{p}</li>)}
+              </ul>
+            )}
             <div className="mt-2 flex flex-wrap gap-1">
               <span className="chip bg-brand-50 text-brand-700">{CATEGORY_KO[cls.category]}</span>
               <span className={`chip ${cls.sentiment === "angry" ? "bg-red-50 text-red-700" : cls.sentiment === "frustrated" ? "bg-amber-50 text-amber-700" : "bg-ink-100 text-ink-700"}`}>감정 {SENTIMENT_KO[cls.sentiment]}</span>

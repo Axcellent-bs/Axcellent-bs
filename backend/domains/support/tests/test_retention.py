@@ -38,6 +38,8 @@ def _analysis() -> Analysis:
             search_query=f"{NAME} 환불",
             pii_masked=["phone"],
             keywords=["환불", NAME],
+            message_ko=f"{NAME}입니다. 환불해 주세요",
+            request_points_ko=[f"{NAME} 환불 요청"],
         ),
         drafts=[
             Draft(
@@ -121,6 +123,7 @@ def test_apply_replaces_text_and_keeps_statistics() -> None:
     classification = done.messages[0].analysis.classification  # type: ignore[union-attr]
     assert classification.keywords == [] and classification.pii_masked == ["phone"]
     assert classification.category == "payment"
+    assert classification.message_ko == retention.PURGED and classification.request_points_ko == []
     draft = done.messages[0].analysis.drafts[0]  # type: ignore[union-attr,index]
     assert draft.reply == retention.PURGED and draft.reply_ko == retention.PURGED
     assert done.feedback and done.feedback.comment == "" and done.feedback.rating == 4
