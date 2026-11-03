@@ -256,13 +256,19 @@ class CampaignCreatedData(AxModel):
 
 
 class CouponIssuedData(AxModel):
-    """`coupon.issued`. `purpose_code`가 보상이면 `campaign_id`는 None이다."""
+    """`coupon.issued`. `purpose_code`가 보상이면 `campaign_id`는 None이다.
+
+    `buyer_id`·`execution_id`는 재무 사건 장부에 남긴다. 안전 서비스 실행 기록은 재시작하면
+    비워진다.
+    """
 
     coupon_id: str
     campaign_id: str | None = None
     purpose_code: Literal["campaign", "compensation"]
     count: int
     total_value: int
+    buyer_id: str | None = None
+    execution_id: str | None = None
 
     @model_validator(mode="after")
     def _campaign_id_matches_purpose(self) -> CouponIssuedData:

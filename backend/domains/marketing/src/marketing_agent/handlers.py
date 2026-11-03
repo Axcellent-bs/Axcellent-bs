@@ -323,8 +323,12 @@ async def issue_coupon(request: AgentRequest) -> AgentResult:
             purpose_code=data.purpose_code,
             count=data.count,
             total_value=total,
+            buyer_id=data.buyer_id,
+            execution_id=decision.execution_id,
         ),
-        f"coupon.issued:{coupon_id}",
+        # 쿠폰 번호는 재시작하면 다시 1부터라 이벤트 키로 쓰면 새 쿠폰이 이미 보낸 것으로 버려진다.
+        # 사건·고객으로 만든 멱등 키를 쓴다
+        f"coupon.issued:{key}",
     )
     return result
 
