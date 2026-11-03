@@ -364,7 +364,7 @@ async def list_inquiries(request: AgentRequest) -> AgentResult:
     parsed = _parse(request, ListInquiriesInput)
     if isinstance(parsed, AgentResult):
         return parsed
-    items = STORE.list(parsed.status, parsed.user_id)
+    items = STORE.list(parsed.status, parsed.user_id, parsed.language)
     return _done(request, {"items": [i.model_dump(mode="json") for i in items]})
 
 

@@ -109,6 +109,7 @@ def overview(store: InquiryStore, now: datetime | None = None) -> InquiryOvervie
             urgency=c.urgency,
             sentiment=c.sentiment,
             preview=c.preview,
+            language=c.language,
             waiting_minutes=max(int((now - parse_time(c.updated_at)).total_seconds() // 60), 0),
         )
         for c in store.all()

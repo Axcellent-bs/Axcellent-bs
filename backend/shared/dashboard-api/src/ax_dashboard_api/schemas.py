@@ -342,6 +342,7 @@ class ConversationListItem(BaseModel):
     updated_at: str
     preview: str
     awaiting_reply: bool
+    language: str = "ko"  # 고객이 마지막으로 쓴 언어 (ko·en·ja·zh·other)
 
 
 class ActivityEntry(BaseModel):

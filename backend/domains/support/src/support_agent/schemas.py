@@ -112,6 +112,7 @@ class ConversationListItem(AxModel):
     updated_at: str
     preview: str
     awaiting_reply: bool
+    language: str = "ko"  # 고객이 마지막으로 쓴 언어 (`languages.detect`: ko·en·ja·zh·other)
 
 
 class ActivityEntry(AxModel):
@@ -214,6 +215,7 @@ class LLMDrafts(AxModel):
 class ListInquiriesInput(AxModel):
     status: InquiryStatus | None = None
     user_id: int | None = None  # 이 고객의 문의만 (고객 화면을 대신 부르는 shop-api는 필수)
+    language: str | None = None  # 이 언어로 쓴 문의만 (ko·en·ja·zh·other)
 
 
 class GetInquiryInput(AxModel):
