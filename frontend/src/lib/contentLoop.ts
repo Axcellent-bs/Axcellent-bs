@@ -71,13 +71,11 @@ export const LOOP_STAGES: LoopStage[] = [
     no: 3,
     tab: "handoff",
     title: "넘김",
-    owner: "데이터분석 AI → 마케팅",
+    owner: "기획 → 마케팅",
     live: false,
-    description: "고른 기획안을 마케팅(영상 제작·게시)으로 넘깁니다.",
+    // 루프 띠와 탭 안 안내가 같은 문장을 쓴다
+    description: "기획팀이 초안을 확정하고 마케팅이 제작·게시하는 단계 (준비 중)",
     status: { label: "준비 중", tone: "muted" },
-    note: `아직 못 해요: ${SEND_TO_MARKETING_BLOCKED}`,
-    todo: "고른 기획안을 마케팅에 넘겨 AI 인플루언서·배우·캐릭터 영상으로 만들기",
-    needs: ["화면(사람 로그인)에서 받은 요청을 넣을 수 있어야 해요"],
   },
   {
     no: 4,
