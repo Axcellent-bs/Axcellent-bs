@@ -11,7 +11,7 @@ from planning_agent.domain.service import PlanningService
 from planning_agent.main import app
 from planning_agent.runtime import set_service
 
-# 간단 요청 규칙에 안 걸리는 제목 (결제 → 사람 확정 필요). 자동 처리 흐름 없이 접수만 본다
+# 간단 요청 규칙에 안 걸리는 제목 (결제 → 간단 요청 아님). 자동 처리 흐름 없이 접수만 본다
 TITLE = "쿠폰 적용 후 결제 금액이 두 번 계산된다"
 
 
