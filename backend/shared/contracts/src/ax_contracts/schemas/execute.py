@@ -69,3 +69,24 @@ class ExecuteDecision(AxModel):
         if self.status == "held" and self.hold_reason is None:
             raise ValueError("held에는 hold_reason이 필요하다")
         return self
+
+
+class ConnectionHoldNotice(AxModel):
+    """개발 → 안전 서비스: 이 외부 연결의 쓰기를 보류(또는 해제)해 달라.
+
+    `hold`가 True면 근거 `kev_cves`가 있어야 한다 (CISA KEV + 취약 버전). 비밀 값은 넣지 않는다.
+    """
+
+    connection_id: str = Field(min_length=1)
+    hold: bool
+    product: str
+    version: str
+    kev_cves: list[str] = Field(default_factory=list)
+    judged_at: str
+    reason: str
+
+    @model_validator(mode="after")
+    def _hold_needs_evidence(self) -> ConnectionHoldNotice:
+        if self.hold and not self.kev_cves:
+            raise ValueError("보류에는 근거 CVE가 필요하다")
+        return self

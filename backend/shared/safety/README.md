@@ -10,7 +10,7 @@
 - 감사 로그 (SAF-06): 접수·검증·판정·인증 거부·보류 결정을 `context_id`와 함께 남긴다
 - 공통 로그 (COM-08): 판정마다 `execute_decided`(grade·status·action·requester), 인증 거부는 `rejected`(`reason_code` = `UNAUTHORIZED`/`FORBIDDEN`)를 `AX_COMMON_LOG_DB`에 남긴다. 대시보드 "안전 관문 로그"와 data `kpi_summary`가 이것을 읽는다. 계약 `LogKind`에 없는 종류는 저장소에 남지 않는다
 - fail-closed (SAF-08): 미등록 액션·금액 필드 오류·총액 불일치·검증 무응답은 실행하지 않는다
-- 외부 연결 쓰기: 레지스트리에 `connection_field`가 있는 액션은 연결 id가 비어 있으면 C(`schema_invalid`). 긴급 취약 연결의 보류는 아직 없다(취약점 판정이 들어오면 붙인다)
+- 외부 연결 쓰기: 레지스트리에 `connection_field`가 있는 액션은 연결 id가 비어 있으면 C(`schema_invalid`). 개발 서비스가 긴급(KEV + 취약 버전)으로 알린 연결은 C로 보류한다(보고서 `rules`의 `connection_kev_hold`, 사람이 승인하면 실행)
 - 누적 한도 (SAF-10): 일일(UTC)·사건별·고객별 누적 금액 규칙
 - 규칙 기반 검증 (SAF-11): 금액은 코드가 건수 × 단가로 다시 계산한다
 
@@ -44,6 +44,8 @@ curl -X POST localhost:8001/api/safety/reviews/<review_id>/decision \
 | `POST /api/safety/reviews/{review_id}/decision` | `{decision: approved\|rejected, note}` | **사람만** |
 | `GET /api/safety/audit-logs?context_id=` | 감사 로그 | — |
 | `GET /api/safety/thresholds`, `GET /api/safety/registry` | 기준표·레지스트리 | — |
+| `POST /api/safety/connection-holds` | 연결 쓰기 보류·해제 (`ConnectionHoldNotice`). `SAFETY_CONNECTION_HOLDS_FILE`이 있으면 재시작해도 남는다 | 개발 서비스만 |
+| `GET /api/safety/connection-holds` | 지금 보류 중인 연결 | — |
 
 - 요청·판정 형식은 `contracts`의 `ExecuteRequest`, `ExecuteDecision`, `HoldReason`.
 - B 교차검증 요청 입력(검증자 skill의 `input`): `execution_id`, `action`, `requester`, `params`, `computed_amount`, `threshold_version`. 검증자는 `completed` + `decision: "approved"`(또는 `approved: true`)일 때만 승인이다.

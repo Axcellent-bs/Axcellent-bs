@@ -5,6 +5,8 @@
 1. 멱등성: 같은 `(tenant_id, idempotency_key)`면 이전 판정을 그대로 돌려준다.
 2. 레지스트리: 미등록 액션이거나 요청자가 액션 owner가 아니면 C(`unregistered_action`).
    외부 연결에 쓰는 액션(`connection_field`)은 연결 id가 비어 있으면 C(`schema_invalid`).
+   그 연결에 긴급 취약 보류가 걸려 있으면 C다. `hold_reason`은 응답 enum이라 값을 더할 수
+   없어(`contracts-compat`) `over_threshold`로 나가고, 보고서 `rules`로 구분한다
 3. 금액은 코드가 계산한다(건수 × 단가 또는 금액 필드). 필드가 없거나 정수가 아니면
    C(`schema_invalid`), 요청 쪽이 적은 총액과 다르면 C(`amount_mismatch`).
 4. 등급 = 레지스트리 기본 등급과 금액 규칙(건별·일일·사건별·고객별 누적) 중 높은 쪽.
@@ -178,6 +180,22 @@ class Gate:
                 )
 
         hits = self._rule_hits(spec, request, amount, unit, customer)
+        held = (
+            self.store.connection_hold(self._param_str(spec.connection_field, request.params))
+            if spec.connection_field
+            else None
+        )
+        if held is not None:
+            hits.append(
+                {
+                    "key": "connection_kev_hold",
+                    "connection_id": held.connection_id,
+                    "product": held.product,
+                    "version": held.version,
+                    "kev_cves": held.kev_cves,
+                    "judged_at": held.judged_at,
+                }
+            )
         grade = spec.base_grade
         if hits:
             grade = higher(grade, "C")

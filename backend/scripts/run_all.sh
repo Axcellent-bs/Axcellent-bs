@@ -159,6 +159,8 @@ export AX_ENABLED_SERVICES_FILE="${AX_ENABLED_SERVICES_FILE:-$PWD/$DATA/enabled_
 export AX_HANDOFF_DB="$PWD/$DATA/handoffs.db"
 # 재무 기록(판매자 심사·정산 보류·장부·사람 결정). 다시 켜도 이어진다
 export FINANCE_STATE_FILE="$PWD/$DATA/finance_state.json"
+# 외부 연결 쓰기 보류(긴급 취약). 다시 켜도 잊지 않게 파일에 둔다
+export SAFETY_CONNECTION_HOLDS_FILE="$PWD/$DATA/connection_holds.json"
 
 # .env (LLM 설정 등). 값은 출력하지 않는다
 if [ -f .env ]; then

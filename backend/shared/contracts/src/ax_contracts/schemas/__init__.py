@@ -126,7 +126,12 @@ from ax_contracts.schemas.event import (
     SupportInquiryReceivedData,
     SupportInquiryResolvedData,
 )
-from ax_contracts.schemas.execute import ExecuteDecision, ExecuteRequest, HoldReason
+from ax_contracts.schemas.execute import (
+    ConnectionHoldNotice,
+    ExecuteDecision,
+    ExecuteRequest,
+    HoldReason,
+)
 from ax_contracts.schemas.finance import (
     ReviewHoldDecision,
     ReviewHoldInput,
@@ -368,6 +373,7 @@ __all__ = [
     "EventEnvelope",
     "EventType",
     "Evidence",
+    "ConnectionHoldNotice",
     "ExecuteDecision",
     "ExecuteRequest",
     "GetRosterInput",
