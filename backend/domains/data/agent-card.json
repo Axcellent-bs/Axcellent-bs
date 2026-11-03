@@ -138,6 +138,17 @@
       "handoff": false
     },
     {
+      "id": "trend_popular",
+      "description": "최신 YouTube 인기 스냅샷의 태그·제목 구(trend_candidates와 같은 정리·별칭·제외 규칙)와 최신 인기 검색어 스냅샷에서 주제를 모아 \"지금 인기\" 순위를 준다(급상승 판정과 별개). 점수는 코드: video_weight × 인기 영상 수 몫 + velocity_weight × 지금 조회 속도 몫(최근 두 스냅샷) + trending_weight × 인기 검색어 순위 몫, 가중치·개수는 config/tenants/<회사>/trends.toml [popular]. 출처를 못 읽으면 그 몫만 unknown과 이유이고 0으로 채우지 않는다. 주제 분류는 LLM이 정해진 목록에서 한 번에 묶어 고르고(하루 캐시) 회사 추천 안 함 분류면 brand_safe false. 오늘 이미 낸 네이버 판정이 급상승이면 rising_now. 네이버를 부르지 않는다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendPopularRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendPopularOutput",
+      "grade": "read",
+      "allowed_requesters": ["orchestrator", "marketing", "dashboard-api"],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
       "id": "answer_planning_question",
       "description": "기획 질문에 답한다. 기획이 data가 보낸 요청(create_ticket)의 근거를 되물으면, data가 보낸 요청의 기록(보낼 때 코드가 만든 사실 문장·근거 ID)으로만 답한다. 근거 질문이고 기록에 사실이 있으면 answered, data가 보낸 요청이지만 기록으로 답할 수 없으면 needs_human(사람이 답하면 planning receive_planning_answer로 보낸다), 보낸 기록이 없으면 unknown. 지어내지 않는다. 상태를 바꾸지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionInput",

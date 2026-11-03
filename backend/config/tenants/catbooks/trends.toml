@@ -104,6 +104,17 @@ months = 24   # 볼 개월 수 (작년 같은 달과 비교하려면 13개월 �
 [velocity]
 top = 10
 
+# 지금 인기(data trend_popular): 급상승 판정과 별개로 "지금 많이 보이고 많이 찾는 주제"를 코드 점수로 줄 세운다.
+# 네이버를 부르지 않는다. 점수 = video_weight × 인기 영상 수 몫 + velocity_weight × 지금 조회 속도 몫
+# + trending_weight × 인기 검색어 순위 몫 (몫은 0~1). 주제 정리·제외 규칙은 [candidates]와 같다
+[popular]
+top = 10                 # 보여 줄 주제 수
+max_youtube = 30         # YouTube 인기 스냅샷에서 볼 주제 수 (trend_candidates보다 넉넉히, 네이버 호출 없음)
+max_trending = 20        # 인기 검색어 스냅샷에서 볼 검색어 수
+video_weight = 1.0
+velocity_weight = 1.0
+trending_weight = 1.0
+
 # 인기 검색어(data trend_candidates 후보 출처): Google Trends 공개 RSS 스냅샷(data trending_collect)에서
 # 검색어를 후보로 쓴다. 정리·별칭·제외 규칙은 YouTube 태그와 같다. YouTube 후보와 이름이 겹치면 그 후보에
 # 근거로 붙고, 겹치지 않는 것만 따로 후보(최대 max_candidates개)가 된다. 후보마다 네이버 1번

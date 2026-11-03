@@ -68,6 +68,7 @@ from data_agent.skills.trend_scan import (
     judge,
     yesterday_kst,
 )
+from data_agent.today_board import BOARD
 from data_agent.trending_store import DB_ENV as TRENDING_DB_ENV
 from data_agent.trending_store import TrendingSnapshot, latest_trending
 from data_agent.youtube_store import (
@@ -492,6 +493,8 @@ async def naver_verdict(
         return TrendVerdict(
             group_name=name, status="unknown", unknown_reason="네이버 응답에 이 키워드가 없음"
         )
+    if results[0].status != "unknown":
+        BOARD.record_verdict([name, *query.keyword_groups[0].keywords], results[0])
     return results[0]
 
 
@@ -931,6 +934,8 @@ async def find_candidates(
                 f" 자동 제외 {len(auto_excluded)}개 ({', '.join(a.name for a in auto_excluded)})."
             )
         applied = [e for e in pairs if e.applied]
+        for e in applied:
+            BOARD.record_pair(e.names[0], e.names[1])
         if applied:
             summary += f" 자동 묶음 {len(applied)}쌍."
         output = TrendCandidatesOutput(
