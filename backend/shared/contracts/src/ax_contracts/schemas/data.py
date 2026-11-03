@@ -984,6 +984,63 @@ class ContentRecommendOutput(AxModel):
         return self
 
 
+# --------------------------------------------------------------- trend_popular (지금 인기)
+# 급상승 판정과 별개인 "지금 인기" 주제 순위. 점수는 코드(영상 수·조회 속도·인기 검색어 순위 몫의
+# 가중합). 출처 하나를 못 읽으면 그 몫만 None(unknown) + 이유이고 0으로 채우지 않는다.
+# 네이버를 부르지 않는다.
+
+
+class TrendPopularRequest(AxModel):
+    max_items: int | None = Field(default=None, ge=1, le=50)  # 없으면 회사 설정 [popular] top
+
+
+class PopularScore(AxModel):
+    score: float = 0.0  # 아는 몫만 가중합 (가중치는 출력 weights)
+    video_share: float | None = None  # 인기 영상 수 몫 (YouTube를 못 읽었으면 None)
+    velocity_share: float | None = None  # 지금 조회 속도 몫 (못 쟀으면 None)
+    trending_share: float | None = None  # 인기 검색어 순위 몫 (인기 검색어를 못 읽었으면 None)
+
+
+class PopularTopic(AxModel):
+    rank: int = Field(ge=1)
+    keyword: str = Field(min_length=1)  # 정리한 대표 이름
+    aliases: list[str] = Field(default_factory=list)  # 같이 센 이름 (태그·별칭·자동 묶음)
+    origins: list[CandidateOrigin] = Field(default_factory=list)
+    score: PopularScore = Field(default_factory=PopularScore)
+    youtube_videos: int | None = Field(default=None, ge=0)  # 이 주제가 나온 인기 영상 수
+    video_ids: list[str] = Field(default_factory=list)  # 인기 순위 순 (최대 5)
+    views_per_hour: float | None = None  # 그 영상들의 지금 시간당 조회 증가 합 (못 쟀으면 None)
+    velocity_videos: int = Field(default=0, ge=0)  # 속도를 잰 영상 수
+    velocity_reason: str | None = None  # 속도를 못 쟀으면 이유
+    trending_rank: int | None = Field(default=None, ge=1)  # 이번에 본 인기 검색어 중 순위
+    trending_traffic: str | None = None  # 피드의 트래픽 표시값 (예: "500+", 검색 건수 아님)
+    topic_category: TopicCategory | None = None  # 주제 분류 (unknown = 분류하지 못함)
+    topic_category_reason: str | None = None
+    # 회사 "추천 안 함" 분류가 아니면 true, 그 분류면 false, 분류 unknown이면 None
+    brand_safe: bool | None = None
+    # 오늘 이미 낸 네이버 판정이 급상승이면 true, 평범이면 false, 오늘 판정이 없으면 None
+    rising_now: bool | None = None
+    rising_ratio: float | None = Field(default=None, ge=0)  # 그 판정의 배수
+
+
+class TrendPopularOutput(AxModel):
+    items: list[PopularTopic] = Field(default_factory=list)  # 점수 순
+    empty_reason: str | None = None  # 주제가 없을 때 이유
+    youtube_status: Literal["known", "unknown"] = "unknown"
+    youtube_reason: str | None = None
+    snapshot_at: UtcDatetime | None = None  # 쓴 YouTube 인기 스냅샷 시각
+    velocity_status: Literal["known", "unknown"] = "unknown"
+    velocity_reason: str | None = None
+    velocity_from: UtcDatetime | None = None  # 조회 속도 구간 (최근 두 스냅샷)
+    velocity_to: UtcDatetime | None = None
+    trending_status: Literal["known", "unknown"] = "unknown"
+    trending_reason: str | None = None
+    trending_at: UtcDatetime | None = None  # 쓴 인기 검색어 스냅샷 시각
+    weights: dict[str, float] = Field(default_factory=dict)  # video·velocity·trending 가중치
+    excluded_categories: list[str] = Field(default_factory=list)  # brand_safe에 쓴 추천 안 함 분류
+    summary: str = ""  # 코드가 만든 한 문장
+
+
 # --------------------------------------------------------------- campaign_effect (캠페인 효과)
 # 캠페인 기간 주문·매출을 지난 7일 같은 시간대 평균과 비교한 증분과, 캠페인 쿠폰 누적 사용률.
 # 항목마다 "앎(값·근거)" 또는 "모름 + 이유"다. 모르면 0으로 채우지 않는다.
