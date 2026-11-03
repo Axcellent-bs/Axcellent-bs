@@ -41,7 +41,7 @@ export const RULE_KO: Record<string, string> = {
   ABUSE_SUSPECTED: "점검 대상", OTHER_REASON: "기타 사유", EXCHANGE_STOCK_LOW: "교환 재고 부족",
 };
 export const BLOCKER_KO: Record<string, string> = {
-  NOT_INSPECTED: "검수 대기", ON_HOLD: "상담원 확인", ABUSE_HOLD: "점검 대상", OVER_LIMIT: "한도 초과", OUT_OF_STOCK: "재고 부족", LIMIT: "개수 제한",
+  NOT_INSPECTED: "검수 대기", ON_HOLD: "상담원 확인", REFUND_REJECTED: "환불 거절됨", ABUSE_HOLD: "점검 대상", OVER_LIMIT: "한도 초과", OUT_OF_STOCK: "재고 부족", LIMIT: "개수 제한",
 };
 export const AUDIT_KO: Record<string, string> = {
   submitted: "신청 접수", decided: "자동 판정", evidence_added: "사진 추가", withdrawn: "철회", agent_override: "상담원 승인",
