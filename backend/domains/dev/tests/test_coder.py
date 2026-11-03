@@ -1213,3 +1213,50 @@ def test_no_change_without_earlier_pr_fails_then_human_closes(
     with pytest.raises(ActionError) as e:
         run(service.close_dev_task_covered("T-D1"))
     assert e.value.code == "NOT_CLOSABLE"
+
+
+# ---------------------------------------------------------------- 외부 쓰기 connection_id
+
+
+class RecordingGate:
+    """관문에 간 (액션, params)를 남기고 모두 실행한다."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    async def __call__(self, action, params, meta, evidence):
+        from ax_contracts.schemas import ExecuteDecision
+
+        self.calls.append((action, dict(params)))
+        return ExecuteDecision(execution_id="ok", grade="A", status="executed")
+
+
+def test_external_writes_always_carry_connection_id(service: PlanningService, adapter) -> None:
+    from dev_agent.external_actions import MOCK_CONNECTION, VCS_WRITE_ACTIONS
+
+    gate = RecordingGate()
+    service._gate = gate
+    coder.set_llm(FakeLLM())
+    run(_go(service))
+    writes = [(a, p) for a, p in gate.calls if a in VCS_WRITE_ACTIONS]
+    assert {a for a, _ in writes} >= {"generate_pr", "review_pr", "merge_pr"}
+    # 화면 연결이 없어도 빠지지 않는다 (시험은 바꿔 낀 부품 = default 연결)
+    assert {p.get("connection_id") for _, p in writes} == {vcs.OVERRIDE_ID}, writes
+    vcs.set_vcs(None)  # 바꿔 낀 부품도 연결도 없으면(시연용 목 부품) mock
+    assert service._connection_for("PR #99", {}) == MOCK_CONNECTION
+    # 외부에 쓰지 않는 액션에는 싣지 않는다
+    assert all("connection_id" not in p for a, p in gate.calls if a not in VCS_WRITE_ACTIONS)
+
+
+def test_connection_id_follows_task_connection(service: PlanningService, adapter) -> None:
+    vcs._screen = {
+        "conn-1": vcs.Connection(id="conn-1", kind="mock", repo="acme/web"),
+        "conn-2": vcs.Connection(id="conn-2", kind="mock", repo="acme/shop"),
+    }
+    gate = RecordingGate()
+    service._gate = gate
+    coder.set_llm(FakeLLM())
+    run(_go(service, connection="conn-2"))
+    got = {p["connection_id"] for a, p in gate.calls if a in ("generate_pr", "merge_pr")}
+    assert got == {"conn-2"}
+    assert service._connection_for("conn-1#7", {}) == "conn-1"  # 레포 작업 공간 대상

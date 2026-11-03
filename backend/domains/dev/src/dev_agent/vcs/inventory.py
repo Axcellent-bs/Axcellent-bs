@@ -6,6 +6,14 @@
 - 클라우드(github.com 등)는 제공사가 패치하므로 버전 점검 대상이 아니다.
 - 토큰 권한이 필요보다 넓으면 경고를 붙인다 (사람 토큰 범위·App 권한).
 - 대장은 이 프로세스 메모리에만 둔다 (비밀 값 없음, 다시 켜면 처음부터 다시 읽는다).
+
+점검 인터페이스 (연결 종류와 상관없음): 연결 종류마다 `register_source(종류, 목록 함수)`로
+점검 대상(`Target`)을 내놓는다. 대상 하나는 `probe()`로 `ServerInfo`(제품·버전·권한·만료)를 준다.
+- 형상관리(`vcs`)가 첫 대상이다 (GitHub 부품의 `server_info()`). GitLab도 같은 부품 방식으로 붙는다.
+- 배포 도구(Jenkins `X-Jenkins` 머리글, Argo CD `/api/version` 등)는 그 연결 계층이 생기면 같은
+  방식으로 `deploy` 종류를 등록한다. 대장·판정·화면·API는 그대로 쓴다.
+- 패치 기준 출처는 `policy_source`에 남긴다: 지금은 `env`(`PLANNING_VCS_MIN_VERSIONS`), 취약점 소식
+  자동 수집이 들어가면 `feed`.
 """
 
 from __future__ import annotations
@@ -14,7 +22,7 @@ import asyncio
 import contextlib
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
@@ -32,18 +40,34 @@ NEEDED_APP = {"contents", "pull_requests", "issues", "checks", "statuses", "meta
 _VERSION = re.compile(r"\d+(?:\.\d+)*")
 
 
+@dataclass(frozen=True)
+class Target:
+    """점검 대상 하나 (연결 하나). 비밀 값은 넣지 않는다. `probe`가 없으면 `점검 전`으로 둔다."""
+
+    id: str  # 연결 id (형상관리 conn-1 · env …)
+    category: str  # vcs · deploy …
+    name: str  # 화면에 보일 이름 (레포 owner/name, 배포 도구 주소 등)
+    kind: str  # github · gitlab · jenkins · argocd · mock …
+    base_url: str = ""
+    app_auth: bool = False  # App 권한(이름:수준) 방식이면 True
+    probe: Callable[[], Awaitable[ServerInfo]] | None = field(default=None, compare=False)
+    no_probe: str = ""  # probe가 없는 이유
+
+
 @dataclass
 class Entry:
     """연결 하나의 대장 줄. 비밀 값은 넣지 않는다."""
 
     connection_id: str
-    repo: str
+    repo: str  # 대상 이름 (형상관리면 레포)
     kind: str
+    category: str = "vcs"
     base_url: str = ""
     product: str = ""
     hosted: bool = False
     version: str = ""
     min_version: str = ""
+    policy_source: str = ""  # 패치 기준 출처: env · feed (없으면 빈 값)
     scopes: list[str] = field(default_factory=list)
     scope_note: str = ""
     token_expires: str = ""
@@ -101,6 +125,7 @@ def judge(entry: Entry, info: ServerInfo, policy: dict[str, str], *, app: bool =
     entry.token_expires = info.token_expires
     entry.warnings = scope_warnings(info, app=app)
     entry.min_version = policy.get(info.product, "")
+    entry.policy_source = "env" if entry.min_version else ""
     if info.hosted:
         entry.status = "hosted"
     elif not info.version:
@@ -126,38 +151,85 @@ _task: asyncio.Task | None = None
 _clock: Callable[[], datetime] = lambda: datetime.now(UTC)  # noqa: E731 - 테스트가 바꿔 끼운다
 
 
-def _blank(conn: vcs.Connection) -> Entry:
-    return Entry(connection_id=conn.id, repo=conn.repo, kind=conn.kind, base_url=conn.base_url)
+def _vcs_targets() -> list[Target]:
+    """형상관리 연결 → 점검 대상. 부품에 `server_info()`가 있으면 그것으로 읽는다."""
+    out: list[Target] = []
+    for conn in vcs.connections():
+
+        async def probe(cid: str = conn.id) -> ServerInfo:
+            reader = getattr(vcs.get_adapter(cid), "server_info", None)
+            if reader is None:
+                raise VcsError("unsupported", "이 형상관리 부품은 서버 정보를 못 읽음")
+            return await reader()
+
+        out.append(
+            Target(
+                id=conn.id,
+                category="vcs",
+                name=conn.repo,
+                kind=conn.kind,
+                base_url=conn.base_url,
+                app_auth=conn.auth == "app",
+                probe=probe,
+            )
+        )
+    return out
+
+
+# 연결 종류 → 점검 대상 목록 함수. 새 종류(배포 도구 등)는 register_source로 더한다
+_sources: dict[str, Callable[[], list[Target]]] = {"vcs": _vcs_targets}
+
+
+def register_source(category: str, lister: Callable[[], list[Target]]) -> None:
+    """연결 종류 하나의 점검 대상 목록 함수를 등록한다 (같은 종류면 바꿔 낀다)."""
+    _sources[category] = lister
+
+
+def unregister_source(category: str) -> None:
+    if category != "vcs":
+        _sources.pop(category, None)
+
+
+def targets() -> list[Target]:
+    """등록된 모든 종류의 점검 대상 (종류 등록 순서, 그 안은 연결 순서)."""
+    return [t for lister in _sources.values() for t in lister()]
+
+
+def _blank(t: Target) -> Entry:
+    return Entry(
+        connection_id=t.id, repo=t.name, kind=t.kind, category=t.category, base_url=t.base_url
+    )
 
 
 async def check(connection_id: str, *, timeout: float = 20.0) -> Entry | None:
     """연결 하나를 다시 읽는다. 모르는 연결이면 None. 실패는 대장에 `error`로 남긴다."""
-    conn = next((c for c in vcs.connections() if c.id == connection_id), None)
-    if conn is None:
+    t = next((x for x in targets() if x.id == connection_id), None)
+    if t is None:
         _entries.pop(connection_id, None)
         return None
-    entry = _blank(conn)
+    entry = _blank(t)
     entry.checked_at = _clock().isoformat()
     try:
-        adapter = vcs.get_adapter(conn.id)
-        reader = getattr(adapter, "server_info", None)
-        if reader is None:
+        if t.probe is None:
             entry.status = "unknown"
-            entry.warnings = ["이 형상관리 부품은 서버 정보를 못 읽음"]
+            entry.warnings = [t.no_probe or "이 연결 종류는 서버 정보를 못 읽음"]
         else:
-            info = await asyncio.wait_for(reader(), timeout)
-            judge(entry, info, min_versions(), app=conn.auth == "app")
+            info = await asyncio.wait_for(t.probe(), timeout)
+            judge(entry, info, min_versions(), app=t.app_auth)
     except VcsError as exc:
-        entry.status, entry.error_code, entry.error = "error", exc.code, exc.message
+        if exc.code == "unsupported":
+            entry.status, entry.warnings = "unknown", [exc.message]
+        else:
+            entry.status, entry.error_code, entry.error = "error", exc.code, exc.message
     except TimeoutError:
         entry.status, entry.error_code, entry.error = "error", "timeout", "서버 정보 읽기 시간 초과"
-    _entries[conn.id] = entry
+    _entries[t.id] = entry
     return entry
 
 
 async def check_all() -> list[Entry]:
     """연결 전부를 다시 읽는다 (지운 연결은 대장에서 뺀다)."""
-    ids = [c.id for c in vcs.connections()]
+    ids = [t.id for t in targets()]
     for gone in set(_entries) - set(ids):
         _entries.pop(gone, None)
     got = await asyncio.gather(*(check(i) for i in ids))
@@ -165,11 +237,11 @@ async def check_all() -> list[Entry]:
 
 
 def entries() -> list[dict]:
-    """대장 전체 (연결 순서). 아직 안 읽은 연결도 `unknown`으로 넣는다."""
+    """대장 전체 (대상 순서). 아직 안 읽은 연결도 `unknown`으로 넣는다."""
     out: list[dict] = []
-    for conn in vcs.connections():
-        hit = _entries.get(conn.id)
-        out.append(asdict(hit if hit is not None and hit.repo == conn.repo else _blank(conn)))
+    for t in targets():
+        hit = _entries.get(t.id)
+        out.append(asdict(hit if hit is not None and hit.repo == t.name else _blank(t)))
     return out
 
 
