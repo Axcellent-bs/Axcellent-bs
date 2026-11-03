@@ -30,7 +30,8 @@
       "grade": "read",
       "allowed_requesters": [
         "dashboard-api",
-        "orchestrator"
+        "orchestrator",
+        "support"
       ],
       "verifier": null,
       "priority": "recommended",

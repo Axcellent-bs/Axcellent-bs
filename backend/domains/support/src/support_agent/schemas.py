@@ -276,8 +276,14 @@ class SetInquiryStatusInput(AxModel):
 
 
 ClaimActivityKind = Literal[
-    "claim_created", "claim_decided", "claim_return_received", "claim_inspected", "claim_paid"
+    "claim_created",
+    "claim_decided",
+    "claim_return_received",
+    "claim_inspected",
+    "claim_paid",
+    "compensation",  # 보상 쿠폰 요청 결과 (클레임이 아니라 문의에 이어진다)
 ]
+CompensationResult = Literal["ineligible", "handed_off", "requested", "unfinished"]
 
 
 class RecordClaimActivityInput(AxModel):
@@ -288,7 +294,7 @@ class RecordClaimActivityInput(AxModel):
 
     inquiry_id: int
     kind: ClaimActivityKind
-    claim_id: int
+    claim_id: int | None = None  # `compensation`에는 없다
     claim_type: str | None = None
     reason: str | None = None
     status: str | None = None
@@ -296,6 +302,14 @@ class RecordClaimActivityInput(AxModel):
     decision: Literal["approve", "reject"] | None = None
     inspection: str | None = None
     amount: int | None = None
+    # `kind="compensation"`(보상 쿠폰 요청 결과)일 때만 쓴다.
+    # 문장은 문의 쪽이 `compensation_result`로 만든다
+    compensation_result: CompensationResult | None = None
+    reason_code: str | None = None
+    coupon_id: str | None = None
+    count: int | None = None
+    total_value: int | None = None
+    marketing_status: str | None = None
 
 
 class SubmitFeedbackInput(AxModel):

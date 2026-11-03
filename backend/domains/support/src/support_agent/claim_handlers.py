@@ -459,7 +459,8 @@ async def process_claim_queue(request: AgentRequest) -> AgentResult:
         await _record_activity(request, claim, "claim_paid", amount=claim.refund_paid)
         # 문의를 이미 닫았다면 재무가 환불 0원으로 남기지 않게 금액을 채워 한 번 더 알린다
         if claim.conversation_id is not None:
-            await events.emit_refund_completed(request, h.STORE.get(claim.conversation_id), claim)
+            conversation = await h.load_inquiry(request, claim.conversation_id)
+            await events.emit_refund_completed(request, conversation, claim)
         paid += 1
         results.append(QueueRunResult(claim_id=claim.id, result="paid", refund=claim.refund_paid))
     run = QueueRun(results=results, paid=paid, held=held, queue=CLAIMS.queue().queue)
