@@ -46,6 +46,7 @@ export const BLOCKER_KO: Record<string, string> = {
 export const AUDIT_KO: Record<string, string> = {
   submitted: "신청 접수", decided: "자동 판정", evidence_added: "사진 추가", withdrawn: "철회", agent_override: "상담원 승인",
   agent_confirmed: "상담원 거절", received: "반품 입고", inspected: "검수 결과 변경", paid: "지급 완료",
+  refund_rejected: "환불 거절됨 (안전 장치)", retry_refund: "환불 다시 요청",
 };
 /** 영수증 대조 결과. 같음·다름·확인할 수 없음만 말하고 환불 판정은 하지 않는다. */
 export const RECEIPT_VERDICT_KO: Record<string, string> = { consistent: "주문과 같음", mismatch: "주문과 다름", insufficient: "확인할 수 없음" };
