@@ -83,12 +83,16 @@ DRAFT = "기획안 초안"
 _TIMING = re.compile(r"\d+\s*[~\-]\s*\d+\s*초|\d+\s*초|\d+\s*컷")
 
 
+MUSIC = "K-pop·음악"
+MUSIC_CAUTION = "음원 저작권: 원곡 사용 금지, 라이선스 음원만"
+
+
 @dataclass(frozen=True)
 class PromoConfig:
     concepts: int = 4  # 기획안 초안 수 (3~5)
     # 트렌드 재료: 지금 인기(카테고리별) 중 이 카테고리만, 카테고리마다 앞에서 N개.
     # 뉴스·사건·기부·재난·정치·사회는 설정과 관계없이 늘 뺀다
-    trend_categories: tuple[str, ...] = ("게임", "연예·스포츠", "IT")
+    trend_categories: tuple[str, ...] = ("게임", "연예·스포츠", "K-pop·음악", "IT")
     trends_per_category: int = 2
     # 트렌드 재료 기준: 출처(YouTube 인기 영상·인기 검색어) 2개 이상, 또는 YouTube 인기 영상 N개
     # 이상.
@@ -373,6 +377,9 @@ def _prompt(config: PromoConfig, example: CatalogProduct | None) -> str:
         "(선택 화면, 하이라이트 중계, 랭킹, 보급 상자 열기 같은 진행 방식)으로 빌릴 수 있다."
         " 맞는 이유가 성립하면 초안 중 1~2개는 지금 인기 트렌드를 쓰는 것을 우선한다."
         " 억지로 붙이지는 말고, 하나도 쓰지 않았으면 그 이유를 no_popular_reason에 한 줄로 적어라\n"
+        "- K-pop·음악 트렌드(재료 분류가 K-pop·음악)는 곡 제목·음원·가수·그룹 이름을 쓰지 말고"
+        " 형식(안무 챌린지, 커버 형식, 무대 직캠 구도 같은 진행 방식)만 빌릴 것."
+        " 원곡을 쓰는 장면 금지\n"
         f"형식 예시(한 개): {sample}"
     )
 
@@ -459,6 +466,9 @@ def validate_concepts(
                     warnings.append(
                         f"상표·초상권 확인 필요: '{name}'이(가) 제목·콘티에 그대로 있음"
                     )
+        cautions = [c.strip() for c in item.cautions if c.strip()]
+        if trend is not None and trend.topic_category == MUSIC and MUSIC_CAUTION not in cautions:
+            cautions.append(MUSIC_CAUTION)  # 음악 트렌드를 쓴 초안은 코드가 늘 붙인다
         shorts = formats.get(fmt)
         kept.append(
             PromoConcept(
@@ -478,7 +488,7 @@ def validate_concepts(
                 ],
                 format=_legacy_format(item.duration_seconds),  # type: ignore[arg-type]
                 storyboard=[s.strip() for s in item.storyboard],
-                cautions=[c.strip() for c in item.cautions if c.strip()],
+                cautions=cautions,
                 warnings=warnings,
                 duration_seconds=item.duration_seconds,
                 shorts_format=fmt or None,

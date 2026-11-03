@@ -149,3 +149,79 @@ def test_person_name_topics_are_flagged_and_old_rows_are_asked_again(tmp_path: P
     conn.close()
     again = CategoryCache(path)
     assert again.get("윤영미") is not None and again.get("t1") is None
+
+
+# ---------------------------------------------------------------- K-pop·음악 (연예·스포츠에서 나눔)
+
+
+def test_music_videos_go_to_kpop_music_and_the_prompt_says_so() -> None:
+    from data_agent.skills.topic_category import _PROMPT
+
+    assert "K-pop·음악" in TOPIC_CATEGORIES and "K-pop·음악:" in _PROMPT
+    llm = _llm(_Item(id="1", category="K-pop·음악", real_entity=True, entity_names=["아이브"]))
+    topic = TopicInput("아이브", (), ("[아이브] 신곡 안무 커버",))
+    got = asyncio.run(classify_topics([topic], llm))["아이브"]
+    assert got.category == "K-pop·음악" and got.reason is None
+
+
+def test_stored_entertainment_rows_are_asked_once_more_and_others_are_reused(
+    tmp_path: Path,
+) -> None:
+    import sqlite3
+
+    path = tmp_path / "topics.db"
+    first = _llm(
+        _Item(id="1", category="연예·스포츠", real_entity=True, entity_names=["아이브"]),
+        _Item(id="2", category="게임", real_entity=True, entity_names=["t1"]),
+    )
+    asyncio.run(classify_topics([TopicInput("아이브"), TopicInput("t1")], first,
+                                cache=CategoryCache(path)))  # fmt: skip
+    # 목록이 나뉘기 전에 저장된 줄로 만든다 (판 칸이 없던 예전 줄 = 판 1)
+    conn = sqlite3.connect(path)
+    conn.execute("UPDATE topic_categories SET version = NULL")
+    conn.commit()
+    conn.close()
+    second = _llm(_Item(id="1", category="K-pop·음악", real_entity=True, entity_names=["아이브"]))
+    cache = CategoryCache(path)
+    got = asyncio.run(
+        classify_topics([TopicInput("아이브"), TopicInput("t1")], second, cache=cache)
+    )
+    assert len(second.calls) == 1  # 연예·스포츠만 다시 물었다 (게임은 재사용)
+    assert got["아이브"].category == "K-pop·음악" and got["t1"].source == "stored"
+    # 다시 분류한 줄은 새 판이라 다음엔 재사용한다
+    assert CategoryCache(path).get("아이브") is not None
+
+
+def test_music_trend_drafts_get_the_copyright_caution_from_code() -> None:
+    from data_agent.skills.promo_concepts import MUSIC_CAUTION
+
+    products = {"p1": CatalogProduct(product_id="p1", name="독서대", category_code="s")}
+    facts: dict[str, int | float | str] = {"콘티": "1컷 2컷 3컷"}
+    trends = [
+        PromoTrend(
+            name="안무 챌린지",
+            kind="popular",
+            topic_category="K-pop·음악",
+            ip_risk=False,
+            detail="x",
+        ),  # fmt: skip
+        PromoTrend(
+            name="모바일게임", kind="popular", topic_category="게임", ip_risk=False, detail="y"
+        ),  # fmt: skip
+    ]
+
+    def concept(title: str, trend: str) -> _Concept:
+        return _Concept(title=title, concept="c", borrowed_trend=trend, product_ids=["p1"],
+                        duration_seconds=15, fit_reason="맞는 이유", cautions=["손 떨림 주의"],
+                        storyboard=["1컷: a", "2컷: b", "3컷: c"])  # fmt: skip
+
+    kept, _ = validate_concepts(
+        [concept("독서대 안무", "안무 챌린지"), concept("게임처럼 공부", "모바일게임")],
+        products,
+        {},
+        trends,
+        facts,
+    )
+    assert kept[0].cautions == ["손 떨림 주의", MUSIC_CAUTION]
+    assert MUSIC_CAUTION == "음원 저작권: 원곡 사용 금지, 라이선스 음원만"
+    assert kept[1].cautions == ["손 떨림 주의"]  # 음악 트렌드가 아니면 붙이지 않는다
