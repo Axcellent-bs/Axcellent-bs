@@ -26,6 +26,7 @@
 | `closing_report` | read | orchestrator, data | optional | 기간 손익 요약 (`ClosingReportInput`·`ClosingReportOutput`) |
 | `audit_report` | read | orchestrator, data | optional | 사후 감사 결과: 관문 보류·거절 추이만 (`AuditReportInput`·`AuditReportOutput`) |
 | `record_support_cost` | read | orchestrator | recommended | 고객지원이 끝낸 처리 결과(환불 금액·쿠폰)를 받아 주문 배송비와 함께 장부에 적음(환불 여부는 확인하지 않음). 경비를 쓰지 않은 문의도 처리 결과를 기록, 같은 문의는 한 번만 (`SupportCostInput`·`SupportCostOutput`) |
+| `answer_planning_question` | read | planning | recommended | 기획이 재무가 보낸 요청의 근거를 되물으면 그 기록으로만 답함(`answered`·`needs_human`·`unknown`). 재무는 아직 요청을 보내지 않아 지금은 `unknown` |
 
 없앤 것: `verify_amount`(B 쿠폰·환불 교차검증), `review_hold`(C 보류 건 AI 1차 판단), `/api/finance/verifications`, `/api/finance/ai-reviews`.
 장애 흐름에서 빠지며 없앤 것(2026-10-27): `loss_aggregation`(손실 집계 skill), `/api/finance/loss-reports`, 사건 상세의 `loss`와 사건 단계(9·10·17) 계산. 재무는 장애 대응 흐름의 단계가 아니고(요구사항 DEP-FIN-01, 공통 구성안 결정 22) 장애 비용은 평상시 장부 → `closing_report`에서 드러난다.

@@ -354,6 +354,8 @@ export interface IncidentDetail {
   context_id: string;
   component: string | null;
   window: { from: string; to: string } | null;
+  /** 쇼핑몰이 정상 복귀를 알린 시각. 아직 모르면 null */
+  recovered_at?: string | null;
   impact: IncidentImpact | null;
   compensation: IncidentCompensation;
   /** 사건 구간 안에 영향 고객에게 나간 환불. 구간·영향 고객을 모르면 null (0원과 다르다) */

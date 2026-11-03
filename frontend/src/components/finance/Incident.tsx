@@ -274,7 +274,7 @@ function IncidentDetailView({ id, summary, tick }: { id: string; summary: Incide
         {res.loading && res.env && <span className="text-[11px] text-ink-500" aria-live="polite">새로 받는 중…</span>}
       </div>
       {res.env?.data.window && (
-        <p className="-mt-3 text-xs text-ink-500">영향 분석 구간 {shortDateTime(res.env.data.window.from)} ~ {shortDateTime(res.env.data.window.to)}</p>
+        <p className="-mt-3 text-xs text-ink-500">영향 분석 구간 {shortDateTime(res.env.data.window.from)} ~ {shortDateTime(res.env.data.window.to)}{res.env.data.recovered_at && ` · 정상 복귀 ${shortDateTime(res.env.data.recovered_at)}`}</p>
       )}
       {summary && <SummaryStrip s={summary} />}
       <MetaLine meta={meta} />

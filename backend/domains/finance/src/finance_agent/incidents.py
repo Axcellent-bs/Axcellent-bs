@@ -112,6 +112,8 @@ async def incident_view(
         "context_id": context_id,
         "component": info.get("component"),
         "window": window,
+        # 쇼핑몰이 정상 복귀를 알린 시각. 아직 모르면 null (총괄 값을 그대로 적는다)
+        "recovered_at": fc.iso(info.get("recovered_at")),
         "impact": impact_out,
         "compensation": {"coupons": coupons, **(totals or dict.fromkeys(_TOTAL_KEYS))},
         "refunds": refunds,

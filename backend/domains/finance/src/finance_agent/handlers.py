@@ -39,7 +39,8 @@ from ax_contracts.schemas import (
     RequestMeta,
     TaskStatus,
 )
-from finance_agent import anomalies, audit, chat_log, closing, team_budget
+from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
+from finance_agent import anomalies, audit, chat_log, closing, planning_questions, team_budget
 from finance_agent import books as bk
 from finance_agent import finance_config as fc
 from finance_agent import ledger as lg
@@ -472,8 +473,29 @@ async def record_support_cost(request: AgentRequest) -> AgentResult:
     )
 
 
+# ---------------------------------------------------- answer_planning_question (읽기)
+async def answer_planning_question(request: AgentRequest) -> AgentResult:
+    """기획이 되묻는 질문에 재무가 보낸 요청의 기록으로만 답한다. 상태를 바꾸지 않는다."""
+    q = _parse(request, AnswerPlanningQuestionInput)
+    if isinstance(q, AgentResult):
+        return q
+    out = planning_questions.answer_question(q, request.meta.tenant_id, request.meta.context_id)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=out.status,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            [f"finance.sent_requests request_id={q.request_id}"],
+            f"{q.question_id} → {out.status}",
+            out.evidence_ids,
+        ),
+    )
+
+
 HANDLERS = {
     "closing_report": closing_report,
     "audit_report": audit_report,
     "record_support_cost": record_support_cost,
+    "answer_planning_question": answer_planning_question,
 }

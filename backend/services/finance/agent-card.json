@@ -46,6 +46,18 @@
       ],
       "verifier": null,
       "priority": "recommended"
+    },
+    {
+      "id": "answer_planning_question",
+      "description": "기획 질문에 답한다. 기획이 재무가 보낸 요청(create_ticket)의 근거를 되물으면 재무가 보낸 요청의 기록으로만 답한다. 사람이 답해야 하면 needs_human, 기록에 없으면 unknown이다. 지어내지 않고 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended"
     }
   ]
 }

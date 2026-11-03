@@ -56,6 +56,7 @@ INCIDENT_FIELDS = (
     "closed_at",
     "impact_from",
     "impact_to",
+    "recovered_at",
 )
 
 
@@ -302,6 +303,7 @@ class LiveSources:
                     "window_from": found.impact_from,
                     "window_to": found.impact_to,
                     "window_exact": True,
+                    "recovered_at": found.recovered_at,
                     "category": None,  # 총괄은 분류를 주지 않는다
                 }
             # 영향 구간을 안 실은 사건: AI 처리 시각으로 대신한다. 장애 시작보다 늦게 시작할 수 있어
@@ -311,6 +313,7 @@ class LiveSources:
                 "window_from": found.opened_at,
                 "window_to": found.closed_at,
                 "window_exact": False,
+                "recovered_at": found.recovered_at,
                 "category": None,
             }
         return None
