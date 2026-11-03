@@ -106,6 +106,7 @@ from dev_agent import coder, cross_check, repo_routing, vcs, vcs_bridge
 from dev_agent.cross_check import CrossChecker, CrossEvidence
 from dev_agent.deploy_store import get_deploy_store
 from dev_agent.external_actions import MOCK_CONNECTION, VCS_WRITE_ACTIONS
+from dev_agent.vcs import inventory
 from dev_agent.vcs.base import VcsError
 
 MAX_INSTRUCTION_CHARS = 1000  # 사람 수정 지시 길이
@@ -2744,6 +2745,7 @@ class DevService(PlanningCore):
                 held = exc.decision.status == "held"
                 cr.status = "waiting_human" if held else "failed"
                 cr.error = f"실행 관문이 generate_pr를 허락하지 않음 ({exc.decision.status})"
+                cr.error += inventory.hold_note(cr.connection) if held else ""
                 if held:
                     cr.hold_key, cr.hold_review = key, exc.decision.review_id
                     cr.hold_paths, cr.hold_ok = paths, False

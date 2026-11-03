@@ -162,3 +162,21 @@ def test_unsent_notice_is_retried() -> None:
     w.forget("conn-1")
     run(w.flush())
     assert [n.hold for n in sent] == [True, False]
+
+
+def test_hold_note_explains_connection_hold() -> None:
+    from dev_agent.vcs import inventory
+
+    vw.watch.holds.clear()
+    assert inventory.hold_note("conn-1") == ""
+    n = vw.ConnectionHoldNotice(
+        connection_id="conn-1", hold=True, product="gitlab", version="18.11.12",
+        kev_cves=["CVE-2026-1001"], judged_at=NOW.isoformat(), reason="x",
+    )  # fmt: skip
+    vw.watch.holds["conn-1"] = vw.HoldState(n, sent=True)
+    try:
+        note = inventory.hold_note("conn-1")
+        assert "연결 conn-1 긴급 취약(CVE-2026-1001)으로 쓰기 보류" in note
+        assert inventory.hold_note("conn-2") == ""
+    finally:
+        vw.watch.holds.clear()

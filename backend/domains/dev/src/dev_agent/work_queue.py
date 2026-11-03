@@ -31,6 +31,7 @@ from ax_workflow.autocheck import WAIT_HUMAN, pr_check
 from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.models import PR, CodingFile, CodingRun, PrGate, State, Task
 from dev_agent import coder, vcs, vcs_bridge
+from dev_agent.vcs import inventory
 from dev_agent.vcs.base import BRANCH_PREFIX, VcsError
 
 if TYPE_CHECKING:
@@ -286,7 +287,10 @@ async def report_pr(
         cr.updated_at = t
         if refused is not None:
             cr.status = "waiting_human"
-            cr.error = f"실행 관문이 generate_pr를 허락하지 않음 ({refused.status}) → 사람 확인"
+            note = inventory.hold_note(cr.connection) if refused.status == "held" else ""
+            cr.error = (
+                f"실행 관문이 generate_pr를 허락하지 않음 ({refused.status}){note} → 사람 확인"
+            )
             x.state = "C 보류"
             svc._hold(pr, WAIT_HUMAN, pr_check(s, pr), refused)
         else:
