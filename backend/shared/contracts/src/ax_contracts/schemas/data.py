@@ -871,6 +871,7 @@ TopicCategory = Literal[
     "기타",
     "unknown",
     "IT",  # 값 추가 (IT·기기·서비스)
+    "K-pop·음악",  # 값 추가 (음악·아이돌·커버·안무, 연예·스포츠에서 나눔)
 ]
 # 추천 묶음: product_linked = 회사 상품과 연결된 소재, general = 일반 화제
 RecommendGroup = Literal["product_linked", "general"]
