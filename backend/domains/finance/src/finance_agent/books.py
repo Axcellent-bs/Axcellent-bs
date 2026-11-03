@@ -5,6 +5,8 @@
 - 실제 모드: shop-api `GET /api/shop/orders`·`/products`·`/sellers`·`/coupons`(재무 토큰),
   safety `GET /api/safety/executions`. 판매 사이트 DB에는 붙지 않는다.
 - 못 받은 자료는 비워 두고 `unavailable`에 이름을 적는다. 추정값을 만들지 않는다(fail-closed).
+- 조회는 캐시가 지나도 `LIVE_STALE_SECONDS` 안이면 직전 장부를 주고 뒤에서 새로 읽는다.
+  결산 확정·정산 요청처럼 사람이 결정하는 일은 새 장부를 기다린다.
 - 실제 모드 장부는 `LIVE_CACHE_SECONDS`초 동안 다시 쓴다. 주문 전체를 매번 읽으면 동시에 여러 번
   부를 때 줄을 서서, 같은 때 들어온 요청은 한 번 모은 결과를 같이 쓴다. 못 받은 자료가 있는
   장부는 캐시에 두지 않는다(다음 요청이 바로 다시 받아 본다). 언제 모은 자료인지는 `collected_at`.
@@ -18,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -29,11 +32,15 @@ import httpx
 from ax_agent_template.config import agent_token, agent_url, is_mock
 from finance_agent import finance_config as fc
 
+logger = logging.getLogger("ax.finance.books")
+
 CALL_SECONDS = 5.0
 # 주문은 전체를 한 번에 읽어서 쌓일수록 오래 걸린다 (#421: 33,850건 22MB에 8초).
 # 부르는 쪽이 먼저 끊어도 끝까지 모아 캐시에 두므로(`cached_live_books`) 다음 요청은 값을 받는다
 ORDERS_CALL_SECONDS = 30.0
 LIVE_CACHE_SECONDS = 30.0
+# 캐시가 지나도 이 시간 안이면 조회는 직전 장부를 바로 주고 뒤에서 새로 읽는다
+LIVE_STALE_SECONDS = 300.0
 SEED_FILE = "finance_books_seed.json"
 
 
@@ -430,21 +437,37 @@ async def _collect_live() -> Books:
     return books
 
 
-async def cached_live_books() -> Books:
-    """실제 모드 장부. 캐시가 살아 있으면 그대로, 모으는 중이면 같은 결과를 기다린다."""
+def _log_refresh_failure(task: asyncio.Task[Books]) -> None:
+    """아무도 기다리지 않는 뒤쪽 새로 읽기의 실패도 남긴다. 다음 요청은 다시 읽어 본다."""
+    if not task.cancelled() and task.exception() is not None:
+        logger.warning("재무 장부를 새로 읽지 못함: %s", type(task.exception()).__name__)
+
+
+async def cached_live_books(fresh: bool = False) -> Books:
+    """실제 모드 장부. 캐시가 살아 있으면 그대로, 모으는 중이면 같은 결과를 기다린다.
+
+    주문이 쌓이면 새로 읽는 데 몇 초가 걸린다. 조회(`fresh=False`)는 캐시가 지나도
+    `LIVE_STALE_SECONDS` 안이면 직전 장부를 바로 주고 뒤에서 새로 읽는다. 언제 모은 자료인지는
+    `collected_at`에 나온다. 사람이 결정하는 일(`fresh=True`)은 새 장부를 기다린다.
+    """
     global _live_inflight
-    if _live_cache and time.monotonic() - _live_cache[0] < LIVE_CACHE_SECONDS:
-        return _live_cache[1]
+    cached = _live_cache
+    age = time.monotonic() - cached[0] if cached else None
+    if cached and age is not None and age < LIVE_CACHE_SECONDS:
+        return cached[1]
     if _live_inflight is None or _live_inflight.done():
         _live_inflight = asyncio.create_task(_collect_live())
+        _live_inflight.add_done_callback(_log_refresh_failure)
+    if cached and not fresh and age is not None and age < LIVE_STALE_SECONDS:
+        return cached[1]
     return await asyncio.shield(_live_inflight)
 
 
-async def load_books() -> Books:
-    """모드에 맞게 장부를 모은다."""
+async def load_books(fresh: bool = False) -> Books:
+    """모드에 맞게 장부를 모은다. `fresh`면 직전 장부로 답하지 않고 새로 읽은 것을 기다린다."""
     if is_mock("finance"):
         return seed_books()
-    return await cached_live_books()
+    return await cached_live_books(fresh)
 
 
 # ---------------------------------------------------------------- 목 PG 정산 (토스 정산 형식)

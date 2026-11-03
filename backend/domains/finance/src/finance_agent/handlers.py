@@ -89,6 +89,12 @@ class State:
     async def books(self) -> Books:
         return await self.books_loader()
 
+    async def fresh_books(self) -> Books:
+        """사람이 결정하는 일에 쓴다. 직전 장부로 답하지 않고 새로 읽은 것을 기다린다."""
+        if self.books_loader is load_books:
+            return await load_books(fresh=True)
+        return await self.books_loader()
+
 
 class FinanceRecords:
     """사람의 결정 기록. `FINANCE_STATE_FILE`이 있으면 `persist.py`가 파일에 남긴다."""
