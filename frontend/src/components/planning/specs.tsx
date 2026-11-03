@@ -133,6 +133,15 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
   const all = kind === 'spec' ? specRows : kind === 'doc' ? docRows : [...specRows, ...docRows]
   const pg = usePage(all, 10)
   const newDoc = () => { d({ type: 'newDoc', title: '' }); go(toPath(`docs/${nextDocId(s)}`)) }
+  const toast = useToast()
+  const [notion, setNotion] = useState<string | null>(null) // 노션 주소 칸 (null = 닫힘)
+  const importNotion = () => {
+    if (!notion?.trim()) return
+    d({ type: 'importNotion', url: notion.trim() })
+    toast.show('노션 페이지를 가져오는 중')
+    setNotion(null)
+    setKind('doc')
+  }
   return (
     <div className="sl-wrap">
       <div className="sl-top">
@@ -142,6 +151,15 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
           ))}
         </div>
         <span style={{ flex: 1 }} />
+        {notion === null ? (
+          <Button size="small" onClick={() => setNotion('')}>노션에서 가져오기</Button>
+        ) : (
+          <form className="sl-notion" onSubmit={(e) => { e.preventDefault(); importNotion() }}>
+            <input className="field" autoFocus value={notion} onChange={(e) => setNotion(e.target.value)} placeholder="노션 페이지 주소" aria-label="노션 페이지 주소" />
+            <Button size="small" variant="primary" type="submit" disabled={!notion.trim()}>가져오기</Button>
+            <Button size="small" onClick={() => setNotion(null)}>취소</Button>
+          </form>
+        )}
         <Button size="small" variant="primary" onClick={newDoc}>+ 새 문서</Button>
       </div>
       {!pg.rows.length ? <div className="empty"><b>없음</b></div> : (

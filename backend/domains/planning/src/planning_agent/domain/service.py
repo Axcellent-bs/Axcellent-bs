@@ -127,6 +127,7 @@ from ax_workflow.rules import (
 from planning_agent import (
     ask_requester,
     cause_inbox,
+    notion_import,
     related,
     release_check,
 )
@@ -232,6 +233,13 @@ class DocParams(BaseModel):
     doc: str
 
 
+class NotionImportParams(BaseModel):
+    """노션 페이지 주소(또는 ID)."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    url: str = Field(min_length=1, max_length=500)
+
+
 class PauseParams(RequestParams):
     """사람이 요청을 중단한다. 이유는 활동에만 남긴다."""
 
@@ -262,6 +270,7 @@ class PlanningService(PlanningCore):
         "edit_spec": ("_edit_spec", EditSpecParams),
         "pause_request": ("_pause_request", PauseParams),
         "delete_doc": ("_delete_doc", DocParams),
+        "import_notion": ("_import_notion", NotionImportParams),
         "resume_request": ("_resume_request", RequestParams),
         "send_release_order": ("_send_release_order_action", ReleaseOrderParams),
     }
@@ -290,6 +299,8 @@ class PlanningService(PlanningCore):
         self.release_checks: dict[str, dict[str, Any]] = {}
         # 접수할 때 이미 비슷한 요청을 찾은 요청 id (_relate_new가 다시 찾지 않게)
         self._pre_related: set[str] = set()
+        # 노션 읽기 (시험은 가짜로 바꿔 끼운다)
+        self.notion_fetch = notion_import.fetch
         self._spec_writer: SpecWriter | None = (
             default_writer() if spec_writer == "default" else spec_writer
         )
@@ -2232,6 +2243,30 @@ class PlanningService(PlanningCore):
             return None
         s.docs = [x for x in s.docs if x.id != doc]
         return ActionResult(output={"doc_id": doc, "deleted": True})
+
+    async def _import_notion(self, s: State, url: str) -> ActionResult:
+        """사람 버튼 "노션에서 가져오기": 노션 페이지를 읽어 새 정리 문서로 저장한다 (읽기만)."""
+        try:
+            page = await self.notion_fetch(url)
+        except notion_import.NotionError as exc:
+            raise ActionError(exc.code, exc.message) from exc
+        doc_id = self._next_doc_id(s)
+        blocks = [DocBlock(id="b1", kind="ref", text=f"노션 원본: {page.url}")]
+        for n, (kind, text, done) in enumerate(page.blocks, start=2):
+            blocks.append(DocBlock(id=f"b{n}", kind=kind, text=text, done=done))
+        s.docs.append(
+            Doc(id=doc_id, title=page.title, updated_at=self.clock(), blocks=blocks, by="human")
+        )
+        skipped = f", 못 옮긴 블록 {page.skipped}개" if page.skipped else ""
+        s.activity.append(
+            self._act(
+                self.clock(), f"doc:{doc_id}", "human", "planning", "import_notion", "사람",
+                f"노션 페이지 → {doc_id} \"{page.title}\" (블록 {len(page.blocks)}개{skipped})",
+            )
+        )  # fmt: skip
+        return ActionResult(
+            output={"doc_id": doc_id, "blocks": len(page.blocks), "skipped": page.skipped}
+        )
 
     async def _new_doc(self, s: State, title: str) -> ActionResult:
         doc_id = self._next_doc_id(s)
