@@ -357,6 +357,7 @@ async def popular(
                 rising_ratio=verdict.ratio if verdict is not None else None,
                 real_entity=cat.real_entity if cat else None,
                 entity_names=list(cat.entity_names) if cat else [],
+                is_person=cat.is_person if cat else None,
             )
         )
 

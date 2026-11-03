@@ -123,3 +123,29 @@ def test_promo_warning_follows_real_entity_names_not_the_category() -> None:
     )
     assert kept[0].warnings == ["상표·초상권 확인 필요: '페이커'이(가) 제목·콘티에 그대로 있음"]
     assert kept[1].warnings == []  # 분류가 게임이어도 실존 이름이 아니면 경고 없음
+
+
+def test_person_name_topics_are_flagged_and_old_rows_are_asked_again(tmp_path: Path) -> None:
+    import sqlite3
+
+    llm = _llm(
+        _Item(
+            id="1",
+            category="연예·스포츠",
+            real_entity=True,
+            entity_names=["윤영미"],
+            is_person=True,
+        ),  # fmt: skip
+        _Item(id="2", category="게임", real_entity=True, entity_names=["t1"]),
+    )
+    path = tmp_path / "topics.db"
+    cache = CategoryCache(path)
+    got = asyncio.run(classify_topics([TopicInput("윤영미"), TopicInput("t1")], llm, cache=cache))
+    assert got["윤영미"].is_person is True and got["t1"].is_person is False
+    # 사람 이름 칸이 없던 예전 줄은 다시 묻는다
+    conn = sqlite3.connect(path)
+    conn.execute("UPDATE topic_categories SET is_person = NULL WHERE keyword = 't1'")
+    conn.commit()
+    conn.close()
+    again = CategoryCache(path)
+    assert again.get("윤영미") is not None and again.get("t1") is None

@@ -109,9 +109,11 @@ class PromoLLM(MockLLMClient):
         return _Concepts(items=self.items)
 
 
-def _topic(name: str, category: str, rank: int) -> PopularTopic:
+def _topic(name: str, category: str, rank: int, *, videos: int = 7,
+           trending: int | None = None, person: bool = False) -> PopularTopic:  # fmt: skip
     return PopularTopic(rank=rank, keyword=name, topic_category=category, brand_safe=True,  # type: ignore[arg-type]
-                        category_rank=rank)  # fmt: skip
+                        category_rank=rank, youtube_videos=videos, trending_rank=trending,
+                        is_person=person)  # fmt: skip
 
 
 async def _fake_popular(*args: Any, **kw: Any) -> Any:
@@ -119,9 +121,25 @@ async def _fake_popular(*args: Any, **kw: Any) -> Any:
         class output:  # noqa: N801
             empty_reason = None
             by_category = [
-                PopularCategory(category="게임", items=[_topic("리그오브레전드", "게임", 1)]),
-                PopularCategory(category="뉴스·사건", items=[_topic("한국철강", "뉴스·사건", 1)]),
-                PopularCategory(category="IT", items=[_topic("새 휴대폰", "IT", 1)]),
+                PopularCategory(
+                    category="게임",
+                    items=[
+                        _topic("페이커", "게임", 1, person=True),  # 사람 이름 → 뺌
+                        _topic("리그오브레전드", "게임", 2),
+                        _topic("원딜", "게임", 3, videos=4),  # 영상 4개·출처 1개 → 뺌
+                    ],
+                ),
+                PopularCategory(
+                    category="뉴스·사건",
+                    items=[_topic("한국철강", "뉴스·사건", 1, videos=0, trending=1)],  # fmt: skip
+                ),
+                PopularCategory(
+                    category="연예·스포츠",
+                    items=[_topic("경기", "연예·스포츠", 1, videos=0, trending=2)],  # 출처 1개
+                ),
+                PopularCategory(
+                    category="IT", items=[_topic("새 휴대폰", "IT", 1, videos=2, trending=3)]
+                ),  # 출처 2개
             ]
 
     return R()
@@ -299,3 +317,42 @@ def test_materials_go_only_into_the_data_block(tmp_path: Path, monkeypatch: Any)
     assert "무지 노트 12월 시즌" not in head and "무지 노트 12월 시즌" in block
     assert "챌린지" in block and "롱폼 금지" in head
     assert "파이썬 입문서" in head  # 형식 예시는 실제 카탈로그 상품 이름
+
+
+def test_trend_material_needs_two_sources_or_enough_videos_and_no_person(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    out = _run(tmp_path, PromoLLM(), monkeypatch)
+    assert [t.name for t in out.trends if t.kind == "popular"] == ["리그오브레전드", "새 휴대폰"]
+    skipped = {s.name: s.reason for s in out.skipped_trends}
+    assert skipped["페이커"] == "사람 이름 주제라 광고 재료에서 뺌 (초상권)"
+    assert skipped["원딜"].startswith("출처 1개·YouTube 인기 영상 4개")
+    assert skipped["경기"].startswith("출처 1개·YouTube 인기 영상 0개")
+    assert "한국철강" not in skipped  # 뉴스·사건은 기준을 보기 전에 늘 뺀다
+
+
+def test_reason_is_returned_when_no_draft_uses_a_popular_trend(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    llm_items = [_item()]
+
+    class WithReason(PromoLLM):
+        async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):  # noqa: ANN001, ANN201
+            self.asked += 1
+            self.calls.append(format_prompt(prompt, untrusted))
+            return _Concepts(
+                items=llm_items, no_popular_reason="게임 트렌드와 문구 상품이 맞지 않음"
+            )
+
+    out = _run(tmp_path, WithReason(), monkeypatch)
+    assert out.popular_trend_note == "게임 트렌드와 문구 상품이 맞지 않음"
+    used = _run(tmp_path / "b", PromoLLM([_item(borrowed_trend="리그오브레전드")]), monkeypatch)
+    assert used.popular_trend_note is None
+
+
+def test_prompt_prefers_popular_trends_as_meme_formats(tmp_path: Path, monkeypatch: Any) -> None:
+    llm = PromoLLM()
+    _run(tmp_path, llm, monkeypatch)
+    head = llm.calls[0].partition("<untrusted")[0]
+    assert "밈 형식" in head and "1~2개는 지금 인기 트렌드" in head
+    assert "no_popular_reason" in head

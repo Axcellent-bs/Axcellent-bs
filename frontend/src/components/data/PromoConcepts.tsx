@@ -110,6 +110,15 @@ function Ingredients({ out }: { out: PromoConceptsOutput }) {
           ))}
         </ul>
       )}
+      {out.popular_trend_note && <p className="mt-2 text-amber-700">지금 인기 트렌드를 쓴 초안 없음: {out.popular_trend_note}</p>}
+      {(out.skipped_trends?.length ?? 0) > 0 && (
+        <details className="mt-2">
+          <summary className="cursor-pointer font-semibold text-ink-900">재료에서 뺀 지금 인기 {out.skipped_trends?.length}개</summary>
+          <ul className="mt-1 space-y-0.5 pl-4">
+            {out.skipped_trends?.map((t) => <li key={t.name}><b>{t.name}</b> · {t.reason}</li>)}
+          </ul>
+        </details>
+      )}
       {(out.season_checks?.length ?? 0) > 0 && (
         <details className="mt-2" open={noSeason}>
           <summary className="cursor-pointer font-semibold text-ink-900">{noSeason ? "시즌 재료 없음 · " : ""}시즌 확인한 키워드 {out.season_checks?.length}개 (작년 같은 달·다음 달 ÷ 평균)</summary>

@@ -688,6 +688,10 @@ export interface PromoConceptsOutput {
   shorts_status?: "known" | "unknown";
   shorts_reason?: string | null;
   season_checks?: PromoSeasonCheck[];
+  /** 재료 기준·사람 이름으로 뺀 지금 인기 주제와 이유 */
+  skipped_trends?: { name: string; reason: string }[];
+  /** 지금 인기 트렌드를 쓴 초안이 없을 때 이유 */
+  popular_trend_note?: string | null;
 }
 
 // ---------------------------------------------------------------- 숏츠 통계 (shorts_stats)
