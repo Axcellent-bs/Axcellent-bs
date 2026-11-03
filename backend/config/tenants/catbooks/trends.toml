@@ -137,6 +137,11 @@ trending_weight = 1.0
 concepts = 4             # 기획안 초안 수 (3~5)
 trend_categories = ["게임", "연예·스포츠", "IT"]  # 트렌드 재료 카테고리 (뉴스·사건·기부·재난·정치·사회·인물은 늘 뺀다)
 trends_per_category = 2  # 카테고리마다 지금 인기 앞에서 몇 개
+# 트렌드 재료 기준: 출처(YouTube 인기 영상·인기 검색어) 2개 이상, 또는 YouTube 인기 영상 N개 이상.
+# 2026-11-03 데이터: 두 출처에 다 나온 주제는 0개, 게임 주제 인기 영상 4~28개(중앙값 6). 5개면 게임 상위 주제는 남고
+# 영상 4개짜리 태그(원딜·롤·worlds)와 인기 검색어에만 나온 주제(영상 0개)는 빠진다. 사람 이름 주제는 늘 뺀다
+trend_min_sources = 2
+trend_min_youtube_videos = 5
 shorts_formats = 3       # 인기 숏츠 형식 재료: shorts_stats 평균 조회수 상위 N개
 min_seconds = 15         # 숏츠 길이 범위(초). 롱폼은 만들지 않는다
 max_seconds = 60
