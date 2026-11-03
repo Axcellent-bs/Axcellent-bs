@@ -326,10 +326,7 @@ class LLMClient:
                 f"{env_prefix(self.dept)}_LLM_BASE_URL 또는 LLM_BASE_URL이 없다"
             )
         payload = response_payload(
-            self.settings.base_url,
-            self.settings.model,
-            messages,
-            schema.__name__,
+            self.settings.base_url, self.settings.model, messages, schema.__name__,
             schema.model_json_schema(),
         )
         headers = (
@@ -339,7 +336,9 @@ class LLMClient:
         attempts = 1 + _max_retries(self.dept)
         model = self.settings.model
         last_problem = "응답이 비어 있다"
-        async with httpx.AsyncClient(timeout=self.timeout, transport=self._transport) as http:
+        async with httpx.AsyncClient(
+            timeout=self.timeout, transport=self._transport
+        ) as http:
             for _ in range(attempts):
                 try:
                     response = await http.post(url, json=payload, headers=headers)
@@ -432,7 +431,9 @@ class LLMClient:
                 response.raise_for_status()
             body = response.json()
             # `index`가 없는 응답(Gemini 호환 엔드포인트)은 응답에 온 순서를 그대로 쓴다
-            items = sorted(enumerate(body["data"]), key=lambda pair: pair[1].get("index", pair[0]))
+            items = sorted(
+                enumerate(body["data"]), key=lambda pair: pair[1].get("index", pair[0])
+            )
             items = [item for _, item in items]
             vectors = [[float(x) for x in item["embedding"]] for item in items]
             if len(vectors) != len(texts):
