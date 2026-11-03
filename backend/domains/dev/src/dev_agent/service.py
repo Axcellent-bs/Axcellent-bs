@@ -175,6 +175,7 @@ class DevService(PlanningCore):
                 await asyncio.sleep(PR_SYNC_SECONDS)
                 try:
                     await self.sync_prs()
+                    await self.recheck_ci()  # CI 실패로 멈춘 PR: 나중에 통과하면 다시 판단
                     await work_queue.expire_leases(self)  # 진행 보고가 끊긴 구독형 작업 되돌리기
                     # 앞 요청을 오래 기다리는 대화에 알린다 (상태가 안 바뀌어도 시간이 지나면)
                     await dev_chat.notice_long_waits(self)
@@ -1078,6 +1079,48 @@ class DevService(PlanningCore):
 
         await self._apply(run)
         return len(done)
+
+    async def recheck_ci(self) -> int:
+        """CI 실패·시간 초과로 사람 확인에 둔 PR의 CI를 다시 본다. 다시 판단한 PR 수.
+
+        나중에 CI가 통과하면(사람이 테스트 레포를 고친 경우 등) 사람 확인을 풀고 자동 머지 규칙을
+        다시 돌린다. 규칙에 걸리면 그 이유로 다시 기다린다. 아직 실패·진행 중이면 그대로 둔다."""
+        held = [
+            p for p in self.state.prs
+            if p.vcs_number is not None and not p.merged and not p.closed
+            and p.task not in self._coding
+            and any(t.id == p.task and t.coding is not None and t.coding.ci_hold
+                    and t.coding.status == "waiting_human" for t in self.state.tasks)
+        ]  # fmt: skip
+        passed = {p.id for p in held if await vcs_bridge.checks_state(p) == "passed"}
+        if not passed:
+            return 0
+
+        async def run(s: State) -> None:
+            for p in s.prs:
+                task = next((t for t in s.tasks if t.id == p.task), None)
+                cr = task.coding if task is not None else None
+                if p.id not in passed or cr is None or not cr.ci_hold or p.merged or p.closed:
+                    continue
+                ctx = self._ctx_of_pr(s, p)
+                cr.ci_hold = False
+                p.auto_review = None
+                s.activity.append(
+                    self._act(self.clock(), ctx, "dev", "dev", "code.ci", "API",
+                              f"{p.id} CI 나중에 통과 → 자동 머지 다시 판단")
+                )  # fmt: skip
+                await self._try_auto_merge(s, p)
+                cr.updated_at = self.clock()
+                if p.merged:
+                    cr.status, cr.error = "merged", None
+                elif p.auto_review is not None:
+                    why = ", ".join(p.auto_review.rules) or f"safety {p.auto_review.gate_status}"
+                    cr.error = f"CI 통과 · 자동 머지 안 함 → {p.auto_review.state} ({why})"
+                else:
+                    cr.error = f"CI 통과 → {p.id} 사람 머지 버튼으로 머지"
+
+        await self._apply(run)
+        return len(passed)
 
     @staticmethod
     def _find_pr(s: State, ref: str | int) -> PR | None:
@@ -2599,6 +2642,7 @@ class DevService(PlanningCore):
             p = next((x for x in s.prs if x.id == cr.pr), None)
             if p is None:
                 raise coder.CoderStop("failed", "PR이 없다")
+            cr.ci_hold = False  # 이번 리뷰 결과로 다시 정한다
             p.reviews.extend(earlier or [])  # type: ignore[arg-type]
             text = f"{p.id} 리뷰 {verdict} · 노트 {len(notes)}개"
             await self._execute(
@@ -2617,6 +2661,7 @@ class DevService(PlanningCore):
                 self._hold(p, WAIT_HUMAN, pr_check(s, p))
                 cr.status = "waiting_human"
                 cr.error = ci_hold
+                cr.ci_hold = True
                 self._code_act(s, job, "code.ci", ci_hold)
                 return
             if verdict == "통과":

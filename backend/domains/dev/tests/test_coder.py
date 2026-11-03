@@ -837,6 +837,27 @@ def test_ci_failure_holds_for_human(service: PlanningService, adapter) -> None:
     assert not pr.merged and pr.auto_review is not None
 
 
+def test_ci_passes_later_then_auto_merges(service: PlanningService, adapter) -> None:
+    ci = ChecksAdapter("failed")
+    vcs.set_vcs(ci)
+    coder.set_llm(FakeLLM())
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "waiting_human" and c.ci_hold
+    # 아직 실패면 그대로 둔다
+    assert run(service.recheck_ci()) == 0
+    assert _task(service).coding.status == "waiting_human"
+    # 사람이 테스트 레포를 고쳐 CI가 나중에 통과 → 자동 머지 규칙을 다시 돌린다
+    ci.states = ["passed"]
+    assert run(service.recheck_ci()) == 1
+    c = _task(service).coding
+    pr = next(p for p in service.state.prs if p.id == c.pr)
+    assert c.status == "merged" and not c.ci_hold and c.error is None
+    assert pr.merged and pr.auto_review is None
+    assert any("CI 나중에 통과" in a.text for a in service.state.activity)
+    assert run(service.recheck_ci()) == 0  # 한 번만
+
+
 def test_ci_timeout_holds_for_human(service: PlanningService, adapter, monkeypatch) -> None:
     monkeypatch.setattr(coder, "CI_WAIT_SECONDS", 0.0)
     vcs.set_vcs(ChecksAdapter("pending"))

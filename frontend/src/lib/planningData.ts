@@ -112,6 +112,7 @@ export interface CodingRun {
   claimedBy?: string | null // 구독형: 가져간 사람
   holdKey?: string | null // 실행 관문이 PR 열기(generate_pr)를 보류한 키
   coveredBy?: string[] // covered: 이 작업을 이미 반영한 앞 작업 PR (PR 없이 완료)
+  ciHold?: boolean // CI 실패로 사람 확인: 서버가 CI를 다시 보고 통과하면 자동 머지를 다시 판단
   holdReview?: string | null // 그 보류 건 (사람이 승인하면 같은 키로 PR을 연다)
   claimedAt?: string | null
   leaseUntil?: string | null // 이때까지 진행 보고가 없으면 대기열로 돌아간다
