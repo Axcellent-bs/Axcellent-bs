@@ -84,7 +84,7 @@ function Pages() {
           <Route path="/org" element={<OrgChanges />} />
           <Route path="/marketing" element={<Marketing />} />
           <Route path="/orchestrator" element={<Orchestrator />} />
-          <Route path="/data" element={<Data />} />
+          <Route path="/data/*" element={<Data />} />
           <Route path="/planning/*" element={<PlanningPage />} />
           <Route path="/dev/*" element={<DevPage />} />
           <Route path="/handoffs" element={<Handoffs />} />

@@ -102,6 +102,12 @@ export const SERVICES: Service[] = [
   {
     id: 'data', agent: 'data', family: 'growth', name: '데이터 분석', by: 'AXcellent', Icon: IconChart, entry: '/data', paths: ['/data'],
     desc: '사건 영향을 숫자로 세고 학습 지표를 봅니다.',
+    // 화면 안 전환(pages/Data.tsx)을 사이드바 하위 탭으로 연다
+    children: [
+      { href: '/data', label: '장애 영향 분석' },
+      { href: '/data/ops', label: '운영 지표' },
+      { href: '/data/trend', label: '트렌드&콘텐츠' },
+    ],
   },
   {
     id: 'handover', agent: 'hr', family: 'backoffice', name: '인수인계', by: 'AXcellent', Icon: IconUsers, entry: '/hr', paths: ['/hr'],

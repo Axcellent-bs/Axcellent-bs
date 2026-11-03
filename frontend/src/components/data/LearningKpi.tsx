@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Bars, Stat } from "@/components/admin/bits";
 import { AgentAccuracy } from "@/components/data/AgentAccuracy";
 import { ChartWithTable, RingMeter, TableView } from "@/components/charts";
@@ -25,7 +26,17 @@ function sum(r: Record<string, number> | null | undefined) {
   return Object.values(r ?? {}).reduce((a, b) => a + (num(b) ?? 0), 0);
 }
 
-function KpiBody({ res }: { res: A2AResult<KpiSummaryOutput> }) {
+/** 운영 지표 묶음 제목 (평상시 지표 · 복구 속도 · AI 단독 처리율) */
+function Group({ id, title, children }: { id: string; title: string; children: ReactNode }) {
+  return (
+    <section aria-labelledby={`${id}-group`} className="space-y-3">
+      <h2 id={`${id}-group`} className="text-lg font-bold tracking-tight text-ink-900">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function KpiBody({ res, accuracy }: { res: A2AResult<KpiSummaryOutput>; accuracy: ReactNode }) {
   const o = res.output;
   const { headline, notes } = evidenceLines(res.evidence?.data_summary);
   // 감지 시각 순서대로 1차, 2차 … (서버 값의 순서만 맞춘다)
@@ -39,7 +50,9 @@ function KpiBody({ res }: { res: A2AResult<KpiSummaryOutput> }) {
   const meta = { mock: false, collected_at: res.evidence?.collected_at ?? undefined };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-8">
+      <Group id="data-daily" title="평상시 지표">{accuracy}</Group>
+      <Group id="data-mttr" title="복구 속도">
       <Panel id="data-learning" title="사건별 복구 시간 비교" meta={meta}
         hint="같은 종류의 장애가 다시 났을 때, 회사 기억(지난 사건 기록)을 참조해 더 빨리 복구했는지 봅니다.">
         {headline && <p className="mb-4 rounded-2xl bg-brand-50 px-4 py-3 text-sm font-medium text-brand-700">{headline}</p>}
@@ -69,7 +82,9 @@ function KpiBody({ res }: { res: A2AResult<KpiSummaryOutput> }) {
           </div>
         )}
       </Panel>
+      </Group>
 
+      <Group id="data-auto" title="AI 단독 처리율">
       <Panel id="data-kpi" title="자동 처리·안전 지표" meta={meta} hint="AI가 사람 없이 끝낸 비율, 안전 등급별 처리 건수, 안전 장치가 막은 요청, 사람에게 넘긴 건수입니다.">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl bg-surface-2 px-4 py-3">
@@ -94,6 +109,7 @@ function KpiBody({ res }: { res: A2AResult<KpiSummaryOutput> }) {
           </div>
         </div>
       </Panel>
+      </Group>
     </div>
   );
 }
@@ -112,8 +128,7 @@ function LiveKpi({ tick }: { tick: number }) {
   return (
     <>
       {res.error && <div className="mb-3"><ErrorBox message={`새로 받지 못해 이전 값을 보여 줍니다. ${res.error}`} onRetry={res.reload} /></div>}
-      <KpiBody res={res.env.data} />
-      <div className="mt-5"><AgentAccuracy tick={tick} feedback={res.env.data.output.human_feedback ?? null} /></div>
+      <KpiBody res={res.env.data} accuracy={<AgentAccuracy tick={tick} feedback={res.env.data.output.human_feedback ?? null} />} />
     </>
   );
 }

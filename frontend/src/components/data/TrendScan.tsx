@@ -9,20 +9,20 @@ import { ShortsStats } from "@/components/data/ShortsStats";
 import { TrendPopular } from "@/components/data/TrendPopular";
 import { YoutubeVelocity } from "@/components/data/YoutubeVelocity";
 import { ContentLoop, type LoopTrendState } from "@/components/data/ContentLoop";
-import { LOOP_STAGES, SEND_TO_MARKETING_BLOCKED, stageFromHash, trendHash, type LoopProbe, type LoopStage } from "@/lib/contentLoop";
+import { LOOP_STAGES, SEND_TO_MARKETING_BLOCKED, TREND_TABS, trendTabFromHash, trendTabHash, trendTabOfStage, type LoopProbe, type LoopStage, type TrendTab } from "@/lib/contentLoop";
 import {
   DATA_SERVER, TREND_MAX_GROUPS, dataAi, evidenceLines, kpiLive,
   type TrendCandidatesOutput, type TrendScanOutput, type TrendVerdict, type TrendingSearchEvidence, type YouTubeTagEvidence,
 } from "@/lib/data";
 
-// 트렌드 탭 (#trend): 콘텐츠 루프 5단계와 같은 이름·순서의 하위 탭 5개 (단계 정의는 lib/contentLoop.ts 한 곳).
-// - 주소에 하위 탭을 남긴다: #trend/detect · #trend/recommend · #trend/video · #trend/campaign · #trend/feedback (없으면 1단계)
-// - 루프 띠의 단계를 누르면 그 하위 탭으로 간다. 루프 띠는 모든 하위 탭 위에 있다
-// - 1 트렌드·밈 감지: 맨 위 지금 인기(trend_popular), 그 아래 급상승 한 줄 목록(trend_scan·trend_candidates), YouTube 지금 속도.
+// 트렌드&콘텐츠 화면 (/data/trend): 콘텐츠 루프 5단계를 하위 탭 4개로 묶어 보여 준다 (단계 정의·묶음은 lib/contentLoop.ts 한 곳).
+// - 주소에 하위 탭을 남긴다: /data/trend#detect · #recommend · #handoff · #result (없으면 감지). 옛 #trend/<단계> 주소는 Data.tsx가 새 주소로 옮긴다
+// - 루프 띠의 단계를 누르면 그 단계가 속한 하위 탭으로 간다. 루프 띠는 모든 하위 탭 위에 있다
+// - 1 감지(1단계 트렌드·밈 감지): 맨 위 지금 인기(trend_popular), 그 아래 급상승 한 줄 목록(trend_scan·trend_candidates), YouTube 지금 속도.
 //   교차 출처 목록(평소 수준·판정 불가)·판정 방법 안내·월별 흐름·계절 패턴은 화면을 줄이려고 뺐다
-// - 2 영상 소재 추천: 맨 위 인기 숏츠 형식(shorts_stats, components/data/ShortsStats.tsx), 그 아래 광고·홍보 숏츠 기획안 초안(promo_concepts, components/data/PromoConcepts.tsx) + content_recommend 출력(components/data/ContentRecommend.tsx). 하위 탭을 오가도 남게 숨기기만 한다
-// - 3·5: 준비 중. 단계 정의의 할 일·필요한 것만 보여 준다(숫자·예시 없음)
-// - 4 게시·성과 측정: 캠페인 효과(campaign_effect). 하위 탭을 오가도 측정 결과가 남게 화면에서 내리지 않고 숨긴다
+// - 2 추천(2단계 영상 소재 추천): 맨 위 인기 숏츠 형식(shorts_stats), 그 아래 광고·홍보 숏츠 기획안 초안(promo_concepts) + content_recommend 출력. 하위 탭을 오가도 남게 숨기기만 한다
+// - 3 넘김(3단계 AI 인플루언서·배우·캐릭터 영상으로 넘기기): 준비 중. 단계 정의의 할 일·필요한 것만 보여 준다(숫자·예시 없음)
+// - 4 성과(4단계 게시·성과 측정 + 5단계 다음 추천에 반영): 캠페인 효과(campaign_effect) 아래에 5단계 준비 중 안내. 측정 결과가 남게 숨기기만 한다
 //
 // 1단계 급상승 한 줄
 // - 주제 · "평소보다 N배 많이 검색돼요"(서버 배수) · 판정에 쓴 마지막 날. 순서는 배수 큰 순. 그래프는 없다
@@ -156,10 +156,12 @@ function PreparingStage({ stage }: { stage: LoopStage }) {
 export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const stage = stageFromHash(location.hash);
-  const openStage = useCallback((s: LoopStage) => {
-    navigate({ search: location.search, hash: trendHash(s) }, { replace: true });
-  }, [navigate, location.search]);
+  const tab = trendTabFromHash(location.hash);
+  const openTab = useCallback((t: TrendTab) => {
+    navigate({ pathname: location.pathname, search: location.search, hash: trendTabHash(t) }, { replace: true });
+  }, [navigate, location.pathname, location.search]);
+  const openStage = useCallback((s: LoopStage) => openTab(trendTabOfStage(s)), [openTab]);
+  const stageOf = (key: string) => LOOP_STAGES.find((s) => s.tab === key)!;
 
   const [text, setText] = useState("");
   const [groups, setGroups] = useState<string[]>([]);
@@ -283,43 +285,46 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
 
   return (
     <div className="space-y-5">
-      <ContentLoop trend={loopTrend} probes={{ trend_scan: trendProbe, content_recommend: stage2Probe, campaign_effect: loopCampaignProbe }} active={stage.no} onSelect={openStage} />
+      <ContentLoop trend={loopTrend} probes={{ trend_scan: trendProbe, content_recommend: stage2Probe, campaign_effect: loopCampaignProbe }} active={stageOf(tab.stages[0]).no} onSelect={openStage} />
 
-      {/* 하위 탭: 루프 5단계와 같은 이름·순서 */}
-      <div role="tablist" aria-label="콘텐츠 루프 단계" className="flex w-full gap-1 overflow-x-auto rounded-2xl bg-surface p-1 ring-1 ring-ink-100">
-        {LOOP_STAGES.map((s) => (
-          <button key={s.tab} type="button" role="tab" id={`trend-sub-${s.tab}`} aria-selected={stage.no === s.no} aria-controls={`trend-sub-panel-${s.tab}`}
-            onClick={() => openStage(s)}
-            className={`flex-1 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${stage.no === s.no ? "bg-brand-600 text-white" : "text-ink-700 hover:bg-ink-100"}`}>
-            {s.no} {s.title}
+      {/* 하위 탭 4개: 감지 → 추천 → 넘김 → 성과 (루프 5단계를 묶은 것, lib/contentLoop.ts TREND_TABS) */}
+      <div role="tablist" aria-label="트렌드&콘텐츠 단계" className="flex w-full gap-1 overflow-x-auto rounded-2xl bg-surface p-1 ring-1 ring-ink-100">
+        {TREND_TABS.map((t, i) => (
+          <button key={t.key} type="button" role="tab" id={`trend-sub-${t.key}`} aria-selected={tab.key === t.key} aria-controls={`trend-sub-panel-${t.key}`}
+            onClick={() => openTab(t)}
+            className={`flex-1 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${tab.key === t.key ? "bg-brand-600 text-white" : "text-ink-700 hover:bg-ink-100"}`}>
+            {i + 1} {t.title}
           </button>
         ))}
       </div>
 
-      {LOOP_STAGES.map((s) => (
-        <div key={s.tab} role="tabpanel" id={`trend-sub-panel-${s.tab}`} aria-labelledby={`trend-sub-${s.tab}`} hidden={stage.no !== s.no}>
-          {s.tab === "detect" ? (
+      {TREND_TABS.map((t) => (
+        <div key={t.key} role="tabpanel" id={`trend-sub-panel-${t.key}`} aria-labelledby={`trend-sub-${t.key}`} hidden={tab.key !== t.key}>
+          {t.key === "detect" ? (
             <div className="space-y-5">
-              {/* 지금 인기 (trend_popular): 급상승 판정과 별개. 1단계 맨 위, 급상승 화면은 아래 */}
+              {/* 지금 인기 (trend_popular): 급상승 판정과 별개. 맨 위, 급상승 화면은 아래 */}
               <TrendPopular />
               {detect}
-              {/* YouTube 지금 속도: 판정 없이 보여 주기 (youtube_velocity). 보기와 상관없이 1단계 아래에 */}
+              {/* YouTube 지금 속도: 판정 없이 보여 주기 (youtube_velocity) */}
               <YoutubeVelocity />
             </div>
-          ) : s.tab === "recommend" ? (
+          ) : t.key === "recommend" ? (
             // 추천 결과가 하위 탭을 오가도 남도록 늘 그려 두고 숨기기만 한다
             <div className="space-y-5">
-              {/* 광고·홍보 숏츠 기획안 초안 (promo_concepts): 2단계 맨 위 */}
-              {/* 인기 숏츠 형식 (shorts_stats): 기획안 위 */}
+              {/* 인기 숏츠 형식 (shorts_stats) → 광고·홍보 숏츠 기획안 초안 (promo_concepts) → content_recommend */}
               <ShortsStats />
               <PromoConcepts onProbe={setPromoProbe} />
               <ContentRecommend onProbe={setRecommendProbe} dataUp={dataUp} />
             </div>
-          ) : s.tab === "campaign" ? (
-            // 측정 결과가 하위 탭을 오가도 남도록 늘 그려 두고 숨기기만 한다
-            <CampaignEffect onProbe={setCampaignProbe} />
+          ) : t.key === "handoff" ? (
+            // 영상 제작으로 넘기기: 아직 준비 중
+            <PreparingStage stage={stageOf("video")} />
           ) : (
-            <PreparingStage stage={s} />
+            // 성과: 캠페인 효과 + 다음 추천 반영(준비 중). 측정 결과가 하위 탭을 오가도 남게 늘 그려 두고 숨기기만 한다
+            <div className="space-y-5">
+              <CampaignEffect onProbe={setCampaignProbe} />
+              <PreparingStage stage={stageOf("feedback")} />
+            </div>
           )}
         </div>
       ))}
