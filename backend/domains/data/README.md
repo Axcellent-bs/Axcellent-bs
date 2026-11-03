@@ -533,6 +533,8 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 
 "지금 많이 보이고 많이 찾는 주제"를 코드 점수로 줄 세운다. 급상승 판정(trend_scan·trend_candidates)과 별개이고 **네이버를 부르지 않는다**. "급상승"이라는 말은 trend_scan 판정에만 쓴다(화면 배지는 "지금 급등 중").
 
+- **모자란 칸 채우기**: 화면 카테고리 주제가 `per_category`보다 적고 `[popular] fill_youtube_categories`(화면 카테고리 → YouTube 카테고리 id, 캣북스: 뉴스·사건 → 25, IT → 28)에 있으면, 그 YouTube 카테고리의 최근 `fill_days`일 게시 영상을 조회수 순으로 `top_videos`에 채운다. **지금 인기 아님**이라 주제 순위·점수와 섞지 않는다. 검색은 카테고리마다 하루 1번(101단위)이고 `backend/.data/popular_videos.db`에 저장해 다시 쓴다. `fill_language = "ko"`면 한국 영상만(shorts_stats와 같은 판단). 2026-11-03: 뉴스 50개 중 한국 35개, IT 50개 중 한국 2개
+
 1. 주제: 최신 YouTube 인기 스냅샷의 태그·제목 구를 trend_candidates와 같은 규칙(정리·별칭 표·수동 제외·자동 제외, `pick_names`)으로 최대 `max_youtube`(80)개, 최신 인기 검색어 스냅샷을 같은 정리 규칙(`pick_trending`)으로 최대 `max_trending`(30)개 본다(카테고리마다 5개를 채우려고 넉넉히, 네이버 호출 없음). 이름이 같으면 한 주제다
 2. 자동 묶기: 네이버 일별 시계열이 필요해 여기서 새로 재지 않는다. 오늘 trend_candidates가 자동으로 묶은 이름 쌍(프로세스 안 오늘 판정 게시판 `today_board`)이 있으면 그대로 한 주제로 묶는다
 3. 점수 = `video_weight` × 영상 몫 + `velocity_weight` × 조회 속도 몫 + `trending_weight` × 검색어 순위 몫(가중치 기본 1.0). **몫은 출처마다 순위로 매긴다**: 그 출처에 값이 있는 주제끼리 큰 순으로 순위를 매겨 (N − 순위 + 1) ÷ N(같은 값은 같은 순위). 값이 없는 주제는 0

@@ -129,6 +129,11 @@ per_category = 5
 video_weight = 1.0
 velocity_weight = 1.0
 trending_weight = 1.0
+# 주제가 per_category보다 적은 화면 카테고리를 그 YouTube 카테고리의 최근 조회수 높은 영상으로 채운다(지금 인기 아님).
+# 2026-11-03: 뉴스·사건 주제 1개, IT 0개. YouTube 카테고리 25 = 뉴스·정치, 28 = 과학·기술. 카테고리마다 하루 1번 검색(101단위)
+fill_youtube_categories = { "뉴스·사건" = "25", "IT" = "28" }
+fill_days = 7            # 최근 며칠 게시 영상에서 고를지
+fill_language = "ko"     # 한국 영상만 (제목·채널 이름에 한글이 있거나 영상 언어가 한국어)
 
 # 광고·홍보 숏츠 기획안 초안(data promo_concepts): 재료(상품 카탈로그·인기 숏츠 형식·지금 인기 게임·연예·스포츠·IT·
 # 카탈로그 시즌·회사 이벤트)는 코드가 모으고 LLM은 정해진 스키마로 초안 문장만 쓴다. 시즌은 카탈로그 카테고리 이름과

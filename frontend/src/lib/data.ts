@@ -572,6 +572,19 @@ export interface PopularCategory {
   items: PopularTopic[];
   /** N개를 못 채웠으면 이유 */
   shortage_reason: string | null;
+  /** 주제가 모자랄 때 그 카테고리의 최근 조회수 높은 영상 (지금 인기 아님, #470). 예전 응답은 없다 */
+  top_videos?: PopularVideo[];
+  /** 고른 기준, 또는 받지 못한 이유 */
+  top_videos_reason?: string | null;
+}
+/** 카테고리의 최근 조회수 높은 영상 하나 (#470) */
+export interface PopularVideo {
+  video_id: string;
+  title: string | null;
+  channel_title: string | null;
+  views: number | null;
+  published_at: string | null;
+  duration_seconds: number | null;
 }
 export interface TrendPopularOutput {
   /** 점수 순 */

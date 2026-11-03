@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Chip, Empty, Panel, TONE, Waiting } from "@/components/finance/bits";
-import { DATA_SERVER, dataAi, kpiLive, type PopularTopic, type TrendPopularOutput } from "@/lib/data";
+import { DATA_SERVER, dataAi, kpiLive, type PopularTopic, type PopularVideo, type TrendPopularOutput } from "@/lib/data";
 
 // 트렌드 1단계 맨 위 "지금 인기": 데이터 AI(8106) trend_popular 출력을 그대로 보여 준다 (계약 TrendPopularOutput, #411).
 // - 급상승 판정과 별개인 지금 인기 순위다. 서버 카테고리별 보기(by_category, #431)를 서버가 준 칸 순서 그대로 그린다
@@ -66,7 +66,7 @@ function sourceLines(out: TrendPopularOutput): { text: string; warn: boolean }[]
 }
 
 /** 화면 칸 하나. legacy = 예전 응답을 화면이 주제 분류별로 묶은 칸(순위는 전체 순위) */
-type Cell = { category: string; items: PopularTopic[]; shortage_reason: string | null; legacy?: boolean };
+type Cell = { category: string; items: PopularTopic[]; shortage_reason: string | null; top_videos?: PopularVideo[]; top_videos_reason?: string | null; legacy?: boolean };
 
 type State = { kind: "loading" } | { kind: "ok"; out: TrendPopularOutput } | { kind: "failed"; reason: string };
 
@@ -116,6 +116,26 @@ export function TrendPopular() {
                   )}
                   {c.shortage_reason && <p className="py-2 text-xs text-amber-700">{c.shortage_reason}</p>}
                   {c.items.length === 0 && !c.shortage_reason && <p className="py-2 text-xs text-ink-500">이 칸에 들어온 주제가 없어요. 서버가 이유를 주지 않았어요.</p>}
+                  {(c.top_videos?.length ?? 0) > 0 && (
+                    <div className="mt-1 border-t border-ink-100 pt-2">
+                      <p className="flex flex-wrap items-center gap-2 text-xs font-semibold text-ink-700">
+                        최근 조회수 높은 영상 <span className="chip">지금 인기 아님</span>
+                      </p>
+                      <ol className="divide-y divide-ink-100">
+                        {(c.top_videos ?? []).map((v) => (
+                          <li key={v.video_id} className="flex items-baseline gap-2 py-1.5 text-sm">
+                            <a className="min-w-0 flex-1 truncate text-ink-900 hover:underline" href={`https://www.youtube.com/watch?v=${encodeURIComponent(v.video_id)}`} target="_blank" rel="noreferrer">
+                              {v.title ?? "제목 없음"}
+                            </a>
+                            <span className="shrink-0 text-xs text-ink-500">
+                              {v.channel_title ?? "채널 모름"}{v.views != null ? ` · 조회 ${v.views.toLocaleString("ko-KR")}회` : ""}
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+                  {c.top_videos_reason && <p className="py-1 text-xs text-ink-500">{c.top_videos_reason}</p>}
                 </section>
               ))}
             </div>

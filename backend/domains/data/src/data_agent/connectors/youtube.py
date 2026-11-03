@@ -234,6 +234,33 @@ class YouTubeConnector:
         ids = [item.id.videoId for item in page.items if item.id.videoId]
         return await self.videos(ids) if ids else []
 
+    async def search_category(
+        self,
+        category_id: str,
+        published_after: datetime,
+        region: str = "KR",
+        max_results: int = PAGE_SIZE,
+        language: str | None = None,
+    ) -> list[VideoStat]:
+        """YouTube 카테고리 하나의 최근 게시 영상을 조회수 순으로 검색 → 결과 영상의 통계.
+
+        길이 조건 없음. 검색 100단위 + 통계 1단위(50개마다).
+        """
+        params = {
+            "part": "snippet",
+            "type": "video",
+            "videoCategoryId": category_id,
+            "regionCode": region,
+            "order": "viewCount",
+            "maxResults": max(1, min(max_results, PAGE_SIZE)),
+            "publishedAfter": published_after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        if language:
+            params["relevanceLanguage"] = language
+        page = _parse(_SearchPage, await self._get("search", params), "카테고리 검색")
+        ids = [item.id.videoId for item in page.items if item.id.videoId]
+        return await self.videos(ids) if ids else []
+
     async def search_shorts(
         self,
         category_id: str,
