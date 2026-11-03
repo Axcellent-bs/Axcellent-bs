@@ -5,6 +5,7 @@ import { STEP_STATUS, adminRelay, relayEnabled, type Incident } from "@/lib/admi
 import { incidentTitle, skillKo, stepLabel } from "@/lib/agentChat";
 import { shortDateTime } from "@/lib/format";
 import { support, type ExecutionRow } from "@/lib/support";
+import { IncidentCompensationList } from "@/components/support/IncidentCompensationList";
 
 // 사건 대응 기록: 결제 서버 오류 같은 사건이 났을 때 고객지원이 처리한 일이 언제 적용됐는지 시간순으로 남긴다.
 // 자료는 두 곳이고 화면이 새로 만들지 않는다: 총괄 사건(시작 시각, 고객지원 단계의 시각)과 안전 관문 실행 기록(처리 시각).
@@ -117,6 +118,7 @@ function Detail({ incident, tick }: { incident: Incident; tick: number }) {
                 </table>
               </div>
             )}
+            <IncidentCompensationList contextId={incident.context_id} tick={tick} />
             <p className="text-[11px] text-ink-500">
               적용 시각은 안전 관문이 &quot;실행함&quot;으로 판정한 시각(또는 총괄 단계가 끝난 시각)입니다. 보류·검증 중인 건은 아직 적용 전이라 시각이 요청 시각입니다.
               문의 단위 처리 내용은 <Link href="/console" className="underline">상담 콘솔</Link>의 AI 처리 내력에서 볼 수 있습니다.

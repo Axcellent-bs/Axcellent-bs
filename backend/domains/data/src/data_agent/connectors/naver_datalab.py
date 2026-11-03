@@ -185,6 +185,12 @@ class NaverDatalabConnector:
     def __repr__(self) -> str:  # 키를 담지 않는다
         return f"NaverDatalabConnector(url={self.url!r})"
 
+    @property
+    def calls_today(self) -> int:
+        """오늘(한국 날짜) 네이버를 실제로 부른 수 (캐시에서 돌려준 요청은 세지 않는다)."""
+        self._cache.get("")  # 날짜가 바뀌었으면 비운다
+        return self._cache.calls
+
     def _headers(self) -> dict[str, str]:
         if not self._client_id or not self._client_secret:
             raise ConnectorUnavailable(

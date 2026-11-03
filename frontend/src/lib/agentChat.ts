@@ -100,9 +100,14 @@ const METRIC_KO: Record<string, string> = {
 const SUBJECT_KO: Record<string, string> = { payment: "결제가", api: "쇼핑몰이", db: "주문 DB가", search: "검색이", shipping: "배송이" };
 // 재무 이상 이벤트(finance.anomaly_detected)는 주어 없이 한 문장으로
 const FINANCE_KO: Record<string, string> = {
-  repeat_refund: "같은 고객이 환불을 반복해요", refund_rate_jump: "환불이 갑자기 많아졌어요",
-  split_under_limit: "한도 바로 아래로 쪼갠 지급이 있어요", duplicate_coupon: "같은 이벤트 보상 쿠폰이 두 번 나갔어요",
+  gate_hold_trend: "안전 장치 보류·거절이 늘었어요",
 };
+/** 보류 건을 결정하는 화면. 환불은 고객지원, 쿠폰은 마케팅, 나머지는 재무 화면의 보류 큐다 */
+export function holdPage(action: string | null | undefined): string {
+  if (action === "refund_request") return "/queue";
+  if (action === "issue_coupon") return "/marketing";
+  return "/finance";
+}
 /** 총괄 제목 끝의 "(metric)"에서 지표 코드를 꺼낸다 */
 function metricOf(inc: Pick<OrchIncident, "title">): string | null {
   return /\(([^)]+)\)\s*$/.exec(inc.title)?.[1] ?? null;
@@ -138,7 +143,7 @@ const ACTION_KO: Record<string, string> = {
   rollback_deployment: "배포 되돌리기", verify_recovery: "복구 확인", restart_service: "서비스 다시 켜기",
   find_related_prs: "관련 코드 변경 찾기", link_incident: "이벤트에 코드 변경 연결", verify_rollback_target: "되돌릴 배포 확인",
   draft_notice: "공지 초안 작성", publish_notice: "공지 게시", get_notice: "공지 조회",
-  loss_aggregation: "손실 리포트", record_support_cost: "배송비·비용 기록 확인", record_case: "이벤트 기록", check_plan: "예전 결정과 비교",
+  loss_aggregation: "손실 리포트", record_support_cost: "처리 결과 장부에 기록", record_case: "이벤트 기록", check_plan: "예전 결정과 비교",
   // 돈이 나가는 일·안전 관문
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 확정",
   verify_amount: "금액 다시 계산", review_hold: "보류 건 1차 판단", review_threshold_change: "기준 변경 판단",
@@ -178,7 +183,7 @@ export interface Fact { label: string; value: string }
 export type ChatItem =
   | { kind: "msg"; id: string; at: string; room: string; from: string; to: string; fromKey: string; central: boolean; text: string; tag?: string; raw?: string; tone: Tone; facts: Fact[]; repeat?: number; lastAt?: string }
   | { kind: "system"; id: string; at: string; room: string; text: string }
-  | { kind: "hold"; id: string; at: string; room: string; title: string; detail: string; state: "pending" | "approved" | "rejected" | "timeout"; contextId?: string; stepId?: string; link?: string }
+  | { kind: "hold"; id: string; at: string; room: string; title: string; detail: string; state: "pending" | "approved" | "rejected" | "timeout"; contextId?: string; stepId?: string; link?: string; decideAt?: string }
   | { kind: "separator"; id: string; at: string; room: string; text: string; raw?: string; variant: "day" | "topic" };
 
 export const SAFETY_ROOM = "safety";
@@ -361,7 +366,7 @@ export function incidentItems(inc: OrchIncident): ChatItem[] {
           ? step.note === "시간 초과로 자동 거절" ? "timeout" : "rejected"
           : "approved";
       out.push({
-        kind: "hold", id: `${sid}:hold`, at: holdAt, room, contextId: inc.context_id, stepId: step.step_id, state,
+        kind: "hold", id: `${sid}:hold`, at: holdAt, room, contextId: inc.context_id, stepId: step.step_id, state, decideAt: holdPage(step.skill),
         title: stepLabel(step.label), detail: `${speaker(step.dept)} · ${skillKo(step.skill)}`,
       });
       if (pending) continue;
@@ -458,8 +463,8 @@ export function executionItems(rec: ExecutionRecord): ChatItem[] {
   });
   if (d.status === "held") {
     out.push({
-      kind: "hold", id: `${id}:hold`, at: rec.created_at, room, state: "pending", link: "/finance",
-      title: `${speaker(req.requester)}의 ${actionKo(req.action)}${amount}`, detail: "재무 AI 화면(/finance)에서 결정합니다",
+      kind: "hold", id: `${id}:hold`, at: rec.created_at, room, state: "pending", link: holdPage(req.action),
+      title: `${speaker(req.requester)}의 ${actionKo(req.action)}${amount}`, detail: `담당 화면(${holdPage(req.action)})에서 결정합니다`,
     });
   }
   return out;
@@ -499,7 +504,7 @@ export function commItem(line: CommLine, room: string, safetyIds: ReadonlySet<st
     line.execution_id,
     line.context_id,
   );
-  const holdHint = line.outcome === "held" && !dupOf ? " — 안전 관문 보류 큐(/finance)에서 결정" : "";
+  const holdHint = line.outcome === "held" && !dupOf ? ` — 안전 관문 보류 큐(${holdPage(line.skill)})에서 결정` : "";
   return {
     kind: "msg", id: `log:${line.log_id}`, at: line.occurred_at, room,
     from: speaker(line.from_agent), to: line.to_agent ? speaker(line.to_agent) : "받는 쪽 미기록",

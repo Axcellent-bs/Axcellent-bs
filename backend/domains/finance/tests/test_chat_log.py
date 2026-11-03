@@ -52,15 +52,16 @@ def test_ledger_without_incident_is_not_a_chat(logged: list[dict[str, Any]]) -> 
 @pytest.mark.asyncio
 async def test_new_audit_finding_opens_finance_incident(published: list[EventEnvelope]) -> None:
     finding = {
-        "code": "repeat_refund", "severity": "medium",
-        "detail": "buy_0008의 주문 3건 환불, 합계 49,500원 (최근 7일)", "refs": ["ref_1", "ord_1"],
+        "code": "gate_hold_trend", "severity": "medium",
+        "detail": "buy_0008 관련 안전 장치 보류 3건",
+        "refs": ["ref_1", "ord_1"],
     }
     await chat_log.audit_findings([finding], "shop-demo")
     await chat_log.audit_findings([dict(finding)], "shop-demo")  # 화면이 감사를 다시 불러도
     assert len(published) == 1
     env = published[0]
     assert env.type == EventType.FINANCE_ANOMALY_DETECTED and env.source == "finance"
-    assert env.data["component"] == "finance" and env.data["metric_code"] == "repeat_refund"
+    assert env.data["component"] == "finance" and env.data["metric_code"] == "gate_hold_trend"
     assert env.data["buyer_ids"] == ["buy_0008"]
     # 다른 의심 건은 새로
     await chat_log.audit_findings([{**finding, "refs": ["ref_9"]}], "shop-demo")

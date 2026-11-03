@@ -5,7 +5,8 @@ import { DEPT_NAME, type PR, type State as S, type Task } from '@/lib/planningDa
 import { Tag, rowNav } from '@/components/planning-common/parts'
 import { prName, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
 import { duration, shortTime, toMin, type Cell } from '@/components/planning/requests'
-import { OriginTag, codingState, fromDevTeam, requestOfTask, tokens } from '@/components/dev/coding'
+import { OriginTag, UsageBar, codingState, fromDevTeam, pctOf, requestOfTask, tokens } from '@/components/dev/coding'
+import { useCodingLimits } from '@/lib/planning'
 
 // ---------------------------------------------------------------- 필터
 type Group = 'stuck' | 'running' | 'done' | 'stopped'
@@ -29,7 +30,7 @@ const prOf = (s: S, t: Task) => {
   return all.find((p) => !p.merged && !p.closed) ?? all[all.length - 1]
 }
 
-export function taskRow(s: S, t: Task): TaskRow {
+export function taskRow(s: S, t: Task, runTokens = 600_000): TaskRow {
   const pr = prOf(s, t)
   const c = t.coding
   const xr = pr && !pr.merged ? reviewOf(s, pr.id) : undefined
@@ -49,7 +50,7 @@ export function taskRow(s: S, t: Task): TaskRow {
   const c1: Cell = { kind: kind(1) }
   if (c) {
     c1.value = codingState(c)
-    c1.meta = c.mode === 'subscription' ? c.progress ?? '내 Claude' : c.llmCalls ? `AI ${c.llmCalls}회 · ${tokens(c.llmTokens ?? 0)}` : c.model ?? undefined
+    c1.meta = c.mode === 'subscription' ? c.progress ?? '내 Claude' : c.llmCalls ? `AI ${c.llmCalls}회 · 토큰 ${pctOf(c.llmTokens ?? 0, runTokens)}% (${tokens(c.llmTokens ?? 0)})` : c.model ?? undefined
     if (c1.kind === 'now' && (held || canceled)) { c1.warn = true; c1.meta = c.error ?? c1.meta }
   } else {
     c1.value = t.owner
@@ -89,7 +90,8 @@ export function sortTaskRows(rows: TaskRow[]): TaskRow[] {
 // ---------------------------------------------------------------- 화면
 export function TaskBoard({ s, filter }: { s: S; filter?: string }) {
   const f = parseFilter(filter)
-  const all = s.tasks.map((t) => taskRow(s, t))
+  const lim = useCodingLimits()
+  const all = s.tasks.map((t) => taskRow(s, t, lim.runTokens))
   const rows = sortTaskRows(f === 'all' ? all : all.filter((x) => x.group === f))
   const calls = s.tasks.reduce((n, t) => n + (t.coding?.llmCalls ?? 0), 0)
   const used = s.tasks.reduce((n, t) => n + (t.coding?.llmTokens ?? 0), 0)
@@ -105,7 +107,7 @@ export function TaskBoard({ s, filter }: { s: S; filter?: string }) {
             </a>
           )
         })}
-        {calls > 0 && <span className="rq-usage" title="모든 작업이 지금까지 쓴 LLM 호출·토큰">AI {calls}회 · <span className="mono">{tokens(used)}</span> 토큰</span>}
+        {calls > 0 && <span className="rq-usage"><UsageBar used={used} limit={lim.trial} label={`AI ${calls}회 · 서버 AI 체험`} title="모든 작업이 쓴 토큰 / 서버 AI 체험 한도" /></span>}
       </nav>
 
       <div className="rq-head" aria-hidden>

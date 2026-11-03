@@ -50,7 +50,7 @@ export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: num
 
   return (
     <Panel id="settlements" title="③ 판매자 정산" titleHidden meta={res.env?.meta}
-      hint="판매자에게 줄 돈(정산금) = 판매액 − 판매 수수료 − 판매자가 부담한 쿠폰 − 환불. 처리 중인 환불·교환이 있거나 위험한 판매자는 자동으로 보류하고, 나머지만 묶어 지급 승인을 요청합니다.">
+      hint="판매자에게 줄 돈(정산금) = 판매액 − 판매 수수료 − 판매자가 부담한 쿠폰 − 환불. 구매가 확정되지 않았거나 정산금이 0원 이하인 판매자는 자동으로 보류하고, 나머지만 묶어 지급 승인을 요청합니다.">
       <ResourceBody res={res}>
         {(s) => {
           const total = readyPayout(s.statements);

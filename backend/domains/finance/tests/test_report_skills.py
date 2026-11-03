@@ -59,24 +59,37 @@ def test_closing_report_defaults_and_confirmation() -> None:
     assert (bad["status"], bad["outcome"]) == ("failed", "invalid_input")
 
 
-def test_audit_report_lists_findings_with_evidence() -> None:
+def test_audit_report_lists_findings_with_evidence(kit) -> None:
+    held = [
+        {
+            "execution_id": f"exe_{i}",
+            "created_at": kit.at("2026-10-22"),
+            "action": "confirm_settlement",
+            "status": "held",
+            "params": {},
+        }
+        for i in range(3)
+    ]
+
+    async def books():
+        return kit.books(executions=held)
+
+    handlers.state().books_loader = books
     result = _ask("audit_report", {"days": 7})
     assert result["status"] == "completed"
     out = AuditReportOutput.model_validate(result["output"])
-    assert {f.code for f in out.findings} == {
-        "split_under_limit",
-        "repeat_refund",
-        "duplicate_coupon",
-        "refund_rate_jump",
-        "amount_recheck_failed",
-        "gate_hold_trend",
-        "compensation_outside_impact",  # 시나리오 A 지난 사건(ctx_inc_0100)의 buy_0999
-    }
+    assert {f.code for f in out.findings} == {"gate_hold_trend"}
     assert out.stats.gate_held == 3 and out.unavailable == []
-    assert result["evidence"]["ref_ids"] and "감사 의심 7건" in result["evidence"]["data_summary"]
+    assert result["evidence"]["ref_ids"] and "감사 의심 1건" in result["evidence"]["data_summary"]
     for bad in ({"days": 0}, {"days": 91}, {"days": "x"}):
         failed = _ask("audit_report", bad)
         assert (failed["status"], failed["outcome"]) == ("failed", "invalid_input")
+
+
+def test_audit_report_on_the_seed_books_has_no_coupon_or_refund_findings() -> None:
+    """시드 장부의 쿠폰·환불 보류는 감사 대상이 아니다. skill과 응답 모양은 그대로다."""
+    out = AuditReportOutput.model_validate(_ask("audit_report", {"days": 7})["output"])
+    assert out.findings == [] and out.stats.gate_held == 0 and out.stats.gate_rejected == 0
 
 
 def test_partial_when_sources_missing(kit) -> None:

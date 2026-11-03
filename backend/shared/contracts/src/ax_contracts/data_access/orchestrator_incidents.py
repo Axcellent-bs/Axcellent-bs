@@ -10,6 +10,9 @@
 `opened_at`·`closed_at`은 AI 처리가 시작·끝난 시각이라 장애 구간과 다를 수 있다(감시가 장애를
 몇십 초 지켜본 뒤 사건을 연다). 그래서 영향 고객 판정에는 `impact_from`·`impact_to`가 있으면
 그걸 쓴다.
+실제 장애가 풀린 시각은 `recovered_at`이다(shop.recovered를 받은 시각, 2026-11-02 추가).
+`impact_to`는 시작 + 15분 고정값이라 실제 종료가 아니다. 복귀 신호가 오기 전까지 `recovered_at`은
+None이고, 신호가 와도 `status`가 `resolved`이면 `closed_at`이 이미 있을 수 있다.
 
 `GET /api/incidents`는 지금 질의 매개변수를 받지 않고 사건 전부를
 `{"data": [...], "meta": {...}}`로 돌려준다. 그래서 `OrchestratorIncidentsQuery`의 값은
@@ -50,6 +53,8 @@ class OrchestratorIncident(AxModel):
     # 총괄이 data `impact_analysis`에 넘긴 구간 (장애 시작 `since` ~ 끝). 아직 안 실으면 None
     impact_from: UtcDatetime | None = None
     impact_to: UtcDatetime | None = None
+    # 쇼핑몰이 정상 복귀를 알린 시각(shop.recovered). 오기 전이면 None. 실제 장애 종료 시각이다
+    recovered_at: UtcDatetime | None = None
     tenant_id: str = TENANT_ID_DEFAULT
 
 

@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 
 from ax_agent_template import events
 from finance_agent import handlers, selftest
-from finance_agent.handlers import recompute
 from finance_agent.main import app
 from finance_agent.sources import MockSources
 
@@ -21,8 +20,7 @@ REGISTRY = {
         {"action": "confirm_settlement", "base_grade": "C", "verifier": None},
     ]
 }
-THRESHOLDS = {"version": 1, "rules": [{"key": "refund_single", "value": 100000}]}
-ROUTING = "쿠폰·환불은 규칙 검사, 정산 확정은 사람 승인"
+ROUTING = "정산 확정은 사람 승인"
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +30,7 @@ def _mock_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     handlers.reset_state(MockSources())
 
 
-def _network(up: set[str], registry: dict | None = None, thresholds: dict | None = None):
+def _network(up: set[str], registry: dict | None = None):
     """가짜 네트워크. `up`에 있는 서비스만 응답한다."""
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -41,24 +39,24 @@ def _network(up: set[str], registry: dict | None = None, thresholds: dict | None
             raise httpx.ConnectError("down")
         if path == "/api/safety/registry":
             return httpx.Response(200, json={"data": registry or REGISTRY, "meta": {}})
-        if path == "/api/safety/thresholds":
-            return httpx.Response(200, json={"data": thresholds or THRESHOLDS, "meta": {}})
         return httpx.Response(200, json={"data": {"status": "ok"}, "meta": {}})
 
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
 async def _run(client: httpx.AsyncClient) -> dict[str, Any]:
-    return await selftest.run_self_test(recompute, http_client=client)
+    return await selftest.run_self_test(http_client=client)
 
 
 @pytest.mark.asyncio
 async def test_all_green_when_everything_is_up() -> None:
     result = await _run(_network({"safety", "shop-api", "data"}))
     assert result["result"] == "pass", [c for c in result["checks"] if not c["ok"]]
-    assert result["passed"] == result["total"] >= 14
+    assert result["passed"] == result["total"] == 8
     names = {c["name"] for c in result["checks"]}
-    assert {"금액을 틀리게 적은 쿠폰 막기", "결제보다 큰 환불 막기", "안전 장치 연결"} <= names
+    assert "안전 장치 연결" in names
+    # 쿠폰·환불 판단과 예산·한도는 재무 일이 아니라 점검하지 않는다
+    assert not {n for n in names if "쿠폰" in n or "환불" in n or "한도" in n or "예산" in n}
     assert {"결산 계산 공식", "대사 상태 나누기", "판매자 정산 공식", "사후 감사 규칙"} <= names
 
 
@@ -79,15 +77,10 @@ async def test_safety_down_fails() -> None:
 
 
 @pytest.mark.asyncio
-async def test_old_finance_routing_or_missing_settlement_action_fails() -> None:
-    """안전 장치가 아직 쿠폰을 재무 검증으로 보내거나 정산 확정이 C가 아니면 빨간불."""
-    old = {
-        "actions": [
-            {"action": "issue_coupon", "base_grade": "B", "verifier": "finance"},
-            {"action": "refund_request", "base_grade": "A", "verifier": None},
-            {"action": "confirm_settlement", "base_grade": "C", "verifier": None},
-        ]
-    }
+async def test_old_settlement_grade_or_missing_action_fails() -> None:
+    """정산 확정이 C가 아니거나 등록되어 있지 않으면 빨간불."""
+    settle = {"action": "confirm_settlement", "base_grade": "A"}
+    old = {"actions": [*REGISTRY["actions"][:2], settle]}
     result = await _run(_network({"safety", "shop-api", "data"}, old))
     by = {c["name"]: c for c in result["checks"]}
     assert (by[ROUTING]["ok"], by[ROUTING]["level"]) == (False, "fail")
@@ -99,44 +92,32 @@ async def test_old_finance_routing_or_missing_settlement_action_fails() -> None:
 
 
 @pytest.mark.asyncio
-async def test_thresholds_unreadable_only_warns() -> None:
-    result = await _run(_network({"safety", "shop-api", "data"}, thresholds={"version": 1}))
-    bad = [(c["name"], c["level"]) for c in result["checks"] if not c["ok"]]
-    assert bad == [("기준표 읽기", "warn")]
-    assert result["result"] == "warn"
-
-
-@pytest.mark.asyncio
 async def test_module_checks_cover_every_new_module() -> None:
-    """결산·대사·정산·예산·감사 규칙 점검이 모두 통과한다(가짜 자료, 실제 기록 없음)."""
+    """결산·대사·정산·감사 규칙 점검이 모두 통과한다(가짜 자료, 실제 기록 없음)."""
     result = await _run(_network({"safety", "shop-api", "data"}))
     by = {c["name"]: c for c in result["checks"]}
     for name in (
         "결산 계산 공식",
         "대사 상태 나누기",
         "판매자 정산 공식",
-        "예산 경보 기준",
         "사후 감사 규칙",
-        "한도 제안 설정 읽기",
     ):
         assert by[name]["ok"], (name, by[name]["detail"])
     assert "13,000원" in by["판매자 정산 공식"]["detail"]
 
 
 @pytest.mark.asyncio
-async def test_broken_judgement_is_caught(monkeypatch: pytest.MonkeyPatch) -> None:
-    """판단 코드가 고장 나면(무조건 통과) 테스트가 빨간불을 켠다."""
-    from finance_agent.recheck import VerifyAmountOutput
+async def test_broken_calculation_is_caught(monkeypatch: pytest.MonkeyPatch) -> None:
+    """계산 코드가 고장 나면 테스트가 빨간불을 켠다."""
 
-    async def always_approve(*args: Any, **kwargs: Any) -> VerifyAmountOutput:
-        return VerifyAmountOutput(decision="approved", reason_code="recomputed_match")
+    def broken(*args: Any, **kwargs: Any) -> dict:
+        row = {"gross": 1, "commission": 0, "refunds": 0, "payout": 1, "status": "ready"}
+        return {"statements": [row]}
 
-    result = await selftest.run_self_test(
-        always_approve,
-        http_client=_network({"safety", "shop-api", "data"}),
-    )
+    monkeypatch.setattr(selftest, "statements", broken)
+    result = await _run(_network({"safety", "shop-api", "data"}))
     failed = {c["name"] for c in result["checks"] if not c["ok"]}
-    assert "금액을 틀리게 적은 쿠폰 막기" in failed and "결제보다 큰 환불 막기" in failed
+    assert "판매자 정산 공식" in failed
     assert result["result"] == "fail"
 
 

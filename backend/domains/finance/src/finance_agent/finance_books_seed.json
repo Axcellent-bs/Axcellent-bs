@@ -1,5 +1,5 @@
 {
- "_note": "재무 목 장부 (finance_books.py). day는 오늘(UTC) 기준 날짜 오프셋, time은 UTC 시각. day 0 기록은 00시대에만 둔다. pg_overrides는 데모용으로 일부러 넣은 PG 정산 불일치. thresholds는 safety thresholds.toml v1 값을 옮긴 것(목 모드 기본값). incidents는 시나리오 A 시연용 사건(장애 구간). 영향 숫자는 mock_seed.json impacts(data 목과 같은 값).",
+ "_note": "재무 목 장부 (finance_books.py). day는 오늘(UTC) 기준 날짜 오프셋, time은 UTC 시각. day 0 기록은 00시대에만 둔다. pg_overrides는 데모용으로 일부러 넣은 PG 정산 불일치. incidents는 시나리오 A 시연용 사건(장애 구간). 영향 숫자는 mock_seed.json impacts(data 목과 같은 값).",
  "sellers": [
   {
    "seller_id": "sel_0001",
@@ -5572,24 +5572,6 @@
    "execution_id": "exe_s0065"
   }
  ],
- "claims": [
-  {
-   "claim_id": 501,
-   "order_id": "ord_2145",
-   "seller_id": "sel_0002",
-   "type": "return",
-   "status": "open",
-   "day": -2
-  },
-  {
-   "claim_id": 502,
-   "order_id": "ord_2086",
-   "seller_id": "sel_0001",
-   "type": "exchange",
-   "status": "closed",
-   "day": -7
-  }
- ],
  "executions": [
   {
    "execution_id": "exe_s0001",
@@ -6588,6 +6570,25 @@
    "review_id": "rev_s0051"
   },
   {
+   "execution_id": "exe_s0052",
+   "day": -2,
+   "time": "16:20",
+   "action": "issue_coupon",
+   "requester": "marketing",
+   "context_id": "ctx_req_issue_coupon_0052",
+   "params": {
+    "buyer_id": "buy_0020",
+    "purpose_code": "campaign",
+    "count": 2,
+    "unit_value": 5000,
+    "total_value": 12000
+   },
+   "status": "executed",
+   "grade": "A",
+   "hold_reason": null,
+   "computed_amount": 12000
+  },
+  {
    "execution_id": "exe_s0060",
    "day": -1,
    "time": "06:10",
@@ -6742,59 +6743,6 @@
    "kind": "mismatch",
    "delta": 1000
   }
- },
- "thresholds": {
-  "version": 1,
-  "rules": [
-   {
-    "key": "coupon_total",
-    "action": "issue_coupon",
-    "metric": "amount",
-    "op": ">=",
-    "value": 300000
-   },
-   {
-    "key": "coupon_unit",
-    "action": "issue_coupon",
-    "metric": "unit",
-    "op": ">",
-    "value": 20000
-   },
-   {
-    "key": "coupon_daily",
-    "action": "issue_coupon",
-    "metric": "daily_total",
-    "op": ">=",
-    "value": 1000000
-   },
-   {
-    "key": "compensation_per_context",
-    "action": "issue_coupon",
-    "metric": "context_total",
-    "op": ">=",
-    "value": 1000000,
-    "when": {
-     "purpose_code": "compensation"
-    }
-   },
-   {
-    "key": "compensation_per_customer",
-    "action": "issue_coupon",
-    "metric": "customer_total",
-    "op": ">=",
-    "value": 50000,
-    "when": {
-     "purpose_code": "compensation"
-    }
-   },
-   {
-    "key": "refund_single",
-    "action": "refund_request",
-    "metric": "amount",
-    "op": ">=",
-    "value": 100000
-   }
-  ]
  },
  "incidents": [
   {

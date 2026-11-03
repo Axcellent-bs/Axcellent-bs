@@ -133,7 +133,7 @@ function Claims() {
                 <section>
                   <h2 className="panel-title mb-2">내부 점검 신호 <span className="normal-case tracking-normal text-red-700">(고객에게 노출되지 않음)</span></h2>
                   <div className="rounded-xl border border-ink-100 p-3 text-xs">
-                    <p className="font-semibold">점수 {detail.abuse.score} / 100 <span className="font-normal text-ink-500">· 60 이상이면 자동 승인하지 않고 상담원이 봅니다</span></p>
+                    <p className="font-semibold">점수 {detail.abuse.score} <span className="font-normal text-ink-500">· 이전 클레임 3건(점수 90) 이상이면 자동 승인하지 않고 상담원이 봅니다</span></p>
                     <ul className="mt-1.5 space-y-0.5 text-ink-700">{detail.abuse.signals.map((s, i) => <li key={i}>+{s.points} · {s.message}</li>)}</ul>
                   </div>
                 </section>

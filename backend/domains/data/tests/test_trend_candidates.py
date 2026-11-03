@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import random
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -30,6 +31,7 @@ from data_agent.skills.trend_candidates import (
     find_candidates,
     load_config,
     pick_candidates,
+    pick_verdict,
 )
 from data_agent.skills.trend_scan import REQUEST_DAYS, judge
 from data_agent.youtube_store import (
@@ -41,7 +43,9 @@ from data_agent.youtube_store import (
 )
 
 NOW = datetime(2026, 11, 2, 6, 0, tzinfo=UTC)
-SNAP_AT = NOW - timedelta(hours=1)
+# 판정 마지막 날(END = 11-01) 한국 시간 23시. 지난 기간(end_date) 판정은 그 기간 끝(11-02 0시 KST)
+# 이전 스냅샷만 쓴다
+SNAP_AT = datetime(2026, 11, 1, 14, 0, tzinfo=UTC)
 END = date(2026, 11, 1)
 START = END - timedelta(days=REQUEST_DAYS - 1)
 CATBOOKS_TRENDS = (
@@ -238,14 +242,22 @@ def test_latest_popular_does_not_create_a_missing_file(tmp_path: Path) -> None:
 # ---------------------------------------------------------------- skill
 
 
-def _calm(day: date) -> float:
-    return 50.0 * (1 + 0.05 * math.sin(day.toordinal() * 2.1))
+def _calm(day: date, phase: float = 0.0) -> float:
+    return 50.0 * (1 + 0.05 * math.sin(day.toordinal() * 2.1 + phase))
 
 
-def _points(spike: float = 1.0) -> tuple[tuple[date, float], ...]:
+def _phase(name: str) -> float:
+    """키워드마다 날짜별 흔들림 위상이 다르다 (실제 검색어처럼 서로 다른 모양).
+
+    모든 키워드가 같은 모양이면 상관이 1이라 이름 자동 묶기가 서로 다른 후보를 묶는다.
+    """
+    return random.Random(name).uniform(0.6, 2.5)
+
+
+def _points(spike: float = 1.0, phase: float = 0.0) -> tuple[tuple[date, float], ...]:
     out, day = [], START
     while day <= END:
-        v = _calm(day) * (spike if day > END - timedelta(days=3) else 1.0)
+        v = _calm(day, phase) * (spike if day > END - timedelta(days=3) else 1.0)
         out.append((day, v))
         day += timedelta(days=1)
     top = max(v for _, v in out)
@@ -265,7 +277,7 @@ class Naver:
         name = query.keyword_groups[0].group_name
         if name in self.fail:
             raise ConnectorUnavailable("UNAVAILABLE", "네이버 검색어 트렌드에 연결할 수 없다")
-        series = TrendSeries(name, (name,), _points(self.spikes.get(name, 1.0)))
+        series = TrendSeries(name, (name,), _points(self.spikes.get(name, 1.0), _phase(name)))
         return TrendResponse(query.start_date, query.end_date, query.time_unit, (series,))
 
 
@@ -296,10 +308,13 @@ def test_candidates_carry_youtube_evidence_and_the_naver_verdict(tmp_path: Path)
     assert t1.youtube.video_ids == ["v1", "v2", "v3"]
     assert t1.naver.status == "rising" and t1.naver.group_name == "t1"
     assert out.candidates[1].naver.status == "normal"
-    assert out.naver_calls == 3 == len(naver.queries)
-    # 회사 별칭 표에 t1 = ["티원"]이 있어 t1 그룹에는 별칭이 키워드로 함께 들어간다
+    # 회사 별칭 표에 t1 = ["티원"]이 있어 t1 그룹에는 별칭이 키워드로 함께 들어가고,
+    # 이름마다 따로도 판정한다(t1·티원 2번 더) → 묶음 3 + 이름 2 = 5번
+    assert out.naver_calls == 5 == len(naver.queries)
     assert [q.keyword_groups[0].keywords for q in naver.queries] == [
         ["t1", "티원"],
+        ["t1"],
+        ["티원"],
         ["롤"],
         ["젠지"],
     ]
@@ -321,7 +336,8 @@ def test_naver_verdict_is_exactly_the_trend_scan_judgement(tmp_path: Path) -> No
 def test_max_candidates_in_the_request_caps_naver_calls(tmp_path: Path) -> None:
     naver = Naver({})
     out = _run(_db(tmp_path, VIDEOS), naver, max_candidates=1).output
-    assert [c.keyword for c in out.candidates] == ["t1"] and out.naver_calls == 1
+    # 후보 1개(t1) = 묶음 1번 + 이름별(t1·티원) 2번
+    assert [c.keyword for c in out.candidates] == ["t1"] and out.naver_calls == 3
 
 
 def test_a_naver_failure_makes_only_that_candidate_unknown(tmp_path: Path) -> None:
@@ -331,7 +347,7 @@ def test_a_naver_failure_makes_only_that_candidate_unknown(tmp_path: Path) -> No
     assert by["롤"].status == "unknown"
     assert by["롤"].unknown_reason == "네이버 검색어 트렌드를 읽지 못함 [UNAVAILABLE]"
     assert by["젠지"].status == "normal"
-    assert result.output.naver_calls == 3  # 실패도 부른 수에 든다
+    assert result.output.naver_calls == 5  # 실패도 부른 수에 든다 (t1은 이름별 2번 더)
     assert "판정 불가 1개" in result.output.summary
     assert "네이버를 읽지 못한 후보: 롤" in result.evidence.data_summary
 
@@ -340,24 +356,25 @@ def test_no_snapshot_is_unknown_with_a_reason(tmp_path: Path) -> None:
     naver = Naver({})
     out = _run(tmp_path / "missing.db", naver).output
     assert out.status == "unknown" and out.candidates == [] and out.snapshot_at is None
-    assert (out.unknown_reason or "").startswith("YouTube 스냅샷이 없음")
+    assert "스냅샷이 없음" in (out.unknown_reason or "")
     assert naver.queries == []  # 네이버를 부르지 않는다
 
 
 def test_a_db_with_only_tracked_videos_has_no_popular_snapshot(tmp_path: Path) -> None:
     out = _run(_db(tmp_path, [("tr", None, ("t1",))]), Naver({})).output
     assert out.status == "unknown"
-    assert (out.unknown_reason or "").startswith("YouTube 스냅샷이 없음")
+    assert "스냅샷이 없음" in (out.unknown_reason or "")
 
 
 def test_an_old_snapshot_is_unknown_with_its_age(tmp_path: Path) -> None:
     naver = Naver({})
-    old = NOW - timedelta(hours=30)
+    old = datetime(2026, 10, 31, 9, 0, tzinfo=UTC)  # 판정 기간 끝(11-01 15시 UTC)보다 30시간 전
     out = _run(_db(tmp_path, VIDEOS, at=old), naver).output
     assert out.status == "unknown" and out.candidates == []
     assert out.snapshot_at == old
     assert out.unknown_reason == (
-        "YouTube 스냅샷이 오래됨: 마지막 수집 2026-11-01T00:00:00+00:00 (30.0시간 전, 기준 24시간)"
+        "YouTube 스냅샷이 오래됨: 마지막 수집 2026-10-31T09:00:00+00:00"
+        " (판정 기간 끝보다 30.0시간 전, 기준 24시간)"
     )
     assert naver.queries == []
 
@@ -385,7 +402,7 @@ def test_handler_completes_with_the_contract_output(
     monkeypatch.setenv("DATA_TREND_CONFIG", str(CATBOOKS_TRENDS))
     monkeypatch.setattr(handlers, "get_trend_connector", lambda: Naver({"t1": 3.0}))
     result = asyncio.run(
-        handlers.HANDLERS["trend_candidates"](_request({"end_date": "2026-11-01"}))
+        handlers.HANDLERS["trend_candidates"](_request({}))  # 지금 기준 (가장 최근 스냅샷)
     )
     assert result.status == TaskStatus.COMPLETED and result.outcome == "known"
     assert [c["keyword"] for c in result.output["candidates"]] == ["t1", "롤", "젠지"]
@@ -407,3 +424,138 @@ def test_handler_reports_unknown_snapshot_as_completed_unknown(
 def test_handler_rejects_a_bad_input(monkeypatch: pytest.MonkeyPatch) -> None:
     result = asyncio.run(handlers.HANDLERS["trend_candidates"](_request({"max_candidates": 0})))
     assert result.status == TaskStatus.FAILED and result.outcome == "invalid_input"
+
+
+# -------------------------------------------------- 이름별 판정 (작은 이름이 묻히지 않게)
+
+LOL_VIDEOS = [
+    ("a", 1, ("리그오브레전드", "lol")),
+    ("b", 2, ("리그오브레전드",)),
+    ("c", 3, ("lol", "젠지")),
+    ("d", 4, ("젠지",)),
+]
+
+
+def _lol_env(tmp_path: Path) -> dict[str, str]:
+    config = tmp_path / "trends.toml"
+    config.write_text(
+        '[candidates]\nmin_videos = 2\n\n[candidates.aliases]\n"리그오브레전드" = ["lol"]\n',
+        encoding="utf-8",
+    )
+    return {"DATA_YOUTUBE_DB": str(_db(tmp_path, LOL_VIDEOS)), "DATA_TREND_CONFIG": str(config)}
+
+
+def _lol_run(tmp_path: Path, naver: Naver):  # noqa: ANN202
+    request = TrendCandidatesRequest(end_date=END)
+    return asyncio.run(find_candidates(request, naver, env=_lol_env(tmp_path), now=NOW))
+
+
+def test_a_rising_alias_buried_in_the_group_is_raised(tmp_path: Path) -> None:
+    """묶음(리그오브레전드·lol)은 평범인데 lol만 급상승 → 급상승으로 올리고 올라간 이름을 남긴다."""
+    naver = Naver({"lol": 3.0})  # 묶음 그룹(이름 = 리그오브레전드)은 평범
+    out = _lol_run(tmp_path, naver).output
+    lol = next(c for c in out.candidates if c.keyword == "리그오브레전드")
+    assert lol.naver.status == "rising" and lol.naver.group_name == "lol"
+    assert lol.naver_from == "name" and lol.rising_names == ["lol"]
+    assert [v.group_name for v in lol.name_verdicts] == ["리그오브레전드", "lol"]
+    assert [v.status for v in lol.name_verdicts] == ["normal", "rising"]
+    # 묶음 1번 + 이름별 2번(리그오브레전드·lol) + 젠지 1번 = 4번
+    assert out.naver_calls == 4 == len(naver.queries)
+
+
+def test_a_rising_group_keeps_the_group_verdict(tmp_path: Path) -> None:
+    naver = Naver({"리그오브레전드": 3.0, "lol": 3.0})
+    lol = next(
+        c for c in _lol_run(tmp_path, naver).output.candidates if c.keyword == "리그오브레전드"
+    )
+    assert lol.naver.group_name == "리그오브레전드" and lol.naver_from == "group"
+    assert lol.rising_names == ["리그오브레전드", "lol"]
+
+
+def test_no_alias_means_no_extra_naver_calls(tmp_path: Path) -> None:
+    naver = Naver({})
+    out = _lol_run(tmp_path, naver).output
+    zenji = next(c for c in out.candidates if c.keyword == "젠지")
+    assert zenji.name_verdicts == [] and zenji.rising_names == [] and zenji.naver_from == "group"
+    assert sum(q.keyword_groups[0].group_name == "젠지" for q in naver.queries) == 1
+
+
+def test_a_failed_name_does_not_raise_and_the_group_stays(tmp_path: Path) -> None:
+    naver = Naver({}, fail={"lol"})
+    lol = next(
+        c for c in _lol_run(tmp_path, naver).output.candidates if c.keyword == "리그오브레전드"
+    )
+    assert lol.naver.status == "normal" and lol.naver_from == "group"
+    assert [v.status for v in lol.name_verdicts] == ["normal", "unknown"]
+    assert lol.rising_names == []
+
+
+def test_pick_verdict_takes_the_biggest_z_among_rising_names() -> None:
+    from ax_contracts.schemas.data import TrendEvidence, TrendVerdict
+
+    def v(name: str, status: str, z: float = 0.0) -> TrendVerdict:
+        return TrendVerdict(
+            group_name=name, status=status, ratio=1.0, evidence=TrendEvidence(score=z)
+        )  # type: ignore[arg-type]
+
+    group = v("묶음", "normal")
+    chosen, source, rising = pick_verdict(group, [v("가", "rising", 4.0), v("나", "rising", 6.0)])
+    assert (chosen.group_name, source, rising) == ("나", "name", ["가", "나"])
+    assert pick_verdict(group, [])[1] == "group"
+
+
+# -------------------------------------------------- 지난 기간 판정 = 그 시점 스냅샷
+
+
+def test_latest_popular_can_look_back_to_a_time(tmp_path: Path) -> None:
+    path = _db(tmp_path, [("old", 1, ("옛날",))], at=SNAP_AT - timedelta(days=2))
+    store = SnapshotStore(path)
+    store.save(SNAP_AT, [Row(_stat("new", 1, ("요즘",)), ("popular",))])
+    store.close()
+    assert latest_popular(path).collected_at == SNAP_AT  # type: ignore[union-attr]
+    back = latest_popular(path, SNAP_AT - timedelta(days=1))
+    assert back is not None and [v.video_id for v in back.videos] == ["old"]
+    assert latest_popular(path, SNAP_AT - timedelta(days=3)) is None
+
+
+def _two_snapshots(tmp_path: Path) -> Path:
+    """10-24 23시 KST(그 주 끝)와 11-01 23시 KST 두 번 받은 DB. 태그가 다르다."""
+    first = datetime(2026, 10, 24, 14, 0, tzinfo=UTC)
+    path = _db(tmp_path, [("a", 1, ("가을",)), ("b", 2, ("가을",))], at=first)
+    store = SnapshotStore(path)
+    store.save(SNAP_AT, [Row(_stat("c", 1, ("t1",)), ("popular",)),
+                         Row(_stat("d", 2, ("t1",)), ("popular",))])  # fmt: skip
+    store.close()
+    return path
+
+
+def test_a_past_period_uses_the_snapshot_from_that_time(tmp_path: Path) -> None:
+    path = _two_snapshots(tmp_path)
+    env = {"DATA_YOUTUBE_DB": str(path), "DATA_TREND_CONFIG": str(CATBOOKS_TRENDS)}
+    past = TrendCandidatesRequest(end_date=date(2026, 10, 24))
+    out = asyncio.run(find_candidates(past, Naver({}), env=env, now=NOW)).output
+    assert out.snapshot_at == datetime(2026, 10, 24, 14, 0, tzinfo=UTC)
+    assert [c.keyword for c in out.candidates] == ["가을"]
+    now = asyncio.run(find_candidates(TrendCandidatesRequest(), Naver({}), env=env, now=NOW)).output
+    assert now.snapshot_at == SNAP_AT and [c.keyword for c in now.candidates] == ["t1"]
+
+
+def test_a_past_period_without_a_snapshot_then_is_unknown(tmp_path: Path) -> None:
+    path = _two_snapshots(tmp_path)
+    env = {"DATA_YOUTUBE_DB": str(path), "DATA_TREND_CONFIG": str(CATBOOKS_TRENDS)}
+    naver = Naver({})
+    early = TrendCandidatesRequest(end_date=date(2026, 10, 11))
+    out = asyncio.run(find_candidates(early, naver, env=env, now=NOW)).output
+    assert out.status == "unknown" and out.candidates == [] and naver.queries == []
+    assert out.unknown_reason == (
+        "그 시점(2026-10-12 0시 KST) 이전 YouTube 스냅샷이 없음"
+        " (지난 기간은 그때 스냅샷의 태그로만 본다)"
+    )
+
+
+def test_a_past_period_snapshot_too_far_before_is_old(tmp_path: Path) -> None:
+    path = _two_snapshots(tmp_path)
+    env = {"DATA_YOUTUBE_DB": str(path), "DATA_TREND_CONFIG": str(CATBOOKS_TRENDS)}
+    later = TrendCandidatesRequest(end_date=date(2026, 10, 28))  # 10-24 스냅샷은 4일 전
+    out = asyncio.run(find_candidates(later, Naver({}), env=env, now=NOW)).output
+    assert out.status == "unknown" and "판정 기간 끝보다" in (out.unknown_reason or "")

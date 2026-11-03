@@ -54,6 +54,16 @@
       ],
       "verifier": null,
       "priority": "required"
+    },
+    {
+      "id": "request_release_check",
+      "description": "배포 전 기획서 대조. 개발이 기획서 하나에 묶인 작업·PR(머지 여부, PR 검수 결과)을 보내면 기획이 코드 규칙으로 대조한다(LLM 아님). 연결 규칙(기획서 확정·문단마다 작업·작업마다 머지된 PR·기획서 밖 PR 없음·열린 장애 표시 없음·남은 질문 없음)에 걸리면 hold와 이유 코드, 통과했는데 검수가 하나라도 mismatch·none이면 needs_human(사람이 기획 화면에서 보고 지시), 전부 match면 ready이고 개발에 receive_release_order로 배포 지시를 바로 보낸다. 배포 실행·prod 승인은 개발과 안전 레이어가 그대로 한다. execute()를 거친다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#RequestReleaseCheckInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#RequestReleaseCheckOutput",
+      "grade": "A",
+      "allowed_requesters": ["dev"],
+      "verifier": null,
+      "priority": "required"
     }
   ]
 }

@@ -8,6 +8,9 @@ YouTube는 지금 누적값만 주고 기간별 추이를 주지 않는다. 그�
   같은 시각 같은 영상은 두 번 들어가지 않는다(먼저 넣은 줄이 남는다).
   숫자 칸이 응답에 없으면 NULL이다(0이 아님).
 - `runs`: 수집 한 번마다 한 줄. 쓴 할당량 단위, 개수, 검색을 했는지, 실패 이유.
+- `video_titles`: 영상 id마다 제목 한 줄(마지막으로 받은 제목). `snapshots` 표 모양은 바꾸지 않는다
+  (돌고 있는 예전 수집기의 INSERT가 깨지지 않게 따로 둔다). 제목이 없는 예전 스냅샷은
+  `youtube_collect --titles`로 채운다.
 """
 
 from __future__ import annotations
@@ -51,6 +54,11 @@ CREATE TABLE IF NOT EXISTS runs (
     searched      INTEGER NOT NULL,   -- 회사 키워드 검색을 했는지 (한국 날짜 하루 1번)
     errors        TEXT NOT NULL       -- 실패 이유 JSON 배열 (없으면 [])
 );
+CREATE TABLE IF NOT EXISTS video_titles (
+    video_id      TEXT PRIMARY KEY,
+    title         TEXT NOT NULL,      -- 마지막으로 받은 제목
+    seen_at       TEXT NOT NULL       -- 그 제목을 받은 시각 (UTC)
+);
 """
 
 
@@ -84,6 +92,7 @@ class SnapshotStore:
     def save(self, collected_at: datetime, rows: Iterable[Row]) -> int:
         """한 시각의 영상들을 넣는다. 이미 있는 (시각, 영상)은 건너뛴다. 넣은 줄 수를 돌려준다."""
         at = iso(collected_at)
+        rows_list = list(rows)
         values = [
             (
                 at,
@@ -98,14 +107,40 @@ class SnapshotStore:
                 json.dumps(list(r.stat.tags), ensure_ascii=False),
                 ",".join(r.sources),
             )
-            for r in rows
+            for r in rows_list
         ]
         with self._lock, self._conn:
             before = self._conn.total_changes
             self._conn.executemany(
                 "INSERT OR IGNORE INTO snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?)", values
             )
+            saved = self._conn.total_changes - before
+        self.save_titles(collected_at, [(r.stat.video_id, r.stat.title) for r in rows_list])
+        return saved
+
+    def save_titles(self, seen_at: datetime, titles: Iterable[tuple[str, str]]) -> int:
+        """영상 제목을 넣거나 바꾼다(빈 제목은 건너뜀). 바꾼 줄 수."""
+        values = [(vid, title.strip(), iso(seen_at)) for vid, title in titles if title.strip()]
+        with self._lock, self._conn:
+            before = self._conn.total_changes
+            self._conn.executemany(
+                "INSERT INTO video_titles VALUES (?,?,?) ON CONFLICT(video_id) DO UPDATE"
+                " SET title = excluded.title, seen_at = excluded.seen_at"
+                " WHERE excluded.seen_at >= video_titles.seen_at",
+                values,
+            )
             return self._conn.total_changes - before
+
+    def popular_ids_without_title(self) -> list[str]:
+        """인기 목록에 나온 적이 있는데 제목이 없는 영상 id (최근에 본 순서)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT s.video_id, MAX(s.collected_at) AS last FROM snapshots s"
+                " LEFT JOIN video_titles t ON t.video_id = s.video_id"
+                " WHERE s.popular_rank IS NOT NULL AND t.video_id IS NULL"
+                " GROUP BY s.video_id ORDER BY last DESC"
+            ).fetchall()
+        return [r[0] for r in rows]
 
     def log_run(
         self,
@@ -180,6 +215,8 @@ class PopularVideo:
     video_id: str
     rank: int
     tags: tuple[str, ...]
+    title: str = ""  # 제목 (`video_titles`에 없으면 "")
+    category_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -188,9 +225,12 @@ class PopularSnapshot:
     videos: tuple[PopularVideo, ...]  # 인기 순위 순
 
 
-def latest_popular(path: str | Path) -> PopularSnapshot | None:
+def latest_popular(
+    path: str | Path, at_or_before: datetime | None = None
+) -> PopularSnapshot | None:
     """가장 최근에 인기 목록을 받은 시각의 인기 영상들. 파일이 없거나 인기 영상이 없으면 None.
 
+    `at_or_before`를 주면 그 시각 이전(같은 시각 포함) 스냅샷 중 가장 최근 것이다(지난 기간 판정용).
     읽기 전용으로 연다(파일이 없을 때 새로 만들지 않는다).
     """
     if str(path) != ":memory:" and not Path(path).is_file():
@@ -198,14 +238,25 @@ def latest_popular(path: str | Path) -> PopularSnapshot | None:
     uri = f"file:{Path(path).as_posix()}?mode=ro"
     conn = sqlite3.connect(uri, uri=True, timeout=5.0)
     try:
-        row = conn.execute(
-            "SELECT MAX(collected_at) FROM snapshots WHERE popular_rank IS NOT NULL"
-        ).fetchone()
+        if at_or_before is None:
+            row = conn.execute(
+                "SELECT MAX(collected_at) FROM snapshots WHERE popular_rank IS NOT NULL"
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT MAX(collected_at) FROM snapshots"
+                " WHERE popular_rank IS NOT NULL AND collected_at <= ?",
+                (iso(at_or_before),),
+            ).fetchone()
         if not row or not row[0]:
             return None
+        titles = _has_titles(conn)
         rows = conn.execute(
-            "SELECT video_id, popular_rank, tags FROM snapshots"
-            " WHERE collected_at = ? AND popular_rank IS NOT NULL ORDER BY popular_rank",
+            "SELECT s.video_id, s.popular_rank, s.tags, s.category_id, "
+            + ("t.title" if titles else "''")
+            + " FROM snapshots s"
+            + (" LEFT JOIN video_titles t ON t.video_id = s.video_id" if titles else "")
+            + " WHERE s.collected_at = ? AND s.popular_rank IS NOT NULL ORDER BY s.popular_rank",
             (row[0],),
         ).fetchall()
     except sqlite3.DatabaseError:
@@ -213,12 +264,153 @@ def latest_popular(path: str | Path) -> PopularSnapshot | None:
     finally:
         conn.close()
     videos = []
-    for video_id, rank, tags in rows:
-        try:
-            parsed = json.loads(tags)
-        except ValueError:
-            parsed = []
-        videos.append(
-            PopularVideo(video_id, int(rank), tuple(str(t) for t in parsed if isinstance(t, str)))
-        )
+    for video_id, rank, tags, category, title in rows:
+        videos.append(PopularVideo(video_id, int(rank), _tags(tags), title or "", category))
     return PopularSnapshot(datetime.fromisoformat(row[0]).astimezone(UTC), tuple(videos))
+
+
+@dataclass(frozen=True)
+class StoredVideo:
+    """스냅샷 한 시각의 영상 한 줄 (숫자 칸이 응답에 없었으면 None)."""
+
+    video_id: str
+    channel_id: str
+    published_at: datetime
+    view_count: int | None
+    like_count: int | None
+    comment_count: int | None
+    popular_rank: int | None
+    tags: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class StoredSnapshot:
+    collected_at: datetime
+    videos: dict[str, StoredVideo]  # 영상 id → 그 시각의 값
+
+
+def recent_snapshots(path: str | Path, count: int = 3) -> list[StoredSnapshot]:
+    """가장 최근 수집 시각 `count`개(최근 것부터)의 영상 값. 파일이 없으면 빈 목록. 읽기 전용."""
+    if str(path) != ":memory:" and not Path(path).is_file():
+        return []
+    conn = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True, timeout=5.0)
+    try:
+        times = [
+            r[0]
+            for r in conn.execute(
+                "SELECT DISTINCT collected_at FROM snapshots ORDER BY collected_at DESC LIMIT ?",
+                (count,),
+            )
+        ]
+        out = []
+        for at in times:
+            rows = conn.execute(
+                "SELECT video_id, channel_id, published_at, view_count, like_count, comment_count,"
+                " popular_rank, tags FROM snapshots WHERE collected_at = ?",
+                (at,),
+            ).fetchall()
+            videos = {}
+            for vid, ch, pub, views, likes, comments, rank, tags in rows:
+                try:
+                    parsed = json.loads(tags)
+                except ValueError:
+                    parsed = []
+                videos[vid] = StoredVideo(
+                    vid,
+                    ch,
+                    datetime.fromisoformat(pub).astimezone(UTC),
+                    views,
+                    likes,
+                    comments,
+                    rank,
+                    tuple(str(t) for t in parsed if isinstance(t, str)),
+                )
+            out.append(StoredSnapshot(datetime.fromisoformat(at).astimezone(UTC), videos))
+        return out
+    except sqlite3.DatabaseError:
+        return []
+    finally:
+        conn.close()
+
+
+def _has_titles(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'video_titles'"
+    ).fetchone()
+    return row is not None
+
+
+def _tags(raw: str) -> tuple[str, ...]:
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return ()
+    return tuple(str(t) for t in parsed if isinstance(t, str)) if isinstance(parsed, list) else ()
+
+
+# ---------------------------------------------------------------- 쌓인 스냅샷 전체 (자동 제외)
+
+
+@dataclass(frozen=True)
+class HistoryVideo:
+    """쌓인 인기 목록 전체의 영상 하나: 태그(모든 시각의 합), 제목, 카테고리, 나온 한국 날짜."""
+
+    video_id: str
+    category_id: str | None
+    tags: tuple[str, ...]
+    title: str
+    days: frozenset[date]
+
+
+def popular_history(path: str | Path, until: datetime | None = None) -> list[HistoryVideo]:
+    """`until`(포함) 이전 모든 인기 목록 스냅샷의 영상. 파일이 없으면 빈 목록. 읽기 전용."""
+    if str(path) != ":memory:" and not Path(path).is_file():
+        return []
+    conn = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True, timeout=5.0)
+    try:
+        titles = _has_titles(conn)
+        sql = (
+            "SELECT s.video_id, s.category_id, s.tags, s.collected_at, "
+            + ("t.title" if titles else "''")
+            + " FROM snapshots s"
+            + (" LEFT JOIN video_titles t ON t.video_id = s.video_id" if titles else "")
+            + " WHERE s.popular_rank IS NOT NULL"
+        )
+        args: list[str] = []
+        if until is not None:
+            sql += " AND s.collected_at <= ?"
+            args.append(iso(until))
+        rows = conn.execute(sql, args).fetchall()
+    except sqlite3.DatabaseError:
+        return []
+    finally:
+        conn.close()
+    acc: dict[str, tuple[str | None, set[str], str, set[date]]] = {}
+    for vid, category, tags, at, title in rows:
+        cat, seen, old_title, days = acc.setdefault(vid, (category, set(), title or "", set()))
+        seen.update(_tags(tags))
+        days.add(datetime.fromisoformat(at).astimezone(KST).date())
+    return [
+        HistoryVideo(vid, cat, tuple(sorted(seen)), title, frozenset(days))
+        for vid, (cat, seen, title, days) in sorted(acc.items())
+    ]
+
+
+def video_titles(path: str | Path, video_ids: list[str]) -> dict[str, str]:
+    """영상 id → 제목 (`video_titles` 표, 읽기 전용). 파일·표가 없거나 제목이 없으면 빠진다."""
+    if not video_ids or (str(path) != ":memory:" and not Path(path).is_file()):
+        return {}
+    conn = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True, timeout=5.0)
+    try:
+        if not _has_titles(conn):
+            return {}
+        marks = ",".join("?" * len(video_ids))
+        rows = conn.execute(
+            f"SELECT video_id, title FROM video_titles WHERE video_id IN ({marks})",  # noqa: S608
+            video_ids,
+        ).fetchall()
+    except sqlite3.DatabaseError:
+        return {}
+    finally:
+        conn.close()
+    return {vid: title for vid, title in rows if title}

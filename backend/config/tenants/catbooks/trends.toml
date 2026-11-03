@@ -24,8 +24,11 @@ keywords = ["그림책"]
 max_candidates = 5      # 후보 수 상한 (나온 영상 수 많은 순)
 min_videos = 2          # 이 수 이상의 인기 영상에 붙은 태그만 후보
 max_age_hours = 24      # 스냅샷이 이보다 오래되면 후보를 뽑지 않음 (unknown + 이유)
-rep_videos = 3          # 근거로 보여 줄 대표 영상 id 수
-# 너무 일반적인 태그 (정리한 뒤 값과 비교: 앞뒤 공백·# 제거, 영문 소문자)
+rep_videos = 5          # 근거로 보여 줄 대표 영상 id 수 (밈 형식 분류도 이 영상 제목을 쓴다, 최대 5)
+titles = true           # YouTube 제목에서 뽑은 2~3어절 구도 후보로 (min_videos개 이상 영상 제목에 나온 것만)
+keep_tags = []          # (덮어쓰기용) 자동 제외에 걸려도 후보로 남길 이름
+# (덮어쓰기용) 늘 빼는 일반 태그. 자동 제외([candidates.auto_exclude])가 데이터로 찾고, 이 목록은 자동이 못
+# 잡는 것을 사람이 덧붙이는 용도로 남긴다 (정리한 뒤 값과 비교: 앞뒤 공백·# 제거, 영문 소문자)
 exclude_tags = [
   "shorts", "쇼츠", "short", "브이로그", "vlog", "유튜브", "youtube",
   "게임", "game", "gaming", "스트리머", "방송", "생방송", "live", "bj",
@@ -44,3 +47,59 @@ exclude_tags = [
 "마인크래프트" = ["minecraft"]
 "배틀그라운드" = ["배그", "pubg"]
 "메이플스토리" = ["maplestory"]
+
+# 자동 제외: 쌓인 YouTube 스냅샷 전체에서 여러 날·여러 카테고리에 고르게 나오는 태그·제목 구를 늘 붙는 말로 보고 뺀다.
+# 아래 셋을 모두 넘으면 제외 (문서 빈도). 2026-11-02 스냅샷(영상 275개, 1일)으로 본 값: 카테고리 2개로 낮추면
+# 로블록스·피파 같은 실제 소재도 빠져서 3개로 둔다(보수적)
+[candidates.auto_exclude]
+enabled = true
+min_doc_ratio = 0.02     # 쌓인 인기 영상 중 이 비율 이상에 나옴
+min_categories = 3       # 서로 다른 카테고리 이 수 이상에 나옴
+min_day_ratio = 0.5      # 기록이 있는 날 중 이 비율 이상의 날에 나옴
+
+# 이름 자동 묶기: 판정한 YouTube 후보 둘이 쌓인 스냅샷에서 같은 영상에 함께 나온 적이 있고(min_shared_videos),
+# 두 이름의 네이버 일별 값(로그) 상관이 merge_corr 이상이면(둘 다 값이 있는 날 min_days 이상) 같은 대상으로 묶는다.
+# 묶음은 별칭 표와 같은 규칙으로 다시 판정한다(묶음마다 네이버 1번 더). suggest_corr 이상이면 묶음 제안만 낸다.
+# 위 [candidates.aliases] 표는 덮어쓰기용으로 남긴다(표에 있는 이름은 표대로 먼저 묶인다)
+[candidates.auto_group]
+enabled = true
+merge_corr = 0.95        # 보수적으로: 거의 같은 모양일 때만 자동 묶음
+suggest_corr = 0.8       # 이 이상이면 묶음 제안 (자동 적용 안 함)
+min_days = 28            # 상관에 쓸 날 수 하한 (trend 기준선 최소 일수와 같음)
+min_shared_videos = 1    # 같은 영상에 함께 나온 영상 수 하한
+
+# 영상 소재 추천(data content_recommend, 콘텐츠 루프 2단계): 기본 키워드 그룹(trend_scan)과 YouTube 후보
+# (trend_candidates)에서 급상승한 것만 골라 점수 순으로 추천한다. 점수 = z_weight × z + (두 소스면 two_source_bonus)
+[recommend]
+max_items = 5            # 추천 수 상한. 급상승이 이보다 적으면 있는 만큼만(억지로 채우지 않음)
+z_weight = 1.0           # 변화 정도(z) 가중치
+two_source_bonus = 2.0   # 검색 급상승 + YouTube 인기 태그 근거가 둘 다 있으면 더하는 점수
+# 소재 ↔ 실제 상품 연결: 회사 상품 목록(shop-api 판매 중 상품·카테고리)과 글자 일치 + 임베딩 유사도로
+# 소재마다 최대 max_products개를 잇는다. 회사 관련성은 이 연결로 정한다(연결되면 related)
+max_products = 3         # 소재마다 연결할 상품 수 상한
+min_similarity = 0.6     # 임베딩 코사인 기준 (임베딩 설정 DATA_EMBED_MODEL/EMBED_MODEL이 있을 때만). 모델마다 척도가 달라 설정 후 다시 볼 값
+use_similarity = true    # false면 글자 일치만
+# (덮어쓰기용) 수동 회사 키워드: 상품 연결이 없어도 이 말과 겹치면 related (위 기본 키워드 그룹 이름·키워드 포함).
+# 순위에서 빼지는 않는다
+company_keywords = ["책", "도서", "출판", "캣북스", "반려묘", "집사"]
+# 회사 소개 한두 줄 (무엇을 파는지, 고객). 아이디어 문장 프롬프트에 보조로 넣는다(상품 이름은 연결된 실제 상품만 쓰게 함).
+# 상품은 지금 쇼핑몰(shop-api)에 있는 것만 적는다
+company_intro = "캣북스는 여러 판매자가 책(프로그래밍 입문서·데이터 분석서·에세이·소설)과 독서·필기 문구(노트·젤펜·만년필·독서대)를 파는 온라인 서점이다. 고객은 책과 문구를 사는 개인 고객이다."
+
+# 월별 흐름(data trend_history): 기본 키워드 그룹을 네이버 월 단위로 본다. 판정은 하지 않고 값과
+# "작년 같은 달 대비" 배수만 준다. 그룹마다 네이버 1번
+[history]
+months = 24   # 볼 개월 수 (작년 같은 달과 비교하려면 13개월 이상)
+
+# YouTube 지금 속도(data youtube_velocity): 최근 두 스냅샷 사이 시간당 조회 증가가 큰 영상 몇 개를 보여 줄지.
+# 판정은 하지 않는다 (스냅샷이 며칠 쌓이면 평소 속도와 비교한 판정을 붙일 예정)
+[velocity]
+top = 10
+
+# 인기 검색어(data trend_candidates 후보 출처): Google Trends 공개 RSS 스냅샷(data trending_collect)에서
+# 검색어를 후보로 쓴다. 정리·별칭·제외 규칙은 YouTube 태그와 같다. YouTube 후보와 이름이 겹치면 그 후보에
+# 근거로 붙고, 겹치지 않는 것만 따로 후보(최대 max_candidates개)가 된다. 후보마다 네이버 1번
+[trending]
+geo = "KR"               # 지역 (피드 geo)
+max_candidates = 5       # YouTube 후보와 겹치지 않는 인기 검색어 후보 수 상한 (피드 순위 순)
+max_age_hours = 24       # 스냅샷이 이보다 오래되면 이 출처만 unknown + 이유

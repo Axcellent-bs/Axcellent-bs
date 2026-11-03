@@ -301,14 +301,83 @@ export interface YouTubeTagEvidence {
   video_ids: string[];
   /** 이 후보로 센 태그 (스냅샷에 실제로 나온 것, #339). 예전 응답은 없다 */
   matched_tags?: string[];
+  /** 이 후보로 센 제목 구 (YouTube 제목 2~3어절). 예전 응답은 없다 */
+  matched_phrases?: string[];
+}
+/** 쌓인 스냅샷 전체에서 늘 붙는 말로 보고 자동으로 뺀 이름 (서버 값) */
+export interface AutoExcludedTerm {
+  name: string;
+  source: "youtube_tag" | "youtube_title";
+  snapshot_videos: number;
+  videos: number;
+  total_videos: number;
+  doc_ratio: number;
+  categories: number;
+  days: number;
+  total_days: number;
+  /** 코드가 숫자로 만든 한 줄 */
+  reason: string;
 }
 export interface TrendCandidate {
   keyword: string;
   /** 대표 이름에 묶인 별칭 (회사 별칭 표, #339). 네이버 그룹에 함께 넣었다. 없으면 빈 목록, 예전 응답은 없다 */
   aliases?: string[];
   youtube: YouTubeTagEvidence;
-  /** 네이버 판정. 네이버를 못 읽으면 이 후보만 unknown + 이유 */
+  /** 네이버 판정. 네이버를 못 읽으면 이 후보만 unknown + 이유. 이름 하나가 올라 급상승이 됐으면(naver_from = name) group_name은 그 이름 */
   naver: TrendVerdict;
+  /** 이름마다 따로 판정한 결과 (별칭이 있을 때만). 예전 응답은 없다 */
+  name_verdicts?: TrendVerdict[];
+  /** 따로 판정해 급상승인 이름. 예전 응답은 없다 */
+  rising_names?: string[];
+  /** naver 판정이 어디서 왔는지: group = 묶음 그룹, name = 묶음은 평범인데 이름 하나가 급상승. 예전 응답은 없다 */
+  naver_from?: "group" | "name";
+  /** 후보가 나온 곳. 예전 응답은 없다 */
+  origins?: CandidateOrigin[];
+  /** 인기 검색어에도 있으면 그 근거. 예전 응답은 없다 */
+  trending?: TrendingSearchEvidence | null;
+  /** 데이터로 자동 묶은 다른 이름 (aliases에도 들어 있다). 예전 응답은 없다 */
+  auto_grouped?: string[];
+}
+/** 후보 이름 두 개를 같은 대상으로 볼지의 근거 (서버 값) */
+export interface NamePairEvidence {
+  names: string[];
+  /** 두 이름 네이버 일별 값(로그)의 같은 날 상관 */
+  correlation: number;
+  days: number;
+  /** 쌓인 인기 영상 중 두 이름이 함께 나온 영상 수 */
+  shared_videos: number;
+  /** true = 자동으로 묶음, false = 제안만 */
+  applied: boolean;
+}
+/** 후보가 나온 곳 (서버 값). 화면 이름: CANDIDATE_ORIGIN_LABEL */
+export type CandidateOrigin = "youtube_tag" | "youtube_title" | "trending_search";
+export const CANDIDATE_ORIGIN_LABEL: Record<CandidateOrigin | "keyword_group", string> = {
+  keyword_group: "회사 기본 키워드",
+  youtube_tag: "YouTube 태그",
+  youtube_title: "YouTube 제목",
+  trending_search: "인기 검색어",
+};
+/** 인기 검색어 근거 (Google Trends 공개 RSS 스냅샷, 피드 값 그대로) */
+export interface TrendingSearchEvidence {
+  /** 피드 안 순서 */
+  rank: number;
+  /** 피드의 트래픽 표시값 (예: "500+", 검색 건수가 아님) */
+  traffic: string | null;
+  snapshot_at: string;
+  source?: string;
+  /** 피드에 나온 검색어 그대로 */
+  keyword?: string | null;
+}
+/** 인기 검색어에서만 나온 후보 (YouTube 근거 없음) */
+export interface TrendingCandidate {
+  keyword: string;
+  trending: TrendingSearchEvidence;
+  naver: TrendVerdict;
+  aliases?: string[];
+  name_verdicts?: TrendVerdict[];
+  rising_names?: string[];
+  naver_from?: "group" | "name";
+  origins?: CandidateOrigin[];
 }
 export interface TrendCandidatesOutput {
   /** unknown = 스냅샷이 없거나 오래됨 (후보를 뽑지 않음) */
@@ -323,10 +392,166 @@ export interface TrendCandidatesOutput {
   naver_calls: number;
   /** 코드가 숫자로 만든 한 문장 */
   summary: string;
+  /** 인기 검색어에서만 나온 후보 (피드 순위 순). 예전 응답은 없다 */
+  trending_candidates?: TrendingCandidate[];
+  trending_status?: "known" | "unknown";
+  trending_reason?: string | null;
+  trending_snapshot_at?: string | null;
+  /** 자동 제외된 늘 붙는 말과 근거. 예전 응답은 없다 */
+  auto_excluded?: AutoExcludedTerm[];
+  /** 자동 제외를 무엇으로 쟀는지 한 줄 (예: 쌓인 인기 영상 275개, 기록이 있는 날 1일) */
+  exclusion_basis?: string | null;
+  /** 자동으로 묶은 이름 쌍. 예전 응답은 없다 */
+  auto_groups?: NamePairEvidence[];
+  /** 기준에 못 미쳐 묶음 제안만 하는 쌍 (자동 적용 안 함). 예전 응답은 없다 */
+  group_suggestions?: NamePairEvidence[];
 }
 
 /** 한 번에 판정할 수 있는 그룹 수 (화면 입력 한도) */
 export const TREND_MAX_GROUPS = 5;
+
+// ---------------------------------------------------------------- 월별 흐름 (trend_history)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py TrendHistoryOutput.
+// 판정하지 않는다: 달마다 값(그 그룹 요청 안 상대값, 최댓값 100)과 작년 같은 달 대비 배수만 서버가 계산한다.
+export interface TrendMonthPoint {
+  /** 그 달 1일 */
+  month: string;
+  value: number;
+  last_year_value: number | null;
+  /** 작년 같은 달 대비 배수. 작년 값이 없거나 0이면 null */
+  vs_last_year: number | null;
+}
+export interface TrendHistoryGroup {
+  group_name: string;
+  keywords: string[];
+  status: "known" | "unknown";
+  unknown_reason: string | null;
+  /** 달 순서. 네이버가 주지 않은 달은 빠져 있다(0 아님) */
+  points: TrendMonthPoint[];
+  latest_month: string | null;
+  latest_vs_last_year: number | null;
+}
+export interface TrendHistoryOutput {
+  start_month: string;
+  end_month: string;
+  months: number;
+  time_unit: "month";
+  source: string;
+  value_kind: "relative";
+  groups: TrendHistoryGroup[];
+  naver_calls: number;
+  summary: string;
+}
+
+// ---------------------------------------------------------------- YouTube 지금 속도 (youtube_velocity)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py YouTubeVelocityOutput. 판정하지 않는다.
+// 지금 속도 = 최근 두 스냅샷 사이 시간당 조회 증가. 숫자 칸이 빠진 영상은 서버가 비워 둔다(0 아님).
+export interface YouTubeVideoVelocity {
+  video_id: string;
+  channel_id: string;
+  published_at: string;
+  popular_rank: number | null;
+  tags: string[];
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  views_per_hour: number | null;
+  prev_views_per_hour: number | null;
+  speed_change: number | null;
+  /** 그 전 구간보다 빨라졌는지 (그 전 구간이 없으면 null) */
+  faster: boolean | null;
+}
+export interface YouTubeVelocityOutput {
+  status: "known" | "unknown";
+  unknown_reason: string | null;
+  latest_at: string | null;
+  previous_at: string | null;
+  earlier_at: string | null;
+  compared_videos: number;
+  missing_views: number;
+  /** 지금 속도 큰 순, 상위 N개 */
+  videos: YouTubeVideoVelocity[];
+  summary: string;
+}
+
+// ---------------------------------------------------------------- 영상 소재 추천 (content_recommend)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py ContentRecommendOutput (#356, #370).
+// 급상승만 코드 점수로 순위를 매기고(두 소스 가산), 소재마다 아이디어 문장·형식은 LLM(숫자 검증, 실패하면 기본 문장).
+export type ContentSource = "naver" | "youtube";
+export interface ContentScore {
+  score: number;
+  /** 변화 정도 (trend_scan 판정의 강건 z) */
+  z: number;
+  /** 기준선 대비 배수 */
+  ratio: number;
+  /** 검색 급상승 + YouTube 인기 태그 근거가 둘 다 있음 */
+  two_sources: boolean;
+  /** YouTube 인기 영상 수 (두 소스일 때) */
+  youtube_videos: number | null;
+}
+export interface ContentRecommendation {
+  rank: number;
+  keyword: string;
+  /** 같이 본 이름 (네이버 그룹의 다른 키워드) */
+  aliases: string[];
+  sources: ContentSource[];
+  score: ContentScore;
+  /** 회사 키워드와 겹치는지 (표시만, 순위에서 빼지 않음) */
+  company_relevance: "related" | "low";
+  company_match: string[];
+  /** 영상 아이디어 1~2문장 (LLM, 숫자 검증. 실패하면 서버 기본 문장) */
+  idea: string;
+  format: "숏폼" | "롱폼";
+  /** 아이디어 문장을 서버 기본 문장으로 바꿨는지 */
+  fallback: boolean;
+  fallback_reason: string | null;
+  /** 소재가 나온 곳 (예전 응답은 없다) */
+  origins?: (CandidateOrigin | "keyword_group")[];
+  /** 연결할 회사 실제 상품 (회사 상품 목록 값 그대로). 예전 응답은 없다 */
+  products?: LinkedProduct[];
+  /** 회사 관련성 근거: 상품 연결·수동 회사 키워드·둘 다·없음. 예전 응답은 없다 */
+  relevance_from?: "products" | "manual_keywords" | "both" | "none" | null;
+  /** 밈 형식 (대표 영상 제목으로 서버 LLM이 목록 안에서만 고름). unknown = 분류하지 못함. 예전 응답은 없다 */
+  meme_format?: "챌린지" | "패러디·밈" | "리액션" | "하이라이트" | "정보·리뷰" | "기타" | "unknown" | null;
+  meme_reason?: string | null;
+  /** 분류에 쓴 대표 영상 제목 수 */
+  meme_titles?: number;
+}
+/** 소재와 연결한 회사 실제 상품 (서버 값) */
+export interface LinkedProduct {
+  product_id: string;
+  name: string;
+  category_code: string | null;
+  category_name: string | null;
+  /** name = 상품 이름 글자 일치, category = 카테고리 이름 일치, embedding = 임베딩 유사도 */
+  match: "name" | "category" | "embedding";
+  similarity: number | null;
+  /** 서버가 만든 한 줄 (예: 이름 일치: 파이썬) */
+  reason: string;
+}
+export interface ContentRecommendOutput {
+  start_date: string | null;
+  end_date: string | null;
+  /** 순위 순 */
+  items: ContentRecommendation[];
+  /** 추천이 없을 때 서버 이유 (예: 이번 기간 급상승한 소재가 없음) */
+  empty_reason: string | null;
+  /** 이번 실행에서 네이버를 실제로 부른 수 (캐시 제외) */
+  naver_calls: number;
+  naver_failed: string[];
+  youtube_status: "known" | "unknown";
+  youtube_reason: string | null;
+  snapshot_at: string | null;
+  /** 코드가 숫자로 만든 한 문장 */
+  summary: string;
+  /** 회사 상품 목록을 읽었는지 (예전 응답은 없다) */
+  catalog_status?: "known" | "unknown";
+  catalog_reason?: string | null;
+  catalog_products?: number;
+  /** 임베딩 유사도를 쟀는지. unknown이면 글자 일치만 썼다 */
+  similarity_status?: "known" | "unknown";
+  similarity_reason?: string | null;
+}
 
 // ---------------------------------------------------------------- 캠페인 효과 (campaign_effect)
 // 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py CampaignEffectOutput. 계산·이유·설명 문장은 모두 서버 값이다.
@@ -399,6 +624,13 @@ export const dataAi = {
     ),
   /** YouTube 인기 태그 후보 + 후보마다 네이버 판정. 입력을 비우면 회사 설정(trends.toml [candidates])과 어제 날짜. 후보마다 네이버 1번 */
   trendCandidates: () => askData<TrendCandidatesOutput>("trend_candidates", "YouTube 후보 판정", {}, TREND_DEADLINE_MS),
+  /** 키워드 그룹별 월별 흐름(작년 같은 달 대비). 입력을 비우면 회사 기본 키워드·설정 개월 수(24)·지난달까지. 그룹마다 네이버 1번 */
+  trendHistory: () => askData<TrendHistoryOutput>("trend_history", "월별 흐름", {}, TREND_DEADLINE_MS),
+  /** YouTube 영상 지금 속도 (판정 없음). 스냅샷 DB만 읽고 외부 호출이 없다. 입력을 비우면 회사 설정 개수(10) */
+  youtubeVelocity: () => askData<YouTubeVelocityOutput>("youtube_velocity", "YouTube 지금 속도", {}),
+  /** 영상 소재 추천 (콘텐츠 루프 2단계). 입력을 비우면 회사 설정(trends.toml [recommend])과 어제 날짜.
+   *  네이버는 서버 하루 캐시를 같이 쓰고, 소재마다 아이디어 문장을 LLM이 쓴다 */
+  contentRecommend: () => askData<ContentRecommendOutput>("content_recommend", "영상 소재 추천", {}, RECOMMEND_DEADLINE_MS),
   /** 캠페인 효과. from·to는 ISO 시각(UTC). campaignId가 없으면 쿠폰은 서버가 "확인할 수 없음"으로 답한다 */
   campaignEffect: (from: string, to: string, campaignId: string | null) =>
     askData<CampaignEffectOutput>(
@@ -413,6 +645,7 @@ const DEADLINE_MS = 30_000;
 const REPORT_DEADLINE_MS = 120_000;
 const TREND_DEADLINE_MS = 60_000; // 그룹마다 네이버 호출 + 급상승마다 설명 문장
 const CAMPAIGN_DEADLINE_MS = 60_000; // 지난 7일 같은 시간대 지표 + 쿠폰 + 설명 문장
+const RECOMMEND_DEADLINE_MS = 120_000; // 기본 그룹·YouTube 후보 네이버 판정(캐시가 없으면) + 소재마다 아이디어 문장
 
 /** 목적격 조사: 마지막 글자에 받침이 있으면 "을", 없거나 한글이 아니면 "를" ("급상승 판정을", "캠페인 효과를") */
 function objectParticle(word: string): string {

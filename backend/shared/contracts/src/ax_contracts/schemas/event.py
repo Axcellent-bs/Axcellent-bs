@@ -323,6 +323,11 @@ class SupportInquiryResolvedData(AxModel):
 
     사실 필드만 담는다. 고객 원문과 판단 문장은 담지 않고, 사유는 열거형 코드뿐이다.
     멱등 키는 `<context_id>:support.inquiry_resolved:<inquiry_id>`라 같은 문의는 한 번만 나간다.
+    닫은 뒤 환불이 끝나면 `refund_amount`를 채워 한 번 더 나간다. 이때 키 끝에
+    `:refund:<claim_id>`가 붙어서 같은 환불은 한 번만 나가고, 받는 쪽은 같은 `inquiry_id`의
+    기록에 금액을 갱신하면 된다. 보상 쿠폰이 닫은 뒤 지급되면 `coupon_id`를 채워
+    `:coupon:<coupon_id>` 키로 한 번 더 나간다. 클레임 판정 없이 쿠폰만 나갔으면 `resolution`은
+    `compensated`다.
     `order_id`는 다른 주문 이벤트와 같은 `ord_` 문자열 ID, `coupon_id`는 마케팅 `coupon.issued`와
     이어 보는 `cpn_` ID, `refund_amount`는 정수 원이다.
     """

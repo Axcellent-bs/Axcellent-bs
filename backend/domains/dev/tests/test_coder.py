@@ -445,6 +445,11 @@ def test_dev_role_reports_coding_result_to_planning(adapter) -> None:
 
     async def send(skill: str, ctx: str, tenant: str, payload, key: str) -> str:
         sent.append(skill)
+        if skill == "request_release_check":  # 작업이 다 머지되면 배포 전 대조도 묻는다
+            await planning.request_release_check(
+                context_id=ctx, requester="dev", inp=payload, idempotency_key=key
+            )
+            return "보냄"
         body = payload.model_dump(mode="json")
         await planning.receive_dev_result(
             context_id=ctx, requester="dev", idempotency_key=key, **body
@@ -461,7 +466,8 @@ def test_dev_role_reports_coding_result_to_planning(adapter) -> None:
 
     run(go())
     assert _task(dev).coding.status == "merged"
-    assert set(sent) == {"receive_dev_result"}
+    assert set(sent) == {"receive_dev_result", "request_release_check"}
+    assert sent[-1] == "request_release_check"  # 작업·PR 결과가 먼저 간 뒤
     got = _task(planning)
     assert got.coding is not None and got.coding.status == "merged"
     assert any(p.task == "T-D1" and p.merged for p in planning.state.prs)
@@ -1094,3 +1100,29 @@ def test_renew_hold_only_for_held_task(service: PlanningService, adapter) -> Non
     assert err.value.code == "NOT_RETRYABLE"
     res = TestClient(app).post("/api/planning/dev-tasks/T-D1/renew-hold")
     assert res.status_code == 409 and res.json()["error"]["code"] == "NOT_RETRYABLE"
+
+
+def test_draft_survives_restart_and_approve_needs_no_llm(tmp_path, monkeypatch, adapter) -> None:
+    """작성해 둔 코드는 상태 파일 옆에 남는다. 다시 켠 뒤 보류 승인도 LLM 없이 같은 코드로 연다."""
+    monkeypatch.setenv("PLANNING_STATE_DIR", str(tmp_path))
+    gate = HoldingGate()
+    svc = DevService(gate=gate, relater=None)
+    llm = FakeLLM()
+    coder.set_llm(llm)
+    run(_go(svc))
+    assert _task(svc).coding.status == "waiting_human"
+    assert (tmp_path / "coding_drafts_dev.json").exists()
+    calls = len(llm.calls)
+
+    again = DevService(gate=gate, relater=None)  # 다시 켬
+    d = coder.draft_of(again, "T-D1")
+    assert d is not None and set(d.contents) == {BANNER, NOTICE} and d.rows
+    gate.approve(_task(again).coding.hold_review or "")
+    run(_approved(again, "T-D1"))
+    c = _task(again).coding
+    assert c.pr is not None and c.status in ("opened", "merged")
+    assert len(llm.calls) == calls  # 다시 쓰지 않음
+    assert coder.draft_of(again, "T-D1") is None  # PR이 열리면 지운다
+
+    again.reset()
+    assert coder.draft_of(DevService(gate=gate, relater=None), "T-D1") is None

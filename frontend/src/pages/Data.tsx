@@ -11,7 +11,7 @@ import { useCompany } from "@/demo/company";
 
 // 데이터분석 AI 화면 = 고객사 데이터분석팀. 짜임은 재무 AI(/finance)와 같다.
 // 기본 화면은 결제 장애의 "장애 사건 데이터": 이상 감지 → 영향 분석 → 복구 확인 → 처리 시간 요약.
-// 두 번째 탭 "평상시 지표"는 학습 효과·KPI. 세 번째 탭 "리포트"(#report)는 부서별 AI 업무 리포트(activity_report). 네 번째 탭 "트렌드"(#trend)는 검색어 급상승(trend_scan). 숫자는 서버가 계산한 값만 보여 주고, 없으면 빈 상태를 보여 준다(예시 숫자를 만들지 않는다).
+// 두 번째 탭 "평상시 지표"는 학습 효과·KPI. 세 번째 탭 "리포트"(#report)는 부서별 AI 업무 리포트(activity_report). 네 번째 탭 "트렌드"(#trend)는 콘텐츠 루프 5단계와 같은 하위 탭 5개(#trend/detect 등, components/data/TrendScan.tsx). 숫자는 서버가 계산한 값만 보여 주고, 없으면 빈 상태를 보여 준다(예시 숫자를 만들지 않는다).
 // 실서버 연결 방법과 화면이 부르는 주소: frontend/README.md "데이터 분석 화면 확인 방법"
 
 const REFRESH_MS = 30_000;
@@ -24,7 +24,8 @@ const MODES = Object.keys(MODE_LABEL) as Mode[];
 export default function DataPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const mode: Mode = MODES.find((m) => MODE_HASH[m] && MODE_HASH[m] === location.hash) ?? "incident";
+  // 트렌드는 하위 탭 주소(#trend/detect 등)도 트렌드 탭이다
+  const mode: Mode = MODES.find((m) => MODE_HASH[m] && (location.hash === MODE_HASH[m] || location.hash.startsWith(`${MODE_HASH[m]}/`))) ?? "incident";
   const urlIncident = new URLSearchParams(location.search).get("incident");
 
   const openMode = useCallback((m: Mode) => {

@@ -17,11 +17,12 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import json
 import os
 import re
 from collections.abc import Awaitable
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
@@ -684,9 +685,71 @@ class Draft:
     freshened: bool = False  # PR 직전 확인에서 최신 글로 한 번 다시 썼나
 
 
+def _drafts_path(svc: DevService) -> str | None:
+    """작성해 둔 코드 파일. 상태를 파일에 쓸 때만(`PLANNING_STATE_DIR`) 그 옆에 둔다."""
+    state = getattr(svc, "_state_path", None)
+    if not state:
+        return None
+    return os.path.join(os.path.dirname(state), f"coding_drafts_{svc.role or 'all'}.json")
+
+
+def _draft_from(d: dict[str, Any]) -> Draft:
+    return Draft(
+        connection=d.get("connection"),
+        picks=[FilePick.model_validate(x) for x in d.get("picks", [])],
+        originals=dict(d.get("originals", {})),
+        contents=dict(d.get("contents", {})),
+        rows=[CodingFile.model_validate(x) for x in d.get("rows", [])],
+        summary=d.get("summary"),
+        verdicts=list(d.get("verdicts", [])),
+        notes=list(d.get("notes", [])),
+        attempts=int(d.get("attempts", 1)),
+        freshened=bool(d.get("freshened", False)),
+    )
+
+
 def _drafts(svc: DevService) -> dict[str, Draft]:
-    """서비스마다 작업 id → 작성해 둔 코드 (프로세스 메모리). PR이 열리면 지운다."""
-    return svc.__dict__.setdefault("_coding_drafts", {})
+    """서비스마다 작업 id → 작성해 둔 코드. PR이 열리면 지운다.
+
+    상태를 파일에 쓰면 작성해 둔 코드도 파일에 남겨, 서버를 다시 켜도 다시 시도·보류 승인 때
+    LLM을 다시 부르지 않는다 (예전엔 프로세스 메모리라 재시작하면 처음부터 다시 썼다)."""
+    found = svc.__dict__.get("_coding_drafts")
+    if found is not None:
+        return found
+    drafts: dict[str, Draft] = {}
+    path = _drafts_path(svc)
+    if path and os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                drafts = {k: _draft_from(v) for k, v in json.load(f).items()}
+        except (OSError, ValueError, TypeError, KeyError):
+            drafts = {}  # 읽지 못하면 없는 것으로 (다시 시도하면 다시 쓴다)
+    svc.__dict__["_coding_drafts"] = drafts
+    return drafts
+
+
+def _save_drafts(svc: DevService) -> None:
+    path = _drafts_path(svc)
+    if not path:
+        return
+    data = {
+        k: {
+            **asdict(d),
+            "picks": [p.model_dump() for p in d.picks],
+            "rows": [r.model_dump(mode="json") for r in d.rows],
+        }
+        for k, d in _drafts(svc).items()
+    }
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def put_draft(svc: DevService, task_id: str, draft: Draft) -> None:
+    _drafts(svc)[task_id] = draft
+    _save_drafts(svc)
 
 
 def draft_of(svc: DevService, task_id: str) -> Draft | None:
@@ -694,7 +757,14 @@ def draft_of(svc: DevService, task_id: str) -> Draft | None:
 
 
 def drop_draft(svc: DevService, task_id: str) -> None:
-    _drafts(svc).pop(task_id, None)
+    if _drafts(svc).pop(task_id, None) is not None:
+        _save_drafts(svc)
+
+
+def clear_drafts(svc: DevService) -> None:
+    """초기화: 작성해 둔 코드를 모두 지운다 (파일도)."""
+    svc.__dict__["_coding_drafts"] = {}
+    _save_drafts(svc)
 
 
 QUEUE_POLL_SECONDS = 2.0  # 대기열 차례 확인 간격
@@ -862,7 +932,7 @@ async def _run(svc: DevService, job: Job) -> None:
     # 4. 리뷰 → 불일치면 한 번 고쳐 다시 리뷰 (PR 전)
     draft = Draft(job.connection, picks, originals, contents, rows, summary)
     draft = await _review(svc, job, llm, draft)
-    _drafts(svc)[job.task_id] = draft
+    put_draft(svc, job.task_id, draft)
 
     # 5. 마지막 결과만 커밋 하나로 PR
     await _open(svc, job, draft)
@@ -1017,7 +1087,7 @@ async def _open(svc: DevService, job: Job, d: Draft) -> None:
     """PR 직전 최신 코드 확인 → 관문 generate_pr 뒤 커밋 하나로 PR → CI 기다림 → 리뷰 결과
     (통과·CI 통과면 자동 머지)."""
     d = await _freshen(svc, job, d)
-    _drafts(svc)[job.task_id] = d
+    put_draft(svc, job.task_id, d)
     if not await svc.coding_open(job, d.contents, d.rows, pr_body(job, d.rows, d.summary or "")):
         return
     drop_draft(svc, job.task_id)

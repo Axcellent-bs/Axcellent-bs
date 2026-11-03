@@ -6,7 +6,7 @@
 
 - 넘겨받은 기획서는 사람 클릭 없이 PR 만들기 → 검수 → 불일치면 수정 후 재검수 → 자동 머지 검사까지 간다. 규칙에 걸리면 `auto_review` 대기열(교차검증 대기·사람 확인).
 - 자동 처리 범위(`auto_policy`)의 주인이다. 바뀌면 `receive_dev_result`에 실어 기획에 맞춘다.
-- 코딩 에이전트(`coder.py`)·개발 AI 대화(`dev_chat.py`)·개발자 본인 Claude 일감(`work_queue.py`·`work_api.py`, MCP)·저장소 작업 공간(`repo_api.py`)·형상관리 연결(`vcs/`·`vcs_bridge.py`·`repo_routing.py`)·배포 기록(`deploy_store.py`·`deploy_signals.py`·`deploy.py`)·머지 교차검증 근거(`cross_check.py`)가 여기 있다.
+- 코딩 에이전트(`coder.py`)·개발 AI 대화(`dev_chat.py`)·개발자 본인 Claude 작업(`work_queue.py`·`work_api.py`, MCP)·저장소 작업 공간(`repo_api.py`)·형상관리 연결(`vcs/`·`vcs_bridge.py`·`repo_routing.py`)·배포 기록(`deploy_store.py`·`deploy_signals.py`·`deploy.py`)·머지 교차검증 근거(`cross_check.py`)가 여기 있다.
 - 장애 사건에 관련 PR 후보(`find_related_prs`)·롤백 대상 확인(`verify_rollback_target`)·사건 연결(`link_incident`), 인사 인수인계용 진행 중 항목(`list_in_progress`)·인계 확인(`verify_handover`)을 맡는다.
 
 ## 2. 구성
@@ -92,7 +92,7 @@ hr 연동 항목 규칙 (`domain/handover.py`, 시연값):
 - 받기: `POST /dev-tasks` `{title(필수, 200자), plan(필수, 8000자), done?(완료 기준, 한 줄에 하나), paths?(경로 힌트 20개), connection?(연결 id)}` → `data: {request_id, spec_id, task_id, status: "queued"}`. 요청(`from` dev, `via` dev_team, `작업 중`)·확정 기획서(`origin` dev_team, `handed_to_dev`, R1 = 제목·`paths` 힌트, `problem` = 기획 글, C1.. = 완료 기준 줄, 없으면 기본 한 줄)·작업 하나를 관문 `dev_task_create`(A) 뒤에 만든다. id는 planning 번호와 겹치지 않게 `REQ-D1`·`SPEC-D1`·`T-D1`, 사건은 `ctx_dev_0001`.
 - 오류: 400 `INVALID_INPUT`(형식, 모르는 연결, 연결이 여럿인데 `connection` 없음) · 409 `NO_VCS`(연결 없음) · 409 `LLM_NOT_CONFIGURED`(모델·주소 없음, 아무것도 만들지 않음) · 409 `WRONG_ROLE`(역할 planning 서비스) · 409 `GATE_REJECTED`.
 - 다시 시도: `POST /dev-tasks/{task_id}/retry` `{connection?}` → 같은 모양(`status: queued`). `failed`·`waiting_human`이고 PR을 아직 안 만든 작업만(관문 `dev_task_retry` A). 없으면 404 `NOT_FOUND`, 진행 중·끝남·PR 있음은 409 `NOT_RETRYABLE`(PR이 있으면 PR 화면 머지 버튼으로 판단).
-- 구독형 일감: `POST /dev-tasks`에 `mode: "subscription"`을 넣으면 서버 에이전트를 띄우지 않고 대기열에 둔다. 개발자 본인 Claude Code가 MCP(`POST /mcp`, 도구 `list_tasks`·`claim_task`·`report_progress`·`report_pr`·`release_task`)나 REST(`/work/tasks/*`)로 가져가 PR을 올린다 (사람 토큰, 임대 `PLANNING_LEASE_MINUTES` 기본 30분, 관문 `dev_task_claim`·`dev_task_release` A, PR 잇기는 `generate_pr` B). 사용법 `backend/docs/dev-mcp.md`, 코드 `work_queue.py`·`work_api.py`.
+- 구독형 작업: `POST /dev-tasks`에 `mode: "subscription"`을 넣으면 서버 에이전트를 띄우지 않고 대기열에 둔다. 개발자 본인 Claude Code가 MCP(`POST /mcp`, 도구 `list_tasks`·`claim_task`·`report_progress`·`report_pr`·`release_task`)나 REST(`/work/tasks/*`)로 가져가 PR을 올린다 (사람 토큰, 임대 `PLANNING_LEASE_MINUTES` 기본 30분, 관문 `dev_task_claim`·`dev_task_release` A, PR 잇기는 `generate_pr` B). 사용법 `backend/docs/dev-mcp.md`, 코드 `work_queue.py`·`work_api.py`.
 - 올릴 레포(v1): 코딩 작업에는 레포 제안·`approveRepo`를 쓰지 않는다. `connection`을 주거나 연결이 하나일 때만 받는다. 고른 연결은 PR `target`에 승인 상태(`decided_by` 개발팀)로 적는다.
 - 진행(작업 `coding`, SSE 상태로 나간다): `{status, model, files: [{path, additions, deletions, reason}], summary, review: {verdict, notes} | null, error, attempts, updated_at, connection, pr}`. status는 `queued → reading → writing → reviewing → opened → merged`, 멈추면 `waiting_human`·`failed`.
 - 흐름 (상태 잠금 밖에서 돌고, 단계마다 작은 액션으로 상태를 적는다):

@@ -15,7 +15,7 @@ data `impact_analysis`의 입력·출력은 계약(`ImpactAnalysisInput`·`Impac
 
 장애 구간은 총괄 사건 목록(`GET /api/incidents`)을 읽기 전용으로 읽어서 안다
 (계약 `data_access/orchestrator_incidents.py`, [협업] #417 제안 A, 요청 #418).
-사건 **중**에 총괄을 부르는 게 아니다 — 평상시 사후 감사·사건 조회에서만 읽는다.
+사건 **중**에 총괄을 부르는 게 아니다 — 평상시 사건 조회에서만 읽는다.
 """
 
 from __future__ import annotations
@@ -70,23 +70,6 @@ def order_key(order_id: object) -> str | None:
     return None
 
 
-def paid_total(order: dict[str, Any]) -> int | None:
-    """shop-api 주문 응답에서 성공한 결제 금액 합계. 결제가 없으면 0, 형식이 다르면 None."""
-    payments = order.get("payments")
-    if not isinstance(payments, list):
-        return None
-    total = 0
-    for p in payments:
-        if not isinstance(p, dict):
-            return None
-        if p.get("status") == "succeeded":
-            amount = _int(p.get("amount"))
-            if amount is None:
-                return None
-            total += amount
-    return total
-
-
 IMPACT_FIELDS = ("failed_order_count", "affected_customer_count", "damage_amount")
 
 
@@ -109,8 +92,6 @@ class Sources(Protocol):
     ) -> Impact | None: ...
 
     async def incident_window(self, context_id: str) -> dict[str, Any] | None: ...
-
-    async def paid_amount(self, meta: RequestMeta, order_id: str) -> int | None: ...
 
     async def team_headcount(self, meta: RequestMeta, month: str) -> TeamHeadcountOutput | None: ...
 
@@ -172,9 +153,6 @@ class MockSources:
     async def incident_window(self, context_id: str) -> dict[str, Any] | None:
         """목 모드는 장부 시드(`seed_incidents`)로 구간을 알아서 총괄을 읽지 않는다."""
         return None
-
-    async def paid_amount(self, meta: RequestMeta, order_id: str) -> int | None:
-        return _int(self.seed.get("payments", {}).get(str(order_id)))
 
     async def team_headcount(self, meta: RequestMeta, month: str) -> TeamHeadcountOutput | None:
         """시드의 월별 팀 인원. 그 달이 없으면 그 전 가장 가까운 달(발령이 없던 달)을 쓴다."""
@@ -298,7 +276,7 @@ class LiveSources:
     async def incident_window(self, context_id: str) -> dict[str, Any] | None:
         """총괄 사건 목록에서 이 사건의 구간·부품을 읽는다 (읽기 전용, 상태를 바꾸지 않음).
 
-        사건 중에 부르지 않는다 — 평상시 사후 감사·사건 조회 경로에서만 읽는다
+        사건 중에 부르지 않는다 — 평상시 사건 조회 경로에서만 읽는다
         ([협업] #417 제안 A, 요청 #418). 계약은 `data_access/orchestrator_incidents.py`.
         못 받거나 형식이 다르거나 그 사건이 없으면 None(확인할 수 없음)이고 추정하지 않는다.
         아직 열린 사건은 `window_to`가 None이라 구간이 되지 않는다(그때는 data에 묻지 않는다).
@@ -336,11 +314,3 @@ class LiveSources:
                 "category": None,
             }
         return None
-
-    async def paid_amount(self, meta: RequestMeta, order_id: str) -> int | None:
-        """shop-api 주문 조회. 주문이 없거나(404) 응답이 없으면 None(승인 근거로 쓰지 않음)."""
-        body = await self._read_json(
-            f"{agent_url('shop-api')}/api/shop/orders/{order_id}", SHOP_CALL_SECONDS
-        )
-        order = body.get("data") if isinstance(body, dict) else None
-        return paid_total(order) if isinstance(order, dict) else None

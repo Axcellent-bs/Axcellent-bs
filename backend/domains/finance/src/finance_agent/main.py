@@ -28,7 +28,6 @@ from finance_agent.handlers import (
     SUBSCRIBED_EVENTS,
     closing_key,
     on_event,
-    recompute,
     state,
 )
 from finance_agent.incidents import add_incident_api
@@ -40,7 +39,7 @@ from finance_agent.selftest import SELF_TEST_TTL_HOURS, is_fresh, run_self_test
 DEFAULT_CORS_ORIGINS = "http://localhost:3001,http://127.0.0.1:3001"
 DECISION_PATHS = re.compile(
     r"^/api/finance/(closing/confirm|reconciliation/[^/]+/note|settlements/batch"
-    r"|anomalies/[^/]+/resolve|policy/[^/]+/ack|bank/statement"
+    r"|anomalies/[^/]+/resolve|bank/statement"
     r"|team-budget/[^/]+/approve)$"
 )
 
@@ -105,7 +104,7 @@ def self_test_seconds() -> int:
 
 async def run_and_store_self_test(trigger: Trigger) -> dict[str, Any]:
     """재무 AI 테스트를 돌리고 `/api/finance/self-test/last`가 읽는 곳에 남긴다."""
-    result = await run_self_test(recompute)
+    result = await run_self_test()
     result["trigger"] = trigger
     state().last_self_test = result
     return result
@@ -247,7 +246,7 @@ def cors_origins() -> list[str]:
 def add_read_api(app: FastAPI) -> None:
     """대시보드용 기존 조회 API. 상태를 바꾸지 않는다. 응답은 `{data, meta}`.
 
-    재무 재설계 API(overview·closing·reconciliation·settlements·policy·audit)는 `finance_api.py`.
+    재무 재설계 API(overview·closing·reconciliation·settlements·audit)는 `finance_api.py`.
     """
 
     @app.get("/api/finance/ledger")
@@ -259,7 +258,7 @@ def add_read_api(app: FastAPI) -> None:
 
     @app.get("/api/finance/self-test")
     async def self_test() -> dict:
-        """재무 AI 테스트 버튼: 가짜 자료로 판단 점검, 연결 확인. 상태를 바꾸지 않는다."""
+        """재무 AI 테스트 버튼: 가짜 자료로 계산 점검, 연결 확인. 상태를 바꾸지 않는다."""
         result = await run_and_store_self_test("manual")
         return {"data": result, "meta": {}}
 

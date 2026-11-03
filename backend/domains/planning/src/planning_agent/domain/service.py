@@ -15,11 +15,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Literal, get_args
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ax_agent_template.services import BY_ID as SERVICE_BY_ID
 from ax_agent_template.services import department_of
@@ -28,6 +29,8 @@ from ax_contracts.schemas.hr import PlanDraft
 from ax_contracts.schemas.planning import (
     AnswerPlanningQuestionInput,
     DevHandoffInput,
+    ReceiveReleaseOrderInput,
+    RequestReleaseCheckInput,
 )
 from ax_contracts.schemas.record import RecordCase, RecordKind
 from ax_workflow import hr_link
@@ -124,6 +127,7 @@ from planning_agent import (
     ask_requester,
     cause_inbox,
     related,
+    release_check,
 )
 from planning_agent.ask_requester import Asker, missing_info_question
 from planning_agent.domain.docs import gather_blocks, next_block_id
@@ -206,6 +210,14 @@ def _hr_state(hr: HrRecordResult | None) -> str | None:
     return "held" if reason.startswith(("input-required", "held")) else "failed"
 
 
+class ReleaseOrderParams(BaseModel):
+    """대조가 사람 확인(needs_human)으로 끝난 건을 사람이 보고 배포 지시를 보낸다."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    check: str  # RC-n
+    note: str | None = None
+
+
 class RejectSpecParams(SpecParams):
     """확인 대기 기획서 거절. 이유가 있어야 인사에 기각 기록으로 남긴다."""
 
@@ -224,6 +236,7 @@ class PlanningService(PlanningCore):
         **PLANNING_ACTIONS,
         "unlink_duplicate": ("_unlink_duplicate", RequestParams),
         "reject_spec": ("_reject_spec", RejectSpecParams),
+        "send_release_order": ("_send_release_order_action", ReleaseOrderParams),
     }
 
     def __init__(
@@ -245,6 +258,9 @@ class PlanningService(PlanningCore):
         # 요청 서비스에 되묻는 곳 (None이면 묻지 않음, 목 모드 기본값)
         self._asker: Asker | None = ask_requester.default_asker() if asker == "default" else asker
         # 기획서 초안을 LLM으로 쓰는 곳 (None이면 규칙 초안, 목 모드 기본값)
+        # 배포 전 대조 기록 (RC-n → 판정·지시 여부). 서버 메모리에만 둔다
+        # (다시 켜면 비어 있고, 개발이 다시 물으면 새로 대조한다)
+        self.release_checks: dict[str, dict[str, Any]] = {}
         # 접수할 때 이미 비슷한 요청을 찾은 요청 id (_relate_new가 다시 찾지 않게)
         self._pre_related: set[str] = set()
         self._spec_writer: SpecWriter | None = (
@@ -428,9 +444,13 @@ class PlanningService(PlanningCore):
         - LLM이 "같은 일"(same)로 본 이 서버의 열린 요청만 묶는다. 다른 서비스에만 있는 요청은
           비슷한 요청 표시로만 둔다.
         - LLM 판단이 하나도 없으면(실패) 같은 제목 규칙으로 대신한다.
-        - 이미 묶였거나 접수 뒤 다른 단계로 간 요청은 그대로 둔다.
+        - 이미 묶였거나 접수 뒤 다른 단계로 간 요청, 개발이 만든 재발 방지 요청은 그대로 둔다.
         """
         if not self._content_match or req.duplicate_of or req.state != "접수":
+            return
+        # 개발이 장애 연결로 만든 재발 방지 요청은 묶지 않는다. 사건 번호가 개발 사본과 같아야
+        # 사후관리(aftercare) 연결이 맞는다 (via "link_incident (재발 방지)", #363)
+        if req.via.startswith("link_incident"):
             return
         others = [r for r in s.requests if r.id != req.id]
         by_id = {r.id: r for r in others}
@@ -962,6 +982,171 @@ class PlanningService(PlanningCore):
         self._save()
         return result
 
+    # ---- 배포 전 기획서 대조 → 배포 지시
+
+    async def request_release_check(
+        self,
+        *,
+        context_id: str,
+        requester: str,
+        inp: RequestReleaseCheckInput,
+        idempotency_key: str,
+    ) -> ActionResult:
+        """개발이 보낸 작업·PR을 기획서와 대조한다 (A, 코드 규칙). `ready`면 배포 지시를 보낸다.
+
+        `needs_human`이면 사람이 기획 화면에서 보고 `send_release_order`로 지시한다.
+        `hold`면 지시하지 않고 이유 코드만 돌려준다. 같은 멱등성 키는 이전 결과를 돌려준다.
+        """
+        cached = self._idempotent.get(idempotency_key)
+        if cached is not None:
+            return ActionResult(changed=False, outcome=cached.outcome, output=dict(cached.output))
+
+        async def run(s: State) -> ActionResult:
+            j = release_check.judge(s, inp)
+            check_id = f"RC-{len(self.release_checks) + 1}"
+            req = next((r for r in s.requests if r.id == inp.request_id), None)
+            ctx = req.context_id if req else context_id
+            why = f" ({', '.join(j.hold_reasons)})" if j.hold_reasons else ""
+            text = f"{check_id} {inp.spec_id} 배포 전 대조 → {j.verdict}{why}"
+            await self._execute(
+                "request_release_check",
+                ctx,
+                check_id,
+                text,
+                {
+                    "spec": inp.spec_id,
+                    "verdict": j.verdict,
+                    "hold_reasons": j.hold_reasons,
+                    "prs": [p.number for p in inp.prs],
+                },
+            )
+            items = [i.model_dump(mode="json") for i in j.items]
+            self.release_checks[check_id] = {
+                "check_id": check_id,
+                "context_id": ctx,
+                "spec_id": inp.spec_id,
+                "request_id": inp.request_id,
+                "env": inp.env,
+                "verdict": j.verdict,
+                "hold_reasons": list(j.hold_reasons),
+                "items": items,
+                "pr_numbers": [p.number for p in inp.prs if p.merged],
+                "requester": requester,
+                "at": self.clock().isoformat(),
+                "order_sent": False,
+                "order_result": None,
+            }
+            s.activity.append(
+                self._act(
+                    self.clock(),
+                    ctx,
+                    requester,
+                    "planning",
+                    "request_release_check",
+                    "A2A",
+                    text,
+                    "A",
+                )
+            )
+            return ActionResult(
+                outcome=j.verdict,
+                output={
+                    "check_id": check_id,
+                    "verdict": j.verdict,
+                    "items": items,
+                    "hold_reasons": list(j.hold_reasons),
+                    "order_sent": False,
+                },
+            )
+
+        result = await self._apply(run)
+        if result.output["verdict"] == "ready":
+            sent = await self._send_release_order(result.output["check_id"], "agent")
+            result = ActionResult(
+                changed=result.changed,
+                outcome=result.outcome,
+                output={**result.output, "order_sent": sent},
+            )
+        self._idempotent[idempotency_key] = result
+        self._save()
+        return result
+
+    async def _send_release_order(
+        self, check_id: str, decided_by: str, note: str | None = None
+    ) -> bool:
+        """개발에 배포 지시(`receive_release_order`)를 보낸다. 잠금 밖에서 부른다.
+
+        실행·prod 승인·보호 경로 승인은 개발과 안전 레이어가 그대로 한다
+        (지시가 사람 승인을 건너뛰지 않는다).
+        """
+        rc = self.release_checks[check_id]
+        if not rc["pr_numbers"]:
+            return False
+        order = ReceiveReleaseOrderInput(
+            check_id=check_id,
+            spec_id=rc["spec_id"],
+            request_id=rc["request_id"],
+            env=rc["env"],
+            pr_numbers=rc["pr_numbers"],
+            decided_by=decided_by,  # type: ignore[arg-type]
+            note=note,
+        )
+        key = f"{rc['context_id']}:release_order:{check_id}"
+        try:
+            how = await self._send_dev(
+                "receive_release_order", rc["context_id"], self.tenant_id, order, key
+            )
+        except Exception:  # noqa: BLE001 - 지시 실패가 대조 결과를 되돌리지 않는다
+            how = "보내지 못함 (오류)"
+        sent = how.startswith("보냄")
+        rc["order_sent"] = sent
+        rc["order_result"] = how
+        who = "사람" if decided_by == "human" else "기획 AI"
+        prs = ", ".join(f"#{n}" for n in rc["pr_numbers"])
+        text = f"{check_id} {rc['spec_id']} 배포 지시 ({who}, {rc['env']}, PR {prs}) → {how}"
+
+        async def log(s: State) -> None:
+            s.activity.append(
+                self._act(
+                    self.clock(),
+                    rc["context_id"],
+                    "planning",
+                    "dev",
+                    "receive_release_order",
+                    "A2A",
+                    text,
+                    "A",
+                )
+            )
+
+        await self._apply(log)
+        return sent
+
+    async def _send_release_order_action(
+        self, s: State, check: str, note: str | None
+    ) -> ActionResult | None:
+        """사람 버튼: 사람 확인으로 끝난 대조 건에 배포 지시를 보낸다 (보내기는 잠금 밖에서)."""
+        rc = self.release_checks.get(check)
+        if rc is None:
+            raise ActionError("NOT_FOUND", f"대조 {check}가 없다")
+        if rc["verdict"] == "hold":
+            raise ActionError("RELEASE_HELD", f"{check}는 연결 규칙에 걸려 배포를 지시할 수 없다")
+        if rc["order_sent"]:
+            return None
+        await self._execute(
+            "send_release_order",
+            rc["context_id"],
+            check,
+            f"{check} {rc['spec_id']} 사람이 배포 지시",
+            {"spec": rc["spec_id"], "verdict": rc["verdict"], "prs": rc["pr_numbers"]},
+        )
+        task = asyncio.get_running_loop().create_task(
+            self._send_release_order(check, "human", note)
+        )
+        self._sending.add(task)
+        task.add_done_callback(self._sending.discard)
+        return ActionResult(output={"check_id": check, "order": "sending"})
+
     async def _auto_plan(self, s: State, req: Request, *, done: bool) -> tuple[Spec, Task]:
         """간단 요청 앞쪽: write_spec → 자동 확정 → split_tasks.
 
@@ -1172,6 +1357,10 @@ class PlanningService(PlanningCore):
         async def run(s: State) -> ActionResult:
             t = self.clock()
             new_own = got_req is not None and not any(r.id == got_req.id for r in s.requests)
+            if not spec_id and not new_own:
+                # 기획서 없는 요청(재발 방지 후속)은 처음 한 번만 받는다. 그 뒤로는 기획이 주인이라
+                # 다시 와도(재시작 뒤 맞추기 등) 기획서·상태를 덮어쓰지 않는다
+                return ActionResult(changed=False, output={"applied": 0})
             if got_req is not None:
                 self._upsert(s.requests, [got_req])
             if got_spec is not None:
@@ -1183,13 +1372,16 @@ class PlanningService(PlanningCore):
                 f"{spec_id} 작업 {len(got_tasks)}·PR {len(got_prs)}(머지 {merged}) 반영"
                 f" · {request_id} {request_state}"
             )
+            if not spec_id and req is not None:
+                # 기획서 없이 요청만 (개발이 장애 연결로 만든 재발 방지 요청) → 요청 목록에 받는다
+                text = f"{req.via} 요청 {request_id} 받음: {req.title}"
             await self._execute(
                 RECEIVE_DEV_RESULT,
                 ctx,
-                f"{spec_id}:{len(s.activity)}",
+                f"{spec_id or request_id}:{len(s.activity)}",
                 text,
                 {"request": request_id, "request_state": request_state},
-                [spec_id, request_id],
+                [x for x in (spec_id, request_id) if x],
             )
             self._upsert(s.tasks, got_tasks)
             self._upsert(s.prs, got_prs)
@@ -1386,16 +1578,21 @@ class PlanningService(PlanningCore):
         split = f"요구사항 {len(reqs)}개 → 작업 {', '.join(t.id for t in tasks)}"
         await self._execute("split_tasks", ctx, sp.id, split, {"tasks": [t.id for t in tasks]})
         case = f"① kind spec_confirmed · {sp.id}" + (" (자동 확정)" if auto else "")
+        # 결정 문장(summary)에는 결정 내용만 둔다. 기획서 번호·"자동 확정"·"warn 무시 진행" 같은
+        # 틀 문구가 붙으면 인사 병합 판정이 같은 결정을 "바뀜"으로 본다 (11/2 병합 재평가, 준하 님).
+        # 확정 방식과 경고 무시는 이유(decision_reason)로 옮기고, 기획서 번호는 근거에 있다.
         if auto:
-            summary = f"{sp.id} {sp.title} 자동 확정 (사후 감사 대상)"
+            reason = f"자동 확정 (사후 감사 대상): confirm_spec 규칙 통과 · {rule_text}"
         else:
-            summary = f"{sp.id} {sp.title} 확정" + (f" ({audit})" if audit else "")
+            reason = f"팀장 {TEAM_LEAD}이 기획서를 보고 확정"
+            if audit:
+                reason += f" · {audit}"
         record = RecordCase(
             context_id=ctx,
             tenant_id=self.tenant_id,
             kind=RecordKind.SPEC_CONFIRMED,
-            summary=summary,
-            decision_reason=f"confirm_spec 규칙 통과: {rule_text}" if auto else None,
+            summary=sp.title,
+            decision_reason=reason,
             source_refs=[f"spec:{sp.id}"]
             + [f"para:{sp.id}:{w['para']}" for w in warn_ignored]
             + [f"card:{w['card']}" for w in warn_ignored],
@@ -1729,8 +1926,9 @@ class PlanningService(PlanningCore):
     async def _reject_spec(self, s: State, spec: str, reason: str) -> ActionResult | None:
         """사람 버튼 "거절": 확인 대기(교차검증·사람 확인) 기획서를 확정하지 않는다.
 
-        기획서는 초안으로 남기고 대기열에서 내린다. 거절한 기획서는 결정 이력에 남기고 인사에
-        기각 기록(decision_rejected)으로 보낸다. 확정된 기획서·대기열에 없는 기획서는 바꾸지 않는다.
+        기획서는 초안으로 남기고 대기열에서 내린다. 요청은 기각으로 닫고 요청 부서에 알린다.
+        거절한 기획서는 결정 이력에 남기고 인사에 기각 기록(decision_rejected)으로 보낸다.
+        확정된 기획서·대기열에 없는 기획서는 바꾸지 않는다.
         """
         sp = next((x for x in s.specs if x.id == spec), None)
         if sp is None:
@@ -1746,6 +1944,24 @@ class PlanningService(PlanningCore):
         s.activity.append(
             self._act(self.clock(), ctx, "human", "planning", "reject_spec", "사람", text)
         )
+        # 요청은 기각으로 닫고 요청 부서에 알린다 (개선 초안 기각과 같게, 11/2 시연 F)
+        if req is not None and req.state not in CLOSED_REQUEST_STATES:
+            req.state = "기각"
+            await self._notify_result(
+                s, req, "declined", spec_id=sp.id, reason_code="spec_rejected"
+            )
+            s.activity.append(
+                self._act(
+                    self.clock(),
+                    ctx,
+                    "planning",
+                    req.from_,
+                    "get_request_status",
+                    "A2A",
+                    f'{req.id} "{req.title}" 기각 (기획서 {sp.id} 거절 · 이유: {reason.strip()})',
+                    "read",
+                )
+            )
         return ActionResult(output={"spec": sp.id, **(res.output if res else {})})
 
     # ---- 소통

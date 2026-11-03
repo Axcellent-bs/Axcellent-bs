@@ -253,6 +253,27 @@ owner = "planning"
 requesters = ["planning"]
 base_grade = "A"
 
+# 배포 전 기획서 대조 (dev → planning). 기획 기록에 대조 결과만 남긴다. 배포 실행은 개발 관문
+[[actions]]
+action = "request_release_check"
+owner = "planning"
+requesters = ["dev"]
+base_grade = "A"
+
+# 배포 지시 받기 (planning → dev). 개발은 지금의 배포 요청 흐름을 탄다 (prod·보호 경로는 사람 승인)
+[[actions]]
+action = "receive_release_order"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+# 사람 확인으로 끝난 대조 건에 사람이 배포 지시 (배포 실행·prod 승인은 개발·안전 레이어가 그대로)
+[[actions]]
+action = "send_release_order"
+owner = "planning"
+requesters = ["planning"]
+base_grade = "A"
+
 [[actions]]
 action = "receive_planning_answer"
 owner = "planning"
@@ -306,7 +327,7 @@ owner = "planning"
 requesters = ["planning", "dev"]
 base_grade = "A"
 
-# 구독형 일감: 개발자 본인 Claude가 작업을 가져가기·내려놓기(임대 만료 포함). 기록만 바뀌어 A.
+# 구독형 작업: 개발자 본인 Claude가 작업을 가져가기·내려놓기(임대 만료 포함). 기록만 바뀌어 A.
 # 개발자가 올린 PR을 잇는 건 generate_pr(B), 머지는 merge_pr(B) 관문을 그대로 지난다
 [[actions]]
 action = "dev_task_claim"

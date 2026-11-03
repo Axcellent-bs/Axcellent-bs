@@ -27,6 +27,7 @@ from ax_contracts.data_access.shop_metric_series import MetricName, ShopMetricSe
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT
 from data_agent.connectors import (
     EVENTS_LIMIT,
+    CatalogProduct,
     ConnectorUnavailable,
     FailureEvents,
     Point,
@@ -122,6 +123,8 @@ class ShopApiConnector:
     - `transactions_volume`: 결제 시도 수(`payment_count`) 시계열
     - `campaign_coupons`: `GET /api/shop/coupons?campaign_id=` (캠페인 효과 쿠폰 사용률). 회사 공통
       인터페이스가 아니라 캣북스 커넥터에만 있다
+    - `products`·`categories`: `GET /api/shop/products`(판매 중 상품)·`/categories`(코드 → 이름).
+      영상 소재 ↔ 실제 상품 연결(content_recommend)에 쓴다. 읽기만 한다
     """
 
     def __init__(self, api: ShopApi) -> None:
@@ -192,6 +195,26 @@ class ShopApiConnector:
             return [CampaignCoupon.model_validate(item) for item in data]
         except (ValidationError, TypeError) as exc:
             raise ShopUnavailable("BAD_RESPONSE", "쿠폰 응답 형식이 예상과 다르다") from exc
+
+    async def products(self) -> list[CatalogProduct]:
+        """판매 중 상품 (shop-api가 판매 중만 준다). 형식이 다르면 `ShopUnavailable`."""
+        data = await self.api.get("/products", {})
+        try:
+            return [CatalogProduct.model_validate(item) for item in data]
+        except (ValidationError, TypeError) as exc:
+            raise ShopUnavailable("BAD_RESPONSE", "상품 응답 형식이 예상과 다르다") from exc
+
+    async def categories(self) -> dict[str, str]:
+        """카테고리 코드 → 이름 (이름이 없는 코드는 뺀다)."""
+        data = await self.api.get("/categories", {})
+        try:
+            return {
+                str(item["category_code"]): str(item["name"])
+                for item in data
+                if item.get("category_code") and item.get("name")
+            }
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise ShopUnavailable("BAD_RESPONSE", "카테고리 응답 형식이 예상과 다르다") from exc
 
 
 class CampaignCoupon(BaseModel):

@@ -45,7 +45,18 @@ def http_card_fetcher(client: httpx.AsyncClient | None = None) -> CardFetcher:
             cards = [c for c in [await get(http, t) for t in targets] if c]
             if not cards:
                 return None
-            skills = [skill for c in cards for skill in c.get("skills", [])]
+            # 같은 skill id가 두 서비스 카드에 있어도 부서 카드에는 하나만 둔다.
+            # 겹치면 카드 검증이 "skill id 중복"으로 거부돼 그 부서 skill이 모두 건너뛰어진다.
+            # 겹치면 나중 서비스 것을 쓴다(호출 대응표 `_SKILL_HOME`도 나중 서비스를 가리킨다)
+            by_id: dict[str, Any] = {}
+            no_id: list[Any] = []
+            for c in cards:
+                for skill in c.get("skills", []):
+                    if isinstance(skill, dict) and "id" in skill:
+                        by_id[skill["id"]] = skill
+                    else:
+                        no_id.append(skill)
+            skills = [*by_id.values(), *no_id]
             return {**cards[0], "name": dept, "skills": skills}
         finally:
             if client is None:

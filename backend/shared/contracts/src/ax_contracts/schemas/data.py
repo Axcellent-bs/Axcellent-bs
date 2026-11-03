@@ -621,6 +621,22 @@ class YouTubeTagEvidence(AxModel):
     # 이 후보로 센 태그 (정리한 값, 스냅샷에 실제로 나온 것. 별칭이 묶였으면 여러 개).
     # 예전 응답은 없다
     matched_tags: list[str] = Field(default_factory=list)
+    # 이 후보로 센 제목 구 (YouTube 제목에서 뽑은 2~3어절). 예전 응답은 없다
+    matched_phrases: list[str] = Field(default_factory=list)
+
+
+# 후보가 어디서 나왔는지 (화면 표시: youtube_tag = YouTube 태그, trending_search = 인기 검색어)
+CandidateOrigin = Literal["youtube_tag", "youtube_title", "trending_search"]
+
+
+class TrendingSearchEvidence(AxModel):
+    """인기 검색어 근거 (공개 피드 스냅샷 한 시각, 피드에 있는 값 그대로)."""
+
+    rank: int = Field(ge=1)  # 피드 안 순서
+    traffic: str | None = None  # 피드의 트래픽 표시값 (예: "500+", 검색 건수가 아님). 없으면 None
+    snapshot_at: UtcDatetime  # 스냅샷 수집 시각
+    source: str = "google_trends_rss"  # 피드 이름
+    keyword: str | None = None  # 피드에 나온 검색어 그대로 (정리 전)
 
 
 class TrendCandidate(AxModel):
@@ -632,6 +648,59 @@ class TrendCandidate(AxModel):
     # 대표 이름(`keyword`)에 묶인 별칭 (회사 설정 별칭 표). 네이버 그룹에 대표 이름과 함께 키워드로
     # 넣었다. 별칭이 없으면 빈 목록. 예전 응답은 없다
     aliases: list[str] = Field(default_factory=list)
+    # 아래는 이름별 판정 (별칭이 있을 때만, 예전 응답은 없다). 묶음 그룹으로만 보면 작은 이름의
+    # 급상승이 큰 이름에 묻혀서 대표 이름·별칭을 하나씩 따로도 판정한다
+    name_verdicts: list[TrendVerdict] = Field(
+        default_factory=list
+    )  # 이름 하나씩 판정 (group_name = 그 이름)
+    rising_names: list[str] = Field(default_factory=list)  # 따로 판정해 급상승인 이름
+    # `naver`가 어디서 왔는지: group = 묶음 그룹 판정,
+    # name = 묶음은 급상승이 아닌데 이름 하나가 급상승 (그 이름들 중 z가 가장 큰 판정을 올림)
+    naver_from: Literal["group", "name"] = "group"
+    # 아래는 출처 추가 (예전 응답은 없다). 이 후보가 나온 곳 (YouTube 태그는 늘, 인기 검색어에도
+    # 있으면 trending_search가 붙고 `trending`에 그 근거)
+    origins: list[CandidateOrigin] = Field(default_factory=list)
+    trending: TrendingSearchEvidence | None = None
+    # 데이터로 자동 묶은 다른 이름 (`aliases`에도 들어 있다). 예전 응답은 없다
+    auto_grouped: list[str] = Field(default_factory=list)
+
+
+class AutoExcludedTerm(AxModel):
+    """쌓인 스냅샷 전체에서 늘 붙는 말로 보고 후보에서 자동으로 뺀 이름 (문서 빈도 기준)."""
+
+    name: str
+    source: Literal["youtube_tag", "youtube_title"]  # 태그에서 / 제목 구에서
+    snapshot_videos: int = Field(ge=0)  # 이번 스냅샷에서 이 이름이 나온 영상 수 (빠지지 않았다면)
+    videos: int = Field(ge=0)  # 쌓인 인기 영상 중 이 이름이 나온 영상 수
+    total_videos: int = Field(ge=0)
+    doc_ratio: float = Field(ge=0, le=1)  # videos ÷ total_videos
+    categories: int = Field(ge=0)  # 이 이름이 나온 영상의 카테고리 수
+    days: int = Field(ge=0)  # 이 이름이 나온 한국 날짜 수
+    total_days: int = Field(ge=0)  # 기록이 있는 한국 날짜 수
+    reason: str  # 코드가 숫자로 만든 한 줄
+
+
+class NamePairEvidence(AxModel):
+    """후보 이름 두 개를 같은 대상으로 볼지의 근거 (자동 묶음 또는 묶음 제안)."""
+
+    names: list[str] = Field(min_length=2, max_length=2)
+    correlation: float = Field(ge=-1, le=1)  # 두 이름 네이버 일별 값(로그)의 같은 날 피어슨 상관
+    days: int = Field(ge=0)  # 상관에 쓴 날 수 (둘 다 값이 있는 날)
+    shared_videos: int = Field(ge=0)  # 쌓인 인기 영상 중 두 이름이 함께 나온 영상 수
+    applied: bool  # true = 기준을 넘어 자동으로 묶음, false = 제안만 (자동 적용 안 함)
+
+
+class TrendingCandidate(AxModel):
+    """인기 검색어에서만 나온 후보 (YouTube 근거 없음). 네이버 판정은 YouTube 후보와 같은 함수."""
+
+    keyword: str = Field(min_length=1)  # 정리한 검색어 (별칭 표가 있으면 대표 이름)
+    trending: TrendingSearchEvidence
+    naver: TrendVerdict
+    aliases: list[str] = Field(default_factory=list)
+    name_verdicts: list[TrendVerdict] = Field(default_factory=list)
+    rising_names: list[str] = Field(default_factory=list)
+    naver_from: Literal["group", "name"] = "group"
+    origins: list[CandidateOrigin] = Field(default_factory=lambda: ["trending_search"])
 
 
 class TrendCandidatesOutput(AxModel):
@@ -644,6 +713,18 @@ class TrendCandidatesOutput(AxModel):
     candidates: list[TrendCandidate] = Field(default_factory=list)  # 나온 영상 수 많은 순
     naver_calls: int = Field(default=0, ge=0)  # 네이버 검색어 트렌드를 부른 수 (실패 포함)
     summary: str  # 한 문장 (코드가 숫자로 만든 고정 문장)
+    # 아래는 인기 검색어 출처 (예전 응답은 없다). YouTube 후보와 이름이 겹치면 그 후보에 붙고
+    # (`TrendCandidate.trending`), 겹치지 않는 것만 여기 (피드 순위 순)
+    trending_candidates: list[TrendingCandidate] = Field(default_factory=list)
+    trending_status: Literal["known", "unknown"] = "unknown"  # 인기 검색어 스냅샷을 썼는지
+    trending_reason: str | None = None  # unknown이면 이유 (스냅샷 없음·오래됨)
+    trending_snapshot_at: UtcDatetime | None = None  # 쓴 인기 검색어 스냅샷 시각
+    # 자동 제외 (예전 응답은 없다): 이번 스냅샷에서 빠진 늘 붙는 말과 근거, 무엇으로 쟀는지 한 줄
+    auto_excluded: list[AutoExcludedTerm] = Field(default_factory=list)
+    exclusion_basis: str | None = None
+    # 이름 자동 묶기 (예전 응답은 없다): 자동으로 묶은 쌍, 제안만 하는 쌍 (상관 큰 순)
+    auto_groups: list[NamePairEvidence] = Field(default_factory=list)
+    group_suggestions: list[NamePairEvidence] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _known_or_reason(self) -> Self:
@@ -651,6 +732,212 @@ class TrendCandidatesOutput(AxModel):
             raise ValueError("unknown이면 unknown_reason이 있어야 한다")
         if self.status == "unknown" and self.candidates:
             raise ValueError("unknown이면 후보가 없어야 한다")
+        return self
+
+
+# --------------------------------------------------------------- trend_history (월별 흐름)
+# 키워드 그룹별 네이버 월 단위 값(timeUnit=month)과 "작년 같은 달 대비" 배수만 돌려준다.
+# 급상승·계절 판정은 하지 않는다(평가가 없어서). 값은 그 그룹 요청 안 상대값(최댓값 = 100)이다.
+
+
+class TrendHistoryRequest(AxModel):
+    """trend_history skill 입력. 비우면 회사 기본 키워드 그룹·설정 개월 수·지난달까지."""
+
+    # 없으면 회사 설정(trends.toml)의 기본 그룹. 그룹마다 네이버 호출 1번
+    keyword_groups: list[TrendKeywordGroup] | None = Field(
+        default=None, min_length=1, max_length=20
+    )
+    months: int | None = Field(default=None, ge=13, le=60)  # 볼 개월 수. 없으면 회사 설정(기본 24)
+    end_month: dt.date | None = None  # 마지막 달(그 달의 아무 날). 없으면 지난달(다 채워진 달)
+
+    @model_validator(mode="after")
+    def _unique_names(self) -> Self:
+        names = [g.group_name for g in self.keyword_groups or []]
+        if len(names) != len(set(names)):
+            raise ValueError("group_name이 겹친다")
+        return self
+
+
+class TrendMonthPoint(AxModel):
+    month: dt.date  # 그 달 1일
+    value: float = Field(ge=0)  # 그 그룹 요청 안 상대값 (최댓값 100)
+    last_year_value: float | None = Field(default=None, ge=0)  # 작년 같은 달 값 (없으면 None)
+    # 작년 같은 달 대비 배수 = 값 ÷ 작년 같은 달 값. 작년 값이 없거나 0이면 None (0으로 채우지 않음)
+    vs_last_year: float | None = Field(default=None, ge=0)
+
+
+class TrendHistoryGroup(AxModel):
+    group_name: str
+    keywords: list[str] = Field(default_factory=list)
+    status: Literal["known", "unknown"]
+    unknown_reason: str | None = None  # 자료 없음·네이버를 읽지 못함 등
+    points: list[TrendMonthPoint] = Field(
+        default_factory=list
+    )  # 달 순서. 네이버가 주지 않은 달은 빠짐
+    latest_month: dt.date | None = None  # 마지막으로 값이 있는 달
+    latest_vs_last_year: float | None = Field(default=None, ge=0)  # 그 달의 작년 같은 달 대비
+
+    @model_validator(mode="after")
+    def _reason_when_unknown(self) -> Self:
+        if self.status == "unknown" and not self.unknown_reason:
+            raise ValueError("unknown이면 unknown_reason이 있어야 한다")
+        return self
+
+
+class TrendHistoryOutput(AxModel):
+    start_month: dt.date  # 첫 달 1일
+    end_month: dt.date  # 마지막 달 1일
+    months: int = Field(ge=1)
+    time_unit: Literal["month"] = "month"
+    source: str  # 자료 출처 (naver_datalab)
+    value_kind: Literal["relative"] = "relative"  # 검색 건수가 아니라 그룹 요청 안 상대값
+    groups: list[TrendHistoryGroup] = Field(default_factory=list)  # 입력 그룹 순서
+    naver_calls: int = Field(default=0, ge=0)  # 네이버 요청 수 (그룹마다 1번, 실패 포함)
+    summary: str  # 한 문장 (코드가 숫자로 만든 고정 문장)
+
+
+# ---------------------------------------------------------- youtube_velocity (YouTube 지금 속도)
+# 최근 두 스냅샷 사이 영상별 시간당 조회 증가(지금 속도)와 그 전 구간 대비 빨라졌는지(가속).
+# 판정하지 않는다(평소 속도 기준이 아직 없음). 숫자 칸이 빠진 영상은 빈 값, 지워진 영상은 뺀다.
+
+
+class YouTubeVelocityRequest(AxModel):
+    """youtube_velocity skill 입력. 비우면 회사 설정(trends.toml `[velocity] top`) 개수."""
+
+    top: int | None = Field(default=None, ge=1, le=50)  # 지금 속도 상위 몇 개. 없으면 회사 설정
+
+
+class YouTubeVideoVelocity(AxModel):
+    video_id: str
+    channel_id: str
+    published_at: UtcDatetime
+    popular_rank: int | None = Field(
+        default=None, ge=1
+    )  # 최근 스냅샷의 인기 순위 (인기 목록에 없으면 None)
+    tags: list[str] = Field(default_factory=list)  # 저장된 태그 그대로
+    views: int | None = Field(default=None, ge=0)  # 최근 스냅샷 조회수
+    likes: int | None = Field(default=None, ge=0)  # 최근 스냅샷 좋아요 (숨김이면 None)
+    comments: int | None = Field(default=None, ge=0)  # 최근 스냅샷 댓글 (막음이면 None)
+    views_per_hour: float | None = None  # 지금 속도: 최근 두 스냅샷 사이 시간당 조회 증가
+    prev_views_per_hour: float | None = None  # 그 전 구간(셋째·둘째 스냅샷 사이) 시간당 조회 증가
+    speed_change: float | None = (
+        None  # 지금 속도 − 그 전 속도 (시간당 조회). 그 전 구간이 없으면 None
+    )
+    faster: bool | None = None  # 그 전 구간보다 빨라졌는지 (그 전 구간이 없으면 None)
+
+
+class YouTubeVelocityOutput(AxModel):
+    status: Literal["known", "unknown"]  # unknown = 스냅샷이 2개 미만 등
+    unknown_reason: str | None = None
+    latest_at: UtcDatetime | None = None  # 최근 스냅샷 시각
+    previous_at: UtcDatetime | None = None  # 그 앞 스냅샷 시각 (지금 속도 구간 시작)
+    earlier_at: UtcDatetime | None = None  # 셋째 스냅샷 시각 (그 전 구간 시작, 없으면 None)
+    compared_videos: int = Field(default=0, ge=0)  # 두 스냅샷 모두에 있어 속도를 잰 영상 수
+    missing_views: int = Field(default=0, ge=0)  # 조회수가 빠져 속도를 못 잰 영상 수
+    videos: list[YouTubeVideoVelocity] = Field(default_factory=list)  # 지금 속도 큰 순, 상위 N개
+    summary: str  # 한 문장 (코드가 숫자로 만든 고정 문장)
+
+    @model_validator(mode="after")
+    def _reason_when_unknown(self) -> Self:
+        if self.status == "unknown" and not self.unknown_reason:
+            raise ValueError("unknown이면 unknown_reason이 있어야 한다")
+        return self
+
+
+# --------------------------------------------------------------- content_recommend (영상 소재 추천)
+# trend_scan(회사 기본 키워드) + trend_candidates(YouTube 인기 태그) 판정에서 급상승한 것만 골라
+# 코드 규칙 점수로 순위를 매기고, 소재마다 LLM이 영상 아이디어 문장·형식을 쓴다(숫자 검증).
+# 급상승이 없으면 빈 목록 + 이유다(억지로 채우지 않는다). 콘텐츠 루프 2단계용.
+
+ContentFormat = Literal["숏폼", "롱폼"]
+ContentSource = Literal["naver", "youtube"]  # 검색 급상승, YouTube 인기 태그
+RecommendOrigin = Literal["keyword_group", "youtube_tag", "youtube_title", "trending_search"]
+# 밈 형식 (대표 영상 제목으로 LLM이 목록 안에서만 고름, 목록 밖 답은 기타). unknown = 분류하지 못함
+MemeFormat = Literal["챌린지", "패러디·밈", "리액션", "하이라이트", "정보·리뷰", "기타", "unknown"]
+
+
+class ContentRecommendRequest(AxModel):
+    """content_recommend skill 입력. 비우면 회사 설정(trends.toml `[recommend]`)과 어제 날짜."""
+
+    max_items: int | None = Field(default=None, ge=1, le=10)  # 추천 수 상한. 없으면 회사 설정
+    end_date: dt.date | None = None  # 네이버 판정할 마지막 날 (한국 날짜). 없으면 어제
+
+
+class ContentScore(AxModel):
+    """순위 점수와 그 근거 (점수 = z 가중치 × z + 두 소스면 가산점, 가중치는 회사 설정)."""
+
+    score: float
+    z: float  # 변화 정도 (trend_scan 판정의 강건 z)
+    ratio: float = Field(ge=0)  # 기준선 대비 배수
+    two_sources: bool  # 검색 급상승 + YouTube 인기 태그 근거가 둘 다 있음
+    youtube_videos: int | None = Field(default=None, ge=1)  # YouTube 인기 영상 수 (두 소스일 때)
+
+
+class LinkedProduct(AxModel):
+    """소재와 연결한 회사 실제 상품 하나 (회사 상품 목록에 있는 값 그대로)와 연결 근거."""
+
+    product_id: str
+    name: str
+    category_code: str | None = None
+    category_name: str | None = None
+    # name = 상품 이름 글자 일치, category = 카테고리 이름 일치, embedding = 임베딩 유사도만
+    match: Literal["name", "category", "embedding"]
+    similarity: float | None = None  # 임베딩 코사인 (재지 못했으면 None)
+    reason: str  # 코드가 만든 한 줄 (예: 이름 일치: 파이썬)
+
+
+class ContentRecommendation(AxModel):
+    rank: int = Field(ge=1)
+    keyword: str = Field(
+        min_length=1
+    )  # 소재 이름 (기본 키워드 그룹 이름 또는 YouTube 후보 대표 이름)
+    aliases: list[str] = Field(default_factory=list)  # 같이 본 이름 (네이버 그룹의 다른 키워드)
+    sources: list[ContentSource]
+    score: ContentScore
+    # 회사 관련성 (표시만, 순위에서 빼지 않음): related = 회사 키워드와 겹침, low = 안 겹침
+    company_relevance: Literal["related", "low"]
+    company_match: list[str] = Field(default_factory=list)  # 겹친 회사 키워드
+    idea: str  # 영상 아이디어 1~2문장 (LLM, 숫자 검증. 실패하면 고정 문장)
+    format: ContentFormat  # 형식 제안
+    fallback: bool  # 아이디어 문장을 고정 문장으로 바꿨는지
+    fallback_reason: str | None = None  # llm_unavailable·llm_error·format_error·number_invalid
+    # 소재가 나온 곳 (예전 응답은 없다): keyword_group = 회사 기본 키워드 그룹, 그 밖은 후보 출처
+    origins: list[RecommendOrigin] = Field(default_factory=list)
+    # 아래는 상품 연결 (예전 응답은 없다). 연결할 회사 실제 상품 (최대 N개, 회사 설정)
+    products: list[LinkedProduct] = Field(default_factory=list)
+    # 회사 관련성을 무엇으로 정했는지: products = 상품 연결, manual_keywords = 수동 회사 키워드
+    # (덮어쓰기용), both = 둘 다, none = 둘 다 없음 (low)
+    relevance_from: Literal["products", "manual_keywords", "both", "none"] | None = None
+    # 아래는 밈 형식 (예전 응답은 없다). YouTube 근거 영상이 없거나 분류하지 못하면 unknown + 이유
+    meme_format: MemeFormat | None = None
+    meme_reason: str | None = None
+    meme_titles: int = Field(default=0, ge=0)  # 분류에 쓴 대표 영상 제목 수 (최대 5)
+
+
+class ContentRecommendOutput(AxModel):
+    start_date: dt.date | None = None  # 네이버 요청 기간 (기준선 시작)
+    end_date: dt.date | None = None  # 네이버 판정 마지막 날
+    items: list[ContentRecommendation] = Field(default_factory=list)  # 순위 순
+    empty_reason: str | None = None  # 추천이 없을 때 이유 (예: 이번 기간 급상승한 소재가 없음)
+    naver_calls: int = Field(default=0, ge=0)  # 이번 실행에서 네이버를 실제로 부른 수 (캐시 제외)
+    naver_failed: list[str] = Field(default_factory=list)  # 네이버를 읽지 못한 그룹·후보
+    youtube_status: Literal["known", "unknown"] = "unknown"  # YouTube 후보를 썼는지
+    youtube_reason: str | None = None  # unknown이면 이유 (예: 스냅샷이 오래됨)
+    snapshot_at: UtcDatetime | None = None  # 쓴 YouTube 스냅샷 시각
+    summary: str  # 한 문장 (코드가 숫자로 만든 고정 문장)
+    # 아래는 상품 연결 (예전 응답은 없다): 회사 상품 목록을 읽었는지, 임베딩 유사도를 쟀는지
+    catalog_status: Literal["known", "unknown"] = "unknown"
+    catalog_reason: str | None = None
+    catalog_products: int = Field(default=0, ge=0)  # 읽은 판매 중 상품 수
+    similarity_status: Literal["known", "unknown"] = "unknown"
+    similarity_reason: str | None = None
+
+    @model_validator(mode="after")
+    def _reason_when_empty(self) -> Self:
+        if not self.items and not self.empty_reason:
+            raise ValueError("추천이 없으면 empty_reason이 있어야 한다")
+        if [i.rank for i in self.items] != list(range(1, len(self.items) + 1)):
+            raise ValueError("rank는 1부터 차례로")
         return self
 
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import date, timedelta
 
 import httpx
@@ -54,7 +53,6 @@ def test_month_range_and_parsing() -> None:
     )
     assert fc.parse_dt("어제") is None and fc.parse_dt(None) is None
     assert fc.won(1250000) == "1,250,000원" and fc.won(None) == "확인할 수 없음"
-    assert fc.ratio(1, 3) == 0.3333 and fc.ratio(1, 0) is None
 
 
 def test_config_values() -> None:
@@ -196,13 +194,9 @@ EXECUTION = {
 def _transport(
     seen: list[httpx.Request],
     down: set[str] = frozenset(),  # type: ignore[assignment]
-    claims_reply: dict | None = None,
 ):
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        if request.url.path == "/a2a":  # 고객지원 `list_claims`만 A2A로 읽는다
-            assert json.loads(request.content)["skill"] == "list_claims"
-            return httpx.Response(200, json=claims_reply) if claims_reply else httpx.Response(404)
         assert request.method == "GET", "재무는 원천에 GET만 보낸다"
         if request.url.host in down:
             raise httpx.ConnectError("down")
@@ -223,7 +217,6 @@ def _transport(
                     "created_at": "2026-10-21T00:00:00Z",
                 }
             ],
-            "/api/safety/thresholds": {"version": 1, "rules": []},
             "/api/safety/executions": [EXECUTION],
         }.get(request.url.path)
         if data is None:
@@ -240,8 +233,9 @@ def test_live_books_read_shop_api_and_safety(monkeypatch: pytest.MonkeyPatch) ->
     books = asyncio.run(bk.live_books(_transport(seen)))
     assert (books.source, books.mock) == ("shop-api", False)
     assert [o["order_id"] for o in books.orders] == ["ord_0001"]
-    assert "orders_partial" in books.unavailable and "claims" in books.unavailable
-    assert books.claims is None  # 고객지원이 답하지 않으면 확인할 수 없음
+    assert "orders_partial" in books.unavailable
+    # 재무는 원천에 읽기만 한다. 고객지원 클레임·안전 장치 기준표는 읽지 않는다
+    assert {r.url.path for r in seen}.isdisjoint({"/a2a", "/api/safety/thresholds"})
     assert [i["category_code"] for i in books.orders[0]["items"]] == ["book", "stationery"]
     coupon_call = next(r for r in seen if r.url.path == "/api/shop/coupons")
     assert coupon_call.headers["authorization"] == "Bearer mock:finance"
@@ -255,56 +249,11 @@ def test_live_books_read_shop_api_and_safety(monkeypatch: pytest.MonkeyPatch) ->
     ]
 
 
-def _claims_reply(*claims: dict) -> dict:
-    meta = {
-        "context_id": "ctx_finance_books",
-        "token": "t",
-        "deadline": "2099-01-01T00:00:00Z",
-    }
-    return {"meta": meta, "status": "completed", "output": {"items": list(claims)}}
-
-
-def test_live_books_read_open_claims_from_support(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AX_SHOP_API_URL", "http://shop")
-    monkeypatch.setenv("AX_SAFETY_URL", "http://safety")
-    reply = _claims_reply(
-        {
-            "id": 1,
-            "order_id": "ord_0001",
-            "status": "needs_review",
-            "customer": "이름",
-            "lines": [{"order_item_id": "oit_0001"}],
-        },
-        {"id": 2, "order_id": "ord_0001", "status": "completed", "lines": []},
-    )
-    books = asyncio.run(bk.live_books(_transport([], claims_reply=reply)))
-    assert "claims" not in books.unavailable
-    assert books.claims == [
-        {"claim_id": 1, "order_id": "ord_0001", "seller_id": "sel_0001", "status": "open"}
-    ]
-
-
-def test_open_claims_fall_back_to_every_seller_of_the_order() -> None:
-    orders = [{"order_id": "ord_1", "items": [{"seller_id": "s2"}, {"seller_id": "s1"}]}]
-    rows = bk.open_claims([{"id": 1, "order_id": "ord_1", "status": "approved"}], orders)
-    assert rows is not None and [r["seller_id"] for r in rows] == ["s1", "s2"]
-
-
-def test_open_claim_of_an_unknown_seller_keeps_settlement_on_hold() -> None:
-    """판매자를 모르는 처리 중 클레임이 있으면 확인할 수 없음으로 둔다 (fail-closed)."""
-    assert bk.open_claims([{"id": 1, "order_id": "ord_x", "status": "needs_info"}], []) is None
-    assert bk.open_claims(None, []) is None
-    assert bk.open_claims(["broken"], []) is None
-    # 끝난 클레임은 판매자를 몰라도 정산을 막지 않는다
-    assert bk.open_claims([{"id": 1, "order_id": "ord_x", "status": "rejected"}], []) == []
-
-
 def test_live_books_mark_missing_sources(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AX_SHOP_API_URL", "http://shop")
     monkeypatch.setenv("AX_SAFETY_URL", "http://safety")
     books = asyncio.run(bk.live_books(_transport([], {"safety"})))
-    assert {"thresholds", "executions", "claims"} <= set(books.unavailable)
-    assert books.thresholds is None and books.executions is None
+    assert "executions" in books.unavailable and books.executions is None
     books = asyncio.run(bk.live_books(_transport([], {"shop"})))
     assert {"orders", "products", "sellers", "coupons"} <= set(books.unavailable)
     assert books.orders == [] and books.meta()["unavailable"] == books.unavailable

@@ -86,6 +86,18 @@
       ],
       "verifier": null,
       "priority": "required"
+    },
+    {
+      "id": "receive_release_order",
+      "description": "배포 지시 받기. 기획이 배포 전 기획서 대조(request_release_check)를 통과시키면(ready, 또는 사람 확인 뒤) 보낸다. 개발은 PR이 모두 머지됐는지 보고 지금의 배포 요청 흐름을 탄다. prod·보호 경로는 그대로 사람 승인 대기로 남는다(지시가 승인을 건너뛰지 않는다). 같은 idempotency_key의 두 번째 지시는 duplicate. execute()를 거친다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ReceiveReleaseOrderInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ReceiveReleaseOrderOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "required"
     }
   ]
 }

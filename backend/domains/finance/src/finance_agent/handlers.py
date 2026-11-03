@@ -7,9 +7,10 @@
 
 `verify_amount`·`review_hold`는 재무 재설계(2026-10-23)로, `loss_aggregation`은 2026-10-27에
 없앴다 (재무는 장애 대응 흐름의 단계가 아니다 — 요구사항 DEP-FIN-01, 공통 구성안 결정 22).
-장애 비용은 평상시 장부로 들어가 `closing_report`·`audit_report`에서 드러난다. 금액 다시 계산 규칙은
-`recheck.py`에 남아 사후 감사가 쓴다. 고객사 클레임 건별 확인과 `review_threshold_change`(AI가 기준
-변경을 판단)도 재무 일이 아니라 없앴다. 한도는 제안만 하고(`policy.py`) 사람이 기준표 PR로 바꾼다.
+장애 비용은 평상시 장부로 들어가 `closing_report`에서 드러난다. 고객사 클레임 건별 확인과
+`review_threshold_change`(AI가 기준 변경을 판단)도 재무 일이 아니라 없앴다.
+재무는 쿠폰·환불을 끝난 금액만 장부에 적는다. 결정·확인·검증·감사·이상 탐지·한도·예산·제안·경보는
+재무 일이 아니다(2026-11-02).
 
 - 숫자는 전부 코드로 계산한다. 요청 쪽이 적은 총액·등급은 믿지 않는다.
 - 외부 입력(`request.untrusted`)은 읽지 않는다.
@@ -43,7 +44,6 @@ from finance_agent import books as bk
 from finance_agent import finance_config as fc
 from finance_agent import ledger as lg
 from finance_agent.books import Books, load_books
-from finance_agent.recheck import recompute
 from finance_agent.schemas import (
     AuditReportInput,
     AuditReportOutput,
@@ -54,7 +54,7 @@ from finance_agent.schemas import (
 )
 from finance_agent.sources import Impact, LiveSources, MockSources, Sources, order_key
 
-__all__ = ["HANDLERS", "SUBSCRIBED_EVENTS", "on_event", "recompute", "reset_state", "state"]
+__all__ = ["HANDLERS", "SUBSCRIBED_EVENTS", "on_event", "reset_state", "state"]
 
 
 class Ledger:
@@ -80,11 +80,10 @@ class State:
         self.last_daily_closing: dict[str, Any] | None = None  # 마지막 자동 결산(전날) 결과
         self.records = FinanceRecords()
         self.books_loader: Callable[[], Awaitable[Books]] = load_books  # 테스트에서 바꾼다
-        # 사건별 쿠폰 장부(⑨)의 실행 기록과 기준표. 테스트에서 바꾼다
+        # 사건별 쿠폰 장부(⑨)의 실행 기록. 테스트에서 바꾼다
         self.executions_loader: Callable[[str | None], Awaitable[lg.ExecutionFeed]] = (
             lg.load_executions
         )
-        self.thresholds_loader: Callable[[], Awaitable[dict[str, Any] | None]] = lg.load_thresholds
 
     async def books(self) -> Books:
         return await self.books_loader()
@@ -99,7 +98,8 @@ class FinanceRecords:
         self.recon_note_log: list[dict[str, Any]] = []
         self.batches: dict[str, dict[str, Any]] = {}  # 정산 기간 → 묶음 요청 상태
         self.anomalies: dict[str, dict[str, Any]] = {}  # 의심 건 번호 → 처리 전·후 기록
-        self.policy_acks: dict[str, dict[str, Any]] = {}  # 규칙 키 → 경보 확인 기록
+        # 없앤 예산·한도 경보의 확인 메모. 쓰지 않지만 사람이 쓴 기록이라 저장 파일에 그대로 둔다
+        self.policy_acks: dict[str, dict[str, Any]] = {}
         self.bank_rows: list[dict[str, Any]] = []  # 사람이 올린 은행 입금 내역
         self.team_budgets: dict[str, dict[str, Any]] = {}  # YYYY-MM → 재무 담당이 확정한 팀 예산
 
@@ -221,7 +221,7 @@ def incident_meta(context_id: str) -> dict[str, Any]:
 async def incident_info(context_id: str) -> dict[str, Any]:
     """사건의 장애 구간·부품. 목 모드는 시드, 실제 모드는 총괄 사건 목록(읽기 전용).
 
-    총괄에게 사건 **중**에 묻는 것이 아니다 — 평상시 사후 감사·사건 조회에서만 읽는다
+    총괄에게 사건 **중**에 묻는 것이 아니다 — 평상시 사건 조회에서만 읽는다
     ([협업] #417 제안 A, 요청 #418, 계약 `data_access/orchestrator_incidents.py`).
     못 받으면 모름(None)이고 추정값을 만들지 않는다(fail-closed).
     """
@@ -337,17 +337,13 @@ async def audit_report(request: AgentRequest) -> AgentResult:
     if isinstance(data, AgentResult):
         return data
     books = await state().books()
-
-    async def lookup(ctx: str) -> Impact | None:
-        return await incident_impact(ctx, request.meta)
-
-    report, missing = await audit.audit_report(
-        books, data.days, impact_lookup=lookup, context_id=data.context_id
-    )
+    report, missing = await audit.audit_report(books, data.days, context_id=data.context_id)
     await note_audit(report["findings"], request.meta.tenant_id)
     if data.finding_ref:
         # 알림받은 의심 건 하나: 기간이 지나도 목록에 남은 기록으로 본다
         entry = state().records.anomalies.get(data.finding_ref)
+        if entry and anomalies.is_retired_audit(entry):
+            entry = None  # 없앤 쿠폰·환불 감사가 남긴 처리 기록은 감사 결과로 내지 않는다
         found = [f for f in report["findings"] if anomalies.signature(f) == data.finding_ref]
         report["findings"] = found or ([anomalies.finding_view(entry)] if entry else [])
     output = AuditReportOutput(
@@ -367,7 +363,7 @@ async def audit_report(request: AgentRequest) -> AgentResult:
         TaskStatus.COMPLETED,
         outcome="partial" if output.unavailable else "reported",
         output=output.model_dump(mode="json"),
-        evidence=_evidence([*BOOK_QUERIES, f"audit:{data.days}d"], summary, refs),
+        evidence=_evidence([BOOK_QUERIES[2], f"audit:{data.days}d"], summary, refs),
     )
 
 
@@ -399,7 +395,9 @@ def _with_new_expense(
 
 
 async def record_support_cost(request: AgentRequest) -> AgentResult:
-    """고객지원이 닫은 문의의 처리 결과를 받아 배송비·비용 기록을 확인하고 재무 장부에 남긴다.
+    """고객지원이 끝낸 처리 결과(환불 금액·쿠폰)를 받아 주문 배송비와 함께 재무 장부에 적는다.
+
+    환불 여부를 확인·검증하지 않는다. 받은 금액을 그대로 적는다.
 
     돈을 움직이거나 외부 상태를 바꾸지 않는다(그래서 읽기 등급이다). 경비를 쓰지 않은 문의
     (답변만 한 문의, 환불·쿠폰이 없는 문의)도 상담 처리 결과를 기록으로 남긴다.

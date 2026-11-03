@@ -111,7 +111,7 @@ function HoldBanner({ h, busy, canDecide, orchMock, onDecide }: {
   // (총괄의 POST /api/incidents/{ctx}/holds/{step}은 사람 토큰을 받지만 목 모드에서만 열린다 — DSH-03)
   const orchHold = !h.link;
   const showButtons = orchHold && orchMock;
-  const link = h.link ?? (orchMock ? undefined : "/finance");
+  const link = h.link ?? (orchMock ? undefined : h.decideAt ?? "/finance");
   const outcome = { approved: "사람이 승인 → 다시 진행", rejected: "사람이 거절 → 진행하지 않음", timeout: "기한 안에 결정 없음 → 자동 거절", pending: "" }[h.state];
   return (
     <li className="rounded-2xl bg-ink-900 px-4 py-3 text-app dark:bg-surface-2 dark:text-ink-900 dark:ring-1 dark:ring-amber-700/40">
@@ -124,7 +124,7 @@ function HoldBanner({ h, busy, canDecide, orchMock, onDecide }: {
         {h.state !== "pending" && <span className="chip ml-auto bg-white/15 text-current dark:bg-ink-100">{outcome}</span>}
         {h.state === "pending" && link && (
           <Link href={link} className="btn ml-auto bg-white/15 text-current hover:bg-white/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-700 dark:bg-ink-100">
-            {orchHold ? "안전 관문 보류 큐에서 결정 (/finance) →" : "재무 AI 화면에서 결정 →"}
+            {orchHold ? `안전 관문 보류 큐에서 결정 (${link}) →` : "담당 화면에서 결정 →"}
           </Link>
         )}
         {h.state === "pending" && showButtons && (

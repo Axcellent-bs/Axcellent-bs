@@ -4,8 +4,8 @@
 
 - 규칙 점검은 **테스트 전용 가짜 자료**로 돌린다. 실제 기록(결산 확정, 대사 메모, 정산 묶음,
   환불 누적)에는 아무것도 남기지 않는다. 숫자는 실제 리포트와 같은 코드가 계산한다.
-  점검 대상: 금액 다시 계산(`recheck`, 사후 감사가 씀), ① 결산 공식, ② 대사 상태 분류,
-  ③ 정산 공식, ⑤ 예산 경보, ⑦ 감사 규칙(시드 장부에서 6가지 의심 코드가 모두 잡히는지).
+  점검 대상: ① 결산 공식, ② 대사 상태 분류, ③ 정산 공식, ⑦ 감사 규칙(보류·거절 추이,
+  쿠폰·환불은 세지 않음).
 - 연결 점검은 실제 주소(`agent_url`)에 `GET`만 보낸다. 상태를 바꾸지 않는다.
 - 결과 수준: `fail`(계산이 틀리거나 안전 장치가 끊김 → 바로 확인 필요), `warn`(원천 데이터에 닿지
   않음 → 리포트 일부가 "확인할 수 없음"이 될 수 있음).
@@ -21,27 +21,15 @@ from typing import Any, Literal
 import httpx
 
 from ax_agent_template.config import agent_url
-from ax_contracts.schemas import RequestMeta, VerifyAmountInput
 from finance_agent import finance_config as fc
 from finance_agent.audit import audit_report
-from finance_agent.books import Books, seed_books
+from finance_agent.books import Books
 from finance_agent.closing import compute_totals
-from finance_agent.policy import _alert
 from finance_agent.reconciliation import classify
 from finance_agent.settlement import statements
-from finance_agent.sources import MockSources
 
-CTX = "ctx_selftest"
 CALL_SECONDS = 3.0
 SELF_TEST_TTL_HOURS = 12  # 마지막 결과를 보여 주는 시간. 지나면 기록을 지우고 다시 테스트하게 한다
-AUDIT_CODES = {
-    "split_under_limit",
-    "repeat_refund",
-    "duplicate_coupon",
-    "refund_rate_jump",
-    "amount_recheck_failed",
-    "gate_hold_trend",
-}
 
 
 def is_fresh(result: dict[str, Any], now: datetime | None = None) -> bool:
@@ -52,22 +40,6 @@ def is_fresh(result: dict[str, Any], now: datetime | None = None) -> bool:
         return False
     return (now or datetime.now(UTC)) - ran_at < timedelta(hours=SELF_TEST_TTL_HOURS)
 
-
-# 테스트 전용 가짜 자료: 장애 피해 고객 2명(피해 100,000원), 결제 30,000원 주문 하나
-SELFTEST_SOURCES = MockSources(
-    {
-        "impacts": {
-            CTX: {
-                "failed_order_count": 2,
-                "affected_customer_count": 2,
-                "damage_amount": 100000,
-                "affected_customer_ids": ["test_buyer_1", "test_buyer_2"],
-            }
-        },
-        "payments": {"test_order_1": 30000},
-    }
-)
-EMPTY_SOURCES = MockSources({"impacts": {}, "payments": {}})
 
 Level = Literal["fail", "warn"]
 
@@ -81,35 +53,6 @@ class Check:
 
     def as_dict(self) -> dict[str, Any]:
         return {"name": self.name, "ok": self.ok, "detail": self.detail, "level": self.level}
-
-
-def _meta() -> RequestMeta:
-    return RequestMeta(
-        context_id=CTX,
-        token="selftest",
-        deadline=datetime.now(UTC) + timedelta(seconds=10),
-    )
-
-
-def _verify_input(action: str, params: dict[str, Any], computed: int | None) -> VerifyAmountInput:
-    return VerifyAmountInput(
-        execution_id="exe_selftest",
-        action=action,
-        requester="selftest",
-        params=params,
-        computed_amount=computed,
-        threshold_version=1,
-    )
-
-
-def _coupon(buyer: str, count: int, unit: int, total: int | None = None) -> dict[str, Any]:
-    return {
-        "purpose_code": "compensation",
-        "buyer_id": buyer,
-        "count": count,
-        "unit_value": unit,
-        "total_value": count * unit if total is None else total,
-    }
 
 
 def _tiny_books() -> Books:
@@ -153,7 +96,6 @@ def _tiny_books() -> Books:
         orders=[order],
         sellers=[{"seller_id": "sel_t", "name": "점검 판매자"}],
         refunds=[refund],
-        claims=[],
         executions=[],
         mock=True,
         source="seed",
@@ -166,73 +108,6 @@ async def _guard(name: str, run: Any, checks: list[Check]) -> None:
         checks.append(Check(name, ok, detail))
     except Exception as exc:  # 점검 자체가 깨져도 결과로 보여 준다
         checks.append(Check(name, False, f"점검 중 오류: {type(exc).__name__}"))
-
-
-async def _recompute_checks(recompute: Any) -> list[Check]:
-    """금액 다시 계산 규칙. 사후 감사(`amount_recheck_failed`)가 이 코드를 쓴다."""
-    meta = _meta()
-    cases = [
-        (
-            "쿠폰 금액 다시 계산",
-            "issue_coupon",
-            _coupon("test_buyer_1", 2, 5000),
-            10000,
-            SELFTEST_SOURCES,
-            ("approved", "recomputed_match"),
-            "2장 × 5,000원 = 10,000원을 맞다고 봄",
-        ),
-        (
-            "금액을 틀리게 적은 쿠폰 막기",
-            "issue_coupon",
-            _coupon("test_buyer_1", 3, 5000, 5000),
-            15000,
-            SELFTEST_SOURCES,
-            ("rejected", "amount_mismatch"),
-            "15,000원인데 5,000원이라 적은 기록을 잡아냄",
-        ),
-        (
-            "피해 고객이 아닌 사람 막기",
-            "issue_coupon",
-            _coupon("someone_else", 1, 5000),
-            5000,
-            SELFTEST_SOURCES,
-            ("rejected", "not_affected"),
-            "피해 고객 목록에 없는 사람의 보상을 잡아냄",
-        ),
-        (
-            "결제보다 큰 환불 막기",
-            "refund_request",
-            {"order_id": "test_order_1", "refund_amount": 40000},
-            40000,
-            SELFTEST_SOURCES,
-            ("rejected", "exceeds_paid"),
-            "결제 30,000원 주문에 40,000원 환불을 잡아냄",
-        ),
-        (
-            "자료가 없으면 통과시키지 않기",
-            "issue_coupon",
-            _coupon("test_buyer_1", 1, 5000),
-            5000,
-            EMPTY_SOURCES,
-            ("rejected", "source_unavailable"),
-            "피해 자료가 없을 때 맞다고 보지 않음",
-        ),
-    ]
-    checks: list[Check] = []
-    for name, action, params, computed, sources, expected, good in cases:
-        try:
-            out = await recompute(meta, _verify_input(action, params, computed), sources, {})
-            got = (out.decision, out.reason_code)
-            checks.append(
-                Check(
-                    name,
-                    got == expected,
-                    good if got == expected else f"예상 {expected}, 실제 {got}",
-                )
-            )
-        except Exception as exc:
-            checks.append(Check(name, False, f"점검 중 오류: {type(exc).__name__}"))
-    return checks
 
 
 async def _module_checks() -> list[Check]:
@@ -285,36 +160,34 @@ async def _module_checks() -> list[Check]:
             else f"실제 {row['gross']}/{row['commission']}/{row['refunds']}/{row['payout']}"
         )
 
-    async def budget_alerts() -> tuple[bool, str]:
-        got = (_alert(0.2), _alert(0.85), _alert(1.0), _alert(0.2, True))
-        expected = ("ok", "warn", "over", "warn")
-        return got == expected, (
-            "소진율 80% 이상·월말 예상 초과는 주의, 100% 이상은 초과"
-            if got == expected
-            else f"예상 {expected}, 실제 {got}"
-        )
-
     async def audit_rules() -> tuple[bool, str]:
-        report, _ = await audit_report(seed_books(), 7)
-        found = {f["code"] for f in report["findings"]}
-        missing = sorted(AUDIT_CODES - found)
-        return not missing, (
-            "쪼개기·반복 환불·중복 쿠폰·환불률 급변·재계산 실패·안전 장치 보류 추이를 모두 잡음"
-            if not missing
-            else f"못 잡은 규칙: {', '.join(missing)}"
-        )
+        def held(action: str, n: int) -> dict[str, Any]:
+            return {
+                "execution_id": f"exe_selftest_{action}_{n}",
+                "created_at": fc.now(),
+                "action": action,
+                "status": "held",
+            }
 
-    async def policy_file() -> tuple[bool, str]:
-        step = fc.load_config().proposal.max_step_ratio
-        return 0 < step <= 1, f"한도 제안은 한 번에 {round(step * 100)}% 안에서만 바꿈"
+        other = Books(executions=[held("confirm_settlement", n) for n in range(3)])
+        money = Books(
+            executions=[held(a, n) for a in ("issue_coupon", "refund_request") for n in range(3)]
+        )
+        report, _ = await audit_report(other, 7)
+        quiet, _ = await audit_report(money, 7)
+        found = [f["code"] for f in report["findings"]]
+        ok = found == ["gate_hold_trend"] and not quiet["findings"]
+        return ok, (
+            "안전 장치 보류 추이를 잡고 쿠폰·환불은 세지 않음"
+            if ok
+            else "안전 장치 보류 추이 규칙이 기대와 다름"
+        )
 
     for name, run in (
         ("결산 계산 공식", closing_formula),
         ("대사 상태 나누기", recon_classes),
         ("판매자 정산 공식", settlement_formula),
-        ("예산 경보 기준", budget_alerts),
         ("사후 감사 규칙", audit_rules),
-        ("한도 제안 설정 읽기", policy_file),
     ):
         await _guard(name, run, checks)
     return checks
@@ -351,37 +224,20 @@ async def _connection_checks(client: httpx.AsyncClient) -> list[Check]:
         if status == 200
         else {}
     )
-    rules_only = all(
-        a in actions and actions[a].get("verifier") != "finance"
-        for a in ("issue_coupon", "refund_request")
-    )
     settle_c = actions.get("confirm_settlement", {}).get("base_grade") == "C"
     checks.append(
         Check(
-            "쿠폰·환불은 규칙 검사, 정산 확정은 사람 승인",
-            rules_only and settle_c,
-            "안전 장치가 쿠폰·환불을 코드 규칙으로 검사하고 정산 확정은 사람 승인(C)으로 보냄"
-            if rules_only and settle_c
-            else "안전 장치 설정이 재무 재설계와 다름 (쿠폰·환불 검증자 또는 정산 확정 등급)",
-        )
-    )
-
-    status, body = await _get_json(client, f"{safety}/api/safety/thresholds")
-    rules = (body or {}).get("data", {}).get("rules") if status == 200 else None
-    checks.append(
-        Check(
-            "기준표 읽기",
-            isinstance(rules, list),
-            "안전 장치 기준표를 읽음(예산·한도 화면)"
-            if isinstance(rules, list)
-            else "기준표를 못 읽어 한도 정책이 '확인할 수 없음'으로 보입니다",
-            level="warn",
+            "정산 확정은 사람 승인",
+            settle_c,
+            "안전 장치가 정산 확정을 사람 승인(C)으로 보냄"
+            if settle_c
+            else "안전 장치 설정이 재무 재설계와 다름 (정산 확정 등급)",
         )
     )
 
     for name, target, why in (
         ("쇼핑몰 연결", "shop-api", "주문·결제를 못 받아 결산·대사·정산이 비어 보일 수 있습니다"),
-        ("데이터 AI 연결", "data", "장애 손실 리포트에 필요한 영향 분석을 못 받습니다"),
+        ("데이터 AI 연결", "data", "사건 화면의 피해 숫자에 쓰는 영향 분석을 못 받습니다"),
     ):
         status, _ = await _get_json(client, f"{agent_url(target)}/health")
         checks.append(
@@ -395,12 +251,9 @@ async def _connection_checks(client: httpx.AsyncClient) -> list[Check]:
     return checks
 
 
-async def run_self_test(
-    recompute: Any, http_client: httpx.AsyncClient | None = None
-) -> dict[str, Any]:
+async def run_self_test(http_client: httpx.AsyncClient | None = None) -> dict[str, Any]:
     started = time.perf_counter()
-    checks = await _recompute_checks(recompute)
-    checks += await _module_checks()
+    checks = await _module_checks()
     client = http_client or httpx.AsyncClient()
     try:
         checks += await _connection_checks(client)

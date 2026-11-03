@@ -15,11 +15,11 @@ from finance_agent.sources import MockSources
 
 HUMAN = {"Authorization": "Bearer human:taeyoon"}
 FINDING = {
-    "code": "repeat_refund",
+    "code": "gate_hold_trend",
     "severity": "medium",
-    "title": "같은 고객 반복 환불",
-    "detail": "buy_0008의 주문 3건 환불",
-    "refs": ["ord_1", "ord_2"],
+    "title": "안전 장치 보류·거절 증가",
+    "detail": "최근 7일 안전 장치 보류 3건·거절 0건 (지난 7일 0건)",
+    "refs": ["exe_1", "exe_2", "exe_3"],
 }
 
 
@@ -139,3 +139,25 @@ def test_skill_reads_an_announced_finding_after_the_audit_window(published) -> N
     assert result["output"]["findings"] == [
         anomalies.finding_view(_store()[anomalies.signature(FINDING)])
     ]
+
+
+def test_skill_does_not_return_a_resolved_coupon_finding(published) -> None:
+    """예전 쿠폰 의심 건은 처리 메모와 함께 목록에 남지만 감사 결과로 내지 않는다."""
+    old = {"code": "duplicate_coupon", "severity": "medium", "title": "쿠폰 2번", "refs": ["cpn_1"]}
+    anomalies.note_findings(_store(), [old])
+    ref = anomalies.signature(old)
+    anomalies.resolve(_store(), ref, "태윤", "담당 팀 확인")
+    body = {
+        "meta": {
+            "context_id": "ctx_fin_1",
+            "token": "mock:orchestrator",
+            "path": [],
+            "deadline": (datetime.now(UTC) + timedelta(seconds=30)).isoformat(),
+        },
+        "skill": "audit_report",
+        "input": {"days": 7, "finding_ref": ref},
+        "untrusted": {},
+    }
+    result = TestClient(app).post("/a2a", json=body).json()
+    assert result["status"] == "completed" and result["output"]["findings"] == []
+    assert anomalies.listing(_store())["resolved"][0]["note"] == "담당 팀 확인"

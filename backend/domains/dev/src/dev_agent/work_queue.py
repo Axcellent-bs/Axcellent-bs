@@ -1,7 +1,7 @@
-"""구독형 일감 대기열: 개발자 본인 Claude(본인 PC·본인 구독)가 MCP로 코딩 작업을 가져간다.
+"""구독형 작업 대기열: 개발자 본인 Claude(본인 PC·본인 구독)가 MCP로 코딩 작업을 가져간다.
 
 서버 코딩 에이전트(coder.py, API 키) 대신 개발자의 Claude Code가 코딩하고 PR을 올린다.
-코딩 토큰은 개발자 구독에서 나가고, 이 서버는 일감·진행·PR 번호만 기록한다.
+코딩 토큰은 개발자 구독에서 나가고, 이 서버는 작업·진행·PR 번호만 기록한다.
 
 흐름 (작업 `coding.mode == "subscription"`만):
 1. `create_dev_task(mode="subscription")` → `queued` (서버 에이전트를 띄우지 않는다).

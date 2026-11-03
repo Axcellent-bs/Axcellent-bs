@@ -5,7 +5,7 @@ import { Chip, TONE } from "./bits";
 // "지금 사람이 할 일" 한 줄. 보기만 하지 않고 그 자리에서 사람이 결정한다.
 // - 결산 확정: 숫자를 보고 확정 (돈은 움직이지 않음)
 // - 판매자 정산: 지급 승인 요청 → 안전 장치 보류 큐에서 승인 (요청과 승인을 한 사람이 바로 끝내지 않는다)
-// - 대사 불일치·감사 의심·한도 경보: 건마다 확인 결과(메모)를 남기면 할 일에서 빠진다
+// - 대사 불일치·감사 의심: 건마다 확인 결과(메모)를 남기면 할 일에서 빠진다
 // 결정 기록은 재무 AI 서버에 남는다(누가·언제·메모). 예시 데이터 모드에서는 화면 안에서만 바뀐다.
 
 const KIND: Record<FinanceTodo["kind"], { label: string; tone: string }> = {
@@ -14,7 +14,6 @@ const KIND: Record<FinanceTodo["kind"], { label: string; tone: string }> = {
   closing_confirm: { label: "결산", tone: TONE.info },
   recon_exception: { label: "대사", tone: TONE.bad },
   audit_finding: { label: "감사", tone: TONE.warn },
-  policy_alert: { label: "한도", tone: TONE.warn },
   team_budget: { label: "팀 예산", tone: TONE.info },
 };
 
@@ -28,15 +27,9 @@ const ITEM_ACTION = {
   },
   anomaly_resolve: {
     button: "처리 완료",
-    placeholder: "예: 고객에게 확인, 정상 환불",
+    placeholder: "예: 담당 팀에 확인, 정상 처리",
     hint: "조사한 결론을 적고 처리 완료를 누르면 목록에서 빠집니다. 돈을 돌려받거나 고객을 막지는 않습니다.",
     send: (ref: string, note: string) => finance.resolveAnomaly(ref, note),
-  },
-  policy_ack: {
-    button: "확인함",
-    placeholder: "예: 이번 달 캠페인 때문, 다음 달 예산 늘림 요청",
-    hint: "확인한 내용을 적으면 이번 달에는 다시 묻지 않습니다(경보가 더 세지면 다시 보입니다). 한도를 바꾸려면 기준표 변경을 요청하세요.",
-    send: (ref: string, note: string) => finance.ackPolicy(ref, note),
   },
 } as const;
 type ItemActionType = keyof typeof ITEM_ACTION;

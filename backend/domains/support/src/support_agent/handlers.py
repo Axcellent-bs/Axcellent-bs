@@ -759,7 +759,22 @@ async def request_compensation(request: AgentRequest) -> AgentResult:
     parsed = _parse(request, RequestCompensationInput)
     if not isinstance(parsed, AgentResult):
         _log_compensation(parsed, result)
+        # 문의를 이미 닫았다면 재무가 쿠폰 없음으로 남기지 않게 쿠폰 ID를 채워 한 번 더 알린다
+        coupon_id = _issued_coupon_id(result)
+        if coupon_id is not None:
+            await events.emit_coupon_issued(request, STORE.get(parsed.inquiry_id), coupon_id)
     return result
+
+
+def _issued_coupon_id(result: AgentResult) -> str | None:
+    """마케팅이 쿠폰을 지급(완료)한 결과에서 쿠폰 ID를 꺼낸다. 보류·거절이면 None."""
+    out = result.output
+    if result.status != TaskStatus.COMPLETED or not out.get("eligible"):
+        return None
+    if out.get("marketing_status") != TaskStatus.COMPLETED.value:
+        return None
+    coupon_id = (out.get("marketing_output") or {}).get("coupon_id")
+    return coupon_id if isinstance(coupon_id, str) and coupon_id.startswith("cpn_") else None
 
 
 def _log_compensation(parsed: RequestCompensationInput, result: AgentResult) -> None:
@@ -777,6 +792,9 @@ def _log_compensation(parsed: RequestCompensationInput, result: AgentResult) -> 
             total_value=out.get("total_value"),
             marketing_status=out.get("marketing_status"),
         )
+        coupon_id = _issued_coupon_id(result)
+        if coupon_id is not None:
+            data["coupon_id"] = coupon_id  # 문의와 쿠폰을 잇는 정보 (닫을 때 이벤트에 싣는다)
     else:
         title = "보상 요청이 끝나지 않아 보류했어요"
     conversation = STORE.get(parsed.inquiry_id)
@@ -836,8 +854,8 @@ async def _unverified_payment_failure(
 ) -> AgentResult | None:
     """결제 장애 보상은 그 고객의 주문에 결제 서버 문제로 실패한 기록이 있을 때만 요청한다.
 
-    재무 감사(`compensation_outside_impact`)가 영향 고객 밖의 보상을 잡으므로, 사유 코드만 믿지
-    않고 본인 주문의 결제 기록으로 확인한다. 확인이 되면 None, 안 되면 돌려줄 결과다.
+    영향 고객 밖 보상 점검은 고객지원 몫이다. 사유 코드만 믿지 않고 본인 주문의 결제 기록으로
+    확인한다. 확인이 되면 None, 안 되면 돌려줄 결과다.
     기록을 읽지 못한 일시 장애는 `shop_unavailable`로 알리고 저장하지 않아 다시 요청할 수 있다.
     """
 

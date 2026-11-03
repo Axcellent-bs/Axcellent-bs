@@ -83,19 +83,7 @@ def books(**kw: Any) -> Books:
             {"seller_id": "sel_a", "name": "가게A"},
             {"seller_id": "sel_b", "name": "가게B"},
         ],
-        "claims": [],
         "executions": [],
-        "thresholds": {
-            "rules": [
-                {"key": "coupon_unit", "action": "issue_coupon", "metric": "unit", "value": 20000},
-                {
-                    "key": "refund_single",
-                    "action": "refund_request",
-                    "metric": "amount",
-                    "value": 100000,
-                },
-            ]
-        },
         "mock": True,
         "source": "seed",
     }

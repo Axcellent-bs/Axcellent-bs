@@ -47,6 +47,14 @@ class Wire:
             await self.dev.start_dev(
                 context_id=ctx, requester="planning", idempotency_key=key, **body
             )
+        elif skill == "request_release_check":  # dev → planning 배포 전 대조
+            await self.planning.request_release_check(
+                context_id=ctx, requester="dev", inp=payload, idempotency_key=key
+            )
+        elif skill == "receive_release_order":  # planning → dev 배포 지시
+            await self.dev.receive_release_order(
+                context_id=ctx, requester="planning", inp=payload, idempotency_key=key
+            )
         else:
             await self.planning.receive_dev_result(
                 context_id=ctx, requester="dev", idempotency_key=key, **body

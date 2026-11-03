@@ -259,6 +259,34 @@ def test_change_proposals_call_support_read_only(fake: Fake) -> None:
     assert [s.skill for s in fake.sent] == ["propose_change_requests"]  # 보내는 skill은 안 부른다
 
 
+def test_incident_compensation_in_mock_mode(mock_client: TestClient) -> None:
+    body = mock_client.get(BASE + "/incident-compensation").json()["data"]
+    assert body["incidents"][0]["issued_buyers"] == 2
+    picked = mock_client.get(BASE + "/incident-compensation", params={"incident_id": "ctx_inc_7"})
+    assert picked.json()["data"]["incidents"][0]["context_id"] == "ctx_inc_7"
+
+
+def test_incident_compensation_calls_support_read_only(fake: Fake) -> None:
+    fake.outputs["list_incident_compensation"] = {"incidents": [], "notes": []}
+    client = TestClient(app)
+    assert client.get(BASE + "/incident-compensation").json()["data"] == {
+        "incidents": [],
+        "notes": [],
+    }
+    client.get(BASE + "/incident-compensation", params={"incident_id": "ctx_inc_0001"})
+    assert [s.skill for s in fake.sent] == [
+        "list_incident_compensation"
+    ] * 2  # 요청하는 skill은 안 부른다
+    assert fake.sent[0].input == {} and fake.sent[1].input == {
+        "incident_context_id": "ctx_inc_0001"
+    }
+
+
+def test_incident_compensation_rejects_a_non_incident_id(fake: Fake) -> None:
+    res = TestClient(app).get(BASE + "/incident-compensation", params={"incident_id": "ctx_req_1"})
+    assert res.status_code == 422 and fake.sent == []
+
+
 def test_surge_and_change_requests_call_support(fake: Fake) -> None:
     fake.outputs["detect_inquiry_surge"] = {"surges": [], "total_in_window": 0}
     fake.outputs["list_change_requests"] = {"items": [{"inquiry_id": 3}]}

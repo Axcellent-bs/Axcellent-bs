@@ -36,6 +36,9 @@ def test_reject_takes_spec_off_queue_and_records(service) -> None:
     assert dec.spec == sp.id and dec.text == f"[기각한 안] {sp.title}"
     assert dec.reason == "범위가 너무 넓음" and res.output["decision_id"] == dec.id
     assert any(a.point == "reject_spec" for a in service.state.activity)
+    # 요청도 기각으로 닫는다
+    req = next(r for r in service.state.requests if r.id == sp.request)
+    assert req.state == "기각"
 
 
 def test_reject_needs_reason(service) -> None:

@@ -18,6 +18,7 @@ from hr_agent.case_memory import service as case_memory
 from hr_agent.clients.errors import UpstreamError, bind_meta
 from hr_agent.fraud_similar import service as fraud_similar
 from hr_agent.handover import service as handover
+from hr_agent.org import headcount as org_headcount
 from hr_agent.planning_check import service as planning_check
 from hr_agent.results import failed
 from hr_agent.roster import service as roster
@@ -43,6 +44,10 @@ async def answer_handover_question(request: AgentRequest) -> AgentResult:
 
 async def confirm_handover(request: AgentRequest) -> AgentResult:
     return await handover.confirm_handover(get_services(), request)
+
+
+async def team_headcount(request: AgentRequest) -> AgentResult:
+    return await org_headcount.team_headcount(get_services(), request)
 
 
 async def check_plan(request: AgentRequest) -> AgentResult:
@@ -93,6 +98,7 @@ _HANDLERS = {
     "restore_merged_card": _with_services(merge.restore_merged_card),
     "record_case": record_case,
     "get_roster": get_roster,
+    "team_headcount": team_headcount,
     "start_handover": start_handover,
     "answer_handover_question": answer_handover_question,
     "confirm_handover": confirm_handover,

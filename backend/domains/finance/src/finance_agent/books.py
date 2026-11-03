@@ -1,9 +1,9 @@
-"""재무 장부 자료 모으기: 주문·결제·환불·쿠폰·판매자·클레임·관문 기록·기준표 + 목 PG 정산.
+"""재무 장부 자료 모으기: 주문·결제·환불·쿠폰·판매자·관문 기록 + 목 PG 정산.
 
 - 목 모드(`FINANCE_MOCK=1` 또는 `AGENT_TEMPLATE_MOCK=1`): 패키지 시드 `finance_books_seed.json`.
   시드의 날짜는 오늘(UTC) 기준 오프셋(`day`)이라 언제 띄워도 최근 2주치가 보인다. 금액은 고정이다.
 - 실제 모드: shop-api `GET /api/shop/orders`·`/products`·`/sellers`·`/coupons`(재무 토큰),
-  safety `GET /api/safety/thresholds`·`/api/safety/executions`. 판매 사이트 DB에는 붙지 않는다.
+  safety `GET /api/safety/executions`. 판매 사이트 DB에는 붙지 않는다.
 - 못 받은 자료는 비워 두고 `unavailable`에 이름을 적는다. 추정값을 만들지 않는다(fail-closed).
 - 실제 모드 장부는 `LIVE_CACHE_SECONDS`초 동안 다시 쓴다. 주문 전체를 매번 읽으면 동시에 여러 번
   부를 때 줄을 서서, 같은 때 들어온 요청은 한 번 모은 결과를 같이 쓴다. 못 받은 자료가 있는
@@ -20,15 +20,13 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from importlib import resources
 from typing import Any
 
 import httpx
 
-from ax_agent_template import call_agent
 from ax_agent_template.config import agent_token, agent_url, is_mock
-from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
 from finance_agent import finance_config as fc
 
 CALL_SECONDS = 5.0
@@ -44,9 +42,7 @@ class Books:
     sellers: list[dict[str, Any]] = field(default_factory=list)
     refunds: list[dict[str, Any]] = field(default_factory=list)
     coupons: list[dict[str, Any]] = field(default_factory=list)
-    claims: list[dict[str, Any]] | None = None
     executions: list[dict[str, Any]] | None = None
-    thresholds: dict[str, Any] | None = None
     pg_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
     source: str = "seed"
     mock: bool = True
@@ -72,13 +68,6 @@ class Books:
                 if p.get("status") == "succeeded" and isinstance(p.get("amount"), int):
                     rows.append(p | {"order": o})
         return rows
-
-    def paid_by_order(self) -> dict[str, int]:
-        out: dict[str, int] = {}
-        for p in self.payments():
-            oid = p["order"]["order_id"]
-            out[oid] = out.get(oid, 0) + p["amount"]
-        return out
 
     def unavailable_core(self) -> bool:
         """주문·쿠폰처럼 숫자를 내는 데 꼭 필요한 자료를 못 받았는가."""
@@ -176,12 +165,6 @@ def seed_books(today: date | None = None, seed: dict[str, Any] | None = None) ->
         row["created_at"] = _at(today, c["day"], c["time"])
         coupons.append(row)
 
-    claims = []
-    for c in seed.get("claims", []):
-        row = {k: v for k, v in c.items() if k != "day"}
-        row["created_at"] = _at(today, c["day"], "12:00")
-        claims.append(row)
-
     executions = []
     for e in seed.get("executions", []):
         executions.append(
@@ -207,9 +190,7 @@ def seed_books(today: date | None = None, seed: dict[str, Any] | None = None) ->
         sellers=list(seed.get("sellers", [])),
         refunds=refunds,
         coupons=coupons,
-        claims=claims,
         executions=executions,
-        thresholds=seed.get("thresholds"),
         pg_overrides=dict(seed.get("pg_overrides", {})),
         source="seed",
         mock=True,
@@ -348,62 +329,6 @@ def normalize_execution(raw: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-# 고객지원 클레임 중 끝난 상태. 나머지는 처리 중이라 판매자 정산을 보류한다
-CLAIM_DONE = ("completed", "rejected")
-CLAIMS_CALL_SECONDS = 5.0
-
-
-async def _support_claims(client: httpx.AsyncClient) -> list[Any] | None:
-    """고객지원 `list_claims` (읽기). 응답이 없거나 형식이 다르면 None."""
-    meta = RequestMeta(
-        context_id="ctx_finance_books",
-        token="finance-books",
-        deadline=datetime.now(UTC) + timedelta(seconds=CLAIMS_CALL_SECONDS),
-    )
-    request = AgentRequest(meta=meta, skill="list_claims", input={})
-    try:
-        result = await call_agent("support", request, http_client=client)
-    except RuntimeError:  # 에이전트 토큰이 없다
-        return None
-    items = result.output.get("items") if result.status == TaskStatus.COMPLETED else None
-    return items if isinstance(items, list) else None
-
-
-def open_claims(
-    items: list[Any] | None, orders: list[dict[str, Any]]
-) -> list[dict[str, Any]] | None:
-    """처리 중 클레임 → 판매자별 행. 주문·상태·판매자만 남긴다 (고객 정보는 받아 두지 않는다).
-
-    클레임 품목의 판매자에게 붙이고, 품목을 못 맞추면 그 주문의 판매자 전부에게 붙인다.
-    판매자를 알 수 없는 처리 중 클레임이 있으면 None: 정산을 풀어 주지 않는다(fail-closed).
-    """
-    if items is None:
-        return None
-    by_order = {o["order_id"]: o for o in orders}
-    rows: list[dict[str, Any]] = []
-    for claim in items:
-        if not isinstance(claim, dict) or not isinstance(claim.get("status"), str):
-            return None
-        if claim["status"] in CLAIM_DONE:
-            continue
-        order_items = (by_order.get(claim.get("order_id")) or {}).get("items") or []
-        claimed = {line.get("order_item_id") for line in claim.get("lines") or []}
-        matched = [i for i in order_items if i.get("order_item_id") in claimed] or order_items
-        sellers = {i.get("seller_id") for i in matched}
-        if not sellers or None in sellers:
-            return None
-        rows.extend(
-            {
-                "claim_id": claim.get("id"),
-                "order_id": claim.get("order_id"),
-                "seller_id": seller,
-                "status": "open",
-            }
-            for seller in sorted(sellers)
-        )
-    return rows
-
-
 async def live_books(http_client: httpx.AsyncClient | None = None) -> Books:
     client = http_client or httpx.AsyncClient()
     unavailable: list[str] = []
@@ -417,9 +342,7 @@ async def live_books(http_client: httpx.AsyncClient | None = None) -> Books:
         except RuntimeError:
             headers = {}
         coupons_raw = await _get(client, f"{shop}/api/shop/coupons", headers) if headers else None
-        thresholds = await _get(client, f"{safety}/api/safety/thresholds")
         executions_raw = await _get(client, f"{safety}/api/safety/executions")
-        claims_raw = await _support_claims(client)
     finally:
         if http_client is None:
             await client.aclose()
@@ -465,21 +388,12 @@ async def live_books(http_client: httpx.AsyncClient | None = None) -> Books:
         executions = [e for e in map(_norm_exec, executions_raw) if e is not None]
     else:
         unavailable.append("executions")
-    if not isinstance(thresholds, dict):
-        thresholds = None
-        unavailable.append("thresholds")
-    # 처리 중 클레임은 고객지원 `list_claims`로 안다. 못 받으면 확인할 수 없음으로 둔다
-    claims = open_claims(claims_raw, orders)
-    if claims is None:
-        unavailable.append("claims")
     return Books(
         orders=orders,
         sellers=sellers if isinstance(sellers, list) else [],
         refunds=refunds_from_orders(orders),
         coupons=coupons,
-        claims=claims,
         executions=executions,
-        thresholds=thresholds,
         source="shop-api",
         mock=False,
         collected_at=fc.now(),

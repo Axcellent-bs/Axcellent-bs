@@ -39,7 +39,6 @@ PATHS = [
     "/api/finance/statements?period=year",
     "/api/finance/reconciliation",
     "/api/finance/settlements",
-    "/api/finance/policy",
     "/api/finance/settlements/deadlines",
     "/api/finance/payables",
     "/api/finance/variance",

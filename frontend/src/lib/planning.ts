@@ -187,6 +187,28 @@ export const planningApi = (base: string) => ({
   eventsUrl: () => `${base}/api/planning/events`,
 })
 
+// ---- 배포 전 기획서 대조 (planning `/api/planning/release-checks`). SSE 상태와 따로 읽는다
+export interface ReleaseCheckItem { para_id: string; status: 'covered' | 'missing_task' | 'not_merged' | 'incident_open'; pr_numbers: number[]; content: 'match' | 'mismatch' | 'none'; content_notes: string[] }
+export interface ReleaseCheck {
+  check_id: string; spec_id: string; request_id: string; env: 'dev' | 'prod'; at: string
+  verdict: 'ready' | 'hold' | 'needs_human'; hold_reasons: string[]; items: ReleaseCheckItem[]
+  pr_numbers: number[]; order_sent: boolean; order_result: string | null
+}
+/** 기획서 하나의 배포 전 대조 기록 (최근 순). 10초마다 다시 읽는다. 서버가 꺼져 있으면 빈 목록 */
+export function useReleaseChecks(spec: string): ReleaseCheck[] {
+  const [rows, setRows] = useState<ReleaseCheck[]>([])
+  useEffect(() => {
+    let alive = true
+    const load = () => call<ReleaseCheck[]>(PLANNING_API, '/release-checks')
+      .then((all) => { if (alive) setRows(all.filter((x) => x.spec_id === spec)) })
+      .catch(() => { if (alive) setRows([]) })
+    void load()
+    const t = setInterval(load, 10_000)
+    return () => { alive = false; clearInterval(t) }
+  }, [spec])
+  return rows
+}
+
 // ---- 배포 기록·배포 후 확인 (dev 서비스 `/api/planning/deployments`). SSE 상태와 따로 읽는다
 export interface RollbackSuggestion { suspect_count: number; low_confidence: number; irreversible_count: number; prior_rollbacks: number; grade: 'B' | 'C'; rules: string[] }
 export interface DeployCheck { deployment: string; at: string; window_minutes: number; verdict: 'ok' | 'watch' | 'suspect'; evidence: string[]; candidate_prs: string[]; rollback: RollbackSuggestion | null }
@@ -238,10 +260,28 @@ export interface CodingSettings {
   mode: CodingSetting // 회사 설정
   resolved: 'agent' | 'subscription' // 지금 넘겨받는 요청 작업을 실제로 누가 코딩하나
   why: string
-  agents_connected: string[] // 최근 본인 Claude(MCP)로 일감을 본 개발자
+  agents_connected: string[] // 최근 본인 Claude(MCP)로 작업을 본 개발자
   trial_used: number // 서버 AI가 쓴 토큰
   trial_limit: number
+  run_max_calls?: number // 코딩 실행 한 번의 LLM 호출 한도
+  run_max_tokens?: number // 코딩 실행 한 번의 토큰 한도
 }
+// 토큰 한도 (비율 표시용). 한 번 읽어 화면들이 같이 쓴다. 못 읽으면 서버 기본값
+const LIMIT_DEFAULT = { trial: 1_000_000, runCalls: 40, runTokens: 600_000 }
+let limitCache: Promise<typeof LIMIT_DEFAULT> | null = null
+export function useCodingLimits(): typeof LIMIT_DEFAULT {
+  const [v, setV] = useState(LIMIT_DEFAULT)
+  useEffect(() => {
+    limitCache ??= codingSettingsApi(DEV_API).get()
+      .then((c) => ({ trial: c.trial_limit || LIMIT_DEFAULT.trial, runCalls: c.run_max_calls || LIMIT_DEFAULT.runCalls, runTokens: c.run_max_tokens || LIMIT_DEFAULT.runTokens }))
+      .catch(() => { limitCache = null; return LIMIT_DEFAULT })
+    let alive = true
+    void limitCache.then((x) => alive && setV(x))
+    return () => { alive = false }
+  }, [])
+  return v
+}
+
 export const codingSettingsApi = (base: string) => ({
   get: () => call<CodingSettings>(base, '/coding-settings'),
   set: (mode: CodingSetting) => call<CodingSettings>(base, '/coding-settings', post({ mode }, 'admin')),

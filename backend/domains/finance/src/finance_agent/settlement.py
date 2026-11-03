@@ -8,7 +8,6 @@
 - 환불: 기간 안 환불 중 그 판매자 몫
 
 보류 사유 (하나라도 있으면 `held`, 정산 묶음에서 빠진다):
-- `open_claim`: 처리 중인 환불·교환 (클레임 자료를 못 받으면 `claims_unknown`, fail-closed)
 - `unconfirmed_purchase`: 기간 안 주문 중 아직 배송 완료 전 (구매 미확정)
 - `negative_payout`: 정산금이 0원 이하
 
@@ -88,18 +87,6 @@ def statements(
             rate_shown = cfg.commission.default_rate
 
         reasons = []
-        if books.claims is None:
-            reasons.append({"code": "claims_unknown", "label": "처리 중 클레임을 확인할 수 없음"})
-        else:
-            open_claims = [
-                c
-                for c in books.claims
-                if c.get("seller_id") == seller_id and c.get("status") == "open"
-            ]
-            if open_claims:
-                reasons.append(
-                    {"code": "open_claim", "label": f"처리 중인 환불·교환 {len(open_claims)}건"}
-                )
         if unconfirmed:
             reasons.append(
                 {"code": "unconfirmed_purchase", "label": f"구매 미확정 주문 {len(unconfirmed)}건"}

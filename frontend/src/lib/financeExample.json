@@ -101,78 +101,6 @@
      ]
     },
     {
-     "kind": "audit_finding",
-     "title": "처리 전 감사 의심 7건",
-     "count": 7,
-     "amount": null,
-     "link": "audit",
-     "action": {
-      "type": "anomaly_resolve"
-     },
-     "items": [
-      {
-       "ref": "5c23a9cfe3babd1e",
-       "title": "같은 고객에게 한도 바로 아래 쿠폰 3장",
-       "detail": "buy_0007에게 35분 안에 19,900원 쿠폰 3장 3번 (한 장 한도 20,000원)",
-       "amount": null
-      },
-      {
-       "ref": "159299a58bb31a28",
-       "title": "환불률 급변",
-       "detail": "최근 7일 환불률 4.1% (지난 7일 0.5%)",
-       "amount": null
-      },
-      {
-       "ref": "f03c0d629b32677b",
-       "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
-       "detail": "10-31 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
-       "amount": null
-      },
-      {
-       "ref": "c7f81886a850f4f7",
-       "title": "영향 고객이 아닌 구매자에게 보상 쿠폰 1건",
-       "detail": "사건 ctx_inc_0100: buy_0999에게 보상 쿠폰 1건 2,000원 (데이터 AI 영향 고객 2명 목록에 없음)",
-       "amount": null
-      },
-      {
-       "ref": "420aaa6abfe12a20",
-       "title": "같은 고객 환불 3번",
-       "detail": "buy_0013의 주문 3건 환불, 합계 64,000원 (최근 7일)",
-       "amount": null
-      },
-      {
-       "ref": "2743e7ba8a94ffb9",
-       "title": "같은 고객에게 같은 사건 보상 쿠폰 2번",
-       "detail": "buy_0011에게 사건 ctx_inc_0104 보상 쿠폰 2번, 합계 20,000원",
-       "amount": null
-      },
-      {
-       "ref": "17666e7e527681dd",
-       "title": "안전 장치 보류·거절 증가",
-       "detail": "최근 7일 안전 장치 보류 3건·거절 1건 (지난 7일 1건)",
-       "amount": null
-      }
-     ]
-    },
-    {
-     "kind": "policy_alert",
-     "title": "예산·한도 경보 1건 (이번 달 쿠폰 예산)",
-     "count": 1,
-     "amount": null,
-     "link": "policy",
-     "action": {
-      "type": "policy_ack"
-     },
-     "items": [
-      {
-       "ref": "coupon_budget_month",
-       "title": "이번 달 쿠폰 예산",
-       "detail": "한도에 가까움",
-       "amount": null
-      }
-     ]
-    },
-    {
      "kind": "team_budget",
      "title": "2026-11 팀 예산 확정 대기",
      "count": 8,
@@ -215,7 +143,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.670246Z",
+   "collected_at": "2026-11-02T08:53:08.204379Z",
    "source": "seed",
    "unavailable": []
   }
@@ -310,7 +238,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.711720Z",
+   "collected_at": "2026-11-02T08:53:08.226383Z",
    "source": "seed",
    "unavailable": []
   }
@@ -405,7 +333,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.721562Z",
+   "collected_at": "2026-11-02T08:53:08.235800Z",
    "source": "seed",
    "unavailable": []
   }
@@ -581,7 +509,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.728757Z",
+   "collected_at": "2026-11-02T08:53:08.245303Z",
    "source": "seed",
    "unavailable": []
   }
@@ -757,7 +685,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.745513Z",
+   "collected_at": "2026-11-02T08:53:08.252476Z",
    "source": "seed",
    "unavailable": []
   }
@@ -933,7 +861,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.760381Z",
+   "collected_at": "2026-11-02T08:53:08.267513Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2052,7 +1980,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.762225Z",
+   "collected_at": "2026-11-02T08:53:08.270228Z",
    "source": "seed",
    "unavailable": [],
    "pg_source": "mock_toss_settlement"
@@ -2091,10 +2019,6 @@
      "payout": 628496,
      "hold_reasons": [
       {
-       "code": "open_claim",
-       "label": "처리 중인 환불·교환 1건"
-      },
-      {
        "code": "unconfirmed_purchase",
        "label": "구매 미확정 주문 12건"
       }
@@ -2127,122 +2051,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.778878Z",
-   "source": "seed",
-   "unavailable": []
-  }
- },
- "/api/finance/policy": {
-  "data": {
-   "rules": [
-    {
-     "key": "coupon_total",
-     "label": "쿠폰 한 번 총액",
-     "limit": 300000,
-     "unit": "원",
-     "used_today": null,
-     "used_month": null,
-     "ratio": null,
-     "alert": null,
-     "source": "thresholds.toml"
-    },
-    {
-     "key": "coupon_unit",
-     "label": "쿠폰 한 장 금액",
-     "limit": 20000,
-     "unit": "원",
-     "used_today": null,
-     "used_month": null,
-     "ratio": null,
-     "alert": null,
-     "source": "thresholds.toml"
-    },
-    {
-     "key": "coupon_daily",
-     "label": "하루 쿠폰 합계",
-     "limit": 1000000,
-     "unit": "원",
-     "used_today": 13000,
-     "used_month": null,
-     "ratio": 0.013,
-     "alert": "ok",
-     "source": "thresholds.toml"
-    },
-    {
-     "key": "compensation_per_context",
-     "label": "장애 한 건 보상 합계",
-     "limit": 1000000,
-     "unit": "원",
-     "used_today": null,
-     "used_month": null,
-     "ratio": null,
-     "alert": null,
-     "source": "thresholds.toml"
-    },
-    {
-     "key": "compensation_per_customer",
-     "label": "고객 한 명 보상 합계",
-     "limit": 50000,
-     "unit": "원",
-     "used_today": null,
-     "used_month": null,
-     "ratio": null,
-     "alert": null,
-     "source": "thresholds.toml"
-    },
-    {
-     "key": "refund_single",
-     "label": "환불 한 건",
-     "limit": 100000,
-     "unit": "원",
-     "used_today": null,
-     "used_month": null,
-     "ratio": null,
-     "alert": null,
-     "source": "thresholds.toml"
-    },
-    {
-     "key": "coupon_budget_month",
-     "label": "이번 달 쿠폰 예산",
-     "limit": 300000,
-     "unit": "원",
-     "used_today": 13000,
-     "used_month": 34000,
-     "ratio": 0.1133,
-     "alert": "warn",
-     "projected_month": 510000,
-     "source": "finance_policy.toml"
-    },
-    {
-     "key": "refund_budget_month",
-     "label": "이번 달 환불 예산",
-     "limit": 600000,
-     "unit": "원",
-     "used_today": 0,
-     "used_month": 0,
-     "ratio": 0.0,
-     "alert": "ok",
-     "projected_month": 0,
-     "source": "finance_policy.toml"
-    }
-   ],
-   "proposals": [
-    {
-     "key": "refund_single",
-     "current": 100000,
-     "proposed": 70000,
-     "reason": "최근 14일 환불 95%가 31,000원 이하라 한도를 70,000원로 낮춰도 됩니다 (한 번에 30% 안).",
-     "evidence": {
-      "sample": 8,
-      "p95": 31000
-     }
-    }
-   ],
-   "how_to_change": "기준표(safety/.../thresholds.toml) PR로 사람이 바꿉니다."
-  },
-  "meta": {
-   "mock": true,
-   "collected_at": "2026-11-02T05:32:47.812240Z",
+   "collected_at": "2026-11-02T08:53:08.285497Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2274,10 +2083,6 @@
      "status": "at_risk",
      "status_label": "기한 넘길 위험",
      "hold_reasons": [
-      {
-       "code": "open_claim",
-       "label": "처리 중인 환불·교환 1건"
-      },
       {
        "code": "unconfirmed_purchase",
        "label": "구매 미확정 주문 12건"
@@ -2314,7 +2119,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.812240Z",
+   "collected_at": "2026-11-02T08:53:08.294510Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2365,7 +2170,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.837734Z",
+   "collected_at": "2026-11-02T08:53:08.302602Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2547,7 +2352,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.862955Z",
+   "collected_at": "2026-11-02T08:53:08.319264Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2562,7 +2367,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.899596Z",
+   "collected_at": "2026-11-02T08:53:08.334725Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2688,7 +2493,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.907786Z",
+   "collected_at": "2026-11-02T08:53:08.352028Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2735,8 +2540,8 @@
     {
      "key": "audit",
      "label": "감사 의심 건 처리",
-     "status": "pending",
-     "detail": "처리 전 7건",
+     "status": "done",
+     "detail": "처리 전 0건",
      "link": "audit"
     },
     {
@@ -2747,14 +2552,14 @@
      "link": "closing"
     }
    ],
-   "done": 3,
+   "done": 4,
    "total": 7,
    "ready": false,
    "closed": false
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.922883Z",
+   "collected_at": "2026-11-02T08:53:08.369102Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2814,7 +2619,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.930826Z",
+   "collected_at": "2026-11-02T08:53:08.384971Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2921,7 +2726,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.945156Z",
+   "collected_at": "2026-11-02T08:53:08.395124Z",
    "source": "seed",
    "unavailable": []
   }
@@ -2931,100 +2736,14 @@
    "from": "2026-10-27T00:00:00Z",
    "to": "2026-11-03T00:00:00Z",
    "stats": {
-    "refund_count": 6,
-    "refund_amount": 122800,
-    "refund_rate": 0.0409,
-    "refund_rate_prev": 0.0048,
-    "coupon_count": 33,
-    "coupon_amount": 200700,
-    "gate_held": 3,
-    "gate_rejected": 1
+    "gate_held": 0,
+    "gate_rejected": 0
    },
-   "findings": [
-    {
-     "code": "split_under_limit",
-     "severity": "high",
-     "title": "같은 고객에게 한도 바로 아래 쿠폰 3장",
-     "detail": "buy_0007에게 35분 안에 19,900원 쿠폰 3장 3번 (한 장 한도 20,000원)",
-     "refs": [
-      "cpn_3053",
-      "cpn_3054",
-      "cpn_3055",
-      "exe_s0042",
-      "exe_s0043",
-      "exe_s0044"
-     ]
-    },
-    {
-     "code": "refund_rate_jump",
-     "severity": "high",
-     "title": "환불률 급변",
-     "detail": "최근 7일 환불률 4.1% (지난 7일 0.5%)",
-     "refs": []
-    },
-    {
-     "code": "amount_recheck_failed",
-     "severity": "high",
-     "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
-     "detail": "10-31 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
-     "refs": [
-      "exe_s0009",
-      "ord_2156"
-     ]
-    },
-    {
-     "code": "compensation_outside_impact",
-     "severity": "high",
-     "title": "영향 고객이 아닌 구매자에게 보상 쿠폰 1건",
-     "detail": "사건 ctx_inc_0100: buy_0999에게 보상 쿠폰 1건 2,000원 (데이터 AI 영향 고객 2명 목록에 없음)",
-     "refs": [
-      "exe_s0065",
-      "cpn_3063"
-     ]
-    },
-    {
-     "code": "repeat_refund",
-     "severity": "medium",
-     "title": "같은 고객 환불 3번",
-     "detail": "buy_0013의 주문 3건 환불, 합계 64,000원 (최근 7일)",
-     "refs": [
-      "rfd_3003",
-      "rfd_3004",
-      "rfd_3005",
-      "ord_2110",
-      "ord_2122",
-      "ord_2135"
-     ]
-    },
-    {
-     "code": "duplicate_coupon",
-     "severity": "medium",
-     "title": "같은 고객에게 같은 사건 보상 쿠폰 2번",
-     "detail": "buy_0011에게 사건 ctx_inc_0104 보상 쿠폰 2번, 합계 20,000원",
-     "refs": [
-      "cpn_3056",
-      "cpn_3057",
-      "exe_s0045",
-      "exe_s0046"
-     ]
-    },
-    {
-     "code": "gate_hold_trend",
-     "severity": "medium",
-     "title": "안전 장치 보류·거절 증가",
-     "detail": "최근 7일 안전 장치 보류 3건·거절 1건 (지난 7일 1건)",
-     "refs": [
-      "exe_s0048",
-      "exe_s0050",
-      "exe_s0051",
-      "exe_s0049"
-     ]
-    }
-   ]
+   "findings": []
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.963919Z",
+   "collected_at": "2026-11-02T08:53:08.402114Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3034,101 +2753,14 @@
    "from": "2026-10-20T00:00:00Z",
    "to": "2026-11-03T00:00:00Z",
    "stats": {
-    "refund_count": 8,
-    "refund_amount": 140100,
-    "refund_rate": 0.0212,
-    "refund_rate_prev": 0.0,
-    "coupon_count": 56,
-    "coupon_amount": 311700,
-    "gate_held": 4,
-    "gate_rejected": 1
+    "gate_held": 0,
+    "gate_rejected": 0
    },
-   "findings": [
-    {
-     "code": "split_under_limit",
-     "severity": "high",
-     "title": "같은 고객에게 한도 바로 아래 쿠폰 3장",
-     "detail": "buy_0007에게 35분 안에 19,900원 쿠폰 3장 3번 (한 장 한도 20,000원)",
-     "refs": [
-      "cpn_3053",
-      "cpn_3054",
-      "cpn_3055",
-      "exe_s0042",
-      "exe_s0043",
-      "exe_s0044"
-     ]
-    },
-    {
-     "code": "refund_rate_jump",
-     "severity": "high",
-     "title": "환불률 급변",
-     "detail": "최근 14일 환불률 2.1% (지난 14일 0.0%)",
-     "refs": []
-    },
-    {
-     "code": "amount_recheck_failed",
-     "severity": "high",
-     "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
-     "detail": "10-31 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
-     "refs": [
-      "exe_s0009",
-      "ord_2156"
-     ]
-    },
-    {
-     "code": "compensation_outside_impact",
-     "severity": "high",
-     "title": "영향 고객이 아닌 구매자에게 보상 쿠폰 1건",
-     "detail": "사건 ctx_inc_0100: buy_0999에게 보상 쿠폰 1건 2,000원 (데이터 AI 영향 고객 2명 목록에 없음)",
-     "refs": [
-      "exe_s0065",
-      "cpn_3063"
-     ]
-    },
-    {
-     "code": "repeat_refund",
-     "severity": "medium",
-     "title": "같은 고객 환불 3번",
-     "detail": "buy_0013의 주문 3건 환불, 합계 64,000원 (최근 14일)",
-     "refs": [
-      "rfd_3003",
-      "rfd_3004",
-      "rfd_3005",
-      "ord_2110",
-      "ord_2122",
-      "ord_2135"
-     ]
-    },
-    {
-     "code": "duplicate_coupon",
-     "severity": "medium",
-     "title": "같은 고객에게 같은 사건 보상 쿠폰 2번",
-     "detail": "buy_0011에게 사건 ctx_inc_0104 보상 쿠폰 2번, 합계 20,000원",
-     "refs": [
-      "cpn_3056",
-      "cpn_3057",
-      "exe_s0045",
-      "exe_s0046"
-     ]
-    },
-    {
-     "code": "gate_hold_trend",
-     "severity": "medium",
-     "title": "안전 장치 보류·거절 증가",
-     "detail": "최근 14일 안전 장치 보류 4건·거절 1건 (지난 14일 0건)",
-     "refs": [
-      "exe_s0047",
-      "exe_s0048",
-      "exe_s0050",
-      "exe_s0051",
-      "exe_s0049"
-     ]
-    }
-   ]
+   "findings": []
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:47.991725Z",
+   "collected_at": "2026-11-02T08:53:08.402114Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3138,251 +2770,22 @@
    "from": "2026-10-04T00:00:00Z",
    "to": "2026-11-03T00:00:00Z",
    "stats": {
-    "refund_count": 8,
-    "refund_amount": 140100,
-    "refund_rate": 0.0186,
-    "refund_rate_prev": null,
-    "coupon_count": 63,
-    "coupon_amount": 344700,
-    "gate_held": 4,
-    "gate_rejected": 1
+    "gate_held": 0,
+    "gate_rejected": 0
    },
-   "findings": [
-    {
-     "code": "split_under_limit",
-     "severity": "high",
-     "title": "같은 고객에게 한도 바로 아래 쿠폰 3장",
-     "detail": "buy_0007에게 35분 안에 19,900원 쿠폰 3장 3번 (한 장 한도 20,000원)",
-     "refs": [
-      "cpn_3053",
-      "cpn_3054",
-      "cpn_3055",
-      "exe_s0042",
-      "exe_s0043",
-      "exe_s0044"
-     ]
-    },
-    {
-     "code": "amount_recheck_failed",
-     "severity": "high",
-     "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
-     "detail": "10-31 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
-     "refs": [
-      "exe_s0009",
-      "ord_2156"
-     ]
-    },
-    {
-     "code": "compensation_outside_impact",
-     "severity": "high",
-     "title": "영향 고객이 아닌 구매자에게 보상 쿠폰 1건",
-     "detail": "사건 ctx_inc_0100: buy_0999에게 보상 쿠폰 1건 2,000원 (데이터 AI 영향 고객 2명 목록에 없음)",
-     "refs": [
-      "exe_s0065",
-      "cpn_3063"
-     ]
-    },
-    {
-     "code": "repeat_refund",
-     "severity": "medium",
-     "title": "같은 고객 환불 3번",
-     "detail": "buy_0013의 주문 3건 환불, 합계 64,000원 (최근 30일)",
-     "refs": [
-      "rfd_3003",
-      "rfd_3004",
-      "rfd_3005",
-      "ord_2110",
-      "ord_2122",
-      "ord_2135"
-     ]
-    },
-    {
-     "code": "duplicate_coupon",
-     "severity": "medium",
-     "title": "같은 고객에게 같은 사건 보상 쿠폰 2번",
-     "detail": "buy_0011에게 사건 ctx_inc_0104 보상 쿠폰 2번, 합계 20,000원",
-     "refs": [
-      "cpn_3056",
-      "cpn_3057",
-      "exe_s0045",
-      "exe_s0046"
-     ]
-    },
-    {
-     "code": "gate_hold_trend",
-     "severity": "medium",
-     "title": "안전 장치 보류·거절 증가",
-     "detail": "최근 30일 안전 장치 보류 4건·거절 1건 (지난 30일 0건)",
-     "refs": [
-      "exe_s0047",
-      "exe_s0048",
-      "exe_s0050",
-      "exe_s0051",
-      "exe_s0049"
-     ]
-    }
-   ]
+   "findings": []
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.015783Z",
+   "collected_at": "2026-11-02T08:53:08.418244Z",
    "source": "seed",
    "unavailable": []
   }
  },
  "/api/finance/anomalies": {
   "data": {
-   "open": [
-    {
-     "finding_ref": "5c23a9cfe3babd1e",
-     "code": "split_under_limit",
-     "severity": "high",
-     "title": "같은 고객에게 한도 바로 아래 쿠폰 3장",
-     "detail": "buy_0007에게 35분 안에 19,900원 쿠폰 3장 3번 (한 장 한도 20,000원)",
-     "refs": [
-      "cpn_3053",
-      "cpn_3054",
-      "cpn_3055",
-      "exe_s0042",
-      "exe_s0043",
-      "exe_s0044"
-     ],
-     "status": "open",
-     "first_seen": "2026-11-02T05:32:47.700960Z",
-     "last_seen": "2026-11-02T05:32:48.027008Z",
-     "resolved_by": null,
-     "resolved_at": null,
-     "note": null
-    },
-    {
-     "finding_ref": "159299a58bb31a28",
-     "code": "refund_rate_jump",
-     "severity": "high",
-     "title": "환불률 급변",
-     "detail": "최근 7일 환불률 4.1% (지난 7일 0.5%)",
-     "refs": [],
-     "status": "open",
-     "first_seen": "2026-11-02T05:32:47.700960Z",
-     "last_seen": "2026-11-02T05:32:48.007581Z",
-     "resolved_by": null,
-     "resolved_at": null,
-     "note": null
-    },
-    {
-     "finding_ref": "f03c0d629b32677b",
-     "code": "amount_recheck_failed",
-     "severity": "high",
-     "title": "안전 장치를 통과한 금액이 다시 계산하면 틀림",
-     "detail": "10-31 11:20 환불 6,000원: 주문 ord_2156 결제 21,000원 중 이미 18,000원 환불해서 결제 금액을 넘습니다",
-     "refs": [
-      "exe_s0009",
-      "ord_2156"
-     ],
-     "status": "open",
-     "first_seen": "2026-11-02T05:32:47.700960Z",
-     "last_seen": "2026-11-02T05:32:48.027008Z",
-     "resolved_by": null,
-     "resolved_at": null,
-     "note": null
-    },
-    {
-     "finding_ref": "c7f81886a850f4f7",
-     "code": "compensation_outside_impact",
-     "severity": "high",
-     "title": "영향 고객이 아닌 구매자에게 보상 쿠폰 1건",
-     "detail": "사건 ctx_inc_0100: buy_0999에게 보상 쿠폰 1건 2,000원 (데이터 AI 영향 고객 2명 목록에 없음)",
-     "refs": [
-      "exe_s0065",
-      "cpn_3063"
-     ],
-     "status": "open",
-     "first_seen": "2026-11-02T05:32:47.700960Z",
-     "last_seen": "2026-11-02T05:32:48.027008Z",
-     "resolved_by": null,
-     "resolved_at": null,
-     "note": null
-    },
-    {
-     "finding_ref": "420aaa6abfe12a20",
-     "code": "repeat_refund",
-     "severity": "medium",
-     "title": "같은 고객 환불 3번",
-     "detail": "buy_0013의 주문 3건 환불, 합계 64,000원 (최근 7일)",
-     "refs": [
-      "rfd_3003",
-      "rfd_3004",
-      "rfd_3005",
-      "ord_2110",
-      "ord_2122",
-      "ord_2135"
-     ],
-     "status": "open",
-     "first_seen": "2026-11-02T05:32:47.700960Z",
-     "last_seen": "2026-11-02T05:32:48.027008Z",
-     "resolved_by": null,
-     "resolved_at": null,
-     "note": null
-    },
-    {
-     "finding_ref": "2743e7ba8a94ffb9",
-     "code": "duplicate_coupon",
-     "severity": "medium",
-     "title": "같은 고객에게 같은 사건 보상 쿠폰 2번",
-     "detail": "buy_0011에게 사건 ctx_inc_0104 보상 쿠폰 2번, 합계 20,000원",
-     "refs": [
-      "cpn_3056",
-      "cpn_3057",
-      "exe_s0045",
-      "exe_s0046"
-     ],
-     "status": "open",
-     "first_seen": "2026-11-02T05:32:47.700960Z",
-     "last_seen": "2026-11-02T05:32:48.027008Z",
-     "resolved_by": null,
-     "resolved_at": null,
-     "note": null
-    },
-    {
-     "finding_ref": "17666e7e527681dd",
-     "code": "gate_hold_trend",
-     "severity": "medium",
-     "title": "안전 장치 보류·거절 증가",
-     "detail": "최근 7일 안전 장치 보류 3건·거절 1건 (지난 7일 1건)",
-     "refs": [
-      "exe_s0048",
-      "exe_s0050",
-      "exe_s0051",
-      "exe_s0049"
-     ],
-     "status": "open",
-     "first_seen": "2026-11-02T05:32:47.700960Z",
-     "last_seen": "2026-11-02T05:32:47.982660Z",
-     "resolved_by": null,
-     "resolved_at": null,
-     "note": null
-    },
-    {
-     "finding_ref": "4b8601c77571f2f4",
-     "code": "gate_hold_trend",
-     "severity": "medium",
-     "title": "안전 장치 보류·거절 증가",
-     "detail": "최근 14일 안전 장치 보류 4건·거절 1건 (지난 14일 0건)",
-     "refs": [
-      "exe_s0047",
-      "exe_s0048",
-      "exe_s0050",
-      "exe_s0051",
-      "exe_s0049"
-     ],
-     "status": "open",
-     "first_seen": "2026-11-02T05:32:48.007581Z",
-     "last_seen": "2026-11-02T05:32:48.027008Z",
-     "resolved_by": null,
-     "resolved_at": null,
-     "note": null
-    }
-   ],
-   "open_count": 8,
+   "open": [],
+   "open_count": 0,
    "resolved": []
   },
   "meta": {
@@ -3401,8 +2804,7 @@
     "coupon_count": 4,
     "held_count": 0,
     "refund_total": 0,
-    "money_out_total": 8000,
-    "checks_ok": true
+    "money_out_total": 8000
    },
    {
     "context_id": "ctx_inc_0103",
@@ -3413,8 +2815,7 @@
     "coupon_count": 1,
     "held_count": 0,
     "refund_total": 0,
-    "money_out_total": 19900,
-    "checks_ok": true
+    "money_out_total": 19900
    },
    {
     "context_id": "ctx_inc_0102",
@@ -3425,8 +2826,7 @@
     "coupon_count": 1,
     "held_count": 0,
     "refund_total": 0,
-    "money_out_total": 19900,
-    "checks_ok": true
+    "money_out_total": 19900
    },
    {
     "context_id": "ctx_inc_0101",
@@ -3437,8 +2837,7 @@
     "coupon_count": 1,
     "held_count": 0,
     "refund_total": 0,
-    "money_out_total": 19900,
-    "checks_ok": true
+    "money_out_total": 19900
    },
    {
     "context_id": "ctx_inc_0104",
@@ -3449,8 +2848,7 @@
     "coupon_count": 2,
     "held_count": 0,
     "refund_total": 0,
-    "money_out_total": 20000,
-    "checks_ok": false
+    "money_out_total": 20000
    },
    {
     "context_id": "ctx_inc_0100",
@@ -3461,13 +2859,12 @@
     "coupon_count": 2,
     "held_count": 0,
     "refund_total": 0,
-    "money_out_total": 4000,
-    "checks_ok": false
+    "money_out_total": 4000
    }
   ],
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.065557Z",
+   "collected_at": "2026-11-02T08:53:08.441320Z",
    "ledger_source": "seed",
    "unavailable": []
   }
@@ -3476,7 +2873,7 @@
   "data": [],
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.065557Z",
+   "collected_at": "2026-11-02T08:53:08.446132Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3578,7 +2975,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.104943Z",
+   "collected_at": "2026-11-02T08:53:08.452433Z",
    "source": "seed",
    "unavailable": []
   }
@@ -3667,7 +3064,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.110316Z",
+   "collected_at": "2026-11-02T08:53:08.467655Z",
    "source": "hr.team_headcount",
    "unavailable": []
   }
@@ -3756,7 +3153,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.115782Z",
+   "collected_at": "2026-11-02T08:53:08.469679Z",
    "source": "hr.team_headcount",
    "unavailable": []
   }
@@ -3845,7 +3242,7 @@
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.115782Z",
+   "collected_at": "2026-11-02T08:53:08.469679Z",
    "source": "hr.team_headcount",
    "unavailable": []
   }
@@ -3882,7 +3279,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T05:32:48.132795Z"
+    "collected_at": "2026-11-02T08:53:08.485765Z"
    },
    "compensation": {
     "coupons": [
@@ -3898,8 +3295,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-11-01T06:10:00Z",
-      "in_impact": true
+      "at": "2026-11-01T06:10:00Z"
      },
      {
       "buyer_id": "buy_0002",
@@ -3913,8 +3309,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-11-01T06:11:00Z",
-      "in_impact": true
+      "at": "2026-11-01T06:11:00Z"
      },
      {
       "buyer_id": "buy_0003",
@@ -3928,8 +3323,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-11-01T06:12:00Z",
-      "in_impact": true
+      "at": "2026-11-01T06:12:00Z"
      },
      {
       "buyer_id": "buy_0004",
@@ -3943,8 +3337,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-11-01T06:13:00Z",
-      "in_impact": true
+      "at": "2026-11-01T06:13:00Z"
      }
     ],
     "total_executed": 8000,
@@ -3957,60 +3350,11 @@
     "count": 0
    },
    "money_out_total": 8000,
-   "limits": {
-    "per_customer": {
-     "limit": 50000,
-     "max_used": 2000,
-     "buyer_id": "buy_0001"
-    },
-    "per_incident": {
-     "limit": 1000000,
-     "used": 8000,
-     "remaining": 992000
-    }
-   },
-   "checks": [
-    {
-     "code": "recipients_in_impact",
-     "ok": true,
-     "title": "보상 받은 고객이 모두 영향 고객인지",
-     "detail": "보상 받은 고객 4명 모두 영향 고객 4명 안",
-     "refs": []
-    },
-    {
-     "code": "one_coupon_per_buyer",
-     "ok": true,
-     "title": "고객당 쿠폰 1건",
-     "detail": "같은 사건·같은 고객 보상 쿠폰은 1건씩",
-     "refs": []
-    },
-    {
-     "code": "per_customer_limit",
-     "ok": true,
-     "title": "고객당 보상 한도",
-     "detail": "고객 최대 2,000원 / 한도 50,000원 (buy_0001)",
-     "refs": []
-    },
-    {
-     "code": "per_incident_limit",
-     "ok": true,
-     "title": "사건당 보상 한도",
-     "detail": "사건 합계 8,000원 / 한도 1,000,000원",
-     "refs": []
-    },
-    {
-     "code": "amount_recheck",
-     "ok": true,
-     "title": "보상 금액 다시 계산",
-     "detail": "실행된 보상 쿠폰 4건 금액(장 수 × 단가)이 모두 맞음",
-     "refs": []
-    }
-   ],
    "ledger_source": "seed"
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.132795Z",
+   "collected_at": "2026-11-02T08:53:08.485765Z",
    "unavailable": []
   }
  },
@@ -4044,7 +3388,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T05:32:48.150044Z"
+    "collected_at": "2026-11-02T08:53:08.501609Z"
    },
    "compensation": {
     "coupons": [
@@ -4060,8 +3404,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-31T14:40:00Z",
-      "in_impact": true
+      "at": "2026-10-31T14:40:00Z"
      }
     ],
     "total_executed": 19900,
@@ -4074,60 +3417,11 @@
     "count": 0
    },
    "money_out_total": 19900,
-   "limits": {
-    "per_customer": {
-     "limit": 50000,
-     "max_used": 19900,
-     "buyer_id": "buy_0007"
-    },
-    "per_incident": {
-     "limit": 1000000,
-     "used": 19900,
-     "remaining": 980100
-    }
-   },
-   "checks": [
-    {
-     "code": "recipients_in_impact",
-     "ok": true,
-     "title": "보상 받은 고객이 모두 영향 고객인지",
-     "detail": "보상 받은 고객 1명 모두 영향 고객 2명 안",
-     "refs": []
-    },
-    {
-     "code": "one_coupon_per_buyer",
-     "ok": true,
-     "title": "고객당 쿠폰 1건",
-     "detail": "같은 사건·같은 고객 보상 쿠폰은 1건씩",
-     "refs": []
-    },
-    {
-     "code": "per_customer_limit",
-     "ok": true,
-     "title": "고객당 보상 한도",
-     "detail": "고객 최대 19,900원 / 한도 50,000원 (buy_0007)",
-     "refs": []
-    },
-    {
-     "code": "per_incident_limit",
-     "ok": true,
-     "title": "사건당 보상 한도",
-     "detail": "사건 합계 19,900원 / 한도 1,000,000원",
-     "refs": []
-    },
-    {
-     "code": "amount_recheck",
-     "ok": true,
-     "title": "보상 금액 다시 계산",
-     "detail": "실행된 보상 쿠폰 1건 금액(장 수 × 단가)이 모두 맞음",
-     "refs": []
-    }
-   ],
    "ledger_source": "seed"
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.150044Z",
+   "collected_at": "2026-11-02T08:53:08.501609Z",
    "unavailable": []
   }
  },
@@ -4155,7 +3449,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T05:32:48.163511Z"
+    "collected_at": "2026-11-02T08:53:08.502746Z"
    },
    "compensation": {
     "coupons": [
@@ -4171,8 +3465,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-31T14:20:00Z",
-      "in_impact": true
+      "at": "2026-10-31T14:20:00Z"
      }
     ],
     "total_executed": 19900,
@@ -4185,60 +3478,11 @@
     "count": 0
    },
    "money_out_total": 19900,
-   "limits": {
-    "per_customer": {
-     "limit": 50000,
-     "max_used": 19900,
-     "buyer_id": "buy_0007"
-    },
-    "per_incident": {
-     "limit": 1000000,
-     "used": 19900,
-     "remaining": 980100
-    }
-   },
-   "checks": [
-    {
-     "code": "recipients_in_impact",
-     "ok": true,
-     "title": "보상 받은 고객이 모두 영향 고객인지",
-     "detail": "보상 받은 고객 1명 모두 영향 고객 1명 안",
-     "refs": []
-    },
-    {
-     "code": "one_coupon_per_buyer",
-     "ok": true,
-     "title": "고객당 쿠폰 1건",
-     "detail": "같은 사건·같은 고객 보상 쿠폰은 1건씩",
-     "refs": []
-    },
-    {
-     "code": "per_customer_limit",
-     "ok": true,
-     "title": "고객당 보상 한도",
-     "detail": "고객 최대 19,900원 / 한도 50,000원 (buy_0007)",
-     "refs": []
-    },
-    {
-     "code": "per_incident_limit",
-     "ok": true,
-     "title": "사건당 보상 한도",
-     "detail": "사건 합계 19,900원 / 한도 1,000,000원",
-     "refs": []
-    },
-    {
-     "code": "amount_recheck",
-     "ok": true,
-     "title": "보상 금액 다시 계산",
-     "detail": "실행된 보상 쿠폰 1건 금액(장 수 × 단가)이 모두 맞음",
-     "refs": []
-    }
-   ],
    "ledger_source": "seed"
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.163511Z",
+   "collected_at": "2026-11-02T08:53:08.502746Z",
    "unavailable": []
   }
  },
@@ -4267,7 +3511,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T05:32:48.205249Z"
+    "collected_at": "2026-11-02T08:53:08.529137Z"
    },
    "compensation": {
     "coupons": [
@@ -4283,8 +3527,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-31T14:05:00Z",
-      "in_impact": true
+      "at": "2026-10-31T14:05:00Z"
      }
     ],
     "total_executed": 19900,
@@ -4297,60 +3540,11 @@
     "count": 0
    },
    "money_out_total": 19900,
-   "limits": {
-    "per_customer": {
-     "limit": 50000,
-     "max_used": 19900,
-     "buyer_id": "buy_0007"
-    },
-    "per_incident": {
-     "limit": 1000000,
-     "used": 19900,
-     "remaining": 980100
-    }
-   },
-   "checks": [
-    {
-     "code": "recipients_in_impact",
-     "ok": true,
-     "title": "보상 받은 고객이 모두 영향 고객인지",
-     "detail": "보상 받은 고객 1명 모두 영향 고객 2명 안",
-     "refs": []
-    },
-    {
-     "code": "one_coupon_per_buyer",
-     "ok": true,
-     "title": "고객당 쿠폰 1건",
-     "detail": "같은 사건·같은 고객 보상 쿠폰은 1건씩",
-     "refs": []
-    },
-    {
-     "code": "per_customer_limit",
-     "ok": true,
-     "title": "고객당 보상 한도",
-     "detail": "고객 최대 19,900원 / 한도 50,000원 (buy_0007)",
-     "refs": []
-    },
-    {
-     "code": "per_incident_limit",
-     "ok": true,
-     "title": "사건당 보상 한도",
-     "detail": "사건 합계 19,900원 / 한도 1,000,000원",
-     "refs": []
-    },
-    {
-     "code": "amount_recheck",
-     "ok": true,
-     "title": "보상 금액 다시 계산",
-     "detail": "실행된 보상 쿠폰 1건 금액(장 수 × 단가)이 모두 맞음",
-     "refs": []
-    }
-   ],
    "ledger_source": "seed"
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.205249Z",
+   "collected_at": "2026-11-02T08:53:08.529137Z",
    "unavailable": []
   }
  },
@@ -4384,7 +3578,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T05:32:48.221074Z"
+    "collected_at": "2026-11-02T08:53:08.553428Z"
    },
    "compensation": {
     "coupons": [
@@ -4400,8 +3594,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-30T11:00:00Z",
-      "in_impact": true
+      "at": "2026-10-30T11:00:00Z"
      },
      {
       "buyer_id": "buy_0011",
@@ -4415,8 +3608,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-30T11:30:00Z",
-      "in_impact": true
+      "at": "2026-10-30T11:30:00Z"
      }
     ],
     "total_executed": 20000,
@@ -4429,63 +3621,11 @@
     "count": 0
    },
    "money_out_total": 20000,
-   "limits": {
-    "per_customer": {
-     "limit": 50000,
-     "max_used": 20000,
-     "buyer_id": "buy_0011"
-    },
-    "per_incident": {
-     "limit": 1000000,
-     "used": 20000,
-     "remaining": 980000
-    }
-   },
-   "checks": [
-    {
-     "code": "recipients_in_impact",
-     "ok": true,
-     "title": "보상 받은 고객이 모두 영향 고객인지",
-     "detail": "보상 받은 고객 1명 모두 영향 고객 2명 안",
-     "refs": []
-    },
-    {
-     "code": "one_coupon_per_buyer",
-     "ok": false,
-     "title": "고객당 쿠폰 1건",
-     "detail": "buy_0011 2건",
-     "refs": [
-      "exe_s0045",
-      "exe_s0046"
-     ]
-    },
-    {
-     "code": "per_customer_limit",
-     "ok": true,
-     "title": "고객당 보상 한도",
-     "detail": "고객 최대 20,000원 / 한도 50,000원 (buy_0011)",
-     "refs": []
-    },
-    {
-     "code": "per_incident_limit",
-     "ok": true,
-     "title": "사건당 보상 한도",
-     "detail": "사건 합계 20,000원 / 한도 1,000,000원",
-     "refs": []
-    },
-    {
-     "code": "amount_recheck",
-     "ok": true,
-     "title": "보상 금액 다시 계산",
-     "detail": "실행된 보상 쿠폰 2건 금액(장 수 × 단가)이 모두 맞음",
-     "refs": []
-    }
-   ],
    "ledger_source": "seed"
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.221074Z",
+   "collected_at": "2026-11-02T08:53:08.553428Z",
    "unavailable": []
   }
  },
@@ -4514,7 +3654,7 @@
     ],
     "window_exact": true,
     "source": "data.impact_analysis",
-    "collected_at": "2026-11-02T05:32:48.254177Z"
+    "collected_at": "2026-11-02T08:53:08.569785Z"
    },
    "compensation": {
     "coupons": [
@@ -4530,8 +3670,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-28T04:00:00Z",
-      "in_impact": true
+      "at": "2026-10-28T04:00:00Z"
      },
      {
       "buyer_id": "buy_0999",
@@ -4545,8 +3684,7 @@
       "grade": "A",
       "status": "executed",
       "review_id": null,
-      "at": "2026-10-28T04:05:00Z",
-      "in_impact": false
+      "at": "2026-10-28T04:05:00Z"
      }
     ],
     "total_executed": 4000,
@@ -4559,62 +3697,11 @@
     "count": 0
    },
    "money_out_total": 4000,
-   "limits": {
-    "per_customer": {
-     "limit": 50000,
-     "max_used": 2000,
-     "buyer_id": "buy_0005"
-    },
-    "per_incident": {
-     "limit": 1000000,
-     "used": 4000,
-     "remaining": 996000
-    }
-   },
-   "checks": [
-    {
-     "code": "recipients_in_impact",
-     "ok": false,
-     "title": "보상 받은 고객이 모두 영향 고객인지",
-     "detail": "영향 고객이 아닌 buy_0999에게 보상 쿠폰",
-     "refs": [
-      "exe_s0065"
-     ]
-    },
-    {
-     "code": "one_coupon_per_buyer",
-     "ok": true,
-     "title": "고객당 쿠폰 1건",
-     "detail": "같은 사건·같은 고객 보상 쿠폰은 1건씩",
-     "refs": []
-    },
-    {
-     "code": "per_customer_limit",
-     "ok": true,
-     "title": "고객당 보상 한도",
-     "detail": "고객 최대 2,000원 / 한도 50,000원 (buy_0005)",
-     "refs": []
-    },
-    {
-     "code": "per_incident_limit",
-     "ok": true,
-     "title": "사건당 보상 한도",
-     "detail": "사건 합계 4,000원 / 한도 1,000,000원",
-     "refs": []
-    },
-    {
-     "code": "amount_recheck",
-     "ok": true,
-     "title": "보상 금액 다시 계산",
-     "detail": "실행된 보상 쿠폰 2건 금액(장 수 × 단가)이 모두 맞음",
-     "refs": []
-    }
-   ],
    "ledger_source": "seed"
   },
   "meta": {
    "mock": true,
-   "collected_at": "2026-11-02T05:32:48.254177Z",
+   "collected_at": "2026-11-02T08:53:08.569785Z",
    "unavailable": []
   }
  },

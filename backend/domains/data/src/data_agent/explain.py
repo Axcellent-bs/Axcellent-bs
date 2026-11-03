@@ -14,8 +14,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ValidationError
 
@@ -47,6 +49,7 @@ LLM_UNAVAILABLE = "llm_unavailable"
 LLM_ERROR = "llm_error"
 FORMAT_ERROR = "format_error"
 NUMBER_INVALID = "number_invalid"
+PRODUCT_INVALID = "product_invalid"  # 아이디어 문장에 연결되지 않은 회사 상품
 FALLBACK_REASONS = (LLM_UNAVAILABLE, LLM_ERROR, FORMAT_ERROR, NUMBER_INVALID)
 
 
@@ -311,3 +314,120 @@ async def explain(kind: str, facts: dict[str, int | float | str], llm: LLMClient
     if bad := _bad_numbers(summary, facts):
         return fallback(NUMBER_INVALID, bad)
     return Explanation(summary, False)
+
+
+# ---------------------------------------------------------- 영상 소재 아이디어 (content_recommend)
+
+IDEA_FORMATS = ("숏폼", "롱폼")
+_IDEA_PROMPT = (
+    "회사 소개: {company}\n"
+    "트렌드 소재 하나로 이 회사가 만들 영상 아이디어를 한국어 한두 문장으로 제안하고, "
+    "형식을 숏폼과 롱폼 중 하나로 골라라.\n"
+    "규칙:\n"
+    "- 숫자는 '평소보다 {ratio}배' 하나만 쓸 수 있다. 다른 숫자(영상 수·날짜·가격·순위·개수 등)는 "
+    "쓰지 말 것\n"
+    "- z·점수·통계·표준편차·수치 같은 통계 용어를 쓰지 말 것\n"
+    "- 상품은 데이터 블록의 '연결 상품'에 있는 것만 이름 그대로 쓸 것. '연결 상품'이 없으면 상품 "
+    "이름을 쓰지 말고 회사 소개의 고객·분야만 참고할 것. 회사 소개는 보조 정보다\n"
+    "- '우리 회사 제품', '회사 관점' 같은 막연한 말은 쓰지 말 것. 상품을 지어내지 말 것\n"
+    "- 소재 이름은 데이터 블록의 이름만 쓸 것. 출연자·사건·날짜 같은 사실을 지어내지 말 것\n"
+    "근거: {sources}{meme}"
+)
+NO_COMPANY = "(회사 소개 설정이 없음. 상품·고객을 지어내지 말 것)"
+
+
+class _Idea(BaseModel):
+    idea: str
+    format: Literal["숏폼", "롱폼"]
+
+
+@dataclass(frozen=True)
+class Idea:
+    idea: str
+    format: str  # IDEA_FORMATS 중 하나
+    fallback: bool
+    reason: str | None = None
+    bad_numbers: tuple[float, ...] = ()
+
+    def note(self) -> str | None:
+        return Explanation(self.idea, self.fallback, self.reason, self.bad_numbers).note()
+
+
+def _idea_template(
+    numbers: dict[str, int | float | str], names: dict[str, str], videos: int | None
+) -> str:
+    keyword = names.get("키워드", "")
+    head = f"{keyword} 검색이 평소의 {_fmt(numbers.get('배수'))}배로 올랐습니다"
+    if videos is not None:
+        head += f"(YouTube 인기 영상 {_fmt(videos)}개)"
+    return head + ". 이 소재를 짧은 영상으로 다뤄 볼 만합니다."
+
+
+async def explain_idea(
+    numbers: dict[str, int | float | str],
+    names: dict[str, str],
+    llm: LLMClient,
+    context_id: str | None = None,
+    *,
+    company: str | None = None,
+    sources: str = "검색 급상승",
+    youtube_videos: int | None = None,
+    catalog: Sequence[str] = (),
+    meme: str | None = None,
+    format_hint: str | None = None,
+) -> Idea:
+    """소재 하나의 영상 아이디어 문장과 형식.
+
+    - 숫자는 `numbers`의 배수 하나만 프롬프트에 넣는다("평소보다 N배"). z 같은 통계 값은 순위
+      근거로만 쓰고 넣지 않는다. 영상 수(`youtube_videos`)는 고정 문장에만 쓴다.
+    - 회사 소개(`company`, 회사 설정)는 코드가 정한 사실이라 프롬프트에 넣는다. 이름(외부 태그 등)은
+      `names`로 데이터 블록에만 넣는다.
+    - 숫자 검증은 `explain`과 같은 규칙(`_bad_numbers`)이고 이름 속 숫자(예: t1)도 허용한다.
+      실패하면 고정 문장 + 숏폼, `fallback=True`와 이유.
+    - 밈 형식(`meme`, 목록 안 값)과 권장 형식(`format_hint`)이 있으면 프롬프트에 넣고, 고정 문장의
+      형식도 권장 형식을 따른다.
+    - 상품: 연결된 실제 상품은 `names["연결 상품"]`(데이터 블록)으로만 넣는다. 문장에 연결되지 않은
+      회사 상품(`catalog`, 상품 이름 목록)이 나오면 버리고 고정 문장(`product_invalid`).
+    """
+    facts: dict[str, int | float | str] = {**numbers, **names}
+
+    def fallback(reason: str, bad: list[float] | None = None) -> Idea:
+        template = _idea_template(numbers, names, youtube_videos)
+        shape = format_hint if format_hint in IDEA_FORMATS else "숏폼"
+        return Idea(template, shape, True, reason, tuple(bad or ()))
+
+    meme_line = ""
+    if meme:  # 정해진 목록 안의 값만 온다 (meme_format.classify)
+        meme_line = f"\n밈 형식(대표 영상 제목으로 분류): {meme}. 이 형식에 맞는 영상으로 제안할 것"
+        if format_hint in IDEA_FORMATS:
+            meme_line += f"(권장 형식: {format_hint})"
+
+    try:
+        prompt = _IDEA_PROMPT.format(
+            company=(company or "").strip() or NO_COMPANY,
+            ratio=_fmt(numbers.get("배수")),
+            sources=sources,
+            meme=meme_line,
+        )
+        result = await llm.structured(prompt, _Idea, untrusted=dict(names), context_id=context_id)
+        idea = result.idea.strip()
+    except LLMNotConfiguredError:
+        return fallback(LLM_UNAVAILABLE)
+    except (LLMFormatError, ValidationError):
+        return fallback(FORMAT_ERROR)
+    except Exception:  # 호출 실패(HTTP 오류·시간 초과 등) 모두 고정 문장으로 대체
+        return fallback(LLM_ERROR)
+    if not idea or result.format not in IDEA_FORMATS:
+        return fallback(FORMAT_ERROR)
+    if bad := _bad_numbers(idea, facts):
+        return fallback(NUMBER_INVALID, bad)
+    linked = {n.strip() for n in names.get("연결 상품", "").split(",") if n.strip()}
+    if any(
+        name not in linked and _squash(name) in _squash(idea) for name in catalog if _squash(name)
+    ):
+        return fallback(PRODUCT_INVALID)
+    return Idea(idea, result.format, False)
+
+
+def _squash(text: str) -> str:
+    return "".join(text.lower().split())
