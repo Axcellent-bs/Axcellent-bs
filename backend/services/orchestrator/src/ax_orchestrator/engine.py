@@ -695,6 +695,7 @@ class Engine:
         ok = all(inc.steps[i].status == "completed" for i in required)
         inc.status = "resolved" if ok else "degraded"
         inc.closed_at = now()
+        inc.settle_after_recovery()  # 복구 신호를 먼저 받았으면 장애 중으로 남기지 않는다
         inc.summary = [self._summary_line(r) for r in inc.steps.values()]
         statuses = [r.status for r in inc.steps.values()]
         retries = sum(max(r.attempts - 1, 0) for r in inc.steps.values())
