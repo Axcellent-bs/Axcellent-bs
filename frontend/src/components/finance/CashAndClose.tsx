@@ -25,11 +25,11 @@ export function ChecklistSection({ tick, onOpen }: { tick: number; onOpen: (tab:
             <ol className="space-y-1.5">
               {c.items.map((i, n) => (
                 <li key={i.key} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-ink-100 px-3 py-2 text-sm">
-                  <span className="w-5 text-xs tabular-nums text-ink-500">{n + 1}</span>
+                  <span className="w-5 text-sm tabular-nums text-ink-500">{n + 1}</span>
                   <Chip label={CHECK_KO[i.status]} tone={CHECK_TONE[i.status]} />
                   <span className="font-medium text-ink-900">{i.label}</span>
-                  <span className="min-w-0 flex-1 text-xs text-ink-500">{i.detail}</span>
-                  {i.status !== "done" && <button type="button" className="text-xs font-medium text-brand-700 hover:underline" onClick={() => onOpen(i.link)}>하러 가기 →</button>}
+                  <span className="min-w-0 flex-1 text-sm text-ink-500">{i.detail}</span>
+                  {i.status !== "done" && <button type="button" className="text-sm font-medium text-brand-700 hover:underline" onClick={() => onOpen(i.link)}>하러 가기 →</button>}
                 </li>
               ))}
             </ol>
@@ -95,17 +95,17 @@ export function BankSection({ tick }: { tick: number }) {
           <input type="file" accept=".csv,.txt,text/csv" className="sr-only" disabled={!humanTokenSet || busy}
             onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ""; }} />
         </label>
-        <span className="text-xs text-ink-500">머리줄에 거래일자·입금액(·적요·잔액) 열이 있으면 됩니다. 같은 내역을 다시 올려도 한 번만 셉니다.</span>
+        <span className="text-sm text-ink-500">머리줄에 거래일자·입금액(·적요·잔액) 열이 있으면 됩니다. 같은 내역을 다시 올려도 한 번만 셉니다.</span>
       </div>
-      {!humanTokenSet && <p className="mb-2 text-xs text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 없어 올리기 버튼이 꺼져 있습니다.</p>}
+      {!humanTokenSet && <p className="mb-2 text-sm text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 없어 올리기 버튼이 꺼져 있습니다.</p>}
       {message && <p role="status" className="mb-3 rounded-lg bg-surface-2 px-3 py-2 text-sm text-ink-700">{message}</p>}
       <ResourceBody res={res}>
         {(b) => !b.uploaded ? <Empty>아직 올린 은행 거래내역이 없습니다. 올리면 그 기간의 PG 정산금 입금을 맞춰 봅니다.</Empty> : (
           <div className="space-y-3">
-            <p className="text-xs text-ink-500">올린 기간 {b.covered?.from} ~ {b.covered?.to} · {b.covered?.rows}줄{b.pg_memo ? ` · 적요에 "${b.pg_memo}"가 있는 입금만` : ""}</p>
+            <p className="text-sm text-ink-500">올린 기간 {b.covered?.from} ~ {b.covered?.to} · {b.covered?.rows}줄{b.pg_memo ? ` · 적요에 "${b.pg_memo}"가 있는 입금만` : ""}</p>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[520px] text-sm">
-                <thead className="text-left text-xs text-ink-500">
+                <thead className="text-left text-sm text-ink-500">
                   <tr><th className="pb-1 font-medium">날짜</th><th className="pb-1 text-right font-medium">PG 정산 예정</th><th className="pb-1 text-right font-medium">실제 입금</th><th className="pb-1 text-right font-medium">차이</th><th className="pb-1 font-medium">상태</th></tr>
                 </thead>
                 <tbody>
@@ -137,10 +137,10 @@ export function CashflowSection({ tick }: { tick: number }) {
         {(c) => (
           <div className="space-y-3">
             {c.negative_weeks.length > 0 && <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">나가는 돈이 들어오는 돈보다 많은 주 {c.negative_weeks.length}개: {c.negative_weeks.join(", ")} 시작 주</p>}
-            <p className="text-xs text-ink-500">{c.note}. 추정은 최근 {c.trailing_weeks}주 평균{c.trailing_weeks ? "" : " (평균을 낼 만큼 쌓인 주가 없어 비워 둠)"}입니다.</p>
+            <p className="text-sm text-ink-500">{c.note}. 추정은 최근 {c.trailing_weeks}주 평균{c.trailing_weeks ? "" : " (평균을 낼 만큼 쌓인 주가 없어 비워 둠)"}입니다.</p>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[560px] text-sm">
-                <thead className="text-left text-xs text-ink-500">
+                <thead className="text-left text-sm text-ink-500">
                   <tr><th className="pb-1 font-medium">주 (월요일)</th><th className="pb-1 font-medium">구분</th><th className="pb-1 text-right font-medium">들어옴 (PG)</th><th className="pb-1 text-right font-medium">나감 (판매자)</th><th className="pb-1 text-right font-medium">순현금</th><th className="pb-1 text-right font-medium">누적</th></tr>
                 </thead>
                 <tbody>

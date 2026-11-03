@@ -92,11 +92,11 @@ export function SafetyQueue({ reviews, error, highlight, reload, intro = FINANCE
         <h2 id="safety-queue-title" className="text-base font-semibold text-ink-900">안전 장치 보류 큐</h2>
         <p className={`text-sm font-semibold ${pending.length ? "text-amber-800" : "text-emerald-800"}`}>{pending.length ? `결정 기다림 ${pending.length}건` : "기다리는 일 없음"}</p>
       </div>
-      <p className="mt-0.5 text-xs leading-relaxed text-ink-500">
+      <p className="mt-0.5 text-sm leading-relaxed text-ink-500">
         {intro} 금액과 이유를 보고 진행 또는 멈춤을 누르세요. 진행은 되돌릴 수 없고, 애매하면 멈춤을 누르세요. 정한 시간 안에 아무도 누르지 않으면 자동으로 멈춥니다.
       </p>
       {error && <p role="alert" className="mt-3 rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{SAFETY_SERVER}에서 보류 큐를 받지 못했습니다. {error}</p>}
-      {!canDecide && pending.length > 0 && <p className="mt-3 text-xs text-amber-800">결정 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 버튼이 꺼져 있습니다.</p>}
+      {!canDecide && pending.length > 0 && <p className="mt-3 text-sm text-amber-800">결정 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 버튼이 꺼져 있습니다.</p>}
       {problem && <p role="alert" className="mt-3 rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{problem}</p>}
 
       {pending.length > 0 && (
@@ -111,7 +111,7 @@ export function SafetyQueue({ reviews, error, highlight, reload, intro = FINANCE
                   {r.report.computed_amount != null
                     ? <p className="text-xl font-bold tabular-nums text-ink-900">{krw(r.report.computed_amount)}</p>
                     : <p className="text-sm font-semibold text-ink-500">금액으로 판단하지 않는 일</p>}
-                  <p className="text-xs text-ink-500">{action(r.action)}</p>
+                  <p className="text-sm text-ink-500">{action(r.action)}</p>
                 </div>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
@@ -120,8 +120,8 @@ export function SafetyQueue({ reviews, error, highlight, reload, intro = FINANCE
                     {mark && <Chip label={r.action === "confirm_settlement" ? "방금 요청한 정산 묶음" : "방금 고른 건"} tone={TONE.info} />}
                   </div>
                   {lines.length > 0 && <ul className="mt-1 space-y-0.5 text-sm text-ink-700">{lines.map((t) => <li key={t}>{t}</li>)}</ul>}
-                  <p className="mt-1.5 rounded-lg bg-brand-50 px-2 py-1 text-xs text-brand-700">이럴 땐: {tipOf(r)}</p>
-                  <p className="mt-1 break-all text-xs text-ink-500">
+                  <p className="mt-1.5 rounded-lg bg-brand-50 px-2 py-1 text-sm text-brand-700">이럴 땐: {tipOf(r)}</p>
+                  <p className="mt-1 break-all text-sm text-ink-500">
                     {who(r.requester)}가 {ago(r.created_at)} 요청 · 확인 번호 {r.review_id} · <span className={left < 3600 ? "font-semibold text-red-700" : ""}>{duration(left)} 안에 결정하지 않으면 자동 취소</span>
                   </p>
                 </div>
@@ -135,7 +135,7 @@ export function SafetyQueue({ reviews, error, highlight, reload, intro = FINANCE
         </ul>
       )}
       {recent.length > 0 && (
-        <div className="mt-4 text-xs">
+        <div className="mt-4 text-sm">
           <p className="mb-1 font-medium text-ink-700">최근 결정</p>
           <ul className="space-y-1">
             {recent.map((r) => (

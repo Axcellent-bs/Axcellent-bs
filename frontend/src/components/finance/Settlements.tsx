@@ -67,7 +67,7 @@ export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: num
               {s.statements.length ? (
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[860px] text-sm">
-                    <thead className="text-left text-xs text-ink-500">
+                    <thead className="text-left text-sm text-ink-500">
                       <tr>
                         <th className="pb-2 font-medium">판매자</th>
                         <th className="pb-2 text-right font-medium">판매액</th>
@@ -82,16 +82,16 @@ export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: num
                     <tbody>
                       {s.statements.map((x) => (
                         <tr key={x.seller_id} className="border-t border-ink-100 align-top">
-                          <td className="py-2"><b className="text-ink-900">{x.name}</b><div className="text-xs text-ink-500">주문 {x.orders}건 <code className="font-mono text-[10px]">{x.seller_id}</code></div></td>
+                          <td className="py-2"><b className="text-ink-900">{x.name}</b><div className="text-sm text-ink-500">주문 {x.orders}건 <code className="font-mono text-sm">{x.seller_id}</code></div></td>
                           <td className="py-2 text-right tabular-nums">{krw(x.gross)}</td>
-                          <td className="py-2 text-right tabular-nums">{minus(x.commission)}<div className="text-xs text-ink-500">{percent(x.commission_rate)}</div></td>
+                          <td className="py-2 text-right tabular-nums">{minus(x.commission)}<div className="text-sm text-ink-500">{percent(x.commission_rate)}</div></td>
                           <td className="py-2 text-right tabular-nums">{minus(x.seller_coupon)}</td>
                           <td className="py-2 text-right tabular-nums">{minus(x.refunds)}</td>
                           <td className="py-2 text-right font-semibold tabular-nums">{krw(x.payout)}</td>
                           <td className="py-2 pl-4">
                             {x.hold_reasons.length
                               ? <div className="flex flex-wrap gap-1">{x.hold_reasons.map((h) => <Chip key={h.code} label={h.label} tone={TONE.warn} />)}</div>
-                              : <span className="text-xs text-ink-500">없음</span>}
+                              : <span className="text-sm text-ink-500">없음</span>}
                           </td>
                           <td className="py-2"><Chip label={STATUS_KO[x.status]?.label ?? "확인 필요"} tone={STATUS_KO[x.status]?.tone ?? TONE.muted} /></td>
                         </tr>
@@ -106,12 +106,12 @@ export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: num
                   <div>
                     {inFlight ? (
                       <>
-                        <p className="text-xs text-ink-500">지급 승인을 요청한 판매자 {s.batch.seller_ids.length}곳 정산금 합계</p>
+                        <p className="text-sm text-ink-500">지급 승인을 요청한 판매자 {s.batch.seller_ids.length}곳 정산금 합계</p>
                         <p className="text-2xl font-bold tabular-nums text-ink-900">{krw(s.batch.total_payout)}</p>
                       </>
                     ) : (
                       <>
-                        <p className="text-xs text-ink-500">지급 준비된 판매자 {readyCount}곳 정산금 합계</p>
+                        <p className="text-sm text-ink-500">지급 준비된 판매자 {readyCount}곳 정산금 합계</p>
                         <p className={`text-2xl font-bold tabular-nums ${total == null ? "text-ink-500" : "text-ink-900"}`}>{krw(total)}</p>
                       </>
                     )}
@@ -120,14 +120,14 @@ export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: num
                     <button className="btn-primary" disabled={!canRequest} onClick={() => requestBatch(s.period)}>
                       {sending ? "요청하는 중…" : "정산 묶음 지급 승인 요청"}
                     </button>
-                    <span className="text-xs text-ink-500">
+                    <span className="text-sm text-ink-500">
                       {inFlight ? "이미 요청한 묶음이 있습니다." : readyCount === 0 ? "지급 준비된 판매자가 없습니다." : "누르면 안전 장치 보류 큐로 갑니다. 돈은 아직 나가지 않습니다."}
                     </span>
                   </div>
                 </div>
                 <p className="mt-2 text-sm text-ink-700">{BATCH_KO[s.batch.status] ?? "지급 상태를 확인할 수 없습니다."}</p>
                 {s.batch.review_id && (
-                  <p className="mt-1 text-xs text-ink-500">
+                  <p className="mt-1 text-sm text-ink-500">
                     확인 번호 <code>{s.batch.review_id}</code> · 묶음 {s.batch.seller_ids.length}곳 {krw(s.batch.total_payout)}{" "}
                     {s.batch.status === "requested" && <button type="button" className="font-medium text-brand-700 underline" onClick={() => onGoToQueue(s.batch.review_id)}>보류 큐에서 승인하기</button>}
                   </p>

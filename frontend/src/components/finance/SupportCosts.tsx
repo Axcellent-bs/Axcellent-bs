@@ -27,7 +27,7 @@ function Row({ r }: { r: SupportCostRecord }) {
       <td className="py-2 pr-3"><Chip label={spent} tone={r.expense_used ? TONE.warn : TONE.muted} /></td>
       <td className="py-2 pr-3 whitespace-nowrap text-ink-500">{shortDateTime(r.recorded_at)}</td>
       <td className="py-2">
-        <Link href={`/orchestrator?ctx=${encodeURIComponent(r.context_id)}`} className="whitespace-nowrap text-xs font-medium text-brand-700 underline">총괄 사건 →</Link>
+        <Link href={`/orchestrator?ctx=${encodeURIComponent(r.context_id)}`} className="whitespace-nowrap text-sm font-medium text-brand-700 underline">총괄 사건 →</Link>
       </td>
     </tr>
   );
@@ -44,7 +44,7 @@ export function SupportCostsSection({ tick }: { tick: number }) {
         ) : (
           <div className="scroll-thin overflow-x-auto">
             <table className="w-full min-w-[640px] text-left text-sm">
-              <thead className="text-[11px] text-ink-500">
+              <thead className="text-sm text-ink-500">
                 <tr><th className="pb-1 pr-3 font-medium">문의</th><th className="pb-1 pr-3 font-medium">처리 결과</th><th className="pb-1 pr-3 font-medium">주문</th><th className="pb-1 pr-3 font-medium">배송비</th><th className="pb-1 pr-3 font-medium">경비</th><th className="pb-1 pr-3 font-medium">기록 시각</th><th /></tr>
               </thead>
               <tbody>{rows.map((r) => <Row key={r.record_id} r={r} />)}</tbody>

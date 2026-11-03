@@ -50,7 +50,7 @@ export function ClosingSection({ tick, onChanged, focus }: {
           </button>
         ))}
       </div>
-      <label className="flex items-center gap-1 text-xs text-ink-500">
+      <label className="flex items-center gap-1 text-sm text-ink-500">
         <span className="sr-only">{period === "day" ? "날짜" : "달"}</span>
         {period === "day"
           ? <input type="date" className="field w-auto py-1" value={date || res.env?.data.date || ""} onChange={(e) => setDate(e.target.value)} />
@@ -72,15 +72,15 @@ export function ClosingSection({ tick, onChanged, focus }: {
                 ? <Chip label="확정됨" tone={TONE.ok} />
                 : <Chip label="확정 전" tone={TONE.warn} />}
               {r.status === "confirmed" && (
-                <span className="text-xs text-ink-500">{r.confirmed_by ? `${r.confirmed_by}님이 ` : ""}{shortDateTime(r.confirmed_at)}에 확정</span>
+                <span className="text-sm text-ink-500">{r.confirmed_by ? `${r.confirmed_by}님이 ` : ""}{shortDateTime(r.confirmed_at)}에 확정</span>
               )}
-              {res.loading && <span className="text-xs text-ink-500">새로 받는 중…</span>}
+              {res.loading && <span className="text-sm text-ink-500">새로 받는 중…</span>}
             </div>
 
             <div className="grid gap-5 lg:grid-cols-2">
               <div>
                 <h3 className="text-sm font-semibold text-ink-900">손익 요약</h3>
-                <p className="text-xs text-ink-500">들어온 돈은 그대로, 나간 돈은 − 로 표시합니다.</p>
+                <p className="text-sm text-ink-500">들어온 돈은 그대로, 나간 돈은 − 로 표시합니다.</p>
                 {r.lines.length ? (
                   <table className="mt-2 w-full text-sm">
                     <tbody>
@@ -100,7 +100,7 @@ export function ClosingSection({ tick, onChanged, focus }: {
 
               <div>
                 <h3 className="text-sm font-semibold text-ink-900">설명</h3>
-                <p className="text-xs text-ink-500">{r.commentary_source === "llm" ? "AI가 위 숫자를 보고 쓴 문장입니다. 숫자는 표가 기준입니다." : "정해진 문장 틀(템플릿)에 숫자를 넣어 만든 설명입니다."}</p>
+                <p className="text-sm text-ink-500">{r.commentary_source === "llm" ? "AI가 위 숫자를 보고 쓴 문장입니다. 숫자는 표가 기준입니다." : "정해진 문장 틀(템플릿)에 숫자를 넣어 만든 설명입니다."}</p>
                 <div className="mt-2 rounded-2xl bg-surface-2 px-4 py-3 text-sm leading-relaxed text-ink-700">
                   <Chip label={r.commentary_source === "llm" ? "AI가 씀" : "템플릿 문장"} tone={r.commentary_source === "llm" ? TONE.info : TONE.muted} />
                   <p className="mt-1.5 whitespace-pre-line">{plainText(r.commentary) || "설명이 없습니다."}</p>
@@ -114,7 +114,7 @@ export function ClosingSection({ tick, onChanged, focus }: {
                       <p className="text-sm text-ink-700">숫자를 확인했으면 결산을 확정하세요. 확정하면 이 기간 숫자를 보고 기준으로 고정합니다(돈이 움직이지는 않습니다).</p>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <button className="btn-primary" disabled={!humanTokenSet || confirming} onClick={() => confirm(r)}>{confirming ? "확정하는 중…" : "결산 확정"}</button>
-                        {!humanTokenSet && <span className="text-xs text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 버튼이 꺼져 있습니다.</span>}
+                        {!humanTokenSet && <span className="text-sm text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 버튼이 꺼져 있습니다.</span>}
                       </div>
                     </>
                   )}
@@ -127,11 +127,11 @@ export function ClosingSection({ tick, onChanged, focus }: {
               <summary className="cursor-pointer text-sm font-semibold text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
                 장부에 적을 내용 미리보기 (분개 {r.journal.length}줄)
               </summary>
-              <p className="mt-1 text-xs text-ink-500">회계 장부에 적는 방식(분개)입니다. 왼쪽(차변)은 늘어난 자산·비용, 오른쪽(대변)은 늘어난 매출·갚을 돈입니다. 두 합계가 같아야 맞습니다.</p>
+              <p className="mt-1 text-sm text-ink-500">회계 장부에 적는 방식(분개)입니다. 왼쪽(차변)은 늘어난 자산·비용, 오른쪽(대변)은 늘어난 매출·갚을 돈입니다. 두 합계가 같아야 맞습니다.</p>
               {r.journal.length ? (
                 <div className="mt-2 overflow-x-auto">
                   <table className="w-full min-w-[480px] text-sm">
-                    <thead className="text-left text-xs text-ink-500">
+                    <thead className="text-left text-sm text-ink-500">
                       <tr><th className="pb-1 font-medium">계정</th><th className="pb-1 text-right font-medium">차변</th><th className="pb-1 text-right font-medium">대변</th><th className="pb-1 pl-3 font-medium">메모</th></tr>
                     </thead>
                     <tbody>
@@ -140,7 +140,7 @@ export function ClosingSection({ tick, onChanged, focus }: {
                           <td className="py-1.5">{j.account}</td>
                           <td className="py-1.5 text-right tabular-nums">{j.debit ? krw(j.debit) : ""}</td>
                           <td className="py-1.5 text-right tabular-nums">{j.credit ? krw(j.credit) : ""}</td>
-                          <td className="py-1.5 pl-3 text-xs text-ink-500">{j.memo}</td>
+                          <td className="py-1.5 pl-3 text-sm text-ink-500">{j.memo}</td>
                         </tr>
                       ))}
                       <tr className="border-t-2 border-ink-300 font-semibold">

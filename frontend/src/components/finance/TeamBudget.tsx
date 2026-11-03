@@ -56,7 +56,7 @@ export function TeamBudgetSection({ tick }: { tick: number }) {
         <div className="flex gap-1 rounded-full bg-ink-50 p-0.5" role="group" aria-label="달 고르기">
           {months.map((m) => (
             <button key={m} type="button" aria-pressed={m === month} onClick={() => setMonth(m)}
-              className={`rounded-full px-3 py-1 text-xs font-medium ${m === month ? "bg-brand-600 text-white" : "text-ink-700 hover:bg-ink-100"}`}>
+              className={`rounded-full px-3 py-1 text-sm font-medium ${m === month ? "bg-brand-600 text-white" : "text-ink-700 hover:bg-ink-100"}`}>
               {m === thisMonth ? `${m} (이번 달)` : m}
             </button>
           ))}
@@ -79,13 +79,13 @@ export function TeamBudgetSection({ tick }: { tick: number }) {
                 {b.example ? <Chip label="예시 인원" tone={TONE.muted} /> : <Chip label={s.label} tone={s.tone} />}
                 <span className="text-ink-700">인당 월 <b className="tabular-nums">{krw(b.per_head_monthly)}</b> · 총 {people(b.headcount_total)}</span>
                 <span className="text-ink-900">합계 <b className="tabular-nums">{krw(b.total)}</b></span>
-                {b.change_total != null && <span className="text-xs tabular-nums text-ink-500">{b.prev_month} 대비 {b.change_total === 0 ? "변동 없음" : delta(b.change_total)}</span>}
-                {b.basis && <span className="text-xs text-ink-500">{plainText(b.basis)}</span>}
+                {b.change_total != null && <span className="text-sm tabular-nums text-ink-500">{b.prev_month} 대비 {b.change_total === 0 ? "변동 없음" : delta(b.change_total)}</span>}
+                {b.basis && <span className="text-sm text-ink-500">{plainText(b.basis)}</span>}
               </div>
 
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[520px] text-sm">
-                  <thead className="text-left text-xs text-ink-500">
+                  <thead className="text-left text-sm text-ink-500">
                     <tr>
                       <th className="py-2 pr-3 font-medium">팀</th>
                       <th className="py-2 pr-3 text-right font-medium">{b.prev_month} 인원</th>
@@ -109,10 +109,10 @@ export function TeamBudgetSection({ tick }: { tick: number }) {
                   </tbody>
                 </table>
               </div>
-              {b.prev_total == null && <p className="text-xs text-ink-500">{b.prev_month} 인원을 받지 못해 지난달 대비는 보여 주지 않습니다.</p>}
+              {b.prev_total == null && <p className="text-sm text-ink-500">{b.prev_month} 인원을 받지 못해 지난달 대비는 보여 주지 않습니다.</p>}
 
               {b.approved && (
-                <p className="text-xs text-ink-500">
+                <p className="text-sm text-ink-500">
                   {b.approved.by}님이 {new Date(b.approved.at).toLocaleString("ko-KR")}에 합계 {krw(b.approved.total)}(인당 {krw(b.approved.per_head_monthly)})로 확정함
                   {b.approved.note && ` · 메모: ${plainText(b.approved.note)}`}
                 </p>
@@ -127,7 +127,7 @@ export function TeamBudgetSection({ tick }: { tick: number }) {
 
               {!b.example && (b.status === "pending" || b.status === "changed") && (
                 <div className="space-y-2 rounded-2xl border border-ink-100 px-4 py-3">
-                  <p className="text-xs text-ink-500">
+                  <p className="text-sm text-ink-500">
                     {b.status === "changed"
                       ? "확정한 뒤 팀 인원이나 인당 단가가 바뀌었습니다. 지금 숫자를 보고 다시 확정하세요."
                       : "숫자가 맞으면 확정하세요. 이 달 팀 예산을 기준으로 남길 뿐, 돈을 옮기지는 않습니다."}
@@ -139,7 +139,7 @@ export function TeamBudgetSection({ tick }: { tick: number }) {
                       {busy ? "확정하는 중…" : `${b.month} 팀 예산 확정`}
                     </button>
                   </div>
-                  {!humanTokenSet && <p className="text-xs text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 없어 확정 버튼이 꺼져 있습니다.</p>}
+                  {!humanTokenSet && <p className="text-sm text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 없어 확정 버튼이 꺼져 있습니다.</p>}
                 </div>
               )}
               {problem && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{problem}</p>}

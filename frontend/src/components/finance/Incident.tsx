@@ -71,7 +71,7 @@ function IncidentTabs({ recent, older, selected, onSelect }: { recent: IncidentS
               onClick={() => onSelect(i.context_id)} onKeyDown={(e) => onKey(e, idx)}
               className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${on ? "bg-brand-600 text-white" : "bg-surface text-ink-700 ring-1 ring-ink-100 hover:bg-ink-100"}`}>
               <span className="truncate" title={i.context_id}>{incidentName(i.context_id, i.component, i.opened_at)}</span>
-              <span className={`shrink-0 text-xs tabular-nums ${on ? "text-white/80" : "text-ink-500"}`}>{shortDay(i.opened_at)}</span>
+              <span className={`shrink-0 text-sm tabular-nums ${on ? "text-white/80" : "text-ink-500"}`}>{shortDay(i.opened_at)}</span>
             </button>
           );
         })}
@@ -107,7 +107,7 @@ function SummaryStrip({ s }: { s: IncidentSummary }) {
 function LedgerLine({ d }: { d: IncidentDetail }) {
   const src = ledgerSourceKo(d.ledger_source);
   return (
-    <p className="rounded-2xl bg-surface-2 px-4 py-3 text-xs text-ink-700">
+    <p className="rounded-2xl bg-surface-2 px-4 py-3 text-sm text-ink-700">
       <b>장부 출처: {src.label}</b>{src.detail && <span className="text-ink-500"> · {src.detail}</span>}
     </p>
   );
@@ -118,9 +118,9 @@ function Card({ title, value, tone = "text-ink-900", children }: { title: string
   const unknown = value === "확인할 수 없음";
   return (
     <div className="rounded-2xl border border-ink-100 bg-surface px-4 py-3">
-      <p className="text-xs font-medium text-ink-500">{title}</p>
+      <p className="text-sm font-medium text-ink-500">{title}</p>
       <p className={`mt-0.5 break-words font-bold tabular-nums ${unknown ? "text-sm text-ink-500" : `text-2xl ${tone}`}`}>{value}</p>
-      {children && <div className="mt-2 space-y-1 text-xs text-ink-700">{children}</div>}
+      {children && <div className="mt-2 space-y-1 text-sm text-ink-700">{children}</div>}
     </div>
   );
 }
@@ -142,7 +142,7 @@ function Cards({ d }: { d: IncidentDetail }) {
                 ))}
               </ul>
             )}
-            <p className="text-[11px] text-ink-500">재무는 이 숫자를 다시 계산하지 않습니다.{impact.collected_at && ` ${shortDateTime(impact.collected_at)} 분석`}</p>
+            <p className="text-sm text-ink-500">재무는 이 숫자를 다시 계산하지 않습니다.{impact.collected_at && ` ${shortDateTime(impact.collected_at)} 분석`}</p>
           </>
         ) : <p className="text-ink-500">{d.window ? "데이터 AI의 영향 분석을 아직 받지 못했습니다." : "장애 구간을 몰라 계산하지 못했습니다. 총괄 AI의 사건 기록은 서버를 다시 켜면 비워집니다."}</p>}
       </Card>
@@ -172,7 +172,7 @@ function Recipients({ d }: { d: IncidentDetail }) {
         <div className="mt-2 overflow-x-auto rounded-2xl border border-ink-100">
           {/* 열 너비를 고정한다. 기록 번호를 펼쳐도 금액 열이 움직이지 않게 */}
           <table className="w-full min-w-[480px] table-fixed text-sm">
-            <thead className="bg-surface-2 text-left text-xs text-ink-500">
+            <thead className="bg-surface-2 text-left text-sm text-ink-500">
               <tr>
                 <th className="px-3 py-2 font-medium">고객</th>
                 <th className="w-36 px-3 py-2 text-right font-medium">금액</th>
@@ -186,11 +186,11 @@ function Recipients({ d }: { d: IncidentDetail }) {
                     <td className="px-3 py-2">
                       {/* 쿠폰 이벤트로만 적힌 줄은 고객·실행 번호가 비어 있다. 비어 있어도 화면이 깨지면 안 된다 */}
                       <b className="text-ink-900">{r.buyer_id ? humanId(r.buyer_id) : "고객 정보 없음"}</b>
-                      <p className="text-[11px] text-ink-500">{purposeKo(r.reason_code, r.purpose_code)} · {shortDateTime(r.at)}</p>
+                      <p className="text-sm text-ink-500">{purposeKo(r.reason_code, r.purpose_code)} · {shortDateTime(r.at)}</p>
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {krw(r.amount)}
-                      {r.count > 1 && <p className="text-[11px] text-ink-500">{krw(r.unit_value)} × {r.count}장</p>}
+                      {r.count > 1 && <p className="text-sm text-ink-500">{krw(r.unit_value)} × {r.count}장</p>}
                     </td>
                     <td className="px-3 py-2">
                       <RefList refs={[r.coupon_id, r.execution_id]} label="보기" />
@@ -203,7 +203,7 @@ function Recipients({ d }: { d: IncidentDetail }) {
         </div>
       ) : <div className="mt-2"><Empty>이 사건으로 나간 보상 쿠폰이 아직 없습니다.</Empty></div>}
       {noCustomer > 0 && (
-        <p className="mt-2 text-xs leading-relaxed text-ink-500">
+        <p className="mt-2 text-sm leading-relaxed text-ink-500">
           "고객 정보 없음" {noCustomer}건: 안전 장치와 쇼핑몰 기록에서 고객 번호를 찾지 못한 줄입니다. 금액은 지급 기록 그대로입니다.
         </p>
       )}
@@ -218,7 +218,7 @@ function WhatToDo() {
     <aside className="rounded-2xl bg-surface-2 px-4 py-3 text-sm leading-relaxed text-ink-700">
       <p><b className="text-ink-900">여기서 할 일은 없습니다.</b> 이 장애로 나간 돈을 확인하는 화면이고, 보상과 환불은 재무가 정하지 않습니다.</p>
       <p className="mt-1">이상한 점이 있으면 담당 화면에서 처리합니다.</p>
-      <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+      <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm">
         <li>보상을 못 받은 고객, 환불 문제: <Link to="/support" className={link}>고객지원 AI</Link></li>
         <li>승인을 기다리는 쿠폰: <Link to="/marketing" className={link}>마케팅 AI</Link></li>
         <li>장애 진행 상황: <Link to="/orchestrator" className={link}>총괄</Link></li>
@@ -236,10 +236,10 @@ function IncidentDetailView({ id, summary, tick }: { id: string; summary: Incide
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-lg font-semibold text-ink-900">{incidentName(id, res.env?.data.component ?? summary?.component)}</h3>
         <MockBadge meta={meta} />
-        {res.loading && res.env && <span className="text-[11px] text-ink-500" aria-live="polite">새로 받는 중…</span>}
+        {res.loading && res.env && <span className="text-sm text-ink-500" aria-live="polite">새로 받는 중…</span>}
       </div>
       {res.env?.data.window && (
-        <p className="-mt-3 text-xs text-ink-500">영향 분석 구간 {shortDateTime(res.env.data.window.from)} ~ {shortDateTime(res.env.data.window.to)}{res.env.data.recovered_at && ` · 정상 복귀 ${shortDateTime(res.env.data.recovered_at)}`}</p>
+        <p className="-mt-3 text-sm text-ink-500">영향 분석 구간 {shortDateTime(res.env.data.window.from)} ~ {shortDateTime(res.env.data.window.to)}{res.env.data.recovered_at && ` · 정상 복귀 ${shortDateTime(res.env.data.recovered_at)}`}</p>
       )}
       {summary && <SummaryStrip s={summary} />}
       <MetaLine meta={meta} />
@@ -281,11 +281,11 @@ export function IncidentFinance({ list, selected, onSelect, tick }: {
           <h2 id="incident-finance-title" className="flex flex-wrap items-center gap-2 text-base font-semibold text-ink-900">
             장애 사건 재무 <MockBadge meta={list.env?.meta} />
           </h2>
-          <p className="mt-0.5 text-xs leading-relaxed text-ink-500">
+          <p className="mt-0.5 text-sm leading-relaxed text-ink-500">
             결제 같은 서비스에 장애가 나면 총괄 AI가 사건을 열고, 보상은 고객지원 AI가 정해 마케팅 AI가 지급합니다.
             재무는 쿠폰·환불의 끝난 금액을 사건별 장부에 적기만 합니다.
           </p>
-          {src && <p className="text-[11px] text-ink-500">장부 출처: {src.label}</p>}
+          {src && <p className="text-sm text-ink-500">장부 출처: {src.label}</p>}
         </div>
       </div>
 

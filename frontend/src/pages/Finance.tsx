@@ -73,7 +73,7 @@ function Glossary() {
         {TERMS.map(([term, meaning]) => (
           <div key={term}>
             <dt className="font-medium text-ink-900">{term}</dt>
-            <dd className="text-xs leading-relaxed text-ink-700">{meaning}</dd>
+            <dd className="text-sm leading-relaxed text-ink-700">{meaning}</dd>
           </div>
         ))}
       </dl>
@@ -92,7 +92,7 @@ function DataToggle() {
     <div className="flex gap-1 rounded-full bg-ink-50 p-0.5" role="group" aria-label="데이터 보기">
       {([[false, "실제 데이터"], [true, "예시 데이터"]] as const).map(([on, label]) => (
         <button key={label} type="button" aria-pressed={exampleMode === on} onClick={() => pick(on)}
-          className={`rounded-full px-3 py-1 text-xs font-medium ${exampleMode === on ? "bg-brand-600 text-white" : "text-ink-700 hover:bg-ink-100"}`}>{label}</button>
+          className={`rounded-full px-3 py-1 text-sm font-medium ${exampleMode === on ? "bg-brand-600 text-white" : "text-ink-700 hover:bg-ink-100"}`}>{label}</button>
       ))}
     </div>
   );
@@ -215,7 +215,7 @@ export default function FinancePage() {
             평소에는 결산·대사·판매자 정산·팀 예산을 합니다.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs sm:ml-auto">
+        <div className="flex flex-wrap items-center gap-2 text-sm sm:ml-auto">
           <DataToggle />
           <button className="btn-ghost" onClick={bump}>새로고침</button>
           {safetyUp != null && <Chip label={safetyUp ? "안전 장치 켜짐" : "안전 장치 꺼짐"} tone={safetyUp ? TONE.ok : TONE.bad} />}
@@ -232,7 +232,7 @@ export default function FinancePage() {
           <li><b>보류 큐 결정</b>: 판매자 정산 지급은 아래 <b>안전 장치 보류 큐</b>에서 진행 또는 멈춤을 누릅니다.</li>
           <li><b>평상시 업무</b>: <b>평상시 재무 업무</b> 탭에서 결산 확정, 대사 메모, 판매자 정산 묶음 요청, 팀 예산 확정을 합니다.</li>
         </ol>
-        <p className="mt-3 text-xs text-ink-500">
+        <p className="mt-3 text-sm text-ink-500">
           단계별 설명과 자주 묻는 질문은 <Link href="/finance/guide" className="font-medium text-brand-700 underline">재무 AI 관리자 사용법</Link>에 있습니다.
         </p>
       </details>
@@ -282,7 +282,7 @@ export default function FinancePage() {
                   className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-surface px-4 py-3 text-left shadow-sm transition hover:ring-2 hover:ring-brand-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
                   <Chip label="보류 큐" tone={TONE.warn} />
                   <span className="min-w-0 flex-1 text-sm font-medium text-ink-900">안전 장치 보류 큐에서 결정 기다림 {otherPending.length}건</span>
-                  <span className="text-xs font-medium text-brand-700">보류 큐에서 결정하기 →</span>
+                  <span className="text-sm font-medium text-brand-700">보류 큐에서 결정하기 →</span>
                 </button>
               </li>
             )}
@@ -315,7 +315,7 @@ export default function FinancePage() {
       <section aria-labelledby="today" className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <h2 id="today" className="text-base font-semibold text-ink-900">오늘의 재무</h2>
-          {overview.env && <span className="text-xs text-ink-500">{overview.env.data.date}</span>}
+          {overview.env && <span className="text-sm text-ink-500">{overview.env.data.date}</span>}
           <MockBadge meta={overview.env?.meta} />
         </div>
         {overview.env ? (
@@ -325,11 +325,11 @@ export default function FinancePage() {
                 const v = overview.env!.data.kpis[key];
                 return (
                   <div key={key} className={`card px-4 py-3 ${key === "net_result" ? "ring-1 ring-brand-100" : ""}`}>
-                    <dt className="text-[11px] text-ink-500">{label}</dt>
+                    <dt className="text-sm text-ink-500">{label}</dt>
                     <dd className={`mt-0.5 break-words font-semibold tabular-nums ${v == null ? "text-sm text-ink-500" : `text-lg sm:text-xl ${v < 0 ? "text-red-700" : "text-ink-900"}`}`}>
                       {v != null && v < 0 ? `−${krw(-v)}` : krw(v)}
                     </dd>
-                    <dd className="mt-0.5 text-[11px] leading-snug text-ink-500">{hint}</dd>
+                    <dd className="mt-0.5 text-sm leading-snug text-ink-500">{hint}</dd>
                   </div>
                 );
               })}

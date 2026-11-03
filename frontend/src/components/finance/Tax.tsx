@@ -35,7 +35,7 @@ export function TaxSection({ tick }: { tick: number }) {
               <dl className="grid grid-cols-3 gap-3">
                 {([["매출세액", p.output_vat], ["매입세액", p.input_vat], ["낼 세액 (참고)", p.payable]] as const).map(([label, v]) => (
                   <div key={label} className="rounded-2xl bg-surface-2 px-3 py-2">
-                    <dt className="text-[11px] text-ink-500">{label}</dt>
+                    <dt className="text-sm text-ink-500">{label}</dt>
                     <dd className="text-base font-semibold tabular-nums">{krw(v)}</dd>
                   </div>
                 ))}
@@ -46,18 +46,18 @@ export function TaxSection({ tick }: { tick: number }) {
                   쿠폰 {krw(p.coupon.company_coupon)} · 수수료 {krw(p.coupon.commission_before_coupon)} → 쿠폰 공제 후 {krw(p.coupon.commission_after_coupon)}
                   {p.coupon.coupon_over_commission ? ` (수수료를 넘는 쿠폰 ${krw(p.coupon.coupon_over_commission)}은 공제할 수 없음)` : ""}
                 </p>
-                <p className="mt-1 text-xs text-ink-500">
+                <p className="mt-1 text-sm text-ink-500">
                   지금 설정: {p.coupon.reduces_base ? "쿠폰을 수수료에서 공제(에누리)" : "공제하지 않음"}. 약관상 쿠폰 할인액을 판매자 수수료에서 직접 빼는 구조면 에누리로 과세표준에서 뺍니다(대법원 2014두298).
                 </p>
               </div>
               {p.seller_sales && (
-                <p className="text-xs text-ink-500">참고 · 판매자 상품 매출(캣북스 매출 아님): 면세(도서) {krw(p.seller_sales.exempt)}, 과세 {krw(p.seller_sales.taxable)}</p>
+                <p className="text-sm text-ink-500">참고 · 판매자 상품 매출(캣북스 매출 아님): 면세(도서) {krw(p.seller_sales.exempt)}, 과세 {krw(p.seller_sales.taxable)}</p>
               )}
               <div className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 <b>세무사에게 확인할 것</b>
                 <ul className="mt-1 list-disc space-y-0.5 pl-5">{p.checks.map((c) => <li key={c}>{c}</li>)}</ul>
               </div>
-              <p className="text-xs text-ink-500">{p.basis}</p>
+              <p className="text-sm text-ink-500">{p.basis}</p>
             </div>
           )}
         </ResourceBody>
@@ -80,7 +80,7 @@ export function TaxSection({ tick }: { tick: number }) {
               {r.rows.length ? (
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[640px] text-sm">
-                    <thead className="text-left text-xs text-ink-500">
+                    <thead className="text-left text-sm text-ink-500">
                       <tr><th className="pb-1 font-medium">판매자</th><th className="pb-1 font-medium">사업자번호</th><th className="pb-1 font-medium">월</th><th className="pb-1 text-right font-medium">판매금액</th><th className="pb-1 font-medium">결제수단</th><th className="pb-1 font-medium">면세·과세</th></tr>
                     </thead>
                     <tbody>
@@ -90,15 +90,15 @@ export function TaxSection({ tick }: { tick: number }) {
                           <td className="py-1.5">{x.business_no ?? <Chip label="자료 없음" tone={TONE.warn} />}</td>
                           <td className="py-1.5 tabular-nums">{x.month}</td>
                           <td className="py-1.5 text-right tabular-nums">{krw(x.total)}</td>
-                          <td className="py-1.5 text-xs text-ink-700">{Object.entries(x.by_method).map(([k, v]) => `${k} ${krw(v)}`).join(", ")}</td>
-                          <td className="py-1.5 text-xs text-ink-700">{Object.entries(x.by_tax).map(([k, v]) => `${k} ${krw(v)}`).join(", ")}</td>
+                          <td className="py-1.5 text-sm text-ink-700">{Object.entries(x.by_method).map(([k, v]) => `${k} ${krw(v)}`).join(", ")}</td>
+                          <td className="py-1.5 text-sm text-ink-700">{Object.entries(x.by_tax).map(([k, v]) => `${k} ${krw(v)}`).join(", ")}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               ) : <Empty>이번 분기 판매가 없습니다.</Empty>}
-              <p className="text-xs text-ink-500">{r.basis}</p>
+              <p className="text-sm text-ink-500">{r.basis}</p>
             </div>
           )}
         </ResourceBody>
@@ -113,7 +113,7 @@ function VatTable({ title, rows }: { title: string; rows: { code: string; label:
       <h3 className="text-sm font-semibold text-ink-900">{title}</h3>
       {rows.length ? (
         <table className="mt-2 w-full text-sm">
-          <thead className="text-left text-xs text-ink-500"><tr><th className="pb-1 font-medium">항목</th><th className="pb-1 text-right font-medium">공급가액</th><th className="pb-1 text-right font-medium">세액</th></tr></thead>
+          <thead className="text-left text-sm text-ink-500"><tr><th className="pb-1 font-medium">항목</th><th className="pb-1 text-right font-medium">공급가액</th><th className="pb-1 text-right font-medium">세액</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.code} className="border-t border-ink-100">

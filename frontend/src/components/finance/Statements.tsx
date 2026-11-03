@@ -44,7 +44,7 @@ export function StatementsSection({ tick }: { tick: number }) {
           </button>
         ))}
       </div>
-      <label className="flex items-center gap-1 text-xs text-ink-500">
+      <label className="flex items-center gap-1 text-sm text-ink-500">
         <span className="sr-only">기준 날짜</span>
         <input type="date" className="field w-auto py-1" value={date} onChange={(e) => setDate(e.target.value)} />
       </label>
@@ -69,7 +69,7 @@ export function StatementsSection({ tick }: { tick: number }) {
             </p>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[560px] text-sm">
-                <thead className="text-left text-xs text-ink-500">
+                <thead className="text-left text-sm text-ink-500">
                   <tr>
                     <th className="pb-1 font-medium">과목</th>
                     <th className="pb-1 text-right font-medium">당기 ({s.current.name})</th>
@@ -83,7 +83,7 @@ export function StatementsSection({ tick }: { tick: number }) {
                       <th scope="row" className={`py-1.5 pr-3 text-left font-normal ${r.level ? "pl-4 text-ink-700" : ""}`}>{r.total ? <b>{r.label}</b> : r.label}</th>
                       <td className={`py-1.5 text-right tabular-nums ${tone(r.current)}`}>{amount(r.current)}</td>
                       <td className={`py-1.5 text-right tabular-nums ${tone(r.previous)}`}>{amount(r.previous)}</td>
-                      <td className="py-1.5 pl-3 text-xs font-normal text-ink-500">{r.note}</td>
+                      <td className="py-1.5 pl-3 text-sm font-normal text-ink-500">{r.note}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -94,17 +94,17 @@ export function StatementsSection({ tick }: { tick: number }) {
               <dl className="mt-2 grid gap-2 sm:grid-cols-3">
                 {s.notes.map((n) => (
                   <div key={n.code} className="rounded-2xl bg-surface-2 px-3 py-2">
-                    <dt className="text-[11px] text-ink-500">{n.label}</dt>
+                    <dt className="text-sm text-ink-500">{n.label}</dt>
                     <dd className="text-sm font-semibold tabular-nums">
                       {n.current == null ? "자료 없음" : n.current.toLocaleString("ko-KR")}
-                      <span className="ml-1 text-xs font-normal text-ink-500">전기 {n.previous == null ? "자료 없음" : n.previous.toLocaleString("ko-KR")}</span>
+                      <span className="ml-1 text-sm font-normal text-ink-500">전기 {n.previous == null ? "자료 없음" : n.previous.toLocaleString("ko-KR")}</span>
                     </dd>
-                    {n.note && <dd className="text-[11px] text-ink-500">{n.note}</dd>}
+                    {n.note && <dd className="text-sm text-ink-500">{n.note}</dd>}
                   </div>
                 ))}
               </dl>
             </div>
-            <p className="text-xs text-ink-500">작성 기준: {s.basis}. 재무상태표·현금흐름표는 자산·부채·현금 잔액 장부가 없어 만들지 않습니다.</p>
+            <p className="text-sm text-ink-500">작성 기준: {s.basis}. 재무상태표·현금흐름표는 자산·부채·현금 잔액 장부가 없어 만들지 않습니다.</p>
           </div>
         )}
       </ResourceBody>

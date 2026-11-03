@@ -46,7 +46,7 @@ export function SelfTestPanel({ test, meta, loaded, open, running, disabled, onR
 }) {
   const stale = loaded && isStale(test, meta);
   const runBtn = (
-    <button type="button" className="btn-ghost text-xs" onClick={onRunNow} disabled={running || disabled}>
+    <button type="button" className="btn-ghost text-sm" onClick={onRunNow} disabled={running || disabled}>
       {running ? "테스트하는 중…" : "지금 다시 테스트"}
     </button>
   );
@@ -57,7 +57,7 @@ export function SelfTestPanel({ test, meta, loaded, open, running, disabled, onR
     <p role="alert" className="flex flex-wrap items-center gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 ring-1 ring-amber-100 sm:px-5">
       <span className="min-w-0 flex-1">
         자동 테스트 결과가 늦어지고 있습니다 (재무 AI 서버 상태 확인).
-        <span className="block text-xs font-normal">
+        <span className="block text-sm font-normal">
           {test ? `마지막 결과는 ${ago(test.ran_at)}입니다.` : "아직 받은 테스트 결과가 없습니다."} 서버는 {every ?? "10분마다"} 스스로 테스트합니다.
         </span>
       </span>
@@ -81,7 +81,7 @@ export function SelfTestPanel({ test, meta, loaded, open, running, disabled, onR
           <p className="min-w-0 flex-1 text-sm">{test.summary}</p>
           {!stale && runBtn}
         </div>
-        <p className="mt-1 text-xs opacity-80">
+        <p className="mt-1 text-sm opacity-80">
           {ago(test.ran_at)} ({shortDateTime(test.ran_at)})
           {test.trigger && TRIGGER_KO[test.trigger] && ` · ${TRIGGER_KO[test.trigger]}`}
           {` · ${test.passed}/${test.total} 통과`}
@@ -90,7 +90,7 @@ export function SelfTestPanel({ test, meta, loaded, open, running, disabled, onR
           {!next && every && ` · ${every} 자동 테스트`}
         </p>
         {test.result !== "pass" && (
-          <p className="mt-1 text-xs font-medium">
+          <p className="mt-1 text-sm font-medium">
             {test.result === "fail"
               ? "테스트를 통과하지 못했습니다. 문제가 해결될 때까지 재무 AI의 숫자와 리포트를 믿고 쓰지 마세요."
               : "연결 문제가 해결될 때까지 일부 숫자가 ‘확인할 수 없음’으로 보일 수 있습니다."}
@@ -102,17 +102,17 @@ export function SelfTestPanel({ test, meta, loaded, open, running, disabled, onR
           </ul>
         )}
         <details className="mt-2 text-sm" open={open}>
-          <summary className="cursor-pointer text-xs font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">점검한 항목 {test.total}개 모두 보기</summary>
+          <summary className="cursor-pointer text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">점검한 항목 {test.total}개 모두 보기</summary>
           <ul className="mt-2 grid gap-1 sm:grid-cols-2">
             {test.checks.map((c) => (
               <li key={c.name} className="flex gap-2 rounded-lg bg-surface/70 px-2 py-1 text-ink-700">
-                <span className={`chip shrink-0 ${c.ok ? "bg-emerald-50 text-emerald-700" : c.level === "fail" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{c.ok ? "통과" : c.level === "fail" ? "실패" : "주의"}</span>
-                <span><b className="text-ink-900">{c.name}</b> <span className="text-xs">{c.detail}</span></span>
+                <span className={`chip shrink-0 text-sm ${c.ok ? "bg-emerald-50 text-emerald-700" : c.level === "fail" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{c.ok ? "통과" : c.level === "fail" ? "실패" : "주의"}</span>
+                <span><b className="text-ink-900">{c.name}</b> <span className="text-sm">{c.detail}</span></span>
               </li>
             ))}
           </ul>
         </details>
-        <p className="mt-2 text-[11px] opacity-80">가짜 자료로 점검해서 실제 기록이나 돈에는 영향이 없습니다. 화면은 1분마다 최근 결과를 다시 받습니다.</p>
+        <p className="mt-2 text-sm opacity-80">가짜 자료로 점검해서 실제 기록이나 돈에는 영향이 없습니다. 화면은 1분마다 최근 결과를 다시 받습니다.</p>
       </section>
     </div>
   );
