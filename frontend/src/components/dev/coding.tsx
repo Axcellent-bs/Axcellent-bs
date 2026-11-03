@@ -14,9 +14,9 @@ const actions = planningApi(DEV_API)
 
 export const CODING_LABEL: Record<CodingStatus, string> = {
   queued: '대기', claimed: '가져감', reading: '파일 읽는 중', writing: '코드 작성 중', reviewing: '리뷰 중',
-  opened: 'PR 열림', merged: '머지됨', waiting_human: '사람 확인', failed: '실패', canceled: '중단됨',
+  opened: 'PR 열림', merged: '머지됨', waiting_human: '사람 확인', failed: '실패', canceled: '중단됨', covered: '반영됨',
 }
-const DONE: CodingStatus[] = ['opened', 'merged']
+const DONE: CodingStatus[] = ['opened', 'merged', 'covered']
 /** 토큰 수를 짧게: 950 · 12.3k · 1.2M */
 export const tokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : `${n}`)
 export const pctOf = (used: number, limit: number) => Math.round((used / Math.max(limit, 1)) * 100)
@@ -40,7 +40,7 @@ export const isRunning = (s?: CodingStatus | string) => RUNNING.includes(s as Co
 export const CodingLabel = ({ c }: { c: CodingRun }) => <State v={codingState(c)} live={isRunning(c.status)} />
 const STUCK: CodingStatus[] = ['failed', 'waiting_human']
 /** 사람이 중단할 수 있는 상태 (머지됨·중단됨이 아니면) */
-export const canCancel = (s?: CodingStatus) => !!s && s !== 'merged' && s !== 'canceled'
+export const canCancel = (s?: CodingStatus) => !!s && s !== 'merged' && s !== 'canceled' && s !== 'covered'
 
 /** 작업 중단 버튼. 열린 PR은 서버가 닫고 브랜치를 지운다 */
 export function CancelButton({ taskId, status }: { taskId: string; status?: CodingStatus }) {
@@ -171,6 +171,13 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
       setBusy(false)
     }
   }
+  // 바뀐 내용이 없어 멈춤: 앞 작업이 이미 반영했으면 사람이 PR 없이 완료로 닫는다
+  const noChange = !c.pr && (c.status === 'failed' || c.status === 'waiting_human') && (c.error ?? '').includes('바뀐 내용이 없음')
+  const closeCovered = () => {
+    if (window.confirm(`${task.id}를 앞 작업이 이미 반영한 것으로 닫을까요? PR 없이 완료돼요.`)) {
+      void act(() => api.closeCovered(task.id), `${task.id} 반영됨으로 닫음`)
+    }
+  }
   // 실행 관문이 PR 열기를 보류함 (보호 경로·한도 등): 사람이 승인하면 같은 코드로 PR을 연다
   const heldPr = c.status === 'waiting_human' && !c.pr && (!!c.holdKey || (c.error ?? '').includes('generate_pr를 허락하지 않음 (held)'))
   const approveHold = () => act(async () => {
@@ -194,6 +201,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
         {!!files.length && <Tag>{files.length}파일 · <span className="mono">+{add} −{del}</span></Tag>}
         {c.review && <Tag tone={c.review.verdict === '통과' ? 'green' : 'amber'}>리뷰 {c.review.verdict}</Tag>}
         {c.instruction && <Tag>사람 지시</Tag>}
+        {c.status === 'covered' && <Tag tone="green">PR 없음 · {c.coveredBy?.length ? `${c.coveredBy.join(', ')}가 반영` : '앞 작업이 반영'}</Tag>}
       </span>
       {c.summary && <p>{c.summary}</p>}
       {c.mode === 'subscription' && c.progress && <p className="muted">{c.progress}</p>}
@@ -226,6 +234,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
         {waitingPr && <Button size="small" variant="primary" onClick={merge} disabled={busy}>머지</Button>}
         {heldPr && <Button size="small" variant="primary" onClick={() => void approveHold()} disabled={busy}>{busy ? '보내는 중…' : '승인하고 PR 열기'}</Button>}
         {(STUCK.includes(c.status) || c.status === 'canceled') && !waitingPr && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.status === 'canceled' ? '재개' : c.mergeConflict ? '최신 코드로 다시 쓰기' : '다시 시도'}</Button>}
+        {noChange && <Button size="small" onClick={closeCovered} disabled={busy}>반영됨으로 닫기</Button>}
         <CancelButton taskId={task.id} status={c.status} />
       </span>
     </Step>

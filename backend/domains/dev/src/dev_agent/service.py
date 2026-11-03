@@ -225,6 +225,14 @@ class DevService(PlanningCore):
     def _release_prs(s: State, sp: Spec) -> list[ReleasePr]:
         """기획서 하나에 묶인 PR과 개발 검수(review_pr) 결과. 닫힌 PR은 뺀다."""
         tasks = {t.id: t for t in s.tasks if t.spec == sp.id}
+        merged = [p.id for p in s.prs if p.task in tasks and p.merged and not p.closed]
+        # 앞 작업 PR이 이미 반영해 PR 없이 끝난 작업(covered): 그 문단은 반영한 PR이 맡는다
+        # (반영한 PR을 모르면 이 기획서의 머지된 PR 전부)
+        extra: dict[str, list[str]] = {}
+        for t in tasks.values():
+            if t.coding is not None and t.coding.status == "covered":
+                for pid in [x for x in t.coding.covered_by if x in merged] or merged:
+                    extra.setdefault(pid, []).append(t.para)
         out: list[ReleasePr] = []
         for p in s.prs:
             t = tasks.get(p.task)
@@ -241,7 +249,7 @@ class DevService(PlanningCore):
                     changed_paths=list(p.changed_paths),
                     review=review,  # type: ignore[arg-type]
                     review_note=(" / ".join(notes)[:300] or None) if notes else None,
-                    reviewed_paras=[t.para],
+                    reviewed_paras=[t.para, *(x for x in extra.get(p.id, []) if x != t.para)],
                 )
             )
         return out
@@ -2352,8 +2360,108 @@ class DevService(PlanningCore):
                 task.state = "C 보류"
             if point:
                 self._code_act(s, job, point, text or "")
+            if status == "covered":
+                cr.error = None
+                await self._finish_covered(s, task, job.ctx)
 
         await self._apply(run)
+
+    # ---- 앞 작업이 이미 반영한 작업 (바뀐 내용 없음 → PR 없이 완료)
+
+    def covering_prs(self, task_id: str, paths: list[str]) -> list[str]:
+        """같은 기획서의 다른 작업이 머지한 PR 중 이 파일들을 바꾼 것 (표시 id)."""
+        s = self.state
+        task = next((t for t in s.tasks if t.id == task_id), None)
+        if task is None or not task.spec:
+            return []
+        others = {t.id for t in s.tasks if t.spec == task.spec and t.id != task_id}
+        mine = {p.strip("/") for p in paths if p}
+
+        def touches(changed: list[str]) -> bool:
+            # PR 경로는 회사 코드 위치(앞머리)가 붙었을 수 있어 끝이 같으면 같은 파일로 본다
+            return any(c == m or c.endswith("/" + m) for c in changed for m in mine)
+
+        return [
+            p.id
+            for p in s.prs
+            if p.task in others and p.merged and not p.closed and touches(p.changed_paths)
+        ]
+
+    async def _finish_covered(self, s: State, task: Task, ctx: str) -> None:
+        """covered 작업을 완료로 두고, 기획서 작업이 모두 끝났으면 요청을 닫는다."""
+        task.state = "완료"
+        spec_id = task.spec
+        tasks = [t for t in s.tasks if t.spec == spec_id]
+        if not spec_id or any(t.state != "완료" for t in tasks):
+            return
+        closed = [r for r in s.requests if r.spec == spec_id and r.state != "완료"]
+        if not closed:
+            return
+        spec_prs = [p for p in s.prs if p.task in {t.id for t in tasks}]
+        ids = ", ".join(r.id for r in closed)
+        case = f"① kind request_closed · {ids}"
+        hr = await self._send_hr(
+            ctx, RecordKind.REQUEST_CLOSED, f"{spec_id}:request_closed", case,
+            f"{ids} 완료 (기획서 {spec_id} 작업 전부 끝남, {task.id}는 앞 작업이 반영)",
+            f"{spec_id} 작업 {len(tasks)}개 완료",
+            [f"request:{r.id}" for r in closed] + [f"spec:{spec_id}"],
+            self._hr_area(s, spec_prs, *self._hr_titles(s, spec_id)),
+        )  # fmt: skip
+        s.activity.append(self._hr_act(ctx, case, hr))
+        for r in closed:
+            r.state = "완료"
+        for r in closed:
+            await self._notify_result(s, r, "completed", prs=spec_prs, spec_id=spec_id)
+        s.activity.append(
+            self._act(
+                self.clock(), ctx, "planning", closed[0].from_, "get_request_status", "A2A",
+                f'{ids} "완료"를 요청 부서에 회신', "read",
+            )
+        )  # fmt: skip
+
+    async def close_dev_task_covered(self, task_id: str) -> ActionResult:
+        """사람이 '반영됨으로 닫기': 바뀐 내용이 없어 멈춘 작업을 앞 작업이 반영한 것으로 완료한다.
+
+        열린 PR이 있거나 돌고 있는 작업은 안 된다. 반영한 PR은 같은 기획서의 머지된 PR로 적는다."""
+        task = next((t for t in self.state.tasks if t.id == task_id), None)
+        if task is None or task.coding is None:
+            raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+        if task.coding.status not in ("failed", "waiting_human", "canceled"):
+            raise ActionError(
+                "NOT_CLOSABLE", f"{task_id}는 {task.coding.status} 상태라 반영됨으로 닫을 수 없다"
+            )
+        if any(p.task == task_id and not p.merged and not p.closed for p in self.state.prs):
+            raise ActionError("NOT_CLOSABLE", f"{task_id}에 열린 PR이 있다 → 머지하거나 중단")
+        coder.drop_draft(self, task_id)
+
+        async def run(s: State) -> ActionResult:
+            x = next((t for t in s.tasks if t.id == task_id), None)
+            if x is None or x.coding is None:
+                raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+            sp = next((p for p in s.specs if p.id == x.spec), None)
+            req = self._request_of_spec(s, sp) if sp else None
+            ctx = req.context_id if req else f"task:{task_id}"
+            others = {t.id for t in s.tasks if t.spec == x.spec and t.id != task_id}
+            by = [p.id for p in s.prs if p.task in others and p.merged and not p.closed]
+            text = f"{task_id} 반영됨으로 닫기" + (f" ({', '.join(by)}가 반영)" if by else "")
+            await self._execute("dev_task_covered", ctx, f"{task_id}:covered", text)
+            s.activity.append(
+                self._act(
+                    self.clock(), ctx, "human", "dev", "dev_task_covered", "사람",
+                    f"{text} (사람 클릭)",
+                )
+            )  # fmt: skip
+            x.coding.status = "covered"
+            x.coding.covered_by = by
+            x.coding.error = None
+            x.coding.updated_at = self.clock()
+            await self._finish_covered(s, x, ctx)
+            return ActionResult(
+                outcome="covered",
+                output={"task_id": task_id, "status": "covered", "covered_by": by},
+            )
+
+        return await self._apply(run)
 
     def _coding_target(self, cid: str | None) -> RepoTarget:
         conn = vcs.find_connection(cid) if cid else None

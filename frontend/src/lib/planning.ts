@@ -312,6 +312,8 @@ export const devTaskApi = (base: string) => ({
   // PR 열기 보류 건 새로 받기 (만료·모름). 받은 review_id를 사람이 승인한 뒤 retry(approved)
   renewHold: (taskId: string) => call<{ review_id: string | null }>(base, `/dev-tasks/${encodeURIComponent(taskId)}/renew-hold`, post()),
   cancel: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/cancel`, post()),
+  // 반영됨으로 닫기: 바뀐 내용이 없어 멈춘 작업을 앞 작업 PR이 반영한 것으로 완료 (PR 없음)
+  closeCovered: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/close-covered`, post()),
   revise: (taskId: string, note: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/revise`, post({ note })),
 })
 
