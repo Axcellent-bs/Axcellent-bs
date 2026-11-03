@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ax_agent_template.llm import MockLLMClient
 from ax_contracts.schemas.data import TrendEvidence, TrendVerdict
+from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.google_trends import TrendingItem
 from data_agent.connectors.youtube import VideoStat
 from data_agent.skills.topic_category import CategoryCache, _Categories, _Item
@@ -259,3 +260,109 @@ def test_todays_verdicts_survive_a_restart(tmp_path: Path) -> None:
     assert got is not None and got.status == "rising" and again.pairs() == [("롤", "lck")]
     tomorrow = TodayBoard(today=lambda: date(2026, 11, 4), path=path)
     assert tomorrow.verdict(["t1"]) is None  # 다음 날은 그날 판정만
+
+
+# ---------------------------------------------------------------- 모자란 칸: 최근 조회수 높은 영상
+
+
+class FillYouTube:
+    """search_category 가짜: 한국 영상 2개·외국 영상 1개. 부른 카테고리를 남긴다."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.calls: list[tuple[str, str | None]] = []
+        self.fail = fail
+
+    async def search_category(self, category_id, published_after, language=None):  # noqa: ANN001, ANN201
+        self.calls.append((category_id, language))
+        if self.fail:
+            raise ConnectorUnavailable("QUOTA_EXCEEDED", "할당량")
+        return [
+            VideoStat(
+                f"{category_id}a",
+                "c",
+                category_id,
+                T0,
+                500,
+                1,
+                1,
+                (),
+                title="속보 뉴스",
+                rank=None,
+                channel_title="뉴스채널",
+                duration_seconds=100,
+            ),  # fmt: skip
+            VideoStat(
+                f"{category_id}b",
+                "c",
+                category_id,
+                T0,
+                900,
+                1,
+                1,
+                (),
+                title="Breaking",
+                rank=None,
+                channel_title="News",
+                duration_seconds=100,
+            ),  # fmt: skip
+            VideoStat(
+                f"{category_id}c",
+                "c",
+                category_id,
+                T0,
+                700,
+                1,
+                1,
+                (),
+                title="오늘 소식",
+                rank=None,
+                channel_title="방송",
+                duration_seconds=100,
+            ),  # fmt: skip
+        ]
+
+
+FILL = '\nfill_youtube_categories = { "뉴스·사건" = "25", "IT" = "28" }\n'
+
+
+def _run_fill(env: dict, youtube: object, answers: dict[str, str]):  # noqa: ANN202
+    env = {**env, "DATA_POPULAR_VIDEOS_DB": str(Path(env["DATA_TREND_CONFIG"]).parent / "pv.db")}
+    return asyncio.run(
+        popular(
+            TrendPopularRequest(),
+            _llm(answers),
+            env=env,
+            now=NOW,
+            board=TodayBoard(),
+            youtube=youtube,
+        )  # fmt: skip
+    ).output
+
+
+def test_short_categories_get_recent_top_korean_videos_once_a_day(tmp_path: Path) -> None:
+    answers = {"t1": "게임", "lck": "게임", "롤": "IT", "한국철강": "기부·재난"}
+    env = _env(tmp_path, extra=FILL)
+    youtube = FillYouTube()
+    out = _run_fill(env, youtube, answers)
+    by = {g.category: g for g in out.by_category}
+    # 주제가 모자란 뉴스·사건·IT만 채운다. 한국 영상만, 조회수 순
+    assert [v.video_id for v in by["뉴스·사건"].top_videos] == ["25c", "25a"]
+    assert (
+        by["뉴스·사건"].top_videos_reason and "지금 인기 아님" in by["뉴스·사건"].top_videos_reason
+    )
+    assert [v.title for v in by["IT"].top_videos] == ["오늘 소식", "속보 뉴스"]
+    assert by["게임"].top_videos == [] or by["게임"].shortage_reason
+    assert youtube.calls == [("25", "ko"), ("28", "ko")]
+    _run_fill(env, youtube, answers)  # 같은 날 다시: 저장한 결과를 쓴다
+    assert len(youtube.calls) == 2
+
+
+def test_fill_failure_or_unmapped_category_leaves_only_a_reason(tmp_path: Path) -> None:
+    answers = {"t1": "게임", "lck": "게임", "롤": "IT", "한국철강": "기부·재난"}
+    out = _run_fill(_env(tmp_path, extra=FILL), FillYouTube(fail=True), answers)
+    by = {g.category: g for g in out.by_category}
+    assert by["뉴스·사건"].top_videos == []
+    assert by["뉴스·사건"].top_videos_reason == "최근 조회수 높은 영상 검색 실패 [QUOTA_EXCEEDED]"
+    # 설정 표에 없는 카테고리는 채우지 않는다
+    out = _run_fill(_env(tmp_path / "b"), FillYouTube(), answers)
+    assert all(g.top_videos == [] and g.top_videos_reason is None for g in out.by_category)

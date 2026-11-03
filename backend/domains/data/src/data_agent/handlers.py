@@ -403,6 +403,7 @@ async def trend_popular(request: AgentRequest) -> AgentResult:
         env=os.environ,
         context_id=request.meta.context_id,
         category_cache=get_category_cache(),
+        youtube=get_youtube(),
     )
     return _result(
         request,
