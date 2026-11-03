@@ -607,6 +607,7 @@ export type Action =
   | { type: 'writeSpec'; request: string }
   | { type: 'unlinkDuplicate'; request: string }
   | { type: 'rejectSpec'; spec: string; reason: string } // 확인 대기 기획서 거절 (승인은 humanDecide)
+  | { type: 'deleteDoc'; doc: string } // 정리 문서 지우기
   | { type: 'pauseRequest'; request: string; reason?: string } // 사람이 요청을 중단
   | { type: 'resumeRequest'; request: string } // 중단한 요청 재개
   | { type: 'editSpec'; spec: string; title?: string; problem?: string; goal?: string; paras?: Record<string, string> } // 확정 전 기획서를 사람이 고침 (칸에서 벗어날 때 저장)
@@ -1252,6 +1253,9 @@ function patchDoc(s: State, id: string, f: (d: Doc) => Doc): State {
 }
 
 // 요청 하나에 걸린 것(기획서 문단·작업·PR·대화·결정·장애)을 모아 정리 문서 블록으로 만든다
+/** 지운 문서가 있어도 번호가 겹치지 않게 가장 큰 번호 + 1 */
+export const nextDocId = (s: State) => `DOC-${Math.max(0, ...s.docs.map((x) => Number(x.id.split('-')[1]) || 0)) + 1}`
+
 export function gatherBlocks(s: State, about: string): DocBlock[] {
   const r = s.requests.find((x) => x.id === about)
   const out: Omit<DocBlock, 'id'>[] = []
@@ -1338,14 +1342,16 @@ function talkAndDocs(s: State, a: Action): State | null {
         ],
       }
     }
+    case 'deleteDoc':
+      return { ...s, docs: s.docs.filter((x) => x.id !== a.doc) }
     case 'newDoc': {
-      const id = `DOC-${s.docs.length + 1}`
+      const id = nextDocId(s)
       return { ...s, docs: [...s.docs, { id, title: a.title || '제목 없는 문서', updated: now(), blocks: [{ id: 'b1', kind: 'p', text: '' }] }] }
     }
     case 'gatherDoc': {
       const r = s.requests.find((x) => x.id === a.about)
       if (!r) return s
-      const id = `DOC-${s.docs.length + 1}`
+      const id = nextDocId(s)
       const blocks = gatherBlocks(s, a.about)
       return {
         ...s,

@@ -887,3 +887,6 @@ button.spec-pid { cursor: pointer; color: var(--primary); font-weight: 600; }
 
 /* 문서·기획서 목록 위: 종류 거르기 + 새 문서 */
 .sl-top { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+
+/* 문서 저장·삭제 */
+.doc-actions { display: flex; justify-content: flex-end; gap: 6px; margin-bottom: 4px; }
