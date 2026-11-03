@@ -243,6 +243,9 @@ export interface VcsInventory {
   connection_id: string; repo: string; kind: string; product: string; hosted: boolean
   version: string; min_version: string; scopes: string[]; scope_note: string; token_expires: string
   status: VcsInventoryStatus; warnings: string[]; checked_at: string; error_code: string; error: string
+  // 취약점 소식 맞춰 보기: emergency(KEV) · warning · clear · feed_failed. 긴급이면 안전 서비스에 보류 알림
+  vuln?: '' | 'emergency' | 'warning' | 'clear' | 'feed_failed'; kev_cves?: string[]; vuln_cves?: string[]; vuln_total?: number; vuln_error?: string
+  safety_hold?: { hold: boolean; sent: boolean; error: string; judged_at: string } | null
 }
 const toInventory = (d: unknown): VcsInventory[] =>
   Array.isArray(d) ? (d as VcsInventory[]).filter((r) => r && typeof r.connection_id === 'string').map((r) => ({ ...r, scopes: r.scopes ?? [], warnings: r.warnings ?? [] })) : []

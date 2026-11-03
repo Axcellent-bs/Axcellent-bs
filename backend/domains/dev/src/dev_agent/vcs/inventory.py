@@ -28,6 +28,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from dev_agent import vcs
+from dev_agent.vcs import vuln_watch
 from dev_agent.vcs.base import ServerInfo, VcsError
 
 Status = Literal["ok", "outdated", "no_policy", "hosted", "unknown", "error"]
@@ -76,6 +77,14 @@ class Entry:
     checked_at: str = ""
     error_code: str = ""
     error: str = ""
+    # 취약점 소식 맞춰 보기 (vuln_watch.py): emergency · warning · clear · feed_failed
+    vuln: str = ""
+    kev_cves: list[str] = field(default_factory=list)
+    vuln_cves: list[str] = field(default_factory=list)  # 경고: NVD에서 걸린 CVE 앞 몇 개
+    vuln_total: int = 0
+    vuln_error: str = ""
+    # 안전 서비스에 보낸 마지막 보류·해제 알림 {hold, sent, error, judged_at}
+    safety_hold: dict | None = None
 
 
 def _parse(v: str) -> tuple[int, ...] | None:
@@ -216,6 +225,10 @@ async def check(connection_id: str, *, timeout: float = 20.0) -> Entry | None:
         else:
             info = await asyncio.wait_for(t.probe(), timeout)
             judge(entry, info, min_versions(), app=t.app_auth)
+            j = await vuln_watch.watch.update(
+                t.id, entry.product, entry.version, entry.hosted, _clock()
+            )
+            _put_vuln(entry, j)
     except VcsError as exc:
         if exc.code == "unsupported":
             entry.status, entry.warnings = "unknown", [exc.message]
@@ -227,12 +240,30 @@ async def check(connection_id: str, *, timeout: float = 20.0) -> Entry | None:
     return entry
 
 
+def _put_vuln(entry: Entry, j: vuln_watch.Judgement) -> None:
+    entry.vuln, entry.kev_cves, entry.vuln_cves = j.verdict, list(j.kev_cves), list(j.cves)
+    entry.vuln_total, entry.vuln_error = j.cve_total, j.error
+    if j.verdict == "emergency":
+        entry.warnings.insert(0, f"긴급: 실제 악용 중인 취약점 {', '.join(j.kev_cves)} → 쓰기 보류")
+    elif j.verdict == "warning":
+        entry.warnings.append(f"이 버전에 걸리는 알려진 취약점 {j.cve_total}건")
+
+
+def _hold_of(cid: str) -> dict | None:
+    st = vuln_watch.watch.holds.get(cid)
+    if st is None:
+        return None
+    n = st.notice
+    return {"hold": n.hold, "sent": st.sent, "error": st.error, "judged_at": n.judged_at}
+
+
 async def check_all() -> list[Entry]:
     """연결 전부를 다시 읽는다 (지운 연결은 대장에서 뺀다)."""
     ids = [t.id for t in targets()]
     for gone in set(_entries) - set(ids):
         _entries.pop(gone, None)
     got = await asyncio.gather(*(check(i) for i in ids))
+    await vuln_watch.watch.flush()  # 긴급 보류·해제를 안전 서비스에 (못 보낸 건 다시)
     return [e for e in got if e is not None]
 
 
@@ -241,16 +272,20 @@ def entries() -> list[dict]:
     out: list[dict] = []
     for t in targets():
         hit = _entries.get(t.id)
-        out.append(asdict(hit if hit is not None and hit.repo == t.name else _blank(t)))
+        row = asdict(hit if hit is not None and hit.repo == t.name else _blank(t))
+        row["safety_hold"] = _hold_of(t.id)
+        out.append(row)
     return out
 
 
 def forget(connection_id: str) -> None:
     _entries.pop(connection_id, None)
+    vuln_watch.watch.forget(connection_id)  # 보류 중이었으면 해제를 알린다
 
 
 def reset() -> None:
     _entries.clear()
+    vuln_watch.watch.reset()
 
 
 def _hours() -> float:

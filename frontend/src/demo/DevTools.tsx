@@ -46,6 +46,13 @@ const INV: Record<VcsInventory['status'], { label: string; tone: string }> = {
   unknown: { label: '점검 전', tone: TONE.none },
   error: { label: '점검 실패', tone: TONE.bad },
 }
+// 취약점 소식 판정 (KEV·NVD)
+const VULN: Record<string, { label: string; tone: string }> = {
+  emergency: { label: '긴급 · 실제 악용 중', tone: TONE.bad },
+  warning: { label: '알려진 취약점', tone: TONE.wait },
+  clear: { label: '취약점 해당 없음', tone: TONE.ok },
+  feed_failed: { label: '취약점 점검 실패', tone: TONE.wait },
+}
 const PRODUCT: Record<string, string> = { 'github.com': 'github.com', ghes: 'GitHub Enterprise Server', gitlab: 'GitLab', mock: '시연용' }
 const when = (iso: string) => (iso ? new Date(iso).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—')
 
@@ -60,15 +67,21 @@ function InventoryRow({ inv }: { inv?: VcsInventory }) {
         <span className={`chip ${st.tone}`}>{st.label}</span>
         {inv.product && <span className="chip bg-ink-100 text-ink-700">{PRODUCT[inv.product] ?? inv.product}{inv.version ? ` ${inv.version}` : ''}</span>}
         {inv.min_version && <span className="chip bg-ink-100 text-ink-500">기준 {inv.min_version}</span>}
+        {inv.vuln && VULN[inv.vuln] && <span className={`chip ${VULN[inv.vuln].tone}`}>{VULN[inv.vuln].label}{inv.vuln === 'warning' ? ` ${inv.vuln_total ?? 0}건` : ''}</span>}
+        {inv.safety_hold && <span className={`chip ${inv.safety_hold.hold ? TONE.bad : TONE.none}`}>{inv.safety_hold.hold ? '쓰기 보류' : '보류 해제'} · 안전 서비스 {inv.safety_hold.sent ? '알림 보냄' : '알림 대기'}</span>}
         <span className="ml-auto text-xs text-ink-500">마지막 점검 {when(inv.checked_at)}</span>
       </div>
       <div className="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
         <div><span className="text-xs text-ink-500">토큰 권한 </span>{inv.scopes.length ? inv.scopes.join(', ') : inv.scope_note || '—'}</div>
         <div><span className="text-xs text-ink-500">토큰 만료 </span>{inv.token_expires || '—'}</div>
+        {!!inv.kev_cves?.length && <div className="sm:col-span-2"><span className="text-xs text-ink-500">근거 CVE (KEV) </span><span className="mono">{inv.kev_cves.join(', ')}</span></div>}
+        {inv.vuln === 'warning' && !!inv.vuln_cves?.length && <div className="sm:col-span-2"><span className="text-xs text-ink-500">걸린 CVE </span><span className="mono">{inv.vuln_cves.join(', ')}{(inv.vuln_total ?? 0) > inv.vuln_cves.length ? ' …' : ''}</span></div>}
       </div>
-      {(inv.warnings.length > 0 || inv.error) && (
+      {(inv.warnings.length > 0 || inv.error || inv.vuln_error || (inv.safety_hold && !inv.safety_hold.sent)) && (
         <ul className="mt-2 space-y-0.5 text-sm text-red-700">
           {inv.error && <li>{inv.error}{inv.error_code ? ` (${inv.error_code})` : ''}</li>}
+          {inv.vuln_error && <li>{inv.vuln_error}</li>}
+          {inv.safety_hold && !inv.safety_hold.sent && inv.safety_hold.error && <li>{inv.safety_hold.error} → 다음 점검 때 다시 보냄</li>}
           {inv.warnings.map((w) => <li key={w}>{w}</li>)}
         </ul>
       )}
