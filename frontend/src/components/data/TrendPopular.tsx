@@ -3,7 +3,10 @@ import { Chip, Empty, Panel, TONE, Waiting } from "@/components/finance/bits";
 import { DATA_SERVER, dataAi, kpiLive, type PopularTopic, type TrendPopularOutput } from "@/lib/data";
 
 // 트렌드 1단계 맨 위 "지금 인기": 데이터 AI(8106) trend_popular 출력을 그대로 보여 준다 (계약 TrendPopularOutput, #411).
-// - 급상승 판정과 별개인 지금 인기 순위다. 순서는 서버 점수 순, 화면은 주제 분류별로 묶기만 한다
+// - 급상승 판정과 별개인 지금 인기 순위다. 서버 카테고리별 보기(by_category, #431)를 서버가 준 칸 순서 그대로 그린다
+//   (회사 설정 [popular] categories, 예: 게임·뉴스·사건·연예·스포츠·IT, 칸마다 1~5위). 모자란 칸은 서버 이유(shortage_reason)
+// - 실존 인물·팀·리그·상표 표시(real_entity·entity_names)가 있으면 작은 칩
+// - by_category가 없는 예전 응답이면 items를 주제 분류별로 묶기만 한다
 // - 근거는 쉬운 말로: "YouTube 인기 영상 N개", "인기 검색어 N위". 숫자는 서버 값만, 없으면(null) 그 줄을 빼고 0으로 채우지 않는다
 // - "지금 급등 중" 배지는 서버가 rising_now = true를 줄 때만
 // - 출처(YouTube·조회 속도·인기 검색어)를 못 읽었으면 서버 이유를 그대로 보여 준다
@@ -26,15 +29,21 @@ function evidence(t: PopularTopic): string[] {
   return out;
 }
 
-function Row({ t }: { t: PopularTopic }) {
+function Row({ t, rank }: { t: PopularTopic; rank: number | null }) {
   const lines = evidence(t);
+  const names = t.entity_names ?? [];
   return (
     <li className="flex flex-wrap items-start gap-3 py-3">
-      <span className="w-6 text-sm font-semibold text-ink-500">{t.rank}</span>
+      <span className="w-6 text-sm font-semibold text-ink-500">{rank ?? "-"}</span>
       <div className="min-w-0 flex-1 space-y-0.5">
         <p className="flex flex-wrap items-center gap-2 font-semibold text-ink-900">
           {t.keyword}
           {t.rising_now === true && <Chip label="지금 급등 중" tone={TONE.bad} />}
+          {t.real_entity === true && (
+            <span className="chip bg-amber-50 text-[10px] text-amber-700" title="실존 인물·팀·리그·상표가 든 주제예요">
+              {names.length ? `실존 이름 · ${names.join(", ")}` : "실존 이름"}
+            </span>
+          )}
         </p>
         {t.aliases.length > 0 && <p className="text-[11px] text-ink-500">함께 센 이름: {t.aliases.join(", ")}</p>}
         <p className="text-xs text-ink-700">{lines.length ? lines.join(" · ") : "근거 숫자를 받지 못했어요"}</p>
@@ -56,6 +65,9 @@ function sourceLines(out: TrendPopularOutput): { text: string; warn: boolean }[]
   ];
 }
 
+/** 화면 칸 하나. legacy = 예전 응답을 화면이 주제 분류별로 묶은 칸(순위는 전체 순위) */
+type Cell = { category: string; items: PopularTopic[]; shortage_reason: string | null; legacy?: boolean };
+
 type State = { kind: "loading" } | { kind: "ok"; out: TrendPopularOutput } | { kind: "failed"; reason: string };
 
 export function TrendPopular() {
@@ -73,9 +85,13 @@ export function TrendPopular() {
   if (!kpiLive) return null;
 
   const out = state.kind === "ok" ? state.out : null;
-  // 주제 분류별로 묶는다. 묶음 순서는 서버 점수 순으로 처음 나온 순서
-  const groups = new Map<string, PopularTopic[]>();
-  for (const t of out?.items ?? []) groups.set(categoryOf(t), [...(groups.get(categoryOf(t)) ?? []), t]);
+  // 칸: 서버 카테고리별 보기 순서 그대로. 예전 응답(by_category 없음)이면 items를 주제 분류별로 묶는다(점수 순으로 처음 나온 순서)
+  const cells: Cell[] = out?.by_category?.length ? out.by_category : (() => {
+    const groups = new Map<string, PopularTopic[]>();
+    for (const t of out?.items ?? []) groups.set(categoryOf(t), [...(groups.get(categoryOf(t)) ?? []), t]);
+    return [...groups.entries()].map(([category, items]) => ({ category, items, shortage_reason: null, legacy: true }));
+  })();
+  const empty = cells.every((c) => c.items.length === 0) && !out?.by_category?.length;
 
   return (
     <Panel id="data-trend-popular" title="지금 인기"
@@ -87,13 +103,19 @@ export function TrendPopular() {
       tools={<button type="button" className="btn-ghost" disabled={state.kind === "loading"} onClick={() => setRun((n) => n + 1)}>다시 보기</button>}>
       {state.kind === "loading" ? <Waiting what="지금 인기를 받는 중…" />
         : state.kind === "failed" ? <Empty>지금 인기를 받지 못했어요. {state.reason} {DATA_SERVER}가 켜져 있는지 확인해 주세요.</Empty>
-        : !out || out.items.length === 0 ? <Empty>{out?.empty_reason ?? "지금 인기 주제가 없어요."}</Empty> : (
+        : !out || empty ? <Empty>{out?.empty_reason ?? "지금 인기 주제가 없어요."}</Empty> : (
           <div className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
-              {[...groups.entries()].map(([category, items]) => (
-                <section key={category} aria-label={category} className="rounded-xl bg-ink-50 px-3 py-2">
-                  <p className="panel-title">{category}</p>
-                  <ul className="divide-y divide-ink-100">{items.map((t) => <Row key={t.keyword} t={t} />)}</ul>
+              {cells.map((c) => (
+                <section key={c.category} aria-label={c.category} className="rounded-xl bg-ink-50 px-3 py-2">
+                  <p className="panel-title">{c.category === "unknown" ? "분류 못 함" : c.category}</p>
+                  {c.items.length > 0 && (
+                    <ol className="divide-y divide-ink-100">
+                      {c.items.map((t) => <Row key={t.keyword} t={t} rank={c.legacy ? t.rank : t.category_rank ?? null} />)}
+                    </ol>
+                  )}
+                  {c.shortage_reason && <p className="py-2 text-xs text-amber-700">{c.shortage_reason}</p>}
+                  {c.items.length === 0 && !c.shortage_reason && <p className="py-2 text-xs text-ink-500">이 칸에 들어온 주제가 없어요. 서버가 이유를 주지 않았어요.</p>}
                 </section>
               ))}
             </div>
