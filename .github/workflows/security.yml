@@ -1,0 +1,128 @@
+# 의존성 보안 점검: 알려진 취약점(CVE)이 있는 패키지를 쓰는지 본다.
+# - 백엔드: uv.lock을 고정 버전 목록으로 뽑아 pip-audit (PyPI 취약점 DB · OSV)
+# - 화면: package-lock.json으로 npm audit
+#   운영에 실리는 의존성은 중간(moderate) 이상, 개발 도구는 높음(high) 이상이면 실패
+# 의존성 파일이 바뀐 PR, dev push, 매일 아침(새 취약점 공지 대비)에 돈다.
+# 매일 점검에서 걸리면 "보안 점검" 이슈를 열거나(이미 열려 있으면 댓글) 알린다.
+# ci.yml의 필수 체크와 별개라서 머지를 막지 않는다. 결과를 보고 사람이 판단한다.
+name: security
+
+on:
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - backend/uv.lock
+      - backend/pyproject.toml
+      - "backend/**/pyproject.toml"
+      - frontend/package.json
+      - frontend/package-lock.json
+      - .github/workflows/security.yml
+  push:
+    branches: [dev]
+    paths:
+      - backend/uv.lock
+      - frontend/package-lock.json
+      - .github/workflows/security.yml
+  schedule:
+    - cron: "0 0 * * *" # 매일 09:00 KST
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: backend/.python-version
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.13.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 백엔드 의존성 점검 (pip-audit)
+        id: py
+        working-directory: backend
+        continue-on-error: true
+        run: |
+          uv export --frozen --all-packages --no-hashes --no-emit-workspace --no-header -q -o "$RUNNER_TEMP/req.txt"
+          uvx pip-audit -r "$RUNNER_TEMP/req.txt" --no-deps --disable-pip --progress-spinner off \
+            --desc on 2>&1 | tee "$RUNNER_TEMP/py.txt"
+          exit "${PIPESTATUS[0]}"
+
+      - name: 화면 운영 의존성 점검 (npm audit, moderate 이상)
+        id: npm_prod
+        working-directory: frontend
+        continue-on-error: true
+        run: |
+          npm audit --omit=dev --audit-level=moderate 2>&1 | tee "$RUNNER_TEMP/npm_prod.txt"
+          exit "${PIPESTATUS[0]}"
+
+      - name: 화면 개발 도구 점검 (npm audit, high 이상)
+        id: npm_dev
+        working-directory: frontend
+        continue-on-error: true
+        run: |
+          npm audit --audit-level=high 2>&1 | tee "$RUNNER_TEMP/npm_dev.txt"
+          exit "${PIPESTATUS[0]}"
+
+      - name: 결과 요약
+        id: sum
+        env:
+          PY: ${{ steps.py.outcome }}
+          NP: ${{ steps.npm_prod.outcome }}
+          ND: ${{ steps.npm_dev.outcome }}
+        run: |
+          mark() { [ "$1" = success ] && echo "통과" || echo "**취약점 있음**"; }
+          {
+            echo "## 의존성 보안 점검"
+            echo "| 대상 | 결과 |"
+            echo "|---|---|"
+            echo "| 백엔드 (pip-audit) | $(mark "$PY") |"
+            echo "| 화면 운영 의존성 (moderate 이상) | $(mark "$NP") |"
+            echo "| 화면 개발 도구 (high 이상) | $(mark "$ND") |"
+          } > "$RUNNER_TEMP/summary.md"
+          for f in py npm_prod npm_dev; do
+            echo; echo "<details><summary>$f</summary>"; echo; echo '```'
+            tail -c 12000 "$RUNNER_TEMP/$f.txt"; echo '```'; echo "</details>"
+          done >> "$RUNNER_TEMP/summary.md"
+          cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PY" = success ] && [ "$NP" = success ] && [ "$ND" = success ]; then
+            echo "bad=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "bad=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 매일 점검·수동 실행에서만 이슈로 남긴다 (PR에서는 체크 결과로 충분)
+      - name: 보안 점검 이슈 열기·갱신
+        if: steps.sum.outputs.bad == 'true' && github.event_name != 'pull_request' && github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="보안 점검: 취약한 의존성 발견"
+          body="$(cat "$RUNNER_TEMP/summary.md"; echo; echo "실행: $RUN_URL")"
+          num="$(gh issue list --state open --search "in:title \"$title\"" --json number -q '.[0].number')"
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
+
+      - name: 실패로 표시
+        if: steps.sum.outputs.bad == 'true'
+        run: |
+          echo "취약한 의존성이 있다: 위 요약을 본다"
+          exit 1
