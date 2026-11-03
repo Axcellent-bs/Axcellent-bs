@@ -1041,6 +1041,78 @@ class TrendPopularOutput(AxModel):
     summary: str = ""  # 코드가 만든 한 문장
 
 
+# --------------------------------------------------------------- promo_concepts (홍보 영상 기획안)
+# 재료(회사 상품·안전한 지금 인기 트렌드·카탈로그 카테고리 시즌·회사 이벤트)는 코드가 모으고,
+# LLM은 정해진 스키마로 기획안 문장만 쓴다. 카탈로그에 없는 상품·재료 밖 트렌드·재료에 없는 숫자는
+# 코드가 버린다(이유 기록).
+
+PromoFormat = Literal["15초 숏폼", "30초 숏폼", "롱폼"]
+# 지금 인기 · 시즌(작년 같은 달) · 회사 이벤트
+PromoTrendKind = Literal["popular", "season", "event"]
+
+
+class PromoConceptsRequest(AxModel):
+    regenerate: bool = False  # true면 오늘 만든 기획안이 있어도 새로 만든다 (기본: 하루 캐시)
+
+
+class PromoProduct(AxModel):
+    """기획안에 나오는 회사 상품 (회사 상품 목록 값 그대로)."""
+
+    product_id: str
+    name: str
+    category_name: str | None = None
+    price: int | None = Field(default=None, ge=0)  # 판매가 (원)
+
+
+class PromoTrend(AxModel):
+    """재료 트렌드 하나 (코드가 고른 값)."""
+
+    name: str = Field(min_length=1)
+    kind: PromoTrendKind
+    topic_category: TopicCategory | None = None  # popular만 (주제 분류)
+    ip_risk: bool = False  # 게임·연예·스포츠·인물 분류 (이름이 제목·콘티에 그대로 있으면 경고)
+    detail: str = ""  # 코드가 만든 한 줄 (예: 지금 인기 3위, 작년 12월 검색이 평균의 1.6배)
+
+
+class PromoConcept(AxModel):
+    concept_id: str
+    title: str
+    concept: str = ""  # 컨셉 한 줄
+    borrowed_trend: str  # 빌려 온 트렌드 (재료 트렌드 이름 그대로)
+    trend_kind: PromoTrendKind | None = None
+    products: list[PromoProduct] = Field(default_factory=list)  # 등장 상품
+    format: PromoFormat | None = None
+    storyboard: list[str] = Field(default_factory=list)  # 콘티 3컷
+    cautions: list[str] = Field(default_factory=list)  # 주의사항 (LLM)
+    warnings: list[str] = Field(default_factory=list)  # 코드가 단 경고 (상표·초상권 확인 필요 등)
+
+
+class DroppedConcept(AxModel):
+    """검증에서 버린 기획안 (제목과 이유만, 내용은 남기지 않는다)."""
+
+    title: str
+    reason: str
+
+
+class PromoConceptsOutput(AxModel):
+    concepts: list[PromoConcept] = Field(default_factory=list)
+    dropped: list[DroppedConcept] = Field(default_factory=list)
+    empty_reason: str | None = None  # 기획안이 없을 때 이유 (LLM 실패·재료 없음 등)
+    trends: list[PromoTrend] = Field(default_factory=list)  # 쓴 재료 트렌드
+    products: int = Field(default=0, ge=0)  # 재료 상품 수
+    catalog_status: Literal["known", "unknown"] = "unknown"
+    catalog_reason: str | None = None
+    popular_status: Literal["known", "unknown"] = "unknown"  # 안전한 지금 인기 트렌드를 썼는지
+    popular_reason: str | None = None
+    season_status: Literal["known", "unknown"] = "unknown"  # 카테고리 월별 흐름을 읽었는지
+    season_reason: str | None = None
+    naver_calls: int = Field(default=0, ge=0)  # 이번 실행에서 네이버를 실제로 부른 수 (캐시 제외)
+    cached: bool = False  # 오늘 만든 기획안을 그대로 줬는지
+    run_id: str | None = None  # 기획안 기록 id
+    generated_at: UtcDatetime | None = None
+    summary: str = ""  # 코드가 만든 한 문장
+
+
 # --------------------------------------------------------------- campaign_effect (캠페인 효과)
 # 캠페인 기간 주문·매출을 지난 7일 같은 시간대 평균과 비교한 증분과, 캠페인 쿠폰 누적 사용률.
 # 항목마다 "앎(값·근거)" 또는 "모름 + 이유"다. 모르면 0으로 채우지 않는다.
