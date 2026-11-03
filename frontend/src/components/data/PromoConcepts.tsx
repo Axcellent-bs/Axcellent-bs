@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
 import { Chip, Empty, Panel, TONE, Waiting } from "@/components/finance/bits";
-import type { LoopProbe } from "@/lib/contentLoop";
-import { DATA_SERVER, dataAi, kpiLive, type PromoConcept, type PromoConceptsOutput, type PromoTrendKind } from "@/lib/data";
+import type { SkillState } from "@/components/data/useSkill";
+import { DATA_SERVER, kpiLive, type PromoConcept, type PromoConceptsOutput, type PromoTrendKind } from "@/lib/data";
 
 // 트렌드 2단계 맨 위 "광고·홍보 숏츠 기획안 초안": 데이터 AI(8106) promo_concepts 출력을 그대로 보여 준다 (계약 PromoConceptsOutput).
 // - 초안 카드: 제목·컨셉·길이·콘티·빌려 온 숏츠 형식(평균 조회수)·트렌드(없으면 "트렌드 없음")·맞는 이유·등장 상품·주의사항·코드 경고. 숫자는 서버 값만
@@ -9,7 +8,7 @@ import { DATA_SERVER, dataAi, kpiLive, type PromoConcept, type PromoConceptsOutp
 // - 재료 요약(트렌드·상품 수·출처 상태와 이유)과 검증에서 버린 기획안(제목·이유)
 // - "다시 만들기"는 계약의 regenerate 옵션. 서버는 하루 캐시라 처음에는 오늘 만든 기획안을 그대로 준다
 // - 👍/👎는 피드백을 저장할 곳(안전 관문 등록)이 아직 없어 꺼 둔다
-// - 응답 결과(확인 중·정상·실패)는 콘텐츠 루프 2단계 칩으로 올린다(onProbe)
+// - 응답 결과(확인 중·정상·실패)는 트렌드 화면이 콘텐츠 루프 2단계 칩으로 쓴다
 
 const TIME = new Intl.DateTimeFormat("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 const when = (iso: string | null) => (iso ? TIME.format(new Date(iso)) : null);
@@ -136,24 +135,8 @@ function Ingredients({ out }: { out: PromoConceptsOutput }) {
   );
 }
 
-type State = { kind: "loading" } | { kind: "ok"; out: PromoConceptsOutput } | { kind: "failed"; reason: string };
-
-export function PromoConcepts({ onProbe }: { onProbe: (p: LoopProbe) => void }) {
-  // regenerate: 0 = 처음(하루 캐시), 1 이상 = "다시 만들기"를 누른 횟수
-  const [regen, setRegen] = useState(0);
-  const [state, setState] = useState<State>({ kind: "loading" });
-  useEffect(() => {
-    if (!kpiLive) return;
-    let live = true;
-    setState({ kind: "loading" });
-    dataAi.promoConcepts(regen > 0)
-      .then((r) => live && setState({ kind: "ok", out: r.output }))
-      .catch((e: Error) => live && setState({ kind: "failed", reason: e.message }));
-    return () => { live = false; };
-  }, [regen]);
-  useEffect(() => {
-    onProbe(!kpiLive ? "failed" : state.kind === "ok" ? "ok" : state.kind === "failed" ? "failed" : "checking");
-  }, [state.kind, onProbe]);
+/** 응답은 트렌드 화면(TrendScan)이 한 번 받아 1단계 요약 카드와 같이 쓴다. onRegenerate = "다시 만들기" */
+export function PromoConcepts({ state, onRegenerate }: { state: SkillState<PromoConceptsOutput>; onRegenerate: () => void }) {
   if (!kpiLive) return null;
 
   const out = state.kind === "ok" ? state.out : null;
@@ -165,7 +148,7 @@ export function PromoConcepts({ onProbe }: { onProbe: (p: LoopProbe) => void }) 
 
   return (
     <Panel id="data-trend-promo" title="광고·홍보 숏츠 기획안 초안" hint={meta}
-      tools={<button type="button" className="btn-ghost" disabled={state.kind === "loading"} onClick={() => setRegen((n) => n + 1)}>다시 만들기</button>}>
+      tools={<button type="button" className="btn-ghost" disabled={state.kind === "loading"} onClick={onRegenerate}>다시 만들기</button>}>
       {state.kind === "loading" ? <Waiting what="기획안 초안을 받는 중…" />
         : state.kind === "failed" ? <Empty>기획안 초안을 받지 못했어요. {state.reason} {DATA_SERVER}가 켜져 있는지 확인해 주세요.</Empty>
         : out && (
