@@ -48,7 +48,11 @@ def _save() -> None:
             os.remove(path)
         return
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    # 키 파일은 만든 사용자만 읽는다. 프로세스 umask(서버는 0002)로 만들면 그룹·다른 사용자가
+    # 읽을 수 있으므로 처음부터 0600으로 만들고, 예전 임시 파일이 남아 있어도 권한을 다시 맞춘다
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.chmod(tmp, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(asdict(_key), f)
     os.replace(tmp, path)
 
