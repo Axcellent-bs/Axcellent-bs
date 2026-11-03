@@ -262,7 +262,7 @@ def test_todays_verdicts_survive_a_restart(tmp_path: Path) -> None:
     assert tomorrow.verdict(["t1"]) is None  # 다음 날은 그날 판정만
 
 
-# ---------------------------------------------------------------- 모자란 칸: 최근 조회수 높은 영상
+# ---------------------------------------------------------------- 칸별 영상: 공유 분류기로 칸 판정
 
 
 class FillYouTube:
@@ -277,120 +277,148 @@ class FillYouTube:
         if self.fail:
             raise ConnectorUnavailable("QUOTA_EXCEEDED", "할당량")
         return [
-            VideoStat(
-                f"{category_id}a",
-                "c",
-                category_id,
-                T0,
-                500,
-                1,
-                1,
-                (),
-                title="속보 뉴스",
-                rank=None,
-                channel_title="뉴스채널",
-                duration_seconds=100,
-            ),  # fmt: skip
-            VideoStat(
-                f"{category_id}b",
-                "c",
-                category_id,
-                T0,
-                900,
-                1,
-                1,
-                (),
-                title="Breaking",
-                rank=None,
-                channel_title="News",
-                duration_seconds=100,
-            ),  # fmt: skip
-            VideoStat(
-                f"{category_id}c",
-                "c",
-                category_id,
-                T0,
-                700,
-                1,
-                1,
-                (),
-                title="오늘 소식",
-                rank=None,
-                channel_title="방송",
-                duration_seconds=100,
-            ),  # fmt: skip
+            _titled(f"{category_id}a", category_id, 500, "속보 뉴스", "뉴스채널"),
+            _titled(f"{category_id}b", category_id, 900, "Breaking", "News"),
+            _titled(f"{category_id}c", category_id, 700, "오늘 소식", "방송"),
         ]
 
 
-FILL = '\nfill_youtube_categories = { "뉴스·사건" = "25", "IT" = "28" }\n'
+def _titled(vid: str, cat: str, views: int, title: str, channel: str, rank: int | None = None):  # noqa: ANN202, PLR0913
+    return VideoStat(vid, "c", cat, NOW - timedelta(days=1), views, 1, 1, ("태그",), title=title,
+                     rank=rank, channel_title=channel, duration_seconds=100)  # fmt: skip
 
 
-def _run_fill(env: dict, youtube: object, answers: dict[str, str]):  # noqa: ANN202
-    env = {**env, "DATA_POPULAR_VIDEOS_DB": str(Path(env["DATA_TREND_CONFIG"]).parent / "pv.db")}
+# 한국 인기 목록에 더 넣는 영상: (id, YouTube 카테고리, 조회수, 제목)
+CHART = [
+    ("c1", "20", 9000, "아이브 신곡 안무 커버"),  # YouTube는 게임, 내용은 음악
+    ("c2", "20", 8000, "롤 하이라이트 모음"),
+    ("c3", "20", 9500, "Funny cat"),  # 외국 영상: 빠진다
+    ("c4", "25", 7000, "오늘의 뉴스 속보"),
+]
+VIDEO_ANSWERS = {
+    "아이브 신곡 안무 커버": "K-pop·음악",
+    "롤 하이라이트 모음": "게임",
+    "오늘의 뉴스 속보": "뉴스·사건",
+    "속보 뉴스": "뉴스·사건",
+    "오늘 소식": "뉴스·사건",
+}
+FILL = (
+    '\nfill_youtube_categories = { "게임" = "20", "뉴스·사건" = "25", "K-pop·음악" = "10" }\n'
+    "fill_always = true\n"
+    'categories = ["게임", "뉴스·사건", "연예·스포츠", "K-pop·음악", "IT"]\n'
+)
+
+
+def _vllm(videos: dict[str, str] | None = None, fail: bool = False) -> MockLLMClient:
+    """소재 분류는 모두 게임, 영상 분류는 제목으로 답하는 가짜 LLM."""
+
+    class LLM(MockLLMClient):
+        async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):  # noqa: ANN001, ANN201
+            self.calls.append(prompt)
+            data = dict(untrusted or {})
+            if any(k.startswith("영상") for k in data):
+                if fail:
+                    raise RuntimeError("down")
+                titles = {k[2:].split(" ")[0]: v for k, v in data.items() if k.startswith("영상")}
+                answers = videos if videos is not None else VIDEO_ANSWERS
+                return _Categories(
+                    items=[_Item(id=n, category=answers.get(t, "기타")) for n, t in titles.items()]
+                )
+            names = {k[2:]: v for k, v in data.items() if k.startswith("소재")}
+            return _Categories(items=[_Item(id=n, category="게임") for n in names])
+
+    return LLM()
+
+
+def _fill_env(tmp_path: Path, extra: str = FILL) -> dict:
+    env = _env(tmp_path, extra=extra)
+    store = SnapshotStore(env["DATA_YOUTUBE_DB"])
+    rows = [
+        Row(_titled(v, c, n, t, "Cats" if v == "c3" else "채널", rank=50 + i), ("popular",))
+        for i, (v, c, n, t) in enumerate(CHART)
+    ]
+    store.save(T1, rows)
+    store.close()
+    return {**env, "DATA_POPULAR_VIDEOS_DB": str(tmp_path / "pv.db")}
+
+
+def _run_fill(env: dict, youtube: object, llm: MockLLMClient, cache: CategoryCache | None = None,
+              fill: bool = True):  # fmt: skip  # noqa: ANN202
     return asyncio.run(
         popular(
             TrendPopularRequest(),
-            _llm(answers),
+            llm,
             env=env,
             now=NOW,
             board=TodayBoard(),
             youtube=youtube,
+            category_cache=cache,
+            fill=fill,
         )  # fmt: skip
     ).output
 
 
-def test_short_categories_get_recent_top_korean_videos_once_a_day(tmp_path: Path) -> None:
-    answers = {"t1": "게임", "lck": "게임", "롤": "IT", "한국철강": "기부·재난"}
-    env = _env(tmp_path, extra=FILL)
+def _video_calls(llm: MockLLMClient) -> int:
+    return sum(1 for p in llm.calls if "YouTube 영상 여러 개" in p)
+
+
+def test_chart_videos_are_put_in_cells_by_the_classifier_not_the_youtube_category(
+    tmp_path: Path,
+) -> None:
+    env = _fill_env(tmp_path)
+    youtube, llm = FillYouTube(), _vllm()
+    out = _run_fill(env, youtube, llm, CategoryCache(tmp_path / "t.db"))
+    by = {g.category: g for g in out.by_category}
+    # YouTube 카테고리 20(게임)인 안무 커버는 분류기를 따라 K-pop·음악 칸으로, 다름 표시
+    music = by["K-pop·음악"].top_videos
+    assert [v.video_id for v in music] == ["c1"]
+    assert music[0].youtube_category_id == "20" and music[0].category_mismatch is True
+    assert music[0].topic_category == "K-pop·음악" and music[0].source == "chart"
+    game = by["게임"].top_videos
+    assert [v.video_id for v in game] == ["c2"] and game[0].category_mismatch is False
+    # 외국 영상(c3)은 칸에 없다. 뉴스 칸은 인기 목록 1개 + 그 칸 검색 보충(한국 영상만, 조회수 순)
+    assert [v.video_id for v in by["뉴스·사건"].top_videos] == ["c4", "25c", "25a"]
+    assert [v.source for v in by["뉴스·사건"].top_videos] == ["chart", "search", "search"]
+    # 검색 결과도 분류기를 통과해야 한다: 게임 검색에 나온 뉴스 영상은 게임 칸에 넣지 않는다
+    assert "20a" not in [v.video_id for v in game]
+    assert youtube.calls == [("20", "ko"), ("25", "ko"), ("10", "ko")]  # 5개 미만인 칸만 보충
+    assert "분류해 이 칸" in (by["게임"].top_videos_reason or "")
+    first = _video_calls(llm)
+    assert first >= 1
+    # 같은 날 다시: 검색도 영상 분류도 저장한 것을 쓴다
+    again = _vllm()
+    _run_fill(env, youtube, again, CategoryCache(tmp_path / "t.db"))
+    assert len(youtube.calls) == 3 and _video_calls(again) == 0
+
+
+def test_cells_with_enough_chart_videos_do_not_search(tmp_path: Path) -> None:
+    env = _fill_env(tmp_path, FILL + "per_category = 1\n")
     youtube = FillYouTube()
-    out = _run_fill(env, youtube, answers)
+    out = _run_fill(env, youtube, _vllm())
     by = {g.category: g for g in out.by_category}
-    # 주제가 모자란 뉴스·사건·IT만 채운다. 한국 영상만, 조회수 순
-    assert [v.video_id for v in by["뉴스·사건"].top_videos] == ["25c", "25a"]
-    assert (
-        by["뉴스·사건"].top_videos_reason and "지금 인기 아님" in by["뉴스·사건"].top_videos_reason
+    assert [v.video_id for v in by["게임"].top_videos] == ["c2"]
+    assert youtube.calls == []  # 세 칸 모두 인기 목록으로 1개를 채웠다
+
+
+def test_search_failure_and_unclassified_videos_leave_reasons(tmp_path: Path) -> None:
+    env = _fill_env(tmp_path)
+    out = _run_fill(env, FillYouTube(fail=True), _vllm())
+    news = next(g for g in out.by_category if g.category == "뉴스·사건")
+    assert [v.video_id for v in news.top_videos] == ["c4"]
+    assert "검색 실패: 최근 조회수 높은 영상 검색 실패 [QUOTA_EXCEEDED]" in (
+        news.top_videos_reason or ""
     )
-    assert [v.title for v in by["IT"].top_videos] == ["오늘 소식", "속보 뉴스"]
-    assert by["게임"].top_videos == [] or by["게임"].shortage_reason
-    assert youtube.calls == [("25", "ko"), ("28", "ko")]
-    _run_fill(env, youtube, answers)  # 같은 날 다시: 저장한 결과를 쓴다
-    assert len(youtube.calls) == 2
-
-
-def test_fill_failure_or_unmapped_category_leaves_only_a_reason(tmp_path: Path) -> None:
-    answers = {"t1": "게임", "lck": "게임", "롤": "IT", "한국철강": "기부·재난"}
-    out = _run_fill(_env(tmp_path, extra=FILL), FillYouTube(fail=True), answers)
-    by = {g.category: g for g in out.by_category}
-    assert by["뉴스·사건"].top_videos == []
-    assert by["뉴스·사건"].top_videos_reason == "최근 조회수 높은 영상 검색 실패 [QUOTA_EXCEEDED]"
-    # 설정 표에 없는 카테고리는 채우지 않는다
-    out = _run_fill(_env(tmp_path / "b"), FillYouTube(), answers)
-    assert all(g.top_videos == [] and g.top_videos_reason is None for g in out.by_category)
-
-
-def test_fill_always_fills_every_mapped_category_from_several_ids(tmp_path: Path) -> None:
-    answers = {"t1": "게임", "lck": "게임", "롤": "IT", "한국철강": "뉴스·사건"}
-    extra = (
-        '\nfill_youtube_categories = { "게임" = "20", "연예·스포츠" = ["24", "17"] }\n'
-        "fill_always = true\n"
-    )
-    youtube = FillYouTube()
-    out = _run_fill(_env(tmp_path, extra=extra), youtube, answers)
-    by = {g.category: g for g in out.by_category}
-    # 주제가 있는 게임도 채우고, 주제 순위(items)는 그대로 남긴다
-    assert by["게임"].items and [v.video_id for v in by["게임"].top_videos] == ["20c", "20a"]
-    # 여러 id는 합쳐 조회수 순
-    assert [v.video_id for v in by["연예·스포츠"].top_videos] == ["24c", "17c", "24a", "17a"]
-    assert youtube.calls == [("20", "ko"), ("24", "ko"), ("17", "ko")]
-    assert by["뉴스·사건"].top_videos == []  # 표에 없는 카테고리
-
-
-def test_fill_adds_recent_videos_from_the_saved_popular_chart(tmp_path: Path) -> None:
-    extra = (
-        '\nfill_youtube_categories = { "게임" = "20" }\nfill_always = true\nfill_language = ""\n'
-    )
-    out = _run_fill(_env(tmp_path, extra=extra), FillYouTube(), {"t1": "게임"})
+    # 영상 분류를 못 하면 칸에 넣지 않고(지어내지 않음) 수를 남긴다
+    out = _run_fill(_fill_env(tmp_path / "b"), FillYouTube(), _vllm(fail=True))
+    assert all(g.top_videos == [] for g in out.by_category)
     game = next(g for g in out.by_category if g.category == "게임")
-    # 검색 결과(20a·20b·20c)와 저장된 인기 목록(v1~v4, 같은 카테고리 20)을 합쳐 조회수 순
-    assert [v.video_id for v in game.top_videos] == ["v1", "v2", "20b", "20c", "v3"]
-    assert game.top_videos_reason and "한국 인기 목록 4개" in game.top_videos_reason
+    assert "분류 못 한 영상 3개 뺌" in (game.top_videos_reason or "")
+
+
+def test_fill_off_or_unmapped_category_makes_no_video_calls(tmp_path: Path) -> None:
+    llm = _vllm()
+    out = _run_fill(_fill_env(tmp_path), FillYouTube(), llm, fill=False)
+    assert all(g.top_videos == [] and g.top_videos_reason is None for g in out.by_category)
+    assert _video_calls(llm) == 0  # 기획안 재료(promo)는 영상 칸을 쓰지 않는다
+    out = _run_fill(_fill_env(tmp_path / "b", ""), FillYouTube(), _vllm())
+    assert all(g.top_videos == [] for g in out.by_category)  # 설정 표가 없으면 채우지 않는다

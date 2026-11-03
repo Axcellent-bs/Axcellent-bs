@@ -131,6 +131,9 @@ export function TrendPopular() {
                             <span className="shrink-0 text-xs text-ink-500">
                               {v.channel_title ?? "채널 모름"}{v.views != null ? ` · 조회 ${v.views.toLocaleString("ko-KR")}회` : ""}
                             </span>
+                            {v.category_mismatch && (
+                              <span className="chip shrink-0" title={`YouTube 카테고리 ${v.youtube_category_id ?? "?"}와 다르게 분류함`}>YouTube 카테고리와 다름</span>
+                            )}
                           </li>
                         ))}
                       </ol>
