@@ -364,3 +364,15 @@ def test_dashboard_may_ask_for_the_headcount_preview(client) -> None:
     assert res["status"] == "completed"
     body = _body("team_headcount", {"month": "2026-11"}, token="mock:dashboard-api")
     assert client.post("/a2a", json=body).json()["status"] == "completed"
+
+
+def test_expected_member_count_comes_from_env(monkeypatch):
+    from hr_agent.org import roster
+
+    monkeypatch.setenv("HR_EXPECTED_MEMBERS", "27")
+    assert roster._expected_member_count() == 27
+    for bad in ("", "0", "-3", "abc"):
+        monkeypatch.setenv("HR_EXPECTED_MEMBERS", bad)
+        assert roster._expected_member_count() == 10
+    monkeypatch.delenv("HR_EXPECTED_MEMBERS")
+    assert roster._expected_member_count() == 10
