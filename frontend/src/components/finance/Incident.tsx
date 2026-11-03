@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Link } from "react-router";
 import { humanId, shortDateTime } from "@/lib/format";
 import {
   finance, incidentName, krw, ledgerSourceKo, purposeKo, sortIncidents,
@@ -164,17 +165,19 @@ function Cards({ d }: { d: IncidentDetail }) {
 // ---------------------------------------------------------------- 보상 받은 고객
 function Recipients({ d }: { d: IncidentDetail }) {
   const rows = [...d.compensation.coupons].sort((a, b) => a.at.localeCompare(b.at));
+  const noCustomer = rows.filter((r) => !r.buyer_id).length;
   return (
     <div>
       <h3 className="text-sm font-semibold text-ink-900">보상으로 나간 내역 (장부) <span className="font-normal text-ink-500">{rows.length}건</span></h3>
       {rows.length ? (
         <div className="mt-2 overflow-x-auto rounded-2xl border border-ink-100">
-          <table className="w-full min-w-[480px] text-sm">
+          {/* 열 너비를 고정한다. 기록 번호를 펼쳐도 금액 열이 움직이지 않게 */}
+          <table className="w-full min-w-[480px] table-fixed text-sm">
             <thead className="bg-surface-2 text-left text-xs text-ink-500">
               <tr>
                 <th className="px-3 py-2 font-medium">고객</th>
-                <th className="px-3 py-2 text-right font-medium">금액</th>
-                <th className="px-3 py-2 font-medium">기록 번호</th>
+                <th className="w-36 px-3 py-2 text-right font-medium">금액</th>
+                <th className="w-56 px-3 py-2 font-medium">기록 번호</th>
               </tr>
             </thead>
             <tbody>
@@ -182,7 +185,7 @@ function Recipients({ d }: { d: IncidentDetail }) {
                 return (
                   <tr key={r.execution_id ?? `${r.coupon_id ?? "coupon"}-${n}`} className="border-t border-ink-100 align-top">
                     <td className="px-3 py-2">
-                      {/* 옛 장부 기록은 고객·실행 번호가 비어 있을 수 있다. 비어 있어도 화면이 깨지면 안 된다 */}
+                      {/* 쿠폰 이벤트로만 적힌 줄은 고객·실행 번호가 비어 있다. 비어 있어도 화면이 깨지면 안 된다 */}
                       <b className="text-ink-900">{r.buyer_id ? humanId(r.buyer_id) : "고객 정보 없음"}</b>
                       <p className="text-[11px] text-ink-500">{purposeKo(r.reason_code, r.purpose_code)} · {shortDateTime(r.at)}</p>
                     </td>
@@ -200,14 +203,28 @@ function Recipients({ d }: { d: IncidentDetail }) {
           </table>
         </div>
       ) : <div className="mt-2"><Empty>이 사건으로 나간 보상 쿠폰이 아직 없습니다.</Empty></div>}
+      {noCustomer > 0 && (
+        <p className="mt-2 text-xs leading-relaxed text-ink-500">
+          "고객 정보 없음" {noCustomer}건: 쿠폰 지급 기록에 고객 번호가 남지 않은 줄입니다. 금액은 지급 기록 그대로입니다.
+          누가 받았는지는 <Link to="/support" className="underline hover:text-ink-700">고객지원 AI</Link> 화면의 장애 대응에서 확인합니다.
+        </p>
+      )}
     </div>
   );
 }
 
-function NotOurJob() {
+/** 처음 보는 사람이 이 화면에서 무엇을 해야 하는지 먼저 알려 준다 */
+function WhatToDo() {
+  const link = "font-medium text-brand-700 underline hover:text-brand-600";
   return (
-    <aside className="rounded-2xl border border-dashed border-ink-300 px-4 py-3 text-xs leading-relaxed text-ink-700">
-      재무는 쿠폰·환불의 끝난 금액을 장부에 적기만 합니다.
+    <aside className="rounded-2xl bg-surface-2 px-4 py-3 text-sm leading-relaxed text-ink-700">
+      <p><b className="text-ink-900">여기서 할 일은 없습니다.</b> 이 장애로 나간 돈을 확인하는 화면이고, 보상과 환불은 재무가 정하지 않습니다.</p>
+      <p className="mt-1">이상한 점이 있으면 담당 화면에서 처리합니다.</p>
+      <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+        <li>보상을 못 받은 고객, 환불 문제: <Link to="/support" className={link}>고객지원 AI</Link></li>
+        <li>승인을 기다리는 쿠폰: <Link to="/marketing" className={link}>마케팅 AI</Link></li>
+        <li>장애 진행 상황: <Link to="/orchestrator" className={link}>총괄</Link></li>
+      </ul>
     </aside>
   );
 }
@@ -231,10 +248,10 @@ function IncidentDetailView({ id, summary, tick }: { id: string; summary: Incide
       <ResourceBody res={res}>
         {(d) => (
           <div className="space-y-5">
-            <LedgerLine d={d} />
+            <WhatToDo />
             <Cards d={d} />
             <Recipients d={d} />
-            <NotOurJob />
+            <LedgerLine d={d} />
           </div>
         )}
       </ResourceBody>
