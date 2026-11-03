@@ -1038,6 +1038,17 @@ class PopularTopic(AxModel):
     is_person: bool | None = None
 
 
+class PopularVideo(AxModel):
+    """카테고리의 최근 조회수 높은 영상 하나 (지금 인기 주제가 모자랄 때 채움, 지금 인기 아님)."""
+
+    video_id: str = Field(min_length=1)
+    title: str | None = None
+    channel_title: str | None = None
+    views: int | None = Field(default=None, ge=0)  # 받은 시각의 누적 조회수
+    published_at: UtcDatetime | None = None
+    duration_seconds: int | None = Field(default=None, ge=0)
+
+
 class PopularCategory(AxModel):
     """화면용 카테고리 하나의 "지금 인기" 1~N위 (회사 설정 [popular] categories)."""
 
@@ -1045,6 +1056,9 @@ class PopularCategory(AxModel):
     items: list[PopularTopic] = Field(default_factory=list)  # 점수 순, 최대 per_category개
     # N개를 못 채웠으면 이유 (예: 이 카테고리로 분류된 주제가 3개뿐)
     shortage_reason: str | None = None
+    # 아래는 예전 응답은 없다. 주제가 모자랄 때 그 카테고리의 최근 조회수 높은 영상 (지금 인기 아님)
+    top_videos: list[PopularVideo] = Field(default_factory=list)
+    top_videos_reason: str | None = None  # 고른 기준, 또는 못 받은 이유
 
 
 class TrendPopularOutput(AxModel):
