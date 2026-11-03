@@ -16,7 +16,7 @@
 | ② 매출·PG 대사 | `reconciliation.py` | `matched`·`mismatch`·`missing_in_pg`·`pending`·`fee_anomaly` |
 | ③ 판매자 정산 | `settlement.py` | 정산금 = 판매액 − 수수료 − 판매자 부담 쿠폰 − 환불, 보류 사유. 묶음 지급은 `execute("confirm_settlement")`(항상 C) |
 | ④ 팀 예산 | `team_budget.py` | 팀 예산 = 그달 1일 팀 인원(인사 `team_headcount`) × 인당 월 단가. 확정은 사람 |
-| 사건 보상 장부 | `ledger.py` | 쿠폰 업무는 재무가 맡지 않는다(마케팅·고객지원 합의). 지급은 마케팅(`issue_coupon`), 판정은 고객지원이 하고 재무는 **끝난 금액**만 사건별로 적는다(보류·거절 줄과 등급은 장부에 없다): 이벤트(`events`) 또는 safety 실행 기록(`safety_executions`, 이벤트를 못 받을 때)·시드(`seed`). 실행 기록이 있으면 그것이 원본이라 이벤트를 더하지 않는다. 둘 다 없으면 null |
+| 사건 보상 장부 | `ledger.py` | 쿠폰 업무는 재무가 맡지 않는다(마케팅·고객지원 합의). 지급은 마케팅(`issue_coupon`), 판정은 고객지원이 하고 재무는 **끝난 금액**만 사건별로 적는다(보류·거절 줄과 등급은 장부에 없다): safety 실행 기록(`safety_executions`)이 있으면 그것이 원본이라 이벤트를 더하지 않고, 없는 사건만 이벤트(`events`)로 적는다. 목 모드는 시드(`seed`). 둘 다 없으면 null |
 | 사건별 화면 | `incidents.py` | 사건 목록·상세: data 영향 그대로 + 보상 장부 + 환불 금액(`refunds`: 사건 구간·영향 고객으로 귀속, 금액·건수만) + 빠져나간 돈 합계(`money_out_total` = 보상 + 환불) (재설계 문서 12-1). 재무 단계는 #415로 없앴다 |
 | 설정 | `finance_policy.toml` | 수수료율(기본 10%, 문구 8%), 주 정산, PG 3.1%, 인당 월 단가, 보류 추이 기준 |
 
@@ -68,7 +68,7 @@ safety·finance를 목 모드로 띄운 뒤 `uv run python agents/finance/demo/s
 - 매일 결산 자동 실행(①): 서버가 켜지고 10초 뒤 한 번, 그다음 `FINANCE_DAILY_CLOSING_SECONDS`(기본 86400초=하루, 0이면 끔)마다 **전날** 하루 결산을 계산해 `GET /api/finance/closing/last`에 남긴다(`data.date`·`data.report`·`data.trigger`=`auto`|`manual`·`data.ran_at`, `meta.interval_seconds`·`meta.next_run_at`). 조회만 한다 — 확정(`closing/confirm`)은 사람이 대시보드에서 누른다. 테스트는 0으로 끈다
 - 사람 토큰: 안전 관문과 같은 형식 `Authorization: Bearer human:<이름>`(목 모드) 또는 `FINANCE_HUMAN_TOKENS`/`SAFETY_HUMAN_TOKENS`의 토큰 (`human.py`)
 - CORS: `FINANCE_CORS_ORIGINS`(기본 `http://localhost:3001,http://127.0.0.1:3001`). 사람 결정 경로 3개만 POST·Authorization 허용, 나머지는 GET만
-- 구독 이벤트: `coupon.issued`(보상 쿠폰 지급 누적), `payment.refunded`(환불 누적). 실제 모드는 `REDIS_URL`이 있어야 받는다. 받지 못하면 보상 쿠폰 장부를 safety `GET /api/safety/executions`(읽기)로 채운다
+- 구독 이벤트: `coupon.issued`(보상 쿠폰 지급 누적), `payment.refunded`(환불 누적). 실제 모드는 `REDIS_URL`이 있어야 받는다. 보상 쿠폰 장부는 safety `GET /api/safety/executions`(읽기)에 기록이 있으면 그것을 먼저 쓴다
 - 부르는 것: data `impact_analysis`(`failed_order_count`·`affected_customer_count`·`damage_amount` + 영향 고객 ID `affected_customer_ids`), data `fraud_score`(`risk_score` 0~100), safety `execute()`(판매자 승인·정산 보류·정산 묶음 `confirm_settlement`), shop-api·safety 조회 API(장부)
 
 ## 4. 의존
