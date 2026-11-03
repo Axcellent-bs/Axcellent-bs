@@ -476,3 +476,31 @@ def test_unknown_notice_has_no_incident_or_publish_time() -> None:
     missing = _call("get_notice", {"notice_id": "ntc_9999"}, token=SUPPORT)["output"]
     assert missing["found"] is False
     assert missing["context_id"] is None and missing["published_at"] is None
+
+
+def test_coupon_event_survives_a_marketing_restart() -> None:
+    """재시작으로 쿠폰 번호가 1부터 다시 나와도 다른 사건의 쿠폰 이벤트는 버려지지 않는다."""
+
+    def issue(context_id: str) -> dict:
+        data = {
+            "purpose_code": "compensation",
+            "buyer_id": "buy_a1",
+            "count": 1,
+            "unit_value": 2000,
+        }
+        return _call("issue_coupon", data, sequence=1, token=SUPPORT, context_id=context_id)
+
+    assert issue("ctx_inc_a")["status"] == "completed"
+    first = events.MOCK_PUBLISHED[-1]
+    handlers.reset_state()  # 재시작: 쿠폰 번호 카운터가 처음으로 돌아간다 (이벤트 버스는 그대로)
+    assert issue("ctx_inc_b")["status"] == "completed"
+    second = events.MOCK_PUBLISHED[-1]
+    assert first.data["coupon_id"] == second.data["coupon_id"]  # 번호는 같아도
+    assert first.event_id != second.event_id and _coupon_events() == 2  # 둘 다 전달된다
+
+
+def test_coupon_event_carries_the_buyer_and_execution_for_the_ledger(monkeypatch) -> None:
+    _fake_execute(monkeypatch, _decision(execution_id="exe_x1", grade="A"))
+    assert _coupon(buyer_id="buy_a9")["status"] == "completed"
+    data = events.MOCK_PUBLISHED[-1].data
+    assert (data["buyer_id"], data["execution_id"]) == ("buy_a9", "exe_x1")
