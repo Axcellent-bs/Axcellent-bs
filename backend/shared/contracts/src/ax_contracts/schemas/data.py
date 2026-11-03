@@ -1263,6 +1263,9 @@ class ShortsStatsOutput(AxModel):
     # 아래는 예전 응답은 없다. 검색 숏츠 다시 조회(videos.list): 이번에 다시 본 수와 못 본 이유
     rechecked: int = Field(default=0, ge=0)
     recheck_reason: str | None = None
+    # 아래는 예전 응답은 없다. 표본 언어 (예: ko = 한국 숏츠만)와 그 기준으로 뺀 숏츠 수
+    language: str | None = None
+    foreign_excluded: int = Field(default=0, ge=0)
     limitation: str = ""  # 한계 (이미 뜬 영상끼리의 비교 등)
     summary: str = ""
 
