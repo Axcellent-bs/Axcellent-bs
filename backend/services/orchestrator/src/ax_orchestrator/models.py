@@ -136,6 +136,26 @@ class Incident:
     def new_context_id() -> str:
         return f"ctx_inc_{uuid.uuid4().hex[:12]}"
 
+    def mttr_seconds(self) -> float | None:
+        """복구까지 걸린 초(이벤트를 연 때부터).
+
+        장애가 안 풀린 채 대응이 끝난 이벤트(degraded)는 복구 신호(shop.recovered)가 올 때까지
+        None이다.
+        그 전의 `closed_at`은 AI 대응이 끝난 시각일 뿐이라 복구 시간으로 쓰면 3초 같은 값이 나온다.
+        """
+        if self.status == "degraded":
+            if self.recovered_at is None:
+                return None
+            return round((self.recovered_at - self.opened_at).total_seconds(), 2)
+        if self.closed_at is None:
+            return None
+        return round((self.closed_at - self.opened_at).total_seconds(), 2)
+
+    def refresh_mttr(self) -> None:
+        """복구 신호가 늦게 와서 값이 바뀌면 이미 만든 지표에 반영한다(지표가 있을 때만)."""
+        if self.metrics:
+            self.metrics["mttr_seconds"] = self.mttr_seconds()
+
     def impact_window(self) -> tuple[datetime, datetime]:
         """영향 분석 구간. 장애 시작(since)부터, 없으면 열린 시각 앞 15분부터 뒤 15분까지.
 

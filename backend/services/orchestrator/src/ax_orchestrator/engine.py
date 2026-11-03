@@ -699,7 +699,9 @@ class Engine:
         statuses = [r.status for r in inc.steps.values()]
         retries = sum(max(r.attempts - 1, 0) for r in inc.steps.values())
         inc.metrics = {
-            "mttr_seconds": round((inc.closed_at - inc.opened_at).total_seconds(), 2),
+            "mttr_seconds": inc.mttr_seconds(),
+            # AI 대응이 끝나기까지 걸린 초. 장애가 풀린 시간(mttr_seconds)과 다르다
+            "response_seconds": round((inc.closed_at - inc.opened_at).total_seconds(), 2),
             "steps_total": len(statuses),
             "steps_completed": statuses.count("completed"),
             "held": sum(1 for r in inc.steps.values() if r.reason_code == "human_input"),
