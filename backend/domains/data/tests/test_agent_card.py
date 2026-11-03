@@ -33,6 +33,7 @@ def test_card_validates(card: AgentCard) -> None:
         "content_recommend",
         "trend_popular",
         "promo_concepts",
+        "shorts_stats",
         "answer_planning_question",
         "campaign_effect",
     }
