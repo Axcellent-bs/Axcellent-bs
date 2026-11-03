@@ -202,8 +202,16 @@ async def reject_claim(claim_id: int, body: NoteBody) -> dict:
     return await _decide(claim_id, "reject", body.note)
 
 
+@router.post("/claims/{claim_id}/retry-refund")
+async def retry_refund_claim(claim_id: int, body: NoteBody) -> dict:
+    """만료(`review_timeout`)로 닫힌 환불을 다시 요청한다. 사람이 거절한 건은 409다."""
+    return await _decide(claim_id, "retry_refund", body.note)
+
+
 async def _decide(claim_id: int, decision: str, note: str) -> dict:
     if is_mock():
+        if decision == "retry_refund":
+            raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "환불 다시 요청은 실제 모드에서만 된다")
         action = mock_actions.approve_claim if decision == "approve" else mock_actions.reject_claim
         return ok(action(claim_id, note))
     out = await support_client.call(

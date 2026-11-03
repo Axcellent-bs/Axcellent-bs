@@ -32,7 +32,8 @@
 | `/conversations` | 새 문의 만들기 (201) |
 | `/conversations/{id}/customer-messages`, `/agent-messages` | 메시지 추가 (201). 상담원 답변은 가드(환불 단정 문구)에 걸리면 422 `REPLY_BLOCKED` |
 | `/conversations/{id}/check`, `/reject-draft`, `/summary`, `/status` | 답변 검사, 초안 거절, 요약, 상태 변경 |
-| `/claims/{id}/approve`, `/reject`, `/receive`, `/inspection` | 클레임 처리. 상태가 맞지 않으면 409 `INVALID_STATE` |
+| `/claims/{id}/approve`, `/reject`, `/receive`, `/inspection` | 클레임 처리. 상태가 맞지 않으면 409 `INVALID_STATE`. 안전 장치가 환불을 닫은 입고 클레임의 `/reject`는 종료이고 사유(`note`)가 필요하다 |
+| `/claims/{id}/retry-refund` | 만료(`review_timeout`)로 닫힌 환불 다시 요청 (실제 모드만). 사람이 거절한 건은 409 `INVALID_STATE` |
 | `/queue-entries/process` | 준비된 보상 큐 항목 지급 처리 |
 | `/reviews/{id}/status` | 후기 노출·숨김 |
 
@@ -59,7 +60,7 @@ CORS 허용 출처는 `DASHBOARD_CORS_ORIGINS`(쉼표 구분, 기본 `http://loc
 | GET `/claims?status`, `/claims/stats`, `/claims/{id}` | `list_claims`, `claim_stats`, `get_claim` |
 | GET `/queue-entries` | `claim_queue` |
 | GET `/kpis` | `inquiry_overview` (`kpis`만 쓴다) |
-| POST `/claims/{id}/approve`, `/reject` | `decide_claim` (메모는 `untrusted.note`) |
+| POST `/claims/{id}/approve`, `/reject`, `/retry-refund` | `decide_claim` (`approve`·`reject`·`retry_refund`, 메모는 `untrusted.note`) |
 | POST `/claims/{id}/receive`, `/inspection` | `receive_return`, `inspect_return` |
 | POST `/queue-entries/process` | `process_claim_queue` (`refund_request`로 지급, 안전 관문 기준표 검사) |
 | GET `/customers/at-risk?min_level&limit` | `list_at_risk_customers` (고객관리 탭. `data`는 `items`, `meta.total`은 자르기 전 전체 수) |

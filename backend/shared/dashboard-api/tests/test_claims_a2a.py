@@ -296,6 +296,19 @@ def test_reject_calls_decide_claim(client: TestClient, fake: Fake) -> None:
     assert fake.sent[0].input == {"claim_id": 1, "decision": "reject"}
 
 
+def test_retry_refund_calls_decide_claim_with_the_retry_decision(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.outputs["decide_claim"] = claim(status="approved")
+    response = client.post(BASE + "/claims/1/retry-refund", json={"note": "기한을 놓쳤다"})
+    assert response.status_code == 200
+    sent = fake.sent[0]
+    assert sent.skill == "decide_claim"
+    assert sent.input == {"claim_id": 1, "decision": "retry_refund"}
+    assert sent.untrusted == {"note": "기한을 놓쳤다"}
+    assert sent.meta.idempotency_key == f"{sent.meta.context_id}:decide_claim:claim:1:retry_refund"
+
+
 def test_receive_and_inspection_translate_screen_values(client: TestClient, fake: Fake) -> None:
     fake.outputs["receive_return"] = claim(status="return_received", return_received_at="t")
     fake.outputs["inspect_return"] = claim(

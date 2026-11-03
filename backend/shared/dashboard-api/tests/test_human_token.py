@@ -8,6 +8,7 @@ from ax_dashboard_api.main import app
 BASE = "/api/dashboard"
 WRITES = [
     ("/claims/1/approve", {}),
+    ("/claims/1/retry-refund", {}),
     ("/queue-entries/process", {}),
     ("/conversations/1/status", {"status": "closed"}),
     ("/handover-questions/q1/answer", {}),

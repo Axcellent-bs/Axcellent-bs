@@ -12,6 +12,7 @@ export default function QueuePage() {
   const [limit, setLimit] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [closeNotes, setCloseNotes] = useState<Record<number, string>>({});
 
   const load = useCallback(async () => {
     try { setView(await api.admin.queue()); setError(null); } catch { setError(OFFLINE); }
@@ -81,6 +82,28 @@ export default function QueuePage() {
                 <div className="space-y-1.5">
                   <span className={`chip ${e.ready ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{e.ready ? "처리 가능" : "대기 — 조건 미충족"}</span>
                   {!e.ready && <Blockers items={e.blockers} />}
+                  {e.blockers.some((b) => b.code === "REFUND_REJECTED" || b.code === "REFUND_EXPIRED") && (() => {
+                    const note = (closeNotes[e.claim_id] ?? "").trim();
+                    const expired = e.blockers.some((b) => b.code === "REFUND_EXPIRED");
+                    return (
+                      <div className="space-y-1.5 rounded-md border border-amber-200 px-2 py-2">
+                        <input className="field w-full py-1.5 text-xs" placeholder="사유 (필수)" aria-label={`신청 #${e.claim_id} 처리 사유`} maxLength={200}
+                          value={closeNotes[e.claim_id] ?? ""} onChange={(ev) => setCloseNotes((n) => ({ ...n, [e.claim_id]: ev.target.value }))} />
+                        <div className="flex flex-wrap gap-1.5">
+                          <button className="btn-ghost py-1 text-xs" disabled={busy !== null || !note}
+                            onClick={() => act("close", async () => { await api.admin.reject(e.claim_id, note); })}>환불 불가로 종료</button>
+                          {expired && (
+                            <button className="btn-ghost py-1 text-xs" disabled={busy !== null || !note}
+                              onClick={() => act("retry", async () => { await api.admin.retryRefund(e.claim_id, note); })}>다시 요청</button>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-ink-500">
+                          종료하면 이 클레임은 큐에서 빠지고 같은 품목은 다시 접수할 수 없습니다. 고객 안내는 상담원이 문의 답변으로 합니다.
+                          {expired && " 다시 요청하면 큐에서 ‘처리’를 눌러 안전 장치를 다시 거칩니다."}
+                        </p>
+                      </div>
+                    );
+                  })()}
                   {!e.ready && e.inspection === "pending" && (
                     <div className="flex gap-1.5">
                       <button className="btn-ghost py-1 text-xs" disabled={busy !== null} onClick={() => act("ins", async () => { await api.admin.inspect(e.claim_id, "ok"); })}>검수 정상</button>

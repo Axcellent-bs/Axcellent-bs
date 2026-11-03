@@ -231,7 +231,7 @@
     },
     {
       "id": "decide_claim",
-      "description": "사람 확인이 필요한 클레임을 상담원이 승인·거절한다. 메모는 untrusted.note. 상태 변경이라 execute()를 거친다.",
+      "description": "사람 확인이 필요한 클레임을 상담원이 승인·거절한다. 안전 장치가 환불을 거절·만료로 닫은 입고 클레임은 사유(untrusted.note)와 함께 거절로 종료하고, 만료(review_timeout)로 닫힌 것만 retry_refund로 다시 요청한다. 메모는 untrusted.note. 상태 변경이라 execute()를 거친다.",
       "input_schema": "agents/support/src/support_agent/claim_schemas.py#DecideClaimInput",
       "output_schema": "agents/support/src/support_agent/claim_schemas.py#Claim",
       "grade": "A",

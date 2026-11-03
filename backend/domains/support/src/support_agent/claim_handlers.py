@@ -31,7 +31,7 @@ from support_agent.claim_schemas import (
     QueueRunResult,
     ReceiveReturnInput,
 )
-from support_agent.claims import now_iso
+from support_agent.claims import now_iso, refund_rejection_hit
 from support_agent.schemas import RecordClaimActivityInput
 
 CLAIMS = persistence.build_claim_store()
@@ -87,7 +87,6 @@ HELD_MESSAGE = {
     "held": "안전 레이어 보류 (사람 확인 대기)",
     "rejected": "실행이 거부됨",
     "failed": "실행에 실패함",
-    "refund_rejected": "환불이 안전 장치에서 거절돼 지급하지 않는다",
     "shop_refund_failed": "shop-api 환불 실패 (다시 처리하면 같은 키로 재시도)",
 }
 
@@ -157,12 +156,14 @@ async def create_claim(request: AgentRequest) -> AgentResult:
         return h._done(request, h.STORE.results[key])
     wanted = None if parsed.items is None else {i.order_item_id: i.qty for i in parsed.items}
     item_ids = {i.id for i in order.items} if wanted is None else set(wanted)
-    if CLAIMS.has_open_claim(order.id, item_ids):
-        return h._done(
-            request,
-            {"message": "같은 품목에 진행 중인 클레임이 있다"},
-            outcome="duplicate_claim",
+    blocking = CLAIMS.blocking_claim(order.id, item_ids)
+    if blocking is not None:
+        message = (
+            "같은 품목에 환불이 거절된 클레임이 있다"
+            if blocking.status == "rejected"
+            else "같은 품목에 진행 중인 클레임이 있다"
         )
+        return h._done(request, {"message": message}, outcome="duplicate_claim")
     decision = claim_rules.decide(
         order,
         parsed.type,
@@ -206,12 +207,44 @@ async def decide_claim(request: AgentRequest) -> AgentResult:
     claim = CLAIMS.get(parsed.claim_id)
     if claim is None:
         return _claim_not_found(request, parsed.claim_id)
-    allowed = ("needs_review",) if parsed.decision == "approve" else ("needs_review", "needs_info")
-    if claim.status not in allowed:
-        return _invalid_state(request, claim.id, claim.status, "결정")
+    # 안전 장치가 환불을 닫은 입고 클레임: 상담원이 사유와 함께 종료하거나,
+    # 만료로 닫힌 것만 다시 요청한다
+    refund_closed = bool(claim.refund_rejected) and claim.status in ("approved", "return_received")
+    if parsed.decision == "retry_refund":
+        if claim.refund_rejected != "review_timeout" or not refund_closed or claim.refund_paid > 0:
+            return h._done(
+                request,
+                {
+                    "message": f"클레임 {claim.id}는 만료로 닫힌 환불이 아니라 다시 요청할 수 없다",
+                    "status": claim.status,
+                },
+                outcome="invalid_state",
+            )
+    else:
+        allowed = (
+            ("needs_review",) if parsed.decision == "approve" else ("needs_review", "needs_info")
+        )
+        closing_refund = (
+            parsed.decision == "reject" and claim.status not in allowed and refund_closed
+        )
+        if claim.status not in allowed and not closing_refund:
+            return _invalid_state(request, claim.id, claim.status, "결정")
+        if closing_refund and not _note(request):
+            return h._done(
+                request,
+                {
+                    "message": "환불이 거절된 클레임을 종료하려면 사유를 적어야 한다",
+                    "status": claim.status,
+                },
+                outcome="invalid_state",
+            )
 
     async def apply() -> tuple[dict[str, Any], bool]:
-        if parsed.decision == "approve":
+        if parsed.decision == "retry_refund":
+            status = claim.status
+            claim.refund_rejected = None
+            claim.refund_attempt += 1
+        elif parsed.decision == "approve":
             status = "awaiting_return" if claim.requires_return else "approved"
         else:
             status = "rejected"
@@ -315,10 +348,17 @@ async def process_claim_queue(request: AgentRequest) -> AgentResult:
             continue
         # 키와 사건은 클레임 단위로 고정한다. 안전 레이어는 C 보류 건을 승인한 뒤 같은 키로 다시
         # 요청해야 `executed`를 돌려주는데, 호출마다 새 키를 쓰면 승인이 반영되지 않는다.
+        if claim.refund_paid > 0:  # 이미 지급한 클레임은 다시 요청하지 않는다
+            results.append(
+                QueueRunResult(claim_id=claim.id, result="skipped", detail="already_paid")
+            )
+            continue
+        # 만료로 닫힌 환불을 다시 요청하면 시도 번호가 붙은 새 키로 관문을 다시 지난다
+        attempt = f":retry{claim.refund_attempt}" if claim.refund_attempt else ""
         meta = request.meta.model_copy(
             update={
                 "context_id": claim.context_id,
-                "idempotency_key": f"{claim.context_id}:refund_request:claim:{claim.id}",
+                "idempotency_key": f"{claim.context_id}:refund_request:claim:{claim.id}{attempt}",
             }
         )
         # 보류되면 담당자가 이 요약을 본다 (safety가 앞 200자를 보류 기록에 담는다). 고객 이름·메모
@@ -358,13 +398,7 @@ async def process_claim_queue(request: AgentRequest) -> AgentResult:
                     claim_id=claim.id,
                     result="skipped",
                     detail=f"refund_rejected:{claim.refund_rejected}",
-                    blockers=[
-                        ClaimReasonHit(
-                            code="REFUND_REJECTED",
-                            level="block",
-                            message=HELD_MESSAGE["refund_rejected"],
-                        )
-                    ],
+                    blockers=[refund_rejection_hit(claim.refund_rejected)],
                 )
             )
             continue

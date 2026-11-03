@@ -43,7 +43,7 @@
 | `decline_change_proposal` | A | dashboard-api | 변경 요청 제안을 보내지 않기로 한 이유(`already_known`·`not_a_real_problem`·`other`)와 결정한 사람을 남긴다(#281). 제안은 저장하지 않으므로 분류와 대표 문의로 가리키고, 자유 메모는 untrusted `note`(200자 이하, 개인정보는 거부). 기획으로는 아무것도 보내지 않으며 같은 제안에 두 번 해도 한 번만 기록된다. `execute()`를 거친다 |
 | `answer_planning_question` | read | planning | 기획이 문의에서 보낸 변경 요청의 근거를 되물으면 **문의 서비스가 보낸 요청의 기록**(보낼 때 남긴 근거 요약·근거 문의 ID)으로만 코드 규칙으로 답한다(#264, LLM 없음). 사건·요청 번호·테넌트가 맞는 기록이 없으면 `unknown`, 근거 질문이고 기록이 있으면 `answered`, 우리 요청이지만 기록으로 답할 수 없으면 `needs_human`. 시각은 요청을 보낸 시각이다. 사람이 답하는 화면과 `receive_planning_answer`는 후속 |
 | `create_claim` | A | dashboard-api, shop-api, orchestrator | 취소·반품·교환 접수 + 규칙 판정 |
-| `decide_claim` | A | dashboard-api | 사람 확인이 필요한 클레임 승인·거절 |
+| `decide_claim` | A | dashboard-api | 사람 확인이 필요한 클레임 승인·거절. 안전 장치가 환불을 닫은 입고 클레임은 사유와 함께 거절로 종료하고(같은 품목 재접수도 막는다), 만료(`review_timeout`)로 닫힌 것만 `retry_refund`로 새 시도 키(`…:retry<n>`)로 다시 요청한다 |
 | `receive_return`, `inspect_return` | A | dashboard-api (입고는 shop-api도) | 반품 입고, 검수 결과 기록 |
 | `process_claim_queue` | A | dashboard-api | 준비된 큐 항목을 `refund_request`(안전 관문의 한도 검사, 기준 이상 C 보류)로 지급 처리 |
 
