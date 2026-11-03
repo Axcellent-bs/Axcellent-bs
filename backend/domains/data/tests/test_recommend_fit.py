@@ -221,11 +221,13 @@ def test_missing_answers_are_unknown_and_unknown_is_not_cached() -> None:
     got = asyncio.run(classify_topics([TopicInput("a"), TopicInput("b")], llm, cache=cache))
     assert (got["b"].category, got["b"].reason) == ("unknown", "LLM 답에 이 소재가 없음")
     assert cache.get("a") is not None and cache.get("b") is None
-    day = [date(2026, 11, 3)]
-    rolling = CategoryCache(today=lambda: day[0])
-    rolling.put("a", got["a"])
-    day[0] = date(2026, 11, 4)
-    assert rolling.get("a") is None  # 날짜가 바뀌면 비운다
+    at = [datetime(2026, 11, 3, tzinfo=UTC)]
+    kept = CategoryCache(retention_days=30, now=lambda: at[0])
+    kept.put("a", got["a"])
+    at[0] = datetime(2026, 11, 4, tzinfo=UTC)
+    assert kept.get("a") is not None  # 다음 날에도 같은 분류 (날마다 바뀌지 않게)
+    at[0] = datetime(2026, 12, 4, tzinfo=UTC)
+    assert kept.get("a") is None  # 보관 기간(30일)이 지나면 다시 묻는다
 
 
 def test_recommend_classifies_all_head_topics_in_one_call(tmp_path: Path) -> None:

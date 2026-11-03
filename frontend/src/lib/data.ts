@@ -576,7 +576,7 @@ export interface TrendPopularOutput {
 }
 
 export type TopicCategory =
-  | "뉴스·사건" | "정치·사회" | "기부·재난" | "인물" | "게임" | "연예·스포츠" | "생활·취미" | "교육·책" | "기타" | "unknown";
+  | "뉴스·사건" | "정치·사회" | "기부·재난" | "인물" | "게임" | "연예·스포츠" | "생활·취미" | "교육·책" | "IT" | "기타" | "unknown";
 /** 급상승했지만 회사 설정의 "추천 안 함" 분류라 추천하지 않은 소재 (참고용, 서버 값) */
 export interface ReferenceTopic {
   keyword: string;
