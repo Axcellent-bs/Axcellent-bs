@@ -752,8 +752,10 @@ class PlanningService(PlanningCore):
         if auto.ok:
             judged = "간단 요청 판정 → 사람 승인 없이 끝까지 처리"
         else:
-            need = [r for r in auto.reasons if "필요" in r or "초과" in r]
-            judged = f"일반 요청 · {', '.join(need)} → 기획서 초안부터 사람 클릭 없이 진행"
+            need = [r for r in auto.reasons if "아님" in r or "필요" in r or "초과" in r]
+            # 일반 요청은 기획서 확정 규칙(질문·인사 경고·충돌·되돌릴 수 없음)으로 확정하고,
+            # 결제 같은 보호 경로는 PR을 열기 전에 사람 승인을 받는다
+            judged = f"일반 요청 · {', '.join(need)} → 기획서 초안 → 확정 규칙으로 판단"
         s.activity.append(
             self._act(t, ctx_req, "planning", "planning", "classify_request", "A2A", judged, "read")
         )

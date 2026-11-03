@@ -93,9 +93,9 @@ def check_simple(title: str, policy: AutoPolicy) -> AutoCheck:
     return AutoCheck(
         ok=hit is None and display and not rejected and small,
         reasons=[
-            f'민감 경로 포함("{hit}") → 사람 확정 필요' if hit else "결제·주문·개인정보 경로 아님",
-            "화면 표시만 바꾸는 요청" if display else "새 기능·동작 변경 → 사람 확정 필요",
-            "인사 ② 기각 이력 있음 → 사람 확정 필요" if rejected else "인사 ② 기각 이력 없음",
+            f'민감 경로 포함("{hit}") → 간단 요청 아님' if hit else "결제·주문·개인정보 경로 아님",
+            "화면 표시만 바꾸는 요청" if display else "새 기능·동작 변경 → 간단 요청 아님",
+            "인사 ② 기각 이력 있음 → 간단 요청 아님" if rejected else "인사 ② 기각 이력 없음",
             size,
         ],
     )
