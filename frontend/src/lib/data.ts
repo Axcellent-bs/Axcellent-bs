@@ -555,6 +555,19 @@ export interface PopularTopic {
   /** 오늘 낸 네이버 판정이 급상승이면 true, 평범이면 false, 판정이 없으면 null */
   rising_now: boolean | null;
   rising_ratio: number | null;
+  /** 실존 인물·팀·리그·상표가 주제에 들어 있는지와 그 이름 (#422, 분류하지 못했으면 null) */
+  real_entity?: boolean | null;
+  entity_names?: string[];
+  /** 화면 카테고리 안 순위 1~5 (#431) */
+  category_rank?: number | null;
+}
+/** 화면용 카테고리 하나의 지금 인기 1~N위 (#431, 회사 설정 [popular] categories) */
+export interface PopularCategory {
+  category: TopicCategory;
+  /** 점수 순, 최대 per_category개 */
+  items: PopularTopic[];
+  /** N개를 못 채웠으면 이유 */
+  shortage_reason: string | null;
 }
 export interface TrendPopularOutput {
   /** 점수 순 */
@@ -573,6 +586,12 @@ export interface TrendPopularOutput {
   weights: Record<string, number>;
   excluded_categories: string[];
   summary: string;
+  /** 카테고리별 보기 (#431, 예전 응답은 없다). 서버가 준 순서 그대로 */
+  by_category?: PopularCategory[];
+  /** 회사 설정의 화면 카테고리 순서 */
+  display_categories?: string[];
+  /** 점수 방식 (예: rank = 출처별 순위 몫) */
+  score_method?: string | null;
 }
 
 // ---------------------------------------------------------------- 홍보 영상 기획안 (promo_concepts)
