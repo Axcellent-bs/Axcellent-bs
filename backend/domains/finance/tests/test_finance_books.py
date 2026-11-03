@@ -316,3 +316,43 @@ def test_live_books_missing_orders_are_not_cached(monkeypatch: pytest.MonkeyPatc
 def test_load_books_uses_seed_in_mock_mode(fixed_now) -> None:
     books = asyncio.run(bk.load_books())
     assert books.source == "seed" and len(books.orders) > 100
+
+
+def test_orders_get_a_longer_read_time_than_other_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#421: 쌓인 주문 전체를 읽는 데 5초를 넘겨도 매출이 "확인할 수 없음"이 되지 않는다."""
+    monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
+    monkeypatch.delenv("FINANCE_MOCK", raising=False)
+    seen: dict[str, float] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen[request.url.path] = request.extensions["timeout"]["read"]
+        return httpx.Response(200, json={"data": []})
+
+    async def run() -> bk.Books:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await bk.live_books(client)
+
+    books = asyncio.run(run())
+    assert seen["/api/shop/orders"] == bk.ORDERS_CALL_SECONDS > bk.CALL_SECONDS
+    assert seen["/api/shop/products"] == seen["/api/safety/executions"] == bk.CALL_SECONDS
+    assert "orders" not in books.unavailable
+
+
+def test_slow_orders_past_the_limit_stay_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """시간을 늘려도 끝내 못 받으면 0원으로 채우지 않고 못 받은 자료로 적는다."""
+    monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
+    monkeypatch.delenv("FINANCE_MOCK", raising=False)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/shop/orders":
+            raise httpx.ReadTimeout("느림", request=request)
+        return httpx.Response(200, json={"data": []})
+
+    async def run() -> bk.Books:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await bk.live_books(client)
+
+    books = asyncio.run(run())
+    assert "orders" in books.unavailable and books.orders == []

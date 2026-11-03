@@ -30,6 +30,9 @@ from ax_agent_template.config import agent_token, agent_url, is_mock
 from finance_agent import finance_config as fc
 
 CALL_SECONDS = 5.0
+# 주문은 전체를 한 번에 읽어서 쌓일수록 오래 걸린다 (#421: 33,850건 22MB에 8초).
+# 부르는 쪽이 먼저 끊어도 끝까지 모아 캐시에 두므로(`cached_live_books`) 다음 요청은 값을 받는다
+ORDERS_CALL_SECONDS = 30.0
 LIVE_CACHE_SECONDS = 30.0
 SEED_FILE = "finance_books_seed.json"
 
@@ -212,10 +215,15 @@ def seed_incidents(today: date | None = None) -> dict[str, dict[str, Any]]:
 
 
 # ---------------------------------------------------------------- 실제 (shop-api, safety)
-async def _get(client: httpx.AsyncClient, url: str, headers: dict | None = None) -> Any:
+async def _get(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict | None = None,
+    timeout: float = CALL_SECONDS,
+) -> Any:
     """`{data, meta}` 응답의 data. 실패하면 None."""
     try:
-        response = await client.get(url, headers=headers or {}, timeout=CALL_SECONDS)
+        response = await client.get(url, headers=headers or {}, timeout=timeout)
     except httpx.HTTPError:
         return None
     if response.status_code != 200:
@@ -334,7 +342,7 @@ async def live_books(http_client: httpx.AsyncClient | None = None) -> Books:
     unavailable: list[str] = []
     try:
         shop, safety = agent_url("shop-api"), agent_url("safety")
-        orders_raw = await _get(client, f"{shop}/api/shop/orders")
+        orders_raw = await _get(client, f"{shop}/api/shop/orders", timeout=ORDERS_CALL_SECONDS)
         products = await _get(client, f"{shop}/api/shop/products")
         sellers = await _get(client, f"{shop}/api/shop/sellers")
         try:
