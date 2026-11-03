@@ -170,3 +170,69 @@ def test_formats_are_classified_in_batches_and_stored(tmp_path: Path) -> None:
     store = ShortsStore(tmp_path / "shorts.db")
     assert len(store.formats([f"p{i}" for i in range(6)], NOW - timedelta(days=1))) == 6
     store.close()
+
+
+# ------------------------------------------------ 검색 숏츠 다시 조회 (시간당 조회 증가)
+
+
+class RecheckYouTube(FakeYouTube):
+    """검색 결과를 다시 조회(videos.list)하면 조회수가 `grow`만큼 늘어 있다."""
+
+    def __init__(self, grow: int = 200, fail: str | None = None) -> None:
+        super().__init__()
+        self.grow = grow
+        self.recheck_fail = fail
+        self.rechecked: list[list[str]] = []
+
+    async def videos(self, ids: list[str]) -> list[VideoStat]:
+        self.rechecked.append(list(ids))
+        self.quota_used += 1
+        if self.recheck_fail:
+            raise ConnectorUnavailable(self.recheck_fail, "x")
+        out = []
+        for vid in ids:
+            cat, i = vid[1:].split("_")
+            out.append(_stat(vid, 1000 * (int(i) + 1) + self.grow, 30, cat=cat))
+        return out
+
+
+def _run_at(env: dict[str, str], youtube: FakeYouTube, at: datetime):  # noqa: ANN202
+    return asyncio.run(
+        shorts_stats(ShortsStatsRequest(), youtube, FakeLLM(), env=env, now=at)
+    ).output
+
+
+def test_searched_shorts_get_a_speed_only_after_two_looks(tmp_path: Path) -> None:
+    popular = [_stat(f"p{i}", 100, 300, cat="20") for i in range(3)]
+    env = _env(tmp_path, popular, "search_calls = 1\nrecheck_min_hours = 1\n")
+    youtube = RecheckYouTube(grow=200)
+    first = _run_at(env, youtube, NOW)
+    assert first.searched_shorts == 6 and youtube.rechecked == []  # 방금 봐서 다시 보지 않음
+    [g] = first.by_format
+    assert g.avg_views_per_hour is None and g.velocity_pending == 6
+    assert g.velocity_reason == "다음 조회 대기 6개 (한 번만 봄)"
+    later = _run_at(env, youtube, NOW + timedelta(hours=2))
+    assert later.rechecked == 6 and len(youtube.rechecked) == 1
+    [g2] = later.by_format
+    assert (g2.avg_views_per_hour, g2.velocity_videos, g2.velocity_pending) == (100.0, 6, 0)
+    assert g2.top[0].views_per_hour == 100.0  # 200회 ÷ 2시간
+
+
+def test_recheck_failure_leaves_shorts_waiting(tmp_path: Path) -> None:
+    popular = [_stat("p0", 100, 300, cat="20")]
+    env = _env(tmp_path, popular, "search_calls = 1\n")
+    _run_at(env, RecheckYouTube(), NOW)
+    failing = RecheckYouTube(fail="QUOTA_EXCEEDED")
+    out = _run_at(env, failing, NOW + timedelta(hours=2))
+    assert out.recheck_reason == "다시 조회 실패 [QUOTA_EXCEEDED] (그 숏츠는 다음 조회 대기)"
+    assert out.rechecked == 0 and out.by_format[0].velocity_pending == 6
+
+
+def test_recheck_respects_the_cap(tmp_path: Path) -> None:
+    popular = [_stat("p0", 100, 300, cat="20")]
+    env = _env(tmp_path, popular, "search_calls = 1\nrecheck_videos = 4\n")
+    youtube = RecheckYouTube()
+    _run_at(env, youtube, NOW)
+    out = _run_at(env, youtube, NOW + timedelta(hours=2))
+    assert out.rechecked == 4 and len(youtube.rechecked[0]) == 4
+    assert out.by_format[0].velocity_pending == 2  # 상한 밖 2개는 다음 조회 대기

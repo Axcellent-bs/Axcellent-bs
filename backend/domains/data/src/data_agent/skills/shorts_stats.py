@@ -82,6 +82,10 @@ class ShortsConfig:
     search_days: int = 7
     top_videos: int = 3
     retention_days: int = 30
+    # 검색으로 모은 숏츠를 다음 실행 때 다시 조회(videos.list, 50개마다 1단위)해
+    # 시간당 조회 증가를 잰다
+    recheck_videos: int = 200  # 한 번에 다시 조회할 숏츠 수 상한
+    recheck_min_hours: float = 1.0  # 마지막으로 본 지 이 시간이 지난 숏츠만 다시 본다
 
 
 def load_config(env: Mapping[str, str]) -> ShortsConfig:
@@ -99,6 +103,8 @@ def load_config(env: Mapping[str, str]) -> ShortsConfig:
             search_days=max(1, int(raw.get("search_days", base.search_days))),
             top_videos=max(1, int(raw.get("top_videos", base.top_videos))),
             retention_days=max(1, int(raw.get("retention_days", base.retention_days))),
+            recheck_videos=max(0, int(raw.get("recheck_videos", base.recheck_videos))),
+            recheck_min_hours=max(0.1, float(raw.get("recheck_min_hours", base.recheck_min_hours))),
         )
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return ShortsConfig()
@@ -124,6 +130,8 @@ class ShortsStore:
                 " PRIMARY KEY (day, video_id));"
                 "CREATE TABLE IF NOT EXISTS formats (video_id TEXT PRIMARY KEY,"
                 " format TEXT NOT NULL, reason TEXT, classified_at TEXT NOT NULL);"
+                "CREATE TABLE IF NOT EXISTS views (video_id TEXT NOT NULL, at TEXT NOT NULL,"
+                " views INTEGER NOT NULL, PRIMARY KEY (video_id, at));"
             )
 
     def close(self) -> None:
@@ -137,7 +145,7 @@ class ShortsStore:
         return row is not None
 
     def save_search(self, day: date, category_id: str, status: str, reason: str | None,
-                    videos: Sequence[Any]) -> None:  # fmt: skip
+                    videos: Sequence[Any], at: datetime | None = None) -> None:  # fmt: skip
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT OR REPLACE INTO searches VALUES (?,?,?,?,?)",
@@ -159,6 +167,33 @@ class ShortsStore:
                     for v in videos
                 ],
             )
+        if at is not None:
+            self.record_views(at, videos)
+
+    def record_views(self, at: datetime, videos: Sequence[Any]) -> int:
+        """숏츠 조회수 한 번 본 값을 남긴다 (조회수가 없는 영상은 건너뜀)."""
+        rows = [
+            (v.video_id, at.isoformat(), v.view_count) for v in videos if v.view_count is not None
+        ]
+        with self._lock, self._conn:
+            self._conn.executemany("INSERT OR REPLACE INTO views VALUES (?,?,?)", rows)
+        return len(rows)
+
+    def view_history(self, ids: Sequence[str]) -> dict[str, list[tuple[datetime, int]]]:
+        """영상 id → [(본 시각, 조회수)] (시각 순)."""
+        if not ids:
+            return {}
+        marks = ",".join("?" * len(ids))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT video_id, at, views FROM views WHERE video_id IN ({marks})"  # noqa: S608
+                " ORDER BY at",
+                tuple(ids),
+            ).fetchall()
+        out: dict[str, list[tuple[datetime, int]]] = {}
+        for vid, at, views in rows:
+            out.setdefault(vid, []).append((datetime.fromisoformat(at), int(views)))
+        return out
 
     def searches(self, day: date) -> list[tuple[str, str, str | None, int]]:
         with self._lock:
@@ -230,6 +265,7 @@ class _Short:
     source: str  # popular | search
     category: str = UNKNOWN
     format: str = UNKNOWN
+    pending: bool = False  # 검색 숏츠를 한 번만 봐서 시간당 조회 증가를 아직 못 잼
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -288,6 +324,8 @@ def group_stats(
             continue
         views = [s.views for s in mine if s.views is not None]
         speeds = [s.views_per_hour for s in mine if s.views_per_hour is not None]
+        pending = sum(s.pending for s in mine)
+        velocity_reason = f"다음 조회 대기 {pending}개 (한 번만 봄)" if pending else None
         top = sorted((s for s in mine if s.views is not None), key=lambda s: -(s.views or 0))
         if len(mine) < config.min_sample:
             out.append(
@@ -296,6 +334,8 @@ def group_stats(
                     status="unknown",
                     reason=f"표본 부족 ({len(mine)}개, 기준 {config.min_sample}개)",
                     count=len(mine),
+                    velocity_pending=pending,
+                    velocity_reason=velocity_reason,
                 )
             )
             continue
@@ -306,12 +346,15 @@ def group_stats(
                 avg_views=round(sum(views) / len(views), 1) if views else None,
                 avg_views_per_hour=round(sum(speeds) / len(speeds), 1) if speeds else None,
                 velocity_videos=len(speeds),
+                velocity_pending=pending,
+                velocity_reason=velocity_reason,
                 top=[
                     ShortsVideo(
                         video_id=s.video_id,
                         title=s.title or None,
                         channel_title=s.channel_title,
                         views=s.views,
+                        views_per_hour=s.views_per_hour,
                     )
                     for s in top[: config.top_videos]
                 ],
@@ -426,9 +469,22 @@ async def _run(
                 s.shorts += 1
     out.searched_shorts = searched
     out.shorts = len(shorts)
+    # 검색 숏츠: 다음 실행 때 다시 조회(videos.list)해 두 번 본 것만 시간당 조회 증가를 잰다
+    searched_ids = [vid for vid, sh in shorts.items() if sh.source == "search"]
+    await _recheck(config, youtube, store, now, searched_ids, out)
+    if out.rechecked:
+        queries.append(f"youtube videos.list recheck x{out.rechecked}")
+    history = store.view_history(searched_ids)
+    for vid in searched_ids:
+        speed = speed_from(history.get(vid, []))
+        if speed is None:
+            shorts[vid].pending = True
+        else:
+            shorts[vid].views_per_hour = speed
+            shorts[vid].views = history[vid][-1][1]
     out.velocity_note = (
-        "시간당 조회 증가는 최근 두 인기 스냅샷에 있는 숏츠만 잰다."
-        " 검색 표본은 한 번만 봐서 잴 수 없다"
+        "시간당 조회 증가: 인기 숏츠는 최근 두 인기 스냅샷, 검색 숏츠는 두 번 본 조회수로 잰다."
+        " 한 번만 본 검색 숏츠는 다음 조회 대기다"
     )
 
     # 3. 분류 (카테고리: 주제 분류기 / 형식: 숏츠 형식 목록), 저장해 재사용
@@ -470,6 +526,62 @@ async def _run(
                                       collected_at=now))  # fmt: skip
 
 
+def speed_from(history: Sequence[tuple[datetime, int]]) -> float | None:
+    """마지막 두 번 본 조회수로 시간당 조회 증가. 한 번만 봤거나 시간이 같으면 None."""
+    if len(history) < 2:
+        return None
+    (t1, v1), (t2, v2) = history[-2], history[-1]
+    hours = (t2 - t1).total_seconds() / 3600
+    if hours <= 0:
+        return None
+    return round((v2 - v1) / hours, 1)
+
+
+async def _recheck(
+    config: ShortsConfig,
+    youtube: Any,
+    store: ShortsStore,
+    now: datetime,
+    ids: Sequence[str],
+    out: ShortsStatsOutput,
+) -> None:
+    """마지막으로 본 지 `recheck_min_hours`가 지난 검색 숏츠를 최대 `recheck_videos`개 다시 본다.
+
+    덜 본 영상부터. 실패하면 이번에는 다시 보지 않고 이유만 남긴다(그 숏츠는 다음 조회 대기).
+    """
+    if not ids:
+        return
+    if config.recheck_videos <= 0:
+        out.recheck_reason = "회사 설정에서 다시 조회를 끔 (recheck_videos = 0)"
+        return
+    if youtube is None or not hasattr(youtube, "videos"):
+        out.recheck_reason = "YouTube 커넥터가 없어 다시 조회하지 않음"
+        return
+    history = store.view_history(ids)
+    due = [
+        vid
+        for vid in ids
+        if not history.get(vid)
+        or (now - history[vid][-1][0]).total_seconds() / 3600 >= config.recheck_min_hours
+    ]
+    due.sort(key=lambda v: (len(history.get(v, [])), v))
+    due = due[: config.recheck_videos]
+    if not due:
+        out.recheck_reason = (
+            f"모든 검색 숏츠를 최근 {config.recheck_min_hours:g}시간 안에 봐서 다시 조회하지 않음"
+        )
+        return
+    before = getattr(youtube, "quota_used", 0)
+    try:
+        stats = await youtube.videos(due)
+    except ConnectorUnavailable as error:
+        out.recheck_reason = f"다시 조회 실패 [{error.code}] (그 숏츠는 다음 조회 대기)"
+        return
+    finally:
+        out.quota_used += getattr(youtube, "quota_used", 0) - before
+    out.rechecked = store.record_views(now, stats)
+
+
 async def _search(
     config: ShortsConfig,
     youtube: Any,
@@ -493,6 +605,7 @@ async def _search(
             continue
         try:
             videos = await youtube.search_shorts(cat_id, now - timedelta(days=config.search_days))
+            store.record_views(now, videos)
         except ConnectorUnavailable as error:
             reason = f"검색 실패 [{error.code}]"
             if error.code == "QUOTA_EXCEEDED":
