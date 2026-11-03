@@ -39,9 +39,9 @@ export interface SupportCostRecord {
 }
 
 // ---------------------------------------------------------------- §11 overview
-export type TodoKind = "settlement_batch" | "settlement_deadline" | "closing_confirm" | "recon_exception" | "audit_finding" | "team_budget";
+export type TodoKind = "settlement_batch" | "settlement_deadline" | "closing_confirm" | "recon_exception" | "team_budget";
 /** 할 일에서 사람이 바로 누를 결정 */
-export type TodoActionType = "closing_confirm" | "settlement_request" | "review_decision" | "recon_note" | "anomaly_resolve" | "open_tab" | "team_budget_approve";
+export type TodoActionType = "closing_confirm" | "settlement_request" | "review_decision" | "recon_note" | "open_tab" | "team_budget_approve";
 export interface TodoAction { type: TodoActionType; period?: string; date?: string; review_id?: string | null; month?: string; signature?: string }
 /** 건마다 결정할 때의 한 건 (대사 불일치·감사 의심) */
 export interface TodoItem { ref: string; title: string; detail: string; amount: number | null }
@@ -256,26 +256,6 @@ export interface Variance {
   summary: string[];
   thresholds: { flag_ratio: number; flag_min_amount: number };
 }
-
-// ---------------------------------------------------------------- ⑦ 내부통제·감사
-export type FindingSeverity = "high" | "medium" | "low";
-export interface AuditFinding { code: string; severity: FindingSeverity; title: string; detail: string; refs: string[] }
-export interface AuditStats {
-  gate_held: number | null;
-  gate_rejected: number | null;
-}
-export interface AuditReport { from: string; to: string; stats: AuditStats; findings: AuditFinding[] }
-/** 처리 전 의심 건. 감사 기간이 지나도 사람이 처리할 때까지 남는다 */
-export interface Anomaly extends AuditFinding {
-  finding_ref: string;
-  status: "open" | "resolved";
-  first_seen: string;
-  last_seen: string;
-  resolved_by: string | null;
-  resolved_at: string | null;
-  note: string | null;
-}
-export interface AnomalyList { open: Anomaly[]; open_count: number; resolved: Anomaly[] }
 
 // ---------------------------------------------------------------- 재무제표 (손익계산서, 당기·전기)
 export type StatementPeriod = "month" | "quarter" | "year";
@@ -560,12 +540,6 @@ export const finance = {
   /** 팀 예산 확정. 사람 토큰만. 보던 숫자(signature)가 지금과 같아야 한다 */
   approveTeamBudget: (month: string, signature: string, note?: string) =>
     fin<Envelope<TeamBudget>>(`/api/finance/team-budget/${encodeURIComponent(month)}/approve`, { method: "POST", body: { signature, note: note || null }, human: true }),
-  audit: (days = 7) => fin<Envelope<AuditReport>>(`/api/finance/audit${query({ days })}`),
-  /** 처리 전 의심 건 전부 (기간 제한 없음) */
-  anomalies: () => fin<Envelope<AnomalyList>>("/api/finance/anomalies"),
-  /** 의심 건 처리 완료. 사람 토큰만, 메모 필수 */
-  resolveAnomaly: (ref: string, note: string) =>
-    fin<Envelope<Anomaly>>(`/api/finance/anomalies/${encodeURIComponent(ref)}/resolve`, { method: "POST", body: { note }, human: true }),
   statements: (period: StatementPeriod, date?: string | null) =>
     fin<Envelope<IncomeStatement>>(`/api/finance/statements${query({ period, date })}`),
   /** 손익계산서 CSV 내려받기 (엑셀에서 열림) */
@@ -646,10 +620,10 @@ export function todayKst(now = new Date()): string {
 }
 
 /** todo.link 또는 kind → 화면 탭 id */
-export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "audit" | "tax";
-export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "tax", "audit"];
+export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "tax";
+export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "tax"];
 const TODO_TAB: Record<TodoKind, FinanceTab> = {
-  settlement_batch: "settlements", settlement_deadline: "settlements", closing_confirm: "closing", recon_exception: "reconciliation", audit_finding: "audit", team_budget: "policy",
+  settlement_batch: "settlements", settlement_deadline: "settlements", closing_confirm: "closing", recon_exception: "reconciliation", team_budget: "policy",
 };
 export function todoTab(t: Pick<FinanceTodo, "kind" | "link">): FinanceTab {
   const link = (t.link ?? "").replace(/^#/, "");
@@ -697,12 +671,6 @@ export const ledgerSourceKo = (s: LedgerSource | string | null | undefined) =>
 /** 모르는 코드일 때 쓰는 말 */
 export const OTHER_CHECK = "기타 점검";
 
-/** ⑦ 사후 감사 의심 건 종류 */
-export const FINDING_KO: Record<string, string> = {
-  gate_hold_trend: "안전 장치 보류·거절 증가",
-};
-export const findingKo = (code: string) => FINDING_KO[code] ?? OTHER_CHECK;
-
 /** 쿠폰을 준 이유·목적 */
 export const PURPOSE_KO: Record<string, string> = {
   payment_failure: "결제 실패 보상", compensation: "장애 보상", campaign: "마케팅 쿠폰", seller_promo: "판매자 할인 쿠폰",
@@ -738,6 +706,5 @@ export function plainText(text: string | null | undefined, sellers?: Record<stri
     .replace(/\bdata 영향/g, "데이터 AI 영향")
     .replace(/출처:? (events|safety_executions|seed)\b/g, (_, src: string) => `출처: ${ledgerSourceKo(src).label}`)
     .replace(/\b(issue_coupon|refund_request|confirm_settlement)\b/g, (c: string) => ACTION_KO[c] ?? c)
-    .replace(/\b(damage_amount|compensation_total)\b/g, (c: string) => (c === "damage_amount" ? "피해 금액" : "보상 합계"))
-    .replace(/\b[a-z]+(?:_[a-z]+)+\b/g, (c: string) => FINDING_KO[c] ?? c);
+    .replace(/\b(damage_amount|compensation_total)\b/g, (c: string) => (c === "damage_amount" ? "피해 금액" : "보상 합계"));
 }

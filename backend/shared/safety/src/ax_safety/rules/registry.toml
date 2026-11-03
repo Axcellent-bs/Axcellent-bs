@@ -19,7 +19,7 @@ base_grade = "A"
 
 # 쿠폰·환불은 A (재무 재설계 2026-10-23, docs/notes/finance/2026-10-23-finance-redesign.md 4장).
 # 건별 검사는 이 관문의 코드 규칙이 한다: 금액 계산, claimed_fields 불일치(C), 기준표 한도(C).
-# 재무 교차검증(verify_amount)은 없앴다. 재무는 한도를 정하고 사후 감사를 한다.
+# 재무는 쿠폰·환불의 끝난 금액을 장부에 기록만 한다.
 [[actions]]
 action = "issue_coupon"
 owner = "marketing"

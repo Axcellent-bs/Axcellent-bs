@@ -45,7 +45,6 @@ CARDS: dict[str, list[tuple[str, str, str | None]]] = {
     "support": [("send_reply", "A", None), ("request_incident_compensation", "A", None)],
     "finance": [
         ("loss_aggregation", "read", None),
-        ("audit_report", "read", None),
         ("record_support_cost", "read", None),
     ],
     "hr": [
@@ -192,14 +191,6 @@ DEFAULT_OUTPUTS: dict[str, Callable[[AgentRequest], dict[str, Any]]] = {
         ],
         stopped_early=False,
         notes=[],
-    ),
-    # 실제 재무 `AuditReportOutput` 모양(문제가 없으면 findings는 빈 목록)
-    "audit_report": lambda r: _ok(
-        window_from="2026-10-09T00:00:00Z",
-        window_to="2026-10-16T00:00:00Z",
-        stats={"gate_held": 0, "gate_rejected": 0},
-        findings=[],
-        unavailable=[],
     ),
     # 실제 재무 `SupportCostOutput` 모양(경비를 쓰지 않은 문의도 처리 결과를 기록한다)
     "record_support_cost": lambda r: _ok(

@@ -99,7 +99,7 @@ main        ← 야간 e2e 성공 시 release 워크플로가 머지 (AX_RELEASE
 | 부서 폴더 PR (contracts·agent-template·infra 포함) | ci·contracts-compat·automation-tests 통과 + folder-guard·test-guard·dev-health + 리뷰 부서 에이전트 승인(agent-review) |
 | human_paths PR (`.github/`, `.claude/`, `scripts/`, `CLAUDE.md`, `docs/`, 루트 파일) | 위 체크 + **code owner 승인** (`.github/`·`.claude/`·`scripts/`·`CLAUDE.md`는 재현·준하·태윤, 그 밖은 재현·준하). 에이전트 리뷰는 생략 |
 | contracts PR | 위 부서 폴더 PR 조건. 리뷰는 바뀐 계약 파일을 쓰는 부서 에이전트. 깨지는 변경은 contracts-compat이 막음 |
-| 기준표 PR (`thresholds.toml`, `ai_review_policy.toml`) | 체크 + **code owner(태윤·재현·준하) 승인**. 에이전트는 못 바꿈 |
+| 기준표 PR (`thresholds.toml`) | 체크 + **code owner(태윤·재현·준하) 승인**. 에이전트는 못 바꿈 |
 | 봇 PR (`revert/`, `openapi/sync-`) | 리뷰·호환 검사 생략, 허용 경로만 |
 
 ### 왜 사람 승인이 아니라 에이전트 리뷰인가
@@ -130,7 +130,7 @@ DejaFix에서는 "승인 1명 + 작성자 본인 승인 불가" 때문에 PR 30�
 ```
 
 뒤의 줄이 앞의 `*`를 덮어써서, owner가 없는 줄의 경로는 code owner 승인이 필요 없다. 적힌 owner 중 한 명이 승인하면 된다.
-부서 폴더 안의 기준표(`thresholds.toml`, `ai_review_policy.toml`)는 맨 뒤에 owner 줄을 따로 둔다 (team.yml `human_files`).
+부서 폴더 안의 기준표(`thresholds.toml`)는 맨 뒤에 owner 줄을 따로 둔다 (team.yml `human_files`).
 
 ### 리뷰 부서
 

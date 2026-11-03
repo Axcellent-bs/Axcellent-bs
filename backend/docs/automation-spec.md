@@ -79,7 +79,7 @@ docs/requirements.md (사람이 수정) ──claude-plan──▶ 작업 이슈
 - contracts는 사람 승인 없이, 바뀐 계약 파일을 쓰는 부서(team.yml `contracts_affected`)의 에이전트 리뷰와 하위 호환 검사로 머지한다.
   표에 없는 공통 파일은 reviewers.contracts(agent-template + safety). 깨지는 변경은 contracts-compat(필수 체크)이 막는다 (CODEOWNERS `/contracts/`는 소유자 없음).
   `.github/`·`.claude/`·`scripts/`·`CLAUDE.md`의 code owner는 재현·준하·태윤, 그 밖의 human_paths는 재현·준하.
-- 부서 폴더 안의 사람 전용 파일(team.yml `human_files`: safety thresholds.toml, finance ai_review_policy.toml)은 human_paths로 취급한다.
+- 부서 폴더 안의 사람 전용 파일(team.yml `human_files`: safety thresholds.toml)은 human_paths로 취급한다.
   에이전트는 못 바꾸고(folder-guard·guard-folder 훅·write_post), 사람 PR은 CODEOWNERS(태윤·재현·준하) 승인
 
 

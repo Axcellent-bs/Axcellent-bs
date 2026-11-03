@@ -11,8 +11,8 @@ from fastapi.testclient import TestClient
 
 from ax_agent_template import events
 from ax_contracts.schemas import ExecuteDecision, HoldReason
-from finance_agent import anomalies, finance_api, handlers
 from finance_agent import books as bk
+from finance_agent import finance_api, handlers
 from finance_agent.books import Books
 from finance_agent.main import app
 from finance_agent.sources import MockSources
@@ -147,7 +147,7 @@ def test_reconciliation_shape(client: TestClient) -> None:
     assert client.get("/api/finance/reconciliation", params={"date": "x"}).status_code == 400
 
 
-def test_settlements_policy_audit_shapes(client: TestClient) -> None:
+def test_settlements_shapes(client: TestClient) -> None:
     sett = _get(client, "/api/finance/settlements")["data"]
     assert set(sett) == {"period", "from", "to", "pay_date", "statements", "batch"}
     assert sett["batch"]["status"] == "none"
@@ -155,12 +155,6 @@ def test_settlements_policy_audit_shapes(client: TestClient) -> None:
         _get(client, "/api/finance/settlements", period="2026-W41")["data"]["period"] == "2026-W41"
     )
     assert client.get("/api/finance/settlements", params={"period": "41"}).status_code == 400
-
-    aud = _get(client, "/api/finance/audit", days=7)["data"]
-    assert set(aud) == {"from", "to", "stats", "findings"}
-    assert _get(client, "/api/finance/audit", days=14)["data"]["from"] == "2026-10-10T00:00:00Z"
-    for bad in ("0", "91", "x"):
-        assert client.get("/api/finance/audit", params={"days": bad}).status_code == 400
 
 
 def test_missing_sources_are_reported_in_meta(client: TestClient, kit) -> None:
@@ -176,8 +170,6 @@ def test_missing_sources_are_reported_in_meta(client: TestClient, kit) -> None:
     body = client.get("/api/finance/settlements").json()
     assert body["meta"]["unavailable"] == ["executions"]
     assert (body["meta"]["mock"], body["meta"]["source"]) == (False, "shop-api")
-    audit_body = client.get("/api/finance/audit").json()
-    assert {"stats.gate_held", "stats.gate_rejected"} <= set(audit_body["meta"]["unavailable"])
 
 
 def test_closing_without_orders_is_unknown_not_zero(client: TestClient, kit) -> None:
@@ -467,6 +459,8 @@ def test_dashboard_can_post_decisions_only_on_decision_paths(client: TestClient)
 
 def test_removed_endpoints(client: TestClient) -> None:
     for path in (
+        "/api/finance/audit",  # 재무는 감사를 하지 않는다
+        "/api/finance/anomalies",
         "/api/finance/verifications",
         "/api/finance/ai-reviews",
         "/api/finance/catbooks/sync",
@@ -514,18 +508,3 @@ def test_support_costs_lists_recorded_inquiries_newest_first(client: TestClient)
 def _todo(client: TestClient, kind: str) -> dict | None:
     todo = client.get("/api/finance/overview").json()["data"]["todo"]
     return next((t for t in todo if t["kind"] == kind), None)
-
-
-def test_resolving_audit_items_clears_the_todo(client: TestClient) -> None:
-    """감사 할 일은 처리 전 의심 건이다. 사람이 모두 처리하면 할 일에서 빠진다."""
-    assert _todo(client, "audit_finding") is None  # 시드의 쿠폰·환불 보류는 의심 건이 아니다
-    anomalies.note_findings(
-        handlers.state().records.anomalies,
-        [{"code": "gate_hold_trend", "severity": "medium", "title": "보류", "refs": ["exe_1"]}],
-    )
-    todo = _todo(client, "audit_finding")
-    assert todo is not None and todo["action"]["type"] == "anomaly_resolve"
-    for item in client.get("/api/finance/anomalies").json()["data"]["open"]:
-        url = f"/api/finance/anomalies/{item['finding_ref']}/resolve"
-        assert client.post(url, json={"note": "확인함"}, headers=HUMAN).status_code == 200
-    assert _todo(client, "audit_finding") is None

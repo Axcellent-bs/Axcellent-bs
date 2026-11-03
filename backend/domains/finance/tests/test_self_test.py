@@ -52,12 +52,12 @@ async def _run(client: httpx.AsyncClient) -> dict[str, Any]:
 async def test_all_green_when_everything_is_up() -> None:
     result = await _run(_network({"safety", "shop-api", "data"}))
     assert result["result"] == "pass", [c for c in result["checks"] if not c["ok"]]
-    assert result["passed"] == result["total"] == 8
+    assert result["passed"] == result["total"] == 7
     names = {c["name"] for c in result["checks"]}
     assert "안전 장치 연결" in names
     # 쿠폰·환불 판단과 예산·한도는 재무 일이 아니라 점검하지 않는다
     assert not {n for n in names if "쿠폰" in n or "환불" in n or "한도" in n or "예산" in n}
-    assert {"결산 계산 공식", "대사 상태 나누기", "판매자 정산 공식", "사후 감사 규칙"} <= names
+    assert {"결산 계산 공식", "대사 상태 나누기", "판매자 정산 공식"} <= names
 
 
 @pytest.mark.asyncio
@@ -93,14 +93,13 @@ async def test_old_settlement_grade_or_missing_action_fails() -> None:
 
 @pytest.mark.asyncio
 async def test_module_checks_cover_every_new_module() -> None:
-    """결산·대사·정산·감사 규칙 점검이 모두 통과한다(가짜 자료, 실제 기록 없음)."""
+    """결산·대사·정산 규칙 점검이 모두 통과한다(가짜 자료, 실제 기록 없음)."""
     result = await _run(_network({"safety", "shop-api", "data"}))
     by = {c["name"]: c for c in result["checks"]}
     for name in (
         "결산 계산 공식",
         "대사 상태 나누기",
         "판매자 정산 공식",
-        "사후 감사 규칙",
     ):
         assert by[name]["ok"], (name, by[name]["detail"])
     assert "13,000원" in by["판매자 정산 공식"]["detail"]

@@ -4,7 +4,7 @@
 // 바뀌고 서버에는 아무것도 보내지 않는다. 새로고침하면 처음 예시로 돌아간다.
 import raw from "./financeExample.json";
 import type {
-  Anomaly, AnomalyList, ClosingReport, FinanceOverview, FinanceTodo, Reconciliation, Review, Settlements, TeamBudget,
+  ClosingReport, FinanceOverview, FinanceTodo, Reconciliation, Review, Settlements, TeamBudget,
 } from "./finance";
 
 const KEY = "axcellent-finance-example";
@@ -120,19 +120,6 @@ async function financeCall(method: string, path: string, body: Record<string, un
       action: { type: "review_decision", period: s.period, review_id: reviewId },
     });
     return sett;
-  }
-  const anomaly = /^\/api\/finance\/anomalies\/([^/]+)\/resolve$/.exec(path);
-  if (anomaly) {
-    const ref = decodeURIComponent(anomaly[1]);
-    const list = dataOf<AnomalyList>("/api/finance/anomalies");
-    const entry = list?.open.find((a) => a.finding_ref === ref);
-    if (!list || !entry) throw new ExampleMissing("예시 데이터에 없는 의심 건입니다.");
-    const done: Anomaly = { ...entry, status: "resolved", resolved_by: PERSON, resolved_at: now(), note: String(body.note ?? "") };
-    list.open = list.open.filter((a) => a !== entry);
-    list.open_count = list.open.length;
-    list.resolved = [done, ...list.resolved];
-    dropTodoItem("audit_finding", ref);
-    return { data: done, meta: { ...META, resolved_by: PERSON } };
   }
   const team = /^\/api\/finance\/team-budget\/([^/]+)\/approve$/.exec(path);
   if (team) {

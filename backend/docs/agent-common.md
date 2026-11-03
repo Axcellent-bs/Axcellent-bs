@@ -206,7 +206,7 @@ C 등급 보류는 Task 상태가 아니라 안전 레이어의 실행 결과(`s
 | 업무 지표 감시 (주문·결제 실패율, 문의 총량) | data | — |  |
 | 문의 접수 이벤트 | support (문의 위젯) `support.inquiry_received` | — | 위젯이 고객지원 소관 |
 | 문의 분류·정책 패턴 감지 | support `support.inquiry_surge` | 공지 여부·문안은 marketing `draft_notice`가 결정 | 양은 data, 내용 패턴은 support |
-| 영향 원천 숫자 (실패 건수·영향 고객·피해 금액) | data | finance는 사건 장부 화면에 이 결과를 그대로 보여 준다(다시 계산하지 않음). 장애 대응 중에는 finance를 부르지 않음 | 같은 숫자를 두 곳에서 내지 않기 |
+| 영향 원천 숫자 (실패 건수·영향 고객·피해 금액) | data | finance는 사건 장부 화면에 이 결과를 그대로 보여 준다(다시 계산하지 않음). 이 숫자를 얻으려고 finance를 부르지 않음 | 같은 숫자를 두 곳에서 내지 않기 |
 | 장애 관련 PR·배포 후보 | planning `find_related_prs` | data·infra가 질의 | 원인 판정은 하지 않음 |
 | 원인 확정 | infra (DejaFix) | data는 업무 지표, planning은 배포·PR 근거를 제공 | 원인 확정과 롤백을 같은 곳에서 (예진 답변) |
 | 롤백 실행 | infra `rollback_deployment` (B) | 검증자 planning. 검증은 "롤백 대상 배포가 장애 시각 직전이고, 그 사이 머지된 PR이 있는가"를 확인하는 읽기 skill (원인 판정은 하지 않음) | DejaFix 쓰기 도구 계약 PR 선행. 데모에서는 롤백이 판매 사이트 장애 주입 해제로 이어짐 (13장 후속 결정) |
@@ -324,7 +324,7 @@ C 등급 보류는 Task 상태가 아니라 안전 레이어의 실행 결과(`s
 | planning (예진) | `find_related_prs`, `link_incident` | `create_ticket` 등 권장, 기획서→PR 파이프라인 선택 |
 | marketing (재헌) | `draft_notice`, `publish_notice`, `get_notice`, `issue_coupon`(compensation, 직렬) | `draft_campaign`, `campaign_report`, `notice_check` 연동 |
 | support (병환) | `inquiry_draft`, `reply_send`, `compensation_request`, 문의 위젯 이벤트 | `claim_evaluate`·보상 큐(불량·반품 흐름), `refund_request`, `support.inquiry_surge`, `notice_check` |
-| finance (태윤) | 없음. 재무/정산은 시나리오 A 흐름의 단계가 아니다 (후속 22). 장애 중 나간 보상 쿠폰은 `coupon.issued`로 장부에만 기록 | 장부·결산(`closing_report`), 관문 보류 추이 사후 감사(`audit_report`), 일일 대사, 판매자 정산 |
+| finance (태윤) | 장부 기록: 장애 중 나간 보상 쿠폰·환불은 이벤트로, 문의 처리 결과는 총괄 호출(`record_support_cost`)로 장부에 기록 | 장부·결산(`closing_report`), 일일 대사, 판매자 정산 |
 | hr (준하) | `record_case` → memory에 사건 카드 저장 | 인수인계, 발령·교대, 온보딩, 계획 비교 |
 | safety (태윤) | `execute()`: A 즉시 실행·C 보류 최소판 → B 교차검증, 보류 큐 | 누적 한도 세부 키 |
 | memory (재현) | 카드 쓰기·검색 | 카드 대체·폐기 연결 |
@@ -374,7 +374,7 @@ C 등급 보류는 Task 상태가 아니라 안전 레이어의 실행 결과(`s
 
 | # | 안건 | 결정 | 관련 |
 | --- | --- | --- | --- |
-| 22 | 서버 장애 흐름의 재무 | 재무/정산은 서버 장애(시나리오 A) 대응 흐름의 노드가 아니다. 총괄은 사건 중에 finance를 부르지 않는다(손실 리포트·사건 후 감사 단계 없음). 장애 중 나간 보상 쿠폰·환불은 이벤트(`coupon.issued`·`payment.refunded`)로 재무 장부에 들어가고, 그 비용은 평상시 결산에서 확인한다(재무는 쿠폰·환불을 끝난 금액만 장부에 적는다) (8·12장, 요구사항 DEP-FIN-01·SCN-A) | 멘토 피드백 2026-10-26, 태윤 |
+| 22 | 서버 장애 흐름의 재무 | 재무는 장부에 기록만 한다(손실 리포트·감사 없음). 총괄은 고객지원이 문의를 닫으면 재무를 불러(`record_support_cost`) 처리 결과를 장부에 기록하게 한다. 장애 때 나간 보상 쿠폰·환불은 이벤트(`coupon.issued`·`payment.refunded`)로 재무 장부에 기록되고, 비용은 결산에서 드러난다. (8·12장, 요구사항 DEP-FIN-01·SCN-A) | 멘토 피드백 2026-10-26, 태윤 |
 | 23 | 쿠폰·환불 등급과 재무 | marketing `issue_coupon`, support `refund_request`는 A, 검증자 없음. 금액은 안전 레이어가 코드로 계산하고 기준표 기준 이상이면 C(쿠폰은 요청 총액이 계산값과 다를 때도 C), 모두 safety 보류 큐 하나로. 재무는 쿠폰·환불을 검증하지 않고 장부에 기록만 한다. finance `verify_amount` 폐지(재무 재설계 2026-10-23, 레지스트리 반영), 결정 13 폐지. 보상 단가·상한은 support 정책표, 금액 기준은 사람만 바꾸는 기준표 (8장, 요구사항 DEP-MKT-02·DEP-CS-04·DEP-FIN-02) | 태윤, 재헌·병환 |
 
 ### 구성안별 수정 목록

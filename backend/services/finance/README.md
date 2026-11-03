@@ -5,7 +5,6 @@
 | skill | 등급 |
 | --- | --- |
 | `closing_report` | read |
-| `audit_report` | read |
 | `record_support_cost` | read |
 | `answer_planning_question` | read |
 

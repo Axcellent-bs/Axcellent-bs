@@ -142,18 +142,16 @@ def test_checklist_items_follow_records(kit) -> None:
     rec = handlers.FinanceRecords()
     r = close_checklist.checklist(books, rec, TODAY, TODAY)
     status = {i["key"]: i["status"] for i in r["items"]}
-    assert r["month"] == "2026-10" and r["total"] == 7
+    assert r["month"] == "2026-10" and r["total"] == 6
     assert status["daily_closing"] == "pending" and status["bank"] == "pending"
     assert status["month_closing"] == "pending" and r["ready"] is False
 
     for k in range(22):
         rec.closings[("day", (date(2026, 10, 1) + timedelta(days=k)).isoformat())] = {"by": "t"}
     rec.closings[("month", "2026-10-01")] = {"by": "t"}
-    rec.anomalies["x"] = {"status": "open"}
     r = close_checklist.checklist(books, rec, TODAY, TODAY)
     status = {i["key"]: i["status"] for i in r["items"]}
     assert status["daily_closing"] == "done" and status["month_closing"] == "done"
-    assert status["audit"] == "pending"  # 처리 전 의심 건이 남아 있다
     assert r["closed"] is True and r["ready"] is False
 
 

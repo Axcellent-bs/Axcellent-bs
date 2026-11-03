@@ -27,21 +27,14 @@ METRIC_KO = {
     "order_fail_rate": "주문 실패가 늘었어요",
     "payment_fail_rate": "실패가 늘었어요",
 }
-FINANCE_KO = {
-    "gate_hold_trend": "안전 장치 보류·거절이 늘었어요",
-}
-FINANCE_DEFAULT = "돈 흐름에서 이상한 점을 찾았어요"
 PLAN_KO = {
     "scenario_a": "결제 장애 대응",
-    "finance_anomaly": "재무 이상 대응",
     "support_resolved": "고객 문의 처리 결과 기록",
 }
 
 
 def event_title(component: str, metric: str | None) -> str:
     """이벤트 제목. 예: `결제가 응답이 느려졌어요`."""
-    if component == "finance":
-        return FINANCE_KO.get(metric or "", FINANCE_DEFAULT)
     comp = COMPONENT_KO.get(component, component)
     if metric and metric in METRIC_KO:
         return f"{SUBJECT_KO.get(component, f'{comp}이(가)')} {METRIC_KO[metric]}"

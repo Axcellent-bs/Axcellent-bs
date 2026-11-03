@@ -4,8 +4,7 @@
 
 - 규칙 점검은 **테스트 전용 가짜 자료**로 돌린다. 실제 기록(결산 확정, 대사 메모, 정산 묶음,
   환불 누적)에는 아무것도 남기지 않는다. 숫자는 실제 리포트와 같은 코드가 계산한다.
-  점검 대상: ① 결산 공식, ② 대사 상태 분류, ③ 정산 공식, ⑦ 감사 규칙(보류·거절 추이,
-  쿠폰·환불은 세지 않음).
+  점검 대상: ① 결산 공식, ② 대사 상태 분류, ③ 정산 공식.
 - 연결 점검은 실제 주소(`agent_url`)에 `GET`만 보낸다. 상태를 바꾸지 않는다.
 - 결과 수준: `fail`(계산이 틀리거나 안전 장치가 끊김 → 바로 확인 필요), `warn`(원천 데이터에 닿지
   않음 → 리포트 일부가 "확인할 수 없음"이 될 수 있음).
@@ -22,7 +21,6 @@ import httpx
 
 from ax_agent_template.config import agent_url
 from finance_agent import finance_config as fc
-from finance_agent.audit import audit_report
 from finance_agent.books import Books
 from finance_agent.closing import compute_totals
 from finance_agent.reconciliation import classify
@@ -160,34 +158,10 @@ async def _module_checks() -> list[Check]:
             else f"실제 {row['gross']}/{row['commission']}/{row['refunds']}/{row['payout']}"
         )
 
-    async def audit_rules() -> tuple[bool, str]:
-        def held(action: str, n: int) -> dict[str, Any]:
-            return {
-                "execution_id": f"exe_selftest_{action}_{n}",
-                "created_at": fc.now(),
-                "action": action,
-                "status": "held",
-            }
-
-        other = Books(executions=[held("confirm_settlement", n) for n in range(3)])
-        money = Books(
-            executions=[held(a, n) for a in ("issue_coupon", "refund_request") for n in range(3)]
-        )
-        report, _ = await audit_report(other, 7)
-        quiet, _ = await audit_report(money, 7)
-        found = [f["code"] for f in report["findings"]]
-        ok = found == ["gate_hold_trend"] and not quiet["findings"]
-        return ok, (
-            "안전 장치 보류 추이를 잡고 쿠폰·환불은 세지 않음"
-            if ok
-            else "안전 장치 보류 추이 규칙이 기대와 다름"
-        )
-
     for name, run in (
         ("결산 계산 공식", closing_formula),
         ("대사 상태 나누기", recon_classes),
         ("판매자 정산 공식", settlement_formula),
-        ("사후 감사 규칙", audit_rules),
     ):
         await _guard(name, run, checks)
     return checks

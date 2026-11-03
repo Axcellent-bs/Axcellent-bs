@@ -111,7 +111,6 @@ SERVICES: tuple[Service, ...] = (
         8105,
         (
             "closing_report",
-            "audit_report",
             "record_support_cost",
             "answer_planning_question",
         ),

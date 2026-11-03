@@ -13,7 +13,6 @@ const KIND: Record<FinanceTodo["kind"], { label: string; tone: string }> = {
   settlement_deadline: { label: "정산 기한", tone: TONE.bad },
   closing_confirm: { label: "결산", tone: TONE.info },
   recon_exception: { label: "대사", tone: TONE.bad },
-  audit_finding: { label: "감사", tone: TONE.warn },
   team_budget: { label: "팀 예산", tone: TONE.info },
 };
 
@@ -24,12 +23,6 @@ const ITEM_ACTION = {
     placeholder: "예: PG사에 문의함, 다음 정산일에 들어옴",
     hint: "PG사·카드사에서 확인한 내용을 적으면 이 건은 할 일에서 빠집니다. 돈을 옮기지는 않습니다.",
     send: (ref: string, note: string) => finance.reconNote(ref, note),
-  },
-  anomaly_resolve: {
-    button: "처리 완료",
-    placeholder: "예: 담당 팀에 확인, 정상 처리",
-    hint: "조사한 결론을 적고 처리 완료를 누르면 목록에서 빠집니다. 돈을 돌려받거나 고객을 막지는 않습니다.",
-    send: (ref: string, note: string) => finance.resolveAnomaly(ref, note),
   },
 } as const;
 type ItemActionType = keyof typeof ITEM_ACTION;

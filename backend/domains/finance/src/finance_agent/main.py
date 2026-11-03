@@ -39,7 +39,7 @@ from finance_agent.selftest import SELF_TEST_TTL_HOURS, is_fresh, run_self_test
 DEFAULT_CORS_ORIGINS = "http://localhost:3001,http://127.0.0.1:3001"
 DECISION_PATHS = re.compile(
     r"^/api/finance/(closing/confirm|reconciliation/[^/]+/note|settlements/batch"
-    r"|anomalies/[^/]+/resolve|bank/statement"
+    r"|bank/statement"
     r"|team-budget/[^/]+/approve)$"
 )
 
@@ -246,7 +246,7 @@ def cors_origins() -> list[str]:
 def add_read_api(app: FastAPI) -> None:
     """대시보드용 기존 조회 API. 상태를 바꾸지 않는다. 응답은 `{data, meta}`.
 
-    재무 재설계 API(overview·closing·reconciliation·settlements·audit)는 `finance_api.py`.
+    재무 재설계 API(overview·closing·reconciliation·settlements)는 `finance_api.py`.
     """
 
     @app.get("/api/finance/ledger")

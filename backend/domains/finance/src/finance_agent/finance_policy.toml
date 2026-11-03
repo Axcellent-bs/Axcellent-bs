@@ -1,7 +1,6 @@
 # 재무 설정 (재무 재설계 2026-10-23, docs/notes/finance/2026-10-23-finance-redesign.md 5장).
 #
-# 판매 수수료율, 정산 주기, PG 수수료율, 팀 예산 단가, 사후 감사 기준이다.
-# 쿠폰·환불 예산·한도는 재무 일이 아니라 없앴다(안전 관문 한도는 thresholds.toml).
+# 판매 수수료율, 정산 주기, PG 수수료율, 팀 예산 단가다.
 # 금액은 정수 원, 비율은 0~1 소수. 바꾸면 PR로 (재무 담당 확인).
 
 [commission]
@@ -47,10 +46,6 @@ trailing_weeks = 8                  # 확정된 돈이 없는 뒤쪽 주는 최�
 [variance]
 flag_ratio = 0.1                    # 지난달보다 10% 이상 움직이고
 flag_min_amount = 10000             # 변동액이 1만 원 이상이면 "크게 움직인 줄"
-
-[audit]
-gate_hold_min = 3                   # 관문 보류·거절이 기간 안에 이 수 이상이고
-gate_hold_jump_ratio = 2.0          # 지난 기간의 2배 이상이면 추이 경보
 
 [team_budget]
 # 팀 예산 = 그달 1일 팀 인원(인사 AI team_headcount) × 인당 월 단가. 파견은 세지 않는다(원래 팀)

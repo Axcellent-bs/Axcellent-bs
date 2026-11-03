@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from finance_agent import persist
@@ -67,62 +68,20 @@ def test_no_path_means_no_file(monkeypatch) -> None:
     assert persist.state_file() is None
 
 
-def test_open_anomalies_survive_a_restart(tmp_path) -> None:
-    """처리 전 의심 건은 다시 켜도 남는다. 예전 파일(목록 없음)도 읽는다."""
-    from finance_agent import anomalies
-
-    s = State(MockSources())
-    anomalies.note_findings(s.records.anomalies, [{"code": "gate_hold_trend", "refs": ["exe_1"]}])
+def test_old_suspicion_records_are_gone_after_a_restart(tmp_path) -> None:
+    """예전 파일에 남은 의심 건은 읽지 않고, 다음 저장 때 파일에서도 사라진다."""
     path = tmp_path / "finance_state.json"
-    persist.save(s, path)
+    s = State(MockSources())
+    old = persist.dump(s)
+    old["records"]["anomalies"] = {
+        "abc": {"finding_ref": "abc", "code": "duplicate_coupon", "status": "open", "refs": []}
+    }
+    path.write_text(json.dumps(old), encoding="utf-8")
     again = State(MockSources())
     assert persist.load(again, path)
-    assert anomalies.listing(again.records.anomalies)["open_count"] == 1
-
-    old = persist.dump(again)
-    del old["records"]["anomalies"]
-    third = State(MockSources())
-    persist.restore(third, old)
-    assert third.records.anomalies == {}
-
-
-def test_restart_drops_open_coupon_refund_audit_keeps_the_rest(tmp_path) -> None:
-    """예전 파일의 쿠폰·환불 의심 건은 처리 전이면 뺀다. 남은 규칙의 건과 사람의 메모는 남긴다."""
-    from finance_agent import anomalies
-
-    s = State(MockSources())
-    anomalies.note_findings(
-        s.records.anomalies,
-        [
-            {"code": "repeat_refund", "title": "같은 고객 환불 3번", "refs": ["rfd_1"]},
-            {"code": "refund_rate_jump", "title": "환불률 급변", "refs": []},
-            {"code": "split_under_limit", "title": "한도 바로 아래 쿠폰 3장", "refs": ["cpn_1"]},
-            {"code": "amount_recheck_failed", "detail": "쿠폰 총액이 다릅니다", "refs": ["exe_2"]},
-            {"code": "duplicate_coupon", "title": "같은 사건 보상 쿠폰 2번", "refs": ["cpn_2"]},
-            {"code": "compensation_outside_impact", "title": "영향 고객 밖", "refs": ["exe_3"]},
-            {"code": "gate_hold_trend", "title": "보류·거절 증가", "refs": ["exe_4"]},
-            {"code": "repeat_refund", "title": "처리한 예전 건", "refs": ["rfd_9"]},
-            {"code": "duplicate_coupon", "title": "처리한 쿠폰 건", "refs": ["cpn_9"]},
-        ],
-    )
-    for code, ref, note in (
-        ("repeat_refund", "rfd_9", "환불 확인함"),
-        ("duplicate_coupon", "cpn_9", "쿠폰 확인함"),
-    ):
-        sig = anomalies.signature({"code": code, "refs": [ref]})
-        assert anomalies.resolve(s.records.anomalies, sig, "태윤", note)
-    path = tmp_path / "finance_state.json"
-    persist.save(s, path)
-    again = State(MockSources())
-    assert persist.load(again, path)
-    listed = anomalies.listing(again.records.anomalies)
-    assert [(e["code"], e["refs"][0]) for e in listed["open"]] == [("gate_hold_trend", "exe_4")]
-    assert sorted(e["note"] for e in listed["resolved"]) == ["쿠폰 확인함", "환불 확인함"]
-    # 다음 저장에도 사람의 메모가 남는다
+    assert not hasattr(again.records, "anomalies")
     persist.save(again, path)
-    third = State(MockSources())
-    assert persist.load(third, path)
-    assert len(anomalies.listing(third.records.anomalies)["resolved"]) == 2
+    assert "anomalies" not in json.loads(path.read_text("utf-8"))["records"]
 
 
 def test_an_old_state_file_with_removed_policy_records_still_loads(tmp_path) -> None:

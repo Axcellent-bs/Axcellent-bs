@@ -1,7 +1,6 @@
 """finance skill 입출력 (재무 구성안 4-2, 공통 구성안 12장, 재무 재설계 2026-10-23 7장).
 
-`verify_amount`·`review_hold`·`loss_aggregation` skill은 재무 재설계로 없앴다
-(`loss_aggregation`은 2026-10-27, 재무가 장애 대응 흐름의 단계가 아니게 되면서).
+`verify_amount`·`review_hold`·`loss_aggregation` skill은 재무 재설계로 없앴다.
 금액은 모두 정수 원, 시각은 UTC ISO8601 문자열이다.
 """
 
@@ -50,34 +49,6 @@ class ClosingReportOutput(AxModel):
     status: Literal["draft", "confirmed"]
     confirmed_by: str | None = None
     confirmed_at: str | None = None
-    unavailable: list[str] = Field(default_factory=list)
-
-
-# ------------------------------------------------ audit_report (orchestrator·data → finance, 읽기)
-class AuditReportInput(AxModel):
-    days: int = Field(default=7, ge=1, le=90)
-    context_id: str | None = None  # 주면 그 사건의 실행 기록만 본다
-    finding_ref: str | None = None  # 주면 그 의심 건 하나만 (기간과 관계없이 처리 전 기록)
-
-
-class AuditFinding(AxModel):
-    code: Literal["gate_hold_trend"]
-    severity: Literal["high", "medium", "low"]
-    title: str
-    detail: str
-    refs: list[str] = Field(default_factory=list)
-
-
-class AuditStats(AxModel):
-    gate_held: int | None = None
-    gate_rejected: int | None = None
-
-
-class AuditReportOutput(AxModel):
-    window_from: str
-    window_to: str
-    stats: AuditStats
-    findings: list[AuditFinding]
     unavailable: list[str] = Field(default_factory=list)
 
 
