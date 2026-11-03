@@ -42,6 +42,10 @@ uv run python domains/hr/eval/run_eval.py dice 620
 uv run python domains/hr/eval/compare.py 620
 ```
 
+> 참고: 평가의 "환불 남용" 유형은 당시 총괄이 받던 재무 이상 환불 신호(`finance:repeat_refund`)다. 재무 AI가 쿠폰·환불
+> 감사를 하지 않게 되어(#393) 총괄은 이제 이 신호를 받지 않는다. 기록된 결과(`results/`)와 맞추려고 평가 데이터는
+> 바꾸지 않았다. 환불 유형 수치는 지난 평가의 기록으로만 읽는다.
+
 ## 규모
 1000장 평가는 규모를 정하려는 용도로 한 번만 돌렸다(620장과 사실상 같은 결과). 이후 평가는 620장까지만 쓴다.
 
