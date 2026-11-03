@@ -295,6 +295,8 @@ class Classification(BaseModel):
     pii_masked: list[str] = Field(default_factory=list)
     language: str = "ko"
     keywords: list[str] = Field(default_factory=list)
+    message_ko: str = ""  # 한국어가 아닌 문의의 한국어 번역
+    request_points_ko: list[str] = Field(default_factory=list)  # 핵심 요청
 
 
 class Analysis(BaseModel):

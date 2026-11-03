@@ -43,6 +43,9 @@ class Classification(AxModel):
     pii_masked: list[str] = Field(default_factory=list)
     language: str = "ko"  # 고객 메시지의 언어 (`languages.detect`, 코드가 판별: ko·en·ja·zh·other)
     keywords: list[str] = Field(default_factory=list)  # 핵심 단어 최대 5개 (개인정보 제거)
+    # 한국어가 아닌 문의일 때만: 상담원이 읽을 한국어 번역과 핵심 요청 (개인정보·욕설은 가린다)
+    message_ko: str = ""
+    request_points_ko: list[str] = Field(default_factory=list)
 
 
 class Source(AxModel):
@@ -194,6 +197,8 @@ class LLMClassification(AxModel):
     urgency: Urgency
     search_query: str
     keywords: list[str] = Field(default_factory=list)
+    message_ko: str = ""  # 고객 메시지가 한국어가 아니면 한국어 번역, 한국어면 빈 문자열
+    request_points_ko: list[str] = Field(default_factory=list)  # 고객이 바라는 핵심 요청 (최대 3개)
 
     @field_validator("category", mode="before")
     @classmethod

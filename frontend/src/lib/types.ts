@@ -121,6 +121,8 @@ export interface Draft { style: "empathetic" | "concise" | "step_by_step"; reply
 export interface Classification {
   intent_ko: string; category: string; sentiment: "calm" | "frustrated" | "angry"; urgency: "low" | "medium" | "high";
   search_query: string; pii_masked: string[];
+  /** 한국어가 아닌 문의의 한국어 번역과 핵심 요청 (한국어 문의·옛 응답에는 없다) */
+  language?: string; message_ko?: string; request_points_ko?: string[];
 }
 export interface Analysis {
   classification?: Classification; sources?: Source[]; drafts?: Draft[]; timings_ms?: Record<string, number>; validation?: Validation;
