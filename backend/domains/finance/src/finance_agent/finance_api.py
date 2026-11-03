@@ -304,8 +304,8 @@ def add_finance_api(app: FastAPI) -> None:
     ) -> dict | Response:
         if period not in statements.PERIODS:
             return error(400, "invalid_request", "period는 month, quarter, year 중 하나")
-        if format not in ("json", "csv"):
-            return error(400, "invalid_request", "format은 json 또는 csv")
+        if format not in ("json", "csv", "xlsx"):
+            return error(400, "invalid_request", "format은 json, csv, xlsx 중 하나")
         try:
             d = fc.parse_date(date) or fc.today()
         except ValueError as exc:
@@ -315,6 +315,13 @@ def add_finance_api(app: FastAPI) -> None:
         meta = books.meta()
         if format == "json":
             return ok(report, meta)
+        if format == "xlsx":
+            name = statements.filename(report, "xlsx")
+            return Response(
+                content=statements.to_xlsx(report, meta["unavailable"]),
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f'attachment; filename="{name}"'},
+            )
         return Response(
             content=statements.to_csv(report, meta["unavailable"]).encode("utf-8"),
             media_type="text/csv; charset=utf-8",
