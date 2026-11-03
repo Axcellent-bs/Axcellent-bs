@@ -1142,6 +1142,79 @@ class PromoConceptsOutput(AxModel):
     summary: str = ""  # 코드가 만든 한 문장
 
 
+# --------------------------------------------------------------- shorts_stats (숏츠 통계)
+# YouTube 숏츠(길이 기준, API에 숏츠 표시가 없음)를 카테고리별·형식별로 센다. 숫자는 코드, 분류는
+# LLM이
+# 정해진 목록 안에서만. 표본이 적은 묶음은 unknown + 표본 부족.
+
+ShortsFormat = Literal[
+    "챌린지",
+    "상황극·스케치",
+    "리액션",
+    "정보·팁",
+    "비포애프터",
+    "브이로그",
+    "밈 패러디",
+    "기타",
+    "unknown",
+]
+
+
+class ShortsStatsRequest(AxModel):
+    pass
+
+
+class ShortsVideo(AxModel):
+    video_id: str
+    title: str | None = None
+    channel_title: str | None = None
+    views: int | None = Field(default=None, ge=0)
+
+
+class ShortsGroup(AxModel):
+    """카테고리 또는 형식 하나의 숏츠 통계."""
+
+    name: str  # 주제 분류 값 또는 숏츠 형식
+    status: Literal["known", "unknown"] = "known"
+    reason: str | None = None  # unknown이면 이유 (예: 표본 부족 3개, 기준 5개)
+    count: int = Field(default=0, ge=0)
+    avg_views: float | None = None
+    avg_views_per_hour: float | None = None  # 시간당 조회 증가를 잰 숏츠만의 평균
+    velocity_videos: int = Field(default=0, ge=0)  # 시간당 조회 증가를 잰 숏츠 수
+    top: list[ShortsVideo] = Field(default_factory=list)  # 조회수 상위 N개
+
+
+class ShortsSearch(AxModel):
+    """표본 넓히기 검색 한 번 (YouTube 카테고리 하나)."""
+
+    youtube_category_id: str
+    status: Literal["known", "unknown"]
+    reason: str | None = None  # 할당량 초과·실패 이유
+    found: int = Field(default=0, ge=0)  # 검색에서 받은 영상 수
+    shorts: int = Field(default=0, ge=0)  # 그중 길이 기준 이하 숏츠 수
+
+
+class ShortsStatsOutput(AxModel):
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = None
+    snapshot_at: UtcDatetime | None = None  # 쓴 YouTube 인기 스냅샷 시각
+    max_seconds: int = Field(default=60, ge=1)  # 숏츠 길이 기준(초)
+    shorts: int = Field(default=0, ge=0)  # 숏츠 표본 수 (인기 + 검색, 중복 없음)
+    popular_shorts: int = Field(default=0, ge=0)
+    searched_shorts: int = Field(default=0, ge=0)
+    unknown_length: int = Field(default=0, ge=0)  # 길이를 몰라 뺀 인기 영상 수
+    by_category: list[ShortsGroup] = Field(default_factory=list)
+    by_format: list[ShortsGroup] = Field(default_factory=list)
+    search: list[ShortsSearch] = Field(default_factory=list)
+    # known = 이번에 검색함, cached = 오늘 이미 검색해 저장한 결과, unknown = 검색하지 않음(이유)
+    search_status: Literal["known", "unknown", "cached"] = "unknown"
+    search_reason: str | None = None
+    quota_used: int = Field(default=0, ge=0)  # 이번 실행에서 쓴 YouTube 할당량 단위
+    velocity_note: str | None = None  # 평균 시간당 조회 증가를 잰 범위
+    limitation: str = ""  # 한계 (이미 뜬 영상끼리의 비교 등)
+    summary: str = ""
+
+
 # --------------------------------------------------------------- campaign_effect (캠페인 효과)
 # 캠페인 기간 주문·매출을 지난 7일 같은 시간대 평균과 비교한 증분과, 캠페인 쿠폰 누적 사용률.
 # 항목마다 "앎(값·근거)" 또는 "모름 + 이유"다. 모르면 0으로 채우지 않는다.
