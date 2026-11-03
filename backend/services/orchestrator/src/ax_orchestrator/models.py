@@ -113,6 +113,8 @@ class Incident:
     # 장애가 풀린 때와 다르다. degraded로 끝난 이벤트는 이 값이 생길 때까지 장애 중으로 본다
     recovered_at: datetime | None = None
     status: str = "open"
+    # degraded로 끝났다가 복구 신호로 resolved가 된 이벤트. 복구 시간은 복구 신호 기준
+    settled_by_recovery: bool = False
     steps: dict[str, StepRun] = field(default_factory=dict)
     events: list[dict[str, Any]] = field(default_factory=list)
     outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -147,9 +149,20 @@ class Incident:
             if self.recovered_at is None:
                 return None
             return round((self.recovered_at - self.opened_at).total_seconds(), 2)
+        if self.settled_by_recovery and self.recovered_at is not None:
+            return round((self.recovered_at - self.opened_at).total_seconds(), 2)
         if self.closed_at is None:
             return None
         return round((self.closed_at - self.opened_at).total_seconds(), 2)
+
+    def settle_after_recovery(self) -> None:
+        """복구 신호가 오면 장애 중으로 남아 있던 이벤트(degraded)를 해결로 바꾼다.
+
+        `closed_at`(AI 대응이 끝난 시각)과 `response_seconds`는 그대로 둔다.
+        """
+        if self.status == "degraded" and self.recovered_at is not None:
+            self.status = "resolved"
+            self.settled_by_recovery = True
 
     def refresh_mttr(self) -> None:
         """복구 신호가 늦게 와서 값이 바뀌면 이미 만든 지표에 반영한다(지표가 있을 때만)."""

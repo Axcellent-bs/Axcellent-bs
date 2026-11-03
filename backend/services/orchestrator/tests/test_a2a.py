@@ -102,8 +102,12 @@ async def test_degraded_incident_stays_active_until_recovered(harness) -> None:
     recovered = _event("evt_2")
     recovered.type = EventType.SHOP_RECOVERED
     recovered.occurred_at = later
+    closed_at = inc.closed_at
     await manager.process(recovered)
     assert inc.recovered_at == later
+    assert inc.status == "resolved"  # 복구되면 장애 중으로 남기지 않는다
+    assert inc.closed_at == closed_at  # AI 대응이 끝난 시각은 그대로
+    assert inc.mttr_seconds() == round((later - inc.opened_at).total_seconds(), 2)
     assert manager.find_active("payment", later) is inc
     assert manager.find_active("payment", later + timedelta(minutes=1)) is None
 

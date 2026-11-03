@@ -156,6 +156,7 @@ class IncidentManager:
             target = self._latest_unrecovered(self._component(env), env.occurred_at)
             if target is not None:
                 target.recovered_at = env.occurred_at
+                target.settle_after_recovery()
                 target.refresh_mttr()
                 target.log(f"정상 복귀 신호 받음 ({env.source}, {iso(env.occurred_at)})")
                 await self.engine.refresh_impact(target, self.plan_factory())
@@ -197,6 +198,7 @@ class IncidentManager:
         for inc in self.incidents.values():
             if inc.component == component and inc.status == "degraded" and not inc.recovered_at:
                 inc.recovered_at = max(at, inc.closed_at or at)
+                inc.settle_after_recovery()
                 inc.refresh_mttr()
                 inc.log(f"복구 신호 수신 ({iso(at)})")
 
