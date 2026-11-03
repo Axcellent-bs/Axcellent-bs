@@ -882,8 +882,11 @@ async def run(svc: DevService, job: Job) -> None:
             await _run(svc, job)
         except GateRefused as exc:
             status = "waiting_human" if exc.decision.status == "held" else "failed"
+            from dev_agent.vcs import inventory  # 연결 보류 이유 (취약점 긴급)
+
+            note = inventory.hold_note(job.connection) if status == "waiting_human" else ""
             raise CoderStop(
-                status, f"실행 관문이 {exc.action}을 허락하지 않음 ({exc.decision.status})"
+                status, f"실행 관문이 {exc.action}을 허락하지 않음 ({exc.decision.status}){note}"
             ) from None
         except (CoderStop, CoderGone):
             raise

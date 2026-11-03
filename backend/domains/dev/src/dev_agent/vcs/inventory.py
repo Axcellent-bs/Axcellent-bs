@@ -249,6 +249,18 @@ def _put_vuln(entry: Entry, j: vuln_watch.Judgement) -> None:
         entry.warnings.append(f"이 버전에 걸리는 알려진 취약점 {j.cve_total}건")
 
 
+def hold_note(cid: str | None) -> str:
+    """이 연결이 긴급 취약으로 쓰기 보류 중이면 화면에 붙일 이유 한 줄 (아니면 빈 값).
+
+    관문의 보류 사유(`hold_reason`)는 `over_threshold`로 나가서 금액 기준처럼 읽힐 수 있다.
+    개발 화면은 연결 대장의 보류 알림으로 연결 보류인지 가려 보여 준다."""
+    st = vuln_watch.watch.holds.get(cid or "")
+    if st is None or not st.notice.hold:
+        return ""
+    cves = ", ".join(st.notice.kev_cves) or "KEV"
+    return f" · 연결 {cid} 긴급 취약({cves})으로 쓰기 보류 → 패치 확인 뒤 승인"
+
+
 def _hold_of(cid: str) -> dict | None:
     st = vuln_watch.watch.holds.get(cid)
     if st is None:
