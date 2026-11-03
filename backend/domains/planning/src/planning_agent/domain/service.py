@@ -225,6 +225,13 @@ class RejectSpecParams(SpecParams):
     reason: str = Field(min_length=1)
 
 
+class DocParams(BaseModel):
+    """문서 하나를 가리킨다."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    doc: str
+
+
 class PauseParams(RequestParams):
     """사람이 요청을 중단한다. 이유는 활동에만 남긴다."""
 
@@ -254,6 +261,7 @@ class PlanningService(PlanningCore):
         "reject_spec": ("_reject_spec", RejectSpecParams),
         "edit_spec": ("_edit_spec", EditSpecParams),
         "pause_request": ("_pause_request", PauseParams),
+        "delete_doc": ("_delete_doc", DocParams),
         "resume_request": ("_resume_request", RequestParams),
         "send_release_order": ("_send_release_order_action", ReleaseOrderParams),
     }
@@ -2211,8 +2219,22 @@ class PlanningService(PlanningCore):
         fn(d)
         d.updated_at = self.clock()
 
+    @staticmethod
+    def _next_doc_id(s: State) -> str:
+        """지운 문서가 있어도 번호가 겹치지 않게 가장 큰 번호 + 1."""
+        nums = [int(x.id.split("-")[1]) for x in s.docs if x.id.split("-")[-1].isdigit()]
+        return f"DOC-{max(nums, default=0) + 1}"
+
+    async def _delete_doc(self, s: State, doc: str) -> ActionResult | None:
+        """사람 버튼 "삭제": 정리 문서를 지운다 (기획서는 지우지 않는다)."""
+        d = next((x for x in s.docs if x.id == doc), None)
+        if d is None:
+            return None
+        s.docs = [x for x in s.docs if x.id != doc]
+        return ActionResult(output={"doc_id": doc, "deleted": True})
+
     async def _new_doc(self, s: State, title: str) -> ActionResult:
-        doc_id = f"DOC-{len(s.docs) + 1}"
+        doc_id = self._next_doc_id(s)
         s.docs.append(
             Doc(
                 id=doc_id,
@@ -2227,7 +2249,7 @@ class PlanningService(PlanningCore):
         r = next((x for x in s.requests if x.id == about), None)
         if r is None:
             return None
-        doc_id = f"DOC-{len(s.docs) + 1}"
+        doc_id = self._next_doc_id(s)
         blocks = gather_blocks(s, about)
         s.docs.append(
             Doc(
