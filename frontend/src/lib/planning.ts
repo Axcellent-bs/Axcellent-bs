@@ -279,15 +279,17 @@ export interface CodingSettings {
   trial_limit: number
   run_max_calls?: number // 코딩 실행 한 번의 LLM 호출 한도
   run_max_tokens?: number // 코딩 실행 한 번의 토큰 한도
+  estimate?: CodingEstimate // 대기 작업 예상 규모 (지난 서버 AI 코딩의 중앙값)
 }
 // 토큰 한도 (비율 표시용). 한 번 읽어 화면들이 같이 쓴다. 못 읽으면 서버 기본값
-const LIMIT_DEFAULT = { trial: 1_000_000, runCalls: 40, runTokens: 600_000 }
+export interface CodingEstimate { samples: number; tokens: number; tokens_max: number; calls: number; files: number }
+const LIMIT_DEFAULT: { trial: number; runCalls: number; runTokens: number; est: CodingEstimate | null } = { trial: 1_000_000, runCalls: 40, runTokens: 600_000, est: null }
 let limitCache: Promise<typeof LIMIT_DEFAULT> | null = null
 export function useCodingLimits(): typeof LIMIT_DEFAULT {
   const [v, setV] = useState(LIMIT_DEFAULT)
   useEffect(() => {
     limitCache ??= codingSettingsApi(DEV_API).get()
-      .then((c) => ({ trial: c.trial_limit || LIMIT_DEFAULT.trial, runCalls: c.run_max_calls || LIMIT_DEFAULT.runCalls, runTokens: c.run_max_tokens || LIMIT_DEFAULT.runTokens }))
+      .then((c) => ({ trial: c.trial_limit || LIMIT_DEFAULT.trial, runCalls: c.run_max_calls || LIMIT_DEFAULT.runCalls, runTokens: c.run_max_tokens || LIMIT_DEFAULT.runTokens, est: c.estimate ?? null }))
       .catch(() => { limitCache = null; return LIMIT_DEFAULT })
     let alive = true
     void limitCache.then((x) => alive && setV(x))

@@ -212,3 +212,20 @@ def test_hand_to_agent_button(service, adapter, monkeypatch) -> None:
     with pytest.raises(ActionError) as err:  # 이미 넘겼으면 안 된다
         run(service.hand_to_agent("T-11"))
     assert err.value.code == "NOT_MOVABLE"
+
+
+def test_estimate_uses_median_of_finished_agent_runs(service) -> None:
+    from ax_workflow.models import CodingFile
+
+    assert service.coding_settings()["estimate"]["samples"] == 0
+    rows = [(10_000, 4, 1), (40_000, 9, 2), (90_000, 20, 3)]
+    base = service.state.tasks[0]
+    for i, (tok, calls, files) in enumerate(rows):
+        t = base.model_copy(update={"id": f"T-E{i}"})
+        service.state.tasks.append(t)
+        t.coding = CodingRun(
+            status="merged", updated_at=service.clock(), mode="agent", llm_tokens=tok,
+            llm_calls=calls, files=[CodingFile(path=f"f{i}.ts") for i in range(files)],
+        )  # fmt: skip
+    est = service.coding_settings()["estimate"]
+    assert est == {"samples": 3, "tokens": 40_000, "tokens_max": 90_000, "calls": 9, "files": 2}
