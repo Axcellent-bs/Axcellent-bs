@@ -234,6 +234,7 @@ class PauseParams(RequestParams):
 class EditSpecParams(SpecParams):
     """확정 전 기획서를 사람이 고친다. 빈 값은 그대로 둔다."""
 
+    title: str = ""
     problem: str = ""
     goal: str = ""
     paras: dict[str, str] = Field(default_factory=dict)
@@ -2037,19 +2038,32 @@ class PlanningService(PlanningCore):
         )
 
     async def _edit_spec(
-        self, s: State, spec: str, problem: str, goal: str, paras: dict[str, str]
+        self,
+        s: State,
+        spec: str,
+        problem: str,
+        goal: str,
+        paras: dict[str, str],
+        title: str = "",
     ) -> ActionResult | None:
-        """사람 버튼 "수정": 확정 전 기획서의 문제·목표·문단 글을 고친다.
+        """사람 수정: 기획서의 제목·문제·목표·문단 글을 고친다.
 
-        확정된 기획서는 작업이 개발로 나가서 고치지 않는다(SPEC_CONFIRMED). 바뀐 곳마다 사람이 쓴
+        확정된 기획서는 제목·문제·목표만 고친다. 문단(요구사항·완료 기준)은 작업이 개발로 나가
+        고치지 않는다(SPEC_CONFIRMED, 개정 흐름은 다음 단계). 바뀐 곳마다 사람이 쓴
         문장 수를 늘리고 활동에 남긴다. 확정 조건은 다음 진행에서 다시 본다.
         """
         sp = next((x for x in s.specs if x.id == spec), None)
         if sp is None:
             raise ActionError("NOT_FOUND", f"기획서 {spec}가 없습니다")
-        if sp.status == "확정":
-            raise ActionError("SPEC_CONFIRMED", f"{spec}는 확정돼서 고칠 수 없습니다")
+        # 확정 뒤에도 제목·문제·목표(설명)는 고친다. 요구사항·완료 기준은 작업·대조 기준이라 막는다
+        if sp.status == "확정" and any((v or "").strip() for v in paras.values()):
+            raise ActionError(
+                "SPEC_CONFIRMED", f"{spec}는 확정돼서 요구사항·완료 기준은 고칠 수 없습니다"
+            )
         changed: list[str] = []
+        if title.strip() and title.strip() != sp.title:
+            sp.title = title.strip()
+            changed.append("제목")
         if problem.strip() and problem.strip() != sp.problem:
             sp.problem = problem.strip()
             changed.append("문제")
