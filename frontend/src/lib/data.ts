@@ -690,6 +690,62 @@ export interface PromoConceptsOutput {
   season_checks?: PromoSeasonCheck[];
 }
 
+// ---------------------------------------------------------------- 숏츠 통계 (shorts_stats)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py ShortsStatsOutput (#437).
+// 숏츠 = 길이 기준(max_seconds) 이하 영상. 숫자는 코드, 분류는 LLM(정해진 목록 안). 표본이 적은 묶음은 unknown + 이유
+export interface ShortsVideo {
+  video_id: string;
+  title: string | null;
+  channel_title: string | null;
+  views: number | null;
+}
+export interface ShortsGroup {
+  /** 주제 분류 값 또는 숏츠 형식 */
+  name: string;
+  status: "known" | "unknown";
+  /** unknown이면 이유 (예: 표본 부족) */
+  reason: string | null;
+  count: number;
+  avg_views: number | null;
+  /** 시간당 조회 증가를 잰 숏츠만의 평균 */
+  avg_views_per_hour: number | null;
+  velocity_videos: number;
+  /** 조회수 상위 N개 */
+  top: ShortsVideo[];
+}
+export interface ShortsSearch {
+  youtube_category_id: string;
+  status: "known" | "unknown";
+  reason: string | null;
+  found: number;
+  shorts: number;
+}
+export interface ShortsStatsOutput {
+  status: "known" | "unknown";
+  reason: string | null;
+  snapshot_at: string | null;
+  /** 숏츠 길이 기준(초) */
+  max_seconds: number;
+  /** 숏츠 표본 수 (인기 + 검색, 중복 없음) */
+  shorts: number;
+  popular_shorts: number;
+  searched_shorts: number;
+  /** 길이를 몰라 뺀 인기 영상 수 */
+  unknown_length: number;
+  by_category: ShortsGroup[];
+  by_format: ShortsGroup[];
+  search: ShortsSearch[];
+  /** known = 이번에 검색함, cached = 오늘 이미 검색해 저장한 결과, unknown = 검색하지 않음(이유) */
+  search_status: "known" | "unknown" | "cached";
+  search_reason: string | null;
+  quota_used: number;
+  /** 평균 시간당 조회 증가를 잰 범위 */
+  velocity_note: string | null;
+  /** 표본 한계 (서버 문장) */
+  limitation: string;
+  summary: string;
+}
+
 export type TopicCategory =
   | "뉴스·사건" | "정치·사회" | "기부·재난" | "인물" | "게임" | "연예·스포츠" | "생활·취미" | "교육·책" | "IT" | "기타" | "unknown";
 /** 급상승했지만 회사 설정의 "추천 안 함" 분류라 추천하지 않은 소재 (참고용, 서버 값) */
@@ -829,6 +885,8 @@ export const dataAi = {
   /** 영상 소재 추천 (콘텐츠 루프 2단계). 입력을 비우면 회사 설정(trends.toml [recommend])과 어제 날짜.
    *  네이버는 서버 하루 캐시를 같이 쓰고, 소재마다 아이디어 문장을 LLM이 쓴다 */
   contentRecommend: () => askData<ContentRecommendOutput>("content_recommend", "영상 소재 추천", {}, RECOMMEND_DEADLINE_MS),
+  /** 숏츠 통계 (카테고리·형식별). YouTube 검색으로 표본을 넓힌다(할당량, 서버 하루 캐시) */
+  shortsStats: () => askData<ShortsStatsOutput>("shorts_stats", "숏츠 통계", {}, TREND_DEADLINE_MS),
   /** 홍보 영상 기획안. 서버 하루 캐시. regenerate = true면 오늘 만든 기획안이 있어도 새로 만든다(LLM·네이버를 다시 부름) */
   promoConcepts: (regenerate = false) =>
     askData<PromoConceptsOutput>("promo_concepts", "홍보 영상 기획안", regenerate ? { regenerate: true } : {}, RECOMMEND_DEADLINE_MS),

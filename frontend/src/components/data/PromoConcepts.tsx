@@ -31,7 +31,7 @@ function ConceptCard({ c }: { c: PromoConcept }) {
         </p>
         {c.concept && <p className="text-sm text-ink-700">{c.concept}</p>}
         <div className="flex flex-wrap gap-1.5">
-          {c.shorts_format && <Chip label={[`숏츠 형식 · ${c.shorts_format}`, views(c.shorts_format_avg_views)].filter(Boolean).join(" · ")} tone={TONE.info} />}
+          {c.shorts_format && <Chip label={[`빌려 온 숏츠 형식 · ${c.shorts_format}`, views(c.shorts_format_avg_views)].filter(Boolean).join(" · ")} tone={TONE.info} />}
           <Chip label={c.borrowed_trend ? `빌려 온 트렌드 · ${c.borrowed_trend}` : "트렌드 없음 (상품 + 숏츠 형식)"} tone={TONE.muted} />
           {c.trend_kind && <Chip label={KIND_LABEL[c.trend_kind]} tone={TONE.muted} />}
         </div>
@@ -89,6 +89,8 @@ function Ingredients({ out }: { out: PromoConceptsOutput }) {
     out.season_status === "known" ? { text: out.season_reason ?? "시즌 키워드 읽음", warn: Boolean(out.season_reason) }
       : { text: `시즌: ${out.season_reason ?? NO_REASON}`, warn: true },
   ];
+  // 시즌 재료(kind = season)가 비면 서버가 확인한 키워드·배율 요약을 펼쳐 둔다
+  const noSeason = !out.trends.some((t) => t.kind === "season");
   const ratio = (v: number | null) => (typeof v === "number" ? `${v.toLocaleString("ko-KR")}배` : "–");
   return (
     <div className="rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-700">
@@ -109,8 +111,8 @@ function Ingredients({ out }: { out: PromoConceptsOutput }) {
         </ul>
       )}
       {(out.season_checks?.length ?? 0) > 0 && (
-        <details className="mt-2">
-          <summary className="cursor-pointer font-semibold text-ink-900">시즌 확인한 키워드 {out.season_checks?.length}개 (작년 같은 달·다음 달 ÷ 평균)</summary>
+        <details className="mt-2" open={noSeason}>
+          <summary className="cursor-pointer font-semibold text-ink-900">{noSeason ? "시즌 재료 없음 · " : ""}시즌 확인한 키워드 {out.season_checks?.length}개 (작년 같은 달·다음 달 ÷ 평균)</summary>
           <ul className="mt-1 space-y-0.5 pl-4">
             {out.season_checks?.map((s) => (
               <li key={s.keyword}>
