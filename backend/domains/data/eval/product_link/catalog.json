@@ -1,0 +1,61 @@
+{
+ "collected_at": "2026-11-03T03:43:48+00:00",
+ "products": [
+  {
+   "product_id": "prd_0001",
+   "name": "파이썬 입문서",
+   "category_code": "book",
+   "category_name": "도서",
+   "description": null
+  },
+  {
+   "product_id": "prd_0002",
+   "name": "데이터 분석 실전",
+   "category_code": "book",
+   "category_name": "도서",
+   "description": null
+  },
+  {
+   "product_id": "prd_0003",
+   "name": "에세이 모음집",
+   "category_code": "book",
+   "category_name": "도서",
+   "description": null
+  },
+  {
+   "product_id": "prd_0004",
+   "name": "무지 노트 3권 세트",
+   "category_code": "stationery",
+   "category_name": "문구",
+   "description": null
+  },
+  {
+   "product_id": "prd_0005",
+   "name": "젤펜 12색",
+   "category_code": "stationery",
+   "category_name": "문구",
+   "description": null
+  },
+  {
+   "product_id": "prd_0006",
+   "name": "독서대",
+   "category_code": "stationery",
+   "category_name": "문구",
+   "description": null
+  },
+  {
+   "product_id": "prd_0007",
+   "name": "소설 베스트 3종",
+   "category_code": "book",
+   "category_name": "도서",
+   "description": null
+  },
+  {
+   "product_id": "prd_0008",
+   "name": "만년필 입문 세트",
+   "category_code": "stationery",
+   "category_name": "문구",
+   "description": null
+  }
+ ]
+}

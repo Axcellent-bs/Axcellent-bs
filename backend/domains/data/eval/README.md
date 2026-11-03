@@ -162,3 +162,11 @@ seed `20261029` 분석 결론:
 - **`campaign/holdout/` 케이스 내용을 열지 않는다.** 위 holdout 규칙과 같다
 - 여러 날 캠페인 케이스는 `campaign/multiday/`(cases 9개, holdout 10개 seed `2026110204`)에 따로 둔다. 기준선은 "캠페인 시작 전 14일의 같은 요일·같은 시간대"(다음 코드 PR). 기준선 코드 PR부터 campaign 관문에 들어가고 기준값은 `campaign/baseline.json` `multiday_metrics`다. **`campaign/multiday/holdout/` 내용도 열지 않는다**
 
+## content_recommend 상품 연결 보정셋 (`product_link/`, 소재 ↔ 상품)
+
+급상승 소재를 회사 상품에 잇는 임베딩 유사도·여유 기준을 정하는 보정셋과 채점기(`product_link/score.py`)다. 결제·trend·campaign 관문(`baseline.json`)에는 넣지 않는다. 자세한 것은 `product_link/README.md`.
+
+- 관련 질의 20개(상품 이름 핵심어·카테고리 + 꼬리말), 무관 소재 22개(2026-11-03 인기 검색어·YouTube 태그). 정답은 만든 방식에서만 정한다
+- dev 30개, holdout 12개(seed `2026110302`). 저장된 코사인(`product_link/sims/`)만 읽고 임베딩을 다시 부르지 않는다
+- 근거 글(영상 제목·뉴스 제목)은 커밋하지 않는다
+- **holdout 케이스 내용을 열지 않는다.** 위 holdout 규칙과 같다
