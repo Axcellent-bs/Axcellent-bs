@@ -49,7 +49,7 @@ const HOLD_STATE: [string, string][] = [
   ['task_not_merged', 'PR 머지 대기'],
   ['pr_outside_spec', '기획서 밖 PR 섞임'],
 ]
-function releaseState(rc: ReleaseCheck): { label: string; tone: 'green' | 'amber'; title?: string } {
+export function releaseState(rc: ReleaseCheck): { label: string; tone: 'green' | 'amber'; title?: string } {
   if (rc.order_sent) return { label: '배포 지시 보냄', tone: 'green' }
   if (rc.verdict === 'ready') return { label: '배포 지시 전송 실패', tone: 'amber', title: rc.order_result ?? undefined }
   if (rc.verdict === 'needs_human') {
