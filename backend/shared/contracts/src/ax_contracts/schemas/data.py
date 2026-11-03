@@ -1213,6 +1213,8 @@ class ShortsVideo(AxModel):
     title: str | None = None
     channel_title: str | None = None
     views: int | None = Field(default=None, ge=0)
+    # 시간당 조회 증가 (두 번 본 숏츠만, 예전 응답은 없다)
+    views_per_hour: float | None = None
 
 
 class ShortsGroup(AxModel):
@@ -1226,6 +1228,9 @@ class ShortsGroup(AxModel):
     avg_views_per_hour: float | None = None  # 시간당 조회 증가를 잰 숏츠만의 평균
     velocity_videos: int = Field(default=0, ge=0)  # 시간당 조회 증가를 잰 숏츠 수
     top: list[ShortsVideo] = Field(default_factory=list)  # 조회수 상위 N개
+    # 아래는 예전 응답은 없다. 한 번만 본 숏츠 수 (다음 조회 대기)와 그 이유
+    velocity_pending: int = Field(default=0, ge=0)
+    velocity_reason: str | None = None
 
 
 class ShortsSearch(AxModel):
@@ -1255,6 +1260,9 @@ class ShortsStatsOutput(AxModel):
     search_reason: str | None = None
     quota_used: int = Field(default=0, ge=0)  # 이번 실행에서 쓴 YouTube 할당량 단위
     velocity_note: str | None = None  # 평균 시간당 조회 증가를 잰 범위
+    # 아래는 예전 응답은 없다. 검색 숏츠 다시 조회(videos.list): 이번에 다시 본 수와 못 본 이유
+    rechecked: int = Field(default=0, ge=0)
+    recheck_reason: str | None = None
     limitation: str = ""  # 한계 (이미 뜬 영상끼리의 비교 등)
     summary: str = ""
 
