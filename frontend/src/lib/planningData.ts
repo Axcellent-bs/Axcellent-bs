@@ -110,6 +110,7 @@ export interface CodingRun {
   mode?: CodingMode
   connection?: string | null // 올릴 레포 연결
   claimedBy?: string | null // 구독형: 가져간 사람
+  assignee?: string | null // 구독형: 맡긴 사람 (그 사람의 Claude만 가져간다)
   holdKey?: string | null // 실행 관문이 PR 열기(generate_pr)를 보류한 키
   coveredBy?: string[] // covered: 이 작업을 이미 반영한 앞 작업 PR (PR 없이 완료)
   ciHold?: boolean // CI 실패로 사람 확인: 서버가 CI를 다시 보고 통과하면 자동 머지를 다시 판단

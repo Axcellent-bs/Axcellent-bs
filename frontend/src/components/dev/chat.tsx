@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Chip, useToast, type ChipTone } from '@dejafix/common-frontend'
 import type { ChatMessage, ChatStatus, ChatThread, CodingMode, CodingStatus, State as S, Task } from '@/lib/planningData'
-import { DEV_API, PlanningApiError, chatApi, codingSettingsApi, vcsApi, type CodingSettings, type VcsConnection } from '@/lib/planning'
+import { DEV_API, PlanningApiError, chatApi, codingSettingsApi, useMe, vcsApi, type CodingSettings, type VcsConnection } from '@/lib/planning'
 import { CODING_LABEL, CancelButton, ResumeButton, codingState, isRunning } from '@/components/dev/coding'
 import { State } from '@/components/planning-common/parts'
 import { go, toPath } from '@/components/planning-common/links'
@@ -115,8 +115,10 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
 
   const repo = cur?.connection ?? conn
   // 작업을 띄운 대화는 그 대화의 모드 그대로, 새 대화는 고른 모드 (이 브라우저에 기억)
-  // 내 Claude는 본인 Claude(MCP)를 연결한 개발자가 있어야 가져간다. 없으면 고를 수 없고 서버 AI로 둔다
-  const noClaude = !!setting && setting.agents_connected.length === 0
+  // 내 Claude는 이 화면을 쓰는 사람이 본인 Claude(MCP)를 연결했을 때만 고른다 (그 사람에게 맡긴다).
+  // 나를 모르면(사람 토큰 없음) 예전처럼 회사에 연결한 개발자가 있는지로 본다
+  const me = useMe()
+  const noClaude = me?.name ? !me.claude_connected : !!setting && setting.agents_connected.length === 0
   const trialOut = !!setting && setting.trial_used >= setting.trial_limit
   const mode: CodingMode = cur?.taskId ? cur.mode ?? 'agent' : noClaude && pick === 'subscription' ? 'agent' : trialOut && !noClaude ? 'subscription' : pick
   const choose = (m: CodingMode) => {

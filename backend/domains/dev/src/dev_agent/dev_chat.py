@@ -283,8 +283,11 @@ async def turn(
     message: str,
     connection: str | None = None,
     mode: str | None = None,
+    who: str | None = None,
 ) -> ChatThread:
     """사용자 메시지 하나를 받고 AI 답 하나를 적는다. 바뀐 대화를 돌려준다.
+
+    `who`: 말한 사람(사람 토큰 이름). 내 Claude 작업은 이 사람에게 맡긴다.
 
     `mode`는 작업을 누가 코딩하나 (agent 서버 AI · subscription 본인 Claude). 주면 대화에 남긴다.
 
@@ -314,6 +317,7 @@ async def turn(
         connection=connection,
         title=title_of(text) if thread_id is None else None,
         mode=mode,
+        who=who,
     )
     tid = th.id
 
@@ -409,7 +413,7 @@ async def turn(
                 connection=cid,
                 waiting_for=ids,
             )
-    return await _start(svc, tid, plan, cid, reply, skip_queue=now(text), mode=th.mode)
+    return await _start(svc, tid, plan, cid, reply, skip_queue=now(text), mode=th.mode, who=th.who)
 
 
 async def _start(
@@ -420,8 +424,10 @@ async def _start(
     reply: str = "",
     skip_queue: bool = False,
     mode: str = "agent",
+    who: str | None = None,
 ) -> ChatThread:
-    """계획으로 코딩 작업을 띄우고 대화에 남긴다. 구독형이면 대기열에 올리기만 한다."""
+    """계획으로 코딩 작업을 띄우고 대화에 남긴다. 구독형이면 대기열에 올리기만 한다
+    (`who`가 있으면 그 사람에게 맡긴다)."""
     try:
         result = await svc.create_dev_task(
             title=plan.title,
@@ -431,6 +437,7 @@ async def _start(
             connection=cid,
             skip_queue=skip_queue,
             mode=mode,
+            assignee=who,
         )
     except ActionError as exc:
         return await svc.chat_add(
@@ -484,7 +491,15 @@ async def resume_waiting(svc: DevService) -> None:
             )  # fmt: skip
             continue
         done = ", ".join(th.waiting_for)
-        await _start(svc, th.id, plan, th.connection, f"{done}가 끝나서 시작할게요.", mode=th.mode)
+        await _start(
+            svc,
+            th.id,
+            plan,
+            th.connection,
+            f"{done}가 끝나서 시작할게요.",
+            mode=th.mode,
+            who=th.who,
+        )
 
 
 WAIT_NOTICE_MINUTES = 30  # 앞 요청을 이만큼 넘게 기다리면 대화에 한 번 알린다

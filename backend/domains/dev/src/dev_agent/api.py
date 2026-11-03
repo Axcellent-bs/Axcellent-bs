@@ -21,6 +21,7 @@ from ax_workflow.api import (
     _ok,
     add_common_routes,
 )
+from ax_workflow.auth import AuthError, check_human
 from ax_workflow.base import TEAM_LEAD
 from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.models import dump
@@ -428,6 +429,12 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return _err(404, "NOT_FOUND", f"대화 {thread_id}가 없다")
         return _ok(dump(th), svc)
 
+    @router.get("/me", dependencies=CALLER)
+    def get_me(request: Request) -> dict:
+        """지금 화면을 쓰는 사람과 그 사람의 본인 Claude 연결 (사람 토큰일 때만 이름)."""
+        svc = get_service()
+        return _ok(svc.me(_person(request)), svc)
+
     @router.post("/dev-chat", response_model=None, dependencies=CALLER)
     async def post_dev_chat(request: Request) -> dict | JSONResponse:
         """`{thread_id?, message, connection?, mode?}` → 바뀐 대화. AI 답 하나까지 기다린다.
@@ -457,7 +464,8 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return _err(400, "INVALID_INPUT", "connection은 문자열이어야 한다")
         try:
             mode = body.get("mode")
-            th = await dev_chat.turn(svc, thread_id, message, connection or None, mode)
+            who = _person(request)
+            th = await dev_chat.turn(svc, thread_id, message, connection or None, mode, who)
         except ActionError as exc:
             return _coding_err(exc)
         except GateRefused as exc:
@@ -491,6 +499,14 @@ def add_settings_routes(router: APIRouter, get_service: Callable[[], Any]) -> No
         except ActionError as exc:
             return _err(400, exc.code, exc.message)
         return _ok(result.output, svc)
+
+
+def _person(request: Request) -> str | None:
+    """사람 토큰이면 그 사람 이름 (에이전트 토큰·없음이면 None)."""
+    try:
+        return check_human(request.headers.get("authorization"))
+    except AuthError:
+        return None
 
 
 def create_dev_router(get_service: Callable[[], Any]) -> APIRouter:

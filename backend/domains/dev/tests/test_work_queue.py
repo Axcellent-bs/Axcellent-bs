@@ -294,3 +294,36 @@ def test_mcp_tools(svc: PlanningService, adapter) -> None:
     assert released.json()["result"]["structuredContent"]["status"] == "queued"
     assert rpc("nope").json()["error"]["code"] == -32601
     assert client.get("/api/planning/mcp").status_code == 405
+
+
+# ---------------------------------------------------------------- 사람별 내 Claude
+
+
+def test_assigned_task_only_for_that_person(svc, adapter) -> None:
+    out = run(
+        svc.create_dev_task(
+            title="배너", plan="배너 문구 변경", mode="subscription", assignee="kim"
+        )
+    )
+    tid = out.output["task_id"]
+    assert tid not in [r["task_id"] for r in work_queue.available(svc, "lee")]
+    assert tid in [r["task_id"] for r in work_queue.available(svc, "kim")]
+    with pytest.raises(ActionError) as err:
+        run(work_queue.claim(svc, tid, "lee"))
+    assert err.value.code == "NOT_YOURS"
+    run(work_queue.claim(svc, tid, "kim"))
+    t = next(x for x in svc.state.tasks if x.id == tid)
+    assert t.coding.claimed_by == "kim" and t.coding.assignee == "kim"
+
+
+def test_me_reports_own_claude_connection(svc, adapter) -> None:
+    client = TestClient(app)
+    me = client.get("/api/planning/me", headers={"Authorization": "Bearer human:kim"})
+    assert me.json()["data"]["name"] == "kim" and not me.json()["data"]["claude_connected"]
+    run(svc.mark_agent_seen("kim"))
+    d = client.get("/api/planning/me", headers={"Authorization": "Bearer human:kim"}).json()
+    assert d["data"]["claude_connected"] and d["data"]["team"][0]["name"] == "kim"
+    other = client.get("/api/planning/me", headers={"Authorization": "Bearer human:lee"}).json()
+    assert other["data"]["name"] == "lee" and not other["data"]["claude_connected"]
+    agent = client.get("/api/planning/me", headers={"Authorization": "Bearer mock:infra"}).json()
+    assert agent["data"]["name"] is None  # 에이전트 토큰은 사람이 아니다
