@@ -122,7 +122,7 @@ async def incident_view(
     return data, unavailable
 
 
-_TOTAL_KEYS = ("total_executed", "total_held", "count_executed", "count_held")
+_TOTAL_KEYS = ("total_executed", "count_executed")
 
 
 def known_incidents(feed: lg.ExecutionFeed) -> list[str]:
@@ -164,7 +164,6 @@ def summary_row(detail: dict[str, Any], feed: lg.ExecutionFeed) -> dict[str, Any
         "damage_amount": (detail["impact"] or {}).get("damage_amount"),
         "compensation_total": comp["total_executed"],
         "coupon_count": comp["count_executed"],
-        "held_count": comp["count_held"],
         "refund_total": (detail["refunds"] or {}).get("total"),
         "money_out_total": detail["money_out_total"],
     }

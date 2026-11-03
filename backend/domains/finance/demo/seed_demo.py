@@ -92,24 +92,6 @@ def main() -> None:
             f"보상 쿠폰 {buyer} 1장×5,000원",
             execute(s, "marketing", "issue_coupon", f"cpn-{buyer}", coupon(buyer, 1, 5000)),
         )
-    show(
-        "영향 고객이 아닌 buy_0999에게 쿠폰",
-        execute(s, "marketing", "issue_coupon", "cpn-zz", coupon("buy_0999", 1, 5000)),
-    )
-    show(
-        "총액을 틀리게 적은 쿠폰(3장×5,000원인데 5,000원)",
-        execute(s, "marketing", "issue_coupon", "cpn-wrong", coupon("buy_0907", 3, 5000, 5000)),
-    )
-    show(
-        "한 고객에게 6만 원어치 쿠폰(고객당 5만 원 기준 넘음)",
-        execute(s, "marketing", "issue_coupon", "cpn-big", coupon("buy_0908", 3, 20000)),
-    )
-
-    show(
-        "한 번에 50만 원 쿠폰(기준표 넘음 → 사람 확인)",
-        execute(s, "marketing", "issue_coupon", "cpn-huge", coupon("buy_0909", 25, 20000)),
-    )
-
     # 2) 환불 (고객지원 → 안전 레이어 기준표 검사. 재무는 끝난 환불 금액을 장부에 적기만 한다)
     show(
         "ord_1003 환불 20,000원(결제 32,000원)",
@@ -119,26 +101,6 @@ def main() -> None:
             "refund_request",
             "rfd-1003",
             {"order_id": "ord_1003", "refund_amount": 20000},
-        ),
-    )
-    show(
-        "ord_1004 환불 25,000원(결제 18,000원보다 큼)",
-        execute(
-            s,
-            "support",
-            "refund_request",
-            "rfd-1004",
-            {"order_id": "ord_1004", "refund_amount": 25000},
-        ),
-    )
-    show(
-        "ord_1005 환불 150,000원(환불 10만 원 기준 넘음)",
-        execute(
-            s,
-            "support",
-            "refund_request",
-            "rfd-1005",
-            {"order_id": "ord_1005", "refund_amount": 150000},
         ),
     )
 

@@ -83,7 +83,7 @@
 
 | 항목 | 재무 AI가 하는 일 | 화면·API |
 | --- | --- | --- |
-| 쿠폰 장부 | 보상 쿠폰을 사건별로 기록. 이벤트 버스가 없으면(실제 모드) **안전 장치 실행 기록**의 `issue_coupon`(실행·보류·거절)으로 채움. 출처는 `ledger_source`(`events`·`safety_executions`·`seed`) | `GET /api/finance/incidents` |
+| 쿠폰 장부 | 보상 쿠폰을 사건별로 기록. 이벤트 버스가 없으면(실제 모드) **안전 장치 실행 기록**의 `issue_coupon` 중 끝난 것(`executed`)으로 채움. 출처는 `ledger_source`(`events`·`safety_executions`·`seed`) | `GET /api/finance/incidents` |
 | 환불 금액 | 사건 구간에 영향 고객에게 나간 환불 합계. 구간이나 영향 고객을 모르면 0원이 아니라 "확인할 수 없음" | 상세 `refunds`, `money_out_total` |
 | 피해 숫자 | 데이터 AI 영향 분석 숫자 그대로 | 상세 `impact` |
 

@@ -2,22 +2,15 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { humanId, shortDateTime } from "@/lib/format";
 import {
   finance, incidentName, krw, ledgerSourceKo, purposeKo, sortIncidents,
-  type CouponStatus, type IncidentCoupon, type IncidentDetail, type IncidentSummary,
+  type IncidentDetail, type IncidentSummary,
 } from "@/lib/finance";
-import { Link } from "@/lib/nav";
-import { Chip, Empty, ErrorBox, MetaLine, MockBadge, RefList, ResourceBody, TONE, Waiting, useResource, type Resource } from "./bits";
+import { Empty, ErrorBox, MetaLine, MockBadge, RefList, ResourceBody, Waiting, useResource, type Resource } from "./bits";
 
 // 장애 사건 재무 (시나리오 A). 기준: ax-backend docs/notes/finance/2026-10-23-finance-redesign.md §12·§12-1
 // 재무가 하는 일: 끝난 쿠폰·환불 금액을 사건별 장부에 적기. 재무는 장애 대응 흐름의 단계가 아니다(#415).
-// 건별 승인·한도·감사는 하지 않는다(안전 장치가 A/C로 판정). 숫자는 서버 값을 그대로 보여 준다.
+// 숫자는 서버 값을 그대로 보여 준다.
 
 const CATEGORY_KO: Record<string, string> = { book: "도서", books: "도서", stationery: "문구", ebook: "전자책", ebooks: "전자책", goods: "굿즈" };
-const COUPON_STATUS: Record<CouponStatus, { label: string; tone: string }> = {
-  executed: { label: "지급됨", tone: TONE.ok },
-  held: { label: "보류 중 (사람 결정 기다림)", tone: TONE.warn },
-  rejected: { label: "거절됨", tone: TONE.bad },
-  failed: { label: "지급 실패", tone: TONE.bad },
-};
 const count = (n: number | null | undefined, unit: string) => (n == null ? "확인할 수 없음" : `${n.toLocaleString("ko-KR")}${unit}`);
 
 // ---------------------------------------------------------------- 사건 고르기 (탭 + 이전 사건 목록)
@@ -47,12 +40,6 @@ function shortDay(iso: string | null) {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-/** C 보류 = 주황. 아니면 표시 없음 */
-function statusDot(i: IncidentSummary): { cls: string; label: string } | null {
-  if (i.held_count > 0) return { cls: "bg-amber-500", label: `보류 중 보상 ${i.held_count}건` };
-  return null;
-}
-
 const tabId = (contextId: string) => `inc-tab-${contextId}`;
 const PANEL_ID = "incident-panel";
 
@@ -78,7 +65,6 @@ function IncidentTabs({ recent, older, selected, onSelect }: { recent: IncidentS
       <div role="tablist" aria-label="장애 사건 (최근 먼저)" className="flex min-w-0 flex-wrap gap-1">
         {recent.map((i, idx) => {
           const on = i.context_id === selected;
-          const dot = statusDot(i);
           return (
             <button key={i.context_id} ref={(el) => { refs.current[idx] = el; }} type="button" role="tab" id={tabId(i.context_id)}
               aria-selected={on} aria-controls={PANEL_ID} tabIndex={on || (!recentSelected && idx === 0) ? 0 : -1}
@@ -86,7 +72,6 @@ function IncidentTabs({ recent, older, selected, onSelect }: { recent: IncidentS
               className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${on ? "bg-brand-600 text-white" : "bg-surface text-ink-700 ring-1 ring-ink-100 hover:bg-ink-100"}`}>
               <span className="truncate" title={i.context_id}>{incidentName(i.context_id, i.component, i.opened_at)}</span>
               <span className={`shrink-0 text-xs tabular-nums ${on ? "text-white/80" : "text-ink-500"}`}>{shortDay(i.opened_at)}</span>
-              {dot && <span className={`h-2 w-2 shrink-0 rounded-full ${dot.cls} ${on ? "ring-2 ring-white" : ""}`} role="img" aria-label={dot.label} title={dot.label} />}
             </button>
           );
         })}
@@ -97,14 +82,11 @@ function IncidentTabs({ recent, older, selected, onSelect }: { recent: IncidentS
           <select value={olderSelected ? selected ?? "" : ""} onChange={(e) => { if (e.target.value) onSelect(e.target.value); }}
             className={`max-w-full rounded-full border-0 py-2 pl-4 pr-8 text-sm font-medium ring-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${olderSelected ? "bg-brand-600 text-white ring-brand-600" : "bg-surface text-ink-700 ring-ink-100"}`}>
             <option value="">이전 사건 {older.length}건</option>
-            {older.map((i) => {
-              const dot = statusDot(i);
-              return (
-                <option key={i.context_id} value={i.context_id}>
-                  {incidentName(i.context_id, i.component)} · {shortDay(i.opened_at)}{dot ? ` · ${dot.label}` : ""}
-                </option>
-              );
-            })}
+            {older.map((i) => (
+              <option key={i.context_id} value={i.context_id}>
+                {incidentName(i.context_id, i.component)} · {shortDay(i.opened_at)}
+              </option>
+            ))}
           </select>
         </label>
       )}
@@ -117,9 +99,6 @@ function SummaryStrip({ s }: { s: IncidentSummary }) {
   return (
     <div className="flex flex-wrap items-end gap-x-6 gap-y-2 rounded-2xl bg-surface-2 px-4 py-3">
       <p className="text-sm tabular-nums text-ink-700">피해 {krw(s.damage_amount)} · 보상으로 나간 돈 {krw(s.compensation_total)}</p>
-      <div className="flex flex-wrap gap-1.5">
-        {s.held_count > 0 && <Chip label={`보류 중 보상 ${s.held_count}건`} tone={TONE.warn} />}
-      </div>
     </div>
   );
 }
@@ -170,10 +149,6 @@ function Cards({ d }: { d: IncidentDetail }) {
 
       <Card title="보상으로 나간 돈 (장부)" value={krw(c.total_executed)}>
         <p>이 사건으로 실제 나간 금액입니다.</p>
-        <p className={c.count_held ? "font-medium text-amber-700" : ""}>
-          보류 중 <b className="tabular-nums">{krw(c.total_held)}</b>{c.count_held > 0 && " · 사람이 마케팅 화면의 보류 큐에서 결정합니다"}
-        </p>
-        <p className="text-[11px] text-ink-500">보상 판정은 고객지원, 지급은 마케팅이 합니다. 재무는 빠져나간 돈만 적습니다. 보류 중인 금액은 아직 나간 돈이 아닙니다.</p>
       </Card>
 
       <Card title="환불로 나간 돈 (장부)" value={krw(refunds?.total)}>
@@ -181,7 +156,6 @@ function Cards({ d }: { d: IncidentDetail }) {
           ? <p>이 사건 구간에 영향 고객에게 나간 환불 <b className="tabular-nums">{count(refunds.count, "건")}</b>입니다.</p>
           : <p className="text-ink-500">장애 구간이나 영향 고객을 몰라 이 사건에 묶지 못했습니다.</p>}
         <p>보상과 환불을 더한 돈 <b className="tabular-nums">{krw(d.money_out_total)}</b></p>
-        <p className="text-[11px] text-ink-500">환불 여부는 고객지원이 정합니다. 재무는 끝난 금액만 적습니다.</p>
       </Card>
     </div>
   );
@@ -190,31 +164,23 @@ function Cards({ d }: { d: IncidentDetail }) {
 // ---------------------------------------------------------------- 보상 받은 고객
 function Recipients({ d }: { d: IncidentDetail }) {
   const rows = [...d.compensation.coupons].sort((a, b) => a.at.localeCompare(b.at));
-  const needsHuman = (r: IncidentCoupon) => r.grade === "C" || r.status === "held";
   return (
     <div>
       <h3 className="text-sm font-semibold text-ink-900">보상으로 나간 내역 (장부) <span className="font-normal text-ink-500">{rows.length}건</span></h3>
-      <p className="mt-0.5 text-xs text-ink-500">
-        누구에게 줄지는 고객지원 AI가 정하고 지급은 마케팅 AI가 합니다. 재무는 빠져나간 돈을 적기만 합니다.
-        A는 한도 안이라 안전 장치가 바로 지급한 쿠폰, C는 한도를 넘거나 금액이 맞지 않아 사람 결정을 기다리는 쿠폰입니다(10분 안에 아무도 정하지 않으면 자동 취소).
-      </p>
       {rows.length ? (
         <div className="mt-2 overflow-x-auto rounded-2xl border border-ink-100">
-          <table className="w-full min-w-[680px] text-sm">
+          <table className="w-full min-w-[480px] text-sm">
             <thead className="bg-surface-2 text-left text-xs text-ink-500">
               <tr>
                 <th className="px-3 py-2 font-medium">고객</th>
                 <th className="px-3 py-2 text-right font-medium">금액</th>
-                <th className="px-3 py-2 font-medium">판정</th>
-                <th className="px-3 py-2 font-medium">상태</th>
                 <th className="px-3 py-2 font-medium">기록 번호</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => {
-                const st = COUPON_STATUS[r.status] ?? { label: r.status, tone: TONE.muted };
                 return (
-                  <tr key={r.execution_id} className={`border-t border-ink-100 align-top ${needsHuman(r) ? "bg-amber-50/60" : ""}`}>
+                  <tr key={r.execution_id} className="border-t border-ink-100 align-top">
                     <td className="px-3 py-2">
                       <b className="text-ink-900">{humanId(r.buyer_id)}</b>
                       <p className="text-[11px] text-ink-500">{purposeKo(r.reason_code, r.purpose_code)} · {shortDateTime(r.at)}</p>
@@ -224,16 +190,7 @@ function Recipients({ d }: { d: IncidentDetail }) {
                       {r.count > 1 && <p className="text-[11px] text-ink-500">{krw(r.unit_value)} × {r.count}장</p>}
                     </td>
                     <td className="px-3 py-2">
-                      <Chip label={r.grade === "A" ? "A 바로 지급" : "C 사람 확인"} tone={r.grade === "A" ? TONE.ok : TONE.warn} />
-                    </td>
-                    <td className="px-3 py-2">
-                      <Chip label={st.label} tone={st.tone} />
-                      {needsHuman(r) && (
-                        <Link href="/marketing" className="mt-1 block text-xs font-medium text-brand-700 hover:underline">마케팅 화면에서 결정 →</Link>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">
-                      <RefList refs={[r.coupon_id, r.execution_id, r.review_id]} label="보기" />
+                      <RefList refs={[r.coupon_id, r.execution_id]} label="보기" />
                     </td>
                   </tr>
                 );
@@ -241,7 +198,7 @@ function Recipients({ d }: { d: IncidentDetail }) {
             </tbody>
           </table>
         </div>
-      ) : <div className="mt-2"><Empty>이 사건으로 나간 보상 쿠폰이 아직 없습니다. 고객지원 AI가 요청하면 마케팅 AI가 쿠폰을 주고, 재무가 장부에 적습니다.</Empty></div>}
+      ) : <div className="mt-2"><Empty>이 사건으로 나간 보상 쿠폰이 아직 없습니다.</Empty></div>}
     </div>
   );
 }
@@ -249,15 +206,7 @@ function Recipients({ d }: { d: IncidentDetail }) {
 function NotOurJob() {
   return (
     <aside className="rounded-2xl border border-dashed border-ink-300 px-4 py-3 text-xs leading-relaxed text-ink-700">
-      <p className="font-semibold text-ink-900">재무가 하지 않는 일</p>
-      <ul className="mt-1 list-disc space-y-0.5 pl-4">
-        <li><b>쿠폰 한 장씩 승인</b>: 안전 장치가 판정합니다. 한도 안이면 A로 바로 지급, 넘거나 금액이 맞지 않으면 C로 보류합니다.</li>
-        <li><b>누구에게 얼마를 줄지 정하기</b>: 고객지원 AI가 보상 기준표로 정합니다.</li>
-        <li><b>쿠폰 지급</b>: 마케팅 AI가 합니다. 쿠폰 발행·관리는 재무 업무가 아닙니다 (마케팅·고객지원 합의).</li>
-        <li><b>쿠폰·환불 한도와 감사</b>: 재무 일이 아닙니다. 보류 건은 쿠폰은 마케팅 화면, 환불은 고객지원 화면에서 사람이 결정합니다.</li>
-        <li><b>장애 손실 집계</b>: 재무 일이 아닙니다. 장애 비용은 평상시 장부로 들어가 결산에서 드러납니다.</li>
-      </ul>
-      <p className="mt-1 text-ink-500">재무는 쿠폰·환불을 끝난 금액만 장부에 적습니다.</p>
+      재무는 쿠폰·환불의 끝난 금액을 장부에 적기만 합니다.
     </aside>
   );
 }
@@ -318,7 +267,7 @@ export function IncidentFinance({ list, selected, onSelect, tick }: {
           </h2>
           <p className="mt-0.5 text-xs leading-relaxed text-ink-500">
             결제 같은 서비스에 장애가 나면 총괄 AI가 사건을 열고, 보상은 고객지원 AI가 정해 마케팅 AI가 지급합니다.
-            재무는 쿠폰·환불을 끝난 금액만 사건별 장부에 적습니다. 쿠폰·환불 결정과 감사, 장애 손실 집계는 재무가 하지 않습니다.
+            재무는 쿠폰·환불의 끝난 금액을 사건별 장부에 적기만 합니다.
           </p>
           {src && <p className="text-[11px] text-ink-500">장부 출처: {src.label}</p>}
         </div>

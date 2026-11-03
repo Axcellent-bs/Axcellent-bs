@@ -34,6 +34,8 @@ RATE_CODES = {"take_rate"}
 COUNT_CODES = {"order_count"}
 # 늘어나면 나쁜 줄 (설명에서 "늘어 이익을 줄였다"로 쓴다)
 COST_CODES = {"coupon_cost", "pg_fee", "refund_total"}
+# 쿠폰·환불은 금액만 적는다. 크게 움직였다고 표시하거나 설명하지 않는다
+NOT_FLAGGED = {"coupon_cost", "refund_total"}
 
 
 def _month(d: date, back: int = 0) -> tuple[date, date]:
@@ -140,7 +142,8 @@ def variance_report(books: Books, d: date | None = None) -> dict[str, Any]:
         diff, pct = _change(cur[code], prev[code])
         yoy_diff, yoy_pct = _change(cur[code], yoy[code])
         big = (
-            diff is not None
+            code not in NOT_FLAGGED
+            and diff is not None
             and pct is not None
             and abs(pct) >= cfg.flag_ratio
             and (code in RATE_CODES or code in COUNT_CODES or abs(diff) >= cfg.flag_min_amount)
