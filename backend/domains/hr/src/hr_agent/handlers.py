@@ -18,6 +18,7 @@ from hr_agent.case_memory import service as case_memory
 from hr_agent.clients.errors import UpstreamError, bind_meta
 from hr_agent.fraud_similar import service as fraud_similar
 from hr_agent.handover import service as handover
+from hr_agent.org import changes as org_changes
 from hr_agent.org import headcount as org_headcount
 from hr_agent.planning_check import service as planning_check
 from hr_agent.results import failed
@@ -44,6 +45,18 @@ async def answer_handover_question(request: AgentRequest) -> AgentResult:
 
 async def confirm_handover(request: AgentRequest) -> AgentResult:
     return await handover.confirm_handover(get_services(), request)
+
+
+async def record_org_change(request: AgentRequest) -> AgentResult:
+    return await org_changes.record_org_change(get_services(), request)
+
+
+async def decide_org_change(request: AgentRequest) -> AgentResult:
+    return await org_changes.decide_org_change(get_services(), request)
+
+
+async def list_org_changes(request: AgentRequest) -> AgentResult:
+    return await org_changes.list_org_changes(get_services(), request)
 
 
 async def team_headcount(request: AgentRequest) -> AgentResult:
@@ -99,6 +112,9 @@ _HANDLERS = {
     "record_case": record_case,
     "get_roster": get_roster,
     "team_headcount": team_headcount,
+    "record_org_change": record_org_change,
+    "decide_org_change": decide_org_change,
+    "list_org_changes": list_org_changes,
     "start_handover": start_handover,
     "answer_handover_question": answer_handover_question,
     "confirm_handover": confirm_handover,

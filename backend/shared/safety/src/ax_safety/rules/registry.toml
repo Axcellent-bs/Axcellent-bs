@@ -128,6 +128,18 @@ action = "record_case"
 owner = "hr"
 base_grade = "A"
 
+# 조직 변동(팀 이동·입사·퇴사) 기록. 초안 저장은 인원에 세지 않는다. 확정·반려는 인사 담당자가
+# 대시보드 사람 토큰으로 decide_org_change를 부르는 것이 곧 승인이다(skill 요청자는 dashboard-api뿐)
+[[actions]]
+action = "record_org_change"
+owner = "hr"
+base_grade = "A"
+
+[[actions]]
+action = "decide_org_change"
+owner = "hr"
+base_grade = "A"
+
 # 인수인계·담당 변경 (#180). 기록·진행은 A, 확정은 B. 온보딩·발령 요청·퇴직 확정은 hr에서 빠져서
 # (#374, #375) 등록하지 않는다. 미등록은 항상 C(사람 승인)라 다시 쓰려면 그때 새로 등록한다
 [[actions]]
