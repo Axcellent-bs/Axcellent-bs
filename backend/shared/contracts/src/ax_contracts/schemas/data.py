@@ -866,6 +866,7 @@ TopicCategory = Literal[
     "교육·책",
     "기타",
     "unknown",
+    "IT",  # 값 추가 (IT·기기·서비스)
 ]
 # 추천 묶음: product_linked = 회사 상품과 연결된 소재, general = 일반 화제
 RecommendGroup = Literal["product_linked", "general"]
@@ -936,6 +937,10 @@ class ContentRecommendation(AxModel):
     topic_category_reason: str | None = None
     # 추천 묶음: 회사 상품과 연결됐으면 product_linked, 아니면 general
     group: RecommendGroup | None = None
+    # 실존 인물·팀·리그·상표가 소재에 들어 있는지(주제 분류와 같은 LLM 호출, 별도 칸)와 그 이름.
+    # 분류하지 못했으면 None
+    real_entity: bool | None = None
+    entity_names: list[str] = Field(default_factory=list)
 
 
 class ReferenceTopic(AxModel):
@@ -1021,6 +1026,9 @@ class PopularTopic(AxModel):
     # 오늘 이미 낸 네이버 판정이 급상승이면 true, 평범이면 false, 오늘 판정이 없으면 None
     rising_now: bool | None = None
     rising_ratio: float | None = Field(default=None, ge=0)  # 그 판정의 배수
+    # 실존 인물·팀·리그·상표가 주제에 들어 있는지와 그 이름 (분류하지 못했으면 None)
+    real_entity: bool | None = None
+    entity_names: list[str] = Field(default_factory=list)
 
 
 class TrendPopularOutput(AxModel):
@@ -1070,7 +1078,8 @@ class PromoTrend(AxModel):
     name: str = Field(min_length=1)
     kind: PromoTrendKind
     topic_category: TopicCategory | None = None  # popular만 (주제 분류)
-    ip_risk: bool = False  # 게임·연예·스포츠·인물 분류 (이름이 제목·콘티에 그대로 있으면 경고)
+    ip_risk: bool = False  # 실존 인물·팀·리그·상표가 든 트렌드 (그 이름이 제목·콘티에 있으면 경고)
+    entity_names: list[str] = Field(default_factory=list)  # 그 실존 이름들 (경고 기준)
     detail: str = ""  # 코드가 만든 한 줄 (예: 지금 인기 3위, 작년 12월 검색이 평균의 1.6배)
 
 
