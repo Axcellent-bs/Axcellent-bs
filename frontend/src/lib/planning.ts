@@ -196,16 +196,20 @@ export interface ReleaseCheck {
 }
 /** 기획서 하나의 배포 전 대조 기록 (최근 순). 10초마다 다시 읽는다. 서버가 꺼져 있으면 빈 목록 */
 export function useReleaseChecks(spec: string): ReleaseCheck[] {
+  return useAllReleaseChecks().filter((x) => x.spec_id === spec)
+}
+/** 모든 기획서의 배포 전 대조 기록 (최근 순). 요청 목록처럼 여러 기획서를 한 번에 볼 때 쓴다 */
+export function useAllReleaseChecks(): ReleaseCheck[] {
   const [rows, setRows] = useState<ReleaseCheck[]>([])
   useEffect(() => {
     let alive = true
     const load = () => call<ReleaseCheck[]>(PLANNING_API, '/release-checks')
-      .then((all) => { if (alive) setRows(all.filter((x) => x.spec_id === spec)) })
+      .then((all) => { if (alive) setRows(all) })
       .catch(() => { if (alive) setRows([]) })
     void load()
     const t = setInterval(load, 10_000)
     return () => { alive = false; clearInterval(t) }
-  }, [spec])
+  }, [])
   return rows
 }
 
