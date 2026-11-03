@@ -238,6 +238,9 @@ class CodingRun(DomainModel):
     hold_ok: bool = False
     # status covered: 이 작업 내용을 이미 반영한 PR 표시 id (배포 전 대조에서 그 PR이 맡는다)
     covered_by: list[str] = Field(default_factory=list)
+    # CI 실패·시간 초과로 자동 머지 대신 사람 확인에 둠. PR 맞추기(sync)가 CI를 다시 보고
+    # 나중에 통과하면 자동 머지 판단을 다시 한다 (dev `recheck_ci`)
+    ci_hold: bool = False
 
 
 class Task(DomainModel):

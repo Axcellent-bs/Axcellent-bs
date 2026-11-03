@@ -201,6 +201,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
         {!!files.length && <Tag>{files.length}파일 · <span className="mono">+{add} −{del}</span></Tag>}
         {c.review && <Tag tone={c.review.verdict === '통과' ? 'green' : 'amber'}>리뷰 {c.review.verdict}</Tag>}
         {c.instruction && <Tag>사람 지시</Tag>}
+        {c.ciHold && c.status === 'waiting_human' && <Tag tone="amber">CI 다시 보는 중</Tag>}
         {c.status === 'covered' && <Tag tone="green">PR 없음 · {c.coveredBy?.length ? `${c.coveredBy.join(', ')}가 반영` : '앞 작업이 반영'}</Tag>}
       </span>
       {c.summary && <p>{c.summary}</p>}
