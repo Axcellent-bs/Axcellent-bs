@@ -31,6 +31,12 @@ purpose_field = "purpose_code"
 amount = { count_field = "count", unit_field = "unit_value", claimed_fields = ["total_value", "claimed_total"] }
 
 # ---- 고객지원 (병환)
+# 개인정보 삭제는 되돌릴 수 없어 늘 사람이 정한다 (#194). 기한 안에 결정이 없으면 자동 거절
+[[actions]]
+action = "approve_data_deletion"
+owner = "support"
+base_grade = "C"
+
 [[actions]]
 action = "refund_request"
 owner = "support"
@@ -204,23 +210,25 @@ owner = "finance"
 base_grade = "C"
 
 # ---- 회사 기억 (재현, #41). 카드 쓰기는 여러 부서가, 대체·폐기 연결은 hr만 요청한다
+# 부서가 memory의 skill을 부르면 관문에는 memory 서비스가 자기 토큰으로 요청한다. 그래서 memory도
+# 요청자에 있어야 한다. 어느 부서가 부를 수 있는지는 memory 카드의 allowed_requesters가 막는다
 [[actions]]
 action = "memory.card_write"
 owner = "memory"
-requesters = ["hr", "support", "marketing", "planning", "finance", "orchestrator", "data"]
+requesters = ["memory", "hr", "support", "marketing", "planning", "finance", "orchestrator", "data"]
 base_grade = "A"
 
 [[actions]]
 action = "memory.card_link"
 owner = "memory"
-requesters = ["hr"]
+requesters = ["memory", "hr"]
 base_grade = "A"
 
 # 후보 카드 승인·폐기 반영 (#304). 사람이 hr decide_candidate_card로 정한 결과를 memory에 쓴다
 [[actions]]
 action = "memory.card_review"
 owner = "memory"
-requesters = ["hr"]
+requesters = ["memory", "hr"]
 base_grade = "A"
 
 # ---- 변경 요청 결과 받기 (#280·#292). planning이 요청을 닫을 때 보낸 결과를 요청 부서가 자기 기록에 반영한다

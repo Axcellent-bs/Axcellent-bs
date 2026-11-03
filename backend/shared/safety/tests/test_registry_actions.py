@@ -37,6 +37,26 @@ async def test_memory_card_write_is_a_for_listed_writers(gate: Gate, act, reques
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["memory.card_write", "memory.card_link", "memory.card_review"])
+async def test_memory_service_itself_can_pass_the_gate(gate: Gate, act, action: str) -> None:
+    """부서가 memory skill을 부르면 관문 요청자는 memory다. 등록되지 않은 일로 보류되면 안 된다."""
+    decision = await gate.execute(act(action, "memory", f"self-{action}"))
+    assert (decision.grade, decision.status) == ("A", "executed")
+
+
+@pytest.mark.asyncio
+async def test_data_deletion_always_waits_for_a_person(gate: Gate, act) -> None:
+    """#194: 개인정보 삭제 승인은 등록된 C. 고객지원만 요청하고, 결정이 없으면 자동 거절이다."""
+    held = await gate.execute(act("approve_data_deletion", "support", "del-1", summary="삭제 요청"))
+    assert (held.grade, held.status) == ("C", "held")
+    assert held.hold_reason == HoldReason.OVER_THRESHOLD
+    review = gate.store.get_review(held.review_id)
+    assert review.report["rules"] == [{"key": "base_grade", "value": "C"}]
+    other = await gate.execute(act("approve_data_deletion", "marketing", "del-2"))
+    assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
+
+
+@pytest.mark.asyncio
 async def test_memory_card_link_only_hr(gate: Gate, act) -> None:
     ok = await gate.execute(act("memory.card_link", "hr", "link-1"))
     assert (ok.grade, ok.status) == ("A", "executed")
