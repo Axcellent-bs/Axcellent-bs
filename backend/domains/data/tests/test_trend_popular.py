@@ -366,3 +366,31 @@ def test_fill_failure_or_unmapped_category_leaves_only_a_reason(tmp_path: Path) 
     # 설정 표에 없는 카테고리는 채우지 않는다
     out = _run_fill(_env(tmp_path / "b"), FillYouTube(), answers)
     assert all(g.top_videos == [] and g.top_videos_reason is None for g in out.by_category)
+
+
+def test_fill_always_fills_every_mapped_category_from_several_ids(tmp_path: Path) -> None:
+    answers = {"t1": "게임", "lck": "게임", "롤": "IT", "한국철강": "뉴스·사건"}
+    extra = (
+        '\nfill_youtube_categories = { "게임" = "20", "연예·스포츠" = ["24", "17"] }\n'
+        "fill_always = true\n"
+    )
+    youtube = FillYouTube()
+    out = _run_fill(_env(tmp_path, extra=extra), youtube, answers)
+    by = {g.category: g for g in out.by_category}
+    # 주제가 있는 게임도 채우고, 주제 순위(items)는 그대로 남긴다
+    assert by["게임"].items and [v.video_id for v in by["게임"].top_videos] == ["20c", "20a"]
+    # 여러 id는 합쳐 조회수 순
+    assert [v.video_id for v in by["연예·스포츠"].top_videos] == ["24c", "17c", "24a", "17a"]
+    assert youtube.calls == [("20", "ko"), ("24", "ko"), ("17", "ko")]
+    assert by["뉴스·사건"].top_videos == []  # 표에 없는 카테고리
+
+
+def test_fill_adds_recent_videos_from_the_saved_popular_chart(tmp_path: Path) -> None:
+    extra = (
+        '\nfill_youtube_categories = { "게임" = "20" }\nfill_always = true\nfill_language = ""\n'
+    )
+    out = _run_fill(_env(tmp_path, extra=extra), FillYouTube(), {"t1": "게임"})
+    game = next(g for g in out.by_category if g.category == "게임")
+    # 검색 결과(20a·20b·20c)와 저장된 인기 목록(v1~v4, 같은 카테고리 20)을 합쳐 조회수 순
+    assert [v.video_id for v in game.top_videos] == ["v1", "v2", "20b", "20c", "v3"]
+    assert game.top_videos_reason and "한국 인기 목록 4개" in game.top_videos_reason

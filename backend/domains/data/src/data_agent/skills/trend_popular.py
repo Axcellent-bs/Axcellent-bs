@@ -22,7 +22,8 @@
 - 주제 분류: content_recommend와 같은 `classify_topics`(LLM 한 번에 묶어서, 주제별 하루 캐시).
   회사 "추천 안 함" 분류(`[recommend] exclude_categories`)에 들면 `brand_safe: false`
 - "지금 급등 중" 배지: 오늘 이미 낸 네이버 판정(today_board)이 급상승이면 표시. 판정이 없으면 비운다
-- 카테고리 주제가 `per_category`보다 적으면, 회사 설정 `[popular] fill_youtube_categories`에 YouTube
+- 카테고리 주제가 `per_category`보다 적으면(`fill_always`면 늘), 회사 설정
+  `[popular] fill_youtube_categories`에 YouTube
   카테고리가 있는 화면 카테고리만 그 카테고리의 최근 `fill_days`일 조회수 높은 영상을 `top_videos`로
   채운다(**지금 인기 아님**). YouTube 검색은 카테고리마다 하루 1번이고 저장해 다시 쓴다
   (`DATA_POPULAR_VIDEOS_DB`). `fill_language`가 있으면 그 언어 영상만 남긴다
@@ -72,6 +73,7 @@ from data_agent.youtube_store import (
     latest_popular,
     popular_history,
     recent_snapshots,
+    video_details,
     video_titles,
 )
 
@@ -93,7 +95,9 @@ class PopularConfig:
     trending_weight: float = 1.0
     # 주제가 모자란 화면 카테고리 → YouTube 카테고리 id.
     # 여기 있는 카테고리만 최근 조회수 높은 영상으로 채운다
-    fill_youtube_categories: tuple[tuple[str, str], ...] = ()
+    # 값은 YouTube 카테고리 id 하나 또는 여러 개 (예: 연예·스포츠 = ["24", "17"])
+    fill_youtube_categories: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    fill_always: bool = False  # 참이면 주제 수와 상관없이 늘 채운다 (화면은 영상만 보여 줌)
     fill_days: int = 7  # 최근 며칠 게시 영상에서 고를지
     fill_language: str = "ko"  # 그 언어 영상만 (""면 거르지 않음)
 
@@ -120,10 +124,18 @@ def load_config(env: Mapping[str, str]) -> PopularConfig:
             ),
             per_category=max(1, min(20, int(raw.get("per_category", base.per_category)))),
             fill_youtube_categories=tuple(
-                (str(k).strip(), str(v).strip())
+                (str(k).strip(), ids)
                 for k, v in (raw.get("fill_youtube_categories") or {}).items()
-                if str(k).strip() in TOPIC_CATEGORIES and str(v).strip()
+                if str(k).strip() in TOPIC_CATEGORIES
+                and (
+                    ids := tuple(
+                        str(i).strip()
+                        for i in (v if isinstance(v, list) else [v])
+                        if str(i).strip()
+                    )
+                )  # fmt: skip
             ),
+            fill_always=bool(raw.get("fill_always", base.fill_always)),
             fill_days=max(1, min(30, int(raw.get("fill_days", base.fill_days)))),
             fill_language=str(raw.get("fill_language", base.fill_language)).strip().lower(),
         )
@@ -175,10 +187,11 @@ async def fill_videos(
     config: PopularConfig,
     youtube: Any,
     store: FillStore,
-    yt_category: str,
+    yt_categories: tuple[str, ...],
     now: datetime,
     limit: int,
     queries: list[str],
+    chart: Sequence[dict[str, Any]] = (),
 ) -> tuple[list[PopularVideo], str]:
     """YouTube 카테고리의 최근 조회수 높은 영상 (그날 저장한 결과가 있으면 그것).
 
@@ -186,32 +199,22 @@ async def fill_videos(
     """
     today = now.astimezone(KST).date()
     lang = config.fill_language
-    rows = store.get(today, yt_category, lang)
-    if rows is None:
-        if youtube is None or not hasattr(youtube, "search_category"):
-            return [], "YouTube 커넥터가 없어 최근 조회수 높은 영상을 받지 않음"
-        try:
-            stats = await youtube.search_category(
-                yt_category,
-                now - timedelta(days=config.fill_days),
-                language=lang or None,
-            )
-        except ConnectorUnavailable as error:
-            return [], f"최근 조회수 높은 영상 검색 실패 [{error.code}]"
-        queries.append(f"youtube search.list videoCategoryId={yt_category} order=viewCount")
-        rows = [
-            {
-                "video_id": s.video_id,
-                "title": s.title or None,
-                "channel_title": s.channel_title or None,
-                "views": s.view_count,
-                "published_at": s.published_at.isoformat() if s.published_at else None,
-                "duration_seconds": s.duration_seconds,
-                "language": getattr(s, "language", None),
-            }
-            for s in stats
-        ]
-        store.put(today, yt_category, lang, rows)
+    rows: list[dict[str, Any]] = []
+    failed: list[str] = []
+    for yt_category in yt_categories:
+        got = await _fill_rows(config, youtube, store, yt_category, now, today, queries)
+        if isinstance(got, str):
+            failed.append(got)
+        else:
+            rows += got
+    searched = len(rows)
+    # 검색 결과에 한국 인기 목록(저장된 스냅샷, 외부 호출 없음)의 같은 카테고리 최근 영상을 더한다
+    from_chart = [r for r in chart if r.get("category_id") in yt_categories]
+    rows += from_chart
+    if failed and not rows:
+        return [], failed[0]
+    seen: set[str] = set()
+    rows = [r for r in rows if not (r["video_id"] in seen or seen.add(r["video_id"]))]
     kept = [
         r
         for r in rows
@@ -229,13 +232,85 @@ async def fill_videos(
         )
         for r in kept[:limit]
     ]
+    ids = "·".join(yt_categories)
     basis = (
-        f"지금 인기 아님: YouTube 카테고리 {yt_category}의 최근 {config.fill_days}일 게시 영상 중"
+        f"지금 인기 아님: YouTube 카테고리 {ids}의 최근 {config.fill_days}일 게시 영상 중"
         f" 조회수 높은 순"
     )
-    if lang:
-        basis += f" ({lang} 영상만, 검색 {len(rows)}개 중 {len(kept)}개)"
+    only = f"{lang} 영상만, " if lang else ""
+    basis += f" ({only}검색 {searched}개 + 한국 인기 목록 {len(from_chart)}개 중 {len(kept)}개)"
+    if failed:
+        basis += f". 일부 검색 실패: {', '.join(failed)}"
     return videos, basis
+
+
+def _chart_rows(db: str, snapshot: Any, since: datetime) -> list[dict[str, Any]]:
+    """최신 한국 인기 목록 스냅샷의 영상 (since 이후 게시, 조회수·채널·길이는 저장된 값)."""
+    if snapshot is None:
+        return []
+    latest = recent_snapshots(db, 1)
+    values = latest[0].videos if latest else {}
+    ids = [v.video_id for v in snapshot.videos]
+    details = video_details(db, ids)
+    rows: list[dict[str, Any]] = []
+    for v in snapshot.videos:
+        stored = values.get(v.video_id)
+        if stored is None or stored.published_at < since:
+            continue
+        d = details.get(v.video_id)
+        rows.append(
+            {
+                "video_id": v.video_id,
+                "title": v.title or None,
+                "channel_title": d.channel_title if d else None,
+                "views": stored.view_count,
+                "published_at": stored.published_at.isoformat(),
+                "duration_seconds": d.duration_seconds if d else None,
+                "language": None,
+                "category_id": v.category_id,
+            }
+        )
+    return rows
+
+
+async def _fill_rows(
+    config: PopularConfig,
+    youtube: Any,
+    store: FillStore,
+    yt_category: str,
+    now: datetime,
+    today: date,
+    queries: list[str],
+) -> list[dict[str, Any]] | str:
+    """YouTube 카테고리 하나의 그날 검색 결과 (저장한 것이 있으면 그것). 실패면 이유 문자열."""
+    lang = config.fill_language
+    rows = store.get(today, yt_category, lang)
+    if rows is None:
+        if youtube is None or not hasattr(youtube, "search_category"):
+            return "YouTube 커넥터가 없어 최근 조회수 높은 영상을 받지 않음"
+        try:
+            stats = await youtube.search_category(
+                yt_category,
+                now - timedelta(days=config.fill_days),
+                language=lang or None,
+            )
+        except ConnectorUnavailable as error:
+            return f"최근 조회수 높은 영상 검색 실패 [{error.code}]"
+        queries.append(f"youtube search.list videoCategoryId={yt_category} order=viewCount")
+        rows = [
+            {
+                "video_id": s.video_id,
+                "title": s.title or None,
+                "channel_title": s.channel_title or None,
+                "views": s.view_count,
+                "published_at": s.published_at.isoformat() if s.published_at else None,
+                "duration_seconds": s.duration_seconds,
+                "language": getattr(s, "language", None),
+            }
+            for s in stats
+        ]
+        store.put(today, yt_category, lang, rows)
+    return rows
 
 
 # ---------------------------------------------------------------- 계산
@@ -501,6 +576,7 @@ async def popular(
     shown: list[PopularTopic] = []
     fill_map = dict(config.fill_youtube_categories)
     fill_store: FillStore | None = None
+    chart = _chart_rows(db, snapshot, now - timedelta(days=config.fill_days)) if fill_map else []
     for category in config.categories:
         mine = [i for i in every if i.topic_category == category][:per]
         for n, item in enumerate(mine, start=1):
@@ -513,11 +589,11 @@ async def popular(
             )
         top_videos: list[PopularVideo] = []
         top_reason: str | None = None
-        if shortage and category in fill_map:
+        if (shortage or config.fill_always) and category in fill_map:
             if fill_store is None:
                 fill_store = FillStore(env.get(FILL_DB_ENV) or FILL_DEFAULT_DB)
             top_videos, top_reason = await fill_videos(
-                config, youtube, fill_store, fill_map[category], now, per, queries
+                config, youtube, fill_store, fill_map[category], now, per, queries, chart
             )
         groups.append(
             PopularCategory(
