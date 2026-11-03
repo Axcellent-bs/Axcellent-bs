@@ -460,6 +460,10 @@ export interface YouTubeVideoVelocity {
   speed_change: number | null;
   /** 그 전 구간보다 빨라졌는지 (그 전 구간이 없으면 null) */
   faster: boolean | null;
+  /** 영상 제목·채널 이름·길이(초) (#431, 예전 응답은 없다) */
+  title?: string | null;
+  channel_title?: string | null;
+  duration_seconds?: number | null;
 }
 export interface YouTubeVelocityOutput {
   status: "known" | "unknown";
