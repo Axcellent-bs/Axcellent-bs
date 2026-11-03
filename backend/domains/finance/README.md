@@ -4,7 +4,7 @@
 **캣북스 재무팀** 에이전트 (재무 재설계 2026-10-23, `docs/notes/finance/2026-10-23-finance-redesign.md`).
 마켓운영(판매자 입점 심사 `seller_review`·정산 보류 `settlement_hold`)은 재무 일이 아니라 2026-10-30에 없앴다.
 결산·리포트, 매출·PG 대사, 판매자 정산, 팀 예산, 세무 지원, 현금 흐름, 안전 장치 보류 추이 사후 감사를 한다.
-**재무는 쿠폰·환불을 끝난 금액만 장부에 적는다.** 결정·확인·검증·감사·이상 탐지·한도·예산·제안·경보는 재무 일이 아니다:
+**재무는 쿠폰·환불의 끝난 금액을 장부에 기록만 한다.**
 건별 검사는 안전 관문 코드 규칙(금액 계산, `claimed_fields` 불일치, 기준표 한도)이 하고, 환불 여부는 고객지원, 쿠폰은 마케팅이 정한다.
 안전 장치가 보류한 환불은 고객지원 화면, 쿠폰은 마케팅 화면에서 사람이 결정한다.
 숫자는 전부 코드로 계산하고, LLM은 결산 설명 문장만 쓴다(목 모드·미설정·실패 때는 템플릿 문장).
@@ -16,7 +16,7 @@
 | ② 매출·PG 대사 | `reconciliation.py` | `matched`·`mismatch`·`missing_in_pg`·`pending`·`fee_anomaly` |
 | ③ 판매자 정산 | `settlement.py` | 정산금 = 판매액 − 수수료 − 판매자 부담 쿠폰 − 환불, 보류 사유. 묶음 지급은 `execute("confirm_settlement")`(항상 C) |
 | ⑤ 팀 예산 | `team_budget.py` | 팀 예산 = 그달 1일 팀 인원(인사 `team_headcount`) × 인당 월 단가. 확정은 사람 |
-| ⑦ 사후 감사 | `audit.py` | 관문 보류·거절 추이 (`issue_coupon`·`refund_request`는 세지 않는다. 남은 액션이 없으면 결과 없음) |
+| ⑦ 사후 감사 | `audit.py` | 재무 자기 일(`confirm_settlement`)의 관문 보류·거절 추이 |
 | 사건 보상 장부 | `ledger.py` | 쿠폰 업무는 재무가 맡지 않는다(마케팅·고객지원 합의). 지급은 마케팅(`issue_coupon`), 판정은 고객지원이 하고 재무는 **끝난 금액**만 사건별로 적는다(보류·거절 줄과 등급은 장부에 없다): 이벤트(`events`) 또는 safety 실행 기록(`safety_executions`, 이벤트를 못 받을 때)·시드(`seed`). 실행 기록이 있으면 그것이 원본이라 이벤트를 더하지 않는다. 둘 다 없으면 null |
 | 사건별 화면 | `incidents.py` | 사건 목록·상세: data 영향 그대로 + 보상 장부 + 환불 금액(`refunds`: 사건 구간·영향 고객으로 귀속, 금액·건수만) + 빠져나간 돈 합계(`money_out_total` = 보상 + 환불) (재설계 문서 12-1). 재무 단계는 #415로 없앴다 |
 | 설정 | `finance_policy.toml` | 수수료율(기본 10%, 문구 8%), 주 정산, PG 3.1%, 인당 월 단가, 보류 추이 기준 |
@@ -28,14 +28,10 @@
 | `record_support_cost` | read | orchestrator | recommended | 고객지원이 끝낸 처리 결과(환불 금액·쿠폰)를 받아 주문 배송비와 함께 장부에 적음(환불 여부는 확인하지 않음). 경비를 쓰지 않은 문의도 처리 결과를 기록, 같은 문의는 한 번만 (`SupportCostInput`·`SupportCostOutput`) |
 | `answer_planning_question` | read | planning | recommended | 기획이 근거를 되물으면 재무가 보낸 요청의 기록으로만 답한다. 기록에 없으면 `unknown`. 지금은 재무에서 요청을 보내는 코드가 없어 모든 질문이 `unknown`이다. |
 
-없앤 것: `verify_amount`(B 쿠폰·환불 교차검증), `review_hold`(C 보류 건 AI 1차 판단), `/api/finance/verifications`, `/api/finance/ai-reviews`.
 장애 흐름에서 빠지며 없앤 것(2026-10-27): `loss_aggregation`(손실 집계 skill), `/api/finance/loss-reports`, 사건 상세의 `loss`와 사건 단계(9·10·17) 계산. 재무는 장애 대응 흐름의 단계가 아니고(요구사항 DEP-FIN-01, 공통 구성안 결정 22) 장애 비용은 평상시 장부 → `closing_report`에서 드러난다.
 화면 호환으로 한 단계 남겨 뒀던 키(사건 상세 `steps`, 목록 `loss_total`)도 지웠다 — 화면 정리(ax-company-hq/ax-frontend#61)가 끝나 읽는 쪽이 없다.
 재무 일이 아니라 없앤 것(2026-10-26): 캣북스 클레임 연동(`catbooks.py`, 환불·교환 신청을 건별로 다시 확인 → 건별 검사는 안전 관문의 일, `/api/finance/catbooks/*`, `FINANCE_CATBOOKS_*`),
 `review_threshold_change`(AI가 기준 변경을 판단 → 사람이 기준표 PR로 바꾼다, `/api/finance/threshold-reviews`).
-`ai_review_policy.toml`(사람 전용)은 이제 코드가 읽지 않는다. 사람이 지우는 PR을 올린다.
-환불은 고객지원 일이라 없앤 것(2026-11-02): 감사 규칙 `repeat_refund`·`refund_rate_jump`, 한도 바로 아래 환불 쪼개기, 환불 금액 재계산(`amount_recheck_failed`의 환불·결제 금액 비교, `Sources.paid_amount`), 감사 통계의 환불 건수·금액·환불률, 설정값 `refund_split_*`·`repeat_refund_min`·`refund_rate_jump_*`. 예전 저장 파일에 남은 처리 전 환불 의심 건은 다시 켤 때 뺀다. 장부 기록·결산 환불 합계·정산 환불 차감·사건별 환불 금액은 그대로다.
-쿠폰·환불은 끝난 금액만 적기로 해서 없앤 것(2026-11-02): 감사 규칙 `split_under_limit`·`duplicate_coupon`·`amount_recheck_failed`·`compensation_outside_impact`와 `recheck.py`, 감사 통계의 쿠폰 건수·금액, `policy.py` 전체(쿠폰·환불 월 예산·경보·소진율·한도 제안, `GET /api/finance/policy`, `POST /api/finance/policy/{key}/ack`, 할 일 `policy_alert`), 사건 화면의 `limits`·`checks`·`in_impact`·`checks_ok`, 처리 중 클레임 정산 보류(`open_claim`·`claims_unknown`, 고객지원 `list_claims` 호출), 재무가 안전 장치 기준표를 읽던 일. 영향 고객 밖 보상 점검은 고객지원 담당이다. 예전 저장 파일의 처리 전 쿠폰·환불 의심 건은 다시 켤 때 빼고, 사람이 쓴 처리 메모와 경보 확인 메모는 파일에 그대로 둔다. 금액(장부·결산·정산·세무·현금 흐름)은 바뀌지 않았다.
 
 ## 2. 실행 방법
 `docker compose -f infra/compose.yml up finance` / 목 모드: `FINANCE_MOCK=1` (장부 시드 `src/finance_agent/finance_books_seed.json`, 영향 분석·심사 시드 `mock_seed.json`)
@@ -87,4 +83,4 @@ ax-contracts, ax-agent-template, data 에이전트(`impact_analysis`, `fraud_sco
 - 판매 사이트 DB에 직접 붙지 않는다 (shop-api·data를 거친다)
 - 판매자 소개·구매자 메모 같은 `untrusted` 문장을 금액·심사 판단에 쓰지 않는다
 - 기준표를 읽거나 바꾸지 않는다 (사람이 safety 레포 설정을 PR로)
-- 쿠폰·환불을 결정·확인·검증·감사하지 않는다 (끝난 금액만 장부에 적는다)
+- 쿠폰·환불은 끝난 금액을 장부에 기록만 한다

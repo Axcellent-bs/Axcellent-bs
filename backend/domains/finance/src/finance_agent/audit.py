@@ -1,7 +1,6 @@
 """⑦ 사후 감사: 안전 장치 기록의 보류·거절 추이.
 
-재무는 쿠폰·환불을 끝난 금액만 장부에 적는다. 결정·확인·검증·감사는 재무 일이 아니라서 쿠폰·환불은
-여기서 보지 않는다(`NOT_AUDITED`). 없앤 규칙과 경위는 `README.md`에 있다.
+재무 자기 일(`AUDITED_ACTIONS`)의 실행 기록만 본다.
 기간은 오늘까지 `days`일, 비교 기간은 그 바로 앞 같은 길이. 판정은 코드 규칙이다
 (기준값은 `finance_policy.toml [audit]`).
 
@@ -21,8 +20,7 @@ from finance_agent import finance_config as fc
 from finance_agent.books import Books, in_range
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
-# 쿠폰은 마케팅, 환불은 고객지원 일이다. 재무는 끝난 금액만 장부에 적는다
-NOT_AUDITED = {"issue_coupon", "refund_request"}
+AUDITED_ACTIONS = {"confirm_settlement"}
 
 
 def _finding(code: str, severity: str, title: str, detail: str, refs: list[str]) -> dict:
@@ -42,7 +40,7 @@ def gate_trend(
     cfg = fc.load_config().audit
     if books.executions is None:
         return [], None, None
-    rows = [e for e in books.executions if e.get("action") not in NOT_AUDITED]
+    rows = [e for e in books.executions if e.get("action") in AUDITED_ACTIONS]
     cur = [e for e in rows if in_range(e["created_at"], start, end)]
     prev = [e for e in rows if in_range(e["created_at"], prev_start, start)]
     held = [e for e in cur if e.get("status") == "held"]

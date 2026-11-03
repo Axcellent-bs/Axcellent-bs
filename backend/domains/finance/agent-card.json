@@ -1,7 +1,7 @@
 {
   "name": "finance",
   "owner": "태윤",
-  "description": "캣북스 재무팀 에이전트. 결산·리포트·재무제표, 매출·PG 대사, 판매자 정산 내역, 팀 예산, 안전 장치 보류 추이 사후 감사. 쿠폰·환불은 끝난 금액만 장부에 적는다(결정·확인·검증·감사·한도·예산·경보는 하지 않는다). 마켓운영(판매자 입점 심사·정산 보류)은 하지 않는다. 숫자는 코드로 계산하고 LLM은 설명 문장만 쓴다.",
+  "description": "캣북스 재무팀 에이전트. 결산·리포트·재무제표, 매출·PG 대사, 판매자 정산 내역, 팀 예산, 안전 장치 보류 추이 사후 감사. 쿠폰·환불은 끝난 금액을 장부에 기록만 한다. 마켓운영(판매자 입점 심사·정산 보류)은 하지 않는다. 숫자는 코드로 계산하고 LLM은 설명 문장만 쓴다.",
   "url": "http://finance:8105/a2a",
   "version": "0.1.0",
   "capabilities": {
@@ -24,7 +24,7 @@
     },
     {
       "id": "audit_report",
-      "description": "최근 days일 안전 장치 기록 사후 감사: 관문 보류·거절 추이를 코드 규칙으로 찾는다. 쿠폰·환불은 세지 않는다(끝난 금액만 장부에 적는다). 상태를 바꾸지 않는다.",
+      "description": "최근 days일 재무 자기 일의 안전 장치 기록 사후 감사: 관문 보류·거절 추이를 코드 규칙으로 찾는다. 상태를 바꾸지 않는다.",
       "input_schema": "agents/finance/src/finance_agent/schemas.py#AuditReportInput",
       "output_schema": "agents/finance/src/finance_agent/schemas.py#AuditReportOutput",
       "grade": "read",

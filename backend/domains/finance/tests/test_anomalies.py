@@ -139,25 +139,3 @@ def test_skill_reads_an_announced_finding_after_the_audit_window(published) -> N
     assert result["output"]["findings"] == [
         anomalies.finding_view(_store()[anomalies.signature(FINDING)])
     ]
-
-
-def test_skill_does_not_return_a_resolved_coupon_finding(published) -> None:
-    """예전 쿠폰 의심 건은 처리 메모와 함께 목록에 남지만 감사 결과로 내지 않는다."""
-    old = {"code": "duplicate_coupon", "severity": "medium", "title": "쿠폰 2번", "refs": ["cpn_1"]}
-    anomalies.note_findings(_store(), [old])
-    ref = anomalies.signature(old)
-    anomalies.resolve(_store(), ref, "태윤", "담당 팀 확인")
-    body = {
-        "meta": {
-            "context_id": "ctx_fin_1",
-            "token": "mock:orchestrator",
-            "path": [],
-            "deadline": (datetime.now(UTC) + timedelta(seconds=30)).isoformat(),
-        },
-        "skill": "audit_report",
-        "input": {"days": 7, "finding_ref": ref},
-        "untrusted": {},
-    }
-    result = TestClient(app).post("/a2a", json=body).json()
-    assert result["status"] == "completed" and result["output"]["findings"] == []
-    assert anomalies.listing(_store())["resolved"][0]["note"] == "담당 팀 확인"

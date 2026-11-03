@@ -3,8 +3,7 @@ import { shortDateTime } from "@/lib/format";
 import { finance, findingKo, humanTokenSet, plainText, type Anomaly, type FindingSeverity } from "@/lib/finance";
 import { Chip, Empty, Panel, RefList, ResourceBody, TONE, useResource } from "./bits";
 
-// ⑦ 사후 감사: 지난 며칠 동안의 안전 장치 기록에서 보류·거절이 늘었는지 본다. 쿠폰·환불은 세지 않는다
-// (재무는 끝난 금액만 장부에 적는다). 건마다 막는 것이 아니라 나중에 점검하는 것이다.
+// ⑦ 사후 감사: 재무 자기 일의 지난 며칠 안전 장치 기록에서 보류·거절이 늘었는지 본다. 건마다 막는 것이 아니라 나중에 점검하는 것이다.
 
 const SEVERITY: Record<FindingSeverity, { label: string; tone: string; rank: number }> = {
   high: { label: "높음", tone: TONE.bad, rank: 0 },
@@ -109,7 +108,7 @@ export function AuditSection({ tick, onChanged }: { tick: number; onChanged?: ()
     <div className="space-y-4">
     <OpenAnomalies tick={tick} onChanged={onChanged} />
     <Panel id="audit" title="⑦ 사후 감사" titleHidden meta={res.env?.meta} tools={tools}
-      hint="한 건씩 막는 일은 안전 장치가 합니다. 재무 AI는 지난 안전 장치 기록을 다시 훑어 보류·거절이 갑자기 늘었는지 봅니다. 쿠폰·환불은 세지 않습니다. 재무는 끝난 금액을 장부에 적기만 합니다. 의심 건은 조사해 보고 결론을 남기세요.">
+      hint="한 건씩 막는 일은 안전 장치가 합니다. 재무 AI는 재무 일의 지난 안전 장치 기록을 다시 훑어 보류·거절이 갑자기 늘었는지 봅니다. 재무는 끝난 금액을 장부에 적기만 합니다. 의심 건은 조사해 보고 결론을 남기세요.">
       <ResourceBody res={res}>
         {(a) => {
           const s = a.stats;

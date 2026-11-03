@@ -10,8 +10,7 @@
 없앴다 (재무는 장애 대응 흐름의 단계가 아니다 — 요구사항 DEP-FIN-01, 공통 구성안 결정 22).
 장애 비용은 평상시 장부로 들어가 `closing_report`에서 드러난다. 고객사 클레임 건별 확인과
 `review_threshold_change`(AI가 기준 변경을 판단)도 재무 일이 아니라 없앴다.
-재무는 쿠폰·환불을 끝난 금액만 장부에 적는다. 결정·확인·검증·감사·이상 탐지·한도·예산·제안·경보는
-재무 일이 아니다(2026-11-02).
+재무는 쿠폰·환불의 끝난 금액을 장부에 기록만 한다.
 
 - 숫자는 전부 코드로 계산한다. 요청 쪽이 적은 총액·등급은 믿지 않는다.
 - 외부 입력(`request.untrusted`)은 읽지 않는다.
@@ -345,8 +344,6 @@ async def audit_report(request: AgentRequest) -> AgentResult:
     if data.finding_ref:
         # 알림받은 의심 건 하나: 기간이 지나도 목록에 남은 기록으로 본다
         entry = state().records.anomalies.get(data.finding_ref)
-        if entry and anomalies.is_retired_audit(entry):
-            entry = None  # 없앤 쿠폰·환불 감사가 남긴 처리 기록은 감사 결과로 내지 않는다
         found = [f for f in report["findings"] if anomalies.signature(f) == data.finding_ref]
         report["findings"] = found or ([anomalies.finding_view(entry)] if entry else [])
     output = AuditReportOutput(

@@ -136,7 +136,7 @@
       ]
     }
   },
-  "_note": "impacts.ctx_inc_scn_a_0001은 data 목(agents/data seed.py, 장애 구간 6건·4명·95,000원)과 같은 숫자다. ctx_inc_0100은 감사 시연용 지난 사건(buy_0999는 영향 고객이 아닌데 보상 쿠폰을 받음).",
+  "_note": "impacts.ctx_inc_scn_a_0001은 data 목(agents/data seed.py, 장애 구간 6건·4명·95,000원)과 같은 숫자다. ctx_inc_0100은 지난 사건이다.",
   "team_headcount": {
     "_note": "테스트·예시 전용 가상 팀 인원. 2026-12-01 발령: 개발팀 1명 → 기획팀",
     "2026-01": {
