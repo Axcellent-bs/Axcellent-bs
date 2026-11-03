@@ -50,6 +50,22 @@ BUCKET = timedelta(minutes=5)
 LISTING_WINDOW = timedelta(hours=24)  # 판매자 정보의 "최근 등록" 구간
 MAX_POINTS = 2016  # 5분 버킷 7일치. 넘으면 잘라서 `truncated`로 알린다
 
+# 주문 금액·쿠폰 지표는 `orders`에서 계산한다. 접수 시각(created_at)이 속한 버킷에 센다.
+# - order_amount(매출): 결제가 끝난 주문의 total_amount. 결제 대기·결제 실패·취소는 뺀다
+# - coupon_*: 쿠폰을 쓴 주문. 장수를 돌려받은 주문(취소·전액 환불)은 뺀다
+#   (`coupon_used_units`와 같은 기준)
+_COUPON_KEPT = (
+    "o.coupon_id IS NOT NULL AND o.status != 'cancelled' AND NOT (o.total_amount > 0 AND "
+    "COALESCE((SELECT SUM(r.amount) FROM refunds r WHERE r.order_id = o.order_id), 0) "
+    ">= o.total_amount)"
+)
+ORDER_VALUE_FILTER = {
+    "order_amount": "o.status NOT IN ('pending_payment', 'payment_failed', 'cancelled')",
+    "coupon_order_count": _COUPON_KEPT,
+    "coupon_discount_amount": _COUPON_KEPT,
+}
+ORDER_VALUE_METRICS = frozenset(ORDER_VALUE_FILTER)
+
 
 def _iso(moment: datetime) -> str:
     return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -125,6 +141,14 @@ class Lookups:
                     "WHERE tenant_id = ? AND created_at >= ? AND created_at < ?",
                     (query.tenant_id, _iso(start), _iso(query.to)),
                 ).fetchall()
+            elif query.metric in ORDER_VALUE_METRICS:
+                rows = conn.execute(
+                    "SELECT created_at, total_amount, coupon_discount, status, 1 AS ok "
+                    "FROM orders o "
+                    "WHERE tenant_id = ? AND created_at >= ? AND created_at < ? AND "
+                    + ORDER_VALUE_FILTER[query.metric],
+                    (query.tenant_id, _iso(start), _iso(query.to)),
+                ).fetchall()
             else:
                 rows = conn.execute(
                     "SELECT created_at, status = 'succeeded' AS ok, order_id FROM payments "
@@ -160,6 +184,12 @@ class Lookups:
         failed = [row for row in rows if not row["ok"]] if metric != "order_count" else []
         if metric == "order_count":
             return float(len(rows))
+        if metric == "order_amount":
+            return float(sum(row["total_amount"] for row in rows))
+        if metric == "coupon_order_count":
+            return float(len(rows))
+        if metric == "coupon_discount_amount":
+            return float(sum(row["coupon_discount"] for row in rows))
         if metric == "payment_count":
             return float(len(rows))
         if metric == "order_fail_count":
