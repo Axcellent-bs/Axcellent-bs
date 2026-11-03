@@ -514,6 +514,9 @@ class State(DomainModel):
     coding_mode: Literal["auto", "agent", "subscription"] = "auto"
     # 서버 AI 코딩 단계별 모델 (plan 파일 고르기 · write 쓰기 · review 리뷰). 비우면 기본 모델
     coding_models: dict[str, str] = Field(default_factory=dict)
+    # 서버 AI 코딩 월 예산 (입력+출력 토큰, None = 없음)과 달마다 쓴 양 ("2026-11" → 토큰)
+    monthly_budget_tokens: int | None = None
+    usage_by_month: dict[str, int] = Field(default_factory=dict)
     # 개발: 본인 Claude(MCP 작업 대기열)로 작업을 본 개발자 → 마지막으로 본 시각 (연결 여부 판단)
     agents_seen: dict[str, UtcDatetime] = Field(default_factory=dict)
 

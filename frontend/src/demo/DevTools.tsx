@@ -147,6 +147,59 @@ function ClaudeConnect({ connected }: { connected: string[] }) {
 }
 
 /** 요청 작업 코딩 방식 + 서버 AI 체험 한도 */
+/** 고객사 API 키(BYOK)와 서버 AI 월 예산. 키는 보내기만 하고 화면에는 끝 4자리만 */
+function CompanyKeyBudget({ cfg, onSaved }: { cfg: CodingSettings; onSaved: (c: CodingSettings) => void }) {
+  const key = cfg.company_key
+  const [form, setForm] = useState({ api_key: '', base_url: key?.base_url ?? '', model: key?.model ?? '' })
+  const [budget, setBudget] = useState(cfg.budget?.limit != null ? String(cfg.budget.limit) : '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const act = async (f: () => Promise<CodingSettings>) => {
+    setBusy(true)
+    setError(null)
+    try { onSaved(await f()); setForm((x) => ({ ...x, api_key: '' })) } catch (x) { setError((x as Error).message) } finally { setBusy(false) }
+  }
+  const saveKey = (e: FormEvent) => {
+    e.preventDefault()
+    if (!form.api_key && !key?.key_set) return setError('고객사 API 키를 넣어 주세요.')
+    void act(() => codingApi.setCompanyKey({ ...(form.api_key ? { api_key: form.api_key } : {}), base_url: form.base_url.trim(), model: form.model.trim() }))
+  }
+  const saveBudget = (e: FormEvent) => {
+    e.preventDefault()
+    const n = budget.trim() === '' ? null : Number(budget.replace(/,/g, ''))
+    if (n !== null && (!Number.isInteger(n) || n < 0)) return setError('월 예산은 0 이상 정수(토큰)로 넣어 주세요.')
+    void act(() => codingApi.setBudget(n))
+  }
+  const b = cfg.budget
+  return (
+    <div className="space-y-3 rounded-lg border border-ink-100 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="font-medium">고객사 API 키 · 월 예산</h3>
+        <span className={`chip ${key?.key_set ? TONE.ok : TONE.none}`}>{key?.key_set ? `고객사 키 ${key.key_hint}` : '서버 기본 키 (체험)'}</span>
+        {key?.key_set && <button type="button" className="btn-quiet ml-auto px-2 py-1 text-xs" disabled={busy} onClick={() => { if (window.confirm('고객사 API 키를 지울까요? 그 뒤로는 서버 기본 키와 체험 한도로 돌아요.')) void act(() => codingApi.deleteCompanyKey()) }}>키 지우기</button>}
+      </div>
+      <form className="grid gap-2 sm:grid-cols-[2fr_2fr_1.5fr_auto] sm:items-end" onSubmit={saveKey}>
+        <label className="space-y-1 text-sm"><span className="text-xs text-ink-500">API 키</span>
+          <input className="field mono w-full text-xs" type="password" autoComplete="off" value={form.api_key} placeholder={key?.key_set ? '비우면 지금 키 그대로' : 'sk-…'} onChange={(e) => setForm({ ...form, api_key: e.target.value })} /></label>
+        <label className="space-y-1 text-sm"><span className="text-xs text-ink-500">주소 (비우면 서버 설정)</span>
+          <input className="field mono w-full text-xs" value={form.base_url} placeholder="https://…" onChange={(e) => setForm({ ...form, base_url: e.target.value })} /></label>
+        <label className="space-y-1 text-sm"><span className="text-xs text-ink-500">모델 (비우면 서버 설정)</span>
+          <input className="field mono w-full text-xs" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} /></label>
+        <button type="submit" className="btn-ghost px-3 py-1.5 text-xs" disabled={busy}>{key?.key_set ? '키 바꾸기' : '키 넣기'}</button>
+      </form>
+      <form className="flex flex-wrap items-end gap-3" onSubmit={saveBudget}>
+        <label className="space-y-1 text-sm"><span className="text-xs text-ink-500">월 예산 (토큰, 비우면 없음)</span>
+          <input className="field mono w-44 text-xs" inputMode="numeric" value={budget} placeholder="예: 5000000" onChange={(e) => setBudget(e.target.value)} /></label>
+        <button type="submit" className="btn-ghost px-3 py-1.5 text-xs" disabled={busy}>예산 저장</button>
+        {b && (b.limit != null
+          ? <UsageBar used={b.used} limit={b.limit} label={`${b.month}`} title="이번 달 서버 AI 코딩이 쓴 토큰 / 월 예산" />
+          : <span className="text-xs text-ink-500">{b.month} 사용 <span className="mono">{b.used.toLocaleString()}</span> 토큰 · 예산 없음</span>)}
+      </form>
+      {error && <p className="text-sm text-red-700">{error}</p>}
+    </div>
+  )
+}
+
 // 서버 AI 코딩 단계별 모델: 비우면 기본 모델
 const STEP_LABEL: { id: CodingStep; label: string }[] = [
   { id: 'plan', label: '파일 고르기' },
@@ -211,10 +264,11 @@ function CodingModeSection() {
       {cfg && (
         <dl className="grid grid-cols-[120px_1fr] gap-x-3 gap-y-2 text-sm">
           <dt className="text-ink-500">이유</dt><dd>{cfg.why}</dd>
-          <dt className="text-ink-500">서버 AI 체험</dt>
-          <dd><UsageBar used={cfg.trial_used} limit={cfg.trial_limit} wide title="서버 AI(회사 키)가 코딩에 쓴 토큰 / 체험 한도" /></dd>
+          {!cfg.company_key?.key_set && <><dt className="text-ink-500">서버 AI 체험</dt>
+          <dd><UsageBar used={cfg.trial_used} limit={cfg.trial_limit} wide title="서버 AI(기본 키)가 코딩에 쓴 토큰 / 체험 한도" /></dd></>}
         </dl>
       )}
+      {cfg && <CompanyKeyBudget cfg={cfg} onSaved={setCfg} />}
       {cfg && <StepModels cfg={cfg} onSaved={setCfg} />}
       <ClaudeConnect connected={cfg?.agents_connected ?? []} />
     </section>

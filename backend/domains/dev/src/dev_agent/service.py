@@ -38,7 +38,7 @@ from ax_workflow.autocheck import (
     pr_wait_state,
 )
 from ax_workflow.base import _TICKET_KINDS, AGENT_NAME, DEV_ACTIONS, TEAM_LEAD, PlanningCore
-from ax_workflow.clock import Clock
+from ax_workflow.clock import KST, Clock
 from ax_workflow.core import (
     ActionError,
     ActionResult,
@@ -102,7 +102,7 @@ from ax_workflow.rules import (
     verify_rollback,
 )
 from ax_workflow.trace import changed_paths_for
-from dev_agent import coder, cross_check, repo_routing, vcs, vcs_bridge
+from dev_agent import coder, cross_check, llm_key, repo_routing, vcs, vcs_bridge
 from dev_agent.cross_check import CrossChecker, CrossEvidence
 from dev_agent.deploy_store import get_deploy_store
 from dev_agent.external_actions import MOCK_CONNECTION, VCS_WRITE_ACTIONS
@@ -616,11 +616,10 @@ class DevService(PlanningCore):
         if mode not in ("agent", "subscription"):
             raise ActionError("INVALID_INPUT", "mode는 agent·subscription 중 하나다")
         sub = mode == "subscription"
-        if not sub and self.trial_used(self.state) >= self.trial_limit():
-            raise ActionError(
-                "TRIAL_EXHAUSTED",
-                f"서버 AI 체험 한도({self.trial_limit():,} 토큰)를 다 썼어요. 내 Claude로",
-            )
+        over = None if sub else self.budget_over(self.state)
+        if over:
+            code = "BUDGET_EXHAUSTED" if "예산" in over else "TRIAL_EXHAUSTED"
+            raise ActionError(code, f"{over}. 내 Claude로")
         title = " ".join((title or "").split())
         plan = (plan or "").strip()
         if not title or not plan:
@@ -804,6 +803,44 @@ class DevService(PlanningCore):
             return True
         return not template_config.is_mock(AGENT_NAME) and bool(vcs_bridge.targets())
 
+    def month_key(self) -> str:
+        """월 예산을 세는 달 (KST 기준 YYYY-MM)."""
+        return self.clock().astimezone(KST).strftime("%Y-%m")
+
+    def month_used(self, s: State) -> int:
+        return s.usage_by_month.get(self.month_key(), 0)
+
+    def budget_over(self, s: State) -> str | None:
+        """서버 AI를 더 못 쓰는 이유 (없으면 None).
+
+        고객사 키(BYOK)면 월 예산만, 기본 키면 체험 한도와 월 예산 둘 다 본다."""
+        budget = s.monthly_budget_tokens
+        if budget is not None and self.month_used(s) >= budget:
+            return f"이번 달 서버 AI 예산을 다 씀 ({self.month_used(s):,}/{budget:,} 토큰)"
+        used, limit = self.trial_used(s), self.trial_limit()
+        if not llm_key.active() and used >= limit:
+            return f"서버 AI 체험 한도를 다 씀 ({used:,}/{limit:,} 토큰)"
+        return None
+
+    async def set_budget(self, tokens: int | None) -> ActionResult:
+        """회사 설정: 서버 AI 코딩 월 예산 (토큰, None이면 없음. 관리자)."""
+        if tokens is not None and (
+            isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 0 or tokens > 10**12
+        ):
+            raise ActionError("INVALID_INPUT", "월 예산은 0 이상 정수(토큰)거나 비워야 한다")
+
+        async def run(s: State) -> ActionResult:
+            if s.monthly_budget_tokens != tokens:
+                shown = f"{tokens:,} 토큰" if tokens is not None else "없음"
+                s.monthly_budget_tokens = tokens
+                s.activity.append(
+                    self._act(self.clock(), "dev_settings", "human", "dev", "dev.settings", "사람",
+                              f"서버 AI 월 예산 → {shown}")
+                )  # fmt: skip
+            return ActionResult(output=self.coding_settings(s))
+
+        return await self._apply(run)
+
     @staticmethod
     def trial_limit() -> int:
         """서버 AI 체험 한도 (회사 전체, 입력+출력 토큰). `PLANNING_TRIAL_TOKENS`."""
@@ -811,7 +848,7 @@ class DevService(PlanningCore):
 
     @staticmethod
     def trial_used(s: State) -> int:
-        """서버 AI(회사 키)로 돈 코딩 작업이 지금까지 쓴 토큰."""
+        """서버 AI로 돈 코딩 작업이 지금까지 쓴 토큰."""
         return sum(t.coding.llm_tokens for t in s.tasks if t.coding and t.coding.mode == "agent")
 
     @staticmethod
@@ -850,14 +887,13 @@ class DevService(PlanningCore):
         seen = self.agents_connected(s)
         if s.coding_mode == "auto" and seen:
             return "subscription", f"본인 Claude 연결 {len(seen)}명 → 내 Claude"
-        used, limit = self.trial_used(s), self.trial_limit()
-        if used >= limit:
-            return (
-                "subscription",
-                f"서버 AI 체험 한도를 다 씀 ({used:,}/{limit:,} 토큰) → 내 Claude",
-            )
+        over = self.budget_over(s)
+        if over:
+            return "subscription", f"{over} → 내 Claude"
         if s.coding_mode == "agent":
-            return "agent", "회사 설정: 서버 AI"
+            return "agent", "회사 설정: 서버 AI" + (" (고객사 키)" if llm_key.active() else "")
+        if llm_key.active():
+            return "agent", "본인 Claude 연결 없음 → 서버 AI (고객사 키)"
         return "agent", "본인 Claude 연결 없음 → 서버 AI (체험)"
 
     def _task_connection(self, sp: Spec, req: Request | None, t: Task) -> str | None:
@@ -1003,6 +1039,9 @@ class DevService(PlanningCore):
             )
         if coder.get_llm() is None:
             raise ActionError("NOT_MOVABLE", "서버 AI 설정(LLM)이 없어 넘길 수 없다")
+        over = self.budget_over(self.state)
+        if over:
+            raise ActionError("NOT_MOVABLE", f"{over} → 서버 AI로 넘길 수 없다")
 
         async def run(s: State) -> ActionResult:
             x = next((t for t in s.tasks if t.id == task_id), None)
@@ -1033,6 +1072,13 @@ class DevService(PlanningCore):
             # 서버 AI 단계별 모델 (plan·write·review). 비운 단계는 기본 모델 `model_default`
             "models": coder.step_models(s.coding_models),
             "model_default": coder.model_name(coder.get_llm()),
+            # 고객사 API 키(BYOK): 넣었는지·끝 4자리만. 있으면 체험 한도 대신 월 예산만 본다
+            "company_key": llm_key.public(),
+            "budget": {
+                "month": self.month_key(),
+                "limit": s.monthly_budget_tokens,
+                "used": self.month_used(s),
+            },
             # 대기 중인 작업에 보여 줄 예상 규모 (지난 서버 AI 코딩의 중앙값)
             "estimate": self.coding_estimate(s),
         }
@@ -2187,6 +2233,9 @@ class DevService(PlanningCore):
             )
         cid = self._coding_connection(connection, task.coding.connection)
         sub = task.coding.mode == "subscription"  # 구독형은 다시 대기열에만 올린다
+        over = None if sub else self.budget_over(self.state)
+        if over:
+            raise ActionError("BUDGET_EXHAUSTED", f"{over} → 내 Claude로 넘기거나 예산을 늘린다")
         llm = None if sub else self._coding_llm()
 
         async def run(s: State) -> ActionResult:
@@ -2588,7 +2637,13 @@ class DevService(PlanningCore):
                 setattr(cr, key, value)
             m = coder.meter_now()
             if m is not None:  # 단계마다 쓴 양을 적는다 (화면에 보인다)
+                before = cr.llm_tokens
                 cr.llm_calls, cr.llm_tokens = m.base_calls + m.calls, m.base_tokens + m.tokens
+                if cr.mode == "agent" and cr.llm_tokens > before:  # 월 예산용
+                    month = self.month_key()
+                    s.usage_by_month[month] = (
+                        s.usage_by_month.get(month, 0) + cr.llm_tokens - before
+                    )
             cr.updated_at = self.clock()
             if status == "waiting_human" and cr.pr is None:
                 task.state = "C 보류"
