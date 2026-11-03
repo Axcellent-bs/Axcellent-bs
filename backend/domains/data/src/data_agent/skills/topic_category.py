@@ -23,6 +23,9 @@ LLM은 정해진 목록 안에서만 고른다.
   쓴다
 - "추천 안 함" 분류(회사 설정 `exclude_categories`)는 쓰는 skill이 정한다. 여기서는 분류만
 - 분류 정확도는 평가셋이 없어 재지 않는다(README 한계)
+- 분류 목록이 바뀌어 다시 물어야 하는 분류는 `RECHECK`(분류 → 이 판 이상만 재사용)로 정한다.
+  "K-pop·음악"을 연예·스포츠에서 나눌 때(판 2) 저장된 연예·스포츠만 한 번 다시 묻고, 다른 분류는
+  재사용한다
 """
 
 from __future__ import annotations
@@ -47,6 +50,7 @@ TOPIC_CATEGORIES: tuple[str, ...] = (
     "인물",
     "게임",
     "연예·스포츠",
+    "K-pop·음악",
     "생활·취미",
     "교육·책",
     "IT",
@@ -59,6 +63,9 @@ DB_ENV = "DATA_TOPIC_CATEGORY_DB"
 DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "topic_categories.db"  # backend/.data
 DEFAULT_RETENTION_DAYS = 30
 TREND_CONFIG_ENV = "DATA_TREND_CONFIG"
+CATEGORY_VERSION = 2  # 분류 목록 판 (2: K-pop·음악 추가)
+# 저장된 분류가 이 판보다 낮으면 다시 묻는다 (목록이 나뉜 분류만). 예전 줄은 판 1
+RECHECK: dict[str, int] = {"연예·스포츠": 2}
 
 _PROMPT = (
     "데이터 블록에는 지금 검색·시청이 많은 소재 여러 개가 번호와 함께 있다"
@@ -69,7 +76,10 @@ _PROMPT = (
     "목록: " + ", ".join(TOPIC_CATEGORIES) + "\n"
     "- 뉴스·사건: 사고·사건·기업·경제 소식 / 정치·사회: 정치·정책·사회 쟁점 / "
     "기부·재난: 기부·모금·재난·구호 / 인물: 특정 개인(연예인·운동선수가 아닌 인물) / "
-    "게임: 게임·e스포츠 / 연예·스포츠: 방송·연예인·스포츠 경기 / 생활·취미: 생활·여행·음식·취미 / "
+    "게임: 게임·e스포츠 / 연예·스포츠: 방송·예능·드라마·영화·연예인 소식·스포츠 경기"
+    "(음악은 제외) / K-pop·음악: 노래·음원·가수·아이돌 그룹·뮤직비디오·커버곡·안무·"
+    "음악 방송·공연 (아이돌·가수가 나와도 음악·안무·커버면 여기) / "
+    "생활·취미: 생활·여행·음식·취미 / "
     "교육·책: 공부·시험·책·독서·문구 / IT: IT 기기·앱·인터넷 서비스·기술 / 기타: 그 밖\n"
     "real_entity·entity_names: category와 따로, 소재에 실존 인물(연예인·선수 포함)·팀·리그·"
     "회사·상표"
@@ -195,6 +205,8 @@ class CategoryCache:
                 cols = [r[1] for r in self._conn.execute("PRAGMA table_info(topic_categories)")]
                 if "is_person" not in cols:  # 예전 파일: 칸을 더하고, 그 줄들은 다음에 다시 묻는다
                     self._conn.execute("ALTER TABLE topic_categories ADD COLUMN is_person INTEGER")
+                if "version" not in cols:  # 예전 파일: 분류 목록 판 칸 (예전 줄은 NULL = 판 1)
+                    self._conn.execute("ALTER TABLE topic_categories ADD COLUMN version INTEGER")
                 cutoff = (self.now() - self.retention).isoformat()
                 self._conn.execute(
                     "DELETE FROM topic_categories WHERE classified_at < ?", (cutoff,)
@@ -206,18 +218,20 @@ class CategoryCache:
             return self.overrides[key]
         cutoff = self.now() - self.retention
         hit = self._mem.get(key)
-        if hit is not None and hit[0] >= cutoff:
+        if hit is not None and hit[0] >= cutoff and not _stale(hit[1].category, CATEGORY_VERSION):
             return replace(hit[1], cached=True, source="stored")
         if self._conn is None:
             return None
         with self._lock:
             row = self._conn.execute(
                 "SELECT category, reason, real_entity, entity_names, evidence, classified_at,"
-                " is_person FROM topic_categories WHERE key = ?",
+                " is_person, version FROM topic_categories WHERE key = ?",
                 (key,),
             ).fetchone()
         if row is None or datetime.fromisoformat(row[5]) < cutoff or row[6] is None:
             return None  # 없음·보관 기간 지남·사람 이름 칸이 없던 예전 분류(다시 묻는다)
+        if _stale(row[0], row[7] or 1):
+            return None  # 분류 목록이 나뉜 분류의 예전 판 (한 번 다시 묻는다)
         return CategoryResult(
             row[0],
             row[1],
@@ -240,8 +254,8 @@ class CategoryCache:
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT OR REPLACE INTO topic_categories (key, keyword, category, reason,"
-                " real_entity, entity_names, evidence, classified_at, is_person)"
-                " VALUES (?,?,?,?,?,?,?,?,?)",
+                " real_entity, entity_names, evidence, classified_at, is_person, version)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (
                     key,
                     keyword,
@@ -252,6 +266,7 @@ class CategoryCache:
                     result.evidence,
                     at.isoformat(),
                     None if result.is_person is None else int(result.is_person),
+                    CATEGORY_VERSION,
                 ),
             )
 
@@ -260,6 +275,11 @@ class CategoryCache:
         if self._conn is not None:
             with self._lock, self._conn:
                 self._conn.execute("DELETE FROM topic_categories")
+
+
+def _stale(category: str, version: int) -> bool:
+    """저장된 분류가 목록이 나뉘기 전 판이라 다시 물어야 하는지."""
+    return version < RECHECK.get(category, 0)
 
 
 def cache_from_env(env: Mapping[str, str]) -> CategoryCache:
