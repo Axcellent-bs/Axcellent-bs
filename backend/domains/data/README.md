@@ -16,7 +16,7 @@
 | `trend_candidates` | 사람 목록 없이 찾은 후보 키워드와 후보마다 출처(YouTube 태그·YouTube 제목·인기 검색어)·근거·네이버 급상승 판정(trend_scan과 같은 함수). 늘 붙는 말은 쌓인 스냅샷으로 자동 제외, 같은 대상 이름은 같은 영상 + 검색 추이 상관으로 자동 묶음(가까운 쌍은 제안만). 스냅샷이 없거나 오래되면 그 출처만 unknown + 이유 | YouTube 스냅샷 DB(인기 목록·제목, `youtube_store`, 읽기 전용), 인기 검색어 스냅샷 DB(`trending_store`, 읽기 전용), 네이버 검색어 트렌드(후보마다 1번, 별칭·묶음이 있으면 더). 설정: 회사 폴더 `trends.toml` `[candidates]`·`[trending]` |
 | `trend_history` | 키워드 그룹별 네이버 월 단위 값(최근 24개월, 설정)과 달마다 "작년 같은 달 대비" 배수. **판정하지 않음**(급상승·계절 판정은 평가가 없어서). 자료 없음·못 읽음은 그 그룹만 unknown | 네이버 검색어 트렌드(`timeUnit=month`, 그룹마다 1번). 기본 키워드: 회사 폴더 `trends.toml`, 개월 수 `[history] months` |
 | `youtube_velocity` | YouTube 영상 지금 속도(최근 두 스냅샷 사이 시간당 조회 증가)와 그 전 구간보다 빨라졌는지, 지금 속도 상위 N개(설정)와 태그. **판정하지 않음** | YouTube 스냅샷 DB(`youtube_store.recent_snapshots`, 읽기 전용, 외부 호출 없음). 개수: 회사 폴더 `trends.toml` `[velocity] top` |
-| `content_recommend` | 지금 만들 만한 영상 소재(급상승만, 최대 N개): 순위·점수 근거(z·배수·두 소스)·출처·연결할 실제 상품(최대 N개, 근거)·회사 관련성(상품 연결로, 표시만)·밈 형식·영상 아이디어 1~2문장·형식(숏폼·롱폼)·fallback. 콘텐츠 루프 2단계 | trend_scan(회사 기본 키워드 그룹)·trend_candidates(후보 전체)와 같은 네이버 요청(하루 캐시 같이 씀), 회사 상품 목록(shop-api `GET /api/shop/products`·`/categories`), LLM(아이디어 문장·밈 형식 분류만), 임베딩(설정이 있을 때만). 설정: 회사 폴더 `trends.toml` `[recommend]` |
+| `content_recommend` | 지금 만들 만한 영상 소재(급상승만, 최대 N개): 순위·점수 근거(z·배수·두 소스)·출처·주제 분류·묶음(회사 상품과 연결된 소재·일반 화제)·연결할 실제 상품(근거)·회사 관련성(상품 연결로, 표시만)·밈 형식·영상 아이디어 1~2문장·형식(숏폼·롱폼)·fallback. 추천 안 함 분류(회사 설정)는 참고용 + 이유로 따로. 콘텐츠 루프 2단계 | trend_scan(회사 기본 키워드 그룹)·trend_candidates(후보 전체)와 같은 네이버 요청(하루 캐시 같이 씀), 회사 상품 목록(shop-api `GET /api/shop/products`·`/categories`), LLM(아이디어 문장·밈 형식·주제 분류만), 임베딩(설정이 있을 때만). 설정: 회사 폴더 `trends.toml` `[recommend]` |
 | `answer_planning_question` | 기획이 되묻는 근거 질문의 답(answered·needs_human·unknown). 기획만 부른다 | data가 보낸 요청의 기록(`planning_questions.py`, 프로세스 안). 아직 요청을 보내는 코드가 없어 지금은 늘 unknown. 사람 답은 `human_answer_request`로 planning `receive_planning_answer`에 보낸다 |
 | `campaign_effect` | 캠페인 기간 주문 방향(늘었음·같음·줄었음)·증분(실제 − 지난 7일 같은 시간대 평균), 캠페인 쿠폰 조회 시점 누적 사용률. 매출은 매출 지표가 생기면 같은 방법(지금은 확인할 수 없음) | shop-api `GET /api/shop/metric-series`(`order_count`), `GET /api/shop/coupons?campaign_id=` |
 
@@ -37,7 +37,7 @@
 | `trend_candidates` | 판정은 trend_scan과 같은 함수(위 평가). 후보 뽑기·자동 제외·자동 묶기는 평가 없음(기준값은 2026-11-02·03 실데이터로 본 값) | 제목 구는 형태소 분석이 없어 조각(`안 되는`)이 섞인다. 자동 제외는 스냅샷이 하루치라 날짜 기준이 아직 안 걸리고, 게임 카테고리가 80%라 `게임`·`치지직`은 수동 목록이 필요하다. 자동 묶기는 영문 이름(lol·minecraft)을 못 찾고 상위 후보끼리만 본다. 인기 검색어는 오늘, 네이버 판정은 어제까지라 오늘 처음 뜬 검색어는 평범·자료 없음일 수 있다. 스냅샷이 쌓이기 전 날짜로 판정하면 그 출처는 unknown |
 | `trend_history` | 없음(판정하지 않음) | 그룹마다 상대값이라 그룹끼리 높이를 비교할 수 없다. 계절 반복 판정은 평가 케이스부터 만들어야 한다 |
 | `youtube_velocity` | 없음(판정하지 않음) | 평소 속도 기준이 없어 빠른 순서만 보여 준다. 스냅샷 간격이 짧으면 속도가 흔들린다 |
-| `content_recommend` | 없음(순위 규칙·숫자 검증·상품 연결 규칙만 테스트) | 추천 품질은 나중에 게시 성과로 잰다. 상품 연결은 임베딩 설정(`DATA_EMBED_MODEL`/`EMBED_MODEL`)이 없으면 글자 일치만 본다. **밈 형식 분류 정확도는 평가셋이 없어 재지 않는다**(제목만 본다). 인기 검색어에서만 나온 소재는 밈 형식이 늘 unknown |
+| `content_recommend` | 상품 연결 기준만 보정셋 `eval/product_link/`(#403, 관문 아님) | 추천 품질은 나중에 게시 성과로 잰다. 상품 연결은 임베딩 설정이 없으면 글자 일치만 본다. 임베딩 기준(1등만, 0.65)은 **임시 기준**이다. **밈 형식·주제 분류 정확도는 평가셋이 없어 재지 않는다**. 인기 검색어에서만 나온 소재는 밈 형식이 늘 unknown |
 | `answer_planning_question` | 없음 | 아직 data가 요청을 보내는 코드가 없어 늘 unknown이다 |
 | `campaign_effect` | 있음: `eval/campaign/`(기존·여러 날, 개발 방향 1.0, holdout 0.9167·0.8) | 매출 지표가 없어 매출은 unknown. 7일 넘는 캠페인은 unknown. 주문이 아주 적은 가게의 새벽 기록 공백은 못 잡는다 |
 
@@ -51,11 +51,12 @@
 | --- | --- | --- | --- | --- |
 | 후보 | YouTube 인기 목록 태그 | 정리한 태그, `min_videos`개 이상 영상 | YouTube 스냅샷(`youtube_collect`) | 수집기만(1시간마다 약 7단위) |
 | 후보 | YouTube 인기 영상 제목 | 2~3어절 구, `min_videos`개 이상 영상 | YouTube 스냅샷 `video_titles` | 같음(예전 스냅샷은 `--titles`로 채움) |
-| 후보 | 인기 검색어 | Google Trends 공개 RSS 검색어(피드 순위·트래픽 표시값) | 인기 검색어 스냅샷(`trending_collect`) | 수집 1번에 피드 1번 |
+| 후보 | 인기 검색어 | Google Trends 공개 RSS 검색어(피드 순위·트래픽 표시값·관련 뉴스 제목 최대 3) | 인기 검색어 스냅샷(`trending_collect`) | 수집 1번에 피드 1번 |
 | 자동 제외 | 쌓인 YouTube 스냅샷 전체 | 여러 날·여러 카테고리에 고르게 나오는 태그·구(문서 빈도) | `youtube_store.popular_history` | 없음 |
 | 자동 묶기 | 같은 영상 + 네이버 일별 추이 | 함께 나온 영상 수, 로그 상관 | 스냅샷 + 이미 받은 판정 시계열 | 묶음마다 네이버 1번 |
 | 급상승 판정 | 네이버 검색어 트렌드 | 최근 56일 대비 마지막 7일(trend_scan 함수) | `connectors/naver_datalab.py` | 후보마다 1번(+ 별칭·묶음) |
-| 상품 연결 | 회사 상품 목록 | 판매 중 상품·카테고리 이름, 글자 일치 + 임베딩 유사도 | shop-api `GET /api/shop/products`·`/categories` | shop-api 2번, 임베딩 1번(설정 있을 때) |
+| 주제 분류 | 소재 이름 + 근거 글(대표 영상 제목 또는 인기 검색어 관련 뉴스 제목, 최대 3) | 정해진 9개 분류 중 하나(LLM, 목록 밖은 기타). 추천 안 함 분류는 참고용으로 | YouTube 스냅샷 `video_titles`, 인기 검색어 스냅샷 `trending_news` | 분류한 소재마다 LLM 1번 |
+| 상품 연결 | 회사 상품 목록 | 판매 중 상품·카테고리 이름, 글자 일치 + 임베딩 유사도(1등만, 임시 기준) | shop-api `GET /api/shop/products`·`/categories` | shop-api 2번, 임베딩 1번(설정 있을 때) |
 | 밈 형식 | 대표 영상 제목(최대 5) | 정해진 6개 형식 중 하나(LLM, 목록 밖은 기타) | YouTube 스냅샷 `video_titles` | 소재마다 LLM 1번(YouTube 근거가 있을 때) |
 | 아이디어 문장 | 판정 숫자(배수) + 연결 상품 + 밈 형식 | 1~2문장(LLM, 숫자·상품 검증) | — | 소재마다 LLM 1번 |
 
@@ -67,7 +68,9 @@
 | `[candidates] exclude_tags` | 늘 빼는 일반 태그 | 자동 제외가 못 잡는 말(게임·치지직: 인기 영상 80%가 게임 카테고리라 카테고리 2개에만 나옴)이 있다. 끄면 `게임`이 상위 5에 들어온다 |
 | `[candidates] keep_tags` (비어 있음) | 자동 제외에서 살릴 이름 | 자동 제외가 실제 소재를 뺄 때 사람이 되살리는 칸 |
 | `[candidates.aliases]` 별칭 표 | 같은 대상 이름 묶기 | 자동 묶기가 영문 이름(lol·minecraft·league of legends, 상관 0.56~0.73)을 못 찾는다 |
-| `[recommend] company_keywords` | 수동 회사 키워드(겹치면 관련 있음) | 임베딩 설정이 없어 상품 연결이 글자 일치뿐이라 보조로 둔다 |
+| `[recommend] company_keywords` | 수동 회사 키워드(겹치면 관련 있음) | 임베딩 기준이 임시라 보조로 둔다 |
+| `[recommend] exclude_categories` | 추천 안 함 주제 분류(기본: 뉴스·사건·정치·사회·기부·재난·인물) | 브랜드 안전은 회사가 정할 일이다. 분류는 LLM이 정해진 목록에서만 고른다 |
+| `[recommend] min_similarity`·`link_top_only`·`min_margin` | 임베딩 상품 연결 기준(0.65, 1등만, 0) | 보정셋으로 고른 **임시 기준**(아래 "상품 연결") |
 | `[recommend] company_intro` | 회사 소개 한두 줄 | 아이디어 문장의 보조 정보(상품 이름은 연결된 실제 상품만 쓴다) |
 
 ### 새 회사를 붙일 때 필요한 것: 지표 카탈로그 + 커넥터
@@ -527,18 +530,24 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 2. 합치기: 기본 그룹과 후보의 이름(같이 본 이름 포함, 공백·대소문자 무시)이 겹치면 한 소재다. 그 그룹이 급상승이면 그 판정에 YouTube 근거를 붙인다. 소재가 나온 곳은 `origins`(keyword_group·youtube_tag·youtube_title·trending_search)
 3. **급상승(rising)만** 후보다. 평범·판정 불가는 넣지 않는다. 급상승이 없으면 빈 목록 + 이유 `이번 기간 급상승한 소재가 없음`(네이버를 못 읽은 것이 있으면 그 이름도)이고 **억지로 채우지 않는다**
 4. 점수 = `z_weight` × z + (검색 급상승 + YouTube 근거 **두 소스**면 `two_source_bonus`). 큰 순, 같으면 z 큰 순 → 이름. 최대 `max_items`개(요청의 `max_items`가 있으면 그 값). 인기 검색어 + 네이버는 한 소스로 센다(점수 규칙 그대로)
-5. **상품 연결**(`skills/product_link.py`, #384): 회사 커넥터의 판매 중 상품·카테고리(캣북스 shop-api `GET /api/shop/products`·`/categories`)와 소재마다 최대 `max_products`(3)개를 잇는다
+5. **주제 분류·브랜드 안전**(`skills/topic_category.py`): 순위대로 급상승 소재마다 LLM이 **뉴스·사건·정치·사회·기부·재난·인물·게임·연예·스포츠·생활·취미·교육·책·기타** 중 하나만 고른다. 넣는 것은 소재 이름(같이 본 이름)과 근거 글 최대 3개(YouTube 대표 영상 제목, 없으면 인기 검색어 피드의 관련 뉴스 제목)이고 **데이터 블록(untrusted)에만** 넣는다. 목록 밖 답은 기타(이유만 남김), LLM 설정이 없거나 실패하면 `unknown` + 이유
+   - 회사 설정 `exclude_categories`(캣북스: 뉴스·사건·정치·사회·기부·재난·인물)에 들면 **추천하지 않고** `reference_items`(참고용: 키워드·분류·이유·배수)로 따로 낸다. 그만큼 다음 순위로 채운다(분류는 최대 `max_items + max_reference`번)
+   - unknown은 빼지 않는다(분류 칸에 unknown + 이유). 추천이 모두 빠지면 빈 목록 + 이유 `급상승 소재가 모두 추천 안 함 분류라 참고용으로만 보여 줌`
+6. **상품 연결**(`skills/product_link.py`, #384): 회사 커넥터의 판매 중 상품·카테고리(캣북스 shop-api `GET /api/shop/products`·`/categories`)와 소재마다 최대 `max_products`(3)개를 잇는다
    - 글자 일치: 소재 이름(같이 본 이름 포함, 공백·대소문자 무시)이 상품 이름 낱말(2글자 이상)을 품거나 상품 이름이 소재 이름을 품으면 `name`, 카테고리 이름이 겹치면 `category`
-   - 임베딩 유사도: 소재 글 ↔ 상품 글("이름 (카테고리)") 코사인 ≥ `min_similarity`(0.6)면 `embedding`. agent-template `LLMClient.embed`(memory 카드 검색과 같은 OpenAI 호환 `/embeddings`), 모델 `DATA_EMBED_MODEL` 또는 `EMBED_MODEL`. **설정이 없으면 `similarity_status: unknown` + 이유이고 글자 일치만 쓴다**(2026-11-03 지금 설정 없음). `min_similarity`는 모델 척도에 맞춰 설정 후 다시 볼 값
+   - 임베딩 유사도: 소재 글(이름 + 근거 글 최대 3개) ↔ 상품 글("이름 (카테고리)" + 설명) 코사인(`eval/product_link`의 rich 모양). **1등 상품 하나만**, 유사도 ≥ `min_similarity`(0.65)이고 1등 − 2등 ≥ `min_margin`(0)일 때 `embedding`으로 잇는다(`margin`에 1등 − 2등). agent-template `LLMClient.embed`, 모델 `DATA_EMBED_MODEL` 또는 `EMBED_MODEL`, 주소·키 `*_EMBED_BASE_URL`·`*_EMBED_API_KEY`(없으면 LLM 주소·키)
+   - **임시 기준**: 보정셋 `eval/product_link/`(#403)에서 정해 둔 규칙으로 고른 값이다. 관련·무관 사이 간격이 좁다(관련 질의 정답 최저 0.606 vs 무관 소재 최고 0.573). 뜻만 가까운 질의(예: "그림책 추천")를 보정셋에 더한 뒤 다시 정한다
+   - 유사도를 못 재면 `similarity_status: unknown` + 이유 + 까닭 `similarity_failure`: `not_configured`(설정 없음), `config_error`(설정 오류: 임베딩 주소가 LLM 주소와 다른데 키 없음 등), `request_failed`(요청 실패). 이때는 글자 일치만 쓴다
    - 상품을 못 읽으면 `catalog_status: unknown` + 이유(0개로 지어내지 않음)
-6. 회사 관련성: 상품이 연결되면 `related`. 수동 회사 키워드(기본 키워드 그룹 이름·키워드 + `company_keywords`, 덮어쓰기용)와 겹쳐도 `related`. 근거는 `relevance_from`(products·manual_keywords·both·none). **표시만** 하고 순위에서 빼지 않는다
-7. **밈 형식**(`skills/meme_format.py`, #385): YouTube 근거가 있는 소재는 대표 영상 제목 최대 5개(`rep_videos`)를 데이터 블록으로 넣어 LLM이 **챌린지·패러디·밈·리액션·하이라이트·정보·리뷰·기타** 중 하나만 고른다. 목록 밖 답은 기타(이유만 남기고 답 원문은 남기지 않음). YouTube 근거 영상이 없거나 LLM 설정이 없거나 실패하면 `unknown` + 이유(기타로 채우지 않음). 권장 형식: 정보·리뷰 롱폼, 그 밖 숏폼
-8. 아이디어 문장(LLM, `explain.explain_idea`): 소재마다 1~2문장 + 형식(숏폼·롱폼). 프롬프트에 넣는 숫자는 **배수 하나**("평소보다 N배")뿐이고 z·YouTube 영상 수는 넣지 않는다. 규칙: 숫자는 "평소보다 N배"만, z·점수 같은 통계 용어 금지, **상품은 연결된 실제 상품(데이터 블록 `연결 상품`)만 이름 그대로**, 연결 상품이 없으면 상품 이름을 쓰지 않고 회사 소개(`company_intro`)의 고객·분야는 보조로만. 밈 형식이 있으면 "이 형식에 맞는 영상으로(권장 형식)". 이름(외부 태그·같이 본 이름·연결 상품)은 **데이터 블록(untrusted)에만** 넣는다. 숫자 검증은 `explain`과 같은 규칙(이름 속 숫자 t1의 1은 허용). **연결되지 않은 회사 상품 이름이 나오면 버린다**(`product_invalid`). 실패하면 고정 문장("〈키워드〉 검색이 평소의 N배로 올랐습니다… 짧은 영상으로 다뤄 볼 만합니다") + 권장 형식(없으면 숏폼), `fallback: true`와 이유
+   - 묶음: 상품과 연결된 소재는 `group: product_linked`(회사 상품과 연결된 소재), 아니면 `general`(일반 화제). 순위는 그대로이고 화면이 두 묶음으로 나눠 보여 준다
+7. 회사 관련성: 상품이 연결되면 `related`. 수동 회사 키워드(기본 키워드 그룹 이름·키워드 + `company_keywords`, 덮어쓰기용)와 겹쳐도 `related`. 근거는 `relevance_from`(products·manual_keywords·both·none). **표시만** 하고 순위에서 빼지 않는다
+8. **밈 형식**(`skills/meme_format.py`, #385): YouTube 근거가 있는 소재는 대표 영상 제목 최대 5개(`rep_videos`)를 데이터 블록으로 넣어 LLM이 **챌린지·패러디·밈·리액션·하이라이트·정보·리뷰·기타** 중 하나만 고른다. 목록 밖 답은 기타(이유만 남기고 답 원문은 남기지 않음). YouTube 근거 영상이 없거나 LLM 설정이 없거나 실패하면 `unknown` + 이유(기타로 채우지 않음). 권장 형식: 정보·리뷰 롱폼, 그 밖 숏폼
+9. 아이디어 문장(LLM, `explain.explain_idea`): 소재마다 1~2문장 + 형식(숏폼·롱폼). 프롬프트에 넣는 숫자는 **배수 하나**("평소보다 N배")뿐이고 z·YouTube 영상 수는 넣지 않는다. 규칙: 숫자는 "평소보다 N배"만, z·점수 같은 통계 용어 금지, **상품은 연결된 실제 상품(데이터 블록 `연결 상품`)만 이름 그대로**, 연결 상품이 없으면 상품 이름을 쓰지 않고 회사 소개(`company_intro`)의 고객·분야는 보조로만. 밈 형식이 있으면 "이 형식에 맞는 영상으로(권장 형식)". 이름(외부 태그·같이 본 이름·연결 상품)은 **데이터 블록(untrusted)에만** 넣는다. 숫자 검증은 `explain`과 같은 규칙(이름 속 숫자 t1의 1은 허용). **연결되지 않은 회사 상품 이름이 나오면 버린다**(`product_invalid`). 실패하면 고정 문장("〈키워드〉 검색이 평소의 N배로 올랐습니다… 짧은 영상으로 다뤄 볼 만합니다") + 권장 형식(없으면 숏폼), `fallback: true`와 이유
 
 - 네이버 호출: trend_scan·trend_candidates와 요청 모양이 같아 **같은 프로세스에서 오늘 이미 부른 요청은 커넥터 하루 캐시**에서 나온다. 이번 실행에서 실제로 부른 수는 `naver_calls`(커넥터 `calls_today` 전후 차이). 2026-11-03 새 프로세스 한 번: 25번(기본 그룹 4 + YouTube 후보 16 + 인기 검색어 5)
-- 설정 `[recommend]`: `max_items` 5, `z_weight` 1.0, `two_source_bonus` 2.0, `max_products` 3, `min_similarity` 0.6, `use_similarity` true, `company_keywords`(덮어쓰기용, 캣북스: 책·도서·출판·캣북스·반려묘·집사), `company_intro`(보조). 설정이 없으면 같은 숫자에 회사 키워드는 기본 그룹만, 회사 소개가 없으면 프롬프트에 "상품·고객을 지어내지 말 것"
-- 출력: 소재마다 순위, 키워드, 같이 본 이름, 출처(`sources`·`origins`), 점수 근거, 연결 상품(`products`: id·이름·카테고리·근거·유사도), 회사 관련성·근거·겹친 수동 키워드, 밈 형식·이유·쓴 제목 수, 아이디어 문장, 형식, fallback·이유. 그리고 네이버 호출 수, 못 읽은 그룹·후보, YouTube 후보 상태, 상품 목록 상태(`catalog_*`), 유사도 상태(`similarity_*`)
-- **한계:** 추천 "품질"은 **평가셋이 없어 재지 않는다**. 순위 규칙·숫자 검증·상품 연결 규칙만 테스트한다. 나중에 게시 성과(콘텐츠 루프 4·5단계, `campaign_effect`)로 평가한다. 가중치(1.0·2.0)도 성과 자료가 없어 정한 값이다. **밈 형식 분류 정확도도 평가셋이 없어 재지 않는다**(영상 내용이 아니라 제목만 본다). 인기 검색어에서만 나온 소재는 YouTube 근거가 없어 밈 형식이 늘 unknown이다. 임베딩 설정이 없으면 뜻이 가까운 상품(예: 책 추천 ↔ 도서)을 글자로 겹칠 때만 잇는다
+- 설정 `[recommend]`: `max_items` 5, `z_weight` 1.0, `two_source_bonus` 2.0, `max_products` 3, `min_similarity` 0.65·`link_top_only` true·`min_margin` 0(임시 기준), `use_similarity` true, `exclude_categories`(캣북스: 뉴스·사건·정치·사회·기부·재난·인물), `max_reference` 5, `company_keywords`(덮어쓰기용, 캣북스: 책·도서·출판·캣북스·반려묘·집사), `company_intro`(보조). 설정이 없으면 같은 숫자에 회사 키워드는 기본 그룹만, 회사 소개가 없으면 프롬프트에 "상품·고객을 지어내지 말 것"
+- 출력: 소재마다 순위, 키워드, 같이 본 이름, 출처(`sources`·`origins`), 점수 근거, 연결 상품(`products`: id·이름·카테고리·근거·유사도), 회사 관련성·근거·겹친 수동 키워드, 밈 형식·이유·쓴 제목 수, 아이디어 문장, 형식, fallback·이유. 그리고 네이버 호출 수, 못 읽은 그룹·후보, YouTube 후보 상태, 상품 목록 상태(`catalog_*`), 유사도 상태(`similarity_*`·`similarity_failure`), 소재마다 주제 분류(`topic_category`·이유)·묶음(`group`), 참고용(`reference_items`)·쓴 추천 안 함 분류(`excluded_categories`)
+- **한계:** 추천 "품질"은 **평가셋이 없어 재지 않는다**. 순위 규칙·숫자 검증·상품 연결 규칙만 테스트한다. 나중에 게시 성과(콘텐츠 루프 4·5단계, `campaign_effect`)로 평가한다. 가중치(1.0·2.0)도 성과 자료가 없어 정한 값이다. **밈 형식·주제 분류 정확도도 평가셋이 없어 재지 않는다**(영상 내용이 아니라 제목·뉴스 제목만 본다). 주제 분류는 LLM 판단이라 같은 소재가 날마다 달리 분류될 수 있다. 인기 검색어에서만 나온 소재는 YouTube 근거가 없어 밈 형식이 늘 unknown이다. 임베딩 설정이 없으면 뜻이 가까운 상품(예: 책 추천 ↔ 도서)을 글자로 겹칠 때만 잇는다. 임베딩 기준(0.65, 1등만)은 상품 8개·소재 42개 보정셋으로 고른 임시 값이다. 인기 검색어 관련 뉴스 제목은 이 기능 뒤에 받은 스냅샷부터 있다(그 전 스냅샷은 이름만)
 
 ### 설명 문장(LLM)과 템플릿 대체 이유
 - 숫자는 코드가 계산하고 LLM은 문장만 쓴다(`explain.py`). 문장에 넘긴 facts에 없는 숫자가 있거나 LLM이 실패하면 고정 템플릿으로 바꾸고 `fallback=true`다.

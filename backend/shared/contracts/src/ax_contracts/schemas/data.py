@@ -854,6 +854,23 @@ ContentSource = Literal["naver", "youtube"]  # 검색 급상승, YouTube 인기 
 RecommendOrigin = Literal["keyword_group", "youtube_tag", "youtube_title", "trending_search"]
 # 밈 형식 (대표 영상 제목으로 LLM이 목록 안에서만 고름, 목록 밖 답은 기타). unknown = 분류하지 못함
 MemeFormat = Literal["챌린지", "패러디·밈", "리액션", "하이라이트", "정보·리뷰", "기타", "unknown"]
+# 소재 주제 분류 (LLM이 이 목록 안에서만 고른다. 목록 밖 답은 기타, 분류하지 못하면 unknown + 이유)
+TopicCategory = Literal[
+    "뉴스·사건",
+    "정치·사회",
+    "기부·재난",
+    "인물",
+    "게임",
+    "연예·스포츠",
+    "생활·취미",
+    "교육·책",
+    "기타",
+    "unknown",
+]
+# 추천 묶음: product_linked = 회사 상품과 연결된 소재, general = 일반 화제
+RecommendGroup = Literal["product_linked", "general"]
+# 임베딩 유사도를 재지 못한 까닭: 설정 없음 / 설정 오류(키 없음 등) / 요청 실패
+SimilarityFailure = Literal["not_configured", "config_error", "request_failed"]
 
 
 class ContentRecommendRequest(AxModel):
@@ -884,6 +901,8 @@ class LinkedProduct(AxModel):
     match: Literal["name", "category", "embedding"]
     similarity: float | None = None  # 임베딩 코사인 (재지 못했으면 None)
     reason: str  # 코드가 만든 한 줄 (예: 이름 일치: 파이썬)
+    # 임베딩으로 이었을 때 1등 유사도 − 2등 유사도 (예전 응답·글자 일치는 None)
+    margin: float | None = None
 
 
 class ContentRecommendation(AxModel):
@@ -912,6 +931,25 @@ class ContentRecommendation(AxModel):
     meme_format: MemeFormat | None = None
     meme_reason: str | None = None
     meme_titles: int = Field(default=0, ge=0)  # 분류에 쓴 대표 영상 제목 수 (최대 5)
+    # 아래는 적합성 (예전 응답은 없다). 주제 분류와 그 이유(목록 밖 답·분류 못 함일 때)
+    topic_category: TopicCategory | None = None
+    topic_category_reason: str | None = None
+    # 추천 묶음: 회사 상품과 연결됐으면 product_linked, 아니면 general
+    group: RecommendGroup | None = None
+
+
+class ReferenceTopic(AxModel):
+    """급상승했지만 회사 설정의 "추천 안 함" 분류라 추천하지 않은 소재 (참고용)."""
+
+    keyword: str = Field(min_length=1)
+    aliases: list[str] = Field(default_factory=list)
+    origins: list[RecommendOrigin] = Field(default_factory=list)
+    ratio: float = Field(ge=0)  # 기준선 대비 배수 (판정 그대로)
+    z: float  # 변화 정도
+    two_sources: bool
+    topic_category: TopicCategory
+    topic_category_reason: str | None = None  # 목록 밖 답 등
+    reason: str  # 추천하지 않은 이유 (코드가 만든 한 줄, 예: 추천 안 함 분류: 뉴스·사건)
 
 
 class ContentRecommendOutput(AxModel):
@@ -931,6 +969,11 @@ class ContentRecommendOutput(AxModel):
     catalog_products: int = Field(default=0, ge=0)  # 읽은 판매 중 상품 수
     similarity_status: Literal["known", "unknown"] = "unknown"
     similarity_reason: str | None = None
+    # 아래는 적합성 (예전 응답은 없다). 유사도를 재지 못한 까닭 (잰 경우·소재·상품이 없으면 None)
+    similarity_failure: SimilarityFailure | None = None
+    # 급상승했지만 "추천 안 함" 분류라 뺀 소재 (참고용, 순위 순)
+    reference_items: list[ReferenceTopic] = Field(default_factory=list)
+    excluded_categories: list[str] = Field(default_factory=list)  # 이번에 쓴 "추천 안 함" 분류
 
     @model_validator(mode="after")
     def _reason_when_empty(self) -> Self:
