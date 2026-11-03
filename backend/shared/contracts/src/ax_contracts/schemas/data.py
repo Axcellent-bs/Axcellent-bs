@@ -1034,6 +1034,8 @@ class PopularTopic(AxModel):
     real_entity: bool | None = None
     entity_names: list[str] = Field(default_factory=list)
     category_rank: int | None = Field(default=None, ge=1)  # 화면 카테고리 안 순위 (1~5)
+    # 주제 이름 자체가 실존 사람 이름인지 (분류기, 분류하지 못했으면 None)
+    is_person: bool | None = None
 
 
 class PopularCategory(AxModel):
@@ -1142,6 +1144,13 @@ class PromoSeasonCheck(AxModel):
     next_month_ratio: float | None = None
 
 
+class PromoSkippedTrend(AxModel):
+    """재료 기준에 못 미쳐 뺀 지금 인기 주제 (코드가 만든 이유)."""
+
+    name: str
+    reason: str
+
+
 class DroppedConcept(AxModel):
     """검증에서 버린 기획안 (제목과 이유만, 내용은 남기지 않는다)."""
 
@@ -1168,6 +1177,10 @@ class PromoConceptsOutput(AxModel):
     shorts_status: Literal["known", "unknown"] = "unknown"
     shorts_reason: str | None = None
     season_checks: list[PromoSeasonCheck] = Field(default_factory=list)  # 확인한 시즌 키워드
+    # 아래는 재료 거르기 (예전 응답은 없다). 기준(출처 수·인기 영상 수)·사람 이름으로 뺀 주제와 이유
+    skipped_trends: list[PromoSkippedTrend] = Field(default_factory=list)
+    # 초안 중 지금 인기 트렌드를 쓴 것이 없을 때 그 이유 (LLM 한 줄 또는 코드)
+    popular_trend_note: str | None = None
     run_id: str | None = None  # 기획안 기록 id
     generated_at: UtcDatetime | None = None
     summary: str = ""  # 코드가 만든 한 문장
