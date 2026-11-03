@@ -120,10 +120,26 @@ class LLMSettings:
     base_url: str | None = None
     api_key: str | None = None
     embed_model: str | None = None
+    # 임베딩 전용 주소·키. 없으면 `embed()`가 위 LLM 주소·키를 쓴다(예전 동작)
+    embed_base_url: str | None = None
+    embed_api_key: str | None = None
+
+    @property
+    def embed_url(self) -> str | None:
+        """임베딩 요청 주소: 임베딩 전용 주소, 없으면 LLM 주소."""
+        return self.embed_base_url or self.base_url
+
+    @property
+    def embed_key(self) -> str | None:
+        """임베딩 요청 키: 임베딩 전용 키, 없으면 LLM 키."""
+        return self.embed_api_key or self.api_key
 
     @classmethod
     def from_env(cls, dept: str, env: Mapping[str, str] | None = None) -> LLMSettings:
-        """`<부서>_LLM_*`를 먼저 읽고, 없으면 공통 `LLM_*`를 읽는다. 빈 문자열은 없는 값이다."""
+        """`<부서>_LLM_*`를 먼저 읽고, 없으면 공통 `LLM_*`를 읽는다. 빈 문자열은 없는 값이다.
+
+        임베딩은 `<부서>_EMBED_*` → `EMBED_*` 순서로 읽는다(MODEL·BASE_URL·API_KEY).
+        """
         source = os.environ if env is None else env
         prefix = env_prefix(dept)
 
@@ -132,12 +148,20 @@ class LLMSettings:
                 source.get(f"{prefix}_LLM_{field_name}") or source.get(f"LLM_{field_name}") or None
             )
 
-        embed_model = source.get(f"{prefix}_EMBED_MODEL") or source.get("EMBED_MODEL") or None
+        def pick_embed(field_name: str) -> str | None:
+            return (
+                source.get(f"{prefix}_EMBED_{field_name}")
+                or source.get(f"EMBED_{field_name}")
+                or None
+            )
+
         return cls(
             model=pick("MODEL"),
             base_url=pick("BASE_URL"),
             api_key=pick("API_KEY"),
-            embed_model=embed_model,
+            embed_model=pick_embed("MODEL"),
+            embed_base_url=pick_embed("BASE_URL"),
+            embed_api_key=pick_embed("API_KEY"),
         )
 
 
@@ -339,23 +363,25 @@ class LLMClient:
     async def embed(self, texts: list[str], context_id: str | None = None) -> list[list[float]]:
         """OpenAI 호환 `/embeddings`로 텍스트별 벡터를 돌려준다. 입력 순서를 유지한다.
 
-        모델은 `<부서>_EMBED_MODEL`(없으면 `EMBED_MODEL`), 엔드포인트·키는 LLM 설정을 쓴다.
+        모델은 `<부서>_EMBED_MODEL`(없으면 `EMBED_MODEL`). 주소·키는
+        `<부서>_EMBED_BASE_URL`·`<부서>_EMBED_API_KEY`(없으면 `EMBED_BASE_URL`·`EMBED_API_KEY`),
+        그것도 없으면 LLM 설정을 쓴다.
         호출 사용량은 `context_id`가 없어도 LLM 사용량 저장소에 남긴다.
         """
         if not self.settings.embed_model:
             raise LLMNotConfiguredError(
                 f"{env_prefix(self.dept)}_EMBED_MODEL 또는 EMBED_MODEL이 없다"
             )
-        if not self.settings.base_url:
+        base_url = self.settings.embed_url
+        if not base_url:
             raise LLMNotConfiguredError(
                 f"{env_prefix(self.dept)}_LLM_BASE_URL 또는 LLM_BASE_URL이 없다"
             )
         if not texts:
             return []
-        headers = (
-            {"Authorization": f"Bearer {self.settings.api_key}"} if self.settings.api_key else {}
-        )
-        url = self.settings.base_url.rstrip("/") + "/embeddings"
+        api_key = self.settings.embed_key
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        url = base_url.rstrip("/") + "/embeddings"
         model = self.settings.embed_model
         try:
             async with httpx.AsyncClient(timeout=30.0) as http:

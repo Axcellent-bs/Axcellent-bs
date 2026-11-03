@@ -9,7 +9,8 @@
 # 먼저 backend/ 에서 `uv sync --all-packages` 한 번. 로그는 backend/.logs/<이름>.log
 #
 # 실제 모드에 필요한 것
-# - backend/.env 의 LLM_MODEL·LLM_BASE_URL·LLM_API_KEY (EMBED_MODEL은 회사 기억 검색용, .env.example 참고)
+# - backend/.env 의 LLM_MODEL·LLM_BASE_URL·LLM_API_KEY (EMBED_MODEL은 회사 기억 검색·상품 연결용.
+#   EMBED_BASE_URL·EMBED_API_KEY는 임베딩만 다른 주소로 보낼 때, 없으면 LLM 주소·키. .env.example 참고)
 # - Docker (Redis 이벤트 버스를 컨테이너 ax-redis 로 띄운다. REDIS_URL을 주면 그걸 쓴다)
 # 에이전트 토큰·사람 토큰은 켤 때마다 새로 만들어 프로세스에만 넘긴다(파일에 남기지 않는다).
 # 화면에 넘길 값(사람 토큰 등)은 backend/.data/web.env 에 쓰고, scripts/run_web.sh 가 읽는다.
@@ -163,10 +164,10 @@ if [ -f .env ]; then
   . <(tr -d '\r' < .env)
   set +a
 fi
-# backend/.env 에 없으면 레포 맨 위 .env 에서 LLM 설정 4개만 읽는다 (DejaFix 형식 .env 를 같이 쓰는 경우).
+# backend/.env 에 없으면 레포 맨 위 .env 에서 LLM·임베딩 설정 6개만 읽는다 (DejaFix 형식 .env 를 같이 쓰는 경우).
 # 다른 값(메일·Zabbix 등)은 서버에 넘기지 않고, 줄 끝 주석(공백 뒤 #)은 뗀다
 if [ -f ../.env ]; then
-  for v in LLM_MODEL LLM_BASE_URL LLM_API_KEY EMBED_MODEL; do
+  for v in LLM_MODEL LLM_BASE_URL LLM_API_KEY EMBED_MODEL EMBED_BASE_URL EMBED_API_KEY; do
     [ -n "${!v:-}" ] && continue
     val=$(tr -d '\r' < ../.env | sed -n "s/^$v=//p" | tail -n 1 | sed -E 's/^\xEF\xBB\xBF//; s/[[:space:]]+#.*$//; s/[[:space:]]+$//; s/^"(.*)"$/\1/')
     [ -n "$val" ] && export "$v=$val"
