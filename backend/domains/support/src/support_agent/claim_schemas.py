@@ -123,6 +123,8 @@ class Claim(AxModel):
     refund_paid: int = 0
     # 안전 장치가 환불을 거절·만료로 닫았을 때의 사유 코드. 있으면 큐에서 지급 대상에서 뺀다
     refund_rejected: str | None = None
+    # 만료로 닫힌 환불을 다시 요청한 횟수. 0이면 첫 시도 키를, 1 이상이면 `retry<n>` 키를 쓴다
+    refund_attempt: int = 0
     processed_at: str | None = None
     decided_by: str | None = None
     agent_note: str | None = None  # 상담원 결정 메모 (`untrusted.note`)
@@ -224,7 +226,7 @@ class DecideClaimInput(AxModel):
     """상담원 결정. 메모는 `untrusted.note`로 받는다."""
 
     claim_id: int
-    decision: Literal["approve", "reject"]
+    decision: Literal["approve", "reject", "retry_refund"]
 
 
 class ReceiveReturnInput(AxModel):

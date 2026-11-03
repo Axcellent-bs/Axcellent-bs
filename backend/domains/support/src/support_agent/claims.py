@@ -53,14 +53,24 @@ class ClaimStore:
     def count_for_buyer(self, buyer_id: str) -> int:
         return sum(1 for c in self._claims.values() if c.buyer_id == buyer_id)
 
-    def has_open_claim(self, order_id: str, order_item_ids: set[str]) -> bool:
-        """같은 주문 품목에 아직 끝나지 않은 클레임이 있으면 중복 접수로 본다."""
+    def blocking_claim(self, order_id: str, order_item_ids: set[str]) -> Claim | None:
+        """같은 주문 품목의 재접수를 막는 클레임.
+
+        끝나지 않은 클레임과, 안전 장치가 환불을 거절·만료로 닫아 `rejected`로 끝낸 클레임이다
+        (거절한 품목을 다시 접수해 거절을 우회하지 못하게 한다).
+        """
         for claim in self._claims.values():
-            if claim.order_id != order_id or claim.status in ("rejected", "completed"):
+            if claim.order_id != order_id or claim.status == "completed":
+                continue
+            if claim.status == "rejected" and not claim.refund_rejected:
                 continue
             if order_item_ids & {line.order_item_id for line in claim.lines}:
-                return True
-        return False
+                return claim
+        return None
+
+    def has_open_claim(self, order_id: str, order_item_ids: set[str]) -> bool:
+        """같은 주문 품목에 아직 끝나지 않은 클레임이 있으면 중복 접수로 본다."""
+        return self.blocking_claim(order_id, order_item_ids) is not None
 
     def stats(self) -> ClaimStats:
         claims = list(self._claims.values())
@@ -82,13 +92,7 @@ class ClaimStore:
             if claim.refund_rejected:
                 # 안전 장치가 이 환불을 거절·만료로 닫았다.
                 # 같은 키로 다시 부르면 같은 거절이 돌아오므로 지급 대상에서 뺀다
-                blockers.append(
-                    ClaimReasonHit(
-                        code="REFUND_REJECTED",
-                        level="block",
-                        message="환불이 안전 장치에서 거절돼 지급하지 않는다",
-                    )
-                )
+                blockers.append(refund_rejection_hit(claim.refund_rejected))
             if claim.status == "return_received" and claim.inspection != "pass":
                 # 화면(BLOCKER_KO)과 같은 코드: NOT_INSPECTED 검수 대기, ON_HOLD 상담원 확인
                 if claim.inspection is None:
@@ -183,6 +187,21 @@ class ClaimStore:
     @staticmethod
     def _audit(claim: Claim, action: str, **detail: Any) -> None:
         claim.audit.append(ClaimAudit(actor=ACTOR, action=action, detail=detail, at=now_iso()))
+
+
+def refund_rejection_hit(reason: str) -> ClaimReasonHit:
+    """안전 장치가 환불을 닫은 사유에 맞는 막힘. 만료(`review_timeout`)만 다시 요청할 수 있다."""
+    if reason == "review_timeout":
+        return ClaimReasonHit(
+            code="REFUND_EXPIRED",
+            level="block",
+            message="환불 보류가 기한 안에 결정되지 않아 닫혔다 (종료하거나 다시 요청할 수 있다)",
+        )
+    return ClaimReasonHit(
+        code="REFUND_REJECTED",
+        level="block",
+        message="환불이 안전 장치에서 거절돼 지급하지 않는다 (종료할 수 있다)",
+    )
 
 
 def _receipt(order: Order) -> ClaimReceipt:

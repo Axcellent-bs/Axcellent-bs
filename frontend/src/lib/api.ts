@@ -117,6 +117,8 @@ export const api = {
     claim: (id: number) => request<ClaimDetail>(`/api/dashboard/claims/${id}`),
     approve: (id: number, note: string) => post<ClaimDetail>(`/api/dashboard/claims/${id}/approve`, { note }),
     reject: (id: number, note: string) => post<ClaimDetail>(`/api/dashboard/claims/${id}/reject`, { note }),
+    /** 만료(review_timeout)로 닫힌 환불을 다시 요청한다. 사람이 거절한 건은 409 */
+    retryRefund: (id: number, note: string) => post<ClaimDetail>(`/api/dashboard/claims/${id}/retry-refund`, { note }),
     receive: (id: number, inspection: string, note?: string) => post<ClaimDetail>(`/api/dashboard/claims/${id}/receive`, { inspection, note }),
     inspect: (id: number, inspection: string, note?: string) => post<ClaimDetail>(`/api/dashboard/claims/${id}/inspection`, { inspection, note }),
     queue: () => request<QueueView>("/api/dashboard/queue-entries"),

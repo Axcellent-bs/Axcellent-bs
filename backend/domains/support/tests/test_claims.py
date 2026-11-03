@@ -412,6 +412,121 @@ def test_a_rejection_without_a_reason_is_not_remembered(
     assert second["paid"] == 1
 
 
+def _refund_closed_by_safety(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, reason: str
+) -> list[str]:
+    """자동 승인된 취소 클레임의 환불을 안전 장치가 `reason`으로 닫게 한다. 쓴 키를 돌려준다."""
+    create(client, order_id="102", buyer_id="buy_0002", type="cancel", reason="change_of_mind")
+    keys: list[str] = []
+
+    async def closed(action: str, params: dict, meta: Any, evidence: Any) -> ExecuteDecision:
+        keys.append(meta.idempotency_key)
+        return ExecuteDecision(
+            execution_id="exe_1", grade="C", status="rejected", hold_reason=reason
+        )
+
+    monkeypatch.setattr(claim_handlers, "execute", closed)
+    call(client, "process_claim_queue", {}, key="k-1")
+    return keys
+
+
+def _decide(client: TestClient, decision: str, key: str, note: str | None = None) -> dict:
+    untrusted = {"note": note} if note else None
+    return call(client, "decide_claim", {"claim_id": 1, "decision": decision}, untrusted, key=key)
+
+
+@pytest.mark.parametrize(
+    ("reason", "code"),
+    [("over_threshold", "REFUND_REJECTED"), ("review_timeout", "REFUND_EXPIRED")],
+)
+def test_the_queue_tells_an_expired_refund_from_a_rejected_one(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, reason: str, code: str
+) -> None:
+    _refund_closed_by_safety(client, monkeypatch, reason)
+    (entry,) = call(client, "claim_queue")["output"]["queue"]
+    assert entry["ready"] is False and [b["code"] for b in entry["blockers"]] == [code]
+
+
+def test_a_refund_closed_by_safety_is_ended_by_an_agent_with_a_reason(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _refund_closed_by_safety(client, monkeypatch, "over_threshold")
+    no_reason = _decide(client, "reject", "k-d1")
+    assert no_reason["outcome"] == "invalid_state"
+    assert call(client, "get_claim", {"claim_id": 1})["output"]["status"] == "approved"
+    ended = _decide(client, "reject", "k-d2", note="사람이 거절한 환불이라 종료")["output"]
+    assert ended["status"] == "rejected" and ended["agent_note"] == "사람이 거절한 환불이라 종료"
+    assert call(client, "claim_queue")["output"]["queue"] == []
+
+
+def test_ending_a_closed_refund_blocks_filing_the_same_item_again(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _refund_closed_by_safety(client, monkeypatch, "over_threshold")
+    _decide(client, "reject", "k-d", note="종료")
+    again = create(
+        client, "k-2", order_id="102", buyer_id="buy_0002", type="cancel", reason="change_of_mind"
+    )
+    assert again["outcome"] == "duplicate_claim"
+    assert "환불이 거절된" in again["output"]["message"]
+
+
+def test_a_claim_rejected_for_another_reason_can_still_be_filed_again(client: TestClient) -> None:
+    first = create(client)["output"]["id"]
+    call(client, "decide_claim", {"claim_id": first, "decision": "reject"}, key="k-d")
+    again = create(client, "k-2")
+    assert again.get("outcome") != "duplicate_claim"
+
+
+def test_an_expired_refund_is_requested_again_with_a_new_attempt_key(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    keys = _refund_closed_by_safety(client, monkeypatch, "review_timeout")
+    retried = _decide(client, "retry_refund", "k-d")["output"]
+    assert retried["refund_rejected"] is None and retried["refund_attempt"] == 1
+    assert call(client, "claim_queue")["output"]["queue"][0]["ready"] is True
+
+    async def approved(action: str, params: dict, meta: Any, evidence: Any) -> ExecuteDecision:
+        keys.append(meta.idempotency_key)
+        return ExecuteDecision(execution_id="exe_2", grade="C", status="executed")
+
+    monkeypatch.setattr(claim_handlers, "execute", approved)
+    run = call(client, "process_claim_queue", {}, key="k-2")["output"]
+    assert run["paid"] == 1 and run["held"] == 0
+    assert keys[1] == keys[0] + ":retry1"  # 첫 시도 키는 그대로, 다시 요청에만 시도 번호가 붙는다
+    assert call(client, "get_claim", {"claim_id": 1})["output"]["status"] == "completed"
+
+
+def test_a_refund_rejected_by_a_person_cannot_be_requested_again(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _refund_closed_by_safety(client, monkeypatch, "over_threshold")
+    assert _decide(client, "retry_refund", "k-d")["outcome"] == "invalid_state"
+    claim = call(client, "get_claim", {"claim_id": 1})["output"]
+    assert claim["refund_rejected"] == "over_threshold" and claim["refund_attempt"] == 0
+
+
+def test_a_paid_claim_is_never_requested_or_paid_again(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _refund_closed_by_safety(client, monkeypatch, "review_timeout")
+    claim = claim_handlers.CLAIMS.get(1)
+    assert claim is not None
+    claim.refund_paid = 5000  # 어떤 경로로든 이미 지급 기록이 있다
+    assert _decide(client, "retry_refund", "k-d")["outcome"] == "invalid_state"
+
+    claim.refund_rejected = None  # 닫힘 기록이 없어도 지급 기록이 있으면 안전 장치를 부르지 않는다
+    spy: list[str] = []
+
+    async def never(action: str, params: dict, meta: Any, evidence: Any) -> ExecuteDecision:
+        spy.append(meta.idempotency_key)
+        return ExecuteDecision(execution_id="exe_3", grade="A", status="executed")
+
+    monkeypatch.setattr(claim_handlers, "execute", never)
+    run = call(client, "process_claim_queue", {}, key="k-3")["output"]
+    assert run["paid"] == 0 and run["results"][0]["detail"] == "already_paid" and spy == []
+
+
 def test_held_refund_is_paid_when_retried_after_approval_even_from_a_new_request(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
