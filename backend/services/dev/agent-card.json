@@ -98,6 +98,18 @@
       ],
       "verifier": null,
       "priority": "required"
+    },
+    {
+      "id": "receive_request_pause",
+      "description": "요청 사람 중단·재개 받기. 기획에서 사람이 요청을 중단하면 개발은 그 요청의 돌고 있는 서버 AI 코딩을 멈추고(초안은 남김), 안 가져간 내 Claude 작업을 대기열에서 빼고, 열린 PR을 자동 머지하지 않고, 배포 지시를 거절한다(request_paused). 재개하면 멈춘 작업을 다시 띄우고 열린 PR의 자동 머지를 다시 판단한다. 같은 idempotency_key의 두 번째 알림은 duplicate. execute()를 거친다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#RequestPauseInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#RequestPauseOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "required"
     }
   ]
 }

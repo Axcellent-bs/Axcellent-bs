@@ -1260,3 +1260,114 @@ def test_connection_id_follows_task_connection(service: PlanningService, adapter
     got = {p["connection_id"] for a, p in gate.calls if a in ("generate_pr", "merge_pr")}
     assert got == {"conn-2"}
     assert service._connection_for("conn-1#7", {}) == "conn-1"  # 레포 작업 공간 대상
+
+
+# ---------------------------------------------------------------- 요청 사람 중단·재개
+
+
+def _pause(service, req_id: str, paused: bool, n: int):
+    from ax_contracts.schemas.planning import RequestPauseInput
+
+    return run(
+        service.receive_request_pause(
+            context_id="ctx",
+            requester="planning",
+            inp=RequestPauseInput(request_id=req_id, paused=paused, reason="확인 중"),
+            idempotency_key=f"ctx:request_pause:{req_id}:{n}",
+        )
+    )
+
+
+def test_pause_holds_auto_merge_and_release_then_resume_merges(service, adapter) -> None:
+    from ax_contracts.schemas.planning import ReceiveReleaseOrderInput
+
+    ci = ChecksAdapter("failed")
+    vcs.set_vcs(ci)
+    coder.set_llm(FakeLLM())
+    run(_go(service))
+    c = _task(service).coding
+    pr = next(p for p in service.state.prs if p.id == c.pr)
+    assert c.status == "waiting_human" and not pr.merged  # CI 실패로 사람 확인
+
+    out = _pause(service, "REQ-D1", True, 1)
+    assert out.outcome == "applied" and out.output["prs_held"] == [pr.number]
+    assert next(r for r in service.state.requests if r.id == "REQ-D1").paused
+    assert _pause(service, "REQ-D1", True, 1).outcome == "duplicate"
+    # CI가 통과해도 중단 중이면 머지하지 않는다
+    ci.states = ["passed"]
+    run(service.recheck_ci())
+    pr = next(p for p in service.state.prs if p.id == c.pr)
+    assert not pr.merged and "request_paused" in pr.auto_review.rules
+    # 배포 지시도 거절
+    order = run(
+        service.receive_release_order(
+            context_id="ctx", requester="planning",
+            inp=ReceiveReleaseOrderInput(
+                check_id="RC-1", spec_id="SPEC-D1", request_id="REQ-D1", env="dev",
+                pr_numbers=[pr.number], decided_by="agent",
+            ),
+            idempotency_key="ctx:release_order:RC-1",
+        )
+    )  # fmt: skip
+    assert order.output["reason_code"] == "request_paused"
+    with pytest.raises(ActionError) as err:
+        run(service.retry_dev_task("T-D1"))
+    assert err.value.code == "REQUEST_PAUSED"
+    # 재개: 자동 머지를 다시 판단한다
+    out = _pause(service, "REQ-D1", False, 2)
+    pr = next(p for p in service.state.prs if p.id == c.pr)
+    assert out.outcome == "applied" and pr.merged
+    assert _task(service).coding.status == "merged"
+    assert not next(r for r in service.state.requests if r.id == "REQ-D1").paused
+
+
+def test_pause_hides_subscription_task_and_unknown_request(service, adapter) -> None:
+    from dev_agent import work_queue
+
+    out = run(service.create_dev_task(title="배너", plan="배너 문구 변경", mode="subscription"))
+    tid = out.output["task_id"]
+    req = out.output["request_id"]
+    _pause(service, req, True, 1)
+    assert tid not in [r["task_id"] for r in work_queue.available(service, "kim")]
+    with pytest.raises(ActionError) as err:
+        run(work_queue.claim(service, tid, "kim"))
+    assert err.value.code == "REQUEST_PAUSED"
+    _pause(service, req, False, 2)
+    assert tid in [r["task_id"] for r in work_queue.available(service, "kim")]
+    assert _pause(service, "REQ-404", True, 1).outcome == "unknown_request"
+
+
+def test_pause_stops_running_coder_and_resume_restarts(service, adapter) -> None:
+    from ax_contracts.schemas.planning import RequestPauseInput
+
+    gate = asyncio.Event()
+    coder.set_llm(_blocking_llm(gate))
+
+    async def go():
+        out = await service.create_dev_task(title="배너", plan="배너 문구 변경")
+        tid, req = out.output["task_id"], out.output["request_id"]
+        await _until(
+            lambda: tid in service._coding and _task(service, tid).coding.status == "reviewing"
+        )
+
+        def pause(paused: bool, n: int):
+            return service.receive_request_pause(
+                context_id="ctx", requester="planning",
+                inp=RequestPauseInput(request_id=req, paused=paused),
+                idempotency_key=f"ctx:request_pause:{req}:{n}",
+            )  # fmt: skip
+
+        stopped = await pause(True, 1)
+        await asyncio.sleep(0.05)
+        c = _task(service, tid).coding
+        assert stopped.output["tasks_stopped"] == [tid]
+        assert tid not in service._coding and c.status == "queued"
+        assert c.error.startswith("사람이 요청 중단")
+        gate.set()
+        await pause(False, 2)
+        await service.wait_coding()
+        return tid
+
+    tid = run(go())
+    c = _task(service, tid).coding
+    assert c.status == "merged" and c.error is None

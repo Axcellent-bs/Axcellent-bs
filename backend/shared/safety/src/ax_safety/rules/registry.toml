@@ -289,6 +289,13 @@ owner = "planning"
 requesters = ["planning", "dev"]
 base_grade = "A"
 
+# 요청 사람 중단·재개 받기 (planning → dev). 코딩을 멈추거나 다시 띄우고, 코드는 바꾸지 않아 A
+[[actions]]
+action = "receive_request_pause"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
 # 배포 요청·승인 (dev 배포 기록 deploy_store). 관문은 A로 기록만 하고, prod·보호 경로가 닿는 배포는
 # 배포 기록이 사람 승인 대기(requested)로 남겨 approve_deploy(사람 클릭) 전에는 나가지 않는다
 [[actions]]

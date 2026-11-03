@@ -24,6 +24,7 @@ from ax_contracts.schemas.planning import (
     DevResultInput,
     ReceiveReleaseOrderInput,
     ReleasePr,
+    RequestPauseInput,
     RequestReleaseCheckInput,
 )
 from ax_contracts.schemas.record import RecordCase, RecordKind
@@ -368,6 +369,108 @@ class DevService(PlanningCore):
         self._sending.add(task)
         task.add_done_callback(self._sending.discard)
 
+    # ---- 요청 단계별 사람 중단 (planning → dev `receive_request_pause`)
+
+    def task_paused(self, s: State, task_id: str) -> bool:
+        """이 작업의 요청이 사람 중단 중인가."""
+        t = next((x for x in s.tasks if x.id == task_id), None)
+        sp = next((x for x in s.specs if t and x.id == t.spec), None)
+        req = self._request_of_spec(s, sp) if sp else None
+        return bool(req and req.paused)
+
+    async def receive_request_pause(
+        self,
+        *,
+        context_id: str,
+        requester: str,
+        inp: RequestPauseInput,
+        idempotency_key: str,
+    ) -> ActionResult:
+        """기획이 요청을 중단·재개했다 (A).
+
+        중단: 돌고 있는 서버 AI 코딩은 멈추고 대기로 둔다(초안은 남김). 안 가져간 내 Claude 작업은
+        대기열에서 빠지고(work_queue), 열린 PR은 자동 머지하지 않는다. 배포 지시는 거절한다.
+        재개: 멈춘 작업을 다시 띄우고(초안이 있으면 이어서), 열린 PR은 자동 머지를 다시 판단한다.
+        같은 멱등성 키의 두 번째 알림은 `duplicate`."""
+        cached = self._idempotent.get(idempotency_key)
+        if cached is not None:
+            return ActionResult(
+                changed=False, outcome="duplicate", output={**cached.output, "outcome": "duplicate"}
+            )
+        req0 = next((r for r in self.state.requests if r.id == inp.request_id), None)
+        if req0 is None:
+            out = {"outcome": "unknown_request", "tasks_stopped": [], "prs_held": []}
+            return ActionResult(changed=False, outcome="unknown_request", output=out)
+        specs = {sp.id for sp in self.state.specs if self._request_of_spec(self.state, sp) is req0}
+        task_ids = [t.id for t in self.state.tasks if t.spec in specs]
+        stopping = [i for i in task_ids if i in self._coding] if inp.paused else []
+        for i in stopping:  # 실행부터 끊는다 (다음 단계에서 CoderGone, LLM 호출도 취소)
+            self._coding_live.pop(i, None)
+            running = self._coding.pop(i, None)
+            if running is not None:
+                running.cancel()
+        restart: list[str] = []
+
+        async def run(s: State) -> ActionResult:
+            req = next(r for r in s.requests if r.id == inp.request_id)
+            ctx = req.context_id or context_id
+            how = "중단" if inp.paused else "재개"
+            who = "사람" if inp.decided_by == "human" else inp.decided_by
+            text = f"{req.id} {who}이 요청 {how}" + (f" ({inp.reason})" if inp.reason else "")
+            await self._execute(
+                "receive_request_pause", ctx, f"{req.id}:{how}:{len(s.activity)}", text,
+                {"request": req.id, "paused": inp.paused},
+            )  # fmt: skip
+            req.paused = inp.paused
+            tasks = [t for t in s.tasks if t.id in task_ids]
+            held: list[int] = []
+            if inp.paused:
+                for t in tasks:
+                    if t.id in stopping and t.coding is not None:
+                        t.coding.status = "queued"
+                        t.coding.error = f"{PAUSE} → 재개하면 이어서"
+                        t.coding.updated_at = self.clock()
+                for p in s.prs:
+                    if p.task in task_ids and not p.merged and not p.closed:
+                        held.append(p.number)
+            else:
+                for t in tasks:
+                    cr = t.coding
+                    if cr is None:
+                        continue
+                    if (cr.error or "").startswith(PAUSE):
+                        cr.error = None
+                        cr.updated_at = self.clock()
+                        if cr.mode == "agent" and cr.status == "queued":
+                            restart.append(t.id)
+                for p in s.prs:
+                    rules = p.auto_review.rules if p.auto_review else []
+                    if (
+                        p.task in task_ids
+                        and not p.merged
+                        and not p.closed
+                        and ("request_paused" in rules)
+                    ):
+                        p.auto_review = None
+                        await self._try_auto_merge(s, p)
+                        t = next((x for x in tasks if x.id == p.task), None)
+                        if t is not None and t.coding is not None and p.merged:
+                            t.coding.status, t.coding.error = "merged", None
+                        held.append(p.number)
+            s.activity.append(
+                self._act(self.clock(), ctx, requester, "dev", "receive_request_pause", "A2A",
+                          f"{text} · 멈춘 작업 {len(stopping)} · PR {len(held)}", "A")
+            )  # fmt: skip
+            out = {"outcome": "applied", "tasks_stopped": stopping, "prs_held": held}
+            return ActionResult(outcome="applied", output=out)
+
+        result = await self._apply(run)
+        self._idempotent[idempotency_key] = result
+        for i in restart:
+            self._spawn_coder(i)
+        self._save()
+        return result
+
     async def receive_release_order(
         self,
         *,
@@ -392,6 +495,15 @@ class DevService(PlanningCore):
             prs = {p.number: p for p in s.prs}
             unknown = [n for n in inp.pr_numbers if n not in prs]
             open_ = [n for n in inp.pr_numbers if n in prs and not prs[n].merged]
+            if req is not None and req.paused:
+                s.activity.append(
+                    self._act(self.clock(), ctx, requester, "dev", "receive_release_order", "A2A",
+                              f"{inp.check_id} 배포 지시 받지 않음: request_paused", "A")
+                )  # fmt: skip
+                return ActionResult(
+                    outcome="rejected",
+                    output={"outcome": "rejected", "reason_code": "request_paused"},
+                )
             who = "사람" if inp.decided_by == "human" else "기획 AI"
             nums = ", ".join(f"#{n}" for n in inp.pr_numbers)
             if unknown or open_:
@@ -2223,6 +2335,8 @@ class DevService(PlanningCore):
         task = next((t for t in self.state.tasks if t.id == task_id), None)
         if task is None or task.coding is None:
             raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+        if self.task_paused(self.state, task_id):
+            raise ActionError("REQUEST_PAUSED", f"{task_id}의 요청이 사람 중단 중이다 → 재개 뒤")
         resumable = ("failed", "waiting_human", "canceled")
         if task_id in self._coding or task.coding.status not in resumable:
             raise ActionError("NOT_RETRYABLE", f"{task_id}는 진행 중이거나 끝났다")
@@ -2530,6 +2644,8 @@ class DevService(PlanningCore):
         )
 
     def _spawn_coder(self, task_id: str) -> None:
+        if self.task_paused(self.state, task_id):
+            return  # 사람이 요청을 중단함: 재개할 때 띄운다 (receive_request_pause)
         self._coding_seq += 1
         run_id = self._coding_live[task_id] = self._coding_seq
         task = asyncio.create_task(self._run_coder(task_id, run_id))
@@ -3122,6 +3238,14 @@ class DevService(PlanningCore):
         safety가 merge_pr을 보류·거절해도 "교차검증 대기" (PR 생성·검수는 그대로 남는다)."""
         if p.merged or not p.reviews or p.reviews[-1] != "통과":
             return False
+        if self.task_paused(s, p.task):
+            hold = self._hold(p, WAIT_HUMAN, pr_check(s, p))
+            hold.rules = [*hold.rules, "request_paused"]
+            s.activity.append(
+                self._act(self.clock(), self._ctx_of_pr(s, p), "dev", "dev", "auto_review",
+                          "execute", f"{p.id} 요청이 사람 중단 중 → 자동 머지 안 함", "B")
+            )  # fmt: skip
+            return False
         if self._repo_pending(p):
             s.activity.append(self._repo_wait_act(self._ctx_of_pr(s, p), p))
             return False
@@ -3457,6 +3581,7 @@ class DevService(PlanningCore):
         pol.proposal = None
 
 
+PAUSE = "사람이 요청 중단"  # 요청 중단으로 멈춘 코딩 작업의 오류 줄 앞머리
 RELEASE_CHECK = "request_release_check"  # dev → planning 배포 전 대조
 TRIAL_TOKENS = 1_000_000  # 서버 AI 체험 한도 기본값 (PLANNING_TRIAL_TOKENS)
 AGENT_SEEN_DAYS = 7  # 이 기간 안에 본인 Claude로 작업을 본 개발자가 있으면 '연결됨'

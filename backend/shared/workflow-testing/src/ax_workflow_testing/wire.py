@@ -51,6 +51,10 @@ class Wire:
             await self.planning.request_release_check(
                 context_id=ctx, requester="dev", inp=payload, idempotency_key=key
             )
+        elif skill == "receive_request_pause":  # planning → dev 요청 사람 중단·재개
+            await self.dev.receive_request_pause(
+                context_id=ctx, requester="planning", inp=payload, idempotency_key=key
+            )
         elif skill == "receive_release_order":  # planning → dev 배포 지시
             await self.dev.receive_release_order(
                 context_id=ctx, requester="planning", inp=payload, idempotency_key=key
