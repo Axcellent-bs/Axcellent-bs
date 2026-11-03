@@ -35,6 +35,8 @@ from hr_agent.config import HrSettings  # noqa: E402
 from hr_agent.retrieval.cards import build_dense_search  # noqa: E402
 from hr_agent.services import build_services  # noqa: E402
 
+# 환불 유형은 평가 당시 총괄이 받던 재무 이상 신호(repeat_refund)다.
+# 재무가 환불 감사를 그만둬(#393) 총괄은 이제 받지 않는다. 기록된 결과와 맞추려고 그대로 둔다.
 SIGNALS = {  # 유형: (구성요소, 지표)
     "fail": ("payment", "error_rate_5xx"),
     "slow": ("payment", "p95_latency_ms"),

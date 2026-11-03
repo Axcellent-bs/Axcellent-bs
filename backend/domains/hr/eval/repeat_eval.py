@@ -77,6 +77,8 @@ UNRESOLVED = {
     "refund": REFUND,
 }  # 유형마다 미해결 사건 1건(근거로 안 쓰임)
 
+# 환불 유형은 평가 당시 총괄이 받던 재무 이상 신호(repeat_refund)다.
+# 재무가 환불 감사를 그만둬(#393) 총괄은 이제 받지 않는다. 기록된 결과와 맞추려고 그대로 둔다.
 QUERIES = [  # (유형, 종류, 질의)
     ("fail", "총괄", f"{PAY} payment"),
     ("slow", "총괄", f"{SLOW} payment"),
