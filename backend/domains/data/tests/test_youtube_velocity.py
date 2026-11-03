@@ -17,8 +17,9 @@ import pytest
 from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
 from ax_contracts.schemas.data import YouTubeVelocityRequest
 from data_agent import handlers
+from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.youtube import VideoStat
-from data_agent.skills.youtube_velocity import measure_velocity, top_setting
+from data_agent.skills.youtube_velocity import fill_names, measure_velocity, top_setting
 from data_agent.youtube_store import Row, SnapshotStore, recent_snapshots
 
 T0 = datetime(2026, 11, 2, 1, 0, tzinfo=UTC)
@@ -134,8 +135,59 @@ def _request(payload: dict) -> AgentRequest:
 
 def test_handler(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DATA_YOUTUBE_DB", str(_db(tmp_path, RUNS)))
+    monkeypatch.setattr(handlers, "get_youtube", lambda: NamesYouTube())
     result = asyncio.run(handlers.HANDLERS["youtube_velocity"](_request({"top": 5})))
+    assert result.output["videos"][0]["title"] == "a 제목"  # 비어 있던 제목을 받아 붙였다
     assert result.status == TaskStatus.COMPLETED and result.outcome == "known"
     assert [v["video_id"] for v in result.output["videos"]] == ["a", "b"]
     bad = asyncio.run(handlers.HANDLERS["youtube_velocity"](_request({"top": 0})))
     assert bad.status == TaskStatus.FAILED and bad.outcome == "invalid_input"
+
+
+class NamesYouTube:
+    """videos.list 가짜: 받은 id마다 제목·채널·길이를 돌려준다."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.asked: list[list[str]] = []
+        self.fail = fail
+
+    async def videos(self, ids: list[str]) -> list[VideoStat]:
+        self.asked.append(list(ids))
+        if self.fail:
+            raise ConnectorUnavailable("QUOTA_EXCEEDED", "할당량")
+        return [
+            VideoStat(
+                i,
+                "ch",
+                "20",
+                T0,
+                1,
+                1,
+                1,
+                (),
+                title=f"{i} 제목",
+                rank=None,
+                channel_title="채널",
+                duration_seconds=30,
+            )  # fmt: skip
+            for i in ids
+        ]
+
+
+def test_missing_titles_are_fetched_once_and_saved(tmp_path: Path) -> None:
+    path = _db(tmp_path, RUNS)
+    rows = _run(path, top=5).output.videos
+    assert all(v.title is None for v in rows)  # 저장된 제목이 없던 영상
+    youtube = NamesYouTube()
+    named, why = asyncio.run(fill_names(str(path), list(rows), youtube, T0))
+    assert why is None and [v.title for v in named] == ["a 제목", "b 제목"]
+    assert named[0].duration_seconds == 30 and youtube.asked == [["a", "b"]]
+    again = _run(path, top=5).output.videos  # 저장했으니 다음엔 바로 붙는다
+    assert [v.title for v in again] == ["a 제목", "b 제목"]
+
+
+def test_title_fetch_failure_leaves_titles_empty(tmp_path: Path) -> None:
+    path = _db(tmp_path, RUNS)
+    rows = _run(path, top=5).output.videos
+    named, why = asyncio.run(fill_names(str(path), list(rows), NamesYouTube(fail=True), T0))
+    assert why == "제목 받기 실패 [QUOTA_EXCEEDED]" and all(v.title is None for v in named)

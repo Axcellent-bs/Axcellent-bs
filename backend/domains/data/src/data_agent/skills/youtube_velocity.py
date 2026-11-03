@@ -8,6 +8,8 @@
 - 조회수가 빠진 영상(응답에 없음)은 속도를 비우고 순위에 넣지 않는다(0으로 채우지 않음).
   좋아요·댓글이 숨겨진 영상은 그 칸만 비운다. 최근 스냅샷에 없는 영상(지워짐·비공개·추적 끝)은 뺀다.
 - 스냅샷이 2개 미만이면 unknown + 이유.
+- 상위 영상에 저장된 제목·길이가 없으면(회사 키워드 검색·추적으로 들어온 영상) videos.list로
+  한 번 받아 저장하고 붙인다(영상 50개마다 1단위). 받지 못하면 비워 두고 요약에 수를 적는다.
 README "youtube_velocity".
 """
 
@@ -18,6 +20,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
@@ -25,10 +28,12 @@ from ax_contracts.schemas.data import (
     YouTubeVelocityRequest,
     YouTubeVideoVelocity,
 )
+from data_agent.connectors import ConnectorUnavailable
 from data_agent.skills.trend_scan import TREND_CONFIG_ENV
 from data_agent.youtube_store import (
     DB_ENV,
     DEFAULT_DB,
+    SnapshotStore,
     StoredSnapshot,
     recent_snapshots,
     video_details,
@@ -121,6 +126,55 @@ def with_names(db: str, rows: list[YouTubeVideoVelocity]) -> list[YouTubeVideoVe
             )
         )
     return out
+
+
+async def fill_names(
+    db: str, rows: list[YouTubeVideoVelocity], youtube: Any, now: datetime | None = None
+) -> tuple[list[YouTubeVideoVelocity], str | None]:
+    """제목이나 길이가 비어 있는 영상을 videos.list로 받아 저장하고 다시 붙인다.
+
+    (붙인 결과, 실패 이유). 커넥터가 없거나 받지 못하면 그대로 둔다(지어내지 않음).
+    """
+    ids = [r.video_id for r in rows if not r.title or r.duration_seconds is None]
+    if not ids:
+        return rows, None
+    if youtube is None or not hasattr(youtube, "videos"):
+        return rows, "YouTube 커넥터가 없어 제목을 받지 않음"
+    try:
+        stats = await youtube.videos(ids)
+    except ConnectorUnavailable as error:
+        return rows, f"제목 받기 실패 [{error.code}]"
+    at = (now or datetime.now(UTC)).astimezone(UTC).replace(microsecond=0)
+    store = SnapshotStore(db)
+    try:
+        store.save_titles(at, [(s.video_id, s.title) for s in stats])
+        store.save_details(at, stats)
+    finally:
+        store.close()
+    return with_names(db, rows), None
+
+
+async def measure_velocity_named(
+    request: YouTubeVelocityRequest,
+    *,
+    env: Mapping[str, str],
+    youtube: Any,
+    now: datetime | None = None,
+) -> VelocityResult:
+    """measure_velocity + 비어 있는 제목·길이 채우기 (서버 핸들러가 쓴다)."""
+    result = measure_velocity(request, env=env, now=now)
+    out = result.output
+    if out.status != "known" or not out.videos:
+        return result
+    db = env.get(DB_ENV) or str(DEFAULT_DB)
+    videos, why = await fill_names(db, list(out.videos), youtube, now)
+    missing = sum(1 for v in videos if not v.title)
+    summary = out.summary
+    if missing:
+        summary += f" 제목을 받지 못한 영상 {missing}개" + (f" ({why})." if why else ".")
+    output = out.model_copy(update={"videos": videos, "summary": summary})
+    evidence = result.evidence.model_copy(update={"data_summary": summary})
+    return VelocityResult(output, evidence)
 
 
 @dataclass(frozen=True)

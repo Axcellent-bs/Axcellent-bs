@@ -88,7 +88,7 @@ from data_agent.skills.trend_candidates import find_candidates
 from data_agent.skills.trend_history import history
 from data_agent.skills.trend_popular import popular
 from data_agent.skills.trend_scan import NoTrendGroups, scan_trends
-from data_agent.skills.youtube_velocity import measure_velocity
+from data_agent.skills.youtube_velocity import measure_velocity_named
 
 
 def get_llm() -> LLMClient:
@@ -547,7 +547,7 @@ async def youtube_velocity(request: AgentRequest) -> AgentResult:
     data = _parse(request, YouTubeVelocityRequest)
     if isinstance(data, AgentResult):
         return data
-    result = measure_velocity(data, env=os.environ)
+    result = await measure_velocity_named(data, env=os.environ, youtube=get_youtube())
     return _result(
         request,
         TaskStatus.COMPLETED,
