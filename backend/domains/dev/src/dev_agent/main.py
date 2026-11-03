@@ -23,6 +23,7 @@ from dev_agent import vcs
 from dev_agent.api import create_dev_router
 from dev_agent.handlers import DEV_HANDLERS
 from dev_agent.runtime import get_service
+from dev_agent.vcs import inventory
 
 # 화면: 업무 시스템 dashboard-web 「개발 AI」 탭(3001), 옛 planning-web(3002·5173)
 DEFAULT_CORS_ORIGINS = (
@@ -67,6 +68,8 @@ async def _resync_on_start() -> None:
     상대가 아직 안 떴으면 못 보낸 것으로 남겨 다시 보낸다."""
     asyncio.get_running_loop().create_task(get_service().resync_peer())
     get_service().start_pr_sync()
+    # 연결 대장: 켤 때 한 번, 그 뒤 하루마다 서버 버전·토큰 권한을 다시 읽는다
+    inventory.start_daily()
 
 
 app.router.on_startup.append(_resync_on_start)

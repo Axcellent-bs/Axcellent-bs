@@ -42,6 +42,7 @@ from dev_agent.vcs.base import (
     GraphPr,
     IssueSummary,
     OpenedChange,
+    ServerInfo,
     TraceMeta,
     VcsError,
     cap_diff,
@@ -114,6 +115,10 @@ class MockVcsAdapter:
         self._issue_comments: dict[int, list[Comment]] = {}
         # 쓰기 호출 기록 (테스트에서 execute 뒤에만 불렀는지 본다)
         self.writes: list[tuple[str, int]] = []
+
+    async def server_info(self) -> ServerInfo:
+        """목 부품: 클라우드처럼 본다 (버전 점검 대상 아님)."""
+        return ServerInfo(product="mock", hosted=True, scopes=("repo",))
 
     def __repr__(self) -> str:
         return f"MockVcsAdapter(base_branch={self.base_branch!r}, changes={len(self._entries)})"

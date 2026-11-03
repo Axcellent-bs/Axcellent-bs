@@ -20,7 +20,7 @@ import time
 from dataclasses import replace
 from datetime import datetime
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -58,6 +58,7 @@ from dev_agent.vcs.base import (
     GraphPr,
     IssueSummary,
     OpenedChange,
+    ServerInfo,
     TraceMeta,
     VcsError,
     cap_diff,
@@ -175,6 +176,49 @@ class GithubVcsAdapter:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+    # ---- 연결 대장 (보안 점검)
+
+    def _hosted(self) -> bool:
+        host = urlparse(self.base_url).hostname or ""
+        return host == "api.github.com" or host.endswith(".ghe.com")
+
+    async def server_info(self) -> ServerInfo:
+        """서버 종류·버전과 토큰 권한을 읽는다 (쓰기 없음).
+
+        `GET /meta`: 사내 설치형(GHES)이면 `installed_version`이 온다. 사람 토큰이면 응답 머리글
+        `X-OAuth-Scopes`(클래식 토큰 범위)와 `github-authentication-token-expiration`(만료)을
+        읽는다."""
+        token = await self._auth()
+        try:
+            res = await self._client.get(f"{self.base_url}/meta", headers=self._headers(token))
+        except UnicodeEncodeError:
+            raise VcsError("config", "GET /meta 토큰이나 주소에 쓸 수 없는 글자가 있다") from None
+        except httpx.HTTPError as exc:
+            raise VcsError("unavailable", f"GET /meta 연결 실패 ({type(exc).__name__})") from None
+        if res.status_code >= 400:
+            raise VcsError(self._code(res, ""), f"GET /meta → {res.status_code}")
+        try:
+            body = res.json() if res.content else {}
+        except ValueError:
+            body = {}
+        hosted = self._hosted()
+        version = "" if hosted else str((body or {}).get("installed_version") or "")
+        if self._app is not None:
+            scopes = tuple(f"{k}:{v}" for k, v in sorted(self._app.permissions.items()))
+            note = "" if scopes else "GitHub App 권한을 아직 못 받았다"
+        else:
+            raw = res.headers.get("x-oauth-scopes")
+            scopes = tuple(s.strip() for s in raw.split(",") if s.strip()) if raw else ()
+            note = "" if raw is not None else "세분화 토큰: 권한은 GitHub 토큰 설정에서 확인"
+        return ServerInfo(
+            product="github.com" if hosted else "ghes",
+            hosted=hosted,
+            version=version,
+            scopes=scopes,
+            scope_note=note,
+            token_expires=res.headers.get("github-authentication-token-expiration", ""),
+        )
 
     # ---- HTTP
 

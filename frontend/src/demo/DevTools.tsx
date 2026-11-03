@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from '@/lib/nav'
-import { DEV_API, codingSettingsApi, vcsApi, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsTestResult } from '@/lib/planning'
+import { DEV_API, codingSettingsApi, vcsApi, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsInventory, type VcsTestResult } from '@/lib/planning'
 import { UsageBar } from '@/components/dev/coding'
 
 // 개발 도구 연결: 고객사 개발팀이 쓰는 형상관리·CI·배포 도구를 개발·배포 AI(dev)에 잇는 창구.
@@ -36,6 +36,45 @@ const splitPaths = (x: string) => x.split(/[,\n]/).map((p) => p.trim()).filter(B
 const failed = (id: string, message: string): VcsTestResult => ({ ok: false, code: 'unavailable', message, checked_at: new Date().toISOString(), connection_id: id })
 
 const TONE = { ok: 'bg-emerald-50 text-emerald-700', bad: 'bg-red-50 text-red-700', wait: 'bg-amber-50 text-amber-700', none: 'bg-ink-100 text-ink-700' }
+
+// 연결 대장 상태 (FR-AG-012 연결 시 보안 조건)
+const INV: Record<VcsInventory['status'], { label: string; tone: string }> = {
+  hosted: { label: '클라우드 · 제공사 패치', tone: TONE.none },
+  ok: { label: '패치 기준 충족', tone: TONE.ok },
+  outdated: { label: '패치 필요', tone: TONE.bad },
+  no_policy: { label: '패치 기준 없음', tone: TONE.wait },
+  unknown: { label: '점검 전', tone: TONE.none },
+  error: { label: '점검 실패', tone: TONE.bad },
+}
+const PRODUCT: Record<string, string> = { 'github.com': 'github.com', ghes: 'GitHub Enterprise Server', gitlab: 'GitLab', mock: '시연용' }
+const when = (iso: string) => (iso ? new Date(iso).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—')
+
+/** 연결 하나의 보안 점검 줄: 서버·버전·토큰 권한·만료·마지막 점검, 경고 */
+function InventoryRow({ inv }: { inv?: VcsInventory }) {
+  if (!inv) return null
+  const st = INV[inv.status] ?? INV.unknown
+  return (
+    <div className="sm:col-span-2 lg:col-span-4 rounded-lg border border-ink-100 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-ink-500">보안 점검</span>
+        <span className={`chip ${st.tone}`}>{st.label}</span>
+        {inv.product && <span className="chip bg-ink-100 text-ink-700">{PRODUCT[inv.product] ?? inv.product}{inv.version ? ` ${inv.version}` : ''}</span>}
+        {inv.min_version && <span className="chip bg-ink-100 text-ink-500">기준 {inv.min_version}</span>}
+        <span className="ml-auto text-xs text-ink-500">마지막 점검 {when(inv.checked_at)}</span>
+      </div>
+      <div className="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+        <div><span className="text-xs text-ink-500">토큰 권한 </span>{inv.scopes.length ? inv.scopes.join(', ') : inv.scope_note || '—'}</div>
+        <div><span className="text-xs text-ink-500">토큰 만료 </span>{inv.token_expires || '—'}</div>
+      </div>
+      {(inv.warnings.length > 0 || inv.error) && (
+        <ul className="mt-2 space-y-0.5 text-sm text-red-700">
+          {inv.error && <li>{inv.error}{inv.error_code ? ` (${inv.error_code})` : ''}</li>}
+          {inv.warnings.map((w) => <li key={w}>{w}</li>)}
+        </ul>
+      )}
+    </div>
+  )
+}
 
 // 요청 작업 코딩 방식: 기획에서 넘어온 작업을 누가 코딩하나 (회사 설정)
 const CODING_MODES: { id: CodingSetting; label: string }[] = [
@@ -135,16 +174,27 @@ export function DevToolsPanel() {
   const [form, setForm] = useState<Form | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [inv, setInv] = useState<Record<string, VcsInventory>>({})
+  const [checking, setChecking] = useState(false)
+  const putInv = (rows: VcsInventory[]) => setInv(Object.fromEntries(rows.map((r) => [r.connection_id, r])))
 
   useEffect(() => {
     api.list().then(setList).catch(() => { setList([]); setOffline(true) })
+    api.inventory().then(putInv).catch(() => {})
   }, [])
+
+  const checkAll = async () => {
+    setChecking(true)
+    try { putInv(await api.checkAll()) } catch (e) { setError((e as Error).message) } finally { setChecking(false) }
+  }
 
   const runTest = async (id: string) => {
     setTesting(id)
     try {
       const r = await api.test(id)
       setTests((t) => ({ ...t, [id]: r && typeof r.message === 'string' ? r : failed(id, '확인 결과 없음') }))
+      const got = r?.inventory
+      if (got) setInv((m) => ({ ...m, [id]: got }))
     } catch (e) {
       setTests((t) => ({ ...t, [id]: failed(id, (e as Error).message) }))
     } finally {
@@ -281,7 +331,8 @@ export function DevToolsPanel() {
           {list && <span className={`chip ${connected ? TONE.none : TONE.wait}`}>레포 {list.length}</span>}
           {list && list.length > 1 && <span className="chip bg-ink-100 text-ink-700">PR마다 AI 제안 · 사람 승인</span>}
           {offline && <span className="chip bg-amber-50 text-amber-700">개발·배포 AI에 연결할 수 없음</span>}
-          <button type="button" className="btn-primary ml-auto px-4" disabled={offline || (!!form && !form.id)}
+          {!!list?.length && <button type="button" className="btn-ghost ml-auto" onClick={checkAll} disabled={checking || offline}>{checking ? '점검 중…' : '보안 점검'}</button>}
+          <button type="button" className={`btn-primary px-4 ${list?.length ? '' : 'ml-auto'}`} disabled={offline || (!!form && !form.id)}
             onClick={() => { setForm({ ...EMPTY }); setError(null) }}>연결 추가</button>
         </div>
 
@@ -323,6 +374,7 @@ export function DevToolsPanel() {
                         {c.paths.length ? c.paths.map((p) => <span key={p} className="chip bg-ink-100 text-ink-700">{p}</span>) : <span className="text-ink-500">—</span>}
                       </dd>
                     </div>
+                    <InventoryRow inv={inv[c.id]} />
                     {t && (
                       <div className="sm:col-span-2 lg:col-span-4">
                         <dt className="text-xs text-ink-500">마지막 확인</dt>
