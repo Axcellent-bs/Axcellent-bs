@@ -47,6 +47,9 @@ CONFLICT_OUTCOMES = frozenset(
         "EXPIRED",
         "CANCELLED",
         "HANDOVER_CLOSED",
+        "NOT_DRAFT",
+        "LEDGER_CONFLICT",
+        "ROSTER_COUNT_MISMATCH",
     }
 )
 
@@ -75,6 +78,8 @@ def unwrap(result: AgentResult) -> dict[str, Any]:
         raise ApiError(504, "UPSTREAM_TIMEOUT", "hr 에이전트가 제때 응답하지 않았다")
     if result.status == TaskStatus.FAILED:
         raise ApiError(502, "UPSTREAM_ERROR", f"hr 호출 실패 ({outcome or 'failed'})")
+    if outcome == "UNKNOWN_TEAM":
+        raise ApiError(422, "INVALID_INPUT", _message(result, "조직도에 없는 팀이다"))
     if outcome in NOT_FOUND_OUTCOMES:
         raise ApiError(404, "NOT_FOUND", _message(result, "찾을 수 없다"))
     if outcome in CONFLICT_OUTCOMES:

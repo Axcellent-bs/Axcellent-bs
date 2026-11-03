@@ -4,8 +4,9 @@
 팀을 읽지 못함) 0명으로 채우지 않고 실패로 답한다.
 발령은 발령일이 1일이면 그 달부터, 아니면 다음 달 1일부터 센다.
 
-- 확정된 발령 기록이 하나도 없으면 가상 명부(예시)로 세고 `example: true`로 밝힌다.
-- 확정 기록이 있으면 그 기록만으로 센다(`example: false`). 초안·반려는 세지 않는다.
+- 확정된 발령 기록이 없거나, 있어도 "전 직원 등록 완료"가 표시되지 않았으면 가상 명부(예시)로 세고
+  `example: true`로 밝힌다(일부만 등록된 인원을 진짜 값으로 내보내지 않는다).
+- 전 직원 등록 완료가 표시되면 확정 기록만으로 센다(`example: false`). 초안·반려는 세지 않는다.
   기록이 시작되기 전의 달은 인원을 알 수 없으므로 0명으로 채우지 않고 실패로 답한다.
 """
 
@@ -39,9 +40,11 @@ async def team_headcount(svc: Services, request: AgentRequest) -> AgentResult:
         return failed(request, "NO_ORG_ROSTER", "조직도에서 팀을 읽지 못해 팀 인원을 셀 수 없다")
 
     records = changes.confirmed(svc)
-    if not records:
+    if not records or not changes.roster_complete(svc):
         members = [m.team for m in example_roster(teams)]
         basis = f"가상 명부(예시) 기준, {params.month}-01 소속"
+        if records:
+            basis += " (발령 기록 등록 중: 전 직원 등록 완료 전)"
         example = True
     else:
         first = ledger.earliest_month(records)

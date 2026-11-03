@@ -698,3 +698,16 @@ class OnboardingStepBody(BaseModel):
     깨지는 변경이라, 프론트가 쓰지 않게 된 뒤 따로 지운다)."""
 
     done: bool = True
+
+
+class OrgChangeDecisionBody(BaseModel):
+    """조직 변동 초안 결정. `approve`는 확정(그때부터 팀 인원에 센다), `reject`는 반려."""
+
+    decision: Literal["approve", "reject"]
+    note: str | None = None
+
+
+class OrgRosterCompleteBody(BaseModel):
+    """전 직원 등록 완료 표시(`complete=true`) 또는 다시 열기(`false`)."""
+
+    complete: bool = True

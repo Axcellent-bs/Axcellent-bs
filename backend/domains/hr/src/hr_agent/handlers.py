@@ -59,6 +59,10 @@ async def list_org_changes(request: AgentRequest) -> AgentResult:
     return await org_changes.list_org_changes(get_services(), request)
 
 
+async def set_org_roster_complete(request: AgentRequest) -> AgentResult:
+    return await org_changes.set_org_roster_complete(get_services(), request)
+
+
 async def team_headcount(request: AgentRequest) -> AgentResult:
     return await org_headcount.team_headcount(get_services(), request)
 
@@ -115,6 +119,7 @@ _HANDLERS = {
     "record_org_change": record_org_change,
     "decide_org_change": decide_org_change,
     "list_org_changes": list_org_changes,
+    "set_org_roster_complete": set_org_roster_complete,
     "start_handover": start_handover,
     "answer_handover_question": answer_handover_question,
     "confirm_handover": confirm_handover,

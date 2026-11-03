@@ -3,7 +3,9 @@
 - `record_org_change`: 초안을 저장한다. 승인은 필요 없고 인원에는 아직 세지 않는다.
 - `decide_org_change`: 인사 담당자(대시보드 사람 토큰)가 확정하거나 반려한다. 확정하기 전에 앞선
   확정 기록과 맞는지 전체를 다시 적용해 보고(`ledger.validate`), 맞지 않으면 확정하지 않는다.
-- `list_org_changes`: 조회 전용.
+- `list_org_changes`: 조회 전용. 명부 등록 상태(등록된 직원 수, 전 직원 등록 완료 여부)도 돌려준다.
+- `set_org_roster_complete`: 인사 담당자가 "전 직원 등록 완료"를 표시한다. 확정된 명부가 전체 직원
+  수와 같을 때만 표시할 수 있고, 표시해야 `team_headcount`가 확정 기록으로 센다.
 팀 이름은 조직도(`org.yaml`)에 있는 것만 받는다. 같은 발령을 두 번 접수하면 처음 것을 돌려준다.
 """
 
@@ -23,9 +25,11 @@ from ax_contracts.schemas import (
     OrgChangeView,
     RecordOrgChangeInput,
     RecordOrgChangeOutput,
+    SetOrgRosterCompleteInput,
+    SetOrgRosterCompleteOutput,
 )
 from hr_agent.org import ledger
-from hr_agent.org.roster import org_teams
+from hr_agent.org.roster import EXPECTED_MEMBER_COUNT, org_teams
 from hr_agent.results import (
     completed,
     gate_blocked,
@@ -63,6 +67,23 @@ def confirmed(svc: Services) -> list[ledger.Change]:
         "SELECT * FROM org_changes WHERE status = 'confirmed' ORDER BY created_at, rowid"
     )
     return [_change(r) for r in rows]
+
+
+_COMPLETE_KEY = "roster_complete"
+_LAST_MONTH = "9999-12"
+
+
+def roster_complete(svc: Services) -> bool:
+    row = svc.store.one("SELECT value FROM org_state WHERE key = ?", (_COMPLETE_KEY,))
+    return row is not None and row["value"] == "1"
+
+
+def registered_members(svc: Services) -> int:
+    """확정 기록으로 지금(가장 늦은 기록까지 반영) 명부에 있는 직원 수."""
+    try:
+        return len(ledger.roster_at(confirmed(svc), _LAST_MONTH))
+    except ledger.LedgerError:
+        return 0
 
 
 async def record_org_change(svc: Services, request: AgentRequest) -> AgentResult:
@@ -217,10 +238,65 @@ async def list_org_changes(svc: Services, request: AgentRequest) -> AgentResult:
     sql += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
     args.append(params.limit)
     rows = svc.store.all(sql, args)
-    output = ListOrgChangesOutput(changes=[_view(r) for r in rows], collected_at=svc.clock())
+    output = ListOrgChangesOutput(
+        changes=[_view(r) for r in rows],
+        registered_members=registered_members(svc),
+        expected_members=EXPECTED_MEMBER_COUNT,
+        roster_complete=roster_complete(svc),
+        collected_at=svc.clock(),
+    )
     return completed(
         request,
         output,
         outcome="org_changes",
         evidence=make_evidence(svc.clock, f"발령 기록 {len(rows)}건"),
+    )
+
+
+async def set_org_roster_complete(svc: Services, request: AgentRequest) -> AgentResult:
+    try:
+        params = SetOrgRosterCompleteInput.model_validate(request.input)
+    except ValidationError as exc:
+        return invalid_input(request, exc)
+    if not request.meta.idempotency_key:
+        return invalid_input(request, "상태를 바꾸는 요청에는 idempotency_key가 필요하다")
+
+    registered = registered_members(svc)
+    already = roster_complete(svc)
+    if params.complete and registered != EXPECTED_MEMBER_COUNT:
+        return refused(
+            request,
+            "ROSTER_COUNT_MISMATCH",
+            f"확정된 명부가 {registered}명이다. 전체 직원 {EXPECTED_MEMBER_COUNT}명을 모두 "
+            "등록하고 확정한 뒤에 완료로 표시할 수 있다",
+        )
+    summary = f"전 직원 등록 완료 {'표시' if params.complete else '해제'} ({registered}명)"
+    evidence = make_evidence(svc.clock, summary)
+    output = SetOrgRosterCompleteOutput(
+        roster_complete=params.complete,
+        registered_members=registered,
+        expected_members=EXPECTED_MEMBER_COUNT,
+    )
+    if already == params.complete:
+        return completed(request, output, outcome="duplicate", evidence=evidence)
+
+    target = f"roster_complete#{int(params.complete)}"
+    decision = await svc.gate.execute(
+        "set_org_roster_complete",
+        {"summary": summary, "target": target},
+        with_key(request.meta, f"set_org_roster_complete:{target}"),
+        evidence,
+    )
+    if decision.status != "executed":
+        return gate_blocked(request, decision)
+    svc.store.execute(
+        "INSERT OR REPLACE INTO org_state(key, value, updated_at) VALUES (?, ?, ?)",
+        (_COMPLETE_KEY, "1" if params.complete else "0", svc.clock().isoformat()),
+    )
+    svc.audit.record(request.meta.context_id, "org_roster.complete", {"complete": params.complete})
+    return completed(
+        request,
+        output,
+        outcome="roster_complete" if params.complete else "roster_reopened",
+        evidence=evidence,
     )

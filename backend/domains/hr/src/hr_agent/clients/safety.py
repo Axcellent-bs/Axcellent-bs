@@ -38,7 +38,10 @@ HR_ACTIONS: dict[str, ActionSpec] = {
     "answer_handover_question": ActionSpec("A"),
     "confirm_handover": ActionSpec("B", verifier="planning"),
     "record_org_change": ActionSpec("A"),  # 발령 초안 저장(인원에 세지 않는다)
-    "decide_org_change": ActionSpec("A"),  # 인사 담당자가 사람 토큰으로 확정·반려
+    "decide_org_change": ActionSpec("A"),
+    "set_org_roster_complete": ActionSpec(
+        "A"
+    ),  # 전 직원 등록 완료 표시  # 인사 담당자가 사람 토큰으로 확정·반려
     "confirm_handover_incomplete": ActionSpec("C"),  # 완성도 미달이면 사람이 보고 결정한다
 }
 

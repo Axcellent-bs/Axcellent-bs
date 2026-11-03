@@ -48,13 +48,14 @@
     },
     {
       "id": "team_headcount",
-      "description": "그달 1일 기준 팀별 인원수를 돌려준다(조회 전용). 이름·ID는 내보내지 않는다. 발령일이 1일이면 그 달부터, 아니면 다음 달 1일부터 센다. 확정된 발령 기록이 있으면 그 기록으로 세고, 하나도 없으면 가상 명부(예시)로 세며 example=true로 밝힌다. 인원을 알 수 없으면 0명으로 채우지 않고 실패로 답한다.",
+      "description": "그달 1일 기준 팀별 인원수를 돌려준다(조회 전용). 이름·ID는 내보내지 않는다. 발령일이 1일이면 그 달부터, 아니면 다음 달 1일부터 센다. 확정된 발령 기록이 있고 \"전 직원 등록 완료\"가 표시됐으면 그 기록으로 세고, 아니면 가상 명부(예시)로 세며 example=true로 밝힌다. 인원을 알 수 없으면 0명으로 채우지 않고 실패로 답한다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#TeamHeadcountInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#TeamHeadcountOutput",
       "grade": "read",
       "allowed_requesters": [
         "orchestrator",
-        "finance"
+        "finance",
+        "dashboard-api"
       ],
       "verifier": null,
       "priority": "recommended"
@@ -318,10 +319,22 @@
     },
     {
       "id": "list_org_changes",
-      "description": "조직 변동 기록(초안·확정·반려)을 조회한다(조회 전용).",
+      "description": "조직 변동 기록(초안·확정·반려)과 명부 등록 상태(등록된 직원 수, 전 직원 등록 완료 여부)를 조회한다(조회 전용).",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListOrgChangesInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListOrgChangesOutput",
       "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "set_org_roster_complete",
+      "description": "인사 담당자가 \"전 직원 등록 완료\"를 표시하거나 해제한다. 확정된 명부가 전체 직원 수와 같을 때만 표시할 수 있고, 표시해야 team_headcount가 확정 기록으로 센다(일부만 등록된 인원이 재무에 나가지 않게).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#SetOrgRosterCompleteInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#SetOrgRosterCompleteOutput",
+      "grade": "A",
       "allowed_requesters": [
         "dashboard-api"
       ],

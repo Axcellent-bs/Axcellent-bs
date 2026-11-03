@@ -12,6 +12,7 @@ import Finance from '@/pages/Finance'
 import FinanceGuide from '@/pages/FinanceGuide'
 import Handoffs from '@/pages/Handoffs'
 import Hr from '@/pages/Hr'
+import OrgChanges from '@/pages/OrgChanges'
 import Incidents from '@/pages/Incidents'
 import IncidentDetail from '@/pages/IncidentDetail'
 import Orchestrator from '@/pages/Orchestrator'
@@ -80,6 +81,7 @@ function Pages() {
           <Route path="/finance/guide" element={<FinanceGuide />} />
           <Route path="/hr" element={<Hr part="hr" />} />
           <Route path="/ops" element={<Hr part="ops" />} />
+          <Route path="/org" element={<OrgChanges />} />
           <Route path="/marketing" element={<Marketing />} />
           <Route path="/orchestrator" element={<Orchestrator />} />
           <Route path="/data" element={<Data />} />

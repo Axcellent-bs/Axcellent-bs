@@ -13,3 +13,4 @@ assignments:
   data: {unit: 물류기획}
   handover: {unit: 경영지원}
   decisions: {unit: 경영지원}
+  org: {unit: 경영지원}

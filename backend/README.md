@@ -1,6 +1,6 @@
 # backend
 
-AXcellent AI 백엔드. ax-company-hq/ax-backend(dev `04f0e28`, 10/28)를 복사해 와서 **서비스 13개 단위**로 나눴다.
+AXcellent AI 백엔드. ax-company-hq/ax-backend(dev `04f0e28`, 10/28)를 복사해 와서 **서비스 14개 단위**로 나눴다.
 부서가 아니라 서비스 단위로 팔기 때문에(고객사가 필요한 서비스만 고름) 에이전트도 서비스마다 하나씩 띄운다.
 
 ## 폴더
@@ -9,13 +9,13 @@ AXcellent AI 백엔드. ax-company-hq/ax-backend(dev `04f0e28`, 10/28)를 복사
 | --- | --- |
 | `shared/` | 공통: `contracts`(계약), `agent-template`(에이전트 틀·서비스 대응표), `safety`(안전 관문), `memory`(회사 기억), `dashboard-api`(화면 중계), `shop-api`(고객사 쇼핑몰 시뮬·총괄 읽기 중계) |
 | `domains/` | 업무 로직. 원래 부서 패키지 그대로(support·hr·marketing·finance·data·planning·infra-dejafix). 직접 띄우지 않고 서비스가 가져다 쓴다 |
-| `services/` | 서비스 에이전트 13개. 각자 카드(`agent-card.json`)·포트·실행 설정을 가진다 |
+| `services/` | 서비스 에이전트 14개. 각자 카드(`agent-card.json`)·포트·실행 설정을 가진다 |
 | `infra/` | docker compose (`infra/compose.yml`이 `shared/*`·`services/*` compose를 모은다) |
 | `config/` | 회사 설정 폴더 `tenants/<회사>/`(카탈로그·커넥터·조직도, "새 회사를 붙일 때") |
 | `scripts/` | `split_services.py`(서비스 폴더 생성), `run_all.sh`(로컬 전체 실행), `tenant_env.py`(회사 설정 읽기) |
 | `docs/` | ax-backend 설계 문서 복사본 |
 
-## 서비스 13개
+## 서비스 14개
 
 | 서비스 | 화면 | 포트 | 업무 로직 | skill |
 | --- | --- | --- | --- | --- |
@@ -28,6 +28,7 @@ AXcellent AI 백엔드. ax-company-hq/ax-backend(dev `04f0e28`, 10/28)를 복사
 | `data` | 데이터 분석 | 8106 | domains/data | 4 |
 | `handover` | 인수인계 | 8104 | domains/hr | 6 |
 | `decisions` | 결정 기록 | 8114 | domains/hr | 5 |
+| `org` | 조직 변동 | 8124 | domains/hr | 5 |
 | `planning` | 요청·기획서 | 8101 | domains/planning | 2 |
 | `dev` | 개발·배포 | 8111 | domains/planning | 6 |
 | `incident` | 장애 대응 | 8107 | domains/infra-dejafix | 3 |
@@ -109,7 +110,7 @@ call_agent("finance", req)
 ```
 
 - **켠 서비스**: `backend/.env`의 `AX_ENABLED_SERVICES` (쉼표 목록, 예: `inquiry,claims`). 비어 있으면 전부 켠다(예전 동작).
-  `run_all.sh`가 읽어서 모든 서버에 넘긴다. 서비스 13개만 이 목록을 따르고, 공통 서버(safety·memory·shop-api·dashboard-api)와
+  `run_all.sh`가 읽어서 모든 서버에 넘긴다. 서비스 14개만 이 목록을 따르고, 공통 서버(safety·memory·shop-api·dashboard-api)와
   주소로 부른 대상은 늘 켜져 있다. 서버는 목록과 관계없이 다 띄운다(꺼진 서비스로 가는 요청만 사람에게 간다).
 - **켠 서비스 파일**: `AX_ENABLED_SERVICES_FILE`(run_all.sh 기본값 `backend/.data/enabled_services.json`)이 가리키는 파일이 있으면
   환경변수보다 먼저 쓴다. 형식은 `{"enabled": ["data", "finance"], "updated_at": "...", "updated_by": "..."}`이고, 빈 목록은 "모두 끔"이다.
@@ -170,7 +171,7 @@ tests/tenants/
 | `tenant.toml` | 회사 폴더 | `name`(한국어 이름), `catalog`, `connector`, `org` |
 | 카탈로그 | `catalog` 값. 이름이면 `domains/data/src/data_agent/catalogs/<이름>.toml`, `.toml`이면 회사 폴더 기준 경로 | data가 무엇을 볼지: 지표·단위·실패 코드 (`domains/data/README.md` "지표 카탈로그") |
 | 커넥터 | `connector` 값. 카탈로그의 `connector`와 같아야 한다 | data가 어디서 읽을지: 이름 → 구현은 data `clients/shop_client.py`의 `CONNECTORS` (`domains/data/README.md` "커넥터") |
-| 조직도 | `org` 값(회사 폴더 기준, 기본 `org.yaml`) | 꺼진 서비스로 가는 일을 맡을 부서·담당자 ("업무 요청 라우터"). **서비스 13개를 모두 적는다**. 빠진 서비스로 가는 일은 `no_assignee`로 실패한다 |
+| 조직도 | `org` 값(회사 폴더 기준, 기본 `org.yaml`) | 꺼진 서비스로 가는 일을 맡을 부서·담당자 ("업무 요청 라우터"). **서비스 14개를 모두 적는다**. 빠진 서비스로 가는 일은 `no_assignee`로 실패한다 |
 
 ### 예시: 냉장 물류 (테스트 전용 가짜 회사)
 
@@ -190,7 +191,7 @@ assignments:
   incident: {unit: 관제실, assignee: 야간 당직}
   inquiry: {unit: 거래처지원}
   finance: {unit: 경영지원}
-  # … 서비스 13개 모두
+  # … 서비스 14개 모두
 ```
 
 카탈로그 `coldchain.toml`은 지표 2개(냉장 유통 이탈 건수·출고 지연 건수), 단위 "출고", 고객 "거래처"다. 이 회사로 돌리면 data 문장에 캣북스 단어(결제·주문·판매자)가 나오지 않는다(`domains/data/tests/test_catalog_wording.py`).
@@ -200,7 +201,7 @@ assignments:
 1. `config/tenants/<회사>/` 폴더를 만들고 `tenant.toml`·`org.yaml`을 둔다 (위 예시를 복사해 고친다)
 2. 카탈로그를 만든다. 실제 회사는 `domains/data/src/data_agent/catalogs/<회사>.toml`에 두고 `catalog = "<회사>"`
 3. 그 회사 시스템을 읽는 커넥터가 없으면 data에 만들고 `CONNECTORS`에 이름을 올린다 (메서드 3개, 못 읽으면 `ConnectorUnavailable`, 0으로 채우지 않음)
-4. `uv run pytest tests/test_tenant_config.py`: 회사 폴더 확인 (카탈로그 있음, 커넥터 일치, 조직도에 서비스 13개). 새 회사 폴더는 이 테스트의 목록에 더한다
+4. `uv run pytest tests/test_tenant_config.py`: 회사 폴더 확인 (카탈로그 있음, 커넥터 일치, 조직도에 서비스 14개). 새 회사 폴더는 이 테스트의 목록에 더한다
 5. `AX_TENANT=<회사> bash scripts/run_all.sh`
 
 ### run_all.sh가 정하는 것 (`scripts/tenant_env.py`)

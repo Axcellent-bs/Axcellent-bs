@@ -29,6 +29,7 @@ members = [
     "ax-svc-handover",
     "ax-svc-incident",
     "ax-svc-inquiry",
+    "ax-svc-org",
     "ax-svc-planning",
     "ax-svc-reviews",
     "ax-workflow-core",
@@ -509,6 +510,17 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "ax-agent-support", editable = "domains/support" }]
+
+[[package]]
+name = "ax-svc-org"
+version = "0.1.0"
+source = { editable = "services/org" }
+dependencies = [
+    { name = "ax-agent-hr" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "ax-agent-hr", editable = "domains/hr" }]
 
 [[package]]
 name = "ax-svc-planning"

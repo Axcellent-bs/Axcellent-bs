@@ -42,19 +42,6 @@
       "priority": "recommended"
     },
     {
-      "id": "team_headcount",
-      "description": "그달 1일 기준 팀별 인원수를 돌려준다(조회 전용). 이름·ID는 내보내지 않는다. 발령일이 1일이면 그 달부터, 아니면 다음 달 1일부터 센다. 확정된 발령 기록이 있으면 그 기록으로 세고, 하나도 없으면 가상 명부(예시)로 세며 example=true로 밝힌다. 인원을 알 수 없으면 0명으로 채우지 않고 실패로 답한다.",
-      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#TeamHeadcountInput",
-      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#TeamHeadcountOutput",
-      "grade": "read",
-      "allowed_requesters": [
-        "orchestrator",
-        "finance"
-      ],
-      "verifier": null,
-      "priority": "recommended"
-    },
-    {
       "id": "list_candidate_cards",
       "description": "확신이 낮아 사람 확인을 기다리는 후보 카드를 조회한다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCandidateCardsInput",
@@ -212,42 +199,6 @@
       "verifier": null,
       "priority": "recommended",
       "handoff": false
-    },
-    {
-      "id": "record_org_change",
-      "description": "조직 변동(팀 이동·입사·퇴사) 초안을 저장한다. 승인은 필요 없고 확정 전에는 팀 인원에 세지 않는다. 팀은 조직도에 있는 이름만 받고, 같은 발령을 두 번 접수하면 처음 것을 돌려준다.",
-      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordOrgChangeInput",
-      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordOrgChangeOutput",
-      "grade": "A",
-      "allowed_requesters": [
-        "dashboard-api"
-      ],
-      "verifier": null,
-      "priority": "recommended"
-    },
-    {
-      "id": "decide_org_change",
-      "description": "인사 담당자가 조직 변동 초안을 확정하거나 반려한다. 확정하면 그때부터 team_headcount의 인원에 센다. 앞선 확정 기록과 맞지 않으면(없는 사람의 이동 등) 확정하지 않는다.",
-      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideOrgChangeInput",
-      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideOrgChangeOutput",
-      "grade": "A",
-      "allowed_requesters": [
-        "dashboard-api"
-      ],
-      "verifier": null,
-      "priority": "recommended"
-    },
-    {
-      "id": "list_org_changes",
-      "description": "조직 변동 기록(초안·확정·반려)을 조회한다(조회 전용).",
-      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListOrgChangesInput",
-      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListOrgChangesOutput",
-      "grade": "read",
-      "allowed_requesters": [
-        "dashboard-api"
-      ],
-      "verifier": null,
-      "priority": "recommended"
     }
   ]
 }

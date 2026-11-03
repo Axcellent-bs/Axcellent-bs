@@ -140,6 +140,12 @@ action = "decide_org_change"
 owner = "hr"
 base_grade = "A"
 
+# "전 직원 등록 완료" 표시. 이게 있어야 team_headcount가 확정 기록으로 센다(일부만 등록된 인원이 나가지 않게)
+[[actions]]
+action = "set_org_roster_complete"
+owner = "hr"
+base_grade = "A"
+
 # 인수인계·담당 변경 (#180). 기록·진행은 A, 확정은 B. 온보딩·발령 요청·퇴직 확정은 hr에서 빠져서
 # (#374, #375) 등록하지 않는다. 미등록은 항상 C(사람 승인)라 다시 쓰려면 그때 새로 등록한다
 [[actions]]

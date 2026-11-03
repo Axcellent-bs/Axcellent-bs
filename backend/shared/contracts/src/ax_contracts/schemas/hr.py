@@ -28,7 +28,8 @@ skill과 등급(등급 신고는 안전 레이어 레지스트리가 원본이�
 | `restore_merged_card` | A | 병합으로 대체됨이 된 카드를 되돌림 |
 | `record_org_change` | A | 조직 변동(발령) 초안 저장. 승인 전에는 인원에 세지 않는다 |
 | `decide_org_change` | A | 인사 담당자가 발령 초안을 확정·반려 (요청자 dashboard-api) |
-| `list_org_changes` | 읽기 | 발령 기록 목록 |
+| `list_org_changes` | 읽기 | 발령 기록 목록과 명부 등록 상태 |
+| `set_org_roster_complete` | A | 인사 담당자가 "전 직원 등록 완료"를 표시 (요청자 dashboard-api) |
 | `team_headcount` | 읽기 | 그 달 1일 기준 팀별 인원수 (이름·직원 ID 없음, 요청자 finance 팀 예산) |
 
 `RecordCaseOutput`은 모델만 추가했고, hr의 출력 전환은 hr 담당 PR에서 한다.
@@ -392,8 +393,25 @@ class ListOrgChangesInput(AxModel):
 
 
 class ListOrgChangesOutput(AxModel):
+    """발령 기록과 명부 등록 상태. `roster_complete`가 참이어야 확정 기록으로 센다."""
+
     changes: list[OrgChangeView] = Field(default_factory=list)
+    registered_members: int = Field(default=0, ge=0)  # 확정 기록으로 지금 명부에 있는 직원 수
+    expected_members: int = Field(default=0, ge=0)  # 전체 직원 수(가정)
+    roster_complete: bool = False
     collected_at: UtcDatetime
+
+
+class SetOrgRosterCompleteInput(AxModel):
+    """인사 담당자가 "전 직원 등록 완료"를 표시(`complete=True`)하거나 다시 연다(`False`)."""
+
+    complete: bool = True
+
+
+class SetOrgRosterCompleteOutput(AxModel):
+    roster_complete: bool
+    registered_members: int = Field(ge=0)
+    expected_members: int = Field(ge=0)
 
 
 # ---- 유사 사기 카드 조회 (data의 사기 점수 FRAUD_SIMILAR 규칙용) ------------------------------
