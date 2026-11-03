@@ -55,6 +55,7 @@ LIST_KEYS = {
     "money_out_total",
 }
 DETAIL_KEYS = {
+    "recovered_at",
     "context_id",
     "component",
     "window",
@@ -589,6 +590,23 @@ def test_impact_window_from_the_orchestrator_is_used_first(real_mode, fake_data)
     assert data["impact"]["window_exact"] is True
     assert body["meta"]["unavailable"] == []
     assert data["refunds"] is not None  # 정확한 구간이면 환불을 사건에 묶는다
+
+
+def test_recovery_time_comes_from_the_orchestrator(real_mode, fake_data) -> None:
+    row = {**ORC_ROW, "recovered_at": "2026-10-22T05:07:00Z"}
+    handlers.reset_state(LiveSources(_orchestrator([row])))
+    _use_safety(_safety([_raw_record(e) for e in GOOD]))
+    _use_books()
+    data = TestClient(app).get(f"/api/finance/incidents/{CTX}").json()["data"]
+    assert data["recovered_at"] == "2026-10-22T05:07:00Z"
+
+
+def test_recovery_time_is_empty_until_the_shop_recovers(real_mode, fake_data) -> None:
+    handlers.reset_state(LiveSources(_orchestrator([ORC_ROW])))
+    _use_safety(_safety([_raw_record(e) for e in GOOD]))
+    _use_books()
+    data = TestClient(app).get(f"/api/finance/incidents/{CTX}").json()["data"]
+    assert data["recovered_at"] is None
 
 
 def test_window_end_is_never_in_the_future(mock_mode, monkeypatch) -> None:
