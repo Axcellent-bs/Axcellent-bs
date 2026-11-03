@@ -604,8 +604,11 @@ class DevService(PlanningCore):
         connection: str | None = None,
         skip_queue: bool = False,
         mode: str = "agent",
+        assignee: str | None = None,
     ) -> ActionResult:
         """개발팀원이 쓴 기획으로 요청·확정 기획서·작업 하나를 만들고 코딩 에이전트를 띄운다 (A).
+
+        `assignee`: 내 Claude 작업을 맡긴 사람 (그 사람의 Claude만 가져간다, 구독형만).
 
         에이전트는 바꿔 끼운 뒤 잠금 밖에서 돈다. 진행은 작업 `coding`에 적힌다.
         `mode="subscription"`이면 서버 에이전트를 띄우지 않고 `queued`로 두어 개발자 본인 Claude가
@@ -693,6 +696,7 @@ class DevService(PlanningCore):
                         connection=cid,
                         skip_queue=skip_queue,
                         mode="subscription" if sub else "agent",
+                        assignee=assignee if sub else None,
                     ),
                 )
             )
@@ -1003,6 +1007,21 @@ class DevService(PlanningCore):
             "run_max_tokens": coder.limit("PLANNING_CODER_MAX_TOKENS", coder.RUN_MAX_TOKENS),
             # 대기 중인 작업에 보여 줄 예상 규모 (지난 서버 AI 코딩의 중앙값)
             "estimate": self.coding_estimate(s),
+        }
+
+    def me(self, who: str | None) -> dict[str, Any]:
+        """지금 화면을 쓰는 사람과 그 사람의 본인 Claude 연결 (사람 토큰 이름 기준)."""
+        seen = self.state.agents_seen.get(who) if who else None
+        return {
+            "name": who,
+            "claude_connected": bool(who) and who in self.agents_connected(self.state),
+            "claude_seen_at": seen.isoformat() if seen else None,
+            "team": [
+                {"name": n, "seen_at": at.isoformat()}
+                for n, at in sorted(
+                    self.state.agents_seen.items(), key=lambda x: x[1], reverse=True
+                )
+            ],
         }
 
     async def mark_agent_seen(self, who: str) -> None:
@@ -2061,6 +2080,7 @@ class DevService(PlanningCore):
         title: str | None = None,
         waiting_for: list[str] | None = None,
         mode: str | None = None,
+        who: str | None = None,
     ) -> ChatThread:
         """대화에 메시지 하나를 더한다. thread_id가 없으면 새 대화(`chat-n`)를 연다."""
 
@@ -2100,6 +2120,8 @@ class DevService(PlanningCore):
                 th.task_id = task_id
             if connection:
                 th.connection = connection
+            if who and th.who is None:
+                th.who = who
             if title and thread_id is not None:
                 th.title = title
             if waiting_for is not None:

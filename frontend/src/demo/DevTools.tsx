@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from '@/lib/nav'
-import { DEV_API, codingSettingsApi, vcsApi, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsInventory, type VcsTestResult } from '@/lib/planning'
+import { DEV_API, codingSettingsApi, useMe, vcsApi, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsInventory, type VcsTestResult } from '@/lib/planning'
 import { UsageBar } from '@/components/dev/coding'
 
 // 개발 도구 연결: 고객사 개발팀이 쓰는 형상관리·CI·배포 도구를 개발·배포 AI(dev)에 잇는 창구.
@@ -114,12 +114,15 @@ function CopyLine({ text }: { text: string }) {
 
 /** 내 Claude(MCP 작업 대기열 서버) 연결하기: 내 PC의 Claude Code에 작업 대기열 서버를 붙이는 순서 */
 function ClaudeConnect({ connected }: { connected: string[] }) {
+  const me = useMe()
+  const mine = me?.name ? me.claude_connected : null
   return (
     <div className="space-y-3 rounded-lg border border-ink-100 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="font-medium">내 Claude 연결</h3>
-        <span className={`chip ${connected.length ? TONE.ok : TONE.none}`}>{connected.length ? `연결됨 ${connected.join(', ')}` : '연결 없음'}</span>
-        <span className="text-xs text-ink-500">최근 7일 안에 작업을 본 개발자</span>
+        {me?.name && <span className={`chip ${mine ? TONE.ok : TONE.none}`}>{me.name} · {mine ? '연결됨' : '연결 없음'}</span>}
+        <span className={`chip ${connected.length ? TONE.ok : TONE.none}`}>{connected.length ? `팀 연결 ${connected.join(', ')}` : '팀 연결 없음'}</span>
+        <span className="text-xs text-ink-500">최근 7일 안에 작업을 본 개발자 · 내 Claude 작업은 맡긴 사람의 Claude만 가져감</span>
       </div>
       <ol className="list-decimal space-y-3 pl-5 text-sm">
         <li className="space-y-1">

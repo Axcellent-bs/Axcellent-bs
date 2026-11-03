@@ -298,6 +298,22 @@ export function useCodingLimits(): typeof LIMIT_DEFAULT {
   return v
 }
 
+// ---- 나 (dev 서비스 `/api/planning/me`): 이 화면을 쓰는 사람(사람 토큰)과 그 사람의 본인 Claude 연결
+export interface Me { name: string | null; claude_connected: boolean; claude_seen_at: string | null; team: { name: string; seen_at: string }[] }
+let meCache: Promise<Me | null> | null = null
+export function useMe(): Me | null {
+  const [v, setV] = useState<Me | null>(null)
+  useEffect(() => {
+    meCache ??= call<Me>(DEV_API, '/me', { headers: SAFETY_HUMAN_TOKEN ? { Authorization: `Bearer ${SAFETY_HUMAN_TOKEN}` } : {} })
+      .then((m) => (m && 'claude_connected' in m ? m : null))
+      .catch(() => { meCache = null; return null })
+    let alive = true
+    void meCache.then((x) => alive && setV(x))
+    return () => { alive = false }
+  }, [])
+  return v
+}
+
 export const codingSettingsApi = (base: string) => ({
   get: () => call<CodingSettings>(base, '/coding-settings'),
   set: (mode: CodingSetting) => call<CodingSettings>(base, '/coding-settings', post({ mode }, 'admin')),

@@ -134,6 +134,8 @@ def available(svc: DevService, who: str) -> list[dict[str, Any]]:
         cr = x.coding
         if cr is None or cr.mode != SUBSCRIPTION:
             continue
+        if cr.assignee and cr.assignee != who and cr.status == "queued":
+            continue  # 다른 사람에게 맡긴 작업
         if cr.status == "queued" or (cr.status in HELD and cr.claimed_by == who):
             row = spec_of(svc.state, x)
             row["mine"] = cr.status in HELD
@@ -153,6 +155,8 @@ async def claim(svc: DevService, task_id: str, who: str) -> dict[str, Any]:
             raise _error("ALREADY_CLAIMED", f"{task_id}는 {cr.claimed_by}가 가져갔다")
         if cr.status != "queued" and cr.status not in HELD:
             raise _error("NOT_CLAIMABLE", f"{task_id}는 지금 가져갈 수 없다 ({cr.status})")
+        if cr.assignee and cr.assignee != who:
+            raise _error("NOT_YOURS", f"{task_id}는 {cr.assignee}에게 맡긴 작업이다")
         mins = lease_minutes()
         if not again:
             ctx = _ctx(svc, s, x)

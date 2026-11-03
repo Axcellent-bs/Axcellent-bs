@@ -227,6 +227,8 @@ class CodingRun(DomainModel):
     # MCP로 가져가 코딩한다 (work_queue.py). 구독형은 서버 에이전트를 띄우지 않는다
     mode: Literal["agent", "subscription"] = "agent"
     claimed_by: str | None = None  # 가져간 사람 (사람 토큰 이름)
+    # 내 Claude 작업을 맡긴 사람 (사람 토큰 이름). 있으면 그 사람의 Claude만 가져간다
+    assignee: str | None = None
     claimed_at: UtcDatetime | None = None
     lease_until: UtcDatetime | None = None  # 이때까지 진행 보고가 없으면 대기열로 돌린다
     progress: str | None = None  # 개발자 Claude가 마지막으로 보고한 진행 글
@@ -481,6 +483,8 @@ class ChatThread(DomainModel):
     waiting_for: list[str] = Field(default_factory=list)  # 끝나기를 기다리는 요청 ID
     # 작업을 누가 코딩하나: agent(서버 AI, API 키) · subscription(개발자 본인 Claude, work_queue.py)
     mode: Literal["agent", "subscription"] = "agent"
+    # 대화를 연 사람 (사람 토큰 이름). 내 Claude 작업은 이 사람에게 맡긴다
+    who: str | None = None
     created_at: UtcDatetime
     updated_at: UtcDatetime
 
