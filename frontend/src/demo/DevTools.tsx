@@ -97,7 +97,8 @@ const CODING_MODES: { id: CodingSetting; label: string }[] = [
 ]
 const codingApi = codingSettingsApi(DEV_API)
 const MCP_URL = `${DEV_API.replace(/\/$/, '')}/api/planning/mcp`
-const MCP_ADD = `claude mcp add --transport http axcellent-dev ${MCP_URL} --header "Authorization: Bearer <내 토큰>"`
+// 로컬: run_all.sh가 처음 켤 때 만든 사람 토큰(backend/.data/tokens.env HUMAN_TOKEN)을 읽어 넣는다 (Git Bash, 레포 폴더)
+const MCP_ADD = `claude mcp add --transport http axcellent-dev ${MCP_URL} --header "Authorization: Bearer $(sed -n 's/^HUMAN_TOKEN=//p' backend/.data/tokens.env)"`
 
 function CopyLine({ text }: { text: string }) {
   const [done, setDone] = useState(false)
@@ -120,17 +121,12 @@ function ClaudeConnect({ connected }: { connected: string[] }) {
     <div className="space-y-3 rounded-lg border border-ink-100 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="font-medium">내 Claude 연결</h3>
-        {me?.name && <span className={`chip ${mine ? TONE.ok : TONE.none}`}>{me.name} · {mine ? '연결됨' : '연결 없음'}</span>}
-        <span className={`chip ${connected.length ? TONE.ok : TONE.none}`}>{connected.length ? `팀 연결 ${connected.join(', ')}` : '팀 연결 없음'}</span>
-        <span className="text-xs text-ink-500">최근 7일 안에 작업을 본 개발자 · 내 Claude 작업은 맡긴 사람의 Claude만 가져감</span>
+        {me?.name && !connected.includes(me.name) && <span className={`chip ${mine ? TONE.ok : TONE.none}`} title="최근 7일 작업 목록을 열었는지">{me.name} {mine ? '연결됨' : '연결 없음'}</span>}
+        <span className={`chip ${connected.length ? TONE.ok : TONE.none}`} title="최근 7일 작업 목록을 연 사람">{connected.length ? `연결됨 ${connected.join(', ')}` : '연결 없음'}</span>
       </div>
       <ol className="list-decimal space-y-3 pl-5 text-sm">
         <li className="space-y-1">
-          <span>내 사람 토큰 받기</span>
-          <span className="block text-xs text-ink-500">운영자에게 받기 · 저장소에 커밋 금지</span>
-        </li>
-        <li className="space-y-1">
-          <span>내 PC 터미널에서 작업 대기열 서버 붙이기</span>
+          <span className="flex flex-wrap items-center gap-2">작업 대기열 서버 붙이기 <span className="chip bg-ink-100 text-ink-500">Git Bash · 레포 폴더</span></span>
           <CopyLine text={MCP_ADD} />
         </li>
         <li className="space-y-1">
