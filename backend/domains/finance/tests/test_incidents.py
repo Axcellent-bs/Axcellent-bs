@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock
@@ -25,7 +26,7 @@ from ax_contracts.schemas import (
 )
 from finance_agent import books as bk
 from finance_agent import finance_config as fc
-from finance_agent import handlers, incidents, sources
+from finance_agent import handlers, incidents, persist, sources
 from finance_agent import ledger as lg
 from finance_agent.main import app
 from finance_agent.sources import LiveSources, MockSources
@@ -654,3 +655,41 @@ def test_incident_window_survives_when_the_orchestrator_forgets(monkeypatch) -> 
     assert again["component"] == "payment"
     unknown = asyncio.run(handlers.incident_info("ctx_never"))
     assert unknown["window_from"] is None  # 받은 적 없으면 지어내지 않는다
+
+
+def test_incident_api_works_from_a_saved_window_after_a_restart(monkeypatch, tmp_path) -> None:
+    """저장 파일에서 복원한 구간으로 목록·상세 API가 500 없이 돈다 (복구 시각까지)."""
+    start, end = fc.now() - timedelta(minutes=9), fc.now() - timedelta(minutes=1)
+    reply = {
+        "window_from": start,
+        "window_to": end,
+        "recovered_at": end,
+        "window_exact": True,
+        "component": "payment",
+    }
+    src = handlers.state().sources
+    monkeypatch.setattr(src, "incident_window", AsyncMock(return_value=reply))
+    asyncio.run(handlers.incident_info("ctx_inc_saved"))
+
+    dumped = json.loads(json.dumps(persist.dump(handlers.state())))  # 파일에 쓰고 읽은 것과 같다
+    handlers.reset_state(src)
+    persist.restore(handlers.state(), dumped)
+    monkeypatch.setattr(src, "incident_window", AsyncMock(return_value=None))  # 총괄이 잊었다
+    handlers.state().ledger.coupons["ctx_inc_saved"] = {"count": 1, "total": 2000}
+    handlers.state().ledger.coupon_events["ctx_inc_saved"] = [
+        lg.coupon_from_event(
+            "ctx_inc_saved",
+            {"coupon_id": "cpn_1", "buyer_id": "buy_1", "count": 1, "total_value": 2000},
+            fc.now(),
+        )
+    ]
+
+    client = TestClient(app)
+    listed = client.get("/api/finance/incidents")
+    assert listed.status_code == 200
+    assert "ctx_inc_saved" in [i["context_id"] for i in listed.json()["data"]]
+    detail = client.get("/api/finance/incidents/ctx_inc_saved")
+    assert detail.status_code == 200
+    data = detail.json()["data"]
+    assert data["window"] is not None and data["recovered_at"] == fc.iso(end)
+    assert data["compensation"]["coupons"][0]["buyer_id"] == "buy_1"
