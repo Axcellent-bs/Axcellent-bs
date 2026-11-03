@@ -2,7 +2,7 @@ import { useState } from "react";
 import { finance, signedKrw, type StatementPeriod } from "@/lib/finance";
 import { Panel, ResourceBody, useResource } from "./bits";
 
-// 재무제표: 일반 회사가 쓰는 손익계산서 순서(K-IFRS 기능별)로 당기·전기를 나란히 보여 주고 CSV로 내려받는다.
+// 재무제표: 일반 회사가 쓰는 손익계산서 순서(K-IFRS 기능별)로 당기·전기를 나란히 보여 주고 엑셀·CSV로 내려받는다.
 // 장부에 없는 항목(급여·임차료, 영업외손익, 법인세)은 "자료 없음"으로 둔다. 숫자를 지어내지 않는다.
 
 const PERIODS: { id: StatementPeriod; label: string }[] = [
@@ -19,18 +19,18 @@ export function StatementsSection({ tick }: { tick: number }) {
   /** 비어 있으면 서버 기본값(오늘이 속한 기간) */
   const [date, setDate] = useState("");
   const res = useResource(`statements:${period}:${date}`, () => finance.statements(period, date || null), tick);
-  const [downloading, setDownloading] = useState(false);
+  const [downloading, setDownloading] = useState<"csv" | "xlsx" | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
-  async function download() {
-    setDownloading(true);
+  async function download(format: "csv" | "xlsx") {
+    setDownloading(format);
     setProblem(null);
     try {
-      await finance.downloadStatement(period, date || null);
+      await finance.downloadStatement(period, date || null, format);
     } catch (e) {
       setProblem((e as Error).message);
     } finally {
-      setDownloading(false);
+      setDownloading(null);
     }
   }
 
@@ -48,8 +48,11 @@ export function StatementsSection({ tick }: { tick: number }) {
         <span className="sr-only">기준 날짜</span>
         <input type="date" className="field w-auto py-1" value={date} onChange={(e) => setDate(e.target.value)} />
       </label>
-      <button type="button" className="btn-primary" disabled={downloading} onClick={download}>
-        {downloading ? "내려받는 중…" : "CSV 내려받기"}
+      <button type="button" className="btn-primary" disabled={downloading !== null} onClick={() => download("xlsx")}>
+        {downloading === "xlsx" ? "내려받는 중…" : "엑셀 내려받기"}
+      </button>
+      <button type="button" className="btn-ghost" disabled={downloading !== null} onClick={() => download("csv")}>
+        {downloading === "csv" ? "내려받는 중…" : "CSV 내려받기"}
       </button>
     </>
   );

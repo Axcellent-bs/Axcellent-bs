@@ -542,9 +542,9 @@ export const finance = {
     fin<Envelope<TeamBudget>>(`/api/finance/team-budget/${encodeURIComponent(month)}/approve`, { method: "POST", body: { signature, note: note || null }, human: true }),
   statements: (period: StatementPeriod, date?: string | null) =>
     fin<Envelope<IncomeStatement>>(`/api/finance/statements${query({ period, date })}`),
-  /** 손익계산서 CSV 내려받기 (엑셀에서 열림) */
-  downloadStatement: (period: StatementPeriod, date?: string | null) =>
-    download(`/api/finance/statements${query({ period, date, format: "csv" })}`, `income-statement-${period}.csv`),
+  /** 손익계산서 내려받기 (CSV 또는 엑셀) */
+  downloadStatement: (period: StatementPeriod, date: string | null | undefined, format: "csv" | "xlsx") =>
+    download(`/api/finance/statements${query({ period, date, format })}`, `income-statement-${period}.${format}`),
 
   // §12-1 장애 사건 재무 (시나리오 A)
   incidents: () => fin<Envelope<IncidentSummary[]>>("/api/finance/incidents"),

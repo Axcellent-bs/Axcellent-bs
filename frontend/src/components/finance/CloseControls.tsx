@@ -124,19 +124,19 @@ export function VarianceSection({ tick }: { tick: number }) {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[600px] text-sm">
                 <thead className="text-left text-xs text-ink-500">
-                  <tr><th className="pb-1 font-medium">항목 ({v.month})</th><th className="pb-1 text-right font-medium">이번 달</th><th className="pb-1 text-right font-medium">지난달</th><th className="pb-1 text-right font-medium">변동</th><th className="pb-1 text-right font-medium">작년 같은 달</th></tr>
+                  <tr><th className="pb-1 pl-3 font-medium">항목 ({v.month})</th><th className="pb-1 text-right font-medium">이번 달</th><th className="pb-1 text-right font-medium">지난달</th><th className="pb-1 text-right font-medium">변동</th><th className="pb-1 pr-3 text-right font-medium">작년 같은 달</th></tr>
                 </thead>
                 <tbody>
                   {v.lines.map((l) => (
                     <tr key={l.code} className={`border-t border-ink-100 ${l.flag ? "bg-amber-50" : ""}`}>
-                      <th scope="row" className="py-1.5 pr-3 text-left font-normal">{l.label}{l.flag && <span className="ml-1 text-xs text-amber-800">크게 움직임</span>}</th>
+                      <th scope="row" className="py-1.5 pl-3 pr-3 text-left font-normal">{l.label}{l.flag && <span className="ml-1 text-xs text-amber-800">크게 움직임</span>}</th>
                       <td className="py-1.5 text-right tabular-nums">{valueOf(l, l.current)}</td>
                       <td className="py-1.5 text-right tabular-nums text-ink-500">{valueOf(l, l.previous)}</td>
                       <td className="py-1.5 text-right tabular-nums">
                         {l.diff == null ? "–" : l.code === "take_rate" ? `${l.diff > 0 ? "+" : ""}${(l.diff * 100).toFixed(1)}%p` : l.code === "order_count" ? `${l.diff > 0 ? "+" : ""}${l.diff.toLocaleString("ko-KR")}건` : signedKrw(l.diff)}
                         {l.pct != null && l.code !== "take_rate" && <span className="ml-1 text-xs text-ink-500">({l.pct > 0 ? "+" : ""}{(l.pct * 100).toFixed(0)}%)</span>}
                       </td>
-                      <td className="py-1.5 text-right tabular-nums text-ink-500">{valueOf(l, l.last_year)}</td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums text-ink-500">{valueOf(l, l.last_year)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -151,15 +151,15 @@ export function VarianceSection({ tick }: { tick: number }) {
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[480px] text-sm">
                   <thead className="text-left text-xs text-ink-500">
-                    <tr><th className="pb-1 font-medium">분류</th><th className="pb-1 text-right font-medium">총거래액 (지난달)</th><th className="pb-1 text-right font-medium">수수료 매출 (지난달)</th><th className="pb-1 text-right font-medium">수수료 변동</th></tr>
+                    <tr><th className="pb-1 pl-3 font-medium">분류</th><th className="pb-1 text-right font-medium">총거래액 (지난달)</th><th className="pb-1 text-right font-medium">수수료 매출 (지난달)</th><th className="pb-1 pr-3 text-right font-medium">수수료 변동</th></tr>
                   </thead>
                   <tbody>
                     {v.categories.map((c) => (
                       <tr key={c.category} className="border-t border-ink-100">
-                        <td className="py-1.5">{c.category}</td>
+                        <td className="py-1.5 pl-3">{c.category}</td>
                         <td className="py-1.5 text-right tabular-nums">{krw(c.gmv)} <span className="text-xs text-ink-500">({krw(c.gmv_prev)})</span></td>
                         <td className="py-1.5 text-right tabular-nums">{krw(c.commission)} <span className="text-xs text-ink-500">({krw(c.commission_prev)})</span></td>
-                        <td className="py-1.5 text-right tabular-nums">{signedKrw(c.commission_diff)}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{signedKrw(c.commission_diff)}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
 from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 
 from finance_agent import closing, handlers, statements
 from finance_agent import finance_config as fc
@@ -132,3 +134,35 @@ def test_api_rejects_unknown_period_and_format() -> None:
     client = TestClient(app)
     assert client.get("/api/finance/statements", params={"period": "day"}).status_code == 400
     assert client.get("/api/finance/statements", params={"format": "pdf"}).status_code == 400
+
+
+def test_xlsx_download_has_real_numbers_and_the_same_content_as_the_report() -> None:
+    client = TestClient(app)
+    res = client.get("/api/finance/statements", params={"period": "month", "format": "xlsx"})
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert 'filename="income-statement-month-2026-10-01.xlsx"' in res.headers["content-disposition"]
+
+    ws = load_workbook(io.BytesIO(res.content)).active
+    assert ws.title == "손익계산서" and ws["A1"].value == "손익계산서"
+    cells = {row[0].value: row for row in ws.iter_rows() if row[0].value}
+    report = client.get("/api/finance/statements", params={"period": "month"}).json()["data"]
+    assert any(line["current"] is not None for line in report["rows"])
+    for line in report["rows"]:
+        row = cells[line["label"]]
+        for col, key in ((1, "current"), (2, "previous")):
+            # 금액은 글자가 아니라 숫자 칸이고, 자료가 없으면 "자료 없음"이다
+            assert row[col].value == ("자료 없음" if line[key] is None else line[key])
+    for note in report["notes"]:
+        assert note["label"] in cells
+    assert cells["작성 기준"][1].value == report["basis"]
+
+
+def test_xlsx_text_starting_with_equals_is_not_a_formula() -> None:
+    client = TestClient(app)
+    report = client.get("/api/finance/statements").json()["data"]
+    report["company"] = "=HYPERLINK(1)"
+    ws = load_workbook(io.BytesIO(statements.to_xlsx(report, []))).active
+    assert ws["B2"].value == "=HYPERLINK(1)" and ws["B2"].data_type == "s"

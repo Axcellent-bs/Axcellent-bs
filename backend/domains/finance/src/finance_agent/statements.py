@@ -1,4 +1,4 @@
-"""재무제표: 기간 손익계산서(당기·전기 비교)와 내려받기(CSV).
+"""재무제표: 기간 손익계산서(당기·전기 비교)와 내려받기(CSV, 엑셀).
 
 일반 회사가 쓰는 K-IFRS 기능별 손익계산서 순서(매출액 → 매출원가 → 매출총이익 → 판매비와관리비 →
 영업이익 → 영업외손익 → 법인세비용차감전순이익 → 법인세비용 → 당기순이익)를 따른다.
@@ -207,6 +207,92 @@ def to_csv(report: dict[str, Any], unavailable: list[str]) -> str:
     return "﻿" + buf.getvalue()
 
 
-def filename(report: dict[str, Any]) -> str:
-    """ASCII 파일 이름 (예: income-statement-month-2026-10-01.csv)."""
-    return f"income-statement-{report['period']}-{report['current']['from'][:10]}.csv"
+def to_xlsx(report: dict[str, Any], unavailable: list[str]) -> bytes:
+    """내려받기용 엑셀. CSV와 같은 내용이고, 금액은 바로 계산할 수 있게 숫자 칸으로 넣는다."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = report["title"]
+    cur, prev = report["current"], report["previous"]
+    bold = Font(bold=True)
+    head_fill = PatternFill("solid", fgColor="EEF0F6")
+
+    def text(row: int, col: int, value: str, font: Font | None = None) -> Any:
+        cell = ws.cell(row=row, column=col)
+        cell.value = value
+        cell.data_type = "s"  # "="로 시작해도 수식으로 실행되지 않게 글자로 넣는다
+        if font is not None:
+            cell.font = font
+        return cell
+
+    def money(row: int, col: int, value: int | None, font: Font | None = None) -> None:
+        if value is None:
+            cell = text(row, col, "자료 없음")
+        else:
+            cell = ws.cell(row=row, column=col, value=value)
+            cell.number_format = "#,##0"
+            if font is not None:
+                cell.font = font
+        cell.alignment = Alignment(horizontal="right")
+
+    def amounts(row: int, label: str, line: dict[str, Any], indent: int = 0) -> None:
+        font = bold if indent == 0 else None
+        text(row, 1, label, font).alignment = Alignment(indent=indent)
+        money(row, 2, line["current"], font)
+        money(row, 3, line["previous"], font)
+        text(row, 4, line["note"])
+
+    r = 1
+    text(r, 1, report["title"], Font(bold=True, size=14))
+    if report["company"]:
+        r += 1
+        text(r, 1, "회사")
+        text(r, 2, report["company"])
+    for name, period in (("당기", cur), ("전기", prev)):
+        r += 1
+        text(r, 1, name)
+        text(r, 2, period["name"])
+        text(r, 3, f"{period['from']} ~ {period['to']}")
+    r += 1
+    text(r, 1, "단위")
+    text(r, 2, report["unit"])
+
+    r += 2
+    heads = ["과목", f"당기 ({cur['name']})", f"전기 ({prev['name']})", "비고"]
+    for col, head in enumerate(heads, start=1):
+        cell = text(r, col, head, bold)
+        cell.fill = head_fill
+        if col in (2, 3):
+            cell.alignment = Alignment(horizontal="right")
+    ws.freeze_panes = ws.cell(row=r + 1, column=2)
+    for line in report["rows"]:
+        r += 1
+        amounts(r, line["label"], line, line["level"])
+
+    r += 2
+    text(r, 1, "주석(참고)", bold)
+    for note in report["notes"]:
+        r += 1
+        amounts(r, note["label"], note, 1)
+
+    r += 2
+    text(r, 1, "작성 기준", bold)
+    text(r, 2, report["basis"])
+    if unavailable:
+        r += 1
+        text(r, 1, "못 받은 자료", bold)
+        text(r, 2, ", ".join(unavailable))
+
+    for col, width in enumerate((34, 18, 18, 48), start=1):
+        ws.column_dimensions[get_column_letter(col)].width = width
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def filename(report: dict[str, Any], ext: str = "csv") -> str:
+    """ASCII 파일 이름 (예: income-statement-month-2026-10-01.xlsx)."""
+    return f"income-statement-{report['period']}-{report['current']['from'][:10]}.{ext}"
