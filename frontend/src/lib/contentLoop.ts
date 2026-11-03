@@ -1,7 +1,7 @@
 // 콘텐츠 루프: 트렌드 감지 → 영상 소재 추천 → 영상 제작 → 게시·성과 측정 → 다음 추천에 반영 → (다시 1).
 // 단계 이름·담당·상태는 이 파일에만 둔다. 단계가 생기거나 동작하기 시작하면 이 파일만 고친다.
 // 숫자는 여기 두지 않는다: 1단계 개수는 트렌드 탭이 받은 trend_scan 응답에서 화면이 센다. 2~5단계는 상태 칩만.
-// 1·2·4단계 칩은 트렌드 탭이 받은 trend_scan·content_recommend·campaign_effect 응답으로 정한다: 정상이면 "동작 중"(파란 테두리), 실패면 "연결 확인 필요"(회색 칩, 점선 회색 테두리).
+// 1·2·4단계 칩은 트렌드 탭이 받은 trend_scan·content_recommend(+promo_concepts)·campaign_effect 응답으로 정한다: 정상이면 "동작 중"(파란 테두리), 실패면 "연결 확인 필요"(회색 칩, 점선 회색 테두리).
 // 트렌드 탭의 하위 탭 5개도 이 단계 정의를 그대로 쓴다(이름·순서·주소 `#trend/<tab>`·할 일). 루프 띠와 하위 탭이 같은 말을 한다.
 
 /** "마케팅에 소재로 보내기"를 아직 못 하는 이유 (dashboard-api POST /handoffs는 에이전트 토큰만 받는다) */
@@ -62,9 +62,9 @@ export const LOOP_STAGES: LoopStage[] = [
     no: 2,
     tab: "recommend",
     title: "영상 소재 추천",
-    owner: "데이터분석 AI · content_recommend → 마케팅",
+    owner: "데이터분석 AI · promo_concepts · content_recommend → 마케팅",
     live: true,
-    description: "급상승 소재를 순위·근거·영상 아이디어와 함께 추천합니다.",
+    description: "회사 상품 홍보 영상 기획안을 만들고, 급상승 소재를 순위·근거·영상 아이디어와 함께 추천합니다.",
     status: PROBE_STATUS.checking,
     note: `마케팅에 넘기기는 아직 못 해요: ${SEND_TO_MARKETING_BLOCKED}`,
     probe: "content_recommend",
