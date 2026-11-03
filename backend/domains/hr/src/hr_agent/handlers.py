@@ -18,8 +18,11 @@ from hr_agent.case_memory import service as case_memory
 from hr_agent.clients.errors import UpstreamError, bind_meta
 from hr_agent.fraud_similar import service as fraud_similar
 from hr_agent.handover import service as handover
+from hr_agent.org import basis as org_basis
 from hr_agent.org import changes as org_changes
+from hr_agent.org import describe as org_describe
 from hr_agent.org import headcount as org_headcount
+from hr_agent.org import parse as org_parse
 from hr_agent.planning_check import service as planning_check
 from hr_agent.results import failed
 from hr_agent.roster import service as roster
@@ -57,6 +60,18 @@ async def decide_org_change(request: AgentRequest) -> AgentResult:
 
 async def list_org_changes(request: AgentRequest) -> AgentResult:
     return await org_changes.list_org_changes(get_services(), request)
+
+
+async def find_org_change_basis(request: AgentRequest) -> AgentResult:
+    return await org_basis.find_org_change_basis(get_services(), request)
+
+
+async def parse_org_change_text(request: AgentRequest) -> AgentResult:
+    return await org_parse.parse_org_change_text(get_services(), request)
+
+
+async def describe_org_change(request: AgentRequest) -> AgentResult:
+    return await org_describe.describe_org_change(get_services(), request)
 
 
 async def set_org_roster_complete(request: AgentRequest) -> AgentResult:
@@ -120,6 +135,9 @@ _HANDLERS = {
     "decide_org_change": decide_org_change,
     "list_org_changes": list_org_changes,
     "set_org_roster_complete": set_org_roster_complete,
+    "find_org_change_basis": find_org_change_basis,
+    "parse_org_change_text": parse_org_change_text,
+    "describe_org_change": describe_org_change,
     "start_handover": start_handover,
     "answer_handover_question": answer_handover_question,
     "confirm_handover": confirm_handover,

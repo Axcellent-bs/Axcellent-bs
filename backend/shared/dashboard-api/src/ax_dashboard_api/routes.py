@@ -21,12 +21,17 @@ from ax_contracts.schemas.hr import (
     DecideCandidateCardOutput,
     DecideDuplicateGroupOutput,
     DecideOrgChangeOutput,
+    DescribeOrgChangeOutput,
+    FindOrgChangeBasisInput,
+    FindOrgChangeBasisOutput,
     GetRosterOutput,
     HandoverAnswerRequest,
     HandoverQuestion,
     HandoverStatus,
     HandoverView,
     ListOrgChangesOutput,
+    ParseOrgChangeTextInput,
+    ParseOrgChangeTextOutput,
     RecordOrgChangeInput,
     RecordOrgChangeOutput,
     RecordResolutionOutput,
@@ -718,6 +723,30 @@ async def record_org_change(body: RecordOrgChangeInput) -> dict:
         "record_org_change", body.model_dump(exclude_none=True), target=f"org:{target}"
     )
     return ok(RecordOrgChangeOutput.model_validate(out))
+
+
+@router.post("/org-changes/basis")
+async def find_org_change_basis(body: FindOrgChangeBasisInput) -> dict:
+    """발령 사유와 비슷한 과거 업무 결정 카드 후보(RAG). 찾기만 하고 연결하지 않는다."""
+    _no_org_in_mock()
+    out = await hr_client.call("find_org_change_basis", body.model_dump())
+    return ok(FindOrgChangeBasisOutput.model_validate(out))
+
+
+@router.post("/org-changes/parse")
+async def parse_org_change_text(body: ParseOrgChangeTextInput) -> dict:
+    """직원 번호로 적은 발령 문장을 입력 칸으로 나눈 제안(LLM). 저장하지 않는다."""
+    _no_org_in_mock()
+    out = await hr_client.call("parse_org_change_text", body.model_dump())
+    return ok(ParseOrgChangeTextOutput.model_validate(out))
+
+
+@router.get("/org-changes/{change_id}/description")
+async def describe_org_change(change_id: str) -> dict:
+    """발령이 팀 인원에 주는 변화를 읽기 쉬운 설명문으로 쓴다. 숫자는 코드 값이다."""
+    _no_org_in_mock()
+    out = await hr_client.call("describe_org_change", {"change_id": change_id})
+    return ok(DescribeOrgChangeOutput.model_validate(out))
 
 
 @router.post("/org-changes/{change_id}/decision")

@@ -21,7 +21,13 @@ from ax_dashboard_api.envelope import ApiError, is_mock
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 # 본문을 받아 계산만 하고 저장하지 않는 POST (읽기와 같다)
-READ_ONLY_POSTS = frozenset({"/api/dashboard/plan-checks"})
+READ_ONLY_POSTS = frozenset(
+    {
+        "/api/dashboard/plan-checks",
+        "/api/dashboard/org-changes/basis",
+        "/api/dashboard/org-changes/parse",
+    }
+)
 
 
 def bearer(authorization: str | None) -> str | None:

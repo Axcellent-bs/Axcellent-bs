@@ -28,6 +28,7 @@ from ax_contracts.schemas import (
     SetOrgRosterCompleteInput,
     SetOrgRosterCompleteOutput,
 )
+from hr_agent.clients.memory import card_state
 from hr_agent.org import ledger
 from hr_agent.org.roster import EXPECTED_MEMBER_COUNT, org_teams
 from hr_agent.results import (
@@ -99,6 +100,15 @@ async def record_org_change(svc: Services, request: AgentRequest) -> AgentResult
     if unknown:
         return refused(request, "UNKNOWN_TEAM", f"조직도에 없는 팀이다: {', '.join(unknown)}")
 
+    basis_title: str | None = None
+    if params.basis_card_id:
+        card = await svc.memory.get_card(params.basis_card_id)
+        if card is None:
+            return refused(request, "UNKNOWN_CARD", "없는 근거 카드다")
+        if card.kind != "decision" or card_state(card) != "active":
+            return refused(request, "NOT_BASIS_CARD", "확정된 업무 결정 카드만 근거로 쓸 수 있다")
+        basis_title = card.title
+
     change_id = stable_id("orgchg_", request.meta.idempotency_key)
     existing = get(svc, change_id) or svc.store.one(
         "SELECT * FROM org_changes WHERE member_id = ? AND kind = ? AND effective_date = ?"
@@ -138,8 +148,8 @@ async def record_org_change(svc: Services, request: AgentRequest) -> AgentResult
 
     svc.store.execute(
         "INSERT INTO org_changes(change_id, context_id, member_id, kind, from_team, to_team,"
-        " effective_date, counts_from_month, status, note, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)",
+        " effective_date, counts_from_month, status, note, created_at, basis_card_id, basis_title)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)",
         (
             change_id,
             request.meta.context_id,
@@ -151,6 +161,8 @@ async def record_org_change(svc: Services, request: AgentRequest) -> AgentResult
             month,
             params.note,
             svc.clock().isoformat(),
+            params.basis_card_id,
+            basis_title,
         ),
     )
     # 직원 ID는 감사 로그에 남기지 않는다(발령 ID만)

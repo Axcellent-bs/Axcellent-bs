@@ -29,6 +29,9 @@ skill과 등급(등급 신고는 안전 레이어 레지스트리가 원본이�
 | `record_org_change` | A | 조직 변동(발령) 초안 저장. 승인 전에는 인원에 세지 않는다 |
 | `decide_org_change` | A | 인사 담당자가 발령 초안을 확정·반려 (요청자 dashboard-api) |
 | `list_org_changes` | 읽기 | 발령 기록 목록과 명부 등록 상태 |
+| `find_org_change_basis` | 읽기 | 발령 사유와 비슷한 과거 업무 결정 카드 후보(RAG) |
+| `parse_org_change_text` | 읽기 | 발령 문장을 입력 칸으로 정리하는 제안(LLM, 저장 안 함) |
+| `describe_org_change` | 읽기 | 발령 요약 설명문(숫자는 코드, 문장만 LLM) |
 | `set_org_roster_complete` | A | 인사 담당자가 "전 직원 등록 완료"를 표시 (요청자 dashboard-api) |
 | `team_headcount` | 읽기 | 그 달 1일 기준 팀별 인원수 (이름·직원 ID 없음, 요청자 finance 팀 예산) |
 
@@ -341,6 +344,7 @@ class RecordOrgChangeInput(AxModel):
     to_team: str | None = None
     effective_date: str = Date
     note: str | None = Field(default=None, max_length=500)
+    basis_card_id: str | None = None  # 사람이 고른 근거 결정 카드(선택). 없어도 저장된다
 
     @model_validator(mode="after")
     def _teams_match_kind(self) -> RecordOrgChangeInput:
@@ -367,6 +371,8 @@ class OrgChangeView(AxModel):
     counts_from_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     status: OrgChangeStatus
     note: str | None = None
+    basis_card_id: str | None = None
+    basis_title: str | None = None  # 근거 카드를 고른 때의 제목
     created_at: UtcDatetime
     decided_at: UtcDatetime | None = None
 
@@ -412,6 +418,79 @@ class SetOrgRosterCompleteOutput(AxModel):
     roster_complete: bool
     registered_members: int = Field(ge=0)
     expected_members: int = Field(ge=0)
+
+
+# ---- 조직 변동 RAG·LLM: 근거 카드 찾기(9번) · 문장 정리(10번) · 요약 설명문(11번) ----------
+# 모두 조회 전용이다. 저장은 사람이 확인한 뒤 `record_org_change`로 한다.
+
+
+class FindOrgChangeBasisInput(AxModel):
+    """발령 사유와 비슷한 과거 업무 결정 카드를 찾는다."""
+
+    reason: str = Field(min_length=2, max_length=500)
+    limit: int = Field(default=3, ge=1, le=5)
+
+
+class OrgChangeBasisCandidate(AxModel):
+    card_id: str
+    title: str
+    summary: str  # 카드의 결정 한 줄(없으면 제목)
+    similarity: float = Field(ge=0.0, le=1.0)  # 검색 점수 그대로
+    rejected: bool = False  # 과거에 기각된 안이면 true: 사람이 알고 판단하게 표시한다
+
+
+class FindOrgChangeBasisOutput(AxModel):
+    """기준 미만이면 `candidates`가 비어 있다(근거 카드 없음). 자동으로 연결하지 않는다."""
+
+    candidates: list[OrgChangeBasisCandidate] = Field(default_factory=list)
+    method: Literal["dense", "dice"]
+    collected_at: UtcDatetime
+
+
+class ParseOrgChangeTextInput(AxModel):
+    """발령 문장(직원 번호로 적은 것)을 입력 칸으로 나눠 달라는 요청."""
+
+    text: str = Field(min_length=2, max_length=500)
+
+
+class OrgChangeSuggestion(AxModel):
+    """폼에 채워 줄 제안. 문장에 없거나 확인하지 못한 칸은 비운다."""
+
+    kind: OrgChangeKind | None = None
+    member_id: str | None = None
+    from_team: str | None = None
+    to_team: str | None = None
+    effective_date: str | None = None
+    from_team_from_roster: bool = False  # 원래 팀을 문장이 아니라 확정 명부의 현재 소속으로 채웠다
+
+
+class ParseOrgChangeTextOutput(AxModel):
+    """`available`이 false면 문장 정리를 쓸 수 없는 것이다(LLM 꺼짐·실패): 직접 입력한다."""
+
+    available: bool
+    suggestion: OrgChangeSuggestion | None = None
+    warnings: list[str] = Field(default_factory=list)
+    message: str | None = None
+
+
+class DescribeOrgChangeInput(AxModel):
+    change_id: str
+
+
+class OrgChangeDelta(AxModel):
+    team: str
+    delta: int  # 그 달 팀 인원 변화(코드가 센 값)
+
+
+class DescribeOrgChangeOutput(AxModel):
+    """승인하는 사람이 읽을 설명문. 숫자는 코드가 정하고, 다르면 템플릿 문장이다."""
+
+    change_id: str
+    month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    deltas: list[OrgChangeDelta] = Field(default_factory=list)
+    text: str
+    fallback: bool = False  # LLM 문장을 버리고 템플릿으로 대체했다
+    llm_used: bool = False
 
 
 # ---- 유사 사기 카드 조회 (data의 사기 점수 FRAUD_SIMILAR 규칙용) ------------------------------
