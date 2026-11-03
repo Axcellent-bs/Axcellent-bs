@@ -9,7 +9,8 @@
 - 한도: 파일 5개, 바뀐 줄 합 1500줄, 고칠 파일 600줄. 넘으면 PR 없이 사람 확인(`waiting_human`).
 - 줄 수는 difflib로 코드가 센다. LLM은 파일 고르기·글 쓰기·리뷰만 한다.
 - 기획 글·파일 글은 데이터 블록으로만 넣는다. 토큰은 보내지 않는다.
-- LLM은 `PLANNING_LLM_*`·`LLM_*` 설정. 테스트는 `set_llm()`으로 가짜를 끼운다.
+- LLM은 `DEV_LLM_*`·`LLM_*` 설정 (기획 `PLANNING_LLM_*`와 따로, llm_env).
+  테스트는 `set_llm()`으로 가짜를 끼운다.
 - LLM·형상관리 오류는 `failed` + 짧은 이유 한 줄 (예외 내용·비밀 값은 넣지 않는다).
 """
 
@@ -27,10 +28,10 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
-from ax_agent_template.llm import LLMClient, LLMSettings
+from ax_agent_template.llm import LLMClient
 from ax_workflow.core import GateRefused
 from ax_workflow.models import CodingFile
-from dev_agent import llm_key, vcs_bridge
+from dev_agent import llm_env, llm_key, vcs_bridge
 from dev_agent.vcs.base import VcsAdapter, VcsError, check_path
 
 if TYPE_CHECKING:
@@ -205,13 +206,13 @@ class MeteredLLM(LLMClient):
 
 
 def get_llm() -> LLMClient | None:
-    """바꿔 끼운 것, 아니면 planning LLM 설정(`PLANNING_LLM_*`·`LLM_*`)이 있을 때만 클라이언트."""
+    """바꿔 끼운 것, 아니면 개발 LLM 설정(`DEV_LLM_*`·`LLM_*`)이 있을 때만 클라이언트."""
     if _llm_set:
         return _llm
     # 고객사 API 키(BYOK)가 있으면 그 키로 (주소·모델을 비우면 서버 설정 값)
-    settings = llm_key.apply(LLMSettings.from_env("planning"))
+    settings = llm_key.apply(llm_env.settings())
     if settings.model and settings.base_url:
-        return MeteredLLM("planning", settings=settings, timeout=LLM_HTTP_TIMEOUT_SECONDS)
+        return MeteredLLM(llm_env.DEPT, settings=settings, timeout=LLM_HTTP_TIMEOUT_SECONDS)
     return None
 
 
@@ -544,7 +545,7 @@ def _client_for(llm: Any, step: str) -> Any:
     hit = _step_clients.get(name)
     want = replace(settings, model=name)
     if hit is None or hit.settings != want:
-        hit = MeteredLLM("planning", settings=want, timeout=LLM_HTTP_TIMEOUT_SECONDS)
+        hit = MeteredLLM(llm_env.DEPT, settings=want, timeout=LLM_HTTP_TIMEOUT_SECONDS)
         _step_clients[name] = hit
     return hit
 

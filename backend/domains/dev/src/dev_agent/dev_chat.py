@@ -295,7 +295,7 @@ async def turn(
     llm = get_llm()
     if llm is None:
         raise ActionError(
-            "LLM_NOT_CONFIGURED", "LLM 설정이 없다 (PLANNING_LLM_MODEL·BASE_URL 또는 LLM_*)"
+            "LLM_NOT_CONFIGURED", "LLM 설정이 없다 (DEV_LLM_MODEL·BASE_URL 또는 LLM_*)"
         )
     if svc.role == "planning":
         raise ActionError("WRONG_ROLE", "개발 AI 대화는 개발 서비스(dev)에서 돈다")
