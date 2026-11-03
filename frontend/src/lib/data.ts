@@ -635,6 +635,30 @@ export interface PromoConcept {
   cautions: string[];
   /** 코드가 단 경고 (상표·초상권 확인 필요 등) */
   warnings: string[];
+  /** 숏츠 길이(초). 예전 응답은 없다 */
+  duration_seconds?: number | null;
+  /** 빌려 온 인기 숏츠 형식과 그 평균 조회수 (서버 값) */
+  shorts_format?: string | null;
+  shorts_format_avg_views?: number | null;
+  /** 이 트렌드·형식이 이 상품과 맞는 이유 한 줄 */
+  fit_reason?: string | null;
+}
+/** 기획안 재료로 쓴 인기 숏츠 형식 (shorts_stats 값) */
+export interface PromoShortsFormat {
+  name: string;
+  avg_views: number;
+  count: number;
+}
+/** 시즌을 확인한 키워드 하나 (카탈로그 카테고리 이름 또는 상품 핵심어) */
+export interface PromoSeasonCheck {
+  keyword: string;
+  source: "category" | "product";
+  status: "known" | "unknown";
+  reason: string | null;
+  same_month: string | null;
+  same_month_ratio: number | null;
+  next_month: string | null;
+  next_month_ratio: number | null;
 }
 export interface DroppedConcept {
   title: string;
@@ -659,6 +683,11 @@ export interface PromoConceptsOutput {
   run_id: string | null;
   generated_at: string | null;
   summary: string;
+  /** 재료 숏츠 형식·시즌 확인 키워드 (예전 응답은 없다) */
+  shorts_formats?: PromoShortsFormat[];
+  shorts_status?: "known" | "unknown";
+  shorts_reason?: string | null;
+  season_checks?: PromoSeasonCheck[];
 }
 
 export type TopicCategory =

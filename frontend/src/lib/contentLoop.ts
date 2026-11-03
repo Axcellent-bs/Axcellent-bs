@@ -64,7 +64,7 @@ export const LOOP_STAGES: LoopStage[] = [
     title: "영상 소재 추천",
     owner: "데이터분석 AI · promo_concepts · content_recommend → 마케팅",
     live: true,
-    description: "회사 상품 홍보 영상 기획안을 만들고, 급상승 소재를 순위·근거·영상 아이디어와 함께 추천합니다.",
+    description: "회사 상품 광고·홍보 숏츠 기획안 초안을 만들고, 급상승 소재를 순위·근거·영상 아이디어와 함께 추천합니다.",
     status: PROBE_STATUS.checking,
     note: `마케팅에 넘기기는 아직 못 해요: ${SEND_TO_MARKETING_BLOCKED}`,
     probe: "content_recommend",
