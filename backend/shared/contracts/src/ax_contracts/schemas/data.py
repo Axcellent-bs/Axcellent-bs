@@ -1048,6 +1048,12 @@ class PopularVideo(AxModel):
     views: int | None = Field(default=None, ge=0)  # 받은 시각의 누적 조회수
     published_at: UtcDatetime | None = None
     duration_seconds: int | None = Field(default=None, ge=0)
+    # 아래는 예전 응답은 없다. 칸을 정한 분류(공유 분류기)와 YouTube가 준 카테고리 번호(참고)
+    topic_category: TopicCategory | None = None
+    youtube_category_id: str | None = None
+    # 분류기 칸과 YouTube 카테고리가 가리키는 칸이 다르면 true (분류기를 따른다)
+    category_mismatch: bool | None = None
+    source: Literal["chart", "search"] | None = None  # 한국 인기 목록 / 카테고리 검색 보충
 
 
 class PopularCategory(AxModel):
