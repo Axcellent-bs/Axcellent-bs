@@ -1,6 +1,7 @@
 // 작업 현황 = 개발 AI 첫 화면. 모든 작업이 지금 어느 단계에 있나를 한눈에 (기획 화면 요청 탭과 같은 틀, 작업·PR 탭은 작업 1건을 깊게).
 // 위: 필터 한 줄 (주소 #/tasks/<필터>) + AI 사용 합계. 아래: 작업 한 건 = 제목 한 줄 + 가로 흐름바(기획서 → 코딩 → PR·검증 → 머지) + 다음.
-// 멈춘 작업(사람 확인·실패·교차검증)이 먼저. 블록 통째 클릭 = 그 작업의 작업·PR 화면.
+// 최신순(새로 생긴 작업이 위), 20개씩 페이지. 블록 통째 클릭 = 그 작업의 작업·PR 화면.
+import { useEffect, useState } from 'react'
 import { DEPT_NAME, type PR, type State as S, type Task } from '@/lib/planningData'
 import { Tag, rowNav } from '@/components/planning-common/parts'
 import { prName, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
@@ -81,18 +82,25 @@ export function taskRow(s: S, t: Task, runTokens = 600_000): TaskRow {
   return { t, pr, group, cells: [c0, c1, c2, c3], next: { href, label }, born, last, minutes: born ? end - toMin(born) : 0 }
 }
 
-const ORDER: Record<Group, number> = { stuck: 0, running: 1, done: 2, stopped: 3 }
-// 멈춘 작업 → 진행 중 → 머지됨 → 중단. 진행 중은 오래 걸린 것이 위, 끝난 것은 최근 것이 위
+// 최신순: 새로 생긴 작업이 위 (같으면 최근에 움직인 것이 위). 상태로 보려면 위 필터를 쓴다
 export function sortTaskRows(rows: TaskRow[]): TaskRow[] {
-  return rows.slice().sort((a, b) => ORDER[a.group] - ORDER[b.group] || (a.group === 'done' || a.group === 'stopped' ? toMin(b.last ?? '') - toMin(a.last ?? '') : b.minutes - a.minutes))
+  return rows.slice().sort((a, b) => toMin(b.born ?? '') - toMin(a.born ?? '') || toMin(b.last ?? '') - toMin(a.last ?? ''))
 }
 
 // ---------------------------------------------------------------- 화면
+const PAGE_SIZE = 20
+
 export function TaskBoard({ s, filter }: { s: S; filter?: string }) {
   const f = parseFilter(filter)
   const lim = useCodingLimits()
   const all = s.tasks.map((t) => taskRow(s, t, lim.runTokens))
-  const rows = sortTaskRows(f === 'all' ? all : all.filter((x) => x.group === f))
+  const sorted = sortTaskRows(f === 'all' ? all : all.filter((x) => x.group === f))
+  // 페이지: 한 번에 PAGE_SIZE개. 필터를 바꾸면 첫 페이지로
+  const [page, setPage] = useState(0)
+  useEffect(() => setPage(0), [f])
+  const pages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
+  const cur = Math.min(page, pages - 1)
+  const rows = sorted.slice(cur * PAGE_SIZE, (cur + 1) * PAGE_SIZE)
   const calls = s.tasks.reduce((n, t) => n + (t.coding?.llmCalls ?? 0), 0)
   const used = s.tasks.reduce((n, t) => n + (t.coding?.llmTokens ?? 0), 0)
 
@@ -150,6 +158,16 @@ export function TaskBoard({ s, filter }: { s: S; filter?: string }) {
           )
         })}
       </ol>
+      {pages > 1 && (
+        <nav className="flex items-center justify-center gap-1 pt-3 text-sm" aria-label="페이지">
+          <button type="button" className="btn-quiet px-2 py-1" disabled={cur === 0} onClick={() => setPage(cur - 1)} aria-label="이전 페이지">‹</button>
+          {Array.from({ length: pages }, (_, n) => (
+            <button key={n} type="button" className={n === cur ? 'btn-primary px-2.5 py-1 !text-white' : 'btn-quiet px-2.5 py-1'} aria-current={n === cur ? 'page' : undefined} onClick={() => setPage(n)}>{n + 1}</button>
+          ))}
+          <button type="button" className="btn-quiet px-2 py-1" disabled={cur === pages - 1} onClick={() => setPage(cur + 1)} aria-label="다음 페이지">›</button>
+          <span className="ml-2 text-xs text-ink-500">{sorted.length}개 중 {cur * PAGE_SIZE + 1}–{Math.min(sorted.length, (cur + 1) * PAGE_SIZE)}</span>
+        </nav>
+      )}
     </div>
   )
 }
