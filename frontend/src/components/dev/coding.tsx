@@ -198,7 +198,8 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
   return (
     <Step name="코딩 에이전트" on={!!on || DONE.includes(c.status)} title={<CodingLabel c={c} />}>
       <span className="tags">
-        {c.mode === 'subscription' ? <Tag>내 Claude{c.claimedBy ? ` · ${c.claimedBy}` : c.assignee ? ` · ${c.assignee}에게 맡김` : ''}</Tag> : c.model && <Tag><span className="mono">{c.model}</span></Tag>}
+        {c.mode === 'subscription' && c.assignee && <Tag>맡은 사람 {c.assignee}</Tag>}
+        {c.mode === 'subscription' ? <Tag>내 Claude{c.claimedBy ? ` · ${c.claimedBy}` : ''}</Tag> : c.model && <Tag><span className="mono">{c.model}</span></Tag>}
         {c.attempts > 1 && <Tag>{c.attempts}회차</Tag>}
         {!!c.llmCalls && <Tag><UsageBar used={c.llmTokens ?? 0} limit={lim.runTokens} label={`AI ${c.llmCalls}/${lim.runCalls}회 · 토큰`} title="코딩 실행 한 번의 한도 대비 (다시 시도까지 합친 양)" /></Tag>}
         {!!files.length && <Tag>{files.length}파일 · <span className="mono">+{add} −{del}</span></Tag>}
