@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from ax_agent_template.llm import LLMClient, LLMSettings, MockLLMClient, format_
 from ax_contracts.schemas.data import (
     PopularCategory,
     PopularTopic,
+    PromoConceptsOutput,
     PromoConceptsRequest,
     PromoShortsFormat,
     PromoTrend,
@@ -356,3 +358,72 @@ def test_prompt_prefers_popular_trends_as_meme_formats(tmp_path: Path, monkeypat
     head = llm.calls[0].partition("<untrusted")[0]
     assert "밈 형식" in head and "1~2개는 지금 인기 트렌드" in head
     assert "no_popular_reason" in head
+
+
+# ---------------------------------------------------------------- 하루 캐시: 규칙 버전
+
+
+def _run_with(tmp_path: Path, llm: MockLLMClient, monkeypatch: Any, config_text: str):  # noqa: ANN202
+    monkeypatch.setattr(promo, "popular", _fake_popular)
+    monkeypatch.setattr(promo, "shorts_formats", _fake_shorts)
+    env = _env(tmp_path)
+    Path(env["DATA_TREND_CONFIG"]).write_text(config_text, encoding="utf-8")
+    return asyncio.run(
+        make_concepts(
+            PromoConceptsRequest(),
+            MonthlyNaver({"무지 노트"}),
+            llm,
+            env=env,
+            catalog=FakeCatalog(),
+            now=NOW,
+            board=TodayBoard(),
+        )
+    ).output
+
+
+BASE = "[promo]\nconcepts = 3\nseason_min_ratio = 1.3\n"
+
+
+def test_cache_is_reused_when_the_rules_do_not_change(tmp_path: Path, monkeypatch: Any) -> None:
+    llm = PromoLLM()
+    first = _run_with(tmp_path, llm, monkeypatch, BASE)
+    again = _run_with(tmp_path, llm, monkeypatch, BASE)
+    assert again.cached and again.run_id == first.run_id and llm.asked == 1
+
+
+def test_changed_filter_settings_make_a_new_draft_on_the_next_request(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    llm = PromoLLM()
+    first = _run_with(tmp_path, llm, monkeypatch, BASE)
+    changed = _run_with(tmp_path, llm, monkeypatch, BASE + "trend_min_youtube_videos = 7\n")
+    assert not changed.cached and changed.run_id != first.run_id and llm.asked == 2
+    # 바뀐 규칙으로 만든 것은 다음에 다시 쓴다
+    again = _run_with(tmp_path, llm, monkeypatch, BASE + "trend_min_youtube_videos = 7\n")
+    assert again.cached and again.run_id == changed.run_id and llm.asked == 2
+
+
+def test_rules_version_follows_categories_and_prompt(monkeypatch: Any) -> None:
+    base = promo.load_config({})
+    before = promo.rules_version(base)
+    assert promo.rules_version(base) == before  # 같은 규칙이면 같다
+    assert promo.rules_version(dataclasses.replace(base, trend_min_sources=3)) != before
+    monkeypatch.setattr(promo, "TOPIC_CATEGORIES", (*promo.TOPIC_CATEGORIES, "새분류"))
+    assert promo.rules_version(base) != before  # 분류 목록이 바뀌면 다르다
+    monkeypatch.undo()
+    monkeypatch.setattr(promo, "_prompt", lambda config, example: "다른 프롬프트")
+    assert promo.rules_version(base) != before  # 프롬프트가 바뀌면 다르다
+
+
+def test_old_rows_without_a_rules_version_are_not_used_as_cache(tmp_path: Path) -> None:
+    import sqlite3
+
+    store = PromoStore(tmp_path / "promo.db")
+    out = PromoConceptsOutput(run_id="old", summary="예전")
+    store.save(date(2026, 11, 3), out)  # 규칙 버전 없이 남은 예전 줄
+    assert store.latest(date(2026, 11, 3), "abc") is None
+    assert store.latest(date(2026, 11, 3)) is not None
+    store.close()
+    conn = sqlite3.connect(tmp_path / "promo.db")
+    assert "rules" in [r[1] for r in conn.execute("PRAGMA table_info(runs)")]
+    conn.close()
