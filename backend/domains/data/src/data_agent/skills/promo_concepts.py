@@ -717,7 +717,7 @@ async def popular_materials(
     """
     result = await popular(
         TrendPopularRequest(), llm, env=env, now=now, context_id=context_id,
-        category_cache=category_cache, board=board,
+        category_cache=category_cache, board=board, fill=False,
     )  # fmt: skip
     o = result.output
     allowed = [c for c in config.trend_categories if c not in NEVER_TREND]

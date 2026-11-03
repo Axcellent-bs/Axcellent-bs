@@ -585,6 +585,14 @@ export interface PopularVideo {
   views: number | null;
   published_at: string | null;
   duration_seconds: number | null;
+  /** 칸을 정한 분류 (공유 분류기, #477). 예전 응답은 없다 */
+  topic_category?: TopicCategory | null;
+  /** YouTube가 준 카테고리 번호 (참고) */
+  youtube_category_id?: string | null;
+  /** 분류기 칸과 YouTube 카테고리가 다르면 true (분류기를 따름) */
+  category_mismatch?: boolean | null;
+  /** chart = 한국 인기 목록, search = 카테고리 검색 보충 */
+  source?: "chart" | "search" | null;
 }
 export interface TrendPopularOutput {
   /** 점수 순 */
