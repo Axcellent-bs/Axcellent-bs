@@ -810,6 +810,30 @@ class DevService(PlanningCore):
         """서버 AI(회사 키)로 돈 코딩 작업이 지금까지 쓴 토큰."""
         return sum(t.coding.llm_tokens for t in s.tasks if t.coding and t.coding.mode == "agent")
 
+    @staticmethod
+    def coding_estimate(s: State) -> dict[str, Any]:
+        """서버 AI 코딩 한 건의 예상 규모: 지난 작업(파일을 다 쓴 것)의 중앙값.
+
+        화면이 대기 중인 작업에 "예상 토큰·호출·파일"을 보여 준다. 기록이 없으면 samples 0."""
+        done = ("opened", "merged", "waiting_human", "covered")
+        runs = [
+            t.coding for t in s.tasks
+            if t.coding is not None and t.coding.mode == "agent"
+            and t.coding.status in done and t.coding.llm_tokens > 0
+        ]  # fmt: skip
+
+        def mid(xs: list[int]) -> int:
+            xs = sorted(xs)
+            return xs[len(xs) // 2] if xs else 0
+
+        return {
+            "samples": len(runs),
+            "tokens": mid([r.llm_tokens for r in runs]),
+            "tokens_max": max((r.llm_tokens for r in runs), default=0),
+            "calls": mid([r.llm_calls for r in runs]),
+            "files": mid([len(r.files) for r in runs]),
+        }
+
     def agents_connected(self, s: State) -> list[str]:
         """최근 본인 Claude(MCP)로 작업을 본 개발자."""
         since = self.clock() - timedelta(days=AGENT_SEEN_DAYS)
@@ -977,6 +1001,8 @@ class DevService(PlanningCore):
             # 코딩 실행 한 번의 한도 (화면이 작업마다 쓴 양을 비율로 보여 준다)
             "run_max_calls": coder.limit("PLANNING_CODER_MAX_CALLS", coder.RUN_MAX_CALLS),
             "run_max_tokens": coder.limit("PLANNING_CODER_MAX_TOKENS", coder.RUN_MAX_TOKENS),
+            # 대기 중인 작업에 보여 줄 예상 규모 (지난 서버 AI 코딩의 중앙값)
+            "estimate": self.coding_estimate(s),
         }
 
     async def mark_agent_seen(self, who: str) -> None:

@@ -205,6 +205,11 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
         {c.review && <Tag tone={c.review.verdict === '통과' ? 'green' : 'amber'}>리뷰 {c.review.verdict}</Tag>}
         {c.instruction && <Tag>사람 지시</Tag>}
         {c.ciHold && c.status === 'waiting_human' && <Tag tone="amber">CI 다시 보는 중</Tag>}
+        {c.mode !== 'subscription' && (c.status === 'queued' || c.status === 'reading') && lim.est && (
+          <Tag>{lim.est.samples
+            ? <>예상 토큰 ~<span className="mono">{tokens(lim.est.tokens)}</span> (한도의 {pctOf(lim.est.tokens, lim.runTokens)}%) · AI {lim.est.calls}회 · 파일 {lim.est.files}개 · 지난 {lim.est.samples}건 기준</>
+            : '예상 규모 · 지난 기록 없음'}</Tag>
+        )}
         {c.status === 'covered' && <Tag tone="green">PR 없음 · {c.coveredBy?.length ? `${c.coveredBy.join(', ')}가 반영` : '앞 작업이 반영'}</Tag>}
       </span>
       {c.summary && <p>{c.summary}</p>}
