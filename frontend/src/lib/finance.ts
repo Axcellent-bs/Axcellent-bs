@@ -323,8 +323,8 @@ export interface IncidentImpact {
 }
 
 export interface IncidentCoupon {
-  buyer_id: string;
-  execution_id: string;
+  buyer_id: string | null;
+  execution_id: string | null;
   coupon_id: string | null;
   count: number;
   unit_value: number;

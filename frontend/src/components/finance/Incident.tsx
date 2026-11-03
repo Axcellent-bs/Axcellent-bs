@@ -178,11 +178,12 @@ function Recipients({ d }: { d: IncidentDetail }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
+              {rows.map((r, n) => {
                 return (
-                  <tr key={r.execution_id} className="border-t border-ink-100 align-top">
+                  <tr key={r.execution_id ?? `${r.coupon_id ?? "coupon"}-${n}`} className="border-t border-ink-100 align-top">
                     <td className="px-3 py-2">
-                      <b className="text-ink-900">{humanId(r.buyer_id)}</b>
+                      {/* 옛 장부 기록은 고객·실행 번호가 비어 있을 수 있다. 비어 있어도 화면이 깨지면 안 된다 */}
+                      <b className="text-ink-900">{r.buyer_id ? humanId(r.buyer_id) : "고객 정보 없음"}</b>
                       <p className="text-[11px] text-ink-500">{purposeKo(r.reason_code, r.purpose_code)} · {shortDateTime(r.at)}</p>
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
