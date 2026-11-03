@@ -115,9 +115,9 @@ cd backend && bash scripts/run_web.sh   # http://localhost:3090
    .venv/Scripts/python.exe infra/fault-injection/payment_fault.py clear
    ```
    - 감지 시간은 `SHOP_DEGRADED_SUSTAIN_S`(run_all.sh 기본 20초)와 `SHOP_MONITOR_INTERVAL_S`(5초)로 정해져요
-4. http://localhost:3090/data 를 열어요. "장애 사건 데이터"에 사건이, "평상시 지표"(`/data#daily`)에 복구 시간·자동 처리율이 나와요. 사건을 하나 더 만들면 1차·2차 복구 시간이 비교돼요
-5. **트렌드 탭**(`/data#trend`, 검색어 급상승 `trend_scan`): 장애 주입 없이 데이터 AI 서버(8106)와 네이버 키(`backend/.env`의 `NAVER_HUB_CLIENT_ID`·`NAVER_HUB_CLIENT_SECRET`)만 있으면 돼요. 트렌드만 볼 때는 `bash scripts/run_all.sh --only data` + `bash scripts/run_web.sh`로 충분해요
-   - **하위 탭 5개** = 콘텐츠 루프 5단계와 같은 이름·순서(정의는 `src/lib/contentLoop.ts` 한 곳). 주소에 남아요: `#trend/detect`(1 트렌드·밈 감지) · `#trend/recommend`(2 영상 소재 추천) · `#trend/video`(3 AI 인플루언서·배우·캐릭터) · `#trend/campaign`(4 게시·성과 측정) · `#trend/feedback`(5 다음 추천에 반영). 루프 띠의 단계를 눌러도 그 하위 탭으로 가요. 3·5는 "준비 중" + 할 일·필요한 것만(숫자·예시 없음)이에요
+4. http://localhost:3090/data 를 열어요. 왼쪽 사이드바 "데이터분석 AI > 데이터 분석"의 하위 탭 3개: **장애 영향 분석**(`/data`, 장애 사건 데이터 + 아래 리포트), **운영 지표**(`/data/ops`, 평상시 지표 · 복구 속도 · AI 단독 처리율), **트렌드&콘텐츠**(`/data/trend`)예요. 장애 영향 분석에 사건이, 운영 지표에 복구 시간·자동 처리율이 나와요. 옛 주소(`/data#daily`·`#report`·`#trend`·`#trend/<단계>`)는 새 주소로 옮겨 줘요. 사건을 하나 더 만들면 1차·2차 복구 시간이 비교돼요
+5. **트렌드&콘텐츠 탭**(`/data/trend`, 검색어 급상승 `trend_scan`): 장애 주입 없이 데이터 AI 서버(8106)와 네이버 키(`backend/.env`의 `NAVER_HUB_CLIENT_ID`·`NAVER_HUB_CLIENT_SECRET`)만 있으면 돼요. 트렌드만 볼 때는 `bash scripts/run_all.sh --only data` + `bash scripts/run_web.sh`로 충분해요
+   - **하위 탭 4개** = 감지 → 추천 → 넘김 → 성과. 콘텐츠 루프 5단계(정의는 `src/lib/contentLoop.ts` 한 곳)를 묶은 거예요: `/data/trend#detect`(1 트렌드·밈 감지) · `#recommend`(2 영상 소재 추천) · `#handoff`(3 AI 인플루언서·배우·캐릭터 영상으로 넘기기, 준비 중) · `#result`(4 게시·성과 측정 + 5 다음 추천에 반영). 루프 띠의 단계를 누르면 그 단계가 속한 하위 탭으로 가요. 옛 주소 `#trend/video`는 넘김, `#trend/campaign`·`#trend/feedback`은 성과로 가요.
    - 1단계 급상승은 그래프 없이 한 줄 목록: 주제 · "평소보다 N배 많이 검색돼요"(서버 배수) · 판정에 쓴 마지막 날 (배수 큰 순). 교차 출처 목록("YouTube에서 뜨지만 검색은 평소 수준", "인기 검색어지만 네이버 검색은 평소 수준", "평소 수준 · 판정 불가")·"판정 방법" 안내·월별 흐름·계절 패턴 보기는 뺐어요
    - 처음 열면 회사 기본 키워드(`backend/config/tenants/<회사>/trends.toml`)로 한 번 판정해요. 오른쪽 위 입력에 쉼표로 최대 5개 그룹을 적고 "판정"을 누르면 그 그룹만 봐요(그룹마다 네이버 1번). 6개 이상이면 서버를 부르지 않고 안내만 해요
    - 판정마다 서버가 급상승 그룹마다 설명 문장을 써서, 이 탭은 30초 새로고침을 따르지 않아요. "판정"·"다시 판정"을 누를 때만 다시 불러요
@@ -129,8 +129,8 @@ cd backend && bash scripts/run_web.sh   # http://localhost:3090
    - 2단계 맨 위 "인기 숏츠 형식"(`shorts_stats`, 계약 #437, `src/components/data/ShortsStats.tsx`): 형식별·카테고리별 숏츠 수·평균 조회수·평균 시간당 조회 표와 묶음마다 상위 숏츠 제목(+채널). 표본 부족·unknown 묶음과 검색 안 함은 서버 이유 그대로, 표본 한계 문구(`limitation`)도 서버 문장. 판정 없음. 기획안 카드는 서버 길이(초)·"빌려 온 숏츠 형식" 칩·"맞는 이유", 시즌 재료가 비면 확인 키워드·배율 요약을 펼쳐 둠
    - 2단계 맨 위 "광고·홍보 영상 기획안"(`promo_concepts`, 계약 #415, `src/components/data/PromoConcepts.tsx`): 기획안 카드(제목·컨셉·형식 칩·콘티 3컷·등장 상품·빌려 온 트렌드·주의사항·코드 경고), 재료 요약(출처를 못 읽었으면 서버 이유), 버린 기획안. "다시 만들기" = 계약 `regenerate`. 👍/👎는 피드백 저장(안전 관문 등록) 전이라 꺼 둠. 응답이 정상이면 루프 2단계 칩 "동작 중"
    - 1단계 아래 "YouTube 지금 빨리 크는 영상"(`youtube_velocity`, `src/components/data/YoutubeVelocity.tsx`): 최근 두 스냅샷 사이 시간당 조회 증가가 큰 영상(서버 값 그대로, 상위 10개, 제목+채널 #431, 제목이 없는 예전 응답은 영상 ID), 그 전 구간보다 빨라졌는지, 태그·조회·좋아요·댓글(숨김이면 "-")·인기 순위, 스냅샷 시각. 판정하지 않아 "판정 없음" 칩. 스냅샷이 2개 미만이면 서버 이유 그대로. 외부 호출 없이 스냅샷 DB만 읽어요
-   - 2 영상 소재 추천 하위 탭(`#trend/recommend`, `content_recommend`, `src/components/data/ContentRecommend.tsx`): 서버가 고른 급상승 소재만 순위대로 카드로 보여요. 소재 이름(+함께 본 이름), "평소보다 N배 많이 검색돼요" + 변화 정도(1단계와 같은 `lib/trendWording.ts`), 두 소스 칩(검색 + YouTube 인기 영상 N개 / 검색 급상승만), 회사 관련성 칩(관련 있음(겹친 키워드) / 관련 낮음, 순위에서 빼지 않음), 형식(숏폼·롱폼), 영상 아이디어 문장, 서버 기본 문장이면 "기본 문장" 칩과 이유. 추천이 없으면 서버 이유(`empty_reason`) 그대로. "마케팅에 소재로 보내기"는 누를 수 없고 이유를 보여 줘요. 트렌드 탭을 열 때 한 번 + "다시 추천"을 누를 때만 불러요(소재마다 AI 문장). 루프 2단계 칩은 이 응답이 정상이면 "동작 중", 실패면(데이터 AI 꺼짐 포함) "연결 확인 필요"
-   - 4 게시·성과 측정 하위 탭(`#trend/campaign`)의 **캠페인 효과**(`campaign_effect`, `src/components/data/CampaignEffect.tsx`, 다른 하위 탭에 다녀와도 결과가 남아요): campaign_id(선택)·시작·끝 시각으로 주문 방향·증분·기준선, 쿠폰 누적 사용률(서버 고정 문장 그대로), 매출·7일 넘는 캠페인은 서버의 "확인할 수 없음 + 이유"를 그대로 보여요(7일 이하 여러 날 캠페인은 #310부터 판정). 처음 열 때는 부르지 않고, 기간을 넣고 "측정"을 눌러야 불러요(그 전엔 안내 문구만, 루프 4단계 칩은 "측정 대기"). 기준선 정의(`baseline_rule`)와 기준선에서 뺀 구간(`baseline_note`)은 기준선 줄 아래에 서버 문장 그대로 보여요. 루프 1·4단계 칩은 이 탭의 trend_scan·campaign_effect 응답이 정상이면 "동작 중", 실패면 "연결 확인 필요"(회색). 테두리도 같이 바뀌어요: 동작 중 파란 실선, 확인 중 회색 실선, 연결 확인 필요는 준비 중 단계와 같은 점선 회색(범례도 같은 표에서 그림)
+   - 2 추천 하위 탭(`/data/trend#recommend`, `content_recommend`, `src/components/data/ContentRecommend.tsx`): 서버가 고른 급상승 소재만 순위대로 카드로 보여요. 소재 이름(+함께 본 이름), "평소보다 N배 많이 검색돼요" + 변화 정도(1단계와 같은 `lib/trendWording.ts`), 두 소스 칩(검색 + YouTube 인기 영상 N개 / 검색 급상승만), 회사 관련성 칩(관련 있음(겹친 키워드) / 관련 낮음, 순위에서 빼지 않음), 형식(숏폼·롱폼), 영상 아이디어 문장, 서버 기본 문장이면 "기본 문장" 칩과 이유. 추천이 없으면 서버 이유(`empty_reason`) 그대로. "마케팅에 소재로 보내기"는 누를 수 없고 이유를 보여 줘요. 트렌드 탭을 열 때 한 번 + "다시 추천"을 누를 때만 불러요(소재마다 AI 문장). 루프 2단계 칩은 이 응답이 정상이면 "동작 중", 실패면(데이터 AI 꺼짐 포함) "연결 확인 필요"
+   - 4 성과 하위 탭(`/data/trend#result`)의 **캠페인 효과**(`campaign_effect`, `src/components/data/CampaignEffect.tsx`, 다른 하위 탭에 다녀와도 결과가 남아요): campaign_id(선택)·시작·끝 시각으로 주문 방향·증분·기준선, 쿠폰 누적 사용률(서버 고정 문장 그대로), 매출·7일 넘는 캠페인은 서버의 "확인할 수 없음 + 이유"를 그대로 보여요(7일 이하 여러 날 캠페인은 #310부터 판정). 처음 열 때는 부르지 않고, 기간을 넣고 "측정"을 눌러야 불러요(그 전엔 안내 문구만, 루프 4단계 칩은 "측정 대기"). 기준선 정의(`baseline_rule`)와 기준선에서 뺀 구간(`baseline_note`)은 기준선 줄 아래에 서버 문장 그대로 보여요. 루프 1·4단계 칩은 이 탭의 trend_scan·campaign_effect 응답이 정상이면 "동작 중", 실패면 "연결 확인 필요"(회색). 테두리도 같이 바뀌어요: 동작 중 파란 실선, 확인 중 회색 실선, 연결 확인 필요는 준비 중 단계와 같은 점선 회색(범례도 같은 표에서 그림)
    - LLM 설정이 없으면 설명 문장은 규칙 기반 문장("○○ 검색이 직전 56일 평소의 N배입니다")으로 나와요. 데이터 AI가 꺼지면 숫자 없이 이유만 보여요
 
 화면이 부르는 주소:
@@ -141,8 +141,8 @@ cd backend && bash scripts/run_web.sh   # http://localhost:3090
 | 장애 사건 목록 | `GET /orch/api/incidents` | 총괄 8000 `/api/incidents` |
 | 고른 사건 상세 | `GET /orch/api/incidents/{context_id}` | 총괄 8000 `/api/incidents/{context_id}` |
 | 데이터 AI 켜짐/꺼짐 칩 | `GET /data-a2a/health` | 데이터 AI data 8106 `/health` |
-| 평상시 지표 | `POST /data-a2a/a2a` (skill `kpi_summary`, 토큰 `VITE_DATA_A2A_TOKEN`) | 데이터 AI 8106 `/a2a` |
-| 트렌드 (`#trend`) | `POST /data-a2a/a2a` (skill `trend_scan`, 입력 비우면 회사 기본 키워드) | 데이터 AI 8106 `/a2a` → 네이버 검색어 트렌드 |
+| 운영 지표 (`/data/ops`) | `POST /data-a2a/a2a` (skill `kpi_summary`, 토큰 `VITE_DATA_A2A_TOKEN`) | 데이터 AI 8106 `/a2a` |
+| 트렌드&콘텐츠 (`/data/trend`) | `POST /data-a2a/a2a` (skill `trend_scan`, 입력 비우면 회사 기본 키워드) | 데이터 AI 8106 `/a2a` → 네이버 검색어 트렌드 |
 
 `/orch`, `/data-a2a`는 개발 서버 프록시예요 (`vite.config.ts`, `ORCHESTRATOR_PROXY_TARGET`·`DATA_PROXY_TARGET`).
 
@@ -159,7 +159,7 @@ cd backend && bash scripts/run_web.sh   # http://localhost:3090
 4. **빈 상태·서버 꺼짐 안내**: 값이 없을 때 예시 숫자를 만들지 않고 무엇을 하면 채워지는지 안내해요. "예시 데이터"처럼 녹화본을 전제한 표시는 빼요. 서버가 꺼지면 어느 서버가 꺼졌는지 이름과 포트로 보여 줘요
    - 예: "아직 장애 사건이 없어요…", "데이터 AI 서버(8106)에 연결할 수 없어요", "총괄 서버(8000)에 연결할 수 없어요"
 5. **화면 확인 경로**: 실서버로 직접 열어 본 주소를 PR 본문에 적어요
-   - 예: http://localhost:3090/data, http://localhost:3090/data#daily, 사건 지정은 `/data?incident=<context_id>`
+   - 예: http://localhost:3090/data, http://localhost:3090/data/ops, http://localhost:3090/data/trend, 사건 지정은 `/data?incident=<context_id>`
 
 ## 받은 요청 확인 방법
 

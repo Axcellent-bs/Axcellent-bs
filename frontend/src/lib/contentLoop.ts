@@ -2,7 +2,7 @@
 // 단계 이름·담당·상태는 이 파일에만 둔다. 단계가 생기거나 동작하기 시작하면 이 파일만 고친다.
 // 숫자는 여기 두지 않는다: 1단계 개수는 트렌드 탭이 받은 trend_scan 응답에서 화면이 센다. 2~5단계는 상태 칩만.
 // 1·2·4단계 칩은 트렌드 탭이 받은 trend_scan·content_recommend(+promo_concepts)·campaign_effect 응답으로 정한다: 정상이면 "동작 중"(파란 테두리), 실패면 "연결 확인 필요"(회색 칩, 점선 회색 테두리).
-// 트렌드 탭의 하위 탭 5개도 이 단계 정의를 그대로 쓴다(이름·순서·주소 `#trend/<tab>`·할 일). 루프 띠와 하위 탭이 같은 말을 한다.
+// 트렌드&콘텐츠 화면(/data/trend)의 하위 탭은 이 5단계를 4개(감지·추천·넘김·성과)로 묶은 것이다(TREND_TABS). 단계 안 내용·할 일은 이 정의를 그대로 쓴다.
 
 /** "마케팅에 소재로 보내기"를 아직 못 하는 이유 (dashboard-api POST /handoffs는 에이전트 토큰만 받는다) */
 export const SEND_TO_MARKETING_BLOCKED =
@@ -12,7 +12,7 @@ export type LoopTone = "ok" | "warn" | "muted" | "info";
 
 export interface LoopStage {
   no: number;
-  /** 트렌드 탭의 하위 탭 주소 조각 (`#trend/<tab>`) */
+  /** 단계 주소 조각 (옛 주소 `#trend/<tab>` 호환용) */
   tab: string;
   title: string;
   /** 담당 (A → B는 A가 만들어 B에게 넘김) */
@@ -103,14 +103,32 @@ export const LOOP_STAGES: LoopStage[] = [
   },
 ];
 
-/** 트렌드 하위 탭 주소: `#trend/<tab>` */
-export const trendHash = (stage: LoopStage) => `#trend/${stage.tab}`;
-
-/** 주소(#trend/<tab>)로 단계 찾기. 없거나 모르는 값이면 1단계 */
-export function stageFromHash(hash: string): LoopStage {
-  const tab = hash.startsWith("#trend/") ? hash.slice("#trend/".length) : "";
-  return LOOP_STAGES.find((s) => s.tab === tab) ?? LOOP_STAGES[0];
+/** 트렌드&콘텐츠 화면 하위 탭 4개: 감지 → 추천 → 넘김 → 성과. 루프 5단계를 묶어 보여 준다.
+ *  넘김 = 3단계(영상 제작으로 넘기기). 성과 = 4단계 게시·성과 측정 + 5단계 다음 추천에 반영(성과를 다음 추천에 되돌리는 일이라 같이 둔다) */
+export interface TrendTab {
+  key: "detect" | "recommend" | "handoff" | "result";
+  title: string;
+  /** 이 탭이 보여 주는 루프 단계의 tab 값(LoopStage.tab) */
+  stages: string[];
 }
+export const TREND_TABS: TrendTab[] = [
+  { key: "detect", title: "감지", stages: ["detect"] },
+  { key: "recommend", title: "추천", stages: ["recommend"] },
+  { key: "handoff", title: "넘김", stages: ["video"] },
+  { key: "result", title: "성과", stages: ["campaign", "feedback"] },
+];
+
+/** 트렌드 하위 탭 주소: `/data/trend#<key>` */
+export const trendTabHash = (t: TrendTab) => `#${t.key}`;
+
+/** 주소 해시로 탭 찾기. 없거나 모르는 값이면 감지. 옛 주소(#trend/<단계>)도 알아본다 */
+export function trendTabFromHash(hash: string): TrendTab {
+  const raw = hash.replace(/^#(trend\/)?/, "");
+  return TREND_TABS.find((t) => t.key === raw || t.stages.includes(raw)) ?? TREND_TABS[0];
+}
+
+/** 루프 단계가 속한 탭 */
+export const trendTabOfStage = (stage: LoopStage): TrendTab => TREND_TABS.find((t) => t.stages.includes(stage.tab)) ?? TREND_TABS[0];
 
 /** 5 → 1 돌아가는 줄의 설명 */
 export const LOOP_BACK = "성과가 다음 트렌드 판정의 우선순위로 돌아갑니다";
