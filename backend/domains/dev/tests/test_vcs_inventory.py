@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from dev_agent import vcs
 from dev_agent.main import app
-from dev_agent.vcs import inventory
+from dev_agent.vcs import inventory, vuln_watch
 from dev_agent.vcs.github import GithubVcsAdapter
 
 pytestmark = pytest.mark.role("dev")
@@ -22,6 +22,12 @@ def setup_function() -> None:
     vcs._screen = None
     vcs.set_vcs(None)
     inventory.reset()
+
+    # 취약점 소식은 부르지 않는다 (KEV·NVD 빈 소식)
+    async def empty(url, params):
+        return {"vulnerabilities": [], "totalResults": 0}
+
+    vuln_watch.watch.feed = vuln_watch.Feed(empty, nvd_gap=0)
 
 
 def teardown_function() -> None:
@@ -160,3 +166,37 @@ def test_other_connection_kind_registers_and_is_judged(monkeypatch: pytest.Monke
     finally:
         inventory.unregister_source("deploy")
     assert inventory.entries() == []
+
+
+def test_ghes_on_kev_is_emergency_and_hold_waits_for_safety() -> None:
+    """사내 설치형 GHES 버전이 KEV 취약 범위면 긴급, 안전 서비스 창구가 없으면 알림은 대기."""
+    cpe = "cpe:2.3:a:github:enterprise_server"
+
+    async def feed(url, params):
+        if url == vuln_watch.KEV_URL:
+            return {"vulnerabilities": [{"cveID": "CVE-2026-7", "vendorProject": "GitHub",
+                                         "product": "Enterprise Server"}]}  # fmt: skip
+        if "cveId" in params:
+            m = {"criteria": f"{cpe}:*:*", "versionEndExcluding": "3.14.0"}
+            return {
+                "vulnerabilities": [{"cve": {"configurations": [{"nodes": [{"cpeMatch": [m]}]}]}}]
+            }
+        return {"totalResults": 1, "vulnerabilities": [{"cve": {"id": "CVE-2026-7"}}]}
+
+    async def no_safety(notice):
+        raise httpx.ConnectError("창구 없음")
+
+    vuln_watch.watch.feed = vuln_watch.Feed(feed, nvd_gap=0)
+    vuln_watch.watch.send = no_safety
+    try:
+        _connect(
+            _server({"installed_version": "3.12.1"}, {"x-oauth-scopes": "repo"}), base_url=GHES
+        )
+        asyncio.run(inventory.check_all())
+        row = inventory.entries()[0]
+        assert row["vuln"] == "emergency" and row["kev_cves"] == ["CVE-2026-7"]
+        assert row["warnings"][0].startswith("긴급: 실제 악용 중인 취약점 CVE-2026-7")
+        assert row["safety_hold"]["hold"] and not row["safety_hold"]["sent"]
+        assert "못 보냄" in row["safety_hold"]["error"]
+    finally:
+        vuln_watch.watch.send = vuln_watch.send_to_safety
