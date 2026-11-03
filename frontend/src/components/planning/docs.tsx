@@ -93,9 +93,22 @@ function DocOutline({ doc }: { doc: Doc }) {
 }
 
 function Editor({ doc, d, s }: { doc: Doc; d: Dispatch<Action>; s: State }) {
+  const toast = useToast()
   const todos = doc.blocks.filter((b) => b.kind === 'todo')
+  // 글은 칸에서 벗어날 때 저장된다. "저장"은 지금 쓰던 칸을 바로 저장한다
+  const saveNow = () => { (document.activeElement as HTMLElement | null)?.blur(); toast.show(`${doc.id} 저장됨`) }
+  const remove = () => {
+    if (!window.confirm(`${doc.id} "${doc.title}" 문서를 지울까요? 되돌릴 수 없어요.`)) return
+    d({ type: 'deleteDoc', doc: doc.id })
+    toast.show(`${doc.id} 삭제`)
+    go(toPath('work/specs'))
+  }
   return (
     <>
+      <div className="doc-actions">
+        <Button size="small" variant="primary" onClick={saveNow}>저장</Button>
+        <Button size="small" onClick={remove}>삭제</Button>
+      </div>
       <input
         key={`title-${doc.title}`}
         className="doc-title-input"

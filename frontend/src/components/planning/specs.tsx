@@ -1,7 +1,7 @@
 // 기획서 화면: 문서가 원본이고 문단에 작업·PR·결정이 붙는다
 import { useState, type Dispatch } from 'react'
 import { Button, Notice, useToast } from '@dejafix/common-frontend'
-import { DEPT_NAME, type Action, type Decision, type PR, type Spec, type State as S } from '@/lib/planningData'
+import { DEPT_NAME, nextDocId, type Action, type Decision, type PR, type Spec, type State as S } from '@/lib/planningData'
 import { ActivityList, Sec, State, Tag, rowNav } from '@/components/planning-common/parts'
 import { Linked, Ref, go, hrefOf, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
 import { CONFIRMED_BY, mergedLabel } from '@/components/planning-common/flow'
@@ -132,7 +132,7 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
   })
   const all = kind === 'spec' ? specRows : kind === 'doc' ? docRows : [...specRows, ...docRows]
   const pg = usePage(all, 10)
-  const newDoc = () => { d({ type: 'newDoc', title: '' }); go(toPath(`docs/DOC-${s.docs.length + 1}`)) }
+  const newDoc = () => { d({ type: 'newDoc', title: '' }); go(toPath(`docs/${nextDocId(s)}`)) }
   return (
     <div className="sl-wrap">
       <div className="sl-top">
