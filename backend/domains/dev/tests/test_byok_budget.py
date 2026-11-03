@@ -30,6 +30,7 @@ def run(coro):
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("PLANNING_LLM_KEY_STORE", raising=False)
+    monkeypatch.delenv("DEV_LLM_KEY_STORE", raising=False)
     llm_key.clear()
     yield
     llm_key.clear()
@@ -52,9 +53,9 @@ def test_key_is_validated_and_never_shown() -> None:
 
 
 def test_coder_uses_company_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PLANNING_LLM_MODEL", "server-model")
-    monkeypatch.setenv("PLANNING_LLM_BASE_URL", "https://server.example")
-    monkeypatch.setenv("PLANNING_LLM_API_KEY", "server-key")
+    monkeypatch.setenv("DEV_LLM_MODEL", "server-model")
+    monkeypatch.setenv("DEV_LLM_BASE_URL", "https://server.example")
+    monkeypatch.setenv("DEV_LLM_API_KEY", "server-key")
     coder.reset_llm()
     assert coder.get_llm().settings.api_key == "server-key"
     llm_key.set_key(KEY, model="company-model")
@@ -113,7 +114,7 @@ def test_saved_key_file_is_readable_by_the_owner_only(
 ) -> None:  # noqa: ANN001
     """저장한 키 파일은 umask가 느슨해도, 예전 임시 파일이 남아 있어도 0600이다."""
     path = tmp_path / "llm_key.json"
-    monkeypatch.setenv("PLANNING_LLM_KEY_STORE", str(path))
+    monkeypatch.setenv("DEV_LLM_KEY_STORE", str(path))
     old_umask = os.umask(0o002)  # 서버와 같은 umask
     try:
         stale = tmp_path / "llm_key.json.tmp"

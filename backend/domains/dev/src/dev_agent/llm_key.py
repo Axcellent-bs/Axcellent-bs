@@ -2,10 +2,10 @@
 
 - 넣으면 코딩 에이전트(coder.py)가 서버 기본 키 대신 이 키로 부른다. 서버 AI 체험 한도는
   기본 키에만 걸리고, 고객사 키에는 월 예산(`State.monthly_budget_tokens`)만 걸린다.
-- 키는 이 프로세스 메모리와 저장 파일(`PLANNING_LLM_KEY_STORE`, run_all.sh가 git에 안 올라가는
-  backend/.data/에 둔다)에만 둔다. 화면·로그·상태 파일(planning_state)로는 돌려주지 않는다
-  (넣었는지와 끝 4자리만).
-- 주소·모델을 비우면 서버 설정(`PLANNING_LLM_*`)의 주소·모델을 쓴다.
+- 키는 이 프로세스 메모리와 저장 파일(`DEV_LLM_KEY_STORE`, 예전 이름
+  `PLANNING_LLM_KEY_STORE`도 읽음. run_all.sh가 git에 안 올라가는 backend/.data/에
+  둔다)에만 둔다. 화면·로그·상태 파일(planning_state)로는 돌려주지 않는다 (넣었는지와 끝 4자리만).
+- 주소·모델을 비우면 서버 설정(`DEV_LLM_*`·`LLM_*`)의 주소·모델을 쓴다.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import os
 from dataclasses import asdict, dataclass, field, replace
 
 from ax_agent_template.llm import LLMSettings
+from dev_agent import llm_env
 
 
 @dataclass(frozen=True)
@@ -36,7 +37,7 @@ def _hint(key: str) -> str:
 
 
 def _store_path() -> str:
-    return os.getenv("PLANNING_LLM_KEY_STORE") or ""
+    return llm_env.key_store_path()
 
 
 def _save() -> None:
