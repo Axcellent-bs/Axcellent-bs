@@ -115,8 +115,10 @@ def _batch_status(decision_status: str) -> str:
     )
 
 
-async def settlements_view(period: str | None) -> tuple[dict[str, Any], dict[str, Any]]:
-    books = await state().books()
+async def settlements_view(
+    period: str | None, fresh: bool = False
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    books = await (state().fresh_books() if fresh else state().books())
     result = settlement.statements(books, period)
     batch = state().records.batches.get(result["period"])
     if batch:
@@ -348,7 +350,7 @@ def add_finance_api(app: FastAPI) -> None:
             return error(400, "invalid_request", str(exc))
         key = closing_key(period, d)
         records = state().records.closings
-        books = await state().books()
+        books = await state().fresh_books()
         if key not in records and closing.unknown_codes(books):
             return error(
                 409,
@@ -381,7 +383,7 @@ def add_finance_api(app: FastAPI) -> None:
         note = (await _body(request)).get("note")
         if not isinstance(note, str) or not note.strip() or len(note) > 500:
             return error(400, "invalid_request", "note는 1~500자 문자열")
-        books = await state().books()
+        books = await state().fresh_books()
         payment = next((p for p in books.payments() if p["payment_id"] == payment_id), None)
         if payment is None:
             return error(404, "not_found", f"결제 {payment_id}이 장부에 없다")
@@ -416,7 +418,7 @@ def add_finance_api(app: FastAPI) -> None:
         if period is not None and not isinstance(period, str):
             return error(400, "invalid_request", "period는 YYYY-Www 문자열")
         try:
-            data, meta = await settlements_view(period)
+            data, meta = await settlements_view(period, fresh=True)
         except ValueError as exc:
             return error(400, "invalid_request", str(exc))
         name = data["period"]

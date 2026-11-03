@@ -7,9 +7,13 @@ from datetime import date, timedelta
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 from finance_agent import books as bk
 from finance_agent import finance_config as fc
+from finance_agent import handlers
+from finance_agent.main import app
+from finance_agent.sources import MockSources
 
 
 @pytest.fixture(autouse=True)
@@ -356,3 +360,108 @@ def test_slow_orders_past_the_limit_stay_unavailable(monkeypatch: pytest.MonkeyP
 
     books = asyncio.run(run())
     assert "orders" in books.unavailable and books.orders == []
+
+
+def _slow_live(monkeypatch: pytest.MonkeyPatch) -> list[bk.Books]:
+    """부를 때마다 새 장부를 돌려주는 대역. 새로 읽는 데 시간이 걸린다."""
+    monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
+    monkeypatch.delenv("FINANCE_MOCK", raising=False)
+    bk.clear_live_cache()
+    made: list[bk.Books] = []
+
+    async def fake_live() -> bk.Books:
+        await asyncio.sleep(0.05)
+        made.append(bk.Books(source="shop-api", mock=False))
+        return made[-1]
+
+    monkeypatch.setattr(bk, "live_books", fake_live)
+    return made
+
+
+def test_expired_books_answer_at_once_and_refresh_behind(monkeypatch: pytest.MonkeyPatch) -> None:
+    made = _slow_live(monkeypatch)
+
+    async def run() -> None:
+        first = await bk.load_books()
+        monkeypatch.setattr(bk, "LIVE_CACHE_SECONDS", 0.0)  # 캐시가 지났다
+        again = await bk.load_books()
+        assert again is first and len(made) == 1  # 기다리지 않고 직전 장부를 준다
+        await asyncio.sleep(0.1)
+        assert len(made) == 2  # 뒤에서 새로 읽었다
+        assert await bk.load_books() is made[1]
+
+    asyncio.run(run())
+    bk.clear_live_cache()
+
+
+def test_a_decision_waits_for_new_books(monkeypatch: pytest.MonkeyPatch) -> None:
+    made = _slow_live(monkeypatch)
+
+    async def run() -> None:
+        first = await bk.load_books()
+        monkeypatch.setattr(bk, "LIVE_CACHE_SECONDS", 0.0)
+        fresh = await bk.load_books(fresh=True)
+        assert fresh is not first and fresh is made[1]
+
+    asyncio.run(run())
+    bk.clear_live_cache()
+
+
+def test_very_old_books_are_not_served(monkeypatch: pytest.MonkeyPatch) -> None:
+    made = _slow_live(monkeypatch)
+
+    async def run() -> None:
+        first = await bk.load_books()
+        monkeypatch.setattr(bk, "LIVE_CACHE_SECONDS", 0.0)
+        monkeypatch.setattr(bk, "LIVE_STALE_SECONDS", 0.0)  # 너무 오래됐다
+        assert await bk.load_books() is not first and len(made) == 2
+
+    asyncio.run(run())
+    bk.clear_live_cache()
+
+
+def test_failed_refresh_does_not_keep_serving_old_books(monkeypatch: pytest.MonkeyPatch) -> None:
+    """새로 읽다 주문을 못 받으면 옛 장부를 계속 주지 않는다. 못 받았다고 알린다."""
+    made = _slow_live(monkeypatch)
+
+    async def run() -> None:
+        await bk.load_books()
+        monkeypatch.setattr(bk, "LIVE_CACHE_SECONDS", 0.0)
+
+        async def broken() -> bk.Books:
+            return bk.Books(source="shop-api", mock=False, unavailable=["orders"])
+
+        monkeypatch.setattr(bk, "live_books", broken)
+        await bk.load_books()  # 이 요청은 직전 장부, 뒤에서 실패
+        await asyncio.sleep(0.01)
+        assert "orders" in (await bk.load_books()).unavailable
+
+    asyncio.run(run())
+    assert len(made) == 1
+    bk.clear_live_cache()
+
+
+def test_decisions_that_move_or_fix_money_read_new_books(monkeypatch: pytest.MonkeyPatch) -> None:
+    """결산 확정과 정산 지급 요청은 직전 장부가 아니라 새 장부로 판단한다."""
+    monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
+    monkeypatch.delenv("FINANCE_HUMAN_TOKENS", raising=False)
+    monkeypatch.delenv("SAFETY_HUMAN_TOKENS", raising=False)
+    handlers.reset_state(MockSources())
+    calls: list[str] = []
+    real = handlers.State.fresh_books
+
+    async def spy(self: handlers.State) -> bk.Books:
+        calls.append("fresh")
+        return await real(self)
+
+    monkeypatch.setattr(handlers.State, "fresh_books", spy)
+    client = TestClient(app)
+    human = {"Authorization": "Bearer human:taeyoon"}
+    client.post(
+        "/api/finance/closing/confirm",
+        json={"period": "day", "date": "2026-10-22"},
+        headers=human,
+    )
+    assert calls == ["fresh"]
+    client.post("/api/finance/settlements/batch", json={}, headers=human)
+    assert calls == ["fresh", "fresh"]
