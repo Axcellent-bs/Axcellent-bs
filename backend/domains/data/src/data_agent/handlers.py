@@ -48,6 +48,7 @@ from ax_contracts.schemas.data import (
     FraudScoreInput,
     ImpactAnalysisInput,
     KpiSummaryInput,
+    PromoConceptsRequest,
     RootCauseInput,
     TrendCandidatesRequest,
     TrendHistoryRequest,
@@ -78,6 +79,7 @@ from data_agent.skills.content_recommend import recommend
 from data_agent.skills.fraud_score import score_fraud
 from data_agent.skills.impact_analysis import analyze_impact
 from data_agent.skills.kpi_summary import summarize_kpi
+from data_agent.skills.promo_concepts import make_concepts
 from data_agent.skills.root_cause import estimate_root_cause
 from data_agent.skills.trend_candidates import find_candidates
 from data_agent.skills.trend_history import history
@@ -408,6 +410,29 @@ async def trend_popular(request: AgentRequest) -> AgentResult:
     )
 
 
+async def promo_concepts(request: AgentRequest) -> AgentResult:
+    """홍보 영상 기획안 3~5개 (하루 캐시, 기획안 기록만 남김). 상태를 바꾸지 않는다(grade read)."""
+    data = _parse(request, PromoConceptsRequest)
+    if isinstance(data, AgentResult):
+        return data
+    result = await make_concepts(
+        data,
+        get_trend_connector(),
+        get_llm(),
+        env=os.environ,
+        catalog=get_catalog(),
+        context_id=request.meta.context_id,
+        category_cache=topic_category.DEFAULT_CACHE,
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome="drafted" if result.output.concepts else "empty",
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
+
+
 async def content_recommend(request: AgentRequest) -> AgentResult:
     """영상 소재 추천 (콘텐츠 루프 2단계). 조회만 하고 상태를 바꾸지 않는다(grade read)."""
     data = _parse(request, ContentRecommendRequest)
@@ -553,6 +578,7 @@ HANDLERS = {
     "youtube_velocity": youtube_velocity,
     "content_recommend": content_recommend,
     "trend_popular": trend_popular,
+    "promo_concepts": promo_concepts,
     "answer_planning_question": answer_planning_question,
     "campaign_effect": campaign_effect,
 }
