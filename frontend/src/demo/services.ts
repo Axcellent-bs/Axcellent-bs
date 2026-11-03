@@ -3,7 +3,7 @@
 // 화면은 예전 캣북스 대시보드의 AI 화면을 옮겨 온 것이다. paths가 그 서비스에 속한 화면 주소, agent가 맡은 AI다.
 import { useSyncExternalStore, type ComponentType } from 'react'
 import {
-  IconBolt, IconBook, IconBox, IconChart, IconCode, IconMegaphone, IconPlan, IconReceipt, IconShield, IconStar, IconUser, IconUsers,
+  IconBolt, IconBook, IconBox, IconChart, IconCode, IconMegaphone, IconOffice, IconPlan, IconReceipt, IconShield, IconStar, IconUser, IconUsers,
 } from '@/components/icons'
 
 export type SubItem = { href: string; label: string; soon?: boolean }
@@ -110,6 +110,10 @@ export const SERVICES: Service[] = [
   {
     id: 'decisions', agent: 'hr', family: 'backoffice', name: '결정 기록', by: 'AXcellent', Icon: IconBook, entry: '/ops', paths: ['/ops'],
     desc: '회사의 결정을 기록하고, 새 계획이 과거에 기각된 안과 겹치는지 봅니다.',
+  },
+  {
+    id: 'org', agent: 'hr', family: 'backoffice', name: '조직 변동', by: 'AXcellent', Icon: IconOffice, entry: '/org', paths: ['/org'],
+    desc: '팀 이동·입사·퇴사를 기록하고 확정합니다. 확정한 기록으로 센 팀별 인원이 재무 AI의 팀 예산에 쓰입니다.',
   },
   {
     id: 'planning', agent: 'planning', family: 'product', name: '요청·기획서', by: 'AXcellent', Icon: IconPlan, entry: '/planning/requests', paths: ['/planning'],

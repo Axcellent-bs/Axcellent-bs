@@ -81,6 +81,21 @@ export interface PlanCheck {
   similar_cards: { card_id: string; status: string; summary: string }[];
   computed: Record<string, unknown>;
 }
+export type OrgChangeKind = "transfer" | "join" | "leave";
+export type OrgChangeStatus = "draft" | "confirmed" | "rejected";
+export interface OrgChange {
+  change_id: string; member_id: string; kind: OrgChangeKind;
+  from_team: string | null; to_team: string | null;
+  effective_date: string; counts_from_month: string; status: OrgChangeStatus;
+  note: string | null; created_at: string; decided_at: string | null;
+}
+/** 발령 기록과 명부 등록 상태. roster_complete가 참이어야 재무에 나가는 인원이 확정 기록으로 센 값이 된다 */
+export interface OrgChanges { changes: OrgChange[]; registered_members: number; expected_members: number; roster_complete: boolean; collected_at: string }
+export interface OrgChangeInput { member_id: string; kind: OrgChangeKind; from_team?: string; to_team?: string; effective_date: string; note?: string }
+export interface OrgHeadcount {
+  available: boolean; month: string; message?: string;
+  rows?: { team: string; headcount: number }[]; basis?: string | null; example?: boolean;
+}
 export interface PlanDraft { title: string; summary: string; area: string; kind: "spec" | "ticket" | "deploy_plan" }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -134,6 +149,15 @@ export const hr = {
     }),
   restoreMerge: (cardId: string) =>
     post<{ outcome: string; card_id: string | null }>(`/cards/${encodeURIComponent(cardId)}/restore-merge`, {}),
+  orgChanges: () => call<OrgChanges>("/org-changes"),
+  /** 발령 초안 저장. 승인 없이 저장되고, 확정하기 전에는 팀 인원에 세지 않는다 */
+  recordOrgChange: (body: OrgChangeInput) => post<{ change: OrgChange }>("/org-changes", body),
+  decideOrgChange: (changeId: string, decision: "approve" | "reject") =>
+    post<{ change: OrgChange }>(`/org-changes/${encodeURIComponent(changeId)}/decision`, { decision }),
+  setRosterComplete: (complete: boolean) =>
+    post<{ roster_complete: boolean; registered_members: number; expected_members: number }>("/org-roster/complete", { complete }),
+  /** 그 달 팀별 인원 미리 보기. 재무에 나가는 값과 같다 */
+  orgHeadcount: (month: string) => call<OrgHeadcount>(`/org-headcount?month=${encodeURIComponent(month)}`),
   roster: () => call<Roster>("/roster"),
   activity: (contextId: string) => call<AuditEntry[]>(`/hr-activity/${encodeURIComponent(contextId)}`),
   checkPlan: (draft: PlanDraft) => post<PlanCheck>("/plan-checks", { draft }),

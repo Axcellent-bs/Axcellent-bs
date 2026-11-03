@@ -1,4 +1,4 @@
-"""서비스 13개와 에이전트의 대응표.
+"""서비스 14개와 에이전트의 대응표.
 
 AXcellent는 부서가 아니라 서비스 단위로 판다(고객사가 필요한 서비스만 고른다).
 그래서 에이전트도 서비스마다 하나씩 띄운다. 업무 로직은 원래 부서 패키지
@@ -173,12 +173,22 @@ SERVICES: tuple[Service, ...] = (
             "get_audit_timeline",
             "decide_candidate_card",
             "answer_planning_question",
+        ),
+        "결정 기록",
+    ),
+    # 조직 변동(발령) 기록과 팀 인원: 인사 AI의 독립 메뉴. 재무 팀 예산이 team_headcount를 부른다
+    Service(
+        "org",
+        "hr",
+        8124,
+        (
             "team_headcount",
             "record_org_change",
             "decide_org_change",
             "list_org_changes",
+            "set_org_roster_complete",
         ),
-        "결정 기록",
+        "조직 변동",
     ),
     Service(
         "planning",

@@ -4,7 +4,7 @@
 # 내 PC에서만 다르게 쓰려면 config/org.yaml(커밋 안 함)을 두거나 AX_ORG_CONFIG를 준다. 그쪽이 먼저다.
 #
 # 켜지 않은 서비스(AX_ENABLED_SERVICES에 없음)로 가는 요청은 여기 적힌 부서의 사람 할 일함으로 간다.
-# - 키: 서비스 id(아래 13개, frontend/src/demo/services.ts 와 같다) 또는 skill id
+# - 키: 서비스 id(아래 14개, frontend/src/demo/services.ts 와 같다) 또는 skill id
 #   skill 줄이 있으면 서비스 줄보다 먼저 쓴다 (특정 업무만 다른 부서·담당자에게 보낼 때)
 # - unit: 맡은 부서 (필수)
 # - assignee: 담당자 (선택). 비우면 부서 할 일함에만 들어간다
@@ -26,6 +26,7 @@ assignments:
   data: {unit: 데이터분석}
   handover: {unit: 인사총무}
   decisions: {unit: 인사총무}
+  org: {unit: 인사총무}
 
   # skill 단위 (예시): 배포 롤백은 서비스운영이 아니라 개발팀 배포 담당이 맡는다
   rollback_deployment: {unit: 개발팀, assignee: 배포 담당}

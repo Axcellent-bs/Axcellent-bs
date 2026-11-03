@@ -14,6 +14,8 @@ from ax_agent_template.routing import load_org
 
 # 시연용 가상 직원 수. 인수인계 명부(`roster/seed.py`)의 직원 ID와 같은 값이다.
 EXAMPLE_MEMBER_COUNT = 10
+# 전체 직원 수(가정). "전 직원 등록 완료"는 확정된 명부가 이 인원일 때만 표시할 수 있다
+EXPECTED_MEMBER_COUNT = 10
 
 
 @dataclass(frozen=True)

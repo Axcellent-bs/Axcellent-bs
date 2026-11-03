@@ -20,13 +20,19 @@ from ax_contracts.schemas.hr import (
     CheckPlanOutput,
     DecideCandidateCardOutput,
     DecideDuplicateGroupOutput,
+    DecideOrgChangeOutput,
     GetRosterOutput,
     HandoverAnswerRequest,
     HandoverQuestion,
     HandoverStatus,
     HandoverView,
+    ListOrgChangesOutput,
+    RecordOrgChangeInput,
+    RecordOrgChangeOutput,
     RecordResolutionOutput,
     RestoreMergedCardOutput,
+    SetOrgRosterCompleteOutput,
+    TeamHeadcountOutput,
 )
 from ax_contracts.schemas.record import Card
 from ax_dashboard_api import (
@@ -66,6 +72,8 @@ from ax_dashboard_api.schemas import (
     Kpi,
     NoteBody,
     OnboardingStepBody,
+    OrgChangeDecisionBody,
+    OrgRosterCompleteBody,
     QueueProcessBody,
     ReceiptAnalysisBody,
     ResolutionBody,
@@ -684,6 +692,73 @@ async def decide_candidate_card(card_id: str, body: CandidateDecisionBody) -> di
         "decide_candidate_card", payload, target=f"card:{card_id}:{body.decision}"
     )
     return ok(DecideCandidateCardOutput.model_validate(out))
+
+
+def _no_org_in_mock() -> None:
+    if is_mock():
+        raise ApiError(501, "NOT_IMPLEMENTED", "목 모드에는 조직 변동 기록이 없다")
+
+
+@router.get("/org-changes")
+async def org_changes(status: Literal["draft", "confirmed", "rejected"] | None = None) -> dict:
+    """조직 변동(발령) 기록과 명부 등록 상태(등록된 직원 수, 전 직원 등록 완료 여부)."""
+    _no_org_in_mock()
+    out = await hr_client.call("list_org_changes", {"status": status} if status else {})
+    return ok(ListOrgChangesOutput.model_validate(out))
+
+
+@router.post("/org-changes")
+async def record_org_change(body: RecordOrgChangeInput) -> dict:
+    """발령 초안 저장. 승인 없이 저장하고 확정 전에는 팀 인원에 세지 않는다."""
+    _no_org_in_mock()
+    target = ":".join(
+        [body.member_id, body.kind, body.effective_date, body.from_team or "", body.to_team or ""]
+    )
+    out = await hr_client.call(
+        "record_org_change", body.model_dump(exclude_none=True), target=f"org:{target}"
+    )
+    return ok(RecordOrgChangeOutput.model_validate(out))
+
+
+@router.post("/org-changes/{change_id}/decision")
+async def decide_org_change(change_id: str, body: OrgChangeDecisionBody) -> dict:
+    """인사 담당자가 초안을 확정·반려한다(사람 토큰 필요). 같은 결정은 성공으로 돌려준다."""
+    _no_org_in_mock()
+    payload: dict[str, str] = {"change_id": change_id, "decision": body.decision}
+    if body.note and body.note.strip():
+        payload["note"] = body.note.strip()
+    out = await hr_client.call(
+        "decide_org_change", payload, target=f"org-change:{change_id}:{body.decision}"
+    )
+    return ok(DecideOrgChangeOutput.model_validate(out))
+
+
+@router.post("/org-roster/complete")
+async def set_org_roster_complete(body: OrgRosterCompleteBody) -> dict:
+    """전 직원 등록 완료 표시(사람 토큰 필요). 확정 명부가 전체 직원 수일 때만 표시할 수 있다."""
+    _no_org_in_mock()
+    out = await hr_client.call(
+        "set_org_roster_complete", {"complete": body.complete}, target=f"org-roster:{body.complete}"
+    )
+    return ok(SetOrgRosterCompleteOutput.model_validate(out))
+
+
+@router.get("/org-headcount")
+async def org_headcount(month: str = Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")) -> dict:
+    """그 달 팀별 인원 미리 보기(재무에 나가는 값과 같다). 알 수 없는 달은 `available: false`."""
+    _no_org_in_mock()
+    try:
+        out = await hr_client.call("team_headcount", {"month": month})
+    except ApiError as err:
+        if err.status_code != 502:
+            raise
+        message = (
+            f"{month}의 팀 인원을 알 수 없다(발령 기록이 시작되기 전이거나 조직도를 읽지 못함)"
+        )
+        return ok({"available": False, "month": month, "message": message})
+    return ok(
+        {"available": True, **TeamHeadcountOutput.model_validate(out).model_dump(mode="json")}
+    )
 
 
 @router.get("/duplicate-groups")

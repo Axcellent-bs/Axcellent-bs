@@ -7,9 +7,9 @@
 - 확정된 발령 기록이 하나도 없으면 가상 명부(예시)로 세고 `example: true`로 밝힌다.
 - 확정 기록이 있으면 그 기록만으로 센다. 초안·반려는 세지 않는다.
   기록이 시작되기 전의 달은 인원을 알 수 없으므로 0명으로 채우지 않고 실패로 답한다.
-- 전 직원 첫 등록이 끝났다고 인사가 밝히기 전(`baseline_complete`)에는 확정 기록으로 세어도
+- 인사 담당자가 "전 직원 등록 완료"를 표시하기 전(`baseline_complete`)에는 확정 기록으로 세어도
   `example: true`로 답한다. 일부만 등록된 낮은 인원으로 재무가 팀 예산을 확정하는 것을 막는다
-  (재무는 전 직원이 등록됐는지 알 수 없다). 등록 방식은 화면 작업(6번)에서 정한다.
+  (재무는 전 직원이 등록됐는지 알 수 없다). 표시는 `set_org_roster_complete`(조직 변동 화면)로 한다.
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ from hr_agent.services import Services
 
 
 def baseline_complete(svc: Services) -> bool:
-    """전 직원 첫 등록이 끝났다고 인사가 밝혔는지. 아직 방법이 없어 늘 거짓(6번에서 채움)."""
-    return False
+    """인사 담당자가 "전 직원 등록 완료"를 표시했는지(`set_org_roster_complete`)."""
+    return changes.roster_complete(svc)
 
 
 async def team_headcount(svc: Services, request: AgentRequest) -> AgentResult:

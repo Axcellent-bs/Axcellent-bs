@@ -36,6 +36,7 @@ reviews 8122 svc_reviews.main:app
 coupon 8103 svc_coupon.main:app
 handover 8104 svc_handover.main:app
 decisions 8114 svc_decisions.main:app
+org 8124 svc_org.main:app
 finance 8105 svc_finance.main:app
 data 8106 svc_data.main:app
 incident 8107 svc_incident.main:app

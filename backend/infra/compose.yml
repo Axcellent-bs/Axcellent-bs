@@ -45,6 +45,9 @@ include:
       - ../services/decisions/compose.yml
       - ./common-log/decisions.yml
   - path:
+      - ../services/org/compose.yml
+      - ./common-log/org.yml
+  - path:
       - ../services/planning/compose.yml
       - ./common-log/planning.yml
   - path:

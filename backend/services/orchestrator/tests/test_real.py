@@ -82,11 +82,17 @@ async def test_merged_department_card_keeps_one_entry_per_skill() -> None:
                 "name": "decisions",
                 "skills": [{"id": "record_case"}, {"id": "answer_planning_question"}],
             },
+            {"name": "org", "skills": [{"id": "team_headcount"}]},
         ]
     )
     async with _client(lambda request: httpx.Response(200, json=next(cards))) as client:
         card = await http_card_fetcher(client)("hr")
     ids = [s["id"] for s in card["skills"]]
     assert ids.count("answer_planning_question") == 1
-    assert set(ids) == {"get_roster", "record_case", "answer_planning_question"}
+    assert set(ids) == {
+        "get_roster",
+        "record_case",
+        "answer_planning_question",
+        "team_headcount",
+    }
     assert card["name"] == "hr"
