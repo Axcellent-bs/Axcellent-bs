@@ -48,6 +48,7 @@ CONFLICT_OUTCOMES = frozenset(
         "CANCELLED",
         "HANDOVER_CLOSED",
         "NOT_DRAFT",
+        "NOT_BASIS_CARD",
         "LEDGER_CONFLICT",
         "ROSTER_COUNT_MISMATCH",
     }

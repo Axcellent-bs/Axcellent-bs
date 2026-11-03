@@ -174,7 +174,9 @@ CREATE TABLE IF NOT EXISTS org_changes (
   status TEXT NOT NULL,
   note TEXT,
   created_at TEXT NOT NULL,
-  decided_at TEXT
+  decided_at TEXT,
+  basis_card_id TEXT,
+  basis_title TEXT
 );
 CREATE TABLE IF NOT EXISTS org_state (
   key TEXT PRIMARY KEY,
@@ -204,6 +206,16 @@ class Store:
         self._conn.row_factory = sqlite3.Row
         with self._lock:
             self._conn.executescript(SCHEMA)
+            self._add_missing_columns(
+                "org_changes", {"basis_card_id": "TEXT", "basis_title": "TEXT"}
+            )
+
+    def _add_missing_columns(self, table: str, columns: dict[str, str]) -> None:
+        """이미 만들어진 DB에 뒤늦게 생긴 칸을 더한다(`IF NOT EXISTS`는 칸을 더하지 않는다)."""
+        have = {row["name"] for row in self._conn.execute(f"PRAGMA table_info({table})")}
+        for name, kind in columns.items():
+            if name not in have:
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
 
     def execute(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> int:
         """쓰기 한 문장을 실행한다(자동 확정, `transaction()` 안에서는 묶음 단위로 확정).

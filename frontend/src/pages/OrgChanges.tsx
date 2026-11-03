@@ -4,7 +4,7 @@ import { HUMAN_TOKEN_SET } from "@/lib/env";
 import { shortDateTime } from "@/lib/format";
 import {
   hr,
-  type OrgChange, type OrgChangeKind, type OrgChanges, type OrgChangeStatus, type OrgHeadcount,
+  type OrgBasis, type OrgChange, type OrgChangeInput, type OrgChangeKind, type OrgDescription, type OrgParse, type OrgChanges, type OrgChangeStatus, type OrgHeadcount,
 } from "@/lib/hr";
 
 // 조직 변동(발령) 화면: ① 지금 사람이 할 일(확정 대기 초안) → ② 명부 등록 현황 → ③ 처음 명부 등록(일괄)
@@ -124,13 +124,15 @@ export default function OrgChangesPage() {
             )}
             {drafts.map((c) => (
               <article key={c.change_id} className="grid gap-3 rounded-2xl bg-surface p-4 shadow-sm sm:grid-cols-[1fr_auto] sm:items-center">
-                <div className="min-w-0">
+                <div className="min-w-0 space-y-1.5">
                   <div className="flex flex-wrap items-center gap-2">
                     <b className="text-[15px]">{KIND_KO[c.kind]}</b>
                     <span className="text-sm">{c.member_id}</span>
                     <span className="text-sm text-ink-700">{describe(c)}</span>
                   </div>
-                  <p className="mt-1 text-xs text-ink-500">발령일 {c.effective_date} · 인원에는 {monthMark(c.counts_from_month)}부터 셉니다{c.note ? ` · ${c.note}` : ""}</p>
+                  <p className="text-xs text-ink-500">발령일 {c.effective_date} · 인원에는 {monthMark(c.counts_from_month)}부터 셉니다{c.note ? ` · ${c.note}` : ""}</p>
+                  <p className="text-xs text-ink-500">{c.basis_title ? `근거 결정 카드: ${c.basis_title}` : "근거 결정 카드 없음"}</p>
+                  <Describe changeId={c.change_id} />
                 </div>
                 <div className="flex gap-2">
                   <button className="btn-primary" disabled={!HUMAN_TOKEN_SET || busy} onClick={() => run(() => hr.decideOrgChange(c.change_id, "approve"))}>확정</button>
@@ -216,7 +218,7 @@ export default function OrgChangesPage() {
                       <td className="py-1.5 pr-3"><Chip label={STATUS[c.status].label} tone={STATUS[c.status].tone} /></td>
                       <td className="py-1.5 pr-3">{KIND_KO[c.kind]}</td>
                       <td className="py-1.5 pr-3">{c.member_id}</td>
-                      <td className="py-1.5 pr-3">{describe(c)}</td>
+                      <td className="py-1.5 pr-3">{describe(c)}{c.basis_title && <span className="block text-xs text-ink-500">근거: {c.basis_title}</span>}</td>
                       <td className="py-1.5 pr-3 tabular-nums">{c.effective_date}</td>
                       <td className="py-1.5 tabular-nums">{c.status === "confirmed" ? `${monthMark(c.counts_from_month)}부터` : "-"}</td>
                     </tr>
@@ -226,6 +228,31 @@ export default function OrgChangesPage() {
             </div>
           )}
       </Section>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- 발령 요약 설명문
+function Describe({ changeId }: { changeId: string }) {
+  const [d, setD] = useState<OrgDescription | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function load() {
+    setBusy(true); setErr(null);
+    try { setD(await hr.orgDescription(changeId)); }
+    catch (e) { setErr(errText(e)); }
+    finally { setBusy(false); }
+  }
+  if (!d && !err) return <button type="button" className="btn-ghost" disabled={busy} onClick={load}>{busy ? "설명 쓰는 중…" : "요약 설명 보기"}</button>;
+  return (
+    <div className="rounded-xl bg-ink-50 px-3 py-2 text-sm">
+      {d && (
+        <>
+          <p>{d.text}</p>
+          <p className="mt-1 text-[11px] text-ink-500">{d.llm_used ? "AI가 다듬은 문장" : d.fallback ? "AI 문장이 숫자와 맞지 않아 기본 문장으로 바꿨습니다" : "기본 문장"} · 인원 숫자는 코드가 센 값입니다</p>
+        </>
+      )}
+      {err && <p className="text-red-800">{err}</p>}
     </div>
   );
 }
@@ -287,7 +314,7 @@ function TeamSelect({ id, teams, value, onChange }: { id: string; teams: string[
 
 function ChangeForm({ teams, busy, onSave }: {
   teams: string[]; busy: boolean;
-  onSave: (input: { member_id: string; kind: OrgChangeKind; from_team?: string; to_team?: string; effective_date: string; note?: string }) => void;
+  onSave: (input: OrgChangeInput) => void;
 }) {
   const [kind, setKind] = useState<OrgChangeKind>("transfer");
   const [member, setMember] = useState("");
@@ -295,19 +322,67 @@ function ChangeForm({ teams, busy, onSave }: {
   const [to, setTo] = useState("");
   const [date, setDate] = useState("");
   const [note, setNote] = useState("");
+  // 문장으로 채우기(LLM 제안)
+  const [sentence, setSentence] = useState("");
+  const [parse, setParse] = useState<OrgParse | null>(null);
+  const [parsing, setParsing] = useState(false);
+  // 근거 카드 찾기(RAG)
+  const [reason, setReason] = useState("");
+  const [basis, setBasis] = useState<OrgBasis | null>(null);
+  const [basisId, setBasisId] = useState("");
+  const [finding, setFinding] = useState(false);
+  const [aiErr, setAiErr] = useState<string | null>(null);
+
   const needFrom = kind !== "join";
   const needTo = kind !== "leave";
   const ready = member.trim() && date && (!needFrom || from) && (!needTo || to) && (kind !== "transfer" || from !== to);
+
+  async function fillFromSentence() {
+    setParsing(true); setAiErr(null); setParse(null);
+    try {
+      const res = await hr.orgParse(sentence.trim());
+      setParse(res);
+      const s = res.suggestion;
+      if (res.available && s) {
+        if (s.kind) setKind(s.kind);
+        setMember(s.member_id ?? ""); setFrom(s.from_team ?? ""); setTo(s.to_team ?? ""); setDate(s.effective_date ?? "");
+      }
+    } catch (e) { setAiErr(errText(e)); }
+    finally { setParsing(false); }
+  }
+  async function findBasis() {
+    setFinding(true); setAiErr(null); setBasis(null); setBasisId("");
+    try { setBasis(await hr.orgBasis(reason.trim())); }
+    catch (e) { setAiErr(errText(e)); }
+    finally { setFinding(false); }
+  }
   function submit(e: FormEvent) {
     e.preventDefault(); if (!ready) return;
     onSave({
       member_id: member.trim(), kind, effective_date: date,
-      ...(needFrom ? { from_team: from } : {}), ...(needTo ? { to_team: to } : {}), ...(note.trim() ? { note: note.trim() } : {}),
+      ...(needFrom ? { from_team: from } : {}), ...(needTo ? { to_team: to } : {}),
+      ...(note.trim() ? { note: note.trim() } : {}), ...(basisId ? { basis_card_id: basisId } : {}),
     });
-    setMember(""); setNote("");
+    setMember(""); setNote(""); setSentence(""); setParse(null); setReason(""); setBasis(null); setBasisId("");
   }
   return (
-    <Section title="발령 입력" desc="초안으로 저장됩니다. 확정하기 전에는 인원에 세지 않습니다.">
+    <Section title="발령 입력" desc="초안으로 저장됩니다. 확정하기 전에는 인원에 세지 않습니다. 문장으로 채우기와 근거 찾기는 제안일 뿐이고, 저장은 아래 버튼을 눌러야 됩니다.">
+      <div className="space-y-2 rounded-2xl bg-ink-50 p-4">
+        <label className="block text-sm font-medium" htmlFor="org-sentence">발령 문장으로 채우기 (직원 번호로 적어 주세요)</label>
+        <div className="flex flex-wrap gap-2">
+          <input id="org-sentence" className={`${INPUT} min-w-[16rem] flex-1`} value={sentence} onChange={(e) => setSentence(e.target.value)}
+            placeholder="다음 달 1일자로 emp_03 기획팀에서 개발팀으로 발령" maxLength={500} />
+          <button type="button" className="btn-ghost" disabled={!HUMAN_TOKEN_SET || parsing || sentence.trim().length < 2} onClick={fillFromSentence}>{parsing ? "정리 중…" : "칸 채우기"}</button>
+        </div>
+        {parse && !parse.available && <p className="rounded-xl bg-white px-3 py-2 text-sm text-ink-700">{parse.message ?? "문장 정리를 쓸 수 없습니다. 직접 입력하세요."}</p>}
+        {parse?.available && (
+          <div className="rounded-xl bg-white px-3 py-2 text-sm">
+            <p className="text-xs text-ink-500">아래 칸을 채웠습니다. 내용을 확인하고 고친 뒤 저장하세요.{parse.suggestion?.from_team_from_roster ? " 원래 팀은 확정 명부의 현재 소속입니다." : ""}</p>
+            {parse.warnings.length > 0 && <ul className="mt-1 list-disc space-y-0.5 pl-5 text-amber-800">{parse.warnings.map((w) => <li key={w}>{w}</li>)}</ul>}
+          </div>
+        )}
+      </div>
+
       <form onSubmit={submit} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <label className="space-y-1 text-sm"><span className="block text-xs text-ink-500">구분</span>
           <select id="org-kind" className={INPUT} value={kind} onChange={(e) => setKind(e.target.value as OrgChangeKind)}>
@@ -325,6 +400,32 @@ function ChangeForm({ teams, busy, onSave }: {
         <label className="space-y-1 text-sm sm:col-span-2 lg:col-span-3"><span className="block text-xs text-ink-500">메모 (선택)</span>
           <input id="org-note" className={INPUT} value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} />
         </label>
+
+        <div className="space-y-2 sm:col-span-2 lg:col-span-3">
+          <label className="block text-xs text-ink-500" htmlFor="org-reason">발령 사유 (선택): 비슷한 과거 결정 카드를 근거 후보로 찾습니다</label>
+          <div className="flex flex-wrap gap-2">
+            <input id="org-reason" className={`${INPUT} min-w-[16rem] flex-1`} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="개발팀 인력 부족으로 기획팀 인원을 이동" maxLength={500} />
+            <button type="button" className="btn-ghost" disabled={finding || reason.trim().length < 2} onClick={findBasis}>{finding ? "찾는 중…" : "근거 후보 찾기"}</button>
+          </div>
+          {basis && basis.candidates.length === 0 && <p className="rounded-xl bg-ink-50 px-3 py-2 text-sm text-ink-700">근거 카드 없음. 근거 없이도 저장할 수 있습니다.</p>}
+          {basis && basis.candidates.length > 0 && (
+            <fieldset className="space-y-2">
+              <legend className="text-xs text-ink-500">근거로 연결할 카드를 고르세요. 고르지 않으면 연결하지 않습니다.</legend>
+              {basis.candidates.map((c) => (
+                <label key={c.card_id} className="flex cursor-pointer gap-2 rounded-xl bg-ink-50 px-3 py-2 text-sm">
+                  <input type="radio" name="org-basis" className="mt-1" checked={basisId === c.card_id} onChange={() => setBasisId(c.card_id)} />
+                  <span className="min-w-0">
+                    <span className="flex flex-wrap items-center gap-2"><b>{c.title}</b><Chip label={`유사도 ${Math.round(c.similarity * 100)}%`} tone="bg-ink-100 text-ink-500" />
+                      {c.rejected && <Chip label="과거에 기각된 안" tone="bg-red-50 text-red-700" />}</span>
+                    <span className="block text-xs text-ink-500">{c.summary}</span>
+                  </span>
+                </label>
+              ))}
+              {basisId && <button type="button" className="btn-ghost" onClick={() => setBasisId("")}>선택 해제</button>}
+            </fieldset>
+          )}
+        </div>
+        {aiErr && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800 sm:col-span-2 lg:col-span-3">{aiErr}</p>}
         <div className="sm:col-span-2 lg:col-span-3"><button className="btn-primary" disabled={!HUMAN_TOKEN_SET || busy || !ready}>초안으로 저장</button></div>
       </form>
     </Section>

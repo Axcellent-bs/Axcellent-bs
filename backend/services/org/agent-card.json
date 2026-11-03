@@ -25,7 +25,7 @@
     },
     {
       "id": "record_org_change",
-      "description": "조직 변동(팀 이동·입사·퇴사) 초안을 저장한다. 승인은 필요 없고 확정 전에는 팀 인원에 세지 않는다. 팀은 조직도에 있는 이름만 받고, 같은 발령을 두 번 접수하면 처음 것을 돌려준다.",
+      "description": "조직 변동(팀 이동·입사·퇴사) 초안을 저장한다. 승인은 필요 없고 확정 전에는 팀 인원에 세지 않는다. 팀은 조직도에 있는 이름만 받고, 같은 발령을 두 번 접수하면 처음 것을 돌려준다. 근거 결정 카드(basis_card_id)는 선택이며 확정된 업무 결정 카드만 받는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordOrgChangeInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordOrgChangeOutput",
       "grade": "A",
@@ -65,6 +65,42 @@
       "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#SetOrgRosterCompleteInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#SetOrgRosterCompleteOutput",
       "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "find_org_change_basis",
+      "description": "발령 사유와 비슷한 과거 업무 결정 카드를 임베딩 검색(RAG)으로 찾는다(조회 전용). 확정된 업무 결정 카드만 대상이고 기준을 넘는 카드가 없으면 비어 있다. 과거에 기각된 안은 rejected로 표시한다. 자동으로 연결하지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#FindOrgChangeBasisInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#FindOrgChangeBasisOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "parse_org_change_text",
+      "description": "직원 번호로 적은 발령 문장을 입력 칸(종류·직원 번호·원래 팀·새 팀·발령일)으로 나눈 제안을 만든다(LLM, 조회 전용, 저장 안 함). 팀·날짜·소속은 코드가 검증하고 틀리면 경고한다. LLM이 꺼져 있거나 실패하면 available=false다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ParseOrgChangeTextInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ParseOrgChangeTextOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "describe_org_change",
+      "description": "발령이 팀 인원에 주는 변화를 승인하는 사람이 읽을 설명문으로 쓴다(조회 전용). 인원 변화는 코드가 세고 LLM은 문장만 다듬는다. 문장 속 숫자가 코드 값과 다르거나 금액을 말하면 템플릿 문장으로 대체한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DescribeOrgChangeInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DescribeOrgChangeOutput",
+      "grade": "read",
       "allowed_requesters": [
         "dashboard-api"
       ],

@@ -55,6 +55,7 @@ class Services:
     idem: IdempotencyStore
     dense: DenseCardSearch | None = None  # None이면 계획 비교는 Dice로 찾는다
     verifier: RelevanceVerifier | None = None  # None이면 Dense 후보를 LLM으로 거르지 않는다
+    llm: Any = None  # None이면 LLM이 필요한 기능(발령 문장 정리)은 쓸 수 없다
     extras: dict[str, Any] = field(default_factory=dict)
 
 
@@ -107,6 +108,7 @@ def build_services(
         idem=IdempotencyStore(store, clock),
         dense=dense,
         verifier=verifier,
+        llm=llm,
     )
     if llm is not None and dense is not None and not settings.mock:
         # 같은 주제로 본 결정 쌍을 가르고(같은 결정/내용이 바뀜/별개) 묶음의 대표 제목을 제안한다
