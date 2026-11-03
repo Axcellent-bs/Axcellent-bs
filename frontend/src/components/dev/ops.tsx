@@ -126,7 +126,10 @@ export function Aftercare({ s, item }: { s: S; item?: string }) {
       {!incidents.length ? <div className="empty"><b>사건 없음</b></div> : (
         <div className="inc-grid">
           {incidents.map((i) => {
-            const done = [true, i.candidates.length > 0, !!i.rollbackCheck, i.linked, !!i.followUp]
+            // 오른쪽 흐름(Flow)과 같은 규칙: 뒤 단계가 켜졌으면 앞 단계도 켠다
+            const raw = [true, i.candidates.length > 0, !!i.rollbackCheck, i.linked, !!i.followUp]
+            const last = raw.lastIndexOf(true)
+            const done = raw.map((on, n) => on || n < last)
             return (
               <a key={i.ctx} href={toPath(`work/aftercare/${i.ctx}`)} className={`inc-card${sel?.ctx === i.ctx ? ' on' : ''}`}>
                 <span className="inc-card-top"><span className="mono">{i.ctx}</span><State v={i.linked ? '완료' : '접수'} /></span>
