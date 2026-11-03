@@ -307,7 +307,6 @@ export interface IncidentSummary {
   damage_amount: number | null;
   compensation_total: number;
   coupon_count: number;
-  held_count: number;
   refund_total: number | null;
   money_out_total: number | null;
 }
@@ -323,7 +322,6 @@ export interface IncidentImpact {
   collected_at: string | null;
 }
 
-export type CouponStatus = "executed" | "held" | "rejected" | "failed";
 export interface IncidentCoupon {
   buyer_id: string;
   execution_id: string;
@@ -333,19 +331,12 @@ export interface IncidentCoupon {
   amount: number;
   purpose_code: string;
   reason_code: string | null;
-  grade: "A" | "C";
-  status: CouponStatus;
-  review_id: string | null;
   at: string;
-  /** 데이터 영향 고객 목록에 있는지. null = 영향 고객 목록이 없어 확인 불가 */
-  in_impact: boolean | null;
 }
 export interface IncidentCompensation {
   coupons: IncidentCoupon[];
   total_executed: number;
-  total_held: number;
   count_executed: number;
-  count_held: number;
 }
 
 export interface IncidentRefunds { total: number; count: number }
@@ -720,7 +711,7 @@ export const purposeKo = (...codes: (string | null | undefined)[]) => {
 };
 
 /** 재무 화면에서 결정하지 않는 보류 건. 환불은 고객지원 화면, 쿠폰은 마케팅 화면에서 결정한다 */
-export const NOT_FINANCE_ACTIONS = new Set(["refund_request", "issue_coupon"]);
+export const NOT_FINANCE_ACTIONS = new Set(["refund_request", "issue_coupon", "publish_notice"]);
 
 export const ACTION_KO: Record<string, string> = {
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 지급",

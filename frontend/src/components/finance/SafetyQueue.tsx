@@ -53,13 +53,12 @@ function tipOf(r: Review): string {
     case "amount_mismatch": return "요청한 AI가 금액을 잘못 적었다는 뜻입니다. 보통 멈추고 담당자에게 알리세요.";
     case "unregistered_action": return "처음 보는 일입니다. 멈추고 담당자에게 문의하세요.";
     case "over_threshold":
-      if (r.action === "refund_request") return "쇼핑몰 관리 화면에서 주문·결제 금액을 확인한 뒤 결정하세요.";
       return "그 사건의 피해 고객·피해 금액과 비교해 보상이 지나치지 않으면 진행하세요.";
     default: return "애매하면 멈추세요. 멈춘 일은 요청한 AI가 고쳐서 다시 요청할 수 있습니다.";
   }
 }
 
-const FINANCE_INTRO = "판매자 정산 지급처럼 사람만 정할 수 있는 일이 여기 모입니다. 환불은 고객지원 화면, 쿠폰은 마케팅 화면에서 결정합니다.";
+const FINANCE_INTRO = "판매자 정산 지급처럼 사람만 정할 수 있는 일이 여기 모입니다. ";
 
 export function SafetyQueue({ reviews, error, highlight, reload, intro = FINANCE_INTRO, live = false }: {
   reviews: Review[] | null;

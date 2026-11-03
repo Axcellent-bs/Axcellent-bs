@@ -9,7 +9,7 @@
 - `events`: 이벤트 버스의 `coupon.issued`(보상). 목 모드는 템플릿 목 버스로 받는다. 실제
   모드는 `REDIS_URL`이 있어야 받고, 없으면 구독이 꺼진 채로 돈다.
 - `safety_executions`: 안전 관문 실행 기록 `GET /api/safety/executions`(읽기 API, 규칙 4)의
-  `issue_coupon`·`purpose_code=compensation`. 실행됨·보류·거절이 모두 남는다.
+  `issue_coupon`·`purpose_code=compensation`. 끝난 것(`executed`)만 장부에 적는다.
 - `seed`: 목 모드의 실행 기록 시드(`finance_books_seed.json` `executions`).
 
 중복 계산 방지: 모든 쿠폰은 안전 관문을 지나므로 한 사건에 실행 기록이 있으면 실행 기록이
@@ -100,9 +100,7 @@ def coupon_from_execution(e: dict[str, Any]) -> dict[str, Any] | None:
         "amount": amount,
         "purpose_code": "compensation",
         "reason_code": params.get("reason_code"),
-        "grade": e.get("grade"),
         "status": e.get("status"),
-        "review_id": e.get("review_id"),
         "at": fc.iso(e.get("created_at")),
         "idempotency_key": e.get("idempotency_key"),
     }
@@ -124,9 +122,7 @@ def coupon_from_event(context_id: str, envelope_data: dict[str, Any], occurred_a
         "amount": total,
         "purpose_code": "compensation",
         "reason_code": envelope_data.get("reason_code"),
-        "grade": None,
         "status": "executed",
-        "review_id": None,
         "at": fc.iso(occurred_at) if hasattr(occurred_at, "astimezone") else None,
         "idempotency_key": None,
     }
@@ -149,7 +145,8 @@ def execution_coupons(rows: list[dict[str, Any]], context_id: str) -> list[dict[
         out[exe] = row
         if key:
             seen_keys[key] = exe
-    return sorted(out.values(), key=lambda r: (r["at"] or "", str(r["execution_id"])))
+    done = [r for r in out.values() if r["status"] == "executed"]  # 보류·거절은 장부에 적지 않는다
+    return sorted(done, key=lambda r: (r["at"] or "", str(r["execution_id"])))
 
 
 def merge(
@@ -177,17 +174,10 @@ def merge(
 
 
 def totals(rows: list[dict[str, Any]]) -> dict[str, int]:
-    """실행됨·보류 합계. 장 수는 줄의 `count` 합(없으면 1장)."""
-
-    def pick(status: str) -> list[dict[str, Any]]:
-        return [r for r in rows if r["status"] == status]
-
-    executed, held = pick("executed"), pick("held")
+    """나간 금액 합계. 장 수는 줄의 `count` 합(없으면 1장)."""
     return {
-        "total_executed": sum(r["amount"] or 0 for r in executed),
-        "total_held": sum(r["amount"] or 0 for r in held),
-        "count_executed": sum(r["count"] or 1 for r in executed),
-        "count_held": sum(r["count"] or 1 for r in held),
+        "total_executed": sum(r["amount"] or 0 for r in rows),
+        "count_executed": sum(r["count"] or 1 for r in rows),
     }
 
 
@@ -204,9 +194,6 @@ def public(row: dict[str, Any]) -> dict[str, Any]:
             "amount",
             "purpose_code",
             "reason_code",
-            "grade",
-            "status",
-            "review_id",
             "at",
         )
     }

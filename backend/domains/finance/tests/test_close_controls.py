@@ -179,6 +179,23 @@ def _variance_books(kit):
     return kit.books(orders=orders)
 
 
+def test_variance_does_not_flag_coupon_or_refund_changes(kit, monkeypatch) -> None:
+    prev = {"coupon_cost": 100000, "refund_total": 100000, "pg_fee": 100000}
+    cur = {"coupon_cost": 900000, "refund_total": 900000, "pg_fee": 900000}
+    books = _variance_books(kit)
+    real = variance._values
+    monkeypatch.setattr(
+        variance,
+        "_values",
+        lambda b, start, end: {**real(b, start, end), **(cur if start.month == 10 else prev)},
+    )
+    lines = {x["code"]: x for x in variance.variance_report(books, TODAY)["lines"]}
+    assert lines["pg_fee"]["flag"] is True  # 비교 대상: 다른 비용은 그대로 표시한다
+    for code in ("coupon_cost", "refund_total"):
+        assert lines[code]["current"] == 900000  # 금액은 그대로 적는다
+        assert lines[code]["flag"] is False and lines[code]["note"] == ""
+
+
 def test_variance_splits_commission_into_volume_and_rate_mix(kit) -> None:
     r = variance.variance_report(_variance_books(kit), TODAY)
     lines = {x["code"]: x for x in r["lines"]}

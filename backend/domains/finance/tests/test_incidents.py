@@ -51,7 +51,6 @@ LIST_KEYS = {
     "damage_amount",
     "compensation_total",
     "coupon_count",
-    "held_count",
     "refund_total",
     "money_out_total",
 }
@@ -74,9 +73,6 @@ COUPON_KEYS = {
     "amount",
     "purpose_code",
     "reason_code",
-    "grade",
-    "status",
-    "review_id",
     "at",
 }
 
@@ -291,22 +287,14 @@ def test_coupon_rows_only_compensation_from_gate() -> None:
         _exe("exe_6", "buy_0006", ctx="ctx_inc_other"),  # 다른 사건
     ]
     out = lg.execution_coupons(rows, CTX)
-    assert [r["execution_id"] for r in out] == ["exe_1", "exe_2", "exe_3"]
+    assert [r["execution_id"] for r in out] == ["exe_1"]  # 끝난 것만 장부에 적는다
     first = out[0]
-    assert (first["coupon_id"], first["amount"], first["grade"], first["reason_code"]) == (
+    assert (first["coupon_id"], first["amount"], first["reason_code"]) == (
         "cpn_1",
         2000,
-        "A",
         "payment_failure",
     )
-    assert out[1]["review_id"] == "rev_2"
-    totals = lg.totals(out)
-    assert totals == {
-        "total_executed": 2000,
-        "total_held": 2000,
-        "count_executed": 1,
-        "count_held": 1,
-    }
+    assert lg.totals(out) == {"total_executed": 2000, "count_executed": 1}
 
 
 def test_execution_rows_dedupe_by_execution_and_idempotency_key() -> None:
@@ -422,7 +410,6 @@ def test_incident_list_shape_and_numbers(mock_mode) -> None:
         "damage_amount": 95000,
         "compensation_total": 8000,
         "coupon_count": 4,
-        "held_count": 0,
         # 이 사건 구간(05:00~05:30)에 영향 고객에게 나간 환불은 시드에 없다
         "refund_total": 0,
         "money_out_total": 8000,
@@ -460,16 +447,11 @@ def test_incident_detail_shape_matches_spec(mock_mode) -> None:
     assert impact["source"] == "data.impact_analysis"
     assert impact["window_exact"] is True  # 목 모드 시드 구간은 장애 구간이다
     comp = data["compensation"]
-    assert set(comp) == {"coupons", "total_executed", "total_held", "count_executed", "count_held"}
-    assert (comp["total_executed"], comp["count_executed"], comp["total_held"]) == (8000, 4, 0)
+    assert set(comp) == {"coupons", "total_executed", "count_executed"}
+    assert (comp["total_executed"], comp["count_executed"]) == (8000, 4)
     for c in comp["coupons"]:
         assert set(c) == COUPON_KEYS
-        assert (c["unit_value"], c["reason_code"], c["grade"], c["status"]) == (
-            2000,
-            "payment_failure",
-            "A",
-            "executed",
-        )
+        assert (c["unit_value"], c["reason_code"]) == (2000, "payment_failure")
         assert c["coupon_id"].startswith("cpn_")
     # 재무는 장애 대응 흐름의 단계가 아니다 (2026-10-27): 손실 집계·사건 단계를 뺐다.
     # 화면 호환으로 남겨 뒀던 두 키도 화면 정리(ax-frontend#61) 뒤에 지웠다
@@ -488,11 +470,12 @@ def test_unknown_incident_is_404(mock_mode) -> None:
 GOOD = [_exe(f"exe_{n}", f"buy_000{n}", minute=n) for n in range(1, 5)]
 
 
-def test_held_coupons_are_listed_but_not_paid(mock_mode) -> None:
+def test_held_coupons_are_not_in_the_ledger(mock_mode) -> None:
     rows = [*GOOD, _exe("exe_5", "buy_0001", status="held", grade="C", review_id="rev_5")]
     data, _ = asyncio.run(incidents.incident_view(CTX, _feed(rows)))
     comp = data["compensation"]
-    assert (comp["total_executed"], comp["count_held"], comp["total_held"]) == (8000, 1, 2000)
+    assert (comp["total_executed"], comp["count_executed"]) == (8000, 4)
+    assert "exe_5" not in {c["execution_id"] for c in comp["coupons"]}
 
 
 def test_no_ledger_source_makes_everything_unknown(real_mode) -> None:
