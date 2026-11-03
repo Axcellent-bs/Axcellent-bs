@@ -38,14 +38,17 @@ class FakeIndex:
 
     owner = "dev"
 
-    def __init__(self, state: str = "기획 중", fail: bool = False):
+    def __init__(self, state: str = "기획 중", fail: bool = False, empty: bool = False):
         self.state = state
         self.fail = fail
+        self.empty = empty
         self.written: list[str] = []
 
     async def search(self, text, top_k):
         if self.fail:
             raise IndexUnavailable("memory 꺼짐")
+        if self.empty:
+            return []
         return [Hit("REQ-31", "planning", 0.82)]
 
     async def peer_requests(self, owner):
@@ -96,6 +99,15 @@ def test_finished_remote_request_is_not_open_conflict() -> None:
 
 def test_index_down_falls_back_to_local_search() -> None:
     index = FakeIndex(fail=True)
+    svc = PlanningService(gate=_gate, relater=Relater(LexicalEmbedder(), None, index))
+    out = _dev_request(svc, "결제 실패하면 장바구니가 비워져요")
+    req = next(r for r in svc.state.requests if r.id == out.output["request_id"])
+    assert req.related and all(x.by == "lexical" for x in req.related)
+
+
+def test_index_finds_nothing_falls_back_to_local_search() -> None:
+    """색인이 빈 결과면(임베딩 없음 등) 이 서버 안에서 다시 찾아 진행 중 요청을 놓치지 않는다."""
+    index = FakeIndex(empty=True)
     svc = PlanningService(gate=_gate, relater=Relater(LexicalEmbedder(), None, index))
     out = _dev_request(svc, "결제 실패하면 장바구니가 비워져요")
     req = next(r for r in svc.state.requests if r.id == out.output["request_id"])

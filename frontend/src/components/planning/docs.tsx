@@ -2,37 +2,73 @@
 // 수정은 칸에서 벗어날 때(blur) 저장한다. 연동 버스에 붙어 있으면 다른 화면에도 바로 보인다.
 import { useState, type Dispatch } from 'react'
 import {Button, PageHeader, Select, useToast } from '@dejafix/common-frontend'
-import { type Action, type Doc, type DocBlock, type State } from '@/lib/planningData'
+import { DEPT_NAME, type Action, type Doc, type DocBlock, type State } from '@/lib/planningData'
 import { Linked, Ref, go, toPath } from '@/components/planning-common/links'
-import { Sec, Tag } from '@/components/planning-common/parts'
+import { Sec, Tag, rowNav } from '@/components/planning-common/parts'
+import { Pager, usePage } from '@/components/planning-common/pager'
 
+// 문서 탭 첫 화면 = 문서 목록 (최근 것이 위). 줄을 누르면 그 문서를 열어 고친다
 export function Docs({ s, d, item }: { s: State; d: Dispatch<Action>; item?: string }) {
   const toast = useToast()
-  const sel = item ?? s.docs[s.docs.length - 1]?.id ?? ''
   const setSel = (id: string) => go(toPath(`docs/${id}`))
   const [about, setAbout] = useState(s.requests[0]?.id ?? '')
-  const doc = s.docs.find((x) => x.id === sel) ?? s.docs[s.docs.length - 1]
+  const doc = item ? s.docs.find((x) => x.id === item) : undefined
   const lastId = `DOC-${s.docs.length + 1}`
+  const make = (
+    <div className="dl-make">
+      <Button size="small" onClick={() => { d({ type: 'newDoc', title: '' }); setSel(lastId) }}>+ 새 문서</Button>
+      <Select value={about} onChange={(e) => setAbout(e.target.value)} options={s.requests.map((r) => ({ value: r.id, label: `${r.id} ${r.title}` }))} />
+      <Button size="small" variant="primary" icon="sparkle" onClick={() => { d({ type: 'gatherDoc', about }); setSel(lastId); toast.show(`${about}에 걸린 것을 모아 ${lastId}로 정리`) }}>모아서 문서 만들기</Button>
+    </div>
+  )
+
+  const pg = usePage(s.docs.slice().reverse(), 10)
+  if (!item) {
+    const rows = pg.rows
+    return (
+      <>
+        <PageHeader title="문서" sub="요청에 걸린 기획서·작업·PR·대화·결정을 한 장으로 모으고 사람이 고친다." />
+        {make}
+        {!rows.length ? <div className="empty"><b>문서 없음</b></div> : (
+          <div className="sl">
+            <div className="sl-head dl-grid" aria-hidden><span>문서</span><span>요청</span><span>할 일</span><span>마지막 수정</span></div>
+            <ol className="sl-list">
+              {rows.map((x) => {
+                const r = x.about ? s.requests.find((q) => q.id === x.about) : undefined
+                const todos = x.blocks.filter((b) => b.kind === 'todo')
+                const nav = rowNav(toPath(`docs/${x.id}`), `${x.id} 열기`)
+                return (
+                  <li key={x.id} {...nav} className={`sl-item dl-grid ${nav.className ?? ''}`}>
+                    <span className="sl-title">
+                      <span className="mono muted sl-id">{x.id}</span>
+                      <b title={x.title}>{x.title || '제목 없는 문서'}</b>
+                      {x.by === 'ai' && <Tag tone="green">AI 정리</Tag>}
+                    </span>
+                    <span className="sl-title">{r ? <><span className={`rq-dept d-${r.from}`}>{DEPT_NAME[r.from]}</span><span className="mono muted sl-id">{r.id}</span></> : <span className="muted small">직접 쓴 문서</span>}</span>
+                    <span className="muted small">{todos.length ? `${todos.filter((b) => b.done).length}/${todos.length}` : '—'}</span>
+                    <span className="muted small">{x.updated}</span>
+                  </li>
+                )
+              })}
+            </ol>
+            <Pager {...pg} />
+          </div>
+        )}
+      </>
+    )
+  }
 
   return (
     <>
-    <PageHeader title="정리" sub="작업 내용을 문서로 정리한다. AI 어시스턴트에게 'REQ-12 문서로 정리해줘'라고 하면 여기에 쌓이고, 사람이 바로 고친다." />
+    <PageHeader title="문서" sub="요청에 걸린 기획서·작업·PR·대화·결정을 한 장으로 모으고 사람이 고친다." />
     <div className="three">
       <aside className="col-left">
-        <div className="ph">문서 {s.docs.length}개</div>
-        {s.docs.slice().reverse().map((x) => (
-          <a key={x.id} href={toPath(`docs/${x.id}`)} className={`doc-li${x.id === doc?.id ? ' on' : ''}`}>
-            <span className="mono">{x.id}</span> {x.title} {x.by === 'ai' && <Tag tone="green">AI 정리</Tag>}
-          </a>
-        ))}
-        <Button size="small" onClick={() => { d({ type: 'newDoc', title: '' }); setSel(lastId) }}>+ 새 문서</Button>
-        <div className="ph" style={{ marginTop: 18 }}>관련 내용 모아 정리</div>
-        <Select value={about} onChange={(e) => setAbout(e.target.value)} options={s.requests.map((r) => ({ value: r.id, label: `${r.id} ${r.title}` }))} />
-        <Button size="small" variant="primary" icon="sparkle" onClick={() => { d({ type: 'gatherDoc', about }); setSel(lastId); toast.show(`${about}에 걸린 것을 모아 ${lastId}로 정리`) }}>모아서 문서 만들기</Button>
-        <p className="muted small" style={{ margin: 0 }}>요청에 연결된 기획서 문단·작업·PR·대화·결정·장애를 모으고 남은 일을 할 일로 뽑는다.</p>
+        <a href={toPath('docs')} className="plain-link small">‹ 문서 목록</a>
+        <div className="ph" style={{ marginTop: 10 }}>문서 {s.docs.length}개</div>
+        {make}
       </aside>
 
-      <section className="col-doc">{doc ? <Editor key={doc.id} doc={doc} d={d} s={s} /> : <span className="muted">문서가 없습니다.</span>}</section>
+      <section className="col-doc">{doc ? <Editor key={doc.id} doc={doc} d={d} s={s} /> : <span className="muted">{item} 문서가 없습니다.</span>}</section>
 
       <aside className="col-right">
         {doc && <Related doc={doc} s={s} />}

@@ -1,9 +1,9 @@
 // 요청 탭 = 모든 요청이 지금 어느 단계에 있나를 한눈에 (프로젝트 탭은 요청 1건을 깊게).
 // 위: 같은 목록을 거르는 필터 한 줄 (주소 #/requests/<필터>). 아래: 요청 한 건 = 작은 제목 한 줄 + 가로 흐름바(접수 → 기획 → 작업 → 배포 → 처리) + 다음.
-// 멈춘 요청(사람 확인·질문·교차검증·채택 대기)이 먼저. 줄 클릭 = 단계별 자세히 펼치기, 제목 클릭 = 프로젝트, "다음 ›" = 다음 할 일.
+// 멈춘 요청(사람 확인·질문·교차검증·채택 대기)이 먼저. 평소엔 제목과 흐름바만, 줄 클릭 = 흐름바 아래 글씨 펼치기, 제목 클릭 = 프로젝트, "다음 ›" = 다음 할 일.
 import { useEffect, useState, type Dispatch, type KeyboardEvent, type MouseEvent } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
-import { DEPT_NAME, RELATION_LABEL, TODAY, byRelation, type Action, type Activity, type CodingStatus, type PR, type Request, type State as S } from '@/lib/planningData'
+import { DEPT_NAME, RELATION_LABEL, TODAY, byRelation, type Action, type Request, type State as S } from '@/lib/planningData'
 import { useAllReleaseChecks, type ReleaseCheck } from '@/lib/planning'
 import { Tag } from '@/components/planning-common/parts'
 import { Ref, convoHref, isFollowUp, nextOf, prName, prSlug, reviewHref, reviewOf, toPath } from '@/components/planning-common/links'
@@ -134,6 +134,13 @@ export function pipeline(s: S, r: Request, rc?: ReleaseCheck): PipeRow {
     }
   }
 
+  // 사람이 중단한 요청: 지금 단계에서 멈춤 (맨 위로)
+  if (r.paused && !finished) {
+    wait = { label: '사람이 중단', rank: -1 }
+    const c = [c0, c1, c2, c3, c4][stage]
+    if (c) { c.warn = true; c.meta = '중단됨' }
+  }
+
   const end = finished && last ? toMin(last) : now
   return { r, stage, finished, cells: [c0, c1, c2, c3, c4], wait, born, last, minutes: born ? end - toMin(born) : 0, dups: g.dups }
 }
@@ -144,104 +151,9 @@ export function sortRows(rows: PipeRow[]): PipeRow[] {
   return rows.slice().sort((a, b) => group(a) - group(b) || (a.wait?.rank ?? 9) - (b.wait?.rank ?? 9) || (a.finished ? toMin(b.last ?? '') - toMin(a.last ?? '') : b.minutes - a.minutes))
 }
 
-// ---------------------------------------------------------------- 펼친 줄: 단계마다 같은 열에 자세히
+// ---------------------------------------------------------------- 줄 펼치기
 // 줄 안의 링크·버튼을 누르면 펼치기보다 그쪽이 먼저다
 const inner = (t: EventTarget) => !!(t as HTMLElement).closest('a, button, input, select, textarea, label')
-const HR_CHECK = { ok: ['인사 기록 겹침 없음', 'green'], warn: ['인사 기록 경고', 'amber'], unknown: ['인사 기록 확인 못 함', 'amber'] } as const
-const CODING: Partial<Record<CodingStatus, string>> = {
-  queued: '코딩 대기', claimed: '개발자 Claude 작업 중', reading: '코드 읽는 중', writing: '코드 쓰는 중', reviewing: '검수 중',
-  opened: 'PR 열림', merged: '머지', waiting_human: '사람 확인', failed: '실패', canceled: '취소', covered: '앞 작업이 반영',
-}
-// 같은 지점·같은 말이 연달아 오면 한 줄로 (×n)
-function squash(acts: Activity[]): { a: Activity; n: number }[] {
-  const out: { a: Activity; n: number }[] = []
-  for (const a of acts) {
-    const last = out[out.length - 1]
-    if (last && last.a.point === a.point && last.a.text === a.text) last.n += 1
-    else out.push({ a, n: 1 })
-  }
-  return out
-}
-const prMerge = (p: PR) => (!p.merged ? (p.closed ? '닫힘' : '머지 전') : p.mergedBy === 'rule' ? '자동 머지' : p.mergedBy === 'review' ? '교차검증 후 머지' : '사람 머지')
-
-function RowMore({ s, r, rc, minutes, finished }: { s: S; r: Request; rc?: ReleaseCheck; minutes: number; finished: boolean }) {
-  const g = gather(s, r)
-  const sp = g.spec
-  const nReq = sp?.paras.filter((p) => p.kind === 'req').length ?? 0
-  const nDone = sp?.paras.filter((p) => p.kind === 'done').length ?? 0
-  const rel = byRelation(r.related)
-  const acts = squash(s.activity.filter((a) => a.ctx === r.ctx)).slice(-6).reverse()
-  const st = rc ? releaseState(rc) : undefined
-  return (
-    <div className="rq-more">
-      <div className="rq-mc">
-        <span><span className="k">보낸 곳</span> {DEPT_NAME[r.from]} · {viaLabel(r.via)}</span>
-        <span className="k">근거</span>
-        <span className="rq-clamp" title={r.evidence}>{r.evidence || '없음'}</span>
-      </div>
-      <div className="rq-mc">
-        {!sp ? <span className="muted">기획서 없음</span> : (
-          <>
-            <a href={toPath(`work/specs/${sp.id}`)} className="plain-link rq-clamp" title={sp.title}><span className="mono">{sp.id}</span> {sp.title}</a>
-            <span>요구사항 {nReq} · 완료 기준 {nDone}</span>
-            <span className="rq-tags">
-              <Tag tone={sp.status === '확정' ? 'green' : undefined}>{sp.status === '확정' ? (sp.confirmedBy ? { auto: '자동 확정', review: '교차검증 후 확정', human: '사람 확정' }[sp.confirmedBy] : '확정') : '초안'}</Tag>
-              {sp.hrCheck && <Tag tone={HR_CHECK[sp.hrCheck][1]}>{HR_CHECK[sp.hrCheck][0]}</Tag>}
-              {sp.question && <Tag tone="amber">질문 대기</Tag>}
-            </span>
-          </>
-        )}
-        {rel.length > 0 && (
-          <span className="rq-tags">
-            {rel.map((x) => <span key={x.id} title={x.reason}><Tag tone={x.relation === 'conflict' ? 'amber' : undefined}>{RELATION_LABEL[x.relation]}</Tag> <Ref s={s} id={x.id} /></span>)}
-          </span>
-        )}
-      </div>
-      <div className="rq-mc">
-        {!g.tasks.length ? <span className="muted">작업 없음</span> : (
-          <ul>
-            {g.tasks.map((t) => {
-              const prs = g.prs.filter((p) => p.task === t.id)
-              return (
-                <li key={t.id}>
-                  <span className="mono">{t.id}</span> {t.para} · {t.coding ? CODING[t.coding.status] ?? t.state : t.state}
-                  {prs.map((p) => <span key={p.id}> · <a href={toPath(`work/prs/${prSlug(p.id)}`)} className="plain-link">{prName(p)}</a> {prMerge(p)}</span>)}
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </div>
-      <div className="rq-mc">
-        {!rc || !st ? <span className="muted">{finished ? '대조 기록 없음' : '작업이 끝나면 대조'}</span> : (
-          <>
-            <span className="rq-tags"><Tag tone={st.tone} title={st.title}>{st.label}</Tag></span>
-            <span className="rq-tags">
-              {rc.items.map((i) => {
-                const ok = i.status === 'covered' && i.content === 'match'
-                return <Tag key={i.para_id} tone={ok ? 'green' : 'amber'} title={i.content_notes.join('\n') || undefined}>{i.para_id} {ok ? '기획서대로' : i.status !== 'covered' ? '작업 미완료' : i.content === 'mismatch' ? '기획서와 다름' : '검수 없음'}</Tag>
-              })}
-            </span>
-            <span className="muted">{rc.env} · {rc.check_id}</span>
-          </>
-        )}
-      </div>
-      <div className="rq-mc">
-        <span>{finished ? `${duration(minutes)} 걸림` : `${duration(minutes)} 경과`}</span>
-        {g.replies.length > 0 && <span>요청 부서에 회신 {g.replies.length}건</span>}
-        {g.incidents.map((i) => <a key={i.ctx} href={toPath(`work/aftercare/${i.ctx}`)} className="plain-link">장애 {i.ctx}</a>)}
-        {g.follow.map((x) => <span key={x.id}>후속 <Ref s={s} id={x.id} /></span>)}
-      </div>
-      {acts.length > 0 && (
-        <ol className="rq-acts" aria-label="최근 활동">
-          {acts.map(({ a, n }, k) => (
-            <li key={k}><span className="mono">{shortTime(a.t)}</span> <span className="rq-pt">{a.point}</span> {a.text}{n > 1 && <span className="muted"> ×{n}</span>}</li>
-          ))}
-        </ol>
-      )}
-    </div>
-  )
-}
 
 // ---------------------------------------------------------------- 화면
 // 화면을 연 뒤 새로 들어온 요청은 맨 위에 두고 흐름바를 단계별로 채워 보여 준다 (시연용, 들어온 뒤 20초)
@@ -275,6 +187,9 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
     if (focus) document.getElementById(`req-${focus}`)?.scrollIntoView({ block: 'center' })
   }, [focus])
   const stuck = rows.filter((x) => x.wait).length
+  const allOpen = rows.length > 0 && rows.every((x) => open.has(x.r.id))
+  const [view, setView] = useState<'list' | 'card'>(() => (localStorage.getItem('rq-view') === 'card' ? 'card' : 'list'))
+  const pickView = (v: 'list' | 'card') => { setView(v); localStorage.setItem('rq-view', v) }
 
   return (
     <div className="rq">
@@ -288,8 +203,15 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
           )
         })}
         {stuck > 0 && <span className="rq-stuck">멈춤 {stuck}</span>}
+        <div className="seg-toggle rq-view" role="group" aria-label="보기">
+          <button type="button" aria-pressed={view === 'list'} onClick={() => pickView('list')}>목록</button>
+          <button type="button" aria-pressed={view === 'card'} onClick={() => pickView('card')}>카드</button>
+        </div>
+        {view === 'list' && <button type="button" className="rq-all" aria-pressed={allOpen} onClick={() => setOpen(allOpen ? new Set() : new Set(rows.map((x) => x.r.id)))}>{allOpen ? '모두 접기' : '모두 펼치기'}</button>}
       </nav>
 
+      {view === 'card' && <RequestCards rows={rows} />}
+      {view === 'list' && <>
       <div className="rq-head" aria-hidden>
         {STAGES.map((x) => <span key={x}>{x}</span>)}
         <span>다음</span>
@@ -309,10 +231,11 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
             <li key={r.id} id={`req-${r.id}`} role="button" tabIndex={0} aria-expanded={isOpen} onClick={onRow} onKeyDown={onKey}
               className={`rq-item${isOpen ? ' open' : ''}${row.finished ? ' fin' : ''}${focus === r.id ? ' hl' : ''}${isFresh(r.id) ? ' fresh' : ''}`}>
               <div className="rq-title">
+                <span className={`rq-dept d-${r.from}`}>{DEPT_NAME[r.from]}</span>
                 <a href={toPath(`projects/${r.id}`)} className="rq-name plain-link">{r.title}</a>
                 <span className="rq-meta">
                   <span className="mono">{r.id}</span>
-                  <span>{DEPT_NAME[r.from]}</span>
+                  {r.paused && <Tag tone="amber">중단됨</Tag>}
                   {isFollowUp(r) && <Tag tone="amber">후속</Tag>}
                   {row.dups.map((x) => (
                     <span key={x.id} className="rq-dup">
@@ -333,12 +256,15 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
                   <li key={i} className={`rq-c ${c.kind}${c.warn ? ' warn' : ''}${row.finished && i === 3 ? ' end' : ''}`}>
                     <span className="rq-dot" aria-hidden />
                     <span className="sr-only">{STAGES[i]}</span>
-                    {c.value && (c.href ? <a href={c.href} className="rq-v plain-link" title={c.value}>{c.value}</a> : <span className="rq-v" title={c.value}>{c.value}</span>)}
-                    {c.meta && <span className="rq-m">{c.meta}</span>}
+                    {isOpen && c.value && (c.href ? <a href={c.href} className="rq-v plain-link" title={c.value}>{c.value}</a> : <span className="rq-v" title={c.value}>{c.value}</span>)}
+                    {isOpen && c.meta && <span className="rq-m">{c.meta}</span>}
                   </li>
                 ))}
               </ol>
               <div className="rq-next">
+                {!row.finished && (
+                  <button type="button" className="rq-stop" onClick={() => { d({ type: r.paused ? 'resumeRequest' : 'pauseRequest', request: r.id }); toast.show(`${r.id} ${r.paused ? '재개' : '중단'}`) }}>{r.paused ? '재개' : '중단'}</button>
+                )}
                 {draft && (r.from === 'hr' || r.from === 'data') && r.state === '접수' ? (
                   <Button size="small" variant="primary" onClick={() => { d({ type: 'acceptDraft', request: r.id }); toast.show(`${r.id} 채택 · 기획서 초안`) }}>채택 · 초안</Button>
                 ) : draft ? (
@@ -347,11 +273,42 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
                   <a href={href} className={row.finished ? 'rq-go muted' : 'rq-go'}>{(row.finished ? '프로젝트' : next.label).replace(/\s*\(.*\)$/, '')} ›</a>
                 )}
               </div>
-              {isOpen && <RowMore s={s} r={r} rc={latestCheck(r)} minutes={row.minutes} finished={row.finished} />}
             </li>
           )
         })}
       </ol>
+      </>}
+    </div>
+  )
+}
+
+// 카드 보기 (개발 사후관리 카드와 같은 틀): 부서·번호·걸린 시간 / 제목 / 단계 막대 / 지금 단계 한 줄. 카드를 누르면 프로젝트
+function RequestCards({ rows }: { rows: PipeRow[] }) {
+  if (!rows.length) return null
+  return (
+    <div className="inc-grid rq-cards">
+      {rows.map((row) => {
+        const { r } = row
+        const at = row.finished ? row.cells.length - 1 : row.stage
+        const cur = row.cells[at]
+        return (
+          <a key={r.id} href={toPath(`projects/${r.id}`)} className={`inc-card rq-card${row.wait ? ' wait' : ''}${row.finished ? ' fin' : ''}`}>
+            <span className="inc-card-top">
+              <span className={`rq-dept d-${r.from}`}>{DEPT_NAME[r.from]}</span>
+              {r.paused && <Tag tone="amber">중단됨</Tag>}
+              <span className="mono">{r.id}</span>
+            </span>
+            <b className="inc-card-title">{r.title}</b>
+            <ol className="inc-steps" aria-label="진행 단계">
+              {row.cells.map((c, i) => <li key={i} className={`${c.kind !== 'next' ? 'on' : ''}${c.kind === 'now' ? ' now' : ''}${c.warn && c.kind === 'now' ? ' warn' : ''}`}>{STAGES[i]}</li>)}
+            </ol>
+            <span className="inc-card-meta">
+              {row.wait ? <span className="rq-card-wait">{row.wait.label}</span> : [cur?.value, cur?.meta].filter(Boolean).join(' · ') || STAGES[at]}
+              {row.minutes > 0 && <> · {row.finished ? `${duration(row.minutes)} 걸림` : `${duration(row.minutes)} 경과`}</>}
+            </span>
+          </a>
+        )
+      })}
     </div>
   )
 }

@@ -6,7 +6,7 @@ import { reviewOf, toPath } from '@/components/planning-common/links'
 import { rowNav } from '@/components/planning-common/parts'
 
 export const CONFIRMED_BY = { auto: '자동 확정', review: '교차검증 후 확정', human: '사람 확인 후 확정' } as const
-export const mergedLabel = (p: PR) => !p.merged ? '머지 전' : p.mergedBy === 'rule' ? `자동 머지 · ${p.rule}` : p.mergedBy === 'review' ? '교차검증 후 자동 머지' : '사람 머지'
+export const mergedLabel = (p: PR) => !p.merged ? '머지 전' : p.mergedBy === 'rule' ? (p.rule ? `자동 머지 · ${p.rule}` : '자동 머지') : p.mergedBy === 'review' ? '교차검증 후 자동 머지' : '사람 머지'
 
 export function specStatus(s: S, sp: Spec): string {
   const xr = reviewOf(s, sp.id)

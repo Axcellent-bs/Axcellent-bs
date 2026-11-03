@@ -122,6 +122,7 @@ export const SERVICES: Service[] = [
     children: [
       { href: '/planning/requests', label: '요청' },
       { href: '/planning/work', label: '기획서' },
+      { href: '/planning/docs', label: '문서' },
       { href: '/planning/agents', label: '에이전트 대화' },
     ],
   },
