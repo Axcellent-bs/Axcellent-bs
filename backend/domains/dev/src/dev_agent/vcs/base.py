@@ -55,6 +55,21 @@ class Capabilities:
 
 
 @dataclass(frozen=True)
+class ServerInfo:
+    """연결한 형상관리 서버 정보 (연결 대장·보안 점검용). 비밀 값은 넣지 않는다.
+
+    부품이 `server_info()`를 가지면 연결 대장이 읽는다 (없는 부품은 `확인 못 함`)."""
+
+    product: str  # github.com · ghes(GitHub Enterprise Server) · gitlab · mock …
+    hosted: bool  # 제공사가 운영·패치하는 클라우드면 True (버전 점검 대상 아님)
+    version: str = ""  # 사내 설치형 서버 버전 (모르면 빈 값)
+    # 토큰이 가진 권한: 사람 토큰은 범위(scope), App은 `이름:read|write`
+    scopes: tuple[str, ...] = ()
+    scope_note: str = ""  # 범위를 못 읽는 토큰(세분화 토큰 등)일 때 이유
+    token_expires: str = ""  # 토큰 만료 시각 (알려 주는 경우만)
+
+
+@dataclass(frozen=True)
 class ChangedFile:
     path: str
     additions: int = 0

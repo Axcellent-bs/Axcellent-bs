@@ -236,7 +236,16 @@ export interface VcsConnectionInput {
   id?: string; kind: string; repo: string; base_url?: string; base_branch?: string; token?: string; description?: string; paths?: string[]; mount?: string
   auth?: VcsAuth; app_id?: string; installation_id?: string; private_key?: string
 }
-export interface VcsTestResult { ok: boolean; code: string | null; message: string; checked_at: string; connection_id: string }
+export interface VcsTestResult { ok: boolean; code: string | null; message: string; checked_at: string; connection_id: string; inventory?: VcsInventory | null }
+// 연결 대장 (`/vcs/inventory`): 서버 종류·버전·토큰 권한·마지막 확인. 사내 설치형은 패치 기준과 맞춘다
+export type VcsInventoryStatus = 'ok' | 'outdated' | 'no_policy' | 'hosted' | 'unknown' | 'error'
+export interface VcsInventory {
+  connection_id: string; repo: string; kind: string; product: string; hosted: boolean
+  version: string; min_version: string; scopes: string[]; scope_note: string; token_expires: string
+  status: VcsInventoryStatus; warnings: string[]; checked_at: string; error_code: string; error: string
+}
+const toInventory = (d: unknown): VcsInventory[] =>
+  Array.isArray(d) ? (d as VcsInventory[]).filter((r) => r && typeof r.connection_id === 'string').map((r) => ({ ...r, scopes: r.scopes ?? [], warnings: r.warnings ?? [] })) : []
 
 // 녹화 데모(목)는 모르는 주소에 빈 배열·{ok:true}를 준다. 연결 모양이 아닌 값은 버린다
 const toConnections = (d: unknown): VcsConnection[] =>
@@ -251,6 +260,8 @@ export const vcsApi = (base: string) => {
     save: (c: VcsConnectionInput) => call<unknown>(base, '/vcs/connections', post(c, 'admin')).then(after),
     remove: (id: string) => call<unknown>(base, `/vcs/connections/${encodeURIComponent(id)}/delete`, post({}, 'admin')).then(after),
     test: (id: string) => call<VcsTestResult>(base, `/vcs/connections/${encodeURIComponent(id)}/test`, post({}, 'admin')),
+    inventory: () => call<unknown>(base, '/vcs/inventory').then(toInventory),
+    checkAll: () => call<unknown>(base, '/vcs/inventory/check', post({}, 'admin')).then(toInventory),
   }
 }
 

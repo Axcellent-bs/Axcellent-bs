@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -27,6 +28,7 @@ from dev_agent import coder, dev_chat, vcs
 from dev_agent.deploy import DeployError
 from dev_agent.deploy_store import get_deploy_store
 from dev_agent.repo_api import add_repo_routes
+from dev_agent.vcs import inventory
 from dev_agent.work_api import add_work_routes
 
 # 코딩 작업 오류 중 409로 주는 것 (설정·상태 문제). 나머지 입력 오류는 400
@@ -153,7 +155,21 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return _err(400, "INVALID_VCS", exc.message)
         if not removed:
             return _err(404, "NOT_FOUND", f"연결 {connection_id}가 없다")
+        inventory.forget(connection_id)
         return _connections()
+
+    # ---- 연결 대장: 서버 종류·버전·토큰 권한·마지막 확인 (FR-AG-012 연결 시 보안 조건)
+
+    @router.get("/vcs/inventory")
+    def get_vcs_inventory() -> dict:
+        rows = inventory.entries()
+        return _ok(rows, get_service(), count=len(rows), policy=inventory.min_versions())
+
+    @router.post("/vcs/inventory/check", response_model=None, dependencies=ADMIN)
+    async def post_vcs_inventory_check() -> dict:
+        """연결 전부를 지금 다시 읽는다 (쓰기 없음)."""
+        await inventory.check_all()
+        return get_vcs_inventory()
 
     @router.post("/vcs/connections/{connection_id}/test", response_model=None, dependencies=ADMIN)
     async def post_vcs_connection_test(connection_id: str) -> dict | JSONResponse:
@@ -170,6 +186,9 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             result.update(ok=True, code=None, message=f"최근 하루 병합 {len(changes)}건 읽음")
         except vcs.VcsError as exc:
             result.update(ok=False, code=exc.code, message=exc.message)
+        # 연결 대장도 같이 갱신한다 (서버 버전·토큰 권한). 화면은 저장 뒤 바로 이 확인을 부른다
+        entry = await inventory.check(connection_id)
+        result["inventory"] = asdict(entry) if entry else None
         return _ok(result, get_service())
 
     # ---- 배포 기록·배포 후 확인 (deploy_store.py)

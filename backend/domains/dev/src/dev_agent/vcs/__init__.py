@@ -17,6 +17,8 @@
 | `PLANNING_VCS_AUTH` | `token`(기본, 사람 토큰) · `app`(GitHub App) |
 | `PLANNING_VCS_APP_ID` · `PLANNING_VCS_INSTALLATION_ID` | GitHub App ID · 조직에 설치한 설치 ID |
 | `PLANNING_VCS_PRIVATE_KEY_FILE` | GitHub App 개인 키(.pem) 파일 경로 |
+| `PLANNING_VCS_MIN_VERSIONS` | 사내 설치형 패치 기준 (예: `ghes=3.14.0,gitlab=18.11.13`) |
+| `PLANNING_VCS_CHECK_HOURS` | 연결 대장을 다시 읽는 간격 (시간, 기본 24) |
 
 - 연결이 하나도 없으면 목 부품 하나만 쓴다 (도메인은 실제 PR을 올리지 않는다).
 - 부품은 연결마다 한 번 만들어 둔다. 설정이 바뀌면 다시 만든다. 테스트는 `set_vcs()`로 바꿔 끼운다.

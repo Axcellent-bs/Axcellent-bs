@@ -73,6 +73,8 @@ class GithubAppAuth:
         self.__token = ""
         self._expires = 0.0
         self._lock = asyncio.Lock()
+        # 설치 토큰이 받은 권한 (예: {"contents": "write"}). 비밀 값이 아니라 연결 대장에 보여 준다
+        self.permissions: dict[str, str] = {}
 
     def __repr__(self) -> str:
         return f"GithubAppAuth(app_id={self.app_id!r}, installation_id={self.installation_id!r})"
@@ -127,4 +129,7 @@ class GithubAppAuth:
                 raise VcsError("unavailable", f"{where} 응답 형식이 다르다") from None
             self.__token = token
             self._expires = expires.timestamp()
+            perms = got.get("permissions")
+            if isinstance(perms, dict):
+                self.permissions = {str(k): str(v) for k, v in perms.items()}
             return token
