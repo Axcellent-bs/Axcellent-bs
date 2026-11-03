@@ -608,6 +608,7 @@ export type Action =
   | { type: 'unlinkDuplicate'; request: string }
   | { type: 'rejectSpec'; spec: string; reason: string } // 확인 대기 기획서 거절 (승인은 humanDecide)
   | { type: 'deleteDoc'; doc: string } // 정리 문서 지우기
+  | { type: 'importNotion'; url: string } // 노션 페이지를 문서로 가져오기 (서버에서만, 예시 모드는 그대로)
   | { type: 'pauseRequest'; request: string; reason?: string } // 사람이 요청을 중단
   | { type: 'resumeRequest'; request: string } // 중단한 요청 재개
   | { type: 'editSpec'; spec: string; title?: string; problem?: string; goal?: string; paras?: Record<string, string> } // 확정 전 기획서를 사람이 고침 (칸에서 벗어날 때 저장)
@@ -1342,6 +1343,8 @@ function talkAndDocs(s: State, a: Action): State | null {
         ],
       }
     }
+    case 'importNotion':
+      return s
     case 'deleteDoc':
       return { ...s, docs: s.docs.filter((x) => x.id !== a.doc) }
     case 'newDoc': {

@@ -890,3 +890,7 @@ button.spec-pid { cursor: pointer; color: var(--primary); font-weight: 600; }
 
 /* 문서 저장·삭제 */
 .doc-actions { display: flex; justify-content: flex-end; gap: 6px; margin-bottom: 4px; }
+
+/* 노션에서 가져오기 */
+.sl-notion { display: flex; gap: 6px; align-items: center; }
+.sl-notion .field { width: 320px; }
