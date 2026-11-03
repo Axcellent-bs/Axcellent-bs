@@ -30,6 +30,7 @@ from ax_contracts.schemas import (
     NoticePublishedData,
     TaskStatus,
 )
+from marketing_agent import shop_client
 from marketing_agent.coupons import CouponLedger, SequenceGap, total_value
 from marketing_agent.notice import NoticeStore, make_draft
 from marketing_agent.schemas import (
@@ -300,7 +301,29 @@ async def issue_coupon(request: AgentRequest) -> AgentResult:
                 STATE.coupons.record(context_id, key, request.sequence, blocked, cache=cache)
             return blocked
 
-        coupon_id = STATE.coupons.new_coupon_id()
+        if shop_client.coupon_source() == "shop-api":
+            # 안전 장치를 통과했으면 쇼핑몰에 쿠폰을 만든다. 같은 키의 재요청은 shop-api가
+            # 이전 쿠폰을 돌려주므로 실패한 건을 다시 불러도 두 번 만들어지지 않는다.
+            # 번호도 shop-api가 정한다
+            try:
+                coupon = await shop_client.issue_coupon(
+                    idempotency_key=key,
+                    purpose_code=data.purpose_code,
+                    buyer_id=data.buyer_id,
+                    count=data.count,
+                    unit_value=data.unit_value,
+                    campaign_id=data.campaign_id,
+                    context_id=context_id,
+                )
+            except shop_client.ShopError as exc:
+                failed = _result(
+                    request, TaskStatus.FAILED, outcome=f"shop_coupon_failed:{exc.code}"
+                )
+                STATE.coupons.record(context_id, key, request.sequence, failed, cache=False)
+                return failed
+            coupon_id = str(coupon["coupon_id"])
+        else:
+            coupon_id = STATE.coupons.new_coupon_id()
         issued = IssuedCoupon(
             coupon_id=coupon_id,
             purpose_code=data.purpose_code,
