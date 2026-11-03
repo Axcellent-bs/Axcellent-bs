@@ -399,7 +399,7 @@ async def trend_popular(request: AgentRequest) -> AgentResult:
         get_llm(),
         env=os.environ,
         context_id=request.meta.context_id,
-        category_cache=topic_category.DEFAULT_CACHE,
+        category_cache=get_category_cache(),
     )
     return _result(
         request,
@@ -422,7 +422,7 @@ async def promo_concepts(request: AgentRequest) -> AgentResult:
         env=os.environ,
         catalog=get_catalog(),
         context_id=request.meta.context_id,
-        category_cache=topic_category.DEFAULT_CACHE,
+        category_cache=get_category_cache(),
     )
     return _result(
         request,
@@ -445,7 +445,7 @@ async def content_recommend(request: AgentRequest) -> AgentResult:
         env=os.environ,
         context_id=request.meta.context_id,
         catalog=get_catalog(),
-        category_cache=topic_category.DEFAULT_CACHE,
+        category_cache=get_category_cache(),
     )
     return _result(
         request,
@@ -455,6 +455,17 @@ async def content_recommend(request: AgentRequest) -> AgentResult:
         evidence=result.evidence,
         fallback=result.fallback,
     )
+
+
+_category_cache: topic_category.CategoryCache | None = None
+
+
+def get_category_cache() -> topic_category.CategoryCache:
+    """주제 분류 저장소 (backend/.data, 보관 기간·덮어쓰기 표는 회사 설정). 프로세스에 하나."""
+    global _category_cache
+    if _category_cache is None:
+        _category_cache = topic_category.cache_from_env(os.environ)
+    return _category_cache
 
 
 def get_catalog() -> object | None:

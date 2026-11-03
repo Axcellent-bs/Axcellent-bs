@@ -342,7 +342,7 @@ async def recommend(
 
     `catalog`: 회사 상품 목록을 주는 커넥터(`products()`·`categories()`). 없으면 상품 연결은
     확인할 수 없음 + 이유이고 관련성은 수동 회사 키워드로만 본다.
-    `category_cache`: 주제 분류 하루 캐시(서버는 `topic_category.DEFAULT_CACHE`). 없으면 늘 묻는다.
+    `category_cache`: 주제 분류 저장소(서버는 backend/.data, 보관 기간 설정). 없으면 늘 묻는다.
     """
     now = now or datetime.now(UTC)
     config = load_config(env)
@@ -497,6 +497,8 @@ async def recommend(
                 topic_category=category.category,  # type: ignore[arg-type]  # TOPIC_CATEGORIES
                 topic_category_reason=category.reason,
                 group="product_linked" if linked else "general",
+                real_entity=category.real_entity,
+                entity_names=list(category.entity_names),
             )
         )
 

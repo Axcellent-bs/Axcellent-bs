@@ -6,7 +6,7 @@
   1. 상품: 회사 커넥터 상품 목록(캣북스 shop-api, 이름·카테고리·설명·가격).
      못 읽으면 기획안 없음 + 이유
   2. 안전한 인기 트렌드: `trend_popular` 결과 중 `brand_safe`가 true인 것(회사 "추천 안 함" 분류가
-     아니고 분류도 됨) 앞에서 `max_trends`개. 분류가 게임·연예·스포츠·인물이면 IP·초상 경고 대상
+     아니고 분류도 됨) 앞에서 `max_trends`개. 실존 인물·팀·리그·상표가 들었으면 IP·초상 경고 대상
   3. 시즌: 카탈로그의 상품 카테고리마다 그룹 하나(카테고리 이름 + 그 카테고리 상품 핵심어)를
      trend_history(월 단위)로 본다. 작년 같은 달·다음 달 값이 그 기간 평균의 `season_min_ratio`배
      이상이면 시즌 재료. **키워드를 손으로 나열하지 않는다**(카탈로그에서 나온다).
@@ -18,7 +18,8 @@
   규칙: 게임·작품 IP나 인물을 광고에 쓰지 말고 분위기·밈 형식만 빌릴 것, 과장 광고 금지,
   숫자는 재료에 있는 것만. 형식 예시 하나(상품 이름은 실제 카탈로그 값)
 - 검증(코드): 카탈로그에 없는 상품 id·재료 밖 트렌드·목록 밖 형식·콘티 3컷 아님·재료에 없는 숫자
-  (explain 숫자 검증) → 그 기획안은 버리고 이유를 남긴다. 게임·연예·스포츠·인물 트렌드 이름이
+  (explain 숫자 검증) → 그 기획안은 버리고 이유를 남긴다. 실존 이름(분류기의 entity_names)·그 트렌드
+  이름이
   제목·콘티에 그대로 있으면 "상표·초상권 확인 필요" 경고
 - LLM 설정이 없거나 실패하면 빈 목록 + 이유(지어내지 않는다)
 - 하루 캐시: 오늘(한국 날짜) 만든 기획안이 있으면 그것을 준다. `regenerate`면 새로 만든다.
@@ -68,7 +69,6 @@ KST = timezone(timedelta(hours=9))
 DB_ENV = "DATA_PROMO_DB"
 DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "promo_concepts.db"  # backend/.data
 FORMATS: tuple[str, ...] = ("15초 숏폼", "30초 숏폼", "롱폼")
-IP_CATEGORIES = frozenset({"게임", "연예·스포츠", "인물"})
 CUTS = 3
 
 
@@ -312,13 +312,15 @@ def validate_concepts(
             continue
         assert trend is not None
         warnings = []
+        shown = "\n".join([item.title, *item.storyboard]).lower()
         for t in trends:
-            if (
-                t.ip_risk
-                and t.name
-                and t.name.lower() in "\n".join([item.title, *item.storyboard]).lower()
-            ):
-                warnings.append(f"상표·초상권 확인 필요: '{t.name}'이(가) 제목·콘티에 그대로 있음")
+            if not t.ip_risk:
+                continue
+            for name in dict.fromkeys([*t.entity_names, t.name]):
+                if name and name.lower() in shown:
+                    warnings.append(
+                        f"상표·초상권 확인 필요: '{name}'이(가) 제목·콘티에 그대로 있음"
+                    )
         kept.append(
             PromoConcept(
                 concept_id=f"pc_{uuid.uuid4().hex[:10]}",
@@ -537,7 +539,8 @@ async def popular_safe(
             name=i.keyword,
             kind="popular",
             topic_category=i.topic_category,
-            ip_risk=(i.topic_category or "") in IP_CATEGORIES,
+            ip_risk=bool(i.real_entity),
+            entity_names=list(i.entity_names),
             detail=f"지금 인기 {i.rank}위 ({i.topic_category or '분류 없음'})",
         )
         for i in o.items
