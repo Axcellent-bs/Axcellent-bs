@@ -453,6 +453,7 @@ async def promo_concepts(request: AgentRequest) -> AgentResult:
         catalog=get_catalog(),
         context_id=request.meta.context_id,
         category_cache=get_category_cache(),
+        youtube=get_youtube(),
     )
     return _result(
         request,

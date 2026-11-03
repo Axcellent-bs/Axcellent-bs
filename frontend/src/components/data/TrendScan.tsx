@@ -19,7 +19,7 @@ import {
 // - 루프 띠의 단계를 누르면 그 하위 탭으로 간다. 루프 띠는 모든 하위 탭 위에 있다
 // - 1 트렌드·밈 감지: 맨 위 지금 인기(trend_popular), 그 아래 급상승 한 줄 목록(trend_scan·trend_candidates), YouTube 지금 속도.
 //   교차 출처 목록(평소 수준·판정 불가)·판정 방법 안내·월별 흐름·계절 패턴은 화면을 줄이려고 뺐다
-// - 2 영상 소재 추천: 맨 위 홍보 영상 기획안(promo_concepts, components/data/PromoConcepts.tsx) + content_recommend 출력(components/data/ContentRecommend.tsx). 하위 탭을 오가도 남게 숨기기만 한다
+// - 2 영상 소재 추천: 맨 위 광고·홍보 숏츠 기획안 초안(promo_concepts, components/data/PromoConcepts.tsx) + content_recommend 출력(components/data/ContentRecommend.tsx). 하위 탭을 오가도 남게 숨기기만 한다
 // - 3·5: 준비 중. 단계 정의의 할 일·필요한 것만 보여 준다(숫자·예시 없음)
 // - 4 게시·성과 측정: 캠페인 효과(campaign_effect). 하위 탭을 오가도 측정 결과가 남게 화면에서 내리지 않고 숨긴다
 //
@@ -308,7 +308,7 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
           ) : s.tab === "recommend" ? (
             // 추천 결과가 하위 탭을 오가도 남도록 늘 그려 두고 숨기기만 한다
             <div className="space-y-5">
-              {/* 홍보 영상 기획안 (promo_concepts): 2단계 맨 위 */}
+              {/* 광고·홍보 숏츠 기획안 초안 (promo_concepts): 2단계 맨 위 */}
               <PromoConcepts onProbe={setPromoProbe} />
               <ContentRecommend onProbe={setRecommendProbe} dataUp={dataUp} />
             </div>

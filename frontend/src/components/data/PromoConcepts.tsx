@@ -3,8 +3,9 @@ import { Chip, Empty, Panel, TONE, Waiting } from "@/components/finance/bits";
 import type { LoopProbe } from "@/lib/contentLoop";
 import { DATA_SERVER, dataAi, kpiLive, type PromoConcept, type PromoConceptsOutput, type PromoTrendKind } from "@/lib/data";
 
-// 트렌드 2단계 맨 위 "광고·홍보 영상 기획안": 데이터 AI(8106) promo_concepts 출력을 그대로 보여 준다 (계약 PromoConceptsOutput, #415).
-// - 기획안 카드: 제목·컨셉·형식 칩·콘티 3컷·등장 상품·빌려 온 트렌드 칩·주의사항·코드 경고. 숫자는 서버 값만
+// 트렌드 2단계 맨 위 "광고·홍보 숏츠 기획안 초안": 데이터 AI(8106) promo_concepts 출력을 그대로 보여 준다 (계약 PromoConceptsOutput).
+// - 초안 카드: 제목·컨셉·길이·콘티·빌려 온 숏츠 형식(평균 조회수)·트렌드(없으면 "트렌드 없음")·맞는 이유·등장 상품·주의사항·코드 경고. 숫자는 서버 값만
+// - 흐름: 데이터(감지·분석·초안) → 기획(확정) → 마케팅(제작·게시) → 데이터(성과 측정·다음 초안에 반영)
 // - 재료 요약(트렌드·상품 수·출처 상태와 이유)과 검증에서 버린 기획안(제목·이유)
 // - "다시 만들기"는 계약의 regenerate 옵션. 서버는 하루 캐시라 처음에는 오늘 만든 기획안을 그대로 준다
 // - 👍/👎는 피드백을 저장할 곳(안전 관문 등록)이 아직 없어 꺼 둔다
@@ -13,6 +14,7 @@ import { DATA_SERVER, dataAi, kpiLive, type PromoConcept, type PromoConceptsOutp
 const TIME = new Intl.DateTimeFormat("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 const when = (iso: string | null) => (iso ? TIME.format(new Date(iso)) : null);
 const won = (v: number | null) => (typeof v === "number" ? `${v.toLocaleString("ko-KR")}원` : null);
+const views = (v: number | null | undefined) => (typeof v === "number" ? `평균 조회수 ${Math.round(v).toLocaleString("ko-KR")}회` : null);
 const NO_REASON = "서버가 이유를 주지 않았어요";
 const FEEDBACK_BLOCKED = "피드백 저장은 안전 관문 등록 후 열림";
 
@@ -24,16 +26,19 @@ function ConceptCard({ c }: { c: PromoConcept }) {
       <div className="space-y-1">
         <p className="flex flex-wrap items-center gap-2 font-semibold text-ink-900">
           {c.title}
-          {c.format && <Chip label={c.format} tone={TONE.info} />}
+          {typeof c.duration_seconds === "number" ? <Chip label={`숏츠 ${c.duration_seconds}초`} tone={TONE.info} />
+            : c.format && <Chip label={c.format} tone={TONE.info} />}
         </p>
         {c.concept && <p className="text-sm text-ink-700">{c.concept}</p>}
         <div className="flex flex-wrap gap-1.5">
-          <Chip label={`빌려 온 트렌드 · ${c.borrowed_trend}`} tone={TONE.muted} />
+          {c.shorts_format && <Chip label={[`숏츠 형식 · ${c.shorts_format}`, views(c.shorts_format_avg_views)].filter(Boolean).join(" · ")} tone={TONE.info} />}
+          <Chip label={c.borrowed_trend ? `빌려 온 트렌드 · ${c.borrowed_trend}` : "트렌드 없음 (상품 + 숏츠 형식)"} tone={TONE.muted} />
           {c.trend_kind && <Chip label={KIND_LABEL[c.trend_kind]} tone={TONE.muted} />}
         </div>
+        {c.fit_reason && <p className="text-xs text-ink-600">맞는 이유: {c.fit_reason}</p>}
       </div>
       {c.storyboard.length > 0 && (
-        <ol className="grid gap-2 sm:grid-cols-3" aria-label="콘티">
+        <ol className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6" aria-label="콘티">
           {c.storyboard.map((cut, i) => (
             <li key={i} className="rounded-xl bg-ink-50 px-3 py-2 text-xs leading-relaxed text-ink-700">
               <span className="mb-1 block text-[11px] font-semibold text-ink-500">{i + 1}컷</span>
@@ -79,9 +84,12 @@ function Ingredients({ out }: { out: PromoConceptsOutput }) {
       : { text: `회사 상품: ${out.catalog_reason ?? NO_REASON}`, warn: true },
     out.popular_status === "known" ? { text: "지금 인기 트렌드 읽음", warn: false }
       : { text: `지금 인기: ${out.popular_reason ?? NO_REASON}`, warn: true },
-    out.season_status === "known" ? { text: "카테고리 시즌 읽음", warn: false }
+    out.shorts_status === "known" ? { text: `인기 숏츠 형식 ${out.shorts_formats?.length ?? 0}개`, warn: false }
+      : { text: `숏츠 형식: ${out.shorts_reason ?? NO_REASON}`, warn: true },
+    out.season_status === "known" ? { text: out.season_reason ?? "시즌 키워드 읽음", warn: Boolean(out.season_reason) }
       : { text: `시즌: ${out.season_reason ?? NO_REASON}`, warn: true },
   ];
+  const ratio = (v: number | null) => (typeof v === "number" ? `${v.toLocaleString("ko-KR")}배` : "–");
   return (
     <div className="rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-700">
       <p className="panel-title">재료</p>
@@ -99,6 +107,19 @@ function Ingredients({ out }: { out: PromoConceptsOutput }) {
             </li>
           ))}
         </ul>
+      )}
+      {(out.season_checks?.length ?? 0) > 0 && (
+        <details className="mt-2">
+          <summary className="cursor-pointer font-semibold text-ink-900">시즌 확인한 키워드 {out.season_checks?.length}개 (작년 같은 달·다음 달 ÷ 평균)</summary>
+          <ul className="mt-1 space-y-0.5 pl-4">
+            {out.season_checks?.map((s) => (
+              <li key={s.keyword}>
+                <b>{s.keyword}</b> {s.source === "category" ? "(카테고리)" : "(상품)"} ·{" "}
+                {s.status === "known" ? `같은 달 ${ratio(s.same_month_ratio)} · 다음 달 ${ratio(s.next_month_ratio)}` : (s.reason ?? NO_REASON)}
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
     </div>
   );
@@ -127,25 +148,25 @@ export function PromoConcepts({ onProbe }: { onProbe: (p: LoopProbe) => void }) 
   const out = state.kind === "ok" ? state.out : null;
   const meta = out ? [
     out.generated_at ? `만든 시각 ${when(out.generated_at)}` : null,
-    out.cached ? "오늘 만든 기획안" : null,
+    out.cached ? "오늘 만든 초안" : null,
     `네이버 호출 ${out.naver_calls}번`,
-  ].filter(Boolean).join(" · ") : "회사 상품과 지금 인기·시즌 트렌드로 만든 홍보 영상 기획안이에요.";
+  ].filter(Boolean).join(" · ") : "회사 상품과 인기 숏츠 형식·지금 인기·시즌으로 만든 숏츠 광고 기획안 초안이에요. 확정은 기획, 제작·게시는 마케팅이 해요.";
 
   return (
-    <Panel id="data-trend-promo" title="광고·홍보 영상 기획안" hint={meta}
+    <Panel id="data-trend-promo" title="광고·홍보 숏츠 기획안 초안" hint={meta}
       tools={<button type="button" className="btn-ghost" disabled={state.kind === "loading"} onClick={() => setRegen((n) => n + 1)}>다시 만들기</button>}>
-      {state.kind === "loading" ? <Waiting what="기획안을 받는 중…" />
-        : state.kind === "failed" ? <Empty>기획안을 받지 못했어요. {state.reason} {DATA_SERVER}가 켜져 있는지 확인해 주세요.</Empty>
+      {state.kind === "loading" ? <Waiting what="기획안 초안을 받는 중…" />
+        : state.kind === "failed" ? <Empty>기획안 초안을 받지 못했어요. {state.reason} {DATA_SERVER}가 켜져 있는지 확인해 주세요.</Empty>
         : out && (
           <div className="space-y-4">
             {out.summary && <p className="text-sm text-ink-700">{out.summary}</p>}
             {out.concepts.length === 0
-              ? <Empty>{out.empty_reason ?? "기획안이 없어요."}</Empty>
+              ? <Empty>{out.empty_reason ?? "기획안 초안이 없어요."}</Empty>
               : <ul className="space-y-3">{out.concepts.map((c) => <ConceptCard key={c.concept_id} c={c} />)}</ul>}
             <Ingredients out={out} />
             {out.dropped.length > 0 && (
               <details className="text-xs text-ink-700">
-                <summary className="cursor-pointer font-semibold text-ink-900">버린 기획안 {out.dropped.length}개</summary>
+                <summary className="cursor-pointer font-semibold text-ink-900">버린 초안 {out.dropped.length}개</summary>
                 <ul className="mt-1 space-y-0.5 pl-4">
                   {out.dropped.map((d, i) => <li key={`${d.title}-${i}`}><b>{d.title}</b> · {d.reason}</li>)}
                 </ul>

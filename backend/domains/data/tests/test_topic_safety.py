@@ -111,7 +111,8 @@ def test_promo_warning_follows_real_entity_names_not_the_category() -> None:
 
     def concept(title: str, trend: str) -> _Concept:
         return _Concept(title=title, concept="c", borrowed_trend=trend, product_ids=["p1"],
-                        format="15초 숏폼", storyboard=["1컷: a", "2컷: b", "3컷: c"])  # fmt: skip
+                        duration_seconds=15, fit_reason="맞는 이유",
+                        storyboard=["1컷: a", "2컷: b", "3컷: c"])  # fmt: skip
 
     kept, _ = validate_concepts(
         [concept("페이커처럼 집중", "lck"), concept("모바일게임 같은 공부", "모바일게임")],

@@ -1,12 +1,12 @@
-"""promo_concepts: 홍보 영상 기획안.
+"""promo_concepts: 광고·홍보 숏츠 기획안 초안.
 
-실제 네이버·shop-api·LLM을 부르지 않는다 (가짜 커넥터·가짜 LLM).
-
-- 카탈로그에 없는 상품 → 버림, 재료 밖 트렌드 → 버림, 재료에 없는 숫자 → 버림 (이유 기록)
-- 게임·연예·스포츠·인물 트렌드 이름이 제목·콘티에 그대로 있으면 경고
-- LLM 실패 → 빈 목록 + 이유 (지어내지 않음)
-- 하루 캐시, 다시 만들기
-- 시즌 재료는 카탈로그(카테고리 이름 + 상품 핵심어)에서 온다
+실제 네이버·shop-api·YouTube·LLM을 부르지 않는다 (가짜 커넥터·가짜 LLM).
+- 숏츠만: 롱폼·60초 초과·15초 미만 → 버림, 길이에 맞지 않는 컷 수 → 버림
+- 카탈로그에 없는 상품·재료 밖 트렌드·재료 밖 숏츠 형식·재료에 없는 숫자 → 버림 (이유 기록)
+- 트렌드 없는 초안(상품 + 인기 숏츠 형식) 허용, 맞는 이유 한 줄 필수
+- 트렌드 재료: 지금 인기(카테고리별) 중 게임·연예·스포츠·IT만. 뉴스·사건은 재료에 안 들어간다
+- 시즌 키워드는 카탈로그(카테고리 이름 + 상품 핵심어)에서 오고, 확인한 키워드와 배율이 응답에 있다
+- LLM 실패 → 빈 목록 + 이유, 하루 캐시, 다시 만들기
 """
 
 from __future__ import annotations
@@ -17,19 +17,26 @@ from pathlib import Path
 from typing import Any
 
 from ax_agent_template.llm import LLMClient, LLMSettings, MockLLMClient, format_prompt
-from ax_contracts.schemas.data import PromoConceptsRequest, PromoTrend, TrendScanInput
+from ax_contracts.schemas.data import (
+    PopularCategory,
+    PopularTopic,
+    PromoConceptsRequest,
+    PromoShortsFormat,
+    PromoTrend,
+    TrendScanInput,
+)
 from data_agent.connectors import CatalogProduct
 from data_agent.connectors.naver_datalab import TrendResponse, TrendSeries
+from data_agent.skills import promo_concepts as promo
 from data_agent.skills.promo_concepts import (
+    PromoConfig,
     PromoStore,
     _Concept,
     _Concepts,
-    category_groups,
     make_concepts,
-    season_trends,
+    season_keywords,
     validate_concepts,
 )
-from data_agent.skills.topic_category import _Categories
 from data_agent.today_board import TodayBoard
 
 NOW = datetime(2026, 11, 3, 3, 0, tzinfo=UTC)  # 한국 11-03 12시
@@ -39,6 +46,7 @@ PRODUCTS = [
     CatalogProduct(product_id="p2", name="무지 노트 3권 세트", category_code="stat", price=7500),
 ]
 CATEGORIES = {"book": "도서", "stat": "문구"}
+FORMATS = {"챌린지": PromoShortsFormat(name="챌린지", avg_views=12718523.7, count=9)}
 
 
 class FakeCatalog:
@@ -50,7 +58,7 @@ class FakeCatalog:
 
 
 class MonthlyNaver:
-    """월 단위 요청에 그룹마다 시계열을 준다. `spike`인 그룹은 작년 12월 값이 크다."""
+    """월 단위 요청에 키워드마다 시계열을 준다. `spike`인 키워드는 작년 12월 값이 크다."""
 
     def __init__(self, spike: set[str]) -> None:
         self.spike = spike
@@ -73,12 +81,14 @@ class MonthlyNaver:
 
 def _item(**kw: Any) -> _Concept:
     base = {
-        "title": "겨울 책상 정리",
-        "concept": "연말 분위기로 책상을 정리하는 영상",
-        "borrowed_trend": "도서 12월 시즌",
-        "product_ids": ["p1"],
-        "format": "15초 숏폼",
-        "storyboard": ["1컷: 책상", "2컷: 파이썬 입문서 18000원", "3컷: 로고"],
+        "title": "겨울 노트 챌린지",
+        "concept": "연말 노트 정리 챌린지",
+        "borrowed_trend": "무지 노트 12월 시즌",
+        "shorts_format": "챌린지",
+        "fit_reason": "연말 정리 시즌과 따라 하기 형식이 노트와 맞는다",
+        "product_ids": ["p2"],
+        "duration_seconds": 15,
+        "storyboard": ["1컷: 책상", "2컷: 무지 노트 3권 세트 7500원", "3컷: 로고"],
         "cautions": ["과장 금지"],
     }
     return _Concept(**(base | kw))
@@ -92,8 +102,6 @@ class PromoLLM(MockLLMClient):
         self.asked = 0
 
     async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):  # noqa: ANN001, ANN201
-        if schema is _Categories:
-            return _Categories(items=[])
         self.asked += 1
         self.calls.append(format_prompt(prompt, untrusted))
         if self.fail is not None:
@@ -101,23 +109,43 @@ class PromoLLM(MockLLMClient):
         return _Concepts(items=self.items)
 
 
+def _topic(name: str, category: str, rank: int) -> PopularTopic:
+    return PopularTopic(rank=rank, keyword=name, topic_category=category, brand_safe=True,  # type: ignore[arg-type]
+                        category_rank=rank)  # fmt: skip
+
+
+async def _fake_popular(*args: Any, **kw: Any) -> Any:
+    class R:
+        class output:  # noqa: N801
+            empty_reason = None
+            by_category = [
+                PopularCategory(category="게임", items=[_topic("리그오브레전드", "게임", 1)]),
+                PopularCategory(category="뉴스·사건", items=[_topic("한국철강", "뉴스·사건", 1)]),
+                PopularCategory(category="IT", items=[_topic("새 휴대폰", "IT", 1)]),
+            ]
+
+    return R()
+
+
+async def _fake_shorts(*args: Any, **kw: Any) -> Any:
+    return dict(FORMATS), "known", None
+
+
 def _env(tmp_path: Path) -> dict[str, str]:
     tmp_path.mkdir(parents=True, exist_ok=True)
     config = tmp_path / "trends.toml"
     config.write_text("[promo]\nconcepts = 3\nseason_min_ratio = 1.3\n", encoding="utf-8")
-    return {
-        "DATA_TREND_CONFIG": str(config),
-        "DATA_YOUTUBE_DB": str(tmp_path / "none.db"),  # 인기 스냅샷 없음
-        "DATA_TRENDING_DB": str(tmp_path / "none2.db"),
-        "DATA_PROMO_DB": str(tmp_path / "promo.db"),
-    }
+    return {"DATA_TREND_CONFIG": str(config), "DATA_PROMO_DB": str(tmp_path / "promo.db")}
 
 
-def _run(tmp_path: Path, llm: MockLLMClient, *, regenerate: bool = False, naver=None):  # noqa: ANN001, ANN202
+def _run(tmp_path: Path, llm: MockLLMClient, monkeypatch: Any, *, regenerate: bool = False,
+         naver: MonthlyNaver | None = None):  # noqa: ANN202  # fmt: skip
+    monkeypatch.setattr(promo, "popular", _fake_popular)
+    monkeypatch.setattr(promo, "shorts_formats", _fake_shorts)
     return asyncio.run(
         make_concepts(
             PromoConceptsRequest(regenerate=regenerate),
-            naver or MonthlyNaver({"도서"}),
+            naver or MonthlyNaver({"무지 노트"}),
             llm,
             env=_env(tmp_path),
             catalog=FakeCatalog(),
@@ -130,123 +158,144 @@ def _run(tmp_path: Path, llm: MockLLMClient, *, regenerate: bool = False, naver=
 # ---------------------------------------------------------------- 재료
 
 
-def test_season_material_comes_from_the_catalog() -> None:
-    groups = category_groups(PRODUCTS, CATEGORIES)
-    assert [(g.group_name, g.keywords) for g in groups] == [
-        ("도서", ["도서", "파이썬 입문서"]),
-        ("문구", ["문구", "무지 노트"]),  # 핵심어: 숫자가 든 낱말·세트 뺌
+def test_season_keywords_come_from_the_catalog() -> None:
+    assert season_keywords(PRODUCTS, CATEGORIES, 20) == [
+        ("도서", "category"),
+        ("문구", "category"),
+        ("파이썬 입문서", "product"),
+        ("무지 노트", "product"),  # 핵심어: 숫자가 든 낱말·세트 뺌
     ]
+    assert len(season_keywords(PRODUCTS, CATEGORIES, 3)) == 3  # 네이버 호출 상한
 
 
-def test_season_trend_needs_last_years_month_above_the_ratio(tmp_path: Path) -> None:
-    naver = MonthlyNaver({"도서"})
-    out = _run(tmp_path, PromoLLM(), naver=naver)
-    assert out.season_status == "known" and out.naver_calls == 2  # 카테고리 수만큼
-    assert [g.keyword_groups[0].group_name for g in naver.queries] == ["도서", "문구"]
-    names = [t.name for t in out.trends if t.kind == "season"]
-    assert names == ["도서 12월 시즌"]
-    assert out.popular_status == "unknown"  # 인기 스냅샷이 없으면 그 재료만 없음
+def test_season_checks_show_keywords_and_ratios(tmp_path: Path, monkeypatch: Any) -> None:
+    naver = MonthlyNaver({"무지 노트"})
+    out = _run(tmp_path, PromoLLM(), monkeypatch, naver=naver)
+    assert [q.keyword_groups[0].group_name for q in naver.queries] == [
+        "도서", "문구", "파이썬 입문서", "무지 노트",
+    ]  # fmt: skip
+    assert out.naver_calls == 4
+    checks = {c.keyword: c for c in out.season_checks}
+    note = checks["무지 노트"]
+    assert note.next_month == date(2025, 12, 1)
+    assert note.next_month_ratio is not None and note.next_month_ratio > 2
+    assert checks["도서"].same_month_ratio is not None and checks["도서"].source == "category"
+    assert [t.name for t in out.trends if t.kind == "season"] == ["무지 노트 12월 시즌"]
 
-    class G:  # 평균의 1.3배 미만이면 시즌 아님
-        status = "known"
-        group_name = "x"
-        points = [type("P", (), {"month": date(2025, 11, 1), "value": 50.0})()] * 3
 
-    assert season_trends([G()], date(2026, 11, 3), 1.3) == []
+def test_news_trends_never_become_material(tmp_path: Path, monkeypatch: Any) -> None:
+    out = _run(tmp_path, PromoLLM(), monkeypatch)
+    names = [t.name for t in out.trends if t.kind == "popular"]
+    assert names == ["리그오브레전드", "새 휴대폰"]  # 게임·IT만, 뉴스·사건(한국철강)은 뺀다
+    assert out.shorts_formats[0].name == "챌린지"
 
 
 # ---------------------------------------------------------------- 검증
 
 
-def _trends() -> list[PromoTrend]:
-    return [
-        PromoTrend(
-            name="도서 12월 시즌", kind="season", detail="작년 12월 '도서' 검색이 평균의 2.35배"
-        ),
+def _validate(items: list[_Concept]):  # noqa: ANN202
+    trends = [
+        PromoTrend(name="무지 노트 12월 시즌", kind="season", detail="작년 12월 '무지 노트' 2.5배"),
         PromoTrend(
             name="리그오브레전드",
             kind="popular",
             topic_category="게임",
             ip_risk=True,
-            detail="지금 인기 1위 (게임)",
+            entity_names=["리그오브레전드"],
+            detail="x",
         ),  # fmt: skip
     ]
-
-
-def test_validation_drops_unknown_products_outside_trends_and_new_numbers() -> None:
+    facts: dict[str, int | float | str] = {"가격2": 7500, "상품2": "무지 노트 3권 세트"}
     products = {p.product_id: p for p in PRODUCTS}
-    facts: dict[str, int | float | str] = {"가격1": 18000, "콘티": "1컷 2컷 3컷"}
-    items = [
-        _item(),
-        _item(title="없는 상품", product_ids=["p9"]),
-        _item(title="재료 밖", borrowed_trend="크리스마스"),
-        _item(title="숫자", storyboard=["1컷: 책상", "2컷: 50% 할인", "3컷: 로고"]),
-        _item(title="형식", format="60초"),
-        _item(title="콘티", storyboard=["1컷", "2컷"]),
-    ]
-    kept, dropped = validate_concepts(items, products, CATEGORIES, _trends(), facts)
-    assert [c.title for c in kept] == ["겨울 책상 정리"]
-    assert kept[0].products[0].name == "파이썬 입문서" and kept[0].products[0].price == 18000
+    return validate_concepts(items, products, CATEGORIES, trends, facts, formats=FORMATS,
+                             config=PromoConfig())  # fmt: skip
+
+
+def test_longform_and_over_sixty_seconds_are_dropped() -> None:
+    six = ["1컷", "2컷", "3컷", "4컷", "5컷", "6컷"]
+    kept, dropped = _validate(
+        [
+            _item(title="롱폼", duration_seconds=180),
+            _item(title="61초", duration_seconds=61, storyboard=six[:5]),
+            _item(title="10초", duration_seconds=10),
+            _item(title="30초 3컷", duration_seconds=30),
+            _item(title="60초 6컷", duration_seconds=60, storyboard=six),
+        ]
+    )
+    assert [c.title for c in kept] == ["60초 6컷"]
+    assert kept[0].duration_seconds == 60 and kept[0].format is None  # 롱폼 표기 없음
+    reasons = {d.title: d.reason for d in dropped}
+    assert reasons["롱폼"] == "숏츠 길이 180초가 15~60초 밖 (롱폼 제외)"
+    assert reasons["61초"].startswith("숏츠 길이 61초")
+    assert reasons["10초"].startswith("숏츠 길이 10초")
+    assert reasons["30초 3컷"] == "콘티 3컷이 30초 기준(4~5컷)과 맞지 않음"
+
+
+def test_concepts_without_a_trend_are_allowed() -> None:
+    kept, dropped = _validate([_item(title="트렌드 없음", borrowed_trend="")])
+    assert dropped == [] and kept[0].borrowed_trend == "" and kept[0].trend_kind is None
+    assert kept[0].shorts_format == "챌린지" and kept[0].shorts_format_avg_views == 12718523.7
+    assert kept[0].fit_reason
+
+
+def test_material_checks_drop_with_reasons() -> None:
+    _, dropped = _validate(
+        [
+            _item(title="없는 상품", product_ids=["p9"]),
+            _item(title="재료 밖", borrowed_trend="크리스마스"),
+            _item(title="형식 밖", shorts_format="먹방"),
+            _item(title="이유 없음", fit_reason=" "),
+            _item(title="숫자", storyboard=["1컷(0~3초): 책상", "2컷: 50% 할인", "3컷: 로고"]),
+        ]
+    )
     assert {d.title: d.reason for d in dropped} == {
         "없는 상품": "카탈로그에 없는 상품 id: p9",
         "재료 밖": "재료 밖 트렌드",
+        "형식 밖": "재료 밖 숏츠 형식",
+        "이유 없음": "트렌드·형식이 상품과 맞는 이유가 없음",
         "숫자": "재료에 없는 숫자: 50",
-        "형식": "형식이 목록 밖",
-        "콘티": "콘티가 3컷이 아님",
     }
 
 
-def test_ip_trend_name_in_title_or_storyboard_gets_a_warning() -> None:
-    products = {p.product_id: p for p in PRODUCTS}
-    facts: dict[str, int | float | str] = {"가격1": 18000, "콘티": "1컷 2컷 3컷"}
-    item = _item(title="리그오브레전드처럼 공부", borrowed_trend="리그오브레전드")
-    [kept], _ = validate_concepts([item], products, CATEGORIES, _trends(), facts)
+def test_ip_name_in_the_title_gets_a_warning() -> None:
+    [kept], _ = _validate([_item(title="리그오브레전드처럼 공부", borrowed_trend="리그오브레전드")])
     assert kept.warnings == [
         "상표·초상권 확인 필요: '리그오브레전드'이(가) 제목·콘티에 그대로 있음"
     ]
-    calm = _item(title="공부 세팅", borrowed_trend="리그오브레전드")
-    [ok], _ = validate_concepts([calm], products, CATEGORIES, _trends(), facts)
-    assert ok.warnings == [] and ok.trend_kind == "popular"
 
 
 # ---------------------------------------------------------------- 실행
 
 
-def test_llm_failure_gives_an_empty_list_with_a_reason(tmp_path: Path) -> None:
-    out = _run(tmp_path, PromoLLM(fail=RuntimeError("down")))
+def test_llm_failure_gives_an_empty_list_with_a_reason(tmp_path: Path, monkeypatch: Any) -> None:
+    out = _run(tmp_path, PromoLLM(fail=RuntimeError("down")), monkeypatch)
     assert out.concepts == [] and out.empty_reason == "LLM 호출 실패 (RuntimeError)"
-    no_llm = asyncio.run(
-        make_concepts(
-            PromoConceptsRequest(),
-            MonthlyNaver({"도서"}),
-            LLMClient("data", LLMSettings()),
-            env=_env(tmp_path / "x"),
-            catalog=FakeCatalog(),
-            now=NOW,
-            board=TodayBoard(),
-        )  # fmt: skip
-    ).output
-    assert no_llm.concepts == [] and no_llm.empty_reason == "LLM 설정이 없어 기획안을 만들지 않음"
+    no_llm = _run(tmp_path / "x", LLMClient("data", LLMSettings()), monkeypatch)
+    assert no_llm.concepts == []
+    assert no_llm.empty_reason == "LLM 설정이 없어 기획안 초안을 만들지 않음"
 
 
-def test_concepts_are_cached_for_the_day_and_can_be_regenerated(tmp_path: Path) -> None:
+def test_drafts_are_cached_for_the_day_and_can_be_regenerated(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
     llm = PromoLLM()
-    first = _run(tmp_path, llm)
+    first = _run(tmp_path, llm, monkeypatch)
     assert len(first.concepts) == 1 and not first.cached and llm.asked == 1
-    again = _run(tmp_path, llm)
+    assert "기획안 초안" in first.summary
+    again = _run(tmp_path, llm, monkeypatch)
     assert again.cached and llm.asked == 1 and again.run_id == first.run_id
-    fresh = _run(tmp_path, llm, regenerate=True)
+    fresh = _run(tmp_path, llm, monkeypatch, regenerate=True)
     assert not fresh.cached and llm.asked == 2 and fresh.run_id != first.run_id
     store = PromoStore(tmp_path / "promo.db")
     latest = store.latest(date(2026, 11, 3))
     store.close()
-    assert latest is not None and latest.run_id == fresh.run_id  # 기록이 남는다
+    assert latest is not None and latest.run_id == fresh.run_id
 
 
-def test_materials_go_only_into_the_data_block(tmp_path: Path) -> None:
+def test_materials_go_only_into_the_data_block(tmp_path: Path, monkeypatch: Any) -> None:
     llm = PromoLLM()
-    _run(tmp_path, llm)
+    _run(tmp_path, llm, monkeypatch)
     head, _, block = llm.calls[0].partition("<untrusted")
-    assert "도서 12월 시즌" not in head and "도서 12월 시즌" in block
+    assert "무지 노트 12월 시즌" not in head and "무지 노트 12월 시즌" in block
+    assert "챌린지" in block and "롱폼 금지" in head
     assert "파이썬 입문서" in head  # 형식 예시는 실제 카탈로그 상품 이름
-    assert "p1" in block
