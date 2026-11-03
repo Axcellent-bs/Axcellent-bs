@@ -1114,6 +1114,32 @@ class PromoConcept(AxModel):
     storyboard: list[str] = Field(default_factory=list)  # 콘티 3컷
     cautions: list[str] = Field(default_factory=list)  # 주의사항 (LLM)
     warnings: list[str] = Field(default_factory=list)  # 코드가 단 경고 (상표·초상권 확인 필요 등)
+    # 아래는 숏츠 광고 기획안 초안 (예전 응답은 없다)
+    duration_seconds: int | None = Field(default=None, ge=1)  # 숏츠 길이(초)
+    shorts_format: str | None = None  # 빌려 온 인기 숏츠 형식 (shorts_stats 형식 이름)
+    shorts_format_avg_views: float | None = None  # 그 형식의 평균 조회수 (서버 값)
+    fit_reason: str | None = None  # 이 트렌드·형식이 이 상품과 맞는 이유 한 줄 (LLM)
+
+
+class PromoShortsFormat(AxModel):
+    """기획안 재료로 쓴 인기 숏츠 형식 (shorts_stats 값 그대로)."""
+
+    name: str
+    avg_views: float = Field(ge=0)
+    count: int = Field(default=0, ge=0)
+
+
+class PromoSeasonCheck(AxModel):
+    """시즌을 확인한 키워드 하나 (카탈로그 카테고리 이름 또는 상품 핵심어)."""
+
+    keyword: str
+    source: Literal["category", "product"] = "product"
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = None  # unknown이면 이유
+    same_month: dt.date | None = None  # 작년 같은 달 (1일)
+    same_month_ratio: float | None = None  # 그 달 값 ÷ 기간 평균
+    next_month: dt.date | None = None  # 작년 다음 달 (1일)
+    next_month_ratio: float | None = None
 
 
 class DroppedConcept(AxModel):
@@ -1137,6 +1163,11 @@ class PromoConceptsOutput(AxModel):
     season_reason: str | None = None
     naver_calls: int = Field(default=0, ge=0)  # 이번 실행에서 네이버를 실제로 부른 수 (캐시 제외)
     cached: bool = False  # 오늘 만든 기획안을 그대로 줬는지
+    # 아래는 숏츠 광고 기획안 초안 (예전 응답은 없다)
+    shorts_formats: list[PromoShortsFormat] = Field(default_factory=list)  # 재료 숏츠 형식
+    shorts_status: Literal["known", "unknown"] = "unknown"
+    shorts_reason: str | None = None
+    season_checks: list[PromoSeasonCheck] = Field(default_factory=list)  # 확인한 시즌 키워드
     run_id: str | None = None  # 기획안 기록 id
     generated_at: UtcDatetime | None = None
     summary: str = ""  # 코드가 만든 한 문장
