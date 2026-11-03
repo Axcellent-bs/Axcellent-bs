@@ -94,7 +94,7 @@ export function TrendPopular() {
   const empty = cells.every((c) => c.items.length === 0) && !out?.by_category?.length;
 
   return (
-    <Panel id="data-trend-popular" title="지금 인기"
+    <Panel id="data-trend-popular" title={cells.some((c) => c.top_videos?.length) ? "카테고리별 조회수 높은 영상" : "지금 인기"}
       hint={out ? (
         <span className="flex flex-wrap gap-x-3">
           {sourceLines(out).map((l) => <span key={l.text} className={l.warn ? "text-amber-700" : undefined}>{l.text}</span>)}
@@ -109,17 +109,18 @@ export function TrendPopular() {
               {cells.map((c) => (
                 <section key={c.category} aria-label={c.category} className="rounded-xl bg-ink-50 px-3 py-2">
                   <p className="panel-title">{c.category === "unknown" ? "분류 못 함" : c.category}</p>
-                  {c.items.length > 0 && (
+                  {/* 최근 조회수 높은 영상이 있으면 그 칸은 영상만 보여 준다 (회사 설정 fill_always) */}
+                  {!(c.top_videos?.length) && c.items.length > 0 && (
                     <ol className="divide-y divide-ink-100">
                       {c.items.map((t) => <Row key={t.keyword} t={t} rank={c.legacy ? t.rank : t.category_rank ?? null} />)}
                     </ol>
                   )}
-                  {c.shortage_reason && <p className="py-2 text-xs text-amber-700">{c.shortage_reason}</p>}
-                  {c.items.length === 0 && !c.shortage_reason && <p className="py-2 text-xs text-ink-500">이 칸에 들어온 주제가 없어요. 서버가 이유를 주지 않았어요.</p>}
+                  {!(c.top_videos?.length) && c.shortage_reason && <p className="py-2 text-xs text-amber-700">{c.shortage_reason}</p>}
+                  {!(c.top_videos?.length) && c.items.length === 0 && !c.shortage_reason && <p className="py-2 text-xs text-ink-500">이 칸에 들어온 주제가 없어요. 서버가 이유를 주지 않았어요.</p>}
                   {(c.top_videos?.length ?? 0) > 0 && (
-                    <div className="mt-1 border-t border-ink-100 pt-2">
+                    <div className="mt-1">
                       <p className="flex flex-wrap items-center gap-2 text-xs font-semibold text-ink-700">
-                        최근 조회수 높은 영상 <span className="chip">지금 인기 아님</span>
+                        최근 조회수 높은 영상
                       </p>
                       <ol className="divide-y divide-ink-100">
                         {(c.top_videos ?? []).map((v) => (

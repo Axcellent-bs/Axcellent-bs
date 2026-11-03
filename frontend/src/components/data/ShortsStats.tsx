@@ -17,10 +17,10 @@ function GroupTable({ title, groups }: { title: string; groups: ShortsGroup[] })
   return (
     <section aria-label={title} className="min-w-0 space-y-2">
       <p className="panel-title">{title}</p>
-      {groups.length === 0 ? <p className="text-xs text-ink-500">서버가 준 묶음이 없어요.</p> : (
+      {groups.length === 0 ? <p className="text-sm text-ink-500">서버가 준 묶음이 없어요.</p> : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[22rem] text-left text-sm">
-            <thead className="text-[11px] text-ink-500">
+          <table className="w-full min-w-[22rem] text-left text-base">
+            <thead className="text-xs text-ink-500">
               <tr>
                 <th scope="col" className="py-1 pr-2 font-semibold">묶음</th>
                 <th scope="col" className="py-1 pr-2 text-right font-semibold">숏츠 수</th>
@@ -33,9 +33,9 @@ function GroupTable({ title, groups }: { title: string; groups: ShortsGroup[] })
                 <tr key={g.name}>
                   <td className="py-2 pr-2">
                     <p className="font-semibold text-ink-900">{g.name === "unknown" ? "분류 못 함" : g.name}</p>
-                    {g.status === "unknown" && <p className="text-xs text-amber-700">{g.reason ?? NO_REASON}</p>}
+                    {g.status === "unknown" && <p className="text-sm text-amber-700">{g.reason ?? NO_REASON}</p>}
                     {g.top.length > 0 && (
-                      <ul className="mt-1 space-y-0.5 text-xs text-ink-700">
+                      <ul className="mt-1 space-y-0.5 text-sm text-ink-700">
                         {g.top.map((v) => (
                           <li key={v.video_id} className="truncate">
                             <a className="text-brand-700 underline-offset-2 hover:underline" href={`https://www.youtube.com/watch?v=${encodeURIComponent(v.video_id)}`}
@@ -51,7 +51,7 @@ function GroupTable({ title, groups }: { title: string; groups: ShortsGroup[] })
                   <td className="py-2 pr-2 text-right tabular-nums">{g.status === "known" ? num(g.avg_views) : "-"}</td>
                   <td className="py-2 text-right tabular-nums">
                     {g.status === "known" && g.avg_views_per_hour != null ? `+${num(g.avg_views_per_hour)}` : "-"}
-                    {g.velocity_videos > 0 && <span className="block text-[11px] text-ink-500">잰 숏츠 {num(g.velocity_videos)}개</span>}
+                    {g.velocity_videos > 0 && <span className="block text-xs text-ink-500">잰 숏츠 {num(g.velocity_videos)}개</span>}
                   </td>
                 </tr>
               ))}
@@ -107,13 +107,13 @@ export function ShortsStats() {
         : out && out.status === "unknown" ? <Empty>확인할 수 없음 · {out.reason ?? NO_REASON}</Empty>
         : out && (
           <div className="space-y-4">
-            {out.summary && <p className="text-sm text-ink-700">{out.summary}</p>}
+            {out.summary && <p className="text-base text-ink-700">{out.summary}</p>}
             <div className="grid gap-5 lg:grid-cols-2">
               <GroupTable title="형식별" groups={out.by_format} />
               <GroupTable title="카테고리별" groups={out.by_category} />
             </div>
-            {out.velocity_note && <p className="text-xs text-ink-500">{out.velocity_note}</p>}
-            {out.limitation && <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">표본 한계: {out.limitation}</p>}
+            {out.velocity_note && <p className="text-sm text-ink-500">{out.velocity_note}</p>}
+            {out.limitation && <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-700">표본 한계: {out.limitation}</p>}
           </div>
         )}
     </Panel>
