@@ -105,6 +105,7 @@ SKILL_KO: dict[str, str] = {
     "trend_history": "검색어 월별 흐름 보기",
     "youtube_velocity": "YouTube 지금 속도 보기",
     "content_recommend": "영상 소재 추천",
+    "trend_popular": "지금 인기 보기",
     "campaign_effect": "캠페인 효과 보기",
     "receive_dev_result": "개발 결과 받기",
     "start_dev": "개발 시작",

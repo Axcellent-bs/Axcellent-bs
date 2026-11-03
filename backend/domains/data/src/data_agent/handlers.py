@@ -51,6 +51,7 @@ from ax_contracts.schemas.data import (
     RootCauseInput,
     TrendCandidatesRequest,
     TrendHistoryRequest,
+    TrendPopularRequest,
     TrendScanRequest,
     YouTubeVelocityRequest,
 )
@@ -80,6 +81,7 @@ from data_agent.skills.kpi_summary import summarize_kpi
 from data_agent.skills.root_cause import estimate_root_cause
 from data_agent.skills.trend_candidates import find_candidates
 from data_agent.skills.trend_history import history
+from data_agent.skills.trend_popular import popular
 from data_agent.skills.trend_scan import NoTrendGroups, scan_trends
 from data_agent.skills.youtube_velocity import measure_velocity
 
@@ -385,6 +387,27 @@ async def trend_candidates(request: AgentRequest) -> AgentResult:
     )
 
 
+async def trend_popular(request: AgentRequest) -> AgentResult:
+    """지금 인기 주제 순위 (급상승 판정과 별개, 네이버 안 부름). 조회만 한다(grade read)."""
+    data = _parse(request, TrendPopularRequest)
+    if isinstance(data, AgentResult):
+        return data
+    result = await popular(
+        data,
+        get_llm(),
+        env=os.environ,
+        context_id=request.meta.context_id,
+        category_cache=topic_category.DEFAULT_CACHE,
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome="ranked" if result.output.items else "empty",
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
+
+
 async def content_recommend(request: AgentRequest) -> AgentResult:
     """영상 소재 추천 (콘텐츠 루프 2단계). 조회만 하고 상태를 바꾸지 않는다(grade read)."""
     data = _parse(request, ContentRecommendRequest)
@@ -529,6 +552,7 @@ HANDLERS = {
     "trend_history": trend_history,
     "youtube_velocity": youtube_velocity,
     "content_recommend": content_recommend,
+    "trend_popular": trend_popular,
     "answer_planning_question": answer_planning_question,
     "campaign_effect": campaign_effect,
 }

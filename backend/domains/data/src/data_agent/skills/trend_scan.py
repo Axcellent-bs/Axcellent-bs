@@ -45,6 +45,7 @@ from data_agent.connectors.naver_datalab import (
     TrendSeries,
 )
 from data_agent.explain import explain
+from data_agent.today_board import BOARD
 
 BASELINE_DAYS = 56
 WINDOW_DAYS = 7
@@ -346,7 +347,11 @@ async def scan_trends(
                 _unknown(group.group_name, f"네이버 검색어 트렌드를 읽지 못함 [{error.code}]")
             )
             continue
-        results.extend(judge(query, response, settings).results)
+        judged = judge(query, response, settings).results
+        for verdict in judged:
+            if verdict.status != "unknown":
+                BOARD.record_verdict([group.group_name, *group.keywords], verdict)
+        results.extend(judged)
     if last_error is not None and len(failed) == len(groups):
         raise last_error
     group_notes: list[str] = []
