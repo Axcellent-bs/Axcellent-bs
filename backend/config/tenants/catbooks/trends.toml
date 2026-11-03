@@ -117,11 +117,15 @@ top = 10
 
 # 지금 인기(data trend_popular): 급상승 판정과 별개로 "지금 많이 보이고 많이 찾는 주제"를 코드 점수로 줄 세운다.
 # 네이버를 부르지 않는다. 점수 = video_weight × 인기 영상 수 몫 + velocity_weight × 지금 조회 속도 몫
-# + trending_weight × 인기 검색어 순위 몫 (몫은 0~1). 주제 정리·제외 규칙은 [candidates]와 같다
+# + trending_weight × 인기 검색어 순위 몫. 몫은 출처마다 순위로 매긴 0~1 값((N − 순위 + 1) ÷ N).
+# 주제 정리·제외 규칙은 [candidates]와 같다
 [popular]
-top = 10                 # 보여 줄 주제 수
-max_youtube = 30         # YouTube 인기 스냅샷에서 볼 주제 수 (trend_candidates보다 넉넉히, 네이버 호출 없음)
-max_trending = 20        # 인기 검색어 스냅샷에서 볼 검색어 수
+top = 10                 # (예전 칸) 카테고리별 보기에서는 per_category를 쓴다
+max_youtube = 80         # YouTube 인기 스냅샷에서 볼 주제 수 (카테고리마다 5개를 채우려고 넉넉히, 네이버 호출 없음)
+max_trending = 30        # 인기 검색어 스냅샷에서 볼 검색어 수
+# 화면 카테고리(이 순서로 보여 줌)와 카테고리마다 보여 줄 수. 여기 없는 분류(기부·재난·정치·사회 등)는 응답에서 뺀다
+categories = ["게임", "뉴스·사건", "연예·스포츠", "IT"]
+per_category = 5
 video_weight = 1.0
 velocity_weight = 1.0
 trending_weight = 1.0

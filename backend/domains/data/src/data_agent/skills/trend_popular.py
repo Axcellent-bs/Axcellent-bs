@@ -10,9 +10,12 @@
   (오늘 판정 게시판 `today_board`)이면 한 주제. 자동 묶기는 네이버 시계열이 필요해 새로 재지 않는다
 - 점수(코드) = `video_weight` × 영상 몫 + `velocity_weight` × 조회 속도 몫
   + `trending_weight` × 검색어 순위 몫
-  - 영상 몫: 그 주제가 나온 인기 영상 수 ÷ 가장 많은 주제의 영상 수
-  - 조회 속도 몫: 그 영상들의 지금 시간당 조회 증가 합(youtube_velocity와 같은 계산) ÷ 가장 큰 합
-  - 검색어 순위 몫: (N − 순위 + 1) ÷ N (N = 이번에 본 인기 검색어 수). 인기 검색어에 없으면 0
+  - 몫은 출처마다 순위로 매긴다: 그 출처에 값이 있는 주제끼리 큰 순 순위 → (N − 순위 + 1) ÷ N.
+    값이 없으면 0. (최댓값으로 나누면 한 주제가 나머지를 모두 작게 만들어서 바꿨다, README)
+  - 영상: 그 주제가 나온 인기 영상 수 / 조회 속도: 그 영상들의 지금 시간당 조회 증가 합 /
+    검색어: 인기 검색어 순위
+- 카테고리별 보기: 화면 카테고리(`[popular] categories`)마다 1~`per_category`위. 그 밖 분류와
+  분류하지 못한 주제는 응답에서 뺀다
   - 출처 하나를 못 읽으면(스냅샷 없음·오래됨, 스냅샷 2개 미만) 그 몫은 **unknown + 이유**이고
     점수에서 뺀다(0으로 채우지 않음). 주제에 영상이 있는데 속도를 하나도 못 재면 그 주제의 속도 몫만
     unknown
@@ -33,6 +36,7 @@ from pathlib import Path
 from ax_agent_template.llm import LLMClient
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
+    PopularCategory,
     PopularScore,
     PopularTopic,
     TrendPopularOutput,
@@ -40,7 +44,12 @@ from ax_contracts.schemas.data import (
 )
 from data_agent.skills import trend_candidates as cand_mod
 from data_agent.skills.content_recommend import load_config as load_recommend_config
-from data_agent.skills.topic_category import CategoryCache, TopicInput, classify_topics
+from data_agent.skills.topic_category import (
+    TOPIC_CATEGORIES,
+    CategoryCache,
+    TopicInput,
+    classify_topics,
+)
 from data_agent.skills.trend_scan import TREND_CONFIG_ENV
 from data_agent.skills.youtube_velocity import velocities
 from data_agent.today_board import BOARD, TodayBoard
@@ -61,9 +70,12 @@ EVIDENCE = 3  # 분류 근거 글 수
 class PopularConfig:
     """회사 설정 `[popular]`. 파일·표가 없으면 이 값."""
 
-    top: int = 10
-    max_youtube: int = 30
-    max_trending: int = 20
+    top: int = 10  # (예전 칸) 카테고리별 보기에서는 per_category를 쓴다
+    max_youtube: int = 80  # 카테고리마다 5개를 채우려고 넉넉히 (네이버 호출 없음)
+    max_trending: int = 30
+    # 화면 카테고리 (이 순서로 보여 준다). 여기 없는 분류(기부·재난·정치·사회 등)는 응답에서 뺀다
+    categories: tuple[str, ...] = ("게임", "뉴스·사건", "연예·스포츠", "IT")
+    per_category: int = 5
     video_weight: float = 1.0
     velocity_weight: float = 1.0
     trending_weight: float = 1.0
@@ -84,6 +96,12 @@ def load_config(env: Mapping[str, str]) -> PopularConfig:
             video_weight=float(raw.get("video_weight", base.video_weight)),
             velocity_weight=float(raw.get("velocity_weight", base.velocity_weight)),
             trending_weight=float(raw.get("trending_weight", base.trending_weight)),
+            categories=tuple(
+                str(c).strip()
+                for c in raw.get("categories", base.categories)
+                if str(c).strip() in TOPIC_CATEGORIES
+            ),
+            per_category=max(1, min(20, int(raw.get("per_category", base.per_category)))),
         )
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return PopularConfig()
@@ -131,6 +149,16 @@ def _merge_pairs(topics: list[_Topic], pairs: Sequence[tuple[str, str]]) -> list
     return topics
 
 
+def rank_shares(values: Mapping[int, float]) -> dict[int, float]:
+    """값이 큰 순 순위 몫: (N − 순위 + 1) ÷ N. 같은 값은 같은(높은) 순위. 값이 없으면 빈 dict."""
+    n = len(values)
+    out: dict[int, float] = {}
+    for i, v in values.items():
+        rank = 1 + sum(1 for w in values.values() if w > v)
+        out[i] = round((n - rank + 1) / n, 4)
+    return out
+
+
 def score_topics(
     topics: Sequence[_Topic],
     *,
@@ -150,30 +178,27 @@ def score_topics(
             sums[i] = (None, 0)  # 인기 영상이 없거나 그 영상 속도를 하나도 못 잼
         else:
             sums[i] = (round(sum(known), 1), len(known))
-    max_videos = max((len(t.video_ids) for t in topics), default=0)
-    max_speed = max((s for s, _ in sums.values() if s is not None and s > 0), default=0.0)
+    # 출처마다 값이 있는 주제끼리 순위를 매겨 몫 = (N − 순위 + 1) ÷ N (같은 값은 같은 순위).
+    # 최댓값으로 나누면 한 주제(인기 영상 28개)가 나머지를 모두 작게 만들어서 순위 기반으로 바꿨다
+    videos = {i: float(len(t.video_ids)) for i, t in enumerate(topics) if t.video_ids}
+    speed_vals = {i: s for i, (s, _) in sums.items() if s is not None and s > 0}
+    trend_vals = {
+        i: -float(t.trending_rank) for i, t in enumerate(topics) if t.trending_rank is not None
+    }
+    video_rank = rank_shares(videos)
+    speed_rank = rank_shares(speed_vals)
+    trend_rank = rank_shares(trend_vals)
     out = []
     for i, t in enumerate(topics):
-        video_share = (
-            round(len(t.video_ids) / max_videos, 4) if youtube_known and max_videos else None
-        )
-        if not youtube_known:
-            video_share = None
+        video_share = video_rank.get(i, 0.0) if youtube_known else None
         speed, counted = sums[i]
         if speeds is not None and not t.video_ids:
             velocity_share = 0.0  # 인기 영상에 없는 주제 (속도를 못 잰 것이 아님)
         elif speeds is None or speed is None:
             velocity_share = None
         else:
-            velocity_share = round(max(speed, 0.0) / max_speed, 4) if max_speed else 0.0
-        if trending_n:
-            trending_share = (
-                round((trending_n - t.trending_rank + 1) / trending_n, 4)
-                if t.trending_rank is not None
-                else 0.0
-            )
-        else:
-            trending_share = None
+            velocity_share = speed_rank.get(i, 0.0)
+        trending_share = trend_rank.get(i, 0.0) if trending_n else None
         total = sum(
             w * s
             for w, s in (
@@ -275,9 +300,9 @@ async def popular(
         trending_n=trending_n,
         youtube_known=not ywhy,
         config=config,
-    )[: request.max_items or config.top]
+    )
 
-    # 주제 분류 (묶어서 한 번, 하루 캐시)
+    # 주제 분류 (묶어서, 저장된 분류는 다시 묻지 않음). 카테고리별로 채우려고 후보 전부를 분류한다
     evidence: dict[str, list[str]] = {}
     for t, *_ in ranked:
         if t.video_ids:
@@ -296,7 +321,7 @@ async def popular(
         context_id=context_id,
     )
 
-    items: list[PopularTopic] = []
+    every: list[PopularTopic] = []
     for rank, (t, score, speed, counted) in enumerate(ranked, start=1):
         cat = categories.get(t.keyword)
         verdict = board.verdict(t.names())
@@ -307,7 +332,7 @@ async def popular(
                 if not t.video_ids
                 else "이 주제 영상의 조회수를 두 스냅샷에서 모두 읽지 못함"
             )
-        items.append(
+        every.append(
             PopularTopic(
                 rank=rank,
                 keyword=t.keyword,
@@ -335,12 +360,38 @@ async def popular(
             )
         )
 
+    # 화면 카테고리마다 1~N위. 그 밖 분류·분류 못 한 주제는 응답에서 뺀다
+    per = request.max_items or config.per_category
+    from_youtube = sum(1 for t, *_ in ranked if t.video_ids)
+    from_trending = sum(1 for t, *_ in ranked if t.trending_rank is not None)
+    groups: list[PopularCategory] = []
+    shown: list[PopularTopic] = []
+    for category in config.categories:
+        mine = [i for i in every if i.topic_category == category][:per]
+        for n, item in enumerate(mine, start=1):
+            item.category_rank = n
+        shortage = None
+        if len(mine) < per:
+            shortage = (
+                f"이 카테고리로 분류된 주제가 {len(mine)}개뿐 (본 후보: YouTube {from_youtube}개·"
+                f"인기 검색어 {from_trending}개)"
+            )
+        groups.append(PopularCategory(category=category, items=mine, shortage_reason=shortage))  # type: ignore[arg-type]
+        shown += mine
+    shown.sort(key=lambda i: i.rank)
+    for n, item in enumerate(shown, start=1):
+        item.rank = n
+    hidden = sum(1 for i in every if i.topic_category not in config.categories)
+    items = shown
+
     empty = None
     if not items:
         empty = "인기 주제를 볼 출처가 없음" if ywhy and twhy else "인기 주제가 없음"
     known = [s for s, w in (("YouTube", ywhy), ("조회 속도", vwhy), ("인기 검색어", twhy)) if not w]
     summary = (
-        f"지금 인기 주제 {len(items)}개 (쓴 출처: {', '.join(known) or '없음'})."
+        f"지금 인기 주제 {len(items)}개, 화면 카테고리 {len(config.categories)}개"
+        f" (쓴 출처: {', '.join(known) or '없음'}). 화면 카테고리가 아니거나 분류하지 못해 뺀"
+        f" 주제 {hidden}개."
         if items
         else f"지금 인기 주제를 고르지 못함 ({empty})."
     )
@@ -364,6 +415,9 @@ async def popular(
         },
         excluded_categories=exclude,
         summary=summary,
+        by_category=groups,
+        display_categories=list(config.categories),
+        score_method="rank",
     )
     lines = [summary]
     for label, why in (("YouTube", ywhy), ("조회 속도", vwhy), ("인기 검색어", twhy)):

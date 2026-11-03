@@ -1,22 +1,28 @@
-"""오늘 판정 게시판: 오늘(한국 날짜) 이미 낸 네이버 급상승 판정과 자동 묶음을 프로세스 안에 남긴다.
+"""오늘 판정 게시판: 오늘(한국 날짜) 이미 낸 네이버 급상승 판정과 자동 묶음.
 
 trend_popular처럼 네이버를 부르지 않는 skill이 "오늘 판정 결과가 있으면" 그것만 붙이려고 쓴다.
 - 판정: trend_scan·trend_candidates·content_recommend가 낸 판정(`TrendVerdict`)을
-  그룹 이름·키워드마다
-  남긴다(공백·대소문자 무시). 같은 이름을 다시 판정하면 새 값으로 바꾼다
+  그룹 이름·키워드마다 남긴다(공백·대소문자 무시). 같은 이름을 다시 판정하면 새 값으로 바꾼다
 - 자동 묶음: trend_candidates가 기준을 넘어 묶은 이름 쌍
-- 한국 날짜가 바뀌면 비운다. 저장하지 않는다(프로세스를 다시 켜면 빈다)
+- 한국 날짜가 바뀌면 그날 것만 본다
+- 저장: `DATA_TODAY_BOARD_DB`가 있으면 그 SQLite 파일에 남겨 서버를 다시 켜도 그날 배지가 유지된다
+  (run_all.sh가 `backend/.data/today_board.db`로 준다). 없으면 프로세스 안에만 둔다(테스트)
 """
 
 from __future__ import annotations
 
+import os
+import sqlite3
+import threading
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta, timezone
+from pathlib import Path
 
 from ax_contracts.schemas.data import TrendVerdict
 
 KST = timezone(timedelta(hours=9))
+DB_ENV = "DATA_TODAY_BOARD_DB"
+KEEP_DAYS = 7  # 저장 파일에 남기는 날 수 (그 전 날은 지운다)
 
 
 def _today() -> date:
@@ -27,23 +33,61 @@ def _key(name: str) -> str:
     return "".join(name.lower().lstrip("#").split())
 
 
-@dataclass
 class TodayBoard:
-    today: Callable[[], date] = _today
-    _day: date | None = None
-    _verdicts: dict[str, TrendVerdict] = field(default_factory=dict)
-    _pairs: list[tuple[str, str]] = field(default_factory=list)
+    def __init__(self, today: Callable[[], date] = _today, path: str | Path | None = None) -> None:
+        self.today = today
+        self._day: date | None = None
+        self._verdicts: dict[str, TrendVerdict] = {}
+        self._pairs: list[tuple[str, str]] = []
+        self._lock = threading.Lock()
+        self._conn: sqlite3.Connection | None = None
+        if path is not None:
+            if str(path) != ":memory:":
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(str(path), check_same_thread=False, timeout=5.0)
+            with self._lock, self._conn:
+                self._conn.execute(
+                    "CREATE TABLE IF NOT EXISTS board (day TEXT NOT NULL, kind TEXT NOT NULL,"
+                    " key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (day, kind, key))"
+                )
 
     def _roll(self) -> None:
         day = self.today()
-        if day != self._day:
-            self._day, self._verdicts, self._pairs = day, {}, []
+        if day == self._day:
+            return
+        self._day, self._verdicts, self._pairs = day, {}, []
+        if self._conn is None:
+            return
+        with self._lock, self._conn:
+            old = (day - timedelta(days=KEEP_DAYS)).isoformat()
+            self._conn.execute("DELETE FROM board WHERE day < ?", (old,))
+            rows = self._conn.execute(
+                "SELECT kind, key, value FROM board WHERE day = ?", (day.isoformat(),)
+            ).fetchall()
+        for kind, key, value in rows:
+            if kind == "verdict":
+                self._verdicts[key] = TrendVerdict.model_validate_json(value)
+            elif kind == "pair":
+                a, _, b = value.partition("\t")
+                if (a, b) not in self._pairs:
+                    self._pairs.append((a, b))
+
+    def _save(self, kind: str, key: str, value: str) -> None:
+        if self._conn is None or self._day is None:
+            return
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO board VALUES (?,?,?,?)",
+                (self._day.isoformat(), kind, key, value),
+            )
 
     def record_verdict(self, names: Iterable[str], verdict: TrendVerdict) -> None:
         self._roll()
+        raw = verdict.model_dump_json()
         for name in names:
             if name and _key(name):
                 self._verdicts[_key(name)] = verdict
+                self._save("verdict", _key(name), raw)
 
     def verdict(self, names: Iterable[str]) -> TrendVerdict | None:
         """이름들 중 오늘 판정이 있는 것 (급상승이 있으면 그것을 먼저)."""
@@ -57,6 +101,7 @@ class TodayBoard:
         pair = (_key(a), _key(b))
         if pair not in self._pairs:
             self._pairs.append(pair)
+            self._save("pair", f"{pair[0]}\t{pair[1]}", f"{pair[0]}\t{pair[1]}")
 
     def pairs(self) -> list[tuple[str, str]]:
         self._roll()
@@ -66,4 +111,5 @@ class TodayBoard:
         self._day, self._verdicts, self._pairs = None, {}, []
 
 
-BOARD = TodayBoard()  # 서버 프로세스 하나가 같이 쓴다
+# 서버 프로세스 하나가 같이 쓴다. run_all.sh가 저장 파일 경로를 주면 다시 켜도 그날 것이 남는다
+BOARD = TodayBoard(path=os.environ.get(DB_ENV) or None)
