@@ -476,3 +476,44 @@ def test_brief_is_rebuilt_when_the_code_changes(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setattr(brief, "CODE_VERSION", "changed")  # 코드가 바뀐 것과 같다 (소스 해시)
     changed, _ = _run(tmp_path, llm)
     assert not changed.cached and llm.asked == 2 and changed.rules_version != first.rules_version
+
+
+# ------------------------------------------------ facts·안정 insight_id·schema_version
+
+
+def test_stable_insight_id_has_no_date_and_keeps_the_legacy_id() -> None:
+    a = brief.stable_insight_id("캣북스", "리그오브레전드", "게임")
+    assert a == brief.stable_insight_id("캣북스", " 리그 오브레전드 ".replace(" 오", "오"), "게임")
+    assert a != brief.stable_insight_id("다른회사", "리그오브레전드", "게임")
+    assert a != brief.stable_insight_id("캣북스", "리그오브레전드", "IT")
+    assert "2026" not in a
+
+
+def test_brief_numbers_are_all_in_facts_with_ids_and_schema(tmp_path: Path) -> None:
+    from data_agent.explain import _bad_numbers
+
+    out, _ = _run(tmp_path, BriefLLM(), extra="max_insights = 4\n")
+    assert out.schema_version == brief.SCHEMA_VERSION and out.snapshot_id
+    by_id = {f.fact_id: f for f in out.facts}
+    lol = next(i for i in out.insights if i.topic == "리그오브레전드")
+    assert lol.legacy_insight_id == brief.insight_id(DAY, "리그오브레전드")
+    assert lol.insight_id == brief.stable_insight_id("default", "리그오브레전드", "게임")
+    assert lol.fact_ids and all(fid in by_id for fid in lol.fact_ids)
+    mine = {by_id[fid].label: by_id[fid] for fid in lol.fact_ids}
+    assert mine["YouTube 인기 영상 수"].link == "https://www.youtube.com/watch?v=v1"
+    assert (
+        mine["20대 평소 대비 배수"].value == 2.4
+        and mine["20대 평소 대비 배수"].source == "trend_age"
+    )
+    values = {by_id[fid].value for fid in lol.fact_ids}
+    for i in out.insights:  # 한 줄 검증의 숫자는 모두 그 인사이트 facts에 있다
+        nums = {by_id[fid].value for fid in i.fact_ids}
+        for v in brief.facts(i).values():
+            if isinstance(v, int | float):
+                assert float(v) in nums, (i.topic, v)
+        if i.line_status == "llm":
+            assert not _bad_numbers(i.line, brief.facts(i))
+    assert values  # 0으로 채운 칸 없음: 모르는 칸은 아예 없다
+    news = next(i for i in out.insights if i.topic == "한국철강")
+    labels = {by_id[fid].label for fid in news.fact_ids}
+    assert "숏츠 형식 조회 중앙값" not in labels  # 모르는 숫자는 넣지 않는다

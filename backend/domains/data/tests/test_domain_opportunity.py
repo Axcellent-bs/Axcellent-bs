@@ -282,3 +282,31 @@ def test_political_subtopics_are_left_out_with_a_reason() -> None:
     )  # fmt: skip
     assert [c.subtopic for c in res.cards] == ["그림책 낭독"]
     assert any("역대 대통령(정치·사회 분류)" in x for x in res.cards[0].limits)
+
+
+def test_card_numbers_are_facts_with_video_links() -> None:
+    from ax_contracts.schemas.data import DomainSubtopic, DomainSubtopicsOutput
+
+    subs = DomainSubtopicsOutput(status="known", subtopics=[
+        DomainSubtopic(name="그림책 낭독", seed_keyword="고양이 그림책", axis="활용 방식",
+                       videos=6, median_views=20000.0, video_ids=["v9", "v8"]),
+    ])  # fmt: skip
+    res = asyncio.run(
+        do.make_opportunities(
+            env={}, llm=LineLLM({}), profile=PROFILE, plan=PLAN, sources=SOURCES,
+            shorts=_shorts(), catalog_products=[CatalogProduct(product_id="p1",
+                                                               name="고양이 그림책")],
+            classify=_classify, trend_connector=FakeTrend(), age_fn=_ages,
+            consumption_fn=None, day=END, end=END, subtopics=subs,
+        )
+    )  # fmt: skip
+    card = res.cards[0]
+    by_id = {f.fact_id: f for f in res.facts}
+    assert card.fact_ids and all(fid in by_id for fid in card.fact_ids)
+    mine = {by_id[fid].label: by_id[fid] for fid in card.fact_ids}
+    fit = mine["숏츠 조회 중앙값 전체 대비 배수"]
+    assert fit.link == "https://www.youtube.com/watch?v=v9" and fit.sample == 6
+    assert all(f.about == card.opportunity_id for f in mine.values())
+    for v in do.facts(card).values():  # 한 줄 검증 숫자는 모두 facts에
+        if isinstance(v, int | float):
+            assert float(v) in {f.value for f in mine.values()}, v

@@ -54,6 +54,7 @@ from ax_contracts.schemas.data import (
 )
 from data_agent.explain import _bad_numbers
 from data_agent.skills.ad_material import AdRules, judge, load_rules
+from data_agent.skills.brief_facts import insight_facts
 from data_agent.skills.code_version import source_hash
 from data_agent.skills.topic_category import CategoryResult, TopicInput, classify_topics
 from data_agent.skills.trend_evidence import BLAME, fixed_line
@@ -65,7 +66,7 @@ DB_ENV = "DATA_INSIGHT_BRIEF_DB"
 # 코드가 바뀌면 규칙 버전이 바뀌어 오늘 캐시를 다음 요청에서 다시 묶는다
 CODE_VERSION = source_hash(
     "trend_insight_brief", "domain_opportunity", "domain_subtopics", "domain_profile",
-    "source_plan", "data_sources", "code_version",
+    "source_plan", "data_sources", "code_version", "brief_facts",
 )  # fmt: skip
 DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "insight_brief.db"  # backend/.data
 REFERENCE = "참고용"
@@ -145,8 +146,28 @@ def _norm(name: str) -> str:
 
 
 def insight_id(day: date, topic: str) -> str:
+    """예전 id (날짜 + 주제). 지금은 `legacy_insight_id`로만 준다."""
     digest = hashlib.sha256(_norm(topic).encode("utf-8")).hexdigest()[:8]
     return f"ins_{day:%Y%m%d}_{digest}"
+
+
+def stable_insight_id(tenant: str, topic: str, category: str | None) -> str:
+    """날짜 없는 id: 테넌트 + 정규화 주제 + 카테고리 해시. 같은 주제면 날이 바뀌어도 같다.
+
+    시점은 브리프 `generated_at`·`snapshot_id`로 본다. 분류가 바뀌면(분류 대기 → 분류) id도 바뀐다.
+    """
+    key = f"{_norm(tenant)}|{_norm(topic)}|{category or 'unknown'}"
+    return "ins_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+SCHEMA_VERSION = "trend_insight_brief.v3"  # 응답 모양 버전 (facts·fact_ids·안정 insight_id)
+
+
+def tenant_of(env: Mapping[str, str]) -> str:
+    """insight_id에 넣는 테넌트: 회사 설정 이름 → AX_TENANT → default."""
+    from data_agent.skills.domain_profile import load_tenant
+
+    return load_tenant(env).name or env.get("AX_TENANT") or "default"
 
 
 class BriefStore:
@@ -507,6 +528,7 @@ def build_insights(
     products_reason: str | None,
     rules: AdRules,
     shorts: ShortsStatsOutput | None = None,
+    tenant: str = "default",
 ) -> list[TrendInsight]:
     """후보 → 인사이트 칸 (한 줄은 아직 비움). 광고 재료가 아닌 것·분류 대기는 맨 아래."""
     out: list[TrendInsight] = []
@@ -536,7 +558,8 @@ def build_insights(
         limits += ev.missing
         out.append(
             TrendInsight(
-                insight_id=insight_id(day, c.topic),
+                insight_id=stable_insight_id(tenant, c.topic, c.category()),
+                legacy_insight_id=insight_id(day, c.topic),
                 rank=1,
                 topic=c.topic,
                 aliases=c.aliases,
@@ -694,6 +717,7 @@ def empty(day: date, rules: str, now: datetime, reason: str) -> TrendInsightBrie
     return TrendInsightBriefOutput(
         status="unknown", reason=reason, day=day, rules_version=rules, generated_at=now,
         limits=list(BRIEF_LIMITS), summary=f"인사이트 없음: {reason}",
+        schema_version=SCHEMA_VERSION, snapshot_id=f"brief_{day:%Y%m%d}_{rules}",
     )  # fmt: skip
 
 
@@ -855,6 +879,7 @@ async def make_brief(
         )
         insights = build_insights(
             picked, day=day, popular=popular, promo=promo, products=prods, shorts=shorts,
+            tenant=tenant_of(env),
             products_reason=prod_why, rules=load_rules(env),
         )  # fmt: skip
         await write_lines(insights, llm, context_id, queries)
@@ -881,10 +906,17 @@ async def make_brief(
                 out.opportunities_reason = opp.reason
                 queries += opp.queries
                 out.sources += ["domain_profile", "source_plan"]
+                out.facts += list(getattr(opp, "facts", []) or [])
             except Exception as error:  # 카드를 못 만들어도 브리프는 준다
                 out.opportunities_reason = f"기회 가설 카드를 만들지 못함 ({type(error).__name__})"
         else:
             out.opportunities_reason = "기회 가설 카드를 요청하지 않음"
+        for i in out.insights:  # 응답에 나오는 숫자 전부 (인사이트는 fact_ids로 가리킴)
+            mine = insight_facts(i)
+            i.fact_ids = [f.fact_id for f in mine]
+            out.facts += mine
+        out.schema_version = SCHEMA_VERSION
+        out.snapshot_id = f"brief_{day:%Y%m%d}_{rules}"
         store.put(day, rules, out, now)
         return BriefResult(out, as_evidence(out, queries, now))
     finally:
