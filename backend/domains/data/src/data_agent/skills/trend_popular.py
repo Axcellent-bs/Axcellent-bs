@@ -55,8 +55,15 @@ from ax_contracts.schemas.data import (
 )
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.skills import trend_candidates as cand_mod
+from data_agent.skills import trend_evidence as ev
 from data_agent.skills.content_recommend import load_config as load_recommend_config
-from data_agent.skills.shorts_stats import is_language
+from data_agent.skills.shorts_stats import (
+    SHORTS_DB_ENV,
+    SHORTS_DEFAULT_DB,
+    ShortsStore,
+    is_language,
+)
+from data_agent.skills.shorts_stats import load_config as load_shorts_config
 from data_agent.skills.topic_category import (
     TOPIC_CATEGORIES,
     UNKNOWN,
@@ -70,7 +77,7 @@ from data_agent.skills.topic_category import (
 from data_agent.skills.trend_scan import TREND_CONFIG_ENV
 from data_agent.skills.youtube_velocity import velocities
 from data_agent.today_board import BOARD, TodayBoard
-from data_agent.trending_store import latest_trending, news_titles
+from data_agent.trending_store import latest_trending, news_links, news_titles
 from data_agent.youtube_store import (
     DB_ENV,
     DEFAULT_DB,
@@ -113,6 +120,8 @@ class PopularConfig:
     # 주제 근거 영상 중 저장된 제목이 없는 것을 videos.list로 받는 하루 호출 상한
     # (한 번 = 영상 50개·1단위)
     title_fill_calls: int = 2
+    # 근거: 채널 구독자 받기(channels.list) 하루 호출 상한 (한 번 = 채널 50개·1단위)
+    channel_fill_calls: int = 2
 
 
 def load_config(env: Mapping[str, str]) -> PopularConfig:
@@ -159,6 +168,9 @@ def load_config(env: Mapping[str, str]) -> PopularConfig:
             ),  # fmt: skip
             fill_search_calls=max(0, int(raw.get("fill_search_calls", base.fill_search_calls))),
             title_fill_calls=max(0, int(raw.get("title_fill_calls", base.title_fill_calls))),
+            channel_fill_calls=max(
+                0, int(raw.get("channel_fill_calls", base.channel_fill_calls))
+            ),  # fmt: skip
             fill_days=max(1, min(30, int(raw.get("fill_days", base.fill_days)))),
             fill_language=str(raw.get("fill_language", base.fill_language)).strip().lower(),
         )
@@ -444,6 +456,73 @@ async def _fill_rows(
 
 OVER_CAP = "하루 보충 검색 상한"
 TITLE_PAGE = 50  # videos.list 한 번에 받는 영상 수
+
+
+async def add_evidence(
+    topics: Sequence[PopularTopic],
+    *,
+    env: Mapping[str, str],
+    db: str,
+    youtube: Any,
+    llm: LLMClient,
+    config: PopularConfig,
+    board: TodayBoard,
+    speeds: Mapping[str, float],
+    tdb: Any,
+    tsnap: Any,
+    raw_names: Mapping[str, str],
+    now: datetime,
+    queries: list[str],
+    context_id: str | None,
+) -> None:
+    """주제·영상마다 "왜 뜨나" 근거를 붙인다 (topics를 바꾼다). 숫자는 코드, 한 줄만 LLM."""
+    today = now.astimezone(KST).date()
+    latest = recent_snapshots(db, 1)
+    stored = latest[0].videos if latest else {}
+    ids = [v.video_id for t in topics for v in t.videos]
+    channels = [stored[i].channel_id for i in ids if i in stored]
+    store = ev.EvidenceStore(env.get(FILL_DB_ENV) or FILL_DEFAULT_DB)
+    shorts = ShortsStore(env.get(SHORTS_DB_ENV) or SHORTS_DEFAULT_DB)
+    try:
+        subs, subs_why = await ev.subscribers(
+            db, channels, youtube=youtube, store=store, cap=config.channel_fill_calls,
+            now=now, today=today, queries=queries,
+        )  # fmt: skip
+        formats = shorts.formats(ids, now - timedelta(days=30))
+        short_max = load_shorts_config(env).max_seconds
+        news: dict[str, list[dict[str, Any]]] = {}
+        if tsnap is not None and raw_names:
+            news = news_links(tdb, tsnap.geo, tsnap.collected_at, raw_names.values())
+        for t in topics:
+            t.videos = [
+                ev.video_evidence(
+                    v,
+                    stored.get(v.video_id),
+                    speed=speeds.get(v.video_id),
+                    subs=subs,
+                    subs_reason=subs_why,
+                    fmt=(formats.get(v.video_id) or (None,))[0],
+                    short_max=short_max,
+                    now=now,
+                )  # fmt: skip
+                for v in t.videos
+            ]
+            raw = raw_names.get(t.keyword)
+            t.news = ev.topic_news(news.get(raw, [])) if raw else []
+            t.news_reason = (
+                None if t.news
+                else "인기 검색어에 없는 주제" if not raw
+                else "인기 검색어 피드가 관련 뉴스를 주지 않음 (또는 출처·주소 저장 전 스냅샷)"
+            )  # fmt: skip
+            t.rising_started, t.rising_reason = ev.rising_start(
+                board.verdict([t.keyword, *t.aliases])
+            )
+        await ev.why_lines(
+            topics, llm, store=store, today=today, context_id=context_id, queries=queries
+        )
+    finally:
+        store.close()
+        shorts.close()
 
 
 async def attach_videos(
@@ -841,6 +920,14 @@ async def popular(
     )
     if fill_store is not None:
         fill_store.close()
+    if youtube is not None and shown:
+        # "왜 뜨나" 근거 (화면 경로만. 기획안 재료는 커넥터 없이 불러 이 근거를 쓰지 않는다)
+        raw_names = {t.keyword: t.trending_raw for t, *_ in ranked if t.trending_raw}
+        await add_evidence(
+            shown, env=env, db=db, youtube=youtube, llm=llm, config=config, board=board,
+            speeds=speeds or {}, tdb=tdb, tsnap=tsnap, raw_names=raw_names, now=now,
+            queries=queries, context_id=context_id,
+        )  # fmt: skip
     hidden = sum(1 for i in every if i.topic_category not in config.categories)
     items = shown
 

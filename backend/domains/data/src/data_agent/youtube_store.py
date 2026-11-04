@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
@@ -60,6 +60,11 @@ CREATE TABLE IF NOT EXISTS video_details (
     channel_title   TEXT,             -- 채널 이름 (snippet.channelTitle). NULL = 받은 적 없음
     duration_s      INTEGER,          -- 길이(초, contentDetails.duration). NULL = 못 읽음
     seen_at         TEXT NOT NULL     -- 받은 시각 (UTC)
+);
+CREATE TABLE IF NOT EXISTS channel_stats (
+    channel_id    TEXT PRIMARY KEY,
+    subscribers   INTEGER,            -- 구독자 수. NULL = 채널이 숨김
+    seen_at       TEXT NOT NULL       -- 받은 시각 (UTC)
 );
 CREATE TABLE IF NOT EXISTS video_titles (
     video_id      TEXT PRIMARY KEY,
@@ -156,6 +161,16 @@ class SnapshotStore:
                 " GROUP BY s.video_id ORDER BY last DESC"
             ).fetchall()
         return [r[0] for r in rows]
+
+    def save_channels(self, seen_at: datetime, subscribers: Mapping[str, int | None]) -> None:
+        """채널 구독자 수를 넣거나 바꾼다 (숨김은 NULL)."""
+        values = [(cid, n, iso(seen_at)) for cid, n in subscribers.items()]
+        with self._lock, self._conn:
+            self._conn.executemany(
+                "INSERT INTO channel_stats VALUES (?,?,?) ON CONFLICT(channel_id) DO UPDATE"
+                " SET subscribers = excluded.subscribers, seen_at = excluded.seen_at",
+                values,
+            )
 
     def save_titles(self, seen_at: datetime, titles: Iterable[tuple[str, str]]) -> int:
         """영상 제목을 넣거나 바꾼다(빈 제목은 건너뜀). 바꾼 줄 수."""
@@ -478,3 +493,25 @@ def video_details(path: str | Path, video_ids: list[str]) -> dict[str, VideoDeta
     finally:
         conn.close()
     return {vid: VideoDetail(ch, dur) for vid, ch, dur in rows}
+
+
+def channel_subscribers(
+    path: str | Path, channel_ids: Iterable[str], since: datetime
+) -> dict[str, int | None]:
+    """`since` 이후에 받은 채널 구독자 수 (숨김은 None). 받은 적 없거나 오래된 채널은 빠진다."""
+    ids = [c for c in dict.fromkeys(channel_ids) if c]
+    if not ids or (str(path) != ":memory:" and not Path(path).is_file()):
+        return {}
+    conn = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True, timeout=5.0)
+    try:
+        marks = ",".join("?" * len(ids))
+        rows = conn.execute(
+            f"SELECT channel_id, subscribers FROM channel_stats WHERE channel_id IN ({marks})"  # noqa: S608
+            " AND seen_at >= ?",
+            (*ids, iso(since)),
+        ).fetchall()
+    except sqlite3.DatabaseError:
+        return {}  # 표가 없는 예전 파일
+    finally:
+        conn.close()
+    return {str(c): (int(n) if n is not None else None) for c, n in rows}

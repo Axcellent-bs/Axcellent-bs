@@ -44,6 +44,13 @@ CREATE TABLE IF NOT EXISTS trending_news (
     titles        TEXT NOT NULL,      -- 관련 뉴스 제목 JSON 배열
     PRIMARY KEY (collected_at, geo, keyword)
 );
+CREATE TABLE IF NOT EXISTS trending_news_links (
+    collected_at  TEXT NOT NULL,
+    geo           TEXT NOT NULL,
+    keyword       TEXT NOT NULL,
+    items         TEXT NOT NULL,      -- [{"title", "source", "url"}] JSON 배열 (피드 값 그대로)
+    PRIMARY KEY (collected_at, geo, keyword)
+);
 CREATE TABLE IF NOT EXISTS runs (
     collected_at  TEXT NOT NULL,
     geo           TEXT NOT NULL,
@@ -86,11 +93,22 @@ class TrendingStore:
             for i in items_list
             if i.news_titles
         ]
+        links = [
+            (at, geo, i.keyword, json.dumps(
+                [{"title": t, "source": src, "url": url} for t, src, url in i.news],
+                ensure_ascii=False,
+            ))
+            for i in items_list
+            if i.news
+        ]  # fmt: skip
         with self._lock, self._conn:
             before = self._conn.total_changes
             self._conn.executemany("INSERT OR IGNORE INTO trending VALUES (?,?,?,?,?,?)", values)
             saved = self._conn.total_changes - before
             self._conn.executemany("INSERT OR IGNORE INTO trending_news VALUES (?,?,?,?)", news)
+            self._conn.executemany(
+                "INSERT OR IGNORE INTO trending_news_links VALUES (?,?,?,?)", links
+            )
             return saved
 
     def log_run(self, collected_at: datetime, geo: str, items: int, errors: list[str]) -> None:
@@ -177,4 +195,41 @@ def news_titles(
             continue
         if titles:
             out[str(keyword)] = titles
+    return out
+
+
+def news_links(
+    path: str | Path, geo: str, collected_at: datetime, keywords: Iterable[str]
+) -> dict[str, list[dict[str, str | None]]]:
+    """그 스냅샷의 검색어별 관련 뉴스 (제목·출처·주소). 없으면 빠진다. 읽기 전용.
+
+    출처·주소를 저장하기 전 스냅샷(표 없음·줄 없음)이면 빈 dict.
+    """
+    wanted = [k for k in keywords if k]
+    if not wanted or (str(path) != ":memory:" and not Path(path).is_file()):
+        return {}
+    conn = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True, timeout=5.0)
+    try:
+        marks = ",".join("?" * len(wanted))
+        rows = conn.execute(
+            "SELECT keyword, items FROM trending_news_links"
+            f" WHERE collected_at = ? AND geo = ? AND keyword IN ({marks})",
+            (iso(collected_at), geo, *wanted),
+        ).fetchall()
+    except sqlite3.DatabaseError:
+        return {}
+    finally:
+        conn.close()
+    out: dict[str, list[dict[str, str | None]]] = {}
+    for keyword, raw in rows:
+        try:
+            items = [
+                {"title": str(x["title"]), "source": x.get("source"), "url": x.get("url")}
+                for x in json.loads(raw)
+                if isinstance(x, dict) and str(x.get("title") or "").strip()
+            ]
+        except (TypeError, ValueError):
+            continue
+        if items:
+            out[str(keyword)] = items
     return out

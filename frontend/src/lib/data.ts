@@ -568,6 +568,16 @@ export interface PopularTopic {
   videos?: PopularVideo[];
   /** 제목을 못 붙인 영상이 있으면 이유 */
   videos_reason?: string | null;
+  /** "왜 뜨나" 근거 (#515, 예전 응답은 없다). 숫자는 서버 코드 값 */
+  news?: TrendingNewsLink[];
+  news_reason?: string | null;
+  /** 네이버 판정 구간에서 평소 범위를 처음 넘은 날 */
+  rising_started?: string | null;
+  rising_reason?: string | null;
+  /** 근거 숫자만 쓴 한 줄. llm = 숫자 검증 통과, fixed = 고정 문장, unknown = 근거 없음 */
+  why_line?: string | null;
+  why_status?: "llm" | "fixed" | "unknown" | null;
+  why_reason?: string | null;
 }
 /** 화면용 카테고리 하나의 지금 인기 1~N위 (#431, 회사 설정 [popular] categories) */
 export interface PopularCategory {
@@ -582,6 +592,8 @@ export interface PopularCategory {
   top_videos_reason?: string | null;
 }
 /** 카테고리의 최근 조회수 높은 영상 하나 (#470) */
+/** 인기 검색어 RSS 관련 뉴스 하나 (피드 값 그대로) */
+export interface TrendingNewsLink { title: string; source: string | null; url: string | null }
 export interface PopularVideo {
   video_id: string;
   title: string | null;
@@ -597,6 +609,16 @@ export interface PopularVideo {
   category_mismatch?: boolean | null;
   /** chart = 한국 인기 목록, search = 카테고리 검색 보충 */
   source?: "chart" | "search" | null;
+  /** 영상 근거 (#515, 서버 코드 값, 모르면 null + evidence_reason) */
+  hours_since_published?: number | null;
+  views_per_hour?: number | null;
+  channel_subscribers?: number | null;
+  views_per_subscriber?: number | null;
+  like_rate?: number | null;
+  comment_rate?: number | null;
+  is_short?: boolean | null;
+  shorts_format?: string | null;
+  evidence_reason?: string | null;
 }
 export interface TrendPopularOutput {
   /** 점수 순 */

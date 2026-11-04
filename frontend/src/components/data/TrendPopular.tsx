@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Chip, Empty, Panel, TONE, Waiting } from "@/components/finance/bits";
 import { okEvidence, type SkillState } from "@/components/data/useSkill";
-import { Basis, Sources, VideoLinks } from "@/components/data/Sources";
+import { Basis, Sources, VideoLinks, videoUrl } from "@/components/data/Sources";
 import { DATA_SERVER, type PopularCategory, type PopularTopic, type PopularVideo, type PromoConceptsOutput, type TrendPopularOutput } from "@/lib/data";
 
 // 트렌드 1단계(감지) 위쪽: 요약 카드 3개 + 카테고리 버튼.
@@ -184,6 +184,19 @@ export function videoTitles(out: TrendPopularOutput | null): Map<string, string 
   return m;
 }
 
+/** 영상 하나의 근거 숫자 글자 (서버 값이 있는 것만) */
+function videoFacts(v: PopularVideo): string[] {
+  const pct = (x: number) => `${(x * 100).toLocaleString("ko-KR", { maximumFractionDigits: 2 })}%`;
+  const out: string[] = [];
+  if (v.hours_since_published != null) out.push(`올린 지 ${num(v.hours_since_published)}시간`);
+  if (v.views_per_hour != null) out.push(`시간당 +${num(v.views_per_hour)}`);
+  if (v.views_per_subscriber != null) out.push(`구독자 ${num(v.channel_subscribers)}명의 ${v.views_per_subscriber.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}배 조회`);
+  if (v.like_rate != null) out.push(`좋아요 ${pct(v.like_rate)}`);
+  if (v.comment_rate != null) out.push(`댓글 ${pct(v.comment_rate)}`);
+  if (v.is_short != null) out.push(v.is_short ? `숏츠${v.shorts_format ? `·${v.shorts_format}` : ""}` : "롱폼");
+  return out;
+}
+
 /** 주제 하나의 근거 줄 (서버 값이 있는 것만) */
 function TopicBasis({ t, titles }: { t: PopularTopic; titles: Map<string, string | null> }) {
   const rows: { source: string; body: ReactNode }[] = [];
@@ -198,11 +211,44 @@ function TopicBasis({ t, titles }: { t: PopularTopic; titles: Map<string, string
   } else if (t.velocity_reason) {
     rows.push({ source: "YouTube 조회수 스냅샷 비교", body: t.velocity_reason });
   }
-  if (t.rising_ratio != null) rows.push({ source: "네이버 데이터랩", body: `오늘 판정 평소의 ${t.rising_ratio.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}배` });
+  if (t.rising_ratio != null) {
+    rows.push({
+      source: "네이버 데이터랩",
+      body: `오늘 판정 평소의 ${t.rising_ratio.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}배${t.rising_started ? ` · ${t.rising_started.slice(5)}부터 평소 범위 넘음` : ""}`,
+    });
+  }
+  if (t.news && t.news.length > 0) {
+    rows.push({
+      source: "Google 인기 검색어 관련 뉴스",
+      body: <span className="inline-flex flex-wrap gap-x-2">{t.news.map((n) => n.url
+        ? <a key={n.title} href={n.url} target="_blank" rel="noreferrer noopener" className="text-brand-700 hover:underline">{n.title}{n.source ? ` (${n.source})` : ""}</a>
+        : <span key={n.title}>{n.title}{n.source ? ` (${n.source})` : ""}</span>)}</span>,
+    });
+  }
+  const measured = (t.videos ?? []).filter((v) => v.hours_since_published != null || v.views_per_subscriber != null);
   return (
     <li className="space-y-1">
       <p className="text-sm font-semibold text-ink-900">{t.category_rank ?? t.rank}. {t.keyword}</p>
+      {t.why_line && (
+        <p className="text-sm text-ink-700" title={t.why_reason ?? undefined}>
+          {t.why_line}{t.why_status === "fixed" && <span className="ml-1 text-xs text-ink-500">(고정 문장)</span>}
+        </p>
+      )}
+      {t.why_status === "unknown" && t.why_reason && <p className="text-xs text-ink-500">근거 한 줄 없음: {t.why_reason}</p>}
       {rows.length > 0 ? <Basis rows={rows} /> : <p className="text-xs text-ink-500">근거 값을 받지 못했어요.</p>}
+      {measured.length > 0 && (
+        <details className="text-xs text-ink-700">
+          <summary className="cursor-pointer">영상별 근거 {measured.length}개 (올린 뒤 시간·시간당 조회·구독자 대비·좋아요율)</summary>
+          <ul className="mt-1 space-y-0.5">
+            {measured.map((v) => (
+              <li key={v.video_id} className="truncate" title={v.evidence_reason ?? undefined}>
+                <a href={videoUrl(v.video_id)} target="_blank" rel="noreferrer noopener" className="text-brand-700 hover:underline">{v.title ?? "제목 모름"}</a>
+                {" · "}{videoFacts(v).join(" · ") || "숫자 없음"}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       {t.videos_reason && <p className="text-xs text-ink-500">영상 제목: {t.videos_reason}</p>}
     </li>
   );
