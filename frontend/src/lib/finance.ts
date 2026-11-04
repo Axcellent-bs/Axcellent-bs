@@ -76,10 +76,8 @@ export interface IncomeEstimate {
   not_included: string[]; basis: string; applied_rules: AppliedRule[];
 }
 export interface ExportFile { name: string; bytes: number; sha256: string }
-export type HandoffStatus = "not_requested" | "request_failed" | "requested" | "approved" | "rejected";
 export interface ExportPackage {
   package_id: string; month: string; version: number; generated_at: string; files: ExportFile[]; mock: boolean;
-  handoff: { status: HandoffStatus; review_id?: string | null; delivered_to?: string | null };
 }
 export interface BankImport { file: string; at: string; status: "imported" | "failed"; added?: number; rows?: number; skipped?: number; reason?: string }
 export interface ExportsView { packages: ExportPackage[]; bank_imports: BankImport[] }
@@ -589,8 +587,8 @@ export const finance = {
   /** 자동으로 만든 파일과 은행 폴더 기록 */
   exports: () => fin<Envelope<ExportsView>>("/api/finance/exports"),
   runExports: () => fin<Envelope<unknown>>("/api/finance/exports/run", { method: "POST", body: {}, human: true }),
-  requestHandoff: (packageId: string) =>
-    fin<Envelope<ExportPackage>>(`/api/finance/exports/${encodeURIComponent(packageId)}/handoff`, { method: "POST", body: {}, human: true }),
+  downloadBundle: (packageId: string) =>
+    download(`/api/finance/exports/${encodeURIComponent(packageId)}/bundle`, `${packageId}.zip`),
   downloadExport: (packageId: string, name: string) =>
     download(`/api/finance/exports/${encodeURIComponent(packageId)}/files/${encodeURIComponent(name)}`, name),
   /** 월간 변동 분석 (지난달·작년 같은 달 대비) */
@@ -751,7 +749,6 @@ export const NOT_FINANCE_ACTIONS = new Set<string>(["refund_request", ...MARKETI
 export const ACTION_KO: Record<string, string> = {
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 지급",
   publish_notice: "공지 올리기", publish_sns: "SNS 게시", generate_video: "영상 만들기",
-  send_tax_package: "세무 자료 전달",
   rollback_deployment: "배포 되돌리기", restart_service: "서비스 다시 켜기", generate_pr: "코드 변경 만들기",
 };
 

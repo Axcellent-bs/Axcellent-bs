@@ -14,6 +14,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+# 전문가 확인 대상. 브레이크·교훈·인사이트 같은 내부 기준은 재무 담당이 정한다
+EXPERT_AREAS = frozenset({"revenue", "expense", "settlement", "vat", "income_tax"})
+
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -93,6 +96,7 @@ class RuleBook(_Strict):
     lessons: LessonRules
     insights: InsightRules
     income_tax: IncomeTaxRules
+    expert_questions: list[str] = Field(default_factory=list)
     rules: list[Rule]
 
     @model_validator(mode="after")
@@ -131,6 +135,30 @@ def applied(rule_id: str, detail: str | None = None) -> dict[str, Any]:
         "detail": detail,
         "rules_version": load_rules().version,
     }
+
+
+def review_checklist_md() -> str:
+    """세무사·회계사에게 함께 전달할 확인 목록. 규칙 파일에서 만들어 항상 지금 규칙과 같다."""
+    book = load_rules()
+    lines = [
+        "# 재무·세무 규칙 전문가 확인 목록",
+        "",
+        f"규칙 버전 {book.version} ({book.updated}). AI가 공개 자료로 적은 근거입니다.",
+        "전문가 확인 전이고, 이 묶음의 숫자는 신고서가 아니라 보조 자료입니다.",
+        "",
+        "## 먼저 답이 필요한 질문",
+        "",
+        *[f"{n}. {q}" for n, q in enumerate(book.expert_questions, start=1)],
+        "",
+        "## 규칙별 확인",
+        "",
+        "| 규칙 | 내용 | 적어 둔 근거 | 확인 |",
+        "|---|---|---|---|",
+    ]
+    for r in book.rules:
+        if r.review == "pending" and r.area in EXPERT_AREAS:
+            lines.append(f"| {r.id} {r.title} | {r.statement} | {r.basis} | [ ] |")
+    return "\n".join(lines) + "\n"
 
 
 def applied_many(*rule_ids: str) -> list[dict[str, Any]]:

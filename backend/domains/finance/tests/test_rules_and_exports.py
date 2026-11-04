@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import zipfile
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -15,7 +17,7 @@ from finance_agent import exports, finance_api, tax
 from finance_agent.books import Books
 from finance_agent.handlers import reset_state, state
 from finance_agent.main import app
-from finance_agent.rules import applied, load_rules
+from finance_agent.rules import applied, load_rules, review_checklist_md
 from finance_agent.sources import MockSources
 
 HUMAN = {"Authorization": "Bearer human:taeyoon"}
@@ -139,7 +141,7 @@ def test_package_is_written_once_and_new_version_on_change(
     assert exports.make_package(books, store, date(2026, 11, 4))["version"] == 1
     calls["n"] = 1
     second = exports.make_package(books, store, date(2026, 11, 4))
-    assert second["version"] == 2 and second["handoff"]["status"] == "not_requested"
+    assert second["version"] == 2
 
 
 def test_excel_timestamps_alone_do_not_make_a_new_version(
@@ -182,6 +184,7 @@ def test_real_files_build_from_seed_books(tmp_path: Path, monkeypatch: pytest.Mo
     assert {f["name"] for f in made["mid"]["files"]} == {
         "income-statement-2026-10.csv",
         "income-statement-2026-10.xlsx",
+        "expert-review-checklist.md",
     }
     assert {"vat-summary-2026-Q3.csv", "seller-sales-2026-Q3.xlsx"} <= {
         f["name"] for f in made["end"]["files"]
@@ -202,49 +205,49 @@ def test_read_file_only_serves_listed_untampered_files(
     assert exports.read_file(store, "fin_2026-10", "a.csv") is None
 
 
-def test_handoff_copies_after_approval(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    out, handoff = tmp_path / "out", tmp_path / "handoff"
-    monkeypatch.setenv("FINANCE_EXPORT_DIR", str(out))
-    monkeypatch.setenv("FINANCE_TAX_HANDOFF_DIR", str(handoff))
-    monkeypatch.setattr(exports, "build_files", lambda *a: {"a.csv": b"x"})
-    calls = _fake_execute(monkeypatch, _decision("held"))
-
-    async def run() -> None:
-        package = (await finance_api.run_export_cycle())["package"]
-        assert calls[0]["action"] == "send_tax_package"
-        assert package["handoff"]["status"] == "requested" and not handoff.exists()
-        again = await finance_api.run_export_cycle()  # 같은 판은 다시 요청하지 않는다
-        assert len(calls) == 1 and again["package"]["version"] == 1
-        package["handoff"]["status"] = "approved"
-        await finance_api.refresh_handoff(package)
-        copied = handoff / f"{package['package_id']}-v1" / "a.csv"
-        assert copied.read_bytes() == b"x"
-        assert package["handoff"]["delivered_to"] == str(copied.parent)
-
-    asyncio.run(run())
-
-
-def test_handoff_marks_failure_when_gate_is_down(
+def test_cycle_makes_files_but_sends_nothing_outside(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """세무 자료는 사람이 내려받아 전달한다. 관문이나 외부로 보내는 일이 없다."""
     monkeypatch.setenv("FINANCE_EXPORT_DIR", str(tmp_path))
     monkeypatch.setattr(exports, "build_files", lambda *a: {"a.csv": b"x"})
-    down = _decision("failed").model_copy(
-        update={"execution_id": finance_api.UNAVAILABLE_EXECUTION}
-    )
-    calls = _fake_execute(monkeypatch, down)
+    assert not hasattr(finance_api, "request_handoff") and not hasattr(exports, "handoff_dir")
 
     async def run() -> None:
-        package = (await finance_api.run_export_cycle())["package"]
-        assert package["handoff"]["status"] == "request_failed"
-        await finance_api.run_export_cycle()  # 다음 회차에 다시 요청한다
-        assert len(calls) == 2
+        first = await finance_api.run_export_cycle()
+        again = await finance_api.run_export_cycle()
+        assert first["package"]["version"] == again["package"]["version"] == 1
+        assert "handoff" not in first["package"]
 
     asyncio.run(run())
+
+
+def test_bundle_zips_verified_files_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FINANCE_EXPORT_DIR", str(tmp_path))
+    monkeypatch.setattr(exports, "build_files", lambda *a: {"a.csv": b"x", "b.md": b"y"})
+    store: dict[str, dict[str, Any]] = {}
+    exports.make_package(Books(source="s", mock=False), store, date(2026, 11, 4))
+    name, body = exports.bundle(store, "fin_2026-10")  # type: ignore[misc]
+    assert name == "fin_2026-10-v1.zip"
+    with zipfile.ZipFile(io.BytesIO(body)) as archive:
+        assert sorted(archive.namelist()) == ["a.csv", "b.md"]
+        assert archive.read("a.csv") == b"x"
+    (tmp_path / "fin_2026-10" / "a.csv").write_bytes(b"changed")
+    assert exports.bundle(store, "fin_2026-10") is None
+    assert exports.bundle(store, "fin_none") is None
+
+
+def test_checklist_comes_from_rules_and_skips_internal_rules() -> None:
+    text = review_checklist_md()
+    assert "REV-001" in text and "CIT-001" in text and "VAT-003" in text
+    assert "BRK-001" not in text and "LRN-001" not in text
+    assert "소규모 법인" in text
+    assert "캣북스" not in text  # 범용: 어느 회사든 그대로 전달할 수 있게 회사 이름을 쓰지 않는다
 
 
 def test_export_api_requires_a_person(client: TestClient) -> None:
     assert client.post("/api/finance/exports/run").status_code == 401
+    assert client.get("/api/finance/exports/fin_x/bundle").status_code == 404
     assert client.post("/api/finance/exports/fin_x/handoff", headers=HUMAN).status_code == 404
     assert client.get("/api/finance/exports/fin_x/files/a.csv").status_code == 404
 
