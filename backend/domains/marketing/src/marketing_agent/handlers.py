@@ -31,6 +31,7 @@ from ax_contracts.schemas import (
     TaskStatus,
 )
 from marketing_agent import shop_client
+from marketing_agent.campaign import record_campaign_result, start_campaign
 from marketing_agent.coupons import CouponLedger, SequenceGap, total_value
 from marketing_agent.notice import NoticeStore, make_draft
 from marketing_agent.schemas import (
@@ -393,4 +394,6 @@ HANDLERS = {
     "get_notice": get_notice,
     "list_active_notices": list_active_notices,
     "issue_coupon": issue_coupon,
+    "start_campaign": start_campaign,
+    "record_campaign_result": record_campaign_result,
 }
