@@ -3,6 +3,8 @@ id = "a"
 title = "성과가 좋은 브랜드 검색 광고"
 today = "2026-10-15"
 cash_net_krw = 3000000
+monthly_budget_krw = 1000000
+repeat_multiple = 1.5
 
 [[rounds]]
 campaign_id = "cmp_a_1"

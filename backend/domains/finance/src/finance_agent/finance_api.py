@@ -71,6 +71,7 @@ from finance_agent.handlers import (
     cash_net_krw,
     closing_key,
     current_insights,
+    monthly_budget,
     state,
     team_budget_data,
 )
@@ -702,9 +703,9 @@ def add_finance_api(app: FastAPI) -> None:
         return ok(close_checklist.checklist(books, state().records, d), books.meta())
 
     @app.get("/api/finance/campaigns")
-    def get_campaigns() -> dict:
+    async def get_campaigns() -> dict:
         records = state().records
-        book = load_rules().brake
+        budget = await monthly_budget()
         month = fc.today().isoformat()[:7]
         spent = cp.committed_this_month("", month, records.campaigns, records.budget_reviews)
         return ok(
@@ -717,8 +718,9 @@ def add_finance_api(app: FastAPI) -> None:
                 "opinions": list(reversed(records.opinions)),
                 "budget": {
                     "month": month,
-                    "monthly_krw": book.monthly_budget_krw,
-                    "provisional": book.budget_provisional,
+                    "monthly_krw": budget["amount_krw"],
+                    "provisional": budget["provisional"],
+                    "basis": budget["basis"],
                     "committed_krw": spent,
                 },
                 "break_even_roas": cp.break_even_roas(),
@@ -749,6 +751,7 @@ def add_finance_api(app: FastAPI) -> None:
             lessons=records.lessons,
             cash_net_krw=await cash_net_krw(),
             today=fc.today(),
+            monthly_budget=await monthly_budget(),
         )
         return ok(result, {"collected_at": fc.iso(fc.now())})
 

@@ -95,6 +95,21 @@ function StepCard({ step, known, onPick }: { step: PlanStep; known: Set<string>;
   );
 }
 
+/** 저장된 발췌의 마크다운 기호와 제목 줄을 빼고 UTC 시각을 KST로 보여 준다. 내용은 바꾸지 않는다 */
+function readableExcerpt(excerpt: string, title: string): string {
+  const plain = (s: string) => s.replace(/[*_`]/g, "").replace(/\s+/g, " ").trim();
+  const key = plain(title);
+  const kst = excerpt.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z\b/g, (iso) => {
+    const shifted = new Date(new Date(iso).getTime() + 9 * 3600_000).toISOString();
+    return `${shifted.slice(0, 10)} ${shifted.slice(11, 16)}`;
+  });
+  return kst
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:#{1,6}\s+|>\s?|[-*+]\s+)/, "").replace(/\*\*|__|`/g, "").trim())
+    .filter((line) => line && !(key.length >= 4 && plain(line).includes(key)))
+    .join("\n");
+}
+
 /** 비슷한 과거 장애. DejaFix가 분석 때 저장한 검색 결과를 옮겨 보여 주기만 한다. 찾은 것이 없으면 없다고 말한다 */
 function SimilarIncidents({ report, hits, known, onPick }: { report: Report; hits: KnowledgeHit[]; known: Set<string>; onPick: (id: string) => void }) {
   const fact = report.facts.find((f) => f.label === SIMILAR_FACT_LABEL);
@@ -113,7 +128,7 @@ function SimilarIncidents({ report, hits, known, onPick }: { report: Report; hit
                   <Link href={`/infra/${h.incident_id}`} className="text-brand-700 hover:underline">장애 #{h.incident_id} 열기</Link>
                 )}
               </p>
-              <p className="line-clamp-6 whitespace-pre-line text-sm text-ink-700">{h.excerpt}</p>
+              <p className="line-clamp-6 whitespace-pre-line text-sm text-ink-700">{readableExcerpt(h.excerpt, h.title) || h.excerpt}</p>
               {evId
                 ? <button type="button" className="chip bg-ink-100 font-mono text-ink-700 hover:bg-brand-50" title="아래 근거에서 원문 열기" onClick={() => onPick(evId)}>{h.chunk_id}</button>
                 : <span className="chip bg-ink-100 font-mono text-ink-500">{h.chunk_id}</span>}

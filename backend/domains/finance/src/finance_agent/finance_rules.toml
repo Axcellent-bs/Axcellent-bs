@@ -12,12 +12,16 @@ good_roi = 0.2            # ROI가 이 값 이상이면 좋음
 bad_roi = 0.0             # ROI가 이 값 미만이면 나쁨 (적자)
 
 [brake]
-monthly_budget_krw = 1000000   # 임시값. 근거 없이 정한 시작값이라 예산이 정해지면 바꾼다
-budget_provisional = true
+budget_ratio_of_last_month = 0.3  # 월 예산 = 직전 달 영업 결과 × 이 비율. 번 돈 안에서만 쓰고 나머지는 급여 등 장부에 없는 비용 몫
+monthly_budget_krw = 1000000   # 직전 달 자료가 없을 때만 쓰는 임시값
 min_viable_krw = 50000         # 이보다 적게 남으면 조건부 승인도 의미가 없어 거절한다
 loss_limit_krw = 500000        # 이달 캠페인 손실 합계가 이 값 이상이면 거절
 loss_streak_reject = 2         # 같은 채널이 연속으로 이만큼 적자면 거절
 cash_lookahead_weeks = 4       # 앞으로 이 주수의 누적 순현금을 본다
+
+[repeat]
+window_days = 90          # 첫 구매 뒤 이 기간의 재구매를 본다
+min_cohort_buyers = 30    # 첫 구매가 기간보다 오래된 구매자가 이만큼 없으면 추정하지 않는다
 
 [lessons]
 limit_factor = 0.5        # 실패 1건마다 그 채널 승인 한도에 곱한다
@@ -164,7 +168,7 @@ id = "CIT-001"
 area = "income_tax"
 title = "법인세 참고 추정"
 statement = "장부의 영업 결과에 법인세율을 곱한 참고치다. 세무조정과 급여·임차료가 빠져 있어 신고에 쓰지 않는다."
-basis = "법인세법 제55조 ①, 지방세법 제103조의20. 세무조정은 세무사 업무"
+basis = "법인세법 제55조 ①, 국세청 법인세 세율 안내 (2026-11-04 확인). 법인지방소득세 지방세법 제103조의20은 원문 미확인. 세무조정은 세무사 업무"
 review = "pending"
 
 # ---------------------------------------------------------------- 세무 전달
@@ -202,6 +206,14 @@ basis = "내부 관리 기준"
 review = "pending"
 
 [[rules]]
+id = "CMP-005"
+area = "campaign"
+title = "재구매 포함 손익 (참고)"
+statement = "장부의 구매자별 재구매 배수를 판매액에 곱한 참고 손익이다. 전체 구매자 평균이라 캠페인 고객의 실제 재구매와 다를 수 있어, 효율 판단과 브레이크는 단기 손익으로 한다."
+basis = "내부 관리 기준, [repeat] window_days, min_cohort_buyers"
+review = "pending"
+
+[[rules]]
 id = "CMP-004"
 area = "campaign"
 title = "효율 판단"
@@ -214,8 +226,8 @@ review = "pending"
 id = "BRK-001"
 area = "brake"
 title = "남은 예산"
-statement = "요청이 이달 남은 캠페인 예산을 넘으면 남은 금액까지만 조건부 승인한다. 남은 금액이 최소액보다 적으면 거절한다."
-basis = "내부 기준, [brake] monthly_budget_krw, min_viable_krw"
+statement = "월 예산은 직전 달 영업 결과의 일정 비율이다. 요청이 남은 예산을 넘으면 남은 금액까지만 조건부 승인하고, 남은 금액이 최소액보다 적으면 거절한다. 직전 달이 적자면 예산이 0이다."
+basis = "내부 기준, [brake] budget_ratio_of_last_month, monthly_budget_krw, min_viable_krw"
 review = "pending"
 
 [[rules]]
