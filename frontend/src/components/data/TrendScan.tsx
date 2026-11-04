@@ -4,6 +4,7 @@ import { Chip, ErrorBox, Panel, TONE, Waiting, useResource } from "@/components/
 import { PreparingChip } from "@/components/Preparing";
 import { CampaignEffect } from "@/components/data/CampaignEffect";
 import { PromoConcepts } from "@/components/data/PromoConcepts";
+import { InsightBrief } from "@/components/data/InsightBrief";
 import { TrendPopular, TrendSummary, materialOf } from "@/components/data/TrendPopular";
 import { okOut, useSkill } from "@/components/data/useSkill";
 import { Basis, Sources, VideoLinks, when } from "@/components/data/Sources";
@@ -21,8 +22,8 @@ import {
 // - 1 감지: 요약 카드 3개(오늘 가장 큰 화제·기획안에 쓸 수 있는 트렌드·다가오는 시즌) → 카테고리 버튼(지금 인기, 고른 칸만 그림)
 //   → 맨 아래 급상승 한 줄 목록(trend_scan·trend_candidates). 그래프 없음. YouTube 속도 목록은 화면을 줄이려고 뺐다
 // - trend_popular·promo_concepts는 이 화면이 한 번 받아 1단계 요약·칩 색과 2단계 기획안이 같이 쓴다 (useSkill)
-// - 2 추천: 숏츠 광고 예시 아이디어(참고용, promo_concepts, 왼쪽 형식 막대 + shorts_stats 표본 한계). 처음 열 때 그리고, 그 뒤에는 하위 탭을 오가도 남게 숨기기만 한다
-// - 3 넘김: "기획팀이 초안을 확정하고 마케팅이 제작·게시하는 단계 (준비 중)". 루프 띠와 같은 단계 설명 문장만 보여 준다(숫자·예시 없음)
+// - 2 인사이트: 인사이트 브리프(trend_insight_brief) + 맨 아래 참고용 예시(promo_concepts 기획안 카드, 접힘). 처음 열 때 그리고, 그 뒤에는 숨기기만 한다
+// - 3 넘김: "기획팀이 이 인사이트를 가져가 제안을 만들어요. 가져간 기록 보기는 준비 중". 루프 띠와 같은 단계 설명 문장만 보여 준다(숫자·예시 없음)
 // - 4 성과(게시·성과 측정, 다음 추천 반영은 준비 중): 캠페인 효과(campaign_effect). 측정 결과가 남게 숨기기만 한다
 //
 // 1단계 급상승 한 줄
@@ -209,8 +210,10 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
   const promoRes = useSkill((n) => dataAi.promoConcepts(n > 0));
   const popularOut = okOut(popularRes.state);
   const promoOut = okOut(promoRes.state);
-  const promoProbe: LoopProbe = !kpiLive ? "failed"
-    : promoRes.state.kind === "ok" ? "ok" : promoRes.state.kind === "failed" ? "failed" : "checking";
+  // 2단계 인사이트 브리프: 루프 2단계 칩도 이 응답으로 정한다
+  const briefRes = useSkill(() => dataAi.trendInsightBrief());
+  const briefProbe: LoopProbe = !kpiLive ? "failed"
+    : briefRes.state.kind === "ok" ? "ok" : briefRes.state.kind === "failed" ? "failed" : "checking";
   // 2단계 이후 하위 탭은 처음 열 때 그린다(1단계를 빨리 열려고). 그 뒤에는 숨기기만 한다
   const [seen, setSeen] = useState<ReadonlySet<string>>(() => new Set([tab.key]));
   useEffect(() => {
@@ -321,7 +324,7 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
 
   return (
     <div className="space-y-5">
-      <ContentLoop trend={loopTrend} probes={{ trend_scan: trendProbe, promo_concepts: promoProbe, campaign_effect: loopCampaignProbe }} active={stageOf(tab.stages[0]).no} onSelect={openStage} />
+      <ContentLoop trend={loopTrend} probes={{ trend_scan: trendProbe, trend_insight_brief: briefProbe, campaign_effect: loopCampaignProbe }} active={stageOf(tab.stages[0]).no} onSelect={openStage} />
 
       {/* 하위 탭 4개: 감지 → 추천 → 넘김 → 성과 (루프 4단계와 같다, lib/contentLoop.ts TREND_TABS) */}
       <div role="tablist" aria-label="트렌드&콘텐츠 단계" className="flex w-full gap-1 overflow-x-auto rounded-2xl bg-surface p-1 ring-1 ring-ink-100">
@@ -344,10 +347,9 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
             </div>
           ) : !seen.has(t.key) ? null : t.key === "recommend" ? (
             // 처음 열 때 그리고, 그 뒤에는 하위 탭을 오가도 남도록 숨기기만 한다
-            <div className="space-y-5">
-              {/* 숏츠 광고 예시 아이디어 (참고용, promo_concepts, 왼쪽 숏츠 형식 막대 + 표본 한계 shorts_stats) */}
-              <PromoConcepts state={promoRes.state} popular={popularOut} onRegenerate={promoRes.reload} />
-            </div>
+            // 인사이트 브리프(trend_insight_brief) + 맨 아래 "참고용 예시 N개" 접힘(숏츠 광고 예시 아이디어, promo_concepts)
+            <InsightBrief state={briefRes.state} examplesCount={promoOut ? promoOut.concepts.length : null}
+              examples={<PromoConcepts state={promoRes.state} popular={popularOut} onRegenerate={promoRes.reload} />} />
           ) : t.key === "handoff" ? (
             // 마케팅·영상 제작으로 넘기기: 아직 준비 중
             <PreparingStage stage={stageOf("handoff")} />
