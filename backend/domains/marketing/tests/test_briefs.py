@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ax_agent_template import events
+from ax_contracts.schemas import ExecuteDecision
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
 from marketing_agent import briefs, handlers
 from marketing_agent.main import app, load_card
@@ -13,11 +14,29 @@ PLANNING = "mock:planning"
 client = TestClient(app)
 
 
+def _decision(**fields) -> ExecuteDecision:
+    return ExecuteDecision(
+        **({"execution_id": "exe_b1", "grade": "A", "status": "executed"} | fields)
+    )
+
+
+def _fake_execute(monkeypatch: pytest.MonkeyPatch, decision: ExecuteDecision) -> list[dict]:
+    seen: list[dict] = []
+
+    async def fake(action, params, context, evidence):  # noqa: ANN001
+        seen.append({"action": action, "params": params, "key": context.idempotency_key})
+        return decision
+
+    monkeypatch.setattr(handlers, "execute", fake)
+    return seen
+
+
 @pytest.fixture(autouse=True)
 def _mock_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
     events.reset_mock_bus()
     handlers.reset_state()
+    _fake_execute(monkeypatch, _decision())  # 기본: 관문 통과. 개별 테스트가 덮어쓴다
 
 
 def _call(skill: str, input: dict, token: str = PLANNING) -> dict:
@@ -182,3 +201,77 @@ def test_reset_state_clears_briefs() -> None:
     handlers.reset_state()
     assert _call("list_campaign_briefs", {})["output"]["total"] == 0
     assert _receive()["output"]["outcome"] == "accepted"
+
+
+# --- 안전 관문 -------------------------------------------------------------
+
+
+def test_first_receipt_calls_gate_once_and_stores_only_when_executed(monkeypatch) -> None:  # noqa: ANN001
+    seen = _fake_execute(monkeypatch, _decision(execution_id="exe_z9"))
+    out = _receive()
+    assert out["output"]["outcome"] == "accepted"
+    assert "exe_z9" in out["evidence"]["ref_ids"]
+    assert len(seen) == 1
+    assert seen[0]["action"] == "receive_campaign_brief"
+    assert seen[0]["key"] == f"{CTX}:receive_campaign_brief:PROP-1"
+    assert seen[0]["params"] == {
+        "proposal_id": "PROP-1",
+        "campaign_id": "cmp_PROP-1",
+        "insight_id": "INS-7",
+        "title": "독서의 달 기획전",
+        "approved_by": "예진",
+    }
+    assert _call("list_campaign_briefs", {})["output"]["total"] == 1
+
+
+def test_duplicate_never_calls_the_gate(monkeypatch) -> None:  # noqa: ANN001
+    seen = _fake_execute(monkeypatch, _decision())
+    _receive()
+    again = _receive()
+    assert again["output"]["outcome"] == "duplicate"
+    assert again["output"]["campaign_id"] == "cmp_PROP-1"
+    assert len(seen) == 1
+
+
+def test_rejected_and_invalid_never_call_the_gate(monkeypatch) -> None:  # noqa: ANN001
+    seen = _fake_execute(monkeypatch, _decision())
+    assert _receive(title="")["output"]["outcome"] == "rejected"
+    assert _call("receive_campaign_brief", {"proposal_id": "PROP-1"})["outcome"] == "invalid_input"
+    assert seen == []
+
+
+@pytest.mark.parametrize(
+    ("fields", "status", "outcome"),
+    [
+        (
+            {"status": "held", "review_id": "rev_1", "hold_reason": "over_threshold"},
+            "input-required",
+            "held",
+        ),
+        ({"status": "rejected", "hold_reason": "verify_timeout"}, "canceled", "TIMEOUT"),
+        ({"status": "rejected"}, "failed", "execute_rejected"),  # 관문 무응답(fail-closed)
+        ({"status": "failed"}, "failed", "execute_failed"),
+        ({"status": "verifying"}, "working", "verifying"),
+    ],
+)
+def test_brief_is_not_stored_unless_executed(monkeypatch, fields, status, outcome) -> None:  # noqa: ANN001
+    _fake_execute(monkeypatch, _decision(**fields))
+    result = _receive()
+    assert (result["status"], result["outcome"]) == (status, outcome)
+    assert (result["output"] or {}).get("outcome") != "accepted"
+    assert _call("list_campaign_briefs", {})["output"]["total"] == 0
+
+
+def test_blocked_receipt_can_continue_with_the_same_key(monkeypatch) -> None:  # noqa: ANN001
+    seen = _fake_execute(monkeypatch, _decision(status="rejected"))
+    _receive()
+    _fake_execute(monkeypatch, _decision())
+    assert _receive()["output"]["outcome"] == "accepted"
+    assert _call("list_campaign_briefs", {})["output"]["total"] == 1
+    assert len(seen) == 1
+
+
+def test_get_without_id_has_the_common_invalid_input_shape() -> None:
+    out = _call("get_campaign_brief", {})
+    assert (out["status"], out["outcome"]) == ("failed", "invalid_input")
+    assert out["output"]["errors"]

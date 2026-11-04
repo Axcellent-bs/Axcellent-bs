@@ -7,7 +7,12 @@
 - 같은 `proposal_id`는 한 번만 받는다. 다시 오면 `duplicate`이고 보관본은 바뀌지 않는다.
 - `campaign_id = "cmp_" + proposal_id`. 제안 번호에서 정해지므로 재전송·다시 시작해도 같고,
   나중에 `start_campaign`도 같은 `campaign_id`를 쓴다(insight_id → proposal_id → campaign_id).
-- 저장소는 메모리다. 서비스를 다시 시작하면 사라진다(영속 저장은 TODO).
+- 저장은 안전 관문(`execute("receive_campaign_brief")`)이 `executed`를 돌려준 뒤에만 한다
+  (핸들러 `handlers.receive_campaign_brief`). 검증·중복 확인은 관문 앞에서 하고, 중복은
+  관문을 부르지 않는다.
+- 저장소는 메모리다. 서비스를 다시 시작하면 받은 기획안이 사라진다. 기획 쪽은 이미 넘겼다고
+  (`handoff.ok`) 남기므로 재시작 뒤에는 마케팅 목록과 어긋날 수 있다(영속 저장은 TODO).
+  같은 제안을 다시 받으면 같은 `campaign_id`로 다시 `accepted`다.
 
 거절 이유 코드(`reason_code`, 닫힌 집합):
 - `unsupported_schema_version`: 마케팅이 읽을 수 없는 `schema_version`
@@ -94,12 +99,13 @@ class BriefStore:
     def __init__(self) -> None:
         self._by_proposal: dict[str, StoredBrief] = {}
 
-    def receive(self, brief: CampaignBriefInput, at: datetime) -> CampaignBriefOutput:
-        reason = rejection_reason(brief)
-        if reason is not None:
-            return CampaignBriefOutput(outcome="rejected", reason_code=reason)
+    def existing(self, proposal_id: str) -> StoredBrief | None:
+        return self._by_proposal.get(proposal_id)
+
+    def add(self, brief: CampaignBriefInput, at: datetime) -> CampaignBriefOutput:
+        """관문이 `executed`를 돌려준 뒤에만 부른다. 이미 있으면 보관본을 그대로 두고 duplicate."""
         existing = self._by_proposal.get(brief.proposal_id)
-        if existing is not None:  # 보관본은 그대로 둔다
+        if existing is not None:
             return CampaignBriefOutput(outcome="duplicate", campaign_id=existing.campaign_id)
         stored = StoredBrief(
             campaign_id=campaign_id_for(brief.proposal_id),
