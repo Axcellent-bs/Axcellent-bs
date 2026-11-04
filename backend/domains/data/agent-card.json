@@ -237,6 +237,21 @@
       "verifier": null,
       "priority": "recommended",
       "handoff": false
+    },
+    {
+      "id": "data_sources",
+      "description": "데이터 출처 목록. 출처마다 주는 데이터 종류(검색 관심·실제 소비·시청·조사 통계), 맞는 업종 태그(전체 또는 특정, 회사 이름 없음), 연령·성별 지원, 카테고리 목록을 어디서 받는지, 자료 주기, 하루 한도(공식 문서 기준, 확인 못 한 수치는 미확인), 필요한 키 환경변수 이름(값은 넣지 않음), 상태(사용 가능 / 키 필요), 공식 문서 주소, 사람 승인 여부를 돌려준다. 상태는 코드가 정한다: 키가 모두 있으면 사용 가능, 없으면 키 필요와 키 이름. 같은 키를 쓰지만 이용 신청이 따로일 수 있는 출처(네이버 쇼핑인사이트)는 실제 호출 1번이 성공해야 사용 가능이고 결과를 저장한다. 수집 계획(source_plan)은 이 목록 안에서만 고른다. 새 출처 수집은 회사 설정 승인 플래그가 있어야 시작한다. 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataSourcesRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataSourcesOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
     }
   ]
 }
