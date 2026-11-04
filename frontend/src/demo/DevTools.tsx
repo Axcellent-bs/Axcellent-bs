@@ -308,6 +308,30 @@ function StepModels({ cfg, onSaved }: { cfg: CodingSettings; onSaved: (c: Coding
   )
 }
 
+/** 요청 작업을 누가 코딩하는지 판단 근거: 자동이면 규칙 두 줄 중 맞은 줄을 진하게, 고정이면 설정, 예외(예산·LLM 없음)는 따로 */
+function CodingWhy({ cfg }: { cfg: CodingSettings }) {
+  const who = cfg.agents_connected
+  const mine = cfg.resolved === 'subscription'
+  const ruled = who.length ? 'subscription' : 'agent'
+  const row = (on: boolean) => `flex flex-wrap items-center gap-1.5 ${on ? 'font-medium text-ink-900' : 'text-ink-400'}`
+  const target = mine ? '내 Claude · 연결한 개발자 Claude가 작업 목록에서 가져감' : '서버 AI · 서버가 바로 코딩'
+  if (cfg.mode !== 'auto') {
+    return <div className="space-y-1"><div className={row(true)}>회사 설정 고정 → {target}</div></div>
+  }
+  return (
+    <div className="space-y-1">
+      <div className={row(!!who.length && ruled === cfg.resolved)}>
+        <span>최근 7일 본인 Claude 연결</span>
+        {who.length ? who.map((n) => <span key={n} className="chip bg-ink-100 text-ink-700">{n}</span>) : <span className="chip bg-ink-100 text-ink-500">없음</span>}
+        <span>→ 내 Claude</span>
+      </div>
+      <div className={row(!who.length && ruled === cfg.resolved)}>연결 없음 → 서버 AI</div>
+      {ruled !== cfg.resolved && <div className={row(true)}><span className="chip bg-amber-50 text-amber-800">예외</span>{cfg.why}</div>}
+      <div className="pt-1 text-xs text-ink-500">{target}</div>
+    </div>
+  )
+}
+
 function CodingModeSection({ part }: { part: AiPart }) {
   const [cfg, setCfg] = useState<CodingSettings | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -338,7 +362,8 @@ function CodingModeSection({ part }: { part: AiPart }) {
       <Seg label="요청 작업 코딩 방식" items={CODING_MODES} value={cfg?.mode} disabled={!cfg || busy} onPick={(id) => void choose(id)} />
       {cfg && (
         <dl className="grid grid-cols-[120px_1fr] gap-x-3 gap-y-2 text-sm">
-          <dt className="text-ink-500">이유</dt><dd>{cfg.why}</dd>
+          <dt className="text-ink-500">판단</dt>
+          <dd><CodingWhy cfg={cfg} /></dd>
           {!cfg.company_key?.key_set && <><dt className="text-ink-500">서버 AI 체험</dt>
           <dd><UsageBar used={cfg.trial_used} limit={cfg.trial_limit} wide title="서버 AI(기본 키)가 코딩에 쓴 토큰 / 체험 한도" /></dd></>}
         </dl>
