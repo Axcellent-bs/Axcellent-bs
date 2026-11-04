@@ -619,6 +619,10 @@ async def _run(
 
     out.by_category = group_stats(items, "category", [*TOPIC_CATEGORIES, UNKNOWN], config)
     out.by_format = group_stats(items, "format", [*SHORTS_FORMATS, UNKNOWN], config)
+    # 전체 숏츠 조회수 중앙값 (카테고리·하위 주제 배수의 분모)
+    all_views = [s.views for s in items if s.views is not None]
+    out.median_views = round(statistics.median(all_views), 1) if all_views else None
+    out.median_views_count = len(all_views)
     out.status = "known" if items else "unknown"
     if not items:
         out.reason = f"길이 {config.max_seconds}초 이하인 숏츠가 없음"
