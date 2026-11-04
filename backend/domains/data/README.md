@@ -551,7 +551,7 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
   |---|---|---|
   | `gmv_krw` | 캠페인 때문에 늘어난 판매액 | `sales.incremental_gross_krw` (증분 주문 금액, 할인 전). 0보다 작으면 재무 칸은 0 이상이라 넣지 않고 판단을 미룬다. 범위는 `incremental_low_krw`~`incremental_high_krw` |
   | `coupon_krw` | 끝난 회사 부담 쿠폰 금액 | `sales.period.discount_krw` (구간 결제 완료 주문의 쿠폰 할인 합). 캠페인 쿠폰만이면 쿠폰 귀속 주문의 할인 합이지만 지금 칸은 구간 전체 |
-  | `orders` | 주문 수 | `orders.excess` (증분 주문 수, 주문 수 판정) 또는 `sales.period.orders` (구간 결제 완료 주문) — 재무 계약에 증분인지 정의가 없어 확인 필요 |
+  | `orders` | 주문 수 | **확정: `incremental_orders`** (증분 주문 수 = 주문 판정의 실제 − 기대, 정수 반올림. `gmv_krw`가 증분이라 같은 뜻으로 맞춤). 주문 판정을 모르면 None이라 넣지 않는다. 음수면 재무 칸이 0 이상이라 넣지 않고 판단을 미룬다 |
   | `source` | 숫자의 출처 | `"data.campaign_effect"` |
   | (없음) | — | `sales.direct_attributed_krw` (캠페인 쿠폰 주문 판매액 합), `sales.direction`(up·down·uncertain) |
 - 쿠폰: `GET /api/shop/coupons?campaign_id=`(커넥터 `campaign_coupons`, data는 `COUPON_READERS`에 있다)의 발급(`count`)·사용(`used_units`) 장수 합으로 누적 사용률 = 사용 ÷ 발급. 설명은 LLM이 아니라 고정 문장 "조회 시점 기준 누적 사용률이며, 캠페인 뒤 사용분도 섞여 있다"(평가 채점기가 이 글자를 본다)
