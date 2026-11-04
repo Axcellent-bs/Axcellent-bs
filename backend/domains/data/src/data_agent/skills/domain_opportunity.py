@@ -313,6 +313,20 @@ class OpportunityResult:
     plan_id: str | None
     queries: list[str]
     facts: list[DataFact] = field(default_factory=list)  # 카드 숫자 (브리프 facts에 합친다)
+    # 도메인 키워드 (프로필 씨앗·하위 주제 이름). 브리프 인사이트의 회사 연결(domain) 판정에 쓴다
+    domain_terms: list[str] = field(default_factory=list)
+
+
+def domain_terms(
+    profile: DomainProfileOutput, subtopics: DomainSubtopicsOutput | None
+) -> list[str]:
+    """도메인 프로필 씨앗 키워드와 하위 주제 이름(묶은 이름 포함). 프로필이 없으면 빈 목록."""
+    if profile.status != "known":
+        return []
+    names = [s.keyword for s in profile.seed_keywords]
+    for t in subtopics.subtopics if subtopics is not None else []:
+        names += [t.name, *t.merged]
+    return list(dict.fromkeys(n.strip() for n in names if n.strip()))
 
 
 PER_SEED = 2  # 카드에서 씨앗 하나가 차지할 수 있는 하위 주제 수
@@ -403,15 +417,17 @@ async def make_opportunities(
     """계획대로 사용 가능·승인 출처만 불러 하위 주제마다 기회 가설 카드."""
     config = load_config(env)
     queries: list[str] = []
+    terms = domain_terms(profile, subtopics)
     if profile.status != "known":
         return OpportunityResult([], f"도메인 프로필이 없음 ({profile.reason})", None, queries)
     if plan.status != "known":
-        return OpportunityResult([], f"수집 계획이 없음 ({plan.reason})", None, queries)
+        return OpportunityResult([], f"수집 계획이 없음 ({plan.reason})", None, queries,
+                                 domain_terms=terms)  # fmt: skip
     # 후보를 넉넉히 뽑아 분류부터 하고(광고 재료가 아닌 것 빼기), 남은 것에서 카드 수만큼
     pool = topics_of(profile, plan, subtopics, config.max_cards * 3)
     if not pool:
         return OpportunityResult([], "하위 주제도 계획에 들어간 씨앗 키워드도 없음", plan.plan_id,
-                                 queries)  # fmt: skip
+                                 queries, domain_terms=terms)  # fmt: skip
     from_subtopics = pool[0].axis is not None
     try:  # 분류 (광고 재료 거르기·숏츠 적합도용, 저장된 분류는 다시 묻지 않음)
         cats = await classify([t.name for t in pool])
@@ -506,7 +522,9 @@ async def make_opportunities(
         mine = card_facts(c, [v.video_url for v in c.video_links if v.video_url])
         c.fact_ids = [x.fact_id for x in mine]
         rows += mine
-    return OpportunityResult(cards, None, plan.plan_id, queries, rows)
+    for c in cards:  # 카드는 도메인 프로필에서 나오므로 늘 domain 이상
+        c.company_relevance = "direct" if c.products else "domain"
+    return OpportunityResult(cards, None, plan.plan_id, queries, rows, terms)
 
 
 def not_material(

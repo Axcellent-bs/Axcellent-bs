@@ -517,3 +517,55 @@ def test_brief_numbers_are_all_in_facts_with_ids_and_schema(tmp_path: Path) -> N
     news = next(i for i in out.insights if i.topic == "한국철강")
     labels = {by_id[fid].label for fid in news.fact_ids}
     assert "숏츠 형식 조회 중앙값" not in labels  # 모르는 숫자는 넣지 않는다
+
+
+# ------------------------------------------------ 회사 연결 (company_relevance)
+
+
+def test_general_topics_without_company_link_become_reference_only(tmp_path: Path) -> None:
+    """골프 같은 일반 스포츠 화제는 상품·도메인 연결이 없어 참고용. 회사 관련은 그대로."""
+    from ax_contracts.schemas.data import DomainOpportunity
+    from data_agent.skills.domain_opportunity import OpportunityResult
+
+    popular = TrendPopularOutput(items=[
+        _topic("골프", 1, "연예·스포츠", youtube_videos=8),  # 일반 스포츠 화제
+        _topic("무지 노트 꾸미기", 2, "IT", youtube_videos=6),  # 연결 상품 (노트)
+        _topic("문구 하울", 3, "IT", youtube_videos=5),  # 도메인 키워드 '문구'
+    ])  # fmt: skip
+    card = DomainOpportunity(opportunity_id="opp_1", subtopic="그림책 낭독", line="x",
+                             company_relevance="domain")  # fmt: skip
+
+    async def opps():  # noqa: ANN202
+        return OpportunityResult([card], None, "plan_1", [], domain_terms=["문구", "고양이 그림책"])
+
+    out = asyncio.run(
+        brief.make_brief(
+            TrendInsightBriefRequest(), BriefLLM(cats={}), env=_env(tmp_path, "max_insights = 5\n"),
+            popular=popular, popular_reason=None, rising=[], age_fn=_ages([]), promo=None,
+            catalog=CATALOG, now=NOW, opportunities_fn=opps,
+        )
+    ).output  # fmt: skip
+    by = {i.topic: i for i in out.insights}
+    golf = by["골프"]
+    assert golf.company_relevance == "none" and golf.reference_only
+    assert golf.company_relevance_reason == "회사 상품·도메인과 연결 없음"
+    assert golf.rank == len(out.insights)  # 참고용은 맨 아래
+    assert by["무지 노트 꾸미기"].company_relevance == "direct"
+    assert not by["무지 노트 꾸미기"].reference_only
+    assert by["문구 하울"].company_relevance == "domain" and not by["문구 하울"].reference_only
+    assert [c.company_relevance for c in out.opportunities] == ["domain"]  # 카드는 그대로
+
+
+def test_relevance_rules() -> None:
+    from ax_contracts.schemas.data import InsightEvidence, InsightProduct, TrendInsight
+
+    def ins(topic: str, **kw: Any) -> TrendInsight:
+        return TrendInsight(insight_id="i", rank=1, topic=topic, line="x",
+                            evidence=InsightEvidence(), **kw)  # fmt: skip
+
+    p = InsightProduct(product_id="p1", name="무지 노트", reason="r")
+    assert brief.relevance(ins("골프", products=[p]), [])[0] == "direct"
+    assert brief.relevance(ins("골프", company_related=True), [])[0] == "domain"
+    assert brief.relevance(ins("고양이 그림책 추천"), ["고양이 그림책"])[0] == "domain"
+    assert brief.relevance(ins("골프"), ["고양이 그림책", "책"])[0] == "none"
+    assert brief.relevance(ins("골프"), ["골"])[0] == "none"  # 한 글자 키워드는 안 본다

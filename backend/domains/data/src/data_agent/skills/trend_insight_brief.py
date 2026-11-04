@@ -688,6 +688,35 @@ def company_rise(c: Candidate, config: BriefConfig) -> float | None:
     return max(hits) if hits else None
 
 
+NO_RELEVANCE = "회사 상품·도메인과 연결 없음"
+MIN_TERM = 2  # 도메인 키워드 대조 최소 글자 수 (공백 뺀 길이)
+
+
+def relevance(
+    i: TrendInsight, terms: Sequence[str]
+) -> tuple[Literal["direct", "domain", "none"], str]:
+    """회사와의 연결 (코드): 연결 상품 → direct, 회사 관련 키워드나 도메인 키워드
+    (프로필 씨앗·하위 주제)와 이름이 겹침 → domain, 둘 다 아님 → none."""
+    if i.products:
+        return "direct", f"연결 상품 {len(i.products)}개 (임베딩 기준 통과)"
+    if i.company_related:
+        return "domain", i.company_reason or "회사 시즌 키워드·상품 핵심어"
+    names = [_norm(n) for n in [i.topic, *getattr(i, "aliases", [])] if len(_norm(n)) >= MIN_TERM]
+    for t in terms:
+        k = _norm(t)
+        if len(k) >= MIN_TERM and any(k in n or n in k for n in names):
+            return "domain", f"도메인 프로필 키워드 '{t}'와 겹침"
+    return "none", NO_RELEVANCE
+
+
+def mark_relevance(insights: Sequence[TrendInsight], terms: Sequence[str]) -> None:
+    """연결이 없으면(none) 참고용으로 돌린다 (기획은 reference_only를 뺀다)."""
+    for i in insights:
+        i.company_relevance, i.company_relevance_reason = relevance(i, terms)
+        if i.company_relevance == "none" and not i.reference_only:
+            i.reference_only = True
+
+
 def company_reason(c: Candidate) -> str | None:
     if not c.company:
         return None
@@ -905,7 +934,7 @@ async def make_brief(
                 f" {config.company_min_season_ratio:g}배·연령대 {config.company_min_age_ratio:g}배)"
                 " 이상 오른 것이 없음"
             )
-        out.summary = summary(out)
+        terms: list[str] = []
         if opportunities_fn is not None:  # 기회 가설 카드 (도메인 프로필 → 수집 계획, 선택 칸)
             try:
                 opp = await opportunities_fn()
@@ -914,10 +943,22 @@ async def make_brief(
                 queries += opp.queries
                 out.sources += ["domain_profile", "source_plan"]
                 out.facts += list(getattr(opp, "facts", []) or [])
+                terms = list(getattr(opp, "domain_terms", []) or [])
             except Exception as error:  # 카드를 못 만들어도 브리프는 준다
                 out.opportunities_reason = f"기회 가설 카드를 만들지 못함 ({type(error).__name__})"
         else:
             out.opportunities_reason = "기회 가설 카드를 요청하지 않음"
+        # 회사 연결: 상품도 도메인 키워드도 없는 인사이트는 참고용 (기획은 참고용을 뺀다)
+        mark_relevance(out.insights, terms)
+        if not terms:
+            out.limits.append(
+                "도메인 프로필 키워드를 받지 못해 회사 연결은 연결 상품·회사 관련 키워드로만 봄"
+            )
+        out.insights.sort(key=lambda i: (i.classification_pending, i.reference_only,
+                                         i.company_related, -i.score))  # fmt: skip
+        for n, i in enumerate(out.insights, start=1):
+            i.rank = n
+        out.summary = summary(out)
         for i in out.insights:  # 응답에 나오는 숫자 전부 (인사이트는 fact_ids로 가리킴)
             mine = insight_facts(i)
             i.fact_ids = [f.fact_id for f in mine]

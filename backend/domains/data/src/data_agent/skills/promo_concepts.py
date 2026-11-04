@@ -260,6 +260,31 @@ def name_core(name: str) -> str:
     return " ".join(words) or name
 
 
+NO_COMPANY_LINK = "빌린 트렌드가 회사 상품·도메인과 연결 없음"
+MIN_TERM = 2
+
+
+def company_terms(products: Sequence[Any], categories: Mapping[str, str]) -> list[str]:
+    """회사 키워드: 카탈로그 상품 이름 핵심어와 카테고리 이름 (저장된 카탈로그, 호출 없음)."""
+    names = [name_core(p.name) for p in products] + list(categories.values())
+    return list(dict.fromkeys(n.strip() for n in names if len(_key(n)) >= MIN_TERM))
+
+
+def mark_reference(concepts: Sequence[PromoConcept], terms: Sequence[str]) -> None:
+    """지금 인기 트렌드를 빌렸는데 그 트렌드 이름이 회사 키워드와 겹치지 않으면 참고용 (코드).
+
+    시즌 재료는 회사 상품 키워드에서 나오므로 회사 관련이다. 등장 상품은 LLM이 고른 것이라 연결로
+    보지 않는다 (트렌드 자체가 회사와 연결돼야 한다).
+    """
+    keys = [k for t in terms if len(k := _key(t)) >= MIN_TERM]
+    for c in concepts:
+        if c.trend_kind != "popular" or not c.borrowed_trend:
+            continue
+        name = _key(c.borrowed_trend)
+        if not any(k in name or name in k for k in keys):
+            c.reference_only, c.reference_reason = True, NO_COMPANY_LINK
+
+
 def season_keywords(
     products: Sequence[CatalogProduct], categories: Mapping[str, str], limit: int
 ) -> list[tuple[str, str]]:
@@ -765,6 +790,7 @@ async def _generate(
             retry_note = " 버린 이유를 붙여 한 번 더 물음."
     out.concepts = kept[: config.concepts]
     out.dropped = dropped
+    mark_reference(out.concepts, company_terms(shop.products, shop.categories))
     if not any(c.trend_kind == "popular" for c in out.concepts):
         if not any(t.kind == "popular" for t in trends):
             out.popular_trend_note = "재료 기준을 넘은 지금 인기 트렌드가 없음"

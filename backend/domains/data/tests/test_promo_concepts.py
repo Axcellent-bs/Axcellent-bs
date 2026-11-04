@@ -547,3 +547,24 @@ def test_target_age_failure_keeps_the_examples_with_a_reason(
     out = _run(tmp_path, PromoLLM(), monkeypatch, naver=NoAges({"무지 노트"}))
     [c] = out.concepts
     assert c.target_age is None and c.target_age_reason == "연령대 조회 실패 (RuntimeError)"
+
+
+def test_concepts_borrowing_unrelated_popular_trends_are_reference_only() -> None:
+    from ax_contracts.schemas.data import PromoConcept, PromoTrendKind
+
+    def concept(trend: str, kind: PromoTrendKind | None) -> PromoConcept:
+        return PromoConcept(concept_id=trend, title=trend, borrowed_trend=trend, trend_kind=kind)
+
+    terms = promo.company_terms(
+        [CatalogProduct(product_id="p1", name="무지 노트 3권 세트"),
+         CatalogProduct(product_id="p2", name="만년필 입문 세트")],
+        {"stat": "문구", "book": "도서"},
+    )  # fmt: skip
+    assert "무지 노트" in terms and "문구" in terms
+    items = [concept("골프", "popular"), concept("무지 노트 꾸미기", "popular"),
+             concept("만년필 입문 12월 시즌", "season"), concept("", None)]  # fmt: skip
+    promo.mark_reference(items, terms)
+    golf, note, season, none = items
+    assert golf.reference_only and golf.reference_reason == promo.NO_COMPANY_LINK
+    assert not note.reference_only  # 회사 상품 핵심어와 겹침
+    assert not season.reference_only and not none.reference_only  # 시즌 재료·트렌드 없음은 그대로
