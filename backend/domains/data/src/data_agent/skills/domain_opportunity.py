@@ -27,7 +27,7 @@ import hashlib
 import json
 import tomllib
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -37,6 +37,7 @@ from pydantic import BaseModel, ValidationError
 from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
 from ax_contracts.schemas.data import (
     AgeTopic,
+    DataFact,
     DataSourcesOutput,
     DomainOpportunity,
     DomainProfileOutput,
@@ -53,6 +54,7 @@ from ax_contracts.schemas.data import (
 )
 from data_agent.connectors import CatalogProduct, ConnectorUnavailable
 from data_agent.explain import _bad_numbers
+from data_agent.skills.brief_facts import card_facts
 from data_agent.skills.trend_evidence import BLAME, fixed_line
 from data_agent.skills.trend_scan import REQUEST_DAYS, TREND_CONFIG_ENV, judge_series
 
@@ -308,6 +310,7 @@ class OpportunityResult:
     reason: str | None
     plan_id: str | None
     queries: list[str]
+    facts: list[DataFact] = field(default_factory=list)  # 카드 숫자 (브리프 facts에 합친다)
 
 
 PER_SEED = 2  # 카드에서 씨앗 하나가 차지할 수 있는 하위 주제 수
@@ -340,6 +343,7 @@ class Topic:
     videos: int = 0  # 하위 주제 숏츠 수 (넓히기 결과)
     median_views: float | None = None
     evidence: str | None = None
+    video_ids: tuple[str, ...] = ()  # 근거 숏츠 (facts의 link)
 
 
 def topics_of(
@@ -361,6 +365,7 @@ def topics_of(
                 t.videos,
                 t.median_views,
                 f"'{t.seed_keyword}' 한국 숏츠 {t.videos}개에 함께 나옴",
+                tuple(t.video_ids),
             )  # fmt: skip
             for t in ranked
         ]
@@ -489,7 +494,16 @@ async def make_opportunities(
         for c in cards:
             c.limits.append(note)
     await write_lines(cards, llm, context_id, queries)
-    return OpportunityResult(cards, None, plan.plan_id, queries)
+    links = {
+        opportunity_id(day, t.name): [f"https://www.youtube.com/watch?v={v}" for v in t.video_ids]
+        for t in topics
+    }
+    rows: list[DataFact] = []
+    for c in cards:
+        mine = card_facts(c, links.get(c.opportunity_id, []))
+        c.fact_ids = [x.fact_id for x in mine]
+        rows += mine
+    return OpportunityResult(cards, None, plan.plan_id, queries, rows)
 
 
 def not_material(
