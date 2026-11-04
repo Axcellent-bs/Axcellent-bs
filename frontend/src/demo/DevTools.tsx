@@ -272,7 +272,18 @@ function CodingModeSection() {
   )
 }
 
-/** 형상관리 연결 목록 + 다른 개발 도구. 개발·배포 화면의 톱니바퀴 창과 시스템 관리 화면이 같이 쓴다 */
+// 연결 창 탭: 형상관리(레포 연결·보안 점검·다른 개발 도구) / AI 코딩(서버 AI·내 Claude·모델·키·예산)
+type PanelTab = 'vcs' | 'ai'
+const PANEL_TABS: { id: PanelTab; label: string }[] = [
+  { id: 'vcs', label: '형상관리' },
+  { id: 'ai', label: 'AI 코딩' },
+]
+const TAB_KEY = 'ax.devtools.tab'
+const readTab = (): PanelTab => {
+  try { return localStorage.getItem(TAB_KEY) === 'ai' ? 'ai' : 'vcs' } catch { return 'vcs' }
+}
+
+/** 연결 창: 형상관리·AI 코딩 탭. 개발·배포 화면의 톱니바퀴 창과 시스템 관리 화면이 같이 쓴다 */
 export function DevToolsPanel() {
   const [list, setList] = useState<VcsConnection[] | null>(null)
   const [offline, setOffline] = useState(false)
@@ -284,6 +295,11 @@ export function DevToolsPanel() {
   const [inv, setInv] = useState<Record<string, VcsInventory>>({})
   const [checking, setChecking] = useState(false)
   const putInv = (rows: VcsInventory[]) => setInv(Object.fromEntries(rows.map((r) => [r.connection_id, r])))
+  const [tab, setTab] = useState<PanelTab>(readTab)
+  const pickTab = (t: PanelTab) => {
+    setTab(t)
+    try { localStorage.setItem(TAB_KEY, t) } catch { /* 저장이 막혀도 탭은 바뀐다 */ }
+  }
 
   useEffect(() => {
     api.list().then(setList).catch(() => { setList([]); setOffline(true) })
@@ -431,7 +447,12 @@ export function DevToolsPanel() {
 
   return (
     <div className="space-y-6">
-      <CodingModeSection />
+      <div className="seg-toggle" role="tablist" aria-label="연결 종류">
+        {PANEL_TABS.map((t) => (
+          <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} aria-pressed={tab === t.id} onClick={() => pickTab(t.id)}>{t.label}</button>
+        ))}
+      </div>
+      {tab === 'ai' ? <CodingModeSection /> : <>
       <section className="card space-y-4 p-6">
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="card-title text-lg">형상관리</h2>
@@ -519,6 +540,7 @@ export function DevToolsPanel() {
           ))}
         </ul>
       </section>
+      </>}
     </div>
   )
 }
