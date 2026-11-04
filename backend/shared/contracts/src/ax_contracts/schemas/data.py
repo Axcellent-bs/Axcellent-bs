@@ -1447,6 +1447,26 @@ class CampaignFact(AxModel):
     source: str = "shop-api"
     period: str  # "<from>~<to>" (UTC ISO)
     sample: int | None = Field(default=None, ge=0)  # 표본 (주문 수·기준선 날 수)
+    # 아래는 예전 응답은 없다. 같은 응답 안에서 이 숫자를 가리키는 id, 근거 주소
+    fact_id: str | None = None
+    link: str | None = None
+
+
+class DataFact(AxModel):
+    """응답에 나오는 숫자 하나 (출처·기간·표본). 숫자는 코드가 낸다.
+
+    응답 안의 숫자는 모두 facts에 있고, 문장(한 줄·요약)은 facts에 있는 숫자만 쓴다.
+    """
+
+    fact_id: str = Field(min_length=1)  # 같은 응답 안에서 이 숫자를 가리키는 id
+    label: str
+    value: float
+    unit: str  # 배, 개, 회, 원(KRW), 건, 일, 위, 비율 등
+    source: str  # youtube, google_trending, naver_search_trend, trend_age, shorts_stats, code 등
+    link: str | None = None  # 근거 주소 (영상·뉴스 등)
+    period: str | None = None  # "<from>~<to>" 또는 스냅샷 시각
+    sample: int | None = Field(default=None, ge=0)  # 표본 (영상 수·날 수·주문 수)
+    about: str | None = None  # 어느 항목의 숫자인지 (insight_id·opportunity_id)
 
 
 class CampaignSales(AxModel):
@@ -1497,6 +1517,11 @@ class CampaignEffectOutput(AxModel):
     # 아래는 예전 응답은 없다. 판매액 (shop-api 주문 기록에서 코드가 셈)과 근거 숫자 목록
     sales: CampaignSales | None = None
     facts: list[CampaignFact] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. 증분 주문 수 (= 주문 판정의 실제 − 기대, 정수 반올림. 모르면 None),
+    # 응답 모양 버전과 만든 시각
+    incremental_orders: int | None = None
+    schema_version: str = ""
+    generated_at: UtcDatetime | None = None
 
 
 # ---------------------------------------------------------------- 연령대별 상승 (trend_age)
@@ -1639,6 +1664,9 @@ class TrendInsight(AxModel):
     # 아래는 예전 응답은 없다. 회사 관련 인사이트 칸 (시즌 키워드·상품 핵심어 중 오른 것, 별도 확보)
     company_related: bool = False
     company_reason: str | None = None  # 왜 회사 관련으로 골랐는지 (코드 문장)
+    # 아래는 예전 응답은 없다. 날짜 없이 바뀐 insight_id 이전의 id(날짜 + 주제)와 이 인사이트의 숫자
+    legacy_insight_id: str | None = None
+    fact_ids: list[str] = Field(default_factory=list)
     # 아래는 예전 응답은 없다. 연령대별 평소 대비 배수 전체 (trend_age 결과 그대로, 설정 순서).
     # 연령대를 보지 않은 주제는 빈 목록이고 이유는 target_age_reason
     age_bands: list[AgeBandTrend] = Field(default_factory=list)
@@ -1710,6 +1738,8 @@ class DomainOpportunity(AxModel):
     limits: list[str] = Field(default_factory=list)
     planning_decides: list[str] = Field(default_factory=list)  # 기획이 정할 것 (코드 고정 문장)
     score: float = 0.0  # 순서를 정한 코드 점수
+    # 아래는 예전 응답은 없다. 이 카드의 숫자 (브리프 facts의 fact_id)
+    fact_ids: list[str] = Field(default_factory=list)
 
 
 class TrendInsightBriefOutput(AxModel):
@@ -1727,6 +1757,11 @@ class TrendInsightBriefOutput(AxModel):
     opportunities: list[DomainOpportunity] = Field(default_factory=list)
     opportunities_reason: str | None = None  # 비었으면 이유
     plan_id: str | None = None  # 쓴 수집 계획 id
+    # 아래는 예전 응답은 없다. 응답에 나오는 숫자 목록(인사이트·카드는 fact_ids로 가리킴),
+    # 응답 모양 버전, 이 브리프를 묶은 시점 id (insight_id에 날짜가 없어 시점은 여기와 generated_at)
+    facts: list[DataFact] = Field(default_factory=list)
+    schema_version: str = ""
+    snapshot_id: str | None = None
 
 
 # ------------------------------------------------ 도메인 프로필 (domain_profile)
@@ -1762,6 +1797,15 @@ class MismatchProduct(AxModel):
     name: str
 
 
+class ProfileEvidence(AxModel):
+    """프로필 칸 하나의 근거 문장 (소개·상품 이름·카테고리 이름·설명 원문 일부, 코드가 대조)."""
+
+    field: Literal["industry", "product_group", "customer_axis", "question"]
+    value: str  # 그 칸의 값 (업종 이름·상품군 이름·고객 축·질문)
+    evidence: str
+    evidence_from: Literal["about", "product", "category", "description"]
+
+
 class IntroMismatch(AxModel):
     """소개와 카탈로그가 어긋남: 회사 소개에 없는 상품군이 카탈로그에 있다 (경고만, 빼지 않음)."""
 
@@ -1790,6 +1834,8 @@ class DomainProfileOutput(AxModel):
     # 아래는 예전 응답은 없다. 경고(intro_mismatch)로 씨앗에서 뺀 키워드 (카탈로그는 그대로,
     # 사람 덮어쓰기 seed_keywords에 넣으면 다시 쓴다)
     mismatch_skipped: list[DroppedKeyword] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. 업종·상품군·고객 축·분석 질문의 근거 문장 (원문 대조를 통과한 것만)
+    evidence: list[ProfileEvidence] = Field(default_factory=list)
     overridden: list[str] = Field(default_factory=list)  # 사람이 덮어쓴 칸 이름
     catalog_hash: str = ""  # 카탈로그·소개 해시 (바뀌면 다시 만든다)
     products_seen: int = Field(default=0, ge=0)
@@ -1850,6 +1896,19 @@ class PlanCategory(AxModel):
 class PlanDropped(AxModel):
     value: str  # 버린 출처 id·카테고리 id·키워드
     reason: str
+    # 아래는 예전 응답은 없다. 버린 값의 종류
+    kind: Literal["source", "category", "keyword", "age"] | None = None
+
+
+class NotPlannedSource(AxModel):
+    """출처 목록에 있지만 계획에 들어가지 않은 출처와, 등록·승인하면 얻는 근거."""
+
+    source_id: str
+    name: str
+    status: SourceStatus
+    approved: bool = False
+    reason: str  # 계획에 없는 이유 (코드 문장)
+    unlocks: str | None = None  # 등록하면 얻는 근거
 
 
 class SourcePlanItem(AxModel):
@@ -1891,6 +1950,8 @@ class SourcePlanOutput(AxModel):
     cached: bool = False
     generated_at: UtcDatetime | None = None
     summary: str = ""
+    # 아래는 예전 응답은 없다. 계획에 없는 출처와 등록하면 얻는 근거
+    not_planned: list[NotPlannedSource] = Field(default_factory=list)
 
 
 # ------------------------------------------------ 하위 주제 넓히기 (domain_subtopics)
