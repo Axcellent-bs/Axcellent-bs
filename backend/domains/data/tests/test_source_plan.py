@@ -267,3 +267,12 @@ def test_subtopic_searches_join_the_youtube_quota(tmp_path: Path) -> None:
         )  # fmt: skip
     ).output
     assert again.cached and again.subtopic_searches == 0  # 검색 캐시 상태는 그때그때
+
+
+def test_plan_is_rebuilt_when_the_code_changes(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    llm = PlanLLM(PICKS)
+    first = _run(tmp_path, llm)
+    assert _run(tmp_path, llm).cached and llm.asked == 1
+    monkeypatch.setattr(sp, "CODE_VERSION", "changed")  # 코드가 바뀐 것과 같다 (소스 해시)
+    again = _run(tmp_path, llm)
+    assert not again.cached and llm.asked == 2 and again.plan_id != first.plan_id

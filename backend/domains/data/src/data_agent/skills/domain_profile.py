@@ -41,10 +41,13 @@ from ax_contracts.schemas.data import (
     ProductGroup,
     SeedKeyword,
 )
+from data_agent.skills.code_version import source_hash
 from data_agent.skills.product_link import CatalogRead
 
 TENANT_CONFIG_ENV = "DATA_TENANT_CONFIG"  # 테넌트 설정 파일 (tenant.toml, scripts/tenant_env.py)
 DB_ENV = "DATA_DOMAIN_PROFILE_DB"
+# 프로필을 만드는 코드의 버전. 코드가 바뀌면 저장 키가 바뀌어 다음 요청에서 다시 만든다
+CODE_VERSION = source_hash("domain_profile", "code_version")
 DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "domain_profile.db"  # backend/.data
 
 # 업종 태그 (출처 목록 `data_sources`의 업종 태그와 같은 값). 회사 이름이 아니라 업종으로만 나눈다
@@ -158,6 +161,7 @@ def profile_hash(tenant: TenantProfile, catalog: CatalogRead) -> str:
         "categories": sorted(catalog.categories.items()),
         "prompt": PROMPT,
         "lists": [INDUSTRIES, CUSTOMER_AXES],
+        "code": CODE_VERSION,
     }
     text = json.dumps(parts, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
