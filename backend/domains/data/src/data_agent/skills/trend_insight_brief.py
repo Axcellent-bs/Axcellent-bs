@@ -779,6 +779,28 @@ def to_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
+def cached_brief(
+    request: TrendInsightBriefRequest, env: Mapping[str, str], now: datetime | None = None
+) -> BriefResult | None:
+    """오늘 저장된 같은 규칙의 브리프 (make_brief 캐시 경로와 같은 응답). 없으면 None.
+
+    핸들러가 지금 인기·숏츠 통계·상품 목록을 계산하기 전에 먼저 본다 (트렌드 감지 탭 속도).
+    """
+    if request.regenerate:
+        return None
+    now = now or now_utc()
+    rules = rules_version(load_config(env))
+    store = BriefStore(env.get(DB_ENV) or DEFAULT_DB)
+    try:
+        hit = store.get(today_kst(now), rules)
+    finally:
+        store.close()
+    if hit is None:
+        return None
+    out = hit.model_copy(update={"cached": True})
+    return BriefResult(out, as_evidence(out, [f"trend_insight_brief cache rules={rules}"], now))
+
+
 async def make_brief(
     request: TrendInsightBriefRequest,
     llm: LLMClient,

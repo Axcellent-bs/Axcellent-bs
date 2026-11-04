@@ -11,6 +11,8 @@ trend_popular처럼 네이버를 부르지 않는 skill이 "오늘 판정 결과
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import sqlite3
 import threading
@@ -115,6 +117,15 @@ class TodayBoard:
     def pairs(self) -> list[tuple[str, str]]:
         self._roll()
         return list(self._pairs)
+
+    def stamp(self) -> str:
+        """오늘 판정판 내용의 해시 (응답 캐시 키). 같은 판정을 다시 기록하면 바뀌지 않는다."""
+        self._roll()
+        body = json.dumps(
+            [str(self._day), sorted((k, v.model_dump_json()) for k, v in self._verdicts.items()),
+             sorted(self._pairs)], ensure_ascii=False,
+        )  # fmt: skip
+        return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
 
     def clear(self) -> None:
         self._day, self._verdicts, self._pairs = None, {}, []

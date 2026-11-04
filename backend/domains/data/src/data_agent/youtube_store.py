@@ -46,6 +46,10 @@ CREATE TABLE IF NOT EXISTS snapshots (
     PRIMARY KEY (collected_at, video_id)
 );
 CREATE INDEX IF NOT EXISTS snapshots_video ON snapshots (video_id, collected_at);
+-- 마지막 수집 시각·기간 조회용 (표 전체를 훑지 않게)
+CREATE INDEX IF NOT EXISTS snapshots_at ON snapshots (collected_at);
+CREATE INDEX IF NOT EXISTS snapshots_popular_at ON snapshots (collected_at)
+    WHERE popular_rank IS NOT NULL;
 CREATE TABLE IF NOT EXISTS runs (
     collected_at  TEXT PRIMARY KEY,
     quota_units   INTEGER NOT NULL,   -- 이 실행에서 쓴 할당량 (문서 단가, 실패한 호출 포함)

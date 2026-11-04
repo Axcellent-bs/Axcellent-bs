@@ -74,8 +74,10 @@ from data_agent.clients.shop_client import (
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.naver_datalab import NaverDatalabConnector
 from data_agent.connectors.youtube import YouTubeConnector
+from data_agent.explain import ExplainCache
 from data_agent.planning_questions import answer_question
 from data_agent.report_store import ReportStore, get_report_store
+from data_agent.response_cache import ResponseCache
 from data_agent.skills import topic_category
 from data_agent.skills.accuracy_report import eval_dir, load_report
 from data_agent.skills.activity_report import InvalidActivityInput, build_report
@@ -380,6 +382,7 @@ async def trend_scan(request: AgentRequest) -> AgentResult:
             data, get_trend_connector(), get_llm(), env=os.environ,
             category_cache=get_category_cache(),
             seed_provider=_profile_seeds(request.meta.context_id),
+            explain_cache=EXPLAINED,
         )  # fmt: skip
     except TrendGroupsUnknown as error:
         return _result(
@@ -427,9 +430,19 @@ async def trend_candidates(request: AgentRequest) -> AgentResult:
 
 async def trend_popular(request: AgentRequest) -> AgentResult:
     """지금 인기 주제 순위 (급상승 판정과 별개, 네이버 안 부름). 조회만 한다(grade read)."""
+    from data_agent.response_cache import data_stamp
+    from data_agent.today_board import BOARD
+
     data = _parse(request, TrendPopularRequest)
     if isinstance(data, AgentResult):
         return data
+    # 응답 캐시: 마지막 스냅샷·판정판·설정이 같으면 처음 계산한 응답 그대로 (새 스냅샷이면 무효)
+    key = RESPONSES.key("trend_popular", data.model_dump(mode="json"),
+                        data_stamp(os.environ, BOARD.stamp()), "")  # fmt: skip
+    if (hit := RESPONSES.get(key)) is not None:
+        outcome, output, evidence = hit
+        return _result(request, TaskStatus.COMPLETED, outcome=outcome, output=output,
+                       evidence=evidence)  # fmt: skip
     result = await popular(
         data,
         get_llm(),
@@ -438,12 +451,14 @@ async def trend_popular(request: AgentRequest) -> AgentResult:
         category_cache=get_category_cache(),
         youtube=get_youtube(),
     )
+    outcome = "ranked" if result.output.items else "empty"
+    output = result.output.model_dump(mode="json")
+    # 계산이 끝난 뒤의 도장으로 저장한다 (이 요청이 새로 분류해 저장분이 바뀌었을 수 있다)
+    after = RESPONSES.key("trend_popular", data.model_dump(mode="json"),
+                          data_stamp(os.environ, BOARD.stamp()), "")  # fmt: skip
+    RESPONSES.put(after, (outcome, output, result.evidence))
     return _result(
-        request,
-        TaskStatus.COMPLETED,
-        outcome="ranked" if result.output.items else "empty",
-        output=result.output.model_dump(mode="json"),
-        evidence=result.evidence,
+        request, TaskStatus.COMPLETED, outcome=outcome, output=output, evidence=result.evidence
     )
 
 
@@ -563,7 +578,7 @@ async def trend_insight_brief(request: AgentRequest) -> AgentResult:
     """기획에 넘기는 인사이트 3~7개 (기존 skill 결과를 코드로 묶음, 하루 캐시). grade read."""
     from data_agent.skills import promo_concepts as promo
     from data_agent.skills.product_link import read_catalog
-    from data_agent.skills.trend_insight_brief import make_brief
+    from data_agent.skills.trend_insight_brief import cached_brief, make_brief
     from data_agent.skills.trend_popular import popular
     from data_agent.today_board import BOARD
 
@@ -571,6 +586,11 @@ async def trend_insight_brief(request: AgentRequest) -> AgentResult:
     if isinstance(data, AgentResult):
         return data
     env = os.environ
+    # 오늘 저장된 브리프가 있으면 재료(지금 인기·숏츠·상품)를 계산하지 않고 바로 준다
+    if (hit := cached_brief(data, env)) is not None:
+        output = hit.output.model_dump(mode="json")
+        return _result(request, TaskStatus.COMPLETED, outcome=hit.output.status, output=output,
+                       evidence=hit.evidence)  # fmt: skip
     llm = get_llm()
     popular_out = None
     popular_why: str | None = None
@@ -829,6 +849,9 @@ async def source_plan(request: AgentRequest) -> AgentResult:
 
 
 _category_cache: topic_category.CategoryCache | None = None
+# 트렌드 감지 탭 읽기 응답 캐시와 설명 문장 캐시 (프로세스에 하나, 데이터 도장이 바뀌면 다른 키)
+RESPONSES = ResponseCache()
+EXPLAINED = ExplainCache()
 
 
 def get_category_cache() -> topic_category.CategoryCache:
