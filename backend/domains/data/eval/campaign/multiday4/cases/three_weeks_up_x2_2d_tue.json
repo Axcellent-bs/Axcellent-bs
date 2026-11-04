@@ -1,0 +1,64 @@
+{
+ "id": "three_weeks_up_x2_2d_tue",
+ "kind": "up",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-10-13T00:00:00Z",
+  "window_to": "2026-10-15T00:00:00Z"
+ },
+ "spec": {
+  "id": "three_weeks_up_x2_2d_tue",
+  "window": {
+   "from": "2026-10-13T00:00:00Z",
+   "to": "2026-10-15T00:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 0.5,
+   "history_days": 21,
+   "weekday_levels": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.1,
+    1.4,
+    1.3
+   ]
+  },
+  "injection": {
+   "type": "sale",
+   "factor": 2.0,
+   "from": "2026-10-13T00:00:00Z",
+   "to": "2026-10-15T00:00:00Z"
+  }
+ },
+ "expected": {
+  "orders": {
+   "status": "known",
+   "direction": "up",
+   "multiplier": 2.0
+  },
+  "revenue": {
+   "status": "known",
+   "direction": "up"
+  },
+  "coupon": {
+   "status": "unknown",
+   "unknown_reason": "no_campaign_id"
+  }
+ },
+ "counted": {
+  "orders_actual": 622,
+  "orders_baseline": 277.6667,
+  "revenue_actual": 15406300,
+  "revenue_baseline": 6920033.3333,
+  "baseline_rule": "7·14·21·28일 전 같은 요일·같은 길이 구간 평균 (최소 3구간)",
+  "baseline_weeks": [
+   7,
+   14,
+   21
+  ],
+  "history_days_before_start": 21
+ },
+ "memo": "2일 캠페인 (화수). 시작 전 기록 21일 → 3구간(최소)으로 판정"
+}

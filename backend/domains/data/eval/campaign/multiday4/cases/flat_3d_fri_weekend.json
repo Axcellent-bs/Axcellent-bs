@@ -1,0 +1,77 @@
+{
+ "id": "flat_3d_fri_weekend",
+ "kind": "none",
+ "input": {
+  "campaign_id": "cmp_m4_flat",
+  "window_from": "2026-10-16T00:00:00Z",
+  "window_to": "2026-10-19T00:00:00Z"
+ },
+ "spec": {
+  "id": "flat_3d_fri_weekend",
+  "window": {
+   "from": "2026-10-16T00:00:00Z",
+   "to": "2026-10-19T00:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 0.5,
+   "history_days": 28,
+   "weekday_levels": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.1,
+    1.4,
+    1.3
+   ]
+  },
+  "injection": {
+   "type": "none"
+  },
+  "campaign": {
+   "campaign_id": "cmp_m4_flat",
+   "buyers": 15,
+   "units_each": 3,
+   "unit_value": 1000,
+   "use_fraction": 0.2,
+   "used_after": 0
+  }
+ },
+ "expected": {
+  "orders": {
+   "status": "known",
+   "direction": "none",
+   "multiplier": 1.0
+  },
+  "revenue": {
+   "status": "known",
+   "direction": "none"
+  },
+  "coupon": {
+   "status": "known",
+   "issued_units": 45,
+   "used_after_units": 0,
+   "note": "조회 시점 기준 누적 사용률이며 캠페인 뒤 사용분도 섞인다"
+  }
+ },
+ "counted": {
+  "orders_actual": 551,
+  "orders_baseline": 518.5,
+  "revenue_actual": 13837600,
+  "revenue_baseline": 13128325.0,
+  "baseline_rule": "7·14·21·28일 전 같은 요일·같은 길이 구간 평균 (최소 3구간)",
+  "baseline_weeks": [
+   7,
+   14,
+   21,
+   28
+  ],
+  "history_days_before_start": 28,
+  "coupon_issued_units": 45,
+  "coupon_used_in_window": 39,
+  "coupon_used_after": 0,
+  "coupon_used_units": 39,
+  "coupon_use_rate": 0.8667
+ },
+ "memo": "3일 캠페인 (금토일). 금~일, 변화 없음"
+}
