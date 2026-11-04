@@ -1,0 +1,49 @@
+{
+ "id": "drop_half_2h_19h",
+ "kind": "down",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-10-14T19:00:00Z",
+  "window_to": "2026-10-14T21:00:00Z"
+ },
+ "spec": {
+  "id": "drop_half_2h_19h",
+  "window": {
+   "from": "2026-10-14T19:00:00Z",
+   "to": "2026-10-14T21:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "order_drop",
+   "factor": 0.5,
+   "from": "2026-10-14T19:00:00Z",
+   "to": "2026-10-14T21:00:00Z"
+  }
+ },
+ "expected": {
+  "sales": {
+   "status": "known",
+   "direction": "down",
+   "lift": 0.5,
+   "direct_attributed": false
+  }
+ },
+ "counted": {
+  "gross_actual": 1889000,
+  "gross_baseline": 3867228.5714,
+  "gross_excess": -1978228.5714,
+  "gross_past_days": {
+   "1": 3831400,
+   "2": 3672100,
+   "3": 4137300,
+   "4": 3914900,
+   "5": 3567000,
+   "6": 3748700,
+   "7": 4199200
+  },
+  "direct_attributed": null
+ },
+ "memo": "주문 절반 → 금액 줄어듦"
+}

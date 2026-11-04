@@ -1,0 +1,46 @@
+{
+ "id": "flat_2h_10h",
+ "kind": "none",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-10-14T10:00:00Z",
+  "window_to": "2026-10-14T12:00:00Z"
+ },
+ "spec": {
+  "id": "flat_2h_10h",
+  "window": {
+   "from": "2026-10-14T10:00:00Z",
+   "to": "2026-10-14T12:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "none"
+  }
+ },
+ "expected": {
+  "sales": {
+   "status": "known",
+   "direction": "none",
+   "lift": 1.0,
+   "direct_attributed": false
+  }
+ },
+ "counted": {
+  "gross_actual": 3993400,
+  "gross_baseline": 4086042.8571,
+  "gross_excess": -92642.8571,
+  "gross_past_days": {
+   "1": 3848300,
+   "2": 4509800,
+   "3": 4271300,
+   "4": 3753000,
+   "5": 4423500,
+   "6": 3886100,
+   "7": 3910300
+  },
+  "direct_attributed": null
+ },
+ "memo": "변화 없음 (불확실·같음이 정답)"
+}

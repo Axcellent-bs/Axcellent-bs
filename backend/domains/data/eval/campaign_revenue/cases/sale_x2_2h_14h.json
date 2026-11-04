@@ -1,0 +1,49 @@
+{
+ "id": "sale_x2_2h_14h",
+ "kind": "up",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-10-14T14:00:00Z",
+  "window_to": "2026-10-14T16:00:00Z"
+ },
+ "spec": {
+  "id": "sale_x2_2h_14h",
+  "window": {
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T16:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "sale",
+   "factor": 2.0,
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T16:00:00Z"
+  }
+ },
+ "expected": {
+  "sales": {
+   "status": "known",
+   "direction": "up",
+   "lift": 2.0,
+   "direct_attributed": false
+  }
+ },
+ "counted": {
+  "gross_actual": 6941700,
+  "gross_baseline": 3371557.1429,
+  "gross_excess": 3570142.8571,
+  "gross_past_days": {
+   "1": 3379200,
+   "2": 2979200,
+   "3": 2870400,
+   "4": 3877300,
+   "5": 3476200,
+   "6": 3143900,
+   "7": 3874700
+  },
+  "direct_attributed": null
+ },
+ "memo": "주문 2배 → 금액도 늘어남"
+}
