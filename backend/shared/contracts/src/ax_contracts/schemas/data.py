@@ -1699,6 +1699,20 @@ class DroppedKeyword(AxModel):
     reason: str
 
 
+class MismatchProduct(AxModel):
+    product_id: str
+    name: str
+
+
+class IntroMismatch(AxModel):
+    """소개와 카탈로그가 어긋남: 회사 소개에 없는 상품군이 카탈로그에 있다 (경고만, 빼지 않음)."""
+
+    group: str  # 상품군 이름
+    category_codes: list[str] = Field(default_factory=list)
+    products: list[MismatchProduct] = Field(default_factory=list)  # 그 상품군의 카탈로그 상품
+    reason: str  # 코드 문장
+
+
 class DomainProfileOutput(AxModel):
     status: Literal["known", "unknown"] = "unknown"
     reason: str | None = None
@@ -1713,6 +1727,8 @@ class DomainProfileOutput(AxModel):
     questions: list[str] = Field(default_factory=list)  # 분석 질문
     seed_keywords: list[SeedKeyword] = Field(default_factory=list)
     dropped_keywords: list[DroppedKeyword] = Field(default_factory=list)  # 근거가 없어 버린 것
+    # 아래는 예전 응답은 없다. 소개와 카탈로그가 어긋남 경고 (소개에 없는 상품군이 카탈로그에 있음)
+    intro_mismatch: list[IntroMismatch] = Field(default_factory=list)
     overridden: list[str] = Field(default_factory=list)  # 사람이 덮어쓴 칸 이름
     catalog_hash: str = ""  # 카탈로그·소개 해시 (바뀌면 다시 만든다)
     products_seen: int = Field(default=0, ge=0)
