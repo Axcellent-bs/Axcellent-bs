@@ -114,7 +114,8 @@ export function ClosingSection({ tick, onChanged, focus }: {
                     <>
                       <p className="text-sm text-ink-700">숫자를 확인했으면 결산을 확정하세요. 확정하면 이 기간 숫자를 보고 기준으로 고정합니다(돈이 움직이지는 않습니다).</p>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <button className="btn-primary" disabled={!humanTokenSet || confirming} onClick={() => confirm(r)}>{confirming ? "확정하는 중…" : "결산 확정"}</button>
+                        <button className="btn-primary" disabled={!humanTokenSet || confirming || r.closable === false} onClick={() => confirm(r)}>{confirming ? "확정하는 중…" : "결산 확정"}</button>
+                        {r.closable === false && <span className="text-sm text-ink-500">아직 끝나지 않은 기간이라 끝난 뒤 확정할 수 있습니다.</span>}
                         {!humanTokenSet && <span className="text-sm text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 버튼이 꺼져 있습니다.</span>}
                       </div>
                     </>

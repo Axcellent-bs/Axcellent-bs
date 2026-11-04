@@ -143,6 +143,7 @@ class FinanceRecords:
 
     def __init__(self) -> None:
         self.closings: dict[tuple[str, str], dict[str, Any]] = {}  # (period, date) → {by, at}
+        self.closing_cancels: list[dict[str, Any]] = []  # 취소한 결산 확정 기록
         self.recon_notes: dict[str, str] = {}  # payment_id → 처리 메모
         self.recon_note_log: list[dict[str, Any]] = []
         self.batches: dict[str, dict[str, Any]] = {}  # 정산 기간 → 묶음 요청 상태

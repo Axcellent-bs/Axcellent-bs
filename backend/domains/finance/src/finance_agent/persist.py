@@ -46,6 +46,7 @@ def dump(s: State) -> dict[str, Any]:
         },
         "records": {
             "closings": [[p, d, v] for (p, d), v in records.closings.items()],
+            "closing_cancels": records.closing_cancels,
             "recon_notes": records.recon_notes,
             "recon_note_log": records.recon_note_log,
             "batches": records.batches,
@@ -75,6 +76,7 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.ledger.coupon_events = {k: list(v) for k, v in led["coupon_events"].items()}
     s.ledger.incident_windows = {k: dict(v) for k, v in led.get("incident_windows", {}).items()}
     s.records.closings = {(p, d): v for p, d, v in rec["closings"]}
+    s.records.closing_cancels = [dict(r) for r in rec.get("closing_cancels", [])]
     s.records.recon_notes = dict(rec["recon_notes"])
     s.records.recon_note_log = list(rec["recon_note_log"])
     s.records.batches = dict(rec["batches"])

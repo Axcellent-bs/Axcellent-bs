@@ -112,6 +112,7 @@ def test_report_shape_and_template_commentary(kit) -> None:
         "confirmed_by",
         "confirmed_at",
         "applied_rules",
+        "closable",
     }
     assert (report["from"], report["to"]) == ("2026-10-20T00:00:00Z", "2026-10-21T00:00:00Z")
     assert (report["status"], report["confirmed_by"], report["commentary_source"]) == (

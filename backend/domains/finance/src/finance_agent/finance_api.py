@@ -4,7 +4,8 @@
 | --- | --- | --- |
 | `GET /api/finance/overview` | 오늘 요약(KPI)과 사람이 할 일 | 없음 |
 | `GET /api/finance/closing?period=&date=` | ① 손익·분개 미리보기·설명 | 없음 |
-| `POST /api/finance/closing/confirm` | ① 결산 확정 기록 | **사람** |
+| `POST /api/finance/closing/confirm` | ① 결산 확정 기록. 날짜 필수, 끝난 기간만 | **사람** |
+| `POST /api/finance/closing/cancel` | ① 잘못한 결산 확정 취소. 이유 필수, 기록이 남음 | **사람** |
 | `GET /api/finance/statements?period=&date=&format=` | ① 손익계산서, `csv`면 내려받기 | 없음 |
 | `GET /api/finance/reconciliation?date=` | ② 결제별 PG 대사 (생략 = 최근 7일) | 없음 |
 | `POST /api/finance/reconciliation/{payment_id}/note` | ② 불일치 처리 메모 | **사람** |
@@ -378,12 +379,17 @@ def add_finance_api(app: FastAPI) -> None:
         period = body.get("period", "day")
         if period not in ("day", "week", "month"):
             return error(400, "invalid_request", "period는 day, week, month 중 하나")
+        # 날짜를 빠뜨려 오늘 결산이 확정되는 일을 막는다
+        if not body.get("date"):
+            return error(400, "invalid_request", "date가 필요하다")
         try:
             d = fc.parse_date(body.get("date")) or fc.today()
         except (ValueError, TypeError) as exc:
             return error(400, "invalid_request", str(exc))
         key = closing_key(period, d)
         records = state().records.closings
+        if key not in records and not closing.period_finished(period, d):
+            return error(409, "period_not_closed", "아직 끝나지 않은 기간은 결산을 확정할 수 없다")
         books = await state().fresh_books()
         if key not in records and closing.unknown_codes(books):
             return error(
@@ -394,6 +400,45 @@ def add_finance_api(app: FastAPI) -> None:
         records.setdefault(key, {"by": person, "at": fc.iso(fc.now())})
         report = await closing.closing_report(books, period, d, records[key])
         return ok(report, books.meta())
+
+    @app.post("/api/finance/closing/cancel", response_model=None)
+    async def cancel_closing(
+        request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """잘못한 확정을 취소한다. 지우지 않고 누가 왜 취소했는지 남긴다."""
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await _body(request)
+        period, reason = body.get("period"), body.get("reason")
+        if period not in ("day", "week", "month") or not body.get("date"):
+            return error(400, "invalid_request", "period와 date가 필요하다")
+        if not isinstance(reason, str) or not reason.strip():
+            return error(400, "invalid_request", "reason이 필요하다")
+        try:
+            d = fc.parse_date(body.get("date"))
+        except (ValueError, TypeError) as exc:
+            return error(400, "invalid_request", str(exc))
+        key = closing_key(period, d)
+        records = state().records
+        confirmed = records.closings.get(key)
+        if confirmed is None:
+            return error(404, "not_confirmed", "확정된 결산이 아니다")
+        records.closing_cancels.append(
+            {
+                "period": key[0],
+                "date": key[1],
+                "confirmed_by": confirmed["by"],
+                "confirmed_at": confirmed["at"],
+                "canceled_by": person,
+                "canceled_at": fc.iso(fc.now()),
+                "reason": reason.strip()[:300],
+            }
+        )
+        del records.closings[key]
+        books = await state().fresh_books()
+        return ok(await closing.closing_report(books, period, d, None), books.meta())
 
     @app.get("/api/finance/reconciliation", response_model=None)
     async def get_reconciliation(date: str | None = None) -> dict | JSONResponse:
