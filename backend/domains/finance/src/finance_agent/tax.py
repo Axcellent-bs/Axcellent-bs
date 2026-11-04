@@ -34,6 +34,7 @@ from typing import Any
 from finance_agent import closing
 from finance_agent import finance_config as fc
 from finance_agent.books import Books, in_range, item_gross, order_sold
+from finance_agent.rules import applied, applied_many, load_rules
 
 METHOD_KO = {
     "card": "카드",
@@ -159,7 +160,65 @@ def vat_pack(books: Books, d: date | None = None) -> dict[str, Any]:
             "shipping_supplier": t.shipping_supplier,
         },
         "checks": checks,
+        "applied_rules": applied_many("VAT-001", "VAT-002", "VAT-003", "VAT-004", "TAX-001"),
         "basis": "신고서가 아니라 신고 보조 집계입니다. 신고는 세무 담당이 홈택스에서 합니다",
+    }
+
+
+def income_tax_amount(base: int) -> int:
+    """법인세 누진 계산(원 미만 버림). 0 이하면 0."""
+    if base <= 0:
+        return 0
+    amount, lower = 0.0, 0
+    for bracket in load_rules().income_tax.brackets:
+        upper = bracket.upto_krw if bracket.upto_krw is not None else base
+        if base > lower:
+            amount += (min(base, upper) - lower) * bracket.rate
+        lower = upper
+    return int(amount)
+
+
+def income_tax_estimate(
+    books: Books, year: int | None = None, today: date | None = None
+) -> dict[str, Any]:
+    """법인세 참고 추정. 장부의 영업 결과만 쓴다. 세무조정 전이라 신고에 쓰지 않는다."""
+    today = today or fc.today()
+    year = year or today.year
+    start_d = date(year, 1, 1)
+    end_d = min(date(year + 1, 1, 1), today + timedelta(days=1))
+    book = load_rules().income_tax
+    missing = "pg_fee" in closing.unknown_codes(
+        books
+    ) or "commission_revenue" in closing.unknown_codes(books)
+    base = None
+    if not missing:
+        base = closing.compute_totals(books, fc.day_start(start_d), fc.day_start(end_d)).net_result
+    income_tax = None if base is None else income_tax_amount(base)
+    local_tax = None if income_tax is None else int(income_tax * book.local_rate_of_tax)
+    return {
+        "year": year,
+        "from": start_d.isoformat(),
+        "to": (end_d - timedelta(days=1)).isoformat(),
+        "operating_result": base,
+        "income_tax": income_tax,
+        "local_income_tax": local_tax,
+        "total": None if income_tax is None or local_tax is None else income_tax + local_tax,
+        "brackets": [b.model_dump() for b in book.brackets],
+        "not_included": [
+            "급여",
+            "임차료",
+            "광고비 외 비용",
+            "영업외손익",
+            "세무조정",
+            "이월결손금",
+            "세액공제",
+        ],
+        "status": "reference_only",
+        "basis": "참고용 추정입니다. 세무조정 전이라 신고에 쓰지 않고, 세무사 검토가 필요합니다.",
+        "applied_rules": [
+            applied("CIT-001", None if base is None else f"영업 결과 {fc.won(base)} 기준"),
+            applied("TAX-001"),
+        ],
     }
 
 
@@ -241,6 +300,7 @@ def seller_report(books: Books, d: date | None = None) -> dict[str, Any]:
         "due": due.isoformat(),
         "rows": out,
         "missing": ["business_no"] if out else [],
+        "applied_rules": applied_many("VAT-005", "TAX-001"),
         "basis": "부가가치세법 제75조 판매·중개 명세 초안. 제출 서식은 국세청 고시 확인 필요",
         "unavailable": "orders" in books.unavailable,
     }

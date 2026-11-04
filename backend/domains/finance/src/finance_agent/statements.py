@@ -24,6 +24,7 @@ from typing import Any, Literal
 from finance_agent import closing
 from finance_agent import finance_config as fc
 from finance_agent.books import Books
+from finance_agent.rules import applied_many
 
 Period = Literal["month", "quarter", "year"]
 PERIODS: tuple[str, ...] = ("month", "quarter", "year")
@@ -173,6 +174,7 @@ def income_statement(books: Books, period: Period, d: date) -> dict[str, Any]:
             for code, label, note in NOTES
         ],
         "basis": "K-IFRS 기능별 손익계산서. 장부(판매 사이트·안전 관문 기록)에 있는 항목만 계산",
+        "applied_rules": applied_many("REV-001", "REV-003", "EXP-001", "PL-002"),
     }
 
 

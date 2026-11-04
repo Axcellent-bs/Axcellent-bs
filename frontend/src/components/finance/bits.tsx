@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { humanId, shortDateTime } from "@/lib/format";
-import type { Envelope, FinanceMeta } from "@/lib/finance";
+import type { AppliedRule, Envelope, FinanceMeta } from "@/lib/finance";
 
 // 재무 화면 공통 부품: 칩, 예시 데이터 표시, 불러오기·오류·빈 상태, 섹션 틀, 데이터 훅.
 
@@ -76,6 +76,30 @@ export function RefList({ refs, sellers, label = "기록 번호 보기" }: { ref
  * 섹션 틀: 제목·설명·오른쪽 도구 + 본문.
  * `titleHidden`: 바로 위 탭 이름과 같은 제목이면 화면에서는 숨기고(읽기 프로그램에는 남김) 한 번만 보이게 한다.
  */
+/** 이 숫자와 판단에 쓴 규칙과 근거. 전문가 확인 전인 규칙은 표시한다 */
+export function AppliedRules({ rules }: { rules?: AppliedRule[] }) {
+  if (!rules?.length) return null;
+  return (
+    <details className="rounded-2xl border border-ink-100 px-4 py-2 text-sm">
+      <summary className="cursor-pointer font-medium text-ink-700">적용한 규칙과 근거 {rules.length}개</summary>
+      <ul className="mt-2 space-y-2">
+        {rules.map((r) => (
+          <li key={r.rule_id}>
+            <p className="flex flex-wrap items-center gap-2 font-medium text-ink-900">
+              {r.title}
+              <Chip label={r.rule_id} tone={TONE.muted} />
+              {r.review === "pending" && <Chip label="전문가 확인 전" tone={TONE.warn} />}
+            </p>
+            <p className="text-ink-700">{r.statement}</p>
+            {r.detail && <p className="text-ink-700">이번 판단: {r.detail}</p>}
+            <p className="text-ink-500">근거: {r.basis}</p>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 export function Panel({ id, title, titleHidden, hint, meta, tools, children }: { id?: string; title: string; titleHidden?: boolean; hint?: ReactNode; meta?: FinanceMeta | null; tools?: ReactNode; children: ReactNode }) {
   return (
     <section id={id} aria-labelledby={id ? `${id}-title` : undefined} className="card scroll-mt-4 p-4 sm:p-5">
