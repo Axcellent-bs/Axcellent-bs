@@ -820,7 +820,7 @@ async def attach_target_ages(
         try:
             result = await run_trend_age(
                 TrendAgeRequest(keywords=list(dict.fromkeys(search.values()))), connector,
-                env=env, now=now,
+                env=env, now=now, caller="promo_concepts",
             )  # fmt: skip
         except Exception as error:  # 연령대는 참고용이라 실패해도 예시는 그대로 둔다
             age_why = f"연령대 조회 실패 ({type(error).__name__})"
