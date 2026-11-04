@@ -906,3 +906,112 @@ def test_settlement_request_records_who_asked(
     monkeypatch.setattr("finance_agent.finance_api.execute", fake)
     client.post("/api/finance/settlements/batch", json={}, headers=HUMAN)
     assert seen[0]["requested_by"] == "taeyoon"
+
+
+# ---------------------------------------------------------------- 장부 밖 손익
+OTHER = {
+    "month": "2026-09",
+    "salary": 300_000,
+    "rent": 100_000,
+    "other_sga": 50_000,
+    "non_operating_income": 20_000,
+    "non_operating_expense": 10_000,
+}
+
+
+def _rows(report: dict) -> dict[str, Any]:
+    return {r["code"]: r for r in report["rows"]}
+
+
+def _statement(client: TestClient, kit: Any, monkeypatch: pytest.MonkeyPatch) -> dict:
+    rows = [kit.order("o1", kit.at("2026-09-10"), [("s", "book", 1, 10_000_000)])]
+    _swap_books(monkeypatch, kit.books(orders=rows))
+    params = {"period": "month", "date": "2026-09-10"}
+    return client.get("/api/finance/statements", params=params).json()["data"]
+
+
+def test_no_entry_keeps_no_data_and_entry_fills_the_rows(
+    client: TestClient, kit: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    empty = _rows(_statement(client, kit, monkeypatch))
+    assert empty["pretax_income"]["current"] is None and empty["other_sga"]["note"]
+    operating = empty["operating_income"]["current"]
+
+    url = "/api/finance/other-pnl"
+    assert client.post(url, json=OTHER).status_code == 401
+    assert client.post(url, json=OTHER, headers=HUMAN).status_code == 200
+    rows = _rows(_statement(client, kit, monkeypatch))
+    assert rows["other_sga"]["current"] == -450_000
+    assert rows["operating_income"]["current"] == operating - 450_000
+    assert rows["non_operating_income"]["current"] == 20_000
+    assert rows["non_operating_expense"]["current"] == -10_000
+    assert rows["pretax_income"]["current"] == operating - 450_000 + 10_000
+    assert rows["income_tax"]["current"] is None and rows["net_income"]["current"] is None
+    assert rows["other_sga"]["note"] == "재무 담당 입력값으로 계산"
+
+
+def test_entered_tax_gives_net_income(
+    client: TestClient, kit: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client.post("/api/finance/other-pnl", json=OTHER | {"income_tax": 5_000}, headers=HUMAN)
+    rows = _rows(_statement(client, kit, monkeypatch))
+    assert rows["net_income"]["current"] == rows["pretax_income"]["current"] - 5_000
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"month": "2026-13"},
+        {"month": "2099-01"},
+        OTHER | {"salary": -1},
+        OTHER | {"rent": "100"},
+        OTHER | {"rent": True},
+        OTHER | {"income_tax": -5},
+    ],
+)
+def test_other_pnl_rejects_bad_input(client: TestClient, bad: dict) -> None:
+    assert client.post("/api/finance/other-pnl", json=bad, headers=HUMAN).status_code == 400
+
+
+def test_edit_keeps_history_and_confirmed_month_is_locked(
+    client: TestClient, kit: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    url = "/api/finance/other-pnl"
+    client.post(url, json=OTHER, headers=HUMAN)
+    second = client.post(url, json=OTHER | {"salary": 1}, headers=HUMAN).json()["data"]["entry"]
+    assert second["history"][0]["salary"] == 300_000
+
+    rows = [kit.order("o1", kit.at("2026-09-10"), [("s", "book", 1, 1_000_000)])]
+    _swap_books(monkeypatch, kit.books(orders=rows))
+    monkeypatch.setattr("finance_agent.closing.pending_recon", lambda books, start, end: 0)
+    body = {"period": "month", "date": "2026-09-10"}
+    assert client.post("/api/finance/closing/confirm", json=body, headers=HUMAN).status_code == 200
+    locked = client.post(url, json=OTHER, headers=HUMAN)
+    assert locked.status_code == 409 and locked.json()["error"]["code"] == "month_confirmed"
+    view = client.get(url, params={"month": "2026-09"}).json()["data"]
+    assert view["locked"] is True and view["entry"]["salary"] == 1
+    # 저장한 재무제표 값에 입력이 들어가 고정된다
+    params = {"period": "month", "date": "2026-09-10"}
+    report = client.get("/api/finance/statements", params=params).json()["data"]
+    assert _rows(report)["other_sga"]["current"] == -(1 + 100_000 + 50_000)
+
+
+def test_budget_and_tax_estimate_use_entered_costs(kit: Any) -> None:
+    from datetime import date
+
+    from finance_agent import campaign as cp
+    from finance_agent import tax
+
+    rows = [
+        kit.order(f"o{n}", kit.at(f"2026-09-{n:02d}"), [("s", "book", 1, 1_000_000)])
+        for n in range(1, 21)
+    ]
+    books = kit.books(orders=rows)
+    other = {"2026-09": OTHER}
+    plain = cp.budget_from_last_month(books, date(2026, 10, 15))
+    less = cp.budget_from_last_month(books, date(2026, 10, 15), None, other)
+    assert less["amount_krw"] == plain["amount_krw"] - 135_000 and "입력 비용" in less["basis"]
+    before = tax.income_tax_estimate(books, 2026, date(2026, 10, 15))
+    after = tax.income_tax_estimate(books, 2026, date(2026, 10, 15), other)
+    assert after["operating_result"] == before["operating_result"] - 440_000
+    assert after["entered_months"] == 1

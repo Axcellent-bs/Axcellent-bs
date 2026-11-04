@@ -1,3 +1,4 @@
+import { writeAuth } from "./api";
 import { DASHBOARD_API_URL, RELAY_API_URL } from "./env";
 import { MARKETING_HOLD_ACTIONS, finance, type ExecutionRecord, type Review } from "./finance";
 import { shortDateTime } from "./format";
@@ -216,3 +217,24 @@ export async function loadMarketingLive(): Promise<MarketingLive> {
     loaded_at: new Date().toISOString(),
   };
 }
+
+// ---------------------------------------------------------------- 캠페인 시작·결과·취소
+export interface CampaignAnswer { status: string; outcome: string | null; output: Record<string, unknown> }
+
+async function campaignPost(path: string, body: unknown): Promise<CampaignAnswer> {
+  const res = await fetch(`${DASHBOARD_API_URL}/api/dashboard/campaigns${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...writeAuth("POST", path) },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(json?.error?.message ?? `요청 실패 (${res.status})`);
+  return json.data as CampaignAnswer;
+}
+
+export const campaigns = {
+  start: (body: { campaign_id: string; campaign_name: string; channel: string; budget_krw: number }) => campaignPost("/start", body),
+  result: (id: string, body: { campaign_name: string; channel: string; period_from: string; period_to: string; spend_krw: number; coupon_krw: number; gmv_krw: number | null; source: string }) =>
+    campaignPost(`/${encodeURIComponent(id)}/result`, body),
+  cancel: (id: string, reason: string) => campaignPost(`/${encodeURIComponent(id)}/cancel`, { reason }),
+};

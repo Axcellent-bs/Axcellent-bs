@@ -46,7 +46,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
               {v.running.length > 0 && (
                 <p className="text-sm text-ink-700">결과를 기다리는 캠페인: {v.running.map((r) => `${r.campaign_id} ${krw(r.active_krw)}`).join(", ")}</p>
               )}
-              {v.campaigns.length === 0 ? <Empty>아직 기록된 캠페인이 없습니다. 마케팅 AI가 성과를 보내면 여기에 적힙니다.</Empty> : (
+              {v.campaigns.length === 0 ? <Empty>아직 기록된 캠페인이 없습니다. 마케팅 AI 화면에서 캠페인을 시작하고 결과를 저장하면 여기에 적힙니다.</Empty> : (
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[840px] text-sm">
                     <thead className="text-left text-ink-500">

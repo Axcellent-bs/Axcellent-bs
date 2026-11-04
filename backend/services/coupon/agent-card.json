@@ -83,7 +83,8 @@
       "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
       "grade": "B",
       "allowed_requesters": [
-        "orchestrator"
+        "orchestrator",
+        "dashboard-api"
       ],
       "verifier": "finance",
       "priority": "recommended"
@@ -95,7 +96,8 @@
       "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
       "grade": "read",
       "allowed_requesters": [
-        "orchestrator"
+        "orchestrator",
+        "dashboard-api"
       ],
       "verifier": null,
       "priority": "recommended"
@@ -131,7 +133,10 @@
       "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignCancelInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignCancelInput",
       "grade": "read",
-      "allowed_requesters": ["orchestrator"],
+      "allowed_requesters": [
+        "orchestrator",
+        "dashboard-api"
+      ],
       "verifier": null,
       "priority": "recommended"
     }

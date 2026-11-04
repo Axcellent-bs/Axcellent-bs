@@ -26,6 +26,8 @@
 | `GET /api/finance/team-budget?month=YYYY-MM` | ④ 팀 예산 (팀 인원 × 인당 월 단가) | 없음 |
 | `POST /api/finance/team-budget/{month}/approve` | ④ 팀 예산 확정 (`signature` 일치) | **사람** |
 | `GET /api/finance/rules` | 재무·세무 규칙과 근거 | 없음 |
+| `GET /api/finance/other-pnl?month=` | ① 그 달의 장부 밖 손익 | 없음 |
+| `POST /api/finance/other-pnl` | ① 장부 밖 손익 입력. 확정한 달은 409 | **사람** |
 | `GET /api/finance/campaigns` | ⑥ 캠페인 손익·예산 판단·교훈·의견 | 없음 |
 | `GET /api/finance/campaigns/compare?channel=&requested=` | ⑥ 실패 이력 전/후 판단 비교 | 없음 |
 | `GET /api/finance/insights` | ⑥ 재무 인사이트와 근거 | 없음 |
@@ -93,6 +95,13 @@ UNAVAILABLE_EXECUTION = "exe_unavailable"  # agent-template execute()가 safety�
 REVIEW_CHECK_SECONDS = 3.0
 
 
+OTHER_PNL_FIELDS = ("salary", "rent", "other_sga", "non_operating_income", "non_operating_expense")
+
+
+def _month_confirmed(closings: dict[tuple[str, str], dict[str, Any]], month: str) -> bool:
+    return ("month", f"{month}-01") in closings
+
+
 def ok(data: Any, meta: dict[str, Any]) -> dict[str, Any]:
     return {"data": data, "meta": meta}
 
@@ -123,7 +132,11 @@ async def run_export_cycle(trigger: str = "auto") -> dict[str, Any]:
         imported = exports.scan_inbox(records.bank_rows, records.bank_imports)
         books = await state().fresh_books()
         package = exports.make_package(
-            books, records.exports, closings=records.closings, filings=records.vat_filings
+            books,
+            records.exports,
+            closings=records.closings,
+            filings=records.vat_filings,
+            other_pnl=records.other_pnl,
         )
         return {"trigger": trigger, "package": package, "imported": imported}
 
@@ -388,8 +401,9 @@ def add_finance_api(app: FastAPI) -> None:
         except ValueError as exc:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
+        records = state().records
         report = statements.income_statement(  # type: ignore[arg-type]
-            books, period, d, state().records.closings
+            books, period, d, records.closings, records.other_pnl
         )
         meta = books.meta()
         if format == "json":
@@ -448,7 +462,13 @@ def add_finance_api(app: FastAPI) -> None:
                     f"PG 정산 전 결제 {pending:,}건이 남아 월 결산을 확정할 수 없다",
                 )
             draft = await closing.closing_report(books, period, d, None, records)
-            column = statements.column(books, fc.day_start(start), fc.day_start(end))
+            entered = state().records.other_pnl.get(start.isoformat()[:7])
+            column = statements.column(
+                books,
+                fc.day_start(start),
+                fc.day_start(end),
+                entered if period == "month" else None,
+            )
             records[key] = {
                 "by": person,
                 "at": fc.iso(fc.now()),
@@ -496,6 +516,65 @@ def add_finance_api(app: FastAPI) -> None:
         del records.closings[key]
         books = await state().fresh_books()
         return ok(await closing.closing_report(books, period, d, None), books.meta())
+
+    @app.get("/api/finance/other-pnl", response_model=None)
+    def get_other_pnl(month: str) -> dict | JSONResponse:
+        if not team_budget.MONTH_RE.match(month):
+            return error(400, "invalid_request", "month는 YYYY-MM")
+        records = state().records
+        return ok(
+            {
+                "month": month,
+                "entry": records.other_pnl.get(month),
+                "locked": _month_confirmed(records.closings, month),
+            },
+            {"collected_at": fc.iso(fc.now())},
+        )
+
+    @app.post("/api/finance/other-pnl", response_model=None)
+    async def post_other_pnl(
+        request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """쇼핑몰 장부에 없는 월 손익을 사람이 입력한다. 고치면 이전 값을 기록에 남긴다."""
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await _body(request)
+        month = body.get("month")
+        if not isinstance(month, str) or not team_budget.MONTH_RE.match(month):
+            return error(400, "invalid_request", "month는 YYYY-MM")
+        if month > fc.today().isoformat()[:7]:
+            return error(400, "invalid_request", "아직 오지 않은 달은 입력할 수 없다")
+        records = state().records
+        if _month_confirmed(records.closings, month):
+            return error(409, "month_confirmed", "확정한 달은 고칠 수 없다. 조정으로 처리해 달라")
+        entry: dict[str, Any] = {}
+        for field in OTHER_PNL_FIELDS:
+            value = body.get(field, 0)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                return error(400, "invalid_request", f"{field}는 0 이상의 정수 원")
+            entry[field] = value
+        tax_value = body.get("income_tax")
+        if tax_value is not None and (
+            isinstance(tax_value, bool) or not isinstance(tax_value, int) or tax_value < 0
+        ):
+            return error(400, "invalid_request", "income_tax는 0 이상의 정수 원이거나 비운다")
+        previous = records.other_pnl.get(month)
+        history = list((previous or {}).get("history", []))
+        if previous:
+            history.append({k: v for k, v in previous.items() if k != "history"})
+        records.other_pnl[month] = entry | {
+            "income_tax": tax_value,
+            "memo": str(body.get("memo") or "")[:300],
+            "by": person,
+            "at": fc.iso(fc.now()),
+            "history": history,
+        }
+        return ok(
+            {"month": month, "entry": records.other_pnl[month], "locked": False},
+            {"collected_at": fc.iso(fc.now())},
+        )
 
     @app.post("/api/finance/closing/adjust", response_model=None)
     async def adjust_closing(
@@ -943,7 +1022,8 @@ def add_finance_api(app: FastAPI) -> None:
         if year is not None and not 2026 <= year <= fc.today().year:
             return error(400, "invalid_request", "year는 2026년 이후 올해까지만 계산한다")
         books = await state().books()
-        return ok(tax.income_tax_estimate(books, year), books.meta())
+        estimate = tax.income_tax_estimate(books, year, other_pnl=state().records.other_pnl)
+        return ok(estimate, books.meta())
 
     @app.get("/api/finance/exports")
     async def get_exports() -> dict:

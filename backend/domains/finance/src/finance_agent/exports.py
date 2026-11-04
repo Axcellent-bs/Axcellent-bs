@@ -84,13 +84,14 @@ def build_files(
     last_day: date,
     closings: dict[tuple[str, str], dict[str, Any]] | None = None,
     filings: dict[str, dict[str, Any]] | None = None,
+    other_pnl: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, bytes]:
     """파일 이름 → 내용. 이름은 코드가 정한다.
 
     분기 자료는 분기가 끝난 달의 묶음에만 넣는다. 진행 중인 분기는 주문마다 숫자가 바뀌어
     묶음이 계속 새 판이 되고 승인 요청이 반복된다.
     """
-    report = statements.income_statement(books, "month", last_day, closings)
+    report = statements.income_statement(books, "month", last_day, closings, other_pnl)
     missing = list(books.unavailable)
     files = {
         f"income-statement-{month}.csv": statements.to_csv(report, missing).encode("utf-8-sig"),
@@ -116,6 +117,7 @@ def make_package(
     today: date | None = None,
     closings: dict[tuple[str, str], dict[str, Any]] | None = None,
     filings: dict[str, dict[str, Any]] | None = None,
+    other_pnl: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """지난달 묶음을 만든다. 내용이 같으면 그대로 두고, 달라지면 새 판으로 바꾼다."""
     today = today or fc.today()
@@ -134,7 +136,7 @@ def make_package(
             "status": "skipped",
             "reason": "FINANCE_EXPORT_DIR이 없다",
         }
-    files = build_files(books, month, last_day, closings, filings)
+    files = build_files(books, month, last_day, closings, filings, other_pnl)
     manifest = [
         {"name": name, "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()}
         for name, body in sorted(files.items())

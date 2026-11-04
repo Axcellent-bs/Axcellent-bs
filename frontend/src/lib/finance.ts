@@ -111,6 +111,13 @@ export interface FinanceInsight {
   evidence: { label: string; value: string | number | null }[]; recommendation: string; applied_rules: AppliedRule[];
 }
 
+/** 쇼핑몰 장부에 없는 월 손익. 재무 담당이 입력한다 */
+export interface OtherPnlInput {
+  month: string; salary: number; rent: number; other_sga: number;
+  non_operating_income: number; non_operating_expense: number; income_tax: number | null; memo?: string;
+}
+export interface OtherPnlView { month: string; locked: boolean; entry: (OtherPnlInput & { by: string; at: string }) | null }
+
 export interface ClosingReport {
   applied_rules?: AppliedRule[];
   closable?: boolean;
@@ -599,6 +606,8 @@ export const finance = {
   confirmVat: (date: string) => fin<Envelope<VatPack>>("/api/finance/tax/vat/confirm", { method: "POST", body: { date }, human: true }),
   adjustClosing: (date: string, reason: string, signature: string) =>
     fin<Envelope<ClosingReport>>("/api/finance/closing/adjust", { method: "POST", body: { date, reason, signature }, human: true }),
+  otherPnl: (month: string) => fin<Envelope<OtherPnlView>>(`/api/finance/other-pnl${query({ month })}`),
+  saveOtherPnl: (body: OtherPnlInput) => fin<Envelope<OtherPnlView>>("/api/finance/other-pnl", { method: "POST", body, human: true }),
   /** 법인세 참고 추정. 신고에 쓰지 않는다 */
   incomeEstimate: () => fin<Envelope<IncomeEstimate>>("/api/finance/tax/income-estimate"),
   /** 자동으로 만든 파일과 은행 폴더 기록 */

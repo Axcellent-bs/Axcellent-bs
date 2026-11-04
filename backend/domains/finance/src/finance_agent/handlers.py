@@ -146,6 +146,7 @@ class FinanceRecords:
     def __init__(self) -> None:
         self.closings: dict[tuple[str, str], dict[str, Any]] = {}  # (period, date) → {by, at}
         self.closing_cancels: list[dict[str, Any]] = []  # 취소한 결산 확정 기록
+        self.other_pnl: dict[str, dict[str, Any]] = {}  # YYYY-MM → 사람이 입력한 장부 밖 손익
         self.vat_filings: dict[str, dict[str, Any]] = {}  # 분기 시작일 → 확정한 부가세 숫자
         self.vat_filing_cancels: list[dict[str, Any]] = []
         self.recon_notes: dict[str, str] = {}  # payment_id → 처리 메모
@@ -615,7 +616,9 @@ async def started_campaigns() -> dict[str, dict[str, Any]] | None:
 async def monthly_budget() -> dict[str, Any]:
     if state().budget_override is not None:
         return state().budget_override
-    return cp.budget_from_last_month(await state().books(), fc.today(), state().records.closings)
+    return cp.budget_from_last_month(
+        await state().books(), fc.today(), state().records.closings, state().records.other_pnl
+    )
 
 
 async def repeat_estimate() -> dict[str, Any] | None:

@@ -265,6 +265,7 @@ def budget_from_last_month(
     books: Books,
     today: date,
     closings: dict[tuple[str, str], dict[str, Any]] | None = None,
+    other_pnl: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """월 예산 = 직전 달 영업 결과 × 비율. 확정한 달은 확정 숫자를 쓴다. 자료가 없으면 임시값.
 
@@ -283,6 +284,10 @@ def budget_from_last_month(
     snap = ((closings or {}).get(("month", last_month.isoformat())) or {}).get("snapshot")
     if snap:
         net = next((x["amount"] for x in snap["lines"] if x["code"] == "net_result"), None)
+        # 비용을 입력하고 확정한 달은 비용까지 뺀 영업이익이 기준이다
+        stated = (snap.get("statement") or {}).get("operating_income")
+        if (snap.get("statement") or {}).get("other_sga") is not None and stated is not None:
+            net = stated
         if net is not None:
             return {
                 "amount_krw": max(fc.rate_amount(net, ratio), 0),
@@ -294,9 +299,13 @@ def budget_from_last_month(
     totals = closing.compute_totals(books, fc.day_start(last_month), fc.day_start(this_month))
     if totals.order_count == 0:
         return fallback_budget()
+    entered = (other_pnl or {}).get(name)
+    costs = entered["salary"] + entered["rent"] + entered["other_sga"] if entered else 0
+    result = totals.net_result - costs
+    label = "입력 비용을 뺀 영업이익" if entered else "영업 결과"
     return {
-        "amount_krw": max(fc.rate_amount(totals.net_result, ratio), 0),
-        "basis": f"{name} 영업 결과 {fc.won(totals.net_result)}의 {ratio:.0%}{note}",
+        "amount_krw": max(fc.rate_amount(result, ratio), 0),
+        "basis": f"{name} {label} {fc.won(result)}의 {ratio:.0%}{note}",
         "provisional": short,
     }
 

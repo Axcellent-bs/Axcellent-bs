@@ -230,7 +230,10 @@ def income_tax_amount(base: int) -> int:
 
 
 def income_tax_estimate(
-    books: Books, year: int | None = None, today: date | None = None
+    books: Books,
+    year: int | None = None,
+    today: date | None = None,
+    other_pnl: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """법인세 참고 추정. 장부의 영업 결과만 쓴다. 세무조정 전이라 신고에 쓰지 않는다."""
     today = today or fc.today()
@@ -244,6 +247,16 @@ def income_tax_estimate(
     base = None
     if not missing:
         base = closing.compute_totals(books, fc.day_start(start_d), fc.day_start(end_d)).net_result
+    months = [v for k, v in (other_pnl or {}).items() if k.startswith(f"{year}-")]
+    if base is not None:
+        for row in months:
+            base += (
+                row["non_operating_income"]
+                - row["non_operating_expense"]
+                - row["salary"]
+                - row["rent"]
+                - row["other_sga"]
+            )
     income_tax = None if base is None else income_tax_amount(base)
     local_tax = None if income_tax is None else int(income_tax * book.local_rate_of_tax)
     return {
@@ -255,15 +268,20 @@ def income_tax_estimate(
         "local_income_tax": local_tax,
         "total": None if income_tax is None or local_tax is None else income_tax + local_tax,
         "brackets": [b.model_dump() for b in book.brackets],
-        "not_included": [
-            "급여",
-            "임차료",
-            "광고비 외 비용",
-            "영업외손익",
-            "세무조정",
-            "이월결손금",
-            "세액공제",
-        ],
+        "entered_months": len(months),
+        "not_included": (
+            ["입력하지 않은 달의 비용", "세무조정", "이월결손금", "세액공제"]
+            if months
+            else [
+                "급여",
+                "임차료",
+                "광고비 외 비용",
+                "영업외손익",
+                "세무조정",
+                "이월결손금",
+                "세액공제",
+            ]
+        ),
         "status": "reference_only",
         "basis": "참고용 추정입니다. 세무조정 전이라 신고에 쓰지 않고, 세무사 검토가 필요합니다.",
         "applied_rules": [

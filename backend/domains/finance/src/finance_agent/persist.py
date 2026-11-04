@@ -47,6 +47,7 @@ def dump(s: State) -> dict[str, Any]:
         "records": {
             "closings": [[p, d, v] for (p, d), v in records.closings.items()],
             "closing_cancels": records.closing_cancels,
+            "other_pnl": records.other_pnl,
             "vat_filings": records.vat_filings,
             "vat_filing_cancels": records.vat_filing_cancels,
             "recon_notes": records.recon_notes,
@@ -79,6 +80,7 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.ledger.incident_windows = {k: dict(v) for k, v in led.get("incident_windows", {}).items()}
     s.records.closings = {(p, d): v for p, d, v in rec["closings"]}
     s.records.closing_cancels = [dict(r) for r in rec.get("closing_cancels", [])]
+    s.records.other_pnl = {k: dict(v) for k, v in rec.get("other_pnl", {}).items()}
     s.records.vat_filings = {k: dict(v) for k, v in rec.get("vat_filings", {}).items()}
     s.records.vat_filing_cancels = [dict(r) for r in rec.get("vat_filing_cancels", [])]
     s.records.recon_notes = dict(rec["recon_notes"])

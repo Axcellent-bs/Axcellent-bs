@@ -31,6 +31,7 @@ PERIODS: tuple[str, ...] = ("month", "quarter", "year")
 
 ORDER_SOURCES = {"orders", "orders_partial", "products"}
 NO_DATA = "이 장부에 없는 항목"
+ENTERED = "재무 담당 입력값으로 계산"
 
 # (코드, 이름, 들여쓰기, 주석). 순서가 곧 표 순서다
 ROWS: list[tuple[str, str, int, str]] = [
@@ -97,8 +98,14 @@ def _sum(*values: int | None) -> int | None:
     return None if any(v is None for v in values) else sum(v for v in values if v is not None)
 
 
-def column(books: Books, start: datetime, end: datetime) -> dict[str, int | None]:
-    """한 기간의 손익계산서 값. 못 받은 자료로 만드는 줄은 None."""
+def other_sga_total(other: dict[str, Any]) -> int:
+    return other["salary"] + other["rent"] + other["other_sga"]
+
+
+def column(
+    books: Books, start: datetime, end: datetime, other: dict[str, Any] | None = None
+) -> dict[str, int | None]:
+    """한 기간의 손익계산서 값. 못 받은 자료로 만드는 줄은 None. `other`는 사람이 입력한 값."""
     t = closing.compute_totals(books, start, end)
     missing = set(books.unavailable)
     orders_ok = not (ORDER_SOURCES & missing)
@@ -108,21 +115,28 @@ def column(books: Books, start: datetime, end: datetime) -> dict[str, int | None
     pg_fee = -t.pg_fee if orders_ok else None
     revenue = _sum(commission, discount)
     gross = _sum(revenue, 0)
+    other_sga = -other_sga_total(other) if other else None
+    sga = _sum(pg_fee, other_sga) if other else pg_fee
+    operating = _sum(gross, sga)
+    income = other["non_operating_income"] if other else None
+    expense = -other["non_operating_expense"] if other else None
+    pretax = _sum(operating, income, expense) if other else None
+    tax = -other["income_tax"] if other and other.get("income_tax") is not None else None
     return {
         "revenue": revenue,
         "commission": commission,
         "sales_discount": discount,
         "cogs": 0,
         "gross_profit": gross,
-        "sga": pg_fee,
+        "sga": sga,
         "pg_fee": pg_fee,
-        "other_sga": None,
-        "operating_income": _sum(gross, pg_fee),
-        "non_operating_income": None,
-        "non_operating_expense": None,
-        "pretax_income": None,
-        "income_tax": None,
-        "net_income": None,
+        "other_sga": other_sga,
+        "operating_income": operating,
+        "non_operating_income": income,
+        "non_operating_expense": expense,
+        "pretax_income": pretax,
+        "income_tax": tax,
+        "net_income": _sum(pretax, tax) if tax is not None else None,
         "gmv": t.gmv if orders_ok else None,
         "refund_total": t.refund_total if orders_ok else None,
         "order_count": t.order_count if orders_ok else None,
@@ -151,14 +165,19 @@ def composed_column(
     closings: dict[tuple[str, str], dict[str, Any]] | None,
     start: date,
     end: date,
+    other_pnl: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[dict[str, int | None], int, int]:
     """기간 값, 그중 확정한 달 수, 달 수. 확정한 달은 확정 숫자, 나머지는 지금 장부다."""
+    other_pnl = other_pnl or {}
     months = _months(start, end)
     fixed = {m: frozen_column(closings, m) for m, _ in months}
     count = sum(1 for v in fixed.values() if v is not None)
-    if count == 0:
+    entered = {m: other_pnl.get(m.isoformat()[:7]) for m, _ in months}
+    if count == 0 and not any(entered.values()):
         return column(books, fc.day_start(start), fc.day_start(end)), 0, len(months)
-    cols = [fixed[m] or column(books, fc.day_start(m), fc.day_start(n)) for m, n in months]
+    cols = [
+        fixed[m] or column(books, fc.day_start(m), fc.day_start(n), entered[m]) for m, n in months
+    ]
     keys = cols[0].keys()
     return {k: _sum(*(c[k] for c in cols)) for k in keys}, count, len(months)
 
@@ -168,12 +187,13 @@ def income_statement(
     period: Period,
     d: date,
     closings: dict[tuple[str, str], dict[str, Any]] | None = None,
+    other_pnl: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """손익계산서(당기·전기). 금액 단위는 원, 비용은 − 로 적는다. 확정한 달은 확정 숫자를 쓴다."""
     start, end = period_range(period, d)
     prev = previous_start(period, start)
-    current, now_fixed, now_total = composed_column(books, closings, start, end)
-    previous, prev_fixed, prev_total = composed_column(books, closings, prev, start)
+    current, now_fixed, now_total = composed_column(books, closings, start, end, other_pnl)
+    previous, prev_fixed, prev_total = composed_column(books, closings, prev, start, other_pnl)
     company = closing.tenant_name()
     return {
         "title": "손익계산서",
@@ -198,7 +218,7 @@ def income_statement(
                 "total": code in TOTAL_CODES,
                 "current": current[code],
                 "previous": previous[code],
-                "note": note,
+                "note": ENTERED if note == NO_DATA and current[code] is not None else note,
             }
             for code, label, level, note in ROWS
         ],
@@ -219,7 +239,9 @@ def income_statement(
             "current_months": now_fixed,
             "total_months": now_total,
         },
-        "applied_rules": applied_many("REV-001", "REV-003", "EXP-001", "PL-002", "CLS-001"),
+        "applied_rules": applied_many(
+            "REV-001", "REV-003", "EXP-001", "PL-002", "PL-003", "CLS-001"
+        ),
     }
 
 
