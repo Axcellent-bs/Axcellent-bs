@@ -6,6 +6,11 @@
   safety가 정하고, 여기서는 숫자를 만들지 않는다.
 - 결과: 끝난 캠페인의 성과를 재무 `record_campaign_result`에 계약 모델(`CampaignResultInput`)로
   그대로 전달한다. 모르는 숫자(`gmv_krw` 등)는 비워 두고 채우지 않는다.
+- 광고비: 마케팅에는 실제 집행액 출처가 없다. 호출자가 `spend_krw`를 주면(`source` 필수) 그대로
+  전달한다. 생략하면 이 프로세스에서 `executed`된 캠페인의 예산(`budget_krw`)을 `source =
+  "marketing.budget_krw"`로 대신 쓰고, 출력에 예산 기준 참고값(실제 집행액 아님)이라고 밝힌다.
+  기억에 없으면(이 프로세스에서 시작한 적 없음·재시작) `spend_unknown`으로 멈추고 0을 보내지 않는다.
+- 예산 기억(`BUDGETS`)은 메모리뿐이라 프로세스를 다시 띄우면 사라진다.
 - 쿠폰 지급(`issue_coupon`)은 이 흐름과 별개다. 재무는 쿠폰을 판단하지 않는다.
 - 재무에 닿지 못하면 승인으로 보지 않는다(fail-closed): 시작은 실행하지 않고 멈춘다.
 """
@@ -39,6 +44,15 @@ FINANCE = "finance"
 REVIEW_SKILL = "review_campaign_budget"
 RECORD_SKILL = "record_campaign_result"
 START_ACTION = "start_campaign"
+BUDGET_SOURCE = "marketing.budget_krw"
+BUDGET_NOTE = "spend_krw는 실제 집행액이 아니라 시작 때의 예산(budget_krw) 기준 참고값이다"
+
+# executed된 캠페인의 예산 {campaign_id: budget_krw}. 메모리뿐이라 재시작하면 사라진다.
+BUDGETS: dict[str, int] = {}
+
+
+def reset_budgets() -> None:
+    BUDGETS.clear()
 
 
 class StartCampaignInput(AxModel):
@@ -51,7 +65,22 @@ class StartCampaignInput(AxModel):
 
 
 class RecordCampaignResultInput(CampaignResultInput):
-    """재무 계약(`CampaignResultInput`)에 날짜 순서만 확인을 더한다. 필드는 그대로다."""
+    """재무 계약(`CampaignResultInput`)과 같되 `spend_krw`·`source`는 생략할 수 있다.
+
+    생략하면 기억해 둔 예산으로 채운다. `spend_krw`를 주면 `source`도 있어야 하고,
+    `source`만 주는 것은 받지 않는다. 날짜 순서도 확인한다.
+    """
+
+    spend_krw: int | None = Field(default=None, ge=0)
+    source: str | None = None
+
+    @model_validator(mode="after")
+    def _spend_and_source_together(self) -> RecordCampaignResultInput:
+        if self.spend_krw is not None and not self.source:
+            raise ValueError("spend_krw를 주면 source(출처)도 줘야 한다")
+        if self.spend_krw is None and self.source is not None:
+            raise ValueError("source만 줄 수 없다(spend_krw와 함께 준다)")
+        return self
 
     @model_validator(mode="after")
     def _period_in_order(self) -> RecordCampaignResultInput:
@@ -210,7 +239,10 @@ async def start_campaign(request: AgentRequest) -> AgentResult:
         request.meta.model_copy(update={"idempotency_key": key}),
         evidence,
     )
-    return _gate_outcome(request, decision, review, evidence)
+    result = _gate_outcome(request, decision, review, evidence)
+    if result.outcome == "executed":
+        BUDGETS[data.campaign_id] = data.budget_krw
+    return result
 
 
 async def record_campaign_result(request: AgentRequest) -> AgentResult:
@@ -219,14 +251,34 @@ async def record_campaign_result(request: AgentRequest) -> AgentResult:
     except ValidationError as error:
         return _invalid(request, error)
 
+    fields = data.model_dump()
+    budget_based = data.spend_krw is None
+    if budget_based:
+        budget = BUDGETS.get(data.campaign_id)
+        if budget is None:
+            # 광고비를 모르면 짐작하거나 0을 보내지 않는다
+            return _result(
+                request,
+                TaskStatus.FAILED,
+                outcome="spend_unknown",
+                output={
+                    "campaign_id": data.campaign_id,
+                    "detail": "spend_krw가 없고 이 프로세스에서 시작한 캠페인 예산도 없다",
+                },
+            )
+        fields |= {"spend_krw": budget, "source": BUDGET_SOURCE}
+
     # 계약 모델 그대로 보낸다. 값이 없는 선택 필드는 보내지 않아 재무가 0으로 채우지 못한다
-    contract = CampaignResultInput.model_validate(data.model_dump())
+    contract = CampaignResultInput.model_validate(fields)
     answer = await _ask_finance(request, RECORD_SKILL, contract)
+    output = answer.output
+    if budget_based:
+        output = {**output, "spend_basis": "budget", "spend_note": BUDGET_NOTE}
     return _result(
         request,
         answer.status,
         outcome=answer.outcome,
-        output=answer.output,
+        output=output,
         reason_code=answer.reason_code,
         evidence=answer.evidence
         if answer.evidence.data_summary

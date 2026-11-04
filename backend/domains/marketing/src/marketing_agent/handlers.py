@@ -31,7 +31,7 @@ from ax_contracts.schemas import (
     TaskStatus,
 )
 from marketing_agent import shop_client
-from marketing_agent.campaign import record_campaign_result, start_campaign
+from marketing_agent.campaign import record_campaign_result, reset_budgets, start_campaign
 from marketing_agent.coupons import CouponLedger, SequenceGap, total_value
 from marketing_agent.notice import NoticeStore, make_draft
 from marketing_agent.schemas import (
@@ -62,6 +62,7 @@ def reset_state() -> None:
     """테스트 사이에 저장소를 비운다."""
     global STATE
     STATE = State()
+    reset_budgets()
 
 
 def _now() -> datetime:
