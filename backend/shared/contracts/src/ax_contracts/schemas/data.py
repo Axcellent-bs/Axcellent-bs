@@ -1178,6 +1178,9 @@ class PromoConcept(AxModel):
     duration_seconds: int | None = Field(default=None, ge=1)  # 숏츠 길이(초)
     shorts_format: str | None = None  # 빌려 온 인기 숏츠 형식 (shorts_stats 형식 이름)
     shorts_format_avg_views: float | None = None  # 그 형식의 평균 조회수 (서버 값)
+    # 아래는 예전 응답은 없다. 그 형식의 중앙값 조회수(대표값)와 숏츠 통계 기준 시각
+    shorts_format_median_views: float | None = None
+    shorts_format_at: UtcDatetime | None = None
     fit_reason: str | None = None  # 이 트렌드·형식이 이 상품과 맞는 이유 한 줄 (LLM)
     # 아래는 예전 응답은 없다. 타깃 연령대 (trend_age 결과, 코드). 모르면 None + 이유
     target_age: str | None = None  # 빌린 트렌드에서 평소 대비 가장 크게 오른 연령대
@@ -1190,8 +1193,11 @@ class PromoShortsFormat(AxModel):
     """기획안 재료로 쓴 인기 숏츠 형식 (shorts_stats 값 그대로)."""
 
     name: str
-    avg_views: float = Field(ge=0)
+    avg_views: float = Field(ge=0)  # 보조 칸 (평균)
     count: int = Field(default=0, ge=0)
+    # 아래는 예전 응답은 없다. 대표값 = 중앙값, 숏츠 통계 기준 시각
+    median_views: float | None = Field(default=None, ge=0)
+    snapshot_at: UtcDatetime | None = None
 
 
 class PromoSeasonCheck(AxModel):
@@ -1278,6 +1284,9 @@ class ShortsVideo(AxModel):
     views: int | None = Field(default=None, ge=0)
     # 시간당 조회 증가 (두 번 본 숏츠만, 예전 응답은 없다)
     views_per_hour: float | None = None
+    # 아래는 예전 응답은 없다. known = 잼, measuring = 다시 본 간격이 기준 미만이라 측정 중,
+    # pending = 한 번만 봐서 다음 조회 대기
+    velocity_status: Literal["known", "measuring", "pending"] | None = None
 
 
 class ShortsGroup(AxModel):
@@ -1294,6 +1303,10 @@ class ShortsGroup(AxModel):
     # 아래는 예전 응답은 없다. 한 번만 본 숏츠 수 (다음 조회 대기)와 그 이유
     velocity_pending: int = Field(default=0, ge=0)
     velocity_reason: str | None = None
+    # 아래는 예전 응답은 없다. 대표값 = 중앙값 (평균 avg_views는 보조 칸)
+    median_views: float | None = None
+    median_views_per_hour: float | None = None  # 시간당 조회 증가를 잰 숏츠만의 중앙값
+    velocity_measuring: int = Field(default=0, ge=0)  # 다시 본 간격이 기준 미만이라 측정 중인 수
 
 
 class ShortsSearch(AxModel):
@@ -1534,6 +1547,9 @@ class TrendInsight(AxModel):
     shorts_format: str | None = None  # 이 주제 숏츠 영상에서 가장 많은 형식
     shorts_format_samples: int | None = Field(default=None, ge=0)
     shorts_format_reason: str | None = None
+    # 아래는 예전 응답은 없다. 숏츠 통계와 같은 시점의 그 형식 중앙값 조회수와 기준 시각
+    shorts_format_median_views: float | None = Field(default=None, ge=0)
+    shorts_format_at: UtcDatetime | None = None
     limits: list[str] = Field(default_factory=list)  # 한계 (평가셋 없음, 상대값 등)
     example_ideas: list[str] = Field(default_factory=list)  # 이 주제를 쓴 예시 아이디어 (참고용)
     score: float = 0.0  # 순서를 정한 코드 점수 (가중치는 회사 설정)
