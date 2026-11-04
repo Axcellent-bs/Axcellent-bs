@@ -742,3 +742,28 @@ def test_only_banner_channel_goes_to_the_shop(monkeypatch: pytest.MonkeyPatch) -
 
 def test_mock_mode_keeps_notices_in_memory() -> None:
     assert _publish_notice() == "ntc_0001"
+
+
+def test_publish_notice_rejects_sns_channel_before_the_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SNS 초안은 publish_notice로 게시하지 않는다(publish_sns 사용). 관문·쇼핑몰 호출 없음."""
+    seen_exec = _fake_execute(monkeypatch, _decision())
+    seen = _banner_shop(monkeypatch)
+    draft_id = _draft(channel_code="sns")
+    result = _call("publish_notice", {"draft_id": draft_id})
+    assert (result["status"], result["outcome"]) == ("failed", "sns_use_publish_sns")
+    assert seen_exec == [] and seen == []
+    assert _call("list_active_notices", {})["output"]["total"] == 0
+
+
+def test_banner_and_email_still_publish_after_the_sns_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen_exec = _fake_execute(monkeypatch, _decision())
+    seen = _banner_shop(monkeypatch)
+    banner = _call("publish_notice", {"draft_id": _draft()})
+    email = _call("publish_notice", {"draft_id": _draft(channel_code="email")})
+    assert banner["status"] == "completed" and email["status"] == "completed"
+    assert [e["action"] for e in seen_exec] == ["publish_notice", "publish_notice"]
+    assert [r.url.path for r in seen] == ["/api/shop/banners"]
