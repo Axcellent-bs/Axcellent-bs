@@ -221,8 +221,39 @@ def test_agent_config_and_hook_files_are_merge_risk_at_any_depth() -> None:
         ".clinerules",
     ]
     assert merge_risk_paths(risky) == risky
-    plain = ["shop-web/src/pages/Notice.tsx", "docs/claude-notes.md", "shop-web/package-lock.json"]
+    plain = ["shop-web/src/pages/Notice.tsx", "docs/claude-notes.md", "docs/CLAUDE.md.bak"]
     assert merge_risk_paths(plain) == []
+
+
+def test_agent_config_names_match_safety_spelling_rules() -> None:
+    """safety #517 `paths_named`와 같은 규칙: 끝 조각·Windows 표기·잠금 파일·다른 CI도 잡는다."""
+    risky = [
+        "shop-web/package-lock.json",  # 잠금 파일 (받을 주소 바꿔치기)
+        "shop-api/uv.lock",
+        ".gitlab-ci.yml",
+        "Jenkinsfile",
+        "shop-web/.env",
+        ".claude",  # 끝 조각이 폴더 이름 (심볼릭 링크)
+        "shop-web/.claude/",
+        "CLAUDE.md.",  # Windows가 무시하는 끝의 점
+        "shop-web/CLAUDE.md::$DATA",  # 대체 스트림
+        "./AGENTS.md",
+        r"shop-web\.cursor\rules\a.mdc",
+    ]
+    assert merge_risk_paths(risky) == risky
+
+
+def test_renamed_file_keeps_old_path_in_changed_paths() -> None:
+    """CLAUDE.md를 docs/로 옮겨 지시를 없애도 관문·머지 위험 검사가 옛 경로를 본다 (#506)."""
+    from dev_agent.vcs.base import Change, ChangedFile
+
+    moved = Change(
+        number=1, title="정리", branch="b", base="dev", merged=False,
+        files=(ChangedFile(path="docs/old-claude.md", previous_path="CLAUDE.md"),
+               ChangedFile(path="shop-web/a.ts")),
+    )  # fmt: skip
+    assert moved.changed_paths == ["docs/old-claude.md", "CLAUDE.md", "shop-web/a.ts"]
+    assert merge_risk_paths(moved.changed_paths) == ["CLAUDE.md"]
 
 
 @pytest.mark.role("dev")

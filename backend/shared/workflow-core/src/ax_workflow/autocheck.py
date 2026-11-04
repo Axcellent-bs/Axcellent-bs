@@ -106,6 +106,9 @@ AGENT_CONFIG_DIRS: dict[str, str] = {
     ".factory": "Factory 설정",
     ".idea": "JetBrains 실행 구성",
     ".run": "JetBrains 실행 구성",
+    # safety #517이 더한 것 (다른 CI)
+    ".gitlab": "GitLab CI",
+    ".circleci": "CircleCI",
 }
 AGENT_CONFIG_FILES: dict[str, str] = {
     "claude.md": "에이전트 지시 파일",
@@ -133,18 +136,62 @@ AGENT_CONFIG_FILES: dict[str, str] = {
     ".envrc": "direnv가 폴더에 들어갈 때 실행",
     ".gitmodules": "하위 저장소 주소",
     "dockerfile": "이미지 빌드 스크립트",
+    # ---- safety #517이 더한 것 (safety `paths_named`와 같은 목록으로 맞춘다)
+    # 잠금 파일: package.json은 그대로 두고 받을 주소만 바꿔치기할 수 있다
+    "package-lock.json": "잠금 파일 (받을 주소)",
+    "npm-shrinkwrap.json": "잠금 파일 (받을 주소)",
+    "pnpm-lock.yaml": "잠금 파일 (받을 주소)",
+    "yarn.lock": "잠금 파일 (받을 주소)",
+    "bun.lock": "잠금 파일 (받을 주소)",
+    "bun.lockb": "잠금 파일 (받을 주소)",
+    "uv.lock": "잠금 파일 (받을 주소)",
+    "poetry.lock": "잠금 파일 (받을 주소)",
+    "pipfile.lock": "잠금 파일 (받을 주소)",
+    "composer.lock": "잠금 파일 (받을 주소)",
+    "gemfile.lock": "잠금 파일 (받을 주소)",
+    # 패키지 관리자 설정: 받는 곳을 바꾸거나 설치 때 코드를 실행한다
+    ".yarnrc": "패키지 설치 설정",
+    ".yarnrc.yml": "패키지 설치 설정",
+    ".pnpmfile.cjs": "설치 때 실행되는 코드",
+    "pnpm-workspace.yaml": "패키지 설치 설정",
+    "bunfig.toml": "패키지 설치 설정",
+    "uv.toml": "패키지 설치 설정",
+    "pip.conf": "패키지 설치 설정",
+    "pipfile": "의존성",
+    # 다른 CI: 고객사 레포가 GitHub만 쓴다는 보장이 없다
+    ".gitlab-ci.yml": "GitLab CI",
+    "jenkinsfile": "Jenkins CI",
+    "azure-pipelines.yml": "Azure Pipelines",
+    "bitbucket-pipelines.yml": "Bitbucket Pipelines",
+    # 나머지: 도구가 자동으로 읽는 파일이거나 있는 이름의 다른 표기
+    ".env": "환경값 (도구가 자동으로 읽음)",
+    ".devcontainer.json": "개발 컨테이너 설정",
+    ".aider.conf.yml": "Aider 설정",
+    "gnumakefile": "빌드 스크립트",
+    "taskfile.yaml": "작업 실행 스크립트",
 }
 
 
+def path_segments(path: str) -> list[str]:
+    """이름 비교용 경로 조각 (safety `ax_safety.rules.path_segments`와 같은 규칙).
+
+    대소문자, `\\` 구분자, `./`·`../`·끝의 `/`, Windows가 무시하는 끝의 점·공백(`CLAUDE.md.`),
+    대체 스트림(`CLAUDE.md::$DATA`)을 같은 파일로 본다."""
+    segments = path.replace("\\", "/").split("/")
+    cleaned = (segment.split(":", 1)[0].rstrip(" .").casefold() for segment in segments)
+    return [segment for segment in cleaned if segment]
+
+
 def agent_config_reason(path: str) -> str | None:
-    """에이전트 설정·실행 훅 파일이면 그 이유 (아니면 None)."""
-    parts = [p for p in path.replace("\\", "/").split("/") if p]
-    if not parts:
-        return None
-    for part in parts[:-1]:
-        if part.lower() in AGENT_CONFIG_DIRS:
-            return AGENT_CONFIG_DIRS[part.lower()]
-    return AGENT_CONFIG_FILES.get(parts[-1].lower())
+    """에이전트 설정·실행 훅 파일이면 그 이유 (아니면 None).
+
+    조각 하나라도 이름이 같으면 걸린다 (폴더·파일 구분 없이, 끝 조각도). `.claude`라는 심볼릭
+    링크나 `.claude/`처럼 끝 조각이 폴더 이름인 경로도 잡는다."""
+    for part in path_segments(path):
+        reason = AGENT_CONFIG_DIRS.get(part) or AGENT_CONFIG_FILES.get(part)
+        if reason:
+            return reason
+    return None
 
 
 def merge_risk_paths(paths: list[str]) -> list[str]:

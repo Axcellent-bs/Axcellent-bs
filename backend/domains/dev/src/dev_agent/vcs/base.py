@@ -76,6 +76,8 @@ class ChangedFile:
     deletions: int = 0
     # 바뀐 줄 번호 (새 파일 기준). 모르면 빈 값
     lines: tuple[int, ...] = ()
+    # 이름을 바꾼 파일의 옛 경로 (GitHub `previous_filename`). 없으면 None
+    previous_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -93,7 +95,14 @@ class Change:
 
     @property
     def changed_paths(self) -> list[str]:
-        return [f.path for f in self.files]
+        """바뀐 경로. 이름을 바꾼 파일은 옛 경로도 넣는다 (`CLAUDE.md`를 `docs/`로 옮겨 지시·훅을
+        없애는 것도 관문·머지 위험 검사가 보게: safety #506)."""
+        out: list[str] = []
+        for f in self.files:
+            out.append(f.path)
+            if f.previous_path and f.previous_path != f.path:
+                out.append(f.previous_path)
+        return list(dict.fromkeys(out))
 
     @property
     def additions(self) -> int:
