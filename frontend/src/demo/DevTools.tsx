@@ -100,6 +100,34 @@ const MCP_URL = `${DEV_API.replace(/\/$/, '')}/api/planning/mcp`
 // 로컬: run_all.sh가 만든 작업 대기열 전용 토큰(backend/.data/tokens.env WORK_TOKEN)을 읽어 넣는다 (Git Bash, 레포 폴더).
 // 이 값은 내 PC의 Claude Code 설정(~/.claude.json)에 남으므로 승인·머지 권한이 있는 사람 토큰은 쓰지 않는다
 const MCP_ADD = `claude mcp add --transport http axcellent-dev ${MCP_URL} --header "Authorization: Bearer $(sed -n 's/^WORK_TOKEN=//p' backend/.data/tokens.env)"`
+// Codex·Cursor는 토큰을 설정 파일이 아니라 환경변수(AXCELLENT_WORK_TOKEN)에서 읽는다
+const TOKEN_ENV = 'AXCELLENT_WORK_TOKEN'
+const SET_TOKEN_ENV = `setx ${TOKEN_ENV} "$(sed -n 's/^WORK_TOKEN=//p' backend/.data/tokens.env)"`
+const CODEX_ADD = `codex mcp add axcellent-dev --url ${MCP_URL} --bearer-token-env-var ${TOKEN_ENV}`
+const CURSOR_JSON = JSON.stringify({ mcpServers: { 'axcellent-dev': { url: MCP_URL, headers: { Authorization: `Bearer \${env:${TOKEN_ENV}}` } } } }, null, 2)
+const ASK = 'axcellent-dev에서 작업 목록 보여 줘. 하나 가져가서 명세대로 구현하고 PR 올려 줘.'
+type AiClient = 'claude' | 'codex' | 'cursor'
+const AI_CLIENTS: { id: AiClient; label: string }[] = [
+  { id: 'claude', label: 'Claude Code' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'cursor', label: 'Cursor' },
+]
+
+/** 여러 개 중 하나 고르기 (연결 페이지는 기획 화면 CSS를 안 읽어서 이 화면 안에서 그린다). 고른 것은 파란 바탕·흰 글씨 */
+function Seg<T extends string>({ label, items, value, onPick, disabled }: {
+  label: string; items: { id: T; label: string }[]; value?: T; onPick: (id: T) => void; disabled?: boolean
+}) {
+  return (
+    <div className="inline-flex overflow-hidden rounded-lg border border-ink-200" role="group" aria-label={label}>
+      {items.map((it) => (
+        <button key={it.id} type="button" aria-pressed={value === it.id} disabled={disabled} onClick={() => onPick(it.id)}
+          className={`px-3 py-1 text-xs ${value === it.id ? 'bg-brand-600 !text-white' : 'text-ink-700 hover:bg-ink-50'}`}>
+          {it.label}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 function CopyLine({ text }: { text: string }) {
   const [done, setDone] = useState(false)
@@ -114,29 +142,50 @@ function CopyLine({ text }: { text: string }) {
   )
 }
 
-/** 내 Claude(MCP 작업 대기열 서버) 연결하기: 내 PC의 Claude Code에 작업 대기열 서버를 붙이는 순서 */
+/** AI 도구 연결: 내 PC의 AI 코딩 도구(Claude Code·Codex·Cursor)에 작업 대기열 MCP 서버를 붙이는 순서 */
 function ClaudeConnect({ connected }: { connected: string[] }) {
   const me = useMe()
   const mine = me?.name ? me.claude_connected : null
+  const [client, setClient] = useState<AiClient>('claude')
   return (
     <div className="space-y-3 rounded-lg border border-ink-100 p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="font-medium">내 Claude 연결</h3>
+        <h3 className="font-medium">AI 도구 연결</h3>
         {me?.name && !connected.includes(me.name) && <span className={`chip ${mine ? TONE.ok : TONE.none}`} title="최근 7일 작업 목록을 열었는지">{me.name} {mine ? '연결됨' : '연결 없음'}</span>}
         <span className={`chip ${connected.length ? TONE.ok : TONE.none}`} title="최근 7일 작업 목록을 연 사람">{connected.length ? `연결됨 ${connected.join(', ')}` : '연결 없음'}</span>
       </div>
+      <Seg label="AI 도구" items={AI_CLIENTS} value={client} onPick={setClient} />
       <ol className="list-decimal space-y-3 pl-5 text-sm">
+        {client === 'claude' ? (
+          <>
+            <li className="space-y-1">
+              <span className="flex flex-wrap items-center gap-2">작업 대기열 서버 붙이기 <span className="chip bg-ink-100 text-ink-500">Git Bash · 레포 폴더</span></span>
+              <CopyLine text={MCP_ADD} />
+            </li>
+            <li className="space-y-1"><span>확인</span><CopyLine text="claude mcp list" /></li>
+          </>
+        ) : (
+          <>
+            <li className="space-y-1">
+              <span className="flex flex-wrap items-center gap-2">토큰을 환경변수로 <span className="chip bg-ink-100 text-ink-500">Git Bash · 레포 폴더 · 다시 켠 뒤 적용</span></span>
+              <CopyLine text={SET_TOKEN_ENV} />
+            </li>
+            {client === 'codex' ? (
+              <>
+                <li className="space-y-1"><span>작업 대기열 서버 붙이기</span><CopyLine text={CODEX_ADD} /></li>
+                <li className="space-y-1"><span>확인</span><CopyLine text="codex mcp list" /></li>
+              </>
+            ) : (
+              <li className="space-y-1">
+                <span className="flex flex-wrap items-center gap-2">작업 대기열 서버 붙이기 <span className="chip bg-ink-100 text-ink-500">~/.cursor/mcp.json</span></span>
+                <CopyLine text={CURSOR_JSON} />
+              </li>
+            )}
+          </>
+        )}
         <li className="space-y-1">
-          <span className="flex flex-wrap items-center gap-2">작업 대기열 서버 붙이기 <span className="chip bg-ink-100 text-ink-500">Git Bash · 레포 폴더</span></span>
-          <CopyLine text={MCP_ADD} />
-        </li>
-        <li className="space-y-1">
-          <span>확인</span>
-          <CopyLine text="claude mcp list" />
-        </li>
-        <li className="space-y-1">
-          <span>레포 폴더에서 Claude Code로 작업 가져가기</span>
-          <CopyLine text="axcellent-dev에서 작업 목록 보여 줘. 하나 가져가서 명세대로 구현하고 PR 올려 줘." />
+          <span>레포 폴더에서 작업 가져가기</span>
+          <CopyLine text={ASK} />
         </li>
       </ol>
     </div>
@@ -236,7 +285,7 @@ function StepModels({ cfg, onSaved }: { cfg: CodingSettings; onSaved: (c: Coding
   )
 }
 
-function CodingModeSection() {
+function CodingModeSection({ part }: { part: AiPart }) {
   const [cfg, setCfg] = useState<CodingSettings | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -246,18 +295,17 @@ function CodingModeSection() {
     setError(null)
     try { setCfg(await codingApi.set(mode)) } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
+  if (part === 'key') return cfg ? <CompanyKeyBudget cfg={cfg} onSaved={setCfg} /> : <Loading error={error} />
+  if (part === 'models') return cfg ? <StepModels cfg={cfg} onSaved={setCfg} /> : <Loading error={error} />
+  if (part === 'claude') return <ClaudeConnect connected={cfg?.agents_connected ?? []} />
   return (
-    <section className="card space-y-4 p-6">
+    <section className="space-y-4 rounded-lg border border-ink-100 p-4">
       <div className="flex flex-wrap items-center gap-3">
-        <h2 className="card-title text-lg">요청 작업 코딩</h2>
+        <h3 className="font-medium">요청 작업 코딩</h3>
         {cfg && <span className={`chip ${cfg.resolved === 'agent' ? TONE.none : TONE.ok}`}>지금: {cfg.resolved === 'agent' ? '서버 AI' : '내 Claude'}</span>}
         {error && <span className="chip bg-amber-50 text-amber-700">{error}</span>}
       </div>
-      <div className="seg-toggle" role="group" aria-label="요청 작업 코딩 방식">
-        {CODING_MODES.map((m) => (
-          <button key={m.id} type="button" aria-pressed={cfg?.mode === m.id} disabled={!cfg || busy} onClick={() => void choose(m.id)}>{m.label}</button>
-        ))}
-      </div>
+      <Seg label="요청 작업 코딩 방식" items={CODING_MODES} value={cfg?.mode} disabled={!cfg || busy} onPick={(id) => void choose(id)} />
       {cfg && (
         <dl className="grid grid-cols-[120px_1fr] gap-x-3 gap-y-2 text-sm">
           <dt className="text-ink-500">이유</dt><dd>{cfg.why}</dd>
@@ -265,26 +313,37 @@ function CodingModeSection() {
           <dd><UsageBar used={cfg.trial_used} limit={cfg.trial_limit} wide title="서버 AI(기본 키)가 코딩에 쓴 토큰 / 체험 한도" /></dd></>}
         </dl>
       )}
-      {cfg && <CompanyKeyBudget cfg={cfg} onSaved={setCfg} />}
-      {cfg && <StepModels cfg={cfg} onSaved={setCfg} />}
-      <ClaudeConnect connected={cfg?.agents_connected ?? []} />
     </section>
   )
 }
 
-// 연결 창 탭: 형상관리(레포 연결·보안 점검·다른 개발 도구) / AI 코딩(서버 AI·내 Claude·모델·키·예산)
-type PanelTab = 'vcs' | 'ai'
-const PANEL_TABS: { id: PanelTab; label: string }[] = [
-  { id: 'vcs', label: '형상관리' },
-  { id: 'ai', label: 'AI 코딩' },
-]
-const TAB_KEY = 'ax.devtools.tab'
-const readTab = (): PanelTab => {
-  try { return localStorage.getItem(TAB_KEY) === 'ai' ? 'ai' : 'vcs' } catch { return 'vcs' }
+function Loading({ error }: { error: string | null }) {
+  return <p className="text-sm text-ink-500">{error ?? '불러오는 중…'}</p>
 }
 
-/** 연결 창: 형상관리·AI 코딩 탭. 개발·배포 화면의 톱니바퀴 창과 시스템 관리 화면이 같이 쓴다 */
-export function DevToolsPanel() {
+// 연결 창 왼쪽 메뉴 (설정 창처럼 묶음 › 항목). 고른 항목만 오른쪽에 보인다
+type AiPart = 'mode' | 'key' | 'models' | 'claude'
+type PanelItem = 'repos' | 'others' | AiPart
+const PANEL_GROUPS: { label: string; items: { id: PanelItem; label: string }[] }[] = [
+  { label: '형상관리', items: [{ id: 'repos', label: '레포 연결' }, { id: 'others', label: '다른 개발 도구' }] },
+  { label: 'AI', items: [
+    { id: 'mode', label: '코딩 방식' },
+    { id: 'key', label: 'AI 키·예산' },
+    { id: 'models', label: '단계별 모델' },
+    { id: 'claude', label: 'AI 도구 연결' },
+  ] },
+]
+const PANEL_IDS = PANEL_GROUPS.flatMap((g) => g.items.map((i) => i.id))
+const TAB_KEY = 'ax.connections.item'
+const readTab = (): PanelItem => {
+  try {
+    const v = localStorage.getItem(TAB_KEY) as PanelItem | null
+    return v && PANEL_IDS.includes(v) ? v : 'repos'
+  } catch { return 'repos' }
+}
+
+/** 연결 창: 왼쪽 메뉴(형상관리·AI 코딩) + 오른쪽 내용. 개발·배포 화면의 톱니바퀴 창과 시스템 관리 화면이 같이 쓴다 */
+export function DevToolsPanel({ title, onClose }: { title?: string; onClose?: () => void } = {}) {
   const [list, setList] = useState<VcsConnection[] | null>(null)
   const [offline, setOffline] = useState(false)
   const [tests, setTests] = useState<Record<string, VcsTestResult>>({})
@@ -295,8 +354,8 @@ export function DevToolsPanel() {
   const [inv, setInv] = useState<Record<string, VcsInventory>>({})
   const [checking, setChecking] = useState(false)
   const putInv = (rows: VcsInventory[]) => setInv(Object.fromEntries(rows.map((r) => [r.connection_id, r])))
-  const [tab, setTab] = useState<PanelTab>(readTab)
-  const pickTab = (t: PanelTab) => {
+  const [tab, setTab] = useState<PanelItem>(readTab)
+  const pickTab = (t: PanelItem) => {
     setTab(t)
     try { localStorage.setItem(TAB_KEY, t) } catch { /* 저장이 막혀도 탭은 바뀐다 */ }
   }
@@ -446,16 +505,27 @@ export function DevToolsPanel() {
   )
 
   return (
-    <div className="space-y-6">
-      <div className="seg-toggle" role="tablist" aria-label="연결 종류">
-        {PANEL_TABS.map((t) => (
-          <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} aria-pressed={tab === t.id} onClick={() => pickTab(t.id)}>{t.label}</button>
+    <div className={`flex flex-col gap-0 overflow-hidden p-0 md:flex-row ${onClose ? 'h-full' : 'card min-h-[460px]'}`}>
+      <nav className="shrink-0 overflow-y-auto border-b border-ink-100 p-3 md:w-56 md:border-b-0 md:border-r" aria-label="연결 메뉴">
+        {title && <h2 className="mb-3 px-2 text-lg font-semibold">{title}</h2>}
+        {PANEL_GROUPS.map((g) => (
+          <div key={g.label} className="mb-3 last:mb-0">
+            <div className="px-2 pb-1 text-xs text-ink-500">{g.label}</div>
+            {g.items.map((it) => (
+              <button key={it.id} type="button" aria-current={tab === it.id ? 'page' : undefined} onClick={() => pickTab(it.id)}
+                className={`block w-full rounded-md px-2 py-1.5 text-left text-sm ${tab === it.id ? 'bg-ink-100 font-medium text-ink-900' : 'text-ink-700 hover:bg-ink-50'}`}>
+                {it.label}
+              </button>
+            ))}
+          </div>
         ))}
-      </div>
-      {tab === 'ai' ? <CodingModeSection /> : <>
-      <section className="card space-y-4 p-6">
+      </nav>
+      <div className={`relative min-w-0 flex-1 overflow-y-auto p-6 ${onClose ? 'pt-12' : ''}`}>
+      {onClose && <button className="btn-quiet absolute right-3 top-3 px-2 py-1" onClick={onClose} aria-label="닫기">✕</button>}
+      {tab === 'mode' || tab === 'key' || tab === 'models' || tab === 'claude' ? <CodingModeSection part={tab} /> : tab === 'repos' ? (
+      <section className="space-y-4">
         <div className="flex flex-wrap items-center gap-3">
-          <h2 className="card-title text-lg">형상관리</h2>
+          <h2 className="card-title text-lg">레포 연결</h2>
           {list && <span className={`chip ${connected ? TONE.none : TONE.wait}`}>레포 {list.length}</span>}
           {list && list.length > 1 && <span className="chip bg-ink-100 text-ink-700">PR마다 AI 제안 · 사람 승인</span>}
           {offline && <span className="chip bg-amber-50 text-amber-700">개발·배포 AI에 연결할 수 없음</span>}
@@ -521,8 +591,8 @@ export function DevToolsPanel() {
 
         {!form && error && <p className="text-sm text-red-700">{error}</p>}
       </section>
-
-      <section className="card p-6">
+      ) : (
+      <section>
         <h2 className="card-title">다른 개발 도구</h2>
         <ul className="mt-3 divide-y divide-ink-100">
           {OTHERS.map((o) => (
@@ -540,40 +610,18 @@ export function DevToolsPanel() {
           ))}
         </ul>
       </section>
-      </>}
+      )}
+      </div>
     </div>
   )
 }
 
+/** 연결 페이지(/connections): 사이드바 AI 오피스 아래. 형상관리 · AI(코딩 방식·키·모델·AI 도구) */
 export default function DevTools() {
   return (
     <div className="space-y-6 px-8 py-8">
-      <header>
-        <p className="text-sm text-ink-500">시스템 관리</p>
-        <h1 className="text-2xl font-semibold">개발 도구 연결</h1>
-      </header>
+      <h1 className="text-2xl font-semibold">연결</h1>
       <DevToolsPanel />
-    </div>
-  )
-}
-
-/** 개발·배포 화면 오른쪽 위 톱니바퀴로 여는 창 */
-export function DevToolsDialog({ onClose }: { onClose: () => void }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 pt-16" onClick={onClose} role="presentation">
-      <div role="dialog" aria-modal="true" aria-label="개발 도구 연결" className="w-full max-w-4xl space-y-4 rounded-2xl p-5 shadow-xl"
-        style={{ background: 'rgb(var(--canvas))' }} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">개발 도구 연결</h2>
-          <button className="btn-quiet px-2 py-1" onClick={onClose} aria-label="닫기">✕</button>
-        </div>
-        <DevToolsPanel />
-      </div>
     </div>
   )
 }

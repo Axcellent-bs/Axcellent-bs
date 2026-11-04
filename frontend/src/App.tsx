@@ -103,7 +103,8 @@ function Pages() {
           <Route path="/control/*" element={<ControlCenter />} />
           {/* 회사 서비스 연결은 회사 연결(/system/connect) 화면 아래쪽으로 합쳤다 */}
           <Route path="/system/integrations" element={<Navigate to="/system/connect" replace />} />
-          <Route path="/system/devtools" element={<DevTools />} />
+          <Route path="/connections" element={<DevTools />} />
+          <Route path="/system/devtools" element={<Navigate to="/connections" replace />} />
           {/* 예전 관리자 대시보드(/admin/*) 주소 호환 */}
           <Route path="/admin/*" element={<LegacyAdminRedirect />} />
           <Route path="*" element={<ToHome />} />
