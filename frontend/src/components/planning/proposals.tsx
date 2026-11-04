@@ -7,11 +7,36 @@ import { PROPOSAL_SKILL_LABEL, PROPOSAL_STAGES, WRITTEN_BY_LABEL, proposalEnded,
 import { Tag } from '@/components/planning-common/parts'
 import { go, toPath } from '@/components/planning-common/links'
 import { Pager, usePage } from '@/components/planning-common/pager'
+import { Markdown } from '@/components/planning-common/markdown'
 
 interface P { s: S; d: Dispatch<Action> }
 
 const STATUS_TONE: Record<Proposal['status'], 'amber' | 'neutral' | 'green'> = {
   '확인 대기': 'amber', '기획안': 'green', '마케팅 전달': 'neutral', '진행 중': 'neutral', '성과 확인': 'green', '기획서로': 'neutral', '폐기': 'neutral',
+}
+
+/** 제안 상세의 주 버튼 (머리 줄 데이터 보기 토글 자리): 기획안으로 만들기 · 폐기. 확인 대기일 때만 */
+export function ProposalActions({ s, d, item }: P & { item?: string }) {
+  const toast = useToast()
+  const [reason, setReason] = useState<string | null>(null)
+  const p = item ? (s.proposals ?? []).find((x) => x.id === item) : undefined
+  if (!p || !proposalOpen(p)) return null
+  const nextSpec = `SPEC-${Math.max(0, ...s.specs.map((x) => Number(x.id.split('-')[1]) || 0)) + 1}`
+  if (reason !== null) {
+    return (
+      <form className="pp-head-reject" onSubmit={(e) => { e.preventDefault(); if (!reason.trim()) return; d({ type: 'rejectProposal', proposal: p.id, reason: reason.trim() }); setReason(null); toast.show(`${p.id} 폐기`) }}>
+        <input className="input" autoFocus placeholder="폐기 이유" aria-label="폐기 이유" value={reason} onChange={(e) => setReason(e.target.value)} />
+        <Button variant="primary" type="submit" disabled={!reason.trim()}>폐기</Button>
+        <Button onClick={() => setReason(null)}>취소</Button>
+      </form>
+    )
+  }
+  return (
+    <>
+      <Button variant="primary" onClick={() => { d({ type: 'makePlan', proposal: p.id }); toast.show(`${p.id} 기획안으로 만듦`); go(toPath(`work/specs/${nextSpec}`)) }}>기획안으로 만들기</Button>
+      <Button onClick={() => setReason('')}>폐기</Button>
+    </>
+  )
 }
 
 export function Proposals({ s, d, item }: P & { item?: string }) {
@@ -100,14 +125,13 @@ function Facts({ facts }: { facts: ProposalFact[] }) {
 function ProposalView({ s, d, p }: P & { p: Proposal }) {
   const toast = useToast()
   const open = proposalOpen(p)
-  const [reason, setReason] = useState<string | null>(null)
   const save = (k: 'title' | 'idea' | 'why', v: string) => { if (v.trim() && v.trim() !== p[k]) d({ type: 'editProposal', proposal: p.id, [k]: v.trim() }) }
   const [tLabel, setTLabel] = useState(p.target?.label ?? '')
   const [tValue, setTValue] = useState(p.target?.value ?? '')
   const saveTarget = () => { if (tLabel.trim() && tValue.trim() && (tLabel.trim() !== p.target?.label || tValue.trim() !== p.target?.value)) d({ type: 'editProposal', proposal: p.id, targetLabel: tLabel.trim(), targetValue: tValue.trim() }) }
   const req = p.request ? s.requests.find((r) => r.id === p.request) : undefined
   return (
-    <div className="pp-view">
+    <div className={`pp-view${open ? " solo" : ""}`}>
       <div className="pp-main">
         <a className="plain-link proj-back" href={toPath('proposals')} onClick={(e) => { e.preventDefault(); go(toPath('proposals')) }}>‹ 제안 목록</a>
         <div className="pp-head">
@@ -137,7 +161,7 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
           {p.bodyMd && (
             <details className="pp-body">
               <summary>설명</summary>
-              <div className="pp-md">{p.bodyMd}</div>
+              <Markdown text={p.bodyMd} className="pp-md" />
             </details>
           )}
         </section>
@@ -165,19 +189,8 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
         </section>
       </div>
 
-      <aside className="pp-side">
-        {open ? (
-          <div className="pp-decide">
-            <Button variant="primary" onClick={() => { d({ type: 'makePlan', proposal: p.id }); toast.show(`${p.id} 기획안으로 만듦`); go(toPath(`work/specs/SPEC-${Math.max(0, ...s.specs.map((x) => Number(x.id.split('-')[1]) || 0)) + 1}`)) }}>기획안으로 만들기</Button>
-            {reason === null ? <Button onClick={() => setReason('')}>폐기</Button> : (
-              <form className="pp-reject" onSubmit={(e) => { e.preventDefault(); if (!reason.trim()) return; d({ type: 'rejectProposal', proposal: p.id, reason: reason.trim() }); setReason(null); toast.show(`${p.id} 폐기`) }}>
-                <input className="input" autoFocus placeholder="폐기 이유" value={reason} onChange={(e) => setReason(e.target.value)} />
-                <Button variant="primary" type="submit" disabled={!reason.trim()}>폐기</Button>
-                <Button onClick={() => setReason(null)}>취소</Button>
-              </form>
-            )}
-          </div>
-        ) : (
+      {!open && (
+        <aside className="pp-side">
           <dl className="pp-out">
             {p.spec && <><dt>기획안</dt><dd><a href={toPath(`work/specs/${p.spec}`)}>{p.spec}</a> <span className="muted small">{s.specs.find((x) => x.id === p.spec)?.status ?? ''}</span></dd></>}
             {p.handoff && <><dt>마케팅</dt><dd>{p.handoff.ok ? <Tag>받음{p.handoff.campaign ? ` · ${p.handoff.campaign}` : ''}</Tag> : <Tag tone="amber" title={p.handoff.reason}>전달 실패</Tag>}{p.handoff.at && <span className="muted small"> {p.handoff.at}</span>}{!p.handoff.ok && p.handoff.reason && <div className="muted small">{p.handoff.reason}</div>}</dd></>}
@@ -198,8 +211,8 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
               <><dt /><dd><Button size="small" onClick={() => { d({ type: 'measureProposal', proposal: p.id }); toast.show(`${p.id} 성과 재는 중`) }}>{p.result ? '성과 다시 재기' : '성과 재기'}</Button></dd></>
             )}
           </dl>
-        )}
-      </aside>
+        </aside>
+      )}
     </div>
   )
 }

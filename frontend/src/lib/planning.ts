@@ -4,7 +4,7 @@
 import type { Proposal } from './proposals'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { RELAY_TOKEN, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from '@/lib/env'
-import { RULE_LABEL, type Action, type Activity, type AuditItem, type ChatThread, type CodingMode, type CrossEvidence, type CrossReview, type Doc, type Incident, type OutMsg, type PR, type Request, type State, type Thread } from '@/lib/planningData'
+import { RULE_LABEL, type Action, type FillPreview, type Activity, type AuditItem, type ChatThread, type CodingMode, type CrossEvidence, type CrossReview, type Doc, type Incident, type OutMsg, type PR, type Request, type State, type Thread } from '@/lib/planningData'
 
 export const PLANNING_API = (import.meta.env.VITE_PLANNING_API_URL as string | undefined) ?? 'http://localhost:8101'
 /** 개발·배포 서비스 에이전트(dev, 8111). 업무 로직은 기획과 같은 planning 도메인이라 같은 REST(`/api/planning`)를 쓴다 */
@@ -190,6 +190,28 @@ const post = (body: unknown = {}, who: Who = 'human'): RequestInit => {
     body: JSON.stringify(body),
   }
 }
+
+/** 연결 페이지 › 문서 › 노션 (기획 서버). 토큰 값은 돌려받지 않고 끝 4자리만 */
+export interface NotionConnection { connected: boolean; source: 'saved' | 'env' | 'none'; hint: string; workspace: string; checked_at: string | null; oauth_ready: boolean }
+export const notionApi = {
+  get: () => call<NotionConnection>(PLANNING_API, '/notion/connection'),
+  save: (token: string) => call<NotionConnection>(PLANNING_API, '/notion/connection', post({ token }, 'admin')),
+  check: () => call<NotionConnection>(PLANNING_API, '/notion/connection/check', post({}, 'admin')),
+  remove: () => call<NotionConnection>(PLANNING_API, '/notion/connection/delete', post({}, 'admin')),
+  oauthStart: () => call<{ url: string }>(PLANNING_API, '/notion/oauth/start', post({}, 'admin')),
+  search: (query: string) => call<NotionHit[]>(PLANNING_API, '/notion/search', post({ query })),
+}
+/** 자동 채우기 (저장하지 않음): 기획 AI가 화면 초안의 자유 작성·지금 칸·질문을 읽은 값. 예시 모드에서도 같은 AI */
+export async function previewFill(input: { spec: string; template?: string; title: string; bodyMd: string; question?: string; current: { problem: string; goal: string; requirements: string[]; done_criteria: string[] } }): Promise<FillPreview & { ai: boolean }> {
+  const r = await call<FillPreview & { ai: boolean }>(PLANNING_API, '/spec-fill', post({ spec: input.spec, template: input.template ?? 'plan', title: input.title, body_md: input.bodyMd, question: input.question ?? '', current: input.current }))
+  return { problem: r.problem ?? '', goal: r.goal ?? '', reqs: r.reqs ?? [], done: r.done ?? [], answer: r.answer ?? '', extra: r.extra ?? {}, by: r.by ?? 'rule', ai: !!r.ai }
+}
+/** 빈 칸 제안 (저장하지 않음): 비어 있는 칸(fields)에 쓸 안을 기획 AI가 낸다 */
+export async function previewSuggest(input: { spec: string; template: string; title: string; bodyMd: string; basis: string[]; fields: string[]; current: Record<string, unknown> }): Promise<FillPreview & { ai: boolean }> {
+  const r = await call<FillPreview & { ai: boolean }>(PLANNING_API, '/spec-fill', post({ mode: 'suggest', spec: input.spec, template: input.template, title: input.title, body_md: input.bodyMd, basis: input.basis, fields: input.fields, current: input.current }))
+  return { problem: r.problem ?? '', goal: r.goal ?? '', reqs: r.reqs ?? [], done: r.done ?? [], answer: '', extra: r.extra ?? {}, by: r.by ?? 'none', ai: !!r.ai }
+}
+export interface NotionHit { id: string; title: string; url: string; edited: string }
 
 export const planningApi = (base: string) => ({
   state: () => call<Json>(base, '/state'),

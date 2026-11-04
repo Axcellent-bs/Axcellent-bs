@@ -1,14 +1,15 @@
 // 기획서 화면: 문서가 원본이고 문단에 작업·PR·결정이 붙는다
-import { useState, type Dispatch } from 'react'
+import { useEffect, useState, type Dispatch } from 'react'
 import { Button, Notice, useToast } from '@dejafix/common-frontend'
-import { DEPT_NAME, nextDocId, type Action, type Decision, type PR, type Spec, type State as S } from '@/lib/planningData'
-import { ActivityList, Sec, State, Tag, rowNav } from '@/components/planning-common/parts'
-import { Linked, Ref, go, hrefOf, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
-import { CONFIRMED_BY, mergedLabel } from '@/components/planning-common/flow'
-import { RepoTag } from '@/components/planning-common/repo'
+import { DEPT_NAME, exampleFill, nextDocId, type Action, type FillPreview, type Decision, type Spec, type State as S } from '@/lib/planningData'
+import { State, Tag, rowNav } from '@/components/planning-common/parts'
+import { Linked, Ref, go, reviewOf, toPath } from '@/components/planning-common/links'
+import { CONFIRMED_BY } from '@/components/planning-common/flow'
 import { Pager, usePage } from '@/components/planning-common/pager'
+import { Markdown } from '@/components/planning-common/markdown'
 import { PROPOSAL_ORIGIN, proposalReady, type Proposal } from '@/lib/proposals'
-import { useAllReleaseChecks, useReleaseChecks, type ReleaseCheck } from '@/lib/planning'
+import { TEMPLATES, TEMPLATE_NAME, templateOf, type Section } from '@/lib/specTemplate'
+import { notionApi, previewFill, previewSuggest, useAllReleaseChecks, useReleaseChecks, type NotionHit, type ReleaseCheck } from '@/lib/planning'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -100,11 +101,11 @@ function ReleaseCheckBox({ d, spec }: { d: Dispatch<Action>; spec: string }) {
 
 // ---------------------------------------------------------------- 기획 문서 (문서가 원본, 문단에 모든 것이 붙는다)
 // 기획서 탭 첫 화면 = 기획서 목록 (최근 것이 위). 줄을 누르면 그 기획서 상세로
-export function Specs({ s, d, item, item2 }: P & { item?: string; item2?: string }) {
+export function Specs({ s, d, item, item2, example }: P & { item?: string; item2?: string; example?: boolean }) {
   if (!item) return <SpecList s={s} d={d} />
   const spec = s.specs.find((x) => x.id === item)
   if (!spec) return <div className="empty"><b>{item} 없음</b> <a href={toPath('work/specs')}>기획서 목록</a></div>
-  return <SpecView key={spec.id} s={s} d={d} spec={spec} item2={item2} />
+  return <SpecView key={spec.id} s={s} d={d} spec={spec} item2={item2} example={example} />
 }
 
 type ListKind = 'all' | 'spec' | 'doc'
@@ -147,13 +148,26 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
   const pg = usePage(all, 10)
   const newDoc = () => { d({ type: 'newDoc', title: '' }); go(toPath(`docs/${nextDocId(s)}`)) }
   const toast = useToast()
-  const [notion, setNotion] = useState<string | null>(null) // 노션 주소 칸 (null = 닫힘)
-  const importNotion = () => {
-    if (!notion?.trim()) return
-    d({ type: 'importNotion', url: notion.trim() })
-    toast.show('노션 페이지를 가져오는 중')
-    setNotion(null)
+  const [notion, setNotion] = useState<string | null>(null) // 노션 주소·제목 칸 (null = 닫힘)
+  const [hits, setHits] = useState<NotionHit[] | null>(null) // 제목 검색 결과
+  const [searching, setSearching] = useState(false)
+  const [notionErr, setNotionErr] = useState<string | null>(null)
+  const closeNotion = () => { setNotion(null); setHits(null); setNotionErr(null) }
+  const importPage = (url: string, title?: string) => {
+    d({ type: 'importNotion', url })
+    toast.show(title ? `"${title}" 가져오는 중` : '노션 페이지를 가져오는 중')
+    closeNotion()
     setKind('doc')
+  }
+  // 주소·페이지 ID면 바로 가져오고, 아니면 제목으로 찾아 고르게 한다 (연결 › 문서 › 노션의 토큰을 쓴다)
+  const isLink = (x: string) => /notion\.(so|site)\//i.test(x) || /[0-9a-f]{32}/i.test(x.replace(/-/g, ''))
+  const importNotion = async () => {
+    const q = notion?.trim()
+    if (!q) return
+    if (isLink(q)) return importPage(q)
+    setSearching(true)
+    setNotionErr(null)
+    try { setHits(await notionApi.search(q)) } catch (x) { setHits(null); setNotionErr((x as Error).message) } finally { setSearching(false) }
   }
   return (
     <div className="sl-wrap">
@@ -167,14 +181,33 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
         {notion === null ? (
           <Button size="small" onClick={() => setNotion('')}>노션에서 가져오기</Button>
         ) : (
-          <form className="sl-notion" onSubmit={(e) => { e.preventDefault(); importNotion() }}>
-            <input className="field" autoFocus value={notion} onChange={(e) => setNotion(e.target.value)} placeholder="노션 페이지 주소" aria-label="노션 페이지 주소" />
-            <Button size="small" variant="primary" type="submit" disabled={!notion.trim()}>가져오기</Button>
-            <Button size="small" onClick={() => setNotion(null)}>취소</Button>
+          <form className="sl-notion" onSubmit={(e) => { e.preventDefault(); void importNotion() }}>
+            <input className="field" autoFocus value={notion} onChange={(e) => { setNotion(e.target.value); setHits(null) }} placeholder="노션 주소 또는 페이지 제목" aria-label="노션 주소 또는 페이지 제목" />
+            <Button size="small" variant="primary" type="submit" disabled={!notion.trim() || searching}>{searching ? '찾는 중…' : isLink(notion) ? '가져오기' : '찾기'}</Button>
+            <Button size="small" onClick={closeNotion}>취소</Button>
           </form>
         )}
         <Button size="small" variant="primary" onClick={newDoc}>+ 새 문서</Button>
       </div>
+      {notion !== null && (notionErr || hits) && (
+        <div className="sl-notion-hits">
+          {notionErr ? <span className="small" style={{ color: 'var(--danger, #b91c1c)' }}>{notionErr}</span>
+            : !hits?.length ? <span className="muted small">"{notion}" 제목의 페이지가 없어요. 노션에서 그 페이지에 통합을 연결했는지 확인해 주세요.</span>
+            : (
+              <ol>
+                {hits.map((h) => (
+                  <li key={h.id}>
+                    <b>{h.title}</b>
+                    <span className="muted small">{h.edited ? new Date(h.edited).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' }) + ' 수정' : ''}</span>
+                    <span style={{ flex: 1 }} />
+                    <a className="small" href={h.url} target="_blank" rel="noreferrer">노션에서 보기 ↗</a>
+                    <Button size="small" variant="primary" onClick={() => importPage(h.id, h.title)}>가져오기</Button>
+                  </li>
+                ))}
+              </ol>
+            )}
+        </div>
+      )}
       {!pg.rows.length ? <div className="empty"><b>없음</b></div> : (
         <div className="sl">
           <div className="sl-head" aria-hidden><span>상태</span><span>제목</span><span>내용</span><span>작성일</span></div>
@@ -223,8 +256,10 @@ function PlanHandoff({ s, d, spec }: P & { spec: Spec }) {
       <span style={{ flex: 1 }} />
       {proposalReady(p) ? (
         <>
-          <span className="muted small">이 기획안을</span>
-          <Button size="small" variant={mk ? 'primary' : undefined} onClick={() => { flush(); d({ type: 'approveProposal', proposal: p.id }); toast.show(`${spec.id} → 마케팅`) }}>마케팅으로 넘기기</Button>
+          {p.handoff && !p.handoff.ok
+            ? <span className="plan-fail" title={p.handoff.reason}>마케팅 전달 실패{p.handoff.reason ? ` · ${p.handoff.reason}` : ''}</span>
+            : <span className="muted small">이 기획안을</span>}
+          <Button size="small" variant={mk ? 'primary' : undefined} onClick={() => { flush(); d({ type: 'approveProposal', proposal: p.id }); toast.show(`${spec.id} → 마케팅`) }}>{p.handoff && !p.handoff.ok ? '마케팅에 다시 보내기' : '마케팅으로 넘기기'}</Button>
           <Button size="small" variant={mk ? undefined : 'primary'} onClick={() => { flush(); d({ type: 'proposalToRequest', proposal: p.id }); toast.show(`${spec.id} → 개발`) }}>개발로 넘기기</Button>
         </>
       ) : p.status === '기획서로' ? <span className="small">개발로 넘김 · 작업 {s.tasks.filter((t) => t.spec === spec.id).length}개</span>
@@ -234,83 +269,400 @@ function PlanHandoff({ s, d, spec }: P & { spec: Spec }) {
   )
 }
 
-function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
-  // 작업·PR·장애가 연결된 문단만 눌러서 오른쪽에 본다. 연결이 없으면 글로만 보인다
+// 양옆 칸 접기·펴기 (브라우저에 기억). 접으면 좁은 띠만 남고 누르면 다시 펼친다
+function useStoredOpen(key: string): [boolean, (v: boolean) => void] {
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem(key) !== '0' } catch { return true } })
+  const set = (v: boolean) => { setOpen(v); try { localStorage.setItem(key, v ? '1' : '0') } catch { /* 저장이 막혀도 이번 화면에서는 바뀐다 */ } }
+  return [open, set]
+}
+
+function PaneToggle({ side, open, onToggle }: { side: 'left' | 'right'; open: boolean; onToggle: () => void }) {
+  const arrow = (side === 'left') === open ? '‹' : '›'
+  return <button type="button" className={`pane-toggle ${side}`} onClick={onToggle} aria-expanded={open} aria-label={open ? '칸 접기' : '칸 펼치기'} title={open ? '접기' : '펼치기'}>{arrow}</button>
+}
+
+function Rail({ side, label, onOpen }: { side: 'left' | 'right'; label: string; onOpen: () => void }) {
+  return (
+    <aside className={`pane-rail ${side}`}>
+      <button type="button" className="pane-rail-btn" onClick={onOpen} aria-expanded={false} aria-label={`${label} 펼치기`} title={`${label} 펼치기`}>
+        <span className="pane-rail-arrow" aria-hidden>{side === 'left' ? '›' : '‹'}</span>
+      </button>
+    </aside>
+  )
+}
+
+// 가운데 자유 작성 캔버스. 보기 모드는 서식대로만 보이고, "수정" 중에만 원문(마크다운)을 고친다 (편집·미리보기)
+const NL = String.fromCharCode(10)
+const FREE_HINT = ['배경, 목표, 해야 할 일, 다 됐는지 확인할 방법을 자유롭게 써 주세요.', '다 쓰고 왼쪽 ✦ 자동 채우기를 누르면 AI가 읽고 필수 항목을 채워요.', '', '## 배경', '## 목표', '## 요구사항', '- ', '## 완료 기준', '- '].join(NL)
+
+function FreeCanvas({ value, editing, onChange }: { value: string; editing: boolean; onChange: (text: string) => void }) {
+  const [preview, setPreview] = useState(false)
+  const showEdit = editing && !preview
+  return (
+    <section className="fc" id="sec-free" aria-label="자유 작성">
+      <div className="fc-bar">
+        <h2>자유 작성</h2>
+        <span style={{ flex: 1 }} />
+        {editing && (
+          <div className="fc-toggle" role="group" aria-label="보기 방식">
+            <button type="button" aria-pressed={!preview} onClick={() => setPreview(false)}>편집</button>
+            <button type="button" aria-pressed={preview} disabled={!value.trim()} onClick={() => setPreview(true)}>미리보기</button>
+          </div>
+        )}
+      </div>
+      {showEdit ? (
+        <textarea className="fc-edit" autoFocus value={value} placeholder={FREE_HINT} aria-label="자유 작성 (마크다운)" onChange={(e) => onChange(e.target.value)} />
+      ) : value.trim() ? (
+        <div className="fc-view"><Markdown text={value} /></div>
+      ) : (
+        <p className="fc-empty">아직 비어 있어요. 위의 <b>수정</b>을 눌러 자유롭게 써 주세요.</p>
+      )}
+    </section>
+  )
+}
+
+// 수정 이력 (구글 문서의 "버전 기록"처럼): 이 기획서에 남은 사람·AI 변경을 날짜별로. 되돌리기는 다음 과제
+const HISTORY_POINTS = new Set(['write_spec', 'edit_spec', 'fill_spec', 'answer_question', 'extract_decision', 'confirm_spec', 'auto_review', 'reject_spec', 'make_plan', 'delete_spec', 'spec_question', 'receive_planning_answer', 'split_tasks', 'start_dev'])
+function History({ s, spec, onClose }: { s: S; spec: Spec; onClose: () => void }) {
+  const ctx = s.requests.find((r) => r.id === spec.request)?.ctx
+  const items = s.activity
+    .filter((a) => (a.ctx === ctx || a.text.includes(spec.id)) && (HISTORY_POINTS.has(a.point) || a.text.includes(spec.id)))
+    .slice()
+    .reverse()
+  const days = new Map<string, typeof items>()
+  for (const a of items) {
+    const day = a.t.slice(0, 5)
+    days.set(day, [...(days.get(day) ?? []), a])
+  }
+  const who = (a: S['activity'][number]) => (a.kind === '사람' || a.from === 'human' ? '사람' : DEPT_NAME[a.from] ?? a.from)
+  return (
+    <aside className="col-right hist" aria-label="수정 이력">
+      <header className="hist-head">
+        <h2>수정 이력</h2>
+        <button type="button" className="hist-x" onClick={onClose} aria-label="수정 이력 닫기">✕</button>
+      </header>
+      {!items.length ? <p className="muted small">아직 기록이 없어요.</p> : (
+        <ol className="hist-list">
+          {[...days.entries()].map(([day, list]) => (
+            <li key={day}>
+              <h3 className="hist-day">{day}</h3>
+              <ol>
+                {list.map((a, i) => (
+                  <li key={i} className={`hist-item${who(a) === '사람' ? ' human' : ''}`}>
+                    <span className="hist-time">{a.t.slice(6)}</span>
+                    <span className="hist-who">{who(a)}</span>
+                    <p className="hist-text"><Linked s={s} text={a.text} /></p>
+                  </li>
+                ))}
+              </ol>
+            </li>
+          ))}
+        </ol>
+      )}
+      <p className="hist-note">되돌리기는 준비 중이에요.</p>
+    </aside>
+  )
+}
+
+type Draft = { title: string; problem: string; goal: string; reqs: string[]; dones: string[]; bodyMd: string; extra: Record<string, string> }
+const draftOf = (spec: Spec): Draft => ({
+  title: spec.title, problem: spec.problem, goal: spec.goal,
+  reqs: spec.paras.filter((p) => p.kind === 'req').map((p) => p.text),
+  dones: spec.paras.filter((p) => p.kind === 'done').map((p) => p.text),
+  bodyMd: spec.bodyMd ?? '',
+  extra: { ...(spec.extra ?? {}) },
+})
+const sameExtra = (a: Record<string, string>, b: Record<string, string>) => [...new Set([...Object.keys(a), ...Object.keys(b)])].every((k) => (a[k] ?? '').trim() === (b[k] ?? '').trim())
+const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x.trim() === b[i].trim())
+
+// 수정 중 목록 칸 (요구사항·완료 기준): 줄마다 고치고, 추가·삭제
+function ListEdit({ prefix, items, onChange, locked }: { prefix: string; items: string[]; onChange: (xs: string[]) => void; locked: boolean }) {
+  if (locked) return <>{items.map((t, i) => <p key={i} className="sp-static"><span className="sp-pid">{prefix}{i + 1}</span>{t}</p>)}</>
+  return (
+    <>
+      {items.map((t, i) => (
+        <div key={i} className="sp-row">
+          <span className="sp-pid">{prefix}{i + 1}</span>
+          <textarea className="sp-input" value={t} placeholder="비어 있음" aria-label={`${prefix}${i + 1}`} onChange={(e) => onChange(items.map((x, j) => (j === i ? e.target.value : x)))} />
+          <button type="button" className="sp-del" aria-label={`${prefix}${i + 1} 지우기`} onClick={() => onChange(items.filter((_, j) => j !== i))}>×</button>
+        </div>
+      ))}
+      {items.length < 6 && <button type="button" className="sp-add" onClick={() => onChange([...items, ''])}>+ 추가</button>}
+    </>
+  )
+}
+
+function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string; example?: boolean }) {
+  // 작업·PR·장애가 연결된 문단만 눌러서 오른쪽에 본다
   const linked = (id: string) => s.tasks.some((t) => t.spec === spec.id && t.para === id) || s.incidents.some((i) => i.candidates.some((c) => c.spec === spec.id && c.para === id))
   const para = spec.paras.find((p) => p.id === item2 && linked(p.id)) ?? spec.paras.find((p) => linked(p.id))
-  const paraHref = (id: string) => toPath(`work/specs/${spec.id}/${id}`)
-  const setParaId = (id: string) => go(paraHref(id))
-  // 개요 = 목차: 누르면 본문의 그 자리로 (연결된 문단이면 오른쪽도 그 문단으로)
+  const setParaId = (id: string) => go(toPath(`work/specs/${spec.id}/${id}`))
   const jump = (id: string) => setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0)
-  const tasks = para ? s.tasks.filter((t) => t.spec === spec.id && t.para === para.id) : []
-  const prs = s.prs.filter((p) => tasks.some((t) => t.id === p.task))
   const decisions = s.decisions.filter((x) => x.spec === spec.id)
   const thread = s.threads.find((t) => t.on === spec.id)
-  const inc = para ? s.incidents.find((i) => i.candidates.some((c) => c.spec === spec.id && c.para === para.id)) : undefined
   const xr = reviewOf(s, spec.id)
   const toast = useToast()
-  // 노션처럼 칸을 눌러 바로 고치고, 칸에서 벗어나면 저장한다. 확정되면 작업이 나가서 읽기 전용
-  // 제목·문제·목표는 언제든, 요구사항·완료 기준은 확정 전까지만 고친다
-  const editable = true
-  const parasEditable = spec.status !== '확정'
-  const [answer, setAnswer] = useState('')
-  const save = (patch: { title?: string; problem?: string; goal?: string; paras?: Record<string, string>; body_md?: string }) => {
-    d({ type: 'editSpec', spec: spec.id, ...patch })
-    toast.show(`${spec.id} 저장`)
+  const locked = spec.status === '확정' // 확정되면 요구사항·완료 기준은 작업이 나가 잠긴다
+  const tpl = templateOf(spec.origin) // 기획 제안에서 온 기획서는 제안서 양식 (배경·타깃·핵심 메시지·성공 지표…)
+  const sections = TEMPLATES[tpl]
+  const [leftOpen, setLeftOpen] = useStoredOpen('ax.spec.left')
+  const [historyOpen, setHistoryOpen] = useState(false)
+
+  // "수정" → 화면 초안에서만 고치고 "저장"할 때 한 번에 보낸다. "취소"는 초안을 버린다
+  const [draft, setDraft] = useState<Draft | null>(null)
+  const [answerFound, setAnswerFound] = useState('') // 자동 채우기가 자유 작성에서 찾은 질문 답 (저장하면 답으로 보냄)
+  const [filling, setFilling] = useState(false)
+  const editing = draft !== null
+  const cur = draft ?? draftOf(spec)
+  const orig = draftOf(spec)
+  const dirty = editing && (cur.title !== orig.title || cur.problem !== orig.problem || cur.goal !== orig.goal || cur.bodyMd !== orig.bodyMd || !sameList(cur.reqs, orig.reqs) || !sameList(cur.dones, orig.dones) || !sameExtra(cur.extra, orig.extra) || !!answerFound)
+  useEffect(() => {
+    if (!dirty) return
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault() }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [dirty])
+  const set = (patch: Partial<Draft>) => setDraft({ ...cur, ...patch })
+  const startEdit = () => { setDraft(draftOf(spec)); setAnswerFound('') }
+  const cancel = () => {
+    if (dirty && !window.confirm('고친 내용을 버릴까요?')) return
+    setDraft(null); setAnswerFound('')
   }
-  const blockOf = (p: S['specs'][number]['paras'][number]) => (
-    <SpecPara key={`${p.id}-${p.text}`} p={p} on={p.id === para?.id} onPick={linked(p.id) ? () => setParaId(p.id) : undefined} s={s} spec={spec.id} editable={parasEditable} onSave={(text) => text.trim() !== p.text && save({ paras: { [p.id]: text } })} />
+  const saveAll = () => {
+    if (!draft) return
+    const patch: Record<string, unknown> = {}
+    if (cur.title.trim() && cur.title !== orig.title) patch.title = cur.title
+    if (cur.problem.trim() && cur.problem !== orig.problem) patch.problem = cur.problem
+    if (cur.goal.trim() && cur.goal !== orig.goal) patch.goal = cur.goal
+    if (cur.bodyMd !== orig.bodyMd) patch.body_md = cur.bodyMd
+    if (!sameExtra(cur.extra, orig.extra)) patch.extra = Object.fromEntries(sections.filter((x) => x.source === 'extra').map((x) => [x.key, cur.extra[x.key] ?? '']))
+    if (!locked && !sameList(cur.reqs, orig.reqs)) patch.reqs = cur.reqs.filter((x) => x.trim())
+    if (!locked && !sameList(cur.dones, orig.dones)) patch.dones = cur.dones.filter((x) => x.trim())
+    if (Object.keys(patch).length) d({ type: 'editSpec', spec: spec.id, ...patch } as Action)
+    if (answerFound && spec.question) d({ type: 'answerQuestion', spec: spec.id, text: answerFound })
+    setDraft(null); setAnswerFound('')
+    toast.show(Object.keys(patch).length || answerFound ? `${spec.id} 저장됨` : '바뀐 내용이 없어요')
+  }
+
+  // ✦ 자동 채우기: AI가 (저장 안 된) 자유 작성을 읽고 채운 값을 초안에만 넣는다. 저장해야 반영된다
+  // 누르면 늘 AI 값으로 바꾼다 (빈 칸이 아니어도). 초안에만 들어가서 "취소"로 되돌릴 수 있다
+  const autoFill = async () => {
+    const base = draft ?? draftOf(spec)
+    if (!base.bodyMd.trim()) { toast.show('자유 작성을 먼저 써 주세요'); return }
+    if (!draft) setDraft(base)
+    setFilling(true)
+    try {
+      // 예시 모드여도 서버의 기획 AI가 읽는다. 서버에 닿지 않을 때만 소제목 읽기로 대신한다
+      let got: FillPreview & { ai: boolean }
+      try {
+        got = await previewFill({ spec: spec.id, template: tpl, title: base.title, bodyMd: base.bodyMd, question: spec.question, current: { problem: base.problem, goal: base.goal, requirements: base.reqs, done_criteria: base.dones } })
+      } catch {
+        got = { ...exampleFill(base.bodyMd), ai: false }
+      }
+      const next = { ...base }
+      const filled: string[] = []
+      const label = (src: string) => sections.find((x) => x.source === src || x.key === src)?.label ?? src
+      if (got.problem && got.problem !== base.problem) { next.problem = got.problem; filled.push(label('problem')) }
+      if (got.goal && got.goal !== base.goal) { next.goal = got.goal; filled.push(label('goal')) }
+      if (!locked && got.reqs.length && !sameList(got.reqs, base.reqs)) { next.reqs = got.reqs; filled.push(label('req')) }
+      if (!locked && got.done.length && !sameList(got.done, base.dones)) { next.dones = got.done; filled.push(label('done')) }
+      next.extra = { ...base.extra }
+      for (const x of sections.filter((y) => y.source === 'extra')) {
+        const v = got.extra?.[x.key]
+        if (v && v !== base.extra[x.key]) { next.extra[x.key] = v; filled.push(x.label) }
+      }
+      setDraft(next)
+      void askSuggest(next) // 자동 채우기 뒤에도 빈 칸이 남으면 AI 제안
+      if (got.answer && spec.question) { setAnswerFound(got.answer); filled.push('질문 답') }
+      const how = !got.ai ? 'AI 연결 안 됨 · 소제목만 읽었어요' : got.by === 'llm' ? 'AI가 읽고 채웠어요' : 'AI가 채우고 빈 곳은 소제목으로'
+      toast.show(filled.length ? `${how} · ${filled.join(', ')} · 확인하고 저장해 주세요` : locked ? '바뀐 항목이 없어요 (확정된 기획서라 요구사항·완료 기준은 잠겨 있어요)' : '자유 작성에서 바꿀 내용을 찾지 못했어요')
+    } catch (x) {
+      toast.show(`자동 채우기 실패: ${(x as Error).message}`)
+    } finally {
+      setFilling(false)
+    }
+  }
+
+  // AI 제안: 비어 있는 필수 칸에 무엇을 쓸지 AI가 안을 낸다 (열 때, 자동 채우기 뒤에도 비어 있으면). 고르면 초안에만 들어간다
+  const FIELD: Record<string, string> = { req: 'requirements', done: 'done_criteria', problem: 'problem', goal: 'goal' }
+  const [sugg, setSugg] = useState<Record<string, string | string[]>>({})
+  const [suggesting, setSuggesting] = useState(false)
+  const emptyOf = (b: Draft) => sections.filter((x) => {
+    if (x.source === 'req' || x.source === 'done') return !locked && !(x.source === 'req' ? b.reqs : b.dones).some((t) => t.trim())
+    return !(x.source === 'extra' ? b.extra[x.key] ?? '' : b[x.source]).trim()
+  })
+  const askSuggest = async (b: Draft) => {
+    const empty = emptyOf(b)
+    if (!empty.length) { setSugg({}); return }
+    setSuggesting(true)
+    try {
+      const got = await previewSuggest({
+        spec: spec.id, template: tpl, title: b.title, bodyMd: b.bodyMd, basis: spec.basis ?? [],
+        fields: empty.map((x) => (x.source === 'extra' ? x.key : FIELD[x.source])),
+        current: { problem: b.problem, goal: b.goal, requirements: b.reqs, done_criteria: b.dones, ...b.extra },
+      })
+      const out: Record<string, string | string[]> = {}
+      for (const x of empty) {
+        const v = x.source === 'req' ? got.reqs : x.source === 'done' ? got.done : x.source === 'extra' ? got.extra?.[x.key] ?? '' : got[x.source]
+        if (Array.isArray(v) ? v.length : v.trim()) out[x.key] = v
+      }
+      setSugg(out)
+    } catch {
+      setSugg({})
+    } finally {
+      setSuggesting(false)
+    }
+  }
+  useEffect(() => { setSugg({}); if (!draft) void askSuggest(draftOf(spec)) }, [spec.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  const valueOf = (x: Section, v: string | string[]): Partial<Draft> => (
+    x.source === 'req' ? { reqs: v as string[] } : x.source === 'done' ? { dones: v as string[] }
+      : x.source === 'extra' ? { extra: { ...cur.extra, [x.key]: v as string } } : { [x.source]: v as string }
   )
+  const applySugg = (x: Section) => {
+    const v = sugg[x.key]; if (!v) return
+    set(valueOf(x, v)); setSugg(({ [x.key]: _, ...rest }) => rest)
+  }
+  const applyAll = () => {
+    let next = { ...cur, extra: { ...cur.extra } }
+    for (const x of sections) {
+      const v = sugg[x.key]; if (!v) continue
+      next = x.source === 'extra' ? { ...next, extra: { ...next.extra, [x.key]: v as string } } : { ...next, ...valueOf(x, v), extra: next.extra }
+    }
+    setDraft(next); setSugg({})
+  }
+  const suggCount = Object.keys(sugg).length
+  const suggEl = (x: Section, empty: boolean) => {
+    const v = sugg[x.key]
+    if (!empty || !v) return null
+    return (
+      <div className="sp-sugg">
+        <span className="sp-sugg-tag">AI 제안</span>
+        {Array.isArray(v) ? <ul>{v.map((t, i) => <li key={i}>{t}</li>)}</ul> : <p>{v}</p>}
+        <div className="sp-sugg-act">
+          <button type="button" onClick={() => applySugg(x)}>적용</button>
+          <button type="button" className="quiet" onClick={() => setSugg(({ [x.key]: _, ...rest }) => rest)}>닫기</button>
+        </div>
+      </div>
+    )
+  }
+
+  const deletable = !locked && !s.tasks.some((t) => t.spec === spec.id)
+  const removeSpec = () => {
+    if (!window.confirm(`${spec.id} "${spec.title}" 기획서를 지울까요? 요청은 남고 접수 상태로 돌아가요.`)) return
+    d({ type: 'deleteSpec', spec: spec.id })
+    toast.show(`${spec.id} 삭제`)
+    go(toPath('work/specs'))
+  }
+  const [answer, setAnswer] = useState('')
+  const hasFree = !!cur.bodyMd.trim()
+  const reqParas = spec.paras.filter((p) => p.kind === 'req')
+  const doneParas = spec.paras.filter((p) => p.kind === 'done')
+  const blockOf = (p: S['specs'][number]['paras'][number]) => (
+    <SpecPara key={`${p.id}-${p.text}`} p={p} on={p.id === para?.id} onPick={linked(p.id) ? () => setParaId(p.id) : undefined} s={s} spec={spec.id} editable={false} onSave={() => undefined} />
+  )
+  const lockTag = locked && <span className="sp-lock" title="확정되면 작업이 개발로 나가서 고치지 않아요">잠김</span>
+  const sectionEl = (x: Section) => {
+    if (x.source === 'req' || x.source === 'done') {
+      const isReq = x.source === 'req'
+      const paras = isReq ? reqParas : doneParas
+      return (
+        <div key={x.key} className="sp-prop sp-list">
+          <span className="sp-label">{x.label}{lockTag}</span>
+          {editing ? <ListEdit prefix={isReq ? 'R' : 'C'} items={isReq ? cur.reqs : cur.dones} locked={locked} onChange={(xs) => set(isReq ? { reqs: xs } : { dones: xs })} />
+            : paras.length ? paras.map(blockOf) : <span className="sp-empty">비어 있음</span>}
+          {suggEl(x, !(isReq ? cur.reqs : cur.dones).some((t) => t.trim()))}
+        </div>
+      )
+    }
+    const value = x.source === 'extra' ? cur.extra[x.key] ?? '' : cur[x.source]
+    const onChange = (v: string) => (x.source === 'extra' ? set({ extra: { ...cur.extra, [x.key]: v } }) : set({ [x.source]: v }))
+    return (
+      <div key={x.key} className="sp-prop" id={x.source === 'problem' ? 'sec-problem' : undefined}>
+        <label htmlFor={`sp-${x.key}-${spec.id}`}>{x.label}</label>
+        {editing
+          ? <textarea id={`sp-${x.key}-${spec.id}`} className="sp-input" value={value} placeholder={x.placeholder || '비어 있음'} onChange={(e) => onChange(e.target.value)} />
+          : value.trim() ? <p className="sp-static">{value}</p> : <span className="sp-empty">비어 있음</span>}
+        {suggEl(x, !value.trim())}
+      </div>
+    )
+  }
 
   return (
-    <div className="three">
-      <aside className="col-left">
+    <div className={`three spec-three${leftOpen ? '' : ' no-left'}${historyOpen ? ' with-hist' : ''}${editing ? ' is-editing' : ''}`}>
+      {!leftOpen ? <Rail side="left" label="필수 항목" onOpen={() => setLeftOpen(true)} /> : <aside className="col-left spec-left">
+        <PaneToggle side="left" open onToggle={() => setLeftOpen(false)} />
         <a href={toPath('work/specs')} className="plain-link small">‹ 문서·기획서 목록</a>
-        <div className="ph" style={{ marginTop: 10 }}>{spec.id} 개요</div>
-        <ul className="outline">
-          <li><button type="button" onClick={() => jump('sec-problem')}>문제 · 목표</button></li>
-          {spec.paras.map((p) => (
-            <li key={p.id}><button type="button" className={p.id === para?.id ? 'on' : ''} onClick={() => { if (linked(p.id)) setParaId(p.id); jump(`para-${p.id}`) }}>{p.id} {p.kind === 'req' ? '요구사항' : '완료 기준'}</button></li>
-          ))}
-          {spec.question && <li><button type="button" onClick={() => jump('sec-question')}>질문 1개 남음</button></li>}
-          <li><button type="button" onClick={() => jump('sec-free')}>자유 작성</button></li>
-          <li><button type="button" onClick={() => jump('sec-decisions')}>결정 이력 {decisions.length}건</button></li>
-          {thread && <li><a href={toPath(`talk/${thread.id}`)}>문서 스레드 열기</a></li>}
-        </ul>
-      </aside>
+        <section className="sp-props" aria-label="필수 항목">
+          <header className="sp-props-head">
+            <h2>{TEMPLATE_NAME[tpl]} 항목</h2>
+          </header>
+          <div className="sp-fill">
+            <button type="button" className="sp-fill-btn" disabled={!hasFree || filling} title={hasFree ? 'AI가 자유 작성을 읽고 필수 항목을 다시 써요 (저장 전까지 반영 안 됨, 취소로 되돌림)' : '가운데 자유 작성을 먼저 써 주세요'}
+              onClick={() => void autoFill()}>{filling ? '읽는 중…' : '✦ 자동 채우기'}</button>
+          </div>
+          {(suggesting || suggCount > 0) && (
+            <div className="sp-sugg-bar">
+              <span>{suggesting ? '빈 칸 제안 만드는 중…' : `빈 칸 AI 제안 ${suggCount}`}</span>
+              {!suggesting && suggCount > 1 && <button type="button" onClick={applyAll}>모두 적용</button>}
+            </div>
+          )}
+
+          {spec.question && (
+            <button type="button" className={`sp-question${answerFound ? ' answered' : ''}`} onClick={() => jump('sec-question')}>
+              <span className="sp-q-label">{answerFound ? '질문 답 찾음 · 저장하면 보내요' : '답할 질문'}</span>
+              <span className="sp-q-text">{spec.question}</span>
+              {answerFound && <span className="sp-q-answer">{answerFound}</span>}
+            </button>
+          )}
+
+          {sections.map(sectionEl)}
+        </section>
+
+        <nav className="sp-links" aria-label="이 기획서">
+          <details className="sp-decisions" id="sec-decisions">
+            <summary>결정 이력 {decisions.length}건</summary>
+            {decisions.length ? (
+              <ul>
+                {decisions.map((x) => <li key={x.id}><span className="sp-pid">{x.id}</span><span>{x.text}<HrRecord d={x} /></span></li>)}
+              </ul>
+            ) : <p className="sp-empty">아직 없음</p>}
+          </details>
+          {thread && <a href={toPath(`talk/${thread.id}`)}>문서 스레드 ({thread.messages.length})</a>}
+        </nav>
+      </aside>}
 
       <section className="col-doc">
-        <input key={`t-${spec.title}`} className="doc-title-input" defaultValue={spec.title} readOnly={!editable} aria-label="기획서 제목"
-          onBlur={(e) => editable && e.target.value.trim() && e.target.value.trim() !== spec.title && save({ title: e.target.value })} />
+        <div className="doc-actions spec-actions">
+          {editing ? (
+            <>
+              {dirty && <span className="spec-dirty">저장 안 됨</span>}
+              <Button size="small" onClick={cancel}>취소</Button>
+              <Button size="small" variant="primary" onClick={saveAll}>저장</Button>
+            </>
+          ) : (
+            <>
+              <Button size="small" variant="primary" onClick={startEdit}>수정</Button>
+              <Button size="small" onClick={() => { setHistoryOpen(!historyOpen) }} aria-pressed={historyOpen}>수정 이력</Button>
+              <Button size="small" onClick={removeSpec} disabled={!deletable} title={deletable ? '기획서 초안 지우기' : '확정됐거나 작업이 나간 기획서는 지울 수 없어요'}>삭제</Button>
+            </>
+          )}
+        </div>
+        {editing
+          ? <input className="doc-title-input" value={cur.title} onChange={(e) => set({ title: e.target.value })} aria-label="기획서 제목" />
+          : <h1 className="doc-title-static">{spec.title}</h1>}
         <div className="doc-head" style={{ marginTop: 4 }}>
           <State v={xr ? (xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기') : spec.status} />
           {spec.confirmedBy && <Tag>{CONFIRMED_BY[spec.confirmedBy]}</Tag>}
-          {!parasEditable && <Tag title="확정되면 작업이 개발로 나가서 요구사항·완료 기준은 고치지 않아요">문단 잠김</Tag>}
-          <span className="muted small">요청 <Ref s={s} id={spec.request} /> · <a href={toPath(`projects/${spec.request}`)}>프로젝트 보기</a> · 사람이 쓴 문장 {spec.humanSentences}개</span>
+          <span className="muted small">요청 <Ref s={s} id={spec.request} /> · <a href={toPath(`projects/${spec.request}`)}>프로젝트 보기</a></span>
         </div>
-        {spec.status === '초안' && !xr && spec.question && <Notice tone="warn">빈 항목 질문이 남아 있습니다. 답이 오면 AI가 확정 조건(질문 없음·인사 경고 없음·근거 있음)을 다시 보고, 맞으면 바로 확정하고 아니면 AI 교차검증에 올립니다.</Notice>}
         {xr && <ReviewDecide d={d} spec={spec} xr={xr} />}
         <PlanHandoff s={s} d={d} spec={spec} />
         {spec.status === '확정' && <ReleaseCheckBox d={d} spec={spec.id} />}
-        <div className="doc-blocks">
-          <h2 className="spec-h" id="sec-problem">문제</h2>
-          <textarea key={`p-${spec.problem}`} className="blk-p" defaultValue={spec.problem} readOnly={!editable} rows={Math.max(1, Math.ceil(spec.problem.length / 70))} aria-label="문제"
-            onBlur={(e) => editable && e.target.value.trim() !== spec.problem && save({ problem: e.target.value })} />
-          <h2 className="spec-h">목표</h2>
-          <textarea key={`g-${spec.goal}`} className="blk-p" defaultValue={spec.goal} readOnly={!editable} rows={Math.max(1, Math.ceil(spec.goal.length / 70))} aria-label="목표"
-            onBlur={(e) => editable && e.target.value.trim() !== spec.goal && save({ goal: e.target.value })} />
-          <h2 className="spec-h">요구사항</h2>
-          {spec.paras.filter((p) => p.kind === 'req').map(blockOf)}
-          <h2 className="spec-h">완료 기준</h2>
-          {spec.paras.filter((p) => p.kind === 'done').map(blockOf)}
-          <h2 className="spec-h" id="sec-free">자유 작성 <span className="muted small">마크다운 · 판단에는 안 씀</span></h2>
-          <textarea key={`md-${spec.id}-${spec.bodyMd ?? ''}`} className="blk-p spec-md" defaultValue={spec.bodyMd ?? ''} placeholder="배경, 참고 링크, 촬영·디자인 메모 등을 자유롭게 (## 제목, - 목록, > 인용)"
-            rows={Math.max(4, (spec.bodyMd ?? '').split('\n').length + 1)} aria-label="자유 작성"
-            onBlur={(e) => e.target.value !== (spec.bodyMd ?? '') && save({ body_md: e.target.value })} />
-        </div>
+        <FreeCanvas value={cur.bodyMd} editing={editing} onChange={(bodyMd) => set({ bodyMd })} />
         {spec.question && (
           <div className="question" id="sec-question">
-            질문 · {spec.question}
+            <b className="question-label">답할 질문</b>
+            <p className="question-text">{spec.question}</p>
             <form className="spec-answer" onSubmit={(e) => { e.preventDefault(); if (!answer.trim()) return; d({ type: 'answerQuestion', spec: spec.id, text: answer.trim() }); setAnswer(''); toast.show(`${spec.id} 질문에 답함`) }}>
               <input className="field" value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="답 적기" aria-label="질문에 답" />
               <Button size="small" variant="primary" type="submit" disabled={!answer.trim()}>답하기</Button>
@@ -321,27 +673,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
         <span className="tags">{spec.basis.map((b) => <Tag key={b}>{b}</Tag>)}</span>
       </section>
 
-      <aside className="col-right">
-        {para && <>
-        <div className="ph">{para.id}에 연결된 작업·PR</div>
-        <Sec title="작업" sub={`${tasks.length}건`}>
-          {tasks.length ? tasks.map((t) => <div key={t.id} {...rowNav(hrefOf(s, t.id), '이 작업의 PR 보기')}><div className="mini-row"><span className="mono">{t.id}</span> {t.title} <State v={t.state} /></div></div>) : <span className="muted">기획서가 확정되면 split_tasks가 나눈다</span>}
-        </Sec>
-        <Sec title="PR" sub="작업 1개 = PR 1개">
-          {prs.length ? prs.map((p) => <PrLine key={p.id} s={s} p={p} d={d} />) : <span className="muted">아직 없음</span>}
-        </Sec>
-        </>}
-        <div id="sec-decisions" />
-        <Sec title="스레드 · 결정" sub={thread ? <a href={toPath(`talk/${thread.id}`)}>스레드 전체 보기</a> : undefined}>
-          {thread?.messages.slice(-2).map((m, i) => <div key={i} className="msg"><b>{m.who}</b> <Linked s={s} text={m.text} />{m.decision && <> <Tag tone="green">{m.decision}</Tag></>}</div>)}
-          {decisions.map((x) => <div key={x.id} className="msg"><span className="mono">{x.id}</span> {x.text} <HrRecord d={x} /></div>)}
-        </Sec>
-        {para && <Sec title="장애 연결" sub="DejaFix 사후관리">
-          {inc ? <div className="msg"><Ref s={s} id={inc.ctx} /> {inc.title} → 관련 PR {inc.candidates.map((c, i) => <span key={c.pr}>{i > 0 && ', '}<Ref s={s} id={c.pr} /></span>)}</div> : <span className="muted">연결된 사건 없음</span>}
-        </Sec>}
-        <div className="ph" style={{ marginTop: 6 }}>최근 에이전트 활동</div>
-        <ActivityList s={s} items={s.activity.filter((a) => a.ctx === (s.requests.find((r) => r.id === spec.request)?.ctx ?? 'ctx_req_0012')).slice(-4).reverse()} compact />
-      </aside>
+      {historyOpen && <History s={s} spec={spec} onClose={() => setHistoryOpen(false)} />}
     </div>
   )
 }
@@ -367,25 +699,6 @@ function SpecPara({ p, on, onPick, s, spec, editable, onSave }: { p: S['specs'][
           {done && <Tag tone="green">구현됨</Tag>}
         </span>
       )}
-    </div>
-  )
-}
-
-// PR 한 줄 (기획서 옆 칸). 머지 버튼은 없다: 기준 안이면 자동 머지, 밖이면 교차검증, 되돌릴 수 없는 일이면 사람 확인
-function PrLine({ s, p, d }: { s: S; p: PR; d: Dispatch<Action> }) {
-  const last = p.reviews[p.reviews.length - 1]
-  const xr = reviewOf(s, p.id)
-  const rejected = !p.merged && !xr && s.reviews.some((x) => x.ref === p.id && x.result === '거절')
-  return (
-    <div className="pr-line">
-      <div><a href={toPath(`work/prs/${prSlug(p.id)}`)}><b>{p.id}</b> {p.title}</a></div>
-      <div className="muted small mono">{p.gate.lines}줄·{p.gate.files}파일 · {p.gate.paths}</div>
-      <span className="tags">
-        <Tag tone={last === '통과' ? 'green' : 'amber'}>검수 {last}{p.reviews.length > 1 ? ` (${p.reviews.length}회차)` : ''}</Tag>
-        <RepoTag p={p} />
-        {p.merged ? <Tag tone="green">{mergedLabel(p)}</Tag> : xr ? <a href={toPath(`work/reviews/${xr.id}`)}><Tag tone="amber">{xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기'} {xr.id}</Tag></a> : rejected ? <Tag tone="amber">검증자 거절</Tag> : null}
-      </span>
-      {!p.merged && (last === '불일치' || rejected) && <Button size="small" onClick={() => d({ type: 'reviewPr', pr: p.id })}>다시 검수</Button>}
     </div>
   )
 }

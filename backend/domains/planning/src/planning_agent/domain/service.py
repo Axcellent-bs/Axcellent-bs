@@ -131,6 +131,8 @@ from planning_agent import (
     proposals,
     related,
     release_check,
+    spec_fill,
+    spec_template,
 )
 from planning_agent.ask_requester import Asker, missing_info_question
 from planning_agent.domain.docs import gather_blocks, next_block_id
@@ -256,6 +258,11 @@ class EditSpecParams(SpecParams):
     goal: str = ""
     paras: dict[str, str] = Field(default_factory=dict)
     body_md: str | None = Field(default=None, max_length=20000)  # 자유 작성 칸 (None = 그대로)
+    # 요구사항·완료 기준 목록을 통째로 바꾼다 (자동 채우기 뒤 저장, 확정 전만). None = 그대로
+    reqs: list[str] | None = Field(default=None, max_length=10)
+    dones: list[str] | None = Field(default=None, max_length=10)
+    # 양식 추가 칸 (spec_template.EXTRA_KEYS). 빈 글이면 그 칸을 비운다. None = 그대로
+    extra: dict[str, str] | None = None
 
 
 class PlanningService(ProposalMixin, PlanningCore):
@@ -273,6 +280,7 @@ class PlanningService(ProposalMixin, PlanningCore):
         "edit_spec": ("_edit_spec", EditSpecParams),
         "pause_request": ("_pause_request", PauseParams),
         "delete_doc": ("_delete_doc", DocParams),
+        "delete_spec": ("_delete_spec", SpecParams),
         "import_notion": ("_import_notion", NotionImportParams),
         "resume_request": ("_resume_request", RequestParams),
         "send_release_order": ("_send_release_order_action", ReleaseOrderParams),
@@ -294,12 +302,15 @@ class PlanningService(ProposalMixin, PlanningCore):
         insights: proposals.DataInsights | None | Literal["default"] = "default",
         marketing: proposals.MarketingBrief | None | Literal["default"] = "default",
         proposal_writer: proposals.ProposalWriter | None | Literal["default"] = "default",
+        spec_filler: spec_fill.SpecFiller | None | Literal["default"] = "default",
     ):
         super().__init__(clock, gate, tenant_id, result_sender, dev_sender, real_example, relater)
         # 기획 제안: 데이터분석 인사이트를 받아오는 곳·마케팅에 넘기는 곳
         # (None이면 부르지 않음, 목 모드 기본값)
         self._insights = proposals.default_insights() if insights == "default" else insights
         self._marketing = proposals.default_marketing() if marketing == "default" else marketing
+        # 자유 작성 → 필수 칸·질문 답 (None이면 소제목 읽기만, 목 모드 기본값)
+        self._spec_filler = spec_fill.default_filler() if spec_filler == "default" else spec_filler
         pw = proposal_writer  # 할 일·이유·목표 초안 (None이면 규칙 초안)
         self._proposal_writer = proposals.default_writer() if pw == "default" else pw
         # 인사 record_case를 실제로 부르는 곳 (None이면 관문·활동 기록만, 목 모드 기본값)
@@ -559,7 +570,11 @@ class PlanningService(ProposalMixin, PlanningCore):
         if area is None:
             return PlanCheck("unknown", message="영역을 정하지 못함")
         draft = PlanDraft(title=req.title, summary=req.title, area=area, kind="spec", ref=spec_id)
-        return await self._hr.check_plan(ctx, draft, {"요청 근거": req.evidence})
+        untrusted = {"요청 근거": req.evidence}
+        sp = next((x for x in self.state.specs if x.id == spec_id), None)
+        if sp is not None and sp.body_md:  # 자유 작성 칸도 인사 확인 근거로
+            untrusted["자유 작성"] = sp.body_md[:2000]
+        return await self._hr.check_plan(ctx, draft, untrusted)
 
     async def _record_hr(
         self, decision: ExecuteDecision, record: RecordCase, key: str
@@ -2080,8 +2095,11 @@ class PlanningService(ProposalMixin, PlanningCore):
         paras: dict[str, str],
         title: str = "",
         body_md: str | None = None,
+        reqs: list[str] | None = None,
+        dones: list[str] | None = None,
+        extra: dict[str, str] | None = None,
     ) -> ActionResult | None:
-        """사람 수정: 기획서의 제목·문제·목표·문단 글을 고친다.
+        """사람 수정 ("수정" → "저장"): 기획서의 제목·문제·목표·문단 글을 고친다.
 
         확정된 기획서는 제목·문제·목표만 고친다. 문단(요구사항·완료 기준)은 작업이 개발로 나가
         고치지 않는다(SPEC_CONFIRMED, 개정 흐름은 다음 단계). 바뀐 곳마다 사람이 쓴
@@ -2091,14 +2109,27 @@ class PlanningService(ProposalMixin, PlanningCore):
         if sp is None:
             raise ActionError("NOT_FOUND", f"기획서 {spec}가 없습니다")
         # 확정 뒤에도 제목·문제·목표(설명)는 고친다. 요구사항·완료 기준은 작업·대조 기준이라 막는다
-        if sp.status == "확정" and any((v or "").strip() for v in paras.values()):
+        lists = [x for x in (reqs, dones) if x is not None]
+        if sp.status == "확정" and (any((v or "").strip() for v in paras.values()) or lists):
             raise ActionError(
                 "SPEC_CONFIRMED", f"{spec}는 확정돼서 요구사항·완료 기준은 고칠 수 없습니다"
             )
         changed: list[str] = []
         if body_md is not None and body_md != (sp.body_md or ""):
-            sp.body_md = body_md  # 자유 작성 칸은 확정 뒤에도 고친다 (판단에 안 씀)
+            sp.body_md = (
+                body_md  # 자유 작성 칸은 확정 뒤에도 고친다 (유사·충돌 판단·인사 확인에 쓴다)
+            )
             changed.append("자유 작성")
+        for key, val in (extra or {}).items():  # 양식 추가 칸은 확정 뒤에도 고친다 (설명 칸)
+            if key not in spec_template.EXTRA_KEYS:
+                continue
+            v = (val or "").strip()[:2000]
+            if v != (sp.extra.get(key) or ""):
+                if v:
+                    sp.extra[key] = v
+                else:
+                    sp.extra.pop(key, None)
+                changed.append(key)
         if title.strip() and title.strip() != sp.title:
             sp.title = title.strip()
             changed.append("제목")
@@ -2108,6 +2139,17 @@ class PlanningService(ProposalMixin, PlanningCore):
         if goal.strip() and goal.strip() != sp.goal:
             sp.goal = goal.strip()
             changed.append("목표")
+        for kind, items, prefix, name in (
+            ("req", reqs, "R", "요구사항"),
+            ("done", dones, "C", "완료 기준"),
+        ):
+            clean = [t.strip()[:300] for t in items or [] if t.strip()]
+            old = [p.text for p in sp.paras if p.kind == kind]
+            if items is not None and clean and clean != old:
+                keep = [p for p in sp.paras if p.kind != kind]
+                new = [Para(id=f"{prefix}{i}", kind=kind, text=t) for i, t in enumerate(clean, 1)]
+                sp.paras = [*new, *keep] if kind == "req" else [*keep, *new]
+                changed.append(f"{name} {len(clean)}")
         for p in sp.paras:
             text = (paras.get(p.id) or "").strip()
             if text and text != p.text:
@@ -2257,13 +2299,150 @@ class PlanningService(ProposalMixin, PlanningCore):
                 out = await self.dispatch_proposal(name, action)
                 if out is not None:
                     return out
+            if name == "fill_spec":  # LLM을 부르니 잠금 밖에서
+                spec = action.get("spec")
+                if not isinstance(spec, str):
+                    raise ActionError("INVALID_ACTION", "spec이 없다")
+                return await self.fill_spec(
+                    spec,
+                    overwrite=bool(action.get("overwrite")),
+                    preview=bool(action.get("preview")),
+                    body_md=body if isinstance(body := action.get("body_md"), str) else None,
+                )
         return await super().dispatch(action)
+
+    # 규칙 초안이 넣는 기본 글: 자동 채우기에서 빈 칸처럼 다룬다
+    FILL_DEFAULTS = (
+        "바뀐 뒤 같은 문의·이상 신호가 다시 생기지 않는다",
+        "바뀐 화면에서 요청한 표시가 그대로 보인다",
+        "성과를 잴 기준을 정한다",
+    )
+
+    async def fill_spec(
+        self,
+        spec: str,
+        overwrite: bool = False,
+        preview: bool = False,
+        body_md: str | None = None,
+    ) -> ActionResult:
+        """사람 버튼 "자동 채우기": 자유 작성(body_md)을 읽어 필수 칸을 채운다 (spec_fill.py).
+
+        빈 칸과 규칙 초안 기본 글만 채운다. `overwrite`면 전부 다시 쓴다. 확정된 기획서는
+        문제·목표만 (요구사항·완료 기준은 작업이 나가 잠김)."""
+        sp = next((x for x in self.state.specs if x.id == spec), None)
+        if sp is None:
+            raise ActionError("NOT_FOUND", f"기획서 {spec}가 없습니다")
+        # 미리보기는 화면 초안의 (아직 저장 안 된) 자유 작성을 읽을 수 있다
+        md = (body_md if preview and body_md is not None else sp.body_md) or ""
+        if not md.strip():
+            raise ActionError("SPEC_NO_FREE_TEXT", "자유 작성이 비어 있어요")
+        req = self._request_of_spec(self.state, sp)
+        current = {
+            "problem": sp.problem,
+            "goal": sp.goal,
+            "requirements": [p.text for p in sp.paras if p.kind == "req"],
+            "done_criteria": [p.text for p in sp.paras if p.kind == "done"],
+        }
+        got = await spec_fill.fill(
+            md[:20000],
+            title=sp.title,
+            current=current,
+            question=sp.question or "",
+            context_id=req.context_id if req else f"spec:{sp.id}",
+            filler=self._spec_filler,
+            template=spec_template.template_of(sp.origin),
+        )
+        if got.empty():
+            raise ActionError(
+                "SPEC_FILL_EMPTY",
+                "채울 내용을 찾지 못했어요 (기획 LLM이 없으면 ## 목표 같은 소제목이 필요해요)",
+            )
+        if preview:  # 화면 "수정" 중: 값만 돌려주고 저장은 사람이 "저장"으로 한다
+            out = {
+                "spec": spec, "by": got.by, "problem": got.problem, "goal": got.goal,
+                "reqs": got.reqs, "done": got.done, "answer": got.answer if sp.question else "",
+                "extra": got.extra,
+            }  # fmt: skip
+            return ActionResult(changed=False, outcome="preview", output=out)
+        defaults = {*self.FILL_DEFAULTS, sp.title, req.title if req else ""}
+
+        def blank(v: str) -> bool:
+            t = (v or "").strip()
+            return overwrite or not t or t in defaults
+
+        async def run(s: State) -> ActionResult:
+            x = next((y for y in s.specs if y.id == spec), None)
+            if x is None:
+                return ActionResult(changed=False)
+            changed: list[str] = []
+            src = f"{DEPT_NAME.get(req.from_, '')}에서 받은 요청:" if req else ""
+            if got.problem and (blank(x.problem) or (src and x.problem.startswith(src))):
+                x.problem = got.problem
+                changed.append("문제")
+            if got.goal and blank(x.goal):
+                x.goal = got.goal
+                changed.append("목표")
+            if x.status != "확정":
+                for kind, items, prefix in (("req", got.reqs, "R"), ("done", got.done, "C")):
+                    cur = [p for p in x.paras if p.kind == kind]
+                    if items and (not cur or all(blank(p.text) for p in cur)):
+                        keep = [p for p in x.paras if p.kind != kind]
+                        new = [
+                            Para(id=f"{prefix}{i}", kind=kind, text=t)
+                            for i, t in enumerate(items, 1)
+                        ]
+                        x.paras = [*new, *keep] if kind == "req" else [*keep, *new]
+                        changed.append(
+                            f"{'요구사항' if kind == 'req' else '완료 기준'} {len(items)}"
+                        )
+            if got.answer and x.question:  # 자유 작성에 남은 질문의 답 → 답하기 흐름 그대로
+                await self._answer_question(s, spec, got.answer)
+                changed.append("질문 답")
+            if not changed:
+                return ActionResult(
+                    changed=False, output={"spec": spec, "filled": [], "by": got.by}
+                )
+            how = {"rule": "소제목", "llm": "AI", "llm+rule": "AI+소제목"}[got.by]
+            ctx = req.context_id if req else f"spec:{spec}"
+            text = f"{spec} 자유 작성으로 칸 채움 ({how}) · {', '.join(changed)}"
+            s.activity.append(
+                self._act(self.clock(), ctx, "planning", "planning", "fill_spec", "사람", text)
+            )
+            return ActionResult(output={"spec": spec, "filled": changed, "by": got.by})
+
+        return await self._apply(run)
 
     @staticmethod
     def _next_doc_id(s: State) -> str:
         """지운 문서가 있어도 번호가 겹치지 않게 가장 큰 번호 + 1."""
         nums = [int(x.id.split("-")[1]) for x in s.docs if x.id.split("-")[-1].isdigit()]
         return f"DOC-{max(nums, default=0) + 1}"
+
+    async def _delete_spec(self, s: State, spec: str) -> ActionResult | None:
+        """사람 버튼 "삭제": 확정 전 기획서 초안을 지운다. 작업·PR이 붙었거나 확정됐으면 막는다.
+
+        요청은 남기고 기획서 연결만 끊어 "접수"로 돌린다 (자동으로 다시 쓰지 않게 흐름도 끈다).
+        기획 제안으로 만든 기획안이면 그 요청도 지우고 제안을 "확인 대기"로 돌린다."""
+        sp = next((x for x in s.specs if x.id == spec), None)
+        if sp is None:
+            return None
+        if sp.status == "확정" or sp.handed_to_dev or any(t.spec == spec for t in s.tasks):
+            raise ActionError("SPEC_IN_USE", f"{spec}는 확정됐거나 작업이 나가 지울 수 없습니다")
+        s.specs = [x for x in s.specs if x.id != spec]
+        req = next((r for r in s.requests if r.id == sp.request), None)
+        prop = next((p for p in s.proposals if p.spec == spec), None)
+        if prop is not None:
+            prop.status, prop.spec, prop.request = "확인 대기", None, None
+            if req is not None:
+                s.requests = [r for r in s.requests if r.id != req.id]
+        elif req is not None:
+            req.spec, req.state, req.flow = None, "접수", False
+        ctx = req.context_id if req else f"spec:{spec}"
+        text = f"{spec} 기획서 삭제" + (f" · {prop.id} 확인 대기로" if prop else "")
+        s.activity.append(
+            self._act(self.clock(), ctx, "human", "planning", "delete_spec", "사람", text)
+        )
+        return ActionResult(output={"spec_id": spec, "deleted": True})
 
     async def _delete_doc(self, s: State, doc: str) -> ActionResult | None:
         """사람 버튼 "삭제": 정리 문서를 지운다 (기획서는 지우지 않는다)."""

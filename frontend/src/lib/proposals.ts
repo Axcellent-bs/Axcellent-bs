@@ -46,11 +46,13 @@ export interface Proposal {
 
 export const PROPOSAL_STAGES = ['받음', '기획안', '실행', '성과'] as const
 /** 상태 → 흐름 칸 (폐기는 받음에서 끝난다). 확정하면 기획안을 먼저 만들고, 마케팅·개발로 넘기는 건 그다음 */
+/** 마케팅에 넘기다 실패한 채 남은 기록 (서버는 이제 기획안으로 되돌리지만 예전 기록이 남아 있을 수 있다) */
+export const handoffFailed = (p: Proposal) => p.status === '마케팅 전달' && p.handoff?.ok === false
 export const proposalStage = (p: Proposal): number =>
-  p.status === '확인 대기' || p.status === '폐기' ? 0 : p.status === '기획안' ? 1 : p.status === '성과 확인' ? 3 : 2
+  p.status === '확인 대기' || p.status === '폐기' ? 0 : p.status === '기획안' || handoffFailed(p) ? (p.spec ? 1 : 0) : p.status === '성과 확인' ? 3 : 2
 export const proposalOpen = (p: Proposal) => p.status === '확인 대기'
 /** 기획안을 만든 뒤 마케팅·개발로 넘길 수 있는 상태 */
-export const proposalReady = (p: Proposal) => p.status === '기획안'
+export const proposalReady = (p: Proposal) => p.status === '기획안' || handoffFailed(p)
 export const PROPOSAL_ORIGIN = 'proposal' // 기획 제안에서 만든 기획서 (Spec.origin)
 export const proposalEnded = (p: Proposal) => p.status === '폐기'
 

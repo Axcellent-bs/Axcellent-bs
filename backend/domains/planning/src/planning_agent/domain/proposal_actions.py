@@ -119,6 +119,23 @@ def _next_num(ids: list[str]) -> int:
     return max(nums, default=0) + 1
 
 
+def _can_send(p: Proposal) -> bool:
+    """마케팅에 (다시) 보낼 수 있는 상태: 확인 대기·기획안, 또는 전달에 실패한 채 남은 예전 기록."""
+    failed = p.status == "마케팅 전달" and p.handoff is not None and not p.handoff.ok
+    return p.status in ("확인 대기", "기획안") or failed
+
+
+def _undo_send(s: State, p: Proposal) -> None:
+    """전달 실패: 제안은 기획안으로, 기획안 기획서는 초안으로, 요청은 기획 중으로 되돌린다."""
+    p.status = "기획안" if p.spec else "확인 대기"
+    sp = next((x for x in s.specs if x.id == p.spec), None) if p.spec else None
+    if sp is not None and not sp.handed_to_dev:
+        sp.status = "초안"
+        req = next((r for r in s.requests if r.id == sp.request), None)
+        if req is not None and req.state == "작업 중":
+            req.state = "기획 중"
+
+
 def _find(s: State, pid: str) -> Proposal | None:
     return next((x for x in s.proposals if x.id == pid), None)
 
@@ -278,9 +295,11 @@ class ProposalMixin:
         )  # fmt: skip
         s.specs.append(
             Spec(
-                id=spec_id, title=p.title, request=req_id, status="초안", problem=p.why,
+                id=spec_id, title=p.title, request=req_id, status="초안",
+                problem=f"{p.insight} {p.why}".strip()[:300],  # 제안서 양식에서는 "배경"
                 goal=p.target and f"{p.target.label} {p.target.value}" or p.idea, paras=paras,
                 basis=basis, origin=PROPOSAL_ORIGIN, body_md="\n".join(body),
+                extra={k: v for k, v in (("audience", p.audience or ""),) if v},
             )
         )  # fmt: skip
         p.status = "기획안"
@@ -296,7 +315,7 @@ class ProposalMixin:
         self: Any, s: State, proposal: str, note: str
     ) -> ActionResult | None:
         p = _find(s, proposal)
-        if p is None or p.status not in ("확인 대기", "기획안"):
+        if p is None or not _can_send(p):
             return None
         p.status = "마케팅 전달"
         p.note = note or p.note
@@ -336,12 +355,15 @@ class ProposalMixin:
             if p is None:
                 return
             now = self.clock()
-            if isinstance(out, str):
-                reason = f"마케팅 receive_campaign_brief: {out}"
-                p.handoff = ProposalHandoff(ok=False, reason=reason, at=now)
-            elif out.outcome == "rejected":
-                reason = f"마케팅이 거절: {out.reason_code}"
-                p.handoff = ProposalHandoff(ok=False, reason=reason, at=now)
+            if isinstance(out, str) or out.outcome == "rejected":
+                why = out if isinstance(out, str) else f"마케팅이 거절 ({out.reason_code})"
+                p.handoff = ProposalHandoff(ok=False, reason=why, at=now)
+                _undo_send(s, p)  # 못 넘겼으면 기획안으로 되돌려 다시 보낼 수 있게
+                text = f"{p.id} 마케팅 전달 실패 · {why} → 기획안으로 되돌림"
+                s.activity.append(
+                    self._act(now, _ctx(p), "marketing", "planning", "receive_campaign_brief",
+                              "A2A", text)
+                )  # fmt: skip
             else:
                 p.handoff = ProposalHandoff(ok=True, campaign=out.campaign_id, at=now)
 

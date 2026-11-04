@@ -269,7 +269,7 @@ def test_confirm_makes_plan_spec_that_waits_for_human_route() -> None:
     assert p.status == "기획안" and p.spec == spec_id and p.request == req_id
     sp = next(x for x in svc.state.specs if x.id == spec_id)
     assert sp.origin == "proposal" and sp.status == "초안" and sp.title == p.title
-    assert sp.problem == p.why and sp.paras[0].text == p.idea
+    assert p.insight in sp.problem and sp.paras[0].text == p.idea
     assert any("+10%" in x.text for x in sp.paras if x.kind == "done")
     assert "데이터분석 메모" in (sp.body_md or "") and any("평균의 1.6배" in b for b in sp.basis)
     req = next(r for r in svc.state.requests if r.id == req_id)
@@ -405,3 +405,36 @@ def test_plan_spec_with_free_md_goes_to_marketing_without_dev() -> None:
     sp = next(x for x in svc.state.specs if x.id == spec)
     assert sp.status == "확정" and not sp.handed_to_dev
     assert not any(t.spec == spec for t in svc.state.tasks)  # 마케팅 실행이라 개발 작업 없음
+
+
+@pytest.mark.role("planning")
+def test_failed_handoff_reverts_to_plan_and_can_retry() -> None:
+    class Down(Brief):
+        async def send(self, ctx, brief, key):
+            self.sent.append(key)
+            return CampaignBriefOutput(outcome="rejected", reason_code="FORBIDDEN_SKILL")
+
+    down = Down()
+    svc = _svc(marketing=down)
+
+    async def go():
+        pid = (await svc.receive_insight(requester="data", inp=_insight())).output["proposal_id"]
+        await svc.dispatch({"type": "makePlan", "proposal": pid})
+        await svc.dispatch({"type": "approveProposal", "proposal": pid})
+        await _flush(svc)
+        return pid
+
+    pid = asyncio.run(go())
+    p = _p(svc, pid)
+    sp = next(x for x in svc.state.specs if x.id == p.spec)
+    assert p.status == "기획안" and not p.handoff.ok and "FORBIDDEN_SKILL" in p.handoff.reason
+    assert sp.status == "초안"  # 못 넘겼으니 기획안 기획서도 초안으로
+    svc._marketing = Brief()
+
+    async def retry():
+        await svc.dispatch({"type": "approveProposal", "proposal": pid})
+        await _flush(svc)
+
+    asyncio.run(retry())
+    p = _p(svc, pid)
+    assert p.status == "마케팅 전달" and p.handoff.ok and p.handoff.campaign == "CMP-1"

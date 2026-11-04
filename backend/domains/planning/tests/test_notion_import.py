@@ -49,12 +49,40 @@ def test_convert_blocks() -> None:
     assert out == [
         ("h2", "배경", None),
         ("p", "결제 실패 문의가 늘었다", None),
-        ("p", "• 카드", None),
+        ("p", "- 카드", None),
         ("p", "1. 첫째", None),
         ("p", "2. 둘째", None),
         ("todo", "담당 정하기", True),
+        ("p", "---", None),
     ]
-    assert skipped == 1  # 이미지 (구분선은 건너뛰어도 셈하지 않음)
+    assert skipped == 1  # 주소 없는 이미지
+
+
+@pytest.mark.role("planning")
+def test_convert_table_code_link_and_quote() -> None:
+    def row(*cells: str) -> dict:
+        return {"type": "table_row", "table_row": {"cells": [_rich(c) for c in cells]}}
+
+    blocks = [
+        {"type": "table", "table": {}, "has_children": True,
+         "_rows": [row("상품", "가격"), row("밤의 도서관", "16,800원"), row("a|b", "x")]},
+        {"type": "code", "code": {"rich_text": _rich("print(1)"), "language": "python"}},
+        {"type": "image", "image": {"external": {"url": "https://img.example/a.png"},
+                                    "caption": _rich("표지")}},
+        {"type": "bookmark", "bookmark": {"url": "https://catbooks.example"}},
+        {"type": "callout", "callout": {"rich_text": _rich("주의"), "icon": {"emoji": "💡"}}},
+        {"type": "image", "image": {"external": {"url": "javascript:alert(1)"}}},
+    ]  # fmt: skip
+    out, skipped = notion_import.convert(blocks)
+    table = "\n".join(
+        ["| 상품 | 가격 |", "|---|---|", "| 밤의 도서관 | 16,800원 |", r"| a\|b | x |"]
+    )
+    assert out[0] == ("p", table, None)
+    assert out[1] == ("p", "```python\nprint(1)\n```", None)
+    assert out[2] == ("p", "[표지](https://img.example/a.png)", None)
+    assert out[3] == ("p", "[https://catbooks.example](https://catbooks.example)", None)
+    assert out[4] == ("p", "> 💡 주의", None)
+    assert skipped == 1  # javascript: 주소는 옮기지 않는다
 
 
 @pytest.mark.role("planning")
@@ -79,7 +107,7 @@ def test_fetch_reads_title_and_blocks_with_paging(monkeypatch) -> None:
             return await notion_import.fetch(PID, client=c)
 
     page = asyncio.run(go())
-    assert page.title == "결제 정리" and len(page.blocks) == 6 and page.skipped == 1
+    assert page.title == "결제 정리" and len(page.blocks) == 7 and page.skipped == 1
     assert len(calls) == 3
 
 
@@ -115,8 +143,8 @@ def test_import_action_saves_doc() -> None:
     doc = next(x for x in svc.state.docs if x.id == out["doc_id"])
     assert doc.title == "결제 정리"
     assert doc.blocks[0].kind == "ref" and "notion.so/x" in doc.blocks[0].text
-    assert [b.kind for b in doc.blocks[1:]] == ["h2", "p", "p", "p", "p", "todo"]
-    assert doc.blocks[-1].done is True and out["skipped"] == 1
+    assert [b.kind for b in doc.blocks[1:]] == ["h2", "p", "p", "p", "p", "todo", "p"]
+    assert doc.blocks[-2].done is True and doc.blocks[-1].text == "---" and out["skipped"] == 1
 
 
 @pytest.mark.role("planning")
