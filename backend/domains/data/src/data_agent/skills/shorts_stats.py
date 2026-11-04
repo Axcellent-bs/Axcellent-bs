@@ -26,6 +26,7 @@ import sqlite3
 import statistics
 import threading
 import tomllib
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta, timezone
@@ -37,6 +38,7 @@ from pydantic import BaseModel, ValidationError
 from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
+    ShortsFormatCount,
     ShortsGroup,
     ShortsSearch,
     ShortsStatsOutput,
@@ -389,6 +391,15 @@ def group_stats(
             )
         velocity_reason = ", ".join(notes) or None
         top = sorted((s for s in mine if s.views is not None), key=lambda s: -(s.views or 0))
+        # 카테고리 그룹만: 그 카테고리 숏츠의 형식별 수 (브리프가 주제 숏츠가 없을 때 쓴다)
+        formats = (
+            [
+                ShortsFormatCount(name=f, count=n)
+                for f, n in Counter(s.format for s in mine if s.format != UNKNOWN).most_common()
+            ]
+            if key == "category"
+            else []
+        )
         if len(mine) < config.min_sample:
             out.append(
                 ShortsGroup(
@@ -399,6 +410,7 @@ def group_stats(
                     velocity_pending=pending,
                     velocity_reason=velocity_reason,
                     velocity_measuring=measuring,
+                    formats=formats,
                 )
             )
             continue
@@ -412,6 +424,7 @@ def group_stats(
                 velocity_pending=pending,
                 velocity_reason=velocity_reason,
                 velocity_measuring=measuring,
+                formats=formats,
                 median_views=round(statistics.median(views), 1) if views else None,
                 median_views_per_hour=round(statistics.median(speeds), 1) if speeds else None,
                 top=[
@@ -606,6 +619,10 @@ async def _run(
 
     out.by_category = group_stats(items, "category", [*TOPIC_CATEGORIES, UNKNOWN], config)
     out.by_format = group_stats(items, "format", [*SHORTS_FORMATS, UNKNOWN], config)
+    # 전체 숏츠 조회수 중앙값 (카테고리·하위 주제 배수의 분모)
+    all_views = [s.views for s in items if s.views is not None]
+    out.median_views = round(statistics.median(all_views), 1) if all_views else None
+    out.median_views_count = len(all_views)
     out.status = "known" if items else "unknown"
     if not items:
         out.reason = f"길이 {config.max_seconds}초 이하인 숏츠가 없음"

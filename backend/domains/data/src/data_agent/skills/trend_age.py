@@ -8,9 +8,12 @@
   네이버 검색어 트렌드를 따로 불러, trend_scan과 같은 판정 함수(`judge_series`)로
   "그 연령대에서 평소 대비 몇 배"를 낸다
 - 네이버 값은 요청마다 최댓값이 100인 상대값이라 연령대끼리 절대량은 비교하지 않는다(응답 `note`)
-- 하루 호출 상한 `[age] daily_calls`(기본 80). 주제 하나에 연령대 수만큼 부르는데, 남은 호출이
-  모자라면 그 주제만 unknown + 이유. 결과는 하루 캐시(같은 주제·연령대 설정이면 그날은 다시
-  부르지 않는다)
+- 하루 호출 상한 `[age] daily_calls`(기본 200). 주제 하나에 연령대 수만큼 부르는데, 남은 호출이
+  모자라면 그 주제만 unknown + 이유. 결과는 `[age] cache_days`(기본 3)일 캐시(같은 주제·연령대
+  설정이면 그 기간엔 다시 부르지 않는다)
+- 몫 나누기(코드): 브리프·기회 카드(`PRIORITY_CALLERS`)는 상한 전부, 나머지는 상한에서
+  `priority_reserve`(기본 120)를 뺀 만큼만. 네이버 전체 하루 상한에서 `naver_reserve`(기본 300,
+  다른 네이버 skill 몫)를 남긴다. 호출자별 사용량은 AgeStore에 하루 단위로 남긴다
 README "trend_age".
 """
 
@@ -53,6 +56,7 @@ DEFAULT_BANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("50대 이상", ("9", "10", "11")),
 )
 NAVER_AGES = {str(n) for n in range(1, 12)}
+PRIORITY_CALLERS = frozenset({"trend_insight_brief"})  # 브리프·기회 카드는 상한 전부를 쓴다
 
 
 @dataclass(frozen=True)
@@ -61,7 +65,10 @@ class AgeConfig:
     rising_topics: int = 3
     popular_topics: int = 5
     season_topics: int = 2
-    daily_calls: int = 80
+    daily_calls: int = 200
+    cache_days: int = 3
+    priority_reserve: int = 120
+    naver_reserve: int = 300
 
 
 def load_config(env: Mapping[str, str]) -> AgeConfig:
@@ -85,13 +92,16 @@ def load_config(env: Mapping[str, str]) -> AgeConfig:
             popular_topics=max(0, int(raw.get("popular_topics", base.popular_topics))),
             season_topics=max(0, int(raw.get("season_topics", base.season_topics))),
             daily_calls=max(0, int(raw.get("daily_calls", base.daily_calls))),
+            cache_days=max(1, int(raw.get("cache_days", base.cache_days))),
+            priority_reserve=max(0, int(raw.get("priority_reserve", base.priority_reserve))),
+            naver_reserve=max(0, int(raw.get("naver_reserve", base.naver_reserve))),
         )
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return AgeConfig()
 
 
 class AgeStore:
-    """그날 쓴 네이버 호출 수와 주제별 결과 (하루 캐시)."""
+    """그날 쓴 네이버 호출 수(호출자별 포함)와 주제별 결과 (며칠 캐시)."""
 
     def __init__(self, path: str | Path) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -105,6 +115,10 @@ class AgeStore:
                 "CREATE TABLE IF NOT EXISTS topics (day TEXT NOT NULL, key TEXT NOT NULL,"
                 " topic TEXT NOT NULL, PRIMARY KEY (day, key))"
             )
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS calls_by_caller (day TEXT NOT NULL,"
+                " caller TEXT NOT NULL, calls INTEGER NOT NULL, PRIMARY KEY (day, caller))"
+            )
 
     def close(self) -> None:
         self._conn.close()
@@ -116,20 +130,37 @@ class AgeStore:
             ).fetchone()
         return int(row[0]) if row else 0
 
-    def add_calls(self, day: date, n: int) -> None:
+    def calls_by_caller(self, day: date) -> dict[str, int]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT caller, calls FROM calls_by_caller WHERE day = ? ORDER BY caller",
+                (day.isoformat(),),
+            ).fetchall()
+        return {str(c): int(n) for c, n in rows}
+
+    def add_calls(self, day: date, n: int, caller: str = "trend_age") -> None:
         if n <= 0:
             return
         with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO calls_by_caller VALUES (?, ?, ?) ON CONFLICT(day, caller)"
+                " DO UPDATE SET calls = calls + excluded.calls",
+                (day.isoformat(), caller, n),
+            )
             self._conn.execute(
                 "INSERT INTO calls VALUES (?, ?) ON CONFLICT(day) DO UPDATE"
                 " SET calls = calls + excluded.calls",
                 (day.isoformat(), n),
             )
 
-    def topic(self, day: date, key: str) -> AgeTopic | None:
+    def topic(self, day: date, key: str, cache_days: int = 1) -> AgeTopic | None:
+        """오늘부터 cache_days일 안에 저장된 가장 최근 결과."""
+        oldest = day - timedelta(days=max(1, cache_days) - 1)
         with self._lock:
             row = self._conn.execute(
-                "SELECT topic FROM topics WHERE day = ? AND key = ?", (day.isoformat(), key)
+                "SELECT topic FROM topics WHERE key = ? AND day >= ? AND day <= ?"
+                " ORDER BY day DESC LIMIT 1",
+                (key, oldest.isoformat(), day.isoformat()),
             ).fetchone()
         return AgeTopic.model_validate_json(row[0]) if row else None
 
@@ -139,6 +170,35 @@ class AgeStore:
                 "INSERT OR REPLACE INTO topics VALUES (?,?,?)",
                 (day.isoformat(), key, topic.model_dump_json()),
             )
+
+
+def _share_line(by_caller: Mapping[str, int], config: AgeConfig) -> str:
+    used = "·".join(f"{c} {n}번" for c, n in by_caller.items())
+    return (
+        f"연령대 하루 상한 {config.daily_calls}번 중 {used} 사용"
+        f" (브리프·카드 우선 몫 {config.priority_reserve}번)"
+    )
+
+
+def _cap_reason(
+    store: AgeStore, today: date, need: int, caller: str, config: AgeConfig, connector: Any
+) -> tuple[int, str] | None:
+    """이 주제를 더 못 부르는 이유 (상한 번호, 어느 상한인지). 부를 수 있으면 None."""
+    total = store.calls(today)
+    if total + need > config.daily_calls:
+        return config.daily_calls, ""
+    if caller not in PRIORITY_CALLERS:
+        by = store.calls_by_caller(today)
+        other = total - sum(n for c, n in by.items() if c in PRIORITY_CALLERS)
+        cap = max(0, config.daily_calls - config.priority_reserve)
+        if other + need > cap:
+            return cap, f" (브리프·카드 우선 몫 {config.priority_reserve}번을 뺀 몫)"
+    limit = getattr(connector, "daily_limit", None)
+    used_now = getattr(connector, "calls_today", None)
+    if isinstance(limit, int) and isinstance(used_now, int):
+        if used_now + need > max(0, limit - config.naver_reserve):
+            return limit, f" (네이버 전체 상한 중 다른 기능 몫 {config.naver_reserve}번을 남김)"
+    return None
 
 
 @dataclass
@@ -269,6 +329,7 @@ async def trend_age(
     board: TodayBoard | None = None,
     store: AgeStore | None = None,
     now: datetime | None = None,
+    caller: str = "trend_age",
 ) -> AgeResult:
     """연령대별 상승. 상태를 바꾸지 않는다(그날 결과·호출 수만 data 파일에 남김)."""
     now = now or datetime.now(UTC)
@@ -301,20 +362,21 @@ async def trend_age(
     try:
         for t in targets:
             key = f"{_norm(t.keyword)}|{json.dumps(t.keywords, ensure_ascii=False)}|{bands_key}"
-            hit = store.topic(today, key)
+            hit = store.topic(today, key, config.cache_days)
             if hit is not None:
                 out.items.append(hit.model_copy(update={"sources": t.sources}))
                 continue
             cached_all = False
             need = len(config.bands)
-            if store.calls(today) + need > config.daily_calls:
-                why = f"하루 네이버 호출 상한({config.daily_calls}번)에 닿아 이 주제는 보지 않음"
+            cap = _cap_reason(store, today, need, caller, config, connector)
+            if cap:
+                why = f"하루 네이버 호출 상한({cap[0]}번)에 닿아 이 주제는 보지 않음{cap[1]}"
                 out.items.append(
                     AgeTopic(keyword=t.keyword, keywords=t.keywords, sources=t.sources, reason=why)  # type: ignore[arg-type]
                 )
                 continue
             topic, used = await measure_topic(t, connector, config, start, end)
-            store.add_calls(today, used)
+            store.add_calls(today, used, caller)
             queries.append(
                 f"naver search-trend ages group={t.keyword} bands={len(config.bands)}"
                 f" {start}~{end} date calls={used}"
@@ -323,10 +385,13 @@ async def trend_age(
                 store.save_topic(today, key, topic)
             out.items.append(topic)
         out.calls_used = store.calls(today)
+        out.calls_by_caller = store.calls_by_caller(today)
     finally:
         if own:
             store.close()
     out.cached = cached_all
+    if out.calls_by_caller:
+        out.limits.append(_share_line(out.calls_by_caller, config))
     known = [i for i in out.items if i.status == "known"]
     out.status = "known" if known else "unknown"
     if not known:

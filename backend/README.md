@@ -172,6 +172,7 @@ tests/tenants/
 | 카탈로그 | `catalog` 값. 이름이면 `domains/data/src/data_agent/catalogs/<이름>.toml`, `.toml`이면 회사 폴더 기준 경로 | data가 무엇을 볼지: 지표·단위·실패 코드 (`domains/data/README.md` "지표 카탈로그") |
 | 커넥터 | `connector` 값. 카탈로그의 `connector`와 같아야 한다 | data가 어디서 읽을지: 이름 → 구현은 data `clients/shop_client.py`의 `CONNECTORS` (`domains/data/README.md` "커넥터") |
 | 조직도 | `org` 값(회사 폴더 기준, 기본 `org.yaml`) | 꺼진 서비스로 가는 일을 맡을 부서·담당자 ("업무 요청 라우터"). **서비스 14개를 모두 적는다**. 빠진 서비스로 가는 일은 `no_assignee`로 실패한다 |
+| 회사 소개 | `tenant.toml` `[profile] about` (덮어쓰기는 `[profile.override]`) | data 도메인 프로필(업종·상품군·씨앗 키워드)의 재료. **회사 소개는 AI가 사실로 읽는다. 분위기 문장·별명은 쓰지 말고, 카탈로그와 맞게** (소개에 없는 상품군이 카탈로그에 있으면 프로필에 경고) |
 
 ### 예시: 냉장 물류 (테스트 전용 가짜 회사)
 

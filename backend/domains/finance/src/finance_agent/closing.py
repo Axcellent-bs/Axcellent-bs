@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -28,7 +30,7 @@ from pydantic import BaseModel, Field
 from ax_agent_template.llm import LLMClient
 from finance_agent import finance_config as fc
 from finance_agent.books import Books, in_range, item_gross, order_sold, pg_settlements
-from finance_agent.rules import applied_many
+from finance_agent.rules import applied_many, load_rules
 
 logger = logging.getLogger("ax.finance.closing")
 
@@ -89,6 +91,192 @@ def period_range(period: Period, d: date) -> tuple[date, date]:
         monday = d - timedelta(days=d.weekday())
         return monday, monday + timedelta(days=7)
     return d, d + timedelta(days=1)
+
+
+def period_finished(period: Period, d: date, today: date | None = None) -> bool:
+    """그 기간이 끝났는가. 진행 중인 기간은 숫자가 계속 바뀌어 결산을 확정하지 않는다."""
+    return period_range(period, d)[1] <= (today or fc.today())
+
+
+def _sales_by_day(books: Books, start: date, end: date) -> dict[date, int]:
+    """[start, end) 안의 날짜별 판매액. 판매가 있던 날만 들어 있다."""
+    out: dict[date, int] = {}
+    for order in books.orders:
+        if not order_sold(order):
+            continue
+        paid = min(p["created_at"] for p in order["payments"] if p.get("status") == "succeeded")
+        day = paid.date()
+        if start <= day < end:
+            out[day] = out.get(day, 0) + sum(item_gross(item) for item in order["items"])
+    return out
+
+
+def sales_days(books: Books, start: date, end: date) -> int:
+    return len(_sales_by_day(books, start, end))
+
+
+def pending_recon(books: Books, start: date, end: date) -> int:
+    """그 기간 결제 중 PG 정산이 아직 안 된 건수."""
+    return sum(
+        1
+        for rec in pg_settlements(books).values()
+        if not rec.get("settled")
+        and start.isoformat() <= str(rec.get("sold_date"))[:10] < end.isoformat()
+    )
+
+
+def close_warnings(books: Books, period: Period, d: date) -> list[dict[str, Any]]:
+    """확정 전에 사람이 봐야 할 것. 막지 않는 경고다 (월 결산의 정산 전 건수는 API가 막는다)."""
+    start, end = period_range(period, d)
+    warnings: list[dict[str, Any]] = []
+    if not period_finished(period, d):
+        return warnings
+    pending = pending_recon(books, start, end)
+    if pending:
+        warnings.append(
+            {
+                "code": "recon_pending",
+                "count": pending,
+                "message": f"PG 정산 전 결제 {pending:,}건. 정산 뒤 금액이 달라질 수 있습니다.",
+            }
+        )
+    if period == "day":
+        cfg = load_rules().closing
+        past = _sales_by_day(books, start - timedelta(days=cfg.spike_trailing_days), start)
+        today_sales = _sales_by_day(books, start, end).get(start, 0)
+        if len(past) >= cfg.spike_min_sales_days:
+            usual = sum(past.values()) / len(past)
+            if today_sales >= usual * cfg.spike_ratio:
+                warnings.append(
+                    {
+                        "code": "sales_spike",
+                        "ratio": round(today_sales / usual, 1),
+                        "message": f"판매액이 평소의 {today_sales / usual:.1f}배입니다.",
+                    }
+                )
+    return warnings
+
+
+def line_drift(
+    confirmed: list[dict[str, Any]], current: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """확정 숫자와 지금 숫자가 다른 줄. 지금 숫자를 모르는 줄은 비교하지 않는다."""
+    now = {x["code"]: x["amount"] for x in current}
+    out = []
+    for line in confirmed:
+        value, fixed = now.get(line["code"]), line["amount"]
+        if value is not None and fixed is not None and value != fixed:
+            out.append(
+                {
+                    "code": line["code"],
+                    "label": line["label"],
+                    "confirmed": fixed,
+                    "current": value,
+                    "diff": value - fixed,
+                }
+            )
+    return out
+
+
+def baseline_lines(confirmation: dict[str, Any]) -> list[dict[str, Any]]:
+    """확정 숫자 + 반영한 조정. 차이는 이 값과 비교해 조정한 차이가 다시 나오지 않게 한다."""
+    done: dict[str, int] = {}
+    for adj in confirmation.get("adjustments", []):
+        for row in adj["lines"]:
+            done[row["code"]] = done.get(row["code"], 0) + row["diff"]
+    return [
+        line | {"amount": line["amount"] + done.get(line["code"], 0)}
+        if line["amount"] is not None
+        else line
+        for line in confirmation["snapshot"]["lines"]
+    ]
+
+
+def adjustment_journal(diff: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """차이 → 조정 분개안. 줄의 비용은 음수라 부호를 맞춘다. 차변·대변 합은 같다."""
+    d = {x["code"]: x["diff"] for x in diff}
+    gmv, commission = d.get("gmv", 0), d.get("commission_revenue", 0)
+    pg, coupon, refund = -d.get("pg_fee", 0), -d.get("coupon_cost", 0), -d.get("refund_total", 0)
+    rows = [
+        ("외상매출금(PG)", gmv, "판매액 변동"),
+        ("수수료 매출", -commission, "수수료 변동"),
+        ("판매자 예수금", -(gmv - commission), "판매자 몫 변동"),
+        ("지급수수료(PG)", pg, "PG 수수료 변동"),
+        ("외상매출금(PG)", -pg, "PG 수수료 차감 변동"),
+        ("판매촉진비(쿠폰)", coupon, "쿠폰 변동"),
+        ("미지급금(쿠폰)", -coupon, "쿠폰 정산 변동"),
+        ("판매자 예수금", refund, "환불 변동"),
+        ("외상매출금(PG)", -refund, "카드 취소 변동"),
+    ]
+    return [
+        {
+            "account": account,
+            "debit": max(amount, 0),
+            "credit": max(-amount, 0),
+            "memo": f"전기 조정: {memo}",
+        }
+        for account, amount, memo in rows
+        if amount
+    ]
+
+
+def adjustment_signature(diff: list[dict[str, Any]]) -> str:
+    """사람이 본 차이와 반영할 차이가 같은지 확인한다."""
+    text = json.dumps(diff, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def prior_adjustments(
+    closings: dict[tuple[str, str], dict[str, Any]] | None, month: str
+) -> list[dict[str, Any]]:
+    """그 달에 반영한 전기 조정."""
+    out = []
+    for confirmation in (closings or {}).values():
+        out += [a for a in confirmation.get("adjustments", []) if a["posted_month"] == month]
+    return sorted(out, key=lambda a: a["at"])
+
+
+def net_of(adjustment: dict[str, Any]) -> int:
+    return next((x["diff"] for x in adjustment["lines"] if x["code"] == "net_result"), 0)
+
+
+def snapshot_of(
+    report: dict[str, Any], books: Books, statement_column: dict[str, Any]
+) -> dict[str, Any]:
+    """확정할 때 저장하는 숫자. 이후 보고는 이 값을 쓴다."""
+    return {
+        "taken_at": fc.iso(fc.now()),
+        "source": books.source,
+        "rules_version": load_rules().version,
+        "lines": report["lines"],
+        "journal": report["journal"],
+        "commentary": report["commentary"],
+        "commentary_source": report["commentary_source"],
+        "close_warnings": report["close_warnings"],
+        "prior_adjustments": report["prior_adjustments"],
+        "statement": statement_column,
+    }
+
+
+def find_drifts(
+    books: Books, closings: dict[tuple[str, str], dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """확정 뒤 숫자가 달라진 결산 목록. 하루 한 번 돈다 (주문 전체를 읽어 무겁다)."""
+    out = []
+    unknown = unknown_codes(books)
+    for (period, day), confirmation in closings.items():
+        snap = confirmation.get("snapshot")
+        if not snap:
+            continue
+        start, end = period_range(period, date.fromisoformat(day))  # type: ignore[arg-type]
+        if period != "month" and ("month", start.replace(day=1).isoformat()) in closings:
+            continue  # 그 달을 확정했으면 차이는 월 결산에서 본다
+        totals = compute_totals(books, fc.day_start(start), fc.day_start(end))
+        diff = line_drift(baseline_lines(confirmation), lines(totals, unknown))
+        if diff:
+            net = next((x["diff"] for x in diff if x["code"] == "net_result"), 0)
+            out.append({"period": period, "date": day, "net_diff": net, "lines": diff})
+    return sorted(out, key=lambda x: x["date"])
 
 
 def compute_totals(books: Books, start: datetime, end: datetime) -> Totals:
@@ -273,25 +461,70 @@ async def closing_report(
     period: Period,
     d: date,
     confirmation: dict[str, Any] | None,
+    closings: dict[tuple[str, str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     start_d, end_d = period_range(period, d)
     start, end = fc.day_start(start_d), fc.day_start(end_d)
     t = compute_totals(books, start, end)
     unknown = unknown_codes(books)
     label = period_label(period, d, fc.today())
-    commentary, source = await write_commentary(label, t, books.mock, unknown)
     shown_date = d if period == "day" else start_d
+    current = lines(t, unknown)
+    snap = (confirmation or {}).get("snapshot")
+    if snap:  # 확정한 숫자를 그대로 쓴다. 지금 숫자와 다르면 차이를 따로 보여 준다
+        shown, journal_lines = snap["lines"], snap["journal"]
+        commentary, source = snap["commentary"], snap["commentary_source"]
+        warnings = snap["close_warnings"]
+    else:
+        shown, journal_lines = current, journal(t, unknown)
+        commentary, source = await write_commentary(label, t, books.mock, unknown)
+        warnings = [] if confirmation else close_warnings(books, period, d)
+    drift = line_drift(baseline_lines(confirmation), current) if snap else []
+    prior = (
+        (snap or {}).get("prior_adjustments", prior_adjustments(closings, start_d.isoformat()[:7]))
+        if period == "month"
+        else []
+    )
+    net = next((x["amount"] for x in shown if x["code"] == "net_result"), None)
     return {
         "period": period,
         "date": shown_date.isoformat(),
         "from": fc.iso(start),
         "to": fc.iso(end),
-        "lines": lines(t, unknown),
-        "journal": journal(t, unknown),
+        "lines": shown,
+        "journal": journal_lines,
         "commentary": commentary,
         "commentary_source": source,
         "status": "confirmed" if confirmation else "draft",
+        "closable": period_finished(period, d),
         "confirmed_by": confirmation["by"] if confirmation else None,
         "confirmed_at": confirmation["at"] if confirmation else None,
-        "applied_rules": applied_many("REV-001", "REV-002", "REV-003", "EXP-001", "PL-001"),
+        "snapshot_at": snap["taken_at"] if snap else None,
+        "drift": drift,
+        "adjustment_proposal": (
+            {
+                "journal": adjustment_journal(drift),
+                "net": next((x["diff"] for x in drift if x["code"] == "net_result"), 0),
+                "signature": adjustment_signature(drift),
+            }
+            if drift and period == "month"
+            else None
+        ),
+        "adjustments": (confirmation or {}).get("adjustments", []),
+        "prior_adjustments": prior,
+        "net_after_adjustments": (
+            None if net is None or not prior else net + sum(net_of(a) for a in prior)
+        ),
+        "close_warnings": warnings,
+        "applied_rules": applied_many(
+            "REV-001",
+            "REV-002",
+            "REV-003",
+            "EXP-001",
+            "PL-001",
+            "CLS-001",
+            "CLS-002",
+            "CLS-003",
+            "CLS-004",
+        ),
     }

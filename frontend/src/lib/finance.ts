@@ -39,7 +39,7 @@ export interface SupportCostRecord {
 }
 
 // ---------------------------------------------------------------- §11 overview
-export type TodoKind = "settlement_batch" | "settlement_deadline" | "closing_confirm" | "recon_exception" | "team_budget";
+export type TodoKind = "settlement_batch" | "settlement_deadline" | "closing_confirm" | "closing_drift" | "vat_drift" | "recon_exception" | "team_budget";
 /** 할 일에서 사람이 바로 누를 결정 */
 export type TodoActionType = "closing_confirm" | "settlement_request" | "review_decision" | "recon_note" | "open_tab" | "team_budget_approve";
 export interface TodoAction { type: TodoActionType; period?: string; date?: string; review_id?: string | null; month?: string; signature?: string }
@@ -113,6 +113,14 @@ export interface FinanceInsight {
 
 export interface ClosingReport {
   applied_rules?: AppliedRule[];
+  closable?: boolean;
+  snapshot_at?: string | null;
+  drift?: { code: string; label: string; confirmed: number; current: number; diff: number }[];
+  close_warnings?: { code: string; message: string }[];
+  adjustment_proposal?: { journal: { account: string; debit: number; credit: number; memo: string }[]; net: number; signature: string } | null;
+  adjustments?: { reason: string; by: string; at: string; posted_month: string }[];
+  prior_adjustments?: { for_month: string; reason: string; lines: { code: string; diff: number }[] }[];
+  net_after_adjustments?: number | null;
   period: ClosingPeriod;
   date: string;
   from: string;
@@ -260,6 +268,11 @@ export interface TeamBudget {
 export interface VatRow { code: string; label: string; supply: number; vat: number }
 export interface VatPack {
   applied_rules?: AppliedRule[];
+  closable?: boolean;
+  filing_status?: "draft" | "confirmed";
+  confirmed_by?: string;
+  confirmed_at?: string;
+  drift?: { code: string; label: string; confirmed: number; current: number; diff: number }[];
   quarter: string;
   from: string;
   to: string;
@@ -583,6 +596,9 @@ export const finance = {
   campaigns: () => fin<Envelope<CampaignView>>("/api/finance/campaigns"),
   /** 사람이 놓치기 쉬운 재무 패턴과 근거 */
   insights: () => fin<Envelope<FinanceInsight[]>>("/api/finance/insights"),
+  confirmVat: (date: string) => fin<Envelope<VatPack>>("/api/finance/tax/vat/confirm", { method: "POST", body: { date }, human: true }),
+  adjustClosing: (date: string, reason: string, signature: string) =>
+    fin<Envelope<ClosingReport>>("/api/finance/closing/adjust", { method: "POST", body: { date, reason, signature }, human: true }),
   /** 법인세 참고 추정. 신고에 쓰지 않는다 */
   incomeEstimate: () => fin<Envelope<IncomeEstimate>>("/api/finance/tax/income-estimate"),
   /** 자동으로 만든 파일과 은행 폴더 기록 */
@@ -685,6 +701,8 @@ export function todayKst(now = new Date()): string {
 export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "tax" | "campaigns";
 export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "tax", "campaigns"];
 const TODO_TAB: Record<TodoKind, FinanceTab> = {
+  closing_drift: "closing",
+  vat_drift: "tax",
   settlement_batch: "settlements", settlement_deadline: "settlements", closing_confirm: "closing", recon_exception: "reconciliation", team_budget: "policy",
 };
 export function todoTab(t: Pick<FinanceTodo, "kind" | "link">): FinanceTab {

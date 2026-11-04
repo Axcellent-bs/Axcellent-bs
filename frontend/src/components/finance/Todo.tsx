@@ -9,6 +9,8 @@ import { Chip, TONE } from "./bits";
 // 결정 기록은 재무 AI 서버에 남는다(누가·언제·메모). 예시 데이터 모드에서는 화면 안에서만 바뀐다.
 
 const KIND: Record<FinanceTodo["kind"], { label: string; tone: string }> = {
+  closing_drift: { label: "결산 조정", tone: TONE.warn },
+  vat_drift: { label: "부가세 변동", tone: TONE.warn },
   settlement_batch: { label: "판매자 정산", tone: TONE.info },
   settlement_deadline: { label: "정산 기한", tone: TONE.bad },
   closing_confirm: { label: "결산", tone: TONE.info },

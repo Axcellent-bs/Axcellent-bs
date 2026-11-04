@@ -129,12 +129,51 @@ def column(books: Books, start: datetime, end: datetime) -> dict[str, int | None
     }
 
 
-def income_statement(books: Books, period: Period, d: date) -> dict[str, Any]:
-    """손익계산서(당기·전기). 금액 단위는 원, 비용은 − 로 적는다."""
+def frozen_column(
+    closings: dict[tuple[str, str], dict[str, Any]] | None, start: date
+) -> dict[str, int | None] | None:
+    """그 달을 확정했으면 확정할 때 저장한 값. 저장이 없으면 None."""
+    snap = ((closings or {}).get(("month", start.isoformat())) or {}).get("snapshot") or {}
+    return snap.get("statement")
+
+
+def _months(start: date, end: date) -> list[tuple[date, date]]:
+    out, cur = [], start
+    while cur < end:
+        nxt = date(cur.year + 1, 1, 1) if cur.month == 12 else date(cur.year, cur.month + 1, 1)
+        out.append((cur, nxt))
+        cur = nxt
+    return out
+
+
+def composed_column(
+    books: Books,
+    closings: dict[tuple[str, str], dict[str, Any]] | None,
+    start: date,
+    end: date,
+) -> tuple[dict[str, int | None], int, int]:
+    """기간 값, 그중 확정한 달 수, 달 수. 확정한 달은 확정 숫자, 나머지는 지금 장부다."""
+    months = _months(start, end)
+    fixed = {m: frozen_column(closings, m) for m, _ in months}
+    count = sum(1 for v in fixed.values() if v is not None)
+    if count == 0:
+        return column(books, fc.day_start(start), fc.day_start(end)), 0, len(months)
+    cols = [fixed[m] or column(books, fc.day_start(m), fc.day_start(n)) for m, n in months]
+    keys = cols[0].keys()
+    return {k: _sum(*(c[k] for c in cols)) for k in keys}, count, len(months)
+
+
+def income_statement(
+    books: Books,
+    period: Period,
+    d: date,
+    closings: dict[tuple[str, str], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """손익계산서(당기·전기). 금액 단위는 원, 비용은 − 로 적는다. 확정한 달은 확정 숫자를 쓴다."""
     start, end = period_range(period, d)
     prev = previous_start(period, start)
-    current = column(books, fc.day_start(start), fc.day_start(end))
-    previous = column(books, fc.day_start(prev), fc.day_start(start))
+    current, now_fixed, now_total = composed_column(books, closings, start, end)
+    previous, prev_fixed, prev_total = composed_column(books, closings, prev, start)
     company = closing.tenant_name()
     return {
         "title": "손익계산서",
@@ -174,7 +213,13 @@ def income_statement(books: Books, period: Period, d: date) -> dict[str, Any]:
             for code, label, note in NOTES
         ],
         "basis": "K-IFRS 기능별 손익계산서. 장부(판매 사이트·안전 관문 기록)에 있는 항목만 계산",
-        "applied_rules": applied_many("REV-001", "REV-003", "EXP-001", "PL-002"),
+        "confirmed": {
+            "current": now_fixed == now_total,
+            "previous": prev_fixed == prev_total,
+            "current_months": now_fixed,
+            "total_months": now_total,
+        },
+        "applied_rules": applied_many("REV-001", "REV-003", "EXP-001", "PL-002", "CLS-001"),
     }
 
 

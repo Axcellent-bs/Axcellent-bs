@@ -32,7 +32,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ValidationError
 
@@ -62,6 +62,8 @@ KST = timezone(timedelta(hours=9))
 DB_ENV = "DATA_INSIGHT_BRIEF_DB"
 DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "insight_brief.db"  # backend/.data
 REFERENCE = "참고용"
+# 브리프 칸 모양이 바뀌면 올린다 (오늘 캐시를 새 모양으로 다시 묶게)
+SHAPE = "shorts-source,age-bands,opportunities"
 BRIEF_LIMITS = (
     "평가셋이 없어 인사이트가 맞는지 재지 않는다",
     "네이버 값은 요청마다 최댓값이 100인 상대값이다",
@@ -123,7 +125,10 @@ def load_config(env: Mapping[str, str]) -> BriefConfig:
 
 
 def rules_version(config: BriefConfig) -> str:
-    parts = {"config": dataclasses.asdict(config), "prompt": LINE_PROMPT, "limits": BRIEF_LIMITS}
+    parts = {
+        "config": dataclasses.asdict(config), "prompt": LINE_PROMPT, "limits": BRIEF_LIMITS,
+        "shape": SHAPE,
+    }  # fmt: skip
     text = json.dumps(parts, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
@@ -330,20 +335,77 @@ def evidence(c: Candidate, popular: TrendPopularOutput | None) -> InsightEvidenc
     return ev
 
 
-def shorts_format(p: PopularTopic | None) -> tuple[str | None, int | None, str | None]:
-    if p is None:
-        return None, None, "지금 인기에 없는 주제라 영상 근거가 없음"
-    shorts = [v for v in p.videos if v.is_short]
-    named = [v.shorts_format for v in shorts if v.shorts_format]
+@dataclass(frozen=True)
+class ShortsPick:
+    """숏츠 형식과 고른 단계 (topic → category → all), 그 단계의 표본."""
+
+    format: str | None
+    source: Literal["topic", "category", "all"] | None
+    count: int | None  # 그 단계에서 이 형식인 숏츠 수
+    total: int | None  # 그 단계에서 형식을 분류한 숏츠 수
+    reason: str | None  # 형식이 없거나 주제 단계가 아니면 이유
+
+
+SOURCE_NAME = {"topic": "주제", "category": "카테고리", "all": "전체"}
+
+
+OTHER_FORMAT = (
+    "기타"  # 목록 밖 형식. 카테고리·전체 단계에서는 고르지 않는다 (기획에 쓸 형식이 아님)
+)
+
+
+def _top(counts: Counter[str], skip: tuple[str, ...] = ()) -> tuple[str, int, int] | None:
+    """(가장 많은 형식, 그 수, 형식을 분류한 숏츠 수). skip 형식은 고르지 않지만 표본에는 센다."""
+    counts = Counter({k: n for k, n in counts.items() if k and k != "unknown" and n > 0})
+    named = Counter({k: n for k, n in counts.items() if k not in skip})
     if not named:
+        return None
+    fmt, n = named.most_common(1)[0]
+    return fmt, n, sum(counts.values())
+
+
+def shorts_format(
+    p: PopularTopic | None, category: str | None = None, shorts: ShortsStatsOutput | None = None
+) -> ShortsPick:
+    """이 주제 근거 숏츠에서 가장 많은 형식. 없으면 카테고리 숏츠 통계, 그것도 없으면 전체."""
+    if p is None:
+        why = "지금 인기에 없는 주제라 영상 근거가 없음"
+    else:
+        topic_shorts = [v for v in p.videos if v.is_short]
+        got = _top(Counter(v.shorts_format or "" for v in topic_shorts))
+        if got is not None:
+            return ShortsPick(got[0], "topic", got[1], got[2], None)
         why = (
             "이 주제 근거 영상 중 숏츠가 없음"
-            if not shorts
+            if not topic_shorts
             else "이 주제 숏츠의 형식 분류가 저장돼 있지 않음 (shorts_stats 표본 밖)"
         )
-        return None, None, why
-    fmt, n = Counter(named).most_common(1)[0]
-    return fmt, n, None
+    if shorts is None or shorts.status != "known":
+        reason = shorts.reason if shorts is not None and shorts.reason else "숏츠 통계 없음"
+        return ShortsPick(None, None, None, None, f"{why}, 숏츠 통계로 채우지 못함 ({reason})")
+    group = next((g for g in shorts.by_category if category and g.name == category), None)
+    if group is not None and group.status == "known":
+        got = _top(Counter({f.name: f.count for f in group.formats}), (OTHER_FORMAT,))
+        if got is not None:
+            return ShortsPick(
+                got[0], "category", got[1], got[2], f"{why} → 카테고리 숏츠 통계에서 고름"
+            )
+    if not category or category == "unknown":
+        cat_why = "카테고리 미정"
+    elif group is None:
+        cat_why = f"{category} 숏츠 없음"
+    elif group.status != "known":
+        cat_why = f"{category} 숏츠 {group.reason or '표본 부족'}"
+    else:
+        cat_why = f"{category} 숏츠에 쓸 형식 분류 없음 (기타·미분류만)"
+    got = _top(Counter({g.name: g.count for g in shorts.by_format}), (OTHER_FORMAT,))
+    if got is not None:
+        return ShortsPick(
+            got[0], "all", got[1], got[2], f"{why}, {cat_why} → 전체 숏츠 통계에서 고름"
+        )
+    return ShortsPick(
+        None, None, None, None, f"{why}, {cat_why}, 전체 숏츠도 쓸 형식 분류 없음 (기타·미분류만)"
+    )
 
 
 def facts(i: TrendInsight) -> dict[str, int | float | str]:
@@ -372,6 +434,9 @@ def facts(i: TrendInsight) -> dict[str, int | float | str]:
         out["연결 상품 수"] = len(i.products)
     if i.shorts_format and i.shorts_format_samples:
         out[f"{i.shorts_format} 숏츠 표본 수"] = i.shorts_format_samples
+    if i.shorts_format and i.shorts_format_source in ("category", "all"):
+        # 이 주제 숏츠가 아니라 카테고리·전체 숏츠 통계에서 고른 형식
+        out["숏츠 형식을 고른 단계"] = f"{SOURCE_NAME[i.shorts_format_source]} 숏츠 통계"
     return out
 
 
@@ -443,7 +508,8 @@ def build_insights(
         if c.company and not c.pending():
             # 회사 상품·시즌 키워드라 빌려 올 IP·인물이 없다
             ok, ok_why = True, f"회사 시즌 키워드·상품 핵심어 (분류: {c.category()})"
-        fmt, samples, fmt_why = shorts_format(c.popular)
+        sp = shorts_format(c.popular, c.category(), shorts)
+        fmt, samples, fmt_why = sp.format, sp.count, sp.reason
         group = next((g for g in (shorts.by_format if shorts else []) if g.name == fmt), None)
         if fmt and group is not None:  # 숏츠 통계와 같은 시점 값 (표본 수·중앙값·기준 시각)
             samples = group.count
@@ -479,6 +545,8 @@ def build_insights(
                 target_age=age.top_band if age else None,
                 target_age_ratio=age.top_ratio if age else None,
                 target_age_status=band.status if band else None,
+                # 연령대별 배수 전체 (trend_age 결과 그대로, 추가 네이버 호출 없음)
+                age_bands=list(age.bands) if age is not None else [],
                 target_age_reason=(
                     None
                     if age is not None and age.top_band
@@ -497,6 +565,9 @@ def build_insights(
                 shorts_format_median_views=group.median_views if fmt and group else None,
                 shorts_format_at=shorts.snapshot_at if fmt and group and shorts else None,
                 shorts_format_reason=fmt_why,
+                shorts_format_source=sp.source,
+                shorts_format_source_count=sp.count,
+                shorts_format_source_total=sp.total,
                 limits=limits,
                 example_ideas=[f"{t} ({REFERENCE})" for t in ideas],
                 score=c.score,
@@ -658,6 +729,7 @@ async def make_brief(
     now: datetime | None = None,
     context_id: str | None = None,
     store: BriefStore | None = None,
+    opportunities_fn: Any = None,
 ) -> BriefResult:
     """기존 skill 결과를 묶어 인사이트 3~7개 (하루 캐시). 상태를 바꾸지 않는다(브리프 기록만)."""
     from data_agent.skills.content_recommend import load_config as load_recommend
@@ -703,9 +775,11 @@ async def make_brief(
         first = pick(ready, config, n + config.age_topics_extra)
         company = [c for c in company if not c.pending()]
         ask = [*first, *company]
+        age_limits: list[str] = []
         try:
             age_out = await age_fn([c.topic for c in ask])
             queries.append(f"trend_age keywords={len(ask)}")
+            age_limits = list(getattr(age_out, "limits", []))
             by_age = {_norm(i.keyword): i for i in age_out.items}
             for c in ask:
                 c.age = by_age.get(_norm(c.topic))
@@ -783,6 +857,7 @@ async def make_brief(
                      "promo_concepts(오늘 저장된 것만)", "product_link"],
             limits=list(BRIEF_LIMITS),
         )  # fmt: skip
+        out.limits += [x for x in age_limits if x not in out.limits]
         if promo is None:
             out.limits.append("오늘 만든 예시 아이디어가 없어 example_ideas가 비어 있다")
         if not rising_company:
@@ -792,6 +867,17 @@ async def make_brief(
                 " 이상 오른 것이 없음"
             )
         out.summary = summary(out)
+        if opportunities_fn is not None:  # 기회 가설 카드 (도메인 프로필 → 수집 계획, 선택 칸)
+            try:
+                opp = await opportunities_fn()
+                out.opportunities, out.plan_id = opp.cards, opp.plan_id
+                out.opportunities_reason = opp.reason
+                queries += opp.queries
+                out.sources += ["domain_profile", "source_plan"]
+            except Exception as error:  # 카드를 못 만들어도 브리프는 준다
+                out.opportunities_reason = f"기회 가설 카드를 만들지 못함 ({type(error).__name__})"
+        else:
+            out.opportunities_reason = "기회 가설 카드를 요청하지 않음"
         store.put(day, rules, out, now)
         return BriefResult(out, as_evidence(out, queries, now))
     finally:

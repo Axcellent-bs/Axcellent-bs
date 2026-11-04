@@ -771,6 +771,10 @@ export interface InsightEvidence {
   links: string[];
   /** 없는 출처와 이유 */
   missing: string[];
+  /** 시즌 근거 (작년 같은 달·다음 달 ÷ 기간 평균 중 큰 값, #543). 예전 응답은 없다 */
+  season_keyword?: string | null;
+  season_ratio?: number | null;
+  season_month?: string | null;
 }
 export interface InsightProduct {
   product_id: string;
@@ -806,9 +810,25 @@ export interface TrendInsight {
   shorts_format: string | null;
   shorts_format_samples: number | null;
   shorts_format_reason: string | null;
+  /** 형식을 고른 단계: topic = 이 주제 근거 숏츠, category = 이 주제 카테고리 숏츠 통계, all = 전체 숏츠 통계 (#556). 예전 응답은 없다
+   *  count = 이 형식인 숏츠 수, total = 형식을 분류한 숏츠 수 */
+  shorts_format_source?: "topic" | "category" | "all" | null;
+  shorts_format_source_count?: number | null;
+  shorts_format_source_total?: number | null;
+  /** 연령대별 평소 대비 배수 전체 (trend_age 결과 그대로, 설정 순서, #556). 보지 않은 주제는 빈 목록 + target_age_reason */
+  age_bands?: AgeBandTrend[];
+  /** 숏츠 통계와 같은 시점의 그 형식 중앙값 조회수와 기준 시각 (#547). 예전 응답은 없다 */
+  shorts_format_median_views?: number | null;
+  shorts_format_at?: string | null;
   limits: string[];
   example_ideas: string[];
   score: number;
+  /** 분류기가 아직 분류하지 못한 주제 (순위에 넣지 않고 참고용, #543). 예전 응답은 없다 */
+  classification_pending?: boolean;
+  /** 회사 관련 인사이트 칸 (시즌 키워드·상품 핵심어 중 오른 것, #543). 예전 응답은 없다 */
+  company_related?: boolean;
+  /** 왜 회사 관련으로 골랐는지 (코드 문장) */
+  company_reason?: string | null;
 }
 export interface TrendInsightBriefOutput {
   status: "known" | "unknown";
@@ -821,6 +841,11 @@ export interface TrendInsightBriefOutput {
   sources: string[];
   limits: string[];
   summary: string;
+  /** 기회 가설 카드 (#579). 예전 응답은 없다. 비었으면 opportunities_reason */
+  opportunities?: DomainOpportunity[];
+  opportunities_reason?: string | null;
+  /** 쓴 수집 계획 id */
+  plan_id?: string | null;
 }
 
 // ---------------------------------------------------------------- 연령대별 상승 (trend_age)
@@ -857,6 +882,150 @@ export interface TrendAgeOutput {
   note: string;
   generated_at: string | null;
   summary: string;
+}
+
+// 출처가 주는 데이터 종류 (#571): 검색 관심 · 실제 소비 · 시청 · 조사
+export type SourceDataKind = "search_interest" | "consumption" | "viewing" | "survey";
+
+// ---------------------------------------------------------------- 도메인 프로필 (domain_profile, #573)
+export interface ProductGroup { name: string; category_codes: string[]; product_count: number }
+export interface SeedKeyword {
+  keyword: string;
+  /** 근거 문장 (소개·상품 이름·카테고리·설명 원문 일부) */
+  evidence: string;
+  evidence_from: "about" | "product" | "category" | "description" | "override";
+  product_ids: string[];
+}
+export interface DomainProfileOutput {
+  status: "known" | "unknown";
+  reason: string | null;
+  tenant: string | null;
+  industry: string | null;
+  industry_tags: string[];
+  product_groups: ProductGroup[];
+  customer_axes: string[];
+  questions: string[];
+  seed_keywords: SeedKeyword[];
+  dropped_keywords: { keyword: string; reason: string }[];
+  /** 사람이 덮어쓴 칸 이름 */
+  overridden: string[];
+  catalog_hash: string;
+  products_seen: number;
+  cached: boolean;
+  generated_at: string | null;
+  limits: string[];
+}
+
+// ---------------------------------------------------------------- 데이터 출처 목록 (data_sources, #576)
+export type SourceStatus = "available" | "key_required";
+export interface DataSource {
+  source_id: string;
+  name: string;
+  kinds: SourceDataKind[];
+  /** 맞는 업종 태그 ("all" = 전체) */
+  industries: string[];
+  age: boolean;
+  gender: boolean;
+  categories: "api" | "fixed" | "none";
+  period: string;
+  quota_daily: number | null;
+  quota_unit: string;
+  quota_note: string;
+  /** 필요한 키 환경변수 이름 (값은 없다) */
+  key_envs: string[];
+  status: SourceStatus;
+  status_reason: string | null;
+  docs_url: string;
+  approved: boolean;
+}
+export interface DataSourcesOutput { sources: DataSource[]; checked_at: string | null; summary: string }
+
+// ---------------------------------------------------------------- 수집 계획 (source_plan, #578)
+export interface PlanDropped { value: string; reason: string }
+export interface SourcePlanItem {
+  source_id: string;
+  status: SourceStatus;
+  approved: boolean;
+  /** 이 출처를 고른 이유 (LLM 문장) */
+  reason: string;
+  categories: { category_id: string; name: string | null }[];
+  category_check: "verified" | "after_key" | "not_applicable" | "unknown";
+  category_check_reason: string | null;
+  keywords: string[];
+  use_age: boolean;
+  calls: number;
+  quota_units: number;
+  dropped: PlanDropped[];
+  /** 키 필요 출처: 이 키가 있으면 더 쓸 수 있는 근거 */
+  unlocks: string | null;
+}
+export interface PlanQuota { source_id: string; units: number; cap: number; unit: string }
+export interface SourcePlanOutput {
+  status: "known" | "unknown";
+  reason: string | null;
+  plan_id: string;
+  profile_hash: string;
+  items: SourcePlanItem[];
+  dropped_sources: PlanDropped[];
+  quota: PlanQuota[];
+  trimmed: string[];
+  approval_note: string;
+  cached: boolean;
+  generated_at: string | null;
+  summary: string;
+}
+
+// ---------------------------------------------------------------- 기회 가설 카드 (trend_insight_brief 선택 칸, #571·#579)
+// 수집 계획(source_plan)대로 모은 근거(사용 가능·승인된 출처만). 숫자는 코드, 한 줄만 LLM
+export type EvidenceStatus = "known" | "unknown" | "key_required" | "not_approved";
+export interface OpportunityEvidence {
+  source_id: string;
+  kind: SourceDataKind;
+  status: EvidenceStatus;
+  /** 무엇을 잰 값인지 */
+  label: string;
+  value: number | null;
+  unit: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  samples: number | null;
+  /** 모르면 이유 (예: 키 등록 후 가능) */
+  reason: string | null;
+}
+export interface ShortsFit {
+  level: "high" | "uncertain" | "low";
+  category: string | null;
+  median_views: number | null;
+  overall_median_views: number | null;
+  ratio: number | null;
+  samples: number;
+  snapshot_at: string | null;
+  /** 이 등급인 이유 (기준값 포함, 코드 문장) */
+  reason: string;
+}
+export interface OpportunityFormat { name: string; count: number; median_views: number | null }
+export interface DomainOpportunity {
+  opportunity_id: string;
+  subtopic: string;
+  subtopic_evidence: string | null;
+  line: string;
+  line_status: "llm" | "fixed";
+  line_reason: string | null;
+  consumption: OpportunityEvidence[];
+  search_interest: OpportunityEvidence[];
+  age_bands: AgeBandTrend[];
+  age_reason: string | null;
+  shorts_fit: ShortsFit | null;
+  formats: OpportunityFormat[];
+  /** 목표 참고값: 이 분류 숏츠 조회 중앙값 (없으면 전체 중앙값) */
+  target_views_reference: number | null;
+  target_reference_basis: string | null;
+  products: InsightProduct[];
+  products_reason: string | null;
+  limits: string[];
+  /** 기획이 정할 것 (코드 고정 문장) */
+  planning_decides: string[];
+  score: number;
 }
 
 // ---------------------------------------------------------------- 숏츠 통계 (shorts_stats)
@@ -1063,8 +1232,12 @@ export const dataAi = {
   shortsStats: () => askData<ShortsStatsOutput>("shorts_stats", "숏츠 통계", {}, TREND_DEADLINE_MS),
   /** 인사이트 브리프 (2단계). 서버 하루 캐시. 브리프 안에서 trend_age·임베딩·한 줄 문장(LLM)을 부른다 */
   trendInsightBrief: () => askData<TrendInsightBriefOutput>("trend_insight_brief", "인사이트 브리프", {}, RECOMMEND_DEADLINE_MS),
-  /** 연령대별 상승. keywords를 주면 그 주제만. 서버 하루 캐시(주제별)라 브리프가 이미 본 주제는 네이버를 다시 부르지 않는다 */
-  trendAge: (keywords: string[]) => askData<TrendAgeOutput>("trend_age", "연령대별 상승", { keywords: keywords.slice(0, 30) }, TREND_DEADLINE_MS),
+  /** 회사 도메인 프로필 (업종·상품군·고객 축·질문·씨앗 키워드). 서버가 저장해 두고 카탈로그가 바뀌면 다시 만든다 */
+  domainProfile: () => askData<DomainProfileOutput>("domain_profile", "회사 도메인 프로필", {}, RECOMMEND_DEADLINE_MS),
+  /** 데이터 출처 목록 (능력·키 상태·승인). 키 값은 응답에 없다 */
+  dataSources: () => askData<DataSourcesOutput>("data_sources", "데이터 출처 목록", {}),
+  /** 수집 계획 (출처 목록 안에서 고르고 코드가 검증) */
+  sourcePlan: () => askData<SourcePlanOutput>("source_plan", "수집 계획", {}, RECOMMEND_DEADLINE_MS),
   /** 홍보 영상 기획안. 서버 하루 캐시. regenerate = true면 오늘 만든 기획안이 있어도 새로 만든다(LLM·네이버를 다시 부름) */
   promoConcepts: (regenerate = false) =>
     askData<PromoConceptsOutput>("promo_concepts", "홍보 영상 기획안", regenerate ? { regenerate: true } : {}, RECOMMEND_DEADLINE_MS),

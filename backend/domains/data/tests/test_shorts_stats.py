@@ -386,3 +386,25 @@ def test_searched_shorts_rechecked_too_soon_are_measuring(tmp_path: Path) -> Non
     later = _run_at(env, youtube, NOW + timedelta(hours=2))
     [g2] = later.by_format
     assert g2.velocity_measuring == 0 and g2.median_views_per_hour is not None
+
+
+def test_category_groups_count_formats() -> None:
+    from data_agent.skills import shorts_stats as ss
+
+    config = ss.ShortsConfig(min_sample=1)
+    items = [
+        ss._Short("a", "t", None, 10, None, (), "popular", category="IT", format="정보·팁"),
+        ss._Short("b", "t", None, 20, None, (), "popular", category="IT", format="정보·팁"),
+        ss._Short("c", "t", None, 30, None, (), "popular", category="IT", format="리액션"),
+        ss._Short("d", "t", None, 40, None, (), "popular", category="IT", format=ss.UNKNOWN),
+    ]
+    cat = ss.group_stats(items, "category", ["IT"], config)[0]
+    assert [(f.name, f.count) for f in cat.formats] == [("정보·팁", 2), ("리액션", 1)]
+    assert ss.group_stats(items, "format", ["정보·팁"], config)[0].formats == []
+
+
+def test_overall_median_is_over_all_shorts(tmp_path: Path) -> None:
+    popular = [_stat(f"p{i}", 100 * (i + 1), 30) for i in range(3)]
+    out = _run(_env(tmp_path, popular, "search_calls = 0\n"), FakeYouTube())
+    # 최신 스냅샷 조회수(100·200·300 + 360)의 중앙값. 카테고리 배수의 분모
+    assert out.median_views == 560.0 and out.median_views_count == 3

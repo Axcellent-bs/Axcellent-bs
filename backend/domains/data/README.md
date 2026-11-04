@@ -18,7 +18,11 @@
 | `youtube_velocity` | YouTube 영상 지금 속도(최근 두 스냅샷 사이 시간당 조회 증가)와 그 전 구간보다 빨라졌는지, 지금 속도 상위 N개(설정)와 태그·제목·채널 이름·길이. **판정하지 않음** | YouTube 스냅샷 DB(`youtube_store.recent_snapshots`). 상위 영상에 저장된 제목·길이가 없으면(회사 키워드 검색·추적으로 들어온 영상) YouTube `videos.list`로 한 번 받아 저장(영상 50개마다 1단위), 못 받으면 비우고 요약에 수를 적음. 개수: 회사 폴더 `trends.toml` `[velocity] top` |
 | `trend_popular` | "지금 인기" 주제 순위(급상승 판정과 별개): 점수(코드) = 인기 영상 수 몫 + 지금 조회 속도 몫 + 인기 검색어 순위 몫(가중치 설정), 출처별 몫·근거, 주제 분류·`brand_safe`, 오늘 판정이 급상승이면 "지금 급등 중"(`rising_now`) | YouTube 스냅샷 DB·인기 검색어 스냅샷 DB(읽기 전용), LLM(주제 분류만, 묶어서 1번·하루 캐시). **네이버를 부르지 않는다**. 설정: `trends.toml` `[popular]` |
 | `trend_insight_brief` | 기획에 넘기는 근거 있는 인사이트 3~7개(insight_id·한 줄·분류·광고 재료 여부·근거·타깃 연령대·상품·숏츠 형식·한계·참고용 예시 아이디어). 데이터는 기획안을 확정하지 않는다 | 기존 skill 결과를 코드로 묶음: trend_popular·오늘 급상승 판정·trend_age(후보 상위만)·오늘 저장된 promo_concepts·product_link(임베딩 기준 통과만). LLM은 한 줄만(묶어서 1번). 하루 캐시(날짜 + 규칙 버전) `backend/.data/insight_brief.db`. 설정: `trends.toml` `[brief]` |
-| `trend_age` | 연령대별 상승: 주제마다 연령대(설정)별로 따로 조회해 "그 연령대에서 평소 대비 몇 배"(trend_scan과 같은 판정 함수), 가장 크게 오른 연령대 | 네이버 검색어 트렌드(`ages` 조건, 주제 하나 = 연령대 수만큼, 하루 상한 80번·하루 캐시), trend_popular(커넥터 없이), 오늘 판정 기록, 기획안 시즌 확인·카탈로그. LLM 없음. 설정: `trends.toml` `[age]` |
+| `domain_profile` | 회사 도메인 프로필: 업종·상품군·고객 축·분석 질문·씨앗 키워드(근거 문장). 고객사가 바뀌어도 사람이 키워드·카테고리를 손으로 정하지 않게 | 테넌트 설정 `[profile] about` + 회사 카탈로그(이름·카테고리·설명). LLM 한 번(정해진 스키마·목록 안), 코드 검증. 저장 재사용 `backend/.data/domain_profile.db`(소개·카탈로그·규칙 해시). 덮어쓰기 `[profile.override]` |
+| `data_sources` | 데이터 출처 목록: 데이터 종류·업종 태그·연령/성별·카테고리 출처·주기·한도·키 이름·상태(사용 가능/키 필요)·공식 문서·승인 | 코드 표(`skills/data_sources.py`). 키 환경변수 유무로 상태, 쇼핑인사이트는 확인 호출 1번(저장 `backend/.data/source_probe.db`). 승인: 회사 설정 `[sources] approved` |
+| `source_plan` | 수집 계획: 출처·이유·카테고리(실제 목록에서 확인)·키워드·연령 여부·호출 수·할당량·키가 있으면 얻는 근거 | 도메인 프로필 + 출처 목록 → LLM 한 번(목록 안에서만), 코드 검증·할당량 자르기. 저장 `backend/.data/source_plan.db`. 상한 `trends.toml` `[plan]`. 수집은 하지 않음 |
+| `domain_subtopics` | 하위 주제 넓히기: 씨앗 키워드 → YouTube 한국 숏츠 → 함께 나온 말(코드) → 프로필 하위 주제 축으로 분류(LLM) | YouTube search.list(videoDuration=short) 씨앗마다 1번, 일주일 캐시 `backend/.data/subtopics.db`, 하루 상한 `[subtopics] daily_searches` 5번(수집 계획 YouTube 할당량에 합침) |
+| `trend_age` | 연령대별 상승: 주제마다 연령대(설정)별로 따로 조회해 "그 연령대에서 평소 대비 몇 배"(trend_scan과 같은 판정 함수), 가장 크게 오른 연령대 | 네이버 검색어 트렌드(`ages` 조건, 주제 하나 = 연령대 수만큼, 하루 상한 200번·3일 캐시, 브리프·카드 우선 120번을 빼고 다른 skill은 80번까지, 네이버 전체 상한에서 300번은 다른 skill용으로 남김, 호출자별 사용량은 응답 `calls_by_caller`·`limits`), trend_popular(커넥터 없이), 오늘 판정 기록, 기획안 시즌 확인·카탈로그. LLM 없음. 설정: `trends.toml` `[age]` |
 | `promo_concepts` | 광고·홍보 숏츠 **예시 아이디어(참고용)** 3~5개(확정 기획은 기획팀 몫): 타깃 연령대와 근거 숫자(trend_age, 없으면 미정 + 이유)· 제목·컨셉·길이(15~60초)·콘티(길이에 맞는 컷 수)·빌려 온 숏츠 형식과 그 평균 조회수·빌려 온 트렌드(없어도 됨)·맞는 이유·등장 상품·주의사항, 코드 경고(상표·초상권 확인 필요), 버린 초안과 이유, 쓴 재료·시즌 확인 키워드 | shop-api 상품·카테고리, shorts_stats(형식별 평균 조회수), trend_popular(게임·연예·스포츠·K-pop·음악·IT만), 카탈로그 카테고리·상품 핵심어 월별 흐름(trend_history, 키워드마다 네이버 1번·상한 20·하루 캐시), LLM(초안 1번). 하루 캐시·기록 `backend/.data/promo_concepts.db`(캐시 키 = 날짜 + 규칙 버전: 재료 거르기 설정 `[promo]`·분류 목록·프롬프트의 해시. 규칙이 바뀌면 다음 요청에서 다시 만든다). 설정: `trends.toml` `[promo]` |
 | `shorts_stats` | YouTube 숏츠 통계(카테고리별·형식별): 숏츠 수·평균 조회수·평균 시간당 조회 증가·조회수 상위 3개, 표본 부족은 unknown | YouTube 스냅샷 DB(길이 `video_details`), 숏츠 검색(`search.list`, 하루 1번·상한 8번, `backend/.data/shorts.db`), LLM(카테고리·형식 분류, 묶어서·저장). 설정: `trends.toml` `[shorts]` |
 | `content_recommend` | 지금 만들 만한 영상 소재(급상승만, 최대 N개): 순위·점수 근거(z·배수·두 소스)·출처·주제 분류·묶음(회사 상품과 연결된 소재·일반 화제)·연결할 실제 상품(근거)·회사 관련성(상품 연결로, 표시만)·밈 형식·영상 아이디어 1~2문장·형식(숏폼·롱폼)·fallback. 추천 안 함 분류(회사 설정)는 참고용 + 이유로 따로. 콘텐츠 루프 2단계 | trend_scan(회사 기본 키워드 그룹)·trend_candidates(후보 전체)와 같은 네이버 요청(하루 캐시 같이 씀), 회사 상품 목록(shop-api `GET /api/shop/products`·`/categories`), LLM(아이디어 문장·밈 형식·주제 분류만), 임베딩(설정이 있을 때만). 설정: 회사 폴더 `trends.toml` `[recommend]` |
@@ -74,7 +78,7 @@
 
 | 설정 | 하는 일 | 왜 남겼나 |
 | --- | --- | --- |
-| `[[groups]]` 기본 키워드 그룹 | trend_scan이 늘 보는 회사 키워드 4개, content_recommend의 소재·수동 회사 키워드 | 회사가 꼭 지켜볼 말(고양이·책)이라 자동 후보와 별개로 본다 |
+| `[[override.groups]]` 키워드 그룹 덮어쓰기 (비어 있어도 됨) | 있으면 trend_scan 기본 그룹을 프로필 씨앗 대신 이 그룹으로 바꾼다. trend_history·content_recommend는 이 그룹만 본다 (캣북스는 4개를 남겨 둠) | 회사가 꼭 지켜볼 말(고양이·책)을 사람이 정하고 싶을 때. 옛 이름 `[[groups]]`도 같은 덮어쓰기로 읽는다 |
 | `[candidates] exclude_tags` | 늘 빼는 일반 태그 | 자동 제외가 못 잡는 말(게임·치지직: 인기 영상 80%가 게임 카테고리라 카테고리 2개에만 나옴)이 있다. 끄면 `게임`이 상위 5에 들어온다 |
 | `[candidates] keep_tags` (비어 있음) | 자동 제외에서 살릴 이름 | 자동 제외가 실제 소재를 뺄 때 사람이 되살리는 칸 |
 | `[candidates.aliases]` 별칭 표 | 같은 대상 이름 묶기 | 자동 묶기가 영문 이름(lol·minecraft·league of legends, 상관 0.56~0.73)을 못 찾는다 |
@@ -176,7 +180,7 @@ class MemoryConnector:
 
 | skill | 언제 | 요청 | 응답 핵심 |
 |---|---|---|---|
-| `trend_insight_brief` | 제안을 만들기 전에 근거 있는 인사이트를 받을 때 | `max_insights`(3~7, 비우면 회사 설정 5), `regenerate` | `insights[]`: `insight_id`·한 줄·분류·광고 재료 여부·근거(YouTube·Google·네이버, 링크·시각)·타깃 연령대·상품(임베딩 기준 통과만)·숏츠 형식·한계·예시 아이디어(참고용) |
+| `trend_insight_brief` | 제안을 만들기 전에 근거 있는 인사이트를 받을 때 | `max_insights`(3~7, 비우면 회사 설정 5), `regenerate` | `insights[]`: `insight_id`·한 줄·분류·광고 재료 여부·근거(YouTube·Google·네이버, 링크·시각)·타깃 연령대와 연령대별 배수 전체(`age_bands`)·상품(임베딩 기준 통과만)·숏츠 형식(단계·표본 수)·한계·예시 아이디어(참고용) |
 | `campaign_effect` | 마케팅이 실행한 뒤 성과를 기록할 때 | `window_from`·`window_to`(필수), `campaign_id`, **`insight_id`·`proposal_id`(선택)** | 주문 증분·매출·쿠폰 누적 사용률(모르면 unknown + 이유), 요청의 `insight_id`·`proposal_id` 그대로 |
 
 둘 다 grade read(조회만). 요청 가능: `trend_insight_brief`는 planning·orchestrator·dashboard-api, `campaign_effect`는 카드의 `allowed_requesters`.
@@ -298,6 +302,38 @@ class MemoryConnector:
 - **제안 확정**: 인사이트와 예시 아이디어(`promo_concepts`, 참고용)만 준다. 무엇을 할지는 기획이 정하고 사람이 확인한다
 - **기획 쪽 저장**: `insight_id`·`proposal_id`·결과를 데이터가 저장하지 않는다. `campaign_effect`는 받은 id를 돌려줄 뿐이다(읽기 전용)
 - **마케팅 실행**: 게시·발행·쿠폰 발급은 마케팅(과 safety 승인)이 한다
+
+### 외부 호출 없이 확인하기 (#4, `connectors/replay.py`)
+
+로컬 확인에서 네이버·YouTube 할당량을 쓰지 않으려고, 응답을 저장해 두고 다시 쓰는 모드가 있다. **단위 테스트(`uv run pytest`)는 원래 가짜 커넥터·가짜 LLM만 쓰므로 외부를 부르지 않는다.** 이 모드는 서버나 확인 스크립트를 실제 데이터 모양으로 돌릴 때 쓴다.
+
+| `DATA_EXTERNAL_MODE` | 동작 |
+|---|---|
+| `live`(기본) | 실제로 부른다 |
+| `record` | 실제로 부르고 응답 본문을 `DATA_REPLAY_DIR`(기본 `backend/.data/replay/`, 커밋 안 함)에 저장한다. **키·토큰은 헤더로만 가서 파일에 들어가지 않는다** |
+| `replay` | 부르지 않고 저장된 응답만 쓴다. 할당량·하루 호출 수를 세지 않는다. 저장된 것이 없으면 그 호출만 `REPLAY_MISS`(unknown + 이유, 지어내지 않음) |
+
+```bash
+cd backend
+# 1) 한 번만 실제로 부르며 저장 (몇 번 부르는지 아래 표로 먼저 세고 진행)
+DATA_EXTERNAL_MODE=record bash scripts/run_all.sh
+# 2) 그 뒤 확인은 저장된 응답으로 (할당량 0)
+DATA_EXTERNAL_MODE=replay bash scripts/run_all.sh
+```
+
+저장 키는 서비스 + 주소 + 요청 본문(네이버) 또는 쿼리(YouTube)라, 같은 요청이면 같은 파일을 쓴다. 날짜가 바뀌면 요청 기간이 달라져 새로 저장해야 한다. Google 인기 검색어 RSS는 키·할당량이 없어 대상이 아니다.
+
+**외부 호출이 필요한 확인은 몇 번 쓰는지 먼저 세고 진행한다.** skill별 최대 호출(설정 기본값):
+
+| skill | 네이버 | YouTube |
+|---|---|---|
+| `trend_scan` | 그룹마다 1번 (같은 요청은 하루 캐시) | 0 |
+| `trend_candidates` | 후보마다 1번 + 별칭 수 | 0 |
+| `trend_age` | 주제 × 연령대(기본 10 × 5 = 50), 하루 상한 200(우선 아닌 skill은 80) | 0 |
+| `trend_popular` (화면 경로) | 0 | 제목 videos.list ≤ 2번, 구독자 channels.list ≤ 2번, 보충 검색 ≤ 6번(100단위씩) |
+| `shorts_stats` | 0 | 검색 하루 ≤ 8번(100단위씩, 저장 재사용), 다시 보기 videos.list 50개마다 1단위 |
+| `promo_concepts` | 시즌 키워드 ≤ 20번(하루 캐시) + 연령대(예시 트렌드 수 × 5) | shorts_stats와 같다 |
+| `trend_insight_brief` | trend_age(후보 × 5, 상한 공유) | trend_popular·shorts_stats와 같다 |
 
 ## 2. 실행 방법
 `docker compose -f infra/compose.yml up data` / 목 모드: `DATA_MOCK=1`
@@ -459,7 +495,9 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 - 판정(`skills/trend_scan.py`, 코드 계산): 로그 강건 z. 기준선 log 값의 중앙값 m, 중앙 절대 편차 MAD로 σ = 1.4826 × max(MAD, 0.05). 판정 구간 안 이어진 1~7일 구간마다 z = (구간 log 평균 − m) ÷ (σ ÷ √일수)를 구해 가장 큰 z가 3.2 이상이면 rising. 배수 = exp(그 구간 log 평균 − m)
 - 판정 불가(normal이 아니라 unknown + 이유): 자료 없음, 기준선 56일 중 값이 있는 날 28일 미만(요청이 짧거나 빈 날·0이 많음), 기준선 중앙값 0.01 미만(요청 최댓값 100 기준), 판정 구간에 값 없음
 - 일부 그룹만 네이버를 못 읽으면 그 그룹은 unknown("읽지 못함 [코드]"), 모든 그룹을 못 읽으면 숫자 없이 `failed`·`unavailable`
-- 기본 키워드 그룹은 코드에 두지 않는다: `config/tenants/<회사>/trends.toml`(`tenant.toml`의 `trends`) → `scripts/tenant_env.py`가 `DATA_TREND_CONFIG`로 넘긴다. 입력에 그룹도 없고 설정도 없으면 `invalid_input`
+- 기본 키워드 그룹은 코드에 두지 않는다: `config/tenants/<회사>/trends.toml`(`tenant.toml`의 `trends`) → `scripts/tenant_env.py`가 `DATA_TREND_CONFIG`로 넘긴다. 기본 그룹은 도메인 프로필의 씨앗 키워드에서 온다(씨앗 하나 = 그룹 하나, 이름·키워드 = 씨앗, 상한 `[scan] max_seed_groups` 기본 5. 그룹마다 네이버 1번).
+  - 우선순위: 요청 그룹 > 사람 덮어쓰기(`[[override.groups]]`) > 프로필 씨앗. 프로필을 못 얻으면(LLM 없음·씨앗 없음) 덮어쓰기가 있으면 그것을, 없으면 지어내지 않고 `unknown` + 이유(`outcome="unknown"`)
+  - 코드: `resolve_groups(requested, env, seed_provider)` — 테스트는 `seed_provider`로 LLM 없이 씨앗을 준다
   - Docker(`services/data/compose.yml`)는 `DATA_TREND_CONFIG`를 `/app/config/tenants/${AX_TENANT:-catbooks}/trends.toml`로 넘긴다. 바꾸려면 셸 환경변수로 준다(`.env` 값은 이 줄에 덮인다)
   - **주의:** `services/*/compose.yml`·`agent-card.json`은 `scripts/split_services.py`가 만드는 파일이다. 이 줄은 손으로 넣어서 스크립트를 다시 돌리면 빠진다. 그 스크립트는 `--help` 같은 옵션을 읽지 않고 **바로 실행돼** 지금 dev에서도 `services/` 파일 66개를 다시 쓴다(줄바꿈 등). 확인하려고 옵션을 붙여 돌리지 말 것
 - 설명 문장은 LLM이 쓰고 `explain.py` 숫자 검증을 그대로 거친다(템플릿 `trend`)
@@ -740,15 +778,98 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 2. **점수**(코드, `[brief]` 가중치): 지금 인기 `1/순위` + 네이버 `max(0, 배수−1)` + 연령대 `max(0, 최대 연령대 배수−1)` + 인기 검색어 `1/순위` + YouTube `영상 수/최대`. 1차 점수 상위 `인사이트 수 + age_topics_extra`개만 `trend_age`로 연령대를 보고(네이버 호출 아끼기, trend_age 하루 상한·캐시 공유) 다시 점수를 매겨 `max_insights`(5, 요청으로 3~7)개
 3. **분류(#539)**: 브리프에 들어가는 모든 주제는 공유 분류기(`topic_category`)를 거친다. 지금 인기 주제는 이미 분류된 값(저장 재사용)을, 지금 인기에 없는 급상승 주제는 여기서 묶어 한 번 분류한다(저장된 분류는 다시 묻지 않음). **분류가 안 된 주제(unknown)는 순위·연령대 후보에 넣지 않고** 맨 아래 "참고용 + 분류 대기"(`classification_pending`, 최대 `pending_max` 2개)로 둔다
 3-1. **광고 재료**: 공용 규칙(`skills/ad_material.py`, 예시 아이디어·급상승 판정과 같다). 뉴스·사건·기부·재난·정치·사회·인물 분류, 사람 이름 주제, 회사 추천 안 함 분류, `[promo] trend_categories` 밖이면 `ad_material: false` + 이유이고 **맨 아래 `reference_only`(참고용)**. 실존 이름·상표가 든 주제는 가능 + "분위기·형식만" 이유. 분류가 없는 급상승 주제는 `null` + 이유
-4. **칸**: `insight_id` = `ins_<날짜>_<주제 이름 해시>`(같은 날 같은 주제면 같은 id, 기획이 제안·성과 요청에 적는다) · 근거(YouTube 영상 수·시간당 조회·구독자 대비 최대 배수·스냅샷 시각, Google 순위·관련 뉴스·스냅샷 시각, 네이버 배수·판정·상승 시작일·판정 마지막 날, 링크, 없는 출처와 이유) · 타깃 연령대(없으면 미정 + 이유) · 상품(`product_link` 임베딩 기준 `[recommend] min_similarity` 이상·1등만, 이름에 시즌 확인 키워드가 들어 있으면 시즌 근거 한 줄) · 숏츠 형식(이 주제 근거 숏츠 중 가장 많은 형식과 표본 수, shorts_stats가 분류해 둔 것만) · 한계 · 예시 아이디어(오늘 저장된 `promo_concepts` 중 이 주제를 빌린 것, "참고용". 새로 만들지 않는다)
+4. **칸**: `insight_id` = `ins_<날짜>_<주제 이름 해시>`(같은 날 같은 주제면 같은 id, 기획이 제안·성과 요청에 적는다) · 근거(YouTube 영상 수·시간당 조회·구독자 대비 최대 배수·스냅샷 시각, Google 순위·관련 뉴스·스냅샷 시각, 네이버 배수·판정·상승 시작일·판정 마지막 날, 링크, 없는 출처와 이유) · 타깃 연령대(없으면 미정 + 이유)와 **연령대별 배수 전체**(`age_bands`, trend_age 결과 그대로 설정 순서. 브리프가 이미 부른 trend_age 한 번에서 나오므로 네이버 호출이 늘지 않는다. 기획은 브리프 하나로 연령대 전체를 받는다. 연령대를 보지 않은 주제는 빈 목록이고 이유는 `target_age_reason`) · 상품(`product_link` 임베딩 기준 `[recommend] min_similarity` 이상·1등만, 이름에 시즌 확인 키워드가 들어 있으면 시즌 근거 한 줄) · 숏츠 형식(4-2) · 한계 · 예시 아이디어(오늘 저장된 `promo_concepts` 중 이 주제를 빌린 것, "참고용". 새로 만들지 않는다)
 4-1. **구성(#543)**
    - **카테고리 상한** `per_category_max`(2): 한 분류(예: 게임)가 브리프를 채우지 않게 점수 순으로 고르되 카테고리마다 최대 2개
    - **회사 관련 인사이트**(`company_related`): 시즌 키워드(오늘 기획안 시즌 확인, 배율 큰 순)와 카탈로그 상품 핵심어(`season_keywords`) 중 `company_pool`(4)개를 후보로, 공유 분류기와 연령대를 거쳐 **급상승 판정이 아니어도** 작년 같은 달·다음 달 배율 ≥ `company_min_season_ratio`(1.3) 또는 어느 연령대 배수 ≥ `company_min_age_ratio`(1.3)이면 "오른 것"으로 보고 `company_topics`(최대 2)개를 **따로 확보**한다(그만큼 트렌드 자리를 줄임). 고른 이유는 `company_reason`(코드 문장), 시즌 근거는 `evidence.season_*`. 회사 상품·시즌 키워드라 빌려 올 IP·인물이 없어 광고 재료 가능(분류 대기면 제외). 없으면 브리프 `limits`에 "회사 관련 인사이트 없음: …"
    - **점수에 상품·시즌**: 상품 몫 `w_product`(0.5, 임베딩 기준을 통과한 상품이 있으면) + 시즌 몫 `w_season`(0.5 × max(0, 배율−1), 연결 상품 이름에 시즌 키워드가 있으면 그 배율). **이유**: 기획이 바로 쓸 수 있는 인사이트는 회사 상품과 이어지고 시즌이 맞는 것이라, 같은 인기라면 그쪽을 앞에 둔다. 다만 상품 연결은 임베딩 기준(0.65·1등)을 통과해야 해서 드물고, 인기 몫(1/순위 ≤ 1)을 넘지 않게 0.5로 둔다(성과 자료가 쌓이면 다시 정할 값)
    - **상품 0개**: `products_reason`이 "회사 상품과 직접 연결 없음 (…이유)"
    - 순서: 순위 인사이트(점수 순) → 회사 관련 → 광고 재료 아님(참고용) → 분류 대기
+4-2. **숏츠 형식 단계**: ① `topic` 이 주제 근거 숏츠(shorts_stats가 분류해 둔 것) 중 가장 많은 형식 → 없으면 ② `category` 이 주제 분류의 숏츠 통계(`by_category[].formats`, 표본이 `[shorts] min_sample` 이상일 때만)에서 가장 많은 형식 → 없으면 ③ `all` 전체 숏츠 통계(`by_format`)에서 가장 많은 형식. ②·③에서는 목록 밖 형식 "기타"와 미분류를 고르지 않는다(표본 수에는 센다). 칸: `shorts_format_source`(단계), `shorts_format_source_count`(그 단계에서 이 형식인 숏츠 수)·`shorts_format_source_total`(그 단계에서 형식을 분류한 숏츠 수), ②·③이면 `shorts_format_reason`에 앞 단계를 못 쓴 이유. 중앙값·기준 시각(`shorts_format_median_views`·`shorts_format_at`)은 어느 단계든 숏츠 통계의 그 형식 값. 한 줄 데이터 블록에도 "숏츠 형식을 고른 단계"를 넣어 이 주제 숏츠의 형식처럼 쓰지 않게 한다
 5. **한 줄**: 인사이트마다 근거 숫자만 데이터 블록에 넣고 묶어서 LLM 한 번. 숫자 검증(`explain`)·단정 말 검사에 걸리면 코드가 만든 고정 문장(`line_status: fixed` + 이유)
-6. **하루 캐시**: (한국 날짜, 규칙 버전 = `[brief]` 설정·프롬프트·한계 문장 해시) → 브리프. `regenerate: true`면 새로 묶는다
+6. **하루 캐시**: (한국 날짜, 규칙 버전 = `[brief]` 설정·프롬프트·한계 문장·칸 모양(`SHAPE`) 해시) → 브리프. `regenerate: true`면 새로 묶는다
+
+### domain_profile (도메인 프로필)
+
+고객사가 바뀌어도 사람이 키워드·카테고리·출처를 손으로 정하지 않게, 회사 소개와 카탈로그로 프로필을 만든다.
+테넌트 설정에는 회사 소개(`[profile] about`)와 사람이 덮어쓰기(`[profile.override]`, 비어 있어도 됨)만 둔다.
+`scripts/tenant_env.py`가 `DATA_TENANT_CONFIG`(= 회사 폴더 `tenant.toml`)를 넘긴다.
+**회사 소개는 AI가 사실로 읽는다. 분위기 문장·별명은 쓰지 말고, 카탈로그와 맞게** 쓴다.
+
+1. **입력**(코드): 회사 소개 + 카탈로그 상품(이름·카테고리 코드·설명 앞 120자, 최대 80개)·카테고리 이름. 데이터 블록에만 넣는다
+2. **LLM 한 번**(정해진 스키마): 업종(`INDUSTRIES` 중 하나: 출판·교육·패션·식품·뷰티·디지털·가전·생활·리빙·반려동물·스포츠·레저·유아·출산·여가·취미·기타), 상품군(이름 + 카테고리 코드), 고객 축(`CUSTOMER_AXES` 중), 분석 질문(최대 5개, 숫자 없이), 씨앗 키워드(최대 12개 + 근거 문장)
+3. **코드 검증**: 목록 밖 업종·고객 축은 버림. 상품군 카테고리 코드는 카탈로그에 있는 것만, 상품 수는 코드가 셈. 숫자가 든 질문은 버림. **씨앗 키워드는 근거 문장이 상품 이름·카테고리 이름·설명·회사 소개 원문에 그대로 있고 키워드가 그 근거 안에 있을 때만** 남긴다(`evidence_from`, 근거 상품 id). 회사 소개·상품 설명 문장은 낱말이 떨어져 있어도("고양이가 지키는 서점" ↔ "고양이 서점") **키워드 낱말이 모두 같은 문장 안에** 있으면 그 문장을 근거로 본다(다른 문장에 흩어지면 버림). 아니면 `dropped_keywords` + 이유
+4. **사람 덮어쓰기가 먼저**: `industry`·`customer_axes`·`questions`(바꿈), `seed_keywords`(더함, `evidence_from: override`), `drop_keywords`(뺌). 덮어쓴 칸은 `overridden`
+4-1. **소개와 카탈로그가 어긋남**(`intro_mismatch`, 경고만): LLM이 상품군 중 회사 소개에 나오지 않는 것을 고르고(`groups_not_in_intro`), 코드가 검증된 상품군인지·상품군 이름이나 카테고리 이름이 소개에 그대로 있지 않은지 확인한 뒤 그 상품군의 카탈로그 상품 목록을 붙인다. 상품을 빼지 않고 `limits`에도 한 줄
+5. **저장 재사용**: 키 = 소개·덮어쓰기·카탈로그(상품·카테고리)·프롬프트·목록 해시. 소개나 카탈로그가 바뀌면 다시 만든다. 업종이나 근거 있는 씨앗 키워드가 없으면 저장하지 않고 `unknown` + 이유
+
+### data_sources (데이터 출처 목록)
+
+출처마다 능력을 코드에 적고, 수집 계획(LLM)이 이 목록 안에서만 고른다. 출처는 **업종 태그로만** 구분한다(회사 이름 없음).
+API 키는 AXcellent 공용으로 `backend/.env`에 한 번만 두고 고객사별로 받지 않는다. 키가 없는 출처는 구조만 있고 상태가 "키 필요"다.
+
+| 출처 id | 데이터 종류 | 업종 | 연령·성별 | 카테고리 | 한도 (공식 문서) | 키 | 공식 문서 |
+|---|---|---|---|---|---|---|---|
+| `youtube` | 시청 | 전체 | 없음 | API (`videoCategories.list`) | 하루 10,000 단위, search.list 100·videos.list 1 | `YOUTUBE_API_KEY` | [quota](https://developers.google.com/youtube/v3/getting-started#quota) |
+| `google_trending` | 검색 관심 | 전체 | 없음 | 없음 | 공개 RSS, 한도 미공개 | 없음 | [RSS](https://trends.google.com/trending/rss?geo=KR) |
+| `naver_search_trend` | 검색 관심 | 전체 | 있음 | 없음(키워드) | 하루 1,000회, 그룹 5개·그룹당 키워드 20개 | `NAVER_HUB_CLIENT_ID`·`NAVER_HUB_CLIENT_SECRET` | [API HUB](https://api.ncloud-docs.com/docs/naver-api-hub-overview) |
+| `naver_shopping` | 실제 소비(쇼핑 클릭, 판매량 아님) | 전체 | 있음 | 고정 후보(네이버쇼핑 cat_id)를 실제 호출로 확인. 목록 API 없음 | 하루 한도 미확인(429 = 하루 허용량 초과), 분야 3개·키워드 5개/요청, 2017-08-01부터 | 검색어 트렌드와 같은 API HUB 키 | [쇼핑인사이트](https://api.ncloud-docs.com/docs/naver-api-hub-shopping-insight-categories.md) |
+| `data4library` | 실제 소비(공공도서관 대출) | 출판·교육 | 있음 | 고정(KDC 대분류 0~9) | 하루 한도 미확인(비공식 500회) | `DATA4LIBRARY_API_KEY` | [정보나루](https://data4library.kr/apiUtilization) |
+| `kosis` | 조사 통계 | 전체 | 표마다 | API (통계목록 `statisticsList.do`) | 하루 한도 미확인, 2026 공지로 분당 제한(수치 미확인), HTTPS만 | `KOSIS_API_KEY`(요청 변수 `apiKey`) | [개발 가이드](https://kosis.kr/openapi/devGuide/devGuide_0201List.do) |
+
+- **상태**(코드): 키가 모두 있으면 `available`, 없으면 `key_required` + 키 이름. 쇼핑인사이트는 같은 키라도 API HUB 앱에서 그 API를 켜야 해서 **실제 호출 1번**(`probe`, 패션의류 최근 30일 월 단위)이 성공해야 `available`이다. 결과는 저장하고, 실패면 하루 뒤 다시 확인한다
+  - 2026-11-04 확인: 지금 키로 401 "요청한 API는 이 Application에서 활성화되어 있지 않습니다" → `key_required`
+- **승인**(사람): 기존 출처 3개는 승인된 것으로 본다. 새 출처는 `tenant.toml` `[sources] approved`에 id를 적어야 수집을 시작한다(상태 변경이라 원래 승인 레지스트리가 필요하다. 지금은 설정 파일 플래그)
+- **커넥터**(`connectors/naver_shopping.py`·`data4library.py`·`kosis.py`): 공식 문서의 요청·응답 형식대로. live·record·replay(`DATA_EXTERNAL_MODE`)를 지원하고 키는 로그·오류·저장 파일에 넣지 않는다. 테스트는 문서 형식으로 만든 가짜 응답(`tests/test_source_connectors.py` 안에만)으로만 돈다
+- **미확인**: 쇼핑인사이트 하루 한도·분야 목록 API, 정보나루 JSON 응답 구조(공식 페이지 예시는 XML)·한도, KOSIS 오류 형식·분당 한도. 키를 등록하면 record 모드로 한 번 불러 형식을 확인한다
+- **한계**: 새 업종에 맞는 출처가 목록에 없으면 커넥터를 한 번 추가해야 한다 (출처 표에 한 줄 + 커넥터 1개)
+
+### source_plan (수집 계획)
+
+AI가 고르고 코드가 검증한다. 수집은 하지 않는다(카테고리 확인 호출만).
+
+1. **재료**: 도메인 프로필(저장 재사용) + 출처 목록(`data_sources`)
+2. **카테고리 선택지**(코드, 실제 목록): YouTube `videoCategories.list`(regionCode=KR, 1단위) / 쇼핑인사이트는 공식 목록 API가 없어 네이버쇼핑 cat_id 후보를 주고, 사용 가능이면 고른 것을 실제 호출(`verify_categories`, 3개씩)로 확인해 데이터가 오는 것만 남김 / 정보나루 KDC 대분류 / KOSIS는 통계목록 API. **키 필요 출처는 확인을 건너뛰고 `after_key`(키 등록 후 확인)**
+3. **LLM 한 번**(정해진 스키마): 출처 목록 안에서 출처·이유(숫자 없이)·카테고리 id·키워드·연령 여부
+4. **코드 검증**: 목록 밖·중복 출처, 업종 태그가 회사 업종과 안 맞는 출처(`all`이 아니면), 선택지 밖·확인 호출에서 데이터가 없는 카테고리, 씨앗 키워드 밖 키워드, 키워드를 안 받는 출처의 키워드, 연령대를 못 주는 출처의 연령은 버리고 이유(`dropped`·`dropped_sources`)
+5. **할당량**(코드): 출처마다 공식 문서 요청 단위로 호출 수·단위를 센다(YouTube 카테고리·키워드마다 search.list 100 + videos.list 1, 네이버 검색어 트렌드 그룹 5개당 1번 × 연령대 5, 쇼핑 분야 3개당 1번 + 분야마다 키워드 5개당 1번 + 분야 연령 1번, 정보나루 분류마다 1번 × 연령대, KOSIS 목록 1 + 표마다 1). 상한(`[plan]`: YouTube 1,000단위, 네이버 검색어 60번, 쇼핑 40번, 정보나루 50번, KOSIS 20번, Google 2번)을 넘으면 연령대 → 키워드 → 카테고리 순으로 뒤에서 자르고 `trimmed`에 남김
+6. **키 필요 출처도 계획에 남김**: `unlocks` = "<키 이름>가 있으면: <더 쓸 수 있는 근거>" (키는 있지만 API를 못 쓰면 그 이유)
+7. **승인**: 새 출처 수집은 사람 승인 후(`tenant.toml` `[sources] approved`). 원래는 상태 변경이라 승인 레지스트리가 필요하다(초안은 needs-human 이슈)
+8. **저장**: 계획 id = 프로필 해시·씨앗 키워드·출처 상태·승인·상한·프롬프트 해시. 같으면 저장된 계획을 쓴다(`regenerate`로 새로)
+
+### trend_insight_brief 기회 가설 카드 (선택 칸 `opportunities`)
+
+도메인 프로필 → 수집 계획(저장 재사용)대로 **사용 가능하고 승인된 출처만** 불러 하위 주제(계획에 들어간 씨앗 키워드, 최대 `[opportunity] max_cards` 5)마다 카드를 만든다. 숫자는 모두 코드, 한 줄만 LLM. 카드를 못 만들어도 브리프는 그대로 주고 `opportunities_reason`에 이유.
+
+| 칸 | 출처·계산 (코드) |
+|---|---|
+| 실제 소비 `consumption` | 계획의 소비 출처마다. 키가 없으면 `key_required`("키 등록 후 가능" + 얻는 근거), 승인이 없으면 `not_approved`, 둘 다 되면 실제로 부름(쇼핑: 계획 첫 분야 안 키워드 클릭을 trend_scan 판정으로 평소 대비 배수, 정보나루: 최근 30일 그 분류 인기 대출 중 키워드가 든 책의 대출 수 합) |
+| 검색 관심 `search_interest` | 네이버 검색어 트렌드(계획에 있고 승인된 경우) 그룹 5개씩 한 요청, `judge_series` 평소 대비 배수. 기간(84일)·표본(값이 있는 날 수) |
+| 연령대 `age_bands` | trend_age 그대로 (계획에서 연령을 고른 경우만, 하루 상한·캐시 공유). 없으면 `age_reason` |
+| 숏츠 적합도 `shorts_fit` | 하위 주제를 공유 분류기로 분류 → 숏츠 통계 그 분류 조회 중앙값 ÷ 전체 숏츠 중앙값(`ShortsStatsOutput.median_views`). 표본 < `min_samples`(5)면 불확실, ≥ `high_ratio`(1.2)면 높음, ≤ `low_ratio`(0.8)면 낮음, 사이면 불확실 |
+| 잘 되는 형식 `formats` | 그 분류 숏츠의 형식별 수(기타·미분류 제외, 최대 3) + 전체 숏츠 통계의 그 형식 중앙값 |
+| 목표 참고값 | 그 분류 숏츠 조회 중앙값(표본 기준 이상), 아니면 전체 중앙값. 기준 문장 `target_reference_basis` |
+| 연결 상품 | 프로필에서 그 씨앗 키워드의 근거가 된 카탈로그 상품 |
+| 한계·기획이 정할 것 | 코드 고정 문장 |
+| 한 줄 `line` | 근거 숫자만 데이터 블록에 넣고 묶어서 LLM 한 번. 숫자 검증·단정 금지에 걸리면 고정 문장 |
+
+순서는 코드 점수: 검색 max(0, 배수−1) + 0.5 × max(0, 숏츠 배수−1) + 연결 상품 0.25. 브리프 칸 모양이 바뀌어 규칙 버전 `SHAPE`를 올렸다.
+
+### 다른 업종 확인 (도메인 프로필 → 출처 목록 → 수집 계획)
+
+`tests/test_other_industries.py`: 테스트 안에만 있는 가짜 테넌트 2개(패션 쇼핑몰·식품, 카탈로그만)로 사람 입력(덮어쓰기·키워드·카테고리·출처) 없이 돌린다. 가짜 LLM(데이터 블록만 보는 규칙 함수) + 저장된 YouTube 카테고리 응답(replay). 업종·씨앗 키워드·쇼핑 분야(패션 50000000, 식품 50000006)가 서로 다르게 나오고, 출판·교육 전용 출처(정보나루)는 코드가 업종 불일치로 버리며, 근거 없는 키워드도 버린다. 실제 고객사 설정은 만들지 않는다.
+
+- **한계**: 새 업종에 맞는 출처가 목록에 없으면 커넥터를 한 번 추가해야 한다 (출처 표에 한 줄 + 커넥터 1개)
+
+### domain_subtopics (하위 주제 넓히기)
+
+씨앗 키워드(상품 이름 위주)만으로는 기회 카드가 상품 목록이 되어, 씨앗 주변에서 실제로 같이 소비되는 말을 찾는다.
+
+1. **검색**(코드): 씨앗마다 YouTube `search.list`(q=씨앗, `videoDuration=short`, regionCode=KR, relevanceLanguage=ko, 조회수 순, 최근 `published_days` 90일, 최대 50개) + `videos.list`. 길이 `[shorts] max_seconds` 이하·한국어(`shorts_stats.is_language`)만. 씨앗마다 결과를 `cache_days` 7일 저장해 다시 쓰고, 새 검색은 하루 `daily_searches` 5번까지(넘으면 다음 날, 지난 결과가 있으면 그것을 쓰고 이유)
+2. **후보**(코드): 결과 영상 태그 + 제목 구(2~3어절)를 trend_candidates와 같은 정리(`clean_tag`)·별칭 표(`canonical`)로 센다. 빼는 것: 씨앗 자체·씨앗을 품은 말, 회사 제외 목록(`exclude_tags`), **쌓인 인기 영상 문서 빈도로 찾은 흔한 말**(`common_terms`, `[candidates.auto_exclude]` 기준 그대로). `min_videos`(2)개 이상 영상에 나온 것만. 같은 대상 묶기: 공백·대소문자만 다른 이름은 하나, 같은 영상들에만 나온 더 긴 구는 짧은 이름에(`merged`). 씨앗마다 `max_per_seed` 5개, 전체 `max_total` 20개(숏츠 수 많은 순)
+3. **축 분류**(LLM 한 번): 프로필의 `subtopic_axes`(프로필 LLM이 고객 축에 맞춰 2~5개 정함, 사람이 나열하지 않음. 덮어쓰기 `[profile.override] subtopic_axes`) + 기타 중에서만. 목록 밖 답은 기타
+4. **수집 계획**: 오늘 새로 할 검색 수(캐시 밖, 하루 상한 안)를 `subtopic_searches`·`subtopic_units`(검색 1번 = 101단위)로 YouTube 할당량 합계에 넣는다. 상한을 넘으면 YouTube 항목 키워드를 먼저 자르고(카테고리는 하나 남김), 그래도 넘으면 하위 주제 검색 수를 줄인다
+5. **기회 카드**: 하위 주제(숏츠 수 많은 순, 최대 5) 단위. 상품은 그 씨앗의 근거 상품을 "연결 상품"으로만. 하위 주제 숏츠가 표본 기준(5) 이상이면 숏츠 적합도 = 그 숏츠 조회 중앙값 ÷ 전체 숏츠 중앙값, 목표 참고값도 그 중앙값. 하위 주제가 없으면 예전처럼 씨앗 키워드 단위(한계에 적음)
 
 ### trend_age (연령대별 상승)
 

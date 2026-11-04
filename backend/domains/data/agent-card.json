@@ -210,9 +210,69 @@
     },
     {
       "id": "trend_insight_brief",
-      "description": "기획에 넘기는 근거 있는 인사이트 3~7개(데이터는 기획안을 확정하지 않는다). 기존 skill 결과를 코드로 묶는다: trend_popular(주제·분류·광고 재료 판정·YouTube 영상 수·시간당 조회·구독자 대비 배수·Google 인기 검색어 순위·관련 뉴스), 오늘 네이버 급상승 판정(평소 대비 배수·상승 시작일), trend_age(후보 상위의 타깃 연령대와 배수), 오늘 저장된 promo_concepts 예시 아이디어(참고용)·시즌 확인, product_link 임베딩 기준을 통과한 상품. 인사이트마다 insight_id(날짜+주제, 같은 날 같은 주제면 같은 id), 한 줄(LLM은 근거 숫자만, 숫자 검증 실패면 고정 문장), 카테고리, 광고 재료 가능 여부와 이유, 실존 이름 표시, 근거·링크·불러온 시각, 타깃 연령대(없으면 미정과 이유), 상품과 시즌 근거, 잘 맞는 숏츠 형식과 표본 수, 한계. 순서는 코드 점수(회사 설정 [brief] 가중치), 광고 재료가 아닌 것은 맨 아래 참고용. 하루 캐시(날짜 + 규칙 버전). 회사 상태를 바꾸지 않는다.",
+      "description": "기획에 넘기는 근거 있는 인사이트 3~7개(데이터는 기획안을 확정하지 않는다). 기존 skill 결과를 코드로 묶는다: trend_popular(주제·분류·광고 재료 판정·YouTube 영상 수·시간당 조회·구독자 대비 배수·Google 인기 검색어 순위·관련 뉴스), 오늘 네이버 급상승 판정(평소 대비 배수·상승 시작일), trend_age(후보 상위의 타깃 연령대와 배수), 오늘 저장된 promo_concepts 예시 아이디어(참고용)·시즌 확인, product_link 임베딩 기준을 통과한 상품. 인사이트마다 insight_id(날짜+주제, 같은 날 같은 주제면 같은 id), 한 줄(LLM은 근거 숫자만, 숫자 검증 실패면 고정 문장), 카테고리, 광고 재료 가능 여부와 이유, 실존 이름 표시, 근거·링크·불러온 시각, 타깃 연령대(없으면 미정과 이유), 상품과 시즌 근거, 잘 맞는 숏츠 형식과 표본 수, 한계. 순서는 코드 점수(회사 설정 [brief] 가중치), 광고 재료가 아닌 것은 맨 아래 참고용. 하루 캐시(날짜 + 규칙 버전). 회사 상태를 바꾸지 않는다. 선택 칸 opportunities(기회 가설 카드): 도메인 프로필 → 수집 계획대로 사용 가능·승인된 출처만 불러 하위 주제마다 실제 소비 근거(없으면 키 등록 후 가능·승인 후 수집), 검색 관심(네이버 평소 대비 배수), 연령대별 배수, 숏츠 적합도(그 분류 숏츠 조회 중앙값 ÷ 전체 중앙값·표본 수 → 높음/불확실/낮음), 잘 되는 형식, 목표 참고값, 연결 상품, 한계, 기획이 정할 것. 근거마다 출처·기간·표본. 가설 한 줄은 LLM(근거 숫자만, 숫자 검증).",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendInsightBriefRequest",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendInsightBriefOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "domain_profile",
+      "description": "회사 소개(테넌트 설정 [profile] about)와 회사 카탈로그(이름·카테고리·설명)로 업종·상품군·고객 축·분석 질문·씨앗 키워드를 만든다. 고객사가 바뀌어도 사람이 키워드·카테고리를 손으로 정하지 않게 한다. LLM은 정해진 스키마와 목록(업종 태그·고객 축) 안에서만 고르고, 씨앗 키워드는 근거 문장이 소개·카탈로그 원문에 있을 때만 코드가 남긴다(없으면 이유와 함께 버림). 상품군 카테고리 코드는 카탈로그에 있는 것만, 상품 수는 코드가 센다. 사람 덮어쓰기([profile.override])가 먼저다. 소개·카탈로그가 같으면 저장된 프로필을 다시 쓴다(regenerate로 새로). 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DomainProfileRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DomainProfileOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "data_sources",
+      "description": "데이터 출처 목록. 출처마다 주는 데이터 종류(검색 관심·실제 소비·시청·조사 통계), 맞는 업종 태그(전체 또는 특정, 회사 이름 없음), 연령·성별 지원, 카테고리 목록을 어디서 받는지, 자료 주기, 하루 한도(공식 문서 기준, 확인 못 한 수치는 미확인), 필요한 키 환경변수 이름(값은 넣지 않음), 상태(사용 가능 / 키 필요), 공식 문서 주소, 사람 승인 여부를 돌려준다. 상태는 코드가 정한다: 키가 모두 있으면 사용 가능, 없으면 키 필요와 키 이름. 같은 키를 쓰지만 이용 신청이 따로일 수 있는 출처(네이버 쇼핑인사이트)는 실제 호출 1번이 성공해야 사용 가능이고 결과를 저장한다. 수집 계획(source_plan)은 이 목록 안에서만 고른다. 새 출처 수집은 회사 설정 승인 플래그가 있어야 시작한다. 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataSourcesRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataSourcesOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "source_plan",
+      "description": "수집 계획. 도메인 프로필(domain_profile)과 출처 목록(data_sources)을 보고 LLM이 출처 목록 안에서만 출처·이유·카테고리·키워드·연령 여부를 정해진 스키마로 고르고, 코드가 검증한다. 카테고리는 출처마다 실제 목록에서만 고른다(YouTube videoCategories.list, 네이버 쇼핑인사이트는 공식 목록 API가 없어 네이버쇼핑 cat_id 후보를 실제 호출로 확인). 목록 밖·중복·업종이 안 맞는 출처, 실제 목록에 없는 카테고리, 씨앗 키워드 밖 키워드, 연령을 못 주는 출처의 연령은 이유와 함께 버린다. 키 필요 출처는 카테고리 확인을 건너뛰고 '키 등록 후 확인'으로 남기며, 키가 있으면 더 쓸 수 있는 근거를 보여 준다. 출처마다 호출 수·할당량을 코드가 세고 회사 설정 상한 안으로 자른다. 계획은 저장하고 다시 쓴다(regenerate로 새로). 새 출처 수집은 사람 승인 후(설정 파일 승인 플래그). 수집은 하지 않고 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#SourcePlanRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#SourcePlanOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "domain_subtopics",
+      "description": "하위 주제 넓히기. 도메인 프로필의 씨앗 키워드마다 YouTube에서 한국 숏츠를 검색해(씨앗마다 결과 일주일 캐시, 새 검색은 하루 상한 기본 5번, 수집 계획 YouTube 할당량 합계에 들어감) 결과 영상 태그·제목에 함께 나오는 말을 코드가 모은다. 정리·별칭 표는 trend_candidates와 같고, 씨앗 자체·회사 제외 목록·쌓인 인기 영상 문서 빈도로 찾은 흔한 말은 뺀다. 같은 대상(공백만 다른 이름, 같은 영상들에만 나온 더 긴 구)은 묶는다. LLM은 프로필의 하위 주제 축(고객 축에 맞춰 프로필이 정함, 사람이 나열하지 않음)과 기타 중에서만 분류한다. 하위 주제마다 함께 나온 숏츠 수·조회 중앙값·근거 영상. 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DomainSubtopicsRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DomainSubtopicsOutput",
       "grade": "read",
       "allowed_requesters": [
         "planning",

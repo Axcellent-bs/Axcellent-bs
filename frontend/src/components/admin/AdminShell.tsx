@@ -8,7 +8,7 @@ import { endSupport, supportActive, useSupport } from "@/demo/support";
 import { AGENTS, activeChild, matchPath, useEnabledServices, type Service, type SubItem } from "@/demo/services";
 import { useOpenHandoffCount } from "@/lib/handoffs";
 import { DEV_TASKS_HREF, ORCHESTRATOR_HREF, PLANNING_REQUESTS_HREF, useNavCounts } from "@/lib/navCounts";
-import { IconAgents, IconBell, IconChart, IconGear, IconInbox, IconOffice, IconSearch } from "../icons";
+import { IconAgents, IconBell, IconChart, IconGear, IconInbox, IconLink, IconOffice, IconSearch } from "../icons";
 
 // 메뉴: AI가 상위 탭이고, 그 AI가 맡은 서비스가 하위 탭이다. 서비스 안 화면(예: 고객 문의의 상담 콘솔)은 그 아래 한 단 더.
 // 고객사 계정은 시스템 관리자 하나이고, 회사가 켠 서비스는 전부 메뉴에 보인다(서비스 고르기에서 끈 서비스만 빠짐, src/demo/session.tsx).
@@ -52,6 +52,7 @@ const SHARED_NAV: NavItem[] = [
   { href: HANDOFFS_HREF, label: "받은 요청", Icon: IconInbox, match: [HANDOFFS_HREF] },
   { href: "/agents/chat", label: "AI 대화방", Icon: IconAgents, match: ["/agents/chat"] },
   { href: "/agents/office", label: "AI 오피스", Icon: IconOffice, match: ["/agents/office"] },
+  { href: "/connections", label: "연결", Icon: IconLink, match: ["/connections"] },
 ];
 // 관제 센터: 고객사에 설치된 AXcellent 상태를 모아 보는 AXcellent 운영팀 전용 화면 (src/control). 고객사 계정에는 안 보인다
 const CONTROL_MENU: SubItem[] = [

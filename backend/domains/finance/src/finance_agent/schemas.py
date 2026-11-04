@@ -47,6 +47,14 @@ class ClosingReportOutput(AxModel):
     commentary: str
     commentary_source: Literal["llm", "template"]
     status: Literal["draft", "confirmed"]
+    closable: bool = True  # 기간이 끝나 확정할 수 있는가
+    snapshot_at: str | None = None  # 확정 때 숫자를 저장한 시각. 없으면 지금 숫자다
+    drift: list[dict[str, Any]] = Field(default_factory=list)  # 확정 뒤 달라진 줄
+    close_warnings: list[dict[str, Any]] = Field(default_factory=list)
+    adjustment_proposal: dict[str, Any] | None = None  # 조정 분개안. 사람이 반영한다
+    adjustments: list[dict[str, Any]] = Field(default_factory=list)  # 이 기간에 반영한 차이
+    prior_adjustments: list[dict[str, Any]] = Field(default_factory=list)  # 이 달에 잡은 전기 조정
+    net_after_adjustments: int | None = None
     confirmed_by: str | None = None
     confirmed_at: str | None = None
     unavailable: list[str] = Field(default_factory=list)

@@ -7,6 +7,7 @@ import { Linked, Ref, go, hrefOf, prSlug, reviewOf, toPath } from '@/components/
 import { CONFIRMED_BY, mergedLabel } from '@/components/planning-common/flow'
 import { RepoTag } from '@/components/planning-common/repo'
 import { Pager, usePage } from '@/components/planning-common/pager'
+import { PROPOSAL_ORIGIN, proposalReady, type Proposal } from '@/lib/proposals'
 import { useAllReleaseChecks, useReleaseChecks, type ReleaseCheck } from '@/lib/planning'
 
 interface P { s: S; d: Dispatch<Action> }
@@ -107,7 +108,7 @@ export function Specs({ s, d, item, item2 }: P & { item?: string; item2?: string
 }
 
 type ListKind = 'all' | 'spec' | 'doc'
-type ListRow = { key: string; kind: 'spec' | 'doc'; href: string; id: string; title: string; from?: S['requests'][number]['from']; state: string; size: string; tail?: { label: string; tone: 'green' | 'amber'; title?: string }; note?: string }
+type ListRow = { key: string; kind: 'spec' | 'plan' | 'doc'; href: string; id: string; title: string; from?: S['requests'][number]['from']; state: string; size: string; tail?: { label: string; tone: 'green' | 'amber'; title?: string }; note?: string; origin?: '요청' | '제안' }
 // 문서·기획서 목록 (탭 첫 화면). 기획서(요청에서 나온 것)와 사람이 쓴 문서를 한 목록에, 최근 것이 위
 function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
   const checks = useAllReleaseChecks()
@@ -117,8 +118,10 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
     const xr = reviewOf(s, sp.id)
     const rc = checks.find((c) => c.spec_id === sp.id)
     return {
+      // 어디서 나온 기획서인지: 기획 제안 → 기획안 → 개발로 넘긴 요청이면 "제안", 나머지는 "요청"
+      origin: sp.origin === PROPOSAL_ORIGIN || (s.proposals ?? []).some((p) => p.request && p.request === req?.id) ? '제안' : '요청',
       key: sp.id, kind: 'spec', href: toPath(`work/specs/${sp.id}`), id: sp.id, title: sp.title, from: req?.from,
-      state: xr ? (xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기') : sp.status,
+      state: xr ? (xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기') : sp.origin === PROPOSAL_ORIGIN && sp.status === '초안' ? '기획안' : sp.status,
       size: `요구사항 ${sp.paras.filter((p) => p.kind === 'req').length} · 완료 기준 ${sp.paras.filter((p) => p.kind === 'done').length}`,
       tail: rc ? releaseState(rc) : undefined, note: sp.question ? '질문 대기' : undefined,
     }
@@ -130,7 +133,17 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
       state: '문서', size: todos.length ? `할 일 ${todos.filter((b) => b.done).length}/${todos.length}` : `블록 ${x.blocks.length}`, note: x.updated,
     }
   })
-  const all = kind === 'spec' ? specRows : kind === 'doc' ? docRows : [...specRows, ...docRows]
+  // 작성일 최신순: 문서는 만든 시각(예전 문서는 고친 시각), 기획서는 그 기획서가 처음 나온 활동 시각 ("MM-DD HH:mm")
+  const firstAct = (id: string) => s.activity.reduce((m, x) => (x.text.includes(id) && x.t && (!m || x.t < m) ? x.t : m), '')
+  const timeOf = (r: ListRow) => {
+    if (r.kind !== 'spec') { const x = s.docs.find((y) => y.id === r.id); return x?.created || firstAct(r.id) || x?.updated || '' }
+    return firstAct(r.id)
+  }
+  const num = (id: string) => Number(id.split('-')[1]) || 0
+  const newest = (xs: ListRow[]) => xs.map((r) => ({ r, t: timeOf(r) })).sort((a, b) => (a.t === b.t ? num(b.r.id) - num(a.r.id) : a.t < b.t ? 1 : -1)).map((x) => x.r)
+  const planRows = docRows.filter((r) => r.kind === 'plan')
+  const plainDocs = docRows.filter((r) => r.kind === 'doc')
+  const all = newest(kind === 'spec' ? [...specRows, ...planRows] : kind === 'doc' ? plainDocs : [...specRows, ...docRows])
   const pg = usePage(all, 10)
   const newDoc = () => { d({ type: 'newDoc', title: '' }); go(toPath(`docs/${nextDocId(s)}`)) }
   const toast = useToast()
@@ -146,7 +159,7 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
     <div className="sl-wrap">
       <div className="sl-top">
         <div className="seg-toggle" role="group" aria-label="종류">
-          {([['all', `전체 ${specRows.length + docRows.length}`], ['spec', `기획서 ${specRows.length}`], ['doc', `문서 ${docRows.length}`]] as const).map(([k, label]) => (
+          {([['all', `전체 ${specRows.length + docRows.length}`], ['spec', `기획서 ${specRows.length + planRows.length}`], ['doc', `문서 ${plainDocs.length}`]] as const).map(([k, label]) => (
             <button key={k} type="button" aria-pressed={kind === k} onClick={() => { setKind(k); pg.setPage(0) }}>{label}</button>
           ))}
         </div>
@@ -164,21 +177,23 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
       </div>
       {!pg.rows.length ? <div className="empty"><b>없음</b></div> : (
         <div className="sl">
-          <div className="sl-head" aria-hidden><span>상태</span><span>제목</span><span>내용</span><span>배포 전 확인</span></div>
+          <div className="sl-head" aria-hidden><span>상태</span><span>제목</span><span>내용</span><span>작성일</span></div>
           <ol className="sl-list">
             {pg.rows.map((r) => {
               const nav = rowNav(r.href, `${r.id} 열기`)
               return (
                 <li key={r.key} {...nav} className={`sl-item ${nav.className ?? ''}`}>
-                  <span>{r.kind === 'spec' ? <State v={r.state} /> : <Tag>문서</Tag>}</span>
+                  <span>{r.kind === 'doc' ? <Tag>문서</Tag> : <State v={r.state} />}</span>
                   <span className="sl-title">
+                    {r.origin && <span className={`sl-origin${r.origin === '제안' ? ' prop' : ''}`} title={r.origin === '제안' ? '기획 제안에서 만든 기획서' : '요청에서 만든 기획서'}>{r.origin}</span>}
                     {r.from && <span className={`rq-dept d-${r.from}`}>{DEPT_NAME[r.from]}</span>}
                     <span className="mono muted sl-id">{r.id}</span>
                     <b title={r.title}>{r.title}</b>
                     {r.kind === 'spec' && r.note && <Tag tone="amber">{r.note}</Tag>}
+                    {r.tail && <Tag tone={r.tail.tone} title={r.tail.title}>{r.tail.label}</Tag>}
                   </span>
                   <span className="muted small">{r.size}</span>
-                  <span>{r.tail ? <Tag tone={r.tail.tone} title={r.tail.title}>{r.tail.label}</Tag> : <span className="muted small">{r.kind === 'doc' ? r.note : '—'}</span>}</span>
+                  <span className="muted small">{timeOf(r) || '—'}</span>
                 </li>
               )
             })}
@@ -186,6 +201,35 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
           <Pager {...pg} />
         </div>
       )}
+    </div>
+  )
+}
+
+// 기획 제안에서 만든 기획안(origin proposal) 위의 넘기기 줄: 자동 확정 없이 사람이 마케팅·개발 중 고른다.
+// 숏츠·배너 같은 제작물이면 마케팅을, 아니면 개발을 파란 버튼으로. 넘긴 뒤에는 어디로 갔는지만 보인다.
+const MARKETING_FORMATS = ['숏폼', '숏츠', '배너', '공지', 'SNS']
+const marketingFirst = (p: Proposal) => !!p.shortsFormat || [p.format].some((x) => x && MARKETING_FORMATS.some((k) => x.includes(k)))
+function PlanHandoff({ s, d, spec }: P & { spec: Spec }) {
+  const toast = useToast()
+  const p = (s.proposals ?? []).find((x) => x.spec === spec.id)
+  if (spec.origin !== PROPOSAL_ORIGIN || !p) return null
+  const flush = () => (document.activeElement as HTMLElement | null)?.blur()
+  const mk = marketingFirst(p)
+  return (
+    <div className="plan-handoff">
+      <span className="sl-origin prop">제안</span>
+      <a className="plain-link mono small" href={toPath(`proposals/${p.id}`)}>{p.id}</a>
+      {p.target && <span className="small">목표 <b>{p.target.value}</b> {p.target.label}</span>}
+      <span style={{ flex: 1 }} />
+      {proposalReady(p) ? (
+        <>
+          <span className="muted small">이 기획안을</span>
+          <Button size="small" variant={mk ? 'primary' : undefined} onClick={() => { flush(); d({ type: 'approveProposal', proposal: p.id }); toast.show(`${spec.id} → 마케팅`) }}>마케팅으로 넘기기</Button>
+          <Button size="small" variant={mk ? undefined : 'primary'} onClick={() => { flush(); d({ type: 'proposalToRequest', proposal: p.id }); toast.show(`${spec.id} → 개발`) }}>개발로 넘기기</Button>
+        </>
+      ) : p.status === '기획서로' ? <span className="small">개발로 넘김 · 작업 {s.tasks.filter((t) => t.spec === spec.id).length}개</span>
+        : p.handoff ? <span className="small">마케팅 {p.handoff.ok ? `받음${p.handoff.campaign ? ` · ${p.handoff.campaign}` : ''}` : '전달 실패'} · <a href={toPath(`proposals/${p.id}`)}>{p.status}</a></span>
+        : <span className="muted small">{p.status}</span>}
     </div>
   )
 }
@@ -210,7 +254,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
   const editable = true
   const parasEditable = spec.status !== '확정'
   const [answer, setAnswer] = useState('')
-  const save = (patch: { title?: string; problem?: string; goal?: string; paras?: Record<string, string> }) => {
+  const save = (patch: { title?: string; problem?: string; goal?: string; paras?: Record<string, string>; body_md?: string }) => {
     d({ type: 'editSpec', spec: spec.id, ...patch })
     toast.show(`${spec.id} 저장`)
   }
@@ -229,6 +273,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
             <li key={p.id}><button type="button" className={p.id === para?.id ? 'on' : ''} onClick={() => { if (linked(p.id)) setParaId(p.id); jump(`para-${p.id}`) }}>{p.id} {p.kind === 'req' ? '요구사항' : '완료 기준'}</button></li>
           ))}
           {spec.question && <li><button type="button" onClick={() => jump('sec-question')}>질문 1개 남음</button></li>}
+          <li><button type="button" onClick={() => jump('sec-free')}>자유 작성</button></li>
           <li><button type="button" onClick={() => jump('sec-decisions')}>결정 이력 {decisions.length}건</button></li>
           {thread && <li><a href={toPath(`talk/${thread.id}`)}>문서 스레드 열기</a></li>}
         </ul>
@@ -245,6 +290,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
         </div>
         {spec.status === '초안' && !xr && spec.question && <Notice tone="warn">빈 항목 질문이 남아 있습니다. 답이 오면 AI가 확정 조건(질문 없음·인사 경고 없음·근거 있음)을 다시 보고, 맞으면 바로 확정하고 아니면 AI 교차검증에 올립니다.</Notice>}
         {xr && <ReviewDecide d={d} spec={spec} xr={xr} />}
+        <PlanHandoff s={s} d={d} spec={spec} />
         {spec.status === '확정' && <ReleaseCheckBox d={d} spec={spec.id} />}
         <div className="doc-blocks">
           <h2 className="spec-h" id="sec-problem">문제</h2>
@@ -257,6 +303,10 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
           {spec.paras.filter((p) => p.kind === 'req').map(blockOf)}
           <h2 className="spec-h">완료 기준</h2>
           {spec.paras.filter((p) => p.kind === 'done').map(blockOf)}
+          <h2 className="spec-h" id="sec-free">자유 작성 <span className="muted small">마크다운 · 판단에는 안 씀</span></h2>
+          <textarea key={`md-${spec.id}-${spec.bodyMd ?? ''}`} className="blk-p spec-md" defaultValue={spec.bodyMd ?? ''} placeholder="배경, 참고 링크, 촬영·디자인 메모 등을 자유롭게 (## 제목, - 목록, > 인용)"
+            rows={Math.max(4, (spec.bodyMd ?? '').split('\n').length + 1)} aria-label="자유 작성"
+            onBlur={(e) => e.target.value !== (spec.bodyMd ?? '') && save({ body_md: e.target.value })} />
         </div>
         {spec.question && (
           <div className="question" id="sec-question">

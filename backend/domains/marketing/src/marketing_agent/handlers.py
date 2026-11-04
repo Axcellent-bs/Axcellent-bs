@@ -32,6 +32,7 @@ from ax_contracts.schemas import (
 )
 from marketing_agent import shop_client
 from marketing_agent.campaign import record_campaign_result, start_campaign
+from marketing_agent.campaign_cancel import cancel_campaign
 from marketing_agent.coupons import CouponLedger, SequenceGap, total_value
 from marketing_agent.notice import NoticeStore, make_draft
 from marketing_agent.schemas import (
@@ -408,4 +409,5 @@ HANDLERS = {
     "record_campaign_result": record_campaign_result,
     "draft_sns_post": draft_sns_post_skill,
     "check_sns_post": check_sns_post_skill,
+    "cancel_campaign": cancel_campaign,
 }

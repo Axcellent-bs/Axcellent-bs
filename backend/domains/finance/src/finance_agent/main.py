@@ -20,7 +20,7 @@ from ax_agent_template import events
 from ax_agent_template.events import subscribe
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
-from finance_agent import closing, exports, persist
+from finance_agent import closing, exports, persist, tax
 from finance_agent import finance_config as fc
 from finance_agent.finance_api import add_finance_api, run_export_cycle
 from finance_agent.handlers import (
@@ -39,8 +39,8 @@ from finance_agent.selftest import SELF_TEST_TTL_HOURS, is_fresh, run_self_test
 # 경로(`DECISION_PATHS`)만 POST·Authorization을 허용한다. A2A(`POST /a2a`)는 에이전트끼리만 쓴다
 DEFAULT_CORS_ORIGINS = "http://localhost:3001,http://127.0.0.1:3001"
 DECISION_PATHS = re.compile(
-    r"^/api/finance/(closing/confirm|reconciliation/[^/]+/note|settlements/batch"
-    r"|bank/statement|exports/run"
+    r"^/api/finance/(closing/confirm|closing/cancel|reconciliation/[^/]+/note|settlements/batch"
+    r"|bank/statement|exports/run|closing/adjust|tax/vat/confirm"
     r"|team-budget/[^/]+/approve)$"
 )
 
@@ -187,6 +187,8 @@ async def run_and_store_daily_closing(trigger: Trigger) -> dict[str, Any]:
     day = fc.today() - timedelta(days=1)
     confirmation = state().records.closings.get(closing_key("day", day))
     report = await closing.closing_report(books, "day", day, confirmation)
+    state().closing_drifts = closing.find_drifts(books, state().records.closings)
+    state().vat_drifts = tax.find_vat_drifts(books, state().records.vat_filings)
     stored = {
         "date": day.isoformat(),
         "report": report,

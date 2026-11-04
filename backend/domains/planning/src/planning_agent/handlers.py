@@ -23,6 +23,10 @@ from ax_contracts.schemas.planning import (
     CreateTicketOutput,
     DevResultInput,
     DevResultOutput,
+    ReceiveCampaignUpdateInput,
+    ReceiveCampaignUpdateOutput,
+    ReceiveInsightInput,
+    ReceiveInsightOutput,
     ReceivePlanningAnswerInput,
     ReceivePlanningAnswerOutput,
     RequestReleaseCheckInput,
@@ -212,10 +216,64 @@ async def request_release_check(request: AgentRequest) -> AgentResult:
     )
 
 
+async def receive_insight(request: AgentRequest) -> AgentResult:
+    """기획 제안 받기 (A, data·marketing → planning). 인사이트 한 건 → 제안 PROP-n (확인 대기)."""
+    try:
+        inp = ReceiveInsightInput.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    if not request.meta.idempotency_key:
+        return _missing_key(request)
+    try:
+        result = await get_service().receive_insight(requester=_requester(request), inp=inp)
+    except GateRefused as exc:
+        return _gate_rejected(request, exc)
+    out = ReceiveInsightOutput.model_validate(result.output)
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        outcome=out.outcome,
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(
+            data_summary=f"{out.proposal_id} {out.outcome} · {inp.skill} 근거 {len(inp.facts)}개",
+            ref_ids=[f"proposal:{out.proposal_id}"] + ([inp.ref] if inp.ref else []),
+        ),
+    )
+
+
+async def receive_campaign_update(request: AgentRequest) -> AgentResult:
+    """넘긴 제안의 진행·성과 (A, marketing → planning)."""
+    try:
+        inp = ReceiveCampaignUpdateInput.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    if not request.meta.idempotency_key:
+        return _missing_key(request)
+    try:
+        result = await get_service().receive_campaign_update(
+            inp=inp, requester=_requester(request)
+        )
+    except GateRefused as exc:
+        return _gate_rejected(request, exc)
+    out = ReceiveCampaignUpdateOutput.model_validate(result.output)
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        outcome=out.outcome,
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(
+            data_summary=f"{inp.proposal_id} {inp.stage} {out.outcome}",
+            ref_ids=[f"proposal:{inp.proposal_id}", f"campaign:{inp.campaign_id}"],
+        ),
+    )
+
+
 # 기획 서비스(planning 8101)가 받는 skill
 PLANNING_HANDLERS = {
     "create_ticket": create_ticket,
     "receive_dev_result": receive_dev_result,
     "receive_planning_answer": receive_planning_answer,
     "request_release_check": request_release_check,
+    "receive_insight": receive_insight,
+    "receive_campaign_update": receive_campaign_update,
 }

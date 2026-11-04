@@ -26,7 +26,7 @@ from typing import Any
 from finance_agent import bank, statements, tax
 from finance_agent import finance_config as fc
 from finance_agent.books import Books
-from finance_agent.rules import applied, load_rules, review_checklist_md
+from finance_agent.rules import applied, load_rules, review_checklist_docx
 
 logger = logging.getLogger("ax.finance.exports")
 
@@ -78,22 +78,29 @@ def vat_csv(pack: dict[str, Any]) -> str:
     return out.getvalue()
 
 
-def build_files(books: Books, month: str, last_day: date) -> dict[str, bytes]:
+def build_files(
+    books: Books,
+    month: str,
+    last_day: date,
+    closings: dict[tuple[str, str], dict[str, Any]] | None = None,
+    filings: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, bytes]:
     """파일 이름 → 내용. 이름은 코드가 정한다.
 
     분기 자료는 분기가 끝난 달의 묶음에만 넣는다. 진행 중인 분기는 주문마다 숫자가 바뀌어
     묶음이 계속 새 판이 되고 승인 요청이 반복된다.
     """
-    report = statements.income_statement(books, "month", last_day)
+    report = statements.income_statement(books, "month", last_day, closings)
     missing = list(books.unavailable)
     files = {
         f"income-statement-{month}.csv": statements.to_csv(report, missing).encode("utf-8-sig"),
         f"income-statement-{month}.xlsx": statements.to_xlsx(report, missing),
-        "expert-review-checklist.md": review_checklist_md().encode("utf-8"),
+        "expert-review-checklist.docx": review_checklist_docx(),
     }
     if last_day.month % 3 == 0:
-        pack = tax.vat_pack(books, last_day)
-        seller = tax.seller_report(books, last_day)
+        filing = (filings or {}).get(tax.filing_key(last_day))  # 확정한 분기는 확정 숫자를 낸다
+        pack = filing["pack"] if filing else tax.vat_pack(books, last_day)
+        seller = filing["seller_report"] if filing else tax.seller_report(books, last_day)
         quarter = f"{last_day.year}-Q{last_day.month // 3}"  # 파일 이름은 영문만
         files |= {
             f"vat-summary-{quarter}.csv": vat_csv(pack).encode("utf-8-sig"),
@@ -104,7 +111,11 @@ def build_files(books: Books, month: str, last_day: date) -> dict[str, bytes]:
 
 
 def make_package(
-    books: Books, exports: dict[str, dict[str, Any]], today: date | None = None
+    books: Books,
+    exports: dict[str, dict[str, Any]],
+    today: date | None = None,
+    closings: dict[tuple[str, str], dict[str, Any]] | None = None,
+    filings: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """지난달 묶음을 만든다. 내용이 같으면 그대로 두고, 달라지면 새 판으로 바꾼다."""
     today = today or fc.today()
@@ -123,13 +134,16 @@ def make_package(
             "status": "skipped",
             "reason": "FINANCE_EXPORT_DIR이 없다",
         }
-    files = build_files(books, month, last_day)
+    files = build_files(books, month, last_day, closings, filings)
     manifest = [
         {"name": name, "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()}
         for name, body in sorted(files.items())
     ]
     # 엑셀은 만들 때마다 내부 시각이 달라진다. 숫자가 같으면 같은 판으로 보려고 CSV만 비교한다
-    same_content = [f for f in manifest if not f["name"].endswith(".xlsx")]
+    # 확인 목록은 규칙 버전으로 비교한다. Word 파일도 만들 때마다 내부 시각이 달라진다
+    same_content = [f for f in manifest if not f["name"].endswith((".xlsx", ".docx"))] + [
+        load_rules().version
+    ]
     signature = hashlib.sha256(json.dumps(same_content, sort_keys=True).encode()).hexdigest()
     current = exports.get(package_id)
     if current and current["signature"] == signature:

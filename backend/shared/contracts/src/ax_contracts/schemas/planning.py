@@ -99,6 +99,70 @@ class ListInProgressOutput(AxModel):
     unavailable: str | None = None
 
 
+class ListDevOutcomesInput(AxModel):
+    """개발 작업 결과 (인사·총괄의 부서·에이전트 평가 근거, read).
+
+    `since`·`until`은 작업이 마지막으로 바뀐 시각 기준 (둘 다 없으면 전부).
+    `coder`: `agent`(서버 AI만) · 사람 이름(그 사람의 내 Claude가 가져간 작업만) · 없으면 전부."""
+
+    since: UtcDatetime | None = None
+    until: UtcDatetime | None = None
+    coder: str | None = None
+
+
+class DevOutcome(AxModel):
+    """코딩 작업 하나의 결과. 숫자는 개발 서비스 기록 그대로다 (받는 쪽이 다시 만들지 않는다).
+
+    - `mode`: agent = 서버 AI(회사 키·토큰을 셈),
+      subscription = 개발자 본인 Claude(토큰은 개인 구독이라 0)
+    - `coder`: 서버 AI면 모델 이름, 내 Claude면 가져간 사람 이름
+    - `complexity`: simple(바뀐 줄·파일이 적고 한 번에 통과) · complex · unknown(PR 없음)
+    - `review_mismatches`: 리뷰가 "불일치"로 돌려보낸 횟수, `attempts`: 코드를 쓴 횟수(첫 작성 1)
+    - `held`: 자동으로 못 가고 사람 확인을 거쳤는지 (관문 보류·자동 머지 멈춤)
+    """
+
+    task_id: str
+    spec_id: str
+    title: str
+    mode: Literal["agent", "subscription"]
+    coder: str | None = None
+    status: str
+    complexity: Literal["simple", "complex", "unknown"]
+    changed_lines: int | None = None
+    changed_files: int | None = None
+    attempts: int = 0
+    llm_calls: int = 0
+    llm_tokens: int = 0
+    review_mismatches: int = 0
+    held: bool = False
+    pr_number: int | None = None
+    merged: bool = False
+    merged_at: UtcDatetime | None = None
+    updated_at: UtcDatetime | None = None
+
+
+class DevOutcomeSummary(AxModel):
+    """`outcomes`를 코드로 센 값. 비율은 분모가 0이면 None (확인할 수 없음)."""
+
+    total: int
+    merged: int
+    failed: int
+    covered: int  # 앞 작업이 이미 반영해 PR 없이 끝남
+    by_mode: dict[str, int] = Field(default_factory=dict)
+    by_complexity: dict[str, int] = Field(default_factory=dict)
+    llm_tokens: int = 0  # 서버 AI가 쓴 토큰 합 (내 Claude는 0)
+    tokens_per_merged: float | None = None  # 서버 AI 토큰 ÷ 서버 AI 머지 건수
+    avg_attempts: float | None = None
+    first_pass_rate: float | None = None  # 리뷰 불일치 없이 머지된 비율 (머지된 것 중)
+    held_rate: float | None = None  # 사람 확인을 거친 비율
+
+
+class ListDevOutcomesOutput(AxModel):
+    outcomes: list[DevOutcome] = Field(default_factory=list)
+    summary: DevOutcomeSummary
+    collected_at: UtcDatetime  # 조회 시각 (근거)
+
+
 class VerifyHandoverInput(AxModel):
     handover_id: str
     owner_id: str  # `RosterEntry.member_id`
@@ -420,3 +484,119 @@ class ReceiveReleaseOrderOutput(AxModel):
         if self.outcome == "rejected" and not self.reason_code:
             raise ValueError("rejected면 reason_code가 있어야 한다")
         return self
+
+
+# ---- 기획 제안 (2026-11-04). 11/4 데이터분석(재현)·기획(예진) 합의
+#
+# 흐름: 데이터분석(인사이트 + 데이터 근거) → 기획(제안 + 실행 근거 + 목표) → 사람 확인(확정·폐기)
+#       → 마케팅 실행 또는 개발(요청) → 데이터분석 성과 측정 → 기획에 결과 기록
+# 원칙
+# 1. 수치는 데이터분석에서만 만든다. `facts`에 담아 보내고
+#    기획·마케팅은 다시 계산하지 않고 인용한다.
+# 2. 기획이 넣는 숫자는 목표치뿐이고 `target` 칸에 넣는다.
+# 3. `body_md`는 설명용. 판단은 `facts`/`target`만 본다. 본문 숫자가 둘에 없으면 경고한다.
+# 4. id로 끝까지 잇는다: insight_id → proposal_id → campaign_id → result
+# 5. 모든 메시지에 `schema_version`을 넣는다.
+#
+# 창구
+# - `receive_insight`: data(·marketing) → planning, A. 인사이트 한 건 → 기획 제안(PROP-n)
+# - data `trend_insight_brief`(read, 데이터분석이 만드는 중): 기획이 불러 인사이트 목록을 받는다
+# - data `campaign_effect`(read): 기획이 성과를 잴 때
+#   insight_id·proposal_id·campaign_id를 같이 보낸다
+# - `receive_campaign_brief`: planning → marketing, A (marketing이 자기 관문으로 실행)
+# - `receive_campaign_update`: marketing(게시) · data(성과) → planning, A
+
+PROPOSAL_SCHEMA_VERSION = "1"
+SchemaVersion = Literal["1"]
+
+
+class InsightFact(AxModel):
+    """데이터 근거 한 줄. 값은 보낸 쪽 코드가 낸 값 그대로."""
+
+    label: str = Field(min_length=1, max_length=120)  # 무엇 (예: "독서" 검색 작년 11월)
+    value: str = Field(min_length=1, max_length=80)  # 얼마 (예: 평균의 1.6배)
+    source: str = Field(min_length=1, max_length=60)  # 그 값을 낸 skill
+    link: str | None = Field(default=None, max_length=500)  # 출처 링크 (영상·검색 화면 등)
+
+
+class ProposalTarget(AxModel):
+    """기획이 정한 목표치 (기획이 넣는 유일한 숫자)."""
+
+    label: str = Field(min_length=1, max_length=120)  # 무엇을 (예: 캠페인 기간 주문 증분)
+    value: str = Field(min_length=1, max_length=80)  # 얼마나 (예: +10% 이상)
+    measure: str | None = Field(default=None, max_length=60)  # 잴 skill (예: campaign_effect)
+
+
+class ReceiveInsightInput(AxModel):
+    schema_version: SchemaVersion = PROPOSAL_SCHEMA_VERSION
+    insight_id: str = Field(min_length=1, max_length=80)  # 보낸 쪽 인사이트 id (재전송은 중복)
+    title: str = Field(min_length=1, max_length=120)
+    summary: str = Field(min_length=1, max_length=400)  # 무엇을 발견했는지 한두 문장
+    skill: str = Field(min_length=1, max_length=60)  # 인사이트를 낸 skill
+    facts: list[InsightFact] = Field(
+        min_length=1, max_length=12
+    )  # 근거 없는 인사이트는 받지 않는다
+    products: list[str] = Field(default_factory=list, max_length=10)  # 관련 회사 상품 이름
+    audience: str | None = Field(default=None, max_length=60)  # 타깃 연령대 (예: 20대)
+    shorts_format: str | None = Field(default=None, max_length=60)  # 잘 맞는 숏츠 형식
+    generated_at: UtcDatetime | None = None  # 어느 시점 데이터 기준인지
+    body_md: str | None = Field(default=None, max_length=8000)  # 설명 (마크다운)
+
+
+class ReceiveInsightOutput(AxModel):
+    schema_version: SchemaVersion = PROPOSAL_SCHEMA_VERSION
+    outcome: Literal["created", "duplicate"]
+    proposal_id: str  # PROP-n
+
+
+class CampaignBriefInput(AxModel):
+    """기획 → 마케팅: 사람이 확정한 제안 (marketing `receive_campaign_brief`)."""
+
+    schema_version: SchemaVersion = PROPOSAL_SCHEMA_VERSION
+    proposal_id: str
+    insight_id: str | None = None
+    title: str
+    idea: str  # 무엇을 할지
+    why: str  # 왜 해야 하는지 (facts 인용)
+    facts: list[InsightFact] = Field(default_factory=list)
+    target: ProposalTarget | None = None
+    products: list[str] = Field(default_factory=list)
+    format: str | None = None
+    approved_by: str  # 확정한 사람
+    note: str | None = None
+    body_md: str | None = None
+
+
+class CampaignBriefOutput(AxModel):
+    schema_version: SchemaVersion = PROPOSAL_SCHEMA_VERSION
+    outcome: Literal["accepted", "duplicate", "rejected"]
+    campaign_id: str | None = None  # 마케팅이 붙인 캠페인 id (accepted일 때)
+    reason_code: str | None = None  # rejected일 때
+
+
+class ReceiveCampaignUpdateInput(AxModel):
+    """게시(marketing)·성과(data)를 기획에 기록한다. 성과 숫자는 data가 낸 `facts` 그대로."""
+
+    schema_version: SchemaVersion = PROPOSAL_SCHEMA_VERSION
+    proposal_id: str
+    campaign_id: str
+    stage: Literal["published", "result"]
+    direction: Literal["늘었음", "같음", "줄었음", "확인 불가"] | None = None  # result일 때
+    summary: str | None = Field(default=None, max_length=200)  # result일 때
+    facts: list[InsightFact] = Field(default_factory=list, max_length=12)  # result 숫자 (data)
+    # 아래는 published 때 마케팅이 채운다 (선택, 저장만)
+    insight_id: str | None = Field(default=None, max_length=80)  # 받은 brief의 insight_id
+    channel: str | None = Field(default=None, max_length=40)  # 게시 채널 (banner·sns 등)
+    published_at: UtcDatetime | None = None
+    post_ref: str | None = Field(default=None, max_length=120)  # 게시물 id
+
+    @model_validator(mode="after")
+    def _result_has_direction(self) -> ReceiveCampaignUpdateInput:
+        if self.stage == "result" and (self.direction is None or not self.summary):
+            raise ValueError("result면 direction·summary가 있어야 한다")
+        return self
+
+
+class ReceiveCampaignUpdateOutput(AxModel):
+    schema_version: SchemaVersion = PROPOSAL_SCHEMA_VERSION
+    outcome: Literal["applied", "duplicate", "unknown_proposal"]

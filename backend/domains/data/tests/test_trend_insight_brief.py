@@ -341,3 +341,128 @@ def test_shorts_format_values_come_from_shorts_stats_at_the_same_time(tmp_path: 
     lol = next(i for i in out.insights if i.topic == "리그오브레전드")
     assert lol.shorts_format == "챌린지" and lol.shorts_format_samples == 9  # 숏츠 통계 표본 수
     assert lol.shorts_format_median_views == 12000.0 and lol.shorts_format_at == NOW
+
+
+# ------------------------------------------------ 숏츠 형식 단계 (주제 → 카테고리 → 전체)
+
+
+def _shorts_stats(cat_formats: dict[str, int] | None, cat_status: str = "known"):  # noqa: ANN202
+    from ax_contracts.schemas.data import ShortsFormatCount, ShortsGroup, ShortsStatsOutput
+
+    by_category = []
+    if cat_formats is not None:
+        by_category.append(ShortsGroup(
+            name="IT", status=cat_status, reason=None if cat_status == "known" else "표본 부족",
+            count=sum(cat_formats.values()),
+            formats=[ShortsFormatCount(name=k, count=v) for k, v in cat_formats.items()],
+        ))  # fmt: skip
+    return ShortsStatsOutput(status="known", snapshot_at=NOW, by_category=by_category, by_format=[
+        ShortsGroup(name="리액션", count=4, median_views=500.0),
+        ShortsGroup(name="정보·팁", count=7, median_views=300.0),
+        ShortsGroup(name="unknown", count=20),
+        ShortsGroup(name="기타", count=30),  # 목록 밖 형식은 카테고리·전체 단계에서 고르지 않는다
+    ])  # fmt: skip
+
+
+def test_shorts_format_stage_topic_first() -> None:
+    p = POPULAR.items[1]  # 리그오브레전드: 근거 숏츠 2개 모두 챌린지
+    got = brief.shorts_format(p, "게임", _shorts_stats({"정보·팁": 5}))
+    assert (got.format, got.source, got.count, got.total) == ("챌린지", "topic", 2, 2)
+    assert got.reason is None
+
+
+def test_shorts_format_falls_back_to_category_then_all() -> None:
+    p = POPULAR.items[2]  # 문구 하울(IT): 근거 숏츠 없음
+    got = brief.shorts_format(p, "IT", _shorts_stats({"정보·팁": 5, "리액션": 2}))
+    assert (got.format, got.source, got.count, got.total) == ("정보·팁", "category", 5, 7)
+    assert "카테고리 숏츠 통계에서 고름" in (got.reason or "")
+    # 카테고리 표본이 부족하면 전체에서 가장 많은 형식 (분류 못 한 형식은 빼고)
+    low = brief.shorts_format(p, "IT", _shorts_stats({"리액션": 2}, cat_status="unknown"))
+    assert (low.format, low.source, low.count, low.total) == ("정보·팁", "all", 7, 41)
+    assert "IT 숏츠 표본 부족" in (low.reason or "")
+    none = brief.shorts_format(None, None, _shorts_stats(None))  # 지금 인기에 없는 주제·분류 미정
+    assert none.source == "all" and "카테고리 미정" in (none.reason or "")
+
+
+def test_shorts_format_without_stats_says_why() -> None:
+    got = brief.shorts_format(POPULAR.items[2], "IT", None)
+    assert got.format is None and got.source is None
+    assert "숏츠 통계로 채우지 못함" in (got.reason or "")
+
+
+def test_brief_fills_shorts_format_from_category_with_source_and_samples(tmp_path: Path) -> None:
+    out = asyncio.run(
+        brief.make_brief(
+            TrendInsightBriefRequest(), BriefLLM(), env=_env(tmp_path, "max_insights = 4\n"),
+            popular=POPULAR, popular_reason=None, rising=[_rising("다이어리", 3.0)],
+            age_fn=_ages([]), promo=None, catalog=CATALOG, now=NOW,
+            shorts=_shorts_stats({"정보·팁": 5, "리액션": 2}),
+        )
+    ).output  # fmt: skip
+    by = {i.topic: i for i in out.insights}
+    lol, haul, diary = by["리그오브레전드"], by["문구 하울"], by["다이어리"]
+    assert lol.shorts_format_source == "topic" and lol.shorts_format_source_count == 2
+    assert haul.shorts_format == "정보·팁" and haul.shorts_format_source == "category"
+    assert (haul.shorts_format_source_count, haul.shorts_format_source_total) == (5, 7)
+    assert haul.shorts_format_samples == 7 and haul.shorts_format_median_views == 300.0
+    assert diary.shorts_format_source == "category"  # 급상승 주제도 분류(IT)로 카테고리 단계
+    news = by["한국철강"]  # 뉴스·사건 숏츠 통계 없음 → 전체
+    assert news.shorts_format_source == "all" and news.shorts_format == "정보·팁"
+
+
+# ------------------------------------------------ 연령대 전체 (trend_age 결과 재사용)
+
+
+def test_every_insight_carries_all_age_bands_without_extra_calls(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    async def ages(keywords: list[str]) -> TrendAgeOutput:
+        calls.append(list(keywords))
+        bands = [
+            AgeBandTrend(band="10대", status="normal", ratio=1.1),
+            AgeBandTrend(band="20대", status="rising", ratio=2.4),
+            AgeBandTrend(band="30대", status="unknown", reason="빈 시계열"),
+        ]
+        items = [AgeTopic(keyword=k, status="known", top_band="20대", top_ratio=2.4, bands=bands)
+                 for k in keywords if k == "리그오브레전드"]  # fmt: skip
+        return TrendAgeOutput(status="known", items=items)
+
+    out, _ = _run(tmp_path, BriefLLM(), ages=ages)
+    assert len(calls) == 1  # 연령대 전체도 브리프가 이미 부른 trend_age 한 번에서
+    lol = next(i for i in out.insights if i.topic == "리그오브레전드")
+    assert [(b.band, b.ratio, b.status) for b in lol.age_bands] == [
+        ("10대", 1.1, "normal"), ("20대", 2.4, "rising"), ("30대", None, "unknown"),
+    ]  # fmt: skip
+    assert lol.age_bands[2].reason == "빈 시계열" and lol.target_age == "20대"
+    news = next(i for i in out.insights if i.topic == "한국철강")
+    assert news.age_bands == [] and news.target_age_reason  # 연령대를 받지 못하면 빈 목록 + 이유
+
+
+# ------------------------------------------------ 기회 가설 카드 (선택 칸)
+
+
+def test_brief_attaches_opportunity_cards_or_says_why(tmp_path: Path) -> None:
+    from data_agent.skills.domain_opportunity import OpportunityResult
+
+    async def none_fn():  # noqa: ANN202
+        return OpportunityResult([], "수집 계획이 없음 (LLM 설정이 없음)", None, [])
+
+    async def broken():  # noqa: ANN202
+        raise RuntimeError("down")
+
+    def run(fn, sub: str):  # noqa: ANN001, ANN202
+        return asyncio.run(
+            brief.make_brief(
+                TrendInsightBriefRequest(), BriefLLM(), env=_env(tmp_path / sub), popular=POPULAR,
+                popular_reason=None, rising=[], age_fn=_ages([]), promo=None, catalog=CATALOG,
+                now=NOW, opportunities_fn=fn,
+            )
+        ).output  # fmt: skip
+
+    out = run(none_fn, "a")
+    assert out.opportunities == [] and out.opportunities_reason.startswith("수집 계획이 없음")
+    assert "source_plan" in out.sources and out.insights  # 인사이트는 그대로
+    bad = run(broken, "b")
+    assert bad.opportunities_reason == "기회 가설 카드를 만들지 못함 (RuntimeError)"
+    plain = run(None, "c")
+    assert plain.opportunities_reason == "기회 가설 카드를 요청하지 않음"

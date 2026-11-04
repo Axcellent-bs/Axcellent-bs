@@ -118,13 +118,14 @@ export const SERVICES: Service[] = [
     desc: '팀 이동·입사·퇴사를 기록하고 확정합니다. 확정한 기록으로 센 팀별 인원이 재무 AI의 팀 예산에 쓰입니다.',
   },
   {
-    id: 'planning', agent: 'planning', family: 'product', name: '요청·기획서', by: 'AXcellent', Icon: IconPlan, entry: '/planning/requests', paths: ['/planning'],
+    id: 'planning', agent: 'planning', family: 'product', name: '요청·기획서', by: 'AXcellent', Icon: IconPlan, entry: '/planning/home', paths: ['/planning'],
     desc: '들어온 요청을 정리해 기획서로 만들고, 결과를 요청한 곳에 알립니다.',
     // 화면 안 메뉴(pages/Planning.tsx SECTIONS)를 사이드바 하위 탭으로 연다
     children: [
+      { href: '/planning/home', label: '홈' },
       { href: '/planning/requests', label: '요청' },
+      { href: '/planning/proposals', label: '기획 제안' },
       { href: '/planning/work', label: '문서·기획서' },
-      { href: '/planning/agents', label: '에이전트 대화' },
     ],
   },
   {
@@ -134,7 +135,6 @@ export const SERVICES: Service[] = [
     children: [
       { href: '/dev/tasks', label: '작업 현황' },
       { href: '/dev/work', label: '작업' },
-      { href: '/dev/agents', label: '에이전트 대화' },
       { href: '/dev/metrics', label: '지표' },
     ],
   },
@@ -148,7 +148,7 @@ export const SERVICES: Service[] = [
 export const agentName = (s: Service) => AGENTS.find((g) => g.id === s.agent)?.name
 
 /** 서비스를 고르지 않아도 모두 쓰는 화면. 할 일함은 꺼진 서비스로 가던 일이 사람에게 쌓이는 곳이라 어느 서비스를 샀든 보인다 */
-export const SHARED_PATHS = ['/handoffs', '/agents/chat', '/agents/office']
+export const SHARED_PATHS = ['/handoffs', '/agents/chat', '/agents/office', '/connections']
 
 export const matchPath = (base: string, path: string) =>
   base === '/' ? path === '/' : path === base || path.startsWith(`${base}/`)

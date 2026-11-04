@@ -30,7 +30,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from data_agent.connectors import ConnectorUnavailable
+from data_agent.connectors import ConnectorUnavailable, replay
 
 DEFAULT_URL = "https://www.googleapis.com/youtube/v3"
 URL_ENV = "AX_YOUTUBE_API_URL"
@@ -38,7 +38,7 @@ KEY_ENV = "YOUTUBE_API_KEY"
 TIMEOUT_SECONDS = 15.0
 PAGE_SIZE = 50  # videos.list 한 번에 최대 50개
 MAX_POPULAR_PAGES = 4  # mostPopular는 200개까지 준다
-COST = {"videos": 1, "search": 100, "channels": 1}  # 문서 단가 (단위)
+COST = {"videos": 1, "search": 100, "channels": 1, "videoCategories": 1}  # 문서 단가 (단위)
 QUOTA_REASONS = frozenset({"quotaExceeded", "dailyLimitExceeded", "rateLimitExceeded"})
 
 _client: httpx.AsyncClient | None = None  # 테스트가 `use_client`로 바꿔 끼운다
@@ -145,6 +145,23 @@ class _ChannelPage(BaseModel):
     items: list[_Channel] = Field(default_factory=list)
 
 
+class _CategorySnippet(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    title: str
+    assignable: bool = True
+
+
+class _Category(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    snippet: _CategorySnippet
+
+
+class _CategoryPage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    items: list[_Category]
+
+
 class _SearchId(BaseModel):
     model_config = ConfigDict(extra="ignore")
     videoId: str | None = None  # noqa: N815
@@ -197,6 +214,8 @@ class YouTubeConnector:
         self._key = env.get(KEY_ENV) or ""
         self._client = client
         self.quota_used = 0
+        self._env = env
+        self.mode = replay.mode(env)  # live · record · replay (README "외부 호출 없이 확인하기")
         self.next_page_tokens: dict[str, str | None] = {}  # 숏츠 검색 카테고리마다 다음 페이지
 
     def __repr__(self) -> str:  # 키를 담지 않는다
@@ -234,6 +253,12 @@ class YouTubeConnector:
             out.extend(_stat(v) for v in page.items)
         return out
 
+    async def video_categories(self, region: str = "KR", hl: str = "ko") -> dict[str, str]:
+        """그 지역 영상 카테고리 id → 이름 (videoCategories.list, 1단위). 지정할 수 있는 것만."""
+        params = {"part": "snippet", "regionCode": region, "hl": hl}
+        page = _parse(_CategoryPage, await self._get("videoCategories", params), "영상 카테고리")
+        return {c.id: c.snippet.title for c in page.items if c.snippet.assignable}
+
     async def channels(self, ids: Sequence[str]) -> dict[str, int | None]:
         """채널 id → 구독자 수 (channels.list, 50개씩 1단위). 숨김은 None, 없는 채널은 빠진다."""
         unique = list(dict.fromkeys(i for i in ids if i))
@@ -261,6 +286,36 @@ class YouTubeConnector:
             "publishedAfter": published_after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
         page = _parse(_SearchPage, await self._get("search", params), "검색")
+        ids = [item.id.videoId for item in page.items if item.id.videoId]
+        return await self.videos(ids) if ids else []
+
+    async def search_query_shorts(
+        self,
+        query: str,
+        published_after: datetime,
+        region: str = "KR",
+        language: str | None = None,
+        max_results: int = PAGE_SIZE,
+    ) -> list[VideoStat]:
+        """검색어로 짧은 영상(4분 미만, `videoDuration=short`) 검색 → 결과 영상의 통계.
+
+        조회수 순, 최근 게시. `language`(예: ko)는 `relevanceLanguage`(앞에 둘 뿐 거르지 않음).
+        검색 100단위 + 통계 1단위(50개마다). 숏츠 길이 기준은 부르는 쪽이 `duration_seconds`로
+        거른다.
+        """
+        params = {
+            "part": "snippet",
+            "q": query,
+            "type": "video",
+            "videoDuration": "short",
+            "regionCode": region,
+            "order": "viewCount",
+            "maxResults": max(1, min(max_results, PAGE_SIZE)),
+            "publishedAfter": published_after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        if language:
+            params["relevanceLanguage"] = language
+        page = _parse(_SearchPage, await self._get("search", params), "숏츠 검색")
         ids = [item.id.videoId for item in page.items if item.id.videoId]
         return await self.videos(ids) if ids else []
 
@@ -329,6 +384,14 @@ class YouTubeConnector:
         return await self.videos(ids) if ids else []
 
     async def _get(self, resource: str, params: dict[str, Any]) -> Any:
+        if self.mode == "replay":  # 저장된 응답만 (할당량을 세지 않는다)
+            return replay.load("youtube", f"{self.url}/{resource}", params, self._env)
+        payload = await self._get_live(resource, params)
+        if self.mode == "record":
+            replay.save("youtube", f"{self.url}/{resource}", params, payload, self._env)
+        return payload
+
+    async def _get_live(self, resource: str, params: dict[str, Any]) -> Any:
         if not self._key:
             raise ConnectorUnavailable(
                 "UNAUTHORIZED", f"{KEY_ENV}가 없어 YouTube Data API를 부를 수 없다"

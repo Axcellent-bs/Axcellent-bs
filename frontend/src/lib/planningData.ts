@@ -9,6 +9,7 @@
 //   - 교차검증 뒤 머지 → 관찰 기간 장애·revert 없음 → 같은 경로 N건이면 기준 제안·백테스트 → 안전 장치 안 재무 AI, 밖 사람(태윤) 승인 → 정식.
 //   - 되돌릴 수 없는 일(IRREVERSIBLE)은 교차검증 대신 항상 사람이 확인한다.
 //   - 사람은 사후 감사 화면에서 AI가 스스로 승인한 건을 보고, 기준을 바로 끌 수 있다.
+import { PROPOSAL_ACTIONS, PROPOSAL_ORIGIN, SEED_PROPOSALS, proposalOpen, proposalReady, reduceProposals, type Proposal, type ProposalAction } from './proposals'
 
 export type Dept =
   | 'planning' | 'dev' | 'hr' | 'support' | 'marketing' | 'data' | 'finance'
@@ -74,6 +75,7 @@ export interface Spec {
   confirmedBy?: Approver
   origin?: string // 'dev_team' = 개발팀이 직접 넣은 기획
   hrCheck?: 'ok' | 'warn' | 'unknown' // 인사 ② check_plan 실제 결과 (없으면 묻지 않음)
+  bodyMd?: string // 자유 작성 칸 (마크다운). 판단·대조에는 안 씀
 }
 
 export type TaskState = '진행 중' | 'PR 검수' | '머지 대기' | '완료' | 'C 보류'
@@ -158,7 +160,7 @@ export interface Thread { id: string; on: string; title: string; messages: Messa
 
 // 정리 문서: 요청·기획서·작업·PR·대화·결정을 한 장으로 모으고 사람이 고친다
 export interface DocBlock { id: string; kind: 'h2' | 'p' | 'todo' | 'ref'; text: string; done?: boolean }
-export interface Doc { id: string; title: string; about?: string; updated: string; blocks: DocBlock[]; by?: 'ai' | 'human' }
+export interface Doc { id: string; title: string; about?: string; updated: string; created?: string; blocks: DocBlock[]; by?: 'ai' | 'human' }
 
 export interface Decision { id: string; spec: string; text: string; reason: string; alternatives: string; from: string; sentToHr: boolean; hrRecord?: 'ok' | 'failed' | 'held' }
 
@@ -316,6 +318,7 @@ export interface State {
   firstPrMinutes: number[]
   autoPolicy: AutoPolicy
   chats?: ChatThread[] // AI와 대화 (dev 서비스 SSE에 있을 때만)
+  proposals?: Proposal[] // 기획 제안 (데이터분석·마케팅 인사이트 → 제안 → 마케팅)
 }
 
 // ---- AI와 대화: 개발 에이전트와 대화하다 필요한 것이 모이면 코딩 작업을 시작한다
@@ -394,6 +397,7 @@ function exampleTarget(paths: string, status: RepoTarget['status'] = 'approved')
 export const initialState: State = {
   seq: 0,
   outbox: [],
+  proposals: SEED_PROPOSALS,
   requests: [
     { id: 'REQ-8', ctx: 'ctx_req_0008', from: 'support', via: 'create_ticket', title: '도서 상세의 출간일 표기 오타 수정', evidence: '같은 문의 3건 (고객지원 문의 분류)', state: '완료', spec: 'SPEC-4',
       auto: { ok: true, reasons: ['결제·주문·개인정보 경로 아님', '화면 표시만 바꾸는 요청', '인사 ② 기각 이력 없음', '예상 변경 4줄·1파일 · 기준 AR-1(shop-web/ 30줄·2파일 이하 · 경고 없음) 안 → 자동 머지'] } },
@@ -596,6 +600,7 @@ export type InboundKind =
   | 'support_simple' | 'marketing_simple' | 'finance_irreversible'
 
 export type Action =
+  | ProposalAction
   | { type: 'inbound'; kind: InboundKind }
   | { type: 'send'; to: Dept; point: string; text: string }
   | { type: 'markRead'; to: Dept }
@@ -613,7 +618,7 @@ export type Action =
   | { type: 'importNotion'; url: string } // 노션 페이지를 문서로 가져오기 (서버에서만, 예시 모드는 그대로)
   | { type: 'pauseRequest'; request: string; reason?: string } // 사람이 요청을 중단
   | { type: 'resumeRequest'; request: string } // 중단한 요청 재개
-  | { type: 'editSpec'; spec: string; title?: string; problem?: string; goal?: string; paras?: Record<string, string> } // 확정 전 기획서를 사람이 고침 (칸에서 벗어날 때 저장)
+  | { type: 'editSpec'; spec: string; title?: string; problem?: string; goal?: string; paras?: Record<string, string>; body_md?: string } // 확정 전 기획서를 사람이 고침 (칸에서 벗어날 때 저장)
   | { type: 'sendReleaseOrder'; check: string; note?: string } // 배포 전 대조가 사람 확인이면 사람이 배포 지시
   // 교차검증·학습 기준·사람 확인
   | { type: 'decideReview'; review: string } // 시연: 검증자(다른 부서)가 판단
@@ -1351,7 +1356,7 @@ function talkAndDocs(s: State, a: Action): State | null {
       return { ...s, docs: s.docs.filter((x) => x.id !== a.doc) }
     case 'newDoc': {
       const id = nextDocId(s)
-      return { ...s, docs: [...s.docs, { id, title: a.title || '제목 없는 문서', updated: now(), blocks: [{ id: 'b1', kind: 'p', text: '' }] }] }
+      return { ...s, docs: [...s.docs, { id, title: a.title || '제목 없는 문서', updated: now(), created: now(), blocks: [{ id: 'b1', kind: 'p', text: '' }] }] }
     }
     case 'gatherDoc': {
       const r = s.requests.find((x) => x.id === a.about)
@@ -1360,7 +1365,7 @@ function talkAndDocs(s: State, a: Action): State | null {
       const blocks = gatherBlocks(s, a.about)
       return {
         ...s,
-        docs: [...s.docs, { id, title: `${r.id} 관련 정리 · ${r.title}`, about: r.id, updated: now(), blocks, by: a.by ?? 'human' }],
+        docs: [...s.docs, { id, title: `${r.id} 관련 정리 · ${r.title}`, about: r.id, updated: now(), created: now(), blocks, by: a.by ?? 'human' }],
         activity: [...s.activity, { t: now(), ctx: r.ctx, from: a.by === 'ai' ? 'planning' : 'human', to: 'planning', point: 'gather_doc', kind: a.by === 'ai' ? 'A2A' : '사람', grade: 'read', text: `${a.by === 'ai' ? 'AI 어시스턴트 요청으로 ' : ''}${r.id}에 걸린 문서·작업·PR·대화·결정을 ${id}로 정리 (블록 ${blocks.length}개)` }],
       }
     }
@@ -1378,7 +1383,62 @@ function talkAndDocs(s: State, a: Action): State | null {
   return null
 }
 
+function proposalsOf(s: State, a: ProposalAction): State {
+  const xs = s.proposals ?? []
+  const p = 'proposal' in a ? xs.find((x) => x.id === a.proposal) : undefined
+  if (a.type === 'makePlan') {
+    if (!p || !proposalOpen(p)) return s
+    const n = Math.max(0, ...s.requests.map((r) => Number(r.id.split('-')[1]) || 0)) + 1
+    const reqId = `REQ-${n}`
+    const ctx = `ctx_req_${String(n).padStart(4, '0')}`
+    const specId = `SPEC-${Math.max(0, ...s.specs.map((x) => Number(x.id.split('-')[1]) || 0)) + 1}`
+    const extra = [p.format, p.shortsFormat, ...p.products].filter(Boolean).join(' · ')
+    const paras: Para[] = [
+      { id: 'R1', kind: 'req', text: p.idea },
+      ...(extra ? [{ id: 'R2', kind: 'req' as const, text: `형식·상품: ${extra}` }] : []),
+      { id: 'C1', kind: 'done', text: p.target ? `${p.target.label} ${p.target.value}${p.target.measure ? ` (${p.target.measure}로 잰다)` : ''}` : '성과를 잴 기준을 정한다' },
+    ]
+    const body = [`> ${DEPT_NAME[p.from]} 인사이트: ${p.insight}`, ...(p.audience ? [`> 타깃: ${p.audience}`] : []), ...(p.bodyMd ? ['', p.bodyMd] : [])].join('\n')
+    return {
+      ...s,
+      proposals: xs.map((x) => (x.id === p.id ? { ...x, status: '기획안' as const, spec: specId, request: reqId } : x)),
+      requests: [...s.requests, { id: reqId, ctx, from: p.from, via: `기획 제안 ${p.id}`, title: p.title, evidence: p.facts.map((f) => `${f.label} ${f.value}`).join(' · '), state: '기획 중', spec: specId }],
+      specs: [...s.specs, {
+        id: specId, title: p.title, request: reqId, status: '초안', problem: p.why, goal: p.target ? `${p.target.label} ${p.target.value}` : p.idea, paras,
+        basis: [...p.facts.map((f) => `${f.label} ${f.value} (${f.source})`), `기획 제안 ${p.id} · 인사이트 ${p.insightId ?? '-'}`], humanSentences: 0, origin: PROPOSAL_ORIGIN, bodyMd: body,
+      }],
+      activity: [...s.activity, { t: now(), ctx, from: 'human', to: 'planning', point: 'make_plan', kind: '사람', text: `${p.id} 확정 → 기획안 ${specId} (${reqId})` }],
+    }
+  }
+  if (a.type === 'proposalToRequest' && p?.spec && proposalReady(p)) {
+    // 기획안 → 개발: 그 기획서를 사람이 확정한 것으로 (작업 분할 → PR 흐름)
+    const confirmed = confirmSpecCore(s, p.spec, 'human', `${p.id} 기획안 → 개발`)
+    return { ...confirmed, proposals: (confirmed.proposals ?? xs).map((x) => (x.id === p.id ? { ...x, status: '기획서로' as const } : x)) }
+  }
+  if (a.type === 'proposalToRequest') {
+    if (!p || !(proposalOpen(p) || proposalReady(p))) return s
+    const n = Math.max(0, ...s.requests.map((r) => Number(r.id.split('-')[1]) || 0)) + 1
+    const id = `REQ-${n}`
+    const ctx = `ctx_req_${String(n).padStart(4, '0')}`
+    return {
+      ...s,
+      proposals: xs.map((x) => (x.id === p.id ? { ...x, status: '기획서로' as const, request: id } : x)),
+      requests: [...s.requests, { id, ctx, from: p.from, via: `기획 제안 ${p.id}`, title: p.title, evidence: [...p.facts.map((f) => `${f.label} ${f.value}`), ...(p.target ? [`목표 ${p.target.label} ${p.target.value}`] : [])].join(' · '), state: '접수' }],
+      activity: [...s.activity, { t: now(), ctx, from: 'human', to: 'planning', point: 'proposal_to_request', kind: '사람', text: `${p.id} → ${id} 요청으로 바꿈 (개발 필요)` }],
+    }
+  }
+  const proposals = reduceProposals(xs, a, now())
+  if (a.type === 'approveProposal' && p && (proposalOpen(p) || proposalReady(p))) {
+    // 기획안 → 마케팅: 기획서는 확정하되 개발 작업은 만들지 않는다 (마케팅이 실행)
+    const specs = p.spec ? s.specs.map((x) => (x.id === p.spec ? { ...x, status: '확정' as const, confirmedBy: 'human' as const } : x)) : s.specs
+    const requests = p.spec ? s.requests.map((r) => (r.spec === p.spec ? { ...r, state: '작업 중' as const } : r)) : s.requests
+    return { ...s, proposals, specs, requests, seq: s.seq + 1, activity: [...s.activity, { t: now(), ctx: `proposal:${p.id}`, from: 'planning', to: 'marketing', point: 'receive_campaign_brief', kind: 'A2A', grade: 'A', text: `${p.id} "${p.title}" 제안 전달 (근거 ${p.facts.length}개)` }] }
+  }
+  return { ...s, proposals }
+}
+
 function inner(s: State, a: Action): State {
+  if (PROPOSAL_ACTIONS.has(a.type)) return proposalsOf(s, a as ProposalAction)
   const talked = talkAndDocs(s, a)
   if (talked) return talked
   switch (a.type) {
@@ -1405,13 +1465,14 @@ function inner(s: State, a: Action): State {
       const spec = s.specs.find((x) => x.id === a.spec)
       if (!spec) return s
       // 확정 뒤에는 제목·문제·목표만 (요구사항·완료 기준은 작업·대조 기준)
-      if (spec.status === '확정' && Object.values(a.paras ?? {}).some((v) => v.trim())) return s
+      if (spec.status === '확정' && Object.values(a.paras ?? {}).some((v) => v.trim())) return s // 자유 작성 칸은 확정 뒤에도 고친다
       const title = a.title?.trim() ?? '', problem = a.problem?.trim() ?? '', goal = a.goal?.trim() ?? '', paras = a.paras ?? {}
       const changed = [
         ...(title && title !== spec.title ? ['제목'] : []),
         ...(problem && problem !== spec.problem ? ['문제'] : []),
         ...(goal && goal !== spec.goal ? ['목표'] : []),
         ...spec.paras.filter((p) => paras[p.id]?.trim() && paras[p.id].trim() !== p.text).map((p) => p.id),
+        ...(a.body_md !== undefined && a.body_md !== (spec.bodyMd ?? '') ? ['자유 작성'] : []),
       ]
       if (!changed.length) return s
       const req = s.requests.find((r) => r.id === spec.request)
@@ -1423,6 +1484,7 @@ function inner(s: State, a: Action): State {
           problem: problem || x.problem,
           goal: goal || x.goal,
           paras: x.paras.map((p) => (paras[p.id]?.trim() ? { ...p, text: paras[p.id].trim() } : p)),
+          bodyMd: a.body_md !== undefined ? a.body_md : x.bodyMd,
           humanSentences: x.humanSentences + changed.length,
         })),
         activity: [...s.activity, { t: now(), ctx: req?.ctx ?? `spec:${spec.id}`, from: 'human', to: 'planning', point: 'edit_spec', kind: '사람', text: `${spec.id} 사람이 고침 · ${changed.join(', ')}` }],
