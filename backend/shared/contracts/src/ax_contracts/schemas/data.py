@@ -1395,3 +1395,57 @@ class CampaignEffectOutput(AxModel):
     revenue: CampaignChange
     coupons: CampaignCoupons
     summary: str  # 한두 문장 (LLM, 숫자 검증 실패면 고정 문장)
+
+
+# ---------------------------------------------------------------- 연령대별 상승 (trend_age)
+
+AGE_NOTE = (
+    "네이버 값은 요청마다 최댓값이 100인 상대값이라 연령대끼리 검색량을 비교하지 않는다."
+    " 각 연령대 안에서 평소 대비 배수만 본다"
+)
+
+
+class TrendAgeRequest(AxModel):
+    """비우면 코드가 대상을 고른다(급상승·지금 인기 상위·시즌 키워드, 수는 회사 설정)."""
+
+    keywords: list[str] = Field(default_factory=list, max_length=30)
+    max_topics: int | None = Field(default=None, ge=1, le=30)
+
+
+class AgeBandTrend(AxModel):
+    """주제 하나의 연령대 하나: 그 연령대만 조회한 값으로 낸 판정 (trend_scan과 같은 함수)."""
+
+    band: str = Field(min_length=1)  # 회사 설정 이름 (예: 20대)
+    ages: list[str] = Field(default_factory=list)  # 네이버 연령 코드
+    status: TrendStatus
+    ratio: float | None = Field(default=None, ge=0)  # 그 연령대 평소 대비 배수
+    latest_value: float | None = Field(default=None, ge=0)
+    baseline_value: float | None = Field(default=None, ge=0)
+    reason: str | None = None  # unknown이면 이유
+
+
+class AgeTopic(AxModel):
+    keyword: str = Field(min_length=1)
+    keywords: list[str] = Field(default_factory=list)  # 네이버에 함께 보낸 이름
+    sources: list[Literal["popular", "rising", "season", "request"]] = Field(default_factory=list)
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = None  # unknown이면 이유 (예: 하루 호출 상한)
+    bands: list[AgeBandTrend] = Field(default_factory=list)
+    # 평소 대비 배수가 가장 큰 연령대 (급상승 판정 연령대가 있으면 그중). 모르면 None
+    top_band: str | None = None
+    top_ratio: float | None = Field(default=None, ge=0)
+
+
+class TrendAgeOutput(AxModel):
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = None
+    start_date: dt.date | None = None
+    end_date: dt.date | None = None
+    bands: list[str] = Field(default_factory=list)  # 설정 순서
+    items: list[AgeTopic] = Field(default_factory=list)
+    calls_used: int = Field(default=0, ge=0)  # 오늘 이 skill이 쓴 네이버 호출 수
+    call_cap: int = Field(default=0, ge=0)  # 하루 상한
+    cached: bool = False
+    note: str = AGE_NOTE
+    generated_at: UtcDatetime | None = None
+    summary: str = ""
