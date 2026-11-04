@@ -26,6 +26,7 @@ import sqlite3
 import statistics
 import threading
 import tomllib
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta, timezone
@@ -37,6 +38,7 @@ from pydantic import BaseModel, ValidationError
 from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
+    ShortsFormatCount,
     ShortsGroup,
     ShortsSearch,
     ShortsStatsOutput,
@@ -389,6 +391,15 @@ def group_stats(
             )
         velocity_reason = ", ".join(notes) or None
         top = sorted((s for s in mine if s.views is not None), key=lambda s: -(s.views or 0))
+        # 카테고리 그룹만: 그 카테고리 숏츠의 형식별 수 (브리프가 주제 숏츠가 없을 때 쓴다)
+        formats = (
+            [
+                ShortsFormatCount(name=f, count=n)
+                for f, n in Counter(s.format for s in mine if s.format != UNKNOWN).most_common()
+            ]
+            if key == "category"
+            else []
+        )
         if len(mine) < config.min_sample:
             out.append(
                 ShortsGroup(
@@ -399,6 +410,7 @@ def group_stats(
                     velocity_pending=pending,
                     velocity_reason=velocity_reason,
                     velocity_measuring=measuring,
+                    formats=formats,
                 )
             )
             continue
@@ -412,6 +424,7 @@ def group_stats(
                 velocity_pending=pending,
                 velocity_reason=velocity_reason,
                 velocity_measuring=measuring,
+                formats=formats,
                 median_views=round(statistics.median(views), 1) if views else None,
                 median_views_per_hour=round(statistics.median(speeds), 1) if speeds else None,
                 top=[

@@ -386,3 +386,18 @@ def test_searched_shorts_rechecked_too_soon_are_measuring(tmp_path: Path) -> Non
     later = _run_at(env, youtube, NOW + timedelta(hours=2))
     [g2] = later.by_format
     assert g2.velocity_measuring == 0 and g2.median_views_per_hour is not None
+
+
+def test_category_groups_count_formats() -> None:
+    from data_agent.skills import shorts_stats as ss
+
+    config = ss.ShortsConfig(min_sample=1)
+    items = [
+        ss._Short("a", "t", None, 10, None, (), "popular", category="IT", format="정보·팁"),
+        ss._Short("b", "t", None, 20, None, (), "popular", category="IT", format="정보·팁"),
+        ss._Short("c", "t", None, 30, None, (), "popular", category="IT", format="리액션"),
+        ss._Short("d", "t", None, 40, None, (), "popular", category="IT", format=ss.UNKNOWN),
+    ]
+    cat = ss.group_stats(items, "category", ["IT"], config)[0]
+    assert [(f.name, f.count) for f in cat.formats] == [("정보·팁", 2), ("리액션", 1)]
+    assert ss.group_stats(items, "format", ["정보·팁"], config)[0].formats == []
