@@ -138,7 +138,7 @@ async def test_cancel_registered_in_card() -> None:
     assert handlers.HANDLERS["cancel_campaign"] is campaign_cancel.cancel_campaign
     skill = {s.id: s for s in load_card().skills}["cancel_campaign"]
     assert skill.grade == "read"
-    assert list(skill.allowed_requesters) == ["orchestrator"]
+    assert list(skill.allowed_requesters) == ["orchestrator", "dashboard-api"]
 
 
 async def test_record_result_not_started_passes_through_once(

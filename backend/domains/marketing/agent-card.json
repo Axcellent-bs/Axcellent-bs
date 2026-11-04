@@ -15,7 +15,9 @@
       "input_schema": "agents/marketing/src/marketing_agent/schemas.py#DraftNoticeInput",
       "output_schema": "agents/marketing/src/marketing_agent/schemas.py#NoticeDraft",
       "grade": "read",
-      "allowed_requesters": ["orchestrator"],
+      "allowed_requesters": [
+        "orchestrator"
+      ],
       "verifier": null,
       "priority": "required"
     },
@@ -25,7 +27,9 @@
       "input_schema": "agents/marketing/src/marketing_agent/schemas.py#PublishNoticeInput",
       "output_schema": "agents/marketing/src/marketing_agent/schemas.py#PublishedNotice",
       "grade": "A",
-      "allowed_requesters": ["orchestrator"],
+      "allowed_requesters": [
+        "orchestrator"
+      ],
       "verifier": null,
       "priority": "required"
     },
@@ -35,7 +39,11 @@
       "input_schema": "agents/marketing/src/marketing_agent/schemas.py#GetNoticeInput",
       "output_schema": "agents/marketing/src/marketing_agent/schemas.py#NoticeView",
       "grade": "read",
-      "allowed_requesters": ["support", "finance", "orchestrator"],
+      "allowed_requesters": [
+        "support",
+        "finance",
+        "orchestrator"
+      ],
       "verifier": null,
       "priority": "required"
     },
@@ -45,7 +53,12 @@
       "input_schema": "agents/marketing/src/marketing_agent/schemas.py#ListActiveNoticesInput",
       "output_schema": "agents/marketing/src/marketing_agent/schemas.py#ActiveNotices",
       "grade": "read",
-      "allowed_requesters": ["support", "finance", "orchestrator", "data"],
+      "allowed_requesters": [
+        "support",
+        "finance",
+        "orchestrator",
+        "data"
+      ],
       "verifier": null,
       "priority": "recommended"
     },
@@ -55,7 +68,9 @@
       "input_schema": "agents/marketing/src/marketing_agent/schemas.py#IssueCouponInput",
       "output_schema": "agents/marketing/src/marketing_agent/schemas.py#IssuedCoupon",
       "grade": "A",
-      "allowed_requesters": ["support"],
+      "allowed_requesters": [
+        "support"
+      ],
       "verifier": null,
       "priority": "required"
     },
@@ -65,7 +80,10 @@
       "input_schema": "agents/marketing/src/marketing_agent/campaign.py#StartCampaignInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
       "grade": "B",
-      "allowed_requesters": ["orchestrator"],
+      "allowed_requesters": [
+        "orchestrator",
+        "dashboard-api"
+      ],
       "verifier": "finance",
       "priority": "recommended"
     },
@@ -75,7 +93,10 @@
       "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignResultInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
       "grade": "read",
-      "allowed_requesters": ["orchestrator"],
+      "allowed_requesters": [
+        "orchestrator",
+        "dashboard-api"
+      ],
       "verifier": null,
       "priority": "recommended"
     },
@@ -85,7 +106,9 @@
       "input_schema": "agents/marketing/src/marketing_agent/sns.py#DraftSnsPostInput",
       "output_schema": "agents/marketing/src/marketing_agent/sns.py#SnsPostDraft",
       "grade": "read",
-      "allowed_requesters": ["orchestrator"],
+      "allowed_requesters": [
+        "orchestrator"
+      ],
       "verifier": null,
       "priority": "optional"
     },
@@ -95,7 +118,10 @@
       "input_schema": "agents/marketing/src/marketing_agent/sns.py#CheckSnsPostInput",
       "output_schema": "agents/marketing/src/marketing_agent/sns.py#SnsPostCheck",
       "grade": "read",
-      "allowed_requesters": ["orchestrator", "safety"],
+      "allowed_requesters": [
+        "orchestrator",
+        "safety"
+      ],
       "verifier": null,
       "priority": "optional"
     },
@@ -105,7 +131,10 @@
       "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignCancelInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignCancelInput",
       "grade": "read",
-      "allowed_requesters": ["orchestrator"],
+      "allowed_requesters": [
+        "orchestrator",
+        "dashboard-api"
+      ],
       "verifier": null,
       "priority": "recommended"
     }

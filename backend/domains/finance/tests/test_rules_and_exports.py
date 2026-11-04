@@ -132,7 +132,12 @@ def test_package_is_written_once_and_new_version_on_change(
     calls = {"n": 0}
 
     def fake_files(
-        books: Any, month: str, last_day: date, closings: Any = None, filings: Any = None
+        books: Any,
+        month: str,
+        last_day: date,
+        closings: Any = None,
+        filings: Any = None,
+        other: Any = None,
     ) -> dict[str, bytes]:
         return {f"a-{month}.csv": f"{calls['n']}".encode()}
 
@@ -155,7 +160,12 @@ def test_excel_timestamps_alone_do_not_make_a_new_version(
     calls = {"n": 0}
 
     def fake_files(
-        books: Any, month: str, last_day: date, closings: Any = None, filings: Any = None
+        books: Any,
+        month: str,
+        last_day: date,
+        closings: Any = None,
+        filings: Any = None,
+        other: Any = None,
     ) -> dict[str, bytes]:
         calls["n"] += 1
         return {"a.csv": b"same", "a.xlsx": str(calls["n"]).encode()}

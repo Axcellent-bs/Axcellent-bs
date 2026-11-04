@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { finance, signedKrw, type StatementPeriod } from "@/lib/finance";
+import { useEffect, useState } from "react";
+import { finance, humanTokenSet, signedKrw, type OtherPnlInput, type StatementPeriod } from "@/lib/finance";
 import { AppliedRules, Panel, ResourceBody, useResource } from "./bits";
 
 // 재무제표: 일반 회사가 쓰는 손익계산서 순서(K-IFRS 기능별)로 당기·전기를 나란히 보여 주고 엑셀·CSV로 내려받는다.
@@ -18,7 +18,8 @@ export function StatementsSection({ tick }: { tick: number }) {
   const [period, setPeriod] = useState<StatementPeriod>("month");
   /** 비어 있으면 서버 기본값(오늘이 속한 기간) */
   const [date, setDate] = useState("");
-  const res = useResource(`statements:${period}:${date}`, () => finance.statements(period, date || null), tick);
+  const [saved, setSaved] = useState(0);
+  const res = useResource(`statements:${period}:${date}:${saved}`, () => finance.statements(period, date || null), tick);
   const [downloading, setDownloading] = useState<"csv" | "xlsx" | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -105,10 +106,77 @@ export function StatementsSection({ tick }: { tick: number }) {
               </dl>
             </div>
             <p className="text-sm text-ink-500">작성 기준: {s.basis}. 재무상태표·현금흐름표는 자산·부채·현금 잔액 장부가 없어 만들지 않습니다.</p>
+            {period === "month" && <OtherPnlForm month={s.current.from.slice(0, 7)} onSaved={() => setSaved((n) => n + 1)} />}
             <AppliedRules rules={s.applied_rules} />
           </div>
         )}
       </ResourceBody>
     </Panel>
+  );
+}
+
+const OTHER_FIELDS: { key: "salary" | "rent" | "other_sga" | "non_operating_income" | "non_operating_expense" | "income_tax"; label: string }[] = [
+  { key: "salary", label: "급여" },
+  { key: "rent", label: "임차료" },
+  { key: "other_sga", label: "그 밖의 판관비" },
+  { key: "non_operating_income", label: "영업외수익" },
+  { key: "non_operating_expense", label: "영업외비용" },
+  { key: "income_tax", label: "법인세 (세무사 확인값, 모르면 비움)" },
+];
+
+/** 쇼핑몰 장부에 없는 손익. 입력해야 재무제표 아래 칸이 계산된다. 지어내지 않으려고 자동으로 채우지 않는다 */
+function OtherPnlForm({ month, onSaved }: { month: string; onSaved: () => void }) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [locked, setLocked] = useState(false);
+  const [info, setInfo] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    finance.otherPnl(month).then((r) => {
+      if (!live) return;
+      const entry = r.data.entry;
+      setValues(Object.fromEntries(OTHER_FIELDS.map((f) => [f.key, entry?.[f.key] == null ? "" : String(entry[f.key])])));
+      setLocked(r.data.locked);
+      setInfo(entry ? `${entry.by} 입력` : null);
+    }).catch(() => { if (live) setProblem("입력값을 읽지 못했습니다."); });
+    return () => { live = false; };
+  }, [month]);
+
+  async function save() {
+    setBusy(true);
+    setProblem(null);
+    const num = (k: string) => Number(values[k] || 0);
+    const body: OtherPnlInput = {
+      month, salary: num("salary"), rent: num("rent"), other_sga: num("other_sga"),
+      non_operating_income: num("non_operating_income"), non_operating_expense: num("non_operating_expense"),
+      income_tax: values.income_tax ? Number(values.income_tax) : null,
+    };
+    try {
+      const r = await finance.saveOtherPnl(body);
+      setInfo(r.data.entry ? `${r.data.entry.by} 입력` : null);
+      onSaved();
+    } catch (e) { setProblem((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <details className="rounded-2xl border border-ink-100 px-4 py-3 text-sm">
+      <summary className="cursor-pointer font-semibold text-ink-900">{month} 장부 밖 손익 입력{info ? ` · ${info}` : ""}</summary>
+      <p className="mt-1 text-ink-500">급여·임차료·영업외손익은 쇼핑몰 장부에 없습니다. 월 합계를 원 단위로 넣으면 아래 칸이 계산됩니다. 입력하지 않으면 "자료 없음"입니다.</p>
+      {locked && <p className="mt-1 text-amber-800">확정한 달이라 고칠 수 없습니다. 차이는 결산 조정으로 처리합니다.</p>}
+      <div className="mt-2 grid gap-2 sm:grid-cols-3">
+        {OTHER_FIELDS.map((f) => (
+          <label key={f.key} className="block">
+            <span className="text-ink-700">{f.label}</span>
+            <input className="field mt-0.5 w-full" inputMode="numeric" disabled={locked} value={values[f.key] ?? ""}
+              onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value.replace(/[^0-9]/g, "") }))} />
+          </label>
+        ))}
+      </div>
+      <button className="btn-primary mt-3" disabled={locked || busy || !humanTokenSet} onClick={save}>{busy ? "저장하는 중" : "저장"}</button>
+      {problem && <p role="alert" className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-red-800">{problem}</p>}
+    </details>
   );
 }

@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request
+from pydantic import BaseModel, Field
 
 from ax_contracts.schemas.hr import (
     AnswerHandoverQuestionOutput,
@@ -44,6 +45,7 @@ from ax_dashboard_api import (
     claim_mapping,
     hr_client,
     live_views,
+    marketing_client,
     mock_actions,
     mock_customers,
     mock_data,
@@ -771,6 +773,65 @@ async def decide_org_change(change_id: str, body: OrgChangeDecisionBody) -> dict
         "decide_org_change", payload, target=f"org-change:{change_id}:{body.decision}"
     )
     return ok(DecideOrgChangeOutput.model_validate(out))
+
+
+# ---------------------------------------------------------------- 캠페인 (사람 토큰 필요)
+class CampaignStartBody(BaseModel):
+    campaign_id: str = Field(pattern=r"^cmp_[A-Za-z0-9_-]{1,40}$")
+    campaign_name: str = Field(min_length=1, max_length=100)
+    channel: str = Field(min_length=1, max_length=50)
+    budget_krw: int = Field(gt=0)
+
+
+class CampaignResultBody(BaseModel):
+    campaign_name: str = Field(min_length=1, max_length=100)
+    channel: str = Field(min_length=1, max_length=50)
+    period_from: str
+    period_to: str
+    spend_krw: int = Field(ge=0)
+    coupon_krw: int = Field(default=0, ge=0)
+    gmv_krw: int | None = Field(default=None, ge=0)
+    source: str = Field(min_length=1, max_length=100)
+
+
+class CampaignCancelBody(BaseModel):
+    reason: str = Field(min_length=1, max_length=300)
+
+
+@router.post("/campaigns/start")
+async def start_campaign(body: CampaignStartBody) -> dict:
+    """캠페인 시작. 재무 판단과 안전 관문을 지난다. 보류·거절도 결과로 돌려준다."""
+    _no_org_in_mock()
+    key = f"ui:start:{body.campaign_id}:{body.budget_krw}"
+    return ok(
+        await marketing_client.call(
+            "start_campaign", body.model_dump(), campaign_id=body.campaign_id, key=key
+        )
+    )
+
+
+@router.post("/campaigns/{campaign_id}/result")
+async def record_campaign_result(campaign_id: str, body: CampaignResultBody) -> dict:
+    """사람이 적은 성과를 재무에 넘긴다. 판매액을 모르면 비워 둔다."""
+    _no_org_in_mock()
+    payload = body.model_dump(exclude_none=True) | {"campaign_id": campaign_id}
+    key = f"ui:result:{campaign_id}:{body.spend_krw}:{body.gmv_krw}:{body.coupon_krw}"
+    return ok(
+        await marketing_client.call(
+            "record_campaign_result", payload, campaign_id=campaign_id, key=key
+        )
+    )
+
+
+@router.post("/campaigns/{campaign_id}/cancel")
+async def cancel_campaign(campaign_id: str, body: CampaignCancelBody) -> dict:
+    _no_org_in_mock()
+    payload = {"campaign_id": campaign_id, "reason": body.reason}
+    return ok(
+        await marketing_client.call(
+            "cancel_campaign", payload, campaign_id=campaign_id, key=f"ui:cancel:{campaign_id}"
+        )
+    )
 
 
 @router.post("/org-roster/complete")

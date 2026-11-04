@@ -1,4 +1,5 @@
 import { ActionQueue } from "@/components/finance/SafetyQueue";
+import { CampaignControl } from "./CampaignControl";
 import { MARKETING_HOLD_ACTIONS } from "@/lib/finance";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ago, shortDateTime, won } from "@/lib/format";
@@ -70,7 +71,7 @@ export default function LiveMarketing() {
       <header className="flex flex-wrap items-end gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">공지·쿠폰</h1>
-          <p className="mt-1 text-sm text-ink-500">마케팅 AI가 캣북스에 실제로 올린 공지와 고객에게 준 쿠폰입니다. 공지 게시와 쿠폰 발급은 안전 장치를 거쳐 실행됩니다. 이 화면에서는 보류된 마케팅 작업만 결정하고 나머지는 읽기만 합니다.</p>
+          <p className="mt-1 text-sm text-ink-500">마케팅 AI가 캣북스에 실제로 올린 공지와 고객에게 준 쿠폰입니다. 공지 게시와 쿠폰 발급은 안전 장치를 거쳐 실행됩니다. 이 화면에서 캠페인을 시작하고 보류된 마케팅 작업을 결정합니다. 나머지는 읽기만 합니다.</p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
           <Chip label="실제 데이터" tone="bg-emerald-50 text-emerald-700" title="캣북스 쇼핑몰 배너와 안전 장치 실행 기록을 읽습니다" />
@@ -80,6 +81,8 @@ export default function LiveMarketing() {
       </header>
 
       <ActionQueue action={MARKETING_HOLD_ACTIONS} intro="안전 장치가 사람 확인으로 보류한 쿠폰·공지·SNS 게시·영상 생성·캠페인 집행이 여기 모입니다." />
+
+      <CampaignControl />
 
       {live?.errors.map((e) => <p key={e} className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{e}</p>)}
       {!live && <p className="text-sm text-ink-500">불러오는 중입니다.</p>}
