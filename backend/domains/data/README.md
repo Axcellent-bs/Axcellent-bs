@@ -21,7 +21,7 @@
 | `domain_profile` | 회사 도메인 프로필: 업종·상품군·고객 축·분석 질문·씨앗 키워드(근거 문장). 고객사가 바뀌어도 사람이 키워드·카테고리를 손으로 정하지 않게 | 테넌트 설정 `[profile] about` + 회사 카탈로그(이름·카테고리·설명). LLM 한 번(정해진 스키마·목록 안), 코드 검증. 저장 재사용 `backend/.data/domain_profile.db`(소개·카탈로그·규칙 해시). 덮어쓰기 `[profile.override]` |
 | `data_sources` | 데이터 출처 목록: 데이터 종류·업종 태그·연령/성별·카테고리 출처·주기·한도·키 이름·상태(사용 가능/키 필요)·공식 문서·승인 | 코드 표(`skills/data_sources.py`). 키 환경변수 유무로 상태, 쇼핑인사이트는 확인 호출 1번(저장 `backend/.data/source_probe.db`). 승인: 회사 설정 `[sources] approved` |
 | `source_plan` | 수집 계획: 출처·이유·카테고리(실제 목록에서 확인)·키워드·연령 여부·호출 수·할당량·키가 있으면 얻는 근거 | 도메인 프로필 + 출처 목록 → LLM 한 번(목록 안에서만), 코드 검증·할당량 자르기. 저장 `backend/.data/source_plan.db`. 상한 `trends.toml` `[plan]`. 수집은 하지 않음 |
-| `trend_age` | 연령대별 상승: 주제마다 연령대(설정)별로 따로 조회해 "그 연령대에서 평소 대비 몇 배"(trend_scan과 같은 판정 함수), 가장 크게 오른 연령대 | 네이버 검색어 트렌드(`ages` 조건, 주제 하나 = 연령대 수만큼, 하루 상한 80번·하루 캐시), trend_popular(커넥터 없이), 오늘 판정 기록, 기획안 시즌 확인·카탈로그. LLM 없음. 설정: `trends.toml` `[age]` |
+| `trend_age` | 연령대별 상승: 주제마다 연령대(설정)별로 따로 조회해 "그 연령대에서 평소 대비 몇 배"(trend_scan과 같은 판정 함수), 가장 크게 오른 연령대 | 네이버 검색어 트렌드(`ages` 조건, 주제 하나 = 연령대 수만큼, 하루 상한 200번·3일 캐시, 브리프·카드 우선 120번을 빼고 다른 skill은 80번까지, 네이버 전체 상한에서 300번은 다른 skill용으로 남김, 호출자별 사용량은 응답 `calls_by_caller`·`limits`), trend_popular(커넥터 없이), 오늘 판정 기록, 기획안 시즌 확인·카탈로그. LLM 없음. 설정: `trends.toml` `[age]` |
 | `promo_concepts` | 광고·홍보 숏츠 **예시 아이디어(참고용)** 3~5개(확정 기획은 기획팀 몫): 타깃 연령대와 근거 숫자(trend_age, 없으면 미정 + 이유)· 제목·컨셉·길이(15~60초)·콘티(길이에 맞는 컷 수)·빌려 온 숏츠 형식과 그 평균 조회수·빌려 온 트렌드(없어도 됨)·맞는 이유·등장 상품·주의사항, 코드 경고(상표·초상권 확인 필요), 버린 초안과 이유, 쓴 재료·시즌 확인 키워드 | shop-api 상품·카테고리, shorts_stats(형식별 평균 조회수), trend_popular(게임·연예·스포츠·K-pop·음악·IT만), 카탈로그 카테고리·상품 핵심어 월별 흐름(trend_history, 키워드마다 네이버 1번·상한 20·하루 캐시), LLM(초안 1번). 하루 캐시·기록 `backend/.data/promo_concepts.db`(캐시 키 = 날짜 + 규칙 버전: 재료 거르기 설정 `[promo]`·분류 목록·프롬프트의 해시. 규칙이 바뀌면 다음 요청에서 다시 만든다). 설정: `trends.toml` `[promo]` |
 | `shorts_stats` | YouTube 숏츠 통계(카테고리별·형식별): 숏츠 수·평균 조회수·평균 시간당 조회 증가·조회수 상위 3개, 표본 부족은 unknown | YouTube 스냅샷 DB(길이 `video_details`), 숏츠 검색(`search.list`, 하루 1번·상한 8번, `backend/.data/shorts.db`), LLM(카테고리·형식 분류, 묶어서·저장). 설정: `trends.toml` `[shorts]` |
 | `content_recommend` | 지금 만들 만한 영상 소재(급상승만, 최대 N개): 순위·점수 근거(z·배수·두 소스)·출처·주제 분류·묶음(회사 상품과 연결된 소재·일반 화제)·연결할 실제 상품(근거)·회사 관련성(상품 연결로, 표시만)·밈 형식·영상 아이디어 1~2문장·형식(숏폼·롱폼)·fallback. 추천 안 함 분류(회사 설정)는 참고용 + 이유로 따로. 콘텐츠 루프 2단계 | trend_scan(회사 기본 키워드 그룹)·trend_candidates(후보 전체)와 같은 네이버 요청(하루 캐시 같이 씀), 회사 상품 목록(shop-api `GET /api/shop/products`·`/categories`), LLM(아이디어 문장·밈 형식·주제 분류만), 임베딩(설정이 있을 때만). 설정: 회사 폴더 `trends.toml` `[recommend]` |
@@ -328,7 +328,7 @@ DATA_EXTERNAL_MODE=replay bash scripts/run_all.sh
 |---|---|---|
 | `trend_scan` | 그룹마다 1번 (같은 요청은 하루 캐시) | 0 |
 | `trend_candidates` | 후보마다 1번 + 별칭 수 | 0 |
-| `trend_age` | 주제 × 연령대(기본 10 × 5 = 50), 하루 상한 80 | 0 |
+| `trend_age` | 주제 × 연령대(기본 10 × 5 = 50), 하루 상한 200(우선 아닌 skill은 80) | 0 |
 | `trend_popular` (화면 경로) | 0 | 제목 videos.list ≤ 2번, 구독자 channels.list ≤ 2번, 보충 검색 ≤ 6번(100단위씩) |
 | `shorts_stats` | 0 | 검색 하루 ≤ 8번(100단위씩, 저장 재사용), 다시 보기 videos.list 50개마다 1단위 |
 | `promo_concepts` | 시즌 키워드 ≤ 20번(하루 캐시) + 연령대(예시 트렌드 수 × 5) | shorts_stats와 같다 |

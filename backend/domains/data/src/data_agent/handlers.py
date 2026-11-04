@@ -517,7 +517,7 @@ async def trend_age(request: AgentRequest) -> AgentResult:
         season = await _season_keywords(os.environ, config.season_topics)
     result = await run_trend_age(
         data, get_trend_connector(), env=os.environ, popular_items=popular_items,
-        season_keywords=season,
+        season_keywords=season, caller="trend_age",
     )  # fmt: skip
     return _result(
         request,
@@ -579,7 +579,8 @@ async def trend_insight_brief(request: AgentRequest) -> AgentResult:
 
     async def ages(keywords: list[str]) -> TrendAgeOutput:
         result = await run_trend_age(
-            TrendAgeRequest(keywords=keywords[:30]), get_trend_connector(), env=env
+            TrendAgeRequest(keywords=keywords[:30]), get_trend_connector(), env=env,
+            caller="trend_insight_brief",
         )
         return result.output
 
