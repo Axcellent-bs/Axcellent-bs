@@ -51,6 +51,7 @@ Persister = Callable[[Incident], None]
 # 못 읽으면 None
 ReviewChecker = Callable[[str], Awaitable[dict[str, Any] | None]]
 # 규칙으로 안 풀릴 때만 쓰는 LLM 선택기: (skill, 후보 부서들) -> 부서 이름 또는 None
+# 확장점이다. 서버(main.py)는 연결하지 않아 지금은 규칙으로 못 찾으면 이관 큐로 넘긴다(README 6장)
 LlmPicker = Callable[[str, list[str]], Awaitable[str | None]]
 
 log = logging.getLogger("orchestrator.engine")
@@ -441,7 +442,10 @@ class Engine:
     async def _transfer(
         self, inc: Incident, step: Step, run: StepRun, dept: str, payload: dict[str, Any], why: str
     ) -> None:
-        """이관 큐: 규칙(같은 skill을 가진 다른 부서)으로 먼저, 안 되면 LLM 선택기."""
+        """이관 큐: 규칙(같은 skill을 가진 다른 부서)으로 먼저, 안 되면 LLM 선택기(`llm_pick`).
+
+        서버는 `llm_pick`을 연결하지 않으므로 규칙으로 못 찾으면 "이관 큐로 넘김"으로 끝난다.
+        """
         run.reason_code = why
         candidates = [
             a for a in self.registry.alternatives(step.skill, dept) if a.callable_by_orchestrator

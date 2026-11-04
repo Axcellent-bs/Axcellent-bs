@@ -25,7 +25,8 @@
    - support · `request_incident_compensation` (영향 고객 일괄 보상)
    - hr · `record_case` (사건 종료 때 1회), 담당자 교대 시 `request_assignment_change`·`start_handover`
 5. 기억해야 하는 것 (memory 부서와 연결):
-   - 사건·단계·보류 상태는 지금 총괄 메모리에만 있어 재시작하면 사라진다. 저장·복구는 아직 정하지 않았다.
+   - 이벤트 기록과 처리한 event_id는 SQLite(`ORCHESTRATOR_DB`)에 저장하고, 다시 켜면 불러온다. 진행 중이던 이벤트는
+     이어 가지 않고 "재시작으로 중단됨"으로 남긴다. 승인 대기·사람 할 일함 대기는 저장하지 않는다.
    - 사건 종료 때 원인·조치·결정 이유를 hr `record_case`로 보내 회사 기억에 남긴다.
 6. 잘하는지 보는 지표:
    - 사건 처리 시간(`mttr_seconds`), 단계 완료 수, 자동 처리율
