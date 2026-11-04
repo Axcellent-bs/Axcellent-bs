@@ -28,7 +28,14 @@ from ax_contracts.data_access.shop_failed_orders import ShopFailedOrdersQuery
 from ax_contracts.data_access.shop_metric_series import ShopMetricSeriesQuery
 from ax_contracts.data_access.shop_seller_prices import ShopSellerPricesQuery
 from ax_contracts.data_access.shop_seller_profile import ShopSellerProfileQuery
-from ax_shop_api import inquiries, orchestrator_relay, outbox, retention, support_client
+from ax_shop_api import (
+    inquiries,
+    marketing_client,
+    orchestrator_relay,
+    outbox,
+    retention,
+    support_client,
+)
 from ax_shop_api.db import Db
 from ax_shop_api.lookups import Lookups
 from ax_shop_api.promotions import Promotions
@@ -483,6 +490,19 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
     async def orchestrator_departments(_: str = Depends(_caller(ORCHESTRATOR_VIEWERS))) -> dict:
         data, meta = await orchestrator_relay.departments()
         return _ok(data, **meta)
+
+    # --- 마케팅 받은 기획안 읽기 중계(A2A 읽기 skill). 관리자와 읽기 전용 열람자만 ----------
+    @app.get("/api/shop/admin/marketing/briefs")
+    async def marketing_briefs(
+        limit: int = 50, _: str = Depends(_caller(ORCHESTRATOR_VIEWERS))
+    ) -> dict:
+        return _ok(await marketing_client.list_briefs(limit))
+
+    @app.get("/api/shop/admin/marketing/briefs/{proposal_id}")
+    async def marketing_brief(
+        proposal_id: str, _: str = Depends(_caller(ORCHESTRATOR_VIEWERS))
+    ) -> dict:
+        return _ok(await marketing_client.get_brief(proposal_id))
 
     # --- 공지 배너(SHOP-08): 고객 화면이 읽고, 마케팅 관문 토큰만 게시·해제한다 ---------
     @app.get("/api/shop/banners")

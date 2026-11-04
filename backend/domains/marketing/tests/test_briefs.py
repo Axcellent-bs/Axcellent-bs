@@ -165,7 +165,12 @@ def test_requester_restriction_follows_the_card() -> None:
     assert _call("list_campaign_briefs", {})["output"]["total"] == 0
     for skill in ("list_campaign_briefs", "get_campaign_brief"):
         assert card[skill].grade == "read"
-        assert card[skill].allowed_requesters == ["planning", "orchestrator", "dashboard-api"]
+        assert card[skill].allowed_requesters == [
+            "planning",
+            "orchestrator",
+            "dashboard-api",
+            "shop-api",
+        ]
         assert _call(skill, {}, token="mock:hr")["outcome"] == "FORBIDDEN_SKILL"
 
 

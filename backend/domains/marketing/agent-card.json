@@ -78,7 +78,7 @@
       "input_schema": "agents/marketing/src/marketing_agent/briefs.py#ListCampaignBriefsInput",
       "output_schema": "agents/marketing/src/marketing_agent/briefs.py#CampaignBriefList",
       "grade": "read",
-      "allowed_requesters": ["planning", "orchestrator", "dashboard-api"],
+      "allowed_requesters": ["planning", "orchestrator", "dashboard-api", "shop-api"],
       "verifier": null,
       "priority": "recommended"
     },
@@ -88,7 +88,7 @@
       "input_schema": "agents/marketing/src/marketing_agent/briefs.py#GetCampaignBriefInput",
       "output_schema": "agents/marketing/src/marketing_agent/briefs.py#CampaignBriefView",
       "grade": "read",
-      "allowed_requesters": ["planning", "orchestrator", "dashboard-api"],
+      "allowed_requesters": ["planning", "orchestrator", "dashboard-api", "shop-api"],
       "verifier": null,
       "priority": "recommended"
     },
