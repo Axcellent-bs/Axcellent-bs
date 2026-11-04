@@ -88,8 +88,10 @@ from data_agent.skills.trend_scan import (
     DEFAULT_SETTINGS,
     REQUEST_DAYS,
     TREND_CONFIG_ENV,
+    NoTrendGroups,
+    SeedProvider,
     Settings,
-    default_groups,
+    resolve_groups,
     yesterday_kst,
 )
 from data_agent.trending_store import news_titles
@@ -337,6 +339,7 @@ async def recommend(
     context_id: str | None = None,
     catalog: Any = None,
     category_cache: CategoryCache | None = None,
+    seed_provider: SeedProvider | None = None,
 ) -> RecommendResult:
     """급상승 소재를 순위대로 고르고 소재마다 상품 연결·아이디어 문장을 붙인다. 읽기만 한다.
 
@@ -350,7 +353,11 @@ async def recommend(
     end = request.end_date or yesterday_kst(now)
     start = end - timedelta(days=REQUEST_DAYS - 1)
 
-    groups = default_groups(env)
+    # 그룹: 사람 덮어쓰기 > 프로필 씨앗 (요청 칸은 없다). 둘 다 없으면 그룹 없이 후보만 본다
+    try:
+        groups = await resolve_groups([], env, seed_provider)
+    except NoTrendGroups:
+        groups = []
     judged = await _judge_groups(groups, connector, start, end, settings)
     found = await find_candidates(
         # 요청에 end_date가 없으면(지금) 그대로 비워서, 지금 가장 최근 스냅샷을 쓰게 한다.
