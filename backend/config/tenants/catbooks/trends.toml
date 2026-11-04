@@ -180,6 +180,7 @@ max_age_hours = 24       # 스냅샷이 이보다 오래되면 이 출처만 unk
 [shorts]
 max_seconds = 60         # 이 길이(초) 이하를 숏츠로 본다
 min_sample = 5           # 묶음(카테고리·형식)의 숏츠가 이보다 적으면 unknown + 표본 부족
+min_recheck_minutes = 50 # 두 번 본 간격이 이 분 미만이면 시간당 조회는 unknown + "측정 중"
 search_calls = 8         # 하루 검색 호출 상한 (0이면 검색 안 함)
 search_days = 7          # 최근 며칠 안에 올라온 영상을 검색할지
 top_videos = 3           # 묶음마다 보여 줄 조회수 상위 숏츠 수

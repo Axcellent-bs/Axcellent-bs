@@ -45,6 +45,7 @@ from ax_contracts.schemas.data import (
     InsightProduct,
     PopularTopic,
     PromoConceptsOutput,
+    ShortsStatsOutput,
     TrendInsight,
     TrendInsightBriefOutput,
     TrendInsightBriefRequest,
@@ -433,6 +434,7 @@ def build_insights(
     products: Mapping[str, list[InsightProduct]],
     products_reason: str | None,
     rules: AdRules,
+    shorts: ShortsStatsOutput | None = None,
 ) -> list[TrendInsight]:
     """후보 → 인사이트 칸 (한 줄은 아직 비움). 광고 재료가 아닌 것·분류 대기는 맨 아래."""
     out: list[TrendInsight] = []
@@ -442,6 +444,9 @@ def build_insights(
             # 회사 상품·시즌 키워드라 빌려 올 IP·인물이 없다
             ok, ok_why = True, f"회사 시즌 키워드·상품 핵심어 (분류: {c.category()})"
         fmt, samples, fmt_why = shorts_format(c.popular)
+        group = next((g for g in (shorts.by_format if shorts else []) if g.name == fmt), None)
+        if fmt and group is not None:  # 숏츠 통계와 같은 시점 값 (표본 수·중앙값·기준 시각)
+            samples = group.count
         age = c.age
         band = next((b for b in age.bands if b.band == age.top_band), None) if age else None
         keys = {_norm(n) for n in c.names()}
@@ -489,6 +494,8 @@ def build_insights(
                 company_reason=company_reason(c),
                 shorts_format=fmt,
                 shorts_format_samples=samples,
+                shorts_format_median_views=group.median_views if fmt and group else None,
+                shorts_format_at=shorts.snapshot_at if fmt and group and shorts else None,
                 shorts_format_reason=fmt_why,
                 limits=limits,
                 example_ideas=[f"{t} ({REFERENCE})" for t in ideas],
@@ -646,6 +653,7 @@ async def make_brief(
     promo: PromoConceptsOutput | None,
     catalog: Any,
     aliases: Mapping[str, Sequence[str]] | None = None,
+    shorts: ShortsStatsOutput | None = None,
     category_cache: Any = None,
     now: datetime | None = None,
     context_id: str | None = None,
@@ -765,7 +773,7 @@ async def make_brief(
             + pick(waiting, config, config.pending_max)
         )
         insights = build_insights(
-            picked, day=day, popular=popular, promo=promo, products=prods,
+            picked, day=day, popular=popular, promo=promo, products=prods, shorts=shorts,
             products_reason=prod_why, rules=load_rules(env),
         )  # fmt: skip
         await write_lines(insights, llm, context_id, queries)

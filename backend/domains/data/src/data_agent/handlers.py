@@ -566,6 +566,16 @@ async def trend_insight_brief(request: AgentRequest) -> AgentResult:
     finally:
         store.close()
     catalog = await read_catalog(get_catalog())
+    shorts_out = None
+    try:  # 숏츠 형식 값은 숏츠 통계와 같은 시점 (검색은 하루 1번 저장 재사용)
+        shorts_out = (
+            await run_shorts_stats(
+                ShortsStatsRequest(), get_youtube(), llm, env=env,
+                context_id=request.meta.context_id, category_cache=get_category_cache(),
+            )
+        ).output  # fmt: skip
+    except Exception:  # 숏츠 통계를 못 받아도 브리프는 만든다 (형식 칸만 비움)
+        shorts_out = None
 
     async def ages(keywords: list[str]) -> TrendAgeOutput:
         result = await run_trend_age(
@@ -576,7 +586,7 @@ async def trend_insight_brief(request: AgentRequest) -> AgentResult:
     result = await make_brief(
         data, llm, env=env, popular=popular_out, popular_reason=popular_why, rising=rising,
         age_fn=ages, promo=promo_out, catalog=catalog, aliases=cand_aliases(env),
-        category_cache=get_category_cache(),
+        category_cache=get_category_cache(), shorts=shorts_out,
         context_id=request.meta.context_id,
     )  # fmt: skip
     return _result(
