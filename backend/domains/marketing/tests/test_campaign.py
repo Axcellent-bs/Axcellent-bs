@@ -106,7 +106,7 @@ async def test_approved_runs_gate_after_review(monkeypatch: pytest.MonkeyPatch) 
         {
             "action": "start_campaign",
             "params": START,
-            "key": f"{CTX}:start_campaign:cmp_1",
+            "key": f"{CTX}:start_campaign:cmp_1:300000",
         }
     ]
     assert result.output["review"]["decision"] == "approved"
