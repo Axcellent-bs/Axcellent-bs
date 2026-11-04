@@ -206,3 +206,37 @@ def test_approved_consumption_source_is_called() -> None:
 def test_no_plan_or_profile_gives_a_reason() -> None:
     res = _run(plan=SourcePlanOutput(status="unknown", reason="LLM 설정이 없음"))
     assert res.cards == [] and "수집 계획이 없음" in (res.reason or "")
+
+
+def test_cards_are_per_subtopic_and_products_are_only_linked() -> None:
+    from ax_contracts.schemas.data import DomainSubtopic, DomainSubtopicsOutput
+
+    subs = DomainSubtopicsOutput(status="known", subtopics=[
+        DomainSubtopic(name="그림책 낭독", seed_keyword="고양이 그림책", axis="활용 방식",
+                       videos=6, median_views=20000.0),
+        DomainSubtopic(name="서점 투어", seed_keyword="서점", axis="같이 묶이는 관심사", videos=2,
+                       median_views=500.0),
+    ])  # fmt: skip
+    res = asyncio.run(
+        do.make_opportunities(
+            env={}, llm=LineLLM({}), profile=PROFILE, plan=PLAN, sources=SOURCES,
+            shorts=_shorts(), catalog_products=[CatalogProduct(product_id="p1",
+                                                               name="고양이 그림책")],
+            classify=_classify, trend_connector=FakeTrend(), age_fn=_ages,
+            consumption_fn=None, day=END, end=END, subtopics=subs,
+        )
+    )  # fmt: skip
+    by = {c.subtopic: c for c in res.cards}
+    assert set(by) == {"그림책 낭독", "서점 투어"}  # 상품 이름이 아니라 하위 주제
+    book = by["그림책 낭독"]
+    assert book.axis == "활용 방식" and book.seed_keyword == "고양이 그림책"
+    assert [p.name for p in book.products] == ["고양이 그림책"]  # 연결 상품으로만
+    f = book.shorts_fit  # 하위 주제 숏츠 6개(표본 기준 이상) 중앙값 ÷ 전체 10,000
+    assert f is not None and f.level == "high" and f.ratio == 2.0 and f.samples == 6
+    assert book.target_views_reference == 20000.0
+    tour = by[
+        "서점 투어"
+    ]  # 표본 2개(기준 5개 미만) → 분류 기준으로 되돌아감 (가짜 분류기는 미분류)
+    assert tour.shorts_fit is not None and tour.shorts_fit.level == "uncertain"
+    assert tour.shorts_fit.reason == "하위 주제 분류 미정"
+    assert not any("씨앗 키워드(상품 이름) 단위" in x for x in book.limits)

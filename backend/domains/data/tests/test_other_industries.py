@@ -20,7 +20,7 @@ from ax_agent_template.llm import MockLLMClient
 from ax_contracts.schemas.data import DomainProfileRequest, SourcePlanRequest
 from data_agent.connectors import CatalogProduct, replay
 from data_agent.connectors.youtube import DEFAULT_URL, YouTubeConnector
-from data_agent.skills import data_sources, domain_profile, source_plan
+from data_agent.skills import data_sources, domain_profile, domain_subtopics, source_plan
 from data_agent.skills.product_link import CatalogRead
 
 NOW = datetime(2026, 11, 4, 3, 0, tzinfo=UTC)
@@ -179,3 +179,82 @@ def test_plans_pick_different_categories_and_drop_mismatched_sources(tmp_path: P
     assert {k for i in fashion.items for k in i.keywords} <= {"셔츠", "슬랙스", "에코백"}
     assert {k for i in food.items for k in i.keywords} <= {"감귤", "그래놀라"}
     assert fashion.plan_id != food.plan_id
+
+
+# ------------------------------------------------ 하위 주제 넓히기 (업종마다 다른 하위 주제)
+
+
+def _save_shorts(
+    env: dict[str, str], seed: str, videos: list[tuple[str, str, list[str], int]]
+) -> None:
+    """씨앗 하나의 숏츠 검색·영상 통계 응답을 저장해 둔다 (공식 문서 형식, 테스트 전용)."""
+    from datetime import timedelta
+
+    from data_agent.skills.domain_subtopics import load_config as sub_config
+
+    cfg = sub_config(env)
+    search = {
+        "part": "snippet", "q": seed, "type": "video", "videoDuration": "short",
+        "regionCode": "KR", "order": "viewCount", "maxResults": cfg.max_results,
+        "publishedAfter": (NOW - timedelta(days=cfg.published_days)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "relevanceLanguage": "ko",
+    }  # fmt: skip
+    replay.save("youtube", f"{DEFAULT_URL}/search",  search,
+                {"items": [{"id": {"videoId": v[0]}} for v in videos]}, env)  # fmt: skip
+    stats = {"part": "snippet,statistics,contentDetails", "id": ",".join(v[0] for v in videos),
+             "maxResults": 50}  # fmt: skip
+    items = [
+        {"id": vid, "snippet": {"publishedAt": "2026-10-30T00:00:00Z", "channelId": "c",
+                                "title": title, "tags": tags, "channelTitle": "채널"},
+         "statistics": {"viewCount": str(views)}, "contentDetails": {"duration": "PT40S"}}
+        for vid, title, tags, views in videos
+    ]  # fmt: skip
+    replay.save("youtube", f"{DEFAULT_URL}/videos", stats, {"items": items}, env)
+
+
+class AxisRule(MockLLMClient):
+    """가짜 LLM: 축 목록의 첫 축으로 (축 이름은 프로필에서 온다)."""
+
+    async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):  # noqa: ANN001, ANN201
+        data = dict(untrusted or {})
+        axes = json.loads(data["축 목록"])
+        return domain_subtopics._Axes(items=[domain_subtopics._Axis(id=k[2:], axis=axes[0])
+                                             for k in data if k.startswith("주제")])  # fmt: skip
+
+
+def test_subtopics_differ_by_industry_without_human_input(tmp_path: Path) -> None:
+    from ax_contracts.schemas.data import DomainSubtopicsRequest
+
+    results = {}
+    for name, tenant, seed, videos, axes in (
+        ("fashion", FASHION, "셔츠", [("s1", "린넨 셔츠 코디", ["코디", "출근룩"], 900),
+                                      ("s2", "여름 셔츠 코디", ["코디", "출근룩"], 1500)],
+         ["스타일", "입는 상황"]),
+        ("food", FOOD, "그래놀라", [("g1", "그래놀라 아침 레시피", ["레시피", "다이어트"], 700),
+                                    ("g2", "그래놀라 요거트 레시피", ["레시피", "다이어트"], 300)],
+         ["먹는 방식", "건강 관심"]),
+    ):  # fmt: skip
+        profile, _, _ = _pipeline(tmp_path / name, tenant)
+        env = _tenant(tmp_path / name, tenant[0]) | {
+            "DATA_SUBTOPICS_DB": str(tmp_path / name / "s.db")
+        }
+        _save_shorts(env, seed, videos)
+        prof = profile.model_copy(
+            update={
+                "subtopic_axes": axes,
+                "seed_keywords": [s for s in profile.seed_keywords if s.keyword == seed],
+            }
+        )  # 축은 프로필 LLM이 정한 값이라 여기서는 업종마다 다른 값을 준다
+        out = asyncio.run(
+            domain_subtopics.make_subtopics(
+                DomainSubtopicsRequest(), AxisRule(), env=env, profile=prof,
+                youtube=YouTubeConnector(env), now=NOW,
+            )
+        ).output  # fmt: skip
+        results[name] = out
+    fashion, food = results["fashion"], results["food"]
+    assert {s.name for s in fashion.subtopics} == {"코디", "출근룩"}
+    assert {s.name for s in food.subtopics} == {"레시피", "다이어트"}
+    assert {s.axis for s in fashion.subtopics} == {"스타일"}
+    assert {s.axis for s in food.subtopics} == {"먹는 방식"}
+    assert fashion.searches[0].status == "searched" and fashion.quota_used == 0  # 저장된 응답

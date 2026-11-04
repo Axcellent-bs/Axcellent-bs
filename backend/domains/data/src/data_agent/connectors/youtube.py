@@ -289,6 +289,36 @@ class YouTubeConnector:
         ids = [item.id.videoId for item in page.items if item.id.videoId]
         return await self.videos(ids) if ids else []
 
+    async def search_query_shorts(
+        self,
+        query: str,
+        published_after: datetime,
+        region: str = "KR",
+        language: str | None = None,
+        max_results: int = PAGE_SIZE,
+    ) -> list[VideoStat]:
+        """검색어로 짧은 영상(4분 미만, `videoDuration=short`) 검색 → 결과 영상의 통계.
+
+        조회수 순, 최근 게시. `language`(예: ko)는 `relevanceLanguage`(앞에 둘 뿐 거르지 않음).
+        검색 100단위 + 통계 1단위(50개마다). 숏츠 길이 기준은 부르는 쪽이 `duration_seconds`로
+        거른다.
+        """
+        params = {
+            "part": "snippet",
+            "q": query,
+            "type": "video",
+            "videoDuration": "short",
+            "regionCode": region,
+            "order": "viewCount",
+            "maxResults": max(1, min(max_results, PAGE_SIZE)),
+            "publishedAfter": published_after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        if language:
+            params["relevanceLanguage"] = language
+        page = _parse(_SearchPage, await self._get("search", params), "숏츠 검색")
+        ids = [item.id.videoId for item in page.items if item.id.videoId]
+        return await self.videos(ids) if ids else []
+
     async def search_category(
         self,
         category_id: str,

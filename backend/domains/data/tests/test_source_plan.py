@@ -225,3 +225,45 @@ def test_unlock_text_follows_why_the_source_is_unavailable(tmp_path: Path) -> No
     shop = out.items[0]
     assert (shop.unlocks or "").startswith("이 API를 쓸 수 있게 되면 (지금 키로 확인 호출이 실패함")
     assert shop.category_check == "after_key" and shop.categories[0].category_id == "50005542"
+
+
+def test_subtopic_searches_join_the_youtube_quota(tmp_path: Path) -> None:
+    llm = PlanLLM(PICKS)
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    cfg = tmp_path / "trends.toml"
+    cfg.write_text("[plan]\nyoutube_units = 400\n", encoding="utf-8")
+    env = {"DATA_TREND_CONFIG": str(cfg), "DATA_SOURCE_PLAN_DB": str(tmp_path / "plan.db")}
+    out = asyncio.run(
+        sp.make_plan(
+            SourcePlanRequest(),
+            llm,
+            env=env,
+            profile=_profile(),
+            sources=SOURCES,
+            youtube_categories=_yt,
+            verify_shopping=_verify,
+            now=NOW,
+            subtopic_pending=3,
+        )  # fmt: skip
+    ).output
+    yt = next(i for i in out.items if i.source_id == "youtube")
+    quota = next(q for q in out.quota if q.source_id == "youtube")
+    # 계획 항목 202단위(카테고리 1 + 키워드 1)와 하위 주제 검색 3번(303)을 합치면 400을 넘어
+    # 항목 키워드를 먼저 자르고(101) 하위 주제 검색은 2번(202)까지
+    assert yt.quota_units == 101 and out.subtopic_searches == 2 and out.subtopic_units == 202
+    assert quota.units == 303 and quota.units <= quota.cap
+    assert any("하위 주제 검색 1번" in t for t in out.trimmed)
+    again = asyncio.run(
+        sp.make_plan(
+            SourcePlanRequest(),
+            llm,
+            env=env,
+            profile=_profile(),
+            sources=SOURCES,
+            youtube_categories=_yt,
+            verify_shopping=_verify,
+            now=NOW,
+            subtopic_pending=0,
+        )  # fmt: skip
+    ).output
+    assert again.cached and again.subtopic_searches == 0  # 검색 캐시 상태는 그때그때

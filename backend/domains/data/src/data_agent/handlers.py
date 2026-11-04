@@ -681,6 +681,54 @@ async def _plan_inputs(context_id: str | None):  # noqa: ANN202
     return catalog, profile.output, sources.output
 
 
+def _subtopic_pending(profile: object) -> int:
+    """오늘 새로 할 하위 주제 숏츠 검색 수 (캐시 밖, 하루 상한 안). 수집 계획 할당량에 넣는다."""
+    from data_agent.skills import domain_subtopics as ds
+
+    seeds = [s.keyword for s in getattr(profile, "seed_keywords", [])]
+    store = ds.SubtopicStore(os.environ.get(ds.DB_ENV) or ds.DEFAULT_DB)
+    try:
+        return ds.pending_searches(seeds, store, ds.load_config(os.environ), datetime.now(UTC))
+    finally:
+        store.close()
+
+
+async def _subtopics(profile: object, context_id: str | None):  # noqa: ANN202
+    """하위 주제 넓히기 (씨앗 → 한국 숏츠 검색, 일주일 캐시·하루 상한 → 함께 나온 말 → 축)."""
+    from ax_contracts.schemas.data import DomainSubtopicsRequest
+    from data_agent.skills.domain_subtopics import make_subtopics
+    from data_agent.youtube_store import DB_ENV as YT_DB_ENV
+    from data_agent.youtube_store import DEFAULT_DB as YT_DEFAULT_DB
+    from data_agent.youtube_store import popular_history
+
+    try:
+        history = popular_history(os.environ.get(YT_DB_ENV) or YT_DEFAULT_DB)
+    except Exception:  # 쌓인 인기 영상이 없으면 흔한 말 제외만 못 한다
+        history = []
+    return await make_subtopics(
+        DomainSubtopicsRequest(), get_llm(), env=os.environ, profile=profile,
+        youtube=get_youtube(), history=history, context_id=context_id,
+    )  # fmt: skip
+
+
+async def domain_subtopics(request: AgentRequest) -> AgentResult:
+    """하위 주제 넓히기 (씨앗 키워드 → YouTube 한국 숏츠 → 함께 나오는 말 → 축 분류). grade read."""
+    from ax_contracts.schemas.data import DomainSubtopicsRequest
+
+    data = _parse(request, DomainSubtopicsRequest)
+    if isinstance(data, AgentResult):
+        return data
+    _, profile, _ = await _plan_inputs(request.meta.context_id)
+    result = await _subtopics(profile, request.meta.context_id)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=result.output.status,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
+
+
 async def _opportunities(context_id: str | None, shorts: object, ages: object):  # noqa: ANN202
     """기회 가설 카드: 프로필 → 계획(저장 재사용) → 사용 가능·승인 출처만 수집."""
     from ax_contracts.schemas.data import SourcePlanRequest
@@ -695,7 +743,9 @@ async def _opportunities(context_id: str | None, shorts: object, ages: object): 
         SourcePlanRequest(), llm, env=os.environ, profile=profile, sources=sources,
         youtube_categories=get_youtube().video_categories,
         verify_shopping=shopping_verifier(os.environ), context_id=context_id,
+        subtopic_pending=_subtopic_pending(profile),
     )  # fmt: skip
+    subtopics = (await _subtopics(profile, context_id)).output
 
     async def classify(names: list[str]) -> dict[str, str | None]:
         found = await classify_topics(
@@ -710,7 +760,7 @@ async def _opportunities(context_id: str | None, shorts: object, ages: object): 
         shorts=shorts, catalog_products=catalog.products, classify=classify,
         trend_connector=get_trend_connector(), age_fn=ages,
         consumption_fn=default_consumption(os.environ, end), day=datetime.now(UTC).date(),
-        end=end, context_id=context_id,
+        end=end, context_id=context_id, subtopics=subtopics,
     )  # fmt: skip
 
 
@@ -726,7 +776,8 @@ async def source_plan(request: AgentRequest) -> AgentResult:
     result = await make_plan(
         data, get_llm(), env=os.environ, profile=profile, sources=sources,
         youtube_categories=get_youtube().video_categories,
-        verify_shopping=shopping_verifier(os.environ), context_id=request.meta.context_id,
+        verify_shopping=shopping_verifier(os.environ), subtopic_pending=_subtopic_pending(profile),
+        context_id=request.meta.context_id,
     )  # fmt: skip
     return _result(
         request,
@@ -877,5 +928,6 @@ HANDLERS = {
     "trend_insight_brief": trend_insight_brief,
     "domain_profile": domain_profile,
     "data_sources": data_sources,
+    "domain_subtopics": domain_subtopics,
     "source_plan": source_plan,
 }
