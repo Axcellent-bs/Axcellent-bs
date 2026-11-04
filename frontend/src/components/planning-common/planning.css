@@ -866,7 +866,7 @@ button.chip { cursor: pointer; font: inherit; }
 /* 문서 목록 */
 .dl-grid { grid-template-columns: minmax(0, 1fr) 200px 80px 120px; }
 .dl-make { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
-.col-left .dl-make { flex-direction: column; align-items: stretch; margin: 0; }
+.dl-make select, .dl-make .field { max-width: 420px; min-width: 0; }
 
 /* 목록 페이지 나누기 */
 .pager { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 12px 0; }
@@ -874,3 +874,23 @@ button.chip { cursor: pointer; font: inherit; }
 /* 요청 중단·재개 (사람) */
 .rq-stop { margin-right: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); font-size: 12px; padding: 2px 8px; border-radius: 6px; cursor: pointer; }
 .rq-stop:hover { border-color: var(--warning); color: var(--warning); }
+
+/* 기획서 = 노션형 문서: 소제목 + 바로 고치는 글 칸 */
+.spec-h { font-size: 16px; font-weight: 700; margin: 18px 0 2px; color: var(--text); }
+.spec-blk { border-left: 2px solid transparent; padding-left: 4px; }
+.spec-blk.on { border-left-color: var(--primary); background: var(--hover); }
+.spec-pid { border: 0; background: none; padding: 9px 0 0; min-width: 28px; text-align: left; }
+button.spec-pid { cursor: pointer; color: var(--primary); font-weight: 600; }
+.spec-tags { margin: 0 0 6px 38px; }
+.blk-p[readonly] { cursor: default; }
+.blk-p[readonly]:focus { border-color: transparent; background: transparent; }
+
+/* 문서·기획서 목록 위: 종류 거르기 + 새 문서 */
+.sl-top { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+
+/* 문서 저장·삭제 */
+.doc-actions { display: flex; justify-content: flex-end; gap: 6px; margin-bottom: 4px; }
+
+/* 노션에서 가져오기 */
+.sl-notion { display: flex; gap: 6px; align-items: center; }
+.sl-notion .field { width: 320px; }

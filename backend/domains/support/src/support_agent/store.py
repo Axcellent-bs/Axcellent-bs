@@ -10,7 +10,7 @@ import itertools
 from datetime import UTC, datetime
 from typing import Any
 
-from support_agent import abuse_rules
+from support_agent import abuse_rules, languages
 from support_agent.schemas import (
     ActivityEntry,
     Analysis,
@@ -55,14 +55,19 @@ class InquiryStore:
         return next(self._audit_ids)
 
     def list(
-        self, status: InquiryStatus | None = None, user_id: int | None = None
+        self,
+        status: InquiryStatus | None = None,
+        user_id: int | None = None,
+        language: str | None = None,
     ) -> list[ConversationListItem]:
         items = [
             ConversationListItem.model_validate(
                 c.model_dump(include=set(ConversationListItem.model_fields))
             )
             for c in self._conversations.values()
-            if (status is None or c.status == status) and (user_id is None or c.user_id == user_id)
+            if (status is None or c.status == status)
+            and (user_id is None or c.user_id == user_id)
+            and (language is None or c.language == language)
         ]
         return sorted(items, key=lambda c: (c.updated_at, c.id), reverse=True)
 
@@ -211,6 +216,8 @@ class InquiryStore:
                 created_at=stamp,
             )
         )
+        if role == "customer":  # 목록의 언어는 고객이 마지막으로 쓴 언어다
+            conversation.language = languages.detect(text)
         conversation.updated_at = stamp
         conversation.preview = _preview(shown)
         conversation.awaiting_reply = role == "customer"

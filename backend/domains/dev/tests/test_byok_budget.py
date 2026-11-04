@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import stat
 
 import pytest
 from fastapi.testclient import TestClient
@@ -28,6 +30,7 @@ def run(coro):
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("PLANNING_LLM_KEY_STORE", raising=False)
+    monkeypatch.delenv("DEV_LLM_KEY_STORE", raising=False)
     llm_key.clear()
     yield
     llm_key.clear()
@@ -50,9 +53,9 @@ def test_key_is_validated_and_never_shown() -> None:
 
 
 def test_coder_uses_company_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PLANNING_LLM_MODEL", "server-model")
-    monkeypatch.setenv("PLANNING_LLM_BASE_URL", "https://server.example")
-    monkeypatch.setenv("PLANNING_LLM_API_KEY", "server-key")
+    monkeypatch.setenv("DEV_LLM_MODEL", "server-model")
+    monkeypatch.setenv("DEV_LLM_BASE_URL", "https://server.example")
+    monkeypatch.setenv("DEV_LLM_API_KEY", "server-key")
     coder.reset_llm()
     assert coder.get_llm().settings.api_key == "server-key"
     llm_key.set_key(KEY, model="company-model")
@@ -103,3 +106,22 @@ def test_company_key_api_is_admin_only(service, monkeypatch) -> None:
     assert r.json()["data"]["budget"]["limit"] == 2000
     r = c.post(f"{url}/delete", headers=admin)
     assert r.json()["data"]["company_key"]["key_set"] is False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="파일 권한 비트는 POSIX에서만 본다")
+def test_saved_key_file_is_readable_by_the_owner_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:  # noqa: ANN001
+    """저장한 키 파일은 umask가 느슨해도, 예전 임시 파일이 남아 있어도 0600이다."""
+    path = tmp_path / "llm_key.json"
+    monkeypatch.setenv("DEV_LLM_KEY_STORE", str(path))
+    old_umask = os.umask(0o002)  # 서버와 같은 umask
+    try:
+        stale = tmp_path / "llm_key.json.tmp"
+        stale.write_text("old")
+        stale.chmod(0o666)  # 이전에 느슨한 권한으로 남은 임시 파일
+        llm_key.set_key(KEY, model="big-model")
+    finally:
+        os.umask(old_umask)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert llm_key.load_saved() and llm_key.public()["key_set"] is True

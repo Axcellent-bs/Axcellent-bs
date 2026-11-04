@@ -2,10 +2,10 @@
 
 - 넣으면 코딩 에이전트(coder.py)가 서버 기본 키 대신 이 키로 부른다. 서버 AI 체험 한도는
   기본 키에만 걸리고, 고객사 키에는 월 예산(`State.monthly_budget_tokens`)만 걸린다.
-- 키는 이 프로세스 메모리와 저장 파일(`PLANNING_LLM_KEY_STORE`, run_all.sh가 git에 안 올라가는
-  backend/.data/에 둔다)에만 둔다. 화면·로그·상태 파일(planning_state)로는 돌려주지 않는다
-  (넣었는지와 끝 4자리만).
-- 주소·모델을 비우면 서버 설정(`PLANNING_LLM_*`)의 주소·모델을 쓴다.
+- 키는 이 프로세스 메모리와 저장 파일(`DEV_LLM_KEY_STORE`, 예전 이름
+  `PLANNING_LLM_KEY_STORE`도 읽음. run_all.sh가 git에 안 올라가는 backend/.data/에
+  둔다)에만 둔다. 화면·로그·상태 파일(planning_state)로는 돌려주지 않는다 (넣었는지와 끝 4자리만).
+- 주소·모델을 비우면 서버 설정(`DEV_LLM_*`·`LLM_*`)의 주소·모델을 쓴다.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import os
 from dataclasses import asdict, dataclass, field, replace
 
 from ax_agent_template.llm import LLMSettings
+from dev_agent import llm_env
 
 
 @dataclass(frozen=True)
@@ -36,7 +37,7 @@ def _hint(key: str) -> str:
 
 
 def _store_path() -> str:
-    return os.getenv("PLANNING_LLM_KEY_STORE") or ""
+    return llm_env.key_store_path()
 
 
 def _save() -> None:
@@ -48,7 +49,11 @@ def _save() -> None:
             os.remove(path)
         return
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    # 키 파일은 만든 사용자만 읽는다. 프로세스 umask(서버는 0002)로 만들면 그룹·다른 사용자가
+    # 읽을 수 있으므로 처음부터 0600으로 만들고, 예전 임시 파일이 남아 있어도 권한을 다시 맞춘다
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.chmod(tmp, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(asdict(_key), f)
     os.replace(tmp, path)
 

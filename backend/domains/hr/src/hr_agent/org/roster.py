@@ -8,14 +8,23 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 from ax_agent_template.routing import load_org
 
 # 시연용 가상 직원 수. 인수인계 명부(`roster/seed.py`)의 직원 ID와 같은 값이다.
 EXAMPLE_MEMBER_COUNT = 10
-# 전체 직원 수(가정). "전 직원 등록 완료"는 확정된 명부가 이 인원일 때만 표시할 수 있다
-EXPECTED_MEMBER_COUNT = 10
+
+
+def _expected_member_count() -> int:
+    """전체 직원 수. 환경변수 `HR_EXPECTED_MEMBERS`로 정하고, 없거나 잘못되면 10(가정)이다."""
+    raw = os.environ.get("HR_EXPECTED_MEMBERS", "").strip()
+    return int(raw) if raw.isdigit() and int(raw) > 0 else 10
+
+
+# 전체 직원 수. "전 직원 등록 완료"는 확정된 명부가 이 인원일 때만 표시할 수 있다
+EXPECTED_MEMBER_COUNT = _expected_member_count()
 
 
 @dataclass(frozen=True)

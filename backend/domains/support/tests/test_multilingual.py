@@ -248,3 +248,57 @@ def test_old_stored_analyses_without_the_new_fields_are_still_read() -> None:
         style="concise", reply="확인 후 안내드립니다.", validation=Validation(passed=True)
     )
     assert (draft.language, draft.reply_ko) == ("ko", None)
+
+
+# ---------------------------------------------------------------- 한국어 번역·핵심 요청
+def _translating_llm(message_ko: str, points: list[str]) -> MockLLMClient:
+    llm = fake_llm(ENGLISH)
+    classification = LLMClassification(
+        intent_ko="파손 환불 요청",
+        category="refund",
+        sentiment="frustrated",
+        urgency="medium",
+        search_query="환불 불량",
+        keywords=["refund"],
+        message_ko=message_ko,
+        request_points_ko=points,
+    )
+    llm.responses[LLMClassification] = classification  # type: ignore[attr-defined]
+    return llm
+
+
+def test_foreign_inquiry_gets_a_korean_translation_and_request_points(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    llm = _translating_llm(
+        "책이 파손되어 도착했습니다. 환불이 가능한가요?", ["파손 도서 환불 요청"]
+    )
+    monkeypatch.setattr(drafting, "get_llm", lambda: llm)
+    analysis, _ = analyze("My book arrived damaged. Can I get a refund?")
+    c = analysis.classification
+    assert c.message_ko == "책이 파손되어 도착했습니다. 환불이 가능한가요?"
+    assert c.request_points_ko == ["파손 도서 환불 요청"]
+
+
+def test_korean_inquiry_has_no_translation(monkeypatch: pytest.MonkeyPatch) -> None:
+    llm = _translating_llm("모델이 괜히 쓴 번역", ["쓸데없는 요청"])
+    monkeypatch.setattr(drafting, "get_llm", lambda: llm)
+    c = analyze("책 표지가 찢어져서 왔어요. 환불해 주세요")[0].classification
+    assert (c.message_ko, c.request_points_ko) == ("", [])
+
+
+def test_translation_is_masked_again_and_limited(monkeypatch: pytest.MonkeyPatch) -> None:
+    long_point = "요청" * 100
+    llm = _translating_llm(
+        "씨발 연락처는 010-1234-5678 입니다", ["a", "b", "c", "d", long_point, ""]
+    )
+    monkeypatch.setattr(drafting, "get_llm", lambda: llm)
+    c = analyze("I want a refund, call 010-1234-5678")[0].classification
+    assert "010-1234-5678" not in c.message_ko and "씨발" not in c.message_ko
+    assert c.request_points_ko == ["a", "b", "c"]  # 최대 3개
+
+
+def test_translation_is_empty_when_the_model_gave_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(drafting, "get_llm", lambda: fake_llm(ENGLISH))
+    c = analyze("My book arrived damaged")[0].classification
+    assert (c.message_ko, c.request_points_ko) == ("", [])

@@ -22,13 +22,17 @@
   이름이
   제목·콘티에 그대로 있으면 "상표·초상권 확인 필요" 경고
 - LLM 설정이 없거나 실패하면 빈 목록 + 이유(지어내지 않는다)
-- 하루 캐시: 오늘(한국 날짜) 만든 기획안이 있으면 그것을 준다. `regenerate`면 새로 만든다.
+- 하루 캐시: 오늘(한국 날짜) 같은 "규칙 버전"으로 만든 기획안이 있으면 그것을 준다. `regenerate`면
+  새로 만든다. 규칙 버전(`rules_version`) = 재료 거르기 설정(`[promo]`)·분류 목록·프롬프트의 해시라,
+  규칙이 바뀌면 다음 요청에서 자동으로 다시 만든다
   만든 기획안은 모두 기록으로 남긴다(`backend/.data/promo_concepts.db`, 피드백 저장은 아직 없음)
 README "promo_concepts".
 """
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
 import json
 import re
 import sqlite3
@@ -65,7 +69,12 @@ from data_agent.connectors import CatalogProduct
 from data_agent.explain import _bad_numbers
 from data_agent.skills.product_link import read_catalog
 from data_agent.skills.shorts_stats import shorts_stats
-from data_agent.skills.topic_category import CategoryCache
+from data_agent.skills.topic_category import (
+    _CATEGORY_GUIDE,
+    CATEGORY_VERSION,
+    TOPIC_CATEGORIES,
+    CategoryCache,
+)
 from data_agent.skills.trend_history import history
 from data_agent.skills.trend_popular import popular
 from data_agent.skills.trend_scan import TREND_CONFIG_ENV
@@ -174,28 +183,36 @@ class PromoStore:
                 "CREATE TABLE IF NOT EXISTS runs (run_id TEXT PRIMARY KEY, day TEXT NOT NULL,"
                 " created_at TEXT NOT NULL, output TEXT NOT NULL)"
             )
+            cols = [r[1] for r in self._conn.execute("PRAGMA table_info(runs)")]
+            if "rules" not in cols:  # 예전 파일: 규칙 버전 칸 (예전 줄은 NULL = 캐시로 안 씀)
+                self._conn.execute("ALTER TABLE runs ADD COLUMN rules TEXT")
+            self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
 
-    def save(self, day: date, output: PromoConceptsOutput) -> None:
+    def save(self, day: date, output: PromoConceptsOutput, rules: str | None = None) -> None:
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT INTO runs VALUES (?,?,?,?)",
+                "INSERT INTO runs (run_id, day, created_at, output, rules) VALUES (?,?,?,?,?)",
                 (
                     output.run_id,
                     day.isoformat(),
                     (output.generated_at or datetime.now(UTC)).isoformat(),
                     output.model_dump_json(),
+                    rules,
                 ),
             )
 
-    def latest(self, day: date) -> PromoConceptsOutput | None:
+    def latest(self, day: date, rules: str | None = None) -> PromoConceptsOutput | None:
+        """그날 마지막 기록. `rules`를 주면 그 규칙 버전으로 만든 것만."""
+        sql = "SELECT output FROM runs WHERE day = ?"
+        args: tuple[str, ...] = (day.isoformat(),)
+        if rules is not None:
+            sql += " AND rules = ?"
+            args += (rules,)
         with self._lock:
-            row = self._conn.execute(
-                "SELECT output FROM runs WHERE day = ? ORDER BY rowid DESC LIMIT 1",
-                (day.isoformat(),),
-            ).fetchone()
+            row = self._conn.execute(sql + " ORDER BY rowid DESC LIMIT 1", args).fetchone()
         return PromoConceptsOutput.model_validate_json(row[0]) if row else None
 
 
@@ -390,6 +407,21 @@ class PromoResult:
     evidence: Evidence
 
 
+def rules_version(config: PromoConfig) -> str:
+    """기획안 규칙 버전: 재료 거르기 설정·분류 목록·프롬프트의 해시 (하나라도 바뀌면 달라진다)."""
+    parts = {
+        "config": dataclasses.asdict(config),
+        "categories": list(TOPIC_CATEGORIES),
+        "category_version": CATEGORY_VERSION,
+        "category_guide": _CATEGORY_GUIDE,
+        "never_trend": sorted(NEVER_TREND),
+        "music_caution": MUSIC_CAUTION,
+        "prompt": _prompt(config, None),
+    }
+    text = json.dumps(parts, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
 def _today(now: datetime) -> date:
     return now.astimezone(KST).date()
 
@@ -520,16 +552,17 @@ async def make_concepts(
     own_store = store is None
     store = store or PromoStore(env.get(DB_ENV) or DEFAULT_DB)
     try:
-        if not request.regenerate and (hit := store.latest(today)) is not None:
+        rules = rules_version(config)
+        if not request.regenerate and (hit := store.latest(today, rules)) is not None:
             out = hit.model_copy(update={"cached": True})
-            return PromoResult(out, Evidence(queries=["promo_concepts cache"],
+            return PromoResult(out, Evidence(queries=[f"promo_concepts cache rules={rules}"],
                                data_summary=out.summary, collected_at=now))  # fmt: skip
         result = await _generate(
             config, connector, llm, env=env, catalog=catalog, now=now,
             context_id=context_id, category_cache=category_cache, board=board, youtube=youtube,
         )  # fmt: skip
         if result.output.concepts:
-            store.save(today, result.output)
+            store.save(today, result.output, rules)
         return result
     finally:
         if own_store:

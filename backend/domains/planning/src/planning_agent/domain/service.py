@@ -127,6 +127,7 @@ from ax_workflow.rules import (
 from planning_agent import (
     ask_requester,
     cause_inbox,
+    notion_import,
     related,
     release_check,
 )
@@ -225,6 +226,20 @@ class RejectSpecParams(SpecParams):
     reason: str = Field(min_length=1)
 
 
+class DocParams(BaseModel):
+    """문서 하나를 가리킨다."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    doc: str
+
+
+class NotionImportParams(BaseModel):
+    """노션 페이지 주소(또는 ID)."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    url: str = Field(min_length=1, max_length=500)
+
+
 class PauseParams(RequestParams):
     """사람이 요청을 중단한다. 이유는 활동에만 남긴다."""
 
@@ -234,6 +249,7 @@ class PauseParams(RequestParams):
 class EditSpecParams(SpecParams):
     """확정 전 기획서를 사람이 고친다. 빈 값은 그대로 둔다."""
 
+    title: str = ""
     problem: str = ""
     goal: str = ""
     paras: dict[str, str] = Field(default_factory=dict)
@@ -253,6 +269,8 @@ class PlanningService(PlanningCore):
         "reject_spec": ("_reject_spec", RejectSpecParams),
         "edit_spec": ("_edit_spec", EditSpecParams),
         "pause_request": ("_pause_request", PauseParams),
+        "delete_doc": ("_delete_doc", DocParams),
+        "import_notion": ("_import_notion", NotionImportParams),
         "resume_request": ("_resume_request", RequestParams),
         "send_release_order": ("_send_release_order_action", ReleaseOrderParams),
     }
@@ -281,6 +299,8 @@ class PlanningService(PlanningCore):
         self.release_checks: dict[str, dict[str, Any]] = {}
         # 접수할 때 이미 비슷한 요청을 찾은 요청 id (_relate_new가 다시 찾지 않게)
         self._pre_related: set[str] = set()
+        # 노션 읽기 (시험은 가짜로 바꿔 끼운다)
+        self.notion_fetch = notion_import.fetch
         self._spec_writer: SpecWriter | None = (
             default_writer() if spec_writer == "default" else spec_writer
         )
@@ -2037,19 +2057,32 @@ class PlanningService(PlanningCore):
         )
 
     async def _edit_spec(
-        self, s: State, spec: str, problem: str, goal: str, paras: dict[str, str]
+        self,
+        s: State,
+        spec: str,
+        problem: str,
+        goal: str,
+        paras: dict[str, str],
+        title: str = "",
     ) -> ActionResult | None:
-        """사람 버튼 "수정": 확정 전 기획서의 문제·목표·문단 글을 고친다.
+        """사람 수정: 기획서의 제목·문제·목표·문단 글을 고친다.
 
-        확정된 기획서는 작업이 개발로 나가서 고치지 않는다(SPEC_CONFIRMED). 바뀐 곳마다 사람이 쓴
+        확정된 기획서는 제목·문제·목표만 고친다. 문단(요구사항·완료 기준)은 작업이 개발로 나가
+        고치지 않는다(SPEC_CONFIRMED, 개정 흐름은 다음 단계). 바뀐 곳마다 사람이 쓴
         문장 수를 늘리고 활동에 남긴다. 확정 조건은 다음 진행에서 다시 본다.
         """
         sp = next((x for x in s.specs if x.id == spec), None)
         if sp is None:
             raise ActionError("NOT_FOUND", f"기획서 {spec}가 없습니다")
-        if sp.status == "확정":
-            raise ActionError("SPEC_CONFIRMED", f"{spec}는 확정돼서 고칠 수 없습니다")
+        # 확정 뒤에도 제목·문제·목표(설명)는 고친다. 요구사항·완료 기준은 작업·대조 기준이라 막는다
+        if sp.status == "확정" and any((v or "").strip() for v in paras.values()):
+            raise ActionError(
+                "SPEC_CONFIRMED", f"{spec}는 확정돼서 요구사항·완료 기준은 고칠 수 없습니다"
+            )
         changed: list[str] = []
+        if title.strip() and title.strip() != sp.title:
+            sp.title = title.strip()
+            changed.append("제목")
         if problem.strip() and problem.strip() != sp.problem:
             sp.problem = problem.strip()
             changed.append("문제")
@@ -2197,8 +2230,46 @@ class PlanningService(PlanningCore):
         fn(d)
         d.updated_at = self.clock()
 
+    @staticmethod
+    def _next_doc_id(s: State) -> str:
+        """지운 문서가 있어도 번호가 겹치지 않게 가장 큰 번호 + 1."""
+        nums = [int(x.id.split("-")[1]) for x in s.docs if x.id.split("-")[-1].isdigit()]
+        return f"DOC-{max(nums, default=0) + 1}"
+
+    async def _delete_doc(self, s: State, doc: str) -> ActionResult | None:
+        """사람 버튼 "삭제": 정리 문서를 지운다 (기획서는 지우지 않는다)."""
+        d = next((x for x in s.docs if x.id == doc), None)
+        if d is None:
+            return None
+        s.docs = [x for x in s.docs if x.id != doc]
+        return ActionResult(output={"doc_id": doc, "deleted": True})
+
+    async def _import_notion(self, s: State, url: str) -> ActionResult:
+        """사람 버튼 "노션에서 가져오기": 노션 페이지를 읽어 새 정리 문서로 저장한다 (읽기만)."""
+        try:
+            page = await self.notion_fetch(url)
+        except notion_import.NotionError as exc:
+            raise ActionError(exc.code, exc.message) from exc
+        doc_id = self._next_doc_id(s)
+        blocks = [DocBlock(id="b1", kind="ref", text=f"노션 원본: {page.url}")]
+        for n, (kind, text, done) in enumerate(page.blocks, start=2):
+            blocks.append(DocBlock(id=f"b{n}", kind=kind, text=text, done=done))
+        s.docs.append(
+            Doc(id=doc_id, title=page.title, updated_at=self.clock(), blocks=blocks, by="human")
+        )
+        skipped = f", 못 옮긴 블록 {page.skipped}개" if page.skipped else ""
+        s.activity.append(
+            self._act(
+                self.clock(), f"doc:{doc_id}", "human", "planning", "import_notion", "사람",
+                f"노션 페이지 → {doc_id} \"{page.title}\" (블록 {len(page.blocks)}개{skipped})",
+            )
+        )  # fmt: skip
+        return ActionResult(
+            output={"doc_id": doc_id, "blocks": len(page.blocks), "skipped": page.skipped}
+        )
+
     async def _new_doc(self, s: State, title: str) -> ActionResult:
-        doc_id = f"DOC-{len(s.docs) + 1}"
+        doc_id = self._next_doc_id(s)
         s.docs.append(
             Doc(
                 id=doc_id,
@@ -2213,7 +2284,7 @@ class PlanningService(PlanningCore):
         r = next((x for x in s.requests if x.id == about), None)
         if r is None:
             return None
-        doc_id = f"DOC-{len(s.docs) + 1}"
+        doc_id = self._next_doc_id(s)
         blocks = gather_blocks(s, about)
         s.docs.append(
             Doc(

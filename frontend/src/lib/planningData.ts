@@ -607,9 +607,11 @@ export type Action =
   | { type: 'writeSpec'; request: string }
   | { type: 'unlinkDuplicate'; request: string }
   | { type: 'rejectSpec'; spec: string; reason: string } // 확인 대기 기획서 거절 (승인은 humanDecide)
+  | { type: 'deleteDoc'; doc: string } // 정리 문서 지우기
+  | { type: 'importNotion'; url: string } // 노션 페이지를 문서로 가져오기 (서버에서만, 예시 모드는 그대로)
   | { type: 'pauseRequest'; request: string; reason?: string } // 사람이 요청을 중단
   | { type: 'resumeRequest'; request: string } // 중단한 요청 재개
-  | { type: 'editSpec'; spec: string; problem: string; goal: string; paras: Record<string, string> } // 확정 전 기획서를 사람이 고침
+  | { type: 'editSpec'; spec: string; title?: string; problem?: string; goal?: string; paras?: Record<string, string> } // 확정 전 기획서를 사람이 고침 (칸에서 벗어날 때 저장)
   | { type: 'sendReleaseOrder'; check: string; note?: string } // 배포 전 대조가 사람 확인이면 사람이 배포 지시
   // 교차검증·학습 기준·사람 확인
   | { type: 'decideReview'; review: string } // 시연: 검증자(다른 부서)가 판단
@@ -1252,6 +1254,9 @@ function patchDoc(s: State, id: string, f: (d: Doc) => Doc): State {
 }
 
 // 요청 하나에 걸린 것(기획서 문단·작업·PR·대화·결정·장애)을 모아 정리 문서 블록으로 만든다
+/** 지운 문서가 있어도 번호가 겹치지 않게 가장 큰 번호 + 1 */
+export const nextDocId = (s: State) => `DOC-${Math.max(0, ...s.docs.map((x) => Number(x.id.split('-')[1]) || 0)) + 1}`
+
 export function gatherBlocks(s: State, about: string): DocBlock[] {
   const r = s.requests.find((x) => x.id === about)
   const out: Omit<DocBlock, 'id'>[] = []
@@ -1338,14 +1343,18 @@ function talkAndDocs(s: State, a: Action): State | null {
         ],
       }
     }
+    case 'importNotion':
+      return s
+    case 'deleteDoc':
+      return { ...s, docs: s.docs.filter((x) => x.id !== a.doc) }
     case 'newDoc': {
-      const id = `DOC-${s.docs.length + 1}`
+      const id = nextDocId(s)
       return { ...s, docs: [...s.docs, { id, title: a.title || '제목 없는 문서', updated: now(), blocks: [{ id: 'b1', kind: 'p', text: '' }] }] }
     }
     case 'gatherDoc': {
       const r = s.requests.find((x) => x.id === a.about)
       if (!r) return s
-      const id = `DOC-${s.docs.length + 1}`
+      const id = nextDocId(s)
       const blocks = gatherBlocks(s, a.about)
       return {
         ...s,
@@ -1392,11 +1401,15 @@ function inner(s: State, a: Action): State {
     }
     case 'editSpec': {
       const spec = s.specs.find((x) => x.id === a.spec)
-      if (!spec || spec.status === '확정') return s
+      if (!spec) return s
+      // 확정 뒤에는 제목·문제·목표만 (요구사항·완료 기준은 작업·대조 기준)
+      if (spec.status === '확정' && Object.values(a.paras ?? {}).some((v) => v.trim())) return s
+      const title = a.title?.trim() ?? '', problem = a.problem?.trim() ?? '', goal = a.goal?.trim() ?? '', paras = a.paras ?? {}
       const changed = [
-        ...(a.problem.trim() && a.problem.trim() !== spec.problem ? ['문제'] : []),
-        ...(a.goal.trim() && a.goal.trim() !== spec.goal ? ['목표'] : []),
-        ...spec.paras.filter((p) => a.paras[p.id]?.trim() && a.paras[p.id].trim() !== p.text).map((p) => p.id),
+        ...(title && title !== spec.title ? ['제목'] : []),
+        ...(problem && problem !== spec.problem ? ['문제'] : []),
+        ...(goal && goal !== spec.goal ? ['목표'] : []),
+        ...spec.paras.filter((p) => paras[p.id]?.trim() && paras[p.id].trim() !== p.text).map((p) => p.id),
       ]
       if (!changed.length) return s
       const req = s.requests.find((r) => r.id === spec.request)
@@ -1404,9 +1417,10 @@ function inner(s: State, a: Action): State {
         ...s,
         specs: s.specs.map((x) => (x.id !== spec.id ? x : {
           ...x,
-          problem: a.problem.trim() || x.problem,
-          goal: a.goal.trim() || x.goal,
-          paras: x.paras.map((p) => (a.paras[p.id]?.trim() ? { ...p, text: a.paras[p.id].trim() } : p)),
+          title: title || x.title,
+          problem: problem || x.problem,
+          goal: goal || x.goal,
+          paras: x.paras.map((p) => (paras[p.id]?.trim() ? { ...p, text: paras[p.id].trim() } : p)),
           humanSentences: x.humanSentences + changed.length,
         })),
         activity: [...s.activity, { t: now(), ctx: req?.ctx ?? `spec:${spec.id}`, from: 'human', to: 'planning', point: 'edit_spec', kind: '사람', text: `${spec.id} 사람이 고침 · ${changed.join(', ')}` }],

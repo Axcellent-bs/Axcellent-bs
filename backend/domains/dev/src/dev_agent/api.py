@@ -442,7 +442,7 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         `mode`(agent·subscription)는 이 대화가 띄울 작업을 누가 코딩하나."""
         svc = get_service()
         if dev_chat.get_llm() is None:
-            return _err(409, "LLM_NOT_CONFIGURED", "LLM 설정이 없다 (PLANNING_LLM_*·LLM_*)")
+            return _err(409, "LLM_NOT_CONFIGURED", "LLM 설정이 없다 (DEV_LLM_*·LLM_*)")
         body = await _body(request)
         if body is None:
             return _err(400, "INVALID_INPUT", "본문은 JSON 객체여야 한다")

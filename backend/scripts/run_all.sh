@@ -135,7 +135,7 @@ export SAFETY_CORS_ORIGINS="$WEB" PLANNING_CORS_ORIGINS="$WEB"
 # 화면에서 넣은 형상관리 연결(토큰 포함)을 다시 켜도 남게 저장한다. .data/는 git에 안 올라간다
 export PLANNING_VCS_STORE="$PWD/$DATA/vcs_connections.json"
 # 화면에서 넣은 고객사 API 키(BYOK)도 같은 곳에 저장한다 (커밋하지 않는다)
-export PLANNING_LLM_KEY_STORE="$PWD/$DATA/llm_key.json"
+export DEV_LLM_KEY_STORE="$PWD/$DATA/llm_key.json"
 # 기획·개발 상태를 서비스 역할마다 파일에 이어 쓴다 (다시 켜도 요청·작업·PR·대화가 남음)
 export PLANNING_STATE_DIR="$PWD/$DATA"
 # data: 오늘 네이버 판정("지금 급등 중" 배지)을 파일에 남겨 다시 켜도 그날 배지가 유지되게

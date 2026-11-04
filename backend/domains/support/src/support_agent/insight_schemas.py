@@ -45,6 +45,7 @@ class WaitingInquiry(AxModel):
     sentiment: str | None = None
     preview: str
     waiting_minutes: int
+    language: str = "ko"
 
 
 class InquiryOverview(AxModel):

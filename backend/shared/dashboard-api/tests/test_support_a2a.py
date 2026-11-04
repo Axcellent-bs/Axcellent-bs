@@ -335,3 +335,18 @@ def test_abusive_subject_is_replaced_by_the_masked_one_everywhere(
     assert client.post(BASE + "/conversations/7/status", json=body).json()["data"]["subject"] == (
         "[비속어] 환불"
     )
+
+
+def test_conversation_list_carries_the_language_and_can_be_filtered(
+    client: TestClient, fake: Fake
+) -> None:
+    """목록에 언어가 실리고, 언어 조건이 support로 넘어간다."""
+    fake.output = {"items": [{**ITEM, "language": "ja"}]}
+    listed = client.get(BASE + "/conversations", params={"language": "ja"}).json()["data"][0]
+    assert listed["language"] == "ja"
+    assert fake.sent[-1].input["language"] == "ja"
+
+    fake.output = {"items": [ITEM]}  # 언어 값이 없는 옛 응답
+    client.get(BASE + "/conversations")
+    assert "language" not in fake.sent[-1].input  # 조건이 없으면 보내지 않는다
+    assert client.get(BASE + "/conversations").json()["data"][0]["language"] == "ko"  # 기본값

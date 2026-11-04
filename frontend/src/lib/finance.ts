@@ -663,8 +663,8 @@ export function sortIncidents(list: IncidentSummary[]): IncidentSummary[] {
 }
 
 export const LEDGER_SOURCE_KO: Record<LedgerSource, { label: string; detail: string }> = {
-  events: { label: "이벤트 알림", detail: "마케팅 AI가 쿠폰을 줄 때 보낸 알림을 받아 장부에 적었습니다." },
-  safety_executions: { label: "안전 장치 실행 기록", detail: "알림을 받을 수 없어, 안전 장치가 남긴 쿠폰 지급 실행 기록을 읽어 장부를 채웠습니다." },
+  events: { label: "이벤트 알림", detail: "이 사건의 안전 장치 실행 기록이 없어(예: 재시작 뒤), 마케팅 AI가 쿠폰을 줄 때 보낸 알림으로 장부를 채웠습니다." },
+  safety_executions: { label: "안전 장치 실행 기록", detail: "안전 장치가 남긴 쿠폰 지급 실행 기록을 원본으로 씁니다. 같은 쿠폰의 알림은 금액에 더하지 않습니다." },
   seed: { label: "예시 데이터", detail: "연습용 예시 자료입니다. 실제 쿠폰 지급 기록이 아닙니다." },
 };
 export const ledgerSourceKo = (s: LedgerSource | string | null | undefined) =>

@@ -12,11 +12,11 @@ import { Specs } from '@/components/planning/specs'
 
 const SECTIONS: Record<string, Section> = {
   requests: { label: '요청', icon: 'bell', tabs: [] }, // 들어온·진행 중·해결·후속은 화면 안 필터 (requests/<필터>)
-  work: { label: '기획서', icon: 'plan', tabs: [{ id: 'specs', label: '기획서' }] },
+  work: { label: '문서·기획서', icon: 'plan', tabs: [{ id: 'specs', label: '문서·기획서' }] },
   agents: { label: '에이전트 대화', icon: 'send', tabs: [] },
   talk: { label: '소통', icon: 'send', tabs: [], hidden: true },
   projects: { label: '프로젝트', icon: 'menu', tabs: [], hidden: true }, // 요청 줄 제목을 누르면 요청 1건을 깊게
-  docs: { label: '문서', icon: 'report', tabs: [] },
+  docs: { label: '정리', icon: 'report', tabs: [], hidden: true }, // 메뉴에서 뺌 (요청 정리는 기획서가 맡는다). AI 대화가 만든 DOC 링크만 연다
   knowledge: { label: '규정·자료', icon: 'admin', tabs: [], hidden: true },
   metrics: { label: '지표', icon: 'dashboard', hidden: true, tabs: [
     { id: 'overview', label: '지표' },

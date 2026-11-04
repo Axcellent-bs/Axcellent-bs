@@ -60,12 +60,10 @@ export function Docs({ s, d, item }: { s: State; d: Dispatch<Action>; item?: str
 
   return (
     <>
-    <PageHeader title="문서" sub="요청에 걸린 기획서·작업·PR·대화·결정을 한 장으로 모으고 사람이 고친다." />
     <div className="three">
       <aside className="col-left">
-        <a href={toPath('docs')} className="plain-link small">‹ 문서 목록</a>
-        <div className="ph" style={{ marginTop: 10 }}>문서 {s.docs.length}개</div>
-        {make}
+        <a href={toPath('work/specs')} className="plain-link small">‹ 문서·기획서 목록</a>
+        {doc && <DocOutline doc={doc} />}
       </aside>
 
       <section className="col-doc">{doc ? <Editor key={doc.id} doc={doc} d={d} s={s} /> : <span className="muted">{item} 문서가 없습니다.</span>}</section>
@@ -78,10 +76,39 @@ export function Docs({ s, d, item }: { s: State; d: Dispatch<Action>; item?: str
   )
 }
 
-function Editor({ doc, d, s }: { doc: Doc; d: Dispatch<Action>; s: State }) {
+// 문서 개요 = 목차: 소제목마다 누르면 그 자리로, 할 일은 끝난 수/전체
+function DocOutline({ doc }: { doc: Doc }) {
+  const heads = doc.blocks.filter((b) => b.kind === 'h2' && b.text.trim())
   const todos = doc.blocks.filter((b) => b.kind === 'todo')
+  const jump = (id: string) => document.getElementById(`blk-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   return (
     <>
+      <div className="ph" style={{ marginTop: 10 }}>{doc.id} 개요</div>
+      <ul className="outline">
+        {heads.length ? heads.map((b) => <li key={b.id}><button type="button" onClick={() => jump(b.id)}>{b.text}</button></li>) : <li className="muted">소제목 없음</li>}
+        {todos.length > 0 && <li><button type="button" onClick={() => jump(todos[0].id)}>할 일 {todos.filter((b) => b.done).length}/{todos.length}</button></li>}
+      </ul>
+    </>
+  )
+}
+
+function Editor({ doc, d, s }: { doc: Doc; d: Dispatch<Action>; s: State }) {
+  const toast = useToast()
+  const todos = doc.blocks.filter((b) => b.kind === 'todo')
+  // 글은 칸에서 벗어날 때 저장된다. "저장"은 지금 쓰던 칸을 바로 저장한다
+  const saveNow = () => { (document.activeElement as HTMLElement | null)?.blur(); toast.show(`${doc.id} 저장됨`) }
+  const remove = () => {
+    if (!window.confirm(`${doc.id} "${doc.title}" 문서를 지울까요? 되돌릴 수 없어요.`)) return
+    d({ type: 'deleteDoc', doc: doc.id })
+    toast.show(`${doc.id} 삭제`)
+    go(toPath('work/specs'))
+  }
+  return (
+    <>
+      <div className="doc-actions">
+        <Button size="small" variant="primary" onClick={saveNow}>저장</Button>
+        <Button size="small" onClick={remove}>삭제</Button>
+      </div>
       <input
         key={`title-${doc.title}`}
         className="doc-title-input"
@@ -97,7 +124,7 @@ function Editor({ doc, d, s }: { doc: Doc; d: Dispatch<Action>; s: State }) {
         {doc.by === 'ai' && <> · AI 어시스턴트가 정리</>}
       </p>
       <div className="doc-blocks">
-        {doc.blocks.map((b) => <Block key={`${b.id}-${b.text}-${b.done}`} b={b} doc={doc.id} d={d} s={s} />)}
+        {doc.blocks.map((b) => <div key={`${b.id}-${b.text}-${b.done}`} id={`blk-${b.id}`}><Block b={b} doc={doc.id} d={d} s={s} /></div>)}
       </div>
       <div className="actions">
         <Button size="small" onClick={() => d({ type: 'addBlock', doc: doc.id, kind: 'h2' })}>+ 소제목</Button>

@@ -106,3 +106,6 @@ export const SKILL_KO: Record<string, string> = {
 };
 
 export const skillLabel = (skill: string) => SKILL_KO[skill] ?? skill;
+
+/** 문의 언어 이름표 (목록의 언어별 보기·배지). 모르는 값은 기타로 본다 */
+export const LANGUAGE_KO: Record<string, string> = { ko: "한국어", en: "English", ja: "日本語", zh: "中文", other: "기타" };

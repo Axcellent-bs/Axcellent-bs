@@ -17,7 +17,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from ax_agent_template.llm import LLMClient, LLMSettings
+from ax_agent_template.llm import LLMClient
+from dev_agent import llm_env
 
 PATH_SCORE = 3
 WORD_SCORE = 1
@@ -152,12 +153,12 @@ def reset_llm() -> None:
 
 
 def get_llm() -> LLMClient | None:
-    """바꿔 끼운 것, 아니면 planning LLM 설정(`PLANNING_LLM_*`·`LLM_*`)이 있을 때만 클라이언트."""
+    """바꿔 끼운 것, 아니면 개발 LLM 설정(`DEV_LLM_*`·`LLM_*`)이 있을 때만 클라이언트."""
     if _llm_set:
         return _llm
-    settings = LLMSettings.from_env("planning")
+    settings = llm_env.settings()
     if settings.model and settings.base_url:
-        return LLMClient("planning", settings=settings)
+        return LLMClient(llm_env.DEPT, settings=settings)
     return None
 
 

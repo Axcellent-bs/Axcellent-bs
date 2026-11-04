@@ -33,7 +33,8 @@
       "allowed_requesters": [
         "dashboard-api",
         "orchestrator",
-        "shop-api"
+        "shop-api",
+        "support"
       ],
       "verifier": null,
       "priority": "required",

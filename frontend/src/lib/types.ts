@@ -121,6 +121,8 @@ export interface Draft { style: "empathetic" | "concise" | "step_by_step"; reply
 export interface Classification {
   intent_ko: string; category: string; sentiment: "calm" | "frustrated" | "angry"; urgency: "low" | "medium" | "high";
   search_query: string; pii_masked: string[];
+  /** 한국어가 아닌 문의의 한국어 번역과 핵심 요청 (한국어 문의·옛 응답에는 없다) */
+  language?: string; message_ko?: string; request_points_ko?: string[];
 }
 export interface Analysis {
   classification?: Classification; sources?: Source[]; drafts?: Draft[]; timings_ms?: Record<string, number>; validation?: Validation;
@@ -140,6 +142,8 @@ export interface ConversationListItem {
   id: number; customer_name: string; subject: string; subject_display?: string | null; category: string | null; sentiment: string | null;
   urgency: "low" | "medium" | "high" | null; status: "open" | "resolved" | "escalated"; order_id: number | null;
   updated_at: string; preview: string; awaiting_reply: boolean;
+  /** 고객이 마지막으로 쓴 언어. 옛 응답에는 없을 수 있다 */
+  language?: "ko" | "en" | "ja" | "zh" | "other";
 }
 /** 상담 콘솔의 클레임 접수 입력 (구매자·주문은 서버가 문의에서 읽는다) */
 export interface ClaimIntake {

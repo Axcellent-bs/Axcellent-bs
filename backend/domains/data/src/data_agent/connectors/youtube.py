@@ -241,10 +241,11 @@ class YouTubeConnector:
         region: str = "KR",
         max_results: int = PAGE_SIZE,
         language: str | None = None,
+        query: str | None = None,
     ) -> list[VideoStat]:
         """YouTube 카테고리 하나의 최근 게시 영상을 조회수 순으로 검색 → 결과 영상의 통계.
 
-        길이 조건 없음. 검색 100단위 + 통계 1단위(50개마다).
+        길이 조건 없음. `query`가 있으면 검색어(q, `|`는 또는). 검색 100단위 + 통계 1단위(50개마다).
         """
         params = {
             "part": "snippet",
@@ -257,6 +258,8 @@ class YouTubeConnector:
         }
         if language:
             params["relevanceLanguage"] = language
+        if query:
+            params["q"] = query
         page = _parse(_SearchPage, await self._get("search", params), "카테고리 검색")
         ids = [item.id.videoId for item in page.items if item.id.videoId]
         return await self.videos(ids) if ids else []

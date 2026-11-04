@@ -25,6 +25,10 @@ PROFANITY = (
     "ㅂㅅ",
     "좆",
     "개새",
+    "개같이",
+    "개같은",
+    "개같네",
+    "개같다",
     "지랄",
     "ㅈㄹ",
     "존나",
@@ -78,7 +82,9 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("insult", _pattern(INSULT)),
     ("profanity", _pattern(PROFANITY)),
 )
-_EXCEPTION = _pattern(EXCEPTIONS)
+# "두개같이 보내 주세요"처럼 개수 뒤에 붙은 "개같이"는 욕설이 아니다 (띄어 쓰면 애초에 안 걸린다)
+_COUNTED = r"[0-9한두세네몇열]개같"
+_EXCEPTION = re.compile("|".join([_pattern(EXCEPTIONS).pattern, _COUNTED]))
 # 글자 사이에 숫자·기호를 끼운 표기("시1발", "씨.발"). 띄어쓰기는 "김씨 발송" 같은 낱말과 섞여 뺀다
 _GAP = r"[^\s가-힣A-Za-z]{1,2}"
 _EVASIVE = re.compile(

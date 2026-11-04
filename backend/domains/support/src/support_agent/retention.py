@@ -103,6 +103,9 @@ def redact(conversation: Conversation, stamp: str) -> tuple[Conversation, dict[s
             analysis.classification.intent_ko = PURGED
             analysis.classification.search_query = ""
             analysis.classification.keywords = []  # `pii_masked`는 종류만 있어 남긴다
+            if analysis.classification.message_ko:  # 번역과 핵심 요청도 고객 원문에서 나온 것이다
+                analysis.classification.message_ko = PURGED
+            analysis.classification.request_points_ko = []
         for draft in analysis.drafts or []:
             draft.reply = PURGED
             if draft.reply_ko is not None:
