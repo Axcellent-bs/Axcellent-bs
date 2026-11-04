@@ -1471,6 +1471,18 @@ function proposalsOf(s: State, a: ProposalAction): State {
       activity: [...s.activity, { t: now(), ctx, from: 'human', to: 'planning', point: 'make_plan', kind: '사람', text: `${p.id} 확정 → 기획안 ${specId} (${reqId})` }],
     }
   }
+  if (a.type === 'deleteProposal') {
+    if (!p) return s
+    const reqIds = new Set(s.requests.filter((r) => r.id === p.request || r.spec === p.spec && !!p.spec).map((r) => r.id))
+    if (s.tasks.some((t) => !!p.spec && t.spec === p.spec)) return s
+    return {
+      ...s,
+      proposals: xs.filter((x) => x.id !== p.id),
+      specs: p.spec ? s.specs.filter((x) => x.id !== p.spec) : s.specs,
+      requests: s.requests.filter((r) => !reqIds.has(r.id)),
+      activity: [...s.activity, { t: now(), ctx: `proposal:${p.id}`, from: 'human', to: 'planning', point: 'delete_proposal', kind: '사람', text: `${p.id} 제안 삭제` }],
+    }
+  }
   if (a.type === 'proposalToRequest' && p?.spec && proposalReady(p)) {
     // 기획안 → 개발: 그 기획서를 사람이 확정한 것으로 (작업 분할 → PR 흐름)
     const confirmed = confirmSpecCore(s, p.spec, 'human', `${p.id} 기획안 → 개발`)

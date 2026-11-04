@@ -20,7 +20,15 @@ export function ProposalActions({ s, d, item }: P & { item?: string }) {
   const toast = useToast()
   const [reason, setReason] = useState<string | null>(null)
   const p = item ? (s.proposals ?? []).find((x) => x.id === item) : undefined
-  if (!p || !proposalOpen(p)) return null
+  if (!p) return null
+  const remove = () => {
+    const sent = !!p.handoff?.ok
+    if (!window.confirm(`${p.id} "${p.title}" 제안을 지울까요?${p.spec ? ` 기획안 ${p.spec}와 요청도 같이 지워져요.` : ''}${sent ? ' 마케팅에 넘긴 기획안은 마케팅 쪽에 남아요.' : ''}`)) return
+    d({ type: 'deleteProposal', proposal: p.id }); toast.show(`${p.id} 삭제`); go(toPath('proposals'))
+  }
+  const reqSpec = s.requests.find((r) => r.id === p.request)?.spec
+  const deletable = !s.tasks.some((t) => t.spec === p.spec || (!!reqSpec && t.spec === reqSpec))
+  if (!proposalOpen(p)) return deletable ? <Button onClick={remove}>삭제</Button> : null
   const nextSpec = `SPEC-${Math.max(0, ...s.specs.map((x) => Number(x.id.split('-')[1]) || 0)) + 1}`
   if (reason !== null) {
     return (

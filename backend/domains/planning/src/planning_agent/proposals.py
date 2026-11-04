@@ -194,6 +194,9 @@ def from_promo(out: PromoConceptsOutput) -> list[ReceiveInsightInput]:
     seasons = [c for c in out.season_checks if c.status == "known" and c.same_month_ratio]
     items: list[ReceiveInsightInput] = []
     for c in out.concepts:
+        # 회사 상품·도메인과 연결 없는 트렌드는 참고용이라 뺀다 (brief 경로와 같게)
+        if c.reference_only:
+            continue
         facts = _facts(c, trends, seasons)
         if not facts:
             continue
