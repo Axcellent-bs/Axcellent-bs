@@ -1,11 +1,13 @@
+import json
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from ax_agent_template import events
 from ax_contracts.schemas import ExecuteDecision
-from marketing_agent import handlers
+from marketing_agent import handlers, shop_client
 from marketing_agent.main import app, load_card
 
 CTX = "ctx_inc_0001"
@@ -504,3 +506,92 @@ def test_coupon_event_carries_the_buyer_and_execution_for_the_ledger(monkeypatch
     assert _coupon(buyer_id="buy_a9")["status"] == "completed"
     data = events.MOCK_PUBLISHED[-1].data
     assert (data["buyer_id"], data["execution_id"]) == ("buy_a9", "exe_x1")
+
+
+def _shop(monkeypatch: pytest.MonkeyPatch, handler) -> list[httpx.Request]:  # noqa: ANN001
+    """쿠폰 발급을 shop-api(가짜)로 보내게 한다."""
+    seen: list[httpx.Request] = []
+
+    def record(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return handler(request)
+
+    monkeypatch.setenv("MARKETING_COUPON_SOURCE", "shop-api")
+    monkeypatch.setattr(
+        shop_client, "_client", httpx.AsyncClient(transport=httpx.MockTransport(record))
+    )
+    return seen
+
+
+def _created(request: httpx.Request) -> httpx.Response:
+    body = json.loads(request.content)
+    coupon = {"coupon_id": "cpn_0042", "buyer_id": body["buyer_id"], "count": body["count"]}
+    return httpx.Response(201, json={"data": coupon, "meta": {}})
+
+
+def test_executed_coupon_is_created_in_shop_api_and_uses_its_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """안전 장치를 통과한 쿠폰은 쇼핑몰에도 만든다. 번호는 shop-api 것이고 이벤트에도 같이 간다."""
+    _fake_execute(monkeypatch, _decision())
+    seen = _shop(monkeypatch, _created)
+    result = _coupon(count=2, unit_value=1500)
+    assert result["status"] == "completed" and result["output"]["coupon_id"] == "cpn_0042"
+    (request,) = seen
+    assert request.method == "POST" and request.url.path == "/api/shop/coupons"
+    assert request.headers["authorization"] == "Bearer mock:marketing"
+    sent = json.loads(request.content)
+    assert sent["idempotency_key"] == f"{CTX}:issue_coupon:buy_a1"
+    assert (sent["purpose_code"], sent["count"], sent["unit_value"]) == ("compensation", 2, 1500)
+    assert sent["campaign_id"] is None and sent["context_id"] == CTX
+    assert events.MOCK_PUBLISHED[-1].data["coupon_id"] == "cpn_0042"
+
+
+def test_coupon_is_not_created_in_shop_api_unless_executed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_execute(
+        monkeypatch, _decision(status="held", hold_reason="over_threshold", review_id="r")
+    )
+    seen = _shop(monkeypatch, _created)
+    assert _coupon()["outcome"] == "held"
+    assert seen == []
+
+
+@pytest.mark.parametrize(
+    ("answer", "code"),
+    [
+        (
+            lambda r: httpx.Response(404, json={"error": {"code": "BUYER_NOT_FOUND"}}),
+            "BUYER_NOT_FOUND",
+        ),
+        (lambda r: httpx.Response(503, text="down"), "UNAVAILABLE"),
+    ],
+)
+def test_shop_api_failure_is_retryable_with_the_same_key_and_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+    answer,
+    code: str,  # noqa: ANN001
+) -> None:
+    """쇼핑몰에서 실패하면 지급 완료로 기록하지 않고 이벤트도 보내지 않는다. 다시 부르면 만든다."""
+    _fake_execute(monkeypatch, _decision())
+    state = {"up": False}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _created(request) if state["up"] else answer(request)
+
+    seen = _shop(monkeypatch, handler)
+    failed = _coupon()
+    assert (failed["status"], failed["outcome"]) == ("failed", f"shop_coupon_failed:{code}")
+    assert not any(e.type.value == "coupon.issued" for e in events.MOCK_PUBLISHED)
+    state["up"] = True
+    retried = _coupon()
+    assert retried["status"] == "completed" and retried["output"]["coupon_id"] == "cpn_0042"
+    assert [json.loads(r.content)["idempotency_key"] for r in seen][0] == (
+        json.loads(seen[1].content)["idempotency_key"]
+    )
+    assert events.MOCK_PUBLISHED[-1].data["coupon_id"] == "cpn_0042"
+
+
+def test_mock_mode_keeps_coupons_in_memory_without_calling_shop_api() -> None:
+    _call_before = len(events.MOCK_PUBLISHED)
+    result = _coupon()
+    assert result["output"]["coupon_id"] == "cpn_0001" and len(events.MOCK_PUBLISHED) > _call_before
