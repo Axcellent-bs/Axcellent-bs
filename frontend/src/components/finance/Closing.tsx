@@ -109,10 +109,22 @@ export function ClosingSection({ tick, onChanged, focus }: {
 
                 <div className="mt-4 rounded-2xl border border-ink-100 px-4 py-3">
                   {r.status === "confirmed" ? (
-                    <p className="text-sm text-emerald-800">이 기간의 결산은 확정됐습니다. 확정한 숫자는 보고에 그대로 씁니다.</p>
+                    <div className="space-y-2 text-sm">
+                      <p className="text-emerald-800">{r.snapshot_at ? "이 기간의 결산은 확정됐습니다. 위 숫자는 확정할 때 저장한 값입니다." : "이 기간의 결산은 확정됐습니다. 예전 확정이라 숫자가 저장되지 않아 지금 장부로 계산한 값입니다."}</p>
+                      {(r.close_warnings ?? []).map((w) => <p key={w.code} className="text-ink-700">확정할 때 경고: {w.message}</p>)}
+                      {(r.drift ?? []).length > 0 && (
+                        <div className="rounded-xl bg-amber-50 px-3 py-2 text-amber-900">
+                          <p className="font-medium">확정 뒤 장부 숫자가 달라졌습니다. 확정 숫자는 그대로 두고, 차이는 발생한 기간에 조정하세요.</p>
+                          <ul className="mt-1 space-y-0.5 tabular-nums">
+                            {r.drift!.map((x) => <li key={x.code}>{x.label}: 확정 {krw(x.confirmed)} → 지금 {krw(x.current)} ({signedKrw(x.diff)})</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <>
                       <p className="text-sm text-ink-700">숫자를 확인했으면 결산을 확정하세요. 확정하면 이 기간 숫자를 보고 기준으로 고정합니다(돈이 움직이지는 않습니다).</p>
+                      {(r.close_warnings ?? []).map((w) => <p key={w.code} className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{w.message}</p>)}
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <button className="btn-primary" disabled={!humanTokenSet || confirming || r.closable === false} onClick={() => confirm(r)}>{confirming ? "확정하는 중…" : "결산 확정"}</button>
                         {r.closable === false && <span className="text-sm text-ink-500">아직 끝나지 않은 기간이라 끝난 뒤 확정할 수 있습니다.</span>}

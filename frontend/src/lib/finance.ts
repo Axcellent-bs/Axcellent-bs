@@ -39,7 +39,7 @@ export interface SupportCostRecord {
 }
 
 // ---------------------------------------------------------------- §11 overview
-export type TodoKind = "settlement_batch" | "settlement_deadline" | "closing_confirm" | "recon_exception" | "team_budget";
+export type TodoKind = "settlement_batch" | "settlement_deadline" | "closing_confirm" | "closing_drift" | "recon_exception" | "team_budget";
 /** 할 일에서 사람이 바로 누를 결정 */
 export type TodoActionType = "closing_confirm" | "settlement_request" | "review_decision" | "recon_note" | "open_tab" | "team_budget_approve";
 export interface TodoAction { type: TodoActionType; period?: string; date?: string; review_id?: string | null; month?: string; signature?: string }
@@ -114,6 +114,9 @@ export interface FinanceInsight {
 export interface ClosingReport {
   applied_rules?: AppliedRule[];
   closable?: boolean;
+  snapshot_at?: string | null;
+  drift?: { code: string; label: string; confirmed: number; current: number; diff: number }[];
+  close_warnings?: { code: string; message: string }[];
   period: ClosingPeriod;
   date: string;
   from: string;
@@ -686,6 +689,7 @@ export function todayKst(now = new Date()): string {
 export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "tax" | "campaigns";
 export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "tax", "campaigns"];
 const TODO_TAB: Record<TodoKind, FinanceTab> = {
+  closing_drift: "closing",
   settlement_batch: "settlements", settlement_deadline: "settlements", closing_confirm: "closing", recon_exception: "reconciliation", team_budget: "policy",
 };
 export function todoTab(t: Pick<FinanceTodo, "kind" | "link">): FinanceTab {

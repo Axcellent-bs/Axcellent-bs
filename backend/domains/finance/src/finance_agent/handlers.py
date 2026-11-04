@@ -112,6 +112,7 @@ class State:
         self.sources: Sources = sources or (MockSources() if is_mock("finance") else LiveSources())
         self.ledger = Ledger()
         self.last_self_test: dict[str, Any] | None = None  # 마지막 "재무 AI 테스트" 결과
+        self.closing_drifts: list[dict[str, Any]] = []  # 확정 뒤 달라진 결산. 하루 한 번 갱신
         self.last_daily_closing: dict[str, Any] | None = None  # 마지막 자동 결산(전날) 결과
         self.records = FinanceRecords()
         self.books_loader: Callable[[], Awaitable[Books]] = load_books  # 테스트에서 바꾼다
@@ -609,7 +610,7 @@ async def started_campaigns() -> dict[str, dict[str, Any]] | None:
 async def monthly_budget() -> dict[str, Any]:
     if state().budget_override is not None:
         return state().budget_override
-    return cp.budget_from_last_month(await state().books(), fc.today())
+    return cp.budget_from_last_month(await state().books(), fc.today(), state().records.closings)
 
 
 async def repeat_estimate() -> dict[str, Any] | None:

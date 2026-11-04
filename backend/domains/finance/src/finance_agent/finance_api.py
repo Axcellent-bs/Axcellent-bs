@@ -119,7 +119,7 @@ async def run_export_cycle(trigger: str = "auto") -> dict[str, Any]:
         records = state().records
         imported = exports.scan_inbox(records.bank_rows, records.bank_imports)
         books = await state().fresh_books()
-        package = exports.make_package(books, records.exports)
+        package = exports.make_package(books, records.exports, closings=records.closings)
         return {"trigger": trigger, "package": package, "imported": imported}
 
 
@@ -226,6 +226,28 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
             }
         )
 
+    drifts = state().closing_drifts
+    if drifts:
+        todo.append(
+            {
+                "kind": "closing_drift",
+                "title": f"확정 뒤 숫자가 달라진 결산 {len(drifts)}건. 조정 처리 필요",
+                "count": len(drifts),
+                "amount": sum(x["net_diff"] for x in drifts),
+                "link": "closing",
+                "items": [
+                    {
+                        "ref": f"{x['period']}:{x['date']}",
+                        "title": x["date"],
+                        "detail": ", ".join(
+                            f"{line['label']} {fc.won(line['diff'])}" for line in x["lines"][:3]
+                        ),
+                        "amount": x["net_diff"],
+                    }
+                    for x in drifts[:TODO_ITEMS]
+                ],
+            }
+        )
     yesterday = today - timedelta(days=1)
     if closing_key("day", yesterday) not in state().records.closings:
         y = closing.compute_totals(books, fc.day_start(yesterday), fc.day_start(today))
@@ -348,7 +370,9 @@ def add_finance_api(app: FastAPI) -> None:
         except ValueError as exc:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
-        report = statements.income_statement(books, period, d)  # type: ignore[arg-type]
+        report = statements.income_statement(  # type: ignore[arg-type]
+            books, period, d, state().records.closings
+        )
         meta = books.meta()
         if format == "json":
             return ok(report, meta)
@@ -397,7 +421,21 @@ def add_finance_api(app: FastAPI) -> None:
                 "books_unavailable",
                 "받지 못한 장부 자료가 있어 확인할 수 없는 숫자로는 결산을 확정하지 않는다",
             )
-        records.setdefault(key, {"by": person, "at": fc.iso(fc.now())})
+        if key not in records:
+            start, end = closing.period_range(period, d)
+            if period == "month" and (pending := closing.pending_recon(books, start, end)):
+                return error(
+                    409,
+                    "recon_pending",
+                    f"PG 정산 전 결제 {pending:,}건이 남아 월 결산을 확정할 수 없다",
+                )
+            draft = await closing.closing_report(books, period, d, None)
+            column = statements.column(books, fc.day_start(start), fc.day_start(end))
+            records[key] = {
+                "by": person,
+                "at": fc.iso(fc.now()),
+                "snapshot": closing.snapshot_of(draft, books, column),
+            }
         report = await closing.closing_report(books, period, d, records[key])
         return ok(report, books.meta())
 
@@ -431,6 +469,7 @@ def add_finance_api(app: FastAPI) -> None:
                 "date": key[1],
                 "confirmed_by": confirmed["by"],
                 "confirmed_at": confirmed["at"],
+                "snapshot": confirmed.get("snapshot"),
                 "canceled_by": person,
                 "canceled_at": fc.iso(fc.now()),
                 "reason": reason.strip()[:300],

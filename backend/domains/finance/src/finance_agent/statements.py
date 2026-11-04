@@ -129,12 +129,29 @@ def column(books: Books, start: datetime, end: datetime) -> dict[str, int | None
     }
 
 
-def income_statement(books: Books, period: Period, d: date) -> dict[str, Any]:
-    """손익계산서(당기·전기). 금액 단위는 원, 비용은 − 로 적는다."""
+def frozen_column(
+    closings: dict[tuple[str, str], dict[str, Any]] | None, period: Period, start: date
+) -> dict[str, int | None] | None:
+    """그 달을 확정했으면 확정할 때 저장한 값. 월이 아니거나 저장이 없으면 None."""
+    if not closings or period != "month":
+        return None
+    snap = (closings.get(("month", start.isoformat())) or {}).get("snapshot") or {}
+    return snap.get("statement")
+
+
+def income_statement(
+    books: Books,
+    period: Period,
+    d: date,
+    closings: dict[tuple[str, str], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """손익계산서(당기·전기). 금액 단위는 원, 비용은 − 로 적는다. 확정한 달은 확정 숫자를 쓴다."""
     start, end = period_range(period, d)
     prev = previous_start(period, start)
-    current = column(books, fc.day_start(start), fc.day_start(end))
-    previous = column(books, fc.day_start(prev), fc.day_start(start))
+    fixed_now = frozen_column(closings, period, start)
+    fixed_prev = frozen_column(closings, period, prev)
+    current = fixed_now or column(books, fc.day_start(start), fc.day_start(end))
+    previous = fixed_prev or column(books, fc.day_start(prev), fc.day_start(start))
     company = closing.tenant_name()
     return {
         "title": "손익계산서",
@@ -174,7 +191,8 @@ def income_statement(books: Books, period: Period, d: date) -> dict[str, Any]:
             for code, label, note in NOTES
         ],
         "basis": "K-IFRS 기능별 손익계산서. 장부(판매 사이트·안전 관문 기록)에 있는 항목만 계산",
-        "applied_rules": applied_many("REV-001", "REV-003", "EXP-001", "PL-002"),
+        "confirmed": {"current": fixed_now is not None, "previous": fixed_prev is not None},
+        "applied_rules": applied_many("REV-001", "REV-003", "EXP-001", "PL-002", "CLS-001"),
     }
 
 
