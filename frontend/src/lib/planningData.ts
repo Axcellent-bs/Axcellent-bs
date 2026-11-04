@@ -75,7 +75,8 @@ export interface Spec {
   confirmedBy?: Approver
   origin?: string // 'dev_team' = 개발팀이 직접 넣은 기획
   hrCheck?: 'ok' | 'warn' | 'unknown' // 인사 ② check_plan 실제 결과 (없으면 묻지 않음)
-  bodyMd?: string // 자유 작성 칸 (마크다운). 판단·대조에는 안 씀
+  bodyMd?: string // 자유 작성 칸 (마크다운). 유사·충돌 판단·인사 확인에도 쓴다
+  extra?: Record<string, string> // 양식에만 있는 칸 (lib/specTemplate.ts)
 }
 
 export type TaskState = '진행 중' | 'PR 검수' | '머지 대기' | '완료' | 'C 보류'
@@ -618,7 +619,9 @@ export type Action =
   | { type: 'importNotion'; url: string } // 노션 페이지를 문서로 가져오기 (서버에서만, 예시 모드는 그대로)
   | { type: 'pauseRequest'; request: string; reason?: string } // 사람이 요청을 중단
   | { type: 'resumeRequest'; request: string } // 중단한 요청 재개
-  | { type: 'editSpec'; spec: string; title?: string; problem?: string; goal?: string; paras?: Record<string, string>; body_md?: string } // 확정 전 기획서를 사람이 고침 (칸에서 벗어날 때 저장)
+  | { type: 'deleteSpec'; spec: string } // 확정 전 기획서 초안 지우기 (요청은 접수로)
+  | { type: 'fillSpec'; spec: string; overwrite?: boolean } // 자유 작성으로 필수 칸 채우기 (서버: 소제목 + 기획 LLM, 예시: 소제목만)
+  | { type: 'editSpec'; spec: string; title?: string; problem?: string; goal?: string; paras?: Record<string, string>; body_md?: string; reqs?: string[]; dones?: string[]; extra?: Record<string, string> } // 확정 전 기획서를 사람이 고침 (칸에서 벗어날 때 저장)
   | { type: 'sendReleaseOrder'; check: string; note?: string } // 배포 전 대조가 사람 확인이면 사람이 배포 지시
   // 교차검증·학습 기준·사람 확인
   | { type: 'decideReview'; review: string } // 시연: 검증자(다른 부서)가 판단
@@ -1383,6 +1386,64 @@ function talkAndDocs(s: State, a: Action): State | null {
   return null
 }
 
+// 자유 작성 소제목 읽기 (백엔드 spec_fill.parse와 같은 규칙): ## 문제·배경 / ## 목표 / ## 요구사항 / ## 완료 기준
+const FREE_SECTIONS: [string, string[]][] = [
+  ['problem', ['문제', '배경', '왜', '현상']], ['goal', ['목표', '목적', '기대']],
+  ['req', ['요구', '할 일', '기능', '해야']], ['done', ['완료', '확인', '검증', '기준']],
+]
+const LIST_MARK = /^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/
+/** 규칙 초안이 넣은 기본 글 (서버 FILL_DEFAULTS와 같음): 자동 채우기에서 빈 칸처럼 다룬다 */
+const FILL_DEFAULTS = ['바뀐 뒤 같은 문의·이상 신호가 다시 생기지 않는다', '바뀐 화면에서 요청한 표시가 그대로 보인다', '성과를 잴 기준을 정한다']
+export function fillBlank(v: string, spec: Spec, req?: Request): boolean {
+  const t = v.trim()
+  return !t || t === spec.title || (!!req && t === req.title) || FILL_DEFAULTS.includes(t) || (!!req && t.startsWith(`${DEPT_NAME[req.from]}에서 받은 요청:`))
+}
+/** 화면 초안용: 규칙 초안 기본 글·빈 칸이면 자동 채우기가 바꿔도 되는 칸 */
+export function isFillBlank(v: string, spec: Spec, s: State): boolean {
+  return fillBlank(v, spec, s.requests.find((x) => x.id === spec.request))
+}
+/** 예시 모드 자동 채우기 미리보기: LLM 없이 소제목만 읽는다 (서버 preview와 같은 모양) */
+export function exampleFill(md: string): FillPreview {
+  const got = parseFree(md)
+  return { ...got, answer: '', by: 'rule' }
+}
+export interface FillPreview { problem: string; goal: string; reqs: string[]; done: string[]; answer: string; extra?: Record<string, string>; by: string }
+
+/** 자동 채우기를 누르기 전에 바뀔 칸을 미리 센다 (화면 안내용, 예시 모드는 소제목만) */
+export function fillPreview(s: State, specId: string, overwrite = false): { fields: string[]; locked: boolean } {
+  const spec = s.specs.find((x) => x.id === specId)
+  if (!spec?.bodyMd?.trim()) return { fields: [], locked: false }
+  const req = s.requests.find((x) => x.id === spec.request)
+  const got = parseFree(spec.bodyMd)
+  const blank = (v: string) => overwrite || fillBlank(v, spec, req)
+  const locked = spec.status === '확정'
+  const reqs = spec.paras.filter((p) => p.kind === 'req'), done = spec.paras.filter((p) => p.kind === 'done')
+  const fields = [
+    ...(got.problem && blank(spec.problem) ? ['문제'] : []),
+    ...(got.goal && blank(spec.goal) ? ['목표'] : []),
+    ...(!locked && got.reqs.length && (!reqs.length || reqs.every((p) => blank(p.text))) ? ['요구사항'] : []),
+    ...(!locked && got.done.length && (!done.length || done.every((p) => blank(p.text))) ? ['완료 기준'] : []),
+  ]
+  return { fields, locked }
+}
+
+function parseFree(md: string) {
+  const buf: Record<string, string[]> = { problem: [], goal: [], req: [], done: [] }
+  let cur: string | null = null
+  for (const line of md.split(/\r?\n/)) {
+    const h = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/)
+    if (h) { cur = FREE_SECTIONS.find(([, ws]) => ws.some((w) => h[1].includes(w)))?.[0] ?? null; continue }
+    if (cur && line.trim() && !/^\s*(\||```|>)/.test(line)) buf[cur].push(line)
+  }
+  const clean = (x: string) => x.replace(/[*_`]+/g, '').replace(/\s+/g, ' ').trim().slice(0, 160)
+  const items = (xs: string[]) => {
+    const m = xs.map((x) => x.match(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?(.*)$/)?.[1]).filter((x): x is string => !!x)
+    return [...new Set((m.length ? m : xs).map(clean).filter(Boolean))].slice(0, 3)
+  }
+  const unlist = (xs: string[]) => xs.map((x) => x.replace(LIST_MARK, ''))
+  return { problem: clean(unlist(buf.problem).join(' ')), goal: clean(unlist(buf.goal).join(' ')), reqs: items(buf.req), done: items(buf.done) }
+}
+
 function proposalsOf(s: State, a: ProposalAction): State {
   const xs = s.proposals ?? []
   const p = 'proposal' in a ? xs.find((x) => x.id === a.proposal) : undefined
@@ -1404,7 +1465,7 @@ function proposalsOf(s: State, a: ProposalAction): State {
       proposals: xs.map((x) => (x.id === p.id ? { ...x, status: '기획안' as const, spec: specId, request: reqId } : x)),
       requests: [...s.requests, { id: reqId, ctx, from: p.from, via: `기획 제안 ${p.id}`, title: p.title, evidence: p.facts.map((f) => `${f.label} ${f.value}`).join(' · '), state: '기획 중', spec: specId }],
       specs: [...s.specs, {
-        id: specId, title: p.title, request: reqId, status: '초안', problem: p.why, goal: p.target ? `${p.target.label} ${p.target.value}` : p.idea, paras,
+        id: specId, title: p.title, request: reqId, status: '초안', problem: `${p.insight} ${p.why}`.trim(), extra: p.audience ? { audience: p.audience } : {}, goal: p.target ? `${p.target.label} ${p.target.value}` : p.idea, paras,
         basis: [...p.facts.map((f) => `${f.label} ${f.value} (${f.source})`), `기획 제안 ${p.id} · 인사이트 ${p.insightId ?? '-'}`], humanSentences: 0, origin: PROPOSAL_ORIGIN, bodyMd: body,
       }],
       activity: [...s.activity, { t: now(), ctx, from: 'human', to: 'planning', point: 'make_plan', kind: '사람', text: `${p.id} 확정 → 기획안 ${specId} (${reqId})` }],
@@ -1461,6 +1522,34 @@ function inner(s: State, a: Action): State {
         activity: [...s.activity, { t: now(), ctx: r.ctx, from: 'human', to: 'planning', point: pause ? 'pause_request' : 'resume_request', kind: '사람', text: `${r.id} 사람이 ${pause ? '중단' : '재개'} (${r.state})` }],
       }
     }
+    case 'deleteSpec': {
+      const sp = s.specs.find((x) => x.id === a.spec)
+      if (!sp || sp.status === '확정' || s.tasks.some((t) => t.spec === sp.id)) return s
+      const prop = (s.proposals ?? []).find((p) => p.spec === sp.id)
+      const r = s.requests.find((x) => x.id === sp.request)
+      return {
+        ...s,
+        specs: s.specs.filter((x) => x.id !== sp.id),
+        proposals: prop ? (s.proposals ?? []).map((p) => (p.id === prop.id ? { ...p, status: '확인 대기' as const, spec: undefined, request: undefined } : p)) : s.proposals,
+        requests: prop ? s.requests.filter((x) => x.id !== sp.request) : s.requests.map((x) => (x.id === sp.request ? { ...x, spec: undefined, state: '접수' as const, flow: false } : x)),
+        activity: [...s.activity, { t: now(), ctx: r?.ctx ?? `spec:${sp.id}`, from: 'human', to: 'planning', point: 'delete_spec', kind: '사람', text: `${sp.id} 기획서 삭제` }],
+      }
+    }
+    case 'fillSpec': {
+      const spec = s.specs.find((x) => x.id === a.spec)
+      if (!spec?.bodyMd?.trim()) return s
+      const got = parseFree(spec.bodyMd)
+      const r0 = s.requests.find((x) => x.id === spec.request)
+      const blank = (v: string) => !!a.overwrite || fillBlank(v, spec, r0)
+      const locked = spec.status === '확정'
+      const paras = (kind: 'req' | 'done', items: string[], prefix: string, cur: Para[]) =>
+        !locked && items.length && (cur.length === 0 || cur.every((p) => blank(p.text))) ? items.map((text, i) => ({ id: `${prefix}${i + 1}`, kind, text })) : cur
+      const req = paras('req', got.reqs, 'R', spec.paras.filter((p) => p.kind === 'req'))
+      const done = paras('done', got.done, 'C', spec.paras.filter((p) => p.kind === 'done'))
+      const next = { ...spec, problem: got.problem && blank(spec.problem) ? got.problem : spec.problem, goal: got.goal && blank(spec.goal) ? got.goal : spec.goal, paras: [...req, ...done] }
+      const r = s.requests.find((x) => x.id === spec.request)
+      return { ...s, specs: s.specs.map((x) => (x.id === spec.id ? next : x)), activity: [...s.activity, { t: now(), ctx: r?.ctx ?? `spec:${spec.id}`, from: 'planning', to: 'planning', point: 'fill_spec', kind: '사람', text: `${spec.id} 자유 작성으로 칸 채움 (소제목)` }] }
+    }
     case 'editSpec': {
       const spec = s.specs.find((x) => x.id === a.spec)
       if (!spec) return s
@@ -1473,6 +1562,9 @@ function inner(s: State, a: Action): State {
         ...(goal && goal !== spec.goal ? ['목표'] : []),
         ...spec.paras.filter((p) => paras[p.id]?.trim() && paras[p.id].trim() !== p.text).map((p) => p.id),
         ...(a.body_md !== undefined && a.body_md !== (spec.bodyMd ?? '') ? ['자유 작성'] : []),
+        ...(a.reqs && spec.status !== '확정' ? ['요구사항'] : []),
+        ...(a.dones && spec.status !== '확정' ? ['완료 기준'] : []),
+        ...(a.extra && Object.entries(a.extra).some(([k, v]) => (spec.extra?.[k] ?? '') !== v) ? ['양식 칸'] : []),
       ]
       if (!changed.length) return s
       const req = s.requests.find((r) => r.id === spec.request)
@@ -1483,8 +1575,14 @@ function inner(s: State, a: Action): State {
           title: title || x.title,
           problem: problem || x.problem,
           goal: goal || x.goal,
-          paras: x.paras.map((p) => (paras[p.id]?.trim() ? { ...p, text: paras[p.id].trim() } : p)),
+          paras: (() => {
+            let ps = x.paras.map((p) => (paras[p.id]?.trim() ? { ...p, text: paras[p.id].trim() } : p))
+            if (a.reqs && x.status !== '확정') ps = [...a.reqs.filter((t) => t.trim()).map((text, i) => ({ id: `R${i + 1}`, kind: 'req' as const, text })), ...ps.filter((p) => p.kind !== 'req')]
+            if (a.dones && x.status !== '확정') ps = [...ps.filter((p) => p.kind !== 'done'), ...a.dones.filter((t) => t.trim()).map((text, i) => ({ id: `C${i + 1}`, kind: 'done' as const, text }))]
+            return ps
+          })(),
           bodyMd: a.body_md !== undefined ? a.body_md : x.bodyMd,
+          extra: a.extra ? Object.fromEntries(Object.entries({ ...(x.extra ?? {}), ...a.extra }).filter(([, v]) => v.trim())) : x.extra,
           humanSentences: x.humanSentences + changed.length,
         })),
         activity: [...s.activity, { t: now(), ctx: req?.ctx ?? `spec:${spec.id}`, from: 'human', to: 'planning', point: 'edit_spec', kind: '사람', text: `${spec.id} 사람이 고침 · ${changed.join(', ')}` }],

@@ -8,7 +8,7 @@ import { Home } from '@/components/planning/home'
 import { Knowledge } from '@/components/planning/knowledge'
 import { Links, Metrics } from '@/components/planning/metrics'
 import { Projects } from '@/components/planning/projects'
-import { Proposals } from '@/components/planning/proposals'
+import { ProposalActions, Proposals } from '@/components/planning/proposals'
 import { Requests } from '@/components/planning/requests'
 import { Specs } from '@/components/planning/specs'
 
@@ -36,13 +36,14 @@ export default function PlanningPage() {
       desc="다른 부서의 요청을 받아 기획서로 정리하고, 결과를 요청한 부서에 알립니다."
       home="home"
       sections={SECTIONS}
+      actions={({ state, dispatch, section, item }) => (section === 'proposals' && item ? <ProposalActions s={state} d={dispatch} item={item} /> : null)}
     >
-      {({ state: s, dispatch: d, section, sub, tab, rest, item, item2 }) => (
+      {({ state: s, dispatch: d, example, section, sub, tab, rest, item, item2 }) => (
         <>
           {section === 'home' && <Home s={s} />}
           {section === 'proposals' && <Proposals s={s} d={d} item={item} />}
           {section === 'requests' && <Requests s={s} d={d} filter={sub} item={rest[0] ? decodeURIComponent(rest[0]) : undefined} />}
-          {section === 'work' && tab === 'specs' && <Specs s={s} d={d} item={item} item2={item2} />}
+          {section === 'work' && tab === 'specs' && <Specs s={s} d={d} item={item} item2={item2} example={example} />}
           {section === 'docs' && <Docs s={s} d={d} item={item} />}
           {section === 'talk' && <Talk s={s} d={d} item={item} />}
           {section === 'agents' && <AgentTalk s={s} item={item} />}

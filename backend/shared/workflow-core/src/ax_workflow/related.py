@@ -98,7 +98,8 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 def text_of(state: State, req: Request) -> str:
-    """검색·판단 대상 문장: 요청 제목과 근거(요청 내용), 기획서가 있으면 문제·목표와 요구 문단.
+    """검색·판단 대상 문장: 요청 제목과 근거(요청 내용), 기획서가 있으면 문제·목표와 요구 문단,
+    자유 작성 칸(body_md, 앞 2000자)까지.
 
     제목만 보면 같은 제목의 다른 일을 묶고, 다른 말로 쓴 같은 일을 놓친다. 근거는 다른 부서가
     쓴 외부 문장이라 LLM에는 데이터 블록(`untrusted`)으로만 넣는다."""
@@ -106,6 +107,7 @@ def text_of(state: State, req: Request) -> str:
     spec = next((s for s in state.specs if s.id == req.spec), None)
     if spec is not None:
         parts += [spec.problem, spec.goal, *(p.text for p in spec.paras if p.kind == "req")]
+        parts.append((spec.body_md or "")[:2000])
     return "\n".join(p for p in parts if p)
 
 

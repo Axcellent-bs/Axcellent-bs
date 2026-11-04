@@ -167,8 +167,11 @@ class Spec(DomainModel):
     # 요청 서비스에 되물은 질문 (answer_planning_question). 답을 받으면 `question`과 같이 비운다
     question_id: str | None = None
     question_to: str | None = None  # 질문을 보낸 서비스 id
-    # 사람이 자유롭게 쓰는 칸 (마크다운). 판단·대조에는 쓰지 않는다 (문단 R·C가 기준)
+    # 사람이 자유롭게 쓰는 칸 (마크다운). 유사·충돌 판단(related)·인사 확인에 쓰고,
+    # 화면의 자동 채우기가 이 글을 AI로 읽어 필수 칸 초안을 만든다 (spec_fill.py, 저장은 사람이)
     body_md: str | None = None
+    # 양식에만 있는 칸 (planning spec_template.py): 범위·타깃·핵심 메시지·일정·예산·고려사항
+    extra: dict[str, str] = Field(default_factory=dict)
 
 
 CodingStatus = Literal[

@@ -47,6 +47,8 @@ export interface ShellProps {
   tabCount?: (v: View, section: string, tab: string) => number
   /** 제목 줄 오른쪽에 더 붙일 것 (개발: AI와 대화·개발 도구) */
   tools?: (v: View) => ReactNode
+  /** 이 화면의 주 버튼: 머리 줄 맨 오른쪽 (데이터 보기 토글은 왼쪽으로 밀린다. 예: 기획 제안 상세의 기획안으로 만들기·폐기) */
+  actions?: (v: View) => ReactNode
   children: (v: View) => ReactNode
 }
 
@@ -90,7 +92,7 @@ const EXAMPLE_KEY = 'axcellent-planning-example'
 // 예시의 AI 승인 감사는 "오늘" 건만 보여서, 예시 기록 날짜를 오늘로 옮긴다
 const todayDemo = (s: State): State => ({ ...s, audit: s.audit.map((a) => ({ ...a, t: `${TODAY}${a.t.slice(5)}` })) })
 
-function Frame({ part, title, desc, home, sections, tabCount, tools, children }: ShellProps) {
+function Frame({ part, title, desc, home, sections, tabCount, tools, actions, children }: ShellProps) {
   const isSection = (x: string) => x in sections
   const route = useRoute(`/${part}`, home)
   const [live, liveDispatch, connected] = useSharedStore(apiBase(part))
@@ -159,6 +161,7 @@ function Frame({ part, title, desc, home, sections, tabCount, tools, children }:
     .reverse()
 
   const view: View = { state, dispatch, connected, example, section, sub, tab, rest, item, item2, newWork, newTalk }
+  const pageActions = actions?.(view) ?? null
 
   return (
     <div className="main">
@@ -168,14 +171,19 @@ function Frame({ part, title, desc, home, sections, tabCount, tools, children }:
           <p className="pl-desc">{desc}</p>
         </div>
         <div className="pl-tools">
-          <div className="seg-toggle" role="group" aria-label="데이터 보기">
-            <button type="button" aria-pressed={!example} onClick={() => pickExample(false)}>실제 데이터</button>
-            <button type="button" aria-pressed={example} onClick={() => pickExample(true)}>예시 데이터</button>
-          </div>
-          {example
-            ? <Chip tone="amber" title="화면 안 예시 데이터. 서버에 반영되지 않아요">예시 모드</Chip>
-            : <Chip tone={connected ? 'green' : 'amber'} title={`${title} 서버 ${apiBase(part)}`}>{`${title} ${connected ? '켜짐' : '꺼짐'}`}</Chip>}
+          {(
+            <>
+              <div className="seg-toggle" role="group" aria-label="데이터 보기">
+                <button type="button" aria-pressed={!example} onClick={() => pickExample(false)}>실제 데이터</button>
+                <button type="button" aria-pressed={example} onClick={() => pickExample(true)}>예시 데이터</button>
+              </div>
+              {example
+                ? <Chip tone="amber" title="화면 안 예시 데이터. 서버에 반영되지 않아요">예시 모드</Chip>
+                : <Chip tone={connected ? 'green' : 'amber'} title={`${title} 서버 ${apiBase(part)}`}>{`${title} ${connected ? '켜짐' : '꺼짐'}`}</Chip>}
+            </>
+          )}
           {tools?.(view)}
+          {pageActions && <div className="pl-actions">{pageActions}</div>}
           <ToastOutlet />
         </div>
       </header>

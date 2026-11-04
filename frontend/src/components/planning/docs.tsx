@@ -6,6 +6,7 @@ import { DEPT_NAME, type Action, type Doc, type DocBlock, type State } from '@/l
 import { Linked, Ref, go, toPath } from '@/components/planning-common/links'
 import { Sec, Tag, rowNav } from '@/components/planning-common/parts'
 import { Pager, usePage } from '@/components/planning-common/pager'
+import { MdEditable } from '@/components/planning-common/markdown'
 
 // 문서 탭 첫 화면 = 문서 목록 (최근 것이 위). 줄을 누르면 그 문서를 열어 고친다
 export function Docs({ s, d, item }: { s: State; d: Dispatch<Action>; item?: string }) {
@@ -155,7 +156,7 @@ function Block({ b, doc, d, s }: { b: DocBlock; doc: string; d: Dispatch<Action>
   }
   return (
     <div className="blk">
-      <textarea className="blk-p" defaultValue={b.text} placeholder="내용을 쓰세요" rows={Math.max(1, Math.ceil(b.text.length / 70))} onBlur={(e) => save(e.target.value)} />
+      <MdEditable value={b.text} onSave={save} placeholder="내용을 쓰세요 (마크다운: # 제목, - 목록, | 표 |)" minRows={1} label="문단" />
       {remove}
     </div>
   )

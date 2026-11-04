@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from '@/lib/nav'
 import { DEV_API, codingSettingsApi, useMe, vcsApi, type CodingStep, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsInventory, type VcsTestResult } from '@/lib/planning'
 import { UsageBar } from '@/components/dev/coding'
+import { NotionConnect } from '@/components/planning/notion'
 
 // 개발 도구 연결: 고객사 개발팀이 쓰는 형상관리·CI·배포 도구를 개발·배포 AI(dev)에 잇는 창구.
 // 형상관리 연결은 레포마다 1개, 여러 개. dev 서비스(`/api/planning/vcs/connections`)에 저장되고 토큰은 끝 4자리만 온다.
@@ -404,17 +405,20 @@ function Loading({ error }: { error: string | null }) {
 
 // 연결 창 왼쪽 메뉴 (설정 창처럼 묶음 › 항목). 고른 항목만 오른쪽에 보인다
 type AiPart = 'mode' | 'all'
-type PanelItem = 'repos' | 'others' | 'ai'
+type PanelItem = 'repos' | 'others' | 'notion' | 'ai'
 const PANEL_GROUPS: { label: string; items: { id: PanelItem; label: string }[] }[] = [
   { label: '형상관리', items: [
     { id: 'repos', label: '레포 연결' },
     { id: 'others', label: '다른 개발 도구' },
   ] },
+  { label: '문서', items: [{ id: 'notion', label: '노션' }] }, // 기획 영역 (components/planning/notion.tsx)
   { label: 'AI', items: [{ id: 'ai', label: 'AI 연결' }] },
 ]
 const PANEL_IDS = PANEL_GROUPS.flatMap((g) => g.items.map((i) => i.id))
 const TAB_KEY = 'ax.connections.item'
 const readTab = (): PanelItem => {
+  // 노션 계정 연결에서 돌아오면(?notion=…) 노션 항목을 연다
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('notion')) return 'notion'
   try {
     const v = localStorage.getItem(TAB_KEY) as PanelItem | null
     return v && PANEL_IDS.includes(v) ? v : 'repos'
@@ -630,7 +634,7 @@ export function DevToolsPanel({ title, onClose }: { title?: string; onClose?: ()
       </nav>
       <div className={`relative min-w-0 flex-1 p-6 ${onClose ? 'overflow-y-auto pt-12' : ''}`}>
       {onClose && <button className="btn-quiet absolute right-3 top-3 px-2 py-1" onClick={onClose} aria-label="닫기">✕</button>}
-      {tab === 'ai' ? <CodingModeSection part="all" /> : tab === 'repos' ? (
+      {tab === 'notion' ? <NotionConnect /> : tab === 'ai' ? <CodingModeSection part="all" /> : tab === 'repos' ? (
       <section className="space-y-4">
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="card-title text-lg">레포 연결</h2>
