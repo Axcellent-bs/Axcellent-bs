@@ -1,6 +1,7 @@
-"""실제 연동 부품: Agent Card 수집(HTTP)과 부서 호출(`call_agent`).
+"""실제 연동 부품: Agent Card 수집(HTTP), 부서 호출(`call_agent`), 안전 관문 보류 건 조회.
 
-이벤트 구독(Redis Streams)은 agent-template `events.py`의 TODO라 아직 연결하지 않는다.
+이벤트 구독(Redis Streams)은 agent-template `events.py`가 하고, `main.py`의 `start_event_bus`가
+연결한다.
 """
 
 from __future__ import annotations
