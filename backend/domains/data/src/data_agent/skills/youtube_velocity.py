@@ -30,6 +30,7 @@ from ax_contracts.schemas.data import (
 )
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.skills.trend_scan import TREND_CONFIG_ENV
+from data_agent.video_links import video_url
 from data_agent.youtube_store import (
     DB_ENV,
     DEFAULT_DB,
@@ -37,6 +38,7 @@ from data_agent.youtube_store import (
     StoredSnapshot,
     recent_snapshots,
     video_details,
+    video_thumbnails,
     video_titles,
 )
 
@@ -113,6 +115,7 @@ def with_names(db: str, rows: list[YouTubeVideoVelocity]) -> list[YouTubeVideoVe
     ids = [r.video_id for r in rows]
     titles = video_titles(db, ids)
     details = video_details(db, ids)
+    thumbs = video_thumbnails(db, ids)
     out = []
     for r in rows:
         d = details.get(r.video_id)
@@ -122,6 +125,8 @@ def with_names(db: str, rows: list[YouTubeVideoVelocity]) -> list[YouTubeVideoVe
                     "title": titles.get(r.video_id) or None,
                     "channel_title": d.channel_title if d else None,
                     "duration_seconds": d.duration_seconds if d else None,
+                    "video_url": video_url(r.video_id),
+                    "thumbnail_url": thumbs.get(r.video_id),  # 저장된 응답 값만
                 }
             )
         )

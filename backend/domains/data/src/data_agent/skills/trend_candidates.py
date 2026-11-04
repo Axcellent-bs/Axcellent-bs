@@ -71,6 +71,7 @@ from data_agent.skills.trend_scan import (
 from data_agent.today_board import BOARD
 from data_agent.trending_store import DB_ENV as TRENDING_DB_ENV
 from data_agent.trending_store import TrendingSnapshot, latest_trending
+from data_agent.video_links import links, thumbs_of
 from data_agent.youtube_store import (
     DB_ENV,
     DEFAULT_DB,
@@ -869,6 +870,9 @@ async def find_candidates(
         judged_tags = [by_name[n] for n in names if n in by_name]
 
     candidates: list[TrendCandidate] = []
+    thumbs = thumbs_of(
+        db, [v for tag, _ in judged_tags for v in tag.video_ids[: config.rep_videos]]
+    )
     for tag, judged in judged_tags:
         hit = attach.get(_norm(tag.keyword))
         candidates.append(
@@ -878,6 +882,7 @@ async def find_candidates(
                     video_count=tag.video_count,
                     snapshot_at=snapshot.collected_at if snapshot else now,
                     video_ids=list(tag.video_ids[: config.rep_videos]),
+                    video_links=links(tag.video_ids[: config.rep_videos], thumbs),
                     matched_tags=list(tag.matched),
                     matched_phrases=list(tag.phrases),
                 ),

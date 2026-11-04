@@ -51,6 +51,7 @@ from ax_contracts.schemas.data import (
     TrendInsightBriefRequest,
     TrendPopularOutput,
     TrendVerdict,
+    VideoLink,
 )
 from data_agent.explain import _bad_numbers
 from data_agent.skills.ad_material import AdRules, judge, load_rules
@@ -59,6 +60,7 @@ from data_agent.skills.code_version import source_hash
 from data_agent.skills.topic_category import CategoryResult, TopicInput, classify_topics
 from data_agent.skills.trend_evidence import BLAME, fixed_line
 from data_agent.skills.trend_scan import TREND_CONFIG_ENV
+from data_agent.video_links import video_url
 
 KST = timezone(timedelta(hours=9))
 DB_ENV = "DATA_INSIGHT_BRIEF_DB"
@@ -338,6 +340,11 @@ def evidence(c: Candidate, popular: TrendPopularOutput | None) -> InsightEvidenc
         ev.youtube_views_per_subscriber = max(ratios) if ratios else None
         ev.youtube_at = popular.snapshot_at if popular else None
         ev.links += [f"https://www.youtube.com/watch?v={x.video_id}" for x in p.videos[:3]]
+        ev.video_links = [
+            VideoLink(video_id=x.video_id, video_url=x.video_url or video_url(x.video_id),
+                      thumbnail_url=x.thumbnail_url)
+            for x in p.videos[:3]
+        ]  # fmt: skip
     else:
         missing.append("YouTube: 인기 영상에 나오지 않은 주제")
     if p is not None and p.trending_rank is not None:

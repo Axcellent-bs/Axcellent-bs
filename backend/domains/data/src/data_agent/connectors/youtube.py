@@ -71,6 +71,8 @@ class VideoStat:
     duration_seconds: int | None = None  # 길이(초, contentDetails.duration). 못 읽으면 None
     # 영상 언어 (snippet.defaultAudioLanguage, 없으면 defaultLanguage). 채널이 안 적었으면 None
     language: str | None = None
+    # 썸네일 주소 (snippet.thumbnails의 medium → high → default). 응답에 없으면 None
+    thumbnail_url: str | None = None
 
 
 # ---------------------------------------------------------------- YouTube 응답 형식 (여기서만 쓴다)
@@ -83,6 +85,11 @@ class _Stats(BaseModel):
     commentCount: int | None = Field(default=None, ge=0)  # noqa: N815
 
 
+class _Thumb(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    url: str | None = None
+
+
 class _Snippet(BaseModel):
     model_config = ConfigDict(extra="ignore")
     publishedAt: datetime  # noqa: N815
@@ -93,6 +100,19 @@ class _Snippet(BaseModel):
     channelTitle: str = ""  # noqa: N815
     defaultAudioLanguage: str | None = None  # noqa: N815
     defaultLanguage: str | None = None  # noqa: N815
+    thumbnails: dict[str, _Thumb] = Field(default_factory=dict)
+
+
+THUMB_ORDER = ("medium", "high", "default", "standard", "maxres")
+
+
+def thumbnail_url(thumbs: dict[str, _Thumb]) -> str | None:
+    """응답에 온 썸네일 중 하나 (medium 먼저). 없으면 None."""
+    for size in THUMB_ORDER:
+        t = thumbs.get(size)
+        if t is not None and t.url:
+            return t.url
+    return None
 
 
 class _Details(BaseModel):
@@ -194,6 +214,7 @@ def _stat(video: _Video, rank: int | None = None) -> VideoStat:
         channel_title=sn.channelTitle,
         duration_seconds=duration_seconds(video.contentDetails.duration),
         language=sn.defaultAudioLanguage or sn.defaultLanguage,
+        thumbnail_url=thumbnail_url(sn.thumbnails),
     )
 
 

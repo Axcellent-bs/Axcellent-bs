@@ -49,12 +49,14 @@ from data_agent.connectors import ConnectorUnavailable
 from data_agent.skills.topic_category import CategoryCache, TopicInput, classify_topics
 from data_agent.skills.trend_scan import TREND_CONFIG_ENV
 from data_agent.skills.youtube_velocity import velocities
+from data_agent.video_links import video_url
 from data_agent.youtube_store import (
     DB_ENV,
     DEFAULT_DB,
     latest_popular,
     recent_snapshots,
     video_details,
+    video_thumbnails,
 )
 
 KST = timezone(timedelta(hours=9))
@@ -145,6 +147,9 @@ class ShortsStore:
                 " format TEXT NOT NULL, reason TEXT, classified_at TEXT NOT NULL);"
                 "CREATE TABLE IF NOT EXISTS views (video_id TEXT NOT NULL, at TEXT NOT NULL,"
                 " views INTEGER NOT NULL, PRIMARY KEY (video_id, at));"
+                # 받은 응답에 있던 썸네일 주소 (썸네일을 위해 더 부르지 않음)
+                "CREATE TABLE IF NOT EXISTS thumbnails (video_id TEXT PRIMARY KEY,"
+                " url TEXT NOT NULL, at TEXT NOT NULL);"
             )
             for table in ("searches", "searched_videos"):
                 cols = [r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")]
@@ -204,9 +209,27 @@ class ShortsStore:
         rows = [
             (v.video_id, at.isoformat(), v.view_count) for v in videos if v.view_count is not None
         ]
+        thumbs = [
+            (v.video_id, url, at.isoformat())
+            for v in videos
+            if (url := getattr(v, "thumbnail_url", None))
+        ]
         with self._lock, self._conn:
             self._conn.executemany("INSERT OR REPLACE INTO views VALUES (?,?,?)", rows)
+            self._conn.executemany("INSERT OR REPLACE INTO thumbnails VALUES (?,?,?)", thumbs)
         return len(rows)
+
+    def thumbnails(self, ids: Sequence[str]) -> dict[str, str]:
+        """영상 id → 저장된 썸네일 주소 (없으면 빠진다)."""
+        if not ids:
+            return {}
+        marks = ",".join("?" * len(ids))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT video_id, url FROM thumbnails WHERE video_id IN ({marks})",  # noqa: S608
+                list(ids),
+            ).fetchall()
+        return {vid: url for vid, url in rows if url}
 
     def view_history(self, ids: Sequence[str]) -> dict[str, list[tuple[datetime, int]]]:
         """영상 id → [(본 시각, 조회수)] (시각 순)."""
@@ -323,6 +346,7 @@ class _Short:
     pending: bool = False  # 검색 숏츠를 한 번만 봐서 시간당 조회 증가를 아직 못 잼
     measuring: bool = False  # 두 번 봤지만 간격이 기준 미만이라 측정 중
     extra: dict[str, Any] = field(default_factory=dict)
+    thumbnail_url: str | None = None  # 저장된 응답 값만
 
 
 async def classify_formats(
@@ -443,6 +467,8 @@ def group_stats(
                             if s.views_per_hour is not None
                             else None
                         ),  # fmt: skip
+                        video_url=video_url(s.video_id, short=True),
+                        thumbnail_url=s.thumbnail_url,
                     )
                     for s in top[: config.top_videos]
                 ],
@@ -595,6 +621,11 @@ async def _run(
         f" {config.min_recheck_minutes}분 미만이면 측정 중이라 시간당 조회를 쓰지 않는다."
         " 형식별 대표값은 중앙값이다(평균은 보조)"
     )
+
+    # 썸네일: 인기 스냅샷·검색 응답에서 저장한 값만 (더 부르지 않음)
+    thumbs = {**video_thumbnails(db, list(shorts)), **store.thumbnails(list(shorts))}
+    for vid, sh in shorts.items():
+        sh.thumbnail_url = thumbs.get(vid)
 
     # 3. 분류 (카테고리: 주제 분류기 / 형식: 숏츠 형식 목록), 저장해 재사용
     items = list(shorts.values())

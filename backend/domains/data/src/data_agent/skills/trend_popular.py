@@ -78,6 +78,7 @@ from data_agent.skills.trend_scan import TREND_CONFIG_ENV
 from data_agent.skills.youtube_velocity import velocities
 from data_agent.today_board import BOARD, TodayBoard
 from data_agent.trending_store import latest_trending, news_links, news_titles
+from data_agent.video_links import video_url
 from data_agent.youtube_store import (
     DB_ENV,
     DEFAULT_DB,
@@ -86,6 +87,7 @@ from data_agent.youtube_store import (
     popular_history,
     recent_snapshots,
     video_details,
+    video_thumbnails,
     video_titles,
 )
 
@@ -259,6 +261,8 @@ def _video(r: dict[str, Any], cell: str, yt_cell: str | None, source: str) -> Po
         youtube_category_id=yt,
         category_mismatch=None if yt_cell is None else yt_cell != cell,
         source=source,  # type: ignore[arg-type]
+        video_url=video_url(r["video_id"]),
+        thumbnail_url=r.get("thumbnail_url"),
     )
 
 
@@ -379,6 +383,7 @@ def _chart_rows(db: str, snapshot: Any, since: datetime) -> list[dict[str, Any]]
     values = latest[0].videos if latest else {}
     ids = [v.video_id for v in snapshot.videos]
     details = video_details(db, ids)
+    thumbs = video_thumbnails(db, ids)
     rows: list[dict[str, Any]] = []
     for v in snapshot.videos:
         stored = values.get(v.video_id)
@@ -396,6 +401,7 @@ def _chart_rows(db: str, snapshot: Any, since: datetime) -> list[dict[str, Any]]
                 "language": None,
                 "category_id": v.category_id,
                 "tags": list(v.tags),
+                "thumbnail_url": thumbs.get(v.video_id),
             }
         )
     return rows
@@ -447,6 +453,7 @@ async def _fill_rows(
                 "language": getattr(s, "language", None),
                 "category_id": s.category_id,
                 "tags": list(s.tags),
+                "thumbnail_url": getattr(s, "thumbnail_url", None),  # 받은 검색 응답 값
             }
             for s in stats
         ]
@@ -575,6 +582,7 @@ async def attach_videos(
                 if gone:
                     why = f"YouTube가 영상 {len(gone)}개를 주지 않음 (지워졌거나 비공개)"
     details = video_details(db, ids)
+    thumbs = video_thumbnails(db, ids)
     latest = recent_snapshots(db, 1)
     stored = latest[0].videos if latest else {}
     for t in topics:
@@ -592,6 +600,8 @@ async def attach_videos(
                     published_at=published,
                     duration_seconds=d.duration_seconds if d else None,
                     source="chart",
+                    video_url=video_url(vid),
+                    thumbnail_url=thumbs.get(vid),
                 )
             )
         t.videos = rows
