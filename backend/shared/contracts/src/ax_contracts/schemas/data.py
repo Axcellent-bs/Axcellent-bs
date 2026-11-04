@@ -1493,6 +1493,10 @@ class TrendAgeOutput(AxModel):
     note: str = AGE_NOTE
     generated_at: UtcDatetime | None = None
     summary: str = ""
+    # 아래는 예전 응답은 없다. 한계 (상한에 닿았을 때 어느 skill이 얼마나 썼는지 등)
+    # 와 skill별 오늘 호출 수
+    limits: list[str] = Field(default_factory=list)
+    calls_by_caller: dict[str, int] = Field(default_factory=dict)
 
 
 # ------------------------------------------------ 인사이트 브리프 (trend_insight_brief)
@@ -1628,6 +1632,9 @@ class DomainOpportunity(AxModel):
     opportunity_id: str = Field(min_length=1)  # 날짜 + 하위 주제 해시
     subtopic: str = Field(min_length=1)  # 하위 주제 (도메인 프로필 씨앗 키워드)
     subtopic_evidence: str | None = None  # 그 씨앗 키워드의 카탈로그·소개 근거 문장
+    # 아래는 예전 응답은 없다. 하위 주제 넓히기(domain_subtopics)에서 온 카드의 축과 씨앗 키워드
+    axis: str | None = None
+    seed_keyword: str | None = None
     line: str  # 가설 한 줄 (LLM, 근거 숫자만. 검증 실패면 고정 문장)
     line_status: Literal["llm", "fixed"] = "fixed"
     line_reason: str | None = None
@@ -1700,6 +1707,9 @@ class DomainProfileOutput(AxModel):
     industry_tags: list[str] = Field(default_factory=list)  # 출처 목록 업종 태그와 맞추는 값
     product_groups: list[ProductGroup] = Field(default_factory=list)
     customer_axes: list[str] = Field(default_factory=list)  # 고객 축 (정해진 목록 중)
+    # 아래는 예전 응답은 없다. 하위 주제를 나눌 축 이름
+    # (고객 축에 맞춰 LLM이 정함, 사람이 나열하지 않음)
+    subtopic_axes: list[str] = Field(default_factory=list)
     questions: list[str] = Field(default_factory=list)  # 분석 질문
     seed_keywords: list[SeedKeyword] = Field(default_factory=list)
     dropped_keywords: list[DroppedKeyword] = Field(default_factory=list)  # 근거가 없어 버린 것
@@ -1797,7 +1807,53 @@ class SourcePlanOutput(AxModel):
     dropped_sources: list[PlanDropped] = Field(default_factory=list)  # 목록 밖·중복 출처
     quota: list[PlanQuota] = Field(default_factory=list)
     trimmed: list[str] = Field(default_factory=list)  # 할당량 상한으로 자른 것
+    # 아래는 예전 응답은 없다. 하위 주제 넓히기 YouTube 숏츠 검색 (YouTube 할당량 합계에 들어감)
+    subtopic_searches: int = Field(default=0, ge=0)
+    subtopic_units: int = Field(default=0, ge=0)
     approval_note: str = ""  # 새 출처 수집은 사람 승인 후 (설정 파일 승인 플래그)
     cached: bool = False
     generated_at: UtcDatetime | None = None
+    summary: str = ""
+
+
+# ------------------------------------------------ 하위 주제 넓히기 (domain_subtopics)
+# 씨앗 키워드로 YouTube 한국 숏츠를 검색해 결과 영상 태그·제목에서 함께 나오는 말을 모으고(코드),
+# LLM이 프로필의 하위 주제 축으로 분류한다.
+
+
+class DomainSubtopicsRequest(AxModel):
+    regenerate: bool = False  # 오늘 묶은 결과를 쓰지 않고 다시 (검색은 일주일 캐시 그대로)
+
+
+class DomainSubtopic(AxModel):
+    name: str = Field(min_length=1)
+    seed_keyword: str  # 이 하위 주제를 찾은 씨앗 키워드
+    axis: str  # 프로필 하위 주제 축 중 하나 또는 "기타"
+    videos: int = Field(default=0, ge=0)  # 함께 나온 숏츠 수 (코드)
+    median_views: float | None = Field(default=None, ge=0)  # 그 숏츠 조회수 중앙값
+    video_ids: list[str] = Field(default_factory=list)  # 근거 영상 (최대 5)
+    origins: list[Literal["tag", "title"]] = Field(default_factory=list)
+    merged: list[str] = Field(default_factory=list)  # 같은 대상으로 묶은 이름
+
+
+class SubtopicSearch(AxModel):
+    seed_keyword: str
+    status: Literal["searched", "cached", "skipped", "failed"]
+    searched_at: UtcDatetime | None = None
+    shorts: int = Field(default=0, ge=0)  # 받은 숏츠 수
+    reason: str | None = None
+
+
+class DomainSubtopicsOutput(AxModel):
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = None
+    axes: list[str] = Field(default_factory=list)  # 프로필 하위 주제 축 + 기타
+    subtopics: list[DomainSubtopic] = Field(default_factory=list)
+    searches: list[SubtopicSearch] = Field(default_factory=list)
+    dropped_common: list[str] = Field(default_factory=list)  # 흔한 말로 뺀 이름 (문서 빈도)
+    quota_used: int = Field(default=0, ge=0)  # 이번에 쓴 YouTube 단위
+    cache_days: int = Field(default=7, ge=0)
+    daily_searches: int = Field(default=5, ge=0)
+    generated_at: UtcDatetime | None = None
+    limits: list[str] = Field(default_factory=list)
     summary: str = ""
