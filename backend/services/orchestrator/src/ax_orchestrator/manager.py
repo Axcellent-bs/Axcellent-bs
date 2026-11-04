@@ -8,16 +8,20 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
 from ax_contracts.schemas import EventEnvelope, EventType
-from ax_orchestrator.engine import Engine
+from ax_orchestrator.engine import Engine, incident_metrics
 from ax_orchestrator.finance_opinions import FinanceOpinions
-from ax_orchestrator.models import Incident, Plan, iso
+from ax_orchestrator.models import Incident, Plan, iso, now
 from ax_orchestrator.naming import event_title, event_type
 from ax_orchestrator.plans.support_resolved import support_resolved
+from ax_orchestrator.store import IncidentStore
+
+log = logging.getLogger("orchestrator.manager")
 
 
 def _since(env: EventEnvelope) -> datetime | None:
@@ -58,14 +62,66 @@ SUBSCRIBED = [
 ]
 
 
+# 다시 켜질 때 진행 중이던 단계의 상태: 이어 가지 않고 이 상태로 남긴다
+UNFINISHED = {"pending", "running", "held", "waiting_human"}
+INTERRUPTED_NOTE = "재시작으로 중단됨 (사람이 확인 필요)"
+
+
 class IncidentManager:
-    def __init__(self, engine: Engine, plan_factory: Callable[[], Plan]) -> None:
+    def __init__(
+        self,
+        engine: Engine,
+        plan_factory: Callable[[], Plan],
+        store: IncidentStore | None = None,
+    ) -> None:
         self.engine = engine
         self.plan_factory = plan_factory
+        self.store = store
         self.incidents: dict[str, Incident] = {}
         self.finance_opinions = FinanceOpinions()
         self._seen: set[str] = set()
         self._tasks: dict[str, asyncio.Task[Incident]] = {}
+
+    def _persist(self, inc: Incident) -> None:
+        if self.store is None:
+            return
+        try:
+            self.store.save(inc)
+        except Exception:  # noqa: BLE001 - 저장 실패가 이벤트 처리를 막지 않게 한다
+            log.exception("이벤트 저장 실패: %s", inc.context_id)
+
+    def restore(self) -> int:
+        """저장된 이벤트와 처리한 event_id를 불러온다. 진행 중이던 이벤트의 수를 돌려준다.
+
+        진행 중이던 이벤트(`open`)는 이어서 실행하지 않는다. 승인 대기·사람 할 일함 대기는 저장되지
+        않았고, 이미 보낸 요청을 다시 보내면 안 되는 것이 있을 수 있어서다. 끝나지 않은 단계는
+        "재시작으로 중단됨"으로 남기고 이벤트는 `degraded`로 닫아 사람이 확인하게 한다.
+        """
+        if self.store is None:
+            return 0
+        self._seen |= self.store.seen_ids()
+        interrupted = 0
+        for inc in self.store.load_all():
+            if inc.status == "open":
+                self._mark_interrupted(inc)
+                self._persist(inc)
+                interrupted += 1
+            self.incidents[inc.context_id] = inc
+        return interrupted
+
+    @staticmethod
+    def _mark_interrupted(inc: Incident) -> None:
+        at = now()
+        for run in inc.steps.values():
+            if run.status in UNFINISHED:
+                run.status, run.note, run.finished_at = "failed", INTERRUPTED_NOTE, at
+                run.reason_code = run.reason_code or "restart_interrupted"
+        inc.status = "degraded"
+        inc.closed_at = at
+        inc.settle_after_recovery()  # 복구 신호를 이미 받았으면 장애 중으로 남기지 않는다
+        inc.summary = [Engine._summary_line(run) for run in inc.steps.values()]
+        inc.metrics = incident_metrics(inc)
+        inc.log(f"총괄이 다시 켜져 진행 중이던 이벤트를 이어 가지 않았다: {INTERRUPTED_NOTE}")
 
     def judge(self, env: EventEnvelope) -> str:
         """`open` | `note` | `ignore`."""
@@ -148,6 +204,17 @@ class IncidentManager:
         if env.event_id in self._seen:
             return "duplicate", None
         self._seen.add(env.event_id)
+        result = await self._process(env)
+        # 이벤트를 저장한 뒤에 적는다: 그 사이에 꺼지면 같은 이벤트를 다시 받아 처리한다
+        # (잃지 않는다)
+        if self.store is not None:
+            try:
+                self.store.mark_seen(env.event_id)
+            except Exception:  # noqa: BLE001 - 기록 실패가 이벤트 처리를 막지 않게 한다
+                log.exception("처리한 event_id 저장 실패: %s", env.event_id)
+        return result
+
+    async def _process(self, env: EventEnvelope) -> tuple[str, Incident | None]:
         if env.type == EventType.HANDOFF_COMPLETED:
             return await self._resume_handoff(env)
         if env.type == EventType.SHOP_RECOVERED:
@@ -160,6 +227,7 @@ class IncidentManager:
                 await self.engine.refresh_impact(target, self.plan_factory())
                 if target.closed_at is not None:  # 열려 있으면 이벤트가 닫힐 때 함께 남긴다
                     await self.engine.sync_times(target)
+                self._persist(target)
                 return "noted", target
         verdict = self.judge(env)
         component = self._component(env)
@@ -188,6 +256,7 @@ class IncidentManager:
         self.incidents[inc.context_id] = inc
         inc.signal = dict(env.data)
         plan = PLANS[env.type][1]() if env.type in PLANS else self.plan_factory()
+        self._persist(inc)  # 단계가 돌기 전에 먼저 남긴다
         self._tasks[inc.context_id] = asyncio.create_task(self.engine.run(inc, plan))
         return "opened", inc
 
@@ -199,6 +268,7 @@ class IncidentManager:
                 inc.settle_after_recovery()
                 inc.refresh_mttr()
                 inc.log(f"복구 신호 수신 ({iso(at)})")
+                self._persist(inc)
 
     async def _resume_handoff(self, env: EventEnvelope) -> tuple[str, Incident | None]:
         """같은 context_id 이벤트에서 같은 task_id를 기다리는 단계를 찾아 사람 결과를 넣는다.

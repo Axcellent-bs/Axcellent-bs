@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import uuid
 from collections.abc import Awaitable, Callable
@@ -44,8 +45,12 @@ from ax_orchestrator.timeline import prior_case_of, times_of
 
 Caller = Callable[[str, AgentRequest], Awaitable[AgentResult]]
 Publisher = Callable[[str, Incident], Awaitable[None]]
+# 이벤트를 저장한다(실패해도 이벤트 처리는 멈추지 않는다): 이벤트 -> 없음
+Persister = Callable[[Incident], None]
 # 규칙으로 안 풀릴 때만 쓰는 LLM 선택기: (skill, 후보 부서들) -> 부서 이름 또는 None
 LlmPicker = Callable[[str, list[str]], Awaitable[str | None]]
+
+log = logging.getLogger("orchestrator.engine")
 
 TRANSFER_CODES = {ErrorCode.FORBIDDEN_SKILL.value, ErrorCode.HOP_LIMIT.value, "not_my_scope"}
 MAX_FAILED_RETRIES = 2
@@ -126,6 +131,7 @@ class Engine:
         step_timeout: float = 30.0,
         llm_pick: LlmPicker | None = None,
         author: str = "orchestrator",
+        persist: Persister | None = None,
     ) -> None:
         self.registry = registry
         self.caller = caller
@@ -136,6 +142,7 @@ class Engine:
         self.step_timeout = step_timeout
         self.llm_pick = llm_pick
         self.author = author
+        self.persist = persist
         self._locks: dict[str, asyncio.Lock] = {}
         self._sequence: dict[str, int] = {}
         # 사람이 대기 상태보다 먼저 끝낸 결과: (context_id, task_id) → (status, 결과)
@@ -147,6 +154,7 @@ class Engine:
             inc.steps[step.id] = StepRun(step.id, step.skill, step.label)
         inc.log(f"이벤트 시작: {inc.title}")
         await self._publish("incident.opened", inc)
+        self._save(inc)
 
         by_id = {s.id: s for s in plan.steps}
         pending = set(by_id)
@@ -161,6 +169,7 @@ class Engine:
             for task in done:
                 running.pop(task)
                 task.result()
+                self._save(inc)
         await self._close(inc, plan)
         return inc
 
@@ -484,6 +493,7 @@ class Engine:
         run.status = "held"
         run.note = (result.output or {}).get("hold_reason", "") or "사람 승인 대기"
         inc.log(f"{run.label}: C 등급 보류 — 승인 대기열에 올림")
+        self._save(inc)
         try:
             await asyncio.wait_for(hold.event.wait(), timeout=self.hold_timeout)
         except TimeoutError:
@@ -526,6 +536,7 @@ class Engine:
         run.output = output
         run.note = f"{wait.assignee_unit or '맡은 부서'} 할 일함에서 사람 처리 대기 ({task_id})"
         inc.log(f"{run.label}: {run.note}")
+        self._save(inc)
         early = self._early_handoffs.pop((inc.context_id, task_id), None)
         if early is not None:  # 대기로 올리기 전에 사람이 이미 끝냈다: 보관한 결과로 바로 이어 간다
             wait.finish(*early)
@@ -697,32 +708,10 @@ class Engine:
         inc.closed_at = now()
         inc.settle_after_recovery()  # 복구 신호를 먼저 받았으면 장애 중으로 남기지 않는다
         inc.summary = [self._summary_line(r) for r in inc.steps.values()]
-        statuses = [r.status for r in inc.steps.values()]
-        retries = sum(max(r.attempts - 1, 0) for r in inc.steps.values())
-        inc.metrics = {
-            "mttr_seconds": inc.mttr_seconds(),
-            # AI 대응이 끝나기까지 걸린 초. 장애가 풀린 시간(mttr_seconds)과 다르다
-            "response_seconds": round((inc.closed_at - inc.opened_at).total_seconds(), 2),
-            "steps_total": len(statuses),
-            "steps_completed": statuses.count("completed"),
-            "held": sum(1 for r in inc.steps.values() if r.reason_code == "human_input"),
-            "handoffs": sum(1 for r in inc.steps.values() if r.handoff_task_id),
-            "transfers": sum(1 for r in inc.steps.values() if r.transferred_to),
-            "retries": retries,
-            "auto_rate": round(
-                # 꺼진 서비스라 건너뛴 조회 등(NOT_INTERVENTION)은 사람이 개입한 일이 아니다
-                1
-                - sum(
-                    1
-                    for r in inc.steps.values()
-                    if r.reason_code and r.reason_code not in NOT_INTERVENTION
-                )
-                / max(len(statuses), 1),
-                2,
-            ),
-        }
+        inc.metrics = incident_metrics(inc)
         inc.log(f"이벤트 종료: {inc.status}")
         await self.sync_times(inc)
+        self._save(inc)
         await self._publish("incident.resolved", inc)
 
     @staticmethod
@@ -742,6 +731,44 @@ class Engine:
         if self.publish is not None:
             await self.publish(kind, inc)
 
+    def _save(self, inc: Incident) -> None:
+        """이벤트를 저장한다. 저장에 실패해도 이벤트 처리는 멈추지 않고 로그만 남긴다."""
+        if self.persist is None:
+            return
+        try:
+            self.persist(inc)
+        except Exception:  # noqa: BLE001 - 저장 실패가 장애 대응을 막으면 안 된다
+            log.exception("이벤트 저장 실패: %s", inc.context_id)
+
+
+def incident_metrics(inc: Incident) -> dict[str, Any]:
+    """닫힌 이벤트의 지표. 이벤트를 닫을 때와 재시작으로 중단된 이벤트를 남길 때 같이 쓴다."""
+    assert inc.closed_at is not None
+    statuses = [r.status for r in inc.steps.values()]
+    retries = sum(max(r.attempts - 1, 0) for r in inc.steps.values())
+    return {
+        "mttr_seconds": inc.mttr_seconds(),
+        # AI 대응이 끝나기까지 걸린 초. 장애가 풀린 시간(mttr_seconds)과 다르다
+        "response_seconds": round((inc.closed_at - inc.opened_at).total_seconds(), 2),
+        "steps_total": len(statuses),
+        "steps_completed": statuses.count("completed"),
+        "held": sum(1 for r in inc.steps.values() if r.reason_code == "human_input"),
+        "handoffs": sum(1 for r in inc.steps.values() if r.handoff_task_id),
+        "transfers": sum(1 for r in inc.steps.values() if r.transferred_to),
+        "retries": retries,
+        "auto_rate": round(
+            # 꺼진 서비스라 건너뛴 조회 등(NOT_INTERVENTION)은 사람이 개입한 일이 아니다
+            1
+            - sum(
+                1
+                for r in inc.steps.values()
+                if r.reason_code and r.reason_code not in NOT_INTERVENTION
+            )
+            / max(len(statuses), 1),
+            2,
+        ),
+    }
+
 
 # 이벤트 종류(plan 이름) → (기록 종류, 담당 영역). 인사 `record_case`로 보내는 값이다.
 # 없으면 장애 이벤트로 기록한다.
@@ -754,4 +781,4 @@ def new_event_id() -> str:
     return f"evt_{uuid.uuid4().hex[:12]}"
 
 
-__all__ = ["Engine", "HandoffWait", "Hold", "iso", "new_event_id"]
+__all__ = ["Engine", "HandoffWait", "Hold", "incident_metrics", "iso", "new_event_id"]
