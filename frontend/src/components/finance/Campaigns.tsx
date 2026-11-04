@@ -48,17 +48,18 @@ export function CampaignsSection({ tick }: { tick: number }) {
               )}
               {v.campaigns.length === 0 ? <Empty>아직 기록된 캠페인이 없습니다. 마케팅 AI 화면에서 캠페인을 시작하고 결과를 저장하면 여기에 적힙니다.</Empty> : (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[840px] text-sm">
+                  <table className="w-full min-w-[920px] text-sm">
                     <thead className="text-left text-ink-500">
-                      <tr>{["캠페인", "채널", "광고비", "판매액", "매출", "손익", "ROI", "재구매 포함 (참고)", "효율"].map((h) => <th key={h} className="pb-1 font-medium">{h}</th>)}</tr>
+                      <tr>{["캠페인", "채널", "광고비", "판매액", "증분 주문", "매출", "손익", "ROI", "재구매 포함 (참고)", "효율"].map((h) => <th key={h} className="pb-1 font-medium">{h}</th>)}</tr>
                     </thead>
                     <tbody>
                       {v.campaigns.map((c) => (
-                        <tr key={c.campaign_id} className="border-t border-ink-100" title={`출처: ${c.source}`}>
+                        <tr key={c.campaign_id} className="border-t border-ink-100" title={[`출처: ${c.source}`, c.effect_generated_at ? `측정 시각: ${c.effect_generated_at}` : "", c.measured_gmv_krw != null && c.measured_gmv_krw < 0 ? `측정 증분 판매액: ${c.measured_gmv_krw}원` : "", c.measured_orders != null && c.measured_orders < 0 ? `측정 증분 주문: ${c.measured_orders}건` : ""].filter(Boolean).join("\n")}>
                           <td className="py-1.5">{c.campaign_name}</td>
                           <td className="py-1.5">{c.channel}</td>
                           <td className="py-1.5 tabular-nums">{krw(c.spend_krw)}</td>
                           <td className="py-1.5 tabular-nums">{c.gmv_krw === null ? "자료 없음" : krw(c.gmv_krw)}</td>
+                          <td className="py-1.5 tabular-nums">{c.orders == null ? "자료 없음" : `${c.orders.toLocaleString("ko-KR")}건`}</td>
                           <td className="py-1.5 tabular-nums">{c.revenue_krw === null ? "-" : krw(c.revenue_krw)}</td>
                           <td className="py-1.5 tabular-nums">{c.profit_krw === null ? "-" : signedKrw(c.profit_krw)}</td>
                           <td className="py-1.5 tabular-nums">{pct(c.roi)}</td>

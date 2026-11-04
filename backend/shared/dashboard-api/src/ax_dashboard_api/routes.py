@@ -792,7 +792,11 @@ class CampaignResultBody(BaseModel):
     spend_krw: int = Field(ge=0)
     coupon_krw: int = Field(default=0, ge=0)
     gmv_krw: int | None = Field(default=None, ge=0)
+    orders: int | None = Field(default=None, ge=0)
     source: str = Field(min_length=1, max_length=100)
+    measured_gmv_krw: int | None = None
+    measured_orders: int | None = None
+    effect_generated_at: str | None = None
 
 
 class CampaignCancelBody(BaseModel):
@@ -813,10 +817,13 @@ async def start_campaign(body: CampaignStartBody) -> dict:
 
 @router.post("/campaigns/{campaign_id}/result")
 async def record_campaign_result(campaign_id: str, body: CampaignResultBody) -> dict:
-    """사람이 적은 성과를 재무에 넘긴다. 판매액을 모르면 비워 둔다."""
+    """화면의 성과를 재무에 넘긴다. 판매액·주문 수를 모르면 비워 둔다."""
     _no_org_in_mock()
     payload = body.model_dump(exclude_none=True) | {"campaign_id": campaign_id}
-    key = f"ui:result:{campaign_id}:{body.spend_krw}:{body.gmv_krw}:{body.coupon_krw}"
+    key = (
+        f"ui:result:{campaign_id}:{body.period_from}:{body.period_to}:{body.spend_krw}"
+        f":{body.gmv_krw}:{body.orders}:{body.coupon_krw}"
+    )
     return ok(
         await marketing_client.call(
             "record_campaign_result", payload, campaign_id=campaign_id, key=key

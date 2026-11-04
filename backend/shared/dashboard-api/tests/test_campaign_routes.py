@@ -83,6 +83,35 @@ def test_held_or_failed_is_a_result_not_an_error(client: TestClient, fake: Fake)
     assert payload["campaign_id"] == "cmp_1" and "gmv_krw" not in payload  # 모르면 보내지 않는다
 
 
+def test_effect_numbers_reach_marketing_and_unknown_stays_out(
+    client: TestClient, fake: Fake
+) -> None:
+    body = {
+        "campaign_name": "가을",
+        "channel": "검색",
+        "period_from": "2026-11-01",
+        "period_to": "2026-11-03",
+        "spend_krw": 1000,
+        "gmv_krw": 0,
+        "orders": 0,
+        "measured_gmv_krw": -3000,
+        "measured_orders": -2,
+        "effect_generated_at": "2026-11-04T00:00:00Z",
+        "source": "data.campaign_effect.v2",
+    }
+    url = "/api/dashboard/campaigns/cmp_1/result"
+    assert client.post(url, json=body).status_code == 200
+    sent = fake.calls[0][1].input
+    assert (sent["gmv_krw"], sent["orders"]) == (0, 0)  # 0은 아는 값이라 보낸다
+    assert (sent["measured_gmv_krw"], sent["measured_orders"]) == (-3000, -2)
+
+    unknown = {k: v for k, v in body.items() if not k.startswith(("gmv", "orders", "measured"))}
+    assert client.post(url, json=unknown | {"orders": None}).status_code == 200
+    sent = fake.calls[1][1].input
+    assert "orders" not in sent and "gmv_krw" not in sent  # 모르면 보내지 않는다
+    assert client.post(url, json=body | {"orders": -1}).status_code == 422
+
+
 def test_rejected_by_acl_is_403(client: TestClient, fake: Fake) -> None:
     fake.status, fake.outcome = TaskStatus.REJECTED, "FORBIDDEN_SKILL"
     response = client.post("/api/dashboard/campaigns/start", json=START)

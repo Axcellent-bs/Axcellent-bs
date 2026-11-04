@@ -87,7 +87,7 @@ export type CampaignVerdict = "good" | "neutral" | "bad";
 export type BudgetDecision = "approved" | "conditional" | "rejected";
 export interface CampaignRecord {
   campaign_id: string; campaign_name: string; channel: string; period_from: string; period_to: string;
-  spend_krw: number; coupon_krw: number; gmv_krw: number | null; revenue_krw: number | null; profit_krw: number | null;
+  spend_krw: number; coupon_krw: number; gmv_krw: number | null; orders?: number | null; measured_gmv_krw?: number | null; measured_orders?: number | null; effect_generated_at?: string | null; revenue_krw: number | null; profit_krw: number | null;
   roi: number | null; roas: number | null; ltv_profit_krw: number | null; verdict: CampaignVerdict | null; status: "recorded" | "waiting_revenue"; source: string;
   applied_rules: AppliedRule[];
 }
