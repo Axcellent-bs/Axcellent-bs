@@ -223,3 +223,48 @@ def test_subtopic_axes_come_from_the_llm_and_are_checked(tmp_path: Path) -> None
     assert out.subtopic_axes == ["활용 방식", "같이 묶이는 관심사"]  # 기타·숫자·긴 이름·중복 뺌
     one = _run(tmp_path / "b", ProfileLLM(_answer(subtopic_axes=["활용 방식"])))
     assert any("하위 주제 축이 1개" in x for x in one.limits)
+
+
+def _about(tmp_path: Path, about: str) -> dict[str, str]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    cfg = tmp_path / "tenant.toml"
+    cfg.write_text(f'[profile]\nabout = "{about}"\n', encoding="utf-8")
+    return {"DATA_TENANT_CONFIG": str(cfg), "DATA_DOMAIN_PROFILE_DB": str(tmp_path / "p.db")}
+
+
+def _profile(env: dict[str, str], llm: ProfileLLM):  # noqa: ANN202
+    return asyncio.run(
+        dp.make_profile(DomainProfileRequest(), llm, env=env, catalog=CATALOG, now=NOW)
+    ).output
+
+
+def test_profile_is_rebuilt_when_the_intro_changes(tmp_path: Path) -> None:
+    llm = ProfileLLM(_answer())
+    first = _profile(_about(tmp_path, "책과 문구를 파는 쇼핑몰."), llm)
+    again = _profile(_about(tmp_path, "책과 문구를 파는 쇼핑몰."), llm)
+    assert again.cached and llm.asked == 1
+    changed = _profile(_about(tmp_path, "책을 파는 출판사다."), llm)  # 같은 저장소, 소개만 바뀜
+    assert not changed.cached and llm.asked == 2 and changed.catalog_hash != first.catalog_hash
+
+
+def test_groups_missing_from_the_intro_are_warned_with_their_products(tmp_path: Path) -> None:
+    answer = _answer(groups_not_in_intro=["문구", "가전", "도서"])
+    out = _profile(
+        _about(tmp_path, "책을 파는 출판사다. 소설과 IT 학습서를 판다."), ProfileLLM(answer)
+    )
+    # 가전: 검증된 상품군이 아님 → 버림. 도서: LLM이 골랐지만 '도서'가 소개에 없어 경고 대상
+    # (소개에 '책'만 있음, 원문 그대로가 아니면 LLM 판단을 따른다)
+    warned = {m.group: m for m in out.intro_mismatch}
+    assert set(warned) == {"문구", "도서"}
+    assert [p.name for p in warned["문구"].products] == ["무지 노트 3권 세트"]
+    assert warned["문구"].category_codes == ["stat"] and "카탈로그에 1개" in warned["문구"].reason
+    assert {s.keyword for s in out.seed_keywords} >= {"무지 노트"}  # 빼지 않고 경고만
+    assert any(x.startswith("소개와 카탈로그가 어긋남") for x in out.limits)
+    named = _profile(
+        _about(tmp_path / "b", "책과 문구를 파는 쇼핑몰."),
+        ProfileLLM(_answer(groups_not_in_intro=["문구"])),
+    )
+    assert named.intro_mismatch == []  # 상품군 이름이 소개에 그대로 있으면 경고하지 않음
+    no_intro = _profile({"DATA_DOMAIN_PROFILE_DB": str(tmp_path / "c.db")},
+                        ProfileLLM(_answer(groups_not_in_intro=["문구"])))  # fmt: skip
+    assert no_intro.intro_mismatch == []  # 소개가 없으면 보지 않음

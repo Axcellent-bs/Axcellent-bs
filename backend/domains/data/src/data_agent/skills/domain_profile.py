@@ -36,6 +36,8 @@ from ax_contracts.schemas.data import (
     DomainProfileOutput,
     DomainProfileRequest,
     DroppedKeyword,
+    IntroMismatch,
+    MismatchProduct,
     ProductGroup,
     SeedKeyword,
 )
@@ -68,6 +70,8 @@ PROMPT = (
     f"- subtopic_axes: 고른 고객 축에 맞춰, 이 회사 상품의 하위 주제를 나눌 축 이름"
     f" {MIN_AXES}~{MAX_AXES}개 (이 업종에 맞는 짧은 명사구, 숫자 없이, 기타는 쓰지 말 것)\n"
     "- product_groups: 상품군 이름과 그 상품군의 카테고리 코드(데이터 블록의 코드 그대로)\n"
+    "- groups_not_in_intro: product_groups 중 회사 소개에 나오지 않는 상품군 이름"
+    " (소개만 읽어서는 이 회사가 판다고 알 수 없는 것). 소개가 없으면 빈 목록\n"
     f"- questions: 데이터로 답할 분석 질문 최대 {MAX_QUESTIONS}개. 숫자를 쓰지 말 것\n"
     f"- seeds: 트렌드를 찾을 씨앗 키워드 최대 {MAX_SEEDS}개."
     " evidence에는 그 키워드가 들어 있는 소개·상품 이름·카테고리 이름·설명 원문 일부를"
@@ -177,6 +181,7 @@ class _Profile(BaseModel):
     product_groups: list[_Group] = []
     customer_axes: list[str] = []
     subtopic_axes: list[str] = []
+    groups_not_in_intro: list[str] = []
     questions: list[str] = []
     seeds: list[_Seed] = []
 
@@ -319,6 +324,47 @@ def check_axes(axes: Sequence[str]) -> list[str]:
     return out[:MAX_AXES]
 
 
+def intro_mismatch(
+    named: Sequence[str],
+    groups: Sequence[ProductGroup],
+    tenant: TenantProfile,
+    catalog: CatalogRead,
+) -> list[IntroMismatch]:
+    """소개에 없는 상품군 (LLM이 고른 이름 → 코드가 확인하고 상품 목록을 붙인다). 경고만.
+
+    LLM이 고른 이름이 검증된 상품군에 없으면 버린다. 상품군 이름이나 그 카테고리 이름이 소개에
+    그대로 있으면 소개에 있는 것이라 경고하지 않는다(LLM 답보다 원문이 먼저).
+    """
+    if not tenant.about:
+        return []
+    about = _n(tenant.about)
+    by_name = {g.name: g for g in groups}
+    out: list[IntroMismatch] = []
+    for name in dict.fromkeys(n.strip() for n in named):
+        g = by_name.get(name)
+        if g is None:
+            continue
+        cat_names = [catalog.categories.get(c, "") for c in g.category_codes]
+        if any(x and _n(x) in about for x in [g.name, *cat_names]):
+            continue
+        products = [
+            MismatchProduct(product_id=p.product_id, name=p.name)
+            for p in catalog.products
+            if p.category_code in g.category_codes
+        ]
+        if not products:
+            continue
+        out.append(
+            IntroMismatch(
+                group=g.name,
+                category_codes=list(g.category_codes),
+                products=products,
+                reason=f"회사 소개에 '{g.name}' 상품군이 없는데 카탈로그에 {len(products)}개 있음",
+            )
+        )
+    return out
+
+
 def check_groups(groups: Sequence[_Group], catalog: CatalogRead) -> list[ProductGroup]:
     known = set(catalog.categories) | {p.category_code for p in catalog.products if p.category_code}
     out: list[ProductGroup] = []
@@ -446,6 +492,14 @@ async def make_profile(
             else:
                 out.limits.append(f"업종 답 {got.industry!r}가 정해진 목록 밖이라 버림")
             out.product_groups = check_groups(got.product_groups, catalog)
+            out.intro_mismatch = intro_mismatch(
+                got.groups_not_in_intro, out.product_groups, tenant, catalog
+            )
+            if out.intro_mismatch:
+                names = ", ".join(m.group for m in out.intro_mismatch)
+                out.limits.append(
+                    f"소개와 카탈로그가 어긋남: 소개에 없는 상품군 {names} (경고만, 빼지 않음)"
+                )
             out.customer_axes = [a for a in dict.fromkeys(got.customer_axes) if a in CUSTOMER_AXES]
             out.subtopic_axes = check_axes(got.subtopic_axes)
             if len(out.subtopic_axes) < MIN_AXES:
