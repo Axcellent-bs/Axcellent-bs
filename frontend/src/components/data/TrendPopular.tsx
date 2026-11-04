@@ -177,7 +177,10 @@ const VIDEO_SOURCE: Record<string, string> = { chart: "YouTube 인기 차트", s
 /** 응답 안 모든 칸의 영상 id → 제목 (근거 링크 글자용) */
 export function videoTitles(out: TrendPopularOutput | null): Map<string, string | null> {
   const m = new Map<string, string | null>();
-  for (const c of out?.by_category ?? []) for (const v of c.top_videos ?? []) m.set(v.video_id, v.title);
+  for (const c of out?.by_category ?? []) {
+    for (const v of c.top_videos ?? []) m.set(v.video_id, v.title);
+    for (const t of c.items) for (const v of t.videos ?? []) if (v.title) m.set(v.video_id, v.title);
+  }
   return m;
 }
 
@@ -200,6 +203,7 @@ function TopicBasis({ t, titles }: { t: PopularTopic; titles: Map<string, string
     <li className="space-y-1">
       <p className="text-sm font-semibold text-ink-900">{t.category_rank ?? t.rank}. {t.keyword}</p>
       {rows.length > 0 ? <Basis rows={rows} /> : <p className="text-xs text-ink-500">근거 값을 받지 못했어요.</p>}
+      {t.videos_reason && <p className="text-xs text-ink-500">영상 제목: {t.videos_reason}</p>}
     </li>
   );
 }
