@@ -662,6 +662,44 @@ async def data_sources(request: AgentRequest) -> AgentResult:
     )
 
 
+async def _plan_inputs(context_id: str | None):  # noqa: ANN202
+    """수집 계획 재료: 도메인 프로필(저장 재사용)과 출처 목록."""
+    from ax_contracts.schemas.data import DomainProfileRequest
+    from data_agent.skills.data_sources import list_sources
+    from data_agent.skills.domain_profile import make_profile
+    from data_agent.skills.product_link import read_catalog
+
+    catalog = await read_catalog(get_catalog())
+    profile = await make_profile(
+        DomainProfileRequest(), get_llm(), env=os.environ, catalog=catalog, context_id=context_id
+    )
+    sources = await list_sources(os.environ)
+    return catalog, profile.output, sources.output
+
+
+async def source_plan(request: AgentRequest) -> AgentResult:
+    """수집 계획 (프로필 + 출처 → LLM이 고르고 코드가 검증, 저장). 수집은 안 함. grade read."""
+    from ax_contracts.schemas.data import SourcePlanRequest
+    from data_agent.skills.source_plan import make_plan, shopping_verifier
+
+    data = _parse(request, SourcePlanRequest)
+    if isinstance(data, AgentResult):
+        return data
+    _, profile, sources = await _plan_inputs(request.meta.context_id)
+    result = await make_plan(
+        data, get_llm(), env=os.environ, profile=profile, sources=sources,
+        youtube_categories=get_youtube().video_categories,
+        verify_shopping=shopping_verifier(os.environ), context_id=request.meta.context_id,
+    )  # fmt: skip
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=result.output.status,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
+
+
 _category_cache: topic_category.CategoryCache | None = None
 
 
@@ -802,4 +840,5 @@ HANDLERS = {
     "trend_insight_brief": trend_insight_brief,
     "domain_profile": domain_profile,
     "data_sources": data_sources,
+    "source_plan": source_plan,
 }

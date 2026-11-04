@@ -38,7 +38,7 @@ KEY_ENV = "YOUTUBE_API_KEY"
 TIMEOUT_SECONDS = 15.0
 PAGE_SIZE = 50  # videos.list 한 번에 최대 50개
 MAX_POPULAR_PAGES = 4  # mostPopular는 200개까지 준다
-COST = {"videos": 1, "search": 100, "channels": 1}  # 문서 단가 (단위)
+COST = {"videos": 1, "search": 100, "channels": 1, "videoCategories": 1}  # 문서 단가 (단위)
 QUOTA_REASONS = frozenset({"quotaExceeded", "dailyLimitExceeded", "rateLimitExceeded"})
 
 _client: httpx.AsyncClient | None = None  # 테스트가 `use_client`로 바꿔 끼운다
@@ -145,6 +145,23 @@ class _ChannelPage(BaseModel):
     items: list[_Channel] = Field(default_factory=list)
 
 
+class _CategorySnippet(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    title: str
+    assignable: bool = True
+
+
+class _Category(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    snippet: _CategorySnippet
+
+
+class _CategoryPage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    items: list[_Category]
+
+
 class _SearchId(BaseModel):
     model_config = ConfigDict(extra="ignore")
     videoId: str | None = None  # noqa: N815
@@ -235,6 +252,12 @@ class YouTubeConnector:
             page = _parse(_VideoPage, await self._get("videos", params), "영상 통계")
             out.extend(_stat(v) for v in page.items)
         return out
+
+    async def video_categories(self, region: str = "KR", hl: str = "ko") -> dict[str, str]:
+        """그 지역 영상 카테고리 id → 이름 (videoCategories.list, 1단위). 지정할 수 있는 것만."""
+        params = {"part": "snippet", "regionCode": region, "hl": hl}
+        page = _parse(_CategoryPage, await self._get("videoCategories", params), "영상 카테고리")
+        return {c.id: c.snippet.title for c in page.items if c.snippet.assignable}
 
     async def channels(self, ids: Sequence[str]) -> dict[str, int | None]:
         """채널 id → 구독자 수 (channels.list, 50개씩 1단위). 숨김은 None, 없는 채널은 빠진다."""
