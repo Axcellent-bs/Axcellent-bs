@@ -8,6 +8,9 @@
 | `publish_notice` | A |
 | `get_notice` | read |
 | `list_active_notices` | read |
+| `receive_campaign_brief` | A |
+| `list_campaign_briefs` | read |
+| `get_campaign_brief` | read |
 | `issue_coupon` | A |
 
 - 실행: `uv run --package ax-svc-coupon uvicorn svc_coupon.main:app --port 8103` (backend/ 에서, 목 모드 `AGENT_TEMPLATE_MOCK=1`)

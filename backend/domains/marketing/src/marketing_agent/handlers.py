@@ -30,7 +30,15 @@ from ax_contracts.schemas import (
     NoticePublishedData,
     TaskStatus,
 )
+from ax_contracts.schemas.planning import CampaignBriefInput
 from marketing_agent import shop_client
+from marketing_agent.briefs import (
+    BriefStore,
+    CampaignBriefList,
+    CampaignBriefView,
+    GetCampaignBriefInput,
+    ListCampaignBriefsInput,
+)
 from marketing_agent.campaign import record_campaign_result, start_campaign
 from marketing_agent.coupons import CouponLedger, SequenceGap, total_value
 from marketing_agent.notice import NoticeStore, make_draft
@@ -53,6 +61,7 @@ class State:
     def __init__(self) -> None:
         self.notices = NoticeStore()
         self.coupons = CouponLedger()
+        self.briefs = BriefStore()
 
 
 STATE = State()
@@ -279,6 +288,67 @@ async def list_active_notices(request: AgentRequest) -> AgentResult:
     )
 
 
+async def receive_campaign_brief(request: AgentRequest) -> AgentResult:
+    """기획안을 받아 보관한다. 캠페인은 시작하지 않는다. 같은 proposal_id는 `duplicate`."""
+    data = _parse(request, CampaignBriefInput)
+    if isinstance(data, AgentResult):
+        return data
+    out = STATE.briefs.receive(data, _now())
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        outcome=out.outcome,
+        evidence=_evidence(
+            ["receive_campaign_brief"],
+            f"기획안 {data.proposal_id} {out.outcome}",
+            [data.proposal_id] + ([out.campaign_id] if out.campaign_id else []),
+        ),
+    )
+
+
+async def list_campaign_briefs(request: AgentRequest) -> AgentResult:
+    data = _parse(request, ListCampaignBriefsInput)
+    if isinstance(data, AgentResult):
+        return data
+    items, total = STATE.briefs.list(data.limit)
+    listing = CampaignBriefList(
+        items=items, total=total, unknown_reason=None if items else "받은 기획안이 없음"
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=listing.model_dump(mode="json"),
+        evidence=_evidence(
+            ["list_campaign_briefs"], f"받은 기획안 {total}건 조회", [i.proposal_id for i in items]
+        ),
+    )
+
+
+async def get_campaign_brief(request: AgentRequest) -> AgentResult:
+    data = _parse(request, GetCampaignBriefInput)
+    if isinstance(data, AgentResult):
+        return data
+    if data.proposal_id is None and data.campaign_id is None:
+        return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    item = STATE.briefs.get(data.proposal_id, data.campaign_id)
+    view = CampaignBriefView(
+        found=item is not None,
+        item=item,
+        unknown_reason=None if item else "받은 기획안을 찾을 수 없음(확인할 수 없음)",
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=view.model_dump(mode="json"),
+        evidence=_evidence(
+            ["get_campaign_brief"],
+            "받은 기획안 조회" if item else "받은 기획안을 찾을 수 없음(확인할 수 없음)",
+            [item.proposal_id] if item else [],
+        ),
+    )
+
+
 async def issue_coupon(request: AgentRequest) -> AgentResult:
     data = _parse(request, IssueCouponInput)
     if isinstance(data, AgentResult):
@@ -393,6 +463,9 @@ HANDLERS = {
     "publish_notice": publish_notice,
     "get_notice": get_notice,
     "list_active_notices": list_active_notices,
+    "receive_campaign_brief": receive_campaign_brief,
+    "list_campaign_briefs": list_campaign_briefs,
+    "get_campaign_brief": get_campaign_brief,
     "issue_coupon": issue_coupon,
     "start_campaign": start_campaign,
     "record_campaign_result": record_campaign_result,
