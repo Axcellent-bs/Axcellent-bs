@@ -436,3 +436,33 @@ def test_every_insight_carries_all_age_bands_without_extra_calls(tmp_path: Path)
     assert lol.age_bands[2].reason == "빈 시계열" and lol.target_age == "20대"
     news = next(i for i in out.insights if i.topic == "한국철강")
     assert news.age_bands == [] and news.target_age_reason  # 연령대를 받지 못하면 빈 목록 + 이유
+
+
+# ------------------------------------------------ 기회 가설 카드 (선택 칸)
+
+
+def test_brief_attaches_opportunity_cards_or_says_why(tmp_path: Path) -> None:
+    from data_agent.skills.domain_opportunity import OpportunityResult
+
+    async def none_fn():  # noqa: ANN202
+        return OpportunityResult([], "수집 계획이 없음 (LLM 설정이 없음)", None, [])
+
+    async def broken():  # noqa: ANN202
+        raise RuntimeError("down")
+
+    def run(fn, sub: str):  # noqa: ANN001, ANN202
+        return asyncio.run(
+            brief.make_brief(
+                TrendInsightBriefRequest(), BriefLLM(), env=_env(tmp_path / sub), popular=POPULAR,
+                popular_reason=None, rising=[], age_fn=_ages([]), promo=None, catalog=CATALOG,
+                now=NOW, opportunities_fn=fn,
+            )
+        ).output  # fmt: skip
+
+    out = run(none_fn, "a")
+    assert out.opportunities == [] and out.opportunities_reason.startswith("수집 계획이 없음")
+    assert "source_plan" in out.sources and out.insights  # 인사이트는 그대로
+    bad = run(broken, "b")
+    assert bad.opportunities_reason == "기회 가설 카드를 만들지 못함 (RuntimeError)"
+    plain = run(None, "c")
+    assert plain.opportunities_reason == "기회 가설 카드를 요청하지 않음"

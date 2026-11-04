@@ -583,11 +583,14 @@ async def trend_insight_brief(request: AgentRequest) -> AgentResult:
         )
         return result.output
 
+    async def opportunities():  # noqa: ANN202
+        return await _opportunities(request.meta.context_id, shorts_out, ages)
+
     result = await make_brief(
         data, llm, env=env, popular=popular_out, popular_reason=popular_why, rising=rising,
         age_fn=ages, promo=promo_out, catalog=catalog, aliases=cand_aliases(env),
         category_cache=get_category_cache(), shorts=shorts_out,
-        context_id=request.meta.context_id,
+        context_id=request.meta.context_id, opportunities_fn=opportunities,
     )  # fmt: skip
     return _result(
         request,
@@ -675,6 +678,39 @@ async def _plan_inputs(context_id: str | None):  # noqa: ANN202
     )
     sources = await list_sources(os.environ)
     return catalog, profile.output, sources.output
+
+
+async def _opportunities(context_id: str | None, shorts: object, ages: object):  # noqa: ANN202
+    """기회 가설 카드: 프로필 → 계획(저장 재사용) → 사용 가능·승인 출처만 수집."""
+    from ax_contracts.schemas.data import SourcePlanRequest
+    from data_agent.skills.domain_opportunity import default_consumption, make_opportunities
+    from data_agent.skills.source_plan import make_plan, shopping_verifier
+    from data_agent.skills.topic_category import TopicInput, classify_topics
+    from data_agent.skills.trend_scan import yesterday_kst
+
+    llm = get_llm()
+    catalog, profile, sources = await _plan_inputs(context_id)
+    plan = await make_plan(
+        SourcePlanRequest(), llm, env=os.environ, profile=profile, sources=sources,
+        youtube_categories=get_youtube().video_categories,
+        verify_shopping=shopping_verifier(os.environ), context_id=context_id,
+    )  # fmt: skip
+
+    async def classify(names: list[str]) -> dict[str, str | None]:
+        found = await classify_topics(
+            [TopicInput(n, ()) for n in names], llm, cache=get_category_cache(),
+            context_id=context_id,
+        )  # fmt: skip
+        return {n: (found[n].category if n in found else None) for n in names}
+
+    end = yesterday_kst()
+    return await make_opportunities(
+        env=os.environ, llm=llm, profile=profile, plan=plan.output, sources=sources,
+        shorts=shorts, catalog_products=catalog.products, classify=classify,
+        trend_connector=get_trend_connector(), age_fn=ages,
+        consumption_fn=default_consumption(os.environ, end), day=datetime.now(UTC).date(),
+        end=end, context_id=context_id,
+    )  # fmt: skip
 
 
 async def source_plan(request: AgentRequest) -> AgentResult:
