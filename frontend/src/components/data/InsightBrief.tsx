@@ -2,7 +2,9 @@ import { useState, type ReactNode } from "react";
 import { Chip, Empty, TONE, Waiting } from "@/components/finance/bits";
 import { okEvidence, type SkillState } from "@/components/data/useSkill";
 import { Sources, when } from "@/components/data/Sources";
-import { DATA_SERVER, kpiLive, type AgeBandTrend, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
+import { OpportunityCards } from "@/components/data/OpportunityCards";
+import { AgeBars } from "@/components/data/AgeBars";
+import { DATA_SERVER, kpiLive, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
 
 // 트렌드 2단계(인사이트): 기획팀이 가져갈 인사이트 브리프. trend_insight_brief(계약 TrendInsightBriefOutput) 응답 그대로.
 // - 카드마다: 한 줄 인사이트 · 카테고리 · 광고 재료 가능 여부(초록 가능 / 노랑 실존 이름·상표 주의 / 회색 아님·판단 못 함 + 서버 이유)
@@ -10,7 +12,8 @@ import { DATA_SERVER, kpiLive, type AgeBandTrend, type TrendInsight, type TrendI
 //   · 참고용 예시(접힘) · insight_id(작게, 복사 버튼: 기획팀이 제안에 적는 값)
 // - 연령대별 막대: 브리프 age_bands(#556, trend_age 결과 그대로·설정 순서). 따로 부르지 않는다.
 //   막대 길이는 그 주제 연령대 배수 중 가장 큰 값에 대한 비율(그리기용). 굵은 글씨 = 타깃 연령대(target_age)
-// - 회사 관련 인사이트(company_related, #543)는 맨 위에 따로 묶고 연결 상품·시즌 근거를 강조한다. 나머지 인사이트는 그 아래
+// - 순서: 기회 가설 카드(opportunities, OpportunityCards.tsx) → 회사 관련 인사이트 → 그 밖의 인사이트
+// - 회사 관련 인사이트(company_related, #543)는 따로 묶고 연결 상품·시즌 근거를 강조한다. 나머지 인사이트는 그 아래
 // - 시즌 근거(evidence.season_*): 작년 같은 달·다음 달 ÷ 기간 평균 중 큰 값 (서버 값)
 // - 응답에 없는 칸(null·빈 목록)은 그리지 않는다. 이유가 오면 이유만
 
@@ -50,29 +53,6 @@ function CopyId({ id }: { id: string }) {
       </button>
       {done === "failed" && <span className="text-red-700">복사하지 못했어요</span>}
     </span>
-  );
-}
-
-function AgeBars({ bands: all, top }: { bands: AgeBandTrend[]; top: string | null }) {
-  const bands = all.filter((b) => typeof b.ratio === "number");
-  const max = Math.max(0, ...bands.map((b) => b.ratio ?? 0));
-  if (bands.length === 0) return null;
-  return (
-    <div className="mt-2 space-y-1.5">
-      <ul className="space-y-1">
-        {bands.map((b) => (
-          <li key={b.band} className="grid grid-cols-[3.5rem_minmax(0,1fr)_5.5rem] items-center gap-2 text-xs">
-            <span className={b.band === top ? "font-semibold text-ink-900" : "text-ink-700"}>{b.band}</span>
-            <span className="h-2 rounded-full bg-ink-100" aria-hidden>
-              <span className={`block h-2 rounded-full ${b.status === "rising" ? "bg-brand-500" : "bg-ink-300"}`}
-                style={{ width: `${max > 0 ? Math.max(2, ((b.ratio ?? 0) / max) * 100) : 0}%` }} />
-            </span>
-            <span className="text-right tabular-nums text-ink-700">{num(b.ratio ?? 0, 2)}배</span>
-          </li>
-        ))}
-      </ul>
-      <p className="text-[11px] text-ink-500">연령대끼리 양 비교 아님</p>
-    </div>
   );
 }
 
@@ -267,6 +247,8 @@ export function InsightBrief({ state, examples, examplesCount }: {
         )}
         <Sources evidence={okEvidence(state)} label="근거 · 브리프가 불러온 곳" />
       </div>
+      {/* 맨 위 기회 가설 카드 (opportunities, #579) → 회사 관련 인사이트 → 그 밖의 인사이트 */}
+      {out && <OpportunityCards list={out.opportunities} reason={out.opportunities_reason} />}
       {state.kind === "loading" ? <Waiting what="인사이트를 묶는 중…" />
         : state.kind === "failed" ? <Empty>인사이트를 받지 못했어요. {state.reason} {DATA_SERVER}가 켜져 있는지 확인해 주세요.</Empty>
         : out && (out.status === "unknown" || out.insights.length === 0)
