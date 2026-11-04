@@ -12,6 +12,7 @@
 - **정답 방향은 주입 조건에서 정한다** (factor × qty_factor > 1 이면 up, < 1 이면 down, = 1 이면
   none). 결제 기록 공백(`payment_gap.days_ago`에 0 = 구간)을 심으면 정답은 unknown(payment_gap)이다.
   지난 날 하나에만 공백을 심으면 그날을 기준선에서 빼고 판정해야 한다(정답은 known).
+  공백이 아닌 지난 날이 `MIN_BASELINE_DAYS`(3)보다 적으면 정답은 unknown(baseline_short).
 - 쿠폰 귀속: 캠페인 쿠폰을 구간 안 주문이 정해진 확률로 쓴다.
 - `counted`는 생성기가 만든 기록에서 바로 센 참고값이다(data 에이전트 코드로 세지 않는다):
   결제 완료 주문의 주문 금액(상품가 × 수량, 할인 전) 합. 증분 = 구간 − 공백이 아닌 지난 날 평균.
@@ -38,6 +39,8 @@ HOLDOUT = HERE / "holdout"
 HOLDOUT_SEED = 2026110401  # 만든 날 YYYYMMDD + 그날 몇 번째
 HOLDOUT_COUNT = 12
 DAY = datetime(2026, 10, 14, tzinfo=UTC)  # 캠페인 날 (지난 7일 기준선이 들어가는 아무 날)
+# 증분을 내려면 기준선 날이 이만큼 있어야 한다 (skill 설정 기본값과 같은 정의, 평가가 정답을 정한다)
+MIN_BASELINE_DAYS = 3
 
 
 def _iso(moment: datetime) -> str:
@@ -119,8 +122,11 @@ def case(
     gaps = gap_days or []
     scenario = spec(case_id, start, minutes, factor, qty=qty, gap_days=gaps, coupons=coupons)
     world = eval_world.build(scenario)
+    left = eval_world.HISTORY_DAYS - len([d for d in gaps if d > 0])  # 공백이 아닌 지난 날
     if 0 in gaps:
         sales: dict[str, Any] = {"status": "unknown", "unknown_reason": "payment_gap"}
+    elif left < MIN_BASELINE_DAYS:  # 기준선 부족: 증분·방향은 모름 (기간 판매액만)
+        sales = {"status": "unknown", "unknown_reason": "baseline_short", "baseline_days": left}
     else:
         sales = {"status": "known", "direction": direction(factor * qty), "lift": factor * qty}
         sales["direct_attributed"] = bool(campaign_id and coupons)
@@ -160,6 +166,8 @@ def build_cases() -> list[dict[str, Any]]:
              coupons=_coupons("cmp_rev2", 25, 0.5), memo="캠페인 쿠폰 주문의 금액 합을 따로"),
         case("coupon_flat_2h_10h", "none", h(10), 120, 1.0, campaign_id="cmp_revflat",
              coupons=_coupons("cmp_revflat", 15, 0.4), memo="변화 없음 + 쿠폰 귀속"),
+        case("short_baseline_2h_14h", "unknown", h(14), 120, 2.0, gap_days=[1, 2, 3, 4, 5],
+             memo="지난 7일 중 5일이 결제 공백 → 기준선 2일(최소 3일) → 증분·방향 unknown"),
     ]  # fmt: skip
 
 

@@ -23,6 +23,8 @@
 - `campaign_revenue.gap_unknown_rate`: 구간 결제 기록 공백 케이스를
   unknown + "결제 기록 공백"으로 답한 비율
 - `campaign_revenue.direct_match`: 쿠폰 귀속 케이스에서 쿠폰 주문 판매액 합이 센 값과 같은 비율
+- `campaign_revenue.short_baseline_unknown_rate`: 기준선 날이 최소보다 적은 케이스를
+  unknown + "기준선 부족"으로 답한 비율 (증분·방향을 지어내지 않는지)
 - holdout: `holdout.campaign_revenue.*` (화면에는 틀린 개수만)
 판정 함수가 오류를 내거나 모양이 틀리면 그 케이스의 모든 항목은 틀린 것(`missing`)으로 센다.
 """
@@ -51,10 +53,13 @@ CASES = HERE / "cases"
 HOLDOUT = HERE / "holdout"
 MISSING = "missing"
 GAP_WORD = "결제 기록 공백"  # 공백 케이스 unknown 이유에 있어야 하는 말
+SHORT_WORD = "기준선 부족"  # 기준선 부족 케이스 unknown 이유에 있어야 하는 말
+WORDS = {"payment_gap": GAP_WORD, "baseline_short": SHORT_WORD}
 METRICS = (
     "campaign_revenue.direction_rate",
     "campaign_revenue.excess_error",
     "campaign_revenue.gap_unknown_rate",
+    "campaign_revenue.short_baseline_unknown_rate",
     "campaign_revenue.direct_match",
 )
 
@@ -114,6 +119,7 @@ def score(cases: list[dict[str, Any]], answers: dict[str, Answer | None]) -> dic
     direction = [0, 0]
     errors: list[float] = []
     gap = [0, 0]
+    short = [0, 0]
     direct = [0, 0]
     wrong: list[dict[str, str]] = []
 
@@ -125,11 +131,14 @@ def score(cases: list[dict[str, Any]], answers: dict[str, Answer | None]) -> dic
         answer = answers.get(cid)
         got = answer.sales if answer else None
         if want["status"] == "unknown":
-            gap[1] += 1
-            if got and got.status == "unknown" and GAP_WORD in (got.unknown_reason or ""):
-                gap[0] += 1
+            kind = want.get("unknown_reason", "payment_gap")
+            tally, word = (short, SHORT_WORD) if kind == "baseline_short" else (gap, GAP_WORD)
+            tally[1] += 1
+            if got and got.status == "unknown" and word in (got.unknown_reason or ""):
+                tally[0] += 1
             else:
-                miss(cid, "gap", f"unknown({GAP_WORD})", got.status if got else MISSING)
+                item = "short" if kind == "baseline_short" else "gap"
+                miss(cid, item, f"unknown({word})", got.status if got else MISSING)
             continue
         direction[1] += 1
         if got and got.status == "known" and direction_ok(want["direction"], got.direction):
@@ -156,12 +165,14 @@ def score(cases: list[dict[str, Any]], answers: dict[str, Answer | None]) -> dic
                 round(sum(errors) / len(errors), 4) if errors else None
             ),
             "campaign_revenue.gap_unknown_rate": _rate(*gap),
+            "campaign_revenue.short_baseline_unknown_rate": _rate(*short),
             "campaign_revenue.direct_match": _rate(*direct),
         },
         "counts": {
             "direction_cases": direction[1],
             "excess_answers": len(errors),
             "gap_cases": gap[1],
+            "short_baseline_cases": short[1],
             "direct_cases": direct[1],
         },
         "wrong": wrong,

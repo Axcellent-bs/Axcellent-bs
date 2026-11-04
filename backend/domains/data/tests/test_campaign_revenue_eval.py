@@ -43,12 +43,17 @@ def _all() -> list[dict]:
 
 def test_answers_come_from_the_injection() -> None:
     cases = _all()
-    assert len(_files("cases")) == 8 and len(_files("holdout")) == 12
+    assert len(_files("cases")) == 9 and len(_files("holdout")) == 12
     for case in cases:
         spec, sales = case["spec"], case["expected"]["sales"]
         gaps = (spec.get("payment_gap") or {}).get("days_ago", [])
         if 0 in gaps:
             assert sales == {"status": "unknown", "unknown_reason": "payment_gap"}
+            continue
+        left = 7 - len([d for d in gaps if d > 0])  # 공백이 아닌 지난 날
+        if left < 3:  # 기준선 부족 (최소 3일)
+            assert sales == {"status": "unknown", "unknown_reason": "baseline_short",
+                             "baseline_days": left}  # fmt: skip
             continue
         injection = spec["injection"]
         factor = float(injection.get("factor", 1.0)) if injection["type"] != "none" else 1.0
@@ -69,8 +74,13 @@ def test_scorer_counts_right_wrong_and_missing() -> None:
     for c in cases:
         want, counted = c["expected"]["sales"], c["counted"]
         if want["status"] == "unknown":
+            reason = (
+                "기준선 부족 (2일, 최소 3일)"
+                if want["unknown_reason"] == "baseline_short"
+                else "결제 기록 공백 (5칸)"
+            )
             perfect[c["id"]] = score.Answer.model_validate(
-                {"sales": {"status": "unknown", "unknown_reason": "결제 기록 공백 (5칸)"}}
+                {"sales": {"status": "unknown", "unknown_reason": reason}}
             )
         else:
             perfect[c["id"]] = score.Answer.model_validate({"sales": {
@@ -82,6 +92,7 @@ def test_scorer_counts_right_wrong_and_missing() -> None:
     got = score.score(cases, perfect)["metrics"]
     assert got["campaign_revenue.direction_rate"] == 1.0
     assert got["campaign_revenue.gap_unknown_rate"] == 1.0
+    assert got["campaign_revenue.short_baseline_unknown_rate"] == 1.0
     assert got["campaign_revenue.direct_match"] == 1.0
     assert got["campaign_revenue.excess_error"] < 0.001
     bad = dict(perfect)
