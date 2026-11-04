@@ -1,0 +1,57 @@
+{
+ "id": "coupon_x2_2h_14h",
+ "kind": "up",
+ "input": {
+  "campaign_id": "cmp_rev2",
+  "window_from": "2026-10-14T14:00:00Z",
+  "window_to": "2026-10-14T16:00:00Z"
+ },
+ "spec": {
+  "id": "coupon_x2_2h_14h",
+  "window": {
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T16:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "sale",
+   "factor": 2.0,
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T16:00:00Z"
+  },
+  "campaign": {
+   "campaign_id": "cmp_rev2",
+   "buyers": 25,
+   "units_each": 3,
+   "unit_value": 1000,
+   "use_fraction": 0.5,
+   "used_after": 0
+  }
+ },
+ "expected": {
+  "sales": {
+   "status": "known",
+   "direction": "up",
+   "lift": 2.0,
+   "direct_attributed": true
+  }
+ },
+ "counted": {
+  "gross_actual": 6664300,
+  "gross_baseline": 3271442.8571,
+  "gross_excess": 3392857.1429,
+  "gross_past_days": {
+   "1": 3709100,
+   "2": 3383300,
+   "3": 3418500,
+   "4": 3088000,
+   "5": 3606300,
+   "6": 2632100,
+   "7": 3062800
+  },
+  "direct_attributed": 1562300
+ },
+ "memo": "캠페인 쿠폰 주문의 금액 합을 따로"
+}

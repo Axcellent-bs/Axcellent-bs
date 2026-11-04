@@ -141,6 +141,10 @@ class World:
                 data = Promotions(self.db).list_coupons(
                     params.get("buyer_id"), params.get("purpose_code"), params.get("campaign_id")
                 )
+            elif path.endswith("/orders"):  # shop-api `GET /api/shop/orders` (캠페인 매출 평가)
+                data = service.Shop(self.db).list_orders(
+                    params.get("buyer_id"), params.get("since"), params.get("until")
+                )
             else:
                 return httpx.Response(404, json={"error": {"code": "NOT_FOUND"}})
             return httpx.Response(200, content=json.dumps({"data": data, "meta": {}}))
@@ -399,6 +403,15 @@ def generate(spec: dict[str, Any]) -> World:
         crng = random.Random(f"{spec['id']}:campaign")  # 기존 난수 순서를 바꾸지 않게 따로
         reserve = int(campaign.get("used_after", 0))
     weekday_levels = traffic.get("weekday_levels")  # 요일 배수 (여러 날 캠페인)
+    # 캠페인 매출 평가 (없으면 예전과 똑같이 만든다):
+    # - `basket.qty_factor`: 구간 안 주문의 수량에 곱한다 (주문 수는 그대로, 금액만 늘림)
+    # - `payment_gap.days_ago`: 그 날(0 = 구간, k = k일 전 같은 시간대)의 주문은 만들고
+    #   결제하지 않는다 (결제 기록 공백: shop-api는 결제 대기 주문으로 남긴다)
+    basket = int((spec.get("basket") or {}).get("qty_factor", 1))
+    gap_days = [int(d) for d in (spec.get("payment_gap") or {}).get("days_ago", [])]
+    gap_ranges = [
+        (window_from - timedelta(days=d), window_to - timedelta(days=d)) for d in gap_days
+    ]
     with _clock() as now:
         margin = timedelta(minutes=int(traffic.get("history_margin_minutes", 0)))
         if traffic.get("history_days"):  # 이어진 기록 (여러 날 캠페인)
@@ -427,6 +440,11 @@ def generate(spec: dict[str, Any]) -> World:
                 buyer = seed_buyer_id(rng.randint(1, BUYER_COUNT))
                 product = PRODUCTS[rng.randrange(len(PRODUCTS))][0]
                 lines = [(product, rng.choice((1, 1, 1, 2)))]
+                if in_window and basket > 1:  # 난수를 더 쓰지 않는다 (다른 케이스와 같은 순서)
+                    lines = [(p, q * basket) for p, q in lines]
+                if any(s <= moment < e for s, e in gap_ranges):
+                    shop.create_order(buyer, lines)  # 결제 기록 공백: 결제하지 않는다
+                    continue
                 held = coupons.get(buyer) if in_window else None
                 # 구간 뒤에 쓸 장수(`used_after`)는 남겨 둔다 (조건과 기록이 늘 같게)
                 spare = held is not None and sum(c[1] for c in coupons.values()) > reserve
