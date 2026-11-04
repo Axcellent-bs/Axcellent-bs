@@ -1493,6 +1493,10 @@ class InsightEvidence(AxModel):
     naver_until: dt.date | None = None  # 네이버 판정 마지막 날
     links: list[str] = Field(default_factory=list)  # 근거 영상·뉴스 주소
     missing: list[str] = Field(default_factory=list)  # 없는 출처와 이유
+    # 아래는 예전 응답은 없다. 시즌 근거 (작년 같은 달·다음 달 ÷ 기간 평균 중 큰 값)
+    season_keyword: str | None = None
+    season_ratio: float | None = Field(default=None, ge=0)
+    season_month: dt.date | None = None
 
 
 class InsightProduct(AxModel):
@@ -1535,6 +1539,9 @@ class TrendInsight(AxModel):
     score: float = 0.0  # 순서를 정한 코드 점수 (가중치는 회사 설정)
     # 아래는 예전 응답은 없다. 분류기가 아직 분류하지 못한 주제 (순위에 넣지 않고 참고용)
     classification_pending: bool = False
+    # 아래는 예전 응답은 없다. 회사 관련 인사이트 칸 (시즌 키워드·상품 핵심어 중 오른 것, 별도 확보)
+    company_related: bool = False
+    company_reason: str | None = None  # 왜 회사 관련으로 골랐는지 (코드 문장)
 
 
 class TrendInsightBriefOutput(AxModel):
