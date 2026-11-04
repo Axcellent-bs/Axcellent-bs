@@ -619,12 +619,22 @@ class TrendCandidatesRequest(AxModel):
     end_date: dt.date | None = None  # 네이버 판정할 마지막 날 (한국 날짜). 없으면 어제
 
 
+class VideoLink(AxModel):
+    """근거 영상 하나의 주소와 썸네일. YouTube 응답에 이미 있던 값만 (더 부르지 않음)."""
+
+    video_id: str = Field(min_length=1)
+    video_url: str | None = None  # https://www.youtube.com/watch?v=<id> (숏츠는 /shorts/<id>)
+    thumbnail_url: str | None = None  # YouTube 응답 snippet.thumbnails 값 (없으면 None)
+
+
 class YouTubeTagEvidence(AxModel):
     """후보 키워드의 YouTube 근거 (스냅샷 한 시각의 인기 영상 목록 안에서 센 값)."""
 
     video_count: int = Field(ge=1)  # 이 태그(정리한 뒤)가 붙은 인기 영상 수
     snapshot_at: UtcDatetime  # 스냅샷 수집 시각
     video_ids: list[str] = Field(default_factory=list)  # 대표 영상 id (인기 순위 순, 몇 개만)
+    # 아래는 예전 응답은 없다. video_ids의 주소·썸네일 (같은 순서)
+    videos: list[VideoLink] = Field(default_factory=list)
     # 이 후보로 센 태그 (정리한 값, 스냅샷에 실제로 나온 것. 별칭이 묶였으면 여러 개).
     # 예전 응답은 없다
     matched_tags: list[str] = Field(default_factory=list)
@@ -830,6 +840,9 @@ class YouTubeVideoVelocity(AxModel):
     speed_change: float | None = (
         None  # 지금 속도 − 그 전 속도 (시간당 조회). 그 전 구간이 없으면 None
     )
+    # 아래는 예전 응답은 없다. 영상 주소와 썸네일 (저장된 YouTube 응답 값만)
+    video_url: str | None = None
+    thumbnail_url: str | None = None
     faster: bool | None = None  # 그 전 구간보다 빨라졌는지 (그 전 구간이 없으면 None)
     # 아래는 화면 표시용 (예전 응답은 없다). 스냅샷에 저장된 값이 없으면 None
     title: str | None = None  # 영상 제목
@@ -1026,6 +1039,8 @@ class PopularTopic(AxModel):
     score: PopularScore = Field(default_factory=PopularScore)
     youtube_videos: int | None = Field(default=None, ge=0)  # 이 주제가 나온 인기 영상 수
     video_ids: list[str] = Field(default_factory=list)  # 인기 순위 순 (최대 5)
+    # 아래는 예전 응답은 없다. video_ids의 주소·썸네일 (같은 순서)
+    videos: list[VideoLink] = Field(default_factory=list)
     views_per_hour: float | None = None  # 그 영상들의 지금 시간당 조회 증가 합 (못 쟀으면 None)
     velocity_videos: int = Field(default=0, ge=0)  # 속도를 잰 영상 수
     velocity_reason: str | None = None  # 속도를 못 쟀으면 이유
@@ -1091,6 +1106,9 @@ class PopularVideo(AxModel):
     is_short: bool | None = None  # 길이가 숏츠 기준([shorts] max_seconds) 이하
     shorts_format: str | None = None  # 숏츠 형식 (shorts_stats 분류가 저장돼 있을 때만)
     evidence_reason: str | None = None  # 못 잰 칸과 이유
+    # 아래는 예전 응답은 없다. 영상 주소와 썸네일 (YouTube 응답 값만)
+    video_url: str | None = None
+    thumbnail_url: str | None = None
 
 
 class PopularCategory(AxModel):
@@ -1287,6 +1305,9 @@ class ShortsVideo(AxModel):
     # 아래는 예전 응답은 없다. known = 잼, measuring = 다시 본 간격이 기준 미만이라 측정 중,
     # pending = 한 번만 봐서 다음 조회 대기
     velocity_status: Literal["known", "measuring", "pending"] | None = None
+    # 아래는 예전 응답은 없다. 숏츠 주소와 썸네일 (YouTube 응답 값만)
+    video_url: str | None = None
+    thumbnail_url: str | None = None
 
 
 class ShortsFormatCount(AxModel):
@@ -1610,6 +1631,8 @@ class InsightEvidence(AxModel):
     season_keyword: str | None = None
     season_ratio: float | None = Field(default=None, ge=0)
     season_month: dt.date | None = None
+    # 아래는 예전 응답은 없다. 근거 영상의 주소·썸네일 (links의 영상과 같은 것)
+    videos: list[VideoLink] = Field(default_factory=list)
 
 
 class InsightProduct(AxModel):
@@ -1740,6 +1763,8 @@ class DomainOpportunity(AxModel):
     score: float = 0.0  # 순서를 정한 코드 점수
     # 아래는 예전 응답은 없다. 이 카드의 숫자 (브리프 facts의 fact_id)
     fact_ids: list[str] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. 근거 숏츠의 주소·썸네일
+    videos: list[VideoLink] = Field(default_factory=list)
 
 
 class TrendInsightBriefOutput(AxModel):
@@ -1970,6 +1995,8 @@ class DomainSubtopic(AxModel):
     videos: int = Field(default=0, ge=0)  # 함께 나온 숏츠 수 (코드)
     median_views: float | None = Field(default=None, ge=0)  # 그 숏츠 조회수 중앙값
     video_ids: list[str] = Field(default_factory=list)  # 근거 영상 (최대 5)
+    # 아래는 예전 응답은 없다. video_ids의 주소·썸네일 (같은 순서)
+    videos: list[VideoLink] = Field(default_factory=list)
     origins: list[Literal["tag", "title"]] = Field(default_factory=list)
     merged: list[str] = Field(default_factory=list)  # 같은 대상으로 묶은 이름
 
