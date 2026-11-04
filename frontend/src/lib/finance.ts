@@ -102,7 +102,8 @@ export interface OpinionRow {
 }
 export interface CampaignView {
   campaigns: CampaignRecord[]; reviews: BudgetReview[]; lessons: CampaignLesson[]; opinions: OpinionRow[];
-  budget: { month: string; monthly_krw: number; provisional: boolean; basis: string; committed_krw: number };
+  budget: { month: string; monthly_krw: number; provisional: boolean; basis: string; committed_krw: number | null };
+  running: { campaign_id: string; active_krw: number }[];
   break_even_roas: number | null;
 }
 export interface FinanceInsight {

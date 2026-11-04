@@ -118,6 +118,7 @@ class CampaignResultInput(AxModel):
     clicks: int | None = Field(default=None, ge=0)
     orders: int | None = Field(default=None, ge=0)
     source: str  # 숫자의 출처. 예: "data.campaign_effect"
+    # spend_krw는 광고 플랫폼 보고서의 실제 집행액이다. 관문을 지나 시작한 캠페인만 기록된다
 
 
 class CampaignBudgetReviewInput(AxModel):
@@ -136,3 +137,10 @@ class CampaignBudgetReviewOutput(AxModel):
     reasons: list[str]
     recommendation: str
     applied_rules: list[dict[str, Any]]
+
+
+class CampaignCancelInput(AxModel):
+    """시작한 캠페인을 쓰지 않고 멈출 때 예산을 푼다. 일부 썼으면 결과를 기록한다."""
+
+    campaign_id: str
+    reason: str = Field(min_length=1)

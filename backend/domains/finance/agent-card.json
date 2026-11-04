@@ -1,7 +1,7 @@
 {
   "name": "finance",
   "owner": "태윤",
-  "description": "캣북스 재무팀 에이전트. 결산·리포트·재무제표, 매출·PG 대사, 판매자 정산 내역, 팀 예산. 쿠폰·환불은 끝난 금액을 장부에 기록만 한다. 마켓운영(판매자 입점 심사·정산 보류)은 하지 않는다. 숫자는 코드로 계산하고 LLM은 설명 문장만 쓴다.",
+  "description": "재무팀 에이전트. 결산·리포트·재무제표, 매출·PG 대사, 판매자 정산 내역, 팀 예산. 쿠폰·환불은 끝난 금액을 장부에 기록만 한다. 마켓운영(판매자 입점 심사·정산 보류)은 하지 않는다. 숫자는 코드로 계산하고 LLM은 설명 문장만 쓴다.",
   "url": "http://finance:8105/a2a",
   "version": "0.1.0",
   "capabilities": {
@@ -92,6 +92,19 @@
       "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
       "grade": "read",
       "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "cancel_campaign",
+      "description": "시작한 캠페인을 취소하고 재무가 잡아 둔 예산을 푼다. 재무 기록만 남기고 외부 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignCancelInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignCancelInput",
+      "grade": "read",
+      "allowed_requesters": [
+        "marketing",
         "orchestrator"
       ],
       "verifier": null,

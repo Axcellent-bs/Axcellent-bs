@@ -21,12 +21,23 @@ TODAY = date(2026, 10, 15)
 RULE_IDS = {"BRK-001", "BRK-002", "BRK-003", "BRK-004", "BRK-005"}
 
 
+class _AnyStarted(dict):
+    """시작 여부를 보는 시험이 아니면 모든 캠페인이 시작된 것으로 둔다. 예산은 잡지 않는다."""
+
+    def __contains__(self, key: object) -> bool:
+        return True
+
+    def __missing__(self, key: str) -> dict:
+        return {"campaign_id": key, "total_krw": 10**12, "active_krw": 0, "month": "2026-10"}
+
+
 @pytest.fixture(autouse=True)
 def _mock(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
     reset_state(MockSources())
     # 예산 계산 자체는 아래 전용 시험에서 본다. 나머지는 장부에 흔들리지 않게 고정한다
     state().budget_override = {"amount_krw": 1_000_000, "basis": "시험", "provisional": True}
+    state().started_override = _AnyStarted()
 
 
 def _result(cid: str = "c1", gmv: int | None = 1_000_000, spend: int = 100_000, **kw: Any) -> dict:
@@ -60,6 +71,7 @@ def _decide(
     lessons: list | None = None,
     cash: int | None = 10_000_000,
     monthly_budget: dict | None = None,
+    started: dict | None = cp.NO_STARTS,
 ) -> dict:
     return cp.decide(
         ask or _ask(),
@@ -69,6 +81,7 @@ def _decide(
         cash_net_krw=cash,
         today=TODAY,
         monthly_budget=monthly_budget,
+        started=started,
     )
 
 
@@ -133,14 +146,10 @@ def test_over_budget_is_conditional_down_to_remaining() -> None:
 
 def test_budget_counts_spent_and_approved_but_unfinished() -> None:
     done = {"a": cp.compute_result(_result("a", gmv=1_800_000, spend=600_000))}
-    pending = [
-        {
-            **_decide(_ask(300_000, "b")),
-            "reviewed_at": "2026-10-10T00:00:00Z",
-            "started_krw": 300_000,
-        }
-    ]
-    d = _decide(_ask(200_000), campaigns=done, reviews=pending)
+    pending = {
+        "b": {"campaign_id": "b", "total_krw": 300_000, "active_krw": 300_000, "month": "2026-10"}
+    }
+    d = _decide(_ask(200_000), campaigns=done, started=pending)
     assert d["remaining_budget_krw"] == 100_000
     assert (d["decision"], d["approved_limit_krw"]) == ("conditional", 100_000)
 
@@ -578,16 +587,131 @@ def test_reviews_that_never_started_do_not_hold_budget() -> None:
     assert (d["decision"], d["remaining_budget_krw"]) == ("approved", 1_000_000)
 
 
-def test_gate_verification_holds_budget_and_rechecks_at_start() -> None:
-    """관문 검증을 통과하면 예산을 잡고, 그 뒤 다른 캠페인은 줄어든 예산으로 판단한다."""
+def _feed(*rows: tuple[str, str, int]) -> Any:
+    """안전 관문 실행 기록 대역: (실행 id, 캠페인 id, 금액)."""
+    from datetime import UTC, datetime
+
+    from finance_agent.ledger import ExecutionFeed
+
+    data = [
+        {
+            "execution_id": eid,
+            "action": "start_campaign",
+            "status": "executed",
+            "params": {"campaign_id": cid},
+            "computed_amount": amount,
+            "created_at": datetime(2026, 10, 20, 1, n, tzinfo=UTC),
+        }
+        for n, (eid, cid, amount) in enumerate(rows)
+    ]
+
+    async def load(context_id: str | None = None) -> ExecutionFeed:
+        return ExecutionFeed(data, "safety")
+
+    return load
+
+
+def _real_starts(*rows: tuple[str, str, int]) -> None:
+    state().started_override = None
+    state().executions_loader = _feed(*rows)
+
+
+def test_start_on_the_gate_holds_budget_including_human_approved(fixed_now: Any) -> None:
+    """사람이 승인한 50만 원 이상도 결과 기록 전부터 예산을 잡는다."""
     _sender(state())
     state().cash_override = 10_000_000
-    one = {"campaign_id": "one", "campaign_name": "n", "channel": "검색"}
-    two = {"campaign_id": "two", "campaign_name": "n", "channel": "검색"}
-    ask = _ask(600_000, "two", "검색")
-    TestClient(app).post("/a2a", json=_body("review_campaign_budget", ask, "mock:marketing"))
-    assert _verify(600_000, one)["output"]["decision"] == "approved"
-    # 먼저 60만 원 승인을 받아 뒀어도 시작 직전에 남은 40만 원으로 다시 본다
-    late = _verify(600_000, two)["output"]
-    assert (late["decision"], late["approved_limit_krw"]) == ("rejected", 400_000)
-    assert _verify(400_000, two)["output"]["decision"] == "approved"
+    _real_starts(("exe_1", "big", 600_000))
+    state().records.budget_reviews.clear()
+    ask = handlers.CampaignBudgetReviewInput(**_ask(600_000, "two", "검색"))
+    review = asyncio.run(handlers.review_budget(ask, "ctx"))
+    assert (review["remaining_budget_krw"], review["approved_limit_krw"]) == (400_000, 400_000)
+
+
+def test_unknown_starts_fail_closed() -> None:
+    from finance_agent.ledger import ExecutionFeed
+
+    async def down(context_id: str | None = None) -> ExecutionFeed:
+        return ExecutionFeed(None, "safety")
+
+    state().started_override = None
+    state().executions_loader = down
+    assert asyncio.run(handlers.started_campaigns()) is None
+    assert _decide(started=None)["decision"] == "rejected"
+    got = asyncio.run(handlers.record_result(CampaignResultInput(**_result("a")), "ctx"))
+    assert got["status"] == "starts_unavailable" and state().records.campaigns == {}
+
+
+def test_only_started_campaigns_are_recorded() -> None:
+    _sender(state())
+    _real_starts(("exe_1", "a", 100_000))
+    missing = asyncio.run(handlers.record_result(CampaignResultInput(**_result("ghost")), "ctx"))
+    assert missing["status"] == "not_started" and "ghost" not in state().records.campaigns
+    record = asyncio.run(handlers.record_result(CampaignResultInput(**_result("a")), "ctx"))
+    assert record["status"] == "recorded" and record["over_started_krw"] == 0
+    over = _result("b", spend=900_000)
+    _real_starts(("exe_2", "b", 100_000))
+    flagged = asyncio.run(handlers.record_result(CampaignResultInput(**over), "ctx"))
+    assert flagged["over_started_krw"] == 800_000
+
+
+def test_not_started_answer_is_a_failure_over_a2a() -> None:
+    _real_starts()
+    client = TestClient(app)
+    got = client.post(
+        "/a2a", json=_body("record_campaign_result", _result("ghost"), "mock:marketing")
+    ).json()
+    assert (got["status"], got["outcome"]) == ("failed", "not_started")
+
+
+def test_starts_survive_a_gate_restart() -> None:
+    """관문은 메모리라 재시작하면 기록이 비어도 재무가 옮겨 둔 기록으로 계속 안다."""
+    _real_starts(("exe_1", "a", 100_000))
+    assert "a" in asyncio.run(handlers.started_campaigns())
+    state().executions_loader = _feed()
+    assert asyncio.run(handlers.started_campaigns())["a"]["active_krw"] == 100_000
+
+
+def test_cancel_releases_budget_and_later_start_counts_again() -> None:
+    _sender(state())
+    _real_starts(("exe_1", "a", 300_000))
+    data = handlers.CampaignCancelInput(campaign_id="a", reason="소재 문제로 중단")
+    out = asyncio.run(handlers.cancel_budget(data))
+    assert (out["status"], out["released_krw"]) == ("canceled", 300_000)
+    assert asyncio.run(handlers.started_campaigns())["a"]["active_krw"] == 0
+    assert asyncio.run(handlers.cancel_budget(data))["status"] == "not_started"
+    # 취소 뒤 다시 시작하면 다시 잡는다
+    state().records.campaign_cancels["a"]["canceled_at"] = "2026-10-20T01:00:30+00:00"
+    _real_starts(("exe_1", "a", 300_000), ("exe_2", "a", 100_000))
+    assert asyncio.run(handlers.started_campaigns())["a"]["active_krw"] == 100_000
+
+
+def test_cannot_cancel_recorded_or_unknown() -> None:
+    _sender(state())
+    _real_starts(("exe_1", "a", 100_000))
+    asyncio.run(handlers.record_result(CampaignResultInput(**_result("a")), "ctx"))
+    data = handlers.CampaignCancelInput(campaign_id="a", reason="r")
+    assert asyncio.run(handlers.cancel_budget(data))["status"] == "already_recorded"
+    other = handlers.CampaignCancelInput(campaign_id="zz", reason="r")
+    assert asyncio.run(handlers.cancel_budget(other))["status"] == "not_started"
+
+
+def test_cancel_skill_acl() -> None:
+    client = TestClient(app)
+    body = {"campaign_id": "x", "reason": "r"}
+    assert (
+        client.post("/a2a", json=_body("cancel_campaign", body, "mock:hr")).json()["status"]
+        != "completed"
+    )
+    _real_starts(("exe_1", "x", 100_000))
+    got = client.post("/a2a", json=_body("cancel_campaign", body, "mock:marketing")).json()
+    assert (got["status"], got["outcome"]) == ("completed", "canceled")
+
+
+def test_finance_code_has_no_brand_name() -> None:
+    from pathlib import Path
+
+    import finance_agent
+
+    root = Path(finance_agent.__file__).parent
+    for name in ("campaign.py", "tax.py", "finance_policy.toml", "finance_rules.toml"):
+        assert "캣북스" not in (root / name).read_text("utf-8"), name

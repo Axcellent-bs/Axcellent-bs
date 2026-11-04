@@ -107,6 +107,7 @@ async def run_scenario(name: str) -> dict[str, Any]:
         return None
 
     state.opinion_sender = capture
+    state.started_override = {}
     rounds: list[dict[str, Any]] = []
     try:
         for round_ in scenario["rounds"]:
@@ -132,6 +133,7 @@ async def run_scenario(name: str) -> dict[str, Any]:
                 cash_net_krw=scenario["cash_net_krw"],
                 today=today,
                 monthly_budget=state.budget_override,
+                started=state.started_override,
             )
             seen = len(received)
             review = await handlers.review_budget(CampaignBudgetReviewInput(**ask), context)
@@ -243,6 +245,12 @@ async def run_scenario(name: str) -> dict[str, Any]:
                 "재무",
                 "작업 비용 없음 (이번 손익에 넣지 않음)",
             )
+            state.started_override[round_["campaign_id"]] = {
+                "campaign_id": round_["campaign_id"],
+                "total_krw": spend,
+                "active_krw": spend,
+                "month": round_["period_to"][:7],
+            }
             seen = len(received)
             record = await handlers.record_result(result, context)
             log.add(

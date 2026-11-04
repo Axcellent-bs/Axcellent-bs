@@ -126,6 +126,7 @@ SERVICES: tuple[Service, ...] = (
             "review_campaign_budget",
             "verify_campaign_budget",
             "finance_insights",
+            "cancel_campaign",
         ),
         "재무 관리",
     ),
