@@ -11,9 +11,11 @@
 
 한 번 실행하면:
 1. 인기 목록(매번): mostPopular 4쪽 = 200개, 4단위
-2. 추적 중인 영상(매번): 지난 `TRACK_HOURS`시간 안에 저장했는데 이번 인기 목록에 없는 영상의
-   지금 값.
-   50개당 1단위, 최대 `MAX_TRACKED`개
+2. 추적 중인 영상(매번): 인기 목록·검색에서 `[tracking] drop_after_hours`(기본 48)시간 안에 봤는데
+   이번 인기 목록에 없는 영상의 지금 값. 추적으로만 본 것은 기간을 늘리지 않는다(그래서 빠진다).
+   브리프에 쓰는 영상은 유지. 50개당 1단위, 최대 `[tracking] max_tracked`(기본 500)개.
+   로그에 "추적에서 뺀 수"(지난 실행엔 있었고 이번에 뺀 영상)
+5. 보관: `[tracking] retention_days`(기본 30)일이 지난 스냅샷 줄은 한국 날짜 하루 1번 지운다
 3. 회사 키워드 검색(한국 날짜 하루 1번): 키워드마다 검색 100단위 + 통계 1단위
 4. 저장(`youtube_store`): 같은 시각 같은 영상은 한 줄. 실행 기록에 쓴 할당량 단위를 남긴다
 
@@ -30,6 +32,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import re
+import sqlite3
 import sys
 import tomllib
 from collections.abc import Mapping
@@ -43,7 +47,6 @@ from data_agent.youtube_store import DB_ENV, DEFAULT_DB, KST, Row, SnapshotStore
 
 BACKEND = Path(__file__).resolve().parents[4]
 CONFIG_ENV = "DATA_YOUTUBE_CONFIG"
-TRACK_HOURS = 72  # 이 시간 안에 본 영상을 계속 추적한다
 MAX_TRACKED = 500  # 한 번에 추적하는 영상 수 상한 (10단위)
 SEARCH_DAYS = 7  # 회사 키워드 검색은 최근 게시 영상만
 MIN_EVERY_SECONDS = 600  # --every 하한 (할당량 보호)
@@ -54,6 +57,10 @@ MAX_TITLE_BACKFILL = 1000  # --titles 한 번에 채우는 영상 수 상한 (20
 class YouTubeConfig:
     region: str = "KR"
     queries: tuple[str, ...] = ()
+    # [tracking]: 인기·검색에서 빠진 지 이 시간이 지나면 추적에서 뺀다 (브리프에 쓰는 영상은 유지)
+    drop_after_hours: int = 48
+    max_tracked: int = MAX_TRACKED  # 한 번에 추적하는 영상 수 상한
+    retention_days: int = 30  # 스냅샷 보관 기간. 지난 줄은 한국 날짜 하루 1번 지운다 (0 = 안 지움)
 
 
 @dataclass
@@ -66,6 +73,8 @@ class RunResult:
     searched: bool = False
     search_skipped: str = ""  # 검색을 안 한 이유
     saved: int = 0
+    dropped: int = 0  # 지난 실행엔 추적했지만 이번에 뺀 영상 수
+    pruned: int = 0  # 보관 기간이 지나 지운 스냅샷 줄 수 (그날 첫 실행만)
     errors: list[str] = field(default_factory=list)
 
     def line(self) -> str:
@@ -77,8 +86,10 @@ class RunResult:
         errors = f" / 실패: {'; '.join(self.errors)}" if self.errors else ""
         return (
             f"[youtube] {self.collected_at.isoformat(timespec='seconds')} 인기 {self.popular}개,"
-            f" 추적 {self.tracked}개, {search}, 저장 {self.saved}줄, 할당량 {self.quota_units}단위"
-            f"{errors}"
+            f" 추적 {self.tracked}개(추적에서 뺀 수 {self.dropped}개), {search},"
+            f" 저장 {self.saved}줄, 할당량 {self.quota_units}단위"
+            + (f", 보관 기간 지나 지움 {self.pruned}줄" if self.pruned else "")
+            + errors
         )
 
 
@@ -112,9 +123,45 @@ def load_config(path: Path) -> YouTubeConfig:
         with path.open("rb") as f:
             raw = tomllib.load(f)
         queries = tuple(str(q["q"]).strip() for q in raw.get("queries", []) if str(q["q"]).strip())
-        return YouTubeConfig(region=str(raw.get("region") or "KR"), queries=queries)
-    except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError):
+        track = raw.get("tracking") or {}
+        base = YouTubeConfig()
+        return YouTubeConfig(
+            region=str(raw.get("region") or "KR"), queries=queries,
+            drop_after_hours=max(1, int(track.get("drop_after_hours", base.drop_after_hours))),
+            max_tracked=max(0, int(track.get("max_tracked", base.max_tracked))),
+            retention_days=max(0, int(track.get("retention_days", base.retention_days))),
+        )  # fmt: skip
+    except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError, ValueError):
         return YouTubeConfig()
+
+
+_VIDEO_ID = re.compile(r"(?:watch\?v=|/shorts/|\"video_id\":\s*\")([A-Za-z0-9_-]{11})")
+
+
+def in_use_ids(env: Mapping[str, str], days: int = 2) -> set[str]:
+    """브리프(근거 영상·기회 카드 근거 숏츠)에 쓰는 영상 id. 최근 `days`일 브리프에서 읽는다.
+
+    브리프 저장 파일이 없거나 못 읽으면 빈 집합 (추적 규칙만 적용).
+    """
+    path = Path(env.get("DATA_INSIGHT_BRIEF_DB") or BACKEND / ".data" / "insight_brief.db")
+    if not path.is_file():
+        return set()
+    since = (datetime.now(UTC).astimezone(KST).date() - timedelta(days=days)).isoformat()
+    try:
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=5.0)
+        try:
+            rows = conn.execute("SELECT output FROM briefs WHERE day >= ?", (since,)).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError:
+        return set()
+    return {m for (text,) in rows for m in _VIDEO_ID.findall(text or "")}
+
+
+def pick_tracked(seen: list[str], in_use: set[str], skip: set[str], cap: int) -> list[str]:
+    """추적할 영상: 브리프에 쓰는 영상 먼저, 그다음 인기·검색에서 최근에 본 순. 상한 `cap`."""
+    ordered = [*sorted(in_use - skip), *(i for i in seen if i not in in_use and i not in skip)]
+    return list(dict.fromkeys(ordered))[:cap]
 
 
 def _merge(rows: dict[str, Row], stats: list[VideoStat], source: str) -> None:
@@ -134,8 +181,12 @@ async def collect_once(
     config: YouTubeConfig,
     *,
     now: datetime | None = None,
+    in_use: set[str] | None = None,
 ) -> RunResult:
-    """한 번 수집해 저장한다. 실패는 기록하고 받은 것까지는 저장한다."""
+    """한 번 수집해 저장한다. 실패는 기록하고 받은 것까지는 저장한다.
+
+    `in_use`: 브리프에 쓰는 영상 (인기·검색에서 빠졌어도 추적 유지).
+    """
     collected_at = (now or datetime.now(UTC)).astimezone(UTC).replace(microsecond=0)
     result = RunResult(collected_at)
     rows: dict[str, Row] = {}
@@ -155,9 +206,10 @@ async def collect_once(
         failed("인기 목록", error)
 
     if not stop:
-        since = collected_at - timedelta(hours=TRACK_HOURS)
-        ids = [i for i in store.recent_video_ids(since, MAX_TRACKED + len(rows)) if i not in rows]
-        ids = ids[:MAX_TRACKED]
+        since = collected_at - timedelta(hours=config.drop_after_hours)
+        before = store.last_run_ids() - set(rows)  # 지난 실행에서 인기 목록 밖으로 본 영상
+        ids = pick_tracked(store.seen_ids(since), in_use or set(), set(rows), config.max_tracked)
+        result.dropped = len(before - set(ids))
         if ids:
             try:
                 tracked = await connector.videos(ids)
@@ -187,6 +239,8 @@ async def collect_once(
                 failed(f"검색 '{query}'", error)
 
     result.saved = store.save(collected_at, rows.values())
+    if config.retention_days > 0 and not store.pruned_on(today):  # 보관 기간 지난 줄 (하루 1번)
+        result.pruned = store.prune(today, collected_at - timedelta(days=config.retention_days))
     result.quota_units = connector.quota_used - start_quota
     store.log_run(
         collected_at,
@@ -284,7 +338,8 @@ async def run(every: int | None, env: Mapping[str, str]) -> int:
         )
     try:
         while True:
-            result = await collect_once(YouTubeConnector(env), store, config)
+            result = await collect_once(YouTubeConnector(env), store, config,
+                                        in_use=in_use_ids(env))  # fmt: skip
             print(result.line(), flush=True)
             if every is None:
                 return 1 if result.errors and not result.saved else 0

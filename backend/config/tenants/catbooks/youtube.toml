@@ -3,6 +3,13 @@
 # 키워드 하나에 할당량 101단위(검색 100 + 통계 1). 하루 기본 한도 10,000단위
 region = "KR"
 
+# 추적: 인기 목록·검색에서 빠진 지 drop_after_hours가 지난 영상은 추적에서 뺀다(브리프에 쓰는 영상은 유지).
+# 한 번에 추적 max_tracked개까지. 스냅샷은 retention_days일 보관(지난 줄은 하루 1번 지움, 0 = 안 지움)
+[tracking]
+drop_after_hours = 48
+max_tracked = 500
+retention_days = 30
+
 [[queries]]
 q = "고양이"
 

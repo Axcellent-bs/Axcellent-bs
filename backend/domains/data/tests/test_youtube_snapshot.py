@@ -323,6 +323,71 @@ def test_collect_saves_popular_every_time_and_searches_once_a_day() -> None:
     assert next_day.searched
 
 
+def _tracking_handler(popular_ids: list[str]) -> Handler:
+    """인기 목록은 `popular_ids`(1쪽), videos.list는 요청한 id를 그대로 돌려준다."""
+
+    def item(vid: str) -> dict:
+        return {"id": vid, "snippet": {"publishedAt": "2026-11-01T00:00:00Z", "channelId": "c"},
+                "statistics": {"viewCount": "10"}}  # fmt: skip
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("chart") == "mostPopular":
+            return httpx.Response(200, json={"items": [item(v) for v in popular_ids]})
+        ids = request.url.params.get("id", "").split(",")
+        return httpx.Response(200, json={"items": [item(v) for v in ids if v]})
+
+    return handler
+
+
+def test_videos_out_of_popular_for_long_leave_tracking_but_brief_videos_stay() -> None:
+    store = SnapshotStore(":memory:")
+    config = YouTubeConfig(drop_after_hours=48)
+    connector, _ = _connector(_tracking_handler(["a", "b", "k"]))
+    _run(collect_once(connector, store, config, now=NOW))  # a·b·k 인기
+    # 이후 매시간 인기는 c뿐. a·b·k는 추적으로만 저장된다 (예전에는 이 저장으로 영원히 남았다)
+    last = None
+    for h in range(1, 50):
+        connector, _ = _connector(_tracking_handler(["c"]))
+        last = _run(collect_once(connector, store, config, now=NOW + timedelta(hours=h),
+                                 in_use={"k"}))  # fmt: skip
+        if h == 47:
+            assert last.tracked == 3 and last.dropped == 0  # 48시간 전이라 아직 추적
+    assert last is not None and last.tracked == 1  # 브리프에 쓰는 k만 남음
+    assert last.dropped == 2 and "추적에서 뺀 수 2개" in last.line()
+
+
+def test_tracking_cap_and_in_use_first() -> None:
+    from data_agent.youtube_collect import pick_tracked
+
+    seen = ["a", "b", "c", "d"]
+    assert pick_tracked(seen, {"z"}, {"b"}, 3) == ["z", "a", "c"]  # 브리프 영상 먼저, 인기 제외
+    assert pick_tracked(seen, set(), set(), 0) == []
+
+
+def test_old_snapshots_are_pruned_once_a_day() -> None:
+    store = SnapshotStore(":memory:")
+    config = YouTubeConfig(retention_days=30)
+    connector, _ = _connector(_tracking_handler(["a"]))
+    _run(collect_once(connector, store, config, now=NOW - timedelta(days=40)))
+    connector, _ = _connector(_tracking_handler(["a"]))
+    first = _run(collect_once(connector, store, config, now=NOW))
+    assert first.pruned == 1 and "보관 기간 지나 지움 1줄" in first.line()
+    assert [r["collected_at"] for r in store.rows("a")] == [NOW.isoformat()]
+    connector, _ = _connector(_tracking_handler(["a"]))
+    again = _run(collect_once(connector, store, config, now=NOW + timedelta(hours=1)))
+    assert again.pruned == 0  # 같은 날은 다시 정리하지 않음
+
+
+def test_tracking_settings_come_from_config(tmp_path: Path) -> None:
+    path = tmp_path / "youtube.toml"
+    path.write_text("[tracking]\ndrop_after_hours = 24\nmax_tracked = 100\nretention_days = 7\n",
+                    encoding="utf-8")  # fmt: skip
+    c = load_config(path)
+    assert (c.drop_after_hours, c.max_tracked, c.retention_days) == (24, 100, 7)
+    assert YouTubeConfig().drop_after_hours == 48 and YouTubeConfig().max_tracked == 500
+    assert YouTubeConfig().retention_days == 30
+
+
 def test_quota_exceeded_stops_the_run_but_keeps_what_was_read() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/search"):
