@@ -1352,6 +1352,9 @@ class ShortsStatsOutput(AxModel):
     # 아래는 예전 응답은 없다. 표본 언어 (예: ko = 한국 숏츠만)와 그 기준으로 뺀 숏츠 수
     language: str | None = None
     foreign_excluded: int = Field(default=0, ge=0)
+    # 아래는 예전 응답은 없다. 전체 숏츠 조회수 중앙값과 그 표본 수 (카테고리 배수의 분모)
+    median_views: float | None = None
+    median_views_count: int = Field(default=0, ge=0)
     limitation: str = ""  # 한계 (이미 뜬 영상끼리의 비교 등)
     summary: str = ""
 
@@ -1579,6 +1582,71 @@ class TrendInsight(AxModel):
     age_bands: list[AgeBandTrend] = Field(default_factory=list)
 
 
+# ------------------------------------------------ 기회 가설 카드 (trend_insight_brief 선택 칸)
+# 수집 계획(source_plan)대로 모은 데이터(사용 가능·승인된 출처만)로 하위 주제마다 근거를 묶는다.
+# 숫자는 모두 코드, 한 줄만 LLM(근거 숫자만, 숫자 검증). 근거마다 출처·기간·표본.
+
+SourceDataKind = Literal["search_interest", "consumption", "viewing", "survey"]
+EvidenceStatus = Literal["known", "unknown", "key_required", "not_approved"]
+
+
+class OpportunityEvidence(AxModel):
+    """근거 하나. 모르면 None + 이유 (0으로 채우지 않는다)."""
+
+    source_id: str  # 출처 목록(data_sources)의 id
+    kind: SourceDataKind
+    status: EvidenceStatus
+    label: str  # 무엇을 잰 값인지 (예: 네이버 검색 평소 대비 배수)
+    value: float | None = None
+    unit: str | None = None  # 배, 회 등
+    period_start: dt.date | None = None
+    period_end: dt.date | None = None
+    samples: int | None = Field(default=None, ge=0)  # 표본 수 (영상 수·기간 점 수 등)
+    reason: str | None = None  # 모르면 이유 (예: 키 등록 후 가능)
+
+
+class ShortsFit(AxModel):
+    """숏츠 적합도: 이 하위 주제 분류의 숏츠 조회 중앙값 ÷ 전체 숏츠 중앙값 (코드, 설정 기준)."""
+
+    level: Literal["high", "uncertain", "low"]
+    category: str | None = None  # 숏츠 통계에서 본 분류
+    median_views: float | None = Field(default=None, ge=0)
+    overall_median_views: float | None = Field(default=None, ge=0)
+    ratio: float | None = Field(default=None, ge=0)
+    samples: int = Field(default=0, ge=0)
+    snapshot_at: UtcDatetime | None = None
+    reason: str  # 이 등급인 이유 (기준값 포함, 코드 문장)
+
+
+class OpportunityFormat(AxModel):
+    name: str  # 숏츠 형식
+    count: int = Field(default=0, ge=0)  # 이 분류 숏츠 중 이 형식 수
+    median_views: float | None = Field(default=None, ge=0)  # 전체 숏츠 통계의 그 형식 중앙값
+
+
+class DomainOpportunity(AxModel):
+    opportunity_id: str = Field(min_length=1)  # 날짜 + 하위 주제 해시
+    subtopic: str = Field(min_length=1)  # 하위 주제 (도메인 프로필 씨앗 키워드)
+    subtopic_evidence: str | None = None  # 그 씨앗 키워드의 카탈로그·소개 근거 문장
+    line: str  # 가설 한 줄 (LLM, 근거 숫자만. 검증 실패면 고정 문장)
+    line_status: Literal["llm", "fixed"] = "fixed"
+    line_reason: str | None = None
+    consumption: list[OpportunityEvidence] = Field(default_factory=list)  # 실제 소비 근거
+    search_interest: list[OpportunityEvidence] = Field(default_factory=list)  # 검색 관심
+    age_bands: list[AgeBandTrend] = Field(default_factory=list)
+    age_reason: str | None = None  # 연령대가 없으면 이유
+    shorts_fit: ShortsFit | None = None
+    formats: list[OpportunityFormat] = Field(default_factory=list)  # 잘 되는 형식 (많은 순)
+    # 목표 참고값: 이 분류 숏츠 조회 중앙값 (없으면 전체 중앙값). 기획이 목표를 정할 때 참고만
+    target_views_reference: float | None = Field(default=None, ge=0)
+    target_reference_basis: str | None = None
+    products: list[InsightProduct] = Field(default_factory=list)
+    products_reason: str | None = None
+    limits: list[str] = Field(default_factory=list)
+    planning_decides: list[str] = Field(default_factory=list)  # 기획이 정할 것 (코드 고정 문장)
+    score: float = 0.0  # 순서를 정한 코드 점수
+
+
 class TrendInsightBriefOutput(AxModel):
     status: Literal["known", "unknown"] = "unknown"
     reason: str | None = None
@@ -1589,4 +1657,147 @@ class TrendInsightBriefOutput(AxModel):
     generated_at: UtcDatetime | None = None
     sources: list[str] = Field(default_factory=list)  # 묶은 skill 결과
     limits: list[str] = Field(default_factory=list)  # 브리프 전체 한계
+    summary: str = ""
+    # 아래는 예전 응답은 없다. 기회 가설 카드 (도메인 프로필 → 수집 계획대로 모은 근거)
+    opportunities: list[DomainOpportunity] = Field(default_factory=list)
+    opportunities_reason: str | None = None  # 비었으면 이유
+    plan_id: str | None = None  # 쓴 수집 계획 id
+
+
+# ------------------------------------------------ 도메인 프로필 (domain_profile)
+# 입력: 회사 소개(테넌트 설정) + 회사 카탈로그(이름·카테고리·설명).
+# LLM은 정해진 스키마·목록 안에서만.
+# 씨앗 키워드는 카탈로그·소개에 근거가 있는 것만 (근거 문장 칸, 코드가 원문에 있는지 확인).
+
+
+class DomainProfileRequest(AxModel):
+    regenerate: bool = False  # 저장된 프로필을 쓰지 않고 다시 만든다
+
+
+class ProductGroup(AxModel):
+    name: str = Field(min_length=1)
+    category_codes: list[str] = Field(default_factory=list)  # 카탈로그 카테고리 코드
+    product_count: int = Field(default=0, ge=0)  # 코드가 센 상품 수
+
+
+class SeedKeyword(AxModel):
+    keyword: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)  # 근거 문장 (소개·상품 이름·카테고리·설명 원문 일부)
+    evidence_from: Literal["about", "product", "category", "description", "override"]
+    product_ids: list[str] = Field(default_factory=list)  # 근거가 된 상품
+
+
+class DroppedKeyword(AxModel):
+    keyword: str
+    reason: str
+
+
+class DomainProfileOutput(AxModel):
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = None
+    tenant: str | None = None  # 회사 이름 (테넌트 설정)
+    industry: str | None = None  # 업종 (정해진 업종 태그 중 하나)
+    industry_tags: list[str] = Field(default_factory=list)  # 출처 목록 업종 태그와 맞추는 값
+    product_groups: list[ProductGroup] = Field(default_factory=list)
+    customer_axes: list[str] = Field(default_factory=list)  # 고객 축 (정해진 목록 중)
+    questions: list[str] = Field(default_factory=list)  # 분석 질문
+    seed_keywords: list[SeedKeyword] = Field(default_factory=list)
+    dropped_keywords: list[DroppedKeyword] = Field(default_factory=list)  # 근거가 없어 버린 것
+    overridden: list[str] = Field(default_factory=list)  # 사람이 덮어쓴 칸 이름
+    catalog_hash: str = ""  # 카탈로그·소개 해시 (바뀌면 다시 만든다)
+    products_seen: int = Field(default=0, ge=0)
+    cached: bool = False
+    generated_at: UtcDatetime | None = None
+    limits: list[str] = Field(default_factory=list)
+
+
+# ------------------------------------------------ 데이터 출처 목록 (data_sources)
+# 출처마다 능력을 코드에 적고, 수집 계획(LLM)이 이 목록 안에서만 고른다. 업종 태그로만 구분한다.
+
+SourceStatus = Literal["available", "key_required"]
+
+
+class DataSourcesRequest(AxModel):
+    pass
+
+
+class DataSource(AxModel):
+    source_id: str = Field(min_length=1)
+    name: str
+    kinds: list[SourceDataKind] = Field(default_factory=list)  # 주는 데이터 종류
+    industries: list[str] = Field(default_factory=list)  # 맞는 업종 태그 ("all" = 전체)
+    age: bool = False  # 연령대별로 받을 수 있는지
+    gender: bool = False
+    categories: Literal["api", "fixed", "none"] = "none"  # 카테고리 목록을 어디서 받는지
+    period: str = ""  # 자료 주기 (예: 일간, 연 1회)
+    quota_daily: int | None = Field(default=None, ge=0)  # 하루 한도 (단위는 quota_unit)
+    quota_unit: str = "calls"
+    quota_note: str = ""  # 한도 설명 (공식 문서 기준)
+    key_envs: list[str] = Field(default_factory=list)  # 필요한 키 환경변수 이름 (값은 넣지 않음)
+    status: SourceStatus
+    status_reason: str | None = None
+    docs_url: str = ""  # 공식 문서
+    approved: bool = False  # 사람이 수집을 승인했는지 (설정 파일 승인 플래그, 기존 출처는 True)
+
+
+class DataSourcesOutput(AxModel):
+    sources: list[DataSource] = Field(default_factory=list)
+    checked_at: UtcDatetime | None = None
+    summary: str = ""
+
+
+# ------------------------------------------------ 수집 계획 (source_plan)
+# 도메인 프로필 + 출처 목록 → LLM이 목록 안에서만 고르고,
+# 코드가 카테고리 id·키워드·할당량을 검증한다.
+
+
+class SourcePlanRequest(AxModel):
+    regenerate: bool = False
+
+
+class PlanCategory(AxModel):
+    category_id: str
+    name: str | None = None
+
+
+class PlanDropped(AxModel):
+    value: str  # 버린 출처 id·카테고리 id·키워드
+    reason: str
+
+
+class SourcePlanItem(AxModel):
+    source_id: str
+    status: SourceStatus
+    approved: bool = False
+    reason: str  # 이 출처를 고른 이유 (LLM 문장)
+    categories: list[PlanCategory] = Field(default_factory=list)  # 실제 목록에 있는 것만
+    category_check: Literal["verified", "after_key", "not_applicable", "unknown"] = "not_applicable"
+    category_check_reason: str | None = None
+    keywords: list[str] = Field(default_factory=list)  # 씨앗 키워드 중에서만
+    use_age: bool = False
+    calls: int = Field(default=0, ge=0)  # 코드가 센 호출 수
+    quota_units: int = Field(default=0, ge=0)  # 코드가 센 할당량 단위
+    dropped: list[PlanDropped] = Field(default_factory=list)
+    unlocks: str | None = None  # 키 필요 출처: 이 키가 있으면 더 쓸 수 있는 근거
+
+
+class PlanQuota(AxModel):
+    source_id: str
+    units: int = Field(default=0, ge=0)
+    cap: int = Field(default=0, ge=0)  # 계획이 쓸 수 있는 상한 (회사 설정)
+    unit: str = "calls"
+
+
+class SourcePlanOutput(AxModel):
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = None
+    plan_id: str = ""  # 프로필·출처 목록·규칙 해시
+    profile_hash: str = ""
+    items: list[SourcePlanItem] = Field(default_factory=list)
+    dropped_sources: list[PlanDropped] = Field(default_factory=list)  # 목록 밖·중복 출처
+    quota: list[PlanQuota] = Field(default_factory=list)
+    trimmed: list[str] = Field(default_factory=list)  # 할당량 상한으로 자른 것
+    approval_note: str = ""  # 새 출처 수집은 사람 승인 후 (설정 파일 승인 플래그)
+    cached: bool = False
+    generated_at: UtcDatetime | None = None
     summary: str = ""
