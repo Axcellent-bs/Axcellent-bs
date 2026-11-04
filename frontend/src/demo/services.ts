@@ -136,7 +136,6 @@ export const SERVICES: Service[] = [
     children: [
       { href: '/dev/tasks', label: '작업 현황' },
       { href: '/dev/work', label: '작업' },
-      { href: '/dev/agents', label: '에이전트 대화' },
       { href: '/dev/metrics', label: '지표' },
     ],
   },
