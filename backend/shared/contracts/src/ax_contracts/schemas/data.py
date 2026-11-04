@@ -1289,6 +1289,13 @@ class ShortsVideo(AxModel):
     velocity_status: Literal["known", "measuring", "pending"] | None = None
 
 
+class ShortsFormatCount(AxModel):
+    """그룹 안의 숏츠 형식 하나와 그 수."""
+
+    name: str  # 숏츠 형식
+    count: int = Field(default=0, ge=0)
+
+
 class ShortsGroup(AxModel):
     """카테고리 또는 형식 하나의 숏츠 통계."""
 
@@ -1307,6 +1314,9 @@ class ShortsGroup(AxModel):
     median_views: float | None = None
     median_views_per_hour: float | None = None  # 시간당 조회 증가를 잰 숏츠만의 중앙값
     velocity_measuring: int = Field(default=0, ge=0)  # 다시 본 간격이 기준 미만이라 측정 중인 수
+    # 아래는 예전 응답은 없다. 카테고리 그룹만: 그 카테고리 숏츠의 형식별 수
+    # (많은 순, 분류 못 한 형식 제외)
+    formats: list[ShortsFormatCount] = Field(default_factory=list)
 
 
 class ShortsSearch(AxModel):
@@ -1550,6 +1560,12 @@ class TrendInsight(AxModel):
     # 아래는 예전 응답은 없다. 숏츠 통계와 같은 시점의 그 형식 중앙값 조회수와 기준 시각
     shorts_format_median_views: float | None = Field(default=None, ge=0)
     shorts_format_at: UtcDatetime | None = None
+    # 아래는 예전 응답은 없다. 형식을 어느 단계에서 골랐는지: topic = 이 주제 근거 숏츠,
+    # category = 이 주제 카테고리의 숏츠 통계, all = 전체 숏츠 통계.
+    # 그 단계의 표본: count = 이 형식인 숏츠 수, total = 형식을 분류한 숏츠 수
+    shorts_format_source: Literal["topic", "category", "all"] | None = None
+    shorts_format_source_count: int | None = Field(default=None, ge=0)
+    shorts_format_source_total: int | None = Field(default=None, ge=0)
     limits: list[str] = Field(default_factory=list)  # 한계 (평가셋 없음, 상대값 등)
     example_ideas: list[str] = Field(default_factory=list)  # 이 주제를 쓴 예시 아이디어 (참고용)
     score: float = 0.0  # 순서를 정한 코드 점수 (가중치는 회사 설정)
@@ -1558,6 +1574,9 @@ class TrendInsight(AxModel):
     # 아래는 예전 응답은 없다. 회사 관련 인사이트 칸 (시즌 키워드·상품 핵심어 중 오른 것, 별도 확보)
     company_related: bool = False
     company_reason: str | None = None  # 왜 회사 관련으로 골랐는지 (코드 문장)
+    # 아래는 예전 응답은 없다. 연령대별 평소 대비 배수 전체 (trend_age 결과 그대로, 설정 순서).
+    # 연령대를 보지 않은 주제는 빈 목록이고 이유는 target_age_reason
+    age_bands: list[AgeBandTrend] = Field(default_factory=list)
 
 
 class TrendInsightBriefOutput(AxModel):
