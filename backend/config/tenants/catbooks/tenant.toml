@@ -19,7 +19,7 @@ timezone = "Asia/Seoul"
 
 # 도메인 프로필(data domain_profile)이 읽는 회사 소개. 키워드·카테고리·출처는 적지 않는다(AI가 카탈로그로 고름)
 [profile]
-about = "캣북스는 책과 문구를 파는 온라인 쇼핑몰이다. 고양이가 지키는 서점 콘셉트다."
+about = "캣북스는 책을 파는 온라인 쇼핑몰(이커머스)을 운영하는 출판사다. 직접 펴낸 책과 함께 소설·에세이·IT 학습서를 판매한다."
 
 # 사람이 덮어쓰기 (비어 있어도 됨). 쓸 수 있는 칸: industry, customer_axes, subtopic_axes, questions,
 # seed_keywords(더할 키워드), drop_keywords(뺄 키워드)
