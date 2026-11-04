@@ -51,12 +51,14 @@ from ax_contracts.schemas.data import (
     SourcePlanOutput,
     TrendKeywordGroup,
     TrendScanInput,
+    VideoLink,
 )
 from data_agent.connectors import CatalogProduct, ConnectorUnavailable
 from data_agent.explain import _bad_numbers
 from data_agent.skills.brief_facts import card_facts
 from data_agent.skills.trend_evidence import BLAME, fixed_line
 from data_agent.skills.trend_scan import REQUEST_DAYS, TREND_CONFIG_ENV, judge_series
+from data_agent.video_links import links
 
 OTHER = ("기타", "unknown")
 PLANNING_DECIDES = (
@@ -344,6 +346,7 @@ class Topic:
     median_views: float | None = None
     evidence: str | None = None
     video_ids: tuple[str, ...] = ()  # 근거 숏츠 (facts의 link)
+    video_links: tuple[VideoLink, ...] = ()  # 근거 숏츠 주소·썸네일 (하위 주제 결과 그대로)
 
 
 def topics_of(
@@ -366,6 +369,7 @@ def topics_of(
                 t.median_views,
                 f"'{t.seed_keyword}' 한국 숏츠 {t.videos}개에 함께 나옴",
                 tuple(t.video_ids),
+                tuple(t.video_links) or tuple(links(t.video_ids, {}, short=True)),
             )  # fmt: skip
             for t in ranked
         ]
@@ -494,13 +498,12 @@ async def make_opportunities(
         for c in cards:
             c.limits.append(note)
     await write_lines(cards, llm, context_id, queries)
-    links = {
-        opportunity_id(day, t.name): [f"https://www.youtube.com/watch?v={v}" for v in t.video_ids]
-        for t in topics
-    }
+    by_card = {opportunity_id(day, t.name): t for t in topics}
     rows: list[DataFact] = []
     for c in cards:
-        mine = card_facts(c, links.get(c.opportunity_id, []))
+        t = by_card.get(c.opportunity_id)
+        c.video_links = list(t.video_links) if t else []
+        mine = card_facts(c, [v.video_url for v in c.video_links if v.video_url])
         c.fact_ids = [x.fact_id for x in mine]
         rows += mine
     return OpportunityResult(cards, None, plan.plan_id, queries, rows)

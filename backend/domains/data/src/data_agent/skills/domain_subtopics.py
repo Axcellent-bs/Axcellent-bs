@@ -46,6 +46,7 @@ from data_agent.skills import trend_candidates as cand
 from data_agent.skills.shorts_stats import is_language
 from data_agent.skills.shorts_stats import load_config as load_shorts_config
 from data_agent.skills.trend_scan import TREND_CONFIG_ENV
+from data_agent.video_links import links
 
 KST = timezone(timedelta(hours=9))
 DB_ENV = "DATA_SUBTOPICS_DB"
@@ -108,6 +109,7 @@ class Short:
     title: str
     tags: tuple[str, ...]
     views: int | None
+    thumbnail_url: str | None = None  # 받은 검색 응답 값 (예전 저장분은 None)
 
 
 class SubtopicStore:
@@ -136,7 +138,8 @@ class SubtopicStore:
         if not row:
             return None
         items = [
-            Short(v["id"], v["title"], tuple(v["tags"]), v["views"]) for v in json.loads(row[1])
+            Short(v["id"], v["title"], tuple(v["tags"]), v["views"], v.get("thumb"))
+            for v in json.loads(row[1])
         ]
         return datetime.fromisoformat(row[0]), items
 
@@ -165,8 +168,8 @@ class SubtopicStore:
         return int(row[0])
 
     def put(self, seed: str, at: datetime, shorts: Sequence[Short]) -> None:
-        data = [{"id": s.video_id, "title": s.title, "tags": list(s.tags), "views": s.views}
-                for s in shorts]  # fmt: skip
+        data = [{"id": s.video_id, "title": s.title, "tags": list(s.tags), "views": s.views,
+                 "thumb": s.thumbnail_url} for s in shorts]  # fmt: skip
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT OR REPLACE INTO searches VALUES (?,?,?,?)",
@@ -399,7 +402,8 @@ async def make_subtopics(
             out.quota_used += SEARCH_UNITS if used is None else used
             queries.append(f"youtube search.list videoDuration=short q={seed}")
             shorts = [
-                Short(v.video_id, v.title, tuple(v.tags), v.view_count)
+                Short(v.video_id, v.title, tuple(v.tags), v.view_count,
+                      getattr(v, "thumbnail_url", None))
                 for v in stats
                 if v.duration_seconds is not None
                 and v.duration_seconds <= shorts_cfg.max_seconds
@@ -418,6 +422,7 @@ async def make_subtopics(
         taken: set[str] = set()
         for seed, shorts in by_seed.items():
             views = {s.video_id: s.views for s in shorts}
+            thumbs = {s.video_id: s.thumbnail_url for s in shorts if s.thumbnail_url}
             found, dropped = terms_of(seed, shorts, cand_cfg, common)
             dropped_common |= dropped
             terms = [
@@ -441,6 +446,7 @@ async def make_subtopics(
                         videos=len(t.videos),
                         median_views=round(statistics.median(vs), 1) if vs else None,
                         video_ids=sorted(t.videos)[:5],
+                        video_links=links(sorted(t.videos)[:5], thumbs, short=True),
                         origins=sorted(t.origins),
                         merged=sorted(t.merged),
                     )  # fmt: skip

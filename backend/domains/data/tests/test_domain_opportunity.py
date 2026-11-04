@@ -305,7 +305,9 @@ def test_card_numbers_are_facts_with_video_links() -> None:
     assert card.fact_ids and all(fid in by_id for fid in card.fact_ids)
     mine = {by_id[fid].label: by_id[fid] for fid in card.fact_ids}
     fit = mine["숏츠 조회 중앙값 전체 대비 배수"]
-    assert fit.link == "https://www.youtube.com/watch?v=v9" and fit.sample == 6
+    assert fit.link == "https://www.youtube.com/shorts/v9" and fit.sample == 6  # 근거 숏츠 주소
+    assert [v.video_id for v in card.video_links] == ["v9", "v8"]
+    assert card.video_links[0].thumbnail_url is None  # 저장된 썸네일이 없으면 지어내지 않음
     assert all(f.about == card.opportunity_id for f in mine.values())
     for v in do.facts(card).values():  # 한 줄 검증 숫자는 모두 facts에
         if isinstance(v, int | float):
