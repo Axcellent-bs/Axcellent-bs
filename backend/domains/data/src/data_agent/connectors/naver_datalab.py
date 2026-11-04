@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
@@ -203,9 +203,14 @@ class NaverDatalabConnector:
             "Content-Type": "application/json",
         }
 
-    async def search_trend(self, query: TrendScanInput) -> TrendResponse:
-        """키워드 그룹별 상대값 시계열. 못 읽으면 `ConnectorUnavailable`."""
+    async def search_trend(self, query: TrendScanInput, ages: Sequence[str] = ()) -> TrendResponse:
+        """키워드 그룹별 상대값 시계열. 못 읽으면 `ConnectorUnavailable`.
+
+        `ages`(네이버 연령 코드 1~11)를 주면 그 연령대만 센 값이다. 값은 그 요청 안에서만 비교한다.
+        """
         body = _request_body(query)
+        if ages:
+            body["ages"] = list(ages)
         key = f"{self.url}|{json.dumps(body, ensure_ascii=False, sort_keys=True)}"
         cached = self._cache.get(key)
         if cached is not None:

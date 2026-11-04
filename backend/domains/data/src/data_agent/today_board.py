@@ -103,6 +103,15 @@ class TodayBoard:
             self._pairs.append(pair)
             self._save("pair", f"{pair[0]}\t{pair[1]}", f"{pair[0]}\t{pair[1]}")
 
+    def rising_names(self) -> list[str]:
+        """오늘 급상승으로 판정된 그룹 이름 (기록 순서, 같은 판정은 한 번)."""
+        self._roll()
+        out: list[str] = []
+        for v in self._verdicts.values():
+            if v.status == "rising" and v.group_name not in out:
+                out.append(v.group_name)
+        return out
+
     def pairs(self) -> list[tuple[str, str]]:
         self._roll()
         return list(self._pairs)
