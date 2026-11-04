@@ -341,6 +341,7 @@ class GithubVcsAdapter:
                     additions=int(f.get("additions", 0)),
                     deletions=int(f.get("deletions", 0)),
                     lines=added_lines(f.get("patch")),
+                    previous_path=f.get("previous_filename") or None,
                 )
                 for f in files
             ),
