@@ -119,7 +119,7 @@ def test_configured_human_tokens(client: Any, coupon: Any, monkeypatch: pytest.M
 
 def test_read_endpoints(client: Any) -> None:
     thresholds = client.get("/api/safety/thresholds").json()["data"]
-    assert thresholds["version"] == 2
+    assert thresholds["version"] == 3
     registry = client.get("/api/safety/registry").json()["data"]
     assert {a["action"] for a in registry["actions"]} >= {"issue_coupon", "publish_notice"}
     assert client.get("/health").json() == {"data": {"status": "ok"}, "meta": {}}
