@@ -233,6 +233,7 @@ SERVICES: tuple[Service, ...] = (
             "link_incident",
             "verify_rollback_target",
             "list_in_progress",
+            "list_dev_outcomes",
             "verify_handover",
             "start_dev",
             "receive_release_order",
