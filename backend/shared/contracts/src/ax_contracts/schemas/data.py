@@ -1039,8 +1039,6 @@ class PopularTopic(AxModel):
     score: PopularScore = Field(default_factory=PopularScore)
     youtube_videos: int | None = Field(default=None, ge=0)  # 이 주제가 나온 인기 영상 수
     video_ids: list[str] = Field(default_factory=list)  # 인기 순위 순 (최대 5)
-    # 아래는 예전 응답은 없다. video_ids의 주소·썸네일 (같은 순서)
-    videos: list[VideoLink] = Field(default_factory=list)
     views_per_hour: float | None = None  # 그 영상들의 지금 시간당 조회 증가 합 (못 쟀으면 None)
     velocity_videos: int = Field(default=0, ge=0)  # 속도를 잰 영상 수
     velocity_reason: str | None = None  # 속도를 못 쟀으면 이유
