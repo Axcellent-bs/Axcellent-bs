@@ -146,6 +146,23 @@ async def test_receive_change_result_refuses_other_requesters(gate: Gate, act) -
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("requester", ["marketing", "coupon"])
+async def test_receive_campaign_brief_is_a_for_marketing(gate: Gate, act, requester: str) -> None:
+    """#552: 관문 요청자는 기획이 아니라 받는 쪽 마케팅이다. 마케팅이 올리는 서비스 이름도 된다."""
+    decision = await gate.execute(act("receive_campaign_brief", requester, f"brief-{requester}"))
+    assert (decision.grade, decision.status) == ("A", "executed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requester", ["planning", "finance"])
+async def test_receive_campaign_brief_refuses_other_requesters(
+    gate: Gate, act, requester: str
+) -> None:
+    decision = await gate.execute(act("receive_campaign_brief", requester, f"brief-{requester}"))
+    assert (decision.status, decision.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
+
+
+@pytest.mark.asyncio
 async def test_confirm_spec_rules(gate: Gate, act) -> None:
     clean = dict(open_questions=0, warnings=0, basis_count=2, irreversible_count=0)
     ok = await gate.execute(act("confirm_spec", "planning", "spec-ok", **clean))

@@ -297,6 +297,7 @@ export interface GithubAccount {
   checked_at?: string
   error?: string
   warnings: string[]
+  app?: { configured: boolean; slug: string } // AXcellent 앱(운영팀이 만든 앱)이 서버에 설정돼 있나
 }
 export interface GithubAccountInput { app_id: string; installation_id: string; private_key?: string; base_url?: string }
 export const githubAccountApi = (base: string) => ({
@@ -305,6 +306,8 @@ export const githubAccountApi = (base: string) => ({
   refresh: () => call<GithubAccount>(base, '/vcs/github-account/refresh', post({}, 'admin')),
   setRepo: (repo: string, enabled: boolean) => call<GithubAccount>(base, '/vcs/github-account/repos', post({ repo, enabled }, 'admin')),
   remove: () => call<GithubAccount>(base, '/vcs/github-account/delete', post({}, 'admin')),
+  installUrl: () => call<{ url: string }>(base, '/vcs/github-account/install', { headers: RELAY_TOKEN ? { Authorization: `Bearer ${RELAY_TOKEN}` } : {} }),
+  installed: (installation_id: string, state: string) => call<GithubAccount>(base, '/vcs/github-account/installed', post({ installation_id, state }, 'admin')),
 })
 
 // ---- 요청 작업 코딩 방식 (dev 서비스 `/api/planning/coding-settings`). 회사 설정 + 서버 AI 체험 한도

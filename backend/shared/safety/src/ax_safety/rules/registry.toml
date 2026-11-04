@@ -19,6 +19,13 @@ action = "publish_notice"
 owner = "marketing"
 base_grade = "A"
 
+# 기획이 확정해 넘긴 기획안 받기 (#552). 마케팅이 자기 보관함에 쓰는 일이라 요청자는 owner(마케팅)다.
+# 기획은 A2A로 이 skill을 부를 뿐 관문에 직접 요청하지 않는다. 누가 부를지는 Agent Card가 막는다
+[[actions]]
+action = "receive_campaign_brief"
+owner = "marketing"
+base_grade = "A"
+
 # 인스타그램 게시 (#487). 외부 고객에게 공개되고 되돌리기 어려워 늘 사람이 정한다.
 # B로 내리는 것은 게시 규칙이 검증된 뒤 사람이 정한다
 [[actions]]
