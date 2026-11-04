@@ -1037,6 +1037,9 @@ class PopularTopic(AxModel):
     category_rank: int | None = Field(default=None, ge=1)  # 화면 카테고리 안 순위 (1~5)
     # 주제 이름 자체가 실존 사람 이름인지 (분류기, 분류하지 못했으면 None)
     is_person: bool | None = None
+    # 아래는 예전 응답은 없다. video_ids 순서의 영상 (제목·채널·조회수는 저장된 값, 모르면 None)
+    videos: list[PopularVideo] = Field(default_factory=list)
+    videos_reason: str | None = None  # 제목을 못 붙인 영상이 있으면 이유
 
 
 class PopularVideo(AxModel):
