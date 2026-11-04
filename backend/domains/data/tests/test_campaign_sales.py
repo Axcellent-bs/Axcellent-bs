@@ -160,3 +160,43 @@ def test_facts_carry_source_period_and_sample() -> None:
     assert facts["구간 결제 완료 주문"].unit == "건"
     short = {f.label for f in ce.sales_facts(out_of(2))}  # 기준선 부족: 기간 숫자만, 0으로 안 채움
     assert "구간 주문 금액 합 (할인 전)" in short and "증분 판매액 (주문 금액)" not in short
+
+
+def test_measure_fills_incremental_orders_schema_version_and_all_summary_numbers() -> None:
+    from ax_contracts.schemas.data import CampaignCoupons
+
+    orders = CampaignChange(status="known", direction="up", actual=130.0, expected=100.0,
+                            excess=30.4, ratio=1.3, p_value=0.0004, baseline_days=7)  # fmt: skip
+    shop = FakeShop({0: [_order("a", START, 30000)], 1: [_order("d", START, 10000)],
+                     2: [_order("e", START, 20000)], 3: [_order("f", START, 15000)]})  # fmt: skip
+    data = CampaignEffectInput(window_from=START, window_to=END)
+    out = ce.CampaignEffectOutput(
+        window_from=START, window_to=END, orders=orders,
+        revenue=CampaignChange(status="unknown", unknown_reason="x"),
+        coupons=CampaignCoupons(status="known", coupon_count=2, issued_units=6, used_units=3,
+                                use_rate=0.5, note=ce.COUPON_NOTE),
+        summary="", sales=asyncio.run(ce._sales(shop, data, orders, _spans(3), ce.RULE_SHORT)),
+        incremental_orders=round(orders.excess or 0),
+    )  # fmt: skip
+    facts = ce.campaign_facts(out)
+    values = {f.value for f in facts}
+    # 요약 문장 재료의 숫자는 모두 facts에 있다 (문장 속 숫자 검증의 기준)
+    for v in ce._facts(out).values():
+        if isinstance(v, int | float):
+            assert float(v) in values, v
+    by = {f.label: f for f in facts}
+    assert by["증분 주문 수"].value == 30 and by["증분 주문 수"].unit == "건"
+    assert by["쿠폰 사용률"].value == 0.5 and by["쿠폰 사용률"].sample == 2
+    assert len({f.fact_id for f in facts}) == len(facts)  # fact_id는 칸마다 다르다
+    assert all(f.fact_id and f.fact_id.startswith("cmp_") for f in facts)
+
+
+def test_unknown_orders_have_no_incremental_orders() -> None:
+    gap = CampaignChange(status="unknown", unknown_reason="기록 공백")
+    out = ce.CampaignEffectOutput(
+        window_from=START, window_to=END, orders=gap,
+        revenue=CampaignChange(status="unknown", unknown_reason="x"),
+        coupons=ce.CampaignCoupons(status="unknown", unknown_reason="x"), summary="",
+    )  # fmt: skip
+    assert out.incremental_orders is None
+    assert [f for f in ce.campaign_facts(out) if "주문" in f.label] == []  # 0으로 채우지 않음

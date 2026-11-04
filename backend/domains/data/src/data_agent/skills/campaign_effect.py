@@ -30,6 +30,7 @@ README "campaign_effect".
 
 from __future__ import annotations
 
+import hashlib
 import math
 import os
 import tomllib
@@ -665,8 +666,55 @@ async def measure(
         proposal_id=data.proposal_id,
         sales=await _sales(connector, data, orders, used, rule),
     )
-    out.facts = sales_facts(out)
+    if orders.status == "known" and orders.excess is not None:
+        out.incremental_orders = round(orders.excess)  # 재무 orders 칸 (증분, gmv_krw와 같은 뜻)
+    out.schema_version = SCHEMA_VERSION
+    out.generated_at = datetime.now(UTC)
+    out.facts = campaign_facts(out)
     return out
+
+
+SCHEMA_VERSION = "campaign_effect.v2"  # 응답 모양 버전 (sales·facts·incremental_orders)
+
+
+def _fact_id(label: str) -> str:
+    return "cmp_" + hashlib.sha256(label.encode("utf-8")).hexdigest()[:10]
+
+
+def campaign_facts(out: CampaignEffectOutput) -> list[CampaignFact]:
+    """응답에 나오는 숫자 전부 (주문·쿠폰·판매액). 요약 문장 재료(`_facts`)의 숫자도 모두 여기 있다.
+
+    모르는 칸은 넣지 않는다 (0으로 채우지 않음). fact_id는 같은 칸이면 같은 값이다.
+    """
+    span = _span_text(out.window_from, out.window_to)
+    rows: list[CampaignFact] = []
+
+    def add(label: str, value: float | None, unit: str, sample: int | None = None) -> None:
+        if value is not None:
+            rows.append(CampaignFact(label=label, value=value, unit=unit, period=span,
+                                     sample=sample, fact_id=_fact_id(label)))  # fmt: skip
+
+    o = out.orders
+    if o.status == "known":
+        days = o.baseline_days
+        add("캠페인 주문", int(o.actual) if o.actual is not None else None, "건", days)
+        add("평소 주문", round(o.expected, 1) if o.expected is not None else None, "건", days)
+        add("주문 증분", round(o.excess, 1) if o.excess is not None else None, "건", days)
+        add("증분 주문 수", out.incremental_orders, "건", days)
+        add("실제 ÷ 기대", o.ratio, "배", days)
+        add("주문 방향 꼬리확률", o.p_value, "확률", days)
+        add("기준 일수", days, "구간", days)
+    c = out.coupons
+    if c.status == "known":
+        add("쿠폰 발급", c.issued_units, "장", c.coupon_count)
+        add("쿠폰 사용", c.used_units, "장", c.coupon_count)
+        add("쿠폰 사용률", c.use_rate, "비율", c.coupon_count)
+    for f in sales_facts(out):
+        rows.append(f.model_copy(update={"fact_id": _fact_id(f.label)}))
+    s = out.sales
+    if s is not None and s.status == "known" and s.incremental_gross_krw is not None:
+        add("증분 판매액(원)", s.incremental_gross_krw, "KRW", s.baseline_days)  # 요약 재료 이름
+    return rows
 
 
 # ---------------------------------------------------------------- 설명 (LLM은 요약 문장만)
