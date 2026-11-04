@@ -381,6 +381,17 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return _gate_err(exc)
         return _ok(result.output, svc)
 
+    @router.post("/dev-tasks/{task_id}/text-ok", response_model=None)
+    async def post_dev_task_text_ok(task_id: str, request: Request) -> dict | JSONResponse:
+        """작업 글 경고를 사람이 확인함 → 내 Claude가 가져갈 수 있다 (사람 토큰만)."""
+        svc = get_service()
+        who = check_human(request.headers.get("authorization"))
+        try:
+            result = await svc.ok_task_text(task_id, who)
+        except ActionError as exc:
+            return _coding_err(exc)
+        return _ok(result.output, svc)
+
     @router.post("/dev-tasks/{task_id}/close-covered", response_model=None, dependencies=HUMAN)
     async def post_dev_task_close_covered(task_id: str) -> dict | JSONResponse:
         """반영됨으로 닫기: 바뀐 내용이 없어 멈춘 작업을 앞 작업이 반영한 것으로 완료 (PR 없음)."""

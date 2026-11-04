@@ -234,6 +234,10 @@ class CodingRun(DomainModel):
     claimed_at: UtcDatetime | None = None
     lease_until: UtcDatetime | None = None  # 이때까지 진행 보고가 없으면 대기열로 돌린다
     progress: str | None = None  # 개발자 Claude가 마지막으로 보고한 진행 글
+    # 작업 글(제목·기획·완료 기준)에 에이전트를 노린 지시로 보이는 것 (work_queue.warnings_of).
+    # 있으면 사람이 화면에서 글을 확인(text_ok_by)하기 전까지 개발자 Claude가 가져가지 못한다
+    text_warnings: list[str] = Field(default_factory=list)
+    text_ok_by: str | None = None
     # 실행 관문이 generate_pr를 보류(held)했을 때: 그 멱등 키·보류 건·경로. 사람이 보류 건을
     # 승인하고 "승인하고 PR 열기"(hold_ok)로 다시 돌리면 같은 키로 보내 승인된 결정을 받는다
     hold_key: str | None = None

@@ -120,6 +120,13 @@ def _fmt(at: datetime) -> str:
     return at.astimezone(UTC).strftime("%m-%d %H:%M UTC")
 
 
+def _text_warnings(s: State, x: Task) -> list[str]:
+    """작업 글 경고 (work_queue). 순환 import를 피해 안에서 부른다."""
+    from dev_agent import work_queue
+
+    return work_queue.task_text_warnings(s, x)
+
+
 class DevService(PlanningCore):
     """개발 서비스 (dev, 8111): 넘겨받은 기획서로 PR·검수·머지·배포, 코딩 에이전트·개발 대화,
     장애 연결·관련 PR·롤백 확인. 자동 처리 범위(auto_policy)의 주인이다."""
@@ -812,6 +819,9 @@ class DevService(PlanningCore):
                     ),
                 )
             )
+            made = s.tasks[-1]
+            assert made.coding is not None
+            made.coding.text_warnings = _text_warnings(s, made)
             s.activity.append(self._act(t, ctx, "dev", "dev", "dev_task_create", "A2A", text, "A"))
             return ActionResult(
                 outcome="queued",
@@ -1050,6 +1060,7 @@ class DevService(PlanningCore):
                 connection=cid,
                 mode=mode,  # type: ignore[arg-type]
             )
+            t.coding.text_warnings = _text_warnings(s, t)
             if mode == "agent":
                 self._pending_spawn.append(t.id)
             s.activity.append(
@@ -2385,6 +2396,7 @@ class DevService(PlanningCore):
                 connection=cid, llm_calls=x.coding.llm_calls, llm_tokens=x.coding.llm_tokens,
                 mode=x.coding.mode, hold_key=x.coding.hold_key, hold_review=x.coding.hold_review,
                 hold_paths=x.coding.hold_paths, hold_ok=approved and x.coding.hold_key is not None,
+                text_warnings=x.coding.text_warnings, text_ok_by=x.coding.text_ok_by,
             )  # fmt: skip
             x.state = "진행 중"
             s.activity.append(self._act(t, ctx, "dev", "dev", "dev_task_retry", "A2A", text, "A"))
@@ -2824,6 +2836,32 @@ class DevService(PlanningCore):
                 f'{ids} "완료"를 요청 부서에 회신', "read",
             )
         )  # fmt: skip
+
+    async def ok_task_text(self, task_id: str, who: str) -> ActionResult:
+        """사람이 작업 글의 경고를 보고 "글 확인함" (내 Claude가 가져갈 수 있게 된다).
+
+        에이전트·작업 토큰으로는 부를 수 없다 (api.py HUMAN). 경고가 없으면 할 일이 없다."""
+
+        async def run(s: State) -> ActionResult:
+            x = next((t for t in s.tasks if t.id == task_id), None)
+            if x is None or x.coding is None:
+                raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+            warns = _text_warnings(s, x)
+            if not warns:
+                raise ActionError("NOTHING_TO_REVIEW", f"{task_id} 작업 글에 경고가 없다")
+            x.coding.text_warnings = warns
+            x.coding.text_ok_by = who
+            x.coding.updated_at = self.clock()
+            sp = next((p for p in s.specs if p.id == x.spec), None)
+            req = self._request_of_spec(s, sp) if sp else None
+            ctx = req.context_id if req else f"task:{task_id}"
+            s.activity.append(
+                self._act(self.clock(), ctx, "human", "dev", "dev_task_text_ok", "사람",
+                          f"{task_id} 작업 글 확인함 ({who}, 경고: {', '.join(warns)})")
+            )  # fmt: skip
+            return ActionResult(output={"task_id": task_id, "text_ok_by": who, "warnings": warns})
+
+        return await self._apply(run)
 
     async def close_dev_task_covered(self, task_id: str) -> ActionResult:
         """사람이 '반영됨으로 닫기': 바뀐 내용이 없어 멈춘 작업을 앞 작업이 반영한 것으로 완료한다.

@@ -214,6 +214,11 @@ def test_agent_config_and_hook_files_are_merge_risk_at_any_depth() -> None:
         "shop-api/pyproject.toml",
         ".vscode/tasks.json",
         ".github/workflows/ci.yml",
+        "shop-api/tests/conftest.py",
+        ".cursor/rules/a.mdc",
+        ".kiro/steering/x.md",
+        "shop-web/.envrc",
+        ".clinerules",
     ]
     assert merge_risk_paths(risky) == risky
     plain = ["shop-web/src/pages/Notice.tsx", "docs/claude-notes.md", "shop-web/package-lock.json"]

@@ -93,7 +93,19 @@ AGENT_CONFIG_DIRS: dict[str, str] = {
     ".devcontainer": "개발 컨테이너 설정",
     ".husky": "git 훅",
     ".githooks": "git 훅",
-    ".github": "CI·Actions",
+    ".github": "CI·Actions (copilot-instructions.md 포함)",
+    # 다른 코딩 에이전트·에디터 (Postman 설치 프로그램이 노린 목록과 SafeDep 정리 참고)
+    ".agents": "에이전트 설정",
+    ".agent": "에이전트 설정",
+    ".kiro": "Kiro 지시 파일",
+    ".windsurf": "Windsurf 지시 파일",
+    ".roo": "Roo 지시 파일",
+    ".continue": "Continue 설정",
+    ".amazonq": "Amazon Q 지시 파일",
+    ".opencode": "opencode 설정",
+    ".factory": "Factory 설정",
+    ".idea": "JetBrains 실행 구성",
+    ".run": "JetBrains 실행 구성",
 }
 AGENT_CONFIG_FILES: dict[str, str] = {
     "claude.md": "에이전트 지시 파일",
@@ -107,6 +119,20 @@ AGENT_CONFIG_FILES: dict[str, str] = {
     "pyproject.toml": "설치·빌드 설정",
     "setup.py": "설치 스크립트",
     "makefile": "빌드 스크립트",
+    ".clinerules": "에이전트 지시 파일",
+    ".windsurfrules": "에이전트 지시 파일",
+    "copilot-instructions.md": "에이전트 지시 파일",
+    "conftest.py": "pytest가 자동으로 실행하는 파일",
+    "setup.cfg": "설치·빌드 설정",
+    "tox.ini": "테스트 실행 설정",
+    "noxfile.py": "테스트 실행 스크립트",
+    "requirements.txt": "의존성 (새 패키지 = 공급망)",
+    "composer.json": "설치·실행 스크립트 (post-install-cmd)",
+    "gemfile": "Bundler가 읽을 때 실행",
+    "taskfile.yml": "작업 실행 스크립트",
+    ".envrc": "direnv가 폴더에 들어갈 때 실행",
+    ".gitmodules": "하위 저장소 주소",
+    "dockerfile": "이미지 빌드 스크립트",
 }
 
 

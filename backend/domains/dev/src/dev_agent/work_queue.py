@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -124,10 +125,36 @@ SUSPICIOUS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
+# 사람 눈에는 안 보이지만 에이전트는 읽는 글자: 폭 없는 문자·방향 바꾸기·태그 문자 (숨은 지시)
+_HIDDEN = re.compile(
+    "[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\U000e0000-\U000e007f]"
+)
+_COMMENT = re.compile(r"<!--.*?-->", re.S)  # 화면에서 안 보이는 HTML 주석
+
+
+def _plain(text: str) -> str:
+    """정규화(NFKC: 전각·호환 문자 → 보통 문자)하고 숨은 글자를 지운 글 (경고 검사용)."""
+    return _HIDDEN.sub("", unicodedata.normalize("NFKC", text))
+
+
 def warnings_of(*texts: str) -> list[str]:
-    """작업 글에서 에이전트를 노린 지시로 보이는 것 (종류 이름, 중복 없이)."""
-    joined = "\n".join(t for t in texts if t)
-    return [name for name, pat in SUSPICIOUS if pat.search(joined)]
+    """작업 글에서 에이전트를 노린 지시로 보이는 것 (종류 이름, 중복 없이).
+
+    숨은 글자·HTML 주석을 끼워 단어를 쪼개도 잡도록 정규화한 글로 본다."""
+    raw = "\n".join(t for t in texts if t)
+    joined = _plain(raw)
+    found = [name for name, pat in SUSPICIOUS if pat.search(joined)]
+    if _HIDDEN.search(raw) or _COMMENT.search(raw):
+        found.append("숨은 글자")
+    return found
+
+
+def task_text_warnings(s: State, x: Task) -> list[str]:
+    """이 작업 글의 경고 (만들 때 CodingRun.text_warnings에 적는다)."""
+    sp = next((p for p in s.specs if p.id == x.spec), None)
+    paras = sp.paras if sp else []
+    done = [p.text for p in paras if p.kind == "done"]
+    return warnings_of(x.title, sp.problem if sp else "", *done)
 
 
 def spec_of(s: State, x: Task) -> dict[str, Any]:
@@ -149,6 +176,7 @@ def spec_of(s: State, x: Task) -> dict[str, Any]:
         "done": done,
         "untrusted": UNTRUSTED_NOTE,
         "warnings": warnings_of(x.title, plan, *done),
+        "text_ok_by": cr.text_ok_by,  # 경고가 있으면 사람이 확인해야 가져갈 수 있다
         "paths": list(r1.paths) if r1 else [],
         "repo": {
             "connection": cr.connection,
@@ -202,6 +230,14 @@ async def claim(svc: DevService, task_id: str, who: str) -> dict[str, Any]:
             raise _error("NOT_YOURS", f"{task_id}는 {cr.assignee}에게 맡긴 작업이다")
         if cr.status == "queued" and svc.task_paused(s, task_id):
             raise _error("REQUEST_PAUSED", f"{task_id}의 요청이 사람 중단 중이다")
+        warns = task_text_warnings(s, x)
+        if warns and not cr.text_ok_by:
+            # 에이전트가 스스로 "확인함"을 표시할 수 없게, 확인은 사람 토큰으로 화면에서만 한다
+            raise _error(
+                "NEEDS_HUMAN_REVIEW",
+                f"{task_id} 작업 글에 경고({', '.join(warns)})가 있다 → 개발 화면에서 사람이 글을 "
+                "확인한 뒤 가져갈 수 있다",
+            )
         mins = lease_minutes()
         if not again:
             ctx = _ctx(svc, s, x)
