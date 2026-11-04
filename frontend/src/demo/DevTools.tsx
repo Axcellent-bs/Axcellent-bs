@@ -236,7 +236,7 @@ function StepModels({ cfg, onSaved }: { cfg: CodingSettings; onSaved: (c: Coding
   )
 }
 
-function CodingModeSection() {
+function CodingModeSection({ part }: { part: AiPart }) {
   const [cfg, setCfg] = useState<CodingSettings | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -246,10 +246,13 @@ function CodingModeSection() {
     setError(null)
     try { setCfg(await codingApi.set(mode)) } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
+  if (part === 'key') return cfg ? <CompanyKeyBudget cfg={cfg} onSaved={setCfg} /> : <Loading error={error} />
+  if (part === 'models') return cfg ? <StepModels cfg={cfg} onSaved={setCfg} /> : <Loading error={error} />
+  if (part === 'claude') return <ClaudeConnect connected={cfg?.agents_connected ?? []} />
   return (
-    <section className="card space-y-4 p-6">
+    <section className="space-y-4 rounded-lg border border-ink-100 p-4">
       <div className="flex flex-wrap items-center gap-3">
-        <h2 className="card-title text-lg">요청 작업 코딩</h2>
+        <h3 className="font-medium">요청 작업 코딩</h3>
         {cfg && <span className={`chip ${cfg.resolved === 'agent' ? TONE.none : TONE.ok}`}>지금: {cfg.resolved === 'agent' ? '서버 AI' : '내 Claude'}</span>}
         {error && <span className="chip bg-amber-50 text-amber-700">{error}</span>}
       </div>
@@ -265,25 +268,36 @@ function CodingModeSection() {
           <dd><UsageBar used={cfg.trial_used} limit={cfg.trial_limit} wide title="서버 AI(기본 키)가 코딩에 쓴 토큰 / 체험 한도" /></dd></>}
         </dl>
       )}
-      {cfg && <CompanyKeyBudget cfg={cfg} onSaved={setCfg} />}
-      {cfg && <StepModels cfg={cfg} onSaved={setCfg} />}
-      <ClaudeConnect connected={cfg?.agents_connected ?? []} />
     </section>
   )
 }
 
-// 연결 창 탭: 형상관리(레포 연결·보안 점검·다른 개발 도구) / AI 코딩(서버 AI·내 Claude·모델·키·예산)
-type PanelTab = 'vcs' | 'ai'
-const PANEL_TABS: { id: PanelTab; label: string }[] = [
-  { id: 'vcs', label: '형상관리' },
-  { id: 'ai', label: 'AI 코딩' },
-]
-const TAB_KEY = 'ax.devtools.tab'
-const readTab = (): PanelTab => {
-  try { return localStorage.getItem(TAB_KEY) === 'ai' ? 'ai' : 'vcs' } catch { return 'vcs' }
+function Loading({ error }: { error: string | null }) {
+  return <p className="text-sm text-ink-500">{error ?? '불러오는 중…'}</p>
 }
 
-/** 연결 창: 형상관리·AI 코딩 탭. 개발·배포 화면의 톱니바퀴 창과 시스템 관리 화면이 같이 쓴다 */
+// 연결 창 왼쪽 메뉴 (설정 창처럼 묶음 › 항목). 고른 항목만 오른쪽에 보인다
+type AiPart = 'mode' | 'key' | 'models' | 'claude'
+type PanelItem = 'repos' | 'others' | AiPart
+const PANEL_GROUPS: { label: string; items: { id: PanelItem; label: string }[] }[] = [
+  { label: '형상관리', items: [{ id: 'repos', label: '레포 연결' }, { id: 'others', label: '다른 개발 도구' }] },
+  { label: 'AI 코딩', items: [
+    { id: 'mode', label: '코딩 방식' },
+    { id: 'key', label: '고객사 키·예산' },
+    { id: 'models', label: '단계별 모델' },
+    { id: 'claude', label: '내 Claude 연결' },
+  ] },
+]
+const PANEL_IDS = PANEL_GROUPS.flatMap((g) => g.items.map((i) => i.id))
+const TAB_KEY = 'ax.devtools.item'
+const readTab = (): PanelItem => {
+  try {
+    const v = localStorage.getItem(TAB_KEY) as PanelItem | null
+    return v && PANEL_IDS.includes(v) ? v : 'repos'
+  } catch { return 'repos' }
+}
+
+/** 연결 창: 왼쪽 메뉴(형상관리·AI 코딩) + 오른쪽 내용. 개발·배포 화면의 톱니바퀴 창과 시스템 관리 화면이 같이 쓴다 */
 export function DevToolsPanel() {
   const [list, setList] = useState<VcsConnection[] | null>(null)
   const [offline, setOffline] = useState(false)
@@ -295,8 +309,8 @@ export function DevToolsPanel() {
   const [inv, setInv] = useState<Record<string, VcsInventory>>({})
   const [checking, setChecking] = useState(false)
   const putInv = (rows: VcsInventory[]) => setInv(Object.fromEntries(rows.map((r) => [r.connection_id, r])))
-  const [tab, setTab] = useState<PanelTab>(readTab)
-  const pickTab = (t: PanelTab) => {
+  const [tab, setTab] = useState<PanelItem>(readTab)
+  const pickTab = (t: PanelItem) => {
     setTab(t)
     try { localStorage.setItem(TAB_KEY, t) } catch { /* 저장이 막혀도 탭은 바뀐다 */ }
   }
@@ -446,16 +460,25 @@ export function DevToolsPanel() {
   )
 
   return (
-    <div className="space-y-6">
-      <div className="seg-toggle" role="tablist" aria-label="연결 종류">
-        {PANEL_TABS.map((t) => (
-          <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} aria-pressed={tab === t.id} onClick={() => pickTab(t.id)}>{t.label}</button>
+    <div className="card flex min-h-[460px] flex-col gap-0 overflow-hidden p-0 md:flex-row">
+      <nav className="shrink-0 border-b border-ink-100 p-3 md:w-52 md:border-b-0 md:border-r" aria-label="연결 메뉴">
+        {PANEL_GROUPS.map((g) => (
+          <div key={g.label} className="mb-3 last:mb-0">
+            <div className="px-2 pb-1 text-xs text-ink-500">{g.label}</div>
+            {g.items.map((it) => (
+              <button key={it.id} type="button" aria-current={tab === it.id ? 'page' : undefined} onClick={() => pickTab(it.id)}
+                className={`block w-full rounded-md px-2 py-1.5 text-left text-sm ${tab === it.id ? 'bg-ink-100 font-medium text-ink-900' : 'text-ink-700 hover:bg-ink-50'}`}>
+                {it.label}
+              </button>
+            ))}
+          </div>
         ))}
-      </div>
-      {tab === 'ai' ? <CodingModeSection /> : <>
-      <section className="card space-y-4 p-6">
+      </nav>
+      <div className="min-w-0 flex-1 p-6">
+      {tab === 'mode' || tab === 'key' || tab === 'models' || tab === 'claude' ? <CodingModeSection part={tab} /> : tab === 'repos' ? (
+      <section className="space-y-4">
         <div className="flex flex-wrap items-center gap-3">
-          <h2 className="card-title text-lg">형상관리</h2>
+          <h2 className="card-title text-lg">레포 연결</h2>
           {list && <span className={`chip ${connected ? TONE.none : TONE.wait}`}>레포 {list.length}</span>}
           {list && list.length > 1 && <span className="chip bg-ink-100 text-ink-700">PR마다 AI 제안 · 사람 승인</span>}
           {offline && <span className="chip bg-amber-50 text-amber-700">개발·배포 AI에 연결할 수 없음</span>}
@@ -521,8 +544,8 @@ export function DevToolsPanel() {
 
         {!form && error && <p className="text-sm text-red-700">{error}</p>}
       </section>
-
-      <section className="card p-6">
+      ) : (
+      <section>
         <h2 className="card-title">다른 개발 도구</h2>
         <ul className="mt-3 divide-y divide-ink-100">
           {OTHERS.map((o) => (
@@ -540,7 +563,8 @@ export function DevToolsPanel() {
           ))}
         </ul>
       </section>
-      </>}
+      )}
+      </div>
     </div>
   )
 }
@@ -566,7 +590,7 @@ export function DevToolsDialog({ onClose }: { onClose: () => void }) {
   }, [onClose])
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 pt-16" onClick={onClose} role="presentation">
-      <div role="dialog" aria-modal="true" aria-label="개발 도구 연결" className="w-full max-w-4xl space-y-4 rounded-2xl p-5 shadow-xl"
+      <div role="dialog" aria-modal="true" aria-label="개발 도구 연결" className="w-full max-w-5xl space-y-4 rounded-2xl p-5 shadow-xl"
         style={{ background: 'rgb(var(--canvas))' }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">개발 도구 연결</h2>
