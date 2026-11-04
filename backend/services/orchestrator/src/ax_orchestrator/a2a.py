@@ -24,6 +24,7 @@ from ax_contracts.schemas import (
     FindActiveIncidentOutput,
     TaskStatus,
 )
+from ax_contracts.schemas.finance import FinanceOpinion, ReceiveFinanceOpinionOutput
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
 from ax_orchestrator.manager import IncidentManager
 from ax_orchestrator.planning_questions import answer_question
@@ -127,6 +128,47 @@ def answer_planning_question(get_manager: GetManager) -> Handler:
     return handler
 
 
+def receive_finance_opinion(get_manager: GetManager) -> Handler:
+    """재무가 보낸 의견을 받아 보관한다. 같은 의견을 다시 받으면 `duplicate`로 답한다."""
+
+    async def handler(request: AgentRequest) -> AgentResult:
+        try:
+            opinion = FinanceOpinion.model_validate(request.input)
+        except ValidationError as error:
+            errors = [f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in error.errors()]
+            return AgentResult(
+                meta=request.meta,
+                status=TaskStatus.FAILED,
+                outcome="invalid_input",
+                output={"errors": errors},
+            )
+        manager = get_manager()
+        if manager is None:
+            return AgentResult(
+                meta=request.meta,
+                status=TaskStatus.FAILED,
+                outcome="not_ready",
+                output={"errors": ["총괄이 아직 준비되지 않았다. 나중에 다시 보낸다"]},
+            )
+        added = manager.finance_opinions.add(opinion, request.meta.context_id)
+        return AgentResult(
+            meta=request.meta,
+            status=TaskStatus.COMPLETED,
+            outcome="received" if added else "duplicate",
+            output=ReceiveFinanceOpinionOutput(
+                opinion_id=opinion.opinion_id, duplicate=not added
+            ).model_dump(mode="json"),
+            evidence=Evidence(
+                queries=[f"finance.opinion opinion_id={opinion.opinion_id}"],
+                data_summary=f"재무 의견 {opinion.kind} {'받음' if added else '이미 받음'}",
+                collected_at=datetime.now(UTC),
+                ref_ids=[opinion.opinion_id],
+            ),
+        )
+
+    return handler
+
+
 def build_a2a_app(get_manager: GetManager) -> FastAPI:
     """`/a2a`와 `/.well-known/agent-card.json`을 가진 앱. 총괄 서버 맨 끝에 붙인다."""
     return create_agent_app(
@@ -134,5 +176,6 @@ def build_a2a_app(get_manager: GetManager) -> FastAPI:
         {
             "find_active_incident": find_active_incident(get_manager),
             "answer_planning_question": answer_planning_question(get_manager),
+            "receive_finance_opinion": receive_finance_opinion(get_manager),
         },
     )
