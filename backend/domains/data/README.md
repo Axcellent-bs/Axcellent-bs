@@ -168,6 +168,137 @@ class MemoryConnector:
 | skill 한국어 이름표("결제 문제 진단" 등) | `labels.py` | 부서 업무 이름이다(화면 `SKILL_KO`와 같은 말) |
 | 목 시드(`seed.py`·`seed_metrics.py`·`seed_logs.py`) | | 테스트 전용 |
 
+## 기획 협업
+
+흐름: **데이터(인사이트 + 근거) → 기획(제안 + 실행 근거 + 목표) → 사람 확인 → 마케팅 실행 → 데이터(성과 측정) → 기획(결과 기록)**. 데이터는 근거 있는 인사이트를 넘기고 성과를 잴 뿐, 제안을 확정하지 않는다.
+
+### 기획이 부를 skill 2개
+
+| skill | 언제 | 요청 | 응답 핵심 |
+|---|---|---|---|
+| `trend_insight_brief` | 제안을 만들기 전에 근거 있는 인사이트를 받을 때 | `max_insights`(3~7, 비우면 회사 설정 5), `regenerate` | `insights[]`: `insight_id`·한 줄·분류·광고 재료 여부·근거(YouTube·Google·네이버, 링크·시각)·타깃 연령대·상품(임베딩 기준 통과만)·숏츠 형식·한계·예시 아이디어(참고용) |
+| `campaign_effect` | 마케팅이 실행한 뒤 성과를 기록할 때 | `window_from`·`window_to`(필수), `campaign_id`, **`insight_id`·`proposal_id`(선택)** | 주문 증분·매출·쿠폰 누적 사용률(모르면 unknown + 이유), 요청의 `insight_id`·`proposal_id` 그대로 |
+
+둘 다 grade read(조회만). 요청 가능: `trend_insight_brief`는 planning·orchestrator·dashboard-api, `campaign_effect`는 카드의 `allowed_requesters`.
+
+### 예시 (2026-11-04 실제 데이터, 로컬 실행)
+
+`trend_insight_brief` 요청:
+
+```json
+{"skill": "trend_insight_brief", "input": {"max_insights": 5}}
+```
+
+응답 (인사이트 하나만 줄여 보임):
+
+```json
+{
+  "status": "known",
+  "day": "2026-11-04",
+  "rules_version": "04a3a6729e42",
+  "cached": false,
+  "summary": "인사이트 5개 (광고 재료 가능·미정 5개, 참고용 0개). 1위: t1.",
+  "insights": [
+    {
+      "insight_id": "ins_20261104_1ee36d7f",
+      "rank": 2,
+      "topic": "리그오브레전드",
+      "line": "YouTube 인기 영상 27개, 지금 시간당 조회 79390, 구독자 대비 조회 최대 0.82배, 네이버 평소 대비 0.97배, 타깃 10대는 평소 대비 1.16배.",
+      "line_status": "llm",
+      "category": "게임",
+      "ad_material": true,
+      "ad_material_reason": "실존 이름·상표가 든 주제라 분위기·형식만 빌릴 것",
+      "reference_only": false,
+      "real_entity": true,
+      "entity_names": [
+        "리그오브레전드"
+      ],
+      "target_age": "10대",
+      "target_age_ratio": 1.16,
+      "target_age_status": "normal",
+      "products": [],
+      "products_reason": "임베딩 유사도 0.65 이상(1등만)인 상품이 없음",
+      "shorts_format": null,
+      "shorts_format_reason": "이 주제 근거 영상 중 숏츠가 없음",
+      "example_ideas": [],
+      "score": 1.58,
+      "evidence": {
+        "youtube_videos": 27,
+        "youtube_views_per_hour": 79389.5,
+        "youtube_views_per_subscriber": 0.82,
+        "youtube_at": "2026-11-04T00:58:39Z",
+        "google_rank": null,
+        "naver_ratio": 0.97,
+        "naver_status": "normal",
+        "naver_until": null,
+        "links": [
+          "https://www.youtube.com/watch?v=qBrPgSt9mzI"
+        ],
+        "missing": [
+          "Google: 인기 검색어에 없는 주제"
+        ]
+      },
+      "limits": [
+        "평가셋이 없어 인사이트가 맞는지 재지 않는다",
+        "네이버 값은 요청마다 최댓값이 100인 상대값이다"
+      ]
+    },
+    "… (나머지 인사이트)"
+  ]
+}
+```
+
+`campaign_effect` 요청 (기획이 제안에 적어 둔 `insight_id`·`proposal_id`를 같이 보냄):
+
+```json
+{
+  "skill": "campaign_effect",
+  "input": {
+    "campaign_id": null,
+    "window_from": "2026-11-03T00:00:00Z",
+    "window_to": "2026-11-04T00:00:00Z",
+    "insight_id": "ins_20261104_628b49d9",
+    "proposal_id": "prop_example_1"
+  }
+}
+```
+
+응답 (줄임. 이날은 지난 7일 주문 기록에 공백이 많아 주문 증분이 unknown이고, campaign_id가 없어 쿠폰도 unknown이다. 0으로 채우지 않는다):
+
+```json
+{
+  "campaign_id": null,
+  "window_from": "2026-11-03T00:00:00Z",
+  "window_to": "2026-11-04T00:00:00Z",
+  "orders": {
+    "status": "unknown",
+    "unknown_reason": "기준선에 쓸 지난 구간이 없음 (1일 전: 기록 공백 의심 (288칸): 결제 시도 0인 5분 칸이 288칸…"
+  },
+  "revenue": {
+    "status": "unknown"
+  },
+  "coupons": {
+    "status": "unknown",
+    "unknown_reason": "campaign_id가 없어 캠페인 쿠폰을 찾을 수 없음"
+  },
+  "summary": "…",
+  "insight_id": "ins_20261104_628b49d9",
+  "proposal_id": "prop_example_1"
+}
+```
+
+### insight_id 사용법
+
+1. 기획은 `trend_insight_brief` 응답에서 쓸 인사이트의 `insight_id`(예: `ins_20261104_…`)를 제안에 적는다. 같은 날 같은 주제는 다시 불러도 같은 id다(날짜 + 주제 이름 해시)
+2. 마케팅이 실행한 뒤 기획이 `campaign_effect`를 부를 때 그 `insight_id`와 기획 쪽 `proposal_id`를 함께 보낸다
+3. 응답에 두 id가 그대로 돌아오므로, 기획은 그 결과를 자기 쪽 기록(제안·결과)에 이어 붙인다
+
+### 데이터가 하지 않는 것
+
+- **제안 확정**: 인사이트와 예시 아이디어(`promo_concepts`, 참고용)만 준다. 무엇을 할지는 기획이 정하고 사람이 확인한다
+- **기획 쪽 저장**: `insight_id`·`proposal_id`·결과를 데이터가 저장하지 않는다. `campaign_effect`는 받은 id를 돌려줄 뿐이다(읽기 전용)
+- **마케팅 실행**: 게시·발행·쿠폰 발급은 마케팅(과 safety 승인)이 한다
+
 ## 2. 실행 방법
 `docker compose -f infra/compose.yml up data` / 목 모드: `DATA_MOCK=1`
 
