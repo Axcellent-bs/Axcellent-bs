@@ -49,6 +49,9 @@ from ax_contracts.schemas.data import (
     CampaignCoupons,
     CampaignEffectInput,
     CampaignEffectOutput,
+    CampaignFact,
+    CampaignSales,
+    CampaignSalesTotals,
 )
 from data_agent import catalog
 from data_agent.connectors import ConnectorUnavailable
@@ -461,6 +464,145 @@ async def _orders(
     return orders, used, rule
 
 
+# ---------------------------------------------------------------- 판매액 (shop-api 주문 기록)
+
+GAP_WORD = "결제 기록 공백"
+GAP_HINTS = ("기록 공백", "기록이 하나도 없음", "자료가 빠졌을")  # 주문 판정의 공백 이유 문장
+
+
+def _totals(orders: list[Any]) -> CampaignSalesTotals:
+    """결제 완료 주문의 판매액 합 (원 정수). 성공한 결제가 없는 주문은 세지 않는다."""
+    done = [o for o in orders if o.settled]
+    return CampaignSalesTotals(
+        orders=len(done),
+        gross_krw=sum(o.gross for o in done),
+        discount_krw=sum(o.coupon_discount for o in done),
+        paid_krw=sum(o.paid for o in done),
+        refund_krw=sum(o.refunded_amount for o in done),
+    )
+
+
+def _mean_totals(days: list[CampaignSalesTotals]) -> CampaignSalesTotals:
+    n = len(days)
+    return CampaignSalesTotals(
+        orders=round(sum(d.orders for d in days) / n),
+        gross_krw=round(sum(d.gross_krw for d in days) / n),
+        discount_krw=round(sum(d.discount_krw for d in days) / n),
+        paid_krw=round(sum(d.paid_krw for d in days) / n),
+        refund_krw=round(sum(d.refund_krw for d in days) / n),
+    )
+
+
+def _unknown_sales(reason: str, rule: str | None = None, days: int = 0) -> CampaignSales:
+    gap = any(h in reason for h in GAP_HINTS) and not reason.startswith(GAP_WORD)
+    return CampaignSales(
+        status="unknown", unknown_reason=f"{GAP_WORD}: {reason}" if gap else reason,
+        baseline_rule=rule, baseline_days=days,
+    )  # fmt: skip
+
+
+def _span_text(start: datetime, end: datetime) -> str:
+    return f"{start.astimezone(UTC):%Y-%m-%dT%H:%MZ}~{end.astimezone(UTC):%Y-%m-%dT%H:%MZ}"
+
+
+async def _sales(
+    connector: Any,
+    data: CampaignEffectInput,
+    orders: CampaignChange,
+    used: list[Span],
+    rule: str,
+) -> CampaignSales:
+    """판매액 (증분). 기준선은 주문 수 판정이 쓴 지난 구간 그대로 (빈 구간·공백은 이미 빠짐)."""
+    if not hasattr(connector, "orders"):
+        return _unknown_sales("이 회사 커넥터는 주문 금액을 주지 않음", rule)
+    if orders.status == "unknown":  # 기록 공백·기준선 없음 등은 주문과 같은 이유 (공백 규칙 재사용)
+        return _unknown_sales(orders.unknown_reason or "주문을 판정할 수 없음", rule,
+                              orders.baseline_days)  # fmt: skip
+    start, end = data.window_from, data.window_to
+    try:
+        window = await connector.orders(start, end)
+        past = [await connector.orders(s.start, s.end) for s in used]
+    except ConnectorUnavailable as error:
+        return _unknown_sales(f"주문 금액을 읽지 못함 [{error.code}]", rule, len(used))
+    period = _totals(window)
+    unpaid = sum(1 for o in window if not o.settled and o.status == "pending_payment")
+    if period.orders == 0 and unpaid:
+        return _unknown_sales(
+            f"{GAP_WORD}: 구간 주문 {unpaid}건이 결제 대기이고 결제 완료가 0건", rule, len(used)
+        )
+    days = [_totals(p) for p in past]
+    if not days:
+        return _unknown_sales("기준선에 쓸 지난 구간이 없음", rule)
+    base = _mean_totals(days)
+    gross = [d.gross_krw for d in days]
+    excess = period.gross_krw - base.gross_krw
+    low, high = period.gross_krw - max(gross), period.gross_krw - min(gross)
+    if len(days) < 2:
+        direction, why = "uncertain", f"기준선 날이 {len(days)}개라 범위를 낼 수 없음"
+    elif low > 0:
+        direction, why = "up", f"구간 판매액이 기준선 {len(days)}일 중 가장 많은 날보다 많음"
+    elif high < 0:
+        direction, why = "down", f"구간 판매액이 기준선 {len(days)}일 중 가장 적은 날보다 적음"
+    else:
+        direction = "uncertain"
+        why = f"구간 판매액이 기준선 {len(days)}일 범위 안이라 확실하지 않음"
+    why += f" (주문 수 판정: {DIRECTION_KO[orders.direction or 'none']})"
+    direct, direct_orders, direct_why = await _direct(connector, data.campaign_id, window)
+    return CampaignSales(
+        status="known", period=period, baseline=base, baseline_rule=rule,
+        baseline_days=len(days), baseline_note=orders.baseline_note,
+        incremental_gross_krw=excess, incremental_paid_krw=period.paid_krw - base.paid_krw,
+        incremental_low_krw=low, incremental_high_krw=high, direction=direction,
+        direction_reason=why, orders_direction=orders.direction,
+        direct_attributed_krw=direct, direct_orders=direct_orders, direct_reason=direct_why,
+    )  # fmt: skip
+
+
+async def _direct(
+    connector: Any, campaign_id: str | None, window: list[Any]
+) -> tuple[int | None, int | None, str | None]:
+    """쿠폰 귀속: 캠페인 쿠폰을 쓴 결제 완료 구간 주문의 판매액 합."""
+    if not campaign_id:
+        return None, None, "campaign_id가 없어 쿠폰 귀속을 볼 수 없음"
+    if not hasattr(connector, "campaign_coupons"):
+        return None, None, "이 회사 커넥터는 쿠폰을 주지 않음"
+    try:
+        coupons = {c.coupon_id for c in await connector.campaign_coupons(campaign_id)}
+    except ConnectorUnavailable as error:
+        return None, None, f"쿠폰을 읽지 못함 [{error.code}]"
+    if not coupons:
+        return None, None, f"캠페인 {campaign_id} 쿠폰이 없음"
+    hits = [o for o in window if o.settled and o.coupon_id in coupons]
+    return sum(o.gross for o in hits), len(hits), None
+
+
+def sales_facts(out: CampaignEffectOutput) -> list[CampaignFact]:
+    """판매액 근거 숫자 (출처·기간·표본). 모르면 비운다."""
+    s = out.sales
+    if s is None or s.status != "known" or s.period is None or s.baseline is None:
+        return []
+    span = _span_text(out.window_from, out.window_to)
+    p, b = s.period, s.baseline
+
+    def fact(label: str, value: float, sample: int | None, unit: str = "KRW") -> CampaignFact:
+        return CampaignFact(label=label, value=value, unit=unit, period=span, sample=sample)
+
+    rows = [
+        fact("구간 주문 금액 합 (할인 전)", p.gross_krw, p.orders),
+        fact("구간 쿠폰 할인 합", p.discount_krw, p.orders),
+        fact("구간 결제 금액 합", p.paid_krw, p.orders),
+        fact("구간 환불 합", p.refund_krw, p.orders),
+        fact("구간 결제 완료 주문", p.orders, p.orders, unit="건"),
+        fact("기준선 주문 금액 (날 평균)", b.gross_krw, s.baseline_days),
+        fact("증분 판매액 (주문 금액)", s.incremental_gross_krw or 0, s.baseline_days),
+        fact("증분 판매액 하한", s.incremental_low_krw or 0, s.baseline_days),
+        fact("증분 판매액 상한", s.incremental_high_krw or 0, s.baseline_days),
+    ]
+    if s.direct_attributed_krw is not None:
+        rows.append(fact("쿠폰 귀속 판매액", s.direct_attributed_krw, s.direct_orders))
+    return rows
+
+
 async def measure(
     data: CampaignEffectInput,
     connector: Any,
@@ -480,7 +622,7 @@ async def measure(
         actual = await _total(connector, revenue_metric, start, end)
         totals = [await _total(connector, revenue_metric, s.start, s.end) for s in used]
         revenue = judge_revenue(actual, [t for t in totals if t is not None], rule)
-    return CampaignEffectOutput(
+    out = CampaignEffectOutput(
         campaign_id=data.campaign_id,
         window_from=start,
         window_to=end,
@@ -491,7 +633,10 @@ async def measure(
         # 기획이 결과를 기록할 때 잇는 id: 요청 값 그대로 돌려준다 (데이터는 저장하지 않는다)
         insight_id=data.insight_id,
         proposal_id=data.proposal_id,
+        sales=await _sales(connector, data, orders, used, rule),
     )
+    out.facts = sales_facts(out)
+    return out
 
 
 # ---------------------------------------------------------------- 설명 (LLM은 요약 문장만)
@@ -521,7 +666,16 @@ def _facts(out: CampaignEffectOutput) -> dict[str, int | float | str]:
         facts["쿠폰"] = f"확인할 수 없음: {c.unknown_reason}"
     if out.revenue.status == "unknown":
         facts["매출"] = "확인할 수 없음"
+    s = out.sales
+    if s is not None and s.status == "known" and s.incremental_gross_krw is not None:
+        facts["증분 판매액(원)"] = s.incremental_gross_krw
+        facts["판매액 방향"] = SALES_DIRECTION_KO[s.direction or "uncertain"]
+    elif s is not None:
+        facts["판매액"] = f"확인할 수 없음: {s.unknown_reason}"
     return facts
+
+
+SALES_DIRECTION_KO = {"up": "늘었음", "down": "줄었음", "uncertain": "확실하지 않음"}
 
 
 @dataclass(frozen=True)
@@ -596,3 +750,30 @@ async def eval_judge(
             CampaignEffectInput.model_validate(dict(request)), connector, alpha=alpha
         )
     return to_answer(out)
+
+
+def to_sales_answer(out: CampaignEffectOutput) -> dict[str, Any]:
+    """skill 출력 → 매출 채점기 답 모양(`campaign_revenue/score.Answer`)."""
+    s = out.sales
+    if s is None or s.status == "unknown":
+        reason = s.unknown_reason if s is not None else "판매액 칸이 없음"
+        return {"sales": {"status": "unknown", "unknown_reason": reason}}
+    return {"sales": {
+        "status": "known", "direction": s.direction,
+        "incremental_gross_krw": s.incremental_gross_krw,
+        "direct_attributed_krw": s.direct_attributed_krw,
+    }}  # fmt: skip
+
+
+async def eval_sales_judge(
+    request: Mapping[str, Any], transport: httpx.MockTransport, *, alpha: float = DIRECTION_ALPHA
+) -> dict[str, Any]:
+    """매출 채점기(`eval/campaign_revenue/score.py`)가 부르는 판정 함수."""
+    from data_agent.connectors.shop_api import ShopApi, ShopApiConnector
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        connector = ShopApiConnector(ShopApi("http://shop.eval", token="eval", client=client))
+        out = await measure(
+            CampaignEffectInput.model_validate(dict(request)), connector, alpha=alpha
+        )
+    return to_sales_answer(out)
