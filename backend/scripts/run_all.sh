@@ -136,9 +136,6 @@ export DASHBOARD_CORS_ORIGINS="$WEB" FINANCE_CORS_ORIGINS="$WEB" SHOP_CORS_ORIGI
 export SAFETY_CORS_ORIGINS="$WEB" PLANNING_CORS_ORIGINS="$WEB"
 # 화면에서 넣은 형상관리 연결(토큰 포함)을 다시 켜도 남게 저장한다. .data/는 git에 안 올라간다
 export PLANNING_VCS_STORE="$PWD/$DATA/vcs_connections.json"
-# AXcellent GitHub App 개인 키 (운영팀이 한 번 만든 앱, 고객사는 설치만 한다). 앱 ID·슬러그는 .env의
-# DEV_GITHUB_APP_ID·DEV_GITHUB_APP_SLUG. 키 파일이 없으면 화면은 "직접 만든 앱으로 연결"만 보여 준다
-export DEV_GITHUB_APP_KEY_FILE="${DEV_GITHUB_APP_KEY_FILE:-$PWD/$DATA/github_app.pem}"
 # 화면에서 넣은 고객사 API 키(BYOK)도 같은 곳에 저장한다 (커밋하지 않는다)
 export DEV_LLM_KEY_STORE="$PWD/$DATA/llm_key.json"
 # 기획·개발 상태를 서비스 역할마다 파일에 이어 쓴다 (다시 켜도 요청·작업·PR·대화가 남음)

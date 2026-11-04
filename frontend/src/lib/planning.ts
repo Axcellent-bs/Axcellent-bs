@@ -250,6 +250,7 @@ export type VcsAuth = 'token' | 'app'
 export interface VcsConnectionInput {
   id?: string; kind: string; repo: string; base_url?: string; base_branch?: string; token?: string; description?: string; paths?: string[]; mount?: string
   auth?: VcsAuth; app_id?: string; installation_id?: string; private_key?: string
+  detect_branch?: boolean // 브랜치를 비우면 레포 기본 브랜치를 읽어 넣는다 (GitHub)
 }
 export interface VcsTestResult { ok: boolean; code: string | null; message: string; checked_at: string; connection_id: string; inventory?: VcsInventory | null }
 // 연결 대장 (`/vcs/inventory`): 서버 종류·버전·토큰 권한·마지막 확인. 사내 설치형은 패치 기준과 맞춘다
@@ -282,33 +283,6 @@ export const vcsApi = (base: string) => {
     checkAll: () => call<unknown>(base, '/vcs/inventory/check', post({}, 'admin')).then(toInventory),
   }
 }
-
-// ---- GitHub 계정 연결 (dev `/api/planning/vcs/github-account`): 앱 설치 하나 → 레포 자동으로 찾기 → 사람이 켠 레포만 쓴다
-export interface GithubRepo { full_name: string; default_branch: string; private: boolean; enabled: boolean }
-export interface GithubAccount {
-  connected: boolean
-  app_id?: string
-  installation_id?: string
-  base_url?: string
-  key_set?: boolean
-  selection?: string // all · selected
-  permissions?: Record<string, string>
-  repos: GithubRepo[]
-  checked_at?: string
-  error?: string
-  warnings: string[]
-  app?: { configured: boolean; slug: string } // AXcellent 앱(운영팀이 만든 앱)이 서버에 설정돼 있나
-}
-export interface GithubAccountInput { app_id: string; installation_id: string; private_key?: string; base_url?: string }
-export const githubAccountApi = (base: string) => ({
-  get: () => call<GithubAccount>(base, '/vcs/github-account'),
-  save: (b: GithubAccountInput) => call<GithubAccount>(base, '/vcs/github-account', post(b, 'admin')),
-  refresh: () => call<GithubAccount>(base, '/vcs/github-account/refresh', post({}, 'admin')),
-  setRepo: (repo: string, enabled: boolean) => call<GithubAccount>(base, '/vcs/github-account/repos', post({ repo, enabled }, 'admin')),
-  remove: () => call<GithubAccount>(base, '/vcs/github-account/delete', post({}, 'admin')),
-  installUrl: () => call<{ url: string }>(base, '/vcs/github-account/install', { headers: RELAY_TOKEN ? { Authorization: `Bearer ${RELAY_TOKEN}` } : {} }),
-  installed: (installation_id: string, state: string) => call<GithubAccount>(base, '/vcs/github-account/installed', post({ installation_id, state }, 'admin')),
-})
 
 // ---- 요청 작업 코딩 방식 (dev 서비스 `/api/planning/coding-settings`). 회사 설정 + 서버 AI 체험 한도
 export type CodingSetting = 'auto' | 'agent' | 'subscription'

@@ -48,3 +48,17 @@ def test_bad_config_rejected_and_previous_kept() -> None:
     assert c.get("/api/planning/vcs").json()["data"]["kind"] == "mock"
     r = c.post("/api/planning/vcs", json={"kind": "svn"})
     assert r.status_code == 400
+
+
+def test_blank_branch_reads_repo_default_branch(monkeypatch) -> None:
+    from dev_agent.vcs.github import GithubVcsAdapter
+
+    async def fake(self) -> str:
+        return "main"
+
+    monkeypatch.setattr(GithubVcsAdapter, "default_branch", fake)
+    c = TestClient(app)
+    body = {"kind": "github", "repo": "acme/shop", "token": "ghp_x1234567", "detect_branch": True}
+    assert c.post("/api/planning/vcs/connections", json=body).status_code == 200
+    rows = c.get("/api/planning/vcs/connections").json()["data"]
+    assert any(x["repo"] == "acme/shop" and x["base_branch"] == "main" for x in rows)

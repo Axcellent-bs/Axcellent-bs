@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from '@/lib/nav'
-import { DEV_API, codingSettingsApi, githubAccountApi, useMe, vcsApi, type GithubAccount, type CodingStep, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsInventory, type VcsTestResult } from '@/lib/planning'
+import { DEV_API, codingSettingsApi, useMe, vcsApi, type CodingStep, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsInventory, type VcsTestResult } from '@/lib/planning'
 import { UsageBar } from '@/components/dev/coding'
 
 // 개발 도구 연결: 고객사 개발팀이 쓰는 형상관리·CI·배포 도구를 개발·배포 AI(dev)에 잇는 창구.
@@ -15,8 +15,31 @@ const KINDS = [
 const KIND_LABEL: Record<string, string> = Object.fromEntries(KINDS.map((k) => [k.id, k.label]))
 const SOURCE: Record<string, string> = { screen: '이 화면', env: '서버 설정 파일' }
 const PERMISSIONS = ['Contents 읽기·쓰기', 'Pull requests 읽기·쓰기', 'Issues 읽기·쓰기', 'Commit statuses 읽기']
-// 인증 방식. 회사 레포는 조직이 설치하는 GitHub App, 사람 토큰은 개인 레포·시험용
-const AUTHS: { id: VcsAuth; label: string }[] = [{ id: 'app', label: 'GitHub App (조직 설치)' }, { id: 'token', label: '개인 접근 토큰' }]
+// 인증 방식. 기본은 이 레포만 여는 세분화 토큰, 조직이 GitHub App을 쓰면 더 보기에서
+const AUTHS: { id: VcsAuth; label: string }[] = [{ id: 'token', label: '접근 토큰' }, { id: 'app', label: 'GitHub App' }]
+
+/** 레포 주소 붙여 넣기 → 서버·레포. https://github.com/o/n · git@github.com:o/n.git · 사내 설치형 주소 · o/n */
+type RepoAddr = { repo: string; base_url: string; web: string; owner: string; name: string }
+export function parseRepo(raw: string): RepoAddr | null {
+  const s = raw.trim().replace(/\/+$/, '')
+  const m = s.match(/^git@([^:\s]+):([\w.-]+)\/([\w.-]+?)(?:\.git)?$/)
+    ?? s.match(/^(?:https?:\/\/)?([^/\s]+\.[^/\s]+)\/([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/.*)?$/)
+  const short = m ? null : s.match(/^([\w.-]+)\/([\w.-]+?)(?:\.git)?$/)
+  const [host, owner, name] = m ? [m[1].toLowerCase(), m[2], m[3]] : short ? ['github.com', short[1], short[2]] : ['', '', '']
+  if (!owner || !name) return null
+  const h = host.replace(/^www\./, '')
+  const base_url = h === 'github.com' ? '' : h.endsWith('.ghe.com') ? `https://api.${h}` : `https://${h}/api/v3`
+  return { repo: `${owner}/${name}`, base_url, web: `https://${h}`, owner, name }
+}
+
+/** 이 레포용 세분화 토큰 만들기 화면 (이름·만료·권한을 미리 채움. 레포 고르기만 사람이 한다) */
+export function tokenUrl(a: RepoAddr): string {
+  const q = new URLSearchParams({
+    name: `AXcellent ${a.name}`.slice(0, 40), description: `AXcellent 개발 AI · ${a.repo}`, target_name: a.owner,
+    expires_in: '90', contents: 'write', pull_requests: 'write', issues: 'write', statuses: 'read',
+  })
+  return `${a.web}/settings/personal-access-tokens/new?${q}`
+}
 
 // 형상관리 외의 연결 지점. 형상관리 연결로 함께 되는 것과 아직 없는 것을 나눠 보여 준다
 const OTHERS: { name: string; tools: string; state: 'with-vcs' | 'linked' | 'planned'; to?: string }[] = [
@@ -28,9 +51,9 @@ const OTHERS: { name: string; tools: string; state: 'with-vcs' | 'linked' | 'pla
 ]
 
 const api = vcsApi(DEV_API)
-type Form = { id?: string; kind: string; base_url: string; repo: string; base_branch: string; token: string; description: string; paths: string; mount: string; auth: VcsAuth; app_id: string; installation_id: string; private_key: string; key_name: string }
-const EMPTY: Form = { kind: 'github', base_url: '', repo: '', base_branch: 'main', token: '', description: '', paths: '', mount: '', auth: 'app', app_id: '', installation_id: '', private_key: '', key_name: '' }
-const toForm = (c: VcsConnection): Form => ({ id: c.id, kind: c.kind, base_url: c.base_url ?? '', repo: c.repo, base_branch: c.base_branch || 'main', token: '', description: c.description ?? '', paths: c.paths.join(', '), mount: c.mount ?? '', auth: c.auth ?? 'token', app_id: c.app_id ?? '', installation_id: c.installation_id ?? '', private_key: '', key_name: '' })
+type Form = { id?: string; addr: string; kind: string; base_url: string; repo: string; base_branch: string; token: string; description: string; paths: string; mount: string; auth: VcsAuth; app_id: string; installation_id: string; private_key: string; key_name: string }
+const EMPTY: Form = { addr: '', kind: 'github', base_url: '', repo: '', base_branch: '', token: '', description: '', paths: '', mount: '', auth: 'token', app_id: '', installation_id: '', private_key: '', key_name: '' }
+const toForm = (c: VcsConnection): Form => ({ id: c.id, addr: c.repo, kind: c.kind, base_url: c.base_url ?? '', repo: c.repo, base_branch: c.base_branch ?? '', token: '', description: c.description ?? '', paths: c.paths.join(', '), mount: c.mount ?? '', auth: c.auth ?? 'token', app_id: c.app_id ?? '', installation_id: c.installation_id ?? '', private_key: '', key_name: '' })
 // 담당 경로: 쉼표·줄바꿈으로 나눈다
 const splitPaths = (x: string) => x.split(/[,\n]/).map((p) => p.trim()).filter(Boolean)
 const failed = (id: string, message: string): VcsTestResult => ({ ok: false, code: 'unavailable', message, checked_at: new Date().toISOString(), connection_id: id })
@@ -324,8 +347,6 @@ function CodingModeSection({ part }: { part: AiPart }) {
   )
 }
 
-const ghApi = githubAccountApi(DEV_API)
-
 /** 물음표 아이콘: 누르면 옆에 설명 칸이 열린다 (밖을 누르거나 Esc로 닫힘) */
 function Help({ label, children, right }: { label: string; children: ReactNode; right?: boolean }) {
   const [open, setOpen] = useState(false)
@@ -352,187 +373,15 @@ function Help({ label, children, right }: { label: string; children: ReactNode; 
   )
 }
 
-const GH_LINK = 'text-brand-600 underline'
-/** GitHub 연결 전체 순서 (앱 만들기 → 키 → 설치 → 여기 넣기) */
-function GithubGuide() {
-  return (
-    <>
-      <b className="block text-sm text-ink-900">GitHub 연결 순서</b>
-      <ol className="list-decimal space-y-2 pl-4">
-        <li>
-          <b>앱 만들기</b> · <a className={GH_LINK} href="https://github.com/settings/apps/new" target="_blank" rel="noreferrer">github.com/settings/apps/new</a>
-          <table className="mt-1 w-full border-collapse">
-            <tbody>
-              {[
-                ['GitHub App name', '아무 이름'],
-                ['Homepage URL', 'http://localhost:3090'],
-                ['Webhook › Active', '체크 해제'],
-                ['Repository permissions', 'Contents · Pull requests · Issues: Read and write / Commit statuses: Read-only'],
-                ['Where can this app be installed?', 'Only on this account'],
-              ].map(([k, v]) => (
-                <tr key={k} className="border-t border-ink-100"><td className="py-1 pr-2 text-ink-500">{k}</td><td className="py-1">{v}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </li>
-        <li><b>앱 ID · 개인 키</b> · 앱 화면 위 About의 <span className="mono">App ID</span>, 아래 Private keys › <i>Generate a private key</i> → .pem 다운로드</li>
-        <li><b>설치</b> · 왼쪽 Install App › Install › <i>Only select repositories</i>로 레포 고르기 → 주소 <span className="mono">…/installations/<b>숫자</b></span>의 숫자가 설치 ID</li>
-        <li><b>여기 넣기</b> · 앱 ID · 설치 ID · .pem → 저장하고 레포 찾기 → 쓸 레포 <i>사용</i> 켜기</li>
-      </ol>
-      <p className="rounded-md bg-amber-50 px-2 py-1 text-amber-800">.pem은 앱 전체 열쇠 · 넣은 뒤 다운로드 폴더에서 지우기 · 슬랙·깃에 올리지 않기</p>
-    </>
-  )
-}
-
-/** GitHub 연결: 앱 설치 하나를 넣으면 레포를 GitHub에서 찾아오고, 사람이 켠 레포만 개발 AI가 쓴다 */
-function GithubAccountSection() {
-  const [acc, setAcc] = useState<GithubAccount | null>(null)
-  const [form, setForm] = useState({ app_id: '', installation_id: '', base_url: '', key: '', key_name: '' })
-  const [editing, setEditing] = useState(false)
-  const [guide, setGuide] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  useEffect(() => {
-    // GitHub 설치에서 돌아옴(?installation_id=…&state=…): 연결을 끝내고 주소에서 값을 지운다
-    const q = new URLSearchParams(window.location.search)
-    const inst = q.get('installation_id'), state = q.get('state')
-    if (inst && state) {
-      window.history.replaceState(null, '', window.location.pathname)
-      void run(() => ghApi.installed(inst, state))
-      return
-    }
-    ghApi.get().then(setAcc).catch(() => setError('개발 AI에 연결할 수 없음'))
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  // AXcellent 앱이 서버에 있으면 GitHub 설치 화면으로 보낸다 (앱 ID·키를 넣지 않는다)
-  const install = async () => {
-    setBusy(true); setError(null)
-    try { window.location.href = (await ghApi.installUrl()).url } catch (e) { setError((e as Error).message); setBusy(false) }
-  }
-  const platform = !!acc?.app?.configured
-  const run = async (f: () => Promise<GithubAccount>) => {
-    setBusy(true); setError(null)
-    try { setAcc(await f()) } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
-  }
-  const pickKey = (file?: File) => {
-    if (!file) return
-    if (file.size > 16_000) return setError('개인 키 파일이 너무 커요. GitHub App에서 받은 .pem 파일을 골라 주세요.')
-    void file.text().then((text) => {
-      if (!text.includes('PRIVATE KEY')) return setError('GitHub App 개인 키(.pem) 파일이 아니에요.')
-      setError(null); setForm((f) => ({ ...f, key: text, key_name: file.name }))
-    })
-  }
-  const save = (e: FormEvent) => {
-    e.preventDefault()
-    void run(async () => {
-      const r = await ghApi.save({ app_id: form.app_id.trim(), installation_id: form.installation_id.trim(), base_url: form.base_url.trim(), ...(form.key ? { private_key: form.key } : {}) })
-      setEditing(false); setForm((f) => ({ ...f, key: '', key_name: '' }))
-      return r
-    })
-  }
-  const connected = !!acc?.connected
-  const on = acc?.repos.filter((r) => r.enabled).length ?? 0
-  return (
-    <section className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <h2 className="card-title text-lg">GitHub 연결</h2>
-        <button type="button" aria-label="GitHub 연결 순서 도움말" aria-expanded={guide} onClick={() => setGuide((v) => !v)}
-          className={`grid h-5 w-5 place-items-center rounded-full border text-[11px] font-semibold ${guide ? 'border-brand-600 bg-brand-600 !text-white' : 'border-ink-300 text-ink-500 hover:border-brand-600 hover:text-brand-600'}`}>?</button>
-        {acc && <span className={`chip ${connected ? (acc.error ? TONE.bad : TONE.ok) : TONE.wait}`}>{connected ? (acc.error ? '확인 실패' : '연결됨') : '연결 없음'}</span>}
-        {connected && <span className="chip bg-ink-100 text-ink-700">{acc?.selection === 'all' ? '모든 레포에 설치' : '선택한 레포만'}</span>}
-        {connected && <span className="chip bg-ink-100 text-ink-700">사용 {on} / 레포 {acc?.repos.length ?? 0}</span>}
-        <div className="ml-auto flex gap-1.5">
-          {connected && <button type="button" className="btn-ghost" disabled={busy} onClick={() => void run(ghApi.refresh)}>목록 새로 고침</button>}
-          {connected && <button type="button" className="btn-quiet" disabled={busy} onClick={() => { if (window.confirm('GitHub 연결을 끊을까요? 이 연결로 켠 레포도 같이 꺼져요.')) void run(ghApi.remove) }}>연결 끊기</button>}
-          {platform && <button type="button" className="btn-primary px-4" disabled={busy} onClick={() => void install()}>{connected ? '레포 범위 바꾸기' : 'GitHub 연결'}</button>}
-          <button type="button" className={platform ? 'btn-ghost' : 'btn-primary px-4'} disabled={busy} onClick={() => { setEditing((v) => !v); setForm((f) => ({ ...f, app_id: acc?.app_id ?? '', installation_id: acc?.installation_id ?? '', base_url: acc?.base_url ?? '' })) }}>{platform ? '직접 만든 앱으로' : connected ? '수정' : 'GitHub 연결'}</button>
-        </div>
-      </div>
-
-      {guide && <div className="space-y-2 rounded-lg border border-ink-200 p-4 text-xs leading-5 text-ink-700"><GithubGuide /></div>}
-      {acc?.warnings.map((w) => <p key={w} className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{w}</p>)}
-      {acc?.error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{acc.error}</p>}
-
-      {editing && (
-        <form onSubmit={save} className="space-y-3 rounded-xl border border-brand-200 bg-brand-50/40 p-4">
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="space-y-1">
-              <span className="flex items-center gap-1.5 text-xs text-ink-500">앱 ID
-                <Help label="앱 ID">
-                  <b className="block text-ink-900">앱 ID = 내가 만든 GitHub App의 번호</b>
-                  <span className="block">어떤 프로그램인지. 서버가 "나는 이 앱"이라고 밝힐 때 써요.</span>
-                  <span className="block"><a className={GH_LINK} href="https://github.com/settings/apps" target="_blank" rel="noreferrer">github.com/settings/apps</a> › 내 앱 › 위쪽 About의 <span className="mono">App ID</span></span>
-                </Help>
-              </span>
-              <input className="field w-full" inputMode="numeric" placeholder="예: 1234567" value={form.app_id} onChange={(e) => setForm({ ...form, app_id: e.target.value })} aria-label="앱 ID" />
-            </div>
-            <div className="space-y-1">
-              <span className="flex items-center gap-1.5 text-xs text-ink-500">설치 ID
-                <Help label="설치 ID">
-                  <b className="block text-ink-900">설치 ID = 그 앱을 설치한 곳의 번호</b>
-                  <span className="block">어느 계정·조직에 깔았는지. 열어 준 레포도 이 설치에 묶여요. 설치한 곳마다 번호가 달라요.</span>
-                  <span className="block"><a className={GH_LINK} href="https://github.com/settings/installations" target="_blank" rel="noreferrer">github.com/settings/installations</a> › 앱 옆 Configure → 주소 <span className="mono">…/installations/<b>숫자</b></span>의 숫자</span>
-                </Help>
-              </span>
-              <input className="field w-full" inputMode="numeric" placeholder="예: 87654321" value={form.installation_id} onChange={(e) => setForm({ ...form, installation_id: e.target.value })} aria-label="설치 ID" />
-            </div>
-            <div className="space-y-1">
-              <span className="flex items-center gap-1.5 text-xs text-ink-500">개인 키 .pem
-                <Help label="개인 키" right>
-                  <b className="block text-ink-900">개인 키 = 앱임을 증명하는 열쇠 파일</b>
-                  <span className="block">앱 화면 아래 Private keys › Generate a private key → .pem 다운로드</span>
-                  <span className="block text-amber-800">넣은 뒤 다운로드 폴더에서 지우기 · 슬랙·깃에 올리지 않기</span>
-                </Help>
-              </span>
-              <label className="field flex cursor-pointer items-center gap-2 text-sm">
-                <input type="file" accept=".pem,application/x-pem-file" className="sr-only" onChange={(e) => pickKey(e.target.files?.[0])} aria-label="개인 키 파일" />
-                <span className="chip bg-ink-100 text-ink-700">파일</span>
-                <span className="truncate text-ink-500">{form.key_name || (acc?.key_set ? '넣음 · 바꾸려면 다시 고르기' : '파일 고르기')}</span>
-              </label>
-            </div>
-          </div>
-          <input className="field w-full" placeholder="API 주소 (비우면 github.com, 사내 설치형은 https://<주소>/api/v3)" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} aria-label="API 주소" />
-          <div className="flex flex-wrap items-center gap-1.5 text-xs">
-            <span className="text-ink-500">앱 설치: 선택한 레포만 · 권한</span>
-            {PERMISSIONS.map((p) => <span key={p} className="chip bg-ink-100 text-ink-700">{p}</span>)}
-          </div>
-          <div className="flex gap-2">
-            <button className="btn-primary px-5" disabled={busy}>{busy ? '확인 중…' : '저장하고 레포 찾기'}</button>
-            <button type="button" className="btn-ghost" onClick={() => setEditing(false)}>취소</button>
-          </div>
-        </form>
-      )}
-
-      {connected && !!acc?.repos.length && (
-        <ul className="divide-y divide-ink-100 rounded-xl border border-ink-100">
-          {acc.repos.map((r) => (
-            <li key={r.full_name} className="flex flex-wrap items-center gap-2 px-4 py-3">
-              <span className="mono text-sm">{r.full_name}</span>
-              <span className="chip bg-ink-100 text-ink-700">{r.default_branch}</span>
-              {!r.private && <span className="chip bg-amber-50 text-amber-800">공개</span>}
-              <label className="ml-auto flex cursor-pointer items-center gap-2 text-sm">
-                <input type="checkbox" checked={r.enabled} disabled={busy} onChange={(e) => void run(() => ghApi.setRepo(r.full_name, e.target.checked))} />
-                사용
-              </label>
-            </li>
-          ))}
-        </ul>
-      )}
-      {connected && acc?.repos.length === 0 && !acc.error && <p className="text-sm text-ink-500">설치 범위에 레포 없음</p>}
-      {error && <p className="text-sm text-red-700">{error}</p>}
-    </section>
-  )
-}
-
 function Loading({ error }: { error: string | null }) {
   return <p className="text-sm text-ink-500">{error ?? '불러오는 중…'}</p>
 }
 
 // 연결 창 왼쪽 메뉴 (설정 창처럼 묶음 › 항목). 고른 항목만 오른쪽에 보인다
 type AiPart = 'mode' | 'all'
-type PanelItem = 'github' | 'repos' | 'others' | 'ai'
+type PanelItem = 'repos' | 'others' | 'ai'
 const PANEL_GROUPS: { label: string; items: { id: PanelItem; label: string }[] }[] = [
   { label: '형상관리', items: [
-    { id: 'github', label: 'GitHub 연결' },
     { id: 'repos', label: '레포 연결' },
     { id: 'others', label: '다른 개발 도구' },
   ] },
@@ -541,12 +390,10 @@ const PANEL_GROUPS: { label: string; items: { id: PanelItem; label: string }[] }
 const PANEL_IDS = PANEL_GROUPS.flatMap((g) => g.items.map((i) => i.id))
 const TAB_KEY = 'ax.connections.item'
 const readTab = (): PanelItem => {
-  // GitHub 설치에서 돌아오면(?installation_id=…) GitHub 연결 항목을 연다
-  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('installation_id')) return 'github'
   try {
     const v = localStorage.getItem(TAB_KEY) as PanelItem | null
-    return v && PANEL_IDS.includes(v) ? v : 'github'
-  } catch { return 'github' }
+    return v && PANEL_IDS.includes(v) ? v : 'repos'
+  } catch { return 'repos' }
 }
 
 /** 연결 창: 왼쪽 메뉴(형상관리·AI 코딩) + 오른쪽 내용. 개발·배포 화면의 톱니바퀴 창과 시스템 관리 화면이 같이 쓴다 */
@@ -596,7 +443,7 @@ export function DevToolsPanel({ title, onClose }: { title?: string; onClose?: ()
     if (!form) return
     const editing = list?.find((c) => c.id === form.id)
     const repo = form.repo.trim()
-    if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return setError('레포는 owner/name 형태로 넣어 주세요.')
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return setError('레포 주소를 넣어 주세요. 예: https://github.com/owner/name')
     const app = form.auth === 'app'
     if (app) {
       if (!/^\d+$/.test(form.app_id.trim()) || !/^\d+$/.test(form.installation_id.trim())) return setError('앱 ID와 설치 ID는 숫자로 넣어 주세요.')
@@ -605,9 +452,10 @@ export function DevToolsPanel({ title, onClose }: { title?: string; onClose?: ()
     setSaving(true)
     setError(null)
     try {
-      const { paths, token, private_key, key_name: _name, app_id, installation_id, ...rest } = form
+      const { paths, token, private_key, key_name: _name, app_id, installation_id, addr: _addr, ...rest } = form
+      const branch = form.base_branch.trim()
       const next = await api.save({
-        ...rest, repo, base_url: form.base_url.trim(), base_branch: form.base_branch.trim() || 'main',
+        ...rest, repo, base_url: form.base_url.trim(), base_branch: branch, detect_branch: !branch && form.kind === 'github',
         description: form.description.trim(), paths: splitPaths(paths), mount: form.mount.trim(),
         ...(app ? { app_id: app_id.trim(), installation_id: installation_id.trim(), ...(private_key ? { private_key } : {}) } : token ? { token } : {}),
       })
@@ -655,57 +503,85 @@ export function DevToolsPanel({ title, onClose }: { title?: string; onClose?: ()
   const editing = form?.id ? list?.find((c) => c.id === form.id) : undefined
 
   // 연결 추가는 목록 맨 위, 수정은 그 연결 카드 바로 아래에 연다
+  const addr = form ? parseRepo(form.addr) : null
+  const setAddr = (raw: string) => setForm((f) => {
+    if (!f) return f
+    const p = parseRepo(raw)
+    return p ? { ...f, addr: raw, kind: 'github', repo: p.repo, base_url: p.base_url } : { ...f, addr: raw, repo: raw.trim() }
+  })
+  const appAuth = form?.auth === 'app'
   const formEl = form && (
           <form onSubmit={save} className="space-y-3 rounded-xl border border-brand-200 bg-brand-50/40 p-4">
-            <h3 className="font-medium">{editing ? `${editing.repo} 수정` : '연결 추가'}</h3>
-            <div className="grid gap-3 md:grid-cols-[1fr_2fr]">
-              <select className="field" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })} aria-label="형상관리 종류">
-                {KINDS.map((k) => <option key={k.id} value={k.id} disabled={!k.ready}>{k.label}{k.ready ? '' : ' — 준비 중'}</option>)}
-              </select>
-              <input className="field" placeholder="API 주소 (비우면 github.com, 사내 설치형은 https://<주소>/api/v3)" value={form.base_url}
-                onChange={(e) => setForm({ ...form, base_url: e.target.value })} aria-label="API 주소" />
+            <h3 className="font-medium">{editing ? `${editing.repo} 수정` : '새 레포'}</h3>
+            <div className="space-y-1">
+              <label htmlFor="repo-addr" className="text-xs text-ink-500">레포 주소</label>
+              <div className="flex flex-wrap items-center gap-2">
+                <input id="repo-addr" className="field min-w-0 flex-1" placeholder="https://github.com/owner/name" value={form.addr} onChange={(e) => setAddr(e.target.value)} autoFocus={!editing} />
+                {addr && <span className="chip bg-ink-100 text-ink-700">{addr.base_url ? new URL(addr.web).host : 'github.com'} · {addr.repo}</span>}
+              </div>
             </div>
-            <div className="grid gap-3 md:grid-cols-3">
-              <input className="field" placeholder="레포 owner/name" value={form.repo} onChange={(e) => setForm({ ...form, repo: e.target.value })} aria-label="레포" />
-              <input className="field" placeholder="병합 대상 브랜치" value={form.base_branch} onChange={(e) => setForm({ ...form, base_branch: e.target.value })} aria-label="병합 대상 브랜치" />
-              {form.auth === 'token' && (
-                <input className="field" type="password" autoComplete="off" placeholder={editing?.token_set ? '접근 토큰 (비우면 기존 토큰 유지)' : '접근 토큰'} value={form.token}
-                  onChange={(e) => setForm({ ...form, token: e.target.value })} aria-label="접근 토큰" />
-              )}
-            </div>
-            {form.kind === 'github' && (
-              <div className="space-y-2">
-                <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="인증 방식">
-                  {AUTHS.map((a) => (
-                    <button key={a.id} type="button" role="radio" aria-checked={form.auth === a.id} onClick={() => setForm({ ...form, auth: a.id })}
-                      className={`chip py-1 ${form.auth === a.id ? 'bg-brand-600 !text-white' : 'bg-ink-100 text-ink-700'}`}>{a.label}</button>
-                  ))}
+            {!appAuth && (
+              <div className="space-y-1">
+                <span className="flex items-center gap-1.5 text-xs text-ink-500">접근 토큰
+                  <Help label="접근 토큰">
+                    <b className="block text-ink-900">이 레포만 여는 토큰</b>
+                    <ol className="list-decimal space-y-1 pl-4">
+                      <li><i>토큰 만들기</i> → GitHub 화면 (이름·만료 90일·권한 채워짐)</li>
+                      <li>Repository access › <i>Only select repositories</i> › {addr?.repo ?? '이 레포'}</li>
+                      <li><i>Generate token</i> → 복사 → 여기 붙여 넣기</li>
+                    </ol>
+                    <span className="flex flex-wrap gap-1">{PERMISSIONS.map((p) => <span key={p} className="chip bg-ink-100 text-ink-700">{p}</span>)}</span>
+                    <span className="block text-amber-800">조직 레포 · 조직 관리자 승인 필요할 수 있음</span>
+                  </Help>
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  <input className="field min-w-0 flex-1" type="password" autoComplete="off" placeholder={editing?.token_set ? `${editing.token_hint ?? ''} · 비우면 그대로` : 'github_pat_…'} value={form.token}
+                    onChange={(e) => setForm({ ...form, token: e.target.value })} aria-label="접근 토큰" />
+                  <a className={`btn-ghost ${addr ? '' : 'pointer-events-none opacity-50'}`} href={addr ? tokenUrl(addr) : undefined} target="_blank" rel="noreferrer" aria-disabled={!addr}>토큰 만들기</a>
                 </div>
-                {form.auth === 'app' && (
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <input className="field" inputMode="numeric" placeholder="앱 ID (App ID)" value={form.app_id} onChange={(e) => setForm({ ...form, app_id: e.target.value })} aria-label="앱 ID" />
-                    <input className="field" inputMode="numeric" placeholder="설치 ID (Installation ID)" value={form.installation_id} onChange={(e) => setForm({ ...form, installation_id: e.target.value })} aria-label="설치 ID" />
-                    <label className="field flex cursor-pointer items-center gap-2 text-sm">
-                      <input type="file" accept=".pem,application/x-pem-file" className="sr-only" onChange={(e) => pickKey(e.target.files?.[0])} aria-label="개인 키 파일" />
-                      <span className="chip bg-ink-100 text-ink-700">개인 키 .pem</span>
-                      <span className="truncate text-ink-500">{form.key_name || (editing?.key_set ? '넣음 · 바꾸려면 다시 고르기' : '파일 고르기')}</span>
-                    </label>
-                  </div>
-                )}
               </div>
             )}
-            <div className="grid gap-3 md:grid-cols-2">
-              <input className="field" placeholder="설명 (예: 쇼핑몰 웹)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} aria-label="설명" />
-              <textarea className="field" rows={2} placeholder="담당 경로 (예: shop-web/, src/)" value={form.paths} onChange={(e) => setForm({ ...form, paths: e.target.value })} aria-label="담당 경로" />
-              <input className="field md:col-span-2" placeholder="회사 코드 위치 (예: shop-web/ · 레포가 회사 코드의 한 폴더일 때. 비우면 레포 루트)" value={form.mount} onChange={(e) => setForm({ ...form, mount: e.target.value })} aria-label="회사 코드 위치" />
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="text-ink-500">{form.auth === 'app' ? '앱 권한 (설치할 때 이 레포만 고르기)' : '토큰 권한 (이 레포만)'}</span>
-              {PERMISSIONS.map((p) => <span key={p} className="chip bg-ink-100 text-ink-700">{p}</span>)}
-            </div>
+            <details className="group" open={appAuth || !!editing?.paths.length || !!editing?.mount}>
+              <summary className="cursor-pointer select-none text-xs text-ink-500">더 보기 · 브랜치 · 인증 · 담당 경로</summary>
+              <div className="mt-3 space-y-3">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <select className="field" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })} aria-label="형상관리 종류">
+                    {KINDS.map((k) => <option key={k.id} value={k.id} disabled={!k.ready}>{k.label}{k.ready ? '' : ' — 준비 중'}</option>)}
+                  </select>
+                  <input className="field" placeholder="병합 대상 브랜치 (비우면 레포 기본 브랜치)" value={form.base_branch} onChange={(e) => setForm({ ...form, base_branch: e.target.value })} aria-label="병합 대상 브랜치" />
+                  <input className="field" placeholder="API 주소 (주소에서 자동)" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} aria-label="API 주소" />
+                </div>
+                {form.kind === 'github' && (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="인증 방식">
+                      {AUTHS.map((a) => (
+                        <button key={a.id} type="button" role="radio" aria-checked={form.auth === a.id} onClick={() => setForm({ ...form, auth: a.id })}
+                          className={`chip py-1 ${form.auth === a.id ? 'bg-brand-600 !text-white' : 'bg-ink-100 text-ink-700'}`}>{a.label}</button>
+                      ))}
+                    </div>
+                    {appAuth && (
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <input className="field" inputMode="numeric" placeholder="앱 ID (App ID)" value={form.app_id} onChange={(e) => setForm({ ...form, app_id: e.target.value })} aria-label="앱 ID" />
+                        <input className="field" inputMode="numeric" placeholder="설치 ID (Installation ID)" value={form.installation_id} onChange={(e) => setForm({ ...form, installation_id: e.target.value })} aria-label="설치 ID" />
+                        <label className="field flex cursor-pointer items-center gap-2 text-sm">
+                          <input type="file" accept=".pem,application/x-pem-file" className="sr-only" onChange={(e) => pickKey(e.target.files?.[0])} aria-label="개인 키 파일" />
+                          <span className="chip bg-ink-100 text-ink-700">개인 키 .pem</span>
+                          <span className="truncate text-ink-500">{form.key_name || (editing?.key_set ? '넣음 · 바꾸려면 다시 고르기' : '파일 고르기')}</span>
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className="grid gap-3 md:grid-cols-2">
+                  <input className="field" placeholder="설명 (예: 쇼핑몰 웹)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} aria-label="설명" />
+                  <textarea className="field" rows={2} placeholder="담당 경로 (예: shop-web/, src/)" value={form.paths} onChange={(e) => setForm({ ...form, paths: e.target.value })} aria-label="담당 경로" />
+                  <input className="field md:col-span-2" placeholder="회사 코드 위치 (예: shop-web/ · 레포가 회사 코드의 한 폴더일 때. 비우면 레포 루트)" value={form.mount} onChange={(e) => setForm({ ...form, mount: e.target.value })} aria-label="회사 코드 위치" />
+                </div>
+              </div>
+            </details>
             {error && <p className="text-sm text-red-700">{error}</p>}
             <div className="flex gap-2">
-              <button className="btn-primary px-5" disabled={saving || offline || !kindReady}>{saving ? '저장 중…' : '저장'}</button>
+              <button className="btn-primary px-5" disabled={saving || offline || !kindReady}>{saving ? '연결 중…' : editing ? '저장' : '연결'}</button>
               <button type="button" className="btn-ghost" onClick={() => { setForm(null); setError(null) }}>취소</button>
             </div>
           </form>
@@ -729,7 +605,7 @@ export function DevToolsPanel({ title, onClose }: { title?: string; onClose?: ()
       </nav>
       <div className={`relative min-w-0 flex-1 p-6 ${onClose ? 'overflow-y-auto pt-12' : ''}`}>
       {onClose && <button className="btn-quiet absolute right-3 top-3 px-2 py-1" onClick={onClose} aria-label="닫기">✕</button>}
-      {tab === 'ai' ? <CodingModeSection part="all" /> : tab === 'github' ? <GithubAccountSection /> : tab === 'repos' ? (
+      {tab === 'ai' ? <CodingModeSection part="all" /> : tab === 'repos' ? (
       <section className="space-y-4">
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="card-title text-lg">레포 연결</h2>
@@ -738,7 +614,7 @@ export function DevToolsPanel({ title, onClose }: { title?: string; onClose?: ()
           {offline && <span className="chip bg-amber-50 text-amber-700">개발·배포 AI에 연결할 수 없음</span>}
           {!!list?.length && <button type="button" className="btn-ghost ml-auto" onClick={checkAll} disabled={checking || offline}>{checking ? '점검 중…' : '보안 점검'}</button>}
           <button type="button" className={`btn-primary px-4 ${list?.length ? '' : 'ml-auto'}`} disabled={offline || (!!form && !form.id)}
-            onClick={() => { setForm({ ...EMPTY }); setError(null) }}>연결 추가</button>
+            onClick={() => { setForm({ ...EMPTY }); setError(null) }}>레포 연결</button>
         </div>
 
         {form && !form.id && formEl}

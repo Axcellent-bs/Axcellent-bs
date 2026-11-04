@@ -183,6 +183,11 @@ class GithubVcsAdapter:
         host = urlparse(self.base_url).hostname or ""
         return host == "api.github.com" or host.endswith(".ghe.com")
 
+    async def default_branch(self) -> str:
+        """레포 기본 브랜치 (`GET /repos/{repo}`의 default_branch). 쓰기 없음."""
+        body = await self._call("GET", "")
+        return str((body or {}).get("default_branch") or "") if isinstance(body, dict) else ""
+
     async def server_info(self) -> ServerInfo:
         """서버 종류·버전과 토큰 권한을 읽는다 (쓰기 없음).
 
