@@ -144,6 +144,7 @@ SERVICES: tuple[Service, ...] = (
             "answer_planning_question",
             "campaign_effect",
             "trend_age",
+            "trend_insight_brief",
         ),
         "데이터 분석",
     ),
