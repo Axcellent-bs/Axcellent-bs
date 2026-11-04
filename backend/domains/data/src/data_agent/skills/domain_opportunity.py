@@ -313,6 +313,23 @@ class OpportunityResult:
 PER_SEED = 2  # 카드에서 씨앗 하나가 차지할 수 있는 하위 주제 수
 
 
+def per_seed[T](order: Sequence[T], limit: int, seed_of: Callable[[T], str]) -> list[T]:
+    """순서대로 씨앗마다 PER_SEED개까지 고르고, 모자라면 남은 것으로 채운다."""
+    count: dict[str, int] = {}
+    ranked: list[T] = []
+    for t in order:
+        if count.get(seed_of(t), 0) < PER_SEED and len(ranked) < limit:
+            ranked.append(t)
+            count[seed_of(t)] = count.get(seed_of(t), 0) + 1
+    ranked += [t for t in order if t not in ranked][: limit - len(ranked)]
+    return ranked
+
+
+def topics_of_pool(pool: Sequence[Topic], limit: int) -> list[Topic]:
+    """거른 뒤 남은 후보에서 다시 씨앗마다 상한을 지켜 카드 수만큼."""
+    return per_seed(pool, limit, lambda t: t.seed)
+
+
 @dataclass(frozen=True)
 class Topic:
     """카드 하나의 주제: 하위 주제(넓히기 결과) 또는 씨앗 키워드(하위 주제가 없을 때)."""
@@ -335,13 +352,7 @@ def topics_of(
     """
     if subtopics is not None and subtopics.subtopics:
         order = sorted(subtopics.subtopics, key=lambda t: (-t.videos, t.name))
-        count: dict[str, int] = {}
-        ranked = []
-        for t in order:
-            if count.get(t.seed_keyword, 0) < PER_SEED and len(ranked) < limit:
-                ranked.append(t)
-                count[t.seed_keyword] = count.get(t.seed_keyword, 0) + 1
-        ranked += [t for t in order if t not in ranked][: limit - len(ranked)]
+        ranked = per_seed(order, limit, lambda t: t.seed_keyword)
         return [
             Topic(
                 t.name,
@@ -387,11 +398,19 @@ async def make_opportunities(
         return OpportunityResult([], f"도메인 프로필이 없음 ({profile.reason})", None, queries)
     if plan.status != "known":
         return OpportunityResult([], f"수집 계획이 없음 ({plan.reason})", None, queries)
-    topics = topics_of(profile, plan, subtopics, config.max_cards)
-    if not topics:
+    # 후보를 넉넉히 뽑아 분류부터 하고(광고 재료가 아닌 것 빼기), 남은 것에서 카드 수만큼
+    pool = topics_of(profile, plan, subtopics, config.max_cards * 3)
+    if not pool:
         return OpportunityResult([], "하위 주제도 계획에 들어간 씨앗 키워드도 없음", plan.plan_id,
                                  queries)  # fmt: skip
-    from_subtopics = topics[0].axis is not None
+    from_subtopics = pool[0].axis is not None
+    try:  # 분류 (광고 재료 거르기·숏츠 적합도용, 저장된 분류는 다시 묻지 않음)
+        cats = await classify([t.name for t in pool])
+    except Exception:  # 분류를 못 하면 거르지 못하고 적합도는 불확실
+        cats = {}
+    skipped = not_material(pool, cats, env)
+    kept = [t for t in pool if t.name not in skipped]
+    topics = topics_of_pool(kept, config.max_cards)
     names = [t.name for t in topics]
     by_item = {i.source_id: i for i in plan.items}
     ready = {s.source_id for s in sources.sources if s.status == "available" and s.approved}
@@ -412,19 +431,11 @@ async def make_opportunities(
             age_why = "연령대 값을 받지 못함"
         except Exception as error:  # 연령대는 근거 하나라 실패해도 카드는 만든다
             age_why = f"연령대를 읽지 못함 ({type(error).__name__})"
-    # 분류 (숏츠 적합도용)
-    try:
-        cats = await classify(names)
-    except Exception:  # 분류를 못 하면 적합도는 불확실
-        cats = {}
     seeds = {_n(s.keyword): s for s in profile.seed_keywords}
     products = {p.product_id: p for p in catalog_products}
     cards: list[DomainOpportunity] = []
-    skipped = not_material(topics, cats, env)
     for topic in topics:
         k = topic.name
-        if k in skipped:
-            continue
         seed = seeds.get(_n(topic.seed))
         consumption: list[OpportunityEvidence] = []
         for item in plan.items:
