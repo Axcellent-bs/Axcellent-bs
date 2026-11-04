@@ -1,23 +1,22 @@
 import { useState, type ReactNode } from "react";
-import { Chip, Empty, Panel, TONE, Waiting } from "@/components/finance/bits";
+import { Empty, Panel, TONE, Waiting } from "@/components/finance/bits";
 import { okEvidence, type SkillState } from "@/components/data/useSkill";
-import { Basis, Sources, VideoLinks, videoUrl } from "@/components/data/Sources";
+import { Sources, videoUrl } from "@/components/data/Sources";
 import { DATA_SERVER, type PopularCategory, type PopularTopic, type PopularVideo, type PromoConceptsOutput, type TrendPopularOutput } from "@/lib/data";
 
-// 트렌드 1단계(감지) 위쪽: 요약 카드 3개 + 카테고리 버튼.
-// - 지금 인기는 trend_popular(계약 TrendPopularOutput), 재료·시즌은 promo_concepts(계약 PromoConceptsOutput) 응답 그대로다.
-//   두 응답은 트렌드 화면(TrendScan)이 한 번 받아 2단계 기획안과 같이 쓴다
-// - 요약 카드: 오늘 가장 큰 화제(지금 인기 1위와 근거) · 기획안에 쓸 수 있는 트렌드 수(뺀 수와 서버 이유) · 다가오는 시즌(시즌 재료).
-//   값이 없으면 그 카드에 서버 이유
-// - 카테고리는 버튼으로 하나만 펼친다(서버가 준 순서). 고른 칸만 그리고, 다른 칸은 버튼을 누를 때 그린다
-// - 고른 칸: 뜨는 주제 칩 + 조회수 높은 영상(순위·썸네일 자리·제목·채널·조회수). 썸네일은 계약에 없어 자리만 둔다
-// - 주제 칩 색: 기획안 재료로 쓴 주제 = 초록, 상표·실존 이름 주의 = 노랑, 재료에서 뺀 주제 = 회색 + 서버 이유,
-//   기획안이 보지 않은 주제 = 흰색. 숫자는 서버 값만, 없으면(null) 그 줄을 뺀다
-// - 근거: 주제마다 어디서 왔는지(YouTube 인기 차트 영상 링크·Google 인기 검색어 순위·조회수 스냅샷 비교),
-//   영상마다 출처(인기 차트 / 카테고리 검색 보충)와 올린 날, 패널 맨 아래 응답이 부른 API 목록(evidence.queries)
+// 트렌드 1단계(감지): "숏츠를 보게" (v2 시안 ① 보드). trend_popular(계약 TrendPopularOutput) 응답 그대로.
+// - 맨 위 한 줄: 오늘 가장 큰 화제 = 지금 인기 1위(items[0].keyword) + YouTube 인기 스냅샷 시각
+// - 필터: 카테고리 칩(서버 순서, 개수 = 그 칸 영상 수) · 정렬(조회수 / 시간당 조회 / 구독자 대비 배수). 정렬은 받은 값으로만, 값이 없는 영상은 뒤로
+// - 많이 붙는 태그: 그 칸 주제 중 YouTube 태그에서 나온 것(origins에 youtube_tag)만, 서버 이름 그대로
+// - 영상 카드 그리드: 썸네일 자리(계약에 썸네일 주소가 없어 회색 자리) · 순위 · 제목 2줄 · 채널 · 큰 조회수 · 시간당·구독자 대비 한 줄
+//   · 칩 하나(광고 재료 가능 / 실존 인물·상표 주의 / 광고에 안 씀). 카드를 누르면 YouTube 새 탭
+// - 영상 = 그 칸 주제들의 영상(videos, 주제 순서) + 카테고리 조회수 상위 영상(top_videos). 같은 영상은 한 번만.
+//   칩은 주제에 붙은 영상만 그 주제 판정으로 (top_videos는 주제가 없어 칩을 그리지 않는다)
+// - 칩 판정(materialOf): 기획안 재료에서 뺀 주제·회사 추천 안 함 분류 = 광고에 안 씀, 실존 이름·상표 = 주의, 재료로 쓴 주제 = 가능
 
 const num = (v: number | null | undefined) =>
   typeof v === "number" && Number.isFinite(v) ? v.toLocaleString("ko-KR", { maximumFractionDigits: 0 }) : null;
+const COMPACT = new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 });
 const TIME = new Intl.DateTimeFormat("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 const when = (iso: string | null) => (iso ? TIME.format(new Date(iso)) : null);
 const NO_REASON = "서버가 이유를 주지 않았어요";
@@ -33,18 +32,18 @@ export function evidenceOf(t: PopularTopic): string[] {
   return out;
 }
 
-// ------------------------------------------------------------------- 재료 판정 (칩 색)
+// ------------------------------------------------------------------- 재료 판정 (칩)
 
 type MaterialKind = "ok" | "caution" | "excluded" | "none";
 export type Material = { kind: MaterialKind; reason?: string };
-const MATERIAL: Record<MaterialKind, { chip: string; legend: string }> = {
-  ok: { chip: TONE.ok, legend: "기획안 재료" },
-  caution: { chip: TONE.warn, legend: "상표·실존 이름 주의" },
-  excluded: { chip: TONE.muted, legend: "재료에서 뺌 (이유)" },
-  none: { chip: "bg-surface text-ink-700 ring-1 ring-ink-100", legend: "기획안이 보지 않은 주제" },
+/** 영상 카드 칩 (none = 기획안이 보지 않은 주제라 칩을 그리지 않는다) */
+const MATERIAL: Record<Exclude<MaterialKind, "none">, { chip: string; label: string }> = {
+  ok: { chip: TONE.ok, label: "광고 재료 가능" },
+  caution: { chip: TONE.warn, label: "실존 인물·상표 주의" },
+  excluded: { chip: TONE.muted, label: "광고에 안 씀" },
 };
 
-/** 이름(대표·별칭)이 promo_concepts 재료·뺀 목록, trend_popular 표시와 맞는지로 칩 색을 정한다 */
+/** 이름(대표·별칭)이 promo_concepts 재료·뺀 목록, trend_popular 표시와 맞는지로 판정한다 */
 export function materialOf(names: string[], promo: PromoConceptsOutput | null, topic?: PopularTopic | null): Material {
   const keys = names.map(norm);
   const skipped = promo?.skipped_trends?.find((s) => keys.includes(norm(s.name)));
@@ -57,123 +56,6 @@ export function materialOf(names: string[], promo: PromoConceptsOutput | null, t
   return { kind: "none" };
 }
 
-function TopicChip({ t, promo }: { t: PopularTopic; promo: PromoConceptsOutput | null }) {
-  const m = materialOf([t.keyword, ...t.aliases], promo, t);
-  const ev = evidenceOf(t);
-  return (
-    <li className={`chip max-w-full text-sm ${MATERIAL[m.kind].chip}`} title={[MATERIAL[m.kind].legend, m.reason, ...ev].filter(Boolean).join(" · ")}>
-      <span className="font-semibold">{t.keyword}</span>
-      {/* 주의 이름(실존 인물·팀·상표)은 칩에 마우스를 올리면 보인다 */}
-      {m.kind === "caution" && <span className="ml-1 text-xs">· 주의</span>}
-      {m.kind === "excluded" && m.reason && <span className="ml-1 truncate text-xs">· {m.reason}</span>}
-    </li>
-  );
-}
-
-// ------------------------------------------------------------------- 요약 카드 3개
-
-function Card({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <section aria-label={label} className="card flex min-w-0 flex-col gap-2 p-4">
-      <p className="panel-title">{label}</p>
-      {children}
-    </section>
-  );
-}
-
-function Pending<T>({ s, what }: { s: SkillState<T>; what: string }) {
-  if (s.kind === "loading") return <p className="text-sm text-ink-500" aria-live="polite">{what} 받는 중…</p>;
-  if (s.kind === "failed") return <p className="text-sm text-amber-700">{what}: 받지 못했어요. {s.reason}</p>;
-  return null;
-}
-
-/** 서버 이유를 묶어 개수와 함께 (같은 문장끼리) */
-function reasonCounts(list: { reason: string }[]): { reason: string; count: number }[] {
-  const m = new Map<string, number>();
-  for (const x of list) m.set(x.reason, (m.get(x.reason) ?? 0) + 1);
-  return [...m.entries()].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count);
-}
-
-export function TrendSummary({ popular, promo }: { popular: SkillState<TrendPopularOutput>; promo: SkillState<PromoConceptsOutput> }) {
-  const pop = popular.kind === "ok" ? popular.out : null;
-  const pro = promo.kind === "ok" ? promo.out : null;
-  const top = pop?.items[0] ?? null;
-  const usable = pro?.trends.filter((t) => t.kind === "popular") ?? [];
-  const seasons = pro?.trends.filter((t) => t.kind === "season") ?? [];
-  const skipped = pro?.skipped_trends ?? [];
-  const reasons = reasonCounts(skipped);
-  return (
-    <div className="grid gap-3 md:grid-cols-3">
-      <Card label="오늘 가장 큰 화제">
-        <Pending s={popular} what="지금 인기" />
-        {pop && (top ? (
-          <>
-            <p className="flex flex-wrap items-center gap-2 text-xl font-bold text-ink-900">
-              {top.keyword}
-              <Chip label={categoryName(top.topic_category)} tone={TONE.info} />
-            </p>
-            <p className="text-sm text-ink-700">지금 인기 1위 · {evidenceOf(top).join(" · ") || "근거 숫자를 받지 못했어요"}</p>
-            {top.video_ids.length > 0 && <p className="text-xs text-ink-700">YouTube 인기 차트 영상 · <VideoLinks ids={top.video_ids} titles={videoTitles(pop)} max={2} /></p>}
-            {top.real_entity === true && <p className="text-xs text-amber-700">실존 이름이 든 주제예요{top.entity_names?.length ? ` (${top.entity_names.join(", ")})` : ""}</p>}
-          </>
-        ) : <p className="text-sm text-ink-500">{pop.empty_reason ?? NO_REASON}</p>)}
-      </Card>
-
-      <Card label="기획안에 쓸 수 있는 트렌드">
-        <Pending s={promo} what="기획안 재료" />
-        {pro && (pro.popular_status === "unknown" && usable.length === 0 ? (
-          <p className="text-sm text-amber-700">{pro.popular_reason ?? NO_REASON}</p>
-        ) : (
-          <>
-            <p className="text-xl font-bold text-ink-900">{usable.length}개 <span className="text-sm font-normal text-ink-500">· 뺀 주제 {skipped.length}개</span></p>
-            {usable.length > 0 && (
-              <ul className="flex flex-wrap gap-1.5">
-                {usable.map((t) => <li key={t.name} className={`chip text-sm ${t.ip_risk ? TONE.warn : TONE.ok}`}>{t.name}</li>)}
-              </ul>
-            )}
-            {reasons.length > 0 && (
-              <ul className="space-y-0.5 text-xs text-ink-500">
-                {reasons.slice(0, 2).map((r) => <li key={r.reason} className="truncate" title={r.reason}>뺀 이유 · {r.reason} ({r.count}개)</li>)}
-                {reasons.length > 2 && <li>그 밖의 이유 {reasons.length - 2}가지</li>}
-              </ul>
-            )}
-          </>
-        ))}
-      </Card>
-
-      <Card label="다가오는 시즌">
-        <Pending s={promo} what="시즌 재료" />
-        {pro && (seasons.length > 0 ? (
-          <ul className="space-y-1">
-            {seasons.map((t) => (
-              <li key={t.name}>
-                <span className="chip bg-violet-50 text-sm font-semibold text-violet-700">{t.name}</span>
-                {t.detail && <p className="mt-0.5 text-xs text-ink-700">{t.detail}</p>}
-              </li>
-            ))}
-          </ul>
-        ) : <p className="text-sm text-ink-500">시즌 재료가 없어요. {pro.season_reason ?? NO_REASON}</p>)}
-      </Card>
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------- 카테고리 버튼 + 고른 칸
-
-/** 화면 칸 하나. legacy = 예전 응답을 화면이 주제 분류별로 묶은 칸(순위는 전체 순위) */
-type Cell = { category: string; items: PopularTopic[]; shortage_reason: string | null; top_videos?: PopularVideo[]; top_videos_reason?: string | null; legacy?: boolean };
-
-function cellsOf(out: TrendPopularOutput): Cell[] {
-  if (out.by_category?.length) return out.by_category.map((c: PopularCategory) => ({ ...c }));
-  const groups = new Map<string, PopularTopic[]>();
-  for (const t of out.items) groups.set(categoryName(t.topic_category), [...(groups.get(categoryName(t.topic_category)) ?? []), t]);
-  return [...groups.entries()].map(([category, items]) => ({ category, items, shortage_reason: null, legacy: true }));
-}
-
-const DAY = new Intl.DateTimeFormat("ko-KR", { month: "numeric", day: "numeric" });
-/** 영상 출처 (서버 source) */
-const VIDEO_SOURCE: Record<string, string> = { chart: "YouTube 인기 차트", search: "YouTube 카테고리 검색 보충" };
-
 /** 응답 안 모든 칸의 영상 id → 제목 (근거 링크 글자용) */
 export function videoTitles(out: TrendPopularOutput | null): Map<string, string | null> {
   const m = new Map<string, string | null>();
@@ -184,134 +66,102 @@ export function videoTitles(out: TrendPopularOutput | null): Map<string, string 
   return m;
 }
 
-/** 영상 하나의 근거 숫자 글자 (서버 값이 있는 것만) */
-function videoFacts(v: PopularVideo): string[] {
-  const pct = (x: number) => `${(x * 100).toLocaleString("ko-KR", { maximumFractionDigits: 2 })}%`;
-  const out: string[] = [];
-  if (v.hours_since_published != null) out.push(`올린 지 ${num(v.hours_since_published)}시간`);
-  if (v.views_per_hour != null) out.push(`시간당 +${num(v.views_per_hour)}`);
-  if (v.views_per_subscriber != null) out.push(`구독자 ${num(v.channel_subscribers)}명의 ${v.views_per_subscriber.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}배 조회`);
-  if (v.like_rate != null) out.push(`좋아요 ${pct(v.like_rate)}`);
-  if (v.comment_rate != null) out.push(`댓글 ${pct(v.comment_rate)}`);
-  if (v.is_short != null) out.push(v.is_short ? `숏츠${v.shorts_format ? `·${v.shorts_format}` : ""}` : "롱폼");
-  return out;
-}
+// ------------------------------------------------------------------- 맨 위 한 줄
 
-/** 주제 하나의 근거 줄 (서버 값이 있는 것만) */
-function TopicBasis({ t, titles }: { t: PopularTopic; titles: Map<string, string | null> }) {
-  const rows: { source: string; body: ReactNode }[] = [];
-  if (t.youtube_videos != null && t.youtube_videos > 0) {
-    rows.push({ source: "YouTube 인기 차트", body: <>영상 {num(t.youtube_videos)}개에 나옴 {t.video_ids.length > 0 && <VideoLinks ids={t.video_ids} titles={titles} />}</> });
-  }
-  if (t.trending_rank != null) {
-    rows.push({ source: "Google 인기 검색어", body: `${t.trending_rank}위${t.trending_traffic ? ` (트래픽 표시 ${t.trending_traffic}, 검색 건수 아님)` : ""}` });
-  }
-  if (t.views_per_hour != null) {
-    rows.push({ source: "YouTube 조회수 스냅샷 비교", body: `영상 ${num(t.velocity_videos)}개 시간당 조회 +${num(t.views_per_hour)}` });
-  } else if (t.velocity_reason) {
-    rows.push({ source: "YouTube 조회수 스냅샷 비교", body: t.velocity_reason });
-  }
-  if (t.rising_ratio != null) {
-    rows.push({
-      source: "네이버 데이터랩",
-      body: `오늘 판정 평소의 ${t.rising_ratio.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}배${t.rising_started ? ` · ${t.rising_started.slice(5)}부터 평소 범위 넘음` : ""}`,
-    });
-  }
-  if (t.news && t.news.length > 0) {
-    rows.push({
-      source: "Google 인기 검색어 관련 뉴스",
-      body: <span className="inline-flex flex-wrap gap-x-2">{t.news.map((n) => n.url
-        ? <a key={n.title} href={n.url} target="_blank" rel="noreferrer noopener" className="text-brand-700 hover:underline">{n.title}{n.source ? ` (${n.source})` : ""}</a>
-        : <span key={n.title}>{n.title}{n.source ? ` (${n.source})` : ""}</span>)}</span>,
-    });
-  }
-  const measured = (t.videos ?? []).filter((v) => v.hours_since_published != null || v.views_per_subscriber != null);
+export function TrendHeadline({ popular }: { popular: SkillState<TrendPopularOutput> }) {
+  if (popular.kind === "loading") return <p className="text-sm text-ink-500" aria-live="polite">지금 인기 받는 중…</p>;
+  if (popular.kind === "failed") return <p className="text-sm text-amber-700">지금 인기를 받지 못했어요. {popular.reason}</p>;
+  const out = popular.out;
+  const top = out.items[0] ?? null;
   return (
-    <li className="space-y-1">
-      <p className="text-sm font-semibold text-ink-900">{t.category_rank ?? t.rank}. {t.keyword}</p>
-      {t.why_line && (
-        <p className="text-sm text-ink-700" title={t.why_reason ?? undefined}>
-          {t.why_line}{t.why_status === "fixed" && <span className="ml-1 text-xs text-ink-500">(고정 문장)</span>}
-        </p>
-      )}
-      {t.why_status === "unknown" && t.why_reason && <p className="text-xs text-ink-500">근거 한 줄 없음: {t.why_reason}</p>}
-      {rows.length > 0 ? <Basis rows={rows} /> : <p className="text-xs text-ink-500">근거 값을 받지 못했어요.</p>}
-      {measured.length > 0 && (
-        <details className="text-xs text-ink-700">
-          <summary className="cursor-pointer">영상별 근거 {measured.length}개 (올린 뒤 시간·시간당 조회·구독자 대비·좋아요율)</summary>
-          <ul className="mt-1 space-y-0.5">
-            {measured.map((v) => (
-              <li key={v.video_id} className="truncate" title={v.evidence_reason ?? undefined}>
-                <a href={videoUrl(v.video_id)} target="_blank" rel="noreferrer noopener" className="text-brand-700 hover:underline">{v.title ?? "제목 모름"}</a>
-                {" · "}{videoFacts(v).join(" · ") || "숫자 없음"}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-      {t.videos_reason && <p className="text-xs text-ink-500">영상 제목: {t.videos_reason}</p>}
-    </li>
-  );
-}
-
-function VideoRow({ v, rank }: { v: PopularVideo; rank: number }) {
-  return (
-    <li className="flex items-center gap-3 py-2">
-      <span className="w-5 shrink-0 text-right text-sm font-semibold text-ink-500">{rank}</span>
-      {/* 썸네일 자리 (계약에 썸네일 주소가 없다) */}
-      <span aria-hidden className="grid aspect-video w-20 shrink-0 place-items-center rounded-lg bg-ink-100 text-ink-300">▶</span>
-      <div className="min-w-0 flex-1">
-        <a className="block truncate font-semibold text-ink-900 hover:underline" href={`https://www.youtube.com/watch?v=${encodeURIComponent(v.video_id)}`} target="_blank" rel="noreferrer noopener">
-          {v.title ?? "제목 없음"}
-        </a>
-        <p className="truncate text-xs text-ink-500">
-          {[v.channel_title ?? "채널 모름", VIDEO_SOURCE[v.source ?? ""] ?? null, v.published_at ? `${DAY.format(new Date(v.published_at))} 올림` : null].filter(Boolean).join(" · ")}
-        </p>
-      </div>
-      <span className="shrink-0 text-sm tabular-nums text-ink-700">{v.views != null ? `조회 ${v.views.toLocaleString("ko-KR")}회` : "조회수 모름"}</span>
-    </li>
-  );
-}
-
-function CellView({ c, promo, titles }: { c: Cell; promo: PromoConceptsOutput | null; titles: Map<string, string | null> }) {
-  const videos = c.top_videos ?? [];
-  return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-      <section aria-label="뜨는 주제" className="min-w-0 space-y-2">
-        <p className="panel-title">뜨는 주제</p>
-        {c.items.length > 0 ? (
-          <ul className="flex flex-wrap gap-1.5">{c.items.map((t) => <TopicChip key={t.keyword} t={t} promo={promo} />)}</ul>
-        ) : null}
-        {c.shortage_reason && <p className="text-xs text-ink-500">{c.shortage_reason}</p>}
-        {c.items.length === 0 && !c.shortage_reason && <p className="text-xs text-ink-500">이 칸에 들어온 주제가 없어요. {NO_REASON}</p>}
-        {c.items.length > 0 && (
-          <details className="text-sm" open>
-            <summary className="cursor-pointer text-xs font-semibold text-ink-700">주제 근거 (어디서 몇 번 나왔나)</summary>
-            <ul className="mt-2 space-y-2">{c.items.map((t) => <TopicBasis key={t.keyword} t={t} titles={titles} />)}</ul>
-          </details>
-        )}
-      </section>
-      <section aria-label="조회수 높은 영상" className="min-w-0 space-y-1">
-        <p className="panel-title">조회수 높은 영상</p>
-        {videos.length > 0 ? (
-          <ol className="divide-y divide-ink-100">{videos.map((v, i) => <VideoRow key={v.video_id} v={v} rank={i + 1} />)}</ol>
-        ) : <p className="text-xs text-ink-500">{c.top_videos_reason ?? "이 칸의 영상을 받지 못했어요. " + NO_REASON}</p>}
-        {videos.length > 0 && c.top_videos_reason && <p className="text-xs text-ink-500">{c.top_videos_reason}</p>}
-      </section>
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <h2 className="text-lg font-bold text-ink-900">
+        {top ? <>오늘 가장 큰 화제는 <span className="text-brand-700">{top.keyword}</span></> : (out.empty_reason ?? "지금 인기 주제가 없어요.")}
+      </h2>
+      {out.youtube_status === "known" && out.snapshot_at && <span className="text-xs text-ink-500">YouTube 인기 {when(out.snapshot_at)} 기준</span>}
     </div>
   );
 }
 
-/** 출처 줄: 시각, 또는 못 읽은 이유 그대로 */
-function sourceLines(out: TrendPopularOutput): { text: string; warn: boolean }[] {
-  return [
-    out.youtube_status === "known"
-      ? { text: `YouTube 인기 ${when(out.snapshot_at) ?? "-"}`, warn: false }
-      : { text: `YouTube: ${out.youtube_reason ?? NO_REASON}`, warn: true },
-    out.trending_status === "known"
-      ? { text: `인기 검색어 ${when(out.trending_at) ?? "-"}`, warn: false }
-      : { text: `인기 검색어: ${out.trending_reason ?? NO_REASON}`, warn: true },
-  ];
+// ------------------------------------------------------------------- 카테고리 칸
+
+/** 화면 칸 하나. 예전 응답(by_category 없음)은 주제 분류별로 묶는다 */
+type Cell = { category: string; items: PopularTopic[]; shortage_reason: string | null; top_videos?: PopularVideo[]; top_videos_reason?: string | null };
+type Card = { v: PopularVideo; topic: PopularTopic | null };
+type SortKey = "views" | "views_per_hour" | "views_per_subscriber";
+const SORTS: { key: SortKey; label: string }[] = [
+  { key: "views", label: "조회수" },
+  { key: "views_per_hour", label: "시간당 조회" },
+  { key: "views_per_subscriber", label: "구독자 대비 배수" },
+];
+
+function cellsOf(out: TrendPopularOutput): Cell[] {
+  if (out.by_category?.length) return out.by_category.map((c: PopularCategory) => ({ ...c }));
+  const groups = new Map<string, PopularTopic[]>();
+  for (const t of out.items) groups.set(categoryName(t.topic_category), [...(groups.get(categoryName(t.topic_category)) ?? []), t]);
+  return [...groups.entries()].map(([category, items]) => ({ category, items, shortage_reason: null }));
+}
+
+/** 칸의 영상: 주제 영상(주제 순서) → 카테고리 상위 영상. 같은 영상은 처음 것만 */
+function cardsOf(c: Cell): Card[] {
+  const seen = new Set<string>();
+  const out: Card[] = [];
+  for (const t of c.items) for (const v of t.videos ?? []) if (!seen.has(v.video_id)) { seen.add(v.video_id); out.push({ v, topic: t }); }
+  for (const v of c.top_videos ?? []) if (!seen.has(v.video_id)) { seen.add(v.video_id); out.push({ v, topic: null }); }
+  return out;
+}
+
+/** 받은 값으로만 정렬. 값이 없으면 뒤로(서버 순서 유지) */
+function sorted(cards: Card[], key: SortKey): Card[] {
+  return cards.map((c, i) => ({ c, i })).sort((a, b) => {
+    const x = a.c.v[key], y = b.c.v[key];
+    if (x == null && y == null) return a.i - b.i;
+    if (x == null) return 1;
+    if (y == null) return -1;
+    return y - x || a.i - b.i;
+  }).map((x) => x.c);
+}
+
+function VideoCard({ card, rank, promo }: { card: Card; rank: number; promo: PromoConceptsOutput | null }) {
+  const { v, topic } = card;
+  const m = topic ? materialOf([topic.keyword, ...topic.aliases], promo, topic) : null;
+  const chip = m && m.kind !== "none" ? MATERIAL[m.kind] : null;
+  const facts = [
+    v.views_per_hour != null ? `시간당 +${num(v.views_per_hour)}` : null,
+    v.views_per_subscriber != null ? `구독자 대비 ${v.views_per_subscriber.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}배` : null,
+  ].filter(Boolean);
+  return (
+    <li className="min-w-0">
+      <a href={videoUrl(v.video_id)} target="_blank" rel="noreferrer noopener"
+        className="card flex h-full gap-3 p-3 transition hover:ring-brand-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
+        aria-label={`${rank}위 ${v.title ?? "제목 없음"} · YouTube에서 보기`}>
+        {/* 썸네일 자리 (계약에 썸네일 주소가 아직 없다) */}
+        <span aria-hidden className="relative aspect-[9/16] w-24 shrink-0 rounded-xl bg-ink-100">
+          <span className="absolute left-1.5 top-1.5 rounded-md bg-ink-900 px-1.5 py-0.5 text-[11px] font-bold text-white">{rank}위</span>
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="line-clamp-2 text-sm font-semibold leading-snug text-ink-900">{v.title ?? "제목 없음"}</span>
+          {v.channel_title && <span className="truncate text-xs text-ink-500">{v.channel_title}</span>}
+          {v.views != null && <span className="mt-1 text-xl font-bold tabular-nums text-ink-900" title={`조회 ${num(v.views)}회`}>{COMPACT.format(v.views)}</span>}
+          {facts.length > 0 && <span className="text-xs text-ink-500">{facts.join(" · ")}</span>}
+          {chip && (
+            <span className="mt-auto pt-1">
+              <span className={`chip text-xs ${chip.chip}`} title={m?.reason}>{chip.label}</span>
+            </span>
+          )}
+        </span>
+      </a>
+    </li>
+  );
+}
+
+function FilterButton({ on, onClick, children }: { on: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button type="button" aria-pressed={on} onClick={onClick}
+      className={`min-h-[40px] rounded-full px-3.5 py-1.5 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${on ? "bg-brand-600 text-white" : "bg-surface text-ink-700 ring-1 ring-ink-100 hover:bg-ink-50"}`}>
+      {children}
+    </button>
+  );
 }
 
 export function TrendPopular({ popular, promo, onReload }: {
@@ -322,40 +172,42 @@ export function TrendPopular({ popular, promo, onReload }: {
   const out = popular.kind === "ok" ? popular.out : null;
   const cells = out ? cellsOf(out) : [];
   const [picked, setPicked] = useState<string | null>(null);
+  const [sort, setSort] = useState<SortKey>("views");
   const current = cells.find((c) => c.category === picked) ?? cells[0] ?? null;
+  const cards = current ? sorted(cardsOf(current), sort) : [];
+  const tags = current ? current.items.filter((t) => t.origins.includes("youtube_tag")).map((t) => t.keyword) : [];
   return (
-    <Panel id="data-trend-popular" title="카테고리별 지금 인기"
-      hint={out ? (
-        <span className="flex flex-wrap gap-x-3">
-          {sourceLines(out).map((l) => <span key={l.text} className={l.warn ? "text-amber-700" : undefined}>{l.text}</span>)}
-        </span>
-      ) : "카테고리를 하나 고르면 뜨는 주제와 조회수 높은 영상을 보여 줘요."}
+    <Panel id="data-trend-popular" title="지금 뜨는 숏츠" titleHidden
       tools={<button type="button" className="btn-ghost" disabled={popular.kind === "loading"} onClick={onReload}>다시 보기</button>}>
       {popular.kind === "loading" ? <Waiting what="지금 인기를 받는 중…" />
         : popular.kind === "failed" ? <Empty>지금 인기를 받지 못했어요. {popular.reason} {DATA_SERVER}가 켜져 있는지 확인해 주세요.</Empty>
         : !current ? <Empty>{out?.empty_reason ?? "지금 인기 주제가 없어요."}</Empty> : (
           <div className="space-y-4">
-            <div role="tablist" aria-label="카테고리" className="flex flex-wrap gap-1.5">
-              {cells.map((c) => {
-                const on = c.category === current.category;
-                return (
-                  <button key={c.category} type="button" role="tab" aria-selected={on} aria-controls="trend-popular-cell"
-                    onClick={() => setPicked(c.category)}
-                    className={`rounded-full px-3 py-1.5 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${on ? "bg-brand-600 text-white" : "bg-ink-50 text-ink-700 ring-1 ring-ink-100 hover:bg-ink-100"}`}>
-                    {categoryName(c.category)}
-                  </button>
-                );
-              })}
+            <div className="space-y-2.5 rounded-2xl bg-ink-50 p-3">
+              <div className="flex flex-wrap items-center gap-2" role="group" aria-label="카테고리">
+                <span className="w-16 text-xs font-semibold text-ink-500">카테고리</span>
+                {cells.map((c) => (
+                  <FilterButton key={c.category} on={c.category === current.category} onClick={() => setPicked(c.category)}>
+                    {categoryName(c.category)} <span className="font-normal opacity-75">{cardsOf(c).length}</span>
+                  </FilterButton>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-2" role="group" aria-label="정렬">
+                <span className="w-16 text-xs font-semibold text-ink-500">정렬</span>
+                {SORTS.map((s) => <FilterButton key={s.key} on={sort === s.key} onClick={() => setSort(s.key)}>{s.label}</FilterButton>)}
+              </div>
             </div>
-            {/* 고른 칸만 그린다 */}
-            <div id="trend-popular-cell" role="tabpanel" aria-label={categoryName(current.category)}>
-              <CellView c={current} promo={promo} titles={videoTitles(out)} />
-            </div>
-            <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-500" aria-label="주제 칩 색">
-              {(Object.keys(MATERIAL) as MaterialKind[]).map((k) => (
-                <span key={k} className="flex items-center gap-1"><span aria-hidden className={`inline-block h-3 w-3 rounded-full ${MATERIAL[k].chip}`} />{MATERIAL[k].legend}</span>
-              ))}
-            </p>
+            {tags.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs font-semibold text-ink-500">많이 붙는 태그</span>
+                {tags.map((t) => <span key={t} className="chip bg-surface text-sm text-ink-700 ring-1 ring-ink-100">#{t}</span>)}
+              </div>
+            )}
+            {cards.length > 0 ? (
+              <ol className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label={`${categoryName(current.category)} 영상`}>
+                {cards.map((c, i) => <VideoCard key={c.v.video_id} card={c} rank={i + 1} promo={promo} />)}
+              </ol>
+            ) : <Empty>{current.top_videos_reason ?? current.shortage_reason ?? `이 칸의 영상을 받지 못했어요. ${NO_REASON}`}</Empty>}
             <Sources evidence={okEvidence(popular)} />
           </div>
         )}

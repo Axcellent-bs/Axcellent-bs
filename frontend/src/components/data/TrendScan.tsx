@@ -6,7 +6,7 @@ import { CampaignEffect } from "@/components/data/CampaignEffect";
 import { PromoConcepts } from "@/components/data/PromoConcepts";
 import { InsightBrief } from "@/components/data/InsightBrief";
 import { DataSources } from "@/components/data/DataSources";
-import { TrendPopular, TrendSummary, materialOf } from "@/components/data/TrendPopular";
+import { TrendHeadline, TrendPopular, materialOf } from "@/components/data/TrendPopular";
 import { okOut, useSkill } from "@/components/data/useSkill";
 import { Basis, Sources, VideoLinks, when } from "@/components/data/Sources";
 import { ContentLoop, type LoopTrendState } from "@/components/data/ContentLoop";
@@ -27,7 +27,7 @@ import {
 // - 3 넘김: "기획팀이 이 인사이트를 가져가 제안을 만들어요. 가져간 기록 보기는 준비 중". 루프 띠와 같은 단계 설명 문장만 보여 준다(숫자·예시 없음)
 // - 4 성과(게시·성과 측정, 다음 추천 반영은 준비 중): 캠페인 효과(campaign_effect). 측정 결과가 남게 숨기기만 한다
 //
-// 1단계 급상승 한 줄
+// 1단계 급상승 한 줄 (맨 아래 접힘 "검색 급상승 N개")
 // - 주제 · "평소의 N배"(서버 배수) · 판정에 쓴 마지막 날. 순서는 배수 큰 순. 그래프는 없다
 // - 근거(줄 아래): 네이버 데이터랩 마지막 날 값과 평소 값(전 56일 중앙값, 상대값), YouTube 후보면 인기 차트 영상 수·링크·
 //   센 태그, 인기 검색어 후보면 Google 인기 검색어 순위. 목록 아래 trend_scan·trend_candidates가 부른 API 목록
@@ -141,12 +141,13 @@ function Result({ entries, headline, popular, promo, range, evidence }: {
 }) {
   const rising = entries.filter((e) => e.v.status === "rising").sort((a, b) => (b.v.ratio ?? 0) - (a.v.ratio ?? 0));
   return (
-    <section aria-labelledby="trend-rising-title" className="card space-y-2 p-4 sm:p-5">
-      <div>
-        <p className="panel-title">검색 급상승</p>
-        <h2 id="trend-rising-title" className="mt-1 text-lg font-bold text-ink-900">{headline ?? `급상승 ${rising.length}개`}</h2>
-        <p className="text-xs text-ink-500">{range}</p>
-      </div>
+    <details className="card p-4 sm:p-5">
+      <summary className="cursor-pointer">
+        <span className="text-base font-bold text-ink-900">검색 급상승 {rising.length}개</span>
+        {headline && <span className="ml-2 text-sm text-ink-500">{headline}</span>}
+      </summary>
+      <div className="mt-2 space-y-2">
+      <p className="text-xs text-ink-500">{range}</p>
       {rising.length === 0 ? (
         <p className="text-sm text-ink-500">이번 판정 구간에 급상승한 주제가 없어요.</p>
       ) : (
@@ -157,7 +158,8 @@ function Result({ entries, headline, popular, promo, range, evidence }: {
         </ol>
       )}
       {evidence.map((ev, i) => <Sources key={i} evidence={ev} label={i === 0 ? "근거 · 키워드 판정이 불러온 곳" : "근거 · YouTube 후보가 불러온 곳"} />)}
-    </section>
+      </div>
+    </details>
   );
 }
 
@@ -342,7 +344,7 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
         <div key={t.key} role="tabpanel" id={`trend-sub-panel-${t.key}`} aria-labelledby={`trend-sub-${t.key}`} hidden={tab.key !== t.key}>
           {t.key === "detect" ? (
             <div className="space-y-5">
-              {kpiLive && <TrendSummary popular={popularRes.state} promo={promoRes.state} />}
+              {kpiLive && <TrendHeadline popular={popularRes.state} />}
               {kpiLive && <TrendPopular popular={popularRes.state} promo={promoOut} onReload={popularRes.reload} />}
               {detect}
             </div>
