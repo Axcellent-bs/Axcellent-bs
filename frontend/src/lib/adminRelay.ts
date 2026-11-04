@@ -37,7 +37,11 @@ export interface Recommendation {
   minutes_to_resolve?: number | null;
   caveat?: string;
 }
-export interface PendingHold { step_id: string; skill: string; label: string }
+/** 사람 승인 대기. `review_id`는 안전 관문 보류 건 번호, `expires_at`은 총괄이 자동으로 거절하는 마감이다 */
+export interface PendingHold {
+  step_id: string; skill: string; label: string;
+  review_id?: string | null; since?: string | null; expires_at?: string | null;
+}
 export interface Incident {
   context_id: string;
   kind: string;
@@ -138,4 +142,14 @@ export const GRADE: Record<string, { label: string; tone: string }> = {
 export const UNKNOWN = "확인할 수 없음";
 export const rate = (v: number | null) => (v == null ? UNKNOWN : `${Math.round(v * 100)}%`);
 export const millis = (v: number | null) => (v == null ? UNKNOWN : `${v.toLocaleString("ko-KR")}ms`);
+/** 승인 대기의 남은 시간. 마감을 모르면 null이고, 2분 안이면 급하다고 알린다 */
+export function holdLeft(h: PendingHold, now: number): { text: string; urgent: boolean } | null {
+  if (!h.expires_at) return null;
+  const sec = Math.round((new Date(h.expires_at).getTime() - now) / 1000);
+  if (Number.isNaN(sec)) return null;
+  if (sec <= 0) return { text: "마감이 지났습니다 · 곧 자동 거절", urgent: true };
+  const min = Math.floor(sec / 60);
+  return { text: min ? `마감까지 ${min}분 ${sec % 60}초` : `마감까지 ${sec}초`, urgent: sec <= 120 };
+}
+
 export const clock = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString("ko-KR", { hour12: false }) : UNKNOWN);

@@ -39,7 +39,7 @@ export interface OrchIncident {
   events: { at: string | null; message: string }[];
   summary: string[];
   metrics: Record<string, number>;
-  pending_holds: { step_id: string; skill: string; label: string }[];
+  pending_holds: { step_id: string; skill: string; label: string; review_id?: string | null; since?: string | null; expires_at?: string | null }[];
   /** 비슷한 과거 이벤트에서 뽑은 참고 추천(총괄이 계산). 근거가 있으면 card_id가 그 과거 이벤트 카드 */
   recommendation?: { status: string; card_id?: string } | null;
   /** 총괄이 이미 아는 사실로 만든 해결 내용 초안(저장 전). 아는 게 없으면 null */

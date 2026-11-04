@@ -13,8 +13,8 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
-from ax_contracts.schemas import EventEnvelope, EventType
-from ax_orchestrator.engine import Engine, incident_metrics
+from ax_contracts.schemas import EventEnvelope, EventType, SafetyReviewDecidedData
+from ax_orchestrator.engine import Engine, ReviewOutcome, incident_metrics
 from ax_orchestrator.finance_opinions import FinanceOpinions
 from ax_orchestrator.models import Incident, Plan, iso, now
 from ax_orchestrator.naming import event_title, event_type
@@ -22,6 +22,14 @@ from ax_orchestrator.plans.support_resolved import support_resolved
 from ax_orchestrator.store import IncidentStore
 
 log = logging.getLogger("orchestrator.manager")
+
+
+def _review_log(outcome: ReviewOutcome, review_id: str, event_id: str) -> str:
+    who = f" ({outcome.by})" if outcome.by else ""
+    verdict = (
+        "승인" if outcome.approved else "만료" if outcome.reason == "review_timeout" else "거절"
+    )
+    return f"안전 관문 결정 수신: {verdict}{who} — {review_id} ({event_id})"
 
 
 def _since(env: EventEnvelope) -> datetime | None:
@@ -59,6 +67,8 @@ SUBSCRIBED = [
     EventType.SUPPORT_INQUIRY_RESOLVED,
     # 사람 할 일함에서 끝낸 일 → 기다리던 단계를 이어 간다 (업무 요청 라우터)
     EventType.HANDOFF_COMPLETED,
+    # 안전 관문의 사람 결정(승인·거절·만료) → 승인 대기 단계를 잇는다
+    EventType.SAFETY_REVIEW_DECIDED,
 ]
 
 
@@ -199,6 +209,7 @@ class IncidentManager:
         `opened`(새 이벤트) ·
         `resumed`(사람 할 일함 처리 결과로 단계를 이어 감) ·
         `kept`(기다리는 단계가 아직 없어 보관, 그 단계가 대기로 오르면 이어 감) ·
+        `unverified`(안전 관문이 그 결정을 확인해 주지 않아 무시) ·
         `unmatched`(이미 반영했거나 받을 이벤트가 없음).
         """
         if env.event_id in self._seen:
@@ -217,6 +228,8 @@ class IncidentManager:
     async def _process(self, env: EventEnvelope) -> tuple[str, Incident | None]:
         if env.type == EventType.HANDOFF_COMPLETED:
             return await self._resume_handoff(env)
+        if env.type == EventType.SAFETY_REVIEW_DECIDED:
+            return await self._resume_review(env)
         if env.type == EventType.SHOP_RECOVERED:
             target = self._latest_unrecovered(self._component(env), env.occurred_at)
             if target is not None:
@@ -292,6 +305,43 @@ class IncidentManager:
             return "unmatched", inc
         inc.log(f"사람 할 일함 처리 결과 수신: {task_id} ({status}, {env.event_id})")
         await self.engine.sync_times(inc)
+        return "resumed", inc
+
+    async def _resume_review(self, env: EventEnvelope) -> tuple[str, Incident | None]:
+        """안전 관문의 사람 결정으로 승인 대기 단계를 잇는다 (`review_id`로 맞춘다).
+
+        이벤트는 위조될 수 있어서, 안전 관문에 되물어 확인된 결정만 따른다(`Engine.settle_review`).
+        승인이면 단계가 같은 요청을 다시 보내 이어 가고, 거절·만료면 거절로 끝난다.
+        """
+        if env.source != "safety":
+            log.warning("안전 관문이 아닌 곳이 보낸 승인 결정은 무시: %s", env.source)
+            return "ignored", None
+        try:
+            data = SafetyReviewDecidedData.model_validate(env.data)
+        except ValueError:
+            return "unmatched", None
+        found = next(
+            (
+                (inc, hold)
+                for inc in self.incidents.values()
+                for hold in inc.holds.values()
+                if hold.pending and hold.review_id == data.review_id
+            ),
+            None,
+        )
+        outcome = await self.engine.settle_review(data.review_id, data.decision)
+        if outcome is None:
+            if found is not None:
+                found[0].log(
+                    f"안전 관문 결정({data.decision})을 확인하지 못해 무시: {data.review_id}"
+                )
+            return "unverified", found[0] if found else None
+        if found is None:
+            kept = self.engine.keep_early_review(data.review_id, outcome)
+            return ("kept" if kept else "unmatched"), None
+        inc, hold = found
+        hold.decide(outcome.approved, outcome.reason, outcome.by)
+        inc.log(_review_log(outcome, data.review_id, env.event_id))
         return "resumed", inc
 
     @staticmethod

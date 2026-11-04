@@ -33,6 +33,7 @@ from ax_orchestrator.manager import SUBSCRIBED, IncidentManager
 from ax_orchestrator.mock.fake_departments import FakeDepartments
 from ax_orchestrator.models import Incident, now
 from ax_orchestrator.plans.scenario_a import scenario_a
+from ax_orchestrator.real import http_review_checker
 from ax_orchestrator.registry import Registry
 from ax_orchestrator.store import DB_ENV, IncidentStore
 from ax_orchestrator.usage import BUCKET_SECONDS, WINDOW_SECONDS, RecordingCaller, UsageRecorder
@@ -109,6 +110,10 @@ class AppState:
             handoff_timeout=self.handoff_timeout,
             retry_delay=0.2,
             persist=self.store.save,
+            # 안전 관문의 사람 결정을 되물어 확인한다. 목 모드는 AX_SAFETY_URL을 줄 때만 부른다
+            review_check=(
+                http_review_checker() if not self.mock or os.getenv("AX_SAFETY_URL") else None
+            ),
         )
         self.fakes = fakes
         if self.manager is None:
@@ -293,13 +298,16 @@ async def inject(req: DemoRequest | None = None, _: str = Depends(require_admin)
 
 
 @app.post("/api/events")
-async def receive_event(env: EventEnvelope, _: str = Depends(require_agent())) -> dict:
+async def receive_event(env: EventEnvelope, caller: str = Depends(require_agent())) -> dict:
     """다른 부서가 이벤트를 보내 볼 수 있는 입구.
 
     실제 모드에서도 열어 둔다(이벤트 버스와 같은 판단). 에이전트 토큰(`AX_AGENT_TOKENS`)만 받는다.
 
     실제 전달은 Redis Streams 구독(`start_event_bus`)이고, 그때도 판단은 같은 `manager.process`다.
     """
+    # 사람 결정 이벤트는 안전 관문만 보낼 수 있다(다른 에이전트가 승인을 흉내 내지 못하게)
+    if env.type == EventType.SAFETY_REVIEW_DECIDED and caller != "safety":
+        raise HTTPException(403, "안전 관문만 보낼 수 있는 이벤트다")
     manager = state.manager or await state.build()
     outcome, inc = await manager.process(env)
     return {

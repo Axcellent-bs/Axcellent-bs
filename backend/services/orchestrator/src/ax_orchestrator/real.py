@@ -6,12 +6,14 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
 from ax_agent_template.client import call_agent
 from ax_agent_template.config import agent_url
 from ax_agent_template.services import SERVICES
+from ax_orchestrator.engine import ReviewChecker
 from ax_orchestrator.registry import CardFetcher
 
 CARD_PATH = "/.well-known/agent-card.json"
@@ -65,4 +67,25 @@ def http_card_fetcher(client: httpx.AsyncClient | None = None) -> CardFetcher:
     return fetch
 
 
-__all__ = ["call_agent", "http_card_fetcher"]
+def http_review_checker() -> ReviewChecker:
+    """`GET <safety>/api/safety/reviews/<review_id>`로 보류 건 상태를 읽는다. 못 읽으면 None.
+
+    사람이 승인했는지는 이벤트가 아니라 안전 관문의 기록으로 확인한다(읽기 조회라 토큰이 필요 없다).
+    """
+
+    async def check(review_id: str) -> dict[str, Any] | None:
+        url = f"{agent_url('safety')}/api/safety/reviews/{quote(review_id, safe='')}"
+        try:
+            async with httpx.AsyncClient(timeout=CARD_TIMEOUT) as http:
+                response = await http.get(url)
+            if response.status_code != 200:
+                return None
+            data = response.json().get("data")
+            return data if isinstance(data, dict) else None
+        except (httpx.HTTPError, ValueError):
+            return None
+
+    return check
+
+
+__all__ = ["call_agent", "http_card_fetcher", "http_review_checker"]

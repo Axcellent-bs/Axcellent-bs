@@ -2,7 +2,7 @@
 담당: 준하 · 포트: 8000
 
 ## 1. 역할
-통합 에이전트(총괄). 이벤트를 받아 사건을 판단하고(`ctx_inc_` 발급), Agent Card 레지스트리로 부서를 골라 plan대로 순차·병렬 분배하고, `input-required`를 중계하고, 이관·재시도를 처리하고, 사건을 닫으며 hr에 기록을 요청한다. 인터페이스 기준은 `docs/notes/orchestrator/interface.md`.
+통합 에이전트(총괄). 이벤트를 받아 사건을 판단하고(`ctx_inc_` 발급), Agent Card 레지스트리로 부서를 골라 plan대로 순차·병렬 분배하고, `input-required`를 중계하고(C 등급 보류는 안전 관문의 사람 결정 `safety.review_decided`로 잇는다. 이벤트를 믿지 않고 안전 관문에 되물어 확인한다), 이관·재시도를 처리하고, 사건을 닫으며 hr에 기록을 요청한다. 인터페이스 기준은 `docs/notes/orchestrator/interface.md`.
 
 ## 2. 실행 방법
 목 모드(가짜 부서 7곳, 실제 연동 없음). 빈 포트를 찾아 띄우고 브라우저를 연다:
