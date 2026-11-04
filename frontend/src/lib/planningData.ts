@@ -399,7 +399,7 @@ export const initialState: State = {
       auto: { ok: true, reasons: ['결제·주문·개인정보 경로 아님', '화면 표시만 바꾸는 요청', '인사 ② 기각 이력 없음', '예상 변경 4줄·1파일 · 기준 AR-1(shop-web/ 30줄·2파일 이하 · 경고 없음) 안 → 자동 머지'] } },
     { id: 'REQ-9', ctx: 'ctx_req_0009', from: 'data', via: 'create_ticket', title: '느린 카드사에서 결제가 실패한다', evidence: '결제 실패 코드 집계 (데이터분석)', state: '완료', spec: 'SPEC-5' },
     { id: 'REQ-12', ctx: 'ctx_req_0012', from: 'support', via: 'create_ticket', title: '결제 실패 뒤 장바구니가 비워진다', evidence: '반복 문의 42건 (고객지원 문의 분류)', state: '기획 중', spec: 'SPEC-7' },
-    { id: 'REQ-13', ctx: 'ctx_req_0013', from: 'hr', via: 'ticket_draft_propose (③)', title: '결제 실패 안내 문구 전체 정비', evidence: '같은 인수인계 질문 3주 연속 반복 (인사 결정 카드 card-0142)', state: '접수' },
+    { id: 'REQ-13', ctx: 'ctx_req_0013', from: 'hr', via: 'ticket_draft_propose (③)', title: '결제 실패 안내 문구 전체 정비', evidence: '같은 결제 실패 안내 문의 3주 연속 반복 (인사 결정 카드 card-0142)', state: '접수' },
     { id: 'REQ-14', ctx: 'ctx_req_0014', from: 'data', via: '개선 초안 (원인 추적 루프 ③)', title: '결제 실패율이 같은 구간에서 반복 상승', evidence: 'metric.anomaly 3회, 14:00~14:10 구간 (데이터분석)', state: '접수' },
     { id: 'REQ-101', ctx: 'ctx_inc_0001', from: 'infra', via: 'link_incident (재발 방지)', title: '결제 경로 설정 변경은 카나리 배포 필수', evidence: '사건 ctx_inc_0001, 롤백으로 복구 (DejaFix)', state: '작업 중', spec: 'SPEC-6' },
     { id: 'REQ-15', ctx: 'ctx_req_0015', from: 'marketing', via: 'create_ticket', title: '장바구니 보존 문구를 공지에도 반영', evidence: 'REQ-12와 같은 대상', state: '중복 연결', duplicateOf: 'REQ-12' },
@@ -1166,7 +1166,7 @@ function inbound(s: State, kind: InboundKind): State {
   if (kind === 'hr_draft' || kind === 'data_draft') {
     const from: Dept = kind === 'hr_draft' ? 'hr' : 'data'
     const id = `REQ-${20 + seq}`
-    const title = from === 'hr' ? '반복되는 인수인계 질문을 운영 매뉴얼에 반영' : '같은 시간대 결제 실패율 반복 상승 원인 개선'
+    const title = from === 'hr' ? '반복되는 결제 실패 안내 문의를 운영 매뉴얼에 반영' : '같은 시간대 결제 실패율 반복 상승 원인 개선'
     return {
       ...base,
       draftsIn: s.draftsIn + 1,
@@ -1241,7 +1241,7 @@ function inbound(s: State, kind: InboundKind): State {
 const DEPT_CHAT: Partial<Record<Dept, string[]>> = {
   support: ['배송 조회 송장 번호 문의가 하루 10건 넘게 들어옵니다. 우선순위 올려 주실 수 있나요?', 'REQ-12 처리 상태 고객에게 안내해도 될까요?'],
   marketing: ['다음 주 기획전 배너 문구 확정본 공유드려요. 장바구니 보존 공지는 REQ-12 완료 뒤에 낼게요.', '신간 알림 버튼 기획 일정이 궁금합니다.'],
-  hr: ['이번 주 인수인계 질문 중 "결제 실패 안내"가 3번 반복됐습니다. 운영 매뉴얼 반영 초안 보낼게요.', '결정 카드 DC-44에 SPEC-7 결정 이유를 붙였습니다.'],
+  hr: ['이번 주 결정 기록 문의 중 "결제 실패 안내"가 3번 반복됐습니다. 운영 매뉴얼 반영 초안 보낼게요.', '결정 카드 DC-44에 SPEC-7 결정 이유를 붙였습니다.'],
   data: ['결제 실패율이 14:00~14:10에 또 올랐습니다. 직전 배포가 있었는지 확인 부탁드려요.', '장바구니 이탈률 지표 정의 공유드립니다 (코드로 계산).'],
   infra: ['shop-api v2.4.1 롤백 후 p95가 정상 범위로 돌아왔습니다.', '카나리 배포 설정 초안 준비됐습니다. REQ-101에 붙여 주세요.'],
 }

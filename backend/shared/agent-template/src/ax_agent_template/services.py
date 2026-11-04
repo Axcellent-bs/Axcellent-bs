@@ -10,6 +10,7 @@ AXcellent는 부서가 아니라 서비스 단위로 판다(고객사가 필요�
   `department_of()`로 부서 이름까지 같이 본다
   (`claims`가 보낸 요청은 `support`가 보낸 것으로도 인정).
 - 서비스 id는 화면 `frontend/src/demo/services.ts`의 `SERVICES` id와 같다.
+  다만 인수인계(`handover`)는 화면에서 접어 `services.ts`에 없다(정의는 되살릴 수 있게 남겼다).
 """
 
 from __future__ import annotations
@@ -141,6 +142,8 @@ SERVICES: tuple[Service, ...] = (
         ),
         "데이터 분석",
     ),
+    # 화면에서 접었다(인수인계). 정의·skill·계약은 되살릴 수 있게 그대로 두고,
+    # run_all.sh가 띄우지 않고 켠 서비스에서도 뺀다
     Service(
         "handover",
         "hr",

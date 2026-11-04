@@ -50,7 +50,7 @@ const ITEMS: ExItem[] = [
     reason: "지난주 대비 매출 -38% · 집계 누락 의심", status: "waiting", minutesAgo: 20, href: "/data", hrefLabel: "데이터 분석",
     suggest: { dept: "데이터분석팀", reasons: ["지표·집계 관련 요청", "데이터분석 서비스에서 보냄", "비슷한 요청 3건을 데이터분석팀이 처리"] } },
   { id: "ex-7", from: "인사", dept: "인사팀", category: "법인카드 한도", kind: "사람 확인 요청", title: "법인카드 한도 변경 확인",
-    reason: "신규 입사자 2명 · 월 한도 300만 원 요청", status: "claimed", claimedBy: "김서연", minutesAgo: 50, href: "/hr", hrefLabel: "인수인계" },
+    reason: "신규 입사자 2명 · 월 한도 300만 원 요청", status: "claimed", claimedBy: "김서연", minutesAgo: 50, href: "/org", hrefLabel: "조직 변동" },
   { id: "ex-8", from: "개발·배포", dept: "개발팀", category: "배포 후 점검", kind: "사람 확인 요청", title: "배포 후 점검 결과 확인",
     reason: "주문 API 배포 · 자동 점검 1건 경고", status: "done", claimedBy: "박지훈", result: "경고는 로그 설정 문제 · 서비스 영향 없음",
     minutesAgo: 300, closedMinutesAgo: 260, href: "/dev/work/ops", hrefLabel: "운영·배포" },

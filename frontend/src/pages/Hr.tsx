@@ -3,27 +3,13 @@ import { Loading } from "@/components/admin/bits";
 import CardSections from "@/components/hr/CardSections";
 import IncidentRecords from "@/components/hr/IncidentRecords";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
-import { ago, shortDateTime } from "@/lib/format";
+import { ago } from "@/lib/format";
 import { useSearchParams } from "@/lib/nav";
-import {
-  hr,
-  type HandoverQuestion, type HandoverStatus, type HandoverView, type HrCard, type PlanCheck, type PlanDraft, type Roster,
-} from "@/lib/hr";
+import { hr, type HrCard, type PlanCheck, type PlanDraft } from "@/lib/hr";
 
-// 인사 AI 화면 (재무 AI 화면과 같은 짜임): ① 지금 사람이 할 일 → ② 인수인계 → ③ 담당 명부 → ④ 기록 도구.
-// hr이 계산한 완성도·판정을 그대로 보여 주고, 사람이 하는 일(질문에 답하기, 후보 카드 승인·폐기)만
-// 버튼으로 둔다. 인수인계 시작·확정은 총괄 AI가 부르므로 화면에 없다.
+// 결정 기록 화면 (재무 AI 화면과 같은 짜임): ① 지금 사람이 할 일 → ② 기록 도구.
+// hr이 계산한 판정을 그대로 보여 주고, 사람이 하는 일(후보 카드 승인·폐기)만 버튼으로 둔다.
 
-const HANDOVER_STATUS: Record<HandoverStatus, { label: string; tone: string }> = {
-  draft: { label: "초안", tone: "bg-ink-100 text-ink-500" },
-  input_required: { label: "답변 기다림", tone: "bg-amber-50 text-amber-700" },
-  ready: { label: "확정 가능", tone: "bg-brand-50 text-brand-700" },
-  confirmed: { label: "확정됨", tone: "bg-emerald-50 text-emerald-700" },
-  held: { label: "사람 확인 대기", tone: "bg-amber-50 text-amber-700" },
-};
-const REASON_KO: Record<string, string> = { shift: "교대", transfer: "담당 변경", offboarding: "담당 종료", other: "기타" };
-const ITEM_KO: Record<string, string> = { pr: "PR", ticket: "티켓", deployment: "배포", decision: "결정", doc: "문서" };
-const FIELD_KO: Record<string, string> = { decisions: "결정한 것", rollback_criteria: "되돌리는 기준", known_risks: "알려진 위험", open_items: "진행 중인 일", contacts: "연락처" };
 const CONF_KO = { low: "낮음", mid: "보통", high: "높음" } as const;
 const VERDICT: Record<string, { label: string; tone: string }> = {
   ok: { label: "겹치는 기록 없음", tone: "bg-emerald-50 text-emerald-700" },
@@ -48,43 +34,17 @@ function Section({ title, desc, children }: { title: string; desc?: ReactNode; c
   );
 }
 
-function Tile({ label, count, note, tone }: { label: string; count: number | string; note: string; tone: string }) {
-  return (
-    <div className={`rounded-2xl p-4 ${tone}`}>
-      <p className="text-xs">{label}</p>
-      <p className="mt-1 text-3xl font-bold tabular-nums">{count}</p>
-      <p className="mt-1 text-xs opacity-80">{note}</p>
-    </div>
-  );
-}
-
 /** `decided`가 null이면 확정 카드 목록을 받지 못한 것(서버가 아직 이 조회를 모를 때) */
-interface View { handovers: HandoverView[]; cards: HrCard[]; decided: HrCard[] | null; roster: Roster }
+interface View { cards: HrCard[]; decided: HrCard[] | null }
 
-// 데모에서 인사(인수인계·담당 명부)와 운영(결정 기록·계획 비교)을 두 부서로 나눴다. 데이터는 같은 hr 서비스에서 받는다.
-export type HrPart = "hr" | "ops";
-const PART = {
-  hr: {
-    title: "인수인계",
-    desc: "담당이 바뀔 때 일이 끊기지 않게 인수인계와 담당 명부를 관리합니다.",
-    guide: [
-      <>맨 위 <b>지금 사람이 할 일</b>에서 인계자의 답을 기다리는 질문을 봅니다.</>,
-      <>인계자가 <b>답하기</b>로 채웁니다. 모든 항목이 차면 완성도가 올라가 확정할 수 있게 됩니다.</>,
-      <>인수인계의 시작·확정은 총괄 AI가 요청합니다. 이 화면에는 그 버튼이 없습니다.</>,
-    ],
-  },
-  ops: {
-    title: "결정 기록",
-    desc: "회사의 결정을 기록으로 남기고, 새 계획이 과거에 기각된 안과 겹치는지 확인합니다.",
-    guide: [
-      <>맨 위 <b>지금 사람이 할 일</b>에서 확신이 낮아 후보로 남은 기록을 봅니다.</>,
-      <>내용을 읽고 <b>기록으로 확정</b> 또는 <b>폐기</b>를 누릅니다. 애매하면 폐기하세요. 필요하면 요청한 AI가 근거를 보강해 다시 올립니다.</>,
-    ],
-  },
-} satisfies Record<HrPart, { title: string; desc: string; guide: ReactNode[] }>;
+const TITLE = "결정 기록";
+const DESC = "회사의 결정을 기록으로 남기고, 새 계획이 과거에 기각된 안과 겹치는지 확인합니다.";
+const GUIDE: ReactNode[] = [
+  <>맨 위 <b>지금 사람이 할 일</b>에서 확신이 낮아 후보로 남은 기록을 봅니다.</>,
+  <>내용을 읽고 <b>기록으로 확정</b> 또는 <b>폐기</b>를 누릅니다. 애매하면 폐기하세요. 필요하면 요청한 AI가 근거를 보강해 다시 올립니다.</>,
+];
 
-export default function HrPage({ part = "hr" }: { part?: HrPart }) {
-  const P = PART[part];
+export default function HrPage() {
   const ctxParam = useSearchParams().get("ctx"); // 총괄 이벤트 화면의 "결정 기록에서 보기"로 들어올 때
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -92,11 +52,11 @@ export default function HrPage({ part = "hr" }: { part?: HrPart }) {
 
   const load = useCallback(async () => {
     try {
-      const [handovers, cards, roster, decided] = await Promise.all([
-        hr.handovers(), hr.candidateCards(), hr.roster(),
+      const [cards, decided] = await Promise.all([
+        hr.candidateCards(),
         hr.decisionCards(undefined, 200).catch(() => null), // 이 조회만 실패해도 화면 나머지는 보여 준다
       ]);
-      setView({ handovers, cards, decided, roster }); setUp(true);
+      setView({ cards, decided }); setUp(true);
     } catch (e) { setUp(false); setError(errText(e)); }
   }, []);
   useEffect(() => {
@@ -106,29 +66,26 @@ export default function HrPage({ part = "hr" }: { part?: HrPart }) {
   }, [load]);
 
   if (!view) return <Loading error={error} />;
-  const { handovers, roster } = view;
-  const cards = part === "ops" ? view.cards : [];
-  const questions = part === "hr" ? handovers.flatMap((h) => h.open_questions) : [];
-  const todo = cards.length + questions.length;
+  const { cards } = view;
+  const todo = cards.length;
   const tone = todo ? "text-amber-800" : "text-emerald-800";
-  const count = (s: HandoverStatus) => handovers.filter((h) => h.status === s).length;
 
   return (
     <div className="space-y-8 px-8 pb-12 pt-2">
       <header className="flex flex-wrap items-end gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">{P.title}</h1>
-          <p className="mt-1 text-sm text-ink-500">{P.desc} 완성도와 판정은 AI가 아니라 정해진 계산과 기준으로 합니다.</p>
+          <h1 className="text-2xl font-bold tracking-tight">{TITLE}</h1>
+          <p className="mt-1 text-sm text-ink-500">{DESC} 완성도와 판정은 AI가 아니라 정해진 계산과 기준으로 합니다.</p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
-          <Chip label={`${P.title} ${up ? "켜짐" : "꺼짐"}`} tone={up ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"} />
+          <Chip label={`${TITLE} ${up ? "켜짐" : "꺼짐"}`} tone={up ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"} />
         </div>
       </header>
 
       <details className="rounded-2xl border border-ink-100 bg-surface px-5 py-3 text-sm">
         <summary className="cursor-pointer font-semibold text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">처음이라면: 관리자가 할 일</summary>
         <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-ink-700">
-          {P.guide.map((g, i) => <li key={i}>{g}</li>)}
+          {GUIDE.map((g, i) => <li key={i}>{g}</li>)}
         </ol>
       </details>
 
@@ -142,49 +99,23 @@ export default function HrPage({ part = "hr" }: { part?: HrPart }) {
             <p className={`mt-1 text-4xl font-bold tabular-nums ${tone}`}>{todo ? `${todo}건` : "없음"}</p>
           </div>
           <p className={`ml-auto max-w-sm pb-1 text-xs ${tone}`}>
-            {part === "ops"
-              ? "대부분의 기록은 AI가 근거를 보고 바로 남깁니다. 근거가 약해 확신이 낮은 기록만 여기로 옵니다."
-              : "인계자만 알 수 있는 내용을 묻는 질문만 여기로 옵니다."}
+            대부분의 기록은 AI가 근거를 보고 바로 남깁니다. 근거가 약해 확신이 낮은 기록만 여기로 옵니다.
           </p>
         </div>
         {!HUMAN_TOKEN_SET && todo > 0 && <p className="mt-3 text-xs text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 버튼이 꺼져 있습니다.</p>}
         {todo > 0 && (
           <div className="mt-5 space-y-3">
             <Candidates cards={cards} onChanged={load} />
-            {questions.map((q) => <QuestionForm key={q.question_id} q={q} onDone={load} />)}
           </div>
         )}
       </section>
 
-      {part === "hr" && <>
-      {/* ② 인수인계 */}
-      <Section title="인수인계 현황" desc="담당이 바뀔 때 넘길 일을 모아 둔 목록입니다. 완성도는 코드가 계산한 값이고, 시작과 확정은 총괄 AI가 요청합니다.">
-        <div className="grid gap-3 sm:grid-cols-4">
-          <Tile label="확정됨" count={count("confirmed")} note="인계가 끝남" tone="bg-emerald-50 text-emerald-800" />
-          <Tile label="확정 가능" count={count("ready")} note="항목이 모두 찼음" tone="bg-brand-50 text-brand-700" />
-          <Tile label="답변 기다림" count={count("input_required")} note="인계자 답이 필요함" tone="bg-amber-50 text-amber-800" />
-          <Tile label="사람 확인 대기" count={count("held")} note="완성도가 낮은 채 확정 요청됨" tone="bg-red-50 text-red-800" />
-        </div>
-        {handovers.length === 0
-          ? <p className="py-6 text-center text-sm text-ink-500">진행 중인 인수인계가 없습니다.</p>
-          : <div className="space-y-3">{handovers.map((h) => <HandoverCard key={h.handover_id} h={h} />)}</div>}
-      </Section>
-
-      {/* ③ 담당 명부 */}
-      <Section title="담당 명부" desc={`${shortDateTime(roster.collected_at)} 기준. 영역별 담당과 예비 담당이고 개인 정보는 두지 않습니다.`}>
-        {roster.gap_areas.length > 0 && <p className="rounded-xl bg-amber-50 px-4 py-2 text-sm text-amber-800">담당이 비는 영역: {roster.gap_areas.join(", ")}</p>}
-        <RosterGrid roster={roster} />
-      </Section>
-      </>}
-
-      {part === "ops" && <>
-      {/* ④ 기록 도구 */}
+      {/* ② 기록 도구 */}
       {/* 인사 AI가 실제로 남긴 이벤트 기록과 고른 이벤트의 처리 내역 */}
       <IncidentRecords initialCtx={ctxParam} />
       {/* 확정된 카드는 장애 대응(보라)·업무 결정(민트)으로 나눠 보여 준다. 최근 순 최대 200장 */}
       <CardSections cards={view.decided} />
       <Section title="계획 비교" desc="새 계획이 과거에 기각된 안과 겹치는지 확인합니다. 저장하지 않고 보기만 합니다."><PlanChecker /></Section>
-      </>}
     </div>
   );
 }
@@ -220,81 +151,6 @@ function Candidates({ cards, onChanged }: { cards: HrCard[]; onChanged: () => vo
         </article>
       ))}
     </>
-  );
-}
-
-function QuestionForm({ q, onDone }: { q: HandoverQuestion; onDone: () => void }) {
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  async function submit(e: FormEvent) {
-    e.preventDefault(); if (!text.trim()) return;
-    setBusy(true); setErr(null);
-    try { await hr.answer(q.question_id, text.trim()); setText(""); onDone(); }
-    catch (x) { setErr(errText(x)); }
-    finally { setBusy(false); }
-  }
-  return (
-    <form onSubmit={submit} className="space-y-2 rounded-2xl bg-surface p-4 shadow-sm">
-      <p className="text-sm">
-        {FIELD_KO[q.gap_field] && <b className="mr-1.5">{FIELD_KO[q.gap_field]}</b>}{q.question}
-      </p>
-      <div className="flex gap-2">
-        <input className={INPUT} value={text} onChange={(e) => setText(e.target.value)} placeholder={`${q.assignee_id} 님의 답변`} />
-        <button className="btn-primary shrink-0" disabled={!HUMAN_TOKEN_SET || busy || !text.trim()}>답하기</button>
-      </div>
-      {err && <p role="alert" className="text-xs text-red-700">{err}</p>}
-    </form>
-  );
-}
-
-// ---------------------------------------------------------------- 인수인계
-function HandoverCard({ h }: { h: HandoverView }) {
-  const st = HANDOVER_STATUS[h.status] ?? { label: h.status, tone: "bg-ink-100 text-ink-500" };
-  return (
-    <article className="space-y-3 rounded-2xl border border-ink-100 p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Chip label={st.label} tone={st.tone} />
-        <Chip label={h.area} tone="bg-ink-100 text-ink-500" />
-        <Chip label={REASON_KO[h.reason] ?? h.reason} tone="bg-ink-100 text-ink-500" />
-        <span className="ml-auto text-xs text-ink-500">{h.owner_id} → {h.successor_id ?? "후임 미정"} · {ago(h.updated_at)}</span>
-      </div>
-      <div>
-        <div className="flex items-baseline justify-between text-xs"><span className="text-ink-500">완성도 (코드가 계산)</span><span className="font-semibold tabular-nums">{h.completeness}%</span></div>
-        <div className="mt-1 h-2 overflow-hidden rounded-full bg-ink-100"><div className="h-full bg-brand-500" style={{ width: `${h.completeness}%` }} /></div>
-      </div>
-      {h.items.length > 0 && (
-        <ul className="grid gap-1.5 sm:grid-cols-2">
-          {h.items.map((i) => (
-            <li key={i.item_id} className="flex items-center gap-2 rounded-lg bg-ink-50 px-2.5 py-1.5 text-xs">
-              <Chip label={ITEM_KO[i.kind] ?? i.kind} tone="bg-app text-ink-500" /><span className="truncate">{i.title}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {h.open_questions.length > 0 && <p className="text-xs text-amber-800">비어 있는 항목 {h.open_questions.length}개 — 위 "지금 사람이 할 일"에서 답할 수 있습니다.</p>}
-    </article>
-  );
-}
-
-// ---------------------------------------------------------------- 담당 명부
-function RosterGrid({ roster }: { roster: Roster }) {
-  const areas = roster.entries.reduce<Record<string, Roster["entries"]>>((acc, e) => { (acc[e.area] ||= []).push(e); return acc; }, {});
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      {Object.entries(areas).map(([area, rows]) => (
-        <article key={area} className="space-y-2 rounded-2xl border border-ink-100 p-4">
-          <h3 className="text-sm font-semibold">{area}</h3>
-          {rows.map((r) => (
-            <div key={`${r.member_id}${r.shift_start}`} className="flex items-center gap-2 text-xs">
-              <Chip label={r.role === "owner" ? "담당" : "예비"} tone={r.role === "owner" ? "bg-brand-50 text-brand-700" : "bg-ink-100 text-ink-500"} />
-              <span className="font-medium">{r.member_id}</span>
-              <span className="ml-auto text-ink-500">{r.shift_start ? `${shortDateTime(r.shift_start)} ~ ${shortDateTime(r.shift_end)}` : "상시"}</span>
-            </div>
-          ))}
-        </article>
-      ))}
-    </div>
   );
 }
 

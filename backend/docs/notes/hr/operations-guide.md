@@ -29,7 +29,7 @@
 | `HR_HOLD_TTL_MIN` | 10 | C 보류 자동 거절까지(분, 목 안전 레이어) |
 | `HR_LOCK_TTL_MIN` | 1440 | 변경 잠금이 이 시간 넘게 남으면 자동으로 풀림 |
 | `HR_CARD_AUTO_CONFIRM` | high | 이 확신도일 때만 카드를 자동 확정(나머지는 후보) |
-| `HR_TIMER` | 꺼짐 | `1`이면 곧 끝나는 교대의 인수인계를 자동 시작 |
+| `HR_TIMER` | 꺼짐 | `1`이면 곧 끝나는 교대의 인수인계를 자동 시작. 인수인계는 화면에서 접었으므로(서비스 handover를 띄우지 않음) 켜지 않는다 |
 | `HR_PLANNING_MODE` | mock | `a2a`면 planning을 A2A로 부름 |
 | `HR_MEMORY_MODE` | mock | `http`면 memory를 REST로 부름 (`HR_MEMORY_URL`) |
 | `HR_DENSE_SEARCH` | 켬 | 계획 비교의 관련 카드를 임베딩(Dense)으로 찾는다. `0`이면 끄고 Dice만 쓴다. 임베딩 설정(`MEMORY_LLM_*`·`MEMORY_EMBED_MODEL` 또는 `LLM_*`·`EMBED_MODEL`)이 없거나 호출이 실패해도 Dice로 대체한다 |
