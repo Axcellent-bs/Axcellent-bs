@@ -9,6 +9,7 @@ import { AGENTS, activeChild, matchPath, useEnabledServices, type Service, type 
 import { useOpenHandoffCount } from "@/lib/handoffs";
 import { DEV_TASKS_HREF, ORCHESTRATOR_HREF, PLANNING_REQUESTS_HREF, useNavCounts } from "@/lib/navCounts";
 import { IconAgents, IconBell, IconChart, IconGear, IconInbox, IconOffice, IconSearch } from "../icons";
+import { HumanToken } from "./HumanToken";
 
 // 메뉴: AI가 상위 탭이고, 그 AI가 맡은 서비스가 하위 탭이다. 서비스 안 화면(예: 고객 문의의 상담 콘솔)은 그 아래 한 단 더.
 // 고객사 계정은 시스템 관리자 하나이고, 회사가 켠 서비스는 전부 메뉴에 보인다(서비스 고르기에서 끈 서비스만 빠짐, src/demo/session.tsx).
@@ -226,6 +227,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
           <div className="flex shrink-0 items-center gap-4 text-ink-700">
             {account && canOpen(account, "/console") && <Link href="/console" title="문의 찾기" aria-label="문의 찾기"><IconSearch size={20} /></Link>}
             <IconBell size={20} />
+            <HumanToken />
             <AccountSwitcher />
           </div>
         </header>
