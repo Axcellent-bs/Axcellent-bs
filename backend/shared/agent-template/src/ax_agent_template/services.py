@@ -103,7 +103,15 @@ SERVICES: tuple[Service, ...] = (
         "coupon",
         "marketing",
         8103,
-        ("draft_notice", "publish_notice", "get_notice", "list_active_notices", "issue_coupon"),
+        (
+            "draft_notice",
+            "publish_notice",
+            "get_notice",
+            "list_active_notices",
+            "issue_coupon",
+            "start_campaign",
+            "record_campaign_result",
+        ),
         "공지·쿠폰",
     ),
     Service(
