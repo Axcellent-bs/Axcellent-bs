@@ -1,6 +1,6 @@
 # 캣북스 마케팅 에이전트 — Instagram 게시(SNS) 설계 초안
 
-> 작성: 2026-10-27, 이 레포로 옮김: 2026-11-03 · 상태: **초안(팀 검토 전)** · 대상: `backend/domains/marketing/`
+> 작성: 2026-10-27, 이 레포로 옮김: 2026-11-03, 안전 답변 반영: 2026-11-04 · 상태: **초안(팀 검토 전)** · 대상: `backend/domains/marketing/`
 > 전제 문서: `backend/docs/notes/marketing/instagram-policy-checklist.md`, `ai-influencer-pipeline.md`, `backend/shared/safety/src/ax_safety/rules/registry.toml`·`thresholds.toml`, 원본 레포(ax-backend)의 `docs/requirements.md`(SCN-A, SAF-01~11, DEP-MKT-01~04, 참고용)
 > 표기: 레포에서 확인한 사실은 그대로 적고, 확인하지 못한 것은 `[확인 필요]`, 팀이 정할 값은 `(TODO: 추후결정)`으로 둔다. 이 문서는 값을 확정하지 않는다.
 
@@ -19,7 +19,16 @@
 | 공통 로그 `contracts/data-access/common_log.py` | `backend/shared/agent-template/src/ax_agent_template/common_log.py` |
 
 - **이미 있는 것**: `ChannelCode`에 `"sns"`가 있다(`marketing_agent/schemas.py`). 배너 공지 연결은 PR #483, 쿠폰 쇼핑몰 연결은 PR #481(둘 다 머지 전)이라, 3절의 "`publish_notice`는 메모리에만 기록" 설명은 #483이 머지되면 배너 채널에 한해 바뀐다. SNS 채널(`sns`)은 그대로 메모리다.
-- **초안과 달라진 사실**: 3절의 "`generate_pr`가 `verifier = "safety"` 코드 규칙을 쓰는 선례"는 지금 레지스트리에 `generate_pr` 항목이 없다(검증자는 `planning`·`data` 등 다른 부서 skill을 가리킨다). 검증자를 safety 코드 규칙으로 두는 방식이 지금 관문에서 지원되는지 `[확인 필요]`. 요청 이슈 초안(`sns-safety-request.md`)의 질문 3과 이어진다.
+- **초안과 달라진 사실 (2026-11-04 정정)**: 이 문단의 이전 판에는 "레지스트리에 `generate_pr` 항목이 없다"고 적었는데 틀렸다. `registry.toml`에 `generate_pr`(owner = planning, B, `verifier = "safety"`)가 있고 `merge_pr`도 같다. 즉 검증 skill 없이 safety 코드 규칙만 도는 방식은 지금 관문에서 쓰이고 있다(`registry.toml` 확인).
+- **안전 쪽 답변 반영 (이슈 #487, PR #508·#510 머지, 2026-11-04)**: 안전이 SNS 게시와 영상 생성을 관문에 등록했다. 아래 절들에 반영했고, 요약은 다음과 같다. 근거는 이슈 #487의 안전 댓글, PR #508·#510 본문, `registry.toml`·`thresholds.toml`(origin/dev)이다.
+  - `publish_sns`: C, 항상 사람 승인(`registry.toml`).
+  - `generate_video`: B, 검증자 `safety`(검증 skill 없이 코드 규칙). 금액은 `cost_krw`, `claimed_cost_krw`와 다르면 `amount_mismatch`.
+  - 일일 건수는 새 metric `daily_count`가 관문 실행 기록으로 센다. 마케팅이 `today_post_count`를 보낼 필요가 없다. 승인되어 실행된 건만 세고 날짜는 UTC 기준이다(이슈 댓글).
+  - 항상-C 액션의 보류 사유는 `over_threshold`다. `high_impact`는 없고, 보고서 `rules`의 `base_grade`로 구분한다.
+  - `publish_notice`에 `channel_code="sns"`가 오면 safety도 C로 보류한다(규칙 `notice_sns_channel`). 마케팅 쪽 거부는 그대로 넣는다(이중 방어).
+  - `params.summary`는 저장은 되고 있었고, #508에서 보류 큐 화면에 나오게 했다(200자까지, 이슈 댓글).
+  - 기준값은 #510으로 바뀌었다(4절 아래 "안전 기준표" 참고).
+  - 안전 서버를 재시작하면 일일 건수·일일 비용이 0부터 다시 시작한다(관문 실행 기록이 메모리). 월 예산은 마케팅이 직접 막아야 한다.
 - **새 사실**: 2026-11-03 재헌이 #2-마케팅-고객지원에 `instagram.com/catbooks.lab`을 공유하며 "마케팅 AI 에이전트의 관여는 앞으로 이 계정에서 실시될 예정"이라고 알렸다. 10절 "게시 계정" 결정의 후보이며, 운영 주체 표기·테스트 계정 여부는 아직 정하지 않았다 `(TODO: 추후결정)`.
 - **하지 않은 것**: 코드는 아직 한 줄도 없다. 이 문서와 요청 이슈 초안만 올린다. 8절 구현 순서의 S0에 해당한다.
 
@@ -72,18 +81,40 @@
 
 기존 skill(README·`agent-card.json` 확인): `draft_notice`(read), `publish_notice`(A), `get_notice`(read), `list_active_notices`(read), `issue_coupon`(A, 기준 초과·금액 불일치 C). `ChannelCode`에 이미 `"sns"`가 있다.
 
-**충돌 1건(중요)**: 현재 `publish_notice`는 `channel_code="sns"`여도 **A로 바로 실행**된다(registry `publish_notice = A`, 채널 구분 없음). SNS는 외부 공개·되돌리기 어려움이므로 **별도 액션 `publish_sns`로 분리**하고, `publish_notice`는 `channel_code="sns"` 요청을 코드로 거부(`invalid_input`)하거나 `publish_sns`로 안내하도록 바꾼다(마케팅 폴더 안 변경, 계약 변경 없음). `[팀 확인]` — 또는 safety가 registry에서 `publish_notice`에 `when = { channel_code = "sns" }` 규칙으로 C를 거는 방식도 가능(값은 safety 몫).
+**충돌 1건(중요)**: 현재 `publish_notice`는 `channel_code="sns"`여도 **A로 바로 실행**된다(registry `publish_notice = A`, 채널 구분 없음). SNS는 외부 공개·되돌리기 어려움이므로 **별도 액션 `publish_sns`로 분리**하고, `publish_notice`는 `channel_code="sns"` 요청을 코드로 거부(`invalid_input`)하거나 `publish_sns`로 안내하도록 바꾼다(마케팅 폴더 안 변경, 계약 변경 없음). `[팀 확인]`
+
+**안전 쪽 처리 (2026-11-04 확인)**: safety도 `publish_notice`에 `channel_code = "sns"`가 오면 C로 막는다(`thresholds.toml`의 `notice_sns_channel`). 단 이 규칙은 값이 `sns`일 때만 걸리고, `channel_code`가 없는 요청은 지금처럼 A다(PR #508 본문). 그래서 마케팅 쪽 거부는 예정대로 넣는다(이중 방어, 이슈 댓글 4번).
 
 **이름 정리**: `ai-influencer-pipeline.md`의 `produce_short`(B)·`publish_short`(C)와 겹친다. 제안: `produce_short` → `generate_video`(공지·쿠폰·쇼츠 공통), `publish_short` → `publish_sns`(플랫폼 파라미터로 구분)로 **통합**해 액션을 2개만 등록한다. 기존 문서는 머지 뒤 각주로 맞춘다 `[팀 확인]`.
 
 | skill | 상태 변경 | 등급 제안 | 이유 | 대안 |
 | --- | --- | --- | --- | --- |
 | `draft_sns_post` | 없음 | read | 초안만 만든다. 문안은 v0 고정 템플릿(공지 방식), LLM은 이후 | — |
-| `generate_video` | 비용 발생(외부 유료 API) | **B**, 검증자 = `safety`(코드 규칙: 건당 비용 상한·길이·해상도·일일 누적) | 되돌릴 수 있지만 돈이 나간다. 초안 시점에는 `generate_pr`가 `verifier = "safety"` 코드 규칙을 쓰는 선례가 있었으나 **지금 레지스트리에는 없다** `[확인 필요]` | A + 비용 기준표(issue_coupon 방식: 한도 안 A, 초과 C). 교차검증할 다른 부서가 없어 B의 검증자는 safety 코드 규칙뿐 |
+| `generate_video` | 비용 발생(외부 유료 API) | **B**, 검증자 = `safety`(코드 규칙: 건당 비용 상한·길이·해상도·일일 누적) | 되돌릴 수 있지만 돈이 나간다. `generate_pr`가 `verifier = "safety"` 코드 규칙을 쓰는 선례가 지금 레지스트리에 **있다**. **등록 완료(2026-11-04)**: B, 검증자 `safety`, 검증 skill 없이 규칙만 돈다. 금액 필드는 `cost_krw`, `claimed_cost_krw`와 다르면 `amount_mismatch` | A + 비용 기준표(issue_coupon 방식: 한도 안 A, 초과 C). 교차검증할 다른 부서가 없어 B의 검증자는 safety 코드 규칙뿐 |
 | `check_sns_post` | 없음 | read (safety가 B 검증자로 부를 수 있는 skill 후보) | 코드 규칙 점검: 필수 문구·금칙어·규격 | 검증자를 **마케팅 자신**으로 두면 registry가 거부(owner=verifier 금지, registry 주석 확인). 따라서 safety 코드 규칙 또는 다른 부서가 검증해야 함 |
-| `publish_sns` | **외부 공개, 되돌리기 어려움** | **C(항상 사람 승인)** — 1차 | 요구사항 "되돌릴 수 없는 영역"에 "외부 고객 대상 발송"이 들어 있다(원본 레포 `issue-166-planning-grades.md`). 데모·초기엔 모든 게시를 사람이 본다 | **B**(검증자 safety 코드 규칙: AI 라벨·문구 일치·일일 건수) — 테스트 릴스로 규칙이 검증된 뒤 하향은 **사람 결정**(safety 메모: 자동 하향은 팀 결정 필요) |
+| `publish_sns` | **외부 공개, 되돌리기 어려움** | **C(항상 사람 승인)** — 1차. **등록 완료(2026-11-04)**: 레지스트리 기본 등급 C. 보류 사유는 `over_threshold`이고 보고서 `rules`의 `base_grade`로 구분한다 | 요구사항 "되돌릴 수 없는 영역"에 "외부 고객 대상 발송"이 들어 있다(원본 레포 `issue-166-planning-grades.md`). 데모·초기엔 모든 게시를 사람이 본다 | **B**(검증자 safety 코드 규칙: AI 라벨·문구 일치·일일 건수) — 테스트 릴스로 규칙이 검증된 뒤 하향은 **사람 결정**(safety 메모: 자동 하향은 팀 결정 필요) |
 
-미등록 액션은 safety가 C로 보류한다(`HoldReason.UNREGISTERED_ACTION`). 등록 전에도 **동작은 막히지 않고 사람 승인으로 간다**는 점은 안전하나, 라이브에서는 등록이 있어야 한다.
+미등록 액션은 safety가 C로 보류한다(`HoldReason.UNREGISTERED_ACTION`). `publish_sns`·`generate_video`는 2026-11-04 PR #508로 등록되어 이제 `unregistered_action`이 아니라 위 등급으로 판정된다.
+
+### 안전 기준표 현재 값 (`thresholds.toml`, origin/dev 2026-11-04 확인)
+
+PR #508의 시작값을 PR #510이 예상 사용량에 맞춰 바꿨다. 값은 모두 시작값이고, 실제 공급자 시험(S6, 3건)에서 비용을 재면 다시 본다(#510 본문). 넘어도 막지 않고 사람 승인(C)으로 간다.
+
+| 규칙 | 걸리는 조건 | #508 시작값 → 지금 |
+| --- | --- | --- |
+| `sns_ai_label_missing`, `sns_text_mismatch`, `sns_constraint_missing` | 각 필드 1 이상. 필드가 없거나 정수가 아니면 걸림 | 그대로 |
+| `sns_daily_posts` | 오늘(UTC) 게시 **4건째부터** (`daily_count` > 3) | 6건째 → 4건째 |
+| `video_cost_single` | 건당 **2,000원 이상** | 3,000원 → 2,000원 |
+| `video_cost_daily` | 오늘 합계 **10,000원 이상** | 20,000원 → 10,000원 |
+| `video_cost_zero` | 0원도 보류(안전이 더한 규칙. 0원이면 비용 상한을 그냥 지나가므로) | 신규 |
+| `video_duration` | 8초 초과. 필드가 없으면 걸림 | 그대로 |
+| `notice_sns_channel` | `publish_notice`의 `channel_code`가 `sns` | 신규 |
+
+- 근거(#510 본문): 영상 1건(720p 8초) 약 1,300원 = 0.81달러 × 1,500원 + 입력 토큰 여유. 환율 1,500원은 가정이다. 건당 2,000원은 1건 비용의 약 1.5배, 하루 10,000원이면 약 7건까지 자동이다. 하루 게시 3건은 작은 서점 계정 기준의 판단이다.
+- `thresholds.toml`의 `version`은 이후 다른 PR로 계속 올라가므로(2026-11-04 기준 5) 이 문서에는 버전 번호를 적지 않는다. 위 값은 그 시점 파일에서 직접 확인했다.
+- **`cost_krw`는 마케팅이 계산한 값을 관문이 믿는다.** 관문은 공급자 단가를 모른다(이슈 댓글). 단가표 계산을 틀리면 관문이 못 잡는다.
+- **재시작하면 다시 센다.** 관문 실행 기록은 메모리라 안전 서버를 재시작하면 일일 건수와 일일 비용이 0부터 시작한다(PR #508 본문). 월 예산 차단은 마케팅 설정이 맡는다.
+- **승인 결과 확인**: 승인된 건을 같은 키로 다시 물으면 `status`는 `executed`인데 `grade`는 `C`, `hold_reason`은 `over_threshold`로 남는다. `status`만 보고 판단한다. 기한(데모 10분) 안에 결정이 없으면 `rejected`다(이슈 댓글, `review_timeout_seconds = 600` 확인).
 
 ---
 
@@ -112,8 +143,8 @@
 | `MARKETING_VIDEO_MODEL` | 공급자 모델 ID. 기본 후보 `gemini-omni-1.1-flash`(GA). **`gemini-omni-flash-preview`는 쓰지 않는다**(2026-10-22 가장 이른 종료일) | 비움 → `(TODO: 추후결정)` |
 | `MARKETING_VIDEO_API_KEY` | 공급자 키(사람 입력) | 비움 |
 | `MARKETING_VIDEO_BASE_URL` | 엔드포인트(OpenAI 호환 래퍼를 쓸 수 있으면 `LLM_BASE_URL` 패턴 재사용 `[확인 필요]`) | 비움 |
-| `MARKETING_VIDEO_MAX_COST_KRW_PER_CLIP` | 건당 상한(코드가 생성 **전에** 추정 비용과 비교, 초과면 호출하지 않음) | `(TODO)` |
-| `MARKETING_VIDEO_MONTHLY_BUDGET_KRW` | 월 누적 상한(마케팅 쪽 1차 차단; safety 기준표의 일일 누적과 별도) | `(TODO)` |
+| `MARKETING_VIDEO_MAX_COST_KRW_PER_CLIP` | 건당 상한(코드가 생성 **전에** 추정 비용과 비교, 초과면 호출하지 않음) | 권장 `2000` (#510 권장값. **S6 단계에서 추가 예정, 아직 구현 안 됨**) |
+| `MARKETING_VIDEO_MONTHLY_BUDGET_KRW` | 월 누적 상한. **마케팅이 직접 막아야 한다**: safety는 일일 합계만 보고 재시작하면 다시 세므로 월 차단을 하지 않는다 | 권장 `50000`(약 38건, #510 권장값). **S6 단계에서 추가 예정, 아직 구현 안 됨** |
 | `MARKETING_VIDEO_TIMEOUT_S` | 생성 대기 상한 | `(TODO)` |
 | `MARKETING_MEDIA_DIR` | 생성물 저장 경로(컨테이너 볼륨) | `(TODO)` |
 
@@ -169,7 +200,7 @@
 - **Meta 서버가 접근할 수 있는 영상 URL**이 필요하다 → 로컬 볼륨만으로는 안 되고, 공개 HTTPS 호스팅(shop-web 정적 경로·오브젝트 스토리지 등) `[확인 필요 — 어디에 둘지, 누가 소유하는지]`. 서명 URL·만료 시간을 두고, 게시 뒤 원본 URL은 닫을 수 있는지 확인.
 - Reel 규격 `[확인 필요]`: 9:16, MP4(H.264/AAC), 길이 하한·상한, 파일 크기 상한, 프레임레이트. 공식 표를 설정으로 옮기고 `check_sns_post`가 ffprobe로 검사.
 - 실패 처리: 컨테이너 `ERROR` → 사유 코드 기록 후 `failed`(재시도는 사람 판단). 토큰 만료(190 계열) → `failed`, 사람에게 토큰 재발급 안내(에이전트는 발급 안 함). 전송 뒤 응답 유실 → 같은 `creation_id`로 재게시하지 않고 `GET /{ig-user-id}/media`로 최근 게시물에서 `creation_id`/캡션 해시 대조 `[확인 필요: 대조 가능한 필드]`.
-- 게시 한도: 체크리스트가 "24시간 100건 / 50건 어긋남"을 적어 두었다 `[확인 필요]`. 마케팅 설정의 일일 상한은 그보다 훨씬 낮게(`(TODO)`), safety 기준표에도 같은 취지의 규칙 제안(요청 이슈 초안).
+- 게시 한도: 체크리스트가 "24시간 100건 / 50건 어긋남"을 적어 두었다 `[확인 필요]`. 마케팅 설정의 일일 상한은 그보다 훨씬 낮게(`(TODO)`). safety 기준표에는 같은 취지의 `sns_daily_posts`(오늘 4건째부터 C)가 들어갔다.
 
 ### 공식 문서로 확인할 항목
 1. `is_ai_generated` 파라미터의 정확한 이름·적용 미디어 종류(릴스·이미지·캐러셀)·응답 필드.
@@ -192,7 +223,7 @@
 | 허위·과장 | 캡션은 `get_notice` 저장소의 사실 필드·쿠폰 제약 사항에서만 생성. **장애 원인·영향 숫자 금지**(README). 쿠폰은 제약 사항 없으면 reject(체크리스트) | 마케팅 |
 | 중복 게시 | 멱등 키 `"{context_id}:publish_sns:{post_draft_id}"`; `media_publish` 1회; 응답 유실 시 재게시 금지 | 마케팅 + safety(동일 키 재요청은 이전 판정) |
 | 외부 공개 되돌리기 어려움 | `publish_sns` C(사람 승인) 제안, fail-closed(관문 무응답 → 실행 안 함) | safety |
-| 비용 폭주 | 생성 전 추정 비용 vs 건당 상한, 월 누적 상한(마케팅), 일일 누적 기준(safety 기준표 제안) | 마케팅 + safety |
+| 비용 폭주 | 생성 전 추정 비용 vs 건당 상한, 월 누적 상한(마케팅이 직접. safety는 재시작하면 일일 누적이 0으로 돌아감), 일일 누적 기준(safety 기준표 `video_cost_daily` 10,000원) | 마케팅 + safety |
 | 계정 보안 | 토큰·키는 `.env`만, 로그·이슈·커밋 금지(플랫폼 약관 6.a.iv). 토큰 입력·재발급은 사람. 장기 토큰 만료 전 알림만 `(TODO)` | 사람 + 마케팅 |
 | 프롬프트 주입 | 외부 입력은 `untrusted`로만, 게시 문안 생성에 쓰지 않음(SCN-S 필수 항목과 같은 원칙) | 마케팅 |
 | 정책 위반(스팸·조건부) | 참여 조건 문구 금칙어("팔로우하면"·"좋아요 누르면") 코드 검사, 일일 건수 상한, 문구 변주 | 마케팅 |
@@ -204,12 +235,12 @@
 | 단계 | 내용 | 담당 | 완료 기준 |
 | --- | --- | --- | --- |
 | S0 | 이 문서 검토·열린 결정 1차 합의 | 총괄 준하, 마케팅 재헌, 안전 태윤 | 10절 중 "게시 등급·공급자·라벨 문구 담당" 결정 |
-| S1 | 안전 쪽 요청 이슈 등록(`sns-safety-request.md`) | 재헌 | 이슈 번호 발급, 태윤 답변 |
+| S1 | 안전 쪽 요청 이슈 등록(`sns-safety-request.md`) | 재헌 | 이슈 번호 발급, 태윤 답변 — **완료(이슈 #487, 답변 반영 2026-11-04)** |
 | S2 | `draft_sns_post`(read, 고정 템플릿) + `check_sns_post`(read) + 스키마·테스트. `publish_notice`의 `sns` 채널 거부 | 재헌 (`domains/marketing/` 안) | `uv run pytest domains/marketing` 통과, 필수 문구 누락 시 reject 테스트 |
 | S3 | `generate_video` 목 모드 + 공급자 인터페이스 + ffmpeg 오버레이(목에서는 자리표시 영상에 오버레이) | 재헌 | 목에서 `labeled.mp4` 생성·해시 기록, 비용 상한 초과 시 호출 안 함 테스트 |
-| S4 | safety 등록(registry·thresholds) — **태윤 폴더** | 태윤 (사람 승인 파일) | `uv run pytest shared/safety` 통과, 미등록 → C 유지 테스트 |
+| S4 | safety 등록(registry·thresholds) — **태윤 폴더** | 태윤 (사람 승인 파일) | `uv run pytest shared/safety` 통과, 미등록 → C 유지 테스트 — **등록은 완료(PR #508·#510 머지)**. 마케팅 쪽 연동(S2·S5)은 아직 |
 | S5 | `publish_sns` 목 어댑터(`MARKETING_SNS_PROVIDER=mock`), `execute()` 연동, C 보류 → 승인 → 게시 로컬 확인 | 재헌 + 태윤 | 로컬 safety로 held → approve → executed 1회 |
-| S6 | 실제 공급자 1개로 `generate_video` 테스트 3건(9절) | 재헌 (사람이 키 입력) | 비용·시간·오버레이 가독성 기록 |
+| S6 | 실제 공급자 1개로 `generate_video` 테스트 3건(9절). `MARKETING_VIDEO_MAX_COST_KRW_PER_CLIP=2000`·`MARKETING_VIDEO_MONTHLY_BUDGET_KRW=50000` 설정과 월 예산 차단 구현을 이 단계에서 추가한다 | 재헌 (사람이 키 입력) | 비용·시간·오버레이 가독성 기록. 실측 비용으로 안전 기준값(#510)을 다시 본다 |
 | S7 | Instagram 테스트 계정에 **릴스 1건** 게시(사람 승인) | 재헌 + 사람 | API 응답·앱 화면 라벨 기록 분리 저장 |
 | S8 | 이벤트·계약 필요 시 계약 PR(새 이벤트 `sns.published` 등, 추가만) | 계약 소유자 | 계약 호환 검사 통과 |
 | S9 | 시연 리허설(시나리오 A 6+ 단계, 이미지 게시) | 준하·재헌 | 연속 3회 성공(SCN-A 기준과 동일) |
@@ -246,16 +277,18 @@
 
 ---
 
-## 10. 열린 결정 목록 — 전부 `(TODO: 추후결정)`, 임의 기본값을 채우지 않는다
+## 10. 열린 결정 목록 — `(TODO: 추후결정)`, 임의 기본값을 채우지 않는다
 
-| # | 결정 | 보기 | 정하는 사람 |
-| --- | --- | --- | --- |
-| 1 | 영상 생성 **예산**(건당·월) | 원화 상한, 알림 기준 | 준하·태윤(기준표) |
-| 2 | **공급자 최종** | Gemini Omni Flash 기본 유지 / MiniMax / Wan / Kling, Seedance는 허용 조항 확인 뒤 | 팀(9-3 결과 뒤) |
-| 3 | **게시 등급** | `publish_sns` C 유지 / 조건부 B(검증자 safety 코드 규칙), `generate_video` B / A+기준표 | 태윤(safety) |
-| 4 | **AI 라벨 문구·크기·위치** | 법령·가이드라인 확인 뒤 설정 파일 값 | 재헌 초안 → 팀·변호사 |
-| 5 | **게시 계정** | 테스트 계정만 / 시연용 공식 계정(`catbooks.lab` 후보), 운영 주체 표기 | 준하·재헌 |
-| 6 | **생성물·게시 기록 보관 기간** | 개인정보 방침 3개월에 맞춤 / 자산은 별도(개인정보 아님) / 게시 기록은 감사용으로 더 길게 | 재헌 → 팀 |
-| 7 | 영상 공개 호스팅 위치·소유자 | shop-web 정적 / 별도 스토리지 | 준하·재헌 |
-| 8 | 새 이벤트(`sns.published`) 추가 여부 | `notice.published(channel_code=sns)` 재사용 / 계약 추가 | 계약 소유자 |
-| 9 | `publish_notice`의 `sns` 채널 처리 | 코드 거부 / registry `when` 규칙 | 재헌·태윤 |
+2026-11-04: 안전 답변으로 1·3·9번이 (일부) 답이 나왔다. 아래 표의 "상태" 열을 본다.
+
+| # | 결정 | 보기 | 정하는 사람 | 상태 |
+| --- | --- | --- | --- | --- |
+| 1 | 영상 생성 **예산**(건당·월) | 원화 상한, 알림 기준 | 준하·태윤(기준표) | **부분 답변**: 안전 기준표는 건당 2,000원·일일 10,000원(#510), 마케팅 설정 권장은 건당 2,000원·월 50,000원. 모두 시작값이고 S6 실측 뒤 재검토. 월 예산 확정은 아직 |
+| 2 | **공급자 최종** | Gemini Omni Flash 기본 유지 / MiniMax / Wan / Kling, Seedance는 허용 조항 확인 뒤 | 팀(9-3 결과 뒤) | 열림 |
+| 3 | **게시 등급** | `publish_sns` C 유지 / 조건부 B(검증자 safety 코드 규칙), `generate_video` B / A+기준표 | 태윤(safety) | **답변됨**: `publish_sns` C 항상 사람 승인, `generate_video` B(검증자 safety). B로의 하향은 여전히 사람 결정 |
+| 4 | **AI 라벨 문구·크기·위치** | 법령·가이드라인 확인 뒤 설정 파일 값 | 재헌 초안 → 팀·변호사 | 열림 |
+| 5 | **게시 계정** | 테스트 계정만 / 시연용 공식 계정(`catbooks.lab` 후보), 운영 주체 표기 | 준하·재헌 | 열림 |
+| 6 | **생성물·게시 기록 보관 기간** | 개인정보 방침 3개월에 맞춤 / 자산은 별도(개인정보 아님) / 게시 기록은 감사용으로 더 길게 | 재헌 → 팀 | 열림 |
+| 7 | 영상 공개 호스팅 위치·소유자 | shop-web 정적 / 별도 스토리지 | 준하·재헌 | 열림 |
+| 8 | 새 이벤트(`sns.published`) 추가 여부 | `notice.published(channel_code=sns)` 재사용 / 계약 추가 | 계약 소유자 | 열림 |
+| 9 | `publish_notice`의 `sns` 채널 처리 | 코드 거부 / registry `when` 규칙 | 재헌·태윤 | **답변됨**: 둘 다 한다. 마케팅이 코드로 거부하고 safety도 `notice_sns_channel`로 C 보류(이중 방어). 마케팅 쪽 거부 코드는 S2에서 넣는다 |
