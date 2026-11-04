@@ -35,7 +35,7 @@ RESULTS = {
         _v("a2", "만년필 잉크 리뷰", ("잉크", "필사", "다꾸"), 3000),
         _v("a3", "필사 루틴 만년필", ("필사", "다꾸", "shorts"), 2000),
         _v("a4", "긴 영상", ("필사",), 9000, seconds=300),  # 숏츠 길이 밖
-        _v("a5", "fountain pen", ("잉크",), 500),  # 한국어 아님 (제목·채널 이름에 한글 없음)
+        _v("a5", "fountain pen", ("잉크",), 500),  # 제목은 영문이지만 영상 언어가 ko
     ],
     "무지 노트": [
         _v("b1", "무지노트 다꾸 꿀팁", ("다꾸", "스티커"), 800),
@@ -175,3 +175,40 @@ def test_same_object_is_merged() -> None:
     assert set(kept) == {"만년필 잉크", "잉크"} and kept["만년필 잉크"].merged == {
         "만년필 잉크 추천"
     }
+
+
+def test_terms_from_the_same_video_set_are_one_object() -> None:
+    four = {"a", "b", "c", "d"}
+    terms = {
+        "대통령지지율": dsub.Term("대통령 지지율", set(four), {"title"}, set()),
+        "역대대통령": dsub.Term("역대 대통령", set(four), {"title"}, set()),
+        "국정수행": dsub.Term("국정수행", set(four), {"tag"}, set()),
+        "다꾸": dsub.Term("다꾸", {"x", "y"}, {"tag"}, set()),
+        "스티커": dsub.Term("스티커", {"x", "y"}, {"tag"}, set()),  # 2개 겹침은 우연으로 봄
+    }
+    kept = {t.name: t for t in dsub.merge_same(terms)}
+    assert set(kept) == {"국정수행", "다꾸", "스티커"}  # 태그 이름을 남김
+    assert kept["국정수행"].merged == {"대통령 지지율", "역대 대통령"}
+
+
+def test_baseline_is_the_median_over_cached_seed_searches(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    _run(env, FakeYouTube())
+    store = dsub.SubtopicStore(env["DATA_SUBTOPICS_DB"])
+    base = dsub.baseline(
+        [s.keyword for s in PROFILE.seed_keywords], store, dsub.load_config(env), NOW
+    )
+    store.close()
+    # 만년필 a1·a2·a3·a5(1000·3000·2000·500, a5는 영상 언어가 ko라 남음) + 무지 노트
+    # b1·b2(800·1200) → 중앙값 1100, 6개 (a4는 길이 밖)
+    assert base == (1100.0, 6)
+
+
+def test_axis_decisions_are_kept_so_the_same_name_keeps_its_axis(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    first = _run(env, FakeYouTube())
+    flipped = AxisLLM({"필사": "같이 묶이는 관심사"})  # 두 번째 LLM 답이 달라도
+    again = _run(env, FakeYouTube(), llm=flipped)
+    a = {s.name: s.axis for s in first.subtopics}
+    b = {s.name: s.axis for s in again.subtopics}
+    assert a == b and b["필사"] == "활용 방식" and flipped.seen == {}  # 다시 묻지 않음
