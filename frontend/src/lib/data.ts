@@ -1218,6 +1218,21 @@ export interface CampaignEffectOutput {
   revenue: CampaignChange;
   coupons: CampaignCoupons;
   summary: string;
+  sales?: CampaignSales | null;
+  incremental_orders?: number | null; // 모르면 null. 0으로 채우지 않는다
+  schema_version?: string;
+  generated_at?: string | null;
+}
+/** 캠페인 판매액 (증분). 기준선이 모자라면 unknown + 이유 */
+export interface CampaignSales {
+  status: "known" | "unknown";
+  unknown_reason?: string | null;
+  baseline_days: number;
+  incremental_gross_krw?: number | null;
+  incremental_low_krw?: number | null;
+  incremental_high_krw?: number | null;
+  direction?: "up" | "down" | "uncertain" | null;
+  direction_reason?: string | null;
 }
 export const CAMPAIGN_DIRECTION_KO: Record<CampaignDirection, string> = { up: "늘었음", none: "같음", down: "줄었음" };
 

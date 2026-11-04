@@ -40,6 +40,27 @@ def _mock(monkeypatch: pytest.MonkeyPatch) -> None:
     state().started_override = _AnyStarted()
 
 
+def test_unknown_orders_stay_empty_and_measured_values_are_kept() -> None:
+    unknown = CampaignResultInput(**_result(gmv=None, source="data.campaign_effect.v2"))
+    record = cp.compute_result(unknown.model_dump())
+    assert record["orders"] is None and record["status"] == "waiting_revenue"
+
+    # 증분이 음수면 재무 칸은 0, 잰 값은 그대로 남는다. 손익은 광고비만큼 손해다
+    down = CampaignResultInput(
+        **_result(gmv=0, spend=10_000, source="data.campaign_effect.v2"),
+        orders=0,
+        measured_gmv_krw=-30_000,
+        measured_orders=-3,
+        effect_generated_at="2026-11-04T00:00:00Z",
+    )
+    record = cp.compute_result(down.model_dump())
+    assert (record["orders"], record["measured_orders"]) == (0, -3)
+    assert record["measured_gmv_krw"] == -30_000
+    assert (record["status"], record["profit_krw"]) == ("recorded", -10_000)
+    with pytest.raises(ValueError):
+        CampaignResultInput(**_result(), orders=-1)
+
+
 def _result(cid: str = "c1", gmv: int | None = 1_000_000, spend: int = 100_000, **kw: Any) -> dict:
     return {
         "campaign_id": cid,

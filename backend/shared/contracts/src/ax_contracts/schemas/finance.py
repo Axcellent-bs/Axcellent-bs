@@ -116,9 +116,13 @@ class CampaignResultInput(AxModel):
     gmv_krw: int | None = Field(default=None, ge=0)  # 캠페인 때문에 늘어난 판매액
     impressions: int | None = Field(default=None, ge=0)
     clicks: int | None = Field(default=None, ge=0)
-    orders: int | None = Field(default=None, ge=0)
+    orders: int | None = Field(default=None, ge=0)  # 증분 주문 수. gmv_krw와 같은 증분 기준
     source: str  # 숫자의 출처. 예: "data.campaign_effect"
     # spend_krw는 광고 플랫폼 보고서의 실제 집행액이다. 관문을 지나 시작한 캠페인만 기록된다
+    # 데이터가 잰 증분 그대로(음수 가능). 증분이 음수면 gmv_krw·orders는 0이고 잰 값은 여기 남는다
+    measured_gmv_krw: int | None = None
+    measured_orders: int | None = None
+    effect_generated_at: str | None = None  # campaign_effect의 generated_at
 
 
 class CampaignBudgetReviewInput(AxModel):
