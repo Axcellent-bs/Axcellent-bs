@@ -78,7 +78,7 @@ async def test_sns_report_names_the_failed_check(
 async def test_sns_daily_limit_counts_executions_not_request_values(
     gate: Gate, clock: Any, act
 ) -> None:
-    for n in range(5):
+    for n in range(3):
         held = await gate.execute(
             act("publish_sns", "marketing", f"s{n}", **_sns(today_post_count=0))
         )
@@ -89,8 +89,8 @@ async def test_sns_daily_limit_counts_executions_not_request_values(
     rejected = await gate.execute(act("publish_sns", "marketing", "r1", **_sns()))
     await gate.decide_review(rejected.review_id or "", "rejected", "taeyoon", None)
 
-    sixth = await gate.execute(act("publish_sns", "marketing", "s5", **_sns(today_post_count=0)))
-    assert _rule_keys(gate, sixth.review_id) == {"sns_daily_posts"}
+    fourth = await gate.execute(act("publish_sns", "marketing", "s5", **_sns(today_post_count=0)))
+    assert _rule_keys(gate, fourth.review_id) == {"sns_daily_posts"}
 
     clock.advance(24 * 3600)  # 다음 날(UTC)에는 다시 센다
     next_day = await gate.execute(act("publish_sns", "marketing", "s6", **_sns()))
@@ -111,7 +111,7 @@ async def test_video_within_limits_passes_on_rules_without_a_verifier_agent(
 @pytest.mark.parametrize(
     ("over", "key"),
     [
-        ({"cost_krw": 3000}, "video_cost_single"),
+        ({"cost_krw": 2000}, "video_cost_single"),
         ({"cost_krw": 0}, "video_cost_zero"),
         ({"duration_s": 9}, "video_duration"),
         ({"duration_s": None}, "video_duration"),
@@ -129,12 +129,12 @@ async def test_video_over_a_limit_is_held(gate: Gate, act, over: dict[str, Any],
 
 @pytest.mark.asyncio
 async def test_video_daily_total_holds_the_clip_that_reaches_the_limit(gate: Gate, act) -> None:
-    for n in range(6):
+    for n in range(5):
         ok = await gate.execute(
-            act("generate_video", "marketing", f"v{n}", **_video(cost_krw=2900))
+            act("generate_video", "marketing", f"v{n}", **_video(cost_krw=1900))
         )
         assert ok.status == "executed"
-    held = await gate.execute(act("generate_video", "marketing", "v6", **_video(cost_krw=2900)))
+    held = await gate.execute(act("generate_video", "marketing", "v6", **_video(cost_krw=1900)))
     assert held.status == "held"
     assert _rule_keys(gate, held.review_id) == {"video_cost_daily"}
 
