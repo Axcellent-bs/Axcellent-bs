@@ -250,7 +250,7 @@ export SHOP_DEGRADED_SUSTAIN_S="${SHOP_DEGRADED_SUSTAIN_S:-20}" SHOP_MONITOR_INT
 # 없는 이름만 새로 만든다. 새 토큰이 필요하면 bash scripts/run_all.sh reset
 # 사람별 토큰: AX_PEOPLE="예진,준하"처럼 이름을 주면 사람마다 사람 토큰(승인·머지·재무 결정)과
 # 작업 대기열 토큰(내 Claude MCP)을 따로 만든다. 누가 결정했는지 관문·화면 기록에 이름이 남는다.
-# 내 토큰 보기: sed -n 's/^HUMAN_TOKEN\.예진=//p' backend/.data/tokens.env (화면 오른쪽 위 "내 토큰"에 넣는다)
+# 내 작업 토큰 보기: sed -n 's/^WORK_TOKEN\.예진=//p' backend/.data/tokens.env (내 Claude 연결에 넣는다)
 NAMES="$(echo "$APPS" | awk 'NF {print $1}' | tr '\n' ' ') support marketing hr infra admin"
 read -r AX_AGENT_TOKENS HUMAN_TOKEN WORK_TOKEN PEOPLE_HUMAN PEOPLE_WORK < <("$PY" -c "
 import os, secrets, sys
@@ -295,9 +295,7 @@ export DEV_WORK_ALLOW_HUMAN="${DEV_WORK_ALLOW_HUMAN:-0}"
 token_of() { echo "$AX_AGENT_TOKENS" | tr ',' '\n' | sed -n "s/^$1=//p"; }
 # 화면(개발 서버)에 넘길 값. 이 파일은 커밋하지 않는다(.data/)
 {
-  # 사람 토큰을 화면 빌드에 넣으면 그 화면을 여는 누구나 브라우저에서 볼 수 있다. 여러 사람이 쓰는
-  # 서버에서는 AX_WEB_BAKE_HUMAN_TOKEN=0으로 빼고, 사람마다 화면 오른쪽 위 "내 토큰"에 자기 토큰을 넣는다
-  [ "${AX_WEB_BAKE_HUMAN_TOKEN:-1}" = "0" ] || echo "VITE_SAFETY_HUMAN_TOKEN=$HUMAN_TOKEN"
+  echo "VITE_SAFETY_HUMAN_TOKEN=$HUMAN_TOKEN"
   echo "VITE_SHOP_ADMIN_TOKEN=$(token_of admin)"
   echo "VITE_DATA_A2A_TOKEN=$(token_of dashboard-api)"
   # 읽기 전용 열람 토큰(.env의 SHOP_VIEWER_TOKEN)이 있으면 화면에도 넘긴다. 쓰기는 못 하는 값이다

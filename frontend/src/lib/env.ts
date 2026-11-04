@@ -8,28 +8,8 @@ export const DASHBOARD_API_URL = import.meta.env.VITE_DASHBOARD_API_URL ?? 'http
 /** 재무 AI: 안전 레이어(safety, 8001)와 재무 에이전트(finance, 8105) 조회 API */
 export const SAFETY_API_URL = import.meta.env.VITE_SAFETY_API_URL ?? 'http://localhost:8001'
 export const FINANCE_AGENT_URL = import.meta.env.VITE_FINANCE_AGENT_URL ?? 'http://localhost:8105'
-/**
- * C 보류 결정·할 일함 완료 등 쓰기에 쓰는 사람 토큰. 비어 있으면 쓰기 버튼을 끈다.
- * 화면 오른쪽 위 "내 토큰"에 넣은 내 토큰(이 브라우저에만 저장)을 먼저 쓰고, 없으면 빌드 때 넣은 값을 쓴다.
- * 여러 사람이 쓰는 서버는 빌드에 넣지 않고(run_all.sh AX_WEB_BAKE_HUMAN_TOKEN=0) 사람마다 자기 토큰을 넣는다.
- * 그래야 토큰이 화면 코드에 그대로 실려 아무나 보지 않고, 누가 결정했는지 기록에 이름이 남는다.
- */
-export const HUMAN_TOKEN_KEY = 'ax.humanToken'
-const MY_HUMAN_TOKEN = (() => {
-  try { return localStorage.getItem(HUMAN_TOKEN_KEY) ?? '' } catch { return '' }
-})()
-const BUILD_HUMAN_TOKEN = import.meta.env.VITE_SAFETY_HUMAN_TOKEN ?? ''
-export const SAFETY_HUMAN_TOKEN = MY_HUMAN_TOKEN || BUILD_HUMAN_TOKEN
-/** 사람 토큰을 어디서 얻었나: mine(내가 넣음) · build(화면 빌드) · none */
-export const HUMAN_TOKEN_FROM: 'mine' | 'build' | 'none' = MY_HUMAN_TOKEN ? 'mine' : BUILD_HUMAN_TOKEN ? 'build' : 'none'
-/** 내 토큰을 넣거나(값) 지운다(null). 모든 화면이 새 토큰을 쓰도록 새로 고친다 */
-export function setMyHumanToken(token: string | null) {
-  try {
-    if (token && token.trim()) localStorage.setItem(HUMAN_TOKEN_KEY, token.trim())
-    else localStorage.removeItem(HUMAN_TOKEN_KEY)
-  } catch { /* 저장이 막힌 브라우저: 빌드 값만 쓴다 */ }
-  window.location.reload()
-}
+/** C 보류 결정·할 일함 완료 등 쓰기에 쓰는 사람 토큰. 비어 있으면 쓰기 버튼을 끈다 */
+export const SAFETY_HUMAN_TOKEN = import.meta.env.VITE_SAFETY_HUMAN_TOKEN ?? ''
 /** 총괄(orchestrator, 8000). 총괄은 CORS가 없어 기본값은 Vite 개발 프록시(/orch → vite.config.ts) */
 export const ORCHESTRATOR_URL = import.meta.env.VITE_ORCHESTRATOR_URL ?? '/orch'
 /**
