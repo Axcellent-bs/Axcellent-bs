@@ -80,10 +80,56 @@ def irreversible_paths(paths: list[str]) -> list[str]:
     return [p for p in paths if any(p.startswith(prefix) for prefix in IRREVERSIBLE_PREFIXES)]
 
 
+# ---- 에이전트 설정·실행 훅 (고객사·레포와 상관없이, 깊이와 상관없이)
+# AI가 만든 PR이 이 파일을 바꾸면 머지 뒤 이 레포를 여는 개발자의 Claude Code·Codex·에디터나
+# CI가 그 지시·훅·스크립트를 자동으로 읽고 실행한다 (AGENTS.md 공격, 2026-11 Postman 훅 사건과
+# 같은 구조). 그래서 자동 머지하지 않고 항상 사람이 본다.
+AGENT_CONFIG_DIRS: dict[str, str] = {
+    ".claude": "Claude Code 설정·훅",
+    ".codex": "Codex 설정",
+    ".cursor": "Cursor 설정",
+    ".gemini": "Gemini CLI 설정",
+    ".vscode": "에디터 작업·실행 설정",
+    ".devcontainer": "개발 컨테이너 설정",
+    ".husky": "git 훅",
+    ".githooks": "git 훅",
+    ".github": "CI·Actions",
+}
+AGENT_CONFIG_FILES: dict[str, str] = {
+    "claude.md": "에이전트 지시 파일",
+    "agents.md": "에이전트 지시 파일",
+    "gemini.md": "에이전트 지시 파일",
+    ".mcp.json": "MCP 서버 설정",
+    ".cursorrules": "에이전트 지시 파일",
+    ".pre-commit-config.yaml": "git 훅",
+    ".npmrc": "패키지 설치 설정",
+    "package.json": "설치·실행 스크립트 (postinstall 등)",
+    "pyproject.toml": "설치·빌드 설정",
+    "setup.py": "설치 스크립트",
+    "makefile": "빌드 스크립트",
+}
+
+
+def agent_config_reason(path: str) -> str | None:
+    """에이전트 설정·실행 훅 파일이면 그 이유 (아니면 None)."""
+    parts = [p for p in path.replace("\\", "/").split("/") if p]
+    if not parts:
+        return None
+    for part in parts[:-1]:
+        if part.lower() in AGENT_CONFIG_DIRS:
+            return AGENT_CONFIG_DIRS[part.lower()]
+    return AGENT_CONFIG_FILES.get(parts[-1].lower())
+
+
 def merge_risk_paths(paths: list[str]) -> list[str]:
-    """머지하면 사람이 봐야 하는 경로: 되돌릴 수 없는 영역 + 머지 위험 경로(#200)."""
+    """머지하면 사람이 봐야 하는 경로: 되돌릴 수 없는 영역 + 머지 위험 경로(#200)
+    + 에이전트 설정·실행 훅 파일."""
     prefixes = (*IRREVERSIBLE_PREFIXES, *MERGE_RISK_PREFIXES)
-    return [p for p in paths if any(p.startswith(prefix) for prefix in prefixes)]
+    return [
+        p
+        for p in paths
+        if any(p.startswith(prefix) for prefix in prefixes) or agent_config_reason(p)
+    ]
 
 
 def planned_area(index: int) -> str:

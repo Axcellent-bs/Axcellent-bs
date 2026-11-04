@@ -202,6 +202,24 @@ def test_safety_protected_paths_count_as_merge_risk() -> None:
     assert merge_risk_paths(["shop-web/src/pages/Notice.tsx", "docs/a.md"]) == []
 
 
+def test_agent_config_and_hook_files_are_merge_risk_at_any_depth() -> None:
+    """AI PR이 에이전트 지시·훅·설치 스크립트를 바꾸면 자동 머지하지 않는다 (AGENTS.md·훅 주입)."""
+    risky = [
+        ".claude/settings.json",
+        "shop-web/.claude/hooks/start.sh",
+        "shop-web/CLAUDE.md",
+        "docs/AGENTS.md",
+        ".mcp.json",
+        "shop-web/package.json",
+        "shop-api/pyproject.toml",
+        ".vscode/tasks.json",
+        ".github/workflows/ci.yml",
+    ]
+    assert merge_risk_paths(risky) == risky
+    plain = ["shop-web/src/pages/Notice.tsx", "docs/claude-notes.md", "shop-web/package-lock.json"]
+    assert merge_risk_paths(plain) == []
+
+
 @pytest.mark.role("dev")
 def test_plain_shop_web_path_passes_allowed_paths(service) -> None:
     pr = _pr(service, "PR #28").model_copy(
