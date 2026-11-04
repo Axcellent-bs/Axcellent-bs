@@ -127,6 +127,7 @@ function InsightCard({ i, facts }: { i: TrendInsight; facts: DataFact[] | undefi
           {[i.ad_material_reason, i.real_entity && i.entity_names.length ? `이름 · ${i.entity_names.join(", ")}` : null].filter(Boolean).map((x) => <span key={x} className="ml-1 text-xs text-ink-500">{x}</span>)}
         </FoldRow>
         {i.company_reason && <FoldRow label="회사 관련">{i.company_reason}</FoldRow>}
+        {i.company_relevance_reason && <FoldRow label="회사 연결">{i.company_relevance_reason}</FoldRow>}
         <FoldRow label="연결 상품"><Products i={i} /></FoldRow>
         {season && <FoldRow label="시즌 근거">{season}</FoldRow>}
         <FoldRow label="연령대">
@@ -175,10 +176,12 @@ export function InsightBrief({ state, examples, examplesCount }: {
   const out = state.kind === "ok" ? state.out : null;
   if (!kpiLive) return null;
   const all = out?.insights ?? [];
-  // 위: 기회 가설 카드 → 회사 관련 인사이트. 가운데: 상품이 연결된 나머지. 맨 아래 접힘: 상품 연결 없는 화제 (서버 순서 그대로)
-  const companyOnes = all.filter((i) => i.company_related === true);
-  const linked = all.filter((i) => i.company_related !== true && i.products.length > 0);
-  const unlinked = all.filter((i) => i.company_related !== true && i.products.length === 0);
+  // 위: 기회 가설 카드 → 회사 관련 인사이트. 가운데: 기획에 넘기는 나머지.
+  // 맨 아래 접힘: 참고용(reference_only — 회사와 연결 없음·광고 재료 아님·분류 대기). 기획에 넘기지 않는다 (서버 순서 그대로)
+  const passed = (i: TrendInsight) => !i.reference_only && i.classification_pending !== true;
+  const companyOnes = all.filter((i) => passed(i) && i.company_related === true);
+  const linked = all.filter((i) => passed(i) && i.company_related !== true);
+  const unlinked = all.filter((i) => !passed(i));
   const meta = out ? [out.day ? `${out.day} 브리프` : null, out.generated_at ? `만든 시각 ${when(out.generated_at)}` : null, out.cached ? "오늘 만든 브리프" : null].filter(Boolean).join(" · ") : null;
   const hasTop = out !== null && (out.opportunities !== undefined || companyOnes.length > 0);
   return (
@@ -209,7 +212,9 @@ export function InsightBrief({ state, examples, examplesCount }: {
             )}
             {unlinked.length > 0 && (
               <details className="card p-4">
-                <summary className="cursor-pointer text-sm font-semibold text-ink-900">상품 연결 없는 화제 {unlinked.length}개</summary>
+                <summary className="cursor-pointer text-sm font-semibold text-ink-900">
+                  기획에 넘기지 않는 참고용 화제 {unlinked.length}개 <span className="font-normal text-ink-500">· 회사와 연결 없음·광고 재료 아님</span>
+                </summary>
                 <ul className="mt-4 space-y-4">{unlinked.map((i) => <InsightCard key={i.insight_id} i={i} facts={out.facts} />)}</ul>
               </details>
             )}
