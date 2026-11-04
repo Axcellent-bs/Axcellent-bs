@@ -124,7 +124,7 @@ def test_self_approval_is_403_over_http(client, act, gate) -> None:
     response = client.post(
         f"/api/safety/reviews/{held.review_id}/decision",
         json={"decision": "approved"},
-        headers={"Authorization": "Bearer human:taeyoon".encode().decode("latin-1")},
+        headers={"Authorization": "Bearer human:taeyoon"},
     )
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "SELF_APPROVAL"
