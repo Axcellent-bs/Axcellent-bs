@@ -427,3 +427,64 @@ def test_old_rows_without_a_rules_version_are_not_used_as_cache(tmp_path: Path) 
     conn = sqlite3.connect(tmp_path / "promo.db")
     assert "rules" in [r[1] for r in conn.execute("PRAGMA table_info(runs)")]
     conn.close()
+
+
+# ---------------------------------------------------------------- 검사에서 빠지면 한 번 더 묻기
+
+
+class SequenceLLM(PromoLLM):
+    """부를 때마다 다음 답을 준다. 답이 다 떨어지면 마지막 답을 다시 준다."""
+
+    def __init__(self, answers: list[list[_Concept]]) -> None:
+        super().__init__()
+        self.answers = answers
+
+    async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):  # noqa: ANN001, ANN201
+        self.calls.append(format_prompt(prompt, untrusted))
+        items = self.answers[min(self.asked, len(self.answers) - 1)]
+        self.asked += 1
+        return _Concepts(items=items)
+
+
+def test_all_dropped_drafts_are_asked_again_once_with_the_reasons(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    bad = [_item(title="재료 밖", borrowed_trend="크리스마스")]
+    llm = SequenceLLM([bad, [_item(title="다시 쓴 초안")]])
+    out = _run(tmp_path, llm, monkeypatch)
+    assert llm.asked == 2
+    assert [c.title for c in out.concepts] == ["다시 쓴 초안"]
+    assert [(d.title, d.reason) for d in out.dropped] == [("재료 밖", "재료 밖 트렌드")]
+    head, _, block = llm.calls[1].partition("<untrusted")
+    assert "다시 쓰기" in head and "버린 초안1" in block and "재료 밖 트렌드" in block
+    assert "한 번 더 물음" in out.summary
+
+
+def test_asking_again_happens_only_once(tmp_path: Path, monkeypatch: Any) -> None:
+    bad = [_item(title="숫자", storyboard=["1컷: 책상", "2컷: 50% 할인", "3컷: 로고"])]
+    llm = SequenceLLM([bad])
+    out = _run(tmp_path, llm, monkeypatch)
+    assert llm.asked == 2 and out.concepts == []
+    assert out.empty_reason == "LLM 기획안 초안이 모두 검증에서 빠짐 (재료에 없는 숫자: 50)"
+
+
+def test_no_second_ask_when_nothing_was_dropped_or_enough_were_kept(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    good = [_item(title=f"초안 {n}") for n in "가나다"]
+    llm = SequenceLLM([[*good, _item(title="재료 밖", borrowed_trend="크리스마스")]])
+    out = _run(tmp_path, llm, monkeypatch)
+    assert llm.asked == 1 and len(out.concepts) == 3 and len(out.dropped) == 1
+
+
+def test_material_names_match_without_spaces_case_or_by_block_label() -> None:
+    kept, dropped = _validate(
+        [
+            _item(title="공백 다름", borrowed_trend="무지노트 12월시즌", shorts_format=" 챌린지 "),
+            _item(title="번호로 답함", borrowed_trend="트렌드1", shorts_format="숏츠형식1"),
+            _item(title="따옴표", borrowed_trend="'무지 노트 12월 시즌'"),
+        ]
+    )
+    assert dropped == []
+    assert [c.borrowed_trend for c in kept] == ["무지 노트 12월 시즌"] * 3
+    assert {c.shorts_format for c in kept} == {"챌린지"}

@@ -18,9 +18,10 @@
   규칙: 게임·작품 IP나 인물을 광고에 쓰지 말고 분위기·밈 형식만 빌릴 것, 과장 광고 금지,
   숫자는 재료에 있는 것만. 형식 예시 하나(상품 이름은 실제 카탈로그 값)
 - 검증(코드): 카탈로그에 없는 상품 id·재료 밖 트렌드·목록 밖 형식·콘티 3컷 아님·재료에 없는 숫자
-  (explain 숫자 검증) → 그 기획안은 버리고 이유를 남긴다. 실존 이름(분류기의 entity_names)·그 트렌드
-  이름이
-  제목·콘티에 그대로 있으면 "상표·초상권 확인 필요" 경고
+  (explain 숫자 검증) → 그 기획안은 버리고 이유를 남긴다. 트렌드·형식 이름은 공백·대소문자·따옴표가
+  달라도, 데이터 블록 번호(트렌드N·숏츠형식N)로 답해도 같은 재료로 본다. 통과한 초안이 3개(설정 수가
+  더 작으면 그 수) 미만이고 버린 것이 있으면 버린 이유를 데이터 블록에 붙여 LLM에
+  한 번만 더 묻는다. 실존 이름(분류기의 entity_names)·그 트렌드 이름이 제목·콘티에 그대로 있으면 "상표·초상권 확인 필요" 경고
 - LLM 설정이 없거나 실패하면 빈 목록 + 이유(지어내지 않는다)
 - 하루 캐시: 오늘(한국 날짜) 같은 "규칙 버전"으로 만든 기획안이 있으면 그것을 준다. `regenerate`면
   새로 만든다. 규칙 버전(`rules_version`) = 재료 거르기 설정(`[promo]`)·분류 목록·프롬프트의 해시라,
@@ -34,6 +35,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import logging
 import re
 import sqlite3
 import threading
@@ -94,6 +96,30 @@ _TIMING = re.compile(r"\d+\s*[~\-]\s*\d+\s*초|\d+\s*초|\d+\s*컷")
 
 MUSIC = "K-pop·음악"
 MUSIC_CAUTION = "음원 저작권: 원곡 사용 금지, 라이선스 음원만"
+# 검사를 통과한 초안이 이보다 적고 버린 초안이 있으면, 버린 이유를 붙여 LLM에 한 번만 더 묻는다
+MIN_KEPT = 3
+RETRY_RULE = (
+    "다시 쓰기: 데이터 블록의 '버린 초안N'은 지난 답에서 코드 검사가 버린 초안과 그 이유다."
+    " 같은 이유에 걸리지 않게 새 초안을 써라. 트렌드·형식은 재료 이름을 글자 그대로 쓰고,"
+    " 숫자는 재료에 있는 것과 길이·컷 번호만 쓴다"
+)
+_NAME_NOISE = re.compile(r"[\s'\"‘’“”「」『』〈〉<>()\[\]]")
+
+logger = logging.getLogger(__name__)
+
+
+def _key(name: str) -> str:
+    """이름 비교용: 공백·따옴표·괄호를 빼고 소문자로."""
+    return _NAME_NOISE.sub("", name).lower()
+
+
+def _lookup(names: Sequence[str], label: str) -> dict[str, str]:
+    """재료 이름 찾기표: 이름(공백·대소문자 무시)과 데이터 블록 번호(예: 트렌드1) → 재료 이름."""
+    table: dict[str, str] = {}
+    for n, name in enumerate(names, start=1):
+        table.setdefault(_key(f"{label}{n}"), name)
+        table.setdefault(_key(name), name)
+    return table
 
 
 @dataclass(frozen=True)
@@ -417,6 +443,8 @@ def rules_version(config: PromoConfig) -> str:
         "never_trend": sorted(NEVER_TREND),
         "music_caution": MUSIC_CAUTION,
         "prompt": _prompt(config, None),
+        "retry_rule": RETRY_RULE,
+        "min_kept": MIN_KEPT,
     }
     text = json.dumps(parts, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
@@ -449,14 +477,20 @@ def validate_concepts(
     config = config or PromoConfig()
     formats = formats or {}
     by_name = {t.name: t for t in trends}
+    # 공백·대소문자·따옴표가 다르거나 데이터 블록 번호(트렌드N·숏츠형식N)로 답해도 같은 재료로 본다
+    trend_names = _lookup([t.name for t in trends], "트렌드")
+    format_names = _lookup(list(formats), "숏츠형식")
     kept: list[PromoConcept] = []
     dropped: list[DroppedConcept] = []
     for item in items:
         title = item.title.strip() or "(제목 없음)"
         missing = [pid for pid in item.product_ids if pid not in products]
         borrowed = item.borrowed_trend.strip()
+        if borrowed not in NO_TREND:
+            borrowed = trend_names.get(_key(borrowed), borrowed)
         trend = None if borrowed in NO_TREND else by_name.get(borrowed)
         fmt = item.shorts_format.strip()
+        fmt = format_names.get(_key(fmt), fmt) if fmt else fmt
         band = _cut_band(item.duration_seconds, config.cut_bands)
         text = "\n".join(
             [item.title, item.concept, item.fit_reason, *item.storyboard, *item.cautions]
@@ -681,45 +715,62 @@ async def _generate(
         if t.topic_category:
             data[f"트렌드{n} 분류"] = t.topic_category
         facts[f"트렌드{n}"] = f"{t.name} {t.detail}"
+    prompt = _prompt(config, next(iter(products.values()), None))
     try:
-        answer = await llm.structured(
-            _prompt(config, next(iter(products.values()), None)),
-            _Concepts,
-            untrusted=data,
-            context_id=context_id,
-        )
+        answer = await llm.structured(prompt, _Concepts, untrusted=data, context_id=context_id)
     except LLMNotConfiguredError:
         return _llm_failed(out, f"LLM 설정이 없어 {DRAFT}을 만들지 않음", queries, now)
     except (LLMFormatError, ValidationError):
         return _llm_failed(out, f"LLM 답 형식이 맞지 않아 {DRAFT}을 만들지 않음", queries, now)
     except Exception as error:  # 호출 실패
         return _llm_failed(out, f"LLM 호출 실패 ({type(error).__name__})", queries, now)
-    kept, dropped = validate_concepts(
-        answer.items[: config.concepts + 2],
-        products,
-        shop.categories,
-        trends,
-        facts,
-        formats=formats[0],
-        config=config,
-    )
+
+    def check(found: _Concepts) -> tuple[list[PromoConcept], list[DroppedConcept]]:
+        return validate_concepts(
+            found.items[: config.concepts + 2], products, shop.categories, trends, facts,
+            formats=formats[0], config=config,
+        )  # fmt: skip
+
+    kept, dropped = check(answer)
+    retry_note = ""
+    popular_reason = answer.no_popular_reason.strip()
+    if dropped and len(kept) < min(MIN_KEPT, config.concepts):
+        # 버린 이유를 데이터 블록에 붙여 한 번만 더 묻는다. 두 번째 답도 같은 코드 검사를 거친다
+        logger.warning("promo_concepts 검사에서 버림 %d개, 다시 물음: %s", len(dropped),
+                       "; ".join(d.reason for d in dropped))  # fmt: skip
+        again = data | {f"버린 초안{n}": f"{d.title} — {d.reason}"
+                        for n, d in enumerate(dropped, start=1)}  # fmt: skip
+        queries.append(f"llm promo_concepts retry dropped={len(dropped)}")
+        try:
+            second = await llm.structured(
+                f"{prompt}\n{RETRY_RULE}", _Concepts, untrusted=again, context_id=context_id
+            )
+        except Exception as error:  # 두 번째 실패는 첫 답 결과를 그대로 쓴다
+            retry_note = f" 다시 물었지만 실패 ({type(error).__name__})."
+        else:
+            more, more_dropped = check(second)
+            seen = {_key(c.title) for c in kept}
+            kept += [c for c in more if _key(c.title) not in seen]
+            dropped += more_dropped
+            popular_reason = popular_reason or second.no_popular_reason.strip()
+            retry_note = " 버린 이유를 붙여 한 번 더 물음."
     out.concepts = kept[: config.concepts]
     out.dropped = dropped
     if not any(c.trend_kind == "popular" for c in out.concepts):
         if not any(t.kind == "popular" for t in trends):
             out.popular_trend_note = "재료 기준을 넘은 지금 인기 트렌드가 없음"
         else:
-            out.popular_trend_note = (
-                answer.no_popular_reason.strip() or "지금 인기 트렌드와 맞는 이유를 찾지 못함"
-            )
+            out.popular_trend_note = popular_reason or "지금 인기 트렌드와 맞는 이유를 찾지 못함"
     if not out.concepts:
-        out.empty_reason = f"LLM {DRAFT}이 모두 검증에서 빠짐"
+        reasons = ", ".join(dict.fromkeys(d.reason for d in dropped)) or "답에 초안이 없음"
+        out.empty_reason = f"LLM {DRAFT}이 모두 검증에서 빠짐 ({reasons})"
+        logger.warning("promo_concepts 초안 0개: %s", reasons)
     warned = sum(bool(c.warnings) for c in out.concepts)
     no_trend = sum(not c.borrowed_trend for c in out.concepts)
     out.summary = (
         f"숏츠 광고 {DRAFT} {len(out.concepts)}개 (트렌드 없는 초안 {no_trend}개, 버린 것"
         f" {len(dropped)}개, 경고 {warned}개). 재료: 상품 {len(products)}개, 숏츠 형식"
-        f" {len(formats[0])}개, 트렌드 {len(trends)}개."
+        f" {len(formats[0])}개, 트렌드 {len(trends)}개.{retry_note}"
     )
     lines = [out.summary, *(f"버림: {d.title} — {d.reason}" for d in dropped)]
     return PromoResult(out, Evidence(queries=queries, data_summary="\n".join(lines),
