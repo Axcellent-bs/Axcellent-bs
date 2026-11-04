@@ -1371,3 +1371,18 @@ def test_pause_stops_running_coder_and_resume_restarts(service, adapter) -> None
     tid = run(go())
     c = _task(service, tid).coding
     assert c.status == "merged" and c.error is None
+
+
+def test_secret_files_never_listed_or_picked() -> None:
+    secrets = [
+        ".env", "backend/.env.local", "deploy/server.pem", "keys/id_rsa", "ssh/id_ed25519.pub",
+        "conf/tls.key", "gcp/service-account.json", ".npmrc", "infra/terraform.tfstate",
+    ]  # fmt: skip
+    ok = [".env.example", "src/app.ts", "docs/keys.md", "src/env.ts"]
+    assert all(coder.is_secret(p) for p in secrets)
+    assert not any(coder.is_secret(p) for p in ok)
+    assert coder.listing_for(secrets + ok) == ok
+    picks = [FilePick(path=p, action="modify", reason="x") for p in [".env", "src/app.ts"]]
+    picks.append(FilePick(path="deploy/new.pem", action="create", reason="x"))
+    kept, dropped = coder.check_picks(picks, {".env", "src/app.ts"})
+    assert [p.path for p in kept] == ["src/app.ts"] and dropped == 2

@@ -334,13 +334,42 @@ def _no_change(svc: DevService, job: Job, paths: list[str], why: str, point: str
 # ---------------------------------------------------------------- 코드로 하는 일
 
 
+# 비밀 파일: 목록에도 안 넣고, 읽지도(LLM에 보내지도) 쓰지도 않는다
+_SECRET_NAMES = {
+    ".env", ".netrc", ".pypirc", ".npmrc", ".pgpass", ".htpasswd", ".git-credentials",
+    "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "credentials", "credentials.json",
+    "service-account.json", "service_account.json", "secrets.json", "secrets.yaml",
+    "secrets.yml", "secrets.toml", "terraform.tfstate", "terraform.tfvars",
+}  # fmt: skip
+_SECRET_EXT = (
+    ".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".kdbx", ".ppk", ".tfstate", ".tfvars",
+    ".asc", ".gpg",
+)  # fmt: skip
+_SECRET_OK = (".example", ".sample", ".template", ".dist")  # 값 없는 본보기는 괜찮다
+
+
+def is_secret(path: str) -> bool:
+    """키·토큰이 들어 있을 만한 파일인가 (.env·*.pem·id_rsa 등). .env.example은 아니다."""
+    name = path.replace("\\", "/").split("/")[-1].lower()
+    if name.endswith(_SECRET_OK):
+        return False
+    return (
+        name in _SECRET_NAMES
+        or name.startswith((".env.", "id_rsa", "id_ed25519"))
+        or name.endswith(_SECRET_EXT)
+    )
+
+
 def skip_path(path: str) -> bool:
-    """고를 파일 목록에서 뺄 경로인가."""
+    """고를 파일 목록에서 뺄 경로인가 (비밀 파일 포함)."""
     parts = path.split("/")
     name = parts[-1]
     low = name.lower()
     return (
-        any(p in _SKIP_DIRS for p in parts[:-1]) or name in _SKIP_NAMES or low.endswith(_SKIP_EXT)
+        any(p in _SKIP_DIRS for p in parts[:-1])
+        or name in _SKIP_NAMES
+        or low.endswith(_SKIP_EXT)
+        or is_secret(path)
     )
 
 
@@ -373,13 +402,14 @@ def check_picks(picks: list[FilePick], existing: set[str]) -> tuple[list[FilePic
 
     - `..`·절대 경로는 뺀다. 고칠 파일(modify)이 목록에 없으면 뺀다.
     - 새 파일(create)인데 이미 있으면 고칠 파일로 본다. 같은 경로는 한 번만.
+    - 비밀 파일(.env·*.pem 등)은 고칠 것도 만들 것도 뺀다.
     - 보호 경로도 그대로 둔다 (머지 때 기존 규칙이 사람 확인으로 보낸다)."""
     out: list[FilePick] = []
     seen: set[str] = set()
     dropped = 0
     for pick in picks:
         path = clean_path(pick.path)
-        if path is None or path in seen:
+        if path is None or path in seen or is_secret(path):
             dropped += 1
             continue
         action = pick.action
@@ -1183,7 +1213,7 @@ async def _revise(svc: DevService, job: Job, llm: Any, adapter: VcsAdapter) -> N
     if pr is None:
         raise CoderStop("failed", "고칠 PR이 없다")
     await svc.coding_step(job, "reading")
-    paths = list(pr.changed_paths)
+    paths = [p for p in pr.changed_paths if not is_secret(p)]
     base_rows = await asyncio.gather(*(_read_or_empty(adapter, p) for p in paths))
     head_rows = await asyncio.gather(*(_read_or_empty(adapter, p, pr.branch) for p in paths))
     base = dict(zip(paths, base_rows, strict=True))

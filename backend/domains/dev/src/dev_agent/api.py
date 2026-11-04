@@ -29,7 +29,7 @@ from dev_agent import coder, dev_chat, llm_key, vcs
 from dev_agent.deploy import DeployError
 from dev_agent.deploy_store import get_deploy_store
 from dev_agent.repo_api import add_repo_routes
-from dev_agent.vcs import github_account, inventory
+from dev_agent.vcs import inventory
 from dev_agent.work_api import add_work_routes
 
 # 코딩 작업 오류 중 409로 주는 것 (설정·상태 문제). 나머지 입력 오류는 400
@@ -129,7 +129,7 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         if any(v is not None and not isinstance(v, str) for v in text.values()):
             return _err(400, "INVALID_VCS", "문자열 필드에 다른 값이 들어 있다")
         try:
-            vcs.upsert_connection(
+            conn = vcs.upsert_connection(
                 id=text["id"] or None,
                 kind=text["kind"] or "",
                 repo=text["repo"] or "",
@@ -146,7 +146,36 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             )
         except vcs.VcsError as exc:
             return _err(400, "INVALID_VCS", exc.message)
-        return _connections()
+        note = ""
+        # 화면이 브랜치를 비우고 detect_branch를 켜면 레포 기본 브랜치를 읽어 넣는다
+        if (
+            conn.kind == "github"
+            and body.get("detect_branch") is True
+            and not (text["base_branch"] or "").strip()
+        ):
+            note = await _default_branch(conn)
+        rows = vcs.list_connections()
+        return _ok(rows, get_service(), count=len(rows), saved=conn.id, note=note)
+
+    async def _default_branch(conn: vcs.Connection) -> str:
+        """브랜치를 비우고 저장한 GitHub 연결: 레포 기본 브랜치를 읽어 넣는다 (토큰 확인도 겸한다).
+        못 읽으면 dev로 두고 까닭을 돌려준다."""
+        adapter = vcs.get_adapter(conn.id)
+        read = getattr(adapter, "default_branch", None)
+        if read is None:
+            return ""
+        try:
+            branch = await read()
+        except vcs.VcsError as exc:
+            return f"레포를 못 읽음 ({exc.code}) · 기준 브랜치는 {conn.base_branch}"
+        if branch and branch != conn.base_branch:
+            vcs.upsert_connection(
+                id=conn.id, kind=conn.kind, repo=conn.repo, base_url=conn.base_url,
+                base_branch=branch, description=conn.description, paths=list(conn.paths),
+                mount=conn.mount, auth=conn.auth, app_id=conn.app_id,
+                installation_id=conn.installation_id,
+            )  # fmt: skip
+        return ""
 
     @router.post("/vcs/connections/{connection_id}/delete", response_model=None, dependencies=ADMIN)
     def post_vcs_connection_delete(connection_id: str) -> dict | JSONResponse:
@@ -158,89 +187,6 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return _err(404, "NOT_FOUND", f"연결 {connection_id}가 없다")
         inventory.forget(connection_id)
         return _connections()
-
-    # ---- GitHub 계정 연결 (앱 설치 하나 → 레포 자동으로 찾기, vcs/github_account.py)
-
-    def _account() -> dict:
-        return _ok(github_account.public(), get_service())
-
-    @router.get("/vcs/github-account")
-    def get_github_account() -> dict:
-        """연결 상태·설치 범위·권한·찾은 레포(켰는지)·경고. 앱 개인 키는 돌려주지 않는다."""
-        return _account()
-
-    @router.post("/vcs/github-account", response_model=None, dependencies=ADMIN)
-    async def post_github_account(request: Request) -> dict | JSONResponse:
-        """`{app_id, installation_id, private_key?, base_url?}` 넣고 바로 레포 목록을 읽는다."""
-        body = await _body(request)
-        if body is None:
-            return _err(400, "INVALID_VCS", "본문은 JSON 객체여야 한다")
-        text = {k: body.get(k) for k in ("app_id", "installation_id", "private_key", "base_url")}
-        if any(v is not None and not isinstance(v, str) for v in text.values()):
-            return _err(400, "INVALID_VCS", "문자열 필드에 다른 값이 들어 있다")
-        try:
-            github_account.set_account(
-                text["app_id"] or "", text["installation_id"] or "",
-                text["private_key"] or None, text["base_url"] or "",
-            )  # fmt: skip
-        except vcs.VcsError as exc:
-            return _err(400, "INVALID_VCS", exc.message)
-        try:
-            await github_account.refresh()
-        except vcs.VcsError:
-            pass  # 넣은 값은 두고, 실패 이유는 상태(error)로 보여 준다
-        return _account()
-
-    @router.get("/vcs/github-account/install", response_model=None, dependencies=ADMIN)
-    def get_github_install() -> dict | JSONResponse:
-        """AXcellent 앱 설치 화면 주소 `{url}` (state 포함). 화면이 이 주소로 보낸다."""
-        try:
-            url = github_account.install_url()
-        except vcs.VcsError as exc:
-            return _err(400, "INVALID_VCS", exc.message)
-        return _ok({"url": url}, get_service())
-
-    @router.post("/vcs/github-account/installed", response_model=None, dependencies=ADMIN)
-    async def post_github_installed(request: Request) -> dict | JSONResponse:
-        """GitHub 설치에서 돌아옴 `{installation_id, state}` → 연결하고 레포를 찾는다."""
-        body = await _body(request)
-        inst = body.get("installation_id") if body else None
-        if not isinstance(inst, str) or not isinstance(body.get("state"), str):
-            return _err(400, "INVALID_VCS", "installation_id·state(문자열)가 필요하다")
-        try:
-            await github_account.finish_install(body["installation_id"], body["state"])
-        except vcs.VcsError as exc:
-            return _err(400, "INVALID_VCS", exc.message)
-        return _account()
-
-    @router.post("/vcs/github-account/refresh", response_model=None, dependencies=ADMIN)
-    async def post_github_account_refresh() -> dict | JSONResponse:
-        try:
-            await github_account.refresh()
-        except vcs.VcsError as exc:
-            return _err(400, "INVALID_VCS", exc.message)
-        return _account()
-
-    @router.post("/vcs/github-account/repos", response_model=None, dependencies=ADMIN)
-    async def post_github_account_repo(request: Request) -> dict | JSONResponse:
-        """`{repo: "owner/name", enabled: bool}` 사람이 레포 사용을 켜고 끈다."""
-        body = await _body(request)
-        if (
-            body is None
-            or not isinstance(body.get("repo"), str)
-            or not isinstance(body.get("enabled"), bool)
-        ):
-            return _err(400, "INVALID_VCS", "repo(문자열)·enabled(참/거짓)가 필요하다")
-        try:
-            github_account.enable_repo(body["repo"], body["enabled"])
-        except vcs.VcsError as exc:
-            return _err(400, "INVALID_VCS", exc.message)
-        return _account()
-
-    @router.post("/vcs/github-account/delete", response_model=None, dependencies=ADMIN)
-    def post_github_account_delete() -> dict:
-        github_account.clear_account()
-        return _account()
 
     # ---- 연결 대장: 서버 종류·버전·토큰 권한·마지막 확인 (FR-AG-012 연결 시 보안 조건)
 
