@@ -27,6 +27,14 @@ import httpx
 from data_agent.connectors import ConnectorUnavailable
 
 DEFAULT_URL = "https://trends.google.com/trending/rss"
+
+
+def _http_url(raw: str | None) -> str | None:
+    """http(s) 주소만 (그 밖은 버린다)."""
+    value = (raw or "").strip()
+    return value if value.startswith(("https://", "http://")) else None
+
+
 MAX_NEWS = 3  # 검색어마다 남기는 관련 뉴스 제목 수
 URL_ENV = "AX_GOOGLE_TRENDS_RSS_URL"
 TIMEOUT_SECONDS = 15.0
@@ -52,6 +60,9 @@ class TrendingItem:
     published_at: datetime | None  # 피드의 pubDate (UTC). 없거나 못 읽으면 None
     # 피드가 함께 주는 관련 뉴스 제목 (`ht:news_item_title`, 최대 MAX_NEWS개). 없으면 ()
     news_titles: tuple[str, ...] = ()
+    # 관련 뉴스 (제목, 출처, 주소) 피드 값 그대로
+    # (`ht:news_item_source`·`ht:news_item_url`, 최대 MAX_NEWS)
+    news: tuple[tuple[str, str | None, str | None], ...] = ()
 
 
 def parse_feed(body: bytes) -> list[TrendingItem]:
@@ -88,7 +99,16 @@ def parse_feed(body: bytes) -> list[TrendingItem]:
             )
             if t
         )[:MAX_NEWS]
-        out.append(TrendingItem(keyword, len(out) + 1, traffic, published, news))
+        links = tuple(
+            (
+                title,
+                (n.findtext(f"{HT}news_item_source") or "").strip() or None,
+                _http_url(n.findtext(f"{HT}news_item_url")),
+            )
+            for n in item.findall(f"{HT}news_item")
+            if (title := (n.findtext(f"{HT}news_item_title") or "").strip())
+        )[:MAX_NEWS]
+        out.append(TrendingItem(keyword, len(out) + 1, traffic, published, news, links))
     return out
 
 

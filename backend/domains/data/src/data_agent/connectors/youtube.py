@@ -38,7 +38,7 @@ KEY_ENV = "YOUTUBE_API_KEY"
 TIMEOUT_SECONDS = 15.0
 PAGE_SIZE = 50  # videos.list 한 번에 최대 50개
 MAX_POPULAR_PAGES = 4  # mostPopular는 200개까지 준다
-COST = {"videos": 1, "search": 100}  # 문서 단가 (단위)
+COST = {"videos": 1, "search": 100, "channels": 1}  # 문서 단가 (단위)
 QUOTA_REASONS = frozenset({"quotaExceeded", "dailyLimitExceeded", "rateLimitExceeded"})
 
 _client: httpx.AsyncClient | None = None  # 테스트가 `use_client`로 바꿔 끼운다
@@ -128,6 +128,23 @@ class _VideoPage(BaseModel):
     nextPageToken: str | None = None  # noqa: N815
 
 
+class _ChannelStats(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    subscriberCount: int | None = Field(default=None, ge=0)  # noqa: N815
+    hiddenSubscriberCount: bool = False  # noqa: N815
+
+
+class _Channel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    statistics: _ChannelStats = Field(default_factory=_ChannelStats)
+
+
+class _ChannelPage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    items: list[_Channel] = Field(default_factory=list)
+
+
 class _SearchId(BaseModel):
     model_config = ConfigDict(extra="ignore")
     videoId: str | None = None  # noqa: N815
@@ -215,6 +232,19 @@ class YouTubeConnector:
             }
             page = _parse(_VideoPage, await self._get("videos", params), "영상 통계")
             out.extend(_stat(v) for v in page.items)
+        return out
+
+    async def channels(self, ids: Sequence[str]) -> dict[str, int | None]:
+        """채널 id → 구독자 수 (channels.list, 50개씩 1단위). 숨김은 None, 없는 채널은 빠진다."""
+        unique = list(dict.fromkeys(i for i in ids if i))
+        out: dict[str, int | None] = {}
+        for start in range(0, len(unique), PAGE_SIZE):
+            chunk = unique[start : start + PAGE_SIZE]
+            params = {"part": "statistics", "id": ",".join(chunk), "maxResults": PAGE_SIZE}
+            page = _parse(_ChannelPage, await self._get("channels", params), "채널 통계")
+            for c in page.items:
+                hidden = c.statistics.hiddenSubscriberCount
+                out[c.id] = None if hidden else c.statistics.subscriberCount
         return out
 
     async def search(
