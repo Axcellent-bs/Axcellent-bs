@@ -21,7 +21,7 @@ timezone = "Asia/Seoul"
 [profile]
 about = "캣북스는 책과 문구를 파는 온라인 쇼핑몰이다. 고양이가 지키는 서점 콘셉트다."
 
-# 사람이 덮어쓰기 (비어 있어도 됨). 쓸 수 있는 칸: industry, customer_axes, questions,
+# 사람이 덮어쓰기 (비어 있어도 됨). 쓸 수 있는 칸: industry, customer_axes, subtopic_axes, questions,
 # seed_keywords(더할 키워드), drop_keywords(뺄 키워드)
 [profile.override]
 

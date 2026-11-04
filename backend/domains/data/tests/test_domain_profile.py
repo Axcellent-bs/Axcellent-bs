@@ -208,3 +208,18 @@ def test_intro_sentence_with_separated_words_is_evidence(tmp_path: Path) -> None
     assert kept["고양이 서점"].evidence_from == "about"
     assert kept["고양이 서점"].evidence == "고양이가 지키는 서점"
     assert {d.keyword for d in out.dropped_keywords} == {"고양이 문구"}
+
+
+def test_subtopic_axes_come_from_the_llm_and_are_checked(tmp_path: Path) -> None:
+    axes = [
+        "활용 방식",
+        "같이 묶이는 관심사",
+        "기타",
+        "2026 트렌드",
+        "아주아주아주긴축이름입니다",
+        "활용 방식",
+    ]
+    out = _run(tmp_path, ProfileLLM(_answer(subtopic_axes=axes)))
+    assert out.subtopic_axes == ["활용 방식", "같이 묶이는 관심사"]  # 기타·숫자·긴 이름·중복 뺌
+    one = _run(tmp_path / "b", ProfileLLM(_answer(subtopic_axes=["활용 방식"])))
+    assert any("하위 주제 축이 1개" in x for x in one.limits)
