@@ -1,4 +1,6 @@
-// 기획 홈: 사람이 눌러야 할 것 한 목록 + 두 흐름(요청 → 개발, 제안 → 마케팅) 단계별 개수 + 최근 활동
+// 기획 홈: 받은 요청·제안 최근 20개(메일함처럼 안 연 것은 밝게, 사람이 눌러야 할 것은 표시) + 두 흐름 단계별 개수 + 최근 활동
+import { useEffect, useState } from 'react'
+import { Pager, usePage } from '@/components/planning-common/pager'
 import { DEPT_NAME, type Dept, type State as S } from '@/lib/planningData'
 import { PROPOSAL_STAGES, PROPOSAL_SKILL_LABEL, proposalEnded, proposalOpen, proposalStage } from '@/lib/proposals'
 import { useAllReleaseChecks } from '@/lib/planning'
@@ -6,7 +8,12 @@ import { ActivityList, Tag, rowNav } from '@/components/planning-common/parts'
 import { toPath } from '@/components/planning-common/links'
 import { STAGES, pipeline, sortRows } from './requests'
 
-interface Todo { key: string; rank: number; kind: string; from: Dept; id: string; title: string; label: string; href: string }
+interface Todo { key: string; rank: number; kind: string; from: Dept; id: string; title: string; label: string; href: string; wait: boolean; at: string }
+
+// 연 것 기록 (이 브라우저). 처음엔 확인할 것만 "새로 옴", 나머지는 읽은 것으로 시작한다
+const SEEN_KEY = 'ax.planning.home.seen'
+const loadSeen = (): Set<string> | null => { try { const v = localStorage.getItem(SEEN_KEY); return v ? new Set(JSON.parse(v) as string[]) : null } catch { return null } }
+const saveSeen = (xs: Set<string>) => { try { localStorage.setItem(SEEN_KEY, JSON.stringify([...xs].slice(-400))) } catch { /* 저장이 막혀도 이번 화면에서는 반영 */ } }
 
 export function Home({ s }: { s: S }) {
   const checks = useAllReleaseChecks()
@@ -14,14 +21,25 @@ export function Home({ s }: { s: S }) {
   const rows = sortRows(live.map((r) => pipeline(s, r, checks.find((c) => c.request_id === r.id))))
   const props = s.proposals ?? []
 
+  // 요청이 들어온 시각 = 그 요청 사건(ctx)의 첫 활동 ("MM-DD HH:mm")
+  const firstAt = (ctx: string) => s.activity.reduce((m, x) => (x.ctx === ctx && x.t && (!m || x.t < m) ? x.t : m), '')
   const todos: Todo[] = [
-    ...rows.filter((x) => x.wait && !x.finished).map((x) => ({
-      key: x.r.id, rank: x.wait!.rank, kind: '요청', from: x.r.from, id: x.r.id, title: x.r.title, label: x.wait!.label, href: `projects/${x.r.id}`,
+    ...rows.map((x) => ({
+      key: x.r.id, rank: x.wait?.rank ?? 9, kind: '요청', from: x.r.from, id: x.r.id, title: x.r.title, href: `projects/${x.r.id}`,
+      wait: !!x.wait && !x.finished, label: x.wait && !x.finished ? x.wait.label : x.finished ? '완료' : STAGES[x.stage] ?? x.r.state, at: firstAt(x.r.ctx),
     })),
-    ...props.filter(proposalOpen).map((p) => ({
-      key: p.id, rank: 1, kind: '제안', from: p.from as Dept, id: p.id, title: p.title, label: `${PROPOSAL_SKILL_LABEL[p.skill] ?? p.skill} · 근거 ${p.facts.length}`, href: `proposals/${p.id}`,
+    ...props.map((p) => ({
+      key: p.id, rank: 1, kind: '제안', from: p.from as Dept, id: p.id, title: p.title, href: `proposals/${p.id}`,
+      wait: proposalOpen(p), label: proposalOpen(p) ? `${PROPOSAL_SKILL_LABEL[p.skill] ?? p.skill} · 근거 ${p.facts.length}` : p.status, at: p.created ?? '',
     })),
-  ].sort((a, b) => a.rank - b.rank)
+  ].sort((a, b) => (a.at === b.at ? b.id.localeCompare(a.id, undefined, { numeric: true }) : a.at < b.at ? 1 : -1)).slice(0, 20)
+  const waiting = todos.filter((x) => x.wait).length
+
+  const [seen, setSeen] = useState<Set<string>>(() => loadSeen() ?? new Set())
+  useEffect(() => { if (loadSeen() === null) { const init = new Set(todos.filter((x) => !x.wait).map((x) => x.key)); setSeen(init); saveSeen(init) } }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const markSeen = (keys: string[]) => { const next = new Set([...seen, ...keys]); setSeen(next); saveSeen(next) }
+  const unread = todos.filter((x) => !seen.has(x.key))
+  const pg = usePage(todos, 10)
 
   const reqCount = STAGES.map((_, i) => rows.filter((x) => !x.finished && x.stage === i).length)
   reqCount[STAGES.length - 1] = rows.filter((x) => x.finished).length
@@ -30,25 +48,37 @@ export function Home({ s }: { s: S }) {
   return (
     <div className="home-wrap">
       <section className="home-todo">
-        <h3>확인할 것 <span className="home-n">{todos.length}</span></h3>
+        <h3>
+          받은 요청·제안
+          {unread.length > 0 && <span className="home-new">새로 {unread.length}</span>}
+          {waiting > 0 && <span className="home-n" title="사람이 확인해야 하는 것">확인할 것 {waiting}</span>}
+          {unread.length > 0 && <button type="button" className="home-readall" onClick={() => markSeen(unread.map((x) => x.key))}>모두 읽음</button>}
+        </h3>
         {!todos.length ? <div className="empty"><b>없음</b></div> : (
           <ol className="sl-list">
-            {todos.map((t) => {
+            {pg.rows.map((t) => {
               const nav = rowNav(toPath(t.href), `${t.id} 열기`)
+              const isNew = !seen.has(t.key)
+              const { onClick, onKeyDown } = nav
               return (
-                <li key={t.key} {...nav} className={`sl-item home-item ${nav.className ?? ''}`}>
+                <li key={t.key} {...nav} onClick={(e) => { markSeen([t.key]); onClick?.(e) }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') markSeen([t.key]); onKeyDown?.(e) }}
+                  className={`sl-item home-item${isNew ? ' is-new' : ''} ${nav.className ?? ''}`}>
                   <span><Tag tone={t.kind === '제안' ? 'green' : 'neutral'}>{t.kind}</Tag></span>
                   <span className="sl-title">
+                    {isNew && <span className="home-dot" aria-label="새로 옴" />}
                     <span className={`rq-dept d-${t.from}`}>{DEPT_NAME[t.from]}</span>
                     <span className="mono muted sl-id">{t.id}</span>
                     <b title={t.title}>{t.title}</b>
                   </span>
-                  <span><Tag tone="amber">{t.label}</Tag></span>
+                  <span>{t.wait ? <Tag tone="amber">{t.label}</Tag> : <span className="muted small">{t.label}</span>}</span>
+                  <span className="muted small home-at">{t.at}</span>
                 </li>
               )
             })}
           </ol>
         )}
+        <Pager {...pg} />
       </section>
 
       <div className="home-flows">

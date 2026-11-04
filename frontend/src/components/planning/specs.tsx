@@ -104,8 +104,28 @@ function ReleaseCheckBox({ d, spec }: { d: Dispatch<Action>; spec: string }) {
 export function Specs({ s, d, item, item2, example }: P & { item?: string; item2?: string; example?: boolean }) {
   if (!item) return <SpecList s={s} d={d} />
   const spec = s.specs.find((x) => x.id === item)
-  if (!spec) return <div className="empty"><b>{item} 없음</b> <a href={toPath('work/specs')}>기획서 목록</a></div>
+  if (!spec) {
+    // 기획안으로 만들기 직후엔 서버가 다 만들기 전에 이 주소로 온다 → 다음 번호면 "작성 중"으로 기다린다
+    const num = (id: string) => Number(id.split('-')[1]) || 0
+    const next = num(item) > Math.max(0, ...s.specs.map((x) => num(x.id)))
+    return <SpecPending key={item} item={item} waiting={next} />
+  }
   return <SpecView key={spec.id} s={s} d={d} spec={spec} item2={item2} example={example} />
+}
+
+function SpecPending({ item, waiting }: { item: string; waiting: boolean }) {
+  const [late, setLate] = useState(false)
+  useEffect(() => { if (!waiting) return; const t = setTimeout(() => setLate(true), 20000); return () => clearTimeout(t) }, [waiting])
+  if (waiting && !late) {
+    return (
+      <div className="empty spec-pending" role="status" aria-live="polite">
+        <span className="spec-pending-dot" aria-hidden />
+        <b>기획안 작성 중</b>
+        <span className="mono muted small">{item}</span>
+      </div>
+    )
+  }
+  return <div className="empty"><b>{item}을 찾을 수 없어요</b> <a href={toPath('work/specs')}>기획서 목록</a></div>
 }
 
 type ListKind = 'all' | 'spec' | 'doc'
