@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { Chip, ErrorBox, Panel, TONE, Waiting, useResource } from "@/components/finance/bits";
 import { PreparingChip } from "@/components/Preparing";
@@ -6,12 +6,13 @@ import { CampaignEffect } from "@/components/data/CampaignEffect";
 import { PromoConcepts } from "@/components/data/PromoConcepts";
 import { TrendPopular, TrendSummary, materialOf } from "@/components/data/TrendPopular";
 import { okOut, useSkill } from "@/components/data/useSkill";
+import { Basis, Sources, VideoLinks, when } from "@/components/data/Sources";
 import { ContentLoop, type LoopTrendState } from "@/components/data/ContentLoop";
 import { LOOP_STAGES, TREND_TABS, trendTabFromHash, trendTabHash, trendTabOfStage, type LoopProbe, type LoopStage, type TrendTab } from "@/lib/contentLoop";
 import {
   DATA_SERVER, TREND_MAX_GROUPS, dataAi, evidenceLines, kpiLive,
   type PromoConceptsOutput, type TrendCandidatesOutput, type TrendPopularOutput, type TrendScanOutput, type TrendVerdict,
-  type TrendingSearchEvidence, type YouTubeTagEvidence,
+  type Evidence, type TrendingSearchEvidence, type YouTubeTagEvidence,
 } from "@/lib/data";
 
 // 트렌드&콘텐츠 화면 (/data/trend): 콘텐츠 루프 4단계와 같은 하위 탭 4개 (단계 정의는 lib/contentLoop.ts 한 곳).
@@ -26,6 +27,8 @@ import {
 //
 // 1단계 급상승 한 줄
 // - 주제 · "평소의 N배"(서버 배수) · 판정에 쓴 마지막 날. 순서는 배수 큰 순. 그래프는 없다
+// - 근거(줄 아래): 네이버 데이터랩 마지막 날 값과 평소 값(전 56일 중앙값, 상대값), YouTube 후보면 인기 차트 영상 수·링크·
+//   센 태그, 인기 검색어 후보면 Google 인기 검색어 순위. 목록 아래 trend_scan·trend_candidates가 부른 API 목록
 // - "광고 재료 아님" 칩: 기획안 재료에서 뺀 주제(promo_concepts skipped_trends, 서버 이유)이거나
 //   회사 "추천 안 함" 분류(trend_popular brand_safe = false)일 때만
 // - 기본 판정(입력 비움) = 회사 기본 키워드(trend_scan) + YouTube 인기 태그 후보(trend_candidates, 후보마다 네이버 판정).
@@ -50,20 +53,50 @@ function parseGroups(text: string): string[] {
 /** trending: 인기 검색어 근거 (서버 값). youtube 없이 trending만 있으면 인기 검색어에서만 나온 후보 */
 type Entry = { v: TrendVerdict; youtube?: YouTubeTagEvidence; trending?: TrendingSearchEvidence | null; aliases?: string[]; autoGrouped?: string[]; risingNames?: string[] };
 
-/** 급상승 한 줄: 주제 · 평소의 N배(서버 배수) · 광고 재료 아님(서버 이유) · 판정에 쓴 마지막 날 */
-function RisingRow({ v, rank, notAd }: { v: TrendVerdict; rank: number; notAd: string | null }) {
+/** 급상승 판정의 근거 줄 (서버 값이 있는 것만) */
+function risingBasis(e: Entry) {
+  const ev = e.v.evidence;
+  const rows: { source: string; body: ReactNode }[] = [];
+  if (ev.latest_value != null && ev.baseline_value != null) {
+    rows.push({
+      source: "네이버 데이터랩 검색어 트렌드",
+      body: `${shortDay(ev.latest_period)} 값 ${fixed(ev.latest_value)} ÷ 평소 ${fixed(ev.baseline_value)} (전 ${ev.baseline_points}일 중앙값) · 값은 검색 건수가 아닌 상대값`,
+    });
+  }
+  if (e.youtube) {
+    const tags = [...(e.youtube.matched_tags ?? []), ...(e.youtube.matched_phrases ?? [])];
+    rows.push({
+      source: "YouTube 인기 차트",
+      body: <>{when(e.youtube.snapshot_at)} 스냅샷 영상 {e.youtube.video_count}개{tags.length ? ` (센 말: ${tags.slice(0, 4).join(", ")})` : ""} <VideoLinks ids={e.youtube.video_ids} /></>,
+    });
+  }
+  if (e.trending) {
+    rows.push({
+      source: "Google 인기 검색어",
+      body: `${when(e.trending.snapshot_at)} ${e.trending.rank}위${e.trending.keyword ? ` "${e.trending.keyword}"` : ""}${e.trending.traffic ? ` · 트래픽 표시 ${e.trending.traffic}` : ""}`,
+    });
+  }
+  return rows;
+}
+
+/** 급상승 한 줄: 주제 · 평소의 N배(서버 배수) · 광고 재료 아님(서버 이유) · 판정에 쓴 마지막 날 + 근거 */
+function RisingRow({ e, rank, notAd }: { e: Entry; rank: number; notAd: string | null }) {
+  const v = e.v;
   const day = v.evidence.latest_period;
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
-      <span className="w-6 text-sm font-semibold text-ink-500">{rank}</span>
-      <span className="font-semibold text-ink-900">{v.group_name}</span>
-      <span className="text-sm font-semibold text-red-700">평소의 {fixed(v.ratio) ?? "-"}배</span>
-      {notAd != null && (
-        <span className={`chip max-w-full text-xs ${TONE.muted}`} title={notAd || undefined}>
-          광고 재료 아님{notAd ? <span className="ml-1 truncate">· {notAd}</span> : null}
-        </span>
-      )}
-      {day && <span className="ml-auto text-xs text-ink-500">{shortDay(day)} 기준</span>}
+    <li className="space-y-1.5 py-2.5">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="w-6 text-sm font-semibold text-ink-500">{rank}</span>
+        <span className="font-semibold text-ink-900">{v.group_name}</span>
+        <span className="text-sm font-semibold text-red-700">평소의 {fixed(v.ratio) ?? "-"}배</span>
+        {notAd != null && (
+          <span className={`chip max-w-full text-xs ${TONE.muted}`} title={notAd || undefined}>
+            광고 재료 아님{notAd ? <span className="ml-1 truncate">· {notAd}</span> : null}
+          </span>
+        )}
+        {day && <span className="ml-auto text-xs text-ink-500">{shortDay(day)} 기준</span>}
+      </div>
+      <Basis rows={risingBasis(e)} />
     </li>
   );
 }
@@ -88,7 +121,7 @@ function mergeEntries(out: TrendScanOutput, cands: TrendCandidatesOutput | null)
 type CandState =
   | { kind: "off" }
   | { kind: "loading" }
-  | { kind: "ok"; out: TrendCandidatesOutput }
+  | { kind: "ok"; out: TrendCandidatesOutput; evidence: Evidence | null }
   | { kind: "failed"; reason: string };
 
 /** 광고 재료가 아니면 서버 이유(없으면 빈 문자열), 재료이거나 모르면 null */
@@ -100,8 +133,9 @@ function notAdOf(e: Entry, popular: TrendPopularOutput | null, promo: PromoConce
   return m.kind === "excluded" ? (m.reason ?? "") : null;
 }
 
-function Result({ entries, headline, popular, promo, range }: {
+function Result({ entries, headline, popular, promo, range, evidence }: {
   entries: Entry[]; headline: string | null; popular: TrendPopularOutput | null; promo: PromoConceptsOutput | null; range: string;
+  evidence: (Evidence | null | undefined)[];
 }) {
   const rising = entries.filter((e) => e.v.status === "rising").sort((a, b) => (b.v.ratio ?? 0) - (a.v.ratio ?? 0));
   return (
@@ -116,10 +150,11 @@ function Result({ entries, headline, popular, promo, range }: {
       ) : (
         <ol className="divide-y divide-ink-100">
           {rising.map((e, i) => (
-            <RisingRow key={`${e.youtube ? "yt" : e.trending ? "tr" : "kw"}-${e.v.group_name}`} v={e.v} rank={i + 1} notAd={notAdOf(e, popular, promo)} />
+            <RisingRow key={`${e.youtube ? "yt" : e.trending ? "tr" : "kw"}-${e.v.group_name}`} e={e} rank={i + 1} notAd={notAdOf(e, popular, promo)} />
           ))}
         </ol>
       )}
+      {evidence.map((ev, i) => <Sources key={i} evidence={ev} label={i === 0 ? "근거 · 키워드 판정이 불러온 곳" : "근거 · YouTube 후보가 불러온 곳"} />)}
     </section>
   );
 }
@@ -194,7 +229,7 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
     let live = true;
     setCands({ kind: "loading" });
     dataAi.trendCandidates()
-      .then((r) => live && setCands({ kind: "ok", out: r.output }))
+      .then((r) => live && setCands({ kind: "ok", out: r.output, evidence: r.evidence ?? null }))
       .catch((e: Error) => live && setCands({ kind: "failed", reason: e.message }));
     return () => { live = false; };
   }, [useCandidates, run]);
@@ -260,6 +295,7 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
           {res.error && <ErrorBox message={`새로 판정하지 못해 이전 결과를 보여 줍니다. ${res.error}`} onRetry={res.reload} />}
           {out && (
             <Result entries={entries} headline={headline} popular={popularOut} promo={promoOut}
+              evidence={[res.env?.data.evidence, cands.kind === "ok" ? cands.evidence : null]}
               range={`네이버 검색 ${windowFrom ?? out.start_date} ~ ${out.end_date} · 평소 = 그 전 56일${groups.length ? ` · 직접 고른 ${groups.length}개` : ""}`} />
           )}
         </>
@@ -310,7 +346,7 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
             // 처음 열 때 그리고, 그 뒤에는 하위 탭을 오가도 남도록 숨기기만 한다
             <div className="space-y-5">
               {/* 숏츠 광고 기획안 초안 (promo_concepts, 왼쪽 숏츠 형식 막대 + 표본 한계 shorts_stats) */}
-              <PromoConcepts state={promoRes.state} onRegenerate={promoRes.reload} />
+              <PromoConcepts state={promoRes.state} popular={popularOut} onRegenerate={promoRes.reload} />
             </div>
           ) : t.key === "handoff" ? (
             // 마케팅·영상 제작으로 넘기기: 아직 준비 중
