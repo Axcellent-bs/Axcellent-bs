@@ -446,8 +446,11 @@ async def scan_trends(
     now: datetime | None = None,
     category_cache: Any = None,
     seed_provider: SeedProvider | None = None,
+    explain_cache: Any = None,
 ) -> TrendScanResult:
     """그룹마다 한 번씩 받아 판정한다. 커넥터가 모든 그룹에서 실패하면 `ConnectorUnavailable`.
+
+    `explain_cache`를 주면 같은 숫자의 설명 문장을 다시 쓴다 (LLM을 다시 부르지 않음).
 
     그룹은 요청 > 사람 덮어쓰기 > 프로필 씨앗(`seed_provider`) 순 (`resolve_groups`).
     """
@@ -481,7 +484,7 @@ async def scan_trends(
     for i, verdict in enumerate(results):
         if verdict.status != "rising":
             continue
-        said = await explain("trend_group", _group_facts(verdict), llm)
+        said = await explain("trend_group", _group_facts(verdict), llm, explain_cache)
         results[i] = verdict.model_copy(update={"summary": said.summary})
         group_fallback = group_fallback or said.fallback
         if note := said.note():
@@ -489,7 +492,7 @@ async def scan_trends(
     output = TrendScanOutput(
         start_date=start, end_date=end, time_unit="date", source=SOURCE, results=results
     )
-    explained = await explain("trend", _facts(results), llm)
+    explained = await explain("trend", _facts(results), llm, explain_cache)
     queries = [f"naver search-trend group={g.group_name} {start}~{end} date" for g in groups]
     notes = [explained.summary]
     if failed:

@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal
 from typing import Literal
@@ -293,14 +293,52 @@ def _template(kind: str, facts: dict[str, int | float | str]) -> str:
     return f"{kind}: {pairs}" if pairs else f"{kind}: 표시할 값이 없습니다."
 
 
-async def explain(kind: str, facts: dict[str, int | float | str], llm: LLMClient) -> Explanation:
-    """facts를 설명하는 문장을 만든다. 검증에 실패하면 템플릿(fallback=True)과 이유를 쓴다."""
+class ExplainCache:
+    """같은 프롬프트(종류 + 숫자 facts)의 검증 통과 문장을 다시 쓰지 않는다 (프로세스 메모리, 상한).
+
+    facts가 하나라도 다르면 프롬프트가 달라 새로 묻는다. LLM 실패·숫자 검증 실패는 저장하지 않는다.
+    """
+
+    def __init__(self, max_entries: int = 512) -> None:
+        self._data: dict[str, Explanation] = {}
+        self.max_entries = max_entries
+
+    def get(self, prompt: str) -> Explanation | None:
+        return self._data.get(prompt)
+
+    def put(self, prompt: str, value: Explanation) -> None:
+        if len(self._data) >= self.max_entries:
+            self._data.pop(next(iter(self._data)))
+        self._data[prompt] = value
+
+
+async def explain(
+    kind: str, facts: dict[str, int | float | str], llm: LLMClient,
+    cache: ExplainCache | None = None,
+) -> Explanation:  # fmt: skip
+    """facts를 설명하는 문장을 만든다. 검증에 실패하면 템플릿(fallback=True)과 이유를 쓴다.
+
+    `cache`를 주면 같은 프롬프트의 검증 통과 문장을 다시 쓴다 (트렌드 감지 탭 속도).
+    """
 
     def fallback(reason: str, numbers: list[float] | None = None) -> Explanation:
         return Explanation(_template(kind, facts), True, reason, tuple(numbers or ()))
 
+    prompt = _PROMPT.format(kind=kind, facts=facts) + _KIND_RULES.get(kind, "")
+    if cache is not None and (hit := cache.get(prompt)) is not None:
+        return hit
+    said = await _explain(kind, facts, llm, prompt, fallback)
+    if cache is not None and not said.fallback:
+        cache.put(prompt, said)
+    return said
+
+
+async def _explain(
+    kind: str, facts: dict[str, int | float | str], llm: LLMClient, prompt: str,
+    fallback: Callable[..., Explanation],
+) -> Explanation:  # fmt: skip
+    del kind  # 프롬프트에 이미 들어 있다
     try:
-        prompt = _PROMPT.format(kind=kind, facts=facts) + _KIND_RULES.get(kind, "")
         result = await llm.structured(prompt, _Summary)
         summary = result.summary.strip()
     except LLMNotConfiguredError:
