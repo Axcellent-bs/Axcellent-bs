@@ -370,6 +370,8 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 
 ### campaign_effect (캠페인 효과)
 
+- **기획 연결(#531)**: 요청에 선택 칸 `insight_id`(trend_insight_brief)·`proposal_id`(기획 제안)를 보내면 결과에 그대로 돌려준다. 기획이 결과를 기록할 때 인사이트·제안과 잇는 용도이고, 데이터는 저장하지 않는다(읽기 전용)
+
 - 입력: `campaign_id`(선택), 캠페인 시작·끝(`window_from`·`window_to`). 출력: 주문·매출·쿠폰 각각 "앎(값·근거)" 또는 "확인할 수 없음 + 이유", 요약 문장
 - 주문(`skills/campaign_effect.py`, 코드 계산): 캠페인 기간 `order_count` 합계(실제)와 기준선 지난 구간 합계의 평균(기대). **증분 = 실제 − 기대**(평가 채점기와 같은 정의). 방향은 기대를 평균으로 한 포아송 꼬리확률(`metrics/judge.py`의 `poisson_upper`·`poisson_lower`)이 0.001보다 작으면 늘었음·줄었음, 아니면 같음. 지표는 커넥터 `metric_series`로 읽는다
 - 매출: 카탈로그 `revenue_metric`(회사 카탈로그 한 줄)이 있으면 같은 방법으로 합계·기대·증분을 낸다(방향은 기대 대비 ±10% 임시 기준, 평가로 정하지 않음). **캣북스는 비어 있다**: shop-api metric-series에 매출이 없어 "확인할 수 없음 + 이유(지표 없음)"가 지금 정상이다
