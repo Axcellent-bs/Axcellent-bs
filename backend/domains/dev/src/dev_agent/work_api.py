@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from typing import Any
 
@@ -35,6 +36,7 @@ STATUS = {
     "NOT_CLAIMED": 409,
     "PR_TAKEN": 409,
     "NO_VCS": 409,
+    "NEEDS_HUMAN_REVIEW": 409,
 }
 INSTRUCTIONS = (
     "Axcellent 개발 서비스 작업 대기열. list_tasks로 고르고 claim_task로 가져간 뒤 "
@@ -53,6 +55,8 @@ TOOLS: list[dict[str, Any]] = [
         "name": "list_tasks",
         "description": "가져갈 수 있는 코딩 작업(대기 중)과 내가 쥐고 있는 작업 목록.",
         "inputSchema": {"type": "object", "properties": {}},
+        # MCP 도구 표시: 읽기만, 바깥(인터넷) 세상과 닿지 않음 → 클라이언트가 확인 수준을 정한다
+        "annotations": {"readOnlyHint": True, "openWorldHint": False},
     },
     {
         "name": "claim_task",
@@ -142,6 +146,17 @@ def _fail(exc: Exception) -> tuple[int, str, str]:
     return 400, "INVALID_INPUT", str(exc)
 
 
+def origin_refused(origin: str | None) -> str | None:
+    """MCP Streamable HTTP 규칙대로 Origin을 본다. 없으면(Claude Code 등 브라우저 아닌 클라이언트)
+    통과, 있으면 `DEV_MCP_ALLOWED_ORIGINS`(쉼표)에 있어야 한다. 막으면 이유."""
+    if not origin:
+        return None
+    allowed = {o.strip().rstrip("/") for o in os.getenv("DEV_MCP_ALLOWED_ORIGINS", "").split(",")}
+    if origin.strip().rstrip("/") in allowed - {""}:
+        return None
+    return f"허용하지 않은 Origin이다 ({origin}) → DEV_MCP_ALLOWED_ORIGINS"
+
+
 def _rpc(id_: Any, result: Any = None, error: dict | None = None) -> JSONResponse:
     body: dict[str, Any] = {"jsonrpc": "2.0", "id": id_}
     if error is not None:
@@ -208,6 +223,9 @@ def add_work_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
 
     @router.post("/mcp", response_model=None)
     async def mcp(request: Request, who: str = Depends(require_worker)) -> Response:
+        bad = origin_refused(request.headers.get("origin"))
+        if bad:  # MCP 규칙: 브라우저에서 온 요청(DNS 리바인딩)은 Origin을 보고 403
+            return JSONResponse({"error": {"code": "FORBIDDEN", "message": bad}}, status_code=403)
         try:
             msg = json.loads(await request.body())
         except ValueError:

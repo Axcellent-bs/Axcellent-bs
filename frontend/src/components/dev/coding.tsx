@@ -174,6 +174,14 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
   // 개발자 Claude 대기열에서 아무도 안 가져감: 서버 AI로 넘길 수 있다
   const unclaimed = c.mode === 'subscription' && c.status === 'queued' && !c.claimedBy
   const toAgent = () => act(() => api.toAgent(task.id), `${task.id} 서버 AI로 넘김`)
+  // 작업 글 경고: 사람이 글을 보고 확인해야 내 Claude가 가져간다 (에이전트는 스스로 확인 못 함)
+  const warns = c.textWarnings ?? []
+  const textHeld = c.mode === 'subscription' && c.status === 'queued' && warns.length > 0 && !c.textOkBy
+  const textOk = () => {
+    if (window.confirm(`${task.id} 작업 글을 확인했나요? 경고: ${warns.join(', ')}`)) {
+      void act(() => api.textOk(task.id), `${task.id} 작업 글 확인함`)
+    }
+  }
   // 바뀐 내용이 없어 멈춤: 앞 작업이 이미 반영했으면 사람이 PR 없이 완료로 닫는다
   const noChange = !c.pr && (c.status === 'failed' || c.status === 'waiting_human') && (c.error ?? '').includes('바뀐 내용이 없음')
   const closeCovered = () => {
@@ -199,6 +207,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
     <Step name="코딩 에이전트" on={!!on || DONE.includes(c.status)} title={<CodingLabel c={c} />}>
       <span className="tags">
         {c.mode === 'subscription' && c.assignee && <Tag>맡은 사람 {c.assignee}</Tag>}
+        {warns.length > 0 && <Tag tone={c.textOkBy ? undefined : 'amber'}>글 경고 · {warns.join(', ')}{c.textOkBy ? ` · ${c.textOkBy} 확인` : ''}</Tag>}
         {c.mode === 'subscription' ? <Tag>내 Claude{c.claimedBy ? ` · ${c.claimedBy}` : ''}</Tag> : c.model && <Tag><span className="mono">{c.model}</span></Tag>}
         {c.attempts > 1 && <Tag>{c.attempts}회차</Tag>}
         {!!c.llmCalls && <Tag><UsageBar used={c.llmTokens ?? 0} limit={lim.runTokens} label={`AI ${c.llmCalls}/${lim.runCalls}회 · 토큰`} title="코딩 실행 한 번의 한도 대비 (다시 시도까지 합친 양)" /></Tag>}
@@ -244,6 +253,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
         {waitingPr && <Button size="small" variant="primary" onClick={merge} disabled={busy}>머지</Button>}
         {heldPr && <Button size="small" variant="primary" onClick={() => void approveHold()} disabled={busy}>{busy ? '보내는 중…' : '승인하고 PR 열기'}</Button>}
         {(STUCK.includes(c.status) || c.status === 'canceled') && !waitingPr && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.status === 'canceled' ? '재개' : c.mergeConflict ? '최신 코드로 다시 쓰기' : '다시 시도'}</Button>}
+        {textHeld && <Button size="small" onClick={textOk} disabled={busy}>글 확인함</Button>}
         {unclaimed && <Button size="small" onClick={() => void toAgent()} disabled={busy}>서버 AI로 넘기기</Button>}
         {noChange && <Button size="small" onClick={closeCovered} disabled={busy}>반영됨으로 닫기</Button>}
         <CancelButton taskId={task.id} status={c.status} />
