@@ -38,6 +38,7 @@ def test_card_validates(card: AgentCard) -> None:
         "campaign_effect",
         "trend_age",
         "trend_insight_brief",
+        "domain_profile",
     }
 
 

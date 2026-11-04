@@ -13,6 +13,8 @@
 - 검색어 급상승 기본 키워드 `DATA_TREND_CONFIG`: 환경변수 → 회사 폴더 `trends`(있을 때만)
 - YouTube 스냅샷 회사 키워드 `DATA_YOUTUBE_CONFIG`: 환경변수 → 회사 폴더 `youtube`(있을 때만)
 - 회사 시간대 `DATA_TENANT_TIMEZONE`: 환경변수 → 회사 폴더 `timezone`(있을 때만)
+- 회사 설정 파일 `DATA_TENANT_CONFIG`: 환경변수 → 회사 폴더 `tenant.toml` (data 도메인 프로필이
+  `[profile] about`·`[profile.override]`를 읽는다)
 설정이 틀리면(폴더·카탈로그 없음, 커넥터가 카탈로그와 다름) 이유를 stderr에 쓰고 2로 끝난다.
 """
 
@@ -151,6 +153,12 @@ def resolve(
     elif tenant["timezone"]:
         out["DATA_TENANT_TIMEZONE"] = tenant["timezone"]
         notes.append(f"회사 시간대: {tenant['timezone']} (회사 폴더)")
+
+    if env.get("DATA_TENANT_CONFIG"):
+        notes.append(f"회사 설정 파일: {env['DATA_TENANT_CONFIG']} (환경변수)")
+    else:
+        out["DATA_TENANT_CONFIG"] = (folder / "tenant.toml").resolve().as_posix()
+        notes.append("회사 설정 파일: tenant.toml (회사 폴더)")
     return out, notes
 
 
