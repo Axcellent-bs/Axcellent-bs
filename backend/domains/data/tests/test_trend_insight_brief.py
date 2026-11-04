@@ -86,10 +86,15 @@ class BriefLLM(MockLLMClient):
 
     async def embed(self, texts, context_id=None):  # noqa: ANN001, ANN201
         self.embedded += 1
-        # 주제 글은 [1, 0], 상품 "무지 노트"는 [1, 0](유사도 1), 나머지 상품은 [0, 1](유사도 0)
+        # "노트"가 든 글끼리만 닮는다: 노트 [1,0,0], 다른 상품 [0,1,0], 다른 주제 [0,0,1]
         out = []
         for t in texts:
-            out.append([0.0, 1.0] if ("(" in t and "무지 노트" not in t) else [1.0, 0.0])
+            if "노트" in t:
+                out.append([1.0, 0.0, 0.0])
+            elif "(" in t:
+                out.append([0.0, 1.0, 0.0])
+            else:
+                out.append([0.0, 0.0, 1.0])
         return out
 
 
@@ -190,7 +195,7 @@ def test_insight_fields_come_from_existing_results(tmp_path: Path) -> None:
     assert lol.evidence.youtube_views_per_subscriber == 2.5
     assert lol.evidence.links[0] == "https://www.youtube.com/watch?v=v1"
     assert lol.example_ideas == ["롤 밈 노트 (참고용)"]
-    assert [p.name for p in lol.products] == ["무지 노트"]  # 임베딩 기준 통과(1등)만
+    assert lol.products == []  # 임베딩 기준(0.65·1등)을 넘는 상품이 없다
     assert any("평가셋" in x for x in lol.limits)
     news = next(i for i in out.insights if i.topic == "한국철강")
     assert news.target_age is None and news.target_age_reason == "연령대 값을 받지 못함"
@@ -242,3 +247,79 @@ def test_aliases_merge_rising_topics() -> None:
     assert names.count("t1") == 1 and "티원" not in names
     t1 = next(c for c in cands if c.topic == "t1")
     assert t1.verdict is not None and t1.verdict.ratio == 3.0 and t1.aliases == ["티원"]
+
+
+# ---------------------------------------------------------------- 구성 (카테고리 상한·회사 관련)
+
+
+def test_each_category_is_capped(tmp_path: Path) -> None:
+    games = TrendPopularOutput(items=[_topic(f"게임{n}", n, "게임") for n in range(1, 5)])
+    out = asyncio.run(
+        brief.make_brief(
+            TrendInsightBriefRequest(), BriefLLM(), env=_env(tmp_path, "max_insights = 4\n"),
+            popular=games, popular_reason=None, rising=[], age_fn=_ages([]), promo=None,
+            catalog=CATALOG, now=NOW,
+        )
+    ).output  # fmt: skip
+    ranked = [i for i in out.insights if not i.company_related and not i.classification_pending]
+    assert [i.topic for i in ranked] == ["게임1", "게임2"]  # per_category_max 2
+
+
+def _season_promo(keyword: str, ratio: float):  # noqa: ANN202
+    from ax_contracts.schemas.data import PromoSeasonCheck
+
+    check = PromoSeasonCheck(keyword=keyword, status="known", same_month=date(2025, 12, 1),
+                             same_month_ratio=ratio, next_month=date(2026, 1, 1),
+                             next_month_ratio=1.0)  # fmt: skip
+    return PromoConceptsOutput(season_checks=[check])
+
+
+def test_company_insight_is_reserved_when_a_season_keyword_rose(tmp_path: Path) -> None:
+    llm = BriefLLM(cats={"다이어리": "IT", "무지 노트": "기타", "파이썬 입문서": "기타"})
+    out, seen = _run(
+        tmp_path, llm, promo=_season_promo("무지 노트", 1.5), extra="max_insights = 4\n"
+    )
+    company = [i for i in out.insights if i.company_related]
+    note = company[0]
+    assert note.topic == "무지 노트" and len(company) <= 2
+    assert note.ad_material is True and not note.reference_only
+    assert note.evidence.season_ratio == 1.5 and note.evidence.season_keyword == "무지 노트"
+    assert "작년 12월 검색이 기간 평균의 1.5배" in (note.company_reason or "")
+    assert "무지 노트" in seen[0]  # 회사 후보도 연령대를 본다
+    assert note.products and note.products[0].name == "무지 노트"
+    trend = [i for i in out.insights if not i.company_related and not i.reference_only]
+    assert len(trend) <= 3  # 4개 중 1자리는 회사 관련
+
+
+def test_company_insight_can_rise_by_age_band_without_season(tmp_path: Path) -> None:
+    async def ages(keywords: list[str]) -> TrendAgeOutput:
+        items = [AgeTopic(keyword=k, status="known", top_band="30대", top_ratio=1.4,
+                          bands=[AgeBandTrend(band="30대", status="normal", ratio=1.4)])
+                 for k in keywords if k == "파이썬 입문서"]  # fmt: skip
+        return TrendAgeOutput(status="known", items=items)
+
+    llm = BriefLLM(cats={"다이어리": "IT", "무지 노트": "기타", "파이썬 입문서": "기타"})
+    out, _ = _run(tmp_path, llm, ages=ages)
+    company = [i for i in out.insights if i.company_related]
+    assert [i.topic for i in company] == ["파이썬 입문서"]
+    assert "30대 평소 대비 1.4배" in (company[0].company_reason or "")
+
+
+def test_no_company_insight_is_said_and_no_product_is_explicit(tmp_path: Path) -> None:
+    out, _ = _run(tmp_path, BriefLLM(cats={"다이어리": "IT"}))
+    assert not any(i.company_related for i in out.insights)
+    assert any(x.startswith("회사 관련 인사이트 없음") for x in out.limits)
+    lol = next(i for i in out.insights if i.topic == "리그오브레전드")
+    assert lol.products == [] and (lol.products_reason or "").startswith(
+        "회사 상품과 직접 연결 없음"
+    )
+
+
+def test_score_counts_products_and_season(tmp_path: Path) -> None:
+    config = brief.BriefConfig()
+    plain = brief.Candidate("a", [], popular=_topic("a", 1, "게임"))
+    linked = brief.Candidate("b", [], popular=_topic("b", 1, "게임"), has_products=True,
+                             season=("노트", 1.6, date(2025, 12, 1)))  # fmt: skip
+    a = brief.score(plain, config, 10)
+    b = brief.score(linked, config, 10)
+    assert round(b - a, 4) == round(config.w_product + config.w_season * 0.6, 4)
