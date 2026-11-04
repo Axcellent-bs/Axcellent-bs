@@ -20,6 +20,7 @@ const RULE_KO: Record<string, string> = {
   compensation_per_context: "장애 한 건에 준 보상 합계", compensation_per_customer: "한 고객에게 준 보상 합계",
   refund_single: "환불 한 건 금액", seller_risk: "판매자 위험 점수", base_grade: "항상 사람이 확인하는 일",
   connection_kev_hold: "연결 서버의 긴급 취약점",
+  pr_agent_config_paths: "에이전트 설정·훅·설치 파일", merge_agent_config_paths: "에이전트 설정·훅·설치 파일", revert_agent_config_paths: "에이전트 설정·훅·설치 파일",
   sns_ai_label_missing: "AI 생성 표시가 빠진 곳", sns_text_mismatch: "승인한 문구와 다른 곳", sns_constraint_missing: "쿠폰 필수 안내가 빠진 곳",
   sns_daily_posts: "오늘 SNS 게시 수", notice_sns_channel: "공지를 SNS로 올리려 함. SNS 게시는 별도 요청으로 해야 함",
   video_cost_single: "영상 한 건 비용", video_cost_daily: "오늘 영상 비용 합계", video_cost_zero: "영상 비용", video_duration: "영상 길이(초)",
@@ -44,6 +45,7 @@ function ruleSentence(h: RuleHit): string {
   const name = RULE_KO[h.key] ?? "기타 기준";
   if (h.key === "base_grade") return "항상 사람이 확인하는 일";
   if (h.key === "connection_kev_hold") return `연결 서버(${h.product ?? "?"} ${h.version ?? "?"})에 실제 악용 중인 취약점이 있음: ${(h.kev_cves ?? []).join(", ")}`;
+  if (h.named_hit) return `${name}을 바꿈: ${h.named_hit.join(", ")}`;
   if (h.outside) return `${name}가 아닌 곳을 바꿈: ${h.outside.join(", ")}`;
   if (h.invalid) return `${name} 정보가 없음`;
   if (h.observed != null && typeof h.value === "number") {
@@ -55,6 +57,7 @@ function ruleSentence(h: RuleHit): string {
 
 function tipOf(r: Review): string {
   if (r.report.rules?.some((h) => h.key === "connection_kev_hold")) return "서버를 패치하면 보류가 풀립니다. 그때까지는 멈추세요. 장애 복구처럼 급한 일이면 위험을 알고 진행하세요.";
+  if (r.report.rules?.some((h) => h.named_hit)) return "머지되면 개발자 PC와 CI가 이 파일을 자동으로 읽고 실행합니다. 바뀐 내용을 직접 보고, 왜 바꿨는지 모르겠으면 멈추세요.";
   if (r.action === "confirm_settlement") return "위 ③ 판매자 정산 표의 판매자·기간·금액과 같으면 진행하세요.";
   if (r.action === "publish_sns") return "글과 영상이 승인한 초안과 같고 AI 생성 표시가 있으면 진행하세요. 올리면 되돌리기 어렵습니다.";
   if (r.action === "generate_video") return "비용과 길이가 예상과 맞으면 진행하세요. 진행하면 비용이 나갑니다.";

@@ -14,7 +14,7 @@ from ax_safety.rules import ActionSpec, Rule, ThresholdTable, load_registry, loa
 
 def test_rule_files_load_and_match_agreed_values() -> None:
     registry, table = load_registry(), load_thresholds()
-    assert table.version == 3
+    assert table.version == 4
     assert table.review_timeout_seconds == 600  # 데모 10분 자동 거절
     values = {rule.key: rule.value for rule in table.rules if rule.metric != "param"}
     values.pop("pr_allowed_paths")
@@ -23,6 +23,9 @@ def test_rule_files_load_and_match_agreed_values() -> None:
     values.pop("merge_protected_paths")
     values.pop("revert_allowed_paths")
     values.pop("revert_protected_paths")
+    values.pop("pr_agent_config_paths")
+    values.pop("merge_agent_config_paths")
+    values.pop("revert_agent_config_paths")
     values.pop("merge_cross_data_verdict")
     values.pop("auto_policy_shrink_only")
     values.pop("notice_sns_channel")
@@ -150,6 +153,110 @@ def test_paths_avoid_rule_needs_protected() -> None:
     assert rule.paths_protected(
         ["shop-web/src/lib/auth.tsx", ".github/workflows/ci.yml", "shop-web/src/pages/Home.tsx"]
     ) == ["shop-web/src/lib/auth.tsx", ".github/workflows/ci.yml"]
+
+
+# 이슈 #506 본문과 #504·#509의 개발 쪽 목록. 빠지면 개발이 놓친 파일을 safety도 놓친다
+DEV_AGENT_CONFIG_NAMES = """
+.claude .codex .cursor .gemini .vscode .devcontainer .husky .githooks .github .agents .agent .kiro
+.windsurf .roo .continue .amazonq .opencode .factory .idea .run
+CLAUDE.md AGENTS.md GEMINI.md .mcp.json .cursorrules .pre-commit-config.yaml .npmrc package.json
+pyproject.toml setup.py Makefile .clinerules .windsurfrules copilot-instructions.md conftest.py
+setup.cfg tox.ini noxfile.py requirements.txt composer.json Gemfile Taskfile.yml .envrc .gitmodules
+Dockerfile
+""".split()
+
+
+def _agent_config_rules() -> dict[str, Rule]:
+    return {rule.key: rule for rule in load_thresholds().rules if rule.metric == "paths_named"}
+
+
+def test_agent_config_rules_cover_three_actions_with_same_names() -> None:
+    """#506: PR 만들기·머지·되돌리기 PR 어느 문으로 와도 같은 목록으로 걸린다."""
+    rules = _agent_config_rules()
+    assert {key: rule.action for key, rule in rules.items()} == {
+        "pr_agent_config_paths": "generate_pr",
+        "merge_agent_config_paths": "merge_pr",
+        "revert_agent_config_paths": "repo_revert_pr",
+    }
+    pr, merge = rules["pr_agent_config_paths"], rules["merge_agent_config_paths"]
+    assert pr.names == merge.names == rules["revert_agent_config_paths"].names
+    assert pr.field == merge.field == "changed_paths"
+    assert len(set(pr.names)) == len(pr.names)
+    assert set(DEV_AGENT_CONFIG_NAMES) <= set(pr.names)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "CLAUDE.md",
+        "shop-web/CLAUDE.md",
+        "shop-web/src/deep/AGENTS.md",
+        "docs/GEMINI.md",
+        ".mcp.json",
+        "shop-web/.claude/settings.json",
+        "shop-api/.vscode/tasks.json",
+        ".claude/hooks/start.sh",
+        "shop-web/package.json",
+        "shop-web/package-lock.json",
+        "shop-api/uv.lock",
+        "shop-api/tests/conftest.py",
+        "shop-web/.gitlab-ci.yml",
+        # 표기만 다른 같은 파일
+        "shop-web/claude.md",
+        "shop-web/Claude.MD",
+        "shop-web/.CLAUDE/settings.json",
+        "sub\\CLAUDE.md",
+        "sub\\.claude\\settings.json",
+        "./CLAUDE.md",
+        "./shop-web/./CLAUDE.md",
+        "shop-web/../CLAUDE.md",
+        "shop-web//CLAUDE.md",
+        "shop-web/CLAUDE.md.",
+        "shop-web/CLAUDE.md ",
+        "shop-web/CLAUDE.md::$DATA",
+        "shop-web/.claude./settings.json",
+        # 끝 조각이 폴더 이름: 폴더 통째로, 또는 그 이름의 심볼릭 링크
+        ".claude",
+        ".claude/",
+        "shop-web/.github/",
+        "shop-web\\.claude\\",
+    ],
+)
+def test_paths_named_catches_at_any_depth_and_spelling(path: str) -> None:
+    rule = _agent_config_rules()["merge_agent_config_paths"]
+    assert rule.paths_named_hit(["docs/a.md", path]) == [path]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "docs/claude-notes.md",
+        "docs/CLAUDE.md.bak",
+        "docs/my.claude/a.md",
+        "shop-web/src/lib/env.ts",
+        "shop-web/src/github/index.ts",
+        "shop-web/src/package.ts",
+        "shop-web/src/pages/Notice.tsx",
+        "",
+        "./",
+    ],
+)
+def test_paths_named_leaves_similar_names_alone(path: str) -> None:
+    rule = _agent_config_rules()["merge_agent_config_paths"]
+    assert rule.paths_named_hit([path]) == []
+
+
+def test_paths_named_rule_needs_field_and_plain_names() -> None:
+    base = {"key": "n", "action": "merge_pr", "metric": "paths_named", "field": "changed_paths"}
+    with pytest.raises(ValueError, match="names가 필요하다"):
+        Rule.model_validate(base)
+    with pytest.raises(ValueError, match="field가 필요하다"):
+        Rule.model_validate(
+            {**{k: v for k, v in base.items() if k != "field"}, "names": ["CLAUDE.md"]}
+        )
+    for bad in ["", ".claude/", "sub/CLAUDE.md", "sub\\CLAUDE.md", "CLAUDE.md.", "a:b", "."]:
+        with pytest.raises(ValueError, match="이름만 쓴다"):
+            Rule.model_validate({**base, "names": ["CLAUDE.md", bad]})
 
 
 def test_on_verify_reject_hold_only_on_rollback() -> None:

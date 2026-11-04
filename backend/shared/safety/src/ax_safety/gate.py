@@ -366,6 +366,13 @@ class Gate:
                         }
                     )
                 continue
+            if rule.metric == "paths_named":
+                paths = request.params.get(rule.field or "")
+                if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+                    hits.append({"key": rule.key, "invalid": rule.field})
+                elif named_hit := rule.paths_named_hit(paths):
+                    hits.append({"key": rule.key, "named_hit": named_hit})
+                continue
             if rule.metric == "param":
                 value = request.params.get(rule.field or "")
                 if isinstance(value, bool) or not isinstance(value, int) or value < 0:

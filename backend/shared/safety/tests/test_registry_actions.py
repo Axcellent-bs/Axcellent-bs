@@ -327,6 +327,7 @@ async def test_missing_rule_fields_fail_closed(gate: Gate, act) -> None:
         "pr_changed_files",
         "pr_allowed_paths",
         "pr_protected_paths",
+        "pr_agent_config_paths",
     }
 
 
@@ -338,6 +339,7 @@ _MERGE_CLEAN = dict(
     linked_incident_count=0,
     irreversible_count=0,
 )
+_REVERT_CLEAN = dict(changed_lines=10, changed_files=1, irreversible_count=0)
 
 
 @pytest.mark.asyncio
@@ -389,6 +391,57 @@ async def test_protected_paths_fail_closed(
 ) -> None:
     """changed_paths가 없거나 문자열 목록이 아니면 보호 경로 규칙도 걸린 것으로 본다."""
     for suffix, extra in {"none": {}, "str": {"changed_paths": "docs/a.md"}}.items():
+        decision = await gate.execute(act(action, "planning", f"{key}-{suffix}", **clean, **extra))
+        assert decision.status == "held"
+        review = gate.store.get_review(decision.review_id or "")
+        hits = {hit["key"]: hit for hit in review.report["rules"]}  # type: ignore[union-attr]
+        assert hits[key] == {"key": key, "invalid": "changed_paths"}
+
+
+_AGENT_CONFIG_ACTIONS = [
+    ("generate_pr", "pr_agent_config_paths", _PR_CLEAN),
+    ("merge_pr", "merge_agent_config_paths", _MERGE_CLEAN),
+    ("repo_revert_pr", "revert_agent_config_paths", _REVERT_CLEAN),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("action", "key", "clean"), _AGENT_CONFIG_ACTIONS)
+async def test_agent_config_file_inside_allowed_path_is_always_c(
+    gate: Gate, verifier: Any, act, action: str, key: str, clean: dict[str, Any]
+) -> None:
+    """#506: 허용 경로·크기 안이고 irreversible_count가 0이어도 깊은 곳의 CLAUDE.md는 C."""
+    named = ["shop-web/CLAUDE.md", "shop-api/.CLAUDE/settings.json", "shop-web/package.json"]
+    decision = await gate.execute(
+        act(action, "planning", f"{key}-hit", changed_paths=["docs/a.md", *named], **clean)
+    )
+    assert (decision.grade, decision.status) == ("C", "held")
+    assert decision.hold_reason == HoldReason.OVER_THRESHOLD
+    assert verifier.tasks == []
+    review = gate.store.get_review(decision.review_id or "")
+    assert review is not None
+    assert review.report["rules"] == [{"key": key, "named_hit": named}]
+
+    plain = await gate.execute(
+        act(
+            action,
+            "planning",
+            f"{key}-ok",
+            changed_paths=["shop-web/src/pages/Notice.tsx", "docs/claude-notes.md"],
+            **clean,
+        )
+    )
+    assert (plain.grade, plain.status) == ("B", "executed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("action", "key", "clean"), _AGENT_CONFIG_ACTIONS)
+async def test_agent_config_rule_fails_closed(
+    gate: Gate, act, action: str, key: str, clean: dict[str, Any]
+) -> None:
+    """changed_paths가 없거나 문자열 목록이 아니면 이름 규칙도 걸린 것으로 본다."""
+    bad_values = {"none": {}, "str": {"changed_paths": "docs/a.md"}, "int": {"changed_paths": [1]}}
+    for suffix, extra in bad_values.items():
         decision = await gate.execute(act(action, "planning", f"{key}-{suffix}", **clean, **extra))
         assert decision.status == "held"
         review = gate.store.get_review(decision.review_id or "")

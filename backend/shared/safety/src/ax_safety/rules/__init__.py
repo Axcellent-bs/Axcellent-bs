@@ -89,6 +89,17 @@ class ActionSpec(_Strict):
         return self
 
 
+def path_segments(path: str) -> list[str]:
+    """이름 비교용 경로 조각. 같은 파일을 가리키는 다른 표기를 한 가지로 모은다.
+
+    대소문자(Windows·macOS는 같은 파일로 본다), `\\` 구분자, `./`·`../`·끝의 `/`, Windows가 무시하는
+    끝의 점·공백(`CLAUDE.md.`), 대체 스트림(`CLAUDE.md::$DATA`).
+    """
+    segments = path.replace("\\", "/").split("/")
+    cleaned = (segment.split(":", 1)[0].rstrip(" .").casefold() for segment in segments)
+    return [segment for segment in cleaned if segment]
+
+
 class Rule(_Strict):
     """금액 규칙과 금액이 아닌 규칙.
 
@@ -97,6 +108,7 @@ class Rule(_Strict):
     - 숫자 파라미터: `param` + `field` (`op`·`value`), 예: `pr_changed_lines`
     - 경로 목록: `paths_within` + `field` + `allowed` (하나라도 허용 접두사 밖이면 걸림)
     - 보호 경로: `paths_avoid` + `field` + `protected` (하나라도 보호 경로와 같거나 그 아래면 걸림)
+    - 보호 이름: `paths_named` + `field` + `names` (경로 조각 하나라도 그 이름이면 걸림, 깊이 무관)
     - 정해진 값: `param_in` + `field` + `allowed` (값이 문자열이고 `allowed` 안이어야 통과)
 
     `when`은 params가 그 값일 때만 규칙을 적용하고, `unless`는 params가 그 값이면 규칙을 건너뛴다.
@@ -114,6 +126,7 @@ class Rule(_Strict):
         "param",
         "paths_within",
         "paths_avoid",
+        "paths_named",
         "param_in",
     ]
     op: Literal[">=", ">", "<", "<="] = ">="
@@ -121,15 +134,22 @@ class Rule(_Strict):
     field: str | None = None
     allowed: list[str] = Field(default_factory=list)
     protected: list[str] = Field(default_factory=list)
+    names: list[str] = Field(default_factory=list)
     when: dict[str, Any] = Field(default_factory=dict)
     unless: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _field_needed(self) -> Rule:
-        if self.metric in ("param", "paths_within", "paths_avoid", "param_in") and not self.field:
+        field_metrics = ("param", "paths_within", "paths_avoid", "paths_named", "param_in")
+        if self.metric in field_metrics and not self.field:
             raise ValueError(f"{self.key}: {self.metric} 규칙에는 field가 필요하다")
         if self.metric == "paths_avoid" and not [p for p in self.protected if p]:
             raise ValueError(f"{self.key}: paths_avoid 규칙에는 protected가 필요하다")
+        if self.metric == "paths_named" and not self.names:
+            raise ValueError(f"{self.key}: paths_named 규칙에는 names가 필요하다")
+        for name in self.names:  # 경로·빈 값은 어떤 조각과도 맞지 않아 조용히 구멍이 된다
+            if path_segments(name) != [name.casefold()]:
+                raise ValueError(f"{self.key}: names에는 경로가 아닌 이름만 쓴다: {name!r}")
         if self.metric == "param_in" and not self.allowed:
             raise ValueError(f"{self.key}: param_in 규칙에는 allowed가 필요하다")
         return self
@@ -152,6 +172,11 @@ class Rule(_Strict):
         """보호 경로와 같거나 그 접두사로 시작하는 경로. 빈 문자열 접두사는 무시한다."""
         prefixes = [prefix for prefix in self.protected if prefix]
         return [p for p in paths if any(p.startswith(prefix) for prefix in prefixes)]
+
+    def paths_named_hit(self, paths: list[str]) -> list[str]:
+        """조각 하나라도 `names`의 이름과 같은 경로. 원래 표기 그대로 돌려준다."""
+        names = {name.casefold() for name in self.names}
+        return [p for p in paths if names.intersection(path_segments(p))]
 
 
 class ThresholdTable(_Strict):
