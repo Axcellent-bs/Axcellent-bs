@@ -35,14 +35,17 @@ export function CampaignsSection({ tick }: { tick: number }) {
                   <dd className="text-sm text-ink-500">{v.budget.basis}</dd>
                 </div>
                 <div className="rounded-2xl bg-surface-2 px-3 py-2">
-                  <dt className="text-sm text-ink-500">쓴 돈과 승인한 돈</dt>
-                  <dd className="text-base font-semibold tabular-nums">{krw(v.budget.committed_krw)}</dd>
+                  <dt className="text-sm text-ink-500">쓴 돈과 진행 중인 돈</dt>
+                  <dd className="text-base font-semibold tabular-nums">{v.budget.committed_krw === null ? "확인할 수 없음" : krw(v.budget.committed_krw)}</dd>
                 </div>
                 <div className="rounded-2xl bg-surface-2 px-3 py-2">
                   <dt className="text-sm text-ink-500">손익분기 ROAS</dt>
                   <dd className="text-base font-semibold tabular-nums">{v.break_even_roas === null ? "-" : `${v.break_even_roas}배`}</dd>
                 </div>
               </dl>
+              {v.running.length > 0 && (
+                <p className="text-sm text-ink-700">결과를 기다리는 캠페인: {v.running.map((r) => `${r.campaign_id} ${krw(r.active_krw)}`).join(", ")}</p>
+              )}
               {v.campaigns.length === 0 ? <Empty>아직 기록된 캠페인이 없습니다. 마케팅 AI가 성과를 보내면 여기에 적힙니다.</Empty> : (
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[840px] text-sm">

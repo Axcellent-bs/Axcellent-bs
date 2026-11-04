@@ -85,6 +85,7 @@ def test_agent_card(client: TestClient) -> None:
         "review_campaign_budget",
         "verify_campaign_budget",
         "finance_insights",
+        "cancel_campaign",
     }
     assert skills["answer_planning_question"].allowed_requesters == ["planning"]
     assert skills["answer_planning_question"].grade == "read"
@@ -93,7 +94,7 @@ def test_agent_card(client: TestClient) -> None:
     # 재무는 장애 대응 흐름의 단계가 아니다 (2026-10-27, 요구사항 DEP-FIN-01)
     assert "loss_aggregation" not in skills
     served = client.get("/.well-known/agent-card.json").json()
-    assert served["name"] == "finance" and len(served["skills"]) == 7
+    assert served["name"] == "finance" and len(served["skills"]) == 8
 
 
 # ------------------------------------------- 금액 다시 계산 (예전 verify_amount, recheck.py)

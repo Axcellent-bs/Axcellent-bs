@@ -1,7 +1,7 @@
 # agents/finance
 담당: 태윤 · 포트: 8105
 ## 1. 역할
-**캣북스 재무팀** 에이전트 (재무 재설계 2026-10-23, `docs/notes/finance/2026-10-23-finance-redesign.md`).
+**재무팀** 에이전트 (재무 재설계 2026-10-23, `docs/notes/finance/2026-10-23-finance-redesign.md`).
 마켓운영(판매자 입점 심사 `seller_review`·정산 보류 `settlement_hold`)은 재무 일이 아니라 2026-10-30에 없앴다.
 결산·리포트, 매출·PG 대사, 판매자 정산, 팀 예산, 세무 지원, 현금 흐름을 한다.
 **재무는 쿠폰·환불의 끝난 금액을 장부에 기록만 한다.**
@@ -28,7 +28,7 @@
 
 없앤 것: `loss_aggregation`(손실 집계 skill), `/api/finance/loss-reports`. 장애 비용은 평상시 장부 → `closing_report`에서 드러난다. 총괄은 고객지원이 문의를 닫으면 재무를 불러(`record_support_cost`) 처리 결과를 장부에 기록하게 한다.
 화면 호환으로 한 단계 남겨 뒀던 키(사건 상세 `steps`, 목록 `loss_total`)도 지웠다 — 화면 정리(ax-company-hq/ax-frontend#61)가 끝나 읽는 쪽이 없다.
-재무 일이 아니라 없앤 것(2026-10-26): 캣북스 클레임 연동(`catbooks.py`, 환불·교환 신청을 건별로 다시 확인 → 건별 검사는 안전 관문의 일, `/api/finance/catbooks/*`, `FINANCE_CATBOOKS_*`),
+재무 일이 아니라 없앤 것(2026-10-26): 쇼핑몰 클레임 연동(`catbooks.py`, 환불·교환 신청을 건별로 다시 확인 → 건별 검사는 안전 관문의 일, `/api/finance/catbooks/*`, `FINANCE_CATBOOKS_*`),
 `review_threshold_change`(AI가 기준 변경을 판단 → 사람이 기준표 PR로 바꾼다, `/api/finance/threshold-reviews`).
 
 ## 2. 실행 방법

@@ -1,6 +1,6 @@
 """캠페인 재무: 손익 기록, 예산 브레이크, 실패 교훈, 인사이트. 숫자와 판단은 전부 코드가 한다.
 
-- 손익: 캣북스는 중개업이라 매출은 판매액이 아니라 수수료다 (`CMP-001`)
+- 손익: 회사는 중개업이라 매출은 판매액이 아니라 수수료다 (`CMP-001`)
 - 브레이크: 캠페인 예산만 판단한다. 쿠폰 발급과 환불은 대상이 아니다 (`BRK-005`).
   재무는 끝난 쿠폰 금액을 받아 비용에 적을 뿐이다
 - 교훈: 적자 캠페인이 다음 예산 한도를 줄이고, 효율 좋음이 나오면 풀린다 (`LRN-*`)
@@ -73,6 +73,11 @@ def repeat_estimate(books: Books, today: date) -> dict[str, Any] | None:
         "window_days": cfg.window_days,
         "source": "books",
     }
+
+
+def over_started(record: dict[str, Any], started: dict[str, Any]) -> int:
+    """시작한 금액보다 많이 쓴 금액. 0이면 정상."""
+    return max(record["spend_krw"] - started["total_krw"], 0)
 
 
 def compute_result(data: dict[str, Any], repeat: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -245,6 +250,9 @@ def apply_lessons(
 
 
 # ---------------------------------------------------------------- 브레이크
+NO_STARTS: dict[str, dict[str, Any]] = {}
+
+
 def fallback_budget() -> dict[str, Any]:
     return {
         "amount_krw": load_rules().brake.monthly_budget_krw,
@@ -277,25 +285,40 @@ def committed_this_month(
     campaign_id: str,
     month: str,
     campaigns: dict[str, dict[str, Any]],
-    reviews: list[dict[str, Any]],
+    started: dict[str, dict[str, Any]],
 ) -> int:
-    """이달 쓴 돈 + 관문을 통과해 시작했지만 결과가 아직 없는 돈. 다시 묻는 같은 캠페인은 뺀다.
+    """이달 결과가 기록된 집행액 + 시작했지만 결과가 아직 없는 금액. 다시 묻는 같은 캠페인은 뺀다.
 
-    판단만 받고 시작하지 않은 건, 사람이 거절한 건은 예산을 잡지 않는다.
+    시작 여부는 안전 관문 실행 기록이 기준이다. 사람이 승인한 큰 금액도 여기 잡힌다.
+    판단만 받고 시작하지 않은 건, 사람이 거절한 건, 취소한 건은 잡지 않는다.
     """
     total = sum(
         c["spend_krw"]
         for c in campaigns.values()
         if _month(c["period_to"]) == month and c["campaign_id"] != campaign_id
     )
-    latest: dict[str, dict[str, Any]] = {}
-    for review in reviews:
-        if review["month"] == month and review.get("started_krw"):
-            latest[review["campaign_id"]] = review
-    for cid, review in latest.items():
-        if cid != campaign_id and cid not in campaigns and review.get("started_krw"):
-            total += review["started_krw"]
+    for cid, row in started.items():
+        if cid != campaign_id and cid not in campaigns and row["month"] == month:
+            total += row["active_krw"]
     return total
+
+
+def summarize_starts(
+    rows: list[dict[str, Any]], cancels: dict[str, dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    """관문 실행 기록 → 캠페인별 시작 금액. `active_krw`는 취소 뒤 남은 금액이다."""
+    out: dict[str, dict[str, Any]] = {}
+    for row in sorted(rows, key=lambda r: r["at"]):
+        cid = row["campaign_id"]
+        cur = out.setdefault(
+            cid, {"campaign_id": cid, "total_krw": 0, "active_krw": 0, "month": row["at"][:7]}
+        )
+        cur["total_krw"] += row["amount_krw"]
+        cancel = cancels.get(cid)
+        if cancel is None or row["at"] > cancel["canceled_at"]:
+            cur["active_krw"] += row["amount_krw"]
+            cur["month"] = row["at"][:7]
+    return out
 
 
 def _loss_streak(channel: str, campaigns: dict[str, dict[str, Any]]) -> int:
@@ -317,8 +340,12 @@ def decide(
     cash_net_krw: int | None,
     today: date,
     monthly_budget: dict[str, Any] | None = None,
+    started: dict[str, dict[str, Any]] | None = NO_STARTS,
 ) -> dict[str, Any]:
-    """승인·조건부·거절. 거절 사유가 있어도 모든 기준의 확인 결과를 근거로 남긴다."""
+    """승인·조건부·거절. 거절 사유가 있어도 모든 기준의 확인 결과를 근거로 남긴다.
+
+    `started`가 None이면 안전 관문 기록을 못 읽은 것이다. 쓴 돈을 모르니 승인하지 않는다.
+    """
     book = load_rules()
     brake, lesson_rules = book.brake, book.lessons
     requested, channel = request["requested_krw"], request["channel"]
@@ -361,7 +388,7 @@ def decide(
     rules.append(applied("BRK-004", detail))
 
     # 남은 예산
-    committed = committed_this_month(request["campaign_id"], month, campaigns, reviews)
+    committed = committed_this_month(request["campaign_id"], month, campaigns, started or {})
     budget = monthly_budget or fallback_budget()
     remaining = max(budget["amount_krw"] - committed, 0)
     detail = (
@@ -369,6 +396,8 @@ def decide(
         f"중 남은 금액 {fc.won(remaining)}"
     )
     rules.append(applied("BRK-001", detail))
+    if started is None:
+        rejects.append("안전 장치의 집행 기록을 읽지 못해 쓴 돈을 확인할 수 없음")
     budget_limited = remaining < limit
     if remaining < brake.min_viable_krw:
         rejects.append(f"{detail}, 최소 {fc.won(brake.min_viable_krw)}보다 적음")
@@ -433,6 +462,7 @@ def compare_with_history(
     cash_net_krw: int | None,
     today: date,
     monthly_budget: dict[str, Any] | None = None,
+    started: dict[str, dict[str, Any]] | None = NO_STARTS,
 ) -> dict[str, Any]:
     """같은 요청을 실패 이력이 없을 때와 지금으로 판단해 나란히 보여 준다."""
     clean = {
@@ -445,6 +475,7 @@ def compare_with_history(
         "cash_net_krw": cash_net_krw,
         "today": today,
         "monthly_budget": monthly_budget,
+        "started": started,
     }
     before = decide(request, campaigns=clean, lessons=[], **common)
     after = decide(request, campaigns=campaigns, lessons=lessons, **common)

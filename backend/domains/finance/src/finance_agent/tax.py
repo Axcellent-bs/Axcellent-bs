@@ -5,10 +5,10 @@
 근거는 2026-10-30 검토(세무 관점) 기준이다. 확인이 안 된 부분은 설정값과 `checks`(확인 필요 목록)로
 드러낸다.
 
-캣북스(통신판매중개)의 부가세 구조
-- 판매자의 상품 매출은 캣북스 매출이 아니다. 도서는 면세(부가세법 제26조①8), 문구 등은 과세이고
+회사(통신판매중개)의 부가세 구조
+- 판매자의 상품 매출은 회사 매출이 아니다. 도서는 면세(부가세법 제26조①8), 문구 등은 과세이고
   판매자가 신고한다
-- 캣북스의 과세 매출은 판매 수수료(중개 용역)다. 면세 도서를 중개해도 수수료는 과세다.
+- 회사의 과세 매출은 판매 수수료(중개 용역)다. 면세 도서를 중개해도 수수료는 과세다.
   광고·직접 배송 용역이 있으면 더한다
 - 회사 부담 쿠폰: 약관상 쿠폰 할인액을 판매자에게 받는 수수료에서 직접 공제하는 구조면 수수료의
   에누리로 과세표준에서 뺀다(대법원 2016.6.23. 2014두298, G마켓). 따로 현금으로 보전하면
@@ -105,7 +105,7 @@ def vat_pack(books: Books, d: date | None = None) -> dict[str, Any]:
             sales_rows.append(
                 {
                     "code": "shipping",
-                    "label": "배송 용역(캣북스 공급)",
+                    "label": "배송 용역(회사 공급)",
                     "supply": s_supply,
                     "vat": s_tax,
                 }
@@ -128,7 +128,7 @@ def vat_pack(books: Books, d: date | None = None) -> dict[str, Any]:
     seller_sales = seller_sales_by_tax(books, start_d, end_d) if "gmv" not in unknown else None
     kind, due = filing_deadline(end_d)
     vat_word = {"excluded": "별도", "included": "포함"}
-    supplier = "캣북스" if t.shipping_supplier == "platform" else "판매자"
+    supplier = "회사" if t.shipping_supplier == "platform" else "판매자"
     checks = [
         f"판매 수수료가 부가세 {vat_word[t.commission_vat]} 금액인지 (약관 확인)",
         "회사 부담 쿠폰을 약관상 수수료에서 공제하는 구조인지 (2014두298형이면 에누리)",
@@ -233,7 +233,7 @@ def _tax_type(category: str | None) -> str:
 
 
 def seller_sales_by_tax(books: Books, start_d: date, end_d: date) -> dict[str, int]:
-    """판매자 상품 매출(캣북스 매출 아님)을 면세·과세로 나눈 합. 참고용."""
+    """판매자 상품 매출(회사 매출 아님)을 면세·과세로 나눈 합. 참고용."""
     start, end = fc.day_start(start_d), fc.day_start(end_d)
     out: dict[str, int] = {"exempt": 0, "taxable": 0}
     for o in books.orders:

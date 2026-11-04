@@ -72,6 +72,7 @@ from finance_agent.handlers import (
     closing_key,
     current_insights,
     monthly_budget,
+    started_campaigns,
     state,
     team_budget_data,
 )
@@ -652,12 +653,23 @@ def add_finance_api(app: FastAPI) -> None:
         records = state().records
         budget = await monthly_budget()
         month = fc.today().isoformat()[:7]
-        spent = cp.committed_this_month("", month, records.campaigns, records.budget_reviews)
+        started = await started_campaigns()
+        spent = (
+            None
+            if started is None
+            else cp.committed_this_month("", month, records.campaigns, started)
+        )
+        running = [
+            row
+            for cid, row in (started or {}).items()
+            if cid not in records.campaigns and row["active_krw"] > 0
+        ]
         return ok(
             {
                 "campaigns": sorted(
                     records.campaigns.values(), key=lambda c: c["period_to"], reverse=True
                 ),
+                "running": running,
                 "reviews": list(reversed(records.budget_reviews)),
                 "lessons": list(reversed(records.lessons)),
                 "opinions": list(reversed(records.opinions)),
@@ -697,6 +709,7 @@ def add_finance_api(app: FastAPI) -> None:
             cash_net_krw=await cash_net_krw(),
             today=fc.today(),
             monthly_budget=await monthly_budget(),
+            started=await started_campaigns(),
         )
         return ok(result, {"collected_at": fc.iso(fc.now())})
 

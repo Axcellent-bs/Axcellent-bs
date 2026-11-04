@@ -8,6 +8,7 @@
 | `review_campaign_budget` | read | marketing, orchestrator | 캠페인 예산 승인·조건부·거절 판단 |
 | `verify_campaign_budget` | read | safety | 관문 `start_campaign` 검증 |
 | `finance_insights` | read | orchestrator | 재무 인사이트와 근거 |
+| `cancel_campaign` | read | marketing, orchestrator | 시작한 캠페인 취소, 잡아 둔 예산 풀기 |
 
 `verify_amount`·`review_hold`는 재무 재설계(2026-10-23)로, `loss_aggregation`은 2026-10-27에
 없앴다.
@@ -46,6 +47,7 @@ from ax_contracts.schemas import (
 from ax_contracts.schemas.finance import (
     CampaignBudgetReviewInput,
     CampaignBudgetReviewOutput,
+    CampaignCancelInput,
     CampaignResultInput,
     FinanceOpinion,
     VerifyAmountInput,
@@ -120,6 +122,7 @@ class State:
         self.cash_override: int | None = None
         self.budget_override: dict[str, Any] | None = None
         self.repeat_override: dict[str, Any] | None = None
+        self.started_override: dict[str, dict[str, Any]] | None = None
         # 사건별 쿠폰 장부(⑨)의 실행 기록. 테스트에서 바꾼다
         self.executions_loader: Callable[[str | None], Awaitable[lg.ExecutionFeed]] = (
             lg.load_executions
@@ -147,6 +150,9 @@ class FinanceRecords:
         self.policy_acks: dict[str, dict[str, Any]] = {}
         self.bank_rows: list[dict[str, Any]] = []  # 사람이 올린 은행 입금 내역
         self.campaigns: dict[str, dict[str, Any]] = {}  # 캠페인 id → 손익 기록
+        # 관문에서 읽은 start_campaign 실행 기록. 관문은 메모리라 재시작해도 잊지 않게 옮겨 둔다
+        self.campaign_starts: dict[str, dict[str, Any]] = {}  # 실행 id → 기록
+        self.campaign_cancels: dict[str, dict[str, Any]] = {}  # 캠페인 id → 취소 기록
         self.budget_reviews: list[dict[str, Any]] = []  # 예산 판단 기록
         self.lessons: list[dict[str, Any]] = []  # 실패 교훈
         self.opinions: list[dict[str, Any]] = []  # 총괄에 낸 의견과 전달 상태
@@ -574,6 +580,31 @@ async def cash_net_krw() -> int | None:
     return sum(values)
 
 
+async def started_campaigns() -> dict[str, dict[str, Any]] | None:
+    """캠페인별 시작 금액. 기준은 안전 관문 실행 기록이다. 못 읽으면 None(모른다고 답한다)."""
+    if state().started_override is not None:
+        return state().started_override
+    records = state().records
+    try:
+        feed = await state().executions_loader(None)
+    except Exception:  # 관문이 꺼져 있으면 쓴 돈을 모른다
+        return None
+    if feed.rows is None:
+        return None
+    for row in feed.rows:
+        cid = (row.get("params") or {}).get("campaign_id")
+        amount = row.get("computed_amount")
+        if row.get("action") != "start_campaign" or row.get("status") != "executed":
+            continue
+        if isinstance(cid, str) and cid and isinstance(amount, int):
+            records.campaign_starts[row["execution_id"]] = {
+                "campaign_id": cid,
+                "amount_krw": amount,
+                "at": fc.iso(row["created_at"]),
+            }
+    return cp.summarize_starts(list(records.campaign_starts.values()), records.campaign_cancels)
+
+
 async def monthly_budget() -> dict[str, Any]:
     if state().budget_override is not None:
         return state().budget_override
@@ -598,6 +629,7 @@ async def review_budget(data: CampaignBudgetReviewInput, context_id: str) -> dic
         cash_net_krw=await cash_net_krw(),
         today=today,
         monthly_budget=await monthly_budget(),
+        started=await started_campaigns(),
     )
     review |= {
         "review_id": f"bud_{data.campaign_id}_{len(records.budget_reviews) + 1}",
@@ -657,8 +689,6 @@ async def verify_campaign_budget(request: AgentRequest) -> AgentResult:
     # 먼저 받은 판단은 그사이 다른 캠페인이 시작했으면 틀릴 수 있어 시작 직전에 다시 판단한다
     review = await review_budget(ask, request.meta.context_id)
     ok = review["decision"] != "rejected" and ask.requested_krw <= review["approved_limit_krw"]
-    if ok:
-        review["started_krw"] = ask.requested_krw  # 관문이 곧 실행한다. 이때부터 예산을 잡는다
     first_rule = next(
         (
             r["rule_id"]
@@ -692,7 +722,13 @@ async def record_result(data: CampaignResultInput, context_id: str) -> dict[str,
     previous = records.campaigns.get(data.campaign_id)
     if previous is not None and all(previous.get(k) == v for k, v in body.items()):
         return previous | {"write": "already_recorded"}
+    started = await started_campaigns()
+    if started is None:
+        return {"status": "starts_unavailable", "campaign_id": data.campaign_id}
+    if data.campaign_id not in started:
+        return {"status": "not_started", "campaign_id": data.campaign_id}
     record = cp.compute_result(body, await repeat_estimate()) | {
+        "over_started_krw": cp.over_started(body, started[data.campaign_id]),
         "revision": (previous or {}).get("revision", 0) + 1,
         "recorded_at": fc.iso(fc.now()),
         "context_id": context_id,
@@ -740,6 +776,8 @@ async def record_campaign_result(request: AgentRequest) -> AgentResult:
     if isinstance(data, AgentResult):
         return data
     record = await record_result(data, request.meta.context_id)
+    if record["status"] in ("not_started", "starts_unavailable"):
+        return _result(request, TaskStatus.FAILED, outcome=record["status"], output=record)
     return _result(
         request,
         TaskStatus.COMPLETED,
@@ -750,6 +788,46 @@ async def record_campaign_result(request: AgentRequest) -> AgentResult:
             f"{data.campaign_id} 손익 {record['profit_krw']}",
             [data.campaign_id],
         ),
+    )
+
+
+async def cancel_budget(data: CampaignCancelInput) -> dict[str, Any]:
+    """시작한 캠페인을 취소해 잡아 둔 예산을 푼다. 결과가 기록된 캠페인은 취소하지 않는다."""
+    records = state().records
+    if data.campaign_id in records.campaigns:
+        return {"campaign_id": data.campaign_id, "status": "already_recorded", "released_krw": 0}
+    started = await started_campaigns()
+    if started is None:
+        return {"campaign_id": data.campaign_id, "status": "starts_unavailable", "released_krw": 0}
+    row = started.get(data.campaign_id)
+    if row is None or row["active_krw"] == 0:
+        return {"campaign_id": data.campaign_id, "status": "not_started", "released_krw": 0}
+    records.campaign_cancels[data.campaign_id] = {
+        "campaign_id": data.campaign_id,
+        "reason": data.reason,
+        "canceled_at": fc.iso(fc.now()),
+        "released_krw": row["active_krw"],
+    }
+    return {
+        "campaign_id": data.campaign_id,
+        "status": "canceled",
+        "released_krw": row["active_krw"],
+    }
+
+
+async def cancel_campaign(request: AgentRequest) -> AgentResult:
+    """캠페인 취소. 재무 기록만 바꾼다. 광고를 멈추는 일은 요청 쪽이 한다."""
+    data = _parse(request, CampaignCancelInput)
+    if isinstance(data, AgentResult):
+        return data
+    out = await cancel_budget(data)
+    done = out["status"] == "canceled"
+    return _result(
+        request,
+        TaskStatus.COMPLETED if done else TaskStatus.FAILED,
+        outcome=out["status"],
+        output=out,
+        evidence=_evidence(["finance.campaign_starts"], f"{data.campaign_id} {out['status']}"),
     )
 
 
@@ -769,6 +847,7 @@ HANDLERS = {
     "review_campaign_budget": review_campaign_budget,
     "verify_campaign_budget": verify_campaign_budget,
     "finance_insights": finance_insights,
+    "cancel_campaign": cancel_campaign,
     "closing_report": closing_report,
     "record_support_cost": record_support_cost,
     "answer_planning_question": answer_planning_question,
