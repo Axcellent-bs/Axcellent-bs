@@ -252,6 +252,21 @@
       "verifier": null,
       "priority": "recommended",
       "handoff": false
+    },
+    {
+      "id": "source_plan",
+      "description": "수집 계획. 도메인 프로필(domain_profile)과 출처 목록(data_sources)을 보고 LLM이 출처 목록 안에서만 출처·이유·카테고리·키워드·연령 여부를 정해진 스키마로 고르고, 코드가 검증한다. 카테고리는 출처마다 실제 목록에서만 고른다(YouTube videoCategories.list, 네이버 쇼핑인사이트는 공식 목록 API가 없어 네이버쇼핑 cat_id 후보를 실제 호출로 확인). 목록 밖·중복·업종이 안 맞는 출처, 실제 목록에 없는 카테고리, 씨앗 키워드 밖 키워드, 연령을 못 주는 출처의 연령은 이유와 함께 버린다. 키 필요 출처는 카테고리 확인을 건너뛰고 '키 등록 후 확인'으로 남기며, 키가 있으면 더 쓸 수 있는 근거를 보여 준다. 출처마다 호출 수·할당량을 코드가 세고 회사 설정 상한 안으로 자른다. 계획은 저장하고 다시 쓴다(regenerate로 새로). 새 출처 수집은 사람 승인 후(설정 파일 승인 플래그). 수집은 하지 않고 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#SourcePlanRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#SourcePlanOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
     }
   ]
 }

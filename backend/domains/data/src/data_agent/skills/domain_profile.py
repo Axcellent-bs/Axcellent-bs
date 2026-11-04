@@ -384,7 +384,7 @@ async def make_profile(
         out.status = "known" if out.industry and out.seed_keywords else "unknown"
         if out.status == "unknown" and not out.reason:
             out.reason = "업종 또는 근거 있는 씨앗 키워드가 없음"
-        if out.status == "known":
+        if out.status == "known" and not catalog.reason:  # 카탈로그를 못 읽었으면 다음에 다시
             store.put(key, out, now)
         return ProfileResult(out, _evidence(out, queries, now))
     finally:

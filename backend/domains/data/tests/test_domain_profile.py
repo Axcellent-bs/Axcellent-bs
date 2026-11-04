@@ -165,3 +165,12 @@ def test_catalog_and_about_go_only_into_the_data_block(tmp_path: Path) -> None:
     _run(tmp_path, llm)
     assert llm.seen["회사 소개"].startswith("책과 문구")
     assert llm.seen["상품3"] == "무지 노트 3권 세트 | 카테고리 stat | 줄 없는 무지 노트"
+
+
+def test_profile_without_catalog_is_not_stored(tmp_path: Path) -> None:
+    llm = ProfileLLM(_answer(seeds=[dp._Seed(keyword="서점", evidence="고양이가 지키는 서점")]))
+    no_catalog = CatalogRead([], {}, "회사 상품 목록을 읽지 못함 [UNAVAILABLE]")
+    first = _run(tmp_path, llm, catalog=no_catalog)
+    assert first.status == "known" and any("카탈로그를 읽지 못해" in x for x in first.limits)
+    again = _run(tmp_path, llm, catalog=no_catalog)
+    assert not again.cached and llm.asked == 2  # 카탈로그가 돌아오면 다시 만들게 저장하지 않음

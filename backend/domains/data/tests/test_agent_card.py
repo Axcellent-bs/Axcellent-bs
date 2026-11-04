@@ -40,6 +40,7 @@ def test_card_validates(card: AgentCard) -> None:
         "trend_insight_brief",
         "domain_profile",
         "data_sources",
+        "source_plan",
     }
 
 
