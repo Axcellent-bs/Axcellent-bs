@@ -11,7 +11,7 @@ import {
 // 트렌드 2단계(인사이트) 맨 아래 "참고용 예시" 접힘 안: 캣북스 숏츠 광고 예시 아이디어(참고용, 확정 기획은 기획팀). 예시마다 타깃 연령대(trend_age). promo_concepts(계약 PromoConceptsOutput) 응답 그대로 보여 준다.
 // - 맨 위: 제목 · 다시 만들기(계약 regenerate, 서버는 하루 캐시) · 재료 한 줄(상품·트렌드·시즌·형식 개수, 못 읽은 출처는 서버 이유)
 //   · "뺀 재료 N개 보기"(접힘: 뺀 지금 인기 주제·시즌 확인 키워드·버린 초안과 서버 이유)
-// - 왼쪽: 잘 되는 숏츠 형식 막대. 값은 기획안 재료 shorts_formats(서버 대표값)라 기획안 칩의 평균 조회수와 같다.
+// - 왼쪽: 잘 되는 숏츠 형식 막대. 값은 기획안 재료 shorts_formats의 대표값 = 중앙값(평균은 보조)이고 숏츠 통계 기준 시각을 붙인다.
 //   막대 길이는 그중 가장 큰 값에 대한 비율(그리기용). 아래 표본 한계는 shorts_stats의 서버 문장 그대로
 // - 오른쪽 카드: 칩(길이·형식·트렌드 출처) → 제목 → "왜 맞나" → 콘티(넓은 화면 가로, 좁은 화면 세로) → 등장 상품·가격 → 주의(노랑)
 //   → [기획팀에 보내기] 꺼 둠(승인 절차 등록 전)
@@ -86,7 +86,7 @@ function conceptBasis(c: PromoConcept, { out, popular, shorts }: Ctx) {
     rows.push({
       source: "형식 · YouTube 숏츠 표본",
       body: <>
-        {fmt ? `인기 숏츠 ${fmt.count.toLocaleString("ko-KR")}개 평균 조회수 ${count(fmt.avg_views)}회` : "표본 값을 받지 못했어요"}
+        {fmt ? `인기 숏츠 ${fmt.count.toLocaleString("ko-KR")}개 ${fmt.median_views != null ? `중앙값 조회수 ${count(fmt.median_views)}회` : `평균 조회수 ${count(fmt.avg_views)}회`}` : "표본 값을 받지 못했어요"}
         {shorts?.snapshot_at && ` (${when(shorts.snapshot_at)} 스냅샷)`}{" "}
         {group && group.top.length > 0 && <VideoLinks ids={group.top.map((v) => v.video_id)} titles={new Map(group.top.map((v) => [v.video_id, v.title]))} max={2} />}
       </>,
@@ -105,7 +105,7 @@ function ConceptCard({ c, ctx }: { c: PromoConcept; ctx: Ctx }) {
         {typeof c.duration_seconds === "number" ? <Chip label={`${c.duration_seconds}초`} tone="bg-ink-100 text-ink-700" />
           : c.format && <Chip label={c.format} tone="bg-ink-100 text-ink-700" />}
         {c.shorts_format && (
-          <Chip label={[`형식 · ${c.shorts_format}`, typeof c.shorts_format_avg_views === "number" ? `평균 조회수 ${count(c.shorts_format_avg_views)}회` : null].filter(Boolean).join(" · ")}
+          <Chip label={[`형식 · ${c.shorts_format}`, typeof c.shorts_format_median_views === "number" ? `중앙값 조회수 ${count(c.shorts_format_median_views)}회` : typeof c.shorts_format_avg_views === "number" ? `평균 조회수 ${count(c.shorts_format_avg_views)}회` : null].filter(Boolean).join(" · ")}
             tone="bg-ink-100 text-ink-700" />
         )}
         <TrendChip c={c} />
@@ -227,11 +227,14 @@ function FormatSample({ top }: { top: ShortsStatsOutput["by_format"][number]["to
 /** 왼쪽: 잘 되는 숏츠 형식 막대(기획안 재료 값) + 표본 한계(shorts_stats 서버 문장) */
 function FormatBars({ out, s }: { out: PromoConceptsOutput; s: SkillState<ShortsStatsOutput> }) {
   const formats = out.shorts_formats ?? [];
-  const max = Math.max(0, ...formats.map((f) => f.avg_views));
+  const typical = (f: { median_views?: number | null; avg_views: number }) => f.median_views ?? f.avg_views;
+  const max = Math.max(0, ...formats.map(typical));
+  const at = formats.find((f) => f.snapshot_at)?.snapshot_at ?? null;
   const groups = s.kind === "ok" ? s.out.by_format : [];
   return (
     <section aria-labelledby="promo-formats-title" className="card space-y-3 p-4">
       <h3 id="promo-formats-title" className="text-base font-semibold text-ink-900">잘 되는 숏츠 형식</h3>
+      {at && <p className="text-xs text-ink-500">숏츠 통계 {when(at)} 기준 · 대표값은 중앙값</p>}
       {formats.length === 0 ? (
         <p className="text-sm text-ink-500">{out.shorts_reason ?? "기획안에 쓴 숏츠 형식이 없어요."}</p>
       ) : (
@@ -240,12 +243,14 @@ function FormatBars({ out, s }: { out: PromoConceptsOutput; s: SkillState<Shorts
             <li key={f.name}>
               <p className="flex items-baseline justify-between gap-2 text-sm">
                 <span className="font-semibold text-ink-900">{f.name}</span>
-                <span className="tabular-nums text-ink-700">평균 조회수 {count(f.avg_views)}회</span>
+                <span className="tabular-nums text-ink-700">
+                  {f.median_views != null ? `중앙값 조회수 ${count(f.median_views)}회` : `평균 조회수 ${count(f.avg_views)}회`}
+                </span>
               </p>
               <div className="mt-1 h-2.5 rounded-full bg-ink-100" aria-hidden>
-                <div className="h-2.5 rounded-full bg-brand-500" style={{ width: `${max > 0 ? Math.max(2, (f.avg_views / max) * 100) : 0}%` }} />
+                <div className="h-2.5 rounded-full bg-brand-500" style={{ width: `${max > 0 ? Math.max(2, (typical(f) / max) * 100) : 0}%` }} />
               </div>
-              <p className="mt-0.5 text-xs text-ink-500">숏츠 {f.count.toLocaleString("ko-KR")}개</p>
+              <p className="mt-0.5 text-xs text-ink-500">숏츠 {f.count.toLocaleString("ko-KR")}개{f.median_views != null ? ` · 평균 ${count(f.avg_views)}회(보조)` : ""}</p>
               <FormatSample top={groups.find((g) => g.name === f.name)?.top ?? []} />
             </li>
           ))}

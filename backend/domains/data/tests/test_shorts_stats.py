@@ -335,3 +335,54 @@ def test_spare_search_calls_read_the_next_page_of_the_best_category(tmp_path: Pa
     # 카테고리 2개를 먼저 보고, 남은 1번은 한국 숏츠가 나온 20번의 다음 페이지
     assert youtube.pages == [("20", None), ("24", None), ("20", "20-next")]
     assert out.searched_shorts == 6 and out.foreign_excluded == 3
+
+
+# ---------------------------------------------------------------- 중앙값 대표값·측정 중
+
+
+def test_group_representative_value_is_the_median() -> None:
+    views = [100, 120, 130, 140, 10000]  # 큰 영상 하나가 평균을 끌어올림
+    shorts = [
+        _Short(
+            f"v{i}", f"제목{i}", "채널", v, None, (), "popular", category="게임", format="챌린지"
+        )
+        for i, v in enumerate(views)
+    ]
+    [g] = group_stats(shorts, "format", ["챌린지"], ShortsConfig())
+    assert g.median_views == 130.0 and g.avg_views == 2098.0  # 평균은 보조
+
+
+def test_close_popular_snapshots_mean_measuring_not_a_speed(tmp_path: Path) -> None:
+    popular = [_stat(f"p{i}", 100, 30) for i in range(5)]
+    db = tmp_path / "yt.db"
+    store = SnapshotStore(db)
+    store.save(NOW - timedelta(minutes=30), [Row(s, ("popular",)) for s in popular])
+    store.save(
+        NOW,
+        [Row(VideoStat(**{**s.__dict__, "view_count": (s.view_count or 0) + 50}), ("popular",))
+         for s in popular],
+    )  # fmt: skip
+    store.close()
+    config = tmp_path / "trends.toml"
+    config.write_text("[shorts]\nmin_sample = 5\nsearch_calls = 0\n", encoding="utf-8")
+    env = {"DATA_YOUTUBE_DB": str(db), "DATA_TREND_CONFIG": str(config),
+           "DATA_SHORTS_DB": str(tmp_path / "shorts.db")}  # fmt: skip
+    out = _run(env, FakeYouTube())
+    [g] = [x for x in out.by_format if x.count]
+    assert g.avg_views_per_hour is None and g.median_views_per_hour is None
+    assert g.velocity_measuring == 5
+    assert "측정 중 5개 (다시 본 간격 50분 미만)" in (g.velocity_reason or "")
+    assert g.top[0].velocity_status == "measuring"
+
+
+def test_searched_shorts_rechecked_too_soon_are_measuring(tmp_path: Path) -> None:
+    popular = [_stat(f"p{i}", 100, 300, cat="20") for i in range(3)]
+    env = _env(tmp_path, popular, "search_calls = 1\nrecheck_min_hours = 0.5\n")
+    youtube = RecheckYouTube(grow=200)
+    _run_at(env, youtube, NOW)
+    soon = _run_at(env, youtube, NOW + timedelta(minutes=40))  # 다시 봤지만 40분 < 50분
+    [g] = soon.by_format
+    assert g.velocity_measuring == 6 and g.median_views_per_hour is None
+    later = _run_at(env, youtube, NOW + timedelta(hours=2))
+    [g2] = later.by_format
+    assert g2.velocity_measuring == 0 and g2.median_views_per_hour is not None

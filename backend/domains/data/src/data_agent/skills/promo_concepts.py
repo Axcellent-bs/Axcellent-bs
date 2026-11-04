@@ -565,6 +565,8 @@ def validate_concepts(
                 duration_seconds=item.duration_seconds,
                 shorts_format=fmt or None,
                 shorts_format_avg_views=shorts.avg_views if shorts else None,
+                shorts_format_median_views=shorts.median_views if shorts else None,
+                shorts_format_at=shorts.snapshot_at if shorts else None,
                 fit_reason=item.fit_reason.strip(),
             )
         )
@@ -714,7 +716,8 @@ async def _generate(
         facts[f"상품{n}"] = p.name
     for n, f in enumerate(formats[0].values(), start=1):
         data[f"숏츠형식{n}"] = f.name
-        data[f"숏츠형식{n} 근거"] = f"인기 숏츠 {f.count}개 평균 조회수 {f.avg_views:.0f}"
+        typical = f.median_views if f.median_views is not None else f.avg_views
+        data[f"숏츠형식{n} 근거"] = f"인기 숏츠 {f.count}개 중앙값 조회수 {typical:.0f}"
     for n, t in enumerate(trends, start=1):
         data[f"트렌드{n}"] = t.name
         data[f"트렌드{n} 근거"] = t.detail
@@ -930,7 +933,10 @@ async def shorts_formats(
     category_cache: CategoryCache | None,
     config: PromoConfig,
 ) -> tuple[dict[str, PromoShortsFormat], Literal["known", "unknown"], str | None]:
-    """shorts_stats 형식별 중 표본이 충분한 것의 평균 조회수 상위 N개 (서버 값 그대로)."""
+    """shorts_stats 형식별 중 표본이 충분한 것의 중앙값 조회수 상위 N개 (서버 값, 같은 시점).
+
+    대표값은 중앙값이고 평균은 보조 칸이다. 값마다 숏츠 통계 기준 시각(snapshot_at)을 붙인다.
+    """
     if config.shorts_formats <= 0:
         return {}, "unknown", "회사 설정에서 숏츠 형식 재료를 끔"
     result = await shorts_stats(
@@ -941,11 +947,19 @@ async def shorts_formats(
     known = [
         g
         for g in o.by_format
-        if g.status == "known" and g.avg_views is not None and g.name not in ("기타", "unknown")
+        if g.status == "known"
+        and (g.median_views if g.median_views is not None else g.avg_views) is not None
+        and g.name not in ("기타", "unknown")
     ]
-    known.sort(key=lambda g: -(g.avg_views or 0.0))
+    known.sort(key=lambda g: -(g.median_views if g.median_views is not None else g.avg_views or 0))
     picked = {
-        g.name: PromoShortsFormat(name=g.name, avg_views=g.avg_views or 0.0, count=g.count)
+        g.name: PromoShortsFormat(
+            name=g.name,
+            avg_views=g.avg_views or 0.0,
+            count=g.count,
+            median_views=g.median_views,
+            snapshot_at=o.snapshot_at,
+        )  # fmt: skip
         for g in known[: config.shorts_formats]
     }
     if not picked:
