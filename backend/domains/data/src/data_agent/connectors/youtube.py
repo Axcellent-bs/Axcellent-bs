@@ -30,7 +30,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from data_agent.connectors import ConnectorUnavailable
+from data_agent.connectors import ConnectorUnavailable, replay
 
 DEFAULT_URL = "https://www.googleapis.com/youtube/v3"
 URL_ENV = "AX_YOUTUBE_API_URL"
@@ -197,6 +197,8 @@ class YouTubeConnector:
         self._key = env.get(KEY_ENV) or ""
         self._client = client
         self.quota_used = 0
+        self._env = env
+        self.mode = replay.mode(env)  # live · record · replay (README "외부 호출 없이 확인하기")
         self.next_page_tokens: dict[str, str | None] = {}  # 숏츠 검색 카테고리마다 다음 페이지
 
     def __repr__(self) -> str:  # 키를 담지 않는다
@@ -329,6 +331,14 @@ class YouTubeConnector:
         return await self.videos(ids) if ids else []
 
     async def _get(self, resource: str, params: dict[str, Any]) -> Any:
+        if self.mode == "replay":  # 저장된 응답만 (할당량을 세지 않는다)
+            return replay.load("youtube", f"{self.url}/{resource}", params, self._env)
+        payload = await self._get_live(resource, params)
+        if self.mode == "record":
+            replay.save("youtube", f"{self.url}/{resource}", params, payload, self._env)
+        return payload
+
+    async def _get_live(self, resource: str, params: dict[str, Any]) -> Any:
         if not self._key:
             raise ConnectorUnavailable(
                 "UNAUTHORIZED", f"{KEY_ENV}가 없어 YouTube Data API를 부를 수 없다"
