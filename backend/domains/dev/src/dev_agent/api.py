@@ -191,6 +191,28 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             pass  # 넣은 값은 두고, 실패 이유는 상태(error)로 보여 준다
         return _account()
 
+    @router.get("/vcs/github-account/install", response_model=None, dependencies=ADMIN)
+    def get_github_install() -> dict | JSONResponse:
+        """AXcellent 앱 설치 화면 주소 `{url}` (state 포함). 화면이 이 주소로 보낸다."""
+        try:
+            url = github_account.install_url()
+        except vcs.VcsError as exc:
+            return _err(400, "INVALID_VCS", exc.message)
+        return _ok({"url": url}, get_service())
+
+    @router.post("/vcs/github-account/installed", response_model=None, dependencies=ADMIN)
+    async def post_github_installed(request: Request) -> dict | JSONResponse:
+        """GitHub 설치에서 돌아옴 `{installation_id, state}` → 연결하고 레포를 찾는다."""
+        body = await _body(request)
+        inst = body.get("installation_id") if body else None
+        if not isinstance(inst, str) or not isinstance(body.get("state"), str):
+            return _err(400, "INVALID_VCS", "installation_id·state(문자열)가 필요하다")
+        try:
+            await github_account.finish_install(body["installation_id"], body["state"])
+        except vcs.VcsError as exc:
+            return _err(400, "INVALID_VCS", exc.message)
+        return _account()
+
     @router.post("/vcs/github-account/refresh", response_model=None, dependencies=ADMIN)
     async def post_github_account_refresh() -> dict | JSONResponse:
         try:

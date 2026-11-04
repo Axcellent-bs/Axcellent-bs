@@ -22,6 +22,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
+import time
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
@@ -141,7 +143,68 @@ def load_saved() -> bool:
 
 
 def public() -> dict[str, Any]:
-    return _account.public() if _account else {"connected": False, "repos": [], "warnings": []}
+    out = _account.public() if _account else {"connected": False, "repos": [], "warnings": []}
+    return {**out, "app": app_config()}
+
+
+# ---- AXcellent 앱으로 설치만 하기 (Claude·Vercel처럼)
+# 운영팀이 GitHub App을 한 번 만들어 두면 고객사는 "GitHub 연결" → GitHub 설치 화면에서
+# 레포 고르기로 끝난다. 앱 ID·키는 서버 설정이고
+# (DEV_GITHUB_APP_ID · DEV_GITHUB_APP_SLUG · DEV_GITHUB_APP_KEY_FILE), 설치 ID는 GitHub이 설치 뒤
+# Setup URL(연결 페이지)로 돌려준다. state(10분, 한 번만)로 우리가 보낸 설치인지 확인한다.
+
+STATE_TTL = 600
+_states: dict[str, float] = {}
+
+
+def app_config() -> dict[str, Any]:
+    slug = (os.getenv("DEV_GITHUB_APP_SLUG") or "").strip()
+    ok = bool(slug and (os.getenv("DEV_GITHUB_APP_ID") or "").strip() and _app_key_path())
+    return {"configured": ok, "slug": slug if ok else ""}
+
+
+def _app_key_path() -> str:
+    path = (os.getenv("DEV_GITHUB_APP_KEY_FILE") or "").strip()
+    return path if path and os.path.exists(path) else ""
+
+
+def install_url() -> str:
+    """GitHub 설치 화면 주소 (state를 붙인다). 앱 설정이 없으면 VcsError(config)."""
+    cfg = app_config()
+    if not cfg["configured"]:
+        raise VcsError(
+            "config", "AXcellent GitHub App 설정이 없다 (DEV_GITHUB_APP_ID·SLUG·KEY_FILE)"
+        )
+    now = time.time()
+    for k in [k for k, t in _states.items() if now - t > STATE_TTL]:
+        _states.pop(k, None)
+    state = secrets.token_urlsafe(24)
+    _states[state] = now
+    web = (os.getenv("DEV_GITHUB_WEB_URL") or "https://github.com").rstrip("/")
+    return f"{web}/apps/{cfg['slug']}/installations/new?state={state}"
+
+
+async def finish_install(installation_id: str, state: str) -> Account:
+    """GitHub 설치에서 돌아왔다: state를 확인하고 AXcellent 앱 + 이 설치로 연결한 뒤
+    레포를 찾는다."""
+    started = _states.pop(state or "", None)
+    if started is None or time.time() - started > STATE_TTL:
+        raise VcsError(
+            "config",
+            "연결 요청이 만료됐거나 우리가 보낸 것이 아니다. GitHub 연결을 다시 눌러 주세요",
+        )
+    path = _app_key_path()
+    if not path:
+        raise VcsError("config", "AXcellent GitHub App 키 파일이 없다 (DEV_GITHUB_APP_KEY_FILE)")
+    with open(path, encoding="utf-8") as f:
+        key = f.read()
+    set_account(
+        (os.getenv("DEV_GITHUB_APP_ID") or "").strip(),
+        installation_id,
+        key,
+        (os.getenv("DEV_GITHUB_API_URL") or "").strip(),
+    )
+    return await refresh()
 
 
 def account() -> Account | None:
