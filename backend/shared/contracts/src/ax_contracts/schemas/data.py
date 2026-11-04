@@ -556,6 +556,13 @@ class TrendVerdict(AxModel):
     series: list[TrendPoint] = Field(default_factory=list)  # 이 그룹이 받은 날짜별 값 (기간 전체)
     window_from: dt.date | None = None  # 판정 구간 시작일 (그 앞은 기준선)
     summary: str | None = None  # 이 그룹 설명 한두 문장 (급상승만, 숫자는 근거에서 검증)
+    # 아래는 예전 응답은 없다. 공유 주제 분류기 결과 (판정과 별개, 분류 못 하면 unknown + 이유)
+    topic_category: TopicCategory | None = None
+    topic_category_reason: str | None = None
+    real_entity: bool | None = None  # 실존 인물·팀·리그·상표가 든 주제
+    entity_names: list[str] = Field(default_factory=list)
+    ad_material: bool | None = None  # 광고 재료로 쓸 수 있는지 (분류 못 하면 None)
+    ad_material_reason: str | None = None
 
     @model_validator(mode="after")
     def _reason_when_unknown(self) -> Self:
@@ -1526,6 +1533,8 @@ class TrendInsight(AxModel):
     limits: list[str] = Field(default_factory=list)  # 한계 (평가셋 없음, 상대값 등)
     example_ideas: list[str] = Field(default_factory=list)  # 이 주제를 쓴 예시 아이디어 (참고용)
     score: float = 0.0  # 순서를 정한 코드 점수 (가중치는 회사 설정)
+    # 아래는 예전 응답은 없다. 분류기가 아직 분류하지 못한 주제 (순위에 넣지 않고 참고용)
+    classification_pending: bool = False
 
 
 class TrendInsightBriefOutput(AxModel):
