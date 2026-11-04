@@ -771,6 +771,10 @@ export interface InsightEvidence {
   links: string[];
   /** 없는 출처와 이유 */
   missing: string[];
+  /** 시즌 근거 (작년 같은 달·다음 달 ÷ 기간 평균 중 큰 값, #543). 예전 응답은 없다 */
+  season_keyword?: string | null;
+  season_ratio?: number | null;
+  season_month?: string | null;
 }
 export interface InsightProduct {
   product_id: string;
@@ -806,9 +810,18 @@ export interface TrendInsight {
   shorts_format: string | null;
   shorts_format_samples: number | null;
   shorts_format_reason: string | null;
+  /** 숏츠 통계와 같은 시점의 그 형식 중앙값 조회수와 기준 시각 (#547). 예전 응답은 없다 */
+  shorts_format_median_views?: number | null;
+  shorts_format_at?: string | null;
   limits: string[];
   example_ideas: string[];
   score: number;
+  /** 분류기가 아직 분류하지 못한 주제 (순위에 넣지 않고 참고용, #543). 예전 응답은 없다 */
+  classification_pending?: boolean;
+  /** 회사 관련 인사이트 칸 (시즌 키워드·상품 핵심어 중 오른 것, #543). 예전 응답은 없다 */
+  company_related?: boolean;
+  /** 왜 회사 관련으로 골랐는지 (코드 문장) */
+  company_reason?: string | null;
 }
 export interface TrendInsightBriefOutput {
   status: "known" | "unknown";
