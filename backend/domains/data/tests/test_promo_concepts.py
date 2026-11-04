@@ -1,4 +1,4 @@
-"""promo_concepts: 광고·홍보 숏츠 기획안 초안.
+"""promo_concepts: 광고·홍보 숏츠 예시 아이디어(참고용).
 
 실제 네이버·shop-api·YouTube·LLM을 부르지 않는다 (가짜 커넥터·가짜 LLM).
 - 숏츠만: 롱폼·60초 초과·15초 미만 → 버림, 길이에 맞지 않는 컷 수 → 버림
@@ -62,14 +62,19 @@ class FakeCatalog:
 class MonthlyNaver:
     """월 단위 요청에 키워드마다 시계열을 준다. `spike`인 키워드는 작년 12월 값이 크다."""
 
-    def __init__(self, spike: set[str]) -> None:
+    def __init__(self, spike: set[str], age_spike: set[tuple[str, ...]] | None = None) -> None:
         self.spike = spike
+        self.age_spike = age_spike or set()
         self.calls_today = 0
         self.queries: list[TrendScanInput] = []
 
-    async def search_trend(self, query: TrendScanInput) -> TrendResponse:
+    async def search_trend(
+        self, query: TrendScanInput, ages: tuple[str, ...] = ()
+    ) -> TrendResponse:
         self.calls_today += 1
         self.queries.append(query)
+        if ages:  # 연령대 조회(trend_age): 날짜 단위, `age_spike` 연령대만 마지막 7일이 3배
+            return _age_series(query, tuple(ages) in self.age_spike)
         group = query.keyword_groups[0]
         points = []
         month = date(query.start_date.year, query.start_date.month, 1)
@@ -79,6 +84,19 @@ class MonthlyNaver:
             month = date(month.year + month.month // 12, month.month % 12 + 1, 1)
         series = TrendSeries(group.group_name, tuple(group.keywords), tuple(points))
         return TrendResponse(query.start_date, query.end_date, "month", (series,))
+
+
+def _age_series(query: TrendScanInput, spike: bool) -> TrendResponse:
+    from datetime import timedelta
+
+    group = query.keyword_groups[0]
+    points, day = [], query.start_date
+    while day <= query.end_date:
+        late = day > query.end_date - timedelta(days=7)
+        points.append((day, (30.0 if late and spike else 10.0) + (day.toordinal() % 3) * 0.5))
+        day += timedelta(days=1)
+    series = TrendSeries(group.group_name, tuple(group.keywords), tuple(points))
+    return TrendResponse(query.start_date, query.end_date, "date", (series,))
 
 
 def _item(**kw: Any) -> _Concept:
@@ -155,7 +173,11 @@ def _env(tmp_path: Path) -> dict[str, str]:
     tmp_path.mkdir(parents=True, exist_ok=True)
     config = tmp_path / "trends.toml"
     config.write_text("[promo]\nconcepts = 3\nseason_min_ratio = 1.3\n", encoding="utf-8")
-    return {"DATA_TREND_CONFIG": str(config), "DATA_PROMO_DB": str(tmp_path / "promo.db")}
+    return {
+        "DATA_TREND_CONFIG": str(config),
+        "DATA_PROMO_DB": str(tmp_path / "promo.db"),
+        "DATA_TREND_AGE_DB": str(tmp_path / "age.db"),
+    }
 
 
 def _run(tmp_path: Path, llm: MockLLMClient, monkeypatch: Any, *, regenerate: bool = False,
@@ -191,7 +213,8 @@ def test_season_keywords_come_from_the_catalog() -> None:
 def test_season_checks_show_keywords_and_ratios(tmp_path: Path, monkeypatch: Any) -> None:
     naver = MonthlyNaver({"무지 노트"})
     out = _run(tmp_path, PromoLLM(), monkeypatch, naver=naver)
-    assert [q.keyword_groups[0].group_name for q in naver.queries] == [
+    monthly = [q for q in naver.queries if q.time_unit == "month"]  # 시즌 확인 (연령대는 날짜 단위)
+    assert [q.keyword_groups[0].group_name for q in monthly] == [
         "도서", "문구", "파이썬 입문서", "무지 노트",
     ]  # fmt: skip
     assert out.naver_calls == 4
@@ -292,7 +315,7 @@ def test_llm_failure_gives_an_empty_list_with_a_reason(tmp_path: Path, monkeypat
     assert out.concepts == [] and out.empty_reason == "LLM 호출 실패 (RuntimeError)"
     no_llm = _run(tmp_path / "x", LLMClient("data", LLMSettings()), monkeypatch)
     assert no_llm.concepts == []
-    assert no_llm.empty_reason == "LLM 설정이 없어 기획안 초안을 만들지 않음"
+    assert no_llm.empty_reason == "LLM 설정이 없어 예시 아이디어를 만들지 않음"
 
 
 def test_drafts_are_cached_for_the_day_and_can_be_regenerated(
@@ -301,7 +324,7 @@ def test_drafts_are_cached_for_the_day_and_can_be_regenerated(
     llm = PromoLLM()
     first = _run(tmp_path, llm, monkeypatch)
     assert len(first.concepts) == 1 and not first.cached and llm.asked == 1
-    assert "기획안 초안" in first.summary
+    assert "예시 아이디어(참고용)" in first.summary
     again = _run(tmp_path, llm, monkeypatch)
     assert again.cached and llm.asked == 1 and again.run_id == first.run_id
     fresh = _run(tmp_path, llm, monkeypatch, regenerate=True)
@@ -465,7 +488,7 @@ def test_asking_again_happens_only_once(tmp_path: Path, monkeypatch: Any) -> Non
     llm = SequenceLLM([bad])
     out = _run(tmp_path, llm, monkeypatch)
     assert llm.asked == 2 and out.concepts == []
-    assert out.empty_reason == "LLM 기획안 초안이 모두 검증에서 빠짐 (재료에 없는 숫자: 50)"
+    assert out.empty_reason == "LLM 예시 아이디어가 모두 검증에서 빠짐 (재료에 없는 숫자: 50)"
 
 
 def test_no_second_ask_when_nothing_was_dropped_or_enough_were_kept(
@@ -488,3 +511,39 @@ def test_material_names_match_without_spaces_case_or_by_block_label() -> None:
     assert dropped == []
     assert [c.borrowed_trend for c in kept] == ["무지 노트 12월 시즌"] * 3
     assert {c.shorts_format for c in kept} == {"챌린지"}
+
+
+# ---------------------------------------------------------------- 타깃 연령대 (trend_age)
+
+
+def test_examples_get_the_target_age_band_of_their_trend(tmp_path: Path, monkeypatch: Any) -> None:
+    llm = PromoLLM([
+        _item(title="시즌 예시"),  # 무지 노트 12월 시즌 → 시즌 확인 키워드 "무지 노트"
+        _item(title="인기 예시", borrowed_trend="리그오브레전드"),
+        _item(title="트렌드 없음", borrowed_trend=""),
+    ])  # fmt: skip
+    naver = MonthlyNaver({"무지 노트"}, age_spike={("3", "4")})
+    out = _run(tmp_path, llm, monkeypatch, naver=naver)
+    by = {c.title: c for c in out.concepts}
+    assert by["시즌 예시"].target_age == "20대" and by["시즌 예시"].target_age_status == "rising"
+    assert by["시즌 예시"].target_age_ratio is not None and by["시즌 예시"].target_age_ratio > 2.5
+    assert by["인기 예시"].target_age == "20대"
+    assert by["트렌드 없음"].target_age is None
+    assert by["트렌드 없음"].target_age_reason == "트렌드 없는 예시라 연령대 근거가 없음"
+    asked = {q.keyword_groups[0].group_name for q in naver.queries if q.time_unit == "date"}
+    assert asked == {"무지 노트", "리그오브레전드"}  # 시즌은 시즌 이름이 아니라 확인 키워드로 본다
+    assert "타깃 연령대 있음 2개" in out.summary
+
+
+def test_target_age_failure_keeps_the_examples_with_a_reason(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    class NoAges(MonthlyNaver):
+        async def search_trend(self, query, ages=()):  # noqa: ANN001, ANN201
+            if ages:
+                raise RuntimeError("down")
+            return await super().search_trend(query)
+
+    out = _run(tmp_path, PromoLLM(), monkeypatch, naver=NoAges({"무지 노트"}))
+    [c] = out.concepts
+    assert c.target_age is None and c.target_age_reason == "연령대 조회 실패 (RuntimeError)"

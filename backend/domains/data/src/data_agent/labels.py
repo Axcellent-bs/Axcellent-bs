@@ -106,7 +106,7 @@ SKILL_KO: dict[str, str] = {
     "youtube_velocity": "YouTube 지금 속도 보기",
     "content_recommend": "영상 소재 추천",
     "trend_popular": "지금 인기 보기",
-    "promo_concepts": "광고·홍보 숏츠 기획안 초안",
+    "promo_concepts": "광고·홍보 숏츠 예시 아이디어(참고용)",
     "shorts_stats": "숏츠 통계 보기",
     "campaign_effect": "캠페인 효과 보기",
     "trend_age": "연령대별 상승 보기",
