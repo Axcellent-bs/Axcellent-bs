@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from docx import Document
 from fastapi.testclient import TestClient
 
 from ax_contracts.schemas import ExecuteDecision, HoldReason
@@ -17,7 +18,7 @@ from finance_agent import exports, finance_api, tax
 from finance_agent.books import Books
 from finance_agent.handlers import reset_state, state
 from finance_agent.main import app
-from finance_agent.rules import applied, load_rules, review_checklist_md
+from finance_agent.rules import applied, load_rules, review_checklist_docx
 from finance_agent.sources import MockSources
 
 HUMAN = {"Authorization": "Bearer human:taeyoon"}
@@ -188,7 +189,7 @@ def test_real_files_build_from_seed_books(tmp_path: Path, monkeypatch: pytest.Mo
     assert {f["name"] for f in made["mid"]["files"]} == {
         "income-statement-2026-10.csv",
         "income-statement-2026-10.xlsx",
-        "expert-review-checklist.md",
+        "expert-review-checklist.docx",
     }
     assert {"vat-summary-2026-Q3.csv", "seller-sales-2026-Q3.xlsx"} <= {
         f["name"] for f in made["end"]["files"]
@@ -241,12 +242,35 @@ def test_bundle_zips_verified_files_only(tmp_path: Path, monkeypatch: pytest.Mon
     assert exports.bundle(store, "fin_none") is None
 
 
-def test_checklist_comes_from_rules_and_skips_internal_rules() -> None:
-    text = review_checklist_md()
-    assert "REV-001" in text and "CIT-001" in text and "VAT-003" in text
+def _checklist_text() -> str:
+    doc = Document(io.BytesIO(review_checklist_docx()))
+    cells = [c.text for t in doc.tables for row in t.rows for c in row.cells]
+    return "\n".join([p.text for p in doc.paragraphs] + cells)
+
+
+def test_checklist_is_word_from_rules_and_skips_internal_rules() -> None:
+    text = _checklist_text()
+    assert "REV-001" in text and "CIT-001" in text and "VAT-003" in text and "CLS-004" in text
     assert "BRK-001" not in text and "LRN-001" not in text
-    assert "소규모 법인" in text
+    assert "소규모 법인" in text and "\u2610" in text
     assert "캣북스" not in text  # 범용: 어느 회사든 그대로 전달할 수 있게 회사 이름을 쓰지 않는다
+
+
+def test_word_file_alone_does_not_make_a_new_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FINANCE_EXPORT_DIR", str(tmp_path))
+    calls = {"n": 0}
+
+    def fake_files(*a: Any, **k: Any) -> dict[str, bytes]:
+        calls["n"] += 1
+        return {"a.csv": b"same", "b.docx": str(calls["n"]).encode()}
+
+    monkeypatch.setattr(exports, "build_files", fake_files)
+    store: dict[str, dict[str, Any]] = {}
+    books = Books(source="shop-api", mock=False)
+    exports.make_package(books, store, date(2026, 11, 4))
+    assert exports.make_package(books, store, date(2026, 11, 4))["version"] == 1
 
 
 def test_export_api_requires_a_person(client: TestClient) -> None:
