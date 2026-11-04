@@ -153,6 +153,7 @@ class ProposalMixin:
         "approve_proposal": ("_approve_proposal", ApproveProposalParams),
         "reject_proposal": ("_reject_proposal", RejectProposalParams),
         "edit_proposal": ("_edit_proposal", EditProposalParams),
+        "delete_proposal": ("_delete_proposal", ProposalParams),
     }
     # 잠금 밖에서 다른 부서·LLM을 부르는 액션 (dispatch가 따로 받는다)
     OUTSIDE_LOCK = {"pull_insights", "proposal_to_request", "measure_proposal"}
@@ -382,6 +383,33 @@ class ProposalMixin:
             self._act(self.clock(), _ctx(p), "human", "planning", "reject_proposal", "사람", text)
         )
         return ActionResult(output={"proposal_id": p.id})
+
+    async def _delete_proposal(self: Any, s: State, proposal: str) -> ActionResult | None:
+        """사람 버튼 "삭제": 잘못 들어온 제안을 지운다
+        (예: 데이터분석이 나중에 참고용으로 바꾼 인사이트).
+        기획안으로 만든 기획서·요청도 같이 지운다. 개발로 작업이 나갔으면 막는다.
+        마케팅에 이미 넘긴 기획안은 마케팅 쪽 보관본이 남는다 (화면에서 안내)."""
+        p = _find(s, proposal)
+        if p is None:
+            return None
+        sp = next((x for x in s.specs if x.id == p.spec), None) if p.spec else None
+        req_ids = {r.id for r in s.requests if r.source_ref == p.id or r.id == p.request}
+        spec_ids = {r.spec for r in s.requests if r.id in req_ids and r.spec} | (
+            {sp.id} if sp else set()
+        )
+        busy = any(t.spec in spec_ids for t in s.tasks)
+        if busy or (sp is not None and sp.handed_to_dev):
+            raise ActionError("PROPOSAL_IN_USE", f"{p.id}는 개발 작업이 나가 지울 수 없습니다")
+        if sp is not None:
+            s.specs = [x for x in s.specs if x.id != sp.id]
+        s.requests = [r for r in s.requests if r.id not in req_ids]
+        s.proposals = [x for x in s.proposals if x.id != p.id]
+        gone = " · ".join(x for x in [sp.id if sp else "", *sorted(req_ids)] if x)
+        text = f"{p.id} 제안 삭제" + (f" ({gone} 같이)" if gone else "")
+        s.activity.append(
+            self._act(self.clock(), _ctx(p), "human", "planning", "delete_proposal", "사람", text)
+        )
+        return ActionResult(output={"proposal_id": p.id, "deleted": True})
 
     async def _edit_proposal(
         self: Any,

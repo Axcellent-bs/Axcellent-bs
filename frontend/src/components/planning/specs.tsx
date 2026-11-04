@@ -7,7 +7,7 @@ import { Linked, Ref, go, reviewOf, toPath } from '@/components/planning-common/
 import { CONFIRMED_BY } from '@/components/planning-common/flow'
 import { Pager, usePage } from '@/components/planning-common/pager'
 import { Markdown } from '@/components/planning-common/markdown'
-import { PROPOSAL_ORIGIN, proposalReady, type Proposal } from '@/lib/proposals'
+import { PROPOSAL_ORIGIN, handoffFailed, proposalReady, type Proposal } from '@/lib/proposals'
 import { TEMPLATES, TEMPLATE_NAME, templateOf, type Section } from '@/lib/specTemplate'
 import { notionApi, previewFill, previewSuggest, useAllReleaseChecks, useReleaseChecks, type NotionHit, type ReleaseCheck } from '@/lib/planning'
 
@@ -109,7 +109,7 @@ export function Specs({ s, d, item, item2, example }: P & { item?: string; item2
 }
 
 type ListKind = 'all' | 'spec' | 'doc'
-type ListRow = { key: string; kind: 'spec' | 'plan' | 'doc'; href: string; id: string; title: string; from?: S['requests'][number]['from']; state: string; size: string; tail?: { label: string; tone: 'green' | 'amber'; title?: string }; note?: string; origin?: '요청' | '제안' }
+type ListRow = { key: string; kind: 'spec' | 'plan' | 'doc'; href: string; id: string; title: string; from?: S['requests'][number]['from']; to?: 'marketing' | 'dev'; state: string; size: string; tail?: { label: string; tone: 'green' | 'amber'; title?: string }; note?: string; origin?: '요청' | '제안' }
 // 문서·기획서 목록 (탭 첫 화면). 기획서(요청에서 나온 것)와 사람이 쓴 문서를 한 목록에, 최근 것이 위
 function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
   const checks = useAllReleaseChecks()
@@ -118,10 +118,15 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
     const req = s.requests.find((r) => r.id === sp.request)
     const xr = reviewOf(s, sp.id)
     const rc = checks.find((c) => c.spec_id === sp.id)
+    // 어디서 나온 기획서인지: 기획 제안 → 기획안 → 개발로 넘긴 요청이면 "제안", 나머지는 "요청"
+    const prop = (s.proposals ?? []).find((p) => p.spec === sp.id || (!!p.request && p.request === req?.id))
+    const fromProposal = sp.origin === PROPOSAL_ORIGIN || !!prop
+    // 요청은 보낸 부서, 제안은 넘긴 부서 (넘기기 전·전달 실패면 칩 없음)
+    const to = !prop ? undefined : prop.status === '기획서로' ? 'dev' as const
+      : ['마케팅 전달', '진행 중', '성과 확인'].includes(prop.status) && !handoffFailed(prop) ? 'marketing' as const : undefined
     return {
-      // 어디서 나온 기획서인지: 기획 제안 → 기획안 → 개발로 넘긴 요청이면 "제안", 나머지는 "요청"
-      origin: sp.origin === PROPOSAL_ORIGIN || (s.proposals ?? []).some((p) => p.request && p.request === req?.id) ? '제안' : '요청',
-      key: sp.id, kind: 'spec', href: toPath(`work/specs/${sp.id}`), id: sp.id, title: sp.title, from: req?.from,
+      origin: fromProposal ? '제안' : '요청', to: fromProposal ? to : undefined,
+      key: sp.id, kind: 'spec', href: toPath(`work/specs/${sp.id}`), id: sp.id, title: sp.title, from: fromProposal ? undefined : req?.from,
       state: xr ? (xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기') : sp.origin === PROPOSAL_ORIGIN && sp.status === '초안' ? '기획안' : sp.status,
       size: `요구사항 ${sp.paras.filter((p) => p.kind === 'req').length} · 완료 기준 ${sp.paras.filter((p) => p.kind === 'done').length}`,
       tail: rc ? releaseState(rc) : undefined, note: sp.question ? '질문 대기' : undefined,
@@ -219,7 +224,8 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
                   <span>{r.kind === 'doc' ? <Tag>문서</Tag> : <State v={r.state} />}</span>
                   <span className="sl-title">
                     {r.origin && <span className={`sl-origin${r.origin === '제안' ? ' prop' : ''}`} title={r.origin === '제안' ? '기획 제안에서 만든 기획서' : '요청에서 만든 기획서'}>{r.origin}</span>}
-                    {r.from && <span className={`rq-dept d-${r.from}`}>{DEPT_NAME[r.from]}</span>}
+                    {r.from && <span className={`rq-dept d-${r.from}`} title="요청한 부서">{DEPT_NAME[r.from]}</span>}
+                    {r.to && <span className={`rq-dept d-${r.to}`} title="기획안을 넘긴 부서">→ {DEPT_NAME[r.to]}</span>}
                     <span className="mono muted sl-id">{r.id}</span>
                     <b title={r.title}>{r.title}</b>
                     {r.kind === 'spec' && r.note && <Tag tone="amber">{r.note}</Tag>}

@@ -72,10 +72,11 @@ export type ProposalAction =
   | { type: 'approveProposal'; proposal: string; note?: string } // 기획안 → 마케팅 (다음 단계)
   | { type: 'proposalToRequest'; proposal: string } // 기획안 → 개발 (다음 단계)
   | { type: 'rejectProposal'; proposal: string; reason: string } // 폐기
+  | { type: 'deleteProposal'; proposal: string } // 삭제 (기획안으로 만든 기획서·요청도 같이, 개발 작업이 나갔으면 안 됨)
   | { type: 'measureProposal'; proposal: string } // 성과 재기 (데이터분석 campaign_effect, insight_id·제안 id 함께)
   | { type: 'editProposal'; proposal: string; title?: string; idea?: string; why?: string; targetLabel?: string; targetValue?: string }
 
-export const PROPOSAL_ACTIONS = new Set<string>(['makePlan', 'measureProposal', 'pullInsights', 'approveProposal', 'rejectProposal', 'editProposal', 'proposalToRequest'])
+export const PROPOSAL_ACTIONS = new Set<string>(['makePlan', 'measureProposal', 'pullInsights', 'approveProposal', 'rejectProposal', 'deleteProposal', 'editProposal', 'proposalToRequest'])
 
 // ---- 숫자 검사 (백엔드 proposals.number_warnings와 같은 규칙): 글의 숫자가 근거·목표·제목에 없으면 경고
 const nums = (t: string) => new Set((t.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((x) => x.replace(/,/g, '')))
@@ -190,6 +191,7 @@ export function reduceProposals(xs: Proposal[], a: ProposalAction, t: string): P
       return upd(a.proposal, (p) => (p.handoff?.campaign && !p.result ? { ...p, status: '성과 확인', result: { direction: '늘었음', summary: '예시 결과 · 주문이 기대보다 늘었다', facts: [{ label: '캠페인 기간 주문 증분', value: '+24건 (기대 120건)', source: 'campaign_effect' }], at: t } } : p))
     case 'proposalToRequest':
     case 'makePlan':
+    case 'deleteProposal':
       return xs
   }
 }

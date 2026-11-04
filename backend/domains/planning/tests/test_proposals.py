@@ -438,3 +438,45 @@ def test_failed_handoff_reverts_to_plan_and_can_retry() -> None:
     asyncio.run(retry())
     p = _p(svc, pid)
     assert p.status == "마케팅 전달" and p.handoff.ok and p.handoff.campaign == "CMP-1"
+
+
+@pytest.mark.role("planning")
+def test_promo_reference_only_concept_is_skipped() -> None:
+    promo = PromoConceptsOutput.model_validate(
+        {
+            "concepts": [
+                {
+                    "concept_id": "c1", "title": "골프 입문", "borrowed_trend": "골프",
+                    "products": [{"product_id": "p1", "name": "골프 첫걸음", "price": 15000}],
+                    "reference_only": True, "reference_reason": "회사 도메인과 연결 없음",
+                },
+                {
+                    "concept_id": "c2", "title": "밤 독서", "borrowed_trend": "독서",
+                    "products": [{"product_id": "p2", "name": "밤의 도서관", "price": 16800}],
+                },
+            ],
+            "trends": [{"name": "독서", "kind": "season", "detail": "평균의 1.6배"}],
+            "run_id": "run-2",
+        }
+    )  # fmt: skip
+    got = proposals.from_promo(promo)
+    assert [x.insight_id for x in got] == ["run-2:c2"]
+
+
+@pytest.mark.role("planning")
+def test_delete_proposal_removes_plan_and_request_but_not_after_dev() -> None:
+    svc = _svc(writer=Writer())
+    pid = _new(svc)
+    out = asyncio.run(svc.dispatch({"type": "makePlan", "proposal": pid})).output
+    asyncio.run(svc.dispatch({"type": "deleteProposal", "proposal": pid}))
+    assert all(x.id != pid for x in svc.state.proposals)
+    assert all(x.id != out["spec_id"] for x in svc.state.specs)
+    assert all(r.id != out["request_id"] for r in svc.state.requests)
+    assert svc.state.activity[-1].point == "delete_proposal"
+
+    pid2 = _new(svc, ref="ins-2")
+    asyncio.run(svc.dispatch({"type": "makePlan", "proposal": pid2}))
+    asyncio.run(svc.dispatch({"type": "proposalToRequest", "proposal": pid2}))
+    with pytest.raises(ActionError):
+        asyncio.run(svc.dispatch({"type": "deleteProposal", "proposal": pid2}))
+    assert any(x.id == pid2 for x in svc.state.proposals)
