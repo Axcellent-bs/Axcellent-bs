@@ -543,7 +543,17 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 
 - 입력: `campaign_id`(선택), 캠페인 시작·끝(`window_from`·`window_to`). 출력: 주문·매출·쿠폰 각각 "앎(값·근거)" 또는 "확인할 수 없음 + 이유", 요약 문장
 - 주문(`skills/campaign_effect.py`, 코드 계산): 캠페인 기간 `order_count` 합계(실제)와 기준선 지난 구간 합계의 평균(기대). **증분 = 실제 − 기대**(평가 채점기와 같은 정의). 방향은 기대를 평균으로 한 포아송 꼬리확률(`metrics/judge.py`의 `poisson_upper`·`poisson_lower`)이 0.001보다 작으면 늘었음·줄었음, 아니면 같음. 지표는 커넥터 `metric_series`로 읽는다
-- 매출: 카탈로그 `revenue_metric`(회사 카탈로그 한 줄)이 있으면 같은 방법으로 합계·기대·증분을 낸다(방향은 기대 대비 ±10% 임시 기준, 평가로 정하지 않음). **캣북스는 비어 있다**: shop-api metric-series에 매출이 없어 "확인할 수 없음 + 이유(지표 없음)"가 지금 정상이다
+- 매출: 카탈로그 `revenue_metric`(회사 카탈로그 한 줄)이 있으면 같은 방법으로 합계·기대·증분을 낸다(방향은 기대 대비 ±10% 임시 기준, 평가로 정하지 않음). **캣북스는 비어 있다**: shop-api metric-series에 매출이 없어 "확인할 수 없음 + 이유(지표 없음)"가 지금 정상이다. 판매액은 아래 `sales` 칸을 본다(기존 `revenue` 칸은 campaign 평가가 채점하는 칸이라 그대로 둔다)
+- **판매액 `sales`·근거 `facts`**: shop-api 주문 기록(`GET /api/shop/orders?since&until`, 커넥터 `orders`)에서 결제 완료 주문의 금액을 코드가 센다. 정의·기준선·공백·한계는 "campaign_effect 판매액" 절
+- **재무 칸 대응표** (재무 `record_campaign_result` `CampaignResultInput`):
+
+  | 재무 칸 | 뜻 (재무 계약) | data 칸 |
+  |---|---|---|
+  | `gmv_krw` | 캠페인 때문에 늘어난 판매액 | `sales.incremental_gross_krw` (증분 주문 금액, 할인 전). 0보다 작으면 재무 칸은 0 이상이라 넣지 않고 판단을 미룬다. 범위는 `incremental_low_krw`~`incremental_high_krw` |
+  | `coupon_krw` | 끝난 회사 부담 쿠폰 금액 | `sales.period.discount_krw` (구간 결제 완료 주문의 쿠폰 할인 합). 캠페인 쿠폰만이면 쿠폰 귀속 주문의 할인 합이지만 지금 칸은 구간 전체 |
+  | `orders` | 주문 수 | `orders.excess` (증분 주문 수, 주문 수 판정) 또는 `sales.period.orders` (구간 결제 완료 주문) — 재무 계약에 증분인지 정의가 없어 확인 필요 |
+  | `source` | 숫자의 출처 | `"data.campaign_effect"` |
+  | (없음) | — | `sales.direct_attributed_krw` (캠페인 쿠폰 주문 판매액 합), `sales.direction`(up·down·uncertain) |
 - 쿠폰: `GET /api/shop/coupons?campaign_id=`(커넥터 `campaign_coupons`, data는 `COUPON_READERS`에 있다)의 발급(`count`)·사용(`used_units`) 장수 합으로 누적 사용률 = 사용 ÷ 발급. 설명은 LLM이 아니라 고정 문장 "조회 시점 기준 누적 사용률이며, 캠페인 뒤 사용분도 섞여 있다"(평가 채점기가 이 글자를 본다)
 - **기준선** (`baseline_rule`로 어느 것을 썼는지 답한다):
   - 하루 이하 캠페인: 지난 7일 같은 시간대 (예전과 같음)

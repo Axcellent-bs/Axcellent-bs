@@ -196,6 +196,14 @@ class ShopApiConnector:
         except (ValidationError, TypeError) as exc:
             raise ShopUnavailable("BAD_RESPONSE", "쿠폰 응답 형식이 예상과 다르다") from exc
 
+    async def orders(self, window_from: datetime, window_to: datetime) -> list[ShopOrder]:
+        """접수 시각이 [from, to)인 주문 (`GET /api/shop/orders?since&until`). 금액·결제·쿠폰 칸."""
+        data = await self.api.get("/orders", {"since": _iso(window_from), "until": _iso(window_to)})
+        try:
+            return [ShopOrder.model_validate(item) for item in data]
+        except (ValidationError, TypeError) as exc:
+            raise ShopUnavailable("BAD_RESPONSE", "주문 응답 형식이 예상과 다르다") from exc
+
     async def products(self) -> list[CatalogProduct]:
         """판매 중 상품 (shop-api가 판매 중만 준다). 형식이 다르면 `ShopUnavailable`."""
         data = await self.api.get("/products", {})
@@ -215,6 +223,47 @@ class ShopApiConnector:
             }
         except (KeyError, TypeError, AttributeError) as exc:
             raise ShopUnavailable("BAD_RESPONSE", "카테고리 응답 형식이 예상과 다르다") from exc
+
+
+class ShopOrderItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    qty: int = Field(ge=0)
+    unit_price: int = Field(ge=0)
+
+
+class ShopOrderPayment(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    amount: int = Field(ge=0)
+    status: str  # succeeded | failed
+
+
+class ShopOrder(BaseModel):
+    """shop-api 주문 한 건에서 캠페인 판매액이 쓰는 칸 (응답 모양은 shop-api 코드에만 있다)."""
+
+    model_config = ConfigDict(extra="ignore")
+    order_id: str
+    status: str  # pending_payment | paid | payment_failed | ...
+    created_at: datetime
+    coupon_id: str | None = None
+    coupon_discount: int = Field(default=0, ge=0)
+    refunded_amount: int = Field(default=0, ge=0)
+    items: list[ShopOrderItem] = Field(default_factory=list)
+    payments: list[ShopOrderPayment] = Field(default_factory=list)
+
+    @property
+    def gross(self) -> int:
+        """주문 금액 = 상품가 × 수량 합 (할인 전)."""
+        return sum(i.qty * i.unit_price for i in self.items)
+
+    @property
+    def paid(self) -> int:
+        """성공한 결제 금액 합."""
+        return sum(p.amount for p in self.payments if p.status == "succeeded")
+
+    @property
+    def settled(self) -> bool:
+        """결제 완료 주문 (성공한 결제가 하나라도 있음)."""
+        return any(p.status == "succeeded" for p in self.payments)
 
 
 class CampaignCoupon(BaseModel):
