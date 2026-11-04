@@ -85,7 +85,8 @@
       "allowed_requesters": [
         "planning",
         "orchestrator",
-        "dashboard-api"
+        "dashboard-api",
+        "shop-api"
       ],
       "verifier": null,
       "priority": "recommended"
@@ -99,7 +100,8 @@
       "allowed_requesters": [
         "planning",
         "orchestrator",
-        "dashboard-api"
+        "dashboard-api",
+        "shop-api"
       ],
       "verifier": null,
       "priority": "recommended"
