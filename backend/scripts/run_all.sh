@@ -308,6 +308,12 @@ if echo "$RUN_APPS" | awk '$1 == "shop-api" {found=1} END {exit !found}'; then
   echo $! > "$LOGS/shop-traffic.pid"
 fi
 
+# data: Google 인기 검색어 스냅샷을 1시간마다 모은다 (data를 띄웠을 때만, 끄기는 stop이 .pid로 같이 끈다)
+if echo "$RUN_APPS" | awk '$1 == "data" {found=1} END {exit !found}'; then
+  "$PY" -m data_agent.trending_collect --every 3600 > "$LOGS/trending-collect.log" 2>&1 &
+  echo $! > "$LOGS/trending-collect.pid"
+fi
+
 sleep 8
 echo "모드: 실제"
 if [ -f "$AX_ENABLED_SERVICES_FILE" ]; then

@@ -1,4 +1,4 @@
-"""인기 검색어 스냅샷 수집 (한 번 또는 `--every 초`마다). run_all.sh에는 넣지 않았다.
+"""인기 검색어 스냅샷 수집 (한 번 또는 `--every 초`마다). run_all.sh가 data와 함께 1시간마다 띄운다.
 
     cd backend
     uv run python -m data_agent.trending_collect              # 한 번
