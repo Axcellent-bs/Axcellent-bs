@@ -2056,6 +2056,35 @@ class DevService(PlanningCore):
         await self._apply(log)
         return items, t
 
+    async def list_dev_outcomes(
+        self,
+        *,
+        context_id: str,
+        requester: str,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        coder: str | None = None,
+    ) -> tuple[list[Any], Any, datetime]:
+        """개발 작업 결과와 합계 (read, 평가 근거). 활동 로그만 남긴다 (outcomes.py)."""
+        from dev_agent import outcomes
+
+        rows, summary = outcomes.list_outcomes(self.state, since=since, until=until, coder=coder)
+        t = self.clock()
+        who = coder or "전체"
+
+        async def log(s: State) -> None:
+            s.activity.append(
+                self._act(t, context_id, requester, "planning", "list_dev_outcomes", "A2A",
+                          f"개발 작업 결과 조회 ({who})", "read")
+            )  # fmt: skip
+            s.activity.append(
+                self._act(t, context_id, "planning", requester, "list_dev_outcomes", "A2A",
+                          f"작업 {summary.total}건 · 머지 {summary.merged}건 회신", "read")
+            )  # fmt: skip
+
+        await self._apply(log)
+        return rows, summary, t
+
     async def verify_handover(
         self,
         *,

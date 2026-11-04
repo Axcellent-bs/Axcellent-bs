@@ -18,6 +18,8 @@ from ax_contracts.schemas.planning import (
     InProgressItem,
     LinkIncidentInput,
     LinkIncidentOutput,
+    ListDevOutcomesInput,
+    ListDevOutcomesOutput,
     ListInProgressInput,
     ListInProgressOutput,
     ReceiveReleaseOrderInput,
@@ -264,6 +266,39 @@ async def list_in_progress(request: AgentRequest) -> AgentResult:
             ],
             data_summary=summary,
             ref_ids=_item_refs(rows),
+        ),
+    )
+
+
+async def list_dev_outcomes(request: AgentRequest) -> AgentResult:
+    """개발 작업 결과 (read): 인사·총괄의 부서·에이전트 평가 근거. 상태를 바꾸지 않는다."""
+    try:
+        inp = ListDevOutcomesInput.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    rows, summary, at = await get_service().list_dev_outcomes(
+        context_id=request.meta.context_id,
+        requester=_requester(request),
+        since=inp.since,
+        until=inp.until,
+        coder=inp.coder,
+    )
+    if rows:
+        text = (
+            f"작업 {summary.total}건 (머지 {summary.merged}, 실패 {summary.failed}, "
+            f"반영됨 {summary.covered}) · 서버 AI 토큰 {summary.llm_tokens:,}"
+        )
+    else:
+        text = "확인할 수 없음: 조건에 맞는 개발 작업 없음"
+    out = ListDevOutcomesOutput(outcomes=rows, summary=summary, collected_at=at)
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(
+            queries=["tasks WHERE coding IS NOT NULL", "prs WHERE task = tasks.id"],
+            data_summary=text,
+            ref_ids=[r.task_id for r in rows][:50],
         ),
     )
 
@@ -526,6 +561,7 @@ DEV_HANDLERS = {
     "link_incident": link_incident,
     "verify_rollback_target": verify_rollback_target,
     "list_in_progress": list_in_progress,
+    "list_dev_outcomes": list_dev_outcomes,
     "verify_handover": verify_handover,
     "start_dev": start_dev,
     "receive_release_order": receive_release_order,
