@@ -281,13 +281,14 @@ PEOPLE_WORK="$(printf '%s' "$PEOPLE_WORK" | tr -d '\015')"  # Windows 파이썬�
 [ "$PEOPLE_HUMAN" = "-" ] && PEOPLE_HUMAN=""
 [ "$PEOPLE_WORK" = "-" ] && PEOPLE_WORK=""
 export AX_AGENT_TOKENS
-# 사람(운영자) 토큰: 안전 관문 보류 결정·재무·dashboard-api 쓰기
-# 사람별 토큰(AX_PEOPLE)이 있으면 같이 넣는다. 운영자 토큰은 로컬 화면 빌드(web.env)가 쓴다
-HUMANS="운영자:$HUMAN_TOKEN${PEOPLE_HUMAN:+,$PEOPLE_HUMAN}"
+# 사람 토큰: 안전 관문 보류 결정·재무·dashboard-api 쓰기. 이름 "공용"은 모두가 같이 쓰는 토큰이다
+# (화면 데모 로그인의 "운영자" 역할과는 다른 것. 사람마다 나누려면 AX_PEOPLE)
+# 사람별 토큰(AX_PEOPLE)이 있으면 같이 넣는다. 공용 토큰은 로컬 화면 빌드(web.env)가 쓴다
+HUMANS="공용:$HUMAN_TOKEN${PEOPLE_HUMAN:+,$PEOPLE_HUMAN}"
 export SAFETY_HUMAN_TOKENS="$HUMANS" FINANCE_HUMAN_TOKENS="$HUMANS"
 # 작업 대기열(MCP) 전용 토큰: 개발자 PC의 Claude Code 설정에 남는 값이라 사람 토큰과 나눈다.
 # 승인·머지 권한이 없다 (dev_agent/work_auth.py). 이름이 같아 화면의 "내 Claude"와 이어진다
-export DEV_WORK_TOKENS="${DEV_WORK_TOKENS:-운영자:$WORK_TOKEN${PEOPLE_WORK:+,$PEOPLE_WORK}}"
+export DEV_WORK_TOKENS="${DEV_WORK_TOKENS:-공용:$WORK_TOKEN${PEOPLE_WORK:+,$PEOPLE_WORK}}"
 # MCP·작업 대기열은 작업 토큰만 받는다 (사람 토큰이 개발자 PC 설정에 남지 않게). 예전 연결은
 # 화면 "내 Claude 연결" 명령으로 다시 붙인다. 한동안 예전처럼 쓰려면 DEV_WORK_ALLOW_HUMAN=1
 export DEV_WORK_ALLOW_HUMAN="${DEV_WORK_ALLOW_HUMAN:-0}"

@@ -31,7 +31,7 @@ export function HumanToken() {
           onSubmit={(e) => { e.preventDefault(); if (value.trim()) setMyHumanToken(value) }}>
           <label className="block text-xs font-medium text-ink-700" htmlFor="my-human-token">내 사람 토큰</label>
           <input id="my-human-token" type="password" autoComplete="off" spellCheck={false} value={value}
-            onChange={(e) => setValue(e.target.value)} className="w-full rounded-md border border-ink-200 px-2 py-1.5 text-sm" placeholder="운영자에게 받은 토큰" />
+            onChange={(e) => setValue(e.target.value)} className="w-full rounded-md border border-ink-200 px-2 py-1.5 text-sm" placeholder="서버 관리자에게 받은 토큰" />
           <div className="flex items-center gap-2">
             <button type="submit" className="btn-primary px-3 py-1 text-xs" disabled={!value.trim()}>넣기</button>
             {HUMAN_TOKEN_FROM === 'mine' && <button type="button" className="btn-ghost px-3 py-1 text-xs" onClick={() => setMyHumanToken(null)}>빼기</button>}
