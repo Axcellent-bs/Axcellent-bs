@@ -248,10 +248,14 @@ export SHOP_DEGRADED_SUSTAIN_S="${SHOP_DEGRADED_SUSTAIN_S:-20}" SHOP_MONITOR_INT
 # 토큰은 $DATA/tokens.env 에 두고 다시 켤 때 그대로 쓴다. 켤 때마다 새로 만들면 이미 떠 있는
 # 화면(run_web.sh)이 예전 사람 토큰을 들고 있어 "사람 토큰을 검증할 수 없다"로 막힌다.
 # 없는 이름만 새로 만든다. 새 토큰이 필요하면 bash scripts/run_all.sh reset
+# 사람별 토큰: AX_PEOPLE="예진,준하"처럼 이름을 주면 사람마다 사람 토큰(승인·머지·재무 결정)과
+# 작업 대기열 토큰(내 Claude MCP)을 따로 만든다. 누가 결정했는지 관문·화면 기록에 이름이 남는다.
+# 내 토큰 보기: sed -n 's/^HUMAN_TOKEN\.예진=//p' backend/.data/tokens.env (화면 오른쪽 위 "내 토큰"에 넣는다)
 NAMES="$(echo "$APPS" | awk 'NF {print $1}' | tr '\n' ' ') support marketing hr infra admin"
-read -r AX_AGENT_TOKENS HUMAN_TOKEN WORK_TOKEN < <("$PY" -c "
+read -r AX_AGENT_TOKENS HUMAN_TOKEN WORK_TOKEN PEOPLE_HUMAN PEOPLE_WORK < <("$PY" -c "
 import os, secrets, sys
 names, path = sys.argv[1].split(), sys.argv[2]
+people = [p.strip() for p in sys.argv[3].split(',') if p.strip() and ':' not in p and '=' not in p and ' ' not in p]
 saved = {}
 if os.path.exists(path):
     for line in open(path, encoding='utf-8'):
@@ -261,22 +265,38 @@ agents = dict(p.split('=', 1) for p in saved.get('AX_AGENT_TOKENS', '').split(',
 agents = {n: agents.get(n) or secrets.token_urlsafe(24) for n in names}
 human = saved.get('HUMAN_TOKEN') or secrets.token_urlsafe(24)
 work = saved.get('WORK_TOKEN') or secrets.token_urlsafe(24)
+ph = {p: saved.get(f'HUMAN_TOKEN.{p}') or secrets.token_urlsafe(24) for p in people}
+pw = {p: saved.get(f'WORK_TOKEN.{p}') or secrets.token_urlsafe(24) for p in people}
 line = ','.join(f'{n}={t}' for n, t in agents.items())
 with open(path, 'w', encoding='utf-8') as f:
     f.write(f'AX_AGENT_TOKENS={line}\nHUMAN_TOKEN={human}\nWORK_TOKEN={work}\n')
+    for p in people:
+        f.write(f'HUMAN_TOKEN.{p}={ph[p]}\nWORK_TOKEN.{p}={pw[p]}\n')
 os.chmod(path, 0o600)
-print(line, human, work)
-" "$NAMES" "$DATA/tokens.env")
+# 빈 목록도 자리를 지키게 '-'를 넣는다 (read가 칸을 당기지 않게)
+print(line, human, work, ','.join(f'{p}:{t}' for p, t in ph.items()) or '-',
+      ','.join(f'{p}:{t}' for p, t in pw.items()) or '-')
+" "$NAMES" "$DATA/tokens.env" "${AX_PEOPLE:-}")
+PEOPLE_WORK="$(printf '%s' "$PEOPLE_WORK" | tr -d '\015')"  # Windows 파이썬이 줄 끝에 붙이는 CR을 지운다
+[ "$PEOPLE_HUMAN" = "-" ] && PEOPLE_HUMAN=""
+[ "$PEOPLE_WORK" = "-" ] && PEOPLE_WORK=""
 export AX_AGENT_TOKENS
 # 사람(운영자) 토큰: 안전 관문 보류 결정·재무·dashboard-api 쓰기
-export SAFETY_HUMAN_TOKENS="운영자:$HUMAN_TOKEN" FINANCE_HUMAN_TOKENS="운영자:$HUMAN_TOKEN"
+# 사람별 토큰(AX_PEOPLE)이 있으면 같이 넣는다. 운영자 토큰은 로컬 화면 빌드(web.env)가 쓴다
+HUMANS="운영자:$HUMAN_TOKEN${PEOPLE_HUMAN:+,$PEOPLE_HUMAN}"
+export SAFETY_HUMAN_TOKENS="$HUMANS" FINANCE_HUMAN_TOKENS="$HUMANS"
 # 작업 대기열(MCP) 전용 토큰: 개발자 PC의 Claude Code 설정에 남는 값이라 사람 토큰과 나눈다.
 # 승인·머지 권한이 없다 (dev_agent/work_auth.py). 이름이 같아 화면의 "내 Claude"와 이어진다
-export DEV_WORK_TOKENS="${DEV_WORK_TOKENS:-운영자:$WORK_TOKEN}"
+export DEV_WORK_TOKENS="${DEV_WORK_TOKENS:-운영자:$WORK_TOKEN${PEOPLE_WORK:+,$PEOPLE_WORK}}"
+# MCP·작업 대기열은 작업 토큰만 받는다 (사람 토큰이 개발자 PC 설정에 남지 않게). 예전 연결은
+# 화면 "내 Claude 연결" 명령으로 다시 붙인다. 한동안 예전처럼 쓰려면 DEV_WORK_ALLOW_HUMAN=1
+export DEV_WORK_ALLOW_HUMAN="${DEV_WORK_ALLOW_HUMAN:-0}"
 token_of() { echo "$AX_AGENT_TOKENS" | tr ',' '\n' | sed -n "s/^$1=//p"; }
 # 화면(개발 서버)에 넘길 값. 이 파일은 커밋하지 않는다(.data/)
 {
-  echo "VITE_SAFETY_HUMAN_TOKEN=$HUMAN_TOKEN"
+  # 사람 토큰을 화면 빌드에 넣으면 그 화면을 여는 누구나 브라우저에서 볼 수 있다. 여러 사람이 쓰는
+  # 서버에서는 AX_WEB_BAKE_HUMAN_TOKEN=0으로 빼고, 사람마다 화면 오른쪽 위 "내 토큰"에 자기 토큰을 넣는다
+  [ "${AX_WEB_BAKE_HUMAN_TOKEN:-1}" = "0" ] || echo "VITE_SAFETY_HUMAN_TOKEN=$HUMAN_TOKEN"
   echo "VITE_SHOP_ADMIN_TOKEN=$(token_of admin)"
   echo "VITE_DATA_A2A_TOKEN=$(token_of dashboard-api)"
   # 읽기 전용 열람 토큰(.env의 SHOP_VIEWER_TOKEN)이 있으면 화면에도 넘긴다. 쓰기는 못 하는 값이다
