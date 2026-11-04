@@ -32,6 +32,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, ValidationError
@@ -51,6 +52,7 @@ from ax_contracts.schemas.data import (
     PromoConceptsRequest,
     RootCauseInput,
     ShortsStatsRequest,
+    TrendAgeRequest,
     TrendCandidatesRequest,
     TrendHistoryRequest,
     TrendPopularRequest,
@@ -84,6 +86,8 @@ from data_agent.skills.kpi_summary import summarize_kpi
 from data_agent.skills.promo_concepts import make_concepts
 from data_agent.skills.root_cause import estimate_root_cause
 from data_agent.skills.shorts_stats import shorts_stats as run_shorts_stats
+from data_agent.skills.trend_age import popular_targets
+from data_agent.skills.trend_age import trend_age as run_trend_age
 from data_agent.skills.trend_candidates import find_candidates
 from data_agent.skills.trend_history import history
 from data_agent.skills.trend_popular import popular
@@ -465,6 +469,60 @@ async def promo_concepts(request: AgentRequest) -> AgentResult:
     )
 
 
+async def _season_keywords(env: Mapping[str, str], limit: int) -> list[str]:
+    """시즌 키워드: 오늘 만든 기획안의 시즌 확인에서 기준을 넘은 것, 없으면 카탈로그에서 코드로."""
+    from data_agent.skills import promo_concepts as promo
+    from data_agent.skills.product_link import read_catalog
+
+    if limit <= 0:
+        return []
+    config = promo.load_config(env)
+    store = promo.PromoStore(env.get(promo.DB_ENV) or promo.DEFAULT_DB)
+    try:
+        hit = store.latest(promo._today(datetime.now(UTC)))
+    finally:
+        store.close()
+    if hit is not None:
+        passed = [
+            c.keyword for c in hit.season_checks
+            if c.status == "known" and max(c.same_month_ratio or 0, c.next_month_ratio or 0)
+            >= config.season_min_ratio
+        ]  # fmt: skip
+        if passed:
+            return passed[:limit]
+    shop = await read_catalog(get_catalog())
+    return [k for k, _ in promo.season_keywords(shop.products, shop.categories, limit)]
+
+
+async def trend_age(request: AgentRequest) -> AgentResult:
+    """연령대별 상승 (네이버 연령대별 조회, 하루 상한·캐시). 상태를 바꾸지 않는다(grade read)."""
+    from data_agent.skills.trend_age import load_config as load_age_config
+
+    data = _parse(request, TrendAgeRequest)
+    if isinstance(data, AgentResult):
+        return data
+    config = load_age_config(os.environ)
+    popular_items: list[tuple[str, list[str]]] = []
+    season: list[str] = []
+    if not data.keywords:
+        popular_items = await popular_targets(
+            get_llm(), os.environ, datetime.now(UTC), config.popular_topics * 2,
+            category_cache=get_category_cache(),
+        )  # fmt: skip
+        season = await _season_keywords(os.environ, config.season_topics)
+    result = await run_trend_age(
+        data, get_trend_connector(), env=os.environ, popular_items=popular_items,
+        season_keywords=season,
+    )  # fmt: skip
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=result.output.status,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
+
+
 async def content_recommend(request: AgentRequest) -> AgentResult:
     """영상 소재 추천 (콘텐츠 루프 2단계). 조회만 하고 상태를 바꾸지 않는다(grade read)."""
     data = _parse(request, ContentRecommendRequest)
@@ -625,4 +683,5 @@ HANDLERS = {
     "shorts_stats": shorts_stats,
     "answer_planning_question": answer_planning_question,
     "campaign_effect": campaign_effect,
+    "trend_age": trend_age,
 }

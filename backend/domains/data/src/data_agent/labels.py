@@ -109,6 +109,7 @@ SKILL_KO: dict[str, str] = {
     "promo_concepts": "광고·홍보 숏츠 기획안 초안",
     "shorts_stats": "숏츠 통계 보기",
     "campaign_effect": "캠페인 효과 보기",
+    "trend_age": "연령대별 상승 보기",
     "receive_dev_result": "개발 결과 받기",
     "start_dev": "개발 시작",
 }
