@@ -11,6 +11,8 @@ import { DATA_SERVER, dataAi, kpiLive, type AgeTopic, type TrendAgeOutput, type 
 // - 연령대별 막대: 브리프는 1등 연령대만 준다. 막대는 trend_age(계약 TrendAgeOutput)를 같은 주제로 불러 그린다.
 //   서버가 주제별 하루 캐시라 브리프가 이미 본 주제(타깃 연령대가 있는 주제)만 보낸다 = 네이버를 다시 부르지 않는다.
 //   막대 길이는 그 주제 연령대 배수 중 가장 큰 값에 대한 비율(그리기용)
+// - 회사 관련 인사이트(company_related, #543)는 맨 위에 따로 묶고 연결 상품·시즌 근거를 강조한다. 나머지 인사이트는 그 아래
+// - 시즌 근거(evidence.season_*): 작년 같은 달·다음 달 ÷ 기간 평균 중 큰 값 (서버 값)
 // - 응답에 없는 칸(null·빈 목록)은 그리지 않는다. 이유가 오면 이유만
 
 const NO_REASON = "서버가 이유를 주지 않았어요";
@@ -129,10 +131,33 @@ function Evidence({ e }: { e: TrendInsight["evidence"] }) {
   );
 }
 
+/** 시즌 근거 한 줄. 서버가 시즌 값을 주지 않았으면 null */
+function seasonText(e: TrendInsight["evidence"]): string | null {
+  if (typeof e.season_ratio !== "number") return null;
+  const month = e.season_month ? `${e.season_month.slice(0, 7)} ` : "";
+  return [e.season_keyword, `${month}기간 평균의 ${num(e.season_ratio, 2)}배`].filter(Boolean).join(" · ");
+}
+
+function Products({ i }: { i: TrendInsight }) {
+  return i.products.length > 0 ? (
+    <ul className="space-y-1">
+      {i.products.map((p) => (
+        <li key={p.product_id}>
+          <span className="font-semibold text-ink-900">{p.name}</span>
+          {p.category_name && <span className="text-ink-500"> · {p.category_name}</span>}
+          <span className="block text-xs text-ink-500">{[p.reason, p.season].filter(Boolean).join(" · ")}</span>
+        </li>
+      ))}
+    </ul>
+  ) : <span className="text-ink-500">{i.products_reason ?? NO_REASON}</span>;
+}
+
 function InsightCard({ i, age, note }: { i: TrendInsight; age: AgeTopic | null; note: string | null }) {
   const m = material(i);
+  const company = i.company_related === true;
+  const season = seasonText(i.evidence);
   return (
-    <li className="card space-y-3 p-4 sm:p-5">
+    <li className={`card space-y-3 p-4 sm:p-5 ${company ? "ring-2 ring-emerald-200" : ""}`}>
       <div className="flex flex-wrap items-start gap-2">
         <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-ink-900 text-xs font-bold text-white">{i.rank}</span>
         <div className="min-w-0 flex-1">
@@ -141,9 +166,25 @@ function InsightCard({ i, age, note }: { i: TrendInsight; age: AgeTopic | null; 
         </div>
         <div className="flex flex-wrap gap-1.5">
           {i.category && i.category !== "unknown" && <Chip label={i.category} tone="bg-ink-100 text-ink-700" />}
+          {i.classification_pending && <Chip label="분류 대기" tone={TONE.muted} />}
           <Chip label={m.label} tone={m.tone} />
         </div>
       </div>
+      {company && (
+        <div className="space-y-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
+          {i.company_reason && <p className="text-xs">{i.company_reason}</p>}
+          <div>
+            <p className="text-xs font-semibold">연결 상품</p>
+            <div className="mt-0.5"><Products i={i} /></div>
+          </div>
+          {season && (
+            <div>
+              <p className="text-xs font-semibold">시즌 근거</p>
+              <p className="mt-0.5 font-semibold">{season}</p>
+            </div>
+          )}
+        </div>
+      )}
       {i.line && (
         <p className="rounded-xl bg-brand-50 px-3 py-2 text-sm font-semibold leading-relaxed text-brand-900">
           {i.line}
@@ -166,22 +207,16 @@ function InsightCard({ i, age, note }: { i: TrendInsight; age: AgeTopic | null; 
             </>
           ) : <span className="text-ink-500">{i.target_age_reason ?? NO_REASON}</span>}
         </Row>
-        <Row label="연결 상품">
-          {i.products.length > 0 ? (
-            <ul className="space-y-1">
-              {i.products.map((p) => (
-                <li key={p.product_id}>
-                  <span className="font-semibold text-ink-900">{p.name}</span>
-                  {p.category_name && <span className="text-ink-500"> · {p.category_name}</span>}
-                  <span className="block text-xs text-ink-500">{[p.reason, p.season].filter(Boolean).join(" · ")}</span>
-                </li>
-              ))}
-            </ul>
-          ) : <span className="text-ink-500">{i.products_reason ?? NO_REASON}</span>}
-        </Row>
+        {!company && <Row label="연결 상품"><Products i={i} /></Row>}
+        {!company && season && <Row label="시즌 근거">{season}</Row>}
         <Row label="잘 맞는 숏츠 형식">
           {i.shorts_format ? (
-            <><span className="font-semibold text-ink-900">{i.shorts_format}</span>{i.shorts_format_samples !== null && <span className="text-ink-500"> · 표본 {num(i.shorts_format_samples)}개</span>}</>
+            <>
+              <span className="font-semibold text-ink-900">{i.shorts_format}</span>
+              {i.shorts_format_samples !== null && <span className="text-ink-500"> · 표본 {num(i.shorts_format_samples)}개</span>}
+              {typeof i.shorts_format_median_views === "number" && <span className="text-ink-500"> · 중앙값 조회수 {num(i.shorts_format_median_views)}회</span>}
+              {i.shorts_format_at && <span className="text-ink-500"> · {when(i.shorts_format_at)} 기준</span>}
+            </>
           ) : <span className="text-ink-500">{i.shorts_format_reason ?? NO_REASON}</span>}
         </Row>
         {i.limits.length > 0 && (
@@ -227,6 +262,9 @@ export function InsightBrief({ state, examples, examplesCount }: {
   const age = useAgeBands(out);
   if (!kpiLive) return null;
   const ageOf = (i: TrendInsight) => age?.items.find((a) => a.status === "known" && norm(a.keyword) === norm(i.topic)) ?? null;
+  // 회사 관련 인사이트는 맨 위에 따로 묶는다 (서버 순서 그대로)
+  const companyOnes = (out?.insights ?? []).filter((i) => i.company_related === true);
+  const others = (out?.insights ?? []).filter((i) => i.company_related !== true);
   const meta = out ? [out.day ? `${out.day} 브리프` : null, out.generated_at ? `만든 시각 ${when(out.generated_at)}` : null, out.cached ? "오늘 만든 브리프" : null].filter(Boolean).join(" · ") : null;
   return (
     <section id="data-trend-insight" aria-labelledby="data-trend-insight-title" className="space-y-4">
@@ -245,7 +283,24 @@ export function InsightBrief({ state, examples, examplesCount }: {
         : state.kind === "failed" ? <Empty>인사이트를 받지 못했어요. {state.reason} {DATA_SERVER}가 켜져 있는지 확인해 주세요.</Empty>
         : out && (out.status === "unknown" || out.insights.length === 0)
           ? <Empty>{out.reason ?? "오늘 인사이트가 없어요."}</Empty>
-          : out && <ul className="space-y-4">{out.insights.map((i) => <InsightCard key={i.insight_id} i={i} age={ageOf(i)} note={age?.note ?? null} />)}</ul>}
+          : out && (
+            <>
+              {companyOnes.length > 0 && (
+                <section aria-labelledby="data-trend-insight-company" className="space-y-3">
+                  <h3 id="data-trend-insight-company" className="text-base font-bold text-ink-900">
+                    회사 관련 인사이트 <span className="text-sm font-normal text-ink-500">· {companyOnes.length}개</span>
+                  </h3>
+                  <ul className="space-y-4">{companyOnes.map((i) => <InsightCard key={i.insight_id} i={i} age={ageOf(i)} note={age?.note ?? null} />)}</ul>
+                </section>
+              )}
+              {others.length > 0 && (
+                <section aria-labelledby={companyOnes.length > 0 ? "data-trend-insight-others" : undefined} className="space-y-3">
+                  {companyOnes.length > 0 && <h3 id="data-trend-insight-others" className="text-base font-bold text-ink-900">그 밖의 인사이트</h3>}
+                  <ul className="space-y-4">{others.map((i) => <InsightCard key={i.insight_id} i={i} age={ageOf(i)} note={age?.note ?? null} />)}</ul>
+                </section>
+              )}
+            </>
+          )}
       <details className="card p-4">
         <summary className="cursor-pointer text-sm font-semibold text-ink-900">
           참고용 예시{examplesCount !== null ? ` ${examplesCount}개` : ""} <span className="font-normal text-ink-500">· 숏츠 광고 예시 아이디어</span>
