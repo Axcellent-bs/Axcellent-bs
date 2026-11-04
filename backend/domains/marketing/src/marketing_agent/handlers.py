@@ -33,6 +33,7 @@ from ax_contracts.schemas import (
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
 from marketing_agent import shop_client
 from marketing_agent.briefs import (
+    BriefStorageError,
     BriefStore,
     CampaignBriefList,
     CampaignBriefView,
@@ -312,7 +313,10 @@ async def receive_campaign_brief(request: AgentRequest) -> AgentResult:
             outcome=rejected.outcome,
             evidence=_evidence(["receive_campaign_brief"], f"기획안 거절 {reason}", []),
         )
-    existing = STATE.briefs.existing(data.proposal_id)
+    try:
+        existing = STATE.briefs.existing(data.proposal_id)
+    except BriefStorageError:
+        return _brief_storage_failed(request)
     if existing is not None:  # 관문 앞에서 막는다. 보관본은 그대로
         dup = CampaignBriefOutput(outcome="duplicate", campaign_id=existing.campaign_id)
         return _result(
@@ -347,7 +351,10 @@ async def receive_campaign_brief(request: AgentRequest) -> AgentResult:
     blocked = _from_decision(request, decision, evidence)
     if blocked:  # 보류·거절·관문 무응답: 저장하지 않는다(같은 요청을 다시 보내면 이어서 처리)
         return blocked
-    out = STATE.briefs.add(data, _now())
+    try:
+        out = STATE.briefs.add(data, _now())
+    except BriefStorageError:  # 같은 요청을 다시 보내면 관문은 이어서 처리하고 저장을 다시 시도한다
+        return _brief_storage_failed(request)
     return _result(
         request,
         TaskStatus.COMPLETED,
@@ -362,11 +369,18 @@ async def receive_campaign_brief(request: AgentRequest) -> AgentResult:
     )
 
 
+def _brief_storage_failed(request: AgentRequest) -> AgentResult:
+    return _result(request, TaskStatus.FAILED, outcome="storage_error")
+
+
 async def list_campaign_briefs(request: AgentRequest) -> AgentResult:
     data = _parse(request, ListCampaignBriefsInput)
     if isinstance(data, AgentResult):
         return data
-    items, total = STATE.briefs.list(data.limit)
+    try:
+        items, total = STATE.briefs.list(data.limit)
+    except BriefStorageError:
+        return _brief_storage_failed(request)
     listing = CampaignBriefList(
         items=items, total=total, unknown_reason=None if items else "받은 기획안이 없음"
     )
@@ -391,7 +405,10 @@ async def get_campaign_brief(request: AgentRequest) -> AgentResult:
             outcome="invalid_input",
             output={"errors": ["proposal_id|campaign_id: missing"]},
         )
-    item = STATE.briefs.get(data.proposal_id, data.campaign_id)
+    try:
+        item = STATE.briefs.get(data.proposal_id, data.campaign_id)
+    except BriefStorageError:
+        return _brief_storage_failed(request)
     view = CampaignBriefView(
         found=item is not None,
         item=item,

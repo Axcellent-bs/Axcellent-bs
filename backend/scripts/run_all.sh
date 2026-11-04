@@ -142,6 +142,8 @@ export DEV_LLM_KEY_STORE="$PWD/$DATA/llm_key.json"
 export PLANNING_STATE_DIR="$PWD/$DATA"
 # data: 오늘 네이버 판정("지금 급등 중" 배지)을 파일에 남겨 다시 켜도 그날 배지가 유지되게
 export DATA_TODAY_BOARD_DB="$PWD/$DATA/today_board.db"
+# marketing: 기획에서 받은 기획안을 파일에 남겨 다시 켜도 목록이 유지되게
+export MARKETING_BRIEFS_DB="$PWD/$DATA/marketing_briefs.db"
 # 기획·개발은 실제 시각으로 (기본은 10-22에서 1분씩 가는 시연 시계라 총괄이 사건 구간으로 묻는
 # 관련 PR 찾기·교차검증 최근 7일 장애가 실제 머지를 못 잡는다)
 export PLANNING_CLOCK=real
