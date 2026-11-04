@@ -180,12 +180,22 @@ class MemoryConnector:
 
 | skill | 언제 | 요청 | 응답 핵심 |
 |---|---|---|---|
-| `trend_insight_brief` | 제안을 만들기 전에 근거 있는 인사이트를 받을 때 | `max_insights`(3~7, 비우면 회사 설정 5), `regenerate` | `insights[]`: `insight_id`·한 줄·분류·광고 재료 여부·근거(YouTube·Google·네이버, 링크·시각)·타깃 연령대와 연령대별 배수 전체(`age_bands`)·상품(임베딩 기준 통과만)·숏츠 형식(단계·표본 수)·한계·예시 아이디어(참고용) |
-| `campaign_effect` | 마케팅이 실행한 뒤 성과를 기록할 때 | `window_from`·`window_to`(필수), `campaign_id`, **`insight_id`·`proposal_id`(선택)** | 주문 증분·매출·쿠폰 누적 사용률(모르면 unknown + 이유), 요청의 `insight_id`·`proposal_id` 그대로 |
+| `trend_insight_brief` | 제안을 만들기 전에 근거 있는 인사이트를 받을 때 | `max_insights`(3~7, 비우면 회사 설정 5), `regenerate` | `insights[]`: `insight_id`·한 줄·분류·광고 재료 여부·근거(YouTube·Google·네이버, 링크·시각)·타깃 연령대와 연령대별 배수 전체(`age_bands`)·상품(임베딩 기준 통과만)·숏츠 형식(단계·표본 수)·한계·예시 아이디어(참고용)·`fact_ids`. 기회 카드 `opportunities[]`, 숫자 목록 `facts`, `schema_version`·`snapshot_id`·`generated_at` |
+| `campaign_effect` | 마케팅이 실행한 뒤 성과를 기록할 때 | `window_from`·`window_to`(필수), `campaign_id`, **`insight_id`·`proposal_id`(선택)** | 주문 증분·`incremental_orders`·판매액(`sales`)·쿠폰 누적 사용률(모르면 unknown + 이유), 숫자 목록 `facts`, `schema_version`·`generated_at`, 요청의 `insight_id`·`proposal_id` 그대로 |
 
 둘 다 grade read(조회만). 요청 가능: `trend_insight_brief`는 planning·orchestrator·dashboard-api, `campaign_effect`는 카드의 `allowed_requesters`.
 
-### 예시 (2026-11-04 실제 데이터, 로컬 실행)
+### 합의한 원칙 (기획과)
+
+1. **숫자는 facts**: 데이터 응답에 나오는 숫자는 모두 `facts`에 있다(`fact_id`·`label`·`value`·`unit`·`source`·`link`·`period`·`sample`). 브리프는 `facts`(`DataFact`)에 모으고 인사이트·기회 카드가 `fact_ids`로 가리킨다. `campaign_effect`는 `facts`(`CampaignFact`)에 주문·쿠폰·판매액 숫자를 모두 둔다
+   - 숫자는 코드가 낸다. LLM은 분류와 문장만 쓴다. 문장(한 줄·요약) 속 숫자가 facts에 없으면 고정 문장으로 바꾼다
+   - 모르는 숫자는 facts에 넣지 않고 칸은 None + 이유다. 0으로 채우지 않는다
+2. **기획 숫자는 target**: 목표 숫자는 기획이 정해 기획 쪽 `target`에 적는다. 데이터의 `target_views_reference`는 참고값일 뿐이다(하위 주제 숏츠 표본이 5개 미만이면 None + "표본 부족"). 기획이 정할 것은 카드의 `planning_decides`에 있다
+3. **ID 사슬**: `insight_id`(날짜 없음, 테넌트 + 주제 + 카테고리) / `opportunity_id` → 기획 `proposal_id` → `campaign_effect` 요청에 둘 다 → 응답에 그대로 → 기획 결과 기록. 숫자 하나는 `fact_id`, 시점은 `generated_at`·`snapshot_id`, 쓴 수집 계획은 `plan_id`. 예전 날짜 id는 `legacy_insight_id`
+4. **schema_version**: 응답 모양 버전(브리프 `trend_insight_brief.v3`, campaign_effect `campaign_effect.v2`). 칸이 늘면 올린다. 계약은 추가만 하므로 예전 칸은 그대로 읽힌다
+5. **재무로 넘길 숫자**: `gmv_krw` = `sales.incremental_gross_krw`, `orders` = `incremental_orders`(둘 다 증분, 대응표는 campaign_effect 절)
+
+### 예시 (2026-11-04 실제 데이터, 로컬 실행. facts·안정 id를 넣기 전 응답이라 `insight_id`가 날짜 형식)
 
 `trend_insight_brief` 요청:
 
