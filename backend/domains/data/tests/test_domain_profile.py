@@ -258,8 +258,35 @@ def test_groups_missing_from_the_intro_are_warned_with_their_products(tmp_path: 
     assert set(warned) == {"문구", "도서"}
     assert [p.name for p in warned["문구"].products] == ["무지 노트 3권 세트"]
     assert warned["문구"].category_codes == ["stat"] and "카탈로그에 1개" in warned["문구"].reason
-    assert {s.keyword for s in out.seed_keywords} >= {"무지 노트"}  # 빼지 않고 경고만
+    # 카탈로그 상품은 경고 목록에 그대로, 그 상품의 씨앗 키워드만 뺀다 (#594 → 씨앗 빼기)
+    assert "무지 노트" not in {s.keyword for s in out.seed_keywords}
     assert any(x.startswith("소개와 카탈로그가 어긋남") for x in out.limits)
+
+
+def test_mismatch_seeds_are_skipped_and_human_override_brings_them_back(tmp_path: Path) -> None:
+    seeds = [
+        dp._Seed(keyword="무지 노트", evidence="무지 노트 3권 세트"),  # 경고 상품군(문구) 상품
+        dp._Seed(keyword="문구", evidence="문구"),  # 경고 상품군의 카테고리 이름
+        dp._Seed(keyword="고양이 그림책", evidence="고양이 그림책"),  # 도서: 경고 아님
+        dp._Seed(keyword="출판사", evidence="책을 파는 출판사다"),  # 소개가 근거라 남김
+    ]
+    answer = _answer(seeds=seeds, groups_not_in_intro=["문구"])
+    out = _profile(_about(tmp_path, "책을 파는 출판사다."), ProfileLLM(answer))
+    assert {s.keyword for s in out.seed_keywords} == {"고양이 그림책", "출판사"}
+    skipped = {d.keyword: d.reason for d in out.mismatch_skipped}
+    assert set(skipped) == {"무지 노트", "문구"} and "문구 상품군" in skipped["무지 노트"]
+    assert [p.name for p in out.intro_mismatch[0].products] == [
+        "무지 노트 3권 세트"
+    ]  # 카탈로그 그대로
+    env = _about(tmp_path / "o", "책을 파는 출판사다.")
+    Path(env["DATA_TENANT_CONFIG"]).write_text(
+        '[profile]\nabout = "책을 파는 출판사다."\n'
+        '[profile.override]\nseed_keywords = ["무지 노트"]\n',
+        encoding="utf-8",
+    )
+    back = _profile(env, ProfileLLM(answer))
+    assert "무지 노트" in {s.keyword for s in back.seed_keywords}  # 사람이 넣으면 다시 씀
+    assert {d.keyword for d in back.mismatch_skipped} == {"문구"}
     named = _profile(
         _about(tmp_path / "b", "책과 문구를 파는 쇼핑몰."),
         ProfileLLM(_answer(groups_not_in_intro=["문구"])),
