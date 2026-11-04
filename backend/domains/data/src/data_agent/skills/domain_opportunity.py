@@ -540,6 +540,13 @@ def own_shorts(
     """
     overall = baseline[0] if baseline else (shorts.median_views if shorts is not None else None)
     base_name = f"씨앗 검색 숏츠 전체({baseline[1]}개)" if baseline else "숏츠 통계 전체"
+    if topic.axis is not None and (topic.videos < config.min_samples or topic.median_views is None):
+        # 하위 주제 카드: 표본이 기준보다 적으면 목표 참고값은 모름 (다른 중앙값으로 안 채움)
+        return (
+            fit,
+            None,
+            (f"표본 부족: 이 하위 주제 숏츠 {topic.videos}개 (최소 {config.min_samples}개)"),
+        )
     if topic.videos < config.min_samples or topic.median_views is None or not overall:
         return fit, target, basis
     ratio = round(topic.median_views / overall, 2)

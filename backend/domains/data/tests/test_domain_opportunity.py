@@ -239,6 +239,10 @@ def test_cards_are_per_subtopic_and_products_are_only_linked() -> None:
     ]  # 표본 2개(기준 5개 미만) → 분류 기준으로 되돌아감 (가짜 분류기는 미분류)
     assert tour.shorts_fit is not None and tour.shorts_fit.level == "uncertain"
     assert tour.shorts_fit.reason == "하위 주제 분류 미정"
+    # 하위 주제 표본 5개 미만: 목표 참고값은 모름 + 표본 부족 (전체 중앙값으로 채우지 않음)
+    assert tour.target_views_reference is None
+    assert tour.target_reference_basis == "표본 부족: 이 하위 주제 숏츠 2개 (최소 5개)"
+    assert not any("목표 참고값" in f.label for f in res.facts if f.about == tour.opportunity_id)
     assert not any("씨앗 키워드(상품 이름) 단위" in x for x in book.limits)
 
 
