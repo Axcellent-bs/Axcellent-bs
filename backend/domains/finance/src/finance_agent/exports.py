@@ -1,15 +1,12 @@
-"""재무 파일 자동 만들기·보관, 은행 내역 폴더 읽기, 세무 전달.
+"""재무 파일 자동 만들기·보관, 은행 내역 폴더 읽기.
 
 자동으로 하는 일 (사람 없이)
-- 지난달 손익계산서, 그 분기 부가세 집계, 판매자 명세를 `FINANCE_EXPORT_DIR`에 만든다
+- 지난달 손익계산서, 분기가 끝났으면 부가세 집계와 판매자 명세, 전문가 확인 목록을
+  `FINANCE_EXPORT_DIR`에 만든다
 - `FINANCE_BANK_INBOX`에 넣은 은행 거래내역 CSV를 읽어 대조 자료에 더한다
 
-사람이 승인해야 하는 일
-- 세무 자료 전달: 안전 관문 `send_tax_package`(항상 C).
-  승인되면 `FINANCE_TAX_HANDOFF_DIR`로 복사한다.
-  복사할 곳을 정하지 않았으면 내려받을 수 있게 표시만 한다
-
-하지 않는 일: 은행·홈택스 접속, 신고·제출.
+세무사에게는 사람이 내려받아 전달한다. 회사마다 세무사와 전달 방법이 달라서 전달 기능을 두지 않는다.
+하지 않는 일: 외부 전송, 은행·홈택스 접속, 신고·제출.
 주문 자료를 못 받았으면 파일을 만들지 않는다(틀린 숫자 방지).
 """
 
@@ -21,7 +18,7 @@ import io
 import json
 import logging
 import os
-import shutil
+import zipfile
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -29,7 +26,7 @@ from typing import Any
 from finance_agent import bank, statements, tax
 from finance_agent import finance_config as fc
 from finance_agent.books import Books
-from finance_agent.rules import applied, load_rules
+from finance_agent.rules import applied, load_rules, review_checklist_md
 
 logger = logging.getLogger("ax.finance.exports")
 
@@ -52,10 +49,6 @@ def export_dir() -> Path | None:
 
 def inbox_dir() -> Path | None:
     return _dir("FINANCE_BANK_INBOX")
-
-
-def handoff_dir() -> Path | None:
-    return _dir("FINANCE_TAX_HANDOFF_DIR")
 
 
 # ---------------------------------------------------------------- 파일 만들기
@@ -96,6 +89,7 @@ def build_files(books: Books, month: str, last_day: date) -> dict[str, bytes]:
     files = {
         f"income-statement-{month}.csv": statements.to_csv(report, missing).encode("utf-8-sig"),
         f"income-statement-{month}.xlsx": statements.to_xlsx(report, missing),
+        "expert-review-checklist.md": review_checklist_md().encode("utf-8"),
     }
     if last_day.month % 3 == 0:
         pack = tax.vat_pack(books, last_day)
@@ -154,7 +148,6 @@ def make_package(
         "generated_at": fc.iso(fc.now()),
         "source": books.source,
         "mock": books.mock,
-        "handoff": {"status": "not_requested"},
         "rules_version": load_rules().version,
         "applied_rules": [applied("TAX-001")],
     }
@@ -178,16 +171,19 @@ def read_file(exports: dict[str, dict[str, Any]], package_id: str, name: str) ->
     return body if hashlib.sha256(body).hexdigest() == entry["sha256"] else None
 
 
-def copy_to_handoff(package: dict[str, Any]) -> str | None:
-    """승인된 묶음을 전달 폴더로 복사한다. 복사한 위치. 정해진 곳이 없으면 None."""
-    target, root = handoff_dir(), export_dir()
-    if target is None or root is None:
+def bundle(exports: dict[str, dict[str, Any]], package_id: str) -> tuple[str, bytes] | None:
+    """묶음 전체를 zip으로. 세무사에게 그대로 전달할 수 있다. 파일이 기록과 다르면 None."""
+    package = exports.get(package_id)
+    if package is None:
         return None
-    dest = target / f"{package['package_id']}-v{package['version']}"
-    dest.mkdir(parents=True, exist_ok=True)
-    for entry in package["files"]:
-        shutil.copyfile(root / package["package_id"] / entry["name"], dest / entry["name"])
-    return str(dest)
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
+        for entry in package["files"]:
+            body = read_file(exports, package_id, entry["name"])
+            if body is None:
+                return None
+            archive.writestr(entry["name"], body)
+    return f"{package_id}-v{package['version']}.zip", out.getvalue()
 
 
 # ---------------------------------------------------------------- 은행 내역 폴더
