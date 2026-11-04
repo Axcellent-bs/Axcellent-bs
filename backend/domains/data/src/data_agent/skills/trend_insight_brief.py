@@ -54,12 +54,19 @@ from ax_contracts.schemas.data import (
 )
 from data_agent.explain import _bad_numbers
 from data_agent.skills.ad_material import AdRules, judge, load_rules
+from data_agent.skills.code_version import source_hash
 from data_agent.skills.topic_category import CategoryResult, TopicInput, classify_topics
 from data_agent.skills.trend_evidence import BLAME, fixed_line
 from data_agent.skills.trend_scan import TREND_CONFIG_ENV
 
 KST = timezone(timedelta(hours=9))
 DB_ENV = "DATA_INSIGHT_BRIEF_DB"
+# 브리프·기회 카드를 만드는 코드의 버전 (브리프 + 기회 카드 + 하위 주제 + 프로필 + 계획).
+# 코드가 바뀌면 규칙 버전이 바뀌어 오늘 캐시를 다음 요청에서 다시 묶는다
+CODE_VERSION = source_hash(
+    "trend_insight_brief", "domain_opportunity", "domain_subtopics", "domain_profile",
+    "source_plan", "data_sources", "code_version",
+)  # fmt: skip
 DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "insight_brief.db"  # backend/.data
 REFERENCE = "참고용"
 # 브리프 칸 모양이 바뀌면 올린다 (오늘 캐시를 새 모양으로 다시 묶게)
@@ -127,7 +134,7 @@ def load_config(env: Mapping[str, str]) -> BriefConfig:
 def rules_version(config: BriefConfig) -> str:
     parts = {
         "config": dataclasses.asdict(config), "prompt": LINE_PROMPT, "limits": BRIEF_LIMITS,
-        "shape": SHAPE,
+        "shape": SHAPE, "code": CODE_VERSION,
     }  # fmt: skip
     text = json.dumps(parts, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]

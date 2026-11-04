@@ -47,10 +47,13 @@ from ax_contracts.schemas.data import (
     SourcePlanRequest,
 )
 from data_agent.connectors import ConnectorUnavailable, data4library, naver_shopping
+from data_agent.skills.code_version import source_hash
 from data_agent.skills.data_sources import BY_ID
 from data_agent.skills.trend_scan import TREND_CONFIG_ENV
 
 DB_ENV = "DATA_SOURCE_PLAN_DB"
+# 계획을 만드는 코드의 버전 (이 모듈과 출처 목록). 코드가 바뀌면 계획 id가 바뀌어 다시 만든다
+CODE_VERSION = source_hash("source_plan", "data_sources", "code_version")
 DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "source_plan.db"  # backend/.data
 AGE_BANDS = 5  # 연령대 수 (trend_age 기본 설정과 같다: 10대·20대·30대·40대·50대 이상)
 APPROVAL_NOTE = (
@@ -290,6 +293,7 @@ def plan_id(profile: DomainProfileOutput, sources: Sequence[DataSource], config:
         "sources": [(s.source_id, s.status, s.approved) for s in sources],
         "config": dataclasses.asdict(config),
         "prompt": PROMPT,
+        "code": CODE_VERSION,  # 코드가 바뀌면 다음 요청에서 다시 만든다
     }
     text = json.dumps(parts, ensure_ascii=False, sort_keys=True)
     return "plan_" + hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]

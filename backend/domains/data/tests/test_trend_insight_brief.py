@@ -466,3 +466,13 @@ def test_brief_attaches_opportunity_cards_or_says_why(tmp_path: Path) -> None:
     assert bad.opportunities_reason == "기회 가설 카드를 만들지 못함 (RuntimeError)"
     plain = run(None, "c")
     assert plain.opportunities_reason == "기회 가설 카드를 요청하지 않음"
+
+
+def test_brief_is_rebuilt_when_the_code_changes(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    llm = BriefLLM()
+    first, _ = _run(tmp_path, llm)
+    again, _ = _run(tmp_path, llm)
+    assert again.cached and llm.asked == 1
+    monkeypatch.setattr(brief, "CODE_VERSION", "changed")  # 코드가 바뀐 것과 같다 (소스 해시)
+    changed, _ = _run(tmp_path, llm)
+    assert not changed.cached and llm.asked == 2 and changed.rules_version != first.rules_version

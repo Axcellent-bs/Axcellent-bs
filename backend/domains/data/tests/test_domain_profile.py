@@ -295,3 +295,12 @@ def test_mismatch_seeds_are_skipped_and_human_override_brings_them_back(tmp_path
     no_intro = _profile({"DATA_DOMAIN_PROFILE_DB": str(tmp_path / "c.db")},
                         ProfileLLM(_answer(groups_not_in_intro=["문구"])))  # fmt: skip
     assert no_intro.intro_mismatch == []  # 소개가 없으면 보지 않음
+
+
+def test_profile_is_rebuilt_when_the_code_changes(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    llm = ProfileLLM(_answer())
+    first = _run(tmp_path, llm)
+    assert _run(tmp_path, llm).cached and llm.asked == 1
+    monkeypatch.setattr(dp, "CODE_VERSION", "changed")  # 코드가 바뀐 것과 같다 (소스 해시)
+    again = _run(tmp_path, llm)
+    assert not again.cached and llm.asked == 2 and again.catalog_hash != first.catalog_hash
