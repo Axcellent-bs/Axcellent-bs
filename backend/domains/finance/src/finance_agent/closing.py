@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -176,6 +178,68 @@ def line_drift(
     return out
 
 
+def baseline_lines(confirmation: dict[str, Any]) -> list[dict[str, Any]]:
+    """확정 숫자 + 반영한 조정. 차이는 이 값과 비교해 조정한 차이가 다시 나오지 않게 한다."""
+    done: dict[str, int] = {}
+    for adj in confirmation.get("adjustments", []):
+        for row in adj["lines"]:
+            done[row["code"]] = done.get(row["code"], 0) + row["diff"]
+    return [
+        line | {"amount": line["amount"] + done.get(line["code"], 0)}
+        if line["amount"] is not None
+        else line
+        for line in confirmation["snapshot"]["lines"]
+    ]
+
+
+def adjustment_journal(diff: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """차이 → 조정 분개안. 줄의 비용은 음수라 부호를 맞춘다. 차변·대변 합은 같다."""
+    d = {x["code"]: x["diff"] for x in diff}
+    gmv, commission = d.get("gmv", 0), d.get("commission_revenue", 0)
+    pg, coupon, refund = -d.get("pg_fee", 0), -d.get("coupon_cost", 0), -d.get("refund_total", 0)
+    rows = [
+        ("외상매출금(PG)", gmv, "판매액 변동"),
+        ("수수료 매출", -commission, "수수료 변동"),
+        ("판매자 예수금", -(gmv - commission), "판매자 몫 변동"),
+        ("지급수수료(PG)", pg, "PG 수수료 변동"),
+        ("외상매출금(PG)", -pg, "PG 수수료 차감 변동"),
+        ("판매촉진비(쿠폰)", coupon, "쿠폰 변동"),
+        ("미지급금(쿠폰)", -coupon, "쿠폰 정산 변동"),
+        ("판매자 예수금", refund, "환불 변동"),
+        ("외상매출금(PG)", -refund, "카드 취소 변동"),
+    ]
+    return [
+        {
+            "account": account,
+            "debit": max(amount, 0),
+            "credit": max(-amount, 0),
+            "memo": f"전기 조정: {memo}",
+        }
+        for account, amount, memo in rows
+        if amount
+    ]
+
+
+def adjustment_signature(diff: list[dict[str, Any]]) -> str:
+    """사람이 본 차이와 반영할 차이가 같은지 확인한다."""
+    text = json.dumps(diff, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def prior_adjustments(
+    closings: dict[tuple[str, str], dict[str, Any]] | None, month: str
+) -> list[dict[str, Any]]:
+    """그 달에 반영한 전기 조정."""
+    out = []
+    for confirmation in (closings or {}).values():
+        out += [a for a in confirmation.get("adjustments", []) if a["posted_month"] == month]
+    return sorted(out, key=lambda a: a["at"])
+
+
+def net_of(adjustment: dict[str, Any]) -> int:
+    return next((x["diff"] for x in adjustment["lines"] if x["code"] == "net_result"), 0)
+
+
 def snapshot_of(
     report: dict[str, Any], books: Books, statement_column: dict[str, Any]
 ) -> dict[str, Any]:
@@ -189,6 +253,7 @@ def snapshot_of(
         "commentary": report["commentary"],
         "commentary_source": report["commentary_source"],
         "close_warnings": report["close_warnings"],
+        "prior_adjustments": report["prior_adjustments"],
         "statement": statement_column,
     }
 
@@ -204,8 +269,10 @@ def find_drifts(
         if not snap:
             continue
         start, end = period_range(period, date.fromisoformat(day))  # type: ignore[arg-type]
+        if period != "month" and ("month", start.replace(day=1).isoformat()) in closings:
+            continue  # 그 달을 확정했으면 차이는 월 결산에서 본다
         totals = compute_totals(books, fc.day_start(start), fc.day_start(end))
-        diff = line_drift(snap["lines"], lines(totals, unknown))
+        diff = line_drift(baseline_lines(confirmation), lines(totals, unknown))
         if diff:
             net = next((x["diff"] for x in diff if x["code"] == "net_result"), 0)
             out.append({"period": period, "date": day, "net_diff": net, "lines": diff})
@@ -394,6 +461,7 @@ async def closing_report(
     period: Period,
     d: date,
     confirmation: dict[str, Any] | None,
+    closings: dict[tuple[str, str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     start_d, end_d = period_range(period, d)
     start, end = fc.day_start(start_d), fc.day_start(end_d)
@@ -411,6 +479,13 @@ async def closing_report(
         shown, journal_lines = current, journal(t, unknown)
         commentary, source = await write_commentary(label, t, books.mock, unknown)
         warnings = [] if confirmation else close_warnings(books, period, d)
+    drift = line_drift(baseline_lines(confirmation), current) if snap else []
+    prior = (
+        (snap or {}).get("prior_adjustments", prior_adjustments(closings, start_d.isoformat()[:7]))
+        if period == "month"
+        else []
+    )
+    net = next((x["amount"] for x in shown if x["code"] == "net_result"), None)
     return {
         "period": period,
         "date": shown_date.isoformat(),
@@ -425,9 +500,31 @@ async def closing_report(
         "confirmed_by": confirmation["by"] if confirmation else None,
         "confirmed_at": confirmation["at"] if confirmation else None,
         "snapshot_at": snap["taken_at"] if snap else None,
-        "drift": line_drift(snap["lines"], current) if snap else [],
+        "drift": drift,
+        "adjustment_proposal": (
+            {
+                "journal": adjustment_journal(drift),
+                "net": next((x["diff"] for x in drift if x["code"] == "net_result"), 0),
+                "signature": adjustment_signature(drift),
+            }
+            if drift and period == "month"
+            else None
+        ),
+        "adjustments": (confirmation or {}).get("adjustments", []),
+        "prior_adjustments": prior,
+        "net_after_adjustments": (
+            None if net is None or not prior else net + sum(net_of(a) for a in prior)
+        ),
         "close_warnings": warnings,
         "applied_rules": applied_many(
-            "REV-001", "REV-002", "REV-003", "EXP-001", "PL-001", "CLS-001", "CLS-002", "CLS-003"
+            "REV-001",
+            "REV-002",
+            "REV-003",
+            "EXP-001",
+            "PL-001",
+            "CLS-001",
+            "CLS-002",
+            "CLS-003",
+            "CLS-004",
         ),
     }

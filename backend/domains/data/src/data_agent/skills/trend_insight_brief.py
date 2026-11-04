@@ -775,9 +775,11 @@ async def make_brief(
         first = pick(ready, config, n + config.age_topics_extra)
         company = [c for c in company if not c.pending()]
         ask = [*first, *company]
+        age_limits: list[str] = []
         try:
             age_out = await age_fn([c.topic for c in ask])
             queries.append(f"trend_age keywords={len(ask)}")
+            age_limits = list(getattr(age_out, "limits", []))
             by_age = {_norm(i.keyword): i for i in age_out.items}
             for c in ask:
                 c.age = by_age.get(_norm(c.topic))
@@ -855,6 +857,7 @@ async def make_brief(
                      "promo_concepts(오늘 저장된 것만)", "product_link"],
             limits=list(BRIEF_LIMITS),
         )  # fmt: skip
+        out.limits += [x for x in age_limits if x not in out.limits]
         if promo is None:
             out.limits.append("오늘 만든 예시 아이디어가 없어 example_ideas가 비어 있다")
         if not rising_company:

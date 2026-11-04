@@ -721,3 +721,188 @@ def test_budget_from_a_short_month_is_marked_provisional(kit: Any) -> None:
     rows = [kit.order("o1", kit.at("2026-09-28"), [("s", "book", 1, 1_000_000)])]
     got = cp.budget_from_last_month(kit.books(orders=rows), date(2026, 10, 15))
     assert got["provisional"] is True and "1일치" in got["basis"]
+
+
+# ---------------------------------------------------------------- 조정
+def _confirm_september(client: TestClient, kit: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+    first = kit.order("o1", kit.at("2026-09-10"), [("s", "book", 1, 1_000_000)])
+    second = kit.order("o2", kit.at("2026-09-10"), [("s", "book", 1, 1_000_000)])
+    _swap_books(monkeypatch, kit.books(orders=[first, second]))
+    monkeypatch.setattr("finance_agent.closing.pending_recon", lambda books, start, end: 0)
+    body = {"period": "month", "date": "2026-09-10"}
+    assert client.post("/api/finance/closing/confirm", json=body, headers=HUMAN).status_code == 200
+    _swap_books(monkeypatch, kit.books(orders=[first]))
+    return first
+
+
+def _september(client: TestClient) -> dict:
+    params = {"period": "month", "date": "2026-09-10"}
+    return client.get("/api/finance/closing", params=params).json()["data"]
+
+
+def test_month_drift_makes_a_balanced_proposal(
+    client: TestClient, kit: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _confirm_september(client, kit, monkeypatch)
+    proposal = _september(client)["adjustment_proposal"]
+    assert proposal["net"] < 0 and proposal["signature"]
+    rows = proposal["journal"]
+    assert sum(r["debit"] for r in rows) == sum(r["credit"] for r in rows)
+    assert all(r["debit"] >= 0 and r["credit"] >= 0 for r in rows)
+    assert all(r["memo"].startswith("전기 조정") for r in rows)
+
+
+def test_person_posts_adjustment_and_month_stays_fixed(
+    client: TestClient, kit: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _confirm_september(client, kit, monkeypatch)
+    before = _september(client)
+    fixed = _lines(before)
+    body = {
+        "date": "2026-09-10",
+        "reason": "주문 취소 반영",
+        "signature": before["adjustment_proposal"]["signature"],
+    }
+    url = "/api/finance/closing/adjust"
+    assert client.post(url, json=body).status_code == 401
+    assert client.post(url, json={"date": "2026-09-10"}, headers=HUMAN).status_code == 400
+    wrong = body | {"signature": "old"}
+    assert client.post(url, json=wrong, headers=HUMAN).json()["error"]["code"] == "drift_changed"
+    after = client.post(url, json=body, headers=HUMAN).json()["data"]
+    assert _lines(after) == fixed  # 확정한 달의 숫자는 그대로
+    assert after["drift"] == [] and after["adjustment_proposal"] is None  # 다시 나오지 않는다
+    assert after["adjustments"][0]["reason"] == "주문 취소 반영"
+    assert client.post(url, json=body, headers=HUMAN).json()["error"]["code"] == "no_drift"
+
+    # 반영한 달(이번 달)의 결산에 전기 조정으로 나온다
+    now = client.get(
+        "/api/finance/closing", params={"period": "month", "date": "2026-10-23"}
+    ).json()["data"]
+    assert len(now["prior_adjustments"]) == 1
+    net = _lines(now)["net_result"]
+    assert now["net_after_adjustments"] == net + before["adjustment_proposal"]["net"]
+
+
+def test_day_drift_has_no_proposal_and_month_takes_over(
+    client: TestClient, kit: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from finance_agent import closing
+
+    first = kit.order("o1", kit.at("2026-09-10"), [("s", "book", 1, 100_000)])
+    second = kit.order("o2", kit.at("2026-09-10"), [("s", "book", 1, 100_000)])
+    _swap_books(monkeypatch, kit.books(orders=[first, second]))
+    monkeypatch.setattr("finance_agent.closing.pending_recon", lambda books, start, end: 0)
+    day = {"period": "day", "date": "2026-09-10"}
+    client.post("/api/finance/closing/confirm", json=day, headers=HUMAN)
+    now = kit.books(orders=[first])
+    _swap_books(monkeypatch, now)
+    data = client.get("/api/finance/closing", params=day).json()["data"]
+    assert data["drift"] and data["adjustment_proposal"] is None
+    records = handlers.state().records.closings
+    assert [x["period"] for x in closing.find_drifts(now, records)] == ["day"]
+    records[("month", "2026-09-01")] = {"by": "x", "at": "t"}  # 월을 확정하면 일 차이는 빠진다
+    assert closing.find_drifts(now, records) == []
+
+
+# ---------------------------------------------------------------- 분기·연 재무제표, 변동 분석
+def test_quarter_statement_uses_confirmed_months(
+    client: TestClient, kit: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = _confirm_september(client, kit, monkeypatch)
+    august = kit.order("a1", kit.at("2026-08-10"), [("s", "book", 1, 500_000)])
+    _swap_books(monkeypatch, kit.books(orders=[first, august]))
+    params = {"period": "quarter", "date": "2026-09-10"}
+    report = client.get("/api/finance/statements", params=params).json()["data"]
+    assert report["confirmed"] == {
+        "current": False,
+        "previous": False,
+        "current_months": 1,
+        "total_months": 3,
+    }
+    row = next(r for r in report["rows"] if r["code"] == "commission")
+    assert row["current"] == 200_000 + 50_000  # 9월 확정 2건 + 8월 지금 장부
+
+
+def test_variance_uses_confirmed_numbers(
+    client: TestClient, kit: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _confirm_september(client, kit, monkeypatch)
+    data = client.get("/api/finance/variance", params={"date": "2026-09-10"}).json()["data"]
+    line = next(x for x in data["lines"] if x["code"] == "gmv")
+    assert line["current"] == 2_000_000  # 지금 장부는 1건이지만 확정 숫자다
+
+
+# ---------------------------------------------------------------- 부가세 고정
+def _vat(client: TestClient, date: str = "2026-09-10") -> dict:
+    return client.get("/api/finance/tax/vat", params={"date": date}).json()["data"]
+
+
+def test_vat_confirm_only_finished_settled_quarters(
+    client: TestClient, kit: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    url = "/api/finance/tax/vat/confirm"
+    assert client.post(url, json={"date": "2026-09-10"}).status_code == 401
+    assert client.post(url, json={}, headers=HUMAN).status_code == 400
+    current = client.post(url, json={"date": "2026-10-10"}, headers=HUMAN)
+    assert current.json()["error"]["code"] == "period_not_closed"
+    monkeypatch.setattr("finance_agent.closing.pending_recon", lambda books, start, end: 2)
+    pending = client.post(url, json={"date": "2026-09-10"}, headers=HUMAN)
+    assert pending.json()["error"]["code"] == "recon_pending"
+    assert handlers.state().records.vat_filings == {}
+
+
+def test_vat_numbers_stay_after_confirm_and_drift_shows(
+    client: TestClient, kit: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from finance_agent import tax
+
+    first = kit.order("o1", kit.at("2026-09-10"), [("s", "book", 1, 1_000_000)])
+    second = kit.order("o2", kit.at("2026-09-10"), [("s", "book", 1, 1_000_000)])
+    both = kit.books(orders=[first, second])
+    _swap_books(monkeypatch, both)
+    monkeypatch.setattr("finance_agent.closing.pending_recon", lambda books, start, end: 0)
+    body = {"date": "2026-09-10"}
+    done = client.post("/api/finance/tax/vat/confirm", json=body, headers=HUMAN).json()["data"]
+    assert done["filing_status"] == "confirmed" and done["drift"] == []
+    fixed = done["payable"]
+
+    one = kit.books(orders=[first])
+    _swap_books(monkeypatch, one)
+    later = _vat(client)
+    assert later["payable"] == fixed
+    assert {x["code"] for x in later["drift"]} >= {"payable"}
+    filings = handlers.state().records.vat_filings
+    assert tax.find_vat_drifts(one, filings)[0]["from"] == "2026-07-01"
+    handlers.state().vat_drifts = tax.find_vat_drifts(one, filings)
+    todo = client.get("/api/finance/overview").json()["data"]["todo"]
+    assert next(t for t in todo if t["kind"] == "vat_drift")["link"] == "tax"
+    seller = client.get("/api/finance/tax/seller-report", params=body).json()["data"]
+    assert sum(r["total"] for r in seller["rows"]) == 2_000_000  # 명세도 확정 숫자
+
+    url = "/api/finance/tax/vat/cancel"
+    assert client.post(url, json=body, headers=HUMAN).status_code == 400
+    undone = client.post(url, json=body | {"reason": "재검토"}, headers=HUMAN).json()["data"]
+    assert undone["filing_status"] == "draft"
+    assert handlers.state().records.vat_filing_cancels[0]["reason"] == "재검토"
+    assert client.post(url, json=body | {"reason": "r"}, headers=HUMAN).status_code == 404
+
+
+def test_settlement_request_records_who_asked(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[dict] = []
+
+    async def fake(action: str, params: dict, context: Any, evidence: Any) -> Any:
+        seen.append(params)
+        return ExecuteDecision(
+            execution_id="exe_1",
+            grade="C",
+            status="held",
+            review_id="rev_1",
+            hold_reason="over_threshold",
+            threshold_version=1,
+        )
+
+    monkeypatch.setattr("finance_agent.finance_api.execute", fake)
+    client.post("/api/finance/settlements/batch", json={}, headers=HUMAN)
+    assert seen[0]["requested_by"] == "taeyoon"

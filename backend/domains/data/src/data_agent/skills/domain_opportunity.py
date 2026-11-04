@@ -40,6 +40,7 @@ from ax_contracts.schemas.data import (
     DataSourcesOutput,
     DomainOpportunity,
     DomainProfileOutput,
+    DomainSubtopicsOutput,
     InsightProduct,
     OpportunityEvidence,
     OpportunityFormat,
@@ -309,6 +310,63 @@ class OpportunityResult:
     queries: list[str]
 
 
+PER_SEED = 2  # 카드에서 씨앗 하나가 차지할 수 있는 하위 주제 수
+
+
+def per_seed[T](order: Sequence[T], limit: int, seed_of: Callable[[T], str]) -> list[T]:
+    """순서대로 씨앗마다 PER_SEED개까지 고르고, 모자라면 남은 것으로 채운다."""
+    count: dict[str, int] = {}
+    ranked: list[T] = []
+    for t in order:
+        if count.get(seed_of(t), 0) < PER_SEED and len(ranked) < limit:
+            ranked.append(t)
+            count[seed_of(t)] = count.get(seed_of(t), 0) + 1
+    ranked += [t for t in order if t not in ranked][: limit - len(ranked)]
+    return ranked
+
+
+def topics_of_pool(pool: Sequence[Topic], limit: int) -> list[Topic]:
+    """거른 뒤 남은 후보에서 다시 씨앗마다 상한을 지켜 카드 수만큼."""
+    return per_seed(pool, limit, lambda t: t.seed)
+
+
+@dataclass(frozen=True)
+class Topic:
+    """카드 하나의 주제: 하위 주제(넓히기 결과) 또는 씨앗 키워드(하위 주제가 없을 때)."""
+
+    name: str
+    seed: str
+    axis: str | None = None
+    videos: int = 0  # 하위 주제 숏츠 수 (넓히기 결과)
+    median_views: float | None = None
+    evidence: str | None = None
+
+
+def topics_of(
+    profile: DomainProfileOutput, plan: SourcePlanOutput,
+    subtopics: DomainSubtopicsOutput | None, limit: int,
+) -> list[Topic]:  # fmt: skip
+    """하위 주제(숏츠 수 많은 순, 씨앗마다 `PER_SEED`개까지)가 있으면 그것, 없으면 씨앗 키워드.
+
+    한 씨앗의 하위 주제가 카드를 다 채우지 않게 씨앗마다 상한을 두고, 남은 자리는 다시 채운다.
+    """
+    if subtopics is not None and subtopics.subtopics:
+        order = sorted(subtopics.subtopics, key=lambda t: (-t.videos, t.name))
+        ranked = per_seed(order, limit, lambda t: t.seed_keyword)
+        return [
+            Topic(
+                t.name,
+                t.seed_keyword,
+                t.axis,
+                t.videos,
+                t.median_views,
+                f"'{t.seed_keyword}' 한국 숏츠 {t.videos}개에 함께 나옴",
+            )  # fmt: skip
+            for t in ranked
+        ]
+    return [Topic(k, k) for k in subtopics_of(profile, plan, limit)]
+
+
 def subtopics_of(profile: DomainProfileOutput, plan: SourcePlanOutput, limit: int) -> list[str]:
     planned = {_n(k) for i in plan.items for k in i.keywords}
     return [s.keyword for s in profile.seed_keywords if _n(s.keyword) in planned][:limit]
@@ -330,6 +388,8 @@ async def make_opportunities(
     day: date,
     end: date,
     context_id: str | None = None,
+    subtopics: DomainSubtopicsOutput | None = None,
+    baseline: tuple[float, int] | None = None,
 ) -> OpportunityResult:
     """계획대로 사용 가능·승인 출처만 불러 하위 주제마다 기회 가설 카드."""
     config = load_config(env)
@@ -338,38 +398,45 @@ async def make_opportunities(
         return OpportunityResult([], f"도메인 프로필이 없음 ({profile.reason})", None, queries)
     if plan.status != "known":
         return OpportunityResult([], f"수집 계획이 없음 ({plan.reason})", None, queries)
-    subtopics = subtopics_of(profile, plan, config.max_cards)
-    if not subtopics:
-        return OpportunityResult([], "계획에 들어간 씨앗 키워드가 없음", plan.plan_id, queries)
+    # 후보를 넉넉히 뽑아 분류부터 하고(광고 재료가 아닌 것 빼기), 남은 것에서 카드 수만큼
+    pool = topics_of(profile, plan, subtopics, config.max_cards * 3)
+    if not pool:
+        return OpportunityResult([], "하위 주제도 계획에 들어간 씨앗 키워드도 없음", plan.plan_id,
+                                 queries)  # fmt: skip
+    from_subtopics = pool[0].axis is not None
+    try:  # 분류 (광고 재료 거르기·숏츠 적합도용, 저장된 분류는 다시 묻지 않음)
+        cats = await classify([t.name for t in pool])
+    except Exception:  # 분류를 못 하면 거르지 못하고 적합도는 불확실
+        cats = {}
+    skipped = not_material(pool, cats, env)
+    kept = [t for t in pool if t.name not in skipped]
+    topics = topics_of_pool(kept, config.max_cards)
+    names = [t.name for t in topics]
     by_item = {i.source_id: i for i in plan.items}
     ready = {s.source_id for s in sources.sources if s.status == "available" and s.approved}
     # 검색 관심
     search: dict[str, OpportunityEvidence] = {}
     trend = by_item.get("naver_search_trend")
     if trend is not None and trend.source_id in ready and trend_connector is not None:
-        search, q = await search_interest(subtopics, trend_connector, end)
+        search, q = await search_interest(names, trend_connector, end)
         queries += q
     # 연령대 (계획에서 연령을 고른 경우만)
     ages: dict[str, AgeTopic] = {}
     age_why = "수집 계획에서 연령대를 고르지 않음"
     if trend is not None and trend.use_age and trend.source_id in ready and age_fn is not None:
         try:
-            got = await age_fn(subtopics)
+            got = await age_fn(names)
             ages = {_n(i.keyword): i for i in got.items}
-            queries.append(f"trend_age keywords={len(subtopics)}")
+            queries.append(f"trend_age keywords={len(names)}")
             age_why = "연령대 값을 받지 못함"
         except Exception as error:  # 연령대는 근거 하나라 실패해도 카드는 만든다
             age_why = f"연령대를 읽지 못함 ({type(error).__name__})"
-    # 분류 (숏츠 적합도용)
-    try:
-        cats = await classify(subtopics)
-    except Exception:  # 분류를 못 하면 적합도는 불확실
-        cats = {}
     seeds = {_n(s.keyword): s for s in profile.seed_keywords}
     products = {p.product_id: p for p in catalog_products}
     cards: list[DomainOpportunity] = []
-    for k in subtopics:
-        seed = seeds.get(_n(k))
+    for topic in topics:
+        k = topic.name
+        seed = seeds.get(_n(topic.seed))
         consumption: list[OpportunityEvidence] = []
         for item in plan.items:
             src = next((s for s in sources.sources if s.source_id == item.source_id), None)
@@ -383,6 +450,7 @@ async def make_opportunities(
                 queries.append(f"{item.source_id} consumption {k}")
         age = ages.get(_n(k))
         fit, formats, target, basis = shorts_fit(cats.get(k), shorts, config)
+        fit, target, basis = own_shorts(topic, fit, target, basis, shorts, config, baseline)
         age_reason = None if age and age.bands else (age.reason if age and age.reason else age_why)
         linked = [
             InsightProduct(
@@ -394,15 +462,16 @@ async def make_opportunities(
             if pid in products
         ]
         card = DomainOpportunity(
-            opportunity_id=opportunity_id(day, k), subtopic=k,
-            subtopic_evidence=seed.evidence if seed else None, line="",
+            opportunity_id=opportunity_id(day, k), subtopic=k, axis=topic.axis,
+            seed_keyword=topic.seed,
+            subtopic_evidence=topic.evidence or (seed.evidence if seed else None), line="",
             consumption=consumption,
             search_interest=[search[k]] if k in search else [],
             age_bands=list(age.bands) if age else [],
             age_reason=age_reason,
             shorts_fit=fit, formats=formats, target_views_reference=target,
             target_reference_basis=basis, products=linked,
-            products_reason=None if linked else "이 키워드의 근거가 회사 소개라 연결 상품 없음",
+            products_reason=None if linked else "씨앗 키워드의 근거가 회사 소개라 연결 상품 없음",
             limits=list(LIMITS), planning_decides=list(PLANNING_DECIDES),
         )  # fmt: skip
         if not search.get(k):
@@ -410,8 +479,71 @@ async def make_opportunities(
         card.score = score(card)
         cards.append(card)
     cards.sort(key=lambda c: -c.score)
+    if not from_subtopics:
+        for c in cards:
+            c.limits.append("하위 주제 넓히기 결과가 없어 씨앗 키워드(상품 이름) 단위 카드")
+    if skipped:
+        note = "광고 재료가 아니라 뺀 하위 주제: " + ", ".join(
+            f"{k}({why})" for k, why in skipped.items()
+        )
+        for c in cards:
+            c.limits.append(note)
     await write_lines(cards, llm, context_id, queries)
     return OpportunityResult(cards, None, plan.plan_id, queries)
+
+
+def not_material(
+    topics: Sequence[Topic], cats: Mapping[str, str | None], env: Mapping[str, str]
+) -> dict[str, str]:
+    """카드에서 뺄 하위 주제 → 이유. 공용 광고 재료 규칙 중 '늘 빼는 분류'와 회사 제외 분류만 본다.
+
+    회사 씨앗에서 나온 하위 주제라 트렌드 허용 분류 목록(`[promo] trend_categories`)은 보지 않는다
+    (브리프의 회사 관련 인사이트와 같은 이유: 빌려 올 IP·인물이 아니다).
+    """
+    from data_agent.skills.ad_material import NEVER_TREND, load_rules
+
+    rules = load_rules(env)
+    out: dict[str, str] = {}
+    for t in topics:
+        cat = cats.get(t.name)
+        if cat in NEVER_TREND or (cat is not None and cat in rules.exclude):
+            out[t.name] = f"{cat} 분류"
+    return out
+
+
+def own_shorts(
+    topic: Topic, fit: ShortsFit | None, target: float | None, basis: str | None,
+    shorts: ShortsStatsOutput | None, config: OpportunityConfig,
+    baseline: tuple[float, int] | None = None,
+) -> tuple[ShortsFit | None, float | None, str | None]:  # fmt: skip
+    """하위 주제 숏츠가 표본 기준 이상이면 그 중앙값 ÷ 같은 방식으로 모은 숏츠 전체 중앙값.
+
+    분모는 씨앗 키워드 검색 숏츠 전체의 중앙값(`baseline`)이다. 인기 차트 숏츠(숏츠 통계)는 이미
+    크게 뜬 영상이라 검색 숏츠와 비교하면 모두 낮게 나온다. baseline이 없을 때만 숏츠 통계 중앙값.
+    """
+    overall = baseline[0] if baseline else (shorts.median_views if shorts is not None else None)
+    base_name = f"씨앗 검색 숏츠 전체({baseline[1]}개)" if baseline else "숏츠 통계 전체"
+    if topic.videos < config.min_samples or topic.median_views is None or not overall:
+        return fit, target, basis
+    ratio = round(topic.median_views / overall, 2)
+    level = (
+        "high"
+        if ratio >= config.high_ratio
+        else "low"
+        if ratio <= config.low_ratio
+        else "uncertain"
+    )
+    rule = f"높음 {config.high_ratio:g}배 이상·낮음 {config.low_ratio:g}배 이하"
+    new = ShortsFit(
+        level=level, category=fit.category if fit else None, median_views=topic.median_views,
+        overall_median_views=overall, ratio=ratio, samples=topic.videos,
+        snapshot_at=shorts.snapshot_at if shorts else None,
+        reason=(
+            f"'{topic.name}' 숏츠 {topic.videos}개 중앙값이 {base_name} 중앙값의 {ratio:g}배"
+            f" ({rule})"
+        ),
+    )  # fmt: skip
+    return new, topic.median_views, f"이 하위 주제 숏츠 조회 중앙값 (표본 {topic.videos}개)"
 
 
 def score(c: DomainOpportunity) -> float:

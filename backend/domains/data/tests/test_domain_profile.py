@@ -183,7 +183,9 @@ def test_evidence_copied_as_a_data_block_line_still_matches_the_source(tmp_path:
         dp._Seed(
             keyword="무지 노트", evidence="무지 노트 3권 세트 | 카테고리 stat | 줄 없는 무지 노트"
         ),
-        dp._Seed(keyword="고양이 서점", evidence="고양이가 지키는 서점"),  # 키워드가 원문에 없음
+        dp._Seed(
+            keyword="문구 서점", evidence="문구를 파는 쇼핑몰. 고양이가 지키는 서점"
+        ),  # 다른 문장
         dp._Seed(keyword="만년필", evidence="만년필 | 카테고리 stat"),  # 카탈로그에 없는 상품
     ]
     out = _run(tmp_path, ProfileLLM(_answer(seeds=seeds)))
@@ -192,4 +194,32 @@ def test_evidence_copied_as_a_data_block_line_still_matches_the_source(tmp_path:
         "파이썬 입문서"
     ].product_ids == ["p2"]
     assert kept["무지 노트"].evidence_from == "product" and kept["무지 노트"].product_ids == ["p3"]
-    assert {d.keyword for d in out.dropped_keywords} == {"고양이 서점", "만년필"}
+    assert {d.keyword for d in out.dropped_keywords} == {"문구 서점", "만년필"}
+
+
+def test_intro_sentence_with_separated_words_is_evidence(tmp_path: Path) -> None:
+    """'고양이 서점'은 소개 문장 '고양이가 지키는 서점'에 낱말이 떨어져 있다 (#581 뒤 원인)."""
+    seeds = [
+        dp._Seed(keyword="고양이 서점", evidence="고양이가 지키는 서점"),
+        dp._Seed(keyword="고양이 문구", evidence="고양이가 지키는 서점"),  # 문구는 그 문장에 없음
+    ]
+    out = _run(tmp_path, ProfileLLM(_answer(seeds=seeds)))
+    kept = {s.keyword: s for s in out.seed_keywords}
+    assert kept["고양이 서점"].evidence_from == "about"
+    assert kept["고양이 서점"].evidence == "고양이가 지키는 서점"
+    assert {d.keyword for d in out.dropped_keywords} == {"고양이 문구"}
+
+
+def test_subtopic_axes_come_from_the_llm_and_are_checked(tmp_path: Path) -> None:
+    axes = [
+        "활용 방식",
+        "같이 묶이는 관심사",
+        "기타",
+        "2026 트렌드",
+        "아주아주아주긴축이름입니다",
+        "활용 방식",
+    ]
+    out = _run(tmp_path, ProfileLLM(_answer(subtopic_axes=axes)))
+    assert out.subtopic_axes == ["활용 방식", "같이 묶이는 관심사"]  # 기타·숫자·긴 이름·중복 뺌
+    one = _run(tmp_path / "b", ProfileLLM(_answer(subtopic_axes=["활용 방식"])))
+    assert any("하위 주제 축이 1개" in x for x in one.limits)

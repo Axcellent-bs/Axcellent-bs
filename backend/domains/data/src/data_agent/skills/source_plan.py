@@ -396,6 +396,48 @@ async def check_items(
         out.items.append(item)
 
 
+SUBTOPIC_UNITS = 101  # 하위 주제 숏츠 검색 1번 = search.list 100 + videos.list 1
+
+
+def fit_subtopics(out: SourcePlanOutput, config: PlanConfig, pending: int) -> None:
+    """하위 주제 숏츠 검색(오늘 새로 할 것)을 YouTube 할당량 합계에 넣는다.
+
+    YouTube 계획 항목과 같은 상한을 나눠 쓴다. 넘으면 항목의 키워드 → 카테고리를 먼저 자르고,
+    그래도 넘으면 하위 주제 검색 수를 줄인다(줄인 것은 다음 날 검색).
+    """
+    cap, unit = cap_of("youtube", config)
+    item = next((i for i in out.items if i.source_id == "youtube"), None)
+    searches = max(0, pending)
+    while item is not None and item.quota_units + searches * SUBTOPIC_UNITS > cap:
+        if item.keywords:
+            cut = item.keywords.pop()
+            out.trimmed.append(f"youtube: 키워드 '{cut}' (하위 주제 검색과 합쳐 상한 {cap} {unit})")
+        elif len(item.categories) > 1:  # 카테고리는 하나는 남긴다 (fit_quota와 같다)
+            cut_c = item.categories.pop()
+            out.trimmed.append(
+                f"youtube: 카테고리 {cut_c.category_id} (하위 주제 검색과 합쳐 상한 {cap} {unit})"
+            )
+        else:
+            break
+        item.calls, item.quota_units = cost("youtube", len(item.categories), len(item.keywords),
+                                            item.use_age)  # fmt: skip
+    used = item.quota_units if item is not None else 0
+    while searches and used + searches * SUBTOPIC_UNITS > cap:
+        searches -= 1
+    if searches < pending:
+        out.trimmed.append(
+            f"하위 주제 검색 {pending - searches}번 (상한 {cap} {unit}, 다음 날 검색)"
+        )
+    out.subtopic_searches, out.subtopic_units = searches, searches * SUBTOPIC_UNITS
+    quota = next((q for q in out.quota if q.source_id == "youtube"), None)
+    if quota is None:
+        out.quota.append(
+            PlanQuota(source_id="youtube", units=out.subtopic_units, cap=cap, unit=unit)
+        )
+    else:
+        quota.units = used + out.subtopic_units
+
+
 def fit_quota(out: SourcePlanOutput, config: PlanConfig) -> None:
     """출처마다 호출 수·단위를 세고 상한 안으로 자른다: 연령대(호출을 배로 늘림) → 키워드 →
     카테고리 순, 뒤에서부터. 다 잘라도 넘으면 그 출처를 상한 0으로 보고 비운다."""
@@ -454,6 +496,7 @@ async def make_plan(
     sources: DataSourcesOutput,
     youtube_categories: YouTubeCategories | None = None,
     verify_shopping: ShoppingVerify | None = None,
+    subtopic_pending: int = 0,
     now: datetime | None = None,
     context_id: str | None = None,
     store: PlanStore | None = None,
@@ -467,7 +510,8 @@ async def make_plan(
     queries: list[str] = []
     try:
         if not request.regenerate and (hit := store.get(pid)) is not None:
-            out = hit.model_copy(update={"cached": True})
+            out = hit.model_copy(update={"cached": True}, deep=True)
+            fit_subtopics(out, config, subtopic_pending)  # 검색 캐시 상태는 그때그때
             ev = Evidence(
                 queries=[f"source_plan cache {pid}"], data_summary=out.summary, collected_at=now
             )
@@ -500,6 +544,7 @@ async def make_plan(
                 got.items, profile, sources.sources, options, config, verify_shopping, out
             )
             fit_quota(out, config)
+            fit_subtopics(out, config, subtopic_pending)
         out.status = "known" if out.items else "unknown"
         if not out.items and not out.reason:
             out.reason = "검증을 통과한 출처가 없음"

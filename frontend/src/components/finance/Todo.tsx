@@ -10,6 +10,7 @@ import { Chip, TONE } from "./bits";
 
 const KIND: Record<FinanceTodo["kind"], { label: string; tone: string }> = {
   closing_drift: { label: "결산 조정", tone: TONE.warn },
+  vat_drift: { label: "부가세 변동", tone: TONE.warn },
   settlement_batch: { label: "판매자 정산", tone: TONE.info },
   settlement_deadline: { label: "정산 기한", tone: TONE.bad },
   closing_confirm: { label: "결산", tone: TONE.info },

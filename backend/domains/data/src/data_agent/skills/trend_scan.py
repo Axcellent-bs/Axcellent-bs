@@ -20,7 +20,7 @@ from __future__ import annotations
 import math
 import statistics
 import tomllib
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -252,20 +252,79 @@ def judge(
 # ---------------------------------------------------------------- 회사 기본 키워드 그룹
 
 
-def default_groups(env: Mapping[str, str]) -> list[TrendKeywordGroup]:
-    """`DATA_TREND_CONFIG`(회사 폴더 `trends.toml`)의 `[[groups]]`. 없거나 틀리면 빈 목록."""
+def _read_config(env: Mapping[str, str]) -> dict[str, Any]:
     path = env.get(TREND_CONFIG_ENV)
     if not path or not Path(path).is_file():
-        return []
+        return {}
     try:
         with Path(path).open("rb") as f:
-            raw = tomllib.load(f)
+            return tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+
+def default_groups(env: Mapping[str, str]) -> list[TrendKeywordGroup]:
+    """사람이 덮어쓴 그룹: `trends.toml`의 `[[override.groups]]`. 없거나 틀리면 빈 목록.
+
+    옛 이름 `[[groups]]`도 같은 덮어쓰기로 읽는다(`override.groups`가 있으면 그쪽만).
+    """
+    try:
+        raw = _read_config(env)
+        found = (raw.get("override") or {}).get("groups") or raw.get("groups") or []
         return [
-            TrendKeywordGroup(group_name=g["name"], keywords=list(g["keywords"]))
-            for g in raw.get("groups", [])
+            TrendKeywordGroup(group_name=g["name"], keywords=list(g["keywords"])) for g in found
         ]
-    except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError, ValueError):
+    except (AttributeError, KeyError, TypeError, ValueError):
         return []
+
+
+def max_seed_groups(env: Mapping[str, str]) -> int:
+    """씨앗 키워드로 만드는 기본 그룹 수 상한: `[scan] max_seed_groups`. 그룹마다 네이버 1번."""
+    try:
+        value = int((_read_config(env).get("scan") or {}).get("max_seed_groups", 5))
+    except (AttributeError, TypeError, ValueError):
+        return 5
+    return max(1, value)
+
+
+def seed_groups(seeds: Sequence[str], limit: int) -> list[TrendKeywordGroup]:
+    """씨앗 키워드 하나 = 그룹 하나(이름·키워드 = 씨앗). 중복은 건너뛰고 limit개까지."""
+    out: list[TrendKeywordGroup] = []
+    seen: set[str] = set()
+    for seed in seeds:
+        word = seed.strip()
+        if word and word not in seen:
+            seen.add(word)
+            out.append(TrendKeywordGroup(group_name=word, keywords=[word]))
+    return out[:limit]
+
+
+# 프로필 씨앗 키워드를 주는 함수. (씨앗 목록, 못 얻은 이유). 테스트는 LLM 없이 바꿔 끼운다
+SeedProvider = Callable[[], Awaitable[tuple[Sequence[str], str | None]]]
+
+
+async def resolve_groups(
+    requested: Sequence[TrendKeywordGroup],
+    env: Mapping[str, str],
+    seed_provider: SeedProvider | None = None,
+) -> list[TrendKeywordGroup]:
+    """우선순위: 요청 그룹 > 사람 덮어쓰기(`[[override.groups]]`) > 프로필 씨앗 키워드.
+
+    프로필을 못 얻으면(씨앗 없음·LLM 없음) 지어내지 않고 `TrendGroupsUnknown`.
+    """
+    if requested:
+        return list(requested)
+    if override := default_groups(env):
+        return override
+    reason = "프로필 씨앗 키워드를 받을 방법이 없음"
+    if seed_provider is not None:
+        seeds, why = await seed_provider()
+        if groups := seed_groups(seeds, max_seed_groups(env)):
+            return groups
+        reason = why or "프로필에 씨앗 키워드가 없음"
+    raise TrendGroupsUnknown(
+        f"볼 키워드 그룹을 정할 수 없다: {reason} (입력에도, 사람 덮어쓰기 trends.toml에도 없음)"
+    )
 
 
 def yesterday_kst(now: datetime | None = None) -> date:
@@ -278,6 +337,10 @@ def yesterday_kst(now: datetime | None = None) -> date:
 
 class NoTrendGroups(ValueError):
     """볼 키워드 그룹이 없다 (입력도 회사 설정도 없음)."""
+
+
+class TrendGroupsUnknown(NoTrendGroups):
+    """요청·덮어쓰기 그룹이 없고 프로필 씨앗도 못 얻었다 (지어내지 않고 unknown)."""
 
 
 @dataclass(frozen=True)
@@ -382,11 +445,13 @@ async def scan_trends(
     settings: Settings = DEFAULT_SETTINGS,
     now: datetime | None = None,
     category_cache: Any = None,
+    seed_provider: SeedProvider | None = None,
 ) -> TrendScanResult:
-    """그룹마다 한 번씩 받아 판정한다. 커넥터가 모든 그룹에서 실패하면 `ConnectorUnavailable`."""
-    groups = request.keyword_groups or default_groups(env)
-    if not groups:
-        raise NoTrendGroups("볼 키워드 그룹이 없다 (입력에도, 회사 설정 trends.toml에도 없음)")
+    """그룹마다 한 번씩 받아 판정한다. 커넥터가 모든 그룹에서 실패하면 `ConnectorUnavailable`.
+
+    그룹은 요청 > 사람 덮어쓰기 > 프로필 씨앗(`seed_provider`) 순 (`resolve_groups`).
+    """
+    groups = await resolve_groups(request.keyword_groups, env, seed_provider)
     end = request.end_date or yesterday_kst(now)
     start = end - timedelta(days=REQUEST_DAYS - 1)
     results: list[TrendVerdict] = []

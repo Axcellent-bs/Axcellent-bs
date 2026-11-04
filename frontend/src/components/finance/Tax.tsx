@@ -8,10 +8,28 @@ import { AppliedRules, Chip, Empty, Panel, ResourceBody, TONE, useResource } fro
 // 세무사 확인 전인 설정(수수료 부가세 별도/포함, 쿠폰 공제 구조, 배송비 공급자)은 화면에 그대로 드러낸다.
 
 export function TaxSection({ tick }: { tick: number }) {
-  const vat = useResource("tax-vat", () => finance.vat(), tick);
+  const [quarterDate, setQuarterDate] = useState<string | null>(null);
+  const [own, setOwn] = useState(0);
+  const vat = useResource(`tax-vat-${quarterDate ?? "now"}`, () => finance.vat(quarterDate), tick + own);
+  const [confirming, setConfirming] = useState(false);
   const report = useResource("tax-seller-report", () => finance.sellerReport(), tick);
   const [problem, setProblem] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<"csv" | "xlsx" | null>(null);
+
+  async function confirmVat(date: string) {
+    setConfirming(true);
+    setProblem(null);
+    try { await finance.confirmVat(date); setOwn((n) => n + 1); }
+    catch (e) { setProblem((e as Error).message); }
+    finally { setConfirming(false); }
+  }
+
+  /** 지금 보는 분기의 바로 앞 분기 마지막 날 */
+  function previousQuarter(from: string): string {
+    const d = new Date(`${from}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - 1);
+    return d.toISOString().slice(0, 10);
+  }
 
   async function download(format: "csv" | "xlsx") {
     setDownloading(format);
@@ -29,6 +47,23 @@ export function TaxSection({ tick }: { tick: number }) {
               <p className="text-sm text-ink-700">
                 <b className="text-ink-900">{p.quarter}</b> ({p.from} ~ {p.to}) · {p.filing.kind} 기한 <b>{p.filing.due}</b>
               </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="btn-ghost" onClick={() => setQuarterDate(previousQuarter(p.from))}>앞 분기 보기</button>
+                {quarterDate && <button className="btn-ghost" onClick={() => setQuarterDate(null)}>이번 분기로</button>}
+                {p.filing_status === "confirmed"
+                  ? <Chip label={`숫자 확정 · ${p.confirmed_by ?? ""}`} tone={TONE.ok} />
+                  : <button className="btn-primary" disabled={!humanTokenSet || confirming || p.closable === false} onClick={() => confirmVat(p.to)}>이 분기 숫자 확정</button>}
+                {p.closable === false && <span className="text-sm text-ink-500">분기가 끝난 뒤 확정할 수 있습니다.</span>}
+              </div>
+              {(p.drift ?? []).length > 0 && (
+                <div className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  <p className="font-medium">확정 뒤 장부 숫자가 달라졌습니다. 수정신고나 경정청구가 필요한지 세무사에게 확인하세요.</p>
+                  <ul className="mt-1 space-y-0.5 tabular-nums">
+                    {p.drift!.map((x) => <li key={x.code}>{x.label}: 확정 {krw(x.confirmed)} → 지금 {krw(x.current)}</li>)}
+                  </ul>
+                </div>
+              )}
+              {problem && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{problem}</p>}
               <div className="grid gap-4 lg:grid-cols-2">
                 <VatTable title="매출 (과세)" rows={p.sales} />
                 <VatTable title="매입 (공제할 세액)" rows={p.purchases} />

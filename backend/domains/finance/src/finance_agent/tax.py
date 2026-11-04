@@ -160,9 +160,60 @@ def vat_pack(books: Books, d: date | None = None) -> dict[str, Any]:
             "shipping_supplier": t.shipping_supplier,
         },
         "checks": checks,
-        "applied_rules": applied_many("VAT-001", "VAT-002", "VAT-003", "VAT-004", "TAX-001"),
+        "applied_rules": applied_many(
+            "VAT-001", "VAT-002", "VAT-003", "VAT-004", "VAT-006", "TAX-001"
+        ),
         "basis": "신고서가 아니라 신고 보조 집계입니다. 신고는 세무 담당이 홈택스에서 합니다",
     }
+
+
+def quarter_finished(d: date, today: date | None = None) -> bool:
+    return quarter_range(d)[1] <= (today or fc.today())
+
+
+def filing_key(d: date) -> str:
+    return quarter_range(d)[0].isoformat()
+
+
+def filing_drift(fixed: dict[str, Any], now: dict[str, Any]) -> list[dict[str, Any]]:
+    """확정한 부가세 숫자와 지금 숫자의 차이. 지금 숫자를 모르면 비교하지 않는다."""
+    labels = {"output_vat": "매출세액", "input_vat": "매입세액", "payable": "낼 세액"}
+    out = []
+    for code, label in labels.items():
+        a, b = fixed.get(code), now.get(code)
+        if a is not None and b is not None and a != b:
+            out.append({"code": code, "label": label, "confirmed": a, "current": b, "diff": b - a})
+    return out
+
+
+def vat_view(
+    books: Books, d: date, filings: dict[str, dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """화면과 skill이 보는 부가세. 확정한 분기는 확정 숫자이고 차이는 따로 보여 준다."""
+    now = vat_pack(books, d)
+    filing = (filings or {}).get(filing_key(d))
+    status = {"closable": quarter_finished(d), "filing_status": "draft", "drift": []}
+    if filing is None:
+        return now | status
+    return (
+        filing["pack"]
+        | status
+        | {
+            "filing_status": "confirmed",
+            "confirmed_by": filing["by"],
+            "confirmed_at": filing["at"],
+            "drift": filing_drift(filing["pack"], now),
+        }
+    )
+
+
+def find_vat_drifts(books: Books, filings: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    for key, filing in filings.items():
+        diff = filing_drift(filing["pack"], vat_pack(books, date.fromisoformat(key)))
+        if diff:
+            out.append({"quarter": filing["pack"]["quarter"], "from": key, "lines": diff})
+    return sorted(out, key=lambda x: x["from"])
 
 
 def income_tax_amount(base: int) -> int:

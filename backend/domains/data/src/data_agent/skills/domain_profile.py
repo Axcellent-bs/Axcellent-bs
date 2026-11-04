@@ -55,6 +55,8 @@ CUSTOMER_AXES: tuple[str, ...] = (
     "구매 시기(시즌)",
 )  # fmt: skip
 MAX_SEEDS = 12
+MIN_AXES, MAX_AXES = 2, 5  # 하위 주제 축 수 (축 이름은 LLM이 정하고 코드는 모양만 본다)
+MAX_AXIS_WIDTH = 12  # 축 이름 글자 수 상한
 MAX_QUESTIONS = 5
 MAX_PRODUCTS_IN_PROMPT = 80
 PROMPT = (
@@ -63,6 +65,8 @@ PROMPT = (
     "규칙:\n"
     f"- industry는 다음 중 하나: {', '.join(INDUSTRIES)}\n"
     f"- customer_axes는 다음 중에서만 고른다: {', '.join(CUSTOMER_AXES)}\n"
+    f"- subtopic_axes: 고른 고객 축에 맞춰, 이 회사 상품의 하위 주제를 나눌 축 이름"
+    f" {MIN_AXES}~{MAX_AXES}개 (이 업종에 맞는 짧은 명사구, 숫자 없이, 기타는 쓰지 말 것)\n"
     "- product_groups: 상품군 이름과 그 상품군의 카테고리 코드(데이터 블록의 코드 그대로)\n"
     f"- questions: 데이터로 답할 분석 질문 최대 {MAX_QUESTIONS}개. 숫자를 쓰지 말 것\n"
     f"- seeds: 트렌드를 찾을 씨앗 키워드 최대 {MAX_SEEDS}개."
@@ -172,6 +176,7 @@ class _Profile(BaseModel):
     industry: str
     product_groups: list[_Group] = []
     customer_axes: list[str] = []
+    subtopic_axes: list[str] = []
     questions: list[str] = []
     seeds: list[_Seed] = []
 
@@ -206,11 +211,17 @@ def find_evidence(
 
     근거는 LLM이 데이터 블록 줄을 통째로 옮길 수 있어("이름 | 카테고리 코드 | 설명") `|`로 나눈
     조각마다 본다. 짧은 원문(상품·카테고리 이름)은 근거 조각과 서로 포함이면 맞다고 본다.
+
+    회사 소개·상품 설명 같은 문장은 낱말이 떨어져 있을 수 있어
+    ("고양이가 지키는 서점" ↔ "고양이 서점"), 키워드의 낱말(2글자 이상)이 **모두 같은 문장 안에**
+    있고 근거가 그 문장과 겹치면 그 문장을 근거로 본다.
     """
     key = _n(keyword)
     pieces = [_n(x) for x in (evidence, *evidence.split("|")) if _n(x)]
-    if not key or not any(key in ev for ev in pieces):
+    if not key or not pieces:
         return None
+    if not any(key in ev for ev in pieces):
+        return sentence_evidence(keyword, pieces, tenant, catalog)
     pieces = [ev for ev in pieces if key in ev]
     ids = [
         p.product_id
@@ -233,6 +244,36 @@ def find_evidence(
             return "description", p.description.strip(), ids
     if tenant.about and any(ev in _n(tenant.about) for ev in pieces):
         return "about", evidence.split("|")[0].strip(), ids
+    return sentence_evidence(keyword, pieces, tenant, catalog)
+
+
+_SENTENCE = re.compile(r"[.!?。\n]+")
+
+
+def sentence_evidence(
+    keyword: str, pieces: Sequence[str], tenant: TenantProfile, catalog: CatalogRead
+) -> tuple[SourceKind, str, list[str]] | None:
+    """키워드 낱말이 모두 한 문장(회사 소개·상품 설명) 안에 있고 근거가 그 문장과 겹치면 그 문장."""
+    words = [_n(w) for w in keyword.split() if len(_n(w)) >= 2]
+    if len(words) < 2:  # 한 낱말 키워드는 붙은 문자열 대조로 충분하다
+        return None
+
+    def hit(sentence: str) -> bool:
+        s = _n(sentence)
+        return all(w in s for w in words) and any(ev in s or s in ev for ev in pieces)
+
+    ids = [
+        p.product_id
+        for p in catalog.products
+        if all(w in _n(p.name) or (p.description and w in _n(p.description)) for w in words)
+    ]
+    for sentence in _SENTENCE.split(tenant.about or ""):
+        if sentence.strip() and hit(sentence):
+            return "about", sentence.strip(), ids
+    for p in catalog.products:
+        for sentence in _SENTENCE.split(p.description or ""):
+            if sentence.strip() and hit(sentence):
+                return "description", sentence.strip(), ids
     return None
 
 
@@ -264,6 +305,20 @@ def check_seeds(
     return kept, dropped
 
 
+def check_axes(axes: Sequence[str]) -> list[str]:
+    """하위 주제 축 이름: 비지 않고, 숫자 없이, 짧게, 중복·기타 없이 최대 MAX_AXES개."""
+    out: list[str] = []
+    for a in axes:
+        name = " ".join(a.split())
+        if (
+            not name or name == "기타" or _DIGIT.search(name) or len(name) > MAX_AXIS_WIDTH
+            or name in out
+        ):  # fmt: skip
+            continue
+        out.append(name)
+    return out[:MAX_AXES]
+
+
 def check_groups(groups: Sequence[_Group], catalog: CatalogRead) -> list[ProductGroup]:
     known = set(catalog.categories) | {p.category_code for p in catalog.products if p.category_code}
     out: list[ProductGroup] = []
@@ -286,6 +341,10 @@ def apply_override(out: DomainProfileOutput, override: Mapping[str, Any]) -> Non
     if isinstance(axes, list):
         out.customer_axes = [a for a in axes if a in CUSTOMER_AXES]
         out.overridden.append("customer_axes")
+    sub_axes = override.get("subtopic_axes")
+    if isinstance(sub_axes, list):
+        out.subtopic_axes = check_axes([str(a) for a in sub_axes])
+        out.overridden.append("subtopic_axes")
     questions = override.get("questions")
     if isinstance(questions, list):
         out.questions = [str(q) for q in questions if str(q).strip()]
@@ -388,6 +447,11 @@ async def make_profile(
                 out.limits.append(f"업종 답 {got.industry!r}가 정해진 목록 밖이라 버림")
             out.product_groups = check_groups(got.product_groups, catalog)
             out.customer_axes = [a for a in dict.fromkeys(got.customer_axes) if a in CUSTOMER_AXES]
+            out.subtopic_axes = check_axes(got.subtopic_axes)
+            if len(out.subtopic_axes) < MIN_AXES:
+                out.limits.append(
+                    f"하위 주제 축이 {len(out.subtopic_axes)}개라 하위 주제는 기타로 둘 수 있음"
+                )
             out.questions = [
                 q.strip() for q in got.questions if q.strip() and not _DIGIT.search(q)
             ][:MAX_QUESTIONS]
