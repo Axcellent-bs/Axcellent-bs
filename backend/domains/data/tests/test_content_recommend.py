@@ -427,3 +427,22 @@ def test_the_default_period_uses_the_latest_snapshot(tmp_path: Path) -> None:
         )
     ).output
     assert out.youtube_status == "known" and out.snapshot_at == SNAP_AT
+
+
+def test_profile_seeds_are_the_default_groups_when_there_is_no_override(tmp_path: Path) -> None:
+    async def seeds():  # noqa: ANN202
+        return ["무지 노트"], None
+
+    bare = tmp_path / "bare.toml"  # 사람 덮어쓰기 그룹 없음
+    bare.write_text("[candidates]\nmax_candidates = 5\nmin_videos = 2\n", encoding="utf-8")
+    naver = Naver({"무지 노트": 3.0})
+    env = _env(tmp_path, config=bare)
+    out = asyncio.run(recommend(ContentRecommendRequest(end_date=END), naver, _llm(), env=env,
+                                now=NOW, seed_provider=seeds)).output  # fmt: skip
+    assert "무지 노트" in [i.keyword for i in out.items]  # 프로필 씨앗을 기본 그룹으로 판정
+    asked = {q.keyword_groups[0].group_name for q in naver.queries}
+    assert "무지 노트" in asked
+    over = Naver({"그림책": 3.0})  # 덮어쓰기가 있으면 씨앗은 안 본다
+    asyncio.run(recommend(ContentRecommendRequest(end_date=END), over, _llm(),
+                          env=_env(tmp_path / "o"), now=NOW, seed_provider=seeds))  # fmt: skip
+    assert "무지 노트" not in {q.keyword_groups[0].group_name for q in over.queries}

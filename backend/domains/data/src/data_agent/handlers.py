@@ -641,6 +641,7 @@ async def content_recommend(request: AgentRequest) -> AgentResult:
         context_id=request.meta.context_id,
         catalog=get_catalog(),
         category_cache=get_category_cache(),
+        seed_provider=_profile_seeds(request.meta.context_id),
     )
     return _result(
         request,
@@ -852,7 +853,14 @@ async def trend_history(request: AgentRequest) -> AgentResult:
     if isinstance(data, AgentResult):
         return data
     try:
-        result = await history(data, get_trend_connector(), env=os.environ)
+        result = await history(
+            data, get_trend_connector(), env=os.environ,
+            seed_provider=_profile_seeds(request.meta.context_id),
+        )  # fmt: skip
+    except TrendGroupsUnknown as error:
+        return _result(
+            request, TaskStatus.FAILED, outcome="unknown", output={"message": str(error)}
+        )
     except NoTrendGroups as error:
         return _result(
             request, TaskStatus.FAILED, outcome="invalid_input", output={"message": str(error)}

@@ -498,6 +498,7 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 - 기본 키워드 그룹은 코드에 두지 않는다: `config/tenants/<회사>/trends.toml`(`tenant.toml`의 `trends`) → `scripts/tenant_env.py`가 `DATA_TREND_CONFIG`로 넘긴다. 기본 그룹은 도메인 프로필의 씨앗 키워드에서 온다(씨앗 하나 = 그룹 하나, 이름·키워드 = 씨앗, 상한 `[scan] max_seed_groups` 기본 5. 그룹마다 네이버 1번).
   - 우선순위: 요청 그룹 > 사람 덮어쓰기(`[[override.groups]]`) > 프로필 씨앗. 프로필을 못 얻으면(LLM 없음·씨앗 없음) 덮어쓰기가 있으면 그것을, 없으면 지어내지 않고 `unknown` + 이유(`outcome="unknown"`)
   - 코드: `resolve_groups(requested, env, seed_provider)` — 테스트는 `seed_provider`로 LLM 없이 씨앗을 준다
+  - **trend_history·content_recommend도 같은 우선순위**를 쓴다. trend_history는 못 정하면 `outcome="unknown"` + 이유, content_recommend는 요청 그룹 칸이 없어 덮어쓰기 > 프로필 씨앗이고, 둘 다 없으면 그룹 판정 없이 YouTube 후보만 본다
   - Docker(`services/data/compose.yml`)는 `DATA_TREND_CONFIG`를 `/app/config/tenants/${AX_TENANT:-catbooks}/trends.toml`로 넘긴다. 바꾸려면 셸 환경변수로 준다(`.env` 값은 이 줄에 덮인다)
   - **주의:** `services/*/compose.yml`·`agent-card.json`은 `scripts/split_services.py`가 만드는 파일이다. 이 줄은 손으로 넣어서 스크립트를 다시 돌리면 빠진다. 그 스크립트는 `--help` 같은 옵션을 읽지 않고 **바로 실행돼** 지금 dev에서도 `services/` 파일 66개를 다시 쓴다(줄바꿈 등). 확인하려고 옵션을 붙여 돌리지 말 것
 - 설명 문장은 LLM이 쓰고 `explain.py` 숫자 검증을 그대로 거친다(템플릿 `trend`)

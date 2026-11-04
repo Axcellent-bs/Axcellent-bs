@@ -27,6 +27,7 @@ from data_agent.skills.trend_history import (
     period,
     with_last_year,
 )
+from data_agent.skills.trend_scan import TrendGroupsUnknown
 
 NOW = datetime(2026, 11, 2, 6, 0, tzinfo=UTC)
 CATBOOKS_TRENDS = (
@@ -170,6 +171,29 @@ def test_handler_all_failed_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> N
     groups = [{"group_name": "고양이", "keywords": ["고양이"]}]
     result = _handle(monkeypatch, Naver({}, fail={"고양이"}), {"keyword_groups": groups})
     assert result.status == TaskStatus.FAILED and result.outcome == "unavailable"
+
+
+def test_profile_seeds_are_the_default_after_request_and_override(tmp_path: Path) -> None:
+    async def seeds():  # noqa: ANN202
+        return ["고양이 그림책", "무지 노트"], None
+
+    async def nothing():  # noqa: ANN202
+        return [], "LLM 설정이 없어 프로필을 만들지 못함"
+
+    empty = tmp_path / "trends.toml"
+    empty.write_text("", encoding="utf-8")
+    env = {"DATA_TREND_CONFIG": str(empty)}
+    request = TrendHistoryRequest()
+    out = asyncio.run(history(request, Naver({}), env=env, now=NOW, seed_provider=seeds)).output
+    assert [g.group_name for g in out.groups] == ["고양이 그림책", "무지 노트"]  # 프로필 씨앗
+    over = asyncio.run(history(request, Naver({}), env={"DATA_TREND_CONFIG": str(CATBOOKS_TRENDS)},
+                               now=NOW, seed_provider=seeds)).output  # fmt: skip
+    assert [g.group_name for g in over.groups][0] == "고양이"  # 사람 덮어쓰기가 먼저
+    asked = asyncio.run(history(TrendHistoryRequest(keyword_groups=_groups("요청")), Naver({}),
+                                env=env, now=NOW, seed_provider=seeds)).output  # fmt: skip
+    assert [g.group_name for g in asked.groups] == ["요청"]  # 요청이 가장 먼저
+    with pytest.raises(TrendGroupsUnknown, match="LLM 설정이 없어"):
+        asyncio.run(history(request, Naver({}), env=env, now=NOW, seed_provider=nothing))
 
 
 def test_handler_rejects_too_few_months(monkeypatch: pytest.MonkeyPatch) -> None:

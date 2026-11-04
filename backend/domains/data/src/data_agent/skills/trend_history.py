@@ -29,7 +29,7 @@ from ax_contracts.schemas.data import (
 )
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.naver_datalab import KST, SOURCE, NaverDatalabConnector
-from data_agent.skills.trend_scan import TREND_CONFIG_ENV, NoTrendGroups, default_groups
+from data_agent.skills.trend_scan import TREND_CONFIG_ENV, SeedProvider, resolve_groups
 
 DEFAULT_MONTHS = 24
 NAVER_FAILED = "네이버 검색어 트렌드를 읽지 못함"  # trend_scan과 같은 문장
@@ -113,11 +113,14 @@ async def history(
     *,
     env: Mapping[str, str],
     now: datetime | None = None,
+    seed_provider: SeedProvider | None = None,
 ) -> HistoryResult:
-    """그룹마다 월 단위로 한 번씩 받는다. 판정하지 않는다. 상태를 바꾸지 않는다."""
-    groups = request.keyword_groups or default_groups(env)
-    if not groups:
-        raise NoTrendGroups("볼 키워드 그룹이 없다 (입력에도, 회사 설정 trends.toml에도 없음)")
+    """그룹마다 월 단위로 한 번씩 받는다. 판정하지 않는다. 상태를 바꾸지 않는다.
+
+    그룹은 trend_scan과 같다: 요청 > 사람 덮어쓰기 > 프로필 씨앗(`seed_provider`). 못 정하면
+    `TrendGroupsUnknown` (지어내지 않음).
+    """
+    groups = await resolve_groups(request.keyword_groups, env, seed_provider)
     months = request.months or months_setting(env)
     first, last = period(request.end_month, months, now)
     out_groups: list[TrendHistoryGroup] = []
