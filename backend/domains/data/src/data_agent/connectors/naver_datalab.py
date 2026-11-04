@@ -30,7 +30,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ax_contracts.schemas.data import TrendScanInput, TrendTimeUnit
-from data_agent.connectors import ConnectorUnavailable
+from data_agent.connectors import ConnectorUnavailable, replay
 
 DEFAULT_URL = "https://naverapihub.apigw.ntruss.com/search-trend/v1/search"
 URL_ENV = "AX_NAVER_DATALAB_URL"
@@ -181,6 +181,8 @@ class NaverDatalabConnector:
         self._client_secret = env.get(CLIENT_SECRET_ENV) or ""
         self._client = client
         self._cache = cache or _cache
+        self._env = env
+        self.mode = replay.mode(env)  # live · record · replay (README "외부 호출 없이 확인하기")
 
     def __repr__(self) -> str:  # 키를 담지 않는다
         return f"NaverDatalabConnector(url={self.url!r})"
@@ -215,9 +217,14 @@ class NaverDatalabConnector:
         cached = self._cache.get(key)
         if cached is not None:
             return cached
-        headers = self._headers()
-        self._cache.count_call(self.daily_limit)
-        payload = await self._post(body, headers)
+        if self.mode == "replay":  # 저장된 응답만 (할당량·하루 호출 수를 세지 않는다)
+            payload = replay.load("naver", self.url, body, self._env)
+        else:
+            headers = self._headers()
+            self._cache.count_call(self.daily_limit)
+            payload = await self._post(body, headers)
+            if self.mode == "record":
+                replay.save("naver", self.url, body, payload, self._env)
         result = _parse(payload, query)
         self._cache.put(key, result)
         return result

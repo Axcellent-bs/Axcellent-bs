@@ -299,6 +299,38 @@ class MemoryConnector:
 - **기획 쪽 저장**: `insight_id`·`proposal_id`·결과를 데이터가 저장하지 않는다. `campaign_effect`는 받은 id를 돌려줄 뿐이다(읽기 전용)
 - **마케팅 실행**: 게시·발행·쿠폰 발급은 마케팅(과 safety 승인)이 한다
 
+### 외부 호출 없이 확인하기 (#4, `connectors/replay.py`)
+
+로컬 확인에서 네이버·YouTube 할당량을 쓰지 않으려고, 응답을 저장해 두고 다시 쓰는 모드가 있다. **단위 테스트(`uv run pytest`)는 원래 가짜 커넥터·가짜 LLM만 쓰므로 외부를 부르지 않는다.** 이 모드는 서버나 확인 스크립트를 실제 데이터 모양으로 돌릴 때 쓴다.
+
+| `DATA_EXTERNAL_MODE` | 동작 |
+|---|---|
+| `live`(기본) | 실제로 부른다 |
+| `record` | 실제로 부르고 응답 본문을 `DATA_REPLAY_DIR`(기본 `backend/.data/replay/`, 커밋 안 함)에 저장한다. **키·토큰은 헤더로만 가서 파일에 들어가지 않는다** |
+| `replay` | 부르지 않고 저장된 응답만 쓴다. 할당량·하루 호출 수를 세지 않는다. 저장된 것이 없으면 그 호출만 `REPLAY_MISS`(unknown + 이유, 지어내지 않음) |
+
+```bash
+cd backend
+# 1) 한 번만 실제로 부르며 저장 (몇 번 부르는지 아래 표로 먼저 세고 진행)
+DATA_EXTERNAL_MODE=record bash scripts/run_all.sh
+# 2) 그 뒤 확인은 저장된 응답으로 (할당량 0)
+DATA_EXTERNAL_MODE=replay bash scripts/run_all.sh
+```
+
+저장 키는 서비스 + 주소 + 요청 본문(네이버) 또는 쿼리(YouTube)라, 같은 요청이면 같은 파일을 쓴다. 날짜가 바뀌면 요청 기간이 달라져 새로 저장해야 한다. Google 인기 검색어 RSS는 키·할당량이 없어 대상이 아니다.
+
+**외부 호출이 필요한 확인은 몇 번 쓰는지 먼저 세고 진행한다.** skill별 최대 호출(설정 기본값):
+
+| skill | 네이버 | YouTube |
+|---|---|---|
+| `trend_scan` | 그룹마다 1번 (같은 요청은 하루 캐시) | 0 |
+| `trend_candidates` | 후보마다 1번 + 별칭 수 | 0 |
+| `trend_age` | 주제 × 연령대(기본 10 × 5 = 50), 하루 상한 80 | 0 |
+| `trend_popular` (화면 경로) | 0 | 제목 videos.list ≤ 2번, 구독자 channels.list ≤ 2번, 보충 검색 ≤ 6번(100단위씩) |
+| `shorts_stats` | 0 | 검색 하루 ≤ 8번(100단위씩, 저장 재사용), 다시 보기 videos.list 50개마다 1단위 |
+| `promo_concepts` | 시즌 키워드 ≤ 20번(하루 캐시) + 연령대(예시 트렌드 수 × 5) | shorts_stats와 같다 |
+| `trend_insight_brief` | trend_age(후보 × 5, 상한 공유) | trend_popular·shorts_stats와 같다 |
+
 ## 2. 실행 방법
 `docker compose -f infra/compose.yml up data` / 목 모드: `DATA_MOCK=1`
 
