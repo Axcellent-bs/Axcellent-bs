@@ -88,6 +88,14 @@ class BriefConfig:
     w_youtube: float = 0.5  # YouTube 몫: 영상 수 ÷ 후보 중 최대 영상 수
     age_topics_extra: int = 2  # 연령대를 볼 후보 = 인사이트 수 + 이만큼 (네이버 호출 아끼기)
     pending_max: int = 2  # 분류 대기 주제를 맨 아래 참고용으로 몇 개까지 보일지 (순위에는 안 넣음)
+    per_category_max: int = 2  # 카테고리마다 최대 인사이트 수 (한 분류가 브리프를 채우지 않게)
+    w_product: float = 0.5  # 상품 몫: 임베딩 기준을 통과한 회사 상품이 있으면 이만큼
+    w_season: float = 0.5  # 시즌 몫: max(0, 작년 같은 달·다음 달 배율 − 1)
+    # 회사 관련 인사이트: 시즌 키워드·상품 핵심어 중 오른 것을 이 수만큼 따로 확보 (1~2)
+    company_topics: int = 2
+    company_pool: int = 4  # 회사 관련 후보로 연령대까지 볼 키워드 수 (시즌 배율 큰 순)
+    company_min_season_ratio: float = 1.3  # 작년 같은 달·다음 달 ÷ 기간 평균이 이 이상
+    company_min_age_ratio: float = 1.3  # 또는 어느 연령대 평소 대비 배수가 이 이상
 
 
 def load_config(env: Mapping[str, str]) -> BriefConfig:
@@ -105,6 +113,9 @@ def load_config(env: Mapping[str, str]) -> BriefConfig:
         values["max_insights"] = max(3, min(7, int(values["max_insights"])))
         values["age_topics_extra"] = max(0, int(values["age_topics_extra"]))
         values["pending_max"] = max(0, int(values["pending_max"]))
+        values["per_category_max"] = max(1, int(values["per_category_max"]))
+        values["company_topics"] = max(0, min(2, int(values["company_topics"])))
+        values["company_pool"] = max(0, int(values["company_pool"]))
         return BriefConfig(**values)
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return BriefConfig()
@@ -168,6 +179,9 @@ class Candidate:
     age: AgeTopic | None = None
     score: float = 0.0
     cls: CategoryResult | None = None  # 지금 인기에 없는 주제를 공유 분류기로 분류한 결과
+    company: bool = False  # 회사 관련 후보 (시즌 키워드·상품 핵심어)
+    season: tuple[str, float, date] | None = None  # (시즌 키워드, 배율, 그 달)
+    has_products: bool = False  # 임베딩 기준을 통과한 회사 상품이 있는지
 
     def names(self) -> list[str]:
         return [self.topic, *self.aliases]
@@ -258,6 +272,10 @@ def score(c: Candidate, config: BriefConfig, max_videos: int) -> float:
         s += config.w_naver * max(0.0, ratio - 1.0)
     if c.age is not None and c.age.top_ratio is not None:
         s += config.w_age * max(0.0, c.age.top_ratio - 1.0)
+    if c.has_products:
+        s += config.w_product
+    if c.season is not None:
+        s += config.w_season * max(0.0, c.season[1] - 1.0)
     return round(s, 4)
 
 
@@ -305,6 +323,8 @@ def evidence(c: Candidate, popular: TrendPopularOutput | None) -> InsightEvidenc
         ev.naver_status = "rising" if p.rising_now else "normal"
     else:
         missing.append("네이버: 오늘 판정이 없는 주제")
+    if c.season is not None:
+        ev.season_keyword, ev.season_ratio, ev.season_month = c.season
     ev.missing = missing
     return ev
 
@@ -343,6 +363,12 @@ def facts(i: TrendInsight) -> dict[str, int | float | str]:
     if i.target_age and i.target_age_ratio is not None:
         out["타깃 연령대"] = i.target_age  # "20대"의 20도 근거 숫자로 허용
         out[f"{i.target_age} 평소 대비 배수"] = i.target_age_ratio
+    if e.season_ratio is not None and e.season_keyword and e.season_month is not None:
+        out["시즌 키워드"] = e.season_keyword
+        out["작년 시즌 달"] = f"{e.season_month.month}월"
+        out["시즌 배율 (기간 평균 대비)"] = e.season_ratio
+    if i.products:
+        out["연결 상품 수"] = len(i.products)
     if i.shorts_format and i.shorts_format_samples:
         out[f"{i.shorts_format} 숏츠 표본 수"] = i.shorts_format_samples
     return out
@@ -412,6 +438,9 @@ def build_insights(
     out: list[TrendInsight] = []
     for c in picked:
         ok, ok_why = ad_material(c, rules)
+        if c.company and not c.pending():
+            # 회사 상품·시즌 키워드라 빌려 올 IP·인물이 없다
+            ok, ok_why = True, f"회사 시즌 키워드·상품 핵심어 (분류: {c.category()})"
         fmt, samples, fmt_why = shorts_format(c.popular)
         age = c.age
         band = next((b for b in age.bands if b.band == age.top_band), None) if age else None
@@ -451,7 +480,13 @@ def build_insights(
                     else (age.reason if age is not None and age.reason else "연령대 값을 받지 못함")
                 ),
                 products=mine,
-                products_reason=None if mine else products_reason,
+                products_reason=(
+                    None
+                    if mine
+                    else f"회사 상품과 직접 연결 없음 ({products_reason or '이유 없음'})"
+                ),
+                company_related=c.company,
+                company_reason=company_reason(c),
                 shorts_format=fmt,
                 shorts_format_samples=samples,
                 shorts_format_reason=fmt_why,
@@ -460,7 +495,10 @@ def build_insights(
                 score=c.score,
             )
         )
-    out.sort(key=lambda i: (i.classification_pending, i.reference_only, -i.score))
+    # 순위 인사이트 → 회사 관련(별도 확보) → 광고 재료 아님(참고용) → 분류 대기
+    out.sort(
+        key=lambda i: (i.classification_pending, i.reference_only, i.company_related, -i.score)
+    )
     for n, i in enumerate(out, start=1):
         i.rank = n
     return out
@@ -473,18 +511,94 @@ def pick(cands: Sequence[Candidate], config: BriefConfig, n: int) -> list[Candid
     return sorted(cands, key=lambda c: -c.score)[:n]
 
 
-def season_note(product_name: str, promo: PromoConceptsOutput | None) -> str | None:
-    """상품 이름에 시즌 확인 키워드가 들어 있고 기준을 넘었으면 그 근거 한 줄."""
+def season_of(name: str, promo: PromoConceptsOutput | None) -> tuple[str, float, date] | None:
+    """이름에 시즌 확인 키워드가 들어 있으면 (키워드, 작년 같은 달·다음 달 중 큰 배율, 그 달)."""
     for s in promo.season_checks if promo else []:
-        if s.status != "known" or _norm(s.keyword) not in _norm(product_name):
+        if s.status != "known" or _norm(s.keyword) not in _norm(name):
             continue
         best = max(
             ((s.same_month, s.same_month_ratio), (s.next_month, s.next_month_ratio)),
             key=lambda x: x[1] or 0,
         )
         if best[0] is not None and best[1] is not None:
-            return f"'{s.keyword}' 작년 {best[0].month}월 검색이 기간 평균의 {best[1]:g}배"
+            return s.keyword, best[1], best[0]
     return None
+
+
+def season_note(product_name: str, promo: PromoConceptsOutput | None) -> str | None:
+    """상품 이름에 시즌 확인 키워드가 들어 있으면 그 근거 한 줄."""
+    found = season_of(product_name, promo)
+    if found is None:
+        return None
+    keyword, ratio, month = found
+    return f"'{keyword}' 작년 {month.month}월 검색이 기간 평균의 {ratio:g}배"
+
+
+def company_candidates(
+    promo: PromoConceptsOutput | None, catalog: Any, taken: Sequence[Candidate], pool: int
+) -> list[Candidate]:
+    """회사 관련 후보: 기획안 시즌 키워드(배율 큰 순) → 카탈로그 상품 핵심어 (손으로 안 적음)."""
+    from data_agent.skills.promo_concepts import season_keywords
+
+    seen = {_norm(n) for c in taken for n in c.names()}
+    out: list[Candidate] = []
+
+    def add(name: str) -> None:
+        key = _norm(name)
+        if key and key not in seen and len(out) < pool:
+            seen.add(key)
+            out.append(Candidate(name, [], company=True, season=season_of(name, promo)))
+
+    checks = [s for s in (promo.season_checks if promo else []) if s.status == "known"]
+    for s in sorted(checks, key=lambda x: -max(x.same_month_ratio or 0, x.next_month_ratio or 0)):
+        add(s.keyword)
+    if catalog is not None and not catalog.reason:
+        for k, _ in season_keywords(catalog.products, catalog.categories, 50):
+            add(k)
+    return out
+
+
+def company_rise(c: Candidate, config: BriefConfig) -> float | None:
+    """회사 관련 후보가 "오른 것"이면 그 세기(가장 큰 배율), 아니면 None."""
+    season = c.season[1] if c.season else None
+    age = c.age.top_ratio if c.age is not None else None
+    hits = [
+        r
+        for r, floor in (
+            (season, config.company_min_season_ratio),
+            (age, config.company_min_age_ratio),
+        )
+        if r is not None and r >= floor
+    ]
+    return max(hits) if hits else None
+
+
+def company_reason(c: Candidate) -> str | None:
+    if not c.company:
+        return None
+    parts = []
+    if c.season is not None:
+        keyword, ratio, month = c.season
+        parts.append(f"'{keyword}' 작년 {month.month}월 검색이 기간 평균의 {ratio:g}배")
+    if c.age is not None and c.age.top_band and c.age.top_ratio is not None:
+        parts.append(f"{c.age.top_band} 평소 대비 {c.age.top_ratio:g}배")
+    return "회사 시즌 키워드·상품 핵심어 중 오른 것: " + (", ".join(parts) or "근거 없음")
+
+
+def pick_capped(cands: Sequence[Candidate], config: BriefConfig, n: int) -> list[Candidate]:
+    """점수 순으로 n개, 카테고리마다 최대 per_category_max개."""
+    pick(cands, config, len(cands))  # 점수 매기기
+    out: list[Candidate] = []
+    count: Counter[str] = Counter()
+    for c in sorted(cands, key=lambda x: -x.score):
+        cat = c.category() or "unknown"
+        if count[cat] >= config.per_category_max:
+            continue
+        count[cat] += 1
+        out.append(c)
+        if len(out) >= n:
+            break
+    return out
 
 
 def today_kst(now: datetime) -> date:
@@ -562,14 +676,15 @@ async def make_brief(
             return BriefResult(out, as_evidence(out, queries, now))
         # 모든 주제는 공유 분류기를 거친다. 지금 인기 주제는 이미 분류됐고(저장 재사용),
         # 지금 인기에 없는 급상승 주제만 여기서 묶어 분류한다(저장된 분류는 다시 묻지 않음)
-        todo = [c for c in cands if c.popular is None]
+        company = company_candidates(promo, catalog, cands, config.company_pool)
+        todo = [c for c in [*cands, *company] if c.popular is None]
         if todo:
             try:
                 found = await classify_topics(
                     [TopicInput(c.topic, tuple(c.aliases)) for c in todo], llm,
                     cache=category_cache, context_id=context_id,
                 )  # fmt: skip
-                queries.append(f"topic_category rising_only={len(todo)}")
+                queries.append(f"topic_category rising_or_company={len(todo)}")
                 for c in todo:
                     c.cls = found.get(c.topic)
             except Exception as error:  # 분류 실패면 그 주제들은 분류 대기
@@ -578,15 +693,17 @@ async def make_brief(
         waiting = [c for c in cands if c.pending()]  # 순위에 넣지 않고 맨 아래 참고용
         # 연령대: 1차 점수 상위만 (네이버 호출 아끼기)
         first = pick(ready, config, n + config.age_topics_extra)
+        company = [c for c in company if not c.pending()]
+        ask = [*first, *company]
         try:
-            age_out = await age_fn([c.topic for c in first])
-            queries.append(f"trend_age keywords={len(first)}")
+            age_out = await age_fn([c.topic for c in ask])
+            queries.append(f"trend_age keywords={len(ask)}")
             by_age = {_norm(i.keyword): i for i in age_out.items}
-            for c in first:
+            for c in ask:
                 c.age = by_age.get(_norm(c.topic))
         except Exception as error:  # 연령대는 근거 하나라 실패해도 브리프는 만든다
             queries.append(f"trend_age failed ({type(error).__name__})")
-        picked = pick(first, config, n) + pick(waiting, config, config.pending_max)
+        linked = ask
         # 상품: 임베딩 기준을 통과한 것만 (product_link, [recommend] 기준)
         rec = load_recommend(env)
         prods: dict[str, list[InsightProduct]] = {}
@@ -596,7 +713,7 @@ async def make_brief(
             prod_why = f"회사 상품을 읽지 못함 ({shop.reason if shop else '카탈로그 없음'})"
         else:
             texts = {}
-            for c in picked:
+            for c in linked:
                 ev = [x.title for x in (c.popular.videos if c.popular else []) if x.title][:3]
                 texts[c.topic] = topic_text(c.names(), ev)
             sims = await similarities(
@@ -607,7 +724,7 @@ async def make_brief(
             if sims.reason:
                 prod_why = f"임베딩 유사도를 재지 못함 ({sims.reason})"
             else:
-                for c in picked:
+                for c in linked:
                     links = pick_links(
                         c.names(), shop.products, shop.categories, sims.by_topic.get(c.topic),
                         min_similarity=rec.min_similarity, limit=rec.max_products,
@@ -629,6 +746,24 @@ async def make_brief(
                         for x in passed
                     ]
                 prod_why = f"임베딩 유사도 {rec.min_similarity:g} 이상(1등만)인 상품이 없음"
+        for c in linked:
+            c.has_products = bool(prods.get(c.topic))
+            if c.season is None:  # 연결 상품 이름에 시즌 키워드가 있으면 그 시즌 근거
+                c.season = next(
+                    (x for p in prods.get(c.topic, []) if (x := season_of(p.name, promo))), None
+                )
+        # 회사 관련 인사이트를 먼저 확보하고, 남은 자리를 점수 순(카테고리 상한)으로
+        rising_company = sorted(
+            [c for c in company if company_rise(c, config) is not None],
+            key=lambda c: -(company_rise(c, config) or 0),
+        )[: config.company_topics]
+        pick(rising_company, config, len(rising_company))  # 점수 매기기 (참고 값)
+        trend_n = max(1, n - len(rising_company))
+        picked = (
+            pick_capped(first, config, trend_n)
+            + rising_company
+            + pick(waiting, config, config.pending_max)
+        )
         insights = build_insights(
             picked, day=day, popular=popular, promo=promo, products=prods,
             products_reason=prod_why, rules=load_rules(env),
@@ -642,6 +777,12 @@ async def make_brief(
         )  # fmt: skip
         if promo is None:
             out.limits.append("오늘 만든 예시 아이디어가 없어 example_ideas가 비어 있다")
+        if not rising_company:
+            out.limits.append(
+                "회사 관련 인사이트 없음: 시즌 키워드·상품 핵심어 중 기준(시즌 배율"
+                f" {config.company_min_season_ratio:g}배·연령대 {config.company_min_age_ratio:g}배)"
+                " 이상 오른 것이 없음"
+            )
         out.summary = summary(out)
         store.put(day, rules, out, now)
         return BriefResult(out, as_evidence(out, queries, now))
