@@ -30,6 +30,7 @@ from data_agent.skills.trend_scan import (
     REQUEST_DAYS,
     NoTrendGroups,
     Settings,
+    TrendGroupsUnknown,
     default_groups,
     judge_series,
     scan_trends,
@@ -225,6 +226,100 @@ def test_catbooks_has_default_groups() -> None:
     assert groups and all(g.keywords for g in groups)
 
 
+def _seeds(*words: str, reason: str | None = None):  # noqa: ANN202
+    async def provide() -> tuple[list[str], str | None]:
+        return list(words), reason
+
+    return provide
+
+
+def _scan_seeded(connector, request, env, provider):  # noqa: ANN001, ANN202
+    return asyncio.run(
+        scan_trends(request, connector, MockLLMClient(), env=env, seed_provider=provider)  # type: ignore[arg-type]
+    )
+
+
+def _override_config(tmp_path: Path, extra: str = "") -> dict[str, str]:
+    config = tmp_path / "trends.toml"
+    config.write_text(
+        '[[override.groups]]\nname = "사람"\nkeywords = ["사람", "사람 책"]\n' + extra,
+        encoding="utf-8",
+    )
+    return {"DATA_TREND_CONFIG": str(config)}
+
+
+def test_catbooks_override_keeps_four_groups() -> None:
+    names = [g.group_name for g in default_groups({"DATA_TREND_CONFIG": str(CATBOOKS_TRENDS)})]
+    assert names == ["고양이", "고양이 책", "책 추천", "그림책"]
+
+
+def test_seeds_become_one_group_each_capped_and_deduped() -> None:
+    connector = MemoryConnector({w: _series(w) for w in ("가", "나", "다")})
+    seeds = _seeds("가", "나", " 가 ", "다")
+    result = _scan_seeded(connector, TrendScanRequest(end_date=END), {}, seeds)
+    assert [g.group_name for g in result.output.results] == ["가", "나", "다"]
+    assert [q.keyword_groups[0].keywords for q in connector.queries] == [["가"], ["나"], ["다"]]
+
+
+def test_seed_groups_respect_the_configured_cap(tmp_path: Path) -> None:
+    config = tmp_path / "trends.toml"
+    config.write_text("[scan]\nmax_seed_groups = 2\n", encoding="utf-8")
+    connector = MemoryConnector({w: _series(w) for w in ("가", "나", "다")})
+    result = _scan_seeded(
+        connector, TrendScanRequest(end_date=END), {"DATA_TREND_CONFIG": str(config)},
+        _seeds("가", "나", "다"),
+    )  # fmt: skip
+    assert [g.group_name for g in result.output.results] == ["가", "나"]
+
+
+def test_request_groups_beat_override_and_seeds(tmp_path: Path) -> None:
+    connector = MemoryConnector({"요청": _series("요청")})
+    result = _scan_seeded(
+        connector, TrendScanRequest(keyword_groups=_groups("요청"), end_date=END),
+        _override_config(tmp_path), _seeds("씨앗"),
+    )  # fmt: skip
+    assert [g.group_name for g in result.output.results] == ["요청"]
+
+
+def test_override_beats_seeds(tmp_path: Path) -> None:
+    connector = MemoryConnector({"사람": _series("사람")})
+    result = _scan_seeded(
+        connector, TrendScanRequest(end_date=END), _override_config(tmp_path), _seeds("씨앗")
+    )
+    assert [g.group_name for g in result.output.results] == ["사람"]
+    assert connector.queries[0].keyword_groups[0].keywords == ["사람", "사람 책"]
+
+
+def test_profile_unavailable_falls_back_to_override(tmp_path: Path) -> None:
+    connector = MemoryConnector({"사람": _series("사람")})
+    result = _scan_seeded(
+        connector, TrendScanRequest(end_date=END), _override_config(tmp_path),
+        _seeds(reason="LLM 설정이 없어 프로필을 만들지 못함"),
+    )  # fmt: skip
+    assert [g.group_name for g in result.output.results] == ["사람"]
+
+
+def test_profile_unavailable_without_override_is_unknown_with_reason() -> None:
+    with pytest.raises(TrendGroupsUnknown, match="LLM 설정이 없어"):
+        _scan_seeded(
+            MemoryConnector({}), TrendScanRequest(end_date=END), {},
+            _seeds(reason="LLM 설정이 없어 프로필을 만들지 못함"),
+        )  # fmt: skip
+
+
+def test_handler_returns_unknown_when_no_groups_and_no_profile(monkeypatch) -> None:  # noqa: ANN001
+    async def none() -> tuple[list[str], str | None]:
+        return [], "업종 또는 근거 있는 씨앗 키워드가 없음"
+
+    monkeypatch.delenv("DATA_TREND_CONFIG", raising=False)
+    monkeypatch.setattr(handlers, "_profile_seeds", lambda _ctx: none)
+    monkeypatch.setattr(handlers, "get_trend_connector", lambda: MemoryConnector({}))
+    monkeypatch.setattr(handlers, "get_llm", lambda: MockLLMClient())
+    result = asyncio.run(handlers.trend_scan(_request({})))
+    assert result.outcome == "unknown"
+    assert "씨앗 키워드가 없음" in result.output["message"]
+
+
 def test_no_groups_anywhere_is_refused() -> None:
     with pytest.raises(NoTrendGroups):
         _scan(MemoryConnector({}), TrendScanRequest(end_date=END))
@@ -342,13 +437,6 @@ def test_handler_reports_unavailable_without_numbers(monkeypatch: pytest.MonkeyP
     assert result.outcome == "unavailable"
     assert result.output["code"] == "UNAVAILABLE"
     assert "results" not in result.output
-
-
-def test_handler_without_groups_or_config_is_invalid_input(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("DATA_TREND_CONFIG", raising=False)
-    result = _handle(monkeypatch, MemoryConnector({}), {"end_date": "2026-11-01"})
-    assert result.status == TaskStatus.FAILED
-    assert result.outcome == "invalid_input"
 
 
 def test_handler_rejects_bad_input(monkeypatch: pytest.MonkeyPatch) -> None:
