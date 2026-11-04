@@ -392,7 +392,23 @@ function GithubAccountSection() {
   const [guide, setGuide] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  useEffect(() => { ghApi.get().then(setAcc).catch(() => setError('개발 AI에 연결할 수 없음')) }, [])
+  useEffect(() => {
+    // GitHub 설치에서 돌아옴(?installation_id=…&state=…): 연결을 끝내고 주소에서 값을 지운다
+    const q = new URLSearchParams(window.location.search)
+    const inst = q.get('installation_id'), state = q.get('state')
+    if (inst && state) {
+      window.history.replaceState(null, '', window.location.pathname)
+      void run(() => ghApi.installed(inst, state))
+      return
+    }
+    ghApi.get().then(setAcc).catch(() => setError('개발 AI에 연결할 수 없음'))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // AXcellent 앱이 서버에 있으면 GitHub 설치 화면으로 보낸다 (앱 ID·키를 넣지 않는다)
+  const install = async () => {
+    setBusy(true); setError(null)
+    try { window.location.href = (await ghApi.installUrl()).url } catch (e) { setError((e as Error).message); setBusy(false) }
+  }
+  const platform = !!acc?.app?.configured
   const run = async (f: () => Promise<GithubAccount>) => {
     setBusy(true); setError(null)
     try { setAcc(await f()) } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
@@ -427,7 +443,8 @@ function GithubAccountSection() {
         <div className="ml-auto flex gap-1.5">
           {connected && <button type="button" className="btn-ghost" disabled={busy} onClick={() => void run(ghApi.refresh)}>목록 새로 고침</button>}
           {connected && <button type="button" className="btn-quiet" disabled={busy} onClick={() => { if (window.confirm('GitHub 연결을 끊을까요? 이 연결로 켠 레포도 같이 꺼져요.')) void run(ghApi.remove) }}>연결 끊기</button>}
-          <button type="button" className="btn-primary px-4" disabled={busy} onClick={() => { setEditing((v) => !v); setForm((f) => ({ ...f, app_id: acc?.app_id ?? '', installation_id: acc?.installation_id ?? '', base_url: acc?.base_url ?? '' })) }}>{connected ? '수정' : 'GitHub 연결'}</button>
+          {platform && <button type="button" className="btn-primary px-4" disabled={busy} onClick={() => void install()}>{connected ? '레포 범위 바꾸기' : 'GitHub 연결'}</button>}
+          <button type="button" className={platform ? 'btn-ghost' : 'btn-primary px-4'} disabled={busy} onClick={() => { setEditing((v) => !v); setForm((f) => ({ ...f, app_id: acc?.app_id ?? '', installation_id: acc?.installation_id ?? '', base_url: acc?.base_url ?? '' })) }}>{platform ? '직접 만든 앱으로' : connected ? '수정' : 'GitHub 연결'}</button>
         </div>
       </div>
 
@@ -524,6 +541,8 @@ const PANEL_GROUPS: { label: string; items: { id: PanelItem; label: string }[] }
 const PANEL_IDS = PANEL_GROUPS.flatMap((g) => g.items.map((i) => i.id))
 const TAB_KEY = 'ax.connections.item'
 const readTab = (): PanelItem => {
+  // GitHub 설치에서 돌아오면(?installation_id=…) GitHub 연결 항목을 연다
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('installation_id')) return 'github'
   try {
     const v = localStorage.getItem(TAB_KEY) as PanelItem | null
     return v && PANEL_IDS.includes(v) ? v : 'github'

@@ -119,3 +119,33 @@ def test_repo_removed_from_install_turns_its_connection_off() -> None:
     assert vcs.find_connection(ga.connection_id("catbooks/shop-api")) is None
     with pytest.raises(vcs.VcsError):
         ga.enable_repo("catbooks/shop-api", True)
+
+
+# ---- AXcellent 앱으로 설치만 하기
+
+
+def _platform_app(monkeypatch, tmp_path) -> None:
+    key = tmp_path / "github_app.pem"
+    key.write_text(PEM)
+    monkeypatch.setenv("DEV_GITHUB_APP_ID", "1234")
+    monkeypatch.setenv("DEV_GITHUB_APP_SLUG", "axcellent-test")
+    monkeypatch.setenv("DEV_GITHUB_APP_KEY_FILE", str(key))
+
+
+def test_install_flow_needs_our_state_and_connects(monkeypatch, tmp_path) -> None:
+    assert ga.public()["app"]["configured"] is False
+    with pytest.raises(vcs.VcsError):
+        ga.install_url()
+    _platform_app(monkeypatch, tmp_path)
+    url = ga.install_url()
+    assert url.startswith("https://github.com/apps/axcellent-test/installations/new?state=")
+    state = url.split("state=")[1]
+    ga.set_client(httpx.AsyncClient(transport=httpx.MockTransport(Fake().handler)))
+    with pytest.raises(vcs.VcsError):  # 우리가 보내지 않은 state
+        run(ga.finish_install("42", "forged"))
+    run(ga.finish_install("42", state))
+    pub = ga.public()
+    assert pub["connected"] and pub["installation_id"] == "42" and len(pub["repos"]) == 2
+    assert "PRIVATE KEY" not in str(pub)
+    with pytest.raises(vcs.VcsError):  # 같은 state는 한 번만
+        run(ga.finish_install("42", state))
