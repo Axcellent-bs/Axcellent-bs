@@ -879,6 +879,97 @@ export interface TrendAgeOutput {
   summary: string;
 }
 
+// 출처가 주는 데이터 종류 (#571): 검색 관심 · 실제 소비 · 시청 · 조사
+export type SourceDataKind = "search_interest" | "consumption" | "viewing" | "survey";
+
+// ---------------------------------------------------------------- 도메인 프로필 (domain_profile, #573)
+export interface ProductGroup { name: string; category_codes: string[]; product_count: number }
+export interface SeedKeyword {
+  keyword: string;
+  /** 근거 문장 (소개·상품 이름·카테고리·설명 원문 일부) */
+  evidence: string;
+  evidence_from: "about" | "product" | "category" | "description" | "override";
+  product_ids: string[];
+}
+export interface DomainProfileOutput {
+  status: "known" | "unknown";
+  reason: string | null;
+  tenant: string | null;
+  industry: string | null;
+  industry_tags: string[];
+  product_groups: ProductGroup[];
+  customer_axes: string[];
+  questions: string[];
+  seed_keywords: SeedKeyword[];
+  dropped_keywords: { keyword: string; reason: string }[];
+  /** 사람이 덮어쓴 칸 이름 */
+  overridden: string[];
+  catalog_hash: string;
+  products_seen: number;
+  cached: boolean;
+  generated_at: string | null;
+  limits: string[];
+}
+
+// ---------------------------------------------------------------- 데이터 출처 목록 (data_sources, #576)
+export type SourceStatus = "available" | "key_required";
+export interface DataSource {
+  source_id: string;
+  name: string;
+  kinds: SourceDataKind[];
+  /** 맞는 업종 태그 ("all" = 전체) */
+  industries: string[];
+  age: boolean;
+  gender: boolean;
+  categories: "api" | "fixed" | "none";
+  period: string;
+  quota_daily: number | null;
+  quota_unit: string;
+  quota_note: string;
+  /** 필요한 키 환경변수 이름 (값은 없다) */
+  key_envs: string[];
+  status: SourceStatus;
+  status_reason: string | null;
+  docs_url: string;
+  approved: boolean;
+}
+export interface DataSourcesOutput { sources: DataSource[]; checked_at: string | null; summary: string }
+
+// ---------------------------------------------------------------- 수집 계획 (source_plan, #578)
+export interface PlanDropped { value: string; reason: string }
+export interface SourcePlanItem {
+  source_id: string;
+  status: SourceStatus;
+  approved: boolean;
+  /** 이 출처를 고른 이유 (LLM 문장) */
+  reason: string;
+  categories: { category_id: string; name: string | null }[];
+  category_check: "verified" | "after_key" | "not_applicable" | "unknown";
+  category_check_reason: string | null;
+  keywords: string[];
+  use_age: boolean;
+  calls: number;
+  quota_units: number;
+  dropped: PlanDropped[];
+  /** 키 필요 출처: 이 키가 있으면 더 쓸 수 있는 근거 */
+  unlocks: string | null;
+}
+export interface PlanQuota { source_id: string; units: number; cap: number; unit: string }
+export interface SourcePlanOutput {
+  status: "known" | "unknown";
+  reason: string | null;
+  plan_id: string;
+  profile_hash: string;
+  items: SourcePlanItem[];
+  dropped_sources: PlanDropped[];
+  quota: PlanQuota[];
+  trimmed: string[];
+  approval_note: string;
+  cached: boolean;
+  generated_at: string | null;
+  summary: string;
+}
+
 // ---------------------------------------------------------------- 숏츠 통계 (shorts_stats)
 // 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py ShortsStatsOutput (#437).
 // 숏츠 = 길이 기준(max_seconds) 이하 영상. 숫자는 코드, 분류는 LLM(정해진 목록 안). 표본이 적은 묶음은 unknown + 이유
@@ -1083,6 +1174,12 @@ export const dataAi = {
   shortsStats: () => askData<ShortsStatsOutput>("shorts_stats", "숏츠 통계", {}, TREND_DEADLINE_MS),
   /** 인사이트 브리프 (2단계). 서버 하루 캐시. 브리프 안에서 trend_age·임베딩·한 줄 문장(LLM)을 부른다 */
   trendInsightBrief: () => askData<TrendInsightBriefOutput>("trend_insight_brief", "인사이트 브리프", {}, RECOMMEND_DEADLINE_MS),
+  /** 회사 도메인 프로필 (업종·상품군·고객 축·질문·씨앗 키워드). 서버가 저장해 두고 카탈로그가 바뀌면 다시 만든다 */
+  domainProfile: () => askData<DomainProfileOutput>("domain_profile", "회사 도메인 프로필", {}, RECOMMEND_DEADLINE_MS),
+  /** 데이터 출처 목록 (능력·키 상태·승인). 키 값은 응답에 없다 */
+  dataSources: () => askData<DataSourcesOutput>("data_sources", "데이터 출처 목록", {}),
+  /** 수집 계획 (출처 목록 안에서 고르고 코드가 검증) */
+  sourcePlan: () => askData<SourcePlanOutput>("source_plan", "수집 계획", {}, RECOMMEND_DEADLINE_MS),
   /** 홍보 영상 기획안. 서버 하루 캐시. regenerate = true면 오늘 만든 기획안이 있어도 새로 만든다(LLM·네이버를 다시 부름) */
   promoConcepts: (regenerate = false) =>
     askData<PromoConceptsOutput>("promo_concepts", "홍보 영상 기획안", regenerate ? { regenerate: true } : {}, RECOMMEND_DEADLINE_MS),
