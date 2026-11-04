@@ -91,18 +91,17 @@ export const LOOP_STAGES: LoopStage[] = [
   },
 ];
 
-/** 트렌드&콘텐츠 화면 하위 탭 4개: 감지 → 추천 → 넘김 → 성과. 루프 4단계와 하나씩 같다 */
+/** 트렌드&콘텐츠 화면 하위 탭: 루프 4단계(감지 → 인사이트 → 넘김 → 성과)와 하나씩 같은 탭 + 맨 끝 "데이터 출처"(루프와 별개, stages 없음) */
 export interface TrendTab {
-  key: "detect" | "recommend" | "handoff" | "result";
+  key: "detect" | "recommend" | "handoff" | "result" | "sources";
   title: string;
   /** 이 탭이 보여 주는 루프 단계의 tab 값(LoopStage.tab) */
   stages: string[];
 }
-export const TREND_TABS: TrendTab[] = LOOP_STAGES.map((s) => ({
-  key: s.tab as TrendTab["key"],
-  title: s.title,
-  stages: [s.tab],
-}));
+export const TREND_TABS: TrendTab[] = [
+  ...LOOP_STAGES.map((s) => ({ key: s.tab as TrendTab["key"], title: s.title, stages: [s.tab] })),
+  { key: "sources", title: "데이터 출처", stages: [] },
+];
 
 /** 예전 5단계 주소 조각 → 지금 탭 (옛 주소 `#trend/<단계>` 호환) */
 const OLD_STAGE_TAB: Record<string, TrendTab["key"]> = { video: "handoff", campaign: "result", feedback: "result" };
