@@ -126,6 +126,14 @@ uv run pytest -q domains/data/tests/test_campaign_multiday_cases.py  # 약속 �
 
 틀린 항목: cases 8개(주문 방향이 모두 "확인할 수 없음"), holdout 10개. 지금 skill은 하루 넘는 캠페인을 판정하지 않으므로 정상이다.
 
+## 여러 날 캠페인 — 4주 기준선 (`multiday4/`)
+
+`make_multiday4.py`. 위 `multiday/`(7·14일 전 2구간)와 같은 생성기·요일 배수이고 **기준선 정의만 다르다**.
+- 기대: **7·14·21·28일 전 같은 요일·같은 길이 구간 평균**. 시작 전 기록(`history_days`, 기본 28일) 안에 들어오는 구간만 쓴다(`counted.baseline_weeks`)
+- 쓸 수 있는 구간이 **3개보다 적으면** 주문·매출은 확인할 수 없음(`short_history`). 예: 기록 14일 → 2구간 → unknown, 기록 21일 → 3구간 → 판정
+- `cases/` 8개(2배·1.3배 주말·변화 없음 주말·0.6배·1.2배·7일 변화 없음·기록 21일 3구간·기록 14일 부족), `holdout/` 10개(seed `2026110402`, 기록 28일 또는 21일). 채점기는 같은 `score.py`(폴더만 넘김)
+- 이 정의로 바꾸면 예전 `multiday/`(기록 14일) 케이스는 모두 구간 부족이 되어 예전 지표가 떨어진다. 바꿀지는 코드 PR에서 판단한다
+
 ## skill PR에 넘길 것 (이 PR에서 확인한 것)
 
 - **매출 시계열이 없다.** shop-api `metric-series`는 `order_count`·`order_fail_count`·`payment_fail_rate`·`payment_count`만 준다. "매출을 metric_series로 기준선 비교"는 지금 그대로는 안 된다. 정답(`revenue.direction`)은 이 PR에 넣어 두고, skill에서 매출을 어디서 읽을지(shop-api에 매출 지표 추가 또는 확인할 수 없음)는 따로 정한다.
