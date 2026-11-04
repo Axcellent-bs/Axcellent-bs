@@ -111,6 +111,7 @@ SERVICES: tuple[Service, ...] = (
             "issue_coupon",
             "start_campaign",
             "record_campaign_result",
+            "cancel_campaign",
         ),
         "공지·쿠폰",
     ),
