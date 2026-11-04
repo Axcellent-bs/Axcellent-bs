@@ -249,6 +249,53 @@ class SnapshotStore:
             ).fetchone()
         return row is not None
 
+    def seen_ids(self, since: datetime) -> list[str]:
+        """`since` 뒤에 인기 목록이나 회사 키워드 검색에서 본 영상 (추적으로만 본 것은 뺀다).
+
+        추적한 영상도 매번 저장되므로 "마지막 저장 시각"으로 고르면 한 번 들어온 영상이 영원히
+        남는다. 그래서 추적 대상은 인기·검색에서 마지막으로 본 시각으로 고른다 (최근 순).
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT video_id, MAX(collected_at) AS last FROM snapshots WHERE collected_at >= ?"
+                " AND (popular_rank IS NOT NULL OR sources LIKE '%popular%'"
+                " OR sources LIKE '%search:%') GROUP BY video_id ORDER BY last DESC",
+                (iso(since),),
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def last_run_ids(self) -> set[str]:
+        """가장 최근 수집 시각에 저장한 영상 id."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT video_id FROM snapshots"
+                " WHERE collected_at = (SELECT MAX(collected_at) FROM snapshots)"
+            ).fetchall()
+        return {r[0] for r in rows}
+
+    def pruned_on(self, day: date) -> bool:
+        with self._lock:
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS prunes (day TEXT PRIMARY KEY, deleted INTEGER NOT NULL)"
+            )
+            row = self._conn.execute(
+                "SELECT 1 FROM prunes WHERE day = ?", (day.isoformat(),)
+            ).fetchone()
+        return row is not None
+
+    def prune(self, day: date, before: datetime) -> int:
+        """`before`보다 오래된 스냅샷 줄을 지우고 그날 정리했다고 남긴다. 지운 줄 수."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS prunes (day TEXT PRIMARY KEY, deleted INTEGER NOT NULL)"
+            )
+            cur = self._conn.execute("DELETE FROM snapshots WHERE collected_at < ?", (iso(before),))
+            deleted = cur.rowcount
+            self._conn.execute(
+                "INSERT OR REPLACE INTO prunes VALUES (?, ?)", (day.isoformat(), deleted)
+            )
+        return deleted
+
     def recent_video_ids(self, since: datetime, limit: int) -> list[str]:
         """`since` 뒤에 한 번이라도 저장한 영상 id (최근에 본 순서, 최대 `limit`개)."""
         with self._lock:

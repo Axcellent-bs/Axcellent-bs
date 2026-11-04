@@ -661,6 +661,9 @@ uv run python -m data_agent.youtube_collect              # 한 번
 uv run python -m data_agent.youtube_collect --every 3600 # 1시간마다 (최소 600초, Ctrl+C로 멈춤)
 ```
 
+- **추적 영상 줄이기**(`youtube.toml` `[tracking]`): 추적 대상은 인기 목록·검색에서 마지막으로 본 시각이 `drop_after_hours`(기본 48)시간 안인 영상이다. 예전에는 "마지막 저장 시각"으로 골라, 추적한 영상이 매번 다시 저장되며 영원히 남아 계속 늘었다(359→400개). 브리프(근거 영상·기회 카드 근거 숏츠, 최근 2일)에 쓰는 영상은 유지하고 먼저 넣는다. 상한 `max_tracked`(기본 500). 로그에 "추적에서 뺀 수"(지난 실행엔 있었고 이번에 뺀 영상)
+- **보관**: `retention_days`(기본 30)일이 지난 스냅샷 줄은 한국 날짜 하루 1번 지운다(`prunes` 표에 그날 지운 줄 수, 0 = 안 지움). 제목·채널·길이·썸네일 표는 그대로
+
 - 커넥터 `connectors/youtube.py`: 인기 목록(mostPopular, 50개씩 4쪽 = 200개, 순위 붙임), 추적 영상 통계(id 50개씩), 키워드 검색(검색 결과 통계는 videos.list로 한 번 더). 키 `YOUTUBE_API_KEY`는 URL이 아니라 헤더(`X-Goog-Api-Key`)로 보낸다. 주소는 `AX_YOUTUBE_API_URL`로 바꿀 수 있다
 - 숫자 칸이 응답에 없으면(좋아요 숨김·댓글 막음) None/NULL이다. 지워졌거나 비공개가 된 영상은 결과에 없다. 0으로 채우지 않는다
 - 못 읽으면 `ConnectorUnavailable`(403 할당량 초과는 `QUOTA_EXCEEDED`). 할당량 초과가 나면 그 실행의 남은 호출을 멈추고 받은 것까지 저장한다
