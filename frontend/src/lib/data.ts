@@ -829,6 +829,9 @@ export interface TrendInsight {
   company_related?: boolean;
   /** 왜 회사 관련으로 골랐는지 (코드 문장) */
   company_reason?: string | null;
+  /** 날짜 없이 바뀐 insight_id 이전의 id와 이 인사이트의 숫자 (#614). 예전 응답은 없다 */
+  legacy_insight_id?: string | null;
+  fact_ids?: string[];
 }
 export interface TrendInsightBriefOutput {
   status: "known" | "unknown";
@@ -846,6 +849,24 @@ export interface TrendInsightBriefOutput {
   opportunities_reason?: string | null;
   /** 쓴 수집 계획 id */
   plan_id?: string | null;
+  /** 응답에 나오는 숫자 목록 (#614). 인사이트·카드는 fact_ids로 가리킨다. 예전 응답은 없다 */
+  facts?: DataFact[];
+  schema_version?: string;
+  snapshot_id?: string | null;
+}
+/** 응답에 나오는 숫자 하나 (출처·기간·표본, #614) */
+export interface DataFact {
+  fact_id: string;
+  label: string;
+  value: number;
+  unit: string;
+  source: string;
+  /** 근거 주소 (영상·뉴스 등) */
+  link: string | null;
+  period: string | null;
+  sample: number | null;
+  /** 어느 항목의 숫자인지 (insight_id·opportunity_id) */
+  about: string | null;
 }
 
 // ---------------------------------------------------------------- 연령대별 상승 (trend_age)
@@ -1026,6 +1047,11 @@ export interface DomainOpportunity {
   /** 기획이 정할 것 (코드 고정 문장) */
   planning_decides: string[];
   score: number;
+  /** 하위 주제 넓히기에서 온 카드의 축과 씨앗 키워드 (#587). 예전 응답은 없다 */
+  axis?: string | null;
+  seed_keyword?: string | null;
+  /** 이 카드의 숫자 (브리프 facts의 fact_id, #614) */
+  fact_ids?: string[];
 }
 
 // ---------------------------------------------------------------- 숏츠 통계 (shorts_stats)

@@ -1,21 +1,20 @@
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Chip, Empty, TONE, Waiting } from "@/components/finance/bits";
 import { okEvidence, type SkillState } from "@/components/data/useSkill";
 import { Sources, when } from "@/components/data/Sources";
 import { OpportunityCards } from "@/components/data/OpportunityCards";
 import { AgeBars } from "@/components/data/AgeBars";
-import { DATA_SERVER, kpiLive, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
+import { CopyId, FoldRow, ShortsCard, factLinks, shortsLinks, type Tile } from "@/components/data/ShortsCard";
+import { DATA_SERVER, kpiLive, type DataFact, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
 
-// 트렌드 2단계(인사이트): 기획팀이 가져갈 인사이트 브리프. trend_insight_brief(계약 TrendInsightBriefOutput) 응답 그대로.
-// - 카드마다: 한 줄 인사이트 · 카테고리 · 광고 재료 가능 여부(초록 가능 / 노랑 실존 이름·상표 주의 / 회색 아님·판단 못 함 + 서버 이유)
-//   · 타깃 연령대 + 연령대별 배수 막대 · 데이터 근거(접힘) · 연결 상품(없으면 서버 이유) · 잘 맞는 숏츠 형식 + 표본 수 · 한계
-//   · 참고용 예시(접힘) · insight_id(작게, 복사 버튼: 기획팀이 제안에 적는 값)
-// - 연령대별 막대: 브리프 age_bands(#556, trend_age 결과 그대로·설정 순서). 따로 부르지 않는다.
-//   막대 길이는 그 주제 연령대 배수 중 가장 큰 값에 대한 비율(그리기용). 굵은 글씨 = 타깃 연령대(target_age)
-// - 순서: 기회 가설 카드(opportunities, OpportunityCards.tsx) → 회사 관련 인사이트 → 그 밖의 인사이트
-// - 회사 관련 인사이트(company_related, #543)는 따로 묶고 연결 상품·시즌 근거를 강조한다. 나머지 인사이트는 그 아래
-// - 시즌 근거(evidence.season_*): 작년 같은 달·다음 달 ÷ 기간 평균 중 큰 값 (서버 값)
-// - 응답에 없는 칸(null·빈 목록)은 그리지 않는다. 이유가 오면 이유만
+// 트렌드 2단계(인사이트): 기획팀이 가져갈 인사이트 브리프 (v2 시안 ② 보드). trend_insight_brief(계약 TrendInsightBriefOutput) 응답 그대로.
+// - 카드 틀은 ShortsCard: 판정 칩 · 제목 · 한 문장(서버 line) · 숫자 타일 · 연결 상품 · 오른쪽 근거 숏츠 썸네일(최대 3) · "근거 전체 보기" 접힘 하나
+// - 인사이트 카드: 판정 칩은 그리지 않는다(TrendInsight에 숏츠 적합도 칸이 없다). 숫자 타일은 가장 오른 연령(target_age·target_age_ratio)만
+//   근거 숏츠 = evidence.links + 브리프 facts 중 이 인사이트(about·fact_ids)의 YouTube 주소
+//   접힘 안: 광고 재료 판정·회사 관련 이유·연결 상품 이유·시즌 근거·연령대 막대·숏츠 형식·데이터 근거·한계·예시 아이디어·insight_id 복사
+// - 순서: 회사 관련·기회(기회 가설 카드 → 회사 관련 인사이트) → 상품이 연결된 그 밖의 인사이트 → 맨 아래 접힘 "상품 연결 없는 화제 N개"
+//   → 참고용 예시(기존 기획안 카드) 접힘
+// - 응답에 없는 칸(null·빈 목록)은 그리지 않는다. 이유가 오면 접힘 안에 이유만
 
 const NO_REASON = "서버가 이유를 주지 않았어요";
 const num = (v: number, digits = 0) => v.toLocaleString("ko-KR", { maximumFractionDigits: digits });
@@ -27,33 +26,6 @@ function material(i: TrendInsight): { label: string; tone: string } {
   if (i.ad_material === true) return { label: "광고 재료 가능", tone: TONE.ok };
   if (i.ad_material === false) return { label: "광고 재료 아님", tone: TONE.muted };
   return { label: "광고 재료 판단 못 함", tone: TONE.muted };
-}
-
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)]">
-      <p className="text-xs font-semibold text-ink-500">{label}</p>
-      <div className="min-w-0 text-sm text-ink-700">{children}</div>
-    </div>
-  );
-}
-
-function CopyId({ id }: { id: string }) {
-  const [done, setDone] = useState<"idle" | "ok" | "failed">("idle");
-  const copy = () => {
-    if (!navigator.clipboard) { setDone("failed"); return; }
-    navigator.clipboard.writeText(id).then(() => setDone("ok"), () => setDone("failed"));
-  };
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[11px] text-ink-500">
-      <code className="rounded bg-ink-50 px-1.5 py-0.5 font-mono">{id}</code>
-      <button type="button" className="rounded px-1.5 py-0.5 font-semibold text-brand-700 ring-1 ring-ink-100 hover:bg-brand-50" onClick={copy}
-        aria-label={`인사이트 번호 ${id} 복사`}>
-        {done === "ok" ? "복사됨" : "복사"}
-      </button>
-      {done === "failed" && <span className="text-red-700">복사하지 못했어요</span>}
-    </span>
-  );
 }
 
 function Evidence({ e }: { e: TrendInsight["evidence"] }) {
@@ -131,52 +103,33 @@ function Products({ i }: { i: TrendInsight }) {
   ) : <span className="text-ink-500">{i.products_reason ?? NO_REASON}</span>;
 }
 
-function InsightCard({ i }: { i: TrendInsight }) {
+function InsightCard({ i, facts }: { i: TrendInsight; facts: DataFact[] | undefined }) {
   const m = material(i);
-  const company = i.company_related === true;
   const season = seasonText(i.evidence);
+  const tiles: Tile[] = [];
+  if (i.target_age && i.target_age_ratio !== null) tiles.push({ label: "가장 오른 연령", value: i.target_age, note: `검색 ${times(i.target_age_ratio)}` });
+  const kicker = [i.category && i.category !== "unknown" ? i.category : null, i.company_related ? "회사 관련" : null, i.classification_pending ? "분류 대기" : null]
+    .filter(Boolean).join(" · ");
   return (
-    <li className={`card space-y-3 p-4 sm:p-5 ${company ? "ring-2 ring-emerald-200" : ""}`}>
-      <div className="flex flex-wrap items-start gap-2">
-        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-ink-900 text-xs font-bold text-white">{i.rank}</span>
-        <div className="min-w-0 flex-1">
-          <h3 className="text-base font-bold text-ink-900">{i.topic}</h3>
-          {i.aliases.length > 0 && <p className="text-xs text-ink-500">같은 주제 · {i.aliases.join(", ")}</p>}
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {i.category && i.category !== "unknown" && <Chip label={i.category} tone="bg-ink-100 text-ink-700" />}
-          {i.classification_pending && <Chip label="분류 대기" tone={TONE.muted} />}
+    <ShortsCard
+      verdict={null}
+      kicker={kicker || null}
+      title={i.topic}
+      line={i.line || null}
+      lineNote={i.line_status === "fixed" ? "고정 문장" : null}
+      tiles={tiles}
+      products={i.products.map((p) => ({ id: p.product_id, name: p.name }))}
+      thumbs={shortsLinks([...i.evidence.links, ...factLinks(facts, i.insight_id, i.fact_ids)])}
+      highlight={i.company_related === true}
+      fold={<>
+        <FoldRow label="광고 재료">
           <Chip label={m.label} tone={m.tone} />
-        </div>
-      </div>
-      {company && (
-        <div className="space-y-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
-          {i.company_reason && <p className="text-xs">{i.company_reason}</p>}
-          <div>
-            <p className="text-xs font-semibold">연결 상품</p>
-            <div className="mt-0.5"><Products i={i} /></div>
-          </div>
-          {season && (
-            <div>
-              <p className="text-xs font-semibold">시즌 근거</p>
-              <p className="mt-0.5 font-semibold">{season}</p>
-            </div>
-          )}
-        </div>
-      )}
-      {i.line && (
-        <p className="rounded-xl bg-brand-50 px-3 py-2 text-sm font-semibold leading-relaxed text-brand-900">
-          {i.line}
-          {i.line_status === "fixed" && i.line_reason && <span className="mt-0.5 block text-xs font-normal text-ink-500">고정 문장 · {i.line_reason}</span>}
-        </p>
-      )}
-      <div className="space-y-2.5">
-        {(i.ad_material_reason || (i.real_entity && i.entity_names.length > 0)) && (
-          <Row label="광고 재료">
-            {[i.ad_material_reason, i.real_entity && i.entity_names.length ? `이름 · ${i.entity_names.join(", ")}` : null].filter(Boolean).join(" · ")}
-          </Row>
-        )}
-        <Row label="타깃 연령대">
+          {[i.ad_material_reason, i.real_entity && i.entity_names.length ? `이름 · ${i.entity_names.join(", ")}` : null].filter(Boolean).map((x) => <span key={x} className="ml-1 text-xs text-ink-500">{x}</span>)}
+        </FoldRow>
+        {i.company_reason && <FoldRow label="회사 관련">{i.company_reason}</FoldRow>}
+        <FoldRow label="연결 상품"><Products i={i} /></FoldRow>
+        {season && <FoldRow label="시즌 근거">{season}</FoldRow>}
+        <FoldRow label="연령대">
           {i.target_age ? (
             <>
               <span className="font-semibold text-ink-900">{i.target_age}</span>
@@ -185,10 +138,8 @@ function InsightCard({ i }: { i: TrendInsight }) {
               {(i.age_bands?.length ?? 0) > 0 && <AgeBars bands={i.age_bands ?? []} top={i.target_age} />}
             </>
           ) : <span className="text-ink-500">{i.target_age_reason ?? NO_REASON}</span>}
-        </Row>
-        {!company && <Row label="연결 상품"><Products i={i} /></Row>}
-        {!company && season && <Row label="시즌 근거">{season}</Row>}
-        <Row label="잘 맞는 숏츠 형식">
+        </FoldRow>
+        <FoldRow label="숏츠 형식">
           {i.shorts_format ? (
             <>
               <span className="font-semibold text-ink-900">{i.shorts_format}</span>
@@ -202,25 +153,18 @@ function InsightCard({ i }: { i: TrendInsight }) {
               {i.shorts_format_at && <span className="text-ink-500"> · {when(i.shorts_format_at)} 기준</span>}
             </>
           ) : <span className="text-ink-500">{i.shorts_format_reason ?? NO_REASON}</span>}
-        </Row>
+        </FoldRow>
+        <FoldRow label="데이터 근거"><Evidence e={i.evidence} /></FoldRow>
         {i.limits.length > 0 && (
-          <Row label="한계">
-            <ul className="list-disc space-y-0.5 pl-4 text-xs text-ink-500">{i.limits.map((l) => <li key={l}>{l}</li>)}</ul>
-          </Row>
+          <FoldRow label="한계"><ul className="list-disc space-y-0.5 pl-4 text-xs text-ink-500">{i.limits.map((l) => <li key={l}>{l}</li>)}</ul></FoldRow>
         )}
-      </div>
-      <details className="rounded-xl bg-ink-50 px-3 py-2">
-        <summary className="cursor-pointer text-xs font-semibold text-ink-700">데이터 근거 보기</summary>
-        <div className="mt-2"><Evidence e={i.evidence} /></div>
-      </details>
-      {i.example_ideas.length > 0 && (
-        <details className="rounded-xl px-3 py-2 ring-1 ring-ink-100">
-          <summary className="cursor-pointer text-xs font-semibold text-ink-700">참고용 예시 {i.example_ideas.length}개</summary>
-          <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-sm text-ink-700">{i.example_ideas.map((x) => <li key={x}>{x}</li>)}</ul>
-        </details>
-      )}
-      <div className="border-t border-ink-100 pt-2"><CopyId id={i.insight_id} /></div>
-    </li>
+        {i.example_ideas.length > 0 && (
+          <FoldRow label={`예시 아이디어 ${i.example_ideas.length}개`}><ul className="list-disc space-y-0.5 pl-4">{i.example_ideas.map((x) => <li key={x}>{x}</li>)}</ul></FoldRow>
+        )}
+        {i.line_status === "fixed" && i.line_reason && <p className="text-xs text-ink-500">고정 문장 · {i.line_reason}</p>}
+        <CopyId id={i.insight_id} />
+      </>}
+    />
   );
 }
 
@@ -230,47 +174,54 @@ export function InsightBrief({ state, examples, examplesCount }: {
 }) {
   const out = state.kind === "ok" ? state.out : null;
   if (!kpiLive) return null;
-  // 회사 관련 인사이트는 맨 위에 따로 묶는다 (서버 순서 그대로)
-  const companyOnes = (out?.insights ?? []).filter((i) => i.company_related === true);
-  const others = (out?.insights ?? []).filter((i) => i.company_related !== true);
+  const all = out?.insights ?? [];
+  // 위: 기회 가설 카드 → 회사 관련 인사이트. 가운데: 상품이 연결된 나머지. 맨 아래 접힘: 상품 연결 없는 화제 (서버 순서 그대로)
+  const companyOnes = all.filter((i) => i.company_related === true);
+  const linked = all.filter((i) => i.company_related !== true && i.products.length > 0);
+  const unlinked = all.filter((i) => i.company_related !== true && i.products.length === 0);
   const meta = out ? [out.day ? `${out.day} 브리프` : null, out.generated_at ? `만든 시각 ${when(out.generated_at)}` : null, out.cached ? "오늘 만든 브리프" : null].filter(Boolean).join(" · ") : null;
+  const hasTop = out !== null && (out.opportunities !== undefined || companyOnes.length > 0);
   return (
     <section id="data-trend-insight" aria-labelledby="data-trend-insight-title" className="space-y-4">
-      <div className="card space-y-2 p-4 sm:p-5">
-        <h2 id="data-trend-insight-title" className="text-lg font-bold text-ink-900">인사이트 브리프</h2>
-        <p className="text-xs text-ink-500">{meta || "기획팀이 이 인사이트를 가져가 제안을 만들어요."}</p>
-        {out?.limits && out.limits.length > 0 && (
-          <details className="text-xs text-ink-500">
-            <summary className="cursor-pointer font-semibold text-ink-700">브리프 한계 {out.limits.length}개</summary>
-            <ul className="mt-1 list-disc space-y-0.5 pl-4">{out.limits.map((l) => <li key={l}>{l}</li>)}</ul>
-          </details>
-        )}
-        <Sources evidence={okEvidence(state)} label="근거 · 브리프가 불러온 곳" />
+      <div className="space-y-1">
+        <h2 id="data-trend-insight-title" className="text-xl font-bold text-ink-900">기획팀에 넘길 인사이트</h2>
+        {meta && <p className="text-xs text-ink-500">{meta}</p>}
       </div>
-      {/* 맨 위 기회 가설 카드 (opportunities, #579) → 회사 관련 인사이트 → 그 밖의 인사이트 */}
-      {out && <OpportunityCards list={out.opportunities} reason={out.opportunities_reason} />}
       {state.kind === "loading" ? <Waiting what="인사이트를 묶는 중…" />
         : state.kind === "failed" ? <Empty>인사이트를 받지 못했어요. {state.reason} {DATA_SERVER}가 켜져 있는지 확인해 주세요.</Empty>
-        : out && (out.status === "unknown" || out.insights.length === 0)
-          ? <Empty>{out.reason ?? "오늘 인사이트가 없어요."}</Empty>
-          : out && (
-            <>
-              {companyOnes.length > 0 && (
-                <section aria-labelledby="data-trend-insight-company" className="space-y-3">
-                  <h3 id="data-trend-insight-company" className="text-base font-bold text-ink-900">
-                    회사 관련 인사이트 <span className="text-sm font-normal text-ink-500">· {companyOnes.length}개</span>
-                  </h3>
-                  <ul className="space-y-4">{companyOnes.map((i) => <InsightCard key={i.insight_id} i={i} />)}</ul>
-                </section>
-              )}
-              {others.length > 0 && (
-                <section aria-labelledby={companyOnes.length > 0 ? "data-trend-insight-others" : undefined} className="space-y-3">
-                  {companyOnes.length > 0 && <h3 id="data-trend-insight-others" className="text-base font-bold text-ink-900">그 밖의 인사이트</h3>}
-                  <ul className="space-y-4">{others.map((i) => <InsightCard key={i.insight_id} i={i} />)}</ul>
-                </section>
-              )}
-            </>
-          )}
+        : out && (
+          <>
+            {hasTop && (
+              <section aria-labelledby="data-trend-insight-top" className="space-y-3">
+                <h3 id="data-trend-insight-top" className="text-base font-bold text-ink-900">회사 관련·기회</h3>
+                <ul className="space-y-4">
+                  <OpportunityCards list={out.opportunities} reason={out.opportunities_reason} facts={out.facts} />
+                  {companyOnes.map((i) => <InsightCard key={i.insight_id} i={i} facts={out.facts} />)}
+                </ul>
+              </section>
+            )}
+            {(out.status === "unknown" || all.length === 0) && <Empty>{out.reason ?? "오늘 인사이트가 없어요."}</Empty>}
+            {linked.length > 0 && (
+              <section aria-labelledby={hasTop ? "data-trend-insight-linked" : undefined} className="space-y-3">
+                {hasTop && <h3 id="data-trend-insight-linked" className="text-base font-bold text-ink-900">그 밖의 인사이트</h3>}
+                <ul className="space-y-4">{linked.map((i) => <InsightCard key={i.insight_id} i={i} facts={out.facts} />)}</ul>
+              </section>
+            )}
+            {unlinked.length > 0 && (
+              <details className="card p-4">
+                <summary className="cursor-pointer text-sm font-semibold text-ink-900">상품 연결 없는 화제 {unlinked.length}개</summary>
+                <ul className="mt-4 space-y-4">{unlinked.map((i) => <InsightCard key={i.insight_id} i={i} facts={out.facts} />)}</ul>
+              </details>
+            )}
+            <details className="card p-4">
+              <summary className="cursor-pointer text-sm font-semibold text-ink-900">브리프 한계·불러온 곳</summary>
+              <div className="mt-2 space-y-2 text-xs text-ink-500">
+                {out.limits.length > 0 && <ul className="list-disc space-y-0.5 pl-4">{out.limits.map((l) => <li key={l}>{l}</li>)}</ul>}
+                <Sources evidence={okEvidence(state)} label="근거 · 브리프가 불러온 곳" />
+              </div>
+            </details>
+          </>
+        )}
       <details className="card p-4">
         <summary className="cursor-pointer text-sm font-semibold text-ink-900">
           참고용 예시{examplesCount !== null ? ` ${examplesCount}개` : ""} <span className="font-normal text-ink-500">· 숏츠 광고 예시 아이디어</span>

@@ -1,44 +1,38 @@
-import type { ReactNode } from "react";
-import { Chip, TONE } from "@/components/finance/bits";
+import { TONE } from "@/components/finance/bits";
 import { useSkill } from "@/components/data/useSkill";
 import { when } from "@/components/data/Sources";
 import { AgeBars } from "@/components/data/AgeBars";
-import { dataAi, type DomainOpportunity, type OpportunityEvidence, type ShortsFit } from "@/lib/data";
+import { CopyId, FoldRow, ShortsCard, factLinks, shortsLinks, type Tile, type Verdict } from "@/components/data/ShortsCard";
+import { dataAi, type DataFact, type DomainOpportunity, type OpportunityEvidence, type ShortsFit } from "@/lib/data";
 
-// 트렌드 2단계(인사이트) 맨 위 "기회 가설" 카드. trend_insight_brief의 opportunities(계약 DomainOpportunity, #579) 그대로.
-// - 카드: 가설 한 줄 → 숏츠 적합도 칩(높음 초록 / 불확실 노랑 / 낮음 회색 + 서버 이유) → 근거 목록(출처·기간·표본, 접힘)
-//   → 연령대 막대("연령대끼리 양 비교 아님") → 잘 되는 형식 → 목표 참고값 → 연결 상품 → 한계 → "기획이 정할 것"(표시만)
-// - 근거 status가 key_required·not_approved·unknown이면 값 없이 회색 자리만 + 서버 이유 (어떤 근거가 빠졌는지 보이게)
+// 트렌드 2단계(인사이트) 맨 위 "기회 가설" 카드. trend_insight_brief의 opportunities(계약 DomainOpportunity, #579) 그대로. v2 틀(ShortsCard)
+// - 판정 칩 하나: 숏츠 적합도(shorts_fit.level) high → "숏츠로 해볼 만함", uncertain·low → "아직 불확실". shorts_fit이 없으면 칩 없음
+// - 숫자 타일(서버 값이 있는 것만): 숏츠 반응(shorts_fit.ratio·samples) · 가장 오른 연령(age_bands 중 배수가 가장 큰 연령대) · 목표 참고값(target_views_reference)
+// - 근거 숏츠: 브리프 facts 중 이 카드(about = opportunity_id, fact_ids)의 YouTube 근거 주소 최대 3개
+// - 접힘 "근거 전체 보기": 적합도 이유 · 근거(실제 소비·검색 관심: 출처·기간·표본, 키 필요·승인 전은 회색 자리 + 서버 이유)
+//   · 연령대 막대 · 잘 되는 형식 · 연결 상품 이유 · 한계 · 기획이 정할 것(표시만) · 카드 번호 복사
 // - 근거의 출처 이름은 data_sources 응답에서 source_id로 찾는다. 못 찾으면 id 그대로
-// - 응답에 없는 칸(null·빈 목록)은 그리지 않는다
 
 const NO_REASON = "서버가 이유를 주지 않았어요";
 const num = (v: number, digits = 0) => v.toLocaleString("ko-KR", { maximumFractionDigits: digits });
-const FIT: Record<ShortsFit["level"], { label: string; tone: string }> = {
-  high: { label: "숏츠 적합도 높음", tone: TONE.ok },
-  uncertain: { label: "숏츠 적합도 불확실", tone: TONE.warn },
-  low: { label: "숏츠 적합도 낮음", tone: TONE.muted },
+const COMPACT = new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 });
+const VERDICT: Record<ShortsFit["level"], Verdict> = {
+  high: { label: "숏츠로 해볼 만함", tone: TONE.ok },
+  uncertain: { label: "아직 불확실", tone: TONE.muted },
+  low: { label: "아직 불확실", tone: TONE.muted },
 };
+const LEVEL: Record<ShortsFit["level"], string> = { high: "높음", uncertain: "불확실", low: "낮음" };
 const MISSING: Record<Exclude<OpportunityEvidence["status"], "known">, string> = {
   key_required: "키 등록 후 가능",
   not_approved: "수집 승인 전",
   unknown: "값 없음",
 };
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)]">
-      <p className="text-xs font-semibold text-ink-500">{label}</p>
-      <div className="min-w-0 text-sm text-ink-700">{children}</div>
-    </div>
-  );
-}
-
 function EvidenceItem({ e, name }: { e: OpportunityEvidence; name: string }) {
   const period = e.period_start || e.period_end ? [e.period_start, e.period_end].filter(Boolean).join(" ~ ") : null;
   if (e.status !== "known") {
     return (
-      <li className="rounded-lg border border-dashed border-ink-200 bg-ink-50 px-2.5 py-1.5 text-xs text-ink-500">
+      <li className="rounded-lg border border-dashed border-ink-200 bg-surface px-2.5 py-1.5 text-xs text-ink-500">
         <span className="font-semibold">{name}</span> · {e.label} · <span className="font-semibold">{MISSING[e.status]}</span>
         {e.reason && <span> · {e.reason}</span>}
       </li>
@@ -57,50 +51,57 @@ function EvidenceItem({ e, name }: { e: OpportunityEvidence; name: string }) {
 function EvidenceGroup({ title, list, nameOf }: { title: string; list: OpportunityEvidence[]; nameOf: (id: string) => string }) {
   if (list.length === 0) return null;
   return (
-    <div>
-      <p className="text-xs font-semibold text-ink-700">{title}</p>
-      <ul className="mt-1 space-y-1">{list.map((e, k) => <EvidenceItem key={`${e.source_id}-${e.label}-${k}`} e={e} name={nameOf(e.source_id)} />)}</ul>
-    </div>
+    <FoldRow label={title}>
+      <ul className="space-y-1">{list.map((e, k) => <EvidenceItem key={`${e.source_id}-${e.label}-${k}`} e={e} name={nameOf(e.source_id)} />)}</ul>
+    </FoldRow>
   );
 }
 
-function Card({ o, nameOf }: { o: DomainOpportunity; nameOf: (id: string) => string }) {
+function tilesOf(o: DomainOpportunity): Tile[] {
+  const tiles: Tile[] = [];
   const fit = o.shorts_fit;
-  const evidence = [...o.consumption, ...o.search_interest];
-  const missing = evidence.filter((e) => e.status !== "known").length;
+  if (fit && typeof fit.ratio === "number") {
+    tiles.push({ label: "숏츠 반응", value: `${num(fit.ratio, 2)}배`, note: [fit.category, fit.samples ? `표본 ${num(fit.samples)}개` : null].filter(Boolean).join(" · ") || null });
+  }
+  const top = o.age_bands.filter((b) => typeof b.ratio === "number").sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0))[0];
+  if (top && typeof top.ratio === "number") tiles.push({ label: "가장 오른 연령", value: top.band, note: `검색 평소의 ${num(top.ratio, 2)}배` });
+  if (typeof o.target_views_reference === "number") {
+    tiles.push({ label: "목표 참고값", value: `${COMPACT.format(o.target_views_reference)}회`, note: o.target_reference_basis });
+  }
+  return tiles;
+}
+
+function Card({ o, facts, nameOf }: { o: DomainOpportunity; facts: DataFact[] | undefined; nameOf: (id: string) => string }) {
+  const fit = o.shorts_fit;
   return (
-    <li className="card space-y-3 p-4 sm:p-5">
-      <div className="flex flex-wrap items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <h3 className="text-base font-bold text-ink-900">{o.subtopic}</h3>
-          {o.subtopic_evidence && <p className="text-xs text-ink-500">근거 · {o.subtopic_evidence}</p>}
-        </div>
-        {fit && <Chip label={FIT[fit.level].label} tone={FIT[fit.level].tone} />}
-      </div>
-      {o.line && (
-        <p className="rounded-xl bg-brand-50 px-3 py-2 text-sm font-semibold leading-relaxed text-brand-900">
-          {o.line}
-          {o.line_status === "fixed" && o.line_reason && <span className="mt-0.5 block text-xs font-normal text-ink-500">고정 문장 · {o.line_reason}</span>}
-        </p>
-      )}
-      <div className="space-y-2.5">
+    <ShortsCard
+      verdict={fit ? VERDICT[fit.level] : null}
+      kicker={o.axis ?? null}
+      title={o.subtopic}
+      line={o.line || null}
+      lineNote={o.line_status === "fixed" ? "고정 문장" : null}
+      tiles={tilesOf(o)}
+      products={o.products.map((p) => ({ id: p.product_id, name: p.name }))}
+      thumbs={shortsLinks(factLinks(facts, o.opportunity_id, o.fact_ids))}
+      fold={<>
+        {o.subtopic_evidence && <FoldRow label="주제 근거">{o.subtopic_evidence}</FoldRow>}
         {fit && (
-          <Row label="숏츠 적합도">
-            {fit.reason}
+          <FoldRow label="숏츠 적합도">
+            <span className="font-semibold text-ink-900">{LEVEL[fit.level]}</span> · {fit.reason}
             {[
-              fit.category ? `분류 ${fit.category}` : null,
               typeof fit.median_views === "number" ? `중앙값 조회 ${num(fit.median_views)}회` : null,
               typeof fit.overall_median_views === "number" ? `전체 중앙값 ${num(fit.overall_median_views)}회` : null,
-              fit.samples ? `표본 ${num(fit.samples)}개` : null,
               fit.snapshot_at ? `${when(fit.snapshot_at)} 기준` : null,
             ].filter(Boolean).map((x) => <span key={x} className="text-xs text-ink-500"> · {x}</span>)}
-          </Row>
+          </FoldRow>
         )}
-        <Row label="연령대">
+        <EvidenceGroup title="실제 소비" list={o.consumption} nameOf={nameOf} />
+        <EvidenceGroup title="검색 관심" list={o.search_interest} nameOf={nameOf} />
+        <FoldRow label="연령대">
           {o.age_bands.length > 0 ? <AgeBars bands={o.age_bands} top={null} /> : <span className="text-ink-500">{o.age_reason ?? NO_REASON}</span>}
-        </Row>
+        </FoldRow>
         {o.formats.length > 0 && (
-          <Row label="잘 되는 형식">
+          <FoldRow label="잘 되는 형식">
             <ul className="space-y-0.5">
               {o.formats.map((f) => (
                 <li key={f.name}>
@@ -109,75 +110,48 @@ function Card({ o, nameOf }: { o: DomainOpportunity; nameOf: (id: string) => str
                 </li>
               ))}
             </ul>
-          </Row>
+          </FoldRow>
         )}
-        {typeof o.target_views_reference === "number" && (
-          <Row label="목표 참고값">
-            <span className="font-semibold text-ink-900">조회 {num(o.target_views_reference)}회</span>
-            {o.target_reference_basis && <span className="text-ink-500"> · {o.target_reference_basis}</span>}
-          </Row>
-        )}
-        <Row label="연결 상품">
+        <FoldRow label="연결 상품">
           {o.products.length > 0 ? (
             <ul className="space-y-1">
               {o.products.map((p) => (
                 <li key={p.product_id}>
                   <span className="font-semibold text-ink-900">{p.name}</span>
-                  {p.category_name && <span className="text-ink-500"> · {p.category_name}</span>}
-                  <span className="block text-xs text-ink-500">{[p.reason, p.season].filter(Boolean).join(" · ")}</span>
+                  <span className="block text-xs text-ink-500">{[p.category_name, p.reason, p.season].filter(Boolean).join(" · ")}</span>
                 </li>
               ))}
             </ul>
           ) : <span className="text-ink-500">{o.products_reason ?? NO_REASON}</span>}
-        </Row>
+        </FoldRow>
         {o.limits.length > 0 && (
-          <Row label="한계">
-            <ul className="list-disc space-y-0.5 pl-4 text-xs text-ink-500">{o.limits.map((l) => <li key={l}>{l}</li>)}</ul>
-          </Row>
+          <FoldRow label="한계"><ul className="list-disc space-y-0.5 pl-4 text-xs text-ink-500">{o.limits.map((l) => <li key={l}>{l}</li>)}</ul></FoldRow>
         )}
-      </div>
-      {evidence.length > 0 && (
-        <details className="rounded-xl bg-ink-50 px-3 py-2">
-          <summary className="cursor-pointer text-xs font-semibold text-ink-700">
-            근거 {evidence.length}개 보기{missing > 0 ? ` · 빠진 근거 ${missing}개` : ""}
-          </summary>
-          <div className="mt-2 space-y-2">
-            <EvidenceGroup title="실제 소비" list={o.consumption} nameOf={nameOf} />
-            <EvidenceGroup title="검색 관심" list={o.search_interest} nameOf={nameOf} />
-          </div>
-        </details>
-      )}
-      {o.planning_decides.length > 0 && (
-        <div className="rounded-xl px-3 py-2 ring-1 ring-ink-100">
-          <p className="text-xs font-semibold text-ink-700">기획이 정할 것</p>
-          <ul className="mt-1 space-y-1 text-sm text-ink-700">
-            {o.planning_decides.map((d) => (
-              <li key={d} className="flex items-start gap-2">
-                <span aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border border-ink-300 bg-surface" />
-                <span>{d}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </li>
+        {o.planning_decides.length > 0 && (
+          <FoldRow label="기획이 정할 것">
+            <ul className="space-y-1">
+              {o.planning_decides.map((d) => (
+                <li key={d} className="flex items-start gap-2">
+                  <span aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border border-ink-300 bg-surface" />
+                  <span>{d}</span>
+                </li>
+              ))}
+            </ul>
+          </FoldRow>
+        )}
+        {o.line_status === "fixed" && o.line_reason && <p className="text-xs text-ink-500">고정 문장 · {o.line_reason}</p>}
+        <CopyId id={o.opportunity_id} label="카드 번호" />
+      </>}
+    />
   );
 }
 
-/** opportunities가 응답에 없으면(예전 응답) 그리지 않는다. 비었으면 서버 이유 */
-export function OpportunityCards({ list, reason }: { list: DomainOpportunity[] | undefined; reason: string | null | undefined }) {
+/** 기회 가설 카드 <li> 목록 (부모가 <ul>로 감싼다). opportunities가 응답에 없으면(예전 응답) 그리지 않는다. 비었으면 서버 이유 */
+export function OpportunityCards({ list, reason, facts }: { list: DomainOpportunity[] | undefined; reason: string | null | undefined; facts: DataFact[] | undefined }) {
   const sources = useSkill(() => dataAi.dataSources());
   if (list === undefined) return null;
   const names = new Map((sources.state.kind === "ok" ? sources.state.out.sources : []).map((s) => [s.source_id, s.name]));
   const nameOf = (id: string) => names.get(id) ?? id;
-  return (
-    <section aria-labelledby="data-trend-opportunity" className="space-y-3">
-      <h3 id="data-trend-opportunity" className="text-base font-bold text-ink-900">
-        기회 가설{list.length > 0 && <span className="text-sm font-normal text-ink-500"> · {list.length}개</span>}
-      </h3>
-      {list.length === 0
-        ? <p className="card p-4 text-sm text-ink-500">{reason ?? NO_REASON}</p>
-        : <ul className="space-y-4">{list.map((o) => <Card key={o.opportunity_id} o={o} nameOf={nameOf} />)}</ul>}
-    </section>
-  );
+  if (list.length === 0) return <li className="card p-4 text-sm text-ink-500">기회 가설 카드가 없어요. {reason ?? NO_REASON}</li>;
+  return <>{list.map((o) => <Card key={o.opportunity_id} o={o} facts={facts} nameOf={nameOf} />)}</>;
 }
