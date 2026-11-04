@@ -467,6 +467,20 @@ async def _orders(
 # ---------------------------------------------------------------- 판매액 (shop-api 주문 기록)
 
 GAP_WORD = "결제 기록 공백"
+MIN_BASELINE_ENV = "DATA_CAMPAIGN_SALES_MIN_BASELINE_DAYS"
+MIN_BASELINE_DAYS = 3  # 증분 판매액을 내려면 기준선 날이 이만큼 (설정 `MIN_BASELINE_ENV`)
+
+
+def min_baseline_days(env: Mapping[str, str] | None = None) -> int:
+    """증분 판매액에 필요한 기준선 날 수 (설정, 기본 3). 1보다 작거나 숫자가 아니면 기본값."""
+    raw = (os.environ if env is None else env).get(MIN_BASELINE_ENV, "")
+    try:
+        value = int(str(raw).strip())
+    except ValueError:
+        return MIN_BASELINE_DAYS
+    return value if value >= 1 else MIN_BASELINE_DAYS
+
+
 GAP_HINTS = ("기록 공백", "기록이 하나도 없음", "자료가 빠졌을")  # 주문 판정의 공백 이유 문장
 
 
@@ -531,8 +545,16 @@ async def _sales(
             f"{GAP_WORD}: 구간 주문 {unpaid}건이 결제 대기이고 결제 완료가 0건", rule, len(used)
         )
     days = [_totals(p) for p in past]
-    if not days:
-        return _unknown_sales("기준선에 쓸 지난 구간이 없음", rule)
+    need = min_baseline_days()
+    if len(days) < need:  # 증분·범위·방향은 모름, 기간 판매액·쿠폰 귀속(기간 숫자)은 준다
+        direct, direct_orders, direct_why = await _direct(connector, data.campaign_id, window)
+        return CampaignSales(
+            status="unknown", unknown_reason=f"기준선 부족({len(days)}일, 최소 {need}일)",
+            period=period, baseline=_mean_totals(days) if days else None, baseline_rule=rule,
+            baseline_days=len(days), baseline_note=orders.baseline_note,
+            orders_direction=orders.direction, direct_attributed_krw=direct,
+            direct_orders=direct_orders, direct_reason=direct_why,
+        )  # fmt: skip
     base = _mean_totals(days)
     gross = [d.gross_krw for d in days]
     excess = period.gross_krw - base.gross_krw
@@ -577,9 +599,12 @@ async def _direct(
 
 
 def sales_facts(out: CampaignEffectOutput) -> list[CampaignFact]:
-    """판매액 근거 숫자 (출처·기간·표본). 모르면 비운다."""
+    """판매액 근거 숫자 (출처·기간·표본). 있는 숫자만 넣는다 (모르는 칸은 0으로 채우지 않음).
+
+    기준선이 부족해 증분을 모를 때도 구간 판매액은 넣는다.
+    """
     s = out.sales
-    if s is None or s.status != "known" or s.period is None or s.baseline is None:
+    if s is None or s.period is None:
         return []
     span = _span_text(out.window_from, out.window_to)
     p, b = s.period, s.baseline
@@ -593,11 +618,16 @@ def sales_facts(out: CampaignEffectOutput) -> list[CampaignFact]:
         fact("구간 결제 금액 합", p.paid_krw, p.orders),
         fact("구간 환불 합", p.refund_krw, p.orders),
         fact("구간 결제 완료 주문", p.orders, p.orders, unit="건"),
-        fact("기준선 주문 금액 (날 평균)", b.gross_krw, s.baseline_days),
-        fact("증분 판매액 (주문 금액)", s.incremental_gross_krw or 0, s.baseline_days),
-        fact("증분 판매액 하한", s.incremental_low_krw or 0, s.baseline_days),
-        fact("증분 판매액 상한", s.incremental_high_krw or 0, s.baseline_days),
     ]
+    if b is not None:
+        rows.append(fact("기준선 주문 금액 (날 평균)", b.gross_krw, s.baseline_days))
+    for label, value in (
+        ("증분 판매액 (주문 금액)", s.incremental_gross_krw),
+        ("증분 판매액 하한", s.incremental_low_krw),
+        ("증분 판매액 상한", s.incremental_high_krw),
+    ):
+        if value is not None:
+            rows.append(fact(label, value, s.baseline_days))
     if s.direct_attributed_krw is not None:
         rows.append(fact("쿠폰 귀속 판매액", s.direct_attributed_krw, s.direct_orders))
     return rows

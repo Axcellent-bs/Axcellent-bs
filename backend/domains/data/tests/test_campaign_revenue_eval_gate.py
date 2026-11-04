@@ -20,6 +20,7 @@ REVENUE = Path(__file__).resolve().parents[1] / "eval" / "campaign_revenue"
 HIGHER_IS_BETTER = (
     "campaign_revenue.direction_rate",
     "campaign_revenue.gap_unknown_rate",
+    "campaign_revenue.short_baseline_unknown_rate",
     "campaign_revenue.direct_match",
     "holdout.campaign_revenue.direction_rate",
     "holdout.campaign_revenue.gap_unknown_rate",
