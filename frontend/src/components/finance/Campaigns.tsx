@@ -24,7 +24,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
   return (
     <div className="space-y-4">
       <Panel id="campaign-pnl" title="캠페인 손익" meta={view.env?.meta}
-        hint="회사 매출은 판매액이 아니라 수수료입니다. 손익 = 판매액의 수수료 − 광고비 − 회사 부담 쿠폰 − PG 수수료. 재구매는 넣지 않은 단기 손익입니다.">
+        hint="회사 매출은 판매액이 아니라 수수료입니다. 손익 = 판매액의 수수료 − 광고비 − 회사 부담 쿠폰 − PG 수수료. 효율 판단은 이 단기 손익으로 하고, 재구매 포함 손익은 참고로만 보여 줍니다.">
         <ResourceBody res={view}>
           {(v) => (
             <div className="space-y-3">
@@ -32,6 +32,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
                 <div className="rounded-2xl bg-surface-2 px-3 py-2">
                   <dt className="text-sm text-ink-500">{v.budget.month} 캠페인 예산{v.budget.provisional ? " (임시값)" : ""}</dt>
                   <dd className="text-base font-semibold tabular-nums">{krw(v.budget.monthly_krw)}</dd>
+                  <dd className="text-sm text-ink-500">{v.budget.basis}</dd>
                 </div>
                 <div className="rounded-2xl bg-surface-2 px-3 py-2">
                   <dt className="text-sm text-ink-500">쓴 돈과 승인한 돈</dt>
@@ -44,9 +45,9 @@ export function CampaignsSection({ tick }: { tick: number }) {
               </dl>
               {v.campaigns.length === 0 ? <Empty>아직 기록된 캠페인이 없습니다. 마케팅 AI가 성과를 보내면 여기에 적힙니다.</Empty> : (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[720px] text-sm">
+                  <table className="w-full min-w-[840px] text-sm">
                     <thead className="text-left text-ink-500">
-                      <tr>{["캠페인", "채널", "광고비", "판매액", "매출", "손익", "ROI", "효율"].map((h) => <th key={h} className="pb-1 font-medium">{h}</th>)}</tr>
+                      <tr>{["캠페인", "채널", "광고비", "판매액", "매출", "손익", "ROI", "재구매 포함 (참고)", "효율"].map((h) => <th key={h} className="pb-1 font-medium">{h}</th>)}</tr>
                     </thead>
                     <tbody>
                       {v.campaigns.map((c) => (
@@ -58,6 +59,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
                           <td className="py-1.5 tabular-nums">{c.revenue_krw === null ? "-" : krw(c.revenue_krw)}</td>
                           <td className="py-1.5 tabular-nums">{c.profit_krw === null ? "-" : signedKrw(c.profit_krw)}</td>
                           <td className="py-1.5 tabular-nums">{pct(c.roi)}</td>
+                          <td className="py-1.5 tabular-nums">{c.ltv_profit_krw === null ? "자료 부족" : signedKrw(c.ltv_profit_krw)}</td>
                           <td className="py-1.5">{c.verdict ? <Chip label={VERDICT[c.verdict].label} tone={VERDICT[c.verdict].tone} /> : <Chip label="판단 대기" tone={TONE.muted} />}</td>
                         </tr>
                       ))}

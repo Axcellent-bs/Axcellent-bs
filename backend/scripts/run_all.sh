@@ -165,7 +165,9 @@ export AX_HANDOFF_DB="$PWD/$DATA/handoffs.db"
 export FINANCE_STATE_FILE="$PWD/$DATA/finance_state.json"
 export FINANCE_EXPORT_DIR="${FINANCE_EXPORT_DIR:-$PWD/$DATA/finance_exports}"
 export FINANCE_BANK_INBOX="${FINANCE_BANK_INBOX:-$PWD/$DATA/finance_bank_inbox}"
-mkdir -p "$FINANCE_EXPORT_DIR" "$FINANCE_BANK_INBOX"
+# 세무사에게 보낼 자료를 사람이 승인하면 여기로 복사한다. 공유 폴더를 쓰면 이 값을 바꾼다
+export FINANCE_TAX_HANDOFF_DIR="${FINANCE_TAX_HANDOFF_DIR:-$PWD/$DATA/finance_tax_handoff}"
+mkdir -p "$FINANCE_EXPORT_DIR" "$FINANCE_BANK_INBOX" "$FINANCE_TAX_HANDOFF_DIR"
 # 외부 연결 쓰기 보류(긴급 취약). 다시 켜도 잊지 않게 파일에 둔다
 export SAFETY_CONNECTION_HOLDS_FILE="$PWD/$DATA/connection_holds.json"
 

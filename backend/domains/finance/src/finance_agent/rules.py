@@ -40,12 +40,17 @@ class CampaignRules(_Strict):
 
 
 class BrakeRules(_Strict):
+    budget_ratio_of_last_month: float = Field(gt=0, le=1)
     monthly_budget_krw: int = Field(ge=0)
-    budget_provisional: bool
     min_viable_krw: int = Field(ge=0)
     loss_limit_krw: int = Field(ge=0)
     loss_streak_reject: int = Field(ge=1)
     cash_lookahead_weeks: int = Field(ge=1, le=13)
+
+
+class RepeatRules(_Strict):
+    window_days: int = Field(ge=1)
+    min_cohort_buyers: int = Field(ge=1)
 
 
 class LessonRules(_Strict):
@@ -84,6 +89,7 @@ class RuleBook(_Strict):
     updated: str
     campaign: CampaignRules
     brake: BrakeRules
+    repeat: RepeatRules
     lessons: LessonRules
     insights: InsightRules
     income_tax: IncomeTaxRules

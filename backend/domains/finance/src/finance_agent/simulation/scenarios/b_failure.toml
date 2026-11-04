@@ -3,6 +3,8 @@ id = "b"
 title = "성과가 나쁜 인스타그램 릴스 광고"
 today = "2026-10-15"
 cash_net_krw = 3000000
+monthly_budget_krw = 1000000
+repeat_multiple = 1.2
 
 [[rounds]]
 campaign_id = "cmp_b_1"
