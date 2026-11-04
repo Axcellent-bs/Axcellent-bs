@@ -4,7 +4,7 @@
 # - review: "expert"는 전문가가 확인한 규칙, "pending"은 전문가 확인 전이다
 # - 세법 조항과 회계 기준은 공개 자료로 찾아 적었다. 신고와 판단의 최종 책임은 세무사·담당자에게 있다
 
-version = 4
+version = 5
 updated = "2026-11-04"
 
 # 세무사·회계사에게 먼저 물을 질문. 묶음의 expert-review-checklist.md에 들어간다
@@ -28,6 +28,12 @@ min_viable_krw = 50000         # 이보다 적게 남으면 조건부 승인도 
 loss_limit_krw = 500000        # 이달 캠페인 손실 합계가 이 값 이상이면 거절
 loss_streak_reject = 2         # 같은 채널이 연속으로 이만큼 적자면 거절
 cash_lookahead_weeks = 4       # 앞으로 이 주수의 누적 순현금을 본다
+
+[closing]
+spike_ratio = 3.0             # 하루 판매액이 평소의 이 배 이상이면 확정 전에 알린다
+spike_trailing_days = 28      # 평소를 재는 기간
+spike_min_sales_days = 14     # 판매가 있던 날이 이보다 적으면 평소를 모르므로 비교하지 않는다
+budget_min_sales_days = 20    # 직전 달 판매일이 이보다 적으면 그 달로 낸 예산은 임시값으로 표시한다
 
 [repeat]
 window_days = 90          # 첫 구매 뒤 이 기간의 재구매를 본다
@@ -113,6 +119,30 @@ title = "자료 없는 항목은 비움"
 statement = "급여, 영업외손익, 법인세처럼 장부에 없는 항목은 0으로 채우지 않고 비운다."
 basis = "내부 기준 (데이터를 지어내지 않는다)"
 review = "expert"
+
+[[rules]]
+id = "CLS-001"
+area = "closing"
+title = "확정한 숫자는 고정"
+statement = "결산을 확정하면 그때 숫자를 저장하고 보고에 그대로 쓴다. 확정 뒤 숫자가 달라지면 고쳐 쓰지 않고 차이를 따로 보여 주며, 차이는 발생한 기간의 조정으로 처리한다."
+basis = "내부통제 기준. 중요한 오류의 소급 수정 여부는 K-IFRS 제1008호로 판단하며 회계사 확인 필요"
+review = "pending"
+
+[[rules]]
+id = "CLS-002"
+area = "closing"
+title = "대사가 끝나야 월 결산 확정"
+statement = "PG 정산 전 결제가 남아 있으면 월 결산을 확정하지 않는다. 일 결산은 속보라 확정할 수 있지만 정산 전 건수를 경고하고 함께 저장한다."
+basis = "내부통제 기준. PG 정산 주기는 finance_policy.toml [pg] payout_days"
+review = "pending"
+
+[[rules]]
+id = "CLS-003"
+area = "closing"
+title = "평소와 크게 다른 날 경고"
+statement = "하루 판매액이 평소의 일정 배수 이상이면 확정 전에 알린다. 판매일이 적어 평소를 모르면 비교하지 않는다."
+basis = "내부통제 기준, [closing] spike_ratio, spike_trailing_days, spike_min_sales_days"
+review = "pending"
 
 # ---------------------------------------------------------------- 정산·예산
 [[rules]]
@@ -244,7 +274,7 @@ review = "pending"
 id = "BRK-001"
 area = "brake"
 title = "남은 예산"
-statement = "월 예산은 직전 달 영업 결과의 일정 비율이다. 쓴 돈은 안전 관문 실행 기록과 기록된 결과로 센다. 요청이 남은 예산을 넘으면 남은 금액까지만 조건부 승인하고, 남은 금액이 최소액보다 적으면 거절한다. 직전 달이 적자면 예산이 0이다."
+statement = "월 예산은 직전 달 영업 결과의 일정 비율이다. 그 달 결산이 확정됐으면 확정 숫자를 쓰고, 판매일이 적으면 임시값으로 표시한다. 쓴 돈은 안전 관문 실행 기록과 기록된 결과로 센다. 요청이 남은 예산을 넘으면 남은 금액까지만 조건부 승인하고, 남은 금액이 최소액보다 적으면 거절한다. 직전 달이 적자면 예산이 0이다."
 basis = "내부 기준, [brake] budget_ratio_of_last_month, monthly_budget_krw, min_viable_krw"
 review = "pending"
 

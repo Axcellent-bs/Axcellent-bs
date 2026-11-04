@@ -15,7 +15,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # 전문가 확인 대상. 브레이크·교훈·인사이트 같은 내부 기준은 재무 담당이 정한다
-EXPERT_AREAS = frozenset({"revenue", "expense", "settlement", "vat", "income_tax"})
+EXPERT_AREAS = frozenset({"revenue", "expense", "settlement", "vat", "income_tax", "closing"})
 
 
 class _Strict(BaseModel):
@@ -49,6 +49,13 @@ class BrakeRules(_Strict):
     loss_limit_krw: int = Field(ge=0)
     loss_streak_reject: int = Field(ge=1)
     cash_lookahead_weeks: int = Field(ge=1, le=13)
+
+
+class ClosingRules(_Strict):
+    spike_ratio: float = Field(gt=1)
+    spike_trailing_days: int = Field(ge=1)
+    spike_min_sales_days: int = Field(ge=1)
+    budget_min_sales_days: int = Field(ge=1)
 
 
 class RepeatRules(_Strict):
@@ -92,6 +99,7 @@ class RuleBook(_Strict):
     updated: str
     campaign: CampaignRules
     brake: BrakeRules
+    closing: ClosingRules
     repeat: RepeatRules
     lessons: LessonRules
     insights: InsightRules

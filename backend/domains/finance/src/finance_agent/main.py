@@ -187,6 +187,7 @@ async def run_and_store_daily_closing(trigger: Trigger) -> dict[str, Any]:
     day = fc.today() - timedelta(days=1)
     confirmation = state().records.closings.get(closing_key("day", day))
     report = await closing.closing_report(books, "day", day, confirmation)
+    state().closing_drifts = closing.find_drifts(books, state().records.closings)
     stored = {
         "date": day.isoformat(),
         "report": report,

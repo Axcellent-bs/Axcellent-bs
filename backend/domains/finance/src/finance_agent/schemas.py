@@ -48,6 +48,9 @@ class ClosingReportOutput(AxModel):
     commentary_source: Literal["llm", "template"]
     status: Literal["draft", "confirmed"]
     closable: bool = True  # 기간이 끝나 확정할 수 있는가
+    snapshot_at: str | None = None  # 확정 때 숫자를 저장한 시각. 없으면 지금 숫자다
+    drift: list[dict[str, Any]] = Field(default_factory=list)  # 확정 뒤 달라진 줄
+    close_warnings: list[dict[str, Any]] = Field(default_factory=list)
     confirmed_by: str | None = None
     confirmed_at: str | None = None
     unavailable: list[str] = Field(default_factory=list)

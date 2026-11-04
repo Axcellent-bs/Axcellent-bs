@@ -130,7 +130,9 @@ def test_package_is_written_once_and_new_version_on_change(
     store: dict[str, dict[str, Any]] = {}
     calls = {"n": 0}
 
-    def fake_files(books: Any, month: str, last_day: date) -> dict[str, bytes]:
+    def fake_files(
+        books: Any, month: str, last_day: date, closings: Any = None
+    ) -> dict[str, bytes]:
         return {f"a-{month}.csv": f"{calls['n']}".encode()}
 
     monkeypatch.setattr(exports, "build_files", fake_files)
@@ -151,7 +153,9 @@ def test_excel_timestamps_alone_do_not_make_a_new_version(
     monkeypatch.setenv("FINANCE_EXPORT_DIR", str(tmp_path))
     calls = {"n": 0}
 
-    def fake_files(books: Any, month: str, last_day: date) -> dict[str, bytes]:
+    def fake_files(
+        books: Any, month: str, last_day: date, closings: Any = None
+    ) -> dict[str, bytes]:
         calls["n"] += 1
         return {"a.csv": b"same", "a.xlsx": str(calls["n"]).encode()}
 
