@@ -1729,6 +1729,9 @@ class DomainProfileOutput(AxModel):
     dropped_keywords: list[DroppedKeyword] = Field(default_factory=list)  # 근거가 없어 버린 것
     # 아래는 예전 응답은 없다. 소개와 카탈로그가 어긋남 경고 (소개에 없는 상품군이 카탈로그에 있음)
     intro_mismatch: list[IntroMismatch] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. 경고(intro_mismatch)로 씨앗에서 뺀 키워드 (카탈로그는 그대로,
+    # 사람 덮어쓰기 seed_keywords에 넣으면 다시 쓴다)
+    mismatch_skipped: list[DroppedKeyword] = Field(default_factory=list)
     overridden: list[str] = Field(default_factory=list)  # 사람이 덮어쓴 칸 이름
     catalog_hash: str = ""  # 카탈로그·소개 해시 (바뀌면 다시 만든다)
     products_seen: int = Field(default=0, ge=0)
