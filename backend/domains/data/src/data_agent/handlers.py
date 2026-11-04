@@ -93,7 +93,7 @@ from data_agent.skills.trend_age import trend_age as run_trend_age
 from data_agent.skills.trend_candidates import find_candidates
 from data_agent.skills.trend_history import history
 from data_agent.skills.trend_popular import popular
-from data_agent.skills.trend_scan import NoTrendGroups, scan_trends
+from data_agent.skills.trend_scan import NoTrendGroups, TrendGroupsUnknown, scan_trends
 from data_agent.skills.youtube_velocity import measure_velocity_named
 
 
@@ -351,6 +351,25 @@ def get_trend_connector() -> NaverDatalabConnector:
     return NaverDatalabConnector(os.environ)
 
 
+def _profile_seeds(context_id: str | None):  # noqa: ANN202
+    """기본 키워드 그룹용 씨앗: 도메인 프로필(저장 재사용)의 씨앗 키워드. 못 얻으면 이유."""
+
+    async def provide() -> tuple[list[str], str | None]:
+        from ax_contracts.schemas.data import DomainProfileRequest
+        from data_agent.skills.domain_profile import make_profile
+        from data_agent.skills.product_link import read_catalog
+
+        catalog = await read_catalog(get_catalog())
+        got = await make_profile(
+            DomainProfileRequest(), get_llm(), env=os.environ, catalog=catalog,
+            context_id=context_id,
+        )  # fmt: skip
+        out = got.output
+        return [s.keyword for s in out.seed_keywords], out.reason
+
+    return provide
+
+
 async def trend_scan(request: AgentRequest) -> AgentResult:
     """키워드 그룹별 검색어 급상승. 조회만 하고 상태를 바꾸지 않는다(grade read)."""
     data = _parse(request, TrendScanRequest)
@@ -360,7 +379,12 @@ async def trend_scan(request: AgentRequest) -> AgentResult:
         result = await scan_trends(
             data, get_trend_connector(), get_llm(), env=os.environ,
             category_cache=get_category_cache(),
+            seed_provider=_profile_seeds(request.meta.context_id),
         )  # fmt: skip
+    except TrendGroupsUnknown as error:
+        return _result(
+            request, TaskStatus.FAILED, outcome="unknown", output={"message": str(error)}
+        )
     except NoTrendGroups as error:
         return _result(
             request, TaskStatus.FAILED, outcome="invalid_input", output={"message": str(error)}

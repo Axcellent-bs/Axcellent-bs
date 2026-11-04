@@ -1,20 +1,25 @@
-# 검색어 급상승(data trend_scan)이 기본으로 보는 키워드 그룹. 요청에 그룹이 없으면 이 목록을 본다
+# 검색어 급상승(data trend_scan)이 보는 키워드 그룹. 기본은 도메인 프로필의 씨앗 키워드(그룹 하나 = 씨앗 하나,
+# 상한 [scan] max_seed_groups). 우선순위: 요청 그룹 > 아래 사람 덮어쓰기 > 프로필 씨앗
 # run_all.sh가 tenant.toml의 trends로 이 파일을 찾아 DATA_TREND_CONFIG로 넘긴다 (scripts/tenant_env.py)
 # 그룹마다 네이버 검색어 트렌드를 한 번씩 부른다(하루 한도 NAVER_DATALAB_DAILY_LIMIT). 키워드는 그룹당 20개까지
+[scan]
+max_seed_groups = 5      # 프로필 씨앗으로 만드는 기본 그룹 수 상한
 
-[[groups]]
+# (덮어쓰기용) 사람이 정한 기본 키워드 그룹. 비어 있어도 된다. 있으면 프로필 씨앗 대신 이 그룹을 본다
+# (trend_scan 기본·trend_history·content_recommend 공통). 지우면 프로필 씨앗으로 돌아간다
+[[override.groups]]
 name = "고양이"
 keywords = ["고양이"]
 
-[[groups]]
+[[override.groups]]
 name = "고양이 책"
 keywords = ["고양이 책", "고양이 도서", "고양이 그림책"]
 
-[[groups]]
+[[override.groups]]
 name = "책 추천"
 keywords = ["책 추천", "도서 추천"]
 
-[[groups]]
+[[override.groups]]
 name = "그림책"
 keywords = ["그림책"]
 
