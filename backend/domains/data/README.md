@@ -482,7 +482,7 @@ uv run python -m data_agent.trending_collect --every 3600 # 1시간마다 (최�
 - 커넥터 `connectors/google_trends.py`: 항목마다 검색어, 피드 안 순서(순위), 피드의 트래픽 표시값(`ht:approx_traffic`, 예: "500+". 검색 건수가 아니라 글자 그대로 둔다), 올라온 시각. DTD가 든 응답은 읽지 않는다. 주소는 `AX_GOOGLE_TRENDS_RSS_URL`로 바꿀 수 있다
 - 저장: `DATA_TRENDING_DB`(없으면 YouTube 스냅샷 DB와 같은 폴더의 `trending_snapshots.db`, 기본 `backend/.data/`, 커밋 안 함). (수집 시각, 지역, 순위)가 기본 키. 실패한 실행은 `runs`에만 남고 빈 스냅샷을 만들지 않는다
 - 지역: 회사 `trends.toml` `[trending] geo`(기본 KR)
-- `run_all.sh`에는 넣지 않았다
+- `run_all.sh`가 data 서버를 띄울 때 `--every 3600`으로 같이 띄운다(로그 `.logs/trending-collect.log`, `run_all.sh stop`이 같이 끈다). 켤 때 한 번 바로 모으고 그 뒤 1시간마다
 
 ### trend_candidates (후보 → 네이버 급상승)
 
