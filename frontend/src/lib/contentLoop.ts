@@ -63,7 +63,7 @@ export const LOOP_STAGES: LoopStage[] = [
     title: "추천",
     owner: "데이터분석 AI · shorts_stats · promo_concepts",
     live: true,
-    description: "인기 숏츠 형식과 지금 인기 트렌드로 회사 상품 광고·홍보 숏츠 기획안 초안을 만듭니다.",
+    description: "인기 숏츠 형식과 지금 인기 트렌드로 회사 상품 광고·홍보 숏츠 예시 아이디어(참고용)를 만듭니다. 확정 기획은 기획팀이 해요.",
     status: PROBE_STATUS.checking,
     probe: "promo_concepts",
   },

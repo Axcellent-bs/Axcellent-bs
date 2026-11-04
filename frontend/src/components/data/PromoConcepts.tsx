@@ -8,7 +8,7 @@ import {
   type PopularTopic, type PromoConcept, type PromoConceptsOutput, type PromoTrendKind, type ShortsStatsOutput, type TrendPopularOutput,
 } from "@/lib/data";
 
-// 트렌드 2단계(추천): 캣북스 숏츠 광고 기획안 초안. promo_concepts(계약 PromoConceptsOutput) 응답 그대로 보여 준다.
+// 트렌드 2단계(추천): 캣북스 숏츠 광고 예시 아이디어(참고용, 확정 기획은 기획팀). 예시마다 타깃 연령대(trend_age). promo_concepts(계약 PromoConceptsOutput) 응답 그대로 보여 준다.
 // - 맨 위: 제목 · 다시 만들기(계약 regenerate, 서버는 하루 캐시) · 재료 한 줄(상품·트렌드·시즌·형식 개수, 못 읽은 출처는 서버 이유)
 //   · "뺀 재료 N개 보기"(접힘: 뺀 지금 인기 주제·시즌 확인 키워드·버린 초안과 서버 이유)
 // - 왼쪽: 잘 되는 숏츠 형식 막대. 값은 기획안 재료 shorts_formats(서버 대표값)라 기획안 칩의 평균 조회수와 같다.
@@ -109,6 +109,9 @@ function ConceptCard({ c, ctx }: { c: PromoConcept; ctx: Ctx }) {
             tone="bg-ink-100 text-ink-700" />
         )}
         <TrendChip c={c} />
+        {c.target_age
+          ? <Chip label={`타깃 ${c.target_age} · 평소의 ${ratioText(c.target_age_ratio ?? null)}${c.target_age_status === "rising" ? " 급상승" : ""}`} tone="bg-violet-50 text-violet-700" />
+          : c.target_age_reason && <Chip label={`타깃 미정 · ${c.target_age_reason}`} tone="bg-ink-100 text-ink-500" />}
       </div>
       <div>
         <h3 className="text-lg font-bold text-ink-900">{c.title}</h3>
@@ -273,21 +276,21 @@ export function PromoConcepts({ state, popular = null, onRegenerate }: {
       <div className="card space-y-2 p-4 sm:p-5">
         <div className="flex flex-wrap items-start gap-3">
           <div className="min-w-0 flex-1">
-            <h2 id="data-trend-promo-title" className="text-lg font-bold text-ink-900">캣북스 숏츠 광고 기획안 초안</h2>
-            <p className="text-xs text-ink-500">{meta || "확정은 기획팀, 제작·게시는 마케팅이 해요."}</p>
+            <h2 id="data-trend-promo-title" className="text-lg font-bold text-ink-900">캣북스 숏츠 광고 예시 아이디어 <span className="chip ml-1 bg-ink-100 align-middle text-xs font-semibold text-ink-700">참고용</span></h2>
+            <p className="text-xs text-ink-500">{meta || "참고용 예시예요. 확정 기획은 기획팀, 제작·게시는 마케팅이 해요."}</p>
           </div>
           <button type="button" className="btn-ghost" disabled={state.kind === "loading"} onClick={onRegenerate}>다시 만들기</button>
         </div>
         {out && <Ingredients out={out} />}
         <Sources evidence={okEvidence(state)} label="근거 · 기획안이 불러온 곳" />
       </div>
-      {state.kind === "loading" ? <Waiting what="기획안 초안을 받는 중…" />
-        : state.kind === "failed" ? <Empty>기획안 초안을 받지 못했어요. {state.reason} {DATA_SERVER}가 켜져 있는지 확인해 주세요.</Empty>
+      {state.kind === "loading" ? <Waiting what="예시 아이디어를 받는 중…" />
+        : state.kind === "failed" ? <Empty>예시 아이디어를 받지 못했어요. {state.reason} {DATA_SERVER}가 켜져 있는지 확인해 주세요.</Empty>
         : out && (
           <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2.4fr)]">
             <FormatBars out={out} s={shorts.state} />
             {out.concepts.length === 0
-              ? <Empty>{out.empty_reason ?? "기획안 초안이 없어요."}</Empty>
+              ? <Empty>{out.empty_reason ?? "예시 아이디어가 없어요."}</Empty>
               : ctx && <ul className="space-y-4">{out.concepts.map((c) => <ConceptCard key={c.concept_id} c={c} ctx={ctx} />)}</ul>}
           </div>
         )}

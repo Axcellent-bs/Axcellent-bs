@@ -1,4 +1,7 @@
-"""promo_concepts: 회사 상품 홍보 영상 기획안 3~5개. 읽기 전용(grade read, 기획안 기록만 남김).
+"""promo_concepts: 회사 상품 홍보 숏츠 예시 아이디어(참고용) 3~5개. 읽기 전용(grade read).
+
+확정 기획은 기획팀 몫이다. 데이터는 근거 있는 인사이트와 참고용 예시만 넘긴다.
+각 예시에는 빌린 트렌드의 타깃 연령대(trend_age, 코드)를 붙이고, 모르면 "타깃 미정 + 이유".
 
 재료는 코드가 모으고, LLM은 정해진 JSON 스키마로 기획안 문장만 쓴다. 검증도 코드다.
 
@@ -53,6 +56,7 @@ from pydantic import BaseModel, Field, ValidationError
 from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
+    AgeTopic,
     DroppedConcept,
     PopularTopic,
     PromoConcept,
@@ -64,6 +68,7 @@ from ax_contracts.schemas.data import (
     PromoSkippedTrend,
     PromoTrend,
     ShortsStatsRequest,
+    TrendAgeRequest,
     TrendHistoryRequest,
     TrendKeywordGroup,
     TrendPopularRequest,
@@ -78,6 +83,7 @@ from data_agent.skills.topic_category import (
     TOPIC_CATEGORIES,
     CategoryCache,
 )
+from data_agent.skills.trend_age import trend_age as run_trend_age
 from data_agent.skills.trend_history import history
 from data_agent.skills.trend_popular import popular
 from data_agent.skills.trend_scan import TREND_CONFIG_ENV
@@ -89,7 +95,7 @@ DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "promo_concepts.db"
 # 기획안 재료에서 늘 빼는 주제 분류 (화면 "지금 인기"에 보여도 광고 재료로 쓰지 않는다)
 NEVER_TREND = frozenset({"뉴스·사건", "기부·재난", "정치·사회", "인물"})
 NO_TREND = ("", "없음", "트렌드 없음")  # 트렌드 없이 상품 + 인기 숏츠 형식만 쓴 초안
-DRAFT = "기획안 초안"
+DRAFT = "예시 아이디어"  # 참고용. 확정 기획은 기획팀이 한다
 # 숫자 검증 전에 빼는 길이·컷 표기 ("0~3초", "3-5초", "15초", "2컷").
 # 가격 같은 다른 숫자는 그대로 본다
 _TIMING = re.compile(r"\d+\s*[~\-]\s*\d+\s*초|\d+\s*초|\d+\s*컷")
@@ -684,7 +690,7 @@ async def _generate(
     out.trends = trends
 
     if not products:
-        out.empty_reason = f"회사 상품을 읽지 못해 {DRAFT}을 만들지 않음 ({shop.reason})"
+        out.empty_reason = f"회사 상품을 읽지 못해 {DRAFT}를 만들지 않음 ({shop.reason})"
     elif not trends and not formats[0]:
         out.empty_reason = "쓸 수 있는 재료가 없음 (트렌드·시즌·이벤트·인기 숏츠 형식 모두 없음)"
     if out.empty_reason:
@@ -720,9 +726,9 @@ async def _generate(
     try:
         answer = await llm.structured(prompt, _Concepts, untrusted=data, context_id=context_id)
     except LLMNotConfiguredError:
-        return _llm_failed(out, f"LLM 설정이 없어 {DRAFT}을 만들지 않음", queries, now)
+        return _llm_failed(out, f"LLM 설정이 없어 {DRAFT}를 만들지 않음", queries, now)
     except (LLMFormatError, ValidationError):
-        return _llm_failed(out, f"LLM 답 형식이 맞지 않아 {DRAFT}을 만들지 않음", queries, now)
+        return _llm_failed(out, f"LLM 답 형식이 맞지 않아 {DRAFT}를 만들지 않음", queries, now)
     except Exception as error:  # 호출 실패
         return _llm_failed(out, f"LLM 호출 실패 ({type(error).__name__})", queries, now)
 
@@ -764,18 +770,82 @@ async def _generate(
             out.popular_trend_note = popular_reason or "지금 인기 트렌드와 맞는 이유를 찾지 못함"
     if not out.concepts:
         reasons = ", ".join(dict.fromkeys(d.reason for d in dropped)) or "답에 초안이 없음"
-        out.empty_reason = f"LLM {DRAFT}이 모두 검증에서 빠짐 ({reasons})"
+        out.empty_reason = f"LLM {DRAFT}가 모두 검증에서 빠짐 ({reasons})"
         logger.warning("promo_concepts 초안 0개: %s", reasons)
+    await attach_target_ages(out, trends, connector, env=env, now=now, queries=queries)
     warned = sum(bool(c.warnings) for c in out.concepts)
     no_trend = sum(not c.borrowed_trend for c in out.concepts)
+    targeted = sum(c.target_age is not None for c in out.concepts)
     out.summary = (
-        f"숏츠 광고 {DRAFT} {len(out.concepts)}개 (트렌드 없는 초안 {no_trend}개, 버린 것"
+        f"숏츠 광고 {DRAFT}(참고용) {len(out.concepts)}개 (타깃 연령대 있음 {targeted}개,"
+        f" 트렌드 없는 것 {no_trend}개, 버린 것"
         f" {len(dropped)}개, 경고 {warned}개). 재료: 상품 {len(products)}개, 숏츠 형식"
         f" {len(formats[0])}개, 트렌드 {len(trends)}개.{retry_note}"
     )
     lines = [out.summary, *(f"버림: {d.title} — {d.reason}" for d in dropped)]
     return PromoResult(out, Evidence(queries=queries, data_summary="\n".join(lines),
                                      collected_at=now))  # fmt: skip
+
+
+async def attach_target_ages(
+    out: PromoConceptsOutput,
+    trends: Sequence[PromoTrend],
+    connector: Any,
+    *,
+    env: Mapping[str, str],
+    now: datetime,
+    queries: list[str],
+) -> None:
+    """예시마다 빌린 트렌드의 타깃 연령대(trend_age, 코드)를 붙인다. 모르면 미정 + 이유.
+
+    검색 키워드: 지금 인기 = 트렌드 이름, 시즌 = 시즌 확인 키워드. 회사 이벤트는 검색 키워드가 없다.
+    """
+    by_name = {t.name: t for t in trends}
+    search: dict[str, str] = {}  # 트렌드 이름 → 네이버에 볼 키워드
+    for c in out.concepts:
+        t = by_name.get(c.borrowed_trend)
+        if t is None:
+            continue
+        if t.kind == "popular":
+            search[t.name] = t.name
+        elif t.kind == "season":
+            check = next((s for s in out.season_checks if t.name.startswith(f"{s.keyword} ")), None)
+            if check is not None:
+                search[t.name] = check.keyword
+    found: dict[str, AgeTopic] = {}
+    age_why: str | None = None
+    if search:
+        try:
+            result = await run_trend_age(
+                TrendAgeRequest(keywords=list(dict.fromkeys(search.values()))), connector,
+                env=env, now=now,
+            )  # fmt: skip
+        except Exception as error:  # 연령대는 참고용이라 실패해도 예시는 그대로 둔다
+            age_why = f"연령대 조회 실패 ({type(error).__name__})"
+        else:
+            queries += result.evidence.queries
+            found = {i.keyword: i for i in result.output.items}
+    for c in out.concepts:
+        t = by_name.get(c.borrowed_trend)
+        if t is None:
+            c.target_age_reason = "트렌드 없는 예시라 연령대 근거가 없음"
+            continue
+        if t.kind == "event":
+            c.target_age_reason = "회사 이벤트라 볼 검색 키워드가 없음"
+            continue
+        keyword = search.get(t.name)
+        topic = found.get(keyword) if keyword else None
+        if topic is None or topic.top_band is None:
+            c.target_age_reason = (
+                age_why
+                or (topic.reason if topic is not None and topic.reason else None)
+                or ("시즌 확인 키워드를 찾지 못함" if keyword is None else "연령대 값을 받지 못함")
+            )
+            continue
+        band = next(b for b in topic.bands if b.band == topic.top_band)
+        c.target_age, c.target_age_ratio = topic.top_band, topic.top_ratio
+        c.target_age_status = band.status
+        c.target_age_reason = None
 
 
 def _llm_failed(

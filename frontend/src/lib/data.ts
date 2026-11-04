@@ -689,6 +689,11 @@ export interface PromoConcept {
   shorts_format_avg_views?: number | null;
   /** 이 트렌드·형식이 이 상품과 맞는 이유 한 줄 */
   fit_reason?: string | null;
+  /** 타깃 연령대 (trend_age, #524). 없으면 target_age_reason이 미정 이유 */
+  target_age?: string | null;
+  target_age_ratio?: number | null;
+  target_age_status?: TrendStatus | null;
+  target_age_reason?: string | null;
 }
 /** 기획안 재료로 쓴 인기 숏츠 형식 (shorts_stats 값) */
 export interface PromoShortsFormat {
