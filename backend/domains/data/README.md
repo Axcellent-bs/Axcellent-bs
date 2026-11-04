@@ -19,6 +19,7 @@
 | `trend_popular` | "지금 인기" 주제 순위(급상승 판정과 별개): 점수(코드) = 인기 영상 수 몫 + 지금 조회 속도 몫 + 인기 검색어 순위 몫(가중치 설정), 출처별 몫·근거, 주제 분류·`brand_safe`, 오늘 판정이 급상승이면 "지금 급등 중"(`rising_now`) | YouTube 스냅샷 DB·인기 검색어 스냅샷 DB(읽기 전용), LLM(주제 분류만, 묶어서 1번·하루 캐시). **네이버를 부르지 않는다**. 설정: `trends.toml` `[popular]` |
 | `trend_insight_brief` | 기획에 넘기는 근거 있는 인사이트 3~7개(insight_id·한 줄·분류·광고 재료 여부·근거·타깃 연령대·상품·숏츠 형식·한계·참고용 예시 아이디어). 데이터는 기획안을 확정하지 않는다 | 기존 skill 결과를 코드로 묶음: trend_popular·오늘 급상승 판정·trend_age(후보 상위만)·오늘 저장된 promo_concepts·product_link(임베딩 기준 통과만). LLM은 한 줄만(묶어서 1번). 하루 캐시(날짜 + 규칙 버전) `backend/.data/insight_brief.db`. 설정: `trends.toml` `[brief]` |
 | `domain_profile` | 회사 도메인 프로필: 업종·상품군·고객 축·분석 질문·씨앗 키워드(근거 문장). 고객사가 바뀌어도 사람이 키워드·카테고리를 손으로 정하지 않게 | 테넌트 설정 `[profile] about` + 회사 카탈로그(이름·카테고리·설명). LLM 한 번(정해진 스키마·목록 안), 코드 검증. 저장 재사용 `backend/.data/domain_profile.db`(소개·카탈로그·규칙 해시). 덮어쓰기 `[profile.override]` |
+| `data_sources` | 데이터 출처 목록: 데이터 종류·업종 태그·연령/성별·카테고리 출처·주기·한도·키 이름·상태(사용 가능/키 필요)·공식 문서·승인 | 코드 표(`skills/data_sources.py`). 키 환경변수 유무로 상태, 쇼핑인사이트는 확인 호출 1번(저장 `backend/.data/source_probe.db`). 승인: 회사 설정 `[sources] approved` |
 | `trend_age` | 연령대별 상승: 주제마다 연령대(설정)별로 따로 조회해 "그 연령대에서 평소 대비 몇 배"(trend_scan과 같은 판정 함수), 가장 크게 오른 연령대 | 네이버 검색어 트렌드(`ages` 조건, 주제 하나 = 연령대 수만큼, 하루 상한 80번·하루 캐시), trend_popular(커넥터 없이), 오늘 판정 기록, 기획안 시즌 확인·카탈로그. LLM 없음. 설정: `trends.toml` `[age]` |
 | `promo_concepts` | 광고·홍보 숏츠 **예시 아이디어(참고용)** 3~5개(확정 기획은 기획팀 몫): 타깃 연령대와 근거 숫자(trend_age, 없으면 미정 + 이유)· 제목·컨셉·길이(15~60초)·콘티(길이에 맞는 컷 수)·빌려 온 숏츠 형식과 그 평균 조회수·빌려 온 트렌드(없어도 됨)·맞는 이유·등장 상품·주의사항, 코드 경고(상표·초상권 확인 필요), 버린 초안과 이유, 쓴 재료·시즌 확인 키워드 | shop-api 상품·카테고리, shorts_stats(형식별 평균 조회수), trend_popular(게임·연예·스포츠·K-pop·음악·IT만), 카탈로그 카테고리·상품 핵심어 월별 흐름(trend_history, 키워드마다 네이버 1번·상한 20·하루 캐시), LLM(초안 1번). 하루 캐시·기록 `backend/.data/promo_concepts.db`(캐시 키 = 날짜 + 규칙 버전: 재료 거르기 설정 `[promo]`·분류 목록·프롬프트의 해시. 규칙이 바뀌면 다음 요청에서 다시 만든다). 설정: `trends.toml` `[promo]` |
 | `shorts_stats` | YouTube 숏츠 통계(카테고리별·형식별): 숏츠 수·평균 조회수·평균 시간당 조회 증가·조회수 상위 3개, 표본 부족은 unknown | YouTube 스냅샷 DB(길이 `video_details`), 숏츠 검색(`search.list`, 하루 1번·상한 8번, `backend/.data/shorts.db`), LLM(카테고리·형식 분류, 묶어서·저장). 설정: `trends.toml` `[shorts]` |
@@ -795,6 +796,27 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 3. **코드 검증**: 목록 밖 업종·고객 축은 버림. 상품군 카테고리 코드는 카탈로그에 있는 것만, 상품 수는 코드가 셈. 숫자가 든 질문은 버림. **씨앗 키워드는 근거 문장이 상품 이름·카테고리 이름·설명·회사 소개 원문에 그대로 있고 키워드가 그 근거 안에 있을 때만** 남긴다(`evidence_from`, 근거 상품 id). 아니면 `dropped_keywords` + 이유
 4. **사람 덮어쓰기가 먼저**: `industry`·`customer_axes`·`questions`(바꿈), `seed_keywords`(더함, `evidence_from: override`), `drop_keywords`(뺌). 덮어쓴 칸은 `overridden`
 5. **저장 재사용**: 키 = 소개·덮어쓰기·카탈로그(상품·카테고리)·프롬프트·목록 해시. 카탈로그가 바뀌면 다시 만든다. 업종이나 근거 있는 씨앗 키워드가 없으면 저장하지 않고 `unknown` + 이유
+
+### data_sources (데이터 출처 목록)
+
+출처마다 능력을 코드에 적고, 수집 계획(LLM)이 이 목록 안에서만 고른다. 출처는 **업종 태그로만** 구분한다(회사 이름 없음).
+API 키는 AXcellent 공용으로 `backend/.env`에 한 번만 두고 고객사별로 받지 않는다. 키가 없는 출처는 구조만 있고 상태가 "키 필요"다.
+
+| 출처 id | 데이터 종류 | 업종 | 연령·성별 | 카테고리 | 한도 (공식 문서) | 키 | 공식 문서 |
+|---|---|---|---|---|---|---|---|
+| `youtube` | 시청 | 전체 | 없음 | API (`videoCategories.list`) | 하루 10,000 단위, search.list 100·videos.list 1 | `YOUTUBE_API_KEY` | [quota](https://developers.google.com/youtube/v3/getting-started#quota) |
+| `google_trending` | 검색 관심 | 전체 | 없음 | 없음 | 공개 RSS, 한도 미공개 | 없음 | [RSS](https://trends.google.com/trending/rss?geo=KR) |
+| `naver_search_trend` | 검색 관심 | 전체 | 있음 | 없음(키워드) | 하루 1,000회, 그룹 5개·그룹당 키워드 20개 | `NAVER_HUB_CLIENT_ID`·`NAVER_HUB_CLIENT_SECRET` | [API HUB](https://api.ncloud-docs.com/docs/naver-api-hub-overview) |
+| `naver_shopping` | 실제 소비(쇼핑 클릭, 판매량 아님) | 전체 | 있음 | 고정 후보(네이버쇼핑 cat_id)를 실제 호출로 확인. 목록 API 없음 | 하루 한도 미확인(429 = 하루 허용량 초과), 분야 3개·키워드 5개/요청, 2017-08-01부터 | 검색어 트렌드와 같은 API HUB 키 | [쇼핑인사이트](https://api.ncloud-docs.com/docs/naver-api-hub-shopping-insight-categories.md) |
+| `data4library` | 실제 소비(공공도서관 대출) | 출판·교육 | 있음 | 고정(KDC 대분류 0~9) | 하루 한도 미확인(비공식 500회) | `DATA4LIBRARY_API_KEY` | [정보나루](https://data4library.kr/apiUtilization) |
+| `kosis` | 조사 통계 | 전체 | 표마다 | API (통계목록 `statisticsList.do`) | 하루 한도 미확인, 2026 공지로 분당 제한(수치 미확인), HTTPS만 | `KOSIS_API_KEY`(요청 변수 `apiKey`) | [개발 가이드](https://kosis.kr/openapi/devGuide/devGuide_0201List.do) |
+
+- **상태**(코드): 키가 모두 있으면 `available`, 없으면 `key_required` + 키 이름. 쇼핑인사이트는 같은 키라도 API HUB 앱에서 그 API를 켜야 해서 **실제 호출 1번**(`probe`, 패션의류 최근 30일 월 단위)이 성공해야 `available`이다. 결과는 저장하고, 실패면 하루 뒤 다시 확인한다
+  - 2026-11-04 확인: 지금 키로 401 "요청한 API는 이 Application에서 활성화되어 있지 않습니다" → `key_required`
+- **승인**(사람): 기존 출처 3개는 승인된 것으로 본다. 새 출처는 `tenant.toml` `[sources] approved`에 id를 적어야 수집을 시작한다(상태 변경이라 원래 승인 레지스트리가 필요하다. 지금은 설정 파일 플래그)
+- **커넥터**(`connectors/naver_shopping.py`·`data4library.py`·`kosis.py`): 공식 문서의 요청·응답 형식대로. live·record·replay(`DATA_EXTERNAL_MODE`)를 지원하고 키는 로그·오류·저장 파일에 넣지 않는다. 테스트는 문서 형식으로 만든 가짜 응답(`tests/test_source_connectors.py` 안에만)으로만 돈다
+- **미확인**: 쇼핑인사이트 하루 한도·분야 목록 API, 정보나루 JSON 응답 구조(공식 페이지 예시는 XML)·한도, KOSIS 오류 형식·분당 한도. 키를 등록하면 record 모드로 한 번 불러 형식을 확인한다
+- **한계**: 새 업종에 맞는 출처가 목록에 없으면 커넥터를 한 번 추가해야 한다 (출처 표에 한 줄 + 커넥터 1개)
 
 ### trend_age (연령대별 상승)
 

@@ -644,6 +644,24 @@ async def domain_profile(request: AgentRequest) -> AgentResult:
     )
 
 
+async def data_sources(request: AgentRequest) -> AgentResult:
+    """데이터 출처 목록 (능력·상태·승인). 확인이 필요한 출처만 처음 한 번 부른다. grade read."""
+    from ax_contracts.schemas.data import DataSourcesRequest
+    from data_agent.skills.data_sources import list_sources
+
+    data = _parse(request, DataSourcesRequest)
+    if isinstance(data, AgentResult):
+        return data
+    result = await list_sources(os.environ)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome="known",
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
+
+
 _category_cache: topic_category.CategoryCache | None = None
 
 
@@ -783,4 +801,5 @@ HANDLERS = {
     "trend_age": trend_age,
     "trend_insight_brief": trend_insight_brief,
     "domain_profile": domain_profile,
+    "data_sources": data_sources,
 }
