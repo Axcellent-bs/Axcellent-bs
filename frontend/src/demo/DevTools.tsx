@@ -97,8 +97,9 @@ const CODING_MODES: { id: CodingSetting; label: string }[] = [
 ]
 const codingApi = codingSettingsApi(DEV_API)
 const MCP_URL = `${DEV_API.replace(/\/$/, '')}/api/planning/mcp`
-// 로컬: run_all.sh가 처음 켤 때 만든 사람 토큰(backend/.data/tokens.env HUMAN_TOKEN)을 읽어 넣는다 (Git Bash, 레포 폴더)
-const MCP_ADD = `claude mcp add --transport http axcellent-dev ${MCP_URL} --header "Authorization: Bearer $(sed -n 's/^HUMAN_TOKEN=//p' backend/.data/tokens.env)"`
+// 로컬: run_all.sh가 만든 작업 대기열 전용 토큰(backend/.data/tokens.env WORK_TOKEN)을 읽어 넣는다 (Git Bash, 레포 폴더).
+// 이 값은 내 PC의 Claude Code 설정(~/.claude.json)에 남으므로 승인·머지 권한이 있는 사람 토큰은 쓰지 않는다
+const MCP_ADD = `claude mcp add --transport http axcellent-dev ${MCP_URL} --header "Authorization: Bearer $(sed -n 's/^WORK_TOKEN=//p' backend/.data/tokens.env)"`
 
 function CopyLine({ text }: { text: string }) {
   const [done, setDone] = useState(false)

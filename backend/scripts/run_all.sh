@@ -240,7 +240,7 @@ export SHOP_DEGRADED_SUSTAIN_S="${SHOP_DEGRADED_SUSTAIN_S:-20}" SHOP_MONITOR_INT
 # 화면(run_web.sh)이 예전 사람 토큰을 들고 있어 "사람 토큰을 검증할 수 없다"로 막힌다.
 # 없는 이름만 새로 만든다. 새 토큰이 필요하면 bash scripts/run_all.sh reset
 NAMES="$(echo "$APPS" | awk 'NF {print $1}' | tr '\n' ' ') support marketing hr infra admin"
-read -r AX_AGENT_TOKENS HUMAN_TOKEN < <("$PY" -c "
+read -r AX_AGENT_TOKENS HUMAN_TOKEN WORK_TOKEN < <("$PY" -c "
 import os, secrets, sys
 names, path = sys.argv[1].split(), sys.argv[2]
 saved = {}
@@ -251,15 +251,19 @@ if os.path.exists(path):
 agents = dict(p.split('=', 1) for p in saved.get('AX_AGENT_TOKENS', '').split(',') if '=' in p)
 agents = {n: agents.get(n) or secrets.token_urlsafe(24) for n in names}
 human = saved.get('HUMAN_TOKEN') or secrets.token_urlsafe(24)
+work = saved.get('WORK_TOKEN') or secrets.token_urlsafe(24)
 line = ','.join(f'{n}={t}' for n, t in agents.items())
 with open(path, 'w', encoding='utf-8') as f:
-    f.write(f'AX_AGENT_TOKENS={line}\nHUMAN_TOKEN={human}\n')
+    f.write(f'AX_AGENT_TOKENS={line}\nHUMAN_TOKEN={human}\nWORK_TOKEN={work}\n')
 os.chmod(path, 0o600)
-print(line, human)
+print(line, human, work)
 " "$NAMES" "$DATA/tokens.env")
 export AX_AGENT_TOKENS
 # 사람(운영자) 토큰: 안전 관문 보류 결정·재무·dashboard-api 쓰기
 export SAFETY_HUMAN_TOKENS="운영자:$HUMAN_TOKEN" FINANCE_HUMAN_TOKENS="운영자:$HUMAN_TOKEN"
+# 작업 대기열(MCP) 전용 토큰: 개발자 PC의 Claude Code 설정에 남는 값이라 사람 토큰과 나눈다.
+# 승인·머지 권한이 없다 (dev_agent/work_auth.py). 이름이 같아 화면의 "내 Claude"와 이어진다
+export DEV_WORK_TOKENS="${DEV_WORK_TOKENS:-운영자:$WORK_TOKEN}"
 token_of() { echo "$AX_AGENT_TOKENS" | tr ',' '\n' | sed -n "s/^$1=//p"; }
 # 화면(개발 서버)에 넘길 값. 이 파일은 커밋하지 않는다(.data/)
 {
