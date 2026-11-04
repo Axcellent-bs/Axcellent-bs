@@ -525,6 +525,13 @@ async def trend_age(request: AgentRequest) -> AgentResult:
     )
 
 
+def cand_aliases(env: Mapping[str, str]) -> dict[str, tuple[str, ...]]:
+    """회사 별칭 표 `[candidates.aliases]` (대표 이름 = 별칭들)."""
+    from data_agent.skills import trend_candidates as cand_mod
+
+    return dict(cand_mod.load_config(env).aliases)
+
+
 async def trend_insight_brief(request: AgentRequest) -> AgentResult:
     """기획에 넘기는 인사이트 3~7개 (기존 skill 결과를 코드로 묶음, 하루 캐시). grade read."""
     from data_agent.skills import promo_concepts as promo
@@ -565,7 +572,8 @@ async def trend_insight_brief(request: AgentRequest) -> AgentResult:
 
     result = await make_brief(
         data, llm, env=env, popular=popular_out, popular_reason=popular_why, rising=rising,
-        age_fn=ages, promo=promo_out, catalog=catalog, context_id=request.meta.context_id,
+        age_fn=ages, promo=promo_out, catalog=catalog, aliases=cand_aliases(env),
+        context_id=request.meta.context_id,
     )  # fmt: skip
     return _result(
         request,

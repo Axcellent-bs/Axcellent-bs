@@ -169,23 +169,45 @@ class Candidate:
 
 
 def candidates(
-    popular: TrendPopularOutput | None, rising: Sequence[TrendVerdict]
+    popular: TrendPopularOutput | None,
+    rising: Sequence[TrendVerdict],
+    aliases: Mapping[str, Sequence[str]] | None = None,
 ) -> list[Candidate]:
-    """지금 인기 주제(순위 순) + 지금 인기에 없는 오늘 급상승 주제. 이름·별칭이 같으면 하나로."""
+    """지금 인기 주제(순위 순) + 지금 인기에 없는 오늘 급상승 주제.
+
+    이름·별칭(응답 별칭 + 회사 별칭 표 `[candidates.aliases]`)이 같으면 하나로 본다.
+    """
+    groups: dict[str, set[str]] = {}
+    for rep, others in (aliases or {}).items():
+        names = {_norm(rep), *(_norm(o) for o in others)}
+        for n in names:
+            groups[n] = names
+
+    def keys(names: Sequence[str]) -> set[str]:
+        out: set[str] = set()
+        for n in names:
+            k = _norm(n)
+            out |= groups.get(k, {k})
+        return out
+
     out: list[Candidate] = []
     seen: dict[str, Candidate] = {}
     for t in sorted(popular.items if popular else [], key=lambda x: x.rank):
         c = Candidate(t.keyword, list(t.aliases), popular=t)
-        for n in c.names():
-            seen.setdefault(_norm(n), c)
+        for k in keys(c.names()):
+            seen.setdefault(k, c)
         out.append(c)
     for v in rising:
-        hit = seen.get(_norm(v.group_name))
+        ks = keys([v.group_name])
+        hit = next((seen[k] for k in ks if k in seen), None)
         if hit is not None:
             hit.verdict = hit.verdict or v
+            if v.group_name not in hit.names():
+                hit.aliases.append(v.group_name)
             continue
         c = Candidate(v.group_name, [], verdict=v)
-        seen[_norm(v.group_name)] = c
+        for k in ks:
+            seen[k] = c
         out.append(c)
     return out
 
@@ -492,6 +514,7 @@ async def make_brief(
     age_fn: Any,
     promo: PromoConceptsOutput | None,
     catalog: Any,
+    aliases: Mapping[str, Sequence[str]] | None = None,
     now: datetime | None = None,
     context_id: str | None = None,
     store: BriefStore | None = None,
@@ -515,7 +538,7 @@ async def make_brief(
                 out, as_evidence(out, [f"trend_insight_brief cache rules={rules}"], now)
             )
         n = request.max_insights or config.max_insights
-        cands = candidates(popular, rising)
+        cands = candidates(popular, rising, aliases)
         if not cands:
             why = popular_reason or "지금 인기 주제도 오늘 급상승 판정도 없음"
             out = empty(day, rules, now, why)

@@ -206,3 +206,11 @@ def test_age_failure_and_no_candidates_give_reasons(tmp_path: Path) -> None:
         )
     ).output  # fmt: skip
     assert empty.status == "unknown" and empty.reason == "YouTube 스냅샷이 없음"
+
+
+def test_aliases_merge_rising_topics() -> None:
+    cands = brief.candidates(POPULAR, [_rising("t1", 3.0), _rising("티원", 2.9)], {"t1": ("티원",)})
+    names = [c.topic for c in cands]
+    assert names.count("t1") == 1 and "티원" not in names
+    t1 = next(c for c in cands if c.topic == "t1")
+    assert t1.verdict is not None and t1.verdict.ratio == 3.0 and t1.aliases == ["티원"]
