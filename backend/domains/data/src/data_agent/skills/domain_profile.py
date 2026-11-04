@@ -365,6 +365,45 @@ def intro_mismatch(
     return out
 
 
+def skip_mismatch(
+    seeds: Sequence[SeedKeyword], mismatch: Sequence[IntroMismatch], catalog: CatalogRead
+) -> tuple[list[SeedKeyword], list[DroppedKeyword]]:
+    """경고가 걸린 상품군의 상품에서 나온 씨앗 키워드는 씨앗에서 뺀다 (카탈로그는 그대로).
+
+    빼는 것: 근거 상품이 모두 경고 상품군에 있는 키워드,
+    근거가 경고 상품군의 카테고리 이름인 키워드.
+    소개·사람 덮어쓰기가 근거인 키워드는 남긴다(소개에 있는 말이다).
+    """
+    warned: dict[str, str] = {}  # 상품 id → 상품군 이름
+    warned_cats: dict[str, str] = {}  # 카테고리 이름 → 상품군 이름
+    for m in mismatch:
+        warned |= {p.product_id: m.group for p in m.products}
+        warned_cats |= {
+            _n(catalog.categories[c]): m.group for c in m.category_codes if c in catalog.categories
+        }
+    kept: list[SeedKeyword] = []
+    skipped: list[DroppedKeyword] = []
+    for s in seeds:
+        group: str | None = None
+        if s.evidence_from in ("product", "description") and s.product_ids:
+            groups = {warned.get(pid) for pid in s.product_ids}
+            if None not in groups:
+                group = ", ".join(sorted(g for g in groups if g))
+        elif s.evidence_from == "category":
+            group = warned_cats.get(_n(s.evidence))
+        if group is None:
+            kept.append(s)
+        else:
+            skipped.append(
+                DroppedKeyword(
+                    keyword=s.keyword,
+                    reason=f"소개와 카탈로그가 어긋남 경고({group} 상품군)라 씨앗에서 뺌"
+                    " (사람 덮어쓰기 seed_keywords에 넣으면 다시 씀)",
+                )
+            )
+    return kept, skipped
+
+
 def check_groups(groups: Sequence[_Group], catalog: CatalogRead) -> list[ProductGroup]:
     known = set(catalog.categories) | {p.category_code for p in catalog.products if p.category_code}
     out: list[ProductGroup] = []
@@ -417,6 +456,8 @@ def apply_override(out: DomainProfileOutput, override: Mapping[str, Any]) -> Non
                     )  # fmt: skip
                 )
                 have.add(_n(word))
+        # 경고로 뺀 키워드도 사람이 넣으면 다시 쓴다 (뺀 목록에서 지움)
+        out.mismatch_skipped = [d for d in out.mismatch_skipped if _n(d.keyword) not in have]
         out.overridden.append("seed_keywords")
 
 
@@ -498,7 +539,8 @@ async def make_profile(
             if out.intro_mismatch:
                 names = ", ".join(m.group for m in out.intro_mismatch)
                 out.limits.append(
-                    f"소개와 카탈로그가 어긋남: 소개에 없는 상품군 {names} (경고만, 빼지 않음)"
+                    f"소개와 카탈로그가 어긋남: 소개에 없는 상품군 {names}"
+                    " (카탈로그는 그대로, 그 상품의 씨앗 키워드는 뺌: mismatch_skipped)"
                 )
             out.customer_axes = [a for a in dict.fromkeys(got.customer_axes) if a in CUSTOMER_AXES]
             out.subtopic_axes = check_axes(got.subtopic_axes)
@@ -510,6 +552,9 @@ async def make_profile(
                 q.strip() for q in got.questions if q.strip() and not _DIGIT.search(q)
             ][:MAX_QUESTIONS]
             out.seed_keywords, out.dropped_keywords = check_seeds(got.seeds, tenant, catalog)
+            out.seed_keywords, out.mismatch_skipped = skip_mismatch(
+                out.seed_keywords, out.intro_mismatch, catalog
+            )
         apply_override(out, tenant.override)
         out.status = "known" if out.industry and out.seed_keywords else "unknown"
         if out.status == "unknown" and not out.reason:
