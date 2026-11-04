@@ -622,6 +622,28 @@ async def content_recommend(request: AgentRequest) -> AgentResult:
     )
 
 
+async def domain_profile(request: AgentRequest) -> AgentResult:
+    """도메인 프로필 (회사 소개 + 카탈로그 → 업종·상품군·고객 축·질문·씨앗 키워드). grade read."""
+    from ax_contracts.schemas.data import DomainProfileRequest
+    from data_agent.skills.domain_profile import make_profile
+    from data_agent.skills.product_link import read_catalog
+
+    data = _parse(request, DomainProfileRequest)
+    if isinstance(data, AgentResult):
+        return data
+    result = await make_profile(
+        data, get_llm(), env=os.environ, catalog=await read_catalog(get_catalog()),
+        context_id=request.meta.context_id,
+    )  # fmt: skip
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=result.output.status,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
+
+
 _category_cache: topic_category.CategoryCache | None = None
 
 
@@ -760,4 +782,5 @@ HANDLERS = {
     "campaign_effect": campaign_effect,
     "trend_age": trend_age,
     "trend_insight_brief": trend_insight_brief,
+    "domain_profile": domain_profile,
 }

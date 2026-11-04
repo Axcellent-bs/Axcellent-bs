@@ -18,6 +18,7 @@
 | `youtube_velocity` | YouTube 영상 지금 속도(최근 두 스냅샷 사이 시간당 조회 증가)와 그 전 구간보다 빨라졌는지, 지금 속도 상위 N개(설정)와 태그·제목·채널 이름·길이. **판정하지 않음** | YouTube 스냅샷 DB(`youtube_store.recent_snapshots`). 상위 영상에 저장된 제목·길이가 없으면(회사 키워드 검색·추적으로 들어온 영상) YouTube `videos.list`로 한 번 받아 저장(영상 50개마다 1단위), 못 받으면 비우고 요약에 수를 적음. 개수: 회사 폴더 `trends.toml` `[velocity] top` |
 | `trend_popular` | "지금 인기" 주제 순위(급상승 판정과 별개): 점수(코드) = 인기 영상 수 몫 + 지금 조회 속도 몫 + 인기 검색어 순위 몫(가중치 설정), 출처별 몫·근거, 주제 분류·`brand_safe`, 오늘 판정이 급상승이면 "지금 급등 중"(`rising_now`) | YouTube 스냅샷 DB·인기 검색어 스냅샷 DB(읽기 전용), LLM(주제 분류만, 묶어서 1번·하루 캐시). **네이버를 부르지 않는다**. 설정: `trends.toml` `[popular]` |
 | `trend_insight_brief` | 기획에 넘기는 근거 있는 인사이트 3~7개(insight_id·한 줄·분류·광고 재료 여부·근거·타깃 연령대·상품·숏츠 형식·한계·참고용 예시 아이디어). 데이터는 기획안을 확정하지 않는다 | 기존 skill 결과를 코드로 묶음: trend_popular·오늘 급상승 판정·trend_age(후보 상위만)·오늘 저장된 promo_concepts·product_link(임베딩 기준 통과만). LLM은 한 줄만(묶어서 1번). 하루 캐시(날짜 + 규칙 버전) `backend/.data/insight_brief.db`. 설정: `trends.toml` `[brief]` |
+| `domain_profile` | 회사 도메인 프로필: 업종·상품군·고객 축·분석 질문·씨앗 키워드(근거 문장). 고객사가 바뀌어도 사람이 키워드·카테고리를 손으로 정하지 않게 | 테넌트 설정 `[profile] about` + 회사 카탈로그(이름·카테고리·설명). LLM 한 번(정해진 스키마·목록 안), 코드 검증. 저장 재사용 `backend/.data/domain_profile.db`(소개·카탈로그·규칙 해시). 덮어쓰기 `[profile.override]` |
 | `trend_age` | 연령대별 상승: 주제마다 연령대(설정)별로 따로 조회해 "그 연령대에서 평소 대비 몇 배"(trend_scan과 같은 판정 함수), 가장 크게 오른 연령대 | 네이버 검색어 트렌드(`ages` 조건, 주제 하나 = 연령대 수만큼, 하루 상한 80번·하루 캐시), trend_popular(커넥터 없이), 오늘 판정 기록, 기획안 시즌 확인·카탈로그. LLM 없음. 설정: `trends.toml` `[age]` |
 | `promo_concepts` | 광고·홍보 숏츠 **예시 아이디어(참고용)** 3~5개(확정 기획은 기획팀 몫): 타깃 연령대와 근거 숫자(trend_age, 없으면 미정 + 이유)· 제목·컨셉·길이(15~60초)·콘티(길이에 맞는 컷 수)·빌려 온 숏츠 형식과 그 평균 조회수·빌려 온 트렌드(없어도 됨)·맞는 이유·등장 상품·주의사항, 코드 경고(상표·초상권 확인 필요), 버린 초안과 이유, 쓴 재료·시즌 확인 키워드 | shop-api 상품·카테고리, shorts_stats(형식별 평균 조회수), trend_popular(게임·연예·스포츠·K-pop·음악·IT만), 카탈로그 카테고리·상품 핵심어 월별 흐름(trend_history, 키워드마다 네이버 1번·상한 20·하루 캐시), LLM(초안 1번). 하루 캐시·기록 `backend/.data/promo_concepts.db`(캐시 키 = 날짜 + 규칙 버전: 재료 거르기 설정 `[promo]`·분류 목록·프롬프트의 해시. 규칙이 바뀌면 다음 요청에서 다시 만든다). 설정: `trends.toml` `[promo]` |
 | `shorts_stats` | YouTube 숏츠 통계(카테고리별·형식별): 숏츠 수·평균 조회수·평균 시간당 조회 증가·조회수 상위 3개, 표본 부족은 unknown | YouTube 스냅샷 DB(길이 `video_details`), 숏츠 검색(`search.list`, 하루 1번·상한 8번, `backend/.data/shorts.db`), LLM(카테고리·형식 분류, 묶어서·저장). 설정: `trends.toml` `[shorts]` |
@@ -782,6 +783,18 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 4-2. **숏츠 형식 단계**: ① `topic` 이 주제 근거 숏츠(shorts_stats가 분류해 둔 것) 중 가장 많은 형식 → 없으면 ② `category` 이 주제 분류의 숏츠 통계(`by_category[].formats`, 표본이 `[shorts] min_sample` 이상일 때만)에서 가장 많은 형식 → 없으면 ③ `all` 전체 숏츠 통계(`by_format`)에서 가장 많은 형식. ②·③에서는 목록 밖 형식 "기타"와 미분류를 고르지 않는다(표본 수에는 센다). 칸: `shorts_format_source`(단계), `shorts_format_source_count`(그 단계에서 이 형식인 숏츠 수)·`shorts_format_source_total`(그 단계에서 형식을 분류한 숏츠 수), ②·③이면 `shorts_format_reason`에 앞 단계를 못 쓴 이유. 중앙값·기준 시각(`shorts_format_median_views`·`shorts_format_at`)은 어느 단계든 숏츠 통계의 그 형식 값. 한 줄 데이터 블록에도 "숏츠 형식을 고른 단계"를 넣어 이 주제 숏츠의 형식처럼 쓰지 않게 한다
 5. **한 줄**: 인사이트마다 근거 숫자만 데이터 블록에 넣고 묶어서 LLM 한 번. 숫자 검증(`explain`)·단정 말 검사에 걸리면 코드가 만든 고정 문장(`line_status: fixed` + 이유)
 6. **하루 캐시**: (한국 날짜, 규칙 버전 = `[brief]` 설정·프롬프트·한계 문장·칸 모양(`SHAPE`) 해시) → 브리프. `regenerate: true`면 새로 묶는다
+
+### domain_profile (도메인 프로필)
+
+고객사가 바뀌어도 사람이 키워드·카테고리·출처를 손으로 정하지 않게, 회사 소개와 카탈로그로 프로필을 만든다.
+테넌트 설정에는 회사 소개(`[profile] about`)와 사람이 덮어쓰기(`[profile.override]`, 비어 있어도 됨)만 둔다.
+`scripts/tenant_env.py`가 `DATA_TENANT_CONFIG`(= 회사 폴더 `tenant.toml`)를 넘긴다.
+
+1. **입력**(코드): 회사 소개 + 카탈로그 상품(이름·카테고리 코드·설명 앞 120자, 최대 80개)·카테고리 이름. 데이터 블록에만 넣는다
+2. **LLM 한 번**(정해진 스키마): 업종(`INDUSTRIES` 중 하나: 출판·교육·패션·식품·뷰티·디지털·가전·생활·리빙·반려동물·스포츠·레저·유아·출산·여가·취미·기타), 상품군(이름 + 카테고리 코드), 고객 축(`CUSTOMER_AXES` 중), 분석 질문(최대 5개, 숫자 없이), 씨앗 키워드(최대 12개 + 근거 문장)
+3. **코드 검증**: 목록 밖 업종·고객 축은 버림. 상품군 카테고리 코드는 카탈로그에 있는 것만, 상품 수는 코드가 셈. 숫자가 든 질문은 버림. **씨앗 키워드는 근거 문장이 상품 이름·카테고리 이름·설명·회사 소개 원문에 그대로 있고 키워드가 그 근거 안에 있을 때만** 남긴다(`evidence_from`, 근거 상품 id). 아니면 `dropped_keywords` + 이유
+4. **사람 덮어쓰기가 먼저**: `industry`·`customer_axes`·`questions`(바꿈), `seed_keywords`(더함, `evidence_from: override`), `drop_keywords`(뺌). 덮어쓴 칸은 `overridden`
+5. **저장 재사용**: 키 = 소개·덮어쓰기·카탈로그(상품·카테고리)·프롬프트·목록 해시. 카탈로그가 바뀌면 다시 만든다. 업종이나 근거 있는 씨앗 키워드가 없으면 저장하지 않고 `unknown` + 이유
 
 ### trend_age (연령대별 상승)
 
