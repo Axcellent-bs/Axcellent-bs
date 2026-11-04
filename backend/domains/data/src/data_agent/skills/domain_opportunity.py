@@ -310,6 +310,9 @@ class OpportunityResult:
     queries: list[str]
 
 
+PER_SEED = 2  # 카드에서 씨앗 하나가 차지할 수 있는 하위 주제 수
+
+
 @dataclass(frozen=True)
 class Topic:
     """카드 하나의 주제: 하위 주제(넓히기 결과) 또는 씨앗 키워드(하위 주제가 없을 때)."""
@@ -326,9 +329,19 @@ def topics_of(
     profile: DomainProfileOutput, plan: SourcePlanOutput,
     subtopics: DomainSubtopicsOutput | None, limit: int,
 ) -> list[Topic]:  # fmt: skip
-    """하위 주제(숏츠 수 많은 순)가 있으면 그것, 없으면 계획에 들어간 씨앗 키워드."""
+    """하위 주제(숏츠 수 많은 순, 씨앗마다 `PER_SEED`개까지)가 있으면 그것, 없으면 씨앗 키워드.
+
+    한 씨앗의 하위 주제가 카드를 다 채우지 않게 씨앗마다 상한을 두고, 남은 자리는 다시 채운다.
+    """
     if subtopics is not None and subtopics.subtopics:
-        ranked = sorted(subtopics.subtopics, key=lambda t: (-t.videos, t.name))[:limit]
+        order = sorted(subtopics.subtopics, key=lambda t: (-t.videos, t.name))
+        count: dict[str, int] = {}
+        ranked = []
+        for t in order:
+            if count.get(t.seed_keyword, 0) < PER_SEED and len(ranked) < limit:
+                ranked.append(t)
+                count[t.seed_keyword] = count.get(t.seed_keyword, 0) + 1
+        ranked += [t for t in order if t not in ranked][: limit - len(ranked)]
         return [
             Topic(
                 t.name,
@@ -365,6 +378,7 @@ async def make_opportunities(
     end: date,
     context_id: str | None = None,
     subtopics: DomainSubtopicsOutput | None = None,
+    baseline: tuple[float, int] | None = None,
 ) -> OpportunityResult:
     """계획대로 사용 가능·승인 출처만 불러 하위 주제마다 기회 가설 카드."""
     config = load_config(env)
@@ -422,7 +436,7 @@ async def make_opportunities(
                 queries.append(f"{item.source_id} consumption {k}")
         age = ages.get(_n(k))
         fit, formats, target, basis = shorts_fit(cats.get(k), shorts, config)
-        fit, target, basis = own_shorts(topic, fit, target, basis, shorts, config)
+        fit, target, basis = own_shorts(topic, fit, target, basis, shorts, config, baseline)
         age_reason = None if age and age.bands else (age.reason if age and age.reason else age_why)
         linked = [
             InsightProduct(
@@ -461,9 +475,15 @@ async def make_opportunities(
 def own_shorts(
     topic: Topic, fit: ShortsFit | None, target: float | None, basis: str | None,
     shorts: ShortsStatsOutput | None, config: OpportunityConfig,
+    baseline: tuple[float, int] | None = None,
 ) -> tuple[ShortsFit | None, float | None, str | None]:  # fmt: skip
-    """하위 주제 숏츠가 표본 기준 이상이면 그 중앙값 ÷ 전체 숏츠 중앙값으로 적합도를 다시 잰다."""
-    overall = shorts.median_views if shorts is not None else None
+    """하위 주제 숏츠가 표본 기준 이상이면 그 중앙값 ÷ 같은 방식으로 모은 숏츠 전체 중앙값.
+
+    분모는 씨앗 키워드 검색 숏츠 전체의 중앙값(`baseline`)이다. 인기 차트 숏츠(숏츠 통계)는 이미
+    크게 뜬 영상이라 검색 숏츠와 비교하면 모두 낮게 나온다. baseline이 없을 때만 숏츠 통계 중앙값.
+    """
+    overall = baseline[0] if baseline else (shorts.median_views if shorts is not None else None)
+    base_name = f"씨앗 검색 숏츠 전체({baseline[1]}개)" if baseline else "숏츠 통계 전체"
     if topic.videos < config.min_samples or topic.median_views is None or not overall:
         return fit, target, basis
     ratio = round(topic.median_views / overall, 2)
@@ -479,7 +499,10 @@ def own_shorts(
         level=level, category=fit.category if fit else None, median_views=topic.median_views,
         overall_median_views=overall, ratio=ratio, samples=topic.videos,
         snapshot_at=shorts.snapshot_at if shorts else None,
-        reason=f"'{topic.name}' 숏츠 {topic.videos}개 중앙값이 전체의 {ratio:g}배 ({rule})",
+        reason=(
+            f"'{topic.name}' 숏츠 {topic.videos}개 중앙값이 {base_name} 중앙값의 {ratio:g}배"
+            f" ({rule})"
+        ),
     )  # fmt: skip
     return new, topic.median_views, f"이 하위 주제 숏츠 조회 중앙값 (표본 {topic.videos}개)"
 

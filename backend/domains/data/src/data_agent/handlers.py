@@ -603,7 +603,9 @@ async def trend_insight_brief(request: AgentRequest) -> AgentResult:
 
     async def ages(keywords: list[str]) -> TrendAgeOutput:
         result = await run_trend_age(
-            TrendAgeRequest(keywords=keywords[:30]), get_trend_connector(), env=env,
+            TrendAgeRequest(keywords=keywords[:30]),
+            get_trend_connector(),
+            env=env,
             caller="trend_insight_brief",
         )
         return result.output
@@ -717,6 +719,18 @@ def _subtopic_pending(profile: object) -> int:
         store.close()
 
 
+def _subtopic_baseline(profile: object) -> tuple[float, int] | None:
+    """씨앗 검색 숏츠 전체 조회수 중앙값 (하위 주제 숏츠 적합도의 분모)."""
+    from data_agent.skills import domain_subtopics as ds
+
+    seeds = [s.keyword for s in getattr(profile, "seed_keywords", [])]
+    store = ds.SubtopicStore(os.environ.get(ds.DB_ENV) or ds.DEFAULT_DB)
+    try:
+        return ds.baseline(seeds, store, ds.load_config(os.environ), datetime.now(UTC))
+    finally:
+        store.close()
+
+
 async def _subtopics(profile: object, context_id: str | None):  # noqa: ANN202
     """하위 주제 넓히기 (씨앗 → 한국 숏츠 검색, 일주일 캐시·하루 상한 → 함께 나온 말 → 축)."""
     from ax_contracts.schemas.data import DomainSubtopicsRequest
@@ -770,6 +784,7 @@ async def _opportunities(context_id: str | None, shorts: object, ages: object): 
         subtopic_pending=_subtopic_pending(profile),
     )  # fmt: skip
     subtopics = (await _subtopics(profile, context_id)).output
+    baseline = _subtopic_baseline(profile)
 
     async def classify(names: list[str]) -> dict[str, str | None]:
         found = await classify_topics(
@@ -784,7 +799,7 @@ async def _opportunities(context_id: str | None, shorts: object, ages: object): 
         shorts=shorts, catalog_products=catalog.products, classify=classify,
         trend_connector=get_trend_connector(), age_fn=ages,
         consumption_fn=default_consumption(os.environ, end), day=datetime.now(UTC).date(),
-        end=end, context_id=context_id, subtopics=subtopics,
+        end=end, context_id=context_id, subtopics=subtopics, baseline=baseline,
     )  # fmt: skip
 
 

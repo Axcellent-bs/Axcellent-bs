@@ -70,6 +70,7 @@ class SubtopicConfig:
     min_videos: int = 2
     max_per_seed: int = 5
     max_total: int = 20
+    merge_same_min: int = 4  # 영상 묶음이 똑같을 때 한 대상으로 볼 최소 영상 수 (적으면 우연)
     language: str = "ko"
 
 
@@ -152,6 +153,21 @@ class SubtopicStore:
             )
 
 
+def baseline(
+    seeds: Sequence[str], store: SubtopicStore, config: SubtopicConfig, now: datetime
+) -> tuple[float, int] | None:
+    """캐시 안의 씨앗 검색 숏츠 전체 조회수 중앙값과 수 (하위 주제 숏츠 배수의 분모)."""
+    views: dict[str, int] = {}
+    for seed in seeds:
+        hit = store.get(seed)
+        if hit is None or now - hit[0] >= timedelta(days=config.cache_days):
+            continue
+        views |= {s.video_id: s.views for s in hit[1] if s.views is not None}
+    if not views:
+        return None
+    return round(statistics.median(views.values()), 1), len(views)
+
+
 def pending_searches(
     seeds: Sequence[str], store: SubtopicStore, config: SubtopicConfig, now: datetime
 ) -> int:
@@ -208,15 +224,24 @@ def terms_of(
     return found, dropped
 
 
-def merge_same(terms: dict[str, Term]) -> list[Term]:
-    """같은 영상들에만 나온 더 긴 구는 짧은 이름에 묶는다.
+def _same(t: Term, k: Term, same_min: int) -> bool:
+    if t.videos == k.videos and len(t.videos) >= same_min:
+        return True
+    return _n(k.name) in _n(t.name) and t.videos <= k.videos
 
-    예: '만년필 잉크 추천' → '만년필 잉크'.
+
+def merge_same(terms: dict[str, Term], same_min: int = 4) -> list[Term]:
+    """같은 대상 묶기.
+
+    - 같은 영상들에만 나온 더 긴 구는 짧은 이름에 묶는다 (예: '만년필 잉크 추천' → '만년필 잉크')
+    - 나온 영상 묶음이 똑같고 그 수가 `same_min`(4)개 이상인 말끼리는 한 대상으로 본다 (같은 영상 몇
+      개의 제목 구들이 따로 세지지
+      않게. 예: '대통령 지지율'·'역대 대통령'이 같은 영상 4개에만 나오면 하나). 태그를 먼저 남긴다
     """
-    order = sorted(terms.values(), key=lambda t: (len(_n(t.name)), t.name))
+    order = sorted(terms.values(), key=lambda t: ("tag" not in t.origins, len(_n(t.name)), t.name))
     kept: list[Term] = []
     for t in order:
-        host = next((k for k in kept if _n(k.name) in _n(t.name) and t.videos <= k.videos), None)
+        host = next((k for k in kept if _same(t, k, same_min)), None)
         if host is None:
             kept.append(t)
         else:
@@ -374,7 +399,11 @@ async def make_subtopics(
             views = {s.video_id: s.views for s in shorts}
             found, dropped = terms_of(seed, shorts, cand_cfg, common)
             dropped_common |= dropped
-            terms = [t for t in merge_same(found) if len(t.videos) >= config.min_videos]
+            terms = [
+                t
+                for t in merge_same(found, config.merge_same_min)
+                if len(t.videos) >= config.min_videos
+            ]
             terms.sort(key=lambda t: (-len(t.videos), t.name))
             for t in terms:
                 if len([p for p in picked if p.seed_keyword == seed]) >= config.max_per_seed:

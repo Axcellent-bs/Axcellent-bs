@@ -240,3 +240,21 @@ def test_cards_are_per_subtopic_and_products_are_only_linked() -> None:
     assert tour.shorts_fit is not None and tour.shorts_fit.level == "uncertain"
     assert tour.shorts_fit.reason == "하위 주제 분류 미정"
     assert not any("씨앗 키워드(상품 이름) 단위" in x for x in book.limits)
+
+
+def test_subtopic_fit_uses_the_seed_search_baseline_and_seeds_share_cards() -> None:
+    from ax_contracts.schemas.data import DomainSubtopic, DomainSubtopicsOutput
+
+    subs = DomainSubtopicsOutput(status="known", subtopics=[
+        *[DomainSubtopic(name=f"소설{i}", seed_keyword="소설", axis="장르", videos=10 - i,
+                         median_views=30000.0) for i in range(4)],
+        DomainSubtopic(name="다꾸", seed_keyword="무지 노트", axis="관심사", videos=3,
+                       median_views=1000.0),
+    ])  # fmt: skip
+    topics = do.topics_of(PROFILE, PLAN, subs, 3)
+    assert [t.name for t in topics] == ["소설0", "소설1", "다꾸"]  # 씨앗 하나는 2개까지
+    fit, target, basis = do.own_shorts(topics[0], None, None, None, _shorts(),
+                                       do.OpportunityConfig(), baseline=(20000.0, 120))  # fmt: skip
+    # 분모는 인기 차트(숏츠 통계 10,000)가 아니라 같은 방식으로 모은 씨앗 검색 숏츠 전체 20,000
+    assert fit is not None and fit.ratio == 1.5 and fit.level == "high"
+    assert fit.overall_median_views == 20000.0 and "씨앗 검색 숏츠 전체(120개)" in fit.reason
