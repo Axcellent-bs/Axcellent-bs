@@ -1454,3 +1454,82 @@ class TrendAgeOutput(AxModel):
     note: str = AGE_NOTE
     generated_at: UtcDatetime | None = None
     summary: str = ""
+
+
+# ------------------------------------------------ 인사이트 브리프 (trend_insight_brief)
+
+
+class TrendInsightBriefRequest(AxModel):
+    max_insights: int | None = Field(default=None, ge=3, le=7)  # 비우면 회사 설정
+    regenerate: bool = False  # 하루 캐시를 쓰지 않고 새로 묶는다
+
+
+class InsightEvidence(AxModel):
+    """인사이트 하나의 데이터 근거 (모두 기존 skill 결과 그대로, 없으면 None)."""
+
+    youtube_videos: int | None = Field(default=None, ge=0)  # 이 주제가 나온 인기 영상 수
+    youtube_views_per_hour: float | None = Field(default=None, ge=0)  # 그 영상들 시간당 조회 합
+    youtube_views_per_subscriber: float | None = Field(default=None, ge=0)  # 구독자 대비 최대
+    youtube_at: UtcDatetime | None = None  # YouTube 스냅샷 시각
+    google_rank: int | None = Field(default=None, ge=1)  # 인기 검색어 순위
+    google_news: list[TrendingNewsLink] = Field(default_factory=list)
+    google_at: UtcDatetime | None = None  # 인기 검색어 스냅샷 시각
+    naver_ratio: float | None = Field(default=None, ge=0)  # 네이버 평소 대비 배수
+    naver_status: TrendStatus | None = None
+    naver_rising_started: dt.date | None = None
+    naver_until: dt.date | None = None  # 네이버 판정 마지막 날
+    links: list[str] = Field(default_factory=list)  # 근거 영상·뉴스 주소
+    missing: list[str] = Field(default_factory=list)  # 없는 출처와 이유
+
+
+class InsightProduct(AxModel):
+    """임베딩 기준(product_link)을 통과한 회사 상품."""
+
+    product_id: str
+    name: str
+    category_name: str | None = None
+    similarity: float | None = None
+    reason: str  # 코드가 만든 연결 근거 한 줄
+    season: str | None = None  # 이 상품 쪽 시즌 근거 (기획안 시즌 확인, 없으면 None)
+
+
+class TrendInsight(AxModel):
+    insight_id: str = Field(min_length=1)  # 날짜 + 주제 기반 (같은 날 같은 주제면 같은 id)
+    rank: int = Field(ge=1)
+    topic: str = Field(min_length=1)
+    aliases: list[str] = Field(default_factory=list)
+    line: str  # 한 줄 인사이트 (근거 숫자만, 검증 실패면 고정 문장)
+    line_status: Literal["llm", "fixed"] = "fixed"
+    line_reason: str | None = None
+    category: TopicCategory | None = None
+    ad_material: bool | None = None  # 광고 재료로 쓸 수 있는지
+    ad_material_reason: str | None = None
+    reference_only: bool = False  # 광고 재료가 아니라 맨 아래 참고용
+    real_entity: bool | None = None  # 실존 인물·팀·리그·상표가 든 주제
+    entity_names: list[str] = Field(default_factory=list)
+    evidence: InsightEvidence = Field(default_factory=InsightEvidence)
+    target_age: str | None = None  # 평소 대비 가장 크게 오른 연령대 (trend_age)
+    target_age_ratio: float | None = Field(default=None, ge=0)
+    target_age_status: TrendStatus | None = None
+    target_age_reason: str | None = None  # 미정이면 이유
+    products: list[InsightProduct] = Field(default_factory=list)
+    products_reason: str | None = None  # 없으면 이유
+    shorts_format: str | None = None  # 이 주제 숏츠 영상에서 가장 많은 형식
+    shorts_format_samples: int | None = Field(default=None, ge=0)
+    shorts_format_reason: str | None = None
+    limits: list[str] = Field(default_factory=list)  # 한계 (평가셋 없음, 상대값 등)
+    example_ideas: list[str] = Field(default_factory=list)  # 이 주제를 쓴 예시 아이디어 (참고용)
+    score: float = 0.0  # 순서를 정한 코드 점수 (가중치는 회사 설정)
+
+
+class TrendInsightBriefOutput(AxModel):
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = None
+    day: dt.date | None = None  # 한국 날짜
+    rules_version: str = ""
+    insights: list[TrendInsight] = Field(default_factory=list)
+    cached: bool = False
+    generated_at: UtcDatetime | None = None
+    sources: list[str] = Field(default_factory=list)  # 묶은 skill 결과
+    limits: list[str] = Field(default_factory=list)  # 브리프 전체 한계
+    summary: str = ""
