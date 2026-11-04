@@ -420,8 +420,11 @@ async def make_opportunities(
     seeds = {_n(s.keyword): s for s in profile.seed_keywords}
     products = {p.product_id: p for p in catalog_products}
     cards: list[DomainOpportunity] = []
+    skipped = not_material(topics, cats, env)
     for topic in topics:
         k = topic.name
+        if k in skipped:
+            continue
         seed = seeds.get(_n(topic.seed))
         consumption: list[OpportunityEvidence] = []
         for item in plan.items:
@@ -468,8 +471,33 @@ async def make_opportunities(
     if not from_subtopics:
         for c in cards:
             c.limits.append("하위 주제 넓히기 결과가 없어 씨앗 키워드(상품 이름) 단위 카드")
+    if skipped:
+        note = "광고 재료가 아니라 뺀 하위 주제: " + ", ".join(
+            f"{k}({why})" for k, why in skipped.items()
+        )
+        for c in cards:
+            c.limits.append(note)
     await write_lines(cards, llm, context_id, queries)
     return OpportunityResult(cards, None, plan.plan_id, queries)
+
+
+def not_material(
+    topics: Sequence[Topic], cats: Mapping[str, str | None], env: Mapping[str, str]
+) -> dict[str, str]:
+    """카드에서 뺄 하위 주제 → 이유. 공용 광고 재료 규칙 중 '늘 빼는 분류'와 회사 제외 분류만 본다.
+
+    회사 씨앗에서 나온 하위 주제라 트렌드 허용 분류 목록(`[promo] trend_categories`)은 보지 않는다
+    (브리프의 회사 관련 인사이트와 같은 이유: 빌려 올 IP·인물이 아니다).
+    """
+    from data_agent.skills.ad_material import NEVER_TREND, load_rules
+
+    rules = load_rules(env)
+    out: dict[str, str] = {}
+    for t in topics:
+        cat = cats.get(t.name)
+        if cat in NEVER_TREND or (cat is not None and cat in rules.exclude):
+            out[t.name] = f"{cat} 분류"
+    return out
 
 
 def own_shorts(

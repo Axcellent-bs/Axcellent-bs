@@ -120,6 +120,10 @@ class SubtopicStore:
                 "CREATE TABLE IF NOT EXISTS searches (seed TEXT PRIMARY KEY,"
                 " searched_at TEXT NOT NULL, day TEXT NOT NULL, shorts TEXT NOT NULL)"
             )
+            self._conn.execute(  # 축 결정 (같은 축 목록·같은 이름이면 같은 축)
+                "CREATE TABLE IF NOT EXISTS axes (axes TEXT NOT NULL, name TEXT NOT NULL,"
+                " axis TEXT NOT NULL, PRIMARY KEY (axes, name))"
+            )
 
     def close(self) -> None:
         self._conn.close()
@@ -135,6 +139,23 @@ class SubtopicStore:
             Short(v["id"], v["title"], tuple(v["tags"]), v["views"]) for v in json.loads(row[1])
         ]
         return datetime.fromisoformat(row[0]), items
+
+    def axes(self, axes: Sequence[str], names: Sequence[str]) -> dict[str, str]:
+        key = json.dumps(list(axes), ensure_ascii=False)
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT name, axis FROM axes WHERE axes = ?", (key,)
+            ).fetchall()
+        wanted = {_n(n): n for n in names}
+        return {wanted[r[0]]: r[1] for r in rows if r[0] in wanted}
+
+    def save_axes(self, axes: Sequence[str], picked: Mapping[str, str]) -> None:
+        key = json.dumps(list(axes), ensure_ascii=False)
+        with self._lock, self._conn:
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO axes VALUES (?,?,?)",
+                [(key, _n(n), a) for n, a in picked.items()],
+            )
 
     def searched_on(self, day: str) -> int:
         with self._lock:
@@ -427,9 +448,15 @@ async def make_subtopics(
         picked.sort(key=lambda s: (-s.videos, s.name))
         out.subtopics = picked[: config.max_total]
         out.dropped_common = sorted(dropped_common)[:30]
-        if out.subtopics:
-            queries.append(f"llm domain_subtopics axes items={len(out.subtopics)}")
-        why = await classify(out.subtopics, profile.subtopic_axes, llm, context_id)
+        known = store.axes(profile.subtopic_axes, [s.name for s in out.subtopics])
+        for s in out.subtopics:
+            s.axis = known.get(s.name, s.axis)
+        todo = [s for s in out.subtopics if s.name not in known]
+        if todo:
+            queries.append(f"llm domain_subtopics axes items={len(todo)}")
+        why = await classify(todo, profile.subtopic_axes, llm, context_id)
+        if not why and todo:
+            store.save_axes(profile.subtopic_axes, {s.name: s.axis for s in todo})
         if why:
             out.limits.append(why)
         out.limits.append(

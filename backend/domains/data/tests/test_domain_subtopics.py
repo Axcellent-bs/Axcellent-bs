@@ -202,3 +202,13 @@ def test_baseline_is_the_median_over_cached_seed_searches(tmp_path: Path) -> Non
     # 만년필 a1·a2·a3·a5(1000·3000·2000·500, a5는 영상 언어가 ko라 남음) + 무지 노트
     # b1·b2(800·1200) → 중앙값 1100, 6개 (a4는 길이 밖)
     assert base == (1100.0, 6)
+
+
+def test_axis_decisions_are_kept_so_the_same_name_keeps_its_axis(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    first = _run(env, FakeYouTube())
+    flipped = AxisLLM({"필사": "같이 묶이는 관심사"})  # 두 번째 LLM 답이 달라도
+    again = _run(env, FakeYouTube(), llm=flipped)
+    a = {s.name: s.axis for s in first.subtopics}
+    b = {s.name: s.axis for s in again.subtopics}
+    assert a == b and b["필사"] == "활용 방식" and flipped.seen == {}  # 다시 묻지 않음

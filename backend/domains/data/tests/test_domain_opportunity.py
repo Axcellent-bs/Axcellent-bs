@@ -258,3 +258,27 @@ def test_subtopic_fit_uses_the_seed_search_baseline_and_seeds_share_cards() -> N
     # 분모는 인기 차트(숏츠 통계 10,000)가 아니라 같은 방식으로 모은 씨앗 검색 숏츠 전체 20,000
     assert fit is not None and fit.ratio == 1.5 and fit.level == "high"
     assert fit.overall_median_views == 20000.0 and "씨앗 검색 숏츠 전체(120개)" in fit.reason
+
+
+def test_political_subtopics_are_left_out_with_a_reason() -> None:
+    from ax_contracts.schemas.data import DomainSubtopic, DomainSubtopicsOutput
+
+    subs = DomainSubtopicsOutput(status="known", subtopics=[
+        DomainSubtopic(name="역대 대통령", seed_keyword="서점", axis="기타", videos=4),
+        DomainSubtopic(name="그림책 낭독", seed_keyword="고양이 그림책", axis="활용 방식",
+                       videos=3),
+    ])  # fmt: skip
+
+    async def classify(names: list[str]) -> dict[str, str | None]:
+        return {"역대 대통령": "정치·사회", "그림책 낭독": "교육·책"}
+
+    res = asyncio.run(
+        do.make_opportunities(
+            env={}, llm=LineLLM({}), profile=PROFILE, plan=PLAN, sources=SOURCES,
+            shorts=_shorts(), catalog_products=[], classify=classify,
+            trend_connector=FakeTrend(), age_fn=_ages, consumption_fn=None, day=END, end=END,
+            subtopics=subs,
+        )
+    )  # fmt: skip
+    assert [c.subtopic for c in res.cards] == ["그림책 낭독"]
+    assert any("역대 대통령(정치·사회 분류)" in x for x in res.cards[0].limits)
