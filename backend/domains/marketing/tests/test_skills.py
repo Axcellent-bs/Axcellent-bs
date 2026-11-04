@@ -595,3 +595,150 @@ def test_mock_mode_keeps_coupons_in_memory_without_calling_shop_api() -> None:
     _call_before = len(events.MOCK_PUBLISHED)
     result = _coupon()
     assert result["output"]["coupon_id"] == "cpn_0001" and len(events.MOCK_PUBLISHED) > _call_before
+
+
+def _banner_shop(monkeypatch: pytest.MonkeyPatch, handler=None) -> list[httpx.Request]:  # noqa: ANN001
+    """공지 배너를 shop-api(가짜)로 보내게 한다. 쿠폰은 메모리로 둔다."""
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if handler is not None:
+            return handler(request)
+        if request.method == "DELETE":
+            return httpx.Response(200, json={"data": {"status": "ended"}, "meta": {}})
+        body = json.loads(request.content)
+        return httpx.Response(201, json={"data": {"notice_id": body["notice_id"]}, "meta": {}})
+
+    monkeypatch.setenv("MARKETING_NOTICE_SOURCE", "shop-api")
+    monkeypatch.setenv("MARKETING_COUPON_SOURCE", "memory")
+    monkeypatch.setattr(
+        shop_client, "_client", httpx.AsyncClient(transport=httpx.MockTransport(answer))
+    )
+    return seen
+
+
+def _draft(kind: str = "incident_opened", **overrides) -> str:  # noqa: ANN003
+    data = {**DRAFT_INPUT, "kind": kind} | overrides
+    return _call("draft_notice", data)["output"]["draft_id"]
+
+
+def test_published_notice_is_posted_as_a_shop_banner_with_a_draft_based_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """통과한 공지는 쇼핑몰 배너로 올린다. 번호는 초안에서 만들어 재시작해도 겹치지 않는다."""
+    _fake_execute(monkeypatch, _decision())
+    seen = _banner_shop(monkeypatch)
+    draft_id = _draft()
+    result = _call("publish_notice", {"draft_id": draft_id})
+    assert result["status"] == "completed"
+    notice_id = result["output"]["notice_id"]
+    assert notice_id == f"ntc_{draft_id.removeprefix('drf_')}"
+    (request,) = seen
+    assert request.method == "POST" and request.url.path == "/api/shop/banners"
+    assert request.headers["authorization"] == "Bearer mock:marketing"
+    sent = json.loads(request.content)
+    assert sent["notice_id"] == notice_id and sent["context_id"] == CTX
+    assert sent["text"] == _call("get_notice", {"notice_id": notice_id})["output"]["public_text"]
+    assert events.MOCK_PUBLISHED[-1].data["notice_id"] == notice_id
+
+
+def test_notice_is_not_posted_unless_executed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_execute(
+        monkeypatch, _decision(status="held", hold_reason="over_threshold", review_id="r")
+    )
+    seen = _banner_shop(monkeypatch)
+    assert _call("publish_notice", {"draft_id": _draft()})["outcome"] == "held"
+    assert seen == []
+
+
+@pytest.mark.parametrize(
+    ("answer", "code"),
+    [
+        (lambda r: httpx.Response(422, json={"error": {"code": "VALIDATION"}}), "VALIDATION"),
+        (lambda r: httpx.Response(503, text="down"), "UNAVAILABLE"),
+    ],
+)
+def test_banner_failure_is_not_a_published_notice_and_can_be_retried(
+    monkeypatch: pytest.MonkeyPatch,
+    answer,
+    code: str,  # noqa: ANN001
+) -> None:
+    """쇼핑몰에서 실패하면 게시로 기록하지 않고 이벤트도 안 보낸다. 다시 보내면 올린다."""
+    _fake_execute(monkeypatch, _decision())
+    state = {"up": False}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if state["up"]:
+            body = json.loads(request.content)
+            return httpx.Response(201, json={"data": {"notice_id": body["notice_id"]}})
+        return answer(request)
+
+    _banner_shop(monkeypatch, handler)
+    draft_id = _draft()
+    failed = _call("publish_notice", {"draft_id": draft_id})
+    assert (failed["status"], failed["outcome"]) == ("failed", f"shop_banner_failed:{code}")
+    assert not any(e.type.value == "notice.published" for e in events.MOCK_PUBLISHED)
+    assert _call("list_active_notices", {})["output"]["total"] == 0
+    state["up"] = True
+    retried = _call("publish_notice", {"draft_id": draft_id})
+    assert retried["status"] == "completed"
+    assert _call("list_active_notices", {})["output"]["total"] == 1
+
+
+def test_too_long_banner_text_is_rejected_before_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """배너 문구가 200자를 넘으면 안전 장치도 쇼핑몰도 부르지 않는다."""
+    seen_exec = _fake_execute(monkeypatch, _decision())
+    seen = _banner_shop(monkeypatch)
+    promises = [
+        {
+            "type": "points",
+            "amount": 1000 + n,
+            "condition_code": "LATE_3D",
+            "condition": "3일 이상 지연",
+        }
+        for n in range(8)
+    ]
+    result = _call("publish_notice", {"draft_id": _draft(promises=promises)})
+    assert (result["status"], result["outcome"]) == ("failed", "notice_text_too_long")
+    assert seen == [] and seen_exec == []
+
+
+def test_resolved_notice_takes_down_the_incident_banner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """복구 공지를 올리면 같은 사건의 장애 배너를 내린다. 쇼핑몰에 없는 옛 배너(404)는 넘어간다."""
+    _fake_execute(monkeypatch, _decision())
+    seen = _banner_shop(monkeypatch)
+    opened = _call("publish_notice", {"draft_id": _draft("incident_opened")})["output"]["notice_id"]
+    _call("publish_notice", {"draft_id": _draft("incident_resolved")})
+    methods = [(r.method, r.url.path) for r in seen]
+    assert methods[-1] == ("DELETE", f"/api/shop/banners/{opened}")
+    assert methods.count(("POST", "/api/shop/banners")) == 2
+
+
+def test_end_banner_ignores_a_banner_the_shop_does_not_have(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_execute(monkeypatch, _decision())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "DELETE":
+            return httpx.Response(404, json={"error": {"code": "BANNER_NOT_FOUND"}})
+        body = json.loads(request.content)
+        return httpx.Response(201, json={"data": {"notice_id": body["notice_id"]}})
+
+    _banner_shop(monkeypatch, handler)
+    _call("publish_notice", {"draft_id": _draft("incident_opened")})
+    resolved = _call("publish_notice", {"draft_id": _draft("incident_resolved")})
+    assert resolved["status"] == "completed"
+
+
+def test_only_banner_channel_goes_to_the_shop(monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_execute(monkeypatch, _decision())
+    seen = _banner_shop(monkeypatch)
+    result = _call("publish_notice", {"draft_id": _draft(channel_code="email")})
+    assert result["status"] == "completed" and result["output"]["notice_id"].startswith("ntc_0")
+    assert seen == []
+
+
+def test_mock_mode_keeps_notices_in_memory() -> None:
+    assert _publish_notice() == "ntc_0001"

@@ -45,6 +45,7 @@ from marketing_agent.schemas import (
 )
 
 SOURCE = "marketing"
+BANNER_TEXT_MAX = 200  # shop-api 배너 문구 상한
 
 
 class State:
@@ -177,6 +178,11 @@ async def publish_notice(request: AgentRequest) -> AgentResult:
     if draft is None:
         return _result(request, TaskStatus.FAILED, outcome="draft_not_found")
 
+    to_shop = draft.channel_code == "banner" and shop_client.notice_source() == "shop-api"
+    if to_shop and len(draft.public_text) > BANNER_TEXT_MAX:
+        # 쇼핑몰 배너 문구는 200자까지다. 안전 장치를 부르기 전에 막아 실행 기록을 남기지 않는다
+        return _result(request, TaskStatus.FAILED, outcome="notice_text_too_long")
+
     key = f"{request.meta.context_id}:publish_notice:{draft.draft_id}"
     evidence = _evidence(["publish_notice"], f"초안 {draft.draft_id} 게시 요청", [draft.draft_id])
     decision = await execute(
@@ -189,7 +195,28 @@ async def publish_notice(request: AgentRequest) -> AgentResult:
     if blocked:
         return blocked
 
-    notice_id = STATE.notices.publish(request.meta.context_id, draft)
+    notice_id = None
+    if to_shop:
+        # 쇼핑몰 배너 번호는 초안에서 만든다(같은 초안은 같은 번호라
+        # 재요청·재시작에도 한 번만 올라간다).
+        # 쇼핑몰에서 실패하면 게시한 것으로 기록하지 않고, 같은 요청을 다시 보내면 이어서 올린다
+        notice_id = f"ntc_{draft.draft_id.removeprefix('drf_')}"
+        try:
+            await shop_client.post_banner(
+                notice_id=notice_id,
+                text=draft.public_text,
+                valid_from=draft.valid_from,
+                valid_to=draft.valid_to,
+                context_id=request.meta.context_id,
+            )
+            if (
+                draft.kind == "incident_resolved"
+            ):  # 복구 공지가 나가면 같은 사건의 장애 배너를 내린다
+                for earlier in STATE.notices.open_incident_notice_ids(request.meta.context_id):
+                    await shop_client.end_banner(earlier)
+        except shop_client.ShopError as exc:
+            return _result(request, TaskStatus.FAILED, outcome=f"shop_banner_failed:{exc.code}")
+    notice_id = STATE.notices.publish(request.meta.context_id, draft, notice_id)
     await _emit(
         request,
         EventType.NOTICE_PUBLISHED,
