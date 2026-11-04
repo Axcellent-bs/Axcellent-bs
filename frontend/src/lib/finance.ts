@@ -84,6 +84,34 @@ export interface ExportPackage {
 export interface BankImport { file: string; at: string; status: "imported" | "failed"; added?: number; rows?: number; skipped?: number; reason?: string }
 export interface ExportsView { packages: ExportPackage[]; bank_imports: BankImport[] }
 
+// 캠페인 재무: 손익 기록, 예산 판단, 실패 교훈, 총괄에 낸 의견
+export type CampaignVerdict = "good" | "neutral" | "bad";
+export type BudgetDecision = "approved" | "conditional" | "rejected";
+export interface CampaignRecord {
+  campaign_id: string; campaign_name: string; channel: string; period_from: string; period_to: string;
+  spend_krw: number; coupon_krw: number; gmv_krw: number | null; revenue_krw: number | null; profit_krw: number | null;
+  roi: number | null; roas: number | null; verdict: CampaignVerdict | null; status: "recorded" | "waiting_revenue"; source: string;
+  applied_rules: AppliedRule[];
+}
+export interface BudgetReview {
+  review_id: string; campaign_id: string; campaign_name: string; channel: string; requested_krw: number; approved_limit_krw: number;
+  decision: BudgetDecision; reasons: string[]; recommendation: string; reviewed_at: string; applied_rules: AppliedRule[];
+}
+export interface CampaignLesson { lesson_id: string; campaign_name: string; channel: string; profit_krw: number; roi: number | null; status: "open" | "closed"; learned_at: string }
+export interface OpinionRow {
+  status: "pending" | "delivered"; attempts: number; last_problem?: string | null;
+  opinion: { opinion_id: string; kind: string; campaign_name: string | null; verdict: string | null; recommendation: string; submitted_at: string };
+}
+export interface CampaignView {
+  campaigns: CampaignRecord[]; reviews: BudgetReview[]; lessons: CampaignLesson[]; opinions: OpinionRow[];
+  budget: { month: string; monthly_krw: number; provisional: boolean; committed_krw: number };
+  break_even_roas: number | null;
+}
+export interface FinanceInsight {
+  insight_id: string; kind: string; severity: "warn" | "info"; title: string; message: string;
+  evidence: { label: string; value: string | number | null }[]; recommendation: string; applied_rules: AppliedRule[];
+}
+
 export interface ClosingReport {
   applied_rules?: AppliedRule[];
   period: ClosingPeriod;
@@ -552,6 +580,10 @@ export const finance = {
   sellerReport: (date?: string | null) => fin<Envelope<SellerReport>>(`/api/finance/tax/seller-report${query({ date })}`),
   downloadSellerReport: (format: "csv" | "xlsx", date?: string | null) =>
     download(`/api/finance/tax/seller-report${query({ date, format })}`, `seller-sales.${format}`),
+  /** 캠페인 손익·예산 판단·교훈·의견 */
+  campaigns: () => fin<Envelope<CampaignView>>("/api/finance/campaigns"),
+  /** 사람이 놓치기 쉬운 재무 패턴과 근거 */
+  insights: () => fin<Envelope<FinanceInsight[]>>("/api/finance/insights"),
   /** 법인세 참고 추정. 신고에 쓰지 않는다 */
   incomeEstimate: () => fin<Envelope<IncomeEstimate>>("/api/finance/tax/income-estimate"),
   /** 자동으로 만든 파일과 은행 폴더 기록 */
@@ -651,8 +683,8 @@ export function todayKst(now = new Date()): string {
 }
 
 /** todo.link 또는 kind → 화면 탭 id */
-export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "tax";
-export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "tax"];
+export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "tax" | "campaigns";
+export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "tax", "campaigns"];
 const TODO_TAB: Record<TodoKind, FinanceTab> = {
   settlement_batch: "settlements", settlement_deadline: "settlements", closing_confirm: "closing", recon_exception: "reconciliation", team_budget: "policy",
 };

@@ -81,3 +81,10 @@ ax-contracts, ax-agent-template, data 에이전트(`impact_analysis`, `fraud_sco
 - 판매자 소개·구매자 메모 같은 `untrusted` 문장을 금액·심사 판단에 쓰지 않는다
 - 기준표를 읽거나 바꾸지 않는다 (사람이 safety 레포 설정을 PR로)
 - 쿠폰·환불은 끝난 금액을 장부에 기록만 한다
+
+## 규칙·캠페인 재무
+
+- 규칙과 근거: `finance_rules.toml`. 값을 바꾸면 version을 올린다. 결과마다 `applied_rules`가 붙는다
+- 캠페인: `record_campaign_result`, `review_campaign_budget`, `verify_campaign_budget`, `finance_insights`. 쿠폰·환불은 판단하지 않는다
+- 시뮬레이션: `uv run python -m finance_agent.simulation`. 가정은 `backend/docs/notes/finance/simulation-assumptions.md`
+- 파일 자동화 환경변수: `FINANCE_EXPORT_DIR`, `FINANCE_BANK_INBOX`, `FINANCE_TAX_HANDOFF_DIR`, `FINANCE_EXPORT_SECONDS`

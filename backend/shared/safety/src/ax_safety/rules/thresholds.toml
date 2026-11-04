@@ -13,7 +13,7 @@
 # - param·paths_within·paths_avoid·paths_named: 금액이 아닌 규칙(아래 각 규칙 주석 참고)
 # op: ">=", ">", "<=", "<". when은 params가 이 값일 때만 규칙을 적용한다.
 
-version = 4
+version = 5
 
 # B 교차검증 응답 마감(초). 넘으면 실행하지 않고 C 보류
 verify_timeout_seconds = 30
@@ -574,3 +574,11 @@ metric = "param"
 field = "duration_s"
 op = ">"
 value = 8
+
+# ---- 캠페인 예산. 값은 시작값. 월 예산(재무 finance_rules.toml, 임시 100만 원)의 절반 이상은 사람이 본다
+[[rules]]
+key = "campaign_budget_single"
+action = "start_campaign"
+metric = "amount"
+op = ">="
+value = 500000

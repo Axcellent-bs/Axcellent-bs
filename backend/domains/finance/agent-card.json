@@ -45,6 +45,57 @@
       ],
       "verifier": null,
       "priority": "recommended"
+    },
+    {
+      "id": "record_campaign_result",
+      "description": "캠페인 성과를 받아 손익(수수료 기준)을 장부에 적고 효율을 판단해 총괄에 의견을 낸다. 재무 기록만 남기고 외부 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignResultInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "marketing",
+        "orchestrator",
+        "data"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "review_campaign_budget",
+      "description": "캠페인 예산 요청을 승인·조건부·거절로 판단하고 이유와 근거를 돌려준다. 쿠폰 발급·환불은 대상이 아니다. 재무 기록만 남기고 외부 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "marketing",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "verify_campaign_budget",
+      "description": "안전 관문 start_campaign의 금액이 재무 승인 한도 안인지 검증한다. 재무 기록만 남기고 외부 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#VerifyAmountInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "safety"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "finance_insights",
+      "description": "사람이 놓치기 쉬운 재무 패턴과 근거 데이터를 돌려준다. 재무 기록만 남기고 외부 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
     }
   ]
 }

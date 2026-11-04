@@ -28,6 +28,7 @@ from finance_agent.handlers import (
     SUBSCRIBED_EVENTS,
     closing_key,
     on_event,
+    retry_opinions,
     state,
 )
 from finance_agent.incidents import add_incident_api
@@ -49,6 +50,7 @@ logger = logging.getLogger("ax.finance")
 DEFAULT_SELF_TEST_SECONDS = 600
 SELF_TEST_FIRST_DELAY = 5.0
 DEFAULT_EXPORT_SECONDS = 3600
+OPINION_RETRY_SECONDS = 600.0
 EXPORT_FIRST_DELAY = 30.0
 SELF_TEST_SCHEDULE: dict[str, Any] = {"interval_seconds": 0, "next_run_at": None}
 Trigger = Literal["auto", "manual"]
@@ -126,6 +128,16 @@ async def self_test_loop(interval: float, first_delay: float = SELF_TEST_FIRST_D
         except Exception:  # 다음 회차는 그대로 돈다
             logger.exception("재무 AI 자동 테스트 중 오류")
         delay = interval
+
+
+async def opinion_retry_loop(interval: float = OPINION_RETRY_SECONDS) -> None:
+    """총괄에 못 보낸 의견을 다시 보낸다. 총괄 쪽 skill이 생기면 쌓인 의견이 전달된다."""
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await retry_opinions()
+        except Exception:
+            logger.exception("재무 의견 다시 보내기 중 오류")
 
 
 def export_seconds() -> int:
@@ -225,6 +237,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         tasks.append(asyncio.create_task(persist.save_loop(state, saved_to, last_saved)))
     if interval:
         tasks.append(asyncio.create_task(self_test_loop(interval, SELF_TEST_FIRST_DELAY)))
+    if saved_to is not None:  # 시험과 단독 실행에서는 돌리지 않는다
+        tasks.append(asyncio.create_task(opinion_retry_loop()))
     if export_interval := export_seconds():
         tasks.append(asyncio.create_task(export_loop(export_interval)))
     if closing_interval:

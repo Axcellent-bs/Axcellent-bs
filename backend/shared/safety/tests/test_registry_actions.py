@@ -692,3 +692,58 @@ async def test_change_proposal_actions_are_a_for_support_only(gate: Gate, act, a
     assert (ok.grade, ok.status) == ("A", "executed")
     other = await gate.execute(act(action, "marketing", f"{action}-other"))
     assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
+
+
+# ---------------------------------------------------------------- 캠페인 예산 (재무 브레이크)
+def _campaign(act, key: str, budget: int = 100_000, **over: Any):
+    params = {
+        "campaign_id": "cmp_1",
+        "campaign_name": "가을",
+        "channel": "검색",
+        "budget_krw": budget,
+    }
+    return act("start_campaign", "marketing", key, **(params | over))
+
+
+@pytest.mark.asyncio
+async def test_campaign_within_finance_limit_runs(gate: Gate, verifier: Any, act) -> None:
+    decision = await gate.execute(_campaign(act, "c1"))
+    assert (decision.grade, decision.status, decision.verifier) == ("B", "executed", "finance")
+    assert verifier.tasks[0].skill == "verify_campaign_budget"
+    assert verifier.tasks[0].input["computed_amount"] == 100_000
+
+
+@pytest.mark.asyncio
+async def test_finance_rejection_stops_the_campaign(gate: Gate, verifier: Any, act) -> None:
+    verifier.result = "rejected"
+    stopped = await gate.execute(_campaign(act, "c1"))
+    assert (stopped.status, stopped.hold_reason) == ("rejected", HoldReason.VERIFY_REJECTED)
+
+
+@pytest.mark.asyncio
+async def test_finance_silence_is_not_approval(gate: Gate, verifier: Any, act) -> None:
+    verifier.result = "raise"
+    held = await gate.execute(_campaign(act, "c1"))
+    assert (held.status, held.hold_reason) == ("held", HoldReason.VERIFY_TIMEOUT)
+
+
+@pytest.mark.asyncio
+async def test_big_campaign_always_needs_a_person(gate: Gate, verifier: Any, act) -> None:
+    held = await gate.execute(_campaign(act, "c1", budget=500_000))
+    assert (held.grade, held.status) == ("C", "held") and verifier.tasks == []
+
+
+@pytest.mark.asyncio
+async def test_campaign_amount_must_be_an_integer(gate: Gate, act) -> None:
+    held = await gate.execute(_campaign(act, "c1", budget_krw="100000"))
+    assert held.hold_reason == HoldReason.SCHEMA_INVALID
+
+
+@pytest.mark.asyncio
+async def test_only_marketing_starts_campaigns_and_coupons_skip_finance(
+    gate: Gate, verifier: Any, act, coupon
+) -> None:
+    other = await gate.execute(act("start_campaign", "hr", "c9", budget_krw=1000))
+    assert other.hold_reason == HoldReason.UNREGISTERED_ACTION
+    await gate.execute(coupon(1, 1000, purpose_code="campaign", key="k9"))
+    assert verifier.tasks == []  # 쿠폰은 재무 검증을 받지 않는다

@@ -4,6 +4,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ClosingSection } from "@/components/finance/Closing";
 import { DeadlineSection, PayablesSection, VarianceSection } from "@/components/finance/CloseControls";
 import { BankSection, CashflowSection, ChecklistSection } from "@/components/finance/CashAndClose";
+import { CampaignsSection } from "@/components/finance/Campaigns";
 import { TaxSection } from "@/components/finance/Tax";
 import { StatementsSection } from "@/components/finance/Statements";
 import { Chip, ErrorBox, MetaLine, MockBadge, TONE, Waiting, useResource } from "@/components/finance/bits";
@@ -39,6 +40,7 @@ const TAB_LABEL: Record<FinanceTab, string> = {
   settlements: "③ 판매자 정산",
   policy: "④ 팀 예산",
   tax: "⑤ 세무 지원",
+  campaigns: "⑥ 캠페인 재무",
 };
 
 const KPI: { key: keyof FinanceKpis; label: string; hint: string }[] = [
@@ -362,6 +364,7 @@ export default function FinancePage() {
           {tab === "settlements" && <div className="mt-4"><CashflowSection tick={tick} /></div>}
           {tab === "policy" && <TeamBudgetSection tick={tick} />}
           {tab === "tax" && <TaxSection tick={tick} />}
+          {tab === "campaigns" && <CampaignsSection tick={tick} />}
         </div>
       </div>
 
