@@ -133,7 +133,13 @@ def test_over_budget_is_conditional_down_to_remaining() -> None:
 
 def test_budget_counts_spent_and_approved_but_unfinished() -> None:
     done = {"a": cp.compute_result(_result("a", gmv=1_800_000, spend=600_000))}
-    pending = [{**_decide(_ask(300_000, "b")), "reviewed_at": "2026-10-10T00:00:00Z"}]
+    pending = [
+        {
+            **_decide(_ask(300_000, "b")),
+            "reviewed_at": "2026-10-10T00:00:00Z",
+            "started_krw": 300_000,
+        }
+    ]
     d = _decide(_ask(200_000), campaigns=done, reviews=pending)
     assert d["remaining_budget_krw"] == 100_000
     assert (d["decision"], d["approved_limit_krw"]) == ("conditional", 100_000)
@@ -197,7 +203,7 @@ def test_marketing_request_never_touches_coupon_or_refund() -> None:
 # ---------------------------------------------------------------- 교훈
 def test_lesson_cuts_limit_then_good_result_restores_it() -> None:
     lessons: list[dict] = []
-    bad = _bad("a", "2026-09-01", 10_000)
+    bad = _bad("a", "2026-09-01", 100_000)
     from datetime import UTC, datetime
 
     at = datetime(2026, 10, 1, tzinfo=UTC)
@@ -214,12 +220,15 @@ def test_lesson_cuts_limit_then_good_result_restores_it() -> None:
 
 
 def test_lesson_floor() -> None:
-    lessons = [{"channel": "릴스", "status": "open", "campaign_name": f"c{i}"} for i in range(5)]
+    lessons = [
+        {"channel": "릴스", "status": "open", "campaign_name": f"c{i}", "spend_krw": 200_000}
+        for i in range(5)
+    ]
     assert _decide(_ask(200_000), lessons=lessons)["approved_limit_krw"] == 50_000
 
 
 def test_compare_shows_decision_changed_by_history() -> None:
-    bad = _bad("a", "2026-09-01", 10_000)
+    bad = _bad("a", "2026-09-01", 100_000)
     lessons: list[dict] = []
     from datetime import UTC, datetime
 
@@ -383,10 +392,16 @@ def test_gate_verification_uses_the_approved_limit() -> None:
     _sender(state())
     state().cash_override = 10_000_000
     params = {"campaign_id": "new", "campaign_name": "n", "channel": "릴스"}
-    bad = cp.compute_result(_result("old", gmv=0, spend=10_000, period_to="2026-09-01"))
+    bad = cp.compute_result(_result("old", gmv=0, spend=100_000, period_to="2026-09-01"))
     state().records.campaigns["old"] = bad
     state().records.lessons.append(
-        {"channel": "릴스", "status": "open", "campaign_name": "old", "campaign_id": "old"}
+        {
+            "channel": "릴스",
+            "status": "open",
+            "campaign_name": "old",
+            "campaign_id": "old",
+            "spend_krw": 100_000,
+        }
     )
     client = TestClient(app)
     client.post("/a2a", json=_body("review_campaign_budget", _ask(100_000), "mock:marketing"))
@@ -543,3 +558,36 @@ def test_scenario_reports_short_term_and_repeat_profit() -> None:
     assert a["total_ltv_profit_krw"] > a["total_profit_krw"] > 0
     b = asyncio.run(run_scenario("b"))["summary"]
     assert b["total_ltv_profit_krw"] < 0
+
+
+# ---------------------------------------------------------------- 검토에서 나온 문제
+def test_lowered_request_after_failure_is_not_cut_again() -> None:
+    """실패 이력 채널이 한도만큼 낮춰 내면 승인된다. 요청액 기준이면 끝없이 깎였다."""
+    bad = _bad("a", "2026-09-01", 100_000)
+    lessons = [{**bad, "status": "open", "lesson_id": "l"}]
+    first = _decide(_ask(100_000), campaigns={"a": bad}, lessons=lessons)
+    assert (first["decision"], first["approved_limit_krw"]) == ("conditional", 50_000)
+    lowered = _decide(_ask(50_000), campaigns={"a": bad}, lessons=lessons)
+    assert (lowered["decision"], lowered["approved_limit_krw"]) == ("approved", 50_000)
+
+
+def test_reviews_that_never_started_do_not_hold_budget() -> None:
+    """사람이 거절했거나 시작하지 않은 건이 이달 예산을 잡지 않는다."""
+    unstarted = [{**_decide(_ask(800_000, "b")), "reviewed_at": "2026-10-10T00:00:00Z"}]
+    d = _decide(_ask(400_000), reviews=unstarted)
+    assert (d["decision"], d["remaining_budget_krw"]) == ("approved", 1_000_000)
+
+
+def test_gate_verification_holds_budget_and_rechecks_at_start() -> None:
+    """관문 검증을 통과하면 예산을 잡고, 그 뒤 다른 캠페인은 줄어든 예산으로 판단한다."""
+    _sender(state())
+    state().cash_override = 10_000_000
+    one = {"campaign_id": "one", "campaign_name": "n", "channel": "검색"}
+    two = {"campaign_id": "two", "campaign_name": "n", "channel": "검색"}
+    ask = _ask(600_000, "two", "검색")
+    TestClient(app).post("/a2a", json=_body("review_campaign_budget", ask, "mock:marketing"))
+    assert _verify(600_000, one)["output"]["decision"] == "approved"
+    # 먼저 60만 원 승인을 받아 뒀어도 시작 직전에 남은 40만 원으로 다시 본다
+    late = _verify(600_000, two)["output"]
+    assert (late["decision"], late["approved_limit_krw"]) == ("rejected", 400_000)
+    assert _verify(400_000, two)["output"]["decision"] == "approved"

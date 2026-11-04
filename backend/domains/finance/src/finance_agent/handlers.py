@@ -654,14 +654,11 @@ async def verify_campaign_budget(request: AgentRequest) -> AgentResult:
             outcome="rejected",
             output={"decision": "rejected", "reason_code": "invalid_params"},
         )
-    # 마케팅이 미리 받은 판단이 있으면 그 한도를 쓴다. 없으면 지금 판단한다
-    previous = [
-        r
-        for r in state().records.budget_reviews
-        if r["campaign_id"] == ask.campaign_id and r["month"] == fc.today().isoformat()[:7]
-    ]
-    review = previous[-1] if previous else await review_budget(ask, request.meta.context_id)
+    # 먼저 받은 판단은 그사이 다른 캠페인이 시작했으면 틀릴 수 있어 시작 직전에 다시 판단한다
+    review = await review_budget(ask, request.meta.context_id)
     ok = review["decision"] != "rejected" and ask.requested_krw <= review["approved_limit_krw"]
+    if ok:
+        review["started_krw"] = ask.requested_krw  # 관문이 곧 실행한다. 이때부터 예산을 잡는다
     first_rule = next(
         (
             r["rule_id"]
