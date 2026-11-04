@@ -21,6 +21,12 @@
 | `GET /api/finance/tax/seller-report?date=&format=` | ⑤ 판매자별 판매 명세 (제75조 초안) | 없음 |
 | `GET /api/finance/team-budget?month=YYYY-MM` | ④ 팀 예산 (팀 인원 × 인당 월 단가) | 없음 |
 | `POST /api/finance/team-budget/{month}/approve` | ④ 팀 예산 확정 (`signature` 일치) | **사람** |
+| `GET /api/finance/rules` | 재무·세무 규칙과 근거 | 없음 |
+| `GET /api/finance/tax/income-estimate?year=` | ⑤ 법인세 참고 추정 | 없음 |
+| `GET /api/finance/exports` | ⑤ 자동으로 만든 파일과 은행 폴더 기록 | 없음 |
+| `GET /api/finance/exports/{id}/files/{name}` | ⑤ 파일 내려받기 | 없음 |
+| `POST /api/finance/exports/run` | ⑤ 지금 만들기 | **사람** |
+| `POST /api/finance/exports/{id}/handoff` | ⑤ 세무 전달 요청 (`send_tax_package`) | **사람** |
 
 `meta`: `mock`, `collected_at`, `source`(`seed`|`shop-api`), `unavailable`(못 받은 자료 이름).
 정산 묶음 지급은 안전 관문이 항상 C로 보류하고 사람이 승인한다. 안전 관문에 닿지 않으면 503
@@ -29,6 +35,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import timedelta
 from typing import Any
@@ -46,6 +53,7 @@ from finance_agent import (
     close_checklist,
     closing,
     deadline,
+    exports,
     payables,
     reconciliation,
     settlement,
@@ -61,6 +69,7 @@ from finance_agent.handlers import (
     team_budget_data,
 )
 from finance_agent.human import human_from_authorization
+from finance_agent.rules import load_rules
 
 TODO_ITEMS = 10  # 할 일 카드에 바로 보여 줄 건수
 RECON_KO = {
@@ -86,6 +95,78 @@ async def _body(request: Request) -> dict[str, Any]:
     except ValueError:
         return {}
     return raw if isinstance(raw, dict) else {}
+
+
+# ---------------------------------------------------------------- 파일 자동화
+async def request_handoff(package: dict[str, Any]) -> dict[str, Any]:
+    """세무 자료 전달을 안전 관문에 요청한다(항상 C). 못 닿으면 기록만 남기고 다음에 다시 한다."""
+    attempt = package["handoff"].get("attempt", 0) + 1
+    summary = f"{package['month']} 재무·세무 자료 {len(package['files'])}개 세무 전달 승인 요청"
+    context_id = f"ctx_req_tax_{package['package_id']}"
+    meta_req = RequestMeta(
+        context_id=context_id,
+        token="finance-dashboard",
+        deadline=fc.now() + timedelta(seconds=40),
+        idempotency_key=f"{context_id}:send_tax_package:v{package['version']}:{attempt}",
+    )
+    params = {
+        "package_id": package["package_id"],
+        "version": package["version"],
+        "signature": package["signature"],
+        "files": [f["name"] for f in package["files"]],
+        "summary": summary,
+    }
+    evidence = Evidence(
+        queries=["finance:exports"],
+        data_summary=summary,
+        collected_at=fc.now(),
+        ref_ids=[package["package_id"]],
+    )
+    with agent_name_scope("finance"):
+        decision = await execute("send_tax_package", params, meta_req, evidence)
+    if decision.execution_id == UNAVAILABLE_EXECUTION or decision.status == "failed":
+        package["handoff"] = {
+            "status": "request_failed",
+            "attempt": attempt,
+            "at": fc.iso(fc.now()),
+        }
+        return package
+    package["handoff"] = {
+        "status": _batch_status(decision.status),
+        "review_id": decision.review_id,
+        "execution_id": decision.execution_id,
+        "attempt": attempt,
+        "requested_at": fc.iso(fc.now()),
+    }
+    return package
+
+
+async def refresh_handoff(package: dict[str, Any]) -> None:
+    """요청 중이면 사람의 결정을 읽어 반영하고, 승인됐으면 전달 폴더로 복사한다."""
+    handoff = package["handoff"]
+    await refresh_batch(handoff)
+    if handoff.get("status") == "approved" and "delivered_to" not in handoff:
+        handoff["delivered_to"] = exports.copy_to_handoff(package)
+
+
+_export_lock = asyncio.Lock()
+
+
+async def run_export_cycle(trigger: str = "auto") -> dict[str, Any]:
+    """은행 폴더 읽기 → 지난달 묶음 만들기 → 세무 전달 요청·결정 반영. 돈과 외부 제출은 없다.
+
+    자동 회차와 사람의 "지금 만들기"가 겹쳐도 승인 요청이 두 번 나가지 않게 한 번에 하나만 돈다.
+    """
+    async with _export_lock:
+        records = state().records
+        imported = exports.scan_inbox(records.bank_rows, records.bank_imports)
+        books = await state().fresh_books()
+        package = exports.make_package(books, records.exports)
+        if package.get("handoff", {}).get("status") in ("not_requested", "request_failed"):
+            package = await request_handoff(package)
+        for existing in records.exports.values():
+            await refresh_handoff(existing)
+        return {"trigger": trigger, "package": package, "imported": imported}
 
 
 # ---------------------------------------------------------------- 정산 묶음 상태
@@ -613,6 +694,75 @@ def add_finance_api(app: FastAPI) -> None:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
         return ok(close_checklist.checklist(books, state().records, d), books.meta())
+
+    @app.get("/api/finance/rules")
+    def get_rules() -> dict:
+        book = load_rules()
+        return ok(book.model_dump(mode="json"), {"version": book.version, "updated": book.updated})
+
+    @app.get("/api/finance/tax/income-estimate", response_model=None)
+    async def get_income_estimate(year: int | None = None) -> dict | JSONResponse:
+        if year is not None and not 2026 <= year <= fc.today().year:
+            return error(400, "invalid_request", "year는 2026년 이후 올해까지만 계산한다")
+        books = await state().books()
+        return ok(tax.income_tax_estimate(books, year), books.meta())
+
+    @app.get("/api/finance/exports")
+    async def get_exports() -> dict:
+        records = state().records
+        for package in records.exports.values():
+            await refresh_handoff(package)
+        packages = sorted(records.exports.values(), key=lambda p: p["package_id"], reverse=True)
+        return ok(
+            {"packages": packages, "bank_imports": list(reversed(records.bank_imports))},
+            {
+                "export_enabled": exports.export_dir() is not None,
+                "inbox_enabled": exports.inbox_dir() is not None,
+                "handoff_enabled": exports.handoff_dir() is not None,
+            },
+        )
+
+    @app.get("/api/finance/exports/{package_id}/files/{name}", response_model=None)
+    def get_export_file(package_id: str, name: str) -> Response | JSONResponse:
+        body = exports.read_file(state().records.exports, package_id, name)
+        if body is None:
+            return error(404, "not_found", "파일이 없거나 내용이 기록과 다르다")
+        media = (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            if name.endswith(".xlsx")
+            else "text/csv; charset=utf-8"
+        )
+        return Response(
+            content=body,
+            media_type=media,
+            headers={"Content-Disposition": f'attachment; filename="{name}"'},
+        )
+
+    @app.post("/api/finance/exports/run", response_model=None)
+    async def post_export_run(
+        authorization: str | None = Header(default=None),
+    ) -> dict | JSONResponse:
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        return ok(await run_export_cycle("manual"), {"by": person})
+
+    @app.post("/api/finance/exports/{package_id}/handoff", response_model=None)
+    async def post_export_handoff(
+        package_id: str, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        package = state().records.exports.get(package_id)
+        if package is None:
+            return error(404, "not_found", "그 묶음이 없다")
+        await refresh_handoff(package)
+        if package["handoff"].get("status") in ("requested", "approved"):
+            return ok(package, {"by": person})
+        return ok(await request_handoff(package), {"by": person})
 
     @app.get("/api/finance/tax/vat", response_model=None)
     async def get_vat(date: str | None = None) -> dict | JSONResponse:

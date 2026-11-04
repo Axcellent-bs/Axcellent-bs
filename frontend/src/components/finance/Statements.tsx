@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { finance, signedKrw, type StatementPeriod } from "@/lib/finance";
-import { Panel, ResourceBody, useResource } from "./bits";
+import { AppliedRules, Panel, ResourceBody, useResource } from "./bits";
 
 // 재무제표: 일반 회사가 쓰는 손익계산서 순서(K-IFRS 기능별)로 당기·전기를 나란히 보여 주고 엑셀·CSV로 내려받는다.
 // 장부에 없는 항목(급여·임차료, 영업외손익, 법인세)은 "자료 없음"으로 둔다. 숫자를 지어내지 않는다.
@@ -105,6 +105,7 @@ export function StatementsSection({ tick }: { tick: number }) {
               </dl>
             </div>
             <p className="text-sm text-ink-500">작성 기준: {s.basis}. 재무상태표·현금흐름표는 자산·부채·현금 잔액 장부가 없어 만들지 않습니다.</p>
+            <AppliedRules rules={s.applied_rules} />
           </div>
         )}
       </ResourceBody>

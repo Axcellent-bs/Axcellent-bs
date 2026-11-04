@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { finance, krw } from "@/lib/finance";
-import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
+import { finance, humanTokenSet, krw, type HandoffStatus } from "@/lib/finance";
+import { shortDateTime } from "@/lib/format";
+import { AppliedRules, Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
 // ⑤ 세무 지원: 부가세 신고 보조 집계와 판매자별 판매 명세(부가가치세법 제75조 초안).
 // 재무 AI는 신고·제출을 하지 않는다. 세무 담당이 홈택스에서 신고할 때 쓸 숫자와 파일만 만든다.
@@ -58,6 +59,7 @@ export function TaxSection({ tick }: { tick: number }) {
                 <ul className="mt-1 list-disc space-y-0.5 pl-5">{p.checks.map((c) => <li key={c}>{c}</li>)}</ul>
               </div>
               <p className="text-sm text-ink-500">{p.basis}</p>
+              <AppliedRules rules={p.applied_rules} />
             </div>
           )}
         </ResourceBody>
@@ -99,11 +101,114 @@ export function TaxSection({ tick }: { tick: number }) {
                 </div>
               ) : <Empty>이번 분기 판매가 없습니다.</Empty>}
               <p className="text-sm text-ink-500">{r.basis}</p>
+              <AppliedRules rules={r.applied_rules} />
             </div>
           )}
         </ResourceBody>
       </Panel>
+      <IncomeEstimatePanel tick={tick} />
+      <ExportsPanel tick={tick} />
     </div>
+  );
+}
+
+function IncomeEstimatePanel({ tick }: { tick: number }) {
+  const est = useResource("tax-income-estimate", () => finance.incomeEstimate(), tick);
+  return (
+    <Panel id="tax-income" title="법인세 참고 추정" meta={est.env?.meta}
+      hint="장부의 영업 결과로 계산한 참고치입니다. 세무조정 전이라 신고에 쓰지 않고, 세무사가 검토합니다.">
+      <ResourceBody res={est}>
+        {(e) => (
+          <div className="space-y-3">
+            <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {([["올해 영업 결과", e.operating_result], ["법인세", e.income_tax], ["지방소득세", e.local_income_tax], ["합계 (참고)", e.total]] as const).map(([label, v]) => (
+                <div key={label} className="rounded-2xl bg-surface-2 px-3 py-2">
+                  <dt className="text-sm text-ink-500">{label}</dt>
+                  <dd className="text-base font-semibold tabular-nums">{v === null ? "자료 없음" : krw(v)}</dd>
+                </div>
+              ))}
+            </dl>
+            <p className="text-sm text-ink-700">빠진 항목: {e.not_included.join(", ")}</p>
+            <AppliedRules rules={e.applied_rules} />
+          </div>
+        )}
+      </ResourceBody>
+    </Panel>
+  );
+}
+
+const HANDOFF: Record<HandoffStatus, { label: string; tone: string }> = {
+  not_requested: { label: "전달 요청 전", tone: TONE.muted },
+  request_failed: { label: "안전 장치에 닿지 않아 다시 요청 필요", tone: TONE.warn },
+  requested: { label: "사람 승인 대기", tone: TONE.warn },
+  approved: { label: "전달 승인됨", tone: TONE.info },
+  rejected: { label: "승인되지 않음", tone: TONE.warn },
+};
+
+function ExportsPanel({ tick }: { tick: number }) {
+  const [own, setOwn] = useState(0);
+  const view = useResource("tax-exports", () => finance.exports(), tick + own);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function act(run: () => Promise<unknown>) {
+    setBusy(true);
+    setProblem(null);
+    try { await run(); setOwn((n) => n + 1); }
+    catch (e) { setProblem((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <Panel id="tax-exports" title="자동으로 만든 파일" meta={view.env?.meta}
+      hint="지난달 손익계산서를 AI가 만들어 보관합니다. 부가세·판매자 자료는 분기가 끝난 달에 함께 만듭니다. 세무 자료 전달은 안전 장치 보류 큐에서 사람이 승인해야 합니다. 신고와 은행·홈택스 접속은 하지 않습니다."
+      tools={<button className="btn-ghost" disabled={busy || !humanTokenSet} onClick={() => act(() => finance.runExports())}>{busy ? "처리 중" : "지금 만들기"}</button>}>
+      {problem && <p role="alert" className="mb-3 rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{problem}</p>}
+      <ResourceBody res={view}>
+        {(v) => (
+          <div className="space-y-4">
+            {v.packages.length === 0 ? <Empty>아직 만든 파일이 없습니다.</Empty> : (
+              <ul className="space-y-3">
+                {v.packages.map((p) => (
+                  <li key={p.package_id} className="rounded-2xl border border-ink-100 p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <b className="text-ink-900">{p.month}</b>
+                      <span className="text-sm text-ink-500">{p.version}번째 판 · {shortDateTime(p.generated_at)}</span>
+                      <Chip label={HANDOFF[p.handoff.status].label} tone={HANDOFF[p.handoff.status].tone} />
+                      {(p.handoff.status === "rejected" || p.handoff.status === "request_failed") && (
+                        <button className="btn-ghost ml-auto" disabled={busy || !humanTokenSet} onClick={() => act(() => finance.requestHandoff(p.package_id))}>전달 다시 요청</button>
+                      )}
+                    </div>
+                    {p.handoff.status === "approved" && !p.handoff.delivered_to && (
+                      <p className="mt-1 text-sm text-ink-700">전달 폴더가 정해지지 않았습니다. 아래 파일을 내려받아 세무사에게 전달해 주세요.</p>
+                    )}
+                    <ul className="mt-2 flex flex-wrap gap-2">
+                      {p.files.map((f) => (
+                        <li key={f.name}>
+                          <button className="btn-ghost break-all" onClick={() => act(() => finance.downloadExport(p.package_id, f.name))}>{f.name}</button>
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div>
+              <h3 className="text-sm font-semibold text-ink-900">은행 내역 폴더</h3>
+              {v.bank_imports.length === 0 ? <p className="mt-1 text-sm text-ink-500">지정 폴더에서 읽은 파일이 없습니다. 은행에서 내려받은 CSV를 폴더에 넣으면 자동으로 읽습니다.</p> : (
+                <ul className="mt-1 space-y-1 text-sm text-ink-700">
+                  {v.bank_imports.slice(0, 5).map((b) => (
+                    <li key={`${b.file}-${b.at}`} className="break-all">
+                      {shortDateTime(b.at)} · {b.file} · {b.status === "imported" ? `새로 ${b.added}줄 더함` : `읽지 못함: ${b.reason}`}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+      </ResourceBody>
+    </Panel>
   );
 }
 

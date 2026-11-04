@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 from ax_agent_template.llm import LLMClient
 from finance_agent import finance_config as fc
 from finance_agent.books import Books, in_range, item_gross, order_sold, pg_settlements
+from finance_agent.rules import applied_many
 
 logger = logging.getLogger("ax.finance.closing")
 
@@ -292,4 +293,5 @@ async def closing_report(
         "status": "confirmed" if confirmation else "draft",
         "confirmed_by": confirmation["by"] if confirmation else None,
         "confirmed_at": confirmation["at"] if confirmation else None,
+        "applied_rules": applied_many("REV-001", "REV-002", "REV-003", "EXP-001", "PL-001"),
     }

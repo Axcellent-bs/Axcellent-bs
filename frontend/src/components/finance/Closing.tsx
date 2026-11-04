@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { shortDateTime } from "@/lib/format";
 import { finance, humanTokenSet, krw, plainText, signedKrw, type ClosingPeriod, type ClosingReport } from "@/lib/finance";
-import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
+import { AppliedRules, Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
 // ① 결산·리포트: 하루·한 달 손익 요약, 장부에 적을 내용 미리보기, 쉬운 말 설명, 사람이 결산 확정.
 
@@ -105,6 +105,7 @@ export function ClosingSection({ tick, onChanged, focus }: {
                   <Chip label={r.commentary_source === "llm" ? "AI가 씀" : "템플릿 문장"} tone={r.commentary_source === "llm" ? TONE.info : TONE.muted} />
                   <p className="mt-1.5 whitespace-pre-line">{plainText(r.commentary) || "설명이 없습니다."}</p>
                 </div>
+                <div className="mt-3"><AppliedRules rules={r.applied_rules} /></div>
 
                 <div className="mt-4 rounded-2xl border border-ink-100 px-4 py-3">
                   {r.status === "confirmed" ? (

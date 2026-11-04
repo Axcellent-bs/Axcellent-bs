@@ -20,9 +20,9 @@ from ax_agent_template import events
 from ax_agent_template.events import subscribe
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
-from finance_agent import closing, persist
+from finance_agent import closing, exports, persist
 from finance_agent import finance_config as fc
-from finance_agent.finance_api import add_finance_api
+from finance_agent.finance_api import add_finance_api, run_export_cycle
 from finance_agent.handlers import (
     HANDLERS,
     SUBSCRIBED_EVENTS,
@@ -39,7 +39,7 @@ from finance_agent.selftest import SELF_TEST_TTL_HOURS, is_fresh, run_self_test
 DEFAULT_CORS_ORIGINS = "http://localhost:3001,http://127.0.0.1:3001"
 DECISION_PATHS = re.compile(
     r"^/api/finance/(closing/confirm|reconciliation/[^/]+/note|settlements/batch"
-    r"|bank/statement"
+    r"|bank/statement|exports/run|exports/[^/]+/handoff"
     r"|team-budget/[^/]+/approve)$"
 )
 
@@ -48,6 +48,8 @@ logger = logging.getLogger("ax.finance")
 # 재무 AI 테스트 자동 실행: 서버가 켜지고 잠시 뒤 한 번, 그다음 `FINANCE_SELF_TEST_SECONDS`마다
 DEFAULT_SELF_TEST_SECONDS = 600
 SELF_TEST_FIRST_DELAY = 5.0
+DEFAULT_EXPORT_SECONDS = 3600
+EXPORT_FIRST_DELAY = 30.0
 SELF_TEST_SCHEDULE: dict[str, Any] = {"interval_seconds": 0, "next_run_at": None}
 Trigger = Literal["auto", "manual"]
 
@@ -126,6 +128,32 @@ async def self_test_loop(interval: float, first_delay: float = SELF_TEST_FIRST_D
         delay = interval
 
 
+def export_seconds() -> int:
+    """`FINANCE_EXPORT_SECONDS` (기본 3600초). 0이면 끈다. 폴더를 정하지 않아도 끈다."""
+    if exports.export_dir() is None and exports.inbox_dir() is None:
+        return 0
+    raw = os.getenv("FINANCE_EXPORT_SECONDS", "").strip()
+    if not raw:
+        return DEFAULT_EXPORT_SECONDS
+    try:
+        return max(int(raw), 0)
+    except ValueError:
+        logger.warning("FINANCE_EXPORT_SECONDS=%r는 숫자가 아니라 기본 3600초를 쓴다", raw)
+        return DEFAULT_EXPORT_SECONDS
+
+
+async def export_loop(interval: float, first_delay: float = EXPORT_FIRST_DELAY) -> None:
+    """파일 만들기와 은행 폴더 읽기를 주기적으로 돈다. 한 번 실패해도 계속한다."""
+    delay = first_delay
+    while True:
+        await asyncio.sleep(delay)
+        try:
+            await run_export_cycle("auto")
+        except Exception:  # 다음 회차는 그대로 돈다
+            logger.exception("재무 파일 자동 만들기 중 오류")
+        delay = interval
+
+
 def daily_closing_seconds() -> int:
     """`FINANCE_DAILY_CLOSING_SECONDS` (기본 86400초). 0이면 끈다. 잘못된 값은 기본값."""
     raw = os.getenv("FINANCE_DAILY_CLOSING_SECONDS", "").strip()
@@ -197,6 +225,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         tasks.append(asyncio.create_task(persist.save_loop(state, saved_to, last_saved)))
     if interval:
         tasks.append(asyncio.create_task(self_test_loop(interval, SELF_TEST_FIRST_DELAY)))
+    if export_interval := export_seconds():
+        tasks.append(asyncio.create_task(export_loop(export_interval)))
     if closing_interval:
         tasks.append(
             asyncio.create_task(daily_closing_loop(closing_interval, DAILY_CLOSING_FIRST_DELAY))

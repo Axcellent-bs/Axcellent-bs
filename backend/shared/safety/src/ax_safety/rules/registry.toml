@@ -221,6 +221,11 @@ verify_skill = "anomaly_detection"
 
 # ---- 재무 (태윤). 재무가 재무를 검증하지 않도록 정산 확정은 항상 C
 [[actions]]
+action = "send_tax_package"
+owner = "finance"
+base_grade = "C"
+
+[[actions]]
 action = "confirm_settlement"
 owner = "finance"
 base_grade = "C"

@@ -68,7 +68,24 @@ export interface FinanceOverview { date: string; kpis: FinanceKpis; todo: Financ
 export type ClosingPeriod = "day" | "month";
 export interface ClosingLine { code: string; label: string; amount: number | null }
 export interface JournalEntry { account: string; debit: number; credit: number; memo: string }
+/** 판단에 쓴 규칙과 근거 (finance_rules.toml) */
+export interface AppliedRule { rule_id: string; title: string; statement: string; basis: string; review: "expert" | "pending"; detail: string | null; rules_version: number }
+export interface IncomeEstimate {
+  year: number; from: string; to: string;
+  operating_result: number | null; income_tax: number | null; local_income_tax: number | null; total: number | null;
+  not_included: string[]; basis: string; applied_rules: AppliedRule[];
+}
+export interface ExportFile { name: string; bytes: number; sha256: string }
+export type HandoffStatus = "not_requested" | "request_failed" | "requested" | "approved" | "rejected";
+export interface ExportPackage {
+  package_id: string; month: string; version: number; generated_at: string; files: ExportFile[]; mock: boolean;
+  handoff: { status: HandoffStatus; review_id?: string | null; delivered_to?: string | null };
+}
+export interface BankImport { file: string; at: string; status: "imported" | "failed"; added?: number; rows?: number; skipped?: number; reason?: string }
+export interface ExportsView { packages: ExportPackage[]; bank_imports: BankImport[] }
+
 export interface ClosingReport {
+  applied_rules?: AppliedRule[];
   period: ClosingPeriod;
   date: string;
   from: string;
@@ -215,6 +232,7 @@ export interface TeamBudget {
 // ---------------------------------------------------------------- ⑤ 세무 지원
 export interface VatRow { code: string; label: string; supply: number; vat: number }
 export interface VatPack {
+  applied_rules?: AppliedRule[];
   quarter: string;
   from: string;
   to: string;
@@ -231,7 +249,7 @@ export interface VatPack {
   basis: string;
 }
 export interface SellerSalesRow { seller_id: string; name: string; business_no: string | null; month: string; total: number; by_method: Record<string, number>; by_tax: Record<string, number>; orders: number }
-export interface SellerReport { quarter: string; from: string; to: string; due: string; rows: SellerSalesRow[]; missing: string[]; basis: string; unavailable: boolean }
+export interface SellerReport { applied_rules?: AppliedRule[]; quarter: string; from: string; to: string; due: string; rows: SellerSalesRow[]; missing: string[]; basis: string; unavailable: boolean }
 
 // ---------------------------------------------------------------- ① 월간 변동 분석
 export interface VarianceLine {
@@ -264,6 +282,7 @@ export interface StatementRow { code: string; label: string; level: number; tota
 export interface StatementNote { code: string; label: string; current: number | null; previous: number | null; note: string }
 export interface StatementSpan { name: string; from: string; to: string }
 export interface IncomeStatement {
+  applied_rules?: AppliedRule[];
   title: string;
   company: string | null;
   period: StatementPeriod;
@@ -533,6 +552,15 @@ export const finance = {
   sellerReport: (date?: string | null) => fin<Envelope<SellerReport>>(`/api/finance/tax/seller-report${query({ date })}`),
   downloadSellerReport: (format: "csv" | "xlsx", date?: string | null) =>
     download(`/api/finance/tax/seller-report${query({ date, format })}`, `seller-sales.${format}`),
+  /** 법인세 참고 추정. 신고에 쓰지 않는다 */
+  incomeEstimate: () => fin<Envelope<IncomeEstimate>>("/api/finance/tax/income-estimate"),
+  /** 자동으로 만든 파일과 은행 폴더 기록 */
+  exports: () => fin<Envelope<ExportsView>>("/api/finance/exports"),
+  runExports: () => fin<Envelope<unknown>>("/api/finance/exports/run", { method: "POST", body: {}, human: true }),
+  requestHandoff: (packageId: string) =>
+    fin<Envelope<ExportPackage>>(`/api/finance/exports/${encodeURIComponent(packageId)}/handoff`, { method: "POST", body: {}, human: true }),
+  downloadExport: (packageId: string, name: string) =>
+    download(`/api/finance/exports/${encodeURIComponent(packageId)}/files/${encodeURIComponent(name)}`, name),
   /** 월간 변동 분석 (지난달·작년 같은 달 대비) */
   variance: (date?: string | null) => fin<Envelope<Variance>>(`/api/finance/variance${query({ date })}`),
   /** 팀 예산 (인사 팀 인원 × 인당 월 단가). month 생략 = 이번 달 */
@@ -691,6 +719,7 @@ export const NOT_FINANCE_ACTIONS = new Set<string>(["refund_request", ...MARKETI
 export const ACTION_KO: Record<string, string> = {
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 지급",
   publish_notice: "공지 올리기", publish_sns: "SNS 게시", generate_video: "영상 만들기",
+  send_tax_package: "세무 자료 전달",
   rollback_deployment: "배포 되돌리기", restart_service: "서비스 다시 켜기", generate_pr: "코드 변경 만들기",
 };
 

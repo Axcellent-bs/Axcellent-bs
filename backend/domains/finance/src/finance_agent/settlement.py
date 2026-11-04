@@ -22,6 +22,7 @@ from typing import Any
 
 from finance_agent import finance_config as fc
 from finance_agent.books import Books, in_range, item_gross, order_sold
+from finance_agent.rules import applied_many
 
 
 def _paid_at(order: dict[str, Any]):
@@ -119,6 +120,7 @@ def statements(
         "to": fc.iso(end),
         "pay_date": pay_date.isoformat(),
         "statements": rows,
+        "applied_rules": applied_many("SET-001"),
     }
 
 
@@ -147,4 +149,3 @@ def ready(result: dict[str, Any]) -> list[dict[str, Any]]:
         for r in result["statements"]
         if not r["hold_reasons"] and r["status"] in ("ready", "rejected")
     ]
-

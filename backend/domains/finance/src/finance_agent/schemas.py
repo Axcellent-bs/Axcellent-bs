@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -50,6 +50,7 @@ class ClosingReportOutput(AxModel):
     confirmed_by: str | None = None
     confirmed_at: str | None = None
     unavailable: list[str] = Field(default_factory=list)
+    applied_rules: list[dict[str, Any]] = Field(default_factory=list)  # 적용한 규칙과 근거
 
 
 # ------------------------------- record_support_cost (orchestrator → finance, 읽기·기록)

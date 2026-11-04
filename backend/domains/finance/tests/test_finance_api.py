@@ -149,7 +149,7 @@ def test_reconciliation_shape(client: TestClient) -> None:
 
 def test_settlements_shapes(client: TestClient) -> None:
     sett = _get(client, "/api/finance/settlements")["data"]
-    assert set(sett) == {"period", "from", "to", "pay_date", "statements", "batch"}
+    assert set(sett) == {"period", "from", "to", "pay_date", "statements", "batch", "applied_rules"}
     assert sett["batch"]["status"] == "none"
     assert (
         _get(client, "/api/finance/settlements", period="2026-W41")["data"]["period"] == "2026-W41"

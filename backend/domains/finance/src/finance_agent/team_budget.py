@@ -20,6 +20,8 @@ import re
 from datetime import date
 from typing import Any
 
+from finance_agent.rules import applied_many
+
 MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
@@ -120,6 +122,7 @@ def report(
         "change_total": None if prev_total is None else total - prev_total,
         "headcount_total": sum(heads.values()),
         "signature": sig,
+        "applied_rules": applied_many("BUD-001"),
     }
 
 

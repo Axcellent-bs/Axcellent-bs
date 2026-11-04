@@ -107,6 +107,8 @@ class FinanceRecords:
         # 없앤 예산·한도 경보의 확인 메모. 쓰지 않지만 사람이 쓴 기록이라 저장 파일에 그대로 둔다
         self.policy_acks: dict[str, dict[str, Any]] = {}
         self.bank_rows: list[dict[str, Any]] = []  # 사람이 올린 은행 입금 내역
+        self.exports: dict[str, dict[str, Any]] = {}  # 자동으로 만든 파일 묶음
+        self.bank_imports: list[dict[str, Any]] = []  # 은행 내역 폴더에서 읽은 기록
         self.team_budgets: dict[str, dict[str, Any]] = {}  # YYYY-MM → 재무 담당이 확정한 팀 예산
 
 

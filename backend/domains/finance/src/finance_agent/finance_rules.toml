@@ -1,0 +1,301 @@
+# 재무·세무 판단 규칙과 근거. 코드는 이 파일을 읽어 계산하고, 결과에 적용 규칙을 함께 낸다.
+#
+# - 계산식은 코드(시험으로 지킴), 값·기준·근거는 여기에 둔다. 바꾸면 version을 올린다
+# - review: "expert"는 전문가가 확인한 규칙, "pending"은 전문가 확인 전이다
+# - 세법 조항과 회계 기준은 공개 자료로 찾아 적었다. 신고와 판단의 최종 책임은 세무사·담당자에게 있다
+
+version = 1
+updated = "2026-11-04"
+
+[campaign]
+good_roi = 0.2            # ROI가 이 값 이상이면 좋음
+bad_roi = 0.0             # ROI가 이 값 미만이면 나쁨 (적자)
+
+[brake]
+monthly_budget_krw = 1000000   # 임시값. 근거 없이 정한 시작값이라 예산이 정해지면 바꾼다
+budget_provisional = true
+min_viable_krw = 50000         # 이보다 적게 남으면 조건부 승인도 의미가 없어 거절한다
+loss_limit_krw = 500000        # 이달 캠페인 손실 합계가 이 값 이상이면 거절
+loss_streak_reject = 2         # 같은 채널이 연속으로 이만큼 적자면 거절
+cash_lookahead_weeks = 4       # 앞으로 이 주수의 누적 순현금을 본다
+
+[lessons]
+limit_factor = 0.5        # 실패 1건마다 그 채널 승인 한도에 곱한다
+floor_factor = 0.25       # 아무리 줄어도 이 비율 아래로는 안 내린다
+
+[insights]
+trend_min_campaigns = 3   # 채널 하락 추세를 보는 최소 캠페인 수
+overrun_window_days = 90  # 반복 초과를 보는 기간
+overrun_min_count = 2     # 이만큼 반복되면 인사이트
+tax_deadline_warn_days = 14
+
+[[income_tax.brackets]]   # 법인세법 제55조 ①, 2026-01-01 이후 개시 사업연도
+upto_krw = 200000000
+rate = 0.10
+[[income_tax.brackets]]
+upto_krw = 20000000000
+rate = 0.20
+[[income_tax.brackets]]
+upto_krw = 300000000000
+rate = 0.22
+[[income_tax.brackets]]
+rate = 0.25               # 3,000억 원 초과
+[income_tax]
+local_rate_of_tax = 0.10  # 법인지방소득세는 법인세 세율의 10분의 1 수준
+
+# ---------------------------------------------------------------- 매출·비용·손익
+[[rules]]
+id = "REV-001"
+area = "revenue"
+title = "판매 수수료만 매출로 인식 (순액)"
+statement = "캣북스는 중개자다. 고객 결제액(총거래액)이 아니라 판매 수수료만 매출이다."
+basis = "K-IFRS 제1115호 B34~B38 (본인과 대리인의 구분)"
+review = "pending"
+
+[[rules]]
+id = "REV-002"
+area = "revenue"
+title = "결제 성공 시각에 수수료 인식"
+statement = "결제가 성공한 시각이 속한 기간에 수수료를 잡는다. 배송 완료 시점 인식과 다를 수 있는 단순화다."
+basis = "K-IFRS 제1115호 문단 31 (수행의무 이행 시 인식). 시점은 내부 단순화라 회계사 확인 필요"
+review = "pending"
+
+[[rules]]
+id = "REV-003"
+area = "revenue"
+title = "회사 부담 쿠폰은 매출 차감"
+statement = "회사가 부담한 쿠폰은 비용이 아니라 고객에게 지급할 대가로 보아 매출에서 뺀다."
+basis = "K-IFRS 제1115호 문단 70~72 (고객에게 지급할 대가)"
+review = "pending"
+
+[[rules]]
+id = "EXP-001"
+area = "expense"
+title = "PG 수수료는 판매비와관리비"
+statement = "결제대행 수수료는 지급수수료로 판매비와관리비에 넣는다."
+basis = "K-IFRS 제1001호 문단 103 (기능별 분류)"
+review = "pending"
+
+[[rules]]
+id = "EXP-002"
+area = "expense"
+title = "광고비는 판매비와관리비"
+statement = "캠페인 광고비는 광고선전비로 판매비와관리비에 넣는다."
+basis = "K-IFRS 제1001호 문단 103 (기능별 분류)"
+review = "pending"
+
+[[rules]]
+id = "PL-001"
+area = "profit"
+title = "영업 결과 계산"
+statement = "영업 결과 = 판매 수수료 − 회사 부담 쿠폰 − PG 수수료. 급여·임차료는 자료가 없어 빠진다."
+basis = "내부 관리 기준 (재무 재설계 2026-10-23)"
+review = "pending"
+
+[[rules]]
+id = "PL-002"
+area = "profit"
+title = "자료 없는 항목은 비움"
+statement = "급여, 영업외손익, 법인세처럼 장부에 없는 항목은 0으로 채우지 않고 비운다."
+basis = "내부 기준 (데이터를 지어내지 않는다)"
+review = "expert"
+
+# ---------------------------------------------------------------- 정산·예산
+[[rules]]
+id = "SET-001"
+area = "settlement"
+title = "판매자 정산금 계산"
+statement = "정산금 = 판매액 − 판매 수수료 − 판매자 부담 쿠폰 − 환불."
+basis = "내부 정산 기준 (재무 재설계 2026-10-23). 판매자 약관 확인 필요"
+review = "pending"
+
+[[rules]]
+id = "BUD-001"
+area = "budget"
+title = "팀 예산 계산"
+statement = "팀 예산 = 그달 1일 팀 인원 × 인당 월 단가. 확정은 재무 담당이 한다."
+basis = "인사·재무 합의 2026-11-02"
+review = "expert"
+
+# ---------------------------------------------------------------- 부가세
+[[rules]]
+id = "VAT-001"
+area = "vat"
+title = "과세 매출은 판매 수수료"
+statement = "판매자의 상품 매출은 판매자가 신고한다. 캣북스의 과세 매출은 중개 수수료다. 면세 도서를 중개해도 수수료는 과세다."
+basis = "부가가치세법 제26조 ①8 (도서 면세), 2026-10-30 세무 관점 검토"
+review = "pending"
+
+[[rules]]
+id = "VAT-002"
+area = "vat"
+title = "매입세액 공제"
+statement = "세금계산서를 받은 PG 수수료의 부가세를 매입세액으로 본다."
+basis = "부가가치세법 제38조 (공제하는 매입세액)"
+review = "pending"
+
+[[rules]]
+id = "VAT-003"
+area = "vat"
+title = "회사 부담 쿠폰의 과세표준"
+statement = "약관상 쿠폰을 수수료에서 직접 공제하면 에누리로 과세표준에서 뺀다. 현금 보전이면 빼지 못할 수 있어 두 값을 모두 보여 준다."
+basis = "대법원 2016.6.23. 선고 2014두298 판결"
+review = "pending"
+
+[[rules]]
+id = "VAT-004"
+area = "vat"
+title = "신고 기한"
+statement = "예정 4/25·10/25, 확정 7/25·1/25 (법인 기준)."
+basis = "부가가치세법 제48조, 제49조"
+review = "pending"
+
+[[rules]]
+id = "VAT-005"
+area = "vat"
+title = "판매자별 판매·중개 명세"
+statement = "분기 말일의 다음 달 15일까지. 서식은 국세청 고시 확인 전 초안이고 사업자등록번호는 자료가 없어 비운다."
+basis = "부가가치세법 제75조"
+review = "pending"
+
+# ---------------------------------------------------------------- 법인세
+[[rules]]
+id = "CIT-001"
+area = "income_tax"
+title = "법인세 참고 추정"
+statement = "장부의 영업 결과에 법인세율을 곱한 참고치다. 세무조정과 급여·임차료가 빠져 있어 신고에 쓰지 않는다."
+basis = "법인세법 제55조 ①, 지방세법 제103조의20. 세무조정은 세무사 업무"
+review = "pending"
+
+# ---------------------------------------------------------------- 세무 전달
+[[rules]]
+id = "TAX-001"
+area = "handoff"
+title = "AI는 준비만, 신고는 사람"
+statement = "재무 AI는 집계와 파일을 만든다. 세무 자료 전달은 사람 승인 뒤에 하고, 검토와 신고는 세무사·담당자가 한다."
+basis = "내부 기준, backend/docs/mcp-permissions.md 5장"
+review = "expert"
+
+# ---------------------------------------------------------------- 캠페인 손익
+[[rules]]
+id = "CMP-001"
+area = "campaign"
+title = "캠페인 매출은 수수료 기준"
+statement = "캠페인 매출 = 증분 판매액 × 판매 수수료율. 판매액 전체를 매출로 보면 적자가 흑자로 보인다."
+basis = "REV-001과 같은 기준 (K-IFRS 제1115호 B34~B38)"
+review = "pending"
+
+[[rules]]
+id = "CMP-002"
+area = "campaign"
+title = "캠페인 비용"
+statement = "캠페인 비용 = 광고비 + 회사 부담 쿠폰 + 증분 판매액의 PG 수수료."
+basis = "EXP-001, EXP-002, REV-003과 같은 기준"
+review = "pending"
+
+[[rules]]
+id = "CMP-003"
+area = "campaign"
+title = "손익과 ROI"
+statement = "손익 = 캠페인 매출 − 캠페인 비용. ROI = 손익 ÷ 광고비와 쿠폰 합. 재구매는 넣지 않은 단기 손익이다."
+basis = "내부 관리 기준"
+review = "pending"
+
+[[rules]]
+id = "CMP-004"
+area = "campaign"
+title = "효율 판단"
+statement = "ROI가 good_roi 이상이면 좋음, bad_roi 미만이면 나쁨, 그 사이는 보통."
+basis = "내부 관리 기준, [campaign] 값"
+review = "pending"
+
+# ---------------------------------------------------------------- 재무 브레이크
+[[rules]]
+id = "BRK-001"
+area = "brake"
+title = "남은 예산"
+statement = "요청이 이달 남은 캠페인 예산을 넘으면 남은 금액까지만 조건부 승인한다. 남은 금액이 최소액보다 적으면 거절한다."
+basis = "내부 기준, [brake] monthly_budget_krw, min_viable_krw"
+review = "pending"
+
+[[rules]]
+id = "BRK-002"
+area = "brake"
+title = "연속 적자"
+statement = "같은 채널이 연속으로 정해진 횟수만큼 적자면 거절한다."
+basis = "내부 기준, [brake] loss_streak_reject"
+review = "pending"
+
+[[rules]]
+id = "BRK-003"
+area = "brake"
+title = "이달 손실 누적"
+statement = "이달 캠페인 손실 합계가 한도 이상이면 거절한다."
+basis = "내부 기준, [brake] loss_limit_krw"
+review = "pending"
+
+[[rules]]
+id = "BRK-004"
+area = "brake"
+title = "현금 흐름"
+statement = "앞으로 몇 주의 누적 순현금이 요청 금액보다 적으면 그 금액까지만 조건부 승인하고, 0 이하이거나 확인할 수 없으면 거절한다."
+basis = "내부 기준, [brake] cash_lookahead_weeks, 13주 현금 흐름 예측"
+review = "pending"
+
+[[rules]]
+id = "BRK-005"
+area = "brake"
+title = "최종 결정은 사람"
+statement = "재무가 거절하거나 금액이 기준을 넘으면 안전 관문이 사람에게 보낸다. 쿠폰 발급과 환불은 이 규칙의 대상이 아니다."
+basis = "shared/safety rules/registry.toml start_campaign, 재무 재설계의 건별 승인 제외 원칙"
+review = "expert"
+
+# ---------------------------------------------------------------- 실수 기반 개선
+[[rules]]
+id = "LRN-001"
+area = "lesson"
+title = "실패 이력으로 한도 축소"
+statement = "그 채널의 적자 캠페인이 교훈으로 남아 있으면 건마다 승인 한도에 limit_factor를 곱한다. floor_factor 아래로는 내리지 않는다."
+basis = "내부 기준, [lessons]"
+review = "pending"
+
+[[rules]]
+id = "LRN-002"
+area = "lesson"
+title = "좋은 결과로 교훈 해제"
+statement = "그 채널에서 효율 좋음 판단이 나오면 남아 있던 교훈을 닫아 한도를 되돌린다."
+basis = "내부 기준"
+review = "pending"
+
+# ---------------------------------------------------------------- 인사이트
+[[rules]]
+id = "INS-001"
+area = "insight"
+title = "채널 효율 하락 추세"
+statement = "한 채널의 ROI가 최근 캠페인에서 연속으로 내려가면 알린다."
+basis = "내부 기준, [insights] trend_min_campaigns"
+review = "pending"
+
+[[rules]]
+id = "INS-002"
+area = "insight"
+title = "손익분기 ROAS 미달"
+statement = "채널의 실제 ROAS가 수수료·PG 구조로 계산한 손익분기 ROAS보다 낮으면 알린다."
+basis = "CMP-001, CMP-002"
+review = "pending"
+
+[[rules]]
+id = "INS-003"
+area = "insight"
+title = "반복되는 예산 초과"
+statement = "승인 한도보다 많이 쓰거나 남은 예산 초과 요청이 기간 안에 반복되면 알린다."
+basis = "내부 기준, [insights] overrun_window_days, overrun_min_count"
+review = "pending"
+
+[[rules]]
+id = "INS-004"
+area = "insight"
+title = "세금 리스크"
+statement = "부가세 기한이 가깝거나 세무 설정의 확인 필요 항목이 남아 있으면 알린다."
+basis = "VAT-003, VAT-004"
+review = "pending"
