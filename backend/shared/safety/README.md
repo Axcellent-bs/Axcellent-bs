@@ -10,6 +10,7 @@
 - 감사 로그 (SAF-06): 접수·검증·판정·인증 거부·보류 결정을 `context_id`와 함께 남긴다
 - 공통 로그 (COM-08): 판정마다 `execute_decided`(grade·status·action·requester), 인증 거부는 `rejected`(`reason_code` = `UNAUTHORIZED`/`FORBIDDEN`)를 `AX_COMMON_LOG_DB`에 남긴다. 대시보드 "안전 관문 로그"와 data `kpi_summary`가 이것을 읽는다. 계약 `LogKind`에 없는 종류는 저장소에 남지 않는다
 - fail-closed (SAF-08): 미등록 액션·금액 필드 오류·총액 불일치·검증 무응답은 실행하지 않는다
+- 마케팅 SNS·영상 (#487): `publish_sns`는 항상 C. `generate_video`는 B(검증자 `safety`)이고 코드 규칙으로 비용·길이를 본다. 일일 게시 수는 요청 값이 아니라 실행 기록으로 센다(`daily_count`)
 - 외부 연결 쓰기: 레지스트리에 `connection_field`가 있는 액션은 연결 id가 비어 있으면 C(`schema_invalid`). 개발 서비스가 긴급(KEV + 취약 버전)으로 알린 연결은 C로 보류한다(보고서 `rules`의 `connection_kev_hold`, 사람이 승인하면 실행)
 - 누적 한도 (SAF-10): 일일(UTC)·사건별·고객별 누적 금액 규칙
 - 규칙 기반 검증 (SAF-11): 금액은 코드가 건수 × 단가로 다시 계산한다

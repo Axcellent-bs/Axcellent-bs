@@ -9,10 +9,11 @@
 # - daily_total: 같은 tenant·같은 액션의 오늘(UTC) 실행 누적 + 이번 금액
 # - context_total: 같은 context_id·같은 액션의 실행 누적 + 이번 금액
 # - customer_total: 같은 context_id·같은 고객의 실행 누적 + 이번 금액
+# - daily_count: 같은 tenant·같은 액션의 오늘(UTC) 실행 건수 + 이번 1건
 # - param·paths_within·paths_avoid: 금액이 아닌 규칙(아래 각 규칙 주석 참고)
 # op: ">=", ">", "<=", "<". when은 params가 이 값일 때만 규칙을 적용한다.
 
-version = 1
+version = 2
 
 # B 교차검증 응답 마감(초). 넘으면 실행하지 않고 C 보류
 verify_timeout_seconds = 30
@@ -394,3 +395,77 @@ field = "prior_rollbacks"
 op = ">"
 value = 0
 
+# ---- 마케팅 SNS·영상 (#487). 값은 제안값. 필드가 없거나 정수가 아니면 걸린 것으로 본다(fail-closed).
+# publish_sns는 기본 등급이 C라 지금은 어차피 사람이 본다. 아래 규칙은 무엇이 걸렸는지 보고서에
+# 남기고, 나중에 B로 내려도 그대로 C로 막는다.
+[[rules]]
+key = "sns_ai_label_missing"
+action = "publish_sns"
+metric = "param"
+field = "ai_label_missing_count"
+op = ">"
+value = 0
+
+[[rules]]
+key = "sns_text_mismatch"
+action = "publish_sns"
+metric = "param"
+field = "text_mismatch_count"
+op = ">"
+value = 0
+
+[[rules]]
+key = "sns_constraint_missing"
+action = "publish_sns"
+metric = "param"
+field = "constraint_missing_count"
+op = ">"
+value = 0
+
+# 오늘 게시 수. 요청 값을 믿지 않고 관문 실행 기록으로 센다. 6건째부터 걸린다
+[[rules]]
+key = "sns_daily_posts"
+action = "publish_sns"
+metric = "daily_count"
+op = ">"
+value = 5
+
+# 공지의 SNS 채널은 publish_sns로 보내야 한다 (마케팅 쪽 거부와 이중 방어)
+[[rules]]
+key = "notice_sns_channel"
+action = "publish_notice"
+metric = "param_in"
+field = "channel_code"
+allowed = ["banner", "email"]
+when = { channel_code = "sns" }
+
+# 영상 건당 비용. 720p 8초 약 0.81달러(추정)의 몇 배 수준
+[[rules]]
+key = "video_cost_single"
+action = "generate_video"
+metric = "amount"
+op = ">="
+value = 3000
+
+[[rules]]
+key = "video_cost_daily"
+action = "generate_video"
+metric = "daily_total"
+op = ">="
+value = 20000
+
+# 유료 호출인데 비용이 0이면 계산이 잘못된 것이다. 0원이 상한을 지나가지 않게 막는다
+[[rules]]
+key = "video_cost_zero"
+action = "generate_video"
+metric = "amount"
+op = "<"
+value = 1
+
+[[rules]]
+key = "video_duration"
+action = "generate_video"
+metric = "param"
+field = "duration_s"
+op = ">"
+value = 8

@@ -372,6 +372,10 @@ class Gate:
                     hits.append({"key": rule.key, "invalid": rule.field})
                     continue
                 observed: int | None = value
+            elif rule.metric == "daily_count":
+                observed = 1 + self.store.executed_count(
+                    request.tenant_id, spec.action, since=self._day_start()
+                )
             else:
                 observed = self._amount_metric(rule.metric, spec, request, amount, unit, customer)
             if observed is not None and rule.hit(observed):
@@ -379,6 +383,9 @@ class Gate:
                     {"key": rule.key, "observed": observed, "op": rule.op, "value": rule.value}
                 )
         return hits
+
+    def _day_start(self) -> datetime:
+        return self._now().replace(hour=0, minute=0, second=0, microsecond=0)
 
     def _amount_metric(
         self,
@@ -396,9 +403,8 @@ class Gate:
         if metric == "unit":
             return unit
         if metric == "daily_total":
-            day_start = self._now().replace(hour=0, minute=0, second=0, microsecond=0)
             return amount + self.store.executed_total(
-                request.tenant_id, spec.action, since=day_start
+                request.tenant_id, spec.action, since=self._day_start()
             )
         if metric == "context_total":
             return amount + self.store.executed_total(
