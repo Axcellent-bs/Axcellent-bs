@@ -10,10 +10,10 @@
 # - context_total: 같은 context_id·같은 액션의 실행 누적 + 이번 금액
 # - customer_total: 같은 context_id·같은 고객의 실행 누적 + 이번 금액
 # - daily_count: 같은 tenant·같은 액션의 오늘(UTC) 실행 건수 + 이번 1건
-# - param·paths_within·paths_avoid: 금액이 아닌 규칙(아래 각 규칙 주석 참고)
+# - param·paths_within·paths_avoid·paths_named: 금액이 아닌 규칙(아래 각 규칙 주석 참고)
 # op: ">=", ">", "<=", "<". when은 params가 이 값일 때만 규칙을 적용한다.
 
-version = 3
+version = 4
 
 # B 교차검증 응답 마감(초). 넘으면 실행하지 않고 C 보류
 verify_timeout_seconds = 30
@@ -115,6 +115,43 @@ protected = [
   "contracts/",
 ]
 
+# 에이전트 설정·훅·설치 스크립트 (#506). 머지되면 이 레포를 여는 개발자의 Claude Code·Codex·에디터나
+# CI가 자동으로 읽고 실행하는 파일이라 AI가 만든 PR이 바꾸면 항상 C. 경로 앞부분이 아니라 이름으로
+# 잡으므로 깊이와 상관없다(shop-web/CLAUDE.md). 대소문자를 가리지 않고, \ 구분자·./·끝의 /와 Windows가
+# 무시하는 끝의 점·공백·:스트림도 같은 이름으로 본다. 필드가 없거나 문자열 목록이 아니면 걸린 것으로
+# 본다(fail-closed). 개발 쪽 AGENT_CONFIG_DIRS·AGENT_CONFIG_FILES와 맞춘다. 세 규칙의 목록은 같다.
+[[rules]]
+key = "pr_agent_config_paths"
+action = "generate_pr"
+metric = "paths_named"
+field = "changed_paths"
+names = [
+  # 코딩 에이전트 지시·설정 (폴더)
+  ".claude", ".codex", ".cursor", ".gemini", ".agents", ".agent", ".kiro", ".windsurf", ".roo",
+  ".continue", ".amazonq", ".opencode", ".factory",
+  # 코딩 에이전트 지시·설정 (파일)
+  "CLAUDE.md", "AGENTS.md", "GEMINI.md", ".mcp.json", ".cursorrules", ".clinerules", ".windsurfrules",
+  "copilot-instructions.md", ".aider.conf.yml",
+  # 에디터·개발 환경이 열 때 실행 (.devcontainer.json은 폴더 없이 쓰는 형태)
+  ".vscode", ".devcontainer", ".devcontainer.json", ".idea", ".run", ".envrc", ".env",
+  # git 훅·하위 저장소
+  ".husky", ".githooks", ".pre-commit-config.yaml", ".gitmodules",
+  # CI
+  ".github", ".gitlab", ".gitlab-ci.yml", ".circleci", "Jenkinsfile", "azure-pipelines.yml",
+  "bitbucket-pipelines.yml",
+  # 설치·빌드 스크립트
+  "package.json", "pyproject.toml", "setup.py", "setup.cfg", "composer.json", "Gemfile", "Pipfile",
+  "requirements.txt", "Makefile", "GNUmakefile", "Dockerfile", "Taskfile.yml", "Taskfile.yaml",
+  # 테스트 도구가 자동으로 실행
+  "conftest.py", "tox.ini", "noxfile.py",
+  # 패키지 관리자 설정 (받는 곳을 바꾸거나 설치 때 코드를 실행)
+  ".npmrc", ".yarnrc", ".yarnrc.yml", ".pnpmfile.cjs", "pnpm-workspace.yaml", "bunfig.toml", "uv.toml",
+  "pip.conf",
+  # 잠금 파일 (받을 주소를 바꿔치기할 수 있다)
+  "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb",
+  "uv.lock", "poetry.lock", "Pipfile.lock", "composer.lock", "Gemfile.lock",
+]
+
 # ---- 기획·개발 자동화 (#166). 값은 제안값. params 키는 planning이 맞춰 보낸다.
 # 필드가 없거나 정수가 아니면 걸린 것으로 본다(fail-closed).
 [[rules]]
@@ -205,6 +242,39 @@ protected = [
   ".github/",
   "safety/",
   "contracts/",
+]
+
+# 에이전트 설정·훅·설치 스크립트: pr_agent_config_paths와 같은 목록
+[[rules]]
+key = "merge_agent_config_paths"
+action = "merge_pr"
+metric = "paths_named"
+field = "changed_paths"
+names = [
+  # 코딩 에이전트 지시·설정 (폴더)
+  ".claude", ".codex", ".cursor", ".gemini", ".agents", ".agent", ".kiro", ".windsurf", ".roo",
+  ".continue", ".amazonq", ".opencode", ".factory",
+  # 코딩 에이전트 지시·설정 (파일)
+  "CLAUDE.md", "AGENTS.md", "GEMINI.md", ".mcp.json", ".cursorrules", ".clinerules", ".windsurfrules",
+  "copilot-instructions.md", ".aider.conf.yml",
+  # 에디터·개발 환경이 열 때 실행 (.devcontainer.json은 폴더 없이 쓰는 형태)
+  ".vscode", ".devcontainer", ".devcontainer.json", ".idea", ".run", ".envrc", ".env",
+  # git 훅·하위 저장소
+  ".husky", ".githooks", ".pre-commit-config.yaml", ".gitmodules",
+  # CI
+  ".github", ".gitlab", ".gitlab-ci.yml", ".circleci", "Jenkinsfile", "azure-pipelines.yml",
+  "bitbucket-pipelines.yml",
+  # 설치·빌드 스크립트
+  "package.json", "pyproject.toml", "setup.py", "setup.cfg", "composer.json", "Gemfile", "Pipfile",
+  "requirements.txt", "Makefile", "GNUmakefile", "Dockerfile", "Taskfile.yml", "Taskfile.yaml",
+  # 테스트 도구가 자동으로 실행
+  "conftest.py", "tox.ini", "noxfile.py",
+  # 패키지 관리자 설정 (받는 곳을 바꾸거나 설치 때 코드를 실행)
+  ".npmrc", ".yarnrc", ".yarnrc.yml", ".pnpmfile.cjs", "pnpm-workspace.yaml", "bunfig.toml", "uv.toml",
+  "pip.conf",
+  # 잠금 파일 (받을 주소를 바꿔치기할 수 있다)
+  "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb",
+  "uv.lock", "poetry.lock", "Pipfile.lock", "composer.lock", "Gemfile.lock",
 ]
 
 [[rules]]
@@ -345,6 +415,39 @@ protected = [
   ".github/",
   "safety/",
   "contracts/",
+]
+
+# 에이전트 설정·훅·설치 스크립트: pr_agent_config_paths와 같은 목록
+[[rules]]
+key = "revert_agent_config_paths"
+action = "repo_revert_pr"
+metric = "paths_named"
+field = "changed_paths"
+names = [
+  # 코딩 에이전트 지시·설정 (폴더)
+  ".claude", ".codex", ".cursor", ".gemini", ".agents", ".agent", ".kiro", ".windsurf", ".roo",
+  ".continue", ".amazonq", ".opencode", ".factory",
+  # 코딩 에이전트 지시·설정 (파일)
+  "CLAUDE.md", "AGENTS.md", "GEMINI.md", ".mcp.json", ".cursorrules", ".clinerules", ".windsurfrules",
+  "copilot-instructions.md", ".aider.conf.yml",
+  # 에디터·개발 환경이 열 때 실행 (.devcontainer.json은 폴더 없이 쓰는 형태)
+  ".vscode", ".devcontainer", ".devcontainer.json", ".idea", ".run", ".envrc", ".env",
+  # git 훅·하위 저장소
+  ".husky", ".githooks", ".pre-commit-config.yaml", ".gitmodules",
+  # CI
+  ".github", ".gitlab", ".gitlab-ci.yml", ".circleci", "Jenkinsfile", "azure-pipelines.yml",
+  "bitbucket-pipelines.yml",
+  # 설치·빌드 스크립트
+  "package.json", "pyproject.toml", "setup.py", "setup.cfg", "composer.json", "Gemfile", "Pipfile",
+  "requirements.txt", "Makefile", "GNUmakefile", "Dockerfile", "Taskfile.yml", "Taskfile.yaml",
+  # 테스트 도구가 자동으로 실행
+  "conftest.py", "tox.ini", "noxfile.py",
+  # 패키지 관리자 설정 (받는 곳을 바꾸거나 설치 때 코드를 실행)
+  ".npmrc", ".yarnrc", ".yarnrc.yml", ".pnpmfile.cjs", "pnpm-workspace.yaml", "bunfig.toml", "uv.toml",
+  "pip.conf",
+  # 잠금 파일 (받을 주소를 바꿔치기할 수 있다)
+  "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb",
+  "uv.lock", "poetry.lock", "Pipfile.lock", "composer.lock", "Gemfile.lock",
 ]
 
 [[rules]]
