@@ -32,6 +32,7 @@ from ax_contracts.schemas.data import (
 from data_agent.connectors import CatalogProduct
 from data_agent.skills import trend_insight_brief as brief
 from data_agent.skills.product_link import CatalogRead
+from data_agent.skills.topic_category import _Categories, _Item
 
 NOW = datetime(2026, 11, 4, 3, 0, tzinfo=UTC)
 DAY = date(2026, 11, 4)
@@ -61,13 +62,23 @@ def _rising(name: str, ratio: float) -> TrendVerdict:
 
 
 class BriefLLM(MockLLMClient):
-    def __init__(self, lines: dict[str, str] | None = None) -> None:
+    """한 줄 질문에는 lines, 분류 질문에는 cats(이름 → 분류, 없으면 답하지 않음 = unknown)."""
+
+    def __init__(self, lines: dict[str, str] | None = None,
+                 cats: dict[str, str] | None = None) -> None:  # fmt: skip
         super().__init__()
         self.lines = lines or {}
+        self.cats = {"다이어리": "IT"} if cats is None else cats
         self.asked = 0
+        self.classified = 0
         self.embedded = 0
 
     async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):  # noqa: ANN001, ANN201
+        if schema is _Categories:
+            self.classified += 1
+            names = {k[2:]: v for k, v in dict(untrusted or {}).items() if k.startswith("소재")}
+            return _Categories(items=[_Item(id=n, category=self.cats[v])
+                                      for n, v in names.items() if v in self.cats])  # fmt: skip
         self.asked += 1
         return brief._Lines(
             items=[brief._LineItem(keyword=k, line=v) for k, v in self.lines.items()]
@@ -142,11 +153,28 @@ def test_brief_orders_by_code_score_and_puts_non_material_last(tmp_path: Path) -
     last = out.insights[-1]
     assert last.reference_only and last.ad_material is False
     assert last.ad_material_reason == "뉴스·사건 분류는 광고 재료로 쓰지 않음"
-    assert "다이어리" in topics  # 지금 인기에 없는 급상승도 후보
-    diary = next(i for i in out.insights if i.topic == "다이어리")
-    assert diary.ad_material is None and diary.evidence.naver_ratio == 3.0
     assert [i.rank for i in out.insights] == [1, 2, 3]
-    assert len(seen[0]) == 4  # 연령대는 인사이트 수 + 2개(설정)만 본다 (후보 4개)
+    assert len(seen[0]) == 4  # 연령대는 분류된 후보 4개 (인사이트 수 + 2개 이내)
+
+
+def test_rising_only_topics_go_through_the_shared_classifier(tmp_path: Path) -> None:
+    llm = BriefLLM(cats={"다이어리": "IT"})
+    out, _ = _run(tmp_path, llm, extra="max_insights = 4\n")
+    diary = next(i for i in out.insights if i.topic == "다이어리")
+    assert llm.classified == 1  # 지금 인기에 없는 급상승 주제만 묶어서 분류
+    assert diary.category == "IT" and diary.ad_material is True
+    assert not diary.classification_pending and diary.evidence.naver_ratio == 3.0
+
+
+def test_unclassified_topics_are_reference_only_and_not_ranked(tmp_path: Path) -> None:
+    out, seen = _run(tmp_path, BriefLLM(cats={}))  # 분류기가 답하지 않음 = 분류 대기
+    last = out.insights[-1]
+    assert last.topic == "다이어리" and last.classification_pending and last.reference_only
+    assert last.category is None and last.ad_material is None
+    assert (last.ad_material_reason or "").startswith("분류 대기")
+    assert "다이어리" not in seen[0]  # 순위·연령대 후보에 넣지 않는다
+    ranked = [i for i in out.insights if not i.classification_pending]
+    assert len(ranked) == 3
 
 
 def test_insight_fields_come_from_existing_results(tmp_path: Path) -> None:

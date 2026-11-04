@@ -52,6 +52,8 @@ from ax_contracts.schemas.data import (
     TrendVerdict,
 )
 from data_agent.explain import _bad_numbers
+from data_agent.skills.ad_material import AdRules, judge, load_rules
+from data_agent.skills.topic_category import CategoryResult, TopicInput, classify_topics
 from data_agent.skills.trend_evidence import BLAME, fixed_line
 from data_agent.skills.trend_scan import TREND_CONFIG_ENV
 
@@ -85,6 +87,7 @@ class BriefConfig:
     w_google: float = 0.5  # 인기 검색어 몫: 1 / 순위
     w_youtube: float = 0.5  # YouTube 몫: 영상 수 ÷ 후보 중 최대 영상 수
     age_topics_extra: int = 2  # 연령대를 볼 후보 = 인사이트 수 + 이만큼 (네이버 호출 아끼기)
+    pending_max: int = 2  # 분류 대기 주제를 맨 아래 참고용으로 몇 개까지 보일지 (순위에는 안 넣음)
 
 
 def load_config(env: Mapping[str, str]) -> BriefConfig:
@@ -101,6 +104,7 @@ def load_config(env: Mapping[str, str]) -> BriefConfig:
         }
         values["max_insights"] = max(3, min(7, int(values["max_insights"])))
         values["age_topics_extra"] = max(0, int(values["age_topics_extra"]))
+        values["pending_max"] = max(0, int(values["pending_max"]))
         return BriefConfig(**values)
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return BriefConfig()
@@ -163,9 +167,37 @@ class Candidate:
     verdict: TrendVerdict | None = None
     age: AgeTopic | None = None
     score: float = 0.0
+    cls: CategoryResult | None = None  # 지금 인기에 없는 주제를 공유 분류기로 분류한 결과
 
     def names(self) -> list[str]:
         return [self.topic, *self.aliases]
+
+    def category(self) -> str | None:
+        if self.popular is not None and self.popular.topic_category:
+            return self.popular.topic_category
+        return self.cls.category if self.cls is not None else None
+
+    def is_person(self) -> bool | None:
+        return (
+            self.popular.is_person
+            if self.popular is not None
+            else (self.cls.is_person if self.cls is not None else None)
+        )
+
+    def real_entity(self) -> bool | None:
+        return (
+            self.popular.real_entity
+            if self.popular is not None
+            else (self.cls.real_entity if self.cls is not None else None)
+        )
+
+    def entity_names(self) -> list[str]:
+        if self.popular is not None:
+            return list(self.popular.entity_names)
+        return list(self.cls.entity_names) if self.cls is not None else []
+
+    def pending(self) -> bool:
+        return self.category() in (None, "unknown")
 
 
 def candidates(
@@ -238,24 +270,9 @@ def _naver_ratio(c: Candidate) -> float | None:
 # ------------------------------------------------------------------ 인사이트 칸
 
 
-def ad_material(
-    c: Candidate, allowed: Sequence[str], never: Sequence[str]
-) -> tuple[bool | None, str | None]:
-    """광고 재료로 쓸 수 있는지와 이유 (기획안 재료 규칙과 같다)."""
-    p = c.popular
-    if p is None or p.topic_category is None or p.topic_category == "unknown":
-        return None, "주제 분류가 없음 (지금 인기에 없는 급상승 주제이거나 분류하지 못함)"
-    if p.topic_category in never:
-        return False, f"{p.topic_category} 분류는 광고 재료로 쓰지 않음"
-    if p.is_person:
-        return False, "사람 이름 주제라 광고 재료로 쓰지 않음 (초상권)"
-    if p.brand_safe is False:
-        return False, f"{p.topic_category} 분류는 회사 추천 안 함 분류"
-    if p.topic_category not in allowed:
-        return False, f"{p.topic_category} 분류는 회사 광고 재료 분류가 아님"
-    if p.real_entity:
-        return True, "실존 이름·상표가 든 주제라 분위기·형식만 빌릴 것"
-    return True, None
+def ad_material(c: Candidate, rules: AdRules) -> tuple[bool | None, str | None]:
+    """광고 재료로 쓸 수 있는지와 이유 (공용 규칙 `ad_material.judge`)."""
+    return judge(c.category(), is_person=c.is_person(), real_entity=c.real_entity(), rules=rules)
 
 
 def evidence(c: Candidate, popular: TrendPopularOutput | None) -> InsightEvidence:
@@ -389,13 +406,12 @@ def build_insights(
     promo: PromoConceptsOutput | None,
     products: Mapping[str, list[InsightProduct]],
     products_reason: str | None,
-    allowed: Sequence[str],
-    never: Sequence[str],
+    rules: AdRules,
 ) -> list[TrendInsight]:
-    """후보 → 인사이트 칸 (한 줄은 아직 비움). 광고 재료가 아닌 것은 맨 아래."""
+    """후보 → 인사이트 칸 (한 줄은 아직 비움). 광고 재료가 아닌 것·분류 대기는 맨 아래."""
     out: list[TrendInsight] = []
     for c in picked:
-        ok, ok_why = ad_material(c, allowed, never)
+        ok, ok_why = ad_material(c, rules)
         fmt, samples, fmt_why = shorts_format(c.popular)
         age = c.age
         band = next((b for b in age.bands if b.band == age.top_band), None) if age else None
@@ -418,12 +434,13 @@ def build_insights(
                 topic=c.topic,
                 aliases=c.aliases,
                 line="",
-                category=c.popular.topic_category if c.popular else None,
+                category=None if c.pending() else c.category(),  # type: ignore[arg-type]
                 ad_material=ok,
                 ad_material_reason=ok_why,
-                reference_only=ok is False,
-                real_entity=c.popular.real_entity if c.popular else None,
-                entity_names=list(c.popular.entity_names) if c.popular else [],
+                reference_only=ok is not True,
+                classification_pending=c.pending(),
+                real_entity=c.real_entity(),
+                entity_names=c.entity_names(),
                 evidence=ev,
                 target_age=age.top_band if age else None,
                 target_age_ratio=age.top_ratio if age else None,
@@ -443,7 +460,7 @@ def build_insights(
                 score=c.score,
             )
         )
-    out.sort(key=lambda i: (i.reference_only, -i.score))
+    out.sort(key=lambda i: (i.classification_pending, i.reference_only, -i.score))
     for n, i in enumerate(out, start=1):
         i.rank = n
     return out
@@ -515,12 +532,12 @@ async def make_brief(
     promo: PromoConceptsOutput | None,
     catalog: Any,
     aliases: Mapping[str, Sequence[str]] | None = None,
+    category_cache: Any = None,
     now: datetime | None = None,
     context_id: str | None = None,
     store: BriefStore | None = None,
 ) -> BriefResult:
     """기존 skill 결과를 묶어 인사이트 3~7개 (하루 캐시). 상태를 바꾸지 않는다(브리프 기록만)."""
-    from data_agent.skills import promo_concepts as promo_mod
     from data_agent.skills.content_recommend import load_config as load_recommend
     from data_agent.skills.product_link import pick_links, similarities, topic_text
 
@@ -543,8 +560,24 @@ async def make_brief(
             why = popular_reason or "지금 인기 주제도 오늘 급상승 판정도 없음"
             out = empty(day, rules, now, why)
             return BriefResult(out, as_evidence(out, queries, now))
+        # 모든 주제는 공유 분류기를 거친다. 지금 인기 주제는 이미 분류됐고(저장 재사용),
+        # 지금 인기에 없는 급상승 주제만 여기서 묶어 분류한다(저장된 분류는 다시 묻지 않음)
+        todo = [c for c in cands if c.popular is None]
+        if todo:
+            try:
+                found = await classify_topics(
+                    [TopicInput(c.topic, tuple(c.aliases)) for c in todo], llm,
+                    cache=category_cache, context_id=context_id,
+                )  # fmt: skip
+                queries.append(f"topic_category rising_only={len(todo)}")
+                for c in todo:
+                    c.cls = found.get(c.topic)
+            except Exception as error:  # 분류 실패면 그 주제들은 분류 대기
+                queries.append(f"topic_category failed ({type(error).__name__})")
+        ready = [c for c in cands if not c.pending()]
+        waiting = [c for c in cands if c.pending()]  # 순위에 넣지 않고 맨 아래 참고용
         # 연령대: 1차 점수 상위만 (네이버 호출 아끼기)
-        first = pick(cands, config, n + config.age_topics_extra)
+        first = pick(ready, config, n + config.age_topics_extra)
         try:
             age_out = await age_fn([c.topic for c in first])
             queries.append(f"trend_age keywords={len(first)}")
@@ -553,7 +586,7 @@ async def make_brief(
                 c.age = by_age.get(_norm(c.topic))
         except Exception as error:  # 연령대는 근거 하나라 실패해도 브리프는 만든다
             queries.append(f"trend_age failed ({type(error).__name__})")
-        picked = pick(first, config, n)
+        picked = pick(first, config, n) + pick(waiting, config, config.pending_max)
         # 상품: 임베딩 기준을 통과한 것만 (product_link, [recommend] 기준)
         rec = load_recommend(env)
         prods: dict[str, list[InsightProduct]] = {}
@@ -596,10 +629,9 @@ async def make_brief(
                         for x in passed
                     ]
                 prod_why = f"임베딩 유사도 {rec.min_similarity:g} 이상(1등만)인 상품이 없음"
-        allowed = [c for c in promo_mod.load_config(env).trend_categories]
         insights = build_insights(
             picked, day=day, popular=popular, promo=promo, products=prods,
-            products_reason=prod_why, allowed=allowed, never=sorted(promo_mod.NEVER_TREND),
+            products_reason=prod_why, rules=load_rules(env),
         )  # fmt: skip
         await write_lines(insights, llm, context_id, queries)
         out = TrendInsightBriefOutput(
