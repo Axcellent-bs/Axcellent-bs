@@ -37,6 +37,7 @@ def test_card_validates(card: AgentCard) -> None:
         "answer_planning_question",
         "campaign_effect",
         "trend_age",
+        "trend_insight_brief",
     }
 
 
@@ -157,3 +158,12 @@ def test_trend_age_is_a_read_for_orchestrator_marketing_planning_and_dashboard(
         "dashboard-api",
     }
     assert skill.output_schema.endswith("#TrendAgeOutput")
+
+
+def test_trend_insight_brief_is_a_read_for_planning_orchestrator_and_dashboard(
+    card: AgentCard,
+) -> None:
+    skill = next(s for s in card.skills if s.id == "trend_insight_brief")
+    assert skill.grade == "read"
+    assert set(skill.allowed_requesters) == {"planning", "orchestrator", "dashboard-api"}
+    assert skill.output_schema.endswith("#TrendInsightBriefOutput")
