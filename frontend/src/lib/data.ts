@@ -810,6 +810,13 @@ export interface TrendInsight {
   shorts_format: string | null;
   shorts_format_samples: number | null;
   shorts_format_reason: string | null;
+  /** 형식을 고른 단계: topic = 이 주제 근거 숏츠, category = 이 주제 카테고리 숏츠 통계, all = 전체 숏츠 통계 (#556). 예전 응답은 없다
+   *  count = 이 형식인 숏츠 수, total = 형식을 분류한 숏츠 수 */
+  shorts_format_source?: "topic" | "category" | "all" | null;
+  shorts_format_source_count?: number | null;
+  shorts_format_source_total?: number | null;
+  /** 연령대별 평소 대비 배수 전체 (trend_age 결과 그대로, 설정 순서, #556). 보지 않은 주제는 빈 목록 + target_age_reason */
+  age_bands?: AgeBandTrend[];
   /** 숏츠 통계와 같은 시점의 그 형식 중앙값 조회수와 기준 시각 (#547). 예전 응답은 없다 */
   shorts_format_median_views?: number | null;
   shorts_format_at?: string | null;
@@ -1076,8 +1083,6 @@ export const dataAi = {
   shortsStats: () => askData<ShortsStatsOutput>("shorts_stats", "숏츠 통계", {}, TREND_DEADLINE_MS),
   /** 인사이트 브리프 (2단계). 서버 하루 캐시. 브리프 안에서 trend_age·임베딩·한 줄 문장(LLM)을 부른다 */
   trendInsightBrief: () => askData<TrendInsightBriefOutput>("trend_insight_brief", "인사이트 브리프", {}, RECOMMEND_DEADLINE_MS),
-  /** 연령대별 상승. keywords를 주면 그 주제만. 서버 하루 캐시(주제별)라 브리프가 이미 본 주제는 네이버를 다시 부르지 않는다 */
-  trendAge: (keywords: string[]) => askData<TrendAgeOutput>("trend_age", "연령대별 상승", { keywords: keywords.slice(0, 30) }, TREND_DEADLINE_MS),
   /** 홍보 영상 기획안. 서버 하루 캐시. regenerate = true면 오늘 만든 기획안이 있어도 새로 만든다(LLM·네이버를 다시 부름) */
   promoConcepts: (regenerate = false) =>
     askData<PromoConceptsOutput>("promo_concepts", "홍보 영상 기획안", regenerate ? { regenerate: true } : {}, RECOMMEND_DEADLINE_MS),
