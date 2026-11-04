@@ -660,6 +660,14 @@ class ChangeProposalDeclineBody(BaseModel):
     note: str | None = Field(default=None, max_length=200)
 
 
+class IncidentCompensationDecideBody(BaseModel):
+    """장애 보상 대기를 고객별로 승인·거절한다. 결정한 사람은 받지 않는다(사람 토큰에서 채운다)."""
+
+    incident_id: str = Field(pattern=r"^ctx_inc_[A-Za-z0-9]+$")
+    approve_buyer_ids: list[str] = Field(default_factory=list, max_length=100)
+    reject_buyer_ids: list[str] = Field(default_factory=list, max_length=100)
+
+
 class ResolutionNoteBody(BaseModel):
     """해결 메모 본문. 작성자는 받지 않는다(서버가 사람 토큰에서 채운다). 셋 다 비면 422."""
 

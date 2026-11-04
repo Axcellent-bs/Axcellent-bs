@@ -17,6 +17,9 @@
 | `suggest_compensation` | read |
 | `request_incident_compensation` | A |
 | `list_incident_compensation` | read |
+| `propose_incident_compensation` | A |
+| `decide_incident_compensation` | A |
+| `list_incident_queue` | read |
 
 - 실행: `uv run --package ax-svc-claims uvicorn svc_claims.main:app --port 8112` (backend/ 에서, 목 모드 `AGENT_TEMPLATE_MOCK=1`)
 - 다른 에이전트가 `support`로 불러도 위 skill이면 이 서비스로 온다 (`route_target`).

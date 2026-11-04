@@ -17,6 +17,7 @@ from support_agent.gap_handlers import GAP_HANDLERS
 from support_agent.handlers import HANDLERS
 from support_agent.handoff_handlers import HANDOFF_HANDLERS
 from support_agent.incident_handlers import INCIDENT_HANDLERS
+from support_agent.incident_queue_handlers import INCIDENT_QUEUE_HANDLERS
 from support_agent.insight_handlers import INSIGHT_HANDLERS
 from support_agent.original_handlers import ORIGINAL_HANDLERS
 from support_agent.payment_handlers import PAYMENT_HANDLERS
@@ -59,6 +60,7 @@ ALL_HANDLERS = {
     **ANALYSIS_HANDLERS,
     **SUGGEST_HANDLERS,
     **INCIDENT_HANDLERS,
+    **INCIDENT_QUEUE_HANDLERS,
     **PAYMENT_HANDLERS,
     **HANDOFF_HANDLERS,
     **GAP_HANDLERS,

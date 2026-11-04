@@ -1,5 +1,5 @@
 import { ApiError } from "./apiError";
-import type { ChangeProposalSent, DeclineReason } from "./support";
+import type { ChangeProposalSent, DeclineReason, IncidentCompensationDecision } from "./support";
 import type { AdminReview, Claim, ClaimDetail, ClaimIntake, ClaimSuggestion, ClaimStats, CommLine, CommMeta, Conversation, ConversationListItem, Dashboard, FeedbackItem, FeedbackOverview, FeedbackStatus, Health, Kpi, Me, QueueRun, QueueView, ReceiptAnalysis, ReceiptImageInput, Summary, Validation } from "./types";
 
 import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN } from "./env";
@@ -105,6 +105,9 @@ export const api = {
     declineChangeProposal: (b: { topic_code: string; inquiry_id: number; reason: DeclineReason; note?: string }) =>
       post<{ topic_code: string; inquiry_id: number; reason: DeclineReason; decided_by: string; created: boolean }>(
         `/api/dashboard/change-proposals/decline`, b),
+    // 장애 보상 대기를 사람이 고객별로 승인·거절한다 (사람 토큰 필요). 승인된 고객만 마케팅 쿠폰 요청으로 넘어간다
+    decideIncidentCompensation: (b: { incident_id: string; approve_buyer_ids: string[]; reject_buyer_ids: string[] }) =>
+      post<IncidentCompensationDecision>(`/api/dashboard/incident-compensation-queue/decide`, b),
     revealOriginal: (id: number, messageId: number) =>
       post<{ message_id: number; text: string }>(`/api/dashboard/conversations/${id}/messages/${messageId}/original`),
     claimSuggestion: (id: number) => post<ClaimSuggestion>(`/api/dashboard/conversations/${id}/claim-suggestion`),

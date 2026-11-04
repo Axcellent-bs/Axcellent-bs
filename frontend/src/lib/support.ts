@@ -147,6 +147,34 @@ export interface IncidentCompensation {
 }
 export interface IncidentCompensationList { incidents: IncidentCompensation[]; notes: string[] }
 
+/** 장애 보상 대기 → 사람 승인 (dashboard-api GET /incident-compensation-queue). 승인하기 전에는 쿠폰이 나가지 않는다 */
+export type QueueStatus = "pending" | "approved" | "sent" | "held" | "rejected";
+export interface QueueRow {
+  buyer_id: string;
+  status: QueueStatus;
+  reason_code: string;
+  count: number;
+  unit_value: number;
+  total_value: number;
+  impact_ref: string | null;
+  created_at: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  coupon_id: string | null;
+  sent_at: string | null;
+}
+export interface IncidentQueue { context_id: string; pending_buyers: number; pending_total: number; rows: QueueRow[] }
+export interface IncidentQueueList { incidents: IncidentQueue[]; notes: string[] }
+export interface IncidentCompensationDecision {
+  incident_context_id: string;
+  results: { buyer_id: string; status: "sent" | "held" | "approved" | "rejected" | "not_found" | "not_pending" | "failed"; coupon_id: string | null; total_value: number }[];
+  approved: number;
+  rejected: number;
+  sent: number;
+  stopped_early: boolean;
+  notes: string[];
+}
+
 // ---------------------------------------------------------------- 호출
 async function get<T>(path: string): Promise<Envelope<T> & { meta: { total?: number } }> {
   let res: Response;
@@ -182,6 +210,9 @@ export const support = {
   /** 사건별로 보상 쿠폰을 받은 고객. 사건을 주면 그 사건만 */
   incidentCompensation: (incidentId?: string) =>
     get<IncidentCompensationList>(`${BASE}/incident-compensation${qs({ incident_id: incidentId })}`),
+  /** 장애 보상 대기·승인·보류 목록 (사건을 주면 그 사건만) */
+  incidentQueue: (incidentId?: string) =>
+    get<IncidentQueueList>(`${BASE}/incident-compensation-queue${qs({ incident_id: incidentId })}`),
   changeProposals: () => get<ChangeProposals>(`${BASE}/change-proposals`),
   /** 한 사건 번호로 기록된 처리(안전 관문 실행 기록) */
   executions: (contextId: string) => get<ExecutionRow[]>(`${BASE}/executions${qs({ context_id: contextId })}`),

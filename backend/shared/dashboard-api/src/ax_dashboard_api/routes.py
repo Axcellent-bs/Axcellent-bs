@@ -73,6 +73,7 @@ from ax_dashboard_api.schemas import (
     FeedbackItem,
     FeedbackOverview,
     FeedbackStatusBody,
+    IncidentCompensationDecideBody,
     InspectionBody,
     Kpi,
     NoteBody,
@@ -1024,6 +1025,49 @@ async def decline_change_proposal(body: ChangeProposalDeclineBody, request: Requ
         },
         {"note": body.note} if body.note else None,
         target=f"inquiry:{body.inquiry_id}:decline:{body.topic_code}",
+    )
+    return ok(out)
+
+
+@router.get("/incident-compensation-queue")
+async def incident_compensation_queue(
+    incident_id: str | None = Query(default=None, pattern=r"^ctx_inc_[A-Za-z0-9]+$"),
+    include_closed: bool = False,
+) -> dict:
+    """장애 보상 대기·승인·보류 목록 (읽기). 사람이 승인하기 전에는 쿠폰이 나가지 않는다."""
+    if is_mock():
+        return ok({"incidents": [], "notes": []})
+    payload: dict = {"include_closed": include_closed}
+    if incident_id:
+        payload["incident_context_id"] = incident_id
+    return ok(await support_client.call("list_incident_queue", payload))
+
+
+@router.post("/incident-compensation-queue/decide", status_code=201)
+async def decide_incident_compensation(
+    body: IncidentCompensationDecideBody, request: Request
+) -> dict:
+    """대기 고객을 고객별로 승인·거절한다. 사람 토큰이 필요하다 (라우터 전체에 걸려 있다).
+
+    승인된 고객만 고객지원이 마케팅 쿠폰 요청으로 넘긴다. 결정한 사람은 사람 토큰에서만 채운다.
+    같은 선택을 여러 번 눌러도 한 번만 처리되도록 호출 사이에 변하지 않는 키를 쓴다.
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "보상 승인은 실제 모드에서만 된다")
+    if not body.approve_buyer_ids and not body.reject_buyer_ids:
+        raise ApiError(422, "NOTHING_TO_DECIDE", "승인하거나 거절할 고객을 골라 주세요")
+    digest = hashlib.sha1(
+        f"{body.incident_id}|{sorted(body.approve_buyer_ids)}|{sorted(body.reject_buyer_ids)}".encode()
+    ).hexdigest()[:12]
+    out = await support_client.call(
+        "decide_incident_compensation",
+        {
+            "incident_context_id": body.incident_id,
+            "approve_buyer_ids": body.approve_buyer_ids,
+            "reject_buyer_ids": body.reject_buyer_ids,
+            "author": request.state.human,
+        },
+        key=f"incident-compensation-decide:{body.incident_id}:{digest}",
     )
     return ok(out)
 
