@@ -34,7 +34,8 @@ def test_agent_card_format_and_served() -> None:
     assert (card.name, card.owner, card.url) == ("planning", "예진", "http://planning:8101/a2a")
     skills = {s.id: s for s in card.skills}
     intake = {"create_ticket", "receive_planning_answer"}  # 요청 접수 (#174)·되묻기 답
-    assert set(skills) == intake | {"receive_dev_result", "request_release_check"}
+    proposals = {"receive_insight", "receive_campaign_update"}  # 기획 제안 (11/4)
+    assert set(skills) == intake | proposals | {"receive_dev_result", "request_release_check"}
     assert skills["request_release_check"].allowed_requesters == ["dev"]
     assert skills["create_ticket"].grade == "A"
     assert skills["create_ticket"].allowed_requesters == [

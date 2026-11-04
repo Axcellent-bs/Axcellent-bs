@@ -151,7 +151,7 @@ function Block({ b, doc, d, s }: { b: DocBlock; doc: string; d: Dispatch<Action>
     )
   }
   if (b.kind === 'ref') {
-    return <div className="blk blk-ref"><Tag>연결</Tag><span><Linked s={s} text={b.text} /></span>{remove}</div>
+    return <div className="blk blk-ref"><Tag>연결</Tag><span className="blk-ref-text"><Linked s={s} text={b.text} /></span>{remove}</div>
   }
   return (
     <div className="blk">

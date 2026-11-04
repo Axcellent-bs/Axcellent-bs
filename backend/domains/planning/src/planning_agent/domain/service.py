@@ -128,11 +128,13 @@ from planning_agent import (
     ask_requester,
     cause_inbox,
     notion_import,
+    proposals,
     related,
     release_check,
 )
 from planning_agent.ask_requester import Asker, missing_info_question
 from planning_agent.domain.docs import gather_blocks, next_block_id
+from planning_agent.domain.proposal_actions import PROPOSAL_ORIGIN, ProposalMixin
 from planning_agent.spec_writer import SpecWriter, default_writer
 
 SAMPLE_TICKETS = {
@@ -253,9 +255,10 @@ class EditSpecParams(SpecParams):
     problem: str = ""
     goal: str = ""
     paras: dict[str, str] = Field(default_factory=dict)
+    body_md: str | None = Field(default=None, max_length=20000)  # 자유 작성 칸 (None = 그대로)
 
 
-class PlanningService(PlanningCore):
+class PlanningService(ProposalMixin, PlanningCore):
     """기획 서비스 (planning, 8101): 요청 접수·기획서 초안·확정·인사 연동·되묻기·소통·문서.
 
     확정한 기획서는 개발 서비스로 넘기고(start_dev) 결과를 돌려받는다(receive_dev_result)."""
@@ -273,6 +276,7 @@ class PlanningService(PlanningCore):
         "import_notion": ("_import_notion", NotionImportParams),
         "resume_request": ("_resume_request", RequestParams),
         "send_release_order": ("_send_release_order_action", ReleaseOrderParams),
+        **ProposalMixin.PROPOSAL_ACTIONS,
     }
 
     def __init__(
@@ -287,8 +291,17 @@ class PlanningService(PlanningCore):
         hr_client: HrClient | None | Literal["default"] = "default",
         asker: Asker | None | Literal["default"] = "default",
         spec_writer: SpecWriter | None | Literal["default"] = "default",
+        insights: proposals.DataInsights | None | Literal["default"] = "default",
+        marketing: proposals.MarketingBrief | None | Literal["default"] = "default",
+        proposal_writer: proposals.ProposalWriter | None | Literal["default"] = "default",
     ):
         super().__init__(clock, gate, tenant_id, result_sender, dev_sender, real_example, relater)
+        # 기획 제안: 데이터분석 인사이트를 받아오는 곳·마케팅에 넘기는 곳
+        # (None이면 부르지 않음, 목 모드 기본값)
+        self._insights = proposals.default_insights() if insights == "default" else insights
+        self._marketing = proposals.default_marketing() if marketing == "default" else marketing
+        pw = proposal_writer  # 할 일·이유·목표 초안 (None이면 규칙 초안)
+        self._proposal_writer = proposals.default_writer() if pw == "default" else pw
         # 인사 record_case를 실제로 부르는 곳 (None이면 관문·활동 기록만, 목 모드 기본값)
         self._hr = hr_link.default_client() if hr_client == "default" else hr_client
         # 요청 서비스에 되묻는 곳 (None이면 묻지 않음, 목 모드 기본값)
@@ -1551,6 +1564,8 @@ class PlanningService(PlanningCore):
         safety가 confirm_spec을 보류·거절해도 "교차검증 대기" (앞선 단계는 그대로 남는다)."""
         if sp.status == "확정":
             return False
+        if sp.origin == PROPOSAL_ORIGIN:  # 기획 제안 기획안: 마케팅·개발 중 사람이 고른다
+            return False
         req = self._request_of_spec(s, sp)
         if req is not None and req.paused:  # 사람이 중단함: 재개할 때 다시 본다
             return False
@@ -2064,6 +2079,7 @@ class PlanningService(PlanningCore):
         goal: str,
         paras: dict[str, str],
         title: str = "",
+        body_md: str | None = None,
     ) -> ActionResult | None:
         """사람 수정: 기획서의 제목·문제·목표·문단 글을 고친다.
 
@@ -2080,6 +2096,9 @@ class PlanningService(PlanningCore):
                 "SPEC_CONFIRMED", f"{spec}는 확정돼서 요구사항·완료 기준은 고칠 수 없습니다"
             )
         changed: list[str] = []
+        if body_md is not None and body_md != (sp.body_md or ""):
+            sp.body_md = body_md  # 자유 작성 칸은 확정 뒤에도 고친다 (판단에 안 씀)
+            changed.append("자유 작성")
         if title.strip() and title.strip() != sp.title:
             sp.title = title.strip()
             changed.append("제목")
@@ -2230,6 +2249,16 @@ class PlanningService(PlanningCore):
         fn(d)
         d.updated_at = self.clock()
 
+    async def dispatch(self, action: dict) -> ActionResult:
+        """기획 제안의 잠금 밖 액션(받아오기·요청으로)은 따로, 나머지는 원래 길."""
+        if isinstance(action, dict) and isinstance(action.get("type"), str):
+            name = action_name(action["type"])
+            if name in self.OUTSIDE_LOCK:
+                out = await self.dispatch_proposal(name, action)
+                if out is not None:
+                    return out
+        return await super().dispatch(action)
+
     @staticmethod
     def _next_doc_id(s: State) -> str:
         """지운 문서가 있어도 번호가 겹치지 않게 가장 큰 번호 + 1."""
@@ -2255,7 +2284,14 @@ class PlanningService(PlanningCore):
         for n, (kind, text, done) in enumerate(page.blocks, start=2):
             blocks.append(DocBlock(id=f"b{n}", kind=kind, text=text, done=done))
         s.docs.append(
-            Doc(id=doc_id, title=page.title, updated_at=self.clock(), blocks=blocks, by="human")
+            Doc(
+                id=doc_id,
+                title=page.title,
+                updated_at=self.clock(),
+                created_at=self.clock(),
+                blocks=blocks,
+                by="human",
+            )
         )
         skipped = f", 못 옮긴 블록 {page.skipped}개" if page.skipped else ""
         s.activity.append(
@@ -2275,6 +2311,7 @@ class PlanningService(PlanningCore):
                 id=doc_id,
                 title=title or "제목 없는 문서",
                 updated_at=self.clock(),
+                created_at=self.clock(),
                 blocks=[DocBlock(id="b1", kind="p", text="")],
             )
         )
@@ -2292,6 +2329,7 @@ class PlanningService(PlanningCore):
                 title=f"{r.id} 관련 정리 · {r.title}",
                 about=r.id,
                 updated_at=self.clock(),
+                created_at=self.clock(),
                 blocks=blocks,
                 by=by or "human",
             )
