@@ -21,7 +21,7 @@
     },
     {
       "id": "publish_notice",
-      "description": "초안(draft_id)을 채널(banner·email·sns)에 게시하고 notice_id를 돌려준다. 게시 뒤 notice.published 이벤트를 발행한다.",
+      "description": "초안(draft_id)을 채널(banner·email)에 게시하고 notice_id를 돌려준다. sns 채널은 거부하고(sns_use_publish_sns) SNS 게시는 publish_sns로 한다. 게시 뒤 notice.published 이벤트를 발행한다.",
       "input_schema": "agents/marketing/src/marketing_agent/schemas.py#PublishNoticeInput",
       "output_schema": "agents/marketing/src/marketing_agent/schemas.py#PublishedNotice",
       "grade": "A",

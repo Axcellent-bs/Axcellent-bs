@@ -227,7 +227,8 @@ async def start_campaign(request: AgentRequest) -> AgentResult:
             evidence=evidence,
         )
 
-    key = f"{request.meta.context_id}:{START_ACTION}:{data.campaign_id}"
+    # 금액이 키에 없으면 관문이 금액을 보지 않고 이전 판정을 돌려준다(태윤 님 검토)
+    key = f"{request.meta.context_id}:{START_ACTION}:{data.campaign_id}:{data.budget_krw}"
     decision = await execute(
         START_ACTION,
         {
