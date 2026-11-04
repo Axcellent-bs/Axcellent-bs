@@ -1,0 +1,52 @@
+{
+ "id": "short_baseline_2h_14h",
+ "kind": "unknown",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-10-14T14:00:00Z",
+  "window_to": "2026-10-14T16:00:00Z"
+ },
+ "spec": {
+  "id": "short_baseline_2h_14h",
+  "window": {
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T16:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "sale",
+   "factor": 2.0,
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T16:00:00Z"
+  },
+  "payment_gap": {
+   "days_ago": [
+    1,
+    2,
+    3,
+    4,
+    5
+   ]
+  }
+ },
+ "expected": {
+  "sales": {
+   "status": "unknown",
+   "unknown_reason": "baseline_short",
+   "baseline_days": 2
+  }
+ },
+ "counted": {
+  "gross_actual": 6746100,
+  "gross_baseline": 3288450.0,
+  "gross_excess": 3457650.0,
+  "gross_past_days": {
+   "6": 3387600,
+   "7": 3189300
+  },
+  "direct_attributed": null
+ },
+ "memo": "지난 7일 중 5일이 결제 공백 → 기준선 2일(최소 3일) → 증분·방향 unknown"
+}

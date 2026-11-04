@@ -22,7 +22,7 @@ uv run python domains/data/eval/campaign_revenue/score.py --judge <모듈>:<함�
 - `counted`(참고값, 생성기 기록에서 바로 셈): 결제 완료 주문의 주문 금액(상품가 × 수량, 할인 전) 합. 증분 = 구간 − 공백이 아닌 지난 7일 같은 시간대 평균
 
 ## 케이스
-- `cases/` 8개: 주문 2배, 수량 2배(주문 수 그대로), 변화 없음, 절반, 구간 결제 공백, 지난 날 하나 공백, 쿠폰 2배, 쿠폰 변화 없음
+- `cases/` 9개: 주문 2배, 수량 2배(주문 수 그대로), 변화 없음, 절반, 구간 결제 공백, 지난 날 하나 공백, 쿠폰 2배, 쿠폰 변화 없음, 기준선 부족(지난 5일 공백)
 - `holdout/` 12개 (seed `2026110401`): 배수·수량·공백·쿠폰을 무작위로. **열어 보지 않고 숫자만 본다**
 
 ## 지표
@@ -32,3 +32,4 @@ uv run python domains/data/eval/campaign_revenue/score.py --judge <모듈>:<함�
 | `campaign_revenue.excess_error` | 증분 판매액 오차율 = \|답 − 센 값\| ÷ 기준선 판매액 (평균) |
 | `campaign_revenue.gap_unknown_rate` | 구간 결제 공백을 unknown + "결제 기록 공백"으로 답한 비율 |
 | `campaign_revenue.direct_match` | 쿠폰 주문 판매액 합이 센 값과 같은 비율 |
+| `campaign_revenue.short_baseline_unknown_rate` | 공백이 아닌 지난 날이 최소(3일)보다 적은 케이스를 unknown + "기준선 부족"으로 답한 비율 (`short_baseline_2h_14h`: 5일 공백 → 2일). holdout에는 이 케이스가 없다 |
