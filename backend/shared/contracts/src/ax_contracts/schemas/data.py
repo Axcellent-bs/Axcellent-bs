@@ -1338,6 +1338,9 @@ class CampaignEffectInput(AxModel):
     campaign_id: str | None = None  # 없으면 쿠폰은 확인할 수 없음 (주문·매출은 본다)
     window_from: UtcDatetime  # 캠페인 시작
     window_to: UtcDatetime  # 캠페인 끝
+    # 아래는 선택. 기획이 결과를 기록할 때 연결하려고 보내면 결과에 그대로 돌려준다 (저장하지 않음)
+    insight_id: str | None = None  # trend_insight_brief의 insight_id
+    proposal_id: str | None = None  # 기획 쪽 제안 id
 
     @model_validator(mode="after")
     def _range(self) -> Self:
@@ -1400,6 +1403,9 @@ class CampaignEffectOutput(AxModel):
     revenue: CampaignChange
     coupons: CampaignCoupons
     summary: str  # 한두 문장 (LLM, 숫자 검증 실패면 고정 문장)
+    # 아래는 예전 응답은 없다. 요청에 있던 연결 id 그대로 (데이터는 저장하지 않는다)
+    insight_id: str | None = None
+    proposal_id: str | None = None
 
 
 # ---------------------------------------------------------------- 연령대별 상승 (trend_age)
