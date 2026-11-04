@@ -832,6 +832,9 @@ export interface TrendInsight {
   /** 날짜 없이 바뀐 insight_id 이전의 id와 이 인사이트의 숫자 (#614). 예전 응답은 없다 */
   legacy_insight_id?: string | null;
   fact_ids?: string[];
+  /** 회사와의 연결 (#628): direct = 연결 상품, domain = 도메인 프로필·회사 키워드, none = 둘 다 아님(참고용). 예전 응답은 없다 */
+  company_relevance?: "direct" | "domain" | "none" | null;
+  company_relevance_reason?: string | null;
 }
 export interface TrendInsightBriefOutput {
   status: "known" | "unknown";
