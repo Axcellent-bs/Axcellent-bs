@@ -127,7 +127,32 @@ def _sentence(code: str, cur: Any, prev: Any, diff: Any, pct: float | None) -> s
     return f"{label} {unit(abs(diff))}{rate} {way}습니다 ({unit(prev)} → {unit(cur)}).{tail}"
 
 
-def variance_report(books: Books, d: date | None = None) -> dict[str, Any]:
+def _with_confirmed(
+    values: dict[str, Any], closings: dict[tuple[str, str], dict[str, Any]] | None, start: date
+) -> tuple[dict[str, Any], bool]:
+    """그 달을 확정했으면 확정 숫자를 쓴다. 비용은 줄에 음수로 저장돼 있어 부호를 맞춘다."""
+    snap = ((closings or {}).get(("month", start.isoformat())) or {}).get("snapshot")
+    if not snap:
+        return values, False
+    fixed = {x["code"]: x["amount"] for x in snap["lines"]}
+    out = dict(values)
+    for code in ("gmv", "commission_revenue", "net_result"):
+        out[code] = fixed.get(code)
+    for code in ("coupon_cost", "pg_fee", "refund_total"):
+        out[code] = None if fixed.get(code) is None else abs(fixed[code])
+    order_count = (snap.get("statement") or {}).get("order_count")
+    out["order_count"] = order_count
+    gmv, commission = out["gmv"], out["commission_revenue"]
+    out["aov"] = round(gmv / order_count) if gmv is not None and order_count else None
+    out["take_rate"] = round(commission / gmv, 4) if gmv and commission is not None else None
+    return out, True
+
+
+def variance_report(
+    books: Books,
+    d: date | None = None,
+    closings: dict[tuple[str, str], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     cfg = fc.load_config().variance
     d = d or fc.today()
     cur_s, cur_e = _month(d)
@@ -138,7 +163,11 @@ def variance_report(books: Books, d: date | None = None) -> dict[str, Any]:
         "previous": (prev_s, prev_e),
         "last_year": (yoy_s, yoy_e),
     }
-    vals = {k: _values(books, fc.day_start(s), fc.day_start(e)) for k, (s, e) in spans.items()}
+    vals = {}
+    confirmed = {}
+    for k, (s, e) in spans.items():
+        live = _values(books, fc.day_start(s), fc.day_start(e))
+        vals[k], confirmed[k] = _with_confirmed(live, closings, s)
     cur, prev, yoy = vals["current"], vals["previous"], vals["last_year"]
 
     lines = []

@@ -113,6 +113,7 @@ class State:
         self.ledger = Ledger()
         self.last_self_test: dict[str, Any] | None = None  # 마지막 "재무 AI 테스트" 결과
         self.closing_drifts: list[dict[str, Any]] = []  # 확정 뒤 달라진 결산. 하루 한 번 갱신
+        self.vat_drifts: list[dict[str, Any]] = []  # 확정 뒤 달라진 부가세 분기
         self.last_daily_closing: dict[str, Any] | None = None  # 마지막 자동 결산(전날) 결과
         self.records = FinanceRecords()
         self.books_loader: Callable[[], Awaitable[Books]] = load_books  # 테스트에서 바꾼다
@@ -145,6 +146,8 @@ class FinanceRecords:
     def __init__(self) -> None:
         self.closings: dict[tuple[str, str], dict[str, Any]] = {}  # (period, date) → {by, at}
         self.closing_cancels: list[dict[str, Any]] = []  # 취소한 결산 확정 기록
+        self.vat_filings: dict[str, dict[str, Any]] = {}  # 분기 시작일 → 확정한 부가세 숫자
+        self.vat_filing_cancels: list[dict[str, Any]] = []
         self.recon_notes: dict[str, str] = {}  # payment_id → 처리 메모
         self.recon_note_log: list[dict[str, Any]] = []
         self.batches: dict[str, dict[str, Any]] = {}  # 정산 기간 → 묶음 요청 상태
@@ -377,7 +380,9 @@ async def closing_report(request: AgentRequest) -> AgentResult:
     books = await state().books()
     d = data.date or fc.today()
     key = closing_key(data.period, d)
-    report = await closing.closing_report(books, data.period, d, state().records.closings.get(key))
+    report = await closing.closing_report(
+        books, data.period, d, state().records.closings.get(key), state().records.closings
+    )
     output = ClosingReportOutput(
         **{k: v for k, v in report.items() if k not in ("from", "to")},
         window_from=report["from"],

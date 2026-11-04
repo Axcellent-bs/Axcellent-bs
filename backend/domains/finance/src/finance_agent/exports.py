@@ -83,6 +83,7 @@ def build_files(
     month: str,
     last_day: date,
     closings: dict[tuple[str, str], dict[str, Any]] | None = None,
+    filings: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, bytes]:
     """파일 이름 → 내용. 이름은 코드가 정한다.
 
@@ -97,8 +98,9 @@ def build_files(
         "expert-review-checklist.md": review_checklist_md().encode("utf-8"),
     }
     if last_day.month % 3 == 0:
-        pack = tax.vat_pack(books, last_day)
-        seller = tax.seller_report(books, last_day)
+        filing = (filings or {}).get(tax.filing_key(last_day))  # 확정한 분기는 확정 숫자를 낸다
+        pack = filing["pack"] if filing else tax.vat_pack(books, last_day)
+        seller = filing["seller_report"] if filing else tax.seller_report(books, last_day)
         quarter = f"{last_day.year}-Q{last_day.month // 3}"  # 파일 이름은 영문만
         files |= {
             f"vat-summary-{quarter}.csv": vat_csv(pack).encode("utf-8-sig"),
@@ -113,6 +115,7 @@ def make_package(
     exports: dict[str, dict[str, Any]],
     today: date | None = None,
     closings: dict[tuple[str, str], dict[str, Any]] | None = None,
+    filings: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """지난달 묶음을 만든다. 내용이 같으면 그대로 두고, 달라지면 새 판으로 바꾼다."""
     today = today or fc.today()
@@ -131,7 +134,7 @@ def make_package(
             "status": "skipped",
             "reason": "FINANCE_EXPORT_DIR이 없다",
         }
-    files = build_files(books, month, last_day, closings)
+    files = build_files(books, month, last_day, closings, filings)
     manifest = [
         {"name": name, "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()}
         for name, body in sorted(files.items())

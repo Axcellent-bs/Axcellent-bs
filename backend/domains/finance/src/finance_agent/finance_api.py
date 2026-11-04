@@ -6,6 +6,9 @@
 | `GET /api/finance/closing?period=&date=` | ① 손익·분개 미리보기·설명 | 없음 |
 | `POST /api/finance/closing/confirm` | ① 결산 확정 기록. 날짜 필수, 끝난 기간만 | **사람** |
 | `POST /api/finance/closing/cancel` | ① 잘못한 결산 확정 취소. 이유 필수, 기록이 남음 | **사람** |
+| `POST /api/finance/closing/adjust` | ① 확정한 달의 차이를 전기 조정으로 반영 | **사람** |
+| `POST /api/finance/tax/vat/confirm` | ⑤ 끝난 분기의 부가세 숫자 확정 | **사람** |
+| `POST /api/finance/tax/vat/cancel` | ⑤ 잘못한 부가세 확정 취소. 이유 필수 | **사람** |
 | `GET /api/finance/statements?period=&date=&format=` | ① 손익계산서, `csv`면 내려받기 | 없음 |
 | `GET /api/finance/reconciliation?date=` | ② 결제별 PG 대사 (생략 = 최근 7일) | 없음 |
 | `POST /api/finance/reconciliation/{payment_id}/note` | ② 불일치 처리 메모 | **사람** |
@@ -119,7 +122,9 @@ async def run_export_cycle(trigger: str = "auto") -> dict[str, Any]:
         records = state().records
         imported = exports.scan_inbox(records.bank_rows, records.bank_imports)
         books = await state().fresh_books()
-        package = exports.make_package(books, records.exports, closings=records.closings)
+        package = exports.make_package(
+            books, records.exports, closings=records.closings, filings=records.vat_filings
+        )
         return {"trigger": trigger, "package": package, "imported": imported}
 
 
@@ -226,6 +231,17 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
             }
         )
 
+    for filing in state().vat_drifts:
+        payable = next((x["diff"] for x in filing["lines"] if x["code"] == "payable"), None)
+        todo.append(
+            {
+                "kind": "vat_drift",
+                "title": f"{filing['quarter']} 부가세 확정 뒤 숫자가 달라짐. 세무사 확인 필요",
+                "count": 1,
+                "amount": payable,
+                "link": "tax",
+            }
+        )
     drifts = state().closing_drifts
     if drifts:
         todo.append(
@@ -354,7 +370,9 @@ def add_finance_api(app: FastAPI) -> None:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
         confirmation = state().records.closings.get(closing_key(period, d))
-        report = await closing.closing_report(books, period, d, confirmation)  # type: ignore[arg-type]
+        report = await closing.closing_report(  # type: ignore[arg-type]
+            books, period, d, confirmation, state().records.closings
+        )
         return ok(report, books.meta())
 
     @app.get("/api/finance/statements", response_model=None)
@@ -429,14 +447,14 @@ def add_finance_api(app: FastAPI) -> None:
                     "recon_pending",
                     f"PG 정산 전 결제 {pending:,}건이 남아 월 결산을 확정할 수 없다",
                 )
-            draft = await closing.closing_report(books, period, d, None)
+            draft = await closing.closing_report(books, period, d, None, records)
             column = statements.column(books, fc.day_start(start), fc.day_start(end))
             records[key] = {
                 "by": person,
                 "at": fc.iso(fc.now()),
                 "snapshot": closing.snapshot_of(draft, books, column),
             }
-        report = await closing.closing_report(books, period, d, records[key])
+        report = await closing.closing_report(books, period, d, records[key], records)
         return ok(report, books.meta())
 
     @app.post("/api/finance/closing/cancel", response_model=None)
@@ -478,6 +496,119 @@ def add_finance_api(app: FastAPI) -> None:
         del records.closings[key]
         books = await state().fresh_books()
         return ok(await closing.closing_report(books, period, d, None), books.meta())
+
+    @app.post("/api/finance/closing/adjust", response_model=None)
+    async def adjust_closing(
+        request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """확정한 달의 차이를 조정으로 반영한다. 재무 AI는 안을 만들고 반영은 사람이 한다."""
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await _body(request)
+        reason, signature = body.get("reason"), body.get("signature")
+        if not body.get("date") or not isinstance(reason, str) or not reason.strip():
+            return error(400, "invalid_request", "date와 reason이 필요하다")
+        try:
+            d = fc.parse_date(body.get("date"))
+        except (ValueError, TypeError) as exc:
+            return error(400, "invalid_request", str(exc))
+        records = state().records.closings
+        key = closing_key("month", d)
+        confirmation = records.get(key)
+        if confirmation is None or not confirmation.get("snapshot"):
+            return error(404, "not_confirmed", "숫자를 저장해 확정한 달이 아니다")
+        books = await state().fresh_books()
+        report = await closing.closing_report(books, "month", d, confirmation, records)
+        proposal = report["adjustment_proposal"]
+        if proposal is None:
+            return error(409, "no_drift", "조정할 차이가 없다")
+        if signature != proposal["signature"]:
+            return error(409, "drift_changed", "본 차이와 지금 차이가 다르다. 다시 확인해 달라")
+        confirmation.setdefault("adjustments", []).append(
+            {
+                "for_month": key[1][:7],
+                "posted_month": fc.today().isoformat()[:7],
+                "lines": report["drift"],
+                "journal": proposal["journal"],
+                "by": person,
+                "at": fc.iso(fc.now()),
+                "reason": reason.strip()[:300],
+            }
+        )
+        return ok(
+            await closing.closing_report(books, "month", d, confirmation, records), books.meta()
+        )
+
+    @app.post("/api/finance/tax/vat/confirm", response_model=None)
+    async def confirm_vat(
+        request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """끝난 분기의 부가세 숫자를 고정한다. 세무사에게 넘길 기준이고 신고가 아니다."""
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await _body(request)
+        if not body.get("date"):
+            return error(400, "invalid_request", "date가 필요하다")
+        try:
+            d = fc.parse_date(body.get("date"))
+        except (ValueError, TypeError) as exc:
+            return error(400, "invalid_request", str(exc))
+        filings = state().records.vat_filings
+        key = tax.filing_key(d)
+        if key not in filings:
+            if not tax.quarter_finished(d):
+                return error(409, "period_not_closed", "끝나지 않은 분기는 확정할 수 없다")
+            books = await state().fresh_books()
+            if closing.unknown_codes(books):
+                return error(409, "books_unavailable", "받지 못한 장부 자료가 있다")
+            start, end, _ = tax.quarter_range(d)
+            if pending := closing.pending_recon(books, start, end):
+                return error(
+                    409, "recon_pending", f"PG 정산 전 결제 {pending:,}건이 남아 확정할 수 없다"
+                )
+            filings[key] = {
+                "by": person,
+                "at": fc.iso(fc.now()),
+                "pack": tax.vat_pack(books, d),
+                "seller_report": tax.seller_report(books, d),
+            }
+        books = await state().books()
+        return ok(tax.vat_view(books, d, filings), books.meta())
+
+    @app.post("/api/finance/tax/vat/cancel", response_model=None)
+    async def cancel_vat(
+        request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await _body(request)
+        reason = body.get("reason")
+        if not body.get("date") or not isinstance(reason, str) or not reason.strip():
+            return error(400, "invalid_request", "date와 reason이 필요하다")
+        try:
+            d = fc.parse_date(body.get("date"))
+        except (ValueError, TypeError) as exc:
+            return error(400, "invalid_request", str(exc))
+        records = state().records
+        filing = records.vat_filings.pop(tax.filing_key(d), None)
+        if filing is None:
+            return error(404, "not_confirmed", "확정한 분기가 아니다")
+        records.vat_filing_cancels.append(
+            filing
+            | {
+                "canceled_by": person,
+                "canceled_at": fc.iso(fc.now()),
+                "reason": reason.strip()[:300],
+            }
+        )
+        books = await state().books()
+        return ok(tax.vat_view(books, d, records.vat_filings), books.meta())
 
     @app.get("/api/finance/reconciliation", response_model=None)
     async def get_reconciliation(date: str | None = None) -> dict | JSONResponse:
@@ -576,6 +707,7 @@ def add_finance_api(app: FastAPI) -> None:
                 for r in rows
             ],
             "summary": summary,
+            "requested_by": requested_by,  # 요청한 사람은 승인하지 못한다 (안전 관문)
         }
         context_id = f"ctx_req_settlement_{name}"
         meta_req = RequestMeta(
@@ -693,7 +825,7 @@ def add_finance_api(app: FastAPI) -> None:
         except ValueError as exc:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
-        return ok(variance.variance_report(books, d), books.meta())
+        return ok(variance.variance_report(books, d, state().records.closings), books.meta())
 
     @app.post("/api/finance/bank/statement", response_model=None)
     async def upload_bank(
@@ -869,7 +1001,7 @@ def add_finance_api(app: FastAPI) -> None:
         except ValueError as exc:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
-        return ok(tax.vat_pack(books, d), books.meta())
+        return ok(tax.vat_view(books, d, state().records.vat_filings), books.meta())
 
     @app.get("/api/finance/tax/seller-report", response_model=None)
     async def get_seller_report(date: str | None = None, format: str = "json") -> dict | Response:
@@ -880,7 +1012,8 @@ def add_finance_api(app: FastAPI) -> None:
         except ValueError as exc:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
-        report = tax.seller_report(books, d)
+        filing = state().records.vat_filings.get(tax.filing_key(d))
+        report = filing["seller_report"] if filing else tax.seller_report(books, d)
         if format == "json":
             return ok(report, books.meta())
         if format == "xlsx":

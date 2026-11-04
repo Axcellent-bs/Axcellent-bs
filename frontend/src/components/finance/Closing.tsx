@@ -24,7 +24,24 @@ export function ClosingSection({ tick, onChanged, focus }: {
   }, [focus]);
   const res = useResource(`${period}:${date}`, () => finance.closing(period, date || null), tick);
   const [confirming, setConfirming] = useState(false);
+  const [reason, setReason] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
+
+  async function adjust(report: ClosingReport) {
+    if (!report.adjustment_proposal) return;
+    setConfirming(true);
+    setProblem(null);
+    try {
+      const next = await finance.adjustClosing(report.date, reason.trim(), report.adjustment_proposal.signature);
+      res.set(() => next);
+      setReason("");
+      onChanged();
+    } catch (e) {
+      setProblem((e as Error).message);
+    } finally {
+      setConfirming(false);
+    }
+  }
 
   async function confirm(report: ClosingReport) {
     setConfirming(true);
@@ -105,6 +122,14 @@ export function ClosingSection({ tick, onChanged, focus }: {
                   <Chip label={r.commentary_source === "llm" ? "AI가 씀" : "템플릿 문장"} tone={r.commentary_source === "llm" ? TONE.info : TONE.muted} />
                   <p className="mt-1.5 whitespace-pre-line">{plainText(r.commentary) || "설명이 없습니다."}</p>
                 </div>
+                {(r.adjustments ?? []).map((a) => <p key={a.at} className="mt-2 text-sm text-ink-700">{a.posted_month}에 조정 반영 · {a.by} · {a.reason}</p>)}
+                {(r.prior_adjustments ?? []).length > 0 && (
+                  <div className="mt-2 rounded-2xl bg-surface-2 px-4 py-3 text-sm text-ink-700">
+                    <p className="font-medium text-ink-900">이번 달에 반영한 전기 조정</p>
+                    {r.prior_adjustments!.map((a, n) => <p key={`${a.for_month}-${n}`}>{a.for_month} · {signedKrw(a.lines.find((x) => x.code === "net_result")?.diff ?? 0)} · {a.reason}</p>)}
+                    {r.net_after_adjustments != null && <p className="mt-1 font-medium tabular-nums text-ink-900">조정 후 영업 결과 {krw(r.net_after_adjustments)}</p>}
+                  </div>
+                )}
                 <div className="mt-3"><AppliedRules rules={r.applied_rules} /></div>
 
                 <div className="mt-4 rounded-2xl border border-ink-100 px-4 py-3">
@@ -118,6 +143,18 @@ export function ClosingSection({ tick, onChanged, focus }: {
                           <ul className="mt-1 space-y-0.5 tabular-nums">
                             {r.drift!.map((x) => <li key={x.code}>{x.label}: 확정 {krw(x.confirmed)} → 지금 {krw(x.current)} ({signedKrw(x.diff)})</li>)}
                           </ul>
+                          {r.adjustment_proposal ? (
+                            <div className="mt-2 space-y-2">
+                              <p>조정 분개안 (영업 결과 {signedKrw(r.adjustment_proposal.net)})</p>
+                              <ul className="space-y-0.5 tabular-nums">
+                                {r.adjustment_proposal.journal.map((j, n) => <li key={`${j.account}-${n}`}>{j.account}: 차변 {krw(j.debit)} / 대변 {krw(j.credit)}</li>)}
+                              </ul>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <input className="field min-w-0 flex-1" aria-label="조정 이유" placeholder="조정 이유" value={reason} onChange={(e) => setReason(e.target.value)} />
+                                <button className="btn-primary" disabled={!humanTokenSet || confirming || !reason.trim()} onClick={() => adjust(r)}>이번 달에 조정 반영</button>
+                              </div>
+                            </div>
+                          ) : <p className="mt-1">일 결산은 속보입니다. 차이는 월 결산에서 조정합니다.</p>}
                         </div>
                       )}
                     </div>
