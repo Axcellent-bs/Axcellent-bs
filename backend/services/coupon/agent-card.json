@@ -99,6 +99,16 @@
       ],
       "verifier": null,
       "priority": "recommended"
+    },
+    {
+      "id": "cancel_campaign",
+      "description": "시작한 캠페인(campaign_id, reason)을 재무 cancel_campaign으로 전달해 재무가 잡아 둔 예산을 푼다. 바뀌는 것은 재무 기록뿐이며 실제 광고를 멈추지 않는다(요청한 쪽이 멈춘다). 재무의 상태·결과를 그대로 돌려주고, 재무에 닿지 못하거나 답이 계약과 다르면 실패로 돌려준다. 결과가 이미 기록된 캠페인은 취소되지 않으며, 일부를 썼으면 record_campaign_result로 결과를 기록한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignCancelInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignCancelInput",
+      "grade": "read",
+      "allowed_requesters": ["orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
     }
   ]
 }
