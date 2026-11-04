@@ -1,6 +1,7 @@
 // 기획(planning 8101)·개발(dev 8111) 백엔드 REST·SSE와 화면 상태(State)를 잇는다.
 // 백엔드는 snake_case·ISO 시각, 화면은 camelCase·KST "MM-DD HH:mm"이라 여기서 한 번만 바꾼다.
 // 백엔드에 없는 값(학습 기준·감사 목록)은 빈 값으로 두고 지어내지 않는다.
+import type { Proposal } from './proposals'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { RELAY_TOKEN, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from '@/lib/env'
 import { RULE_LABEL, type Action, type Activity, type AuditItem, type ChatThread, type CodingMode, type CrossEvidence, type CrossReview, type Doc, type Incident, type OutMsg, type PR, type Request, type State, type Thread } from '@/lib/planningData'
@@ -116,7 +117,7 @@ export function fromBackend(raw: Json, queue: QueueItem[]): State {
       ...th,
       messages: ((th.messages as Json[]) ?? []).map((m) => ({ ...m, t: kst(m.at) || undefined, decision: m.decision ?? undefined })),
     }) as unknown as Thread),
-    docs: list<Json>('docs').map((d) => ({ ...d, updated: kst(d.updatedAt), about: d.about ?? undefined }) as unknown as Doc),
+    docs: list<Json>('docs').map((d) => ({ ...d, updated: kst(d.updatedAt), created: kst(d.createdAt) || undefined, about: d.about ?? undefined }) as unknown as Doc),
     decisions: list('decisions'),
     incidents: list<Json>('incidents').map((i) => ({ ...i, ctx: i.contextId ?? '', at: kst(i.openedAt) }) as unknown as Incident),
     activity: list<Json>('activity').map((a) => ({ ...a, t: kst(a.at), ctx: a.contextId ?? '', seq: a.seq ?? undefined, grade: a.grade ?? undefined }) as unknown as Activity),
@@ -127,6 +128,16 @@ export function fromBackend(raw: Json, queue: QueueItem[]): State {
     warnings: Number(s.warnings ?? 0),
     firstPrMinutes: (s.firstPrMinutes as number[]) ?? [],
     ...(Array.isArray(s.chats) ? { chats: toThreads(raw.chats) } : {}),
+    proposals: list<Json>('proposals').map((p) => {
+      const h = p.handoff as Json | null
+      const r = p.result as Json | null
+      return {
+        ...p, created: kst(p.createdAt), note: p.note ?? undefined, insightId: p.insightId ?? undefined, format: p.format ?? undefined, request: p.request ?? undefined, spec: p.spec ?? undefined,
+        bodyMd: p.bodyMd ?? undefined, target: p.target ? { ...(p.target as Json), measure: (p.target as Json).measure ?? undefined } : undefined, warnings: p.warnings ?? [], audience: p.audience ?? undefined, shortsFormat: p.shortsFormat ?? undefined,
+        handoff: h ? { ok: !!h.ok, reason: h.reason ?? undefined, campaign: h.campaign ?? undefined, at: kst(h.at) || undefined } : undefined,
+        result: r ? { ...r, at: kst(r.at) } : undefined,
+      } as unknown as Proposal
+    }),
     autoPolicy: {
       rules: [], // 관찰 기반 학습 기준은 백엔드에 아직 없다 (FR-ATL-007~009)
       observing: [],

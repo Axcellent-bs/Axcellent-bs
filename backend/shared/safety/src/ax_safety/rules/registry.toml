@@ -356,6 +356,19 @@ owner = "planning"
 requesters = ["planning", "support", "marketing", "hr", "data", "finance", "orchestrator"]
 base_grade = "A"
 
+# 기획 제안 (11/4): 데이터분석 인사이트 → 제안, 마케팅(게시)·데이터분석(성과)이 결과를 알린다
+[[actions]]
+action = "receive_insight"
+owner = "planning"
+requesters = ["planning", "data", "marketing"]
+base_grade = "A"
+
+[[actions]]
+action = "receive_campaign_update"
+owner = "planning"
+requesters = ["planning", "marketing", "data"]
+base_grade = "A"
+
 # 올릴 레포 승인·기각 (연결이 여럿일 때 AI 제안 → 사람 판단). PR 생성·머지는 따로 관문을 지난다
 [[actions]]
 action = "approve_repo"

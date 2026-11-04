@@ -118,11 +118,13 @@ export const SERVICES: Service[] = [
     desc: '팀 이동·입사·퇴사를 기록하고 확정합니다. 확정한 기록으로 센 팀별 인원이 재무 AI의 팀 예산에 쓰입니다.',
   },
   {
-    id: 'planning', agent: 'planning', family: 'product', name: '요청·기획서', by: 'AXcellent', Icon: IconPlan, entry: '/planning/requests', paths: ['/planning'],
+    id: 'planning', agent: 'planning', family: 'product', name: '요청·기획서', by: 'AXcellent', Icon: IconPlan, entry: '/planning/home', paths: ['/planning'],
     desc: '들어온 요청을 정리해 기획서로 만들고, 결과를 요청한 곳에 알립니다.',
     // 화면 안 메뉴(pages/Planning.tsx SECTIONS)를 사이드바 하위 탭으로 연다
     children: [
+      { href: '/planning/home', label: '홈' },
       { href: '/planning/requests', label: '요청' },
+      { href: '/planning/proposals', label: '기획 제안' },
       { href: '/planning/work', label: '문서·기획서' },
       { href: '/planning/agents', label: '에이전트 대화' },
     ],

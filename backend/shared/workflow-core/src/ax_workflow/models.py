@@ -167,6 +167,8 @@ class Spec(DomainModel):
     # 요청 서비스에 되물은 질문 (answer_planning_question). 답을 받으면 `question`과 같이 비운다
     question_id: str | None = None
     question_to: str | None = None  # 질문을 보낸 서비스 id
+    # 사람이 자유롭게 쓰는 칸 (마크다운). 판단·대조에는 쓰지 않는다 (문단 R·C가 기준)
+    body_md: str | None = None
 
 
 CodingStatus = Literal[
@@ -347,6 +349,7 @@ class Doc(DomainModel):
     title: str
     about: str | None = None
     updated_at: UtcDatetime
+    created_at: UtcDatetime | None = None  # 만든 시각 (예전 문서는 없음 → 고친 시각으로 대신)
     blocks: list[DocBlock] = Field(default_factory=list)
     by: Literal["ai", "human"] | None = None
 
@@ -495,6 +498,77 @@ class ChatThread(DomainModel):
     updated_at: UtcDatetime
 
 
+# ---- 기획 제안: 데이터분석 인사이트(근거 수치) → 기획 판단(할 일·이유·목표) → 사람 확정·폐기
+#      → 마케팅 또는 개발(요청) → 데이터분석 성과 → 기획에 기록 (계약 ax_contracts planning.py)
+ProposalStatus = Literal[
+    "확인 대기", "기획안", "마케팅 전달", "진행 중", "성과 확인", "기획서로", "폐기"
+]
+
+
+class ProposalFact(DomainModel):
+    """데이터 근거 한 줄. 숫자는 데이터분석 코드가 낸 값 그대로 (기획이 만들지 않는다)."""
+
+    label: str
+    value: str
+    source: str  # 그 값을 낸 skill
+    link: str | None = None  # 출처 링크
+
+
+class ProposalTarget(DomainModel):
+    """기획이 정한 목표치 (기획이 넣는 유일한 숫자)."""
+
+    label: str
+    value: str
+    measure: str | None = None  # 잴 skill (campaign_effect 등)
+
+
+class ProposalHandoff(DomainModel):
+    """마케팅에 넘긴 결과. 실패면 이유 (마케팅 창구 없음·응답 없음)."""
+
+    ok: bool
+    reason: str | None = None
+    campaign: str | None = None  # 마케팅이 돌려준 캠페인 id
+    at: UtcDatetime | None = None
+    channel: str | None = None  # 게시 채널 (published 때 마케팅이 알려 줌)
+    published_at: UtcDatetime | None = None
+    post_ref: str | None = None  # 게시물 id
+
+
+class ProposalResult(DomainModel):
+    direction: Literal["늘었음", "같음", "줄었음", "확인 불가"]
+    summary: str
+    facts: list[ProposalFact] = Field(default_factory=list)  # 데이터분석이 낸 성과 숫자
+    at: UtcDatetime
+
+
+class Proposal(DomainModel):
+    id: str  # PROP-n
+    title: str
+    from_: Literal["data", "marketing"] = Field(alias="from")
+    skill: str  # 인사이트를 낸 skill
+    insight_id: str | None = None  # 보낸 쪽 인사이트 id (id 사슬의 시작)
+    insight: str  # 받은 인사이트 (무엇을 발견했나, 보낸 쪽 문장)
+    facts: list[ProposalFact] = Field(default_factory=list)  # 데이터 근거 (보낸 쪽 값)
+    products: list[str] = Field(default_factory=list)
+    audience: str | None = None  # 타깃 연령대 (데이터분석)
+    shorts_format: str | None = None  # 잘 맞는 숏츠 형식 (데이터분석)
+    body_md: str | None = None  # 보낸 쪽 설명 (외부 문구라 지시로 쓰지 않는다)
+    # 아래는 기획 판단 (LLM 초안 또는 규칙, 확정 전 사람이 고친다)
+    idea: str  # 무엇을 할지
+    why: str  # 왜 해야 하는지
+    target: ProposalTarget | None = None
+    format: str | None = None
+    written_by: Literal["llm", "rule", "human"] = "rule"
+    warnings: list[str] = Field(default_factory=list)  # 근거에 없는 숫자 등 (코드 검사)
+    status: ProposalStatus = "확인 대기"
+    created_at: UtcDatetime
+    note: str | None = None  # 폐기 이유 · 확정 메모
+    handoff: ProposalHandoff | None = None
+    result: ProposalResult | None = None
+    request: str | None = None  # 개발로 보냈으면 REQ-n
+    spec: str | None = None  # 사람이 확정해 만든 기획안 (기획서 SPEC-n, origin proposal)
+
+
 class State(DomainModel):
     tenant_id: str = TENANT_ID_DEFAULT
     seq: int = 0  # 들어오고 나간 연동 건마다 1씩 (새로 받은 것 표시용)
@@ -525,6 +599,8 @@ class State(DomainModel):
     usage_by_month: dict[str, int] = Field(default_factory=dict)
     # 개발: 본인 Claude(MCP 작업 대기열)로 작업을 본 개발자 → 마지막으로 본 시각 (연결 여부 판단)
     agents_seen: dict[str, UtcDatetime] = Field(default_factory=dict)
+    # 기획 제안 (planning proposals.py). 개발은 쓰지 않는다
+    proposals: list[Proposal] = Field(default_factory=list)
 
 
 def dump(model: BaseModel) -> dict:
