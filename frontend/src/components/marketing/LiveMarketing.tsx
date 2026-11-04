@@ -1,4 +1,5 @@
 import { ActionQueue } from "@/components/finance/SafetyQueue";
+import { MARKETING_HOLD_ACTIONS } from "@/lib/finance";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ago, shortDateTime, won } from "@/lib/format";
 import {
@@ -69,7 +70,7 @@ export default function LiveMarketing() {
       <header className="flex flex-wrap items-end gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">공지·쿠폰</h1>
-          <p className="mt-1 text-sm text-ink-500">마케팅 AI가 캣북스에 실제로 올린 공지와 고객에게 준 쿠폰입니다. 공지 게시와 쿠폰 발급은 안전 장치를 거쳐 실행됩니다. 이 화면에서는 보류된 쿠폰만 결정하고 나머지는 읽기만 합니다.</p>
+          <p className="mt-1 text-sm text-ink-500">마케팅 AI가 캣북스에 실제로 올린 공지와 고객에게 준 쿠폰입니다. 공지 게시와 쿠폰 발급은 안전 장치를 거쳐 실행됩니다. 이 화면에서는 보류된 마케팅 작업만 결정하고 나머지는 읽기만 합니다.</p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
           <Chip label="실제 데이터" tone="bg-emerald-50 text-emerald-700" title="캣북스 쇼핑몰 배너와 안전 장치 실행 기록을 읽습니다" />
@@ -78,7 +79,7 @@ export default function LiveMarketing() {
         </div>
       </header>
 
-      <ActionQueue action="issue_coupon" intro="안전 장치가 C로 보류한 쿠폰(한도 초과·금액 불일치)이 여기 모입니다." />
+      <ActionQueue action={MARKETING_HOLD_ACTIONS} intro="안전 장치가 사람 확인으로 보류한 쿠폰·공지·SNS 게시·영상 생성이 여기 모입니다." />
 
       {live?.errors.map((e) => <p key={e} className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{e}</p>)}
       {!live && <p className="text-sm text-ink-500">불러오는 중입니다.</p>}
@@ -186,7 +187,7 @@ export default function LiveMarketing() {
             )}
           </Section>
 
-          <Section title="사람 결정 대기" desc="금액 기준을 넘거나 계산이 맞지 않아 안전 장치가 멈춘 공지·쿠폰입니다. 쿠폰은 맨 위 보류 큐에서, 공지는 재무 화면의 보류 큐에서 결정합니다.">
+          <Section title="사람 결정 대기" desc="기준에 걸리거나 계산이 맞지 않아 안전 장치가 멈춘 마케팅 작업입니다. 맨 위 보류 큐에서 결정합니다.">
             {live.holds === null ? <Empty>보류 건을 읽지 못했습니다.</Empty>
               : live.holds.length === 0 ? <Empty>기다리는 건이 없습니다.</Empty> : (
                 <ul className="divide-y divide-ink-100 rounded-2xl border border-ink-100">

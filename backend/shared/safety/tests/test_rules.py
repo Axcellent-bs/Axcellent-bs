@@ -14,7 +14,7 @@ from ax_safety.rules import ActionSpec, Rule, ThresholdTable, load_registry, loa
 
 def test_rule_files_load_and_match_agreed_values() -> None:
     registry, table = load_registry(), load_thresholds()
-    assert table.version == 1
+    assert table.version == 2
     assert table.review_timeout_seconds == 600  # 데모 10분 자동 거절
     values = {rule.key: rule.value for rule in table.rules if rule.metric != "param"}
     values.pop("pr_allowed_paths")
@@ -25,6 +25,7 @@ def test_rule_files_load_and_match_agreed_values() -> None:
     values.pop("revert_protected_paths")
     values.pop("merge_cross_data_verdict")
     values.pop("auto_policy_shrink_only")
+    values.pop("notice_sns_channel")
     assert values == {
         "coupon_total": 300_000,
         "coupon_unit": 20_000,
@@ -32,6 +33,10 @@ def test_rule_files_load_and_match_agreed_values() -> None:
         "compensation_per_context": 1_000_000,
         "compensation_per_customer": 50_000,
         "refund_single": 100_000,
+        "sns_daily_posts": 5,
+        "video_cost_single": 3_000,
+        "video_cost_daily": 20_000,
+        "video_cost_zero": 1,
     }
     issue = registry.get("issue_coupon")
     assert issue is not None and (issue.base_grade, issue.verifier) == ("A", None)

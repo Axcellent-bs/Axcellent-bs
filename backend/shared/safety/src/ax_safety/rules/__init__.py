@@ -93,6 +93,7 @@ class Rule(_Strict):
     """금액 규칙과 금액이 아닌 규칙.
 
     - 금액: `amount`·`unit`·`daily_total`·`context_total`·`customer_total` (`op`·`value`)
+    - 건수: `daily_count` (오늘 실행 건수 + 이번 1건, `op`·`value`)
     - 숫자 파라미터: `param` + `field` (`op`·`value`), 예: `pr_changed_lines`
     - 경로 목록: `paths_within` + `field` + `allowed` (하나라도 허용 접두사 밖이면 걸림)
     - 보호 경로: `paths_avoid` + `field` + `protected` (하나라도 보호 경로와 같거나 그 아래면 걸림)
@@ -109,6 +110,7 @@ class Rule(_Strict):
         "daily_total",
         "context_total",
         "customer_total",
+        "daily_count",
         "param",
         "paths_within",
         "paths_avoid",

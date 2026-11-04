@@ -373,7 +373,7 @@ export interface Review {
   decided_by: string | null;
   decided_at: string | null;
   note: string | null;
-  report: { totals?: Record<string, number | null>; calculation?: string; computed_amount?: number | null; hold_reason?: string; rules?: RuleHit[]; claimed?: Record<string, number>; reason?: string };
+  report: { totals?: Record<string, number | null>; calculation?: string; computed_amount?: number | null; hold_reason?: string; rules?: RuleHit[]; claimed?: Record<string, number>; reason?: string; summary?: string };
 }
 
 // ---------------------------------------------------------------- 유지되는 기능
@@ -683,12 +683,14 @@ export const purposeKo = (...codes: (string | null | undefined)[]) => {
   return "보상";
 };
 
-/** 재무 화면에서 결정하지 않는 보류 건. 환불은 고객지원 화면, 쿠폰은 마케팅 화면에서 결정한다 */
-export const NOT_FINANCE_ACTIONS = new Set(["refund_request", "issue_coupon", "publish_notice"]);
+/** 마케팅 화면에서 결정하는 보류 건 */
+export const MARKETING_HOLD_ACTIONS = ["issue_coupon", "publish_notice", "publish_sns", "generate_video"] as const;
+/** 재무 화면에서 결정하지 않는 보류 건. 환불은 고객지원 화면, 쿠폰·공지·SNS·영상은 마케팅 화면에서 결정한다 */
+export const NOT_FINANCE_ACTIONS = new Set<string>(["refund_request", ...MARKETING_HOLD_ACTIONS]);
 
 export const ACTION_KO: Record<string, string> = {
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 지급",
-  publish_notice: "공지 올리기",
+  publish_notice: "공지 올리기", publish_sns: "SNS 게시", generate_video: "영상 만들기",
   rollback_deployment: "배포 되돌리기", restart_service: "서비스 다시 켜기", generate_pr: "코드 변경 만들기",
 };
 

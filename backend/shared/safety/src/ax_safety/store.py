@@ -149,6 +149,16 @@ class Store:
             total += decision.computed_amount
         return total
 
+    def executed_count(self, tenant_id: str, action: str, *, since: datetime) -> int:
+        """실행된(`executed`) 건수. 금액이 없는 액션도 센다. 보류·거부 건은 넣지 않는다."""
+        return sum(
+            record.decision.status == "executed"
+            and record.request.tenant_id == tenant_id
+            and record.request.action == action
+            and record.created_at >= since
+            for record in self._executions.values()
+        )
+
     # ---- 보류 큐
     def add_review(self, review: Review) -> None:
         self._reviews[review.review_id] = review

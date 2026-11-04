@@ -1,5 +1,5 @@
 import { DASHBOARD_API_URL, RELAY_API_URL } from "./env";
-import { finance, type ExecutionRecord, type Review } from "./finance";
+import { MARKETING_HOLD_ACTIONS, finance, type ExecutionRecord, type Review } from "./finance";
 import { shortDateTime } from "./format";
 
 // 마케팅 AI 화면의 실제 데이터.
@@ -81,14 +81,14 @@ export const PURPOSE_LIVE_KO: Record<string, string> = { compensation: "보상",
 export const CHANNEL_LIVE_KO: Record<string, string> = { banner: "쇼핑몰 배너", email: "메일", sns: "SNS" };
 const COMPONENT_KO: Record<string, string> = { payment: "결제", api: "판매 사이트", db: "주문 DB", search: "검색", shipping: "배송" };
 const HOLD_KO: Record<string, string> = {
-  over_threshold: "금액 기준을 넘음", amount_mismatch: "적어 낸 금액과 계산이 다름", unregistered_action: "등록되지 않은 일",
+  over_threshold: "기준에 걸림", amount_mismatch: "적어 낸 금액과 계산이 다름", unregistered_action: "등록되지 않은 일",
   verify_rejected: "재무 AI가 거절함", verify_timeout: "확인하는 쪽이 응답하지 않음", schema_invalid: "요청 내용이 잘못됨",
   review_timeout: "기한 안에 결정이 없어 자동 취소", limit_exceeded: "기준 이상",
 };
 export const holdKo = (code: string | null | undefined) => (code ? HOLD_KO[code] ?? "기타 사유" : "");
 const STATUS_KO: Record<string, string> = { executed: "실행됨", verifying: "확인 중", held: "사람 결정 대기", rejected: "거절됨", failed: "실패" };
 export const statusKo = (s: string) => STATUS_KO[s] ?? "확인할 수 없음";
-const ACTION_KO: Record<string, string> = { issue_coupon: "쿠폰 발급", publish_notice: "공지 게시" };
+const ACTION_KO: Record<string, string> = { issue_coupon: "쿠폰 발급", publish_notice: "공지 게시", publish_sns: "SNS 게시", generate_video: "영상 만들기" };
 export const actionKo = (a: string) => ACTION_KO[a] ?? "기타 요청";
 
 /** 사건 이름: "결제 장애 · 10. 28. 오후 04:32". 모르는 사건이면 "장애 사건", 사건 밖이면 "사건 밖 요청" */
@@ -202,7 +202,7 @@ export async function loadMarketingLive(): Promise<MarketingLive> {
   }
 
   const holds = reviews.status === "fulfilled"
-    ? reviews.value.filter((r) => r.status === "pending" && fromMarketing(r.requester) && (r.action === "issue_coupon" || r.action === "publish_notice"))
+    ? reviews.value.filter((r) => r.status === "pending" && fromMarketing(r.requester) && (MARKETING_HOLD_ACTIONS as readonly string[]).includes(r.action))
     : null;
 
   return {
