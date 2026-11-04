@@ -76,6 +76,8 @@ LEDGER = persistence.build_sequence_ledger()
 CHANGES = persistence.build_change_request_store()
 # 보내지 않기로 한 변경 요청 제안의 기록 (이유만 남긴다). 제안은 proposal_handlers.py
 DECISIONS = persistence.build_proposal_decision_store()
+# 장애 보상의 대기 → 사람 승인 → 발송 큐 (incident_queue.py, 사건 보상 요청은 incident_handlers.py)
+INCIDENT_QUEUE = persistence.build_incident_queue_store()
 # 다른 에이전트로 나가는 모든 요청이 지나간다. DejaFix로 가는 고객 개인정보는 여기서 암호화한다
 SEND = secure_transfer.send  # 테스트에서 바꿀 수 있다
 

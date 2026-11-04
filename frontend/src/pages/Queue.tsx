@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Blockers, Loading, OFFLINE, StatusChip } from "@/components/admin/bits";
+import IncidentCompensationQueue from "@/components/support/IncidentCompensationQueue";
 import RefundHolds from "@/components/support/RefundHolds";
 import { api } from "@/lib/api";
 import { shortDateTime, won } from "@/lib/format";
@@ -50,6 +51,7 @@ export default function QueuePage() {
         </div>
       </div>
       {error && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-xs font-medium text-red-800">{error}</p>}
+      <IncidentCompensationQueue />
       <RefundHolds key={run ? `after-${run.held}-${run.paid}` : "initial"} onDecided={load} />
       {run && (
         <div role="status" className="rounded-xl border border-brand-100 bg-brand-50 px-4 py-3 text-sm text-brand-700">

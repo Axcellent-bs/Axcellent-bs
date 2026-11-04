@@ -136,6 +136,18 @@ action = "decline_change_proposal"
 owner = "support"
 base_grade = "A"
 
+# 장애 보상 대기 (준하님 결정 2026-11-04: 사람 확인 후). 대기에 올리는 것과 사람의 승인·거절 기록은
+# 쿠폰을 내지 않는다. 지급은 승인 뒤 마케팅 issue_coupon이 한도 검사를 거쳐 한다
+[[actions]]
+action = "propose_incident_compensation"
+owner = "support"
+base_grade = "A"
+
+[[actions]]
+action = "decide_incident_compensation"
+owner = "support"
+base_grade = "A"
+
 # 욕설로 가린 고객 메시지의 원문 열기. 돈은 움직이지 않고 "누가 열었는지"를 내력에 남긴다
 [[actions]]
 action = "reveal_original"

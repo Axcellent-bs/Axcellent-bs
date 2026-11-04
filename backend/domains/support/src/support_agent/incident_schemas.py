@@ -86,3 +86,99 @@ class IncidentCompensation(AxModel):
 class ListIncidentCompensationOutput(AxModel):
     incidents: list[IncidentCompensation]
     notes: list[str] = Field(default_factory=list)
+
+
+# ------------------------------------------------- 대기 → 사람 승인 → 발송 큐 (incident_queue.py)
+MAX_DECIDE_BUYERS = 100
+
+
+class ProposeIncidentCompensationInput(AxModel):
+    """영향 고객 목록을 대기로 쌓는다 (쿠폰은 요청하지 않는다). 총괄만, 사건(`ctx_inc_`) 안에서만.
+
+    입력 모양은 `RequestIncidentCompensationInput`과 같다. 단가·건수 상한은 정책표가 정한다.
+    """
+
+    buyer_ids: list[str] = Field(min_length=1, max_length=MAX_BUYERS)
+    reason_code: Literal["payment_failure"] = "payment_failure"
+    count: int = Field(default=1, ge=1, le=3)
+    impact_ref: str | None = Field(default=None, max_length=100)
+
+
+class QueuedBuyer(AxModel):
+    buyer_id: str
+    status: Literal["queued", "already_queued", "already_compensated", "skipped"]
+    queue_status: str | None = None  # 이미 줄이 있으면 그 줄의 지금 상태
+
+
+class ProposeIncidentCompensationOutput(AxModel):
+    reason_code: str
+    unit_value: int
+    count: int
+    queued: int  # 이번 호출에서 새로 대기에 올린 고객 수
+    results: list[QueuedBuyer]
+    limit_reached: bool = False  # 사건당 인원·합계 상한에 닿아 남은 고객은 올리지 않았다
+    notes: list[str] = Field(default_factory=list)
+
+
+class DecideIncidentCompensationInput(AxModel):
+    """사람이 고객별로 승인하거나 거절한다. 결정한 사람(`author`)은 서버가 사람 토큰에서 채운다.
+
+    승인된 고객만 마케팅 `issue_coupon`에 요청한다. 승인했는데 마케팅에 닿지 않은 고객은 같은
+    사건에서 다시 승인하면 이어서 보낸다. 거절은 되돌리지 않는다.
+    """
+
+    incident_context_id: str = Field(pattern=INCIDENT_CONTEXT_PATTERN)
+    approve_buyer_ids: list[str] = Field(default_factory=list, max_length=MAX_DECIDE_BUYERS)
+    reject_buyer_ids: list[str] = Field(default_factory=list, max_length=MAX_DECIDE_BUYERS)
+    author: str = Field(min_length=1, max_length=100)
+
+
+class DecidedBuyer(AxModel):
+    buyer_id: str
+    status: Literal["sent", "held", "approved", "rejected", "not_found", "not_pending", "failed"]
+    coupon_id: str | None = None
+    total_value: int = 0
+
+
+class DecideIncidentCompensationOutput(AxModel):
+    incident_context_id: str
+    results: list[DecidedBuyer]
+    approved: int  # 이번 호출에서 승인한 고객 수
+    rejected: int
+    sent: int  # 마케팅이 지급까지 한 고객 수
+    stopped_early: bool = False
+    notes: list[str] = Field(default_factory=list)
+
+
+class ListIncidentQueueInput(AxModel):
+    """대기·승인·거절 목록을 돌려준다 (읽기). 사건을 안 주면 열린 줄이 있는 모든 사건."""
+
+    incident_context_id: str | None = Field(default=None, pattern=INCIDENT_CONTEXT_PATTERN)
+    include_closed: bool = False  # 참이면 보낸·거절한 줄도 돌려준다
+
+
+class QueueRow(AxModel):
+    buyer_id: str
+    status: str
+    reason_code: str
+    count: int
+    unit_value: int
+    total_value: int
+    impact_ref: str | None = None
+    created_at: str
+    decided_by: str | None = None
+    decided_at: str | None = None
+    coupon_id: str | None = None
+    sent_at: str | None = None
+
+
+class IncidentQueue(AxModel):
+    context_id: str
+    pending_buyers: int
+    pending_total: int
+    rows: list[QueueRow]
+
+
+class ListIncidentQueueOutput(AxModel):
+    incidents: list[IncidentQueue]
+    notes: list[str] = Field(default_factory=list)

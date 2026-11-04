@@ -27,6 +27,7 @@ from support_agent.change_requests import ChangeRequestLink, ChangeRequestStore
 from support_agent.claim_schemas import Claim
 from support_agent.claims import ClaimStore
 from support_agent.compensation import SequenceLedger
+from support_agent.incident_queue import IncidentQueueStore, QueueItem
 from support_agent.proposal_decisions import ProposalDecision, ProposalDecisionStore
 from support_agent.schemas import Conversation
 from support_agent.store import InquiryStore
@@ -54,6 +55,11 @@ TABLES: tuple[Table, ...] = (
         "proposal_decisions",
         ("tenant_id", "topic_code", "inquiry_id"),
         ("context_id", "reason"),
+    ),
+    Table(
+        "incident_compensation_items",
+        ("tenant_id", "context_id", "buyer_id", "reason_code"),
+        ("status",),
     ),
     Table("compensation_sequences", ("tenant_id", "context_id")),
     Table("compensation_results", ("tenant_id", "idempotency_key"), ("context_id",)),
@@ -419,6 +425,29 @@ class PersistentProposalDecisionStore(ProposalDecisionStore):
         return super()._put(decision)  # DB 쓰기에 성공한 뒤에 캐시에 넣는다
 
 
+class PersistentIncidentQueueStore(IncidentQueueStore):
+    def __init__(self, repo: Repo) -> None:
+        super().__init__()
+        self._repo = repo
+        for doc in repo.load("incident_compensation_items"):
+            item = QueueItem.model_validate(doc)
+            self._items[(item.context_id, item.buyer_id, item.reason_code)] = item
+
+    def _put(self, item: QueueItem) -> QueueItem:
+        self._repo.upsert(
+            "incident_compensation_items",
+            {
+                "tenant_id": item.tenant_id,
+                "context_id": item.context_id,
+                "buyer_id": item.buyer_id,
+                "reason_code": item.reason_code,
+                "status": item.status,
+            },
+            item.model_dump(mode="json"),
+        )
+        return super()._put(item)  # DB 쓰기에 성공한 뒤에 캐시에 넣는다
+
+
 class PersistentSequenceLedger(SequenceLedger):
     def __init__(self, repo: Repo) -> None:
         super().__init__()
@@ -467,6 +496,11 @@ def build_claim_store() -> ClaimStore:
 def build_sequence_ledger() -> SequenceLedger:
     repo = get_repo()
     return PersistentSequenceLedger(repo) if repo else SequenceLedger()
+
+
+def build_incident_queue_store() -> IncidentQueueStore:
+    repo = get_repo()
+    return PersistentIncidentQueueStore(repo) if repo else IncidentQueueStore()
 
 
 def build_change_request_store() -> ChangeRequestStore:

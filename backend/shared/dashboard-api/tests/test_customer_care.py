@@ -315,3 +315,86 @@ def test_support_errors_become_api_errors(fake: Fake, monkeypatch: pytest.Monkey
 def test_the_new_routes_are_reads_so_they_need_no_token(mock_client: TestClient) -> None:
     mock_client.headers.pop("authorization")
     assert mock_client.get(BASE + "/customers/at-risk").status_code == 200
+
+
+# ---------------------------------------------------------------- 장애 보상 대기 → 사람 승인
+QUEUE_BODY = {
+    "incident_id": "ctx_inc_0001",
+    "approve_buyer_ids": ["buy_0003", "buy_0006"],
+    "reject_buyer_ids": ["buy_0004"],
+}
+
+
+def test_the_incident_queue_is_read_from_support(fake: Fake) -> None:
+    fake.outputs["list_incident_queue"] = {"incidents": [], "notes": []}
+    response = TestClient(app).get(
+        BASE + "/incident-compensation-queue",
+        params={"incident_id": "ctx_inc_0001", "include_closed": "true"},
+    )
+    assert response.status_code == 200
+    sent = next(r for r in fake.sent if r.skill == "list_incident_queue")
+    assert sent.input == {"include_closed": True, "incident_context_id": "ctx_inc_0001"}
+
+
+def test_a_bad_incident_id_is_a_422_when_reading_the_queue(fake: Fake) -> None:
+    response = TestClient(app).get(
+        BASE + "/incident-compensation-queue", params={"incident_id": "inc_1"}
+    )
+    assert response.status_code == 422
+    assert fake.sent == []
+
+
+def test_deciding_sends_the_choices_with_the_author_from_the_token(fake: Fake) -> None:
+    fake.outputs["decide_incident_compensation"] = {"approved": 2, "rejected": 1, "sent": 2}
+    response = TestClient(app).post(
+        BASE + "/incident-compensation-queue/decide",
+        json={**QUEUE_BODY, "author": "남이 보낸 이름"},  # 본문의 작성자는 쓰지 않는다
+    )
+    assert response.status_code == 201
+    sent = next(r for r in fake.sent if r.skill == "decide_incident_compensation")
+    assert sent.input == {
+        "incident_context_id": "ctx_inc_0001",
+        "approve_buyer_ids": ["buy_0003", "buy_0006"],
+        "reject_buyer_ids": ["buy_0004"],
+        "author": "tester",  # 사람 토큰의 이름
+    }
+    assert sent.meta.idempotency_key.startswith("incident-compensation-decide:ctx_inc_0001:")
+
+
+def test_the_same_choice_gets_the_same_key_so_a_double_click_is_processed_once(
+    fake: Fake,
+) -> None:
+    client = TestClient(app)
+    client.post(BASE + "/incident-compensation-queue/decide", json=QUEUE_BODY)
+    reordered = {**QUEUE_BODY, "approve_buyer_ids": ["buy_0006", "buy_0003"]}
+    client.post(BASE + "/incident-compensation-queue/decide", json=reordered)
+    keys = [r.meta.idempotency_key for r in fake.sent if r.skill == "decide_incident_compensation"]
+    assert len(keys) == 2 and keys[0] == keys[1]
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"incident_id": "inc_1"},
+        {"approve_buyer_ids": [], "reject_buyer_ids": []},
+        {"approve_buyer_ids": [f"buy_{i:04d}" for i in range(101)]},
+    ],
+)
+def test_an_invalid_decision_is_rejected_and_support_is_not_called(
+    fake: Fake, changes: dict[str, Any]
+) -> None:
+    response = TestClient(app).post(
+        BASE + "/incident-compensation-queue/decide", json={**QUEUE_BODY, **changes}
+    )
+    assert response.status_code == 422
+    assert not [r for r in fake.sent if r.skill == "decide_incident_compensation"]
+
+
+def test_deciding_needs_a_human_token(fake: Fake) -> None:
+    response = TestClient(app).post(
+        BASE + "/incident-compensation-queue/decide",
+        json=QUEUE_BODY,
+        headers={"Authorization": "Bearer not-a-person"},
+    )
+    assert response.status_code in (401, 403)
+    assert not [r for r in fake.sent if r.skill == "decide_incident_compensation"]

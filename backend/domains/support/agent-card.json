@@ -471,6 +471,36 @@
       "allowed_requesters": ["dashboard-api", "orchestrator"],
       "verifier": null,
       "priority": "recommended"
+    },
+    {
+      "id": "propose_incident_compensation",
+      "description": "사건(ctx_inc_)으로 피해를 본 영향 고객 목록을 보상 대기로 쌓는다(쿠폰은 요청하지 않는다). 총괄만, 사건 안에서만 부를 수 있다. 입력 모양은 request_incident_compensation과 같고 단가·건수 상한은 정책표가 정한다. 이미 보상했거나 이미 대기에 있는 고객은 건너뛰고, 사건당 인원·합계 상한(대기 포함)을 넘으면 남은 고객은 올리지 않는다. 사람이 승인하기 전에는 아무것도 지급하지 않는다. execute()를 거치는 쓰기라 안전 관문에 등록돼 있다.",
+      "input_schema": "agents/support/src/support_agent/incident_schemas.py#ProposeIncidentCompensationInput",
+      "output_schema": "agents/support/src/support_agent/incident_schemas.py#ProposeIncidentCompensationOutput",
+      "grade": "A",
+      "allowed_requesters": ["orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "decide_incident_compensation",
+      "description": "보상 대기 고객을 사람이 고객별로 승인하거나 거절한다. 결정한 사람(author)은 서버가 사람 토큰에서 채운다. 승인된 고객만 기존 request_incident_compensation 경로로 마케팅 issue_coupon에 요청하며(안전 관문의 한도 검사, 초과는 C 보류) 지급은 마케팅이 한다. 마케팅에 닿지 않은 고객은 승인 상태로 남아 다시 승인하면 이어서 보낸다. 거절은 되돌리지 않는다. 같은 고객을 승인과 거절에 함께 넣으면 거부한다. execute()를 거치는 쓰기라 안전 관문에 등록돼 있다.",
+      "input_schema": "agents/support/src/support_agent/incident_schemas.py#DecideIncidentCompensationInput",
+      "output_schema": "agents/support/src/support_agent/incident_schemas.py#DecideIncidentCompensationOutput",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_incident_queue",
+      "description": "장애 보상 대기·승인·보류 목록을 사건별로 돌려준다(읽기). 사건별 대기 인원·합계 원과 고객별 상태·결정한 사람·쿠폰 ID를 담는다. include_closed를 켜면 보낸·거절한 줄도 돌려준다. 찾기만 하고 아무것도 요청하지 않는다.",
+      "input_schema": "agents/support/src/support_agent/incident_schemas.py#ListIncidentQueueInput",
+      "output_schema": "agents/support/src/support_agent/incident_schemas.py#ListIncidentQueueOutput",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
     }
   ]
 }
