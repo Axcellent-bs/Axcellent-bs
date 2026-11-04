@@ -841,6 +841,11 @@ export interface TrendInsightBriefOutput {
   sources: string[];
   limits: string[];
   summary: string;
+  /** 기회 가설 카드 (#579). 예전 응답은 없다. 비었으면 opportunities_reason */
+  opportunities?: DomainOpportunity[];
+  opportunities_reason?: string | null;
+  /** 쓴 수집 계획 id */
+  plan_id?: string | null;
 }
 
 // ---------------------------------------------------------------- 연령대별 상승 (trend_age)
@@ -968,6 +973,59 @@ export interface SourcePlanOutput {
   cached: boolean;
   generated_at: string | null;
   summary: string;
+}
+
+// ---------------------------------------------------------------- 기회 가설 카드 (trend_insight_brief 선택 칸, #571·#579)
+// 수집 계획(source_plan)대로 모은 근거(사용 가능·승인된 출처만). 숫자는 코드, 한 줄만 LLM
+export type EvidenceStatus = "known" | "unknown" | "key_required" | "not_approved";
+export interface OpportunityEvidence {
+  source_id: string;
+  kind: SourceDataKind;
+  status: EvidenceStatus;
+  /** 무엇을 잰 값인지 */
+  label: string;
+  value: number | null;
+  unit: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  samples: number | null;
+  /** 모르면 이유 (예: 키 등록 후 가능) */
+  reason: string | null;
+}
+export interface ShortsFit {
+  level: "high" | "uncertain" | "low";
+  category: string | null;
+  median_views: number | null;
+  overall_median_views: number | null;
+  ratio: number | null;
+  samples: number;
+  snapshot_at: string | null;
+  /** 이 등급인 이유 (기준값 포함, 코드 문장) */
+  reason: string;
+}
+export interface OpportunityFormat { name: string; count: number; median_views: number | null }
+export interface DomainOpportunity {
+  opportunity_id: string;
+  subtopic: string;
+  subtopic_evidence: string | null;
+  line: string;
+  line_status: "llm" | "fixed";
+  line_reason: string | null;
+  consumption: OpportunityEvidence[];
+  search_interest: OpportunityEvidence[];
+  age_bands: AgeBandTrend[];
+  age_reason: string | null;
+  shorts_fit: ShortsFit | null;
+  formats: OpportunityFormat[];
+  /** 목표 참고값: 이 분류 숏츠 조회 중앙값 (없으면 전체 중앙값) */
+  target_views_reference: number | null;
+  target_reference_basis: string | null;
+  products: InsightProduct[];
+  products_reason: string | null;
+  limits: string[];
+  /** 기획이 정할 것 (코드 고정 문장) */
+  planning_decides: string[];
+  score: number;
 }
 
 // ---------------------------------------------------------------- 숏츠 통계 (shorts_stats)
