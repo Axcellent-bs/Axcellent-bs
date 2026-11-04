@@ -26,7 +26,7 @@ AXcellent AI 백엔드. ax-company-hq/ax-backend(dev `04f0e28`, 10/28)를 복사
 | `coupon` | 공지·쿠폰 | 8103 | domains/marketing | 5 |
 | `finance` | 재무 관리 | 8105 | domains/finance | 4 |
 | `data` | 데이터 분석 | 8106 | domains/data | 4 |
-| `handover` | 인수인계 | 8104 | domains/hr | 6 |
+| `handover` | 인수인계 (화면에서 접음: 띄우지 않고 켠 서비스에서도 뺌) | 8104 | domains/hr | 6 |
 | `decisions` | 결정 기록 | 8114 | domains/hr | 5 |
 | `org` | 조직 변동 | 8124 | domains/hr | 5 |
 | `planning` | 요청·기획서 | 8101 | domains/planning | 2 |
@@ -34,7 +34,7 @@ AXcellent AI 백엔드. ax-company-hq/ax-backend(dev `04f0e28`, 10/28)를 복사
 | `incident` | 장애 대응 | 8107 | domains/infra-dejafix | 3 |
 | `hosts` | PC·서버 연결 | 8117 | 없음 | 0 (`services/hosts/README.md`) |
 
-대응표는 `shared/agent-template/src/ax_agent_template/services.py` 한 곳에 있다. 서비스 id는 화면 `frontend/src/demo/services.ts`와 같다.
+대응표는 `shared/agent-template/src/ax_agent_template/services.py` 한 곳에 있다. 서비스 id는 화면 `frontend/src/demo/services.ts`와 같다(인수인계 `handover`는 화면에서 접어 `services.ts`에 없다).
 
 ## 나눈 방식
 
@@ -68,7 +68,7 @@ bash scripts/run_all.sh stop
   ```bash
   bash scripts/run_all.sh --only data,finance,shop-api   # 이름은 run_all.sh의 APPS 목록 이름
   bash scripts/run_all.sh --only core                    # safety, memory, shop-api, dashboard-api, orchestrator
-  bash scripts/run_all.sh --only data-demo               # core + data, finance, inquiry, coupon, handover, dev (data 업무 리포트가 부르는 곳)
+  bash scripts/run_all.sh --only data-demo               # core + data, finance, inquiry, coupon, dev (data 업무 리포트가 부르는 곳)
   bash scripts/run_all.sh --only data-demo,incident      # 묶음과 이름을 섞어도 된다
   ```
   - 시작할 때 `띄운 서버 N개: …, 안 띄움: …`을 출력한다. 모르는 이름이면 목록을 보여 주고 멈춘다.

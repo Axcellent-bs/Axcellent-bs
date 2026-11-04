@@ -23,6 +23,7 @@ DATA=".data"
 mkdir -p "$LOGS" "$DATA"
 
 # 이름 포트 모듈 (총괄은 부서 카드를 모으므로 맨 뒤에 띄운다)
+# 인수인계(handover, 8104)는 화면에서 접어 띄우지 않는다. 코드·계약·서비스 정의는 그대로 있고, 켠 서비스에서도 뺀다(FOLDED)
 APPS="
 safety 8001 ax_safety.main:app
 memory 8002 ax_memory.main:app
@@ -34,7 +35,6 @@ inquiry 8102 svc_inquiry.main:app
 claims 8112 svc_claims.main:app
 reviews 8122 svc_reviews.main:app
 coupon 8103 svc_coupon.main:app
-handover 8104 svc_handover.main:app
 decisions 8114 svc_decisions.main:app
 org 8124 svc_org.main:app
 finance 8105 svc_finance.main:app
@@ -42,11 +42,13 @@ data 8106 svc_data.main:app
 incident 8107 svc_incident.main:app
 orchestrator 8000 ax_orchestrator.main:app
 "
+# 접어 둔 서비스(띄우지 않고 켠 서비스에서도 뺀다). 되살리려면 위 APPS에 줄을 되돌리고 여기서 뺀다
+FOLDED="handover"
 PORTS=$(echo "$APPS" | awk 'NF {print $2}' | tr '\n' ',' | sed 's/,$//')
 
 # --only 묶음 이름 (data-demo = core + data 업무 리포트가 부르는 서비스)
 GROUP_core="safety,memory,shop-api,dashboard-api,orchestrator"
-GROUP_data_demo="$GROUP_core,data,finance,inquiry,coupon,handover,dev"
+GROUP_data_demo="$GROUP_core,data,finance,inquiry,coupon,dev"
 
 # 인자: stop | reset | mock 과 --only <목록> (--only=<목록>도 된다)
 CMD=""
@@ -201,21 +203,23 @@ for v in LLM_MODEL LLM_BASE_URL LLM_API_KEY; do
 done
 [ -n "${EMBED_MODEL:-}" ] || echo "경고: EMBED_MODEL 이 없습니다. 회사 기억(memory) 검색이 실패합니다 (예: gemini-embedding-001)." >&2
 
-# --only로 안 띄운 서비스는 켠 서비스에서도 뺀다 (라우터가 그쪽으로 A2A를 보내지 않고 사람 할 일함으로 넘긴다).
-# 대상은 서비스 13개(services.py)뿐이다. 이미 AX_ENABLED_SERVICES를 줬으면 둘의 교집합이다
-if [ -n "$ONLY" ]; then
-  svc_ids=" $("$PY" -c "from ax_agent_template.services import SERVICES; print(' '.join(s.id for s in SERVICES))") "
+# 안 띄운 서비스는 켠 서비스에서도 뺀다 (라우터가 그쪽으로 A2A를 보내지 않고 사람 할 일함으로 넘긴다).
+# --only로 뺀 서비스와 접어 둔 서비스(FOLDED)가 대상이다. 이미 AX_ENABLED_SERVICES를 줬으면 둘의 교집합이다
+svc_ids=" $("$PY" -c "from ax_agent_template.services import SERVICES; print(' '.join(s.id for s in SERVICES))") "
+if [ -n "$ONLY" ] || [ -n "$FOLDED" ]; then
   given=",$(echo "${AX_ENABLED_SERVICES:-}" | tr -d ' '),"
   enabled=""
-  for n in $(echo "$RUN_APPS" | awk 'NF {print $1}'); do
+  if [ -n "$ONLY" ]; then base_names=$(echo "$RUN_APPS" | awk 'NF {print $1}'); else base_names=$svc_ids; fi
+  for n in $base_names; do
     case "$svc_ids" in *" $n "*) ;; *) continue ;; esac
+    case " $FOLDED " in *" $n "*) continue ;; esac
     case "$given" in ",,"|*",$n,"*) enabled="$enabled${enabled:+,}$n" ;; esac
   done
   # 비어 있으면 "전부 켬"이 되므로, 켤 서비스가 하나도 없으면 어느 서비스와도 맞지 않는 값을 둔다
   export AX_ENABLED_SERVICES="${enabled:-none}"
   # 켠 서비스 파일이 있으면 라우터는 파일을 먼저 본다. 안 띄운 서비스가 파일에서 켜져 있으면 A2A가 실패한다
   if [ -f "$AX_ENABLED_SERVICES_FILE" ]; then
-    echo "경고: 켠 서비스 파일($AX_ENABLED_SERVICES_FILE)이 있어 --only로 정한 켠 서비스($AX_ENABLED_SERVICES)보다 먼저 쓰입니다. 안 띄운 서비스가 파일에 있으면 그 파일을 고치거나 지우세요." >&2
+    echo "경고: 켠 서비스 파일($AX_ENABLED_SERVICES_FILE)이 있어 run_all.sh가 정한 켠 서비스($AX_ENABLED_SERVICES)보다 먼저 쓰입니다. 안 띄운 서비스가 파일에 있으면 그 파일을 고치거나 지우세요." >&2
   fi
 fi
 

@@ -110,10 +110,6 @@ export const SERVICES: Service[] = [
     ],
   },
   {
-    id: 'handover', agent: 'hr', family: 'backoffice', name: '인수인계', by: 'AXcellent', Icon: IconUsers, entry: '/hr', paths: ['/hr'],
-    desc: '담당이 바뀔 때 넘길 일을 모으고 담당 명부를 관리합니다.',
-  },
-  {
     id: 'decisions', agent: 'hr', family: 'backoffice', name: '결정 기록', by: 'AXcellent', Icon: IconBook, entry: '/ops', paths: ['/ops'],
     desc: '회사의 결정을 기록하고, 새 계획이 과거에 기각된 안과 겹치는지 봅니다.',
   },

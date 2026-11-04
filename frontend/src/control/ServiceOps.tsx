@@ -17,7 +17,6 @@ const OPS: Record<string, Ops> = {
   coupon: { version: '0.9.3', stage: '정식', using: 4, errors: 2, released: '10/27' },
   finance: { version: '0.9.3', stage: '정식', using: 3, errors: 0, released: '10/26' },
   data: { version: '0.9.2', next: '0.9.3', stage: '정식', using: 4, errors: 0, released: '10/24' },
-  handover: { version: '0.8.1', next: '0.9.0', stage: '베타', using: 2, errors: 0, released: '10/20' },
   decisions: { version: '0.8.1', stage: '베타', using: 1, errors: 0, released: '10/20' },
   planning: { version: '0.9.1', stage: '베타', using: 2, errors: 0, released: '10/23' },
   dev: { version: '0.9.1', stage: '베타', using: 1, errors: 1, released: '10/23' },

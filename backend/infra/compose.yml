@@ -3,6 +3,7 @@ name: ax-backend
 include:
   # 각 서비스 compose 뒤에 common-log/<서비스>.yml을 합쳐 공통 로그 볼륨·경로를 붙인다 (#249)
   # shared: 공통 / services: 서비스 13개 (hosts는 아직 백엔드 없음)
+  # 인수인계(handover)는 화면에서 접어 띄우지 않는다. AX_ENABLED_SERVICES를 줄 때는 handover를 넣지 않는다
   - path:
       - ../shared/safety/compose.yml
       - ./common-log/safety.yml
@@ -38,9 +39,6 @@ include:
   - path:
       - ../services/data/compose.yml
       - ./common-log/data.yml
-  - path:
-      - ../services/handover/compose.yml
-      - ./common-log/handover.yml
   - path:
       - ../services/decisions/compose.yml
       - ./common-log/decisions.yml
