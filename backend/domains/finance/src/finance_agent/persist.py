@@ -52,6 +52,10 @@ def dump(s: State) -> dict[str, Any]:
             "policy_acks": records.policy_acks,
             "bank_rows": records.bank_rows,
             "team_budgets": records.team_budgets,
+            "campaigns": records.campaigns,
+            "budget_reviews": records.budget_reviews,
+            "lessons": records.lessons,
+            "opinions": records.opinions,
             "exports": records.exports,
             "bank_imports": records.bank_imports,
         },
@@ -75,6 +79,10 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.records.policy_acks = {k: dict(v) for k, v in rec.get("policy_acks", {}).items()}
     s.records.bank_rows = [dict(r) for r in rec.get("bank_rows", [])]
     s.records.team_budgets = {k: dict(v) for k, v in rec.get("team_budgets", {}).items()}
+    s.records.campaigns = {k: dict(v) for k, v in rec.get("campaigns", {}).items()}
+    s.records.budget_reviews = [dict(r) for r in rec.get("budget_reviews", [])]
+    s.records.lessons = [dict(r) for r in rec.get("lessons", [])]
+    s.records.opinions = [dict(r) for r in rec.get("opinions", [])]
     s.records.exports = {k: dict(v) for k, v in rec.get("exports", {}).items()}
     s.records.bank_imports = [dict(r) for r in rec.get("bank_imports", [])]
 

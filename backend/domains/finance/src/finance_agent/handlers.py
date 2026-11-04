@@ -4,6 +4,10 @@
 | --- | --- | --- | --- |
 | `closing_report` | read | orchestrator, data | ① 기간 손익 요약 (`closing.py`) |
 | `answer_planning_question` | read | planning | 기획 질문에 답함 (`planning_questions.py`) |
+| `record_campaign_result` | read | marketing, orchestrator, data | 캠페인 손익 기록·판단·의견 |
+| `review_campaign_budget` | read | marketing, orchestrator | 캠페인 예산 승인·조건부·거절 판단 |
+| `verify_campaign_budget` | read | safety | 관문 `start_campaign` 검증 |
+| `finance_insights` | read | orchestrator | 재무 인사이트와 근거 |
 
 `verify_amount`·`review_hold`는 재무 재설계(2026-10-23)로, `loss_aggregation`은 2026-10-27에
 없앴다.
@@ -28,6 +32,7 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from ax_agent_template import call_agent
 from ax_agent_template.config import is_mock
 from ax_contracts.schemas import (
     AgentRequest,
@@ -38,13 +43,22 @@ from ax_contracts.schemas import (
     RequestMeta,
     TaskStatus,
 )
+from ax_contracts.schemas.finance import (
+    CampaignBudgetReviewInput,
+    CampaignBudgetReviewOutput,
+    CampaignResultInput,
+    FinanceOpinion,
+    VerifyAmountInput,
+)
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
 from finance_agent import books as bk
-from finance_agent import chat_log, closing, team_budget
+from finance_agent import campaign as cp
+from finance_agent import cashflow, chat_log, closing, tax, team_budget
 from finance_agent import finance_config as fc
 from finance_agent import ledger as lg
 from finance_agent.books import Books, load_books
 from finance_agent.planning_questions import answer_question
+from finance_agent.rules import load_rules
 from finance_agent.schemas import (
     ClosingReportInput,
     ClosingReportOutput,
@@ -73,6 +87,24 @@ class Ledger:
         return self.coupons.get(context_id, {"count": 0, "total": 0})
 
 
+OPINION_CALL_SECONDS = 5.0
+MAX_OPINIONS = 500
+
+
+async def send_opinion(opinion: dict[str, Any], meta: RequestMeta) -> str | None:
+    """총괄 skill `receive_finance_opinion`을 부른다. 전달했으면 None, 못 했으면 이유."""
+    deadline = datetime.now(UTC) + timedelta(seconds=OPINION_CALL_SECONDS)
+    request = AgentRequest(
+        meta=meta.model_copy(update={"deadline": deadline}),
+        skill="receive_finance_opinion",
+        input=opinion,
+    )
+    result = await call_agent("orchestrator", request)
+    return (
+        None if result.status == TaskStatus.COMPLETED else (result.outcome or result.status.value)
+    )
+
+
 class State:
     def __init__(self, sources: Sources | None = None) -> None:
         self.sources: Sources = sources or (MockSources() if is_mock("finance") else LiveSources())
@@ -81,6 +113,11 @@ class State:
         self.last_daily_closing: dict[str, Any] | None = None  # 마지막 자동 결산(전날) 결과
         self.records = FinanceRecords()
         self.books_loader: Callable[[], Awaitable[Books]] = load_books  # 테스트에서 바꾼다
+        self.opinion_sender: Callable[[dict[str, Any], RequestMeta], Awaitable[str | None]] = (
+            send_opinion
+        )
+        # 시뮬레이션은 시나리오의 현금을 넣는다. None이면 13주 현금 흐름 예측으로 계산한다
+        self.cash_override: int | None = None
         # 사건별 쿠폰 장부(⑨)의 실행 기록. 테스트에서 바꾼다
         self.executions_loader: Callable[[str | None], Awaitable[lg.ExecutionFeed]] = (
             lg.load_executions
@@ -107,6 +144,10 @@ class FinanceRecords:
         # 없앤 예산·한도 경보의 확인 메모. 쓰지 않지만 사람이 쓴 기록이라 저장 파일에 그대로 둔다
         self.policy_acks: dict[str, dict[str, Any]] = {}
         self.bank_rows: list[dict[str, Any]] = []  # 사람이 올린 은행 입금 내역
+        self.campaigns: dict[str, dict[str, Any]] = {}  # 캠페인 id → 손익 기록
+        self.budget_reviews: list[dict[str, Any]] = []  # 예산 판단 기록
+        self.lessons: list[dict[str, Any]] = []  # 실패 교훈
+        self.opinions: list[dict[str, Any]] = []  # 총괄에 낸 의견과 전달 상태
         self.exports: dict[str, dict[str, Any]] = {}  # 자동으로 만든 파일 묶음
         self.bank_imports: list[dict[str, Any]] = []  # 은행 내역 폴더에서 읽은 기록
         self.team_budgets: dict[str, dict[str, Any]] = {}  # YYYY-MM → 재무 담당이 확정한 팀 예산
@@ -469,7 +510,253 @@ async def answer_planning_question(request: AgentRequest) -> AgentResult:
     )
 
 
+# ------------------------------------------------- 캠페인 재무
+def _opinion_meta(context_id: str, opinion_id: str) -> RequestMeta:
+    return RequestMeta(
+        context_id=context_id,
+        token="finance",
+        deadline=_now() + timedelta(seconds=OPINION_CALL_SECONDS),
+        idempotency_key=f"{context_id}:finance_opinion:{opinion_id}",
+    )
+
+
+async def submit_opinion(opinion: dict[str, Any], context_id: str) -> dict[str, Any]:
+    """의견을 보관하고 총괄에 보낸다. 못 보내면 "전달 대기"로 두고 나중에 다시 보낸다."""
+    FinanceOpinion.model_validate(opinion)
+    opinions = state().records.opinions
+    for row in opinions:
+        if row["opinion"]["opinion_id"] == opinion["opinion_id"]:
+            return row
+    row = {"opinion": opinion, "context_id": context_id, "status": "pending", "attempts": 0}
+    opinions.append(row)
+    del opinions[:-MAX_OPINIONS]
+    await _deliver(row)
+    return row
+
+
+async def _deliver(row: dict[str, Any]) -> None:
+    row["attempts"] += 1
+    meta = _opinion_meta(row["context_id"], row["opinion"]["opinion_id"])
+    try:
+        problem = await state().opinion_sender(row["opinion"], meta)
+    except Exception as exc:  # 총괄이 꺼져 있어도 재무 판단은 끝난다
+        problem = type(exc).__name__
+    if problem is None:
+        row |= {"status": "delivered", "delivered_at": fc.iso(fc.now()), "last_problem": None}
+    else:
+        row["last_problem"] = str(problem)[:200]
+
+
+async def retry_opinions() -> int:
+    """전달 대기 의견을 다시 보낸다. 전달한 수."""
+    done = 0
+    for row in state().records.opinions:
+        if row["status"] == "pending":
+            await _deliver(row)
+            done += row["status"] == "delivered"
+    return done
+
+
+async def cash_net_krw() -> int | None:
+    """앞으로 몇 주의 누적 순현금. 주문 자료를 못 받았거나 빈 주가 있으면 None(확인 불가)."""
+    if state().cash_override is not None:
+        return state().cash_override
+    books = await state().books()
+    if "orders" in books.unavailable:
+        return None
+    weeks = load_rules().brake.cash_lookahead_weeks
+    rows = cashflow.forecast(books, state().records.batches)["weeks"][:weeks]
+    values = [r.get("net") for r in rows]
+    if len(values) < weeks or any(v is None for v in values):
+        return None
+    return sum(values)
+
+
+async def review_budget(data: CampaignBudgetReviewInput, context_id: str) -> dict[str, Any]:
+    """예산 판단. 판단을 남기고, 승인이 아니면 총괄에 의견으로 알린다."""
+    records = state().records
+    today = fc.today()
+    review = cp.decide(
+        data.model_dump(),
+        campaigns=records.campaigns,
+        reviews=records.budget_reviews,
+        lessons=records.lessons,
+        cash_net_krw=await cash_net_krw(),
+        today=today,
+    )
+    review |= {
+        "review_id": f"bud_{data.campaign_id}_{len(records.budget_reviews) + 1}",
+        "reviewed_at": fc.iso(fc.now()),
+        "context_id": context_id,
+    }
+    records.budget_reviews.append(review)
+    if review["decision"] != "approved":
+        await submit_opinion(cp.budget_opinion(review), context_id)
+    return review
+
+
+def _review_output(review: dict[str, Any]) -> dict[str, Any]:
+    fields = CampaignBudgetReviewOutput.model_fields
+    return CampaignBudgetReviewOutput(**{k: review[k] for k in fields}).model_dump(mode="json")
+
+
+async def review_campaign_budget(request: AgentRequest) -> AgentResult:
+    """마케팅의 캠페인 예산 요청을 판단한다. 쿠폰 발급·환불은 대상이 아니다."""
+    data = _parse(request, CampaignBudgetReviewInput)
+    if isinstance(data, AgentResult):
+        return data
+    review = await review_budget(data, request.meta.context_id)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=review["decision"],
+        output=_review_output(review),
+        evidence=_evidence(
+            ["finance.campaigns", "finance.lessons", "finance:cashflow"],
+            f"{data.campaign_id} {cp.DECISION_KO[review['decision']]}",
+            [review["review_id"]],
+        ),
+    )
+
+
+async def verify_campaign_budget(request: AgentRequest) -> AgentResult:
+    """관문의 `start_campaign` 검증. 금액이 재무 승인 한도 안이면 승인, 넘으면 거절(사람에게 감)."""
+    data = _parse(request, VerifyAmountInput)
+    if isinstance(data, AgentResult):
+        return data
+    params, amount = data.params, data.computed_amount
+    try:
+        ask = CampaignBudgetReviewInput(
+            campaign_id=params.get("campaign_id"),
+            campaign_name=params.get("campaign_name"),
+            channel=params.get("channel"),
+            requested_krw=amount,
+        )
+    except ValidationError:
+        return _result(
+            request,
+            TaskStatus.COMPLETED,
+            outcome="rejected",
+            output={"decision": "rejected", "reason_code": "invalid_params"},
+        )
+    # 마케팅이 미리 받은 판단이 있으면 그 한도를 쓴다. 없으면 지금 판단한다
+    previous = [
+        r
+        for r in state().records.budget_reviews
+        if r["campaign_id"] == ask.campaign_id and r["month"] == fc.today().isoformat()[:7]
+    ]
+    review = previous[-1] if previous else await review_budget(ask, request.meta.context_id)
+    ok = review["decision"] != "rejected" and ask.requested_krw <= review["approved_limit_krw"]
+    first_rule = next(
+        (
+            r["rule_id"]
+            for r in review["applied_rules"]
+            if r["detail"]
+            and any(r["detail"] in why or why in r["detail"] for why in review["reasons"])
+        ),
+        "over_approved_limit",
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome="approved" if ok else "rejected",
+        output={
+            "decision": "approved" if ok else "rejected",
+            "reason_code": "within_limit" if ok else first_rule,
+            "review_id": review["review_id"],
+            "approved_limit_krw": review["approved_limit_krw"],
+            "reasons": review["reasons"],
+        },
+        evidence=_evidence(
+            ["finance.budget_reviews"], f"{ask.campaign_id} 검증", [review["review_id"]]
+        ),
+    )
+
+
+async def record_result(data: CampaignResultInput, context_id: str) -> dict[str, Any]:
+    """손익 기록 → 교훈 반영 → 의견·인사이트 제출. 같은 내용을 다시 보내면 그대로 돌려준다."""
+    records = state().records
+    body = data.model_dump()
+    previous = records.campaigns.get(data.campaign_id)
+    if previous is not None and all(previous.get(k) == v for k, v in body.items()):
+        return previous | {"write": "already_recorded"}
+    record = cp.compute_result(body) | {
+        "revision": (previous or {}).get("revision", 0) + 1,
+        "recorded_at": fc.iso(fc.now()),
+        "context_id": context_id,
+    }
+    records.campaigns[data.campaign_id] = record
+    if record["verdict"] is None:
+        return record | {"write": "recorded"}
+    record["lesson"] = cp.apply_lessons(record, records.lessons, _now())
+    await submit_opinion(cp.opinion_of(record, _now()), context_id)
+    await submit_insights(context_id)
+    return record | {"write": "recorded"}
+
+
+async def current_insights() -> list[dict[str, Any]]:
+    records = state().records
+    books = await state().books()
+    # 곧 신고할 분기는 지금 진행 중인 분기가 아니라 직전 분기다
+    start, _, _ = tax.quarter_range(fc.today())
+    pack = None if "orders" in books.unavailable else tax.vat_pack(books, start - timedelta(days=1))
+    return cp.insights(records.campaigns, records.budget_reviews, pack, fc.today())
+
+
+async def submit_insights(context_id: str) -> list[dict[str, Any]]:
+    """새 인사이트를 총괄에 낸다. 같은 인사이트는 한 번만 낸다."""
+    found = await current_insights()
+    for item in found:
+        await submit_opinion(
+            {
+                "opinion_id": f"ins_{item['insight_id']}",
+                "kind": "insight",
+                "verdict": item["kind"],
+                "reasons": [f"{e['label']}: {e['value']}" for e in item["evidence"]],
+                "recommendation": f"{item['title']}. {item['recommendation']}",
+                "applied_rules": item["applied_rules"],
+                "submitted_at": fc.iso(fc.now()),
+            },
+            context_id,
+        )
+    return found
+
+
+async def record_campaign_result(request: AgentRequest) -> AgentResult:
+    """캠페인 성과를 손익으로 장부에 적고 효율을 판단해 총괄에 의견을 낸다."""
+    data = _parse(request, CampaignResultInput)
+    if isinstance(data, AgentResult):
+        return data
+    record = await record_result(data, request.meta.context_id)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=record["status"],
+        output=record,
+        evidence=_evidence(
+            ["finance.campaigns", f"source:{data.source}"],
+            f"{data.campaign_id} 손익 {record['profit_krw']}",
+            [data.campaign_id],
+        ),
+    )
+
+
+async def finance_insights(request: AgentRequest) -> AgentResult:
+    found = await current_insights()
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome="reported",
+        output={"insights": found},
+        evidence=_evidence(["finance.campaigns", "finance:tax"], f"인사이트 {len(found)}건"),
+    )
+
+
 HANDLERS = {
+    "record_campaign_result": record_campaign_result,
+    "review_campaign_budget": review_campaign_budget,
+    "verify_campaign_budget": verify_campaign_budget,
+    "finance_insights": finance_insights,
     "closing_report": closing_report,
     "record_support_cost": record_support_cost,
     "answer_planning_question": answer_planning_question,

@@ -22,6 +22,9 @@
 | `GET /api/finance/team-budget?month=YYYY-MM` | ④ 팀 예산 (팀 인원 × 인당 월 단가) | 없음 |
 | `POST /api/finance/team-budget/{month}/approve` | ④ 팀 예산 확정 (`signature` 일치) | **사람** |
 | `GET /api/finance/rules` | 재무·세무 규칙과 근거 | 없음 |
+| `GET /api/finance/campaigns` | ⑥ 캠페인 손익·예산 판단·교훈·의견 | 없음 |
+| `GET /api/finance/campaigns/compare?channel=&requested=` | ⑥ 실패 이력 전/후 판단 비교 | 없음 |
+| `GET /api/finance/insights` | ⑥ 재무 인사이트와 근거 | 없음 |
 | `GET /api/finance/tax/income-estimate?year=` | ⑤ 법인세 참고 추정 | 없음 |
 | `GET /api/finance/exports` | ⑤ 자동으로 만든 파일과 은행 폴더 기록 | 없음 |
 | `GET /api/finance/exports/{id}/files/{name}` | ⑤ 파일 내려받기 | 없음 |
@@ -62,9 +65,12 @@ from finance_agent import (
     team_budget,
     variance,
 )
+from finance_agent import campaign as cp
 from finance_agent import finance_config as fc
 from finance_agent.handlers import (
+    cash_net_krw,
     closing_key,
+    current_insights,
     state,
     team_budget_data,
 )
@@ -694,6 +700,61 @@ def add_finance_api(app: FastAPI) -> None:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
         return ok(close_checklist.checklist(books, state().records, d), books.meta())
+
+    @app.get("/api/finance/campaigns")
+    def get_campaigns() -> dict:
+        records = state().records
+        book = load_rules().brake
+        month = fc.today().isoformat()[:7]
+        spent = cp.committed_this_month("", month, records.campaigns, records.budget_reviews)
+        return ok(
+            {
+                "campaigns": sorted(
+                    records.campaigns.values(), key=lambda c: c["period_to"], reverse=True
+                ),
+                "reviews": list(reversed(records.budget_reviews)),
+                "lessons": list(reversed(records.lessons)),
+                "opinions": list(reversed(records.opinions)),
+                "budget": {
+                    "month": month,
+                    "monthly_krw": book.monthly_budget_krw,
+                    "provisional": book.budget_provisional,
+                    "committed_krw": spent,
+                },
+                "break_even_roas": cp.break_even_roas(),
+            },
+            {
+                "collected_at": fc.iso(fc.now()),
+                "source": "finance.campaigns",
+                "mock": False,
+                "unavailable": [],
+            },
+        )
+
+    @app.get("/api/finance/campaigns/compare", response_model=None)
+    async def get_campaign_compare(channel: str, requested: int) -> dict | JSONResponse:
+        if requested <= 0:
+            return error(400, "invalid_request", "requested는 1원 이상")
+        records = state().records
+        ask = {
+            "campaign_id": "compare",
+            "campaign_name": "비교용 요청",
+            "channel": channel,
+            "requested_krw": requested,
+        }
+        result = cp.compare_with_history(
+            ask,
+            campaigns=records.campaigns,
+            reviews=records.budget_reviews,
+            lessons=records.lessons,
+            cash_net_krw=await cash_net_krw(),
+            today=fc.today(),
+        )
+        return ok(result, {"collected_at": fc.iso(fc.now())})
+
+    @app.get("/api/finance/insights")
+    async def get_insights() -> dict:
+        return ok(await current_insights(), {"collected_at": fc.iso(fc.now())})
 
     @app.get("/api/finance/rules")
     def get_rules() -> dict:

@@ -1,0 +1,42 @@
+# 시나리오 A: 광고 성과가 좋을 때. 값의 출처와 가정은 backend/docs/notes/finance/simulation-assumptions.md
+id = "a"
+title = "성과가 좋은 브랜드 검색 광고"
+today = "2026-10-15"
+cash_net_krw = 3000000
+
+[[rounds]]
+campaign_id = "cmp_a_1"
+campaign_name = "가을 독서 브랜드 검색 1차"
+channel = "네이버 브랜드 검색"
+requested_krw = 300000
+period_from = "2026-10-01"
+period_to = "2026-10-05"
+cpc_krw = 150
+ctr = 0.06
+cvr = 0.09
+aov_krw = 32000
+
+[[rounds]]
+campaign_id = "cmp_a_2"
+campaign_name = "가을 독서 브랜드 검색 2차"
+channel = "네이버 브랜드 검색"
+requested_krw = 400000
+period_from = "2026-10-06"
+period_to = "2026-10-10"
+cpc_krw = 165
+ctr = 0.06
+cvr = 0.09
+aov_krw = 32000
+
+# 예산이 300,000원만 남아 조건부 승인이 나온다. 경쟁 입찰로 CPC가 오른 상황
+[[rounds]]
+campaign_id = "cmp_a_3"
+campaign_name = "가을 독서 브랜드 검색 3차"
+channel = "네이버 브랜드 검색"
+requested_krw = 500000
+period_from = "2026-10-11"
+period_to = "2026-10-14"
+cpc_krw = 180
+ctr = 0.06
+cvr = 0.09
+aov_krw = 32000

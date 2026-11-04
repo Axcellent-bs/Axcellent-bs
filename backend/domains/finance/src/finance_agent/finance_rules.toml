@@ -238,15 +238,15 @@ review = "pending"
 id = "BRK-004"
 area = "brake"
 title = "현금 흐름"
-statement = "앞으로 몇 주의 누적 순현금이 요청 금액보다 적으면 그 금액까지만 조건부 승인하고, 0 이하이거나 확인할 수 없으면 거절한다."
+statement = "앞으로 몇 주의 누적 순현금이 요청 금액보다 적으면 그 금액까지만 조건부 승인하고, 0 이하면 거절한다. 확인할 수 없으면 최소 금액까지만 승인한다."
 basis = "내부 기준, [brake] cash_lookahead_weeks, 13주 현금 흐름 예측"
 review = "pending"
 
 [[rules]]
 id = "BRK-005"
 area = "brake"
-title = "최종 결정은 사람"
-statement = "재무가 거절하거나 금액이 기준을 넘으면 안전 관문이 사람에게 보낸다. 쿠폰 발급과 환불은 이 규칙의 대상이 아니다."
+title = "관문이 판단을 강제함"
+statement = "재무가 거절하거나 한도를 넘으면 안전 관문이 집행을 막는다. 건당 기준 금액 이상은 사람이 정한다. 쿠폰 발급과 환불은 이 규칙의 대상이 아니다."
 basis = "shared/safety rules/registry.toml start_campaign, 재무 재설계의 건별 승인 제외 원칙"
 review = "expert"
 
