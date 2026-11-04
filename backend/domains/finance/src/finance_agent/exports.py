@@ -26,7 +26,7 @@ from typing import Any
 from finance_agent import bank, statements, tax
 from finance_agent import finance_config as fc
 from finance_agent.books import Books
-from finance_agent.rules import applied, load_rules, review_checklist_md
+from finance_agent.rules import applied, load_rules, review_checklist_docx
 
 logger = logging.getLogger("ax.finance.exports")
 
@@ -95,7 +95,7 @@ def build_files(
     files = {
         f"income-statement-{month}.csv": statements.to_csv(report, missing).encode("utf-8-sig"),
         f"income-statement-{month}.xlsx": statements.to_xlsx(report, missing),
-        "expert-review-checklist.md": review_checklist_md().encode("utf-8"),
+        "expert-review-checklist.docx": review_checklist_docx(),
     }
     if last_day.month % 3 == 0:
         filing = (filings or {}).get(tax.filing_key(last_day))  # 확정한 분기는 확정 숫자를 낸다
@@ -140,7 +140,10 @@ def make_package(
         for name, body in sorted(files.items())
     ]
     # 엑셀은 만들 때마다 내부 시각이 달라진다. 숫자가 같으면 같은 판으로 보려고 CSV만 비교한다
-    same_content = [f for f in manifest if not f["name"].endswith(".xlsx")]
+    # 확인 목록은 규칙 버전으로 비교한다. Word 파일도 만들 때마다 내부 시각이 달라진다
+    same_content = [f for f in manifest if not f["name"].endswith((".xlsx", ".docx"))] + [
+        load_rules().version
+    ]
     signature = hashlib.sha256(json.dumps(same_content, sort_keys=True).encode()).hexdigest()
     current = exports.get(package_id)
     if current and current["signature"] == signature:

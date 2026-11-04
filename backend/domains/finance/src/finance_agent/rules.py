@@ -6,12 +6,16 @@
 
 from __future__ import annotations
 
+import io
 import os
 import tomllib
 from functools import lru_cache
 from importlib import resources
 from typing import Any, Literal
 
+from docx import Document
+from docx.enum.section import WD_ORIENT
+from docx.oxml.ns import qn
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # 전문가 확인 대상. 브레이크·교훈·인사이트 같은 내부 기준은 재무 담당이 정한다
@@ -145,28 +149,43 @@ def applied(rule_id: str, detail: str | None = None) -> dict[str, Any]:
     }
 
 
-def review_checklist_md() -> str:
-    """세무사·회계사에게 함께 전달할 확인 목록. 규칙 파일에서 만들어 항상 지금 규칙과 같다."""
+def review_checklist_docx() -> bytes:
+    """세무사·회계사에게 함께 전달할 확인 목록(Word). 규칙 파일에서 만들어 항상 지금 규칙과 같다."""
     book = load_rules()
-    lines = [
-        "# 재무·세무 규칙 전문가 확인 목록",
-        "",
-        f"규칙 버전 {book.version} ({book.updated}). AI가 공개 자료로 적은 근거입니다.",
-        "전문가 확인 전이고, 이 묶음의 숫자는 신고서가 아니라 보조 자료입니다.",
-        "",
-        "## 먼저 답이 필요한 질문",
-        "",
-        *[f"{n}. {q}" for n, q in enumerate(book.expert_questions, start=1)],
-        "",
-        "## 규칙별 확인",
-        "",
-        "| 규칙 | 내용 | 적어 둔 근거 | 확인 |",
-        "|---|---|---|---|",
-    ]
-    for r in book.rules:
-        if r.review == "pending" and r.area in EXPERT_AREAS:
-            lines.append(f"| {r.id} {r.title} | {r.statement} | {r.basis} | [ ] |")
-    return "\n".join(lines) + "\n"
+    doc = Document()
+    section = doc.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width, section.page_height = section.page_height, section.page_width
+    for style in ("Normal", "Title", "Heading 1"):
+        doc.styles[style].element.get_or_add_rPr().get_or_add_rFonts().set(
+            qn("w:eastAsia"), "Malgun Gothic"
+        )
+    doc.add_heading("재무·세무 규칙 전문가 확인 목록", level=0)
+    doc.add_paragraph(
+        f"규칙 버전 {book.version} ({book.updated}). AI가 공개 자료로 적은 근거입니다."
+    )
+    doc.add_paragraph("전문가 확인 전이고, 이 묶음의 숫자는 신고서가 아니라 보조 자료입니다.")
+    doc.add_heading("먼저 답이 필요한 질문", level=1)
+    for question in book.expert_questions:
+        doc.add_paragraph(question, style="List Number")
+    doc.add_heading("규칙별 확인", level=1)
+    rows = [r for r in book.rules if r.review == "pending" and r.area in EXPERT_AREAS]
+    table = doc.add_table(rows=1, cols=4)
+    table.style = "Table Grid"
+    for cell, text in zip(
+        table.rows[0].cells, ("규칙", "내용", "적어 둔 근거", "확인"), strict=True
+    ):
+        cell.text = text
+        cell.paragraphs[0].runs[0].bold = True
+    for r in rows:
+        cells = table.add_row().cells
+        cells[0].text = f"{r.id} {r.title}"
+        cells[1].text = r.statement
+        cells[2].text = r.basis
+        cells[3].text = "\u2610"
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
 
 
 def applied_many(*rule_ids: str) -> list[dict[str, Any]]:

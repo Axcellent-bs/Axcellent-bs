@@ -964,7 +964,7 @@ def add_finance_api(app: FastAPI) -> None:
             return error(404, "not_found", "파일이 없거나 내용이 기록과 다르다")
         media = {
             ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ".md": "text/markdown; charset=utf-8",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         }.get(os.path.splitext(name)[1], "text/csv; charset=utf-8")
         return Response(
             content=body,
