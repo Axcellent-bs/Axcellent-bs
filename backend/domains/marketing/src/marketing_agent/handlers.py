@@ -179,6 +179,10 @@ async def publish_notice(request: AgentRequest) -> AgentResult:
     draft = STATE.notices.get_draft(data.draft_id)
     if draft is None:
         return _result(request, TaskStatus.FAILED, outcome="draft_not_found")
+    if draft.channel_code == "sns":
+        # SNS 게시는 별도 관문 행동 publish_sns(C등급, 항상 사람 승인)로만 한다.
+        # publish_notice(A등급)로는 즉시 나가므로 안전 장치를 부르기 전에 막는다
+        return _result(request, TaskStatus.FAILED, outcome="sns_use_publish_sns")
 
     to_shop = draft.channel_code == "banner" and shop_client.notice_source() == "shop-api"
     if to_shop and len(draft.public_text) > BANNER_TEXT_MAX:

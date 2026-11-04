@@ -183,7 +183,7 @@
     },
     {
       "id": "campaign_effect",
-      "description": "캠페인 기간 주문 수를 지난 7일 같은 시간대 평균과 비교해 방향(늘었음·같음·줄었음)과 증분(실제 − 기대)을 내고, campaign_id가 있으면 캠페인 쿠폰 발급·사용 장수로 조회 시점 누적 사용률(캠페인 뒤 사용분도 섞임)을 낸다. 매출은 매출 지표가 없으면 확인할 수 없음이다. 자료가 없거나 쿠폰이 없으면 0으로 채우지 않고 확인할 수 없음과 이유를 준다. 숫자는 코드가 산출하고 LLM은 요약 문장만 쓴다. 상태를 바꾸지 않는다.",
+      "description": "캠페인 기간 주문 수를 지난 7일 같은 시간대 평균과 비교해 방향(늘었음·같음·줄었음)과 증분(실제 − 기대)을 내고, campaign_id가 있으면 캠페인 쿠폰 발급·사용 장수로 조회 시점 누적 사용률(캠페인 뒤 사용분도 섞임)을 낸다. 매출은 매출 지표가 없으면 확인할 수 없음이다. 자료가 없거나 쿠폰이 없으면 0으로 채우지 않고 확인할 수 없음과 이유를 준다. 숫자는 코드가 산출하고 LLM은 요약 문장만 쓴다. 상태를 바꾸지 않는다. 요청에 선택 칸 insight_id·proposal_id가 있으면 결과에 그대로 돌려준다(기획이 결과 기록 때 연결용, 저장하지 않음).",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#CampaignEffectInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#CampaignEffectOutput",
       "grade": "read",
@@ -203,6 +203,21 @@
         "marketing",
         "dashboard-api",
         "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "trend_insight_brief",
+      "description": "기획에 넘기는 근거 있는 인사이트 3~7개(데이터는 기획안을 확정하지 않는다). 기존 skill 결과를 코드로 묶는다: trend_popular(주제·분류·광고 재료 판정·YouTube 영상 수·시간당 조회·구독자 대비 배수·Google 인기 검색어 순위·관련 뉴스), 오늘 네이버 급상승 판정(평소 대비 배수·상승 시작일), trend_age(후보 상위의 타깃 연령대와 배수), 오늘 저장된 promo_concepts 예시 아이디어(참고용)·시즌 확인, product_link 임베딩 기준을 통과한 상품. 인사이트마다 insight_id(날짜+주제, 같은 날 같은 주제면 같은 id), 한 줄(LLM은 근거 숫자만, 숫자 검증 실패면 고정 문장), 카테고리, 광고 재료 가능 여부와 이유, 실존 이름 표시, 근거·링크·불러온 시각, 타깃 연령대(없으면 미정과 이유), 상품과 시즌 근거, 잘 맞는 숏츠 형식과 표본 수, 한계. 순서는 코드 점수(회사 설정 [brief] 가중치), 광고 재료가 아닌 것은 맨 아래 참고용. 하루 캐시(날짜 + 규칙 버전). 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendInsightBriefRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendInsightBriefOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "orchestrator",
+        "dashboard-api"
       ],
       "verifier": null,
       "priority": "recommended",

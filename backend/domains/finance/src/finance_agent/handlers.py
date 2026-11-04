@@ -116,8 +116,10 @@ class State:
         self.opinion_sender: Callable[[dict[str, Any], RequestMeta], Awaitable[str | None]] = (
             send_opinion
         )
-        # 시뮬레이션은 시나리오의 현금을 넣는다. None이면 13주 현금 흐름 예측으로 계산한다
+        # 시뮬레이션은 시나리오의 값을 넣는다. None이면 장부로 계산한다
         self.cash_override: int | None = None
+        self.budget_override: dict[str, Any] | None = None
+        self.repeat_override: dict[str, Any] | None = None
         # 사건별 쿠폰 장부(⑨)의 실행 기록. 테스트에서 바꾼다
         self.executions_loader: Callable[[str | None], Awaitable[lg.ExecutionFeed]] = (
             lg.load_executions
@@ -572,6 +574,18 @@ async def cash_net_krw() -> int | None:
     return sum(values)
 
 
+async def monthly_budget() -> dict[str, Any]:
+    if state().budget_override is not None:
+        return state().budget_override
+    return cp.budget_from_last_month(await state().books(), fc.today())
+
+
+async def repeat_estimate() -> dict[str, Any] | None:
+    if state().repeat_override is not None:
+        return state().repeat_override
+    return cp.repeat_estimate(await state().books(), fc.today())
+
+
 async def review_budget(data: CampaignBudgetReviewInput, context_id: str) -> dict[str, Any]:
     """예산 판단. 판단을 남기고, 승인이 아니면 총괄에 의견으로 알린다."""
     records = state().records
@@ -583,6 +597,7 @@ async def review_budget(data: CampaignBudgetReviewInput, context_id: str) -> dic
         lessons=records.lessons,
         cash_net_krw=await cash_net_krw(),
         today=today,
+        monthly_budget=await monthly_budget(),
     )
     review |= {
         "review_id": f"bud_{data.campaign_id}_{len(records.budget_reviews) + 1}",
@@ -639,14 +654,11 @@ async def verify_campaign_budget(request: AgentRequest) -> AgentResult:
             outcome="rejected",
             output={"decision": "rejected", "reason_code": "invalid_params"},
         )
-    # 마케팅이 미리 받은 판단이 있으면 그 한도를 쓴다. 없으면 지금 판단한다
-    previous = [
-        r
-        for r in state().records.budget_reviews
-        if r["campaign_id"] == ask.campaign_id and r["month"] == fc.today().isoformat()[:7]
-    ]
-    review = previous[-1] if previous else await review_budget(ask, request.meta.context_id)
+    # 먼저 받은 판단은 그사이 다른 캠페인이 시작했으면 틀릴 수 있어 시작 직전에 다시 판단한다
+    review = await review_budget(ask, request.meta.context_id)
     ok = review["decision"] != "rejected" and ask.requested_krw <= review["approved_limit_krw"]
+    if ok:
+        review["started_krw"] = ask.requested_krw  # 관문이 곧 실행한다. 이때부터 예산을 잡는다
     first_rule = next(
         (
             r["rule_id"]
@@ -680,7 +692,7 @@ async def record_result(data: CampaignResultInput, context_id: str) -> dict[str,
     previous = records.campaigns.get(data.campaign_id)
     if previous is not None and all(previous.get(k) == v for k, v in body.items()):
         return previous | {"write": "already_recorded"}
-    record = cp.compute_result(body) | {
+    record = cp.compute_result(body, await repeat_estimate()) | {
         "revision": (previous or {}).get("revision", 0) + 1,
         "recorded_at": fc.iso(fc.now()),
         "context_id": context_id,

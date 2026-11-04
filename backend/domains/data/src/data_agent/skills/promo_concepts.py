@@ -75,6 +75,7 @@ from ax_contracts.schemas.data import (
 )
 from data_agent.connectors import CatalogProduct
 from data_agent.explain import _bad_numbers
+from data_agent.skills.ad_material import NEVER_TREND
 from data_agent.skills.product_link import read_catalog
 from data_agent.skills.shorts_stats import shorts_stats
 from data_agent.skills.topic_category import (
@@ -92,8 +93,6 @@ from data_agent.today_board import TodayBoard
 KST = timezone(timedelta(hours=9))
 DB_ENV = "DATA_PROMO_DB"
 DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "promo_concepts.db"  # backend/.data
-# 기획안 재료에서 늘 빼는 주제 분류 (화면 "지금 인기"에 보여도 광고 재료로 쓰지 않는다)
-NEVER_TREND = frozenset({"뉴스·사건", "기부·재난", "정치·사회", "인물"})
 NO_TREND = ("", "없음", "트렌드 없음")  # 트렌드 없이 상품 + 인기 숏츠 형식만 쓴 초안
 DRAFT = "예시 아이디어"  # 참고용. 확정 기획은 기획팀이 한다
 # 숫자 검증 전에 빼는 길이·컷 표기 ("0~3초", "3-5초", "15초", "2컷").

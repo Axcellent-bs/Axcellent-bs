@@ -17,6 +17,7 @@
 | `trend_history` | 키워드 그룹별 네이버 월 단위 값(최근 24개월, 설정)과 달마다 "작년 같은 달 대비" 배수. **판정하지 않음**(급상승·계절 판정은 평가가 없어서). 자료 없음·못 읽음은 그 그룹만 unknown | 네이버 검색어 트렌드(`timeUnit=month`, 그룹마다 1번). 기본 키워드: 회사 폴더 `trends.toml`, 개월 수 `[history] months` |
 | `youtube_velocity` | YouTube 영상 지금 속도(최근 두 스냅샷 사이 시간당 조회 증가)와 그 전 구간보다 빨라졌는지, 지금 속도 상위 N개(설정)와 태그·제목·채널 이름·길이. **판정하지 않음** | YouTube 스냅샷 DB(`youtube_store.recent_snapshots`). 상위 영상에 저장된 제목·길이가 없으면(회사 키워드 검색·추적으로 들어온 영상) YouTube `videos.list`로 한 번 받아 저장(영상 50개마다 1단위), 못 받으면 비우고 요약에 수를 적음. 개수: 회사 폴더 `trends.toml` `[velocity] top` |
 | `trend_popular` | "지금 인기" 주제 순위(급상승 판정과 별개): 점수(코드) = 인기 영상 수 몫 + 지금 조회 속도 몫 + 인기 검색어 순위 몫(가중치 설정), 출처별 몫·근거, 주제 분류·`brand_safe`, 오늘 판정이 급상승이면 "지금 급등 중"(`rising_now`) | YouTube 스냅샷 DB·인기 검색어 스냅샷 DB(읽기 전용), LLM(주제 분류만, 묶어서 1번·하루 캐시). **네이버를 부르지 않는다**. 설정: `trends.toml` `[popular]` |
+| `trend_insight_brief` | 기획에 넘기는 근거 있는 인사이트 3~7개(insight_id·한 줄·분류·광고 재료 여부·근거·타깃 연령대·상품·숏츠 형식·한계·참고용 예시 아이디어). 데이터는 기획안을 확정하지 않는다 | 기존 skill 결과를 코드로 묶음: trend_popular·오늘 급상승 판정·trend_age(후보 상위만)·오늘 저장된 promo_concepts·product_link(임베딩 기준 통과만). LLM은 한 줄만(묶어서 1번). 하루 캐시(날짜 + 규칙 버전) `backend/.data/insight_brief.db`. 설정: `trends.toml` `[brief]` |
 | `trend_age` | 연령대별 상승: 주제마다 연령대(설정)별로 따로 조회해 "그 연령대에서 평소 대비 몇 배"(trend_scan과 같은 판정 함수), 가장 크게 오른 연령대 | 네이버 검색어 트렌드(`ages` 조건, 주제 하나 = 연령대 수만큼, 하루 상한 80번·하루 캐시), trend_popular(커넥터 없이), 오늘 판정 기록, 기획안 시즌 확인·카탈로그. LLM 없음. 설정: `trends.toml` `[age]` |
 | `promo_concepts` | 광고·홍보 숏츠 **예시 아이디어(참고용)** 3~5개(확정 기획은 기획팀 몫): 타깃 연령대와 근거 숫자(trend_age, 없으면 미정 + 이유)· 제목·컨셉·길이(15~60초)·콘티(길이에 맞는 컷 수)·빌려 온 숏츠 형식과 그 평균 조회수·빌려 온 트렌드(없어도 됨)·맞는 이유·등장 상품·주의사항, 코드 경고(상표·초상권 확인 필요), 버린 초안과 이유, 쓴 재료·시즌 확인 키워드 | shop-api 상품·카테고리, shorts_stats(형식별 평균 조회수), trend_popular(게임·연예·스포츠·K-pop·음악·IT만), 카탈로그 카테고리·상품 핵심어 월별 흐름(trend_history, 키워드마다 네이버 1번·상한 20·하루 캐시), LLM(초안 1번). 하루 캐시·기록 `backend/.data/promo_concepts.db`(캐시 키 = 날짜 + 규칙 버전: 재료 거르기 설정 `[promo]`·분류 목록·프롬프트의 해시. 규칙이 바뀌면 다음 요청에서 다시 만든다). 설정: `trends.toml` `[promo]` |
 | `shorts_stats` | YouTube 숏츠 통계(카테고리별·형식별): 숏츠 수·평균 조회수·평균 시간당 조회 증가·조회수 상위 3개, 표본 부족은 unknown | YouTube 스냅샷 DB(길이 `video_details`), 숏츠 검색(`search.list`, 하루 1번·상한 8번, `backend/.data/shorts.db`), LLM(카테고리·형식 분류, 묶어서·저장). 설정: `trends.toml` `[shorts]` |
@@ -42,6 +43,7 @@
 | `trend_history` | 없음(판정하지 않음) | 그룹마다 상대값이라 그룹끼리 높이를 비교할 수 없다. 계절 반복 판정은 평가 케이스부터 만들어야 한다 |
 | `youtube_velocity` | 없음(판정하지 않음) | 평소 속도 기준이 없어 빠른 순서만 보여 준다. 스냅샷 간격이 짧으면 속도가 흔들린다 |
 | `trend_popular` | 없음 | 평가셋이 없어 "인기 순위가 맞는지"를 재지 않는다. 가중치(1.0·1.0·1.0)는 성과 자료가 없어 정한 값이다. 주제 분류 정확도도 재지 않는다 |
+| `trend_insight_brief` | 없음 | 평가셋이 없어 인사이트가 맞는지 재지 않는다. 순서 가중치(`[brief]`)는 성과 자료가 없어 정한 값이다. 근거 숫자는 기존 skill 값 그대로이고 한 줄만 LLM(숫자 검증) |
 | `trend_age` | 없음 | 평가셋이 없어 "연령대 판정이 맞는지"를 재지 않는다. 판정 함수는 trend_scan과 같다(평가셋 `eval/trend`는 연령대 없이 만든 것). 값은 요청마다 최댓값이 100인 상대값이라 연령대끼리 절대량은 비교하지 않는다. 검색량이 적은 연령대는 네이버가 값을 주지 않아 unknown |
 | `promo_concepts` | 없음 | 평가셋이 없어 기획안 품질을 재지 않는다. 👍/👎 피드백이 쌓이면 그것을 평가셋으로 쓴다(피드백 저장은 safety 레지스트리 등록이 필요해 아직 없음). 코드는 상품·트렌드·숫자·형식·콘티 수만 검증한다 |
 | `shorts_stats` | 없음 | 인기 영상 상위 200개 안(과 조회수 순 검색 결과)에서의 비교라 이미 뜬 영상끼리 비교한다. 숏츠 여부는 길이로 판단한다. 형식 분류 정확도는 재지 않는다 |
@@ -165,6 +167,137 @@ class MemoryConnector:
 | shop-api 응답 오류 문장("실패 주문 응답 형식이 계약과 다르다" 등) | `connectors/shop_api.py` | 캣북스 커넥터 안 문장이다. 다른 회사는 자기 커넥터를 쓴다 |
 | skill 한국어 이름표("결제 문제 진단" 등) | `labels.py` | 부서 업무 이름이다(화면 `SKILL_KO`와 같은 말) |
 | 목 시드(`seed.py`·`seed_metrics.py`·`seed_logs.py`) | | 테스트 전용 |
+
+## 기획 협업
+
+흐름: **데이터(인사이트 + 근거) → 기획(제안 + 실행 근거 + 목표) → 사람 확인 → 마케팅 실행 → 데이터(성과 측정) → 기획(결과 기록)**. 데이터는 근거 있는 인사이트를 넘기고 성과를 잴 뿐, 제안을 확정하지 않는다.
+
+### 기획이 부를 skill 2개
+
+| skill | 언제 | 요청 | 응답 핵심 |
+|---|---|---|---|
+| `trend_insight_brief` | 제안을 만들기 전에 근거 있는 인사이트를 받을 때 | `max_insights`(3~7, 비우면 회사 설정 5), `regenerate` | `insights[]`: `insight_id`·한 줄·분류·광고 재료 여부·근거(YouTube·Google·네이버, 링크·시각)·타깃 연령대·상품(임베딩 기준 통과만)·숏츠 형식·한계·예시 아이디어(참고용) |
+| `campaign_effect` | 마케팅이 실행한 뒤 성과를 기록할 때 | `window_from`·`window_to`(필수), `campaign_id`, **`insight_id`·`proposal_id`(선택)** | 주문 증분·매출·쿠폰 누적 사용률(모르면 unknown + 이유), 요청의 `insight_id`·`proposal_id` 그대로 |
+
+둘 다 grade read(조회만). 요청 가능: `trend_insight_brief`는 planning·orchestrator·dashboard-api, `campaign_effect`는 카드의 `allowed_requesters`.
+
+### 예시 (2026-11-04 실제 데이터, 로컬 실행)
+
+`trend_insight_brief` 요청:
+
+```json
+{"skill": "trend_insight_brief", "input": {"max_insights": 5}}
+```
+
+응답 (인사이트 하나만 줄여 보임):
+
+```json
+{
+  "status": "known",
+  "day": "2026-11-04",
+  "rules_version": "04a3a6729e42",
+  "cached": false,
+  "summary": "인사이트 5개 (광고 재료 가능·미정 5개, 참고용 0개). 1위: t1.",
+  "insights": [
+    {
+      "insight_id": "ins_20261104_1ee36d7f",
+      "rank": 2,
+      "topic": "리그오브레전드",
+      "line": "YouTube 인기 영상 27개, 지금 시간당 조회 79390, 구독자 대비 조회 최대 0.82배, 네이버 평소 대비 0.97배, 타깃 10대는 평소 대비 1.16배.",
+      "line_status": "llm",
+      "category": "게임",
+      "ad_material": true,
+      "ad_material_reason": "실존 이름·상표가 든 주제라 분위기·형식만 빌릴 것",
+      "reference_only": false,
+      "real_entity": true,
+      "entity_names": [
+        "리그오브레전드"
+      ],
+      "target_age": "10대",
+      "target_age_ratio": 1.16,
+      "target_age_status": "normal",
+      "products": [],
+      "products_reason": "임베딩 유사도 0.65 이상(1등만)인 상품이 없음",
+      "shorts_format": null,
+      "shorts_format_reason": "이 주제 근거 영상 중 숏츠가 없음",
+      "example_ideas": [],
+      "score": 1.58,
+      "evidence": {
+        "youtube_videos": 27,
+        "youtube_views_per_hour": 79389.5,
+        "youtube_views_per_subscriber": 0.82,
+        "youtube_at": "2026-11-04T00:58:39Z",
+        "google_rank": null,
+        "naver_ratio": 0.97,
+        "naver_status": "normal",
+        "naver_until": null,
+        "links": [
+          "https://www.youtube.com/watch?v=qBrPgSt9mzI"
+        ],
+        "missing": [
+          "Google: 인기 검색어에 없는 주제"
+        ]
+      },
+      "limits": [
+        "평가셋이 없어 인사이트가 맞는지 재지 않는다",
+        "네이버 값은 요청마다 최댓값이 100인 상대값이다"
+      ]
+    },
+    "… (나머지 인사이트)"
+  ]
+}
+```
+
+`campaign_effect` 요청 (기획이 제안에 적어 둔 `insight_id`·`proposal_id`를 같이 보냄):
+
+```json
+{
+  "skill": "campaign_effect",
+  "input": {
+    "campaign_id": null,
+    "window_from": "2026-11-03T00:00:00Z",
+    "window_to": "2026-11-04T00:00:00Z",
+    "insight_id": "ins_20261104_628b49d9",
+    "proposal_id": "prop_example_1"
+  }
+}
+```
+
+응답 (줄임. 이날은 지난 7일 주문 기록에 공백이 많아 주문 증분이 unknown이고, campaign_id가 없어 쿠폰도 unknown이다. 0으로 채우지 않는다):
+
+```json
+{
+  "campaign_id": null,
+  "window_from": "2026-11-03T00:00:00Z",
+  "window_to": "2026-11-04T00:00:00Z",
+  "orders": {
+    "status": "unknown",
+    "unknown_reason": "기준선에 쓸 지난 구간이 없음 (1일 전: 기록 공백 의심 (288칸): 결제 시도 0인 5분 칸이 288칸…"
+  },
+  "revenue": {
+    "status": "unknown"
+  },
+  "coupons": {
+    "status": "unknown",
+    "unknown_reason": "campaign_id가 없어 캠페인 쿠폰을 찾을 수 없음"
+  },
+  "summary": "…",
+  "insight_id": "ins_20261104_628b49d9",
+  "proposal_id": "prop_example_1"
+}
+```
+
+### insight_id 사용법
+
+1. 기획은 `trend_insight_brief` 응답에서 쓸 인사이트의 `insight_id`(예: `ins_20261104_…`)를 제안에 적는다. 같은 날 같은 주제는 다시 불러도 같은 id다(날짜 + 주제 이름 해시)
+2. 마케팅이 실행한 뒤 기획이 `campaign_effect`를 부를 때 그 `insight_id`와 기획 쪽 `proposal_id`를 함께 보낸다
+3. 응답에 두 id가 그대로 돌아오므로, 기획은 그 결과를 자기 쪽 기록(제안·결과)에 이어 붙인다
+
+### 데이터가 하지 않는 것
+
+- **제안 확정**: 인사이트와 예시 아이디어(`promo_concepts`, 참고용)만 준다. 무엇을 할지는 기획이 정하고 사람이 확인한다
+- **기획 쪽 저장**: `insight_id`·`proposal_id`·결과를 데이터가 저장하지 않는다. `campaign_effect`는 받은 id를 돌려줄 뿐이다(읽기 전용)
+- **마케팅 실행**: 게시·발행·쿠폰 발급은 마케팅(과 safety 승인)이 한다
 
 ## 2. 실행 방법
 `docker compose -f infra/compose.yml up data` / 목 모드: `DATA_MOCK=1`
@@ -367,6 +500,8 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 - holdout(결과 숫자만, 기준을 맞추지 않음): (c) 탐지 0.8125·오탐 0, (b) z 3.2·4.0 탐지 0.9375·오탐 0, (a) z 3.2 오탐 0.125·z 4.0 탐지 0.9375·오탐 0. holdout은 (b)가 낫게 나오지만 개발 케이스로 정한다는 규칙대로 쓰지 않았다. (b)를 다시 보려면 요일 효과가 뚜렷한 개발 케이스를 먼저 늘리고 holdout은 새 seed로 다시 만든다
 
 ### campaign_effect (캠페인 효과)
+
+- **기획 연결(#531)**: 요청에 선택 칸 `insight_id`(trend_insight_brief)·`proposal_id`(기획 제안)를 보내면 결과에 그대로 돌려준다. 기획이 결과를 기록할 때 인사이트·제안과 잇는 용도이고, 데이터는 저장하지 않는다(읽기 전용)
 
 - 입력: `campaign_id`(선택), 캠페인 시작·끝(`window_from`·`window_to`). 출력: 주문·매출·쿠폰 각각 "앎(값·근거)" 또는 "확인할 수 없음 + 이유", 요약 문장
 - 주문(`skills/campaign_effect.py`, 코드 계산): 캠페인 기간 `order_count` 합계(실제)와 기준선 지난 구간 합계의 평균(기대). **증분 = 실제 − 기대**(평가 채점기와 같은 정의). 방향은 기대를 평균으로 한 포아송 꼬리확률(`metrics/judge.py`의 `poisson_upper`·`poisson_lower`)이 0.001보다 작으면 늘었음·줄었음, 아니면 같음. 지표는 커넥터 `metric_series`로 읽는다
@@ -592,6 +727,22 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 - 예전 칸 `format`은 15초 이하 "15초 숏폼", 30초 이하 "30초 숏폼", 그 밖은 비운다(롱폼은 쓰지 않는다). 길이는 `duration_seconds`
 - 👍/👎 피드백 저장은 **아직 없다**. 상태 변경이라 `execute()`(안전 관문)와 safety 레지스트리 등록이 필요하고, 레지스트리는 사람만 바꾼다(#418 본문에 skill 이름·등급·레지스트리 항목 초안)
 - **한계:** 평가셋이 없어 초안 품질을 재지 않는다. 👍/👎가 쌓이면 그것을 평가셋으로 쓴다. 숏츠 형식 재료는 이미 뜬 숏츠(인기·조회수 순 검색)의 평균이다. 시즌 기준(1.3배)과 컷 기준은 정한 값이다. 경고는 IP 이름이 그대로 있을 때만 단다
+
+### trend_scan 분류 칸 (#539)
+
+급상승 판정(`trend_scan`) 응답의 판정마다 공유 분류기 결과를 선택 칸으로 붙인다: `topic_category`·`topic_category_reason`·`real_entity`·`entity_names`·`ad_material`·`ad_material_reason`. 그룹 이름(+ 키워드)을 묶어 한 번 분류하고 저장된 분류는 다시 묻지 않는다. **판정(상태·배수)과 평가 지표는 그대로**이고, 분류가 실패해도 판정은 준다(분류 unknown + 이유, 광고 재료 None).
+
+### trend_insight_brief (인사이트 브리프)
+
+흐름: **데이터(인사이트 + 근거) → 기획(제안 + 실행 근거 + 목표) → 사람 확인 → 마케팅 실행 → 데이터(성과 측정) → 기획(결과 기록)**. 데이터는 기획안을 확정하지 않고 근거 있는 인사이트를 기획에 넘긴다. grade read, 요청: planning·orchestrator·dashboard-api.
+
+1. **후보**(코드): `trend_popular` 지금 인기 주제(순위 순, 화면 경로처럼 YouTube 커넥터를 넘겨 "왜 뜨나" 근거까지) + 지금 인기에 없는 오늘 네이버 급상승 판정. 이름·별칭이 같으면 하나
+2. **점수**(코드, `[brief]` 가중치): 지금 인기 `1/순위` + 네이버 `max(0, 배수−1)` + 연령대 `max(0, 최대 연령대 배수−1)` + 인기 검색어 `1/순위` + YouTube `영상 수/최대`. 1차 점수 상위 `인사이트 수 + age_topics_extra`개만 `trend_age`로 연령대를 보고(네이버 호출 아끼기, trend_age 하루 상한·캐시 공유) 다시 점수를 매겨 `max_insights`(5, 요청으로 3~7)개
+3. **분류(#539)**: 브리프에 들어가는 모든 주제는 공유 분류기(`topic_category`)를 거친다. 지금 인기 주제는 이미 분류된 값(저장 재사용)을, 지금 인기에 없는 급상승 주제는 여기서 묶어 한 번 분류한다(저장된 분류는 다시 묻지 않음). **분류가 안 된 주제(unknown)는 순위·연령대 후보에 넣지 않고** 맨 아래 "참고용 + 분류 대기"(`classification_pending`, 최대 `pending_max` 2개)로 둔다
+3-1. **광고 재료**: 공용 규칙(`skills/ad_material.py`, 예시 아이디어·급상승 판정과 같다). 뉴스·사건·기부·재난·정치·사회·인물 분류, 사람 이름 주제, 회사 추천 안 함 분류, `[promo] trend_categories` 밖이면 `ad_material: false` + 이유이고 **맨 아래 `reference_only`(참고용)**. 실존 이름·상표가 든 주제는 가능 + "분위기·형식만" 이유. 분류가 없는 급상승 주제는 `null` + 이유
+4. **칸**: `insight_id` = `ins_<날짜>_<주제 이름 해시>`(같은 날 같은 주제면 같은 id, 기획이 제안·성과 요청에 적는다) · 근거(YouTube 영상 수·시간당 조회·구독자 대비 최대 배수·스냅샷 시각, Google 순위·관련 뉴스·스냅샷 시각, 네이버 배수·판정·상승 시작일·판정 마지막 날, 링크, 없는 출처와 이유) · 타깃 연령대(없으면 미정 + 이유) · 상품(`product_link` 임베딩 기준 `[recommend] min_similarity` 이상·1등만, 이름에 시즌 확인 키워드가 들어 있으면 시즌 근거 한 줄) · 숏츠 형식(이 주제 근거 숏츠 중 가장 많은 형식과 표본 수, shorts_stats가 분류해 둔 것만) · 한계 · 예시 아이디어(오늘 저장된 `promo_concepts` 중 이 주제를 빌린 것, "참고용". 새로 만들지 않는다)
+5. **한 줄**: 인사이트마다 근거 숫자만 데이터 블록에 넣고 묶어서 LLM 한 번. 숫자 검증(`explain`)·단정 말 검사에 걸리면 코드가 만든 고정 문장(`line_status: fixed` + 이유)
+6. **하루 캐시**: (한국 날짜, 규칙 버전 = `[brief]` 설정·프롬프트·한계 문장 해시) → 브리프. `regenerate: true`면 새로 묶는다
 
 ### trend_age (연령대별 상승)
 

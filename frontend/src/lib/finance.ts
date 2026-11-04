@@ -76,10 +76,8 @@ export interface IncomeEstimate {
   not_included: string[]; basis: string; applied_rules: AppliedRule[];
 }
 export interface ExportFile { name: string; bytes: number; sha256: string }
-export type HandoffStatus = "not_requested" | "request_failed" | "requested" | "approved" | "rejected";
 export interface ExportPackage {
   package_id: string; month: string; version: number; generated_at: string; files: ExportFile[]; mock: boolean;
-  handoff: { status: HandoffStatus; review_id?: string | null; delivered_to?: string | null };
 }
 export interface BankImport { file: string; at: string; status: "imported" | "failed"; added?: number; rows?: number; skipped?: number; reason?: string }
 export interface ExportsView { packages: ExportPackage[]; bank_imports: BankImport[] }
@@ -90,7 +88,7 @@ export type BudgetDecision = "approved" | "conditional" | "rejected";
 export interface CampaignRecord {
   campaign_id: string; campaign_name: string; channel: string; period_from: string; period_to: string;
   spend_krw: number; coupon_krw: number; gmv_krw: number | null; revenue_krw: number | null; profit_krw: number | null;
-  roi: number | null; roas: number | null; verdict: CampaignVerdict | null; status: "recorded" | "waiting_revenue"; source: string;
+  roi: number | null; roas: number | null; ltv_profit_krw: number | null; verdict: CampaignVerdict | null; status: "recorded" | "waiting_revenue"; source: string;
   applied_rules: AppliedRule[];
 }
 export interface BudgetReview {
@@ -104,7 +102,7 @@ export interface OpinionRow {
 }
 export interface CampaignView {
   campaigns: CampaignRecord[]; reviews: BudgetReview[]; lessons: CampaignLesson[]; opinions: OpinionRow[];
-  budget: { month: string; monthly_krw: number; provisional: boolean; committed_krw: number };
+  budget: { month: string; monthly_krw: number; provisional: boolean; basis: string; committed_krw: number };
   break_even_roas: number | null;
 }
 export interface FinanceInsight {
@@ -589,8 +587,8 @@ export const finance = {
   /** 자동으로 만든 파일과 은행 폴더 기록 */
   exports: () => fin<Envelope<ExportsView>>("/api/finance/exports"),
   runExports: () => fin<Envelope<unknown>>("/api/finance/exports/run", { method: "POST", body: {}, human: true }),
-  requestHandoff: (packageId: string) =>
-    fin<Envelope<ExportPackage>>(`/api/finance/exports/${encodeURIComponent(packageId)}/handoff`, { method: "POST", body: {}, human: true }),
+  downloadBundle: (packageId: string) =>
+    download(`/api/finance/exports/${encodeURIComponent(packageId)}/bundle`, `${packageId}.zip`),
   downloadExport: (packageId: string, name: string) =>
     download(`/api/finance/exports/${encodeURIComponent(packageId)}/files/${encodeURIComponent(name)}`, name),
   /** 월간 변동 분석 (지난달·작년 같은 달 대비) */
@@ -744,14 +742,13 @@ export const purposeKo = (...codes: (string | null | undefined)[]) => {
 };
 
 /** 마케팅 화면에서 결정하는 보류 건 */
-export const MARKETING_HOLD_ACTIONS = ["issue_coupon", "publish_notice", "publish_sns", "generate_video"] as const;
+export const MARKETING_HOLD_ACTIONS = ["issue_coupon", "publish_notice", "publish_sns", "generate_video", "start_campaign"] as const;
 /** 재무 화면에서 결정하지 않는 보류 건. 환불은 고객지원 화면, 쿠폰·공지·SNS·영상은 마케팅 화면에서 결정한다 */
 export const NOT_FINANCE_ACTIONS = new Set<string>(["refund_request", ...MARKETING_HOLD_ACTIONS]);
 
 export const ACTION_KO: Record<string, string> = {
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 지급",
-  publish_notice: "공지 올리기", publish_sns: "SNS 게시", generate_video: "영상 만들기",
-  send_tax_package: "세무 자료 전달",
+  publish_notice: "공지 올리기", publish_sns: "SNS 게시", generate_video: "영상 만들기", start_campaign: "캠페인 집행",
   rollback_deployment: "배포 되돌리기", restart_service: "서비스 다시 켜기", generate_pr: "코드 변경 만들기",
 };
 

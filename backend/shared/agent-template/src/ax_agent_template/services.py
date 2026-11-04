@@ -32,7 +32,7 @@ SERVICES: tuple[Service, ...] = (
         "orchestrator",
         "orchestrator",
         8000,
-        ("find_active_incident", "answer_planning_question"),
+        ("find_active_incident", "answer_planning_question", "receive_finance_opinion"),
         "총괄·사건",
     ),
     Service(
@@ -152,6 +152,7 @@ SERVICES: tuple[Service, ...] = (
             "answer_planning_question",
             "campaign_effect",
             "trend_age",
+            "trend_insight_brief",
         ),
         "데이터 분석",
     ),

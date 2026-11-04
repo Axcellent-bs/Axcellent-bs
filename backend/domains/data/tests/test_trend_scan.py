@@ -394,3 +394,42 @@ def test_weekday_correction_sees_a_saturday_spike(mode: str) -> None:
 def test_weekday_pattern_alone_is_not_rising(mode: str) -> None:
     verdict = judge_series(_series(value=_weekly), START, END, Settings(weekday=mode))
     assert verdict.status == "normal"
+
+
+# ---------------------------------------------------------------- 공유 분류기 칸 (선택)
+
+
+def test_verdicts_carry_classifier_fields_without_changing_the_judgement(tmp_path: Path) -> None:
+    from data_agent.skills.topic_category import CategoryCache, _Categories, _Item
+
+    class CatLLM(MockLLMClient):
+        async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):  # noqa: ANN001, ANN201
+            if schema is _Categories:
+                names = {k[2:]: v for k, v in dict(untrusted or {}).items() if k.startswith("소재")}
+                cats = {"고양이": ("IT", False), "윤영미": ("인물", True)}
+                return _Categories(items=[_Item(id=n, category=cats[v][0], is_person=cats[v][1])
+                                          for n, v in names.items() if v in cats])  # fmt: skip
+            return await super().structured(prompt, schema, untrusted, images, context_id)
+
+    series = {"고양이": _series("고양이", spike=3.0, spike_days=2), "윤영미": _series("윤영미"),
+              "모름": _series("모름")}  # fmt: skip
+    plain = _scan(MemoryConnector(series), TrendScanRequest(keyword_groups=_groups(*series)))
+    cache = CategoryCache(tmp_path / "cat.db")
+    out = asyncio.run(
+        scan_trends(
+            TrendScanRequest(keyword_groups=_groups(*series)),
+            MemoryConnector(series),
+            CatLLM(),
+            env={},
+            category_cache=cache,
+        )  # type: ignore[arg-type]  # fmt: skip
+    )
+    by = {v.group_name: v for v in out.output.results}
+    # 판정은 분류와 상관없이 그대로
+    assert [(v.status, v.ratio) for v in out.output.results] == [
+        (v.status, v.ratio) for v in plain.output.results
+    ]
+    assert by["고양이"].topic_category == "IT" and by["고양이"].ad_material is True
+    assert by["윤영미"].ad_material is False
+    assert by["모름"].topic_category == "unknown" and by["모름"].ad_material is None
+    assert (by["모름"].ad_material_reason or "").startswith("분류 대기")

@@ -52,9 +52,11 @@ from ax_contracts.schemas.data import (
     PromoConceptsRequest,
     RootCauseInput,
     ShortsStatsRequest,
+    TrendAgeOutput,
     TrendAgeRequest,
     TrendCandidatesRequest,
     TrendHistoryRequest,
+    TrendInsightBriefRequest,
     TrendPopularRequest,
     TrendScanRequest,
     YouTubeVelocityRequest,
@@ -355,7 +357,10 @@ async def trend_scan(request: AgentRequest) -> AgentResult:
     if isinstance(data, AgentResult):
         return data
     try:
-        result = await scan_trends(data, get_trend_connector(), get_llm(), env=os.environ)
+        result = await scan_trends(
+            data, get_trend_connector(), get_llm(), env=os.environ,
+            category_cache=get_category_cache(),
+        )  # fmt: skip
     except NoTrendGroups as error:
         return _result(
             request, TaskStatus.FAILED, outcome="invalid_input", output={"message": str(error)}
@@ -513,6 +518,66 @@ async def trend_age(request: AgentRequest) -> AgentResult:
     result = await run_trend_age(
         data, get_trend_connector(), env=os.environ, popular_items=popular_items,
         season_keywords=season,
+    )  # fmt: skip
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=result.output.status,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
+
+
+def cand_aliases(env: Mapping[str, str]) -> dict[str, tuple[str, ...]]:
+    """회사 별칭 표 `[candidates.aliases]` (대표 이름 = 별칭들)."""
+    from data_agent.skills import trend_candidates as cand_mod
+
+    return dict(cand_mod.load_config(env).aliases)
+
+
+async def trend_insight_brief(request: AgentRequest) -> AgentResult:
+    """기획에 넘기는 인사이트 3~7개 (기존 skill 결과를 코드로 묶음, 하루 캐시). grade read."""
+    from data_agent.skills import promo_concepts as promo
+    from data_agent.skills.product_link import read_catalog
+    from data_agent.skills.trend_insight_brief import make_brief
+    from data_agent.skills.trend_popular import popular
+    from data_agent.today_board import BOARD
+
+    data = _parse(request, TrendInsightBriefRequest)
+    if isinstance(data, AgentResult):
+        return data
+    env = os.environ
+    llm = get_llm()
+    popular_out = None
+    popular_why: str | None = None
+    try:
+        pop = await popular(
+            TrendPopularRequest(), llm, env=env, context_id=request.meta.context_id,
+            category_cache=get_category_cache(), youtube=get_youtube(),
+        )  # fmt: skip
+        popular_out = pop.output
+        popular_why = pop.output.empty_reason
+    except Exception as error:  # 지금 인기를 못 읽어도 급상승만으로 묶는다
+        popular_why = f"지금 인기를 읽지 못함 ({type(error).__name__})"
+    rising = [v for n in BOARD.rising_names() if (v := BOARD.verdict([n])) is not None]
+    store = promo.PromoStore(env.get(promo.DB_ENV) or promo.DEFAULT_DB)
+    try:
+        promo_out = store.latest(promo._today(datetime.now(UTC)))
+    finally:
+        store.close()
+    catalog = await read_catalog(get_catalog())
+
+    async def ages(keywords: list[str]) -> TrendAgeOutput:
+        result = await run_trend_age(
+            TrendAgeRequest(keywords=keywords[:30]), get_trend_connector(), env=env
+        )
+        return result.output
+
+    result = await make_brief(
+        data, llm, env=env, popular=popular_out, popular_reason=popular_why, rising=rising,
+        age_fn=ages, promo=promo_out, catalog=catalog, aliases=cand_aliases(env),
+        category_cache=get_category_cache(),
+        context_id=request.meta.context_id,
     )  # fmt: skip
     return _result(
         request,
@@ -684,4 +749,5 @@ HANDLERS = {
     "answer_planning_question": answer_planning_question,
     "campaign_effect": campaign_effect,
     "trend_age": trend_age,
+    "trend_insight_brief": trend_insight_brief,
 }

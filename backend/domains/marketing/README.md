@@ -13,7 +13,7 @@
 | skill | 등급 | 요청 가능 | 입력 → 출력 |
 | --- | --- | --- | --- |
 | `draft_notice` | read | orchestrator | 사건·상품 사실, `promises[]` → 공지 초안 |
-| `publish_notice` | A | orchestrator | `draft_id` → `notice_id`, `notice.published` 발행 |
+| `publish_notice` | A | orchestrator | `draft_id` → `notice_id`, `notice.published` 발행 (`channel_code=sns` 초안은 `sns_use_publish_sns`로 거절, SNS는 `publish_sns`) |
 | `get_notice` | read | support, finance, orchestrator | `notice_id` → 사실·약속·기간·공개 문구·상태(`published`·`ended`)·게시 사건(`context_id`)·게시 시각(`published_at`). 없으면 "확인할 수 없음" |
 | `list_active_notices` | read | support, finance, orchestrator | `component`·`channel_code`·`at`·`limit` → 지금 게시 중인 공지 목록(최근 게시 순, 끝난 공지·시작 전 공지 제외). 없으면 빈 목록과 이유 |
 | `issue_coupon` | A (한도 초과·금액 불일치는 C), 검증자 없음 | support | `purpose_code`, `buyer_id`, 건수, 단가 → `coupon_id`, `coupon.issued` 발행 |

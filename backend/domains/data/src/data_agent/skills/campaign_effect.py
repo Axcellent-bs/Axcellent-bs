@@ -488,6 +488,9 @@ async def measure(
         revenue=revenue,
         coupons=await _coupons(connector, data.campaign_id),
         summary="",
+        # 기획이 결과를 기록할 때 잇는 id: 요청 값 그대로 돌려준다 (데이터는 저장하지 않는다)
+        insight_id=data.insight_id,
+        proposal_id=data.proposal_id,
     )
 
 

@@ -87,4 +87,4 @@ ax-contracts, ax-agent-template, data 에이전트(`impact_analysis`, `fraud_sco
 - 규칙과 근거: `finance_rules.toml`. 값을 바꾸면 version을 올린다. 결과마다 `applied_rules`가 붙는다
 - 캠페인: `record_campaign_result`, `review_campaign_budget`, `verify_campaign_budget`, `finance_insights`. 쿠폰·환불은 판단하지 않는다
 - 시뮬레이션: `uv run python -m finance_agent.simulation`. 가정은 `backend/docs/notes/finance/simulation-assumptions.md`
-- 파일 자동화 환경변수: `FINANCE_EXPORT_DIR`, `FINANCE_BANK_INBOX`, `FINANCE_TAX_HANDOFF_DIR`, `FINANCE_EXPORT_SECONDS`
+- 파일 자동화 환경변수: `FINANCE_EXPORT_DIR`, `FINANCE_BANK_INBOX`, `FINANCE_EXPORT_SECONDS`

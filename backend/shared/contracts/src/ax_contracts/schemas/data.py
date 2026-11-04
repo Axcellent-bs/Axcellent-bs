@@ -556,6 +556,13 @@ class TrendVerdict(AxModel):
     series: list[TrendPoint] = Field(default_factory=list)  # 이 그룹이 받은 날짜별 값 (기간 전체)
     window_from: dt.date | None = None  # 판정 구간 시작일 (그 앞은 기준선)
     summary: str | None = None  # 이 그룹 설명 한두 문장 (급상승만, 숫자는 근거에서 검증)
+    # 아래는 예전 응답은 없다. 공유 주제 분류기 결과 (판정과 별개, 분류 못 하면 unknown + 이유)
+    topic_category: TopicCategory | None = None
+    topic_category_reason: str | None = None
+    real_entity: bool | None = None  # 실존 인물·팀·리그·상표가 든 주제
+    entity_names: list[str] = Field(default_factory=list)
+    ad_material: bool | None = None  # 광고 재료로 쓸 수 있는지 (분류 못 하면 None)
+    ad_material_reason: str | None = None
 
     @model_validator(mode="after")
     def _reason_when_unknown(self) -> Self:
@@ -1338,6 +1345,9 @@ class CampaignEffectInput(AxModel):
     campaign_id: str | None = None  # 없으면 쿠폰은 확인할 수 없음 (주문·매출은 본다)
     window_from: UtcDatetime  # 캠페인 시작
     window_to: UtcDatetime  # 캠페인 끝
+    # 아래는 선택. 기획이 결과를 기록할 때 연결하려고 보내면 결과에 그대로 돌려준다 (저장하지 않음)
+    insight_id: str | None = None  # trend_insight_brief의 insight_id
+    proposal_id: str | None = None  # 기획 쪽 제안 id
 
     @model_validator(mode="after")
     def _range(self) -> Self:
@@ -1400,6 +1410,9 @@ class CampaignEffectOutput(AxModel):
     revenue: CampaignChange
     coupons: CampaignCoupons
     summary: str  # 한두 문장 (LLM, 숫자 검증 실패면 고정 문장)
+    # 아래는 예전 응답은 없다. 요청에 있던 연결 id 그대로 (데이터는 저장하지 않는다)
+    insight_id: str | None = None
+    proposal_id: str | None = None
 
 
 # ---------------------------------------------------------------- 연령대별 상승 (trend_age)
@@ -1480,6 +1493,10 @@ class InsightEvidence(AxModel):
     naver_until: dt.date | None = None  # 네이버 판정 마지막 날
     links: list[str] = Field(default_factory=list)  # 근거 영상·뉴스 주소
     missing: list[str] = Field(default_factory=list)  # 없는 출처와 이유
+    # 아래는 예전 응답은 없다. 시즌 근거 (작년 같은 달·다음 달 ÷ 기간 평균 중 큰 값)
+    season_keyword: str | None = None
+    season_ratio: float | None = Field(default=None, ge=0)
+    season_month: dt.date | None = None
 
 
 class InsightProduct(AxModel):
@@ -1520,6 +1537,11 @@ class TrendInsight(AxModel):
     limits: list[str] = Field(default_factory=list)  # 한계 (평가셋 없음, 상대값 등)
     example_ideas: list[str] = Field(default_factory=list)  # 이 주제를 쓴 예시 아이디어 (참고용)
     score: float = 0.0  # 순서를 정한 코드 점수 (가중치는 회사 설정)
+    # 아래는 예전 응답은 없다. 분류기가 아직 분류하지 못한 주제 (순위에 넣지 않고 참고용)
+    classification_pending: bool = False
+    # 아래는 예전 응답은 없다. 회사 관련 인사이트 칸 (시즌 키워드·상품 핵심어 중 오른 것, 별도 확보)
+    company_related: bool = False
+    company_reason: str | None = None  # 왜 회사 관련으로 골랐는지 (코드 문장)
 
 
 class TrendInsightBriefOutput(AxModel):

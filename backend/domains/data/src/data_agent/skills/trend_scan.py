@@ -20,10 +20,11 @@ from __future__ import annotations
 import math
 import statistics
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from ax_agent_template.llm import LLMClient
 from ax_contracts.schemas import Evidence
@@ -318,6 +319,60 @@ def _group_facts(verdict: TrendVerdict) -> dict[str, int | float | str]:
     return facts
 
 
+async def classify_verdicts(
+    results: list[TrendVerdict],
+    groups: Sequence[TrendKeywordGroup],
+    llm: LLMClient,
+    *,
+    env: Mapping[str, str],
+    cache: Any = None,
+) -> list[TrendVerdict]:
+    """판정마다 공유 주제 분류기 결과·실존 이름·광고 재료 여부를 붙인다 (판정 값은 그대로).
+
+    묶어서 한 번 묻고 저장된 분류는 다시 묻지 않는다. 분류 못 하면 unknown + 이유, 광고 재료 None.
+    """
+    from data_agent.skills.ad_material import judge, load_rules
+    from data_agent.skills.topic_category import TopicInput, classify_topics
+
+    if not results:
+        return results
+    aliases = {g.group_name: tuple(k for k in g.keywords if k != g.group_name) for g in groups}
+    try:
+        found = await classify_topics(
+            [TopicInput(v.group_name, aliases.get(v.group_name, ())) for v in results], llm,
+            cache=cache,
+        )  # fmt: skip
+    except Exception as error:  # 분류는 판정과 별개라 실패해도 판정은 그대로 준다
+        found = {}
+        why = f"주제 분류 실패 ({type(error).__name__})"
+    else:
+        why = "분류 결과 없음"
+    rules = load_rules(env)
+    out = []
+    for v in results:
+        cat = found.get(v.group_name)
+        category = cat.category if cat is not None else "unknown"
+        ok, ok_why = judge(
+            category,
+            is_person=cat.is_person if cat else None,
+            real_entity=cat.real_entity if cat else None,
+            rules=rules,
+        )
+        out.append(
+            v.model_copy(
+                update={
+                    "topic_category": category,
+                    "topic_category_reason": cat.reason if cat is not None else why,
+                    "real_entity": cat.real_entity if cat else None,
+                    "entity_names": list(cat.entity_names) if cat else [],
+                    "ad_material": ok,
+                    "ad_material_reason": ok_why,
+                }
+            )
+        )
+    return out
+
+
 async def scan_trends(
     request: TrendScanRequest,
     connector: NaverDatalabConnector,
@@ -326,6 +381,7 @@ async def scan_trends(
     env: Mapping[str, str],
     settings: Settings = DEFAULT_SETTINGS,
     now: datetime | None = None,
+    category_cache: Any = None,
 ) -> TrendScanResult:
     """그룹마다 한 번씩 받아 판정한다. 커넥터가 모든 그룹에서 실패하면 `ConnectorUnavailable`."""
     groups = request.keyword_groups or default_groups(env)
@@ -354,6 +410,7 @@ async def scan_trends(
         results.extend(judged)
     if last_error is not None and len(failed) == len(groups):
         raise last_error
+    results = await classify_verdicts(results, groups, llm, env=env, cache=category_cache)
     group_notes: list[str] = []
     group_fallback = False
     for i, verdict in enumerate(results):

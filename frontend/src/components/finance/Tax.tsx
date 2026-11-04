@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { finance, humanTokenSet, krw, type HandoffStatus } from "@/lib/finance";
+import { finance, humanTokenSet, krw } from "@/lib/finance";
 import { shortDateTime } from "@/lib/format";
 import { AppliedRules, Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
@@ -137,14 +137,6 @@ function IncomeEstimatePanel({ tick }: { tick: number }) {
   );
 }
 
-const HANDOFF: Record<HandoffStatus, { label: string; tone: string }> = {
-  not_requested: { label: "전달 요청 전", tone: TONE.muted },
-  request_failed: { label: "안전 장치에 닿지 않아 다시 요청 필요", tone: TONE.warn },
-  requested: { label: "사람 승인 대기", tone: TONE.warn },
-  approved: { label: "전달 승인됨", tone: TONE.info },
-  rejected: { label: "승인되지 않음", tone: TONE.warn },
-};
-
 function ExportsPanel({ tick }: { tick: number }) {
   const [own, setOwn] = useState(0);
   const view = useResource("tax-exports", () => finance.exports(), tick + own);
@@ -161,7 +153,7 @@ function ExportsPanel({ tick }: { tick: number }) {
 
   return (
     <Panel id="tax-exports" title="자동으로 만든 파일" meta={view.env?.meta}
-      hint="지난달 손익계산서를 AI가 만들어 보관합니다. 부가세·판매자 자료는 분기가 끝난 달에 함께 만듭니다. 세무 자료 전달은 안전 장치 보류 큐에서 사람이 승인해야 합니다. 신고와 은행·홈택스 접속은 하지 않습니다."
+      hint="지난달 손익계산서를 AI가 만들어 보관합니다. 부가세·판매자 자료는 분기가 끝난 달에 함께 만듭니다. 내려받아 세무사에게 전달해 주세요. 전문가 확인 목록도 들어 있습니다. AI는 외부로 보내거나 신고하지 않습니다."
       tools={<button className="btn-ghost" disabled={busy || !humanTokenSet} onClick={() => act(() => finance.runExports())}>{busy ? "처리 중" : "지금 만들기"}</button>}>
       {problem && <p role="alert" className="mb-3 rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{problem}</p>}
       <ResourceBody res={view}>
@@ -174,14 +166,8 @@ function ExportsPanel({ tick }: { tick: number }) {
                     <div className="flex flex-wrap items-center gap-2">
                       <b className="text-ink-900">{p.month}</b>
                       <span className="text-sm text-ink-500">{p.version}번째 판 · {shortDateTime(p.generated_at)}</span>
-                      <Chip label={HANDOFF[p.handoff.status].label} tone={HANDOFF[p.handoff.status].tone} />
-                      {(p.handoff.status === "rejected" || p.handoff.status === "request_failed") && (
-                        <button className="btn-ghost ml-auto" disabled={busy || !humanTokenSet} onClick={() => act(() => finance.requestHandoff(p.package_id))}>전달 다시 요청</button>
-                      )}
+                      <button className="btn-primary ml-auto" disabled={busy} onClick={() => act(() => finance.downloadBundle(p.package_id))}>전체 내려받기 (zip)</button>
                     </div>
-                    {p.handoff.status === "approved" && !p.handoff.delivered_to && (
-                      <p className="mt-1 text-sm text-ink-700">전달 폴더가 정해지지 않았습니다. 아래 파일을 내려받아 세무사에게 전달해 주세요.</p>
-                    )}
                     <ul className="mt-2 flex flex-wrap gap-2">
                       {p.files.map((f) => (
                         <li key={f.name}>

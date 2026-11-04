@@ -88,7 +88,7 @@ const HOLD_KO: Record<string, string> = {
 export const holdKo = (code: string | null | undefined) => (code ? HOLD_KO[code] ?? "기타 사유" : "");
 const STATUS_KO: Record<string, string> = { executed: "실행됨", verifying: "확인 중", held: "사람 결정 대기", rejected: "거절됨", failed: "실패" };
 export const statusKo = (s: string) => STATUS_KO[s] ?? "확인할 수 없음";
-const ACTION_KO: Record<string, string> = { issue_coupon: "쿠폰 발급", publish_notice: "공지 게시", publish_sns: "SNS 게시", generate_video: "영상 만들기" };
+const ACTION_KO: Record<string, string> = { issue_coupon: "쿠폰 발급", publish_notice: "공지 게시", publish_sns: "SNS 게시", generate_video: "영상 만들기", start_campaign: "캠페인 집행" };
 export const actionKo = (a: string) => ACTION_KO[a] ?? "기타 요청";
 
 /** 사건 이름: "결제 장애 · 10. 28. 오후 04:32". 모르는 사건이면 "장애 사건", 사건 밖이면 "사건 밖 요청" */

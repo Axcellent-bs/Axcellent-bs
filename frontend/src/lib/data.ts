@@ -746,6 +746,112 @@ export interface PromoConceptsOutput {
   popular_trend_note?: string | null;
 }
 
+// ---------------------------------------------------------------- 인사이트 브리프 (trend_insight_brief)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py TrendInsightBriefOutput. 서버 하루 캐시.
+// 기획팀이 제안에 insight_id를 적는다. 예시 아이디어(example_ideas)는 참고용
+export interface InsightEvidence {
+  youtube_videos: number | null;
+  youtube_views_per_hour: number | null;
+  youtube_views_per_subscriber: number | null;
+  youtube_at: string | null;
+  google_rank: number | null;
+  google_news: TrendingNewsLink[];
+  google_at: string | null;
+  naver_ratio: number | null;
+  naver_status: TrendStatus | null;
+  naver_rising_started: string | null;
+  naver_until: string | null;
+  links: string[];
+  /** 없는 출처와 이유 */
+  missing: string[];
+}
+export interface InsightProduct {
+  product_id: string;
+  name: string;
+  category_name: string | null;
+  similarity: number | null;
+  /** 코드가 만든 연결 근거 한 줄 */
+  reason: string;
+  season: string | null;
+}
+export interface TrendInsight {
+  insight_id: string;
+  rank: number;
+  topic: string;
+  aliases: string[];
+  /** 한 줄 인사이트 (검증 실패면 고정 문장) */
+  line: string;
+  line_status: "llm" | "fixed";
+  line_reason: string | null;
+  category: TopicCategory | null;
+  ad_material: boolean | null;
+  ad_material_reason: string | null;
+  reference_only: boolean;
+  real_entity: boolean | null;
+  entity_names: string[];
+  evidence: InsightEvidence;
+  target_age: string | null;
+  target_age_ratio: number | null;
+  target_age_status: TrendStatus | null;
+  target_age_reason: string | null;
+  products: InsightProduct[];
+  products_reason: string | null;
+  shorts_format: string | null;
+  shorts_format_samples: number | null;
+  shorts_format_reason: string | null;
+  limits: string[];
+  example_ideas: string[];
+  score: number;
+}
+export interface TrendInsightBriefOutput {
+  status: "known" | "unknown";
+  reason: string | null;
+  day: string | null;
+  rules_version: string;
+  insights: TrendInsight[];
+  cached: boolean;
+  generated_at: string | null;
+  sources: string[];
+  limits: string[];
+  summary: string;
+}
+
+// ---------------------------------------------------------------- 연령대별 상승 (trend_age)
+// 계약: TrendAgeOutput. 네이버 값은 요청마다 최댓값이 100인 상대값이라 연령대끼리 비교하지 않는다(note)
+export interface AgeBandTrend {
+  band: string;
+  ages: string[];
+  status: TrendStatus;
+  ratio: number | null;
+  latest_value: number | null;
+  baseline_value: number | null;
+  reason: string | null;
+}
+export interface AgeTopic {
+  keyword: string;
+  keywords: string[];
+  sources: ("popular" | "rising" | "season" | "request")[];
+  status: "known" | "unknown";
+  reason: string | null;
+  bands: AgeBandTrend[];
+  top_band: string | null;
+  top_ratio: number | null;
+}
+export interface TrendAgeOutput {
+  status: "known" | "unknown";
+  reason: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  bands: string[];
+  items: AgeTopic[];
+  calls_used: number;
+  call_cap: number;
+  cached: boolean;
+  note: string;
+  generated_at: string | null;
+  summary: string;
+}
+
 // ---------------------------------------------------------------- 숏츠 통계 (shorts_stats)
 // 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py ShortsStatsOutput (#437).
 // 숏츠 = 길이 기준(max_seconds) 이하 영상. 숫자는 코드, 분류는 LLM(정해진 목록 안). 표본이 적은 묶음은 unknown + 이유
@@ -943,6 +1049,10 @@ export const dataAi = {
   contentRecommend: () => askData<ContentRecommendOutput>("content_recommend", "영상 소재 추천", {}, RECOMMEND_DEADLINE_MS),
   /** 숏츠 통계 (카테고리·형식별). YouTube 검색으로 표본을 넓힌다(할당량, 서버 하루 캐시) */
   shortsStats: () => askData<ShortsStatsOutput>("shorts_stats", "숏츠 통계", {}, TREND_DEADLINE_MS),
+  /** 인사이트 브리프 (2단계). 서버 하루 캐시. 브리프 안에서 trend_age·임베딩·한 줄 문장(LLM)을 부른다 */
+  trendInsightBrief: () => askData<TrendInsightBriefOutput>("trend_insight_brief", "인사이트 브리프", {}, RECOMMEND_DEADLINE_MS),
+  /** 연령대별 상승. keywords를 주면 그 주제만. 서버 하루 캐시(주제별)라 브리프가 이미 본 주제는 네이버를 다시 부르지 않는다 */
+  trendAge: (keywords: string[]) => askData<TrendAgeOutput>("trend_age", "연령대별 상승", { keywords: keywords.slice(0, 30) }, TREND_DEADLINE_MS),
   /** 홍보 영상 기획안. 서버 하루 캐시. regenerate = true면 오늘 만든 기획안이 있어도 새로 만든다(LLM·네이버를 다시 부름) */
   promoConcepts: (regenerate = false) =>
     askData<PromoConceptsOutput>("promo_concepts", "홍보 영상 기획안", regenerate ? { regenerate: true } : {}, RECOMMEND_DEADLINE_MS),

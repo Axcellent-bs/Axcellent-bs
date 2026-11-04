@@ -161,6 +161,8 @@ export AX_ENABLED_SERVICES="${AX_ENABLED_SERVICES:-}"
 export AX_ENABLED_SERVICES_FILE="${AX_ENABLED_SERVICES_FILE:-$PWD/$DATA/enabled_services.json}"
 # 사람 할 일함 저장 파일 (dashboard-api)
 export AX_HANDOFF_DB="$PWD/$DATA/handoffs.db"
+# 총괄 이벤트 저장소 (다시 켜도 이벤트 기록과 처리한 event_id가 남는다)
+export ORCHESTRATOR_DB="$PWD/$DATA/orchestrator.db"
 # 재무 기록(판매자 심사·정산 보류·장부·사람 결정). 다시 켜도 이어진다
 export FINANCE_STATE_FILE="$PWD/$DATA/finance_state.json"
 export FINANCE_EXPORT_DIR="${FINANCE_EXPORT_DIR:-$PWD/$DATA/finance_exports}"

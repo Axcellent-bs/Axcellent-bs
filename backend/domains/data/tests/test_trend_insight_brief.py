@@ -1,0 +1,244 @@
+"""trend_insight_brief: 기획에 넘기는 근거 있는 인사이트.
+
+실제 네이버·YouTube·LLM·임베딩을 부르지 않는다 (가짜 결과·가짜 LLM).
+- insight_id: 같은 날 같은 주제면 같은 id
+- 후보: 지금 인기 + 지금 인기에 없는 급상승, 코드 점수 순, 광고 재료가 아니면 맨 아래 참고용
+- 한 줄: 근거 숫자만 (지어낸 숫자·단정은 고정 문장), 근거 없으면 고정 문장
+- 연령대·상품(임베딩 기준 통과만)·숏츠 형식·예시 아이디어(참고용)·한계
+- 하루 캐시 + 규칙 버전, regenerate
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import UTC, date, datetime
+from pathlib import Path
+from typing import Any
+
+from ax_agent_template.llm import MockLLMClient
+from ax_contracts.schemas.data import (
+    AgeBandTrend,
+    AgeTopic,
+    PopularTopic,
+    PopularVideo,
+    PromoConcept,
+    PromoConceptsOutput,
+    TrendAgeOutput,
+    TrendEvidence,
+    TrendInsightBriefRequest,
+    TrendPopularOutput,
+    TrendVerdict,
+)
+from data_agent.connectors import CatalogProduct
+from data_agent.skills import trend_insight_brief as brief
+from data_agent.skills.product_link import CatalogRead
+from data_agent.skills.topic_category import _Categories, _Item
+
+NOW = datetime(2026, 11, 4, 3, 0, tzinfo=UTC)
+DAY = date(2026, 11, 4)
+
+
+def _topic(name: str, rank: int, category: str, **kw: Any) -> PopularTopic:
+    base = {"rank": rank, "keyword": name, "topic_category": category, "brand_safe": True,
+            "youtube_videos": 10, "views_per_hour": 1000.0}  # fmt: skip
+    return PopularTopic(**(base | kw))
+
+
+POPULAR = TrendPopularOutput(
+    items=[
+        _topic("한국철강", 1, "뉴스·사건", brand_safe=False, youtube_videos=2),
+        _topic("리그오브레전드", 2, "게임", real_entity=True, entity_names=["리그오브레전드"],
+               videos=[PopularVideo(video_id="v1", title="롤 하이라이트", is_short=True,
+                                    shorts_format="챌린지", views_per_subscriber=2.5),
+                       PopularVideo(video_id="v2", is_short=True, shorts_format="챌린지")]),
+        _topic("문구 하울", 3, "IT", youtube_videos=5),
+    ],
+)  # fmt: skip
+
+
+def _rising(name: str, ratio: float) -> TrendVerdict:
+    ev = TrendEvidence(baseline_points=56, latest_period=date(2026, 11, 3))
+    return TrendVerdict(group_name=name, status="rising", ratio=ratio, evidence=ev)
+
+
+class BriefLLM(MockLLMClient):
+    """한 줄 질문에는 lines, 분류 질문에는 cats(이름 → 분류, 없으면 답하지 않음 = unknown)."""
+
+    def __init__(self, lines: dict[str, str] | None = None,
+                 cats: dict[str, str] | None = None) -> None:  # fmt: skip
+        super().__init__()
+        self.lines = lines or {}
+        self.cats = {"다이어리": "IT"} if cats is None else cats
+        self.asked = 0
+        self.classified = 0
+        self.embedded = 0
+
+    async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):  # noqa: ANN001, ANN201
+        if schema is _Categories:
+            self.classified += 1
+            names = {k[2:]: v for k, v in dict(untrusted or {}).items() if k.startswith("소재")}
+            return _Categories(items=[_Item(id=n, category=self.cats[v])
+                                      for n, v in names.items() if v in self.cats])  # fmt: skip
+        self.asked += 1
+        return brief._Lines(
+            items=[brief._LineItem(keyword=k, line=v) for k, v in self.lines.items()]
+        )
+
+    async def embed(self, texts, context_id=None):  # noqa: ANN001, ANN201
+        self.embedded += 1
+        # 주제 글은 [1, 0], 상품 "무지 노트"는 [1, 0](유사도 1), 나머지 상품은 [0, 1](유사도 0)
+        out = []
+        for t in texts:
+            out.append([0.0, 1.0] if ("(" in t and "무지 노트" not in t) else [1.0, 0.0])
+        return out
+
+
+CATALOG = CatalogRead(
+    products=[
+        CatalogProduct(product_id="p1", name="무지 노트", category_code="stat", price=3000),
+        CatalogProduct(product_id="p2", name="파이썬 입문서", category_code="book", price=18000),
+    ],
+    categories={"stat": "문구", "book": "도서"},
+)
+
+
+def _ages(seen: list[list[str]], fail: bool = False):  # noqa: ANN202
+    async def fn(keywords: list[str]) -> TrendAgeOutput:
+        seen.append(list(keywords))
+        if fail:
+            raise RuntimeError("down")
+        items = [
+            AgeTopic(keyword=k, status="known", top_band="20대", top_ratio=2.4,
+                     bands=[AgeBandTrend(band="20대", status="rising", ratio=2.4)])
+            for k in keywords if k == "리그오브레전드"
+        ]  # fmt: skip
+        return TrendAgeOutput(status="known", items=items)
+
+    return fn
+
+
+def _env(tmp_path: Path, extra: str = "") -> dict[str, str]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    cfg = tmp_path / "trends.toml"
+    cfg.write_text("[brief]\nmax_insights = 3\n" + extra, encoding="utf-8")
+    return {"DATA_TREND_CONFIG": str(cfg), "DATA_INSIGHT_BRIEF_DB": str(tmp_path / "brief.db")}
+
+
+def _run(tmp_path: Path, llm: BriefLLM, *, ages=None, regenerate: bool = False,  # noqa: ANN001
+         extra: str = "", promo: PromoConceptsOutput | None = None, rising=None):  # noqa: ANN001, ANN202  # fmt: skip
+    seen: list[list[str]] = []
+    out = asyncio.run(
+        brief.make_brief(
+            TrendInsightBriefRequest(regenerate=regenerate), llm, env=_env(tmp_path, extra),
+            popular=POPULAR, popular_reason=None,
+            rising=rising if rising is not None else [_rising("다이어리", 3.0)],
+            age_fn=ages or _ages(seen), promo=promo, catalog=CATALOG, now=NOW,
+        )
+    ).output  # fmt: skip
+    return out, seen
+
+
+def test_insight_id_is_stable_for_the_same_day_and_topic() -> None:
+    a = brief.insight_id(DAY, "리그오브레전드")
+    assert a == brief.insight_id(DAY, " 리그 오브레전드 ".replace(" 오", "오"))
+    assert a.startswith("ins_20261104_") and a != brief.insight_id(
+        date(2026, 11, 5), "리그오브레전드"
+    )
+
+
+def test_brief_orders_by_code_score_and_puts_non_material_last(tmp_path: Path) -> None:
+    out, seen = _run(tmp_path, BriefLLM())
+    topics = [i.topic for i in out.insights]
+    assert len(topics) == 3 and topics[-1] == "한국철강"  # 뉴스·사건 = 참고용, 맨 아래
+    last = out.insights[-1]
+    assert last.reference_only and last.ad_material is False
+    assert last.ad_material_reason == "뉴스·사건 분류는 광고 재료로 쓰지 않음"
+    assert [i.rank for i in out.insights] == [1, 2, 3]
+    assert len(seen[0]) == 4  # 연령대는 분류된 후보 4개 (인사이트 수 + 2개 이내)
+
+
+def test_rising_only_topics_go_through_the_shared_classifier(tmp_path: Path) -> None:
+    llm = BriefLLM(cats={"다이어리": "IT"})
+    out, _ = _run(tmp_path, llm, extra="max_insights = 4\n")
+    diary = next(i for i in out.insights if i.topic == "다이어리")
+    assert llm.classified == 1  # 지금 인기에 없는 급상승 주제만 묶어서 분류
+    assert diary.category == "IT" and diary.ad_material is True
+    assert not diary.classification_pending and diary.evidence.naver_ratio == 3.0
+
+
+def test_unclassified_topics_are_reference_only_and_not_ranked(tmp_path: Path) -> None:
+    out, seen = _run(tmp_path, BriefLLM(cats={}))  # 분류기가 답하지 않음 = 분류 대기
+    last = out.insights[-1]
+    assert last.topic == "다이어리" and last.classification_pending and last.reference_only
+    assert last.category is None and last.ad_material is None
+    assert (last.ad_material_reason or "").startswith("분류 대기")
+    assert "다이어리" not in seen[0]  # 순위·연령대 후보에 넣지 않는다
+    ranked = [i for i in out.insights if not i.classification_pending]
+    assert len(ranked) == 3
+
+
+def test_insight_fields_come_from_existing_results(tmp_path: Path) -> None:
+    idea = PromoConcept(concept_id="c1", title="롤 밈 노트", borrowed_trend="리그오브레전드")
+    promo = PromoConceptsOutput(concepts=[idea])
+    out, _ = _run(tmp_path, BriefLLM(), promo=promo, extra="max_insights = 4\n")
+    lol = next(i for i in out.insights if i.topic == "리그오브레전드")
+    assert lol.target_age == "20대" and lol.target_age_ratio == 2.4
+    assert lol.target_age_status == "rising"
+    assert lol.real_entity is True and lol.ad_material is True
+    assert lol.ad_material_reason == "실존 이름·상표가 든 주제라 분위기·형식만 빌릴 것"
+    assert lol.shorts_format == "챌린지" and lol.shorts_format_samples == 2
+    assert lol.evidence.youtube_views_per_subscriber == 2.5
+    assert lol.evidence.links[0] == "https://www.youtube.com/watch?v=v1"
+    assert lol.example_ideas == ["롤 밈 노트 (참고용)"]
+    assert [p.name for p in lol.products] == ["무지 노트"]  # 임베딩 기준 통과(1등)만
+    assert any("평가셋" in x for x in lol.limits)
+    news = next(i for i in out.insights if i.topic == "한국철강")
+    assert news.target_age is None and news.target_age_reason == "연령대 값을 받지 못함"
+    assert news.shorts_format is None and news.shorts_format_reason
+
+
+def test_lines_use_only_evidence_numbers(tmp_path: Path) -> None:
+    llm = BriefLLM({
+        "리그오브레전드": "YouTube 인기 영상 10개, 20대 평소 대비 2.4배 근거가 있어요",
+        "다이어리": "네이버 평소의 7배라 곧 터질 거예요",
+    })  # fmt: skip
+    out, _ = _run(tmp_path, llm)
+    by = {i.topic: i for i in out.insights}
+    assert by["리그오브레전드"].line_status == "llm"
+    assert by["다이어리"].line_status == "fixed"  # 7은 근거에 없는 숫자
+    assert by["다이어리"].line == "네이버 평소 대비 배수 3 근거가 있어요"
+    assert llm.asked == 1  # 묶어서 한 번
+
+
+def test_brief_is_cached_per_day_and_rules(tmp_path: Path) -> None:
+    llm = BriefLLM()
+    first, _ = _run(tmp_path, llm)
+    again, seen = _run(tmp_path, llm)
+    assert again.cached and llm.asked == 1 and seen == []
+    assert [i.insight_id for i in again.insights] == [i.insight_id for i in first.insights]
+    fresh, _ = _run(tmp_path, llm, regenerate=True)
+    assert not fresh.cached and llm.asked == 2
+    changed, _ = _run(tmp_path, llm, extra="w_naver = 2.0\n")  # 규칙이 바뀌면 다시 묶는다
+    assert not changed.cached and changed.rules_version != first.rules_version
+
+
+def test_age_failure_and_no_candidates_give_reasons(tmp_path: Path) -> None:
+    out, _ = _run(tmp_path, BriefLLM(), ages=_ages([], fail=True))
+    assert out.status == "known"
+    assert all(i.target_age is None and i.target_age_reason for i in out.insights)
+    empty = asyncio.run(
+        brief.make_brief(
+            TrendInsightBriefRequest(), BriefLLM(), env=_env(tmp_path / "e"), popular=None,
+            popular_reason="YouTube 스냅샷이 없음", rising=[], age_fn=_ages([]), promo=None,
+            catalog=CATALOG, now=NOW,
+        )
+    ).output  # fmt: skip
+    assert empty.status == "unknown" and empty.reason == "YouTube 스냅샷이 없음"
+
+
+def test_aliases_merge_rising_topics() -> None:
+    cands = brief.candidates(POPULAR, [_rising("t1", 3.0), _rising("티원", 2.9)], {"t1": ("티원",)})
+    names = [c.topic for c in cands]
+    assert names.count("t1") == 1 and "티원" not in names
+    t1 = next(c for c in cands if c.topic == "t1")
+    assert t1.verdict is not None and t1.verdict.ratio == 3.0 and t1.aliases == ["티원"]

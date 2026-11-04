@@ -658,3 +658,16 @@ def test_a_long_run_in_a_quiet_shop_is_still_a_gap() -> None:
     assert (out.unknown_reason or "").startswith("기록 공백 의심")
     # 공백 3시간(36칸) + 바로 앞의 평소 빈 칸 1칸이 이어져 37칸
     assert "37칸 이어짐" in (out.unknown_reason or "")
+
+
+def test_insight_and_proposal_ids_are_echoed_back() -> None:
+    data = CampaignEffectInput(
+        campaign_id="cmp_1", window_from=START, window_to=END,
+        insight_id="ins_20261104_628b49d9", proposal_id="prop_7",
+    )  # fmt: skip
+    result = asyncio.run(analyze_campaign(data, Memory(_week(200.0), coupons=_coupons((3, 2))),
+                                          MockLLMClient()))  # fmt: skip
+    assert result.output.insight_id == "ins_20261104_628b49d9"
+    assert result.output.proposal_id == "prop_7"
+    plain = asyncio.run(analyze_campaign(_input(), Memory(_week(200.0)), MockLLMClient()))
+    assert plain.output.insight_id is None and plain.output.proposal_id is None

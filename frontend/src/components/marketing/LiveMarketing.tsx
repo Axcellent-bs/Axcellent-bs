@@ -79,7 +79,7 @@ export default function LiveMarketing() {
         </div>
       </header>
 
-      <ActionQueue action={MARKETING_HOLD_ACTIONS} intro="안전 장치가 사람 확인으로 보류한 쿠폰·공지·SNS 게시·영상 생성이 여기 모입니다." />
+      <ActionQueue action={MARKETING_HOLD_ACTIONS} intro="안전 장치가 사람 확인으로 보류한 쿠폰·공지·SNS 게시·영상 생성·캠페인 집행이 여기 모입니다." />
 
       {live?.errors.map((e) => <p key={e} className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{e}</p>)}
       {!live && <p className="text-sm text-ink-500">불러오는 중입니다.</p>}

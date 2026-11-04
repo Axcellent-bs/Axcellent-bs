@@ -8,7 +8,7 @@ import {
   type PopularTopic, type PromoConcept, type PromoConceptsOutput, type PromoTrendKind, type ShortsStatsOutput, type TrendPopularOutput,
 } from "@/lib/data";
 
-// 트렌드 2단계(추천): 캣북스 숏츠 광고 예시 아이디어(참고용, 확정 기획은 기획팀). 예시마다 타깃 연령대(trend_age). promo_concepts(계약 PromoConceptsOutput) 응답 그대로 보여 준다.
+// 트렌드 2단계(인사이트) 맨 아래 "참고용 예시" 접힘 안: 캣북스 숏츠 광고 예시 아이디어(참고용, 확정 기획은 기획팀). 예시마다 타깃 연령대(trend_age). promo_concepts(계약 PromoConceptsOutput) 응답 그대로 보여 준다.
 // - 맨 위: 제목 · 다시 만들기(계약 regenerate, 서버는 하루 캐시) · 재료 한 줄(상품·트렌드·시즌·형식 개수, 못 읽은 출처는 서버 이유)
 //   · "뺀 재료 N개 보기"(접힘: 뺀 지금 인기 주제·시즌 확인 키워드·버린 초안과 서버 이유)
 // - 왼쪽: 잘 되는 숏츠 형식 막대. 값은 기획안 재료 shorts_formats(서버 대표값)라 기획안 칩의 평균 조회수와 같다.
@@ -17,7 +17,7 @@ import {
 //   → [기획팀에 보내기] 꺼 둠(승인 절차 등록 전)
 // - 트렌드 출처 색: 지금 인기 = 파랑, 시즌 = 보라, 회사 이벤트 = 초록, 트렌드 없음 = 회색
 // - 콘티 문장 앞의 "1컷:" 같은 번호는 떼고 화면이 컷 번호를 한 번만 붙인다
-// - 응답은 트렌드 화면(TrendScan)이 한 번 받아 1단계 요약 카드와 같이 쓴다. 응답 결과는 루프 2단계 칩에도 쓴다
+// - 응답은 트렌드 화면(TrendScan)이 한 번 받아 1단계 요약 카드와 같이 쓴다
 // - 근거(카드 아래): 빌린 트렌드의 출처(지금 인기 = YouTube 인기 차트 영상 링크·Google 인기 검색어 순위, 시즌 = 네이버 데이터랩
 //   월별 배율, 이벤트 = 회사 설정), 숏츠 형식의 표본(shorts_stats 형식별 조회수 상위 숏츠 링크), 상품 = shop-api 값.
 //   지금 인기·숏츠 통계는 이미 받은 응답(trend_popular·shorts_stats)에서 이름이 같은 것을 찾는다. 맨 위에 부른 API 목록

@@ -13,6 +13,8 @@ from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
 from finance_agent import finance_config as fc
+from finance_agent import settlement
+from finance_agent.books import Books, item_gross, order_sold
 from finance_agent.rules import applied, load_rules
 
 Verdict = Literal["good", "neutral", "bad"]
@@ -32,7 +34,48 @@ def break_even_roas() -> float | None:
     return round(1 / margin, 2) if margin > 0 else None
 
 
-def compute_result(data: dict[str, Any]) -> dict[str, Any]:
+def repeat_estimate(books: Books, today: date) -> dict[str, Any] | None:
+    """장부에서 재는 재구매 배수. 첫 구매가 충분히 지난 구매자만 본다. 모자라면 None(지어내지 않음).
+
+    배수 = (첫 구매액 + 기간 안 재구매액) ÷ 첫 구매액.
+    """
+    cfg = load_rules().repeat
+    if "orders" in books.unavailable:
+        return None
+    purchases: dict[str, list[tuple[date, int]]] = {}
+    for order in books.orders:
+        buyer = order.get("buyer_id")
+        if not buyer or not order_sold(order):
+            continue
+        paid = settlement._paid_at(order)
+        if paid is None:
+            continue
+        gross = sum(item_gross(item) for item in order["items"])
+        purchases.setdefault(buyer, []).append((paid.date(), gross))
+    cutoff = today - timedelta(days=cfg.window_days)
+    first_total = repeat_total = repeaters = cohort = 0
+    for rows in purchases.values():
+        rows.sort(key=lambda r: r[0])
+        first_day, first_gross = rows[0]
+        if first_day > cutoff or first_gross <= 0:
+            continue
+        cohort += 1
+        first_total += first_gross
+        again = sum(g for d, g in rows[1:] if (d - first_day).days <= cfg.window_days)
+        repeat_total += again
+        repeaters += again > 0
+    if cohort < cfg.min_cohort_buyers:
+        return None
+    return {
+        "multiple": round((first_total + repeat_total) / first_total, 3),
+        "cohort_buyers": cohort,
+        "repeat_buyers": repeaters,
+        "window_days": cfg.window_days,
+        "source": "books",
+    }
+
+
+def compute_result(data: dict[str, Any], repeat: dict[str, Any] | None = None) -> dict[str, Any]:
     """캠페인 결과 한 건. 판매액을 모르면 0으로 채우지 않고 판단하지 않는다."""
     cfg = fc.load_config()
     book = load_rules().campaign
@@ -55,6 +98,9 @@ def compute_result(data: dict[str, Any]) -> dict[str, Any]:
             "roi": None,
             "roas": None,
             "verdict": None,
+            "repeat": None,
+            "ltv_profit_krw": None,
+            "ltv_roi": None,
             "applied_rules": [applied("CMP-001", "판매액을 받지 못해 계산하지 않았다")],
         }
     revenue = fc.rate_amount(gmv, cfg.commission.default_rate)
@@ -72,7 +118,20 @@ def compute_result(data: dict[str, Any]) -> dict[str, Any]:
         verdict = "bad"
     else:
         verdict = "neutral"
+    ltv_profit, ltv_roi, ltv_detail = None, None, "재구매 자료가 모자라 계산하지 않았다"
+    if repeat is not None:
+        ltv_gmv = round(gmv * repeat["multiple"])
+        ltv_profit = (
+            fc.rate_amount(ltv_gmv, cfg.commission.default_rate)
+            - fc.rate_amount(ltv_gmv, cfg.pg.fee_rate)
+            - invested
+        )
+        ltv_roi = round(ltv_profit / invested, 4) if invested else None
+        ltv_detail = f"재구매 배수 {repeat['multiple']}배 → 참고 손익 {fc.won(ltv_profit)}"
     return record | {
+        "repeat": repeat,
+        "ltv_profit_krw": ltv_profit,
+        "ltv_roi": ltv_roi,
         "status": "recorded",
         "revenue_krw": revenue,
         "pg_fee_krw": pg_fee,
@@ -98,6 +157,7 @@ def compute_result(data: dict[str, Any]) -> dict[str, Any]:
                 f"ROI {_pct(roi)} → {VERDICT_KO[verdict]} "
                 f"(좋음 {book.good_roi:.0%} 이상, 나쁨 {book.bad_roi:.0%} 미만)",
             ),
+            applied("CMP-005", ltv_detail),
             applied("EXP-002"),
         ],
     }
@@ -113,6 +173,11 @@ def recommendation(record: dict[str, Any]) -> str:
         case "good":
             return (
                 f"{record['channel']} 채널을 같은 조건으로 유지하거나 조금씩 늘리는 것을 권합니다."
+            )
+        case "bad" if (record.get("ltv_profit_krw") or 0) > 0:
+            return (
+                f"{record['channel']} 채널은 단기 적자지만 재구매를 넣으면 회수될 수 있습니다. "
+                "캠페인 고객의 실제 재구매를 확인한 뒤 늘리세요."
             )
         case "bad":
             return (
@@ -180,13 +245,44 @@ def apply_lessons(
 
 
 # ---------------------------------------------------------------- 브레이크
+def fallback_budget() -> dict[str, Any]:
+    return {
+        "amount_krw": load_rules().brake.monthly_budget_krw,
+        "basis": "직전 달 자료가 없어 임시값",
+        "provisional": True,
+    }
+
+
+def budget_from_last_month(books: Books, today: date) -> dict[str, Any]:
+    """월 예산 = 직전 달 영업 결과 × 비율. 자료가 없으면 임시값, 적자면 0원."""
+    from finance_agent import closing  # closing이 LLM 등을 읽어 여기서만 부른다
+
+    ratio = load_rules().brake.budget_ratio_of_last_month
+    this_month = today.replace(day=1)
+    last_month = (this_month - timedelta(days=1)).replace(day=1)
+    if closing.unknown_codes(books) & {"commission_revenue", "pg_fee"}:
+        return fallback_budget()
+    totals = closing.compute_totals(books, fc.day_start(last_month), fc.day_start(this_month))
+    if totals.order_count == 0:
+        return fallback_budget()
+    return {
+        "amount_krw": max(fc.rate_amount(totals.net_result, ratio), 0),
+        "basis": f"{last_month.isoformat()[:7]} 영업 결과 {fc.won(totals.net_result)}의 "
+        f"{ratio:.0%}",
+        "provisional": False,
+    }
+
+
 def committed_this_month(
     campaign_id: str,
     month: str,
     campaigns: dict[str, dict[str, Any]],
     reviews: list[dict[str, Any]],
 ) -> int:
-    """이달 쓴 돈 + 승인했지만 결과가 아직 없는 돈. 다시 묻는 같은 캠페인은 뺀다."""
+    """이달 쓴 돈 + 관문을 통과해 시작했지만 결과가 아직 없는 돈. 다시 묻는 같은 캠페인은 뺀다.
+
+    판단만 받고 시작하지 않은 건, 사람이 거절한 건은 예산을 잡지 않는다.
+    """
     total = sum(
         c["spend_krw"]
         for c in campaigns.values()
@@ -194,11 +290,11 @@ def committed_this_month(
     )
     latest: dict[str, dict[str, Any]] = {}
     for review in reviews:
-        if review["month"] == month:
+        if review["month"] == month and review.get("started_krw"):
             latest[review["campaign_id"]] = review
     for cid, review in latest.items():
-        if cid != campaign_id and cid not in campaigns and review["decision"] != "rejected":
-            total += review["approved_limit_krw"]
+        if cid != campaign_id and cid not in campaigns and review.get("started_krw"):
+            total += review["started_krw"]
     return total
 
 
@@ -220,6 +316,7 @@ def decide(
     lessons: list[dict[str, Any]],
     cash_net_krw: int | None,
     today: date,
+    monthly_budget: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """승인·조건부·거절. 거절 사유가 있어도 모든 기준의 확인 결과를 근거로 남긴다."""
     book = load_rules()
@@ -265,10 +362,11 @@ def decide(
 
     # 남은 예산
     committed = committed_this_month(request["campaign_id"], month, campaigns, reviews)
-    remaining = max(brake.monthly_budget_krw - committed, 0)
+    budget = monthly_budget or fallback_budget()
+    remaining = max(budget["amount_krw"] - committed, 0)
     detail = (
-        f"이달 예산 {fc.won(brake.monthly_budget_krw)}"
-        f"{' (임시값)' if brake.budget_provisional else ''} 중 남은 금액 {fc.won(remaining)}"
+        f"이달 예산 {fc.won(budget['amount_krw'])} ({budget['basis']}) "
+        f"중 남은 금액 {fc.won(remaining)}"
     )
     rules.append(applied("BRK-001", detail))
     budget_limited = remaining < limit
@@ -282,11 +380,12 @@ def decide(
     open_lessons = [x for x in lessons if x["channel"] == channel and x["status"] == "open"]
     factor = max(lesson_rules.limit_factor ** len(open_lessons), lesson_rules.floor_factor)
     if open_lessons:
-        cap = fc.rate_amount(requested, factor)
+        # 요청액이 아니라 실패한 집행액 기준이다. 요청액 기준이면 낮춰 낼 때마다 또 깎인다
+        cap = fc.rate_amount(max(x["spend_krw"] for x in open_lessons), factor)
         names = ", ".join(x["campaign_name"] for x in open_lessons)
         detail = (
             f"{channel} 실패 이력 {len(open_lessons)}건 ({names}) → "
-            f"요청의 {factor:.0%}인 {fc.won(cap)}까지"
+            f"실패 집행액의 {factor:.0%}인 {fc.won(cap)}까지"
         )
         rules.append(applied("LRN-001", detail))
         if cap < limit:
@@ -333,6 +432,7 @@ def compare_with_history(
     lessons: list[dict[str, Any]],
     cash_net_krw: int | None,
     today: date,
+    monthly_budget: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """같은 요청을 실패 이력이 없을 때와 지금으로 판단해 나란히 보여 준다."""
     clean = {
@@ -340,7 +440,12 @@ def compare_with_history(
         for k, v in campaigns.items()
         if not (v["channel"] == request["channel"] and v["verdict"] == "bad")
     }
-    common = {"reviews": reviews, "cash_net_krw": cash_net_krw, "today": today}
+    common = {
+        "reviews": reviews,
+        "cash_net_krw": cash_net_krw,
+        "today": today,
+        "monthly_budget": monthly_budget,
+    }
     before = decide(request, campaigns=clean, lessons=[], **common)
     after = decide(request, campaigns=campaigns, lessons=lessons, **common)
     return {

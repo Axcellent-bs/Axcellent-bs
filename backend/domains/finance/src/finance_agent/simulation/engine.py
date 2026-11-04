@@ -81,7 +81,7 @@ async def run_scenario(name: str) -> dict[str, Any]:
     scenario = load_scenario(name)
     today = date.fromisoformat(scenario["today"])
     log = Log()
-    budget = load_rules().brake.monthly_budget_krw
+    budget = scenario["monthly_budget_krw"]
     context = f"ctx_sim_{name}"
     previous_env = os.environ.get("AGENT_TEMPLATE_MOCK")
     previous_now, previous_state = fc.now, handlers.STATE
@@ -90,6 +90,16 @@ async def run_scenario(name: str) -> dict[str, Any]:
     handlers.reset_state(MockSources())
     state = handlers.state()
     state.cash_override = scenario["cash_net_krw"]
+    state.budget_override = {
+        "amount_krw": budget,
+        "basis": "시나리오 가정",
+        "provisional": True,
+    }
+    state.repeat_override = {
+        "multiple": scenario["repeat_multiple"],
+        "source": "시나리오 가정",
+        "window_days": load_rules().repeat.window_days,
+    }
     received: list[dict[str, Any]] = []
 
     async def capture(opinion: dict[str, Any], meta: Any) -> None:
@@ -121,6 +131,7 @@ async def run_scenario(name: str) -> dict[str, Any]:
                 lessons=state.records.lessons,
                 cash_net_krw=scenario["cash_net_krw"],
                 today=today,
+                monthly_budget=state.budget_override,
             )
             seen = len(received)
             review = await handlers.review_budget(CampaignBudgetReviewInput(**ask), context)
@@ -281,6 +292,7 @@ async def run_scenario(name: str) -> dict[str, Any]:
                 "roas": record["roas"],
                 "verdict": record["verdict"],
                 "lesson": record["lesson"],
+                "ltv_profit_krw": record["ltv_profit_krw"],
             }
         records = state.records
         spent = sum(c["spend_krw"] for c in records.campaigns.values())
@@ -297,6 +309,10 @@ async def run_scenario(name: str) -> dict[str, Any]:
                 "spent_krw": spent,
                 "remaining_krw": budget - spent,
                 "total_profit_krw": sum(c["profit_krw"] for c in records.campaigns.values()),
+                "total_ltv_profit_krw": sum(
+                    c["ltv_profit_krw"] for c in records.campaigns.values()
+                ),
+                "repeat_multiple": scenario["repeat_multiple"],
                 "brake_count": sum(1 for r in rounds if r["brake"]),
                 "conditional_count": sum(1 for r in rounds if r["decision"] == "conditional"),
                 "open_lessons": sum(1 for x in records.lessons if x["status"] == "open"),
@@ -335,6 +351,8 @@ def render_report(results: list[dict[str, Any]]) -> str:
             f"## 시나리오 {result['id'].upper()}: {result['title']}",
             "",
             f"- 손익 합계: **{_money(s['total_profit_krw'])}**",
+            f"- 재구매 포함 참고 손익: {_money(s['total_ltv_profit_krw'])} "
+            f"(재구매 배수 {s['repeat_multiple']}배, 가정)",
             f"- 예산: {_money(s['monthly_budget_krw'])} 중 {_money(s['spent_krw'])} 사용, "
             f"{_money(s['remaining_krw'])} 남음",
             f"- 브레이크(거절): **{s['brake_count']}회**, 조건부 승인: {s['conditional_count']}회, "

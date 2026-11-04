@@ -34,6 +34,7 @@ from ax_orchestrator.mock.fake_departments import FakeDepartments
 from ax_orchestrator.models import Incident, now
 from ax_orchestrator.plans.scenario_a import scenario_a
 from ax_orchestrator.registry import Registry
+from ax_orchestrator.store import DB_ENV, IncidentStore
 from ax_orchestrator.usage import BUCKET_SECONDS, WINDOW_SECONDS, RecordingCaller, UsageRecorder
 
 STATIC = Path(__file__).parent / "static"
@@ -68,9 +69,17 @@ class AppState:
         self.published: list[dict[str, Any]] = []
         self.modes: dict[str, str] = {}
         self.usage = UsageRecorder()  # 이벤트·옵션이 바뀌어도 부서별 사용량은 이어서 쌓는다
+        # 이벤트 저장소(ORCHESTRATOR_DB). 이벤트 목록(manager)과 같이 만든다.
+        # 비어 있으면 메모리라 다시 켜면 사라진다
+        self.store: IncidentStore | None = None
 
     async def build(self, demo: DemoRequest | None = None) -> IncidentManager:
         demo = demo or DemoRequest()
+        if self.manager is None:  # 새 이벤트 목록이면 저장소도 새로 연다
+            if self.store is not None:
+                self.store.close()
+            self.store = IncidentStore.from_env()
+        assert self.store is not None
         fakes = FakeDepartments(latency=self.latency)
         if demo.infra_card_empty:
             fakes.empty_cards.add("infra")
@@ -99,10 +108,12 @@ class AppState:
             hold_timeout=self.hold_timeout,
             handoff_timeout=self.handoff_timeout,
             retry_delay=0.2,
+            persist=self.store.save,
         )
         self.fakes = fakes
         if self.manager is None:
-            self.manager = IncidentManager(engine, scenario_a)
+            self.manager = IncidentManager(engine, scenario_a, store=self.store)
+            self.manager.restore()  # 저장된 이벤트를 올린다(진행 중이던 건은 "재시작으로 중단됨")
         else:  # 같은 이벤트 목록을 유지하면서 부서 동작만 교체
             self.manager.engine = engine
         return self.manager
@@ -136,6 +147,10 @@ async def start_event_bus() -> bool:
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     await start_event_bus()
+    # 다시 켠 직후에도 저장된 이벤트가 목록에 보이게 미리 만든다
+    # (실제 모드, 또는 저장 파일을 준 목 모드)
+    if state.manager is None and (not state.mock or os.getenv(DB_ENV)):
+        await state.build()
     try:
         yield
     finally:
