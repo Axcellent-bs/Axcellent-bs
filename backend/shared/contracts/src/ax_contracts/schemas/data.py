@@ -634,7 +634,7 @@ class YouTubeTagEvidence(AxModel):
     snapshot_at: UtcDatetime  # 스냅샷 수집 시각
     video_ids: list[str] = Field(default_factory=list)  # 대표 영상 id (인기 순위 순, 몇 개만)
     # 아래는 예전 응답은 없다. video_ids의 주소·썸네일 (같은 순서)
-    videos: list[VideoLink] = Field(default_factory=list)
+    video_links: list[VideoLink] = Field(default_factory=list)
     # 이 후보로 센 태그 (정리한 값, 스냅샷에 실제로 나온 것. 별칭이 묶였으면 여러 개).
     # 예전 응답은 없다
     matched_tags: list[str] = Field(default_factory=list)
@@ -1630,7 +1630,7 @@ class InsightEvidence(AxModel):
     season_ratio: float | None = Field(default=None, ge=0)
     season_month: dt.date | None = None
     # 아래는 예전 응답은 없다. 근거 영상의 주소·썸네일 (links의 영상과 같은 것)
-    videos: list[VideoLink] = Field(default_factory=list)
+    video_links: list[VideoLink] = Field(default_factory=list)
 
 
 class InsightProduct(AxModel):
@@ -1762,7 +1762,7 @@ class DomainOpportunity(AxModel):
     # 아래는 예전 응답은 없다. 이 카드의 숫자 (브리프 facts의 fact_id)
     fact_ids: list[str] = Field(default_factory=list)
     # 아래는 예전 응답은 없다. 근거 숏츠의 주소·썸네일
-    videos: list[VideoLink] = Field(default_factory=list)
+    video_links: list[VideoLink] = Field(default_factory=list)
 
 
 class TrendInsightBriefOutput(AxModel):
@@ -1994,7 +1994,7 @@ class DomainSubtopic(AxModel):
     median_views: float | None = Field(default=None, ge=0)  # 그 숏츠 조회수 중앙값
     video_ids: list[str] = Field(default_factory=list)  # 근거 영상 (최대 5)
     # 아래는 예전 응답은 없다. video_ids의 주소·썸네일 (같은 순서)
-    videos: list[VideoLink] = Field(default_factory=list)
+    video_links: list[VideoLink] = Field(default_factory=list)
     origins: list[Literal["tag", "title"]] = Field(default_factory=list)
     merged: list[str] = Field(default_factory=list)  # 같은 대상으로 묶은 이름
 
