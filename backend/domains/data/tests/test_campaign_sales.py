@@ -74,15 +74,37 @@ def test_paid_orders_only_and_incremental_range() -> None:
     assert s.direction == "up" and "주문 수 판정: 늘었음" in (s.direction_reason or "")
 
 
-def test_overlapping_range_or_one_day_is_uncertain_and_below_is_down() -> None:
-    mid = FakeShop({0: [_order("a", START, 25000)], 1: [_order("d", START, 10000)],
-                    2: [_order("e", START, 30000)]})  # fmt: skip
-    assert _run(mid, spans=2).direction == "uncertain"
+def test_overlapping_range_or_one_day_is_uncertain_and_below_is_down(monkeypatch) -> None:  # noqa: ANN001
+    # 기준선 3일 (최소 3일): 범위에 걸치면 확실하지 않음, 가장 적은 날보다 적으면 줄었음
+    three = {1: [_order("d", START, 10000)], 2: [_order("e", START, 30000)],
+             3: [_order("f", START, 20000)]}  # fmt: skip
+    mid = FakeShop({0: [_order("a", START, 25000)], **three})
+    assert _run(mid, spans=3).direction == "uncertain"
+    low = FakeShop({0: [_order("a", START, 5000)], **three})
+    assert _run(low, spans=3).direction == "down"
+    # 최소를 1일로 낮춘 회사 설정: 기준선 1일이면 범위를 낼 수 없어 확실하지 않음
+    monkeypatch.setenv(ce.MIN_BASELINE_ENV, "1")
     one = FakeShop({0: [_order("a", START, 90000)], 1: [_order("d", START, 10000)]})
     assert _run(one, spans=1).direction == "uncertain"
-    low = FakeShop({0: [_order("a", START, 5000)], 1: [_order("d", START, 10000)],
-                    2: [_order("e", START, 30000)]})  # fmt: skip
-    assert _run(low, spans=2).direction == "down"
+
+
+def test_short_baseline_keeps_period_sales_but_not_increments(monkeypatch) -> None:  # noqa: ANN001
+    coupons = [CampaignCoupon(coupon_id="cpn_1", count=3, used_units=1)]
+    shop = FakeShop({0: [_order("a", START, 30000, coupon="cpn_1")], 1: [_order("d", START, 10000)],
+                     2: [_order("e", START, 20000)]}, coupons=coupons)  # fmt: skip
+    s = _run(shop, spans=2, campaign_id="cmp_1")
+    assert s.status == "unknown" and s.unknown_reason == "기준선 부족(2일, 최소 3일)"
+    assert s.period is not None and s.period.gross_krw == 30000  # 기간 판매액은 그대로
+    assert s.baseline is not None and s.baseline_days == 2
+    assert (s.incremental_gross_krw, s.incremental_low_krw, s.incremental_high_krw) == (
+        None, None, None)  # fmt: skip
+    assert s.direction is None and s.orders_direction == "up"
+    assert s.direct_attributed_krw == 30000  # 쿠폰 귀속은 기간 숫자라 준다
+    monkeypatch.setenv(ce.MIN_BASELINE_ENV, "2")  # 회사 설정으로 최소를 바꿀 수 있다
+    assert _run(shop, spans=2, campaign_id="cmp_1").status == "known"
+    for bad in ("0", "x"):
+        monkeypatch.setenv(ce.MIN_BASELINE_ENV, bad)
+        assert ce.min_baseline_days() == 3
 
 
 def test_gaps_and_unknowns_say_why_without_zeros() -> None:
@@ -120,16 +142,21 @@ def test_coupon_attribution_sums_campaign_coupon_orders() -> None:
 
 def test_facts_carry_source_period_and_sample() -> None:
     shop = FakeShop({0: [_order("a", START, 30000)], 1: [_order("d", START, 10000)],
-                     2: [_order("e", START, 20000)]})  # fmt: skip
+                     2: [_order("e", START, 20000)], 3: [_order("f", START, 15000)]})  # fmt: skip
     data = CampaignEffectInput(window_from=START, window_to=END)
-    out = ce.CampaignEffectOutput(
-        window_from=START, window_to=END, orders=ORDERS_UP,
-        revenue=CampaignChange(status="unknown", unknown_reason="x"),
-        coupons=ce.CampaignCoupons(status="unknown", unknown_reason="x"), summary="",
-        sales=asyncio.run(ce._sales(shop, data, ORDERS_UP, _spans(2), ce.RULE_SHORT)),
-    )  # fmt: skip
-    facts = {f.label: f for f in ce.sales_facts(out)}
+
+    def out_of(spans: int) -> ce.CampaignEffectOutput:
+        return ce.CampaignEffectOutput(
+            window_from=START, window_to=END, orders=ORDERS_UP,
+            revenue=CampaignChange(status="unknown", unknown_reason="x"),
+            coupons=ce.CampaignCoupons(status="unknown", unknown_reason="x"), summary="",
+            sales=asyncio.run(ce._sales(shop, data, ORDERS_UP, _spans(spans), ce.RULE_SHORT)),
+        )  # fmt: skip
+
+    facts = {f.label: f for f in ce.sales_facts(out_of(3))}
     gross = facts["증분 판매액 (주문 금액)"]
     assert gross.value == 15000 and gross.unit == "KRW" and gross.source == "shop-api"
-    assert gross.sample == 2 and gross.period == "2026-10-14T14:00Z~2026-10-14T16:00Z"
+    assert gross.sample == 3 and gross.period == "2026-10-14T14:00Z~2026-10-14T16:00Z"
     assert facts["구간 결제 완료 주문"].unit == "건"
+    short = {f.label for f in ce.sales_facts(out_of(2))}  # 기준선 부족: 기간 숫자만, 0으로 안 채움
+    assert "구간 주문 금액 합 (할인 전)" in short and "증분 판매액 (주문 금액)" not in short
