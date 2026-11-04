@@ -44,6 +44,7 @@ from marketing_agent.schemas import (
     PublishedNotice,
     PublishNoticeInput,
 )
+from marketing_agent.sns import SnsStore, check_sns_post, draft_sns_post
 
 SOURCE = "marketing"
 BANNER_TEXT_MAX = 200  # shop-api 배너 문구 상한
@@ -53,6 +54,7 @@ class State:
     def __init__(self) -> None:
         self.notices = NoticeStore()
         self.coupons = CouponLedger()
+        self.sns = SnsStore()
 
 
 STATE = State()
@@ -388,6 +390,14 @@ async def issue_coupon(request: AgentRequest) -> AgentResult:
     return result
 
 
+async def draft_sns_post_skill(request: AgentRequest) -> AgentResult:
+    return await draft_sns_post(request, STATE.notices, STATE.sns)
+
+
+async def check_sns_post_skill(request: AgentRequest) -> AgentResult:
+    return await check_sns_post(request, STATE.sns)
+
+
 HANDLERS = {
     "draft_notice": draft_notice,
     "publish_notice": publish_notice,
@@ -396,4 +406,6 @@ HANDLERS = {
     "issue_coupon": issue_coupon,
     "start_campaign": start_campaign,
     "record_campaign_result": record_campaign_result,
+    "draft_sns_post": draft_sns_post_skill,
+    "check_sns_post": check_sns_post_skill,
 }

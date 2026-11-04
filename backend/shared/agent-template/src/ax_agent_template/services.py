@@ -111,6 +111,8 @@ SERVICES: tuple[Service, ...] = (
             "issue_coupon",
             "start_campaign",
             "record_campaign_result",
+            "draft_sns_post",
+            "check_sns_post",
         ),
         "공지·쿠폰",
     ),
