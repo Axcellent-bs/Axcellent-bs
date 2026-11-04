@@ -279,7 +279,10 @@ def committed_this_month(
     campaigns: dict[str, dict[str, Any]],
     reviews: list[dict[str, Any]],
 ) -> int:
-    """이달 쓴 돈 + 승인했지만 결과가 아직 없는 돈. 다시 묻는 같은 캠페인은 뺀다."""
+    """이달 쓴 돈 + 관문을 통과해 시작했지만 결과가 아직 없는 돈. 다시 묻는 같은 캠페인은 뺀다.
+
+    판단만 받고 시작하지 않은 건, 사람이 거절한 건은 예산을 잡지 않는다.
+    """
     total = sum(
         c["spend_krw"]
         for c in campaigns.values()
@@ -287,11 +290,11 @@ def committed_this_month(
     )
     latest: dict[str, dict[str, Any]] = {}
     for review in reviews:
-        if review["month"] == month:
+        if review["month"] == month and review.get("started_krw"):
             latest[review["campaign_id"]] = review
     for cid, review in latest.items():
-        if cid != campaign_id and cid not in campaigns and review["decision"] != "rejected":
-            total += review["approved_limit_krw"]
+        if cid != campaign_id and cid not in campaigns and review.get("started_krw"):
+            total += review["started_krw"]
     return total
 
 
@@ -377,11 +380,12 @@ def decide(
     open_lessons = [x for x in lessons if x["channel"] == channel and x["status"] == "open"]
     factor = max(lesson_rules.limit_factor ** len(open_lessons), lesson_rules.floor_factor)
     if open_lessons:
-        cap = fc.rate_amount(requested, factor)
+        # 요청액이 아니라 실패한 집행액 기준이다. 요청액 기준이면 낮춰 낼 때마다 또 깎인다
+        cap = fc.rate_amount(max(x["spend_krw"] for x in open_lessons), factor)
         names = ", ".join(x["campaign_name"] for x in open_lessons)
         detail = (
             f"{channel} 실패 이력 {len(open_lessons)}건 ({names}) → "
-            f"요청의 {factor:.0%}인 {fc.won(cap)}까지"
+            f"실패 집행액의 {factor:.0%}인 {fc.won(cap)}까지"
         )
         rules.append(applied("LRN-001", detail))
         if cap < limit:
