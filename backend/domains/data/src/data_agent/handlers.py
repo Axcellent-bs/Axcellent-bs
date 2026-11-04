@@ -357,7 +357,10 @@ async def trend_scan(request: AgentRequest) -> AgentResult:
     if isinstance(data, AgentResult):
         return data
     try:
-        result = await scan_trends(data, get_trend_connector(), get_llm(), env=os.environ)
+        result = await scan_trends(
+            data, get_trend_connector(), get_llm(), env=os.environ,
+            category_cache=get_category_cache(),
+        )  # fmt: skip
     except NoTrendGroups as error:
         return _result(
             request, TaskStatus.FAILED, outcome="invalid_input", output={"message": str(error)}
@@ -573,6 +576,7 @@ async def trend_insight_brief(request: AgentRequest) -> AgentResult:
     result = await make_brief(
         data, llm, env=env, popular=popular_out, popular_reason=popular_why, rising=rising,
         age_fn=ages, promo=promo_out, catalog=catalog, aliases=cand_aliases(env),
+        category_cache=get_category_cache(),
         context_id=request.meta.context_id,
     )  # fmt: skip
     return _result(
