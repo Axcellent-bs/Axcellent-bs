@@ -619,6 +619,10 @@ class TrendCandidatesRequest(AxModel):
     end_date: dt.date | None = None  # 네이버 판정할 마지막 날 (한국 날짜). 없으면 어제
 
 
+# 회사와의 연결: direct = 연결 상품 있음, domain = 도메인 프로필·회사 키워드, none = 둘 다 아님
+CompanyRelevance = Literal["direct", "domain", "none"]
+
+
 class VideoLink(AxModel):
     """근거 영상 하나의 주소와 썸네일. YouTube 응답에 이미 있던 값만 (더 부르지 않음)."""
 
@@ -1203,6 +1207,9 @@ class PromoConcept(AxModel):
     target_age_ratio: float | None = Field(default=None, ge=0)  # 그 연령대 평소 대비 배수
     target_age_status: TrendStatus | None = None  # 그 연령대 판정 (rising·normal)
     target_age_reason: str | None = None  # 타깃 미정이면 이유
+    # 아래는 예전 응답은 없다. 빌린 트렌드가 회사 상품·도메인과 연결이 없으면 참고용 (코드)
+    reference_only: bool = False
+    reference_reason: str | None = None
 
 
 class PromoShortsFormat(AxModel):
@@ -1691,6 +1698,10 @@ class TrendInsight(AxModel):
     # 아래는 예전 응답은 없다. 연령대별 평소 대비 배수 전체 (trend_age 결과 그대로, 설정 순서).
     # 연령대를 보지 않은 주제는 빈 목록이고 이유는 target_age_reason
     age_bands: list[AgeBandTrend] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. 회사와의 연결 (코드): direct = 연결 상품 있음, domain = 도메인
+    # 프로필 씨앗·하위 주제·회사 관련 키워드에서 나옴, none = 둘 다 아님 (none이면 reference_only)
+    company_relevance: CompanyRelevance | None = None
+    company_relevance_reason: str | None = None
 
 
 # ------------------------------------------------ 기회 가설 카드 (trend_insight_brief 선택 칸)
@@ -1763,6 +1774,8 @@ class DomainOpportunity(AxModel):
     fact_ids: list[str] = Field(default_factory=list)
     # 아래는 예전 응답은 없다. 근거 숏츠의 주소·썸네일
     video_links: list[VideoLink] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. 회사와의 연결: 카드는 도메인 프로필에서 나오므로 늘 domain 이상
+    company_relevance: CompanyRelevance | None = None
 
 
 class TrendInsightBriefOutput(AxModel):
