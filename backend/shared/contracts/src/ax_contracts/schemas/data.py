@@ -1040,6 +1040,23 @@ class PopularTopic(AxModel):
     # 아래는 예전 응답은 없다. video_ids 순서의 영상 (제목·채널·조회수는 저장된 값, 모르면 None)
     videos: list[PopularVideo] = Field(default_factory=list)
     videos_reason: str | None = None  # 제목을 못 붙인 영상이 있으면 이유
+    # 아래는 예전 응답은 없다. "왜 뜨나" 근거 (숫자는 코드, 모르면 None + 이유)
+    news: list[TrendingNewsLink] = Field(default_factory=list)  # 인기 검색어 RSS의 관련 뉴스
+    news_reason: str | None = None  # 뉴스가 없으면 이유 (예: 인기 검색어에 없는 주제)
+    rising_started: dt.date | None = None  # 네이버 판정 구간에서 평소 범위를 처음 넘은 날
+    rising_reason: str | None = None  # 네이버 근거가 없으면 이유
+    # "이런 근거가 있어요" 한 줄. llm = 숫자 검증 통과, fixed = 검증 실패·LLM 없음이라 고정 문장
+    why_line: str | None = None
+    why_status: Literal["llm", "fixed", "unknown"] | None = None
+    why_reason: str | None = None  # fixed·unknown이면 이유
+
+
+class TrendingNewsLink(AxModel):
+    """인기 검색어 RSS가 함께 주는 관련 뉴스 하나 (피드 값 그대로)."""
+
+    title: str = Field(min_length=1)
+    source: str | None = None
+    url: str | None = None
 
 
 class PopularVideo(AxModel):
@@ -1057,6 +1074,16 @@ class PopularVideo(AxModel):
     # 분류기 칸과 YouTube 카테고리가 가리키는 칸이 다르면 true (분류기를 따른다)
     category_mismatch: bool | None = None
     source: Literal["chart", "search"] | None = None  # 한국 인기 목록 / 카테고리 검색 보충
+    # 아래는 예전 응답은 없다. 영상 근거 (코드 계산, 모르면 None, 이유는 evidence_reason)
+    hours_since_published: float | None = Field(default=None, ge=0)  # 올린 뒤 지난 시간
+    views_per_hour: float | None = Field(default=None, ge=0)  # 지금 시간당 조회 (두 스냅샷 차)
+    channel_subscribers: int | None = Field(default=None, ge=0)  # channels.list, 숨김이면 None
+    views_per_subscriber: float | None = Field(default=None, ge=0)  # 조회수 ÷ 구독자
+    like_rate: float | None = Field(default=None, ge=0)  # 좋아요 ÷ 조회수
+    comment_rate: float | None = Field(default=None, ge=0)  # 댓글 ÷ 조회수
+    is_short: bool | None = None  # 길이가 숏츠 기준([shorts] max_seconds) 이하
+    shorts_format: str | None = None  # 숏츠 형식 (shorts_stats 분류가 저장돼 있을 때만)
+    evidence_reason: str | None = None  # 못 잰 칸과 이유
 
 
 class PopularCategory(AxModel):
