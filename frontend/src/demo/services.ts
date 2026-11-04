@@ -126,7 +126,6 @@ export const SERVICES: Service[] = [
       { href: '/planning/requests', label: '요청' },
       { href: '/planning/proposals', label: '기획 제안' },
       { href: '/planning/work', label: '문서·기획서' },
-      { href: '/planning/agents', label: '에이전트 대화' },
     ],
   },
   {
