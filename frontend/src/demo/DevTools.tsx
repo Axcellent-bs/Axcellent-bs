@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from '@/lib/nav'
-import { DEV_API, codingSettingsApi, useMe, vcsApi, type CodingStep, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsInventory, type VcsTestResult } from '@/lib/planning'
+import { DEV_API, codingSettingsApi, githubAccountApi, useMe, vcsApi, type GithubAccount, type CodingStep, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsInventory, type VcsTestResult } from '@/lib/planning'
 import { UsageBar } from '@/components/dev/coding'
 
 // 개발 도구 연결: 고객사 개발팀이 쓰는 형상관리·CI·배포 도구를 개발·배포 AI(dev)에 잇는 창구.
@@ -295,9 +295,16 @@ function CodingModeSection({ part }: { part: AiPart }) {
     setError(null)
     try { setCfg(await codingApi.set(mode)) } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
-  if (part === 'key') return cfg ? <CompanyKeyBudget cfg={cfg} onSaved={setCfg} /> : <Loading error={error} />
-  if (part === 'models') return cfg ? <StepModels cfg={cfg} onSaved={setCfg} /> : <Loading error={error} />
-  if (part === 'claude') return <ClaudeConnect connected={cfg?.agents_connected ?? []} />
+  if (part === 'all') {
+    return (
+      <div className="space-y-4">
+        <CodingModeSection part="mode" />
+        {cfg ? <CompanyKeyBudget cfg={cfg} onSaved={setCfg} /> : <Loading error={error} />}
+        {cfg && <StepModels cfg={cfg} onSaved={setCfg} />}
+        <ClaudeConnect connected={cfg?.agents_connected ?? []} />
+      </div>
+    )
+  }
   return (
     <section className="space-y-4 rounded-lg border border-ink-100 p-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -317,29 +324,121 @@ function CodingModeSection({ part }: { part: AiPart }) {
   )
 }
 
+const ghApi = githubAccountApi(DEV_API)
+
+/** GitHub 연결: 앱 설치 하나를 넣으면 레포를 GitHub에서 찾아오고, 사람이 켠 레포만 개발 AI가 쓴다 */
+function GithubAccountSection() {
+  const [acc, setAcc] = useState<GithubAccount | null>(null)
+  const [form, setForm] = useState({ app_id: '', installation_id: '', base_url: '', key: '', key_name: '' })
+  const [editing, setEditing] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => { ghApi.get().then(setAcc).catch(() => setError('개발 AI에 연결할 수 없음')) }, [])
+  const run = async (f: () => Promise<GithubAccount>) => {
+    setBusy(true); setError(null)
+    try { setAcc(await f()) } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+  }
+  const pickKey = (file?: File) => {
+    if (!file) return
+    if (file.size > 16_000) return setError('개인 키 파일이 너무 커요. GitHub App에서 받은 .pem 파일을 골라 주세요.')
+    void file.text().then((text) => {
+      if (!text.includes('PRIVATE KEY')) return setError('GitHub App 개인 키(.pem) 파일이 아니에요.')
+      setError(null); setForm((f) => ({ ...f, key: text, key_name: file.name }))
+    })
+  }
+  const save = (e: FormEvent) => {
+    e.preventDefault()
+    void run(async () => {
+      const r = await ghApi.save({ app_id: form.app_id.trim(), installation_id: form.installation_id.trim(), base_url: form.base_url.trim(), ...(form.key ? { private_key: form.key } : {}) })
+      setEditing(false); setForm((f) => ({ ...f, key: '', key_name: '' }))
+      return r
+    })
+  }
+  const connected = !!acc?.connected
+  const on = acc?.repos.filter((r) => r.enabled).length ?? 0
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="card-title text-lg">GitHub 연결</h2>
+        {acc && <span className={`chip ${connected ? (acc.error ? TONE.bad : TONE.ok) : TONE.wait}`}>{connected ? (acc.error ? '확인 실패' : '연결됨') : '연결 없음'}</span>}
+        {connected && <span className="chip bg-ink-100 text-ink-700">{acc?.selection === 'all' ? '모든 레포에 설치' : '선택한 레포만'}</span>}
+        {connected && <span className="chip bg-ink-100 text-ink-700">사용 {on} / 레포 {acc?.repos.length ?? 0}</span>}
+        <div className="ml-auto flex gap-1.5">
+          {connected && <button type="button" className="btn-ghost" disabled={busy} onClick={() => void run(ghApi.refresh)}>목록 새로 고침</button>}
+          {connected && <button type="button" className="btn-quiet" disabled={busy} onClick={() => { if (window.confirm('GitHub 연결을 끊을까요? 이 연결로 켠 레포도 같이 꺼져요.')) void run(ghApi.remove) }}>연결 끊기</button>}
+          <button type="button" className="btn-primary px-4" disabled={busy} onClick={() => { setEditing((v) => !v); setForm((f) => ({ ...f, app_id: acc?.app_id ?? '', installation_id: acc?.installation_id ?? '', base_url: acc?.base_url ?? '' })) }}>{connected ? '수정' : 'GitHub 연결'}</button>
+        </div>
+      </div>
+
+      {acc?.warnings.map((w) => <p key={w} className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{w}</p>)}
+      {acc?.error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{acc.error}</p>}
+
+      {editing && (
+        <form onSubmit={save} className="space-y-3 rounded-xl border border-brand-200 bg-brand-50/40 p-4">
+          <div className="grid gap-3 md:grid-cols-3">
+            <input className="field" inputMode="numeric" placeholder="앱 ID (App ID)" value={form.app_id} onChange={(e) => setForm({ ...form, app_id: e.target.value })} aria-label="앱 ID" />
+            <input className="field" inputMode="numeric" placeholder="설치 ID (Installation ID)" value={form.installation_id} onChange={(e) => setForm({ ...form, installation_id: e.target.value })} aria-label="설치 ID" />
+            <label className="field flex cursor-pointer items-center gap-2 text-sm">
+              <input type="file" accept=".pem,application/x-pem-file" className="sr-only" onChange={(e) => pickKey(e.target.files?.[0])} aria-label="개인 키 파일" />
+              <span className="chip bg-ink-100 text-ink-700">개인 키 .pem</span>
+              <span className="truncate text-ink-500">{form.key_name || (acc?.key_set ? '넣음 · 바꾸려면 다시 고르기' : '파일 고르기')}</span>
+            </label>
+          </div>
+          <input className="field w-full" placeholder="API 주소 (비우면 github.com, 사내 설치형은 https://<주소>/api/v3)" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} aria-label="API 주소" />
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-ink-500">앱 설치: 선택한 레포만 · 권한</span>
+            {PERMISSIONS.map((p) => <span key={p} className="chip bg-ink-100 text-ink-700">{p}</span>)}
+          </div>
+          <div className="flex gap-2">
+            <button className="btn-primary px-5" disabled={busy}>{busy ? '확인 중…' : '저장하고 레포 찾기'}</button>
+            <button type="button" className="btn-ghost" onClick={() => setEditing(false)}>취소</button>
+          </div>
+        </form>
+      )}
+
+      {connected && !!acc?.repos.length && (
+        <ul className="divide-y divide-ink-100 rounded-xl border border-ink-100">
+          {acc.repos.map((r) => (
+            <li key={r.full_name} className="flex flex-wrap items-center gap-2 px-4 py-3">
+              <span className="mono text-sm">{r.full_name}</span>
+              <span className="chip bg-ink-100 text-ink-700">{r.default_branch}</span>
+              {!r.private && <span className="chip bg-amber-50 text-amber-800">공개</span>}
+              <label className="ml-auto flex cursor-pointer items-center gap-2 text-sm">
+                <input type="checkbox" checked={r.enabled} disabled={busy} onChange={(e) => void run(() => ghApi.setRepo(r.full_name, e.target.checked))} />
+                사용
+              </label>
+            </li>
+          ))}
+        </ul>
+      )}
+      {connected && acc?.repos.length === 0 && !acc.error && <p className="text-sm text-ink-500">설치 범위에 레포 없음</p>}
+      {error && <p className="text-sm text-red-700">{error}</p>}
+    </section>
+  )
+}
+
 function Loading({ error }: { error: string | null }) {
   return <p className="text-sm text-ink-500">{error ?? '불러오는 중…'}</p>
 }
 
 // 연결 창 왼쪽 메뉴 (설정 창처럼 묶음 › 항목). 고른 항목만 오른쪽에 보인다
-type AiPart = 'mode' | 'key' | 'models' | 'claude'
-type PanelItem = 'repos' | 'others' | AiPart
+type AiPart = 'mode' | 'all'
+type PanelItem = 'github' | 'repos' | 'others' | 'ai'
 const PANEL_GROUPS: { label: string; items: { id: PanelItem; label: string }[] }[] = [
-  { label: '형상관리', items: [{ id: 'repos', label: '레포 연결' }, { id: 'others', label: '다른 개발 도구' }] },
-  { label: 'AI', items: [
-    { id: 'mode', label: '코딩 방식' },
-    { id: 'key', label: 'AI 키·예산' },
-    { id: 'models', label: '단계별 모델' },
-    { id: 'claude', label: 'AI 도구 연결' },
+  { label: '형상관리', items: [
+    { id: 'github', label: 'GitHub 연결' },
+    { id: 'repos', label: '레포 연결' },
+    { id: 'others', label: '다른 개발 도구' },
   ] },
+  { label: 'AI', items: [{ id: 'ai', label: 'AI 연결' }] },
 ]
 const PANEL_IDS = PANEL_GROUPS.flatMap((g) => g.items.map((i) => i.id))
 const TAB_KEY = 'ax.connections.item'
 const readTab = (): PanelItem => {
   try {
     const v = localStorage.getItem(TAB_KEY) as PanelItem | null
-    return v && PANEL_IDS.includes(v) ? v : 'repos'
-  } catch { return 'repos' }
+    return v && PANEL_IDS.includes(v) ? v : 'github'
+  } catch { return 'github' }
 }
 
 /** 연결 창: 왼쪽 메뉴(형상관리·AI 코딩) + 오른쪽 내용. 개발·배포 화면의 톱니바퀴 창과 시스템 관리 화면이 같이 쓴다 */
@@ -522,7 +621,7 @@ export function DevToolsPanel({ title, onClose }: { title?: string; onClose?: ()
       </nav>
       <div className={`relative min-w-0 flex-1 overflow-y-auto p-6 ${onClose ? 'pt-12' : ''}`}>
       {onClose && <button className="btn-quiet absolute right-3 top-3 px-2 py-1" onClick={onClose} aria-label="닫기">✕</button>}
-      {tab === 'mode' || tab === 'key' || tab === 'models' || tab === 'claude' ? <CodingModeSection part={tab} /> : tab === 'repos' ? (
+      {tab === 'ai' ? <CodingModeSection part="all" /> : tab === 'github' ? <GithubAccountSection /> : tab === 'repos' ? (
       <section className="space-y-4">
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="card-title text-lg">레포 연결</h2>
