@@ -277,23 +277,23 @@ def budget_from_last_month(
     this_month = today.replace(day=1)
     last_month = (this_month - timedelta(days=1)).replace(day=1)
     name = last_month.isoformat()[:7]
+    days = closing.sales_days(books, last_month, this_month)
+    short = days < book.closing.budget_min_sales_days
+    note = f", 판매 {days}일치라 임시값" if short else ""
     snap = ((closings or {}).get(("month", last_month.isoformat())) or {}).get("snapshot")
     if snap:
         net = next((x["amount"] for x in snap["lines"] if x["code"] == "net_result"), None)
         if net is not None:
             return {
                 "amount_krw": max(fc.rate_amount(net, ratio), 0),
-                "basis": f"{name} 확정 영업 결과 {fc.won(net)}의 {ratio:.0%}",
-                "provisional": False,
+                "basis": f"{name} 확정 영업 결과 {fc.won(net)}의 {ratio:.0%}{note}",
+                "provisional": short,
             }
     if closing.unknown_codes(books) & {"commission_revenue", "pg_fee"}:
         return fallback_budget()
     totals = closing.compute_totals(books, fc.day_start(last_month), fc.day_start(this_month))
     if totals.order_count == 0:
         return fallback_budget()
-    days = closing.sales_days(books, last_month, this_month)
-    short = days < book.closing.budget_min_sales_days
-    note = f", 판매 {days}일치라 임시값" if short else ""
     return {
         "amount_krw": max(fc.rate_amount(totals.net_result, ratio), 0),
         "basis": f"{name} 영업 결과 {fc.won(totals.net_result)}의 {ratio:.0%}{note}",

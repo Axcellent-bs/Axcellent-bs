@@ -85,3 +85,46 @@ async def test_decision_after_expiry_is_refused(gate: Gate, clock: Any, coupon) 
     clock.advance(600)
     with pytest.raises(ValueError, match="expired"):
         await gate.decide_review(held.review_id or "", "approved", "태윤", None)
+
+
+# ---------------------------------------------------------------- 요청한 사람은 승인하지 못한다
+def _settlement(act, key: str, who: str | None):
+    return act("confirm_settlement", "finance", key, period="w", requested_by=who)
+
+
+@pytest.mark.asyncio
+async def test_requester_cannot_approve_own_request(gate, act) -> None:
+    from ax_safety.gate import SelfApprovalError
+
+    held = await gate.execute(_settlement(act, "s1", "태윤"))
+    with pytest.raises(SelfApprovalError):
+        await gate.decide_review(held.review_id, "approved", "태윤", None)
+    assert gate.store.get_review(held.review_id).status == "pending"
+    done = await gate.decide_review(held.review_id, "approved", "재무담당", None)
+    assert done.status == "approved"
+
+
+@pytest.mark.asyncio
+async def test_requester_can_still_reject_own_request(gate, act) -> None:
+    held = await gate.execute(_settlement(act, "s2", "태윤"))
+    done = await gate.decide_review(held.review_id, "rejected", "태윤", None)
+    assert done.status == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_shared_token_cannot_be_separated_so_it_is_allowed(gate, act) -> None:
+    held = await gate.execute(_settlement(act, "s3", "공용"))
+    assert (await gate.decide_review(held.review_id, "approved", "공용", None)).status == "approved"
+
+
+def test_self_approval_is_403_over_http(client, act, gate) -> None:
+    import asyncio
+
+    held = asyncio.run(gate.execute(_settlement(act, "s4", "taeyoon")))
+    response = client.post(
+        f"/api/safety/reviews/{held.review_id}/decision",
+        json={"decision": "approved"},
+        headers={"Authorization": "Bearer human:taeyoon".encode().decode("latin-1")},
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "SELF_APPROVAL"

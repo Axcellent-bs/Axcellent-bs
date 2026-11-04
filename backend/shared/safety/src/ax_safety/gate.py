@@ -62,6 +62,13 @@ Verifier = Callable[[VerifyTask], Awaitable[VerifyOutcome]]
 Publisher = Callable[[str, ExecuteRequest | Review, dict[str, Any]], Awaitable[None]]
 
 
+SHARED_HUMAN = "공용"  # scripts/run_all.sh의 공용 사람 토큰 이름
+
+
+class SelfApprovalError(Exception):
+    pass
+
+
 class AmountError(ValueError):
     pass
 
@@ -520,6 +527,11 @@ class Gate:
             raise KeyError(review_id)
         if review.status != "pending":
             raise ValueError(f"이미 처리된 보류 건이다: {review.status}")
+        record = self.store.get_execution(review.execution_id)
+        asked_by = record.request.params.get("requested_by") if record else None
+        # 요청한 사람이 스스로 승인하지 못한다. 공용 토큰은 누구인지 몰라 기록만 남긴다
+        if decision == "approved" and asked_by == by and by != SHARED_HUMAN:
+            raise SelfApprovalError(f"{by}가 요청한 건은 다른 사람이 승인해야 한다")
         self._close_review(review, decision, by, note)
         await self._emit_review(review)
         return review

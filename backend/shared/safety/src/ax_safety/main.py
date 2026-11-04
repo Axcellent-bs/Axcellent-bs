@@ -31,7 +31,7 @@ from ax_agent_template.config import set_agent_name
 from ax_agent_template.logging import log_event
 from ax_contracts.schemas import ConnectionHoldNotice, ExecuteRequest
 from ax_safety.auth import agent_from_token, bearer, human_from_token
-from ax_safety.gate import Gate, Publisher, Verifier
+from ax_safety.gate import Gate, Publisher, SelfApprovalError, Verifier
 from ax_safety.rules import load_registry, load_thresholds
 from ax_safety.store import Store
 from ax_safety.verify import call_verifier, publish_safety_event
@@ -220,6 +220,8 @@ def create_app(
             review = await gate.decide_review(review_id, body.decision, person, body.note)
         except KeyError:
             return _error(404, "NOT_FOUND", "보류 건이 없다")
+        except SelfApprovalError as exc:
+            return _error(403, "SELF_APPROVAL", str(exc))
         except ValueError as exc:
             return _error(409, "ALREADY_DECIDED", str(exc))
         # 사람 결정을 공통 로그에 남긴다 (data `kpi_summary`의 승인 거절률).
