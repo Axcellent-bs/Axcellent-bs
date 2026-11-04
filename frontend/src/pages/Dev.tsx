@@ -1,5 +1,5 @@
 // 개발·배포 화면(/dev). 확정된 기획서를 작업·PR로 만들고, 교차검증·배포·사후관리까지 맡는다.
-// 메뉴(사이드바 하위 탭 demo/services.ts) = 작업 현황(첫 화면)·작업(작업·PR·AI 교차검증·운영·배포·사후관리)·에이전트 대화·지표. 틀은 기획 화면과 같이 쓴다(components/planning-common/Shell.tsx).
+// 메뉴(사이드바 하위 탭 demo/services.ts) = 작업 현황(첫 화면)·작업(작업·PR·AI 교차검증·운영·배포·사후관리)·지표. 에이전트 대화는 메뉴에서 빼고 주소로만 연다. 틀은 기획 화면과 같이 쓴다(components/planning-common/Shell.tsx).
 import { useState } from 'react'
 import { DevToolsDialog } from '@/demo/DevTools'
 import { IconLink } from '@/components/icons'
@@ -22,7 +22,7 @@ const SECTIONS: Record<string, Section> = {
     { id: 'ops', label: '운영·배포' },
     { id: 'aftercare', label: '사후관리' },
   ] },
-  agents: { label: '에이전트 대화', icon: 'send', tabs: [] },
+  agents: { label: '에이전트 대화', icon: 'send', tabs: [], hidden: true },  // 메뉴에서 뺌 (주소로만 연다)
   talk: { label: '소통', icon: 'send', tabs: [], hidden: true },
   metrics: { label: '지표', icon: 'dashboard', tabs: [
     { id: 'autonomy', label: '자동 처리 범위' },
