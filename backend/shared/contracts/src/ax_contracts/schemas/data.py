@@ -1428,6 +1428,61 @@ class CampaignCoupons(AxModel):
         return self
 
 
+class CampaignSalesTotals(AxModel):
+    """한 구간의 판매액 (결제 완료 주문, 주문 접수 시각 기준, 원 단위 정수)."""
+
+    orders: int = Field(ge=0)  # 결제 완료 주문 수
+    gross_krw: int = Field(ge=0)  # 주문 금액 합 (상품가 × 수량, 할인 전)
+    discount_krw: int = Field(ge=0)  # 쿠폰 할인 합
+    paid_krw: int = Field(ge=0)  # 결제 금액 합 (성공한 결제)
+    refund_krw: int = Field(ge=0)  # 환불 합 (조회 시점)
+
+
+class CampaignFact(AxModel):
+    """근거 숫자 하나 (출처·기간·표본)."""
+
+    label: str
+    value: float
+    unit: str  # KRW, 건
+    source: str = "shop-api"
+    period: str  # "<from>~<to>" (UTC ISO)
+    sample: int | None = Field(default=None, ge=0)  # 표본 (주문 수·기준선 날 수)
+
+
+class CampaignSales(AxModel):
+    """캠페인 판매액 (증분). 모르면 unknown + 이유, 0으로 채우지 않는다."""
+
+    status: CampaignStatus
+    unknown_reason: str | None = None
+    basis: str = "결제 완료 주문, 주문 접수 시각 기준, 원 단위 정수"
+    period: CampaignSalesTotals | None = None  # 캠페인 구간
+    baseline: CampaignSalesTotals | None = None  # 기준선 날들의 평균 (원 단위 반올림)
+    baseline_rule: str | None = None  # 주문 수와 같은 기준선 정의
+    baseline_days: int = Field(default=0, ge=0)
+    baseline_note: str | None = None  # 기준선에서 뺀 날과 이유
+    incremental_gross_krw: int | None = None  # 증분 판매액 = 구간 − 기준선 (주문 금액, 할인 전)
+    incremental_paid_krw: int | None = None  # 증분 결제 금액
+    # 기준선 날들의 범위로 낸 증분의 하한·상한 (구간 − 가장 많은 날, 구간 − 가장 적은 날)
+    incremental_low_krw: int | None = None
+    incremental_high_krw: int | None = None
+    # 방향: 증분 범위가 0을 넘으면 up, 0 아래면 down, 걸치거나 기준선 날이 1개면 uncertain
+    direction: Literal["up", "down", "uncertain"] | None = None
+    direction_reason: str | None = None
+    orders_direction: CampaignDirection | None = None  # 주문 수 판정(포아송)과 함께 본다
+    # 쿠폰 귀속: 캠페인 쿠폰을 쓴 구간 주문의 판매액 합 (모르면 None + 이유)
+    direct_attributed_krw: int | None = None
+    direct_orders: int | None = Field(default=None, ge=0)
+    direct_reason: str | None = None
+
+    @model_validator(mode="after")
+    def _known_or_reason(self) -> Self:
+        if self.status == "unknown" and not self.unknown_reason:
+            raise ValueError("unknown이면 unknown_reason이 있어야 한다")
+        if self.status == "known" and self.incremental_gross_krw is None:
+            raise ValueError("known이면 incremental_gross_krw가 있어야 한다")
+        return self
+
+
 class CampaignEffectOutput(AxModel):
     campaign_id: str | None = None
     window_from: UtcDatetime
@@ -1439,6 +1494,9 @@ class CampaignEffectOutput(AxModel):
     # 아래는 예전 응답은 없다. 요청에 있던 연결 id 그대로 (데이터는 저장하지 않는다)
     insight_id: str | None = None
     proposal_id: str | None = None
+    # 아래는 예전 응답은 없다. 판매액 (shop-api 주문 기록에서 코드가 셈)과 근거 숫자 목록
+    sales: CampaignSales | None = None
+    facts: list[CampaignFact] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------- 연령대별 상승 (trend_age)
