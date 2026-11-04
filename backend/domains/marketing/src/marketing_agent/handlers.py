@@ -30,7 +30,17 @@ from ax_contracts.schemas import (
     NoticePublishedData,
     TaskStatus,
 )
+from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
 from marketing_agent import shop_client
+from marketing_agent.briefs import (
+    BriefStore,
+    CampaignBriefList,
+    CampaignBriefView,
+    GetCampaignBriefInput,
+    ListCampaignBriefsInput,
+    campaign_id_for,
+    rejection_reason,
+)
 from marketing_agent.campaign import record_campaign_result, start_campaign
 from marketing_agent.campaign_cancel import cancel_campaign
 from marketing_agent.coupons import CouponLedger, SequenceGap, total_value
@@ -55,6 +65,7 @@ class State:
     def __init__(self) -> None:
         self.notices = NoticeStore()
         self.coupons = CouponLedger()
+        self.briefs = BriefStore()
         self.sns = SnsStore()
 
 
@@ -282,6 +293,122 @@ async def list_active_notices(request: AgentRequest) -> AgentResult:
     )
 
 
+async def receive_campaign_brief(request: AgentRequest) -> AgentResult:
+    """기획안을 받아 보관한다. 캠페인은 시작하지 않는다.
+
+    순서: 검증(`invalid_input`·`rejected`) → 중복(`duplicate`, 관문 안 부름) → 안전 관문
+    `execute()` → `executed`일 때만 저장. 저장소는 메모리라 재시작하면 사라진다.
+    """
+    data = _parse(request, CampaignBriefInput)
+    if isinstance(data, AgentResult):
+        return data
+    reason = rejection_reason(data)
+    if reason is not None:
+        rejected = CampaignBriefOutput(outcome="rejected", reason_code=reason)
+        return _result(
+            request,
+            TaskStatus.COMPLETED,
+            output=rejected.model_dump(mode="json"),
+            outcome=rejected.outcome,
+            evidence=_evidence(["receive_campaign_brief"], f"기획안 거절 {reason}", []),
+        )
+    existing = STATE.briefs.existing(data.proposal_id)
+    if existing is not None:  # 관문 앞에서 막는다. 보관본은 그대로
+        dup = CampaignBriefOutput(outcome="duplicate", campaign_id=existing.campaign_id)
+        return _result(
+            request,
+            TaskStatus.COMPLETED,
+            output=dup.model_dump(mode="json"),
+            outcome=dup.outcome,
+            evidence=_evidence(
+                ["receive_campaign_brief"],
+                f"기획안 {data.proposal_id} 이미 받음",
+                [data.proposal_id, existing.campaign_id],
+            ),
+        )
+
+    campaign_id = campaign_id_for(data.proposal_id)
+    key = f"{request.meta.context_id}:receive_campaign_brief:{data.proposal_id}"
+    evidence = _evidence(
+        ["receive_campaign_brief"], f"기획안 {data.proposal_id} 받기 요청", [data.proposal_id]
+    )
+    decision = await execute(
+        "receive_campaign_brief",
+        {
+            "proposal_id": data.proposal_id,
+            "campaign_id": campaign_id,
+            "insight_id": data.insight_id,
+            "title": data.title,
+            "approved_by": data.approved_by,
+        },
+        request.meta.model_copy(update={"idempotency_key": key}),
+        evidence,
+    )
+    blocked = _from_decision(request, decision, evidence)
+    if blocked:  # 보류·거절·관문 무응답: 저장하지 않는다(같은 요청을 다시 보내면 이어서 처리)
+        return blocked
+    out = STATE.briefs.add(data, _now())
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        outcome=out.outcome,
+        evidence=evidence.model_copy(
+            update={
+                "data_summary": f"기획안 {data.proposal_id} {out.outcome}",
+                "ref_ids": [data.proposal_id, campaign_id, decision.execution_id],
+            }
+        ),
+    )
+
+
+async def list_campaign_briefs(request: AgentRequest) -> AgentResult:
+    data = _parse(request, ListCampaignBriefsInput)
+    if isinstance(data, AgentResult):
+        return data
+    items, total = STATE.briefs.list(data.limit)
+    listing = CampaignBriefList(
+        items=items, total=total, unknown_reason=None if items else "받은 기획안이 없음"
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=listing.model_dump(mode="json"),
+        evidence=_evidence(
+            ["list_campaign_briefs"], f"받은 기획안 {total}건 조회", [i.proposal_id for i in items]
+        ),
+    )
+
+
+async def get_campaign_brief(request: AgentRequest) -> AgentResult:
+    data = _parse(request, GetCampaignBriefInput)
+    if isinstance(data, AgentResult):
+        return data
+    if data.proposal_id is None and data.campaign_id is None:
+        return _result(
+            request,
+            TaskStatus.FAILED,
+            outcome="invalid_input",
+            output={"errors": ["proposal_id|campaign_id: missing"]},
+        )
+    item = STATE.briefs.get(data.proposal_id, data.campaign_id)
+    view = CampaignBriefView(
+        found=item is not None,
+        item=item,
+        unknown_reason=None if item else "받은 기획안을 찾을 수 없음(확인할 수 없음)",
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=view.model_dump(mode="json"),
+        evidence=_evidence(
+            ["get_campaign_brief"],
+            "받은 기획안 조회" if item else "받은 기획안을 찾을 수 없음(확인할 수 없음)",
+            [item.proposal_id] if item else [],
+        ),
+    )
+
+
 async def issue_coupon(request: AgentRequest) -> AgentResult:
     data = _parse(request, IssueCouponInput)
     if isinstance(data, AgentResult):
@@ -404,6 +531,9 @@ HANDLERS = {
     "publish_notice": publish_notice,
     "get_notice": get_notice,
     "list_active_notices": list_active_notices,
+    "receive_campaign_brief": receive_campaign_brief,
+    "list_campaign_briefs": list_campaign_briefs,
+    "get_campaign_brief": get_campaign_brief,
     "issue_coupon": issue_coupon,
     "start_campaign": start_campaign,
     "record_campaign_result": record_campaign_result,

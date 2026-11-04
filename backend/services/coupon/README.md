@@ -8,6 +8,9 @@
 | `publish_notice` | A |
 | `get_notice` | read |
 | `list_active_notices` | read |
+| `receive_campaign_brief` | A |
+| `list_campaign_briefs` | read |
+| `get_campaign_brief` | read |
 | `issue_coupon` | A |
 | `draft_sns_post` | read |
 | `check_sns_post` | read |

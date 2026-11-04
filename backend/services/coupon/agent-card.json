@@ -65,6 +65,46 @@
       "handoff": false
     },
     {
+      "id": "receive_campaign_brief",
+      "description": "기획이 확정한 기획안(CampaignBriefInput)을 받아 보관한다. 같은 proposal_id는 한 번만 받고 다시 오면 duplicate(보관본 그대로, 처음 campaign_id 반환). 받으면 accepted와 campaign_id(cmp_ + proposal_id, start_campaign도 같은 id를 쓴다), 받을 수 없으면 rejected와 reason_code(unsupported_schema_version·invalid_proposal_id·empty_title·empty_idea·empty_why). facts·target은 받은 그대로 보관하며 숫자를 계산하지 않는다. 캠페인은 시작하지 않는다. 저장소는 메모리라 다시 시작하면 사라진다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#CampaignBriefInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#CampaignBriefOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_campaign_briefs",
+      "description": "받은 기획안 목록을 받은 시각이 늦은 순으로 돌려준다(보관한 그대로). 없으면 빈 목록과 이유를 돌려준다. 상태를 바꾸지 않는다.",
+      "input_schema": "agents/marketing/src/marketing_agent/briefs.py#ListCampaignBriefsInput",
+      "output_schema": "agents/marketing/src/marketing_agent/briefs.py#CampaignBriefList",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "get_campaign_brief",
+      "description": "proposal_id 또는 campaign_id로 받은 기획안 하나를 보관한 그대로 돌려준다. 없으면 '확인할 수 없음'으로 답한다. 상태를 바꾸지 않는다.",
+      "input_schema": "agents/marketing/src/marketing_agent/briefs.py#GetCampaignBriefInput",
+      "output_schema": "agents/marketing/src/marketing_agent/briefs.py#CampaignBriefView",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "issue_coupon",
       "description": "쿠폰을 지급한다(purpose_code: campaign 또는 compensation). 총액은 건수×단가로 코드가 계산한다. 보상 쿠폰은 sequence 순서대로 한 건씩 처리한다. 기준 이상은 safety 보류 큐로 간다.",
       "input_schema": "agents/marketing/src/marketing_agent/schemas.py#IssueCouponInput",
