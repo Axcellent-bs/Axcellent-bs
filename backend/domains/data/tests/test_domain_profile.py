@@ -174,3 +174,22 @@ def test_profile_without_catalog_is_not_stored(tmp_path: Path) -> None:
     assert first.status == "known" and any("카탈로그를 읽지 못해" in x for x in first.limits)
     again = _run(tmp_path, llm, catalog=no_catalog)
     assert not again.cached and llm.asked == 2  # 카탈로그가 돌아오면 다시 만들게 저장하지 않음
+
+
+def test_evidence_copied_as_a_data_block_line_still_matches_the_source(tmp_path: Path) -> None:
+    """실제 LLM은 근거로 데이터 블록 줄("이름 | 카테고리 코드")을 통째로 옮기기도 한다."""
+    seeds = [
+        dp._Seed(keyword="파이썬 입문서", evidence="파이썬 입문서 | 카테고리 book"),
+        dp._Seed(
+            keyword="무지 노트", evidence="무지 노트 3권 세트 | 카테고리 stat | 줄 없는 무지 노트"
+        ),
+        dp._Seed(keyword="고양이 서점", evidence="고양이가 지키는 서점"),  # 키워드가 원문에 없음
+        dp._Seed(keyword="만년필", evidence="만년필 | 카테고리 stat"),  # 카탈로그에 없는 상품
+    ]
+    out = _run(tmp_path, ProfileLLM(_answer(seeds=seeds)))
+    kept = {s.keyword: s for s in out.seed_keywords}
+    assert kept["파이썬 입문서"].evidence == "파이썬 입문서" and kept[
+        "파이썬 입문서"
+    ].product_ids == ["p2"]
+    assert kept["무지 노트"].evidence_from == "product" and kept["무지 노트"].product_ids == ["p3"]
+    assert {d.keyword for d in out.dropped_keywords} == {"고양이 서점", "만년필"}

@@ -201,26 +201,38 @@ SourceKind = Literal["about", "product", "category", "description"]
 def find_evidence(
     keyword: str, evidence: str, tenant: TenantProfile, catalog: CatalogRead
 ) -> tuple[SourceKind, str, list[str]] | None:
-    """근거 문장이 원문에 있고 키워드가 근거 안에 있으면 (출처, 원문 근거, 상품 id들)."""
-    key, ev = _n(keyword), _n(evidence)
-    if not key or not ev or key not in ev:
+    """키워드가 근거 안에 있고, 그 근거가 원문(상품 이름·카테고리 이름·설명·소개)과 맞으면
+    (출처, 원문 근거, 상품 id들). 키워드는 늘 원문 안에 있어야 한다.
+
+    근거는 LLM이 데이터 블록 줄을 통째로 옮길 수 있어("이름 | 카테고리 코드 | 설명") `|`로 나눈
+    조각마다 본다. 짧은 원문(상품·카테고리 이름)은 근거 조각과 서로 포함이면 맞다고 본다.
+    """
+    key = _n(keyword)
+    pieces = [_n(x) for x in (evidence, *evidence.split("|")) if _n(x)]
+    if not key or not any(key in ev for ev in pieces):
         return None
+    pieces = [ev for ev in pieces if key in ev]
     ids = [
         p.product_id
         for p in catalog.products
         if key in _n(p.name) or (p.description and key in _n(p.description))
     ]
+
+    def short_match(source: str) -> bool:  # 이름처럼 짧은 원문
+        s = _n(source)
+        return key in s and any(ev in s or s in ev for ev in pieces)
+
     for p in catalog.products:
-        if ev in _n(p.name):
+        if short_match(p.name):
             return "product", p.name, ids
     for name in catalog.categories.values():
-        if ev in _n(name):
+        if short_match(name):
             return "category", name, ids
     for p in catalog.products:
-        if p.description and ev in _n(p.description):
-            return "description", evidence.strip(), ids
-    if tenant.about and ev in _n(tenant.about):
-        return "about", evidence.strip(), ids
+        if p.description and any(ev in _n(p.description) for ev in pieces):
+            return "description", p.description.strip(), ids
+    if tenant.about and any(ev in _n(tenant.about) for ev in pieces):
+        return "about", evidence.split("|")[0].strip(), ids
     return None
 
 
