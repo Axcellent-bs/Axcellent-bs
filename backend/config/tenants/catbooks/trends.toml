@@ -140,6 +140,7 @@ fill_always = true
 fill_query_cells = ["게임"]
 fill_query_topics = 2
 fill_search_calls = 6    # 보충 검색 하루 호출 상한 (지금 칸별 YouTube 카테고리 수와 같다. 넘으면 그 칸 보충만 unknown + 이유)
+title_fill_calls = 2     # 주제 근거 영상 제목 받기(videos.list) 하루 호출 상한. 한 번 = 영상 50개·1단위
 fill_days = 7            # 최근 며칠 게시 영상에서 고를지
 fill_language = "ko"     # 한국 영상만 (제목·채널 이름에 한글이 있거나 영상 언어가 한국어)
 

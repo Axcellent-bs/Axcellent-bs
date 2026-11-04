@@ -459,3 +459,101 @@ def test_search_cap_leaves_only_that_cell_unknown(tmp_path: Path) -> None:
         news.top_videos_reason or ""
     )
     assert "확인할 수 없음" not in (by["게임"].top_videos_reason or "")
+
+
+# ---------------------------------------------------------------- 주제 근거 영상 제목 (#2)
+
+
+class TitleYouTube:
+    """videos.list만 흉내 낸다. 부른 횟수와 받은 id를 센다."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.calls: list[list[str]] = []
+        self.fail = fail
+
+    async def videos(self, ids):  # noqa: ANN001, ANN201
+        self.calls.append(list(ids))
+        if self.fail:
+            raise ConnectorUnavailable("YOUTUBE_HTTP", "down")
+        return [
+            VideoStat(
+                i,
+                "ch",
+                "20",
+                NOW - timedelta(days=1),
+                99,
+                1,
+                1,
+                (),
+                title=f"제목 {i}",
+                channel_title="채널",
+            )  # fmt: skip
+            for i in ids
+            if i != "gone"
+        ]
+
+
+def _topics(*ids: list[str]):  # noqa: ANN202
+    from ax_contracts.schemas.data import PopularTopic
+
+    return [PopularTopic(rank=n, keyword=f"주제{n}", video_ids=v) for n, v in enumerate(ids, 1)]
+
+
+def _attach(tmp_path: Path, topics, youtube, *, cap: int = 2, calls_before: int = 0):  # noqa: ANN001, ANN202
+    from data_agent.skills.trend_popular import FillStore, attach_videos
+
+    env = _env(tmp_path)
+    store = FillStore(tmp_path / "fill.db")
+    if calls_before:
+        store.add_title_calls(NOW.date(), calls_before)
+    queries: list[str] = []
+    asyncio.run(
+        attach_videos(env["DATA_YOUTUBE_DB"], topics, youtube=youtube, store=store,
+                      config=PopularConfig(title_fill_calls=cap), now=NOW, queries=queries)
+    )  # fmt: skip
+    used = store.title_calls(NOW.date())
+    store.close()
+    return env, queries, used
+
+
+def test_missing_topic_video_titles_are_fetched_once_and_saved(tmp_path: Path) -> None:
+    yt = TitleYouTube()
+    topics = _topics(["v1", "v2"], ["v2", "v3"])
+    env, queries, used = _attach(tmp_path, topics, yt)
+    assert yt.calls == [["v1", "v2", "v3"]] and used == 1  # 겹친 영상은 한 번만, 묶어서 1번
+    assert [v.title for v in topics[0].videos] == ["제목 v1", "제목 v2"]
+    assert topics[0].videos[0].channel_title == "채널" and topics[0].videos[0].views == 99
+    assert topics[0].videos_reason is None and any("videos.list" in q for q in queries)
+    # 저장했으니 다음에는 부르지 않는다
+    again = _topics(["v1"])
+    from data_agent.skills.trend_popular import FillStore, attach_videos
+
+    store = FillStore(tmp_path / "fill.db")
+    yt2 = TitleYouTube()
+    asyncio.run(attach_videos(env["DATA_YOUTUBE_DB"], again, youtube=yt2, store=store,
+                              config=PopularConfig(), now=NOW, queries=[]))  # fmt: skip
+    store.close()
+    assert yt2.calls == [] and again[0].videos[0].title == "제목 v1"
+
+
+def test_title_fetch_stops_at_the_daily_cap(tmp_path: Path) -> None:
+    yt = TitleYouTube()
+    topics = _topics(["v1"])
+    _, _, used = _attach(tmp_path, topics, yt, cap=2, calls_before=2)
+    assert yt.calls == [] and used == 2
+    assert topics[0].videos[0].title is None  # 지어내지 않는다
+    assert topics[0].videos_reason == "제목 받기 하루 상한(2번)에 닿아 저장된 제목만 붙임"
+    assert topics[0].videos[0].views == 3000  # 스냅샷 조회수는 그대로
+
+
+def test_title_fetch_failure_or_gone_videos_leave_a_reason(tmp_path: Path) -> None:
+    failed = _topics(["v1"])
+    _attach(tmp_path / "a", failed, TitleYouTube(fail=True))
+    assert failed[0].videos_reason == "제목 받기 실패 [YOUTUBE_HTTP]"
+    gone = _topics(["gone", "v1"])
+    _attach(tmp_path / "b", gone, TitleYouTube())
+    assert gone[0].videos[0].title is None and gone[0].videos[1].title == "제목 v1"
+    assert gone[0].videos_reason == "YouTube가 영상 1개를 주지 않음 (지워졌거나 비공개)"
+    none = _topics(["v1"])
+    _attach(tmp_path / "c", none, None)
+    assert none[0].videos_reason == "YouTube 커넥터 없이 불러 저장된 제목만 붙임"

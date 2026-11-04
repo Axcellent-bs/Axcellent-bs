@@ -74,6 +74,7 @@ from data_agent.trending_store import latest_trending, news_titles
 from data_agent.youtube_store import (
     DB_ENV,
     DEFAULT_DB,
+    SnapshotStore,
     latest_popular,
     popular_history,
     recent_snapshots,
@@ -109,6 +110,9 @@ class PopularConfig:
     fill_query_cells: tuple[str, ...] = ()
     fill_query_topics: int = 2
     fill_search_calls: int = 6  # 보충 검색 하루 호출 상한 (넘으면 그 칸 보충은 unknown + 이유)
+    # 주제 근거 영상 중 저장된 제목이 없는 것을 videos.list로 받는 하루 호출 상한
+    # (한 번 = 영상 50개·1단위)
+    title_fill_calls: int = 2
 
 
 def load_config(env: Mapping[str, str]) -> PopularConfig:
@@ -154,6 +158,7 @@ def load_config(env: Mapping[str, str]) -> PopularConfig:
                 1, min(5, int(raw.get("fill_query_topics", base.fill_query_topics)))
             ),  # fmt: skip
             fill_search_calls=max(0, int(raw.get("fill_search_calls", base.fill_search_calls))),
+            title_fill_calls=max(0, int(raw.get("title_fill_calls", base.title_fill_calls))),
             fill_days=max(1, min(30, int(raw.get("fill_days", base.fill_days)))),
             fill_language=str(raw.get("fill_language", base.fill_language)).strip().lower(),
         )
@@ -181,6 +186,10 @@ class FillStore:
                 " youtube_category TEXT NOT NULL, language TEXT NOT NULL, videos TEXT NOT NULL,"
                 " PRIMARY KEY (day, youtube_category, language))"
             )
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS title_calls"
+                " (day TEXT PRIMARY KEY, calls INTEGER NOT NULL)"
+            )
 
     def close(self) -> None:
         self._conn.close()
@@ -200,6 +209,22 @@ class FillStore:
                 "SELECT COUNT(*) FROM fill WHERE day = ?", (day.isoformat(),)
             ).fetchone()
         return int(row[0])
+
+    def title_calls(self, day: date) -> int:
+        """그날 제목을 받으려고 부른 videos.list 수."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT calls FROM title_calls WHERE day = ?", (day.isoformat(),)
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def add_title_calls(self, day: date, calls: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO title_calls VALUES (?, ?) ON CONFLICT(day)"
+                " DO UPDATE SET calls = calls + excluded.calls",
+                (day.isoformat(), calls),
+            )
 
     def put(self, day: date, cat: str, language: str, videos: list[dict[str, Any]]) -> None:
         with self._lock, self._conn:
@@ -418,6 +443,80 @@ async def _fill_rows(
 
 
 OVER_CAP = "하루 보충 검색 상한"
+TITLE_PAGE = 50  # videos.list 한 번에 받는 영상 수
+
+
+async def attach_videos(
+    db: str,
+    topics: Sequence[PopularTopic],
+    *,
+    youtube: Any,
+    store: FillStore | None,
+    config: PopularConfig,
+    now: datetime,
+    queries: list[str],
+) -> None:
+    """주제마다 근거 영상(video_ids 순서)의 제목·채널·조회수를 붙인다 (topics를 바꾼다).
+
+    저장된 제목(`video_titles`)을 먼저 쓰고, 없는 것만 videos.list로 한 번에 받아 저장한다.
+    그날 호출이 `title_fill_calls`에 닿았거나 커넥터가 없으면 받지 않고 그 주제에 이유를 남긴다.
+    """
+    ids = list(dict.fromkeys(v for t in topics for v in t.video_ids))
+    if not ids:
+        return
+    titles = video_titles(db, ids)
+    missing = [i for i in ids if not titles.get(i)]
+    why: str | None = None
+    fetched: dict[str, Any] = {}
+    if missing:
+        calls = -(-len(missing) // TITLE_PAGE)
+        today = now.astimezone(KST).date()
+        if youtube is None or not hasattr(youtube, "videos") or store is None:
+            why = "YouTube 커넥터 없이 불러 저장된 제목만 붙임"
+        elif store.title_calls(today) + calls > config.title_fill_calls:
+            why = f"제목 받기 하루 상한({config.title_fill_calls}번)에 닿아 저장된 제목만 붙임"
+        else:
+            try:
+                stats = await youtube.videos(missing)
+            except ConnectorUnavailable as error:
+                why = f"제목 받기 실패 [{error.code}]"
+            else:
+                store.add_title_calls(today, calls)
+                queries.append(f"youtube videos.list titles ids={len(missing)} calls={calls}")
+                at = now.astimezone(UTC).replace(microsecond=0)
+                snap = SnapshotStore(db)
+                try:
+                    snap.save_titles(at, [(x.video_id, x.title) for x in stats if x.title])
+                    snap.save_details(at, stats)
+                finally:
+                    snap.close()
+                fetched = {x.video_id: x for x in stats}
+                titles = video_titles(db, ids)
+                gone = [i for i in missing if not titles.get(i)]
+                if gone:
+                    why = f"YouTube가 영상 {len(gone)}개를 주지 않음 (지워졌거나 비공개)"
+    details = video_details(db, ids)
+    latest = recent_snapshots(db, 1)
+    stored = latest[0].videos if latest else {}
+    for t in topics:
+        rows = []
+        for vid in t.video_ids:
+            d, s, f = details.get(vid), stored.get(vid), fetched.get(vid)
+            views = f.view_count if f is not None else (s.view_count if s else None)
+            published = f.published_at if f is not None else (s.published_at if s else None)
+            rows.append(
+                PopularVideo(
+                    video_id=vid,
+                    title=titles.get(vid) or None,
+                    channel_title=(d.channel_title if d else None) or None,
+                    views=views,
+                    published_at=published,
+                    duration_seconds=d.duration_seconds if d else None,
+                    source="chart",
+                )
+            )
+        t.videos = rows
+        t.videos_reason = why if any(r.title is None for r in rows) else None
 
 
 def search_terms(config: PopularConfig, every: Sequence[PopularTopic]) -> dict[str, str]:
@@ -735,6 +834,11 @@ async def popular(
     shown.sort(key=lambda i: i.rank)
     for n, item in enumerate(shown, start=1):
         item.rank = n
+    if youtube is not None and fill_store is None:
+        fill_store = FillStore(env.get(FILL_DB_ENV) or FILL_DEFAULT_DB)
+    await attach_videos(
+        db, shown, youtube=youtube, store=fill_store, config=config, now=now, queries=queries
+    )
     if fill_store is not None:
         fill_store.close()
     hidden = sum(1 for i in every if i.topic_category not in config.categories)

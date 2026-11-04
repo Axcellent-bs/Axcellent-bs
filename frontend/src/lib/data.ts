@@ -564,6 +564,10 @@ export interface PopularTopic {
   entity_names?: string[];
   /** 화면 카테고리 안 순위 1~5 (#431) */
   category_rank?: number | null;
+  /** video_ids 순서의 영상 (제목·채널·조회수는 저장된 값, #512). 예전 응답은 없다 */
+  videos?: PopularVideo[];
+  /** 제목을 못 붙인 영상이 있으면 이유 */
+  videos_reason?: string | null;
 }
 /** 화면용 카테고리 하나의 지금 인기 1~N위 (#431, 회사 설정 [popular] categories) */
 export interface PopularCategory {
