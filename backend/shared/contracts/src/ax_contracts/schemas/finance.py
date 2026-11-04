@@ -96,6 +96,13 @@ class FinanceOpinion(AxModel):
     submitted_at: str
 
 
+class ReceiveFinanceOpinionOutput(AxModel):
+    """총괄이 의견을 받은 결과. 이미 받은 의견이면 `duplicate`가 참이다."""
+
+    opinion_id: str
+    duplicate: bool = False
+
+
 class CampaignResultInput(AxModel):
     """캠페인 성과. `gmv_krw`를 모르면 비워 둔다. 재무는 0으로 채우지 않고 판단을 미룬다."""
 

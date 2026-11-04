@@ -14,6 +14,7 @@ from typing import Any
 
 from ax_contracts.schemas import EventEnvelope, EventType
 from ax_orchestrator.engine import Engine
+from ax_orchestrator.finance_opinions import FinanceOpinions
 from ax_orchestrator.models import Incident, Plan, iso
 from ax_orchestrator.naming import event_title, event_type
 from ax_orchestrator.plans.support_resolved import support_resolved
@@ -62,6 +63,7 @@ class IncidentManager:
         self.engine = engine
         self.plan_factory = plan_factory
         self.incidents: dict[str, Incident] = {}
+        self.finance_opinions = FinanceOpinions()
         self._seen: set[str] = set()
         self._tasks: dict[str, asyncio.Task[Incident]] = {}
 
