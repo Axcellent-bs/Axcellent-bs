@@ -3,8 +3,8 @@ import { Navigate } from "react-router";
 import { Link, useParams } from "@/lib/nav";
 import { ago, shortDateTime } from "@/lib/format";
 import {
-  ANALYSIS, CONFIDENCE, SEVERITY, TIER, UNKNOWN_REASON, incidentDetail, readableTitle,
-  type Evidence, type IncidentDetail as Detail, type PlanStep,
+  ANALYSIS, CONFIDENCE, KNOWLEDGE_SOURCE, SEVERITY, SIMILAR_FACT_LABEL, TIER, UNKNOWN_REASON, incidentDetail, readableTitle,
+  type Evidence, type IncidentDetail as Detail, type KnowledgeHit, type PlanStep, type Report,
 } from "@/lib/dejafix";
 
 // 장애 상세 = DejaFix API #11(GET /api/incidents/{id}) 한 번으로 그린다. DejaFix 화면을 띄우지 않는다.
@@ -95,6 +95,43 @@ function StepCard({ step, known, onPick }: { step: PlanStep; known: Set<string>;
   );
 }
 
+/** 비슷한 과거 장애. DejaFix가 분석 때 저장한 검색 결과를 옮겨 보여 주기만 한다. 찾은 것이 없으면 없다고 말한다 */
+function SimilarIncidents({ report, hits, known, onPick }: { report: Report; hits: KnowledgeHit[]; known: Set<string>; onPick: (id: string) => void }) {
+  const fact = report.facts.find((f) => f.label === SIMILAR_FACT_LABEL);
+  const evId = fact?.evidence_ids.find((id) => known.has(id));
+  return (
+    <Section title="비슷한 과거 장애" sub="DejaFix AI가 분석할 때 찾은 기록">
+      {hits.length > 0 ? (
+        <ul className="divide-y divide-ink-100">
+          {hits.map((h) => (
+            <li key={h.chunk_id} className="space-y-1 py-3 first:pt-0 last:pb-0">
+              <p className="font-semibold">{h.title}</p>
+              <p className="flex flex-wrap items-center gap-x-2 text-xs text-ink-500">
+                <span>{KNOWLEDGE_SOURCE[h.source_type] ?? h.source_type}</span>
+                {h.host_name && <span className="font-mono">{h.host_name}</span>}
+                {h.source_type === "incident_report" && h.incident_id !== null && (
+                  <Link href={`/infra/${h.incident_id}`} className="text-brand-700 hover:underline">장애 #{h.incident_id} 열기</Link>
+                )}
+              </p>
+              <p className="line-clamp-6 whitespace-pre-line text-sm text-ink-700">{h.excerpt}</p>
+              {evId
+                ? <button type="button" className="chip bg-ink-100 font-mono text-ink-700 hover:bg-brand-50" title="아래 근거에서 원문 열기" onClick={() => onPick(evId)}>{h.chunk_id}</button>
+                : <span className="chip bg-ink-100 font-mono text-ink-500">{h.chunk_id}</span>}
+            </li>
+          ))}
+        </ul>
+      ) : fact?.value !== null && fact?.value !== undefined ? (
+        // 검색 결과 원본은 잘려서 못 읽어도 리포트에 남은 문장은 있다
+        <p className="whitespace-pre-line text-sm text-ink-700">{fact.value}</p>
+      ) : fact ? (
+        <p className="text-sm text-ink-500">확인할 수 없음 · {UNKNOWN_REASON[fact.unknown_reason ?? ""] ?? fact.unknown_reason ?? "데이터 없음"}</p>
+      ) : (
+        <p className="text-sm text-ink-500">이 분석에서 찾은 비슷한 과거 장애가 없습니다.</p>
+      )}
+    </Section>
+  );
+}
+
 export default function IncidentDetail() {
   const { id } = useParams<{ id: string }>();
   const num = Number(id);
@@ -123,6 +160,8 @@ export default function IncidentDetail() {
   };
   const i = data?.incident;
   const r = data?.report;
+  // 과거 유사 사례 행은 문장이 길어 수치 칸 대신 비슷한 과거 장애 카드에서 보여 준다
+  const facts = (r?.facts ?? []).filter((f) => f.label !== SIMILAR_FACT_LABEL);
 
   return (
     <div className="space-y-6 px-8 py-8">
@@ -184,6 +223,8 @@ export default function IncidentDetail() {
               )}
             </Section>
 
+            <SimilarIncidents report={r} hits={data.knowledge_hits ?? []} known={known} onPick={pick} />
+
             {data.plan && (
               <Section title="변경 계획 미리보기" sub="보여 주기만 합니다 · 실행은 사람이 판단">
                 <p className="text-sm font-medium">{data.plan.title}</p>
@@ -202,10 +243,10 @@ export default function IncidentDetail() {
           </div>
 
           <aside className="space-y-6">
-            {r.facts.length > 0 && (
+            {facts.length > 0 && (
               <Section title="수치">
                 <dl className="space-y-2 text-sm">
-                  {r.facts.map((f) => (
+                  {facts.map((f) => (
                     <div key={f.label} className="flex items-baseline justify-between gap-3">
                       <dt className="text-ink-500">{f.label}</dt>
                       <dd className="text-right font-semibold">

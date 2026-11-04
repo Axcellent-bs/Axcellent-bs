@@ -122,7 +122,29 @@ export interface IncidentDetail {
   plan: { id: number; title: string; goal: string | null; mode: string; max_tier: Tier; assumptions: string[] } | null;
   steps: PlanStep[];
   mail_logs: { id: number; kind: string; recipient: string; status: string; attempts: number; error: string | null; created_at: string; sent_at: string | null }[];
+  /** 구버전 DejaFix 응답에는 없을 수 있다. 없으면 빈 목록으로 본다 (계약 #11) */
+  knowledge_hits?: KnowledgeHit[];
 }
+
+/** 계약 #11 knowledge_hits[]: DejaFix AI가 분석 때 찾은 비슷한 과거 사례 (최대 3건). 저장된 값을 옮긴 것이다 */
+export interface KnowledgeHit {
+  chunk_id: string;
+  title: string;
+  source_type: "incident_report" | "runbook" | "pack_action" | "resolution_note" | string;
+  host_name: string | null;
+  incident_id: number | null;
+  excerpt: string;
+}
+
+/** 리포트 facts 중 비슷한 과거 장애 검색 결과를 담은 행의 이름 (DejaFix가 저장하는 값) */
+export const SIMILAR_FACT_LABEL = "과거 유사 사례";
+
+export const KNOWLEDGE_SOURCE: Record<string, string> = {
+  incident_report: "장애 리포트",
+  runbook: "런북",
+  pack_action: "팩 동작",
+  resolution_note: "해결 메모",
+};
 
 /** 장애 하나의 상세(리포트·근거·변경 계획·메일 기록) */
 export const incidentDetail = async (id: number) => (await get<{ data: IncidentDetail }>(`/api/incidents/${id}`)).data;
