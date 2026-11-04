@@ -91,6 +91,11 @@ def period_range(period: Period, d: date) -> tuple[date, date]:
     return d, d + timedelta(days=1)
 
 
+def period_finished(period: Period, d: date, today: date | None = None) -> bool:
+    """그 기간이 끝났는가. 진행 중인 기간은 숫자가 계속 바뀌어 결산을 확정하지 않는다."""
+    return period_range(period, d)[1] <= (today or fc.today())
+
+
 def compute_totals(books: Books, start: datetime, end: datetime) -> Totals:
     cfg = fc.load_config()
     pg = pg_settlements(books)
@@ -291,6 +296,7 @@ async def closing_report(
         "commentary": commentary,
         "commentary_source": source,
         "status": "confirmed" if confirmation else "draft",
+        "closable": period_finished(period, d),
         "confirmed_by": confirmation["by"] if confirmation else None,
         "confirmed_at": confirmation["at"] if confirmation else None,
         "applied_rules": applied_many("REV-001", "REV-002", "REV-003", "EXP-001", "PL-001"),

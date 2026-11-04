@@ -47,6 +47,7 @@ class ClosingReportOutput(AxModel):
     commentary: str
     commentary_source: Literal["llm", "template"]
     status: Literal["draft", "confirmed"]
+    closable: bool = True  # 기간이 끝나 확정할 수 있는가
     confirmed_by: str | None = None
     confirmed_at: str | None = None
     unavailable: list[str] = Field(default_factory=list)

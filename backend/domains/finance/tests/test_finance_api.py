@@ -200,7 +200,8 @@ def test_closing_without_orders_is_unknown_not_zero(client: TestClient, kit) -> 
     todo = next(t for t in overview["todo"] if t["kind"] == "closing_confirm")
     assert todo["amount"] is None
     # 확인할 수 없는 숫자로는 결산을 확정하지 않는다
-    response = client.post("/api/finance/closing/confirm", json={"period": "day"}, headers=HUMAN)
+    body = {"period": "day", "date": "2026-10-22"}
+    response = client.post("/api/finance/closing/confirm", json=body, headers=HUMAN)
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "books_unavailable"
     assert handlers.state().records.closings == {}
@@ -249,7 +250,9 @@ def test_closing_confirm_records_person(client: TestClient) -> None:
 def test_configured_human_tokens(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SAFETY_HUMAN_TOKENS", "byunghwan:s3cret")
     ok = client.post(
-        "/api/finance/closing/confirm", json={}, headers={"Authorization": "Bearer s3cret"}
+        "/api/finance/closing/confirm",
+        json={"date": "2026-10-22"},
+        headers={"Authorization": "Bearer s3cret"},
     )
     assert ok.json()["data"]["confirmed_by"] == "byunghwan"
     monkeypatch.delenv("AGENT_TEMPLATE_MOCK")  # 목 모드가 아니면 human:<이름>은 받지 않는다
@@ -508,3 +511,71 @@ def test_support_costs_lists_recorded_inquiries_newest_first(client: TestClient)
 def _todo(client: TestClient, kind: str) -> dict | None:
     todo = client.get("/api/finance/overview").json()["data"]["todo"]
     return next((t for t in todo if t["kind"] == kind), None)
+
+
+# ---------------------------------------------------------------- 결산 확정 사고 방지
+def test_confirm_needs_a_date(client: TestClient) -> None:
+    """빈 본문이 오늘 결산을 확정한 사고(251, 2026-11-04)가 다시 나지 않게 한다."""
+    for body in ({}, {"period": "day"}):
+        response = client.post("/api/finance/closing/confirm", json=body, headers=HUMAN)
+        assert response.status_code == 400
+    assert handlers.state().records.closings == {}
+
+
+@pytest.mark.parametrize(
+    ("period", "date", "status"),
+    [
+        ("day", "2026-10-23", 409),  # 오늘
+        ("day", "2026-10-24", 409),  # 미래
+        ("day", "2026-10-22", 200),  # 어제
+        ("week", "2026-10-22", 409),  # 이번 주
+        ("week", "2026-10-15", 200),  # 지난주
+        ("month", "2026-10-01", 409),  # 이번 달
+        ("month", "2026-09-30", 200),  # 지난달
+    ],
+)
+def test_only_finished_periods_can_be_confirmed(
+    client: TestClient, period: str, date: str, status: int
+) -> None:
+    body = {"period": period, "date": date}
+    response = client.post("/api/finance/closing/confirm", json=body, headers=HUMAN)
+    assert response.status_code == status
+    if status == 409:
+        assert response.json()["error"]["code"] == "period_not_closed"
+        assert handlers.state().records.closings == {}
+
+
+def test_report_says_whether_it_can_be_confirmed(client: TestClient) -> None:
+    today = client.get("/api/finance/closing", params={"date": "2026-10-23"}).json()["data"]
+    yesterday = client.get("/api/finance/closing", params={"date": "2026-10-22"}).json()["data"]
+    assert today["closable"] is False and yesterday["closable"] is True
+
+
+def test_cancel_reopens_and_leaves_a_record(client: TestClient) -> None:
+    key = {"period": "day", "date": "2026-10-22"}
+    client.post("/api/finance/closing/confirm", json=key, headers=HUMAN)
+    response = client.post(
+        "/api/finance/closing/cancel", json=key | {"reason": "시험 중 잘못 확정"}, headers=HUMAN
+    )
+    assert response.status_code == 200 and response.json()["data"]["status"] == "draft"
+    records = handlers.state().records
+    assert records.closings == {}
+    log = records.closing_cancels[0]
+    assert (log["date"], log["confirmed_by"], log["canceled_by"]) == (
+        "2026-10-22",
+        "taeyoon",
+        "taeyoon",
+    )
+    kinds = [t["kind"] for t in client.get("/api/finance/overview").json()["data"]["todo"]]
+    assert "closing_confirm" in kinds  # 다시 확정할 일로 돌아온다
+
+
+def test_cancel_rules(client: TestClient) -> None:
+    key = {"period": "day", "date": "2026-10-22"}
+    url = "/api/finance/closing/cancel"
+    assert client.post(url, json=key | {"reason": "r"}).status_code == 401
+    assert client.post(url, json=key | {"reason": "r"}, headers=HUMAN).status_code == 404
+    client.post("/api/finance/closing/confirm", json=key, headers=HUMAN)
+    assert client.post(url, json=key, headers=HUMAN).status_code == 400
+    assert client.post(url, json=key | {"reason": " "}, headers=HUMAN).status_code == 400
+    assert handlers.state().records.closings != {}

@@ -113,6 +113,7 @@ export interface FinanceInsight {
 
 export interface ClosingReport {
   applied_rules?: AppliedRule[];
+  closable?: boolean;
   period: ClosingPeriod;
   date: string;
   from: string;
