@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Chip, Empty, Panel, TONE, Waiting } from "@/components/finance/bits";
-import type { SkillState } from "@/components/data/useSkill";
+import { okEvidence, type SkillState } from "@/components/data/useSkill";
+import { Basis, Sources, VideoLinks } from "@/components/data/Sources";
 import { DATA_SERVER, type PopularCategory, type PopularTopic, type PopularVideo, type PromoConceptsOutput, type TrendPopularOutput } from "@/lib/data";
 
 // 트렌드 1단계(감지) 위쪽: 요약 카드 3개 + 카테고리 버튼.
@@ -12,6 +13,8 @@ import { DATA_SERVER, type PopularCategory, type PopularTopic, type PopularVideo
 // - 고른 칸: 뜨는 주제 칩 + 조회수 높은 영상(순위·썸네일 자리·제목·채널·조회수). 썸네일은 계약에 없어 자리만 둔다
 // - 주제 칩 색: 기획안 재료로 쓴 주제 = 초록, 상표·실존 이름 주의 = 노랑, 재료에서 뺀 주제 = 회색 + 서버 이유,
 //   기획안이 보지 않은 주제 = 흰색. 숫자는 서버 값만, 없으면(null) 그 줄을 뺀다
+// - 근거: 주제마다 어디서 왔는지(YouTube 인기 차트 영상 링크·Google 인기 검색어 순위·조회수 스냅샷 비교),
+//   영상마다 출처(인기 차트 / 카테고리 검색 보충)와 올린 날, 패널 맨 아래 응답이 부른 API 목록(evidence.queries)
 
 const num = (v: number | null | undefined) =>
   typeof v === "number" && Number.isFinite(v) ? v.toLocaleString("ko-KR", { maximumFractionDigits: 0 }) : null;
@@ -110,6 +113,7 @@ export function TrendSummary({ popular, promo }: { popular: SkillState<TrendPopu
               <Chip label={categoryName(top.topic_category)} tone={TONE.info} />
             </p>
             <p className="text-sm text-ink-700">지금 인기 1위 · {evidenceOf(top).join(" · ") || "근거 숫자를 받지 못했어요"}</p>
+            {top.video_ids.length > 0 && <p className="text-xs text-ink-700">YouTube 인기 차트 영상 · <VideoLinks ids={top.video_ids} titles={videoTitles(pop)} max={2} /></p>}
             {top.real_entity === true && <p className="text-xs text-amber-700">실존 이름이 든 주제예요{top.entity_names?.length ? ` (${top.entity_names.join(", ")})` : ""}</p>}
           </>
         ) : <p className="text-sm text-ink-500">{pop.empty_reason ?? NO_REASON}</p>)}
@@ -166,6 +170,40 @@ function cellsOf(out: TrendPopularOutput): Cell[] {
   return [...groups.entries()].map(([category, items]) => ({ category, items, shortage_reason: null, legacy: true }));
 }
 
+const DAY = new Intl.DateTimeFormat("ko-KR", { month: "numeric", day: "numeric" });
+/** 영상 출처 (서버 source) */
+const VIDEO_SOURCE: Record<string, string> = { chart: "YouTube 인기 차트", search: "YouTube 카테고리 검색 보충" };
+
+/** 응답 안 모든 칸의 영상 id → 제목 (근거 링크 글자용) */
+export function videoTitles(out: TrendPopularOutput | null): Map<string, string | null> {
+  const m = new Map<string, string | null>();
+  for (const c of out?.by_category ?? []) for (const v of c.top_videos ?? []) m.set(v.video_id, v.title);
+  return m;
+}
+
+/** 주제 하나의 근거 줄 (서버 값이 있는 것만) */
+function TopicBasis({ t, titles }: { t: PopularTopic; titles: Map<string, string | null> }) {
+  const rows: { source: string; body: ReactNode }[] = [];
+  if (t.youtube_videos != null && t.youtube_videos > 0) {
+    rows.push({ source: "YouTube 인기 차트", body: <>영상 {num(t.youtube_videos)}개에 나옴 {t.video_ids.length > 0 && <VideoLinks ids={t.video_ids} titles={titles} />}</> });
+  }
+  if (t.trending_rank != null) {
+    rows.push({ source: "Google 인기 검색어", body: `${t.trending_rank}위${t.trending_traffic ? ` (트래픽 표시 ${t.trending_traffic}, 검색 건수 아님)` : ""}` });
+  }
+  if (t.views_per_hour != null) {
+    rows.push({ source: "YouTube 조회수 스냅샷 비교", body: `영상 ${num(t.velocity_videos)}개 시간당 조회 +${num(t.views_per_hour)}` });
+  } else if (t.velocity_reason) {
+    rows.push({ source: "YouTube 조회수 스냅샷 비교", body: t.velocity_reason });
+  }
+  if (t.rising_ratio != null) rows.push({ source: "네이버 데이터랩", body: `오늘 판정 평소의 ${t.rising_ratio.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}배` });
+  return (
+    <li className="space-y-1">
+      <p className="text-sm font-semibold text-ink-900">{t.category_rank ?? t.rank}. {t.keyword}</p>
+      {rows.length > 0 ? <Basis rows={rows} /> : <p className="text-xs text-ink-500">근거 값을 받지 못했어요.</p>}
+    </li>
+  );
+}
+
 function VideoRow({ v, rank }: { v: PopularVideo; rank: number }) {
   return (
     <li className="flex items-center gap-3 py-2">
@@ -176,14 +214,16 @@ function VideoRow({ v, rank }: { v: PopularVideo; rank: number }) {
         <a className="block truncate font-semibold text-ink-900 hover:underline" href={`https://www.youtube.com/watch?v=${encodeURIComponent(v.video_id)}`} target="_blank" rel="noreferrer noopener">
           {v.title ?? "제목 없음"}
         </a>
-        <p className="truncate text-xs text-ink-500">{v.channel_title ?? "채널 모름"}</p>
+        <p className="truncate text-xs text-ink-500">
+          {[v.channel_title ?? "채널 모름", VIDEO_SOURCE[v.source ?? ""] ?? null, v.published_at ? `${DAY.format(new Date(v.published_at))} 올림` : null].filter(Boolean).join(" · ")}
+        </p>
       </div>
       <span className="shrink-0 text-sm tabular-nums text-ink-700">{v.views != null ? `조회 ${v.views.toLocaleString("ko-KR")}회` : "조회수 모름"}</span>
     </li>
   );
 }
 
-function CellView({ c, promo }: { c: Cell; promo: PromoConceptsOutput | null }) {
+function CellView({ c, promo, titles }: { c: Cell; promo: PromoConceptsOutput | null; titles: Map<string, string | null> }) {
   const videos = c.top_videos ?? [];
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
@@ -194,6 +234,12 @@ function CellView({ c, promo }: { c: Cell; promo: PromoConceptsOutput | null }) 
         ) : null}
         {c.shortage_reason && <p className="text-xs text-ink-500">{c.shortage_reason}</p>}
         {c.items.length === 0 && !c.shortage_reason && <p className="text-xs text-ink-500">이 칸에 들어온 주제가 없어요. {NO_REASON}</p>}
+        {c.items.length > 0 && (
+          <details className="text-sm" open>
+            <summary className="cursor-pointer text-xs font-semibold text-ink-700">주제 근거 (어디서 몇 번 나왔나)</summary>
+            <ul className="mt-2 space-y-2">{c.items.map((t) => <TopicBasis key={t.keyword} t={t} titles={titles} />)}</ul>
+          </details>
+        )}
       </section>
       <section aria-label="조회수 높은 영상" className="min-w-0 space-y-1">
         <p className="panel-title">조회수 높은 영상</p>
@@ -253,13 +299,14 @@ export function TrendPopular({ popular, promo, onReload }: {
             </div>
             {/* 고른 칸만 그린다 */}
             <div id="trend-popular-cell" role="tabpanel" aria-label={categoryName(current.category)}>
-              <CellView c={current} promo={promo} />
+              <CellView c={current} promo={promo} titles={videoTitles(out)} />
             </div>
             <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-500" aria-label="주제 칩 색">
               {(Object.keys(MATERIAL) as MaterialKind[]).map((k) => (
                 <span key={k} className="flex items-center gap-1"><span aria-hidden className={`inline-block h-3 w-3 rounded-full ${MATERIAL[k].chip}`} />{MATERIAL[k].legend}</span>
               ))}
             </p>
+            <Sources evidence={okEvidence(popular)} />
           </div>
         )}
     </Panel>
