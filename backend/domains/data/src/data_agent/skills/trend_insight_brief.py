@@ -63,7 +63,7 @@ DB_ENV = "DATA_INSIGHT_BRIEF_DB"
 DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "insight_brief.db"  # backend/.data
 REFERENCE = "참고용"
 # 브리프 칸 모양이 바뀌면 올린다 (오늘 캐시를 새 모양으로 다시 묶게)
-SHAPE = "shorts-source"
+SHAPE = "shorts-source,age-bands"
 BRIEF_LIMITS = (
     "평가셋이 없어 인사이트가 맞는지 재지 않는다",
     "네이버 값은 요청마다 최댓값이 100인 상대값이다",
@@ -545,6 +545,8 @@ def build_insights(
                 target_age=age.top_band if age else None,
                 target_age_ratio=age.top_ratio if age else None,
                 target_age_status=band.status if band else None,
+                # 연령대별 배수 전체 (trend_age 결과 그대로, 추가 네이버 호출 없음)
+                age_bands=list(age.bands) if age is not None else [],
                 target_age_reason=(
                     None
                     if age is not None and age.top_band

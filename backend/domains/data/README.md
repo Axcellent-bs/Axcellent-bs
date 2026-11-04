@@ -176,7 +176,7 @@ class MemoryConnector:
 
 | skill | 언제 | 요청 | 응답 핵심 |
 |---|---|---|---|
-| `trend_insight_brief` | 제안을 만들기 전에 근거 있는 인사이트를 받을 때 | `max_insights`(3~7, 비우면 회사 설정 5), `regenerate` | `insights[]`: `insight_id`·한 줄·분류·광고 재료 여부·근거(YouTube·Google·네이버, 링크·시각)·타깃 연령대·상품(임베딩 기준 통과만)·숏츠 형식·한계·예시 아이디어(참고용) |
+| `trend_insight_brief` | 제안을 만들기 전에 근거 있는 인사이트를 받을 때 | `max_insights`(3~7, 비우면 회사 설정 5), `regenerate` | `insights[]`: `insight_id`·한 줄·분류·광고 재료 여부·근거(YouTube·Google·네이버, 링크·시각)·타깃 연령대와 연령대별 배수 전체(`age_bands`)·상품(임베딩 기준 통과만)·숏츠 형식(단계·표본 수)·한계·예시 아이디어(참고용) |
 | `campaign_effect` | 마케팅이 실행한 뒤 성과를 기록할 때 | `window_from`·`window_to`(필수), `campaign_id`, **`insight_id`·`proposal_id`(선택)** | 주문 증분·매출·쿠폰 누적 사용률(모르면 unknown + 이유), 요청의 `insight_id`·`proposal_id` 그대로 |
 
 둘 다 grade read(조회만). 요청 가능: `trend_insight_brief`는 planning·orchestrator·dashboard-api, `campaign_effect`는 카드의 `allowed_requesters`.
@@ -772,7 +772,7 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 2. **점수**(코드, `[brief]` 가중치): 지금 인기 `1/순위` + 네이버 `max(0, 배수−1)` + 연령대 `max(0, 최대 연령대 배수−1)` + 인기 검색어 `1/순위` + YouTube `영상 수/최대`. 1차 점수 상위 `인사이트 수 + age_topics_extra`개만 `trend_age`로 연령대를 보고(네이버 호출 아끼기, trend_age 하루 상한·캐시 공유) 다시 점수를 매겨 `max_insights`(5, 요청으로 3~7)개
 3. **분류(#539)**: 브리프에 들어가는 모든 주제는 공유 분류기(`topic_category`)를 거친다. 지금 인기 주제는 이미 분류된 값(저장 재사용)을, 지금 인기에 없는 급상승 주제는 여기서 묶어 한 번 분류한다(저장된 분류는 다시 묻지 않음). **분류가 안 된 주제(unknown)는 순위·연령대 후보에 넣지 않고** 맨 아래 "참고용 + 분류 대기"(`classification_pending`, 최대 `pending_max` 2개)로 둔다
 3-1. **광고 재료**: 공용 규칙(`skills/ad_material.py`, 예시 아이디어·급상승 판정과 같다). 뉴스·사건·기부·재난·정치·사회·인물 분류, 사람 이름 주제, 회사 추천 안 함 분류, `[promo] trend_categories` 밖이면 `ad_material: false` + 이유이고 **맨 아래 `reference_only`(참고용)**. 실존 이름·상표가 든 주제는 가능 + "분위기·형식만" 이유. 분류가 없는 급상승 주제는 `null` + 이유
-4. **칸**: `insight_id` = `ins_<날짜>_<주제 이름 해시>`(같은 날 같은 주제면 같은 id, 기획이 제안·성과 요청에 적는다) · 근거(YouTube 영상 수·시간당 조회·구독자 대비 최대 배수·스냅샷 시각, Google 순위·관련 뉴스·스냅샷 시각, 네이버 배수·판정·상승 시작일·판정 마지막 날, 링크, 없는 출처와 이유) · 타깃 연령대(없으면 미정 + 이유) · 상품(`product_link` 임베딩 기준 `[recommend] min_similarity` 이상·1등만, 이름에 시즌 확인 키워드가 들어 있으면 시즌 근거 한 줄) · 숏츠 형식(4-2) · 한계 · 예시 아이디어(오늘 저장된 `promo_concepts` 중 이 주제를 빌린 것, "참고용". 새로 만들지 않는다)
+4. **칸**: `insight_id` = `ins_<날짜>_<주제 이름 해시>`(같은 날 같은 주제면 같은 id, 기획이 제안·성과 요청에 적는다) · 근거(YouTube 영상 수·시간당 조회·구독자 대비 최대 배수·스냅샷 시각, Google 순위·관련 뉴스·스냅샷 시각, 네이버 배수·판정·상승 시작일·판정 마지막 날, 링크, 없는 출처와 이유) · 타깃 연령대(없으면 미정 + 이유)와 **연령대별 배수 전체**(`age_bands`, trend_age 결과 그대로 설정 순서. 브리프가 이미 부른 trend_age 한 번에서 나오므로 네이버 호출이 늘지 않는다. 기획은 브리프 하나로 연령대 전체를 받는다. 연령대를 보지 않은 주제는 빈 목록이고 이유는 `target_age_reason`) · 상품(`product_link` 임베딩 기준 `[recommend] min_similarity` 이상·1등만, 이름에 시즌 확인 키워드가 들어 있으면 시즌 근거 한 줄) · 숏츠 형식(4-2) · 한계 · 예시 아이디어(오늘 저장된 `promo_concepts` 중 이 주제를 빌린 것, "참고용". 새로 만들지 않는다)
 4-1. **구성(#543)**
    - **카테고리 상한** `per_category_max`(2): 한 분류(예: 게임)가 브리프를 채우지 않게 점수 순으로 고르되 카테고리마다 최대 2개
    - **회사 관련 인사이트**(`company_related`): 시즌 키워드(오늘 기획안 시즌 확인, 배율 큰 순)와 카탈로그 상품 핵심어(`season_keywords`) 중 `company_pool`(4)개를 후보로, 공유 분류기와 연령대를 거쳐 **급상승 판정이 아니어도** 작년 같은 달·다음 달 배율 ≥ `company_min_season_ratio`(1.3) 또는 어느 연령대 배수 ≥ `company_min_age_ratio`(1.3)이면 "오른 것"으로 보고 `company_topics`(최대 2)개를 **따로 확보**한다(그만큼 트렌드 자리를 줄임). 고른 이유는 `company_reason`(코드 문장), 시즌 근거는 `evidence.season_*`. 회사 상품·시즌 키워드라 빌려 올 IP·인물이 없어 광고 재료 가능(분류 대기면 제외). 없으면 브리프 `limits`에 "회사 관련 인사이트 없음: …"
