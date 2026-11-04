@@ -111,6 +111,10 @@ SKILL_KO: dict[str, str] = {
     "campaign_effect": "캠페인 효과 보기",
     "trend_age": "연령대별 상승 보기",
     "trend_insight_brief": "인사이트 브리프 보기",
+    "domain_profile": "회사 도메인 프로필 보기",
+    "data_sources": "데이터 출처 목록 보기",
+    "domain_subtopics": "하위 주제 보기",
+    "source_plan": "수집 계획 보기",
     "receive_dev_result": "개발 결과 받기",
     "start_dev": "개발 시작",
 }

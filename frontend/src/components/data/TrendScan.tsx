@@ -5,6 +5,7 @@ import { PreparingChip } from "@/components/Preparing";
 import { CampaignEffect } from "@/components/data/CampaignEffect";
 import { PromoConcepts } from "@/components/data/PromoConcepts";
 import { InsightBrief } from "@/components/data/InsightBrief";
+import { DataSources } from "@/components/data/DataSources";
 import { TrendPopular, TrendSummary, materialOf } from "@/components/data/TrendPopular";
 import { okOut, useSkill } from "@/components/data/useSkill";
 import { Basis, Sources, VideoLinks, when } from "@/components/data/Sources";
@@ -16,8 +17,8 @@ import {
   type Evidence, type TrendingSearchEvidence, type YouTubeTagEvidence,
 } from "@/lib/data";
 
-// 트렌드&콘텐츠 화면 (/data/trend): 콘텐츠 루프 4단계와 같은 하위 탭 4개 (단계 정의는 lib/contentLoop.ts 한 곳).
-// - 주소에 하위 탭을 남긴다: /data/trend#detect · #recommend · #handoff · #result (없으면 감지). 옛 #trend/<단계> 주소는 Data.tsx가 새 주소로 옮긴다
+// 트렌드&콘텐츠 화면 (/data/trend): 콘텐츠 루프 4단계와 같은 하위 탭 4개 + 맨 끝 "데이터 출처"(루프와 별개) (정의는 lib/contentLoop.ts 한 곳).
+// - 주소에 하위 탭을 남긴다: /data/trend#detect · #recommend · #handoff · #result · #sources(데이터 출처, 루프와 별개) (없으면 감지). 옛 #trend/<단계> 주소는 Data.tsx가 새 주소로 옮긴다
 // - 루프 띠의 단계를 누르면 그 단계가 속한 하위 탭으로 간다. 루프 띠는 모든 하위 탭 위에 있다
 // - 1 감지: 요약 카드 3개(오늘 가장 큰 화제·기획안에 쓸 수 있는 트렌드·다가오는 시즌) → 카테고리 버튼(지금 인기, 고른 칸만 그림)
 //   → 맨 아래 급상승 한 줄 목록(trend_scan·trend_candidates). 그래프 없음. YouTube 속도 목록은 화면을 줄이려고 뺐다
@@ -324,15 +325,15 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
 
   return (
     <div className="space-y-5">
-      <ContentLoop trend={loopTrend} probes={{ trend_scan: trendProbe, trend_insight_brief: briefProbe, campaign_effect: loopCampaignProbe }} active={stageOf(tab.stages[0]).no} onSelect={openStage} />
+      <ContentLoop trend={loopTrend} probes={{ trend_scan: trendProbe, trend_insight_brief: briefProbe, campaign_effect: loopCampaignProbe }} active={tab.stages.length ? stageOf(tab.stages[0]).no : 0} onSelect={openStage} />
 
-      {/* 하위 탭 4개: 감지 → 추천 → 넘김 → 성과 (루프 4단계와 같다, lib/contentLoop.ts TREND_TABS) */}
+      {/* 하위 탭: 감지 → 인사이트 → 넘김 → 성과 (루프 4단계와 같다) + 데이터 출처 (lib/contentLoop.ts TREND_TABS) */}
       <div role="tablist" aria-label="트렌드&콘텐츠 단계" className="flex w-full gap-1 overflow-x-auto rounded-2xl bg-surface p-1 ring-1 ring-ink-100">
         {TREND_TABS.map((t, i) => (
           <button key={t.key} type="button" role="tab" id={`trend-sub-${t.key}`} aria-selected={tab.key === t.key} aria-controls={`trend-sub-panel-${t.key}`}
             onClick={() => openTab(t)}
             className={`flex-1 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${tab.key === t.key ? "bg-brand-600 text-white" : "text-ink-700 hover:bg-ink-100"}`}>
-            {i + 1} {t.title}
+            {t.stages.length ? `${i + 1} ` : ""}{t.title}
           </button>
         ))}
       </div>
@@ -350,6 +351,9 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
             // 인사이트 브리프(trend_insight_brief) + 맨 아래 "참고용 예시 N개" 접힘(숏츠 광고 예시 아이디어, promo_concepts)
             <InsightBrief state={briefRes.state} examplesCount={promoOut ? promoOut.concepts.length : null}
               examples={<PromoConcepts state={promoRes.state} popular={popularOut} onRegenerate={promoRes.reload} />} />
+          ) : t.key === "sources" ? (
+            // 데이터 출처 (루프와 별개): 회사 이해 · 수집 계획 · 출처 현황. 처음 열 때 받는다
+            <DataSources />
           ) : t.key === "handoff" ? (
             // 마케팅·영상 제작으로 넘기기: 아직 준비 중
             <PreparingStage stage={stageOf("handoff")} />

@@ -401,3 +401,10 @@ def test_category_groups_count_formats() -> None:
     cat = ss.group_stats(items, "category", ["IT"], config)[0]
     assert [(f.name, f.count) for f in cat.formats] == [("정보·팁", 2), ("리액션", 1)]
     assert ss.group_stats(items, "format", ["정보·팁"], config)[0].formats == []
+
+
+def test_overall_median_is_over_all_shorts(tmp_path: Path) -> None:
+    popular = [_stat(f"p{i}", 100 * (i + 1), 30) for i in range(3)]
+    out = _run(_env(tmp_path, popular, "search_calls = 0\n"), FakeYouTube())
+    # 최신 스냅샷 조회수(100·200·300 + 360)의 중앙값. 카테고리 배수의 분모
+    assert out.median_views == 560.0 and out.median_views_count == 3

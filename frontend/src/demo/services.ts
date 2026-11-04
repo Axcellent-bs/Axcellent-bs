@@ -126,7 +126,6 @@ export const SERVICES: Service[] = [
       { href: '/planning/requests', label: '요청' },
       { href: '/planning/proposals', label: '기획 제안' },
       { href: '/planning/work', label: '문서·기획서' },
-      { href: '/planning/agents', label: '에이전트 대화' },
     ],
   },
   {
@@ -136,7 +135,6 @@ export const SERVICES: Service[] = [
     children: [
       { href: '/dev/tasks', label: '작업 현황' },
       { href: '/dev/work', label: '작업' },
-      { href: '/dev/agents', label: '에이전트 대화' },
       { href: '/dev/metrics', label: '지표' },
     ],
   },
@@ -150,7 +148,7 @@ export const SERVICES: Service[] = [
 export const agentName = (s: Service) => AGENTS.find((g) => g.id === s.agent)?.name
 
 /** 서비스를 고르지 않아도 모두 쓰는 화면. 할 일함은 꺼진 서비스로 가던 일이 사람에게 쌓이는 곳이라 어느 서비스를 샀든 보인다 */
-export const SHARED_PATHS = ['/handoffs', '/agents/chat', '/agents/office']
+export const SHARED_PATHS = ['/handoffs', '/agents/chat', '/agents/office', '/connections']
 
 export const matchPath = (base: string, path: string) =>
   base === '/' ? path === '/' : path === base || path.startsWith(`${base}/`)

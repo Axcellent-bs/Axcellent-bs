@@ -535,10 +535,19 @@ def test_ltv_is_reference_only_and_does_not_change_the_verdict() -> None:
 
 
 def test_budget_follows_last_month_result(kit: Any) -> None:
-    rows = [kit.order("o1", kit.at("2026-09-10"), [("s", "book", 1, 1_000_000)], buyer="b")]
-    got = cp.budget_from_last_month(_books(rows), TODAY)
-    # 수수료 100,000 − PG 31,000 = 69,000의 30%
-    assert (got["amount_krw"], got["provisional"]) == (20_700, False)
+    from finance_agent import closing
+    from finance_agent import finance_config as fc
+
+    rows = [
+        kit.order(f"o{n}", kit.at(f"2026-09-{n:02d}"), [("s", "book", 1, 50_000)], buyer="b")
+        for n in range(1, 21)
+    ]
+    books = _books(rows)
+    net = closing.compute_totals(
+        books, fc.day_start(date(2026, 9, 1)), fc.day_start(date(2026, 10, 1))
+    ).net_result
+    got = cp.budget_from_last_month(books, TODAY)
+    assert (got["amount_krw"], got["provisional"]) == (fc.rate_amount(net, 0.3), False)
     assert "2026-09" in got["basis"]
 
 

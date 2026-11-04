@@ -261,13 +261,34 @@ def fallback_budget() -> dict[str, Any]:
     }
 
 
-def budget_from_last_month(books: Books, today: date) -> dict[str, Any]:
-    """월 예산 = 직전 달 영업 결과 × 비율. 자료가 없으면 임시값, 적자면 0원."""
+def budget_from_last_month(
+    books: Books,
+    today: date,
+    closings: dict[tuple[str, str], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """월 예산 = 직전 달 영업 결과 × 비율. 확정한 달은 확정 숫자를 쓴다. 자료가 없으면 임시값.
+
+    판매일이 적은 달(서비스를 막 시작한 달)로 낸 값은 한 달을 대표하지 못해 임시값으로 표시한다.
+    """
     from finance_agent import closing  # closing이 LLM 등을 읽어 여기서만 부른다
 
-    ratio = load_rules().brake.budget_ratio_of_last_month
+    book = load_rules()
+    ratio = book.brake.budget_ratio_of_last_month
     this_month = today.replace(day=1)
     last_month = (this_month - timedelta(days=1)).replace(day=1)
+    name = last_month.isoformat()[:7]
+    days = closing.sales_days(books, last_month, this_month)
+    short = days < book.closing.budget_min_sales_days
+    note = f", 판매 {days}일치라 임시값" if short else ""
+    snap = ((closings or {}).get(("month", last_month.isoformat())) or {}).get("snapshot")
+    if snap:
+        net = next((x["amount"] for x in snap["lines"] if x["code"] == "net_result"), None)
+        if net is not None:
+            return {
+                "amount_krw": max(fc.rate_amount(net, ratio), 0),
+                "basis": f"{name} 확정 영업 결과 {fc.won(net)}의 {ratio:.0%}{note}",
+                "provisional": short,
+            }
     if closing.unknown_codes(books) & {"commission_revenue", "pg_fee"}:
         return fallback_budget()
     totals = closing.compute_totals(books, fc.day_start(last_month), fc.day_start(this_month))
@@ -275,9 +296,8 @@ def budget_from_last_month(books: Books, today: date) -> dict[str, Any]:
         return fallback_budget()
     return {
         "amount_krw": max(fc.rate_amount(totals.net_result, ratio), 0),
-        "basis": f"{last_month.isoformat()[:7]} 영업 결과 {fc.won(totals.net_result)}의 "
-        f"{ratio:.0%}",
-        "provisional": False,
+        "basis": f"{name} 영업 결과 {fc.won(totals.net_result)}의 {ratio:.0%}{note}",
+        "provisional": short,
     }
 
 

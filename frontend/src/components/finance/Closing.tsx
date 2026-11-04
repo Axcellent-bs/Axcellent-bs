@@ -24,7 +24,24 @@ export function ClosingSection({ tick, onChanged, focus }: {
   }, [focus]);
   const res = useResource(`${period}:${date}`, () => finance.closing(period, date || null), tick);
   const [confirming, setConfirming] = useState(false);
+  const [reason, setReason] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
+
+  async function adjust(report: ClosingReport) {
+    if (!report.adjustment_proposal) return;
+    setConfirming(true);
+    setProblem(null);
+    try {
+      const next = await finance.adjustClosing(report.date, reason.trim(), report.adjustment_proposal.signature);
+      res.set(() => next);
+      setReason("");
+      onChanged();
+    } catch (e) {
+      setProblem((e as Error).message);
+    } finally {
+      setConfirming(false);
+    }
+  }
 
   async function confirm(report: ClosingReport) {
     setConfirming(true);
@@ -105,16 +122,49 @@ export function ClosingSection({ tick, onChanged, focus }: {
                   <Chip label={r.commentary_source === "llm" ? "AI가 씀" : "템플릿 문장"} tone={r.commentary_source === "llm" ? TONE.info : TONE.muted} />
                   <p className="mt-1.5 whitespace-pre-line">{plainText(r.commentary) || "설명이 없습니다."}</p>
                 </div>
+                {(r.adjustments ?? []).map((a) => <p key={a.at} className="mt-2 text-sm text-ink-700">{a.posted_month}에 조정 반영 · {a.by} · {a.reason}</p>)}
+                {(r.prior_adjustments ?? []).length > 0 && (
+                  <div className="mt-2 rounded-2xl bg-surface-2 px-4 py-3 text-sm text-ink-700">
+                    <p className="font-medium text-ink-900">이번 달에 반영한 전기 조정</p>
+                    {r.prior_adjustments!.map((a, n) => <p key={`${a.for_month}-${n}`}>{a.for_month} · {signedKrw(a.lines.find((x) => x.code === "net_result")?.diff ?? 0)} · {a.reason}</p>)}
+                    {r.net_after_adjustments != null && <p className="mt-1 font-medium tabular-nums text-ink-900">조정 후 영업 결과 {krw(r.net_after_adjustments)}</p>}
+                  </div>
+                )}
                 <div className="mt-3"><AppliedRules rules={r.applied_rules} /></div>
 
                 <div className="mt-4 rounded-2xl border border-ink-100 px-4 py-3">
                   {r.status === "confirmed" ? (
-                    <p className="text-sm text-emerald-800">이 기간의 결산은 확정됐습니다. 확정한 숫자는 보고에 그대로 씁니다.</p>
+                    <div className="space-y-2 text-sm">
+                      <p className="text-emerald-800">{r.snapshot_at ? "이 기간의 결산은 확정됐습니다. 위 숫자는 확정할 때 저장한 값입니다." : "이 기간의 결산은 확정됐습니다. 예전 확정이라 숫자가 저장되지 않아 지금 장부로 계산한 값입니다."}</p>
+                      {(r.close_warnings ?? []).map((w) => <p key={w.code} className="text-ink-700">확정할 때 경고: {w.message}</p>)}
+                      {(r.drift ?? []).length > 0 && (
+                        <div className="rounded-xl bg-amber-50 px-3 py-2 text-amber-900">
+                          <p className="font-medium">확정 뒤 장부 숫자가 달라졌습니다. 확정 숫자는 그대로 두고, 차이는 발생한 기간에 조정하세요.</p>
+                          <ul className="mt-1 space-y-0.5 tabular-nums">
+                            {r.drift!.map((x) => <li key={x.code}>{x.label}: 확정 {krw(x.confirmed)} → 지금 {krw(x.current)} ({signedKrw(x.diff)})</li>)}
+                          </ul>
+                          {r.adjustment_proposal ? (
+                            <div className="mt-2 space-y-2">
+                              <p>조정 분개안 (영업 결과 {signedKrw(r.adjustment_proposal.net)})</p>
+                              <ul className="space-y-0.5 tabular-nums">
+                                {r.adjustment_proposal.journal.map((j, n) => <li key={`${j.account}-${n}`}>{j.account}: 차변 {krw(j.debit)} / 대변 {krw(j.credit)}</li>)}
+                              </ul>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <input className="field min-w-0 flex-1" aria-label="조정 이유" placeholder="조정 이유" value={reason} onChange={(e) => setReason(e.target.value)} />
+                                <button className="btn-primary" disabled={!humanTokenSet || confirming || !reason.trim()} onClick={() => adjust(r)}>이번 달에 조정 반영</button>
+                              </div>
+                            </div>
+                          ) : <p className="mt-1">일 결산은 속보입니다. 차이는 월 결산에서 조정합니다.</p>}
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <>
                       <p className="text-sm text-ink-700">숫자를 확인했으면 결산을 확정하세요. 확정하면 이 기간 숫자를 보고 기준으로 고정합니다(돈이 움직이지는 않습니다).</p>
+                      {(r.close_warnings ?? []).map((w) => <p key={w.code} className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{w.message}</p>)}
                       <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <button className="btn-primary" disabled={!humanTokenSet || confirming} onClick={() => confirm(r)}>{confirming ? "확정하는 중…" : "결산 확정"}</button>
+                        <button className="btn-primary" disabled={!humanTokenSet || confirming || r.closable === false} onClick={() => confirm(r)}>{confirming ? "확정하는 중…" : "결산 확정"}</button>
+                        {r.closable === false && <span className="text-sm text-ink-500">아직 끝나지 않은 기간이라 끝난 뒤 확정할 수 있습니다.</span>}
                         {!humanTokenSet && <span className="text-sm text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 버튼이 꺼져 있습니다.</span>}
                       </div>
                     </>

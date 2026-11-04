@@ -283,6 +283,30 @@ export const vcsApi = (base: string) => {
   }
 }
 
+// ---- GitHub 계정 연결 (dev `/api/planning/vcs/github-account`): 앱 설치 하나 → 레포 자동으로 찾기 → 사람이 켠 레포만 쓴다
+export interface GithubRepo { full_name: string; default_branch: string; private: boolean; enabled: boolean }
+export interface GithubAccount {
+  connected: boolean
+  app_id?: string
+  installation_id?: string
+  base_url?: string
+  key_set?: boolean
+  selection?: string // all · selected
+  permissions?: Record<string, string>
+  repos: GithubRepo[]
+  checked_at?: string
+  error?: string
+  warnings: string[]
+}
+export interface GithubAccountInput { app_id: string; installation_id: string; private_key?: string; base_url?: string }
+export const githubAccountApi = (base: string) => ({
+  get: () => call<GithubAccount>(base, '/vcs/github-account'),
+  save: (b: GithubAccountInput) => call<GithubAccount>(base, '/vcs/github-account', post(b, 'admin')),
+  refresh: () => call<GithubAccount>(base, '/vcs/github-account/refresh', post({}, 'admin')),
+  setRepo: (repo: string, enabled: boolean) => call<GithubAccount>(base, '/vcs/github-account/repos', post({ repo, enabled }, 'admin')),
+  remove: () => call<GithubAccount>(base, '/vcs/github-account/delete', post({}, 'admin')),
+})
+
 // ---- 요청 작업 코딩 방식 (dev 서비스 `/api/planning/coding-settings`). 회사 설정 + 서버 AI 체험 한도
 export type CodingSetting = 'auto' | 'agent' | 'subscription'
 export interface CodingSettings {

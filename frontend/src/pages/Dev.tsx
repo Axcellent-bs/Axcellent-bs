@@ -1,7 +1,7 @@
 // 개발·배포 화면(/dev). 확정된 기획서를 작업·PR로 만들고, 교차검증·배포·사후관리까지 맡는다.
-// 메뉴(사이드바 하위 탭 demo/services.ts) = 작업 현황(첫 화면)·작업(작업·PR·AI 교차검증·운영·배포·사후관리)·에이전트 대화·지표. 틀은 기획 화면과 같이 쓴다(components/planning-common/Shell.tsx).
+// 메뉴(사이드바 하위 탭 demo/services.ts) = 작업 현황(첫 화면)·작업(작업·PR·AI 교차검증·운영·배포·사후관리)·지표. 에이전트 대화는 메뉴에서 빼고 주소로만 연다. 틀은 기획 화면과 같이 쓴다(components/planning-common/Shell.tsx).
 import { useState } from 'react'
-import { DevToolsDialog } from '@/demo/DevTools'
+import { Link, useRouter } from '@/lib/nav'
 import { IconLink } from '@/components/icons'
 import { PlanningShell, type Section, type View } from '@/components/planning-common/Shell'
 import { prSlug, toPath } from '@/components/planning-common/links'
@@ -22,7 +22,7 @@ const SECTIONS: Record<string, Section> = {
     { id: 'ops', label: '운영·배포' },
     { id: 'aftercare', label: '사후관리' },
   ] },
-  agents: { label: '에이전트 대화', icon: 'send', tabs: [] },
+  agents: { label: '에이전트 대화', icon: 'send', tabs: [], hidden: true },  // 메뉴에서 뺌 (주소로만 연다)
   talk: { label: '소통', icon: 'send', tabs: [], hidden: true },
   metrics: { label: '지표', icon: 'dashboard', tabs: [
     { id: 'autonomy', label: '자동 처리 범위' },
@@ -34,7 +34,7 @@ const SECTIONS: Record<string, Section> = {
 // 제목 줄 오른쪽: 레포 승인 대기 · AI 작업 중 · AI와 대화 · 연결(본인 Claude·레포·개발 도구)
 function DevTools({ v }: { v: View }) {
   const { state, connected, example } = v
-  const [tools, setTools] = useState(false)
+  const router = useRouter()
   const [chatOpen, setChatOpen] = useState(false)
   const chat = useDevChat(state, connected)
   const repoWait = repoPending(state)
@@ -48,12 +48,11 @@ function DevTools({ v }: { v: View }) {
         <button type="button" className="chip amber" onClick={() => { chat.select(chat.working[0]); setChatOpen(true) }}>AI 작업 중 {chat.working.length}</button>
       )}
       <button type="button" className="btn-primary px-3 py-1" disabled={!connected || example} title={example ? '예시 모드에서는 쓸 수 없어요' : connected ? '개발 에이전트' : '개발·배포 서버 꺼짐'} onClick={() => setChatOpen(true)}>AI와 대화</button>
-      <button type="button" className="btn-quiet px-2 py-1" title="연결 (AI·레포·개발 도구)" aria-label="연결 (AI·레포·개발 도구)" onClick={() => setTools(true)}>
+      <Link href="/connections" className="btn-quiet px-2 py-1" title="연결 (형상관리·AI)" aria-label="연결 (형상관리·AI)">
         <IconLink size={20} />
-      </button>
-      {tools && <DevToolsDialog onClose={() => setTools(false)} />}
+      </Link>
       {chatOpen && (
-        <ChatPanel s={state} chat={chat} connected={connected} onClose={() => setChatOpen(false)} onTools={() => { setChatOpen(false); setTools(true) }} />
+        <ChatPanel s={state} chat={chat} connected={connected} onClose={() => setChatOpen(false)} onTools={() => { setChatOpen(false); router.push('/connections') }} />
       )}
     </>
   )

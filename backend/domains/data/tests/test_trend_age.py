@@ -60,7 +60,8 @@ def _env(tmp_path: Path, extra: str = "") -> dict[str, str]:
 
 
 def _run(tmp_path: Path, naver: AgeNaver, *, keywords: list[str] | None = None,
-         extra: str = "", popular=(), season=(), board: TodayBoard | None = None):  # noqa: ANN001, ANN202  # fmt: skip
+         extra: str = "", popular=(), season=(), board: TodayBoard | None = None,
+         caller: str = "trend_age", now: datetime = NOW):  # noqa: ANN001, ANN202  # fmt: skip
     return asyncio.run(
         age.trend_age(
             TrendAgeRequest(keywords=keywords or []),
@@ -69,7 +70,8 @@ def _run(tmp_path: Path, naver: AgeNaver, *, keywords: list[str] | None = None,
             popular_items=popular,
             season_keywords=season,
             board=board or TodayBoard(),
-            now=NOW,
+            now=now,
+            caller=caller,
         )  # fmt: skip
     ).output
 
@@ -84,13 +86,17 @@ def test_ratio_per_age_band_and_the_top_band(tmp_path: Path) -> None:
     assert bands["20대"].status == "rising" and bands["20대"].ratio is not None
     assert bands["20대"].ratio > 2.5 and bands["10대"].status == "normal"
     assert topic.top_band == "20대" and topic.top_ratio == bands["20대"].ratio
-    assert out.status == "known" and out.calls_used == 5 and out.call_cap == 80
+    assert out.status == "known" and out.calls_used == 5 and out.call_cap == 200  # 기본 상한 200
     assert "상대값" in out.note and "20대" in out.summary
 
 
+# 우선 몫(기본 120)이 상한 12보다 커서 우선 아닌 호출자 몫이 0이 되므로,
+# 이 테스트는 우선 몫 0으로 전체 상한만 본다
 def test_daily_cap_marks_only_the_topics_that_do_not_fit(tmp_path: Path) -> None:
     naver = AgeNaver(spike=set())
-    out = _run(tmp_path, naver, keywords=["a", "b", "c"], extra="daily_calls = 12\n")
+    out = _run(
+        tmp_path, naver, keywords=["a", "b", "c"], extra="daily_calls = 12\npriority_reserve = 0\n"
+    )
     a, b, c = out.items
     assert a.status == "known" and b.status == "known"
     assert (
@@ -159,3 +165,66 @@ def test_no_targets_gives_a_reason(tmp_path: Path) -> None:
     out = _run(tmp_path, AgeNaver(spike=set()))
     assert out.status == "unknown" and out.items == []
     assert out.reason == "볼 주제가 없음 (오늘 급상승 판정·지금 인기·시즌 키워드가 모두 없음)"
+
+
+class LimitedNaver(AgeNaver):
+    """네이버 전체 하루 상한(daily_limit)과 오늘 호출 수(calls_today)를 흉내 낸다."""
+
+    def __init__(self, daily_limit: int, already: int) -> None:
+        super().__init__(set())
+        self.daily_limit = daily_limit
+        self.calls_today = already
+
+
+def test_cache_is_reused_within_cache_days_and_expires_after(tmp_path: Path) -> None:
+    naver = AgeNaver(spike={("5", "6")})
+    _run(tmp_path, naver, keywords=["t1"])
+    assert len(naver.calls) == 5
+    two_days = _run(tmp_path, naver, keywords=["t1"], now=NOW + timedelta(days=2))
+    assert len(naver.calls) == 5 and two_days.cached  # 3일 안이면 다시 부르지 않는다
+    three_days = _run(tmp_path, naver, keywords=["t1"], now=NOW + timedelta(days=3))
+    assert len(naver.calls) == 10 and not three_days.cached  # 3일이 지나면 새로 부른다
+    one = "cache_days = 1\n"
+    _run(tmp_path / "s", naver, keywords=["t1"], extra=one)
+    again = _run(tmp_path / "s", naver, keywords=["t1"], extra=one, now=NOW + timedelta(days=1))
+    assert len(naver.calls) == 20 and not again.cached  # 설정한 일수를 따른다
+
+
+def test_non_priority_callers_get_only_the_share_left_after_the_reserve(tmp_path: Path) -> None:
+    naver = AgeNaver(spike=set())
+    extra = "daily_calls = 20\npriority_reserve = 10\n"  # 우선 아닌 몫 = 10번 = 주제 2개
+    out = _run(tmp_path, naver, keywords=["a", "b", "c"], extra=extra, caller="promo_concepts")
+    assert [i.status for i in out.items] == ["known", "known", "unknown"]
+    assert "하루 네이버 호출 상한(10번)에 닿아" in (out.items[2].reason or "")
+    assert "우선 몫" in (out.items[2].reason or "")
+    assert len(naver.calls) == 10
+    # 우선 호출자는 남은 몫(10번)을 마저 쓴다
+    top = _run(tmp_path, naver, keywords=["d", "e", "f"], extra=extra, caller="trend_insight_brief")
+    assert [i.status for i in top.items] == ["known", "known", "unknown"]
+    assert top.items[2].reason == "하루 네이버 호출 상한(20번)에 닿아 이 주제는 보지 않음"
+    assert top.calls_used == 20
+
+
+def test_calls_by_caller_and_the_limits_line(tmp_path: Path) -> None:
+    naver = AgeNaver(spike=set())
+    _run(tmp_path, naver, keywords=["a", "b"], caller="trend_insight_brief")
+    out = _run(tmp_path, naver, keywords=["c"], caller="promo_concepts")
+    assert out.calls_by_caller == {"promo_concepts": 5, "trend_insight_brief": 10}
+    assert out.limits == [
+        "연령대 하루 상한 200번 중 promo_concepts 5번·trend_insight_brief 10번 사용"
+        " (브리프·카드 우선 몫 120번)"
+    ]
+    cached = _run(tmp_path, naver, keywords=["a"], caller="trend_age")  # 캐시 히트도 채워진다
+    assert cached.cached and cached.calls_by_caller == out.calls_by_caller
+
+
+def test_naver_overall_limit_keeps_a_reserve_for_other_skills(tmp_path: Path) -> None:
+    naver = LimitedNaver(daily_limit=1000, already=690)  # 남기는 몫 300 -> 앞으로 10번만
+    out = _run(tmp_path, naver, keywords=["a", "b", "c"], caller="trend_insight_brief")
+    a, b, c = out.items
+    assert a.status == "known" and b.status == "known"
+    assert c.reason is not None and "하루 네이버 호출 상한(1000번)에 닿아" in c.reason
+    assert "다른 기능 몫 300번" in c.reason
+    none = _run(tmp_path / "r", LimitedNaver(1000, 0), keywords=["x"],
+                extra="naver_reserve = 1000\n", caller="trend_insight_brief")  # fmt: skip
+    assert none.items[0].status == "unknown"

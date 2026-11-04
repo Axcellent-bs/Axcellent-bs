@@ -408,3 +408,61 @@ def test_brief_fills_shorts_format_from_category_with_source_and_samples(tmp_pat
     assert diary.shorts_format_source == "category"  # 급상승 주제도 분류(IT)로 카테고리 단계
     news = by["한국철강"]  # 뉴스·사건 숏츠 통계 없음 → 전체
     assert news.shorts_format_source == "all" and news.shorts_format == "정보·팁"
+
+
+# ------------------------------------------------ 연령대 전체 (trend_age 결과 재사용)
+
+
+def test_every_insight_carries_all_age_bands_without_extra_calls(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    async def ages(keywords: list[str]) -> TrendAgeOutput:
+        calls.append(list(keywords))
+        bands = [
+            AgeBandTrend(band="10대", status="normal", ratio=1.1),
+            AgeBandTrend(band="20대", status="rising", ratio=2.4),
+            AgeBandTrend(band="30대", status="unknown", reason="빈 시계열"),
+        ]
+        items = [AgeTopic(keyword=k, status="known", top_band="20대", top_ratio=2.4, bands=bands)
+                 for k in keywords if k == "리그오브레전드"]  # fmt: skip
+        return TrendAgeOutput(status="known", items=items)
+
+    out, _ = _run(tmp_path, BriefLLM(), ages=ages)
+    assert len(calls) == 1  # 연령대 전체도 브리프가 이미 부른 trend_age 한 번에서
+    lol = next(i for i in out.insights if i.topic == "리그오브레전드")
+    assert [(b.band, b.ratio, b.status) for b in lol.age_bands] == [
+        ("10대", 1.1, "normal"), ("20대", 2.4, "rising"), ("30대", None, "unknown"),
+    ]  # fmt: skip
+    assert lol.age_bands[2].reason == "빈 시계열" and lol.target_age == "20대"
+    news = next(i for i in out.insights if i.topic == "한국철강")
+    assert news.age_bands == [] and news.target_age_reason  # 연령대를 받지 못하면 빈 목록 + 이유
+
+
+# ------------------------------------------------ 기회 가설 카드 (선택 칸)
+
+
+def test_brief_attaches_opportunity_cards_or_says_why(tmp_path: Path) -> None:
+    from data_agent.skills.domain_opportunity import OpportunityResult
+
+    async def none_fn():  # noqa: ANN202
+        return OpportunityResult([], "수집 계획이 없음 (LLM 설정이 없음)", None, [])
+
+    async def broken():  # noqa: ANN202
+        raise RuntimeError("down")
+
+    def run(fn, sub: str):  # noqa: ANN001, ANN202
+        return asyncio.run(
+            brief.make_brief(
+                TrendInsightBriefRequest(), BriefLLM(), env=_env(tmp_path / sub), popular=POPULAR,
+                popular_reason=None, rising=[], age_fn=_ages([]), promo=None, catalog=CATALOG,
+                now=NOW, opportunities_fn=fn,
+            )
+        ).output  # fmt: skip
+
+    out = run(none_fn, "a")
+    assert out.opportunities == [] and out.opportunities_reason.startswith("수집 계획이 없음")
+    assert "source_plan" in out.sources and out.insights  # 인사이트는 그대로
+    bad = run(broken, "b")
+    assert bad.opportunities_reason == "기회 가설 카드를 만들지 못함 (RuntimeError)"
+    plain = run(None, "c")
+    assert plain.opportunities_reason == "기회 가설 카드를 요청하지 않음"

@@ -26,7 +26,7 @@
 
 ## Claude Code에 붙이기
 
-운영자에게 내 **작업 대기열 토큰**을 받습니다 (서버 `DEV_WORK_TOKENS`의 `이름:토큰`, 로컬은 `run_all.sh`가 만든 `backend/.data/tokens.env`의 `WORK_TOKEN`, 데모 목 모드는 `human:<내 이름>`).
+서버 관리자에게 내 **작업 대기열 토큰**을 받습니다 (서버 `DEV_WORK_TOKENS`의 `이름:토큰`, 로컬은 `run_all.sh`가 만든 `backend/.data/tokens.env`의 `WORK_TOKEN`, 데모 목 모드는 `human:<내 이름>`).
 
 - 이 토큰은 작업 목록·가져가기·진행·PR 알리기·내려놓기만 합니다. 관문 승인·머지·재무 같은 사람 결정은 못 합니다. MCP 토큰은 내 PC의 `~/.claude.json`에 평문으로 남아 같은 PC의 다른 앱이 읽을 수 있기 때문입니다.
 - `run_all.sh`로 켠 서버는 작업 토큰만 받습니다(`DEV_WORK_ALLOW_HUMAN=0`이 기본). 예전처럼 사람 토큰으로 붙인 연결은 화면의 "내 Claude 연결" 명령으로 다시 붙입니다. 한동안 예전처럼 쓰려면 `DEV_WORK_ALLOW_HUMAN=1`.

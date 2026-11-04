@@ -63,7 +63,7 @@ DB_ENV = "DATA_INSIGHT_BRIEF_DB"
 DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "insight_brief.db"  # backend/.data
 REFERENCE = "참고용"
 # 브리프 칸 모양이 바뀌면 올린다 (오늘 캐시를 새 모양으로 다시 묶게)
-SHAPE = "shorts-source"
+SHAPE = "shorts-source,age-bands,opportunities"
 BRIEF_LIMITS = (
     "평가셋이 없어 인사이트가 맞는지 재지 않는다",
     "네이버 값은 요청마다 최댓값이 100인 상대값이다",
@@ -545,6 +545,8 @@ def build_insights(
                 target_age=age.top_band if age else None,
                 target_age_ratio=age.top_ratio if age else None,
                 target_age_status=band.status if band else None,
+                # 연령대별 배수 전체 (trend_age 결과 그대로, 추가 네이버 호출 없음)
+                age_bands=list(age.bands) if age is not None else [],
                 target_age_reason=(
                     None
                     if age is not None and age.top_band
@@ -727,6 +729,7 @@ async def make_brief(
     now: datetime | None = None,
     context_id: str | None = None,
     store: BriefStore | None = None,
+    opportunities_fn: Any = None,
 ) -> BriefResult:
     """기존 skill 결과를 묶어 인사이트 3~7개 (하루 캐시). 상태를 바꾸지 않는다(브리프 기록만)."""
     from data_agent.skills.content_recommend import load_config as load_recommend
@@ -772,9 +775,11 @@ async def make_brief(
         first = pick(ready, config, n + config.age_topics_extra)
         company = [c for c in company if not c.pending()]
         ask = [*first, *company]
+        age_limits: list[str] = []
         try:
             age_out = await age_fn([c.topic for c in ask])
             queries.append(f"trend_age keywords={len(ask)}")
+            age_limits = list(getattr(age_out, "limits", []))
             by_age = {_norm(i.keyword): i for i in age_out.items}
             for c in ask:
                 c.age = by_age.get(_norm(c.topic))
@@ -852,6 +857,7 @@ async def make_brief(
                      "promo_concepts(오늘 저장된 것만)", "product_link"],
             limits=list(BRIEF_LIMITS),
         )  # fmt: skip
+        out.limits += [x for x in age_limits if x not in out.limits]
         if promo is None:
             out.limits.append("오늘 만든 예시 아이디어가 없어 example_ideas가 비어 있다")
         if not rising_company:
@@ -861,6 +867,17 @@ async def make_brief(
                 " 이상 오른 것이 없음"
             )
         out.summary = summary(out)
+        if opportunities_fn is not None:  # 기회 가설 카드 (도메인 프로필 → 수집 계획, 선택 칸)
+            try:
+                opp = await opportunities_fn()
+                out.opportunities, out.plan_id = opp.cards, opp.plan_id
+                out.opportunities_reason = opp.reason
+                queries += opp.queries
+                out.sources += ["domain_profile", "source_plan"]
+            except Exception as error:  # 카드를 못 만들어도 브리프는 준다
+                out.opportunities_reason = f"기회 가설 카드를 만들지 못함 ({type(error).__name__})"
+        else:
+            out.opportunities_reason = "기회 가설 카드를 요청하지 않음"
         store.put(day, rules, out, now)
         return BriefResult(out, as_evidence(out, queries, now))
     finally:

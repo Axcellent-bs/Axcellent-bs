@@ -217,7 +217,7 @@ def test_dev_agent_card_format_and_served() -> None:
     assert (card.name, card.owner, card.url) == ("dev", "예진", "http://dev:8111/a2a")
     skills = {s.id: s for s in card.skills}
     required = {"find_related_prs", "link_incident", "verify_rollback_target"}
-    hr_links = {"list_in_progress", "verify_handover"}
+    hr_links = {"list_in_progress", "list_dev_outcomes", "verify_handover"}
     assert set(skills) == required | hr_links | {
         "start_dev",
         "receive_release_order",
@@ -232,6 +232,8 @@ def test_dev_agent_card_format_and_served() -> None:
     assert skills["find_related_prs"].allowed_requesters == ["orchestrator", "infra", "data"]
     assert skills["link_incident"].allowed_requesters == ["orchestrator", "infra"]
     assert skills["list_in_progress"].allowed_requesters == ["hr", "orchestrator"]
+    assert skills["list_dev_outcomes"].grade == "read"
+    assert skills["list_dev_outcomes"].allowed_requesters == ["hr", "orchestrator"]
     assert skills["verify_handover"].allowed_requesters == ["safety"]
     assert skills["start_dev"].allowed_requesters == ["planning"]
     for skill in card.skills:

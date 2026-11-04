@@ -99,6 +99,70 @@ class ListInProgressOutput(AxModel):
     unavailable: str | None = None
 
 
+class ListDevOutcomesInput(AxModel):
+    """개발 작업 결과 (인사·총괄의 부서·에이전트 평가 근거, read).
+
+    `since`·`until`은 작업이 마지막으로 바뀐 시각 기준 (둘 다 없으면 전부).
+    `coder`: `agent`(서버 AI만) · 사람 이름(그 사람의 내 Claude가 가져간 작업만) · 없으면 전부."""
+
+    since: UtcDatetime | None = None
+    until: UtcDatetime | None = None
+    coder: str | None = None
+
+
+class DevOutcome(AxModel):
+    """코딩 작업 하나의 결과. 숫자는 개발 서비스 기록 그대로다 (받는 쪽이 다시 만들지 않는다).
+
+    - `mode`: agent = 서버 AI(회사 키·토큰을 셈),
+      subscription = 개발자 본인 Claude(토큰은 개인 구독이라 0)
+    - `coder`: 서버 AI면 모델 이름, 내 Claude면 가져간 사람 이름
+    - `complexity`: simple(바뀐 줄·파일이 적고 한 번에 통과) · complex · unknown(PR 없음)
+    - `review_mismatches`: 리뷰가 "불일치"로 돌려보낸 횟수, `attempts`: 코드를 쓴 횟수(첫 작성 1)
+    - `held`: 자동으로 못 가고 사람 확인을 거쳤는지 (관문 보류·자동 머지 멈춤)
+    """
+
+    task_id: str
+    spec_id: str
+    title: str
+    mode: Literal["agent", "subscription"]
+    coder: str | None = None
+    status: str
+    complexity: Literal["simple", "complex", "unknown"]
+    changed_lines: int | None = None
+    changed_files: int | None = None
+    attempts: int = 0
+    llm_calls: int = 0
+    llm_tokens: int = 0
+    review_mismatches: int = 0
+    held: bool = False
+    pr_number: int | None = None
+    merged: bool = False
+    merged_at: UtcDatetime | None = None
+    updated_at: UtcDatetime | None = None
+
+
+class DevOutcomeSummary(AxModel):
+    """`outcomes`를 코드로 센 값. 비율은 분모가 0이면 None (확인할 수 없음)."""
+
+    total: int
+    merged: int
+    failed: int
+    covered: int  # 앞 작업이 이미 반영해 PR 없이 끝남
+    by_mode: dict[str, int] = Field(default_factory=dict)
+    by_complexity: dict[str, int] = Field(default_factory=dict)
+    llm_tokens: int = 0  # 서버 AI가 쓴 토큰 합 (내 Claude는 0)
+    tokens_per_merged: float | None = None  # 서버 AI 토큰 ÷ 서버 AI 머지 건수
+    avg_attempts: float | None = None
+    first_pass_rate: float | None = None  # 리뷰 불일치 없이 머지된 비율 (머지된 것 중)
+    held_rate: float | None = None  # 사람 확인을 거친 비율
+
+
+class ListDevOutcomesOutput(AxModel):
+    outcomes: list[DevOutcome] = Field(default_factory=list)
+    summary: DevOutcomeSummary
+    collected_at: UtcDatetime  # 조회 시각 (근거)
+
+
 class VerifyHandoverInput(AxModel):
     handover_id: str
     owner_id: str  # `RosterEntry.member_id`
