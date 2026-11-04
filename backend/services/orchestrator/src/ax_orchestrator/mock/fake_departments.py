@@ -298,7 +298,8 @@ class FakeDepartments:
                 status=TaskStatus.INPUT_REQUIRED,
                 reason_code=InputReason.HUMAN_INPUT,
                 outcome="held",
-                output={"hold_reason": "over_threshold"},
+                # 실제 부서처럼 안전 관문 보류 건 번호를 함께 돌려준다
+                output={"hold_reason": "over_threshold", "review_id": f"rev_{req.skill}"},
             )
         if behavior == "dept_input" and "answers" not in req.input:
             return AgentResult(

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Loading } from "@/components/admin/bits";
 import { SupportOverviewCard } from "@/components/admin/SupportOverviewCard";
 import {
-  GRADE, STEP_STATUS, adminRelay, clock, deptKo, incidentStatus, relayEnabled, relayError,
+  GRADE, STEP_STATUS, adminRelay, clock, deptKo, holdLeft, incidentStatus, relayEnabled, relayError,
   type Incident,
 } from "@/lib/adminRelay";
 import { incidentTitle, stepLabel } from "@/lib/agentChat";
@@ -239,6 +239,34 @@ function PastRecommendation({ incident }: { incident: Incident }) {
   );
 }
 
+/** 사람 승인 대기: 남은 시간을 보여 주고 마감이 가까우면 강조한다. 승인은 안전 관문 보류 큐에서 사람이 한다 */
+function HoldNotice({ holds }: { holds: Incident["pending_holds"] }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(timer);
+  }, []);
+  const urgent = holds.some((h) => holdLeft(h, now)?.urgent);
+  return (
+    <div role="status" className={`rounded-xl p-3 text-sm ${urgent ? "bg-red-50 text-red-800" : "bg-amber-50 text-amber-800"}`}>
+      <p className="font-semibold">사람 승인 대기 {holds.length}건</p>
+      <ul className="mt-1 space-y-1">
+        {holds.map((h) => {
+          const left = holdLeft(h, now);
+          return (
+            <li key={h.step_id} className="flex flex-wrap items-center gap-2">
+              <span>{stepLabel(h.label)}</span>
+              {left && <span className={`chip ${left.urgent ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}>{left.text}</span>}
+              {h.review_id && <code className="text-[11px] opacity-70" title="안전 관문 보류 건 번호">{h.review_id}</code>}
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-2 text-xs opacity-80">승인·거절은 안전 관문 보류 큐에서 사람이 합니다. 이 화면에서는 결정하지 않습니다. 마감이 지나면 자동으로 거절됩니다.</p>
+    </div>
+  );
+}
+
 function IncidentDetail({ incident }: { incident: Incident }) {
   const shared = Object.entries(incident.shared ?? {});
   const done = incident.steps.filter((s) => s.status === "completed").length;
@@ -265,12 +293,7 @@ function IncidentDetail({ incident }: { incident: Incident }) {
             ))}
           </ul>
         )}
-        {!!incident.pending_holds.length && (
-          <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
-            <p className="font-semibold">사람 승인 대기 {incident.pending_holds.length}건</p>
-            <ul className="mt-1 list-inside list-disc">{incident.pending_holds.map((h) => <li key={h.step_id}>{stepLabel(h.label)}</li>)}</ul>
-          </div>
-        )}
+        {!!incident.pending_holds.length && <HoldNotice holds={incident.pending_holds} />}
       </section>
 
       <SimilarCases incident={incident} />

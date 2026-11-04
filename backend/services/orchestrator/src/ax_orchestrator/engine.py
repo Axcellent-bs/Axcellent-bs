@@ -14,7 +14,7 @@ import logging
 import re
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -47,6 +47,9 @@ Caller = Callable[[str, AgentRequest], Awaitable[AgentResult]]
 Publisher = Callable[[str, Incident], Awaitable[None]]
 # 이벤트를 저장한다(실패해도 이벤트 처리는 멈추지 않는다): 이벤트 -> 없음
 Persister = Callable[[Incident], None]
+# 안전 관문의 보류 건 상태를 되물어 본다: review_id -> {"status", "decided_by", ...}
+# 못 읽으면 None
+ReviewChecker = Callable[[str], Awaitable[dict[str, Any] | None]]
 # 규칙으로 안 풀릴 때만 쓰는 LLM 선택기: (skill, 후보 부서들) -> 부서 이름 또는 None
 LlmPicker = Callable[[str, list[str]], Awaitable[str | None]]
 
@@ -55,24 +58,42 @@ log = logging.getLogger("orchestrator.engine")
 TRANSFER_CODES = {ErrorCode.FORBIDDEN_SKILL.value, ErrorCode.HOP_LIMIT.value, "not_my_scope"}
 MAX_FAILED_RETRIES = 2
 MAX_CANCELED_RETRIES = 1
+MAX_EARLY_REVIEWS = 200  # 대기로 오르기 전에 먼저 온 안전 관문 결정을 담는 상한
 
 
 class Hold:
-    """사람 승인을 기다리는 단계(C 등급 보류). 총괄은 승인하지 않는다."""
+    """사람 승인을 기다리는 단계(C 등급 보류). 총괄은 승인하지 않는다.
 
-    def __init__(self) -> None:
+    `review_id`는 부서가 돌려준 안전 관문 보류 건 번호이고, 안전 관문의 결정 이벤트와 맞춰 본다.
+    """
+
+    def __init__(self, review_id: str | None = None, wait_seconds: float = 0.0) -> None:
         self.pending = True
         self.approved: bool | None = None
         self.reason = ""
+        self.decided_by: str | None = None
+        self.review_id = review_id
+        self.started_at = now()
+        self.expires_at = self.started_at + timedelta(seconds=wait_seconds)
         self.event = asyncio.Event()
 
-    def decide(self, approved: bool, reason: str) -> None:
+    def decide(self, approved: bool, reason: str, by: str | None = None) -> None:
         if not self.pending:
             return
         self.pending = False
         self.approved = approved
         self.reason = reason
+        self.decided_by = by
         self.event.set()
+
+
+@dataclass(frozen=True)
+class ReviewOutcome:
+    """안전 관문이 확인해 준 사람의 결정. 이벤트가 아니라 안전 관문의 기록이 기준이다."""
+
+    approved: bool
+    reason: str  # human | review_timeout
+    by: str | None
 
 
 def _plain(label: str) -> str:
@@ -132,6 +153,7 @@ class Engine:
         llm_pick: LlmPicker | None = None,
         author: str = "orchestrator",
         persist: Persister | None = None,
+        review_check: ReviewChecker | None = None,
     ) -> None:
         self.registry = registry
         self.caller = caller
@@ -143,10 +165,13 @@ class Engine:
         self.llm_pick = llm_pick
         self.author = author
         self.persist = persist
+        self.review_check = review_check
         self._locks: dict[str, asyncio.Lock] = {}
         self._sequence: dict[str, int] = {}
         # 사람이 대기 상태보다 먼저 끝낸 결과: (context_id, task_id) → (status, 결과)
         self._early_handoffs: dict[tuple[str, str], tuple[str, str | None]] = {}
+        # 대기에 오르기 전에 먼저 온 안전 관문 결정: review_id → 결정
+        self._early_reviews: dict[str, ReviewOutcome] = {}
 
     # ---------- 실행 ----------
     async def run(self, inc: Incident, plan: Plan) -> Incident:
@@ -488,18 +513,28 @@ class Engine:
         payload: dict[str, Any],
         result: AgentResult,
     ) -> bool:
-        hold = Hold()
+        review_id = (result.output or {}).get("review_id")
+        hold = Hold(review_id if isinstance(review_id, str) else None, self.hold_timeout)
         inc.holds[step.id] = hold
         run.status = "held"
         run.note = (result.output or {}).get("hold_reason", "") or "사람 승인 대기"
         inc.log(f"{run.label}: C 등급 보류 — 승인 대기열에 올림")
         self._save(inc)
+        early = self._early_reviews.pop(hold.review_id, None) if hold.review_id else None
+        if early is not None:  # 대기로 올리기 전에 안전 관문이 이미 결정했다
+            hold.decide(early.approved, early.reason, early.by)
         try:
             await asyncio.wait_for(hold.event.wait(), timeout=self.hold_timeout)
         except TimeoutError:
-            hold.decide(False, "review_timeout")
+            # 결정 이벤트를 놓쳤을 수 있어 마감 때 안전 관문에 한 번 되물어 본다
+            outcome = await self.settle_review(hold.review_id, None)
+            if outcome is not None:
+                hold.decide(outcome.approved, outcome.reason, outcome.by)
+            else:
+                hold.decide(False, "review_timeout")
         if hold.approved:
-            inc.log(f"{run.label}: 사람이 승인 — 재개")
+            by = f"({hold.decided_by})" if hold.decided_by else ""
+            inc.log(f"{run.label}: 사람이 승인{by} — 재개")
             run.status = "running"
             again = await self._send(
                 inc, step, step.skill, {**payload, "review_decision": "approved"}, dept
@@ -596,6 +631,44 @@ class Engine:
         if key in self._early_handoffs:
             return False
         self._early_handoffs[key] = (status, result)
+        return True
+
+    async def settle_review(
+        self, review_id: str | None, claimed: str | None
+    ) -> ReviewOutcome | None:
+        """안전 관문에 보류 건 상태를 되물어 사람의 결정을 확정한다.
+
+        `claimed`는 이벤트가 말한 결정(approved|rejected|expired)이고 마감 때 확인이면 None이다.
+        이벤트는 누가 보냈든 위조될 수 있어서 **승인은 안전 관문이 승인으로 기록했을 때만**
+        인정한다.
+        안전 관문을 못 읽으면 승인은 인정하지 않고, 거절·만료는 안전한 쪽이라 그대로 따른다.
+        아직 결정되지 않았으면 None이다.
+        """
+        if not review_id:
+            return None
+        review = await self.review_check(review_id) if self.review_check else None
+        if review is None:
+            if claimed in ("rejected", "expired"):
+                return ReviewOutcome(
+                    False, "review_timeout" if claimed == "expired" else "human", None
+                )
+            return None
+        status = review.get("status")
+        by = review.get("decided_by")
+        by = by if isinstance(by, str) else None
+        if status == "approved":
+            return ReviewOutcome(True, "human", by)
+        if status == "expired":
+            return ReviewOutcome(False, "review_timeout", by)
+        if status == "rejected":
+            return ReviewOutcome(False, "human", by)
+        return None  # pending: 아직 사람이 결정하지 않았다
+
+    def keep_early_review(self, review_id: str, outcome: ReviewOutcome) -> bool:
+        """승인 대기에 오르기 전에 온 안전 관문 결정을 보관한다. 이미 있거나 너무 많으면 False."""
+        if review_id in self._early_reviews or len(self._early_reviews) >= MAX_EARLY_REVIEWS:
+            return False
+        self._early_reviews[review_id] = outcome
         return True
 
     def decide_hold(self, inc: Incident, step_id: str, approved: bool) -> bool:
@@ -781,4 +854,12 @@ def new_event_id() -> str:
     return f"evt_{uuid.uuid4().hex[:12]}"
 
 
-__all__ = ["Engine", "HandoffWait", "Hold", "incident_metrics", "iso", "new_event_id"]
+__all__ = [
+    "Engine",
+    "HandoffWait",
+    "Hold",
+    "ReviewOutcome",
+    "incident_metrics",
+    "iso",
+    "new_event_id",
+]

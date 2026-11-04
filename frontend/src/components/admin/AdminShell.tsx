@@ -7,7 +7,7 @@ import { useCompany } from "@/demo/company";
 import { endSupport, supportActive, useSupport } from "@/demo/support";
 import { AGENTS, activeChild, matchPath, useEnabledServices, type Service, type SubItem } from "@/demo/services";
 import { useOpenHandoffCount } from "@/lib/handoffs";
-import { DEV_TASKS_HREF, PLANNING_REQUESTS_HREF, useNavCounts } from "@/lib/navCounts";
+import { DEV_TASKS_HREF, ORCHESTRATOR_HREF, PLANNING_REQUESTS_HREF, useNavCounts } from "@/lib/navCounts";
 import { IconAgents, IconBell, IconChart, IconGear, IconInbox, IconOffice, IconSearch } from "../icons";
 
 // 메뉴: AI가 상위 탭이고, 그 AI가 맡은 서비스가 하위 탭이다. 서비스 안 화면(예: 고객 문의의 상담 콘솔)은 그 아래 한 단 더.
@@ -123,9 +123,11 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const openHandoffs = useOpenHandoffCount(hasInbox);
   // 하위 탭 숫자(기획 들어온 요청·개발 사람 확인)는 하위 탭 옆에, AI 탭에는 그 합을 늘 단다 (열고 닫아도 자리가 그대로)
   const hasSub = (href: string) => baseNav.some((n) => n.children?.some((c) => c.href === href));
-  const subCounts = useNavCounts(hasSub(PLANNING_REQUESTS_HREF), hasSub(DEV_TASKS_HREF));
+  const hasOrchestrator = baseNav.some((n) => n.href === ORCHESTRATOR_HREF);
+  const subCounts = useNavCounts(hasSub(PLANNING_REQUESTS_HREF), hasSub(DEV_TASKS_HREF), hasOrchestrator);
   const nav = baseNav.map((n) => {
     if (n.href === HANDOFFS_HREF) return { ...n, badge: openHandoffs };
+    if (n.href === ORCHESTRATOR_HREF) return { ...n, badge: subCounts[ORCHESTRATOR_HREF] };  // 사람 승인 대기
     if (!n.children?.some((c) => subCounts[c.href])) return n;
     const children = n.children.map((c) => ({ ...c, badge: subCounts[c.href] }));
     return { ...n, children, badge: children.reduce((sum, c) => sum + (c.badge ?? 0), 0) };

@@ -211,7 +211,15 @@ class Incident:
             "timeline": timeline_view(self),
             "resolution_draft": resolution_draft(self),
             "pending_holds": [
-                {"step_id": sid, "skill": self.steps[sid].skill, "label": self.steps[sid].label}
+                {
+                    "step_id": sid,
+                    "skill": self.steps[sid].skill,
+                    "label": self.steps[sid].label,
+                    # 안전 관문 보류 건 번호, 대기 시작과 마감(화면에 남은 시간을 보여 준다)
+                    "review_id": getattr(hold, "review_id", None),
+                    "since": iso(getattr(hold, "started_at", None)),
+                    "expires_at": iso(getattr(hold, "expires_at", None)),
+                }
                 for sid, hold in self.holds.items()
                 if hold.pending
             ],
