@@ -1172,6 +1172,11 @@ class PromoConcept(AxModel):
     shorts_format: str | None = None  # 빌려 온 인기 숏츠 형식 (shorts_stats 형식 이름)
     shorts_format_avg_views: float | None = None  # 그 형식의 평균 조회수 (서버 값)
     fit_reason: str | None = None  # 이 트렌드·형식이 이 상품과 맞는 이유 한 줄 (LLM)
+    # 아래는 예전 응답은 없다. 타깃 연령대 (trend_age 결과, 코드). 모르면 None + 이유
+    target_age: str | None = None  # 빌린 트렌드에서 평소 대비 가장 크게 오른 연령대
+    target_age_ratio: float | None = Field(default=None, ge=0)  # 그 연령대 평소 대비 배수
+    target_age_status: TrendStatus | None = None  # 그 연령대 판정 (rising·normal)
+    target_age_reason: str | None = None  # 타깃 미정이면 이유
 
 
 class PromoShortsFormat(AxModel):
