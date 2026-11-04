@@ -276,3 +276,25 @@ def test_plan_is_rebuilt_when_the_code_changes(tmp_path: Path, monkeypatch) -> N
     monkeypatch.setattr(sp, "CODE_VERSION", "changed")  # 코드가 바뀐 것과 같다 (소스 해시)
     again = _run(tmp_path, llm)
     assert not again.cached and llm.asked == 2 and again.plan_id != first.plan_id
+
+
+def test_dropped_values_have_a_kind_and_unplanned_sources_say_what_they_unlock(
+    tmp_path: Path,
+) -> None:
+    out = _run(tmp_path, PlanLLM(PICKS))
+    assert {d.kind for d in out.dropped_sources} == {"source"}
+    by = {i.source_id: i for i in out.items}
+    kinds = {d.value: d.kind for d in by["youtube"].dropped}
+    assert kinds == {"99": "category", "캠핑": "keyword"}
+    assert {d.value: d.kind for d in by["google_trending"].dropped} == {
+        "use_age": "age", "무지 노트": "keyword",
+    }  # fmt: skip
+    assert next(d for d in by["naver_shopping"].dropped if d.value == "50000003").kind == "category"
+    rest = {n.source_id: n for n in out.not_planned}
+    assert set(rest) == {"kosis"}  # 계획에 든 출처는 없다
+    kosis = rest["kosis"]
+    assert kosis.status == "key_required" and kosis.reason.startswith("키가 없거나 쓸 수 없음")
+    assert kosis.unlocks and "통계" in kosis.unlocks  # 출처 정의의 "등록하면 얻는 근거"
+    other = _run(tmp_path / "f", PlanLLM(PICKS), profile=_profile("패션", seeds=("린넨 셔츠",)))
+    lib = next(n for n in other.not_planned if n.source_id == "data4library")
+    assert lib.reason.startswith("계획에서 뺌: 업종이 맞지 않음")
