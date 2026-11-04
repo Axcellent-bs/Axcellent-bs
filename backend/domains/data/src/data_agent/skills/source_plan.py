@@ -39,6 +39,7 @@ from ax_contracts.schemas.data import (
     DataSource,
     DataSourcesOutput,
     DomainProfileOutput,
+    NotPlannedSource,
     PlanCategory,
     PlanDropped,
     PlanQuota,
@@ -319,15 +320,20 @@ async def check_items(
         sid = p.source_id.strip()
         src = by.get(sid)
         if src is None:
-            out.dropped_sources.append(PlanDropped(value=sid, reason="출처 목록에 없는 id"))
+            out.dropped_sources.append(
+                PlanDropped(value=sid, reason="출처 목록에 없는 id", kind="source")
+            )
             continue
         if sid in taken:
-            out.dropped_sources.append(PlanDropped(value=sid, reason="같은 출처를 두 번 고름"))
+            out.dropped_sources.append(
+                PlanDropped(value=sid, reason="같은 출처를 두 번 고름", kind="source")
+            )
             continue
         if "all" not in src.industries and not (industries & set(src.industries)):
             out.dropped_sources.append(
                 PlanDropped(
                     value=sid,
+                    kind="source",
                     reason=f"업종이 맞지 않음 (출처 {', '.join(src.industries)},"
                     f" 회사 {profile.industry or '미정'})",
                 )
@@ -343,16 +349,19 @@ async def check_items(
         for k in dict.fromkeys(p.keywords):
             hit = seeds.get(_n(k))
             if hit is None:
-                item.dropped.append(PlanDropped(value=k, reason="씨앗 키워드에 없는 키워드"))
+                item.dropped.append(
+                    PlanDropped(value=k, reason="씨앗 키워드에 없는 키워드", kind="keyword")
+                )
             elif len(item.keywords) >= config.max_keywords:
                 item.dropped.append(
-                    PlanDropped(value=k, reason=f"출처당 키워드 상한 {config.max_keywords}개")
-                )
+                    PlanDropped(value=k, reason=f"출처당 키워드 상한 {config.max_keywords}개",
+                                kind="keyword")
+                )  # fmt: skip
             else:
                 item.keywords.append(hit)
         if sid in ("google_trending",) and item.keywords:  # 키워드를 받지 않는 출처
-            item.dropped += [PlanDropped(value=k, reason="이 출처는 키워드를 받지 않음")
-                             for k in item.keywords]  # fmt: skip
+            item.dropped += [PlanDropped(value=k, reason="이 출처는 키워드를 받지 않음",
+                                         kind="keyword") for k in item.keywords]  # fmt: skip
             item.keywords = []
         # 카테고리: 실제 선택지 안에서만, 사용 가능이면 실제 호출로 확인
         choices = options.choices.get(sid, {})
@@ -364,11 +373,12 @@ async def check_items(
                     if not choices and options.how.get(sid) is None
                     else "실제 카테고리 목록에 없는 id"
                 )
-                item.dropped.append(PlanDropped(value=cid, reason=why))
+                item.dropped.append(PlanDropped(value=cid, reason=why, kind="category"))
             elif len(picked) >= config.max_categories:
                 item.dropped.append(
-                    PlanDropped(value=cid, reason=f"출처당 카테고리 상한 {config.max_categories}개")
-                )
+                    PlanDropped(value=cid, reason=f"출처당 카테고리 상한 {config.max_categories}개",
+                                kind="category")
+                )  # fmt: skip
             else:
                 picked.append((choices[cid], cid))
         if sid == naver_shopping.SOURCE_ID and picked and item.category_check == "verified":
@@ -378,7 +388,8 @@ async def check_items(
                 try:
                     ok, bad = await verify_shopping(picked)
                     item.dropped += [
-                        PlanDropped(value=c, reason=f"확인 호출: {r}") for _, c, r in bad
+                        PlanDropped(value=c, reason=f"확인 호출: {r}", kind="category")
+                        for _, c, r in bad
                     ]
                     picked = ok
                 except ConnectorUnavailable as error:
@@ -386,7 +397,9 @@ async def check_items(
                     item.category_check_reason = f"확인 호출 실패 [{error.code}]"
         item.categories = [PlanCategory(category_id=c, name=n) for n, c in picked]
         if p.use_age and not src.age:
-            item.dropped.append(PlanDropped(value="use_age", reason="이 출처는 연령대를 주지 않음"))
+            item.dropped.append(
+                PlanDropped(value="use_age", reason="이 출처는 연령대를 주지 않음", kind="age")
+            )
         item.use_age = p.use_age and src.age
         if src.status == "key_required":
             spec = BY_ID.get(sid)
@@ -398,6 +411,36 @@ async def check_items(
                     f"이 API를 쓸 수 있게 되면 ({src.status_reason or '확인 필요'}): {gain}"
                 )
         out.items.append(item)
+
+
+def not_planned(out: SourcePlanOutput, sources: Sequence[DataSource]) -> list[NotPlannedSource]:
+    """출처 목록에 있지만 계획에 없는 출처, 이유(코드 문장), 등록·승인하면 얻는 근거(출처 정의)."""
+    planned = {i.source_id for i in out.items}
+    dropped = {d.value: d.reason for d in out.dropped_sources}
+    rows: list[NotPlannedSource] = []
+    for s in sources:
+        if s.source_id in planned:
+            continue
+        if s.source_id in dropped:
+            reason = f"계획에서 뺌: {dropped[s.source_id]}"
+        elif s.status == "key_required":
+            reason = f"키가 없거나 쓸 수 없음 ({s.status_reason or '확인 필요'})"
+        elif not s.approved:
+            reason = "수집 승인 전 (설정 파일 승인 플래그)"
+        else:
+            reason = "이 회사 프로필에 맞춰 고르지 않음"
+        spec = BY_ID.get(s.source_id)
+        rows.append(
+            NotPlannedSource(
+                source_id=s.source_id,
+                name=s.name,
+                status=s.status,
+                approved=s.approved,
+                reason=reason,
+                unlocks=spec.unlocks if spec and spec.unlocks else None,
+            )  # fmt: skip
+        )
+    return rows
 
 
 SUBTOPIC_UNITS = 101  # 하위 주제 숏츠 검색 1번 = search.list 100 + videos.list 1
@@ -549,6 +592,7 @@ async def make_plan(
             )
             fit_quota(out, config)
             fit_subtopics(out, config, subtopic_pending)
+        out.not_planned = not_planned(out, sources.sources)
         out.status = "known" if out.items else "unknown"
         if not out.items and not out.reason:
             out.reason = "검증을 통과한 출처가 없음"

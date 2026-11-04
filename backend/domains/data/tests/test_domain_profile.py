@@ -304,3 +304,25 @@ def test_profile_is_rebuilt_when_the_code_changes(tmp_path: Path, monkeypatch) -
     monkeypatch.setattr(dp, "CODE_VERSION", "changed")  # 코드가 바뀐 것과 같다 (소스 해시)
     again = _run(tmp_path, llm)
     assert not again.cached and llm.asked == 2 and again.catalog_hash != first.catalog_hash
+
+
+def test_each_profile_field_has_evidence_checked_against_the_source(tmp_path: Path) -> None:
+    ev = [
+        dp._FieldEvidence(field="industry", value="출판·교육", evidence="책과 문구를 파는 쇼핑몰"),
+        dp._FieldEvidence(field="customer_axis", value="연령대", evidence="고양이 그림책"),
+        dp._FieldEvidence(field="customer_axis", value="구매 목적(선물·자기용)",
+                          evidence="선물 포장 서비스"),  # 원문에 없음 → 버림
+        dp._FieldEvidence(field="customer_axis", value="MBTI", evidence="고양이 그림책"),  # 칸 밖
+        dp._FieldEvidence(field="question", value="어떤 연령대가 그림책을 찾나",
+                          evidence="상품3 | 무지 노트 3권 세트 | 줄 없는 무지 노트"),
+    ]  # fmt: skip
+    out = _run(tmp_path, ProfileLLM(_answer(evidence=ev)))
+    by = {(e.field, e.value): e for e in out.evidence}
+    assert by[("industry", "출판·교육")].evidence_from == "about"
+    assert by[("industry", "출판·교육")].evidence == "책과 문구를 파는 쇼핑몰"  # 원문 문장
+    assert by[("customer_axis", "연령대")].evidence_from == "product"
+    assert ("customer_axis", "구매 목적(선물·자기용)") not in by
+    assert ("customer_axis", "MBTI") not in by
+    assert by[("question", "어떤 연령대가 그림책을 찾나")].evidence_from == "product"
+    group = by[("product_group", "도서")]  # 상품군은 코드가 카테고리 이름으로
+    assert group.evidence == "도서" and group.evidence_from == "category"
