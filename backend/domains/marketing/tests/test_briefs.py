@@ -280,3 +280,94 @@ def test_get_without_id_has_the_common_invalid_input_shape() -> None:
     out = _call("get_campaign_brief", {})
     assert (out["status"], out["outcome"]) == ("failed", "invalid_input")
     assert out["output"]["errors"]
+
+
+# --- 영속 저장 (MARKETING_BRIEFS_DB) ---------------------------------------
+
+
+@pytest.fixture
+def db_file(tmp_path, monkeypatch):  # noqa: ANN001, ANN201
+    path = tmp_path / "briefs.db"
+    monkeypatch.setenv(briefs.DB_ENV, str(path))
+    handlers.reset_state()
+    return path
+
+
+def test_without_env_the_store_is_memory(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.delenv(briefs.DB_ENV, raising=False)
+    assert briefs.BriefStore().path == ":memory:"
+
+
+def test_briefs_survive_a_restart(db_file) -> None:  # noqa: ANN001
+    _receive()
+    _receive(proposal_id="PROP-2", title="겨울 신상")
+    handlers.reset_state()  # 서비스를 다시 시작한 것과 같다: 파일에서 다시 읽는다
+    listing = _call("list_campaign_briefs", {})["output"]
+    assert [i["proposal_id"] for i in listing["items"]] == ["PROP-2", "PROP-1"]
+    one = _call("get_campaign_brief", {"proposal_id": "PROP-1"})["output"]["item"]
+    assert one["campaign_id"] == "cmp_PROP-1"
+    assert one["brief"]["facts"][0]["value"] == "평균의 1.6배"  # 받은 그대로
+    assert one["brief"]["body_md"] == _brief()["body_md"]
+    by_campaign = _call("get_campaign_brief", {"campaign_id": "cmp_PROP-2"})["output"]["item"]
+    assert by_campaign["proposal_id"] == "PROP-2"
+
+
+def test_duplicate_after_restart_keeps_stored_brief_and_skips_the_gate(  # noqa: ANN001
+    db_file, monkeypatch
+) -> None:
+    _receive()
+    handlers.reset_state()
+    seen = _fake_execute(monkeypatch, _decision())
+    out = _receive(title="바뀐 제목")
+    assert out["output"] == {
+        "schema_version": "1",
+        "outcome": "duplicate",
+        "campaign_id": "cmp_PROP-1",
+        "reason_code": None,
+    }
+    assert seen == []
+    kept = _call("get_campaign_brief", {"proposal_id": "PROP-1"})["output"]["item"]
+    assert kept["brief"]["title"] == "독서의 달 기획전"
+
+
+def test_concurrent_duplicate_insert_is_reported_as_duplicate(db_file) -> None:  # noqa: ANN001
+    store = briefs.BriefStore(str(db_file))
+    brief = CampaignBriefInput.model_validate(_brief())
+    first = store.add(brief, datetime.now(UTC))
+    other = briefs.BriefStore(str(db_file))  # 다른 프로세스가 먼저 넣은 상황
+    assert first.outcome == "accepted"
+    assert other.add(brief, datetime.now(UTC)).outcome == "duplicate"
+
+
+def test_unreadable_rows_are_skipped_not_fatal(db_file) -> None:  # noqa: ANN001
+    _receive()
+    store = handlers.STATE.briefs
+    with store._conn:  # noqa: SLF001
+        store._conn.execute(  # noqa: SLF001
+            "INSERT INTO campaign_briefs (proposal_id, campaign_id, received_at, payload)"
+            " VALUES ('PROP-X', 'cmp_PROP-X', '2026-11-04T00:00:00+00:00', '{broken')"
+        )
+    listing = _call("list_campaign_briefs", {})["output"]
+    assert [i["proposal_id"] for i in listing["items"]] == ["PROP-1"]
+
+
+def test_storage_failure_is_a_failed_result_and_retry_continues(  # noqa: ANN001
+    db_file, monkeypatch
+) -> None:
+    store = handlers.STATE.briefs
+    real_add = store.add
+
+    def broken(brief, at):  # noqa: ANN001, ANN202
+        raise briefs.BriefStorageError("디스크 가득")
+
+    monkeypatch.setattr(store, "add", broken)
+    out = _receive()
+    assert (out["status"], out["outcome"]) == ("failed", "storage_error")
+    monkeypatch.setattr(store, "add", real_add)  # 같은 요청을 다시 보내면 이어서 받는다
+    assert _receive()["output"]["outcome"] == "accepted"
+    assert _call("list_campaign_briefs", {})["output"]["total"] == 1
+
+
+def test_unopenable_path_fails_fast_with_a_clear_error(tmp_path) -> None:  # noqa: ANN001
+    with pytest.raises(briefs.BriefStorageError):
+        briefs.BriefStore(str(tmp_path / "no_such_dir" / "briefs.db"))
