@@ -687,6 +687,9 @@ export interface PromoConcept {
   /** 빌려 온 인기 숏츠 형식과 그 평균 조회수 (서버 값) */
   shorts_format?: string | null;
   shorts_format_avg_views?: number | null;
+  /** 그 형식의 중앙값 조회수(대표값)와 숏츠 통계 기준 시각 (#547) */
+  shorts_format_median_views?: number | null;
+  shorts_format_at?: string | null;
   /** 이 트렌드·형식이 이 상품과 맞는 이유 한 줄 */
   fit_reason?: string | null;
   /** 타깃 연령대 (trend_age, #524). 없으면 target_age_reason이 미정 이유 */
@@ -698,8 +701,12 @@ export interface PromoConcept {
 /** 기획안 재료로 쓴 인기 숏츠 형식 (shorts_stats 값) */
 export interface PromoShortsFormat {
   name: string;
+  /** 보조 칸 (평균) */
   avg_views: number;
   count: number;
+  /** 대표값 = 중앙값, 숏츠 통계 기준 시각 (#547, 예전 응답은 없다) */
+  median_views?: number | null;
+  snapshot_at?: string | null;
 }
 /** 시즌을 확인한 키워드 하나 (카탈로그 카테고리 이름 또는 상품 핵심어) */
 export interface PromoSeasonCheck {
@@ -874,6 +881,11 @@ export interface ShortsGroup {
   velocity_videos: number;
   /** 조회수 상위 N개 */
   top: ShortsVideo[];
+  /** 대표값 = 중앙값 (#547). 평균(avg_*)은 보조 */
+  median_views?: number | null;
+  median_views_per_hour?: number | null;
+  /** 다시 본 간격이 기준 미만이라 측정 중인 수 */
+  velocity_measuring?: number;
 }
 export interface ShortsSearch {
   youtube_category_id: string;

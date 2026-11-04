@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import statistics
 import threading
 import tomllib
 from collections.abc import Mapping, Sequence
@@ -90,6 +91,8 @@ class ShortsConfig:
     # 표본 언어. ko면 한국 숏츠만 (제목·채널 이름에 한글이 있거나 영상 언어가 한국어). ""면 거르지
     # 않음
     language: str = "ko"
+    # 시간당 조회: 두 번 본 간격이 이 분보다 짧으면 잰 값으로 쓰지 않고 "측정 중"
+    min_recheck_minutes: int = 50
 
 
 def load_config(env: Mapping[str, str]) -> ShortsConfig:
@@ -110,6 +113,9 @@ def load_config(env: Mapping[str, str]) -> ShortsConfig:
             recheck_videos=max(0, int(raw.get("recheck_videos", base.recheck_videos))),
             recheck_min_hours=max(0.1, float(raw.get("recheck_min_hours", base.recheck_min_hours))),
             language=str(raw.get("language", base.language)).strip().lower(),
+            min_recheck_minutes=max(
+                1, int(raw.get("min_recheck_minutes", base.min_recheck_minutes))
+            ),
         )
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return ShortsConfig()
@@ -313,6 +319,7 @@ class _Short:
     category: str = UNKNOWN
     format: str = UNKNOWN
     pending: bool = False  # 검색 숏츠를 한 번만 봐서 시간당 조회 증가를 아직 못 잼
+    measuring: bool = False  # 두 번 봤지만 간격이 기준 미만이라 측정 중
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -372,7 +379,15 @@ def group_stats(
         views = [s.views for s in mine if s.views is not None]
         speeds = [s.views_per_hour for s in mine if s.views_per_hour is not None]
         pending = sum(s.pending for s in mine)
-        velocity_reason = f"다음 조회 대기 {pending}개 (한 번만 봄)" if pending else None
+        measuring = sum(s.measuring for s in mine)
+        notes = []
+        if pending:
+            notes.append(f"다음 조회 대기 {pending}개 (한 번만 봄)")
+        if measuring:
+            notes.append(
+                f"측정 중 {measuring}개 (다시 본 간격 {config.min_recheck_minutes}분 미만)"
+            )
+        velocity_reason = ", ".join(notes) or None
         top = sorted((s for s in mine if s.views is not None), key=lambda s: -(s.views or 0))
         if len(mine) < config.min_sample:
             out.append(
@@ -383,6 +398,7 @@ def group_stats(
                     count=len(mine),
                     velocity_pending=pending,
                     velocity_reason=velocity_reason,
+                    velocity_measuring=measuring,
                 )
             )
             continue
@@ -395,6 +411,9 @@ def group_stats(
                 velocity_videos=len(speeds),
                 velocity_pending=pending,
                 velocity_reason=velocity_reason,
+                velocity_measuring=measuring,
+                median_views=round(statistics.median(views), 1) if views else None,
+                median_views_per_hour=round(statistics.median(speeds), 1) if speeds else None,
                 top=[
                     ShortsVideo(
                         video_id=s.video_id,
@@ -402,12 +421,22 @@ def group_stats(
                         channel_title=s.channel_title,
                         views=s.views,
                         views_per_hour=s.views_per_hour,
+                        velocity_status=(
+                            "measuring"
+                            if s.measuring
+                            else "pending"
+                            if s.pending
+                            else "known"
+                            if s.views_per_hour is not None
+                            else None
+                        ),  # fmt: skip
                     )
                     for s in top[: config.top_videos]
                 ],
             )
         )
-    out.sort(key=lambda g: (g.status != "known", -(g.avg_views or 0), -g.count))
+    # 대표값은 중앙값 (몇 개의 큰 영상이 평균을 끌어올리는 것을 막는다). 평균은 보조 칸
+    out.sort(key=lambda g: (g.status != "known", -(g.median_views or 0), -g.count))
     return out
 
 
@@ -475,9 +504,14 @@ async def _run(
     snaps = recent_snapshots(db, 3)
     views = {vid: v.view_count for vid, v in snaps[0].videos.items()} if snaps else {}
     speeds: dict[str, float] = {}
+    popular_measuring = False
     if len(snaps) >= 2:
-        rows, _, _ = velocities(snaps)
-        speeds = {r.video_id: r.views_per_hour for r in rows if r.views_per_hour is not None}
+        gap = (snaps[0].collected_at - snaps[1].collected_at).total_seconds() / 60
+        if gap < config.min_recheck_minutes:
+            popular_measuring = True  # 두 스냅샷이 너무 가까움: 측정 중
+        else:
+            rows, _, _ = velocities(snaps)
+            speeds = {r.video_id: r.views_per_hour for r in rows if r.views_per_hour is not None}
     shorts: dict[str, _Short] = {}
     for v in snapshot.videos:
         d = details.get(v.video_id)
@@ -492,6 +526,7 @@ async def _run(
         shorts[v.video_id] = _Short(v.video_id, v.title, d.channel_title,
                                         views.get(v.video_id), speeds.get(v.video_id),
                                         tuple(v.tags), "popular")  # fmt: skip
+        shorts[v.video_id].measuring = popular_measuring
     out.popular_shorts = len(shorts)
 
     # 2. 표본 넓히기: 카테고리별 숏츠 검색 하루 1번 (저장)
@@ -532,15 +567,20 @@ async def _run(
         queries.append(f"youtube videos.list recheck x{out.rechecked}")
     history = store.view_history(searched_ids)
     for vid in searched_ids:
-        speed = speed_from(history.get(vid, []))
-        if speed is None:
+        seen = history.get(vid, [])
+        speed = speed_from(seen)
+        if speed is not None and _gap_minutes(seen) < config.min_recheck_minutes:
+            shorts[vid].measuring = True  # 두 번 봤지만 간격이 짧아 측정 중
+        elif speed is None:
             shorts[vid].pending = True
         else:
             shorts[vid].views_per_hour = speed
             shorts[vid].views = history[vid][-1][1]
     out.velocity_note = (
         "시간당 조회 증가: 인기 숏츠는 최근 두 인기 스냅샷, 검색 숏츠는 두 번 본 조회수로 잰다."
-        " 한 번만 본 검색 숏츠는 다음 조회 대기다"
+        " 한 번만 본 검색 숏츠는 다음 조회 대기다. 두 번 본 간격이"
+        f" {config.min_recheck_minutes}분 미만이면 측정 중이라 시간당 조회를 쓰지 않는다."
+        " 형식별 대표값은 중앙값이다(평균은 보조)"
     )
 
     # 3. 분류 (카테고리: 주제 분류기 / 형식: 숏츠 형식 목록), 저장해 재사용
@@ -592,6 +632,13 @@ def is_language(language: str, title: str | None, channel: str | None, lang: str
     if language == "ko":
         return bool(_HANGUL.search(title or "") or _HANGUL.search(channel or ""))
     return False
+
+
+def _gap_minutes(history: Sequence[tuple[datetime, int]]) -> float:
+    """마지막 두 번 본 간격(분). 두 번 못 봤으면 0."""
+    if len(history) < 2:
+        return 0.0
+    return (history[-1][0] - history[-2][0]).total_seconds() / 60
 
 
 def speed_from(history: Sequence[tuple[datetime, int]]) -> float | None:

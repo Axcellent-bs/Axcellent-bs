@@ -764,6 +764,11 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 
 ### shorts_stats (숏츠 통계)
 
+**숫자 정리(#547):**
+- **대표값 = 중앙값**: 형식·카테고리마다 `median_views`(조회수 중앙값)를 대표값으로 쓰고 순서도 그것으로 정한다. 몇 개의 큰 영상이 평균을 끌어올리는 것을 막으려는 것이고, 평균(`avg_views`)은 보조 칸으로 남긴다. 시간당 조회도 `median_views_per_hour`
+- **측정 중**: 두 번 본 간격이 `[shorts] min_recheck_minutes`(50분) 미만이면 시간당 조회를 잰 값으로 쓰지 않는다(`velocity_status: measuring`, 묶음의 `velocity_measuring` 수, 이유 "측정 중 N개 (다시 본 간격 50분 미만)"). 인기 숏츠는 최근 두 인기 스냅샷 간격, 검색 숏츠는 마지막 두 번 본 간격
+- **같은 시점 값**: 예시 아이디어(`promo_concepts`)의 숏츠 형식 재료는 숏츠 통계의 중앙값 상위 N개이고 값마다 숏츠 통계 기준 시각(`snapshot_at`)을 붙인다. 인사이트 브리프의 숏츠 형식도 같은 호출의 숏츠 통계에서 표본 수·중앙값·기준 시각(`shorts_format_samples`·`shorts_format_median_views`·`shorts_format_at`)을 가져온다
+
 YouTube 숏츠를 카테고리별·형식별로 센다. 숫자는 코드, 분류는 LLM이 정해진 목록 안에서만.
 
 1. **숏츠 고르기: 길이로 판단한다.** YouTube API에는 숏츠 표시가 없어서, 길이(`contentDetails.duration`, `video_details` 표)가 `[shorts] max_seconds`(60초) 이하인 영상을 숏츠로 본다. 길이를 모르는 영상은 빼고 수(`unknown_length`)만 센다

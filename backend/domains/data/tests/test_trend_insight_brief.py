@@ -323,3 +323,21 @@ def test_score_counts_products_and_season(tmp_path: Path) -> None:
     a = brief.score(plain, config, 10)
     b = brief.score(linked, config, 10)
     assert round(b - a, 4) == round(config.w_product + config.w_season * 0.6, 4)
+
+
+def test_shorts_format_values_come_from_shorts_stats_at_the_same_time(tmp_path: Path) -> None:
+    from ax_contracts.schemas.data import ShortsGroup, ShortsStatsOutput
+
+    shorts = ShortsStatsOutput(status="known", snapshot_at=NOW, by_format=[
+        ShortsGroup(name="챌린지", count=9, avg_views=90000.0, median_views=12000.0),
+    ])  # fmt: skip
+    out = asyncio.run(
+        brief.make_brief(
+            TrendInsightBriefRequest(), BriefLLM(), env=_env(tmp_path), popular=POPULAR,
+            popular_reason=None, rising=[], age_fn=_ages([]), promo=None, catalog=CATALOG,
+            shorts=shorts, now=NOW,
+        )
+    ).output  # fmt: skip
+    lol = next(i for i in out.insights if i.topic == "리그오브레전드")
+    assert lol.shorts_format == "챌린지" and lol.shorts_format_samples == 9  # 숏츠 통계 표본 수
+    assert lol.shorts_format_median_views == 12000.0 and lol.shorts_format_at == NOW
