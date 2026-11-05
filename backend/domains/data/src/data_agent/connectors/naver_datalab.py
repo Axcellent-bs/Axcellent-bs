@@ -31,6 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ax_contracts.schemas.data import TrendScanInput, TrendTimeUnit
 from data_agent.connectors import ConnectorUnavailable, replay
+from data_agent.stage_timing import stage
 
 DEFAULT_URL = "https://naverapihub.apigw.ntruss.com/search-trend/v1/search"
 URL_ENV = "AX_NAVER_DATALAB_URL"
@@ -232,9 +233,10 @@ class NaverDatalabConnector:
     async def _post(self, body: dict[str, Any], headers: dict[str, str]) -> Any:
         client = self._client or _client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
         try:
-            response = await client.post(
-                self.url, content=json.dumps(body, ensure_ascii=False), headers=headers
-            )
+            with stage("external"):
+                response = await client.post(
+                    self.url, content=json.dumps(body, ensure_ascii=False), headers=headers
+                )
         except httpx.HTTPError as exc:
             raise ConnectorUnavailable(
                 "UNAVAILABLE", f"네이버 검색어 트렌드에 연결할 수 없다 ({type(exc).__name__})"

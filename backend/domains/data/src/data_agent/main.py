@@ -24,6 +24,7 @@ from data_agent.monitor import run_snapshots_forever
 from data_agent.report_store import Snapshot, get_report_store
 from data_agent.skills.activity_report import build_day_snapshot
 from data_agent.skills.anomaly_detection import get_metric_source
+from data_agent.stage_timing import install_sqlite_timer
 
 logger = logging.getLogger("ax.data")
 SNAPSHOT_CONTEXT = "ctx_req_data_snapshot"
@@ -91,6 +92,7 @@ def build_app() -> FastAPI:
     `/health`는 템플릿 응답에 `llm_configured`(설명 LLM 설정 여부)를 더한다.
     시작할 때 업무 리포트 일간 저장 주기를 켠다(`DATA_REPORT_DB`가 있을 때만).
     """
+    install_sqlite_timer()  # 트렌드 감지 탭 단계별 시간 로그의 sqlite 몫
     app = create_agent_app(load_card(), HANDLERS)
     template_lifespan = app.router.lifespan_context
 
