@@ -24,6 +24,8 @@
   시간대 대신 구간 시작 `history_days`일 전부터 구간 끝까지 5분마다 빠짐없이 만든다(이어진 기록).
   `traffic.weekday_levels`(월~일 7개)가 있으면 그 요일 배수를 주문 수준에 곱한다(주말 효과).
   둘 다 없으면 예전과 똑같이 만든다.
+  `traffic.older_rng_before_days`가 있으면 구간 시작 그 일수보다 앞 칸은 따로 둔 난수·주문 번호로
+  만든다(기록을 늘려도 그 뒤 칸은 늘리기 전과 같은 데이터. 여러 날 케이스를 14일 → 28일로 늘릴 때).
   쿠폰 결정은 따로 씨앗을 둔 난수로 해서, `campaign`이 없는 시나리오의 데이터는 예전과 같다.
 - 상품 하나만 늘림(`product_boost`, campaign_effect 상품 기준 평가 `eval/campaign_products/`):
   구간 안 5분 칸마다 그 상품 주문을 더 넣어 그 상품의 기대 주문 수를 `factor`배로 만든다.
@@ -429,10 +431,18 @@ def generate(spec: dict[str, Any]) -> World:
             slots = _continuous_slots(window_from, window_to, int(traffic["history_days"]))
         else:
             slots = _slots(window_from, window_to, margin)
+        # 기록을 늘린 여러 날 케이스: 구간 시작 `older_rng_before_days`일보다 앞 칸은 따로 둔 난수와
+        # 따로 센 주문 번호로 만든다. 그 뒤 칸(예전 기록)은 늘리기 전과 똑같은 데이터다
+        split = traffic.get("older_rng_before_days")
+        older_from = window_from - timedelta(days=int(split)) if split else None
+        orng = random.Random(f"{spec['id']}:older")
+        older_no = 0
         for slot in slots:
             in_window = window_from <= slot < window_to
             if kind == "empty" and (in_window or injection.get("history_empty")):
                 continue  # 이 버킷에는 주문이 하나도 없다
+            older = older_from is not None and slot < older_from
+            r = orng if older else rng
             level = per_bucket * HOUR_LEVEL[slot.hour]
             if weekday_levels:
                 level *= float(weekday_levels[slot.weekday()])
@@ -442,12 +452,15 @@ def generate(spec: dict[str, Any]) -> World:
                 level *= float(injection["factor"])
             if in_window:
                 level *= sale_factor
-            count = _poisson(rng, level)  # 실제 주문처럼 5분마다 포아송으로 흔들린다
-            for moment, buyer, lines in _slot_orders(slot, count, rng, level, in_window, boost,
+            count = _poisson(r, level)  # 실제 주문처럼 5분마다 포아송으로 흔들린다
+            for moment, buyer, lines in _slot_orders(slot, count, r, level, in_window, boost,
                                                      prng):  # fmt: skip
                 now[0] = moment
                 clock_seconds[0] = moment.timestamp()
-                order_no += 1
+                if older:
+                    older_no += 1
+                else:
+                    order_no += 1
                 if in_window and basket > 1:  # 난수를 더 쓰지 않는다 (다른 케이스와 같은 순서)
                     lines = [(p, q * basket) for p, q in lines]
                 if any(s <= moment < e for s, e in gap_ranges):
@@ -480,7 +493,8 @@ def generate(spec: dict[str, Any]) -> World:
                     noise.pop(0)
                 if faulty or blip:
                     shop.inject_fault("failure")
-                simulate = "failure" if order_no % DECLINE_EVERY == 0 else None
+                seq = older_no if older else order_no
+                simulate = "failure" if seq % DECLINE_EVERY == 0 else None
                 paid = shop.pay(order["order_id"], "card", simulate)
                 if faulty or blip:
                     shop.release_fault()

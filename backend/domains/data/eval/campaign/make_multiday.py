@@ -40,6 +40,7 @@ HOLDOUT_FACTORS = (0.6, 0.8, 1.0, 1.15, 1.2, 1.3, 2.0)
 BASELINE_DAYS = 28  # 만드는 시작 전 기록 (같은 요일 4구간 모두)
 WEEKS = (7, 14, 21, 28)  # 같은 요일 = 1·2·3·4주 전
 MIN_WEEKS = 3  # 이만큼 구간이 있어야 기대를 낸다
+OLD_HISTORY_DAYS = 14  # 4주로 늘리기 전 기록 길이. 이 뒤 칸은 늘리기 전과 같은 데이터다
 ORDERS_PER_5M = 0.5  # 평일 하루 약 140건 (테스트 시간 때문에 결제 평가보다 적게)
 WEEKDAY_LEVELS = [1.0, 1.0, 1.0, 1.0, 1.1, 1.4, 1.3]  # 월~일. 주말이 높다
 MONDAY = datetime(2026, 10, 12, tzinfo=UTC)  # 기준 월요일 (UTC 날짜·요일로 센다)
@@ -53,7 +54,7 @@ def day(weekday: int, week: int = 0) -> datetime:
 
 def spec(
     case_id: str, start: datetime, days: int, factor: float, coupons: dict[str, Any] | None,
-    history_days: int = BASELINE_DAYS,
+    history_days: int = BASELINE_DAYS, older_rng_before_days: int | None = None,
 ) -> dict[str, Any]:  # fmt: skip
     end = start + timedelta(days=days)
     window = {"from": _iso(start), "to": _iso(end)}
@@ -73,6 +74,8 @@ def spec(
         },  # fmt: skip
         "injection": injection,
     }
+    if older_rng_before_days is not None:  # 늘린 앞쪽 기록만 따로 둔 난수 (eval_world)
+        out["traffic"]["older_rng_before_days"] = older_rng_before_days
     if coupons:
         out["campaign"] = coupons
     return out
@@ -84,7 +87,7 @@ def usable(history_days: int) -> list[int]:
 
 
 def counted(world: eval_world.World, campaign_id: str | None, history_days: int) -> dict[str, Any]:
-    """생성기가 만든 기록에서 바로 센 값 (기대는 같은 요일·같은 길이 4구간 정의, data 코드가 아님)."""
+    """생성기 기록에서 바로 센 값 (기대는 같은 요일·같은 길이 4구간 정의, data 코드가 아님)."""
     window_from, window_to = world.window
 
     def rows(start: datetime, end: datetime) -> list[eval_world.Payment]:
@@ -134,7 +137,9 @@ def case(
     campaign_id: str | None, coupons: dict[str, Any] | None,
     history_days: int = BASELINE_DAYS, memo: str = "",
 ) -> dict[str, Any]:  # fmt: skip
-    scenario = spec(case_id, start, days, factor, coupons, history_days)
+    # 예전 14일 기록은 그대로 두고 앞쪽만 늘린다 (늘린 칸은 따로 둔 난수)
+    older = OLD_HISTORY_DAYS if history_days > OLD_HISTORY_DAYS else None
+    scenario = spec(case_id, start, days, factor, coupons, history_days, older)
     world = eval_world.build(scenario)
     end = start + timedelta(days=days)
     if len(usable(history_days)) < MIN_WEEKS:

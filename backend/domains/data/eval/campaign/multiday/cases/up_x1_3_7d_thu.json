@@ -23,7 +23,8 @@
     1.1,
     1.4,
     1.3
-   ]
+   ],
+   "older_rng_before_days": 14
   },
   "injection": {
    "type": "sale",
@@ -48,10 +49,10 @@
   }
  },
  "counted": {
-  "orders_actual": 1486,
-  "orders_baseline": 1131.75,
-  "revenue_actual": 37440000,
-  "revenue_baseline": 28572250.0,
+  "orders_actual": 1410,
+  "orders_baseline": 1110.25,
+  "revenue_actual": 36809500,
+  "revenue_baseline": 28002300.0,
   "baseline_rule": "7·14·21·28일 전 같은 요일·같은 길이 구간 평균 (최소 3구간)",
   "baseline_weeks": [
    7,
