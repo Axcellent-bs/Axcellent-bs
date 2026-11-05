@@ -2232,6 +2232,31 @@ class DataSourcesOutput(AxModel):
     llm_usage: LlmDailyUsage | None = None
     # 아래는 예전 응답은 없다 (#648). 아직 붙이지 않고 기다리는 출처 (수집 계획 후보가 아님)
     pending_sources: list[PendingSource] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. YouTube 오늘 사용량(하나의 장부)과 하루 상한
+    youtube_usage: YouTubeDailyUsage | None = None
+
+
+class YouTubeCallerUsage(AxModel):
+    """YouTube를 부른 곳 하나의 오늘 사용량 (수집기·skill)."""
+
+    caller: str
+    units: int = Field(ge=0)  # 할당량 단위 (search 100, videos·channels·categories 1)
+    searches: int = Field(ge=0)  # search.list 호출 수
+
+
+class YouTubeDailyUsage(AxModel):
+    """YouTube Data API 오늘(한국 날짜) 사용량. 모든 YouTube 호출이 같은 장부에 적는다.
+
+    하루 상한에 닿으면 검색(search.list, 100단위)을 멈춘다. 1단위 호출은 계속한다.
+    """
+
+    day: dt.date
+    units: int = Field(ge=0)
+    unit_cap: int = Field(gt=0)
+    searches: int = Field(ge=0)
+    search_stopped: bool  # 상한에 닿아 지금은 검색하지 않음
+    by_caller: list[YouTubeCallerUsage] = Field(default_factory=list)  # 많이 쓴 순
+    note: str | None = None
 
 
 class PendingSource(AxModel):
