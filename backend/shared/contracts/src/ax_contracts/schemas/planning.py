@@ -600,3 +600,35 @@ class ReceiveCampaignUpdateInput(AxModel):
 class ReceiveCampaignUpdateOutput(AxModel):
     schema_version: SchemaVersion = PROPOSAL_SCHEMA_VERSION
     outcome: Literal["applied", "duplicate", "unknown_proposal"]
+
+
+# ---------------------------------------------------------------- 기획 AI 직접 대화 (11/5)
+# dashboard-api `/api/dashboard/planning-chat` → planning `planning_chat_*`.
+# 마케팅·고객지원 대화와 같은 모양. `who`는 dashboard-api가 사람 토큰에서만 채운다.
+# 대화(thread)는 id·title·status(talking·answering·closed)·who·summary·messages[]
+# ·task_id·restricted·message_count·created_at·updated_at.
+CHAT_MESSAGE_MAX = 2000
+
+
+class PlanningChatSendInput(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=CHAT_MESSAGE_MAX)
+
+
+class PlanningChatListInput(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class PlanningChatRef(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    thread_id: str = Field(min_length=1, max_length=64)
+
+
+class PlanningChatThreadOutput(AxModel):
+    thread: dict[str, Any]
+
+
+class PlanningChatListOutput(AxModel):
+    threads: list[dict[str, Any]]

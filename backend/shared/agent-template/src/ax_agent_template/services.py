@@ -243,6 +243,11 @@ SERVICES: tuple[Service, ...] = (
             "receive_dev_result",
             "receive_planning_answer",
             "request_release_check",
+            # 사람과 직접 대화 (dashboard-api /api/dashboard/planning-chat)
+            "planning_chat_send",
+            "planning_chat_list",
+            "planning_chat_get",
+            "planning_chat_close",
         ),
         "요청·기획서",
     ),

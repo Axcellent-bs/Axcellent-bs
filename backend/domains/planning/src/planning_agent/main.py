@@ -20,7 +20,9 @@ from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
 from ax_workflow.auth import AuthError
 from planning_agent.api import create_api_router
+from planning_agent.chat.a2a import CHAT_HANDLERS
 from planning_agent.chat.api import create_chat_router
+from planning_agent.chat.turn import get_chat_service
 from planning_agent.handlers import PLANNING_HANDLERS
 from planning_agent.runtime import get_service
 
@@ -56,10 +58,11 @@ def _cors_origins() -> list[str]:
     return [o.strip() for o in raw.split(",") if o.strip()]
 
 
-app = create_agent_app(load_card(), PLANNING_HANDLERS)
+# 직접 대화 skill(`planning_chat_*`)은 dashboard-api가 부른다 (화면 `/api/dashboard/planning-chat`)
+app = create_agent_app(load_card(), {**PLANNING_HANDLERS, **CHAT_HANDLERS})
 app.include_router(create_api_router(get_service))
-# 사람과 직접 대화 (조회·설명만, AI 대화방 > 직접 대화)
-app.include_router(create_chat_router(lambda: get_service().state))
+# 사람과 직접 대화 (조회·설명만). 같은 서비스를 기획 서버 주소로도 연다
+app.include_router(create_chat_router(get_chat_service))
 
 
 async def _resync_on_start() -> None:

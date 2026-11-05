@@ -2,6 +2,9 @@
 
 `PLANNING_STATE_DIR`가 있으면 그 폴더의 `planning_chat.db`에, 없으면 프로세스 메모리에 둔다(테스트).
 표는 처음 쓸 때 만든다.
+
+status: `talking`(말 걸 수 있음) · `answering`(AI 답을 만드는 중) · `closed`(끝남, 더는 못 보냄).
+마케팅·고객지원 직접 대화와 같다. 30분 동안 말이 없으면 자동으로 끝낸다.
 """
 
 from __future__ import annotations
@@ -11,12 +14,17 @@ import os
 import sqlite3
 import threading
 from collections.abc import Callable
-from datetime import UTC, datetime
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal
 
 MAX_MESSAGES = 60  # 한 대화에 남기는 메시지 수(넘으면 오래된 것부터 버린다)
 SUMMARY_CHARS = 200
+IDLE_CLOSE_MINUTES = 30  # 이 시간 동안 아무 말이 없으면 자동으로 끝낸다
 FILE_NAME = "planning_chat.db"
+INTERRUPTED = "서버가 다시 켜져서 답을 만들지 못했어요. 다시 보내 주세요."
+
+Status = Literal["talking", "answering", "closed"]
+TurnOutcome = Literal["ok", "closed", "busy", "missing"]
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS planning_chat_threads (
@@ -40,22 +48,16 @@ def _now() -> datetime:
 class ChatStore:
     def __init__(self, path: str = "", clock: Callable[[], datetime] = _now) -> None:
         self.clock = clock
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._db = sqlite3.connect(path or ":memory:", check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         with self._lock:
             self._db.execute(_DDL)
             self._db.commit()
 
-    def _one(self, sql: str, args: tuple = ()) -> dict[str, Any] | None:
+    def _rows(self, sql: str, args: tuple = ()) -> list[dict[str, Any]]:
         with self._lock:
-            row = self._db.execute(sql, args).fetchone()
-        return dict(row) if row else None
-
-    def _write(self, sql: str, args: tuple) -> None:
-        with self._lock:
-            self._db.execute(sql, args)
-            self._db.commit()
+            return [dict(r) for r in self._db.execute(sql, args).fetchall()]
 
     @staticmethod
     def _view(row: dict[str, Any]) -> dict[str, Any]:
@@ -74,55 +76,135 @@ class ChatStore:
         }
 
     def get(self, thread_id: str) -> dict[str, Any] | None:
-        row = self._one("SELECT * FROM planning_chat_threads WHERE id = ?", (thread_id,))
-        return self._view(row) if row else None
+        rows = self._rows("SELECT * FROM planning_chat_threads WHERE id = ?", (thread_id,))
+        return self._view(rows[0]) if rows else None
 
     def list_all(self, limit: int = 100) -> list[dict[str, Any]]:
-        with self._lock:
-            rows = self._db.execute(
-                "SELECT * FROM planning_chat_threads ORDER BY updated_at DESC, seq DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        return [self._view(dict(r)) for r in rows]
+        rows = self._rows(
+            "SELECT * FROM planning_chat_threads ORDER BY updated_at DESC, seq DESC LIMIT ?",
+            (limit,),
+        )
+        return [self._view(r) for r in rows]
 
     def create(self, title: str, who: str | None) -> dict[str, Any]:
-        row = self._one("SELECT COALESCE(MAX(seq), 0) AS n FROM planning_chat_threads")
-        seq = int(row["n"]) + 1 if row else 1
         now = self.clock().isoformat()
-        thread_id = f"planchat-{seq}"
-        self._write(
-            "INSERT INTO planning_chat_threads"
-            "(id, seq, title, status, who, summary, messages, created_at, updated_at)"
-            " VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?)",
-            (thread_id, seq, title, who, now, now),
-        )
+        with self._lock:
+            row = self._db.execute(
+                "SELECT COALESCE(MAX(seq), 0) AS n FROM planning_chat_threads"
+            ).fetchone()
+            seq = int(row["n"]) + 1
+            thread_id = f"planchat-{seq}"
+            self._db.execute(
+                "INSERT INTO planning_chat_threads"
+                "(id, seq, title, status, who, summary, messages, created_at, updated_at)"
+                " VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?)",
+                (thread_id, seq, title, who, now, now),
+            )
+            self._db.commit()
         return self.get(thread_id) or {}
 
-    def append(
-        self, thread_id: str, role: str, text: str, summary: str | None = None
-    ) -> dict[str, Any]:
-        th = self.get(thread_id)
-        if th is None:
-            raise KeyError(thread_id)
-        msgs = th["messages"]
-        now = self.clock().isoformat()
+    def _update(
+        self,
+        thread_id: str,
+        mutate: Callable[[dict[str, Any], list[dict[str, Any]], str], Status | None],
+        summary: str | None = None,
+    ) -> dict[str, Any] | None:
+        """읽고 → 바꾸고 → 쓰기를 잠금 안에서 한다. `mutate`가 None을 돌려주면 쓰지 않는다."""
+        with self._lock:
+            th = self.get(thread_id)
+            if th is None:
+                return None
+            now = self.clock().isoformat()
+            msgs = th["messages"]
+            status = mutate(th, msgs, now)
+            if status is None:
+                return th
+            self._db.execute(
+                "UPDATE planning_chat_threads SET status = ?, messages = ?, summary = ?,"
+                " updated_at = ? WHERE id = ?",
+                (
+                    status,
+                    json.dumps(msgs[-MAX_MESSAGES:], ensure_ascii=False),
+                    (summary if summary is not None else th["summary"])[:SUMMARY_CHARS],
+                    now,
+                    thread_id,
+                ),
+            )
+            self._db.commit()
+            return self.get(thread_id)
+
+    @staticmethod
+    def _add(msgs: list[dict[str, Any]], role: str, text: str, kind: str, at: str) -> None:
         ids = (int(m["id"][1:]) for m in msgs if str(m.get("id", "")).startswith("m"))
         n = max(ids, default=0) + 1
         msgs.append(
-            {"id": f"m{n}", "role": role, "text": text, "at": now, "kind": "text",
+            {"id": f"m{n}", "role": role, "text": text, "at": at, "kind": kind,
              "plan": None, "task_id": None}
         )  # fmt: skip
-        self._write(
-            "UPDATE planning_chat_threads SET messages = ?, summary = ?, updated_at = ?"
-            " WHERE id = ?",
-            (
-                json.dumps(msgs[-MAX_MESSAGES:], ensure_ascii=False),
-                (summary if summary is not None else th["summary"])[:SUMMARY_CHARS],
-                now,
-                thread_id,
-            ),
+
+    def begin_turn(self, thread_id: str, text: str) -> tuple[TurnOutcome, dict[str, Any] | None]:
+        """사람 말을 적고 `answering`으로 바꾼다. 끝난 대화·답하는 중이면 적지 않는다."""
+        outcome: TurnOutcome = "ok"
+
+        def mutate(th: dict[str, Any], msgs: list[dict[str, Any]], at: str) -> Status | None:
+            nonlocal outcome
+            if th["status"] == "closed":
+                outcome = "closed"
+                return None
+            if th["status"] == "answering":
+                outcome = "busy"
+                return None
+            self._add(msgs, "user", text, "text", at)
+            return "answering"
+
+        th = self._update(thread_id, mutate)
+        return ("missing", None) if th is None else (outcome, th)
+
+    def finish_turn(
+        self, thread_id: str, text: str, summary: str | None = None, kind: str = "text"
+    ) -> dict[str, Any] | None:
+        """AI 답을 붙이고 `talking`으로 돌린다(그 사이 끝났으면 `closed` 그대로)."""
+
+        def mutate(th: dict[str, Any], msgs: list[dict[str, Any]], at: str) -> Status | None:
+            self._add(msgs, "assistant", text, kind, at)
+            return "closed" if th["status"] == "closed" else "talking"
+
+        return self._update(thread_id, mutate, summary)
+
+    def close(self, thread_id: str) -> dict[str, Any] | None:
+        """끝낸다. 요약이 비어 있으면 첫 질문 일부를 요약으로 남긴다."""
+        th = self.get(thread_id)
+        if th is None:
+            return None
+        summary = th["summary"] or self._first_question(th["messages"])
+
+        def mutate(th: dict[str, Any], _msgs: list[dict[str, Any]], _at: str) -> Status | None:
+            return None if th["status"] == "closed" else "closed"
+
+        return self._update(thread_id, mutate, summary)
+
+    @staticmethod
+    def _first_question(msgs: list[dict[str, Any]]) -> str:
+        first = next((m["text"] for m in msgs if m["role"] == "user"), "")
+        return " ".join(str(first).split())[:SUMMARY_CHARS]
+
+    def expire_idle(self, minutes: int = IDLE_CLOSE_MINUTES) -> list[str]:
+        """`minutes` 동안 말이 없는 `talking` 대화를 끝낸다. 끝낸 대화 id를 돌려준다."""
+        cut = (self.clock() - timedelta(minutes=minutes)).isoformat()
+        rows = self._rows(
+            "SELECT id FROM planning_chat_threads WHERE status = 'talking' AND updated_at < ?",
+            (cut,),
         )
-        return self.get(thread_id) or {}
+        for r in rows:
+            self.close(r["id"])
+        return [r["id"] for r in rows]
+
+    def recover_orphans(self) -> list[str]:
+        """켤 때: 답을 만들던 중에 서버가 꺼진 대화는 안내 한 줄을 붙여 `talking`으로 돌린다."""
+        rows = self._rows("SELECT id FROM planning_chat_threads WHERE status = 'answering'")
+        for r in rows:
+            self.finish_turn(r["id"], INTERRUPTED, kind="error")
+        return [r["id"] for r in rows]
 
 
 _store: ChatStore | None = None
@@ -133,6 +215,7 @@ def get_store() -> ChatStore:
     if _store is None:
         base = os.getenv("PLANNING_STATE_DIR", "").strip()
         _store = ChatStore(os.path.join(base, FILE_NAME) if base else "")
+        _store.recover_orphans()
     return _store
 
 
