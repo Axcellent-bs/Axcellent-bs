@@ -21,3 +21,13 @@ def _reset_youtube_ledger():
     LEDGER.clear()
     yield
     LEDGER.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_line_store():
+    """한 줄 문장 재사용 저장(메모리)도 테스트마다 비운다 (앞 테스트의 문장을 다시 쓰지 않게)."""
+    from data_agent.line_store import LINES
+
+    LINES.clear()
+    yield
+    LINES.clear()

@@ -100,10 +100,12 @@ class EvidenceStore:
             )
 
     def line(self, day: date, keyword: str, facts: str) -> str | None:
+        """같은 주제 + 같은 근거 숫자로 쓴 문장 (날짜가 바뀌어도 쓴다. 최근 것 먼저)."""
         with self._lock:
             row = self._conn.execute(
-                "SELECT line FROM why_lines WHERE day = ? AND keyword = ? AND facts = ?",
-                (day.isoformat(), keyword, facts),
+                "SELECT line FROM why_lines WHERE keyword = ? AND facts = ?"
+                " ORDER BY day = ? DESC, day DESC LIMIT 1",
+                (keyword, facts, day.isoformat()),
             ).fetchone()
         return str(row[0]) if row else None
 

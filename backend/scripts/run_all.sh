@@ -168,6 +168,8 @@ export DATA_YOUTUBE_QUOTA_DB="$PWD/$DATA/youtube_quota.db"
 export DATA_NAVER_CACHE_DB="$PWD/$DATA/naver_cache.db"
 # data: LLM 하루 상한 기록 (서버·수집기가 같이 셈. 상한은 .env의 DATA_LLM_DAILY_CALLS·DATA_LLM_DAILY_TOKENS)
 export DATA_LLM_BUDGET_DB="$PWD/$DATA/data_llm_budget.db"
+# data: 브리프·기회 카드 한 줄 재사용 (같은 id + 같은 근거 숫자면 LLM에 다시 묻지 않음)
+export DATA_BRIEF_LINES_DB="$PWD/$DATA/brief_lines.db"
 
 # 업무 요청 라우터 (README "업무 요청 라우터"): 켠 서비스면 에이전트로, 안 켠 서비스면 사람 할 일함으로
 # 켠 서비스는 backend/.env 의 AX_ENABLED_SERVICES (쉼표 목록). 없거나 비어 있으면 전부 켠다(예전 동작)
