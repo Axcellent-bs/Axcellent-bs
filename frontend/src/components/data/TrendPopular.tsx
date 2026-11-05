@@ -10,8 +10,6 @@ import { type PopularCategory, type PopularTopic, type PromoConceptsOutput, type
 
 const num = (v: number | null | undefined) =>
   typeof v === "number" && Number.isFinite(v) ? v.toLocaleString("ko-KR", { maximumFractionDigits: 0 }) : null;
-const TIME = new Intl.DateTimeFormat("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
-const when = (iso: string | null) => (iso ? TIME.format(new Date(iso)) : null);
 const norm = (s: string) => s.trim().toLowerCase();
 export const categoryName = (c: string | null | undefined) => (c && c !== "unknown" ? c : "분류 못 함");
 
@@ -58,13 +56,13 @@ export function TrendHeadline({ popular }: { popular: SkillState<TrendPopularOut
   if (popular.kind === "failed") return <p className="text-sm text-amber-700">지금 인기를 받지 못했어요. {popular.reason}</p>;
   const out = popular.out;
   const top = out.items[0] ?? null;
+  // 태그: 지금 인기 주제 중 YouTube 태그에서 나온 것 앞 4개 (서버 순서·이름 그대로). 기준 시각은 제목 줄(TrendScan)
+  const tags = out.items.filter((t) => t.origins.includes("youtube_tag")).slice(0, 4).map((t) => t.keyword);
   return (
-    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-      <h2 className="text-lg font-bold text-ink-900">
-        {top ? <>오늘 가장 큰 화제는 <span className="text-brand-700">{top.keyword}</span></> : (out.empty_reason ?? "지금 인기 주제가 없어요.")}
-      </h2>
-      {out.youtube_status === "known" && out.snapshot_at && <span className="text-xs text-ink-500">YouTube 인기 {when(out.snapshot_at)} 기준</span>}
-    </div>
+    <p className="truncate whitespace-nowrap text-base text-ink-900">
+      {top ? <>오늘 가장 큰 화제는 <b className="text-brand-700">{top.keyword}</b></> : (out.empty_reason ?? "지금 인기 주제가 없어요.")}
+      {tags.length > 0 && <span className="text-sm text-ink-500"> · 많이 붙는 태그 {tags.map((t) => `#${t}`).join(" ")}</span>}
+    </p>
   );
 }
 

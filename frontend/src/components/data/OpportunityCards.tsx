@@ -1,7 +1,7 @@
 import { useSkill } from "@/components/data/useSkill";
 import { when } from "@/components/data/Sources";
 import { AgeBars } from "@/components/data/AgeBars";
-import { CopyId, FoldRow, RestFacts, ShortsCard, factLinks, shortsThumbs, shortsTiles, verdictOf } from "@/components/data/ShortsCard";
+import { CopyId, FoldRow, RestFacts, ShortsCard, TileRow, factLinks, shortsThumbs, shortsTiles, verdictOf } from "@/components/data/ShortsCard";
 import { dataAi, type DataFact, type DomainOpportunity, type OpportunityEvidence, type ShortsFit } from "@/lib/data";
 
 // 트렌드 2단계(인사이트) 맨 위 "기회 가설" 카드. trend_insight_brief의 opportunities(계약 DomainOpportunity, #579) 그대로. v2 틀(ShortsCard)
@@ -61,10 +61,10 @@ function Card({ o, facts, nameOf }: { o: DomainOpportunity; facts: DataFact[] | 
       line={o.line || null}
       lineNote={o.line_status === "fixed" ? "고정 문장" : null}
       highlights={o.evidence_highlights}
-      tiles={shortsTiles(o)}
       products={o.products.map((p) => ({ id: p.product_id, name: p.name }))}
       thumbs={shortsThumbs([...(o.evidence_shorts ?? []), ...(o.video_links ?? [])], factLinks(facts, o.opportunity_id, o.fact_ids))}
       fold={<>
+        <TileRow tiles={shortsTiles(o)} />
         {o.subtopic_evidence && <FoldRow label="주제 근거">{o.subtopic_evidence}</FoldRow>}
         {fit && (
           <FoldRow label="숏츠 적합도">

@@ -116,43 +116,57 @@ const SOURCE_LABEL: Record<EvidenceHighlightSource, string> = {
 };
 const withUnit = (v: number, unit: string) => `${fmt(v, 2)}${unit === "배" ? "배" : unit ? ` ${unit}` : ""}`;
 
-/** 근거 요약 (서버 evidence_highlights 그대로, 최대 3개) */
-export function Highlights({ list }: { list: EvidenceHighlight[] | undefined }) {
-  if (!list?.length) return null;
+const SOURCE_TONE: Record<EvidenceHighlightSource, string> = {
+  naver_search: "bg-blue-50 text-blue-700", naver_shopping: "bg-emerald-50 text-emerald-700",
+  youtube: "bg-red-50 text-red-700", google: "bg-amber-50 text-amber-800",
+};
+
+/** 숫자 타일 하나 (근거 요약 하나): 출처 배지 · 배수 26px · 평소 회색·지금 파랑 작은 막대 · 서버 문장 한 줄.
+ *  평소 값이 없으면 막대 없이. 표본이 적은 근거(low_sample)는 막대 없이 회색 "참고" + 서버 문장·표시 문구 */
+function HighlightTile({ h }: { h: EvidenceHighlight }) {
+  const base = typeof h.baseline_value === "number" ? h.baseline_value : null;
+  const max = Math.max(h.value, base ?? 0);
+  const width = (v: number) => `${max > 0 ? Math.max(4, (v / max) * 100) : 0}%`;
+  const big = typeof h.ratio === "number" ? `${fmt(h.ratio, 2)}배` : withUnit(h.value, h.unit);
   return (
-    <ul className="space-y-2.5" aria-label="근거 요약">
-      {list.map((h, k) => {
-        const base = typeof h.baseline_value === "number" ? h.baseline_value : null;
-        const max = Math.max(h.value, base ?? 0);
-        const width = (v: number) => `${max > 0 ? Math.max(2, (v / max) * 100) : 0}%`;
-        return (
-          <li key={h.fact_id ?? `${h.source}-${h.label}-${k}`} className="grid gap-x-4 gap-y-1.5 rounded-xl bg-ink-50 p-3 sm:grid-cols-[8.5rem_minmax(0,1fr)]">
-            <div className="flex flex-col items-start gap-1">
-              <span className="chip bg-surface text-[11px] font-semibold text-ink-700 ring-1 ring-ink-100">{SOURCE_LABEL[h.source]}</span>
-              <span className="text-2xl font-bold tabular-nums text-ink-900" title={h.label}>
-                {typeof h.ratio === "number" ? `${fmt(h.ratio, 2)}배` : withUnit(h.value, h.unit)}
-              </span>
-            </div>
-            <div className="flex min-w-0 flex-col justify-center gap-1.5">
-              {base !== null && (
-                <div className="space-y-1" aria-label={`평소 ${withUnit(base, h.unit)}, 지금 ${withUnit(h.value, h.unit)}`}>
-                  {[{ name: "평소", v: base, bar: "bg-ink-300" }, { name: "지금", v: h.value, bar: "bg-brand-500" }].map((r) => (
-                    <div key={r.name} className="grid grid-cols-[2.25rem_minmax(0,1fr)_auto] items-center gap-2 text-xs">
-                      <span className="text-ink-500">{r.name}</span>
-                      <span className="h-2.5 rounded-full bg-surface" aria-hidden>
-                        <span className={`block h-2.5 rounded-full ${r.bar}`} style={{ width: width(r.v) }} />
-                      </span>
-                      <span className="tabular-nums text-ink-700">{withUnit(r.v, h.unit)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <p className="text-sm text-ink-900">{h.sentence}</p>
-            </div>
-          </li>
-        );
-      })}
-    </ul>
+    <div className="flex min-w-0 flex-col gap-2 rounded-xl bg-ink-50 p-3.5">
+      <span className={`self-start rounded px-1.5 py-0.5 text-[11px] font-semibold ${SOURCE_TONE[h.source]}`}>{SOURCE_LABEL[h.source]}</span>
+      {h.low_sample ? (
+        <>
+          <span className="text-[26px] font-bold leading-none text-ink-400" title={`${h.label} ${big}`}>참고</span>
+          <p className="text-xs leading-snug text-ink-500">{h.sentence}{h.sample_note ? ` · ${h.sample_note}` : ""}</p>
+        </>
+      ) : (
+        <>
+          <span className="text-[26px] font-bold leading-none tabular-nums text-ink-900" title={h.label}>{big}</span>
+          {base !== null && (
+            <span className="space-y-1" aria-label={`평소 ${withUnit(base, h.unit)}, 지금 ${withUnit(h.value, h.unit)}`}>
+              <span className="block h-1.5 rounded-full bg-ink-300" style={{ width: width(base) }} />
+              <span className="block h-1.5 rounded-full bg-brand-500" style={{ width: width(h.value) }} />
+            </span>
+          )}
+          <p className="truncate text-xs text-ink-700" title={h.sentence}>{h.sentence}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** 숫자 타일 줄: 근거 요약(서버 evidence_highlights)을 앞에, extra 타일(예: 빌릴 형식)을 뒤에, 합쳐 3칸 */
+export function Highlights({ list, extra = [] }: { list: EvidenceHighlight[] | undefined; extra?: Tile[] }) {
+  const shown = (list ?? []).slice(0, Math.max(0, 3 - extra.length));
+  if (shown.length === 0 && extra.length === 0) return null;
+  return (
+    <div className="grid grid-cols-3 gap-2.5" aria-label="근거 요약">
+      {shown.map((h, k) => <HighlightTile key={h.fact_id ?? `${h.source}-${h.label}-${k}`} h={h} />)}
+      {extra.map((t) => (
+        <div key={t.label} className="flex min-w-0 flex-col gap-2 rounded-xl bg-ink-50 p-3.5">
+          <span className="self-start rounded bg-surface px-1.5 py-0.5 text-[11px] font-semibold text-ink-700 ring-1 ring-ink-100">{t.label}</span>
+          <span className="truncate text-xl font-bold text-ink-900">{t.value}</span>
+          {t.note && <p className="truncate text-xs text-ink-500" title={t.note}>{t.note}</p>}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -182,62 +196,69 @@ export function RestFacts({ facts, about, ids, shown }: {
   return <FoldRow label={`근거 숫자 ${rest.length}개`}><FactList facts={rest} /></FoldRow>;
 }
 
-export function ShortsCard({ verdict, kicker, title, line, lineNote, highlights, tiles, products, thumbs, fold, highlight }: {
+/** 숫자 타일 3개(숏츠 반응·가장 오른 연령·목표 참고값)를 접힘 안에 한 줄로 */
+export function TileRow({ tiles }: { tiles: Tile[] }) {
+  if (tiles.length === 0) return null;
+  return (
+    <FoldRow label="숫자 요약">
+      <ul className="flex flex-wrap gap-x-4 gap-y-1">
+        {tiles.map((t) => <li key={t.label}><span className="text-ink-500">{t.label}</span> <b className="text-ink-900">{t.value}</b>{t.note ? <span className="text-xs text-ink-500"> · {t.note}</span> : null}</li>)}
+      </ul>
+    </FoldRow>
+  );
+}
+
+export function ShortsCard({ verdict, kicker, badges, title, line, lineNote, highlights, extraTiles, products, productsLabel = "연결 상품", thumbs, thumbsLabel = "이런 숏츠가 잘 돼요", fold, highlight }: {
   verdict: Verdict | null;
   kicker?: string | null;
+  /** 판정 칩 옆 작은 칩 (예: 상표 주의) */
+  badges?: ReactNode;
   title: string;
   line: string | null;
   /** 한 문장 옆 작은 표시 (예: 고정 문장) */
   lineNote?: string | null;
-  /** 근거 요약 (서버 evidence_highlights) */
+  /** 근거 요약 (서버 evidence_highlights) → 숫자 타일 */
   highlights?: EvidenceHighlight[];
-  tiles: Tile[];
+  /** 근거 요약 뒤에 붙일 타일 (예: 빌릴 형식). 합쳐 3칸 */
+  extraTiles?: Tile[];
   products: { id: string; name: string }[];
+  productsLabel?: string;
   thumbs: Thumb[];
+  thumbsLabel?: string;
   fold: ReactNode;
   highlight?: boolean;
 }) {
   return (
-    <li className={`card flex flex-wrap gap-5 p-4 sm:p-5 ${highlight ? "ring-2 ring-emerald-200" : ""}`}>
-      <div className="flex min-w-0 flex-[999_1_30rem] flex-col gap-3">
-        {(verdict || kicker) && (
+    <li className={`card flex gap-6 p-5 ${highlight ? "ring-2 ring-emerald-200" : ""}`}>
+      <div className="flex min-w-0 flex-1 flex-col gap-3">
+        {(verdict || kicker || badges) && (
           <div className="flex flex-wrap items-center gap-2">
             {verdict && <span className={`chip text-sm font-bold ${verdict.tone}`} title={verdict.title ?? undefined}>{verdict.label}</span>}
             {kicker && <span className="text-xs text-ink-500">{kicker}</span>}
+            {badges}
           </div>
         )}
-        <h3 className="text-xl font-bold text-ink-900">{title}</h3>
+        <h3 className="text-2xl font-bold text-ink-900">{title}</h3>
         {line && (
-          <p className="text-base leading-relaxed text-ink-900">
+          <p className="truncate text-base text-ink-900" title={line}>
             {line}{lineNote && <span className="ml-1.5 text-xs text-ink-500">({lineNote})</span>}
           </p>
         )}
-        <Highlights list={highlights} />
-        {tiles.length > 0 && (
-          <dl className="grid gap-2.5 sm:grid-cols-3">
-            {tiles.map((t) => (
-              <div key={t.label} className="flex flex-col gap-0.5 rounded-xl bg-ink-50 p-3">
-                <dt className="text-xs font-semibold text-ink-500">{t.label}</dt>
-                <dd className="text-2xl font-bold tabular-nums text-ink-900">{t.value}</dd>
-                {t.note && <dd className="text-xs text-ink-500">{t.note}</dd>}
-              </div>
-            ))}
-          </dl>
-        )}
+        <Highlights list={highlights} extra={extraTiles} />
         {products.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs font-semibold text-ink-500">연결 상품</span>
+            <span className="text-xs font-semibold text-ink-500">{productsLabel}</span>
             {products.map((p) => <span key={p.id} className="chip bg-surface text-sm text-ink-700 ring-1 ring-ink-100">{p.name}</span>)}
           </div>
         )}
-        <details className="rounded-xl bg-ink-50 px-3 py-2">
-          <summary className="cursor-pointer text-sm font-semibold text-ink-700">근거 전체 보기</summary>
-          <div className="mt-2 space-y-3 text-sm text-ink-700">{fold}</div>
+        <details>
+          <summary className="cursor-pointer text-sm font-semibold text-ink-900">근거 전체 보기</summary>
+          <div className="mt-2 space-y-3 rounded-xl bg-ink-50 p-3 text-sm text-ink-700">{fold}</div>
         </details>
       </div>
       {thumbs.length > 0 && (
-        <div className="flex min-w-0 flex-[1_1_16rem] flex-col gap-2">
-          <p className="text-xs font-semibold text-ink-500">근거 숏츠</p>
+        <div className="flex w-[19rem] shrink-0 flex-col gap-2">
+          <p className="text-xs font-semibold text-ink-700">{thumbsLabel}</p>
           <ul className="grid grid-cols-3 gap-2">
             {thumbs.map((t, k) => (
               <li key={t.url} className="min-w-0">
