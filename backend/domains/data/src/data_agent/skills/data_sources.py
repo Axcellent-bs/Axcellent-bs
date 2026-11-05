@@ -276,14 +276,26 @@ async def list_sources(
 
 def llm_usage_today(env: Mapping[str, str]) -> LlmDailyUsage:
     """data 부서 LLM 오늘 사용량/상한 (`llm_budget`, 서버·수집기가 같은 기록)."""
-    from data_agent.llm_budget import BUDGET
+    from ax_contracts.schemas.data import LlmTaskUsage
+    from data_agent.llm_budget import BUDGET, reserve_ratio
 
     now = BUDGET.usage(env)
+    ratio = reserve_ratio(env)
+    reserving = not now.reached and now.share() >= ratio
+    note = (
+        f"LLM 하루 상한: {now.line()}. 오늘은 LLM을 부르지 않고 고정 문장·unknown"
+        if now.reached
+        else f"상한의 {ratio:.0%}에 닿아 브리프·기회 카드 몫만 남기고 나머지는 다음 날로"
+        f" ({now.line()})"
+        if reserving
+        else None
+    )
     return LlmDailyUsage(
         day=now.day, calls=now.calls, call_cap=now.call_cap, tokens=now.tokens,
-        token_cap=now.token_cap, reached=now.reached,
-        note=f"LLM 하루 상한: {now.line()}. 오늘은 LLM을 부르지 않고 고정 문장·unknown"
-        if now.reached else None,
+        token_cap=now.token_cap, reached=now.reached, note=note,
+        by_task=[LlmTaskUsage(skill=s, task=t, calls=c, tokens=n)
+                 for s, t, c, n in BUDGET.by_task(now.day)],
+        reserve_ratio=ratio, reserving=reserving,
     )  # fmt: skip
 
 

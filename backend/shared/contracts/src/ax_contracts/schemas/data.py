@@ -2326,6 +2326,19 @@ class LlmDailyUsage(AxModel):
     token_cap: int = Field(gt=0)
     reached: bool  # 상한에 닿아 지금은 LLM을 부르지 않음
     note: str | None = None  # reached면 "LLM 하루 상한: …"
+    # 아래는 예전 응답은 없다. skill·작업별 오늘 사용량 (많은 순), 남겨 둔 몫 기준과 그 상태
+    by_task: list[LlmTaskUsage] = Field(default_factory=list)
+    reserve_ratio: float | None = Field(default=None, ge=0, le=1)  # 이 비율부터 브리프 몫만
+    reserving: bool = False  # 지금 브리프·기회 카드 몫만 남기고 나머지는 다음 날로 미룸
+
+
+class LlmTaskUsage(AxModel):
+    """data LLM 오늘 사용량 한 줄 (skill × 작업)."""
+
+    skill: str  # 부른 skill (미리 계산도 skill 이름)
+    task: str  # 문장·분류·계획·프로필·예시 아이디어·임베딩 등
+    calls: int = Field(ge=0)
+    tokens: int = Field(ge=0)
 
 
 # ------------------------------------------------ 수집 계획 (source_plan)

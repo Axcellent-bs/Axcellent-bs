@@ -265,29 +265,32 @@ class Candidate:
     def names(self) -> list[str]:
         return [self.topic, *self.aliases]
 
+    def _own_cls(self) -> CategoryResult | None:
+        """브리프가 직접 분류한 결과: 지금 인기에 없거나, 지금 인기가 분류하지 못한(미룬) 주제를
+        브리프가 분류했을 때. 지금 인기 분류를 쓰면 None."""
+        popular_known = (self.popular is not None
+                         and self.popular.topic_category not in (None, "", "unknown"))  # fmt: skip
+        return None if popular_known else self.cls
+
     def category(self) -> str | None:
-        if self.popular is not None and self.popular.topic_category:
-            return self.popular.topic_category
-        return self.cls.category if self.cls is not None else None
+        if (own := self._own_cls()) is not None:
+            return own.category
+        return self.popular.topic_category if self.popular is not None else None
 
     def is_person(self) -> bool | None:
-        return (
-            self.popular.is_person
-            if self.popular is not None
-            else (self.cls.is_person if self.cls is not None else None)
-        )
+        if (own := self._own_cls()) is not None:
+            return own.is_person
+        return self.popular.is_person if self.popular is not None else None
 
     def real_entity(self) -> bool | None:
-        return (
-            self.popular.real_entity
-            if self.popular is not None
-            else (self.cls.real_entity if self.cls is not None else None)
-        )
+        if (own := self._own_cls()) is not None:
+            return own.real_entity
+        return self.popular.real_entity if self.popular is not None else None
 
     def entity_names(self) -> list[str]:
-        if self.popular is not None:
-            return list(self.popular.entity_names)
-        return list(self.cls.entity_names) if self.cls is not None else []
+        if (own := self._own_cls()) is not None:
+            return list(own.entity_names)
+        return list(self.popular.entity_names) if self.popular is not None else []
 
     def pending(self) -> bool:
         return self.category() in (None, "unknown")
@@ -553,15 +556,26 @@ class _Lines(BaseModel):
 async def write_lines(
     insights: Sequence[TrendInsight], llm: LLMClient, context_id: str | None, queries: list[str]
 ) -> None:
-    """인사이트마다 한 줄 (묶어서 LLM 한 번). 검증에 걸리면 고정 문장."""
-    data = {i.topic: json.dumps(facts(i), ensure_ascii=False) for i in insights if facts(i)}
-    answer: dict[str, str] = {}
+    """인사이트마다 한 줄 (묶어서 LLM 한 번). 검증에 걸리면 고정 문장.
+
+    같은 insight_id + 같은 근거 숫자로 쓴 문장이 저장돼 있으면 다시 묻지 않는다 (`line_store`).
+    """
+    from data_agent.line_store import LINES, line_key
+
+    keys = {i.topic: line_key("brief", i.insight_id, facts(i)) for i in insights if facts(i)}
+    saved = {t: line for t, k in keys.items() if (line := LINES.get(k)) is not None}
+    data = {i.topic: json.dumps(facts(i), ensure_ascii=False) for i in insights
+            if facts(i) and i.topic not in saved}  # fmt: skip
+    answer: dict[str, str] = dict(saved)
     why: str | None = None
+    if saved:
+        queries.append(f"trend_insight_brief lines reused={len(saved)}")
     if data:
         queries.append(f"llm trend_insight_brief lines={len(data)}")
         try:
             got = await llm.structured(LINE_PROMPT, _Lines, untrusted=data, context_id=context_id)
-            answer = {x.keyword.strip(): x.line.strip() for x in got.items}
+            answer |= {x.keyword.strip(): x.line.strip() for x in got.items
+                       if x.keyword.strip() not in saved}  # fmt: skip
         except LLMNotConfiguredError as error:
             why = f"{no_llm(error)} 고정 문장"
         except (LLMFormatError, ValidationError):
@@ -575,9 +589,11 @@ async def write_lines(
             i.line_reason = "근거 숫자가 없음"
             continue
         line = answer.get(i.topic, "")
-        bad = why or brief_line.problem(line, f)
+        bad = (None if i.topic in saved else why) or brief_line.problem(line, f)
         if bad is None:
             i.line, i.line_status, i.line_reason = line.strip(), "llm", None
+            if i.topic not in saved:
+                LINES.put(keys[i.topic], i.line)
         else:  # 나열하지 않고 근거 1개만 쓴 짧은 고정 문장
             i.line, i.line_status = brief_line.short_fixed(f), "fixed"
             i.line_reason = bad if why else f"LLM 문장을 쓰지 않음 ({bad}), 고정 문장"
@@ -1245,7 +1261,8 @@ async def make_brief(
         # 지금 인기에 없는 급상승 주제만 여기서 묶어 분류한다(저장된 분류는 다시 묻지 않음)
         warned = warned or Warned()
         company = company_candidates(promo, catalog, cands, config.company_pool, warned)
-        todo = [c for c in [*cands, *company] if c.popular is None]
+        # 지금 인기가 분류하지 못한 주제(상한 가까이에서 다음 날로 미룬 것 등)도 브리프 몫으로 분류
+        todo = [c for c in [*cands, *company] if c.popular is None or c.pending()]
         if todo:
             try:
                 found = await classify_topics(

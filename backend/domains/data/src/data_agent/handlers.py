@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Awaitable, Callable, Mapping
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
 
@@ -113,41 +114,59 @@ class TimedLLMClient(LLMClient):
     """data LLM: 하루 상한(`llm_budget`)을 먼저 보고, 대기 시간을 단계 기록에 더한다.
 
     상한에 닿으면 부르지 않고 `LLMDailyCapReached`(= LLMNotConfiguredError)를 올린다.
-    HTTP 요청 한 번마다 남기는 사용량(`record_usage`)을 하루 셈에도 더한다.
+    상한의 80%(설정)부터는 브리프 몫만 남기고 나머지 skill은 다음 날로 미룬다.
+    HTTP 요청 한 번마다 남기는 사용량(`record_usage`)을 하루 셈에 skill·작업과 같이 더한다.
     """
 
     @staticmethod
-    def _check() -> None:
+    def _skill() -> str:
+        from data_agent.stage_timing import current_name
+
+        return (current_name() or "unknown").split("@", 1)[0]
+
+    def _check(self) -> None:
         try:
-            llm_budget.BUDGET.check()
+            llm_budget.BUDGET.check(skill=self._skill())
         except llm_budget.LLMDailyCapReached as error:  # 덜 만든 결과는 짧게만 저장 (capped)
             llm_failure.mark(error)
             raise
 
     async def structured(self, *args: Any, **kwargs: Any) -> Any:
         self._check()
+        schema = args[1] if len(args) > 1 else kwargs.get("schema")
+        token = _LLM_TASK.set((self._skill(), llm_budget.task_of(schema)))
         try:
             with stage("llm"):
                 return await super().structured(*args, **kwargs)
         except Exception as error:  # 실패한 계산은 저장하지 않게 표시 (llm_failure)
             llm_failure.mark(error)
             raise
+        finally:
+            _LLM_TASK.reset(token)
 
     async def embed(self, texts: list[str], context_id: str | None = None) -> list[list[float]]:
         self._check()
+        token = _LLM_TASK.set((self._skill(), llm_budget.EMBED_TASK))
         try:
             with stage("llm"):
                 return await super().embed(texts, context_id)
         except Exception as error:
             llm_failure.mark(error)
             raise
+        finally:
+            _LLM_TASK.reset(token)
 
     def record_usage(
         self, context_id: str | None, model: str | None, input_tokens: int, output_tokens: int,
         success: bool, tenant_id: str = TENANT_ID_DEFAULT,
     ) -> None:  # fmt: skip
         super().record_usage(context_id, model, input_tokens, output_tokens, success, tenant_id)
-        llm_budget.BUDGET.add(1, input_tokens + output_tokens)
+        skill, task = _LLM_TASK.get() or (self._skill(), "unknown")
+        llm_budget.BUDGET.add(1, input_tokens + output_tokens, skill=skill, task=task)
+
+
+# 지금 부르는 LLM의 (skill, 작업): 사용량 기록에 같이 남긴다
+_LLM_TASK: ContextVar[tuple[str, str] | None] = ContextVar("data_llm_task", default=None)
 
 
 def get_llm() -> LLMClient:
