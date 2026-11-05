@@ -12,6 +12,7 @@ from fastapi import FastAPI
 
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
+from hr_agent.chat.api import create_chat_router
 from hr_agent.config import HrSettings
 from hr_agent.handlers import HANDLERS
 
@@ -35,6 +36,7 @@ def load_card() -> AgentCard:
 
 
 app = create_agent_app(load_card(), HANDLERS)
+app.include_router(create_chat_router())  # AI 대화방 직접 대화 (chat/)
 
 
 @asynccontextmanager
