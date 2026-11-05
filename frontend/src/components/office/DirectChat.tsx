@@ -1,29 +1,70 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { PreparingChip } from "@/components/Preparing";
+import { SAFETY_HUMAN_TOKEN } from "@/lib/env";
 import { DEV_API, chatApi } from "@/lib/planning";
-import type { ChatMessage, ChatStatus, ChatThread } from "@/lib/planningData";
+import type { ChatMessage, ChatStatus, ChatThread as BaseThread } from "@/lib/planningData";
 import { useSession, type Account } from "@/demo/session";
 
 // AI 대화방의 직접 대화. 사람이 부서 AI 하나를 골라 바로 말을 건다.
-// 지금 사람 말을 바로 받는 창구는 개발 AI(dev 서비스 /dev-chat)뿐이다. 나머지 AI는 대화 스킬이 생길 때까지 "준비 중"으로 둔다.
+// 사람 말을 바로 받는 창구: 개발 AI(dev 서비스 /dev-chat), 인사 AI(/api/hr/chat). 나머지 AI는 창구가 생길 때까지 "준비 중"으로 둔다.
+// 창구는 모두 같은 대화 모양(id·title·status·messages[]·who·시각)을 돌려준다.
 //
 // 열람 권한
 // - 본인: 자기 대화 원문 전부
 // - 그 AI 담당(담당 부서 회원·관리자): 다른 사람 대화는 요약(제목·메시지 수·시각·결과)만. 일이 생긴 대화(작업 시작)는 원문까지
 // - 그 밖의 사람: 다른 사람 대화를 볼 수 없다
 // 데모 한계: 백엔드는 브라우저마다 같은 사람 토큰(공용)으로 대화를 받아 주인을 구분하지 못한다.
-// 그래서 대화 주인은 이 브라우저가 기억한다(OWNER_KEY). 실제 열람 제한은 백엔드가 대화마다 주인을 남긴 뒤에 서버에서 건다.
+// 그래서 대화 주인은 이 브라우저가 기억한다(OWNER_KEY). 서버가 가린 대화(restricted, 인사 AI)는 서버가 준 요약만 보여 준다.
+
+/** 대화 하나. 서버가 다른 사람 대화를 가리면 messages가 비고 restricted·summary가 온다 */
+type ChatThread = BaseThread & { summary?: string; restricted?: boolean; messageCount?: number };
+interface Talk {
+  list: () => Promise<ChatThread[]>;
+  get: (id: string) => Promise<ChatThread>;
+  send: (x: { thread_id?: string; message: string }) => Promise<ChatThread>;
+}
+
+// 인사 AI 대화 창구(decisions 8114 `/api/hr/chat`). CORS가 없어 기본값은 Vite 개발 프록시(/hr-api → vite.config.ts)
+// 인사 데이터를 다루는 대화라 읽기에도 사람 토큰을 붙인다
+const HR_API_URL = (import.meta.env.VITE_HR_API_URL as string | undefined) ?? "/hr-api";
+const toThread = (x: Record<string, unknown>): ChatThread => ({
+  ...(x as unknown as ChatThread),
+  taskId: (x.task_id as string | null | undefined) ?? null,
+  createdAt: String(x.created_at ?? ""),
+  updatedAt: String(x.updated_at ?? ""),
+  messageCount: typeof x.message_count === "number" ? x.message_count : undefined,
+});
+async function hrCall<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(`${HR_API_URL}/api/hr${path}`, {
+    ...init,
+    cache: "no-store",
+    headers: { "Content-Type": "application/json", ...(SAFETY_HUMAN_TOKEN ? { Authorization: `Bearer ${SAFETY_HUMAN_TOKEN}` } : {}) },
+  });
+  const body = (await res.json().catch(() => null)) as { data?: T; error?: { message?: string } } | null;
+  if (!res.ok || !body || body.data === undefined) throw new Error(body?.error?.message ?? `인사 AI에 연결할 수 없어요 (${res.status})`);
+  return body.data;
+}
+const hrTalk: Talk = {
+  list: () => hrCall<Record<string, unknown>[]>("/chat").then((d) => (Array.isArray(d) ? d.map(toThread) : [])),
+  get: (id) => hrCall<Record<string, unknown>>(`/chat/${encodeURIComponent(id)}`).then(toThread),
+  send: (x) => hrCall<Record<string, unknown>>("/chat", { method: "POST", body: JSON.stringify(x) }).then(toThread),
+};
 
 export const DIRECT_PREFIX = "direct:";
-export interface DirectAgent { key: string; name: string; note: string; live: boolean; /** 이 AI를 맡은 부서. 그 부서 회원이 다른 사람 대화 요약을 본다 */ dept?: string }
+export interface DirectAgent {
+  key: string; name: string; note: string; live: boolean
+  /** 이 AI를 맡은 부서. 그 부서 회원이 다른 사람 대화 요약을 본다 */
+  dept?: string
+  talk?: Talk
+}
 export const DIRECT_AGENTS: DirectAgent[] = [
-  { key: "dev", name: "개발 AI", note: "고칠 것을 말하면 되묻고 계획을 세워요. 계획이 서면 코딩 작업(PR)을 시작해요.", live: true, dept: "개발팀" },
+  { key: "dev", name: "개발 AI", note: "고칠 것을 말하면 되묻고 계획을 세워요. 계획이 서면 코딩 작업(PR)을 시작해요.", live: true, dept: "개발팀", talk: chatApi(DEV_API) },
+  { key: "hr", name: "인사 AI", note: "팀 인원·교대·인수인계 같은 인사 기록을 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요.", live: true, dept: "인사팀", talk: hrTalk },
   { key: "orchestrator", name: "총괄 AI", note: "", live: false },
   { key: "planning", name: "기획 AI", note: "", live: false },
   { key: "support", name: "고객지원 AI", note: "", live: false },
   { key: "finance", name: "재무 AI", note: "", live: false },
   { key: "data", name: "데이터분석 AI", note: "", live: false },
-  { key: "hr", name: "인사 AI", note: "", live: false },
   { key: "marketing", name: "마케팅 AI", note: "", live: false },
 ];
 export const directAgentOf = (room: string) =>
@@ -31,8 +72,6 @@ export const directAgentOf = (room: string) =>
 
 /** 이 계정이 그 AI 담당인가: 관리자이거나 그 AI를 맡은 부서 회원 */
 const isKeeper = (account: Account, agent: DirectAgent) => !!account.admin || (!!agent.dept && account.dept === agent.dept);
-
-const api = chatApi(DEV_API);
 
 // 대화 주인 (대화 id → 계정 id). 데모라 이 브라우저에만 저장한다
 const OWNER_KEY = "axcellent-direct-chat-owner";
@@ -46,15 +85,15 @@ const saveOwner = (threadId: string, accountId: string) => {
   try { localStorage.setItem(OWNER_KEY, JSON.stringify({ ...loadOwners(), [threadId]: accountId })); } catch { /* 저장이 막히면 새로고침 때 내 대화 목록에서 빠진다 */ }
 };
 // 이 계정이 이 탭에서 이어 가던 대화
-const threadKey = (accountId: string) => `axcellent-direct-chat-dev:${accountId}`;
-const loadThreadId = (accountId: string) => { try { return sessionStorage.getItem(threadKey(accountId)); } catch { return null; } };
-const saveThreadId = (accountId: string, id: string | null) => {
-  try { if (id) sessionStorage.setItem(threadKey(accountId), id); else sessionStorage.removeItem(threadKey(accountId)); } catch { /* 저장이 막히면 새로고침 때 새 대화 */ }
+const threadKey = (agentKey: string, accountId: string) => `axcellent-direct-chat-${agentKey}:${accountId}`;
+const loadThreadId = (key: string) => { try { return sessionStorage.getItem(key); } catch { return null; } };
+const saveThreadId = (key: string, id: string | null) => {
+  try { if (id) sessionStorage.setItem(key, id); else sessionStorage.removeItem(key); } catch { /* 저장이 막히면 새로고침 때 새 대화 */ }
 };
 
 const hhmm = (iso: string) => (iso ? new Date(iso).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" }) : "");
 const when = (iso: string) => (iso ? new Date(iso).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
-const errText = (e: unknown) => (e instanceof Error ? e.message : "개발 AI에 연결할 수 없어요");
+const errText = (e: unknown, name: string) => (e instanceof Error ? e.message : `${name}에 연결할 수 없어요`);
 const RESULT: Record<ChatStatus, string> = { talking: "대화만 함", started: "코딩 작업 시작", blocked: "막힘", waiting: "앞 요청 대기" };
 /** 일이 생긴 대화: 담당자가 원문까지 본다 */
 const madeWork = (t: ChatThread) => t.status === "started" || !!t.taskId;
@@ -67,7 +106,7 @@ export function DirectChat({ agent }: { agent: DirectAgent }) {
         <h2 className="card-title">{agent.name}와 직접 대화</h2>
         {!agent.live && <PreparingChip />}
       </header>
-      {agent.live && account ? <DevTalk key={account.id} agent={agent} account={account} /> : (
+      {agent.talk && account ? <AgentTalk key={`${agent.key}:${account.id}`} agent={agent} talk={agent.talk} account={account} /> : (
         <div className="mx-auto max-w-md py-16 text-center text-sm text-ink-500">
           {agent.name}는 아직 사람 말을 바로 받는 창구가 없어요. 부서 AI에 대화 스킬이 생기면 여기서 바로 말을 걸 수 있어요.
         </div>
@@ -76,7 +115,7 @@ export function DirectChat({ agent }: { agent: DirectAgent }) {
   );
 }
 
-function DevTalk({ agent, account }: { agent: DirectAgent; account: Account }) {
+function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Talk; account: Account }) {
   const [thread, setThread] = useState<ChatThread | null>(null);
   const [text, setText] = useState("");
   const [sending, setSending] = useState<string | null>(null);
@@ -85,6 +124,7 @@ function DevTalk({ agent, account }: { agent: DirectAgent; account: Account }) {
   const [owners, setOwners] = useState(loadOwners);
   const box = useRef<HTMLDivElement>(null);
   const keeper = isKeeper(account, agent);
+  const tkey = threadKey(agent.key, account.id);
 
   const mine = all.filter((t) => owners[t.id] === account.id);
   const others = all.filter((t) => owners[t.id] !== account.id);
@@ -92,13 +132,13 @@ function DevTalk({ agent, account }: { agent: DirectAgent; account: Account }) {
   const readOnly = !!thread && owners[thread.id] !== account.id;
 
   useEffect(() => {
-    const id = loadThreadId(account.id);
+    const id = loadThreadId(tkey);
     if (!id || loadOwners()[id] !== account.id) return;
-    api.get(id).then(setThread).catch(() => saveThreadId(account.id, null));
-  }, [account.id]);
+    api.get(id).then(setThread).catch(() => saveThreadId(tkey, null));
+  }, [api, tkey, account.id]);
   useEffect(() => {
     api.list().then(setAll).catch(() => setAll([]));
-  }, [thread?.id]);
+  }, [api, thread?.id]);
   useLayoutEffect(() => {
     const el = box.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -115,9 +155,9 @@ function DevTalk({ agent, account }: { agent: DirectAgent; account: Account }) {
       const next = await api.send({ ...(thread ? { thread_id: thread.id } : {}), message });
       if (!thread) { saveOwner(next.id, account.id); setOwners(loadOwners()); }
       setThread(next);
-      saveThreadId(account.id, next.id);
+      saveThreadId(tkey, next.id);
     } catch (err) {
-      setError(errText(err));
+      setError(errText(err, agent.name));
       setText(message);
     } finally {
       setSending(null);
@@ -126,7 +166,7 @@ function DevTalk({ agent, account }: { agent: DirectAgent; account: Account }) {
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); }
   };
-  const reset = () => { setThread(null); saveThreadId(account.id, null); setError(null); };
+  const reset = () => { setThread(null); saveThreadId(tkey, null); setError(null); };
   const restart = () => {
     if (readOnly) return reset();
     if (!window.confirm("새 대화를 시작할까요? 지금 대화는 '내 지난 대화'에서 다시 열 수 있어요.")) return;
@@ -134,7 +174,7 @@ function DevTalk({ agent, account }: { agent: DirectAgent; account: Account }) {
   };
   const open = (t: ChatThread) => {
     setError(null);
-    api.get(t.id).then((x) => { setThread(x); if (owners[x.id] === account.id) saveThreadId(account.id, x.id); }).catch((err) => setError(errText(err)));
+    api.get(t.id).then((x) => { setThread(x); if (owners[x.id] === account.id) saveThreadId(tkey, x.id); }).catch((err) => setError(errText(err, agent.name)));
   };
   const messages = thread?.messages ?? [];
 
@@ -171,8 +211,9 @@ function DevTalk({ agent, account }: { agent: DirectAgent; account: Account }) {
                 {others.map((t) => (
                   <li key={t.id} className={`rounded-lg px-2 py-1.5 text-xs ${thread?.id === t.id ? "bg-brand-50" : "bg-ink-50"}`}>
                     <span className="block truncate font-medium">{t.title || "제목 없는 대화"}</span>
-                    <span className="text-[11px] text-ink-500">{when(t.createdAt)} · 메시지 {t.messages.length}개 · {RESULT[t.status]}</span>
-                    {madeWork(t) && (
+                    <span className="text-[11px] text-ink-500">{when(t.createdAt)} · 메시지 {t.messageCount ?? t.messages.length}개 · {RESULT[t.status]}</span>
+                    {t.summary && <span className="mt-0.5 block text-[11px] text-ink-700">{t.summary}</span>}
+                    {madeWork(t) && !t.restricted && (
                       <button type="button" className="mt-1 block text-[11px] font-medium text-brand-700 hover:underline" onClick={() => open(t)} disabled={!!sending}>원문 보기</button>
                     )}
                   </li>

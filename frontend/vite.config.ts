@@ -16,6 +16,8 @@ export default defineConfig(({ mode }) => {
     '/planning-api': { target: env.PLANNING_PROXY_TARGET || 'http://127.0.0.1:8101', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/planning-api/, '') },
     // 개발·배포 서비스(dev, 8111)
     '/dev-api': { target: env.DEV_PROXY_TARGET || 'http://127.0.0.1:8111', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/dev-api/, '') },
+    // 인사 AI(decisions, 8114). AI 대화방 직접 대화(/api/hr/chat). 서버에 CORS가 없어 프록시로 부른다
+    '/hr-api': { target: env.HR_PROXY_TARGET || 'http://127.0.0.1:8114', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/hr-api/, '') },
   }
   return {
     // /dejafix-api 는 로그인까지 대신 해야 해서 단순 프록시가 아니라 플러그인이 맡는다 (dejafix-proxy.ts)
