@@ -108,6 +108,56 @@ GAP_RUN_FACTOR = 2.0  # 비교 구간 최장 이어짐의 2배
 GAP_P_MAX = 1e-9
 
 
+# ---------------------------------------------------------------- 한 요청 안의 읽기 (#705)
+
+
+class OnceReads:
+    """한 요청 안에서 같은 구간 주문·상품 목록은 shop-api에서 한 번만 읽는다 (실패도 그대로 기억).
+
+    판매액·상품 기준·유입 기준이 같은 구간 주문을 각자 읽던 것을 하나로 줄인다. 커넥터에 없는
+    메서드는 만들지 않는다(`hasattr` 판단 그대로). 나머지는 커넥터 그대로 부른다.
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self._orders: dict[tuple[datetime, datetime], Any] = {}
+        self._products: list[Any] | ConnectorUnavailable | None = None
+        if hasattr(inner, "orders"):
+            self.orders = self._read_orders
+        if hasattr(inner, "products"):
+            self.products = self._read_products
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    async def _read_orders(self, start: datetime, end: datetime) -> list[Any]:
+        key = (start, end)
+        if key not in self._orders:
+            try:
+                self._orders[key] = await self._inner.orders(start, end)
+            except ConnectorUnavailable as error:
+                self._orders[key] = error
+        got = self._orders[key]
+        if isinstance(got, ConnectorUnavailable):
+            raise got
+        return got
+
+    async def _read_products(self) -> list[Any]:
+        if self._products is None:
+            try:
+                self._products = await self._inner.products()
+            except ConnectorUnavailable as error:
+                self._products = error
+        if isinstance(self._products, ConnectorUnavailable):
+            raise self._products
+        return self._products
+
+
+def read_error(error: ConnectorUnavailable) -> str:
+    """읽기 실패 이유. 연결·제한 시간 문제(UNAVAILABLE)는 코드 대신 커넥터가 준 이유를 쓴다."""
+    return f"({error})" if error.code == "UNAVAILABLE" else f"[{error.code}]"
+
+
 # ---------------------------------------------------------------- 회사 시간대
 
 
@@ -556,7 +606,7 @@ async def _sales(
         window = await connector.orders(start, end)
         past = [await connector.orders(s.start, s.end) for s in used]
     except ConnectorUnavailable as error:
-        return _unknown_sales(f"주문 금액을 읽지 못함 [{error.code}]", rule, len(used))
+        return _unknown_sales(f"주문 금액을 읽지 못함 {read_error(error)}", rule, len(used))
     period = _totals(window)
     unpaid = sum(1 for o in window if not o.settled and o.status == "pending_payment")
     if period.orders == 0 and unpaid:
@@ -695,7 +745,7 @@ async def _products_effect(
     try:
         matched, unmatched = match_products(list(data.products), await connector.products())
     except ConnectorUnavailable as error:
-        return unknown(f"상품 목록을 읽지 못함 [{error.code}]", [], list(data.products))
+        return unknown(f"상품 목록을 읽지 못함 {read_error(error)}", [], list(data.products))
     if not matched:
         return unknown(f"{NO_MATCH} (요청 {len(unmatched)}개 모두 카탈로그 이름·id와 다름)",
                        [], unmatched)  # fmt: skip
@@ -706,7 +756,7 @@ async def _products_effect(
         window = await connector.orders(data.window_from, data.window_to)
         past = [await connector.orders(s.start, s.end) for s in used]
     except ConnectorUnavailable as error:
-        return unknown(f"주문 기록을 읽지 못함 [{error.code}]", matched, unmatched)
+        return unknown(f"주문 기록을 읽지 못함 {read_error(error)}", matched, unmatched)
     unpaid = sum(1 for o in window if not o.settled and o.status == "pending_payment")
     if not any(o.settled for o in window) and unpaid:
         return unknown(f"{GAP_WORD}: 구간 주문 {unpaid}건이 결제 대기이고 결제 완료가 0건",
@@ -769,7 +819,7 @@ async def _attribution(
         tagged = await connector.attributed_orders(data.window_from, data.window_to)
         window = await connector.orders(data.window_from, data.window_to)
     except ConnectorUnavailable as error:
-        return unknown(f"유입 주문을 읽지 못함 [{error.code}]")
+        return unknown(f"유입 주문을 읽지 못함 {read_error(error)}")
     paid = [o for o in tagged if o.status == "paid"]
     if not paid:
         return unknown(f"{NO_TAGS}: 구간에 유입 표시가 있는 결제 완료 주문이 없음"
@@ -906,8 +956,18 @@ async def measure(
     alpha: float = DIRECTION_ALPHA,
     env: Mapping[str, str] | None = None,
 ) -> CampaignEffectOutput:
-    """설명 문장 없이 숫자만 계산한다 (평가 채점기도 이 함수를 부른다)."""
+    """설명 문장 없이 숫자만 계산한다 (평가 채점기도 이 함수를 부른다).
+
+    같은 구간 주문·상품 목록은 한 번만 읽고(`OnceReads`), 상품 목록은 주문을 읽기 전에 먼저 읽는다
+    (큰 주문 읽기와 겹쳐 제한 시간을 넘기지 않게, #705).
+    """
     start, end = data.window_from, data.window_to
+    connector = OnceReads(connector)
+    if data.products and hasattr(connector, "products"):
+        try:
+            await connector.products()
+        except ConnectorUnavailable:
+            pass  # 이유는 상품 기준 결과(_products_effect)가 같은 오류로 남긴다
     orders, used, rule = await _orders(connector, start, end, alpha, tenant_timezone(env))
     revenue_metric = catalog.current().revenue_metric
     if not revenue_metric:
@@ -1008,7 +1068,7 @@ def _facts(out: CampaignEffectOutput) -> dict[str, int | float | str]:
             direction = f"{'증가' if o.excess > 0 else '감소'} 추정, 아직 통계적으로 확실하지 않음"
         facts |= {
             "주문 방향": direction,
-            "캠페인 주문": int(o.actual or 0),
+            "캠페인 기간 가게 전체 주문": int(o.actual or 0),
             "평소 주문": round(o.expected or 0, 1),
             "주문 증분": round(o.excess or 0, 1),
             "기준 일수": o.baseline_days,

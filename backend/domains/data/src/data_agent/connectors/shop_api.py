@@ -39,6 +39,9 @@ TIMEOUT_SECONDS = 10.0
 SHOP_METRICS: frozenset[str] = frozenset(get_args(MetricName))
 # shop-api는 한 번에 5분 버킷 2016점(7일)까지 준다. 기준선 7일 + 구간을 하루씩 나눠 읽는다
 SERIES_CHUNK = timedelta(days=1)
+# 주문 목록은 한 시간씩 나눠 읽는다. 주문이 많은 구간(수만 건)을 한 번에 받으면 shop-api가 그동안
+# 묶여 같이 부른 상품·유입 조회가 제한 시간을 넘긴다 (#705)
+ORDERS_CHUNK = timedelta(hours=1)
 FAILED_ORDERS_LIMIT = EVENTS_LIMIT  # shop-api `/failed-orders`의 최대 limit
 TRANSACTIONS_METRIC = "payment_count"  # 거래 시도 수 = 결제 시도 수
 
@@ -89,6 +92,11 @@ class ShopApi:
             response = await client.get(
                 f"{self.base_url}/api/shop{path}", params=params, headers=headers
             )
+        except httpx.TimeoutException as exc:
+            raise ShopUnavailable(
+                "UNAVAILABLE",
+                f"shop-api가 {TIMEOUT_SECONDS:g}초 안에 답하지 않음 ({type(exc).__name__})",
+            ) from exc
         except httpx.HTTPError as exc:
             raise ShopUnavailable(
                 "UNAVAILABLE", f"shop-api에 연결할 수 없다 ({type(exc).__name__})"
@@ -197,12 +205,23 @@ class ShopApiConnector:
             raise ShopUnavailable("BAD_RESPONSE", "쿠폰 응답 형식이 예상과 다르다") from exc
 
     async def orders(self, window_from: datetime, window_to: datetime) -> list[ShopOrder]:
-        """접수 시각이 [from, to)인 주문 (`GET /api/shop/orders?since&until`). 금액·결제·쿠폰 칸."""
-        data = await self.api.get("/orders", {"since": _iso(window_from), "until": _iso(window_to)})
-        try:
-            return [ShopOrder.model_validate(item) for item in data]
-        except (ValidationError, TypeError) as exc:
-            raise ShopUnavailable("BAD_RESPONSE", "주문 응답 형식이 예상과 다르다") from exc
+        """접수 시각이 [from, to)인 주문 (`GET /api/shop/orders?since&until`). 금액·결제·쿠폰 칸.
+
+        구간을 `ORDERS_CHUNK`(한 시간)씩 나눠 차례로 읽는다. 같은 주문 번호는 한 번만 센다.
+        """
+        found: dict[str, ShopOrder] = {}
+        start = window_from
+        while start < window_to:
+            end = min(start + ORDERS_CHUNK, window_to)
+            data = await self.api.get("/orders", {"since": _iso(start), "until": _iso(end)})
+            try:
+                for item in data:
+                    order = ShopOrder.model_validate(item)
+                    found.setdefault(order.order_id, order)
+            except (ValidationError, TypeError) as exc:
+                raise ShopUnavailable("BAD_RESPONSE", "주문 응답 형식이 예상과 다르다") from exc
+            start = end
+        return list(found.values())
 
     async def attributed_orders(
         self, window_from: datetime, window_to: datetime, campaign_id: str | None = None,

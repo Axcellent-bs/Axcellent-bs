@@ -235,7 +235,7 @@ def test_summary_falls_back_when_the_llm_invents_numbers() -> None:
     )
     assert result.fallback and result.fallback_reason == "number_invalid"
     assert "999" not in result.output.summary
-    assert result.output.summary.startswith("캠페인 기간 주문 200건으로")
+    assert result.output.summary.startswith("캠페인 기간 가게 전체 주문 200건으로")  # #705
     assert "매출 확인할 수 없음" in result.evidence.data_summary
 
 

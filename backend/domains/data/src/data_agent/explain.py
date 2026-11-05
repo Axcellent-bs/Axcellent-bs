@@ -249,7 +249,8 @@ def _campaign_template(facts: dict[str, int | float | str]) -> str:
         excess = facts.get("주문 증분")
         sign = "+" if isinstance(excess, int | float) and excess > 0 else ""
         head = (
-            f"캠페인 기간 주문 {_fmt(facts.get('캠페인 주문'), comma=True)}건으로, 지난 "
+            "캠페인 기간 가게 전체 주문 "
+            f"{_fmt(facts.get('캠페인 기간 가게 전체 주문'), comma=True)}건으로, 지난 "
             f"{_fmt(facts.get('기준 일수'))}일 같은 시간대 평균 "
             f"{_fmt(facts.get('평소 주문'))}건 대비 "
         )
