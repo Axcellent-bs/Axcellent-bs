@@ -59,7 +59,7 @@ from ax_dashboard_api import (
 from ax_dashboard_api import (
     communications as communication_log,
 )
-from ax_dashboard_api.auth import require_human_for_writes
+from ax_dashboard_api.auth import human_from_authorization, require_human_for_writes
 from ax_dashboard_api.envelope import ApiError, is_mock, ok, or_unavailable, require_mock
 from ax_dashboard_api.schemas import (
     AgentMessageBody,
@@ -843,6 +843,46 @@ async def cancel_campaign(campaign_id: str, body: CampaignCancelBody) -> dict:
             "cancel_campaign", payload, campaign_id=campaign_id, key=f"ui:cancel:{campaign_id}"
         )
     )
+
+
+class MarketingChatSendBody(BaseModel):
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=2000)
+
+
+@router.get("/marketing-chat")
+async def marketing_chat_list(request: Request) -> dict:
+    """마케팅 AI 대화 목록. 사람 토큰이 필요하다. 남의 대화는 원문 없이 요약만(`restricted`)."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await marketing_client.chat_call("list_chat_threads", {"who": who})
+    return ok(out.get("threads", []))
+
+
+@router.get("/marketing-chat/{thread_id}")
+async def marketing_chat_get(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await marketing_client.chat_call("get_chat_thread", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+@router.post("/marketing-chat")
+async def marketing_chat_send(body: MarketingChatSendBody, request: Request) -> dict:
+    """말을 저장하고 `status: answering`으로 바로 돌려준다. 답은 GET으로 가져간다."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = {"who": who, "message": body.message} | (
+        {"thread_id": body.thread_id} if body.thread_id else {}
+    )
+    out = await marketing_client.chat_call("send_chat_message", payload)
+    return ok(out["thread"])
+
+
+@router.post("/marketing-chat/{thread_id}/close")
+async def marketing_chat_close(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await marketing_client.chat_call(
+        "close_chat_thread", {"who": who, "thread_id": thread_id}
+    )
+    return ok(out["thread"])
 
 
 @router.post("/org-roster/complete")

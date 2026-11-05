@@ -242,6 +242,8 @@ async def analyze_receipt(request: AgentRequest) -> AgentResult:
             "verdict": check.verdict,
             "mismatches": list(check.mismatches),
             "images": len(images),
+            # 화면을 다시 열어도 결과가 보이도록 대조 결과를 남긴다 (사진·원문 없음)
+            "analysis": output.model_dump(mode="json"),
         },
     )
     return h._done(

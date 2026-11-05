@@ -1,13 +1,12 @@
-import { TONE } from "@/components/finance/bits";
 import { useSkill } from "@/components/data/useSkill";
 import { when } from "@/components/data/Sources";
 import { AgeBars } from "@/components/data/AgeBars";
-import { CopyId, FoldRow, ShortsCard, factLinks, shortsThumbs, type Tile, type Verdict } from "@/components/data/ShortsCard";
+import { CopyId, FoldRow, ShortsCard, factLinks, shortsThumbs, shortsTiles, verdictOf } from "@/components/data/ShortsCard";
 import { dataAi, type DataFact, type DomainOpportunity, type OpportunityEvidence, type ShortsFit } from "@/lib/data";
 
 // 트렌드 2단계(인사이트) 맨 위 "기회 가설" 카드. trend_insight_brief의 opportunities(계약 DomainOpportunity, #579) 그대로. v2 틀(ShortsCard)
-// - 판정 칩 하나: 숏츠 적합도(shorts_fit.level) high → "숏츠로 해볼 만함", uncertain·low → "아직 불확실". shorts_fit이 없으면 칩 없음
-// - 숫자 타일(서버 값이 있는 것만): 숏츠 반응(shorts_fit.ratio·samples) · 가장 오른 연령(age_bands 중 배수가 가장 큰 연령대) · 목표 참고값(target_views_reference)
+// - 판정 칩 하나: 숏츠 적합도(shorts_fit.level) high → "숏츠로 해볼 만함", uncertain·low → "아직 불확실". shorts_fit이 없으면 칩 없음 (verdictOf)
+// - 숫자 타일(서버 값이 있는 것만, shortsTiles): 숏츠 반응(shorts_fit.ratio·samples) · 가장 오른 연령(서버 top_age_band·배수, #678) · 목표 참고값(target_views_reference)
 // - 근거 숏츠: 이 카드 video_links(주소·썸네일) → 브리프 facts 중 이 카드(about = opportunity_id, fact_ids)의 YouTube 근거 주소, 최대 3개
 // - 접힘 "근거 전체 보기": 적합도 이유 · 근거(실제 소비·검색 관심: 출처·기간·표본, 키 필요·승인 전은 회색 자리 + 서버 이유)
 //   · 연령대 막대 · 잘 되는 형식 · 연결 상품 이유 · 한계 · 기획이 정할 것(표시만) · 카드 번호 복사
@@ -15,12 +14,6 @@ import { dataAi, type DataFact, type DomainOpportunity, type OpportunityEvidence
 
 const NO_REASON = "서버가 이유를 주지 않았어요";
 const num = (v: number, digits = 0) => v.toLocaleString("ko-KR", { maximumFractionDigits: digits });
-const COMPACT = new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 });
-const VERDICT: Record<ShortsFit["level"], Verdict> = {
-  high: { label: "숏츠로 해볼 만함", tone: TONE.ok },
-  uncertain: { label: "아직 불확실", tone: TONE.muted },
-  low: { label: "아직 불확실", tone: TONE.muted },
-};
 const LEVEL: Record<ShortsFit["level"], string> = { high: "높음", uncertain: "불확실", low: "낮음" };
 const MISSING: Record<Exclude<OpportunityEvidence["status"], "known">, string> = {
   key_required: "키 등록 후 가능",
@@ -57,30 +50,16 @@ function EvidenceGroup({ title, list, nameOf }: { title: string; list: Opportuni
   );
 }
 
-function tilesOf(o: DomainOpportunity): Tile[] {
-  const tiles: Tile[] = [];
-  const fit = o.shorts_fit;
-  if (fit && typeof fit.ratio === "number") {
-    tiles.push({ label: "숏츠 반응", value: `${num(fit.ratio, 2)}배`, note: [fit.category, fit.samples ? `표본 ${num(fit.samples)}개` : null].filter(Boolean).join(" · ") || null });
-  }
-  const top = o.age_bands.filter((b) => typeof b.ratio === "number").sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0))[0];
-  if (top && typeof top.ratio === "number") tiles.push({ label: "가장 오른 연령", value: top.band, note: `검색 평소의 ${num(top.ratio, 2)}배` });
-  if (typeof o.target_views_reference === "number") {
-    tiles.push({ label: "목표 참고값", value: `${COMPACT.format(o.target_views_reference)}회`, note: o.target_reference_basis });
-  }
-  return tiles;
-}
-
 function Card({ o, facts, nameOf }: { o: DomainOpportunity; facts: DataFact[] | undefined; nameOf: (id: string) => string }) {
   const fit = o.shorts_fit;
   return (
     <ShortsCard
-      verdict={fit ? VERDICT[fit.level] : null}
+      verdict={verdictOf(fit)}
       kicker={o.axis ?? null}
       title={o.subtopic}
       line={o.line || null}
       lineNote={o.line_status === "fixed" ? "고정 문장" : null}
-      tiles={tilesOf(o)}
+      tiles={shortsTiles(o)}
       products={o.products.map((p) => ({ id: p.product_id, name: p.name }))}
       thumbs={shortsThumbs(o.video_links, factLinks(facts, o.opportunity_id, o.fact_ids))}
       fold={<>
@@ -98,7 +77,8 @@ function Card({ o, facts, nameOf }: { o: DomainOpportunity; facts: DataFact[] | 
         <EvidenceGroup title="실제 소비" list={o.consumption} nameOf={nameOf} />
         <EvidenceGroup title="검색 관심" list={o.search_interest} nameOf={nameOf} />
         <FoldRow label="연령대">
-          {o.age_bands.length > 0 ? <AgeBars bands={o.age_bands} top={null} /> : <span className="text-ink-500">{o.age_reason ?? NO_REASON}</span>}
+          {o.age_bands.length > 0 ? <AgeBars bands={o.age_bands} top={o.top_age_band ?? null} /> : <span className="text-ink-500">{o.age_reason ?? NO_REASON}</span>}
+          {!o.top_age_band && o.top_age_band_reason && <p className="mt-1 text-xs text-ink-500">가장 오른 연령 · {o.top_age_band_reason}</p>}
         </FoldRow>
         {o.formats.length > 0 && (
           <FoldRow label="잘 되는 형식">

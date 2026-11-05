@@ -17,6 +17,7 @@ const STATUS: Record<ChatStatus, { label: string; tone: ChipTone }> = {
   blocked: { label: '막힘', tone: 'amber' },
   waiting: { label: '앞 요청 대기', tone: 'amber' },
   answering: { label: '답하는 중', tone: 'neutral' },
+  closed: { label: '끝난 대화', tone: 'neutral' },
 }
 const RUNNING: CodingStatus[] = ['queued', 'reading', 'writing', 'reviewing']
 const EXAMPLES = [

@@ -1,0 +1,183 @@
+{
+ "by_category": [
+  {
+   "avg_views": 5312.5,
+   "avg_views_per_hour": 284.4,
+   "count": 16,
+   "formats": [
+    {
+     "count": 16,
+     "name": "챌린지"
+    }
+   ],
+   "median_views": 5000.0,
+   "median_views_per_hour": 250.0,
+   "name": "게임",
+   "reason": null,
+   "status": "known",
+   "top": [
+    {
+     "channel_title": "채널",
+     "thumbnail_url": "https://i.ytimg.com/vi/s20_11/mqdefault.jpg",
+     "title": "s20_11 숏츠",
+     "velocity_status": "known",
+     "video_id": "s20_11",
+     "video_url": "https://www.youtube.com/shorts/s20_11",
+     "views": 12500,
+     "views_per_hour": 250.0
+    },
+    {
+     "channel_title": "채널",
+     "thumbnail_url": "https://i.ytimg.com/vi/s20_10/mqdefault.jpg",
+     "title": "s20_10 숏츠",
+     "velocity_status": "known",
+     "video_id": "s20_10",
+     "video_url": "https://www.youtube.com/shorts/s20_10",
+     "views": 11500,
+     "views_per_hour": 250.0
+    },
+    {
+     "channel_title": "채널",
+     "thumbnail_url": "https://i.ytimg.com/vi/s20_9/mqdefault.jpg",
+     "title": "s20_9 숏츠",
+     "velocity_status": "known",
+     "video_id": "s20_9",
+     "video_url": "https://www.youtube.com/shorts/s20_9",
+     "views": 10500,
+     "views_per_hour": 250.0
+    }
+   ],
+   "velocity_measuring": 0,
+   "velocity_pending": 0,
+   "velocity_reason": null,
+   "velocity_videos": 16
+  },
+  {
+   "avg_views": null,
+   "avg_views_per_hour": null,
+   "count": 3,
+   "formats": [
+    {
+     "count": 3,
+     "name": "챌린지"
+    }
+   ],
+   "median_views": null,
+   "median_views_per_hour": null,
+   "name": "K-pop·음악",
+   "reason": "표본 부족 (3개, 기준 5개)",
+   "status": "unknown",
+   "top": [],
+   "velocity_measuring": 0,
+   "velocity_pending": 0,
+   "velocity_reason": null,
+   "velocity_videos": 0
+  },
+  {
+   "avg_views": null,
+   "avg_views_per_hour": null,
+   "count": 1,
+   "formats": [
+    {
+     "count": 1,
+     "name": "챌린지"
+    }
+   ],
+   "median_views": null,
+   "median_views_per_hour": null,
+   "name": "연예·스포츠",
+   "reason": "표본 부족 (1개, 기준 5개)",
+   "status": "unknown",
+   "top": [],
+   "velocity_measuring": 0,
+   "velocity_pending": 0,
+   "velocity_reason": null,
+   "velocity_videos": 0
+  }
+ ],
+ "by_format": [
+  {
+   "avg_views": 4750.0,
+   "avg_views_per_hour": 277.5,
+   "count": 20,
+   "formats": [],
+   "median_views": 3500.0,
+   "median_views_per_hour": 250.0,
+   "name": "챌린지",
+   "reason": null,
+   "status": "known",
+   "top": [
+    {
+     "channel_title": "채널",
+     "thumbnail_url": "https://i.ytimg.com/vi/s20_11/mqdefault.jpg",
+     "title": "s20_11 숏츠",
+     "velocity_status": "known",
+     "video_id": "s20_11",
+     "video_url": "https://www.youtube.com/shorts/s20_11",
+     "views": 12500,
+     "views_per_hour": 250.0
+    },
+    {
+     "channel_title": "채널",
+     "thumbnail_url": "https://i.ytimg.com/vi/s20_10/mqdefault.jpg",
+     "title": "s20_10 숏츠",
+     "velocity_status": "known",
+     "video_id": "s20_10",
+     "video_url": "https://www.youtube.com/shorts/s20_10",
+     "views": 11500,
+     "views_per_hour": 250.0
+    },
+    {
+     "channel_title": "채널",
+     "thumbnail_url": "https://i.ytimg.com/vi/s20_9/mqdefault.jpg",
+     "title": "s20_9 숏츠",
+     "velocity_status": "known",
+     "video_id": "s20_9",
+     "video_url": "https://www.youtube.com/shorts/s20_9",
+     "views": 10500,
+     "views_per_hour": 250.0
+    }
+   ],
+   "velocity_measuring": 0,
+   "velocity_pending": 0,
+   "velocity_reason": null,
+   "velocity_videos": 20
+  }
+ ],
+ "foreign_excluded": 0,
+ "language": null,
+ "limitation": "인기 영상 상위 200개 안(과 조회수 순 검색 결과)에서의 비교라 이미 뜬 영상끼리 비교한다. 숏츠 여부는 API 표시가 없어 길이로 판단한다.",
+ "max_seconds": 60,
+ "median_views": 3500.0,
+ "median_views_count": 20,
+ "popular_shorts": 5,
+ "quota_used": 1,
+ "reason": null,
+ "recheck_reason": null,
+ "rechecked": 15,
+ "search": [
+  {
+   "found": 3,
+   "reason": null,
+   "shorts": 3,
+   "status": "known",
+   "youtube_category_id": "10"
+  },
+  {
+   "found": 12,
+   "reason": null,
+   "shorts": 12,
+   "status": "known",
+   "youtube_category_id": "20"
+  }
+ ],
+ "search_reason": "오늘 이미 검색해 저장한 결과를 씀",
+ "search_status": "cached",
+ "searched_shorts": 15,
+ "shorts": 20,
+ "snapshot_at": "2026-11-03T05:00:00Z",
+ "status": "known",
+ "summary": "숏츠 20개 (인기 5·검색 15), 표본이 충분한 카테고리 1개. 길이를 몰라 뺀 인기 영상 0개.",
+ "unknown_length": 0,
+ "velocity_note": "시간당 조회 증가: 인기 숏츠는 최근 두 인기 스냅샷, 검색 숏츠는 두 번 본 조회수로 잰다. 한 번만 본 검색 숏츠는 다음 조회 대기다. 두 번 본 간격이 50분 미만이면 측정 중이라 시간당 조회를 쓰지 않는다. 형식별 대표값은 중앙값이다(평균은 보조)"
+}

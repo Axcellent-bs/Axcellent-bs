@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -43,3 +44,41 @@ async def call(
     if result.status == TaskStatus.CANCELED:
         raise ApiError(504, "UPSTREAM_TIMEOUT", "마케팅 에이전트가 제때 응답하지 않았다")
     return {"status": result.status.value, "outcome": result.outcome, "output": result.output}
+
+
+CHAT_DEADLINE_SECONDS = 30
+# 마케팅 대화 skill이 거절할 때 돌려주는 outcome → (HTTP 상태, 오류 코드)
+CHAT_REFUSALS = {
+    "llm_not_configured": (409, "LLM_NOT_CONFIGURED"),
+    "forbidden": (403, "FORBIDDEN"),
+    "not_found": (404, "NOT_FOUND"),
+    "thread_closed": (409, "THREAD_CLOSED"),
+    "thread_busy": (409, "THREAD_BUSY"),
+    "invalid_input": (400, "INVALID_INPUT"),
+    "storage_error": (503, "STORAGE_ERROR"),
+}
+
+
+async def chat_call(skill: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """마케팅 AI 대화 skill 호출. 거절(outcome)은 오류 모양(`{error:{code,message}}`)으로 바꾼다."""
+    config.set_agent_name(AGENT_NAME)
+    request = AgentRequest(
+        meta=RequestMeta(
+            context_id=f"ctx_chat_{uuid.uuid4().hex[:12]}",
+            token=config.agent_token(AGENT_NAME),
+            deadline=datetime.now(UTC) + timedelta(seconds=CHAT_DEADLINE_SECONDS),
+            idempotency_key=f"ui:chat:{uuid.uuid4().hex}",
+        ),
+        skill=skill,
+        input=payload,
+    )
+    result = await SEND(TARGET, request)
+    if result.status == TaskStatus.COMPLETED:
+        return result.output or {}
+    if result.status == TaskStatus.CANCELED:
+        raise ApiError(504, "UPSTREAM_TIMEOUT", "마케팅 에이전트가 제때 응답하지 않았다")
+    status, code = CHAT_REFUSALS.get(result.outcome or "", (502, "UPSTREAM_FAILED"))
+    message = (result.output or {}).get(
+        "message"
+    ) or f"마케팅이 요청을 처리하지 못했다 ({result.outcome})"
+    raise ApiError(status, code, str(message))

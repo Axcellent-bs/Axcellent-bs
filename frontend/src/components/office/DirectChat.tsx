@@ -23,6 +23,8 @@ interface Talk {
   list: () => Promise<ChatThread[]>;
   get: (id: string) => Promise<ChatThread>;
   send: (x: { thread_id?: string; message: string }) => Promise<ChatThread>;
+  /** 대화 끝내기. 이 창구가 지원할 때만 있다 (끝내면 서버가 한두 줄 요약을 남긴다) */
+  close?: (id: string) => Promise<ChatThread>;
 }
 
 // 인사 AI 대화 창구(decisions 8114 `/api/hr/chat`). CORS가 없어 기본값은 Vite 개발 프록시(/hr-api → vite.config.ts)
@@ -63,7 +65,7 @@ export const DIRECT_AGENTS: DirectAgent[] = [
   { key: "hr", name: "인사 AI", note: "팀 인원·교대·인수인계 같은 인사 기록을 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요.", live: true, dept: "인사팀", talk: hrTalk },
   { key: "planning", name: "기획 AI", note: "받은 요청·기획서·결정·제안 상태를 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요.", live: true, dept: "기획팀", talk: directChatApi({ base: PLANNING_API, path: "/api/planning/chat" }) },
   { key: "orchestrator", name: "총괄 AI", note: "", live: false },
-  { key: "support", name: "고객지원 AI", note: "", live: false },
+  { key: "support", name: "고객지원 AI", note: "문의·클레임·후기 현황을 숫자로 읽고 설명해요. 고객 이름과 원문은 보지 않고, 대화로 바꾸는 일은 하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, dept: "고객지원팀", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/support-chat" }, { closable: true }) },
   { key: "finance", name: "재무 AI", note: "", live: false },
   { key: "data", name: "데이터분석 AI", note: "", live: false },
   { key: "marketing", name: "마케팅 AI", note: "마케팅 일을 물어보면 마케팅 AI가 답해요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, dept: "마케팅팀", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/marketing-chat" }) },
@@ -95,7 +97,7 @@ const saveThreadId = (key: string, id: string | null) => {
 const hhmm = (iso: string) => (iso ? new Date(iso).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" }) : "");
 const when = (iso: string) => (iso ? new Date(iso).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
 const errText = (e: unknown, name: string) => (e instanceof Error ? e.message : `${name}에 연결할 수 없어요`);
-const RESULT: Record<ChatStatus, string> = { talking: "대화만 함", started: "코딩 작업 시작", blocked: "막힘", waiting: "앞 요청 대기", answering: "답하는 중" };
+const RESULT: Record<ChatStatus, string> = { talking: "대화만 함", started: "코딩 작업 시작", blocked: "막힘", waiting: "앞 요청 대기", answering: "답하는 중", closed: "끝난 대화" };
 /** 일이 생긴 대화: 담당자가 원문까지 본다 */
 const madeWork = (t: ChatThread) => t.status === "started" || !!t.taskId;
 
@@ -122,6 +124,7 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
   const [sending, setSending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [all, setAll] = useState<ChatThread[]>([]);
+  const [closing, setClosing] = useState(false);
   const [owners, setOwners] = useState(loadOwners);
   const box = useRef<HTMLDivElement>(null);
   const keeper = isKeeper(account, agent);
@@ -197,6 +200,20 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
     if (readOnly) return reset();
     if (!window.confirm("새 대화를 시작할까요? 지금 대화는 '내 지난 대화'에서 다시 열 수 있어요.")) return;
     reset();
+  };
+  const finish = async () => {
+    if (!thread || !api.close || sending || closing) return;
+    if (!window.confirm("이 대화를 끝낼까요? 끝내면 요약이 남고, 이어서 말할 수 없어요.")) return;
+    setClosing(true);
+    setError(null);
+    try {
+      setThread(await api.close(thread.id));
+      api.list().then(setAll).catch(() => { /* 목록은 다음에 다시 읽는다 */ });
+    } catch (err) {
+      if (!failed(err)) setError(errText(err, agent.name));
+    } finally {
+      setClosing(false);
+    }
   };
   const open = (t: ChatThread) => {
     setError(null);
@@ -285,11 +302,21 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
             <button type="button" className="btn-ghost" onClick={reset}>내 대화로 돌아가기</button>
           </div>
         ) : (
+          thread?.status === "closed" ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ink-100 px-4 py-3 text-sm text-ink-500 lg:px-6">
+              <span>끝난 대화예요. 이어서 말할 수 없어요.{thread.summary ? ` 요약: ${thread.summary}` : ""}</span>
+              <button type="button" className="btn-ghost" onClick={reset}>새 대화</button>
+            </div>
+          ) : (
           <form onSubmit={send} className="flex items-end gap-2 border-t border-ink-100 px-4 py-3 lg:px-6">
             <textarea className="field min-h-[44px] flex-1 resize-none" rows={2} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
               placeholder={`${agent.name}에게 보낼 말 (Enter 보내기, Shift+Enter 줄바꿈)`} aria-label={`${agent.name}에게 보낼 말`} disabled={!!sending || prep || !!locked} />
             <button className="btn-primary" disabled={!text.trim() || !!sending || prep || !!locked || isAnswering(thread)}>보내기</button>
+            {api.close && thread && (
+              <button type="button" className="btn-ghost" onClick={finish} disabled={!!sending || closing || isAnswering(thread)}>{closing ? "끝내는 중…" : "대화 끝내기"}</button>
+            )}
           </form>
+          )
         )}
       </div>
     </div>
