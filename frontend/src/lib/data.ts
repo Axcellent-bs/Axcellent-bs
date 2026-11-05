@@ -1135,13 +1135,26 @@ export interface LlmDailyUsage {
   reached: boolean;
   note: string | null;
 }
-/** collectors·llm_usage는 예전 응답에 없다 */
+/** 영상 탐색 카테고리 인기 차트를 받지 못한 YouTube 카테고리. 그 칸은 검색(최근 3일, 하루 상한 안)으로 대신 채운다 */
+export interface YouTubeChartFailure {
+  category_id: string;
+  categories: string[];
+  code: string;
+  reason: string;
+  failed_at: string;
+  fallback: "searched" | "cap" | "failed" | "not_run";
+  fallback_found: number | null;
+  fallback_reason: string | null;
+  fallback_day: string | null;
+}
+/** collectors·llm_usage·youtube_chart_failures는 예전 응답에 없다 */
 export interface DataSourcesOutput {
   sources: DataSource[];
   checked_at: string | null;
   summary: string;
   collectors?: CollectorStatus[];
   llm_usage?: LlmDailyUsage | null;
+  youtube_chart_failures?: YouTubeChartFailure[];
 }
 
 // ---------------------------------------------------------------- 수집 계획 (source_plan, #578)

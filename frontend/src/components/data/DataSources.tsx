@@ -4,7 +4,7 @@ import { okEvidence, useSkill, type SkillState } from "@/components/data/useSkil
 import { Sources, when } from "@/components/data/Sources";
 import {
   DATA_SERVER, dataAi, kpiLive,
-  type CollectorStatus, type DataSource, type DataSourcesOutput, type DomainProfileOutput, type LlmDailyUsage, type ProfileEvidence, type SourceDataKind, type SourcePlanItem, type SourcePlanOutput,
+  type CollectorStatus, type DataSource, type DataSourcesOutput, type DomainProfileOutput, type LlmDailyUsage, type ProfileEvidence, type SourceDataKind, type SourcePlanItem, type SourcePlanOutput, type YouTubeChartFailure,
 } from "@/lib/data";
 
 // 트렌드&콘텐츠 "데이터 출처" 하위 탭 (루프 4단계와 별개, 탭 맨 끝). 서버 응답 그대로 보여 준다.
@@ -281,6 +281,34 @@ function LlmUsage({ usage }: { usage: LlmDailyUsage | null }) {
   );
 }
 
+const CHART_FALLBACK: Record<YouTubeChartFailure["fallback"], string> = {
+  searched: "검색으로 대신 채움",
+  cap: "검색 상한",
+  failed: "검색도 실패",
+  not_run: "검색 안 함",
+};
+
+function ChartFailures({ list }: { list: YouTubeChartFailure[] }) {
+  if (list.length === 0) return null;
+  return (
+    <div className="rounded-xl bg-ink-50 px-3 py-2 text-sm text-ink-700">
+      <p className="font-semibold">YouTube 카테고리 인기 차트를 받지 못한 카테고리 {list.length}개</p>
+      <ul className="mt-1 space-y-1 text-xs">
+        {list.map((f) => (
+          <li key={f.category_id} className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold">카테고리 {f.category_id}{f.categories.length > 0 && ` (${f.categories.join(", ")})`}</span>
+            <span>[{f.code}] {f.reason}</span>
+            <Chip label={f.fallback === "searched" && f.fallback_found !== null ? `${CHART_FALLBACK[f.fallback]} ${n(f.fallback_found)}개` : CHART_FALLBACK[f.fallback]}
+              tone={f.fallback === "searched" ? TONE.ok : TONE.warn} />
+            {f.fallback_reason && <span>{f.fallback_reason}</span>}
+            <span className="text-ink-500">마지막 실패 {when(f.failed_at)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function SourceTable({ out, plan }: { out: DataSourcesOutput; plan: SourcePlanOutput | null }) {
   if (out.sources.length === 0) return <Empty>{out.summary || "출처가 없어요."}</Empty>;
   const unlocks = new Map((plan?.items ?? []).map((i) => [i.source_id, i.unlocks]));
@@ -332,6 +360,7 @@ export function DataSources() {
           <div className="space-y-3">
             <Collectors list={out.collectors} />
             <LlmUsage usage={out.llm_usage ?? null} />
+            <ChartFailures list={out.youtube_chart_failures ?? []} />
             <SourceTable out={out} plan={planOut} />
           </div>
         )}</State>
