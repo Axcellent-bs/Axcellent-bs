@@ -36,6 +36,7 @@ def test_card_validates(card: AgentCard) -> None:
         "shorts_stats",
         "answer_planning_question",
         "campaign_effect",
+        "video_performance",
         "trend_age",
         "trend_insight_brief",
         "domain_profile",
@@ -169,6 +170,15 @@ def test_answer_planning_question_is_for_planning(card: AgentCard) -> None:
     assert skill.grade == "read"
     assert skill.input_schema.endswith("planning.py#AnswerPlanningQuestionInput")
     assert skill.output_schema.endswith("planning.py#AnswerPlanningQuestionOutput")
+
+
+def test_video_performance_is_a_read_for_planning_marketing_dashboard_orchestrator(
+    card: AgentCard,
+) -> None:
+    skill = next(s for s in card.skills if s.id == "video_performance")
+    assert skill.grade == "read"
+    assert set(skill.allowed_requesters) == {"planning", "marketing", "dashboard-api",
+                                             "orchestrator"}  # fmt: skip
 
 
 def test_campaign_effect_is_a_read_for_marketing_dashboard_and_planning(card: AgentCard) -> None:

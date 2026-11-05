@@ -2459,3 +2459,87 @@ class DomainSubtopicsOutput(AxModel):
     generated_at: UtcDatetime | None = None
     limits: list[str] = Field(default_factory=list)
     summary: str = ""
+
+
+# ------------------------------------------------ video_performance (게시한 영상 성과)
+# 게시한 영상을 추적 목록에 넣어 게시 후 1시간·1일·3일·7일 시점의 조회수·좋아요·댓글을 저장하고,
+# 목표 참고값(인사이트 target_views_reference)·같은 카테고리·형식 숏츠 중앙값 대비 배수를 낸다.
+# 숫자는 모두 코드, facts에. 아직 그 시점이 안 됐으면 unknown + "측정 중".
+# 인스타그램·틱톡은 아직 읽는 길이 없어 unknown + "연결 대기"와 필요한 것.
+
+VideoPlatform = Literal["youtube", "instagram", "tiktok"]
+VideoCheckpointName = Literal["1h", "1d", "3d", "7d"]
+
+
+class VideoPerformanceRequest(AxModel):
+    """campaign_id 또는 video_url 중 하나는 있어야 한다. video_url이 있으면 등록(추적 목록)한다."""
+
+    campaign_id: str | None = Field(default=None, min_length=1, max_length=120)
+    video_url: str | None = Field(default=None, min_length=1, max_length=500)
+    insight_id: str | None = Field(default=None, max_length=80)  # 이 영상을 낸 인사이트
+    proposal_id: str | None = Field(default=None, max_length=80)
+    test: bool = False  # 시험 영상: 진짜 캠페인과 섞지 않는다 (화면·브리프 집계에서 뺌)
+
+    @model_validator(mode="after")
+    def _one_of(self) -> VideoPerformanceRequest:
+        if not self.campaign_id and not self.video_url:
+            raise ValueError("campaign_id 또는 video_url이 있어야 한다")
+        return self
+
+
+class VideoCheckpoint(AxModel):
+    """게시 후 한 시점의 값. 모르면 None + 이유 (0으로 채우지 않는다)."""
+
+    checkpoint: VideoCheckpointName
+    due_at: UtcDatetime | None = None  # 게시 시각 + 시점
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = None  # 측정 중 · 놓침 · 연결 대기 등
+    measured_at: UtcDatetime | None = None
+    hours_after: float | None = Field(default=None, ge=0)  # 게시 후 실제로 잰 시간
+    views: int | None = Field(default=None, ge=0)
+    likes: int | None = Field(default=None, ge=0)  # 숨김이면 None
+    comments: int | None = Field(default=None, ge=0)
+    views_per_hour: float | None = Field(default=None, ge=0)  # 조회 ÷ 게시 후 시간
+    like_rate: float | None = Field(default=None, ge=0)  # 좋아요 ÷ 조회
+    comment_rate: float | None = Field(default=None, ge=0)  # 댓글 ÷ 조회
+    target_ratio: float | None = Field(default=None, ge=0)  # 조회 ÷ 목표 참고값
+    peer_ratio: float | None = Field(default=None, ge=0)  # 조회 ÷ 같은 카테고리·형식 숏츠 중앙값
+    fact_ids: list[str] = Field(default_factory=list)
+
+
+class VideoPerformanceGroup(AxModel):
+    """성과 모으기 표 한 줄 (인사이트·형식·카테고리별). 시험 영상은 뺀다."""
+
+    key: Literal["insight", "format", "category"]
+    value: str
+    videos: int = Field(ge=0)  # 등록된 영상 수
+    measured: int = Field(ge=0)  # 목표 대비 배수가 있는 영상 수
+    median_target_ratio: float | None = Field(default=None, ge=0)  # 영상마다 가장 늦은 시점 값
+
+
+class VideoPerformanceOutput(AxModel):
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = None
+    platform: VideoPlatform | None = None
+    video_id: str | None = None
+    video_url: str | None = None
+    campaign_id: str | None = None
+    insight_id: str | None = None
+    proposal_id: str | None = None
+    test: bool = False
+    title: str | None = None
+    published_at: UtcDatetime | None = None
+    tracking: bool = False  # 추적 목록에 있음 (시점마다 잰다)
+    checkpoints: list[VideoCheckpoint] = Field(default_factory=list)
+    target_views_reference: float | None = Field(default=None, ge=0)
+    target_reference_basis: str | None = None  # 어느 인사이트의 목표 참고값인지
+    category: str | None = None  # 비교에 쓴 카테고리 (인사이트에서)
+    shorts_format: str | None = None  # 비교에 쓴 숏츠 형식 (인사이트에서)
+    peer_median_views: float | None = Field(default=None, ge=0)
+    peer_basis: str | None = None  # 어느 숏츠 통계 중앙값인지 (모르면 이유)
+    needs: list[str] = Field(default_factory=list)  # 연결 대기면 필요한 것 (계정 토큰 등)
+    facts: list[DataFact] = Field(default_factory=list)
+    performance_table: list[VideoPerformanceGroup] = Field(default_factory=list)
+    limits: list[str] = Field(default_factory=list)
+    summary: str = ""
+    schema_version: str = ""
