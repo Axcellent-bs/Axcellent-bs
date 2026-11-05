@@ -464,6 +464,9 @@ export interface YouTubeVideoVelocity {
   title?: string | null;
   channel_title?: string | null;
   duration_seconds?: number | null;
+  /** 영상 주소와 썸네일 (서버가 저장된 YouTube 응답 값만, #620·#621). 예전 응답은 없다 */
+  video_url?: string | null;
+  thumbnail_url?: string | null;
 }
 export interface YouTubeVelocityOutput {
   status: "known" | "unknown";
@@ -619,6 +622,9 @@ export interface PopularVideo {
   is_short?: boolean | null;
   shorts_format?: string | null;
   evidence_reason?: string | null;
+  /** 영상 주소와 썸네일 (서버가 저장된 YouTube 응답 값만, #620·#621). 예전 응답은 없다 */
+  video_url?: string | null;
+  thumbnail_url?: string | null;
 }
 export interface TrendPopularOutput {
   /** 점수 순 */
@@ -753,6 +759,13 @@ export interface PromoConceptsOutput {
   popular_trend_note?: string | null;
 }
 
+/** 근거 영상 하나의 주소와 썸네일 (계약 VideoLink). 서버가 저장된 YouTube 응답 값만 준다. 제목은 없다 */
+export interface VideoLink {
+  video_id: string;
+  video_url: string | null;
+  thumbnail_url: string | null;
+}
+
 // ---------------------------------------------------------------- 인사이트 브리프 (trend_insight_brief)
 // 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py TrendInsightBriefOutput. 서버 하루 캐시.
 // 기획팀이 제안에 insight_id를 적는다. 예시 아이디어(example_ideas)는 참고용
@@ -775,6 +788,8 @@ export interface InsightEvidence {
   season_keyword?: string | null;
   season_ratio?: number | null;
   season_month?: string | null;
+  /** 근거 영상의 주소·썸네일 (links의 영상과 같은 것). 예전 응답은 없다 */
+  video_links?: VideoLink[];
 }
 export interface InsightProduct {
   product_id: string;
@@ -1069,6 +1084,8 @@ export interface DomainOpportunity {
   seed_keyword?: string | null;
   /** 이 카드의 숫자 (브리프 facts의 fact_id, #614) */
   fact_ids?: string[];
+  /** 근거 숏츠의 주소·썸네일. 예전 응답은 없다 */
+  video_links?: VideoLink[];
 }
 
 // ---------------------------------------------------------------- 숏츠 통계 (shorts_stats)
@@ -1079,6 +1096,9 @@ export interface ShortsVideo {
   title: string | null;
   channel_title: string | null;
   views: number | null;
+  /** 영상 주소와 썸네일 (서버가 저장된 YouTube 응답 값만, #620·#621). 예전 응답은 없다 */
+  video_url?: string | null;
+  thumbnail_url?: string | null;
 }
 export interface ShortsGroup {
   /** 주제 분류 값 또는 숏츠 형식 */
