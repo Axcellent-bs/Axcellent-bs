@@ -1400,6 +1400,10 @@ class CampaignEffectInput(AxModel):
     # 아래는 선택. 기획이 결과를 기록할 때 연결하려고 보내면 결과에 그대로 돌려준다 (저장하지 않음)
     insight_id: str | None = None  # trend_insight_brief의 insight_id
     proposal_id: str | None = None  # 기획 쪽 제안 id
+    # 아래는 예전 요청은 없다 (#646). 관련 상품 (상품 id 또는 이름, 최대 10개). 있으면 결과에
+    # 상품 기준(`products_effect`)을 따로 낸다. 이름은 카탈로그 이름과 정규화(NFKC, 소문자, 공백
+    # 모두 뺌)한 값이 정확히 같을 때만 맞추고, 못 맞춘 값은 `unmatched_products`로 돌려준다
+    products: list[str] = Field(default_factory=list, max_length=10)
 
     @model_validator(mode="after")
     def _range(self) -> Self:
@@ -1529,6 +1533,61 @@ class CampaignSales(AxModel):
         return self
 
 
+class CampaignProductMeasure(AxModel):
+    """상품 기준 한 칸(주문 수·판매 수량·판매액)의 기간값·기준선·증분·범위·방향 (#646).
+
+    판매액(`campaign_effect` sales)과 같은 규칙: 기준선 = 주문 수 판정이 쓴 지난 구간들의 평균,
+    범위 = 구간 − 가장 많은 날 ~ 구간 − 가장 적은 날, 방향은 범위가 0을 넘으면 up, 0 아래면 down,
+    걸치거나 기준선 날이 1개면 uncertain.
+    """
+
+    period: float = Field(ge=0)  # 캠페인 구간 값
+    baseline: float | None = Field(default=None, ge=0)  # 기준선 날들의 평균 (모르면 None)
+    incremental: float | None = None  # 증분 = 구간 − 기준선
+    incremental_low: float | None = None
+    incremental_high: float | None = None
+    direction: Literal["up", "down", "uncertain"] | None = None
+    direction_reason: str | None = None
+
+
+class CampaignMatchedProduct(AxModel):
+    product_id: str = Field(min_length=1)
+    name: str | None = None  # 카탈로그 이름
+    asked: str  # 요청에 온 값 그대로 (id 또는 이름)
+
+
+class CampaignProductsEffect(AxModel):
+    """관련 상품 기준 결과 (#646). 맞은 상품이 든 결제 완료 주문만 센다.
+
+    가게 전체(`orders`·`sales`, 참고용)·쿠폰 귀속(`coupons`·`sales.direct_attributed_krw`)과 따로다.
+    같은 주문이 여러 칸에 겹칠 수 있어 합산하지 않는다. 모르면 unknown + 이유, 0으로 채우지 않는다.
+    """
+
+    status: CampaignStatus
+    unknown_reason: str | None = None
+    basis: str = (
+        "결제 완료 주문 중 맞은 상품의 품목만, 주문 접수 시각 기준, 판매액은 단가 × 수량(할인 전)"
+    )
+    matched: list[CampaignMatchedProduct] = Field(default_factory=list)
+    unmatched_products: list[str] = Field(default_factory=list)  # 못 맞춘 요청 값 (추측하지 않음)
+    orders: CampaignProductMeasure | None = None  # 맞은 상품이 든 주문 수
+    units: CampaignProductMeasure | None = None  # 맞은 상품 판매 수량
+    gross_krw: CampaignProductMeasure | None = None  # 맞은 상품 판매액 (원)
+    baseline_rule: str | None = None  # 주문 수 판정과 같은 기준선 정의
+    baseline_days: int = Field(default=0, ge=0)
+    baseline_note: str | None = None  # 기준선에서 뺀 날과 이유
+
+    @model_validator(mode="after")
+    def _known_or_reason(self) -> Self:
+        if self.status == "unknown" and not self.unknown_reason:
+            raise ValueError("unknown이면 unknown_reason이 있어야 한다")
+        if self.status == "known" and (
+            not self.matched or self.orders is None or self.units is None or self.gross_krw is None
+        ):
+            raise ValueError("known이면 맞은 상품과 주문 수·수량·판매액이 있어야 한다")
+        return self
+
+
 class CampaignEffectOutput(AxModel):
     campaign_id: str | None = None
     window_from: UtcDatetime
@@ -1548,6 +1607,8 @@ class CampaignEffectOutput(AxModel):
     incremental_orders: int | None = None
     schema_version: str = ""
     generated_at: UtcDatetime | None = None
+    # 아래는 예전 응답은 없다 (#646). 요청에 products가 있을 때만: 관련 상품 기준 결과
+    products_effect: CampaignProductsEffect | None = None
 
 
 # ---------------------------------------------------------------- 연령대별 상승 (trend_age)
