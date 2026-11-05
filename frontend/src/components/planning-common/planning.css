@@ -1195,3 +1195,5 @@ button.spec-pid { cursor: pointer; color: var(--primary); font-weight: 600; }
 .rq-item.dropped .rq-dot, .rq-item.dropped .rq-c.past .rq-dot, .rq-item.dropped .rq-c.now .rq-dot,
 .rq-item.dropped .rq-c.now.warn .rq-dot, .rq-item.dropped .rq-c.end .rq-dot { background: var(--border-strong); border-color: var(--border-strong); box-shadow: none; }
 .rq-item.dropped .rq-v, .rq-item.dropped .rq-m, .rq-item.dropped .rq-c.now .rq-v, .rq-item.dropped .rq-c.warn .rq-m { color: var(--text-3); }
+.rq-card.dropped .inc-steps li, .rq-card.dropped .inc-steps li.on, .rq-card.dropped .inc-steps li.now, .rq-card.dropped .inc-steps li.now.warn { border-top-color: var(--border-strong); color: var(--text-3); }
+.rq-card.dropped .inc-card-title { color: var(--text-2); font-weight: 500; }

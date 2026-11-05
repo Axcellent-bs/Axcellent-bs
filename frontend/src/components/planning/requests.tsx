@@ -218,7 +218,7 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
         {view === 'list' && <button type="button" className="rq-all" aria-pressed={allOpen} onClick={() => setOpen(allOpen ? new Set() : new Set(rows.map((x) => x.r.id)))}>{allOpen ? '모두 접기' : '모두 펼치기'}</button>}
       </nav>
 
-      {view === 'card' && <RequestCards rows={rows} />}
+      {view === 'card' && <RequestCards s={s} rows={rows} />}
       {view === 'list' && <>
       <div className="rq-head" aria-hidden>
         {STAGES.map((x) => <span key={x}>{x}</span>)}
@@ -293,7 +293,7 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
 }
 
 // 카드 보기 (개발 사후관리 카드와 같은 틀): 부서·번호·걸린 시간 / 제목 / 단계 막대 / 지금 단계 한 줄. 카드를 누르면 프로젝트
-function RequestCards({ rows }: { rows: PipeRow[] }) {
+function RequestCards({ s, rows }: { s: S; rows: PipeRow[] }) {
   if (!rows.length) return null
   return (
     <div className="inc-grid rq-cards">
@@ -301,11 +301,12 @@ function RequestCards({ rows }: { rows: PipeRow[] }) {
         const { r } = row
         const at = row.finished ? row.cells.length - 1 : row.stage
         const cur = row.cells[at]
+        const dropped = devDiscarded(s, gather(s, r).spec?.id) // 개발에서 작업을 모두 폐기함: 회색 막대
         return (
-          <a key={r.id} href={toPath(`projects/${r.id}`)} className={`inc-card rq-card${row.wait ? ' wait' : ''}${row.finished ? ' fin' : ''}`}>
+          <a key={r.id} href={toPath(`projects/${r.id}`)} className={`inc-card rq-card${row.wait ? ' wait' : ''}${row.finished ? ' fin' : ''}${dropped ? ' dropped' : ''}`}>
             <span className="inc-card-top">
               <span className={`rq-dept d-${r.from}`}>{DEPT_NAME[r.from]}</span>
-              {r.paused && <Tag tone="amber">중단됨</Tag>}
+              {r.paused && !dropped && <Tag tone="amber">중단됨</Tag>}
               <span className="mono">{r.id}</span>
             </span>
             <b className="inc-card-title">{r.title}</b>
