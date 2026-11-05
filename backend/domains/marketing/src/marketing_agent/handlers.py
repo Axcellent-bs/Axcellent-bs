@@ -46,6 +46,8 @@ from marketing_agent.campaign import record_campaign_result, start_campaign
 from marketing_agent.campaign_cancel import cancel_campaign
 from marketing_agent.coupons import CouponLedger, SequenceGap, total_value
 from marketing_agent.links import BuildCampaignLinkInput, CampaignLink, build_campaign_link
+from marketing_agent.media.ledger import MediaLedger
+from marketing_agent.media.skill import generate_media
 from marketing_agent.notice import NoticeStore, make_draft
 from marketing_agent.schemas import (
     ActiveNotices,
@@ -69,6 +71,7 @@ class State:
         self.coupons = CouponLedger()
         self.briefs = BriefStore()
         self.sns = SnsStore()
+        self.media_ledger = MediaLedger()  # 열 수 없으면 시작 때 실패한다
 
 
 STATE = State()
@@ -572,6 +575,10 @@ async def check_sns_post_skill(request: AgentRequest) -> AgentResult:
     return await check_sns_post(request, STATE.sns)
 
 
+async def generate_media_skill(request: AgentRequest) -> AgentResult:
+    return await generate_media(request, ledger=STATE.media_ledger, from_decision=_from_decision)
+
+
 HANDLERS = {
     "draft_notice": draft_notice,
     "publish_notice": publish_notice,
@@ -587,4 +594,5 @@ HANDLERS = {
     "draft_sns_post": draft_sns_post_skill,
     "check_sns_post": check_sns_post_skill,
     "cancel_campaign": cancel_campaign,
+    "generate_media": generate_media_skill,
 }

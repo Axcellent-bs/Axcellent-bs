@@ -144,6 +144,8 @@ export PLANNING_STATE_DIR="$PWD/$DATA"
 export DATA_TODAY_BOARD_DB="$PWD/$DATA/today_board.db"
 # marketing: 기획에서 받은 기획안을 파일에 남겨 다시 켜도 목록이 유지되게
 export MARKETING_BRIEFS_DB="$PWD/$DATA/marketing_briefs.db"
+# marketing: 이미지·영상 생성 비용 장부(월 누적). 다시 켜도 남아야 월 상한이 유지된다
+export MARKETING_MEDIA_LEDGER_DB="$PWD/$DATA/marketing_media_ledger.db"
 # 기획·개발은 실제 시각으로 (기본은 10-22에서 1분씩 가는 시연 시계라 총괄이 사건 구간으로 묻는
 # 관련 PR 찾기·교차검증 최근 7일 장애가 실제 머지를 못 잡는다)
 export PLANNING_CLOCK=real
