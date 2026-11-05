@@ -991,7 +991,24 @@ export interface CollectorStatus {
   reason: string;
 }
 /** collectors는 예전 응답에 없다 */
-export interface DataSourcesOutput { sources: DataSource[]; checked_at: string | null; summary: string; collectors?: CollectorStatus[] }
+/** data 부서 LLM 오늘(한국 날짜) 사용량과 하루 상한. reached면 오늘은 LLM을 부르지 않는다 */
+export interface LlmDailyUsage {
+  day: string;
+  calls: number;
+  call_cap: number;
+  tokens: number;
+  token_cap: number;
+  reached: boolean;
+  note: string | null;
+}
+/** collectors·llm_usage는 예전 응답에 없다 */
+export interface DataSourcesOutput {
+  sources: DataSource[];
+  checked_at: string | null;
+  summary: string;
+  collectors?: CollectorStatus[];
+  llm_usage?: LlmDailyUsage | null;
+}
 
 // ---------------------------------------------------------------- 수집 계획 (source_plan, #578)
 export interface PlanDropped { value: string; reason: string }
