@@ -24,6 +24,7 @@ from typing import Any, Protocol
 
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT
 from support_agent.change_requests import ChangeRequestLink, ChangeRequestStore
+from support_agent.chat import ChatStore, ChatThread
 from support_agent.claim_schemas import Claim
 from support_agent.claims import ClaimStore
 from support_agent.compensation import SequenceLedger
@@ -61,6 +62,7 @@ TABLES: tuple[Table, ...] = (
         ("tenant_id", "context_id", "buyer_id", "reason_code"),
         ("status",),
     ),
+    Table("support_chats", ("tenant_id", "chat_id"), ("context_id", "who", "status")),
     Table("compensation_sequences", ("tenant_id", "context_id")),
     Table("compensation_results", ("tenant_id", "idempotency_key"), ("context_id",)),
 )
@@ -448,6 +450,31 @@ class PersistentIncidentQueueStore(IncidentQueueStore):
         return super()._put(item)  # DB 쓰기에 성공한 뒤에 캐시에 넣는다
 
 
+class PersistentChatStore(ChatStore):
+    """고객지원 AI와 사람의 직접 대화 (chat.py)."""
+
+    def __init__(self, repo: Repo) -> None:
+        super().__init__()
+        self._repo = repo
+        for doc in repo.load("support_chats"):
+            thread = ChatThread.model_validate(doc)
+            self._threads[thread.id] = thread
+
+    def _put(self, thread: ChatThread) -> ChatThread:
+        self._repo.upsert(
+            "support_chats",
+            {
+                "tenant_id": thread.tenant_id,
+                "chat_id": thread.id,
+                "context_id": thread.context_id,
+                "who": thread.who,
+                "status": thread.status,
+            },
+            thread.model_dump(mode="json"),
+        )
+        return super()._put(thread)  # DB 쓰기에 성공한 뒤에 캐시에 넣는다
+
+
 class PersistentSequenceLedger(SequenceLedger):
     def __init__(self, repo: Repo) -> None:
         super().__init__()
@@ -501,6 +528,11 @@ def build_sequence_ledger() -> SequenceLedger:
 def build_incident_queue_store() -> IncidentQueueStore:
     repo = get_repo()
     return PersistentIncidentQueueStore(repo) if repo else IncidentQueueStore()
+
+
+def build_chat_store() -> ChatStore:
+    repo = get_repo()
+    return PersistentChatStore(repo) if repo else ChatStore()
 
 
 def build_change_request_store() -> ChangeRequestStore:
