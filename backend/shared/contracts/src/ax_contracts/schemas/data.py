@@ -2106,6 +2106,15 @@ class DataSourcesOutput(AxModel):
     collectors: list[CollectorStatus] = Field(default_factory=list)
     # 아래는 예전 응답은 없다. data 부서 LLM 오늘 사용량과 하루 상한
     llm_usage: LlmDailyUsage | None = None
+    # 아래는 예전 응답은 없다 (#648). 아직 붙이지 않고 기다리는 출처 (수집 계획 후보가 아님)
+    pending_sources: list[PendingSource] = Field(default_factory=list)
+
+
+class PendingSource(AxModel):
+    """기다리는 출처 하나 (예: 광고 데이터 — 마케팅 #647 광고 부분 대기)."""
+
+    name: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
 
 
 class LlmDailyUsage(AxModel):
