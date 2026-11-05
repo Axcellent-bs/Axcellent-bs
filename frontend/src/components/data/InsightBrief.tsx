@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Chip, Empty, TONE, Waiting } from "@/components/finance/bits";
 import { okEvidence, type SkillState } from "@/components/data/useSkill";
 import { Sources, when } from "@/components/data/Sources";
@@ -173,6 +173,7 @@ function InsightCard({ i, facts }: { i: TrendInsight; facts: DataFact[] | undefi
 export function InsightBrief({ state, examples, examplesCount }: {
   state: SkillState<TrendInsightBriefOutput>; examples: ReactNode; examplesCount: number | null;
 }) {
+  const [examplesOpened, setExamplesOpened] = useState(false);
   const out = state.kind === "ok" ? state.out : null;
   if (!kpiLive) return null;
   const all = out?.insights ?? [];
@@ -227,11 +228,12 @@ export function InsightBrief({ state, examples, examplesCount }: {
             </details>
           </>
         )}
-      <details className="card p-4">
+      {/* 예시(와 그 안의 숏츠 통계 요청)는 처음 펼칠 때 그린다. 그 뒤에는 접어도 남긴다 */}
+      <details className="card p-4" onToggle={(e) => e.currentTarget.open && setExamplesOpened(true)}>
         <summary className="cursor-pointer text-sm font-semibold text-ink-900">
           참고용 예시{examplesCount !== null ? ` ${examplesCount}개` : ""} <span className="font-normal text-ink-500">· 숏츠 광고 예시 아이디어</span>
         </summary>
-        <div className="mt-4">{examples}</div>
+        {examplesOpened && <div className="mt-4">{examples}</div>}
       </details>
     </section>
   );
