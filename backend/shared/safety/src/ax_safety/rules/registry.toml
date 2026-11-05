@@ -166,6 +166,32 @@ action = "support_chat_close"
 owner = "support"
 base_grade = "A"
 
+# 사람과 기획 AI의 직접 대화(planning chat/turn.py). 대화 글을 저장하고 닫을 뿐 요청·기획서·제안 상태는
+# 건드리지 않는다 (그런 일은 기획 화면에서 기존 액션으로 execute()와 안전 관문을 거친다)
+[[actions]]
+action = "planning_chat_send"
+owner = "planning"
+base_grade = "A"
+
+[[actions]]
+action = "planning_chat_close"
+owner = "planning"
+base_grade = "A"
+
+# 사람과 개발 AI의 직접 대화(dev dev_chat.py). 메시지 하나는 dev_chat(A)으로 기록하고, 계획이 서서
+# 코딩 작업을 띄우는 건 dev_task_create가 따로 관문을 탄다. 끝내기는 대화 상태만 바꾼다 (주인은 dev_chat과 같게)
+[[actions]]
+action = "dev_chat_send"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+[[actions]]
+action = "dev_chat_close"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
 # 클레임 처리 기록 (#105). 돈이 나가지 않는 기록만. 환불 지급은 refund_request(A, 한도 넘으면 C)
 [[actions]]
 action = "create_claim"

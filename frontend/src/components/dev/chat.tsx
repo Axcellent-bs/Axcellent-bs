@@ -1,5 +1,6 @@
 // AI와 대화: 개발 에이전트와 대화하다 필요한 것이 모이면 에이전트가 코딩 작업(→ PR)을 시작한다.
 // 대화는 REST(/dev-chat)로 주고받고, SSE에 chats가 있으면 그걸로 갱신한다. 없으면 2초마다 다시 읽는다
+// 보내면 서버가 말을 적고 answering으로 바로 돌려준다. 답은 뒤에서 붙는다 (SSE·다시 읽기로 본다)
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Chip, useToast, type ChipTone } from '@dejafix/common-frontend'
 import type { ChatMessage, ChatStatus, ChatThread, CodingMode, CodingStatus, State as S, Task } from '@/lib/planningData'
@@ -101,8 +102,11 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
   }, [onClose])
   useEffect(() => setErr(null), [cur?.id])
 
+  const answering = cur?.status === 'answering' // 서버가 답을 만드는 중
+  const ended = cur?.status === 'closed'
+  const busy = !!pending || answering
   // SSE에 대화가 없을 때만 다시 읽는다
-  const poll = !chat.live && !!cur && (!!pending || running(s, cur))
+  const poll = !chat.live && !!cur && (busy || running(s, cur))
   useEffect(() => {
     if (!poll || !cur) return
     const id = cur.id
@@ -113,7 +117,7 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
   const msgs = cur?.messages ?? []
   useEffect(() => {
     box.current?.scrollTo({ top: box.current.scrollHeight })
-  }, [msgs.length, pending, err])
+  }, [msgs.length, busy, err])
 
   const repo = cur?.connection ?? conn
   // 작업을 띄운 대화는 그 대화의 모드 그대로, 새 대화는 고른 모드 (이 브라우저에 기억)
@@ -129,7 +133,7 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
   }
   const send = async (text = draft) => {
     const message = text.trim()
-    if (!message || pending) return
+    if (!message || busy || ended) return
     setPending(message)
     setErr(null)
     setDraft('')
@@ -141,6 +145,8 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
       const code = x instanceof PlanningApiError ? x.code : 'NETWORK'
       const msg = code === 'LLM_NOT_CONFIGURED' ? 'LLM 설정 필요 (backend/.env)'
         : code === 'NO_VCS' ? '연결된 레포 없음'
+        : code === 'THREAD_BUSY' ? '앞 말에 답하는 중이에요. 답이 온 뒤 보내 주세요'
+        : code === 'THREAD_CLOSED' ? '끝난 대화예요. 새 대화에서 보내 주세요'
         : x instanceof PlanningApiError ? x.message : '개발·배포 서버에 연결할 수 없어요'
       setErr({ code, message: msg })
       setDraft(message)
@@ -191,25 +197,25 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
         )}
         {msgs.map((m) => <Msg key={m.id} m={m} s={s} onOpen={onClose} />)}
         {pending && msgs[msgs.length - 1]?.text !== pending && <div className="bubble user">{pending}</div>}
-        {pending && <div className="bubble ai"><span className="typing" aria-label="답 쓰는 중"><i /><i /><i /></span></div>}
+        {busy && <div className="bubble ai"><span className="typing" aria-label="답 쓰는 중"><i /><i /><i /></span></div>}
         {err && (
           <div className="bubble ai err">
             {err.message}
             {err.code === 'NO_VCS' && <Tools onTools={onTools} />}
           </div>
         )}
-        {!pending && !err && cur?.status === 'blocked' && <Tools onTools={onTools} />}
+        {!busy && !err && cur?.status === 'blocked' && <Tools onTools={onTools} />}
       </div>
 
       <div className="sl-composer">
         <textarea ref={input} rows={3} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey}
-          placeholder={cur ? '답장' : '무엇을 바꿀까요'} aria-label="메시지" disabled={!!pending || !connected} />
+          placeholder={ended ? '끝난 대화예요. 새 대화를 여세요' : cur ? '답장' : '무엇을 바꿀까요'} aria-label="메시지" disabled={busy || ended || !connected} />
         <div className="sl-composer-bar">
           <div className="seg-toggle" role="group" aria-label="누가 코딩하나" title={cur?.taskId ? '작업을 띄운 대화는 바꿀 수 없어요' : '서버 AI는 회사 토큰, 내 Claude는 내 구독으로 코딩해요'}>
-            <button type="button" aria-pressed={mode === 'agent'} onClick={() => choose('agent')} disabled={!!pending || !!cur?.taskId || (trialOut && !noClaude)} title={trialOut ? `서버 AI 체험 한도 다 씀 (${setting!.trial_used.toLocaleString()}/${setting!.trial_limit.toLocaleString()} 토큰)` : undefined}>서버 AI</button>
-            <button type="button" aria-pressed={mode === 'subscription'} onClick={() => choose('subscription')} disabled={!!pending || !!cur?.taskId || noClaude} title={noClaude ? '연결된 본인 Claude 없음 (개발 도구 연결 → MCP)' : undefined}>내 Claude</button>
+            <button type="button" aria-pressed={mode === 'agent'} onClick={() => choose('agent')} disabled={busy || !!cur?.taskId || (trialOut && !noClaude)} title={trialOut ? `서버 AI 체험 한도 다 씀 (${setting!.trial_used.toLocaleString()}/${setting!.trial_limit.toLocaleString()} 토큰)` : undefined}>서버 AI</button>
+            <button type="button" aria-pressed={mode === 'subscription'} onClick={() => choose('subscription')} disabled={busy || !!cur?.taskId || noClaude} title={noClaude ? '연결된 본인 Claude 없음 (개발 도구 연결 → MCP)' : undefined}>내 Claude</button>
           </div>
-          <button type="button" className="send" onClick={() => void send()} disabled={!!pending || !connected || !draft.trim()} aria-label="보내기">↑</button>
+          <button type="button" className="send" onClick={() => void send()} disabled={busy || ended || !connected || !draft.trim()} aria-label="보내기">↑</button>
         </div>
       </div>
     </aside>

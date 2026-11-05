@@ -85,7 +85,9 @@ def adapter(monkeypatch: pytest.MonkeyPatch):
     vcs.set_vcs(a)
     repo_routing.set_llm(None)
     coder.set_llm(CoderLLM())
+    dev_chat.set_background(False)  # 보내기가 답까지 기다린다 (뒤에서 답하기는 따로 시험)
     yield a
+    dev_chat.set_background(True)
     vcs._screen = None
     vcs.set_vcs(None)
     coder.reset_llm()

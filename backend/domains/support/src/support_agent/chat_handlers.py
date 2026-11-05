@@ -24,7 +24,12 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from ax_agent_template.config import is_mock
-from ax_agent_template.llm import LLMClient, LLMNotConfiguredError, MockLLMClient
+from ax_agent_template.llm import (
+    LLMClient,
+    LLMNotConfiguredError,
+    LLMResponseError,
+    MockLLMClient,
+)
 from ax_agent_template.server import error_result
 from ax_contracts.schemas import AgentRequest, AgentResult, TaskStatus
 from support_agent import chat, guard, persistence
@@ -43,6 +48,9 @@ CHATS = persistence.build_chat_store()
 _TASKS: set[asyncio.Task[Any]] = set()  # 뒤에서 도는 일이 중간에 치워지지 않게 붙잡아 둔다
 
 NO_LLM_TEXT = "답변을 만드는 모델 설정이 없어서 지금은 답할 수 없어요."
+# 외부 모델이 잠깐 호출을 막을 때(429 너무 많은 요청, 503 일시 과부하) 한 번만 기다렸다 다시 묻는다
+RETRY_STATUS_CODES = frozenset({429, 503})
+RETRY_DELAY_SECONDS = 4.0
 FAILED_TEXT = "답을 만들지 못했어요. 잠시 뒤에 다시 보내 주세요."
 EMPTY_TEXT = "답할 내용을 만들지 못했어요. 질문을 조금 바꿔서 다시 보내 주세요."
 CLOSED_TEXT = "닫힌 대화다. 새 대화로 보내 주세요"
@@ -97,6 +105,20 @@ async def drain() -> None:
 
 
 # ---------------------------------------------------------------- 뒤에서 하는 일
+async def _ask(prompt: str, untrusted: dict[str, Any]) -> ChatReply:
+    """모델에 묻는다. 호출 제한(429·503)이면 잠깐 기다렸다 한 번만 다시 묻는다."""
+    try:
+        return await get_llm().structured(prompt, ChatReply, untrusted=untrusted)
+    except LLMResponseError as exc:
+        if exc.status_code not in RETRY_STATUS_CODES:
+            raise
+        logger.info(
+            "외부 모델이 잠깐 막아 %s초 뒤 다시 묻는다 (%s)", RETRY_DELAY_SECONDS, exc.status_code
+        )
+        await asyncio.sleep(RETRY_DELAY_SECONDS)
+        return await get_llm().structured(prompt, ChatReply, untrusted=untrusted)
+
+
 async def _answer(thread_id: str, context: dict[str, Any]) -> None:
     """AI 답을 만들어 대화에 덧붙인다. 실패해도 이유를 한 줄 남기고 대화를 다시 열어 둔다."""
     thread = CHATS.get(thread_id)
@@ -111,9 +133,7 @@ async def _answer(thread_id: str, context: dict[str, Any]) -> None:
     try:
         try:
             out = await asyncio.wait_for(
-                get_llm().structured(
-                    REPLY_PROMPT, ChatReply, untrusted={"data": context, "conversation": history}
-                ),
+                _ask(REPLY_PROMPT, {"data": context, "conversation": history}),
                 chat.ANSWER_TIMEOUT_SECONDS,
             )
             text = out.reply.strip()[: chat.MAX_REPLY_CHARS]

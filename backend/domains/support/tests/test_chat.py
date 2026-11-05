@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from ax_agent_template.llm import LLMNotConfiguredError, MockLLMClient
+from ax_agent_template.llm import LLMNotConfiguredError, LLMResponseError, MockLLMClient
 from support_agent import chat, chat_handlers, handlers
 from support_agent.chat import ChatStore
 from support_agent.chat_handlers import ChatReply, ChatSummary
@@ -163,6 +163,69 @@ def test_llm_failure_leaves_a_one_line_error_and_reopens(
     assert t.status == "talking"
     assert t.messages[-1].kind == "error" and t.messages[-1].text == chat_handlers.FAILED_TEXT
     assert "sk-12345" not in t.messages[-1].text  # 예외 내용은 싣지 않는다
+
+
+def _limited(status_code: int | None) -> type[MockLLMClient]:
+    """첫 호출은 `status_code` 오류를 내고, 두 번째부터 정상 답을 주는 모델."""
+
+    class Limited(MockLLMClient):
+        tries = 0
+
+        async def structured(self, *args: Any, **kwargs: Any) -> Any:
+            type(self).tries += 1
+            if type(self).tries == 1:
+                raise LLMResponseError("제한", status_code=status_code)
+            return ChatReply(reply="답변 대기는 3건이에요.")
+
+    return Limited
+
+
+@pytest.mark.parametrize("status_code", [429, 503])
+def test_a_brief_model_limit_is_retried_once_and_answers(
+    env: Spawned, monkeypatch: pytest.MonkeyPatch, status_code: int
+) -> None:
+    limited = _limited(status_code)
+    monkeypatch.setattr(chat_handlers, "get_llm", lambda: limited())
+    monkeypatch.setattr(chat_handlers, "RETRY_DELAY_SECONDS", 0.0)
+    thread_of(send("공용", "질문"))
+    env.run()
+    t = chat_handlers.CHATS.get("chat-1")
+    assert limited.tries == 2
+    assert t.status == "talking" and t.messages[-1].kind == "text"
+    assert t.messages[-1].text == "답변 대기는 3건이에요."
+
+
+@pytest.mark.parametrize("status_code", [None, 400, 500])
+def test_other_model_errors_are_not_retried(
+    env: Spawned, monkeypatch: pytest.MonkeyPatch, status_code: int | None
+) -> None:
+    limited = _limited(status_code)
+    monkeypatch.setattr(chat_handlers, "get_llm", lambda: limited())
+    monkeypatch.setattr(chat_handlers, "RETRY_DELAY_SECONDS", 0.0)
+    thread_of(send("공용", "질문"))
+    env.run()
+    t = chat_handlers.CHATS.get("chat-1")
+    assert limited.tries == 1
+    assert t.messages[-1].kind == "error" and t.messages[-1].text == chat_handlers.FAILED_TEXT
+
+
+def test_a_model_that_keeps_limiting_fails_after_one_retry(
+    env: Spawned, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Always(MockLLMClient):
+        tries = 0
+
+        async def structured(self, *args: Any, **kwargs: Any) -> Any:
+            type(self).tries += 1
+            raise LLMResponseError("제한", status_code=429)
+
+    monkeypatch.setattr(chat_handlers, "get_llm", lambda: Always())
+    monkeypatch.setattr(chat_handlers, "RETRY_DELAY_SECONDS", 0.0)
+    thread_of(send("공용", "질문"))
+    env.run()
+    t = chat_handlers.CHATS.get("chat-1")
+    assert Always.tries == 2  # 한 번만 다시 묻는다
+    assert t.status == "talking" and t.messages[-1].text == chat_handlers.FAILED_TEXT
 
 
 def test_no_llm_configured_says_so(env: Spawned, monkeypatch: pytest.MonkeyPatch) -> None:

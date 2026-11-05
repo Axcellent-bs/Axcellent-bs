@@ -243,6 +243,11 @@ SERVICES: tuple[Service, ...] = (
             "receive_dev_result",
             "receive_planning_answer",
             "request_release_check",
+            # 사람과 직접 대화 (dashboard-api /api/dashboard/planning-chat)
+            "planning_chat_send",
+            "planning_chat_list",
+            "planning_chat_get",
+            "planning_chat_close",
         ),
         "요청·기획서",
     ),
@@ -260,6 +265,11 @@ SERVICES: tuple[Service, ...] = (
             "start_dev",
             "receive_release_order",
             "receive_request_pause",
+            # 사람과 직접 대화 (dashboard-api /api/dashboard/dev-chat)
+            "dev_chat_send",
+            "dev_chat_list",
+            "dev_chat_get",
+            "dev_chat_close",
         ),
         "개발·배포",
     ),

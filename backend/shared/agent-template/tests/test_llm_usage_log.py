@@ -192,3 +192,10 @@ async def test_structured_failures_record_each_request(
         )
     [http_record] = _all(store, context_ids=["ctx-h"])
     assert (http_record.input_tokens, http_record.success) == (0, False)
+
+    # HTTP 오류는 상태 코드를 담는다(호출하는 쪽이 429·503만 골라 다시 시도할 수 있게)
+    with pytest.raises(LLMResponseError) as limited:
+        await _structured_client(lambda r: httpx.Response(429)).structured(
+            "질문", _Answer, context_id="ctx-i"
+        )
+    assert limited.value.status_code == 429

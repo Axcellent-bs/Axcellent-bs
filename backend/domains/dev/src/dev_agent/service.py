@@ -228,6 +228,10 @@ class DevService(PlanningCore):
         from dev_agent import dev_chat, work_queue
 
         async def loop() -> None:
+            try:
+                await dev_chat.recover_orphans(self)  # 꺼질 때 답하던 대화를 되돌린다
+            except Exception:  # noqa: BLE001 - 되돌리기 실패로 루프가 안 켜지면 안 된다
+                pass
             while True:
                 await asyncio.sleep(PR_SYNC_SECONDS)
                 try:
@@ -236,6 +240,7 @@ class DevService(PlanningCore):
                     await work_queue.expire_leases(self)  # 진행 보고가 끊긴 구독형 작업 되돌리기
                     # 앞 요청을 오래 기다리는 대화에 알린다 (상태가 안 바뀌어도 시간이 지나면)
                     await dev_chat.notice_long_waits(self)
+                    await dev_chat.close_idle(self)  # 30분 말이 없는 대화를 끝낸다
                 except Exception:  # noqa: BLE001 - 맞추기 실패로 루프가 멈추지 않게 한다
                     continue  # 다음 차례에 다시
 
@@ -2360,6 +2365,29 @@ class DevService(PlanningCore):
 
         result = await self._apply(run)
         found = self.chat_of(result.output["thread_id"])
+        assert found is not None
+        return found
+
+    async def chat_set(
+        self, thread_id: str, *, status: str | None = None, waiting_for: list[str] | None = None
+    ) -> ChatThread:
+        """메시지 없이 대화 상태만 바꾼다 (답 뒤 되돌리기·끝내기).
+
+        대화 기록일 뿐이라 관문을 다시 타지 않는다 (메시지는 chat_add가 dev_chat 관문을 탄다)."""
+
+        async def run(s: State) -> ActionResult:
+            th = next((c for c in s.chats if c.id == thread_id), None)
+            if th is None:
+                raise ActionError("NOT_FOUND", f"대화 {thread_id}가 없다")
+            if status:
+                th.status = status  # type: ignore[assignment]
+            if waiting_for is not None:
+                th.waiting_for = list(waiting_for)
+            th.updated_at = self.clock()
+            return ActionResult(outcome="chat", output={"thread_id": th.id})
+
+        await self._apply(run)
+        found = self.chat_of(thread_id)
         assert found is not None
         return found
 
