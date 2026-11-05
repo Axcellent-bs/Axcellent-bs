@@ -94,6 +94,10 @@ async def label(
                 warn = caution.judge(r.category, real_entity=r.real_entity, is_person=r.is_person,
                                      names=r.entity_names, basis="영상 분류")  # fmt: skip
                 v = caution.apply(v, warn)
+            elif r is not None and v.ad_usable is None:  # 영상 분류를 못 한 이유를 남긴다
+                why = f"영상 분류 못 함 ({r.reason or '이유 없음'})"
+                v = v.model_copy(update={"caution_reason": "; ".join(
+                    x for x in (why, v.caution_reason) if x)})  # fmt: skip
             views = v.views if v.views is not None else i.views
             filled.append(v.model_copy(update={"title": v.title or i.title, "views": views}))
         out.append(filled)

@@ -10,7 +10,8 @@
      (`video_explorer.db`)에 남긴다. 채널 id도 여기서 채운다
   - 한국 영상만(`[explorer] language`, 숏츠 통계와 같은 판단)
 - 분류: 공유 영상 분류기(`classify_videos`, 저장 재사용, 실존 이름 판정 포함). 한 번 계산에 새로
-  묻는 영상은 `classify_max`개까지(LLM 하루 상한 보호). 못 한 영상은 칸에 넣지 않고 수만 남긴다
+  묻는 영상은 한 번 `classify_max`개·하루 `classify_daily`개까지(LLM 하루 상한 보호, 분류 대기는
+  하루 몫씩 나눠서). 못 한 영상은 칸에 넣지 않고 수만 남긴다
 - 칸마다 최소 `min_per_cell`(10)개: 풀에서 먼저 찾고 모자란 칸만 검색으로 보충한다
   - 검색어: 그 카테고리 지금 인기 주제 이름 앞 `query_topics`개(사람 이름 제외, trend_popular),
     `seed_categories`(교육·책)는 도메인 프로필 씨앗. 손으로 나열하지 않는다. 이름이 없으면
@@ -50,7 +51,7 @@ from ax_contracts.schemas.data import (
     VideoExplorerOutput,
     VideoExplorerRequest,
 )
-from data_agent import caution
+from data_agent import caution, llm_failure
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.youtube import VideoStat
 from data_agent.skills.shorts_stats import is_language
@@ -79,6 +80,7 @@ class ExplorerConfig:
     video_calls: int = 10  # videos.list 하루 상한 (한 번 = 영상 50개·1단위)
     channel_calls: int = 4  # channels.list 하루 상한 (한 번 = 채널 50개·1단위)
     classify_max: int = 200  # 한 번 계산에 새로 분류할 영상 수 상한
+    classify_daily: int = 300  # 하루에 새로 분류할 영상 수 (분류 대기는 하루 몫씩 나눠서)
     max_videos: int = 30  # 응답 칸마다 주는 영상 수 (count는 칸 전체 수)
     query_topics: int = 2
     seed_categories: tuple[str, ...] = ("교육·책",)
@@ -213,11 +215,14 @@ class ExplorerStore:
                 " WHERE day = ?",
                 (day.isoformat(),),
             ).fetchall()
-        return {
-            (c, ln, w): ExplorerSearch(category=c, length=ln, window=w, status=s, query=q,  # type: ignore[arg-type]
-                                       found=n, reason=r, day=day)  # fmt: skip
-            for c, ln, w, s, q, n, r in rows
-        }
+        out: dict[tuple[str, str, str], ExplorerSearch] = {}
+        for c, ln, w, s, q, n, r in rows:
+            if s == "running":  # 다른 계산이 검색 중 (또는 검색 중에 멈춤)
+                s, r = "unknown", "다른 계산이 검색 중이거나 검색 중에 멈춤"
+            out[(c, ln, w)] = ExplorerSearch.model_validate({
+                "category": c, "length": ln, "window": w, "status": s, "query": q, "found": n,
+                "reason": r, "day": day})  # fmt: skip
+        return out
 
     def save_search(self, day: date, s: ExplorerSearch) -> None:
         with self._lock, self._conn:
@@ -226,6 +231,41 @@ class ExplorerStore:
                 (day.isoformat(), s.category, s.length, s.window, s.status, s.query, s.found,
                  s.reason),  # fmt: skip
             )
+
+    def reserve(self, day: date, cat: str, length: str, window: str, cap: int) -> str:
+        """칸 하나의 검색을 예약한다 (서버·수집기가 동시에 계산해도 한 번만, 상한도 여기서 센다).
+
+        "ok" = 이 계산이 검색한다, "done" = 오늘 이미 검색했거나 다른 계산이 검색 중,
+        "cap" = 하루 상한에 닿음.
+        """
+        with self._lock:
+            conn = self._conn
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute(
+                    "SELECT status FROM searches WHERE day = ? AND category = ? AND length = ?"
+                    " AND window = ?",
+                    (day.isoformat(), cat, length, window),
+                ).fetchone()
+                if row is not None and row[0] != "skipped":
+                    conn.rollback()
+                    return "done"
+                used = conn.execute(
+                    "SELECT COUNT(*) FROM searches WHERE day = ? AND status != 'skipped'",
+                    (day.isoformat(),),
+                ).fetchone()[0]
+                if used >= cap:
+                    conn.rollback()
+                    return "cap"
+                conn.execute(
+                    "INSERT OR REPLACE INTO searches VALUES (?,?,?,?,'running',NULL,0,NULL)",
+                    (day.isoformat(), cat, length, window),
+                )
+                conn.commit()
+                return "ok"
+            except Exception:
+                conn.rollback()
+                raise
 
     def searches_on(self, day: date) -> int:
         """그날 실제로 부른 검색 수 (상한으로 건너뛴 것은 빼고)."""
@@ -381,8 +421,9 @@ async def compute(
             items[vid] = _Item(stat, source, at)
     pool = _korean_recent(items, config, since)
 
-    # 2. 분류 (저장 재사용, 새로 묻는 것은 상한까지)
-    pending = await _classify(pool, config, llm, cache, context_id, queries)
+    # 2. 분류 (저장 재사용, 새로 묻는 것은 한 번 상한·하루 몫까지. 나머지는 다음으로)
+    pending = await _classify(pool, config, llm, cache, context_id, queries, store=store,
+                              today=today)  # fmt: skip
 
     # 3. 모자란 칸만 보충 검색: 7일 검색을 먼저 하고 그 결과까지 분류한 뒤, 남은 횟수로 1일 보충.
     #    검색 결과는 분류 상한과 무관하게 분류한다 (검색 1번에 50개 이하)
@@ -405,8 +446,8 @@ async def compute(
     videos = [_video(i, max_seconds) for i in kept]
     shortages = _shortages(videos, config, now, store.searched(today), max_seconds)
     if pending:
-        limits.append(f"분류 대기 {pending}개 (한 번에 새로 묻는 수 상한 {config.classify_max}개,"
-                      " 다음 계산 때 이어서)")  # fmt: skip
+        limits.append(f"분류 대기 {pending}개 (새로 묻는 수: 한 번 {config.classify_max}개·하루"
+                      f" {config.classify_daily}개까지, 다음 계산·다음 날 이어서)")  # fmt: skip
     limits.append("조회수·좋아요는 마지막으로 읽은 값이다 (영상마다 `at`)")
     limits.append("검색 결과는 조회수 순이라 이미 뜬 영상끼리의 비교다")
     payload = {
@@ -420,7 +461,10 @@ async def compute(
         "limits": limits,
         "queries": queries,
     }
-    store.save_result(now, payload)
+    if llm_failure.failed():  # LLM 호출이 실패한 계산은 저장하지 않는다 (다음 계산이 다시)
+        payload["limits"].append("LLM 호출이 실패해 이 결과는 저장하지 않음 (다음 계산에서 다시)")
+    else:
+        store.save_result(now, payload)
     return payload
 
 
@@ -515,20 +559,33 @@ async def _classify(
     context_id: str | None,
     queries: list[str],
     only: Sequence[str] | None = None,
+    *,
+    store: ExplorerStore | None = None,
+    today: date | None = None,
 ) -> int:
-    """풀 영상을 분류한다. 저장된 것은 그대로, 새로 묻는 것은 조회수 순으로 상한까지. 남은 수."""
+    """풀 영상을 분류한다. 저장된 것은 그대로, 새로 묻는 것은 조회수 순으로 상한까지. 남은 수.
+
+    새로 묻는 수 = min(한 번 상한 `classify_max`, 오늘 남은 몫 `classify_daily` − 오늘 물은 수).
+    분류 대기 영상은 하루 몫씩 나눠 다음 계산·다음 날로 넘긴다.
+    """
     ids = list(pool) if only is None else [v for v in only if v in pool]
     if not ids:
         return 0
     stored = [v for v in ids if cache is not None and _has(cache, v)]
     new = sorted((v for v in ids if v not in set(stored)),
                  key=lambda v: -(pool[v].stat.view_count or 0))  # fmt: skip
-    ask = stored + new[: config.classify_max]
+    room = config.classify_max
+    if store is not None and today is not None:
+        room = min(room, max(0, config.classify_daily - store.calls(today, "classify")))
+    take = new[:room]
+    ask = stored + take
     found = await classify_videos(
         [VideoInput(v, pool[v].stat.title, pool[v].stat.channel_title, pool[v].stat.tags)
          for v in ask], llm, cache=cache, context_id=context_id,
-    )  # fmt: skip
-    queries.append(f"video classify stored={len(stored)} new={min(len(new), config.classify_max)}")
+    ) if ask else {}  # fmt: skip
+    if store is not None and today is not None and take:
+        store.add_calls(today, "classify", len(take), 0)  # 물은 영상 수 (YouTube 단위 아님)
+    queries.append(f"video classify stored={len(stored)} new={len(take)}")
     for v in ask:
         r = found.get(v)
         if r is None or r.category == UNKNOWN:
@@ -536,7 +593,7 @@ async def _classify(
         pool[v].category = r.category
         pool[v].ad = caution.judge(r.category, real_entity=r.real_entity, is_person=r.is_person,
                                    names=r.entity_names, basis="영상 분류")  # fmt: skip
-    return max(0, len(new) - config.classify_max)
+    return max(0, len(new) - len(take))
 
 
 def _has(cache: Any, video_id: str) -> bool:
@@ -581,14 +638,16 @@ async def _search(
         if _cell_count(pool, cat, length, days, now, max_seconds) >= config.min_per_cell:
             continue
         skip = None
-        query = category_id = None
-        if store.searches_on(today) >= config.daily_searches:
-            skip = f"{CAP_REASON} (하루 {config.daily_searches}번)"
-        else:
-            query = await terms.get(cat)
-            category_id = None if query else (fill.get(cat) or (None,))[0]
-            if not query and not category_id:
-                skip = "검색어(지금 인기 주제·씨앗)도 YouTube 카테고리도 없음"
+        query = await terms.get(cat)
+        category_id = None if query else (fill.get(cat) or (None,))[0]
+        if not query and not category_id:
+            skip = "검색어(지금 인기 주제·씨앗)도 YouTube 카테고리도 없음"
+        else:  # 예약: 다른 계산과 겹쳐도 칸마다 한 번, 하루 상한도 여기서 센다
+            got = store.reserve(today, cat, length, window, config.daily_searches)
+            if got == "done":
+                continue
+            if got == "cap":
+                skip = f"{CAP_REASON} (하루 {config.daily_searches}번)"
         if skip is not None:
             store.save_search(today, ExplorerSearch.model_validate({
                 "category": cat, "length": length, "window": window, "status": "skipped",

@@ -73,6 +73,7 @@ from ax_contracts.schemas.data import (
     TrendKeywordGroup,
     TrendPopularRequest,
 )
+from data_agent import llm_failure
 from data_agent.connectors import CatalogProduct
 from data_agent.explain import _bad_numbers
 from data_agent.llm_budget import no_llm
@@ -629,7 +630,8 @@ async def make_concepts(
             config, connector, llm, env=env, catalog=catalog, now=now,
             context_id=context_id, category_cache=category_cache, board=board, youtube=youtube,
         )  # fmt: skip
-        if result.output.concepts:
+        # LLM 호출이 실패한 결과(두 번째 호출 실패로 첫 답만 쓴 것 등)는 저장하지 않는다
+        if result.output.concepts and not llm_failure.failed():
             store.save(today, result.output, rules)
         return result
     finally:

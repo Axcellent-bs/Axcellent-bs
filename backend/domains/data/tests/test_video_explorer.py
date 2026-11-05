@@ -181,3 +181,72 @@ def test_screen_request_reads_stored_result_only(tmp_path: Path) -> None:
     out = _view(tmp_path, store, period="3d", length="short")
     assert [c.category for c in out.cells] == ["게임", "유머"] and out.status == "known"
     assert out.computed_at == NOW and out.min_per_cell == 3 and out.search_cap == 3
+
+
+class FailLLM(MockLLMClient):
+    async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):  # noqa: ANN001, ANN201
+        from data_agent import llm_failure
+
+        error = RuntimeError("402 credit")
+        llm_failure.mark(error)  # data LLM 래퍼가 하는 일 (handlers.TimedLLMClient)
+        raise error
+
+
+def test_a_compute_with_a_failed_llm_is_not_stored_and_is_retried(tmp_path: Path) -> None:
+    from data_agent import llm_failure
+
+    store = ve.ExplorerStore(tmp_path / "explorer.db")
+    cache = CategoryCache(tmp_path / "topics.db", now=lambda: NOW)
+    env = _env(tmp_path)
+    with llm_failure.scope():
+        failed = asyncio.run(ve.compute(env, youtube=None, llm=FailLLM(), store=store,
+                                        cache=cache, terms=_terms, now=NOW))  # fmt: skip
+    assert store.result() is None and any("저장하지 않음" in x for x in failed["limits"])
+    assert failed["videos"] == []  # 분류를 못 해 칸에 넣지 않음 (unknown은 분류 저장분에도 없음)
+    with llm_failure.scope():
+        ok = asyncio.run(ve.compute(env, youtube=None, llm=FakeLLM(), store=store, cache=cache,
+                                    terms=_terms, now=NOW))  # fmt: skip
+    assert store.result() is not None and ok["videos"]
+
+
+def test_pending_classification_is_split_into_daily_shares(tmp_path: Path) -> None:
+    """새로 묻는 영상은 하루 몫까지. 나머지는 분류 대기로 남기고 다음 날 이어서."""
+    store = ve.ExplorerStore(tmp_path / "explorer.db")
+    env = _env(tmp_path, "")
+    config = Path(env["DATA_TREND_CONFIG"])
+    config.write_text(config.read_text(encoding="utf-8").replace(
+        "max_videos = 5\n", "max_videos = 5\nclassify_daily = 2\n"), encoding="utf-8")  # fmt: skip
+    cache = CategoryCache(tmp_path / "topics.db", now=lambda: NOW)
+
+    def run(now: datetime) -> dict:
+        return asyncio.run(ve.compute(env, youtube=None, llm=FakeLLM(), store=store, cache=cache,
+                                      terms=_terms, now=now))  # fmt: skip
+
+    first = run(NOW)
+    assert store.calls(ve._day(NOW), "classify") == 2
+    assert any("분류 대기 3개" in x for x in first["limits"])  # 풀 5개 중 2개만
+    again = run(NOW + timedelta(hours=1))
+    assert store.calls(ve._day(NOW), "classify") == 2  # 같은 날은 몫을 다 써서 더 묻지 않음
+    assert any("분류 대기 3개" in x for x in again["limits"])
+    nxt = run(NOW + timedelta(days=1))
+    assert store.calls(ve._day(NOW + timedelta(days=1)), "classify") == 2
+    assert any("분류 대기 1개" in x for x in nxt["limits"])
+
+
+def test_two_computes_at_once_search_each_cell_once_within_the_cap(tmp_path: Path) -> None:
+    """서버 첫 요청과 수집기 미리 계산이 겹쳐도 칸마다 한 번, 상한은 둘이 함께 센다."""
+    day = ve._day(NOW)
+    a = ve.ExplorerStore(tmp_path / "explorer.db")
+    b = ve.ExplorerStore(tmp_path / "explorer.db")  # 다른 프로세스처럼 따로 연 연결
+    assert a.reserve(day, "게임", "short", "7d", 2) == "ok"
+    assert b.reserve(day, "게임", "short", "7d", 2) == "done"  # 검색 중인 칸은 건너뜀
+    assert b.searched(day)[("게임", "short", "7d")].status == "unknown"
+    assert b.reserve(day, "게임", "long", "7d", 2) == "ok"
+    assert a.reserve(day, "유머", "short", "7d", 2) == "cap"
+    yt = FakeYouTube()
+    store = ve.ExplorerStore(tmp_path / "other.db")
+    first = _compute(tmp_path, yt, store)
+    del first
+    again = ve.ExplorerStore(tmp_path / "other.db")
+    _compute(tmp_path, yt, again)
+    assert len(yt.searches) == 3 and again.searches_on(day) == 3

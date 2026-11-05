@@ -54,7 +54,7 @@ from ax_contracts.schemas.data import (
     TrendVerdict,
     VideoLink,
 )
-from data_agent import caution
+from data_agent import caution, llm_failure
 from data_agent.explain import _bad_numbers
 from data_agent.llm_budget import no_llm
 from data_agent.skills import evidence_highlights as hl
@@ -1088,7 +1088,12 @@ async def make_brief(
             c.evidence_shorts = hl.evidence_shorts(c.video_links)
         out.schema_version = SCHEMA_VERSION
         out.snapshot_id = f"brief_{day:%Y%m%d}_{rules}"
-        store.put(day, rules, out, now)
+        if llm_failure.failed():  # LLM 호출이 실패한 브리프는 저장하지 않는다 (다음 요청이 다시)
+            out.limits.append(
+                "LLM 호출이 실패해 이 브리프는 저장하지 않음 (다음 요청에서 다시 만든다)"
+            )
+        else:
+            store.put(day, rules, out, now)
         return BriefResult(out, as_evidence(out, queries, now))
     finally:
         if own:
