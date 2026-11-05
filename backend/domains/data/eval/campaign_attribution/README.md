@@ -1,6 +1,6 @@
 # campaign_effect 유입경로 기준 평가 케이스 (#648)
 
-data 에이전트 `campaign_effect`의 유입경로 기준 결과(`attribution_effect`, 유입 + 관련 상품 `attribution_and_products`)를 채점하는 정답지와 채점기(`score.py`)다. **이 평가 정의 PR에서는 지표를 관찰만 하고 관문이 없다.** 관문과 기준값은 skill PR에서 켠다. 평가 정의 변경은 코드 수정과 별도 PR로 한다(`eval/README.md` 규칙).
+data 에이전트 `campaign_effect`의 유입경로 기준 결과(`attribution_effect`, 유입 + 관련 상품 `attribution_and_products`)를 채점하는 정답지와 채점기(`score.py`)다. 평가 정의 PR(#687)에서는 지표를 관찰만 했고, skill PR에서 기준값(`baseline.json`)과 관문(`tests/test_campaign_attribution_eval_gate.py`)을 켰다. 평가 정의 변경은 코드 수정과 별도 PR로 한다(`eval/README.md` 규칙).
 
 ```bash
 cd backend
@@ -44,7 +44,7 @@ uv run python domains/data/eval/campaign_attribution/score.py --judge <모듈>:<
 
 `holdout/` 10개: 씨앗 `2026110601`로 태그 유무(85%)·출처 1~3개·다른 캠페인 섞임(30%)·상품 요청(40%)·시각을 뽑는다.
 
-## 채점 (`score.py`, 관찰만)
+## 채점 (`score.py`)
 
 | 지표 | 뜻 |
 | --- | --- |

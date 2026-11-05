@@ -348,6 +348,21 @@ DATA_EXTERNAL_MODE=replay bash scripts/run_all.sh
 ## 2. 실행 방법
 `docker compose -f infra/compose.yml up data` / 목 모드: `DATA_MOCK=1`
 
+### 다른 PC에서 실행
+
+**팀원은 각자 PC에서 키를 넣어 띄우지 말고 251에서 데이터 화면을 본다.** 다른 PC에서 직접 띄워야 할 때만 아래를 따른다.
+
+- `backend/.env`에 넣는 키 이름 (값은 각자 받는다, 커밋 금지)
+  - LLM: `DATA_LLM_MODEL`·`DATA_LLM_BASE_URL`·`DATA_LLM_API_KEY` (data 전용) 또는 공용 `LLM_MODEL`·`LLM_BASE_URL`·`LLM_API_KEY`. 임베딩(상품 연결): `EMBED_MODEL`·`EMBED_BASE_URL`·`EMBED_API_KEY`
+  - YouTube: `YOUTUBE_API_KEY`
+  - 네이버 검색어 트렌드·쇼핑인사이트(API HUB): `NAVER_HUB_CLIENT_ID`·`NAVER_HUB_CLIENT_SECRET`
+  - 선택: 도서관 정보나루 `DATA4LIBRARY_API_KEY`, 통계청 `KOSIS_API_KEY`
+  - 상한(키 아님): `DATA_LLM_DAILY_CALLS`(기본 200)·`DATA_LLM_DAILY_TOKENS`(기본 400,000), `NAVER_DATALAB_DAILY_LIMIT`·`NAVER_SHOPPING_DAILY_LIMIT`(기본 1,000)
+- **키를 공유하면 할당량과 비용도 공유된다.** 같은 YouTube 키는 하루 10,000 단위를, 같은 네이버 API HUB 앱은 하루 호출 수를, 같은 LLM 키는 사용 요금을 모든 PC가 나눠 쓴다. 하루 상한 셈(`DATA_LLM_BUDGET_DB`·`DATA_NAVER_CACHE_DB`)은 PC마다 따로라 여러 PC가 같은 키를 쓰면 실제 사용량은 합이 된다
+- **LLM 설정을 읽는 순서**: `<부서>_LLM_*`(예: data는 `DATA_LLM_MODEL`·`DATA_LLM_BASE_URL`·`DATA_LLM_API_KEY`) → 공용 `LLM_*` → 없으면 LLM을 쓰지 않는다(고정 문장·unknown). 다른 변수로 넘어가지 않는다
+  - **공용 `LLM_API_KEY`는 자기 키가 없는 모든 부서(기획·인사·고객지원·재무 등)가 쓴다. 개인 키를 공용 칸에 넣지 말 것.** 개인 키로 data만 쓰려면 `DATA_LLM_API_KEY`(와 `DATA_LLM_MODEL`·`DATA_LLM_BASE_URL`)에 넣는다. 부서 키는 그 부서만 읽는다
+- 키 없이 `backend/.data`만 복사하면: 감지 탭은 저장된 스냅샷으로 다시 계산해 대부분 보이지만(새 분류·설명 문장·YouTube 재조회는 빈칸·대체 문장), 인사이트 탭은 그날·같은 코드로 만든 브리프가 없으면 비거나 unknown이다. 복사할 때는 `*.db-wal`·`*.db-shm`도 같이 옮기고, `tokens.env`·`web.env`는 옮기지 않는다
+
 ### 목 모드 데모 시각 정렬
 - 시드는 고정 날짜다: 실패 주문 2026-10-21 05:00~05:30Z (`seed.py`), 지표 10/14~10/22 (`seed_metrics.py`).
 - 요청 구간이 `seed.DEMO_ALIGN_FROM`(2026-10-23T00:00Z) 이후에 시작하면 목이 시드 장애를 데모 시각으로 옮긴다. 그 전 구간은 고정 날짜 그대로다. 기존 테스트는 이 경로를 쓴다.
@@ -559,7 +574,10 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 - **상품 입력 `products`(#646, 선택)**: 상품 id 또는 이름 최대 10개. 이름은 카탈로그(`GET /api/shop/products`) 이름과 정규화(NFKC, 소문자, 공백 모두 뺌)한 값이 정확히 같을 때만 맞추고, 못 맞춘 값은 추측하지 않고 `products_effect.unmatched_products`로 돌려준다. 생략하면 예전 응답과 같다
 - **세 구분 (합산하지 않음, 같은 주문이 겹칠 수 있다)**: 상품 기준 `products_effect`(맞은 상품의 품목만: 그 상품이 든 결제 완료 주문 수·판매 수량·판매액 각각 기간값·기준선·증분·범위·방향, 기준선·공백·기준선 부족 규칙은 판매액과 같음) / 쿠폰 귀속 `coupons`·`sales.direct_attributed_krw` / 가게 전체 `orders`·`sales`(참고용). 숫자는 모두 `facts`
 - **상품 기준 평가**: `eval/campaign_products/`(그 상품만 늘림·다른 상품만 늘림·이름 못 맞춤·결제 공백·기준선 부족), 관문 `tests/test_campaign_products_eval_gate.py`
-- **상품 기준 한계**: 같은 상품이 캠페인과 다른 이유(다른 행사·시즌·검색)로 팔린 것은 구분하지 못한다. "그 기간 그 상품 판매 변화"다. 유입경로 기준은 #648(마케팅 #647 뒤)
+- **상품 기준 한계**: 같은 상품이 캠페인과 다른 이유(다른 행사·시즌·검색)로 팔린 것은 구분하지 못한다. "그 기간 그 상품 판매 변화"다
+- **유입경로 기준 `attribution_effect`(#648, campaign_id가 있을 때)**: shop-api `GET /api/shop/orders/attributed`(#655, 커넥터 `attributed_orders`, 1000건을 넘으면 구간을 반씩 나눠 읽음)로 유입 표시(`src_campaign` = campaign_id)가 있는 **결제 완료** 주문의 수·판매액(단가 × 수량, 할인 전)을 출처(`src_source`)별로, 유입 표시가 있는 주문 비율(유입 표시가 있는 결제 완료 주문 ÷ 구간 결제 완료 주문)과 함께 준다. 다른 캠페인 표시 주문은 세지 않는다. 직접 귀속이라 기준선과 비교하지 않는다. 구간에 유입 표시가 있는 결제 완료 주문이 하나도 없으면 unknown + "유입 기록 없음". 관련 상품(`products`)도 있으면 `attribution_and_products` = 이 캠페인으로 들어와 그 상품을 산 주문의 그 상품 품목만. 숫자는 모두 `facts`. 평가 `eval/campaign_attribution/`, 관문 `tests/test_campaign_attribution_eval_gate.py`
+- **네 칸은 합산하지 않는다**: 유입(`attribution_effect`) / 상품(`products_effect`) / 쿠폰 귀속(`coupons`·`sales.direct_attributed_krw`) / 가게 전체(`orders`·`sales`, 참고)는 같은 주문이 여러 칸에 겹칠 수 있다
+- **유입경로 한계**: 쇼핑몰 화면이 캠페인 링크 꼬리표(`src_*`)를 주문까지 넘긴 주문만 센다. 꼬리표 없이 들어온 주문(직접 방문·꼬리표 유실)은 빠진다. 광고 데이터(노출·클릭·비용) 결합은 하지 않는다: 출처 현황 `pending_sources`에 "광고 데이터: #647 광고 부분 대기"
 - **재무 칸 대응표** (재무 `record_campaign_result` `CampaignResultInput`):
 
   | 재무 칸 | 뜻 (재무 계약) | data 칸 |
