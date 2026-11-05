@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { api } from "@/lib/api";
 import { dateStr, won } from "@/lib/format";
 import { RECEIPT_FIELD_KO, RECEIPT_IMAGES_KO, RECEIPT_MISMATCH_KO, RECEIPT_VERDICT_KO, RECEIPT_VERDICT_TONE } from "@/lib/labels";
+import { pickGroup } from "@/lib/receiptGroup";
 import type { ActivityEntry, ReceiptAnalysis, ReceiptImageInput } from "@/lib/types";
 
 const MAX_FILES = 4; // 한 번에 다루는 최대 장수
@@ -253,15 +254,12 @@ export function ReceiptAnalysisCard({ conversationId, activity = [] }: { convers
   // 이미 묶어 둔 항목(분석 전)이 있으면 그 쪽들을 그대로 이어서 묶는다 (첫 쪽만 가져가 나머지가 빠지지 않게).
   const pagesOf = (i: Item) => i.files ?? (i.file ? [i.file] : []);
   const urlsOf = (i: Item) => [i.url, ...(i.urls ?? [])].filter((u): u is string => !!u);
-  const pagesPending = pending.reduce((n, i) => n + pagesOf(i).length, 0);
+  // 쪽 수 한도 안에서 묶을 항목을 고른다. 한도를 넘는 항목은 건너뛰고, 두 항목 미만이면 묶을 것이 없다.
+  const pick = pickGroup(pending.map((i) => ({ item: i, pages: pagesOf(i).length })), MAX_GROUP_PAGES);
   const group = () => {
-    const taken: Item[] = [];
-    let count = 0;
-    for (const i of pending) { // 쪽 수 한도 안에서 항목째로 가져온다 (한도를 넘는 항목은 그대로 남긴다)
-      const n = pagesOf(i).length;
-      if (count + n > MAX_GROUP_PAGES) break;
-      taken.push(i); count += n;
-    }
+    if (!pick.ok) return;
+    const taken = pick.taken.map((t) => t.item);
+    const count = pick.pages;
     if (count < 2) return;
     const files = taken.flatMap(pagesOf);
     const urls = taken.flatMap(urlsOf);
@@ -371,10 +369,10 @@ export function ReceiptAnalysisCard({ conversationId, activity = [] }: { convers
           <span className="text-[11px] text-ink-500">{items.length ? `${items.length}장` : "선택한 사진이 없습니다"}</span>
           <div className="ml-auto flex gap-1.5">
             {items.length > 0 && !running && <button className="btn-quiet px-2 py-1 text-xs" onClick={clearAll}>모두 지우기</button>}
-            {!running && pending.length > 1 && (
+            {!running && pick.ok && (
               <button className="btn-ghost px-2.5 py-1 text-xs" onClick={group}
                 title="한 영수증을 여러 장으로 찍었다면 한 영수증으로 합쳐 읽습니다">
-                {pagesPending > MAX_GROUP_PAGES ? `앞 ${MAX_GROUP_PAGES}장까지 한 영수증으로 묶기` : `${pagesPending}장을 한 영수증으로 묶기`}
+                {`${pick.pages}장을 한 영수증으로 묶기`}{pick.taken.length < pending.length ? " (나머지는 따로)" : ""}
               </button>
             )}
             {!running && !pending.length && retryable.length > 1 && <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => analyze(retryable)}>전체 다시 분석</button>}
