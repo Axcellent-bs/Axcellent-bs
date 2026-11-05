@@ -63,7 +63,7 @@ export const DIRECT_AGENTS: DirectAgent[] = [
   { key: "hr", name: "인사 AI", note: "팀 인원·교대·인수인계 같은 인사 기록을 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요.", live: true, dept: "인사팀", talk: hrTalk },
   { key: "planning", name: "기획 AI", note: "받은 요청·기획서·결정·제안 상태를 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요.", live: true, dept: "기획팀", talk: directChatApi({ base: PLANNING_API, path: "/api/planning/chat" }) },
   { key: "orchestrator", name: "총괄 AI", note: "", live: false },
-  { key: "support", name: "고객지원 AI", note: "", live: false },
+  { key: "support", name: "고객지원 AI", note: "문의·클레임·후기 현황을 숫자로 읽고 설명해요. 고객 이름과 원문은 보지 않고, 대화로 바꾸는 일은 하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, dept: "고객지원팀", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/support-chat" }) },
   { key: "finance", name: "재무 AI", note: "", live: false },
   { key: "data", name: "데이터분석 AI", note: "", live: false },
   { key: "marketing", name: "마케팅 AI", note: "마케팅 일을 물어보면 마케팅 AI가 답해요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, dept: "마케팅팀", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/marketing-chat" }) },
@@ -95,7 +95,7 @@ const saveThreadId = (key: string, id: string | null) => {
 const hhmm = (iso: string) => (iso ? new Date(iso).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" }) : "");
 const when = (iso: string) => (iso ? new Date(iso).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
 const errText = (e: unknown, name: string) => (e instanceof Error ? e.message : `${name}에 연결할 수 없어요`);
-const RESULT: Record<ChatStatus, string> = { talking: "대화만 함", started: "코딩 작업 시작", blocked: "막힘", waiting: "앞 요청 대기", answering: "답하는 중" };
+const RESULT: Record<ChatStatus, string> = { talking: "대화만 함", started: "코딩 작업 시작", blocked: "막힘", waiting: "앞 요청 대기", answering: "답하는 중", closed: "끝난 대화" };
 /** 일이 생긴 대화: 담당자가 원문까지 본다 */
 const madeWork = (t: ChatThread) => t.status === "started" || !!t.taskId;
 
