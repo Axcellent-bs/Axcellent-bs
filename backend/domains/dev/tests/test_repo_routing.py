@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -385,3 +386,19 @@ def test_connections_survive_restart(tmp_path, monkeypatch) -> None:
     finally:
         vcs._screen = None
         vcs.set_vcs(None)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX 파일 권한만 본다")
+def test_connection_store_is_owner_only(tmp_path, monkeypatch) -> None:
+    """토큰이 든 연결 저장 파일은 만든 사용자만 읽는다 (0600). 넓은 권한 파일도 읽을 때 좁힌다."""
+    store = tmp_path / "vcs.json"
+    monkeypatch.setenv("PLANNING_VCS_STORE", str(store))
+    old = os.umask(0o002)  # 서버와 같은 umask
+    try:
+        vcs.upsert_connection(kind="github", repo="acme/shop", token="ghp_x1234567")
+    finally:
+        os.umask(old)
+    assert store.stat().st_mode & 0o777 == 0o600
+    store.chmod(0o664)
+    vcs.load_saved()
+    assert store.stat().st_mode & 0o777 == 0o600
