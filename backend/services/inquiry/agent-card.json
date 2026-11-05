@@ -182,6 +182,42 @@
       "priority": "recommended"
     },
     {
+      "id": "preview_data_purge",
+      "description": "개인정보 삭제를 미리 본다(읽기). mode=customer_request면 삭제를 요청한 문의(inquiry_id)의 구매자 문의 중 무엇이 지워지고 무엇이 보존 의무로 남는지(처리 중·클레임 연결, 남기는 날 retained_until)를, mode=expired면 받은 지 3년이 지나 지울 문의를 돌려준다. 아무것도 바꾸지 않고 고객 원문은 싣지 않는다. 클레임 연결을 읽지 못하면 claims_unavailable.",
+      "input_schema": "agents/support/src/support_agent/purge_schemas.py#PreviewPurgeInput",
+      "output_schema": "agents/support/src/support_agent/purge_schemas.py#PurgeReport",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "purge_customer_data",
+      "description": "고객 요청에 따라 삭제를 요청한 문의(inquiry_id)의 구매자의 문의 원문(이름·제목·메시지·답변 초안·번역·요약·활동 상세·피드백 글·해결 메모 본문)을 [삭제됨]으로 바꾼다. 안전 관문 approve_data_deletion(C)이 늘 사람에게 보류하며, 승인된 뒤 같은 키로 다시 부르면 집행한다. 처리 중(열림·이관)인 문의와 클레임이 이어진 문의는 보존 의무로 남기고 지우는 날(retained_until, 받은 날로부터 3년)을 알린다. 지울 것이 없으면 승인을 부탁하지 않는다(nothing_to_purge). 행은 감사 기록 때문에 남기고 retention_purge 기록을 건마다 남긴다. 되돌릴 수 없다.",
+      "input_schema": "agents/support/src/support_agent/purge_schemas.py#PurgeCustomerDataInput",
+      "output_schema": "agents/support/src/support_agent/purge_schemas.py#PurgeReport",
+      "grade": "C",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "purge_expired_inquiries",
+      "description": "받은 지 3년이 지난 문의의 원문을 [삭제됨]으로 바꾼다. 개인정보를 3년을 넘겨 들고 있지 않게 하려고 대시보드가 하루에 한 번 부른다. 상태·클레임에 상관없이 지우고(열린 문의 포함) 행은 감사 기록 때문에 남긴다. 건마다 retention_purge 기록(기준 retention_3y, 실행자 역할 system)을 남긴다. 지울 문의가 없으면 아무것도 하지 않는다(nothing_expired). 되돌릴 수 없어 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/purge_schemas.py#PurgeExpiredInput",
+      "output_schema": "agents/support/src/support_agent/purge_schemas.py#PurgeReport",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "reveal_original",
       "description": "욕설·모욕·위협으로 가려진 고객 메시지의 원문을 연다. 상담 콘솔은 가려진 메시지의 원문을 응답에서 빼므로 이 skill로만 받는다. 열 때마다 연 사람(화면이 사람 토큰에서 채운 이름)을 문의의 AI 처리 내력에 남기고 원문은 내력에 싣지 않는다. 가려진 고객 메시지가 아니면 not_found. 기록이 남아서 execute()를 거친다.",
       "input_schema": "agents/support/src/support_agent/schemas.py#RevealOriginalInput",

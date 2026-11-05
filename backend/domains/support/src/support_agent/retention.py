@@ -47,6 +47,43 @@ class Plan:
     purged: dict[str, int] = field(default_factory=dict)
     kept: dict[str, int] = field(default_factory=dict)
     note: str = ""
+    retained_until: str | None = None  # 보존 의무로 남겨 둔 문의를 지우는 날 (보유기간 만료일)
+
+
+# ---------------------------------------------------------------- 보유기간·고객 요청 삭제
+RETENTION_YEARS = 3  # 개인정보를 이 기간을 넘겨 들고 있지 않는다 (문의를 받은 날부터)
+CRITERION_EXPIRED = "retention_3y"
+CRITERION_CUSTOMER = "customer_request"
+SYSTEM_ROLE = "system"  # 보유기간이 지나 자동으로 지운 기록의 실행자 역할
+
+
+def _parse_time(value: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def received_at(conversation: Conversation) -> datetime | None:
+    """문의를 받은 시각: 가장 이른 메시지 시각. 메시지가 없으면 마지막 변경 시각."""
+    times = [t for m in conversation.messages if (t := _parse_time(m.created_at)) is not None]
+    return min(times) if times else _parse_time(conversation.updated_at)
+
+
+def retention_deadline(conversation: Conversation) -> datetime | None:
+    """이 문의를 지워야 하는 날: 받은 날로부터 3년. 받은 시각을 못 읽으면 None."""
+    created = received_at(conversation)
+    if created is None:
+        return None
+    try:
+        return created.replace(year=created.year + RETENTION_YEARS)
+    except ValueError:  # 2월 29일 → 3년 뒤에 그날이 없으면 3월 1일
+        return created.replace(year=created.year + RETENTION_YEARS, month=3, day=1)
+
+
+def is_expired(conversation: Conversation, now: datetime) -> bool:
+    deadline = retention_deadline(conversation)
+    return deadline is not None and now >= deadline
 
 
 def _is_test_data(conversation: Conversation) -> bool:
@@ -205,6 +242,80 @@ def run(
 ) -> list[Plan]:
     stamp = (now or datetime.now(UTC)).isoformat(timespec="seconds").replace("+00:00", "Z")
     return [plan_one(store, claims, i, apply, stamp) for i in dict.fromkeys(inquiry_ids)]
+
+
+def _do_purge(
+    store: InquiryStore,
+    conversation: Conversation,
+    apply: bool,
+    stamp: str,
+    criterion: str,
+    role: str,
+) -> Plan:
+    redacted, purged = redact(conversation, stamp)
+    kept = {"messages": len(redacted.messages), "activity": len(redacted.activity), "claims": 0}
+    if apply:
+        store.replace(redacted)
+        privacy_audit.record_retention_purge(
+            store, redacted, criterion=criterion, purged=purged, kept=kept, executor_role=role
+        )
+    return Plan(conversation.id, "purge", [], purged, kept)
+
+
+def plan_expired(store: InquiryStore, now: datetime, apply: bool, stamp: str) -> list[Plan]:
+    """받은 지 3년이 지난 문의의 원문을 지운다. 열린 문의·클레임이 이어진 문의도 예외가 없다.
+
+    개인정보를 3년을 넘겨 들고 있지 않는 것이 목적이라 상태나 클레임을 보지 않는다.
+    """
+    return [
+        _do_purge(store, conversation, apply, stamp, CRITERION_EXPIRED, SYSTEM_ROLE)
+        for conversation in list(store.all())
+        if not conversation.purged_at and is_expired(conversation, now)
+    ]
+
+
+def plan_customer_request(
+    store: InquiryStore,
+    claims: ClaimStore,
+    request_id: int,
+    claimed_ids: set[int],
+    apply: bool,
+    stamp: str,
+) -> list[Plan]:
+    """삭제를 요청한 고객(`request_id` 문의의 구매자)의 문의 원문을 지운다.
+
+    지우지 않고 남기는 것(보존 의무): 아직 처리 중인 문의(열림·이관)와 클레임이 이어진 문의.
+    남긴 문의에는 `retained_until`(받은 날로부터 3년)을 붙여, 그날 보유기간 삭제가 지운다.
+    `claimed_ids`는 다른 프로세스(클레임 서비스)에서 읽은 클레임이 이어진 문의 번호다.
+    """
+    request = store.get(request_id)
+    if request is None:
+        return [Plan(request_id, "not_found")]
+    if request.user_id is None:  # 구매자를 모르면 누구의 문의인지 묶을 수 없다
+        return [Plan(request_id, "blocked", ["no_buyer"])]
+    plans: list[Plan] = []
+    for conversation in list(store.all()):
+        if conversation.user_id != request.user_id:
+            continue
+        if conversation.purged_at:
+            plans.append(Plan(conversation.id, "already_purged"))
+            continue
+        reasons = []
+        if conversation.status == "open":
+            reasons.append("status_open")
+        if conversation.status == "escalated":
+            reasons.append("status_escalated")
+        if conversation.id in claimed_ids or _linked_claims(conversation, claims):
+            reasons.append("claim_linked")
+        if reasons:
+            deadline = retention_deadline(conversation)
+            until = deadline.date().isoformat() if deadline else None
+            plans.append(Plan(conversation.id, "blocked", reasons, retained_until=until))
+            continue
+        plans.append(
+            _do_purge(store, conversation, apply, stamp, CRITERION_CUSTOMER, EXECUTOR_ROLE)
+        )
+    return plans
 
 
 def _line(plan: Plan, apply: bool) -> str:
