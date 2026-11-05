@@ -251,7 +251,8 @@ function Msg({ m, s, onOpen }: { m: ChatMessage; s: S; onOpen: () => void }) {
 
 function Started({ m, s, onOpen }: { m: ChatMessage; s: S; onOpen: () => void }) {
   const id = m.taskId
-  const c = id ? s.tasks.find((t) => t.id === id)?.coding : undefined
+  const task = id ? s.tasks.find((t) => t.id === id) : undefined
+  const c = task?.coding
   const status: CodingStatus = c?.status ?? 'queued'
   const files = c?.files?.length ?? 0
   return (
@@ -267,7 +268,7 @@ function Started({ m, s, onOpen }: { m: ChatMessage; s: S; onOpen: () => void })
           {id && (
             <span className="tags">
               <CancelButton taskId={id} status={c?.status} />
-              <ResumeButton taskId={id} status={c?.status} />
+              <ResumeButton taskId={id} status={c?.status} discarded={task?.discarded} />
               <button type="button" className="btn-ghost" onClick={() => { onOpen(); go(toPath(`work/prs/${encodeURIComponent(id)}`)) }}>작업 보기</button>
             </span>
           )}

@@ -15,6 +15,7 @@ const actions = planningApi(DEV_API)
 export const CODING_LABEL: Record<CodingStatus, string> = {
   queued: '대기', claimed: '가져감', reading: '파일 읽는 중', writing: '코드 작성 중', reviewing: '리뷰 중',
   opened: 'PR 열림', merged: '머지됨', waiting_human: '사람 확인', failed: '실패', canceled: '중단됨', covered: '반영됨',
+  returned: '기획에 돌려보냄',
 }
 const DONE: CodingStatus[] = ['opened', 'merged', 'covered']
 /** 토큰 수를 짧게: 950 · 12.3k · 1.2M */
@@ -40,7 +41,32 @@ export const isRunning = (s?: CodingStatus | string) => RUNNING.includes(s as Co
 export const CodingLabel = ({ c }: { c: CodingRun }) => <State v={codingState(c)} live={isRunning(c.status)} />
 const STUCK: CodingStatus[] = ['failed', 'waiting_human']
 /** 사람이 중단할 수 있는 상태 (머지됨·중단됨이 아니면) */
-export const canCancel = (s?: CodingStatus) => !!s && s !== 'merged' && s !== 'canceled' && s !== 'covered'
+export const canCancel = (s?: CodingStatus) => !!s && s !== 'merged' && s !== 'canceled' && s !== 'covered' && s !== 'returned'
+/** 폐기할 수 있는 멈춘 상태 (열린 PR이 없을 때만 서버가 받는다) */
+const DISCARDABLE: CodingStatus[] = ['canceled', 'failed', 'returned']
+export const canDiscard = (t: Task) => !t.discarded && (t.coding ? DISCARDABLE.includes(t.coding.status) : t.state === '중단')
+const DEPT_KO: Record<string, string> = { marketing: '마케팅', support: '고객지원', finance: '재무', hr: '인사', data: '데이터분석', other: '다른 부서' }
+export const deptKo = (d?: string | null) => (d ? DEPT_KO[d] ?? d : '')
+
+/** 멈춘 작업 폐기 버튼. 폐기한 작업은 다시 돌리지 않는다 */
+export function DiscardButton({ task }: { task: Task }) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  if (!canDiscard(task)) return null
+  const discard = async () => {
+    if (!window.confirm(`${task.id} 작업을 폐기할까요? 다시 돌릴 수 없어요.`)) return
+    setBusy(true)
+    try {
+      await api.discard(task.id)
+      toast.show(`${task.id} 폐기`)
+    } catch (x) {
+      toast.show(x instanceof PlanningApiError ? x.message : '개발·배포 서버에 연결할 수 없어요')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return <Button size="small" onClick={discard} disabled={busy}>{busy ? '폐기하는 중…' : '폐기'}</Button>
+}
 
 /** 작업 중단 버튼. 열린 PR은 서버가 닫고 브랜치를 지운다 */
 export function CancelButton({ taskId, status }: { taskId: string; status?: CodingStatus }) {
@@ -63,10 +89,10 @@ export function CancelButton({ taskId, status }: { taskId: string; status?: Codi
 }
 
 /** 중단한 작업 재개 버튼. 레포의 최신 코드를 다시 읽고 처음부터 돈다 */
-export function ResumeButton({ taskId, status }: { taskId: string; status?: CodingStatus }) {
+export function ResumeButton({ taskId, status, discarded }: { taskId: string; status?: CodingStatus; discarded?: boolean }) {
   const toast = useToast()
   const [busy, setBusy] = useState(false)
-  if (status !== 'canceled') return null
+  if (status !== 'canceled' || discarded) return null
   const resume = async () => {
     setBusy(true)
     try {
@@ -252,11 +278,13 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
       <span className="tags">
         {waitingPr && <Button size="small" variant="primary" onClick={merge} disabled={busy}>머지</Button>}
         {heldPr && <Button size="small" variant="primary" onClick={() => void approveHold()} disabled={busy}>{busy ? '보내는 중…' : '승인하고 PR 열기'}</Button>}
-        {(STUCK.includes(c.status) || c.status === 'canceled') && !waitingPr && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.status === 'canceled' ? '재개' : c.mergeConflict ? '최신 코드로 다시 쓰기' : '다시 시도'}</Button>}
+        {(STUCK.includes(c.status) || c.status === 'canceled' || c.status === 'returned') && !waitingPr && !task.discarded && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.returnedTo ? '개발에 다시 맡기기' : c.status === 'canceled' ? '재개' : c.mergeConflict ? '최신 코드로 다시 쓰기' : '다시 시도'}</Button>}
         {textHeld && <Button size="small" onClick={textOk} disabled={busy}>글 확인함</Button>}
         {unclaimed && <Button size="small" onClick={() => void toAgent()} disabled={busy}>서버 AI로 넘기기</Button>}
         {noChange && <Button size="small" onClick={closeCovered} disabled={busy}>반영됨으로 닫기</Button>}
         <CancelButton taskId={task.id} status={c.status} />
+        <DiscardButton task={task} />
+        {task.discarded && <Tag>폐기됨{task.discardedBy ? ` · ${task.discardedBy}` : ''}</Tag>}
       </span>
     </Step>
   )

@@ -34,6 +34,7 @@ from dev_agent.work_api import add_work_routes
 
 # 코딩 작업 오류 중 409로 주는 것 (설정·상태 문제). 나머지 입력 오류는 400
 CODING_CONFLICT = {
+    "NOT_DISCARDABLE",  # 폐기: 돌고 있거나 열린 PR이 있는 작업
     "THREAD_BUSY",  # 개발 AI 대화: 앞 말에 답하는 중
     "THREAD_CLOSED",  # 개발 AI 대화: 끝낸 대화
     "NO_VCS",
@@ -402,6 +403,18 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         svc = get_service()
         try:
             result = await svc.cancel_dev_task(task_id)
+        except ActionError as exc:
+            return _coding_err(exc)
+        except GateRefused as exc:
+            return _gate_err(exc)
+        return _ok(result.output, svc)
+
+    @router.post("/dev-tasks/{task_id}/discard", response_model=None, dependencies=HUMAN)
+    async def post_dev_task_discard(task_id: str, request: Request) -> dict | JSONResponse:
+        """멈춘 작업 폐기 (중단·실패·돌려보냄, 열린 PR 없음). 다시 돌리지 않는다."""
+        svc = get_service()
+        try:
+            result = await svc.discard_dev_task(task_id, _person(request))
         except ActionError as exc:
             return _coding_err(exc)
         except GateRefused as exc:

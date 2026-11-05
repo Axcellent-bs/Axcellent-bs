@@ -79,7 +79,7 @@ export interface Spec {
   extra?: Record<string, string> // 양식에만 있는 칸 (lib/specTemplate.ts)
 }
 
-export type TaskState = '진행 중' | 'PR 검수' | '머지 대기' | '완료' | 'C 보류'
+export type TaskState = '진행 중' | 'PR 검수' | '머지 대기' | '완료' | 'C 보류' | '중단' // 중단: 사람 중단·돌려보냄·폐기 (서버는 이미 쓴다)
 export interface Task {
   id: string
   spec: string
@@ -88,10 +88,13 @@ export interface Task {
   owner: string
   state: TaskState
   coding?: CodingRun // 코딩 에이전트 실행 상태 (dev 서비스)
+  discarded?: boolean // 사람이 폐기함 (멈춘 작업만). 작업 목록에서 숨길 수 있다
+  discardedBy?: string | null
+  discardedAt?: string | null
 }
 
 // 코딩 에이전트 한 번의 실행. SSE로 단계가 바뀐다
-export type CodingStatus = 'queued' | 'claimed' | 'reading' | 'writing' | 'reviewing' | 'opened' | 'merged' | 'waiting_human' | 'failed' | 'canceled' | 'covered'
+export type CodingStatus = 'queued' | 'claimed' | 'reading' | 'writing' | 'reviewing' | 'opened' | 'merged' | 'waiting_human' | 'failed' | 'canceled' | 'covered' | 'returned'
 // 작업을 누가 코딩하나: 서버 AI(API 키) · 개발자 본인 Claude(구독, MCP로 가져감)
 export type CodingMode = 'agent' | 'subscription'
 export interface CodingFile { path: string; additions: number; deletions: number; reason: string }
@@ -120,6 +123,8 @@ export interface CodingRun {
   holdKey?: string | null // 실행 관문이 PR 열기(generate_pr)를 보류한 키
   coveredBy?: string[] // covered: 이 작업을 이미 반영한 앞 작업 PR (PR 없이 완료)
   ciHold?: boolean // CI 실패로 사람 확인: 서버가 CI를 다시 보고 통과하면 자동 머지를 다시 판단
+  returnedTo?: string | null // 코드 변경이 아니라고 본 일의 맞을 것 같은 부서 (returned·사람 확인)
+  returnedReason?: string | null
   holdReview?: string | null // 그 보류 건 (사람이 승인하면 같은 키로 PR을 연다)
   claimedAt?: string | null
   leaseUntil?: string | null // 이때까지 진행 보고가 없으면 대기열로 돌아간다
