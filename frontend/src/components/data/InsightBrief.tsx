@@ -4,7 +4,8 @@ import { okEvidence, type SkillState } from "@/components/data/useSkill";
 import { Sources, when } from "@/components/data/Sources";
 import { OpportunityCards } from "@/components/data/OpportunityCards";
 import { AgeBars } from "@/components/data/AgeBars";
-import { CopyId, FoldRow, RestFacts, ShortsCard, factLinks, shortsThumbs, shortsTiles, verdictOf } from "@/components/data/ShortsCard";
+import { useCompany } from "@/demo/company";
+import { CopyId, FoldRow, RestFacts, ShortsCard, TileRow, factLinks, shortsThumbs, shortsTiles, verdictOf } from "@/components/data/ShortsCard";
 import { DATA_SERVER, kpiLive, type DataFact, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
 
 // 트렌드 2단계(인사이트): 기획팀이 가져갈 인사이트 브리프 (v2 시안 ② 보드). trend_insight_brief(계약 TrendInsightBriefOutput) 응답 그대로.
@@ -23,6 +24,7 @@ const NO_REASON = "서버가 이유를 주지 않았어요";
 const num = (v: number, digits = 0) => v.toLocaleString("ko-KR", { maximumFractionDigits: digits });
 const times = (v: number) => `평소의 ${num(v, 2)}배`;
 const FORMAT_SOURCE = { topic: "이 주제 숏츠", category: "같은 카테고리 숏츠 통계", all: "전체 숏츠 통계" } as const;
+const COMPACT_VIEWS = new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 });
 
 function material(i: TrendInsight): { label: string; tone: string } {
   if (i.ad_material === true && i.real_entity) return { label: "광고 재료 가능 · 이름 주의", tone: TONE.warn };
@@ -106,24 +108,42 @@ function Products({ i }: { i: TrendInsight }) {
   ) : <span className="text-ink-500">{i.products_reason ?? NO_REASON}</span>;
 }
 
+const CAUTION_NAME = { real_person: "인물", trademark: "상표", music: "음원" } as const;
+
 function InsightCard({ i, facts }: { i: TrendInsight; facts: DataFact[] | undefined }) {
   const m = material(i);
   const season = seasonText(i.evidence);
   const kicker = [i.category && i.category !== "unknown" ? i.category : null, i.company_related ? "회사 관련" : null, i.classification_pending ? "분류 대기" : null]
     .filter(Boolean).join(" · ");
+  // 형식 빌리기(format, 서버 company_relevance): "형식 빌리기" 칩 · 주의 칩(서버 cautions) · 빌릴 형식 타일 · 이어 붙일 책 · 지금 뜨는 영상
+  const borrow = i.company_relevance === "format";
+  const bf = i.borrow_format;
+  const formatTile = borrow && bf ? [{
+    label: "빌릴 형식", value: bf.name,
+    note: typeof bf.median_views === "number" ? `숏츠 형식 ${bf.name} 중앙값 ${COMPACT_VIEWS.format(bf.median_views)}회` : null,
+  }] : [];
+  const cautions = i.cautions ?? [];
   return (
     <ShortsCard
-      verdict={verdictOf(i.shorts_fit, i.shorts_fit_status, i.shorts_fit_reason)}
+      verdict={borrow ? { label: "형식 빌리기", tone: "bg-brand-50 text-brand-700", title: i.company_relevance_reason ?? null }
+        : verdictOf(i.shorts_fit, i.shorts_fit_status, i.shorts_fit_reason)}
       kicker={kicker || null}
+      badges={borrow && cautions.length > 0 ? (
+        <span className={`chip text-xs ${TONE.warn}`} title={i.caution_note ?? undefined}>{cautions.map((c) => CAUTION_NAME[c]).join("·")} 주의</span>
+      ) : null}
       title={i.topic}
       line={i.line || null}
       lineNote={i.line_status === "fixed" ? "고정 문장" : null}
       highlights={i.evidence_highlights}
-      tiles={shortsTiles(i)}
-      products={i.products.map((p) => ({ id: p.product_id, name: p.name }))}
+      extraTiles={formatTile}
+      products={(borrow ? (i.borrow_products ?? []) : i.products).map((p) => ({ id: p.product_id, name: p.name }))}
+      productsLabel={borrow ? "이어 붙일 책" : "연결 상품"}
       thumbs={shortsThumbs([...(i.evidence_shorts ?? []), ...(i.evidence.video_links ?? [])], [...i.evidence.links, ...factLinks(facts, i.insight_id, i.fact_ids)])}
+      thumbsLabel={borrow ? "지금 뜨는 영상" : "이런 숏츠가 잘 돼요"}
       highlight={i.company_related === true}
       fold={<>
+        <TileRow tiles={shortsTiles(i)} />
+        {borrow && i.caution_note && <FoldRow label="주의">{i.caution_note}</FoldRow>}
         <FoldRow label="광고 재료">
           <Chip label={m.label} tone={m.tone} />
           {[i.ad_material_reason, i.real_entity && i.entity_names.length ? `이름 · ${i.entity_names.join(", ")}` : null].filter(Boolean).map((x) => <span key={x} className="ml-1 text-xs text-ink-500">{x}</span>)}
@@ -181,47 +201,53 @@ export function InsightBrief({ state, examples, examplesCount }: {
   state: SkillState<TrendInsightBriefOutput>; examples: ReactNode; examplesCount: number | null;
 }) {
   const [examplesOpened, setExamplesOpened] = useState(false);
+  const company = useCompany();
   const out = state.kind === "ok" ? state.out : null;
   if (!kpiLive) return null;
   const all = out?.insights ?? [];
-  // 위: 기회 가설 카드 → 회사 관련 인사이트. 가운데: 기획에 넘기는 나머지.
-  // 맨 아래 접힘: 참고용(reference_only — 회사와 연결 없음·광고 재료 아님·분류 대기). 기획에 넘기지 않는다 (서버 순서 그대로)
+  // 두 묶음 (서버 company_relevance·reference_only 그대로, 서버 순서):
+  // ① 책에서 뜨는 주제 = 기회 가설 카드 + direct·domain 인사이트 ② 빌려 쓸 요즘 유행 = format
+  // 맨 아래 접힘: 참고용(reference_only — 연결할 책 없음·광고 재료 아님·분류 대기). 기획에 넘기지 않는다
   const passed = (i: TrendInsight) => !i.reference_only && i.classification_pending !== true;
-  const companyOnes = all.filter((i) => passed(i) && i.company_related === true);
-  const linked = all.filter((i) => passed(i) && i.company_related !== true);
+  const bookOnes = all.filter((i) => passed(i) && i.company_relevance !== "format");
+  const borrowed = all.filter((i) => passed(i) && i.company_relevance === "format");
   const unlinked = all.filter((i) => !passed(i));
-  const meta = out ? [out.day ? `${out.day} 브리프` : null, out.generated_at ? `만든 시각 ${when(out.generated_at)}` : null, out.cached ? "오늘 만든 브리프" : null].filter(Boolean).join(" · ") : null;
-  const hasTop = out !== null && (out.opportunities !== undefined || companyOnes.length > 0);
+  const name = company?.name ?? "회사";
+  // 형식 빌리기가 0개면 서버가 limits에 남긴 이유 (첫 줄: 예시 아이디어가 고른 트렌드)
+  const noBorrow = out?.limits.find((l) => l.startsWith("형식 빌리기 0개")) ?? null;
   return (
     <section id="data-trend-insight" aria-labelledby="data-trend-insight-title" className="space-y-4">
-      <div className="space-y-1">
-        <h2 id="data-trend-insight-title" className="text-xl font-bold text-ink-900">기획팀에 넘길 인사이트</h2>
-        {meta && <p className="text-xs text-ink-500">{meta}</p>}
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-1">
+        <div className="min-w-0 space-y-1">
+          <h2 id="data-trend-insight-title" className="text-2xl font-bold text-ink-900">기획팀에 넘길 인사이트</h2>
+          <p className="text-sm text-ink-500">두 가지예요. {name} 책에서 뜨는 주제, 그리고 책 숏츠에 빌려 쓸 수 있는 요즘 유행. 숫자는 모두 데이터 근거예요.</p>
+        </div>
+        {out?.generated_at && <span className="ml-auto text-xs text-ink-500">{when(out.generated_at)} 기준</span>}
       </div>
       {state.kind === "loading" ? <Waiting what="인사이트를 묶는 중…" />
         : state.kind === "failed" ? <Empty>인사이트를 받지 못했어요. {state.reason} {DATA_SERVER}가 켜져 있는지 확인해 주세요.</Empty>
         : out && (
           <>
-            {hasTop && (
-              <section aria-labelledby="data-trend-insight-top" className="space-y-3">
-                <h3 id="data-trend-insight-top" className="text-base font-bold text-ink-900">회사 관련·기회</h3>
-                <ul className="space-y-4">
-                  <OpportunityCards list={out.opportunities} reason={out.opportunities_reason} facts={out.facts} />
-                  {companyOnes.map((i) => <InsightCard key={i.insight_id} i={i} facts={out.facts} />)}
-                </ul>
-              </section>
-            )}
             {(out.status === "unknown" || all.length === 0) && <Empty>{out.reason ?? "오늘 인사이트가 없어요."}</Empty>}
-            {linked.length > 0 && (
-              <section aria-labelledby={hasTop ? "data-trend-insight-linked" : undefined} className="space-y-3">
-                {hasTop && <h3 id="data-trend-insight-linked" className="text-base font-bold text-ink-900">그 밖의 인사이트</h3>}
-                <ul className="space-y-4">{linked.map((i) => <InsightCard key={i.insight_id} i={i} facts={out.facts} />)}</ul>
-              </section>
-            )}
+            <section aria-labelledby="data-trend-insight-books" className="space-y-3">
+              <h3 id="data-trend-insight-books" className="text-lg font-bold text-ink-900">{name} 책에서 뜨는 주제</h3>
+              <ul className="space-y-4">
+                <OpportunityCards list={out.opportunities} reason={out.opportunities_reason} facts={out.facts} />
+                {bookOnes.map((i) => <InsightCard key={i.insight_id} i={i} facts={out.facts} />)}
+              </ul>
+            </section>
+            <section aria-labelledby="data-trend-insight-borrow" className="space-y-3">
+              <h3 id="data-trend-insight-borrow" className="text-lg font-bold text-ink-900">
+                책 숏츠에 빌려 쓸 요즘 유행 <span className="text-sm font-normal text-ink-500">이름·로고는 안 쓰고 형식만 빌려요</span>
+              </h3>
+              {borrowed.length > 0
+                ? <ul className="space-y-4">{borrowed.map((i) => <InsightCard key={i.insight_id} i={i} facts={out.facts} />)}</ul>
+                : <p className="card p-4 text-sm text-ink-500">지금 빌려 쓸 유행이 없어요.{noBorrow ? ` ${noBorrow}` : ""}</p>}
+            </section>
             {unlinked.length > 0 && (
               <details className="card p-4">
                 <summary className="cursor-pointer text-sm font-semibold text-ink-900">
-                  기획에 넘기지 않는 참고용 화제 {unlinked.length}개 <span className="font-normal text-ink-500">· 회사와 연결 없음·광고 재료 아님</span>
+                  연결할 책이 없는 화제 (참고용) {unlinked.length}개
                 </summary>
                 <ul className="mt-4 space-y-4">{unlinked.map((i) => <InsightCard key={i.insight_id} i={i} facts={out.facts} />)}</ul>
               </details>

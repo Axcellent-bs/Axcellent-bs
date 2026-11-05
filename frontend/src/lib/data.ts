@@ -809,6 +809,8 @@ export interface ExplorerVideo {
   source: string | null;
   /** 조회수·좋아요를 읽은 시각 */
   at: string | null;
+  /** 칸이 모자라 7일 이전 숏츠 표본으로 채운 영상 (#730, 예전 응답은 없다) */
+  before_period?: boolean;
 }
 export interface ExplorerCell {
   category: string;
@@ -890,6 +892,18 @@ export interface EvidenceHighlight {
   /** 템플릿 문장 하나 */
   sentence: string;
   fact_id: string | null;
+  /** 표본이 기준보다 적은 근거 (#735): 화면은 막대 없이 회색 "참고". 예전 응답은 없다 */
+  low_sample?: boolean;
+  /** 표시 문구 (예: "표본 6개 · 참고") */
+  sample_note?: string | null;
+}
+
+/** 형식 빌리기 인사이트의 빌릴 숏츠 형식 (#737, 숏츠 통계 값 그대로) */
+export interface BorrowFormat {
+  name: string;
+  median_views: number | null;
+  samples: number | null;
+  source: "topic" | "category" | "all" | null;
 }
 
 export interface TrendInsight {
@@ -940,8 +954,13 @@ export interface TrendInsight {
   legacy_insight_id?: string | null;
   fact_ids?: string[];
   /** 회사와의 연결 (#628): direct = 연결 상품, domain = 도메인 프로필·회사 키워드, none = 둘 다 아님(참고용). 예전 응답은 없다 */
-  company_relevance?: "direct" | "domain" | "none" | null;
+  company_relevance?: "direct" | "domain" | "none" | "format" | null;
   company_relevance_reason?: string | null;
+  /** 형식 빌리기(company_relevance = format, #737): 빌릴 형식·이어 붙일 책·주의. 예전 응답은 없다 */
+  borrow_format?: BorrowFormat | null;
+  borrow_products?: InsightProduct[];
+  cautions?: CautionType[];
+  caution_note?: string | null;
   /** 숏츠 적합도·목표 참고값 (#678). 숏츠 표본이 모자라면 null + shorts_fit_status unknown + shorts_fit_reason. 예전 응답은 없다 */
   shorts_fit?: ShortsFit | null;
   shorts_fit_status?: "known" | "unknown" | null;

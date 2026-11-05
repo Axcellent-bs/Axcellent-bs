@@ -10,7 +10,7 @@ import { TrendHeadline, materialOf } from "@/components/data/TrendPopular";
 import { VideoExplorer } from "@/components/data/VideoExplorer";
 import { okOut, useSkill } from "@/components/data/useSkill";
 import { Basis, Sources, VideoLinks, when } from "@/components/data/Sources";
-import { ContentLoop, type LoopTrendState } from "@/components/data/ContentLoop";
+import { LoopStepper, type LoopTrendState } from "@/components/data/ContentLoop";
 import { LOOP_STAGES, TREND_TABS, trendTabFromHash, trendTabHash, trendTabOfStage, type LoopProbe, type LoopStage, type TrendTab } from "@/lib/contentLoop";
 import {
   DATA_SERVER, TREND_MAX_GROUPS, dataAi, evidenceLines, kpiLive,
@@ -194,7 +194,7 @@ function PreparingStage({ stage }: { stage: LoopStage }) {
 // ------------------------------------------------------------------- 트렌드 탭
 
 /** dataUp: 화면(Data.tsx)이 이미 받은 데이터 AI 상태 확인(dataAi.health) 결과. null이면 아직 모름 */
-export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
+export function TrendScan({ dataUp = null, company = null }: { dataUp?: boolean | null; company?: string | null }) {
   const location = useLocation();
   const navigate = useNavigate();
   const tab = trendTabFromHash(location.hash);
@@ -326,17 +326,30 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
     </div>
   );
 
+  const snapshot = popularOut?.youtube_status === "known" ? popularOut.snapshot_at : null;
   return (
-    <div className="space-y-5">
-      <ContentLoop trend={loopTrend} probes={{ trend_scan: trendProbe, trend_insight_brief: briefProbe, campaign_effect: loopCampaignProbe }} active={tab.stages.length ? stageOf(tab.stages[0]).no : 0} onSelect={openStage} />
+    <div className="space-y-4">
+      {/* 제목 한 줄: 트렌드&콘텐츠 · 한 줄 스테퍼(루프 4단계, 큰 카드·설명은 접힘) · 오른쪽 YouTube 인기 기준 시각 (서버 snapshot_at) */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <h1 className="text-2xl font-bold tracking-tight text-ink-900">트렌드&amp;콘텐츠</h1>
+        <LoopStepper trend={loopTrend} probes={{ trend_scan: trendProbe, trend_insight_brief: briefProbe, campaign_effect: loopCampaignProbe }}
+          active={tab.stages.length ? stageOf(tab.stages[0]).no : 0} onSelect={openStage} />
+        <details className="text-xs text-ink-500">
+          <summary className="cursor-pointer select-none">설명</summary>
+          <p className="mt-1 max-w-3xl leading-relaxed">
+            {company ? `${company} ` : ""}데이터분석팀이 감지 → 인사이트 → 넘김 → 성과를 봅니다. 숫자는 서버가 계산한 값만 보여 주고, 없으면 빈 상태를 보여 줍니다.
+          </p>
+        </details>
+        {snapshot && <span className="ml-auto text-xs text-ink-500">YouTube 인기 {when(snapshot)} 기준</span>}
+      </div>
 
       {/* 하위 탭: 감지 → 인사이트 → 넘김 → 성과 (루프 4단계와 같다) + 데이터 출처 (lib/contentLoop.ts TREND_TABS) */}
-      <div role="tablist" aria-label="트렌드&콘텐츠 단계" className="flex w-full gap-1 overflow-x-auto rounded-2xl bg-surface p-1 ring-1 ring-ink-100">
-        {TREND_TABS.map((t, i) => (
+      <div role="tablist" aria-label="트렌드&콘텐츠 단계" className="flex w-full gap-6 overflow-x-auto border-b border-ink-100">
+        {TREND_TABS.map((t) => (
           <button key={t.key} type="button" role="tab" id={`trend-sub-${t.key}`} aria-selected={tab.key === t.key} aria-controls={`trend-sub-panel-${t.key}`}
             onClick={() => openTab(t)}
-            className={`flex-1 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${tab.key === t.key ? "bg-brand-600 text-white" : "text-ink-700 hover:bg-ink-100"}`}>
-            {t.stages.length ? `${i + 1} ` : ""}{t.title}
+            className={`-mb-px whitespace-nowrap border-b-2 px-4 py-2.5 text-[15px] transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${tab.key === t.key ? "border-brand-600 font-bold text-brand-700" : "border-transparent text-ink-500 hover:text-ink-900"}`}>
+            {t.title}
           </button>
         ))}
       </div>
@@ -344,9 +357,9 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
       {TREND_TABS.map((t) => (
         <div key={t.key} role="tabpanel" id={`trend-sub-panel-${t.key}`} aria-labelledby={`trend-sub-${t.key}`} hidden={tab.key !== t.key}>
           {t.key === "detect" ? (
-            <div className="space-y-5">
+            <div className="space-y-4">
               {kpiLive && <TrendHeadline popular={popularRes.state} />}
-              {kpiLive && <VideoExplorer popular={popularRes.state} />}
+              {kpiLive && <VideoExplorer />}
               {detect}
             </div>
           ) : !seen.has(t.key) ? null : t.key === "recommend" ? (

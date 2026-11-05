@@ -77,8 +77,9 @@ export default function DataPage() {
   if (legacy) return <Navigate replace to={{ pathname: legacy.pathname, search: location.search, hash: legacy.hash }} />;
 
   return (
-    <div className="w-full space-y-6 px-4 pb-12 pt-2 sm:space-y-8 sm:px-8">
-      <header className="flex flex-wrap items-end gap-3">
+    <div className={`w-full px-4 pb-12 pt-2 sm:px-8 ${mode === "trend" ? "space-y-4" : "space-y-6 sm:space-y-8"}`}>
+      {/* 트렌드&콘텐츠는 첫 화면에 탭과 내용이 보이게 제목 한 줄만 (TrendScan). 설명은 그 안 접힘 */}
+      {mode !== "trend" && <header className="flex flex-wrap items-end gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">데이터 분석</h1>
           <p className="mt-1 text-sm text-ink-500">
@@ -91,7 +92,7 @@ export default function DataPage() {
           {orchUp != null && <Chip label={orchUp ? "총괄 켜짐" : "총괄 꺼짐"} tone={orchUp ? TONE.ok : TONE.bad} />}
           {dataUp != null && <Chip label={dataUp ? "데이터 AI 켜짐" : "데이터 AI 꺼짐"} tone={dataUp ? TONE.ok : TONE.bad} />}
         </div>
-      </header>
+      </header>}
 
       {orchUp === false && (
         <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
@@ -111,7 +112,7 @@ export default function DataPage() {
         </div>
       )}
       {mode === "ops" && <LearningKpi tick={tick} />}
-      {mode === "trend" && <TrendScan dataUp={dataUp} />}
+      {mode === "trend" && <TrendScan dataUp={dataUp} company={company?.name ?? null} />}
     </div>
   );
 }
