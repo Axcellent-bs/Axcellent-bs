@@ -173,6 +173,39 @@ def test_other_stores_are_refreshed_once_and_hidden_subscribers_say_so(tmp_path:
     assert out.quota_used_today == store.units(ve._day(NOW)) > 0
 
 
+def test_short_cells_are_filled_with_older_shorts_samples_marked(tmp_path: Path) -> None:
+    """7일 안 영상이 최소 수보다 적은 숏 칸은 숏츠 표본(기간 무관)의 최근 것부터 채우고 표시한다."""
+    from data_agent.skills.topic_category import CategoryResult
+
+    env = _env(tmp_path)
+    config = Path(env["DATA_TREND_CONFIG"])
+    config.write_text(config.read_text(encoding="utf-8").replace(
+        "max_videos = 5\n", 'max_videos = 5\nbackfill_categories = ["유머"]\n'),
+        encoding="utf-8")  # fmt: skip
+    store = ve.ExplorerStore(tmp_path / "explorer.db")
+    cache = CategoryCache(tmp_path / "topics.db", now=lambda: NOW)
+    old = [_v("o1", "웃긴 옛날 숏츠 하나", 30, days=20), _v("o2", "웃긴 옛날 숏츠 둘", 40, days=12),
+           _v("o3", "옛날 긴 영상", 600, days=12)]  # fmt: skip
+    store.save_videos(NOW, old, "shorts")
+    for v in old:  # 숏츠 통계가 제목으로 분류해 둔 것 (새로 묻지 않음)
+        cache.put(v.title, CategoryResult("유머", None, 0, real_entity=False, is_person=False))
+    asyncio.run(ve.compute(env, youtube=None, llm=FakeLLM(), store=store, cache=cache,
+                           terms=_terms, now=NOW))  # fmt: skip
+    payload = store.result()
+    day = ve.view(payload, VideoExplorerRequest(category="유머", period="1d", length="short"),
+                  env=env, store=store, now=NOW)[0].cells[0]  # fmt: skip
+    assert day.count == 0  # 1일 안에는 없음
+    assert [v.video_id for v in day.videos] == ["o2", "o1"]  # 최근 올린 것부터
+    assert all(v.before_period for v in day.videos)
+    assert "7일 이전 숏츠 표본 2개로 채움" in (day.shortage_reason or "")
+    long = ve.view(payload, VideoExplorerRequest(category="유머", period="7d", length="long"),
+                   env=env, store=store, now=NOW)[0].cells[0]  # fmt: skip
+    assert not any(v.before_period for v in long.videos)  # 롱 칸은 숏츠 표본으로 채우지 않음
+    game = ve.view(payload, VideoExplorerRequest(category="게임", period="7d", length="short"),
+                   env=env, store=store, now=NOW)[0].cells[0]  # fmt: skip
+    assert not any(v.before_period for v in game.videos)  # 채울 카테고리가 아님
+
+
 def test_screen_request_reads_stored_result_only(tmp_path: Path) -> None:
     store = ve.ExplorerStore(tmp_path / "explorer.db")
     empty = _view(tmp_path, store)
