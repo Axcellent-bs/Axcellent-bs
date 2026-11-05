@@ -15,6 +15,7 @@
 | `list_chat_threads` | read |
 | `get_chat_thread` | read |
 | `close_chat_thread` | read |
+| `build_campaign_link` | read |
 | `issue_coupon` | A |
 | `draft_sns_post` | read |
 | `check_sns_post` | read |

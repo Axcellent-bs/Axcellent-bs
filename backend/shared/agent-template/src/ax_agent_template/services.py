@@ -114,6 +114,7 @@ SERVICES: tuple[Service, ...] = (
             "receive_campaign_brief",
             "list_campaign_briefs",
             "get_campaign_brief",
+            "build_campaign_link",
             "issue_coupon",
             "start_campaign",
             "record_campaign_result",

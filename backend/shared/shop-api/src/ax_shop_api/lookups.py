@@ -43,11 +43,12 @@ from ax_contracts.data_access.shop_seller_prices import (
     ShopSellerPricesResult,
 )
 from ax_contracts.data_access.shop_seller_profile import ShopSellerProfile, ShopSellerProfileQuery
-from ax_shop_api.db import Db
+from ax_shop_api.db import TENANT_ID, Db
 from ax_shop_api.service import ShopError
 
 BUCKET = timedelta(minutes=5)
 LISTING_WINDOW = timedelta(hours=24)  # 판매자 정보의 "최근 등록" 구간
+MAX_ATTRIBUTION_DAYS = 31  # 유입 출처 주문 조회의 기간 상한
 MAX_POINTS = 2016  # 5분 버킷 7일치. 넘으면 잘라서 `truncated`로 알린다
 
 # 주문 금액·쿠폰 지표는 `orders`에서 계산한다. 접수 시각(created_at)이 속한 버킷에 센다.
@@ -129,6 +130,85 @@ class Lookups:
         return ShopFailedOrdersResult(
             orders=orders, collected_at=self.now(), truncated=len(rows) > query.limit
         )
+
+    def attributed_orders(
+        self,
+        since: datetime,
+        until: datetime,
+        campaign_id: str | None = None,
+        source: str | None = None,
+        limit: int = 500,
+    ) -> dict[str, Any]:
+        """유입 출처(`src_*`)가 하나라도 있는 주문. 접수 시각이 `since` 이상 `until` 미만이다.
+
+        쿠폰 귀속 집계(`coupon_used_units`)와 같은 기준으로 취소된 주문과 전액 환불된 주문은 뺀다.
+        결제 대기·실패 주문은 `status`로 구분해 읽는 쪽이 고른다. `buyer_id`·결제 수단 같은
+        개인 식별값은 돌려주지 않는다. 기간은 `MAX_ATTRIBUTION_DAYS`일까지다.
+        """
+        if until <= since:
+            raise ShopError("INVALID_RANGE", "to는 from보다 뒤여야 한다")
+        if until - since > timedelta(days=MAX_ATTRIBUTION_DAYS):
+            raise ShopError(
+                "RANGE_TOO_LONG", f"기간은 {MAX_ATTRIBUTION_DAYS}일을 넘을 수 없다", 400
+            )
+        sql = (
+            "SELECT o.order_id, o.created_at, o.total_amount, o.status, o.src_source, "
+            "o.src_medium, o.src_campaign FROM orders o "
+            "WHERE o.tenant_id = ? AND o.created_at >= ? AND o.created_at < ? "
+            "AND (o.src_source IS NOT NULL OR o.src_medium IS NOT NULL "
+            "OR o.src_campaign IS NOT NULL) AND o.status != 'cancelled' "
+            "AND NOT (o.total_amount > 0 AND COALESCE((SELECT SUM(r.amount) FROM refunds r "
+            "WHERE r.order_id = o.order_id), 0) >= o.total_amount)"
+        )
+        args: list[Any] = [TENANT_ID, _iso(since), _iso(until)]
+        if campaign_id:
+            sql += " AND o.src_campaign = ?"
+            args.append(campaign_id)
+        if source:
+            sql += " AND o.src_source = ?"
+            args.append(source)
+        sql += " ORDER BY o.created_at, o.order_id LIMIT ?"
+        args.append(limit + 1)  # 하나 더 읽어 잘림을 안다
+        with self.db.tx() as conn:
+            rows = conn.execute(sql, args).fetchall()
+            truncated = len(rows) > limit
+            rows = rows[:limit]
+            items: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            ids = [r["order_id"] for r in rows]
+            for start in range(0, len(ids), 500):
+                chunk = ids[start : start + 500]
+                marks = ",".join("?" * len(chunk))
+                for item in conn.execute(
+                    f"SELECT order_id, product_id, qty, unit_price FROM order_items "
+                    f"WHERE order_id IN ({marks}) ORDER BY rowid",
+                    chunk,
+                ):
+                    items[item["order_id"]].append(
+                        {
+                            "product_id": item["product_id"],
+                            "qty": item["qty"],
+                            "unit_price": item["unit_price"],
+                        }
+                    )
+        orders = [
+            {
+                "order_id": r["order_id"],
+                "created_at": r["created_at"],
+                "total_amount": r["total_amount"],
+                "status": r["status"],
+                "items": items[r["order_id"]],
+                "src_source": r["src_source"],
+                "src_medium": r["src_medium"],
+                "src_campaign": r["src_campaign"],
+            }
+            for r in rows
+        ]
+        return {
+            "orders": orders,
+            "order_count": len(orders),
+            "total_amount": sum(o["total_amount"] for o in orders),
+            "truncated": truncated,
+        }
 
     def metric_series(self, query: ShopMetricSeriesQuery) -> ShopMetricSeriesResult:
         if query.to <= query.from_:

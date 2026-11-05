@@ -1,23 +1,49 @@
 import { useState, type ReactNode } from "react";
-import type { DataFact } from "@/lib/data";
+import type { DataFact, VideoLink } from "@/lib/data";
 
 // 2단계 인사이트 v2 카드 틀 (v2 시안 ② 보드). 인사이트 카드와 기회 가설 카드가 같이 쓴다.
 // 왼쪽: 판정 칩 하나 → 제목 → 한 문장(서버 line) → 숫자 타일(서버 값이 있는 것만) → 연결 상품 → "근거 전체 보기" 접힘 하나
-// 오른쪽: 근거 숏츠 썸네일 최대 3개. 썸네일 주소는 계약에 없어 회색 자리이고, 누르면 서버가 준 근거 주소(YouTube)로 간다
+// 오른쪽: 근거 숏츠 썸네일 최대 3개. 서버 thumbnail_url 이미지(세로 비율, cover). 값이 없거나 깨지면 회색 자리.
+//   누르면 서버 video_url(없으면 근거 주소) 새 탭
 // 문단 글은 카드당 한 문장(line)만. 나머지 이유·한계·예시는 접힘 안
 
 export type Verdict = { label: string; tone: string };
 export type Tile = { label: string; value: string; note?: string | null };
+/** 근거 숏츠 하나: 누르면 갈 주소, 썸네일 주소(없으면 null) */
+export type Thumb = { url: string; thumb: string | null };
 
-/** 근거 주소 중 YouTube 영상만, 최대 3개 (서버 evidence.links·facts[].link 순서, 같은 주소는 한 번) */
-export function shortsLinks(links: (string | null | undefined)[]): string[] {
-  const out: string[] = [];
-  for (const l of links) {
-    if (!l || out.includes(l)) continue;
-    if (/^https:\/\/(www\.)?(youtube\.com\/(watch|shorts)|youtu\.be\/)/.test(l)) out.push(l);
-    if (out.length === 3) break;
-  }
+const YOUTUBE = /^https:\/\/(www\.|m\.)?(youtube\.com\/(watch|shorts)|youtu\.be\/)/;
+const YOUTUBE_ID = /(?:[?&]v=|\/shorts\/|youtu\.be\/)([A-Za-z0-9_-]{6,})/;
+const idOf = (url: string) => YOUTUBE_ID.exec(url)?.[1] ?? url;
+
+/** 근거 숏츠 최대 3개. 서버 video_links(주소·썸네일)를 먼저, 이어서 근거 주소(evidence.links·facts[].link) 중 YouTube 영상.
+ *  같은 영상(id)은 한 번만이고, 썸네일이 있는 쪽을 쓴다 */
+export function shortsThumbs(videoLinks: VideoLink[] | undefined, links: (string | null | undefined)[]): Thumb[] {
+  const out: Thumb[] = [];
+  const seen = new Set<string>();
+  const push = (url: string | null | undefined, thumb: string | null, id?: string) => {
+    if (!url || !YOUTUBE.test(url) || out.length === 3) return;
+    const key = id ?? idOf(url);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ url, thumb });
+  };
+  for (const v of videoLinks ?? []) push(v.video_url, v.thumbnail_url, v.video_id);
+  for (const l of links) push(l, null);
   return out;
+}
+
+/** 세로 썸네일. 서버 thumbnail_url이 있으면 이미지(object-fit: cover), 없거나 깨지면 회색 자리 그대로 */
+export function ThumbImage({ src, alt, className = "", children }: { src: string | null | undefined; alt: string; className?: string; children?: ReactNode }) {
+  const [broken, setBroken] = useState<string | null>(null);
+  const ok = !!src && /^https:\/\//.test(src) && broken !== src;
+  return (
+    <span className={`relative block aspect-[9/16] overflow-hidden rounded-xl bg-ink-100 ${className}`}>
+      {ok && <img src={src} alt={alt} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setBroken(src)}
+        className="absolute inset-0 h-full w-full object-cover" />}
+      {children}
+    </span>
+  );
 }
 
 /** 브리프 facts 중 이 항목(about = insight_id·opportunity_id)이거나 fact_ids가 가리키는 숫자의 근거 주소 */
@@ -35,7 +61,7 @@ export function ShortsCard({ verdict, kicker, title, line, lineNote, tiles, prod
   lineNote?: string | null;
   tiles: Tile[];
   products: { id: string; name: string }[];
-  thumbs: string[];
+  thumbs: Thumb[];
   fold: ReactNode;
   highlight?: boolean;
 }) {
@@ -80,11 +106,13 @@ export function ShortsCard({ verdict, kicker, title, line, lineNote, tiles, prod
         <div className="flex min-w-0 flex-[1_1_16rem] flex-col gap-2">
           <p className="text-xs font-semibold text-ink-500">근거 숏츠</p>
           <ul className="grid grid-cols-3 gap-2">
-            {thumbs.map((url, k) => (
-              <li key={url}>
-                {/* 썸네일 자리 (계약에 썸네일 주소가 아직 없다) */}
-                <a href={url} target="_blank" rel="noreferrer noopener" aria-label={`근거 숏츠 ${k + 1} · YouTube에서 보기`}
-                  className="block aspect-[9/16] rounded-xl bg-ink-100 transition hover:bg-ink-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500" />
+            {thumbs.map((t, k) => (
+              <li key={t.url}>
+                {/* 근거 영상 제목은 응답(VideoLink)에 없어 alt는 순번 */}
+                <a href={t.url} target="_blank" rel="noreferrer noopener" aria-label={`근거 숏츠 ${k + 1} · YouTube에서 보기`}
+                  className="block rounded-xl transition hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
+                  <ThumbImage src={t.thumb} alt={`근거 숏츠 ${k + 1}`} />
+                </a>
               </li>
             ))}
           </ul>
