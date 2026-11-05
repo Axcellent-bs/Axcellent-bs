@@ -42,7 +42,19 @@ def test_card_validates(card: AgentCard) -> None:
         "data_sources",
         "domain_subtopics",
         "source_plan",
+        "video_explorer",
     }
+
+
+def test_video_explorer_is_a_read_for_screen_marketing_planning_and_orchestrator(
+    card: AgentCard,
+) -> None:
+    skill = next(s for s in card.skills if s.id == "video_explorer")
+    assert skill.grade == "read"
+    assert set(skill.allowed_requesters) == {"dashboard-api", "marketing", "planning",
+                                             "orchestrator"}  # fmt: skip
+    assert skill.input_schema.endswith("#VideoExplorerRequest")
+    assert skill.output_schema.endswith("#VideoExplorerOutput")
 
 
 def test_all_skills_are_read(card: AgentCard) -> None:

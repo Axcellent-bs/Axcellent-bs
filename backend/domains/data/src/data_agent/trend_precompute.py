@@ -25,10 +25,13 @@ from data_agent.stage_timing import recording
 # 지금 인기의 배지·키가 화면과 같다
 # 브리프는 마지막: 하루 캐시라 그날 처음 한 번만 만들고(26~38초, LLM·쇼핑인사이트),
 # 그 뒤엔 저장분을 읽는다
+# 영상 탐색(video_explorer)은 숏츠 통계 뒤(숏츠 표본·분류 저장분을 쓴다), 첫 번째에만 계산한다
+# (자기 저장분을 다시 계산하는 것이라 두 번째는 같은 결과)
 SKILLS = (
     "trend_scan", "trend_candidates", "trend_popular", "youtube_velocity", "shorts_stats",
-    "trend_insight_brief",
+    "video_explorer", "trend_insight_brief",
 )  # fmt: skip
+ONCE = frozenset({"video_explorer"})
 CONTEXT_ID = "ctx_trend_precompute"
 PASSES = 2
 
@@ -54,16 +57,20 @@ async def precompute(emit: Callable[[str], None] | None = None) -> list[str]:
         "youtube_velocity": handlers.youtube_velocity,
         "shorts_stats": handlers.shorts_stats,
         "trend_insight_brief": handlers.trend_insight_brief,
+        "video_explorer": handlers.video_explorer,
     }
     for n in range(1, PASSES + 1):
         for skill in SKILLS:
+            if skill in ONCE and n > 1:
+                continue
+            last = n == PASSES or skill in ONCE
             try:
                 with recording(f"{skill}@precompute{n}", say):
                     result = await run[skill](_request(skill))
-                if n == PASSES and result.status != TaskStatus.COMPLETED:
+                if last and result.status != TaskStatus.COMPLETED:
                     problems.append(f"{skill}: {result.outcome or result.status}")
             except Exception as error:  # noqa: BLE001 - 미리 계산 실패가 수집을 막지 않게
-                if n == PASSES:
+                if last:
                     problems.append(f"{skill}: {type(error).__name__}")
                 print(f"[precompute] {skill} 실패 ({type(error).__name__})", file=sys.stderr)
     return problems

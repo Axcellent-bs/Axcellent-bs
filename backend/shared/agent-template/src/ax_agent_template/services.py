@@ -177,6 +177,7 @@ SERVICES: tuple[Service, ...] = (
             "data_sources",
             "domain_subtopics",
             "source_plan",
+            "video_explorer",
         ),
         "데이터 분석",
     ),

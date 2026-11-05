@@ -539,6 +539,70 @@ async def shorts_stats(request: AgentRequest) -> AgentResult:
     return await _stored(request, "shorts_stats", data.model_dump(mode="json"), compute)
 
 
+async def video_explorer(request: AgentRequest) -> AgentResult:
+    """영상 탐색 (카테고리 × 기간 × 길이). 수집기가 미리 계산하고 요청은 읽기·정렬만 (grade read).
+
+    수집기(`trend_precompute`)의 요청이거나 저장분이 없을 때만 계산한다.
+    """
+    from ax_contracts.schemas.data import VideoExplorerRequest
+    from data_agent.skills import video_explorer as ve
+    from data_agent.trend_precompute import CONTEXT_ID as PRECOMPUTE
+
+    data = _parse(request, VideoExplorerRequest)
+    if isinstance(data, AgentResult):
+        return data
+    env = os.environ
+    store = ve.ExplorerStore(env.get(ve.DB_ENV) or ve.DEFAULT_DB)
+    try:
+        payload = store.result()
+        if payload is None or request.meta.context_id == PRECOMPUTE:
+            payload = await ve.compute(
+                env, youtube=get_youtube(), llm=get_llm(), store=store,
+                cache=get_category_cache(), terms=_explorer_terms(request.meta.context_id),
+                context_id=request.meta.context_id,
+            )  # fmt: skip
+        out, evidence = ve.view(payload, data, env=env, store=store)
+    finally:
+        store.close()
+    return _result(request, TaskStatus.COMPLETED, outcome=out.status,
+                   output=out.model_dump(mode="json"), evidence=evidence)  # fmt: skip
+
+
+def _explorer_terms(context_id: str | None):  # noqa: ANN202
+    """영상 탐색 보충 검색어: 칸마다 지금 인기 주제 이름 앞 N개(사람 이름 제외).
+
+    씨앗 칸(교육·책)은 도메인 프로필 씨앗.
+    """
+    from data_agent.skills import video_explorer as ve
+
+    async def provide() -> dict[str, str]:
+        config = ve.load_config(os.environ)
+        out: dict[str, str] = {}
+        try:
+            pop = await popular(
+                TrendPopularRequest(), get_llm(), env=os.environ, context_id=context_id,
+                category_cache=get_category_cache(), youtube=get_youtube(),
+            )  # fmt: skip
+            for cat in config.categories:
+                names = [i.keyword for i in sorted(pop.output.items, key=lambda i: i.rank)
+                         if i.topic_category == cat and i.is_person is not True]  # fmt: skip
+                if names:
+                    out[cat] = "|".join(names[: config.query_topics])
+        except Exception:  # 지금 인기를 못 읽으면 그 칸은 YouTube 카테고리로 찾는다
+            pass
+        if config.seed_categories:
+            try:
+                seeds, _ = await _profile_seeds(context_id)()
+            except Exception:
+                seeds = []
+            for cat in config.seed_categories:
+                if seeds:
+                    out[cat] = "|".join(seeds[: config.query_topics])
+        return out
+
+    return provide
+
+
 async def promo_concepts(request: AgentRequest) -> AgentResult:
     """홍보 영상 기획안 3~5개 (하루 캐시, 기획안 기록만 남김). 상태를 바꾸지 않는다(grade read)."""
     data = _parse(request, PromoConceptsRequest)
@@ -1034,7 +1098,7 @@ async def campaign_effect(request: AgentRequest) -> AgentResult:
 # 트렌드 감지 탭이 부르는 skill은 단계별 시간(sqlite·외부·LLM·계산 ms)을 로그 한 줄로 남긴다
 TIMED_SKILLS = frozenset({
     "trend_popular", "trend_scan", "trend_candidates", "youtube_velocity", "shorts_stats",
-    "promo_concepts", "trend_insight_brief",
+    "promo_concepts", "trend_insight_brief", "video_explorer",
 })  # fmt: skip
 
 HANDLERS = {
@@ -1061,5 +1125,6 @@ HANDLERS = {
     "data_sources": data_sources,
     "domain_subtopics": domain_subtopics,
     "source_plan": source_plan,
+    "video_explorer": video_explorer,
 }
 HANDLERS = {k: timed_handler(k, v) if k in TIMED_SKILLS else v for k, v in HANDLERS.items()}
