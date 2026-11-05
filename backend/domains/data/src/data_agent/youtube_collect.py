@@ -349,6 +349,7 @@ async def run(every: int | None, env: Mapping[str, str], precompute_after: bool 
             result = await collect_once(connector, store, config,
                                         in_use=in_use_ids(env))  # fmt: skip
             print(result.line(), flush=True)
+            await measure_videos(connector, env)  # 게시한 영상 성과: 지금 잴 시점만 (실패해도 계속)
             if result.saved and precompute_after:
                 # 새 스냅샷 직후 감지 탭 결과를 미리 계산해 저장 (화면은 읽기만).
                 # 실패해도 수집은 계속
@@ -360,6 +361,32 @@ async def run(every: int | None, env: Mapping[str, str], precompute_after: bool 
             await asyncio.sleep(every)
     finally:
         store.close()
+
+
+async def measure_videos(
+    connector: YouTubeConnector, env: Mapping[str, str], now: datetime | None = None
+) -> int:
+    """video_performance 추적 목록에서 지금 잴 시점(1시간·1일·3일·7일)이 있는 영상만 잰다.
+
+    같은 YouTube 커넥터(장부·하루 상한)로 영상 50개당 1단위. 잰 값 수. 문제는 한 줄 남기고 계속.
+    """
+    from data_agent.skills import video_performance as vp
+
+    path = env.get(vp.DB_ENV) or vp.DEFAULT_DB
+    if str(path) != ":memory:" and not Path(path).is_file():
+        return 0  # 등록된 영상이 없다
+    store = vp.VideoStore(path)
+    try:
+        saved, problems = await vp.measure_due(store, connector, now)
+    except Exception as error:  # 성과 측정이 실패해도 수집은 계속
+        print(f"[video] 성과 측정 실패 ({type(error).__name__})", flush=True)
+        return 0
+    finally:
+        store.close()
+    if saved or problems:
+        print(f"[video] 성과 시점 값 {saved}개" + (f", {'; '.join(problems)}" if problems else ""),
+              flush=True)  # fmt: skip
+    return saved
 
 
 def lock_path(env: Mapping[str, str]) -> Path:

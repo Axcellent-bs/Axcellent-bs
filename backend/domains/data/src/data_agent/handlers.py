@@ -1170,6 +1170,31 @@ async def campaign_effect(request: AgentRequest) -> AgentResult:
     )
 
 
+async def video_performance(request: AgentRequest) -> AgentResult:
+    """게시한 영상 성과 (1시간·1일·3일·7일). 영상 등록(추적 목록)과 시점 측정만, grade read."""
+    from ax_contracts.schemas.data import ShortsStatsOutput, VideoPerformanceRequest
+    from data_agent.skills.video_performance import video_performance as run
+
+    data = _parse(request, VideoPerformanceRequest)
+    if isinstance(data, AgentResult):
+        return data
+    stored = RESPONSES.latest("shorts_stats")  # 같은 숏츠 중앙값: 숏츠 통계 저장분
+    shorts = None
+    if isinstance(stored, list) and len(stored) > 1 and isinstance(stored[1], dict):
+        try:
+            shorts = ShortsStatsOutput.model_validate(stored[1])
+        except ValidationError:
+            shorts = None
+    result = await run(data, get_youtube(), env=os.environ, shorts=shorts)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=result.output.status,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
+
+
 # 트렌드 감지 탭이 부르는 skill은 단계별 시간(sqlite·외부·LLM·계산 ms)을 로그 한 줄로 남긴다
 TIMED_SKILLS = frozenset({
     "trend_popular", "trend_scan", "trend_candidates", "youtube_velocity", "shorts_stats",
@@ -1194,6 +1219,7 @@ HANDLERS = {
     "shorts_stats": shorts_stats,
     "answer_planning_question": answer_planning_question,
     "campaign_effect": campaign_effect,
+    "video_performance": video_performance,
     "trend_age": trend_age,
     "trend_insight_brief": trend_insight_brief,
     "domain_profile": domain_profile,
