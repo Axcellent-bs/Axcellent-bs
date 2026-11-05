@@ -35,7 +35,11 @@ def test_agent_card_format_and_served() -> None:
     skills = {s.id: s for s in card.skills}
     intake = {"create_ticket", "receive_planning_answer"}  # 요청 접수 (#174)·되묻기 답
     proposals = {"receive_insight", "receive_campaign_update"}  # 기획 제안 (11/4)
-    assert set(skills) == intake | proposals | {"receive_dev_result", "request_release_check"}
+    chat = {f"planning_chat_{x}" for x in ("send", "list", "get", "close")}  # 직접 대화 (11/5)
+    rest = {"receive_dev_result", "request_release_check"}
+    assert set(skills) == intake | proposals | chat | rest
+    for name in chat:
+        assert skills[name].allowed_requesters == ["dashboard-api"], name
     assert skills["request_release_check"].allowed_requesters == ["dev"]
     assert skills["create_ticket"].grade == "A"
     assert skills["create_ticket"].allowed_requesters == [
@@ -47,7 +51,8 @@ def test_agent_card_format_and_served() -> None:
         "orchestrator",
     ]
     assert skills["receive_dev_result"].allowed_requesters == ["dev"]
-    assert all(skills[k].grade == "A" for k in skills)
+    reads = {"planning_chat_list", "planning_chat_get"}  # 대화 목록·읽기만 read
+    assert all(skills[k].grade == ("read" if k in reads else "A") for k in skills)
     for skill in card.skills:
         assert skill.priority == "required"
         assert skill.verifier is None

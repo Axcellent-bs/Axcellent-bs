@@ -52,6 +52,7 @@ from ax_dashboard_api import (
     mock_data,
     mock_handover,
     mock_hr,
+    planning_chat,
     relay,
     support_chat,
     support_client,
@@ -882,6 +883,45 @@ async def marketing_chat_close(thread_id: str, request: Request) -> dict:
     out = await marketing_client.chat_call(
         "close_chat_thread", {"who": who, "thread_id": thread_id}
     )
+    return ok(out["thread"])
+
+
+# ---- 기획 AI 직접 대화 (→ planning `planning_chat_*`). 마케팅 AI 대화와 같은 모양이다
+class PlanningChatSendBody(BaseModel):
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=2000)
+
+
+@router.get("/planning-chat")
+async def planning_chat_list(request: Request) -> dict:
+    """기획 AI 대화 목록. 사람 토큰이 필요하다. 남의 대화는 원문 없이 요약만(`restricted`)."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await planning_chat.call("planning_chat_list", {"who": who})
+    return ok(out.get("threads", []))
+
+
+@router.get("/planning-chat/{thread_id}")
+async def planning_chat_get(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await planning_chat.call("planning_chat_get", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+@router.post("/planning-chat")
+async def planning_chat_send(body: PlanningChatSendBody, request: Request) -> dict:
+    """말을 저장하고 `status: answering`으로 바로 돌려준다. 답은 GET으로 가져간다."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = {"who": who, "message": body.message} | (
+        {"thread_id": body.thread_id} if body.thread_id else {}
+    )
+    out = await planning_chat.call("planning_chat_send", payload)
+    return ok(out["thread"])
+
+
+@router.post("/planning-chat/{thread_id}/close")
+async def planning_chat_close(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await planning_chat.call("planning_chat_close", {"who": who, "thread_id": thread_id})
     return ok(out["thread"])
 
 
