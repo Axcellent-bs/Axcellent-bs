@@ -712,10 +712,16 @@ def cand_aliases(env: Mapping[str, str]) -> dict[str, tuple[str, ...]]:
 
 
 def cand_same_targets(env: Mapping[str, str]) -> dict[str, tuple[str, ...]]:
-    """회사 같은 대상 표 `[candidates.same_target]` (예시 아이디어 유행 ↔ 브리프 주제 맞추기)."""
+    """같은 대상 표 (예시 아이디어 유행 ↔ 브리프 주제 맞추기): 최근 급상승 후보 계산의 자동 묶기
+    (#383, 같은 영상 동시 출현 + 일별 값 상관) + 사람 덮어쓰기 `[candidates.same_target]`."""
     from data_agent.skills import trend_candidates as cand_mod
 
-    return dict(cand_mod.load_config(env).same_targets)
+    stored = RESPONSES.latest("trend_candidates")  # [outcome, output, evidence]
+    output = stored[1] if isinstance(stored, list) and len(stored) > 1 else None
+    out = cand_mod.auto_same_targets(output if isinstance(output, dict) else None)
+    for head, names in cand_mod.load_config(env).same_targets.items():
+        out[head] = tuple(dict.fromkeys([*out.get(head, ()), *names]))
+    return out
 
 
 async def trend_insight_brief(request: AgentRequest) -> AgentResult:
