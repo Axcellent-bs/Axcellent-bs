@@ -86,6 +86,10 @@ class ExplorerConfig:
     seed_categories: tuple[str, ...] = ("교육·책",)
     # 숏 칸이 모자라면 7일 이전 숏츠 표본으로 채울 카테고리 (화면 "7일 이전")
     backfill_categories: tuple[str, ...] = ("교육·책",)
+    # 카테고리별 인기 차트 (videos.list chart=mostPopular, regionCode KR, videoCategoryId별 1단위):
+    # 화면 카테고리 → 대응하는 YouTube 카테고리 id. 받은 영상은 우리 분류기로 다시 분류한다
+    chart: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    chart_minutes: int = 50  # 이보다 최근에 받았으면 다시 받지 않는다 (수집기 1시간마다)
     refresh_hours: float = 12.0  # 다시 읽은 지 이 시간이 지난 영상만 다시 읽는다
     language: str = "ko"
 
@@ -102,6 +106,14 @@ def load_config(env: Mapping[str, str]) -> ExplorerConfig:
         for k in dataclasses.fields(ExplorerConfig):
             default = getattr(base, k.name)
             value = raw.get(k.name, default)
+            if k.name == "chart":  # 표: 화면 카테고리 → YouTube 카테고리 id 하나 또는 여러 개
+                table = value if isinstance(value, dict) else dict(default)
+                values[k.name] = tuple(
+                    (str(cat), tuple(str(x) for x in (ids if isinstance(ids, list | tuple)
+                                                      else [ids])))
+                    for cat, ids in table.items()
+                )  # fmt: skip
+                continue
             values[k.name] = (
                 tuple(str(x) for x in value) if isinstance(default, tuple) else type(default)(value)
             )
@@ -420,6 +432,7 @@ async def compute(
     # 1. 영상 풀: 스냅샷 + 다른 저장분(다시 읽기)
     items = snapshot_pool(yt_db, since)
     queries.append(f"youtube snapshots published>={since.date()} videos={len(items)}")
+    await _charts(youtube, store, config, now, today, queries, limits)
     await _refresh(env, youtube, store, config, items, now, today, queries, limits)
     for vid, (stat, source, at) in store.videos().items():
         if vid not in items or items[vid].at < at:
@@ -433,7 +446,7 @@ async def compute(
     # 3. 모자란 칸만 보충 검색: 7일 검색을 먼저 하고 그 결과까지 분류한 뒤, 남은 횟수로 1일 보충.
     #    검색 결과는 분류 상한과 무관하게 분류한다 (검색 1번에 50개 이하)
     names = _Terms(terms)
-    for window in ("7d", "1d"):
+    for window in ("7d", "3d", "1d"):
         await _search(env, youtube, store, config, pool, now, today, max_seconds, names, queries,
                       window)  # fmt: skip
         added = _korean_recent(
@@ -505,6 +518,42 @@ class _Terms:
             except Exception:  # 검색어를 못 만들면 YouTube 카테고리로만 찾는다
                 self.names = {}
         return self.names.get(cat) or None
+
+
+async def _charts(
+    youtube: Any,
+    store: ExplorerStore,
+    config: ExplorerConfig,
+    now: datetime,
+    today: date,
+    queries: list[str],
+    limits: list[str],
+) -> None:
+    """카테고리별 인기 차트 (`chart` 표의 YouTube 카테고리마다 1단위). 최근에 받았으면 건너뜀.
+
+    받은 영상은 `chart_cat` 출처로 남기고, 칸은 우리 분류기 결과로 정한다(YouTube 카테고리는 고르는
+    데만 씀). 실패한 카테고리(그 카테고리 차트가 없음 등)는 이유만 남긴다.
+    """
+    ids = list(dict.fromkeys(i for _, cats in config.chart for i in cats))
+    if not ids or youtube is None or not hasattr(youtube, "popular_category"):
+        return
+    last = [at for _, src, at in store.videos().values() if src == "chart_cat"]
+    if last and now - max(last) < timedelta(minutes=config.chart_minutes):
+        return
+    got: list[VideoStat] = []
+    failed: list[str] = []
+    for cid in ids:
+        try:
+            got += await youtube.popular_category(cid)
+        except ConnectorUnavailable as error:
+            failed.append(f"{cid} [{error.code}]")
+            if error.code == "QUOTA_EXCEEDED":
+                break
+        store.add_calls(today, "chart", 1)
+    store.save_videos(now, got, "chart_cat")
+    queries.append(f"youtube chart=mostPopular categories={len(ids)} videos={len(got)}")
+    if failed:
+        limits.append("카테고리 인기 차트를 받지 못함: " + ", ".join(failed))
 
 
 async def _refresh(
@@ -636,7 +685,7 @@ async def _search(
 
     done = store.searched(today)
     fill = dict(load_popular(env).fill_youtube_categories)
-    days = 7 if window == "7d" else 1
+    days = PERIOD_DAYS[window]
     cells = [(cat, length) for cat in config.categories for length in LENGTHS]
     for cat, length in cells:
         key = (cat, length, window)
@@ -843,7 +892,7 @@ def _shortages(videos: Sequence[ExplorerVideo], config: ExplorerConfig, now: dat
                 if n >= config.min_per_cell:
                     continue
                 why = f"이 기간 한국 영상 {n}개"
-                window = "1d" if period == "1d" else "7d"
+                window = period  # 칸 기간과 같은 구간의 보충 검색 (1d·3d·7d)
                 s = searched.get((cat, length, window))
                 if s is not None and s.status == "skipped":
                     why += f" ({s.reason})"
