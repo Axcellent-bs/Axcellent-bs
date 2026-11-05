@@ -42,6 +42,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, ValidationError
 
 from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
+from data_agent.llm_budget import no_llm
 
 TOPIC_CATEGORIES: tuple[str, ...] = (
     "뉴스·사건",
@@ -332,8 +333,8 @@ async def _ask(
 
     try:
         result = await llm.structured(_PROMPT, _Categories, untrusted=data, context_id=context_id)
-    except LLMNotConfiguredError:
-        return every(UNKNOWN, "LLM 설정이 없어 분류하지 못함")
+    except LLMNotConfiguredError as error:
+        return every(UNKNOWN, f"{no_llm(error)} 분류하지 못함")
     except (LLMFormatError, ValidationError):
         return every(UNKNOWN, "LLM 답 형식이 맞지 않아 분류하지 못함")
     except Exception as error:  # 호출 실패(HTTP 오류·시간 초과 등)
@@ -459,8 +460,8 @@ async def _ask_videos(
         result = await llm.structured(
             _VIDEO_PROMPT, _Categories, untrusted=data, context_id=context_id
         )
-    except LLMNotConfiguredError:
-        return every("LLM 설정이 없어 분류하지 못함")
+    except LLMNotConfiguredError as error:
+        return every(f"{no_llm(error)} 분류하지 못함")
     except (LLMFormatError, ValidationError):
         return every("LLM 답 형식이 맞지 않아 분류하지 못함")
     except Exception as error:  # 호출 실패(HTTP 오류·시간 초과 등)

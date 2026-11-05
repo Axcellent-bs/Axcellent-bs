@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel, ValidationError
 
 from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
+from data_agent.llm_budget import no_llm
 
 MEME_FORMATS: tuple[str, ...] = ("챌린지", "패러디·밈", "리액션", "하이라이트", "정보·리뷰", "기타")
 UNKNOWN = "unknown"
@@ -67,8 +68,8 @@ async def classify(
     data = {"소재": keyword} | {f"제목{i}": t for i, t in enumerate(used, start=1)}
     try:
         result = await llm.structured(_PROMPT, _Meme, untrusted=data, context_id=context_id)
-    except LLMNotConfiguredError:
-        return MemeResult(UNKNOWN, "LLM 설정이 없어 분류하지 못함", len(used))
+    except LLMNotConfiguredError as error:
+        return MemeResult(UNKNOWN, f"{no_llm(error)} 분류하지 못함", len(used))
     except (LLMFormatError, ValidationError):
         return MemeResult(UNKNOWN, "LLM 답 형식이 맞지 않아 분류하지 못함", len(used))
     except Exception as error:  # 호출 실패(HTTP 오류·시간 초과 등)

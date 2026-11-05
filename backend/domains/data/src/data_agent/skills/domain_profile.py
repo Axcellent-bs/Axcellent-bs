@@ -42,6 +42,7 @@ from ax_contracts.schemas.data import (
     ProfileEvidence,
     SeedKeyword,
 )
+from data_agent.llm_budget import no_llm
 from data_agent.skills.code_version import source_hash
 from data_agent.skills.product_link import CatalogRead
 
@@ -617,8 +618,8 @@ async def make_profile(
             got = await llm.structured(
                 PROMPT, _Profile, untrusted=data_block(tenant, catalog), context_id=context_id
             )
-        except LLMNotConfiguredError:
-            out.reason = "LLM 설정이 없어 프로필을 만들지 못함"
+        except LLMNotConfiguredError as error:
+            out.reason = f"{no_llm(error)} 프로필을 만들지 못함"
         except (LLMFormatError, ValidationError):
             out.reason = "LLM 답 형식이 맞지 않아 프로필을 만들지 못함"
         except Exception as error:  # 호출 실패

@@ -75,6 +75,7 @@ from ax_contracts.schemas.data import (
 )
 from data_agent.connectors import CatalogProduct
 from data_agent.explain import _bad_numbers
+from data_agent.llm_budget import no_llm
 from data_agent.skills.ad_material import NEVER_TREND
 from data_agent.skills.product_link import read_catalog
 from data_agent.skills.shorts_stats import shorts_stats
@@ -752,8 +753,8 @@ async def _generate(
     prompt = _prompt(config, next(iter(products.values()), None))
     try:
         answer = await llm.structured(prompt, _Concepts, untrusted=data, context_id=context_id)
-    except LLMNotConfiguredError:
-        return _llm_failed(out, f"LLM 설정이 없어 {DRAFT}를 만들지 않음", queries, now)
+    except LLMNotConfiguredError as error:
+        return _llm_failed(out, f"{no_llm(error)} {DRAFT}를 만들지 않음", queries, now)
     except (LLMFormatError, ValidationError):
         return _llm_failed(out, f"LLM 답 형식이 맞지 않아 {DRAFT}를 만들지 않음", queries, now)
     except Exception as error:  # 호출 실패

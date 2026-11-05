@@ -40,7 +40,13 @@ from pydantic import BaseModel, ValidationError
 
 from ax_agent_template.client import call_agent
 from ax_agent_template.llm import LLMClient
-from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
+from ax_contracts.schemas import (
+    TENANT_ID_DEFAULT,
+    AgentRequest,
+    AgentResult,
+    Evidence,
+    TaskStatus,
+)
 from ax_contracts.schemas.data import (
     AccuracyReportInput,
     ActivityReportInput,
@@ -63,6 +69,7 @@ from ax_contracts.schemas.data import (
     YouTubeVelocityRequest,
 )
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
+from data_agent import llm_budget
 from data_agent.clients.fact_sources import notices_at
 from data_agent.clients.log_client import get_log_source
 from data_agent.clients.shop_client import (
@@ -103,15 +110,28 @@ from data_agent.stage_timing import note_cache, stage, timed_handler
 
 
 class TimedLLMClient(LLMClient):
-    """LLM 응답 대기 시간을 요청 단계 기록(`stage_timing`)의 llm에 더한다. 동작은 그대로."""
+    """data LLM: 하루 상한(`llm_budget`)을 먼저 보고, 대기 시간을 단계 기록에 더한다.
+
+    상한에 닿으면 부르지 않고 `LLMDailyCapReached`(= LLMNotConfiguredError)를 올린다.
+    HTTP 요청 한 번마다 남기는 사용량(`record_usage`)을 하루 셈에도 더한다.
+    """
 
     async def structured(self, *args: Any, **kwargs: Any) -> Any:
+        llm_budget.BUDGET.check()
         with stage("llm"):
             return await super().structured(*args, **kwargs)
 
     async def embed(self, texts: list[str], context_id: str | None = None) -> list[list[float]]:
+        llm_budget.BUDGET.check()
         with stage("llm"):
             return await super().embed(texts, context_id)
+
+    def record_usage(
+        self, context_id: str | None, model: str | None, input_tokens: int, output_tokens: int,
+        success: bool, tenant_id: str = TENANT_ID_DEFAULT,
+    ) -> None:  # fmt: skip
+        super().record_usage(context_id, model, input_tokens, output_tokens, success, tenant_id)
+        llm_budget.BUDGET.add(1, input_tokens + output_tokens)
 
 
 def get_llm() -> LLMClient:

@@ -54,6 +54,7 @@ from ax_contracts.schemas.data import (
     VideoLink,
 )
 from data_agent.explain import _bad_numbers
+from data_agent.llm_budget import no_llm
 from data_agent.skills.ad_material import AdRules, judge, load_rules
 from data_agent.skills.brief_facts import insight_facts
 from data_agent.skills.code_version import source_hash
@@ -503,8 +504,8 @@ async def write_lines(
         try:
             got = await llm.structured(LINE_PROMPT, _Lines, untrusted=data, context_id=context_id)
             answer = {x.keyword.strip(): x.line.strip() for x in got.items}
-        except LLMNotConfiguredError:
-            why = "LLM 설정이 없어 고정 문장"
+        except LLMNotConfiguredError as error:
+            why = f"{no_llm(error)} 고정 문장"
         except (LLMFormatError, ValidationError):
             why = "LLM 답 형식이 맞지 않아 고정 문장"
         except Exception as error:  # 호출 실패

@@ -30,6 +30,7 @@ from ax_contracts.schemas.data import (
     CollectorStatus,
     DataSource,
     DataSourcesOutput,
+    LlmDailyUsage,
     SourceDataKind,
     SourceStatus,
 )
@@ -256,7 +257,21 @@ async def list_sources(
         f" 키 필요 {', '.join(need) or '없음'}"
     )
     out.collectors = collector_states(env, now)  # 요약 문장은 그대로 (출처 목록만 센다)
+    out.llm_usage = llm_usage_today(env)
     return SourcesResult(out, Evidence(queries=queries, data_summary=out.summary, collected_at=now))
+
+
+def llm_usage_today(env: Mapping[str, str]) -> LlmDailyUsage:
+    """data 부서 LLM 오늘 사용량/상한 (`llm_budget`, 서버·수집기가 같은 기록)."""
+    from data_agent.llm_budget import BUDGET
+
+    now = BUDGET.usage(env)
+    return LlmDailyUsage(
+        day=now.day, calls=now.calls, call_cap=now.call_cap, tokens=now.tokens,
+        token_cap=now.token_cap, reached=now.reached,
+        note=f"LLM 하루 상한: {now.line()}. 오늘은 LLM을 부르지 않고 고정 문장·unknown"
+        if now.reached else None,
+    )  # fmt: skip
 
 
 # ---------------------------------------------------------------- 스냅샷 수집기 상태
