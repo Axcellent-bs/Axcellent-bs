@@ -13,10 +13,14 @@ import { Requests } from '@/components/planning/requests'
 import { Specs } from '@/components/planning/specs'
 
 const SECTIONS: Record<string, Section> = {
-  home: { label: '홈', icon: 'dashboard', tabs: [] }, // 확인할 것 + 두 흐름 개수
-  requests: { label: '요청', icon: 'bell', tabs: [] }, // 들어온·진행 중·해결·후속은 화면 안 필터 (requests/<필터>)
-  proposals: { label: '기획 제안', icon: 'report', tabs: [] }, // 데이터분석·마케팅 인사이트 → 제안 → 마케팅
-  work: { label: '문서·기획서', icon: 'plan', tabs: [{ id: 'specs', label: '문서·기획서' }] },
+  home: { label: '홈', icon: 'dashboard', tabs: [], head: { // 확인할 것 + 두 흐름 개수
+    title: '기획 홈', desc: '받은 요청·제안과 기획 AI가 하고 있는 일을 한눈에 봅니다.' } },
+  requests: { label: '요청', icon: 'bell', tabs: [], head: { // 들어온·진행 중·해결·후속은 화면 안 필터 (requests/<필터>)
+    title: '요청', desc: '다른 부서에서 들어온 요청을 기획서로 정리하고, 결과를 요청한 부서에 알립니다.' } },
+  proposals: { label: '기획 제안', icon: 'report', tabs: [], head: { // 데이터분석·마케팅 인사이트 → 제안 → 마케팅
+    title: '기획 제안', desc: '데이터분석 인사이트로 만든 제안을 기획안으로 만들거나 폐기하고, 마케팅에 넘긴 뒤 성과를 확인합니다.' } },
+  work: { label: '문서·기획서', icon: 'plan', tabs: [{ id: 'specs', label: '문서·기획서' }], head: {
+    title: '문서·기획서', desc: '작성한 문서와 기획서를 모아 보고, 노션 문서를 가져옵니다.' } },
   agents: { label: '에이전트 대화', icon: 'send', tabs: [], hidden: true }, // 메뉴에서 뺌 (주소로만 연다)
   talk: { label: '소통', icon: 'send', tabs: [], hidden: true },
   projects: { label: '프로젝트', icon: 'menu', tabs: [], hidden: true }, // 요청 줄 제목을 누르면 요청 1건을 깊게

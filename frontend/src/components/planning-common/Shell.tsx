@@ -14,7 +14,8 @@ import { convoHref, go, setPlanningNav, toPath } from '@/components/planning-com
 
 type IconName = NonNullable<NavItem['icon']>
 // hidden: 메뉴에는 안 보이지만 주소로는 열린다 (소통은 부서 공용 탭으로 뺄 때까지 숨김)
-export interface Section { label: string; icon: IconName; tabs: { id: string; label: string }[]; hidden?: boolean }
+/** `head`가 있으면 그 메뉴에서는 화면 제목·설명을 그것으로 바꾼다 (없으면 페이지 기본 제목·설명) */
+export interface Section { label: string; icon: IconName; tabs: { id: string; label: string }[]; hidden?: boolean; head?: { title: string; desc: string } }
 
 export type PlanningPart = 'planning' | 'dev'
 
@@ -167,8 +168,8 @@ function Frame({ part, title, desc, home, sections, tabCount, tools, actions, ch
     <div className="main">
       <header className="pl-head">
         <div>
-          <h1 className="pl-title">{title}</h1>
-          <p className="pl-desc">{desc}</p>
+          <h1 className="pl-title">{(known && sections[section].head?.title) || title}</h1>
+          <p className="pl-desc">{(known && sections[section].head?.desc) || desc}</p>
         </div>
         <div className="pl-tools">
           {(
