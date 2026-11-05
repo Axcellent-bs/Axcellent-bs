@@ -1,18 +1,21 @@
 import { useState, type ReactNode } from "react";
 import { TONE } from "@/components/finance/bits";
-import type { CautionType, DataFact, ShortsFit, VideoLink } from "@/lib/data";
+import type { CautionType, DataFact, EvidenceHighlight, EvidenceHighlightSource, ShortsFit, VideoLink } from "@/lib/data";
 
 // 2단계 인사이트 v2 카드 틀 (v2 시안 ② 보드). 인사이트 카드와 기회 가설 카드가 같이 쓴다.
-// 왼쪽: 판정 칩 하나 → 제목 → 한 문장(서버 line) → 숫자 타일(서버 값이 있는 것만) → 연결 상품 → "근거 전체 보기" 접힘 하나
-// 오른쪽: 근거 숏츠 썸네일 최대 3개. 서버 thumbnail_url 이미지(세로 비율, cover). 값이 없거나 깨지면 회색 자리.
-//   누르면 서버 video_url(없으면 근거 주소) 새 탭
+// 왼쪽: 판정 칩 하나 → 제목 → 한 문장(서버 line) → 근거 요약(서버 evidence_highlights, #710) → 숫자 타일(서버 값이 있는 것만)
+//   → 연결 상품 → "근거 전체 보기" 접힘 하나
+// 근거 요약 한 줄: 출처 배지 · 배수 크게(평소 값이 없으면 지금 값) · "평소 vs 지금" 가로 막대 2개(회색 평소, 파랑 지금) · 서버 문장 한 줄.
+//   서버가 평소 값을 주지 않은 근거는 막대 없이 숫자와 문장만. 막대 길이는 둘 중 큰 값에 대한 비율(그리기용)
+// 오른쪽: 근거 숏츠 썸네일 최대 3개(서버 evidence_shorts 먼저). 서버 thumbnail_url 이미지(세로 비율, cover) · 제목 · 조회수 · 광고 칩.
+//   값이 없거나 깨지면 회색 자리. 누르면 서버 video_url(없으면 근거 주소) 새 탭
 // 문단 글은 카드당 한 문장(line)만. 나머지 이유·한계·예시는 접힘 안
 // 판정 칩·숫자 타일(verdictOf·shortsTiles)은 서버 칸 그대로: shorts_fit · target_views_reference · top_age_band (#678). 화면에서 고르지 않는다
 
 export type Verdict = { label: string; tone: string; title?: string | null };
 export type Tile = { label: string; value: string; note?: string | null };
-/** 근거 숏츠 하나: 누르면 갈 주소, 썸네일 주소(없으면 null), 서버 광고 재료 칸(VideoLink에 있을 때만) */
-export type Thumb = { url: string; thumb: string | null; caution?: CautionFields };
+/** 근거 숏츠 하나: 누르면 갈 주소, 썸네일 주소(없으면 null), 서버 제목·조회수, 서버 광고 재료 칸(VideoLink에 있을 때만) */
+export type Thumb = { url: string; thumb: string | null; title?: string | null; views?: number | null; caution?: CautionFields };
 
 const fmt = (v: number, digits = 0) => v.toLocaleString("ko-KR", { maximumFractionDigits: digits });
 const COMPACT = new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 });
@@ -52,12 +55,12 @@ const idOf = (url: string) => YOUTUBE_ID.exec(url)?.[1] ?? url;
 export function shortsThumbs(videoLinks: VideoLink[] | undefined, links: (string | null | undefined)[]): Thumb[] {
   const out: Thumb[] = [];
   const seen = new Set<string>();
-  const push = (url: string | null | undefined, thumb: string | null, id?: string, caution?: CautionFields) => {
+  const push = (url: string | null | undefined, thumb: string | null, id?: string, v?: VideoLink) => {
     if (!url || !YOUTUBE.test(url) || out.length === 3) return;
     const key = id ?? idOf(url);
     if (seen.has(key)) return;
     seen.add(key);
-    out.push({ url, thumb, caution });
+    out.push({ url, thumb, title: v?.title ?? null, views: v?.views ?? null, caution: v });
   };
   for (const v of videoLinks ?? []) push(v.video_url, v.thumbnail_url, v.video_id, v);
   for (const l of links) push(l, null);
@@ -97,19 +100,97 @@ export function CautionChip({ v, className = "text-xs" }: { v: CautionFields; cl
   return null;
 }
 
-/** 브리프 facts 중 이 항목(about = insight_id·opportunity_id)이거나 fact_ids가 가리키는 숫자의 근거 주소 */
-export function factLinks(facts: DataFact[] | undefined, about: string, ids: string[] | undefined): (string | null)[] {
+/** 브리프 facts 중 이 항목(about = insight_id·opportunity_id)이거나 fact_ids가 가리키는 숫자 */
+export function cardFacts(facts: DataFact[] | undefined, about: string, ids: string[] | undefined): DataFact[] {
   const want = new Set(ids ?? []);
-  return (facts ?? []).filter((f) => f.about === about || want.has(f.fact_id)).map((f) => f.link);
+  return (facts ?? []).filter((f) => f.about === about || want.has(f.fact_id));
 }
 
-export function ShortsCard({ verdict, kicker, title, line, lineNote, tiles, products, thumbs, fold, highlight }: {
+/** 그 숫자들의 근거 주소 */
+export function factLinks(facts: DataFact[] | undefined, about: string, ids: string[] | undefined): (string | null)[] {
+  return cardFacts(facts, about, ids).map((f) => f.link);
+}
+
+const SOURCE_LABEL: Record<EvidenceHighlightSource, string> = {
+  naver_search: "네이버 검색", naver_shopping: "네이버 쇼핑", youtube: "YouTube", google: "Google",
+};
+const withUnit = (v: number, unit: string) => `${fmt(v, 2)}${unit === "배" ? "배" : unit ? ` ${unit}` : ""}`;
+
+/** 근거 요약 (서버 evidence_highlights 그대로, 최대 3개) */
+export function Highlights({ list }: { list: EvidenceHighlight[] | undefined }) {
+  if (!list?.length) return null;
+  return (
+    <ul className="space-y-2.5" aria-label="근거 요약">
+      {list.map((h, k) => {
+        const base = typeof h.baseline_value === "number" ? h.baseline_value : null;
+        const max = Math.max(h.value, base ?? 0);
+        const width = (v: number) => `${max > 0 ? Math.max(2, (v / max) * 100) : 0}%`;
+        return (
+          <li key={h.fact_id ?? `${h.source}-${h.label}-${k}`} className="grid gap-x-4 gap-y-1.5 rounded-xl bg-ink-50 p-3 sm:grid-cols-[8.5rem_minmax(0,1fr)]">
+            <div className="flex flex-col items-start gap-1">
+              <span className="chip bg-surface text-[11px] font-semibold text-ink-700 ring-1 ring-ink-100">{SOURCE_LABEL[h.source]}</span>
+              <span className="text-2xl font-bold tabular-nums text-ink-900" title={h.label}>
+                {typeof h.ratio === "number" ? `${fmt(h.ratio, 2)}배` : withUnit(h.value, h.unit)}
+              </span>
+            </div>
+            <div className="flex min-w-0 flex-col justify-center gap-1.5">
+              {base !== null && (
+                <div className="space-y-1" aria-label={`평소 ${withUnit(base, h.unit)}, 지금 ${withUnit(h.value, h.unit)}`}>
+                  {[{ name: "평소", v: base, bar: "bg-ink-300" }, { name: "지금", v: h.value, bar: "bg-brand-500" }].map((r) => (
+                    <div key={r.name} className="grid grid-cols-[2.25rem_minmax(0,1fr)_auto] items-center gap-2 text-xs">
+                      <span className="text-ink-500">{r.name}</span>
+                      <span className="h-2.5 rounded-full bg-surface" aria-hidden>
+                        <span className={`block h-2.5 rounded-full ${r.bar}`} style={{ width: width(r.v) }} />
+                      </span>
+                      <span className="tabular-nums text-ink-700">{withUnit(r.v, h.unit)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-sm text-ink-900">{h.sentence}</p>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** 접힘 안 근거 숫자 목록 (서버 facts 그대로: 이름 · 값 · 출처 · 기간 · 표본 · 주소) */
+export function FactList({ facts }: { facts: DataFact[] }) {
+  if (facts.length === 0) return null;
+  return (
+    <ul className="space-y-1 text-xs text-ink-700">
+      {facts.map((f) => (
+        <li key={f.fact_id}>
+          <span className="font-semibold text-ink-900">{f.label}</span> {withUnit(f.value, f.unit)}
+          {[f.source, f.period, typeof f.sample === "number" ? `표본 ${fmt(f.sample)}` : null].filter(Boolean).map((x) => <span key={x} className="text-ink-500"> · {x}</span>)}
+          {f.link && <> · <a href={f.link} target="_blank" rel="noreferrer noopener" className="text-brand-700 hover:underline">주소</a></>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** 접힘 안 "근거 숫자 N개": 이 카드 facts 중 근거 요약에 나오지 않은 나머지 전부 */
+export function RestFacts({ facts, about, ids, shown }: {
+  facts: DataFact[] | undefined; about: string; ids: string[] | undefined; shown: EvidenceHighlight[] | undefined;
+}) {
+  const used = new Set((shown ?? []).map((h) => h.fact_id).filter(Boolean));
+  const rest = cardFacts(facts, about, ids).filter((f) => !used.has(f.fact_id));
+  if (rest.length === 0) return null;
+  return <FoldRow label={`근거 숫자 ${rest.length}개`}><FactList facts={rest} /></FoldRow>;
+}
+
+export function ShortsCard({ verdict, kicker, title, line, lineNote, highlights, tiles, products, thumbs, fold, highlight }: {
   verdict: Verdict | null;
   kicker?: string | null;
   title: string;
   line: string | null;
   /** 한 문장 옆 작은 표시 (예: 고정 문장) */
   lineNote?: string | null;
+  /** 근거 요약 (서버 evidence_highlights) */
+  highlights?: EvidenceHighlight[];
   tiles: Tile[];
   products: { id: string; name: string }[];
   thumbs: Thumb[];
@@ -131,6 +212,7 @@ export function ShortsCard({ verdict, kicker, title, line, lineNote, tiles, prod
             {line}{lineNote && <span className="ml-1.5 text-xs text-ink-500">({lineNote})</span>}
           </p>
         )}
+        <Highlights list={highlights} />
         {tiles.length > 0 && (
           <dl className="grid gap-2.5 sm:grid-cols-3">
             {tiles.map((t) => (
@@ -158,11 +240,13 @@ export function ShortsCard({ verdict, kicker, title, line, lineNote, tiles, prod
           <p className="text-xs font-semibold text-ink-500">근거 숏츠</p>
           <ul className="grid grid-cols-3 gap-2">
             {thumbs.map((t, k) => (
-              <li key={t.url}>
-                {/* 근거 영상 제목은 응답(VideoLink)에 없어 alt는 순번 */}
-                <a href={t.url} target="_blank" rel="noreferrer noopener" aria-label={`근거 숏츠 ${k + 1} · YouTube에서 보기`}
+              <li key={t.url} className="min-w-0">
+                {/* 제목이 없는 근거 영상(예전 응답·근거 주소)은 alt가 순번 */}
+                <a href={t.url} target="_blank" rel="noreferrer noopener" aria-label={`${t.title ?? `근거 숏츠 ${k + 1}`} · YouTube에서 보기`}
                   className="block rounded-xl transition hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
-                  <ThumbImage src={t.thumb} alt={`근거 숏츠 ${k + 1}`} />
+                  <ThumbImage src={t.thumb} alt={t.title ?? `근거 숏츠 ${k + 1}`} />
+                  {t.title && <span className="mt-1 line-clamp-2 text-[11px] font-semibold leading-snug text-ink-900">{t.title}</span>}
+                  {typeof t.views === "number" && <span className="block text-xs font-bold tabular-nums text-ink-700" title={`조회 ${fmt(t.views)}회`}>조회 {COMPACT.format(t.views)}</span>}
                 </a>
                 {t.caution && <span className="mt-1 block empty:hidden"><CautionChip v={t.caution} className="text-[11px]" /></span>}
               </li>

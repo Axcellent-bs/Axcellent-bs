@@ -872,6 +872,26 @@ export interface InsightProduct {
   reason: string;
   season: string | null;
 }
+/** 근거 요약 하나 (계약 EvidenceHighlight, #710). 서버 코드가 facts 중 센 것을 최대 3개 고른다(LLM 안 씀).
+ *  평소 값이 없는 근거(Google 순위·숏츠 조회수 등)는 baseline_value·ratio가 null이고 값만 있다 */
+export type EvidenceHighlightSource = "naver_search" | "naver_shopping" | "youtube" | "google";
+export interface EvidenceHighlight {
+  source: EvidenceHighlightSource;
+  label: string;
+  /** 지금 값 */
+  value: number;
+  unit: string;
+  /** 평소 값 (기준선) */
+  baseline_value: number | null;
+  /** 지금 ÷ 평소 */
+  ratio: number | null;
+  period: string | null;
+  sample: number | null;
+  /** 템플릿 문장 하나 */
+  sentence: string;
+  fact_id: string | null;
+}
+
 export interface TrendInsight {
   insight_id: string;
   rank: number;
@@ -932,6 +952,9 @@ export interface TrendInsight {
   top_age_band?: string | null;
   top_age_band_ratio?: number | null;
   top_age_band_reason?: string | null;
+  /** 근거 요약 최대 3개·근거 숏츠 최대 3개 (#710, 예전 응답은 없다) */
+  evidence_highlights?: EvidenceHighlight[];
+  evidence_shorts?: VideoLink[];
 }
 export interface TrendInsightBriefOutput {
   status: "known" | "unknown";
@@ -1199,6 +1222,9 @@ export interface DomainOpportunity {
   top_age_band?: string | null;
   top_age_band_ratio?: number | null;
   top_age_band_reason?: string | null;
+  /** 근거 요약 최대 3개·근거 숏츠 최대 3개 (#710, 예전 응답은 없다) */
+  evidence_highlights?: EvidenceHighlight[];
+  evidence_shorts?: VideoLink[];
 }
 
 // ---------------------------------------------------------------- 숏츠 통계 (shorts_stats)
