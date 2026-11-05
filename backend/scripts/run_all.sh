@@ -144,6 +144,8 @@ export PLANNING_STATE_DIR="$PWD/$DATA"
 export DATA_TODAY_BOARD_DB="$PWD/$DATA/today_board.db"
 # marketing: 기획에서 받은 기획안을 파일에 남겨 다시 켜도 목록이 유지되게
 export MARKETING_BRIEFS_DB="$PWD/$DATA/marketing_briefs.db"
+# marketing: publish_sns 게시 대기 건(승인 대기·게시 중)을 파일에 남겨 다시 켜도 이어지게
+export MARKETING_SNS_PENDING_DB="$PWD/$DATA/marketing_sns_pending.db"
 # 기획·개발은 실제 시각으로 (기본은 10-22에서 1분씩 가는 시연 시계라 총괄이 사건 구간으로 묻는
 # 관련 PR 찾기·교차검증 최근 7일 장애가 실제 머지를 못 잡는다)
 export PLANNING_CLOCK=real

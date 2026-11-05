@@ -58,6 +58,7 @@ from marketing_agent.schemas import (
     PublishNoticeInput,
 )
 from marketing_agent.sns import SnsStore, check_sns_post, draft_sns_post
+from marketing_agent.sns_publish.publisher import publish_sns
 
 SOURCE = "marketing"
 BANNER_TEXT_MAX = 200  # shop-api 배너 문구 상한
@@ -572,6 +573,10 @@ async def check_sns_post_skill(request: AgentRequest) -> AgentResult:
     return await check_sns_post(request, STATE.sns)
 
 
+async def publish_sns_skill(request: AgentRequest) -> AgentResult:
+    return await publish_sns(request, STATE.sns)
+
+
 HANDLERS = {
     "draft_notice": draft_notice,
     "publish_notice": publish_notice,
@@ -586,5 +591,6 @@ HANDLERS = {
     "record_campaign_result": record_campaign_result,
     "draft_sns_post": draft_sns_post_skill,
     "check_sns_post": check_sns_post_skill,
+    "publish_sns": publish_sns_skill,
     "cancel_campaign": cancel_campaign,
 }

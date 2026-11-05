@@ -15,6 +15,7 @@
 | `issue_coupon` | A |
 | `draft_sns_post` | read |
 | `check_sns_post` | read |
+| `publish_sns` | C |
 
 - 실행: `uv run --package ax-svc-coupon uvicorn svc_coupon.main:app --port 8103` (backend/ 에서, 목 모드 `AGENT_TEMPLATE_MOCK=1`)
 - 다른 에이전트가 `marketing`로 불러도 위 skill이면 이 서비스로 온다 (`route_target`).
