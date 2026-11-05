@@ -25,6 +25,9 @@
   `traffic.weekday_levels`(월~일 7개)가 있으면 그 요일 배수를 주문 수준에 곱한다(주말 효과).
   둘 다 없으면 예전과 똑같이 만든다.
   쿠폰 결정은 따로 씨앗을 둔 난수로 해서, `campaign`이 없는 시나리오의 데이터는 예전과 같다.
+- 상품 하나만 늘림(`product_boost`, campaign_effect 상품 기준 평가 `eval/campaign_products/`):
+  구간 안 5분 칸마다 그 상품 주문을 더 넣어 그 상품의 기대 주문 수를 `factor`배로 만든다.
+  따로 씨앗을 둔 난수라 `product_boost`가 없는 시나리오의 데이터는 예전과 같다.
 
 정답(실패 주문 수·금액·영향 고객, 이상 시작 시각)은 data 에이전트 코드가 아니라 여기서 만든
 결제 기록에서 바로 센다(`Truth`).
@@ -144,6 +147,10 @@ class World:
             elif path.endswith("/orders"):  # shop-api `GET /api/shop/orders` (캠페인 매출 평가)
                 data = service.Shop(self.db).list_orders(
                     params.get("buyer_id"), params.get("since"), params.get("until")
+                )
+            elif path.endswith("/products"):  # shop-api `GET /api/shop/products` (상품 기준 평가)
+                data = service.Shop(self.db).list_products(
+                    params.get("seller_id"), params.get("category_code")
                 )
             else:
                 return httpx.Response(404, json={"error": {"code": "NOT_FOUND"}})
@@ -408,6 +415,10 @@ def generate(spec: dict[str, Any]) -> World:
     # - `payment_gap.days_ago`: 그 날(0 = 구간, k = k일 전 같은 시간대)의 주문은 만들고
     #   결제하지 않는다 (결제 기록 공백: shop-api는 결제 대기 주문으로 남긴다)
     basket = int((spec.get("basket") or {}).get("qty_factor", 1))
+    # 상품 기준 평가 (`eval/campaign_products/`, 없으면 예전과 똑같이 만든다):
+    # `product_boost` = 구간 안에서 그 상품만 `factor`배가 되게 그 상품 주문을 더 넣는다
+    boost = spec.get("product_boost")
+    prng = random.Random(f"{spec['id']}:product")  # 기존 난수 순서를 바꾸지 않게 따로
     gap_days = [int(d) for d in (spec.get("payment_gap") or {}).get("days_ago", [])]
     gap_ranges = [
         (window_from - timedelta(days=d), window_to - timedelta(days=d)) for d in gap_days
@@ -432,14 +443,11 @@ def generate(spec: dict[str, Any]) -> World:
             if in_window:
                 level *= sale_factor
             count = _poisson(rng, level)  # 실제 주문처럼 5분마다 포아송으로 흔들린다
-            for i in range(count):
-                moment = slot + timedelta(seconds=int((i + 0.5) * 300 / max(count, 1)))
+            for moment, buyer, lines in _slot_orders(slot, count, rng, level, in_window, boost,
+                                                     prng):  # fmt: skip
                 now[0] = moment
                 clock_seconds[0] = moment.timestamp()
                 order_no += 1
-                buyer = seed_buyer_id(rng.randint(1, BUYER_COUNT))
-                product = PRODUCTS[rng.randrange(len(PRODUCTS))][0]
-                lines = [(product, rng.choice((1, 1, 1, 2)))]
                 if in_window and basket > 1:  # 난수를 더 쓰지 않는다 (다른 케이스와 같은 순서)
                     lines = [(p, q * basket) for p, q in lines]
                 if any(s <= moment < e for s, e in gap_ranges):
@@ -503,6 +511,36 @@ def generate(spec: dict[str, Any]) -> World:
         if campaign and int(campaign.get("used_after", 0)) > 0:
             _use_after_window(world, shop, coupons, int(campaign["used_after"]), now, clock_seconds)
     return world
+
+
+def _slot_orders(
+    slot: datetime,
+    count: int,
+    rng: random.Random,
+    level: float,
+    in_window: bool,
+    boost: dict[str, Any] | None,
+    prng: random.Random,
+) -> Iterator[tuple[datetime, str, list[tuple[str, int]]]]:
+    """5분 칸 하나의 주문 (시각, 구매자, 품목).
+
+    평소 주문은 예전과 같은 순서로 `rng`에서 하나씩 뽑는다(뽑는 때도 같다: 주문 하나를 처리한 뒤
+    다음을 뽑는다). `boost`가 있으면 구간 안 칸에 그 상품 주문을 평균
+    `level ÷ 상품 수 × (factor − 1)`만큼 더 넣는다(따로 둔 난수 `prng`).
+    그 상품의 기대 주문 수가 `factor`배가 된다.
+    """
+    for i in range(count):
+        moment = slot + timedelta(seconds=int((i + 0.5) * 300 / max(count, 1)))
+        buyer = seed_buyer_id(rng.randint(1, BUYER_COUNT))
+        product = PRODUCTS[rng.randrange(len(PRODUCTS))][0]
+        yield moment, buyer, [(product, rng.choice((1, 1, 1, 2)))]
+    if not (boost and in_window and float(boost["factor"]) > 1):
+        return
+    extra = _poisson(prng, level / len(PRODUCTS) * (float(boost["factor"]) - 1))
+    for i in range(extra):
+        moment = slot + timedelta(seconds=int((i + 0.25) * 300 / max(extra, 1)))
+        buyer = seed_buyer_id(prng.randint(1, BUYER_COUNT))
+        yield moment, buyer, [(str(boost["product_id"]), prng.choice((1, 1, 1, 2)))]
 
 
 def _issue_campaign_coupons(

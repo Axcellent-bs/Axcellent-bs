@@ -1,0 +1,92 @@
+{
+ "id": "store_drop_half_2h_19h",
+ "kind": "down",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-10-14T19:00:00Z",
+  "window_to": "2026-10-14T21:00:00Z",
+  "products": [
+   "prd_0002"
+  ]
+ },
+ "spec": {
+  "id": "store_drop_half_2h_19h",
+  "window": {
+   "from": "2026-10-14T19:00:00Z",
+   "to": "2026-10-14T21:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "order_drop",
+   "factor": 0.5,
+   "from": "2026-10-14T19:00:00Z",
+   "to": "2026-10-14T21:00:00Z"
+  }
+ },
+ "expected": {
+  "products": {
+   "matched": [
+    "prd_0002"
+   ],
+   "unmatched": [],
+   "status": "known",
+   "lift": 0.5,
+   "orders": "down",
+   "units": "down",
+   "gross": "down"
+  }
+ },
+ "counted": {
+  "actual": {
+   "orders": 9,
+   "units": 11,
+   "gross": 264000
+  },
+  "past_days": {
+   "1": {
+    "orders": 23,
+    "units": 30,
+    "gross": 720000
+   },
+   "2": {
+    "orders": 17,
+    "units": 18,
+    "gross": 432000
+   },
+   "3": {
+    "orders": 20,
+    "units": 28,
+    "gross": 672000
+   },
+   "4": {
+    "orders": 17,
+    "units": 23,
+    "gross": 552000
+   },
+   "5": {
+    "orders": 20,
+    "units": 23,
+    "gross": 552000
+   },
+   "6": {
+    "orders": 17,
+    "units": 22,
+    "gross": 528000
+   },
+   "7": {
+    "orders": 30,
+    "units": 39,
+    "gross": 936000
+   }
+  },
+  "orders_baseline": 20.5714,
+  "orders_excess": -11.5714,
+  "units_baseline": 26.1429,
+  "units_excess": -15.1429,
+  "gross_baseline": 627428.5714,
+  "gross_excess": -363428.5714
+ },
+ "memo": "가게 전체 주문 절반 → 요청 상품도 줄어듦"
+}

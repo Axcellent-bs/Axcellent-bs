@@ -1,0 +1,100 @@
+{
+ "id": "holdout_2026110501_00",
+ "kind": "up",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-10-10T17:00:00Z",
+  "window_to": "2026-10-10T19:00:00Z",
+  "products": [
+   "데이터 분석 실전"
+  ]
+ },
+ "spec": {
+  "id": "holdout_2026110501_00",
+  "window": {
+   "from": "2026-10-10T17:00:00Z",
+   "to": "2026-10-10T19:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "none"
+  },
+  "product_boost": {
+   "product_id": "prd_0002",
+   "factor": 2.0
+  }
+ },
+ "expected": {
+  "products": {
+   "matched": [
+    "prd_0002"
+   ],
+   "unmatched": [],
+   "status": "known",
+   "lift": 2.0,
+   "orders": "up",
+   "units": "up",
+   "gross": "up"
+  }
+ },
+ "counted": {
+  "actual": {
+   "orders": 43,
+   "units": 57,
+   "gross": 1368000
+  },
+  "past_days": {
+   "1": {
+    "orders": 20,
+    "units": 24,
+    "gross": 576000
+   },
+   "2": {
+    "orders": 27,
+    "units": 34,
+    "gross": 816000
+   },
+   "3": {
+    "orders": 12,
+    "units": 15,
+    "gross": 360000
+   },
+   "4": {
+    "orders": 21,
+    "units": 29,
+    "gross": 696000
+   },
+   "5": {
+    "orders": 17,
+    "units": 21,
+    "gross": 504000
+   },
+   "6": {
+    "orders": 13,
+    "units": 17,
+    "gross": 408000
+   },
+   "7": {
+    "orders": 15,
+    "units": 19,
+    "gross": 456000
+   }
+  },
+  "orders_baseline": 17.8571,
+  "orders_excess": 25.1429,
+  "units_baseline": 22.7143,
+  "units_excess": 34.2857,
+  "gross_baseline": 545142.8571,
+  "gross_excess": 822857.1429
+ },
+ "memo": "",
+ "holdout": {
+  "seed": 2026110501,
+  "factor": 1.0,
+  "boost": 2.0,
+  "boosted_is_asked": true,
+  "gaps": []
+ }
+}

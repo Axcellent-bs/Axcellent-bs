@@ -1,0 +1,96 @@
+{
+ "id": "partly_unmatched_x2_2h_14h",
+ "kind": "up",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-10-14T14:00:00Z",
+  "window_to": "2026-10-14T16:00:00Z",
+  "products": [
+   "prd_0004",
+   "없는 상품"
+  ]
+ },
+ "spec": {
+  "id": "partly_unmatched_x2_2h_14h",
+  "window": {
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T16:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "none"
+  },
+  "product_boost": {
+   "product_id": "prd_0004",
+   "factor": 2.0
+  }
+ },
+ "expected": {
+  "products": {
+   "matched": [
+    "prd_0004"
+   ],
+   "unmatched": [
+    "없는 상품"
+   ],
+   "status": "known",
+   "lift": 2.0,
+   "orders": "up",
+   "units": "up",
+   "gross": "up"
+  }
+ },
+ "counted": {
+  "actual": {
+   "orders": 28,
+   "units": 37,
+   "gross": 277500
+  },
+  "past_days": {
+   "1": {
+    "orders": 20,
+    "units": 25,
+    "gross": 187500
+   },
+   "2": {
+    "orders": 18,
+    "units": 24,
+    "gross": 180000
+   },
+   "3": {
+    "orders": 17,
+    "units": 20,
+    "gross": 150000
+   },
+   "4": {
+    "orders": 22,
+    "units": 27,
+    "gross": 202500
+   },
+   "5": {
+    "orders": 21,
+    "units": 28,
+    "gross": 210000
+   },
+   "6": {
+    "orders": 22,
+    "units": 30,
+    "gross": 225000
+   },
+   "7": {
+    "orders": 18,
+    "units": 23,
+    "gross": 172500
+   }
+  },
+  "orders_baseline": 19.7143,
+  "orders_excess": 8.2857,
+  "units_baseline": 25.2857,
+  "units_excess": 11.7143,
+  "gross_baseline": 189642.8571,
+  "gross_excess": 87857.1429
+ },
+ "memo": "맞은 상품으로만 계산하고 못 맞춘 값은 따로 돌려줌"
+}
