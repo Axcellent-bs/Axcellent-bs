@@ -137,6 +137,7 @@ from planning_agent import (
 from planning_agent.ask_requester import Asker, missing_info_question
 from planning_agent.domain.docs import gather_blocks, next_block_id
 from planning_agent.domain.proposal_actions import PROPOSAL_ORIGIN, ProposalMixin
+from planning_agent.domain.returned_actions import RETURNED_DEV, ReturnedMixin, return_ctx
 from planning_agent.spec_writer import SpecWriter, default_writer
 
 SAMPLE_TICKETS = {
@@ -265,7 +266,7 @@ class EditSpecParams(SpecParams):
     extra: dict[str, str] | None = None
 
 
-class PlanningService(ProposalMixin, PlanningCore):
+class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
     """기획 서비스 (planning, 8101): 요청 접수·기획서 초안·확정·인사 연동·되묻기·소통·문서.
 
     확정한 기획서는 개발 서비스로 넘기고(start_dev) 결과를 돌려받는다(receive_dev_result)."""
@@ -285,6 +286,7 @@ class PlanningService(ProposalMixin, PlanningCore):
         "resume_request": ("_resume_request", RequestParams),
         "send_release_order": ("_send_release_order_action", ReleaseOrderParams),
         **ProposalMixin.PROPOSAL_ACTIONS,
+        **ReturnedMixin.RETURNED_ACTIONS,
     }
 
     def __init__(
@@ -371,6 +373,20 @@ class PlanningService(ProposalMixin, PlanningCore):
                 tasks=[dump(t) for t in s.tasks if t.spec == sp.id],
             )
             out.append((START_DEV, req.context_id, inp, start_dev_key(req.context_id, sp.id)))
+        # 사람이 "개발로 다시 보내기"를 고른 기획서: keep_dev를 켜서 다시 보낸다 (새 멱등 키)
+        queue = self._redev_queue()
+        while queue:
+            spec_id, task_id = queue.pop(0)
+            sp = next((x for x in s.specs if x.id == spec_id), None)
+            req = self._request_of_spec(s, sp) if sp else None
+            if sp is None or req is None:
+                continue
+            rctx = return_ctx(task_id)
+            n = sum(1 for a in s.activity if a.context_id == rctx and a.point == RETURNED_DEV)
+            mine = [dump(t) for t in s.tasks if t.spec == sp.id]
+            inp = DevHandoffInput(request=dump(req), spec=dump(sp), tasks=mine)
+            key = f"{start_dev_key(req.context_id, sp.id)}:keep:{task_id}:{n}"
+            out.append((START_DEV, req.context_id, inp, key))
         return out
 
     async def _inbound(self, s: State, kind: str) -> ActionResult | None:
@@ -1460,8 +1476,10 @@ class PlanningService(ProposalMixin, PlanningCore):
                 {"request": request_id, "request_state": request_state},
                 [x for x in (spec_id, request_id) if x],
             )
+            before = {x.id: x.coding.status if x.coding else None for x in s.tasks}
             self._upsert(s.tasks, got_tasks)
             self._upsert(s.prs, got_prs)
+            self._log_new_returns(s, before, ctx)
             if req:
                 req.state = request_state  # type: ignore[assignment]
             if got_policy is not None:
@@ -2426,7 +2444,9 @@ class PlanningService(ProposalMixin, PlanningCore):
         sp = next((x for x in s.specs if x.id == spec), None)
         if sp is None:
             return None
-        if sp.status == "확정" or sp.handed_to_dev or any(t.spec == spec for t in s.tasks):
+        mine = [t for t in s.tasks if t.spec == spec]
+        dropped = bool(mine) and all(t.discarded for t in mine)  # 작업을 모두 폐기함 (dev)
+        if sp.status == "확정" or (mine and not dropped) or (sp.handed_to_dev and not dropped):
             raise ActionError("SPEC_IN_USE", f"{spec}는 확정됐거나 작업이 나가 지울 수 없습니다")
         s.specs = [x for x in s.specs if x.id != spec]
         req = next((r for r in s.requests if r.id == sp.request), None)

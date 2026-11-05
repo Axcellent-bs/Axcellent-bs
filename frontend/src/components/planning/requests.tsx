@@ -6,9 +6,11 @@ import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, RELATION_LABEL, TODAY, byRelation, type Action, type Request, type State as S } from '@/lib/planningData'
 import { useAllReleaseChecks, type ReleaseCheck } from '@/lib/planning'
 import { Tag } from '@/components/planning-common/parts'
+import { Pager, usePage } from '@/components/planning-common/pager'
 import { Ref, convoHref, isFollowUp, nextOf, prName, prSlug, reviewHref, reviewOf, toPath } from '@/components/planning-common/links'
 import { gather } from '@/components/planning/projects'
 import { releaseState } from '@/components/planning/specs'
+import { devDiscarded, pendingReturns } from '@/lib/returned'
 
 // ---------------------------------------------------------------- 필터
 // 들어온 경로를 짧은 말로 (시스템 이름은 화면에 내지 않는다)
@@ -134,8 +136,15 @@ export function pipeline(s: S, r: Request, rc?: ReleaseCheck): PipeRow {
     }
   }
 
-  // 사람이 중단한 요청: 지금 단계에서 멈춤 (맨 위로)
-  if (r.paused && !finished) {
+  // 개발이 "코드 변경이 아니다"로 돌려보냄 → 사람 확인 (요청 상세에서 마케팅·개발로 다시·닫기)
+  const sp = g.spec
+  if (sp && pendingReturns(s, sp.id).length && !finished) {
+    wait = { label: '개발이 돌려보냄', rank: 0 }
+    c2.warn = true; c2.meta = '개발이 돌려보냄'; c2.href = toPath(`projects/${r.id}`)
+  } else if (sp && devDiscarded(s, sp.id)) c2.meta = '개발에서 폐기함'
+
+  // 사람이 중단한 요청: 지금 단계에서 멈춤 (맨 위로). 개발에서 폐기했으면 기다릴 것이 없다
+  if (r.paused && !finished && !(sp && devDiscarded(s, sp.id))) {
     wait = { label: '사람이 중단', rank: -1 }
     const c = [c0, c1, c2, c3, c4][stage]
     if (c) { c.warn = true; c.meta = '중단됨' }
@@ -178,39 +187,56 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
   const latestCheck = (r: Request) => { const sp = gather(s, r).spec; return sp ? checks.find((c) => c.spec_id === sp.id) : undefined }
   const [open, setOpen] = useState<Set<string>>(() => new Set())
   const toggle = (id: string) => setOpen((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n })
-  const sorted = sortRows(all.filter(FILTERS.find((x) => x.id === f)!.match).map((r) => pipeline(s, r, latestCheck(r))))
+  // 개발에서 작업을 모두 폐기한 요청은 기본으로 숨긴다. 보기로 켜면 이 브라우저에 기억한다 (개발 작업 목록과 같은 토글)
+  const [showDropped, setShowDropped] = useState(() => { try { return localStorage.getItem('rq-show-dropped') === '1' } catch { return false } })
+  const toggleDropped = () => setShowDropped((v) => { try { localStorage.setItem('rq-show-dropped', v ? '0' : '1') } catch { /* 저장이 막혀도 이번 화면에서는 바뀐다 */ } return !v })
+  const isDropped = (r: Request) => devDiscarded(s, gather(s, r).spec?.id)
+  const droppedN = all.filter(isDropped).length
+  const shown = (r: Request) => showDropped || !isDropped(r)
+  const sorted = sortRows(all.filter(shown).filter(FILTERS.find((x) => x.id === f)!.match).map((r) => pipeline(s, r, latestCheck(r))))
   const rows = [...sorted.filter((x) => isFresh(x.r.id)), ...sorted.filter((x) => !isFresh(x.r.id))]
   // 같은 요청으로 연결만 한 것(REQ-15 등)은 원래 요청 줄을 가리킨다
   const target = s.requests.find((x) => x.id === item)
   const focus = target?.duplicateOf ?? item
-  useEffect(() => {
-    if (focus) document.getElementById(`req-${focus}`)?.scrollIntoView({ block: 'center' })
-  }, [focus])
   const stuck = rows.filter((x) => x.wait).length
-  const allOpen = rows.length > 0 && rows.every((x) => open.has(x.r.id))
   const [view, setView] = useState<'list' | 'card'>(() => (localStorage.getItem('rq-view') === 'card' ? 'card' : 'list'))
   const pickView = (v: 'list' | 'card') => { setView(v); localStorage.setItem('rq-view', v) }
+  // 페이지: 목록 10줄 · 카드 12장(한 줄 4장). 필터·보기·폐기 토글을 바꾸면 첫 페이지로, 주소로 가리킨 요청은 그 페이지로
+  const pg = usePage(rows, view === 'card' ? 12 : 10)
+  useEffect(() => pg.setPage(0), [f, view, showDropped]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!focus) return
+    const at = rows.findIndex((x) => x.r.id === focus)
+    if (at >= 0) pg.setPage(Math.floor(at / pg.size))
+    setTimeout(() => document.getElementById(`req-${focus}`)?.scrollIntoView({ block: 'center' }), 0)
+  }, [focus]) // eslint-disable-line react-hooks/exhaustive-deps
+  const allOpen = pg.rows.length > 0 && pg.rows.every((x) => open.has(x.r.id))
 
   return (
     <div className="rq">
       <nav className="rq-filter" aria-label="요청 거르기">
         {FILTERS.map((x) => {
-          const n = s.requests.filter(x.match).length
+          const n = s.requests.filter(x.match).filter(shown).length
           return (
             <a key={x.id} href={x.id === 'all' ? toPath('requests') : toPath(`requests/${x.id}`)} className={x.id === f ? 'on' : undefined} aria-current={x.id === f ? 'page' : undefined}>
               {x.label}<span className="rq-n">{n}</span>
             </a>
           )
         })}
+        {droppedN > 0 && (
+          <button type="button" className={`rq-toggle${showDropped ? ' on' : ''}`} aria-pressed={showDropped} onClick={toggleDropped} title="개발에서 폐기한 요청을 목록에 보이기·숨기기">
+            {showDropped ? '폐기 숨기기' : '폐기 보기'}<span className="rq-n">{droppedN}</span>
+          </button>
+        )}
         {stuck > 0 && <span className="rq-stuck">멈춤 {stuck}</span>}
         <div className="seg-toggle rq-view" role="group" aria-label="보기">
           <button type="button" aria-pressed={view === 'list'} onClick={() => pickView('list')}>목록</button>
           <button type="button" aria-pressed={view === 'card'} onClick={() => pickView('card')}>카드</button>
         </div>
-        {view === 'list' && <button type="button" className="rq-all" aria-pressed={allOpen} onClick={() => setOpen(allOpen ? new Set() : new Set(rows.map((x) => x.r.id)))}>{allOpen ? '모두 접기' : '모두 펼치기'}</button>}
+        {view === 'list' && <button type="button" className="rq-all" aria-pressed={allOpen} onClick={() => setOpen(allOpen ? new Set() : new Set(pg.rows.map((x) => x.r.id)))}>{allOpen ? '모두 접기' : '모두 펼치기'}</button>}
       </nav>
 
-      {view === 'card' && <RequestCards rows={rows} />}
+      {view === 'card' && <><RequestCards s={s} rows={pg.rows} /><Pager {...pg} /></>}
       {view === 'list' && <>
       <div className="rq-head" aria-hidden>
         {STAGES.map((x) => <span key={x}>{x}</span>)}
@@ -219,23 +245,24 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
 
       {rows.length === 0 && <div className="empty"><b>{FILTERS.find((x) => x.id === f)!.label} 없음</b></div>}
       <ol className="rq-list">
-        {rows.map((row) => {
+        {pg.rows.map((row) => {
           const { r } = row
           const next = nextOf(s, r)
-          const href = row.finished || next.href.startsWith(toPath('requests')) ? toPath(`projects/${r.id}`) : next.href
+          const dropped = devDiscarded(s, gather(s, r).spec?.id) // 개발에서 작업을 모두 폐기함: 회색 막대·다음 동작 없음
+          const href = row.finished || dropped || next.href.startsWith(toPath('requests')) ? toPath(`projects/${r.id}`) : next.href
           const draft = !row.finished && (r.state === '접수' || (r.state === '기획 중' && !row.cells[1].href))
           const isOpen = open.has(r.id)
           const onRow = (e: MouseEvent) => { if (!inner(e.target) && !window.getSelection()?.toString()) toggle(r.id) }
           const onKey = (e: KeyboardEvent) => { if ((e.key === 'Enter' || e.key === ' ') && !inner(e.target)) { e.preventDefault(); toggle(r.id) } }
           return (
             <li key={r.id} id={`req-${r.id}`} role="button" tabIndex={0} aria-expanded={isOpen} onClick={onRow} onKeyDown={onKey}
-              className={`rq-item${isOpen ? ' open' : ''}${row.finished ? ' fin' : ''}${focus === r.id ? ' hl' : ''}${isFresh(r.id) ? ' fresh' : ''}`}>
+              className={`rq-item${isOpen ? ' open' : ''}${row.finished ? ' fin' : ''}${dropped ? ' dropped' : ''}${focus === r.id ? ' hl' : ''}${isFresh(r.id) ? ' fresh' : ''}`}>
               <div className="rq-title">
                 <span className={`rq-dept d-${r.from}`}>{DEPT_NAME[r.from]}</span>
                 <a href={toPath(`projects/${r.id}`)} className="rq-name plain-link">{r.title}</a>
                 <span className="rq-meta">
                   <span className="mono">{r.id}</span>
-                  {r.paused && <Tag tone="amber">중단됨</Tag>}
+                  {r.paused && !dropped && <Tag tone="amber">중단됨</Tag>}
                   {isFollowUp(r) && <Tag tone="amber">후속</Tag>}
                   {row.dups.map((x) => (
                     <span key={x.id} className="rq-dup">
@@ -262,7 +289,8 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
                 ))}
               </ol>
               <div className="rq-next">
-                {!row.finished && (
+                {!row.finished && dropped && <span className="rq-stop muted" title="개발에서 이 요청의 작업을 폐기했어요">개발에서 폐기함</span>}
+                {!row.finished && !dropped && (
                   <button type="button" className="rq-stop" onClick={() => { d({ type: r.paused ? 'resumeRequest' : 'pauseRequest', request: r.id }); toast.show(`${r.id} ${r.paused ? '재개' : '중단'}`) }}>{r.paused ? '재개' : '중단'}</button>
                 )}
                 {draft && (r.from === 'hr' || r.from === 'data') && r.state === '접수' ? (
@@ -270,20 +298,21 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
                 ) : draft ? (
                   <Button size="small" variant="primary" onClick={() => { d({ type: 'writeSpec', request: r.id }); toast.show(`${r.id} 기획서 초안`) }}>기획서 초안</Button>
                 ) : (
-                  <a href={href} className={row.finished ? 'rq-go muted' : 'rq-go'}>{(row.finished ? '프로젝트' : next.label).replace(/\s*\(.*\)$/, '')} ›</a>
+                  <a href={href} className={row.finished || dropped ? 'rq-go muted' : 'rq-go'}>{(row.finished || dropped ? '프로젝트' : next.label).replace(/\s*\(.*\)$/, '')} ›</a>
                 )}
               </div>
             </li>
           )
         })}
       </ol>
+      <Pager {...pg} />
       </>}
     </div>
   )
 }
 
 // 카드 보기 (개발 사후관리 카드와 같은 틀): 부서·번호·걸린 시간 / 제목 / 단계 막대 / 지금 단계 한 줄. 카드를 누르면 프로젝트
-function RequestCards({ rows }: { rows: PipeRow[] }) {
+function RequestCards({ s, rows }: { s: S; rows: PipeRow[] }) {
   if (!rows.length) return null
   return (
     <div className="inc-grid rq-cards">
@@ -291,11 +320,12 @@ function RequestCards({ rows }: { rows: PipeRow[] }) {
         const { r } = row
         const at = row.finished ? row.cells.length - 1 : row.stage
         const cur = row.cells[at]
+        const dropped = devDiscarded(s, gather(s, r).spec?.id) // 개발에서 작업을 모두 폐기함: 회색 막대
         return (
-          <a key={r.id} href={toPath(`projects/${r.id}`)} className={`inc-card rq-card${row.wait ? ' wait' : ''}${row.finished ? ' fin' : ''}`}>
+          <a key={r.id} href={toPath(`projects/${r.id}`)} className={`inc-card rq-card${row.wait ? ' wait' : ''}${row.finished ? ' fin' : ''}${dropped ? ' dropped' : ''}`}>
             <span className="inc-card-top">
               <span className={`rq-dept d-${r.from}`}>{DEPT_NAME[r.from]}</span>
-              {r.paused && <Tag tone="amber">중단됨</Tag>}
+              {r.paused && !dropped && <Tag tone="amber">중단됨</Tag>}
               <span className="mono">{r.id}</span>
             </span>
             <b className="inc-card-title">{r.title}</b>
