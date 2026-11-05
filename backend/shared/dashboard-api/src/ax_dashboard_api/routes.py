@@ -854,14 +854,16 @@ class MarketingChatSendBody(BaseModel):
 async def marketing_chat_list(request: Request) -> dict:
     """마케팅 AI 대화 목록. 사람 토큰이 필요하다. 남의 대화는 원문 없이 요약만(`restricted`)."""
     who = human_from_authorization(request.headers.get("authorization"))
-    out = await marketing_client.chat_call("list_chat_threads", {"who": who})
+    out = await marketing_client.chat_call("marketing_chat_list", {"who": who})
     return ok(out.get("threads", []))
 
 
 @router.get("/marketing-chat/{thread_id}")
 async def marketing_chat_get(thread_id: str, request: Request) -> dict:
     who = human_from_authorization(request.headers.get("authorization"))
-    out = await marketing_client.chat_call("get_chat_thread", {"who": who, "thread_id": thread_id})
+    out = await marketing_client.chat_call(
+        "marketing_chat_get", {"who": who, "thread_id": thread_id}
+    )
     return ok(out["thread"])
 
 
@@ -872,7 +874,7 @@ async def marketing_chat_send(body: MarketingChatSendBody, request: Request) -> 
     payload = {"who": who, "message": body.message} | (
         {"thread_id": body.thread_id} if body.thread_id else {}
     )
-    out = await marketing_client.chat_call("send_chat_message", payload)
+    out = await marketing_client.chat_call("marketing_chat_send", payload)
     return ok(out["thread"])
 
 
@@ -880,7 +882,7 @@ async def marketing_chat_send(body: MarketingChatSendBody, request: Request) -> 
 async def marketing_chat_close(thread_id: str, request: Request) -> dict:
     who = human_from_authorization(request.headers.get("authorization"))
     out = await marketing_client.chat_call(
-        "close_chat_thread", {"who": who, "thread_id": thread_id}
+        "marketing_chat_close", {"who": who, "thread_id": thread_id}
     )
     return ok(out["thread"])
 

@@ -48,7 +48,7 @@ def test_send_passes_the_token_owner_not_a_body_field(client: TestClient, fake: 
     res = client.post(URL, json={"message": "받은 기획안 알려줘", "who": "someone-else"})
     assert res.status_code == 200 and res.json()["data"]["status"] == "answering"
     target, request = fake.calls[0]
-    assert (target, request.skill) == ("marketing", "send_chat_message")
+    assert (target, request.skill) == ("marketing", "marketing_chat_send")
     assert request.input == {"who": "tester", "message": "받은 기획안 알려줘"}  # 토큰의 사람이 who
 
 
@@ -57,9 +57,9 @@ def test_list_get_close_go_to_marketing(client: TestClient, fake: Fake) -> None:
     assert client.get(f"{URL}/mktchat-1").json()["data"]["id"] == "mktchat-1"
     assert client.post(f"{URL}/mktchat-1/close").status_code == 200
     assert [c[1].skill for c in fake.calls] == [
-        "list_chat_threads",
-        "get_chat_thread",
-        "close_chat_thread",
+        "marketing_chat_list",
+        "marketing_chat_get",
+        "marketing_chat_close",
     ]
     assert fake.calls[2][1].input == {"who": "tester", "thread_id": "mktchat-1"}
 
