@@ -384,6 +384,8 @@ export const devTaskApi = (base: string) => ({
   cancel: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/cancel`, post()),
   // 멈춘 작업(중단·실패·돌려보냄) 폐기. 다시 돌리지 않고 작업 목록에서 숨길 수 있다
   discard: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/discard`, post()),
+  // 사람이 기획에 돌려보내기 (코드 변경이 아닌 일). 돌고 있으면 멈추고 열린 PR은 닫는다
+  returnToPlanning: (taskId: string, to: string, reason: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/return`, post({ to, reason })),
   // 서버 AI로 넘기기: 개발자 Claude 대기열에서 아무도 안 가져간 작업을 서버 AI가 맡는다
   toAgent: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/to-agent`, post()),
   textOk: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/text-ok`, post()),
