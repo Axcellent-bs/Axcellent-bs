@@ -1231,7 +1231,7 @@ def _chat_viewer(request: Request) -> dict[str, str | None]:
 async def support_chat_list(request: Request) -> dict:
     if is_mock():
         raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "직접 대화는 실제 모드에서만 된다")
-    out = await support_client.call("chat_list", _chat_viewer(request))
+    out = await support_client.call("support_chat_list", _chat_viewer(request))
     return ok(out["items"], total=out["total"])
 
 
@@ -1240,7 +1240,9 @@ async def support_chat_get(thread_id: str, request: Request) -> dict:
     if is_mock():
         raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "직접 대화는 실제 모드에서만 된다")
     return ok(
-        await support_client.call("chat_get", {"thread_id": thread_id, **_chat_viewer(request)})
+        await support_client.call(
+            "support_chat_get", {"thread_id": thread_id, **_chat_viewer(request)}
+        )
     )
 
 
@@ -1250,7 +1252,7 @@ async def support_chat_send(body: SupportChatSendBody, request: Request) -> dict
     if is_mock():
         raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "직접 대화는 실제 모드에서만 된다")
     out = await support_client.call(
-        "chat_send",
+        "support_chat_send",
         {
             "thread_id": body.thread_id,
             "who": request.state.human,
@@ -1269,7 +1271,7 @@ async def support_chat_close(thread_id: str, request: Request) -> dict:
     # 닫는 사람은 사람 토큰(쓰기라 반드시 있다)에서만 채운다
     role = _chat_viewer(request)["role"]
     out = await support_client.call(
-        "chat_close",
+        "support_chat_close",
         {"thread_id": thread_id, "viewer": request.state.human, "role": role},
         target=f"chat:{thread_id}",
     )

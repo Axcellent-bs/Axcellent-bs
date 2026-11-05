@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -65,7 +66,7 @@ def call(
             "token": f"mock:{requester}",
             "path": [],
             "deadline": (datetime.now(UTC) + timedelta(seconds=30)).isoformat(),
-            "idempotency_key": f"{skill}:{datetime.now(UTC).timestamp()}",
+            "idempotency_key": f"{skill}:{uuid.uuid4().hex}",  # 시각은 Windows에서 같은 값이 겹친다
         },
         "skill": skill,
         "input": input,
@@ -77,7 +78,9 @@ def call(
 
 def send(who: str, message: str, thread_id: str | None = None, **context: Any) -> dict[str, Any]:
     return call(
-        "chat_send", {"who": who, "thread_id": thread_id, "context": context}, message=message
+        "support_chat_send",
+        {"who": who, "thread_id": thread_id, "context": context},
+        message=message,
     )
 
 
@@ -94,7 +97,7 @@ def test_send_saves_message_with_who_and_answers_later(env: Spawned, llm: MockLL
     assert [m["role"] for m in out["messages"]] == ["user"]
     assert out["title"] == "답변 대기 문의가 몇 건이에요?"
     env.run()
-    done = thread_of(call("chat_get", {"thread_id": "chat-1", "viewer": "공용"}))
+    done = thread_of(call("support_chat_get", {"thread_id": "chat-1", "viewer": "공용"}))
     assert done["status"] == "talking"
     assert [m["role"] for m in done["messages"]] == ["user", "assistant"]
     assert done["messages"][1]["text"] == "답변 대기는 3건이에요."
@@ -124,7 +127,7 @@ def test_cannot_send_while_answering_or_after_closing(env: Spawned, llm: MockLLM
     busy = send("공용", "또 질문", thread_id="chat-1")
     assert busy["outcome"] == "invalid_state"
     env.run()
-    thread_of(call("chat_close", {"thread_id": "chat-1", "viewer": "공용"}))
+    thread_of(call("support_chat_close", {"thread_id": "chat-1", "viewer": "공용"}))
     closed = send("공용", "닫은 뒤 질문", thread_id="chat-1")
     assert closed["outcome"] == "invalid_state"
 
@@ -139,7 +142,7 @@ def test_writing_into_someone_elses_thread_is_forbidden(env: Spawned, llm: MockL
 
 
 def test_message_is_required_and_capped(env: Spawned) -> None:
-    empty = call("chat_send", {"who": "공용"})
+    empty = call("support_chat_send", {"who": "공용"})
     assert empty["status"] == "failed"
     too_long = send("공용", "가" * (chat.MAX_MESSAGE_CHARS + 1))
     assert too_long["status"] == "failed"
@@ -178,7 +181,7 @@ def test_no_llm_configured_says_so(env: Spawned, monkeypatch: pytest.MonkeyPatch
 def test_close_saves_a_summary_then_llm_refines_it(env: Spawned, llm: MockLLMClient) -> None:
     thread_of(send("공용", "질문"))
     env.run()
-    closed = thread_of(call("chat_close", {"thread_id": "chat-1", "viewer": "공용"}))
+    closed = thread_of(call("support_chat_close", {"thread_id": "chat-1", "viewer": "공용"}))
     assert closed["status"] == "closed" and closed["closed_at"]
     assert closed["summary"] == "공용 님과 고객지원 현황 1건을 이야기했어요."  # 코드 요약
     env.run()
@@ -194,7 +197,7 @@ def test_summary_falls_back_when_llm_fails(env: Spawned, monkeypatch: pytest.Mon
             raise RuntimeError("down")
 
     monkeypatch.setattr(chat_handlers, "get_llm", lambda: Broken())
-    thread_of(call("chat_close", {"thread_id": "chat-1", "viewer": "공용"}))
+    thread_of(call("support_chat_close", {"thread_id": "chat-1", "viewer": "공용"}))
     env.run()
     assert (
         chat_handlers.CHATS.get("chat-1").summary == "공용 님과 고객지원 현황 1건을 이야기했어요."
@@ -204,11 +207,14 @@ def test_summary_falls_back_when_llm_fails(env: Spawned, monkeypatch: pytest.Mon
 def test_who_may_close(env: Spawned, llm: MockLLMClient) -> None:
     thread_of(send("예진", "질문"))
     env.run()
-    nope = call("chat_close", {"thread_id": "chat-1", "viewer": "병환", "role": "member"})
+    nope = call("support_chat_close", {"thread_id": "chat-1", "viewer": "병환", "role": "member"})
     assert nope["outcome"] == "forbidden"
-    assert call("chat_close", {"thread_id": "chat-9", "viewer": "병환"})["outcome"] == "not_found"
+    assert (
+        call("support_chat_close", {"thread_id": "chat-9", "viewer": "병환"})["outcome"]
+        == "not_found"
+    )
     staff = thread_of(
-        call("chat_close", {"thread_id": "chat-1", "viewer": "병환", "role": "staff"})
+        call("support_chat_close", {"thread_id": "chat-1", "viewer": "병환", "role": "staff"})
     )
     assert staff["status"] == "closed"
     assert staff["restricted"] is True and staff["messages"] == []  # 담당은 요약만 본다
@@ -217,8 +223,8 @@ def test_who_may_close(env: Spawned, llm: MockLLMClient) -> None:
 def test_closing_twice_returns_the_same_thread(env: Spawned, llm: MockLLMClient) -> None:
     thread_of(send("공용", "질문"))
     env.run()
-    first = thread_of(call("chat_close", {"thread_id": "chat-1", "viewer": "공용"}))
-    again = thread_of(call("chat_close", {"thread_id": "chat-1", "viewer": "공용"}))
+    first = thread_of(call("support_chat_close", {"thread_id": "chat-1", "viewer": "공용"}))
+    again = thread_of(call("support_chat_close", {"thread_id": "chat-1", "viewer": "공용"}))
     assert again["closed_at"] == first["closed_at"]
 
 
@@ -230,7 +236,7 @@ def test_idle_threads_close_when_read(
     store = chat_handlers.CHATS
     old = (datetime.now(UTC) - timedelta(minutes=31)).isoformat(timespec="seconds")
     store._put(store.get("chat-1").model_copy(update={"updated_at": old.replace("+00:00", "Z")}))
-    listed = call("chat_list", {"viewer": "공용"})["output"]
+    listed = call("support_chat_list", {"viewer": "공용"})["output"]
     assert listed["items"][0]["status"] == "closed" and listed["items"][0]["summary"]
 
 
@@ -243,7 +249,9 @@ def _age(thread_id: str, **delta: int) -> None:
 def test_a_fresh_answer_in_progress_is_left_alone(env: Spawned, llm: MockLLMClient) -> None:
     thread_of(send("공용", "질문"))  # 답을 만드는 중
     _age("chat-1", minutes=2)
-    assert call("chat_list", {"viewer": "공용"})["output"]["items"][0]["status"] == "answering"
+    assert (
+        call("support_chat_list", {"viewer": "공용"})["output"]["items"][0]["status"] == "answering"
+    )
 
 
 def test_a_stuck_answer_is_reopened_with_an_error_line(env: Spawned, llm: MockLLMClient) -> None:
@@ -253,7 +261,7 @@ def test_a_stuck_answer_is_reopened_with_an_error_line(env: Spawned, llm: MockLL
         lost.close()
     env.clear()
     _age("chat-1", minutes=chat.STUCK_ANSWER_MINUTES + 1)
-    item = call("chat_list", {"viewer": "공용"})["output"]["items"][0]
+    item = call("support_chat_list", {"viewer": "공용"})["output"]["items"][0]
     assert item["status"] == "talking"
     assert item["messages"][-1]["kind"] == "error"
     assert item["messages"][-1]["text"] == chat_handlers.FAILED_TEXT
@@ -299,7 +307,7 @@ def test_an_answer_that_takes_too_long_becomes_an_error_line(
 
 def test_a_late_answer_is_not_added_to_a_closed_thread(env: Spawned, llm: MockLLMClient) -> None:
     thread_of(send("공용", "질문"))
-    thread_of(call("chat_close", {"thread_id": "chat-1", "viewer": "공용"}))
+    thread_of(call("support_chat_close", {"thread_id": "chat-1", "viewer": "공용"}))
     env.run()  # 닫은 뒤에야 답이 만들어진다
     t = chat_handlers.CHATS.get("chat-1")
     assert t.status == "closed" and [m.role for m in t.messages] == ["user"]
@@ -348,7 +356,7 @@ def test_the_idempotency_store_never_holds_chat_text(env: Spawned, llm: MockLLMC
     secret = "고객지원 비밀 질문 원문"
     thread_of(send("공용", secret))
     env.run()
-    thread_of(call("chat_close", {"thread_id": "chat-1", "viewer": "공용"}))
+    thread_of(call("support_chat_close", {"thread_id": "chat-1", "viewer": "공용"}))
     stored = json.dumps(list(handlers.STORE.results.values()), ensure_ascii=False)
     assert secret not in stored and "답변 대기는 3건이에요" not in stored
     assert '"id": "chat-1"' in stored  # 대화 번호와 상태만 남는다
@@ -373,9 +381,9 @@ def test_owner_sees_originals_and_others_get_the_restricted_summary(
     env: Spawned, llm: MockLLMClient
 ) -> None:
     _two_threads(env)
-    thread_of(call("chat_close", {"thread_id": "chat-1", "viewer": "예진"}))
+    thread_of(call("support_chat_close", {"thread_id": "chat-1", "viewer": "예진"}))
     env.run()
-    items = {i["id"]: i for i in call("chat_list", {"viewer": "예진"})["output"]["items"]}
+    items = {i["id"]: i for i in call("support_chat_list", {"viewer": "예진"})["output"]["items"]}
     mine, theirs = items["chat-1"], items["chat-2"]
     assert mine["messages"] and mine["restricted"] is False
     assert theirs["messages"] == [] and theirs["restricted"] is True
@@ -386,10 +394,10 @@ def test_staff_and_admin_see_summaries_but_originals_when_a_task_exists(
     env: Spawned, llm: MockLLMClient
 ) -> None:
     _two_threads(env)
-    thread_of(call("chat_close", {"thread_id": "chat-1", "viewer": "예진"}))
+    thread_of(call("support_chat_close", {"thread_id": "chat-1", "viewer": "예진"}))
     env.run()
     for role in ("staff", "admin"):
-        items = call("chat_list", {"viewer": "담당자", "role": role})["output"]["items"]
+        items = call("support_chat_list", {"viewer": "담당자", "role": role})["output"]["items"]
         assert len(items) == 2
         for item in items:
             assert item["restricted"] is True and item["messages"] == []
@@ -398,11 +406,13 @@ def test_staff_and_admin_see_summaries_but_originals_when_a_task_exists(
         assert closed["summary"] == "문의 현황을 묻고 답을 들었어요."
     # 일이 생긴 대화는 원문까지 본다
     chat_handlers.CHATS.add_task("chat-2", "task-9")
-    got = thread_of(call("chat_get", {"thread_id": "chat-2", "viewer": "담당자", "role": "staff"}))
+    got = thread_of(
+        call("support_chat_get", {"thread_id": "chat-2", "viewer": "담당자", "role": "staff"})
+    )
     assert got["restricted"] is False and got["task_ids"] == ["task-9"] and got["messages"]
     assert got["task_id"] == "task-9"
     # 일이 생겨도 일반 사람은 원문을 못 본다
-    plain = thread_of(call("chat_get", {"thread_id": "chat-2", "viewer": "낯선사람"}))
+    plain = thread_of(call("support_chat_get", {"thread_id": "chat-2", "viewer": "낯선사람"}))
     assert plain["restricted"] is True and plain["messages"] == []
 
 
@@ -410,11 +420,16 @@ def test_getting_someone_elses_thread_returns_the_restricted_view(
     env: Spawned, llm: MockLLMClient
 ) -> None:
     _two_threads(env)
-    got = thread_of(call("chat_get", {"thread_id": "chat-1", "viewer": "낯선사람"}))
+    got = thread_of(call("support_chat_get", {"thread_id": "chat-1", "viewer": "낯선사람"}))
     assert got["restricted"] is True and got["messages"] == [] and got["who"] == "예진"
     assert "비밀" not in got["title"]
-    assert call("chat_get", {"thread_id": "chat-99", "viewer": "예진"})["outcome"] == "not_found"
-    unknown = thread_of(call("chat_get", {"thread_id": "chat-1"}))  # 보는 사람을 몰라도 요약만
+    assert (
+        call("support_chat_get", {"thread_id": "chat-99", "viewer": "예진"})["outcome"]
+        == "not_found"
+    )
+    unknown = thread_of(
+        call("support_chat_get", {"thread_id": "chat-1"})
+    )  # 보는 사람을 몰라도 요약만
     assert unknown["restricted"] is True and unknown["messages"] == []
 
 
@@ -422,7 +437,7 @@ def test_shared_name_means_everyone_is_the_owner(env: Spawned, llm: MockLLMClien
     """토큰을 사람별로 나누기 전에는 모두 "공용"이라 서버가 가를 수 없다 (예진님 확인)."""
     thread_of(send("공용", "질문 하나"))
     env.run()
-    items = call("chat_list", {"viewer": "공용"})["output"]["items"]
+    items = call("support_chat_list", {"viewer": "공용"})["output"]["items"]
     assert items[0]["restricted"] is False and items[0]["messages"]
 
 
@@ -451,10 +466,10 @@ def test_chat_skills_are_on_the_inquiry_card_and_gated() -> None:
     card = {s.id: s for s in load_card().skills}
     inquiry = next(s for s in SERVICES if s.id == "inquiry")
     for skill, grade in (
-        ("chat_send", "A"),
-        ("chat_close", "A"),
-        ("chat_list", "read"),
-        ("chat_get", "read"),
+        ("support_chat_send", "A"),
+        ("support_chat_close", "A"),
+        ("support_chat_list", "read"),
+        ("support_chat_get", "read"),
     ):
         assert skill in inquiry.skills
         assert str(card[skill].grade) == grade or card[skill].grade == grade

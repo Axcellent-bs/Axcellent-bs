@@ -62,10 +62,10 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> Fake:
         },
         "claim_stats": {"total": 3, "by_status": {"auto_rejected": 2}, "rule_hits": {"X": 2}},
         "feedback_overview": {"total": 4, "average_rating": 4.5, "note": "후기 원문 문장"},
-        "chat_send": {"id": "chat-1", "status": "answering", "who": "공용", "messages": []},
-        "chat_list": {"items": [{"id": "chat-1"}], "total": 1},
-        "chat_get": {"id": "chat-1", "status": "talking"},
-        "chat_close": {"id": "chat-1", "status": "closed", "summary": "요약"},
+        "support_chat_send": {"id": "chat-1", "status": "answering", "who": "공용", "messages": []},
+        "support_chat_list": {"items": [{"id": "chat-1"}], "total": 1},
+        "support_chat_get": {"id": "chat-1", "status": "talking"},
+        "support_chat_close": {"id": "chat-1", "status": "closed", "summary": "요약"},
     }
     monkeypatch.setattr(support_client, "SEND", fake)
     return fake
@@ -82,7 +82,7 @@ def test_send_fills_who_from_the_token_and_passes_the_text_as_untrusted(
 ) -> None:
     res = client.post(BASE, json={"message": "답변 대기가 몇 건이에요?"}, headers=HUMAN)
     assert res.status_code == 200 and res.json()["data"]["status"] == "answering"
-    sent = fake.last("chat_send")
+    sent = fake.last("support_chat_send")
     assert sent.input["who"] == "공용" and sent.input["thread_id"] is None
     assert sent.untrusted == {"message": "답변 대기가 몇 건이에요?"}
     assert "message" not in sent.input  # 사람의 말은 입력(지시)에 섞이지 않는다
@@ -91,7 +91,7 @@ def test_send_fills_who_from_the_token_and_passes_the_text_as_untrusted(
 def test_a_who_in_the_body_is_not_trusted(client: TestClient, fake: Fake) -> None:
     res = client.post(BASE, json={"message": "안녕", "who": "관리자"}, headers=HUMAN)
     assert res.status_code == 200  # 모르는 필드는 무시하고
-    assert fake.last("chat_send").input["who"] == "공용"  # 말한 사람은 토큰에서만 채운다
+    assert fake.last("support_chat_send").input["who"] == "공용"  # 말한 사람은 토큰에서만 채운다
 
 
 def test_send_requires_a_human_token(client: TestClient, fake: Fake) -> None:
@@ -111,12 +111,12 @@ def test_send_validates_the_message(client: TestClient, fake: Fake) -> None:
 
 def test_follow_up_carries_the_thread_id(client: TestClient, fake: Fake) -> None:
     client.post(BASE, json={"message": "또", "thread_id": "chat-1"}, headers=HUMAN)
-    assert fake.last("chat_send").input["thread_id"] == "chat-1"
+    assert fake.last("support_chat_send").input["thread_id"] == "chat-1"
 
 
 def test_the_context_has_numbers_only(client: TestClient, fake: Fake) -> None:
     client.post(BASE, json={"message": "현황은?"}, headers=HUMAN)
-    context = fake.last("chat_send").input["context"]
+    context = fake.last("support_chat_send").input["context"]
     assert context["inquiries"]["waiting"] == {
         "count": 2,
         "by_urgency": {"high": 1, "low": 1},
@@ -143,7 +143,7 @@ def test_an_unreadable_source_is_unavailable_not_invented(
 
     monkeypatch.setattr(support_client, "call", flaky)
     client.post(BASE, json={"message": "현황은?"}, headers=HUMAN)
-    context = fake.last("chat_send").input["context"]
+    context = fake.last("support_chat_send").input["context"]
     assert context["claims"] == {"available": False, "note": "확인할 수 없음"}
     assert context["inquiries"]["available"] is True
 
@@ -151,9 +151,9 @@ def test_an_unreadable_source_is_unavailable_not_invented(
 # ---------------------------------------------------------------- 읽기·닫기
 def test_reads_pass_the_viewer_name_and_role(client: TestClient, fake: Fake) -> None:
     client.get(BASE, headers=HUMAN)
-    assert fake.last("chat_list").input == {"viewer": "공용", "role": "member"}
+    assert fake.last("support_chat_list").input == {"viewer": "공용", "role": "member"}
     client.get(BASE + "/chat-1", headers=STAFF)
-    assert fake.last("chat_get").input == {
+    assert fake.last("support_chat_get").input == {
         "thread_id": "chat-1",
         "viewer": "담당자",
         "role": "staff",
@@ -177,23 +177,23 @@ def test_the_response_data_is_the_thread_list(client: TestClient, fake: Fake) ->
 
 
 def test_missing_thread_is_404(client: TestClient, fake: Fake) -> None:
-    fake.outcomes["chat_get"] = "not_found"
-    fake.outputs["chat_get"] = {"message": "대화 chat-9를 찾을 수 없다"}
+    fake.outcomes["support_chat_get"] = "not_found"
+    fake.outputs["support_chat_get"] = {"message": "대화 chat-9를 찾을 수 없다"}
     assert client.get(BASE + "/chat-9", headers=HUMAN).status_code == 404
 
 
 def test_writing_into_someone_elses_thread_is_403(client: TestClient, fake: Fake) -> None:
-    fake.outcomes["chat_send"] = "forbidden"
-    fake.outputs["chat_send"] = {"message": "다른 사람의 대화에는 쓸 수 없다"}
+    fake.outcomes["support_chat_send"] = "forbidden"
+    fake.outputs["support_chat_send"] = {"message": "다른 사람의 대화에는 쓸 수 없다"}
     res = client.post(BASE, json={"message": "끼어들기", "thread_id": "chat-1"}, headers=HUMAN)
     assert res.status_code == 403 and res.json()["error"]["code"] == "FORBIDDEN"
-    fake.outcomes["chat_close"] = "forbidden"
+    fake.outcomes["support_chat_close"] = "forbidden"
     assert client.post(BASE + "/chat-1/close", headers=HUMAN).status_code == 403
 
 
 def test_busy_thread_is_409(client: TestClient, fake: Fake) -> None:
-    fake.outcomes["chat_send"] = "invalid_state"
-    fake.outputs["chat_send"] = {"message": "답을 만드는 중이다"}
+    fake.outcomes["support_chat_send"] = "invalid_state"
+    fake.outputs["support_chat_send"] = {"message": "답을 만드는 중이다"}
     res = client.post(BASE, json={"message": "또", "thread_id": "chat-1"}, headers=HUMAN)
     assert res.status_code == 409
 
@@ -201,7 +201,7 @@ def test_busy_thread_is_409(client: TestClient, fake: Fake) -> None:
 def test_close_uses_the_token_name_and_role(client: TestClient, fake: Fake) -> None:
     res = client.post(BASE + "/chat-1/close", headers=STAFF)
     assert res.status_code == 200 and res.json()["data"]["status"] == "closed"
-    assert fake.last("chat_close").input == {
+    assert fake.last("support_chat_close").input == {
         "thread_id": "chat-1",
         "viewer": "담당자",
         "role": "staff",
