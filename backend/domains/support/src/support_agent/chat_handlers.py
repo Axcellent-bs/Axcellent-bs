@@ -1,11 +1,11 @@
 """고객지원 AI 직접 대화 skill (chat.py).
 
-- `chat_send`(쓰기): 사람의 말을 저장하고 곧바로 돌려준다 (대화 상태 `answering`). AI 답은 뒤에서
-  만들어 대화에 덧붙이고 `talking`으로 돌린다. 화면은 `answering`이면 대화를 다시 읽는다
-  (`chat_get`). 답까지 기다리면 모델이 느릴 때 게이트웨이 시간 초과(504)가 나기 때문이다.
-- `chat_close`(쓰기): 대화를 끝내고 한두 줄 요약을 남긴다. 본인과 담당·관리자만 닫는다.
-- `chat_list`·`chat_get`(읽기): 열람 권한(`chat.access_of`)대로 원문 또는 요약만 돌려준다.
-  다른 사람 대화에 쓰려 하면 `forbidden`(403)이다.
+- `support_chat_send`(쓰기): 사람의 말을 저장하고 곧바로 돌려준다 (대화 상태 `answering`). AI 답은
+  뒤에서 만들어 대화에 덧붙이고 `talking`으로 돌린다. 화면은 `answering`이면 대화를 다시 읽는다
+  (`support_chat_get`). 답까지 기다리면 모델이 느릴 때 게이트웨이 시간 초과(504)가 나기 때문이다.
+- `support_chat_close`(쓰기): 대화를 끝내고 한두 줄 요약을 남긴다. 본인과 담당·관리자만 닫는다.
+- `support_chat_list`·`support_chat_get`(읽기): 열람 권한(`chat.access_of`)대로 원문 또는 요약만
+  돌려준다. 다른 사람 대화에 쓰려 하면 `forbidden`(403)이다.
 - 30분(기본) 말이 없는 대화는 읽을 때 함께 끝낸다(`_sweep`). 대화 안에서만 쓰는 정리라 안전 관문을
   거치지 않는다.
 
@@ -277,7 +277,7 @@ async def chat_send(request: AgentRequest) -> AgentResult:
 
     result = await h._write(
         request,
-        "chat_send",
+        "support_chat_send",
         f"chat:{parsed.thread_id or 'new'}",
         {"who": parsed.who, "thread_id": parsed.thread_id},
         apply,
@@ -308,7 +308,7 @@ async def chat_close(request: AgentRequest) -> AgentResult:
 
     result = await h._write(
         request,
-        "chat_close",
+        "support_chat_close",
         f"chat:{thread.id}",
         {"thread_id": thread.id, "viewer": parsed.viewer},
         apply,
@@ -340,8 +340,8 @@ async def chat_get(request: AgentRequest) -> AgentResult:
 
 
 CHAT_HANDLERS = {
-    "chat_send": chat_send,
-    "chat_close": chat_close,
-    "chat_list": chat_list,
-    "chat_get": chat_get,
+    "support_chat_send": chat_send,
+    "support_chat_close": chat_close,
+    "support_chat_list": chat_list,
+    "support_chat_get": chat_get,
 }

@@ -44,9 +44,9 @@ CORS 허용 출처는 `DASHBOARD_CORS_ORIGINS`(쉼표 구분, 기본 `http://loc
 | --- | --- |
 | GET `/conversations`, `/conversations/{id}` | `list_inquiries`, `get_inquiry` (가린 고객 메시지의 `text`는 비워서 준다) |
 | POST `/conversations/{id}/messages/{message_id}/original` | `reveal_original` (사람 토큰 필요, 연 사람이 내력에 남는다) |
-| GET `/support-chat`, `/support-chat/{id}` | `chat_list`, `chat_get` (직접 대화. 읽기에도 사람 토큰이 필요하다. 다른 사람 대화는 요약만, `restricted: true`) |
-| POST `/support-chat` | `chat_send` (사람 토큰 필요. `{thread_id?, message}` → 말을 저장한 대화, `status: answering`이면 GET으로 다시 읽는다. 말한 사람은 토큰 이름, 말은 `untrusted`, 문의·클레임·후기 집계 숫자를 `context`로 넘긴다) |
-| POST `/support-chat/{id}/close` | `chat_close` (사람 토큰 필요. 본인·담당·관리자) |
+| GET `/support-chat`, `/support-chat/{id}` | `support_chat_list`, `support_chat_get` (직접 대화. 읽기에도 사람 토큰이 필요하다. 다른 사람 대화는 요약만, `restricted: true`) |
+| POST `/support-chat` | `support_chat_send` (사람 토큰 필요. `{thread_id?, message}` → 말을 저장한 대화, `status: answering`이면 GET으로 다시 읽는다. 말한 사람은 토큰 이름, 말은 `untrusted`, 문의·클레임·후기 집계 숫자를 `context`로 넘긴다) |
+| POST `/support-chat/{id}/close` | `support_chat_close` (사람 토큰 필요. 본인·담당·관리자) |
 | POST `/conversations` | `create_inquiry` (제목·본문은 `untrusted`) |
 | POST `/conversations/{id}/customer-messages` | `add_customer_message` |
 | POST `/conversations/{id}/check` | `check_reply` |

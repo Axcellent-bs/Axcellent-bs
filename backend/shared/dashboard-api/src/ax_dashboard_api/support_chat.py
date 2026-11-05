@@ -35,7 +35,7 @@ def staff_names() -> set[str]:
     """고객지원 담당자: 조직도의 서비스별 담당자 + 환경 변수로 더한 이름."""
     names = {n.strip() for n in os.getenv(STAFF_ENV, "").split(",") if n.strip()}
     for service in SUPPORT_SERVICES:
-        assignment = assignment_for(service, "chat_list")
+        assignment = assignment_for(service, "support_chat_list")
         if assignment is not None and assignment.assignee:
             names.add(assignment.assignee)
     return names
