@@ -93,10 +93,14 @@ def test_shorts_ratio_over_the_cap_is_few_samples_and_goes_back() -> None:
     want = ["쇼핑 클릭 평소 대비 배수 · 10대", "쇼핑 클릭 평소 대비 배수",
             "네이버 검색 평소 대비 배수"]  # fmt: skip
     assert [h.label for h in got] == want  # 117배(표본 적음)는 3개 안에 못 듦
-    assert got[2].sentence.endswith("(표본 7개)")  # 표본 기준 10 미만: 뒤로 + 표시
+    # 표본 기준 10 미만: 뒤로 + 표시 칸 (문장에는 붙이지 않음)
+    assert got[2].low_sample and got[2].sample_note == "표본 7개 · 참고"
+    assert "표본" not in got[2].sentence
+    assert not got[0].low_sample and got[0].sample_note is None
     alone = DomainOpportunity(opportunity_id="opp_3", subtopic="x", line="", shorts_fit=fit)
     [few] = hl.card_highlights(alone, card_facts(alone))
-    assert few.sentence.endswith("(표본 적음)") and few.ratio == 117.64
+    # 숏츠 조회 배수(분모가 작은 값)도 같은 규칙: 표본 6개 → low_sample
+    assert few.low_sample and few.sample_note == "표본 6개 · 참고" and few.ratio == 117.64
 
 
 def test_evidence_shorts_need_a_thumbnail_and_title_and_follow_views() -> None:
