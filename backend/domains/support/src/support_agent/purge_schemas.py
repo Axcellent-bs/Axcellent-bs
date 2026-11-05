@@ -41,6 +41,8 @@ class PurgeReport(AxModel):
     purge_count: int = 0  # 지울 수 있는(집행했으면 지운) 문의 수
     retained_count: int = 0  # 보존 의무로 남겨 둔 문의 수
     applied: bool = False  # 이 호출로 실제로 지웠는가
+    # mode=expired: 사람이 SUPPORT_INQUIRY_RETENTION_APPLY=1로 켰는가 (아니면 건수만 센다)
+    apply_enabled: bool | None = None
 
 
 class PurgeExpiredClaimsInput(AxModel):

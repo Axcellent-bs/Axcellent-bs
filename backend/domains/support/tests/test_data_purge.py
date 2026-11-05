@@ -52,6 +52,7 @@ def _age(store: InquiryStore, inquiry_id: int, years: float) -> None:
 @pytest.fixture
 def env(monkeypatch: pytest.MonkeyPatch) -> InquiryStore:
     monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
+    monkeypatch.delenv(retention.ENV_INQUIRY_APPLY, raising=False)
     bus.reset_mock_bus()
     store = InquiryStore()
     monkeypatch.setattr(handlers, "STORE", store)
@@ -97,7 +98,10 @@ def test_a_leap_day_deadline_moves_to_march_first() -> None:
     assert retention.retention_deadline(conversation) == datetime(2027, 3, 1, tzinfo=UTC)
 
 
-def test_expired_inquiries_are_purged_whatever_their_state(env: InquiryStore) -> None:
+def test_expired_inquiries_are_purged_whatever_their_state(
+    env: InquiryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(retention.ENV_INQUIRY_APPLY, "1")
     old_resolved = _make(env)
     old_open = _make(env, status="open")
     fresh = _make(env)
@@ -119,7 +123,10 @@ def test_expired_inquiries_are_purged_whatever_their_state(env: InquiryStore) ->
     assert SECRET in env.get(fresh).subject
 
 
-def test_expiry_writes_an_audit_record_without_content(env: InquiryStore) -> None:
+def test_expiry_writes_an_audit_record_without_content(
+    env: InquiryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(retention.ENV_INQUIRY_APPLY, "1")
     inquiry_id = _make(env)
     _age(env, inquiry_id, 4)
     call("purge_expired_inquiries", {})
@@ -135,7 +142,10 @@ def test_nothing_expired_does_nothing(env: InquiryStore) -> None:
     assert result["outcome"] == "nothing_expired" and result["output"]["applied"] is False
 
 
-def test_the_same_day_call_does_not_purge_or_record_twice(env: InquiryStore) -> None:
+def test_the_same_day_call_does_not_purge_or_record_twice(
+    env: InquiryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(retention.ENV_INQUIRY_APPLY, "1")
     inquiry_id = _make(env)
     _age(env, inquiry_id, 5)
     first = call("purge_expired_inquiries", {}, key="retention-expire:today")
@@ -145,13 +155,122 @@ def test_the_same_day_call_does_not_purge_or_record_twice(env: InquiryStore) -> 
     assert len([r for r in env.privacy_audit if r.get("record_type") == "retention_purge"]) == 1
 
 
-def test_purged_inquiries_leave_the_list(env: InquiryStore) -> None:
+def test_purged_inquiries_leave_the_list(
+    env: InquiryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(retention.ENV_INQUIRY_APPLY, "1")
     gone = _make(env)
     kept = _make(env)
     _age(env, gone, 4)
     call("purge_expired_inquiries", {})
     ids = [i["id"] for i in call("list_inquiries", {})["output"]["items"]]
     assert gone not in ids and kept in ids
+
+
+# ---------------------- 팀 방식: 기본 dry-run, 사람이 켜면 집행
+def test_expiry_only_counts_until_a_human_turns_it_on(env: InquiryStore) -> None:
+    old = _make(env)
+    _age(env, old, 4)
+    result = call("purge_expired_inquiries", {})
+    assert result["outcome"] == "dry_run" and result["output"]["applied"] is False
+    assert result["output"]["apply_enabled"] is False and result["output"]["purge_count"] == 1
+    assert not env.get(old).purged_at and SECRET in env.get(old).subject
+
+
+def test_only_the_value_one_turns_the_inquiry_switch_on(
+    env: InquiryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old = _make(env)
+    _age(env, old, 4)
+    for raw in ("true", "yes", "on", "0", ""):  # 잘못 적어도 지우지 않는 쪽이다
+        monkeypatch.setenv(retention.ENV_INQUIRY_APPLY, raw)
+        assert call("purge_expired_inquiries", {})["outcome"] == "dry_run"
+    assert not env.get(old).purged_at
+
+
+def test_the_preview_shows_whether_the_switch_is_on(
+    env: InquiryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result = call("preview_data_purge", {"mode": "expired"})
+    assert result["output"]["apply_enabled"] is False
+    monkeypatch.setenv(retention.ENV_INQUIRY_APPLY, "1")
+    assert call("preview_data_purge", {"mode": "expired"})["output"]["apply_enabled"] is True
+
+
+# ---------------------- 클레임이 이어진 문의는 클레임 기준(5년)
+def test_a_claim_linked_inquiry_is_kept_past_three_years_until_the_claim_deadline(
+    env: InquiryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(retention.ENV_INQUIRY_APPLY, "1")
+    linked = _make(env)
+    plain = _make(env)
+    for inquiry_id in (linked, plain):
+        _age(env, inquiry_id, 4)  # 3년은 지났고 5년은 안 지났다
+    env.log_activity(linked, kind="claim_created", title="클레임", ref="claim:7")
+    result = call("purge_expired_inquiries", {})
+    items = {i["inquiry_id"]: i for i in result["output"]["items"]}
+    assert items[plain]["action"] == "purge"
+    assert items[linked]["action"] == "blocked" and items[linked]["reasons"] == ["claim_linked"]
+    assert items[linked]["retained_until"]  # 받은 날 + 5년
+    assert env.get(plain).purged_at and not env.get(linked).purged_at
+    assert result["output"]["retained_count"] == 1
+
+
+def test_a_claim_linked_inquiry_is_purged_once_the_claim_deadline_passes(
+    env: InquiryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(retention.ENV_INQUIRY_APPLY, "1")
+    linked = _make(env)
+    _age(env, linked, 5.2)
+    env.log_activity(linked, kind="claim_created", title="클레임", ref="claim:7")
+    result = call("purge_expired_inquiries", {})
+    assert result["output"]["items"][0]["action"] == "purge"
+    assert env.get(linked).purged_at
+
+
+def test_claims_in_another_process_also_keep_the_inquiry(
+    env: InquiryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(retention.ENV_INQUIRY_APPLY, "1")
+    linked = _make(env)
+    _age(env, linked, 4)
+
+    async def claims_service(target: str, req: AgentRequest) -> AgentResult:
+        items = [{"id": 1, "conversation_id": linked}]
+        return AgentResult(meta=req.meta, status=TaskStatus.COMPLETED, output={"items": items})
+
+    monkeypatch.setattr(handlers, "SEND", claims_service)
+    result = call("purge_expired_inquiries", {})
+    assert result["output"]["items"][0]["reasons"] == ["claim_linked"]
+    assert not env.get(linked).purged_at
+
+
+def test_unreadable_claims_stop_the_expiry_sweep(
+    env: InquiryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(retention.ENV_INQUIRY_APPLY, "1")
+    old = _make(env)
+    _age(env, old, 4)
+
+    async def down(target: str, req: AgentRequest) -> AgentResult:
+        raise ConnectionError("claims service down")
+
+    monkeypatch.setattr(handlers, "SEND", down)
+    result = call("purge_expired_inquiries", {})
+    assert result["status"] == "failed" and "claims_unavailable" in str(result)
+    assert not env.get(old).purged_at  # 보존 의무를 모르면 지우지 않는다
+
+
+def test_customer_request_retained_until_follows_the_claim_deadline(env: InquiryStore) -> None:
+    request = _make(env)
+    claimed = _make(env)
+    _age(env, claimed, 1)
+    env.log_activity(claimed, kind="claim_created", title="클레임", ref="claim:7")
+    result = call("preview_data_purge", {"mode": "customer_request", "inquiry_id": request})
+    items = {i["inquiry_id"]: i for i in result["output"]["items"]}
+    until = datetime.fromisoformat(items[claimed]["retained_until"])
+    received = retention.received_at(env.get(claimed))
+    assert (until - received.replace(tzinfo=None)).days in (1824, 1825, 1826)  # 클레임 5년
 
 
 # ---------------------------------------------------------------- 고객 요청 삭제
