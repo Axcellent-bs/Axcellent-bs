@@ -225,7 +225,10 @@ def test_a_model_that_keeps_limiting_fails_after_one_retry(
     env.run()
     t = chat_handlers.CHATS.get("chat-1")
     assert Always.tries == 2  # 한 번만 다시 묻는다
-    assert t.status == "talking" and t.messages[-1].text == chat_handlers.FAILED_TEXT
+    # 다시 물어도 제한이면 1~2분 뒤를 알려 준다 (대화는 다시 열린다)
+    assert t.status == "talking" and t.messages[-1].kind == "error"
+    assert t.messages[-1].text == chat_handlers.LIMITED_TEXT
+    assert "1~2분" in chat_handlers.LIMITED_TEXT
 
 
 def test_no_llm_configured_says_so(env: Spawned, monkeypatch: pytest.MonkeyPatch) -> None:

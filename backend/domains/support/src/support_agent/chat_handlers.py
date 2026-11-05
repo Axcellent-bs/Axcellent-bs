@@ -52,6 +52,7 @@ NO_LLM_TEXT = "답변을 만드는 모델 설정이 없어서 지금은 답할 �
 RETRY_STATUS_CODES = frozenset({429, 503})
 RETRY_DELAY_SECONDS = 4.0
 FAILED_TEXT = "답을 만들지 못했어요. 잠시 뒤에 다시 보내 주세요."
+LIMITED_TEXT = "외부 AI 모델이 잠깐 요청을 막고 있어요. 1~2분 뒤에 다시 보내 주세요."
 EMPTY_TEXT = "답할 내용을 만들지 못했어요. 질문을 조금 바꿔서 다시 보내 주세요."
 CLOSED_TEXT = "닫힌 대화다. 새 대화로 보내 주세요"
 BUSY_TEXT = "답을 만드는 중이다. 잠시 뒤에 보내 주세요"
@@ -141,6 +142,11 @@ async def _answer(thread_id: str, context: dict[str, Any]) -> None:
                 text, kind = EMPTY_TEXT, "error"
         except LLMNotConfiguredError:
             text, kind = NO_LLM_TEXT, "error"
+        except LLMResponseError as exc:
+            logger.warning("대화 답을 만들지 못했다 (%s)", thread_id, exc_info=True)
+            # 다시 물어도 호출 제한(429·503)이면 1분 단위로 풀리는 한도라 1~2분 뒤를 알려 준다
+            limited = exc.status_code in RETRY_STATUS_CODES
+            text, kind = (LIMITED_TEXT if limited else FAILED_TEXT), "error"
         except Exception:  # noqa: BLE001 - 모델 오류는 대화에 한 줄로만 남긴다 (예외 내용은 싣지 않는다)
             logger.warning("대화 답을 만들지 못했다 (%s)", thread_id, exc_info=True)
             text, kind = FAILED_TEXT, "error"
