@@ -230,3 +230,40 @@ def test_grouping_is_off_without_config(tmp_path: Path) -> None:
     ).output
     assert sorted(c.keyword for c in out.candidates) == ["이상호", "축구"]
     assert out.auto_groups == [] and out.naver_calls == 2
+
+
+# ---------------------------------------------------------------- 같은 대상 (형식 빌리기 판정)
+
+
+def test_same_target_comes_from_applied_auto_groups_only() -> None:
+    """자동 묶음(applied)만 같은 대상. 제안(applied=false)·이름 하나는 쓰지 않는다."""
+    from data_agent.skills.trend_candidates import auto_same_targets
+
+    output = {"auto_groups": [
+        {"names": ["메이플", "메이플스토리"], "correlation": 0.9752, "applied": True},
+        {"names": ["리그오브레전드", "t1"], "correlation": 0.82, "applied": False},  # 제안
+        {"names": ["메이플", "#MapleStory "], "applied": True},
+        {"names": ["혼자"], "applied": True},
+    ]}  # fmt: skip
+    assert auto_same_targets(output) == {"메이플": ("메이플스토리", "maplestory")}
+    assert auto_same_targets(None) == {} and auto_same_targets({}) == {}
+
+
+def test_brief_same_targets_are_auto_groups_plus_override(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    from data_agent import handlers
+    from data_agent.response_cache import ResponseCache
+
+    cache = ResponseCache(tmp_path / "responses.db")
+    groups = [{"names": ["메이플", "메이플스토리"], "applied": True}]
+    cache.put("k1", ["known", {"auto_groups": []}, {}], "trend_candidates")
+    cache.put("k2", ["known", {"auto_groups": groups}, {}], "trend_candidates")  # 최근 것
+    monkeypatch.setattr(handlers, "RESPONSES", cache)
+    cfg = tmp_path / "trends.toml"
+    cfg.write_text("[candidates]\n", encoding="utf-8")
+    assert handlers.cand_same_targets({"DATA_TREND_CONFIG": str(cfg)}) == {
+        "메이플": ("메이플스토리",)}  # fmt: skip
+    # 사람 덮어쓰기: 자동으로는 안 묶이는 쌍을 더한다
+    cfg.write_text('[candidates.same_target]\n"리그오브레전드" = ["t1"]\n', encoding="utf-8")
+    assert handlers.cand_same_targets({"DATA_TREND_CONFIG": str(cfg)}) == {
+        "메이플": ("메이플스토리",), "리그오브레전드": ("t1",)}  # fmt: skip
+    assert ResponseCache().latest("trend_candidates") is None  # 메모리 저장은 없음
