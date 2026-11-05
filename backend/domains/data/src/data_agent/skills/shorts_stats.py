@@ -16,6 +16,11 @@
   있는 영상만), 조회수 상위 3개(제목·조회수). 표본이 `min_sample`(5)개 미만이면 unknown + "표본
   부족"
 - 한계: 인기 영상 상위 200개 안에서의 비교라 이미 뜬 영상끼리 비교한다(검색 표본도 조회수 순)
+- 화면 카드(`by_category[].videos`): 카테고리마다 조회수 순 `screen_videos`개(기본 10).
+  이미 모은 숏츠 안에서만 고르고 더 검색하지 않는다. 표본 부족 칸도 준다.
+  영상마다 분류(위 분류 저장분), 광고 재료 칸(`caution.judge`),
+  구독자 대비 조회(channels.list 채널 50개 = 1단위, 그 영상들 채널만, 저장 재사용,
+  하루 상한 `channel_calls`). 통계 칸(수·평균·중앙값·top)은 이 카드와 무관하다
 """
 
 from __future__ import annotations
@@ -45,6 +50,7 @@ from ax_contracts.schemas.data import (
     ShortsStatsRequest,
     ShortsVideo,
 )
+from data_agent import caution
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.llm_budget import no_llm
 from data_agent.skills.topic_category import CategoryCache, TopicInput, classify_topics
@@ -98,6 +104,10 @@ class ShortsConfig:
     language: str = "ko"
     # 시간당 조회: 두 번 본 간격이 이 분보다 짧으면 잰 값으로 쓰지 않고 "측정 중"
     min_recheck_minutes: int = 50
+    # 화면 카드: 카테고리마다 주는 숏츠 수 (이미 모은 숏츠 안에서만)
+    screen_videos: int = 10
+    # 화면 카드 구독자 대비: channels.list 하루 호출 상한 (한 번 = 채널 50개·1단위)
+    channel_calls: int = 2
 
 
 def load_config(env: Mapping[str, str]) -> ShortsConfig:
@@ -121,6 +131,8 @@ def load_config(env: Mapping[str, str]) -> ShortsConfig:
             min_recheck_minutes=max(
                 1, int(raw.get("min_recheck_minutes", base.min_recheck_minutes))
             ),
+            screen_videos=max(0, int(raw.get("screen_videos", base.screen_videos))),
+            channel_calls=max(0, int(raw.get("channel_calls", base.channel_calls))),
         )
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return ShortsConfig()
@@ -151,6 +163,9 @@ class ShortsStore:
                 # 받은 응답에 있던 썸네일 주소 (썸네일을 위해 더 부르지 않음)
                 "CREATE TABLE IF NOT EXISTS thumbnails (video_id TEXT PRIMARY KEY,"
                 " url TEXT NOT NULL, at TEXT NOT NULL);"
+                # 받은 응답(검색·다시 조회)에 있던 채널 id (구독자 대비를 위해 더 부르지 않음)
+                "CREATE TABLE IF NOT EXISTS video_channels (video_id TEXT PRIMARY KEY,"
+                " channel_id TEXT NOT NULL, at TEXT NOT NULL);"
             )
             for table in ("searches", "searched_videos"):
                 cols = [r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")]
@@ -215,10 +230,28 @@ class ShortsStore:
             for v in videos
             if (url := getattr(v, "thumbnail_url", None))
         ]
+        channels = [
+            (v.video_id, cid, at.isoformat())
+            for v in videos
+            if (cid := getattr(v, "channel_id", None))
+        ]
         with self._lock, self._conn:
             self._conn.executemany("INSERT OR REPLACE INTO views VALUES (?,?,?)", rows)
             self._conn.executemany("INSERT OR REPLACE INTO thumbnails VALUES (?,?,?)", thumbs)
+            self._conn.executemany("INSERT OR REPLACE INTO video_channels VALUES (?,?,?)", channels)
         return len(rows)
+
+    def channels(self, ids: Sequence[str]) -> dict[str, str]:
+        """영상 id → 저장된 채널 id (없으면 빠진다)."""
+        if not ids:
+            return {}
+        marks = ",".join("?" * len(ids))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT video_id, channel_id FROM video_channels WHERE video_id IN ({marks})",  # noqa: S608
+                list(ids),
+            ).fetchall()
+        return {vid: cid for vid, cid in rows if cid}
 
     def thumbnails(self, ids: Sequence[str]) -> dict[str, str]:
         """영상 id → 저장된 썸네일 주소 (없으면 빠진다)."""
@@ -348,6 +381,11 @@ class _Short:
     measuring: bool = False  # 두 번 봤지만 간격이 기준 미만이라 측정 중
     extra: dict[str, Any] = field(default_factory=dict)
     thumbnail_url: str | None = None  # 저장된 응답 값만
+    # 화면 카드 칸 (통계에는 쓰지 않는다)
+    channel_id: str | None = None
+    subscribers: int | None = None
+    subscriber_reason: str | None = None
+    ad: caution.Caution | None = None  # 광고 재료 칸 (분류 결과로)
 
 
 async def classify_formats(
@@ -391,6 +429,48 @@ async def classify_formats(
 # ---------------------------------------------------------------- 계산
 
 
+def _video(s: _Short) -> ShortsVideo:
+    """통계 `top`의 영상 한 줄 (예전과 같은 칸)."""
+    return ShortsVideo(
+        video_id=s.video_id,
+        title=s.title or None,
+        channel_title=s.channel_title,
+        views=s.views,
+        views_per_hour=s.views_per_hour,
+        velocity_status=(
+            "measuring"
+            if s.measuring
+            else "pending"
+            if s.pending
+            else "known"
+            if s.views_per_hour is not None
+            else None
+        ),  # fmt: skip
+        video_url=video_url(s.video_id, short=True),
+        thumbnail_url=s.thumbnail_url,
+    )
+
+
+def _screen_video(s: _Short) -> ShortsVideo:
+    """화면 카드 영상: `top` 칸 + 분류·구독자 대비·광고 재료 칸."""
+    per_sub = round(s.views / s.subscribers, 2) if s.views is not None and s.subscribers else None
+    reason = s.subscriber_reason
+    if per_sub is None and reason is None:
+        reason = "조회수를 몰라 구독자 대비를 셀 수 없음" if s.views is None else "구독자 수 0"
+    ad = s.ad or caution.judge(None, real_entity=None, is_person=None)
+    return _video(s).model_copy(
+        update={
+            "category": s.category,
+            "channel_subscribers": s.subscribers,
+            "views_per_subscriber": per_sub,
+            "subscriber_reason": None if per_sub is not None else reason,
+            "ad_usable": ad.ad_usable,
+            "caution_types": list(ad.types),
+            "caution_reason": ad.reason,
+        }
+    )
+
+
 def group_stats(
     shorts: Sequence[_Short], key: str, names: Sequence[str], config: ShortsConfig
 ) -> list[ShortsGroup]:
@@ -416,6 +496,12 @@ def group_stats(
             )
         velocity_reason = ", ".join(notes) or None
         top = sorted((s for s in mine if s.views is not None), key=lambda s: -(s.views or 0))
+        # 카테고리 그룹만: 화면 카드 (조회수 순, 조회수를 모르는 숏츠는 뒤). 표본 부족 칸도 준다
+        screen = (
+            [_screen_video(s) for s in screen_pick(mine, config.screen_videos)]
+            if key == "category"
+            else []
+        )
         # 카테고리 그룹만: 그 카테고리 숏츠의 형식별 수 (브리프가 주제 숏츠가 없을 때 쓴다)
         formats = (
             [
@@ -436,6 +522,7 @@ def group_stats(
                     velocity_reason=velocity_reason,
                     velocity_measuring=measuring,
                     formats=formats,
+                    videos=screen,
                 )
             )
             continue
@@ -452,27 +539,8 @@ def group_stats(
                 formats=formats,
                 median_views=round(statistics.median(views), 1) if views else None,
                 median_views_per_hour=round(statistics.median(speeds), 1) if speeds else None,
-                top=[
-                    ShortsVideo(
-                        video_id=s.video_id,
-                        title=s.title or None,
-                        channel_title=s.channel_title,
-                        views=s.views,
-                        views_per_hour=s.views_per_hour,
-                        velocity_status=(
-                            "measuring"
-                            if s.measuring
-                            else "pending"
-                            if s.pending
-                            else "known"
-                            if s.views_per_hour is not None
-                            else None
-                        ),  # fmt: skip
-                        video_url=video_url(s.video_id, short=True),
-                        thumbnail_url=s.thumbnail_url,
-                    )
-                    for s in top[: config.top_videos]
-                ],
+                top=[_video(s) for s in top[: config.top_videos]],
+                videos=screen,
             )
         )
     # 대표값은 중앙값 (몇 개의 큰 영상이 평균을 끌어올리는 것을 막는다). 평균은 보조 칸
@@ -510,7 +578,11 @@ async def shorts_stats(
     own = store is None
     store = store or ShortsStore(env.get(SHORTS_DB_ENV) or SHORTS_DEFAULT_DB)
     try:
-        return await _run(config, youtube, llm, db, store, now, today, context_id, category_cache)
+        from data_agent.skills.trend_popular import FILL_DB_ENV, FILL_DEFAULT_DB
+
+        calls_db = env.get(FILL_DB_ENV) or str(FILL_DEFAULT_DB)
+        return await _run(config, youtube, llm, db, store, now, today, context_id, category_cache,
+                          calls_db)  # fmt: skip
     finally:
         if own:
             store.close()
@@ -526,6 +598,7 @@ async def _run(
     today: date,
     context_id: str | None,
     category_cache: CategoryCache | None,
+    calls_db: str = ":memory:",
 ) -> ShortsResult:
     out = ShortsStatsOutput(max_seconds=config.max_seconds, limitation=LIMITATION)
     queries: list[str] = []
@@ -567,6 +640,8 @@ async def _run(
                                         views.get(v.video_id), speeds.get(v.video_id),
                                         tuple(v.tags), "popular")  # fmt: skip
         shorts[v.video_id].measuring = popular_measuring
+        stored = snaps[0].videos.get(v.video_id) if snaps else None
+        shorts[v.video_id].channel_id = stored.channel_id if stored else None
     out.popular_shorts = len(shorts)
 
     # 2. 표본 넓히기: 카테고리별 숏츠 검색 하루 1번 (저장)
@@ -645,6 +720,16 @@ async def _run(
         c = cats.get(s.title or s.video_id)
         s.category = c.category if c else UNKNOWN
         s.format = (known_formats.get(s.video_id) or fresh.get(s.video_id) or (UNKNOWN, None))[0]
+        s.ad = caution.judge(
+            s.category,
+            real_entity=c.real_entity if c else None,
+            is_person=c.is_person if c else None,
+            names=c.entity_names if c else (),
+            basis="영상 분류",
+        )
+
+    # 화면 카드 숏츠의 채널 구독자 (그 숏츠들 채널만, 저장 재사용, 하루 상한). 통계에는 쓰지 않는다
+    await _screen_subscribers(config, youtube, db, store, items, now, today, queries, calls_db)
 
     # 4. 계산
     from data_agent.skills.topic_category import TOPIC_CATEGORIES
@@ -669,6 +754,61 @@ async def _run(
         lines.append(f"검색: {out.search_reason}")
     return ShortsResult(out, Evidence(queries=queries, data_summary="\n".join(lines),
                                       collected_at=now))  # fmt: skip
+
+
+def screen_pick(items: Sequence[_Short], limit: int) -> list[_Short]:
+    """카테고리마다 화면 카드로 줄 숏츠 (조회수 순, 모르는 것은 뒤, `limit`개까지)."""
+    out: list[_Short] = []
+    for cat in dict.fromkeys(s.category for s in items):
+        mine = [s for s in items if s.category == cat]
+        out += sorted(mine, key=lambda s: (s.views is None, -(s.views or 0)))[:limit]
+    return out
+
+
+async def _screen_subscribers(
+    config: ShortsConfig,
+    youtube: Any,
+    db: str,
+    store: ShortsStore,
+    items: Sequence[_Short],
+    now: datetime,
+    today: date,
+    queries: list[str],
+    calls_db: str,
+) -> None:
+    """화면 카드 숏츠마다 채널 구독자 수와 못 받은 이유를 채운다 (`trend_evidence.subscribers`).
+
+    하루 호출 수는 `calls_db`(trend_popular 근거와 같은 파일)에 `shorts_channels`로 따로 센다.
+    """
+    from data_agent.skills import trend_evidence as ev
+
+    pick = screen_pick(items, config.screen_videos)
+    if not pick:
+        return
+    saved = store.channels([s.video_id for s in pick if s.channel_id is None])
+    for s in pick:
+        s.channel_id = s.channel_id or saved.get(s.video_id)
+    channels = [s.channel_id for s in pick if s.channel_id]
+    if channels:
+        evidence = ev.EvidenceStore(calls_db)
+        try:
+            subs, why = await ev.subscribers(
+                db, channels, youtube=youtube, store=evidence, cap=config.channel_calls,
+                now=now, today=today, queries=queries, kind="shorts_channels",
+            )  # fmt: skip
+        finally:
+            evidence.close()
+    else:
+        subs, why = {}, None
+    for s in pick:
+        if s.channel_id is None:
+            s.subscriber_reason = "채널 모름 (예전 검색 저장분, 다음 다시 조회 때 채움)"
+        elif s.channel_id in subs and subs[s.channel_id] is None:
+            s.subscriber_reason = "채널이 구독자 수를 숨김"
+        elif s.channel_id not in subs:
+            s.subscriber_reason = why or "구독자 수를 받지 못함"
+        else:
+            s.subscribers = subs[s.channel_id]
 
 
 _HANGUL = re.compile("[\uac00-\ud7a3]")
