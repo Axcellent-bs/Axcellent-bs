@@ -107,6 +107,7 @@ hr 연동 항목 규칙 (`domain/handover.py`, 시연값):
   - 기획 서비스가 넘긴 작업(`handed_to_dev`이고 `origin`이 dev_team이 아님) + 고를 파일 후보 없음 + 담당 경로도 레포에 없음 → `returned`(작업 `중단`, `returned_to`·`returned_reason`, 활동 `code.return`). PR·커밋 없음. 바뀐 작업은 `receive_dev_result`로 기획에 가고, 기획이 받은 요청 사람 확인에 올린다.
   - 그 밖(후보·담당 경로가 있음, 개발팀이 직접 낸 기획) → `waiting_human` + 같은 이유(LLM 판단만으로 튕기지 않는다).
   - 사람이 **개발에 다시 맡기기**: 개발 화면 다시 시도(`retry`) 또는 기획이 `keep_dev: true`인 기획서로 `start_dev`를 다시 보냄 → 기획서 `keep_dev`가 켜지고 그 작업은 처음부터 다시 코딩한다. `keep_dev` 기획서는 다시 돌려보내지 않는다(핑퐁 방지).
+- 사람이 돌려보내기: `POST /dev-tasks/{task_id}/return` `{to(marketing·support·finance·hr·data·other), reason(한 줄, 필수)}`(사람 토큰, 관문 `dev_task_return` A) → 돌고 있으면 멈추고 열린 PR은 닫은 뒤 `not_code`와 같은 `returned`(작업 `중단`). 내 Claude 작업에도 된다. 머지·반영·폐기했거나 이미 돌려보낸 작업은 409 `NOT_RETURNABLE`. 화면은 코딩 카드의 [기획으로 돌려보내기](부서 + 이유).
 - 폐기: `POST /dev-tasks/{task_id}/discard`(사람 토큰, 관문 `dev_task_discard` A) → `{task_id, discarded: true}`. 중단·실패·돌려보낸 작업만(돌고 있거나 열린 PR이 있으면 409 `NOT_DISCARDABLE` → 먼저 중단). 작업에 `discarded`·`discarded_by`·`discarded_at`만 표시하고, 폐기한 작업은 재개·다시 시도가 막힌다(409 `NOT_RETRYABLE`). 작업 현황 목록은 폐기한 작업을 기본으로 숨기고 "폐기 보기"로 켠다.
 - 교차검증 대기가 `PLANNING_CROSS_CHECK_TIMEOUT_MIN`(기본 10분) 넘으면 사람 확인으로 넘긴다(화면 SSE가 열려 있는 동안 확인, 활동 `auto_review`).
 - 브랜치가 이미 있으면 제목·바꾼 파일이 같은 앞선 시도일 때만 이어받고, 아니면(서버를 다시 켜 작업 번호가 겹침 등) `gen/<작업>-<실행>-<6자리>` 새 브랜치로 올린다.

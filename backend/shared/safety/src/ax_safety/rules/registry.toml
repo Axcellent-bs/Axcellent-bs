@@ -475,6 +475,13 @@ owner = "planning"
 requesters = ["planning", "dev"]
 base_grade = "A"
 
+# 사람이 개발 작업을 기획에 돌려보내기 (코드 변경이 아닌 일). 열린 PR은 닫고(머지 안 됨) 기록만 남겨 A
+[[actions]]
+action = "dev_task_return"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
 # 멈춘 코딩 작업 사람 폐기 (중단·실패·돌려보낸 작업, 열린 PR 없음). 기록에 표시만 해서 A
 [[actions]]
 action = "dev_task_discard"
