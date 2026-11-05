@@ -104,7 +104,7 @@ export function CopilotPanel({ conv, onUseDraft, onRejectDraft, onClaimCreated, 
           <h3 className="panel-title mb-2">연결된 주문 · 클레임</h3>
           <div className="space-y-2">
             <p className="rounded-xl border border-ink-100 bg-surface px-3 py-2 text-xs">주문 <b>{conv.order_no ?? conv.order_id}</b> — 답변 초안은 이 영수증과 아래 판정을 근거로 만들어집니다.</p>
-            <ReceiptAnalysisCard key={conv.id} conversationId={conv.id} />
+            <ReceiptAnalysisCard key={conv.id} conversationId={conv.id} activity={conv.activity} />
             {conv.claims.map((c) => (
               <Link key={c.id} href={`/claims?id=${c.id}`} className="block rounded-xl border border-ink-100 bg-surface p-3 text-xs hover:border-brand-500">
                 <div className="flex items-center gap-2"><StatusChip status={c.status} /><b>{CLAIM_TYPE_KO[c.type]} · {CLAIM_REASON_KO[c.reason]}</b><span className="ml-auto text-ink-500">#{c.id}</span></div>
