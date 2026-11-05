@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
-import type { DataFact, VideoLink } from "@/lib/data";
+import { TONE } from "@/components/finance/bits";
+import type { CautionType, DataFact, VideoLink } from "@/lib/data";
 
 // 2단계 인사이트 v2 카드 틀 (v2 시안 ② 보드). 인사이트 카드와 기회 가설 카드가 같이 쓴다.
 // 왼쪽: 판정 칩 하나 → 제목 → 한 문장(서버 line) → 숫자 타일(서버 값이 있는 것만) → 연결 상품 → "근거 전체 보기" 접힘 하나
@@ -44,6 +45,24 @@ export function ThumbImage({ src, alt, className = "", children }: { src: string
       {children}
     </span>
   );
+}
+
+const CAUTION_LABEL: Record<CautionType, string> = { real_person: "실존 인물", trademark: "상표", music: "음원" };
+type CautionFields = { ad_usable?: boolean | null; caution_types?: CautionType[]; caution_reason?: string | null };
+
+/** 서버 광고 재료 칸이 있는지 (예전 응답·칸 없는 영상은 false) */
+export const hasCaution = (v: CautionFields) => typeof v.ad_usable === "boolean" || (v.caution_types?.length ?? 0) > 0;
+
+/** 영상 칩 하나 (서버 ad_usable·caution_types 그대로, #678). 확인할 것이 있으면 "실존 인물·음원 주의"처럼 노랑,
+ *  없고 ad_usable true면 "광고 재료 가능" 초록. 모르면(null) 그리지 않는다. 마우스를 올리면 서버 이유 */
+export function CautionChip({ v, className = "text-xs" }: { v: CautionFields; className?: string }) {
+  const types = v.caution_types ?? [];
+  if (types.length > 0) {
+    return <span className={`chip ${className} ${TONE.warn}`} title={v.caution_reason ?? undefined}>{types.map((t) => CAUTION_LABEL[t]).join("·")} 주의</span>;
+  }
+  if (v.ad_usable === true) return <span className={`chip ${className} ${TONE.ok}`}>광고 재료 가능</span>;
+  if (v.ad_usable === false) return <span className={`chip ${className} ${TONE.muted}`} title={v.caution_reason ?? undefined}>광고에 안 씀</span>;
+  return null;
 }
 
 /** 브리프 facts 중 이 항목(about = insight_id·opportunity_id)이거나 fact_ids가 가리키는 숫자의 근거 주소 */
