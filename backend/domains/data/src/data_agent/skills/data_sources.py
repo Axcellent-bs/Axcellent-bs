@@ -8,6 +8,9 @@
   승인된 것으로 본다. 새 출처 수집은 회사 설정 `[sources] approved`에 출처 id를 적어야 시작한다
   (상태 변경이라 원래는 승인 레지스트리가 필요하다. 지금은 설정 파일 플래그로 대신한다)
 - 한도·기능은 공식 문서 기준이고, 문서로 확인하지 못한 수치는 `quota_note`에 "미확인"으로 적는다
+- 스냅샷 수집기 상태(`collectors`): YouTube·인기 검색어 수집기가 돌고 있는지(잠금 파일의 pid,
+  `collector_lock.status`)와 마지막 저장 스냅샷 시각. 돌고 있지 않거나 마지막 수집이
+  `DATA_COLLECTOR_MAX_AGE_HOURS`(기본 2)시간보다 오래되면 "수집 멈춤" 경고
 README "data_sources".
 """
 
@@ -24,11 +27,13 @@ from typing import Literal
 
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
+    CollectorStatus,
     DataSource,
     DataSourcesOutput,
     SourceDataKind,
     SourceStatus,
 )
+from data_agent import collector_lock
 from data_agent.connectors import data4library, kosis, naver_shopping
 from data_agent.connectors.naver_datalab import CLIENT_ID_ENV, CLIENT_SECRET_ENV
 from data_agent.connectors.youtube import KEY_ENV as YOUTUBE_KEY_ENV
@@ -250,4 +255,68 @@ async def list_sources(
         f"출처 {len(out.sources)}개: 사용 가능 {', '.join(ready) or '없음'},"
         f" 키 필요 {', '.join(need) or '없음'}"
     )
+    out.collectors = collector_states(env, now)  # 요약 문장은 그대로 (출처 목록만 센다)
     return SourcesResult(out, Evidence(queries=queries, data_summary=out.summary, collected_at=now))
+
+
+# ---------------------------------------------------------------- 스냅샷 수집기 상태
+
+COLLECTOR_MAX_AGE_ENV = "DATA_COLLECTOR_MAX_AGE_HOURS"
+COLLECTOR_MAX_AGE_HOURS = 2.0  # 마지막 수집이 이보다 오래되면 "수집 멈춤" (1시간마다 수집 기준)
+
+
+def collector_max_age(env: Mapping[str, str]) -> float:
+    """수집 멈춤 기준(시간). 설정 `DATA_COLLECTOR_MAX_AGE_HOURS`, 숫자가 아니거나 0 이하면 2."""
+    try:
+        value = float(str(env.get(COLLECTOR_MAX_AGE_ENV, "")).strip())
+    except ValueError:
+        return COLLECTOR_MAX_AGE_HOURS
+    return value if value > 0 else COLLECTOR_MAX_AGE_HOURS
+
+
+def _last_at(path: Path, sql: str) -> datetime | None:
+    if not path.is_file():
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=5.0)
+        try:
+            row = conn.execute(sql).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError:
+        return None
+    return datetime.fromisoformat(row[0]).astimezone(UTC) if row and row[0] else None
+
+
+def collector_states(env: Mapping[str, str], now: datetime) -> list[CollectorStatus]:
+    """YouTube·인기 검색어 수집기: 잠금(돌고 있는지·pid)과 마지막 저장 스냅샷 시각. 읽기만 한다."""
+    from data_agent import trending_collect, youtube_collect, youtube_store
+    from data_agent.trending_store import DB_ENV as TRENDING_ENV
+    from data_agent.trending_store import DEFAULT_DB as TRENDING_DB
+
+    max_age = collector_max_age(env)
+    rows = (
+        ("youtube_collect", "YouTube 스냅샷 수집기", youtube_collect.lock_path(env),
+         Path(env.get(youtube_store.DB_ENV) or youtube_store.DEFAULT_DB), "snapshots"),
+        ("trending_collect", "인기 검색어 수집기", trending_collect.lock_path(env),
+         Path(env.get(TRENDING_ENV) or TRENDING_DB), "trending"),
+    )  # fmt: skip
+    out: list[CollectorStatus] = []
+    for cid, name, lock, db, table in rows:
+        state = collector_lock.status(lock)
+        last = _last_at(db, f"SELECT MAX(collected_at) FROM {table}")  # noqa: S608 - 고정 표 이름
+        age = (now - last).total_seconds() / 3600 if last else None
+        warning = None
+        if not state.running:
+            warning = f"수집 멈춤: 수집기가 돌고 있지 않음 ({state.reason})"
+        elif age is None:
+            warning = "수집 멈춤: 저장된 스냅샷이 없음"
+        elif age > max_age:
+            warning = f"수집 멈춤: 마지막 수집 {age:.1f}시간 전 (기준 {max_age:g}시간)"
+        started = datetime.fromisoformat(state.started_at) if state.started_at else None
+        out.append(CollectorStatus(
+            collector_id=cid, name=name, running=state.running, pid=state.pid,
+            started_at=started, last_collected_at=last, max_age_hours=max_age,
+            stalled=warning is not None, warning=warning, reason=state.reason,
+        ))  # fmt: skip
+    return out

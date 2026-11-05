@@ -1972,10 +1972,27 @@ class DataSource(AxModel):
     approved: bool = False  # 사람이 수집을 승인했는지 (설정 파일 승인 플래그, 기존 출처는 True)
 
 
+class CollectorStatus(AxModel):
+    """스냅샷 수집기 하나의 상태 (YouTube·인기 검색어). 잠금 파일과 저장된 스냅샷 시각으로 본다."""
+
+    collector_id: str = Field(min_length=1)  # youtube_collect, trending_collect
+    name: str  # 화면 이름
+    running: bool  # 잠금이 잡혀 있고 적힌 pid가 살아 있음
+    pid: int | None = None
+    started_at: UtcDatetime | None = None  # 지금 수집기가 켜진 시각
+    last_collected_at: UtcDatetime | None = None  # 마지막으로 저장된 스냅샷 시각 (없으면 None)
+    max_age_hours: float = Field(gt=0)  # 이보다 오래되면 수집 멈춤 (설정)
+    stalled: bool  # 돌고 있지 않거나 마지막 수집이 max_age_hours보다 오래됨
+    warning: str | None = None  # stalled면 "수집 멈춤: ..." 한 줄
+    reason: str  # 잠금 상태 한 줄 (사람이 읽음)
+
+
 class DataSourcesOutput(AxModel):
     sources: list[DataSource] = Field(default_factory=list)
     checked_at: UtcDatetime | None = None
     summary: str = ""
+    # 아래는 예전 응답은 없다. 스냅샷 수집기 상태 (출처 현황에 같이 보인다)
+    collectors: list[CollectorStatus] = Field(default_factory=list)
 
 
 # ------------------------------------------------ 수집 계획 (source_plan)
