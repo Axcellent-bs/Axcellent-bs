@@ -153,11 +153,18 @@ def insight_id(day: date, topic: str) -> str:
     return f"ins_{day:%Y%m%d}_{digest}"
 
 
-def stable_insight_id(tenant: str, topic: str, category: str | None) -> str:
-    """날짜 없는 id: 테넌트 + 정규화 주제 + 카테고리 해시. 같은 주제면 날이 바뀌어도 같다.
+def stable_insight_id(tenant: str, topic: str) -> str:
+    """날짜·카테고리 없는 id: 테넌트 + 정규화 주제 해시. 같은 주제면 날·분류가 바뀌어도 같다.
 
-    시점은 브리프 `generated_at`·`snapshot_id`로 본다. 분류가 바뀌면(분류 대기 → 분류) id도 바뀐다.
+    시점은 브리프 `generated_at`·`snapshot_id`로 본다. 분류가 바뀌어도(분류 대기 → 분류,
+    게임 → IT) 같은 id라 기획이 이어 볼 수 있다.
     """
+    key = f"{_norm(tenant)}|{_norm(topic)}"
+    return "ins_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def category_insight_id(tenant: str, topic: str, category: str | None) -> str:
+    """바로 전 방식의 id (테넌트 + 정규화 주제 + 카테고리). 지금은 `legacy_insight_id`로만 준다."""
     key = f"{_norm(tenant)}|{_norm(topic)}|{category or 'unknown'}"
     return "ins_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
@@ -565,8 +572,11 @@ def build_insights(
         limits += ev.missing
         out.append(
             TrendInsight(
-                insight_id=stable_insight_id(tenant, c.topic, c.category()),
-                legacy_insight_id=insight_id(day, c.topic),
+                insight_id=stable_insight_id(tenant, c.topic),
+                # 바뀌기 전 id: 바로 전(카테고리 포함)과 그 전(날짜 + 주제). 기획 기록과 잇기
+                legacy_insight_id=category_insight_id(tenant, c.topic, c.category()),
+                legacy_insight_ids=[category_insight_id(tenant, c.topic, c.category()),
+                                    insight_id(day, c.topic)],  # fmt: skip
                 rank=1,
                 topic=c.topic,
                 aliases=c.aliases,

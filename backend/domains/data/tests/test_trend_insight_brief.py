@@ -481,12 +481,16 @@ def test_brief_is_rebuilt_when_the_code_changes(tmp_path: Path, monkeypatch) -> 
 # ------------------------------------------------ facts·안정 insight_id·schema_version
 
 
-def test_stable_insight_id_has_no_date_and_keeps_the_legacy_id() -> None:
-    a = brief.stable_insight_id("캣북스", "리그오브레전드", "게임")
-    assert a == brief.stable_insight_id("캣북스", " 리그 오브레전드 ".replace(" 오", "오"), "게임")
-    assert a != brief.stable_insight_id("다른회사", "리그오브레전드", "게임")
-    assert a != brief.stable_insight_id("캣북스", "리그오브레전드", "IT")
+def test_stable_insight_id_has_no_date_or_category_and_keeps_the_legacy_ids() -> None:
+    a = brief.stable_insight_id("캣북스", "리그오브레전드")
+    assert a == brief.stable_insight_id("캣북스", " 리그 오브레전드 ".replace(" 오", "오"))
+    assert a != brief.stable_insight_id("다른회사", "리그오브레전드")
+    assert a != brief.stable_insight_id("캣북스", "롤토체스")
     assert "2026" not in a
+    # 분류가 바뀌어도 같은 id (예전 방식은 카테고리마다 달랐다)
+    old_game = brief.category_insight_id("캣북스", "리그오브레전드", "게임")
+    old_it = brief.category_insight_id("캣북스", "리그오브레전드", "IT")
+    assert old_game != old_it and a not in (old_game, old_it)
 
 
 def test_brief_numbers_are_all_in_facts_with_ids_and_schema(tmp_path: Path) -> None:
@@ -496,8 +500,10 @@ def test_brief_numbers_are_all_in_facts_with_ids_and_schema(tmp_path: Path) -> N
     assert out.schema_version == brief.SCHEMA_VERSION and out.snapshot_id
     by_id = {f.fact_id: f for f in out.facts}
     lol = next(i for i in out.insights if i.topic == "리그오브레전드")
-    assert lol.legacy_insight_id == brief.insight_id(DAY, "리그오브레전드")
-    assert lol.insight_id == brief.stable_insight_id("default", "리그오브레전드", "게임")
+    old = brief.category_insight_id("default", "리그오브레전드", "게임")
+    assert lol.legacy_insight_id == old
+    assert lol.legacy_insight_ids == [old, brief.insight_id(DAY, "리그오브레전드")]
+    assert lol.insight_id == brief.stable_insight_id("default", "리그오브레전드")
     assert lol.fact_ids and all(fid in by_id for fid in lol.fact_ids)
     mine = {by_id[fid].label: by_id[fid] for fid in lol.fact_ids}
     assert mine["YouTube 인기 영상 수"].link == "https://www.youtube.com/watch?v=v1"

@@ -191,7 +191,7 @@ class MemoryConnector:
    - 숫자는 코드가 낸다. LLM은 분류와 문장만 쓴다. 문장(한 줄·요약) 속 숫자가 facts에 없으면 고정 문장으로 바꾼다
    - 모르는 숫자는 facts에 넣지 않고 칸은 None + 이유다. 0으로 채우지 않는다
 2. **기획 숫자는 target**: 목표 숫자는 기획이 정해 기획 쪽 `target`에 적는다. 데이터의 `target_views_reference`는 참고값일 뿐이다(하위 주제 숏츠 표본이 5개 미만이면 None + "표본 부족"). 기획이 정할 것은 카드의 `planning_decides`에 있다
-3. **ID 사슬**: `insight_id`(날짜 없음, 테넌트 + 주제 + 카테고리) / `opportunity_id` → 기획 `proposal_id` → `campaign_effect` 요청에 둘 다 → 응답에 그대로 → 기획 결과 기록. 숫자 하나는 `fact_id`, 시점은 `generated_at`·`snapshot_id`, 쓴 수집 계획은 `plan_id`. 예전 날짜 id는 `legacy_insight_id`
+3. **ID 사슬**: `insight_id`(날짜·카테고리 없음, 테넌트 + 정규화 주제. 분류가 바뀌어도 같은 id) / `opportunity_id` → 기획 `proposal_id` → `campaign_effect` 요청에 둘 다 → 응답에 그대로 → 기획 결과 기록. 숫자 하나는 `fact_id`, 시점은 `generated_at`·`snapshot_id`, 쓴 수집 계획은 `plan_id`. 바로 전 id(테넌트 + 주제 + 카테고리)는 `legacy_insight_id`, 바뀌기 전 id 전부(카테고리 포함 id, 날짜 + 주제 id)는 `legacy_insight_ids`
 4. **schema_version**: 응답 모양 버전(브리프 `trend_insight_brief.v3`, campaign_effect `campaign_effect.v2`). 칸이 늘면 올린다. 계약은 추가만 하므로 예전 칸은 그대로 읽힌다
 5. **재무로 넘길 숫자**: `gmv_krw` = `sales.incremental_gross_krw`, `orders` = `incremental_orders`(둘 다 증분, 대응표는 campaign_effect 절)
 
