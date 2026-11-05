@@ -155,6 +155,39 @@ def _same_insight(s: State, ref: str, frm: str) -> Proposal | None:
     return next((p for p in s.proposals if p.insight_id == ref and p.from_ == frm), None)
 
 
+# 이 기간 안에 받은 제안과 견준다 (폐기한 것 포함: 사람이 버린 걸 다시 올리지 않게)
+SIMILAR_DAYS = 30
+SIMILAR_TITLE = 0.8  # 제목 두 글자 묶음 겹침 비율이 이 이상이면 같은 제안으로 본다
+
+
+def _bigrams(text: str) -> set[str]:
+    t = "".join(ch for ch in text.lower() if ch.isalnum())
+    return {t[i : i + 2] for i in range(len(t) - 1)} or {t}
+
+
+def similar_proposal(s: State, inp: ReceiveInsightInput, now: datetime) -> Proposal | None:
+    """받아온 인사이트와 비슷한 최근 제안 (데이터분석 id가 매번 바뀌어도 거른다, #664).
+
+    코드 규칙만 쓴다 (LLM 없음, 같은 입력이면 같은 결과):
+    - 관련 상품이 같고 근거(트렌드·숏츠 형식 등 facts 이름)가 하나라도 같다
+    - 또는 제목의 두 글자 묶음이 `SIMILAR_TITLE` 이상 겹친다
+    """
+    since = now - timedelta(days=SIMILAR_DAYS)
+    goods = {x.strip().lower() for x in inp.products if x.strip()}
+    labels = {f.label for f in inp.facts}
+    title = _bigrams(inp.title)
+    for p in s.proposals:
+        if p.created_at < since:
+            continue
+        same_goods = goods and goods == {x.strip().lower() for x in p.products if x.strip()}
+        if same_goods and labels & {f.label for f in p.facts}:
+            return p
+        other = _bigrams(p.title)
+        if len(title & other) / len(title | other) >= SIMILAR_TITLE:
+            return p
+    return None
+
+
 class ProposalMixin:
     """`PlanningService`가 섞어 쓴다. 서비스의 _apply·_act·_execute·clock·create_ticket·
     _sending과 _insights·_marketing·_proposal_writer를 쓴다 (`self: Any`)."""
@@ -180,11 +213,33 @@ class ProposalMixin:
         if isinstance(got, str):
             raise ActionError("INSIGHTS_FAILED", f"데이터분석에서 받지 못했습니다: {got}")
         created: list[str] = []
+        similar: list[dict[str, str]] = []
         for inp in got:
+            if _same_insight(self.state, inp.insight_id, "data") is None:
+                near = similar_proposal(self.state, inp, self.clock())
+                if near is not None:  # id는 새것이지만 이미 받은 제안과 같은 내용
+                    similar.append({"title": inp.title, "proposal_id": near.id})
+                    continue
             res = await self.receive_insight(requester="data", inp=inp)
             if res.outcome == "created":
                 created.append(res.output["proposal_id"])
-        return ActionResult(outcome="pulled", output={"created": created, "received": len(got)})
+        out = {"created": created, "received": len(got), "similar": similar}
+        if similar:
+            near_ids = ", ".join(dict.fromkeys(x["proposal_id"] for x in similar))
+            text = (
+                f"데이터분석 받아오기: 새 제안 {len(created)}개 · 비슷한 제안이 있어 건너뜀"
+                f" {len(similar)}개 ({near_ids}과 비슷)"
+            )
+
+            async def note(s: State) -> ActionResult:
+                s.activity.append(
+                    self._act(self.clock(), PULL_CTX, "data", "planning", "pull_insights", "A2A",
+                              text)
+                )  # fmt: skip
+                return ActionResult(outcome="pulled", output=out)
+
+            return await self._apply(note)
+        return ActionResult(outcome="pulled", output=out)
 
     # ---- 받는 skill
 
@@ -461,7 +516,7 @@ class ProposalMixin:
         if end <= start:
             raise ActionError("NO_WINDOW", "게시 시각이 아직 오지 않아 잴 기간이 없습니다")
         out = await self._insights.effect(
-            _ctx(p), p.handoff.campaign, start, end, p.insight_id, p.id
+            _ctx(p), p.handoff.campaign, start, end, p.insight_id, p.id, p.products
         )
         if isinstance(out, str):
             raise ActionError("EFFECT_FAILED", f"성과를 재지 못했습니다: {out}")

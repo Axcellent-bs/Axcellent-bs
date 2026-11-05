@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { api } from "@/lib/api";
 import { dateStr, won } from "@/lib/format";
 import { RECEIPT_FIELD_KO, RECEIPT_IMAGES_KO, RECEIPT_MISMATCH_KO, RECEIPT_VERDICT_KO, RECEIPT_VERDICT_TONE } from "@/lib/labels";
-import type { ReceiptAnalysis, ReceiptImageInput } from "@/lib/types";
+import type { ActivityEntry, ReceiptAnalysis, ReceiptImageInput } from "@/lib/types";
 
 const MAX_FILES = 4; // 한 번에 다루는 최대 장수
 const MAX_BYTES = 4_500_000; // 한 장 크기(약 4.5MB)
@@ -173,10 +173,22 @@ function StateChip({ item }: { item: Item }) {
   return <span className="chip bg-ink-100 text-ink-700">대기</span>;
 }
 
-export function ReceiptAnalysisCard({ conversationId }: { conversationId: number }) {
+// 서버가 문의 내력에 남긴 영수증 대조 결과(`receipt_checked`)를 최근 MAX_FILES건까지 되살린다.
+// 새로고침하거나 다른 사람이 열어도 결과가 보인다. 사진은 서버에 없어 "다시"는 못 한다.
+function restore(activity: ActivityEntry[]): Item[] {
+  return activity
+    .filter((a) => a.kind === "receipt_checked" && a.data.analysis)
+    .slice(-MAX_FILES)
+    .map((a, k) => ({
+      key: `saved-${a.at}-${k}`, name: `저장된 분석 ${dateStr(a.at)}`, size: 0,
+      state: "done" as const, result: a.data.analysis as ReceiptAnalysis,
+    }));
+}
+
+export function ReceiptAnalysisCard({ conversationId, activity = [] }: { conversationId: number; activity?: ActivityEntry[] }) {
   const [items, setItems] = useState<Item[]>(() =>
     // 문의를 떠나는 사이 끝나지 못한 분석은 결과를 받지 못했으니 실패로 보인다
-    (STORE.get(conversationId) ?? []).map((i) => i.state === "analyzing"
+    (STORE.get(conversationId) ?? restore(activity)).map((i) => i.state === "analyzing"
       ? { ...i, state: "error" as const, error: "분석이 끝나기 전에 문의를 바꿔서 결과를 받지 못했습니다. 사진을 다시 올려 분석하세요." } : i));
   const [open, setOpen] = useState<Set<string>>(() => new Set(items.filter((i) => i.result && i.result.check.verdict !== "consistent").map((i) => i.key)));
   const [error, setError] = useState<string | null>(null);

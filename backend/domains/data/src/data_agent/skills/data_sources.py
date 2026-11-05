@@ -30,6 +30,8 @@ from ax_contracts.schemas.data import (
     CollectorStatus,
     DataSource,
     DataSourcesOutput,
+    LlmDailyUsage,
+    PendingSource,
     SourceDataKind,
     SourceStatus,
 )
@@ -42,6 +44,8 @@ from data_agent.skills.domain_profile import TENANT_CONFIG_ENV
 DB_ENV = "DATA_SOURCE_PROBE_DB"
 DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "source_probe.db"  # backend/.data
 RETRY_FAILED = timedelta(days=1)  # 확인 호출이 실패했으면 하루 뒤 다시
+# 광고 노출·클릭·비용은 읽을 곳이 정해지면 붙인다 (그때 출처 목록에 "키 필요"로)
+AD_DATA_PENDING = "#647 광고 부분 대기"  # 화면: "광고 데이터: #647 광고 부분 대기"
 ALL = "all"
 
 
@@ -256,7 +260,23 @@ async def list_sources(
         f" 키 필요 {', '.join(need) or '없음'}"
     )
     out.collectors = collector_states(env, now)  # 요약 문장은 그대로 (출처 목록만 센다)
+    out.llm_usage = llm_usage_today(env)
+    # 기다리는 출처: 출처 목록(수집 계획 후보)에 넣지 않고 따로 보여 준다
+    out.pending_sources = [PendingSource(name="광고 데이터", reason=AD_DATA_PENDING)]
     return SourcesResult(out, Evidence(queries=queries, data_summary=out.summary, collected_at=now))
+
+
+def llm_usage_today(env: Mapping[str, str]) -> LlmDailyUsage:
+    """data 부서 LLM 오늘 사용량/상한 (`llm_budget`, 서버·수집기가 같은 기록)."""
+    from data_agent.llm_budget import BUDGET
+
+    now = BUDGET.usage(env)
+    return LlmDailyUsage(
+        day=now.day, calls=now.calls, call_cap=now.call_cap, tokens=now.tokens,
+        token_cap=now.token_cap, reached=now.reached,
+        note=f"LLM 하루 상한: {now.line()}. 오늘은 LLM을 부르지 않고 고정 문장·unknown"
+        if now.reached else None,
+    )  # fmt: skip
 
 
 # ---------------------------------------------------------------- 스냅샷 수집기 상태

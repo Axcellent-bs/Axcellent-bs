@@ -9,13 +9,16 @@
 `docker compose -f infra/compose.yml up support` / 목 모드: `SUPPORT_MOCK=1`
 모델은 `.env`의 `SUPPORT_LLM_MODEL` 또는 `LLM_MODEL`로 정한다 (코드에 모델 이름을 쓰지 않는다).
 ## 3. 입출력 계약
-`agent-card.json`의 skill 21개. 문의 skill의 입력·출력 모델은 `src/support_agent/schemas.py`, 클레임 skill은 `src/support_agent/claim_schemas.py`.
+`agent-card.json`의 skill 53개. 문의 skill의 입력·출력 모델은 `src/support_agent/schemas.py`, 클레임 skill은 `src/support_agent/claim_schemas.py`.
 
 | skill | 등급 | 요청 가능 | 내용 |
 | --- | --- | --- | --- |
 | `list_inquiries` | read | dashboard-api, orchestrator | 문의 목록 (상태 필터) |
 | `get_inquiry` | read | dashboard-api, orchestrator | 메시지·분석 포함 상세 |
 | `reveal_original` | A | dashboard-api | 욕설로 가린 고객 메시지의 원문 열기. 연 사람을 내력에 남긴다 |
+| `support_chat_send` | A | dashboard-api | 사람이 고객지원 AI에게 말 걸기(직접 대화, 조회·설명만). 말을 저장해 곧바로 돌려주고(`answering`) 답은 뒤에서 덧붙인다 |
+| `support_chat_close` | A | dashboard-api | 대화 끝내기 + 한두 줄 요약 저장 (본인·담당·관리자) |
+| `support_chat_list`, `support_chat_get` | read | dashboard-api | 대화 목록·하나. 열람 권한대로 원문 또는 요약만 |
 | `check_reply` | read | dashboard-api, orchestrator | 답변 가드 검사 (`untrusted.text`) |
 | `summarize_inquiry` | read | dashboard-api, orchestrator | 대화 요약 (저장 안 함) |
 | `create_inquiry` | A | dashboard-api, shop-api, orchestrator | 문의 접수 + 첫 메시지 분석 |
@@ -146,3 +149,25 @@ ax-contracts, ax-agent-template
 - 저장소는 `SUPPORT_PG_DSN`이 없으면 프로세스 메모리다(재시작하면 사라진다). 있으면 PostgreSQL에 저장한다 (아래 "영속 저장소").
 - 정책 문서(KB)는 시드 조각이다. memory의 정책 문서 API가 생기면 교체한다.
 - 외부 API를 직접 호출해 상태를 바꾸지 않는다.
+
+## 직접 대화 (`chat.py`, `chat_handlers.py`) — 예진님 요청 2026-11-05
+
+사람이 고객지원 AI에게 문의·클레임·후기 현황을 묻고 설명을 듣는다. 응답 모양은 개발 AI `/dev-chat`과 같다
+(`id, title, status, messages[], who, created_at, updated_at` + `summary, task_ids, restricted`).
+
+- **조회와 설명만.** 상태를 바꾸는 일은 하지 않는다 (그런 일은 기존 skill로 `execute()`와 안전 관문을 거친다).
+  대화 때문에 실제 일이 생기면 `task_ids`에 id를 남긴다 (이번 범위에서는 대화로 일이 생기지 않아 비어 있다).
+- **보내기는 곧바로 돌려준다.** `support_chat_send`는 말을 저장하고 `status: answering`으로 돌려준 뒤 AI 답을 뒤에서
+  만들어 덧붙이고 `talking`으로 돌린다. 화면은 `answering`이면 `support_chat_get`으로 다시 읽는다 (답까지 기다리면
+  모델이 느릴 때 약 32초에 504가 난다).
+- **AI 답의 근거는 집계 숫자뿐이다.** dashboard-api가 문의 현황·클레임 현황·후기 통계에서 숫자만 추려
+  `context`로 넘긴다 (고객 이름·제목·미리보기·원문은 없다). 사람의 말은 개인정보를 가린 글만 모델로 보낸다.
+- **말한 사람(`who`).** dashboard-api가 사람 토큰 이름으로 채운다 (본문 값이 아니다). 지금은 모든 요청이 같은
+  사람("공용")이라 서버가 사람별로 가를 수 없다. 토큰을 사람별로 나눈 뒤부터 열람 규칙이 가려진다.
+- **열람 권한** (`chat.access_of`, 인사 AI 직접 대화와 같은 규칙): 본인은 자기 대화 원문 전부. 다른 사람
+  대화는 `messages: []` + `summary` + `restricted: true`만 온다 (제목도 요약에서 만든다). 다른 사람 대화에
+  쓰면 403 `FORBIDDEN`. 담당(고객지원 담당자)·관리자는 일이 생긴 대화(`task_ids`)만 원문까지 본다.
+- **끝날 때.** 사람이 닫으면(`support_chat_close`) 코드가 한 줄 요약을 바로 저장하고 LLM이 한두 줄로 다듬는다.
+  말이 30분(`SUPPORT_CHAT_IDLE_MINUTES`) 없는 대화는 읽을 때 같은 방식으로 끝난다 (대화 안에서만 쓰는
+  정리라 안전 관문을 거치지 않는다). 닫힌 대화에는 더 보낼 수 없다.
+- 저장은 서버 메모리이고 `SUPPORT_PG_DSN`이 있으면 `support_chats` 테이블에도 쓴다.

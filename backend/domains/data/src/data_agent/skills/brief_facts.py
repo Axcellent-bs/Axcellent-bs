@@ -87,6 +87,15 @@ def insight_facts(i: TrendInsight) -> list[DataFact]:
     f.add("숏츠 형식 단계 표본 (전체)", i.shorts_format_source_total, "개", "shorts_stats")
     f.add("숏츠 형식 조회 중앙값", i.shorts_format_median_views, "회", "shorts_stats",
           period=_at(i.shorts_format_at))  # fmt: skip
+    s = i.shorts_fit  # v2 칸: 숏츠 적합도·목표 참고값 (표본이 모자라면 None이라 넣지 않음)
+    if s is not None:
+        at = _at(s.snapshot_at)
+        f.add("이 분류 숏츠 조회 중앙값", s.median_views, "회", "shorts_stats", period=at,
+              sample=s.samples)  # fmt: skip
+        f.add("이 분류 숏츠 중앙값 전체 대비 배수", s.ratio, "배", "shorts_stats", period=at,
+              sample=s.samples)  # fmt: skip
+        f.add("이 분류 숏츠 표본 수", s.samples, "개", "shorts_stats", period=at)
+    f.add("목표 참고값 (숏츠 조회 중앙값)", i.target_views_reference, "회", "shorts_stats")
     f.add("순서 점수", i.score, "점", "code")
     return f.rows
 

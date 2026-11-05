@@ -921,6 +921,9 @@ button.spec-pid { cursor: pointer; color: var(--primary); font-weight: 600; }
 .pp-out { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px 10px; margin: 0; font-size: 13px; }
 .pp-out dt { color: var(--text-2); }
 .pp-out dd { margin: 0; }
+.pp-effect { display: grid; gap: 8px; margin-top: 6px; }
+.pp-effect-group { border-left: 2px solid var(--border, #e3e6ee); padding-left: 8px; }
+.pp-effect-head { font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 2px; }
 @media (max-width: 900px) { .pp-view { grid-template-columns: 1fr; } .pp-side { position: static; } }
 
 /* ---- 기획 홈 (home.tsx) */

@@ -148,6 +148,31 @@ def _compensation_gate(inc: Incident) -> tuple[str, str, str] | None:
     return ("skipped", "no_affected_customers", "영향 고객 목록이 없어 보상 요청 없음")
 
 
+def _late_compensation(inc: Incident) -> dict[str, Any]:
+    """복구 뒤 다시 센 영향 분석에서 새로 잡힌 고객만 보상 "대기"에 올린다(쿠폰은 사람 승인 뒤)."""
+    return {
+        "buyer_ids": list(_out(inc, "impact").get("added_customer_ids") or []),
+        "reason_code": "payment_failure",
+        "impact_ref": f"{inc.context_id}:impact",
+    }
+
+
+def _late_compensation_gate(inc: Incident) -> tuple[str, str, str] | None:
+    if _out(inc, "impact").get("added_customer_ids"):
+        return None
+    return ("skipped", "no_added_customers", "새로 잡힌 영향 고객이 없어 보상 대기 요청 없음")
+
+
+def _merge_late_compensation(outputs: list[dict[str, Any]]) -> dict[str, Any]:
+    """50명씩 나눠 부른 결과를 합친다. 올라간 수는 고객지원이 준 값을 더하기만 한다."""
+    merged = {**outputs[0]}
+    merged["queued"] = sum(o.get("queued", 0) for o in outputs)
+    merged["results"] = [r for o in outputs for r in o.get("results", [])]
+    merged["limit_reached"] = any(o.get("limit_reached") for o in outputs)
+    merged["notes"] = [n for o in outputs for n in o.get("notes", [])]
+    return merged
+
+
 def _root_cause(inc: Incident) -> dict[str, Any]:
     # 이상 구간은 영향 분석과 같다. 지표는 결제 장애라 결제 실패율이다
     window = _window(inc)
@@ -374,6 +399,18 @@ def scenario_a() -> Plan:
                 "해결 내용 기록 (hr)",
                 also_after=("record",),
                 build=_resolution,
+                required=False,
+            ),
+        ],
+        late_steps=[
+            Step(
+                "late_compensation",
+                "propose_incident_compensation",
+                "복구 뒤 놓친 고객 보상 대기 (support)",
+                build=_late_compensation,
+                gate=_late_compensation_gate,
+                split=("buyer_ids", COMPENSATION_BATCH),
+                merge=_merge_late_compensation,
                 required=False,
             ),
         ],

@@ -44,6 +44,9 @@ CORS 허용 출처는 `DASHBOARD_CORS_ORIGINS`(쉼표 구분, 기본 `http://loc
 | --- | --- |
 | GET `/conversations`, `/conversations/{id}` | `list_inquiries`, `get_inquiry` (가린 고객 메시지의 `text`는 비워서 준다) |
 | POST `/conversations/{id}/messages/{message_id}/original` | `reveal_original` (사람 토큰 필요, 연 사람이 내력에 남는다) |
+| GET `/support-chat`, `/support-chat/{id}` | `support_chat_list`, `support_chat_get` (직접 대화. 읽기에도 사람 토큰이 필요하다. 다른 사람 대화는 요약만, `restricted: true`) |
+| POST `/support-chat` | `support_chat_send` (사람 토큰 필요. `{thread_id?, message}` → 말을 저장한 대화, `status: answering`이면 GET으로 다시 읽는다. 말한 사람은 토큰 이름, 말은 `untrusted`, 문의·클레임·후기 집계 숫자를 `context`로 넘긴다) |
+| POST `/support-chat/{id}/close` | `support_chat_close` (사람 토큰 필요. 본인·담당·관리자) |
 | POST `/conversations` | `create_inquiry` (제목·본문은 `untrusted`) |
 | POST `/conversations/{id}/customer-messages` | `add_customer_message` |
 | POST `/conversations/{id}/check` | `check_reply` |
@@ -151,4 +154,5 @@ ax-contracts, ax-agent-template
 - 목 모드에서는 `human:<이름>`도 받는다. 에이전트 토큰(`mock:`)은 항상 거부한다.
 - 실패는 `{error: {code, message}}`: 토큰 없음 401 `AUTH_REQUIRED`, 에이전트 토큰 403 `HUMAN_TOKEN_REQUIRED`, 모르는 토큰 403 `HUMAN_TOKEN_INVALID`.
 - 토큰이 설정되지 않았고 목 모드도 아니면 쓰기는 모두 거부된다 (fail-closed).
+- 직접 대화(`/support-chat`)는 예외로 **읽기에도 사람 토큰이 필요하다** (없으면 401, 모르는 토큰이면 403). 다른 사람 대화는 `messages: []` + `summary` + `restricted: true`로만 오고 거기에 쓰면 403이다. 담당(staff)은 조직도(`AX_ORG_CONFIG`)에서 고객지원 서비스(inquiry·claims·reviews)의 담당자 이름과 `SUPPORT_CHAT_STAFF`(쉼표로 이름을 더함)다. 관리자는 에이전트 토큰 명부의 `admin` 토큰이다. 지금은 모든 요청이 같은 사람("공용")이라 서버가 사람별로 가를 수 없다.
 - 확인한 사람 이름은 요청마다 `request.state.human`에 담긴다 (A2A 요청자는 여전히 서비스 토큰).

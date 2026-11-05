@@ -53,6 +53,7 @@ from ax_contracts.schemas.data import (
     TrendPopularOutput,
     TrendPopularRequest,
 )
+from data_agent import caution
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.skills import trend_candidates as cand_mod
 from data_agent.skills import trend_evidence as ev
@@ -899,6 +900,7 @@ async def popular(
             cache=category_cache, now=now, limit=per, queries=queries, context_id=context_id,
             search_terms=search_terms(config, every),
         )  # fmt: skip
+    named = [(i.entity_names, i.is_person) for i in every if i.real_entity and i.entity_names]
     for category in config.categories:
         mine = [i for i in every if i.topic_category == category][:per]
         for n, item in enumerate(mine, start=1):
@@ -910,6 +912,11 @@ async def popular(
                 f"인기 검색어 {from_trending}개)"
             )
         top_videos, top_reason = filled.get(category, ([], None))
+        # v2 칸: 음원은 영상 분류로, 실존 이름은 제목에 지금 인기 주제의 이름이 들었을 때만 (코드)
+        top_videos = [
+            caution.apply(v, caution.for_title(v.title, v.topic_category, named))
+            for v in top_videos
+        ]
         groups.append(
             PopularCategory(
                 category=category,  # type: ignore[arg-type]

@@ -1,0 +1,58 @@
+{
+ "id": "mixed_campaigns_2h_19h",
+ "kind": "known",
+ "input": {
+  "campaign_id": "cmp_attr",
+  "window_from": "2026-10-14T19:00:00Z",
+  "window_to": "2026-10-14T21:00:00Z"
+ },
+ "spec": {
+  "id": "mixed_campaigns_2h_19h",
+  "window": {
+   "from": "2026-10-14T19:00:00Z",
+   "to": "2026-10-14T21:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "none"
+  },
+  "attribution": {
+   "tags": [
+    {
+     "source": "instagram",
+     "medium": "social",
+     "campaign_id": "cmp_attr",
+     "fraction": 0.15
+    },
+    {
+     "source": "naver",
+     "medium": "blog",
+     "campaign_id": "cmp_other",
+     "fraction": 0.15
+    }
+   ]
+  }
+ },
+ "expected": {
+  "attribution": {
+   "status": "known"
+  }
+ },
+ "counted": {
+  "window_orders": 164,
+  "tagged_orders": 58,
+  "tagged_share": 0.3537,
+  "orders": 30,
+  "gross_krw": 667200,
+  "by_source": {
+   "instagram": {
+    "orders": 30,
+    "gross_krw": 667200
+   }
+  },
+  "other_campaign_orders": 28
+ },
+ "memo": "이 캠페인 15%, 다른 캠페인 15% → 이 캠페인 것만"
+}

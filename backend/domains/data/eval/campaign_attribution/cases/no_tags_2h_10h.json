@@ -1,0 +1,38 @@
+{
+ "id": "no_tags_2h_10h",
+ "kind": "unknown",
+ "input": {
+  "campaign_id": "cmp_attr",
+  "window_from": "2026-10-14T10:00:00Z",
+  "window_to": "2026-10-14T12:00:00Z"
+ },
+ "spec": {
+  "id": "no_tags_2h_10h",
+  "window": {
+   "from": "2026-10-14T10:00:00Z",
+   "to": "2026-10-14T12:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "none"
+  }
+ },
+ "expected": {
+  "attribution": {
+   "status": "unknown",
+   "unknown_reason": "no_tags"
+  }
+ },
+ "counted": {
+  "window_orders": 167,
+  "tagged_orders": 0,
+  "tagged_share": 0.0,
+  "orders": 0,
+  "gross_krw": 0,
+  "by_source": {},
+  "other_campaign_orders": 0
+ },
+ "memo": "구간에 유입 표시가 있는 주문이 하나도 없음 → 유입 기록 없음"
+}
