@@ -319,3 +319,38 @@ def test_card_numbers_are_facts_with_video_links() -> None:
     for v in do.facts(card).values():  # 한 줄 검증 숫자는 모두 facts에
         if isinstance(v, int | float):
             assert float(v) in {f.value for f in mine.values()}, v
+
+
+def test_card_top_age_band_follows_the_insight_rule() -> None:
+    """가장 오른 연령대: 상태가 rising·normal이어도 배수를 아는 연령대에서 고른다 (예전엔 늘 빔)."""
+    book, shop = _run().cards
+    assert (book.top_age_band, book.top_age_band_ratio, book.top_age_band_reason) == (
+        "20대", 3.1, None)  # fmt: skip
+    assert shop.top_age_band is None and "상한" in (shop.top_age_band_reason or "")
+
+
+def test_card_subtopics_get_ages_even_when_the_plan_did_not_pick_age() -> None:
+    asked: list[list[str]] = []
+
+    async def ages(keywords: list[str]) -> TrendAgeOutput:
+        asked.append(keywords)
+        return await _ages(keywords)
+
+    plan = PLAN.model_copy(update={"items": [
+        PLAN.items[0].model_copy(update={"use_age": False}), *PLAN.items[1:]]})  # fmt: skip
+    res = asyncio.run(do.make_opportunities(
+        env={}, llm=LineLLM({}), profile=PROFILE, plan=plan, sources=SOURCES, shorts=_shorts(),
+        catalog_products=[], classify=_classify, trend_connector=FakeTrend(), age_fn=ages,
+        consumption_fn=None, day=END, end=END,
+    ))  # fmt: skip
+    assert asked == [["고양이 그림책", "서점"]] and res.cards[0].top_age_band == "20대"
+    off = SOURCES.model_copy(update={"sources": [
+        s.model_copy(update={"approved": False}) if s.source_id == "naver_search_trend" else s
+        for s in SOURCES.sources]})  # fmt: skip
+    res = asyncio.run(do.make_opportunities(
+        env={}, llm=LineLLM({}), profile=PROFILE, plan=plan, sources=off, shorts=_shorts(),
+        catalog_products=[], classify=_classify, trend_connector=FakeTrend(), age_fn=ages,
+        consumption_fn=None, day=END, end=END,
+    ))  # fmt: skip
+    assert len(asked) == 1  # 승인되지 않은 출처면 부르지 않는다
+    assert "승인" in (res.cards[0].age_reason or "")
