@@ -57,6 +57,7 @@ from ax_contracts.schemas.data import (
 from data_agent import caution
 from data_agent.explain import _bad_numbers
 from data_agent.llm_budget import no_llm
+from data_agent.skills import evidence_highlights as hl
 from data_agent.skills.ad_material import AdRules, judge, load_rules
 from data_agent.skills.brief_facts import insight_facts
 from data_agent.skills.code_version import source_hash
@@ -76,7 +77,7 @@ CODE_VERSION = source_hash(
 DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "insight_brief.db"  # backend/.data
 REFERENCE = "참고용"
 # 브리프 칸 모양이 바뀌면 올린다 (오늘 캐시를 새 모양으로 다시 묶게)
-SHAPE = "shorts-source,age-bands,opportunities"
+SHAPE = "shorts-source,age-bands,opportunities,evidence-highlights"
 BRIEF_LIMITS = (
     "평가셋이 없어 인사이트가 맞는지 재지 않는다",
     "네이버 값은 요청마다 최댓값이 100인 상대값이다",
@@ -1077,6 +1078,14 @@ async def make_brief(
             mine = insight_facts(i)
             i.fact_ids = [f.fact_id for f in mine]
             out.facts += mine
+            # 근거 요약 (facts 중 센 것 최대 3개, 템플릿 문장)과 근거 숏츠 최대 3개
+            i.evidence_highlights = hl.insight_highlights(i, mine)
+            i.evidence_shorts = hl.evidence_shorts(i.evidence.video_links)
+        for c in out.opportunities:  # 카드 근거 숏츠는 제목을 채운 뒤에 고른다
+            c.evidence_highlights = hl.card_highlights(
+                c, [f for f in out.facts if f.about == c.opportunity_id]
+            )
+            c.evidence_shorts = hl.evidence_shorts(c.video_links)
         out.schema_version = SCHEMA_VERSION
         out.snapshot_id = f"brief_{day:%Y%m%d}_{rules}"
         store.put(day, rules, out, now)
