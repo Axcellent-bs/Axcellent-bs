@@ -127,6 +127,12 @@ class TodayBoard:
         )  # fmt: skip
         return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
 
+    def reload(self) -> None:
+        """저장 파일을 다시 읽는다 (다른 프로세스가 쓴 오늘 판정을 보려고). 파일이 없으면 그대로."""
+        if self._conn is not None:
+            self._day = None
+            self._roll()
+
     def clear(self) -> None:
         self._day, self._verdicts, self._pairs = None, {}, []
 

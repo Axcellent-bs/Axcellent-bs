@@ -16,6 +16,7 @@ YouTube는 지금 누적값만 주고 기간별 추이를 주지 않는다. 그�
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 from collections.abc import Iterable, Mapping
@@ -29,6 +30,8 @@ from data_agent.connectors.youtube import VideoStat
 DB_ENV = "DATA_YOUTUBE_DB"
 DEFAULT_DB = Path(__file__).resolve().parents[4] / ".data" / "youtube_snapshots.db"  # backend/.data
 KST = timezone(timedelta(hours=9))
+LOOKBACK_ENV = "DATA_TREND_LOOKBACK_HOURS"
+DEFAULT_LOOKBACK_HOURS = 48.0
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -418,17 +421,35 @@ class StoredSnapshot:
     videos: dict[str, StoredVideo]  # 영상 id → 그 시각의 값
 
 
+def lookback_hours(env: Mapping[str, str] | None = None) -> float:
+    """최근 스냅샷을 찾을 범위(시간, 마지막 스냅샷 기준). `DATA_TREND_LOOKBACK_HOURS`, 기본 48."""
+    raw = (os.environ if env is None else env).get(LOOKBACK_ENV)
+    try:
+        return max(1.0, float(raw)) if raw else DEFAULT_LOOKBACK_HOURS
+    except ValueError:
+        return DEFAULT_LOOKBACK_HOURS
+
+
 def recent_snapshots(path: str | Path, count: int = 3) -> list[StoredSnapshot]:
-    """가장 최근 수집 시각 `count`개(최근 것부터)의 영상 값. 파일이 없으면 빈 목록. 읽기 전용."""
+    """가장 최근 수집 시각 `count`개(최근 것부터)의 영상 값. 파일이 없으면 빈 목록. 읽기 전용.
+
+    마지막 스냅샷에서 `lookback_hours()`(기본 48시간) 안의 것만 본다
+    (1시간마다 수집하면 결과는 같다).
+    """
     if str(path) != ":memory:" and not Path(path).is_file():
         return []
     conn = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True, timeout=5.0)
     try:
+        last = conn.execute("SELECT MAX(collected_at) FROM snapshots").fetchone()[0]
+        if last is None:
+            return []
+        since = iso(datetime.fromisoformat(last) - timedelta(hours=lookback_hours()))
         times = [
             r[0]
             for r in conn.execute(
-                "SELECT DISTINCT collected_at FROM snapshots ORDER BY collected_at DESC LIMIT ?",
-                (count,),
+                "SELECT DISTINCT collected_at FROM snapshots WHERE collected_at >= ?"
+                " ORDER BY collected_at DESC LIMIT ?",
+                (since, count),
             )
         ]
         out = []

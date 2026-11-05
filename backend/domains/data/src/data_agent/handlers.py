@@ -32,7 +32,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -78,6 +78,7 @@ from data_agent.connectors.youtube import YouTubeConnector
 from data_agent.explain import ExplainCache
 from data_agent.planning_questions import answer_question
 from data_agent.report_store import ReportStore, get_report_store
+from data_agent.response_cache import DB_ENV as RESPONSES_DB_ENV
 from data_agent.response_cache import ResponseCache
 from data_agent.skills import topic_category
 from data_agent.skills.accuracy_report import eval_dir, load_report
@@ -442,40 +443,56 @@ async def trend_candidates(request: AgentRequest) -> AgentResult:
     )
 
 
-async def trend_popular(request: AgentRequest) -> AgentResult:
-    """지금 인기 주제 순위 (급상승 판정과 별개, 네이버 안 부름). 조회만 한다(grade read)."""
-    from data_agent.response_cache import data_stamp
+async def _stored(
+    request: AgentRequest,
+    skill: str,
+    payload: dict[str, Any],
+    compute: Callable[[], Awaitable[tuple[str, dict[str, Any], Evidence]]],
+) -> AgentResult:
+    """저장된 계산 결과가 있으면 읽기만, 없으면 계산해 저장 (`response_cache` 참고).
+
+    키 = skill + 입력 + 데이터 도장 + 규칙 버전. 수집기가 새 스냅샷 직후 같은 키로 미리 넣는다.
+    계산이 끝난 뒤의 도장으로 저장한다 (이 요청이 새로 분류해 저장분이 바뀌었을 수 있다).
+    """
+    from data_agent.response_cache import data_stamp, rules_version
     from data_agent.today_board import BOARD
 
-    data = _parse(request, TrendPopularRequest)
-    if isinstance(data, AgentResult):
-        return data
-    # 응답 캐시: 마지막 스냅샷·판정판·설정이 같으면 처음 계산한 응답 그대로 (새 스냅샷이면 무효)
-    key = RESPONSES.key("trend_popular", data.model_dump(mode="json"),
-                        data_stamp(os.environ, BOARD.stamp()), "")  # fmt: skip
+    key = RESPONSES.key(skill, payload, data_stamp(os.environ, BOARD.stamp()), rules_version())
     if (hit := RESPONSES.get(key)) is not None:
         note_cache("hit")
         outcome, output, evidence = hit
         return _result(request, TaskStatus.COMPLETED, outcome=outcome, output=output,
-                       evidence=evidence)  # fmt: skip
-    result = await popular(
-        data,
-        get_llm(),
-        env=os.environ,
-        context_id=request.meta.context_id,
-        category_cache=get_category_cache(),
-        youtube=get_youtube(),
-    )
-    outcome = "ranked" if result.output.items else "empty"
-    output = result.output.model_dump(mode="json")
-    # 계산이 끝난 뒤의 도장으로 저장한다 (이 요청이 새로 분류해 저장분이 바뀌었을 수 있다)
-    after = RESPONSES.key("trend_popular", data.model_dump(mode="json"),
-                          data_stamp(os.environ, BOARD.stamp()), "")  # fmt: skip
-    RESPONSES.put(after, (outcome, output, result.evidence))
+                       evidence=Evidence.model_validate(evidence))  # fmt: skip
+    outcome, output, evidence = await compute()
+    after = RESPONSES.key(skill, payload, data_stamp(os.environ, BOARD.stamp()), rules_version())
+    RESPONSES.put(after, [outcome, output, evidence.model_dump(mode="json")], skill)
     note_cache("stored")
-    return _result(
-        request, TaskStatus.COMPLETED, outcome=outcome, output=output, evidence=result.evidence
-    )
+    return _result(request, TaskStatus.COMPLETED, outcome=outcome, output=output,
+                   evidence=evidence)  # fmt: skip
+
+
+async def trend_popular(request: AgentRequest) -> AgentResult:
+    """지금 인기 주제 순위 (급상승 판정과 별개, 네이버 안 부름). 조회만 한다(grade read).
+
+    수집기가 미리 계산해 둔 결과를 읽는다. 없을 때만 지금 계산하고 저장한다(`_stored`).
+    """
+    data = _parse(request, TrendPopularRequest)
+    if isinstance(data, AgentResult):
+        return data
+
+    async def compute() -> tuple[str, dict[str, Any], Evidence]:
+        result = await popular(
+            data,
+            get_llm(),
+            env=os.environ,
+            context_id=request.meta.context_id,
+            category_cache=get_category_cache(),
+            youtube=get_youtube(),
+        )
+        outcome = "ranked" if result.output.items else "empty"
+        return outcome, result.output.model_dump(mode="json"), result.evidence
+
+    return await _stored(request, "trend_popular", data.model_dump(mode="json"), compute)
 
 
 def get_youtube() -> YouTubeConnector:
@@ -488,21 +505,19 @@ async def shorts_stats(request: AgentRequest) -> AgentResult:
     data = _parse(request, ShortsStatsRequest)
     if isinstance(data, AgentResult):
         return data
-    result = await run_shorts_stats(
-        data,
-        get_youtube(),
-        get_llm(),
-        env=os.environ,
-        context_id=request.meta.context_id,
-        category_cache=get_category_cache(),
-    )
-    return _result(
-        request,
-        TaskStatus.COMPLETED,
-        outcome=result.output.status,
-        output=result.output.model_dump(mode="json"),
-        evidence=result.evidence,
-    )
+
+    async def compute() -> tuple[str, dict[str, Any], Evidence]:
+        result = await run_shorts_stats(
+            data,
+            get_youtube(),
+            get_llm(),
+            env=os.environ,
+            context_id=request.meta.context_id,
+            category_cache=get_category_cache(),
+        )
+        return result.output.status, result.output.model_dump(mode="json"), result.evidence
+
+    return await _stored(request, "shorts_stats", data.model_dump(mode="json"), compute)
 
 
 async def promo_concepts(request: AgentRequest) -> AgentResult:
@@ -866,8 +881,8 @@ async def source_plan(request: AgentRequest) -> AgentResult:
 
 
 _category_cache: topic_category.CategoryCache | None = None
-# 트렌드 감지 탭 읽기 응답 캐시와 설명 문장 캐시 (프로세스에 하나, 데이터 도장이 바뀌면 다른 키)
-RESPONSES = ResponseCache()
+# 트렌드 감지 탭 계산 결과 저장(`DATA_TREND_RESPONSES_DB` SQLite, 없으면 메모리)과 설명 문장 캐시
+RESPONSES = ResponseCache(os.environ.get(RESPONSES_DB_ENV) or None)
 EXPLAINED = ExplainCache()
 
 
@@ -934,14 +949,12 @@ async def youtube_velocity(request: AgentRequest) -> AgentResult:
     data = _parse(request, YouTubeVelocityRequest)
     if isinstance(data, AgentResult):
         return data
-    result = await measure_velocity_named(data, env=os.environ, youtube=get_youtube())
-    return _result(
-        request,
-        TaskStatus.COMPLETED,
-        outcome=result.output.status,
-        output=result.output.model_dump(mode="json"),
-        evidence=result.evidence,
-    )
+
+    async def compute() -> tuple[str, dict[str, Any], Evidence]:
+        result = await measure_velocity_named(data, env=os.environ, youtube=get_youtube())
+        return result.output.status, result.output.model_dump(mode="json"), result.evidence
+
+    return await _stored(request, "youtube_velocity", data.model_dump(mode="json"), compute)
 
 
 async def answer_planning_question(request: AgentRequest) -> AgentResult:

@@ -151,6 +151,8 @@ export PLANNING_CLOCK=real
 export AX_COMMON_LOG_DB="$PWD/$DATA/common_log.db"
 # 데이터분석 업무 리포트 일간 저장 (data 자체 파일. 하루 한 번 미리 만들어 화면이 바로 읽는다)
 export DATA_REPORT_DB="$PWD/$DATA/data_reports.db"
+# data: 트렌드 감지 탭 계산 결과 (수집기가 새 스냅샷 직후 미리 계산해 넣고, 화면은 읽기만. 다시 켜도 남음)
+export DATA_TREND_RESPONSES_DB="$PWD/$DATA/trend_responses.db"
 
 # 업무 요청 라우터 (README "업무 요청 라우터"): 켠 서비스면 에이전트로, 안 켠 서비스면 사람 할 일함으로
 # 켠 서비스는 backend/.env 의 AX_ENABLED_SERVICES (쉼표 목록). 없거나 비어 있으면 전부 켠다(예전 동작)
@@ -342,6 +344,10 @@ fi
 if echo "$RUN_APPS" | awk '$1 == "data" {found=1} END {exit !found}'; then
   "$PY" -m data_agent.trending_collect --every 3600 > "$LOGS/trending-collect.log" 2>&1 &
   echo $! > "$LOGS/trending-collect.pid"
+  # YouTube 스냅샷도 1시간마다 (수집 직후 감지 탭 결과를 미리 계산). 이미 다른 수집기가 돌면
+  # 잠금(backend/.data/youtube_collect.lock)을 못 잡아 바로 끝난다 → 두 개가 같이 돌지 않는다
+  "$PY" -m data_agent.youtube_collect --every 3600 > "$LOGS/youtube-collect.log" 2>&1 &
+  echo $! > "$LOGS/youtube-collect.pid"
 fi
 
 sleep 8
