@@ -282,6 +282,22 @@
       "verifier": null,
       "priority": "recommended",
       "handoff": false
+    },
+    {
+      "id": "video_explorer",
+      "description": "영상 탐색. 카테고리(설정: 게임·유머·드라마·교양·교육·책) × 기간(올린 시각 기준 1일·3일·7일) × 길이(숏 = 60초 이하, 롱 = 그 초과)마다 한국 영상 목록을 준다. 영상 풀은 저장된 인기 차트·추적·숏츠 표본·하위 주제·보충 검색에서 올린 지 7일 이내 영상이고(다른 저장분 영상은 videos.list로 다시 읽어 올린 시각·좋아요·채널 id를 채움), 칸이 10개보다 적으면 그 카테고리 지금 인기 주제 이름(교육·책은 도메인 프로필 씨앗)으로 보충 검색한다(카테고리 × 길이마다 7일 검색 하루 1번, 1일 칸이 모자라면 1일 보충 한 번, 하루 검색 상한 기본 20번). 영상마다 제목·채널·썸네일·주소·길이·올린 시각·조회수·좋아요·구독자 대비 배수·카테고리(공유 영상 분류기)·광고 재료 칸. 없는 값은 unknown과 이유. 정렬(조회수·구독자 대비·좋아요)은 코드. 수집기가 미리 계산하고 요청은 저장분을 읽는다. 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#VideoExplorerRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#VideoExplorerOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "marketing",
+        "planning",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
     }
   ]
 }

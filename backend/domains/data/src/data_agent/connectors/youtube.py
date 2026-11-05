@@ -405,6 +405,43 @@ class YouTubeConnector:
         ids = [item.id.videoId for item in page.items if item.id.videoId]
         return await self.videos(ids) if ids else []
 
+    async def search_recent(
+        self,
+        published_after: datetime,
+        *,
+        query: str | None = None,
+        category_id: str | None = None,
+        short: bool = False,
+        region: str = "KR",
+        language: str | None = None,
+        max_results: int = PAGE_SIZE,
+    ) -> list[VideoStat]:
+        """최근 게시 영상을 조회수 순으로 검색 → 결과 영상의 통계 (영상 탐색 보충 검색).
+
+        `query`(q, `|`는 또는)·`category_id` 중 있는 것으로 찾는다. `short`면 `videoDuration=short`
+        (4분 미만, 숏츠 길이 기준은 부르는 쪽이 거른다), 아니면 길이 조건 없음.
+        검색 100단위 + 통계 1단위(50개마다).
+        """
+        params: dict[str, Any] = {
+            "part": "snippet",
+            "type": "video",
+            "regionCode": region,
+            "order": "viewCount",
+            "maxResults": max(1, min(max_results, PAGE_SIZE)),
+            "publishedAfter": published_after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        if query:
+            params["q"] = query
+        if category_id:
+            params["videoCategoryId"] = category_id
+        if short:
+            params["videoDuration"] = "short"
+        if language:
+            params["relevanceLanguage"] = language
+        page = _parse(_SearchPage, await self._get("search", params), "최근 영상 검색")
+        ids = [item.id.videoId for item in page.items if item.id.videoId]
+        return await self.videos(ids) if ids else []
+
     async def _get(self, resource: str, params: dict[str, Any]) -> Any:
         if self.mode == "replay":  # 저장된 응답만 (할당량을 세지 않는다)
             return replay.load("youtube", f"{self.url}/{resource}", params, self._env)
