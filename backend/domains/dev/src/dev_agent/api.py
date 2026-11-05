@@ -34,6 +34,8 @@ from dev_agent.work_api import add_work_routes
 
 # 코딩 작업 오류 중 409로 주는 것 (설정·상태 문제). 나머지 입력 오류는 400
 CODING_CONFLICT = {
+    "THREAD_BUSY",  # 개발 AI 대화: 앞 말에 답하는 중
+    "THREAD_CLOSED",  # 개발 AI 대화: 끝낸 대화
     "NO_VCS",
     "LLM_NOT_CONFIGURED",
     "NOT_RETRYABLE",
@@ -307,7 +309,15 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
     # ---- 코딩 에이전트: 개발팀원이 쓴 기획을 레포에 구현 (coder.py). 진행은 작업 `coding`(SSE)
 
     def _coding_err(exc: ActionError) -> JSONResponse:
-        status = 409 if exc.code in CODING_CONFLICT else 404 if exc.code == "NOT_FOUND" else 400
+        status = (
+            409
+            if exc.code in CODING_CONFLICT
+            else 404
+            if exc.code == "NOT_FOUND"
+            else 403
+            if exc.code == "FORBIDDEN"
+            else 400
+        )
         return _err(status, exc.code, exc.message)
 
     @router.post("/dev-tasks", response_model=None, dependencies=CALLER)
@@ -477,7 +487,8 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
 
     @router.post("/dev-chat", response_model=None, dependencies=CALLER)
     async def post_dev_chat(request: Request) -> dict | JSONResponse:
-        """`{thread_id?, message, connection?, mode?}` → 바뀐 대화. AI 답 하나까지 기다린다.
+        """`{thread_id?, message, connection?, mode?}` → `status: answering`인 대화를 바로 준다.
+        답은 뒤에서 붙는다 (SSE `chats` 또는 GET으로 다시 읽는다).
 
         `mode`(agent·subscription)는 이 대화가 띄울 작업을 누가 코딩하나."""
         svc = get_service()
@@ -505,11 +516,21 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         try:
             mode = body.get("mode")
             who = _person(request)
-            th = await dev_chat.turn(svc, thread_id, message, connection or None, mode, who)
+            th = await dev_chat.send(svc, thread_id, message, connection or None, mode, who)
         except ActionError as exc:
             return _coding_err(exc)
         except GateRefused as exc:
             return _gate_err(exc)
+        return _ok(dump(th), svc)
+
+    @router.post("/dev-chat/{thread_id}/close", response_model=None, dependencies=CALLER)
+    async def close_dev_chat(thread_id: str, request: Request) -> dict | JSONResponse:
+        """대화를 끝낸다 (`closed`). 띄운 작업은 그대로 돈다."""
+        svc = get_service()
+        try:
+            th = await dev_chat.close(svc, thread_id, _person(request))
+        except ActionError as exc:
+            return _coding_err(exc)
         return _ok(dump(th), svc)
 
     # ---- 레포 작업 공간 (repo_api.py): PR 게시판·상세·머지·되돌리기·브랜치
