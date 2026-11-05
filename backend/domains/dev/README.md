@@ -103,6 +103,11 @@ hr 연동 항목 규칙 (`domain/handover.py`, 시연값):
   5. 커밋·PR: 관문 `generate_pr`(B, 실제 줄·파일·경로) 뒤 `gen/<작업>-<실행 번호>` 브랜치에 마지막 결과만 커밋 하나로 올리고 PR을 연다(본문에 기획·완료 기준·파일별 이유, `요청`·`기획서`·`문단` 줄). 리뷰 결과를 관문 `review_pr` 뒤 PR `reviews`에 남긴다(PR 전 불일치도 앞에 붙인다). 활동 `code.review`. 두 번 다 불일치면 `waiting_human`(대기열 `pr_review_mismatch`).
   6. 머지: 통과면 기존 자동 머지 규칙(`merge_pr` 크기·보호 경로·장애 연결 등). 걸리면 `waiting_human`, 사람이 머지 버튼을 누르면 `merged`. 형상관리에는 merge commit으로 합친다.
 - 사람 확인 대기(열린 PR) 조치: 화면 코딩 카드의 **수정 지시**(`POST /dev-tasks/{id}/revise` `{note}`, 관문 `dev_task_revise` A) → 개발 AI가 PR 브랜치 글 위에서 지시대로 고치고 리뷰한 뒤 **같은 PR에 커밋**(관문 `code_write` A) → 리뷰 기록·자동 머지 규칙. **머지**는 누구나(`mergePr`, 감사 기록 "사람이 머지"). 대화에서 대기 중인 작업에 이어 말해도 수정 지시가 된다.
+- 코드 변경이 아닌 일(기획에 돌려보내기): 2단계 후보 고르기에서 LLM이 `not_code {reason, department}`(SNS 게시·쿠폰 발행·캠페인 집행처럼 다른 부서가 운영으로 하는 일)를 낼 수 있다. 화면 문구·배너·페이지처럼 레포 파일을 고치는 일은 코드 변경이다.
+  - 기획 서비스가 넘긴 작업(`handed_to_dev`이고 `origin`이 dev_team이 아님) + 고를 파일 후보 없음 + 담당 경로도 레포에 없음 → `returned`(작업 `중단`, `returned_to`·`returned_reason`, 활동 `code.return`). PR·커밋 없음. 바뀐 작업은 `receive_dev_result`로 기획에 가고, 기획이 받은 요청 사람 확인에 올린다.
+  - 그 밖(후보·담당 경로가 있음, 개발팀이 직접 낸 기획) → `waiting_human` + 같은 이유(LLM 판단만으로 튕기지 않는다).
+  - 사람이 **개발에 다시 맡기기**: 개발 화면 다시 시도(`retry`) 또는 기획이 `keep_dev: true`인 기획서로 `start_dev`를 다시 보냄 → 기획서 `keep_dev`가 켜지고 그 작업은 처음부터 다시 코딩한다. `keep_dev` 기획서는 다시 돌려보내지 않는다(핑퐁 방지).
+- 폐기: `POST /dev-tasks/{task_id}/discard`(사람 토큰, 관문 `dev_task_discard` A) → `{task_id, discarded: true}`. 중단·실패·돌려보낸 작업만(돌고 있거나 열린 PR이 있으면 409 `NOT_DISCARDABLE` → 먼저 중단). 작업에 `discarded`·`discarded_by`·`discarded_at`만 표시하고, 폐기한 작업은 재개·다시 시도가 막힌다(409 `NOT_RETRYABLE`). 작업 현황 목록은 폐기한 작업을 기본으로 숨기고 "폐기 보기"로 켠다.
 - 교차검증 대기가 `PLANNING_CROSS_CHECK_TIMEOUT_MIN`(기본 10분) 넘으면 사람 확인으로 넘긴다(화면 SSE가 열려 있는 동안 확인, 활동 `auto_review`).
 - 브랜치가 이미 있으면 제목·바꾼 파일이 같은 앞선 시도일 때만 이어받고, 아니면(서버를 다시 켜 작업 번호가 겹침 등) `gen/<작업>-<실행>-<6자리>` 새 브랜치로 올린다.
 - 한도: 파일 5개, 바뀐 줄 합 1500줄, 고칠 파일 600줄(넘으면 PR 없이 `waiting_human`, 작업 `C 보류`). LLM 오류·시간 초과(180초)·형상관리 오류는 `failed` + 짧은 이유(예외 내용·비밀 값 없음), 활동 `code.failed`.

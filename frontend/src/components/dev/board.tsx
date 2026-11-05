@@ -36,7 +36,8 @@ export function taskRow(s: S, t: Task, runTokens = 600_000): TaskRow {
   const c = t.coding
   const xr = pr && !pr.merged ? reviewOf(s, pr.id) : undefined
   const merged = !!pr?.merged || t.state === '완료'
-  const canceled = c?.status === 'canceled'
+  // 중단·기획에 돌려보냄·폐기는 멈춘 작업 (돌려보낸 일은 기획이 받은 요청에서 다시 정한다)
+  const canceled = c?.status === 'canceled' || c?.status === 'returned' || !!t.discarded
   const held = c?.status === 'waiting_human' || c?.status === 'failed' || t.state === 'C 보류'
   const lastReview = pr?.reviews[pr.reviews.length - 1]
   const group: Group = merged ? 'done' : canceled ? 'stopped' : held || xr || pr?.target?.status === 'proposed' || lastReview === '불일치' ? 'stuck' : 'running'
@@ -89,11 +90,18 @@ export function sortTaskRows(rows: TaskRow[]): TaskRow[] {
 
 // ---------------------------------------------------------------- 화면
 const PAGE_SIZE = 20
+const DISCARDED_KEY = 'axcellent-dev-show-discarded'
+const readShowDiscarded = () => { try { return localStorage.getItem(DISCARDED_KEY) === '1' } catch { return false } }
+const writeShowDiscarded = (on: boolean) => { try { localStorage.setItem(DISCARDED_KEY, on ? '1' : '0') } catch { /* 저장이 막혀도 이번 화면에서는 바뀐다 */ } }
 
 export function TaskBoard({ s, filter }: { s: S; filter?: string }) {
   const f = parseFilter(filter)
   const lim = useCodingLimits()
-  const all = s.tasks.map((t) => taskRow(s, t, lim.runTokens))
+  // 폐기한 작업은 기본으로 숨긴다. 보기로 켜면 이 브라우저에 기억한다
+  const [showDiscarded, setShowDiscarded] = useState(readShowDiscarded)
+  const toggleDiscarded = () => setShowDiscarded((v) => { writeShowDiscarded(!v); return !v })
+  const discarded = s.tasks.filter((t) => t.discarded).length
+  const all = s.tasks.filter((t) => showDiscarded || !t.discarded).map((t) => taskRow(s, t, lim.runTokens))
   const sorted = sortTaskRows(f === 'all' ? all : all.filter((x) => x.group === f))
   // 페이지: 한 번에 PAGE_SIZE개. 필터를 바꾸면 첫 페이지로
   const [page, setPage] = useState(0)
@@ -115,6 +123,11 @@ export function TaskBoard({ s, filter }: { s: S; filter?: string }) {
             </a>
           )
         })}
+        {discarded > 0 && (
+          <button type="button" className={`rq-toggle${showDiscarded ? ' on' : ''}`} aria-pressed={showDiscarded} onClick={toggleDiscarded} title="폐기한 작업을 목록에 보이기·숨기기">
+            {showDiscarded ? '폐기 숨기기' : '폐기 보기'}<span className="rq-n">{discarded}</span>
+          </button>
+        )}
         {calls > 0 && <span className="rq-usage"><UsageBar used={used} limit={lim.trial} label={`AI ${calls}회 · 서버 AI 체험`} title="모든 작업이 쓴 토큰 / 서버 AI 체험 한도" /></span>}
       </nav>
 
@@ -137,6 +150,8 @@ export function TaskBoard({ s, filter }: { s: S; filter?: string }) {
                   <span className="mono">{t.id}</span>
                   <OriginTag s={s} t={t} />
                   {row.group === 'stuck' && <Tag tone="amber">멈춤</Tag>}
+                  {t.discarded && <Tag>폐기</Tag>}
+                  {t.coding?.status === 'returned' && <Tag tone="amber">기획에 돌려보냄</Tag>}
                   {row.minutes > 0 && <span title={row.born ? `시작 ${row.born}` : undefined}>{fin ? `${duration(row.minutes)} 걸림` : `${duration(row.minutes)} 경과`}</span>}
                   {fin && row.last && <span>{shortTime(row.last)}</span>}
                 </span>

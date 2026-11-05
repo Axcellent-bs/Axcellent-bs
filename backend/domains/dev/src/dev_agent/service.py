@@ -2226,6 +2226,7 @@ class DevService(PlanningCore):
         got = [Task.model_validate(t) for t in tasks]
         req.flow = True  # 받은 뒤 사람 클릭 없이 PR까지 잇는다
         sp.handed_to_dev = True
+        again = {t.id for t in got}  # 사람이 "개발에 다시 맡기기"로 다시 넘긴 작업 (keep_dev)
 
         async def run(s: State) -> ActionResult:
             t = self.clock()
@@ -2238,6 +2239,10 @@ class DevService(PlanningCore):
             self._upsert(s.requests, [req])
             self._upsert(s.specs, [sp])
             self._upsert(s.tasks, got)
+            if sp.keep_dev:  # 돌려보냈던 작업을 처음부터 다시 코딩한다 (다시 돌려보내지 않음)
+                for x in s.tasks:
+                    if x.id in again and x.coding is not None and x.coding.status == "returned":
+                        x.coding, x.state = None, "진행 중"
             frm = requester if requester in DEPT_NAME else "planning"
             s.activity.append(self._act(t, ctx, frm, "dev", START_DEV, "A2A", text, "A"))
             return ActionResult(
@@ -2403,9 +2408,11 @@ class DevService(PlanningCore):
         task = next((t for t in self.state.tasks if t.id == task_id), None)
         if task is None or task.coding is None:
             raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+        if task.discarded:
+            raise ActionError("NOT_RETRYABLE", f"{task_id}는 폐기한 작업이다")
         if self.task_paused(self.state, task_id):
             raise ActionError("REQUEST_PAUSED", f"{task_id}의 요청이 사람 중단 중이다 → 재개 뒤")
-        resumable = ("failed", "waiting_human", "canceled")
+        resumable = ("failed", "waiting_human", "canceled", "returned")
         if task_id in self._coding or task.coding.status not in resumable:
             raise ActionError("NOT_RETRYABLE", f"{task_id}는 진행 중이거나 끝났다")
         conflict = task.coding.merge_conflict
@@ -2430,6 +2437,11 @@ class DevService(PlanningCore):
             ctx = req.context_id if req else f"task:{task_id}"
             t = self.clock()
             how = "재개" if x.coding.status == "canceled" else "다시 시도"
+            if x.coding.status == "returned" or x.coding.returned_to:
+                # 사람이 "코드 변경이 아니다" 판단을 뒤집음: 이 기획서는 다시 돌려보내지 않는다
+                how = "개발에 다시 맡기기 (코드 변경으로 확정)"
+                if sp is not None:
+                    sp.keep_dev = True
             if approved and x.coding.hold_key:
                 how = "보류 승인 → PR 열기"
             if x.coding.merge_conflict:
@@ -2575,6 +2587,46 @@ class DevService(PlanningCore):
             return ActionResult(
                 outcome="canceled", output={"task_id": task_id, "status": "canceled"}
             )
+
+        return await self._apply(run)
+
+    DISCARDABLE = ("canceled", "failed", "returned")
+
+    async def discard_dev_task(self, task_id: str, who: str | None = None) -> ActionResult:
+        """멈춘 코딩 작업을 사람이 폐기한다. 상태는 그대로 두고 `discarded`만 표시한다.
+
+        중단·실패·기획에 돌려보낸 작업만 된다. 돌고 있거나 열린 PR이 있으면 먼저 중단한다.
+        폐기한 작업은 다시 돌리지 않는다 (재개·다시 시도 막힘). 이미 폐기했으면 그대로 돌려준다."""
+        task = next((t for t in self.state.tasks if t.id == task_id), None)
+        if task is None:
+            raise ActionError("NOT_FOUND", f"작업 {task_id}가 없다")
+        if task.discarded:
+            return ActionResult(
+                changed=False, outcome="discarded", output={"task_id": task_id, "discarded": True}
+            )
+        status = task.coding.status if task.coding else None
+        stopped = status in self.DISCARDABLE or (status is None and task.state == "중단")
+        if task_id in self._coding or not stopped:
+            raise ActionError(
+                "NOT_DISCARDABLE", f"{task_id}는 멈춘 작업이 아니다 → 먼저 작업을 중단한다"
+            )
+        if any(p.task == task_id and not p.merged and not p.closed for p in self.state.prs):
+            raise ActionError("NOT_DISCARDABLE", f"{task_id}에 열린 PR이 있다 → 먼저 중단한다")
+
+        async def run(s: State) -> ActionResult:
+            x = next((t for t in s.tasks if t.id == task_id), None)
+            if x is None:
+                raise ActionError("NOT_FOUND", f"작업 {task_id}가 없다")
+            sp = next((p for p in s.specs if p.id == x.spec), None)
+            req = self._request_of_spec(s, sp) if sp else None
+            ctx = req.context_id if req else f"task:{task_id}"
+            t = self.clock()
+            text = f"{task_id} 작업 폐기 (사람 클릭{f' · {who}' if who else ''})"
+            await self._execute("dev_task_discard", ctx, task_id, text)
+            s.activity.append(self._act(t, ctx, "human", "dev", "dev_task_discard", "사람", text))
+            x.discarded, x.discarded_by, x.discarded_at = True, who, t
+            x.state = "중단"
+            return ActionResult(outcome="discarded", output={"task_id": task_id, "discarded": True})
 
         return await self._apply(run)
 
@@ -2760,6 +2812,9 @@ class DevService(PlanningCore):
             connection=task.coding.connection,
             instruction=task.coding.instruction,
             skip_queue=task.coding.skip_queue,
+            # 기획 서비스가 넘긴 기획서 (개발팀이 직접 쓴 기획도 handed_to_dev라 origin을 본다)
+            from_planning=sp.handed_to_dev and sp.origin != coder.DEV_TEAM,
+            keep_dev=sp.keep_dev,
         )
 
     def coding_alive(self, job: coder.Job) -> bool:
@@ -2833,6 +2888,8 @@ class DevService(PlanningCore):
             cr.updated_at = self.clock()
             if status == "waiting_human" and cr.pr is None:
                 task.state = "C 보류"
+            if status == "returned":  # 기획에 돌려보냄: receive_dev_result로 기획이 받는다
+                task.state = "중단"
             if point:
                 self._code_act(s, job, point, text or "")
             if status == "covered":

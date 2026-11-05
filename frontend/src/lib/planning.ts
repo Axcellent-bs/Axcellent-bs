@@ -382,6 +382,8 @@ export const devTaskApi = (base: string) => ({
   // PR 열기 보류 건 새로 받기 (만료·모름). 받은 review_id를 사람이 승인한 뒤 retry(approved)
   renewHold: (taskId: string) => call<{ review_id: string | null }>(base, `/dev-tasks/${encodeURIComponent(taskId)}/renew-hold`, post()),
   cancel: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/cancel`, post()),
+  // 멈춘 작업(중단·실패·돌려보냄) 폐기. 다시 돌리지 않고 작업 목록에서 숨길 수 있다
+  discard: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/discard`, post()),
   // 서버 AI로 넘기기: 개발자 Claude 대기열에서 아무도 안 가져간 작업을 서버 AI가 맡는다
   toAgent: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/to-agent`, post()),
   textOk: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/text-ok`, post()),

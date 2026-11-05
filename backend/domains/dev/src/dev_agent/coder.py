@@ -84,9 +84,20 @@ class FilePick(BaseModel):
     reason: str = ""
 
 
+DEPARTMENTS = ("marketing", "support", "finance", "hr", "data", "other")
+
+
+class NotCode(BaseModel):
+    """기획이 레포 코드를 바꾸는 일이 아닐 때 (SNS 게시·쿠폰 발행·캠페인 집행 같은 다른 부서 일)."""
+
+    reason: str = ""
+    department: Literal["marketing", "support", "finance", "hr", "data", "other"] = "other"
+
+
 class CodePlan(BaseModel):
     files: list[FilePick] = Field(default_factory=list)
     summary: str = ""
+    not_code: NotCode | None = None  # 후보 고르기에서만 쓴다
 
 
 class Edit(BaseModel):
@@ -119,8 +130,12 @@ PLAN_PROMPT = (
     "- 새 파일이면 action create.\n"
     "- path_hints가 있으면 그 경로를 먼저 본다.\n"
     "- reason은 그 파일을 고치는 이유 한 줄, summary는 바꿀 내용 한 줄 요약이다.\n"
-    '- JSON {"files": [{"path": "...", "action": "modify", "reason": "..."}], "summary": "..."}'
-    " 로만 답한다."
+    "- 기획이 이 레포의 코드를 바꾸는 일이 아니면(SNS 게시, 쿠폰 발행, 캠페인·광고 집행, 환불 "
+    "처리처럼 다른 부서가 운영으로 하는 일) files를 비우고 not_code에 이유 한 줄과 맞는 부서"
+    "(marketing·support·finance·hr·data·other)를 넣는다. 화면 문구·배너·페이지처럼 레포 파일을 "
+    "고쳐야 하면 마케팅 내용이어도 코드 변경이다. 코드 변경이면 not_code는 null.\n"
+    '- JSON {"files": [{"path": "...", "action": "modify", "reason": "..."}], "summary": "...", '
+    '"not_code": null} 로만 답한다.'
 )
 
 CONFIRM_PROMPT = (
@@ -297,6 +312,9 @@ class Job:
     connection: str | None
     instruction: str | None = None  # 사람이 대기 중인 PR에 준 수정 지시
     skip_queue: bool = False  # '지금 진행': 같은 파일 작업이 있어도 기다리지 않는다
+    # 기획 서비스가 넘긴 작업인가 (돌려보낼 곳이 있다). 개발팀 기획은 사람 확인으로 둔다
+    from_planning: bool = False
+    keep_dev: bool = False  # 사람이 개발로 확정함: 코드 변경이 아니라는 판단으로 멈추지 않는다
 
 
 class CoderGone(Exception):
@@ -305,13 +323,61 @@ class CoderGone(Exception):
 
 @dataclass(eq=False)
 class CoderStop(Exception):
-    """여기서 멈춘다. status는 failed 또는 waiting_human, message는 짧은 이유 한 줄."""
+    """여기서 멈춘다. status는 failed·waiting_human·covered·returned, message는 짧은 이유 한 줄."""
 
     status: str
     message: str
     point: str | None = None
     text: str | None = None
     fields: dict[str, Any] = field(default_factory=dict)
+
+
+DEPT_LABEL = {
+    "marketing": "마케팅",
+    "support": "고객지원",
+    "finance": "재무",
+    "hr": "인사",
+    "data": "데이터분석",
+    "other": "다른 부서",
+}
+
+
+def hinted(hints: tuple[str, ...] | list[str], listed: list[str]) -> bool:
+    """기획서 담당 경로(path_hints)가 레포에 실제로 있나 (파일 그대로 또는 그 폴더 아래)."""
+    for h in hints:
+        base = h.strip().strip("/")
+        if base and any(p == base or p.startswith(base + "/") for p in listed):
+            return True
+    return False
+
+
+def not_code_stop(job: Job, nc: NotCode, has_candidates: bool, has_hints: bool) -> CoderStop:
+    """LLM이 "코드 변경이 아니다"라고 했을 때. 코드 신호도 같은 쪽이면 기획에 돌려보낸다.
+
+    - 기획 서비스가 넘긴 작업 + 고를 파일 후보가 없음 + 담당 경로도 레포에 없음 → `returned`
+    - 그 밖(후보·담당 경로가 있음, 개발팀 기획) → `waiting_human` (LLM 판단만으로 튕기지 않는다)"""
+    dept = nc.department if nc.department in DEPARTMENTS else "other"
+    reason = " ".join(str(nc.reason or "").split())[:200] or "코드 변경이 아닌 일로 보임"
+    label = DEPT_LABEL[dept]
+    fields = {"returned_to": dept, "returned_reason": reason}
+    if job.from_planning and not has_candidates and not has_hints:
+        return CoderStop(
+            "returned",
+            f"코드 변경이 아님 → 기획에 돌려보냄 ({label}): {reason}",
+            "code.return",
+            f"코드 변경이 아님 ({label} 일로 보임) → 기획에 돌려보냄: {reason}",
+            fields,
+        )
+    why = "고를 파일 후보가 있음" if has_candidates else "담당 경로가 레포에 있음"
+    if not job.from_planning:
+        why = "개발팀이 직접 낸 기획"
+    return CoderStop(
+        "waiting_human",
+        f"코드 변경이 아닐 수 있음 ({label}): {reason} → 사람 확인",
+        "code.plan",
+        f"코드 변경이 아닐 수 있음 ({label} 일로 보임, {why}) → 사람 확인: {reason}",
+        fields,
+    )
 
 
 def _no_change(svc: DevService, job: Job, paths: list[str], why: str, point: str) -> CoderStop:
@@ -975,6 +1041,8 @@ async def _run(svc: DevService, job: Job) -> None:
     data = {**_base(job), "path_hints": list(job.hints), "files": listing}
     first = await _ask(llm, "후보 고르기", PLAN_PROMPT, CodePlan, data, job.ctx)
     candidates = check_picks(first.files, set(listed))[0][:MAX_CANDIDATES]
+    if first.not_code is not None and not job.keep_dev:
+        raise not_code_stop(job, first.not_code, bool(candidates), hinted(job.hints, listed))
     bodies = await _read_all(adapter, [p.path for p in candidates if p.action == "modify"])
     plan = first
     if bodies:

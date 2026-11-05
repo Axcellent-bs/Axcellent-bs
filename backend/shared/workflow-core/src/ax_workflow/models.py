@@ -172,6 +172,9 @@ class Spec(DomainModel):
     body_md: str | None = None
     # 양식에만 있는 칸 (planning spec_template.py): 범위·타깃·핵심 메시지·일정·예산·고려사항
     extra: dict[str, str] = Field(default_factory=dict)
+    # 개발이 "코드 변경이 아니다"로 돌려보낸 뒤 사람이 "개발에 다시 맡기기"로 확정함.
+    # 이 기획서의 작업은 다시 돌려보내지 않는다 (개발↔기획 핑퐁 방지, coder `not_code`)
+    keep_dev: bool = False
 
 
 CodingStatus = Literal[
@@ -187,6 +190,9 @@ CodingStatus = Literal[
     "canceled",  # 사람이 중단 (열린 PR은 닫고 브랜치를 지움)
     # 앞 작업 PR이 이미 반영해 바뀐 내용이 없음 → PR 없이 완료 (`covered_by`가 반영한 PR)
     "covered",
+    # 코드 변경이 아니라 다른 부서 일이라 기획에 돌려보냄 (`returned_to`·`returned_reason`).
+    # 기획이 받은 요청 사람 확인에 올리고, 사람이 다른 부서로 보내거나 개발에 다시 맡긴다
+    "returned",
 ]
 
 
@@ -254,6 +260,9 @@ class CodingRun(DomainModel):
     # CI 실패·시간 초과로 자동 머지 대신 사람 확인에 둠. PR 맞추기(sync)가 CI를 다시 보고
     # 나중에 통과하면 자동 머지 판단을 다시 한다 (dev `recheck_ci`)
     ci_hold: bool = False
+    # status returned: 맞을 것 같은 부서(marketing·support·finance·hr·data·other)와 이유 한 줄
+    returned_to: str | None = None
+    returned_reason: str | None = None
 
 
 class Task(DomainModel):
@@ -264,6 +273,11 @@ class Task(DomainModel):
     owner: str
     state: TaskState
     coding: CodingRun | None = None  # 코딩 에이전트 작업만 (개발팀 기획)
+    # 사람이 폐기함 (중단·실패·돌려보낸 작업만, 열린 PR 없음).
+    # 다시 돌리지 않고, 화면 목록에서 숨길 수 있다 (dev `discard_dev_task`)
+    discarded: bool = False
+    discarded_by: str | None = None
+    discarded_at: UtcDatetime | None = None
 
 
 class PrGate(DomainModel):
