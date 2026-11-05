@@ -44,6 +44,15 @@ from marketing_agent.briefs import (
 )
 from marketing_agent.campaign import record_campaign_result, start_campaign
 from marketing_agent.campaign_cancel import cancel_campaign
+from marketing_agent.chat import (
+    ChatRefused,
+    ChatService,
+    ChatThreadRef,
+    ListChatThreadsInput,
+    SendChatMessageInput,
+    short,
+)
+from marketing_agent.chat_store import ChatStorageError, ChatStore
 from marketing_agent.coupons import CouponLedger, SequenceGap, total_value
 from marketing_agent.links import BuildCampaignLinkInput, CampaignLink, build_campaign_link
 from marketing_agent.notice import NoticeStore, make_draft
@@ -70,6 +79,52 @@ class State:
         self.coupons = CouponLedger()
         self.briefs = BriefStore()
         self.sns = SnsStore()
+        # 열 수 없으면 시작 때 ChatStorageError로 실패한다(briefs와 같다)
+        self.chat = ChatService(ChatStore(), self.chat_facts)
+
+    def chat_facts(self) -> dict[str, Any]:
+        """대화에 넣는 사실. 마케팅 저장소를 읽기만 한다(구매자·고객 정보는 넣지 않는다)."""
+        try:
+            briefs, brief_total = self.briefs.list(10)
+            received: Any = [
+                {
+                    "proposal_id": b.proposal_id,
+                    "campaign_id": b.campaign_id,
+                    "status": b.status,
+                    "received_at": b.received_at.isoformat(),
+                    "title": short(b.brief.title),
+                    "idea": short(b.brief.idea),
+                    "why": short(b.brief.why),
+                    "facts": [f.model_dump(mode="json") for f in b.brief.facts][:12],
+                    "target": b.brief.target.model_dump(mode="json") if b.brief.target else None,
+                    "products": b.brief.products[:10],
+                    "approved_by": b.brief.approved_by,
+                    "note": short(b.brief.note),
+                    "body_md": short(b.brief.body_md),
+                }
+                for b in briefs
+            ]
+        except BriefStorageError:
+            brief_total, received = None, "받은 기획안을 읽지 못했다"
+        notices, notice_total = self.notices.active(limit=10)
+        return {
+            "today": _now().strftime("%Y-%m-%d"),
+            "received_briefs_total": brief_total,
+            "received_briefs": received,
+            "active_notices_total": notice_total,
+            "active_notices": [
+                {
+                    "notice_id": n.notice_id,
+                    "channel_code": n.channel_code,
+                    "public_text": n.public_text,
+                    "valid_from": n.valid_from.isoformat() if n.valid_from else None,
+                    "valid_to": n.valid_to.isoformat() if n.valid_to else None,
+                }
+                for n in notices
+            ],
+            "coupons_issued_total": self.coupons.issued_count(),
+            "campaign_status": "마케팅 서비스에는 캠페인 상태 저장소가 없다(예산·성과는 재무 소관)",
+        }
 
 
 STATE = State()
@@ -577,6 +632,76 @@ async def publish_sns_skill(request: AgentRequest) -> AgentResult:
     return await publish_sns(request, STATE.sns)
 
 
+def _chat_failed(request: AgentRequest, refused: ChatRefused) -> AgentResult:
+    return _result(
+        request, TaskStatus.FAILED, outcome=refused.outcome, output={"message": refused.message}
+    )
+
+
+def _chat_storage_failed(request: AgentRequest) -> AgentResult:
+    return _result(request, TaskStatus.FAILED, outcome="storage_error")
+
+
+def _chat_done(request: AgentRequest, skill: str, output: dict[str, Any]) -> AgentResult:
+    # 대화 기록만 읽고 쓴다. 업무 상태(캠페인·공지·쿠폰)는 바꾸지 않아 execute()를 부르지 않는다
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=output,
+        evidence=_evidence([skill], "마케팅 AI 대화"),
+    )
+
+
+async def send_chat_message(request: AgentRequest) -> AgentResult:
+    data = _parse(request, SendChatMessageInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        thread = STATE.chat.send(data.who, data.thread_id, data.message)
+    except ChatRefused as refused:
+        return _chat_failed(request, refused)
+    except ChatStorageError:
+        return _chat_storage_failed(request)
+    return _chat_done(request, "send_chat_message", {"thread": thread})
+
+
+async def list_chat_threads(request: AgentRequest) -> AgentResult:
+    data = _parse(request, ListChatThreadsInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        threads = STATE.chat.list(data.who, data.limit)
+    except ChatStorageError:
+        return _chat_storage_failed(request)
+    return _chat_done(request, "list_chat_threads", {"threads": threads})
+
+
+async def get_chat_thread(request: AgentRequest) -> AgentResult:
+    data = _parse(request, ChatThreadRef)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        thread = STATE.chat.get(data.who, data.thread_id)
+    except ChatRefused as refused:
+        return _chat_failed(request, refused)
+    except ChatStorageError:
+        return _chat_storage_failed(request)
+    return _chat_done(request, "get_chat_thread", {"thread": thread})
+
+
+async def close_chat_thread(request: AgentRequest) -> AgentResult:
+    data = _parse(request, ChatThreadRef)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        thread = STATE.chat.close(data.who, data.thread_id)
+    except ChatRefused as refused:
+        return _chat_failed(request, refused)
+    except ChatStorageError:
+        return _chat_storage_failed(request)
+    return _chat_done(request, "close_chat_thread", {"thread": thread})
+
+
 HANDLERS = {
     "draft_notice": draft_notice,
     "publish_notice": publish_notice,
@@ -593,4 +718,8 @@ HANDLERS = {
     "check_sns_post": check_sns_post_skill,
     "publish_sns": publish_sns_skill,
     "cancel_campaign": cancel_campaign,
+    "send_chat_message": send_chat_message,
+    "list_chat_threads": list_chat_threads,
+    "get_chat_thread": get_chat_thread,
+    "close_chat_thread": close_chat_thread,
 }

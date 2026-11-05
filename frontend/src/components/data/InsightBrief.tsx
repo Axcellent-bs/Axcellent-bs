@@ -4,13 +4,14 @@ import { okEvidence, type SkillState } from "@/components/data/useSkill";
 import { Sources, when } from "@/components/data/Sources";
 import { OpportunityCards } from "@/components/data/OpportunityCards";
 import { AgeBars } from "@/components/data/AgeBars";
-import { CopyId, FoldRow, ShortsCard, factLinks, shortsThumbs, type Tile } from "@/components/data/ShortsCard";
+import { CopyId, FoldRow, ShortsCard, factLinks, shortsThumbs, shortsTiles, verdictOf } from "@/components/data/ShortsCard";
 import { DATA_SERVER, kpiLive, type DataFact, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
 
 // 트렌드 2단계(인사이트): 기획팀이 가져갈 인사이트 브리프 (v2 시안 ② 보드). trend_insight_brief(계약 TrendInsightBriefOutput) 응답 그대로.
 // - 카드 틀은 ShortsCard: 판정 칩 · 제목 · 한 문장(서버 line) · 숫자 타일 · 연결 상품 · 오른쪽 근거 숏츠 썸네일(최대 3) · "근거 전체 보기" 접힘 하나
-// - 인사이트 카드: 판정 칩은 그리지 않는다(TrendInsight에 숏츠 적합도 칸이 없다). 숫자 타일은 가장 오른 연령(target_age·target_age_ratio)만
-//   근거 숏츠 = evidence.links + 브리프 facts 중 이 인사이트(about·fact_ids)의 YouTube 주소
+// - 인사이트 카드: 판정 칩 = 서버 shorts_fit(high → "숏츠로 해볼 만함", 그 밖·표본 부족 unknown → "아직 불확실", 칸 없는 예전 응답은 칩 없음).
+//   숫자 타일 = 숏츠 반응(shorts_fit) · 가장 오른 연령(top_age_band) · 목표 참고값(target_views_reference), 서버 값이 있는 것만 (#678)
+//   근거 숏츠 = evidence.video_links(썸네일·광고 재료 칩) → evidence.links + 브리프 facts 중 이 인사이트(about·fact_ids)의 YouTube 주소
 //   접힘 안: 광고 재료 판정·회사 관련 이유·연결 상품 이유·시즌 근거·연령대 막대·숏츠 형식·데이터 근거·한계·예시 아이디어·insight_id 복사
 // - 순서: 회사 관련·기회(기회 가설 카드 → 회사 관련 인사이트) → 상품이 연결된 그 밖의 인사이트 → 맨 아래 접힘 "상품 연결 없는 화제 N개"
 //   → 참고용 예시(기존 기획안 카드) 접힘
@@ -106,18 +107,16 @@ function Products({ i }: { i: TrendInsight }) {
 function InsightCard({ i, facts }: { i: TrendInsight; facts: DataFact[] | undefined }) {
   const m = material(i);
   const season = seasonText(i.evidence);
-  const tiles: Tile[] = [];
-  if (i.target_age && i.target_age_ratio !== null) tiles.push({ label: "가장 오른 연령", value: i.target_age, note: `검색 ${times(i.target_age_ratio)}` });
   const kicker = [i.category && i.category !== "unknown" ? i.category : null, i.company_related ? "회사 관련" : null, i.classification_pending ? "분류 대기" : null]
     .filter(Boolean).join(" · ");
   return (
     <ShortsCard
-      verdict={null}
+      verdict={verdictOf(i.shorts_fit, i.shorts_fit_status, i.shorts_fit_reason)}
       kicker={kicker || null}
       title={i.topic}
       line={i.line || null}
       lineNote={i.line_status === "fixed" ? "고정 문장" : null}
-      tiles={tiles}
+      tiles={shortsTiles(i)}
       products={i.products.map((p) => ({ id: p.product_id, name: p.name }))}
       thumbs={shortsThumbs(i.evidence.video_links, [...i.evidence.links, ...factLinks(facts, i.insight_id, i.fact_ids)])}
       highlight={i.company_related === true}
@@ -126,6 +125,10 @@ function InsightCard({ i, facts }: { i: TrendInsight; facts: DataFact[] | undefi
           <Chip label={m.label} tone={m.tone} />
           {[i.ad_material_reason, i.real_entity && i.entity_names.length ? `이름 · ${i.entity_names.join(", ")}` : null].filter(Boolean).map((x) => <span key={x} className="ml-1 text-xs text-ink-500">{x}</span>)}
         </FoldRow>
+        {(i.shorts_fit || i.shorts_fit_reason) && (
+          <FoldRow label="숏츠 적합도">{i.shorts_fit ? i.shorts_fit.reason : i.shorts_fit_reason}</FoldRow>
+        )}
+        {!i.top_age_band && i.top_age_band_reason && <FoldRow label="가장 오른 연령">{i.top_age_band_reason}</FoldRow>}
         {i.company_reason && <FoldRow label="회사 관련">{i.company_reason}</FoldRow>}
         {i.company_relevance_reason && <FoldRow label="회사 연결">{i.company_relevance_reason}</FoldRow>}
         <FoldRow label="연결 상품"><Products i={i} /></FoldRow>

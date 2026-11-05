@@ -28,6 +28,7 @@ from pydantic import ValidationError
 from ax_agent_template.llm import LLMClient, LLMNotConfiguredError
 from ax_contracts.schemas.data import LinkedProduct
 from data_agent.connectors import CatalogProduct, ConnectorUnavailable
+from data_agent.llm_budget import LLMDailyCapReached
 
 _SPACE = re.compile(r"\s+")
 _WORD = re.compile(r"[^\W_]+")
@@ -162,6 +163,8 @@ async def similarities(
     texts = [topics[k] for k in keys] + [product_text(p, categories) for p in products]
     try:
         vectors = await llm.embed(texts, context_id=context_id)
+    except LLMDailyCapReached as error:  # data LLM 하루 상한: 부르지 않음 (이유 그대로)
+        return Similarities(reason=f"임베딩을 부르지 않음: {error}", failure="request_failed")
     except LLMNotConfiguredError as error:
         settings = getattr(llm, "settings", None)
         if not getattr(settings, "embed_model", None):

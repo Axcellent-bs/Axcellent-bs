@@ -42,6 +42,7 @@ from ax_contracts.schemas.data import (
     SubtopicSearch,
 )
 from data_agent.connectors import ConnectorUnavailable
+from data_agent.llm_budget import no_llm
 from data_agent.skills import trend_candidates as cand
 from data_agent.skills.shorts_stats import is_language
 from data_agent.skills.shorts_stats import load_config as load_shorts_config
@@ -300,8 +301,8 @@ async def classify(
         data[f"주제{n}"] = f"{s.name} (씨앗 키워드: {s.seed_keyword})"
     try:
         got = await llm.structured(PROMPT, _Axes, untrusted=data, context_id=context_id)
-    except LLMNotConfiguredError:
-        return "LLM 설정이 없어 모두 기타"
+    except LLMNotConfiguredError as error:
+        return f"{no_llm(error)} 모두 기타"
     except (LLMFormatError, ValidationError):
         return "LLM 답 형식이 맞지 않아 모두 기타"
     except Exception as error:  # 호출 실패

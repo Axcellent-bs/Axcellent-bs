@@ -284,7 +284,26 @@ class Engine:
         run.finished_at = now()
         inc.outputs["impact"] = output
         inc.log(f"{step.label}: 복구 시각까지 다시 계산 (새로 잡힌 영향 고객 {len(added)}명)")
+        if added:
+            await self._queue_late(inc, plan, added)
         return True
+
+    async def _queue_late(self, inc: Incident, plan: Plan, added: list[str]) -> None:
+        """새로 잡힌 고객을 고객지원 보상 "대기"에 올린다. 쿠폰은 상담원이 승인한 뒤에만 나간다.
+
+        실패해도 영향 분석 갱신은 그대로 둔다(보상을 자동으로 보내지 않는다).
+        같은 고객 묶음은 같은 단계 id라 다시 와도 한 번만 처리된다.
+        """
+        tag = hashlib.sha1("|".join(sorted(added)).encode()).hexdigest()[:8]
+        for base in plan.late_steps:
+            step = replace(base, id=f"{base.id}_{tag}")
+            if step.id in inc.steps:
+                continue
+            inc.steps[step.id] = StepRun(step.id, step.skill, step.label)
+            try:
+                await self._run_step(inc, step)
+            except Exception as exc:  # noqa: BLE001 - 대기 올리기 실패가 복구 처리를 막지 않게 한다
+                self._fail(inc, inc.steps[step.id], f"{type(exc).__name__}")
 
     async def _call_in_batches(
         self, inc: Incident, step: Step, run: StepRun, dept: str, payload: dict[str, Any]

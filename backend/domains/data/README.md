@@ -24,7 +24,7 @@
 | `domain_subtopics` | 하위 주제 넓히기: 씨앗 키워드 → YouTube 한국 숏츠 → 함께 나온 말(코드) → 프로필 하위 주제 축으로 분류(LLM) | YouTube search.list(videoDuration=short) 씨앗마다 1번, 일주일 캐시 `backend/.data/subtopics.db`, 하루 상한 `[subtopics] daily_searches` 5번(수집 계획 YouTube 할당량에 합침) |
 | `trend_age` | 연령대별 상승: 주제마다 연령대(설정)별로 따로 조회해 "그 연령대에서 평소 대비 몇 배"(trend_scan과 같은 판정 함수), 가장 크게 오른 연령대 | 네이버 검색어 트렌드(`ages` 조건, 주제 하나 = 연령대 수만큼, 하루 상한 200번·3일 캐시, 브리프·카드 우선 120번을 빼고 다른 skill은 80번까지, 네이버 전체 상한에서 300번은 다른 skill용으로 남김, 호출자별 사용량은 응답 `calls_by_caller`·`limits`), trend_popular(커넥터 없이), 오늘 판정 기록, 기획안 시즌 확인·카탈로그. LLM 없음. 설정: `trends.toml` `[age]` |
 | `promo_concepts` | 광고·홍보 숏츠 **예시 아이디어(참고용)** 3~5개(확정 기획은 기획팀 몫): 타깃 연령대와 근거 숫자(trend_age, 없으면 미정 + 이유)· 제목·컨셉·길이(15~60초)·콘티(길이에 맞는 컷 수)·빌려 온 숏츠 형식과 그 평균 조회수·빌려 온 트렌드(없어도 됨)·맞는 이유·등장 상품·주의사항, 코드 경고(상표·초상권 확인 필요), 버린 초안과 이유, 쓴 재료·시즌 확인 키워드 | shop-api 상품·카테고리, shorts_stats(형식별 평균 조회수), trend_popular(게임·연예·스포츠·K-pop·음악·IT만), 카탈로그 카테고리·상품 핵심어 월별 흐름(trend_history, 키워드마다 네이버 1번·상한 20·하루 캐시), LLM(초안 1번). 하루 캐시·기록 `backend/.data/promo_concepts.db`(캐시 키 = 날짜 + 규칙 버전: 재료 거르기 설정 `[promo]`·분류 목록·프롬프트의 해시. 규칙이 바뀌면 다음 요청에서 다시 만든다). 설정: `trends.toml` `[promo]` |
-| `shorts_stats` | YouTube 숏츠 통계(카테고리별·형식별): 숏츠 수·평균 조회수·평균 시간당 조회 증가·조회수 상위 3개, 표본 부족은 unknown | YouTube 스냅샷 DB(길이 `video_details`), 숏츠 검색(`search.list`, 하루 1번·상한 8번, `backend/.data/shorts.db`), LLM(카테고리·형식 분류, 묶어서·저장). 설정: `trends.toml` `[shorts]` |
+| `shorts_stats` | YouTube 숏츠 통계(카테고리별·형식별): 숏츠 수·평균 조회수·평균 시간당 조회 증가·조회수 상위 3개, 표본 부족은 unknown. 카테고리마다 화면 카드 숏츠 10개(분류·구독자 대비·광고 재료 칸) | YouTube 스냅샷 DB(길이 `video_details`), 숏츠 검색(`search.list`, 하루 1번·상한 8번, `backend/.data/shorts.db`), LLM(카테고리·형식 분류, 묶어서·저장). 설정: `trends.toml` `[shorts]` |
 | `content_recommend` | 지금 만들 만한 영상 소재(급상승만, 최대 N개): 순위·점수 근거(z·배수·두 소스)·출처·주제 분류·묶음(회사 상품과 연결된 소재·일반 화제)·연결할 실제 상품(근거)·회사 관련성(상품 연결로, 표시만)·밈 형식·영상 아이디어 1~2문장·형식(숏폼·롱폼)·fallback. 추천 안 함 분류(회사 설정)는 참고용 + 이유로 따로. 콘텐츠 루프 2단계 | trend_scan(회사 기본 키워드 그룹)·trend_candidates(후보 전체)와 같은 네이버 요청(하루 캐시 같이 씀), 회사 상품 목록(shop-api `GET /api/shop/products`·`/categories`), LLM(아이디어 문장·밈 형식·주제 분류만), 임베딩(설정이 있을 때만). 설정: 회사 폴더 `trends.toml` `[recommend]` |
 | `answer_planning_question` | 기획이 되묻는 근거 질문의 답(answered·needs_human·unknown). 기획만 부른다 | data가 보낸 요청의 기록(`planning_questions.py`, 프로세스 안). 아직 요청을 보내는 코드가 없어 지금은 늘 unknown. 사람 답은 `human_answer_request`로 planning `receive_planning_answer`에 보낸다 |
 | `campaign_effect` | 캠페인 기간 주문 방향(늘었음·같음·줄었음)·증분(실제 − 지난 7일 같은 시간대 평균), 캠페인 쿠폰 조회 시점 누적 사용률. 매출은 매출 지표가 생기면 같은 방법(지금은 확인할 수 없음) | shop-api `GET /api/shop/metric-series`(`order_count`), `GET /api/shop/coupons?campaign_id=` |
@@ -341,12 +341,27 @@ DATA_EXTERNAL_MODE=replay bash scripts/run_all.sh
 | `trend_candidates` | 후보마다 1번 + 별칭 수 | 0 |
 | `trend_age` | 주제 × 연령대(기본 10 × 5 = 50), 하루 상한 200(우선 아닌 skill은 80) | 0 |
 | `trend_popular` (화면 경로) | 0 | 제목 videos.list ≤ 2번, 구독자 channels.list ≤ 2번, 보충 검색 ≤ 6번(100단위씩) |
-| `shorts_stats` | 0 | 검색 하루 ≤ 8번(100단위씩, 저장 재사용), 다시 보기 videos.list 50개마다 1단위 |
+| `shorts_stats` | 0 | 검색 하루 ≤ 8번(100단위씩, 저장 재사용), 다시 보기 videos.list 50개마다 1단위, 화면 카드 구독자 channels.list 하루 ≤ 2번(1단위씩) |
 | `promo_concepts` | 시즌 키워드 ≤ 20번(하루 캐시) + 연령대(예시 트렌드 수 × 5) | shorts_stats와 같다 |
 | `trend_insight_brief` | trend_age(후보 × 5, 상한 공유) | trend_popular·shorts_stats와 같다 |
 
 ## 2. 실행 방법
 `docker compose -f infra/compose.yml up data` / 목 모드: `DATA_MOCK=1`
+
+### 다른 PC에서 실행
+
+**팀원은 각자 PC에서 키를 넣어 띄우지 말고 251에서 데이터 화면을 본다.** 다른 PC에서 직접 띄워야 할 때만 아래를 따른다.
+
+- `backend/.env`에 넣는 키 이름 (값은 각자 받는다, 커밋 금지)
+  - LLM: `DATA_LLM_MODEL`·`DATA_LLM_BASE_URL`·`DATA_LLM_API_KEY` (data 전용) 또는 공용 `LLM_MODEL`·`LLM_BASE_URL`·`LLM_API_KEY`. 임베딩(상품 연결): `EMBED_MODEL`·`EMBED_BASE_URL`·`EMBED_API_KEY`
+  - YouTube: `YOUTUBE_API_KEY`
+  - 네이버 검색어 트렌드·쇼핑인사이트(API HUB): `NAVER_HUB_CLIENT_ID`·`NAVER_HUB_CLIENT_SECRET`
+  - 선택: 도서관 정보나루 `DATA4LIBRARY_API_KEY`, 통계청 `KOSIS_API_KEY`
+  - 상한(키 아님): `DATA_LLM_DAILY_CALLS`(기본 200)·`DATA_LLM_DAILY_TOKENS`(기본 400,000), `NAVER_DATALAB_DAILY_LIMIT`·`NAVER_SHOPPING_DAILY_LIMIT`(기본 1,000)
+- **키를 공유하면 할당량과 비용도 공유된다.** 같은 YouTube 키는 하루 10,000 단위를, 같은 네이버 API HUB 앱은 하루 호출 수를, 같은 LLM 키는 사용 요금을 모든 PC가 나눠 쓴다. 하루 상한 셈(`DATA_LLM_BUDGET_DB`·`DATA_NAVER_CACHE_DB`)은 PC마다 따로라 여러 PC가 같은 키를 쓰면 실제 사용량은 합이 된다
+- **LLM 설정을 읽는 순서**: `<부서>_LLM_*`(예: data는 `DATA_LLM_MODEL`·`DATA_LLM_BASE_URL`·`DATA_LLM_API_KEY`) → 공용 `LLM_*` → 없으면 LLM을 쓰지 않는다(고정 문장·unknown). 다른 변수로 넘어가지 않는다
+  - **공용 `LLM_API_KEY`는 자기 키가 없는 모든 부서(기획·인사·고객지원·재무 등)가 쓴다. 개인 키를 공용 칸에 넣지 말 것.** 개인 키로 data만 쓰려면 `DATA_LLM_API_KEY`(와 `DATA_LLM_MODEL`·`DATA_LLM_BASE_URL`)에 넣는다. 부서 키는 그 부서만 읽는다
+- 키 없이 `backend/.data`만 복사하면: 감지 탭은 저장된 스냅샷으로 다시 계산해 대부분 보이지만(새 분류·설명 문장·YouTube 재조회는 빈칸·대체 문장), 인사이트 탭은 그날·같은 코드로 만든 브리프가 없으면 비거나 unknown이다. 복사할 때는 `*.db-wal`·`*.db-shm`도 같이 옮기고, `tokens.env`·`web.env`는 옮기지 않는다
 
 ### 목 모드 데모 시각 정렬
 - 시드는 고정 날짜다: 실패 주문 2026-10-21 05:00~05:30Z (`seed.py`), 지표 10/14~10/22 (`seed_metrics.py`).
@@ -559,7 +574,10 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 - **상품 입력 `products`(#646, 선택)**: 상품 id 또는 이름 최대 10개. 이름은 카탈로그(`GET /api/shop/products`) 이름과 정규화(NFKC, 소문자, 공백 모두 뺌)한 값이 정확히 같을 때만 맞추고, 못 맞춘 값은 추측하지 않고 `products_effect.unmatched_products`로 돌려준다. 생략하면 예전 응답과 같다
 - **세 구분 (합산하지 않음, 같은 주문이 겹칠 수 있다)**: 상품 기준 `products_effect`(맞은 상품의 품목만: 그 상품이 든 결제 완료 주문 수·판매 수량·판매액 각각 기간값·기준선·증분·범위·방향, 기준선·공백·기준선 부족 규칙은 판매액과 같음) / 쿠폰 귀속 `coupons`·`sales.direct_attributed_krw` / 가게 전체 `orders`·`sales`(참고용). 숫자는 모두 `facts`
 - **상품 기준 평가**: `eval/campaign_products/`(그 상품만 늘림·다른 상품만 늘림·이름 못 맞춤·결제 공백·기준선 부족), 관문 `tests/test_campaign_products_eval_gate.py`
-- **상품 기준 한계**: 같은 상품이 캠페인과 다른 이유(다른 행사·시즌·검색)로 팔린 것은 구분하지 못한다. "그 기간 그 상품 판매 변화"다. 유입경로 기준은 #648(마케팅 #647 뒤)
+- **상품 기준 한계**: 같은 상품이 캠페인과 다른 이유(다른 행사·시즌·검색)로 팔린 것은 구분하지 못한다. "그 기간 그 상품 판매 변화"다
+- **유입경로 기준 `attribution_effect`(#648, campaign_id가 있을 때)**: shop-api `GET /api/shop/orders/attributed`(#655, 커넥터 `attributed_orders`, 1000건을 넘으면 구간을 반씩 나눠 읽음)로 유입 표시(`src_campaign` = campaign_id)가 있는 **결제 완료** 주문의 수·판매액(단가 × 수량, 할인 전)을 출처(`src_source`)별로, 유입 표시가 있는 주문 비율(유입 표시가 있는 결제 완료 주문 ÷ 구간 결제 완료 주문)과 함께 준다. 다른 캠페인 표시 주문은 세지 않는다. 직접 귀속이라 기준선과 비교하지 않는다. 구간에 유입 표시가 있는 결제 완료 주문이 하나도 없으면 unknown + "유입 기록 없음". 관련 상품(`products`)도 있으면 `attribution_and_products` = 이 캠페인으로 들어와 그 상품을 산 주문의 그 상품 품목만. 숫자는 모두 `facts`. 평가 `eval/campaign_attribution/`, 관문 `tests/test_campaign_attribution_eval_gate.py`
+- **네 칸은 합산하지 않는다**: 유입(`attribution_effect`) / 상품(`products_effect`) / 쿠폰 귀속(`coupons`·`sales.direct_attributed_krw`) / 가게 전체(`orders`·`sales`, 참고)는 같은 주문이 여러 칸에 겹칠 수 있다
+- **유입경로 한계**: 쇼핑몰 화면이 캠페인 링크 꼬리표(`src_*`)를 주문까지 넘긴 주문만 센다. 꼬리표 없이 들어온 주문(직접 방문·꼬리표 유실)은 빠진다. 광고 데이터(노출·클릭·비용) 결합은 하지 않는다: 출처 현황 `pending_sources`에 "광고 데이터: #647 광고 부분 대기"
 - **재무 칸 대응표** (재무 `record_campaign_result` `CampaignResultInput`):
 
   | 재무 칸 | 뜻 (재무 계약) | data 칸 |
@@ -572,10 +590,11 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 - 쿠폰: `GET /api/shop/coupons?campaign_id=`(커넥터 `campaign_coupons`, data는 `COUPON_READERS`에 있다)의 발급(`count`)·사용(`used_units`) 장수 합으로 누적 사용률 = 사용 ÷ 발급. 설명은 LLM이 아니라 고정 문장 "조회 시점 기준 누적 사용률이며, 캠페인 뒤 사용분도 섞여 있다"(평가 채점기가 이 글자를 본다)
 - **기준선** (`baseline_rule`로 어느 것을 썼는지 답한다):
   - 하루 이하 캠페인: 지난 7일 같은 시간대 (예전과 같음)
-  - 하루 넘는 캠페인(7일 이하): **7일 전 같은 구간 + 14일 전 같은 구간의 평균** = 시작 전 14일의 같은 요일·시간대 (평가 `eval/campaign/multiday` 기대값 정의와 같음). 7일보다 길면 7일 전 구간이 캠페인과 겹쳐 확인할 수 없음
-  - 시작 전 기록이 14일보다 짧으면 확인할 수 없음 "시작 전 기록 부족 (N일): …". 15일 전까지 읽어서, 14일 전 구간만 통째로 빈 경우(그 주 서버 꺼짐)와 기록이 짧은 경우를 구분한다
+  - 하루 넘는 캠페인(7일 이하): **7·14·21·28일 전 같은 요일·같은 길이 구간의 평균**(4주 기준선, 시작 전 기록 안에 들어오는 구간만, 최소 3구간). 평가 `eval/campaign/multiday`·`multiday4` 기대값 정의와 같다. 7일보다 길면 7일 전 구간이 캠페인과 겹쳐 확인할 수 없음
+  - 시작 전 기록이 21일(3구간)보다 짧으면 확인할 수 없음 "시작 전 기록 부족 (N일): …". 29일 전까지 읽어서, 28일 전 구간만 통째로 빈 경우(그 주 서버 꺼짐)와 기록이 짧은 경우를 구분한다. 빈 구간·기록 공백으로 빠져 3구간이 안 되면 "기준선에 쓸 같은 요일 구간이 N개뿐 (최소 3구간)"
+  - 주문 수·판매액(`sales`)·상품 기준(`products_effect`)은 모두 같은 구간을 쓴다(주문 판정이 고른 구간을 그대로 넘김)
   - **기준선에 쓰는 지난 구간이 빈 구간·기록 공백 규칙(아래)에 걸리면 그 구간은 뺀다**(0건으로 넣어 기대값을 낮추지 않음). 뺀 구간과 이유는 `baseline_note`, 남은 구간이 없으면 확인할 수 없음 "기준선에 쓸 지난 구간이 없음 (…)". 지난 구간끼리는 나머지 지난 구간과 비교한다
-  - 요일·날짜 경계는 **회사 시간대**로 센다: `config/tenants/<회사>/tenant.toml`의 `timezone`(캣북스 `Asia/Seoul`) → `scripts/tenant_env.py`가 `DATA_TENANT_TIMEZONE`으로 넘긴다. 환경변수가 없으면 회사 폴더 `tenant.toml`을 직접 읽고, 그것도 없으면 UTC. 지난 구간은 회사 시간대 벽시계로 7·14일 전이다
+  - 요일·날짜 경계는 **회사 시간대**로 센다: `config/tenants/<회사>/tenant.toml`의 `timezone`(캣북스 `Asia/Seoul`) → `scripts/tenant_env.py`가 `DATA_TENANT_TIMEZONE`으로 넘긴다. 환경변수가 없으면 회사 폴더 `tenant.toml`을 직접 읽고, 그것도 없으면 UTC. 지난 구간은 회사 시간대 벽시계로 7·14·21·28일 전이다
   - **한계: 기준선 두 주에 명절·다른 캠페인이 끼면 기준선이 오염된다**(그 주가 평소보다 높거나 낮아도 지금은 걸러 내지 않는다)
 - 확인할 수 없음(0으로 채우지 않음): 기준선 주문이 0건, 시작 전 기록 부족, 기준선에 쓸 지난 구간이 없음, 캠페인이 7일보다 김, campaign_id 없음, 그 캠페인 쿠폰 없음, 쿠폰을 읽지 못함
 - **기록 공백은 줄었음이 아니다.** shop-api는 주문이 없는 5분을 0으로 줘서, 서버가 꺼졌던 시간도 0건으로 보인다. 주문 판정 전에 본다(주문·매출 확인할 수 없음, 쿠폰은 따로):
@@ -638,9 +657,9 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 - **출처**: shop-api `GET /api/shop/orders?since&until`(주문 접수 시각 [since, until)). 판매자 DB를 직접 읽지 않는다
 - **세는 주문**: 결제 완료 주문(성공한 결제가 하나라도 있는 주문). 결제 대기·결제 실패 주문은 세지 않는다
 - **칸 정의** (원 단위 정수): 주문 금액 `gross_krw` = 상품가 × 수량 합(할인 전) · 쿠폰 할인 `discount_krw` · 결제 금액 `paid_krw` = 성공한 결제 금액 합(배송비 포함, 할인·포인트 뺀 현금) · 환불 `refund_krw`(조회 시점 누적) · 결제 완료 주문 수
-- **기준선**: 주문 수 판정과 같은 구간(1일 이하 = 지난 7일 같은 시간대, 여러 날 = 7·14일 전 같은 요일·시간대)의 날 평균. 주문 판정에서 빈 구간·기록 공백으로 뺀 날은 판매액에서도 뺀다(`baseline_note`)
+- **기준선**: 주문 수 판정과 같은 구간(1일 이하 = 지난 7일 같은 시간대, 여러 날 = 7·14·21·28일 전 같은 요일·같은 길이 구간)의 날 평균. 주문 판정에서 빈 구간·기록 공백으로 뺀 날은 판매액에서도 뺀다(`baseline_note`)
 - **증분**: 구간 − 기준선 평균. **하한·상한**: 구간 − 기준선 날 중 가장 많은 날 / 가장 적은 날
-- **최소 기준선**: 기준선 날이 `DATA_CAMPAIGN_SALES_MIN_BASELINE_DAYS`(기본 3)보다 적으면 증분·하한·상한·방향은 unknown + "기준선 부족(N일, 최소 M일)". 기간 판매액(`period`)·쿠폰 귀속은 그대로 준다. **여러 날 캠페인은 기준선이 7·14일 전 2구간뿐이라 기본값에서는 늘 기준선 부족이다**(최소를 2로 낮추면 낸다)
+- **최소 기준선**: 기준선 날이 `DATA_CAMPAIGN_SALES_MIN_BASELINE_DAYS`(기본 3)보다 적으면 증분·하한·상한·방향은 unknown + "기준선 부족(N일, 최소 M일)". 기간 판매액(`period`)·쿠폰 귀속은 그대로 준다. 여러 날 캠페인은 4주 기준선(3~4구간)이라 기본값(3)에서 증분을 낸다(예전 7·14일 전 2구간일 때는 늘 기준선 부족이었다)
 - **방향**: 하한 > 0이면 늘었음, 상한 < 0이면 줄었음, 범위가 0에 걸치거나 기준선 날이 1개면 확실하지 않음(`uncertain`). 주문 수 판정(포아송)을 `orders_direction`·이유에 함께 적는다
 - **쿠폰 귀속** `direct_attributed_krw`: 캠페인 쿠폰(`GET /api/shop/coupons?campaign_id=`)을 쓴 결제 완료 구간 주문의 주문 금액 합. campaign_id·쿠폰이 없으면 None + 이유
 - **공백**: 주문 판정이 기록 공백(결제 시도 0인 5분 칸이 이어짐, 구간 기록 없음)이면 "결제 기록 공백: …"으로 unknown(기존 기록 공백 규칙 그대로). 구간 주문이 모두 결제 대기여도 unknown. 0으로 채우지 않는다
@@ -832,6 +851,11 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 
 흐름: **데이터(인사이트 + 근거) → 기획(제안 + 실행 근거 + 목표) → 사람 확인 → 마케팅 실행 → 데이터(성과 측정) → 기획(결과 기록)**. 데이터는 기획안을 확정하지 않고 근거 있는 인사이트를 기획에 넘긴다. grade read, 요청: planning·orchestrator·dashboard-api.
 
+**v2 화면 칸** (모두 코드, 모르면 None + 이유, `caution.py`):
+- 영상마다 `ad_usable`·`caution_types`(실존 인물·상표·음원)·`caution_reason`. 인사이트 근거 영상은 그 주제 분류(실존 이름·사람·분류)로 정하고, 기회 카드 근거 숏츠는 하위 주제 분류(칸만 앎: 음원이 아니면 모름)로, 지금 인기 `top_videos`는 영상 분류(음원)와 제목에 지금 인기 주제의 실존 이름이 들었는지로 정한다. 확인할 것이 하나라도 있으면 false, 실존 이름 판단까지 알 때만 true
+- 인사이트 `shorts_fit`·`target_views_reference`: 기회 카드와 같은 계산(그 분류 숏츠 조회 중앙값 ÷ 전체 중앙값). 그 분류 숏츠 표본이 5개 미만이면 None + `shorts_fit_status = unknown` + 이유. 숫자는 `facts`
+- 인사이트·기회 카드 `top_age_band`·`top_age_band_ratio`: 평소 대비 가장 크게 오른 연령대(known만). 연령대끼리 양은 비교하지 않는다. 배수는 `facts`의 연령대 칸
+
 1. **후보**(코드): `trend_popular` 지금 인기 주제(순위 순, 화면 경로처럼 YouTube 커넥터를 넘겨 "왜 뜨나" 근거까지) + 지금 인기에 없는 오늘 네이버 급상승 판정. 이름·별칭이 같으면 하나
 2. **점수**(코드, `[brief]` 가중치): 지금 인기 `1/순위` + 네이버 `max(0, 배수−1)` + 연령대 `max(0, 최대 연령대 배수−1)` + 인기 검색어 `1/순위` + YouTube `영상 수/최대`. 1차 점수 상위 `인사이트 수 + age_topics_extra`개만 `trend_age`로 연령대를 보고(네이버 호출 아끼기, trend_age 하루 상한·캐시 공유) 다시 점수를 매겨 `max_insights`(5, 요청으로 3~7)개
 3. **분류(#539)**: 브리프에 들어가는 모든 주제는 공유 분류기(`topic_category`)를 거친다. 지금 인기 주제는 이미 분류된 값(저장 재사용)을, 지금 인기에 없는 급상승 주제는 여기서 묶어 한 번 분류한다(저장된 분류는 다시 묻지 않음). **분류가 안 된 주제(unknown)는 순위·연령대 후보에 넣지 않고** 맨 아래 "참고용 + 분류 대기"(`classification_pending`, 최대 `pending_max` 2개)로 둔다
@@ -871,6 +895,8 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 API 키는 AXcellent 공용으로 `backend/.env`에 한 번만 두고 고객사별로 받지 않는다. 키가 없는 출처는 구조만 있고 상태가 "키 필요"다.
 
 **수집기 상태 `collectors`**: YouTube·인기 검색어 스냅샷 수집기마다 돌고 있는지(잠금 파일 `youtube_collect.lock`·`trending_collect.lock`의 pid, `collector_lock`), pid, 켜진 시각, 마지막 저장 스냅샷 시각을 준다. 돌고 있지 않거나 저장된 스냅샷이 없거나 마지막 수집이 `DATA_COLLECTOR_MAX_AGE_HOURS`(기본 2)시간보다 오래되면 `stalled` + "수집 멈춤: ..." 경고다. 수집기는 끝난 pid가 남긴 잠금을 지우고 다시 잡는다(로그 한 줄).
+
+**LLM 하루 상한 `llm_usage`** (`llm_budget.py`): data 부서 LLM 호출·토큰을 한국 날짜로 센다(HTTP 요청 한 번마다, 재시도·실패 포함, 서버·수집기가 같은 SQLite `DATA_LLM_BUDGET_DB`). 상한은 `DATA_LLM_DAILY_CALLS`(기본 200회)·`DATA_LLM_DAILY_TOKENS`(기본 400,000 토큰). 닿으면 LLM을 부르지 않고(`LLMDailyCapReached`) LLM 설정이 없을 때와 같은 대체 길로 간다: 설명 문장은 템플릿(`fallback_reason = llm_daily_cap`), 분류는 unknown, 한 줄은 고정 문장, 이유는 "LLM 하루 상한에 닿아 (오늘 호출 N/200회, 토큰 …)". 저장된 캐시(분류·설명 문장·브리프·미리 계산)는 그대로 쓴다. 출처 현황에 오늘 사용량/상한(`llm_usage`)을 준다.
 
 | 출처 id | 데이터 종류 | 업종 | 연령·성별 | 카테고리 | 한도 (공식 문서) | 키 | 공식 문서 |
 |---|---|---|---|---|---|---|---|
@@ -966,6 +992,12 @@ YouTube 숏츠를 카테고리별·형식별로 센다. 숫자는 코드, 분류
 4. 계산(코드): 카테고리별·형식별 숏츠 수, 평균 조회수, 평균 시간당 조회 증가(잰 수 `velocity_videos`), 조회수 상위 3개(제목·채널·조회수). **표본이 `min_sample`(5)개 미만이면 unknown + "표본 부족"**
 
 5. **시간당 조회 증가**: 인기 숏츠는 최근 두 인기 스냅샷의 조회수 차이로 잰다. 검색 숏츠는 검색할 때 본 조회수를 `shorts.db` `views` 표에 남기고, **다음 실행 때 `videos.list`로 다시 조회**(영상 50개마다 1단위, 상한 `recheck_videos` 200개, 마지막으로 본 지 `recheck_min_hours` 1시간이 지난 것만, 덜 본 것부터)해 **두 번 본 영상만** 계산한다. 한 번만 본 숏츠는 unknown이고 묶음마다 `velocity_pending`·"다음 조회 대기 N개"로 센다. 다시 조회가 실패하면(할당량 초과 등) 그 부분만 `recheck_reason`에 남기고 다음 조회 대기로 둔다
+
+6. **화면 카드**(`by_category[].videos`, 트렌드 1단계 숏츠 그리드): 카테고리마다 조회수 순 `screen_videos`(10)개. **이미 모은 숏츠 안에서만** 고르고 더 검색하지 않는다. 표본 부족(unknown) 칸도 준다. 영상마다
+   - `category`: 위 3의 분류 저장분
+   - `ad_usable`·`caution_types`·`caution_reason`: 그 영상 분류 결과(분류·실존 이름·사람)로 `caution.judge` (인사이트 근거 영상과 같은 규칙, 음원 = K-pop·음악)
+   - `channel_subscribers`·`views_per_subscriber`(조회 ÷ 구독자, 소수 둘째 자리): 카드 영상들 채널만 `channels.list`(채널 50개 = 1단위). 구독자 수는 YouTube 스냅샷 DB `channel_stats`에 저장해 하루 재사용(trend_popular 근거와 같은 저장분), 하루 호출 상한 `channel_calls`(2번, `popular_videos.db` `api_calls`에 `shorts_channels`로 따로 센다). 채널 id는 검색·다시 조회 응답에 있던 값(`shorts.db` `video_channels`)과 인기 스냅샷 값. 숨김·상한·채널 모름이면 None + `subscriber_reason`
+   - 통계 칸(수·평균·중앙값·`top`)은 화면 카드와 무관하고 그대로다(전·후 비교 테스트 `tests/test_shorts_screen_videos.py`)
 
 - **한계:** 인기 영상 상위 200개 안(과 조회수 순 검색 결과)에서의 비교라 **이미 뜬 영상끼리 비교**한다(응답 `limitation`에도). 검색 숏츠의 속도는 두 번 본 사이 구간의 평균이라, 다시 조회하는 간격에 따라 값이 달라진다. 형식 분류 정확도는 평가셋이 없어 재지 않는다
 

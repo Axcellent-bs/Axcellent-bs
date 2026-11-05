@@ -623,12 +623,22 @@ class TrendCandidatesRequest(AxModel):
 CompanyRelevance = Literal["direct", "domain", "none"]
 
 
+# 영상을 광고·홍보 재료로 쓸 때 확인할 것 (v2 화면 칸, 코드가 분류 결과로 정함):
+# real_person = 실존 인물(초상권), trademark = 팀·리그·상표·작품 이름(상표권), music = 음원(저작권)
+CautionType = Literal["real_person", "trademark", "music"]
+
+
 class VideoLink(AxModel):
     """근거 영상 하나의 주소와 썸네일. YouTube 응답에 이미 있던 값만 (더 부르지 않음)."""
 
     video_id: str = Field(min_length=1)
     video_url: str | None = None  # https://www.youtube.com/watch?v=<id> (숏츠는 /shorts/<id>)
     thumbnail_url: str | None = None  # YouTube 응답 snippet.thumbnails 값 (없으면 None)
+    # 아래는 예전 응답은 없다 (v2 화면 칸). 광고 재료로 쓸 수 있는지: 확인할 것이 없고 분류를
+    # 알 때만 true, 확인할 것이 있으면 false, 분류를 모르면 None + caution_reason
+    ad_usable: bool | None = None
+    caution_types: list[CautionType] = Field(default_factory=list)
+    caution_reason: str | None = None
 
 
 class YouTubeTagEvidence(AxModel):
@@ -949,7 +959,8 @@ class ContentRecommendation(AxModel):
     idea: str  # 영상 아이디어 1~2문장 (LLM, 숫자 검증. 실패하면 고정 문장)
     format: ContentFormat  # 형식 제안
     fallback: bool  # 아이디어 문장을 고정 문장으로 바꿨는지
-    fallback_reason: str | None = None  # llm_unavailable·llm_error·format_error·number_invalid
+    # llm_unavailable·llm_error·format_error·number_invalid·llm_daily_cap(하루 상한)
+    fallback_reason: str | None = None
     # 소재가 나온 곳 (예전 응답은 없다): keyword_group = 회사 기본 키워드 그룹, 그 밖은 후보 출처
     origins: list[RecommendOrigin] = Field(default_factory=list)
     # 아래는 상품 연결 (예전 응답은 없다). 연결할 회사 실제 상품 (최대 N개, 회사 설정)
@@ -1111,6 +1122,10 @@ class PopularVideo(AxModel):
     # 아래는 예전 응답은 없다. 영상 주소와 썸네일 (YouTube 응답 값만)
     video_url: str | None = None
     thumbnail_url: str | None = None
+    # 아래는 예전 응답은 없다 (v2 화면 칸). VideoLink와 같은 뜻
+    ad_usable: bool | None = None
+    caution_types: list[CautionType] = Field(default_factory=list)
+    caution_reason: str | None = None
 
 
 class PopularCategory(AxModel):
@@ -1313,6 +1328,16 @@ class ShortsVideo(AxModel):
     # 아래는 예전 응답은 없다. 숏츠 주소와 썸네일 (YouTube 응답 값만)
     video_url: str | None = None
     thumbnail_url: str | None = None
+    # 아래는 예전 응답은 없다 (1단계 숏츠 카드). 주제 분류(저장된 분류기 결과, 모르면 "unknown")
+    category: str | None = None
+    # 채널 구독자 수와 조회 ÷ 구독자 (channels.list, 저장 재사용). 숨김·못 받음이면 None + 이유
+    channel_subscribers: int | None = Field(default=None, ge=0)
+    views_per_subscriber: float | None = Field(default=None, ge=0)
+    subscriber_reason: str | None = None
+    # 광고 재료로 쓸 수 있는지·확인할 것 (VideoLink와 같은 규칙)
+    ad_usable: bool | None = None
+    caution_types: list[CautionType] = Field(default_factory=list)
+    caution_reason: str | None = None
 
 
 class ShortsFormatCount(AxModel):
@@ -1343,6 +1368,9 @@ class ShortsGroup(AxModel):
     # 아래는 예전 응답은 없다. 카테고리 그룹만: 그 카테고리 숏츠의 형식별 수
     # (많은 순, 분류 못 한 형식 제외)
     formats: list[ShortsFormatCount] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. 카테고리 그룹만: 화면 카드용 숏츠 (조회수 순, 설정 개수까지).
+    # 이미 모은 숏츠 안에서만 고르고(더 검색하지 않음), 표본 부족 칸도 준다. 통계 칸과 무관
+    videos: list[ShortsVideo] = Field(default_factory=list)
 
 
 class ShortsSearch(AxModel):
@@ -1609,6 +1637,69 @@ class CampaignEffectOutput(AxModel):
     generated_at: UtcDatetime | None = None
     # 아래는 예전 응답은 없다 (#646). 요청에 products가 있을 때만: 관련 상품 기준 결과
     products_effect: CampaignProductsEffect | None = None
+    # 아래는 예전 응답은 없다 (#648). 유입경로 기준 (요청에 campaign_id가 있을 때만)과
+    # 유입 + 관련 상품 (products도 있을 때만). 직접 귀속이라 기준선과 비교하지 않는다
+    attribution_effect: CampaignAttribution | None = None
+    attribution_and_products: CampaignAttributionProducts | None = None
+
+
+class CampaignSourceRow(AxModel):
+    """유입 출처 하나 (`src_source`, 없으면 "(출처 없음)")의 이 캠페인 주문."""
+
+    source: str = Field(min_length=1)
+    mediums: list[str] = Field(default_factory=list)  # 이 출처로 온 주문의 매체 (`src_medium`)
+    orders: int = Field(ge=0)
+    gross_krw: int = Field(ge=0)  # 판매액 (단가 × 수량, 할인 전)
+
+
+class CampaignAttribution(AxModel):
+    """이 캠페인 링크(`src_campaign` = campaign_id)로 들어온 결제 완료 주문 (#648).
+
+    유입·상품(#646)·쿠폰 귀속·가게 전체는 같은 주문이 겹칠 수 있어 합산하지 않는다.
+    구간에 유입 표시가 있는 주문이 하나도 없으면 unknown + "유입 기록 없음" (0으로 채우지 않음).
+    """
+
+    status: CampaignStatus
+    unknown_reason: str | None = None
+    basis: str = (
+        "결제 완료 주문 중 유입 표시 campaign_id가 같은 것, 주문 접수 시각 기준,"
+        " 판매액은 단가 × 수량(할인 전). 직접 귀속이라 기준선과 비교하지 않는다"
+    )
+    campaign_id: str | None = None
+    orders: int | None = Field(default=None, ge=0)
+    gross_krw: int | None = Field(default=None, ge=0)
+    by_source: list[CampaignSourceRow] = Field(default_factory=list)  # 주문 많은 순
+    window_orders: int | None = Field(default=None, ge=0)  # 구간 결제 완료 주문 (전부)
+    tagged_orders: int | None = Field(default=None, ge=0)  # 그중 유입 표시가 있는 것 (아무 캠페인)
+    tagged_share: float | None = Field(default=None, ge=0, le=1)  # tagged_orders ÷ window_orders
+    note: str | None = None  # 한계 (예: 꼬리표 없이 들어온 주문은 세지 않음)
+
+    @model_validator(mode="after")
+    def _known_or_reason(self) -> Self:
+        if self.status == "unknown" and not self.unknown_reason:
+            raise ValueError("unknown이면 unknown_reason이 있어야 한다")
+        if self.status == "known" and (self.orders is None or self.gross_krw is None):
+            raise ValueError("known이면 orders·gross_krw가 있어야 한다")
+        return self
+
+
+class CampaignAttributionProducts(AxModel):
+    """이 캠페인으로 들어와 관련 상품(#646에서 맞은 상품)을 산 결제 완료 주문 (그 상품 품목만)."""
+
+    status: CampaignStatus
+    unknown_reason: str | None = None
+    matched: list[str] = Field(default_factory=list)  # 맞은 상품 id
+    orders: int | None = Field(default=None, ge=0)
+    units: int | None = Field(default=None, ge=0)
+    gross_krw: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _known_or_reason(self) -> Self:
+        if self.status == "unknown" and not self.unknown_reason:
+            raise ValueError("unknown이면 unknown_reason이 있어야 한다")
+        if self.status == "known" and (self.orders is None or self.gross_krw is None):
+            raise ValueError("known이면 orders·gross_krw가 있어야 한다")
+        return self
 
 
 # ---------------------------------------------------------------- 연령대별 상승 (trend_age)
@@ -1766,6 +1857,19 @@ class TrendInsight(AxModel):
     # 프로필 씨앗·하위 주제·회사 관련 키워드에서 나옴, none = 둘 다 아님 (none이면 reference_only)
     company_relevance: CompanyRelevance | None = None
     company_relevance_reason: str | None = None
+    # 아래는 예전 응답은 없다 (v2 화면 칸). 이 주제 숏츠 적합도와 목표 참고값 (기회 카드와 같은
+    # 계산). 숏츠 표본이 5개 미만이면 shorts_fit·target_views_reference는 None이고
+    # shorts_fit_status = unknown + shorts_fit_reason
+    shorts_fit: ShortsFit | None = None
+    shorts_fit_status: Literal["known", "unknown"] | None = None
+    shorts_fit_reason: str | None = None
+    target_views_reference: float | None = Field(default=None, ge=0)
+    target_reference_basis: str | None = None
+    # 아래는 예전 응답은 없다 (v2 화면 칸). 평소 대비 가장 크게 오른 연령대와 그 배수
+    # (age_bands 중 known만, 모르면 None + top_age_band_reason). 연령대끼리 양은 비교하지 않는다
+    top_age_band: str | None = None
+    top_age_band_ratio: float | None = Field(default=None, ge=0)
+    top_age_band_reason: str | None = None
 
 
 # ------------------------------------------------ 기회 가설 카드 (trend_insight_brief 선택 칸)
@@ -1840,6 +1944,10 @@ class DomainOpportunity(AxModel):
     video_links: list[VideoLink] = Field(default_factory=list)
     # 아래는 예전 응답은 없다. 회사와의 연결: 카드는 도메인 프로필에서 나오므로 늘 domain 이상
     company_relevance: CompanyRelevance | None = None
+    # 아래는 예전 응답은 없다 (v2 화면 칸). TrendInsight와 같은 뜻 (age_bands에서 고름)
+    top_age_band: str | None = None
+    top_age_band_ratio: float | None = Field(default=None, ge=0)
+    top_age_band_reason: str | None = None
 
 
 class TrendInsightBriefOutput(AxModel):
@@ -1996,6 +2104,29 @@ class DataSourcesOutput(AxModel):
     summary: str = ""
     # 아래는 예전 응답은 없다. 스냅샷 수집기 상태 (출처 현황에 같이 보인다)
     collectors: list[CollectorStatus] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. data 부서 LLM 오늘 사용량과 하루 상한
+    llm_usage: LlmDailyUsage | None = None
+    # 아래는 예전 응답은 없다 (#648). 아직 붙이지 않고 기다리는 출처 (수집 계획 후보가 아님)
+    pending_sources: list[PendingSource] = Field(default_factory=list)
+
+
+class PendingSource(AxModel):
+    """기다리는 출처 하나 (예: 광고 데이터 — 마케팅 #647 광고 부분 대기)."""
+
+    name: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
+class LlmDailyUsage(AxModel):
+    """data 부서 LLM 오늘(한국 날짜) 사용량과 하루 상한. 닿으면 LLM을 부르지 않는다."""
+
+    day: dt.date
+    calls: int = Field(ge=0)  # HTTP 요청 수 (재시도·실패 포함)
+    call_cap: int = Field(gt=0)
+    tokens: int = Field(ge=0)  # 입력 + 출력 토큰
+    token_cap: int = Field(gt=0)
+    reached: bool  # 상한에 닿아 지금은 LLM을 부르지 않음
+    note: str | None = None  # reached면 "LLM 하루 상한: …"
 
 
 # ------------------------------------------------ 수집 계획 (source_plan)

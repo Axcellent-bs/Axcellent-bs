@@ -42,7 +42,11 @@ CARDS: dict[str, list[tuple[str, str, str | None]]] = {
         ("create_ticket", "A", None),
     ],
     "marketing": [("draft_notice", "read", None), ("publish_notice", "A", None)],
-    "support": [("send_reply", "A", None), ("request_incident_compensation", "A", None)],
+    "support": [
+        ("send_reply", "A", None),
+        ("request_incident_compensation", "A", None),
+        ("propose_incident_compensation", "A", None),
+    ],
     "finance": [
         ("loss_aggregation", "read", None),
         ("record_support_cost", "read", None),
@@ -190,6 +194,19 @@ DEFAULT_OUTPUTS: dict[str, Callable[[AgentRequest], dict[str, Any]]] = {
             for b in r.input.get("buyer_ids", [])
         ],
         stopped_early=False,
+        notes=[],
+    ),
+    # 실제 고객지원 `ProposeIncidentCompensationOutput` 모양(쿠폰 없이 대기에만 쌓는다)
+    "propose_incident_compensation": lambda r: _ok(
+        reason_code=r.input.get("reason_code", "payment_failure"),
+        unit_value=2000,
+        count=r.input.get("count", 1),
+        queued=len(r.input.get("buyer_ids", [])),
+        results=[
+            {"buyer_id": b, "status": "queued", "queue_status": "pending"}
+            for b in r.input.get("buyer_ids", [])
+        ],
+        limit_reached=False,
         notes=[],
     ),
     # 실제 재무 `SupportCostOutput` 모양(경비를 쓰지 않은 문의도 처리 결과를 기록한다)

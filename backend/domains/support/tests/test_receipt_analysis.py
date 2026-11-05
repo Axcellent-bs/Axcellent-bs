@@ -242,6 +242,20 @@ def test_the_receipt_original_and_personal_data_never_leave_the_analysis(
         assert leaked not in text
 
 
+def test_the_check_result_is_kept_in_the_inquiry_activity_without_the_original(
+    _fresh: InquiryStore,
+) -> None:
+    inquiry_id = inquiry(_fresh)
+    call("analyze_receipt", {"inquiry_id": inquiry_id}, {"receipt_text": RECEIPT})
+    entries = [a for a in _fresh.get(inquiry_id).activity if a.kind == "receipt_checked"]
+    assert len(entries) == 1
+    analysis = entries[0].data["analysis"]
+    assert analysis["check"]["verdict"] == "consistent" and analysis["facts"]["total"] == 33000
+    text = str(entries[0].data)
+    for leaked in ("4111", "010-1234", "CATBOOKS 영수증", "카드"):
+        assert leaked not in text
+
+
 def test_a_receipt_that_does_not_match_is_reported_not_judged(_fresh: InquiryStore) -> None:
     text = RECEIPT.replace("총 결제금액 33,000원", "총 결제금액 50,000원")
     result = call("analyze_receipt", {"inquiry_id": inquiry(_fresh)}, {"receipt_text": text})

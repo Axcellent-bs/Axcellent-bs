@@ -14,6 +14,10 @@
 | `reject_draft` | A |
 | `set_inquiry_status` | A |
 | `inquiry_overview` | read |
+| `support_chat_send` | A |
+| `support_chat_close` | A |
+| `support_chat_list` | read |
+| `support_chat_get` | read |
 | `detect_inquiry_surge` | read |
 | `propose_change_requests` | read |
 | `decline_change_proposal` | A |

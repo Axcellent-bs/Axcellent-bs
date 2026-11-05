@@ -47,6 +47,8 @@ import httpx
 from ax_agent_template.llm import LLMClient
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
+    CampaignAttribution,
+    CampaignAttributionProducts,
     CampaignChange,
     CampaignCoupons,
     CampaignEffectInput,
@@ -57,6 +59,7 @@ from ax_contracts.schemas.data import (
     CampaignProductsEffect,
     CampaignSales,
     CampaignSalesTotals,
+    CampaignSourceRow,
 )
 from data_agent import catalog
 from data_agent.connectors import ConnectorUnavailable
@@ -78,10 +81,12 @@ SHORT_WINDOW = timedelta(days=1)  # 이하: 지난 7일 같은 시간대
 MAX_WINDOW = timedelta(
     days=7
 )  # 이하: 7일 전·14일 전 같은 구간 (넘으면 7일 전 구간이 캠페인과 겹침)
-MULTIDAY_WEEKS = (7, 14)  # 같은 요일 = 7일 전, 14일 전
-HISTORY_NEEDED_DAYS = 14  # 여러 날 캠페인: 시작 전 이만큼 기록이 있어야 한다
+MULTIDAY_WEEKS = (7, 14, 21, 28)  # 같은 요일 = 1·2·3·4주 전 (평가 multiday·multiday4 정의)
+MULTIDAY_MIN_WEEKS = 3  # 기준선에 쓸 같은 요일 구간이 이만큼 있어야 한다
+HISTORY_NEEDED_DAYS = 21  # 여러 날 캠페인: 시작 전 이만큼 기록이 있어야 3구간 (7·14·21일 전)
+HISTORY_READ_DAYS = max(MULTIDAY_WEEKS)  # 시작 전 이만큼 읽는다 (4구간 모두)
 RULE_SHORT = f"지난 {BASELINE_DAYS}일 같은 시간대"
-RULE_MULTIDAY = f"시작 전 {HISTORY_NEEDED_DAYS}일의 같은 요일·시간대 (7일 전·14일 전 같은 구간)"
+RULE_MULTIDAY = "7·14·21·28일 전 같은 요일·같은 길이 구간 (시작 전 기록 안, 최소 3구간)"
 TIMEZONE_ENV = "DATA_TENANT_TIMEZONE"  # 회사 시간대 (scripts/tenant_env.py가 회사 폴더에서 정함)
 BACKEND = Path(__file__).resolve().parents[5]
 COUPON_NOTE = "조회 시점 기준 누적 사용률이며, 캠페인 뒤 사용분도 섞여 있다"
@@ -426,18 +431,21 @@ async def _spans(
             for d in range(1, BASELINE_DAYS + 1)
         ]
         return window, past, RULE_SHORT, None
-    # 여러 날: 시작 전 15일을 한 번에 읽어 7일 전·14일 전 같은 구간을 잘라 낸다. 하루 더 읽는 건
-    # 14일 전 구간이 통째로 비었을 때(서버가 꺼짐) 기록이 짧은 것과 구분하려고다
-    history = await _read(connector, "시작 전", _back(start, HISTORY_NEEDED_DAYS + 1, tz), start)
+    # 여러 날: 시작 전 29일을 한 번에 읽어 7·14·21·28일 전 같은 구간을 잘라 낸다. 하루 더 읽는 건
+    # 28일 전 구간이 통째로 비었을 때(서버가 꺼짐) 기록이 짧은 것과 구분하려고다.
+    # 시작 전 기록 안에 들어오는 구간만 쓴다 (기록이 21일이면 7·14·21일 전 3구간)
+    history = await _read(connector, "시작 전", _back(start, HISTORY_READ_DAYS + 1, tz), start)
     days = _history_days(history, start, tz)
     if days < HISTORY_NEEDED_DAYS:
         reason = (
             f"시작 전 기록 부족 ({days}일): 같은 요일·시간대 기준선에"
-            f" {HISTORY_NEEDED_DAYS}일이 필요함"
+            f" {HISTORY_NEEDED_DAYS}일({MULTIDAY_MIN_WEEKS}구간)이 필요함"
         )
         return window, [], RULE_MULTIDAY, reason
     past = [
-        _cut(history, f"{k}일 전", _back(start, k, tz), _back(end, k, tz)) for k in MULTIDAY_WEEKS
+        _cut(history, f"{k}일 전", _back(start, k, tz), _back(end, k, tz))
+        for k in MULTIDAY_WEEKS
+        if k <= days
     ]
     return window, past, RULE_MULTIDAY, None
 
@@ -461,6 +469,12 @@ async def _orders(
     if not used:
         why = f"기준선에 쓸 지난 구간이 없음 ({'; '.join(dropped)})"
         return _unknown_change(why, 0, rule), used, rule
+    if rule == RULE_MULTIDAY and len(used) < MULTIDAY_MIN_WEEKS:  # 공백으로 빠져 3구간이 안 됨
+        why = (
+            f"기준선에 쓸 같은 요일 구간이 {len(used)}개뿐 (최소 {MULTIDAY_MIN_WEEKS}구간)"
+            + (f": {'; '.join(dropped)}" if dropped else "")
+        )
+        return _unknown_change(why, len(used), rule), used, rule
     totals = [t for t in (s.total() for s in used) if t is not None]
     orders = judge_orders(window.total(), totals, alpha, rule)
     if dropped and orders.status == "known":
@@ -723,6 +737,104 @@ async def _products_effect(
     return CampaignProductsEffect(status="known", **measures, **common)
 
 
+# ---------------------------------------------------------------- 유입경로 기준 (#648)
+
+NO_TAGS = "유입 기록 없음"
+NO_SOURCE = "(출처 없음)"
+ATTRIBUTION_NOTE = (
+    "쇼핑몰 화면이 캠페인 링크 꼬리표(src_*)를 주문까지 넘긴 주문만 센다."
+    " 꼬리표 없이 들어온 주문(직접 방문·꼬리표 유실)은 빠진다"
+)
+
+
+async def _attribution(
+    connector: Any, data: CampaignEffectInput, products: CampaignProductsEffect | None
+) -> tuple[CampaignAttribution | None, CampaignAttributionProducts | None]:
+    """이 캠페인 링크로 들어온 결제 완료 주문 (직접 귀속, 기준선 비교 없음)."""
+    if not data.campaign_id:
+        return None, None
+    matched = [m.product_id for m in products.matched] if products else []
+
+    def unknown(reason: str) -> tuple[CampaignAttribution, CampaignAttributionProducts | None]:
+        both = None
+        if data.products:
+            both = CampaignAttributionProducts(status="unknown", unknown_reason=reason,
+                                               matched=matched)  # fmt: skip
+        return CampaignAttribution(status="unknown", unknown_reason=reason,
+                                   campaign_id=data.campaign_id), both  # fmt: skip
+
+    if not hasattr(connector, "attributed_orders") or not hasattr(connector, "orders"):
+        return unknown("이 회사 커넥터는 유입 주문을 주지 않음")
+    try:
+        tagged = await connector.attributed_orders(data.window_from, data.window_to)
+        window = await connector.orders(data.window_from, data.window_to)
+    except ConnectorUnavailable as error:
+        return unknown(f"유입 주문을 읽지 못함 [{error.code}]")
+    paid = [o for o in tagged if o.status == "paid"]
+    if not paid:
+        return unknown(f"{NO_TAGS}: 구간에 유입 표시가 있는 결제 완료 주문이 없음"
+                       " (쇼핑몰이 캠페인 링크 꼬리표를 주문에 넘기는지 확인)")  # fmt: skip
+    mine = [o for o in paid if o.src_campaign == data.campaign_id]
+    rows: dict[str, CampaignSourceRow] = {}
+    for o in mine:
+        key = o.src_source or NO_SOURCE
+        row = rows.setdefault(key, CampaignSourceRow(source=key, orders=0, gross_krw=0))
+        row.orders += 1
+        row.gross_krw += o.gross
+        if o.src_medium and o.src_medium not in row.mediums:
+            row.mediums.append(o.src_medium)
+    window_paid = sum(1 for o in window if o.status == "paid")
+    attribution = CampaignAttribution(
+        status="known", campaign_id=data.campaign_id, orders=len(mine),
+        gross_krw=sum(o.gross for o in mine),
+        by_source=sorted(rows.values(), key=lambda r: (-r.orders, r.source)),
+        window_orders=window_paid, tagged_orders=len(paid),
+        tagged_share=round(min(len(paid) / window_paid, 1.0), 4) if window_paid else None,
+        note=ATTRIBUTION_NOTE,
+    )  # fmt: skip
+    if not data.products:
+        return attribution, None
+    if not matched:
+        return attribution, CampaignAttributionProducts(
+            status="unknown", unknown_reason=f"{NO_MATCH}: 관련 상품을 카탈로그에서 맞추지 못함",
+        )  # fmt: skip
+    ids = set(matched)
+    lines = [[i for i in o.items if i.product_id in ids] for o in mine]
+    lines = [ln for ln in lines if ln]
+    return attribution, CampaignAttributionProducts(
+        status="known", matched=matched, orders=len(lines),
+        units=sum(i.qty for ln in lines for i in ln),
+        gross_krw=sum(i.qty * i.unit_price for ln in lines for i in ln),
+    )  # fmt: skip
+
+
+def attribution_facts(out: CampaignEffectOutput) -> list[CampaignFact]:
+    """유입 근거 숫자 (출처·기간·표본). 모르는 칸은 넣지 않는다."""
+    a, b = out.attribution_effect, out.attribution_and_products
+    span = _span_text(out.window_from, out.window_to)
+    rows: list[CampaignFact] = []
+
+    def fact(label: str, value: float | None, unit: str, sample: int | None) -> None:
+        if value is not None:
+            rows.append(CampaignFact(
+                label=label, value=value, unit=unit, period=span, sample=sample,
+                source="shop-api orders/attributed",
+            ))  # fmt: skip
+
+    if a is not None and a.status == "known":
+        fact(f"유입 주문 ({a.campaign_id})", a.orders, "건", a.orders)
+        fact(f"유입 판매액 ({a.campaign_id})", a.gross_krw, "KRW", a.orders)
+        for r in a.by_source:
+            fact(f"유입 주문 · {r.source}", r.orders, "건", r.orders)
+            fact(f"유입 판매액 · {r.source}", r.gross_krw, "KRW", r.orders)
+        fact("유입 표시가 있는 주문 비율", a.tagged_share, "비율", a.window_orders)
+    if b is not None and b.status == "known":
+        fact("유입 + 관련 상품 주문", b.orders, "건", b.orders)
+        fact("유입 + 관련 상품 판매 수량", b.units, "개", b.orders)
+        fact("유입 + 관련 상품 판매액", b.gross_krw, "KRW", b.orders)
+    return rows
+
+
 def product_facts(out: CampaignEffectOutput) -> list[CampaignFact]:
     """상품 기준 근거 숫자 (출처·기간·표본). 있는 숫자만 (모르는 칸은 0으로 채우지 않음)."""
     p = out.products_effect
@@ -820,6 +932,10 @@ async def measure(
         sales=await _sales(connector, data, orders, used, rule),
         products_effect=await _products_effect(connector, data, orders, used, rule),
     )
+    # 유입경로 기준 (직접 귀속, 기준선 없음). 유입·상품·쿠폰·가게 전체는 겹칠 수 있어 합산 안 함
+    out.attribution_effect, out.attribution_and_products = await _attribution(
+        connector, data, out.products_effect
+    )
     if orders.status == "known" and orders.excess is not None:
         out.incremental_orders = round(orders.excess)  # 재무 orders 칸 (증분, gmv_krw와 같은 뜻)
     out.schema_version = SCHEMA_VERSION
@@ -869,6 +985,8 @@ def campaign_facts(out: CampaignEffectOutput) -> list[CampaignFact]:
     s = out.sales
     if s is not None and s.status == "known" and s.incremental_gross_krw is not None:
         add("증분 판매액(원)", s.incremental_gross_krw, "KRW", s.baseline_days)  # 요약 재료 이름
+    for f in attribution_facts(out):
+        rows.append(f.model_copy(update={"fact_id": _fact_id(f.label)}))
     for f in product_facts(out):
         rows.append(f.model_copy(update={"fact_id": _fact_id(f.label)}))
     p = out.products_effect
@@ -1046,6 +1164,43 @@ async def eval_products_judge(
             CampaignEffectInput.model_validate(dict(request)), connector, alpha=alpha
         )
     return to_products_answer(out)
+
+
+def to_attribution_answer(out: CampaignEffectOutput) -> dict[str, Any]:
+    """skill 출력 → 유입경로 채점기 답 모양(`campaign_attribution/score.Answer`)."""
+    a, b = out.attribution_effect, out.attribution_and_products
+    if a is None:
+        body: dict[str, Any] = {"attribution": {"status": "unknown",
+                                                "unknown_reason": "유입 칸이 없음"}}  # fmt: skip
+    elif a.status == "unknown":
+        body = {"attribution": {"status": "unknown", "unknown_reason": a.unknown_reason}}
+    else:
+        body = {"attribution": {
+            "status": "known", "orders": a.orders, "gross_krw": a.gross_krw,
+            "by_source": {r.source: {"orders": r.orders, "gross_krw": r.gross_krw}
+                          for r in a.by_source},
+            "tagged_share": a.tagged_share,
+        }}  # fmt: skip
+    if b is not None:
+        body["overlap"] = {
+            "status": b.status, "unknown_reason": b.unknown_reason,
+            "orders": b.orders, "units": b.units, "gross_krw": b.gross_krw,
+        }  # fmt: skip
+    return body
+
+
+async def eval_attribution_judge(
+    request: Mapping[str, Any], transport: httpx.MockTransport, *, alpha: float = DIRECTION_ALPHA
+) -> dict[str, Any]:
+    """유입경로 채점기(`eval/campaign_attribution/score.py`)가 부르는 판정 함수."""
+    from data_agent.connectors.shop_api import ShopApi, ShopApiConnector
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        connector = ShopApiConnector(ShopApi("http://shop.eval", token="eval", client=client))
+        out = await measure(
+            CampaignEffectInput.model_validate(dict(request)), connector, alpha=alpha
+        )
+    return to_attribution_answer(out)
 
 
 async def eval_sales_judge(
