@@ -18,16 +18,21 @@ interface Item {
   state: "idle" | "analyzing" | "done" | "error";
   result?: ReceiptAnalysis; error?: string;
   file?: File; url?: string; // 사진과 미리보기는 이 화면에서 올린 동안에만 있다 (문의를 오가면 결과만 남는다)
+  // 한 영수증을 여러 쪽으로 찍어 "묶은" 항목: 사진 전부(files)를 한 요청으로 보내 한 영수증으로 읽는다
+  files?: File[]; urls?: string[];
 }
 
 // 분석 결과는 문의를 오갈 때 다시 보이도록 이 화면을 연 동안만 기억한다. 사진은 기억하지 않는다.
 const STORE = new Map<number, Item[]>();
-const keep = (items: Item[]): Item[] => items.map(({ file: _f, url: _u, ...rest }) => rest);
+const keep = (items: Item[]): Item[] => items.map(({ file: _f, url: _u, files: _fs, urls: _us, ...rest }) => rest);
+const revoke = (i: Item) => { [i.url, ...(i.urls ?? [])].forEach((u) => u && URL.revokeObjectURL(u)); };
 
 // 대조하는 값 → 어긋났을 때 support가 돌려주는 코드
 const MISMATCH_OF: Record<string, string> = {
   total: "RECEIPT_AMOUNT_MISMATCH", date: "RECEIPT_DATE_MISMATCH", order_no: "RECEIPT_ORDER_NO_MISMATCH", shipping_fee: "RECEIPT_SHIPPING_MISMATCH",
 };
+
+const MAX_GROUP_PAGES = MAX_FILES; // 한 영수증으로 묶을 수 있는 쪽 수
 
 function readAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -205,7 +210,7 @@ export function ReceiptAnalysisCard({ conversationId, activity = [] }: { convers
   useEffect(() => { // 이 화면을 연 동안 결과를 기억한다 (사진·미리보기 제외)
     if (items.length) STORE.set(conversationId, keep(items)); else STORE.delete(conversationId);
   }, [conversationId, items]);
-  useEffect(() => () => itemsRef.current.forEach((i) => i.url && URL.revokeObjectURL(i.url)), []);
+  useEffect(() => () => itemsRef.current.forEach(revoke), []);
   useEffect(() => {
     if (!running) return;
     const start = Date.now();
@@ -234,23 +239,42 @@ export function ReceiptAnalysisCard({ conversationId, activity = [] }: { convers
 
   const remove = (key: string) => {
     const gone = items.find((i) => i.key === key);
-    if (gone?.url) URL.revokeObjectURL(gone.url);
+    if (gone) revoke(gone);
     setItems(items.filter((i) => i.key !== key));
     setError(null);
   };
 
   const clearAll = () => {
-    items.forEach((i) => i.url && URL.revokeObjectURL(i.url));
+    items.forEach(revoke);
     setItems([]); setOpen(new Set()); setError(null);
   };
 
+  // 아직 분석하지 않은 사진 2장 이상을 한 영수증의 쪽으로 묶는다 (한 영수증을 여러 장으로 찍은 경우)
+  const group = () => {
+    const pages = pending.slice(0, MAX_GROUP_PAGES);
+    if (pages.length < 2) return;
+    const files = pages.map((i) => i.file!);
+    const gone = new Set(pages.map((i) => i.key));
+    const merged: Item = {
+      key: `g${++seq.current}-${pages[0].name}`, name: `한 영수증 ${pages.length}쪽 (${pages[0].name} 외)`,
+      size: pages.reduce((n, i) => n + i.size, 0), state: "idle", file: files[0], files,
+      url: pages[0].url, urls: pages.slice(1).map((i) => i.url).filter((u): u is string => !!u),
+    };
+    // 묶은 사진의 미리보기 주소는 묶음 항목이 맡는다 (빼거나 지울 때 같이 거둔다)
+    setItems((prev) => { const rest = prev.filter((i) => !gone.has(i.key)); return [...rest, merged]; });
+    setError(null);
+  };
+
   const analyzeOne = async (item: Item) => {
-    if (!item.file) return;
+    const files = item.files ?? (item.file ? [item.file] : []);
+    if (!files.length) return;
     patch(item.key, { state: "analyzing", error: undefined, result: undefined });
     try {
-      const image: ReceiptImageInput = { ref: item.name.slice(0, 200), media_type: item.file.type as MediaType, data_base64: await readAsBase64(item.file) };
-      // 사진마다 한 번씩 보낸다: 서버는 한 요청 안의 사진을 하나의 영수증으로 합쳐 읽는다
-      const out = await api.admin.receiptAnalysis(conversationId, { images: [image] });
+      const images: ReceiptImageInput[] = await Promise.all(files.map(async (f, n) => ({
+        ref: (files.length > 1 ? `${n + 1}쪽-${f.name}` : f.name).slice(0, 200), media_type: f.type as MediaType, data_base64: await readAsBase64(f),
+      })));
+      // 사진 한 장이 영수증 한 장이라 따로 보낸다. 묶은 항목만 여러 쪽을 한 요청으로 보내 한 영수증으로 읽는다
+      const out = await api.admin.receiptAnalysis(conversationId, { images });
       patch(item.key, { state: "done", result: out });
       if (out.check.verdict !== "consistent" || itemsRef.current.length === 1) setOpen((s) => new Set(s).add(item.key));
     } catch (e) {
@@ -284,7 +308,7 @@ export function ReceiptAnalysisCard({ conversationId, activity = [] }: { convers
             className={`flex cursor-pointer flex-col items-center gap-1 rounded-xl border-2 border-dashed px-3 text-center transition-colors focus-within:ring-2 focus-within:ring-brand-500 ${items.length ? "py-2.5" : "py-4"} ${over ? "border-brand-500 bg-brand-50" : "border-ink-300 hover:bg-ink-100"}`}>
             {!items.length && <span className="text-lg" aria-hidden>🧾</span>}
             <span className="font-medium">영수증 사진을 끌어다 놓거나 눌러서 고르세요</span>
-            <span className="text-[10px] text-ink-500">jpeg·png·webp · 한 장 4.5MB 이하 · 최대 {MAX_FILES}장 · 사진 한 장이 영수증 한 장입니다</span>
+            <span className="text-[10px] text-ink-500">jpeg·png·webp · 한 장 4.5MB 이하 · 최대 {MAX_FILES}장 · 사진 한 장이 영수증 한 장입니다 (여러 쪽이면 올린 뒤 "한 영수증으로 묶기")</span>
             <input type="file" multiple accept={TYPES.join(",")} aria-label="영수증 사진 선택" className="sr-only"
               onChange={(e) => { if (e.target.files) add(e.target.files); e.target.value = ""; }} />
           </label>
@@ -335,6 +359,12 @@ export function ReceiptAnalysisCard({ conversationId, activity = [] }: { convers
           <span className="text-[11px] text-ink-500">{items.length ? `${items.length}장` : "선택한 사진이 없습니다"}</span>
           <div className="ml-auto flex gap-1.5">
             {items.length > 0 && !running && <button className="btn-quiet px-2 py-1 text-xs" onClick={clearAll}>모두 지우기</button>}
+            {!running && pending.length > 1 && (
+              <button className="btn-ghost px-2.5 py-1 text-xs" onClick={group}
+                title="한 영수증을 여러 장으로 찍었다면 한 영수증으로 합쳐 읽습니다">
+                {pending.length > MAX_GROUP_PAGES ? `앞 ${MAX_GROUP_PAGES}장을 한 영수증으로 묶기` : `${pending.length}장을 한 영수증으로 묶기`}
+              </button>
+            )}
             {!running && !pending.length && retryable.length > 1 && <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => analyze(retryable)}>전체 다시 분석</button>}
             <button className="btn-primary px-3 py-1 text-xs" disabled={!pending.length || running} onClick={() => analyze(pending)}>
               {pending.length > 1 ? `${pending.length}장 분석하기` : "분석하기"}
@@ -344,7 +374,7 @@ export function ReceiptAnalysisCard({ conversationId, activity = [] }: { convers
       </div>
 
       {error && <p role="alert" className="mt-2 rounded-md bg-red-50 px-2 py-1.5 text-[11px] leading-relaxed text-red-700">{error}</p>}
-      <p className="mt-2 text-[10px] text-ink-500">사진마다 따로 분석해서, 서로 다른 영수증도 하나씩 대조합니다. 환불 여부는 판정하지 않습니다.</p>
+      <p className="mt-2 text-[10px] text-ink-500">사진마다 따로 분석해서 서로 다른 영수증도 하나씩 대조하고, 한 영수증의 여러 쪽은 묶어서 한 번에 읽습니다. 환불 여부는 판정하지 않습니다.</p>
     </div>
   );
 }
