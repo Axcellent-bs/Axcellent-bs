@@ -1,9 +1,17 @@
 """개발 AI와 대화 (개발 화면). 개발팀원이 말로 요청하면 AI가 되묻고, 계획이 서면 코딩 작업을 띄운다.
 
-한 번 보낼 때 흐름:
-1. 사용자 메시지를 먼저 대화에 적는다 (SSE로 바로 보인다).
-2. 상태 잠금 밖에서 LLM을 한 번 부른다: `{reply, action: ask|start, plan?}`.
+한 번 보낼 때 흐름 (`send`):
+1. 사용자 메시지를 먼저 대화에 적고 `status: answering`으로 바로 돌려준다 (SSE로 바로 보인다).
+2. 뒤에서 상태 잠금 밖으로 LLM을 한 번 부른다: `{reply, action: ask|start, plan?}`.
 3. 계획이 서면 `create_dev_task`로 작업을 띄우고 `started` 메시지를 적는다.
+   답을 적으면 상태를 되돌린다(talking·started·blocked·waiting). 화면은 다시 읽어 답을 본다.
+
+- 답을 기다리는 대화에 또 보내면 `THREAD_BUSY`, 끝낸 대화(`closed`)에 보내면 `THREAD_CLOSED`.
+- 남의 대화(`who`가 다름)에는 쓰거나 끝낼 수 없다 (`FORBIDDEN`). A2A 읽기는 남의 대화를 요약만 준다.
+- 30분 말이 없는 대화는 끝낸다 (`close_idle`, 작업이 돌거나 앞 요청을 기다리는 대화는 그대로).
+- 다시 켜질 때 `answering`으로 남은 대화는 답을 잃은 것으로 적고 되돌린다 (`recover_orphans`).
+- 화면 창구: 개발 화면 REST `/dev-chat*`, AI 대화방은 dashboard-api `/api/dashboard/dev-chat`
+  → A2A `dev_chat_send`·`_list`·`_get`·`_close` (handlers.py).
 
 - 대화 글은 데이터 블록(untrusted)으로만 넣는다. 레포 이름·설명·담당 경로·파일 경로만 보낸다.
 - 되묻기는 2번까지. 그 뒤에도 묻는데 계획이 있으면 바로 띄운다.
@@ -39,6 +47,8 @@ MAX_LISTED_CONNECTIONS = 3
 MAX_REPLY_CHARS = 2000
 LLM_TIMEOUT_SECONDS = 180.0  # 계획(plan)까지 쓰는 답은 60초를 넘기도 한다. 코딩 요청 하나와 같게
 LIST_TIMEOUT_SECONDS = 20.0
+CLOSE_AFTER_MINUTES = 30  # 이만큼 말이 없으면 대화를 끝낸다
+LIST_LIMIT = 50  # A2A 목록 기본 개수
 
 # 바로 진행하라는 말 (소문자·공백 하나로 맞춘 뒤 찾는다)
 GO_AHEAD = (
@@ -276,22 +286,34 @@ async def _ask_llm(
 
 # ---------------------------------------------------------------- 한 번 주고받기
 
+BACKGROUND = True  # 답을 뒤에서 만든다. 테스트는 False로 두면 보내기가 답까지 기다린다
+_running: set[asyncio.Task] = set()
 
-async def turn(
+
+def set_background(on: bool) -> None:
+    global BACKGROUND
+    BACKGROUND = on
+
+
+async def wait_idle() -> None:
+    """뒤에서 만드는 답이 모두 끝날 때까지 기다린다 (테스트용)."""
+    while _running:
+        await asyncio.gather(*list(_running), return_exceptions=True)
+
+
+def _owner_ok(th: ChatThread, who: str | None) -> bool:
+    return who is None or th.who is None or th.who == who
+
+
+def _prepare(
     svc: DevService,
     thread_id: str | None,
     message: str,
-    connection: str | None = None,
-    mode: str | None = None,
-    who: str | None = None,
-) -> ChatThread:
-    """사용자 메시지 하나를 받고 AI 답 하나를 적는다. 바뀐 대화를 돌려준다.
-
-    `who`: 말한 사람(사람 토큰 이름). 내 Claude 작업은 이 사람에게 맡긴다.
-
-    `mode`는 작업을 누가 코딩하나 (agent 서버 AI · subscription 본인 Claude). 주면 대화에 남긴다.
-
-    오류(입력·없음·설정)는 `ActionError`. LLM·작업 띄우기 오류는 대화에 답으로 남긴다."""
+    connection: str | None,
+    mode: str | None,
+    who: str | None,
+) -> tuple[Any, str, list[vcs.Connection], str]:
+    """보내기 전 확인. (LLM, 글, 연결, 지금 상태)를 준다. 거절은 `ActionError`."""
     llm = get_llm()
     if llm is None:
         raise ActionError(
@@ -302,14 +324,41 @@ async def turn(
     text = str(message or "").strip()
     if not text or len(text) > MAX_MESSAGE_CHARS:
         raise ActionError("INVALID_INPUT", f"message는 1~{MAX_MESSAGE_CHARS}자여야 한다")
-    if thread_id is not None and svc.chat_of(thread_id) is None:
-        raise ActionError("NOT_FOUND", f"대화 {thread_id}가 없다")
+    prev = "talking"
+    if thread_id is not None:
+        th = svc.chat_of(thread_id)
+        if th is None:
+            raise ActionError("NOT_FOUND", f"대화 {thread_id}가 없다")
+        if not _owner_ok(th, who):
+            raise ActionError("FORBIDDEN", f"대화 {thread_id}는 {th.who}의 대화다")
+        if th.status == "answering":
+            raise ActionError("THREAD_BUSY", "아직 앞 말에 답하는 중이다. 답이 온 뒤 보낸다")
+        if th.status == "closed":
+            raise ActionError("THREAD_CLOSED", f"대화 {thread_id}는 끝났다. 새 대화로 보낸다")
+        prev = th.status
     conns = vcs_bridge.targets()
     if connection is not None and connection not in [c.id for c in conns]:
         raise ActionError("INVALID_INPUT", f"모르는 연결: {connection}")
     if mode is not None and mode not in MODES:
         raise ActionError("INVALID_INPUT", "mode는 agent·subscription 중 하나다")
+    return llm, text, conns, prev
 
+
+async def send(
+    svc: DevService,
+    thread_id: str | None,
+    message: str,
+    connection: str | None = None,
+    mode: str | None = None,
+    who: str | None = None,
+) -> ChatThread:
+    """사용자 메시지를 적고 `answering`인 대화를 바로 돌려준다. 답은 뒤에서 붙는다.
+
+    `who`: 말한 사람(사람 토큰 이름). 내 Claude 작업은 이 사람에게 맡긴다.
+    `mode`는 작업을 누가 코딩하나 (agent 서버 AI · subscription 본인 Claude). 주면 대화에 남긴다.
+    오류(입력·없음·설정·바쁨·끝남·남의 대화)는 `ActionError`.
+    LLM·작업 띄우기 오류는 대화에 답으로 남긴다."""
+    llm, text, conns, prev = _prepare(svc, thread_id, message, connection, mode, who)
     th = await svc.chat_add(
         thread_id,
         "user",
@@ -318,12 +367,72 @@ async def turn(
         title=title_of(text) if thread_id is None else None,
         mode=mode,
         who=who,
+        status="answering",
     )
-    tid = th.id
+    if not BACKGROUND:
+        return await _answer(svc, llm, th.id, text, conns, prev)
+    job = asyncio.get_running_loop().create_task(_answer(svc, llm, th.id, text, conns, prev))
+    _running.add(job)
+    job.add_done_callback(_running.discard)
+    return th
+
+
+async def turn(
+    svc: DevService,
+    thread_id: str | None,
+    message: str,
+    connection: str | None = None,
+    mode: str | None = None,
+    who: str | None = None,
+) -> ChatThread:
+    """보내고 답까지 기다린다 (`send` + 답). 바뀐 대화를 돌려준다."""
+    llm, text, conns, prev = _prepare(svc, thread_id, message, connection, mode, who)
+    th = await svc.chat_add(
+        thread_id,
+        "user",
+        text,
+        connection=connection,
+        title=title_of(text) if thread_id is None else None,
+        mode=mode,
+        who=who,
+        status="answering",
+    )
+    return await _answer(svc, llm, th.id, text, conns, prev)
+
+
+async def _answer(
+    svc: DevService, llm: Any, tid: str, text: str, conns: list[vcs.Connection], prev: str
+) -> ChatThread:
+    """답 하나를 적는다. 답이 상태를 정하지 않았으면 보내기 전 상태로 되돌린다."""
+    try:
+        await _reply(svc, llm, tid, text, conns, prev)
+    except Exception as exc:  # noqa: BLE001 - 뒤에서 도는 답이라 오류도 대화에 남긴다
+        try:
+            await svc.chat_add(
+                tid,
+                "assistant",
+                f"답을 만들지 못했어요 ({type(exc).__name__}). 다시 보내 주세요.",
+                kind="error",
+            )
+        except Exception:  # noqa: BLE001 - 적지도 못하면 상태만 되돌린다
+            pass
+    th = svc.chat_of(tid)
+    if th is not None and th.status == "answering":
+        await svc.chat_set(tid, status=prev)
+    found = svc.chat_of(tid)
+    assert found is not None
+    return found
+
+
+async def _reply(
+    svc: DevService, llm: Any, tid: str, text: str, conns: list[vcs.Connection], prev: str
+) -> ChatThread:
+    th = svc.chat_of(tid)
+    assert th is not None
 
     # 작업을 띄운 대화에 이어 말하면 같은 대화에서 잇는다 (새 대화로 보내지 않는다)
     last_task = _last_task(svc, th) if th.task_id else None
-    if th.status == "started":
+    if prev == "started":
         if th.task_id in svc._coding or (
             last_task is not None and coder_running(last_task["status"])
         ):
@@ -563,3 +672,75 @@ async def _revise(svc: DevService, th: ChatThread, text: str) -> ChatThread:
         task_id=th.task_id,
         status="started",
     )
+
+
+# ---------------------------------------------------------------- 끝내기 · 열람
+
+
+async def close(svc: DevService, thread_id: str, who: str | None = None) -> ChatThread:
+    """대화를 끝낸다 (`closed`). 띄운 작업은 그대로 돈다. 앞 요청 기다리기는 그만둔다."""
+    th = svc.chat_of(thread_id)
+    if th is None:
+        raise ActionError("NOT_FOUND", f"대화 {thread_id}가 없다")
+    if not _owner_ok(th, who):
+        raise ActionError("FORBIDDEN", f"대화 {thread_id}는 {th.who}의 대화다")
+    if th.status == "answering":
+        raise ActionError("THREAD_BUSY", "아직 답하는 중이다. 답이 온 뒤 끝낸다")
+    if th.status == "closed":
+        return th
+    return await svc.chat_set(thread_id, status="closed", waiting_for=[])
+
+
+def _idle_closable(svc: DevService, th: ChatThread) -> bool:
+    """오래 말이 없을 때 끝내도 되나: 작업이 돌거나 PR 확인·앞 요청을 기다리면 두고 본다."""
+    if th.status in ("talking", "blocked"):
+        return True
+    if th.status != "started":
+        return False
+    if th.task_id in svc._coding or _open_pr_waiting(svc, th.task_id):
+        return False
+    task = next((t for t in svc.state.tasks if t.id == th.task_id), None)
+    return task is None or task.coding is None or not coder_running(task.coding.status)
+
+
+async def close_idle(svc: DevService) -> list[str]:
+    """CLOSE_AFTER_MINUTES 넘게 말이 없는 대화를 끝낸다. 끝낸 대화 id를 준다."""
+    limit = svc.clock() - timedelta(minutes=CLOSE_AFTER_MINUTES)
+    ids = [c.id for c in svc.state.chats if c.updated_at <= limit and _idle_closable(svc, c)]
+    for tid in ids:
+        await svc.chat_set(tid, status="closed")
+    return ids
+
+
+async def recover_orphans(svc: DevService) -> list[str]:
+    """다시 켜질 때 `answering`으로 남은 대화(답을 만들던 중 꺼짐)를 알리고 되돌린다."""
+    ids = [c.id for c in svc.state.chats if c.status == "answering"]
+    for tid in ids:
+        await svc.chat_add(
+            tid,
+            "assistant",
+            "서버가 다시 켜지면서 답을 잃었어요. 다시 보내 주세요.",
+            kind="error",
+            status="talking",
+        )
+    return ids
+
+
+def view(th: ChatThread, who: str | None) -> dict[str, Any]:
+    """A2A로 줄 대화 모양. 남의 대화는 원문 없이 제목·메시지 수·상태만.
+
+    작업을 띄운 대화는 원문까지 준다 (개발 화면에서도 작업 기록으로 보인다)."""
+    data = th.model_dump(mode="json")
+    data["message_count"] = len(th.messages)
+    data["summary"] = th.title
+    if _owner_ok(th, who) or th.task_id:
+        data["restricted"] = False
+        return data
+    data["messages"] = []
+    data["restricted"] = True
+    return data
+
+
+def listed(svc: DevService, who: str | None, limit: int = LIST_LIMIT) -> list[dict[str, Any]]:
+    rows = sorted(svc.state.chats, key=lambda c: c.updated_at, reverse=True)[:limit]
+    return [view(c, who) for c in rows]

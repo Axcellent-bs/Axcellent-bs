@@ -11,6 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.planning import (
+    DevChatListInput,
+    DevChatRef,
+    DevChatSendInput,
     DevHandoffInput,
     DevHandoffOutput,
     FindRelatedPrsInput,
@@ -33,10 +36,11 @@ from ax_contracts.schemas.planning import (
     VerifyRollbackTargetOutput,
 )
 from ax_workflow.a2a import _gate_rejected, _invalid, _missing_key, _requester
-from ax_workflow.core import GateRefused
+from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.handover import ROSTER_AREAS, Item, is_roster_area
 from ax_workflow.models import PR
 from ax_workflow.rules import ROLLBACK_LOOKBACK
+from dev_agent import dev_chat
 from dev_agent.runtime import get_service
 
 
@@ -555,6 +559,83 @@ async def receive_request_pause(request: AgentRequest) -> AgentResult:
     )
 
 
+# ---- 개발 AI 직접 대화 (dashboard-api /api/dashboard/dev-chat → dev_chat.py)
+# 말한 사람(`who`)은 dashboard-api가 사람 토큰에서만 채운다. 메시지마다 관문 dev_chat(A)을 타고,
+# 계획이 서면 작업 띄우기는 dev_task_create로 따로 관문을 탄다. 거절은 FAILED + outcome(소문자 코드)
+
+
+def _chat_done(request: AgentRequest, skill: str, output: dict[str, Any]) -> AgentResult:
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        outcome="ok",
+        output=output,
+        evidence=Evidence(data_summary=f"개발 AI 대화 {skill}", ref_ids=[]),
+    )
+
+
+def _chat_refused(request: AgentRequest, exc: ActionError) -> AgentResult:
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.FAILED,
+        outcome=exc.code.lower(),
+        output={"message": exc.message},
+        evidence=Evidence(data_summary=f"개발 AI 대화 거절: {exc.code}", ref_ids=[]),
+    )
+
+
+async def dev_chat_send(request: AgentRequest) -> AgentResult:
+    """말을 적고 answering으로 바로 돌려준다 (A, 메시지마다 관문 dev_chat)."""
+    try:
+        inp = DevChatSendInput.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    svc = get_service()
+    try:
+        th = await dev_chat.send(svc, inp.thread_id, inp.message, inp.connection, inp.mode, inp.who)
+    except ActionError as exc:
+        return _chat_refused(request, exc)
+    except GateRefused as exc:
+        return _gate_rejected(request, exc)
+    return _chat_done(request, "dev_chat_send", {"thread": dev_chat.view(th, inp.who)})
+
+
+async def dev_chat_list(request: AgentRequest) -> AgentResult:
+    try:
+        inp = DevChatListInput.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    svc = get_service()
+    await dev_chat.close_idle(svc)
+    threads = dev_chat.listed(svc, inp.who, inp.limit)
+    return _chat_done(request, "dev_chat_list", {"threads": threads})
+
+
+async def dev_chat_get(request: AgentRequest) -> AgentResult:
+    try:
+        inp = DevChatRef.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    svc = get_service()
+    await dev_chat.close_idle(svc)
+    th = svc.chat_of(inp.thread_id)
+    if th is None:
+        return _chat_refused(request, ActionError("NOT_FOUND", f"대화 {inp.thread_id}가 없다"))
+    return _chat_done(request, "dev_chat_get", {"thread": dev_chat.view(th, inp.who)})
+
+
+async def dev_chat_close(request: AgentRequest) -> AgentResult:
+    try:
+        inp = DevChatRef.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    try:
+        th = await dev_chat.close(get_service(), inp.thread_id, inp.who)
+    except ActionError as exc:
+        return _chat_refused(request, exc)
+    return _chat_done(request, "dev_chat_close", {"thread": dev_chat.view(th, inp.who)})
+
+
 # 개발 서비스(dev 8111)가 받는 skill
 DEV_HANDLERS = {
     "find_related_prs": find_related_prs,
@@ -566,4 +647,9 @@ DEV_HANDLERS = {
     "start_dev": start_dev,
     "receive_release_order": receive_release_order,
     "receive_request_pause": receive_request_pause,
+    # 사람과 직접 대화 (dashboard-api /api/dashboard/dev-chat)
+    "dev_chat_send": dev_chat_send,
+    "dev_chat_list": dev_chat_list,
+    "dev_chat_get": dev_chat_get,
+    "dev_chat_close": dev_chat_close,
 }

@@ -48,6 +48,14 @@
 - 로그: `execute_decided`·`result_sent`(공통 로그), `sns_publish_attempt`·`sns_container_status`(표준 로거 `ax.event`만. 계약 `LogKind`에 없다). 토큰·서명 URL·고객 원문은 남기지 않는다.
 - Facebook 로그인 경로의 삭제(`DELETE /{media-id}`)는 어댑터 인터페이스(`delete_media`)에 자리만 있고 쓰지 않는다. 쓰려면 별도 액션(`unpublish_sns`, C 제안)으로 `execute()`를 거친다.
 
+### SNS 미디어와 AI 라벨 오버레이
+
+- 방침(재헌 확정 2026-11-05): 인공지능기본법 제31조를 적용 대상으로 보고, AI 생성물이면 의무 여부와 상관없이 항상 고지한다. 사람이 보는 문구(캡션·오버레이)와 기계판독 표시를 함께 둔다. 계정 프로필 라벨은 사람이 확인한다.
+- 오버레이: `python -m marketing_agent.sns_label <원본> <out_dir> --model <생성 모델 id>` 또는 `sns_label.apply_label()`. ffmpeg `drawtext`로 문구를 입혀 `<out_dir>/labeled.jpg|mp4`, `meta.json`(`ai_label` 키: 문구, 원본·결과 sha256, 설정 파일 sha256, 생성 모델·시각)을 만들고 원본은 보관한다(`raw.*`). 영상은 전 구간 표시, 이미지는 오버레이 뒤 JPEG다. ffmpeg·ffprobe·한글 글꼴이 없으면 `LabelError`로 거절하고 라벨 없는 파일을 만들지 않는다.
+- 설정: `src/marketing_agent/sns_label.toml` 한 곳(문구·위치·크기·표시 시간·글꼴·화질). `MARKETING_SNS_LABEL_CONFIG`로 다른 파일, `MARKETING_SNS_LABEL_FONT`로 글꼴 지정. **문구와 크기·위치는 `[확인 필요 — 팀·변호사 승인]` 임시값이며 확정 문구가 아니다.**
+- 기계판독 표시: 이미지는 XMP(`ai_generated=true`, 생성 모델, 시각, IPTC `trainedAlgorithmicMedia`), 영상은 MP4 메타데이터 태그. 외부 모델이 넣은 SynthID·C2PA는 재저장(이 오버레이 포함)하면 사라질 수 있어 대신하지 않는다. 시행령 제23조의 "기계가 판독할 수 있는 방법"으로 인정되는지(표준 규격 포함)는 변호사 확인 필요.
+- 환경변수: `MARKETING_MEDIA_DIR`(미디어 폴더, 자산 경로는 이 안쪽만), `MARKETING_SNS_DRAFT_DB`(초안 SQLite 파일, 비우면 메모리).
+
 ### 사람과 직접 대화 (`chat.py`, `chat_store.py`)
 - 화면 경로: dashboard-api `/api/dashboard/marketing-chat` (GET 목록, GET `/{id}`, POST `{thread_id?, message}`, POST `/{id}/close`). 사람 토큰(`Authorization: Bearer`)이 있어야 읽기도 된다.
 - 조회·설명만 한다. 읽는 값은 받은 기획안·게시 중인 공지·쿠폰 지급 건수뿐이고, 숫자는 저장소 값을 그대로 인용한다. 캠페인 시작·취소, 공지 게시, 쿠폰 지급을 하라는 말에는 "대화로는 못 한다"는 안내만 한다(모델을 부르지 않음). 대화로 일이 생기지 않으므로 `task_id`는 항상 `null`이다.

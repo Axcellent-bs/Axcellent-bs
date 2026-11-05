@@ -632,3 +632,37 @@ class PlanningChatThreadOutput(AxModel):
 
 class PlanningChatListOutput(AxModel):
     threads: list[dict[str, Any]]
+
+
+# ---------------------------------------------------------------- 개발 AI 직접 대화 (11/5)
+# dashboard-api `/api/dashboard/dev-chat` → dev `dev_chat_*`. 기획 AI 대화와 같은 모양에
+# 개발만의 `connection`(올릴 레포 연결)·`mode`(agent 서버 AI · subscription 본인 Claude)가 더 있다.
+# 대화(thread)는 id·title·status(talking·answering·started·blocked·waiting·closed)·who·messages[]
+# ·task_id·connection·mode·summary·restricted·message_count·created_at·updated_at.
+DEV_CHAT_MESSAGE_MAX = 4000
+
+
+class DevChatSendInput(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=DEV_CHAT_MESSAGE_MAX)
+    connection: str | None = Field(default=None, min_length=1, max_length=120)
+    mode: Literal["agent", "subscription"] | None = None
+
+
+class DevChatListInput(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class DevChatRef(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    thread_id: str = Field(min_length=1, max_length=64)
+
+
+class DevChatThreadOutput(AxModel):
+    thread: dict[str, Any]
+
+
+class DevChatListOutput(AxModel):
+    threads: list[dict[str, Any]]
