@@ -14,7 +14,7 @@
   },
   "traffic": {
    "orders_per_5m": 0.5,
-   "history_days": 14,
+   "history_days": 28,
    "weekday_levels": [
     1.0,
     1.0,
@@ -55,17 +55,23 @@
   }
  },
  "counted": {
-  "orders_actual": 1096,
-  "orders_baseline": 1079.5,
-  "revenue_actual": 27858400,
-  "revenue_baseline": 26958600.0,
-  "baseline_rule": "캠페인 시작 전 14일의 같은 요일·같은 시간대 평균 (7일 전·14일 전 같은 구간)",
-  "history_days_before_start": 14,
+  "orders_actual": 1079,
+  "orders_baseline": 1097.75,
+  "revenue_actual": 26699200,
+  "revenue_baseline": 27410125.0,
+  "baseline_rule": "7·14·21·28일 전 같은 요일·같은 길이 구간 평균 (최소 3구간)",
+  "baseline_weeks": [
+   7,
+   14,
+   21,
+   28
+  ],
+  "history_days_before_start": 28,
   "coupon_issued_units": 45,
-  "coupon_used_in_window": 37,
+  "coupon_used_in_window": 40,
   "coupon_used_after": 1,
-  "coupon_used_units": 38,
-  "coupon_use_rate": 0.8444
+  "coupon_used_units": 41,
+  "coupon_use_rate": 0.9111
  },
  "memo": "7일 캠페인 (월화수목금토일). 7일, 변화 없음"
 }

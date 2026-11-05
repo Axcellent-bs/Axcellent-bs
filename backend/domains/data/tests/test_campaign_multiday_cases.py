@@ -58,7 +58,7 @@ def test_answers_come_from_the_injection() -> None:
             if injection["type"] in ("sale", "order_drop")
             else 1.0
         )
-        if traffic["history_days"] < 14:
+        if traffic["history_days"] < 21:  # 같은 요일 구간 3개(7·14·21일 전)가 안 됨
             assert case["expected"]["orders"] == {
                 "status": "unknown",
                 "unknown_reason": "short_history",
@@ -92,14 +92,16 @@ def test_coupon_conditions_match_the_records() -> None:
         assert coupon["used_after_units"] == campaign["used_after"] == counted["coupon_used_after"]
 
 
-def test_every_case_has_fourteen_days_of_same_weekday_history_or_says_why_not() -> None:
+def test_every_case_has_28_days_of_same_weekday_history_or_says_why_not() -> None:
     for case in _all():
         traffic = case["spec"]["traffic"]
         assert (
             traffic["weekday_levels"][5] > traffic["weekday_levels"][0]
         )  # 주말이 높다 (요일 효과)
-        assert 2 <= _days(case) <= 7  # 같은 요일 7일 전·14일 전이 캠페인 전에 있으려면 7일 이하
-        assert traffic["history_days"] >= 14 or case["expected"]["orders"]["status"] == "unknown"
+        assert 2 <= _days(case) <= 7  # 같은 요일 7일 전 구간이 캠페인 전에 있으려면 7일 이하
+        assert traffic["history_days"] >= 28 or case["expected"]["orders"]["status"] == "unknown"
+        if traffic["history_days"] >= 28:  # 4구간 모두로 기대를 셈
+            assert case["counted"]["baseline_weeks"] == [7, 14, 21, 28]
 
 
 def test_cases_cover_the_plan_and_holdout_is_separate() -> None:

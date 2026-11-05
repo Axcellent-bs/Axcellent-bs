@@ -14,7 +14,7 @@
   },
   "traffic": {
    "orders_per_5m": 0.5,
-   "history_days": 14,
+   "history_days": 28,
    "weekday_levels": [
     1.0,
     1.0,
@@ -48,12 +48,18 @@
   }
  },
  "counted": {
-  "orders_actual": 1410,
-  "orders_baseline": 1124.5,
-  "revenue_actual": 36809500,
-  "revenue_baseline": 28451100.0,
-  "baseline_rule": "캠페인 시작 전 14일의 같은 요일·같은 시간대 평균 (7일 전·14일 전 같은 구간)",
-  "history_days_before_start": 14
+  "orders_actual": 1486,
+  "orders_baseline": 1131.75,
+  "revenue_actual": 37440000,
+  "revenue_baseline": 28572250.0,
+  "baseline_rule": "7·14·21·28일 전 같은 요일·같은 길이 구간 평균 (최소 3구간)",
+  "baseline_weeks": [
+   7,
+   14,
+   21,
+   28
+  ],
+  "history_days_before_start": 28
  },
  "memo": "7일 캠페인 (목금토일월화수). 목~수 7일(주말 낌), 1.3배. campaign_id 없이 요청 → 쿠폰 확인할 수 없음"
 }

@@ -14,7 +14,7 @@
   },
   "traffic": {
    "orders_per_5m": 0.5,
-   "history_days": 14,
+   "history_days": 28,
    "weekday_levels": [
     1.0,
     1.0,
@@ -58,17 +58,23 @@
   }
  },
  "counted": {
-  "orders_actual": 160,
-  "orders_baseline": 291.5,
-  "revenue_actual": 4376300,
-  "revenue_baseline": 7265000.0,
-  "baseline_rule": "캠페인 시작 전 14일의 같은 요일·같은 시간대 평균 (7일 전·14일 전 같은 구간)",
-  "history_days_before_start": 14,
+  "orders_actual": 179,
+  "orders_baseline": 297.5,
+  "revenue_actual": 4731100,
+  "revenue_baseline": 7568725.0,
+  "baseline_rule": "7·14·21·28일 전 같은 요일·같은 길이 구간 평균 (최소 3구간)",
+  "baseline_weeks": [
+   7,
+   14,
+   21,
+   28
+  ],
+  "history_days_before_start": 28,
   "coupon_issued_units": 45,
-  "coupon_used_in_window": 22,
+  "coupon_used_in_window": 23,
   "coupon_used_after": 2,
-  "coupon_used_units": 24,
-  "coupon_use_rate": 0.5333
+  "coupon_used_units": 25,
+  "coupon_use_rate": 0.5556
  },
  "memo": "2일 캠페인 (월화). 월~화, 주문 0.6배"
 }

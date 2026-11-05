@@ -5,13 +5,15 @@
     uv run python domains/data/eval/campaign/make_multiday.py --holdout  # multiday/holdout/
 
 규칙은 `README.md` "여러 날 캠페인". 요약:
-- 데이터는 같은 생성기(`eval_world`, shop-api 코드). 구간 시작 14일 전부터 이어진 기록을 만들고
+- 데이터는 같은 생성기(`eval_world`, shop-api 코드). 구간 시작 28일 전부터 이어진 기록을 만들고
   (`traffic.history_days`), 요일 배수(`traffic.weekday_levels`, 주말이 높음)를 곱한다.
 - 주문 증감은 합성 주입(sale·order_drop·none). **정답(방향·배수)은 주입 조건에서 정한다.**
-- 기대(`counted.orders_baseline`)는 다음 코드 PR의 기준선 정의로 센다: **캠페인 시작 전 14일의 같은
-  요일·같은 시간대 평균** = (7일 전 같은 구간 + 14일 전 같은 구간) ÷ 2. 7일 이하 캠페인만 만든다.
-  채점기(`score.py`)는 이 칸으로 증분 오차를 잰다.
-- 시작 전 기록이 14일보다 짧으면 주문·매출은 확인할 수 없음(`short_history`)이 정답이다.
+  심은 조건·정답은 예전(14일 기록)과 같고, 기록 길이와 기대 정의만 4주로 바꿨다.
+- 기대(`counted.orders_baseline`)는 다음 코드 PR의 기준선 정의로 센다: **7·14·21·28일 전 같은
+  요일·같은 길이 구간의 평균** (시작 전 기록 안에 들어오는 구간만, 최소 3구간). `multiday4/`와 같은
+  정의다. 7일 이하 캠페인만 만든다. 채점기(`score.py`)는 이 칸으로 증분 오차를 잰다.
+- 쓸 수 있는 구간이 3개보다 적으면(시작 전 기록 21일 미만) 주문·매출은 확인할 수 없음
+  (`short_history`)이 정답이다.
 """
 
 from __future__ import annotations
@@ -35,8 +37,9 @@ HOLDOUT = HERE / "multiday" / "holdout"
 HOLDOUT_SEED = 2026110204  # 만든 날 YYYYMMDD + 그날 몇 번째 (campaign holdout 03 다음)
 HOLDOUT_COUNT = 10
 HOLDOUT_FACTORS = (0.6, 0.8, 1.0, 1.15, 1.2, 1.3, 2.0)
-BASELINE_DAYS = 14  # 기준선: 캠페인 시작 전 14일의 같은 요일·같은 시간대
-WEEKS = (7, 14)  # 같은 요일 = 7일 전, 14일 전
+BASELINE_DAYS = 28  # 만드는 시작 전 기록 (같은 요일 4구간 모두)
+WEEKS = (7, 14, 21, 28)  # 같은 요일 = 1·2·3·4주 전
+MIN_WEEKS = 3  # 이만큼 구간이 있어야 기대를 낸다
 ORDERS_PER_5M = 0.5  # 평일 하루 약 140건 (테스트 시간 때문에 결제 평가보다 적게)
 WEEKDAY_LEVELS = [1.0, 1.0, 1.0, 1.0, 1.1, 1.4, 1.3]  # 월~일. 주말이 높다
 MONDAY = datetime(2026, 10, 12, tzinfo=UTC)  # 기준 월요일 (UTC 날짜·요일로 센다)
@@ -75,8 +78,13 @@ def spec(
     return out
 
 
+def usable(history_days: int) -> list[int]:
+    """시작 전 기록 안에 들어오는 같은 요일 구간 (며칠 전)."""
+    return [k for k in WEEKS if k <= history_days]
+
+
 def counted(world: eval_world.World, campaign_id: str | None, history_days: int) -> dict[str, Any]:
-    """생성기가 만든 기록에서 바로 센 값 (기대는 같은 요일·같은 시간대 정의, data 코드가 아님)."""
+    """생성기가 만든 기록에서 바로 센 값 (기대는 같은 요일·같은 길이 4구간 정의, data 코드가 아님)."""
     window_from, window_to = world.window
 
     def rows(start: datetime, end: datetime) -> list[eval_world.Payment]:
@@ -86,16 +94,17 @@ def counted(world: eval_world.World, campaign_id: str | None, history_days: int)
         return sum(p.amount for p in items if p.failure_code is None)
 
     now = rows(window_from, window_to)
-    full = history_days >= BASELINE_DAYS
-    past = [rows(window_from - timedelta(days=k), window_to - timedelta(days=k)) for k in WEEKS]
+    weeks = usable(history_days)
+    full = len(weeks) >= MIN_WEEKS
+    past = [rows(window_from - timedelta(days=k), window_to - timedelta(days=k)) for k in weeks]
     out: dict[str, Any] = {
         "orders_actual": len(now),
-        # 시작 전 기록이 14일보다 짧으면 기대를 셀 수 없다 (반쯤 빈 평균을 넣지 않는다)
+        # 쓸 수 있는 구간이 3개보다 적으면 기대를 셀 수 없다 (반쯤 빈 평균을 넣지 않는다)
         "orders_baseline": round(sum(len(p) for p in past) / len(past), 4) if full else None,
         "revenue_actual": revenue(now),
         "revenue_baseline": round(sum(revenue(p) for p in past) / len(past), 4) if full else None,
-        "baseline_rule": "캠페인 시작 전 14일의 같은 요일·같은 시간대 평균"
-        " (7일 전·14일 전 같은 구간)",
+        "baseline_rule": "7·14·21·28일 전 같은 요일·같은 길이 구간 평균 (최소 3구간)",
+        "baseline_weeks": weeks,
         "history_days_before_start": history_days,
     }
     if campaign_id:
@@ -128,7 +137,7 @@ def case(
     scenario = spec(case_id, start, days, factor, coupons, history_days)
     world = eval_world.build(scenario)
     end = start + timedelta(days=days)
-    if history_days < BASELINE_DAYS:
+    if len(usable(history_days)) < MIN_WEEKS:
         orders: dict[str, Any] = {"status": "unknown", "unknown_reason": "short_history"}
         revenue: dict[str, Any] = {"status": "unknown", "unknown_reason": "short_history"}
     else:
