@@ -6,7 +6,7 @@
 - 하위 주제: 계획에 들어간 씨앗 키워드 (프로필 순서, 최대 `max_cards`)
 - 검색 관심: 네이버 검색어 트렌드(계획에 있을 때)를 한 요청으로 받아 trend_scan과 같은 판정
   (`judge_series`)의 평소 대비 배수. 근거마다 출처·기간·표본(값이 있는 날 수)
-- 연령대별 배수: trend_age 결과 그대로 (계획에서 연령을 고른 경우만, 하루 상한·캐시 공유)
+- 연령대별 배수: trend_age 결과 그대로 (카드 하위 주제는 늘 조회 대상, 하루 상한·몫·캐시 공유)
 - 실제 소비: 계획의 소비 출처(쇼핑인사이트·정보나루)마다. 키가 없으면 `key_required`
   ("키 등록 후 가능"), 키는 있는데 승인이 없으면 `not_approved`, 둘 다 되면 실제로 부른다
 - 숏츠 적합도: 하위 주제를 공유 분류기로 분류 → 숏츠 통계의 그 분류 조회 중앙값 ÷ 전체 중앙값.
@@ -58,11 +58,13 @@ from data_agent.connectors import CatalogProduct, ConnectorUnavailable
 from data_agent.explain import _bad_numbers
 from data_agent.llm_budget import no_llm
 from data_agent.skills.brief_facts import card_facts
+from data_agent.skills.trend_age import top_band
 from data_agent.skills.trend_evidence import BLAME, fixed_line
 from data_agent.skills.trend_scan import REQUEST_DAYS, TREND_CONFIG_ENV, judge_series
 from data_agent.video_links import links
 
 OTHER = ("기타", "unknown")
+AGE_SOURCE = "naver_search_trend"  # 연령대를 주는 출처 (사용 가능·승인일 때만 부른다)
 PLANNING_DECIDES = (
     "이 주제로 콘텐츠를 만들지, 만든다면 어떤 상품·메시지로 갈지",
     "목표 조회수와 기간 (목표 참고값은 이미 뜬 숏츠의 중앙값이라 참고만)",
@@ -454,10 +456,11 @@ async def make_opportunities(
     if trend is not None and trend.source_id in ready and trend_connector is not None:
         search, q = await search_interest(names, trend_connector, end)
         queries += q
-    # 연령대 (계획에서 연령을 고른 경우만)
+    # 연령대: 카드 하위 주제는 늘 연령대 조회 대상 (계획의 연령 선택과 무관). 네이버 하루 상한·
+    # 브리프 몫·3일 캐시는 trend_age가 지킨다 (age_fn = trend_age, caller trend_insight_brief)
     ages: dict[str, AgeTopic] = {}
-    age_why = "수집 계획에서 연령대를 고르지 않음"
-    if trend is not None and trend.use_age and trend.source_id in ready and age_fn is not None:
+    age_why = "네이버 검색어 트렌드가 사용 가능·승인된 출처가 아님"
+    if AGE_SOURCE in ready and age_fn is not None:
         try:
             got = await age_fn(names)
             ages = {_n(i.keyword): i for i in got.items}
@@ -532,10 +535,11 @@ async def make_opportunities(
         warn = caution.judge(cats.get(c.subtopic), real_entity=None, is_person=None,
                              basis=f"하위 주제 '{c.subtopic}' 분류")  # fmt: skip
         c.video_links = [caution.apply(v, warn) for v in (t.video_links if t else [])]
-        known = [b for b in c.age_bands if b.status == "known" and b.ratio is not None]
-        top = max(known, key=lambda b: b.ratio or 0.0) if known else None
-        c.top_age_band = top.band if top else None
-        c.top_age_band_ratio = top.ratio if top else None
+        # 인사이트와 같은 규칙 (trend_age.top_band: 오른 연령대 중 배수가 큰 것, 없으면 큰 것)
+        band, ratio = top_band(c.age_bands)
+        top = band is not None
+        c.top_age_band = band
+        c.top_age_band_ratio = ratio
         c.top_age_band_reason = None if top else (c.age_reason or "연령대 값을 받지 못함")
         mine = card_facts(c, [v.video_url for v in c.video_links if v.video_url])
         c.fact_ids = [x.fact_id for x in mine]

@@ -936,7 +936,7 @@ AI가 고르고 코드가 검증한다. 수집은 하지 않는다(카테고리 
 |---|---|
 | 실제 소비 `consumption` | 계획의 소비 출처마다. 키가 없으면 `key_required`("키 등록 후 가능" + 얻는 근거), 승인이 없으면 `not_approved`, 둘 다 되면 실제로 부름(쇼핑: 계획 첫 분야 안 키워드 클릭을 trend_scan 판정으로 평소 대비 배수 + 연령대마다 그 연령대의 평소 대비 배수(`category/keyword/age`, 연령대끼리 양은 비교하지 않음). 호출은 네이버 전체 하루 상한(검색어 트렌드와 같은 카운터, `NAVER_DATALAB_DAILY_LIMIT` 1,000)에 호출자 `shopping:domain_opportunity`로 세고, 기회 카드 몫 `[opportunity] shopping_daily_calls`(기본 100, 키워드 하나에 2번)을 넘으면 부르지 않고 unknown + 이유. 숫자는 카드 facts에 들어간다. 정보나루: 최근 30일 그 분류 인기 대출 중 키워드가 든 책의 대출 수 합) |
 | 검색 관심 `search_interest` | 네이버 검색어 트렌드(계획에 있고 승인된 경우) 그룹 5개씩 한 요청, `judge_series` 평소 대비 배수. 기간(84일)·표본(값이 있는 날 수) |
-| 연령대 `age_bands` | trend_age 그대로 (계획에서 연령을 고른 경우만, 하루 상한·캐시 공유). 없으면 `age_reason` |
+| 연령대 `age_bands` | trend_age 그대로. 카드 하위 주제는 계획의 연령 선택과 무관하게 늘 조회 대상이다(네이버 검색어 트렌드가 사용 가능·승인일 때, 네이버 하루 상한·브리프 몫·3일 캐시는 trend_age가 지킴). 없으면 `age_reason`. `top_age_band`는 인사이트와 같은 규칙(`trend_age.top_band`: 오른 연령대 중 배수가 큰 것, 없으면 배수가 큰 것) |
 | 숏츠 적합도 `shorts_fit` | 하위 주제를 공유 분류기로 분류 → 숏츠 통계 그 분류 조회 중앙값 ÷ 전체 숏츠 중앙값(`ShortsStatsOutput.median_views`). 표본 < `min_samples`(5)면 불확실, ≥ `high_ratio`(1.2)면 높음, ≤ `low_ratio`(0.8)면 낮음, 사이면 불확실 |
 | 잘 되는 형식 `formats` | 그 분류 숏츠의 형식별 수(기타·미분류 제외, 최대 3) + 전체 숏츠 통계의 그 형식 중앙값 |
 | 목표 참고값 | 하위 주제 카드: 그 하위 주제 숏츠 조회 중앙값(표본 5개 이상). **5개 미만이면 None + "표본 부족"**(분류·전체 중앙값으로 채우지 않음). 씨앗 키워드 카드: 그 분류 숏츠 조회 중앙값(표본 기준 이상), 아니면 전체 중앙값. 기준 문장 `target_reference_basis` |
