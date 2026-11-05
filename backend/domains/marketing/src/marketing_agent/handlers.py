@@ -67,6 +67,7 @@ from marketing_agent.schemas import (
     PublishNoticeInput,
 )
 from marketing_agent.sns import SnsStore, check_sns_post, draft_sns_post
+from marketing_agent.sns_publish.publisher import publish_sns
 
 SOURCE = "marketing"
 BANNER_TEXT_MAX = 200  # shop-api 배너 문구 상한
@@ -627,6 +628,10 @@ async def check_sns_post_skill(request: AgentRequest) -> AgentResult:
     return await check_sns_post(request, STATE.sns)
 
 
+async def publish_sns_skill(request: AgentRequest) -> AgentResult:
+    return await publish_sns(request, STATE.sns)
+
+
 def _chat_failed(request: AgentRequest, refused: ChatRefused) -> AgentResult:
     return _result(
         request, TaskStatus.FAILED, outcome=refused.outcome, output={"message": refused.message}
@@ -647,7 +652,7 @@ def _chat_done(request: AgentRequest, skill: str, output: dict[str, Any]) -> Age
     )
 
 
-async def send_chat_message(request: AgentRequest) -> AgentResult:
+async def marketing_chat_send(request: AgentRequest) -> AgentResult:
     data = _parse(request, SendChatMessageInput)
     if isinstance(data, AgentResult):
         return data
@@ -657,10 +662,10 @@ async def send_chat_message(request: AgentRequest) -> AgentResult:
         return _chat_failed(request, refused)
     except ChatStorageError:
         return _chat_storage_failed(request)
-    return _chat_done(request, "send_chat_message", {"thread": thread})
+    return _chat_done(request, "marketing_chat_send", {"thread": thread})
 
 
-async def list_chat_threads(request: AgentRequest) -> AgentResult:
+async def marketing_chat_list(request: AgentRequest) -> AgentResult:
     data = _parse(request, ListChatThreadsInput)
     if isinstance(data, AgentResult):
         return data
@@ -668,10 +673,10 @@ async def list_chat_threads(request: AgentRequest) -> AgentResult:
         threads = STATE.chat.list(data.who, data.limit)
     except ChatStorageError:
         return _chat_storage_failed(request)
-    return _chat_done(request, "list_chat_threads", {"threads": threads})
+    return _chat_done(request, "marketing_chat_list", {"threads": threads})
 
 
-async def get_chat_thread(request: AgentRequest) -> AgentResult:
+async def marketing_chat_get(request: AgentRequest) -> AgentResult:
     data = _parse(request, ChatThreadRef)
     if isinstance(data, AgentResult):
         return data
@@ -681,10 +686,10 @@ async def get_chat_thread(request: AgentRequest) -> AgentResult:
         return _chat_failed(request, refused)
     except ChatStorageError:
         return _chat_storage_failed(request)
-    return _chat_done(request, "get_chat_thread", {"thread": thread})
+    return _chat_done(request, "marketing_chat_get", {"thread": thread})
 
 
-async def close_chat_thread(request: AgentRequest) -> AgentResult:
+async def marketing_chat_close(request: AgentRequest) -> AgentResult:
     data = _parse(request, ChatThreadRef)
     if isinstance(data, AgentResult):
         return data
@@ -694,7 +699,7 @@ async def close_chat_thread(request: AgentRequest) -> AgentResult:
         return _chat_failed(request, refused)
     except ChatStorageError:
         return _chat_storage_failed(request)
-    return _chat_done(request, "close_chat_thread", {"thread": thread})
+    return _chat_done(request, "marketing_chat_close", {"thread": thread})
 
 
 HANDLERS = {
@@ -711,9 +716,10 @@ HANDLERS = {
     "record_campaign_result": record_campaign_result,
     "draft_sns_post": draft_sns_post_skill,
     "check_sns_post": check_sns_post_skill,
+    "publish_sns": publish_sns_skill,
     "cancel_campaign": cancel_campaign,
-    "send_chat_message": send_chat_message,
-    "list_chat_threads": list_chat_threads,
-    "get_chat_thread": get_chat_thread,
-    "close_chat_thread": close_chat_thread,
+    "marketing_chat_send": marketing_chat_send,
+    "marketing_chat_list": marketing_chat_list,
+    "marketing_chat_get": marketing_chat_get,
+    "marketing_chat_close": marketing_chat_close,
 }

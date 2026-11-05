@@ -44,6 +44,7 @@ from ax_contracts.schemas.hr import (
 from ax_contracts.schemas.record import Card
 from ax_dashboard_api import (
     claim_mapping,
+    dev_chat,
     hr_client,
     live_views,
     marketing_client,
@@ -855,14 +856,16 @@ class MarketingChatSendBody(BaseModel):
 async def marketing_chat_list(request: Request) -> dict:
     """마케팅 AI 대화 목록. 사람 토큰이 필요하다. 남의 대화는 원문 없이 요약만(`restricted`)."""
     who = human_from_authorization(request.headers.get("authorization"))
-    out = await marketing_client.chat_call("list_chat_threads", {"who": who})
+    out = await marketing_client.chat_call("marketing_chat_list", {"who": who})
     return ok(out.get("threads", []))
 
 
 @router.get("/marketing-chat/{thread_id}")
 async def marketing_chat_get(thread_id: str, request: Request) -> dict:
     who = human_from_authorization(request.headers.get("authorization"))
-    out = await marketing_client.chat_call("get_chat_thread", {"who": who, "thread_id": thread_id})
+    out = await marketing_client.chat_call(
+        "marketing_chat_get", {"who": who, "thread_id": thread_id}
+    )
     return ok(out["thread"])
 
 
@@ -873,7 +876,7 @@ async def marketing_chat_send(body: MarketingChatSendBody, request: Request) -> 
     payload = {"who": who, "message": body.message} | (
         {"thread_id": body.thread_id} if body.thread_id else {}
     )
-    out = await marketing_client.chat_call("send_chat_message", payload)
+    out = await marketing_client.chat_call("marketing_chat_send", payload)
     return ok(out["thread"])
 
 
@@ -881,7 +884,7 @@ async def marketing_chat_send(body: MarketingChatSendBody, request: Request) -> 
 async def marketing_chat_close(thread_id: str, request: Request) -> dict:
     who = human_from_authorization(request.headers.get("authorization"))
     out = await marketing_client.chat_call(
-        "close_chat_thread", {"who": who, "thread_id": thread_id}
+        "marketing_chat_close", {"who": who, "thread_id": thread_id}
     )
     return ok(out["thread"])
 
@@ -922,6 +925,45 @@ async def planning_chat_send(body: PlanningChatSendBody, request: Request) -> di
 async def planning_chat_close(thread_id: str, request: Request) -> dict:
     who = human_from_authorization(request.headers.get("authorization"))
     out = await planning_chat.call("planning_chat_close", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+# ---- 개발 AI 직접 대화 (→ dev `dev_chat_*`). 기획 AI 대화와 같은 모양에 connection·mode가 더 있다
+class DevChatSendBody(BaseModel):
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=4000)
+    connection: str | None = Field(default=None, min_length=1, max_length=120)
+    mode: Literal["agent", "subscription"] | None = None
+
+
+@router.get("/dev-chat")
+async def dev_chat_list(request: Request) -> dict:
+    """개발 AI 대화 목록. 사람 토큰이 필요하다. 남의 대화는 원문 없이 요약만(`restricted`)."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await dev_chat.call("dev_chat_list", {"who": who})
+    return ok(out.get("threads", []))
+
+
+@router.get("/dev-chat/{thread_id}")
+async def dev_chat_get(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await dev_chat.call("dev_chat_get", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+@router.post("/dev-chat")
+async def dev_chat_send(body: DevChatSendBody, request: Request) -> dict:
+    """말을 저장하고 `status: answering`으로 바로 돌려준다. 답은 GET으로 가져간다."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    extra = body.model_dump(include={"thread_id", "connection", "mode"}, exclude_none=True)
+    out = await dev_chat.call("dev_chat_send", {"who": who, "message": body.message} | extra)
+    return ok(out["thread"])
+
+
+@router.post("/dev-chat/{thread_id}/close")
+async def dev_chat_close(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await dev_chat.call("dev_chat_close", {"who": who, "thread_id": thread_id})
     return ok(out["thread"])
 
 

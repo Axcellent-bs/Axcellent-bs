@@ -113,12 +113,14 @@ hr 연동 항목 규칙 (`domain/handover.py`, 시연값):
 개발팀원은 양식 대신 개발 AI와 대화한다. 요청이 흐리면 AI가 되묻고, 계획이 서면 코딩 작업(`create_dev_task`, 위 흐름 그대로)을 스스로 띄워 PR까지 간다. `POST /dev-tasks`는 그대로 둔다(안에서 다시 쓴다).
 
 - `GET /dev-chat` → 대화 목록(최근 바뀐 것 먼저, 20개) · `GET /dev-chat/{thread_id}` → 대화 하나(없으면 404).
-- `POST /dev-chat` `{thread_id?, message(1~4000자), connection?}` → 사용자 메시지를 적고 AI 답 하나를 받은 뒤 바뀐 대화를 준다. `thread_id`가 없으면 새 대화(`chat-1`, `chat-2`…, 제목 = 첫 메시지 40자).
-- 대화 `{id, title, status: talking|started|blocked, messages, task_id, connection, created_at, updated_at}`, 메시지 `{id(m1..), role: user|assistant, text, at, kind: text|question|plan|started|error, plan: {title, plan, done[], paths[]}|null, task_id}`.
-- 상태 `chats`에도 들어가 SSE로 나간다. 사용자 메시지는 LLM을 부르기 전에 먼저 적어 화면에 바로 보이고, 작업을 띄운 뒤 진행은 작업 `coding`으로 본다. 초기화하면 비운다.
+- `POST /dev-chat` `{thread_id?, message(1~4000자), connection?, mode?}` → 사용자 메시지를 적고 `status: answering`인 대화를 바로 준다. 답은 뒤에서 붙고 상태를 되돌린다(SSE `chats`·GET으로 본다). `thread_id`가 없으면 새 대화(`chat-1`, `chat-2`…, 제목 = 첫 메시지 40자).
+- `POST /dev-chat/{thread_id}/close` → 대화를 끝낸다(`closed`). 띄운 작업은 그대로 돌고 앞 요청 기다리기는 그만둔다. 30분 말이 없는 대화도 끝낸다(PR 맞추기 루프·A2A 읽기 때, 작업이 돌거나 PR 확인·앞 요청을 기다리는 대화는 그대로). 다시 켜질 때 `answering`으로 남은 대화는 `error` 한 줄을 적고 되돌린다.
+- AI 대화방(직접 대화)은 dashboard-api `/api/dashboard/dev-chat`(GET 목록·하나, POST 보내기·`/{id}/close`) → A2A `dev_chat_send`·`_close`(A)·`_list`·`_get`(read), 요청자는 `dashboard-api`만. `who`는 dashboard-api가 사람 토큰에서 채운다. 남의 대화는 쓰거나 끝낼 수 없고(`forbidden`), 읽으면 원문 없이 제목·메시지 수만 준다(`restricted`, 작업을 띄운 대화는 원문까지). 계약은 `ax_contracts.schemas.planning`의 `DevChat*`.
+- 대화 `{id, title, status: talking|answering|started|blocked|waiting|closed, messages, task_id, connection, created_at, updated_at}`, 메시지 `{id(m1..), role: user|assistant, text, at, kind: text|question|plan|started|error, plan: {title, plan, done[], paths[]}|null, task_id}`.
+- 상태 `chats`에도 들어가 SSE로 나간다. 사용자 메시지는 LLM을 부르기 전에 먼저 적어 화면에 바로 보이고(`answering`), 작업을 띄운 뒤 진행은 작업 `coding`으로 본다. 초기화하면 비운다.
 - 한 번 주고받기: LLM(`{reply, action: ask|start, plan?, connection?}`)에 대화(최근 20개, 데이터 블록)·연결 목록(id·레포·설명·담당 경로)·실제 파일 경로(coder와 같은 걸러내기, 합 300개)를 준다. 되묻기는 2번까지(그 뒤에도 묻는데 계획이 있으면 띄운다). "진행해"·"만들어 줘"·"PR 올려" 같은 말이면 이번 계획 또는 지난 계획으로 띄운다. 계획은 다듬는다(제목 200자, `..` 경로 빼기, 완료 기준 20줄).
 - 올릴 연결: 대화에 고른 것(`connection`) → LLM이 고른 id → 메시지에 나온 연결 id·레포 이름 → 연결이 하나면 그것. 여럿인데 못 정하면 어느 레포인지 묻는다(`question`, 계획을 붙여 둬서 연결을 골라 "진행해"면 바로 띄운다).
 - 작업을 띄우면 `started` 메시지(`task_id`)와 대화 `status: started`. 그 대화에 또 쓰면 LLM 없이 작업 진행 상태만 답한다(다른 변경은 새 대화).
 - 연결이 없으면 요청을 실패시키지 않고 200 + `error` 메시지("연결된 레포가 없어…")와 `status: blocked`를 준다. 연결을 붙인 뒤 다시 보내면 이어 간다. LLM 오류·시간 초과(60초)도 `error` 메시지 한 줄(예외 종류만, 내용·비밀 값 없음).
-- 오류: 409 `LLM_NOT_CONFIGURED`(가장 먼저 본다, 아무것도 안 적음) · 400 `INVALID_INPUT`(형식, 모르는 연결) · 404 `NOT_FOUND`(대화 없음) · 409 `WRONG_ROLE`(planning 서비스) · 409 `GATE_REJECTED`.
-- 메시지 하나를 적을 때마다 관문 `dev_chat`(A, 대상 `chat-1:m2`, 사건 `ctx_chat_1`). LLM은 `coder`와 같은 설정, 테스트는 `dev_chat.set_llm()`(`tests/test_dev_chat.py`).
+- 오류: 409 `LLM_NOT_CONFIGURED`(가장 먼저 본다, 아무것도 안 적음) · 400 `INVALID_INPUT`(형식, 모르는 연결) · 404 `NOT_FOUND`(대화 없음) · 403 `FORBIDDEN`(남의 대화) · 409 `THREAD_BUSY`(답하는 중) · 409 `THREAD_CLOSED`(끝낸 대화) · 409 `WRONG_ROLE`(planning 서비스) · 409 `GATE_REJECTED`.
+- 메시지 하나를 적을 때마다 관문 `dev_chat`(A, 대상 `chat-1:m2`, 사건 `ctx_chat_1`). LLM은 `coder`와 같은 설정, 테스트는 `dev_chat.set_llm()`(`tests/test_dev_chat.py`, 답까지 기다리려면 `set_background(False)`, 뒤에서 답하기·끝내기·A2A는 `tests/test_dev_chat_direct.py`).

@@ -335,32 +335,32 @@ def test_skills_over_a2a() -> None:
     llm = FakeLLM()
     handlers.STATE.chat._llm = lambda: llm
     with TestClient(app) as client:  # 이벤트 루프를 유지해 백그라운드 답이 끝난다
-        sent = _call(client, "send_chat_message", {"who": GAON, "message": "안녕"})
+        sent = _call(client, "marketing_chat_send", {"who": GAON, "message": "안녕"})
         assert sent["status"] == "completed"
         thread = sent["output"]["thread"]
         assert thread["status"] == "answering"
         got: dict = {}
         for _ in range(200):
-            got = _call(client, "get_chat_thread", {"who": GAON, "thread_id": thread["id"]})
+            got = _call(client, "marketing_chat_get", {"who": GAON, "thread_id": thread["id"]})
             if got["output"]["thread"]["status"] == "talking":
                 break
             time.sleep(0.02)
         assert got["output"]["thread"]["status"] == "talking"
         assert len(got["output"]["thread"]["messages"]) == 2
-        listed = _call(client, "list_chat_threads", {"who": NARAE})
+        listed = _call(client, "marketing_chat_list", {"who": NARAE})
         assert listed["output"]["threads"][0]["restricted"] is True
-        denied = _call(client, "close_chat_thread", {"who": NARAE, "thread_id": thread["id"]})
+        denied = _call(client, "marketing_chat_close", {"who": NARAE, "thread_id": thread["id"]})
         assert (denied["status"], denied["outcome"]) == ("failed", "forbidden")
-        closed = _call(client, "close_chat_thread", {"who": GAON, "thread_id": thread["id"]})
+        closed = _call(client, "marketing_chat_close", {"who": GAON, "thread_id": thread["id"]})
         assert closed["output"]["thread"]["status"] == "closed"
         ref = {"who": GAON, "thread_id": thread["id"], "message": "x"}
-        assert _call(client, "send_chat_message", ref)["outcome"] == "thread_closed"
+        assert _call(client, "marketing_chat_send", ref)["outcome"] == "thread_closed"
 
 
 def test_only_the_dashboard_may_chat() -> None:
     with TestClient(app) as client:
         for caller in ("planning", "orchestrator", "support"):
-            denied = _call(client, "list_chat_threads", {"who": GAON}, token=f"mock:{caller}")
+            denied = _call(client, "marketing_chat_list", {"who": GAON}, token=f"mock:{caller}")
             assert denied["outcome"] == "FORBIDDEN_SKILL"
 
 
@@ -368,5 +368,5 @@ def test_no_llm_over_a2a_is_llm_not_configured(monkeypatch: pytest.MonkeyPatch) 
     for key in LLM_ENV:
         monkeypatch.delenv(key, raising=False)
     with TestClient(app) as client:
-        res = _call(client, "send_chat_message", {"who": GAON, "message": "안녕"})
+        res = _call(client, "marketing_chat_send", {"who": GAON, "message": "안녕"})
     assert (res["status"], res["outcome"]) == ("failed", "llm_not_configured")

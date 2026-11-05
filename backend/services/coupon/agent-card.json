@@ -185,6 +185,18 @@
       "priority": "optional"
     },
     {
+      "id": "publish_sns",
+      "description": "내용이 확정된 SNS 게시(post_draft_id, asset_ref, asset_sha256, caption, media_kind)를 Instagram에 올린다. C 등급이라 항상 사람 승인이 필요하다: 멱등 키는 내용 해시(content_sha)를 포함하고, held면 input-required로 돌려준다. 승인(safety.review_decided 구독, 대비책 폴링) 뒤 같은 키로 execute()를 다시 불러 executed를 받은 뒤에만 어댑터를 부른다. 상태 held→approved→publishing→published/failed, media_publish는 1회, 내용이 바뀌면 content_changed. 지금은 목 어댑터만 있고 실제 모드는 adapter_unavailable로 거부한다.",
+      "input_schema": "agents/marketing/src/marketing_agent/sns_publish/publisher.py#PublishSnsInput",
+      "output_schema": "agents/marketing/src/marketing_agent/sns_publish/publisher.py#PublishSnsOutput",
+      "grade": "C",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
       "id": "cancel_campaign",
       "description": "시작한 캠페인(campaign_id, reason)을 재무 cancel_campaign으로 전달해 재무가 잡아 둔 예산을 푼다. 바뀌는 것은 재무 기록뿐이며 실제 광고를 멈추지 않는다(요청한 쪽이 멈춘다). 재무의 상태·결과를 그대로 돌려주고, 재무에 닿지 못하거나 답이 계약과 다르면 실패로 돌려준다. 결과가 이미 기록된 캠페인은 취소되지 않으며, 일부를 썼으면 record_campaign_result로 결과를 기록한다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignCancelInput",
@@ -198,8 +210,8 @@
       "priority": "recommended"
     },
     {
-      "id": "send_chat_message",
-      "description": "사람이 마케팅 AI에 보낸 말을 저장하고 status answering으로 바로 돌려준다(답은 백그라운드에서 만들어 붙이고 talking으로 되돌림, 화면은 get_chat_thread로 가져간다). thread_id가 없으면 새 대화. 조회·설명만 하고 업무 상태(캠페인·공지·쿠폰)는 바꾸지 않아 execute()를 부르지 않는다. 읽는 것은 받은 기획안·게시 중 공지·쿠폰 지급 건수뿐이고 기획안 본문은 untrusted로만 넣는다. 거절 outcome: llm_not_configured(LLM 설정 없음, 답을 지어내지 않음)·forbidden(남의 대화)·not_found·thread_closed·thread_busy.",
+      "id": "marketing_chat_send",
+      "description": "사람이 마케팅 AI에 보낸 말을 저장하고 status answering으로 바로 돌려준다(답은 백그라운드에서 만들어 붙이고 talking으로 되돌림, 화면은 marketing_chat_get로 가져간다). thread_id가 없으면 새 대화. 조회·설명만 하고 업무 상태(캠페인·공지·쿠폰)는 바꾸지 않아 execute()를 부르지 않는다. 읽는 것은 받은 기획안·게시 중 공지·쿠폰 지급 건수뿐이고 기획안 본문은 untrusted로만 넣는다. 거절 outcome: llm_not_configured(LLM 설정 없음, 답을 지어내지 않음)·forbidden(남의 대화)·not_found·thread_closed·thread_busy.",
       "input_schema": "agents/marketing/src/marketing_agent/chat.py#SendChatMessageInput",
       "output_schema": "agents/marketing/src/marketing_agent/chat.py#ChatThreadOutput",
       "grade": "read",
@@ -210,7 +222,7 @@
       "priority": "recommended"
     },
     {
-      "id": "list_chat_threads",
+      "id": "marketing_chat_list",
       "description": "대화 목록(최근 갱신 순). 본인 대화는 전부, 다른 사람 대화는 messages 비움+summary+restricted true. 30분 무응답 대화는 이때 끝낸다. 업무 상태를 바꾸지 않는다.",
       "input_schema": "agents/marketing/src/marketing_agent/chat.py#ListChatThreadsInput",
       "output_schema": "agents/marketing/src/marketing_agent/chat.py#ChatThreadListOutput",
@@ -222,8 +234,8 @@
       "priority": "recommended"
     },
     {
-      "id": "get_chat_thread",
-      "description": "대화 하나. 열람 규칙은 list_chat_threads와 같다. 없으면 not_found.",
+      "id": "marketing_chat_get",
+      "description": "대화 하나. 열람 규칙은 marketing_chat_list와 같다. 없으면 not_found.",
       "input_schema": "agents/marketing/src/marketing_agent/chat.py#ChatThreadRef",
       "output_schema": "agents/marketing/src/marketing_agent/chat.py#ChatThreadOutput",
       "grade": "read",
@@ -234,7 +246,7 @@
       "priority": "recommended"
     },
     {
-      "id": "close_chat_thread",
+      "id": "marketing_chat_close",
       "description": "대화를 끝낸다(status closed). 요약이 비어 있으면 첫 질문 일부만 남긴다. 남의 대화는 forbidden.",
       "input_schema": "agents/marketing/src/marketing_agent/chat.py#ChatThreadRef",
       "output_schema": "agents/marketing/src/marketing_agent/chat.py#ChatThreadOutput",

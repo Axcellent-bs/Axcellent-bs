@@ -443,6 +443,45 @@ def test_effect_result_uses_products_basis_and_keeps_groups_apart() -> None:
 
 
 @pytest.mark.role("planning")
+def test_effect_result_shows_attribution_apart_and_keeps_direction() -> None:
+    """유입 기준(#648)은 따로 묶고, 기준선 없는 직접 귀속이라 방향은 바꾸지 않는다."""
+    from ax_contracts.schemas.data import CampaignEffectOutput
+
+    base = {
+        "campaign_id": "cmp_PROP-1",
+        "window_from": "2026-11-04T00:00:00Z", "window_to": "2026-11-05T00:00:00Z",
+        "orders": {"status": "known", "direction": "none", "actual": 100, "expected": 100,
+                   "excess": 0, "ratio": 1.0, "baseline_days": 7},
+        "revenue": {"status": "unknown", "unknown_reason": "매출 지표 없음"},
+        "coupons": {"status": "unknown", "unknown_reason": "캠페인 쿠폰이 없음"},
+        "summary": "링크로 온 주문이 있다",
+    }  # fmt: skip
+    known = {
+        **base,
+        "attribution_effect": {
+            "status": "known", "campaign_id": "cmp_PROP-1", "orders": 7, "gross_krw": 52500,
+            "by_source": [{"source": "instagram", "mediums": ["social"], "orders": 5,
+                           "gross_krw": 37500}],
+            "window_orders": 100, "tagged_orders": 20, "tagged_share": 0.2,
+        },
+        "attribution_and_products": {"status": "known", "matched": ["p1"], "orders": 4,
+                                     "units": 4, "gross_krw": 30000},
+    }  # fmt: skip
+    direction, _, facts = proposals.effect_result(CampaignEffectOutput.model_validate(known))
+    assert direction == "같음"  # 가게 전체 기준 그대로 (유입은 방향에 안 씀)
+    by = {f.label: (f.value, f.source) for f in facts}
+    assert by["캠페인 링크로 온 주문"] == ("7건 · 52,500원", proposals.EFFECT_ATTRIBUTION)
+    assert by["출처 instagram"][0] == "5건 · 37,500원"
+    assert by["그중 관련 상품 주문"][0] == "4건 · 30,000원"
+    assert by["유입 표시가 있는 주문 비율"][0] == "20%"
+    none = {**base, "attribution_effect": {"status": "unknown", "unknown_reason": "유입 기록 없음"}}
+    _, _, f = proposals.effect_result(CampaignEffectOutput.model_validate(none))
+    assert [(x.label, x.value) for x in f if x.source == proposals.EFFECT_ATTRIBUTION] == [
+        ("유입 기준 확인 불가", "유입 기록 없음")
+    ]
+
+
+@pytest.mark.role("planning")
 def test_measure_sends_proposal_products() -> None:
     seen: list[dict] = []
     effect = {

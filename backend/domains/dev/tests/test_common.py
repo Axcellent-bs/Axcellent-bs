@@ -218,11 +218,15 @@ def test_dev_agent_card_format_and_served() -> None:
     skills = {s.id: s for s in card.skills}
     required = {"find_related_prs", "link_incident", "verify_rollback_target"}
     hr_links = {"list_in_progress", "list_dev_outcomes", "verify_handover"}
-    assert set(skills) == required | hr_links | {
+    chat = {f"dev_chat_{x}" for x in ("send", "list", "get", "close")}  # 직접 대화 (11/5)
+    assert set(skills) == required | hr_links | chat | {
         "start_dev",
         "receive_release_order",
         "receive_request_pause",
     }
+    for name in chat:
+        assert skills[name].allowed_requesters == ["dashboard-api"], name
+    assert {k for k in chat if skills[k].grade == "read"} == {"dev_chat_list", "dev_chat_get"}
     assert skills["find_related_prs"].grade == "read"
     assert skills["link_incident"].grade == "A"
     assert skills["verify_rollback_target"].grade == "read"

@@ -11,14 +11,15 @@
 | `receive_campaign_brief` | A |
 | `list_campaign_briefs` | read |
 | `get_campaign_brief` | read |
-| `send_chat_message` | read |
-| `list_chat_threads` | read |
-| `get_chat_thread` | read |
-| `close_chat_thread` | read |
+| `marketing_chat_send` | read |
+| `marketing_chat_list` | read |
+| `marketing_chat_get` | read |
+| `marketing_chat_close` | read |
 | `build_campaign_link` | read |
 | `issue_coupon` | A |
 | `draft_sns_post` | read |
 | `check_sns_post` | read |
+| `publish_sns` | C |
 
 - 실행: `uv run --package ax-svc-coupon uvicorn svc_coupon.main:app --port 8103` (backend/ 에서, 목 모드 `AGENT_TEMPLATE_MOCK=1`)
 - 다른 에이전트가 `marketing`로 불러도 위 skill이면 이 서비스로 온다 (`route_target`).
