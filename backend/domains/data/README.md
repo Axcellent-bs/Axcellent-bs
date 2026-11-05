@@ -852,7 +852,8 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 흐름: **데이터(인사이트 + 근거) → 기획(제안 + 실행 근거 + 목표) → 사람 확인 → 마케팅 실행 → 데이터(성과 측정) → 기획(결과 기록)**. 데이터는 기획안을 확정하지 않고 근거 있는 인사이트를 기획에 넘긴다. grade read, 요청: planning·orchestrator·dashboard-api.
 
 **v2 화면 칸** (모두 코드, 모르면 None + 이유, `caution.py`):
-- 영상마다 `ad_usable`·`caution_types`(실존 인물·상표·음원)·`caution_reason`. 인사이트 근거 영상은 그 주제 분류(실존 이름·사람·분류)로 정하고, 기회 카드 근거 숏츠는 하위 주제 분류(칸만 앎: 음원이 아니면 모름)로, 지금 인기 `top_videos`는 영상 분류(음원)와 제목에 지금 인기 주제의 실존 이름이 들었는지로 정한다. 확인할 것이 하나라도 있으면 false, 실존 이름 판단까지 알 때만 true
+- 영상마다 `ad_usable`·`caution_types`(실존 인물·상표·음원)·`caution_reason`. 지금 인기 `top_videos`는 영상 분류(음원)와 제목에 지금 인기 주제의 실존 이름이 들었는지로 정한다. 확인할 것이 하나라도 있으면 false, 실존 이름 판단까지 알 때만 true
+- **근거 숏츠(인사이트·기회 카드, #0-c)**: 영상 분류 호출(`classify_videos`)이 칸과 함께 그 영상의 실존 인물·상표 이름도 판정한다(`real_entity`·`entity_names`·`is_person`, 이름은 제목·태그에 실제로 나온 것만, 채널 이름은 넣지 않음). 분류 저장분(`topic_categories.db`)의 같은 칸에 남기고, 이 판정 전에 저장된 영상(칸이 빈 줄)은 다음 분류 때 다시 물어 채운다. 근거 숏츠의 광고 재료 칸은 이 영상 판정으로 정하고(`evidence_videos.label`), 제목이 없거나 분류를 못 한 영상만 카드 주제의 분류 결과를 따른다. `VideoLink.title`·`views`는 저장된 응답 값(YouTube 스냅샷 `video_titles`·조회수, 하위 주제 검색 저장분). 더 부르지 않는다
 - 인사이트 `shorts_fit`·`target_views_reference`: 기회 카드와 같은 계산(그 분류 숏츠 조회 중앙값 ÷ 전체 중앙값). 그 분류 숏츠 표본이 5개 미만이면 None + `shorts_fit_status = unknown` + 이유. 숫자는 `facts`
 - 인사이트·기회 카드 `top_age_band`·`top_age_band_ratio`: 평소 대비 가장 크게 오른 연령대(known만). 연령대끼리 양은 비교하지 않는다. 배수는 `facts`의 연령대 칸
 
@@ -936,7 +937,7 @@ AI가 고르고 코드가 검증한다. 수집은 하지 않는다(카테고리 
 |---|---|
 | 실제 소비 `consumption` | 계획의 소비 출처마다. 키가 없으면 `key_required`("키 등록 후 가능" + 얻는 근거), 승인이 없으면 `not_approved`, 둘 다 되면 실제로 부름(쇼핑: 계획 첫 분야 안 키워드 클릭을 trend_scan 판정으로 평소 대비 배수 + 연령대마다 그 연령대의 평소 대비 배수(`category/keyword/age`, 연령대끼리 양은 비교하지 않음). 호출은 네이버 전체 하루 상한(검색어 트렌드와 같은 카운터, `NAVER_DATALAB_DAILY_LIMIT` 1,000)에 호출자 `shopping:domain_opportunity`로 세고, 기회 카드 몫 `[opportunity] shopping_daily_calls`(기본 100, 키워드 하나에 2번)을 넘으면 부르지 않고 unknown + 이유. 숫자는 카드 facts에 들어간다. 정보나루: 최근 30일 그 분류 인기 대출 중 키워드가 든 책의 대출 수 합) |
 | 검색 관심 `search_interest` | 네이버 검색어 트렌드(계획에 있고 승인된 경우) 그룹 5개씩 한 요청, `judge_series` 평소 대비 배수. 기간(84일)·표본(값이 있는 날 수) |
-| 연령대 `age_bands` | trend_age 그대로 (계획에서 연령을 고른 경우만, 하루 상한·캐시 공유). 없으면 `age_reason` |
+| 연령대 `age_bands` | trend_age 그대로. 카드 하위 주제는 계획의 연령 선택과 무관하게 늘 조회 대상이다(네이버 검색어 트렌드가 사용 가능·승인일 때, 네이버 하루 상한·브리프 몫·3일 캐시는 trend_age가 지킴). 없으면 `age_reason`. `top_age_band`는 인사이트와 같은 규칙(`trend_age.top_band`: 오른 연령대 중 배수가 큰 것, 없으면 배수가 큰 것) |
 | 숏츠 적합도 `shorts_fit` | 하위 주제를 공유 분류기로 분류 → 숏츠 통계 그 분류 조회 중앙값 ÷ 전체 숏츠 중앙값(`ShortsStatsOutput.median_views`). 표본 < `min_samples`(5)면 불확실, ≥ `high_ratio`(1.2)면 높음, ≤ `low_ratio`(0.8)면 낮음, 사이면 불확실 |
 | 잘 되는 형식 `formats` | 그 분류 숏츠의 형식별 수(기타·미분류 제외, 최대 3) + 전체 숏츠 통계의 그 형식 중앙값 |
 | 목표 참고값 | 하위 주제 카드: 그 하위 주제 숏츠 조회 중앙값(표본 5개 이상). **5개 미만이면 None + "표본 부족"**(분류·전체 중앙값으로 채우지 않음). 씨앗 키워드 카드: 그 분류 숏츠 조회 중앙값(표본 기준 이상), 아니면 전체 중앙값. 기준 문장 `target_reference_basis` |
@@ -987,6 +988,7 @@ YouTube 숏츠를 카테고리별·형식별로 센다. 숫자는 코드, 분류
 2. 표본
    - 최신 YouTube 인기 스냅샷의 숏츠. 2026-11-03에는 인기 목록에 60초 이하 영상이 없었다(0개)
    - **표본 넓히기**: 인기 스냅샷에 많이 나온 YouTube 카테고리(데이터에서 고름) 순으로 짧은 영상 검색(`search.list`, `videoDuration=short`, `regionCode=KR`, 최근 `search_days`(7)일, 조회수 순, 50개)을 **하루 1번**, 상한 `search_calls`(8번, 검색 1번 = 100단위). 결과는 `backend/.data/shorts.db`(`DATA_SHORTS_DB`)에 남겨 같은 날은 다시 부르지 않는다. 검색 실패는 그 카테고리만 unknown + 이유, 할당량 초과면 남은 검색은 하지 않고 unknown
+   - **하위 주제 숏츠 합치기**: 하위 주제 넓히기(`domain_subtopics`, #587)가 씨앗마다 이미 검색해 `subtopics.db`(`DATA_SUBTOPICS_DB`, 없으면 shorts.db와 같은 폴더)에 남긴 숏츠 중 보관 기간(`[subtopics] cache_days`, 7일) 안의 것을 표본에 더한다. 추가 검색은 없고, 같은 영상은 한 번만 센다(인기·검색 숏츠가 먼저). 검색 숏츠처럼 다시 조회(videos.list)해 시간당 조회·채널 id를 채운다. 더한 수는 `subtopic_shorts`. 교육·책처럼 인기·검색 표본에 거의 없던 카테고리를 채우려는 것이다
    - **한국 숏츠만**(`[shorts] language = "ko"`): `regionCode=KR`은 "한국에서 볼 수 있는 영상"이라 해외 영상이 대부분이었다(2026-11-03 검색 97개 중 한국 숏츠 몇 개). 그래서 검색에 `relevanceLanguage=ko`를 더하고, 인기·검색 숏츠 모두 **영상 언어(`defaultAudioLanguage`·`defaultLanguage`)가 한국어이거나 제목·채널 이름에 한글이 있는 것만** 남긴다. 뺀 수는 `foreign_excluded`. 언어 조건을 바꾸면 같은 날도 다시 검색한다
 3. 분류(LLM, 묶어서 최대 20개씩, 저장해 재사용): 카테고리는 주제 분류기(`classify_topics`, 제목 + 태그), 형식은 **챌린지·상황극·스케치·리액션·정보·팁·비포애프터·브이로그·밈 패러디·기타**에서 하나(목록 밖은 기타, 실패는 unknown). 형식은 `shorts.db`에 `retention_days`(30)일 남긴다
 4. 계산(코드): 카테고리별·형식별 숏츠 수, 평균 조회수, 평균 시간당 조회 증가(잰 수 `velocity_videos`), 조회수 상위 3개(제목·채널·조회수). **표본이 `min_sample`(5)개 미만이면 unknown + "표본 부족"**

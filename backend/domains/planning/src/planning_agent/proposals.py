@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -403,6 +404,7 @@ def from_brief(out: TrendInsightBriefOutput) -> list[ReceiveInsightInput]:
 
 # 성과 근거의 구분 (#646). 화면이 `source`로 나눠 보여 준다. 같은 주문이 겹칠 수 있어 더하지 않는다
 EFFECT_PRODUCTS = "campaign_effect · 상품 기준"
+EFFECT_ATTRIBUTION = "campaign_effect · 유입 기준"  # 캠페인 링크로 들어온 주문 (#648, 직접 귀속)
 EFFECT_COUPON = "campaign_effect · 쿠폰 귀속"
 EFFECT_STORE = "campaign_effect · 가게 전체"
 
@@ -435,7 +437,8 @@ def effect_result(out: CampaignEffectOutput) -> tuple[str, str, list[InsightFact
     """campaign_effect 응답 → (방향, 요약, 성과 근거). 숫자는 응답 값을 옮겨 적기만 한다.
 
     방향은 상품 기준(`products_effect`)을 쓴다. 상품을 보내지 않은 옛 제안만 가게 전체 주문으로
-    본다. 근거는 상품 기준 · 쿠폰 귀속 · 가게 전체로 `source`를 나눠 적는다."""
+    본다. 유입 기준은 기준선 없는 직접 귀속이라 방향에 쓰지 않는다.
+    근거는 상품 기준 · 유입 기준 · 쿠폰 귀속 · 가게 전체로 `source`를 나눠 적는다."""
     facts: list[InsightFact] = []
 
     def add(label: str, value: str | None, source: str) -> None:
@@ -458,6 +461,7 @@ def effect_result(out: CampaignEffectOutput) -> tuple[str, str, list[InsightFact
         )
         if o.status != "known":
             direction = "확인 불가"
+    _attribution(out, add)
     c = out.coupons
     if c.status == "known" and c.use_rate is not None:
         add("캠페인 쿠폰 사용률", f"{c.use_rate * 100:.0f}%", EFFECT_COUPON)
@@ -470,7 +474,25 @@ def effect_result(out: CampaignEffectOutput) -> tuple[str, str, list[InsightFact
         add("가게 전체 주문 증분", f"{o.excess:+.0f}건 (기대 {o.expected:.0f}건)", EFFECT_STORE)
     if s is not None and s.status == "known" and s.incremental_gross_krw is not None:
         add("가게 전체 판매액 증분", f"{s.incremental_gross_krw:+,}원", EFFECT_STORE)
-    return direction, out.summary[:200], facts[:12]
+    return direction, out.summary[:200], facts[:16]
+
+
+def _attribution(out: CampaignEffectOutput, add: Callable[[str, str | None, str], None]) -> None:
+    """유입 기준 근거: 캠페인 링크(`src_campaign`)로 들어온 결제 완료 주문, 출처별, 관련 상품."""
+    a = out.attribution_effect
+    if a is None:
+        return
+    if a.status != "known":
+        add("유입 기준 확인 불가", a.unknown_reason or "이유 없음", EFFECT_ATTRIBUTION)
+        return
+    add("캠페인 링크로 온 주문", f"{a.orders:,}건 · {a.gross_krw:,}원", EFFECT_ATTRIBUTION)
+    for row in a.by_source[:3]:
+        add(f"출처 {row.source}", f"{row.orders:,}건 · {row.gross_krw:,}원", EFFECT_ATTRIBUTION)
+    ap = out.attribution_and_products
+    if ap is not None and ap.status == "known":
+        add("그중 관련 상품 주문", f"{ap.orders:,}건 · {ap.gross_krw:,}원", EFFECT_ATTRIBUTION)
+    if a.tagged_share is not None:
+        add("유입 표시가 있는 주문 비율", f"{a.tagged_share * 100:.0f}%", EFFECT_ATTRIBUTION)
 
 
 class MarketingBrief:

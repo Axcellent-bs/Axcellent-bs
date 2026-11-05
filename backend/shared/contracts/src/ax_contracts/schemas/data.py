@@ -639,6 +639,9 @@ class VideoLink(AxModel):
     ad_usable: bool | None = None
     caution_types: list[CautionType] = Field(default_factory=list)
     caution_reason: str | None = None
+    # 아래는 예전 응답은 없다. 저장된 응답의 제목과 조회수 (없으면 None)
+    title: str | None = None
+    views: int | None = Field(default=None, ge=0)
 
 
 class YouTubeTagEvidence(AxModel):
@@ -906,6 +909,9 @@ TopicCategory = Literal[
     "unknown",
     "IT",  # 값 추가 (IT·기기·서비스)
     "K-pop·음악",  # 값 추가 (음악·아이돌·커버·안무, 연예·스포츠에서 나눔)
+    "유머",  # 값 추가 (예능·코미디·상황극 클립, 연예·스포츠·기타에서 나눔)
+    "드라마",  # 값 추가 (드라마 클립·리뷰)
+    "교양",  # 값 추가 (다큐·강연·지식·역사)
 ]
 # 추천 묶음: product_linked = 회사 상품과 연결된 소재, general = 일반 화제
 RecommendGroup = Literal["product_linked", "general"]
@@ -1411,6 +1417,96 @@ class ShortsStatsOutput(AxModel):
     median_views_count: int = Field(default=0, ge=0)
     limitation: str = ""  # 한계 (이미 뜬 영상끼리의 비교 등)
     summary: str = ""
+    # 아래는 예전 응답은 없다. 하위 주제 검색(domain_subtopics)으로 이미 모은 숏츠 중
+    # 표본에 더한 수 (같은 영상은 한 번만, 추가 검색 없음)
+    subtopic_shorts: int = Field(default=0, ge=0)
+
+
+# --------------------------------------------------------------- video_explorer (영상 탐색)
+# 카테고리 × 기간(올린 시각 기준 1일·3일·7일) × 길이(숏 = 60초 이하, 롱 = 그 초과)마다 영상 목록.
+# 영상 풀(저장된 인기 차트·추적·숏츠 표본·검색 결과에서 올린 지 7일 이내)에서 먼저 찾고, 칸이
+# 최소 수보다 적으면 검색으로 보충한다(하루 상한). 수집기가 미리 계산하고 화면 요청은 읽기만.
+# 정렬은 코드. 없는 값(좋아요 숨김 등)은 None + 이유.
+
+ExplorerPeriod = Literal["1d", "3d", "7d"]
+ExplorerLength = Literal["short", "long"]
+ExplorerSort = Literal["views", "views_per_subscriber", "likes"]
+
+
+class VideoExplorerRequest(AxModel):
+    category: TopicCategory | None = None  # 없으면 설정의 카테고리 전부
+    period: ExplorerPeriod = "7d"
+    length: ExplorerLength = "short"
+    sort: ExplorerSort = "views"
+
+
+class ExplorerVideo(AxModel):
+    video_id: str = Field(min_length=1)
+    title: str | None = None
+    channel_title: str | None = None
+    channel_id: str | None = None
+    thumbnail_url: str | None = None
+    video_url: str | None = None
+    duration_seconds: int | None = Field(default=None, ge=0)
+    published_at: UtcDatetime | None = None  # 올린 시각 (publishedAt)
+    views: int | None = Field(default=None, ge=0)
+    views_reason: str | None = None
+    likes: int | None = Field(default=None, ge=0)
+    likes_reason: str | None = None  # 좋아요 숨김 등
+    channel_subscribers: int | None = Field(default=None, ge=0)
+    views_per_subscriber: float | None = Field(default=None, ge=0)  # 구독자 대비 배수
+    subscriber_reason: str | None = None
+    category: TopicCategory | None = None
+    ad_usable: bool | None = None
+    caution_types: list[CautionType] = Field(default_factory=list)
+    caution_reason: str | None = None
+    # 어디서 왔는지: chart = 인기 차트, tracked = 추적, shorts = 숏츠 표본, subtopic = 하위 주제
+    # 검색, search = 이 skill의 보충 검색
+    source: str | None = None
+    at: UtcDatetime | None = None  # 조회수·좋아요를 읽은 시각
+
+
+class ExplorerCell(AxModel):
+    """카테고리 하나 × 기간 하나 × 길이 하나의 영상 목록."""
+
+    category: str
+    period: ExplorerPeriod
+    length: ExplorerLength
+    count: int = Field(default=0, ge=0)
+    shortage_reason: str | None = None  # 최소 수보다 적으면 이유 (예: 이 기간 한국 영상 N개)
+    videos: list[ExplorerVideo] = Field(default_factory=list)
+
+
+class ExplorerSearch(AxModel):
+    """보충 검색 하나 (카테고리 × 길이 × 구간)."""
+
+    category: str
+    length: ExplorerLength
+    window: Literal["7d", "1d"]
+    status: Literal["known", "unknown", "skipped"]
+    query: str | None = None  # 검색어 (그 카테고리 지금 인기 주제 이름, 교육·책은 도메인 씨앗)
+    found: int = Field(default=0, ge=0)  # 길이·한국 영상 기준을 통과한 수
+    reason: str | None = None  # unknown·skipped면 이유 (검색 상한·할당량 초과 등)
+    day: dt.date | None = None  # 검색한 한국 날짜
+
+
+class VideoExplorerOutput(AxModel):
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = None
+    category: TopicCategory | None = None  # 요청 값 그대로
+    period: ExplorerPeriod = "7d"
+    length: ExplorerLength = "short"
+    sort: ExplorerSort = "views"
+    categories: list[str] = Field(default_factory=list)  # 설정의 카테고리 (화면 순서)
+    min_per_cell: int = Field(default=10, ge=0)
+    cells: list[ExplorerCell] = Field(default_factory=list)  # 요청 조건의 칸 (정렬된 영상)
+    computed_at: UtcDatetime | None = None  # 수집기가 미리 계산한 시각
+    searches: list[ExplorerSearch] = Field(default_factory=list)  # 오늘 보충 검색
+    searches_today: int = Field(default=0, ge=0)
+    search_cap: int = Field(default=0, ge=0)  # 하루 검색 상한 (설정)
+    quota_used_today: int = Field(default=0, ge=0)  # 이 skill이 오늘 쓴 YouTube 할당량 (단위)
+    limits: list[str] = Field(default_factory=list)
+    summary: str = ""
 
 
 # --------------------------------------------------------------- campaign_effect (캠페인 효과)
@@ -1803,6 +1899,27 @@ class InsightProduct(AxModel):
     season: str | None = None  # 이 상품 쪽 시즌 근거 (기획안 시즌 확인, 없으면 None)
 
 
+EvidenceHighlightSource = Literal["naver_search", "naver_shopping", "youtube", "google"]
+
+
+class EvidenceHighlight(AxModel):
+    """근거 요약 하나 (코드가 facts 중 센 것을 고름, LLM 안 씀).
+
+    평소 값이 없는 근거(Google 순위·숏츠 조회수 등)는 baseline_value·ratio가 None이고 값만 있다.
+    """
+
+    source: EvidenceHighlightSource
+    label: str  # 무엇을 잰 값인지 (facts의 label)
+    value: float  # 지금 값
+    unit: str
+    baseline_value: float | None = None  # 평소 값 (기준선)
+    ratio: float | None = Field(default=None, ge=0)  # 지금 ÷ 평소
+    period: str | None = None  # 기간 (예: 지난 8주 기준, 스냅샷 시각)
+    sample: int | None = Field(default=None, ge=0)  # 표본 (날 수·영상 수)
+    sentence: str  # 템플릿 문장 하나 (예: 네이버 검색이 평소의 1.42배예요 (지난 8주 기준))
+    fact_id: str | None = None  # 고른 숫자의 facts id
+
+
 class TrendInsight(AxModel):
     insight_id: str = Field(min_length=1)  # 날짜 + 주제 기반 (같은 날 같은 주제면 같은 id)
     rank: int = Field(ge=1)
@@ -1870,6 +1987,10 @@ class TrendInsight(AxModel):
     top_age_band: str | None = None
     top_age_band_ratio: float | None = Field(default=None, ge=0)
     top_age_band_reason: str | None = None
+    # 아래는 예전 응답은 없다. 근거 요약 (평소 대비 배수가 큰 순, 최대 3개)과
+    # 근거 숏츠 (썸네일·제목·조회수, 최대 3개)
+    evidence_highlights: list[EvidenceHighlight] = Field(default_factory=list, max_length=3)
+    evidence_shorts: list[VideoLink] = Field(default_factory=list, max_length=3)
 
 
 # ------------------------------------------------ 기회 가설 카드 (trend_insight_brief 선택 칸)
@@ -1948,6 +2069,9 @@ class DomainOpportunity(AxModel):
     top_age_band: str | None = None
     top_age_band_ratio: float | None = Field(default=None, ge=0)
     top_age_band_reason: str | None = None
+    # 아래는 예전 응답은 없다. TrendInsight와 같은 뜻 (근거 요약·근거 숏츠, 각각 최대 3개)
+    evidence_highlights: list[EvidenceHighlight] = Field(default_factory=list, max_length=3)
+    evidence_shorts: list[VideoLink] = Field(default_factory=list, max_length=3)
 
 
 class TrendInsightBriefOutput(AxModel):

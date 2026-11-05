@@ -265,6 +265,11 @@ def _band_trend(name: str, codes: Sequence[str], verdict: Any) -> AgeBandTrend:
     )
 
 
+def top_band(bands: Sequence[AgeBandTrend]) -> tuple[str | None, float | None]:
+    """가장 오른 연령대와 배수 (인사이트·기회 카드 공통 규칙). 배수를 아는 연령대가 없으면 None."""
+    return _top(bands)
+
+
 def _top(bands: Sequence[AgeBandTrend]) -> tuple[str | None, float | None]:
     known = [b for b in bands if b.ratio is not None]
     pool = [b for b in known if b.status == "rising"] or known
