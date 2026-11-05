@@ -32,7 +32,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ValidationError
 
@@ -42,12 +42,14 @@ from ax_contracts.schemas.data import (
     AGE_NOTE,
     AgeTopic,
     BorrowFormat,
+    DomainOpportunity,
     InsightEvidence,
     InsightProduct,
     PopularTopic,
     PromoConceptsOutput,
     ShortsFit,
     ShortsStatsOutput,
+    TopicCategory,
     TrendInsight,
     TrendInsightBriefOutput,
     TrendInsightBriefRequest,
@@ -118,6 +120,10 @@ class BriefConfig:
     company_pool: int = 4  # 회사 관련 후보로 연령대까지 볼 키워드 수 (시즌 배율 큰 순)
     company_min_season_ratio: float = 1.3  # 작년 같은 달·다음 달 ÷ 기간 평균이 이 이상
     company_min_age_ratio: float = 1.3  # 또는 어느 연령대 평소 대비 배수가 이 이상
+    # 브리프 몫: 회사 연결(direct·domain)은 최소 이만큼 (모자라면 기회 카드 하위 주제로 채움),
+    # 연결 없음(none, 분류 대기 포함)은 최대 이만큼
+    domain_min: int = 3
+    none_max: int = 2
 
 
 def load_config(env: Mapping[str, str]) -> BriefConfig:
@@ -138,6 +144,8 @@ def load_config(env: Mapping[str, str]) -> BriefConfig:
         values["per_category_max"] = max(1, int(values["per_category_max"]))
         values["company_topics"] = max(0, min(2, int(values["company_topics"])))
         values["company_pool"] = max(0, int(values["company_pool"]))
+        values["domain_min"] = max(0, min(7, int(values["domain_min"])))
+        values["none_max"] = max(0, min(7, int(values["none_max"])))
         return BriefConfig(**values)
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return BriefConfig()
@@ -918,6 +926,110 @@ def mark_format(
     return [f"형식 빌리기 0개: 예시 아이디어가 고른 트렌드 {trends}", *why]
 
 
+CARD_MATERIAL = "회사 도메인 하위 주제 (광고 재료가 아닌 하위 주제는 기회 카드에서 이미 뺌)"
+
+
+def card_insight(
+    card: DomainOpportunity, *, day: date, tenant: str, promo: PromoConceptsOutput | None
+) -> TrendInsight:
+    """기회 카드(도메인 하위 주제) → 브리프 인사이트. 숫자는 카드 값 그대로 (새로 재지 않음)."""
+    naver = next(
+        (e for e in card.search_interest
+         if e.source_id == "naver_search_trend" and e.status == "known"),
+        None,
+    )  # fmt: skip
+    ev = InsightEvidence(
+        naver_ratio=naver.value if naver else None,
+        naver_until=naver.period_end if naver else None,
+        video_links=list(card.video_links),
+        links=[v.video_url for v in card.video_links if v.video_url],
+        missing=[
+            f"{e.label}: {e.reason}"
+            for e in [*card.search_interest, *card.consumption]
+            if e.status != "known" and e.reason
+        ],
+    )
+    fit = card.shorts_fit
+    cat = fit.category if fit is not None else None
+    fmt = card.formats[0] if card.formats else None
+    ideas = [x.title for x in (promo.concepts if promo else [])
+             if _norm(x.borrowed_trend) == _norm(card.subtopic)]  # fmt: skip
+    band = card.top_age_band
+    return TrendInsight(
+        insight_id=stable_insight_id(tenant, card.subtopic),
+        legacy_insight_ids=[insight_id(day, card.subtopic)],
+        rank=1, topic=card.subtopic, line=card.line, line_status=card.line_status,
+        line_reason=card.line_reason,
+        category=cat if cat in get_args(TopicCategory) else None,  # type: ignore[arg-type]
+        ad_material=True, ad_material_reason=CARD_MATERIAL, reference_only=False,
+        evidence=ev, age_bands=list(card.age_bands),
+        target_age=band, target_age_ratio=card.top_age_band_ratio,
+        target_age_status=next((b.status for b in card.age_bands if b.band == band), None),
+        target_age_reason=card.top_age_band_reason,
+        top_age_band=band, top_age_band_ratio=card.top_age_band_ratio,
+        top_age_band_reason=card.top_age_band_reason,
+        shorts_fit=fit, shorts_fit_status="known" if fit is not None else "unknown",
+        shorts_fit_reason=None if fit is not None else "숏츠 통계 없음",
+        target_views_reference=card.target_views_reference,
+        target_reference_basis=card.target_reference_basis,
+        products=list(card.products), products_reason=card.products_reason,
+        company_related=True,
+        company_reason=f"도메인 하위 주제 '{card.subtopic}' (기회 카드 {card.opportunity_id})",
+        company_relevance=card.company_relevance or "domain",
+        company_relevance_reason=(
+            f"기회 카드 하위 주제, 연결 상품 {len(card.products)}개" if card.products
+            else "기회 카드 하위 주제 (도메인 프로필에서 나옴)"
+        ),  # fmt: skip
+        shorts_format=fmt.name if fmt else None,
+        shorts_format_samples=fmt.count if fmt else None,
+        shorts_format_median_views=fmt.median_views if fmt else None,
+        shorts_format_reason=None if fmt else "이 하위 주제의 잘 되는 숏츠 형식이 없음",
+        limits=[BRIEF_LIMITS[0], *card.limits],
+        example_ideas=[f"{t} ({REFERENCE})" for t in ideas],
+        score=card.score,
+    )  # fmt: skip
+
+
+def linked(i: TrendInsight) -> bool:
+    return i.company_relevance in ("direct", "domain")
+
+
+def fill_quota(
+    insights: Sequence[TrendInsight], cards: Sequence[TrendInsight], config: BriefConfig, n: int
+) -> tuple[list[TrendInsight], list[str]]:
+    """브리프 몫: 회사 연결(direct·domain) 먼저 최소 `domain_min`개(모자라면 기회 카드로),
+    형식 빌리기(format), 연결 없음(none)은 최대 `none_max`개. 모두 n개 안.
+    분류 대기는 예전처럼 n개 밖 맨 아래 참고용(`pending_max`로 이미 골라 옴).
+
+    (고른 인사이트, 한계 문장)."""
+
+    def order(i: TrendInsight) -> tuple[Any, ...]:
+        return (i.classification_pending, RELEVANCE_ORDER.get(i.company_relevance or "none", 2),
+                i.reference_only, i.company_related, -i.score)  # fmt: skip
+
+    pending = [i for i in insights if i.classification_pending]
+    ready = [i for i in insights if not i.classification_pending]
+    taken = {_norm(x) for i in ready if linked(i) for x in [i.topic, *i.aliases]}
+    extra = [c for c in cards if _norm(c.topic) not in taken]
+    domain = sorted([i for i in ready if linked(i)], key=order) + extra
+    fmt = sorted([i for i in ready if i.company_relevance == "format"], key=order)
+    rest = sorted([i for i in ready if not linked(i) and i.company_relevance != "format"],
+                  key=order)  # fmt: skip
+    none = rest[: config.none_max]
+    want = max(min(config.domain_min, n), n - len(fmt) - len(none))
+    d = domain[:want]
+    f = fmt[: max(0, n - len(d))]
+    none = none[: max(0, n - len(d) - len(f))]
+    notes: list[str] = []
+    if len(d) < config.domain_min:
+        notes.append(f"회사 연결 인사이트 {len(d)}개: 최소 몫 {config.domain_min}개에 모자람"
+                     f" (기회 카드 {len(extra)}개)")  # fmt: skip
+    cut = [i.topic for i in rest[len(none) :]]
+    if cut:
+        notes.append(f"연결 없는 주제는 최대 {config.none_max}개라 뺌: " + ", ".join(cut))
+    return [*d, *f, *none, *pending], notes
+
+
 def company_reason(c: Candidate) -> str | None:
     if not c.company:
         return None
@@ -1186,6 +1298,13 @@ async def make_brief(
             )
         # 형식 빌리기: 참고용 중 예시 아이디어에서 회사 상품과 이어진 유행 (0개면 왜 0개인지)
         out.limits += mark_format(out.insights, promo, warned)
+        # 몫: 회사 연결 먼저 최소 몫(모자라면 기회 카드 하위 주제), 연결 없음은 최대 몫 안에서만
+        tenant = tenant_of(env)
+        from_cards = [card_insight(c, day=day, tenant=tenant, promo=promo)
+                      for c in out.opportunities]  # fmt: skip
+        out.insights, notes = fill_quota(out.insights, from_cards, config, n)
+        out.limits += notes
+        card_ids = {id(i): c.fact_ids for i, c in zip(from_cards, out.opportunities, strict=True)}
         # 순서: 회사 상품·도메인(direct·domain) → 형식 빌리기(format) → 참고용(none)
         out.insights.sort(key=lambda i: (
             i.classification_pending, RELEVANCE_ORDER.get(i.company_relevance or "none", 2),
@@ -1195,7 +1314,8 @@ async def make_brief(
         out.summary = summary(out)
         for i in out.insights:  # 응답에 나오는 숫자 전부 (인사이트는 fact_ids로 가리킴)
             mine = insight_facts(i)
-            i.fact_ids = [f.fact_id for f in mine]
+            # 기회 카드에서 온 인사이트는 한 줄이 카드 숫자를 쓰므로 카드 facts도 가리킨다
+            i.fact_ids = [f.fact_id for f in mine] + card_ids.get(id(i), [])
             out.facts += mine
             # 근거 요약 (facts 중 센 것 최대 3개, 템플릿 문장)과 근거 숏츠 최대 3개
             pick_rule = hl.Rule(config.highlight_min_sample, config.highlight_max_ratio)

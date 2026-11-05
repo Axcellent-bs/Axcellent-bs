@@ -122,10 +122,14 @@ def _ages(seen: list[list[str]], fail: bool = False):  # noqa: ANN202
     return fn
 
 
-def _env(tmp_path: Path, extra: str = "") -> dict[str, str]:
+def _env(tmp_path: Path, extra: str = "", none_max: int = 7) -> dict[str, str]:
+    """기본은 연결 없는 주제 최대 몫을 열어 둔다 (그 칸을 보는 테스트). 몫 테스트는 none_max=2."""
     tmp_path.mkdir(parents=True, exist_ok=True)
     cfg = tmp_path / "trends.toml"
-    cfg.write_text("[brief]\nmax_insights = 3\n" + extra, encoding="utf-8")
+    # extra에 같은 키가 있으면 기본 줄을 쓰지 않는다 (TOML은 같은 키 두 번이면 읽기 실패)
+    base = {"max_insights": "3", "none_max": str(none_max)}
+    lines = [f"{k} = {v}\n" for k, v in base.items() if f"{k} =" not in extra]
+    cfg.write_text("[brief]\n" + "".join(lines) + extra, encoding="utf-8")
     return {"DATA_TREND_CONFIG": str(cfg), "DATA_INSIGHT_BRIEF_DB": str(tmp_path / "brief.db")}
 
 
@@ -665,3 +669,87 @@ def test_relevance_rules() -> None:
     assert brief.relevance(ins("고양이 그림책 추천"), ["고양이 그림책"])[0] == "domain"
     assert brief.relevance(ins("골프"), ["고양이 그림책", "책"])[0] == "none"
     assert brief.relevance(ins("골프"), ["골"])[0] == "none"  # 한 글자 키워드는 안 본다
+
+
+# ------------------------------------------------ 브리프 몫 (회사 연결 먼저, 연결 없음 최대)
+
+
+def _card(subtopic: str, score: float, **kw: Any):  # noqa: ANN202
+    from ax_contracts.schemas.data import (
+        DomainOpportunity,
+        InsightProduct,
+        OpportunityEvidence,
+        OpportunityFormat,
+    )
+    from data_agent.skills.brief_facts import card_facts
+
+    naver = OpportunityEvidence(source_id="naver_search_trend", kind="search_interest",
+                                status="known", label="네이버 검색 평소 대비 배수", value=1.4,
+                                unit="배", period_start=date(2026, 9, 10),
+                                period_end=date(2026, 11, 3), samples=56)  # fmt: skip
+    products = kw.pop("products", [])
+    card = DomainOpportunity(
+        opportunity_id=f"opp_{subtopic}", subtopic=subtopic, line=f"{subtopic} 검색 1.4배",
+        line_status="llm", search_interest=[naver], score=score,
+        formats=[OpportunityFormat(name="리뷰", count=12, median_views=8000.0)],
+        products=[InsightProduct(product_id=p, name="파이썬 입문서", reason="r") for p in products],
+        company_relevance="direct" if products else "domain", **kw,
+    )  # fmt: skip
+    rows = card_facts(card)
+    card.fact_ids = [r.fact_id for r in rows]
+    return card, rows
+
+
+def _quota_run(tmp_path: Path, cards: list, extra: str = "", none_max: int = 2):  # noqa: ANN001, ANN202
+    from data_agent.skills.domain_opportunity import OpportunityResult
+
+    async def opps():  # noqa: ANN202
+        return OpportunityResult([c for c, _ in cards], None, "plan_1", [],
+                                 facts=[r for _, rows in cards for r in rows])  # fmt: skip
+
+    return asyncio.run(
+        brief.make_brief(
+            TrendInsightBriefRequest(), BriefLLM(cats={}),
+            env=_env(tmp_path, "max_insights = 5\n" + extra, none_max=none_max), popular=POPULAR,
+            popular_reason=None, rising=[], age_fn=_ages([]), promo=None, catalog=CATALOG,
+            now=NOW, opportunities_fn=opps,
+        )
+    ).output  # fmt: skip
+
+
+def test_domain_cards_come_first_with_a_minimum_and_none_is_capped(tmp_path: Path) -> None:
+    """오늘 인기 주제가 모두 연결 없음(none)이어도 기회 카드 하위 주제가 브리프 인사이트로."""
+    cards = [_card("책추천", 4.0, products=["p2"]), _card("니체 철학", 3.0),
+             _card("파이썬기초", 2.0), _card("코딩입문", 1.0)]  # fmt: skip
+    out = _quota_run(tmp_path, cards)
+    rel = [(i.topic, i.company_relevance) for i in out.insights]
+    assert rel[:3] == [("책추천", "direct"), ("니체 철학", "domain"), ("파이썬기초", "domain")]
+    assert [r for _, r in rel[3:]] == ["none", "none"] and len(rel) == 5  # none은 최대 2개
+    cut = next(x for x in out.limits if x.startswith("연결 없는 주제는 최대 2개라 뺌: "))
+    assert cut.count(",") == 0  # 인기 주제 3개 중 1개만 뺐다
+    book = out.insights[0]
+    assert book.rank == 1 and not book.reference_only and book.ad_material is True
+    assert book.company_related and "기회 카드 opp_책추천" in (book.company_reason or "")
+    assert book.insight_id == brief.stable_insight_id("default", "책추천")
+    assert book.evidence.naver_ratio == 1.4 and book.shorts_format == "리뷰"
+    assert [p.product_id for p in book.products] == ["p2"]
+    assert book.line == "책추천 검색 1.4배" and book.line_status == "llm"  # 카드 한 줄 그대로
+    by_id = {f.fact_id for f in out.facts}
+    assert set(cards[0][0].fact_ids) <= set(book.fact_ids) <= by_id  # 카드 숫자도 가리킨다
+    assert not any("최소 몫" in x for x in out.limits)
+
+
+def test_quota_settings_and_short_domain_say_why(tmp_path: Path) -> None:
+    none_only = _quota_run(tmp_path / "a", [])  # 카드 0개: none 2개만, 모자란 이유
+    assert [i.company_relevance for i in none_only.insights] == ["none", "none"]
+    assert "회사 연결 인사이트 0개: 최소 몫 3개에 모자람 (기회 카드 0개)" in none_only.limits
+    cards = [_card("책추천", 4.0), _card("니체 철학", 3.0), _card("코딩입문", 1.0)]
+    # 회사 설정: 최소 1개여도 연결 없음 2개 뒤 남는 자리는 카드로 채운다 (n=5, 카드 3개)
+    out = _quota_run(tmp_path / "b", cards, "domain_min = 1\n")
+    assert [i.topic for i in out.insights] == ["책추천", "니체 철학", "코딩입문", "리그오브레전드",
+                                               "한국철강"]  # fmt: skip
+    # 연결 없음 0개: 카드 3개만 (none으로 채우지 않는다)
+    only = _quota_run(tmp_path / "d", cards, "domain_min = 1\n", none_max=0)
+    assert [i.topic for i in only.insights] == ["책추천", "니체 철학", "코딩입문"]
+    zero = brief.load_config(_env(tmp_path / "c", "domain_min = 9\n", none_max=-1))
+    assert (zero.domain_min, zero.none_max) == (7, 0)
