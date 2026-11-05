@@ -36,5 +36,3 @@
 - 실행: `uv run --package ax-svc-inquiry uvicorn svc_inquiry.main:app --port 8102` (backend/ 에서, 목 모드 `AGENT_TEMPLATE_MOCK=1`)
 - 다른 에이전트가 `support`로 불러도 위 skill이면 이 서비스로 온다 (`route_target`).
 - 이 폴더는 `scripts/split_services.py`가 만든다. 손으로 고치지 말고 대응표를 고친다.
-
-개인정보 삭제 skill 3개(`preview_data_purge`·`purge_customer_data`·`purge_expired_inquiries`)는 문의를 가진 이 서비스에 둔다(저장소가 프로세스마다 따로라서). 자세한 것은 `domains/support/README.md`의 "개인정보 삭제" 절.
