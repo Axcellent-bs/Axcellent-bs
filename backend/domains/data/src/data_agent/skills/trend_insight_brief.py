@@ -1370,6 +1370,11 @@ async def make_brief(
         out.limits += [x for x in age_limits if x not in out.limits]
         if promo is None:
             out.limits.append("오늘 만든 예시 아이디어가 없어 example_ideas가 비어 있다")
+        # 게시 영상 성과(video_performance)는 쌓는 중: 점수에는 아직 넣지 않고 수만 보인다
+        from data_agent.skills.video_performance import counted_videos
+
+        videos = counted_videos(env)
+        out.limits.append(f"성과 데이터 쌓는 중(영상 {videos}개, 브리프 점수에는 아직 안 넣음)")
         if not rising_company:
             out.limits.append(
                 "회사 관련 인사이트 없음: 시즌 키워드·상품 핵심어 중 기준(시즌 배율"

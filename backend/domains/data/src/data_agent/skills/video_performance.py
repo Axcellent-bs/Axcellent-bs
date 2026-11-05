@@ -18,6 +18,7 @@ import hashlib
 import json
 import re
 import sqlite3
+import statistics
 import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ from ax_contracts.schemas.data import (
     TrendInsight,
     VideoCheckpoint,
     VideoCheckpointName,
+    VideoPerformanceGroup,
     VideoPerformanceOutput,
     VideoPerformanceRequest,
     VideoPlatform,
@@ -431,7 +433,12 @@ def _target_of(env: Mapping[str, str], insight_id: str | None) -> tuple[TrendIns
     return found, f"인사이트 '{found.topic}' ({insight_id}): {found.target_reference_basis}"
 
 
-def _done(out: VideoPerformanceOutput, queries: list[str], now: datetime) -> PerformanceResult:
+def _done(
+    out: VideoPerformanceOutput, queries: list[str], now: datetime, store: VideoStore,
+    env: Mapping[str, str],
+) -> PerformanceResult:  # fmt: skip
+    """결과 마무리: 성과 모으기 표(시험 영상 제외)를 같이 준다."""
+    out.performance_table = performance_table(store, env, now)
     return PerformanceResult(out, Evidence(queries=queries, data_summary=out.summary,
                                            collected_at=now))  # fmt: skip
 
@@ -457,7 +464,7 @@ async def video_performance(
         video = await _register(request, youtube, store, env, now, out, queries)
         if video is None:
             out.summary = f"영상 성과 없음: {out.reason}"
-            return _done(out, queries, now)
+            return _done(out, queries, now, store, env)
         out.platform, out.video_id, out.video_url = video.platform, video.video_id, video.video_url
         out.campaign_id = out.campaign_id or video.campaign_id
         out.insight_id = out.insight_id or video.insight_id
@@ -468,7 +475,7 @@ async def video_performance(
             out.needs = list(NEEDS[video.platform])
             out.checkpoints = [VideoCheckpoint(checkpoint=c, reason=WAITING) for c in CHECKPOINTS]
             out.summary = f"영상 성과 없음: {out.reason}"
-            return _done(out, queries, now)
+            return _done(out, queries, now, store, env)
         out.tracking = True
         n, problems = await measure_due(store, youtube, now)
         if n:
@@ -497,7 +504,7 @@ async def video_performance(
         out.summary = (
             f"{last.checkpoint} 조회 {last.views}회" if last else f"영상 성과 {out.reason}"
         )
-        return _done(out, queries, now)
+        return _done(out, queries, now, store, env)
     finally:
         if own:
             store.close()
@@ -546,6 +553,44 @@ async def _register(
                 out.limits.append("YouTube 응답에 이 영상이 없음 (지워짐·비공개)")
     store.upsert(video)
     return store.find(key=key)
+
+
+# ---------------------------------------------------------------- 성과 모으기 (표만)
+
+
+def performance_table(
+    store: VideoStore, env: Mapping[str, str], now: datetime
+) -> list[VideoPerformanceGroup]:
+    """인사이트·형식·카테고리별 영상 성과 (목표 대비 배수, 영상마다 가장 늦게 잰 시점).
+
+    시험 영상은 뺀다.
+
+    브리프 점수에는 넣지 않는다 (쌓는 중). 목표 참고값이 없는 영상은 videos에만 센다.
+    """
+    groups: dict[tuple[str, str], tuple[int, list[float]]] = {}
+    targets: dict[str, float | None] = {}
+    for v in store.videos(include_test=False):
+        ratio: float | None = None
+        if v.insight_id and v.published_at is not None:
+            if v.insight_id not in targets:
+                found = find_insight(env, v.insight_id)
+                targets[v.insight_id] = found.target_views_reference if found else None
+            known = [c for c in checkpoints_of(v, store.points(v.key), now,
+                                               targets[v.insight_id], None)
+                     if c.target_ratio is not None]  # fmt: skip
+            ratio = known[-1].target_ratio if known else None
+        for key, value in (("insight", v.insight_id), ("format", v.shorts_format),
+                           ("category", v.category)):  # fmt: skip
+            if not value:
+                continue
+            count, ratios = groups.get((key, value), (0, []))
+            groups[(key, value)] = (count + 1, [*ratios, *([ratio] if ratio is not None else [])])
+    return [
+        VideoPerformanceGroup(key=key, value=value, videos=count, measured=len(ratios),
+                              median_target_ratio=round(statistics.median(ratios), 3)
+                              if ratios else None)  # fmt: skip
+        for (key, value), (count, ratios) in sorted(groups.items())
+    ]
 
 
 def counted_videos(env: Mapping[str, str]) -> int:
