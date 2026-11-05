@@ -109,9 +109,9 @@ const OLD_STAGE_TAB: Record<string, TrendTab["key"]> = { video: "handoff", campa
 /** 트렌드 하위 탭 주소: `/data/trend#<key>` */
 export const trendTabHash = (t: TrendTab) => `#${t.key}`;
 
-/** 주소 해시로 탭 찾기. 없거나 모르는 값이면 감지. 옛 주소(#trend/<단계>)도 알아본다 */
+/** 주소 해시로 탭 찾기. 없거나 모르는 값이면 감지. 옛 주소(#trend/<단계>)도 알아본다. `?` 뒤(감지 탭의 고른 조건)는 탭과 무관 */
 export function trendTabFromHash(hash: string): TrendTab {
-  const raw = hash.replace(/^#(trend\/)?/, "");
+  const raw = hash.replace(/^#(trend\/)?/, "").split("?")[0];
   const key = OLD_STAGE_TAB[raw] ?? raw;
   return TREND_TABS.find((t) => t.key === key || t.stages.includes(key)) ?? TREND_TABS[0];
 }
