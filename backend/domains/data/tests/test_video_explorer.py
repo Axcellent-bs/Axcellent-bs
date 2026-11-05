@@ -206,6 +206,74 @@ def test_short_cells_are_filled_with_older_shorts_samples_marked(tmp_path: Path)
     assert not any(v.before_period for v in game.videos)  # 채울 카테고리가 아님
 
 
+class ChartYouTube(FakeYouTube):
+    def __init__(self) -> None:
+        super().__init__()
+        self.charts: list[str] = []
+
+    async def popular_category(self, category_id, region="KR"):  # noqa: ANN001, ANN201
+        from data_agent.connectors import ConnectorUnavailable
+
+        self.quota_used += 1
+        self.charts.append(category_id)
+        if category_id == "99":
+            raise ConnectorUnavailable("NOT_FOUND", "이 카테고리 차트 없음")
+        return [_v(f"c{category_id}_{n}", f"웃긴 차트 영상 {n}", 30, days=0.5, views=9000 + n)
+                for n in range(4)]  # fmt: skip
+
+
+def test_category_charts_are_fetched_hourly_and_reclassified(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    config = Path(env["DATA_TREND_CONFIG"])
+    config.write_text(config.read_text(encoding="utf-8").replace(
+        "max_videos = 5\n", 'max_videos = 5\n\n[explorer.chart]\n"유머" = ["23", "99"]\n'),
+        encoding="utf-8")  # fmt: skip
+    assert ve.load_config(env).chart == (("유머", ("23", "99")),)
+    yt = ChartYouTube()
+    store = ve.ExplorerStore(tmp_path / "explorer.db")
+    cache = CategoryCache(tmp_path / "topics.db", now=lambda: NOW)
+    first = asyncio.run(ve.compute(env, youtube=yt, llm=FakeLLM(), store=store, cache=cache,
+                                   terms=_terms, now=NOW))  # fmt: skip
+    assert yt.charts == ["23", "99"]
+    assert any("99 [NOT_FOUND]" in x for x in first["limits"])  # 실패한 카테고리는 이유만
+    day = ve.view(store.result(), VideoExplorerRequest(category="유머", period="1d"),
+                  env=env, store=store, now=NOW)[0].cells[0]  # fmt: skip
+    assert {v.video_id for v in day.videos} >= {"c23_0", "c23_1", "c23_2"}  # 우리 분류기로 유머
+    assert all(v.source == "chart_cat" for v in day.videos if v.video_id.startswith("c23"))
+    asyncio.run(ve.compute(env, youtube=yt, llm=FakeLLM(), store=store, cache=cache,
+                           terms=_terms, now=NOW + timedelta(minutes=30)))  # fmt: skip
+    assert yt.charts == ["23", "99"]  # 50분 안이면 다시 받지 않음
+    asyncio.run(ve.compute(env, youtube=yt, llm=FakeLLM(), store=store, cache=cache,
+                           terms=_terms, now=NOW + timedelta(minutes=61)))  # fmt: skip
+    assert yt.charts == ["23", "99", "23", "99"]
+
+
+def test_three_day_cells_are_searched_once_a_day_when_short(tmp_path: Path) -> None:
+    """7일 검색 뒤에도 3일·1일 칸이 모자라면 그 구간(publishedAfter 3일·1일)으로 하루 1번."""
+    class OlderResults(FakeYouTube):  # 검색 결과가 5일 전 영상이라 7일 검색으로 1·3일 칸이 안 참
+        async def search_recent(self, published_after, **kw):  # noqa: ANN001, ANN003, ANN201
+            got = await super().search_recent(published_after, **kw)
+            return [VideoStat(**{**v.__dict__, "published_at": NOW - timedelta(days=5)})
+                    for v in got]  # fmt: skip
+
+    env = _env(tmp_path)
+    config = Path(env["DATA_TREND_CONFIG"])
+    config.write_text(config.read_text(encoding="utf-8").replace(
+        "daily_searches = 3", "daily_searches = 20"), encoding="utf-8")  # fmt: skip
+    yt2 = OlderResults()
+    store2 = ve.ExplorerStore(tmp_path / "explorer2.db")
+    cache = CategoryCache(tmp_path / "topics2.db", now=lambda: NOW)
+    asyncio.run(ve.compute(env, youtube=yt2, llm=FakeLLM(), store=store2, cache=cache,
+                           terms=_terms, now=NOW))  # fmt: skip
+    windows = sorted({(NOW - s["after"]).days for s in yt2.searches})
+    assert windows == [1, 3, 7]
+    done = store2.searched(ve._day(NOW))
+    assert all(sum(k == (c, ln, w) for k in done) <= 1 for c, ln, w in done)  # 칸마다 하루 1번
+    asyncio.run(ve.compute(env, youtube=yt2, llm=FakeLLM(), store=store2, cache=cache,
+                           terms=_terms, now=NOW + timedelta(hours=2)))  # fmt: skip
+    assert len({(NOW - s["after"]).days for s in yt2.searches}) == 3  # 같은 날 다시 안 함
+
+
 def test_screen_request_reads_stored_result_only(tmp_path: Path) -> None:
     store = ve.ExplorerStore(tmp_path / "explorer.db")
     empty = _view(tmp_path, store)

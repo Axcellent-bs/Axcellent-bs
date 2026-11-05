@@ -165,6 +165,16 @@ classify_daily = 300     # 하루에 새로 분류할 영상 수. 분류 대기�
 max_videos = 30          # 응답 칸마다 주는 영상 수
 seed_categories = ["교육·책"]
 backfill_categories = ["교육·책"]   # 숏 칸이 모자라면 7일 이전 숏츠 표본(최근 것부터)으로 채움, 화면 "7일 이전"
+# 카테고리별 인기 차트 (수집기 1시간마다 미리 계산할 때, videos.list chart=mostPopular regionCode=KR, id마다 1단위).
+# 대응표: 화면 카테고리 → 그 내용이 주로 올라가는 YouTube 카테고리 (YouTube 카테고리는 고르는 데만 쓰고 칸은 우리 분류기로)
+#   게임 → 20 Gaming / 유머 → 23 Comedy·24 Entertainment(예능 클립) / 드라마 → 24 Entertainment·1 Film & Animation
+#   (드라마 클립·리뷰) / 교양 → 27 Education·28 Science & Technology(지식·과학) / 교육·책 → 27 Education
+[explorer.chart]
+"게임" = "20"
+"유머" = ["23", "24"]
+"드라마" = ["24", "1"]
+"교양" = ["27", "28"]
+"교육·책" = "27"
 
 # 광고·홍보 숏츠 기획안 초안(data promo_concepts): 재료(상품 카탈로그·인기 숏츠 형식·지금 인기 게임·연예·스포츠·IT·
 # 카탈로그 시즌·회사 이벤트)는 코드가 모으고 LLM은 정해진 스키마로 초안 문장만 쓴다. 시즌은 카탈로그 카테고리 이름과

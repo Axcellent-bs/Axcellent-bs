@@ -263,6 +263,14 @@ class YouTubeConnector:
                 break
         return out
 
+    async def popular_category(self, category_id: str, region: str = "KR") -> list[VideoStat]:
+        """YouTube 카테고리 하나의 인기 차트 첫 쪽 (videos.list chart=mostPopular, 50개·1단위)."""
+        params = {"part": "snippet,statistics,contentDetails", "chart": "mostPopular",
+                  "regionCode": region, "videoCategoryId": category_id,
+                  "maxResults": PAGE_SIZE}  # fmt: skip
+        page = _parse(_VideoPage, await self._get("videos", params), "카테고리 인기 목록")
+        return [_stat(v, rank=n) for n, v in enumerate(page.items, start=1)]
+
     async def videos(self, ids: Sequence[str]) -> list[VideoStat]:
         """영상 id 목록의 지금 값. 응답에 없는 영상(지워짐·비공개)은 결과에도 없다."""
         unique = list(dict.fromkeys(i for i in ids if i))
