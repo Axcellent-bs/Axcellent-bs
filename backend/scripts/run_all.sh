@@ -153,6 +153,9 @@ export AX_COMMON_LOG_DB="$PWD/$DATA/common_log.db"
 export DATA_REPORT_DB="$PWD/$DATA/data_reports.db"
 # data: 트렌드 감지 탭 계산 결과 (수집기가 새 스냅샷 직후 미리 계산해 넣고, 화면은 읽기만. 다시 켜도 남음)
 export DATA_TREND_RESPONSES_DB="$PWD/$DATA/trend_responses.db"
+# data: 설명 문장 캐시·네이버 하루 캐시(응답·호출 수)도 파일에 (다시 켜도 LLM·네이버를 다시 안 부름)
+export DATA_EXPLAIN_DB="$PWD/$DATA/explain_cache.db"
+export DATA_NAVER_CACHE_DB="$PWD/$DATA/naver_cache.db"
 
 # 업무 요청 라우터 (README "업무 요청 라우터"): 켠 서비스면 에이전트로, 안 켠 서비스면 사람 할 일함으로
 # 켠 서비스는 backend/.env 의 AX_ENABLED_SERVICES (쉼표 목록). 없거나 비어 있으면 전부 켠다(예전 동작)

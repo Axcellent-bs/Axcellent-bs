@@ -1,4 +1,4 @@
-"""트렌드 감지 탭 미리 계산: 수집기가 계산해 SQLite에 넣고, 화면은 읽기만. 결과 숫자는 그대로여야 한다.
+"""트렌드 감지 탭 미리 계산: 수집기가 계산해 SQLite에 넣고 화면은 읽기만. 숫자는 그대로여야 한다.
 
 - 바꾸기 전(그 자리에서 계산)과 후(미리 계산해 저장한 것을 읽음)의 응답이 같다 (세 skill)
 - 미리 계산한 뒤 화면 요청은 계산하지 않는다. 새 스냅샷이 들어오면 다시 계산한다
@@ -156,3 +156,26 @@ def test_recent_snapshots_look_back_48_hours_from_the_last(
     assert len(recent_snapshots(db, 5)) == 3  # 100시간 전 것은 보지 않는다
     monkeypatch.setenv("DATA_TREND_LOOKBACK_HOURS", "200")
     assert len(recent_snapshots(db, 5)) == 4
+
+
+def test_explain_and_naver_caches_survive_restart(tmp_path: Path) -> None:
+    from datetime import date
+
+    from data_agent.connectors.naver_datalab import DailyCache, TrendResponse, TrendSeries
+    from data_agent.explain import ExplainCache, Explanation
+
+    path = tmp_path / "explain.db"
+    ExplainCache(path=path).put("p", Explanation("급상승 1개입니다.", False))
+    assert ExplainCache(path=path).get("p") == Explanation("급상승 1개입니다.", False)
+    assert ExplainCache(path=path).get("q") is None
+
+    day = date(2026, 11, 5)
+    value = TrendResponse(day, day, "date", (TrendSeries("고양이", ("고양이",), ((day, 1.5),)),))
+    naver = tmp_path / "naver.db"
+    first = DailyCache(today=lambda: day, path=naver)
+    first.put("k", value)
+    first.count_call(10)
+    again = DailyCache(today=lambda: day, path=naver)  # 다시 켬
+    assert again.get("k") == value and again.calls == 1
+    tomorrow = DailyCache(today=lambda: date(2026, 11, 6), path=naver)
+    assert tomorrow.get("k") is None and tomorrow.calls == 0

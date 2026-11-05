@@ -75,7 +75,7 @@ from data_agent.clients.shop_client import (
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.naver_datalab import NaverDatalabConnector
 from data_agent.connectors.youtube import YouTubeConnector
-from data_agent.explain import ExplainCache
+from data_agent.explain import EXPLAIN_DB_ENV, ExplainCache
 from data_agent.planning_questions import answer_question
 from data_agent.report_store import ReportStore, get_report_store
 from data_agent.response_cache import DB_ENV as RESPONSES_DB_ENV
@@ -883,7 +883,7 @@ async def source_plan(request: AgentRequest) -> AgentResult:
 _category_cache: topic_category.CategoryCache | None = None
 # 트렌드 감지 탭 계산 결과 저장(`DATA_TREND_RESPONSES_DB` SQLite, 없으면 메모리)과 설명 문장 캐시
 RESPONSES = ResponseCache(os.environ.get(RESPONSES_DB_ENV) or None)
-EXPLAINED = ExplainCache()
+EXPLAINED = ExplainCache(path=os.environ.get(EXPLAIN_DB_ENV) or None)
 
 
 def get_category_cache() -> topic_category.CategoryCache:

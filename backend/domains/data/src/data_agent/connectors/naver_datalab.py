@@ -19,11 +19,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import sqlite3
+import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -99,27 +103,98 @@ class _Body(BaseModel):
 # ---------------------------------------------------------------- 캐시·호출 수
 
 
-class DailyCache:
-    """같은 요청은 한국 날짜가 같은 동안 다시 부르지 않는다. 하루 호출 수도 센다."""
+CACHE_DB_ENV = "DATA_NAVER_CACHE_DB"
 
-    def __init__(self, today: Callable[[], date] | None = None) -> None:
+
+def _dump(value: TrendResponse) -> str:
+    return json.dumps(
+        {
+            "start": value.start_date.isoformat(), "end": value.end_date.isoformat(),
+            "unit": value.time_unit,
+            "series": [[s.group_name, list(s.keywords), [[d.isoformat(), v] for d, v in s.points]]
+                       for s in value.series],
+        },
+        ensure_ascii=False,
+    )  # fmt: skip
+
+
+def _load(raw: str) -> TrendResponse:
+    body = json.loads(raw)
+    return TrendResponse(
+        date.fromisoformat(body["start"]), date.fromisoformat(body["end"]), body["unit"],
+        tuple(TrendSeries(name, tuple(kws), tuple((date.fromisoformat(d), v) for d, v in pts))
+              for name, kws, pts in body["series"]),
+    )  # fmt: skip
+
+
+class DailyCache:
+    """같은 요청은 한국 날짜가 같은 동안 다시 부르지 않는다. 하루 호출 수도 센다.
+
+    `path`가 있으면 SQLite에 둬 서버를 다시 켜도 그날 응답·호출 수가 남는다(한도도 이어서 센다).
+    없으면 프로세스 메모리. 지난 날 것은 날짜가 바뀌면 지운다.
+    """
+
+    def __init__(
+        self, today: Callable[[], date] | None = None, path: str | Path | None = None
+    ) -> None:
         self._today = today or (lambda: datetime.now(UTC).astimezone(KST).date())
         self._day: date | None = None
         self._hits: dict[str, TrendResponse] = {}
         self.calls = 0
+        self._lock = threading.Lock()
+        self._conn: sqlite3.Connection | None = None
+        if path is not None:
+            if str(path) != ":memory:":
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(str(path), check_same_thread=False, timeout=5.0)
+            with self._lock, self._conn:
+                self._conn.executescript(
+                    "CREATE TABLE IF NOT EXISTS hits (day TEXT NOT NULL, key TEXT NOT NULL,"
+                    " value TEXT NOT NULL, PRIMARY KEY (day, key));"
+                    "CREATE TABLE IF NOT EXISTS calls (day TEXT PRIMARY KEY, n INTEGER NOT NULL);"
+                )
 
     def _roll(self) -> None:
         today = self._today()
-        if today != self._day:
-            self._day, self._hits, self.calls = today, {}, 0
+        if today == self._day:
+            return
+        self._day, self._hits, self.calls = today, {}, 0
+        if self._conn is None:
+            return
+        day = today.isoformat()
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM hits WHERE day < ?", (day,))
+            self._conn.execute("DELETE FROM calls WHERE day < ?", (day,))
+            row = self._conn.execute("SELECT n FROM calls WHERE day = ?", (day,)).fetchone()
+        self.calls = int(row[0]) if row else 0
+
+    @staticmethod
+    def _hash(key: str) -> str:
+        return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
     def get(self, key: str) -> TrendResponse | None:
         self._roll()
-        return self._hits.get(key)
+        if (hit := self._hits.get(key)) is not None or self._conn is None or self._day is None:
+            return hit
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM hits WHERE day = ? AND key = ?",
+                (self._day.isoformat(), self._hash(key)),
+            ).fetchone()
+        if row is None:
+            return None
+        self._hits[key] = value = _load(row[0])
+        return value
 
     def put(self, key: str, value: TrendResponse) -> None:
         self._roll()
         self._hits[key] = value
+        if self._conn is not None and self._day is not None:
+            with self._lock, self._conn:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO hits VALUES (?,?,?)",
+                    (self._day.isoformat(), self._hash(key), _dump(value)),
+                )
 
     def count_call(self, limit: int) -> None:
         """호출 하나를 센다. 한도에 닿았으면 부르지 않고 `RATE_LIMITED`."""
@@ -130,12 +205,22 @@ class DailyCache:
                 f"네이버 검색어 트렌드 하루 호출 한도({limit}회)에 닿아 부르지 않았다",
             )
         self.calls += 1
+        if self._conn is not None and self._day is not None:
+            with self._lock, self._conn:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO calls VALUES (?,?)", (self._day.isoformat(), self.calls)
+                )
 
     def clear(self) -> None:
         self._day, self._hits, self.calls = None, {}, 0
+        if self._conn is not None:
+            with self._lock, self._conn:
+                self._conn.execute("DELETE FROM hits")
+                self._conn.execute("DELETE FROM calls")
 
 
-_cache = DailyCache()  # 요청마다 커넥터를 새로 만들어도 캐시·호출 수는 이어진다
+# 요청마다 커넥터를 새로 만들어도 캐시·호출 수는 이어진다 (`DATA_NAVER_CACHE_DB`면 다시 켜도)
+_cache = DailyCache(path=os.environ.get(CACHE_DB_ENV) or None)
 
 
 def clear_cache() -> None:
