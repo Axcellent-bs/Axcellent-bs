@@ -26,7 +26,7 @@ from data_agent.youtube_store import Row, SnapshotStore, recent_snapshots
 NOW = datetime.now(UTC).replace(microsecond=0)
 VIDEOS = [("v1", 1, ("t1", "lck"), 1000, 3000), ("v2", 2, ("t1",), 1000, 2000),
           ("v3", 3, ("lck", "롤"), 500, 600)]  # fmt: skip
-SKILLS = ("trend_popular", "youtube_velocity", "shorts_stats")
+SKILLS = ("trend_candidates", "trend_popular", "youtube_velocity", "shorts_stats")
 # 계산한 시각이 들어가는 칸 (같은 데이터라도 부를 때마다 다르다)
 CLOCK_FIELDS = {"collected_at", "generated_at", "measured_at", "computed_at"}
 
@@ -90,7 +90,7 @@ def _strip(value: object) -> object:
 
 def _count_compute(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     calls: list[str] = []
-    for name in ("popular", "run_shorts_stats", "measure_velocity_named"):
+    for name in ("popular", "run_shorts_stats", "measure_velocity_named", "find_candidates"):
         real = getattr(handlers, name)
 
         async def counted(*a, _real=real, _name=name, **k):  # noqa: ANN002, ANN003, ANN202
@@ -110,7 +110,9 @@ def test_precomputed_responses_equal_computed_ones(
     # 바꾼 뒤: 수집기가 미리 계산 → 화면은 저장분을 읽기만
     stored = ResponseCache(env["DATA_TREND_RESPONSES_DB"])
     monkeypatch.setattr(handlers, "RESPONSES", stored)
-    assert asyncio.run(trend_precompute.precompute(lambda _: None)) == []
+    problems = asyncio.run(trend_precompute.precompute(lambda _: None))
+    # trend_scan은 저장하지 않고 판정판·캐시만 채운다 (테스트엔 네이버 키가 없어 unknown)
+    assert problems == ["trend_scan: unknown"]
     calls = _count_compute(monkeypatch)
     after = {s: _call(s) for s in SKILLS}
     assert calls == []  # 화면 요청은 계산하지 않았다
@@ -179,3 +181,17 @@ def test_explain_and_naver_caches_survive_restart(tmp_path: Path) -> None:
     assert again.get("k") == value and again.calls == 1
     tomorrow = DailyCache(today=lambda: date(2026, 11, 6), path=naver)
     assert tomorrow.get("k") is None and tomorrow.calls == 0
+
+
+def test_board_sees_verdicts_written_by_another_process(tmp_path: Path) -> None:
+    from datetime import date
+
+    from ax_contracts.schemas.data import TrendEvidence, TrendVerdict
+
+    path = tmp_path / "board.db"
+    server = TodayBoard(today=lambda: date(2026, 11, 5), path=path)
+    collector = TodayBoard(today=lambda: date(2026, 11, 5), path=path)
+    before = server.stamp()
+    v = TrendVerdict(group_name="고양이", status="rising", ratio=2.0, evidence=TrendEvidence())
+    collector.record_verdict(["고양이"], v)  # 수집기의 미리 계산이 기록
+    assert server.verdict(["고양이"]) == v and server.stamp() == collector.stamp() != before

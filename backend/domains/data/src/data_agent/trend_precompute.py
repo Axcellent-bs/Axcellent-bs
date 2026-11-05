@@ -1,7 +1,8 @@
 """트렌드 감지 탭 미리 계산: 수집기가 새 스냅샷을 저장한 직후 부른다.
 
-지금 인기(trend_popular)·빨리 크는 영상(youtube_velocity)·숏츠 통계(shorts_stats)를
-화면과 같은 입력({})으로 계산해 `response_cache`에 넣는다. 화면 요청은 같은 키로 읽기만 한다.
+급상승 판정(trend_scan·trend_candidates)·지금 인기(trend_popular)·빨리 크는 영상(youtube_velocity)·
+숏츠 통계(shorts_stats)를 화면과 같은 입력({})으로 계산해 `response_cache`에 넣는다(trend_scan은
+판정판·네이버·설명 문장 캐시만 채운다). 화면 요청은 같은 키로 읽기만 한다.
 
 - 화면과 같은 핸들러를 그대로 부른다(계산 규칙이 하나). 서버와 같은 환경변수여야 같은 키가 된다
   (run_all.sh가 수집기를 서버와 같은 환경으로 켠다. 다르면 키가 달라 서버가 첫 요청에 계산한다)
@@ -20,7 +21,9 @@ from datetime import UTC, datetime, timedelta
 from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
 from data_agent.stage_timing import recording
 
-SKILLS = ("trend_popular", "youtube_velocity", "shorts_stats")
+# 판정(trend_scan·trend_candidates)을 먼저: 판정판에 오늘 판정을 남겨야
+# 지금 인기의 배지·키가 화면과 같다
+SKILLS = ("trend_scan", "trend_candidates", "trend_popular", "youtube_velocity", "shorts_stats")
 CONTEXT_ID = "ctx_trend_precompute"
 PASSES = 2
 
@@ -40,6 +43,8 @@ async def precompute(emit: Callable[[str], None] | None = None) -> list[str]:
     problems: list[str] = []
     BOARD.reload()
     run = {
+        "trend_scan": handlers.trend_scan,
+        "trend_candidates": handlers.trend_candidates,
         "trend_popular": handlers.trend_popular,
         "youtube_velocity": handlers.youtube_velocity,
         "shorts_stats": handlers.shorts_stats,

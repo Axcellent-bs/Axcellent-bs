@@ -433,14 +433,13 @@ async def trend_candidates(request: AgentRequest) -> AgentResult:
     data = _parse(request, TrendCandidatesRequest)
     if isinstance(data, AgentResult):
         return data
-    result = await find_candidates(data, get_trend_connector(), env=os.environ)
-    return _result(
-        request,
-        TaskStatus.COMPLETED,
-        outcome=result.output.status,
-        output=result.output.model_dump(mode="json"),
-        evidence=result.evidence,
-    )
+
+    # 수집기가 미리 계산해 둔 결과를 읽는다 (판정·묶음 기록은 계산할 때 판정판 파일에 이미 남았다)
+    async def compute() -> tuple[str, dict[str, Any], Evidence]:
+        result = await find_candidates(data, get_trend_connector(), env=os.environ)
+        return result.output.status, result.output.model_dump(mode="json"), result.evidence
+
+    return await _stored(request, "trend_candidates", data.model_dump(mode="json"), compute)
 
 
 async def _stored(

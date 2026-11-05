@@ -43,6 +43,7 @@ class TodayBoard:
         self._pairs: list[tuple[str, str]] = []
         self._lock = threading.Lock()
         self._conn: sqlite3.Connection | None = None
+        self._version: int | None = None
         if path is not None:
             if str(path) != ":memory:":
                 Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -53,9 +54,19 @@ class TodayBoard:
                     " key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (day, kind, key))"
                 )
 
+    def _changed_elsewhere(self) -> bool:
+        """다른 프로세스(수집기의 미리 계산)가 저장 파일에 쓴 뒤인지 (`PRAGMA data_version`)."""
+        if self._conn is None:
+            return False
+        with self._lock:
+            version = self._conn.execute("PRAGMA data_version").fetchone()[0]
+        changed = version != self._version
+        self._version = version
+        return changed
+
     def _roll(self) -> None:
         day = self.today()
-        if day == self._day:
+        if day == self._day and not self._changed_elsewhere():
             return
         self._day, self._verdicts, self._pairs = day, {}, []
         if self._conn is None:

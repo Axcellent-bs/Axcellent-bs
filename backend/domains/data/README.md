@@ -745,9 +745,11 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 
 ### 트렌드 감지 탭 속도 (미리 계산·저장)
 
-- **미리 계산**: 수집기(`youtube_collect`)가 새 스냅샷을 저장한 직후 `trend_precompute`가 지금 인기(`trend_popular`)·빨리 크는 영상(`youtube_velocity`)·숏츠 통계(`shorts_stats`)를 화면과 같은 입력으로 계산해 `DATA_TREND_RESPONSES_DB`(run_all.sh: `backend/.data/trend_responses.db`)에 넣는다. 화면 요청은 저장된 결과를 읽기만 한다. 저장된 것이 없을 때만(첫 실행·수집기 꺼짐) 지금 계산하고 넣는다. SQLite라 서버를 다시 켜도 남는다(환경변수가 없으면 메모리, 테스트)
+- **미리 계산**: 수집기(`youtube_collect`)가 새 스냅샷을 저장한 직후 `trend_precompute`가 급상승 판정(`trend_scan`: 판정판·네이버·설명 문장 캐시만 채움)·YouTube 후보(`trend_candidates`)·지금 인기(`trend_popular`)·빨리 크는 영상(`youtube_velocity`)·숏츠 통계(`shorts_stats`)를 화면과 같은 입력으로 계산해 `DATA_TREND_RESPONSES_DB`(run_all.sh: `backend/.data/trend_responses.db`)에 넣는다. 화면 요청은 저장된 결과를 읽기만 한다. 저장된 것이 없을 때만(첫 실행·수집기 꺼짐) 지금 계산하고 넣는다. SQLite라 서버를 다시 켜도 남는다(환경변수가 없으면 메모리, 테스트)
 - **키** = skill + 요청 + 데이터 도장 + 규칙 버전. 도장: 마지막 YouTube·인기 검색어 스냅샷 시각, 두 스냅샷이 "오래됨" 기준을 넘었는지, 숏츠 형식·주제 분류 저장분, 숏츠 다시 조회·오늘 검색 저장분, 오늘 판정판 내용, 한국 날짜, 설정 파일 내용, LLM 설정·YouTube 키가 있는지(값은 안 봄). 규칙 버전: `RULES_VERSION` + data_agent 코드 해시(코드가 바뀌면 예전 결과를 안 씀). 같은 키면 처음 계산한 응답 그대로(올린 뒤 지난 시간처럼 지금 시각으로 세는 칸도 처음 값)
 - 수집기와 서버의 환경변수가 다르면(예: 수집기를 손으로 켜 LLM 설정이 없음) 키가 달라 서버가 첫 요청에 계산한다. run_all.sh가 둘을 같은 환경으로 켠다
+- 판정판(`today_board`)은 다른 프로세스가 파일에 쓰면(`PRAGMA data_version`) 다시 읽는다. 수집기가 남긴 판정을 서버가 바로 보고 같은 키가 된다
+- 설명 문장 캐시(`DATA_EXPLAIN_DB`)·네이버 하루 캐시와 호출 수(`DATA_NAVER_CACHE_DB`)도 SQLite. 다시 켜도 그날 LLM·네이버를 다시 안 부른다
 - 수집기 중복 실행 잠금: DB 옆 `youtube_collect.lock` (잡혀 있으면 새로 켠 수집기는 바로 끝난다)
 - 최근 스냅샷(`recent_snapshots`, 지금 속도용)은 마지막 스냅샷에서 `DATA_TREND_LOOKBACK_HOURS`(기본 48)시간 안의 것만 본다. 늘 붙는 말 자동 제외(`popular_history`)는 여러 날 비율을 보므로 범위를 줄이지 않았다
 - 단계별 시간: 감지 탭 skill은 요청마다 `[timing] skill=… total_ms sqlite_ms external_ms llm_ms compute_ms cache=hit|stored`를 data 로그에 한 줄 남긴다(값·키는 안 남김). 미리 계산은 수집기 로그에 `skill=trend_popular@precompute1`처럼
