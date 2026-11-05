@@ -1,0 +1,93 @@
+{
+ "id": "other_product_up_2h_14h",
+ "kind": "none",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-10-14T14:00:00Z",
+  "window_to": "2026-10-14T16:00:00Z",
+  "products": [
+   "prd_0004"
+  ]
+ },
+ "spec": {
+  "id": "other_product_up_2h_14h",
+  "window": {
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T16:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "none"
+  },
+  "product_boost": {
+   "product_id": "prd_0005",
+   "factor": 3.0
+  }
+ },
+ "expected": {
+  "products": {
+   "matched": [
+    "prd_0004"
+   ],
+   "unmatched": [],
+   "status": "known",
+   "lift": 1.0,
+   "orders": "none",
+   "units": "none",
+   "gross": "none"
+  }
+ },
+ "counted": {
+  "actual": {
+   "orders": 16,
+   "units": 18,
+   "gross": 135000
+  },
+  "past_days": {
+   "1": {
+    "orders": 22,
+    "units": 30,
+    "gross": 225000
+   },
+   "2": {
+    "orders": 15,
+    "units": 19,
+    "gross": 142500
+   },
+   "3": {
+    "orders": 19,
+    "units": 27,
+    "gross": 202500
+   },
+   "4": {
+    "orders": 15,
+    "units": 15,
+    "gross": 112500
+   },
+   "5": {
+    "orders": 21,
+    "units": 24,
+    "gross": 180000
+   },
+   "6": {
+    "orders": 18,
+    "units": 21,
+    "gross": 157500
+   },
+   "7": {
+    "orders": 20,
+    "units": 28,
+    "gross": 210000
+   }
+  },
+  "orders_baseline": 18.5714,
+  "orders_excess": -2.5714,
+  "units_baseline": 23.4286,
+  "units_excess": -5.4286,
+  "gross_baseline": 175714.2857,
+  "gross_excess": -40714.2857
+ },
+ "memo": "다른 상품만 3배 → 요청 상품은 변화 없음이 정답"
+}

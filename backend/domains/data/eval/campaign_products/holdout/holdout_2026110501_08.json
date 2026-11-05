@@ -1,0 +1,107 @@
+{
+ "id": "holdout_2026110501_08",
+ "kind": "unknown",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-09-29T17:00:00Z",
+  "window_to": "2026-09-29T18:00:00Z",
+  "products": [
+   "prd_0001"
+  ]
+ },
+ "spec": {
+  "id": "holdout_2026110501_08",
+  "window": {
+   "from": "2026-09-29T17:00:00Z",
+   "to": "2026-09-29T18:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "order_drop",
+   "factor": 0.5,
+   "from": "2026-09-29T17:00:00Z",
+   "to": "2026-09-29T18:00:00Z"
+  },
+  "product_boost": {
+   "product_id": "prd_0001",
+   "factor": 3.0
+  },
+  "payment_gap": {
+   "days_ago": [
+    0
+   ]
+  }
+ },
+ "expected": {
+  "products": {
+   "matched": [
+    "prd_0001"
+   ],
+   "unmatched": [],
+   "status": "unknown",
+   "unknown_reason": "payment_gap"
+  }
+ },
+ "counted": {
+  "actual": {
+   "orders": 0,
+   "units": 0,
+   "gross": 0
+  },
+  "past_days": {
+   "1": {
+    "orders": 10,
+    "units": 11,
+    "gross": 198000
+   },
+   "2": {
+    "orders": 6,
+    "units": 7,
+    "gross": 126000
+   },
+   "3": {
+    "orders": 14,
+    "units": 17,
+    "gross": 306000
+   },
+   "4": {
+    "orders": 5,
+    "units": 6,
+    "gross": 108000
+   },
+   "5": {
+    "orders": 9,
+    "units": 11,
+    "gross": 198000
+   },
+   "6": {
+    "orders": 13,
+    "units": 14,
+    "gross": 252000
+   },
+   "7": {
+    "orders": 13,
+    "units": 15,
+    "gross": 270000
+   }
+  },
+  "orders_baseline": 10.0,
+  "orders_excess": -10.0,
+  "units_baseline": 11.5714,
+  "units_excess": -11.5714,
+  "gross_baseline": 208285.7143,
+  "gross_excess": -208285.7143
+ },
+ "memo": "",
+ "holdout": {
+  "seed": 2026110501,
+  "factor": 0.5,
+  "boost": 3.0,
+  "boosted_is_asked": true,
+  "gaps": [
+   0
+  ]
+ }
+}

@@ -1,0 +1,93 @@
+{
+ "id": "product_by_name_x3_2h_10h",
+ "kind": "up",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-10-14T10:00:00Z",
+  "window_to": "2026-10-14T12:00:00Z",
+  "products": [
+   " 소설 베스트  3종"
+  ]
+ },
+ "spec": {
+  "id": "product_by_name_x3_2h_10h",
+  "window": {
+   "from": "2026-10-14T10:00:00Z",
+   "to": "2026-10-14T12:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "none"
+  },
+  "product_boost": {
+   "product_id": "prd_0007",
+   "factor": 3.0
+  }
+ },
+ "expected": {
+  "products": {
+   "matched": [
+    "prd_0007"
+   ],
+   "unmatched": [],
+   "status": "known",
+   "lift": 3.0,
+   "orders": "up",
+   "units": "up",
+   "gross": "up"
+  }
+ },
+ "counted": {
+  "actual": {
+   "orders": 78,
+   "units": 98,
+   "gross": 3038000
+  },
+  "past_days": {
+   "1": {
+    "orders": 25,
+    "units": 31,
+    "gross": 961000
+   },
+   "2": {
+    "orders": 16,
+    "units": 20,
+    "gross": 620000
+   },
+   "3": {
+    "orders": 15,
+    "units": 18,
+    "gross": 558000
+   },
+   "4": {
+    "orders": 13,
+    "units": 18,
+    "gross": 558000
+   },
+   "5": {
+    "orders": 18,
+    "units": 24,
+    "gross": 744000
+   },
+   "6": {
+    "orders": 22,
+    "units": 31,
+    "gross": 961000
+   },
+   "7": {
+    "orders": 21,
+    "units": 22,
+    "gross": 682000
+   }
+  },
+  "orders_baseline": 18.5714,
+  "orders_excess": 59.4286,
+  "units_baseline": 23.4286,
+  "units_excess": 74.5714,
+  "gross_baseline": 726285.7143,
+  "gross_excess": 2311714.2857
+ },
+ "memo": "그 상품만 3배 (이름으로 요청, 공백이 달라도 같음)"
+}

@@ -1,0 +1,107 @@
+{
+ "id": "holdout_2026110501_01",
+ "kind": "unknown",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-10-12T18:00:00Z",
+  "window_to": "2026-10-12T20:00:00Z",
+  "products": [
+   "젤펜 12색"
+  ]
+ },
+ "spec": {
+  "id": "holdout_2026110501_01",
+  "window": {
+   "from": "2026-10-12T18:00:00Z",
+   "to": "2026-10-12T20:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "sale",
+   "factor": 1.5,
+   "from": "2026-10-12T18:00:00Z",
+   "to": "2026-10-12T20:00:00Z"
+  },
+  "product_boost": {
+   "product_id": "prd_0005",
+   "factor": 3.0
+  },
+  "payment_gap": {
+   "days_ago": [
+    0
+   ]
+  }
+ },
+ "expected": {
+  "products": {
+   "matched": [
+    "prd_0005"
+   ],
+   "unmatched": [],
+   "status": "unknown",
+   "unknown_reason": "payment_gap"
+  }
+ },
+ "counted": {
+  "actual": {
+   "orders": 0,
+   "units": 0,
+   "gross": 0
+  },
+  "past_days": {
+   "1": {
+    "orders": 15,
+    "units": 17,
+    "gross": 166600
+   },
+   "2": {
+    "orders": 26,
+    "units": 37,
+    "gross": 362600
+   },
+   "3": {
+    "orders": 23,
+    "units": 26,
+    "gross": 254800
+   },
+   "4": {
+    "orders": 24,
+    "units": 30,
+    "gross": 294000
+   },
+   "5": {
+    "orders": 16,
+    "units": 17,
+    "gross": 166600
+   },
+   "6": {
+    "orders": 18,
+    "units": 23,
+    "gross": 225400
+   },
+   "7": {
+    "orders": 17,
+    "units": 22,
+    "gross": 215600
+   }
+  },
+  "orders_baseline": 19.8571,
+  "orders_excess": -19.8571,
+  "units_baseline": 24.5714,
+  "units_excess": -24.5714,
+  "gross_baseline": 240800.0,
+  "gross_excess": -240800.0
+ },
+ "memo": "",
+ "holdout": {
+  "seed": 2026110501,
+  "factor": 1.5,
+  "boost": 3.0,
+  "boosted_is_asked": true,
+  "gaps": [
+   0
+  ]
+ }
+}
