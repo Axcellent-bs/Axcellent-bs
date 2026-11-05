@@ -17,7 +17,8 @@
       "grade": "read",
       "allowed_requesters": [
         "orchestrator",
-        "infra"
+        "infra",
+        "dev"
       ],
       "verifier": null,
       "priority": "required"
@@ -249,7 +250,8 @@
       "allowed_requesters": [
         "orchestrator",
         "marketing",
-        "dashboard-api"
+        "dashboard-api",
+        "planning"
       ],
       "verifier": null,
       "priority": "recommended",
