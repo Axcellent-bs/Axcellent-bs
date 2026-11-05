@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -171,6 +172,27 @@ def test_other_stores_are_refreshed_once_and_hidden_subscribers_say_so(tmp_path:
     _compute(tmp_path, yt, store, NOW + timedelta(hours=1))
     assert yt.refreshed == ["s1"]  # 다시 읽은 지 12시간 안이면 다시 읽지 않음
     assert out.quota_used_today == store.units(ve._day(NOW)) > 0
+
+
+def test_subtopic_and_shorts_samples_are_reread_first(tmp_path: Path) -> None:
+    """다시 읽기 하루 상한 안에서 하위 주제·숏츠 표본이 지금 인기 보충보다 먼저 (2026-11-05:
+    보충 영상 436개가 몫을 다 써서 교육·책 하위 주제 숏츠를 한 번도 못 읽었다)."""
+    import json as _json
+
+    from data_agent.skills.domain_subtopics import Short, SubtopicStore
+
+    env = _env(tmp_path)
+    sub = SubtopicStore(tmp_path / "subtopics.db")
+    sub.put("파이썬", NOW - timedelta(days=1), [Short("t1", "파이썬 기초", (), 10)])
+    sub.close()
+    conn = sqlite3.connect(env["DATA_POPULAR_VIDEOS_DB"])
+    conn.execute("CREATE TABLE fill (day TEXT, youtube_category TEXT, language TEXT, videos TEXT)")
+    conn.execute("INSERT INTO fill VALUES (?,?,?,?)", (NOW.date().isoformat(), "20", "ko",
+                 _json.dumps([{"video_id": "f1"}, {"video_id": "s1"}])))  # fmt: skip
+    conn.commit()
+    conn.close()
+    got = ve.other_ids(env, NOW)
+    assert got == [("t1", "subtopic"), ("s1", "shorts"), ("f1", "popular_fill")]
 
 
 def test_short_cells_are_filled_with_older_shorts_samples_marked(tmp_path: Path) -> None:

@@ -364,6 +364,12 @@ def other_ids(env: Mapping[str, str], now: datetime) -> list[tuple[str, str]]:
         finally:
             conn.close()
 
+    # 순서 = 다시 읽기 우선순위 (하루 상한 안에서 앞부터). 하위 주제·숏츠 표본이 먼저:
+    # 교육·책처럼 7일 안 영상이 적은 칸을 채우는 숏츠가 여기 있다 (7일 이전 채우기에 올린 시각 필요)
+    shorts = env.get(SHORTS_DB_ENV) or SHORTS_DEFAULT_DB
+    out += [(s.video_id, "subtopic") for s in pool_shorts(env, now, shorts)]
+    out += [(r[0], "shorts") for r in read(
+        shorts, "SELECT DISTINCT video_id FROM searched_videos WHERE day >= ?")]  # fmt: skip
     fill = env.get(FILL_DB_ENV) or FILL_DEFAULT_DB
     for (raw,) in read(fill, "SELECT videos FROM fill WHERE day >= ?"):
         try:
@@ -372,11 +378,8 @@ def other_ids(env: Mapping[str, str], now: datetime) -> list[tuple[str, str]]:
             continue
         out += [(r["video_id"], "popular_fill") for r in rows if isinstance(r, dict) and
                 r.get("video_id")]  # fmt: skip
-    shorts = env.get(SHORTS_DB_ENV) or SHORTS_DEFAULT_DB
-    out += [(r[0], "shorts") for r in read(
-        shorts, "SELECT DISTINCT video_id FROM searched_videos WHERE day >= ?")]  # fmt: skip
-    out += [(s.video_id, "subtopic") for s in pool_shorts(env, now, shorts)]
-    return list(dict.fromkeys(out))
+    seen: set[str] = set()  # 같은 영상은 앞(우선순위 높은) 출처로 한 번만
+    return [(v, s) for v, s in out if not (v in seen or seen.add(v))]
 
 
 # ---------------------------------------------------------------- 계산 (수집기)
