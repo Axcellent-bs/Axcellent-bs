@@ -962,7 +962,21 @@ export interface DataSource {
   docs_url: string;
   approved: boolean;
 }
-export interface DataSourcesOutput { sources: DataSource[]; checked_at: string | null; summary: string }
+/** 스냅샷 수집기 상태 (YouTube·인기 검색어). stalled면 warning에 "수집 멈춤: ..." */
+export interface CollectorStatus {
+  collector_id: string;
+  name: string;
+  running: boolean;
+  pid: number | null;
+  started_at: string | null;
+  last_collected_at: string | null;
+  max_age_hours: number;
+  stalled: boolean;
+  warning: string | null;
+  reason: string;
+}
+/** collectors는 예전 응답에 없다 */
+export interface DataSourcesOutput { sources: DataSource[]; checked_at: string | null; summary: string; collectors?: CollectorStatus[] }
 
 // ---------------------------------------------------------------- 수집 계획 (source_plan, #578)
 export interface PlanDropped { value: string; reason: string }
