@@ -46,6 +46,7 @@ from ax_contracts.schemas.data import (
     ShortsVideo,
 )
 from data_agent.connectors import ConnectorUnavailable
+from data_agent.llm_budget import no_llm
 from data_agent.skills.topic_category import CategoryCache, TopicInput, classify_topics
 from data_agent.skills.trend_scan import TREND_CONFIG_ENV
 from data_agent.skills.youtube_velocity import velocities
@@ -365,8 +366,8 @@ async def classify_formats(
             answer = await llm.structured(
                 _FORMAT_PROMPT, _Formats, untrusted=data, context_id=context_id
             )
-        except LLMNotConfiguredError:
-            out |= {s.video_id: (UNKNOWN, "LLM 설정이 없어 분류하지 못함") for s in batch}
+        except LLMNotConfiguredError as error:
+            out |= {s.video_id: (UNKNOWN, f"{no_llm(error)} 분류하지 못함") for s in batch}
             continue
         except (LLMFormatError, ValidationError):
             out |= {s.video_id: (UNKNOWN, "LLM 답 형식이 맞지 않아 분류하지 못함") for s in batch}

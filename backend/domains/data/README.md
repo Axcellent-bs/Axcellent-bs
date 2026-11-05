@@ -878,6 +878,8 @@ API 키는 AXcellent 공용으로 `backend/.env`에 한 번만 두고 고객사�
 
 **수집기 상태 `collectors`**: YouTube·인기 검색어 스냅샷 수집기마다 돌고 있는지(잠금 파일 `youtube_collect.lock`·`trending_collect.lock`의 pid, `collector_lock`), pid, 켜진 시각, 마지막 저장 스냅샷 시각을 준다. 돌고 있지 않거나 저장된 스냅샷이 없거나 마지막 수집이 `DATA_COLLECTOR_MAX_AGE_HOURS`(기본 2)시간보다 오래되면 `stalled` + "수집 멈춤: ..." 경고다. 수집기는 끝난 pid가 남긴 잠금을 지우고 다시 잡는다(로그 한 줄).
 
+**LLM 하루 상한 `llm_usage`** (`llm_budget.py`): data 부서 LLM 호출·토큰을 한국 날짜로 센다(HTTP 요청 한 번마다, 재시도·실패 포함, 서버·수집기가 같은 SQLite `DATA_LLM_BUDGET_DB`). 상한은 `DATA_LLM_DAILY_CALLS`(기본 200회)·`DATA_LLM_DAILY_TOKENS`(기본 400,000 토큰). 닿으면 LLM을 부르지 않고(`LLMDailyCapReached`) LLM 설정이 없을 때와 같은 대체 길로 간다: 설명 문장은 템플릿(`fallback_reason = llm_daily_cap`), 분류는 unknown, 한 줄은 고정 문장, 이유는 "LLM 하루 상한에 닿아 (오늘 호출 N/200회, 토큰 …)". 저장된 캐시(분류·설명 문장·브리프·미리 계산)는 그대로 쓴다. 출처 현황에 오늘 사용량/상한(`llm_usage`)을 준다.
+
 | 출처 id | 데이터 종류 | 업종 | 연령·성별 | 카테고리 | 한도 (공식 문서) | 키 | 공식 문서 |
 |---|---|---|---|---|---|---|---|
 | `youtube` | 시청 | 전체 | 없음 | API (`videoCategories.list`) | 하루 10,000 단위, search.list 100·videos.list 1 | `YOUTUBE_API_KEY` | [quota](https://developers.google.com/youtube/v3/getting-started#quota) |

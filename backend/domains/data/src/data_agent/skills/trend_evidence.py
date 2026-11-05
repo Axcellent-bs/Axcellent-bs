@@ -30,6 +30,7 @@ from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredErr
 from ax_contracts.schemas.data import PopularTopic, PopularVideo, TrendingNewsLink, TrendVerdict
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.explain import _bad_numbers
+from data_agent.llm_budget import no_llm
 from data_agent.youtube_store import SnapshotStore, StoredVideo, channel_subscribers
 
 _LABEL = re.compile(r"^\s*주제\s*\d+\s*")
@@ -305,8 +306,8 @@ async def why_lines(
     queries.append(f"llm trend why_lines topics={len(ask)}")
     try:
         answer = await llm.structured(WHY_PROMPT, _Why, untrusted=data, context_id=context_id)
-    except LLMNotConfiguredError:
-        return _all_fixed(ask, "LLM 설정이 없어 고정 문장")
+    except LLMNotConfiguredError as error:
+        return _all_fixed(ask, f"{no_llm(error)} 고정 문장")
     except (LLMFormatError, ValidationError):
         return _all_fixed(ask, "LLM 답 형식이 맞지 않아 고정 문장")
     except Exception as error:  # 호출 실패

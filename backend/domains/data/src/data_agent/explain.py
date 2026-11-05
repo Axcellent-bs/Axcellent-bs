@@ -30,6 +30,7 @@ from pydantic import BaseModel, ValidationError
 
 from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
 from data_agent import catalog
+from data_agent.llm_budget import LLMDailyCapReached
 
 # 1,234 / 1234 / 0.5 / 12.5 형태. 숫자 뒤의 퍼센트 기호와 이름·단위 꼬리("xx", "분")도 같이 본다.
 _NUMBER_RE = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?")
@@ -57,7 +58,8 @@ LLM_ERROR = "llm_error"
 FORMAT_ERROR = "format_error"
 NUMBER_INVALID = "number_invalid"
 PRODUCT_INVALID = "product_invalid"  # 아이디어 문장에 연결되지 않은 회사 상품
-FALLBACK_REASONS = (LLM_UNAVAILABLE, LLM_ERROR, FORMAT_ERROR, NUMBER_INVALID)
+LLM_DAILY_CAP = "llm_daily_cap"  # data LLM 하루 상한에 닿아 부르지 않음 (`llm_budget`)
+FALLBACK_REASONS = (LLM_UNAVAILABLE, LLM_ERROR, FORMAT_ERROR, NUMBER_INVALID, LLM_DAILY_CAP)
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,8 @@ class Explanation:
         if not self.fallback:
             return None
         line = f"설명 문장을 템플릿으로 대체함: {self.reason or 'unknown'}"
+        if self.reason == LLM_DAILY_CAP:
+            line += " (LLM 하루 상한)"
         if self.bad_numbers:
             line += " (계산에 없는 숫자: " + ", ".join(_show(n) for n in self.bad_numbers) + ")"
         return line
@@ -390,6 +394,8 @@ async def _explain(
     try:
         result = await llm.structured(prompt, _Summary)
         summary = result.summary.strip()
+    except LLMDailyCapReached:
+        return fallback(LLM_DAILY_CAP)
     except LLMNotConfiguredError:
         return fallback(LLM_UNAVAILABLE)
     except (LLMFormatError, ValidationError):
@@ -498,6 +504,8 @@ async def explain_idea(
         )
         result = await llm.structured(prompt, _Idea, untrusted=dict(names), context_id=context_id)
         idea = result.idea.strip()
+    except LLMDailyCapReached:
+        return fallback(LLM_DAILY_CAP)
     except LLMNotConfiguredError:
         return fallback(LLM_UNAVAILABLE)
     except (LLMFormatError, ValidationError):

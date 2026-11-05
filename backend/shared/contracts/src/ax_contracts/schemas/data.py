@@ -959,7 +959,8 @@ class ContentRecommendation(AxModel):
     idea: str  # 영상 아이디어 1~2문장 (LLM, 숫자 검증. 실패하면 고정 문장)
     format: ContentFormat  # 형식 제안
     fallback: bool  # 아이디어 문장을 고정 문장으로 바꿨는지
-    fallback_reason: str | None = None  # llm_unavailable·llm_error·format_error·number_invalid
+    # llm_unavailable·llm_error·format_error·number_invalid·llm_daily_cap(하루 상한)
+    fallback_reason: str | None = None
     # 소재가 나온 곳 (예전 응답은 없다): keyword_group = 회사 기본 키워드 그룹, 그 밖은 후보 출처
     origins: list[RecommendOrigin] = Field(default_factory=list)
     # 아래는 상품 연결 (예전 응답은 없다). 연결할 회사 실제 상품 (최대 N개, 회사 설정)
@@ -2027,6 +2028,20 @@ class DataSourcesOutput(AxModel):
     summary: str = ""
     # 아래는 예전 응답은 없다. 스냅샷 수집기 상태 (출처 현황에 같이 보인다)
     collectors: list[CollectorStatus] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. data 부서 LLM 오늘 사용량과 하루 상한
+    llm_usage: LlmDailyUsage | None = None
+
+
+class LlmDailyUsage(AxModel):
+    """data 부서 LLM 오늘(한국 날짜) 사용량과 하루 상한. 닿으면 LLM을 부르지 않는다."""
+
+    day: dt.date
+    calls: int = Field(ge=0)  # HTTP 요청 수 (재시도·실패 포함)
+    call_cap: int = Field(gt=0)
+    tokens: int = Field(ge=0)  # 입력 + 출력 토큰
+    token_cap: int = Field(gt=0)
+    reached: bool  # 상한에 닿아 지금은 LLM을 부르지 않음
+    note: str | None = None  # reached면 "LLM 하루 상한: …"
 
 
 # ------------------------------------------------ 수집 계획 (source_plan)
