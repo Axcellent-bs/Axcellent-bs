@@ -52,7 +52,15 @@ class LLMInputError(ValueError):
 
 
 class LLMResponseError(RuntimeError):
-    """다시 요청해도 응답이 스키마에 맞지 않거나 API가 오류를 돌려줬을 때."""
+    """다시 요청해도 응답이 스키마에 맞지 않거나 API가 오류를 돌려줬을 때.
+
+    API가 HTTP 오류를 돌려줬으면 `status_code`에 그 코드가 있다(호출하는 쪽이 429·503 같은
+    잠깐의 제한만 골라 다시 시도할 수 있게). 그 밖의 오류는 `None`이다.
+    """
+
+    def __init__(self, message: str = "", status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class LLMFormatError(LLMResponseError):
@@ -348,7 +356,8 @@ class LLMClient:
                     self.record_usage(context_id, model, 0, 0, False)
                     # 응답 본문에 요청 내용이 섞일 수 있어 상태 코드만 남긴다
                     raise LLMResponseError(
-                        f"LLM API가 {exc.response.status_code}를 돌려줬다"
+                        f"LLM API가 {exc.response.status_code}를 돌려줬다",
+                        status_code=exc.response.status_code,
                     ) from None
                 except httpx.HTTPError as exc:
                     self.record_usage(context_id, model, 0, 0, False)
