@@ -11,10 +11,10 @@
 | `receive_campaign_brief` | A |
 | `list_campaign_briefs` | read |
 | `get_campaign_brief` | read |
-| `send_chat_message` | read |
-| `list_chat_threads` | read |
-| `get_chat_thread` | read |
-| `close_chat_thread` | read |
+| `marketing_chat_send` | read |
+| `marketing_chat_list` | read |
+| `marketing_chat_get` | read |
+| `marketing_chat_close` | read |
 | `build_campaign_link` | read |
 | `issue_coupon` | A |
 | `draft_sns_post` | read |
