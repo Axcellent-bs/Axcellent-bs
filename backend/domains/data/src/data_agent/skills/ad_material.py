@@ -18,7 +18,9 @@ from pathlib import Path
 TREND_CONFIG_ENV = "DATA_TREND_CONFIG"  # trend_scan과 같은 이름 (회사 trends.toml)
 # 광고 재료에서 늘 빼는 주제 분류
 NEVER_TREND = frozenset({"뉴스·사건", "기부·재난", "정치·사회", "인물"})
-DEFAULT_ALLOWED: tuple[str, ...] = ("게임", "연예·스포츠", "K-pop·음악", "IT")
+DEFAULT_ALLOWED: tuple[str, ...] = (
+    "게임", "연예·스포츠", "K-pop·음악", "IT", "유머", "드라마", "교양",
+)  # fmt: skip
 DEFAULT_EXCLUDE: tuple[str, ...] = ("뉴스·사건", "정치·사회", "기부·재난", "인물")
 PENDING = "분류 대기"
 
