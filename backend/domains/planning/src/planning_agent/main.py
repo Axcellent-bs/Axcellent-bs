@@ -20,6 +20,7 @@ from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
 from ax_workflow.auth import AuthError
 from planning_agent.api import create_api_router
+from planning_agent.chat.api import create_chat_router
 from planning_agent.handlers import PLANNING_HANDLERS
 from planning_agent.runtime import get_service
 
@@ -57,6 +58,8 @@ def _cors_origins() -> list[str]:
 
 app = create_agent_app(load_card(), PLANNING_HANDLERS)
 app.include_router(create_api_router(get_service))
+# 사람과 직접 대화 (조회·설명만, AI 대화방 > 직접 대화)
+app.include_router(create_chat_router(lambda: get_service().state))
 
 
 async def _resync_on_start() -> None:
