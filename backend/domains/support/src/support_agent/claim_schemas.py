@@ -131,6 +131,9 @@ class Claim(AxModel):
     inspection_note: str | None = None  # 검수 메모 (`untrusted.note`)
     receipt: ClaimReceipt | None = None
     audit: list[ClaimAudit] = Field(default_factory=list)
+    purged_at: str | None = (
+        None  # 보유기간이 지나 사람이 쓴 글·이름을 지운 시각 (`claim_retention.py`)
+    )
 
     @model_validator(mode="before")
     @classmethod

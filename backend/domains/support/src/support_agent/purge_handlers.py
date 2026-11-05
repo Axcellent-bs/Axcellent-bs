@@ -20,11 +20,14 @@ from typing import Any
 
 from ax_agent_template.server import error_result
 from ax_contracts.schemas import AgentRequest, AgentResult, TaskStatus
-from support_agent import claim_handlers, retention
+from support_agent import claim_handlers, claim_retention, retention
 from support_agent import handlers as h
 from support_agent.purge_schemas import (
+    ClaimPurgeItem,
+    ClaimPurgeReport,
     PreviewPurgeInput,
     PurgeCustomerDataInput,
+    PurgeExpiredClaimsInput,
     PurgeExpiredInput,
     PurgeItem,
     PurgeMode,
@@ -171,7 +174,50 @@ async def purge_expired_inquiries(request: AgentRequest) -> AgentResult:
     )
 
 
+def _claim_report(plans: list[claim_retention.ClaimPlan], *, applied: bool) -> dict[str, Any]:
+    return ClaimPurgeReport(
+        items=[ClaimPurgeItem(claim_id=p.claim_id, purged=dict(p.purged)) for p in plans],
+        count=len(plans),
+        retention_days=claim_retention.retention_days(),
+        apply_enabled=claim_retention.apply_enabled(),
+        applied=applied,
+    ).model_dump(mode="json")
+
+
+@h._caller_meta
+async def purge_expired_claims(request: AgentRequest) -> AgentResult:
+    """보유 일수(기본 5년, 팀 기준 방침 제4조 ⑥)가 지난 클레임의 글·이름을 지운다.
+
+    팀 방식대로 기본은 dry-run이다: 사람이 `SUPPORT_CLAIM_RETENTION_APPLY=1`로 켜기 전에는 건수만
+    알리고 아무것도 바꾸지 않는다(안전 관문도 부르지 않는다). 켜면 `execute()`를 거쳐 지운다.
+    """
+    parsed = h._parse(request, PurgeExpiredClaimsInput)
+    if isinstance(parsed, AgentResult):
+        return parsed
+    now = datetime.now(UTC)
+    preview = claim_retention.plan_expired(claim_handlers.CLAIMS, now, False, _stamp())
+    if not preview:
+        return h._done(request, _claim_report([], applied=False), outcome="nothing_expired")
+    if not claim_retention.apply_enabled():
+        return h._done(request, _claim_report(preview, applied=False), outcome="dry_run")
+
+    async def apply() -> tuple[dict[str, Any], bool]:
+        plans = claim_retention.plan_expired(
+            claim_handlers.CLAIMS, datetime.now(UTC), True, _stamp()
+        )
+        return _claim_report(plans, applied=True), False
+
+    return await h._write(
+        request,
+        "purge_expired_claims",
+        f"claims-expired:{now.date().isoformat()}",
+        {"count": len(preview)},
+        apply,
+    )
+
+
 PURGE_HANDLERS = {
+    "purge_expired_claims": purge_expired_claims,
     "preview_data_purge": preview_data_purge,
     "purge_customer_data": purge_customer_data,
     "purge_expired_inquiries": purge_expired_inquiries,

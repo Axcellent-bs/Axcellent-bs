@@ -103,6 +103,7 @@ SERVICES: tuple[Service, ...] = (
             "propose_incident_compensation",
             "decide_incident_compensation",
             "list_incident_queue",
+            "purge_expired_claims",
         ),
         "클레임·보상",
     ),
