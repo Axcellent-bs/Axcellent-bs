@@ -1307,7 +1307,20 @@ function objectParticle(word: string): string {
   return code >= 0xac00 && code <= 0xd7a3 && (code - 0xac00) % 28 !== 0 ? "을" : "를";
 }
 
-async function askData<T>(skill: string, what: string, input: Record<string, unknown> = {}, deadlineMs = DEADLINE_MS): Promise<A2AResult<T>> {
+// 같은 skill·입력의 요청이 아직 오는 중이면 새로 보내지 않고 그 응답을 같이 쓴다
+// (개발 모드 StrictMode의 effect 두 번, 같은 응답을 쓰는 칸이 동시에 부를 때). 끝나면 지운다(캐시 아님)
+const inFlight = new Map<string, Promise<A2AResult<unknown>>>();
+
+function askData<T>(skill: string, what: string, input: Record<string, unknown> = {}, deadlineMs = DEADLINE_MS): Promise<A2AResult<T>> {
+  const key = `${skill} ${JSON.stringify(input)}`;
+  const pending = inFlight.get(key) as Promise<A2AResult<T>> | undefined;
+  if (pending) return pending;
+  const p = sendData<T>(skill, what, input, deadlineMs).finally(() => inFlight.delete(key));
+  inFlight.set(key, p as Promise<A2AResult<unknown>>);
+  return p;
+}
+
+async function sendData<T>(skill: string, what: string, input: Record<string, unknown>, deadlineMs: number): Promise<A2AResult<T>> {
   const body = {
     meta: { context_id: "ctx_req_dashboard", token: DATA_A2A_TOKEN, path: [], deadline: new Date(Date.now() + deadlineMs).toISOString() },
     skill,
