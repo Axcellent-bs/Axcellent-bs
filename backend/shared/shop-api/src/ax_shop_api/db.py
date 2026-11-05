@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS orders (
   shipping_fee INTEGER NOT NULL DEFAULT 0, points_used INTEGER NOT NULL DEFAULT 0,
   delivered_at TEXT, promised_delivery_at TEXT, shipped_at TEXT, idempotency_key TEXT,
   coupon_id TEXT, coupon_units INTEGER NOT NULL DEFAULT 0,
-  coupon_discount INTEGER NOT NULL DEFAULT 0
+  coupon_discount INTEGER NOT NULL DEFAULT 0,
+  src_source TEXT, src_medium TEXT, src_campaign TEXT
 );
 CREATE TABLE IF NOT EXISTS order_items (
   order_id TEXT NOT NULL REFERENCES orders(order_id), product_id TEXT NOT NULL,
@@ -101,6 +102,10 @@ _ADDED_COLUMNS = {
         ("coupon_id", "TEXT"),
         ("coupon_units", "INTEGER NOT NULL DEFAULT 0"),
         ("coupon_discount", "INTEGER NOT NULL DEFAULT 0"),
+        # 유입 출처(utm). 없으면 NULL이고 옛 주문도 그대로 NULL이다
+        ("src_source", "TEXT"),
+        ("src_medium", "TEXT"),
+        ("src_campaign", "TEXT"),
     ),
     "order_items": (
         ("title", "TEXT"),
@@ -118,6 +123,9 @@ _ADDED_INDEXES = (
     # 쿠폰별 사용 장수를 합산할 때 쓴다
     "CREATE INDEX IF NOT EXISTS idx_orders_coupon_id ON orders(coupon_id) "
     "WHERE coupon_id IS NOT NULL",
+    # 캠페인별 유입 주문을 찾을 때 쓴다
+    "CREATE INDEX IF NOT EXISTS idx_orders_src_campaign ON orders(src_campaign) "
+    "WHERE src_campaign IS NOT NULL",
 )
 
 TENANT_ID = TENANT_ID_DEFAULT

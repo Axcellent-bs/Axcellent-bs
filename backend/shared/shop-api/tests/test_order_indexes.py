@@ -14,7 +14,7 @@ LOOKUPS = {
 
 ADDED = ("idx_order_items_order_id", "idx_payments_order_id", "idx_refunds_order_id")
 # 나중에 열과 함께 붙은 인덱스(주문 멱등 키, 쿠폰별 사용 장수)
-LATER = ("idx_orders_buyer_idempotency", "idx_orders_coupon_id")
+LATER = ("idx_orders_buyer_idempotency", "idx_orders_coupon_id", "idx_orders_src_campaign")
 
 
 def _plan(db: Db, sql: str) -> str:

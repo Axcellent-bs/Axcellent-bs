@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 import time
 from collections.abc import Callable
@@ -26,6 +27,18 @@ class ShopError(Exception):
     def __init__(self, code: str, message: str, status: int = 400) -> None:
         super().__init__(message)
         self.code, self.message, self.status = code, message, status
+
+
+# 유입 출처 값: 영문·숫자·`-`·`_`·`.`만, 64자까지. 어긋나면 그 값만 비운다(주문은 막지 않는다)
+_SOURCE_TAG = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
+def clean_source_tag(value: str | None) -> str | None:
+    """유입 출처 값을 검증한다. 규칙에 어긋나거나 비어 있으면 None(저장 안 함)."""
+    if value is None:
+        return None
+    value = value.strip()
+    return value if _SOURCE_TAG.fullmatch(value) else None
 
 
 def _now() -> str:
@@ -374,12 +387,18 @@ class Shop:
         idempotency_key: str | None = None,
         coupon_id: str | None = None,
         coupon_units: int = 1,
+        src_source: str | None = None,
+        src_medium: str | None = None,
+        src_campaign: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """`create_order`에 멱등 키를 더한 것. `(주문, 재전송 여부)`를 돌려준다.
 
         같은 구매자의 같은 `idempotency_key`가 다시 오면 재고를 확인하거나 차감하기 전에 처음
         주문을 그대로 돌려준다(`replayed=True`). 내용(상품·수량·포인트·쿠폰)이 다르면 409다.
         키가 없으면 예전처럼 매번 새 주문이다.
+
+        유입 출처(`src_*`)는 주문 내용이 아니라서 멱등 비교에 넣지 않는다(재시도는 처음 주문을
+        그대로 돌려준다). 규칙에 어긋난 값은 주문을 거부하지 않고 비운다.
         """
         if not lines:
             raise ShopError("EMPTY_ORDER", "주문 상품이 없다")
@@ -451,8 +470,8 @@ class Shop:
             conn.execute(
                 "INSERT INTO orders (order_id, buyer_id, status, total_amount, tenant_id, "
                 "context_id, created_at, updated_at, shipping_fee, points_used, idempotency_key, "
-                "coupon_id, coupon_units, coupon_discount) "
-                "VALUES (?, ?, 'pending_payment', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "coupon_id, coupon_units, coupon_discount, src_source, src_medium, src_campaign) "
+                "VALUES (?, ?, 'pending_payment', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     order_id,
                     buyer_id,
@@ -466,6 +485,9 @@ class Shop:
                     coupon_id,
                     coupon_units if coupon_id else 0,
                     discount,
+                    clean_source_tag(src_source),
+                    clean_source_tag(src_medium),
+                    clean_source_tag(src_campaign),
                 ),
             )
             for item, title, share, c_share in zip(

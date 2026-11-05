@@ -90,6 +90,11 @@ class OrderIn(BaseModel):
     # 본인의 쿠폰 한 건과 쓸 장수. 할인은 상품 금액 범위 안이고 배송비는 제외한다
     coupon_id: str | None = None
     coupon_units: int = Field(default=1, ge=1)
+    # 유입 출처(utm_source·utm_medium·utm_campaign). 선택. 영문·숫자·`-`·`_`·`.` 64자까지이고
+    # 어긋난 값은 주문을 막지 않고 그 값만 비운다. 멱등 비교에는 넣지 않는다
+    src_source: str | None = None
+    src_medium: str | None = None
+    src_campaign: str | None = None
 
 
 class CartPriceIn(BaseModel):
@@ -221,6 +226,8 @@ RELEASE_ALLOWED = {"admin", "infra"}
 # 캠페인 성과를 세는 data(읽기 전용)까지
 MARKETING_ONLY = {"marketing"}
 COUPON_READERS = {"marketing", "support", "finance", "orchestrator", "data"}
+# 주문 유입 출처 조회(#647)는 데이터분석 커넥터 토큰(data)만. 관리자(admin)도 뺀다
+ATTRIBUTION_READERS = {"data"}
 # 현금 환불(SHOP-12)은 고객지원 관문 토큰만(마케팅 토큰 거부)
 REFUND_ALLOWED = {"support"}
 # 데이터 조회(읽기 전용)는 분석을 하는 data와 관리자만
@@ -415,6 +422,20 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
     ) -> dict:
         return _ok(shop.list_orders(buyer_id, since, until))
 
+    # 고정 경로는 `{order_id}` 경로보다 먼저 등록해야 가로채이지 않는다
+    @app.get("/api/shop/orders/attributed")
+    async def attributed_orders(
+        from_: Annotated[datetime, Query(alias="from")],
+        to: datetime,
+        campaign_id: Annotated[str | None, Query(max_length=64)] = None,
+        source: Annotated[str | None, Query(max_length=64)] = None,
+        limit: Annotated[int, Query(ge=1, le=1000)] = 500,
+        _: str = Depends(_caller(ATTRIBUTION_READERS)),
+    ) -> dict:
+        if from_.tzinfo is None or to.tzinfo is None:
+            raise ShopError("INVALID_QUERY", "from·to에는 시간대가 필요하다")
+        return _ok(lookups.attributed_orders(from_, to, campaign_id, source, limit))
+
     @app.get("/api/shop/orders/{order_id}")
     async def get_order(order_id: str) -> dict:
         return _ok(shop.get_order(order_id))
@@ -428,6 +449,9 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
             body.idempotency_key,
             body.coupon_id,
             body.coupon_units,
+            body.src_source,
+            body.src_medium,
+            body.src_campaign,
         )
         if replayed:
             response.status_code = 200  # 새로 만든 게 아니라 처음 주문을 돌려준다
