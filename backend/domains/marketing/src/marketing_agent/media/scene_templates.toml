@@ -1,0 +1,59 @@
+# 이미지·영상 장면 템플릿. 프롬프트는 자유 입력이 아니다:
+#   프롬프트 = 템플릿의 고정 문장 + 아래 화이트리스트 필드 치환.
+# 글자(제목·가격·AI 라벨)는 모델에 그리지 않는다. 오버레이로 넣는다(다른 단계 담당).
+# 문장에 들어 있는 "no text ..." 는 모델이 임의 글자를 그리지 않게 하는 고정 문구다.
+# 템플릿 문장은 사람이 검토해 바꾼다. 장면 문구는 자체 제작 가상 캐릭터(고양이)만 쓴다.
+
+[rules]
+# 필드 값 검사용 금칙어. 영문은 단어 경계로, 한글은 부분 일치로 찾는다 (소문자 기준)
+text_request_words = [
+  "text", "word", "words", "letter", "letters", "caption", "title", "slogan", "headline",
+  "logo", "watermark", "sign", "signage", "writing", "written", "saying", "says", "typography",
+  "글자", "문구", "텍스트", "자막", "제목", "로고", "간판", "워터마크", "슬로건",
+]
+person_words = [
+  "celebrity", "famous", "lookalike", "look-alike", "portrait of", "real person", "politician",
+  "닮은", "유명인", "연예인", "정치인", "실존",
+]
+brand_words = [
+  "nike", "adidas", "apple", "google", "samsung", "disney", "pixar", "ghibli", "marvel",
+  "starbucks", "coca-cola", "netflix", "youtube", "instagram", "kakao", "naver", "yes24",
+  "kyobo", "aladin", "harry potter", "삼성", "애플", "디즈니", "지브리", "카카오", "네이버",
+  "교보", "알라딘", "스타벅스", "해리포터",
+]
+# 개인정보·식별자 패턴 (필드 값에서 하나라도 걸리면 거절)
+pii_patterns = [
+  '\b01[016789][-. ]?\d{3,4}[-. ]?\d{4}\b',   # 휴대전화
+  '\b0\d{1,2}[-. ]\d{3,4}[-. ]\d{4}\b',       # 지역번호 전화
+  '[\w.+-]+@[\w-]+\.[\w.-]+',                  # 이메일
+  '\b\d{6}[- ]?[1-4]\d{6}\b',                  # 주민등록번호 꼴
+  '(?i)\b(buy|ord|order|pay|cus|usr|user|cpn)_[\w-]+',  # 구매자·주문·결제 식별자
+  '\d{6,}',                                    # 긴 숫자열(계좌·주문번호 등)
+  '(?i)https?://|www\.',                       # 외부 주소
+  '주문|문의|환불|구매자|고객',                 # 고객 원문에서 온 말
+]
+
+# ---- 치환 가능한 필드. values가 있으면 그 값만, 없으면 짧은 단어(max_len, 영문·한글·숫자·공백)만.
+[field.season]
+values = ["spring", "summer", "autumn", "winter"]
+
+[field.color_theme]
+values = ["warm cream", "soft pastel", "deep blue", "forest green", "sunset orange"]
+
+[field.category]
+max_len = 30   # 책 분류 같은 짧은 단어 (예: "그림책", "essay")
+
+# ---- 템플릿
+[template.cat_bookstore_image]
+kind = "image"
+resolution = "1024x1024"
+quality = "medium"
+fields = ["season", "color_theme", "category"]
+sentence = "A flat illustrated scene of a friendly cartoon cat mascot browsing shelves in a cozy independent bookstore, {season} atmosphere, {color_theme} color palette, a small display themed around {category}. Original character design. No text, no letters, no numbers, no logos, no real people, no real brands, no readable book covers."
+
+[template.cat_bookstore_video]
+kind = "video"
+resolution = "720p"
+duration_s = 8
+fields = ["season", "color_theme", "category"]
+sentence = "A short vertical animated clip of a friendly cartoon cat mascot walking through a cozy independent bookstore and pulling a book from a shelf, {season} atmosphere, {color_theme} color palette, a small display themed around {category}. Gentle camera movement, original character design. No text, no letters, no numbers, no logos, no real people, no real brands, no readable book covers."

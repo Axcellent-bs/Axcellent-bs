@@ -64,12 +64,14 @@ export function shortsThumbs(videoLinks: VideoLink[] | undefined, links: (string
   return out;
 }
 
-/** 세로 썸네일. 서버 thumbnail_url이 있으면 이미지(object-fit: cover), 없거나 깨지면 회색 자리 그대로 */
-export function ThumbImage({ src, alt, className = "", children }: { src: string | null | undefined; alt: string; className?: string; children?: ReactNode }) {
+/** 썸네일(기본 세로 9:16, wide면 가로 16:9). 서버 thumbnail_url이 있으면 이미지(object-fit: cover), 없거나 깨지면 회색 자리 그대로 */
+export function ThumbImage({ src, alt, className = "", wide = false, children }: {
+  src: string | null | undefined; alt: string; className?: string; wide?: boolean; children?: ReactNode;
+}) {
   const [broken, setBroken] = useState<string | null>(null);
   const ok = !!src && /^https:\/\//.test(src) && broken !== src;
   return (
-    <span className={`relative block aspect-[9/16] overflow-hidden rounded-xl bg-ink-100 ${className}`}>
+    <span className={`relative block ${wide ? "aspect-video" : "aspect-[9/16]"} overflow-hidden rounded-xl bg-ink-100 ${className}`}>
       {ok && <img src={src} alt={alt} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setBroken(src)}
         className="absolute inset-0 h-full w-full object-cover" />}
       {children}

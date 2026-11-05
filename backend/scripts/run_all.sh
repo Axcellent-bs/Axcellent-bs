@@ -144,6 +144,8 @@ export PLANNING_STATE_DIR="$PWD/$DATA"
 export DATA_TODAY_BOARD_DB="$PWD/$DATA/today_board.db"
 # marketing: 기획에서 받은 기획안을 파일에 남겨 다시 켜도 목록이 유지되게
 export MARKETING_BRIEFS_DB="$PWD/$DATA/marketing_briefs.db"
+# marketing: 이미지·영상 생성 비용 장부(월 누적). 다시 켜도 남아야 월 상한이 유지된다
+export MARKETING_MEDIA_LEDGER_DB="$PWD/$DATA/marketing_media_ledger.db"
 # marketing: publish_sns 게시 대기 건(승인 대기·게시 중)을 파일에 남겨 다시 켜도 이어지게
 export MARKETING_SNS_PENDING_DB="$PWD/$DATA/marketing_sns_pending.db"
 # marketing: SNS 게시 초안도 파일에 남겨 다시 켜도 post_draft_id를 찾게 한다

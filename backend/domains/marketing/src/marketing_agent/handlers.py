@@ -55,6 +55,8 @@ from marketing_agent.chat import (
 from marketing_agent.chat_store import ChatStorageError, ChatStore
 from marketing_agent.coupons import CouponLedger, SequenceGap, total_value
 from marketing_agent.links import BuildCampaignLinkInput, CampaignLink, build_campaign_link
+from marketing_agent.media.ledger import MediaLedger
+from marketing_agent.media.skill import generate_media
 from marketing_agent.notice import NoticeStore, make_draft
 from marketing_agent.schemas import (
     ActiveNotices,
@@ -79,6 +81,7 @@ class State:
         self.coupons = CouponLedger()
         self.briefs = BriefStore()
         self.sns = SnsStore()
+        self.media_ledger = MediaLedger()  # 열 수 없으면 시작 때 실패한다
         # 열 수 없으면 시작 때 ChatStorageError로 실패한다(briefs와 같다)
         self.chat = ChatService(ChatStore(), self.chat_facts)
 
@@ -628,6 +631,10 @@ async def check_sns_post_skill(request: AgentRequest) -> AgentResult:
     return await check_sns_post(request, STATE.sns)
 
 
+async def generate_media_skill(request: AgentRequest) -> AgentResult:
+    return await generate_media(request, ledger=STATE.media_ledger, from_decision=_from_decision)
+
+
 async def publish_sns_skill(request: AgentRequest) -> AgentResult:
     return await publish_sns(request, STATE.sns)
 
@@ -718,6 +725,7 @@ HANDLERS = {
     "check_sns_post": check_sns_post_skill,
     "publish_sns": publish_sns_skill,
     "cancel_campaign": cancel_campaign,
+    "generate_media": generate_media_skill,
     "marketing_chat_send": marketing_chat_send,
     "marketing_chat_list": marketing_chat_list,
     "marketing_chat_get": marketing_chat_get,
