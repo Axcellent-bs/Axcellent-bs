@@ -744,17 +744,57 @@ def season_note(product_name: str, promo: PromoConceptsOutput | None) -> str | N
     return f"'{keyword}' 작년 {month.month}월 검색이 기간 평균의 {ratio:g}배"
 
 
+@dataclass(frozen=True)
+class Warned:
+    """도메인 프로필 경고(소개와 카탈로그가 어긋남)로 씨앗에서 뺀 상품군 (예: 캣북스의 문구).
+
+    시즌·회사 관련 인사이트와 상품 연결에서도 뺀다. `texts` = 상품군·카테고리·상품 이름·뺀
+    키워드(정리한 값), `product_ids` = 그 상품군의 상품.
+    """
+
+    texts: frozenset[str] = frozenset()
+    product_ids: frozenset[str] = frozenset()
+
+    def has(self, name: str) -> bool:
+        key = _norm(name)
+        return bool(key) and any(key == t or key in t for t in self.texts)
+
+
+def warned_of(profile: Any, catalog: Any = None) -> Warned:
+    """프로필의 경고(`intro_mismatch`)·경고로 뺀 키워드(`mismatch_skipped`) → 뺄 이름·상품."""
+    if profile is None:
+        return Warned()
+    names: Mapping[str, str] = dict(getattr(catalog, "categories", None) or {})  # 코드 → 이름
+    texts: set[str] = set()
+    ids: set[str] = set()
+    for m in getattr(profile, "intro_mismatch", []) or []:
+        texts.add(_norm(m.group))
+        texts |= {_norm(names[c]) for c in m.category_codes if c in names}
+        for p in m.products:
+            texts.add(_norm(p.name))
+            ids.add(p.product_id)
+    texts |= {_norm(d.keyword) for d in getattr(profile, "mismatch_skipped", []) or []}
+    return Warned(frozenset(t for t in texts if t), frozenset(ids))
+
+
 def company_candidates(
-    promo: PromoConceptsOutput | None, catalog: Any, taken: Sequence[Candidate], pool: int
+    promo: PromoConceptsOutput | None, catalog: Any, taken: Sequence[Candidate], pool: int,
+    warned: Warned | None = None,
 ) -> list[Candidate]:
-    """회사 관련 후보: 기획안 시즌 키워드(배율 큰 순) → 카탈로그 상품 핵심어 (손으로 안 적음)."""
+    """회사 관련 후보: 기획안 시즌 키워드(배율 큰 순) → 카탈로그 상품 핵심어 (손으로 안 적음).
+
+    경고로 씨앗에서 뺀 상품군(`warned`)의 이름에 든 키워드는 후보로 쓰지 않는다.
+    """
     from data_agent.skills.promo_concepts import season_keywords
 
     seen = {_norm(n) for c in taken for n in c.names()}
     out: list[Candidate] = []
+    warned = warned or Warned()
 
     def add(name: str) -> None:
         key = _norm(name)
+        if warned.has(name):
+            return
         if key and key not in seen and len(out) < pool:
             seen.add(key)
             out.append(Candidate(name, [], company=True, season=season_of(name, promo)))
@@ -915,6 +955,7 @@ async def make_brief(
     store: BriefStore | None = None,
     opportunities_fn: Any = None,
     video_info: Any = None,
+    warned: Warned | None = None,
 ) -> BriefResult:
     """기존 skill 결과를 묶어 인사이트 3~7개 (하루 캐시). 상태를 바꾸지 않는다(브리프 기록만)."""
     from data_agent.skills.content_recommend import load_config as load_recommend
@@ -941,7 +982,8 @@ async def make_brief(
             return BriefResult(out, as_evidence(out, queries, now))
         # 모든 주제는 공유 분류기를 거친다. 지금 인기 주제는 이미 분류됐고(저장 재사용),
         # 지금 인기에 없는 급상승 주제만 여기서 묶어 분류한다(저장된 분류는 다시 묻지 않음)
-        company = company_candidates(promo, catalog, cands, config.company_pool)
+        warned = warned or Warned()
+        company = company_candidates(promo, catalog, cands, config.company_pool, warned)
         todo = [c for c in [*cands, *company] if c.popular is None]
         if todo:
             try:
@@ -997,9 +1039,11 @@ async def make_brief(
                         min_similarity=rec.min_similarity, limit=rec.max_products,
                         top_only=rec.link_top_only, min_margin=rec.min_margin,
                     )  # fmt: skip
+                    # 경고로 씨앗에서 뺀 상품군의 상품은 연결하지 않는다 (시즌 근거도 안 생김)
                     passed = [
                         x for x in links
                         if x.similarity is not None and x.similarity >= rec.min_similarity
+                        and x.product_id not in warned.product_ids
                     ]  # fmt: skip
                     prods[c.topic] = [
                         InsightProduct(

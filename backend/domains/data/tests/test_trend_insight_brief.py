@@ -309,6 +309,33 @@ def test_company_insight_is_reserved_when_a_season_keyword_rose(tmp_path: Path) 
     assert len(trend) <= 3  # 4개 중 1자리는 회사 관련
 
 
+def test_warned_product_groups_do_not_come_back_as_company_insights(tmp_path: Path) -> None:
+    """프로필 경고로 씨앗에서 뺀 문구(만년필·무지 노트)는 시즌·회사 관련 경로에서도 안 나온다."""
+    from ax_contracts.schemas.data import DomainProfileOutput, IntroMismatch, MismatchProduct
+
+    profile = DomainProfileOutput(intro_mismatch=[IntroMismatch(
+        group="문구", category_codes=["stat"], reason="소개에 없는 상품군",
+        products=[MismatchProduct(product_id="p1", name="무지 노트"),
+                  MismatchProduct(product_id="p9", name="만년필 입문 세트")],
+    )])  # fmt: skip
+    warned = brief.warned_of(profile, CATALOG)
+    assert warned.has("만년필 입문") and warned.has("무지 노트") and warned.has("문구")
+    assert not warned.has("파이썬 입문서")
+    llm = BriefLLM(cats={"다이어리": "IT", "무지 노트": "기타", "파이썬 입문서": "기타",
+                         "만년필 입문": "교육·책"})  # fmt: skip
+    promo = _season_promo("무지 노트", 1.5)
+    pen = promo.season_checks[0].model_copy(update={"keyword": "만년필 입문"})
+    promo.season_checks.append(pen)
+    out = asyncio.run(brief.make_brief(
+        TrendInsightBriefRequest(), llm, env=_env(tmp_path, "max_insights = 4\n"),
+        popular=POPULAR, popular_reason=None, rising=[_rising("다이어리", 3.0)],
+        age_fn=_ages([]), promo=promo, catalog=CATALOG, now=NOW, warned=warned,
+    )).output  # fmt: skip
+    topics = [i.topic for i in out.insights]
+    assert "무지 노트" not in topics and "만년필 입문" not in topics
+    assert all(p.product_id != "p1" for i in out.insights for p in i.products)  # 연결도 안 함
+
+
 def test_company_insight_can_rise_by_age_band_without_season(tmp_path: Path) -> None:
     async def ages(keywords: list[str]) -> TrendAgeOutput:
         items = [AgeTopic(keyword=k, status="known", top_band="30대", top_ratio=1.4,
