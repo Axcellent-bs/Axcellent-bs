@@ -556,6 +556,10 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 - 주문(`skills/campaign_effect.py`, 코드 계산): 캠페인 기간 `order_count` 합계(실제)와 기준선 지난 구간 합계의 평균(기대). **증분 = 실제 − 기대**(평가 채점기와 같은 정의). 방향은 기대를 평균으로 한 포아송 꼬리확률(`metrics/judge.py`의 `poisson_upper`·`poisson_lower`)이 0.001보다 작으면 늘었음·줄었음, 아니면 같음. 지표는 커넥터 `metric_series`로 읽는다
 - 매출: 카탈로그 `revenue_metric`(회사 카탈로그 한 줄)이 있으면 같은 방법으로 합계·기대·증분을 낸다(방향은 기대 대비 ±10% 임시 기준, 평가로 정하지 않음). **캣북스는 비어 있다**: shop-api metric-series에 매출이 없어 "확인할 수 없음 + 이유(지표 없음)"가 지금 정상이다. 판매액은 아래 `sales` 칸을 본다(기존 `revenue` 칸은 campaign 평가가 채점하는 칸이라 그대로 둔다)
 - **판매액 `sales`·근거 `facts`**: shop-api 주문 기록(`GET /api/shop/orders?since&until`, 커넥터 `orders`)에서 결제 완료 주문의 금액을 코드가 센다. 정의·기준선·공백·한계는 "campaign_effect 판매액" 절
+- **상품 입력 `products`(#646, 선택)**: 상품 id 또는 이름 최대 10개. 이름은 카탈로그(`GET /api/shop/products`) 이름과 정규화(NFKC, 소문자, 공백 모두 뺌)한 값이 정확히 같을 때만 맞추고, 못 맞춘 값은 추측하지 않고 `products_effect.unmatched_products`로 돌려준다. 생략하면 예전 응답과 같다
+- **세 구분 (합산하지 않음, 같은 주문이 겹칠 수 있다)**: 상품 기준 `products_effect`(맞은 상품의 품목만: 그 상품이 든 결제 완료 주문 수·판매 수량·판매액 각각 기간값·기준선·증분·범위·방향, 기준선·공백·기준선 부족 규칙은 판매액과 같음) / 쿠폰 귀속 `coupons`·`sales.direct_attributed_krw` / 가게 전체 `orders`·`sales`(참고용). 숫자는 모두 `facts`
+- **상품 기준 평가**: `eval/campaign_products/`(그 상품만 늘림·다른 상품만 늘림·이름 못 맞춤·결제 공백·기준선 부족), 관문 `tests/test_campaign_products_eval_gate.py`
+- **상품 기준 한계**: 같은 상품이 캠페인과 다른 이유(다른 행사·시즌·검색)로 팔린 것은 구분하지 못한다. "그 기간 그 상품 판매 변화"다. 유입경로 기준은 #648(마케팅 #647 뒤)
 - **재무 칸 대응표** (재무 `record_campaign_result` `CampaignResultInput`):
 
   | 재무 칸 | 뜻 (재무 계약) | data 칸 |
