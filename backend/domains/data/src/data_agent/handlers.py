@@ -703,6 +703,13 @@ def cand_aliases(env: Mapping[str, str]) -> dict[str, tuple[str, ...]]:
     return dict(cand_mod.load_config(env).aliases)
 
 
+def cand_same_targets(env: Mapping[str, str]) -> dict[str, tuple[str, ...]]:
+    """회사 같은 대상 표 `[candidates.same_target]` (예시 아이디어 유행 ↔ 브리프 주제 맞추기)."""
+    from data_agent.skills import trend_candidates as cand_mod
+
+    return dict(cand_mod.load_config(env).same_targets)
+
+
 async def trend_insight_brief(request: AgentRequest) -> AgentResult:
     """기획에 넘기는 인사이트 3~7개 (기존 skill 결과를 코드로 묶음, 하루 캐시). grade read.
 
@@ -793,7 +800,7 @@ async def _trend_insight_brief(request: AgentRequest) -> AgentResult:
         age_fn=ages, promo=promo_out, catalog=catalog, aliases=cand_aliases(env),
         category_cache=get_category_cache(), shorts=shorts_out,
         context_id=request.meta.context_id, opportunities_fn=opportunities,
-        video_info=video_info, warned=warned,
+        video_info=video_info, warned=warned, same_targets=cand_same_targets(env),
     )  # fmt: skip
     return _result(
         request,

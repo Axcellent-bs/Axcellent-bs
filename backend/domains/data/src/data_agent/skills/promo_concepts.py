@@ -483,12 +483,14 @@ def rules_version(config: PromoConfig) -> str:
         "retry_rule": RETRY_RULE,
         "min_kept": MIN_KEPT,
         "concept_id": ID_VERSION,
+        "trend_pool": POOL_VERSION,
     }
     text = json.dumps(parts, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
 ID_VERSION = "content.v1"  # concept_id 규칙 (바뀌면 규칙 버전이 바뀌어 오늘 저장분을 다시 만든다)
+POOL_VERSION = "brief-pool.v1"  # 지금 인기 재료를 브리프 후보(광고 재료 가능) 안에서만 고름
 
 
 def _norm(text: str) -> str:
@@ -961,6 +963,13 @@ async def popular_materials(
     allowed = [c for c in config.trend_categories if c not in NEVER_TREND]
     picked: list[PromoTrend] = []
     skipped: list[PromoSkippedTrend] = []
+    # 그날 브리프 후보(광고 재료 가능한 유행) 안에서만 고른다. 브리프가 형식 빌리기로 이을 수 있게
+    from data_agent.skills.trend_candidates import load_config as candidate_config
+    from data_agent.skills.trend_insight_brief import material_pool
+
+    rising = [v for n in board.rising_names() if (v := board.verdict([n]))] if board else []
+    pool, seen = material_pool(o, rising, candidate_config(env).aliases, env)
+    in_pool = {_key(n) for n in pool}
     for group in o.by_category:
         if group.category not in allowed:
             continue
@@ -969,6 +978,8 @@ async def popular_materials(
             if mine >= config.trends_per_category or i.brand_safe is False:
                 continue
             why = trend_skip_reason(i, config)
+            if why is None and not in_pool & {_key(n) for n in [i.keyword, *i.aliases]}:
+                why = f"오늘 브리프 후보(점수 상위 {seen}개 중 광고 재료 가능)에 없음"
             if why:
                 skipped.append(PromoSkippedTrend(name=i.keyword, reason=why))
                 continue

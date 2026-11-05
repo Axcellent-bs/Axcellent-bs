@@ -96,6 +96,9 @@ class CandidateConfig:
     exclude_tags: frozenset[str] = field(default_factory=frozenset)
     # 대표 이름 → 별칭들 (정리한 값, 설정 순서). 별칭 → 대표 이름은 `canonical()`
     aliases: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    # 같은 대상 `[candidates.same_target]` (대표 이름 → 같은 대상으로 볼 이름들). 후보 이름은
+    # 묶지 않고, 예시 아이디어의 유행과 브리프 주제를 맞출 때만 쓴다 (예: 리그오브레전드 = t1)
+    same_targets: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     # 인기 검색어 `[trending]`: 지역, YouTube와 겹치지 않는 후보 상한, 스냅샷 나이 기준
     trending_geo: str = "KR"
     trending_max: int = 5
@@ -166,6 +169,21 @@ def _load_aliases(raw: object) -> dict[str, tuple[str, ...]]:
     return out
 
 
+def _load_same(raw: object) -> dict[str, tuple[str, ...]]:
+    """`[candidates.same_target]` (대표 이름 = [같은 대상 이름…]). 다른 대표 이름도 넣을 수 있다
+    (별칭 표와 달리 후보를 묶지 않으므로). 틀린 모양이면 `TypeError`."""
+    if not isinstance(raw, Mapping):
+        raise TypeError("same_target은 표여야 한다")
+    out: dict[str, tuple[str, ...]] = {}
+    for key, values in raw.items():
+        name = clean_tag(str(key))
+        if not name or not isinstance(values, list):
+            raise TypeError("same_target의 값은 이름 목록이어야 한다")
+        others = (clean_tag(str(v)) for v in values)
+        out[name] = tuple(dict.fromkeys(o for o in others if o and o != name))
+    return out
+
+
 def load_config(env: Mapping[str, str]) -> CandidateConfig:
     """`DATA_TREND_CONFIG`(회사 `trends.toml`)의 `[candidates]`. 없거나 틀리면 기본값."""
     path = env.get(TREND_CONFIG_ENV)
@@ -208,6 +226,7 @@ def load_config(env: Mapping[str, str]) -> CandidateConfig:
                 t for t in (clean_tag(str(x)) for x in raw.get("exclude_tags", [])) if t
             ),
             aliases=_load_aliases(raw.get("aliases", {})),
+            same_targets=_load_same(raw.get("same_target", {})),
         )
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return CandidateConfig()

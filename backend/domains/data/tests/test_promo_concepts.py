@@ -161,6 +161,8 @@ async def _fake_popular(*args: Any, **kw: Any) -> Any:
                     category="IT", items=[_topic("새 휴대폰", "IT", 1, videos=2, trending=3)]
                 ),  # 출처 2개
             ]
+            # 실제 응답처럼 전체 목록도 (브리프 후보 = 이 목록에서 고른다)
+            items = [t for g in by_category for t in g.items]
 
     return R()
 
@@ -354,6 +356,31 @@ def test_trend_material_needs_two_sources_or_enough_videos_and_no_person(
     assert skipped["원딜"].startswith("출처 1개·YouTube 인기 영상 4개")
     assert skipped["경기"].startswith("출처 1개·YouTube 인기 영상 0개")
     assert "한국철강" not in skipped  # 뉴스·사건은 기준을 보기 전에 늘 뺀다
+
+
+def test_popular_trends_come_only_from_the_days_brief_candidates(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """예시 아이디어의 지금 인기 재료는 그날 브리프 후보(광고 재료 가능) 안에서만."""
+    from data_agent.skills import trend_insight_brief as brief
+
+    monkeypatch.setattr(brief, "material_pool", lambda *a, **k: (["새 휴대폰"], 7))
+    out = _run(tmp_path, PromoLLM(), monkeypatch)
+    assert [t.name for t in out.trends if t.kind == "popular"] == ["새 휴대폰"]
+    skipped = {s.name: s.reason for s in out.skipped_trends}
+    assert skipped["리그오브레전드"] == "오늘 브리프 후보(점수 상위 7개 중 광고 재료 가능)에 없음"
+    assert skipped["페이커"].startswith("사람 이름")  # 원래 이유가 먼저
+
+
+def test_material_pool_uses_the_brief_rules(tmp_path: Path) -> None:
+    from data_agent.skills import trend_insight_brief as brief
+
+    popular = asyncio.run(_fake_popular()).output
+    cfg = tmp_path / "trends.toml"
+    cfg.write_text("[brief]\nmax_insights = 3\nage_topics_extra = 1\n", encoding="utf-8")
+    pool, seen = brief.material_pool(popular, [], {}, {"DATA_TREND_CONFIG": str(cfg)})
+    assert seen == 4  # 점수 상위 3 + 1개만 본다
+    assert "한국철강" not in pool and "페이커" not in pool  # 뉴스·사람 이름은 광고 재료 아님
 
 
 def test_reason_is_returned_when_no_draft_uses_a_popular_trend(
