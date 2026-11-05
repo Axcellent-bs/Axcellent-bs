@@ -45,7 +45,7 @@ from typing import Any
 
 import httpx
 
-from data_agent.connectors import ConnectorUnavailable, replay
+from data_agent.connectors import ConnectorUnavailable, naver_datalab, replay
 
 SOURCE_ID = "naver_shopping"
 KEY_ENVS = ("NAVER_HUB_CLIENT_ID", "NAVER_HUB_CLIENT_SECRET")
@@ -177,8 +177,11 @@ class NaverShoppingConnector:
         *,
         client: httpx.AsyncClient | None = None,
         cache: DayCache | None = None,
+        caller: str = "",
     ) -> None:
         env = os.environ if env is None else env
+        # 네이버 전체 하루 상한에 셀 때의 호출자 이름 (skill별 몫, 예: shopping:domain_opportunity)
+        self.caller = f"shopping:{caller or 'other'}"
         self.url = (env.get(URL_ENV) or DEFAULT_URL).rstrip("/")
         self.daily_limit = _limit(env)
         self._client_id = env.get(KEY_ENVS[0]) or ""
@@ -305,6 +308,8 @@ class NaverShoppingConnector:
         else:
             headers = self._headers()
             self._cache.count_call(self.daily_limit, "네이버 쇼핑인사이트")
+            # 같은 API HUB 앱이라 네이버 전체 하루 상한(검색어 트렌드와 같이 1,000)에도 센다
+            naver_datalab.count_shared(self._env, self.caller, "네이버 쇼핑인사이트")
             payload = await self._post(url, body, headers)
             if self.mode == "record":
                 replay.save(SOURCE_ID, url, body, payload, self._env)

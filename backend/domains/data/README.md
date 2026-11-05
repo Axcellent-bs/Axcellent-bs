@@ -743,9 +743,16 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 - 스냅샷이 2개 미만이면 unknown + 이유("YouTube 스냅샷이 2개 미만이라 지금 속도를 잴 수 없음 (지금 N개 …)")
 - 2026-11-02 실데이터(17:55·16:55·15:55 KST 스냅샷): 두 시각 모두에 있는 영상 270개, 상위 1위 시간당 조회 약 3.76만(그 전 구간 3.82만보다 느려짐)
 
-### 트렌드 감지 탭 속도 (응답 캐시)
+### 트렌드 감지 탭 속도 (미리 계산·저장)
 
-- `trend_popular`: 응답 캐시(`response_cache.py`, 서버 메모리). 키 = 요청 + 마지막 YouTube 스냅샷 시각 + 마지막 인기 검색어 스냅샷 시각 + 숏츠 형식·주제 분류 저장분 + 오늘 판정판 내용 + 한국 날짜 + 설정 파일 내용. 새 스냅샷·새 분류·판정 변경이면 다른 키라 다시 계산한다. 같은 키면 처음 계산한 응답 그대로(올린 뒤 지난 시간처럼 지금 시각으로 세는 칸도 처음 값)
+- **미리 계산**: 수집기(`youtube_collect`)가 새 스냅샷을 저장한 직후 `trend_precompute`가 급상승 판정(`trend_scan`: 판정판·네이버·설명 문장 캐시만 채움)·YouTube 후보(`trend_candidates`)·지금 인기(`trend_popular`)·빨리 크는 영상(`youtube_velocity`)·숏츠 통계(`shorts_stats`)를 화면과 같은 입력으로 계산해 `DATA_TREND_RESPONSES_DB`(run_all.sh: `backend/.data/trend_responses.db`)에 넣는다. 화면 요청은 저장된 결과를 읽기만 한다. 저장된 것이 없을 때만(첫 실행·수집기 꺼짐) 지금 계산하고 넣는다. SQLite라 서버를 다시 켜도 남는다(환경변수가 없으면 메모리, 테스트)
+- **키** = skill + 요청 + 데이터 도장 + 규칙 버전. 도장: 마지막 YouTube·인기 검색어 스냅샷 시각, 두 스냅샷이 "오래됨" 기준을 넘었는지, 숏츠 형식·주제 분류 저장분, 숏츠 다시 조회·오늘 검색 저장분, 오늘 판정판 내용, 한국 날짜, 설정 파일 내용, LLM 설정·YouTube 키가 있는지(값은 안 봄). 규칙 버전: `RULES_VERSION` + data_agent 코드 해시(코드가 바뀌면 예전 결과를 안 씀). 같은 키면 처음 계산한 응답 그대로(올린 뒤 지난 시간처럼 지금 시각으로 세는 칸도 처음 값)
+- 수집기와 서버의 환경변수가 다르면(예: 수집기를 손으로 켜 LLM 설정이 없음) 키가 달라 서버가 첫 요청에 계산한다. run_all.sh가 둘을 같은 환경으로 켠다
+- 판정판(`today_board`)은 다른 프로세스가 파일에 쓰면(`PRAGMA data_version`) 다시 읽는다. 수집기가 남긴 판정을 서버가 바로 보고 같은 키가 된다
+- 설명 문장 캐시(`DATA_EXPLAIN_DB`)·네이버 하루 캐시와 호출 수(`DATA_NAVER_CACHE_DB`)도 SQLite. 다시 켜도 그날 LLM·네이버를 다시 안 부른다
+- 수집기 중복 실행 잠금: DB 옆 `youtube_collect.lock` (잡혀 있으면 새로 켠 수집기는 바로 끝난다)
+- 최근 스냅샷(`recent_snapshots`, 지금 속도용)은 마지막 스냅샷에서 `DATA_TREND_LOOKBACK_HOURS`(기본 48)시간 안의 것만 본다. 늘 붙는 말 자동 제외(`popular_history`)는 여러 날 비율을 보므로 범위를 줄이지 않았다
+- 단계별 시간: 감지 탭 skill은 요청마다 `[timing] skill=… total_ms sqlite_ms external_ms llm_ms compute_ms cache=hit|stored`를 data 로그에 한 줄 남긴다(값·키는 안 남김). 미리 계산은 수집기 로그에 `skill=trend_popular@precompute1`처럼
 - `trend_scan`: 같은 숫자(facts)의 설명 문장은 다시 쓰지 않는다(`ExplainCache`, 검증 통과 문장만). 네이버는 원래 하루 캐시
 - `trend_insight_brief`: 오늘 저장된 브리프가 있으면 재료(지금 인기·숏츠 통계·상품 목록)를 계산하기 전에 바로 준다
 - 스냅샷 표 인덱스: `collected_at`, 인기 줄만 `collected_at`(마지막 인기 스냅샷·기간 조회)
@@ -864,7 +871,7 @@ API 키는 AXcellent 공용으로 `backend/.env`에 한 번만 두고 고객사�
 | `youtube` | 시청 | 전체 | 없음 | API (`videoCategories.list`) | 하루 10,000 단위, search.list 100·videos.list 1 | `YOUTUBE_API_KEY` | [quota](https://developers.google.com/youtube/v3/getting-started#quota) |
 | `google_trending` | 검색 관심 | 전체 | 없음 | 없음 | 공개 RSS, 한도 미공개 | 없음 | [RSS](https://trends.google.com/trending/rss?geo=KR) |
 | `naver_search_trend` | 검색 관심 | 전체 | 있음 | 없음(키워드) | 하루 1,000회, 그룹 5개·그룹당 키워드 20개 | `NAVER_HUB_CLIENT_ID`·`NAVER_HUB_CLIENT_SECRET` | [API HUB](https://api.ncloud-docs.com/docs/naver-api-hub-overview) |
-| `naver_shopping` | 실제 소비(쇼핑 클릭, 판매량 아님) | 전체 | 있음 | 고정 후보(네이버쇼핑 cat_id)를 실제 호출로 확인. 목록 API 없음 | 하루 한도 미확인(429 = 하루 허용량 초과), 분야 3개·키워드 5개/요청, 2017-08-01부터 | 검색어 트렌드와 같은 API HUB 키 | [쇼핑인사이트](https://api.ncloud-docs.com/docs/naver-api-hub-shopping-insight-categories.md) |
+| `naver_shopping` | 실제 소비(쇼핑 클릭, 판매량 아님). `data_sources` `{"recheck": true}`로 저장된 확인 결과와 상관없이 1번 다시 확인 | 전체 | 있음 | 고정 후보(네이버쇼핑 cat_id)를 실제 호출로 확인. 목록 API 없음 | 하루 한도 미확인(429 = 하루 허용량 초과), 분야 3개·키워드 5개/요청, 2017-08-01부터 | 검색어 트렌드와 같은 API HUB 키 | [쇼핑인사이트](https://api.ncloud-docs.com/docs/naver-api-hub-shopping-insight-categories.md) |
 | `data4library` | 실제 소비(공공도서관 대출) | 출판·교육 | 있음 | 고정(KDC 대분류 0~9) | 하루 한도 미확인(비공식 500회) | `DATA4LIBRARY_API_KEY` | [정보나루](https://data4library.kr/apiUtilization) |
 | `kosis` | 조사 통계 | 전체 | 표마다 | API (통계목록 `statisticsList.do`) | 하루 한도 미확인, 2026 공지로 분당 제한(수치 미확인), HTTPS만 | `KOSIS_API_KEY`(요청 변수 `apiKey`) | [개발 가이드](https://kosis.kr/openapi/devGuide/devGuide_0201List.do) |
 
@@ -895,7 +902,7 @@ AI가 고르고 코드가 검증한다. 수집은 하지 않는다(카테고리 
 
 | 칸 | 출처·계산 (코드) |
 |---|---|
-| 실제 소비 `consumption` | 계획의 소비 출처마다. 키가 없으면 `key_required`("키 등록 후 가능" + 얻는 근거), 승인이 없으면 `not_approved`, 둘 다 되면 실제로 부름(쇼핑: 계획 첫 분야 안 키워드 클릭을 trend_scan 판정으로 평소 대비 배수, 정보나루: 최근 30일 그 분류 인기 대출 중 키워드가 든 책의 대출 수 합) |
+| 실제 소비 `consumption` | 계획의 소비 출처마다. 키가 없으면 `key_required`("키 등록 후 가능" + 얻는 근거), 승인이 없으면 `not_approved`, 둘 다 되면 실제로 부름(쇼핑: 계획 첫 분야 안 키워드 클릭을 trend_scan 판정으로 평소 대비 배수 + 연령대마다 그 연령대의 평소 대비 배수(`category/keyword/age`, 연령대끼리 양은 비교하지 않음). 호출은 네이버 전체 하루 상한(검색어 트렌드와 같은 카운터, `NAVER_DATALAB_DAILY_LIMIT` 1,000)에 호출자 `shopping:domain_opportunity`로 세고, 기회 카드 몫 `[opportunity] shopping_daily_calls`(기본 100, 키워드 하나에 2번)을 넘으면 부르지 않고 unknown + 이유. 숫자는 카드 facts에 들어간다. 정보나루: 최근 30일 그 분류 인기 대출 중 키워드가 든 책의 대출 수 합) |
 | 검색 관심 `search_interest` | 네이버 검색어 트렌드(계획에 있고 승인된 경우) 그룹 5개씩 한 요청, `judge_series` 평소 대비 배수. 기간(84일)·표본(값이 있는 날 수) |
 | 연령대 `age_bands` | trend_age 그대로 (계획에서 연령을 고른 경우만, 하루 상한·캐시 공유). 없으면 `age_reason` |
 | 숏츠 적합도 `shorts_fit` | 하위 주제를 공유 분류기로 분류 → 숏츠 통계 그 분류 조회 중앙값 ÷ 전체 숏츠 중앙값(`ShortsStatsOutput.median_views`). 표본 < `min_samples`(5)면 불확실, ≥ `high_ratio`(1.2)면 높음, ≤ `low_ratio`(0.8)면 낮음, 사이면 불확실 |

@@ -1887,7 +1887,9 @@ SourceStatus = Literal["available", "key_required"]
 
 
 class DataSourcesRequest(AxModel):
-    pass
+    # 아래는 예전 요청은 없다. true면 확인이 필요한 출처를 저장된 결과와 상관없이
+    # 지금 1번 다시 부른다 (키·이용 신청을 바꾼 뒤 사람이 누르는 "다시 확인")
+    recheck: bool = False
 
 
 class DataSource(AxModel):

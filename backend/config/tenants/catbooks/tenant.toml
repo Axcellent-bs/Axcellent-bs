@@ -28,7 +28,8 @@ about = "캣북스는 책을 파는 온라인 쇼핑몰(이커머스)을 운영�
 # 새 데이터 출처 수집 승인 (사람). data_sources의 출처 id를 적으면 수집을 시작한다.
 # 기존 출처(youtube·google_trending·naver_search_trend)는 적지 않아도 승인된 것으로 본다
 [sources]
-approved = []
+# 새 출처는 사람이 승인해야 수집 계획·기회 카드가 부른다 (2026-11-05 쇼핑인사이트 이용 신청 후 승인)
+approved = ["naver_shopping"]
 
 [finance]
 # 팀 예산 = 그달 1일 팀 인원 × 인당 월 단가(원). 재무 AI가 계산하고 재무 담당이 승인한다

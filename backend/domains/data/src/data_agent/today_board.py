@@ -43,6 +43,7 @@ class TodayBoard:
         self._pairs: list[tuple[str, str]] = []
         self._lock = threading.Lock()
         self._conn: sqlite3.Connection | None = None
+        self._version: int | None = None
         if path is not None:
             if str(path) != ":memory:":
                 Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -53,9 +54,19 @@ class TodayBoard:
                     " key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (day, kind, key))"
                 )
 
+    def _changed_elsewhere(self) -> bool:
+        """다른 프로세스(수집기의 미리 계산)가 저장 파일에 쓴 뒤인지 (`PRAGMA data_version`)."""
+        if self._conn is None:
+            return False
+        with self._lock:
+            version = self._conn.execute("PRAGMA data_version").fetchone()[0]
+        changed = version != self._version
+        self._version = version
+        return changed
+
     def _roll(self) -> None:
         day = self.today()
-        if day == self._day:
+        if day == self._day and not self._changed_elsewhere():
             return
         self._day, self._verdicts, self._pairs = day, {}, []
         if self._conn is None:
@@ -126,6 +137,12 @@ class TodayBoard:
              sorted(self._pairs)], ensure_ascii=False,
         )  # fmt: skip
         return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+
+    def reload(self) -> None:
+        """저장 파일을 다시 읽는다 (다른 프로세스가 쓴 오늘 판정을 보려고). 파일이 없으면 그대로."""
+        if self._conn is not None:
+            self._day = None
+            self._roll()
 
     def clear(self) -> None:
         self._day, self._verdicts, self._pairs = None, {}, []

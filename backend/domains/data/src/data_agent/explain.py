@@ -13,10 +13,17 @@
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
+import json
 import re
+import sqlite3
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ValidationError
@@ -293,23 +300,65 @@ def _template(kind: str, facts: dict[str, int | float | str]) -> str:
     return f"{kind}: {pairs}" if pairs else f"{kind}: 표시할 값이 없습니다."
 
 
+EXPLAIN_DB_ENV = "DATA_EXPLAIN_DB"
+
+
 class ExplainCache:
-    """같은 프롬프트(종류 + 숫자 facts)의 검증 통과 문장을 다시 쓰지 않는다 (프로세스 메모리, 상한).
+    """같은 프롬프트(종류 + 숫자 facts)의 검증 통과 문장을 다시 쓰지 않는다 (상한).
 
     facts가 하나라도 다르면 프롬프트가 달라 새로 묻는다. LLM 실패·숫자 검증 실패는 저장하지 않는다.
+    `path`가 있으면 SQLite(서버를 다시 켜도 남음, 키는 프롬프트 해시), 없으면 프로세스 메모리.
     """
 
-    def __init__(self, max_entries: int = 512) -> None:
+    def __init__(self, max_entries: int = 512, path: str | Path | None = None) -> None:
         self._data: dict[str, Explanation] = {}
         self.max_entries = max_entries
+        self._lock = threading.Lock()
+        self._conn: sqlite3.Connection | None = None
+        if path is not None:
+            if str(path) != ":memory:":
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(str(path), check_same_thread=False, timeout=5.0)
+            with self._lock, self._conn:
+                self._conn.execute(
+                    "CREATE TABLE IF NOT EXISTS explanations (key TEXT PRIMARY KEY,"
+                    " stored_at TEXT NOT NULL, value TEXT NOT NULL)"
+                )
+
+    @staticmethod
+    def _key(prompt: str) -> str:
+        return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
 
     def get(self, prompt: str) -> Explanation | None:
-        return self._data.get(prompt)
+        if self._conn is None:
+            return self._data.get(prompt)
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM explanations WHERE key = ?", (self._key(prompt),)
+            ).fetchone()
+        if row is None:
+            return None
+        raw = json.loads(row[0])
+        return Explanation(raw["summary"], raw["fallback"], raw.get("reason"),
+                           tuple(raw.get("bad_numbers") or ()))  # fmt: skip
 
     def put(self, prompt: str, value: Explanation) -> None:
-        if len(self._data) >= self.max_entries:
-            self._data.pop(next(iter(self._data)))
-        self._data[prompt] = value
+        if self._conn is None:
+            if len(self._data) >= self.max_entries:
+                self._data.pop(next(iter(self._data)))
+            self._data[prompt] = value
+            return
+        body = json.dumps(dataclasses.asdict(value), ensure_ascii=False)
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO explanations VALUES (?,?,?)",
+                (self._key(prompt), datetime.now(UTC).isoformat(), body),
+            )
+            self._conn.execute(
+                "DELETE FROM explanations WHERE key NOT IN (SELECT key FROM explanations"
+                " ORDER BY stored_at DESC LIMIT ?)",
+                (self.max_entries,),
+            )
 
 
 async def explain(

@@ -1,4 +1,7 @@
-"""YouTube 영상 통계 스냅샷 수집 (한 번 또는 `--every 초`마다). run_all.sh에는 아직 넣지 않았다.
+"""YouTube 영상 통계 스냅샷 수집 (한 번 또는 `--every 초`마다). run_all.sh가 data와 같이 켠다.
+
+새 스냅샷을 저장하면 바로 트렌드 감지 탭 결과를 미리 계산해 저장한다(`trend_precompute`).
+같은 DB에 수집기가 둘 돌지 않게 DB 옆 `youtube_collect.lock`을 잡는다(잡혀 있으면 바로 끝냄).
 
     cd backend
     uv run python -m data_agent.youtube_collect              # 한 번
@@ -40,9 +43,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import IO
 
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.youtube import VideoStat, YouTubeConnector
+from data_agent.stage_timing import install_sqlite_timer
+from data_agent.trend_precompute import precompute
 from data_agent.youtube_store import DB_ENV, DEFAULT_DB, KST, Row, SnapshotStore
 
 BACKEND = Path(__file__).resolve().parents[4]
@@ -329,7 +335,7 @@ async def run_details(env: Mapping[str, str]) -> int:
     return 1 if errors else 0
 
 
-async def run(every: int | None, env: Mapping[str, str]) -> int:
+async def run(every: int | None, env: Mapping[str, str], precompute_after: bool = True) -> int:
     store = SnapshotStore(env.get(DB_ENV) or DEFAULT_DB)
     config = load_config(config_path(env))
     if not config.queries:
@@ -341,11 +347,42 @@ async def run(every: int | None, env: Mapping[str, str]) -> int:
             result = await collect_once(YouTubeConnector(env), store, config,
                                         in_use=in_use_ids(env))  # fmt: skip
             print(result.line(), flush=True)
+            if result.saved and precompute_after:
+                # 새 스냅샷 직후 감지 탭 결과를 미리 계산해 저장 (화면은 읽기만).
+                # 실패해도 수집은 계속
+                problems = await precompute()
+                if problems:
+                    print(f"[precompute] 일부 못 함: {', '.join(problems)}", flush=True)
             if every is None:
                 return 1 if result.errors and not result.saved else 0
             await asyncio.sleep(every)
     finally:
         store.close()
+
+
+def lock_path(env: Mapping[str, str]) -> Path:
+    """중복 실행 잠금 파일 (스냅샷 DB 옆)."""
+    return Path(env.get(DB_ENV) or DEFAULT_DB).with_name("youtube_collect.lock")
+
+
+def acquire_lock(path: Path) -> IO[str] | None:
+    """다른 수집기가 잡고 있으면 None. 잡은 파일은 프로세스가 끝나면 OS가 푼다."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = path.open("a+", encoding="utf-8")
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -372,10 +409,18 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(run_titles(load_env(os.environ)))
     if args.every is not None and args.every < MIN_EVERY_SECONDS:
         parser.error(f"--every 는 {MIN_EVERY_SECONDS}초 이상 (할당량 보호)")
+    env = load_env(os.environ)
+    lock = acquire_lock(lock_path(env))
+    if lock is None:
+        print(f"[youtube] 이미 다른 수집기가 돌고 있음 (잠금 {lock_path(env)}): 끝냄", flush=True)
+        return 0
+    install_sqlite_timer()
     try:
-        return asyncio.run(run(args.every, load_env(os.environ)))
+        return asyncio.run(run(args.every, env))
     except KeyboardInterrupt:
         return 0
+    finally:
+        lock.close()
 
 
 if __name__ == "__main__":

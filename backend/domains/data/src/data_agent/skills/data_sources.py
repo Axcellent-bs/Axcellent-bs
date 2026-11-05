@@ -189,6 +189,7 @@ async def list_sources(
     prober: Prober | None = None,
     now: datetime | None = None,
     store: ProbeStore | None = None,
+    recheck: bool = False,
 ) -> SourcesResult:
     """출처 목록과 상태. 확인이 필요한 출처는 저장된 확인 결과가 없을 때만 1번 부른다."""
     now = now or datetime.now(UTC)
@@ -207,7 +208,7 @@ async def list_sources(
                 status, why = "key_required", f"키 필요: {', '.join(missing)} (키 등록 후 가능)"
             elif spec.probe:
                 seen = store.get(spec.source_id)
-                if seen is None or (not seen[0] and now - seen[2] >= RETRY_FAILED):
+                if recheck or seen is None or (not seen[0] and now - seen[2] >= RETRY_FAILED):
                     ok, reason = await prober(spec.source_id)
                     store.put(spec.source_id, ok, reason, now)
                     queries.append(f"probe {spec.source_id} ok={ok}")
