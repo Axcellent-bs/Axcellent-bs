@@ -14,7 +14,7 @@
   },
   "traffic": {
    "orders_per_5m": 0.5,
-   "history_days": 14,
+   "history_days": 28,
    "weekday_levels": [
     1.0,
     1.0,
@@ -23,7 +23,8 @@
     1.1,
     1.4,
     1.3
-   ]
+   ],
+   "older_rng_before_days": 14
   },
   "injection": {
    "type": "sale",
@@ -59,11 +60,17 @@
  },
  "counted": {
   "orders_actual": 486,
-  "orders_baseline": 438.0,
+  "orders_baseline": 427.5,
   "revenue_actual": 12323800,
-  "revenue_baseline": 10873000.0,
-  "baseline_rule": "캠페인 시작 전 14일의 같은 요일·같은 시간대 평균 (7일 전·14일 전 같은 구간)",
-  "history_days_before_start": 14,
+  "revenue_baseline": 10914000.0,
+  "baseline_rule": "7·14·21·28일 전 같은 요일·같은 길이 구간 평균 (최소 3구간)",
+  "baseline_weeks": [
+   7,
+   14,
+   21,
+   28
+  ],
+  "history_days_before_start": 28,
   "coupon_issued_units": 60,
   "coupon_used_in_window": 56,
   "coupon_used_after": 0,
