@@ -128,8 +128,13 @@ async def subscribers(
     now: datetime,
     today: date,
     queries: list[str],
+    kind: str = "channels",
 ) -> tuple[dict[str, int | None], str | None]:
-    """채널 구독자 수 (저장된 하루 안 값 + 없는 것만 channels.list). (값, 못 받은 이유)."""
+    """채널 구독자 수 (저장된 하루 안 값 + 없는 것만 channels.list). (값, 못 받은 이유).
+
+    `kind`는 하루 호출 수를 세는 이름이다 (skill마다 상한을 따로 센다).
+    저장된 구독자 수는 같이 쓴다.
+    """
     ids = list(dict.fromkeys(c for c in channel_ids if c))
     known = channel_subscribers(db, ids, now - CHANNEL_FRESH)
     missing = [c for c in ids if c not in known]
@@ -138,13 +143,13 @@ async def subscribers(
     calls = -(-len(missing) // CHANNEL_PAGE)
     if youtube is None or not hasattr(youtube, "channels"):
         return known, "YouTube 커넥터가 없어 구독자 수를 받지 않음"
-    if store.calls(today, "channels") + calls > cap:
+    if store.calls(today, kind) + calls > cap:
         return known, f"구독자 받기 하루 상한({cap}번)에 닿아 받지 않음"
     try:
         got = await youtube.channels(missing)
     except ConnectorUnavailable as error:
         return known, f"구독자 받기 실패 [{error.code}]"
-    store.add_calls(today, "channels", calls)
+    store.add_calls(today, kind, calls)
     queries.append(f"youtube channels.list ids={len(missing)} calls={calls}")
     snap = SnapshotStore(db)
     try:
