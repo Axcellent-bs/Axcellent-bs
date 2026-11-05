@@ -211,8 +211,26 @@ def test_lines_use_only_evidence_numbers(tmp_path: Path) -> None:
     by = {i.topic: i for i in out.insights}
     assert by["리그오브레전드"].line_status == "llm"
     assert by["다이어리"].line_status == "fixed"  # 7은 근거에 없는 숫자
-    assert by["다이어리"].line == "네이버 평소 대비 배수 3 근거가 있어요"
+    # 검증에 실패하면 facts 나열이 아니라 근거 1개만 쓴 짧은 고정 문장 (40자 이내)
+    assert by["다이어리"].line == "네이버: 평소의 3배예요"
+    assert "근거에 없는 숫자" in (by["다이어리"].line_reason or "")
     assert llm.asked == 1  # 묶어서 한 번
+
+
+def test_lines_are_short_with_three_numbers_at_most(tmp_path: Path) -> None:
+    from data_agent.skills.brief_line import count_numbers
+
+    # 근거에 있는 숫자만 썼지만 숫자 6개 (facts 나열형)
+    long_line = ("YouTube 인기 영상 10개, 20대 평소 대비 2.4배, 다시 말해 인기 영상 10개와"
+                 " 20대 2.4배 근거가 있어요")  # fmt: skip
+    llm = BriefLLM({"리그오브레전드": long_line, "다이어리": "네이버 평소의 7배라 곧 터질 거예요"})
+    out, _ = _run(tmp_path, llm)
+    for i in out.insights:
+        assert count_numbers(i.line) <= 3 and len(i.line) <= 80, i.line
+        if i.line_status == "fixed":
+            assert len(i.line) <= 40 and " · " not in i.line, i.line
+    lol = next(i for i in out.insights if i.topic == "리그오브레전드")
+    assert lol.line_status == "fixed" and "넘음" in (lol.line_reason or "")
 
 
 def test_brief_is_cached_per_day_and_rules(tmp_path: Path) -> None:
