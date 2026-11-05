@@ -161,6 +161,22 @@ class SubtopicStore:
                 [(key, _n(n), a) for n, a in picked.items()],
             )
 
+    def fresh_shorts(self, since: datetime) -> list[Short]:
+        """`since` 이후 검색한 씨앗들의 숏츠 (같은 영상은 한 번만, 최근 검색 값)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT searched_at, shorts FROM searches ORDER BY searched_at DESC"
+            ).fetchall()
+        out: dict[str, Short] = {}
+        for at, raw in rows:
+            if datetime.fromisoformat(at) < since:
+                continue
+            for v in json.loads(raw):
+                if v["id"] not in out:
+                    out[v["id"]] = Short(v["id"], v["title"], tuple(v["tags"]), v["views"],
+                                         v.get("thumb"))  # fmt: skip
+        return list(out.values())
+
     def searched_on(self, day: str) -> int:
         with self._lock:
             row = self._conn.execute(
@@ -176,6 +192,22 @@ class SubtopicStore:
                 "INSERT OR REPLACE INTO searches VALUES (?,?,?,?)",
                 (_n(seed), at.isoformat(), _day(at), json.dumps(data, ensure_ascii=False)),
             )
+
+
+def pool_shorts(env: Mapping[str, str], now: datetime, near: str | Path) -> list[Short]:
+    """하위 주제 검색으로 이미 모은 숏츠 (보관 `cache_days` 안, 새 검색 없음).
+
+    저장 파일은 `DATA_SUBTOPICS_DB`, 없으면 `near`(숏츠 저장 파일)와 같은 폴더의 subtopics.db.
+    파일이 없으면 빈 목록 (만들지 않는다).
+    """
+    path = Path(env.get(DB_ENV) or Path(near).parent / DEFAULT_DB.name)
+    if (str(near) == ":memory:" and not env.get(DB_ENV)) or not path.is_file():
+        return []
+    store = SubtopicStore(path)
+    try:
+        return store.fresh_shorts(now - timedelta(days=load_config(env).cache_days))
+    finally:
+        store.close()
 
 
 def baseline(

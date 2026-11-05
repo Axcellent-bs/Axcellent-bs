@@ -10,6 +10,8 @@
      **하루 1번**, 호출 상한 `search_calls`(기본 8번, 검색 1번 = 100단위). 결과는
      `backend/.data/shorts.db`에 남겨 같은 날은 다시 부르지 않는다. 할당량 초과·실패는 그 카테고리만
      unknown + 이유
+  3. 하위 주제 검색(domain_subtopics, #587)으로 이미 모은 숏츠 (보관 기간 안, 같은 영상은 한 번만,
+     추가 검색 없음). 검색 숏츠처럼 다시 조회(videos.list)해 시간당 조회와 채널 id를 채운다
 - 분류(LLM, 묶어서): 카테고리는 주제 분류기(`classify_topics`, 저장해 재사용), 형식은 정해진 목록
   (`SHORTS_FORMATS`) 안에서 고르고 `shorts.db`에 저장해 재사용한다. 목록 밖이면 기타, 실패면 unknown
 - 계산(코드): 카테고리별·형식별 숏츠 수, 평균 조회수, 평균 시간당 조회 증가(최근 두 인기 스냅샷에
@@ -576,13 +578,16 @@ async def shorts_stats(
     config = load_config(env)
     db = env.get(DB_ENV) or str(DEFAULT_DB)
     own = store is None
-    store = store or ShortsStore(env.get(SHORTS_DB_ENV) or SHORTS_DEFAULT_DB)
+    shorts_db = env.get(SHORTS_DB_ENV) or SHORTS_DEFAULT_DB
+    store = store or ShortsStore(shorts_db)
     try:
+        from data_agent.skills.domain_subtopics import pool_shorts
         from data_agent.skills.trend_popular import FILL_DB_ENV, FILL_DEFAULT_DB
 
         calls_db = env.get(FILL_DB_ENV) or str(FILL_DEFAULT_DB)
+        pool = pool_shorts(env, now, shorts_db)
         return await _run(config, youtube, llm, db, store, now, today, context_id, category_cache,
-                          calls_db)  # fmt: skip
+                          calls_db, pool)  # fmt: skip
     finally:
         if own:
             store.close()
@@ -599,6 +604,7 @@ async def _run(
     context_id: str | None,
     category_cache: CategoryCache | None,
     calls_db: str = ":memory:",
+    pool: Sequence[Any] = (),
 ) -> ShortsResult:
     out = ShortsStatsOutput(max_seconds=config.max_seconds, limitation=LIMITATION)
     queries: list[str] = []
@@ -674,9 +680,22 @@ async def _run(
             if s.youtube_category_id == cat_id:
                 s.shorts += 1
     out.searched_shorts = searched
+    # 하위 주제 검색(domain_subtopics)으로 이미 모은 숏츠 (추가 검색 없음, 같은 영상은 한 번만).
+    # 그 검색이 이미 길이·한국어 기준으로 걸렀지만 지금 설정으로 한 번 더 본다
+    for p in pool:
+        if p.video_id in shorts:
+            continue
+        if config.language and not is_language(config.language, p.title, None, None):
+            out.foreign_excluded += 1
+            continue
+        shorts[p.video_id] = _Short(p.video_id, p.title or "", None, p.views, None,
+                                    tuple(p.tags), "subtopic")  # fmt: skip
+        shorts[p.video_id].thumbnail_url = p.thumbnail_url
+        out.subtopic_shorts += 1
     out.shorts = len(shorts)
-    # 검색 숏츠: 다음 실행 때 다시 조회(videos.list)해 두 번 본 것만 시간당 조회 증가를 잰다
-    searched_ids = [vid for vid, sh in shorts.items() if sh.source == "search"]
+    # 검색·하위 주제 숏츠: 다음 실행 때 다시 조회(videos.list, 검색 아님)해 두 번 본 것만 시간당
+    # 조회 증가를 잰다. 다시 조회 응답의 채널 id도 남긴다(구독자 대비)
+    searched_ids = [vid for vid, sh in shorts.items() if sh.source in ("search", "subtopic")]
     await _recheck(config, youtube, store, now, searched_ids, out)
     if out.rechecked:
         queries.append(f"youtube videos.list recheck x{out.rechecked}")
@@ -701,7 +720,7 @@ async def _run(
     # 썸네일: 인기 스냅샷·검색 응답에서 저장한 값만 (더 부르지 않음)
     thumbs = {**video_thumbnails(db, list(shorts)), **store.thumbnails(list(shorts))}
     for vid, sh in shorts.items():
-        sh.thumbnail_url = thumbs.get(vid)
+        sh.thumbnail_url = thumbs.get(vid) or sh.thumbnail_url
 
     # 3. 분류 (카테고리: 주제 분류기 / 형식: 숏츠 형식 목록), 저장해 재사용
     items = list(shorts.values())
@@ -745,7 +764,9 @@ async def _run(
         out.reason = f"길이 {config.max_seconds}초 이하인 숏츠가 없음"
     known_groups = sum(g.status == "known" for g in out.by_category)
     out.summary = (
-        f"숏츠 {out.shorts}개 (인기 {out.popular_shorts}·검색 {out.searched_shorts}),"
+        f"숏츠 {out.shorts}개 (인기 {out.popular_shorts}·검색 {out.searched_shorts}"
+        + (f"·하위 주제 {out.subtopic_shorts}" if out.subtopic_shorts else "")
+        + "),"
         f" 표본이 충분한 카테고리 {known_groups}개."
         f" 길이를 몰라 뺀 인기 영상 {out.unknown_length}개."
     )
