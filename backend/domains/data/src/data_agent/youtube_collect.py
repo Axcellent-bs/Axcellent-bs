@@ -306,7 +306,7 @@ async def backfill_details(
 
 async def run_titles(env: Mapping[str, str]) -> int:
     store = SnapshotStore(env.get(DB_ENV) or DEFAULT_DB)
-    connector = YouTubeConnector(env)
+    connector = YouTubeConnector(env, caller="youtube_collect")
     try:
         found, saved, errors = await backfill_titles(connector, store)
     finally:
@@ -322,7 +322,7 @@ async def run_titles(env: Mapping[str, str]) -> int:
 
 async def run_details(env: Mapping[str, str]) -> int:
     store = SnapshotStore(env.get(DB_ENV) or DEFAULT_DB)
-    connector = YouTubeConnector(env)
+    connector = YouTubeConnector(env, caller="youtube_collect")
     try:
         found, saved, errors = await backfill_details(connector, store)
     finally:
@@ -345,7 +345,8 @@ async def run(every: int | None, env: Mapping[str, str], precompute_after: bool 
         )
     try:
         while True:
-            result = await collect_once(YouTubeConnector(env), store, config,
+            connector = YouTubeConnector(env, caller="youtube_collect")
+            result = await collect_once(connector, store, config,
                                         in_use=in_use_ids(env))  # fmt: skip
             print(result.line(), flush=True)
             if result.saved and precompute_after:

@@ -163,6 +163,8 @@ export DATA_REPORT_DB="$PWD/$DATA/data_reports.db"
 export DATA_TREND_RESPONSES_DB="$PWD/$DATA/trend_responses.db"
 # data: 설명 문장 캐시·네이버 하루 캐시(응답·호출 수)도 파일에 (다시 켜도 LLM·네이버를 다시 안 부름)
 export DATA_EXPLAIN_DB="$PWD/$DATA/explain_cache.db"
+# data: YouTube 할당량 장부 하나 (서버·수집기가 같은 파일, 하루 상한 DATA_YOUTUBE_DAILY_UNITS 기본 8000)
+export DATA_YOUTUBE_QUOTA_DB="$PWD/$DATA/youtube_quota.db"
 export DATA_NAVER_CACHE_DB="$PWD/$DATA/naver_cache.db"
 # data: LLM 하루 상한 기록 (서버·수집기가 같이 셈. 상한은 .env의 DATA_LLM_DAILY_CALLS·DATA_LLM_DAILY_TOKENS)
 export DATA_LLM_BUDGET_DB="$PWD/$DATA/data_llm_budget.db"

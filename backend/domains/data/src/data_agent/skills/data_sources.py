@@ -261,6 +261,10 @@ async def list_sources(
     )
     out.collectors = collector_states(env, now)  # 요약 문장은 그대로 (출처 목록만 센다)
     out.llm_usage = llm_usage_today(env)
+    # YouTube 오늘 사용량/하루 상한 (하나의 장부, 서버·수집기가 같은 기록)
+    from data_agent.youtube_quota import LEDGER
+
+    out.youtube_usage = LEDGER.usage(env)
     # 기다리는 출처: 출처 목록(수집 계획 후보)에 넣지 않고 따로 보여 준다
     out.pending_sources = [PendingSource(name="광고 데이터", reason=AD_DATA_PENDING)]
     return SourcesResult(out, Evidence(queries=queries, data_summary=out.summary, collected_at=now))
