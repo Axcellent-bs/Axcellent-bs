@@ -194,6 +194,54 @@
       "priority": "recommended"
     },
     {
+      "id": "chat_send",
+      "description": "사람이 고객지원 AI에게 말을 건다(직접 대화, 조회와 설명만). 말은 untrusted.message로만 받고 who는 화면이 사람 토큰에서 채운 이름이다. thread_id가 없으면 새 대화를 열고, 말을 저장한 대화(status answering)를 곧바로 돌려준 뒤 AI 답은 뒤에서 만들어 덧붙인다(화면은 chat_get으로 다시 읽는다). context는 화면 API가 코드로 센 문의·클레임·후기 집계 숫자다. 대화 글이 저장돼서 execute()를 거치고, 문의·돈·쿠폰 상태는 바꾸지 않는다. 닫힌 대화·답을 만드는 중인 대화는 invalid_state, 남의 대화는 not_found.",
+      "input_schema": "agents/support/src/support_agent/chat_schemas.py#ChatSendInput",
+      "output_schema": "agents/support/src/support_agent/chat.py#ChatThread",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "chat_close",
+      "description": "직접 대화를 끝내고 한두 줄 요약(summary)을 남긴다. 본인과 담당·관리자(role)만 닫을 수 있고 그 밖은 not_found. 이미 닫힌 대화는 그대로 돌려준다. 말이 30분(SUPPORT_CHAT_IDLE_MINUTES) 없는 대화는 읽을 때 같은 방식으로 자동으로 끝난다. 대화 상태가 바뀌어서 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/chat_schemas.py#ChatCloseInput",
+      "output_schema": "agents/support/src/support_agent/chat.py#ChatThread",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "chat_list",
+      "description": "직접 대화 목록을 최근 순으로 읽는다. 열람 권한대로 본인 대화는 원문, 담당·관리자는 다른 사람 대화의 요약(일이 생긴 대화는 원문), 그 밖의 사람은 다른 사람 대화를 보지 못한다. 상태를 바꾸지 않는다.",
+      "input_schema": "agents/support/src/support_agent/chat_schemas.py#ChatListInput",
+      "output_schema": "agents/support/src/support_agent/chat.py#ChatThread",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "chat_get",
+      "description": "직접 대화 하나를 읽는다. 열람 권한이 없으면(남의 대화) not_found. 화면은 status가 answering이면 이 skill로 다시 읽는다. 상태를 바꾸지 않는다.",
+      "input_schema": "agents/support/src/support_agent/chat_schemas.py#ChatGetInput",
+      "output_schema": "agents/support/src/support_agent/chat.py#ChatThread",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "list_feedback",
       "description": "후기(해결 결과 평가) 목록을 최근 순으로 읽는다. 상태·별점으로 거를 수 있다.",
       "input_schema": "agents/support/src/support_agent/schemas.py#ListFeedbackInput",

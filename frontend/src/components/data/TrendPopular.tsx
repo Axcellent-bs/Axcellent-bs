@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Empty, Panel, TONE, Waiting } from "@/components/finance/bits";
 import { okEvidence, type SkillState } from "@/components/data/useSkill";
+import { ThumbImage } from "@/components/data/ShortsCard";
 import { Sources, videoUrl } from "@/components/data/Sources";
 import { DATA_SERVER, type PopularCategory, type PopularTopic, type PopularVideo, type PromoConceptsOutput, type TrendPopularOutput } from "@/lib/data";
 
@@ -8,8 +9,8 @@ import { DATA_SERVER, type PopularCategory, type PopularTopic, type PopularVideo
 // - 맨 위 한 줄: 오늘 가장 큰 화제 = 지금 인기 1위(items[0].keyword) + YouTube 인기 스냅샷 시각
 // - 필터: 카테고리 칩(서버 순서, 개수 = 그 칸 영상 수) · 정렬(조회수 / 시간당 조회 / 구독자 대비 배수). 정렬은 받은 값으로만, 값이 없는 영상은 뒤로
 // - 많이 붙는 태그: 그 칸 주제 중 YouTube 태그에서 나온 것(origins에 youtube_tag)만, 서버 이름 그대로
-// - 영상 카드 그리드: 썸네일 자리(계약에 썸네일 주소가 없어 회색 자리) · 순위 · 제목 2줄 · 채널 · 큰 조회수 · 시간당·구독자 대비 한 줄
-//   · 칩 하나(광고 재료 가능 / 실존 인물·상표 주의 / 광고에 안 씀). 카드를 누르면 YouTube 새 탭
+// - 영상 카드 그리드: 썸네일(서버 thumbnail_url, 세로·cover, 없거나 깨지면 회색 자리) · 순위 · 제목 2줄 · 채널 · 큰 조회수 · 시간당·구독자 대비 한 줄
+//   · 칩 하나(광고 재료 가능 / 실존 인물·상표 주의 / 광고에 안 씀). 카드를 누르면 서버 video_url(없으면 video_id로 만든 주소) 새 탭
 // - 영상 = 그 칸 주제들의 영상(videos, 주제 순서) + 카테고리 조회수 상위 영상(top_videos). 같은 영상은 한 번만.
 //   칩은 주제에 붙은 영상만 그 주제 판정으로 (top_videos는 주제가 없어 칩을 그리지 않는다)
 // - 칩 판정(materialOf): 기획안 재료에서 뺀 주제·회사 추천 안 함 분류 = 광고에 안 씀, 실존 이름·상표 = 주의, 재료로 쓴 주제 = 가능
@@ -132,13 +133,12 @@ function VideoCard({ card, rank, promo }: { card: Card; rank: number; promo: Pro
   ].filter(Boolean);
   return (
     <li className="min-w-0">
-      <a href={videoUrl(v.video_id)} target="_blank" rel="noreferrer noopener"
+      <a href={v.video_url || videoUrl(v.video_id)} target="_blank" rel="noreferrer noopener"
         className="card flex h-full gap-3 p-3 transition hover:ring-brand-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
         aria-label={`${rank}위 ${v.title ?? "제목 없음"} · YouTube에서 보기`}>
-        {/* 썸네일 자리 (계약에 썸네일 주소가 아직 없다) */}
-        <span aria-hidden className="relative aspect-[9/16] w-24 shrink-0 rounded-xl bg-ink-100">
+        <ThumbImage src={v.thumbnail_url} alt={v.title ?? "제목 없음"} className="w-24 shrink-0">
           <span className="absolute left-1.5 top-1.5 rounded-md bg-ink-900 px-1.5 py-0.5 text-[11px] font-bold text-white">{rank}위</span>
-        </span>
+        </ThumbImage>
         <span className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="line-clamp-2 text-sm font-semibold leading-snug text-ink-900">{v.title ?? "제목 없음"}</span>
           {v.channel_title && <span className="truncate text-xs text-ink-500">{v.channel_title}</span>}

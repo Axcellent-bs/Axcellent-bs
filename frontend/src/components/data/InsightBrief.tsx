@@ -4,7 +4,7 @@ import { okEvidence, type SkillState } from "@/components/data/useSkill";
 import { Sources, when } from "@/components/data/Sources";
 import { OpportunityCards } from "@/components/data/OpportunityCards";
 import { AgeBars } from "@/components/data/AgeBars";
-import { CopyId, FoldRow, ShortsCard, factLinks, shortsLinks, type Tile } from "@/components/data/ShortsCard";
+import { CopyId, FoldRow, ShortsCard, factLinks, shortsThumbs, type Tile } from "@/components/data/ShortsCard";
 import { DATA_SERVER, kpiLive, type DataFact, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
 
 // 트렌드 2단계(인사이트): 기획팀이 가져갈 인사이트 브리프 (v2 시안 ② 보드). trend_insight_brief(계약 TrendInsightBriefOutput) 응답 그대로.
@@ -119,7 +119,7 @@ function InsightCard({ i, facts }: { i: TrendInsight; facts: DataFact[] | undefi
       lineNote={i.line_status === "fixed" ? "고정 문장" : null}
       tiles={tiles}
       products={i.products.map((p) => ({ id: p.product_id, name: p.name }))}
-      thumbs={shortsLinks([...i.evidence.links, ...factLinks(facts, i.insight_id, i.fact_ids)])}
+      thumbs={shortsThumbs(i.evidence.video_links, [...i.evidence.links, ...factLinks(facts, i.insight_id, i.fact_ids)])}
       highlight={i.company_related === true}
       fold={<>
         <FoldRow label="광고 재료">

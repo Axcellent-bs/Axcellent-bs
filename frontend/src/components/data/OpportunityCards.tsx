@@ -2,13 +2,13 @@ import { TONE } from "@/components/finance/bits";
 import { useSkill } from "@/components/data/useSkill";
 import { when } from "@/components/data/Sources";
 import { AgeBars } from "@/components/data/AgeBars";
-import { CopyId, FoldRow, ShortsCard, factLinks, shortsLinks, type Tile, type Verdict } from "@/components/data/ShortsCard";
+import { CopyId, FoldRow, ShortsCard, factLinks, shortsThumbs, type Tile, type Verdict } from "@/components/data/ShortsCard";
 import { dataAi, type DataFact, type DomainOpportunity, type OpportunityEvidence, type ShortsFit } from "@/lib/data";
 
 // 트렌드 2단계(인사이트) 맨 위 "기회 가설" 카드. trend_insight_brief의 opportunities(계약 DomainOpportunity, #579) 그대로. v2 틀(ShortsCard)
 // - 판정 칩 하나: 숏츠 적합도(shorts_fit.level) high → "숏츠로 해볼 만함", uncertain·low → "아직 불확실". shorts_fit이 없으면 칩 없음
 // - 숫자 타일(서버 값이 있는 것만): 숏츠 반응(shorts_fit.ratio·samples) · 가장 오른 연령(age_bands 중 배수가 가장 큰 연령대) · 목표 참고값(target_views_reference)
-// - 근거 숏츠: 브리프 facts 중 이 카드(about = opportunity_id, fact_ids)의 YouTube 근거 주소 최대 3개
+// - 근거 숏츠: 이 카드 video_links(주소·썸네일) → 브리프 facts 중 이 카드(about = opportunity_id, fact_ids)의 YouTube 근거 주소, 최대 3개
 // - 접힘 "근거 전체 보기": 적합도 이유 · 근거(실제 소비·검색 관심: 출처·기간·표본, 키 필요·승인 전은 회색 자리 + 서버 이유)
 //   · 연령대 막대 · 잘 되는 형식 · 연결 상품 이유 · 한계 · 기획이 정할 것(표시만) · 카드 번호 복사
 // - 근거의 출처 이름은 data_sources 응답에서 source_id로 찾는다. 못 찾으면 id 그대로
@@ -82,7 +82,7 @@ function Card({ o, facts, nameOf }: { o: DomainOpportunity; facts: DataFact[] | 
       lineNote={o.line_status === "fixed" ? "고정 문장" : null}
       tiles={tilesOf(o)}
       products={o.products.map((p) => ({ id: p.product_id, name: p.name }))}
-      thumbs={shortsLinks(factLinks(facts, o.opportunity_id, o.fact_ids))}
+      thumbs={shortsThumbs(o.video_links, factLinks(facts, o.opportunity_id, o.fact_ids))}
       fold={<>
         {o.subtopic_evidence && <FoldRow label="주제 근거">{o.subtopic_evidence}</FoldRow>}
         {fit && (

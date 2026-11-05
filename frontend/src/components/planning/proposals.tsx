@@ -130,6 +130,33 @@ function Facts({ facts }: { facts: ProposalFact[] }) {
   )
 }
 
+// 성과 근거 구분 (백엔드 proposals.py EFFECT_*). 같은 주문이 겹칠 수 있어 더하지 않고 나눠 보여 준다
+const EFFECT_GROUPS: { source: string; label: string }[] = [
+  { source: 'campaign_effect · 상품 기준', label: '상품 기준' },
+  { source: 'campaign_effect · 쿠폰 귀속', label: '쿠폰 귀속' },
+  { source: 'campaign_effect · 가게 전체', label: '가게 전체 · 참고' },
+]
+
+function EffectFacts({ facts }: { facts: ProposalFact[] }) {
+  const known = new Set(EFFECT_GROUPS.map((g) => g.source))
+  const rest = facts.filter((f) => !known.has(f.source))
+  return (
+    <div className="pp-effect">
+      {EFFECT_GROUPS.map((g) => {
+        const rows = facts.filter((f) => f.source === g.source)
+        if (!rows.length) return null
+        return (
+          <div key={g.source} className="pp-effect-group">
+            <div className="pp-effect-head">{g.label}</div>
+            {rows.map((f) => <div key={f.label} className="small">{f.label} <b>{f.value}</b></div>)}
+          </div>
+        )
+      })}
+      {rest.map((f) => <div key={f.label} className="small">{f.label} <b>{f.value}</b></div>)}
+    </div>
+  )
+}
+
 function ProposalView({ s, d, p }: P & { p: Proposal }) {
   const toast = useToast()
   const open = proposalOpen(p)
@@ -209,7 +236,7 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
                 <dd>
                   <Tag tone={p.result.direction === '늘었음' ? 'green' : p.result.direction === '줄었음' ? 'amber' : 'neutral'}>{p.result.direction}</Tag> {p.result.summary}
                   {p.target && <div className="small">목표 {p.target.value}</div>}
-                  {(p.result.facts ?? []).map((f) => <div key={f.label} className="small">{f.label} <b>{f.value}</b></div>)}
+                  <EffectFacts facts={p.result.facts ?? []} />
                   <div className="muted small">{p.result.at} · 데이터분석</div>
                 </dd>
               </>

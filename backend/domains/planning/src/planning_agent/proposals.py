@@ -29,6 +29,8 @@ from ax_agent_template.llm import LLMClient, LLMSettings
 from ax_contracts.schemas import TENANT_ID_DEFAULT, AgentRequest, RequestMeta, TaskStatus
 from ax_contracts.schemas.data import (
     CampaignEffectOutput,
+    CampaignProductMeasure,
+    CampaignProductsEffect,
     PromoConcept,
     PromoConceptsOutput,
     TrendInsight,
@@ -295,18 +297,21 @@ class DataInsights:
         window_to: datetime,
         insight_id: str | None,
         proposal_id: str,
+        products: list[str] | None = None,
     ) -> CampaignEffectOutput | str:
         """`campaign_effect`로 성과를 잰다. 어떤 인사이트가 잘 됐는지 이어 볼 수 있게
-        insight_id·proposal_id를 같이 보낸다. 데이터분석 계약에 아직 그 칸이 없어 거부되면
-        id 없이 한 번 더 묻는다 (칸이 생기면 첫 요청으로 끝난다)."""
+        insight_id·proposal_id를, 제안 관련 상품(`products`, #646)을 같이 보낸다. 데이터분석 계약에
+        그 칸이 없어 거부되면 칸을 빼고 한 번 더 묻는다 (칸이 있으면 첫 요청으로 끝난다)."""
         base = {
             "campaign_id": campaign_id,
             "window_from": window_from.isoformat(),
             "window_to": window_to.isoformat(),
         }
         ids = {"insight_id": insight_id, "proposal_id": proposal_id}
+        goods = {"products": products[:10]} if products else {}
+        tries = [{**base, **ids, **goods}, base]
         out: Any = "부르지 않음"
-        for inp in ({**base, **ids}, base):
+        for inp in tries:
             req = AgentRequest(
                 meta=_meta(ctx, self.tenant_id, self.timeout), skill="campaign_effect", input=inp
             )
@@ -396,25 +401,76 @@ def from_brief(out: TrendInsightBriefOutput) -> list[ReceiveInsightInput]:
     return items
 
 
+# 성과 근거의 구분 (#646). 화면이 `source`로 나눠 보여 준다. 같은 주문이 겹칠 수 있어 더하지 않는다
+EFFECT_PRODUCTS = "campaign_effect · 상품 기준"
+EFFECT_COUPON = "campaign_effect · 쿠폰 귀속"
+EFFECT_STORE = "campaign_effect · 가게 전체"
+
+
+def _measure(m: CampaignProductMeasure | None, unit: str) -> str | None:
+    """상품 기준 한 칸 → "+12건 (기준 30건, 범위 +5~+20)". 모르면 None."""
+    if m is None or m.incremental is None or m.baseline is None:
+        return None
+
+    def n(x: float, sign: bool = False) -> str:
+        return f"{x:+,.0f}" if sign else f"{x:,.0f}"
+
+    text = f"{n(m.incremental, True)}{unit} (기준 {n(m.baseline)}{unit}"
+    if m.incremental_low is not None and m.incremental_high is not None:
+        text += f", 범위 {n(m.incremental_low, True)}~{n(m.incremental_high, True)}"
+    return text + ")"
+
+
+def _products_direction(pe: CampaignProductsEffect) -> str:
+    m = pe.orders
+    if pe.status != "known" or m is None or m.direction is None:
+        return "확인 불가"
+    if m.direction == "uncertain":  # 증분 범위가 0에 걸침 = 뚜렷한 변화 없음, 기준선 부족은 모름
+        low, high = m.incremental_low, m.incremental_high
+        return "같음" if low is not None and high is not None and low < high else "확인 불가"
+    return {"up": "늘었음", "down": "줄었음"}[m.direction]
+
+
 def effect_result(out: CampaignEffectOutput) -> tuple[str, str, list[InsightFact]]:
-    """campaign_effect 응답 → (방향, 요약, 성과 근거). 숫자는 응답 값을 옮겨 적기만 한다."""
-    o = out.orders
-    direction = {"up": "늘었음", "none": "같음", "down": "줄었음"}.get(
-        o.direction or "", "확인 불가"
-    )
-    if o.status != "known":
-        direction = "확인 불가"
+    """campaign_effect 응답 → (방향, 요약, 성과 근거). 숫자는 응답 값을 옮겨 적기만 한다.
+
+    방향은 상품 기준(`products_effect`)을 쓴다. 상품을 보내지 않은 옛 제안만 가게 전체 주문으로
+    본다. 근거는 상품 기준 · 쿠폰 귀속 · 가게 전체로 `source`를 나눠 적는다."""
     facts: list[InsightFact] = []
-    if o.status == "known" and o.excess is not None and o.expected is not None:
-        value = f"{o.excess:+.0f}건 (기대 {o.expected:.0f}건)"
-        facts.append(
-            InsightFact(label="캠페인 기간 주문 증분", value=value, source="campaign_effect")
+
+    def add(label: str, value: str | None, source: str) -> None:
+        if value:
+            facts.append(InsightFact(label=label, value=value[:80], source=source))
+
+    pe = out.products_effect
+    if pe is not None:
+        direction = _products_direction(pe)
+        if pe.status != "known":
+            add("상품 기준 확인 불가", pe.unknown_reason or "이유 없음", EFFECT_PRODUCTS)
+        add("관련 상품 주문 증분", _measure(pe.orders, "건"), EFFECT_PRODUCTS)
+        add("관련 상품 판매 수량 증분", _measure(pe.units, "개"), EFFECT_PRODUCTS)
+        add("관련 상품 판매액 증분", _measure(pe.gross_krw, "원"), EFFECT_PRODUCTS)
+        add("못 찾은 상품", ", ".join(pe.unmatched_products), EFFECT_PRODUCTS)
+    else:
+        o = out.orders
+        direction = {"up": "늘었음", "none": "같음", "down": "줄었음"}.get(
+            o.direction or "", "확인 불가"
         )
+        if o.status != "known":
+            direction = "확인 불가"
     c = out.coupons
     if c.status == "known" and c.use_rate is not None:
-        value = f"{c.use_rate * 100:.0f}%"
-        facts.append(InsightFact(label="캠페인 쿠폰 사용률", value=value, source="campaign_effect"))
-    return direction, out.summary[:200], facts
+        add("캠페인 쿠폰 사용률", f"{c.use_rate * 100:.0f}%", EFFECT_COUPON)
+    s = out.sales
+    if s is not None and s.direct_attributed_krw is not None:
+        orders = f" ({s.direct_orders}건)" if s.direct_orders is not None else ""
+        add("쿠폰 귀속 판매액", f"{s.direct_attributed_krw:,}원{orders}", EFFECT_COUPON)
+    o = out.orders
+    if o.status == "known" and o.excess is not None and o.expected is not None:
+        add("가게 전체 주문 증분", f"{o.excess:+.0f}건 (기대 {o.expected:.0f}건)", EFFECT_STORE)
+    if s is not None and s.status == "known" and s.incremental_gross_krw is not None:
+        add("가게 전체 판매액 증분", f"{s.incremental_gross_krw:+,}원", EFFECT_STORE)
+    return direction, out.summary[:200], facts[:12]
 
 
 class MarketingBrief:

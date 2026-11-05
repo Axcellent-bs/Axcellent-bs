@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { PreparingChip } from "@/components/Preparing";
-import { SAFETY_HUMAN_TOKEN } from "@/lib/env";
-import { DEV_API, chatApi } from "@/lib/planning";
+import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN } from "@/lib/env";
+import { POLL_MS, classifyFailure, directChatApi, isAnswering } from "@/lib/directChat";
+import { DEV_API, PLANNING_API, chatApi } from "@/lib/planning";
 import type { ChatMessage, ChatStatus, ChatThread as BaseThread } from "@/lib/planningData";
 import { useSession, type Account } from "@/demo/session";
 
 // AI 대화방의 직접 대화. 사람이 부서 AI 하나를 골라 바로 말을 건다.
-// 사람 말을 바로 받는 창구: 개발 AI(dev 서비스 /dev-chat), 인사 AI(/api/hr/chat). 나머지 AI는 창구가 생길 때까지 "준비 중"으로 둔다.
+// 사람 말을 바로 받는 창구: 개발 AI(dev 서비스 /dev-chat), 인사 AI(/api/hr/chat), 기획 AI(/api/planning/chat), 마케팅 AI(dashboard-api /api/dashboard/marketing-chat). 나머지 AI는 창구가 생길 때까지 "준비 중"으로 둔다.
 // 창구는 모두 같은 대화 모양(id·title·status·messages[]·who·시각)을 돌려준다.
 //
 // 열람 권한
@@ -60,12 +61,12 @@ export interface DirectAgent {
 export const DIRECT_AGENTS: DirectAgent[] = [
   { key: "dev", name: "개발 AI", note: "고칠 것을 말하면 되묻고 계획을 세워요. 계획이 서면 코딩 작업(PR)을 시작해요.", live: true, dept: "개발팀", talk: chatApi(DEV_API) },
   { key: "hr", name: "인사 AI", note: "팀 인원·교대·인수인계 같은 인사 기록을 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요.", live: true, dept: "인사팀", talk: hrTalk },
+  { key: "planning", name: "기획 AI", note: "받은 요청·기획서·결정·제안 상태를 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요.", live: true, dept: "기획팀", talk: directChatApi({ base: PLANNING_API, path: "/api/planning/chat" }) },
   { key: "orchestrator", name: "총괄 AI", note: "", live: false },
-  { key: "planning", name: "기획 AI", note: "", live: false },
   { key: "support", name: "고객지원 AI", note: "", live: false },
   { key: "finance", name: "재무 AI", note: "", live: false },
   { key: "data", name: "데이터분석 AI", note: "", live: false },
-  { key: "marketing", name: "마케팅 AI", note: "", live: false },
+  { key: "marketing", name: "마케팅 AI", note: "마케팅 일을 물어보면 마케팅 AI가 답해요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, dept: "마케팅팀", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/marketing-chat" }) },
 ];
 export const directAgentOf = (room: string) =>
   room.startsWith(DIRECT_PREFIX) ? DIRECT_AGENTS.find((a) => DIRECT_PREFIX + a.key === room) : undefined;
@@ -94,7 +95,7 @@ const saveThreadId = (key: string, id: string | null) => {
 const hhmm = (iso: string) => (iso ? new Date(iso).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" }) : "");
 const when = (iso: string) => (iso ? new Date(iso).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
 const errText = (e: unknown, name: string) => (e instanceof Error ? e.message : `${name}에 연결할 수 없어요`);
-const RESULT: Record<ChatStatus, string> = { talking: "대화만 함", started: "코딩 작업 시작", blocked: "막힘", waiting: "앞 요청 대기" };
+const RESULT: Record<ChatStatus, string> = { talking: "대화만 함", started: "코딩 작업 시작", blocked: "막힘", waiting: "앞 요청 대기", answering: "답하는 중" };
 /** 일이 생긴 대화: 담당자가 원문까지 본다 */
 const madeWork = (t: ChatThread) => t.status === "started" || !!t.taskId;
 
@@ -126,19 +127,44 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
   const keeper = isKeeper(account, agent);
   const tkey = threadKey(agent.key, account.id);
 
-  const mine = all.filter((t) => owners[t.id] === account.id);
-  const others = all.filter((t) => owners[t.id] !== account.id);
+  // 백엔드가 아직 없거나 LLM 키가 없으면 "준비 중", 403이면 입력을 막고 이유를 보여 준다
+  const [prep, setPrep] = useState(false);
+  const [locked, setLocked] = useState<string | null>(null);
+  const failed = (err: unknown) => {
+    const k = classifyFailure(err);
+    if (k === "preparing") { setPrep(true); return true; }
+    if (k === "forbidden") { setLocked(errText(err, agent.name)); return true; }
+    return false;
+  };
+
+  // 서버가 남의 대화(restricted)로 알려 준 것은 원문 없이 요약만. 그 밖에는 이 브라우저가 기억한 주인으로 가른다
+  const isMine = (t: ChatThread) => !t.restricted && owners[t.id] === account.id;
+  const mine = all.filter(isMine);
+  const others = all.filter((t) => !isMine(t));
   // 지금 연 대화가 남의 대화면 보기 전용 (담당자가 일이 생긴 대화 원문을 연 경우)
-  const readOnly = !!thread && owners[thread.id] !== account.id;
+  const readOnly = !!thread && !isMine(thread);
 
   useEffect(() => {
     const id = loadThreadId(tkey);
     if (!id || loadOwners()[id] !== account.id) return;
-    api.get(id).then(setThread).catch(() => saveThreadId(tkey, null));
+    api.get(id).then(setThread).catch((err) => { if (!failed(err)) saveThreadId(tkey, null); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, tkey, account.id]);
   useEffect(() => {
-    api.list().then(setAll).catch(() => setAll([]));
+    api.list().then(setAll).catch((err) => { failed(err); setAll([]); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, thread?.id]);
+  // 답을 기다리는 중(answering)이면 2초마다 상세를 다시 읽고, 답이 오면 멈춘다. 대화를 바꾸거나 화면을 떠나면 타이머를 지운다
+  const answeringId = isAnswering(thread) ? thread?.id : undefined;
+  useEffect(() => {
+    if (!answeringId) return;
+    let stop = false;
+    const timer = window.setInterval(() => {
+      api.get(answeringId).then((x) => { if (!stop) setThread((cur) => (cur?.id === x.id ? x : cur)); }).catch((err) => { if (!stop) { failed(err); setError(errText(err, agent.name)); window.clearInterval(timer); } });
+    }, POLL_MS);
+    return () => { stop = true; window.clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answeringId, api]);
   useLayoutEffect(() => {
     const el = box.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -147,7 +173,7 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
   const send = async (e?: FormEvent) => {
     e?.preventDefault();
     const message = text.trim();
-    if (!message || sending || readOnly) return;
+    if (!message || sending || readOnly || prep || locked) return;
     setSending(message);
     setText("");
     setError(null);
@@ -157,7 +183,7 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
       setThread(next);
       saveThreadId(tkey, next.id);
     } catch (err) {
-      setError(errText(err, agent.name));
+      if (!failed(err)) setError(errText(err, agent.name));
       setText(message);
     } finally {
       setSending(null);
@@ -174,7 +200,7 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
   };
   const open = (t: ChatThread) => {
     setError(null);
-    api.get(t.id).then((x) => { setThread(x); if (owners[x.id] === account.id) saveThreadId(tkey, x.id); }).catch((err) => setError(errText(err, agent.name)));
+    api.get(t.id).then((x) => { setThread(x); if (owners[x.id] === account.id) saveThreadId(tkey, x.id); }).catch((err) => { if (!failed(err)) setError(errText(err, agent.name)); });
   };
   const messages = thread?.messages ?? [];
 
@@ -206,7 +232,7 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
             <p className="mt-2 text-xs text-ink-500">{agent.name} 담당({agent.dept ?? "담당 부서"}·관리자)만 요약을 볼 수 있어요.</p>
           ) : others.length === 0 ? <p className="mt-2 text-xs text-ink-500">아직 없어요.</p> : (
             <>
-              <p className="mt-1 text-[11px] text-ink-500">담당이라 요약만 보여요. 코딩 작업이 생긴 대화는 원문을 열 수 있어요.</p>
+              <p className="mt-1 text-[11px] text-ink-500">다른 사람의 대화(요약만 보임). 담당이라 볼 수 있어요. 코딩 작업이 생긴 대화는 원문을 열 수 있어요.</p>
               <ul className="mt-2 space-y-1.5">
                 {others.map((t) => (
                   <li key={t.id} className={`rounded-lg px-2 py-1.5 text-xs ${thread?.id === t.id ? "bg-brand-50" : "bg-ink-50"}`}>
@@ -226,6 +252,14 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div ref={box} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-5 lg:px-6">
+          {prep && (
+            <p role="status" className="mb-4 flex flex-wrap items-center gap-2 rounded-xl bg-violet-50 px-3 py-2 text-xs text-violet-800">
+              <PreparingChip /> {agent.name}는 아직 준비 중이에요. 서버가 연결되고 LLM 키가 들어가면 여기서 말을 걸 수 있어요.
+            </p>
+          )}
+          {thread?.restricted && (
+            <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">다른 사람의 대화(요약만 보임){thread.summary ? `: ${thread.summary}` : ""}</p>
+          )}
           {readOnly
             ? <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">다른 사람의 대화예요. 코딩 작업이 생긴 대화라 담당자에게 원문을 보여 줘요. 이어서 말할 수는 없어요.</p>
             : <p className="mb-4 rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-500">{agent.note}</p>}
@@ -234,6 +268,7 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
           ) : (
             <ol role="log" aria-live="polite" aria-label={`${agent.name}와 나눈 대화`} className="flex flex-col gap-3">
               {messages.map((m) => <Bubble key={m.id} m={m} name={agent.name} me={!readOnly} />)}
+              {isAnswering(thread) && !sending && <li className="animate-pulse px-1 text-xs text-ink-500">{agent.name}가 답하는 중…</li>}
               {sending && (
                 <>
                   <Bubble m={{ id: "sending", role: "user", text: sending, at: "", kind: "text" }} name={agent.name} me />
@@ -244,6 +279,7 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
           )}
         </div>
         {error && <p role="alert" className="mx-4 mb-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-800 lg:mx-6">{error}</p>}
+        {locked && <p role="alert" className="mx-4 mb-2 rounded-xl bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 lg:mx-6">쓸 수 없어요: {locked}</p>}
         {readOnly ? (
           <div className="border-t border-ink-100 px-4 py-3 text-right lg:px-6">
             <button type="button" className="btn-ghost" onClick={reset}>내 대화로 돌아가기</button>
@@ -251,8 +287,8 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
         ) : (
           <form onSubmit={send} className="flex items-end gap-2 border-t border-ink-100 px-4 py-3 lg:px-6">
             <textarea className="field min-h-[44px] flex-1 resize-none" rows={2} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
-              placeholder={`${agent.name}에게 보낼 말 (Enter 보내기, Shift+Enter 줄바꿈)`} aria-label={`${agent.name}에게 보낼 말`} disabled={!!sending} />
-            <button className="btn-primary" disabled={!text.trim() || !!sending}>보내기</button>
+              placeholder={`${agent.name}에게 보낼 말 (Enter 보내기, Shift+Enter 줄바꿈)`} aria-label={`${agent.name}에게 보낼 말`} disabled={!!sending || prep || !!locked} />
+            <button className="btn-primary" disabled={!text.trim() || !!sending || prep || !!locked || isAnswering(thread)}>보내기</button>
           </form>
         )}
       </div>
