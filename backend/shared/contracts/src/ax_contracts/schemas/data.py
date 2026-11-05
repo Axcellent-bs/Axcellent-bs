@@ -2251,6 +2251,25 @@ class CollectorStatus(AxModel):
     reason: str  # 잠금 상태 한 줄 (사람이 읽음)
 
 
+class YouTubeChartFailure(AxModel):
+    """영상 탐색 카테고리 인기 차트(videos.list chart=mostPopular)를 받지 못한 YouTube 카테고리.
+
+    차트가 다시 되면 목록에서 빠진다. 그 칸은 같은 카테고리 검색(최근 3일, 하루 검색 상한 안에서
+    카테고리마다 하루 1번)으로 대신 채운다.
+    """
+
+    category_id: str = Field(min_length=1)  # YouTube 카테고리 id (예: 27)
+    categories: list[str] = Field(default_factory=list)  # 이 id를 쓰는 화면 카테고리
+    code: str  # 실패 코드 (예: UNAVAILABLE)
+    reason: str  # 실패 이유 (커넥터 문장)
+    failed_at: UtcDatetime  # 마지막으로 실패한 시각
+    # 대신 검색: searched = 검색함, cap = 하루 검색 상한, failed = 검색도 실패, not_run = 안 함
+    fallback: Literal["searched", "cap", "failed", "not_run"] = "not_run"
+    fallback_found: int | None = Field(default=None, ge=0)  # 검색으로 찾은 영상 수
+    fallback_reason: str | None = None  # 검색하지 못했으면 이유
+    fallback_day: dt.date | None = None  # 대신 검색 상태의 날 (한국 날짜)
+
+
 class DataSourcesOutput(AxModel):
     sources: list[DataSource] = Field(default_factory=list)
     checked_at: UtcDatetime | None = None
@@ -2263,6 +2282,8 @@ class DataSourcesOutput(AxModel):
     pending_sources: list[PendingSource] = Field(default_factory=list)
     # 아래는 예전 응답은 없다. YouTube 오늘 사용량(하나의 장부)과 하루 상한
     youtube_usage: YouTubeDailyUsage | None = None
+    # 아래는 예전 응답은 없다. 카테고리 인기 차트를 받지 못한 YouTube 카테고리 (영상 탐색)
+    youtube_chart_failures: list[YouTubeChartFailure] = Field(default_factory=list)
 
 
 class YouTubeCallerUsage(AxModel):

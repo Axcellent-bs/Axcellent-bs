@@ -270,6 +270,90 @@ def test_category_charts_are_fetched_hourly_and_reclassified(tmp_path: Path) -> 
     assert yt.charts == ["23", "99", "23", "99"]
 
 
+def _chart_env(tmp_path: Path, searches: int = 3) -> dict[str, str]:
+    env = _env(tmp_path)
+    config = Path(env["DATA_TREND_CONFIG"])
+    config.write_text(config.read_text(encoding="utf-8").replace(
+        "daily_searches = 3\n", f"daily_searches = {searches}\n").replace(
+        "max_videos = 5\n", 'max_videos = 5\n\n[explorer.chart]\n"유머" = ["23", "99"]\n'),
+        encoding="utf-8")  # fmt: skip
+    return env | {ve.DB_ENV: str(tmp_path / "explorer.db")}
+
+
+def _chart_compute(env: dict[str, str], tmp_path: Path, yt: FakeYouTube,
+                   store: ve.ExplorerStore, now: datetime = NOW) -> dict:  # fmt: skip
+    cache = CategoryCache(tmp_path / "topics.db", now=lambda: now)
+    return asyncio.run(ve.compute(env, youtube=yt, llm=FakeLLM(), store=store, cache=cache,
+                                  terms=_terms, now=now))  # fmt: skip
+
+
+def test_failed_chart_is_recorded_and_its_slot_is_filled_by_search(tmp_path: Path) -> None:
+    """차트가 없는 카테고리(27 교육 등): 실패를 기록하고 그 카테고리 검색(3일)으로 대신 채움."""
+    env = _chart_env(tmp_path)
+    yt = ChartYouTube()
+    store = ve.ExplorerStore(tmp_path / "explorer.db")
+    out = _chart_compute(env, tmp_path, yt, store)
+    first = yt.searches[0]  # 차트 대신 검색이 칸 보충보다 먼저
+    assert (first["category"], first["query"], first["short"]) == ("99", None, False)
+    assert NOW - first["after"] == timedelta(days=3) and first["language"] == "ko"
+    # 길이를 거르지 않는다 (롱 1개 + 숏 1개, 칸은 길이로 나눈다)
+    assert any("99 [NOT_FOUND] → 검색으로 대신 2개" in x for x in out["limits"])
+    [fail] = store.chart_failures()
+    assert (fail.category_id, fail.categories, fail.code) == ("99", ["유머"], "NOT_FOUND")
+    assert fail.reason == "이 카테고리 차트 없음" and fail.failed_at == NOW
+    assert (fail.fallback, fail.fallback_found, fail.fallback_day) == ("searched", 2, NOW.date())
+    saved = {vid: src for vid, (_, src, _) in store.videos().items()}
+    assert saved["q1c"] == "chart_search"  # 우리 분류기가 칸을 정한다 (웃긴 → 유머)
+    long = ve.view(store.result(), VideoExplorerRequest(category="유머", period="7d",
+                   length="long"), env=env, store=store, now=NOW)[0].cells[0]  # fmt: skip
+    assert "q1c" in {v.video_id for v in long.videos}
+    # 하루 상한을 같이 센다: 칸 보충 기록에는 없고(검색 화면) 상한 수에는 있다
+    assert all(not k[0].startswith(ve.CHART_SEARCH) for k in store.searched(NOW.date()))
+    assert store.searches_on(NOW.date()) == 3
+    # 한 시간 뒤 다시 실패해도 대신 검색은 하루 1번
+    before = len(yt.searches)
+    _chart_compute(env, tmp_path, yt, store, NOW + timedelta(minutes=61))
+    assert not any(s["category"] == "99" for s in yt.searches[before:])
+    assert store.chart_failures()[0].failed_at == NOW + timedelta(minutes=61)
+
+
+def test_chart_search_stays_within_the_daily_cap_and_clears_when_the_chart_works(
+    tmp_path: Path,
+) -> None:
+    env = _chart_env(tmp_path, searches=0)
+    yt = ChartYouTube()
+    store = ve.ExplorerStore(tmp_path / "explorer.db")
+    out = _chart_compute(env, tmp_path, yt, store)
+    assert yt.searches == []  # 상한 0: 검색하지 않음
+    [fail] = store.chart_failures()
+    assert fail.fallback == "cap" and fail.fallback_reason == f"{ve.CAP_REASON} (하루 0번)"
+    assert any("99 [NOT_FOUND] → 검색 상한" in x for x in out["limits"])
+
+    class Fixed(ChartYouTube):  # 차트가 다시 됨
+        async def popular_category(self, category_id, region="KR"):  # noqa: ANN001, ANN201
+            return []
+
+    _chart_compute(env, tmp_path, Fixed(), store, NOW + timedelta(minutes=61))
+    assert store.chart_failures() == []  # 되면 목록에서 빠진다
+
+
+def test_failed_charts_show_in_the_source_status(tmp_path: Path) -> None:
+    from data_agent.skills.data_sources import list_sources
+
+    env = _chart_env(tmp_path)
+    assert ve.chart_failures(env) == []  # 저장이 없으면 빈 목록 (파일을 만들지 않음)
+    store = ve.ExplorerStore(tmp_path / "explorer.db")
+    _chart_compute(env, tmp_path, ChartYouTube(), store)
+    store.close()
+
+    async def no_probe(*args, **kw):  # noqa: ANN002, ANN003, ANN202
+        return None
+
+    env = env | {"DATA_SOURCE_PROBE_DB": str(tmp_path / "probe.db")}
+    out = asyncio.run(list_sources(env, prober=no_probe, now=NOW)).output
+    assert [(f.category_id, f.fallback) for f in out.youtube_chart_failures] == [("99", "searched")]
+
+
 def test_three_day_cells_are_searched_once_a_day_when_short(tmp_path: Path) -> None:
     """7일 검색 뒤에도 3일·1일 칸이 모자라면 그 구간(publishedAfter 3일·1일)으로 하루 1번."""
     class OlderResults(FakeYouTube):  # 검색 결과가 5일 전 영상이라 7일 검색으로 1·3일 칸이 안 참

@@ -265,6 +265,10 @@ async def list_sources(
     from data_agent.youtube_quota import LEDGER
 
     out.youtube_usage = LEDGER.usage(env)
+    # 카테고리 인기 차트를 받지 못한 YouTube 카테고리 (영상 탐색이 검색으로 대신 채움)
+    from data_agent.skills.video_explorer import chart_failures
+
+    out.youtube_chart_failures = chart_failures(env)
     # 기다리는 출처: 출처 목록(수집 계획 후보)에 넣지 않고 따로 보여 준다
     out.pending_sources = [PendingSource(name="광고 데이터", reason=AD_DATA_PENDING)]
     return SourcesResult(out, Evidence(queries=queries, data_summary=out.summary, collected_at=now))
