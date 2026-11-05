@@ -5,7 +5,8 @@
 `uv run python domains/data/eval/campaign/score.py --out <파일>
 --judge data_agent.skills.campaign_effect:eval_judge`의 `metrics`를 `baseline.json`에 옮긴다.
 holdout은 결과 숫자만 본다(케이스 내용을 열지 않는다).
-매출(`campaign.revenue_*`)은 관문에 넣지 않는다. 여러 날 케이스는 `multiday_metrics`와 비교한다.
+매출(`campaign.revenue_*`)은 관문에 넣지 않는다. 여러 날 케이스는 `multiday_metrics`,
+4주 기준선 케이스(`multiday4/`)는 `multiday4_metrics`와 비교한다.
 """
 
 from __future__ import annotations
@@ -66,6 +67,20 @@ def test_multiday_campaigns_are_not_worse_than_the_baseline() -> None:
     )
     worse = _worse(report["metrics"], baseline["multiday_metrics"])
     assert worse == [], "여러 날 campaign 평가가 기준보다 나빠졌다: " + "; ".join(worse)
+
+
+def test_four_week_multiday_campaigns_are_not_worse_than_the_baseline() -> None:
+    """4주 기준선 정의 케이스(`multiday4/`, 기록 21일 = 3구간 케이스 포함)도 같은 채점기로 본다."""
+    baseline = json.loads((CAMPAIGN / "baseline.json").read_text(encoding="utf-8"))
+    report = asyncio.run(
+        _score().run(
+            eval_judge,
+            cases_dir=CAMPAIGN / "multiday4" / "cases",
+            holdout_dir=CAMPAIGN / "multiday4" / "holdout",
+        )
+    )
+    worse = _worse(report["metrics"], baseline["multiday4_metrics"])
+    assert worse == [], "4주 여러 날 campaign 평가가 기준보다 나빠졌다: " + "; ".join(worse)
 
 
 def test_campaign_effect_is_not_worse_than_the_baseline() -> None:

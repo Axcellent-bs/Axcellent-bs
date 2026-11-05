@@ -78,10 +78,12 @@ SHORT_WINDOW = timedelta(days=1)  # 이하: 지난 7일 같은 시간대
 MAX_WINDOW = timedelta(
     days=7
 )  # 이하: 7일 전·14일 전 같은 구간 (넘으면 7일 전 구간이 캠페인과 겹침)
-MULTIDAY_WEEKS = (7, 14)  # 같은 요일 = 7일 전, 14일 전
-HISTORY_NEEDED_DAYS = 14  # 여러 날 캠페인: 시작 전 이만큼 기록이 있어야 한다
+MULTIDAY_WEEKS = (7, 14, 21, 28)  # 같은 요일 = 1·2·3·4주 전 (평가 multiday·multiday4 정의)
+MULTIDAY_MIN_WEEKS = 3  # 기준선에 쓸 같은 요일 구간이 이만큼 있어야 한다
+HISTORY_NEEDED_DAYS = 21  # 여러 날 캠페인: 시작 전 이만큼 기록이 있어야 3구간 (7·14·21일 전)
+HISTORY_READ_DAYS = max(MULTIDAY_WEEKS)  # 시작 전 이만큼 읽는다 (4구간 모두)
 RULE_SHORT = f"지난 {BASELINE_DAYS}일 같은 시간대"
-RULE_MULTIDAY = f"시작 전 {HISTORY_NEEDED_DAYS}일의 같은 요일·시간대 (7일 전·14일 전 같은 구간)"
+RULE_MULTIDAY = "7·14·21·28일 전 같은 요일·같은 길이 구간 (시작 전 기록 안, 최소 3구간)"
 TIMEZONE_ENV = "DATA_TENANT_TIMEZONE"  # 회사 시간대 (scripts/tenant_env.py가 회사 폴더에서 정함)
 BACKEND = Path(__file__).resolve().parents[5]
 COUPON_NOTE = "조회 시점 기준 누적 사용률이며, 캠페인 뒤 사용분도 섞여 있다"
@@ -426,18 +428,21 @@ async def _spans(
             for d in range(1, BASELINE_DAYS + 1)
         ]
         return window, past, RULE_SHORT, None
-    # 여러 날: 시작 전 15일을 한 번에 읽어 7일 전·14일 전 같은 구간을 잘라 낸다. 하루 더 읽는 건
-    # 14일 전 구간이 통째로 비었을 때(서버가 꺼짐) 기록이 짧은 것과 구분하려고다
-    history = await _read(connector, "시작 전", _back(start, HISTORY_NEEDED_DAYS + 1, tz), start)
+    # 여러 날: 시작 전 29일을 한 번에 읽어 7·14·21·28일 전 같은 구간을 잘라 낸다. 하루 더 읽는 건
+    # 28일 전 구간이 통째로 비었을 때(서버가 꺼짐) 기록이 짧은 것과 구분하려고다.
+    # 시작 전 기록 안에 들어오는 구간만 쓴다 (기록이 21일이면 7·14·21일 전 3구간)
+    history = await _read(connector, "시작 전", _back(start, HISTORY_READ_DAYS + 1, tz), start)
     days = _history_days(history, start, tz)
     if days < HISTORY_NEEDED_DAYS:
         reason = (
             f"시작 전 기록 부족 ({days}일): 같은 요일·시간대 기준선에"
-            f" {HISTORY_NEEDED_DAYS}일이 필요함"
+            f" {HISTORY_NEEDED_DAYS}일({MULTIDAY_MIN_WEEKS}구간)이 필요함"
         )
         return window, [], RULE_MULTIDAY, reason
     past = [
-        _cut(history, f"{k}일 전", _back(start, k, tz), _back(end, k, tz)) for k in MULTIDAY_WEEKS
+        _cut(history, f"{k}일 전", _back(start, k, tz), _back(end, k, tz))
+        for k in MULTIDAY_WEEKS
+        if k <= days
     ]
     return window, past, RULE_MULTIDAY, None
 
@@ -461,6 +466,12 @@ async def _orders(
     if not used:
         why = f"기준선에 쓸 지난 구간이 없음 ({'; '.join(dropped)})"
         return _unknown_change(why, 0, rule), used, rule
+    if rule == RULE_MULTIDAY and len(used) < MULTIDAY_MIN_WEEKS:  # 공백으로 빠져 3구간이 안 됨
+        why = (
+            f"기준선에 쓸 같은 요일 구간이 {len(used)}개뿐 (최소 {MULTIDAY_MIN_WEEKS}구간)"
+            + (f": {'; '.join(dropped)}" if dropped else "")
+        )
+        return _unknown_change(why, len(used), rule), used, rule
     totals = [t for t in (s.total() for s in used) if t is not None]
     orders = judge_orders(window.total(), totals, alpha, rule)
     if dropped and orders.status == "known":
