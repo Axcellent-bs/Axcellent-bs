@@ -331,7 +331,12 @@ def _save() -> None:
         return
     rows = [{**dataclasses.asdict(c), "paths": list(c.paths)} for c in (_screen or {}).values()]
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    # 토큰·App 개인 키가 들어 있어 만든 사용자만 읽는다 (llm_key와 같은 방식). 프로세스 umask
+    # (서버는 0002)로 만들면 그룹·다른 사용자가 읽을 수 있으므로 처음부터 0600으로 만들고,
+    # 예전 임시 파일이 남아 있어도 권한을 다시 맞춘다
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.chmod(tmp, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(rows, f, ensure_ascii=False)
     os.replace(tmp, path)
 
@@ -342,6 +347,10 @@ def load_saved() -> int:
     path = _store_path()
     if not path or not os.path.exists(path):
         return 0
+    try:
+        os.chmod(path, 0o600)  # 예전에 넓은 권한으로 저장된 파일도 만든 사용자만 읽게 맞춘다
+    except OSError:
+        pass
     try:
         with open(path, encoding="utf-8") as f:
             rows = json.load(f)
