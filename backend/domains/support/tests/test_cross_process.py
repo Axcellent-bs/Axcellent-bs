@@ -152,6 +152,33 @@ def test_a_coupon_paid_after_closing_reissues_the_resolved_event(peers: Peers) -
     assert again.idempotency_key == f"{CTX}:support.inquiry_resolved:1:coupon:cpn_0001"
 
 
+def test_a_refund_paid_after_closing_reissues_the_resolved_event(peers: Peers) -> None:
+    """문의가 이미 닫힌 뒤 클레임 서비스에서 환불이 끝나면 금액을 채워 한 번 더 보낸다."""
+    peers.inquiry.status = "resolved"
+    created = call(
+        "create_claim",
+        {
+            "buyer_id": "buy_0002",
+            "customer_name": "김하늘",
+            "order_id": "102",
+            "type": "cancel",
+            "reason": "change_of_mind",
+            "evidence_count": 0,
+            "conversation_id": 1,
+        },
+        "k-c",
+        requester="dashboard-api",
+    )
+    assert created["status"] == "completed"
+    paid = call("process_claim_queue", {}, "k-p", requester="dashboard-api")["output"]
+    assert paid["paid"] == 1
+    (again,) = resolved()
+    assert again.data["refund_amount"] and again.data["refund_amount"] > 0
+    assert again.data["claim_id"] == 1
+    assert again.idempotency_key == f"{CTX}:support.inquiry_resolved:1:refund:1"
+    assert len(peers.by_skill("get_inquiry")) >= 1  # 문의는 문의 서비스에서 읽었다
+
+
 def test_a_coupon_for_an_open_inquiry_sends_no_event(peers: Peers) -> None:
     compensate()
     assert resolved() == []  # 닫을 때 나가는 이벤트가 쿠폰을 싣는다
