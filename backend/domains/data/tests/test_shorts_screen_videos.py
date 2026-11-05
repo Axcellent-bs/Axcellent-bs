@@ -142,6 +142,8 @@ def run_scenario(tmp_path: Path, extra: str = "", youtube: ScreenYouTube | None 
 def stats_view(output: Any) -> dict[str, Any]:
     """통계 칸만 (화면 칸 `videos`와 영상의 새 칸을 뺀 응답)."""
     data = output.model_dump(mode="json")
+    # 예전 응답에 없던 칸: 이 시나리오엔 하위 주제 저장분이 없어 0이어야 한다
+    assert data.pop("subtopic_shorts") == 0
     for key in ("by_category", "by_format"):
         for group in data[key]:
             group.pop("videos", None)
