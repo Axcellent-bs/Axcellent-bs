@@ -48,6 +48,7 @@ from ax_contracts.schemas.data import (
     SourcePlanRequest,
 )
 from data_agent.connectors import ConnectorUnavailable, data4library, naver_shopping
+from data_agent.llm_budget import no_llm
 from data_agent.skills.code_version import source_hash
 from data_agent.skills.data_sources import BY_ID
 from data_agent.skills.trend_scan import TREND_CONFIG_ENV
@@ -580,8 +581,8 @@ async def make_plan(
                 PROMPT, _Plan, untrusted=data_block(profile, sources.sources, options),
                 context_id=context_id,
             )  # fmt: skip
-        except LLMNotConfiguredError:
-            out.reason = "LLM 설정이 없어 계획을 만들지 못함"
+        except LLMNotConfiguredError as error:
+            out.reason = f"{no_llm(error)} 계획을 만들지 못함"
         except (LLMFormatError, ValidationError):
             out.reason = "LLM 답 형식이 맞지 않아 계획을 만들지 못함"
         except Exception as error:  # 호출 실패

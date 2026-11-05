@@ -87,6 +87,31 @@ def _new(svc: PlanningService, **kw) -> str:
 
 
 @pytest.mark.role("planning")
+def test_pull_skips_similar_proposals_even_with_new_ids() -> None:
+    class Pull:
+        def __init__(self, items):
+            self.items = items
+
+        async def pull(self, ctx):
+            return self.items
+
+    same_goods = _insight("promo_b:pc_2").model_copy(update={"title": "밤의 도서관 루틴 숏츠"})
+    same_title = _insight("promo_b:pc_3").model_copy(
+        update={"title": "가을 밤 10분 독서 숏츠!", "products": ["다른 책"], "facts": []}
+    )
+    other = _insight("promo_b:pc_4").model_copy(
+        update={"title": "겨울 다이어리 꾸미기", "products": ["무지 노트 3권 세트"]}
+    )
+    svc = _svc(insights=Pull([same_goods, same_title, other]))
+    first = _new(svc, ref="promo_a:pc_1")
+    res = asyncio.run(svc.dispatch({"type": "pullInsights"}))
+    out = res.output
+    assert [x["proposal_id"] for x in out["similar"]] == [first, first]
+    assert len(out["created"]) == 1 and len(svc.state.proposals) == 2
+    assert "비슷한 제안이 있어 건너뜀 2개" in svc.state.activity[-1].text
+
+
+@pytest.mark.role("planning")
 def test_rule_draft_quotes_facts_and_dedups_without_rewriting() -> None:
     writer = Writer()
     svc = _svc()
@@ -371,6 +396,80 @@ def test_measure_sends_ids_then_retries_without_and_records_result() -> None:
     assert p.status == "성과 확인" and p.result.direction == "늘었음"
     values = {f.value for f in p.result.facts}
     assert {"+30건 (기대 100건)", "30%"} <= values
+
+
+def test_effect_result_uses_products_basis_and_keeps_groups_apart() -> None:
+    from ax_contracts.schemas.data import CampaignEffectOutput
+
+    def measure(inc, low, high, base, d):
+        return {"period": base + inc, "baseline": base, "incremental": inc,
+                "incremental_low": low, "incremental_high": high, "direction": d}  # fmt: skip
+
+    note = "무지 노트 3권 세트"
+    pe = {
+        "status": "known",
+        "matched": [{"product_id": "p1", "name": note, "asked": note}],
+        "unmatched_products": ["없는 상품"],
+        "orders": measure(12, 5, 20, 30, "up"),
+        "units": measure(15, 6, 24, 40, "up"),
+        "gross_krw": measure(112500, 45000, 180000, 300000, "up"),
+    }
+
+    def out(products_effect: dict) -> CampaignEffectOutput:
+        return CampaignEffectOutput.model_validate({
+            "campaign_id": "cmp_PROP-1",
+            "window_from": "2026-11-04T00:00:00Z", "window_to": "2026-11-05T00:00:00Z",
+            "orders": {"status": "known", "direction": "down", "actual": 80, "expected": 100,
+                       "excess": -20, "ratio": 0.8, "baseline_days": 7},
+            "revenue": {"status": "unknown", "unknown_reason": "매출 지표 없음"},
+            "coupons": {"status": "unknown", "unknown_reason": "캠페인 쿠폰이 없음"},
+            "summary": "관련 상품 주문이 늘었다",
+            "products_effect": products_effect,
+        })  # fmt: skip
+
+    direction, _, facts = proposals.effect_result(out(pe))
+    assert direction == "늘었음"  # 가게 전체는 줄었어도 방향은 상품 기준
+    by = {f.label: (f.value, f.source) for f in facts}
+    got = by["관련 상품 주문 증분"]
+    assert got == ("+12건 (기준 30건, 범위 +5~+20)", proposals.EFFECT_PRODUCTS)
+    assert by["관련 상품 판매액 증분"][0].startswith("+112,500원")
+    assert by["못 찾은 상품"] == ("없는 상품", proposals.EFFECT_PRODUCTS)
+    assert by["가게 전체 주문 증분"] == ("-20건 (기대 100건)", proposals.EFFECT_STORE)
+    flat = {**pe, "orders": measure(2, -4, 8, 30, "uncertain")}
+    assert proposals.effect_result(out(flat))[0] == "같음"
+    gone = {**pe, "status": "unknown", "unknown_reason": "기록 공백"}
+    d, _, f = proposals.effect_result(out(gone))
+    assert d == "확인 불가" and any(x.value == "기록 공백" for x in f)
+
+
+@pytest.mark.role("planning")
+def test_measure_sends_proposal_products() -> None:
+    seen: list[dict] = []
+    effect = {
+        "campaign_id": "CMP-1",
+        "window_from": "2026-11-04T00:00:00Z", "window_to": "2026-11-05T00:00:00Z",
+        "orders": {"status": "unknown", "unknown_reason": "기준선 부족"},
+        "revenue": {"status": "unknown", "unknown_reason": "매출 지표 없음"},
+        "coupons": {"status": "unknown", "unknown_reason": "캠페인 쿠폰이 없음"},
+        "summary": "확인할 수 없음",
+    }  # fmt: skip
+
+    async def caller(target, req):
+        seen.append(dict(req.input))
+        return AgentResult(meta=req.meta, status=TaskStatus.COMPLETED, output=effect)
+
+    svc = _svc(marketing=Brief(), insights=proposals.DataInsights(caller=caller))
+
+    async def go():
+        pid = (await svc.receive_insight(requester="data", inp=_insight())).output["proposal_id"]
+        await svc.dispatch({"type": "makePlan", "proposal": pid})
+        await svc.dispatch({"type": "approveProposal", "proposal": pid})
+        await _flush(svc)
+        await svc.dispatch({"type": "measureProposal", "proposal": pid})
+        return pid
+
+    p = _p(svc, asyncio.run(go()))
+    assert seen[0]["products"] == p.products and p.products
 
 
 def test_effect_window_starts_at_publish_and_caps_at_seven_days() -> None:

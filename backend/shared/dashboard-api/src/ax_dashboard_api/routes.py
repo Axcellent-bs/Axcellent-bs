@@ -7,6 +7,7 @@ dashboard-web 옛 경로와의 대응은 README "엔드포인트" 표를 본다.
 from __future__ import annotations
 
 import hashlib
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -52,12 +53,13 @@ from ax_dashboard_api import (
     mock_handover,
     mock_hr,
     relay,
+    support_chat,
     support_client,
 )
 from ax_dashboard_api import (
     communications as communication_log,
 )
-from ax_dashboard_api.auth import require_human_for_writes
+from ax_dashboard_api.auth import human_from_authorization, require_human_for_writes
 from ax_dashboard_api.envelope import ApiError, is_mock, ok, or_unavailable, require_mock
 from ax_dashboard_api.schemas import (
     AgentMessageBody,
@@ -89,6 +91,7 @@ from ax_dashboard_api.schemas import (
     ReviewStatusBody,
     StatusBody,
     Summary,
+    SupportChatSendBody,
     TextBody,
     Validation,
 )
@@ -842,6 +845,46 @@ async def cancel_campaign(campaign_id: str, body: CampaignCancelBody) -> dict:
     )
 
 
+class MarketingChatSendBody(BaseModel):
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=2000)
+
+
+@router.get("/marketing-chat")
+async def marketing_chat_list(request: Request) -> dict:
+    """마케팅 AI 대화 목록. 사람 토큰이 필요하다. 남의 대화는 원문 없이 요약만(`restricted`)."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await marketing_client.chat_call("list_chat_threads", {"who": who})
+    return ok(out.get("threads", []))
+
+
+@router.get("/marketing-chat/{thread_id}")
+async def marketing_chat_get(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await marketing_client.chat_call("get_chat_thread", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+@router.post("/marketing-chat")
+async def marketing_chat_send(body: MarketingChatSendBody, request: Request) -> dict:
+    """말을 저장하고 `status: answering`으로 바로 돌려준다. 답은 GET으로 가져간다."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = {"who": who, "message": body.message} | (
+        {"thread_id": body.thread_id} if body.thread_id else {}
+    )
+    out = await marketing_client.chat_call("send_chat_message", payload)
+    return ok(out["thread"])
+
+
+@router.post("/marketing-chat/{thread_id}/close")
+async def marketing_chat_close(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await marketing_client.chat_call(
+        "close_chat_thread", {"who": who, "thread_id": thread_id}
+    )
+    return ok(out["thread"])
+
+
 @router.post("/org-roster/complete")
 async def set_org_roster_complete(body: OrgRosterCompleteBody) -> dict:
     """전 직원 등록 완료 표시(사람 토큰 필요). 확정 명부가 전체 직원 수일 때만 표시할 수 있다."""
@@ -1213,6 +1256,66 @@ async def executions(context_id: str | None = None) -> dict:
     else:
         items = await relay.executions(context_id)
     return ok(items, total=len(items))
+
+
+# ---------------------------------------- 고객지원 AI와 직접 대화 (support chat_* skill)
+# 응답 모양은 개발 AI `/dev-chat`과 같다 (id·title·status·messages[]·who·created_at·updated_at +
+# summary·task_ids·redacted). 보내기는 말을 저장하고 곧바로 돌려준다(status answering). 화면은
+# answering이면 GET으로 다시 읽는다. 읽기(GET)도 열람 권한을 가르려면 사람 토큰을 붙여야 한다.
+def _chat_viewer(request: Request) -> dict[str, str | None]:
+    viewer, role = support_chat.viewer_of(request.headers.get("authorization"))
+    return {"viewer": viewer, "role": role}
+
+
+@router.get("/support-chat")
+async def support_chat_list(request: Request) -> dict:
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "직접 대화는 실제 모드에서만 된다")
+    out = await support_client.call("support_chat_list", _chat_viewer(request))
+    return ok(out["items"], total=out["total"])
+
+
+@router.get("/support-chat/{thread_id}")
+async def support_chat_get(thread_id: str, request: Request) -> dict:
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "직접 대화는 실제 모드에서만 된다")
+    return ok(
+        await support_client.call(
+            "support_chat_get", {"thread_id": thread_id, **_chat_viewer(request)}
+        )
+    )
+
+
+@router.post("/support-chat")
+async def support_chat_send(body: SupportChatSendBody, request: Request) -> dict:
+    """말을 보낸다. 말한 사람은 사람 토큰에서만 채우고, 대화가 읽을 집계는 숫자만 넘긴다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "직접 대화는 실제 모드에서만 된다")
+    out = await support_client.call(
+        "support_chat_send",
+        {
+            "thread_id": body.thread_id,
+            "who": request.state.human,
+            "context": await support_chat.snapshot(),
+        },
+        {"message": body.message},  # 사람의 말은 untrusted로만 넘긴다
+        key=f"support-chat:{uuid.uuid4().hex}",  # 보낼 때마다 한 번씩 처리한다
+    )
+    return ok(out)
+
+
+@router.post("/support-chat/{thread_id}/close")
+async def support_chat_close(thread_id: str, request: Request) -> dict:
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "직접 대화는 실제 모드에서만 된다")
+    # 닫는 사람은 사람 토큰(쓰기라 반드시 있다)에서만 채운다
+    role = _chat_viewer(request)["role"]
+    out = await support_client.call(
+        "support_chat_close",
+        {"thread_id": thread_id, "viewer": request.state.human, "role": role},
+        target=f"chat:{thread_id}",
+    )
+    return ok(out)
 
 
 def _given(**filters: str | None) -> dict[str, str]:

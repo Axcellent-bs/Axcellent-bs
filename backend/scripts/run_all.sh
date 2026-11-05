@@ -146,6 +146,8 @@ export DATA_TODAY_BOARD_DB="$PWD/$DATA/today_board.db"
 export MARKETING_BRIEFS_DB="$PWD/$DATA/marketing_briefs.db"
 # marketing: 이미지·영상 생성 비용 장부(월 누적). 다시 켜도 남아야 월 상한이 유지된다
 export MARKETING_MEDIA_LEDGER_DB="$PWD/$DATA/marketing_media_ledger.db"
+# marketing: 마케팅 AI와 사람의 직접 대화를 파일에 남겨 다시 켜도 대화가 유지되게
+export MARKETING_CHAT_DB="$PWD/$DATA/marketing_chat.db"
 # 기획·개발은 실제 시각으로 (기본은 10-22에서 1분씩 가는 시연 시계라 총괄이 사건 구간으로 묻는
 # 관련 PR 찾기·교차검증 최근 7일 장애가 실제 머지를 못 잡는다)
 export PLANNING_CLOCK=real
@@ -158,6 +160,8 @@ export DATA_TREND_RESPONSES_DB="$PWD/$DATA/trend_responses.db"
 # data: 설명 문장 캐시·네이버 하루 캐시(응답·호출 수)도 파일에 (다시 켜도 LLM·네이버를 다시 안 부름)
 export DATA_EXPLAIN_DB="$PWD/$DATA/explain_cache.db"
 export DATA_NAVER_CACHE_DB="$PWD/$DATA/naver_cache.db"
+# data: LLM 하루 상한 기록 (서버·수집기가 같이 셈. 상한은 .env의 DATA_LLM_DAILY_CALLS·DATA_LLM_DAILY_TOKENS)
+export DATA_LLM_BUDGET_DB="$PWD/$DATA/data_llm_budget.db"
 
 # 업무 요청 라우터 (README "업무 요청 라우터"): 켠 서비스면 에이전트로, 안 켠 서비스면 사람 할 일함으로
 # 켠 서비스는 backend/.env 의 AX_ENABLED_SERVICES (쉼표 목록). 없거나 비어 있으면 전부 켠다(예전 동작)

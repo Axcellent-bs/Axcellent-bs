@@ -323,7 +323,7 @@ export interface State {
 }
 
 // ---- AI와 대화: 개발 에이전트와 대화하다 필요한 것이 모이면 코딩 작업을 시작한다
-export type ChatStatus = 'talking' | 'started' | 'blocked' | 'waiting'
+export type ChatStatus = 'talking' | 'started' | 'blocked' | 'waiting' | 'answering' | 'closed'
 export type ChatKind = 'text' | 'question' | 'plan' | 'started' | 'waiting' | 'error'
 export interface ChatPlan { title: string; plan: string; done: string[]; paths: string[] }
 export interface ChatMessage {

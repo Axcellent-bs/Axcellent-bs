@@ -71,15 +71,16 @@ def _validation_error() -> ValidationError:
     raise AssertionError("검증 오류가 나야 한다")
 
 
-# ---------- 이유 4가지 ----------
+# ---------- 이유 5가지 ----------
 
 
-def test_there_are_four_reasons() -> None:
+def test_there_are_five_reasons() -> None:
     assert set(FALLBACK_REASONS) == {
         "llm_unavailable",
         "llm_error",
         "format_error",
         "number_invalid",
+        "llm_daily_cap",  # data LLM 하루 상한 (llm_budget)
     }
 
 

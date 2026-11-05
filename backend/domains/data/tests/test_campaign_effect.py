@@ -531,13 +531,49 @@ def _multi(start: datetime, days: int, value) -> CampaignEffectOutput:  # noqa: 
     return asyncio.run(measure(data, Slots(value), env=SEOUL))
 
 
-def test_multiday_baseline_is_the_same_weekday_two_weeks() -> None:
+def test_multiday_baseline_is_the_same_weekday_four_weeks() -> None:
     start = MON + timedelta(days=4)  # 금~일
     out = _multi(start, 3, lambda at: _daily(at) * (2.0 if at >= start else 1.0)).orders
     assert out.status == "known" and out.direction == "up"
-    assert out.baseline_rule and "같은 요일" in out.baseline_rule and out.baseline_days == 2
-    weekend = 110 + 140 + 130  # 금·토·일 수준 = 7일 전·14일 전 같은 구간
+    assert out.baseline_rule and "같은 요일" in out.baseline_rule and out.baseline_days == 4
+    weekend = 110 + 140 + 130  # 금·토·일 수준 = 7·14·21·28일 전 같은 구간
     assert out.expected == pytest.approx(weekend) and out.actual == pytest.approx(2 * weekend)
+
+
+class SlotsWithOrders(Slots):
+    """주문 기록·상품 목록도 주는 커넥터: 구간마다 그 상품 주문 1건 (읽은 구간 시작을 기록)."""
+
+    def __init__(self, value) -> None:  # noqa: ANN001
+        super().__init__(value)
+        self.read: list[datetime] = []
+
+    async def orders(self, window_from: datetime, window_to: datetime) -> list:
+        from data_agent.connectors.shop_api import ShopOrder
+
+        self.read.append(window_from)
+        return [ShopOrder.model_validate({
+            "order_id": f"o{len(self.read)}", "status": "paid", "created_at": window_from,
+            "items": [{"product_id": "prd_1", "qty": 1, "unit_price": 1000}],
+            "payments": [{"amount": 1000, "status": "succeeded"}],
+        })]  # fmt: skip
+
+    async def products(self) -> list:
+        from data_agent.connectors import CatalogProduct
+
+        return [CatalogProduct(product_id="prd_1", name="노트")]
+
+
+def test_orders_sales_and_products_use_the_same_four_weeks() -> None:
+    start = MON + timedelta(days=4)
+    shop = SlotsWithOrders(_daily)
+    data = CampaignEffectInput(window_from=start, window_to=start + timedelta(days=3),
+                               products=["prd_1"])  # fmt: skip
+    out = asyncio.run(measure(data, shop, env=SEOUL))
+    assert out.orders.baseline_days == 4
+    assert out.sales is not None and out.sales.baseline_days == 4
+    assert out.products_effect is not None and out.products_effect.baseline_days == 4
+    weeks = sorted({round((start - at).total_seconds() / 86400) for at in shop.read})
+    assert weeks == [0, 7, 14, 21, 28]  # 캠페인 구간 + 같은 요일 4구간 (판매액·상품이 같이 읽음)
 
 
 def test_flat_weekend_is_not_a_rise() -> None:
@@ -555,21 +591,33 @@ def test_short_history_says_how_many_days() -> None:
 
 
 def test_an_empty_baseline_week_is_left_out() -> None:
-    """14일 전 같은 구간에 서버가 꺼져 있었으면 그 주는 빼고 7일 전만 쓴다 (0건으로 넣지 않음).
+    """14일 전 같은 구간에 서버가 꺼져 있었으면 그 주는 빼고 7·21·28일 전만 쓴다 (0건 아님).
 
-    그 전(15일 전)에는 기록이 있어서 "시작 전 기록 부족"이 아니다.
+    그 전(29일 전)에는 기록이 있어서 "시작 전 기록 부족"이 아니다.
     """
     start = MON + timedelta(days=1)
     off_from, off_to = start - timedelta(days=14), start - timedelta(days=12)
     out = _multi(start, 2, lambda at: 0.0 if off_from <= at < off_to else _daily(at)).orders
-    assert out.status == "known" and out.baseline_days == 1
-    assert out.expected == pytest.approx(200.0)  # 화·수 = 7일 전 구간만
+    assert out.status == "known" and out.baseline_days == 3
+    assert out.expected == pytest.approx(200.0)  # 화·수 = 남은 3구간 평균
     assert out.baseline_note and "14일 전: 주문·결제 기록이 하나도 없음" in out.baseline_note
 
 
-def test_both_baseline_weeks_empty_is_unknown() -> None:
+def test_fewer_than_three_baseline_weeks_is_unknown() -> None:
+    """같은 요일 구간이 빠져 3구간이 안 되면 판정하지 않는다 (2구간 평균을 쓰지 않음)."""
     start = MON + timedelta(days=1)
     off = [(start - timedelta(days=k), start - timedelta(days=k - 2)) for k in (7, 14)]
+    out = _multi(
+        start, 2, lambda at: 0.0 if any(a <= at < b for a, b in off) else _daily(at)
+    ).orders
+    assert out.status == "unknown" and out.baseline_days == 2
+    reason = out.unknown_reason or ""
+    assert reason.startswith("기준선에 쓸 같은 요일 구간이 2개뿐 (최소 3구간): 7일 전:")
+
+
+def test_all_baseline_weeks_empty_is_unknown() -> None:
+    start = MON + timedelta(days=1)
+    off = [(start - timedelta(days=k), start - timedelta(days=k - 2)) for k in (7, 14, 21, 28)]
     out = _multi(
         start, 2, lambda at: 0.0 if any(a <= at < b for a, b in off) else _daily(at)
     ).orders
@@ -607,15 +655,16 @@ def test_history_days_are_counted_in_the_company_timezone() -> None:
     한국 0시 시작 캠페인에서 UTC로 세면 하루가 모자란다.
     """
     start = datetime(2026, 11, 2, 15, 0, tzinfo=UTC)  # 한국 11-03 00:00
-    first = datetime(2026, 10, 20, 14, 0, tzinfo=UTC)  # 한국 10-20 23:00 (UTC 10-20 14:00)
+    first = datetime(2026, 10, 14, 14, 0, tzinfo=UTC)  # 한국 10-14 23:00 (UTC 10-14 14:00)
     data = CampaignEffectInput(
         campaign_id=None, window_from=start, window_to=start + timedelta(days=2)
     )
     value = lambda at: 0.0 if at < first else _daily(at)  # noqa: E731
     seoul = asyncio.run(measure(data, Slots(value), env=SEOUL)).orders
     utc = asyncio.run(measure(data, Slots(value), env={"DATA_TENANT_TIMEZONE": "UTC"})).orders
-    assert seoul.status == "known"
-    assert (utc.unknown_reason or "").startswith("시작 전 기록 부족 (13일)")
+    # 한국 날짜로 20일, UTC로 세면 19일 (둘 다 3구간에 필요한 21일보다 짧다)
+    assert (seoul.unknown_reason or "").startswith("시작 전 기록 부족 (20일)")
+    assert (utc.unknown_reason or "").startswith("시작 전 기록 부족 (19일)")
 
 
 def test_tenant_timezone_comes_from_config_not_code() -> None:
