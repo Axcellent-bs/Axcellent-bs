@@ -105,6 +105,10 @@ class BriefConfig:
     w_youtube: float = 0.5  # YouTube 몫: 영상 수 ÷ 후보 중 최대 영상 수
     age_topics_extra: int = 2  # 연령대를 볼 후보 = 인사이트 수 + 이만큼 (네이버 호출 아끼기)
     pending_max: int = 2  # 분류 대기 주제를 맨 아래 참고용으로 몇 개까지 보일지 (순위에는 안 넣음)
+    # 근거 요약: 표본이 이보다 적은 근거는 뒤로 + "표본 N개"
+    highlight_min_sample: int = 10
+    # 근거 요약: 숏츠 조회 배수(분모가 작은 값)가 이보다 크면 "표본 적음"으로 뒤로
+    highlight_max_ratio: float = 10.0
     per_category_max: int = 2  # 카테고리마다 최대 인사이트 수 (한 분류가 브리프를 채우지 않게)
     w_product: float = 0.5  # 상품 몫: 임베딩 기준을 통과한 회사 상품이 있으면 이만큼
     w_season: float = 0.5  # 시즌 몫: max(0, 작년 같은 달·다음 달 배율 − 1)
@@ -1079,11 +1083,13 @@ async def make_brief(
             i.fact_ids = [f.fact_id for f in mine]
             out.facts += mine
             # 근거 요약 (facts 중 센 것 최대 3개, 템플릿 문장)과 근거 숏츠 최대 3개
-            i.evidence_highlights = hl.insight_highlights(i, mine)
+            pick_rule = hl.Rule(config.highlight_min_sample, config.highlight_max_ratio)
+            i.evidence_highlights = hl.insight_highlights(i, mine, pick_rule)
             i.evidence_shorts = hl.evidence_shorts(i.evidence.video_links)
         for c in out.opportunities:  # 카드 근거 숏츠는 제목을 채운 뒤에 고른다
             c.evidence_highlights = hl.card_highlights(
-                c, [f for f in out.facts if f.about == c.opportunity_id]
+                c, [f for f in out.facts if f.about == c.opportunity_id],
+                hl.Rule(config.highlight_min_sample, config.highlight_max_ratio),
             )
             c.evidence_shorts = hl.evidence_shorts(c.video_links)
         out.schema_version = SCHEMA_VERSION
