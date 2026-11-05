@@ -1,0 +1,67 @@
+{
+ "id": "overlap_products_2h_14h",
+ "kind": "known",
+ "input": {
+  "campaign_id": "cmp_attr",
+  "window_from": "2026-10-14T14:00:00Z",
+  "window_to": "2026-10-14T16:00:00Z",
+  "products": [
+   "prd_0004"
+  ]
+ },
+ "spec": {
+  "id": "overlap_products_2h_14h",
+  "window": {
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T16:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "none"
+  },
+  "attribution": {
+   "tags": [
+    {
+     "source": "instagram",
+     "medium": "social",
+     "campaign_id": "cmp_attr",
+     "fraction": 0.3
+    }
+   ]
+  },
+  "product_boost": {
+   "product_id": "prd_0004",
+   "factor": 2.0
+  }
+ },
+ "expected": {
+  "attribution": {
+   "status": "known"
+  },
+  "overlap": {
+   "status": "known"
+  }
+ },
+ "counted": {
+  "window_orders": 169,
+  "tagged_orders": 51,
+  "tagged_share": 0.3018,
+  "orders": 51,
+  "gross_krw": 973200,
+  "by_source": {
+   "instagram": {
+    "orders": 51,
+    "gross_krw": 973200
+   }
+  },
+  "other_campaign_orders": 0,
+  "overlap": {
+   "orders": 9,
+   "units": 14,
+   "gross_krw": 105000
+  }
+ },
+ "memo": "유입 + 관련 상품(무지 노트, 2배) → 이 캠페인으로 들어와 그 상품을 산 주문"
+}

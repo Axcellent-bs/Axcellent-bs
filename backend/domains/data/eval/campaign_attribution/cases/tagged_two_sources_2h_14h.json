@@ -1,0 +1,62 @@
+{
+ "id": "tagged_two_sources_2h_14h",
+ "kind": "known",
+ "input": {
+  "campaign_id": "cmp_attr",
+  "window_from": "2026-10-14T14:00:00Z",
+  "window_to": "2026-10-14T16:00:00Z"
+ },
+ "spec": {
+  "id": "tagged_two_sources_2h_14h",
+  "window": {
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T16:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "none"
+  },
+  "attribution": {
+   "tags": [
+    {
+     "source": "instagram",
+     "medium": "social",
+     "campaign_id": "cmp_attr",
+     "fraction": 0.2
+    },
+    {
+     "source": "google",
+     "medium": "cpc",
+     "campaign_id": "cmp_attr",
+     "fraction": 0.1
+    }
+   ]
+  }
+ },
+ "expected": {
+  "attribution": {
+   "status": "known"
+  }
+ },
+ "counted": {
+  "window_orders": 134,
+  "tagged_orders": 33,
+  "tagged_share": 0.2463,
+  "orders": 33,
+  "gross_krw": 866900,
+  "by_source": {
+   "google": {
+    "orders": 13,
+    "gross_krw": 330300
+   },
+   "instagram": {
+    "orders": 20,
+    "gross_krw": 536600
+   }
+  },
+  "other_campaign_orders": 0
+ },
+ "memo": "이 캠페인 태그 두 출처 (인스타 20%, 구글 10%)"
+}

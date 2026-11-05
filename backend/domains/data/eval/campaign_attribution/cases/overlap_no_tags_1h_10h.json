@@ -1,0 +1,50 @@
+{
+ "id": "overlap_no_tags_1h_10h",
+ "kind": "unknown",
+ "input": {
+  "campaign_id": "cmp_attr",
+  "window_from": "2026-10-14T10:00:00Z",
+  "window_to": "2026-10-14T11:00:00Z",
+  "products": [
+   "prd_0004"
+  ]
+ },
+ "spec": {
+  "id": "overlap_no_tags_1h_10h",
+  "window": {
+   "from": "2026-10-14T10:00:00Z",
+   "to": "2026-10-14T11:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "none"
+  }
+ },
+ "expected": {
+  "attribution": {
+   "status": "unknown",
+   "unknown_reason": "no_tags"
+  },
+  "overlap": {
+   "status": "unknown",
+   "unknown_reason": "no_tags"
+  }
+ },
+ "counted": {
+  "window_orders": 93,
+  "tagged_orders": 0,
+  "tagged_share": 0.0,
+  "orders": 0,
+  "gross_krw": 0,
+  "by_source": {},
+  "other_campaign_orders": 0,
+  "overlap": {
+   "orders": 0,
+   "units": 0,
+   "gross_krw": 0
+  }
+ },
+ "memo": "관련 상품만 있고 유입 표시 없음 → 유입·겹침 모두 unknown"
+}

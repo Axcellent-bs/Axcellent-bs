@@ -1,0 +1,72 @@
+{
+ "id": "holdout_2026110601_09",
+ "kind": "known",
+ "input": {
+  "campaign_id": "cmp_ah09",
+  "window_from": "2026-09-30T11:00:00Z",
+  "window_to": "2026-09-30T12:00:00Z"
+ },
+ "spec": {
+  "id": "holdout_2026110601_09",
+  "window": {
+   "from": "2026-09-30T11:00:00Z",
+   "to": "2026-09-30T12:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "none"
+  },
+  "attribution": {
+   "tags": [
+    {
+     "source": "kakao",
+     "medium": "message",
+     "campaign_id": "cmp_ah09",
+     "fraction": 0.08
+    },
+    {
+     "source": "naver",
+     "medium": "blog",
+     "campaign_id": "cmp_ah09",
+     "fraction": 0.18
+    },
+    {
+     "source": "instagram",
+     "medium": "social",
+     "campaign_id": "cmp_ox09",
+     "fraction": 0.1
+    }
+   ]
+  }
+ },
+ "expected": {
+  "attribution": {
+   "status": "known"
+  }
+ },
+ "counted": {
+  "window_orders": 72,
+  "tagged_orders": 29,
+  "tagged_share": 0.4028,
+  "orders": 18,
+  "gross_krw": 490400,
+  "by_source": {
+   "kakao": {
+    "orders": 6,
+    "gross_krw": 120000
+   },
+   "naver": {
+    "orders": 12,
+    "gross_krw": 370400
+   }
+  },
+  "other_campaign_orders": 11
+ },
+ "memo": "",
+ "holdout": {
+  "seed": 2026110601,
+  "tags": 3
+ }
+}

@@ -30,6 +30,9 @@
 - 상품 하나만 늘림(`product_boost`, campaign_effect 상품 기준 평가 `eval/campaign_products/`):
   구간 안 5분 칸마다 그 상품 주문을 더 넣어 그 상품의 기대 주문 수를 `factor`배로 만든다.
   따로 씨앗을 둔 난수라 `product_boost`가 없는 시나리오의 데이터는 예전과 같다.
+- 유입 표시(`attribution.tags`, campaign_effect 유입경로 평가 `eval/campaign_attribution/`): 구간 안
+  주문마다 따로 둔 난수로 태그 하나(출처·매체·campaign_id, 비율 `fraction`)를 붙이거나 붙이지 않는다
+  (shop-api `place_order`의 `src_*`). 다른 캠페인 태그도 같은 방식이다. 없는 시나리오는 예전과 같다.
 
 정답(실패 주문 수·금액·영향 고객, 이상 시작 시각)은 data 에이전트 코드가 아니라 여기서 만든
 결제 기록에서 바로 센다(`Truth`).
@@ -150,6 +153,11 @@ class World:
                 data = service.Shop(self.db).list_orders(
                     params.get("buyer_id"), params.get("since"), params.get("until")
                 )
+            elif path.endswith("/orders/attributed"):  # shop-api 유입 주문 조회 (유입경로 평가)
+                data = lookups.attributed_orders(
+                    parse(params["from"]), parse(params["to"]), params.get("campaign_id"),
+                    params.get("source"), int(params.get("limit", 500)),
+                )  # fmt: skip
             elif path.endswith("/products"):  # shop-api `GET /api/shop/products` (상품 기준 평가)
                 data = service.Shop(self.db).list_products(
                     params.get("seller_id"), params.get("category_code")
@@ -421,6 +429,9 @@ def generate(spec: dict[str, Any]) -> World:
     # `product_boost` = 구간 안에서 그 상품만 `factor`배가 되게 그 상품 주문을 더 넣는다
     boost = spec.get("product_boost")
     prng = random.Random(f"{spec['id']}:product")  # 기존 난수 순서를 바꾸지 않게 따로
+    # 유입경로 평가 (`eval/campaign_attribution/`, 없으면 예전과 똑같이 만든다)
+    attribution = spec.get("attribution")
+    arng = random.Random(f"{spec['id']}:attribution")
     gap_days = [int(d) for d in (spec.get("payment_gap") or {}).get("days_ago", [])]
     gap_ranges = [
         (window_from - timedelta(days=d), window_to - timedelta(days=d)) for d in gap_days
@@ -467,6 +478,8 @@ def generate(spec: dict[str, Any]) -> World:
                     shop.create_order(buyer, lines)  # 결제 기록 공백: 결제하지 않는다
                     continue
                 held = coupons.get(buyer) if in_window else None
+                # 유입 표시: 구간 안 주문에만, 따로 둔 난수로 (없는 시나리오는 예전과 같다)
+                src = _source_tags(attribution, arng) if in_window and attribution else {}
                 # 구간 뒤에 쓸 장수(`used_after`)는 남겨 둔다 (조건과 기록이 늘 같게)
                 spare = held is not None and sum(c[1] for c in coupons.values()) > reserve
                 if (
@@ -475,8 +488,10 @@ def generate(spec: dict[str, Any]) -> World:
                     and spare
                     and crng.random() < float(campaign["use_fraction"])
                 ):
-                    order = shop.place_order(buyer, lines, coupon_id=held[0])[0]
+                    order = shop.place_order(buyer, lines, coupon_id=held[0], **src)[0]
                     held[1] -= 1
+                elif src:
+                    order = shop.place_order(buyer, lines, **src)[0]
                 else:
                     order = shop.create_order(buyer, lines)
                 faulty = (
@@ -525,6 +540,21 @@ def generate(spec: dict[str, Any]) -> World:
         if campaign and int(campaign.get("used_after", 0)) > 0:
             _use_after_window(world, shop, coupons, int(campaign["used_after"]), now, clock_seconds)
     return world
+
+
+def _source_tags(attribution: dict[str, Any], arng: random.Random) -> dict[str, str]:
+    """구간 안 주문 하나의 유입 표시. `attribution.tags`의 비율대로 하나를 고르거나 없음.
+
+    난수를 주문마다 한 번만 쓴다(태그가 몇 개든 같은 순서).
+    """
+    roll = arng.random()
+    acc = 0.0
+    for tag in attribution.get("tags", []):
+        acc += float(tag["fraction"])
+        if roll < acc:
+            return {"src_source": tag["source"], "src_medium": tag["medium"],
+                    "src_campaign": tag["campaign_id"]}  # fmt: skip
+    return {}
 
 
 def _slot_orders(
