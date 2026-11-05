@@ -1400,6 +1400,41 @@ async def support_chat_close(thread_id: str, request: Request) -> dict:
     return ok(out)
 
 
+@router.get("/privacy/purge-preview")
+async def purge_preview(
+    mode: Literal["customer_request", "expired"], inquiry_id: int | None = None
+) -> dict:
+    """개인정보 삭제 미리보기(읽기): 무엇이 지워지고 무엇이 보존 의무로 남는지.
+
+    `mode=customer_request`는 삭제를 요청한 문의 번호(`inquiry_id`)가 필요하다.
+    `mode=expired`는 받은 지 3년이 지나 지울 문의를 보여 준다. 아무것도 바꾸지 않는다.
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "개인정보 삭제는 실제 모드에서만 된다")
+    payload: dict = {"mode": mode}
+    if inquiry_id is not None:
+        payload["inquiry_id"] = inquiry_id
+    return ok(await support_client.call("preview_data_purge", payload))
+
+
+@router.post("/conversations/{conversation_id}/customer-data-purge")
+async def customer_data_purge(conversation_id: int) -> dict:
+    """고객 요청에 따른 개인정보 삭제. 삭제를 요청한 문의(`conversation_id`)의 구매자 것을 지운다.
+
+    안전 관문이 늘 사람에게 보류한다. 처음 누르면 409 NOT_EXECUTED(승인 대기)가 돌아오고, 사람이
+    보류 큐에서 승인한 뒤 같은 버튼을 다시 누르면 집행한다(키가 같아 한 번만 처리된다). 처리 중인
+    문의와 클레임이 이어진 문의는 지우지 않고 남긴 날(`retained_until`)을 응답에 담는다.
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "개인정보 삭제는 실제 모드에서만 된다")
+    out = await support_client.call(
+        "purge_customer_data",
+        {"inquiry_id": conversation_id},
+        key=f"customer-deletion:{conversation_id}",  # 승인 전후 호출이 같은 건이다
+    )
+    return ok(out)
+
+
 def _given(**filters: str | None) -> dict[str, str]:
     """값이 있는 필터만 hr 입력으로 보낸다."""
     return {k: v for k, v in filters.items() if v is not None}
