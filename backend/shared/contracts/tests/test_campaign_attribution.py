@@ -8,7 +8,16 @@ from ax_contracts.schemas import (
     CampaignAttributionProducts,
     CampaignEffectOutput,
     CampaignSourceRow,
+    DataSourcesOutput,
+    PendingSource,
 )
+
+
+def test_pending_sources_are_listed_apart_from_plan_sources() -> None:
+    assert DataSourcesOutput().pending_sources == []
+    ad = PendingSource(name="광고 데이터", reason="#647 광고 부분 대기")
+    out = DataSourcesOutput(pending_sources=[ad])
+    assert out.sources == [] and out.pending_sources[0].name == "광고 데이터"
 
 T0, T1 = "2026-10-14T14:00:00Z", "2026-10-14T16:00:00Z"
 
