@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 import sqlite3
 import statistics
 import threading
@@ -307,6 +308,33 @@ def merge_same(terms: dict[str, Term], same_min: int = 4) -> list[Term]:
     return kept
 
 
+# 소문자 영어 일반어 (대문자가 있는 BTS·LCK 등은 고유 이름으로 보고 그대로 둔다)
+_ENGLISH_WORD = re.compile(r"[a-z][a-z' \-]*")
+_HANGUL = re.compile("[가-힣]")
+FOLD_MIN = 0.5  # 영어 이름 영상 중 이 비율 이상이 한국어 이름에도 나오면 같은 대상
+
+
+def fold_english(terms: Sequence[Term]) -> list[Term]:
+    """영어 일반어(books 등) 하위 주제는 같은 대상의 한국어 이름에 묶고, 없으면 뺀다.
+
+    같은 대상 = 그 영어 이름이 나온 영상 중 `FOLD_MIN` 이상에 함께 나온 한국어 이름 (가장 많이 겹친
+    것). 묶으면 영어 이름은 한국어 이름의 묶인 이름(`merged`)이 되고 영상은 합친다.
+    """
+    korean = [t for t in terms if _HANGUL.search(t.name)]
+    out: list[Term] = []
+    for t in terms:
+        if not _ENGLISH_WORD.fullmatch(t.name.strip()):
+            out.append(t)
+            continue
+        best = max(korean, key=lambda k: (len(t.videos & k.videos), -len(k.name)), default=None)
+        shared = len(t.videos & best.videos) if best is not None else 0
+        if best is not None and t.videos and shared / len(t.videos) >= FOLD_MIN:
+            best.merged.add(t.name)
+            best.videos |= t.videos
+            best.origins |= t.origins
+    return out
+
+
 # ---------------------------------------------------------------- 분류 (LLM)
 
 
@@ -460,7 +488,7 @@ async def make_subtopics(
             dropped_common |= dropped
             terms = [
                 t
-                for t in merge_same(found, config.merge_same_min)
+                for t in fold_english(merge_same(found, config.merge_same_min))
                 if len(t.videos) >= config.min_videos
             ]
             terms.sort(key=lambda t: (-len(t.videos), t.name))
