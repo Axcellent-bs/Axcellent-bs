@@ -753,3 +753,34 @@ def test_quota_settings_and_short_domain_say_why(tmp_path: Path) -> None:
     assert [i.topic for i in only.insights] == ["책추천", "니체 철학", "코딩입문"]
     zero = brief.load_config(_env(tmp_path / "c", "domain_min = 9\n", none_max=-1))
     assert (zero.domain_min, zero.none_max) == (7, 0)
+
+
+# ------------------------------------------------ 같은 대상 묶기 (형식 빌리기 판정)
+
+
+def test_format_matches_an_idea_trend_through_the_same_target_group() -> None:
+    """예시 아이디어가 '리그오브레전드'를 빌렸고 브리프 주제가 't1'이면 같은 대상으로 맞춘다."""
+    from ax_contracts.schemas.data import InsightEvidence, PromoProduct, TrendInsight
+
+    def t1() -> TrendInsight:
+        return TrendInsight(insight_id="t1", rank=1, topic="t1", aliases=["티원"], line="x",
+                            evidence=InsightEvidence(), company_relevance="none",
+                            reference_only=True, ad_material=True, shorts_format="챌린지",
+                            category="게임", real_entity=True, entity_names=["t1"])  # fmt: skip
+
+    promo = PromoConceptsOutput(concepts=[
+        PromoConcept(concept_id="c1", title="오늘의 한 권", borrowed_trend="리그오브레전드",
+                     products=[PromoProduct(product_id="p2", name="파이썬 입문서")]),
+    ])  # fmt: skip
+    groups = brief.name_groups({"리그오브레전드": ["lol"], "t1": ["티원"]},
+                               {"리그오브레전드": ["t1"]})  # fmt: skip
+    assert groups["lol"] == groups["티원"] == {"리그오브레전드", "lol", "t1", "티원"}
+    plain = t1()
+    zero = brief.mark_format([plain], promo, brief.Warned())  # 묶음 없이: 못 맞춤
+    assert plain.company_relevance == "none" and zero
+    linked = t1()
+    assert brief.mark_format([linked], promo, brief.Warned(), groups) == []
+    assert linked.company_relevance == "format" and not linked.reference_only
+    assert "같은 대상: 리그오브레전드" in (linked.company_relevance_reason or "")
+    assert [p.product_id for p in linked.borrow_products] == ["p2"]
+    assert brief.same_target(["골프"], groups) == {"골프"}  # 묶음에 없으면 자기 이름만

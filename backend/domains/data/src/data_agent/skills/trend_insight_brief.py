@@ -620,6 +620,7 @@ def build_insights(
     rules: AdRules,
     shorts: ShortsStatsOutput | None = None,
     tenant: str = "default",
+    groups: Mapping[str, frozenset[str]] | None = None,
 ) -> list[TrendInsight]:
     """후보 → 인사이트 칸 (한 줄은 아직 비움). 광고 재료가 아닌 것·분류 대기는 맨 아래."""
     out: list[TrendInsight] = []
@@ -635,7 +636,7 @@ def build_insights(
             samples = group.count
         age = c.age
         band = next((b for b in age.bands if b.band == age.top_band), None) if age else None
-        keys = {_norm(n) for n in c.names()}
+        keys = same_target(c.names(), groups)  # 같은 대상 묶음 포함 (리그오브레전드 = t1)
         ideas = [
             x.title for x in (promo.concepts if promo else []) if _norm(x.borrowed_trend) in keys
         ]
@@ -728,6 +729,23 @@ def pick(cands: Sequence[Candidate], config: BriefConfig, n: int) -> list[Candid
     for c in cands:
         c.score = score(c, config, max_videos)
     return sorted(cands, key=lambda c: -c.score)[:n]
+
+
+def material_pool(
+    popular: TrendPopularOutput | None,
+    rising: Sequence[TrendVerdict],
+    aliases: Mapping[str, Sequence[str]] | None,
+    env: Mapping[str, str],
+) -> tuple[list[str], int]:
+    """오늘 브리프 후보 중 광고 재료 가능한 유행 (예시 아이디어가 고를 재료). 브리프와 같은 규칙:
+    분류된 후보를 1차 점수 순으로 `max_insights + age_topics_extra`개, 그중 광고 재료 판정 가능.
+
+    (대표 이름 순서대로, 본 후보 수)."""
+    config = load_config(env)
+    rules = load_rules(env)
+    ready = [c for c in candidates(popular, rising, aliases) if not c.pending()]
+    first = pick(ready, config, config.max_insights + config.age_topics_extra)
+    return [c.topic for c in first if ad_material(c, rules)[0] is True], len(first)
 
 
 def season_of(name: str, promo: PromoConceptsOutput | None) -> tuple[str, float, date] | None:
@@ -877,14 +895,55 @@ def _format_ok(i: TrendInsight) -> str | None:
     return None
 
 
+Groups = Mapping[str, frozenset[str]]  # 정리한 이름 → 같은 대상 이름 전부 (자기 포함)
+
+
+def name_groups(*tables: Mapping[str, Sequence[str]] | None) -> dict[str, frozenset[str]]:
+    """별칭 표(`[candidates.aliases]`)·같은 대상 표(`[candidates.same_target]`)를 이어 묶는다.
+
+    표끼리 이름이 겹치면 한 묶음 (리그오브레전드 = lol·t1, t1 = 티원 → 넷이 한 묶음).
+    """
+    parent: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for table in tables:
+        for rep, others in (table or {}).items():
+            for o in others:
+                a, b = find(_norm(rep)), find(_norm(o))
+                if a != b:
+                    parent[b] = a
+    members: dict[str, set[str]] = {}
+    for n in list(parent):
+        members.setdefault(find(n), set()).add(n)
+    return {n: frozenset(members[find(n)]) for n in parent}
+
+
+def same_target(names: Sequence[str], groups: Groups | None) -> set[str]:
+    """이름들과 같은 대상인 정리한 이름 전부."""
+    out: set[str] = set()
+    for n in names:
+        k = _norm(n)
+        out |= (groups or {}).get(k, frozenset({k}))
+    return out
+
+
 def mark_format(
-    insights: Sequence[TrendInsight], promo: PromoConceptsOutput | None, warned: Warned
+    insights: Sequence[TrendInsight],
+    promo: PromoConceptsOutput | None,
+    warned: Warned,
+    groups: Groups | None = None,
 ) -> list[str]:
     """참고용(none) 중 형식 빌리기(format)로 넘길 것을 고른다. 0개면 왜 0개인지 문장 목록.
 
     조건(코드): 회사 상품 직접 연결은 없지만 광고 재료 가능(상표·인물은 형식만), 그 주제의 잘 되는
-    숏츠 형식이 있고, 예시 아이디어(promo_concepts)가 이 주제를 빌려 회사 상품과 이었다(경고로 뺀
-    상품군은 제외). format은 참고용이 아니다(기획이 가져감).
+    숏츠 형식이 있고, 예시 아이디어(promo_concepts)가 이 주제(같은 대상 묶음 포함, `groups`)를 빌려
+    회사 상품과 이었다(경고로 뺀 상품군은 제외). format은 참고용이 아니다(기획이 가져감).
     """
     concepts = list(promo.concepts) if promo else []
     picked = {_norm(c.borrowed_trend) for c in concepts if c.borrowed_trend}
@@ -893,7 +952,7 @@ def mark_format(
     for i in insights:
         if i.company_relevance != "none" or i.classification_pending:
             continue
-        names = {_norm(n) for n in [i.topic, *i.aliases]}
+        names = same_target([i.topic, *i.aliases], groups)
         mine = [c for c in concepts if _norm(c.borrowed_trend) in names]
         books = [
             InsightProduct(product_id=p.product_id, name=p.name, category_name=p.category_name,
@@ -911,6 +970,10 @@ def mark_format(
                              names=i.entity_names)  # fmt: skip
         i.company_relevance = "format"
         i.company_relevance_reason = f"형식 빌리기: '{i.shorts_format}' 형식 + 예시 아이디어 상품"
+        own = {_norm(n) for n in [i.topic, *i.aliases]}
+        via = sorted({c.borrowed_trend for c in mine if _norm(c.borrowed_trend) not in own})
+        if via:
+            i.company_relevance_reason += f" (같은 대상: {', '.join(via)})"
         i.reference_only = False
         i.borrow_format = BorrowFormat(
             name=i.shorts_format or "", median_views=i.shorts_format_median_views,
@@ -1134,6 +1197,7 @@ async def make_brief(
     opportunities_fn: Any = None,
     video_info: Any = None,
     warned: Warned | None = None,
+    same_targets: Mapping[str, Sequence[str]] | None = None,
 ) -> BriefResult:
     """기존 skill 결과를 묶어 인사이트 3~7개 (하루 캐시). 상태를 바꾸지 않는다(브리프 기록만)."""
     from data_agent.skills.content_recommend import load_config as load_recommend
@@ -1253,9 +1317,11 @@ async def make_brief(
             + rising_company
             + pick(waiting, config, config.pending_max)
         )
+        # 같은 대상 묶음: 예시 아이디어의 유행과 브리프 주제를 맞출 때 (리그오브레전드 = t1)
+        groups = name_groups(aliases, same_targets)
         insights = build_insights(
             picked, day=day, popular=popular, promo=promo, products=prods, shorts=shorts,
-            tenant=tenant_of(env),
+            tenant=tenant_of(env), groups=groups,
             products_reason=prod_why, rules=load_rules(env),
         )  # fmt: skip
         await write_lines(insights, llm, context_id, queries)
@@ -1297,7 +1363,7 @@ async def make_brief(
                 "도메인 프로필 키워드를 받지 못해 회사 연결은 연결 상품·회사 관련 키워드로만 봄"
             )
         # 형식 빌리기: 참고용 중 예시 아이디어에서 회사 상품과 이어진 유행 (0개면 왜 0개인지)
-        out.limits += mark_format(out.insights, promo, warned)
+        out.limits += mark_format(out.insights, promo, warned, groups)
         # 몫: 회사 연결 먼저 최소 몫(모자라면 기회 카드 하위 주제), 연결 없음은 최대 몫 안에서만
         tenant = tenant_of(env)
         from_cards = [card_insight(c, day=day, tenant=tenant, promo=promo)

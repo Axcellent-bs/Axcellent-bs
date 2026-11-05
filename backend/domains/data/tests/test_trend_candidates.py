@@ -138,6 +138,8 @@ def test_company_config_has_small_defaults_and_an_exclude_list() -> None:
     assert {"shorts", "브이로그"} <= config.exclude_tags
     assert config.canonical("lol") == "리그오브레전드" and config.canonical("티원") == "t1"
     assert load_config({}) == CandidateConfig()  # 설정이 없으면 기본값, 제외 목록·별칭 없음
+    # 같은 대상 표: 후보는 묶지 않고(t1은 그대로 대표 이름) 맞추기에만 쓴다
+    assert "t1" in config.same_targets["리그오브레전드"] and config.canonical("t1") == "t1"
 
 
 # ---------------------------------------------------------------- 별칭 묶기
