@@ -749,6 +749,17 @@ async def _trend_insight_brief(request: AgentRequest) -> AgentResult:
     finally:
         store.close()
     catalog = await read_catalog(get_catalog())
+    # 도메인 프로필 경고로 씨앗에서 뺀 상품군 (저장된 프로필 재사용): 회사 관련·상품 연결에서도 뺀다
+    try:
+        from ax_contracts.schemas.data import DomainProfileRequest
+        from data_agent.skills.domain_profile import make_profile
+        from data_agent.skills.trend_insight_brief import warned_of
+
+        prof = await make_profile(DomainProfileRequest(), llm, env=env, catalog=catalog,
+                                  context_id=request.meta.context_id)  # fmt: skip
+        warned = warned_of(prof.output, catalog)
+    except Exception:  # 프로필을 못 읽으면 빼지 않는다 (경고는 프로필 화면에 그대로)
+        warned = None
     shorts_out = None
     try:  # 숏츠 형식 값은 숏츠 통계와 같은 시점 (검색은 하루 1번 저장 재사용)
         shorts_out = (
@@ -782,7 +793,7 @@ async def _trend_insight_brief(request: AgentRequest) -> AgentResult:
         age_fn=ages, promo=promo_out, catalog=catalog, aliases=cand_aliases(env),
         category_cache=get_category_cache(), shorts=shorts_out,
         context_id=request.meta.context_id, opportunities_fn=opportunities,
-        video_info=video_info,
+        video_info=video_info, warned=warned,
     )  # fmt: skip
     return _result(
         request,
