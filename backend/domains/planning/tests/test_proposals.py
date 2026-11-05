@@ -373,6 +373,25 @@ def test_measure_sends_ids_then_retries_without_and_records_result() -> None:
     assert {"+30건 (기대 100건)", "30%"} <= values
 
 
+def test_effect_window_starts_at_publish_and_caps_at_seven_days() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from ax_workflow.models import ProposalHandoff
+    from planning_agent.domain.proposal_actions import effect_window
+
+    made = datetime(2026, 11, 1, tzinfo=UTC)
+    sent = made + timedelta(hours=2)
+    posted = sent + timedelta(days=1)
+    now = posted + timedelta(days=2)
+    handed = ProposalHandoff(ok=True, campaign="cmp_PROP-1", at=sent)
+    assert effect_window(handed, made, now) == (sent, now)  # 게시 알림 전: 넘긴 시각부터
+    shown = handed.model_copy(update={"published_at": posted})
+    assert effect_window(shown, made, now) == (posted, now)  # 게시 시각부터
+    late = posted + timedelta(days=30)
+    assert effect_window(shown, made, late) == (posted, posted + timedelta(days=7))  # 7일에서 자름
+    assert effect_window(ProposalHandoff(ok=True), made, now)[0] == made
+
+
 @pytest.mark.role("planning")
 def test_measure_needs_campaign() -> None:
     svc = _svc()

@@ -15,6 +15,7 @@ LLM 초안·다른 부서 호출(data promo_concepts, marketing receive_campaign
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -42,6 +43,7 @@ from planning_agent import proposals as ext
 
 PULL_CTX = "ctx_proposals"
 DEPT_LABEL = {"data": "데이터분석", "marketing": "마케팅"}
+EFFECT_MAX_WINDOW = timedelta(days=7)  # 데이터분석 campaign_effect MAX_WINDOW와 같게
 
 
 class ProposalParams(BaseModel):
@@ -63,6 +65,15 @@ class EditProposalParams(ProposalParams):
     why: str = Field(default="", max_length=400)
     target_label: str = Field(default="", max_length=120, alias="targetLabel")
     target_value: str = Field(default="", max_length=80, alias="targetValue")
+
+
+def effect_window(
+    handoff: ProposalHandoff, created_at: datetime, now: datetime
+) -> tuple[datetime, datetime]:
+    """성과를 잴 기간. 마케팅이 게시를 알렸으면(`published_at`) 그때부터, 아니면 넘긴 시각부터.
+    데이터분석 campaign_effect는 7일보다 긴 기간을 판정하지 않아서(확인 불가) 7일에서 자른다."""
+    start = handoff.published_at or handoff.at or created_at
+    return start, min(now, start + EFFECT_MAX_WINDOW)
 
 
 def next_proposal_id(s: State) -> str:
@@ -438,7 +449,7 @@ class ProposalMixin:
 
     async def measure_proposal(self: Any, proposal: str) -> ActionResult:
         """성과 재기: 데이터분석 campaign_effect를 부르고(insight_id·proposal_id·campaign_id 함께)
-        결과를 제안에 기록한다. 기간은 마케팅에 넘긴 때부터 지금까지."""
+        결과를 제안에 기록한다. 기간은 `effect_window` (게시 시각부터, 최대 7일)."""
         p = _find(self.state, proposal)
         if p is None or p.handoff is None or not p.handoff.campaign:
             raise ActionError("NO_CAMPAIGN", "마케팅 캠페인 번호가 있어야 성과를 잴 수 있습니다")
@@ -446,10 +457,11 @@ class ProposalMixin:
             raise ActionError(
                 "INSIGHTS_OFF", "데이터분석 연결이 꺼져 있어 잴 수 없습니다 (목 모드)"
             )
-        now = self.clock()
-        start = p.handoff.at or p.created_at
+        start, end = effect_window(p.handoff, p.created_at, self.clock())
+        if end <= start:
+            raise ActionError("NO_WINDOW", "게시 시각이 아직 오지 않아 잴 기간이 없습니다")
         out = await self._insights.effect(
-            _ctx(p), p.handoff.campaign, start, now, p.insight_id, p.id
+            _ctx(p), p.handoff.campaign, start, end, p.insight_id, p.id
         )
         if isinstance(out, str):
             raise ActionError("EFFECT_FAILED", f"성과를 재지 못했습니다: {out}")
