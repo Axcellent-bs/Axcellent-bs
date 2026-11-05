@@ -2,6 +2,7 @@ import { Link } from "@/lib/nav";
 import { useEffect, useState } from "react";
 import { Bars, Blockers, Loading, OFFLINE, Stat } from "@/components/admin/bits";
 import { DeptUsage } from "@/components/admin/DeptUsage";
+import { SupportBoard } from "@/components/support/SupportBoard";
 import { ChartWithTable, Legend, LineChart, RingMeter, TableView } from "@/components/charts";
 import { IconBolt, IconChevronRight } from "@/components/icons";
 import { api } from "@/lib/api";
@@ -33,6 +34,8 @@ export default function DashboardPage() {
           <Stat label="보상 큐 (준비/대기)" value={`${t.queue_ready} / ${t.queue_waiting}`} sub={`입고 대기 ${t.awaiting_return}건`} />
           <Stat label="자동 처리율" value={pct(t.auto_rate)} sub={`기간 내 클레임 ${t.claims}건`} />
         </section>
+
+        <SupportBoard />
 
         <section>
           <div className="mb-4 flex flex-wrap items-center gap-3">
