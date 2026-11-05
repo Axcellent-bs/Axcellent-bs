@@ -871,7 +871,7 @@ API 키는 AXcellent 공용으로 `backend/.env`에 한 번만 두고 고객사�
 | `youtube` | 시청 | 전체 | 없음 | API (`videoCategories.list`) | 하루 10,000 단위, search.list 100·videos.list 1 | `YOUTUBE_API_KEY` | [quota](https://developers.google.com/youtube/v3/getting-started#quota) |
 | `google_trending` | 검색 관심 | 전체 | 없음 | 없음 | 공개 RSS, 한도 미공개 | 없음 | [RSS](https://trends.google.com/trending/rss?geo=KR) |
 | `naver_search_trend` | 검색 관심 | 전체 | 있음 | 없음(키워드) | 하루 1,000회, 그룹 5개·그룹당 키워드 20개 | `NAVER_HUB_CLIENT_ID`·`NAVER_HUB_CLIENT_SECRET` | [API HUB](https://api.ncloud-docs.com/docs/naver-api-hub-overview) |
-| `naver_shopping` | 실제 소비(쇼핑 클릭, 판매량 아님) | 전체 | 있음 | 고정 후보(네이버쇼핑 cat_id)를 실제 호출로 확인. 목록 API 없음 | 하루 한도 미확인(429 = 하루 허용량 초과), 분야 3개·키워드 5개/요청, 2017-08-01부터 | 검색어 트렌드와 같은 API HUB 키 | [쇼핑인사이트](https://api.ncloud-docs.com/docs/naver-api-hub-shopping-insight-categories.md) |
+| `naver_shopping` | 실제 소비(쇼핑 클릭, 판매량 아님). `data_sources` `{"recheck": true}`로 저장된 확인 결과와 상관없이 1번 다시 확인 | 전체 | 있음 | 고정 후보(네이버쇼핑 cat_id)를 실제 호출로 확인. 목록 API 없음 | 하루 한도 미확인(429 = 하루 허용량 초과), 분야 3개·키워드 5개/요청, 2017-08-01부터 | 검색어 트렌드와 같은 API HUB 키 | [쇼핑인사이트](https://api.ncloud-docs.com/docs/naver-api-hub-shopping-insight-categories.md) |
 | `data4library` | 실제 소비(공공도서관 대출) | 출판·교육 | 있음 | 고정(KDC 대분류 0~9) | 하루 한도 미확인(비공식 500회) | `DATA4LIBRARY_API_KEY` | [정보나루](https://data4library.kr/apiUtilization) |
 | `kosis` | 조사 통계 | 전체 | 표마다 | API (통계목록 `statisticsList.do`) | 하루 한도 미확인, 2026 공지로 분당 제한(수치 미확인), HTTPS만 | `KOSIS_API_KEY`(요청 변수 `apiKey`) | [개발 가이드](https://kosis.kr/openapi/devGuide/devGuide_0201List.do) |
 
@@ -902,7 +902,7 @@ AI가 고르고 코드가 검증한다. 수집은 하지 않는다(카테고리 
 
 | 칸 | 출처·계산 (코드) |
 |---|---|
-| 실제 소비 `consumption` | 계획의 소비 출처마다. 키가 없으면 `key_required`("키 등록 후 가능" + 얻는 근거), 승인이 없으면 `not_approved`, 둘 다 되면 실제로 부름(쇼핑: 계획 첫 분야 안 키워드 클릭을 trend_scan 판정으로 평소 대비 배수, 정보나루: 최근 30일 그 분류 인기 대출 중 키워드가 든 책의 대출 수 합) |
+| 실제 소비 `consumption` | 계획의 소비 출처마다. 키가 없으면 `key_required`("키 등록 후 가능" + 얻는 근거), 승인이 없으면 `not_approved`, 둘 다 되면 실제로 부름(쇼핑: 계획 첫 분야 안 키워드 클릭을 trend_scan 판정으로 평소 대비 배수 + 연령대마다 그 연령대의 평소 대비 배수(`category/keyword/age`, 연령대끼리 양은 비교하지 않음). 호출은 네이버 전체 하루 상한(검색어 트렌드와 같은 카운터, `NAVER_DATALAB_DAILY_LIMIT` 1,000)에 호출자 `shopping:domain_opportunity`로 세고, 기회 카드 몫 `[opportunity] shopping_daily_calls`(기본 100, 키워드 하나에 2번)을 넘으면 부르지 않고 unknown + 이유. 숫자는 카드 facts에 들어간다. 정보나루: 최근 30일 그 분류 인기 대출 중 키워드가 든 책의 대출 수 합) |
 | 검색 관심 `search_interest` | 네이버 검색어 트렌드(계획에 있고 승인된 경우) 그룹 5개씩 한 요청, `judge_series` 평소 대비 배수. 기간(84일)·표본(값이 있는 날 수) |
 | 연령대 `age_bands` | trend_age 그대로 (계획에서 연령을 고른 경우만, 하루 상한·캐시 공유). 없으면 `age_reason` |
 | 숏츠 적합도 `shorts_fit` | 하위 주제를 공유 분류기로 분류 → 숏츠 통계 그 분류 조회 중앙값 ÷ 전체 숏츠 중앙값(`ShortsStatsOutput.median_views`). 표본 < `min_samples`(5)면 불확실, ≥ `high_ratio`(1.2)면 높음, ≤ `low_ratio`(0.8)면 낮음, 사이면 불확실 |
