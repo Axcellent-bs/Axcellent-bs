@@ -45,6 +45,7 @@ from marketing_agent.briefs import (
 from marketing_agent.campaign import record_campaign_result, start_campaign
 from marketing_agent.campaign_cancel import cancel_campaign
 from marketing_agent.coupons import CouponLedger, SequenceGap, total_value
+from marketing_agent.links import BuildCampaignLinkInput, CampaignLink, build_campaign_link
 from marketing_agent.notice import NoticeStore, make_draft
 from marketing_agent.schemas import (
     ActiveNotices,
@@ -426,6 +427,34 @@ async def get_campaign_brief(request: AgentRequest) -> AgentResult:
     )
 
 
+async def build_campaign_link_skill(request: AgentRequest) -> AgentResult:
+    """UTM 꼬리표를 붙인 링크를 만든다. 순수 계산이라 상태를 바꾸지 않는다(`execute()` 없음)."""
+    data = _parse(request, BuildCampaignLinkInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        url = build_campaign_link(data.base_url, data.campaign_id, data.source, data.medium)
+    except ValueError as error:
+        return _result(
+            request,
+            TaskStatus.FAILED,
+            outcome="invalid_input",
+            output={"errors": [str(error)]},
+        )
+    link = CampaignLink(
+        url=url,
+        utm_campaign=data.campaign_id,
+        utm_source=data.source,
+        utm_medium=data.medium,
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=link.model_dump(mode="json"),
+        evidence=_evidence(["build_campaign_link"], "캠페인 링크 꼬리표 생성", [data.campaign_id]),
+    )
+
+
 async def issue_coupon(request: AgentRequest) -> AgentResult:
     data = _parse(request, IssueCouponInput)
     if isinstance(data, AgentResult):
@@ -551,6 +580,7 @@ HANDLERS = {
     "receive_campaign_brief": receive_campaign_brief,
     "list_campaign_briefs": list_campaign_briefs,
     "get_campaign_brief": get_campaign_brief,
+    "build_campaign_link": build_campaign_link_skill,
     "issue_coupon": issue_coupon,
     "start_campaign": start_campaign,
     "record_campaign_result": record_campaign_result,

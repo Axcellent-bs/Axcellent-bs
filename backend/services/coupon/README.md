@@ -11,6 +11,7 @@
 | `receive_campaign_brief` | A |
 | `list_campaign_briefs` | read |
 | `get_campaign_brief` | read |
+| `build_campaign_link` | read |
 | `issue_coupon` | A |
 | `draft_sns_post` | read |
 | `check_sns_post` | read |
