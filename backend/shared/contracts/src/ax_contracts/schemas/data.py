@@ -1328,6 +1328,16 @@ class ShortsVideo(AxModel):
     # 아래는 예전 응답은 없다. 숏츠 주소와 썸네일 (YouTube 응답 값만)
     video_url: str | None = None
     thumbnail_url: str | None = None
+    # 아래는 예전 응답은 없다 (1단계 숏츠 카드). 주제 분류(저장된 분류기 결과, 모르면 "unknown")
+    category: str | None = None
+    # 채널 구독자 수와 조회 ÷ 구독자 (channels.list, 저장 재사용). 숨김·못 받음이면 None + 이유
+    channel_subscribers: int | None = Field(default=None, ge=0)
+    views_per_subscriber: float | None = Field(default=None, ge=0)
+    subscriber_reason: str | None = None
+    # 광고 재료로 쓸 수 있는지·확인할 것 (VideoLink와 같은 규칙)
+    ad_usable: bool | None = None
+    caution_types: list[CautionType] = Field(default_factory=list)
+    caution_reason: str | None = None
 
 
 class ShortsFormatCount(AxModel):
@@ -1358,6 +1368,9 @@ class ShortsGroup(AxModel):
     # 아래는 예전 응답은 없다. 카테고리 그룹만: 그 카테고리 숏츠의 형식별 수
     # (많은 순, 분류 못 한 형식 제외)
     formats: list[ShortsFormatCount] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. 카테고리 그룹만: 화면 카드용 숏츠 (조회수 순, 설정 개수까지).
+    # 이미 모은 숏츠 안에서만 고르고(더 검색하지 않음), 표본 부족 칸도 준다. 통계 칸과 무관
+    videos: list[ShortsVideo] = Field(default_factory=list)
 
 
 class ShortsSearch(AxModel):
