@@ -72,6 +72,33 @@ def test_card_highlights_use_search_shopping_and_ages() -> None:
     assert len(got) == 3
 
 
+def test_shorts_ratio_over_the_cap_is_few_samples_and_goes_back() -> None:
+    """2026-11-05 '책추천': 숏츠 조회 117.64배(표본 6개)가 맨 위에 왔다."""
+    fit = ShortsFit(level="high", median_views=117640, overall_median_views=1000, ratio=117.64,
+                    samples=6, reason="x")  # fmt: skip
+    c = DomainOpportunity(
+        opportunity_id="opp_2", subtopic="책추천", line="", shorts_fit=fit,
+        consumption=[OpportunityEvidence(source_id="naver_shopping", kind="consumption",
+                                         status="known", label="쇼핑 클릭 평소 대비 배수 · 10대",
+                                         value=1.84, unit="배", samples=59),
+                     OpportunityEvidence(source_id="naver_shopping", kind="consumption",
+                                         status="known", label="쇼핑 클릭 평소 대비 배수",
+                                         value=1.19, unit="배", samples=59)],
+        search_interest=[OpportunityEvidence(source_id="naver_search_trend",
+                                             kind="search_interest", status="known",
+                                             label="네이버 검색 평소 대비 배수", value=1.09,
+                                             unit="배", samples=7)],
+    )  # fmt: skip
+    got = hl.card_highlights(c, card_facts(c), hl.Rule(min_sample=10, max_ratio=10))
+    want = ["쇼핑 클릭 평소 대비 배수 · 10대", "쇼핑 클릭 평소 대비 배수",
+            "네이버 검색 평소 대비 배수"]  # fmt: skip
+    assert [h.label for h in got] == want  # 117배(표본 적음)는 3개 안에 못 듦
+    assert got[2].sentence.endswith("(표본 7개)")  # 표본 기준 10 미만: 뒤로 + 표시
+    alone = DomainOpportunity(opportunity_id="opp_3", subtopic="x", line="", shorts_fit=fit)
+    [few] = hl.card_highlights(alone, card_facts(alone))
+    assert few.sentence.endswith("(표본 적음)") and few.ratio == 117.64
+
+
 def test_evidence_shorts_need_a_thumbnail_and_title_and_follow_views() -> None:
     links = [
         VideoLink(video_id="a", thumbnail_url="t", title="A", views=10),
