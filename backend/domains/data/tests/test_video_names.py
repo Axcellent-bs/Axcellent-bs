@@ -118,3 +118,28 @@ def test_stored_info_reads_titles_views_and_subtopic_shorts(tmp_path: Path) -> N
     assert got["t"] == VideoInfo("하위 주제 숏츠", None, 70)
     assert got["none"] == VideoInfo()
     assert json.dumps(stored_info(env, NOW, [])) == "{}"
+
+
+class NullLLM(MockLLMClient):
+    """참/거짓·이름 칸을 null로 답한다."""
+
+    async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):  # noqa: ANN001, ANN201
+        return schema.model_validate({"items": [
+            {"id": "1", "category": "교육·책", "real_entity": None, "entity_names": None,
+             "is_person": None}]})  # fmt: skip
+
+
+class FailLLM(MockLLMClient):
+    async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):  # noqa: ANN001, ANN201
+        raise TimeoutError
+
+
+def test_null_flags_do_not_drop_the_batch_and_failures_say_why() -> None:
+    got = asyncio.run(classify_videos([VideoInput("a", "책 추천 3권")], NullLLM()))
+    a = got["a"]
+    assert (a.category, a.real_entity, a.entity_names) == ("교육·책", False, ())
+    topic = caution.judge("교육·책", real_entity=None, is_person=None, basis="하위 주제 '책' 분류")
+    [[v]] = asyncio.run(label([[caution.apply(VideoLink(video_id="a"), topic)]],
+                              {"a": VideoInfo("책 추천 3권")}, FailLLM()))  # fmt: skip
+    assert v.ad_usable is None and v.title == "책 추천 3권"
+    assert (v.caution_reason or "").startswith("영상 분류 못 함 (LLM 호출 실패 (TimeoutError))")

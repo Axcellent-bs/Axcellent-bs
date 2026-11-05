@@ -69,7 +69,7 @@ from ax_contracts.schemas.data import (
     YouTubeVelocityRequest,
 )
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
-from data_agent import llm_budget
+from data_agent import llm_budget, llm_failure
 from data_agent.clients.fact_sources import notices_at
 from data_agent.clients.log_client import get_log_source
 from data_agent.clients.shop_client import (
@@ -118,13 +118,21 @@ class TimedLLMClient(LLMClient):
 
     async def structured(self, *args: Any, **kwargs: Any) -> Any:
         llm_budget.BUDGET.check()
-        with stage("llm"):
-            return await super().structured(*args, **kwargs)
+        try:
+            with stage("llm"):
+                return await super().structured(*args, **kwargs)
+        except Exception as error:  # 실패한 계산은 저장하지 않게 표시 (llm_failure)
+            llm_failure.mark(error)
+            raise
 
     async def embed(self, texts: list[str], context_id: str | None = None) -> list[list[float]]:
         llm_budget.BUDGET.check()
-        with stage("llm"):
-            return await super().embed(texts, context_id)
+        try:
+            with stage("llm"):
+                return await super().embed(texts, context_id)
+        except Exception as error:
+            llm_failure.mark(error)
+            raise
 
     def record_usage(
         self, context_id: str | None, model: str | None, input_tokens: int, output_tokens: int,
@@ -482,7 +490,12 @@ async def _stored(
         outcome, output, evidence = hit
         return _result(request, TaskStatus.COMPLETED, outcome=outcome, output=output,
                        evidence=Evidence.model_validate(evidence))  # fmt: skip
-    outcome, output, evidence = await compute()
+    with llm_failure.scope() as llm:
+        outcome, output, evidence = await compute()
+    if llm.failed:  # LLM 호출이 실패한 결과는 저장하지 않는다 (다음 요청이 다시 시도)
+        note_cache(f"not-stored-llm-failed:{llm.reason}")
+        return _result(request, TaskStatus.COMPLETED, outcome=outcome, output=output,
+                       evidence=evidence)  # fmt: skip
     after = RESPONSES.key(skill, payload, data_stamp(os.environ, BOARD.stamp()), rules_version())
     RESPONSES.put(after, [outcome, output, evidence.model_dump(mode="json")], skill)
     note_cache("stored")
@@ -556,11 +569,12 @@ async def video_explorer(request: AgentRequest) -> AgentResult:
     try:
         payload = store.result()
         if payload is None or request.meta.context_id == PRECOMPUTE:
-            payload = await ve.compute(
-                env, youtube=get_youtube(), llm=get_llm(), store=store,
-                cache=get_category_cache(), terms=_explorer_terms(request.meta.context_id),
-                context_id=request.meta.context_id,
-            )  # fmt: skip
+            with llm_failure.scope():  # LLM이 실패하면 결과를 저장하지 않는다 (compute 안에서 봄)
+                payload = await ve.compute(
+                    env, youtube=get_youtube(), llm=get_llm(), store=store,
+                    cache=get_category_cache(), terms=_explorer_terms(request.meta.context_id),
+                    context_id=request.meta.context_id,
+                )  # fmt: skip
         out, evidence = ve.view(payload, data, env=env, store=store)
     finally:
         store.close()
@@ -608,16 +622,17 @@ async def promo_concepts(request: AgentRequest) -> AgentResult:
     data = _parse(request, PromoConceptsRequest)
     if isinstance(data, AgentResult):
         return data
-    result = await make_concepts(
-        data,
-        get_trend_connector(),
-        get_llm(),
-        env=os.environ,
-        catalog=get_catalog(),
-        context_id=request.meta.context_id,
-        category_cache=get_category_cache(),
-        youtube=get_youtube(),
-    )
+    with llm_failure.scope():  # LLM이 실패하면 오늘 기획안을 저장하지 않는다 (make_concepts가 봄)
+        result = await make_concepts(
+            data,
+            get_trend_connector(),
+            get_llm(),
+            env=os.environ,
+            catalog=get_catalog(),
+            context_id=request.meta.context_id,
+            category_cache=get_category_cache(),
+            youtube=get_youtube(),
+        )
     return _result(
         request,
         TaskStatus.COMPLETED,
@@ -689,7 +704,16 @@ def cand_aliases(env: Mapping[str, str]) -> dict[str, tuple[str, ...]]:
 
 
 async def trend_insight_brief(request: AgentRequest) -> AgentResult:
-    """기획에 넘기는 인사이트 3~7개 (기존 skill 결과를 코드로 묶음, 하루 캐시). grade read."""
+    """기획에 넘기는 인사이트 3~7개 (기존 skill 결과를 코드로 묶음, 하루 캐시). grade read.
+
+    재료(지금 인기·숏츠·분류·한 줄)를 만드는 중 LLM 호출이 실패하면 그날 브리프를 저장하지 않는다
+    (`llm_failure`, make_brief가 저장 전에 본다). 다음 요청이 다시 만든다.
+    """
+    with llm_failure.scope():
+        return await _trend_insight_brief(request)
+
+
+async def _trend_insight_brief(request: AgentRequest) -> AgentResult:
     from data_agent.skills import promo_concepts as promo
     from data_agent.skills.product_link import read_catalog
     from data_agent.skills.trend_insight_brief import cached_brief, make_brief
