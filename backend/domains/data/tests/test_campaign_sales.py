@@ -116,7 +116,8 @@ def test_gaps_and_unknowns_say_why_without_zeros() -> None:
     u = _run(unpaid, spans=1)
     assert u.status == "unknown" and "결제 대기" in (u.unknown_reason or "")
     down = _run(FakeShop({}, fail=True))
-    assert down.status == "unknown" and "UNAVAILABLE" in (down.unknown_reason or "")
+    # 연결 문제는 코드(UNAVAILABLE) 대신 커넥터가 준 이유 (#705)
+    assert down.status == "unknown" and down.unknown_reason == "주문 금액을 읽지 못함 (down)"
 
     class NoOrders:  # 주문 금액을 주지 않는 커넥터
         pass
