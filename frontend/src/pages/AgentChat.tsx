@@ -6,6 +6,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { finance, type ExecutionRecord } from "@/lib/finance";
 import { Link } from "@/lib/nav";
+import { DIRECT_AGENTS, DIRECT_PREFIX, DirectChat, directAgentOf } from "@/components/office/DirectChat";
 import { orchestrator } from "@/lib/orchestrator";
 import { shopFaults, type FaultState } from "@/lib/shopFaults";
 import type { CommLine } from "@/lib/types";
@@ -207,6 +208,23 @@ function RoomList({ rooms, selected, unseen, onSelect }: { rooms: Room[]; select
           );
         })}
       </ul>
+      <h2 className="border-t border-ink-100 px-4 pb-1 pt-4 text-sm font-semibold">직접 대화</h2>
+      <ul className="scroll-thin flex gap-1 overflow-x-auto px-2 pb-3 lg:flex-col lg:overflow-x-visible">
+        {DIRECT_AGENTS.map((a) => {
+          const id = DIRECT_PREFIX + a.key;
+          const on = id === selected;
+          return (
+            <li key={a.key} className="shrink-0 lg:shrink">
+              <button onClick={() => onSelect(id)} aria-current={on ? "true" : undefined}
+                className={`flex w-full min-w-[140px] items-center gap-2 rounded-xl px-3 py-2 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${on ? "bg-brand-50" : "hover:bg-ink-50"}`}>
+                <Avatar name={a.name} k={a.key} small />
+                <span className={`truncate text-sm ${on ? "font-semibold text-brand-700" : a.live ? "font-medium" : "text-ink-500"}`}>{a.name}</span>
+                {!a.live && <span className="ml-auto shrink-0 text-[11px] text-ink-500">준비 중</span>}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </nav>
   );
 }
@@ -281,6 +299,7 @@ export default function AgentChat() {
   useEffect(() => { setSeen((s) => (s[room] === counts[room] ? s : { ...s, [room]: counts[room] ?? 0 })); }, [room, counts]);
   const unseen = useMemo(() => Object.fromEntries(rooms.map((r) => [r.id, seen[r.id] == null ? 0 : Math.max(0, r.count - seen[r.id])])), [rooms, seen]);
 
+  const direct = directAgentOf(room);
   const items = useMemo(() => buildTimeline(incidents, executions, comms, room), [incidents, executions, comms, room]);
 
   // ------------------------------------------------ 새 이벤트가 열리면 그 방으로 옮겨 처음부터 차례로 보여 준다
@@ -292,12 +311,12 @@ export default function AgentChat() {
     const ids = incidents.map((i) => i.context_id);
     if (!roomPicked.current) {
       roomPicked.current = true;
-      if (ids.length) setRoom(ids[ids.length - 1]);
+      if (ids.length) setRoom((r) => (r.startsWith(DIRECT_PREFIX) ? r : ids[ids.length - 1]));
     }
     if (knownIncidents.current === null) { knownIncidents.current = new Set(ids); return; }
     const opened = ids.find((id) => !knownIncidents.current?.has(id));
     for (const id of ids) knownIncidents.current.add(id);
-    if (opened) { replayRoom.current = opened; setRoom(opened); }
+    if (opened) { replayRoom.current = opened; setRoom((r) => (r.startsWith(DIRECT_PREFIX) ? r : opened)); }
   }, [incidents, orchConn]);
 
   // ------------------------------------------------ 하나씩 보여 주기
@@ -407,6 +426,7 @@ export default function AgentChat() {
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
         <RoomList rooms={rooms} selected={room} unseen={unseen} onSelect={setRoom} />
 
+        {direct ? <DirectChat agent={direct} /> : (
         <section aria-label="대화 기록" className="card relative flex min-h-[420px] min-w-0 flex-1 flex-col overflow-hidden">
           {participants.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5 border-b border-ink-100 px-4 py-2.5 lg:px-6" aria-label="참석자">
@@ -443,6 +463,7 @@ export default function AgentChat() {
             </button>
           )}
         </section>
+        )}
       </div>
     </div>
   );
