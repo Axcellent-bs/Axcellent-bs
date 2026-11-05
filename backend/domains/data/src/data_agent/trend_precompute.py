@@ -23,7 +23,12 @@ from data_agent.stage_timing import recording
 
 # 판정(trend_scan·trend_candidates)을 먼저: 판정판에 오늘 판정을 남겨야
 # 지금 인기의 배지·키가 화면과 같다
-SKILLS = ("trend_scan", "trend_candidates", "trend_popular", "youtube_velocity", "shorts_stats")
+# 브리프는 마지막: 하루 캐시라 그날 처음 한 번만 만들고(26~38초, LLM·쇼핑인사이트),
+# 그 뒤엔 저장분을 읽는다
+SKILLS = (
+    "trend_scan", "trend_candidates", "trend_popular", "youtube_velocity", "shorts_stats",
+    "trend_insight_brief",
+)  # fmt: skip
 CONTEXT_ID = "ctx_trend_precompute"
 PASSES = 2
 
@@ -48,6 +53,7 @@ async def precompute(emit: Callable[[str], None] | None = None) -> list[str]:
         "trend_popular": handlers.trend_popular,
         "youtube_velocity": handlers.youtube_velocity,
         "shorts_stats": handlers.shorts_stats,
+        "trend_insight_brief": handlers.trend_insight_brief,
     }
     for n in range(1, PASSES + 1):
         for skill in SKILLS:

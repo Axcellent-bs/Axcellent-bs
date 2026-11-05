@@ -57,6 +57,11 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
         "DATA_POPULAR_VIDEOS_DB": str(tmp_path / "popular_videos.db"),
         "DATA_TREND_RESPONSES_DB": str(tmp_path / "responses.db"),
     }  # fmt: skip
+    # 미리 계산이 부르는 다른 skill의 저장 위치도 임시 폴더로 (backend/.data에 쓰지 않게)
+    for name in ("DATA_INSIGHT_BRIEF_DB", "DATA_PROMO_DB", "DATA_DOMAIN_PROFILE_DB",
+                 "DATA_SUBTOPICS_DB", "DATA_SOURCE_PLAN_DB", "DATA_SOURCE_PROBE_DB",
+                 "DATA_TREND_AGE_DB", "DATA_EXPLAIN_DB", "DATA_NAVER_CACHE_DB"):  # fmt: skip
+        out[name] = str(tmp_path / f"{name.lower()}.db")
     for k, v in out.items():
         monkeypatch.setenv(k, v)
     for k in ("YOUTUBE_API_KEY", "DATA_TODAY_BOARD_DB"):

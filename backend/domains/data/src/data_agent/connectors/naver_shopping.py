@@ -46,6 +46,7 @@ from typing import Any
 import httpx
 
 from data_agent.connectors import ConnectorUnavailable, naver_datalab, replay
+from data_agent.stage_timing import stage
 
 SOURCE_ID = "naver_shopping"
 KEY_ENVS = ("NAVER_HUB_CLIENT_ID", "NAVER_HUB_CLIENT_SECRET")
@@ -319,9 +320,10 @@ class NaverShoppingConnector:
     async def _post(self, url: str, body: dict[str, Any], headers: dict[str, str]) -> Any:
         client = self._client or _client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
         try:
-            response = await client.post(
-                url, content=json.dumps(body, ensure_ascii=False), headers=headers
-            )
+            with stage("external"):
+                response = await client.post(
+                    url, content=json.dumps(body, ensure_ascii=False), headers=headers
+                )
         except httpx.HTTPError as exc:
             raise ConnectorUnavailable(
                 "UNAVAILABLE", f"네이버 쇼핑인사이트에 연결할 수 없다 ({type(exc).__name__})"
