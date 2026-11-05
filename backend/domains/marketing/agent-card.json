@@ -203,6 +203,18 @@
       "priority": "recommended"
     },
     {
+      "id": "generate_media",
+      "description": "이미지 또는 영상(media_kind)을 만든다. 프롬프트는 자유 입력이 아니라 장면 템플릿(scene_template_id)의 고정 문장에 화이트리스트 필드만 채운 것이고, 개인정보·고객 원문·글자 요청·실존 인물·브랜드는 코드 검사로 거절한다(prompt_rejected). 호출 전에 단가표로 비용을 계산해 건당·월 상한을 넘으면 공급자를 부르지 않고(cost_over_single·budget_exceeded), 환율·기준일이 비었거나 오래됐거나 단가표에 없는 조합이면 실제 공급자를 거부한다(fail-closed). 안전 관문 execute(generate_media)가 executed를 돌려준 뒤에만 공급자를 부르고, 응답 사용량으로 사후 정산해 장부(SQLite)에 남긴다(사용량이 없으면 추정액). 영상은 무음이며 결과 메타에 ai_generated=true를 항상 남긴다. 같은 키 재요청은 이전 결과를 돌려준다. 지금은 목 어댑터뿐이며 실제 공급자 이름은 어댑터가 없어 거부한다. safety 등록부에 아직 없어 live 관문에서는 fail-closed다.",
+      "input_schema": "agents/marketing/src/marketing_agent/media/skill.py#GenerateMediaInput",
+      "output_schema": "agents/marketing/src/marketing_agent/media/skill.py#GeneratedMedia",
+      "grade": "B",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": "safety",
+      "priority": "optional"
+    },
+    {
       "id": "marketing_chat_send",
       "description": "사람이 마케팅 AI에 보낸 말을 저장하고 status answering으로 바로 돌려준다(답은 백그라운드에서 만들어 붙이고 talking으로 되돌림, 화면은 marketing_chat_get로 가져간다). thread_id가 없으면 새 대화. 조회·설명만 하고 업무 상태(캠페인·공지·쿠폰)는 바꾸지 않아 execute()를 부르지 않는다. 읽는 것은 받은 기획안·게시 중 공지·쿠폰 지급 건수뿐이고 기획안 본문은 untrusted로만 넣는다. 거절 outcome: llm_not_configured(LLM 설정 없음, 답을 지어내지 않음)·forbidden(남의 대화)·not_found·thread_closed·thread_busy.",
       "input_schema": "agents/marketing/src/marketing_agent/chat.py#SendChatMessageInput",
