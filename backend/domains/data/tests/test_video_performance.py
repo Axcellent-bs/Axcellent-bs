@@ -189,6 +189,59 @@ def test_campaign_without_a_video_and_bad_urls_say_why(tmp_path: Path) -> None:
         VideoPerformanceRequest()
 
 
+def test_performance_table_groups_by_insight_format_and_category(tmp_path: Path) -> None:
+    """성과 모으기: 인사이트·형식·카테고리별 목표 대비 배수 중앙값 (영상마다 가장 늦게 잰 시점)."""
+    _brief(tmp_path)
+    yt = FakeYouTube()
+    _run(tmp_path, yt, PUB, insight_id="ins_1")
+    _run(tmp_path, yt, PUB, video_url="https://youtu.be/zyxwvutsrqp", campaign_id="cmp_2",
+         insight_id="ins_1")  # fmt: skip
+    _run(tmp_path, yt, PUB, video_url="https://youtu.be/testtesttes", campaign_id="test-video-1",
+         insight_id="ins_1", test=True)  # 시험 영상: 표에서 뺀다  # fmt: skip
+    _run(tmp_path, yt, PUB, video_url="https://youtu.be/noinsightxx", campaign_id="cmp_3")
+    out = _run(tmp_path, yt, PUB + timedelta(hours=24, minutes=30), video_url=None)
+    table = {(g.key, g.value): g for g in out.performance_table}
+    ins = table[("insight", "ins_1")]
+    assert (ins.videos, ins.measured) == (2, 2)  # 시험 영상·인사이트 없는 영상은 안 셈
+    assert ins.median_target_ratio == 4.9  # 1일 24.5시간: 조회 24500 ÷ 목표 5000
+    assert table[("format", "리뷰")].videos == 2 and table[("category", "교육·책")].videos == 2
+    assert all(g.value != "test" for g in out.performance_table)
+
+
+def test_brief_shows_how_many_videos_are_being_collected(tmp_path: Path) -> None:
+    from ax_agent_template.llm import MockLLMClient
+    from ax_contracts.schemas.data import TrendInsightBriefRequest, TrendPopularOutput
+    from data_agent.skills import trend_insight_brief as brief
+
+    yt = FakeYouTube()
+    _run(tmp_path, yt, PUB)
+    _run(tmp_path, yt, PUB, video_url="https://youtu.be/testtesttes", test=True)
+
+    async def ages(keywords):  # noqa: ANN001, ANN202
+        from ax_contracts.schemas.data import TrendAgeOutput
+
+        return TrendAgeOutput(status="known", items=[])
+
+    out = asyncio.run(brief.make_brief(
+        TrendInsightBriefRequest(), MockLLMClient(), env=_env(tmp_path) | {
+            brief.DB_ENV: str(tmp_path / "b.db")},
+        popular=TrendPopularOutput(items=[]), popular_reason="x", rising=[], age_fn=ages,
+        promo=None, catalog=None, now=PUB,
+    )).output  # fmt: skip
+    assert out.status == "unknown"  # 후보가 없으면 빈 브리프 (표시는 아래 경우)
+    from ax_contracts.schemas.data import PopularTopic
+
+    popular = TrendPopularOutput(items=[PopularTopic(rank=1, keyword="롤", topic_category="게임",
+                                                     youtube_videos=3)])  # fmt: skip
+    full = asyncio.run(brief.make_brief(
+        TrendInsightBriefRequest(), MockLLMClient(), env=_env(tmp_path) | {
+            brief.DB_ENV: str(tmp_path / "b2.db")},
+        popular=popular, popular_reason=None, rising=[], age_fn=ages, promo=None, catalog=None,
+        now=PUB,
+    )).output  # fmt: skip
+    assert "성과 데이터 쌓는 중(영상 1개, 브리프 점수에는 아직 안 넣음)" in full.limits
+
+
 def test_test_videos_are_marked_and_not_counted(tmp_path: Path) -> None:
     yt = FakeYouTube()
     out = _run(tmp_path, yt, PUB, campaign_id="test-video-1", test=True)
