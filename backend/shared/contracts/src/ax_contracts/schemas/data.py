@@ -1233,6 +1233,11 @@ class PromoConcept(AxModel):
     # 아래는 예전 응답은 없다. 빌린 트렌드가 회사 상품·도메인과 연결이 없으면 참고용 (코드)
     reference_only: bool = False
     reference_reason: str | None = None
+    # 아래는 예전 응답은 없다. concept_id는 내용 해시(회사·트렌드·정렬한 상품 id·숏츠 형식)라
+    # 같은 재료면 날·실행이 달라도 같다. 바뀌기 전의 무작위 id는 legacy_concept_id로만 준다
+    legacy_concept_id: str | None = None
+    # 빌린 트렌드가 지금 인기 주제면, 브리프가 같은 주제에 주는 insight_id (stable_insight_id 규칙)
+    source_insight_id: str | None = None
 
 
 class PromoShortsFormat(AxModel):
