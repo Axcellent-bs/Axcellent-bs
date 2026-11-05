@@ -45,6 +45,7 @@ from ax_contracts.schemas.data import (
     InsightProduct,
     PopularTopic,
     PromoConceptsOutput,
+    ShortsFit,
     ShortsStatsOutput,
     TrendInsight,
     TrendInsightBriefOutput,
@@ -53,6 +54,7 @@ from ax_contracts.schemas.data import (
     TrendVerdict,
     VideoLink,
 )
+from data_agent import caution
 from data_agent.explain import _bad_numbers
 from data_agent.skills.ad_material import AdRules, judge, load_rules
 from data_agent.skills.brief_facts import insight_facts
@@ -336,6 +338,29 @@ def ad_material(c: Candidate, rules: AdRules) -> tuple[bool | None, str | None]:
     return judge(c.category(), is_person=c.is_person(), real_entity=c.real_entity(), rules=rules)
 
 
+SHORTS_FIT_MIN_SAMPLES = 5  # 이 주제 분류의 숏츠가 이보다 적으면 적합도·목표 참고값은 unknown
+
+
+def insight_shorts_fit(
+    category: str | None, shorts: ShortsStatsOutput | None
+) -> tuple[ShortsFit | None, str, str | None, float | None, str | None]:
+    """(적합도, known·unknown, 이유, 목표 참고값, 참고값 기준). 기회 카드와 같은 계산(`shorts_fit`).
+
+    그 분류의 숏츠 표본이 5개 미만이면 적합도·목표 참고값을 내지 않는다 (전체 중앙값으로 안 바꿈).
+    """
+    from data_agent.skills.domain_opportunity import OpportunityConfig, shorts_fit
+
+    config = OpportunityConfig(min_samples=SHORTS_FIT_MIN_SAMPLES)
+    fit, _formats, target, basis = shorts_fit(category, shorts, config)
+    if fit is None:
+        return None, "unknown", "숏츠 통계 없음", None, None
+    if fit.samples < SHORTS_FIT_MIN_SAMPLES:
+        why = (f"이 분류({fit.category or category or '모름'}) 숏츠 표본 {fit.samples}개"
+               f" (최소 {SHORTS_FIT_MIN_SAMPLES}개): {fit.reason}")  # fmt: skip
+        return None, "unknown", why, None, None
+    return fit, "known", None, target, basis
+
+
 def evidence(c: Candidate, popular: TrendPopularOutput | None) -> InsightEvidence:
     p, v = c.popular, c.verdict
     ev = InsightEvidence()
@@ -565,6 +590,18 @@ def build_insights(
         mine = products.get(c.topic, [])
         limits = [BRIEF_LIMITS[0]]
         ev = evidence(c, popular)
+        # 근거 영상: 이 주제 분류 결과로 광고 재료 여부·확인할 것 (v2 칸)
+        warn = caution.judge(
+            None if c.pending() else c.category(), real_entity=c.real_entity(),
+            is_person=c.is_person(), names=c.entity_names(), basis=f"주제 '{c.topic}' 분류",
+        )  # fmt: skip
+        ev.video_links = [caution.apply(v, warn) for v in ev.video_links]
+        fit, fit_status, fit_why, target, target_basis = insight_shorts_fit(c.category(), shorts)
+        age_why = (
+            None
+            if age is not None and age.top_band
+            else (age.reason if age is not None and age.reason else "연령대 값을 받지 못함")
+        )
         if ev.naver_ratio is not None:
             limits.append(BRIEF_LIMITS[1])
         if age is not None and age.status == "known":
@@ -594,11 +631,16 @@ def build_insights(
                 target_age_status=band.status if band else None,
                 # 연령대별 배수 전체 (trend_age 결과 그대로, 추가 네이버 호출 없음)
                 age_bands=list(age.bands) if age is not None else [],
-                target_age_reason=(
-                    None
-                    if age is not None and age.top_band
-                    else (age.reason if age is not None and age.reason else "연령대 값을 받지 못함")
-                ),
+                target_age_reason=age_why,
+                # v2 칸: 가장 오른 연령대 (target_age와 같은 값), 숏츠 적합도·목표 참고값
+                top_age_band=age.top_band if age else None,
+                top_age_band_ratio=age.top_ratio if age else None,
+                top_age_band_reason=age_why,
+                shorts_fit=fit,
+                shorts_fit_status=fit_status,
+                shorts_fit_reason=fit_why,
+                target_views_reference=target,
+                target_reference_basis=target_basis,
                 products=mine,
                 products_reason=(
                     None

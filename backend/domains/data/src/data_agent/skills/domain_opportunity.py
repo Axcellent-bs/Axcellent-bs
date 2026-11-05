@@ -53,6 +53,7 @@ from ax_contracts.schemas.data import (
     TrendScanInput,
     VideoLink,
 )
+from data_agent import caution
 from data_agent.connectors import CatalogProduct, ConnectorUnavailable
 from data_agent.explain import _bad_numbers
 from data_agent.skills.brief_facts import card_facts
@@ -526,7 +527,15 @@ async def make_opportunities(
     rows: list[DataFact] = []
     for c in cards:
         t = by_card.get(c.opportunity_id)
-        c.video_links = list(t.video_links) if t else []
+        # v2 칸: 하위 주제 분류(칸만 앎)로 확인할 것. 실존 이름 판단이 없어 음원 아니면 모름
+        warn = caution.judge(cats.get(c.subtopic), real_entity=None, is_person=None,
+                             basis=f"하위 주제 '{c.subtopic}' 분류")  # fmt: skip
+        c.video_links = [caution.apply(v, warn) for v in (t.video_links if t else [])]
+        known = [b for b in c.age_bands if b.status == "known" and b.ratio is not None]
+        top = max(known, key=lambda b: b.ratio or 0.0) if known else None
+        c.top_age_band = top.band if top else None
+        c.top_age_band_ratio = top.ratio if top else None
+        c.top_age_band_reason = None if top else (c.age_reason or "연령대 값을 받지 못함")
         mine = card_facts(c, [v.video_url for v in c.video_links if v.video_url])
         c.fact_ids = [x.fact_id for x in mine]
         rows += mine
