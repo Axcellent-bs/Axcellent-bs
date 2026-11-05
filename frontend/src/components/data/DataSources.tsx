@@ -4,7 +4,7 @@ import { okEvidence, useSkill, type SkillState } from "@/components/data/useSkil
 import { Sources, when } from "@/components/data/Sources";
 import {
   DATA_SERVER, dataAi, kpiLive,
-  type DataSource, type DataSourcesOutput, type DomainProfileOutput, type SourceDataKind, type SourcePlanItem, type SourcePlanOutput,
+  type CollectorStatus, type DataSource, type DataSourcesOutput, type DomainProfileOutput, type SourceDataKind, type SourcePlanItem, type SourcePlanOutput,
 } from "@/lib/data";
 
 // 트렌드&콘텐츠 "데이터 출처" 하위 탭 (루프 4단계와 별개, 탭 맨 끝). 서버 응답 그대로 보여 준다.
@@ -13,6 +13,7 @@ import {
 // - 가운데: 수집 계획(source_plan, 계약 SourcePlanOutput). 출처별 고른 이유·카테고리·키워드·연령 여부·호출 수,
 //   출처별 할당량(quota: 쓸 양 / 상한). 뺀 값(카테고리 id·키워드)은 접힘. [계획 승인]은 꺼 둠, 승인 상태는 서버 값
 // - 아래: 출처 현황 표(data_sources, 계약 DataSourcesOutput). 키는 이름(key_envs)만 있고 값은 응답에 없다.
+//   표 위에 스냅샷 수집기 상태(collectors: 수집 중·수집 멈춤, 마지막 수집 시각, 서버 경고 문장). 예전 응답엔 없다
 //   "등록하면 얻는 근거"는 수집 계획의 그 출처 unlocks (계획에 없는 출처는 칸이 없다)
 // - 세 응답은 이 탭을 처음 열 때 받는다
 
@@ -216,6 +217,28 @@ function SourceRow({ s, unlocks }: { s: DataSource; unlocks: string | null }) {
   );
 }
 
+/** 스냅샷 수집기 (서버 값 그대로). 멈췄으면 경고 문장을 눈에 띄게 */
+function Collectors({ list }: { list: CollectorStatus[] | undefined }) {
+  if (!list || list.length === 0) return null;
+  return (
+    <ul className="space-y-2" aria-label="스냅샷 수집기">
+      {list.map((c) => (
+        <li key={c.collector_id} className={`rounded-xl px-3 py-2 text-sm ${c.stalled ? "bg-amber-50 text-amber-900" : "bg-ink-50 text-ink-700"}`}>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold">{c.name}</span>
+            <Chip label={c.stalled ? "수집 멈춤" : "수집 중"} tone={c.stalled ? TONE.warn : TONE.ok} />
+            <span className="text-xs">
+              마지막 수집 {c.last_collected_at ? when(c.last_collected_at) : "없음"} · 기준 {c.max_age_hours}시간
+            </span>
+          </div>
+          {c.warning && <p className="mt-1 text-xs font-semibold">{c.warning}</p>}
+          <p className="mt-0.5 text-xs opacity-80">{c.reason}</p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function SourceTable({ out, plan }: { out: DataSourcesOutput; plan: SourcePlanOutput | null }) {
   if (out.sources.length === 0) return <Empty>{out.summary || "출처가 없어요."}</Empty>;
   const unlocks = new Map((plan?.items ?? []).map((i) => [i.source_id, i.unlocks]));
@@ -263,7 +286,12 @@ export function DataSources() {
       </Section>
       <Section id="data-sources-list" title="출처 현황"
         meta={sources.state.kind === "ok" && sources.state.out.checked_at ? `확인 시각 ${when(sources.state.out.checked_at)}` : null}>
-        <State s={sources.state} what="출처 목록">{(out) => <SourceTable out={out} plan={planOut} />}</State>
+        <State s={sources.state} what="출처 목록">{(out) => (
+          <div className="space-y-3">
+            <Collectors list={out.collectors} />
+            <SourceTable out={out} plan={planOut} />
+          </div>
+        )}</State>
       </Section>
     </div>
   );
