@@ -68,7 +68,9 @@
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#CampaignBriefInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#CampaignBriefOutput",
       "grade": "A",
-      "allowed_requesters": ["planning"],
+      "allowed_requesters": [
+        "planning"
+      ],
       "verifier": null,
       "priority": "recommended"
     },
@@ -78,7 +80,12 @@
       "input_schema": "agents/marketing/src/marketing_agent/briefs.py#ListCampaignBriefsInput",
       "output_schema": "agents/marketing/src/marketing_agent/briefs.py#CampaignBriefList",
       "grade": "read",
-      "allowed_requesters": ["planning", "orchestrator", "dashboard-api", "shop-api"],
+      "allowed_requesters": [
+        "planning",
+        "orchestrator",
+        "dashboard-api",
+        "shop-api"
+      ],
       "verifier": null,
       "priority": "recommended"
     },
@@ -88,7 +95,12 @@
       "input_schema": "agents/marketing/src/marketing_agent/briefs.py#GetCampaignBriefInput",
       "output_schema": "agents/marketing/src/marketing_agent/briefs.py#CampaignBriefView",
       "grade": "read",
-      "allowed_requesters": ["planning", "orchestrator", "dashboard-api", "shop-api"],
+      "allowed_requesters": [
+        "planning",
+        "orchestrator",
+        "dashboard-api",
+        "shop-api"
+      ],
       "verifier": null,
       "priority": "recommended"
     },
@@ -173,6 +185,54 @@
       "grade": "read",
       "allowed_requesters": [
         "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "send_chat_message",
+      "description": "사람이 마케팅 AI에 보낸 말을 저장하고 status answering으로 바로 돌려준다(답은 백그라운드에서 만들어 붙이고 talking으로 되돌림, 화면은 get_chat_thread로 가져간다). thread_id가 없으면 새 대화. 조회·설명만 하고 업무 상태(캠페인·공지·쿠폰)는 바꾸지 않아 execute()를 부르지 않는다. 읽는 것은 받은 기획안·게시 중 공지·쿠폰 지급 건수뿐이고 기획안 본문은 untrusted로만 넣는다. 거절 outcome: llm_not_configured(LLM 설정 없음, 답을 지어내지 않음)·forbidden(남의 대화)·not_found·thread_closed·thread_busy.",
+      "input_schema": "agents/marketing/src/marketing_agent/chat.py#SendChatMessageInput",
+      "output_schema": "agents/marketing/src/marketing_agent/chat.py#ChatThreadOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_chat_threads",
+      "description": "대화 목록(최근 갱신 순). 본인 대화는 전부, 다른 사람 대화는 messages 비움+summary+restricted true. 30분 무응답 대화는 이때 끝낸다. 업무 상태를 바꾸지 않는다.",
+      "input_schema": "agents/marketing/src/marketing_agent/chat.py#ListChatThreadsInput",
+      "output_schema": "agents/marketing/src/marketing_agent/chat.py#ChatThreadListOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "get_chat_thread",
+      "description": "대화 하나. 열람 규칙은 list_chat_threads와 같다. 없으면 not_found.",
+      "input_schema": "agents/marketing/src/marketing_agent/chat.py#ChatThreadRef",
+      "output_schema": "agents/marketing/src/marketing_agent/chat.py#ChatThreadOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "close_chat_thread",
+      "description": "대화를 끝낸다(status closed). 요약이 비어 있으면 첫 질문 일부만 남긴다. 남의 대화는 forbidden.",
+      "input_schema": "agents/marketing/src/marketing_agent/chat.py#ChatThreadRef",
+      "output_schema": "agents/marketing/src/marketing_agent/chat.py#ChatThreadOutput",
+      "grade": "read",
+      "allowed_requesters": [
         "dashboard-api"
       ],
       "verifier": null,

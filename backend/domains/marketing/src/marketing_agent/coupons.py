@@ -44,6 +44,10 @@ class CouponLedger:
     def new_coupon_id(self) -> str:
         return f"cpn_{next(self._counter):04d}"
 
+    def issued_count(self) -> int:
+        """지급을 마친(저장된) 쿠폰 건수. 구매자 정보는 돌려주지 않는다."""
+        return len(self._by_key)
+
     def previous_by_key(self, idempotency_key: str) -> AgentResult | None:
         return self._by_key.get(idempotency_key)
 
