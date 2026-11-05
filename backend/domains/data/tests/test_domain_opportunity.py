@@ -168,6 +168,13 @@ def test_line_uses_only_evidence_numbers() -> None:
     book = res.cards[0]
     assert book.line_status == "fixed" and "9" not in book.line  # 지어낸 숫자
     assert llm.asked == 1
+    # 고정 문장은 facts 나열이 아니라 근거 1개 (40자 이내, 숫자 3개 이하)
+    from data_agent.skills.brief_line import count_numbers
+
+    for c in res.cards:
+        assert len(c.line) <= 80 and count_numbers(c.line) <= 3, c.line
+        if c.line_status == "fixed":
+            assert len(c.line) <= 40 and " · " not in c.line, c.line
 
 
 def test_unavailable_search_says_why_and_no_search_when_not_planned() -> None:
