@@ -4,7 +4,7 @@ import { okEvidence, useSkill, type SkillState } from "@/components/data/useSkil
 import { Sources, when } from "@/components/data/Sources";
 import {
   DATA_SERVER, dataAi, kpiLive,
-  type CollectorStatus, type DataSource, type DataSourcesOutput, type DomainProfileOutput, type SourceDataKind, type SourcePlanItem, type SourcePlanOutput,
+  type CollectorStatus, type DataSource, type DataSourcesOutput, type DomainProfileOutput, type LlmDailyUsage, type SourceDataKind, type SourcePlanItem, type SourcePlanOutput,
 } from "@/lib/data";
 
 // 트렌드&콘텐츠 "데이터 출처" 하위 탭 (루프 4단계와 별개, 탭 맨 끝). 서버 응답 그대로 보여 준다.
@@ -239,6 +239,21 @@ function Collectors({ list }: { list: CollectorStatus[] | undefined }) {
   );
 }
 
+/** data 부서 LLM 오늘 사용량/상한 (서버 값 그대로). 닿았으면 서버 문장을 눈에 띄게 */
+function LlmUsage({ usage }: { usage: LlmDailyUsage | null }) {
+  if (!usage) return null;
+  return (
+    <div className={`rounded-xl px-3 py-2 text-sm ${usage.reached ? "bg-amber-50 text-amber-900" : "bg-ink-50 text-ink-700"}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold">데이터 AI LLM 오늘 사용량</span>
+        <Chip label={usage.reached ? "하루 상한 도달" : "상한 안"} tone={usage.reached ? TONE.warn : TONE.ok} />
+        <span className="text-xs">호출 {n(usage.calls)}/{n(usage.call_cap)}회 · 토큰 {n(usage.tokens)}/{n(usage.token_cap)}</span>
+      </div>
+      {usage.note && <p className="mt-1 text-xs font-semibold">{usage.note}</p>}
+    </div>
+  );
+}
+
 function SourceTable({ out, plan }: { out: DataSourcesOutput; plan: SourcePlanOutput | null }) {
   if (out.sources.length === 0) return <Empty>{out.summary || "출처가 없어요."}</Empty>;
   const unlocks = new Map((plan?.items ?? []).map((i) => [i.source_id, i.unlocks]));
@@ -289,6 +304,7 @@ export function DataSources() {
         <State s={sources.state} what="출처 목록">{(out) => (
           <div className="space-y-3">
             <Collectors list={out.collectors} />
+            <LlmUsage usage={out.llm_usage ?? null} />
             <SourceTable out={out} plan={planOut} />
           </div>
         )}</State>
