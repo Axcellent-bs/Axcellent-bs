@@ -870,6 +870,8 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 출처마다 능력을 코드에 적고, 수집 계획(LLM)이 이 목록 안에서만 고른다. 출처는 **업종 태그로만** 구분한다(회사 이름 없음).
 API 키는 AXcellent 공용으로 `backend/.env`에 한 번만 두고 고객사별로 받지 않는다. 키가 없는 출처는 구조만 있고 상태가 "키 필요"다.
 
+**수집기 상태 `collectors`**: YouTube·인기 검색어 스냅샷 수집기마다 돌고 있는지(잠금 파일 `youtube_collect.lock`·`trending_collect.lock`의 pid, `collector_lock`), pid, 켜진 시각, 마지막 저장 스냅샷 시각을 준다. 돌고 있지 않거나 저장된 스냅샷이 없거나 마지막 수집이 `DATA_COLLECTOR_MAX_AGE_HOURS`(기본 2)시간보다 오래되면 `stalled` + "수집 멈춤: ..." 경고다. 수집기는 끝난 pid가 남긴 잠금을 지우고 다시 잡는다(로그 한 줄).
+
 | 출처 id | 데이터 종류 | 업종 | 연령·성별 | 카테고리 | 한도 (공식 문서) | 키 | 공식 문서 |
 |---|---|---|---|---|---|---|---|
 | `youtube` | 시청 | 전체 | 없음 | API (`videoCategories.list`) | 하루 10,000 단위, search.list 100·videos.list 1 | `YOUTUBE_API_KEY` | [quota](https://developers.google.com/youtube/v3/getting-started#quota) |
