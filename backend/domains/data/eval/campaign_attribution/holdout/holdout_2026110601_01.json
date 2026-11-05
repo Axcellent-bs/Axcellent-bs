@@ -1,0 +1,56 @@
+{
+ "id": "holdout_2026110601_01",
+ "kind": "known",
+ "input": {
+  "campaign_id": "cmp_ah01",
+  "window_from": "2026-10-03T17:00:00Z",
+  "window_to": "2026-10-03T20:00:00Z"
+ },
+ "spec": {
+  "id": "holdout_2026110601_01",
+  "window": {
+   "from": "2026-10-03T17:00:00Z",
+   "to": "2026-10-03T20:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "none"
+  },
+  "attribution": {
+   "tags": [
+    {
+     "source": "naver",
+     "medium": "blog",
+     "campaign_id": "cmp_ah01",
+     "fraction": 0.14
+    }
+   ]
+  }
+ },
+ "expected": {
+  "attribution": {
+   "status": "known"
+  }
+ },
+ "counted": {
+  "window_orders": 266,
+  "tagged_orders": 29,
+  "tagged_share": 0.109,
+  "orders": 29,
+  "gross_krw": 646100,
+  "by_source": {
+   "naver": {
+    "orders": 29,
+    "gross_krw": 646100
+   }
+  },
+  "other_campaign_orders": 0
+ },
+ "memo": "",
+ "holdout": {
+  "seed": 2026110601,
+  "tags": 1
+ }
+}
