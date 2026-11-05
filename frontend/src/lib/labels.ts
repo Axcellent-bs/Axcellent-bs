@@ -109,3 +109,11 @@ export const skillLabel = (skill: string) => SKILL_KO[skill] ?? skill;
 
 /** 문의 언어 이름표 (목록의 언어별 보기·배지). 모르는 값은 기타로 본다 */
 export const LANGUAGE_KO: Record<string, string> = { ko: "한국어", en: "English", ja: "日本語", zh: "中文", other: "기타" };
+
+/** 개인정보 삭제에서 지우지 않고 남기는 이유 코드 */
+export const PURGE_REASON_KO: Record<string, string> = {
+  status_open: "아직 처리 중(열림)",
+  status_escalated: "아직 처리 중(이관)",
+  claim_linked: "클레임이 이어져 보존",
+  no_buyer: "구매자를 알 수 없음",
+};
