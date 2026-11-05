@@ -1637,6 +1637,69 @@ class CampaignEffectOutput(AxModel):
     generated_at: UtcDatetime | None = None
     # 아래는 예전 응답은 없다 (#646). 요청에 products가 있을 때만: 관련 상품 기준 결과
     products_effect: CampaignProductsEffect | None = None
+    # 아래는 예전 응답은 없다 (#648). 유입경로 기준 (요청에 campaign_id가 있을 때만)과
+    # 유입 + 관련 상품 (products도 있을 때만). 직접 귀속이라 기준선과 비교하지 않는다
+    attribution_effect: CampaignAttribution | None = None
+    attribution_and_products: CampaignAttributionProducts | None = None
+
+
+class CampaignSourceRow(AxModel):
+    """유입 출처 하나 (`src_source`, 없으면 "(출처 없음)")의 이 캠페인 주문."""
+
+    source: str = Field(min_length=1)
+    mediums: list[str] = Field(default_factory=list)  # 이 출처로 온 주문의 매체 (`src_medium`)
+    orders: int = Field(ge=0)
+    gross_krw: int = Field(ge=0)  # 판매액 (단가 × 수량, 할인 전)
+
+
+class CampaignAttribution(AxModel):
+    """이 캠페인 링크(`src_campaign` = campaign_id)로 들어온 결제 완료 주문 (#648).
+
+    유입·상품(#646)·쿠폰 귀속·가게 전체는 같은 주문이 겹칠 수 있어 합산하지 않는다.
+    구간에 유입 표시가 있는 주문이 하나도 없으면 unknown + "유입 기록 없음" (0으로 채우지 않음).
+    """
+
+    status: CampaignStatus
+    unknown_reason: str | None = None
+    basis: str = (
+        "결제 완료 주문 중 유입 표시 campaign_id가 같은 것, 주문 접수 시각 기준,"
+        " 판매액은 단가 × 수량(할인 전). 직접 귀속이라 기준선과 비교하지 않는다"
+    )
+    campaign_id: str | None = None
+    orders: int | None = Field(default=None, ge=0)
+    gross_krw: int | None = Field(default=None, ge=0)
+    by_source: list[CampaignSourceRow] = Field(default_factory=list)  # 주문 많은 순
+    window_orders: int | None = Field(default=None, ge=0)  # 구간 결제 완료 주문 (전부)
+    tagged_orders: int | None = Field(default=None, ge=0)  # 그중 유입 표시가 있는 것 (아무 캠페인)
+    tagged_share: float | None = Field(default=None, ge=0, le=1)  # tagged_orders ÷ window_orders
+    note: str | None = None  # 한계 (예: 꼬리표 없이 들어온 주문은 세지 않음)
+
+    @model_validator(mode="after")
+    def _known_or_reason(self) -> Self:
+        if self.status == "unknown" and not self.unknown_reason:
+            raise ValueError("unknown이면 unknown_reason이 있어야 한다")
+        if self.status == "known" and (self.orders is None or self.gross_krw is None):
+            raise ValueError("known이면 orders·gross_krw가 있어야 한다")
+        return self
+
+
+class CampaignAttributionProducts(AxModel):
+    """이 캠페인으로 들어와 관련 상품(#646에서 맞은 상품)을 산 결제 완료 주문 (그 상품 품목만)."""
+
+    status: CampaignStatus
+    unknown_reason: str | None = None
+    matched: list[str] = Field(default_factory=list)  # 맞은 상품 id
+    orders: int | None = Field(default=None, ge=0)
+    units: int | None = Field(default=None, ge=0)
+    gross_krw: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _known_or_reason(self) -> Self:
+        if self.status == "unknown" and not self.unknown_reason:
+            raise ValueError("unknown이면 unknown_reason이 있어야 한다")
+        if self.status == "known" and (self.orders is None or self.gross_krw is None):
+            raise ValueError("known이면 orders·gross_krw가 있어야 한다")
+        return self
 
 
 # ---------------------------------------------------------------- 연령대별 상승 (trend_age)
