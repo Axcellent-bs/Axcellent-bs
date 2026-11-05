@@ -646,6 +646,10 @@ export type Action =
   | { type: 'editBlock'; doc: string; block: string; text: string }
   | { type: 'toggleTodo'; doc: string; block: string }
   | { type: 'removeBlock'; doc: string; block: string }
+  // 개발이 돌려보낸 작업 (서버 returned_actions.py, 예시 모드에서는 바꾸지 않는다)
+  | { type: 'returnedToMarketing'; task: string }
+  | { type: 'returnedToDev'; task: string; reason: string }
+  | { type: 'dismissReturned'; task: string }
 
 // 기획·개발이 다른 부서로 보낸 활동은 모두 그 부서 창구(outbox)에도 쌓는다
 export function reducer(s: State, a: Action): State {
