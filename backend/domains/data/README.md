@@ -615,7 +615,7 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 - 요약 문장: 방향이 같음인데 증분이 0이 아니면 "증가(감소) 추정 ±N건, 아직 통계적으로 확실하지 않음"(화면 #294와 같은 규칙)
 - 주문 지표를 읽지 못하면(shop-api 꺼짐) 숫자 없이 `failed`·`unavailable`
 - LLM은 전체 요약 문장만 쓰고 `explain.py` 숫자 검증을 그대로 거친다(템플릿 `campaign`)
-- 요청 가능: orchestrator, marketing, dashboard-api
+- 요청 가능: orchestrator, marketing, dashboard-api, planning (기획 measure_proposal이 성과를 묻는다)
 
 #### 기준값 (평가 개발 케이스로 정함)
 

@@ -15,7 +15,7 @@
       "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#AnomalyDetectionInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#AnomalyDetectionOutput",
       "grade": "read",
-      "allowed_requesters": ["orchestrator", "infra"],
+      "allowed_requesters": ["orchestrator", "infra", "dev"],
       "verifier": null,
       "priority": "required"
     },
@@ -187,7 +187,7 @@
       "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#CampaignEffectInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#CampaignEffectOutput",
       "grade": "read",
-      "allowed_requesters": ["orchestrator", "marketing", "dashboard-api"],
+      "allowed_requesters": ["orchestrator", "marketing", "dashboard-api", "planning"],
       "verifier": null,
       "priority": "recommended",
       "handoff": false

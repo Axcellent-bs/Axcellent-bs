@@ -70,6 +70,23 @@ def test_impact_analysis_requesters(card: AgentCard) -> None:
     assert skill.priority == "required"
 
 
+def test_anomaly_detection_is_a_read_for_orchestrator_infra_and_dev(card: AgentCard) -> None:
+    """개발 교차검증·배포 신호가 최근 이상을 묻는다 (dev)."""
+    skill = next(s for s in card.skills if s.id == "anomaly_detection")
+    assert skill.grade == "read"
+    assert set(skill.allowed_requesters) == {"orchestrator", "infra", "dev"}
+
+
+def test_service_card_has_the_same_requesters_as_the_domain_card() -> None:
+    """서비스 카드(services/data)는 도메인 카드의 skill을 올려 띄운다. 요청자 목록이 같아야 한다."""
+    service_path = CARD_PATH.parents[2] / "services" / "data" / "agent-card.json"
+    domain = json.loads(CARD_PATH.read_text(encoding="utf-8"))
+    service = json.loads(service_path.read_text(encoding="utf-8"))
+    by_domain = {s["id"]: s["allowed_requesters"] for s in domain["skills"]}
+    by_service = {s["id"]: s["allowed_requesters"] for s in service["skills"]}
+    assert by_service == by_domain
+
+
 def test_root_cause_is_a_lookup_for_orchestrator(card: AgentCard) -> None:
     skill = next(s for s in card.skills if s.id == "root_cause_hypotheses")
     assert set(skill.allowed_requesters) == {"orchestrator", "dashboard-api"}
@@ -142,10 +159,16 @@ def test_answer_planning_question_is_for_planning(card: AgentCard) -> None:
     assert skill.output_schema.endswith("planning.py#AnswerPlanningQuestionOutput")
 
 
-def test_campaign_effect_is_a_read_for_marketing_and_dashboard(card: AgentCard) -> None:
+def test_campaign_effect_is_a_read_for_marketing_dashboard_and_planning(card: AgentCard) -> None:
+    """기획 measure_proposal이 성과를 묻는다 (planning)."""
     skill = next(s for s in card.skills if s.id == "campaign_effect")
     assert skill.grade == "read"
-    assert set(skill.allowed_requesters) == {"orchestrator", "marketing", "dashboard-api"}
+    assert set(skill.allowed_requesters) == {
+        "orchestrator",
+        "marketing",
+        "dashboard-api",
+        "planning",
+    }
     assert skill.input_schema.endswith("#CampaignEffectInput")
     assert skill.output_schema.endswith("#CampaignEffectOutput")
 
