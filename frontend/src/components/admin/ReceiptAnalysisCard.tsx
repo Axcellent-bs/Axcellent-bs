@@ -19,7 +19,7 @@ interface Item {
   result?: ReceiptAnalysis; error?: string;
   file?: File; url?: string; // 사진과 미리보기는 이 화면에서 올린 동안에만 있다 (문의를 오가면 결과만 남는다)
   // 한 영수증을 여러 쪽으로 찍어 "묶은" 항목: 사진 전부(files)를 한 요청으로 보내 한 영수증으로 읽는다
-  files?: File[]; urls?: string[];
+  files?: File[]; urls?: string[]; base?: string; // base: 묶음 이름에 쓰는 처음 사진 이름
 }
 
 // 분석 결과는 문의를 오갈 때 다시 보이도록 이 화면을 연 동안만 기억한다. 사진은 기억하지 않는다.
@@ -249,19 +249,31 @@ export function ReceiptAnalysisCard({ conversationId, activity = [] }: { convers
     setItems([]); setOpen(new Set()); setError(null);
   };
 
-  // 아직 분석하지 않은 사진 2장 이상을 한 영수증의 쪽으로 묶는다 (한 영수증을 여러 장으로 찍은 경우)
+  // 아직 분석하지 않은 사진 2장 이상을 한 영수증의 쪽으로 묶는다 (한 영수증을 여러 장으로 찍은 경우).
+  // 이미 묶어 둔 항목(분석 전)이 있으면 그 쪽들을 그대로 이어서 묶는다 (첫 쪽만 가져가 나머지가 빠지지 않게).
+  const pagesOf = (i: Item) => i.files ?? (i.file ? [i.file] : []);
+  const urlsOf = (i: Item) => [i.url, ...(i.urls ?? [])].filter((u): u is string => !!u);
+  const pagesPending = pending.reduce((n, i) => n + pagesOf(i).length, 0);
   const group = () => {
-    const pages = pending.slice(0, MAX_GROUP_PAGES);
-    if (pages.length < 2) return;
-    const files = pages.map((i) => i.file!);
-    const gone = new Set(pages.map((i) => i.key));
+    const taken: Item[] = [];
+    let count = 0;
+    for (const i of pending) { // 쪽 수 한도 안에서 항목째로 가져온다 (한도를 넘는 항목은 그대로 남긴다)
+      const n = pagesOf(i).length;
+      if (count + n > MAX_GROUP_PAGES) break;
+      taken.push(i); count += n;
+    }
+    if (count < 2) return;
+    const files = taken.flatMap(pagesOf);
+    const urls = taken.flatMap(urlsOf);
+    const gone = new Set(taken.map((i) => i.key));
+    const first = taken[0].base ?? taken[0].name; // 이미 묶은 항목이면 처음 사진 이름을 이어 쓴다
     const merged: Item = {
-      key: `g${++seq.current}-${pages[0].name}`, name: `한 영수증 ${pages.length}쪽 (${pages[0].name} 외)`,
-      size: pages.reduce((n, i) => n + i.size, 0), state: "idle", file: files[0], files,
-      url: pages[0].url, urls: pages.slice(1).map((i) => i.url).filter((u): u is string => !!u),
+      key: `g${++seq.current}-${first}`, name: `한 영수증 ${files.length}쪽 (${first} 외)`,
+      base: first, size: taken.reduce((n, i) => n + i.size, 0), state: "idle", file: files[0], files,
+      url: urls[0], urls: urls.slice(1),
     };
     // 묶은 사진의 미리보기 주소는 묶음 항목이 맡는다 (빼거나 지울 때 같이 거둔다)
-    setItems((prev) => { const rest = prev.filter((i) => !gone.has(i.key)); return [...rest, merged]; });
+    setItems((prev) => [...prev.filter((i) => !gone.has(i.key)), merged]);
     setError(null);
   };
 
@@ -362,7 +374,7 @@ export function ReceiptAnalysisCard({ conversationId, activity = [] }: { convers
             {!running && pending.length > 1 && (
               <button className="btn-ghost px-2.5 py-1 text-xs" onClick={group}
                 title="한 영수증을 여러 장으로 찍었다면 한 영수증으로 합쳐 읽습니다">
-                {pending.length > MAX_GROUP_PAGES ? `앞 ${MAX_GROUP_PAGES}장을 한 영수증으로 묶기` : `${pending.length}장을 한 영수증으로 묶기`}
+                {pagesPending > MAX_GROUP_PAGES ? `앞 ${MAX_GROUP_PAGES}장까지 한 영수증으로 묶기` : `${pagesPending}장을 한 영수증으로 묶기`}
               </button>
             )}
             {!running && !pending.length && retryable.length > 1 && <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => analyze(retryable)}>전체 다시 분석</button>}
