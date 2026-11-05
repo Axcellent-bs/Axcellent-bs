@@ -28,6 +28,8 @@ async def retention_sweep_once() -> bool:
     try:
         today = datetime.now(UTC).date().isoformat()
         await support_client.call("purge_expired_inquiries", {}, key=f"retention-expire:{today}")
+        # 클레임 기록은 팀 기준(5년)이고 사람이 켜기 전에는 건수만 센다 (support가 정한다)
+        await support_client.call("purge_expired_claims", {}, key=f"claim-retention:{today}")
         return True
     except Exception:  # noqa: BLE001 - 못 불러도 서버는 계속 돈다. 다음 주기에 다시 부른다
         logger.warning("3년 보유기간 삭제를 부르지 못했다", exc_info=True)

@@ -41,3 +41,24 @@ class PurgeReport(AxModel):
     purge_count: int = 0  # 지울 수 있는(집행했으면 지운) 문의 수
     retained_count: int = 0  # 보존 의무로 남겨 둔 문의 수
     applied: bool = False  # 이 호출로 실제로 지웠는가
+
+
+class PurgeExpiredClaimsInput(AxModel):
+    """입력 없음: 보유 일수(기본 5년)가 지난 클레임의 글·이름을 모두 지운다."""
+
+
+class ClaimPurgeItem(AxModel):
+    claim_id: int
+    purged: dict[str, int] = Field(
+        default_factory=dict
+    )  # 바꾼 것의 건수 (customer·notes·audit_details)
+
+
+class ClaimPurgeReport(AxModel):
+    items: list[ClaimPurgeItem] = Field(default_factory=list)
+    count: int = 0  # 지울 수 있는(집행했으면 지운) 클레임 수
+    retention_days: int = 1825  # 보유 일수 (SUPPORT_CLAIM_RETENTION_DAYS, 기본 5년)
+    apply_enabled: bool = (
+        False  # 사람이 SUPPORT_CLAIM_RETENTION_APPLY=1로 켰는가 (아니면 건수만 센다)
+    )
+    applied: bool = False  # 이 호출로 실제로 지웠는가

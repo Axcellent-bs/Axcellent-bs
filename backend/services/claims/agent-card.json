@@ -216,6 +216,18 @@
       ],
       "verifier": null,
       "priority": "recommended"
+    },
+    {
+      "id": "purge_expired_claims",
+      "description": "보유 일수(SUPPORT_CLAIM_RETENTION_DAYS, 기본 1825일=5년, 개인정보처리방침 제4조 ⑥ 클레임 기록 5년 — 팀 기준)가 지난 클레임의 구매자 이름·상담원 결정 메모·검수 메모·내력의 글을 [삭제됨]으로 바꾼다. 금액·판정·상태·주문·구매자 가명 ID는 남기고 내력에 retention_purge(기준·보유 일수, 내용 없음)를 한 줄 더한다. 팀 방식(shop-api retention)대로 기본은 dry-run이라 사람이 SUPPORT_CLAIM_RETENTION_APPLY=1로 켜기 전에는 건수만 알리고(outcome dry_run) 아무것도 바꾸지 않는다. 켜면 execute()를 거쳐 지운다. 지울 클레임이 없으면 nothing_expired. 대시보드가 하루 한 번 부른다.",
+      "input_schema": "agents/support/src/support_agent/purge_schemas.py#PurgeExpiredClaimsInput",
+      "output_schema": "agents/support/src/support_agent/purge_schemas.py#ClaimPurgeReport",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
     }
   ]
 }

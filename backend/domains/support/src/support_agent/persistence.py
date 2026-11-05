@@ -373,6 +373,9 @@ class PersistentClaimStore(ClaimStore):
     def create(self, **kwargs: Any) -> Claim:  # type: ignore[override]
         return self._save(super().create(**kwargs))
 
+    def replace(self, claim: Claim) -> Claim:
+        return self._save(super().replace(claim))
+
     def set_status(self, claim: Claim, status: str, action: str, **detail: Any) -> Claim:
         # 호출한 쪽이 먼저 바꿔 둔 필드(메모·검수·지급 기록)도 이때 함께 저장된다
         return self._save(super().set_status(claim, status, action, **detail))

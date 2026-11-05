@@ -47,6 +47,7 @@ CORS 허용 출처는 `DASHBOARD_CORS_ORIGINS`(쉼표 구분, 기본 `http://loc
 | GET `/privacy/purge-preview?mode=customer_request\|expired[&inquiry_id=]` | `preview_data_purge` (읽기. 지워질 것과 보존 의무로 남을 것) |
 | POST `/conversations/{id}/customer-data-purge` | `purge_customer_data` (사람 토큰 필요. 안전 관문이 사람에게 보류해 처음엔 409 NOT_EXECUTED, 승인 뒤 같은 버튼을 다시 누르면 집행) |
 | (서버 안) 하루 한 번 | `purge_expired_inquiries` — 받은 지 3년이 지난 문의 원문 삭제. `DASHBOARD_RETENTION_SWEEP=off`로 끈다 |
+| (서버 안) 하루 한 번 | `purge_expired_claims` — 클레임 기록 5년(팀 기준) 삭제. support가 `SUPPORT_CLAIM_RETENTION_APPLY=1`일 때만 지우고 아니면 건수만 센다 |
 | GET `/support-chat`, `/support-chat/{id}` | `support_chat_list`, `support_chat_get` (직접 대화. 읽기에도 사람 토큰이 필요하다. 다른 사람 대화는 요약만, `restricted: true`) |
 | POST `/support-chat` | `support_chat_send` (사람 토큰 필요. `{thread_id?, message}` → 말을 저장한 대화, `status: answering`이면 GET으로 다시 읽는다. 말한 사람은 토큰 이름, 말은 `untrusted`, 문의·클레임·후기 집계 숫자를 `context`로 넘긴다) |
 | POST `/support-chat/{id}/close` | `support_chat_close` (사람 토큰 필요. 본인·담당·관리자) |

@@ -112,6 +112,9 @@ async def test_the_daily_sweep_calls_the_expiry_skill_with_a_per_day_key(fake: F
     request = fake.last("purge_expired_inquiries")
     today = datetime.now(UTC).date().isoformat()
     assert request.meta.idempotency_key == f"retention-expire:{today}"
+    # 클레임 기록(팀 기준 5년)도 같은 주기에 부른다. 켜기 전에는 건수만 세는 것은 support가 정한다
+    claims = fake.last("purge_expired_claims")
+    assert claims.meta.idempotency_key == f"claim-retention:{today}"
 
 
 @pytest.mark.asyncio
