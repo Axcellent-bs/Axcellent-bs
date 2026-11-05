@@ -41,6 +41,7 @@ from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     AGE_NOTE,
     AgeTopic,
+    BorrowFormat,
     InsightEvidence,
     InsightProduct,
     PopularTopic,
@@ -852,6 +853,71 @@ def mark_relevance(insights: Sequence[TrendInsight], terms: Sequence[str]) -> No
             i.reference_only = True
 
 
+FORMAT_NOTE = "이름·로고는 쓰지 말고 형식만 빌릴 것"
+RELEVANCE_ORDER = {"direct": 0, "domain": 0, "format": 1, "none": 2}  # 브리프 순서
+
+
+def _format_ok(i: TrendInsight) -> str | None:
+    """형식 빌리기가 안 되는 이유 (되면 None). 상품 직접 연결·회사 관련은 이미 direct·domain."""
+    if i.ad_material is not True:
+        why = i.ad_material_reason or "광고 재료 판정 없음"
+        # 인물 이름 주제는 초상권 때문에 막힌 것이라 형식만은 빌릴 수 있다
+        if not (i.ad_material is False and "초상권" in why):
+            return f"광고 재료 아님 ({why})"
+    if not i.shorts_format:
+        return "이 주제의 잘 되는 숏츠 형식이 없음"
+    return None
+
+
+def mark_format(
+    insights: Sequence[TrendInsight], promo: PromoConceptsOutput | None, warned: Warned
+) -> list[str]:
+    """참고용(none) 중 형식 빌리기(format)로 넘길 것을 고른다. 0개면 왜 0개인지 문장 목록.
+
+    조건(코드): 회사 상품 직접 연결은 없지만 광고 재료 가능(상표·인물은 형식만), 그 주제의 잘 되는
+    숏츠 형식이 있고, 예시 아이디어(promo_concepts)가 이 주제를 빌려 회사 상품과 이었다(경고로 뺀
+    상품군은 제외). format은 참고용이 아니다(기획이 가져감).
+    """
+    concepts = list(promo.concepts) if promo else []
+    picked = {_norm(c.borrowed_trend) for c in concepts if c.borrowed_trend}
+    why: list[str] = []
+    made = 0
+    for i in insights:
+        if i.company_relevance != "none" or i.classification_pending:
+            continue
+        names = {_norm(n) for n in [i.topic, *i.aliases]}
+        mine = [c for c in concepts if _norm(c.borrowed_trend) in names]
+        books = [
+            InsightProduct(product_id=p.product_id, name=p.name, category_name=p.category_name,
+                           reason=f"예시 아이디어 '{c.title}'에서 이 유행과 이어짐")  # fmt: skip
+            for c in mine for p in c.products if p.product_id not in warned.product_ids
+        ]
+        books = list({p.product_id: p for p in books}.values())
+        no_books = None if books else "예시 아이디어에서 이 주제와 이어진 회사 상품 없음"
+        bad = _format_ok(i) or no_books
+        if bad is not None:
+            why.append(f"{i.topic}: {bad}")
+            continue
+        warn = caution.judge(i.category, real_entity=i.real_entity,
+                             is_person="초상권" in (i.ad_material_reason or ""),
+                             names=i.entity_names)  # fmt: skip
+        i.company_relevance = "format"
+        i.company_relevance_reason = f"형식 빌리기: '{i.shorts_format}' 형식 + 예시 아이디어 상품"
+        i.reference_only = False
+        i.borrow_format = BorrowFormat(
+            name=i.shorts_format or "", median_views=i.shorts_format_median_views,
+            samples=i.shorts_format_samples, source=i.shorts_format_source,
+        )  # fmt: skip
+        i.borrow_products = books[:3]
+        i.cautions = list(warn.types)
+        i.caution_note = FORMAT_NOTE if (warn.types or i.real_entity) else None
+        made += 1
+    if made:
+        return []
+    trends = ", ".join(sorted({c.borrowed_trend for c in concepts})) if picked else "없음"
+    return [f"형식 빌리기 0개: 예시 아이디어가 고른 트렌드 {trends}", *why]
+
+
 def company_reason(c: Candidate) -> str | None:
     if not c.company:
         return None
@@ -1118,8 +1184,12 @@ async def make_brief(
             out.limits.append(
                 "도메인 프로필 키워드를 받지 못해 회사 연결은 연결 상품·회사 관련 키워드로만 봄"
             )
-        out.insights.sort(key=lambda i: (i.classification_pending, i.reference_only,
-                                         i.company_related, -i.score))  # fmt: skip
+        # 형식 빌리기: 참고용 중 예시 아이디어에서 회사 상품과 이어진 유행 (0개면 왜 0개인지)
+        out.limits += mark_format(out.insights, promo, warned)
+        # 순서: 회사 상품·도메인(direct·domain) → 형식 빌리기(format) → 참고용(none)
+        out.insights.sort(key=lambda i: (
+            i.classification_pending, RELEVANCE_ORDER.get(i.company_relevance or "none", 2),
+            i.reference_only, i.company_related, -i.score))  # fmt: skip
         for n, i in enumerate(out.insights, start=1):
             i.rank = n
         out.summary = summary(out)

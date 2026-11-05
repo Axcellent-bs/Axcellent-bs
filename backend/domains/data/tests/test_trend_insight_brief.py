@@ -607,6 +607,51 @@ def test_general_topics_without_company_link_become_reference_only(tmp_path: Pat
     assert [c.company_relevance for c in out.opportunities] == ["domain"]  # 카드는 그대로
 
 
+def test_format_insights_borrow_a_shorts_format_with_a_book_from_ideas() -> None:
+    """형식 빌리기: 직접 연결은 없지만 광고 재료·잘 되는 형식·예시 아이디어의 책이 있으면 format."""
+    from ax_contracts.schemas.data import (
+        InsightEvidence,
+        PromoConcept,
+        PromoProduct,
+        TrendInsight,
+    )
+
+    def ins(topic: str, **kw: Any) -> TrendInsight:
+        base = dict(insight_id=topic, rank=1, topic=topic, line="x", evidence=InsightEvidence(),
+                    company_relevance="none", reference_only=True, ad_material=True,
+                    shorts_format="챌린지", shorts_format_median_views=120000.0,
+                    shorts_format_samples=18, shorts_format_source="all",
+                    category="게임")  # fmt: skip
+        return TrendInsight(**{**base, **kw})
+
+    lol = ins("롤드컵", real_entity=True, entity_names=["롤드컵"])
+    golf = ins("골프", category="연예·스포츠")  # 예시 아이디어에 없음
+    news = ins("한남더힐 아파트", ad_material=False,
+               ad_material_reason="뉴스·사건 분류는 광고 재료로 쓰지 않음")  # fmt: skip
+    pen = ins("만년필 챌린지")  # 예시 아이디어의 상품이 경고로 뺀 문구뿐
+    promo = PromoConceptsOutput(concepts=[
+        PromoConcept(concept_id="c1", title="롤드컵 응원 독서 챌린지", borrowed_trend="롤드컵",
+                     products=[PromoProduct(product_id="p2", name="파이썬 입문서")]),
+        PromoConcept(concept_id="c2", title="한남더힐", borrowed_trend="한남더힐 아파트",
+                     products=[PromoProduct(product_id="p2", name="파이썬 입문서")]),
+        PromoConcept(concept_id="c3", title="만년필", borrowed_trend="만년필 챌린지",
+                     products=[PromoProduct(product_id="p1", name="무지 노트")]),
+    ])  # fmt: skip
+    why = brief.mark_format([lol, golf, news, pen], promo,
+                            brief.Warned(product_ids=frozenset({"p1"})))  # fmt: skip
+    assert why == []
+    assert lol.company_relevance == "format" and not lol.reference_only
+    assert lol.borrow_format is not None and lol.borrow_format.name == "챌린지"
+    assert [p.name for p in lol.borrow_products] == ["파이썬 입문서"]
+    assert lol.cautions == ["trademark"] and "형식만" in (lol.caution_note or "")
+    for other in (golf, news, pen):  # 책이 없거나 광고 재료가 아니면 그대로 참고용
+        assert other.company_relevance == "none" and other.reference_only
+    golf2 = ins("골프", category="연예·스포츠")
+    zero = brief.mark_format([golf2], promo, brief.Warned())
+    assert zero[0].startswith("형식 빌리기 0개: 예시 아이디어가 고른 트렌드")
+    assert any("골프: 예시 아이디어에서 이 주제와 이어진 회사 상품 없음" in z for z in zero)
+
+
 def test_relevance_rules() -> None:
     from ax_contracts.schemas.data import InsightEvidence, InsightProduct, TrendInsight
 
