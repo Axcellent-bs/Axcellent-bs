@@ -84,6 +84,8 @@ class ExplorerConfig:
     max_videos: int = 30  # 응답 칸마다 주는 영상 수 (count는 칸 전체 수)
     query_topics: int = 2
     seed_categories: tuple[str, ...] = ("교육·책",)
+    # 숏 칸이 모자라면 7일 이전 숏츠 표본으로 채울 카테고리 (화면 "7일 이전")
+    backfill_categories: tuple[str, ...] = ("교육·책",)
     refresh_hours: float = 12.0  # 다시 읽은 지 이 시간이 지난 영상만 다시 읽는다
     language: str = "ko"
 
@@ -445,6 +447,8 @@ async def compute(
 
     videos = [_video(i, max_seconds) for i in kept]
     shortages = _shortages(videos, config, now, store.searched(today), max_seconds)
+    # 칸이 모자란 카테고리(설정, 교육·책)는 7일 이전 숏츠 표본으로 채울 후보를 같이 저장한다
+    videos += _backfill(store, config, cache, pool, now, max_seconds, yt_db)
     if pending:
         limits.append(f"분류 대기 {pending}개 (새로 묻는 수: 한 번 {config.classify_max}개·하루"
                       f" {config.classify_daily}개까지, 다음 계산·다음 날 이어서)")  # fmt: skip
@@ -737,6 +741,58 @@ async def _subscribers(
             i.subscribers = subs[cid]
 
 
+def _backfill(
+    store: ExplorerStore,
+    config: ExplorerConfig,
+    cache: Any,
+    pool: Mapping[str, _Item],
+    now: datetime,
+    max_seconds: int,
+    yt_db: str,
+) -> list[ExplorerVideo]:
+    """`backfill_categories`의 숏 칸을 채울 7일 이전 숏츠 표본 (기간 무관, 최근 올린 것부터).
+
+    숏츠 통계 표본·하위 주제 숏츠 중 다시 읽어 올린 시각을 아는 것만. 분류는 저장된 것만 쓴다
+    (영상 분류, 없으면 숏츠 통계가 제목으로 분류한 것). 새로 묻지 않는다. 구독자는 저장된 값만.
+    카테고리마다 최소 수만큼 저장하고, 화면 요청에서 모자란 칸에만 붙인다(`before_period`).
+    """
+    from data_agent.skills import trend_evidence as ev
+
+    if not config.backfill_categories or cache is None:
+        return []
+    since = now - timedelta(days=POOL_DAYS)
+    by_cat: dict[str, list[_Item]] = {}
+    for vid, (stat, src, at) in store.videos().items():
+        if vid in pool or src not in ("shorts", "subtopic") or stat.published_at >= since:
+            continue
+        if _length(stat, max_seconds) != "short":
+            continue
+        if config.language and not is_language(config.language, stat.title,
+                                               stat.channel_title, stat.language):  # fmt: skip
+            continue
+        r = cache.get(VIDEO_KEY + vid) or (cache.get(stat.title) if stat.title else None)
+        if r is None or r.category not in config.backfill_categories:
+            continue
+        item = _Item(stat, src, at, category=r.category)
+        item.ad = caution.judge(r.category, real_entity=r.real_entity, is_person=r.is_person,
+                                names=r.entity_names, basis="저장된 분류")  # fmt: skip
+        by_cat.setdefault(r.category, []).append(item)
+    out: list[ExplorerVideo] = []
+    for items in by_cat.values():
+        items.sort(key=lambda i: i.stat.published_at, reverse=True)
+        take = items[: config.min_per_cell]
+        subs = ev.channel_subscribers(yt_db, [i.stat.channel_id for i in take if i.stat.channel_id],
+                                      now - ev.CHANNEL_FRESH)  # fmt: skip
+        for i in take:
+            cid = i.stat.channel_id
+            if cid in subs and subs[cid] is not None:
+                i.subscribers = subs[cid]
+            else:
+                i.subscriber_reason = "7일 이전 표본이라 구독자를 새로 받지 않음"
+            out.append(_video(i, max_seconds).model_copy(update={"before_period": True}))
+    return out
+
+
 def _video(i: _Item, max_seconds: int) -> ExplorerVideo:
     s = i.stat
     short = _length(s, max_seconds) == "short"
@@ -839,14 +895,22 @@ def view(
     shortages = payload.get("shortages", {})
     cats = [request.category] if request.category else out.categories
     for cat in cats:
-        mine = sorted((v for v in videos if _in_cell(v, cat, request.period, request.length,
-                                                       computed, max_seconds)),
+        mine = sorted((v for v in videos if not v.before_period and
+                       _in_cell(v, cat, request.period, request.length, computed, max_seconds)),
                       key=_sort_key(request.sort))  # fmt: skip
+        why = (shortages.get(f"{cat}|{request.period}|{request.length}")
+               if len(mine) < out.min_per_cell else None)  # fmt: skip
+        extra: list[ExplorerVideo] = []
+        if len(mine) < out.min_per_cell and request.length == "short":
+            # 빈 칸 대신 7일 이전 숏츠 표본으로 (최근 올린 것부터, "7일 이전" 표시)
+            extra = sorted((v for v in videos if v.before_period and v.category == cat),
+                           key=lambda v: v.published_at or computed,
+                           reverse=True)[: out.min_per_cell - len(mine)]  # fmt: skip
+            if extra:
+                why = f"{why or ''} · 7일 이전 숏츠 표본 {len(extra)}개로 채움".lstrip(" ·")
         out.cells.append(ExplorerCell(
             category=cat, period=request.period, length=request.length, count=len(mine),
-            shortage_reason=(shortages.get(f"{cat}|{request.period}|{request.length}")
-                             if len(mine) < out.min_per_cell else None),
-            videos=mine[:limit],
+            shortage_reason=why, videos=(mine + extra)[:limit],
         ))  # fmt: skip
     out.searches = [ExplorerSearch.model_validate(s) for s in payload.get("searches", [])]
     out.limits = list(payload.get("limits", []))
