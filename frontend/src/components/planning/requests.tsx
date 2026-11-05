@@ -6,6 +6,7 @@ import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, RELATION_LABEL, TODAY, byRelation, type Action, type Request, type State as S } from '@/lib/planningData'
 import { useAllReleaseChecks, type ReleaseCheck } from '@/lib/planning'
 import { Tag } from '@/components/planning-common/parts'
+import { Pager, usePage } from '@/components/planning-common/pager'
 import { Ref, convoHref, isFollowUp, nextOf, prName, prSlug, reviewHref, reviewOf, toPath } from '@/components/planning-common/links'
 import { gather } from '@/components/planning/projects'
 import { releaseState } from '@/components/planning/specs'
@@ -197,13 +198,19 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
   // 같은 요청으로 연결만 한 것(REQ-15 등)은 원래 요청 줄을 가리킨다
   const target = s.requests.find((x) => x.id === item)
   const focus = target?.duplicateOf ?? item
-  useEffect(() => {
-    if (focus) document.getElementById(`req-${focus}`)?.scrollIntoView({ block: 'center' })
-  }, [focus])
   const stuck = rows.filter((x) => x.wait).length
-  const allOpen = rows.length > 0 && rows.every((x) => open.has(x.r.id))
   const [view, setView] = useState<'list' | 'card'>(() => (localStorage.getItem('rq-view') === 'card' ? 'card' : 'list'))
   const pickView = (v: 'list' | 'card') => { setView(v); localStorage.setItem('rq-view', v) }
+  // 페이지: 목록 10줄 · 카드 12장(한 줄 4장). 필터·보기·폐기 토글을 바꾸면 첫 페이지로, 주소로 가리킨 요청은 그 페이지로
+  const pg = usePage(rows, view === 'card' ? 12 : 10)
+  useEffect(() => pg.setPage(0), [f, view, showDropped]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!focus) return
+    const at = rows.findIndex((x) => x.r.id === focus)
+    if (at >= 0) pg.setPage(Math.floor(at / pg.size))
+    setTimeout(() => document.getElementById(`req-${focus}`)?.scrollIntoView({ block: 'center' }), 0)
+  }, [focus]) // eslint-disable-line react-hooks/exhaustive-deps
+  const allOpen = pg.rows.length > 0 && pg.rows.every((x) => open.has(x.r.id))
 
   return (
     <div className="rq">
@@ -226,10 +233,10 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
           <button type="button" aria-pressed={view === 'list'} onClick={() => pickView('list')}>목록</button>
           <button type="button" aria-pressed={view === 'card'} onClick={() => pickView('card')}>카드</button>
         </div>
-        {view === 'list' && <button type="button" className="rq-all" aria-pressed={allOpen} onClick={() => setOpen(allOpen ? new Set() : new Set(rows.map((x) => x.r.id)))}>{allOpen ? '모두 접기' : '모두 펼치기'}</button>}
+        {view === 'list' && <button type="button" className="rq-all" aria-pressed={allOpen} onClick={() => setOpen(allOpen ? new Set() : new Set(pg.rows.map((x) => x.r.id)))}>{allOpen ? '모두 접기' : '모두 펼치기'}</button>}
       </nav>
 
-      {view === 'card' && <RequestCards s={s} rows={rows} />}
+      {view === 'card' && <><RequestCards s={s} rows={pg.rows} /><Pager {...pg} /></>}
       {view === 'list' && <>
       <div className="rq-head" aria-hidden>
         {STAGES.map((x) => <span key={x}>{x}</span>)}
@@ -238,7 +245,7 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
 
       {rows.length === 0 && <div className="empty"><b>{FILTERS.find((x) => x.id === f)!.label} 없음</b></div>}
       <ol className="rq-list">
-        {rows.map((row) => {
+        {pg.rows.map((row) => {
           const { r } = row
           const next = nextOf(s, r)
           const dropped = devDiscarded(s, gather(s, r).spec?.id) // 개발에서 작업을 모두 폐기함: 회색 막대·다음 동작 없음
@@ -298,6 +305,7 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
           )
         })}
       </ol>
+      <Pager {...pg} />
       </>}
     </div>
   )
