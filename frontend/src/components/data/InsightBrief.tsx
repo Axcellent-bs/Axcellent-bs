@@ -4,15 +4,17 @@ import { okEvidence, type SkillState } from "@/components/data/useSkill";
 import { Sources, when } from "@/components/data/Sources";
 import { OpportunityCards } from "@/components/data/OpportunityCards";
 import { AgeBars } from "@/components/data/AgeBars";
-import { CopyId, FoldRow, ShortsCard, factLinks, shortsThumbs, shortsTiles, verdictOf } from "@/components/data/ShortsCard";
+import { CopyId, FoldRow, RestFacts, ShortsCard, factLinks, shortsThumbs, shortsTiles, verdictOf } from "@/components/data/ShortsCard";
 import { DATA_SERVER, kpiLive, type DataFact, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
 
 // 트렌드 2단계(인사이트): 기획팀이 가져갈 인사이트 브리프 (v2 시안 ② 보드). trend_insight_brief(계약 TrendInsightBriefOutput) 응답 그대로.
 // - 카드 틀은 ShortsCard: 판정 칩 · 제목 · 한 문장(서버 line) · 숫자 타일 · 연결 상품 · 오른쪽 근거 숏츠 썸네일(최대 3) · "근거 전체 보기" 접힘 하나
 // - 인사이트 카드: 판정 칩 = 서버 shorts_fit(high → "숏츠로 해볼 만함", 그 밖·표본 부족 unknown → "아직 불확실", 칸 없는 예전 응답은 칩 없음).
 //   숫자 타일 = 숏츠 반응(shorts_fit) · 가장 오른 연령(top_age_band) · 목표 참고값(target_views_reference), 서버 값이 있는 것만 (#678)
-//   근거 숏츠 = evidence.video_links(썸네일·광고 재료 칩) → evidence.links + 브리프 facts 중 이 인사이트(about·fact_ids)의 YouTube 주소
-//   접힘 안: 광고 재료 판정·회사 관련 이유·연결 상품 이유·시즌 근거·연령대 막대·숏츠 형식·데이터 근거·한계·예시 아이디어·insight_id 복사
+//   근거 요약 = 서버 evidence_highlights("평소 vs 지금" 막대 + 배수 + 서버 문장 + 출처 배지, #710)
+//   근거 숏츠 = evidence_shorts(제목·조회수·광고 칩, #710) → evidence.video_links(썸네일·광고 재료 칩) → evidence.links + 브리프 facts 중 이 인사이트(about·fact_ids)의 YouTube 주소
+//   접힘 안: 광고 재료 판정·회사 관련 이유·연결 상품 이유·시즌 근거·연령대 막대(가장 오른 연령대 top_age_band 강조)·숏츠 형식·데이터 근거
+//   ·근거 숫자(이 카드 facts 중 근거 요약에 없는 나머지 전부)·한계·예시 아이디어·insight_id 복사
 // - 순서: 회사 관련·기회(기회 가설 카드 → 회사 관련 인사이트) → 상품이 연결된 그 밖의 인사이트 → 맨 아래 접힘 "상품 연결 없는 화제 N개"
 //   → 참고용 예시(기존 기획안 카드) 접힘
 // - 응답에 없는 칸(null·빈 목록)은 그리지 않는다. 이유가 오면 접힘 안에 이유만
@@ -116,9 +118,10 @@ function InsightCard({ i, facts }: { i: TrendInsight; facts: DataFact[] | undefi
       title={i.topic}
       line={i.line || null}
       lineNote={i.line_status === "fixed" ? "고정 문장" : null}
+      highlights={i.evidence_highlights}
       tiles={shortsTiles(i)}
       products={i.products.map((p) => ({ id: p.product_id, name: p.name }))}
-      thumbs={shortsThumbs(i.evidence.video_links, [...i.evidence.links, ...factLinks(facts, i.insight_id, i.fact_ids)])}
+      thumbs={shortsThumbs([...(i.evidence_shorts ?? []), ...(i.evidence.video_links ?? [])], [...i.evidence.links, ...factLinks(facts, i.insight_id, i.fact_ids)])}
       highlight={i.company_related === true}
       fold={<>
         <FoldRow label="광고 재료">
@@ -139,7 +142,7 @@ function InsightCard({ i, facts }: { i: TrendInsight; facts: DataFact[] | undefi
               <span className="font-semibold text-ink-900">{i.target_age}</span>
               {i.target_age_ratio !== null && <span> · {times(i.target_age_ratio)}</span>}
               {i.target_age_status === "rising" && <span> · 급상승</span>}
-              {(i.age_bands?.length ?? 0) > 0 && <AgeBars bands={i.age_bands ?? []} top={i.target_age} />}
+              {(i.age_bands?.length ?? 0) > 0 && <AgeBars bands={i.age_bands ?? []} top={i.top_age_band ?? i.target_age} />}
             </>
           ) : <span className="text-ink-500">{i.target_age_reason ?? NO_REASON}</span>}
         </FoldRow>
@@ -159,6 +162,7 @@ function InsightCard({ i, facts }: { i: TrendInsight; facts: DataFact[] | undefi
           ) : <span className="text-ink-500">{i.shorts_format_reason ?? NO_REASON}</span>}
         </FoldRow>
         <FoldRow label="데이터 근거"><Evidence e={i.evidence} /></FoldRow>
+        <RestFacts facts={facts} about={i.insight_id} ids={i.fact_ids} shown={i.evidence_highlights} />
         {i.limits.length > 0 && (
           <FoldRow label="한계"><ul className="list-disc space-y-0.5 pl-4 text-xs text-ink-500">{i.limits.map((l) => <li key={l}>{l}</li>)}</ul></FoldRow>
         )}
