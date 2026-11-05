@@ -722,3 +722,12 @@ class OrgRosterCompleteBody(BaseModel):
     """전 직원 등록 완료 표시(`complete=true`) 또는 다시 열기(`false`)."""
 
     complete: bool = True
+
+
+class SupportChatSendBody(BaseModel):
+    """고객지원 AI에게 말을 건다. 말한 사람은 받지 않는다(서버가 사람 토큰에서 채운다).
+
+    `thread_id`가 없으면 새 대화를 연다 (개발 AI `/dev-chat`과 같은 모양)."""
+
+    thread_id: str | None = Field(default=None, min_length=1, max_length=40)
+    message: str = Field(min_length=1, max_length=4000)
