@@ -619,8 +619,10 @@ class TrendCandidatesRequest(AxModel):
     end_date: dt.date | None = None  # 네이버 판정할 마지막 날 (한국 날짜). 없으면 어제
 
 
-# 회사와의 연결: direct = 연결 상품 있음, domain = 도메인 프로필·회사 키워드, none = 둘 다 아님
-CompanyRelevance = Literal["direct", "domain", "none"]
+# 회사와의 연결: direct = 연결 상품 있음, domain = 도메인 프로필·회사 키워드, none = 둘 다 아님,
+# format = 값 추가 (형식 빌리기: 상품 직접 연결은 없지만 광고 재료 가능하고, 그 주제의 잘 되는 숏츠
+# 형식이 있으며, 예시 아이디어에서 회사 상품과 이어진 유행. 참고용이 아님)
+CompanyRelevance = Literal["direct", "domain", "none", "format"]
 
 
 # 영상을 광고·홍보 재료로 쓸 때 확인할 것 (v2 화면 칸, 코드가 분류 결과로 정함):
@@ -1485,7 +1487,7 @@ class ExplorerSearch(AxModel):
 
     category: str
     length: ExplorerLength
-    window: Literal["7d", "1d"]
+    window: Literal["7d", "1d", "3d"]  # 3d: 값 추가 (3일 칸 보충 검색)
     status: Literal["known", "unknown", "skipped"]
     query: str | None = None  # 검색어 (그 카테고리 지금 인기 주제 이름, 교육·책은 도메인 씨앗)
     found: int = Field(default=0, ge=0)  # 길이·한국 영상 기준을 통과한 수
@@ -1921,6 +1923,19 @@ class EvidenceHighlight(AxModel):
     sample: int | None = Field(default=None, ge=0)  # 표본 (날 수·영상 수)
     sentence: str  # 템플릿 문장 하나 (예: 네이버 검색이 평소의 1.42배예요 (지난 8주 기준))
     fact_id: str | None = None  # 고른 숫자의 facts id
+    # 아래는 예전 응답은 없다. 표본이 기준(설정)보다 적은 근거 (뒤로 보냄, 화면은 막대 없이 "참고")
+    # 와 그 표시 문구 (예: "표본 6개 · 참고")
+    low_sample: bool = False
+    sample_note: str | None = None
+
+
+class BorrowFormat(AxModel):
+    """형식 빌리기 인사이트의 빌릴 숏츠 형식 (숏츠 통계 값 그대로)."""
+
+    name: str = Field(min_length=1)  # 숏츠 형식 (예: 챌린지)
+    median_views: float | None = Field(default=None, ge=0)  # 그 형식 조회 중앙값
+    samples: int | None = Field(default=None, ge=0)  # 그 형식 숏츠 수
+    source: Literal["topic", "category", "all"] | None = None  # 어느 단계 숏츠 통계에서 골랐는지
 
 
 class TrendInsight(AxModel):
@@ -1994,6 +2009,12 @@ class TrendInsight(AxModel):
     # 근거 숏츠 (썸네일·제목·조회수, 최대 3개)
     evidence_highlights: list[EvidenceHighlight] = Field(default_factory=list, max_length=3)
     evidence_shorts: list[VideoLink] = Field(default_factory=list, max_length=3)
+    # 아래는 예전 응답은 없다. 형식 빌리기(company_relevance = format) 칸: 빌릴 형식, 이어 붙일 회사
+    # 상품(예시 아이디어에서 이어진 것), 주의(상표·인물·음원: 이름·로고는 쓰지 말고 형식만)
+    borrow_format: BorrowFormat | None = None
+    borrow_products: list[InsightProduct] = Field(default_factory=list)
+    cautions: list[CautionType] = Field(default_factory=list)
+    caution_note: str | None = None
 
 
 # ------------------------------------------------ 기회 가설 카드 (trend_insight_brief 선택 칸)
