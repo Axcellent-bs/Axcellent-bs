@@ -24,7 +24,7 @@ line_spacing_px = 6
 font_color = "white"
 box_color = "black"
 box_opacity = 0.65
-box_border_ratio = 0.35    # 글자 뒤 배경 상자 안쪽 여백 = 글자 크기 x 이 값
+box_border_ratio = 0.2     # 글자 뒤 배경 상자 안쪽 여백 = 글자 크기 x 이 값
 
 [display]
 time = "full"              # 영상은 전 구간 표시(방침). 다른 값은 아직 받지 않는다

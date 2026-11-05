@@ -422,7 +422,7 @@ def _write_meta(
         "media_kind": kind,
         "text": text,
         "text_status": cfg.text_status,
-        "config_source": cfg.source,
+        "config_source": Path(cfg.source).name,  # 경로는 기록하지 않는다
         "config_sha256": cfg.sha256,
         "source_file": source.name,
         "source_sha256": source_sha,
