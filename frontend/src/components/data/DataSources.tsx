@@ -4,12 +4,13 @@ import { okEvidence, useSkill, type SkillState } from "@/components/data/useSkil
 import { Sources, when } from "@/components/data/Sources";
 import {
   DATA_SERVER, dataAi, kpiLive,
-  type CollectorStatus, type DataSource, type DataSourcesOutput, type DomainProfileOutput, type LlmDailyUsage, type SourceDataKind, type SourcePlanItem, type SourcePlanOutput,
+  type CollectorStatus, type DataSource, type DataSourcesOutput, type DomainProfileOutput, type LlmDailyUsage, type ProfileEvidence, type SourceDataKind, type SourcePlanItem, type SourcePlanOutput,
 } from "@/lib/data";
 
 // 트렌드&콘텐츠 "데이터 출처" 하위 탭 (루프 4단계와 별개, 탭 맨 끝). 서버 응답 그대로 보여 준다.
 // - 위: 회사 이해(domain_profile, 계약 DomainProfileOutput). 업종·상품군·고객 축·분석 질문·씨앗 키워드.
-//   근거 문장은 씨앗 키워드에만 있다(계약). 사람이 덮어쓴 칸(overridden)은 "사람이 덮어씀" 칩
+//   씨앗 키워드는 키워드마다 근거 문장, 업종·상품군·고객 축·분석 질문은 칸마다 접힘 "근거 N개"(서버 evidence, 원문 대조를 통과한 것만).
+//   사람이 덮어쓴 칸(overridden)은 "사람이 덮어씀" 칩
 // - 가운데: 수집 계획(source_plan, 계약 SourcePlanOutput). 출처별 고른 이유·카테고리·키워드·연령 여부·호출 수,
 //   출처별 할당량(quota: 쓸 양 / 상한). 뺀 값(카테고리 id·키워드)은 접힘. [계획 승인]은 꺼 둠, 승인 상태는 서버 값
 // - 아래: 출처 현황 표(data_sources, 계약 DataSourcesOutput). 키는 이름(key_envs)만 있고 값은 응답에 없다.
@@ -53,11 +54,36 @@ function Section({ id, title, meta, tools, children }: { id: string; title: stri
 
 const OVERRIDDEN = <Chip label="사람이 덮어씀" tone={TONE.warn} />;
 
-function Field({ label, name, overridden, children }: { label: string; name: string; overridden: string[]; children: ReactNode }) {
+const EVIDENCE_FROM: Record<ProfileEvidence["evidence_from"], string> = {
+  about: "회사 소개", product: "상품 이름", category: "카테고리 이름", description: "상품 설명",
+};
+
+/** 칸의 근거 문장 접힘 (서버 evidence 중 그 칸 것만). 없으면 그리지 않는다 */
+function EvidenceFold({ list }: { list: ProfileEvidence[] }) {
+  if (list.length === 0) return null;
+  return (
+    <details className="mt-1.5 text-xs">
+      <summary className="cursor-pointer font-semibold text-ink-500">근거 {list.length}개</summary>
+      <ul className="mt-1 space-y-1">
+        {list.map((e, k) => (
+          <li key={`${e.value}-${k}`} className="text-ink-700">
+            <span className="font-semibold text-ink-900">{e.value}</span> · {e.evidence}
+            <span className="text-ink-500"> ({EVIDENCE_FROM[e.evidence_from]})</span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function Field({ label, name, overridden, evidence, children }: {
+  label: string; name: string; overridden: string[]; evidence?: ProfileEvidence[]; children: ReactNode;
+}) {
   return (
     <div className="space-y-1">
       <p className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-ink-500">{label}{overridden.includes(name) && OVERRIDDEN}</p>
       <div className="text-sm text-ink-700">{children}</div>
+      {evidence && <EvidenceFold list={evidence} />}
     </div>
   );
 }
@@ -65,18 +91,19 @@ function Field({ label, name, overridden, children }: { label: string; name: str
 function Profile({ p }: { p: DomainProfileOutput }) {
   if (p.status === "unknown") return <Empty>{p.reason ?? NO_REASON}</Empty>;
   const o = p.overridden;
+  const ev = (field: ProfileEvidence["field"]) => (p.evidence ?? []).filter((e) => e.field === field);
   return (
     <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
-        {p.industry && <Field label="업종" name="industry" overridden={o}><span className="font-semibold text-ink-900">{p.industry}</span></Field>}
+        {p.industry && <Field label="업종" name="industry" overridden={o} evidence={ev("industry")}><span className="font-semibold text-ink-900">{p.industry}</span></Field>}
         {p.customer_axes.length > 0 && (
-          <Field label="고객 축" name="customer_axes" overridden={o}>
+          <Field label="고객 축" name="customer_axes" overridden={o} evidence={ev("customer_axis")}>
             <ul className="flex flex-wrap gap-1.5">{p.customer_axes.map((a) => <li key={a} className="chip bg-ink-100 text-ink-700">{a}</li>)}</ul>
           </Field>
         )}
       </div>
       {p.product_groups.length > 0 && (
-        <Field label="상품군" name="product_groups" overridden={o}>
+        <Field label="상품군" name="product_groups" overridden={o} evidence={ev("product_group")}>
           <ul className="flex flex-wrap gap-1.5">
             {p.product_groups.map((g) => (
               <li key={g.name} className="chip bg-surface text-ink-700 ring-1 ring-ink-100" title={g.category_codes.length ? `카테고리 ${g.category_codes.join(", ")}` : undefined}>
@@ -87,7 +114,7 @@ function Profile({ p }: { p: DomainProfileOutput }) {
         </Field>
       )}
       {p.questions.length > 0 && (
-        <Field label="분석 질문" name="questions" overridden={o}>
+        <Field label="분석 질문" name="questions" overridden={o} evidence={ev("question")}>
           <ul className="list-disc space-y-0.5 pl-5">{p.questions.map((q) => <li key={q}>{q}</li>)}</ul>
         </Field>
       )}

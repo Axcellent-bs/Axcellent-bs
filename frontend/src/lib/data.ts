@@ -625,6 +625,10 @@ export interface PopularVideo {
   /** 영상 주소와 썸네일 (서버가 저장된 YouTube 응답 값만, #620·#621). 예전 응답은 없다 */
   video_url?: string | null;
   thumbnail_url?: string | null;
+  /** 광고 재료로 쓸 수 있는지·확인할 것 (#678·#679). 확인할 것이 없고 분류를 알 때만 true, 있으면 false, 모르면 null + caution_reason */
+  ad_usable?: boolean | null;
+  caution_types?: CautionType[];
+  caution_reason?: string | null;
 }
 export interface TrendPopularOutput {
   /** 점수 순 */
@@ -764,6 +768,10 @@ export interface VideoLink {
   video_id: string;
   video_url: string | null;
   thumbnail_url: string | null;
+  /** 광고 재료로 쓸 수 있는지·확인할 것 (#678·#679). 확인할 것이 없고 분류를 알 때만 true, 있으면 false, 모르면 null + caution_reason */
+  ad_usable?: boolean | null;
+  caution_types?: CautionType[];
+  caution_reason?: string | null;
 }
 
 // ---------------------------------------------------------------- 인사이트 브리프 (trend_insight_brief)
@@ -850,6 +858,16 @@ export interface TrendInsight {
   /** 회사와의 연결 (#628): direct = 연결 상품, domain = 도메인 프로필·회사 키워드, none = 둘 다 아님(참고용). 예전 응답은 없다 */
   company_relevance?: "direct" | "domain" | "none" | null;
   company_relevance_reason?: string | null;
+  /** 숏츠 적합도·목표 참고값 (#678). 숏츠 표본이 모자라면 null + shorts_fit_status unknown + shorts_fit_reason. 예전 응답은 없다 */
+  shorts_fit?: ShortsFit | null;
+  shorts_fit_status?: "known" | "unknown" | null;
+  shorts_fit_reason?: string | null;
+  target_views_reference?: number | null;
+  target_reference_basis?: string | null;
+  /** 평소 대비 가장 크게 오른 연령대 (#678, age_bands 중 known만). 모르면 null + top_age_band_reason. 예전 응답은 없다 */
+  top_age_band?: string | null;
+  top_age_band_ratio?: number | null;
+  top_age_band_reason?: string | null;
 }
 export interface TrendInsightBriefOutput {
   status: "known" | "unknown";
@@ -935,6 +953,14 @@ export interface SeedKeyword {
   evidence_from: "about" | "product" | "category" | "description" | "override";
   product_ids: string[];
 }
+/** 프로필 칸 하나의 근거 문장 (소개·상품 이름·카테고리 이름·설명 원문 일부, 코드가 대조) */
+export interface ProfileEvidence {
+  field: "industry" | "product_group" | "customer_axis" | "question";
+  /** 그 칸의 값 (업종 이름·상품군 이름·고객 축·질문) */
+  value: string;
+  evidence: string;
+  evidence_from: "about" | "product" | "category" | "description";
+}
 export interface DomainProfileOutput {
   status: "known" | "unknown";
   reason: string | null;
@@ -946,6 +972,8 @@ export interface DomainProfileOutput {
   questions: string[];
   seed_keywords: SeedKeyword[];
   dropped_keywords: { keyword: string; reason: string }[];
+  /** 업종·상품군·고객 축·분석 질문의 근거 문장 (원문 대조를 통과한 것만). 예전 응답은 없다 */
+  evidence?: ProfileEvidence[];
   /** 사람이 덮어쓴 칸 이름 */
   overridden: string[];
   catalog_hash: string;
@@ -1103,6 +1131,10 @@ export interface DomainOpportunity {
   fact_ids?: string[];
   /** 근거 숏츠의 주소·썸네일. 예전 응답은 없다 */
   video_links?: VideoLink[];
+  /** 평소 대비 가장 크게 오른 연령대 (#678, age_bands 중 known만). 모르면 null + top_age_band_reason. 예전 응답은 없다 */
+  top_age_band?: string | null;
+  top_age_band_ratio?: number | null;
+  top_age_band_reason?: string | null;
 }
 
 // ---------------------------------------------------------------- 숏츠 통계 (shorts_stats)

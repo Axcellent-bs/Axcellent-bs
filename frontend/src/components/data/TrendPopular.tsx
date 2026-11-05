@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Empty, TONE } from "@/components/finance/bits";
 import type { SkillState } from "@/components/data/useSkill";
-import { ThumbImage } from "@/components/data/ShortsCard";
+import { CautionChip, ThumbImage, hasCaution } from "@/components/data/ShortsCard";
 import { videoUrl } from "@/components/data/Sources";
 import { type PopularCategory, type PopularTopic, type PopularVideo, type PromoConceptsOutput, type TrendPopularOutput } from "@/lib/data";
 
@@ -13,7 +13,8 @@ import { type PopularCategory, type PopularTopic, type PopularVideo, type PromoC
 //   · 영상 카드(썸네일 · 순위 · 제목 2줄 · 채널 · 큰 조회수 · 시간당·구독자 대비 · 칩 하나). 누르면 서버 video_url 새 탭
 // - 긴 영상 = 그 칸 주제들의 영상(videos) + 카테고리 조회수 상위 영상(top_videos) 중 서버 is_short가 true가 아닌 것(모름 포함). 같은 영상은 한 번만.
 //   길이는 화면에서 따로 판단하지 않는다
-// - 칩: 주제 판정(materialOf: 기획안 재료에서 뺀 주제·추천 안 함 분류 = 광고에 안 씀, 실존 이름·상표 = 주의, 재료로 쓴 주제 = 가능)
+// - 칩: 서버 ad_usable·caution_types가 있으면 그 값(CautionChip, #679), 없으면 주제 판정(materialOf: 기획안 재료에서 뺀 주제·추천 안 함 분류 = 광고에 안 씀,
+//   실존 이름·상표 = 주의, 재료로 쓴 주제 = 가능)
 
 const num = (v: number | null | undefined) =>
   typeof v === "number" && Number.isFinite(v) ? v.toLocaleString("ko-KR", { maximumFractionDigits: 0 }) : null;
@@ -124,7 +125,8 @@ function sorted(cards: Card[], key: SortKey): Card[] {
 
 function VideoCard({ card, rank, promo }: { card: Card; rank: number; promo: PromoConceptsOutput | null }) {
   const { v, topic } = card;
-  const m = topic ? materialOf([topic.keyword, ...topic.aliases], promo, topic) : null;
+  const server = hasCaution(v);
+  const m = !server && topic ? materialOf([topic.keyword, ...topic.aliases], promo, topic) : null;
   const chip = m && m.kind !== "none" ? MATERIAL[m.kind] : null;
   const facts = [
     v.views_per_hour != null ? `시간당 +${num(v.views_per_hour)}` : null,
@@ -143,7 +145,7 @@ function VideoCard({ card, rank, promo }: { card: Card; rank: number; promo: Pro
           {v.channel_title && <span className="truncate text-xs text-ink-500">{v.channel_title}</span>}
           {v.views != null && <span className="mt-1 text-xl font-bold tabular-nums text-ink-900" title={`조회 ${num(v.views)}회`}>{COMPACT.format(v.views)}</span>}
           {facts.length > 0 && <span className="text-xs text-ink-500">{facts.join(" · ")}</span>}
-          {chip && (
+          {server ? <span className="mt-auto pt-1 empty:hidden"><CautionChip v={v} /></span> : chip && (
             <span className="mt-auto pt-1">
               <span className={`chip text-xs ${chip.chip}`} title={m?.reason}>{chip.label}</span>
             </span>

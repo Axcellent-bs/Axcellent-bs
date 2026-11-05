@@ -1,17 +1,47 @@
 import { useState, type ReactNode } from "react";
 import { TONE } from "@/components/finance/bits";
-import type { CautionType, DataFact, VideoLink } from "@/lib/data";
+import type { CautionType, DataFact, ShortsFit, VideoLink } from "@/lib/data";
 
 // 2단계 인사이트 v2 카드 틀 (v2 시안 ② 보드). 인사이트 카드와 기회 가설 카드가 같이 쓴다.
 // 왼쪽: 판정 칩 하나 → 제목 → 한 문장(서버 line) → 숫자 타일(서버 값이 있는 것만) → 연결 상품 → "근거 전체 보기" 접힘 하나
 // 오른쪽: 근거 숏츠 썸네일 최대 3개. 서버 thumbnail_url 이미지(세로 비율, cover). 값이 없거나 깨지면 회색 자리.
 //   누르면 서버 video_url(없으면 근거 주소) 새 탭
 // 문단 글은 카드당 한 문장(line)만. 나머지 이유·한계·예시는 접힘 안
+// 판정 칩·숫자 타일(verdictOf·shortsTiles)은 서버 칸 그대로: shorts_fit · target_views_reference · top_age_band (#678). 화면에서 고르지 않는다
 
-export type Verdict = { label: string; tone: string };
+export type Verdict = { label: string; tone: string; title?: string | null };
 export type Tile = { label: string; value: string; note?: string | null };
-/** 근거 숏츠 하나: 누르면 갈 주소, 썸네일 주소(없으면 null) */
-export type Thumb = { url: string; thumb: string | null };
+/** 근거 숏츠 하나: 누르면 갈 주소, 썸네일 주소(없으면 null), 서버 광고 재료 칸(VideoLink에 있을 때만) */
+export type Thumb = { url: string; thumb: string | null; caution?: CautionFields };
+
+const fmt = (v: number, digits = 0) => v.toLocaleString("ko-KR", { maximumFractionDigits: digits });
+const COMPACT = new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 });
+
+/** 판정 칩: 숏츠 적합도 high → "숏츠로 해볼 만함", 그 밖(uncertain·low, 표본 부족 unknown) → "아직 불확실". 칸이 없는 예전 응답은 칩 없음 */
+export function verdictOf(fit: ShortsFit | null | undefined, status?: "known" | "unknown" | null, reason?: string | null): Verdict | null {
+  if (fit) return fit.level === "high" ? { label: "숏츠로 해볼 만함", tone: TONE.ok, title: fit.reason } : { label: "아직 불확실", tone: TONE.muted, title: fit.reason };
+  if (status === "unknown") return { label: "아직 불확실", tone: TONE.muted, title: reason ?? null };
+  return null;
+}
+
+/** 숫자 타일 3개(서버 값이 있는 것만): 숏츠 반응(shorts_fit.ratio·samples) · 가장 오른 연령(top_age_band·배수) · 목표 참고값(target_views_reference) */
+export function shortsTiles(x: {
+  shorts_fit?: ShortsFit | null; target_views_reference?: number | null; target_reference_basis?: string | null;
+  top_age_band?: string | null; top_age_band_ratio?: number | null;
+}): Tile[] {
+  const tiles: Tile[] = [];
+  const fit = x.shorts_fit;
+  if (fit && typeof fit.ratio === "number") {
+    tiles.push({ label: "숏츠 반응", value: `${fmt(fit.ratio, 2)}배`, note: [fit.category, fit.samples ? `표본 ${fmt(fit.samples)}개` : null].filter(Boolean).join(" · ") || null });
+  }
+  if (x.top_age_band) {
+    tiles.push({ label: "가장 오른 연령", value: x.top_age_band, note: typeof x.top_age_band_ratio === "number" ? `검색 평소의 ${fmt(x.top_age_band_ratio, 2)}배` : null });
+  }
+  if (typeof x.target_views_reference === "number") {
+    tiles.push({ label: "목표 참고값", value: `${COMPACT.format(x.target_views_reference)}회`, note: x.target_reference_basis ?? null });
+  }
+  return tiles;
+}
 
 const YOUTUBE = /^https:\/\/(www\.|m\.)?(youtube\.com\/(watch|shorts)|youtu\.be\/)/;
 const YOUTUBE_ID = /(?:[?&]v=|\/shorts\/|youtu\.be\/)([A-Za-z0-9_-]{6,})/;
@@ -22,14 +52,14 @@ const idOf = (url: string) => YOUTUBE_ID.exec(url)?.[1] ?? url;
 export function shortsThumbs(videoLinks: VideoLink[] | undefined, links: (string | null | undefined)[]): Thumb[] {
   const out: Thumb[] = [];
   const seen = new Set<string>();
-  const push = (url: string | null | undefined, thumb: string | null, id?: string) => {
+  const push = (url: string | null | undefined, thumb: string | null, id?: string, caution?: CautionFields) => {
     if (!url || !YOUTUBE.test(url) || out.length === 3) return;
     const key = id ?? idOf(url);
     if (seen.has(key)) return;
     seen.add(key);
-    out.push({ url, thumb });
+    out.push({ url, thumb, caution });
   };
-  for (const v of videoLinks ?? []) push(v.video_url, v.thumbnail_url, v.video_id);
+  for (const v of videoLinks ?? []) push(v.video_url, v.thumbnail_url, v.video_id, v);
   for (const l of links) push(l, null);
   return out;
 }
@@ -89,7 +119,7 @@ export function ShortsCard({ verdict, kicker, title, line, lineNote, tiles, prod
       <div className="flex min-w-0 flex-[999_1_30rem] flex-col gap-3">
         {(verdict || kicker) && (
           <div className="flex flex-wrap items-center gap-2">
-            {verdict && <span className={`chip text-sm font-bold ${verdict.tone}`}>{verdict.label}</span>}
+            {verdict && <span className={`chip text-sm font-bold ${verdict.tone}`} title={verdict.title ?? undefined}>{verdict.label}</span>}
             {kicker && <span className="text-xs text-ink-500">{kicker}</span>}
           </div>
         )}
@@ -132,6 +162,7 @@ export function ShortsCard({ verdict, kicker, title, line, lineNote, tiles, prod
                   className="block rounded-xl transition hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
                   <ThumbImage src={t.thumb} alt={`근거 숏츠 ${k + 1}`} />
                 </a>
+                {t.caution && <span className="mt-1 block empty:hidden"><CautionChip v={t.caution} className="text-[11px]" /></span>}
               </li>
             ))}
           </ul>
