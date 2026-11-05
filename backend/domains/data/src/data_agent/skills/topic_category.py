@@ -109,9 +109,10 @@ _PROMPT = (
 class _Item(BaseModel):
     id: str
     category: str
-    real_entity: bool = False
-    entity_names: list[str] = Field(default_factory=list)
-    is_person: bool = False  # 소재 이름 자체가 실존 사람 이름인지
+    # 참/거짓·이름 칸을 비워(null) 답해도 그 묶음 전체를 버리지 않는다 (null은 거짓·빈 목록)
+    real_entity: bool | None = False
+    entity_names: list[str] | None = Field(default_factory=list)
+    is_person: bool | None = False  # 소재 이름 자체가 실존 사람 이름인지
 
 
 class _Categories(BaseModel):
@@ -356,7 +357,7 @@ async def _ask(
         if item is None:
             out[t.keyword] = CategoryResult(UNKNOWN, "LLM 답에 이 소재가 없음", used)
             continue
-        names = _seen_names(item.entity_names, t)
+        names = _seen_names(item.entity_names or [], t)
         entity = bool(item.real_entity or names)
         answer = item.category.strip()
         person = bool(item.is_person)
@@ -490,7 +491,7 @@ async def _ask_videos(
             continue
         # 실존 이름: 제목·태그에 실제로 나온 것만 (코드 검사, 채널 이름은 근거로 보지 않는다)
         seen = TopicInput(v.title or "", (), (", ".join(_video_tags(v)),))
-        names = _seen_names(item.entity_names, seen)
+        names = _seen_names(item.entity_names or [], seen)
         entity = bool(item.real_entity or names)
         person = bool(item.is_person and names)
         answer = item.category.strip()

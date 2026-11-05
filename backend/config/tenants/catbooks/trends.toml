@@ -161,6 +161,7 @@ daily_searches = 20      # 하루 검색 상한: 7일 검색(카테고리 × 숏
 video_calls = 10         # 다른 저장분 영상 다시 읽기(videos.list) 하루 상한. 한 번 = 50개·1단위
 channel_calls = 4        # 구독자 받기(channels.list) 하루 상한. 한 번 = 채널 50개·1단위
 classify_max = 200       # 한 번 계산에 새로 분류할 영상 수 (LLM 하루 상한 보호, 남으면 다음 계산 때)
+classify_daily = 300     # 하루에 새로 분류할 영상 수. 분류 대기는 하루 몫씩 나눠서 (20개 = LLM 1번)
 max_videos = 30          # 응답 칸마다 주는 영상 수
 seed_categories = ["교육·책"]
 
