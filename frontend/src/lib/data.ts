@@ -1113,10 +1113,26 @@ export interface ShortsVideo {
   title: string | null;
   channel_title: string | null;
   views: number | null;
+  /** 시간당 조회 증가 (두 번 본 숏츠만) */
+  views_per_hour?: number | null;
+  /** known = 잼, measuring = 다시 본 간격이 기준 미만, pending = 다음 조회 대기 */
+  velocity_status?: "known" | "measuring" | "pending" | null;
   /** 영상 주소와 썸네일 (서버가 저장된 YouTube 응답 값만, #620·#621). 예전 응답은 없다 */
   video_url?: string | null;
   thumbnail_url?: string | null;
+  /** 화면 카드 칸 (#683, by_category[].videos만 채운다). 주제 분류 */
+  category?: string | null;
+  /** 채널 구독자 수·조회 ÷ 구독자 (channels.list). 숨김·못 받음이면 null + subscriber_reason */
+  channel_subscribers?: number | null;
+  views_per_subscriber?: number | null;
+  subscriber_reason?: string | null;
+  /** 광고 재료로 쓸 수 있는지·확인할 것 (VideoLink와 같은 규칙) */
+  ad_usable?: boolean | null;
+  caution_types?: CautionType[];
+  caution_reason?: string | null;
 }
+/** 확인할 것: 실존 인물(초상권)·상표·음원 (계약 CautionType, #678) */
+export type CautionType = "real_person" | "trademark" | "music";
 export interface ShortsGroup {
   /** 주제 분류 값 또는 숏츠 형식 */
   name: string;
@@ -1135,6 +1151,8 @@ export interface ShortsGroup {
   median_views_per_hour?: number | null;
   /** 다시 본 간격이 기준 미만이라 측정 중인 수 */
   velocity_measuring?: number;
+  /** 카테고리 그룹만: 화면 카드 숏츠 (조회수 순, 설정 개수까지, 표본 부족 칸도). #683, 예전 응답은 없다 */
+  videos?: ShortsVideo[];
 }
 export interface ShortsSearch {
   youtube_category_id: string;

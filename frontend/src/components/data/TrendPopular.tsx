@@ -1,28 +1,27 @@
 import { useState, type ReactNode } from "react";
-import { Empty, Panel, TONE, Waiting } from "@/components/finance/bits";
-import { okEvidence, type SkillState } from "@/components/data/useSkill";
+import { Empty, TONE } from "@/components/finance/bits";
+import type { SkillState } from "@/components/data/useSkill";
 import { ThumbImage } from "@/components/data/ShortsCard";
-import { Sources, videoUrl } from "@/components/data/Sources";
-import { DATA_SERVER, type PopularCategory, type PopularTopic, type PopularVideo, type PromoConceptsOutput, type TrendPopularOutput } from "@/lib/data";
+import { videoUrl } from "@/components/data/Sources";
+import { type PopularCategory, type PopularTopic, type PopularVideo, type PromoConceptsOutput, type TrendPopularOutput } from "@/lib/data";
 
-// 트렌드 1단계(감지): "숏츠를 보게" (v2 시안 ① 보드). trend_popular(계약 TrendPopularOutput) 응답 그대로.
+// 트렌드 1단계(감지) 보조: 맨 위 한 줄(TrendHeadline)과 맨 아래 접힘 "긴 영상"(LongVideos). trend_popular(계약 TrendPopularOutput) 응답 그대로.
+// 숏츠 그리드는 ShortsGrid.tsx(shorts_stats)
 // - 맨 위 한 줄: 오늘 가장 큰 화제 = 지금 인기 1위(items[0].keyword) + YouTube 인기 스냅샷 시각
-// - 필터: 카테고리 칩(서버 순서, 개수 = 그 칸 영상 수) · 정렬(조회수 / 시간당 조회 / 구독자 대비 배수). 정렬은 받은 값으로만, 값이 없는 영상은 뒤로
-// - 많이 붙는 태그: 그 칸 주제 중 YouTube 태그에서 나온 것(origins에 youtube_tag)만, 서버 이름 그대로
-// - 영상 카드 그리드: 썸네일(서버 thumbnail_url, 세로·cover, 없거나 깨지면 회색 자리) · 순위 · 제목 2줄 · 채널 · 큰 조회수 · 시간당·구독자 대비 한 줄
-//   · 칩 하나(광고 재료 가능 / 실존 인물·상표 주의 / 광고에 안 씀). 카드를 누르면 서버 video_url(없으면 video_id로 만든 주소) 새 탭
-// - 영상 = 그 칸 주제들의 영상(videos, 주제 순서) + 카테고리 조회수 상위 영상(top_videos). 같은 영상은 한 번만.
-//   칩은 주제에 붙은 영상만 그 주제 판정으로 (top_videos는 주제가 없어 칩을 그리지 않는다)
-// - 칩 판정(materialOf): 기획안 재료에서 뺀 주제·회사 추천 안 함 분류 = 광고에 안 씀, 실존 이름·상표 = 주의, 재료로 쓴 주제 = 가능
+// - 태그 칩(tagsOf): 그 카테고리 주제 중 YouTube 태그에서 나온 것(origins에 youtube_tag)만, 서버 이름 그대로
+// - 긴 영상: 카테고리 칩(서버 순서, 개수 = 그 칸 긴 영상 수) · 정렬(조회수 / 시간당 조회 / 구독자 대비 배수, 받은 값으로만, 값이 없는 영상은 뒤로)
+//   · 영상 카드(썸네일 · 순위 · 제목 2줄 · 채널 · 큰 조회수 · 시간당·구독자 대비 · 칩 하나). 누르면 서버 video_url 새 탭
+// - 긴 영상 = 그 칸 주제들의 영상(videos) + 카테고리 조회수 상위 영상(top_videos) 중 서버 is_short가 true가 아닌 것(모름 포함). 같은 영상은 한 번만.
+//   길이는 화면에서 따로 판단하지 않는다
+// - 칩: 주제 판정(materialOf: 기획안 재료에서 뺀 주제·추천 안 함 분류 = 광고에 안 씀, 실존 이름·상표 = 주의, 재료로 쓴 주제 = 가능)
 
 const num = (v: number | null | undefined) =>
   typeof v === "number" && Number.isFinite(v) ? v.toLocaleString("ko-KR", { maximumFractionDigits: 0 }) : null;
 const COMPACT = new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 });
 const TIME = new Intl.DateTimeFormat("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 const when = (iso: string | null) => (iso ? TIME.format(new Date(iso)) : null);
-const NO_REASON = "서버가 이유를 주지 않았어요";
 const norm = (s: string) => s.trim().toLowerCase();
-const categoryName = (c: string | null | undefined) => (c && c !== "unknown" ? c : "분류 못 함");
+export const categoryName = (c: string | null | undefined) => (c && c !== "unknown" ? c : "분류 못 함");
 
 /** 근거 (서버 값이 있는 것만) */
 export function evidenceOf(t: PopularTopic): string[] {
@@ -89,8 +88,8 @@ export function TrendHeadline({ popular }: { popular: SkillState<TrendPopularOut
 /** 화면 칸 하나. 예전 응답(by_category 없음)은 주제 분류별로 묶는다 */
 type Cell = { category: string; items: PopularTopic[]; shortage_reason: string | null; top_videos?: PopularVideo[]; top_videos_reason?: string | null };
 type Card = { v: PopularVideo; topic: PopularTopic | null };
-type SortKey = "views" | "views_per_hour" | "views_per_subscriber";
-const SORTS: { key: SortKey; label: string }[] = [
+export type SortKey = "views" | "views_per_hour" | "views_per_subscriber";
+export const SORTS: { key: SortKey; label: string }[] = [
   { key: "views", label: "조회수" },
   { key: "views_per_hour", label: "시간당 조회" },
   { key: "views_per_subscriber", label: "구독자 대비 배수" },
@@ -103,13 +102,13 @@ function cellsOf(out: TrendPopularOutput): Cell[] {
   return [...groups.entries()].map(([category, items]) => ({ category, items, shortage_reason: null }));
 }
 
-/** 칸의 영상: 주제 영상(주제 순서) → 카테고리 상위 영상. 같은 영상은 처음 것만 */
+/** 칸의 긴 영상: 주제 영상(주제 순서) → 카테고리 상위 영상. 같은 영상은 처음 것만, 서버 is_short가 true인 것은 뺀다 */
 function cardsOf(c: Cell): Card[] {
   const seen = new Set<string>();
   const out: Card[] = [];
   for (const t of c.items) for (const v of t.videos ?? []) if (!seen.has(v.video_id)) { seen.add(v.video_id); out.push({ v, topic: t }); }
   for (const v of c.top_videos ?? []) if (!seen.has(v.video_id)) { seen.add(v.video_id); out.push({ v, topic: null }); }
-  return out;
+  return out.filter((c) => c.v.is_short !== true); // 숏츠(서버 is_short)는 위 숏츠 그리드에서 본다
 }
 
 /** 받은 값으로만 정렬. 값이 없으면 뒤로(서버 순서 유지) */
@@ -155,7 +154,7 @@ function VideoCard({ card, rank, promo }: { card: Card; rank: number; promo: Pro
   );
 }
 
-function FilterButton({ on, onClick, children }: { on: boolean; onClick: () => void; children: ReactNode }) {
+export function FilterButton({ on, onClick, children }: { on: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button type="button" aria-pressed={on} onClick={onClick}
       className={`min-h-[40px] rounded-full px-3.5 py-1.5 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${on ? "bg-brand-600 text-white" : "bg-surface text-ink-700 ring-1 ring-ink-100 hover:bg-ink-50"}`}>
@@ -164,53 +163,44 @@ function FilterButton({ on, onClick, children }: { on: boolean; onClick: () => v
   );
 }
 
-export function TrendPopular({ popular, promo, onReload }: {
-  popular: SkillState<TrendPopularOutput>;
-  promo: PromoConceptsOutput | null;
-  onReload: () => void;
-}) {
-  const out = popular.kind === "ok" ? popular.out : null;
-  const cells = out ? cellsOf(out) : [];
+/** 카테고리(서버 이름) 칸의 태그 칩: 그 칸 주제 중 YouTube 태그에서 나온 것 (서버 이름 그대로) */
+export function tagsOf(out: TrendPopularOutput | null, category: string): string[] {
+  const cell = out ? cellsOf(out).find((c) => c.category === category) : undefined;
+  return cell ? cell.items.filter((t) => t.origins.includes("youtube_tag")).map((t) => t.keyword) : [];
+}
+
+/** 긴 영상 수 (모든 칸, 같은 영상은 칸마다 한 번) */
+export function longVideoCount(out: TrendPopularOutput | null): number {
+  return out ? cellsOf(out).reduce((n, c) => n + cardsOf(c).length, 0) : 0;
+}
+
+/** 맨 아래 접힘 안 "긴 영상" 그리드 (지난 v2 그리드, 칸·정렬 따로) */
+export function LongVideos({ out, promo }: { out: TrendPopularOutput; promo: PromoConceptsOutput | null }) {
+  const cells = cellsOf(out).filter((c) => cardsOf(c).length > 0);
   const [picked, setPicked] = useState<string | null>(null);
   const [sort, setSort] = useState<SortKey>("views");
   const current = cells.find((c) => c.category === picked) ?? cells[0] ?? null;
-  const cards = current ? sorted(cardsOf(current), sort) : [];
-  const tags = current ? current.items.filter((t) => t.origins.includes("youtube_tag")).map((t) => t.keyword) : [];
+  if (!current) return <Empty>{out.empty_reason ?? "긴 영상이 없어요."}</Empty>;
+  const cards = sorted(cardsOf(current), sort);
   return (
-    <Panel id="data-trend-popular" title="지금 뜨는 숏츠" titleHidden
-      tools={<button type="button" className="btn-ghost" disabled={popular.kind === "loading"} onClick={onReload}>다시 보기</button>}>
-      {popular.kind === "loading" ? <Waiting what="지금 인기를 받는 중…" />
-        : popular.kind === "failed" ? <Empty>지금 인기를 받지 못했어요. {popular.reason} {DATA_SERVER}가 켜져 있는지 확인해 주세요.</Empty>
-        : !current ? <Empty>{out?.empty_reason ?? "지금 인기 주제가 없어요."}</Empty> : (
-          <div className="space-y-4">
-            <div className="space-y-2.5 rounded-2xl bg-ink-50 p-3">
-              <div className="flex flex-wrap items-center gap-2" role="group" aria-label="카테고리">
-                <span className="w-16 text-xs font-semibold text-ink-500">카테고리</span>
-                {cells.map((c) => (
-                  <FilterButton key={c.category} on={c.category === current.category} onClick={() => setPicked(c.category)}>
-                    {categoryName(c.category)} <span className="font-normal opacity-75">{cardsOf(c).length}</span>
-                  </FilterButton>
-                ))}
-              </div>
-              <div className="flex flex-wrap items-center gap-2" role="group" aria-label="정렬">
-                <span className="w-16 text-xs font-semibold text-ink-500">정렬</span>
-                {SORTS.map((s) => <FilterButton key={s.key} on={sort === s.key} onClick={() => setSort(s.key)}>{s.label}</FilterButton>)}
-              </div>
-            </div>
-            {tags.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-xs font-semibold text-ink-500">많이 붙는 태그</span>
-                {tags.map((t) => <span key={t} className="chip bg-surface text-sm text-ink-700 ring-1 ring-ink-100">#{t}</span>)}
-              </div>
-            )}
-            {cards.length > 0 ? (
-              <ol className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label={`${categoryName(current.category)} 영상`}>
-                {cards.map((c, i) => <VideoCard key={c.v.video_id} card={c} rank={i + 1} promo={promo} />)}
-              </ol>
-            ) : <Empty>{current.top_videos_reason ?? current.shortage_reason ?? `이 칸의 영상을 받지 못했어요. ${NO_REASON}`}</Empty>}
-            <Sources evidence={okEvidence(popular)} />
-          </div>
-        )}
-    </Panel>
+    <div className="space-y-4">
+      <div className="space-y-2.5 rounded-2xl bg-ink-50 p-3">
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="긴 영상 카테고리">
+          <span className="w-16 text-xs font-semibold text-ink-500">카테고리</span>
+          {cells.map((c) => (
+            <FilterButton key={c.category} on={c.category === current.category} onClick={() => setPicked(c.category)}>
+              {categoryName(c.category)} <span className="font-normal opacity-75">{cardsOf(c).length}</span>
+            </FilterButton>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="긴 영상 정렬">
+          <span className="w-16 text-xs font-semibold text-ink-500">정렬</span>
+          {SORTS.map((s) => <FilterButton key={s.key} on={sort === s.key} onClick={() => setSort(s.key)}>{s.label}</FilterButton>)}
+        </div>
+      </div>
+      <ol className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label={`${categoryName(current.category)} 긴 영상`}>
+        {cards.map((c, i) => <VideoCard key={c.v.video_id} card={c} rank={i + 1} promo={promo} />)}
+      </ol>
+    </div>
   );
 }
