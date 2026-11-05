@@ -224,28 +224,35 @@ class PromoStore:
             cols = [r[1] for r in self._conn.execute("PRAGMA table_info(runs)")]
             if "rules" not in cols:  # 예전 파일: 규칙 버전 칸 (예전 줄은 NULL = 캐시로 안 씀)
                 self._conn.execute("ALTER TABLE runs ADD COLUMN rules TEXT")
+            if "expires_at" not in cols:  # 상한으로 덜 만든 기록의 만료 시각 (NULL = 하루 캐시)
+                self._conn.execute("ALTER TABLE runs ADD COLUMN expires_at TEXT")
             self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
 
-    def save(self, day: date, output: PromoConceptsOutput, rules: str | None = None) -> None:
+    def save(self, day: date, output: PromoConceptsOutput, rules: str | None = None,
+             expires_at: datetime | None = None) -> None:  # fmt: skip
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT INTO runs (run_id, day, created_at, output, rules) VALUES (?,?,?,?,?)",
+                "INSERT INTO runs (run_id, day, created_at, output, rules, expires_at)"
+                " VALUES (?,?,?,?,?,?)",
                 (
                     output.run_id,
                     day.isoformat(),
                     (output.generated_at or datetime.now(UTC)).isoformat(),
                     output.model_dump_json(),
                     rules,
+                    expires_at.isoformat() if expires_at else None,
                 ),
             )
 
-    def latest(self, day: date, rules: str | None = None) -> PromoConceptsOutput | None:
-        """그날 마지막 기록. `rules`를 주면 그 규칙 버전으로 만든 것만."""
-        sql = "SELECT output FROM runs WHERE day = ?"
-        args: tuple[str, ...] = (day.isoformat(),)
+    def latest(
+        self, day: date, rules: str | None = None, now: datetime | None = None
+    ) -> PromoConceptsOutput | None:
+        """그날 마지막 기록 (만료된 것은 빼고). `rules`를 주면 그 규칙 버전으로 만든 것만."""
+        sql = "SELECT output FROM runs WHERE day = ? AND (expires_at IS NULL OR expires_at > ?)"
+        args: tuple[str, ...] = (day.isoformat(), (now or datetime.now(UTC)).isoformat())
         if rules is not None:
             sql += " AND rules = ?"
             args += (rules,)
@@ -673,7 +680,7 @@ async def make_concepts(
     store = store or PromoStore(env.get(DB_ENV) or DEFAULT_DB)
     try:
         rules = rules_version(config)
-        if not request.regenerate and (hit := store.latest(today, rules)) is not None:
+        if not request.regenerate and (hit := store.latest(today, rules, now)) is not None:
             out = hit.model_copy(update={"cached": True})
             return PromoResult(out, Evidence(queries=[f"promo_concepts cache rules={rules}"],
                                data_summary=out.summary, collected_at=now))  # fmt: skip
@@ -682,7 +689,10 @@ async def make_concepts(
             context_id=context_id, category_cache=category_cache, board=board, youtube=youtube,
         )  # fmt: skip
         # LLM 호출이 실패한 결과(두 번째 호출 실패로 첫 답만 쓴 것 등)는 저장하지 않는다
-        if result.output.concepts and not llm_failure.failed():
+        if result.output.concepts and llm_failure.capped() and not llm_failure.failed():
+            # LLM 하루 상한으로 덜 만든 것(분류 unknown·다시 묻기 못 함): 짧게만 (풀리면 다시)
+            store.save(today, result.output, rules, expires_at=now + llm_failure.cap_ttl(env))
+        elif result.output.concepts and not llm_failure.failed():
             store.save(today, result.output, rules)
         return result
     finally:

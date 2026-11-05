@@ -197,7 +197,8 @@ def tenant_of(env: Mapping[str, str]) -> str:
 
 
 class BriefStore:
-    """하루 캐시: (날짜, 규칙 버전) → 브리프 JSON."""
+    """하루 캐시: (날짜, 규칙 버전) → 브리프 JSON. LLM 하루 상한으로 덜 만든 브리프는 만료 시각
+    (`expires_at`)까지만 쓴다 (상한이 풀리면 다음 미리 계산에서 다시 만든다)."""
 
     def __init__(self, path: str | Path) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -208,22 +209,40 @@ class BriefStore:
                 "CREATE TABLE IF NOT EXISTS briefs (day TEXT NOT NULL, rules TEXT NOT NULL,"
                 " created_at TEXT NOT NULL, output TEXT NOT NULL, PRIMARY KEY (day, rules))"
             )
+            cols = [r[1] for r in self._conn.execute("PRAGMA table_info(briefs)")]
+            if "expires_at" not in cols:  # 예전 파일: 만료 칸 (NULL = 하루 캐시)
+                self._conn.execute("ALTER TABLE briefs ADD COLUMN expires_at TEXT")
 
     def close(self) -> None:
         self._conn.close()
 
-    def get(self, day: date, rules: str) -> TrendInsightBriefOutput | None:
+    def get(
+        self, day: date, rules: str, now: datetime | None = None
+    ) -> TrendInsightBriefOutput | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT output FROM briefs WHERE day = ? AND rules = ?", (day.isoformat(), rules)
+                "SELECT output, expires_at FROM briefs WHERE day = ? AND rules = ?",
+                (day.isoformat(), rules),
             ).fetchone()
-        return TrendInsightBriefOutput.model_validate_json(row[0]) if row else None
+        if row is None:
+            return None
+        if row[1] is not None and datetime.fromisoformat(row[1]) <= (now or now_utc()):
+            return None  # 상한으로 덜 만든 브리프: 만료됨 (다시 만든다)
+        return TrendInsightBriefOutput.model_validate_json(row[0])
 
-    def put(self, day: date, rules: str, out: TrendInsightBriefOutput, at: datetime) -> None:
+    def put(self, day: date, rules: str, out: TrendInsightBriefOutput, at: datetime,
+            expires_at: datetime | None = None) -> None:  # fmt: skip
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO briefs VALUES (?,?,?,?)",
-                (day.isoformat(), rules, at.isoformat(), out.model_dump_json()),
+                "INSERT OR REPLACE INTO briefs (day, rules, created_at, output, expires_at)"
+                " VALUES (?,?,?,?,?)",
+                (
+                    day.isoformat(),
+                    rules,
+                    at.isoformat(),
+                    out.model_dump_json(),
+                    expires_at.isoformat() if expires_at else None,
+                ),
             )
 
 
@@ -1168,7 +1187,7 @@ def cached_brief(
     rules = rules_version(load_config(env))
     store = BriefStore(env.get(DB_ENV) or DEFAULT_DB)
     try:
-        hit = store.get(today_kst(now), rules)
+        hit = store.get(today_kst(now), rules, now)
     finally:
         store.close()
     if hit is None:
@@ -1211,7 +1230,7 @@ async def make_brief(
     store = store or BriefStore(env.get(DB_ENV) or DEFAULT_DB)
     queries: list[str] = []
     try:
-        if not request.regenerate and (hit := store.get(day, rules)) is not None:
+        if not request.regenerate and (hit := store.get(day, rules, now)) is not None:
             out = hit.model_copy(update={"cached": True})
             return BriefResult(
                 out, as_evidence(out, [f"trend_insight_brief cache rules={rules}"], now)
@@ -1399,6 +1418,13 @@ async def make_brief(
             out.limits.append(
                 "LLM 호출이 실패해 이 브리프는 저장하지 않음 (다음 요청에서 다시 만든다)"
             )
+        elif llm_failure.capped():  # 상한으로 덜 만든 브리프·기회 카드: 짧게만 (풀리면 다시)
+            ttl = llm_failure.cap_ttl(env)
+            out.limits.append(
+                f"LLM 하루 상한에 닿아 덜 만든 브리프라 {int(ttl.total_seconds() // 60)}분만 저장"
+                " (상한이 풀리면 다음 미리 계산에서 다시 만든다)"
+            )
+            store.put(day, rules, out, now, expires_at=now + ttl)
         else:
             store.put(day, rules, out, now)
         return BriefResult(out, as_evidence(out, queries, now))

@@ -116,8 +116,16 @@ class TimedLLMClient(LLMClient):
     HTTP 요청 한 번마다 남기는 사용량(`record_usage`)을 하루 셈에도 더한다.
     """
 
+    @staticmethod
+    def _check() -> None:
+        try:
+            llm_budget.BUDGET.check()
+        except llm_budget.LLMDailyCapReached as error:  # 덜 만든 결과는 짧게만 저장 (capped)
+            llm_failure.mark(error)
+            raise
+
     async def structured(self, *args: Any, **kwargs: Any) -> Any:
-        llm_budget.BUDGET.check()
+        self._check()
         try:
             with stage("llm"):
                 return await super().structured(*args, **kwargs)
@@ -126,7 +134,7 @@ class TimedLLMClient(LLMClient):
             raise
 
     async def embed(self, texts: list[str], context_id: str | None = None) -> list[list[float]]:
-        llm_budget.BUDGET.check()
+        self._check()
         try:
             with stage("llm"):
                 return await super().embed(texts, context_id)
