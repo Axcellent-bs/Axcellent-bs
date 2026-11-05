@@ -623,12 +623,22 @@ class TrendCandidatesRequest(AxModel):
 CompanyRelevance = Literal["direct", "domain", "none"]
 
 
+# 영상을 광고·홍보 재료로 쓸 때 확인할 것 (v2 화면 칸, 코드가 분류 결과로 정함):
+# real_person = 실존 인물(초상권), trademark = 팀·리그·상표·작품 이름(상표권), music = 음원(저작권)
+CautionType = Literal["real_person", "trademark", "music"]
+
+
 class VideoLink(AxModel):
     """근거 영상 하나의 주소와 썸네일. YouTube 응답에 이미 있던 값만 (더 부르지 않음)."""
 
     video_id: str = Field(min_length=1)
     video_url: str | None = None  # https://www.youtube.com/watch?v=<id> (숏츠는 /shorts/<id>)
     thumbnail_url: str | None = None  # YouTube 응답 snippet.thumbnails 값 (없으면 None)
+    # 아래는 예전 응답은 없다 (v2 화면 칸). 광고 재료로 쓸 수 있는지: 확인할 것이 없고 분류를
+    # 알 때만 true, 확인할 것이 있으면 false, 분류를 모르면 None + caution_reason
+    ad_usable: bool | None = None
+    caution_types: list[CautionType] = Field(default_factory=list)
+    caution_reason: str | None = None
 
 
 class YouTubeTagEvidence(AxModel):
@@ -1111,6 +1121,10 @@ class PopularVideo(AxModel):
     # 아래는 예전 응답은 없다. 영상 주소와 썸네일 (YouTube 응답 값만)
     video_url: str | None = None
     thumbnail_url: str | None = None
+    # 아래는 예전 응답은 없다 (v2 화면 칸). VideoLink와 같은 뜻
+    ad_usable: bool | None = None
+    caution_types: list[CautionType] = Field(default_factory=list)
+    caution_reason: str | None = None
 
 
 class PopularCategory(AxModel):
@@ -1763,6 +1777,19 @@ class TrendInsight(AxModel):
     # 프로필 씨앗·하위 주제·회사 관련 키워드에서 나옴, none = 둘 다 아님 (none이면 reference_only)
     company_relevance: CompanyRelevance | None = None
     company_relevance_reason: str | None = None
+    # 아래는 예전 응답은 없다 (v2 화면 칸). 이 주제 숏츠 적합도와 목표 참고값 (기회 카드와 같은
+    # 계산). 숏츠 표본이 5개 미만이면 shorts_fit·target_views_reference는 None이고
+    # shorts_fit_status = unknown + shorts_fit_reason
+    shorts_fit: ShortsFit | None = None
+    shorts_fit_status: Literal["known", "unknown"] | None = None
+    shorts_fit_reason: str | None = None
+    target_views_reference: float | None = Field(default=None, ge=0)
+    target_reference_basis: str | None = None
+    # 아래는 예전 응답은 없다 (v2 화면 칸). 평소 대비 가장 크게 오른 연령대와 그 배수
+    # (age_bands 중 known만, 모르면 None + top_age_band_reason). 연령대끼리 양은 비교하지 않는다
+    top_age_band: str | None = None
+    top_age_band_ratio: float | None = Field(default=None, ge=0)
+    top_age_band_reason: str | None = None
 
 
 # ------------------------------------------------ 기회 가설 카드 (trend_insight_brief 선택 칸)
@@ -1837,6 +1864,10 @@ class DomainOpportunity(AxModel):
     video_links: list[VideoLink] = Field(default_factory=list)
     # 아래는 예전 응답은 없다. 회사와의 연결: 카드는 도메인 프로필에서 나오므로 늘 domain 이상
     company_relevance: CompanyRelevance | None = None
+    # 아래는 예전 응답은 없다 (v2 화면 칸). TrendInsight와 같은 뜻 (age_bands에서 고름)
+    top_age_band: str | None = None
+    top_age_band_ratio: float | None = Field(default=None, ge=0)
+    top_age_band_reason: str | None = None
 
 
 class TrendInsightBriefOutput(AxModel):
