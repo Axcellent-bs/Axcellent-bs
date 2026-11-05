@@ -34,11 +34,12 @@ import hashlib
 import math
 import os
 import tomllib
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
@@ -51,6 +52,9 @@ from ax_contracts.schemas.data import (
     CampaignEffectInput,
     CampaignEffectOutput,
     CampaignFact,
+    CampaignMatchedProduct,
+    CampaignProductMeasure,
+    CampaignProductsEffect,
     CampaignSales,
     CampaignSalesTotals,
 )
@@ -557,18 +561,8 @@ async def _sales(
             direct_orders=direct_orders, direct_reason=direct_why,
         )  # fmt: skip
     base = _mean_totals(days)
-    gross = [d.gross_krw for d in days]
     excess = period.gross_krw - base.gross_krw
-    low, high = period.gross_krw - max(gross), period.gross_krw - min(gross)
-    if len(days) < 2:
-        direction, why = "uncertain", f"기준선 날이 {len(days)}개라 범위를 낼 수 없음"
-    elif low > 0:
-        direction, why = "up", f"구간 판매액이 기준선 {len(days)}일 중 가장 많은 날보다 많음"
-    elif high < 0:
-        direction, why = "down", f"구간 판매액이 기준선 {len(days)}일 중 가장 적은 날보다 적음"
-    else:
-        direction = "uncertain"
-        why = f"구간 판매액이 기준선 {len(days)}일 범위 안이라 확실하지 않음"
+    low, high, direction, why = _range(period.gross_krw, [d.gross_krw for d in days], "판매액이")
     why += f" (주문 수 판정: {DIRECTION_KO[orders.direction or 'none']})"
     direct, direct_orders, direct_why = await _direct(connector, data.campaign_id, window)
     return CampaignSales(
@@ -579,6 +573,25 @@ async def _sales(
         direction_reason=why, orders_direction=orders.direction,
         direct_attributed_krw=direct, direct_orders=direct_orders, direct_reason=direct_why,
     )  # fmt: skip
+
+
+def _range(
+    period: float, days: list[float], what: str
+) -> tuple[float, float, Literal["up", "down", "uncertain"], str]:
+    """기준선 날들의 범위로 낸 증분 하한·상한과 방향·이유 (판매액·상품 기준이 같이 쓴다).
+
+    하한 = 구간 − 가장 많은 날, 상한 = 구간 − 가장 적은 날. 하한이 0보다 크면 up, 상한이 0보다
+    작으면 down, 걸치거나 기준선 날이 1개면 uncertain.
+    """
+    low, high = period - max(days), period - min(days)
+    n = len(days)
+    if n < 2:
+        return low, high, "uncertain", f"기준선 날이 {n}개라 범위를 낼 수 없음"
+    if low > 0:
+        return low, high, "up", f"구간 {what} 기준선 {n}일 중 가장 많은 날보다 많음"
+    if high < 0:
+        return low, high, "down", f"구간 {what} 기준선 {n}일 중 가장 적은 날보다 적음"
+    return low, high, "uncertain", f"구간 {what} 기준선 {n}일 범위 안이라 확실하지 않음"
 
 
 async def _direct(
@@ -597,6 +610,146 @@ async def _direct(
         return None, None, f"캠페인 {campaign_id} 쿠폰이 없음"
     hits = [o for o in window if o.settled and o.coupon_id in coupons]
     return sum(o.gross for o in hits), len(hits), None
+
+
+# ---------------------------------------------------------------- 상품 기준 (#646)
+
+NO_MATCH = "맞는 상품 없음"
+PRODUCT_PARTS = (("orders", "주문 수가"), ("units", "판매 수량이"), ("gross_krw", "판매액이"))
+
+
+def normalize_name(text: str) -> str:
+    """상품 이름 비교용: NFKC, 소문자, 공백 모두 뺌. 이 값이 정확히 같을 때만 같은 상품이다."""
+    return "".join(unicodedata.normalize("NFKC", text).lower().split())
+
+
+def match_products(
+    asked: list[str], catalog: list[Any]
+) -> tuple[list[CampaignMatchedProduct], list[str]]:
+    """요청 값 → (맞은 상품, 못 맞춘 값). id가 정확히 같거나 정규화한 이름이 정확히 같을 때만.
+
+    일부만 같은 이름은 맞추지 않는다(추측하지 않음). 같은 상품을 두 번 요청하면 한 번만 센다.
+    """
+    by_id = {p.product_id: p for p in catalog}
+    by_name = {normalize_name(p.name): p for p in catalog}
+    matched: list[CampaignMatchedProduct] = []
+    unmatched: list[str] = []
+    for value in asked:
+        product = by_id.get(value.strip()) or by_name.get(normalize_name(value))
+        if product is None:
+            unmatched.append(value)
+        elif all(m.product_id != product.product_id for m in matched):
+            matched.append(CampaignMatchedProduct(product_id=product.product_id,
+                                                  name=product.name, asked=value))  # fmt: skip
+    return matched, unmatched
+
+
+def _product_tally(orders: list[Any], ids: set[str]) -> dict[str, float]:
+    """결제 완료 주문 중 맞은 상품의 품목만: 그 상품이 든 주문 수, 수량 합, 단가 × 수량 합."""
+    out = {"orders": 0.0, "units": 0.0, "gross_krw": 0.0}
+    for order in orders:
+        lines = [i for i in order.items if i.product_id in ids] if order.settled else []
+        if lines:
+            out["orders"] += 1
+            out["units"] += sum(i.qty for i in lines)
+            out["gross_krw"] += sum(i.qty * i.unit_price for i in lines)
+    return out
+
+
+async def _products_effect(
+    connector: Any,
+    data: CampaignEffectInput,
+    orders: CampaignChange,
+    used: list[Span],
+    rule: str,
+) -> CampaignProductsEffect | None:
+    """관련 상품 기준. 기준선·공백 규칙은 판매액과 같다 (주문 수 판정이 쓴 지난 구간 그대로)."""
+    if not data.products:
+        return None
+
+    def unknown(
+        reason: str, matched: list[CampaignMatchedProduct], unmatched: list[str], **more: Any
+    ) -> CampaignProductsEffect:
+        gap = any(h in reason for h in GAP_HINTS) and not reason.startswith(GAP_WORD)
+        return CampaignProductsEffect(
+            status="unknown", unknown_reason=f"{GAP_WORD}: {reason}" if gap else reason,
+            matched=matched, unmatched_products=unmatched, baseline_rule=rule, **more,
+        )  # fmt: skip
+
+    if not hasattr(connector, "products") or not hasattr(connector, "orders"):
+        return unknown("이 회사 커넥터는 상품·주문 기록을 주지 않음", [], list(data.products))
+    try:
+        matched, unmatched = match_products(list(data.products), await connector.products())
+    except ConnectorUnavailable as error:
+        return unknown(f"상품 목록을 읽지 못함 [{error.code}]", [], list(data.products))
+    if not matched:
+        return unknown(f"{NO_MATCH} (요청 {len(unmatched)}개 모두 카탈로그 이름·id와 다름)",
+                       [], unmatched)  # fmt: skip
+    if orders.status == "unknown":
+        return unknown(orders.unknown_reason or "주문을 판정할 수 없음", matched, unmatched,
+                       baseline_days=orders.baseline_days)  # fmt: skip
+    try:
+        window = await connector.orders(data.window_from, data.window_to)
+        past = [await connector.orders(s.start, s.end) for s in used]
+    except ConnectorUnavailable as error:
+        return unknown(f"주문 기록을 읽지 못함 [{error.code}]", matched, unmatched)
+    unpaid = sum(1 for o in window if not o.settled and o.status == "pending_payment")
+    if not any(o.settled for o in window) and unpaid:
+        return unknown(f"{GAP_WORD}: 구간 주문 {unpaid}건이 결제 대기이고 결제 완료가 0건",
+                       matched, unmatched, baseline_days=len(used))  # fmt: skip
+    ids = {m.product_id for m in matched}
+    now = _product_tally(window, ids)
+    days = [_product_tally(p, ids) for p in past]
+    need = min_baseline_days()
+    common: dict[str, Any] = dict(
+        matched=matched, unmatched_products=unmatched, baseline_rule=rule,
+        baseline_days=len(days), baseline_note=orders.baseline_note,
+    )  # fmt: skip
+    if len(days) < need:  # 증분·범위·방향은 모름, 기간값만
+        parts = {k: CampaignProductMeasure(period=now[k]) for k, _ in PRODUCT_PARTS}
+        return CampaignProductsEffect(
+            status="unknown", unknown_reason=f"기준선 부족({len(days)}일, 최소 {need}일)",
+            **parts, **common,
+        )  # fmt: skip
+    measures: dict[str, CampaignProductMeasure] = {}
+    for key, what in PRODUCT_PARTS:
+        values = [d[key] for d in days]
+        base = sum(values) / len(values)
+        low, high, direction, why = _range(now[key], values, what)
+        measures[key] = CampaignProductMeasure(
+            period=now[key], baseline=round(base, 4), incremental=round(now[key] - base, 4),
+            incremental_low=low, incremental_high=high, direction=direction, direction_reason=why,
+        )  # fmt: skip
+    return CampaignProductsEffect(status="known", **measures, **common)
+
+
+def product_facts(out: CampaignEffectOutput) -> list[CampaignFact]:
+    """상품 기준 근거 숫자 (출처·기간·표본). 있는 숫자만 (모르는 칸은 0으로 채우지 않음)."""
+    p = out.products_effect
+    if p is None:
+        return []
+    span = _span_text(out.window_from, out.window_to)
+    names = ", ".join(m.name or m.product_id for m in p.matched)
+    rows: list[CampaignFact] = []
+    units = {"orders": "건", "units": "개", "gross_krw": "KRW"}
+    labels = {"orders": "주문 수", "units": "판매 수량", "gross_krw": "판매액"}
+    for key, _ in PRODUCT_PARTS:
+        m: CampaignProductMeasure | None = getattr(p, key)
+        if m is None:
+            continue
+        for label, value in (
+            ("구간", m.period),
+            ("기준선 (날 평균)", m.baseline),
+            ("증분", m.incremental),
+            ("증분 하한", m.incremental_low),
+            ("증분 상한", m.incremental_high),
+        ):
+            if value is not None:
+                rows.append(CampaignFact(
+                    label=f"상품 기준 {labels[key]} {label} ({names})", value=value,
+                    unit=units[key], period=span, sample=p.baseline_days,
+                ))  # fmt: skip
+    return rows
 
 
 def sales_facts(out: CampaignEffectOutput) -> list[CampaignFact]:
@@ -665,6 +818,7 @@ async def measure(
         insight_id=data.insight_id,
         proposal_id=data.proposal_id,
         sales=await _sales(connector, data, orders, used, rule),
+        products_effect=await _products_effect(connector, data, orders, used, rule),
     )
     if orders.status == "known" and orders.excess is not None:
         out.incremental_orders = round(orders.excess)  # 재무 orders 칸 (증분, gmv_krw와 같은 뜻)
@@ -674,7 +828,8 @@ async def measure(
     return out
 
 
-SCHEMA_VERSION = "campaign_effect.v2"  # 응답 모양 버전 (sales·facts·incremental_orders)
+# 응답 모양 버전 (v2: sales·facts·incremental_orders, v3: products_effect #646)
+SCHEMA_VERSION = "campaign_effect.v3"
 
 
 def _fact_id(label: str) -> str:
@@ -714,6 +869,12 @@ def campaign_facts(out: CampaignEffectOutput) -> list[CampaignFact]:
     s = out.sales
     if s is not None and s.status == "known" and s.incremental_gross_krw is not None:
         add("증분 판매액(원)", s.incremental_gross_krw, "KRW", s.baseline_days)  # 요약 재료 이름
+    for f in product_facts(out):
+        rows.append(f.model_copy(update={"fact_id": _fact_id(f.label)}))
+    p = out.products_effect
+    gross = p.gross_krw if p is not None and p.status == "known" else None
+    if p is not None and gross is not None and gross.incremental is not None:
+        add("상품 기준 증분 판매액(원)", round(gross.incremental), "KRW", p.baseline_days)
     return rows
 
 
@@ -750,6 +911,13 @@ def _facts(out: CampaignEffectOutput) -> dict[str, int | float | str]:
         facts["판매액 방향"] = SALES_DIRECTION_KO[s.direction or "uncertain"]
     elif s is not None:
         facts["판매액"] = f"확인할 수 없음: {s.unknown_reason}"
+    p = out.products_effect
+    gross = p.gross_krw if p is not None and p.status == "known" else None
+    if gross is not None and gross.incremental is not None:
+        facts["상품 기준 증분 판매액(원)"] = round(gross.incremental)
+        facts["상품 기준 판매액 방향"] = SALES_DIRECTION_KO[gross.direction or "uncertain"]
+    elif p is not None:
+        facts["상품 기준"] = f"확인할 수 없음: {p.unknown_reason}"
     return facts
 
 
@@ -778,10 +946,17 @@ async def analyze_campaign(
     ]
     if data.campaign_id:
         queries.append(f"shop_coupons campaign_id={data.campaign_id}")
+    if data.products:
+        queries.append(f"shop_products + shop_orders {span} 관련 상품 {len(data.products)}개")
     notes = [said.summary]
     for name, part in (("주문", output.orders), ("매출", output.revenue), ("쿠폰", output.coupons)):
         if part.status == "unknown":
             notes.append(f"{name} 확인할 수 없음: {part.unknown_reason}")
+    p = output.products_effect
+    if p is not None and p.status == "unknown":
+        notes.append(f"상품 기준 확인할 수 없음: {p.unknown_reason}")
+    if p is not None and p.unmatched_products:
+        notes.append(f"못 맞춘 상품: {', '.join(p.unmatched_products)}")
     if note := said.note():
         notes.append(note)
     return CampaignEffectResult(
@@ -841,6 +1016,36 @@ def to_sales_answer(out: CampaignEffectOutput) -> dict[str, Any]:
         "incremental_gross_krw": s.incremental_gross_krw,
         "direct_attributed_krw": s.direct_attributed_krw,
     }}  # fmt: skip
+
+
+def to_products_answer(out: CampaignEffectOutput) -> dict[str, Any]:
+    """skill 출력 → 상품 기준 채점기 답 모양(`campaign_products/score.Answer`)."""
+    p = out.products_effect
+    if p is None:
+        return {"products": {"status": "unknown", "unknown_reason": "상품 기준 칸이 없음"}}
+    body: dict[str, Any] = {
+        "status": p.status, "unknown_reason": p.unknown_reason,
+        "matched": [m.product_id for m in p.matched], "unmatched": p.unmatched_products,
+    }  # fmt: skip
+    if p.status == "known":
+        for key, name in (("orders", "orders"), ("units", "units"), ("gross_krw", "gross")):
+            m = getattr(p, key)
+            body[name] = {"direction": m.direction, "incremental": m.incremental}
+    return {"products": body}
+
+
+async def eval_products_judge(
+    request: Mapping[str, Any], transport: httpx.MockTransport, *, alpha: float = DIRECTION_ALPHA
+) -> dict[str, Any]:
+    """상품 기준 채점기(`eval/campaign_products/score.py`)가 부르는 판정 함수."""
+    from data_agent.connectors.shop_api import ShopApi, ShopApiConnector
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        connector = ShopApiConnector(ShopApi("http://shop.eval", token="eval", client=client))
+        out = await measure(
+            CampaignEffectInput.model_validate(dict(request)), connector, alpha=alpha
+        )
+    return to_products_answer(out)
 
 
 async def eval_sales_judge(

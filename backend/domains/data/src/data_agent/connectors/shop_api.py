@@ -227,6 +227,7 @@ class ShopApiConnector:
 
 class ShopOrderItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
+    product_id: str | None = None  # 상품 기준 성과(#646). 예전 응답에 없으면 None
     qty: int = Field(ge=0)
     unit_price: int = Field(ge=0)
 
