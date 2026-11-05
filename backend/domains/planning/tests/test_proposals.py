@@ -637,3 +637,22 @@ def test_delete_proposal_removes_plan_and_request_but_not_after_dev() -> None:
     with pytest.raises(ActionError):
         asyncio.run(svc.dispatch({"type": "deleteProposal", "proposal": pid2}))
     assert any(x.id == pid2 for x in svc.state.proposals)
+
+
+@pytest.mark.role("planning")
+def test_delete_proposal_is_blocked_after_marketing_handoff() -> None:
+    """마케팅에 넘긴(전달 성공) 제안은 지우지 않는다. 전달 실패면 지울 수 있다."""
+    from ax_workflow.models import ProposalHandoff
+
+    svc = _svc(writer=Writer())
+    sent, failed = _new(svc), _new(svc, ref="ins-3")
+    for pid in (sent, failed):
+        asyncio.run(svc.dispatch({"type": "makePlan", "proposal": pid}))
+    by = {p.id: p for p in svc.state.proposals}
+    by[sent].handoff = ProposalHandoff(ok=True, campaign="cmp-1")
+    by[failed].handoff = ProposalHandoff(ok=False, reason="마케팅 응답 없음")
+    with pytest.raises(ActionError) as exc:
+        asyncio.run(svc.dispatch({"type": "deleteProposal", "proposal": sent}))
+    assert exc.value.code == "PROPOSAL_SENT"
+    asyncio.run(svc.dispatch({"type": "deleteProposal", "proposal": failed}))
+    assert [p.id for p in svc.state.proposals] == [sent]

@@ -453,11 +453,13 @@ class ProposalMixin:
     async def _delete_proposal(self: Any, s: State, proposal: str) -> ActionResult | None:
         """사람 버튼 "삭제": 잘못 들어온 제안을 지운다
         (예: 데이터분석이 나중에 참고용으로 바꾼 인사이트).
-        기획안으로 만든 기획서·요청도 같이 지운다. 개발로 작업이 나갔으면 막는다.
-        마케팅에 이미 넘긴 기획안은 마케팅 쪽 보관본이 남는다 (화면에서 안내)."""
+        기획안으로 만든 기획서·요청도 같이 지운다. 마케팅에 넘겼거나(전달 성공) 개발로 작업이
+        나갔으면 막는다 (다른 부서로 넘어간 기획서는 지우지 않는다. 전달 실패는 지울 수 있다)."""
         p = _find(s, proposal)
         if p is None:
             return None
+        if p.handoff is not None and p.handoff.ok:
+            raise ActionError("PROPOSAL_SENT", f"{p.id}는 마케팅에 넘겨 지울 수 없습니다")
         sp = next((x for x in s.specs if x.id == p.spec), None) if p.spec else None
         req_ids = {r.id for r in s.requests if r.source_ref == p.id or r.id == p.request}
         spec_ids = {r.spec for r in s.requests if r.id in req_ids and r.spec} | (

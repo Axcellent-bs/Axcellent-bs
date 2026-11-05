@@ -22,12 +22,12 @@ export function ProposalActions({ s, d, item }: P & { item?: string }) {
   const p = item ? (s.proposals ?? []).find((x) => x.id === item) : undefined
   if (!p) return null
   const remove = () => {
-    const sent = !!p.handoff?.ok
-    if (!window.confirm(`${p.id} "${p.title}" 제안을 지울까요?${p.spec ? ` 기획안 ${p.spec}와 요청도 같이 지워져요.` : ''}${sent ? ' 마케팅에 넘긴 기획안은 마케팅 쪽에 남아요.' : ''}`)) return
+    if (!window.confirm(`${p.id} "${p.title}" 제안을 지울까요?${p.spec ? ` 기획안 ${p.spec}와 요청도 같이 지워져요.` : ''}`)) return
     d({ type: 'deleteProposal', proposal: p.id }); toast.show(`${p.id} 삭제`); go(toPath('proposals'))
   }
   const reqSpec = s.requests.find((r) => r.id === p.request)?.spec
-  const deletable = !s.tasks.some((t) => t.spec === p.spec || (!!reqSpec && t.spec === reqSpec))
+  // 다른 부서로 넘어간 제안은 지우지 않는다: 마케팅 전달 성공 · 개발 작업이 나감 (서버도 막는다)
+  const deletable = !p.handoff?.ok && !s.tasks.some((t) => t.spec === p.spec || (!!reqSpec && t.spec === reqSpec))
   if (!proposalOpen(p)) return deletable ? <Button onClick={remove}>삭제</Button> : null
   const nextSpec = `SPEC-${Math.max(0, ...s.specs.map((x) => Number(x.id.split('-')[1]) || 0)) + 1}`
   if (reason !== null) {
