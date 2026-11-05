@@ -1,6 +1,6 @@
 # campaign_effect 평가 케이스 (캠페인 효과)
 
-data 에이전트 `campaign_effect`(아직 없음)의 정답지와 채점기(`score.py`)다. 기준값(baseline)은 skill PR에서 처음 만든다. 평가 정의 변경은 코드 수정과 별도 PR로 한다(`eval/README.md` 규칙).
+data 에이전트 `campaign_effect`(skill 있음, `src/data_agent/skills/campaign_effect.py`)의 정답지와 채점기(`score.py`)다. 기준값(baseline)은 `eval/campaign/baseline.json`이다. 평가 정의 변경은 코드 수정과 별도 PR로 한다(`eval/README.md` 규칙).
 
 ```bash
 cd backend
