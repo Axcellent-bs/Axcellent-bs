@@ -1464,6 +1464,9 @@ class ExplorerVideo(AxModel):
     # 검색, search = 이 skill의 보충 검색
     source: str | None = None
     at: UtcDatetime | None = None  # 조회수·좋아요를 읽은 시각
+    # 아래는 예전 응답은 없다. 칸이 최소 수보다 적어 기간 밖(올린 지 7일 넘은) 숏츠 표본으로 채운
+    # 영상이면 true (화면 표시 "7일 이전")
+    before_period: bool = False
 
 
 class ExplorerCell(AxModel):

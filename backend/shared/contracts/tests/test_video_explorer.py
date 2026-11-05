@@ -36,6 +36,11 @@ def test_output_cells_and_unknown_values() -> None:
     assert again.min_per_cell == 10
 
 
+def test_before_period_flag_defaults_to_false() -> None:
+    assert ExplorerVideo(video_id="v").before_period is False
+    assert ExplorerVideo.model_validate({"video_id": "v", "before_period": True}).before_period
+
+
 def test_new_categories_are_values() -> None:
     for name in ("유머", "드라마", "교양"):
         assert ExplorerVideo(video_id="v", category=name).category == name
