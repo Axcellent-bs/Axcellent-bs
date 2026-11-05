@@ -6,7 +6,7 @@ import type { ChatThread as BaseThread } from "@/lib/planningData";
 /** 대화 하나. 서버가 남의 대화를 가리면 messages가 비고 restricted·summary가 온다 */
 export type ChatThread = BaseThread & { who?: string; summary?: string; restricted?: boolean; messageCount?: number };
 
-/** 대화 목록·상세·보내기 주소. 닫기 경로는 백엔드와 합의되기 전이라 두지 않는다 */
+/** 대화 목록·상세·보내기 주소. 닫기(`/<id>/close`)는 `directChatApi(ep, {closable: true})`로 켠 창구만 쓴다 */
 export interface ChatEndpoint { base: string; path: string }
 
 export class DirectChatError extends Error {
@@ -56,7 +56,8 @@ async function request(ep: ChatEndpoint, suffix: string, init?: RequestInit): Pr
   return body.data;
 }
 
-export const directChatApi = (ep: ChatEndpoint) => {
+/** `closable`: 이 창구가 `POST <주소>/<id>/close`(대화 끝내기)를 갖고 있을 때만 켠다 (고객지원) */
+export const directChatApi = (ep: ChatEndpoint, opts: { closable?: boolean } = {}) => {
   const one = (d: unknown) => {
     if (!isThread(d)) throw new DirectChatError("대화 서버가 대화를 돌려주지 않았어요", 502, "NO_THREAD");
     return toThread(d);
@@ -65,5 +66,6 @@ export const directChatApi = (ep: ChatEndpoint) => {
     list: () => request(ep, "").then(toThreads),
     get: (id: string) => request(ep, `/${encodeURIComponent(id)}`).then(one),
     send: (x: { thread_id?: string; message: string }) => request(ep, "", { method: "POST", body: JSON.stringify(x) }).then(one),
+    ...(opts.closable ? { close: (id: string) => request(ep, `/${encodeURIComponent(id)}/close`, { method: "POST", body: "{}" }).then(one) } : {}),
   };
 };
