@@ -734,7 +734,7 @@ async def data_sources(request: AgentRequest) -> AgentResult:
     data = _parse(request, DataSourcesRequest)
     if isinstance(data, AgentResult):
         return data
-    result = await list_sources(os.environ)
+    result = await list_sources(os.environ, recheck=data.recheck)
     return _result(
         request,
         TaskStatus.COMPLETED,

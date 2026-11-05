@@ -89,6 +89,10 @@ class OpportunityConfig:
     high_ratio: float = 1.2  # 분류 중앙값 ÷ 전체 중앙값이 이 이상이면 높음
     low_ratio: float = 0.8  # 이 이하면 낮음
     max_formats: int = 3
+    # 쇼핑인사이트(실제 소비 근거) 하루 몫: 네이버 전체 상한(1,000) 중 기회 카드·브리프의 호출 수.
+    # trend_age의 naver_reserve(다른 네이버 skill 몫, 기본 300) 안에 든다. 카드 키워드 하나에 2번
+    # (클릭 추이 1 + 연령별 1). 몫을 다 쓰면 그 카드는 unknown + 이유
+    shopping_daily_calls: int = 100
 
 
 def load_config(env: Mapping[str, str]) -> OpportunityConfig:
@@ -233,7 +237,10 @@ def consumption_gate(item: SourcePlanItem) -> OpportunityEvidence | None:
     return None
 
 
-ConsumptionFn = Callable[[SourcePlanItem, str], Awaitable[OpportunityEvidence]]
+# 근거 하나 또는 여러 개 (쇼핑인사이트는 클릭 추이 + 연령대별)
+ConsumptionFn = Callable[
+    [SourcePlanItem, str], Awaitable[OpportunityEvidence | list[OpportunityEvidence]]
+]
 
 
 # ---------------------------------------------------------------- 한 줄
@@ -471,7 +478,8 @@ async def make_opportunities(
             if gate is not None:
                 consumption.append(gate)
             elif consumption_fn is not None:
-                consumption.append(await consumption_fn(item, k))
+                got = await consumption_fn(item, k)
+                consumption.extend(got if isinstance(got, list) else [got])
                 queries.append(f"{item.source_id} consumption {k}")
         age = ages.get(_n(k))
         fit, formats, target, basis = shorts_fit(cats.get(k), shorts, config)
@@ -601,37 +609,78 @@ def score(c: DomainOpportunity) -> float:
     return round(s, 4)
 
 
+SHOPPING_SKILL = "domain_opportunity"  # 기회 카드·브리프의 쇼핑인사이트 호출자 이름
+SHOPPING_CALLER = f"shopping:{SHOPPING_SKILL}"
+SHOPPING_CALLS_PER_CARD = 2  # 클릭 추이 1 + 연령별 1
+
+
+def age_label(group: str) -> str:
+    """쇼핑인사이트 연령 코드(10~60) → 표시 이름. 60은 60대 이상."""
+    return "60대 이상" if group == "60" else f"{group}대" if group.isdigit() else group
+
+
 def default_consumption(env: Mapping[str, str], end: date) -> ConsumptionFn:
     """사용 가능·승인된 소비 출처를 실제로 부른다 (계획의 첫 카테고리 기준)."""
-    from data_agent.connectors import data4library, naver_shopping
+    from data_agent.connectors import data4library, naver_datalab, naver_shopping
     from data_agent.connectors.naver_datalab import TrendSeries
 
-    async def fetch(item: SourcePlanItem, keyword: str) -> OpportunityEvidence:
+    config = load_config(env)
+
+    async def shopping(cat: str | None, keyword: str, start: date) -> list[OpportunityEvidence]:
+        """쇼핑인사이트: 분야 안 키워드 클릭 평소 대비 배수 + 연령대마다 그 연령대의 평소 대비 배수.
+
+        네이버 값은 요청마다 최댓값 100인 상대값이라 연령대끼리 양은 비교하지 않는다(배수만).
+        """
+        base = dict(source_id=naver_shopping.SOURCE_ID, kind="consumption")
+        label = "쇼핑 클릭 평소 대비 배수"
+
+        def unknown(what: str, reason: str) -> OpportunityEvidence:
+            return OpportunityEvidence(**base, label=what, status="unknown", reason=reason)
+
+        if cat is None:
+            return [unknown(label, "계획에 쇼핑 분야 없음")]
+        used = naver_datalab.used_today(SHOPPING_CALLER)
+        if used + SHOPPING_CALLS_PER_CARD > config.shopping_daily_calls:
+            why = (f"오늘 기회 카드 쇼핑인사이트 몫({config.shopping_daily_calls}번)을 다 씀"
+                   f" (쓴 수 {used}번, 네이버 전체 하루 상한 안의 skill별 몫)")  # fmt: skip
+            return [unknown(label, why)]
+        conn = naver_shopping.NaverShoppingConnector(env, caller=SHOPPING_SKILL)
+        try:
+            got = await conn.keyword_trend(cat, [keyword], start, end)
+        except ConnectorUnavailable as error:
+            return [unknown(label, f"쇼핑인사이트를 읽지 못함 [{error.code}]")]
+        if not got or not got[0].points:
+            return [unknown(label, "이 분야·키워드 클릭 자료가 없음")]
+        v = judge_series(TrendSeries(keyword, (keyword,), got[0].points), start, end)
+        out = [OpportunityEvidence(
+            **base, label=label, status="known" if v.ratio is not None else "unknown",
+            value=v.ratio, unit="배", period_start=start, period_end=end,
+            samples=len(got[0].points), reason=v.unknown_reason,
+        )]  # fmt: skip
+        try:
+            ages = await conn.keyword_age(cat, keyword, start, end)
+        except ConnectorUnavailable as error:
+            out.append(
+                unknown("쇼핑 클릭 연령대별 평소 대비 배수", f"연령별을 읽지 못함 [{error.code}]")
+            )
+            return out
+        for group, points in ages.items():
+            a = judge_series(TrendSeries(group, (keyword,), tuple(points)), start, end)
+            out.append(OpportunityEvidence(
+                **base, label=f"쇼핑 클릭 평소 대비 배수 · {age_label(group)}",
+                status="known" if a.ratio is not None else "unknown", value=a.ratio, unit="배",
+                period_start=start, period_end=end, samples=len(points),
+                reason=a.unknown_reason,
+            ))  # fmt: skip
+        return out
+
+    async def fetch(
+        item: SourcePlanItem, keyword: str
+    ) -> OpportunityEvidence | list[OpportunityEvidence]:
         cat = item.categories[0].category_id if item.categories else None
         start = end - timedelta(days=REQUEST_DAYS - 1)
         if item.source_id == naver_shopping.SOURCE_ID:
-            base = dict(source_id=item.source_id, kind="consumption",
-                        label="쇼핑 클릭 평소 대비 배수")  # fmt: skip
-            if cat is None:
-                return OpportunityEvidence(**base, status="unknown", reason="계획에 쇼핑 분야 없음")
-            try:
-                got = await naver_shopping.NaverShoppingConnector(env).keyword_trend(
-                    cat, [keyword], start, end
-                )
-            except ConnectorUnavailable as error:
-                return OpportunityEvidence(
-                    **base, status="unknown", reason=f"쇼핑인사이트를 읽지 못함 [{error.code}]"
-                )
-            if not got or not got[0].points:
-                return OpportunityEvidence(
-                    **base, status="unknown", reason="이 분야·키워드 클릭 자료가 없음"
-                )
-            v = judge_series(TrendSeries(keyword, (keyword,), got[0].points), start, end)
-            return OpportunityEvidence(
-                **base, status="known" if v.ratio is not None else "unknown", value=v.ratio,
-                unit="배", period_start=start, period_end=end, samples=len(got[0].points),
-                reason=v.unknown_reason,
-            )  # fmt: skip
+            return await shopping(cat, keyword, start)
         if item.source_id == data4library.SOURCE_ID:
             base = dict(source_id=item.source_id, kind="consumption", label="인기 대출 수")
             month = end - timedelta(days=30)
