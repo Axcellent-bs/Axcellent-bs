@@ -229,3 +229,22 @@ async def test_recovery_reruns_impact_to_the_recovery_time(harness, monkeypatch)
     # 보상은 자동으로 다시 보내지 않는다
     comp = [r for _, r in harness.fakes.calls if r.skill == "request_incident_compensation"]
     assert len(comp) == comp_before
+    # 새로 잡힌 고객만 보상 "대기"에 올린다(쿠폰 요청은 없다)
+    queued = [r for _, r in harness.fakes.calls if r.skill == "propose_incident_compensation"]
+    assert len(queued) == 1
+    assert queued[0].input["buyer_ids"] == ["buyer-late-1", "buyer-late-2"]
+    assert queued[0].input["reason_code"] == "payment_failure"
+    assert queued[0].meta.context_id == inc.context_id
+    late = [r for k, r in inc.steps.items() if k.startswith("late_compensation_")]
+    assert len(late) == 1 and late[0].status == "completed" and late[0].output["queued"] == 2
+
+
+@pytest.mark.asyncio
+async def test_recovery_without_new_customers_queues_nothing(harness) -> None:
+    engine = await harness.start()
+    manager = IncidentManager(engine, scenario_a)
+    inc = await manager.handle(event(EventType.SHOP_DEGRADED, "evt_deg_2"))
+    await manager.wait(inc.context_id)
+    at = inc.opened_at + timedelta(seconds=40)
+    await manager.process(event(EventType.SHOP_RECOVERED, "evt_rec_2", at=at))
+    assert not [1 for _, r in harness.fakes.calls if r.skill == "propose_incident_compensation"]

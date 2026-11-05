@@ -50,6 +50,8 @@ class Step:
 class Plan:
     name: str
     steps: list[Step]
+    # 복구 뒤 영향 분석을 다시 돌려 새 고객이 잡혔을 때만 부르는 단계(평소 plan에는 안 돈다)
+    late_steps: list[Step] = field(default_factory=list)
 
 
 @dataclass
