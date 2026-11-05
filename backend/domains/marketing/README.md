@@ -23,8 +23,8 @@
 | `issue_coupon` | A (한도 초과·금액 불일치는 C), 검증자 없음 | support | `purpose_code`, `buyer_id`, 건수, 단가 → `coupon_id`, `coupon.issued` 발행 |
 | `start_campaign` | B (검증자 재무) | orchestrator | `campaign_id`, `campaign_name`, `channel`, `budget_krw` → 재무 판단(`review`) + 관문 결과. 재무 거절은 `rejected_by_finance`(관문 미호출), 한도 초과는 `over_approved_limit`, 그 밖에는 `executed`·`held`(50만 원 이상 사람 승인)·`rejected_by_review` 등 관문 결과 그대로 |
 | `record_campaign_result` | read | orchestrator | `CampaignResultInput` → 재무 `record_campaign_result`로 전달. `gmv_krw`를 모르면 비워 둠(0으로 채우지 않음) |
-| `draft_sns_post` | read | orchestrator | `notice_id`(게시 중인 공지) 또는 `coupon`(공개 쿠폰 사실, 제약 사항 7항목 필수) → Instagram 이미지 캡션 초안(`post_draft_id`). 고정 템플릿에 AI 생성·시연용·약관 문구를 넣고 원인·영향 숫자는 적지 않음. 쿠폰 제약 누락은 `rejected_constraint_missing`, 공지가 없으면 `notice_not_found`, 끝났으면 `notice_not_active` |
-| `check_sns_post` | read | orchestrator, safety | `post_draft_id`, `caption`, `is_ai_generated` → `verdict`(approved·rejected)와 `ai_label_missing_count`·`text_mismatch_count`·`constraint_missing_count`(0이 정상, safety `publish_sns` 기준표 필드와 같은 뜻) 등. 하나라도 어긋나면 `rejected_by_check`. 게시(`publish_sns`)·영상(`generate_video`)은 아직 없음 |
+| `draft_sns_post` | read | orchestrator | `notice_id`(게시 중인 공지) 또는 `coupon`(공개 쿠폰 사실, 제약 사항 7항목 필수) → Instagram 이미지 캡션 초안(`post_draft_id`). 고정 템플릿에 AI 생성·시연용·약관 문구를 넣고 원인·영향 숫자는 적지 않음. 쿠폰 제약 누락은 `rejected_constraint_missing`, 공지가 없으면 `notice_not_found`, 끝났으면 `notice_not_active`. `media_kind`(image·reel), `asset_path`(`MARKETING_MEDIA_DIR` 안의 라벨 입힌 결과 파일), `platform_options.share_to_feed`를 받으면 `post_draft_id`는 캡션·자산 sha256·media_kind·옵션의 해시(내용 주소)다. 경로가 폴더 밖이면 `asset_outside_media_dir`, 없으면 `asset_not_found` |
+| `check_sns_post` | read | orchestrator, safety | `post_draft_id`, `caption`, `is_ai_generated` → `verdict`(approved·rejected)와 `ai_label_missing_count`·`text_mismatch_count`·`constraint_missing_count`(0이 정상, safety `publish_sns` 기준표 필드와 같은 뜻) 등. 하나라도 어긋나면 `rejected_by_check`. 캡션 2,200자·해시태그 30·@태그 20, 자산이 있으면 이미지(JPEG·4:5~1.91:1·폭 320~1440·8MB)·릴스(MP4/MOV·H.264/HEVC·3초~15분·300MB, `ffprobe`)와 AI 라벨 3곳(캡션 안내문·미디어 오버레이·`is_ai_generated`)·기계판독 표시를 확인. `ffprobe`가 없으면 릴스는 `media_check_unavailable`로 거절(지어내지 않음). 캡션만 있는 초안은 `publishable=false`. 게시(`publish_sns`)·영상(`generate_video`)은 아직 없음 |
 | `cancel_campaign` | read | orchestrator | `campaign_id`, `reason` → 재무 `cancel_campaign`으로 전달해 **재무가 잡아 둔 예산 기록만** 푼다. 광고를 멈추지 않는다(요청한 쪽이 멈춤). 재무 상태(`canceled`·`already_recorded`·`not_started`·`starts_unavailable`)를 그대로 돌려주고, 재무에 닿지 못하거나 답이 계약과 다르면 `failed`(취소됐다고 가정하지 않음). 결과가 이미 기록됐거나 일부를 썼으면 취소 대신 `record_campaign_result`. (`record_campaign_result`의 `spend_krw`는 광고 플랫폼의 실제 집행액을 호출자가 준다. 예산으로 채우지 않고, 빠지면 재무 호출 전에 `invalid_input`. 재무가 `not_started`로 답하면 다시 시도하지 않고 그대로 돌려준다) |
 
 쿠폰은 안전 장치를 통과한 뒤 shop-api `POST /api/shop/coupons`로도 만든다(`marketing` 토큰, `idempotency_key`는 사건·구매자로 만든 키). 쿠폰 번호는 shop-api가 정하고, 쇼핑몰에서 실패하면 `shop_coupon_failed:<코드>`(failed)로 돌려주며 같은 요청을 다시 보내면 이어서 만든다. 출처는 `MARKETING_COUPON_SOURCE`(`memory` | `shop-api`)로 정하고, 비우면 목 모드는 메모리, 그 밖에는 shop-api다. 배너 공지(`channel_code=banner`)도 안전 장치를 통과한 뒤 `POST /api/shop/banners`로 쇼핑몰에 올린다. 배너 번호는 초안(`draft_id`)에서 만들어 재시작해도 겹치지 않고, 복구 공지를 올리면 같은 사건의 장애 배너를 `DELETE /api/shop/banners/{id}`로 내린다. 문구는 200자까지(넘으면 `notice_text_too_long`), 쇼핑몰에서 실패하면 `shop_banner_failed:<코드>`(failed)로 돌려주고 게시로 기록하지 않아 같은 요청을 다시 보내면 이어서 올린다. 출처는 `MARKETING_NOTICE_SOURCE`(`memory` | `shop-api`), 비우면 목 모드는 메모리다. 이메일·SNS 채널은 아직 메모리다.
@@ -33,6 +33,14 @@
 - 공지는 복구 공지(`incident_resolved`)를 게시하면 같은 `context_id`의 장애 공지가 `ended`가 되고, `valid_to`가 지나도 `ended`다. 끝난 공지도 사실·약속은 그대로 돌려주고 `status`로 구분한다(고객지원이 "종료된 공지"로 표시).
 - 쿠폰 총액은 건수×단가를 코드가 계산한다. 보상 쿠폰은 `sequence` 1부터 한 건씩 처리하고, 건너뛰면 `SEQUENCE_GAP`이다.
 - 결과 상태: 한도 초과·금액 불일치는 `input-required`(`human_input`, safety 보류 큐), 마감 초과는 `canceled`, 관문 무응답은 `failed`(fail-closed).
+### SNS 미디어와 AI 라벨 오버레이
+
+- 방침(재헌 확정 2026-11-05): 인공지능기본법 제31조를 적용 대상으로 보고, AI 생성물이면 의무 여부와 상관없이 항상 고지한다. 사람이 보는 문구(캡션·오버레이)와 기계판독 표시를 함께 둔다. 계정 프로필 라벨은 사람이 확인한다.
+- 오버레이: `python -m marketing_agent.sns_label <원본> <out_dir> --model <생성 모델 id>` 또는 `sns_label.apply_label()`. ffmpeg `drawtext`로 문구를 입혀 `<out_dir>/labeled.jpg|mp4`, `meta.json`(`ai_label` 키: 문구, 원본·결과 sha256, 설정 파일 sha256, 생성 모델·시각)을 만들고 원본은 보관한다(`raw.*`). 영상은 전 구간 표시, 이미지는 오버레이 뒤 JPEG다. ffmpeg·ffprobe·한글 글꼴이 없으면 `LabelError`로 거절하고 라벨 없는 파일을 만들지 않는다.
+- 설정: `src/marketing_agent/sns_label.toml` 한 곳(문구·위치·크기·표시 시간·글꼴·화질). `MARKETING_SNS_LABEL_CONFIG`로 다른 파일, `MARKETING_SNS_LABEL_FONT`로 글꼴 지정. **문구와 크기·위치는 `[확인 필요 — 팀·변호사 승인]` 임시값이며 확정 문구가 아니다.**
+- 기계판독 표시: 이미지는 XMP(`ai_generated=true`, 생성 모델, 시각, IPTC `trainedAlgorithmicMedia`), 영상은 MP4 메타데이터 태그. 외부 모델이 넣은 SynthID·C2PA는 재저장(이 오버레이 포함)하면 사라질 수 있어 대신하지 않는다. 시행령 제23조의 "기계가 판독할 수 있는 방법"으로 인정되는지(표준 규격 포함)는 변호사 확인 필요.
+- 환경변수: `MARKETING_MEDIA_DIR`(미디어 폴더, 자산 경로는 이 안쪽만), `MARKETING_SNS_DRAFT_DB`(초안 SQLite 파일, 비우면 메모리).
+
 ## 4. 의존
 `ax-contracts`, `ax-agent-template`. 다른 부서 폴더를 import하지 않는다.
 ## 5. 하지 않는 것

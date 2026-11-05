@@ -1,34 +1,56 @@
 """Instagram 게시 초안과 점검 (skill `draft_sns_post`, `check_sns_post`). SNS 설계 S2 단계.
 
-- 둘 다 읽기 전용이다. 상태를 바꾸는 `publish_sns`·`generate_video`는 이 단계에 없다.
+- 둘 다 읽기 전용이다(초안 저장만 한다). 상태를 바꾸는 `publish_sns`·`generate_video`는
+  이 단계에 없다.
 - 초안 문안은 고정 템플릿이다. 이미 게시된 공지(`NoticeStore`)의 공개 문구 또는 공개 쿠폰 사실
   (제약 사항 포함)만 쓰고, 원인·영향 숫자는 적지 않는다. 외부 입력(`untrusted`)은 읽지 않는다.
 - 점검은 코드 규칙이다. 필수 항목이 하나라도 빠지면 `rejected`이고, 개수는 safety 기준표
   (`ai_label_missing_count`·`text_mismatch_count`·`constraint_missing_count`)의 정의와 같게 센다.
+- 초안 id는 내용 주소다: 캡션·자산 sha256·media_kind·플랫폼 옵션의 해시. 같은 내용이면 같은 id다.
+  초안은 SQLite(`MARKETING_SNS_DRAFT_DB`, 비우면 메모리)에 둔다.
+- 미디어(JPEG 이미지·릴스)는 `MARKETING_MEDIA_DIR` 안의 자산 경로로 받고
+  규격은 `sns_media`가 검사한다.
+  AI 라벨 오버레이 결과(`sns_label`의 `labeled.*`·`meta.json`)가 맞는지도 점검한다.
 - 필수 문구(AI 라벨·시연용·약관)는 팀·변호사 승인 전의 자리표시 문구다(설계 5절, 열린 결정 4).
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import re
+import sqlite3
+import threading
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import Field, StrictBool, ValidationError, model_validator
 
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.common import AxModel
+from marketing_agent import sns_media
 from marketing_agent.notice import NoticeStore
+
+DRAFT_DB_ENV = "MARKETING_SNS_DRAFT_DB"
 
 # 필수 문구. 승인 전 자리표시이며 코드 한 곳에서만 바꾼다
 AI_LABEL_TEXT = "이 글과 이미지는 AI로 만들었습니다."
+AI_LABEL_TEXT_REEL = "이 글과 영상은 AI로 만들었습니다."
 DEMO_TEXT = "캣북스는 시연용 가상 서비스이며 실제 거래·배송이 없습니다."
 TERMS_TEXT = "주문·결제·환불 등은 캣북스 이용약관·구매자 이용약관에 따릅니다."
 HASHTAGS = ("#캣북스",)
 # 참여 조건부 게시 금지(체크리스트 1절): 조건을 거는 말이 캡션에 있으면 막는다
 FORBIDDEN_PHRASES = ("좋아요", "팔로우", "공유", "댓글")
-CAPTION_MAX = 2200  # Instagram 캡션 길이 상한 [확인 필요: 공식 문서]
+CAPTION_MAX = sns_media.CAPTION_MAX  # Instagram 캡션 길이 상한 [확인 필요: 공식 문서]
+HASHTAG_MAX = sns_media.HASHTAG_MAX
+MENTION_MAX = sns_media.MENTION_MAX
+
+
+def ai_label_text(media_kind: str) -> str:
+    return AI_LABEL_TEXT_REEL if media_kind == "reel" else AI_LABEL_TEXT
+
 
 ConstraintCode = Literal[
     "use_period",
@@ -64,13 +86,23 @@ class SnsCouponFacts(AxModel):
     constraints: list[CouponConstraint] = Field(default_factory=list)
 
 
+class PlatformOptions(AxModel):
+    """Instagram 옵션. 릴스의 `share_to_feed`는 기본값이 문서에 없어 항상 명시해 보낸다."""
+
+    share_to_feed: bool | None = None  # 릴스 전용. 비우면 릴스는 True
+
+
 class DraftSnsPostInput(AxModel):
     """`notice_id`(게시된 공지) 또는 `coupon`(공개 쿠폰 사실) 중 정확히 하나."""
 
     notice_id: str | None = None
     coupon: SnsCouponFacts | None = None
     platform: Literal["instagram"] = "instagram"
-    media_kind: Literal["image"] = "image"  # 영상(reel)은 S3 이후
+    media_kind: Literal["image", "reel"] = "image"
+    # `MARKETING_MEDIA_DIR` 안의 라벨 입힌 결과 파일(예: .../labeled.jpg).
+    # 없으면 캡션만 있는 초안이다
+    asset_path: str | None = None
+    platform_options: PlatformOptions = Field(default_factory=PlatformOptions)
 
     @model_validator(mode="after")
     def _exactly_one_source(self) -> DraftSnsPostInput:
@@ -84,7 +116,7 @@ class SnsPostDraft(AxModel):
     source_kind: Literal["notice", "coupon"]
     source_ref: str  # notice_id 또는 campaign_id
     platform: Literal["instagram"]
-    media_kind: Literal["image"]
+    media_kind: Literal["image", "reel"]
     caption: str
     hashtags: list[str]
     caption_sha256: str
@@ -92,6 +124,9 @@ class SnsPostDraft(AxModel):
     constraints: list[CouponConstraint] = Field(default_factory=list)  # 쿠폰이면 7개 전부
     is_ai_generated: Literal[True] = True
     context_id: str
+    asset_ref: str | None = None  # 미디어 폴더 기준 상대 경로
+    asset_sha256: str | None = None
+    platform_options: dict[str, Any] = Field(default_factory=dict)
 
 
 class CheckSnsPostInput(AxModel):
@@ -112,6 +147,15 @@ class SnsPostCheck(AxModel):
     unverified_number_count: int
     caption_too_long: bool
     caption_sha256: str
+    hashtag_count: int = 0
+    mention_count: int = 0
+    # 미디어 점검. 캡션만 있는 초안은 media_checked=False이고 publishable=False다(게시할 수 없다)
+    media_checked: bool = False
+    media_check_unavailable: bool = False  # 검사 도구(ffprobe)가 없어 검사하지 못함
+    machine_mark_present: bool | None = None  # 결과 파일에 ai_generated 표시가 있는지
+    publishable: bool = False
+    media_details: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
     problems: list[str]
 
 
@@ -133,21 +177,80 @@ def _sha(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-class SnsStore:
-    """초안을 메모리에 둔다(목 모드). 같은 입력이면 같은 `post_draft_id`다."""
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sns_drafts (
+    post_draft_id TEXT PRIMARY KEY,
+    created_at    TEXT NOT NULL,
+    payload       TEXT NOT NULL
+);
+"""
 
-    def __init__(self) -> None:
-        self._drafts: dict[str, SnsPostDraft] = {}
+
+class SnsStore:
+    """초안 저장소. 경로가 없으면 `MARKETING_SNS_DRAFT_DB`, 그것도 없으면 메모리(`:memory:`).
+
+    id가 내용 주소라 같은 초안을 다시 저장해도 같은 줄이다.
+    """
+
+    def __init__(self, path: str | None = None) -> None:
+        self.path = (
+            path if path is not None else (os.getenv(DRAFT_DB_ENV, "").strip() or ":memory:")
+        )
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=5.0)
+        with self._lock, self._conn:
+            self._conn.execute(_SCHEMA)
+
+    def close(self) -> None:
+        self._conn.close()
 
     def save(self, draft: SnsPostDraft) -> None:
-        self._drafts[draft.post_draft_id] = draft
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO sns_drafts (post_draft_id, created_at, payload)"
+                " VALUES (?, ?, ?)",
+                (draft.post_draft_id, _now().isoformat(), draft.model_dump_json()),
+            )
 
     def get(self, post_draft_id: str) -> SnsPostDraft | None:
-        return self._drafts.get(post_draft_id)
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT payload FROM sns_drafts WHERE post_draft_id = ?", (post_draft_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            return SnsPostDraft.model_validate_json(row[0])
+        except ValidationError:  # 계약이 바뀌어 읽을 수 없는 줄
+            return None
 
 
-def _compose(body: str) -> str:
-    return f"{body}\n\n{AI_LABEL_TEXT}\n{DEMO_TEXT}\n{TERMS_TEXT}\n\n{' '.join(HASHTAGS)}"
+def content_id(
+    caption_sha256: str,
+    asset_sha256: str | None,
+    media_kind: str,
+    platform: str,
+    options: dict[str, Any],
+) -> str:
+    """내용 주소 id. 캡션·자산·media_kind·플랫폼 옵션이 같으면 같고 하나라도 다르면 다르다."""
+    canonical = json.dumps(
+        {
+            "caption_sha256": caption_sha256,
+            "asset_sha256": asset_sha256,
+            "media_kind": media_kind,
+            "platform": platform,
+            "options": options,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return f"spd_{_sha(canonical)[:16]}"
+
+
+def _compose(body: str, media_kind: str) -> str:
+    return (
+        f"{body}\n\n{ai_label_text(media_kind)}\n{DEMO_TEXT}\n{TERMS_TEXT}\n\n{' '.join(HASHTAGS)}"
+    )
 
 
 def _coupon_body(facts: SnsCouponFacts) -> str:
@@ -201,19 +304,36 @@ async def draft_sns_post(
         required = [f"{facts.unit_value:,}원 쿠폰", DEMO_TEXT, TERMS_TEXT]
         constraints = facts.constraints
 
-    caption = _compose(body)
+    caption = _compose(body, data.media_kind)
     if len(caption) > CAPTION_MAX:
         return _result(request, TaskStatus.FAILED, outcome="caption_too_long")
-    digest = _sha(f"{request.meta.context_id}:{source_kind}:{source_ref}:{caption}")[:10]
+
+    options: dict[str, Any] = {}
+    if data.media_kind == "reel":
+        share = data.platform_options.share_to_feed
+        options["share_to_feed"] = True if share is None else share
+    asset_ref: str | None = None
+    asset_sha: str | None = None
+    if data.asset_path is not None:
+        try:
+            asset = sns_media.resolve_asset(data.asset_path)
+        except sns_media.MediaPathError as error:
+            return _result(request, TaskStatus.FAILED, outcome=error.code)
+        asset_ref = sns_media.asset_ref_for(asset)
+        asset_sha = sns_media.sha256_file(asset)
+    caption_sha = _sha(caption)
     draft = SnsPostDraft(
-        post_draft_id=f"spd_{digest}",
+        post_draft_id=content_id(caption_sha, asset_sha, data.media_kind, data.platform, options),
+        asset_ref=asset_ref,
+        asset_sha256=asset_sha,
+        platform_options=options,
         source_kind=source_kind,
         source_ref=source_ref,
         platform=data.platform,
         media_kind=data.media_kind,
         caption=caption,
         hashtags=list(HASHTAGS),
-        caption_sha256=_sha(caption),
+        caption_sha256=caption_sha,
         required_text=required,
         constraints=constraints,
         context_id=request.meta.context_id,
@@ -230,6 +350,68 @@ async def draft_sns_post(
         ),
         fallback=True,  # LLM 문안은 연결하지 않았다. 고정 템플릿
     )
+
+
+class _MediaOutcome:
+    def __init__(self) -> None:
+        self.problems: list[str] = []
+        self.warnings: list[str] = []
+        self.details: dict[str, Any] = {}
+        self.checked = False
+        self.unavailable = False
+        self.machine_mark: bool | None = None
+        self.overlay_missing = 0
+        self.asset_changed = 0
+
+
+def _overlay_recorded(asset: Path, asset_sha: str) -> bool:
+    """`sns_label`이 남긴 `meta.json`이 이 파일을 라벨 입힌 결과로 기록했는지."""
+    try:
+        meta = json.loads((asset.parent / "meta.json").read_text(encoding="utf-8"))
+        label = meta["ai_label"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return (
+        isinstance(label, dict)
+        and label.get("label_overlay") is True
+        and label.get("labeled_sha256") == asset_sha
+        and label.get("labeled_file") == asset.name
+    )
+
+
+def _check_asset(draft: SnsPostDraft) -> _MediaOutcome:
+    out = _MediaOutcome()
+    if draft.asset_ref is None or draft.asset_sha256 is None:
+        out.warnings.append("media_not_attached")  # 캡션만 있는 초안: 게시할 수 없다
+        return out
+    try:
+        asset = sns_media.resolve_asset(draft.asset_ref)
+    except sns_media.MediaPathError as error:
+        out.problems.append(f"asset_unavailable_{error.code}")
+        out.overlay_missing = 1  # 확인할 수 없으니 라벨이 있다고 말하지 않는다
+        return out
+    asset_sha = sns_media.sha256_file(asset)
+    if asset_sha != draft.asset_sha256:
+        out.problems.append("asset_changed_after_draft")
+        out.asset_changed = 1
+
+    report = sns_media.check_media(asset, draft.media_kind)
+    out.details = report.details | {"asset_sha256": asset_sha}
+    out.details.pop("tags", None)
+    out.warnings.extend(report.warnings)
+    out.problems.extend(report.problems)
+    out.unavailable = report.unavailable
+    out.checked = not report.unavailable and not report.problems
+
+    if not _overlay_recorded(asset, asset_sha):
+        out.overlay_missing = 1
+        out.problems.append("ai_label_overlay_missing")
+    if not report.unavailable:
+        mark = sns_media.read_machine_mark(asset, draft.media_kind, report)
+        out.machine_mark = mark.get("ai_generated") == "true"
+        if not out.machine_mark:
+            out.problems.append("machine_mark_missing")
+    return out
 
 
 async def check_sns_post(request: AgentRequest, store: SnsStore) -> AgentResult:
@@ -251,16 +433,18 @@ async def check_sns_post(request: AgentRequest, store: SnsStore) -> AgentResult:
     caption = data.caption
     problems: list[str] = []
 
-    # AI 라벨: 캡션 안내문, 게시 API 값(이미지는 영상 오버레이가 없다)
+    # AI 라벨 3곳: 캡션 안내문, 미디어 오버레이(아래), 게시 API 값.
+    # 프로필 계정 라벨은 사람이 확인한다
     ai_missing = 0
-    if AI_LABEL_TEXT not in caption:
+    label_text = ai_label_text(draft.media_kind)
+    if label_text not in caption:
         ai_missing += 1
         problems.append("ai_label_caption_missing")
     if data.is_ai_generated is not True:
         ai_missing += 1
         problems.append("is_ai_generated_not_true")
 
-    # 승인된 초안과 다른 항목: 캡션 전체, 그리고 공지 문구·시연용·약관
+    # 승인된 초안과 다른 항목: 캡션 전체, 그리고 공지 문구·시연용·약관, 자산 파일
     mismatch = 0
     if _sha(caption) != draft.caption_sha256:
         mismatch += 1
@@ -283,7 +467,7 @@ async def check_sns_post(request: AgentRequest, store: SnsStore) -> AgentResult:
     unverified = 0
     if draft.source_kind == "notice":
         rest = caption
-        for fragment in [*draft.required_text, AI_LABEL_TEXT, *draft.hashtags]:
+        for fragment in [*draft.required_text, label_text, *draft.hashtags]:
             rest = rest.replace(fragment, "")
         unverified = len(re.findall(r"\d+", rest))
         if unverified:
@@ -292,6 +476,17 @@ async def check_sns_post(request: AgentRequest, store: SnsStore) -> AgentResult:
     too_long = len(caption) > CAPTION_MAX
     if too_long:
         problems.append("caption_too_long")
+    hashtags = sns_media.count_hashtags(caption)
+    mentions = sns_media.count_mentions(caption)
+    if hashtags > HASHTAG_MAX:
+        problems.append("hashtag_limit_exceeded")
+    if mentions > MENTION_MAX:
+        problems.append("mention_limit_exceeded")
+
+    media = _check_asset(draft)
+    problems.extend(media.problems)
+    ai_missing += media.overlay_missing
+    mismatch += media.asset_changed
 
     approved = not problems
     check = SnsPostCheck(
@@ -304,6 +499,14 @@ async def check_sns_post(request: AgentRequest, store: SnsStore) -> AgentResult:
         unverified_number_count=unverified,
         caption_too_long=too_long,
         caption_sha256=_sha(caption),
+        hashtag_count=hashtags,
+        mention_count=mentions,
+        media_checked=media.checked,
+        media_check_unavailable=media.unavailable,
+        machine_mark_present=media.machine_mark,
+        publishable=approved and media.checked and media.machine_mark is True,
+        media_details=media.details,
+        warnings=media.warnings,
         problems=problems,
     )
     summary = "필수 항목 모두 확인" if approved else f"필수 항목 누락·위반 {len(problems)}건"
