@@ -7,7 +7,7 @@ import { PromoConcepts } from "@/components/data/PromoConcepts";
 import { InsightBrief } from "@/components/data/InsightBrief";
 import { DataSources } from "@/components/data/DataSources";
 import { TrendHeadline, materialOf } from "@/components/data/TrendPopular";
-import { ShortsGrid } from "@/components/data/ShortsGrid";
+import { VideoExplorer } from "@/components/data/VideoExplorer";
 import { okOut, useSkill } from "@/components/data/useSkill";
 import { Basis, Sources, VideoLinks, when } from "@/components/data/Sources";
 import { ContentLoop, type LoopTrendState } from "@/components/data/ContentLoop";
@@ -21,8 +21,8 @@ import {
 // 트렌드&콘텐츠 화면 (/data/trend): 콘텐츠 루프 4단계와 같은 하위 탭 4개 + 맨 끝 "데이터 출처"(루프와 별개) (정의는 lib/contentLoop.ts 한 곳).
 // - 주소에 하위 탭을 남긴다: /data/trend#detect · #recommend · #handoff · #result · #sources(데이터 출처, 루프와 별개) (없으면 감지). 옛 #trend/<단계> 주소는 Data.tsx가 새 주소로 옮긴다
 // - 루프 띠의 단계를 누르면 그 단계가 속한 하위 탭으로 간다. 루프 띠는 모든 하위 탭 위에 있다
-// - 1 감지: 맨 위 한 줄(오늘 가장 큰 화제, trend_popular) → 숏츠 그리드(shorts_stats 카테고리별 화면 카드, ShortsGrid)
-//   → 접힘 "긴 영상 N개"(trend_popular) → 맨 아래 급상승 한 줄 목록(trend_scan·trend_candidates). 그래프 없음. YouTube 속도 목록은 화면을 줄이려고 뺐다
+// - 1 감지: 맨 위 한 줄(오늘 가장 큰 화제, trend_popular) → 영상 탐색(video_explorer 숏·롱 × 카테고리 × 기간, VideoExplorer.
+//   고른 조건은 #detect?… 주소에 남긴다) → 맨 아래 급상승 한 줄 목록(trend_scan·trend_candidates). 그래프 없음. YouTube 속도 목록은 화면을 줄이려고 뺐다
 // - trend_popular·promo_concepts는 이 화면이 한 번 받아 1단계 요약·칩 색과 2단계 기획안이 같이 쓴다 (useSkill)
 // - 2 인사이트: 인사이트 브리프(trend_insight_brief) + 맨 아래 참고용 예시(promo_concepts 기획안 카드, 접힘). 처음 열 때 그리고, 그 뒤에는 숨기기만 한다
 // - 3 넘김: "기획팀이 이 인사이트를 가져가 제안을 만들어요. 가져간 기록 보기는 준비 중". 루프 띠와 같은 단계 설명 문장만 보여 준다(숫자·예시 없음)
@@ -211,8 +211,6 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
   const [campaignProbe, setCampaignProbe] = useState<LoopProbe>("idle");
   // 지금 인기·기획안은 한 번 받아 1단계 요약·칩 색과 2단계가 같이 쓴다
   const popularRes = useSkill(() => dataAi.trendPopular());
-  // 1단계 숏츠 그리드 (shorts_stats 카테고리별 화면 카드)
-  const shortsRes = useSkill(() => dataAi.shortsStats());
   const promoRes = useSkill((n) => dataAi.promoConcepts(n > 0));
   const popularOut = okOut(popularRes.state);
   const promoOut = okOut(promoRes.state);
@@ -348,8 +346,7 @@ export function TrendScan({ dataUp = null }: { dataUp?: boolean | null }) {
           {t.key === "detect" ? (
             <div className="space-y-5">
               {kpiLive && <TrendHeadline popular={popularRes.state} />}
-              {kpiLive && <ShortsGrid shorts={shortsRes.state} popular={popularRes.state} promo={promoOut}
-                onReload={() => { shortsRes.reload(); popularRes.reload(); }} />}
+              {kpiLive && <VideoExplorer popular={popularRes.state} />}
               {detect}
             </div>
           ) : !seen.has(t.key) ? null : t.key === "recommend" ? (

@@ -763,7 +763,7 @@ export interface PromoConceptsOutput {
   popular_trend_note?: string | null;
 }
 
-/** 근거 영상 하나의 주소와 썸네일 (계약 VideoLink). 서버가 저장된 YouTube 응답 값만 준다. 제목은 없다 */
+/** 근거 영상 하나의 주소와 썸네일 (계약 VideoLink). 서버가 저장된 YouTube 응답 값만 준다 */
 export interface VideoLink {
   video_id: string;
   video_url: string | null;
@@ -772,6 +772,70 @@ export interface VideoLink {
   ad_usable?: boolean | null;
   caution_types?: CautionType[];
   caution_reason?: string | null;
+  /** 저장된 응답의 제목·조회수 (#706, 없으면 null) */
+  title?: string | null;
+  views?: number | null;
+}
+
+// ---------------------------------------------------------------- 영상 탐색 (video_explorer)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py VideoExplorerOutput (#709).
+// 카테고리 × 기간(올린 시각 1일·3일·7일) × 길이(숏 = 서버 기준 이하, 롱 = 초과). 수집기가 미리 계산하고 요청은 읽기·정렬만
+export type ExplorerPeriod = "1d" | "3d" | "7d";
+export type ExplorerLength = "short" | "long";
+export type ExplorerSort = "views" | "views_per_subscriber" | "likes";
+export interface ExplorerVideo {
+  video_id: string;
+  title: string | null;
+  channel_title: string | null;
+  channel_id: string | null;
+  thumbnail_url: string | null;
+  video_url: string | null;
+  duration_seconds: number | null;
+  /** 올린 시각 */
+  published_at: string | null;
+  views: number | null;
+  views_reason: string | null;
+  likes: number | null;
+  /** 좋아요 숨김 등 */
+  likes_reason: string | null;
+  channel_subscribers: number | null;
+  /** 구독자 대비 배수 */
+  views_per_subscriber: number | null;
+  subscriber_reason: string | null;
+  category: TopicCategory | null;
+  ad_usable: boolean | null;
+  caution_types: CautionType[];
+  caution_reason: string | null;
+  source: string | null;
+  /** 조회수·좋아요를 읽은 시각 */
+  at: string | null;
+}
+export interface ExplorerCell {
+  category: string;
+  period: ExplorerPeriod;
+  length: ExplorerLength;
+  count: number;
+  /** 최소 수보다 적으면 이유 */
+  shortage_reason: string | null;
+  videos: ExplorerVideo[];
+}
+export interface VideoExplorerOutput {
+  status: "known" | "unknown";
+  reason: string | null;
+  category: TopicCategory | null;
+  period: ExplorerPeriod;
+  length: ExplorerLength;
+  sort: ExplorerSort;
+  /** 설정의 카테고리 (화면 순서) */
+  categories: string[];
+  min_per_cell: number;
+  cells: ExplorerCell[];
+  computed_at: string | null;
+  searches_today: number;
+  search_cap: number;
+  quota_used_today: number;
+  limits: string[];
+  summary: string;
 }
 
 // ---------------------------------------------------------------- 인사이트 브리프 (trend_insight_brief)
@@ -1375,6 +1439,9 @@ export const dataAi = {
   contentRecommend: () => askData<ContentRecommendOutput>("content_recommend", "영상 소재 추천", {}, RECOMMEND_DEADLINE_MS),
   /** 숏츠 통계 (카테고리·형식별). YouTube 검색으로 표본을 넓힌다(할당량, 서버 하루 캐시) */
   shortsStats: () => askData<ShortsStatsOutput>("shorts_stats", "숏츠 통계", {}, TREND_DEADLINE_MS),
+  /** 영상 탐색 (카테고리 × 기간 × 길이). 서버가 미리 계산한 결과를 자르고 정렬만 한다(외부 호출 없음). 카테고리를 비우면 설정의 카테고리 전부 */
+  videoExplorer: (q: { period: ExplorerPeriod; length: ExplorerLength; sort: ExplorerSort }) =>
+    askData<VideoExplorerOutput>("video_explorer", "영상 탐색", q, TREND_DEADLINE_MS),
   /** 인사이트 브리프 (2단계). 서버 하루 캐시. 브리프 안에서 trend_age·임베딩·한 줄 문장(LLM)을 부른다 */
   trendInsightBrief: () => askData<TrendInsightBriefOutput>("trend_insight_brief", "인사이트 브리프", {}, RECOMMEND_DEADLINE_MS),
   /** 회사 도메인 프로필 (업종·상품군·고객 축·질문·씨앗 키워드). 서버가 저장해 두고 카탈로그가 바뀌면 다시 만든다 */
