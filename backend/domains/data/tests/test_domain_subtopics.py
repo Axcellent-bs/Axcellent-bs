@@ -191,6 +191,20 @@ def test_terms_from_the_same_video_set_are_one_object() -> None:
     assert kept["국정수행"].merged == {"대통령 지지율", "역대 대통령"}
 
 
+def test_english_common_words_fold_into_the_korean_name_or_drop() -> None:
+    """2026-11-05 기회 카드 'books': 영어 일반어는 같은 대상의 한국어 이름에 묶고, 없으면 뺀다."""
+    terms = [
+        dsub.Term("책추천", {"a", "b", "c"}, {"tag"}, set()),
+        dsub.Term("books", {"a", "b", "z"}, {"tag"}, set()),  # 3개 중 2개가 책추천에도: 묶음
+        dsub.Term("reading", {"q", "r"}, {"tag"}, set()),  # 한국어 짝 없음: 뺌
+        dsub.Term("BTS", {"q", "r"}, {"tag"}, set()),  # 대문자 고유 이름은 그대로
+        dsub.Term("python 기초", {"q"}, {"title"}, set()),  # 한글이 섞이면 그대로
+    ]
+    kept = {t.name: t for t in dsub.fold_english(terms)}
+    assert set(kept) == {"책추천", "BTS", "python 기초"}
+    assert kept["책추천"].merged == {"books"} and kept["책추천"].videos == {"a", "b", "c", "z"}
+
+
 def test_baseline_is_the_median_over_cached_seed_searches(tmp_path: Path) -> None:
     env = _env(tmp_path)
     _run(env, FakeYouTube())
