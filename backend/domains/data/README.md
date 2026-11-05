@@ -559,7 +559,10 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
 - **상품 입력 `products`(#646, 선택)**: 상품 id 또는 이름 최대 10개. 이름은 카탈로그(`GET /api/shop/products`) 이름과 정규화(NFKC, 소문자, 공백 모두 뺌)한 값이 정확히 같을 때만 맞추고, 못 맞춘 값은 추측하지 않고 `products_effect.unmatched_products`로 돌려준다. 생략하면 예전 응답과 같다
 - **세 구분 (합산하지 않음, 같은 주문이 겹칠 수 있다)**: 상품 기준 `products_effect`(맞은 상품의 품목만: 그 상품이 든 결제 완료 주문 수·판매 수량·판매액 각각 기간값·기준선·증분·범위·방향, 기준선·공백·기준선 부족 규칙은 판매액과 같음) / 쿠폰 귀속 `coupons`·`sales.direct_attributed_krw` / 가게 전체 `orders`·`sales`(참고용). 숫자는 모두 `facts`
 - **상품 기준 평가**: `eval/campaign_products/`(그 상품만 늘림·다른 상품만 늘림·이름 못 맞춤·결제 공백·기준선 부족), 관문 `tests/test_campaign_products_eval_gate.py`
-- **상품 기준 한계**: 같은 상품이 캠페인과 다른 이유(다른 행사·시즌·검색)로 팔린 것은 구분하지 못한다. "그 기간 그 상품 판매 변화"다. 유입경로 기준은 #648(마케팅 #647 뒤)
+- **상품 기준 한계**: 같은 상품이 캠페인과 다른 이유(다른 행사·시즌·검색)로 팔린 것은 구분하지 못한다. "그 기간 그 상품 판매 변화"다
+- **유입경로 기준 `attribution_effect`(#648, campaign_id가 있을 때)**: shop-api `GET /api/shop/orders/attributed`(#655, 커넥터 `attributed_orders`, 1000건을 넘으면 구간을 반씩 나눠 읽음)로 유입 표시(`src_campaign` = campaign_id)가 있는 **결제 완료** 주문의 수·판매액(단가 × 수량, 할인 전)을 출처(`src_source`)별로, 유입 표시가 있는 주문 비율(유입 표시가 있는 결제 완료 주문 ÷ 구간 결제 완료 주문)과 함께 준다. 다른 캠페인 표시 주문은 세지 않는다. 직접 귀속이라 기준선과 비교하지 않는다. 구간에 유입 표시가 있는 결제 완료 주문이 하나도 없으면 unknown + "유입 기록 없음". 관련 상품(`products`)도 있으면 `attribution_and_products` = 이 캠페인으로 들어와 그 상품을 산 주문의 그 상품 품목만. 숫자는 모두 `facts`. 평가 `eval/campaign_attribution/`, 관문 `tests/test_campaign_attribution_eval_gate.py`
+- **네 칸은 합산하지 않는다**: 유입(`attribution_effect`) / 상품(`products_effect`) / 쿠폰 귀속(`coupons`·`sales.direct_attributed_krw`) / 가게 전체(`orders`·`sales`, 참고)는 같은 주문이 여러 칸에 겹칠 수 있다
+- **유입경로 한계**: 쇼핑몰 화면이 캠페인 링크 꼬리표(`src_*`)를 주문까지 넘긴 주문만 센다. 꼬리표 없이 들어온 주문(직접 방문·꼬리표 유실)은 빠진다. 광고 데이터(노출·클릭·비용) 결합은 하지 않는다: 출처 현황 `pending_sources`에 "광고 데이터: #647 광고 부분 대기"
 - **재무 칸 대응표** (재무 `record_campaign_result` `CampaignResultInput`):
 
   | 재무 칸 | 뜻 (재무 계약) | data 칸 |

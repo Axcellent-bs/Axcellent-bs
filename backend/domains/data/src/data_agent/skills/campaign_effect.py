@@ -47,6 +47,8 @@ import httpx
 from ax_agent_template.llm import LLMClient
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
+    CampaignAttribution,
+    CampaignAttributionProducts,
     CampaignChange,
     CampaignCoupons,
     CampaignEffectInput,
@@ -57,6 +59,7 @@ from ax_contracts.schemas.data import (
     CampaignProductsEffect,
     CampaignSales,
     CampaignSalesTotals,
+    CampaignSourceRow,
 )
 from data_agent import catalog
 from data_agent.connectors import ConnectorUnavailable
@@ -734,6 +737,104 @@ async def _products_effect(
     return CampaignProductsEffect(status="known", **measures, **common)
 
 
+# ---------------------------------------------------------------- 유입경로 기준 (#648)
+
+NO_TAGS = "유입 기록 없음"
+NO_SOURCE = "(출처 없음)"
+ATTRIBUTION_NOTE = (
+    "쇼핑몰 화면이 캠페인 링크 꼬리표(src_*)를 주문까지 넘긴 주문만 센다."
+    " 꼬리표 없이 들어온 주문(직접 방문·꼬리표 유실)은 빠진다"
+)
+
+
+async def _attribution(
+    connector: Any, data: CampaignEffectInput, products: CampaignProductsEffect | None
+) -> tuple[CampaignAttribution | None, CampaignAttributionProducts | None]:
+    """이 캠페인 링크로 들어온 결제 완료 주문 (직접 귀속, 기준선 비교 없음)."""
+    if not data.campaign_id:
+        return None, None
+    matched = [m.product_id for m in products.matched] if products else []
+
+    def unknown(reason: str) -> tuple[CampaignAttribution, CampaignAttributionProducts | None]:
+        both = None
+        if data.products:
+            both = CampaignAttributionProducts(status="unknown", unknown_reason=reason,
+                                               matched=matched)  # fmt: skip
+        return CampaignAttribution(status="unknown", unknown_reason=reason,
+                                   campaign_id=data.campaign_id), both  # fmt: skip
+
+    if not hasattr(connector, "attributed_orders") or not hasattr(connector, "orders"):
+        return unknown("이 회사 커넥터는 유입 주문을 주지 않음")
+    try:
+        tagged = await connector.attributed_orders(data.window_from, data.window_to)
+        window = await connector.orders(data.window_from, data.window_to)
+    except ConnectorUnavailable as error:
+        return unknown(f"유입 주문을 읽지 못함 [{error.code}]")
+    paid = [o for o in tagged if o.status == "paid"]
+    if not paid:
+        return unknown(f"{NO_TAGS}: 구간에 유입 표시가 있는 결제 완료 주문이 없음"
+                       " (쇼핑몰이 캠페인 링크 꼬리표를 주문에 넘기는지 확인)")  # fmt: skip
+    mine = [o for o in paid if o.src_campaign == data.campaign_id]
+    rows: dict[str, CampaignSourceRow] = {}
+    for o in mine:
+        key = o.src_source or NO_SOURCE
+        row = rows.setdefault(key, CampaignSourceRow(source=key, orders=0, gross_krw=0))
+        row.orders += 1
+        row.gross_krw += o.gross
+        if o.src_medium and o.src_medium not in row.mediums:
+            row.mediums.append(o.src_medium)
+    window_paid = sum(1 for o in window if o.status == "paid")
+    attribution = CampaignAttribution(
+        status="known", campaign_id=data.campaign_id, orders=len(mine),
+        gross_krw=sum(o.gross for o in mine),
+        by_source=sorted(rows.values(), key=lambda r: (-r.orders, r.source)),
+        window_orders=window_paid, tagged_orders=len(paid),
+        tagged_share=round(min(len(paid) / window_paid, 1.0), 4) if window_paid else None,
+        note=ATTRIBUTION_NOTE,
+    )  # fmt: skip
+    if not data.products:
+        return attribution, None
+    if not matched:
+        return attribution, CampaignAttributionProducts(
+            status="unknown", unknown_reason=f"{NO_MATCH}: 관련 상품을 카탈로그에서 맞추지 못함",
+        )  # fmt: skip
+    ids = set(matched)
+    lines = [[i for i in o.items if i.product_id in ids] for o in mine]
+    lines = [ln for ln in lines if ln]
+    return attribution, CampaignAttributionProducts(
+        status="known", matched=matched, orders=len(lines),
+        units=sum(i.qty for ln in lines for i in ln),
+        gross_krw=sum(i.qty * i.unit_price for ln in lines for i in ln),
+    )  # fmt: skip
+
+
+def attribution_facts(out: CampaignEffectOutput) -> list[CampaignFact]:
+    """유입 근거 숫자 (출처·기간·표본). 모르는 칸은 넣지 않는다."""
+    a, b = out.attribution_effect, out.attribution_and_products
+    span = _span_text(out.window_from, out.window_to)
+    rows: list[CampaignFact] = []
+
+    def fact(label: str, value: float | None, unit: str, sample: int | None) -> None:
+        if value is not None:
+            rows.append(CampaignFact(
+                label=label, value=value, unit=unit, period=span, sample=sample,
+                source="shop-api orders/attributed",
+            ))  # fmt: skip
+
+    if a is not None and a.status == "known":
+        fact(f"유입 주문 ({a.campaign_id})", a.orders, "건", a.orders)
+        fact(f"유입 판매액 ({a.campaign_id})", a.gross_krw, "KRW", a.orders)
+        for r in a.by_source:
+            fact(f"유입 주문 · {r.source}", r.orders, "건", r.orders)
+            fact(f"유입 판매액 · {r.source}", r.gross_krw, "KRW", r.orders)
+        fact("유입 표시가 있는 주문 비율", a.tagged_share, "비율", a.window_orders)
+    if b is not None and b.status == "known":
+        fact("유입 + 관련 상품 주문", b.orders, "건", b.orders)
+        fact("유입 + 관련 상품 판매 수량", b.units, "개", b.orders)
+        fact("유입 + 관련 상품 판매액", b.gross_krw, "KRW", b.orders)
+    return rows
+
+
 def product_facts(out: CampaignEffectOutput) -> list[CampaignFact]:
     """상품 기준 근거 숫자 (출처·기간·표본). 있는 숫자만 (모르는 칸은 0으로 채우지 않음)."""
     p = out.products_effect
@@ -831,6 +932,10 @@ async def measure(
         sales=await _sales(connector, data, orders, used, rule),
         products_effect=await _products_effect(connector, data, orders, used, rule),
     )
+    # 유입경로 기준 (직접 귀속, 기준선 없음). 유입·상품·쿠폰·가게 전체는 겹칠 수 있어 합산 안 함
+    out.attribution_effect, out.attribution_and_products = await _attribution(
+        connector, data, out.products_effect
+    )
     if orders.status == "known" and orders.excess is not None:
         out.incremental_orders = round(orders.excess)  # 재무 orders 칸 (증분, gmv_krw와 같은 뜻)
     out.schema_version = SCHEMA_VERSION
@@ -880,6 +985,8 @@ def campaign_facts(out: CampaignEffectOutput) -> list[CampaignFact]:
     s = out.sales
     if s is not None and s.status == "known" and s.incremental_gross_krw is not None:
         add("증분 판매액(원)", s.incremental_gross_krw, "KRW", s.baseline_days)  # 요약 재료 이름
+    for f in attribution_facts(out):
+        rows.append(f.model_copy(update={"fact_id": _fact_id(f.label)}))
     for f in product_facts(out):
         rows.append(f.model_copy(update={"fact_id": _fact_id(f.label)}))
     p = out.products_effect
@@ -1057,6 +1164,43 @@ async def eval_products_judge(
             CampaignEffectInput.model_validate(dict(request)), connector, alpha=alpha
         )
     return to_products_answer(out)
+
+
+def to_attribution_answer(out: CampaignEffectOutput) -> dict[str, Any]:
+    """skill 출력 → 유입경로 채점기 답 모양(`campaign_attribution/score.Answer`)."""
+    a, b = out.attribution_effect, out.attribution_and_products
+    if a is None:
+        body: dict[str, Any] = {"attribution": {"status": "unknown",
+                                                "unknown_reason": "유입 칸이 없음"}}  # fmt: skip
+    elif a.status == "unknown":
+        body = {"attribution": {"status": "unknown", "unknown_reason": a.unknown_reason}}
+    else:
+        body = {"attribution": {
+            "status": "known", "orders": a.orders, "gross_krw": a.gross_krw,
+            "by_source": {r.source: {"orders": r.orders, "gross_krw": r.gross_krw}
+                          for r in a.by_source},
+            "tagged_share": a.tagged_share,
+        }}  # fmt: skip
+    if b is not None:
+        body["overlap"] = {
+            "status": b.status, "unknown_reason": b.unknown_reason,
+            "orders": b.orders, "units": b.units, "gross_krw": b.gross_krw,
+        }  # fmt: skip
+    return body
+
+
+async def eval_attribution_judge(
+    request: Mapping[str, Any], transport: httpx.MockTransport, *, alpha: float = DIRECTION_ALPHA
+) -> dict[str, Any]:
+    """유입경로 채점기(`eval/campaign_attribution/score.py`)가 부르는 판정 함수."""
+    from data_agent.connectors.shop_api import ShopApi, ShopApiConnector
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        connector = ShopApiConnector(ShopApi("http://shop.eval", token="eval", client=client))
+        out = await measure(
+            CampaignEffectInput.model_validate(dict(request)), connector, alpha=alpha
+        )
+    return to_attribution_answer(out)
 
 
 async def eval_sales_judge(

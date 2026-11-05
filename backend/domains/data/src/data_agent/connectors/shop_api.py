@@ -204,6 +204,38 @@ class ShopApiConnector:
         except (ValidationError, TypeError) as exc:
             raise ShopUnavailable("BAD_RESPONSE", "주문 응답 형식이 예상과 다르다") from exc
 
+    async def attributed_orders(
+        self, window_from: datetime, window_to: datetime, campaign_id: str | None = None,
+        source: str | None = None, *, _depth: int = 0,
+    ) -> list[AttributedOrder]:  # fmt: skip
+        """유입 표시(`src_*`)가 있는 주문 (`GET /api/shop/orders/attributed`, #655).
+
+        취소·전액 환불은 shop-api가 뺀다. 한 번에 1000건을 넘으면(`truncated`) 구간을 반으로 나눠
+        다시 읽는다(최대 6번 나눔, 그래도 넘으면 `ShopUnavailable("TRUNCATED")`).
+        """
+        params: dict[str, Any] = {"from": _iso(window_from), "to": _iso(window_to),
+                                  "limit": ATTRIBUTED_LIMIT}  # fmt: skip
+        if campaign_id:
+            params["campaign_id"] = campaign_id
+        if source:
+            params["source"] = source
+        data = await self.api.get("/orders/attributed", params)
+        try:
+            truncated = bool(data.get("truncated"))
+            rows = [AttributedOrder.model_validate(item) for item in data.get("orders", [])]
+        except (ValidationError, TypeError, AttributeError) as exc:
+            raise ShopUnavailable("BAD_RESPONSE", "유입 주문 응답 형식이 예상과 다르다") from exc
+        if not truncated:
+            return rows
+        if _depth >= ATTRIBUTED_SPLITS:
+            raise ShopUnavailable("TRUNCATED", "유입 주문이 너무 많아 다 읽지 못함")
+        mid = window_from + (window_to - window_from) / 2
+        first = await self.attributed_orders(window_from, mid, campaign_id, source,
+                                             _depth=_depth + 1)  # fmt: skip
+        second = await self.attributed_orders(mid, window_to, campaign_id, source,
+                                              _depth=_depth + 1)  # fmt: skip
+        return first + second
+
     async def products(self) -> list[CatalogProduct]:
         """판매 중 상품 (shop-api가 판매 중만 준다). 형식이 다르면 `ShopUnavailable`."""
         data = await self.api.get("/products", {})
@@ -265,6 +297,28 @@ class ShopOrder(BaseModel):
     def settled(self) -> bool:
         """결제 완료 주문 (성공한 결제가 하나라도 있음)."""
         return any(p.status == "succeeded" for p in self.payments)
+
+
+ATTRIBUTED_LIMIT = 1000  # shop-api 유입 주문 조회 한 번 상한
+ATTRIBUTED_SPLITS = 6  # 넘으면 구간을 반으로 나눠 읽는 최대 횟수
+
+
+class AttributedOrder(BaseModel):
+    """유입 표시가 있는 주문 한 건 (shop-api `orders/attributed`, 개인 식별값 없음)."""
+
+    model_config = ConfigDict(extra="ignore")
+    order_id: str
+    created_at: datetime
+    status: str  # paid | pending_payment | payment_failed | ...
+    items: list[ShopOrderItem] = Field(default_factory=list)
+    src_source: str | None = None
+    src_medium: str | None = None
+    src_campaign: str | None = None
+
+    @property
+    def gross(self) -> int:
+        """주문 금액 = 상품가 × 수량 합 (할인 전)."""
+        return sum(i.qty * i.unit_price for i in self.items)
 
 
 class CampaignCoupon(BaseModel):

@@ -31,6 +31,7 @@ from ax_contracts.schemas.data import (
     DataSource,
     DataSourcesOutput,
     LlmDailyUsage,
+    PendingSource,
     SourceDataKind,
     SourceStatus,
 )
@@ -43,6 +44,8 @@ from data_agent.skills.domain_profile import TENANT_CONFIG_ENV
 DB_ENV = "DATA_SOURCE_PROBE_DB"
 DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "source_probe.db"  # backend/.data
 RETRY_FAILED = timedelta(days=1)  # 확인 호출이 실패했으면 하루 뒤 다시
+# 광고 노출·클릭·비용은 읽을 곳이 정해지면 붙인다 (그때 출처 목록에 "키 필요"로)
+AD_DATA_PENDING = "#647 광고 부분 대기"  # 화면: "광고 데이터: #647 광고 부분 대기"
 ALL = "all"
 
 
@@ -258,6 +261,8 @@ async def list_sources(
     )
     out.collectors = collector_states(env, now)  # 요약 문장은 그대로 (출처 목록만 센다)
     out.llm_usage = llm_usage_today(env)
+    # 기다리는 출처: 출처 목록(수집 계획 후보)에 넣지 않고 따로 보여 준다
+    out.pending_sources = [PendingSource(name="광고 데이터", reason=AD_DATA_PENDING)]
     return SourcesResult(out, Evidence(queries=queries, data_summary=out.summary, collected_at=now))
 
 

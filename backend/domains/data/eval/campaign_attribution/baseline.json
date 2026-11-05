@@ -1,0 +1,16 @@
+{
+ "judge": "data_agent.skills.campaign_effect:eval_attribution_judge",
+ "holdout_seed": 2026110601,
+ "metrics": {
+  "campaign_attribution.count_match": 1.0,
+  "campaign_attribution.share_error": 0.0,
+  "campaign_attribution.no_tag_unknown_rate": 1.0,
+  "campaign_attribution.other_campaign_excluded_rate": 1.0,
+  "campaign_attribution.overlap_match": 1.0,
+  "holdout.campaign_attribution.count_match": 1.0,
+  "holdout.campaign_attribution.share_error": 0.0,
+  "holdout.campaign_attribution.no_tag_unknown_rate": null,
+  "holdout.campaign_attribution.other_campaign_excluded_rate": 1.0,
+  "holdout.campaign_attribution.overlap_match": 1.0
+ }
+}
