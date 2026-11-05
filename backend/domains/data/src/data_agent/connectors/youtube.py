@@ -31,6 +31,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from data_agent.connectors import ConnectorUnavailable, replay
+from data_agent.stage_timing import stage
 
 DEFAULT_URL = "https://www.googleapis.com/youtube/v3"
 URL_ENV = "AX_YOUTUBE_API_URL"
@@ -407,7 +408,8 @@ class YouTubeConnector:
     async def _get(self, resource: str, params: dict[str, Any]) -> Any:
         if self.mode == "replay":  # 저장된 응답만 (할당량을 세지 않는다)
             return replay.load("youtube", f"{self.url}/{resource}", params, self._env)
-        payload = await self._get_live(resource, params)
+        with stage("external"):
+            payload = await self._get_live(resource, params)
         if self.mode == "record":
             replay.save("youtube", f"{self.url}/{resource}", params, payload, self._env)
         return payload

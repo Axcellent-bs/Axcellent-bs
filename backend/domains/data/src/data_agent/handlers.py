@@ -34,6 +34,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
@@ -97,11 +98,24 @@ from data_agent.skills.trend_history import history
 from data_agent.skills.trend_popular import popular
 from data_agent.skills.trend_scan import NoTrendGroups, TrendGroupsUnknown, scan_trends
 from data_agent.skills.youtube_velocity import measure_velocity_named
+from data_agent.stage_timing import note_cache, stage, timed_handler
+
+
+class TimedLLMClient(LLMClient):
+    """LLM 응답 대기 시간을 요청 단계 기록(`stage_timing`)의 llm에 더한다. 동작은 그대로."""
+
+    async def structured(self, *args: Any, **kwargs: Any) -> Any:
+        with stage("llm"):
+            return await super().structured(*args, **kwargs)
+
+    async def embed(self, texts: list[str], context_id: str | None = None) -> list[list[float]]:
+        with stage("llm"):
+            return await super().embed(texts, context_id)
 
 
 def get_llm() -> LLMClient:
     """설명 문장용 LLM. 테스트는 이 함수를 바꿔 끼운다. 미설정이면 explain이 템플릿으로 대체한다."""
-    return LLMClient("data")
+    return TimedLLMClient("data")
 
 
 def get_seller_client() -> SellerClient:
@@ -440,6 +454,7 @@ async def trend_popular(request: AgentRequest) -> AgentResult:
     key = RESPONSES.key("trend_popular", data.model_dump(mode="json"),
                         data_stamp(os.environ, BOARD.stamp()), "")  # fmt: skip
     if (hit := RESPONSES.get(key)) is not None:
+        note_cache("hit")
         outcome, output, evidence = hit
         return _result(request, TaskStatus.COMPLETED, outcome=outcome, output=output,
                        evidence=evidence)  # fmt: skip
@@ -457,6 +472,7 @@ async def trend_popular(request: AgentRequest) -> AgentResult:
     after = RESPONSES.key("trend_popular", data.model_dump(mode="json"),
                           data_stamp(os.environ, BOARD.stamp()), "")  # fmt: skip
     RESPONSES.put(after, (outcome, output, result.evidence))
+    note_cache("stored")
     return _result(
         request, TaskStatus.COMPLETED, outcome=outcome, output=output, evidence=result.evidence
     )
@@ -588,6 +604,7 @@ async def trend_insight_brief(request: AgentRequest) -> AgentResult:
     env = os.environ
     # 오늘 저장된 브리프가 있으면 재료(지금 인기·숏츠·상품)를 계산하지 않고 바로 준다
     if (hit := cached_brief(data, env)) is not None:
+        note_cache("hit")
         output = hit.output.model_dump(mode="json")
         return _result(request, TaskStatus.COMPLETED, outcome=hit.output.status, output=output,
                        evidence=hit.evidence)  # fmt: skip
@@ -976,6 +993,12 @@ async def campaign_effect(request: AgentRequest) -> AgentResult:
     )
 
 
+# 트렌드 감지 탭이 부르는 skill은 단계별 시간(sqlite·외부·LLM·계산 ms)을 로그 한 줄로 남긴다
+TIMED_SKILLS = frozenset({
+    "trend_popular", "trend_scan", "trend_candidates", "youtube_velocity", "shorts_stats",
+    "promo_concepts", "trend_insight_brief",
+})  # fmt: skip
+
 HANDLERS = {
     "impact_analysis": impact_analysis,
     "anomaly_detection": anomaly_detection,
@@ -1001,3 +1024,4 @@ HANDLERS = {
     "domain_subtopics": domain_subtopics,
     "source_plan": source_plan,
 }
+HANDLERS = {k: timed_handler(k, v) if k in TIMED_SKILLS else v for k, v in HANDLERS.items()}
