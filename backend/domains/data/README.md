@@ -852,7 +852,8 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 흐름: **데이터(인사이트 + 근거) → 기획(제안 + 실행 근거 + 목표) → 사람 확인 → 마케팅 실행 → 데이터(성과 측정) → 기획(결과 기록)**. 데이터는 기획안을 확정하지 않고 근거 있는 인사이트를 기획에 넘긴다. grade read, 요청: planning·orchestrator·dashboard-api.
 
 **v2 화면 칸** (모두 코드, 모르면 None + 이유, `caution.py`):
-- 영상마다 `ad_usable`·`caution_types`(실존 인물·상표·음원)·`caution_reason`. 인사이트 근거 영상은 그 주제 분류(실존 이름·사람·분류)로 정하고, 기회 카드 근거 숏츠는 하위 주제 분류(칸만 앎: 음원이 아니면 모름)로, 지금 인기 `top_videos`는 영상 분류(음원)와 제목에 지금 인기 주제의 실존 이름이 들었는지로 정한다. 확인할 것이 하나라도 있으면 false, 실존 이름 판단까지 알 때만 true
+- 영상마다 `ad_usable`·`caution_types`(실존 인물·상표·음원)·`caution_reason`. 지금 인기 `top_videos`는 영상 분류(음원)와 제목에 지금 인기 주제의 실존 이름이 들었는지로 정한다. 확인할 것이 하나라도 있으면 false, 실존 이름 판단까지 알 때만 true
+- **근거 숏츠(인사이트·기회 카드, #0-c)**: 영상 분류 호출(`classify_videos`)이 칸과 함께 그 영상의 실존 인물·상표 이름도 판정한다(`real_entity`·`entity_names`·`is_person`, 이름은 제목·태그에 실제로 나온 것만, 채널 이름은 넣지 않음). 분류 저장분(`topic_categories.db`)의 같은 칸에 남기고, 이 판정 전에 저장된 영상(칸이 빈 줄)은 다음 분류 때 다시 물어 채운다. 근거 숏츠의 광고 재료 칸은 이 영상 판정으로 정하고(`evidence_videos.label`), 제목이 없거나 분류를 못 한 영상만 카드 주제의 분류 결과를 따른다. `VideoLink.title`·`views`는 저장된 응답 값(YouTube 스냅샷 `video_titles`·조회수, 하위 주제 검색 저장분). 더 부르지 않는다
 - 인사이트 `shorts_fit`·`target_views_reference`: 기회 카드와 같은 계산(그 분류 숏츠 조회 중앙값 ÷ 전체 중앙값). 그 분류 숏츠 표본이 5개 미만이면 None + `shorts_fit_status = unknown` + 이유. 숫자는 `facts`
 - 인사이트·기회 카드 `top_age_band`·`top_age_band_ratio`: 평소 대비 가장 크게 오른 연령대(known만). 연령대끼리 양은 비교하지 않는다. 배수는 `facts`의 연령대 칸
 
