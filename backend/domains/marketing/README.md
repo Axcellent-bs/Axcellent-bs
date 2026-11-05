@@ -20,6 +20,10 @@
 | `list_campaign_briefs` | read | planning, orchestrator, dashboard-api, shop-api | `limit` → 받은 기획안 목록(받은 시각 늦은 순, 보관한 그대로, 상태 `received`). 없으면 빈 목록과 이유 |
 | `get_campaign_brief` | read | planning, orchestrator, dashboard-api, shop-api | `proposal_id` 또는 `campaign_id` → 받은 기획안 하나. 없으면 "확인할 수 없음" |
 | `issue_coupon` | A (한도 초과·금액 불일치는 C), 검증자 없음 | support | `purpose_code`, `buyer_id`, 건수, 단가 → `coupon_id`, `coupon.issued` 발행 |
+| `send_chat_message` | read | dashboard-api | `who`, `thread_id?`, `message`(2000자) → 글을 바로 저장하고 `status: answering`인 대화를 돌려준다. 답은 백그라운드에서 붙고 `talking`으로 돌아온다(`get_chat_thread`로 가져감). 조회·설명만 한다 — 업무 상태를 바꾸지 않아 `execute()`를 부르지 않는다(대화 기록만 저장, 인사 AI와 같다). 거절 outcome: `llm_not_configured`(LLM 설정 없음, 답을 지어내지 않음)·`forbidden`(남의 대화)·`not_found`·`thread_closed`·`thread_busy` |
+| `list_chat_threads` | read | dashboard-api | `who`, `limit` → 대화 목록(최근 갱신 순). 남의 대화는 `messages: []`+`summary`+`restricted: true` |
+| `get_chat_thread` | read | dashboard-api | `who`, `thread_id` → 대화 하나(열람 규칙 같음) |
+| `close_chat_thread` | read | dashboard-api | `who`, `thread_id` → 대화를 끝낸다(`closed`). 요약이 비면 첫 질문 일부만 남긴다 |
 | `start_campaign` | B (검증자 재무) | orchestrator | `campaign_id`, `campaign_name`, `channel`, `budget_krw` → 재무 판단(`review`) + 관문 결과. 재무 거절은 `rejected_by_finance`(관문 미호출), 한도 초과는 `over_approved_limit`, 그 밖에는 `executed`·`held`(50만 원 이상 사람 승인)·`rejected_by_review` 등 관문 결과 그대로 |
 | `record_campaign_result` | read | orchestrator | `CampaignResultInput` → 재무 `record_campaign_result`로 전달. `gmv_krw`를 모르면 비워 둠(0으로 채우지 않음) |
 | `draft_sns_post` | read | orchestrator | `notice_id`(게시 중인 공지) 또는 `coupon`(공개 쿠폰 사실, 제약 사항 7항목 필수) → Instagram 이미지 캡션 초안(`post_draft_id`). 고정 템플릿에 AI 생성·시연용·약관 문구를 넣고 원인·영향 숫자는 적지 않음. 쿠폰 제약 누락은 `rejected_constraint_missing`, 공지가 없으면 `notice_not_found`, 끝났으면 `notice_not_active` |
@@ -32,6 +36,15 @@
 - 공지는 복구 공지(`incident_resolved`)를 게시하면 같은 `context_id`의 장애 공지가 `ended`가 되고, `valid_to`가 지나도 `ended`다. 끝난 공지도 사실·약속은 그대로 돌려주고 `status`로 구분한다(고객지원이 "종료된 공지"로 표시).
 - 쿠폰 총액은 건수×단가를 코드가 계산한다. 보상 쿠폰은 `sequence` 1부터 한 건씩 처리하고, 건너뛰면 `SEQUENCE_GAP`이다.
 - 결과 상태: 한도 초과·금액 불일치는 `input-required`(`human_input`, safety 보류 큐), 마감 초과는 `canceled`, 관문 무응답은 `failed`(fail-closed).
+### 사람과 직접 대화 (`chat.py`, `chat_store.py`)
+- 화면 경로: dashboard-api `/api/dashboard/marketing-chat` (GET 목록, GET `/{id}`, POST `{thread_id?, message}`, POST `/{id}/close`). 사람 토큰(`Authorization: Bearer`)이 있어야 읽기도 된다.
+- 조회·설명만 한다. 읽는 값은 받은 기획안·게시 중인 공지·쿠폰 지급 건수뿐이고, 숫자는 저장소 값을 그대로 인용한다. 캠페인 시작·취소, 공지 게시, 쿠폰 지급을 하라는 말에는 "대화로는 못 한다"는 안내만 한다(모델을 부르지 않음). 대화로 일이 생기지 않으므로 `task_id`는 항상 `null`이다.
+- 받은 기획안 본문·메모와 대화 글은 LLM 입력의 `untrusted` 데이터 블록에만 넣는다. 고객 원문·구매자 번호는 싣지 않는다.
+- LLM은 `MARKETING_LLM_*`(없으면 `LLM_*`). 없으면 `llm_not_configured`(화면에서는 409 `LLM_NOT_CONFIGURED`)로 거절하고 답을 지어내지 않는다.
+- 저장: SQLite, 파일은 `MARKETING_CHAT_DB`(run_all.sh는 `.data/marketing_chat.db`). 비우면 메모리. 열 수 없으면 시작 때 실패한다. 다시 시작하면 `answering`에 멈춘 대화는 풀린다.
+- 상태: `talking` · `answering`(AI 답 만드는 중) · `closed`. 30분 동안 말이 없으면 목록·상세를 읽을 때 `closed`로 끝낸다(요약은 마지막 답의 한두 줄 요약, 없으면 첫 질문 일부).
+- 열람: 본인(`who` 같음)은 원문 전부, 남의 대화는 `messages: []`+요약+`restricted: true`, 남의 대화에 쓰기는 `forbidden`(403). **지금은 사람별 토큰이 없어 모든 요청자가 같은 "공용"이라 실제로는 막히지 않는다.** 사람별 토큰으로 나뉘면 서버에서 그대로 걸린다. 담당·관리자의 요약 열람은 화면이 맡고 서버는 인사 AI(#662)와 같이 따로 구분하지 않는다.
+
 ## 4. 의존
 `ax-contracts`, `ax-agent-template`. 다른 부서 폴더를 import하지 않는다.
 ## 5. 하지 않는 것
