@@ -31,6 +31,10 @@
   새로 만든다. 규칙 버전(`rules_version`) = 재료 거르기 설정(`[promo]`)·분류 목록·프롬프트의 해시라,
   규칙이 바뀌면 다음 요청에서 자동으로 다시 만든다
   만든 기획안은 모두 기록으로 남긴다(`backend/.data/promo_concepts.db`, 피드백 저장은 아직 없음)
+- id(`stable_concept_id`): concept_id = 회사 + 빌린 트렌드 + 정렬한 상품 id + 숏츠 형식의
+  해시라 같은 재료면 날·실행이 달라도 같다(브리프 `stable_insight_id`와 같은 방식). 한 번에 같은
+  재료의 초안이 또 나오면 그 초안만 제목까지 넣은 해시. 예전 무작위 id는 `legacy_concept_id`.
+  지금 인기 트렌드를 빌렸으면 `source_insight_id` = 브리프가 같은 주제에 주는 insight_id
 README "promo_concepts".
 """
 
@@ -478,9 +482,54 @@ def rules_version(config: PromoConfig) -> str:
         "prompt": _prompt(config, None),
         "retry_rule": RETRY_RULE,
         "min_kept": MIN_KEPT,
+        "concept_id": ID_VERSION,
     }
     text = json.dumps(parts, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+ID_VERSION = "content.v1"  # concept_id 규칙 (바뀌면 규칙 버전이 바뀌어 오늘 저장분을 다시 만든다)
+
+
+def _norm(text: str) -> str:
+    return "".join(text.split()).lower()
+
+
+def stable_concept_id(
+    tenant: str,
+    trend: str,
+    product_ids: Sequence[str],
+    shorts_format: str | None,
+    title: str | None = None,
+) -> str:
+    """내용 id: 회사 + 빌린 트렌드 + 정렬한 상품 id + 숏츠 형식 해시. 같은 재료면 늘 같다.
+
+    `title`은 한 번에 같은 재료의 초안이 둘 이상일 때 두 번째부터만 넣는다.
+    """
+    products = ",".join(sorted(dict.fromkeys(product_ids)))
+    key = f"{_norm(tenant)}|{_norm(trend)}|{products}|{_norm(shorts_format or '')}"
+    if title is not None:
+        key += f"|{_norm(title)}"
+    return "pc_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def assign_ids(concepts: Sequence[PromoConcept], tenant: str) -> None:
+    """무작위 id → legacy_concept_id, 내용 id → concept_id. 같은 재료가 또 나오면 제목까지 넣는다.
+
+    지금 인기 트렌드를 빌린 초안에는 브리프가 같은 주제에 주는 insight_id를 단다.
+    """
+    from data_agent.skills.trend_insight_brief import stable_insight_id
+
+    seen: set[str] = set()
+    for c in concepts:
+        parts = (tenant, c.borrowed_trend, [p.product_id for p in c.products], c.shorts_format)
+        cid = stable_concept_id(*parts)
+        if cid in seen:
+            cid = stable_concept_id(*parts, title=c.title)
+        seen.add(cid)
+        c.legacy_concept_id, c.concept_id = c.concept_id, cid
+        if c.trend_kind == "popular" and c.borrowed_trend:
+            c.source_insight_id = stable_insight_id(tenant, c.borrowed_trend)
 
 
 def _today(now: datetime) -> date:
@@ -791,7 +840,10 @@ async def _generate(
             dropped += more_dropped
             popular_reason = popular_reason or second.no_popular_reason.strip()
             retry_note = " 버린 이유를 붙여 한 번 더 물음."
+    from data_agent.skills.trend_insight_brief import tenant_of
+
     out.concepts = kept[: config.concepts]
+    assign_ids(out.concepts, tenant_of(env))
     out.dropped = dropped
     mark_reference(out.concepts, company_terms(shop.products, shop.categories))
     if not any(c.trend_kind == "popular" for c in out.concepts):
