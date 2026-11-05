@@ -1182,3 +1182,10 @@ button.spec-pid { cursor: pointer; color: var(--primary); font-weight: 600; }
 .home-readall { margin-left: auto; border: 0; background: none; color: var(--text-3); font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; }
 .home-readall:hover { color: var(--text-1, inherit); text-decoration: underline; }
 .home-item:not(.is-new):hover { background: var(--hover); }
+
+/* 개발이 돌려보낸 작업 (요청 상세 위, components/planning/projects.tsx ReturnedBox) */
+.returned-box { margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--warning); border-radius: 8px; background: color-mix(in srgb, var(--warning) 6%, transparent); }
+.returned-head { display: flex; align-items: center; gap: 8px; }
+.returned-why { margin: 6px 0 0; color: var(--text-2); font-size: 13px; }
+.returned-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
+.returned-acts .input { flex: 1; min-width: 220px; }

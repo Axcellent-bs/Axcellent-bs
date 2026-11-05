@@ -9,6 +9,7 @@ import { Tag } from '@/components/planning-common/parts'
 import { Ref, convoHref, isFollowUp, nextOf, prName, prSlug, reviewHref, reviewOf, toPath } from '@/components/planning-common/links'
 import { gather } from '@/components/planning/projects'
 import { releaseState } from '@/components/planning/specs'
+import { devDiscarded, pendingReturns } from '@/lib/returned'
 
 // ---------------------------------------------------------------- 필터
 // 들어온 경로를 짧은 말로 (시스템 이름은 화면에 내지 않는다)
@@ -134,8 +135,15 @@ export function pipeline(s: S, r: Request, rc?: ReleaseCheck): PipeRow {
     }
   }
 
-  // 사람이 중단한 요청: 지금 단계에서 멈춤 (맨 위로)
-  if (r.paused && !finished) {
+  // 개발이 "코드 변경이 아니다"로 돌려보냄 → 사람 확인 (요청 상세에서 마케팅·개발로 다시·닫기)
+  const sp = g.spec
+  if (sp && pendingReturns(s, sp.id).length && !finished) {
+    wait = { label: '개발이 돌려보냄', rank: 0 }
+    c2.warn = true; c2.meta = '개발이 돌려보냄'; c2.href = toPath(`projects/${r.id}`)
+  } else if (sp && devDiscarded(s, sp.id)) c2.meta = '개발에서 폐기함'
+
+  // 사람이 중단한 요청: 지금 단계에서 멈춤 (맨 위로). 개발에서 폐기했으면 기다릴 것이 없다
+  if (r.paused && !finished && !(sp && devDiscarded(s, sp.id))) {
     wait = { label: '사람이 중단', rank: -1 }
     const c = [c0, c1, c2, c3, c4][stage]
     if (c) { c.warn = true; c.meta = '중단됨' }
@@ -262,7 +270,8 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
                 ))}
               </ol>
               <div className="rq-next">
-                {!row.finished && (
+                {!row.finished && devDiscarded(s, gather(s, r).spec?.id) && <span className="rq-stop muted" title="개발에서 이 요청의 작업을 폐기했어요">개발에서 폐기함</span>}
+                {!row.finished && !devDiscarded(s, gather(s, r).spec?.id) && (
                   <button type="button" className="rq-stop" onClick={() => { d({ type: r.paused ? 'resumeRequest' : 'pauseRequest', request: r.id }); toast.show(`${r.id} ${r.paused ? '재개' : '중단'}`) }}>{r.paused ? '재개' : '중단'}</button>
                 )}
                 {draft && (r.from === 'hr' || r.from === 'data') && r.state === '접수' ? (
