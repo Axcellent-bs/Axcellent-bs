@@ -186,7 +186,13 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
   const latestCheck = (r: Request) => { const sp = gather(s, r).spec; return sp ? checks.find((c) => c.spec_id === sp.id) : undefined }
   const [open, setOpen] = useState<Set<string>>(() => new Set())
   const toggle = (id: string) => setOpen((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n })
-  const sorted = sortRows(all.filter(FILTERS.find((x) => x.id === f)!.match).map((r) => pipeline(s, r, latestCheck(r))))
+  // 개발에서 작업을 모두 폐기한 요청은 기본으로 숨긴다. 보기로 켜면 이 브라우저에 기억한다 (개발 작업 목록과 같은 토글)
+  const [showDropped, setShowDropped] = useState(() => { try { return localStorage.getItem('rq-show-dropped') === '1' } catch { return false } })
+  const toggleDropped = () => setShowDropped((v) => { try { localStorage.setItem('rq-show-dropped', v ? '0' : '1') } catch { /* 저장이 막혀도 이번 화면에서는 바뀐다 */ } return !v })
+  const isDropped = (r: Request) => devDiscarded(s, gather(s, r).spec?.id)
+  const droppedN = all.filter(isDropped).length
+  const shown = (r: Request) => showDropped || !isDropped(r)
+  const sorted = sortRows(all.filter(shown).filter(FILTERS.find((x) => x.id === f)!.match).map((r) => pipeline(s, r, latestCheck(r))))
   const rows = [...sorted.filter((x) => isFresh(x.r.id)), ...sorted.filter((x) => !isFresh(x.r.id))]
   // 같은 요청으로 연결만 한 것(REQ-15 등)은 원래 요청 줄을 가리킨다
   const target = s.requests.find((x) => x.id === item)
@@ -203,13 +209,18 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
     <div className="rq">
       <nav className="rq-filter" aria-label="요청 거르기">
         {FILTERS.map((x) => {
-          const n = s.requests.filter(x.match).length
+          const n = s.requests.filter(x.match).filter(shown).length
           return (
             <a key={x.id} href={x.id === 'all' ? toPath('requests') : toPath(`requests/${x.id}`)} className={x.id === f ? 'on' : undefined} aria-current={x.id === f ? 'page' : undefined}>
               {x.label}<span className="rq-n">{n}</span>
             </a>
           )
         })}
+        {droppedN > 0 && (
+          <button type="button" className={`rq-toggle${showDropped ? ' on' : ''}`} aria-pressed={showDropped} onClick={toggleDropped} title="개발에서 폐기한 요청을 목록에 보이기·숨기기">
+            {showDropped ? '폐기 숨기기' : '폐기 보기'}<span className="rq-n">{droppedN}</span>
+          </button>
+        )}
         {stuck > 0 && <span className="rq-stuck">멈춤 {stuck}</span>}
         <div className="seg-toggle rq-view" role="group" aria-label="보기">
           <button type="button" aria-pressed={view === 'list'} onClick={() => pickView('list')}>목록</button>
