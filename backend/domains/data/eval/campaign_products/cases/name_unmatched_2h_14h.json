@@ -1,0 +1,92 @@
+{
+ "id": "name_unmatched_2h_14h",
+ "kind": "unknown",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-10-14T14:00:00Z",
+  "window_to": "2026-10-14T16:00:00Z",
+  "products": [
+   "무지 노트",
+   "없는 상품"
+  ]
+ },
+ "spec": {
+  "id": "name_unmatched_2h_14h",
+  "window": {
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T16:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "none"
+  },
+  "product_boost": {
+   "product_id": "prd_0004",
+   "factor": 3.0
+  }
+ },
+ "expected": {
+  "products": {
+   "matched": [],
+   "unmatched": [
+    "무지 노트",
+    "없는 상품"
+   ],
+   "status": "unknown",
+   "unknown_reason": "no_match"
+  }
+ },
+ "counted": {
+  "actual": {
+   "orders": 0,
+   "units": 0,
+   "gross": 0
+  },
+  "past_days": {
+   "1": {
+    "orders": 0,
+    "units": 0,
+    "gross": 0
+   },
+   "2": {
+    "orders": 0,
+    "units": 0,
+    "gross": 0
+   },
+   "3": {
+    "orders": 0,
+    "units": 0,
+    "gross": 0
+   },
+   "4": {
+    "orders": 0,
+    "units": 0,
+    "gross": 0
+   },
+   "5": {
+    "orders": 0,
+    "units": 0,
+    "gross": 0
+   },
+   "6": {
+    "orders": 0,
+    "units": 0,
+    "gross": 0
+   },
+   "7": {
+    "orders": 0,
+    "units": 0,
+    "gross": 0
+   }
+  },
+  "orders_baseline": 0.0,
+  "orders_excess": 0.0,
+  "units_baseline": 0.0,
+  "units_excess": 0.0,
+  "gross_baseline": 0.0,
+  "gross_excess": 0.0
+ },
+ "memo": "일부만 같은 이름·없는 이름 → 추측하지 않고 둘 다 못 맞춤, 상품 기준 unknown"
+}
