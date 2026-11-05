@@ -584,6 +584,26 @@ def video_thumbnails(path: str | Path, video_ids: list[str]) -> dict[str, str]:
     return {vid: url for vid, url in rows if url}
 
 
+def latest_views(path: str | Path, video_ids: list[str]) -> dict[str, int]:
+    """영상 id → 마지막으로 본 조회수 (스냅샷, 읽기 전용). 조회수가 없으면 빠진다."""
+    if not video_ids or (str(path) != ":memory:" and not Path(path).is_file()):
+        return {}
+    conn = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True, timeout=5.0)
+    try:
+        marks = ",".join("?" * len(video_ids))
+        rows = conn.execute(
+            "SELECT video_id, view_count FROM snapshots"
+            f" WHERE video_id IN ({marks}) AND view_count IS NOT NULL"  # noqa: S608
+            " ORDER BY collected_at",
+            video_ids,
+        ).fetchall()
+    except sqlite3.DatabaseError:
+        return {}
+    finally:
+        conn.close()
+    return {vid: int(views) for vid, views in rows}  # 시각 순이라 마지막 값이 남는다
+
+
 @dataclass(frozen=True)
 class VideoDetail:
     channel_title: str | None

@@ -558,6 +558,42 @@ class BriefResult:
     evidence: Evidence
 
 
+async def label_evidence_videos(
+    out: TrendInsightBriefOutput,
+    video_info: Any,
+    llm: Any,
+    cache: Any,
+    context_id: str | None,
+    queries: list[str],
+) -> None:
+    """인사이트·기회 카드의 근거 영상에 제목·조회수와 영상 분류 결과(광고 재료 칸)를 채운다.
+
+    `video_info(ids)` = 영상 id → 저장된 제목·채널·조회수 (`evidence_videos.stored_info`).
+    영상 분류를 못 한 영상은 카드 주제의 분류 결과를 그대로 둔다. 실패해도 브리프는 준다.
+    """
+    from data_agent import evidence_videos
+
+    groups = [i.evidence.video_links for i in out.insights] + [
+        c.video_links for c in out.opportunities
+    ]
+    ids = [v.video_id for g in groups for v in g]
+    if not ids:
+        return
+    try:
+        filled = await evidence_videos.label(
+            groups, video_info(ids), llm, cache=cache, context_id=context_id
+        )
+    except Exception as error:  # 근거 영상 칸만 못 채움
+        queries.append(f"evidence videos failed ({type(error).__name__})")
+        return
+    queries.append(f"evidence videos={len(set(ids))} (video classify, stored titles)")
+    n = len(out.insights)
+    for i, links in zip(out.insights, filled[:n], strict=True):
+        i.evidence.video_links = links
+    for c, links in zip(out.opportunities, filled[n:], strict=True):
+        c.video_links = links
+
+
 def build_insights(
     picked: Sequence[Candidate],
     *,
@@ -872,6 +908,7 @@ async def make_brief(
     context_id: str | None = None,
     store: BriefStore | None = None,
     opportunities_fn: Any = None,
+    video_info: Any = None,
 ) -> BriefResult:
     """기존 skill 결과를 묶어 인사이트 3~7개 (하루 캐시). 상태를 바꾸지 않는다(브리프 기록만)."""
     from data_agent.skills.content_recommend import load_config as load_recommend
@@ -1024,6 +1061,8 @@ async def make_brief(
         else:
             out.opportunities_reason = "기회 가설 카드를 요청하지 않음"
         # 회사 연결: 상품도 도메인 키워드도 없는 인사이트는 참고용 (기획은 참고용을 뺀다)
+        if video_info is not None:  # 근거 숏츠: 제목·조회수와 영상 분류(실존 이름)로 광고 재료 칸
+            await label_evidence_videos(out, video_info, llm, category_cache, context_id, queries)
         mark_relevance(out.insights, terms)
         if not terms:
             out.limits.append(

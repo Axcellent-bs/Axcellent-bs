@@ -684,11 +684,17 @@ async def trend_insight_brief(request: AgentRequest) -> AgentResult:
     async def opportunities():  # noqa: ANN202
         return await _opportunities(request.meta.context_id, shorts_out, ages)
 
+    def video_info(ids: list[str]):  # noqa: ANN202
+        from data_agent.evidence_videos import stored_info
+
+        return stored_info(env, datetime.now(UTC), ids)
+
     result = await make_brief(
         data, llm, env=env, popular=popular_out, popular_reason=popular_why, rising=rising,
         age_fn=ages, promo=promo_out, catalog=catalog, aliases=cand_aliases(env),
         category_cache=get_category_cache(), shorts=shorts_out,
         context_id=request.meta.context_id, opportunities_fn=opportunities,
+        video_info=video_info,
     )  # fmt: skip
     return _result(
         request,
