@@ -153,7 +153,7 @@ def test_a_coupon_paid_after_closing_reissues_the_resolved_event(peers: Peers) -
 
 
 def test_a_refund_paid_after_closing_reissues_the_resolved_event(peers: Peers) -> None:
-    """환불이 클레임 서비스에서 끝났을 때 문의가 이미 닫혀 있으면(다른 프로세스) 금액을 채워 다시 보낸다."""
+    """문의가 이미 닫힌 뒤 클레임 서비스에서 환불이 끝나면 금액을 채워 한 번 더 보낸다."""
     peers.inquiry.status = "resolved"
     created = call(
         "create_claim",
