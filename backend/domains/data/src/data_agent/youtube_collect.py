@@ -45,6 +45,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import IO
 
+from data_agent import collector_lock
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.youtube import VideoStat, YouTubeConnector
 from data_agent.stage_timing import install_sqlite_timer
@@ -366,23 +367,11 @@ def lock_path(env: Mapping[str, str]) -> Path:
 
 
 def acquire_lock(path: Path) -> IO[str] | None:
-    """다른 수집기가 잡고 있으면 None. 잡은 파일은 프로세스가 끝나면 OS가 푼다."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    handle = path.open("a+", encoding="utf-8")
-    try:
-        if os.name == "nt":
-            import msvcrt
+    """다른 수집기가 잡고 있으면 None. pid를 적고, 끝난 pid가 남긴 잠금은 지우고 잡는다.
 
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        handle.close()
-        return None
-    return handle
+    잡은 파일은 프로세스가 끝나면 OS가 푼다 (`collector_lock`).
+    """
+    return collector_lock.acquire(path, "youtube", lambda line: print(line, flush=True))
 
 
 def main(argv: list[str] | None = None) -> int:

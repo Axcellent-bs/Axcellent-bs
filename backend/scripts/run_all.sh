@@ -351,6 +351,8 @@ if echo "$RUN_APPS" | awk '$1 == "data" {found=1} END {exit !found}'; then
   # 잠금(backend/.data/youtube_collect.lock)을 못 잡아 바로 끝난다 → 두 개가 같이 돌지 않는다
   "$PY" -m data_agent.youtube_collect --every 3600 > "$LOGS/youtube-collect.log" 2>&1 &
   echo $! > "$LOGS/youtube-collect.pid"
+  # 수집기 두 개를 켰다는 줄 (잠금을 못 잡아 끝났는지는 각 로그 첫 줄, 상태는 data_sources 출처 현황)
+  echo "수집기: trending_collect·youtube_collect 1시간마다 (로그 $LOGS/trending-collect.log, $LOGS/youtube-collect.log)"
 fi
 
 sleep 8

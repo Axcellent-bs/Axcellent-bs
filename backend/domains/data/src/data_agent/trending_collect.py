@@ -7,6 +7,8 @@
 Google Trends 공개 RSS(`connectors/google_trends.py`)를 한 번 읽어 `trending_store`에 저장한다.
 지역은 회사 `trends.toml` `[trending] geo`(기본 KR, `DATA_TREND_CONFIG` → 없으면
 `config/tenants/<AX_TENANT, 기본 catbooks>/trends.toml`). 키가 필요 없다.
+같은 DB에 수집기가 둘 돌지 않게 DB 옆 `trending_collect.lock`을 잡는다(잡혀 있으면 바로 끝냄,
+끝난 pid가 남긴 잠금은 지우고 잡음, `collector_lock`).
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from data_agent import collector_lock
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.google_trends import GoogleTrendsConnector
 from data_agent.trending_store import DB_ENV, DEFAULT_DB, TrendingStore
@@ -112,10 +115,23 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.every is not None and args.every < MIN_EVERY_SECONDS:
         parser.error(f"--every 는 {MIN_EVERY_SECONDS}초 이상")
+    env = dict(os.environ)
+    path = lock_path(env)
+    lock = collector_lock.acquire(path, "trending", lambda line: print(line, flush=True))
+    if lock is None:
+        print(f"[trending] 이미 다른 수집기가 돌고 있음 (잠금 {path}): 끝냄", flush=True)
+        return 0
     try:
-        return asyncio.run(run(args.every, dict(os.environ)))
+        return asyncio.run(run(args.every, env))
     except KeyboardInterrupt:
         return 0
+    finally:
+        lock.close()
+
+
+def lock_path(env: Mapping[str, str]) -> Path:
+    """중복 실행 잠금 파일 (인기 검색어 DB 옆). youtube_collect와 같은 방식(`collector_lock`)."""
+    return Path(env.get(DB_ENV) or DEFAULT_DB).with_name("trending_collect.lock")
 
 
 if __name__ == "__main__":
