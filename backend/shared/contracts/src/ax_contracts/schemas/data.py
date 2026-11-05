@@ -1753,9 +1753,12 @@ class TrendInsight(AxModel):
     # 아래는 예전 응답은 없다. 회사 관련 인사이트 칸 (시즌 키워드·상품 핵심어 중 오른 것, 별도 확보)
     company_related: bool = False
     company_reason: str | None = None  # 왜 회사 관련으로 골랐는지 (코드 문장)
-    # 아래는 예전 응답은 없다. 날짜 없이 바뀐 insight_id 이전의 id(날짜 + 주제)와 이 인사이트의 숫자
+    # 아래는 예전 응답은 없다. 바뀌기 바로 전 방식의 id와 이 인사이트의 숫자.
+    # v3 첫 응답은 날짜 + 주제 id. insight_id에서 카테고리를 뺀 뒤에는 테넌트 + 주제 + 카테고리 id
     legacy_insight_id: str | None = None
     fact_ids: list[str] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. 바뀌기 전 id 전부 (최근 것부터: 카테고리 포함 id, 날짜 + 주제 id)
+    legacy_insight_ids: list[str] = Field(default_factory=list)
     # 아래는 예전 응답은 없다. 연령대별 평소 대비 배수 전체 (trend_age 결과 그대로, 설정 순서).
     # 연령대를 보지 않은 주제는 빈 목록이고 이유는 target_age_reason
     age_bands: list[AgeBandTrend] = Field(default_factory=list)
