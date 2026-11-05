@@ -1,7 +1,7 @@
 # agents/data
 담당: 재현 · 포트: 8106
 ## 1. 역할
-쇼핑몰 데이터와 외부 트렌드(네이버 검색어 트렌드·YouTube 스냅샷)를 **읽어서** 숫자를 계산하고 돌려준다. skill 14개는 모두 읽기 전용(`grade: read`, `services/data/agent-card.json`)이다.
+쇼핑몰 데이터와 외부 트렌드(네이버 검색어 트렌드·YouTube 스냅샷)를 **읽어서** 숫자를 계산하고 돌려준다. skill 23개는 모두 읽기 전용(`grade: read`, `services/data/agent-card.json`)이다.
 
 | skill | 무엇 | 읽는 것 |
 | --- | --- | --- |
