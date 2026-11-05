@@ -24,7 +24,7 @@
 | `domain_subtopics` | 하위 주제 넓히기: 씨앗 키워드 → YouTube 한국 숏츠 → 함께 나온 말(코드) → 프로필 하위 주제 축으로 분류(LLM) | YouTube search.list(videoDuration=short) 씨앗마다 1번, 일주일 캐시 `backend/.data/subtopics.db`, 하루 상한 `[subtopics] daily_searches` 5번(수집 계획 YouTube 할당량에 합침) |
 | `trend_age` | 연령대별 상승: 주제마다 연령대(설정)별로 따로 조회해 "그 연령대에서 평소 대비 몇 배"(trend_scan과 같은 판정 함수), 가장 크게 오른 연령대 | 네이버 검색어 트렌드(`ages` 조건, 주제 하나 = 연령대 수만큼, 하루 상한 200번·3일 캐시, 브리프·카드 우선 120번을 빼고 다른 skill은 80번까지, 네이버 전체 상한에서 300번은 다른 skill용으로 남김, 호출자별 사용량은 응답 `calls_by_caller`·`limits`), trend_popular(커넥터 없이), 오늘 판정 기록, 기획안 시즌 확인·카탈로그. LLM 없음. 설정: `trends.toml` `[age]` |
 | `promo_concepts` | 광고·홍보 숏츠 **예시 아이디어(참고용)** 3~5개(확정 기획은 기획팀 몫): 타깃 연령대와 근거 숫자(trend_age, 없으면 미정 + 이유)· 제목·컨셉·길이(15~60초)·콘티(길이에 맞는 컷 수)·빌려 온 숏츠 형식과 그 평균 조회수·빌려 온 트렌드(없어도 됨)·맞는 이유·등장 상품·주의사항, 코드 경고(상표·초상권 확인 필요), 버린 초안과 이유, 쓴 재료·시즌 확인 키워드 | shop-api 상품·카테고리, shorts_stats(형식별 평균 조회수), trend_popular(게임·연예·스포츠·K-pop·음악·IT만), 카탈로그 카테고리·상품 핵심어 월별 흐름(trend_history, 키워드마다 네이버 1번·상한 20·하루 캐시), LLM(초안 1번). 하루 캐시·기록 `backend/.data/promo_concepts.db`(캐시 키 = 날짜 + 규칙 버전: 재료 거르기 설정 `[promo]`·분류 목록·프롬프트의 해시. 규칙이 바뀌면 다음 요청에서 다시 만든다). 설정: `trends.toml` `[promo]` |
-| `shorts_stats` | YouTube 숏츠 통계(카테고리별·형식별): 숏츠 수·평균 조회수·평균 시간당 조회 증가·조회수 상위 3개, 표본 부족은 unknown | YouTube 스냅샷 DB(길이 `video_details`), 숏츠 검색(`search.list`, 하루 1번·상한 8번, `backend/.data/shorts.db`), LLM(카테고리·형식 분류, 묶어서·저장). 설정: `trends.toml` `[shorts]` |
+| `shorts_stats` | YouTube 숏츠 통계(카테고리별·형식별): 숏츠 수·평균 조회수·평균 시간당 조회 증가·조회수 상위 3개, 표본 부족은 unknown. 카테고리마다 화면 카드 숏츠 10개(분류·구독자 대비·광고 재료 칸) | YouTube 스냅샷 DB(길이 `video_details`), 숏츠 검색(`search.list`, 하루 1번·상한 8번, `backend/.data/shorts.db`), LLM(카테고리·형식 분류, 묶어서·저장). 설정: `trends.toml` `[shorts]` |
 | `content_recommend` | 지금 만들 만한 영상 소재(급상승만, 최대 N개): 순위·점수 근거(z·배수·두 소스)·출처·주제 분류·묶음(회사 상품과 연결된 소재·일반 화제)·연결할 실제 상품(근거)·회사 관련성(상품 연결로, 표시만)·밈 형식·영상 아이디어 1~2문장·형식(숏폼·롱폼)·fallback. 추천 안 함 분류(회사 설정)는 참고용 + 이유로 따로. 콘텐츠 루프 2단계 | trend_scan(회사 기본 키워드 그룹)·trend_candidates(후보 전체)와 같은 네이버 요청(하루 캐시 같이 씀), 회사 상품 목록(shop-api `GET /api/shop/products`·`/categories`), LLM(아이디어 문장·밈 형식·주제 분류만), 임베딩(설정이 있을 때만). 설정: 회사 폴더 `trends.toml` `[recommend]` |
 | `answer_planning_question` | 기획이 되묻는 근거 질문의 답(answered·needs_human·unknown). 기획만 부른다 | data가 보낸 요청의 기록(`planning_questions.py`, 프로세스 안). 아직 요청을 보내는 코드가 없어 지금은 늘 unknown. 사람 답은 `human_answer_request`로 planning `receive_planning_answer`에 보낸다 |
 | `campaign_effect` | 캠페인 기간 주문 방향(늘었음·같음·줄었음)·증분(실제 − 지난 7일 같은 시간대 평균), 캠페인 쿠폰 조회 시점 누적 사용률. 매출은 매출 지표가 생기면 같은 방법(지금은 확인할 수 없음) | shop-api `GET /api/shop/metric-series`(`order_count`), `GET /api/shop/coupons?campaign_id=` |
@@ -341,7 +341,7 @@ DATA_EXTERNAL_MODE=replay bash scripts/run_all.sh
 | `trend_candidates` | 후보마다 1번 + 별칭 수 | 0 |
 | `trend_age` | 주제 × 연령대(기본 10 × 5 = 50), 하루 상한 200(우선 아닌 skill은 80) | 0 |
 | `trend_popular` (화면 경로) | 0 | 제목 videos.list ≤ 2번, 구독자 channels.list ≤ 2번, 보충 검색 ≤ 6번(100단위씩) |
-| `shorts_stats` | 0 | 검색 하루 ≤ 8번(100단위씩, 저장 재사용), 다시 보기 videos.list 50개마다 1단위 |
+| `shorts_stats` | 0 | 검색 하루 ≤ 8번(100단위씩, 저장 재사용), 다시 보기 videos.list 50개마다 1단위, 화면 카드 구독자 channels.list 하루 ≤ 2번(1단위씩) |
 | `promo_concepts` | 시즌 키워드 ≤ 20번(하루 캐시) + 연령대(예시 트렌드 수 × 5) | shorts_stats와 같다 |
 | `trend_insight_brief` | trend_age(후보 × 5, 상한 공유) | trend_popular·shorts_stats와 같다 |
 
@@ -974,6 +974,12 @@ YouTube 숏츠를 카테고리별·형식별로 센다. 숫자는 코드, 분류
 4. 계산(코드): 카테고리별·형식별 숏츠 수, 평균 조회수, 평균 시간당 조회 증가(잰 수 `velocity_videos`), 조회수 상위 3개(제목·채널·조회수). **표본이 `min_sample`(5)개 미만이면 unknown + "표본 부족"**
 
 5. **시간당 조회 증가**: 인기 숏츠는 최근 두 인기 스냅샷의 조회수 차이로 잰다. 검색 숏츠는 검색할 때 본 조회수를 `shorts.db` `views` 표에 남기고, **다음 실행 때 `videos.list`로 다시 조회**(영상 50개마다 1단위, 상한 `recheck_videos` 200개, 마지막으로 본 지 `recheck_min_hours` 1시간이 지난 것만, 덜 본 것부터)해 **두 번 본 영상만** 계산한다. 한 번만 본 숏츠는 unknown이고 묶음마다 `velocity_pending`·"다음 조회 대기 N개"로 센다. 다시 조회가 실패하면(할당량 초과 등) 그 부분만 `recheck_reason`에 남기고 다음 조회 대기로 둔다
+
+6. **화면 카드**(`by_category[].videos`, 트렌드 1단계 숏츠 그리드): 카테고리마다 조회수 순 `screen_videos`(10)개. **이미 모은 숏츠 안에서만** 고르고 더 검색하지 않는다. 표본 부족(unknown) 칸도 준다. 영상마다
+   - `category`: 위 3의 분류 저장분
+   - `ad_usable`·`caution_types`·`caution_reason`: 그 영상 분류 결과(분류·실존 이름·사람)로 `caution.judge` (인사이트 근거 영상과 같은 규칙, 음원 = K-pop·음악)
+   - `channel_subscribers`·`views_per_subscriber`(조회 ÷ 구독자, 소수 둘째 자리): 카드 영상들 채널만 `channels.list`(채널 50개 = 1단위). 구독자 수는 YouTube 스냅샷 DB `channel_stats`에 저장해 하루 재사용(trend_popular 근거와 같은 저장분), 하루 호출 상한 `channel_calls`(2번, `popular_videos.db` `api_calls`에 `shorts_channels`로 따로 센다). 채널 id는 검색·다시 조회 응답에 있던 값(`shorts.db` `video_channels`)과 인기 스냅샷 값. 숨김·상한·채널 모름이면 None + `subscriber_reason`
+   - 통계 칸(수·평균·중앙값·`top`)은 화면 카드와 무관하고 그대로다(전·후 비교 테스트 `tests/test_shorts_screen_videos.py`)
 
 - **한계:** 인기 영상 상위 200개 안(과 조회수 순 검색 결과)에서의 비교라 **이미 뜬 영상끼리 비교**한다(응답 `limitation`에도). 검색 숏츠의 속도는 두 번 본 사이 구간의 평균이라, 다시 조회하는 간격에 따라 값이 달라진다. 형식 분류 정확도는 평가셋이 없어 재지 않는다
 
