@@ -484,11 +484,12 @@ class ChatThread(DomainModel):
     """개발 화면에서 개발팀원이 개발 AI와 나눈 대화 하나. 계획이 서면 코딩 작업을 띄운다.
 
     status: talking(대화 중) · started(작업 띄움, `task_id`) · blocked(연결이 없어 못 띄움) ·
-    waiting(충돌하는 요청 `waiting_for`가 끝나면 마지막 계획으로 작업을 띄움)."""
+    waiting(충돌하는 요청 `waiting_for`가 끝나면 마지막 계획으로 작업을 띄움) ·
+    answering(사람 말을 적고 답을 만드는 중) · closed(끝낸 대화, 30분 말이 없어도 끝남)."""
 
     id: str  # chat-1 …
     title: str
-    status: Literal["talking", "started", "blocked", "waiting"] = "talking"
+    status: Literal["talking", "started", "blocked", "waiting", "answering", "closed"] = "talking"
     messages: list[ChatMessage] = Field(default_factory=list)
     task_id: str | None = None
     connection: str | None = None

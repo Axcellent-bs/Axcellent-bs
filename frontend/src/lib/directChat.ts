@@ -1,4 +1,4 @@
-// AI 대화방 직접 대화 중 dashboard-api 계열 창구(마케팅 등). 개발 AI(/api/planning/dev-chat)는 planning.ts의 chatApi를 쓴다.
+// AI 대화방 직접 대화 중 dashboard-api 계열 창구(개발·기획·마케팅·고객지원). 개발 화면의 대화 패널은 planning.ts의 chatApi(dev 서비스 /dev-chat)를 쓴다.
 // 응답: `{data, meta}` 봉투, 실패는 `{error:{code,message}}`. 쓰기(POST)에는 사람 토큰을 붙인다. 지어낸 값은 없다.
 import { SAFETY_HUMAN_TOKEN } from "@/lib/env";
 import type { ChatThread as BaseThread } from "@/lib/planningData";
