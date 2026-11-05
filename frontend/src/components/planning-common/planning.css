@@ -1189,3 +1189,9 @@ button.spec-pid { cursor: pointer; color: var(--primary); font-weight: 600; }
 .returned-why { margin: 6px 0 0; color: var(--text-2); font-size: 13px; }
 .returned-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
 .returned-acts .input { flex: 1; min-width: 220px; }
+
+/* 개발에서 작업을 모두 폐기한 요청: 진행 막대를 회색으로 (requests.tsx rq-item.dropped) */
+.rq-item.dropped .rq-c::before, .rq-item.dropped .rq-c.past::before { background: var(--border-strong); }
+.rq-item.dropped .rq-dot, .rq-item.dropped .rq-c.past .rq-dot, .rq-item.dropped .rq-c.now .rq-dot,
+.rq-item.dropped .rq-c.now.warn .rq-dot, .rq-item.dropped .rq-c.end .rq-dot { background: var(--border-strong); border-color: var(--border-strong); box-shadow: none; }
+.rq-item.dropped .rq-v, .rq-item.dropped .rq-m, .rq-item.dropped .rq-c.now .rq-v, .rq-item.dropped .rq-c.warn .rq-m { color: var(--text-3); }

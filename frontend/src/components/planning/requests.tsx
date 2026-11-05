@@ -230,20 +230,21 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
         {rows.map((row) => {
           const { r } = row
           const next = nextOf(s, r)
-          const href = row.finished || next.href.startsWith(toPath('requests')) ? toPath(`projects/${r.id}`) : next.href
+          const dropped = devDiscarded(s, gather(s, r).spec?.id) // 개발에서 작업을 모두 폐기함: 회색 막대·다음 동작 없음
+          const href = row.finished || dropped || next.href.startsWith(toPath('requests')) ? toPath(`projects/${r.id}`) : next.href
           const draft = !row.finished && (r.state === '접수' || (r.state === '기획 중' && !row.cells[1].href))
           const isOpen = open.has(r.id)
           const onRow = (e: MouseEvent) => { if (!inner(e.target) && !window.getSelection()?.toString()) toggle(r.id) }
           const onKey = (e: KeyboardEvent) => { if ((e.key === 'Enter' || e.key === ' ') && !inner(e.target)) { e.preventDefault(); toggle(r.id) } }
           return (
             <li key={r.id} id={`req-${r.id}`} role="button" tabIndex={0} aria-expanded={isOpen} onClick={onRow} onKeyDown={onKey}
-              className={`rq-item${isOpen ? ' open' : ''}${row.finished ? ' fin' : ''}${focus === r.id ? ' hl' : ''}${isFresh(r.id) ? ' fresh' : ''}`}>
+              className={`rq-item${isOpen ? ' open' : ''}${row.finished ? ' fin' : ''}${dropped ? ' dropped' : ''}${focus === r.id ? ' hl' : ''}${isFresh(r.id) ? ' fresh' : ''}`}>
               <div className="rq-title">
                 <span className={`rq-dept d-${r.from}`}>{DEPT_NAME[r.from]}</span>
                 <a href={toPath(`projects/${r.id}`)} className="rq-name plain-link">{r.title}</a>
                 <span className="rq-meta">
                   <span className="mono">{r.id}</span>
-                  {r.paused && <Tag tone="amber">중단됨</Tag>}
+                  {r.paused && !dropped && <Tag tone="amber">중단됨</Tag>}
                   {isFollowUp(r) && <Tag tone="amber">후속</Tag>}
                   {row.dups.map((x) => (
                     <span key={x.id} className="rq-dup">
@@ -270,8 +271,8 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
                 ))}
               </ol>
               <div className="rq-next">
-                {!row.finished && devDiscarded(s, gather(s, r).spec?.id) && <span className="rq-stop muted" title="개발에서 이 요청의 작업을 폐기했어요">개발에서 폐기함</span>}
-                {!row.finished && !devDiscarded(s, gather(s, r).spec?.id) && (
+                {!row.finished && dropped && <span className="rq-stop muted" title="개발에서 이 요청의 작업을 폐기했어요">개발에서 폐기함</span>}
+                {!row.finished && !dropped && (
                   <button type="button" className="rq-stop" onClick={() => { d({ type: r.paused ? 'resumeRequest' : 'pauseRequest', request: r.id }); toast.show(`${r.id} ${r.paused ? '재개' : '중단'}`) }}>{r.paused ? '재개' : '중단'}</button>
                 )}
                 {draft && (r.from === 'hr' || r.from === 'data') && r.state === '접수' ? (
@@ -279,7 +280,7 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
                 ) : draft ? (
                   <Button size="small" variant="primary" onClick={() => { d({ type: 'writeSpec', request: r.id }); toast.show(`${r.id} 기획서 초안`) }}>기획서 초안</Button>
                 ) : (
-                  <a href={href} className={row.finished ? 'rq-go muted' : 'rq-go'}>{(row.finished ? '프로젝트' : next.label).replace(/\s*\(.*\)$/, '')} ›</a>
+                  <a href={href} className={row.finished || dropped ? 'rq-go muted' : 'rq-go'}>{(row.finished || dropped ? '프로젝트' : next.label).replace(/\s*\(.*\)$/, '')} ›</a>
                 )}
               </div>
             </li>
