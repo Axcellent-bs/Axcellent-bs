@@ -770,6 +770,7 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 ### 트렌드 감지 탭 속도 (미리 계산·저장)
 
 - **미리 계산**: 수집기(`youtube_collect`)가 새 스냅샷을 저장한 직후 `trend_precompute`가 급상승 판정(`trend_scan`: 판정판·네이버·설명 문장 캐시만 채움)·YouTube 후보(`trend_candidates`)·지금 인기(`trend_popular`)·빨리 크는 영상(`youtube_velocity`)·숏츠 통계(`shorts_stats`)를 화면과 같은 입력으로 계산해 `DATA_TREND_RESPONSES_DB`(run_all.sh: `backend/.data/trend_responses.db`)에 넣는다. 화면 요청은 저장된 결과를 읽기만 한다. 저장된 것이 없을 때만(첫 실행·수집기 꺼짐) 지금 계산하고 넣는다. SQLite라 서버를 다시 켜도 남는다(환경변수가 없으면 메모리, 테스트)
+- **YouTube 할당량 장부 하나**(`youtube_quota`): 모든 YouTube 호출이 커넥터에서 같은 장부(`DATA_YOUTUBE_QUOTA_DB`, run_all.sh: `backend/.data/youtube_quota.db`)에 단위를 적는다(수집기·숏츠 검색·하위 주제 검색·지금 인기 보충·영상 탐색, 부른 곳별). 하루 전체 상한 `DATA_YOUTUBE_DAILY_UNITS`(기본 8,000단위)를 넘으면 검색(100단위)을 부르지 않고 `QUOTA_EXCEEDED`로 그 실행의 남은 검색을 멈춘다. 1단위 호출은 계속한다. 출처 현황 `youtube_usage`에 오늘 사용량/상한·부른 곳별. 한국 날짜로 센다(공식 할당량은 태평양 시간 자정에 채워짐)
 - **키** = skill + 요청 + 데이터 도장 + 규칙 버전. 도장: 마지막 YouTube·인기 검색어 스냅샷 시각, 두 스냅샷이 "오래됨" 기준을 넘었는지, 숏츠 형식·주제 분류 저장분, 숏츠 다시 조회·오늘 검색 저장분, 오늘 판정판 내용, 한국 날짜, 설정 파일 내용, LLM 설정·YouTube 키가 있는지(값은 안 봄). 규칙 버전: `RULES_VERSION` + data_agent 코드 해시(코드가 바뀌면 예전 결과를 안 씀). 같은 키면 처음 계산한 응답 그대로(올린 뒤 지난 시간처럼 지금 시각으로 세는 칸도 처음 값)
 - 수집기와 서버의 환경변수가 다르면(예: 수집기를 손으로 켜 LLM 설정이 없음) 키가 달라 서버가 첫 요청에 계산한다. run_all.sh가 둘을 같은 환경으로 켠다
 - 판정판(`today_board`)은 다른 프로세스가 파일에 쓰면(`PRAGMA data_version`) 다시 읽는다. 수집기가 남긴 판정을 서버가 바로 보고 같은 키가 된다

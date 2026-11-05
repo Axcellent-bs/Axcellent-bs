@@ -31,6 +31,7 @@ class Timing:
         self.seconds: dict[str, float] = dict.fromkeys(STAGES, 0.0)
         self.cache: str | None = None
         self.started = time.perf_counter()
+        self.name: str | None = None  # 기록 이름 (YouTube 장부의 부른 곳)
 
     def line(self, name: str) -> str:
         total = time.perf_counter() - self.started
@@ -64,10 +65,17 @@ def note_cache(result: str) -> None:
         current.cache = result
 
 
+def current_name() -> str | None:
+    """지금 단계 기록 중인 이름 (skill 이름, 미리 계산이면 `skill@precompute1`). 없으면 None."""
+    current = _CURRENT.get()
+    return current.name if current is not None else None
+
+
 @contextmanager
 def recording(name: str, emit: Callable[[str], None] | None = None) -> Iterator[Timing]:
     """이 블록 동안 단계 시간을 모으고 끝나면 한 줄 남긴다."""
     timing = Timing()
+    timing.name = name
     token = _CURRENT.set(timing)
     try:
         yield timing

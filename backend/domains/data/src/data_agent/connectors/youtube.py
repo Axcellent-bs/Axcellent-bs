@@ -30,6 +30,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from data_agent import youtube_quota
 from data_agent.connectors import ConnectorUnavailable, replay
 from data_agent.stage_timing import stage
 
@@ -229,9 +230,11 @@ class YouTubeConnector:
     """
 
     def __init__(
-        self, env: Mapping[str, str] | None = None, *, client: httpx.AsyncClient | None = None
+        self, env: Mapping[str, str] | None = None, *, client: httpx.AsyncClient | None = None,
+        caller: str | None = None,
     ) -> None:
         env = os.environ if env is None else env
+        self.caller = caller  # 할당량 장부의 부른 곳 (단계 기록 중인 skill 이름이 먼저)
         self.url = (env.get(URL_ENV) or DEFAULT_URL).rstrip("/")
         self._key = env.get(KEY_ENV) or ""
         self._client = client
@@ -456,6 +459,16 @@ class YouTubeConnector:
             raise ConnectorUnavailable(
                 "UNAUTHORIZED", f"{KEY_ENV}가 없어 YouTube Data API를 부를 수 없다"
             )
+        # 하나의 장부(youtube_quota): 하루 전체 상한을 넘으면 검색을 부르지 않는다
+        ledger = youtube_quota.LEDGER
+        if resource == "search" and not ledger.can_search(self._env):
+            raise ConnectorUnavailable(
+                "QUOTA_EXCEEDED",
+                f"YouTube 하루 상한에 닿아 검색하지 않음 (오늘 {ledger.units():,}/"
+                f"{youtube_quota.cap(self._env):,}단위, {youtube_quota.CAP_ENV})",
+            )
+        ledger.add(youtube_quota.current_caller(self.caller), COST[resource],
+                   search=resource == "search")  # fmt: skip
         self.quota_used += COST[resource]
         client = self._client or _client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
         try:
