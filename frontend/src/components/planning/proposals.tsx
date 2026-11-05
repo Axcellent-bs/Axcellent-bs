@@ -133,6 +133,7 @@ function Facts({ facts }: { facts: ProposalFact[] }) {
 // 성과 근거 구분 (백엔드 proposals.py EFFECT_*). 같은 주문이 겹칠 수 있어 더하지 않고 나눠 보여 준다
 const EFFECT_GROUPS: { source: string; label: string }[] = [
   { source: 'campaign_effect · 상품 기준', label: '상품 기준' },
+  { source: 'campaign_effect · 유입 기준', label: '유입 기준 · 캠페인 링크' },
   { source: 'campaign_effect · 쿠폰 귀속', label: '쿠폰 귀속' },
   { source: 'campaign_effect · 가게 전체', label: '가게 전체 · 참고' },
 ]
