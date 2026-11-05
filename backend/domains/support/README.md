@@ -18,7 +18,7 @@
 | `reveal_original` | A | dashboard-api | 욕설로 가린 고객 메시지의 원문 열기. 연 사람을 내력에 남긴다 |
 | `preview_data_purge` | read | dashboard-api | 개인정보 삭제 미리보기(고객 요청·3년 만료). 지워질 것과 보존 의무로 남을 것(`retained_until`) |
 | `purge_customer_data` | C | dashboard-api | 고객 요청 삭제: 삭제를 요청한 문의의 구매자 문의 원문을 `[삭제됨]`으로. `approve_data_deletion`으로 늘 사람이 승인 |
-| `purge_expired_inquiries` | A | dashboard-api | 받은 지 3년이 지난 문의 원문을 `[삭제됨]`으로(상태·클레임 무관). 대시보드가 하루 한 번 부른다 |
+| `purge_expired_inquiries` | A | dashboard-api | 받은 지 3년이 지난 문의 원문을 `[삭제됨]`으로(클레임이 이어진 문의는 클레임 기준 5년까지 남김). 기본 dry-run, 사람이 켜야 집행. 대시보드가 하루 한 번 부른다 |
 | `purge_expired_claims` | A | dashboard-api | 보유 일수(기본 5년, 팀 기준)가 지난 클레임의 이름·메모·내력 글을 `[삭제됨]`으로. 기본 dry-run, 사람이 켜야 집행 |
 | `support_chat_send` | A | dashboard-api | 사람이 고객지원 AI에게 말 걸기(직접 대화, 조회·설명만). 말을 저장해 곧바로 돌려주고(`answering`) 답은 뒤에서 덧붙인다 |
 | `support_chat_close` | A | dashboard-api | 대화 끝내기 + 한두 줄 요약 저장 (본인·담당·관리자) |
@@ -180,9 +180,9 @@ ax-contracts, ax-agent-template
 
 개인정보를 **3년을 넘겨 들고 있지 않게** 하고, 고객이 요청하면 지운다. 행은 지우지 않고 원문 필드를 `[삭제됨]`으로 바꾼다(개인정보 감사 기록이 문의 ID로 묶여 있다). 건마다 감사 기록 `retention_purge`(기준·건수·실행자 역할·시각, 문의 내용 없음)를 남기고, 지운 문의는 `list_inquiries`에서 뺀다.
 
-- **3년 보유기간** (`purge_expired_inquiries`, A): 문의를 받은 날(가장 이른 메시지 시각)로부터 3년이 지난 문의의 원문을 지운다. 열린 문의·클레임이 이어진 문의도 예외가 없다. dashboard-api가 서버가 켜진 뒤 1분 뒤부터 6시간마다 하루 키(`retention-expire:<날짜>`)로 부른다(`DASHBOARD_RETENTION_SWEEP=off`로 끈다). 기준 `retention_3y`, 실행자 역할 `system`.
+- **3년 보유기간** (`purge_expired_inquiries`, A): 문의를 받은 날(가장 이른 메시지 시각)로부터 3년이 지난 문의의 원문을 지운다. 열린 문의도 지운다. **팀 방식대로 기본은 dry-run**이라 건수만 알리고, 사람이 `SUPPORT_INQUIRY_RETENTION_APPLY=1`로 켜야 집행한다(`1`만 켠다). **클레임이 이어진 문의는 클레임 기록의 보유기간(5년, `SUPPORT_CLAIM_RETENTION_DAYS`)까지 남기고** `retained_until`만 알린다. 클레임 연결을 읽지 못하면 지우지 않는다(`claims_unavailable`). dashboard-api가 서버가 켜진 뒤 1분 뒤부터 6시간마다 하루 키(`retention-expire:<날짜>`)로 부른다(`DASHBOARD_RETENTION_SWEEP=off`로 끈다). 기준 `retention_3y`, 실행자 역할 `system`.
 - **고객 요청 삭제** (`purge_customer_data`, 안전 관문 `approve_data_deletion` C): 삭제를 요청한 문의의 구매자(`user_id`) 문의를 지운다. 처음 부르면 보류(`not_executed_held`, 화면은 409 NOT_EXECUTED)로 돌아오고, 사람이 보류 큐에서 승인한 뒤 같은 키(`customer-deletion:<문의번호>`)로 다시 부르면 집행한다. 기한 안에 결정이 없으면 자동 거절돼 지우지 않는다(#194). 기준 `customer_request`, 실행자 역할 `operator`.
-- **보존 의무로 남기는 것**: 처리 중인 문의(열림·이관)와 클레임이 이어진 문의는 지우지 않고, 지우는 날(`retained_until` = 받은 날로부터 3년)을 알린다. 그날 3년 보유기간 삭제가 지운다. 클레임이 다른 프로세스(클레임 서비스)에 있으면 거기서 읽어 확인하고, 읽지 못하면 지우지 않는다(`claims_unavailable`).
+- **보존 의무로 남기는 것**: 처리 중(열림·이관) 문의와 클레임이 이어진 문의는 지우지 않고 지우는 날 `retained_until`을 알린다(클레임이 이어졌으면 받은 날 + 클레임 보유 일수 5년, 아니면 3년). 그날 보유기간 삭제가 지운다.
 - 지울 것이 없으면 사람에게 승인을 부탁하지 않는다(`nothing_to_purge`). 구매자를 모르는 문의(`user_id` 없음)는 누구의 것인지 묶을 수 없어 막는다(`no_buyer`).
 - dashboard-api: `GET /privacy/purge-preview?mode=customer_request|expired[&inquiry_id=]`, `POST /conversations/{id}/customer-data-purge`(사람 토큰).
 - **클레임 기록 보유기간** (`purge_expired_claims`, A, `claim_retention.py`): 문의 원문(3년, 고객지원 결정)과 달리 **팀 기준**을 따른다 — 개인정보처리방침 제4조 ⑥ 클레임 기록 5년, shop-api `retention.py`와 같은 방식. 보유 일수 `SUPPORT_CLAIM_RETENTION_DAYS`(기본 1825 = 5년, 기준은 클레임의 `created_at`), 삭제는 **기본 dry-run**(건수만 센다)이고 사람이 `SUPPORT_CLAIM_RETENTION_APPLY=1`로 켜야 집행한다(`1`만 켠다). 보유 일수가 지난 클레임의 구매자 이름·상담원 결정 메모·검수 메모·내력의 글을 `[삭제됨]`으로 바꾸고 `purged_at`을 남기며, 금액·판정·상태·주문·구매자 가명 ID는 남긴다. 내력에 `retention_purge`(기준·보유 일수, 내용 없음)를 한 줄 더한다. 클레임 서비스(claims)에서 돌고 dashboard-api가 하루 한 번(`claim-retention:<날짜>` 키) 부른다.
