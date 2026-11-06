@@ -155,7 +155,8 @@ def _setup(tmp: Path, target: float, peer: float,
 
 
 def _peer_snapshots(tmp: Path, peers: list[dict]) -> None:
-    """같은 형식 숏츠: 형식 분류(shorts.db)와 수집기 스냅샷(youtube.db, 1시간마다)."""
+    """같은 형식 숏츠: 형식 분류(shorts.db)와 새 숏츠 추적 스냅샷(youtube.db, 1시간마다,
+    source "fresh_track" — 기준은 게시 직후부터 추적한 이 스냅샷으로만 계산한다)."""
     from data_agent.skills.shorts_stats import ShortsStore
     from data_agent.youtube_store import SnapshotStore
 
@@ -170,8 +171,8 @@ def _peer_snapshots(tmp: Path, peers: list[dict]) -> None:
         for age, views, likes, comments in make.measurements(p, p["pub"]):
             at = (pub + timedelta(hours=age)).replace(microsecond=0).isoformat()
             row = (at, p["id"], int(views), int(likes), int(comments), pub.isoformat())
-            yt.execute("INSERT INTO snapshots VALUES (?,?,?,?,?,NULL,?,'24','ch','[]','popular')",
-                       row)  # fmt: skip
+            yt.execute("INSERT INTO snapshots VALUES (?,?,?,?,?,NULL,?,'24','ch','[]',"
+                       "'fresh_track')", row)  # fmt: skip
     shorts.commit()
     yt.commit()
     shorts.close()
