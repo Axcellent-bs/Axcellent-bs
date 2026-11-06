@@ -88,7 +88,7 @@ def subscribe_events() -> bool:
     except NotImplementedError:
         logger.warning(
             "이벤트 버스 미연결: coupon.issued·payment.refunded를 받지 못한다 "
-            "(사건 보상 쿠폰 장부는 안전 관문 실행 기록으로 채운다)"
+            "(이벤트 보상 쿠폰 장부는 안전 관문 실행 기록으로 채운다)"
         )
         EVENTS["connected"] = False
         return False

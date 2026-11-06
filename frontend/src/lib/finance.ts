@@ -10,10 +10,10 @@ import { ExampleMissing, exampleCall, exampleOn } from "./financeExample";
 // ---------------------------------------------------------------- 공통 봉투
 export interface FinanceMeta {
   mock: boolean;
-  /** §12-1 사건 응답에는 없을 수 있다 */
+  /** §12-1 이벤트 응답에는 없을 수 있다 */
   collected_at?: string;
   source?: "shop-api" | "seed" | string;
-  /** §12-1 사건 목록: 쿠폰 장부를 어디서 채웠는지 */
+  /** §12-1 이벤트 목록: 쿠폰 장부를 어디서 채웠는지 */
   ledger_source?: LedgerSource;
   /** 값을 못 받아 null로 둔 필드 이름 */
   unavailable?: string[];
@@ -369,7 +369,7 @@ export interface IncomeStatement {
   basis: string;
 }
 
-// ---------------------------------------------------------------- §12 시나리오 A: 장애 사건 재무
+// ---------------------------------------------------------------- §12 시나리오 A: 장애 이벤트 재무
 // 쿠폰·환불은 끝난 금액만 장부에 적는다. 쿠폰 건별 승인은 안전 장치(A/C)가 한다.
 /** 장부 출처: 이벤트 버스(coupon.issued) / 안전 장치 실행 기록(issue_coupon) / 목 시드 */
 export type LedgerSource = "events" | "safety_executions" | "seed";
@@ -423,7 +423,7 @@ export interface IncidentDetail {
   recovered_at?: string | null;
   impact: IncidentImpact | null;
   compensation: IncidentCompensation;
-  /** 사건 구간 안에 영향 고객에게 나간 환불. 구간·영향 고객을 모르면 null (0원과 다르다) */
+  /** 이벤트 구간 안에 영향 고객에게 나간 환불. 구간·영향 고객을 모르면 null (0원과 다르다) */
   refunds: IncidentRefunds | null;
   /** 보상 + 환불. 둘 중 하나라도 모르면 null */
   money_out_total: number | null;
@@ -669,9 +669,9 @@ export const finance = {
   downloadStatement: (period: StatementPeriod, date: string | null | undefined, format: "csv" | "xlsx") =>
     download(`/api/finance/statements${query({ period, date, format })}`, `income-statement-${period}.${format}`),
 
-  // §12-1 장애 사건 재무 (시나리오 A)
+  // §12-1 장애 이벤트 재무 (시나리오 A)
   incidents: () => fin<Envelope<IncidentSummary[]>>("/api/finance/incidents"),
-  /** 없는 사건이면 404 {"error": {"code": "not_found"}} */
+  /** 없는 이벤트면 404 {"error": {"code": "not_found"}} */
   incident: (contextId: string) => fin<Envelope<IncidentDetail>>(`/api/finance/incidents/${encodeURIComponent(contextId)}`),
 
   /** 고객지원이 닫은 문의의 비용 기록. 최근 것이 먼저 */
@@ -759,13 +759,13 @@ export function todoTab(t: Pick<FinanceTodo, "kind" | "link">): FinanceTab {
   return TODO_TAB[t.kind] ?? "closing";
 }
 
-// ---------------------------------------------------------------- 장애 사건 표시 도우미
+// ---------------------------------------------------------------- 장애 이벤트 표시 도우미
 export const COMPONENT_KO: Record<string, string> = { payment: "결제", order: "주문", shop: "쇼핑몰", search: "검색", delivery: "배송" };
 export const componentKo = (c: string | null | undefined) => (c ? COMPONENT_KO[c] ?? "서비스" : null);
 
 /**
- * 사건 이름. 시연 사건 "ctx_inc_scn_a_0001" + "payment" → "장애 #0001 · 결제".
- * 실제 사건 번호(ctx_inc_ + 16진수)는 사람에게 의미가 없어 "결제 장애 · 오후 4:38"처럼 시각으로 부른다.
+ * 이벤트 이름. 시연 이벤트 "ctx_inc_scn_a_0001" + "payment" → "장애 #0001 · 결제".
+ * 실제 이벤트 번호(ctx_inc_ + 16진수)는 사람에게 의미가 없어 "결제 장애 · 오후 4:38"처럼 시각으로 부른다.
  */
 export function incidentName(contextId: string, component?: string | null, openedAt?: string | null): string {
   const where = componentKo(component);
@@ -777,7 +777,7 @@ export function incidentName(contextId: string, component?: string | null, opene
   return `장애 #${no}${where ? ` · ${where}` : ""}`;
 }
 
-/** 최근 사건이 먼저. 시각이 없는 사건은 뒤로 */
+/** 최근 이벤트가 먼저. 시각이 없는 이벤트는 뒤로 */
 export function sortIncidents(list: IncidentSummary[]): IncidentSummary[] {
   return [...list].sort((a, b) => {
     if (a.opened_at && b.opened_at) return b.opened_at.localeCompare(a.opened_at);
@@ -788,7 +788,7 @@ export function sortIncidents(list: IncidentSummary[]): IncidentSummary[] {
 }
 
 export const LEDGER_SOURCE_KO: Record<LedgerSource, { label: string; detail: string }> = {
-  events: { label: "이벤트 알림", detail: "이 사건의 안전 장치 실행 기록이 없어(예: 재시작 뒤), 마케팅 AI가 쿠폰을 줄 때 보낸 알림으로 장부를 채웠습니다." },
+  events: { label: "이벤트 알림", detail: "이 이벤트의 안전 장치 실행 기록이 없어(예: 재시작 뒤), 마케팅 AI가 쿠폰을 줄 때 보낸 알림으로 장부를 채웠습니다." },
   safety_executions: { label: "안전 장치 실행 기록", detail: "안전 장치가 남긴 쿠폰 지급 실행 기록을 원본으로 씁니다. 같은 쿠폰의 알림은 금액에 더하지 않습니다." },
   seed: { label: "예시 데이터", detail: "연습용 예시 자료입니다. 실제 쿠폰 지급 기록이 아닙니다." },
 };
