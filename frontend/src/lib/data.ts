@@ -906,6 +906,29 @@ export interface BorrowFormat {
   source: "topic" | "category" | "all" | null;
 }
 
+/**
+ * 인사이트의 지난번 캠페인 결과 하나 (계약 InsightPastResult, campaign_result 값 그대로 + 띠 문장).
+ * 띠 색·둘째 줄·셋째 줄은 서버가 정한다. 화면은 계산하지 않는다
+ */
+export interface InsightPastResult {
+  campaign_id: string;
+  campaign_name?: string | null;
+  window_from?: string | null;
+  window_to?: string | null;
+  views_verdict: "achieved" | "missed" | "measuring" | "none";
+  /** "조회 달성" · "조회 미달" · "측정 중" · "조회 판정 없음" */
+  views_label: string;
+  sales_verdict?: "more" | "less" | "no_effect" | null;
+  /** "더 팔림" · "덜 팔림" · "효과 확인 안 됨(표본 적음)" · "측정 불가: …" */
+  sales_label: string;
+  actions: string[];
+  alerts: { kind: "loss" | "data_gap"; message: string; note?: string | null }[];
+  band: "green" | "red" | "gray";
+  /** "조회 목표의 N배 (영상 M개 중 K개 달성) · 매출 +N원 · 주문 +N건" */
+  summary_line: string;
+  /** "지난번 개선 방향: …" 또는 조회·매출 반대 문구 */
+  note_line?: string | null;
+}
 export interface TrendInsight {
   insight_id: string;
   rank: number;
@@ -961,6 +984,8 @@ export interface TrendInsight {
   borrow_products?: InsightProduct[];
   cautions?: CautionType[];
   caution_note?: string | null;
+  /** 브리프 v4: 같은 insight_id로 한 캠페인의 지난번 결과 (최근 3개, 최신순). 없으면 []. 예전 응답은 없다 */
+  past_results?: InsightPastResult[];
   /** 숏츠 적합도·목표 참고값 (#678). 숏츠 표본이 모자라면 null + shorts_fit_status unknown + shorts_fit_reason. 예전 응답은 없다 */
   shorts_fit?: ShortsFit | null;
   shorts_fit_status?: "known" | "unknown" | null;

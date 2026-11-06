@@ -6,7 +6,7 @@ import { OpportunityCards } from "@/components/data/OpportunityCards";
 import { AgeBars } from "@/components/data/AgeBars";
 import { useCompany } from "@/demo/company";
 import { CopyId, FoldRow, RestFacts, ShortsCard, TileRow, factLinks, shortsThumbs, shortsTiles, verdictOf } from "@/components/data/ShortsCard";
-import { DATA_SERVER, kpiLive, type DataFact, type LlmStatus, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
+import { DATA_SERVER, kpiLive, type DataFact, type InsightPastResult, type LlmStatus, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
 
 // 트렌드 2단계(인사이트): 기획팀이 가져갈 인사이트 브리프 (v2 시안 ② 보드). trend_insight_brief(계약 TrendInsightBriefOutput) 응답 그대로.
 // - 카드 틀은 ShortsCard: 판정 칩 · 제목 · 한 문장(서버 line) · 숫자 타일 · 연결 상품 · 오른쪽 근거 숏츠 썸네일(최대 3) · "근거 전체 보기" 접힘 하나
@@ -110,6 +110,41 @@ function Products({ i }: { i: TrendInsight }) {
 
 const CAUTION_NAME = { real_person: "인물", trademark: "상표", music: "음원" } as const;
 
+const BAND: Record<InsightPastResult["band"], string> = {
+  green: "border-emerald-300 bg-emerald-50 text-emerald-900",
+  red: "border-red-300 bg-red-50 text-red-900",
+  gray: "border-ink-100 bg-ink-50 text-ink-700",
+};
+const VIEWS_TONE: Record<InsightPastResult["views_verdict"], string> = {
+  achieved: TONE.ok, missed: TONE.bad, measuring: TONE.warn, none: TONE.muted,
+};
+const SALES_TONE: Record<string, string> = { more: TONE.ok, less: TONE.bad };
+const day = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" }) : "?");
+
+/** 카드 맨 위 "지난번 결과" 띠: 가장 최근 캠페인 1개 (서버 값·문장 그대로). 없으면 회색 한 줄 */
+function PastBand({ list }: { list: InsightPastResult[] | undefined }) {
+  const p = list?.[0];
+  if (!p) {
+    return (
+      <div className={`border px-4 py-2 text-sm ${BAND.gray}`}>
+        <b>지난번 결과 없음</b> · 이 주제로 한 캠페인이 아직 없습니다
+      </div>
+    );
+  }
+  return (
+    <div className={`flex flex-col gap-1 border px-4 py-2 text-sm ${BAND[p.band]}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <b>지난번 결과</b>
+        <span className={`chip text-xs font-semibold ${VIEWS_TONE[p.views_verdict]}`}>{p.views_label}</span>
+        <span className={`chip text-xs font-semibold ${SALES_TONE[p.sales_verdict ?? ""] ?? TONE.muted}`}>{p.sales_label}</span>
+        <span className="text-xs opacity-80">{p.campaign_id} · {day(p.window_from)}~{day(p.window_to)}</span>
+      </div>
+      <p>{p.summary_line}</p>
+      {p.note_line && <p className="text-xs opacity-80">{p.note_line}</p>}
+    </div>
+  );
+}
+
 function InsightCard({ i, facts }: { i: TrendInsight; facts: DataFact[] | undefined }) {
   const m = material(i);
   const season = seasonText(i.evidence);
@@ -141,6 +176,7 @@ function InsightCard({ i, facts }: { i: TrendInsight; facts: DataFact[] | undefi
       thumbs={shortsThumbs([...(i.evidence_shorts ?? []), ...(i.evidence.video_links ?? [])], [...i.evidence.links, ...factLinks(facts, i.insight_id, i.fact_ids)])}
       thumbsLabel={borrow ? "지금 뜨는 영상" : "이런 숏츠가 잘 돼요"}
       highlight={i.company_related === true}
+      topBand={<PastBand list={i.past_results} />}
       fold={<>
         <TileRow tiles={shortsTiles(i)} />
         {borrow && i.caution_note && <FoldRow label="주의">{i.caution_note}</FoldRow>}
