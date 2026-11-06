@@ -58,7 +58,7 @@ from finance_agent import campaign as cp
 from finance_agent import cashflow, chat_log, closing, tax, team_budget
 from finance_agent import finance_config as fc
 from finance_agent import ledger as lg
-from finance_agent.books import Books, load_books
+from finance_agent.books import Books, load_books, off
 from finance_agent.planning_questions import answer_question
 from finance_agent.rules import load_rules
 from finance_agent.schemas import (
@@ -584,7 +584,7 @@ async def cash_net_krw() -> int | None:
     if "orders" in books.unavailable:
         return None
     weeks = load_rules().brake.cash_lookahead_weeks
-    rows = cashflow.forecast(books, state().records.batches)["weeks"][:weeks]
+    rows = (await off(cashflow.forecast, books, state().records.batches))["weeks"][:weeks]
     values = [r.get("net") for r in rows]
     if len(values) < weeks or any(v is None for v in values):
         return None
@@ -619,15 +619,20 @@ async def started_campaigns() -> dict[str, dict[str, Any]] | None:
 async def monthly_budget() -> dict[str, Any]:
     if state().budget_override is not None:
         return state().budget_override
-    return cp.budget_from_last_month(
-        await state().books(), fc.today(), state().records.closings, state().records.other_pnl
+    books = await state().books()
+    return await off(
+        cp.budget_from_last_month,
+        books,
+        fc.today(),
+        state().records.closings,
+        state().records.other_pnl,
     )
 
 
 async def repeat_estimate() -> dict[str, Any] | None:
     if state().repeat_override is not None:
         return state().repeat_override
-    return cp.repeat_estimate(await state().books(), fc.today())
+    return await off(cp.repeat_estimate, await state().books(), fc.today())
 
 
 async def review_budget(data: CampaignBudgetReviewInput, context_id: str) -> dict[str, Any]:
@@ -760,7 +765,11 @@ async def current_insights() -> list[dict[str, Any]]:
     books = await state().books()
     # 곧 신고할 분기는 지금 진행 중인 분기가 아니라 직전 분기다
     start, _, _ = tax.quarter_range(fc.today())
-    pack = None if "orders" in books.unavailable else tax.vat_pack(books, start - timedelta(days=1))
+    pack = (
+        None
+        if "orders" in books.unavailable
+        else await off(tax.vat_pack, books, start - timedelta(days=1))
+    )
     return cp.insights(records.campaigns, records.budget_reviews, pack, fc.today())
 
 

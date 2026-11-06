@@ -75,6 +75,7 @@ from finance_agent import (
 )
 from finance_agent import campaign as cp
 from finance_agent import finance_config as fc
+from finance_agent.books import off
 from finance_agent.handlers import (
     cash_net_krw,
     closing_key,
@@ -176,7 +177,7 @@ async def settlements_view(
     period: str | None, fresh: bool = False
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     books = await (state().fresh_books() if fresh else state().books())
-    result = settlement.statements(books, period)
+    result = await off(settlement.statements, books, period)
     batch = state().records.batches.get(result["period"])
     if batch:
         await refresh_batch(batch)
@@ -187,8 +188,10 @@ async def settlements_view(
 async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
     books = await state().books()
     today = fc.today()
-    totals = closing.compute_totals(books, fc.day_start(today), fc.day_start(today + timedelta(1)))
-    unknown = closing.unknown_codes(books)
+    totals = await off(
+        closing.compute_totals, books, fc.day_start(today), fc.day_start(today + timedelta(1))
+    )
+    unknown = await off(closing.unknown_codes, books)
     todo: list[dict[str, Any]] = []
 
     sett, _ = await settlements_view(None)
@@ -224,7 +227,8 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
                 }
             )
 
-    late = deadline.needs_attention(deadline.deadline_report(books, state().records.batches, today))
+    report = await off(deadline.deadline_report, books, state().records.batches, today)
+    late = deadline.needs_attention(report)
     if late:
         worst = late[0]
         todo.append(
@@ -283,7 +287,7 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
         )
     yesterday = today - timedelta(days=1)
     if closing_key("day", yesterday) not in state().records.closings:
-        y = closing.compute_totals(books, fc.day_start(yesterday), fc.day_start(today))
+        y = await off(closing.compute_totals, books, fc.day_start(yesterday), fc.day_start(today))
         todo.append(
             {
                 "kind": "closing_confirm",
@@ -299,7 +303,7 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
             }
         )
 
-    recon = reconciliation.reconcile(books, None, state().records.recon_notes, today)
+    recon = await off(reconciliation.reconcile, books, None, state().records.recon_notes, today)
     open_items = [i for i in reconciliation.exceptions(recon) if not i["note"]]
     if open_items:
         todo.append(
@@ -371,6 +375,10 @@ def _team_budget_meta(missing: list[str]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- 라우트
+RECON_LIMIT = 1000
+RECON_LIMIT_MAX = 5000
+
+
 def add_finance_api(app: FastAPI) -> None:
     @app.get("/api/finance/overview")
     async def overview() -> dict:
@@ -406,8 +414,13 @@ def add_finance_api(app: FastAPI) -> None:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
         records = state().records
-        report = statements.income_statement(  # type: ignore[arg-type]
-            books, period, d, records.closings, records.other_pnl
+        report = await off(
+            statements.income_statement,
+            books,
+            period,
+            d,
+            records.closings,
+            records.other_pnl,
         )
         meta = books.meta()
         if format == "json":
@@ -694,15 +707,26 @@ def add_finance_api(app: FastAPI) -> None:
         return ok(tax.vat_view(books, d, records.vat_filings), books.meta())
 
     @app.get("/api/finance/reconciliation", response_model=None)
-    async def get_reconciliation(date: str | None = None) -> dict | JSONResponse:
+    async def get_reconciliation(
+        date: str | None = None, status: str | None = None, limit: int = RECON_LIMIT
+    ) -> dict | JSONResponse:
+        """대사 결과. `items`는 고른 상태(`status`, 쉼표로 여럿·`all`)의 건만 `limit`건까지 준다.
+
+        기본은 사람이 볼 불일치(일치·정산 전 제외)다. 일치·정산 전까지 다 보내면 최근 7일이
+        십수만 건(2026-11-06 서버 37MB)이라 화면이 켤 때만 따로 받는다.
+        `counts`·`totals`는 늘 기간 전체다.
+        """
         try:
             d = fc.parse_date(date)
+            wanted = reconciliation.parse_statuses(status)
         except ValueError as exc:
             return error(400, "invalid_request", str(exc))
+        if not 1 <= limit <= RECON_LIMIT_MAX:
+            return error(400, "invalid_request", f"limit은 1~{RECON_LIMIT_MAX}")
         books = await state().books()
-        result = reconciliation.reconcile(books, d, state().records.recon_notes)
+        result = await off(reconciliation.reconcile, books, d, state().records.recon_notes)
         meta = books.meta() | {"pg_source": "mock_toss_settlement"}
-        return ok(result, meta)
+        return ok(reconciliation.pick(result, wanted, limit), meta)
 
     @app.post("/api/finance/reconciliation/{payment_id}/note", response_model=None)
     async def note_reconciliation(
@@ -890,7 +914,8 @@ def add_finance_api(app: FastAPI) -> None:
     @app.get("/api/finance/settlements/deadlines")
     async def get_deadlines() -> dict:
         books = await state().books()
-        return ok(deadline.deadline_report(books, state().records.batches), books.meta())
+        report = await off(deadline.deadline_report, books, state().records.batches)
+        return ok(report, books.meta())
 
     @app.get("/api/finance/payables", response_model=None)
     async def get_payables(date: str | None = None) -> dict | JSONResponse:
@@ -899,7 +924,7 @@ def add_finance_api(app: FastAPI) -> None:
         except ValueError as exc:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
-        return ok(payables.rollforward(books, state().records.batches, d), books.meta())
+        return ok(await off(payables.rollforward, books, state().records.batches, d), books.meta())
 
     @app.get("/api/finance/variance", response_model=None)
     async def get_variance(date: str | None = None) -> dict | JSONResponse:
@@ -908,7 +933,8 @@ def add_finance_api(app: FastAPI) -> None:
         except ValueError as exc:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
-        return ok(variance.variance_report(books, d, state().records.closings), books.meta())
+        report = await off(variance.variance_report, books, d, state().records.closings)
+        return ok(report, books.meta())
 
     @app.post("/api/finance/bank/statement", response_model=None)
     async def upload_bank(
@@ -985,21 +1011,20 @@ def add_finance_api(app: FastAPI) -> None:
     @app.get("/api/finance/bank")
     async def get_bank() -> dict:
         books = await state().books()
-        return ok(bank.match(books, state().records.bank_rows), books.meta())
+        return ok(await off(bank.match, books, state().records.bank_rows), books.meta())
 
     @app.get("/api/finance/cashflow")
     async def get_cashflow() -> dict:
         books = await state().books()
         records = state().records
-        return ok(
-            cashflow.forecast(
-                books,
-                records.batches,
-                opening=bank.latest_balance(records.bank_rows),
-                fixed=cashflow.fixed_costs(records.other_pnl),
-            ),
-            books.meta(),
+        forecast = await off(
+            cashflow.forecast,
+            books,
+            records.batches,
+            opening=bank.latest_balance(records.bank_rows),
+            fixed=cashflow.fixed_costs(records.other_pnl),
         )
+        return ok(forecast, books.meta())
 
     @app.get("/api/finance/close-checklist", response_model=None)
     async def get_close_checklist(date: str | None = None) -> dict | JSONResponse:
@@ -1008,7 +1033,7 @@ def add_finance_api(app: FastAPI) -> None:
         except ValueError as exc:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
-        return ok(close_checklist.checklist(books, state().records, d), books.meta())
+        return ok(await off(close_checklist.checklist, books, state().records, d), books.meta())
 
     @app.get("/api/finance/campaigns")
     async def get_campaigns() -> dict:
@@ -1089,7 +1114,9 @@ def add_finance_api(app: FastAPI) -> None:
         if year is not None and not 2026 <= year <= fc.today().year:
             return error(400, "invalid_request", "year는 2026년 이후 올해까지만 계산한다")
         books = await state().books()
-        estimate = tax.income_tax_estimate(books, year, other_pnl=state().records.other_pnl)
+        estimate = await off(
+            tax.income_tax_estimate, books, year, other_pnl=state().records.other_pnl
+        )
         return ok(estimate, books.meta())
 
     @app.get("/api/finance/exports")
@@ -1148,7 +1175,7 @@ def add_finance_api(app: FastAPI) -> None:
         except ValueError as exc:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
-        return ok(tax.vat_view(books, d, state().records.vat_filings), books.meta())
+        return ok(await off(tax.vat_view, books, d, state().records.vat_filings), books.meta())
 
     @app.get("/api/finance/tax/seller-report", response_model=None)
     async def get_seller_report(date: str | None = None, format: str = "json") -> dict | Response:
@@ -1160,7 +1187,7 @@ def add_finance_api(app: FastAPI) -> None:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
         filing = state().records.vat_filings.get(tax.filing_key(d))
-        report = filing["seller_report"] if filing else tax.seller_report(books, d)
+        report = filing["seller_report"] if filing else await off(tax.seller_report, books, d)
         if format == "json":
             return ok(report, books.meta())
         if format == "xlsx":

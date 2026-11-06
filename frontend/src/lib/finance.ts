@@ -163,6 +163,8 @@ export interface Reconciliation {
   counts: Partial<Record<ReconStatus, number>>;
   totals: { order_amount: number | null; pg_amount: number | null; pg_fee: number | null; pay_out: number | null };
   items: ReconItem[];
+  /** 서버가 보낸 건의 상태와 그 상태의 전체 건수. `total`이 items 수보다 크면 잘린 것이다 */
+  shown?: { statuses: ReconStatus[]; total: number; limit: number };
 }
 
 // ---------------------------------------------------------------- ③ 판매자 정산
@@ -598,7 +600,9 @@ export const finance = {
   /** 결산 확정. 사람 토큰만 받는다 */
   confirmClosing: (period: ClosingPeriod, date: string) =>
     fin<Envelope<ClosingReport>>("/api/finance/closing/confirm", { method: "POST", body: { period, date }, human: true }),
-  reconciliation: (date?: string | null) => fin<Envelope<Reconciliation>>(`/api/finance/reconciliation${query({ date })}`),
+  // 일치·정산 전까지 다 받으면 십수만 건이라 화면에서 고른 상태만 받는다
+  reconciliation: (date?: string | null, statuses?: ReconStatus[]) =>
+    fin<Envelope<Reconciliation>>(`/api/finance/reconciliation${query({ date, status: statuses?.length ? statuses.join(",") : null })}`),
   /** 대사 불일치 건 처리 메모. 사람 토큰만 */
   reconNote: (paymentId: string, note: string) =>
     fin<Envelope<ReconItem>>(`/api/finance/reconciliation/${encodeURIComponent(paymentId)}/note`, { method: "POST", body: { note }, human: true }),

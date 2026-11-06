@@ -21,7 +21,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from finance_agent import finance_config as fc
-from finance_agent.books import Books, in_range, item_gross, order_sold
+from finance_agent.books import Books, in_range, item_gross
 from finance_agent.rules import applied_many
 
 
@@ -46,15 +46,14 @@ def statements(
             if i.get("seller_id") and i["seller_id"] not in sellers:
                 sellers.append(i["seller_id"])
 
+    sold = books.sold_between(start, end)
     rows = []
     for seller_id in sellers:
         gross = commission = 0
         order_ids: set[str] = set()
         rates: set[float] = set()
         unconfirmed: set[str] = set()
-        for o in books.orders:
-            if not order_sold(o) or not in_range(_paid_at(o), start, end):
-                continue
+        for o in sold:
             mine = [i for i in o["items"] if i.get("seller_id") == seller_id]
             if not mine:
                 continue

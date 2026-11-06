@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 
 from ax_agent_template.llm import LLMClient
 from finance_agent import finance_config as fc
-from finance_agent.books import Books, in_range, item_gross, order_sold, pg_settlements
+from finance_agent.books import Books, in_range, item_gross, paid_at, pg_settlements
 from finance_agent.rules import applied_many, load_rules
 
 logger = logging.getLogger("ax.finance.closing")
@@ -101,13 +101,9 @@ def period_finished(period: Period, d: date, today: date | None = None) -> bool:
 def _sales_by_day(books: Books, start: date, end: date) -> dict[date, int]:
     """[start, end) 안의 날짜별 판매액. 판매가 있던 날만 들어 있다."""
     out: dict[date, int] = {}
-    for order in books.orders:
-        if not order_sold(order):
-            continue
-        paid = min(p["created_at"] for p in order["payments"] if p.get("status") == "succeeded")
-        day = paid.date()
-        if start <= day < end:
-            out[day] = out.get(day, 0) + sum(item_gross(item) for item in order["items"])
+    for order in books.sold_between(fc.day_start(start), fc.day_start(end)):
+        day = paid_at(order).date()
+        out[day] = out.get(day, 0) + sum(item_gross(item) for item in order["items"])
     return out
 
 
@@ -283,12 +279,7 @@ def compute_totals(books: Books, start: datetime, end: datetime) -> Totals:
     cfg = fc.load_config()
     pg = pg_settlements(books)
     gmv = commission = pg_fee = orders = 0
-    for o in books.orders:
-        if not order_sold(o):
-            continue
-        paid_at = min(p["created_at"] for p in o["payments"] if p.get("status") == "succeeded")
-        if not in_range(paid_at, start, end):
-            continue
+    for o in books.sold_between(start, end):
         orders += 1
         for item in o["items"]:
             gross = item_gross(item)

@@ -62,6 +62,7 @@ function lookup(path: string): Body {
   const params = new URLSearchParams(q);
   const date = params.get("date");
   params.delete("date");
+  params.delete("status"); // 예시 대사는 모든 상태를 담고 있고 화면이 거른다
   const rest = params.toString();
   const plain = store[rest ? `${base}?${rest}` : base];
   if (plain && (!date || (plain.data as { date?: string } | null)?.date === date)) return plain;

@@ -19,7 +19,7 @@ from typing import Any
 
 from finance_agent import closing
 from finance_agent import finance_config as fc
-from finance_agent.books import Books, in_range, item_gross, order_sold
+from finance_agent.books import Books, in_range, item_gross
 
 UNALLOCATED = "_unallocated"
 
@@ -29,12 +29,7 @@ def _accrual(books: Books, start: datetime | None, end: datetime) -> dict[str, i
     cfg = fc.load_config()
     lo = start or datetime.min.replace(tzinfo=end.tzinfo)
     out: dict[str, int] = defaultdict(int)
-    for o in books.orders:
-        if not order_sold(o):
-            continue
-        paid = [p["created_at"] for p in o["payments"] if p.get("status") == "succeeded"]
-        if not paid or not in_range(min(paid), lo, end):
-            continue
+    for o in books.sold_between(lo, end):
         for item in o["items"]:
             seller = item.get("seller_id")
             if not seller:

@@ -167,8 +167,9 @@ def month_range(d: date) -> tuple[date, date]:
 
 
 # ---------------------------------------------------------------- 금액
+@lru_cache(maxsize=65536)
 def rate_amount(amount: int, rate: float) -> int:
-    """금액 × 비율을 원 단위로 반올림(0.5 올림)."""
+    """금액 × 비율을 원 단위로 반올림(0.5 올림). 같은 금액·비율이 많아 결과를 기억해 둔다."""
     value = Decimal(amount) * Decimal(str(rate))
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
