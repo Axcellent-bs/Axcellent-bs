@@ -117,3 +117,12 @@ export const PURGE_REASON_KO: Record<string, string> = {
   claim_linked: "클레임이 이어져 보존",
   no_buyer: "구매자를 알 수 없음",
 };
+
+/** 회사(고객사) 이름표. 데모 쇼핑몰의 고객사 ID는 shop-demo(회사 폴더 catbooks)이고 캣북스다. 모르는 회사는 ID를 그대로 보여 준다 */
+export const TENANT_KO: Record<string, string> = { "shop-demo": "캣북스", catbooks: "캣북스" };
+export const tenantName = (id: string | undefined | null): string => TENANT_KO[id ?? "shop-demo"] ?? id ?? "캣북스";
+
+/** 분류 필요가 된 까닭 */
+export const TRIAGE_REASON_KO: Record<string, string> = {
+  no_error_code: "오류 코드 없음", unclassified: "분류에 안 맞음", manual: "상담원이 올림",
+};

@@ -372,6 +372,17 @@ class Summary(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class Triage(BaseModel):
+    """분류 필요 표시 (고객지원이 오류 코드가 없는 문의를 따로 모은 것)."""
+
+    state: Literal["needed", "done"]
+    reason: Literal["no_error_code", "unclassified", "manual"]
+    marked_by: Literal["auto", "agent"]
+    marked_at: str
+    label: str | None = None  # 상담원이 정한 분류 이름
+    decided_at: str | None = None
+
+
 class ConversationListItem(BaseModel):
     id: int
     customer_name: str
@@ -386,6 +397,8 @@ class ConversationListItem(BaseModel):
     preview: str
     awaiting_reply: bool
     language: str = "ko"  # 고객이 마지막으로 쓴 언어 (ko·en·ja·zh·other)
+    tenant_id: str = "shop-demo"  # 어느 회사(고객사)의 문의인지. 회사별로 따로 본다
+    triage: Triage | None = None  # "분류 필요" 표시 (없으면 일반 문의)
 
 
 class ActivityEntry(BaseModel):
@@ -637,6 +650,13 @@ class DraftStyleBody(BaseModel):
 
 class StatusBody(BaseModel):
     status: ConversationStatus
+
+
+class TriageBody(BaseModel):
+    """`send` 분류 필요로 올리기, `decide` 분류 이름 정하고 마치기, `clear` 표시 지우기."""
+
+    action: Literal["send", "decide", "clear"]
+    label: str | None = Field(default=None, max_length=40)
 
 
 class ClaimIntakeItem(BaseModel):

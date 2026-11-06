@@ -338,6 +338,10 @@ class PersistentInquiryStore(InquiryStore):
         conversation = super().apply_softening(*args, **kwargs)
         return None if conversation is None else self._save(conversation)
 
+    def set_triage(self, *args: Any, **kwargs: Any) -> Conversation | None:
+        conversation = super().set_triage(*args, **kwargs)
+        return None if conversation is None else self._save(conversation)
+
     def log_activity(self, *args: Any, **kwargs: Any) -> Conversation | None:
         conversation = super().log_activity(*args, **kwargs)
         return None if conversation is None else self._save(conversation)

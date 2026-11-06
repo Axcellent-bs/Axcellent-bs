@@ -6,6 +6,7 @@ import { ago, shortDateTime, won } from "@/lib/format";
 import { AUDIT_KO, CLAIM_REASON_KO, CLAIM_STATUS_KO, CLAIM_TYPE_KO, INSPECTION_KO, OUTCOME_KO, RULE_KO } from "@/lib/labels";
 import type { Claim, ClaimDetail, ClaimStats } from "@/lib/types";
 import { useRouter, useSearchParams } from "@/lib/nav";
+import { TriagePanel } from "@/components/support/TriagePanel";
 
 const FILTERS = ["all", "needs_review", "needs_info", "awaiting_return", "return_received", "completed", "rejected"] as const;
 const LEVEL: Record<string, string> = { block: "bg-red-50 text-red-800", review: "bg-violet-50 text-violet-700", warn: "bg-amber-50 text-amber-800", info: "bg-ink-100 text-ink-700" };
@@ -26,6 +27,10 @@ function Claims() {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // "분류 필요": 로그·오류 코드로 원인을 모르는 문의를 따로 모은 화면. 클레임 목록 옆의 두 번째 보기다
+  const view = params.get("view") === "triage" ? "triage" : "claims";
+  const [triageCount, setTriageCount] = useState<number | null>(null);
+  useEffect(() => { api.admin.list().then((l) => setTriageCount(l.filter((c) => c.triage?.state === "needed").length)).catch(() => {}); }, []);
 
   const load = useCallback(async () => {
     try {
@@ -43,12 +48,21 @@ function Claims() {
     try { setDetail(await fn()); setNote(""); await load(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
 
+  const tabs = (
+    <div role="tablist" aria-label="보기" className="flex shrink-0 gap-2">
+      <button role="tab" aria-selected={view === "claims"} onClick={() => router.push("/claims")} className={`chip py-1.5 text-sm ${view === "claims" ? "bg-brand-600 text-white" : "bg-ink-100 text-ink-700"}`}>클레임</button>
+      <button role="tab" aria-selected={view === "triage"} onClick={() => router.push("/claims?view=triage")} className={`chip py-1.5 text-sm ${view === "triage" ? "bg-brand-600 text-white" : "bg-ink-100 text-ink-700"}`}>분류 필요{triageCount ? ` ${triageCount}` : ""}</button>
+    </div>
+  );
+  if (view === "triage") return <div className="flex h-full flex-col gap-3 p-4 lg:px-6">{tabs}<TriagePanel onCount={setTriageCount} /></div>;
+
   if (!rows) return <Loading error={error} />;
   const shown = rows.filter((c) => filter === "all" || c.status === filter);
   const count = (s: string) => rows.filter((c) => s === "all" || c.status === s).length;
 
   return (
     <div className="flex h-full flex-col gap-3 p-4 lg:px-6">
+      {tabs}
       <div className="flex shrink-0 flex-wrap gap-3">
         <Stat label="전체 클레임" value={stats?.total ?? 0} />
         <Stat label="상담원 검토" value={stats?.agent_reviews ?? 0} sub={`규칙 판정을 뒤집음 ${stats?.agent_overrides ?? 0}건`} />

@@ -20,6 +20,7 @@ from support_agent.schemas import (
     InquiryStatus,
     Message,
     ResolutionNote,
+    Triage,
     Urgency,
 )
 
@@ -122,6 +123,14 @@ class InquiryStore:
     def add_agent_message(self, inquiry_id: int, text: str) -> Conversation:
         conversation = self._conversations[inquiry_id]
         self._append(conversation, "agent", text, None, now_iso())
+        return conversation
+
+    def set_triage(self, inquiry_id: int, triage: Triage | None) -> Conversation | None:
+        """ "분류 필요" 표시를 바꾼다 (`None`이면 지운다). 없는 문의면 아무것도 하지 않는다."""
+        conversation = self._conversations.get(inquiry_id)
+        if conversation is None:
+            return None
+        conversation.triage = triage
         return conversation
 
     def log_activity(
