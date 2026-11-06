@@ -1459,6 +1459,99 @@ export interface CampaignSales {
 }
 export const CAMPAIGN_DIRECTION_KO: Record<CampaignDirection, string> = { up: "늘었음", none: "같음", down: "줄었음" };
 
+// ---------------------------------------------------------------- 영상 성과 (video_performance, list_all)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py VideoPerformanceOutput (v3).
+// 판정·신호 등급·성과 요인·개선 방향 문장·예상치는 모두 서버 값이다 (규칙 기반). 화면은 자릿수와 색만 정한다.
+// 같은 형식 비교는 시간 맞춤(peer_age_ratio)만 쓴다. 시간 안 맞춘 peer_ratio는 받아도 보여 주지 않는다.
+export type VideoVerdict = "achieved" | "missed" | "measuring" | "excluded";
+export type SignalLevel = "strong" | "normal" | "weak" | "unknown";
+export type VideoCheckpointName = "1h" | "1d" | "3d" | "7d";
+export interface VideoCheckpoint {
+  checkpoint: VideoCheckpointName;
+  status: "known" | "unknown";
+  /** 측정 중 · 놓침 · 연결 대기 등 */
+  reason?: string | null;
+  due_at?: string | null;
+  hours_after?: number | null;
+  views?: number | null;
+  likes?: number | null;
+  comments?: number | null;
+  /** 7일에만 (목표 참고값이 정의된 시점) */
+  target_ratio?: number | null;
+  /** 같은 형식 숏츠의 게시 후 같은 시간대 중앙값 대비 (시간 맞춤) */
+  peer_age_ratio?: number | null;
+  baseline_n?: number | null;
+  /** "기준 없음(표본 n)" */
+  baseline_reason?: string | null;
+}
+export interface VideoSignal {
+  value?: number | null;
+  /** 화면 값 ("49%", "6.0%", "0.80%", "+64%") */
+  display?: string | null;
+  level: SignalLevel;
+  reason?: string | null;
+  baseline_n: number;
+}
+export interface VideoSignals { first: VideoSignal; like: VideoSignal; cmt: VideoSignal; grow: VideoSignal }
+export interface VideoProjection {
+  views?: number | null;
+  ratio?: number | null;
+  /** 늘 true (예상치) */
+  is_estimate: boolean;
+  reason?: string | null;
+}
+export interface VideoPerformanceVideo {
+  video_id?: string | null;
+  video_url?: string | null;
+  title?: string | null;
+  test: boolean;
+  insight_id?: string | null;
+  topic?: string | null;
+  shorts_format?: string | null;
+  target_views_reference?: number | null;
+  verdict?: VideoVerdict | null;
+  verdict_reason?: string | null;
+  checkpoints: VideoCheckpoint[];
+  signals?: VideoSignals | null;
+  /** 성과 요인 문장 (숫자 포함, 서버 문장) */
+  factors: string[];
+  /** 개선 방향 문장 (서버 문장) */
+  actions: string[];
+  projection?: VideoProjection | null;
+}
+export interface VideoChip {
+  video_id: string;
+  name: string;
+  verdict: VideoVerdict;
+  target_ratio?: number | null;
+  projected_ratio?: number | null;
+}
+export interface VideoInsightCard {
+  insight_id: string;
+  topic?: string | null;
+  finished: number;
+  achieved: number;
+  missed: number;
+  measuring: number;
+  /** "끝난 N개 중 M개 달성 · K개 측정 중" */
+  line: string;
+  chips: VideoChip[];
+  /** 끝난 영상 3개 이상일 때만 */
+  median_target_ratio?: number | null;
+  notes: string[];
+}
+export interface VideoVerdictTally { videos: number; achieved: number; missed: number; measuring: number; excluded: number }
+export interface VideoPerformanceListOutput {
+  status: "known" | "unknown";
+  reason?: string | null;
+  videos: VideoPerformanceVideo[];
+  tally?: VideoVerdictTally | null;
+  insight_cards: VideoInsightCard[];
+  limits: string[];
+  summary: string;
+  schema_version?: string;
+}
+
 /** 서버가 꺼졌을 때 무엇이 꺼졌는지 보여 주는 이름 */
 export const DATA_SERVER = "데이터 AI 서버(8106)";
 export const ORCH_SERVER = "총괄 서버(8000)";
@@ -1519,6 +1612,9 @@ export const dataAi = {
       { window_from: from, window_to: to, ...(campaignId ? { campaign_id: campaignId } : {}) },
       CAMPAIGN_DEADLINE_MS,
     ),
+  /** 게시 영상 성과 전부 (성과 탭). 저장분만 읽고 새로 재지 않는다 (수집기가 1시간마다 잰다) */
+  videoPerformance: () =>
+    askData<VideoPerformanceListOutput>("video_performance", "영상 성과", { list_all: true }, TREND_DEADLINE_MS),
 };
 
 const DEADLINE_MS = 30_000;

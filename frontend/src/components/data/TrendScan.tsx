@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 import { Chip, ErrorBox, Panel, TONE, Waiting, useResource } from "@/components/finance/bits";
 import { PreparingChip } from "@/components/Preparing";
 import { CampaignEffect } from "@/components/data/CampaignEffect";
+import { VideoPerformance } from "@/components/data/VideoPerformance";
 import { PromoConcepts } from "@/components/data/PromoConcepts";
 import { InsightBrief } from "@/components/data/InsightBrief";
 import { DataSources } from "@/components/data/DataSources";
@@ -374,8 +375,11 @@ export function TrendScan({ dataUp = null, company = null }: { dataUp?: boolean 
             // 마케팅·영상 제작으로 넘기기: 아직 준비 중
             <PreparingStage stage={stageOf("handoff")} />
           ) : (
-            // 성과: 캠페인 효과. 측정 결과가 하위 탭을 오가도 남게 숨기기만 한다
-            <CampaignEffect onProbe={setCampaignProbe} />
+            // 성과: 게시 영상 성과(위) + 캠페인 효과(아래). 측정 결과가 하위 탭을 오가도 남게 숨기기만 한다
+            <div className="flex flex-col gap-4">
+              <VideoPerformance />
+              <CampaignEffect onProbe={setCampaignProbe} />
+            </div>
           )}
         </div>
       ))}
