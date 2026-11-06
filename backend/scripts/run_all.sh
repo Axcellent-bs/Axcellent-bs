@@ -180,6 +180,8 @@ export AX_ENABLED_SERVICES="${AX_ENABLED_SERVICES:-}"
 # 켠 서비스 파일 ({"enabled": [...], "updated_at", "updated_by"}). 있으면 위 환경변수보다 먼저 쓰고,
 # 바꾸면 재시작 없이 반영된다. 없거나 깨졌으면 환경변수를 쓴다 (ax_agent_template.routing)
 export AX_ENABLED_SERVICES_FILE="${AX_ENABLED_SERVICES_FILE:-$PWD/$DATA/enabled_services.json}"
+# 회사 연결(시스템 관리 > 회사 연결에서 정한 고객사 판매 서버 주소). 있으면 AX_SHOP_API_URL보다 먼저, 재시작 없이 반영
+export AX_COMPANY_CONNECTION_FILE="${AX_COMPANY_CONNECTION_FILE:-$PWD/$DATA/company_connection.json}"
 # 사람 할 일함 저장 파일 (dashboard-api)
 export AX_HANDOFF_DB="$PWD/$DATA/handoffs.db"
 # 총괄 이벤트 저장소 (다시 켜도 이벤트 기록과 처리한 event_id가 남는다)
@@ -375,6 +377,9 @@ if [ -f "$AX_ENABLED_SERVICES_FILE" ]; then
   echo "켠 서비스: 파일 $AX_ENABLED_SERVICES_FILE (바꾸면 재시작 없이 반영)  조직도: ${AX_ORG_CONFIG:-없음 (꺼진 서비스로 가는 일은 no_assignee로 실패)}"
 else
   echo "켠 서비스: ${AX_ENABLED_SERVICES:-전부}  조직도: ${AX_ORG_CONFIG:-없음 (꺼진 서비스로 가는 일은 no_assignee로 실패)}"
+fi
+if [ -f "$AX_COMPANY_CONNECTION_FILE" ]; then
+  echo "회사 연결: 파일 $AX_COMPANY_CONNECTION_FILE 의 판매 서버 주소를 씁니다 (시스템 관리 > 회사 연결에서 해제)"
 fi
 while read -r name port _; do
   [ -n "$name" ] || continue

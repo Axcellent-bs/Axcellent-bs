@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
@@ -14,6 +15,7 @@ from typing import Any, Protocol
 import httpx
 
 from ax_agent_template import call_agent
+from ax_agent_template.company_connection import shop_api_override
 from ax_agent_template.config import agent_token, is_mock
 from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
 
@@ -70,8 +72,14 @@ class MockData:
 class HttpShop:
     """shop-api 관리 API. 해제는 infra 토큰만 허용된다(shop-api RELEASE_ALLOWED)."""
 
-    def __init__(self, base_url: str) -> None:
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, base_url: str | Callable[[], str]) -> None:
+        # 함수를 주면 부를 때마다 주소를 다시 정한다 (회사 연결이 바뀌면 재시작 없이 따라감)
+        self._base_url = base_url
+
+    @property
+    def base_url(self) -> str:
+        raw = self._base_url() if callable(self._base_url) else self._base_url
+        return raw.rstrip("/")
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {agent_token('infra')}"}
@@ -151,13 +159,15 @@ def _unknown_reason(output: dict[str, Any], unknown: list[str], summary: str) ->
     return summary or "사유 없음"
 
 
+def shop_api_url() -> str:
+    """shop-api 주소: 회사 연결 → `AX_SHOP_API_URL` → `http://shop-api:8010`."""
+    return shop_api_override() or os.getenv("AX_SHOP_API_URL") or "http://shop-api:8010"
+
+
 def default_shop() -> ShopClient:
-    url = os.getenv("AX_SHOP_API_URL")
-    if url:
-        return HttpShop(url)
-    if is_mock("infra"):
+    if not shop_api_override() and not os.getenv("AX_SHOP_API_URL") and is_mock("infra"):
         return MockShop()
-    return HttpShop("http://shop-api:8010")
+    return HttpShop(shop_api_url)
 
 
 def default_data() -> DataClient:

@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
+from ax_agent_template.company_connection import shop_api_override
 from ax_agent_template.services import SERVICE_PORTS, department_of
 
 # CLAUDE.md 포트 표. 컨테이너에서는 서비스 이름이 호스트 이름이다.
@@ -137,10 +138,14 @@ def agent_token(name: str) -> str:
 def agent_url(target: str) -> str:
     """대상 에이전트의 기본 주소. `http`로 시작하면 그대로 쓴다.
 
+    shop-api는 회사 연결 파일(`AX_COMPANY_CONNECTION_FILE`)의 주소가 있으면 그것을 먼저 쓴다.
+
     TODO: 통합 에이전트의 Agent Card 레지스트리로 대체한다.
     """
     if target.startswith("http"):
         return target.rstrip("/")
+    if target == "shop-api" and (connected := shop_api_override()):
+        return connected  # 시스템 관리 > 회사 연결에서 정한 고객사 판매 서버 (company_connection)
     override = os.getenv(f"AX_{env_prefix(target)}_URL")
     if override:
         return override.rstrip("/")
