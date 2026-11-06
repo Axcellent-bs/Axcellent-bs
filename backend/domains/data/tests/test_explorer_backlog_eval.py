@@ -1,6 +1,6 @@
 """영상 탐색 밀린 길이 확인·분류 대기 평가 정의(`eval/explorer_backlog/`)의 약속.
 
-- 다시 읽기 하루 50유닛 (YouTube 장부 날짜), 숏 후보·최근 것 먼저
+- 다시 읽기 하루 80유닛 (YouTube 장부 날짜), 숏 후보·최근 것 먼저
 - 분류 묶음에서 개별 결과가 섞이지 않음, LLM 상한 가까우면 숏츠만 (숏츠 먼저)
 - 관문은 코드 PR에서 켬 (평가 정의 PR #815는 관찰만: dev 0.0 / 0.2 / 1.0 / 0.0)
 """
@@ -42,7 +42,7 @@ def _at(text: str) -> datetime:
 
 def test_answers_come_from_the_specs() -> None:
     cases = {c["name"]: c for c in make.cases()}
-    assert cases["reread_cap"]["expected"]["calls"] == [50, 0, 50]
+    assert cases["reread_cap"]["expected"]["calls"] == [80, 0, 80]
     order = cases["reread_order"]["expected"]["read"]
     assert len(order) == 50 and not any(v.startswith("fl") for v in order)
     assert cases["batch_isolation"]["expected"]["b07"] == "unknown"
@@ -234,7 +234,7 @@ GATES = dict.fromkeys(score.METRICS, 1.0)  # 모두 맞아야 함 (기준선 그
 
 
 def test_explorer_backlog_pass_the_gates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """관문: 다시 읽기 50유닛(장부 날짜)·숏 후보 먼저·묶음 결과 분리·상한 근처 숏츠만."""
+    """관문: 다시 읽기 80유닛(장부 날짜)·숏 후보 먼저·묶음 결과 분리·상한 근처 숏츠만."""
     cases = make.cases()
     metrics = score.score(cases, _answers(tmp_path, monkeypatch))
     print("explorer_backlog eval:", json.dumps(metrics, ensure_ascii=False))

@@ -4,7 +4,7 @@
     uv run python domains/data/eval/explorer_backlog/make_cases.py
 
 규칙 (이 파일에 손으로 적은 정답, 코드와 따로):
-- 다시 읽기(videos.list, 50개 = 1유닛) 하루 상한 50유닛. 하루는 YouTube 장부 날짜(태평양 0시).
+- 다시 읽기(videos.list, 50개 = 1유닛) 하루 상한 80유닛. 하루는 YouTube 장부 날짜(태평양 0시).
   한국 날짜가 바뀌어도 장부 날짜가 같으면 더 읽지 않는다
 - 다시 읽기 순서: 숏 후보(숏 검색 결과, 또는 길이를 아는 4분 미만 영상)가 먼저, 그 안에서 최근
   것(게시 시각을 알면 게시 시각, 모르면 검색한 날)부터
@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import sys
 
-UNITS = 50
+UNITS = 80
 PAGE = 50
 SHORT_HINT_SECONDS = 240
 
@@ -27,7 +27,7 @@ CAP_RUNS = ["2026-11-06T14:00:00Z", "2026-11-06T16:00:00Z", "2026-11-07T09:00:00
 
 
 def cap_case() -> dict:
-    return {"name": "reread_cap", "kind": "reread_cap", "runs": CAP_RUNS, "longs": 4000,
+    return {"name": "reread_cap", "kind": "reread_cap", "runs": CAP_RUNS, "longs": 5000,
             "expected": {"calls": [UNITS, 0, UNITS]}}  # fmt: skip
 
 

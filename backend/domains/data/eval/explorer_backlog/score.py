@@ -1,7 +1,7 @@
 """영상 탐색 밀린 길이 확인·분류 대기 채점기.
 
 지표 (평가 정의 PR에서는 관찰만, 관문은 코드 PR에서 켠다):
-- `explorer_backlog.reread_cap_kept`: 실행마다 다시 읽기 호출 수가 정답(장부 날짜마다 50유닛)과
+- `explorer_backlog.reread_cap_kept`: 실행마다 다시 읽기 호출 수가 정답(장부 날짜마다 80유닛)과
   같은 비율
 - `explorer_backlog.short_first_rate`: 1유닛(50개)으로 읽은 영상 중 정답(숏 후보·최근 순 앞 50개)에
   든 비율
