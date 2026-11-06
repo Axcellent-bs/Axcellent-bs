@@ -362,11 +362,18 @@ async def _execute_write(
 
 
 # ---------------------------------------------------------------- 읽기
+def _is_purged(inquiry_id: int) -> bool:
+    conversation = STORE.get(inquiry_id)
+    return conversation is not None and bool(conversation.purged_at)
+
+
 async def list_inquiries(request: AgentRequest) -> AgentResult:
     parsed = _parse(request, ListInquiriesInput)
     if isinstance(parsed, AgentResult):
         return parsed
     items = STORE.list(parsed.status, parsed.user_id, parsed.language)
+    # 개인정보 삭제로 원문을 지운 문의는 목록에서 뺀다 (행은 감사 기록 때문에 남아 있다)
+    items = [i for i in items if not _is_purged(i.id)]
     return _done(request, {"items": [i.model_dump(mode="json") for i in items]})
 
 

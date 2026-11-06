@@ -46,7 +46,9 @@ from data_agent.connectors import ConnectorUnavailable
 
 DB_ENV = "DATA_VIDEO_PERF_DB"
 DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "video_performance.db"  # backend/.data
-SCHEMA_VERSION = "video_performance.v2"  # v2: 목표 대비는 7일에만, 시점별 성과 모으기, line
+# v2: 목표 대비는 7일에만, 시점별 성과 모으기, line
+# v3: 같은 형식 대비 시간 맞춤, 판정·신호·성과 요인·개선 방향·예상치, list_all
+SCHEMA_VERSION = "video_performance.v3"
 # 게시 후 시간과, 그 시점이 지난 뒤 이 시간 안에 재면 그 시점 값으로 보는 허용 창
 # (수집기가 1시간마다라 1시간 시점의 창은 1시간)
 CHECKPOINTS: dict[VideoCheckpointName, int] = {"1h": 1, "1d": 24, "3d": 72, "7d": 168}
@@ -422,6 +424,10 @@ def facts_of(
             add(f"{c.checkpoint} 댓글 비율", c.comment_rate, "비율", "code", at),
             add(f"{c.checkpoint} 목표 대비 배수", c.target_ratio, "배", "code", at),
             add(f"{c.checkpoint} 같은 숏츠 중앙값 대비 배수", c.peer_ratio, "배", "code", at),
+            add(f"{c.checkpoint} 같은 형식 숏츠 조회 중앙값 (시간 맞춤, 표본 {c.baseline_n})",
+                c.baseline_views, "회", "youtube_snapshots", at),
+            add(f"{c.checkpoint} 같은 형식 대비 배수 (시간 맞춤)", c.peer_age_ratio, "배", "code",
+                at),
         ]
         c.fact_ids = [i for i in ids if i]
     return rows
@@ -483,7 +489,10 @@ async def video_performance(
     store: VideoStore | None = None,
     now: datetime | None = None,
 ) -> PerformanceResult:
-    """영상 성과. video_url이 있으면 등록(추적)하고, 지금 잴 시점이 있으면 잰다."""
+    """영상 성과. video_url이 있으면 등록(추적)하고, 지금 잴 시점이 있으면 잰다.
+
+    list_all이면 등록된 영상 전부를 저장분으로만 보여 준다 (새로 재지 않음, 성과 탭).
+    """
     now = now or datetime.now(UTC)
     own = store is None
     store = store or store_of(env)
@@ -492,56 +501,130 @@ async def video_performance(
                                  proposal_id=request.proposal_id, test=request.test,
                                  schema_version=SCHEMA_VERSION)  # fmt: skip
     try:
+        if request.list_all:
+            return _list_all(store, env, now, shorts, queries)
         video = await _register(request, youtube, store, env, now, out, queries)
         if video is None:
             out.summary = f"영상 성과 없음: {out.reason}"
             return _done(out, queries, now, store, env, shorts)
-        out.platform, out.video_id, out.video_url = video.platform, video.video_id, video.video_url
-        out.campaign_id = out.campaign_id or video.campaign_id
-        out.insight_id = out.insight_id or video.insight_id
-        out.proposal_id = out.proposal_id or video.proposal_id
-        out.test, out.title, out.published_at = video.test, video.title, video.published_at
-        if video.platform != "youtube":
-            out.reason = f"{WAITING}: {video.platform} 성과를 읽는 연결이 아직 없음"
-            out.needs = list(NEEDS[video.platform])
-            out.checkpoints = [VideoCheckpoint(checkpoint=c, reason=WAITING) for c in CHECKPOINTS]
-            out.summary = f"영상 성과 없음: {out.reason}"
-            return _done(out, queries, now, store, env, shorts)
-        out.tracking = True
-        n, problems = await measure_due(store, youtube, now)
-        if n:
-            queries.append(f"youtube videos.list video_performance points={n}")
-        out.limits += problems
-        insight, why = _target_of(env, out.insight_id)
-        out.target_views_reference = insight.target_views_reference if insight else None
-        out.target_reference_basis = why
-        out.category = video.category or (insight.category if insight else None)
-        out.shorts_format = video.shorts_format or (insight.shorts_format if insight else None)
-        out.peer_median_views, out.peer_basis = peer_median(shorts, out.category,
-                                                            out.shorts_format)  # fmt: skip
-        target, peer = out.target_views_reference, out.peer_median_views
-        out.target_checkpoint = TARGET_AT
-        out.checkpoints = checkpoints_of(video, store.points(video.key), now, target, peer)
-        kind = peer_kind(out.peer_basis)
-        for c in out.checkpoints:
-            c.line = line_of(c, kind)
-        out.facts = facts_of(video, out.checkpoints, out.target_views_reference,
-                             out.peer_median_views)  # fmt: skip
-        known = [c for c in out.checkpoints if c.status == "known"]
-        out.status = "known" if known else "unknown"
-        out.reason = None if known else (out.checkpoints[0].reason or MEASURING)
-        out.limits.append("시점 값은 그 시점 뒤 허용 창(1시간 시점 1시간·1일 2시간·3일 3시간·"
-                          "7일 4시간) 안에 잰 값이다 (hours_after)")  # fmt: skip
-        out.limits.append("같은 숏츠 중앙값은 인기·검색 숏츠의 지금 조회수라 게시 후 시간이 다르다")
-        out.limits.append(f"목표 대비 배수는 목표 참고값이 정의된 {NAMES[TARGET_AT]} 시점에만 낸다")
-        if video.test:
-            out.limits.append("시험 영상: 화면·브리프 집계(성과 모으기)에서 뺀다")
-        last = known[-1] if known else None
-        out.summary = (last.line or "") if last else f"영상 성과 {out.reason}"
-        return _done(out, queries, now, store, env, shorts)
+        problems: list[str] = []
+        if video.platform == "youtube":
+            n, problems = await measure_due(store, youtube, now)
+            if n:
+                queries.append(f"youtube videos.list video_performance points={n}")
+        everyone = describe_all(store, env, now, shorts)
+        this = next(o for o in everyone if o.video_id == video.video_id
+                    and o.platform == video.platform)  # fmt: skip
+        this.limits = [*out.limits, *problems, *this.limits]
+        return _done(this, queries, now, store, env, shorts)
     finally:
         if own:
             store.close()
+
+
+AGE_LIMIT = ("같은 형식 대비는 같은 형식 숏츠의 게시 후 같은 시간대(시점 창) 조회 중앙값과 비교한다"
+             " (시간 맞춤, 수집기 스냅샷). 표본이 5개 미만이면 기준 없음. peer_ratio(지금 조회수"
+             " 중앙값 대비)는 시간이 안 맞아 화면에 쓰지 않는다")  # fmt: skip
+
+
+def describe(
+    video: Video, store: VideoStore, env: Mapping[str, str], now: datetime,
+    shorts: ShortsStatsOutput | None, baselines: Mapping[str, Any],
+    insights: dict[str, tuple[TrendInsight | None, str]],
+) -> VideoPerformanceOutput:  # fmt: skip
+    """영상 하나: 시점 값, 시간 맞춤 비교, 판정, 신호, 예상치, facts (문장은 describe_all에서)."""
+    from data_agent.skills import video_factors as vf
+
+    out = VideoPerformanceOutput(
+        campaign_id=video.campaign_id, insight_id=video.insight_id,
+        proposal_id=video.proposal_id, test=video.test, title=video.title,
+        published_at=video.published_at, platform=video.platform, video_id=video.video_id,
+        video_url=video.video_url, schema_version=SCHEMA_VERSION,
+    )  # fmt: skip
+    if video.platform != "youtube":
+        out.reason = f"{WAITING}: {video.platform} 성과를 읽는 연결이 아직 없음"
+        out.needs = list(NEEDS[video.platform])
+        out.checkpoints = [VideoCheckpoint(checkpoint=c, reason=WAITING) for c in CHECKPOINTS]
+        out.summary = f"영상 성과 없음: {out.reason}"
+        vf.assess(out, None)
+        return out
+    out.tracking = True
+    key = out.insight_id or ""
+    if key not in insights:
+        insights[key] = _target_of(env, out.insight_id)
+    insight, why = insights[key]
+    out.target_views_reference = insight.target_views_reference if insight else None
+    out.target_reference_basis = why
+    out.topic = insight.topic if insight else None
+    out.category = video.category or (insight.category if insight else None)
+    out.shorts_format = video.shorts_format or (insight.shorts_format if insight else None)
+    out.peer_median_views, out.peer_basis = peer_median(shorts, out.category,
+                                                        out.shorts_format)  # fmt: skip
+    target, peer = out.target_views_reference, out.peer_median_views
+    out.target_checkpoint = TARGET_AT
+    out.checkpoints = checkpoints_of(video, store.points(video.key), now, target, peer)
+    vf.assess(out, baselines.get(out.shorts_format) if out.shorts_format else None)
+    out.facts = facts_of(video, out.checkpoints, out.target_views_reference,
+                         out.peer_median_views)  # fmt: skip
+    if out.projection is not None and out.projection.views is not None:
+        out.facts.append(DataFact(
+            fact_id=fact_id(video.key, "7일 예상치"), label="7일 예상치 (3일 × 같은 형식 7일/3일)",
+            value=float(out.projection.views), unit="회", source="code", link=video.video_url,
+            about=video.key,
+        ))  # fmt: skip
+    known = [c for c in out.checkpoints if c.status == "known"]
+    out.status = "known" if known else "unknown"
+    out.reason = None if known else (out.checkpoints[0].reason or MEASURING)
+    out.limits.append("시점 값은 그 시점 뒤 허용 창(1시간 시점 1시간·1일 2시간·3일 3시간·"
+                      "7일 4시간) 안에 잰 값이다 (hours_after)")  # fmt: skip
+    out.limits.append(AGE_LIMIT)
+    out.limits.append(f"목표 대비 배수는 목표 참고값이 정의된 {NAMES[TARGET_AT]} 시점에만 낸다")
+    out.limits.append(vf.ANALYTICS_LIMIT)
+    if video.test:
+        out.limits.append("시험 영상: 화면·브리프 집계(성과 모으기)에서 뺀다")
+    last = known[-1] if known else None
+    out.summary = (last.line or "") if last else f"영상 성과 {out.reason}"
+    return out
+
+
+def describe_all(
+    store: VideoStore, env: Mapping[str, str], now: datetime, shorts: ShortsStatsOutput | None,
+) -> list[VideoPerformanceOutput]:  # fmt: skip
+    """등록된 영상 전부 (시험 영상 포함): 같은 인사이트 영상을 서로 보며 성과 요인 문장을 붙인다."""
+    from data_agent.skills import video_baseline, video_factors
+
+    videos = store.videos()
+    windows = {c: (CHECKPOINTS[c], WINDOW_HOURS[c]) for c in CHECKPOINTS}
+    baselines = video_baseline.load(env, windows, exclude=[v.video_id for v in videos])
+    insights: dict[str, tuple[TrendInsight | None, str]] = {}
+    outs = [describe(v, store, env, now, shorts, baselines, insights) for v in videos]
+    for o in outs:
+        video_factors.explain(o, outs)
+    return outs
+
+
+def _list_all(
+    store: VideoStore, env: Mapping[str, str], now: datetime, shorts: ShortsStatsOutput | None,
+    queries: list[str],
+) -> PerformanceResult:  # fmt: skip
+    """성과 탭: 영상 전부, 요약 타일, 인사이트 카드 (저장분만 읽는다)."""
+    from data_agent.skills import video_factors as vf
+
+    outs = describe_all(store, env, now, shorts)
+    out = VideoPerformanceOutput(
+        schema_version=SCHEMA_VERSION, baseline_basis="age_matched", target_checkpoint=TARGET_AT,
+        videos=outs, tally=vf.tally_of(outs), insight_cards=vf.insight_cards(outs),
+    )  # fmt: skip
+    t = out.tally
+    if outs and t is not None:
+        out.status = "known"
+        out.summary = (f"영상 {t.videos}개 (시험 영상 제외) · 달성 {t.achieved} · 미달 {t.missed}"
+                       f" · 측정 중 {t.measuring}")  # fmt: skip
+    else:
+        out.reason = "아직 측정한 캠페인 영상이 없습니다"
+        out.summary = out.reason
+    out.limits = [AGE_LIMIT, vf.ANALYTICS_LIMIT]
+    return _done(out, queries, now, store, env, shorts)
 
 
 async def _register(

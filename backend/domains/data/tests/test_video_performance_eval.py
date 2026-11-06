@@ -129,31 +129,62 @@ class CurveYouTube:
         return out
 
 
-def _setup(tmp: Path, target: float, peer: float) -> tuple[dict, object]:
+def _setup(tmp: Path, target: float, peer: float,
+           insights: list[dict] | None = None) -> tuple[dict, object]:  # fmt: skip
+    """브리프 저장분(인사이트)·숏츠 통계. 같은 형식 숏츠 스냅샷도 늘 임시 폴더 (실제 파일 X)."""
     from ax_contracts.schemas.data import ShortsGroup, ShortsStatsOutput
     from data_agent.skills import video_performance as vp
 
     conn = sqlite3.connect(tmp / "brief.db")
     conn.execute("CREATE TABLE briefs (day TEXT, rules TEXT, created_at TEXT, output TEXT,"
                  " expires_at TEXT)")  # fmt: skip
-    insight = {"insight_id": "ins_eval", "rank": 1, "topic": "평가", "line": "x",
-               "shorts_format": "리뷰", "target_views_reference": target}  # fmt: skip
+    rows = [{"insight_id": i["insight_id"], "rank": n + 1, "topic": i["topic"], "line": "x",
+             "shorts_format": i["format"], "target_views_reference": i["target"]}
+            for n, i in enumerate(insights or [{"insight_id": "ins_eval", "topic": "평가",
+                                                "format": "리뷰", "target": target}])]  # fmt: skip
     conn.execute("INSERT INTO briefs VALUES ('2026-11-06','r','x',?,NULL)",
-                 (json.dumps({"insights": [insight]}),))  # fmt: skip
+                 (json.dumps({"insights": rows}),))  # fmt: skip
     conn.commit()
     conn.close()
     shorts = ShortsStatsOutput(status="known", snapshot_at=PUB, by_format=[
         ShortsGroup(name="리뷰", count=20, median_views=peer)])  # fmt: skip
-    env = {vp.DB_ENV: str(tmp / "perf.db"), "DATA_INSIGHT_BRIEF_DB": str(tmp / "brief.db")}
+    env = {vp.DB_ENV: str(tmp / "perf.db"), "DATA_INSIGHT_BRIEF_DB": str(tmp / "brief.db"),
+           "DATA_YOUTUBE_DB": str(tmp / "youtube.db"),
+           "DATA_SHORTS_DB": str(tmp / "shorts.db")}  # fmt: skip
     return env, shorts
 
 
-def _run_collector(videos: list[dict], tmp: Path, target: float, peer: float) -> dict:
+def _peer_snapshots(tmp: Path, peers: list[dict]) -> None:
+    """같은 형식 숏츠: 형식 분류(shorts.db)와 수집기 스냅샷(youtube.db, 1시간마다)."""
+    from data_agent.skills.shorts_stats import ShortsStore
+    from data_agent.youtube_store import SnapshotStore
+
+    ShortsStore(tmp / "shorts.db").close()
+    SnapshotStore(tmp / "youtube.db").close()
+    shorts = sqlite3.connect(tmp / "shorts.db")
+    yt = sqlite3.connect(tmp / "youtube.db")
+    for p in peers:
+        shorts.execute("INSERT INTO formats VALUES (?,?,NULL,?)", (p["id"], p["format"],
+                                                                   PUB.isoformat()))  # fmt: skip
+        pub = PUB + timedelta(hours=p["pub"])
+        for age, views, likes, comments in make.measurements(p, p["pub"]):
+            at = (pub + timedelta(hours=age)).replace(microsecond=0).isoformat()
+            row = (at, p["id"], int(views), int(likes), int(comments), pub.isoformat())
+            yt.execute("INSERT INTO snapshots VALUES (?,?,?,?,?,NULL,?,'24','ch','[]','popular')",
+                       row)  # fmt: skip
+    shorts.commit()
+    yt.commit()
+    shorts.close()
+    yt.close()
+
+
+def _run_collector(videos: list[dict], tmp: Path, target: float, peer: float,
+                   insights: list[dict] | None = None, list_all: bool = False) -> dict:  # fmt: skip
     """skill을 수집기처럼 돌린다: 영상마다 첫 측정에 등록, 측정 시각마다 measure_due, 끝에 결과."""
     from ax_contracts.schemas.data import VideoPerformanceRequest
     from data_agent.skills import video_performance as vp
 
-    env, shorts = _setup(tmp, target, peer)
+    env, shorts = _setup(tmp, target, peer, insights)
     yt = CurveYouTube(videos)
     clocks = sorted({round(p[0] + v["pub"], 2) for v in videos for p in v["measurements"]})
     first = {v["id"]: round(v["measurements"][0][0] + v["pub"], 2) for v in videos}
@@ -162,7 +193,7 @@ def _run_collector(videos: list[dict], tmp: Path, target: float, peer: float) ->
     def req(v: dict, url: bool) -> VideoPerformanceRequest:
         return VideoPerformanceRequest(
             video_url=f"https://youtu.be/{v['id']}" if url else None,
-            campaign_id=f"cmp_{v['id']}", insight_id="ins_eval")  # fmt: skip
+            campaign_id=f"cmp_{v['id']}", insight_id=v.get("insight", "ins_eval"))  # fmt: skip
 
     try:
         for clock in clocks:
@@ -173,11 +204,25 @@ def _run_collector(videos: list[dict], tmp: Path, target: float, peer: float) ->
                                                  store=store, now=yt.now))  # fmt: skip
             if not new:
                 asyncio.run(vp.measure_due(store, yt, yt.now))
-        out = asyncio.run(vp.video_performance(req(videos[0], False), yt, env=env, shorts=shorts,
-                                               store=store, now=yt.now))  # fmt: skip
+        last = (VideoPerformanceRequest.model_validate({"list_all": True}) if list_all
+                else req(videos[0], False))  # fmt: skip
+        out = asyncio.run(vp.video_performance(last, yt, env=env, shorts=shorts, store=store,
+                                               now=yt.now))  # fmt: skip
     finally:
         store.close()
     return out.output.model_dump(mode="json")
+
+
+def _scenario_answer(case: dict, tmp: Path) -> dict:
+    """수집기처럼 돌린 뒤 list_all 답. 계약에 list_all이 없으면(평가 정의만 있는 dev) 0점."""
+    from pydantic import ValidationError
+
+    videos = [{**v, "measurements": make.measurements(v, v["pub"])} for v in case["videos"]]
+    _peer_snapshots(tmp, case["peers"])
+    try:
+        return _run_collector(videos, tmp, 0.0, case["peer"], case["insights"], list_all=True)
+    except ValidationError as error:
+        return {"error": str(error)}
 
 
 def _skill_answer(case: dict, tmp: Path) -> dict:
@@ -208,6 +253,52 @@ GATES = {  # 관문: 시점·값은 모두 맞고, 배수 오차 0, 시점별 �
     "video_performance.ratio_max_error": 0.0,
     "video_performance.aggregate_accuracy": 1.0,
 }
+
+
+def test_the_scenario_answers_come_from_the_curves() -> None:
+    """성과 요인 시나리오 정답 (①~⑤)."""
+    (case,) = make.scenario_cases()
+    by = {a["name"]: a for a in case["answers"]}
+    avg = by["평범한 영상"]
+    assert avg["verdict"] == "missed" and avg["checkpoints"]["7d"]["peer_age_ratio"] <= 1  # ①
+    assert avg["checkpoints"]["7d"]["views"] / case["peer"] >= 1.9  # 시간 안 맞추면 2배로 반대
+    assert "주제는 같으니" in avg["phrases"] and "10.1배" in avg["numbers"]  # ②
+    gap = by["수집 멈춘 영상"]
+    assert gap["levels"]["grow"] == "unknown" and "데이터 문제" in gap["phrases"]  # ③
+    late = by["늦게 올린 영상"]
+    assert late["verdict"] == "measuring" and late["projection"]["is_estimate"]  # ④
+    assert set(by["강의 영상"]["levels"].values()) == {"unknown"}  # ⑤ 강의 표본 3개
+    assert make.build_scenario() == case
+
+
+SCENARIO_GATES = dict.fromkeys(score.SCENARIO_METRICS, 1.0)  # 모두 맞아야 함 (기준선 그대로)
+
+
+def test_the_skill_passes_the_factor_scenario_gates(tmp_path: Path) -> None:
+    """관문: 시간 맞춤 기준·판정·신호 등급·문장 숫자·문구·예상치 표기가 모두 정답과 같다."""
+    answers = {}
+    for c in make.scenario_cases():
+        folder = tmp_path / c["name"]
+        folder.mkdir()
+        answers[c["name"]] = _scenario_answer(c, folder)
+    metrics = score.score_scenario(make.scenario_cases(), answers)
+    print("video_performance scenario:", json.dumps(metrics, ensure_ascii=False))
+    assert set(metrics) == set(score.SCENARIO_METRICS)
+    for name, gate in SCENARIO_GATES.items():
+        assert metrics[name] >= gate, f"{name} {metrics[name]} (관문 {gate})"
+
+
+def test_the_scenario_scorer() -> None:
+    (case,) = make.scenario_cases()
+    perfect = {"videos": [
+        {"video_id": a["id"], "verdict": a["verdict"],
+         "checkpoints": [{"checkpoint": k, **v} for k, v in a["checkpoints"].items()],
+         "signals": {s: {"level": lv} for s, lv in a["levels"].items()},
+         "factors": [" ".join(a["numbers"] + a["phrases"])], "projection": a["projection"]}
+        for a in case["answers"]]}  # fmt: skip
+    got = score.score_scenario([case], {"scenario": perfect})
+    assert got == dict.fromkeys(score.SCENARIO_METRICS, 1.0)
+    assert score.score_scenario([case], {}) == dict.fromkeys(score.SCENARIO_METRICS, 0.0)
 
 
 def test_the_skill_passes_the_gates_on_the_curves(tmp_path: Path) -> None:

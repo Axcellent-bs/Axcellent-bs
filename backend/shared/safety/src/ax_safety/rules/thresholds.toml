@@ -13,7 +13,7 @@
 # - param·paths_within·paths_avoid·paths_named: 금액이 아닌 규칙(아래 각 규칙 주석 참고)
 # op: ">=", ">", "<=", "<". when은 params가 이 값일 때만 규칙을 적용한다.
 
-version = 5
+version = 7
 
 # B 교차검증 응답 마감(초). 넘으면 실행하지 않고 C 보류
 verify_timeout_seconds = 30
@@ -545,31 +545,52 @@ allowed = ["banner", "email"]
 when = { channel_code = "sns" }
 
 # 영상 건당 비용. 1건 약 1,300원의 1.5배. 더 비싼 모델·길이로 바뀌면 사람이 본다
+# 매체 종류가 image·video가 아니거나 없으면 어느 상한을 쓸지 알 수 없어 C
+[[rules]]
+key = "media_kind_known"
+action = "generate_media"
+metric = "param_in"
+field = "media_kind"
+allowed = ["image", "video"]
+
+# 영상 8초 720p 약 0.81 USD(약 1,150원). 2,000원 이상이면 단가표·환율이 이상한 것이라 사람이 본다
 [[rules]]
 key = "video_cost_single"
-action = "generate_video"
+action = "generate_media"
+when = { media_kind = "video" }
 metric = "amount"
 op = ">="
 value = 2000
 
+# 이미지 1장 1024 medium 약 80원, high 약 300원(0.211 USD). 400원 이상이면 사람이 본다
 [[rules]]
-key = "video_cost_daily"
-action = "generate_video"
+key = "image_cost_single"
+action = "generate_media"
+when = { media_kind = "image" }
+metric = "amount"
+op = ">="
+value = 400
+
+# 하루 누적은 이미지·영상을 합쳐 본다 (같은 생성 예산)
+[[rules]]
+key = "media_cost_daily"
+action = "generate_media"
 metric = "daily_total"
 op = ">="
 value = 10000
 
 # 유료 호출인데 비용이 0이면 계산이 잘못된 것이다. 0원이 상한을 지나가지 않게 막는다
 [[rules]]
-key = "video_cost_zero"
-action = "generate_video"
+key = "media_cost_zero"
+action = "generate_media"
 metric = "amount"
 op = "<"
 value = 1
 
 [[rules]]
 key = "video_duration"
-action = "generate_video"
+action = "generate_media"
+when = { media_kind = "video" }
 metric = "param"
 field = "duration_s"
 op = ">"
@@ -582,3 +603,22 @@ action = "start_campaign"
 metric = "amount"
 op = ">="
 value = 500000
+
+# ---- 보유기간 지난 개인정보 지우기 (고객지원, #736). 기본 A(매일 도는 법정 파기)지만 되돌릴 수 없다.
+# 한 번에 지우는 건수가 평소보다 많으면 날짜 계산·설정이 잘못됐을 수 있어 사람이 본다.
+# 처음 켜는 날처럼 쌓인 건을 한꺼번에 지울 때도 사람이 한 번 확인한다. count가 없으면 C
+[[rules]]
+key = "purge_inquiries_batch"
+action = "purge_expired_inquiries"
+metric = "param"
+field = "count"
+op = ">"
+value = 200
+
+[[rules]]
+key = "purge_claims_batch"
+action = "purge_expired_claims"
+metric = "param"
+field = "count"
+op = ">"
+value = 100

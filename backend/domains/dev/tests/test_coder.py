@@ -702,6 +702,68 @@ def test_cross_check_wait_escalates_to_human_after_timeout(
     assert "10분 응답 없음" in (_task(service).coding.error or "")
 
 
+def test_pr_moved_to_human_goes_to_inbox_once(
+    service: PlanningService, adapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """작업은 PR을 연 상태인데 머지가 사람 확인으로 넘어가면 받은 요청에 한 번 올린다."""
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("PLANNING_CROSS_CHECK_TIMEOUT_MIN", "10")
+    mismatch = CodeReview(verdict="불일치", notes=["아직 아님"])
+    coder.set_llm(FakeLLM(reviews=[mismatch, mismatch]))
+    run(_go(service))
+    sent = []
+
+    async def poster(body):
+        sent.append(body)
+        return SimpleNamespace(task_id="hof_8", assignee_unit=body.assignee_unit)
+
+    service._cause_poster = poster
+    _task(service).coding.status = "opened"  # 작업은 PR을 연 상태 (사람 확인 멈춤으로는 안 올라감)
+    pr = next(p for p in service.state.prs if p.task == "T-D1")
+    pr.auto_review.at -= timedelta(minutes=11)
+
+    async def go() -> None:
+        await service.escalate_waits()
+        await service.wait_sent()
+
+    run(go())
+    assert len(sent) == 1 and sent[0].reason.startswith(f"{pr.id} 머지 사람 확인")
+    assert sent[0].idempotency_key.startswith(f"dev_pr_hold:{pr.id}:")
+    run(service.mark_read("support"))
+    run(service.wait_sent())
+    assert len(sent) == 1
+
+
+def test_failed_task_goes_to_inbox_once(service: PlanningService, adapter) -> None:
+    """실패한 코딩 작업도 받은 요청에 한 번 올린다 (다시 시도·폐기·돌려보내기 판단)."""
+    from types import SimpleNamespace
+
+    sent = []
+
+    async def poster(body):
+        sent.append(body)
+        return SimpleNamespace(task_id="hof_7", assignee_unit=body.assignee_unit)
+
+    service._cause_poster = poster
+    coder.set_llm(FakeLLM(fail={"CodePlan"}))
+
+    async def go() -> None:
+        await _go(service)
+        await service.wait_sent()
+
+    run(go())
+    assert _task(service).coding.status == "failed" and len(sent) == 1
+    body = sent[0]
+    assert body.skill == "review_dev_task" and body.input["task_id"] == "T-D1"
+    assert body.reason.startswith("개발 AI 작업 실패") and "다시 시도" in body.reason
+    assert body.idempotency_key.startswith("dev_fail:T-D1:")
+    run(service.mark_read("support"))  # 다른 변경이 와도 실패가 그대로면 다시 안 올린다
+    run(service.wait_sent())
+    assert len(sent) == 1
+
+
 def test_revise_only_for_waiting_task_with_open_pr(service: PlanningService, adapter) -> None:
     coder.set_llm(FakeLLM())
     run(_go(service))  # 머지까지 감

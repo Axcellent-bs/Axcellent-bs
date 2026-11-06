@@ -23,10 +23,10 @@ const RULE_KO: Record<string, string> = {
   pr_agent_config_paths: "에이전트 설정·훅·설치 파일", merge_agent_config_paths: "에이전트 설정·훅·설치 파일", revert_agent_config_paths: "에이전트 설정·훅·설치 파일",
   sns_ai_label_missing: "AI 생성 표시가 빠진 곳", sns_text_mismatch: "승인한 문구와 다른 곳", sns_constraint_missing: "쿠폰 필수 안내가 빠진 곳",
   sns_daily_posts: "오늘 SNS 게시 수", notice_sns_channel: "공지를 SNS로 올리려 함. SNS 게시는 별도 요청으로 해야 함",
-  video_cost_single: "영상 한 건 비용", video_cost_daily: "오늘 영상 비용 합계", video_cost_zero: "영상 비용", video_duration: "영상 길이(초)",
+  video_cost_single: "영상 한 건 비용", image_cost_single: "이미지 한 장 비용", media_cost_daily: "오늘 이미지·영상 비용 합계", media_cost_zero: "생성 비용", media_kind_known: "매체 종류", video_duration: "영상 길이(초)",
   campaign_budget_single: "캠페인 한 건 예산",
 };
-const MONEY_RULES = new Set(["coupon_total", "coupon_unit", "coupon_daily", "compensation_per_context", "compensation_per_customer", "refund_single", "video_cost_single", "video_cost_daily", "video_cost_zero", "campaign_budget_single"]);
+const MONEY_RULES = new Set(["coupon_total", "coupon_unit", "coupon_daily", "compensation_per_context", "compensation_per_customer", "refund_single", "video_cost_single", "image_cost_single", "media_cost_daily", "media_cost_zero", "campaign_budget_single"]);
 const OP_KO: Record<string, string> = { ">": "초과", ">=": "이상", "<": "미만", "<=": "이하" };
 const action = (a: string) => ACTION_KO[a] ?? "기타 작업";
 const who = (w: string) => WHO_KO[w] ?? "다른 AI";
@@ -62,7 +62,7 @@ function tipOf(r: Review): string {
   if (r.action === "confirm_settlement") return "위 ③ 판매자 정산 표의 판매자·기간·금액과 같으면 진행하세요.";
   if (r.action === "start_campaign") return "재무 탭의 남은 예산과 실패 이력을 보고 금액이 맞으면 진행하세요. 진행하면 광고비가 나갑니다.";
   if (r.action === "publish_sns") return "글과 영상이 승인한 초안과 같고 AI 생성 표시가 있으면 진행하세요. 올리면 되돌리기 어렵습니다.";
-  if (r.action === "generate_video") return "비용과 길이가 예상과 맞으면 진행하세요. 진행하면 비용이 나갑니다.";
+  if (r.action === "generate_media") return "비용과 길이가 예상과 맞으면 진행하세요. 진행하면 비용이 나갑니다.";
   if (r.action === "publish_notice") return "공지 내용과 채널이 맞는지 보고 진행하세요. SNS 게시라면 멈추세요.";
   switch (r.report.hold_reason) {
     case "amount_mismatch": return "요청한 AI가 금액을 잘못 적었다는 뜻입니다. 보통 멈추고 담당자에게 알리세요.";

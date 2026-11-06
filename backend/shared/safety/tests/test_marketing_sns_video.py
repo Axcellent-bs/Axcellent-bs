@@ -1,4 +1,4 @@
-"""마케팅 SNS 게시·영상 생성 등급 (#487)."""
+"""마케팅 SNS 게시·이미지·영상 생성 등급 (#487, #677)."""
 
 from __future__ import annotations
 
@@ -23,7 +23,13 @@ def _sns(**over: Any) -> dict[str, Any]:
 
 
 def _video(**over: Any) -> dict[str, Any]:
-    return {"post_draft_id": "pd_1", "duration_s": 8, "cost_krw": 1200, **over}
+    return {
+        "post_draft_id": "pd_1",
+        "media_kind": "video",
+        "duration_s": 8,
+        "cost_krw": 1200,
+        **over,
+    }
 
 
 def _rule_keys(gate: Gate, review_id: str | None) -> set[str]:
@@ -101,7 +107,7 @@ async def test_sns_daily_limit_counts_executions_not_request_values(
 async def test_video_within_limits_passes_on_rules_without_a_verifier_agent(
     gate: Gate, verifier: Any, act
 ) -> None:
-    decision = await gate.execute(act("generate_video", "marketing", "v1", **_video()))
+    decision = await gate.execute(act("generate_media", "marketing", "v1", **_video()))
     assert (decision.grade, decision.status, decision.verifier) == ("B", "executed", "safety")
     assert decision.computed_amount == 1200
     assert verifier.tasks == []
@@ -112,13 +118,13 @@ async def test_video_within_limits_passes_on_rules_without_a_verifier_agent(
     ("over", "key"),
     [
         ({"cost_krw": 2000}, "video_cost_single"),
-        ({"cost_krw": 0}, "video_cost_zero"),
+        ({"cost_krw": 0}, "media_cost_zero"),
         ({"duration_s": 9}, "video_duration"),
         ({"duration_s": None}, "video_duration"),
     ],
 )
 async def test_video_over_a_limit_is_held(gate: Gate, act, over: dict[str, Any], key: str) -> None:
-    held = await gate.execute(act("generate_video", "marketing", "v1", **_video(**over)))
+    held = await gate.execute(act("generate_media", "marketing", "v1", **_video(**over)))
     assert (held.grade, held.status, held.hold_reason) == (
         "C",
         "held",
@@ -131,22 +137,29 @@ async def test_video_over_a_limit_is_held(gate: Gate, act, over: dict[str, Any],
 async def test_video_daily_total_holds_the_clip_that_reaches_the_limit(gate: Gate, act) -> None:
     for n in range(5):
         ok = await gate.execute(
-            act("generate_video", "marketing", f"v{n}", **_video(cost_krw=1900))
+            act("generate_media", "marketing", f"v{n}", **_video(cost_krw=1900))
         )
         assert ok.status == "executed"
-    held = await gate.execute(act("generate_video", "marketing", "v6", **_video(cost_krw=1900)))
+    held = await gate.execute(act("generate_media", "marketing", "v6", **_video(cost_krw=1900)))
     assert held.status == "held"
-    assert _rule_keys(gate, held.review_id) == {"video_cost_daily"}
+    assert _rule_keys(gate, held.review_id) == {"media_cost_daily"}
 
 
 @pytest.mark.asyncio
 async def test_video_cost_must_be_computed_and_match_the_claim(gate: Gate, act) -> None:
     missing = await gate.execute(
-        act("generate_video", "marketing", "v1", post_draft_id="pd_1", duration_s=8)
+        act(
+            "generate_media",
+            "marketing",
+            "v1",
+            post_draft_id="pd_1",
+            media_kind="video",
+            duration_s=8,
+        )
     )
     assert (missing.status, missing.hold_reason) == ("held", HoldReason.SCHEMA_INVALID)
     mismatch = await gate.execute(
-        act("generate_video", "marketing", "v2", **_video(claimed_cost_krw=900))
+        act("generate_media", "marketing", "v2", **_video(claimed_cost_krw=900))
     )
     assert (mismatch.status, mismatch.hold_reason) == ("held", HoldReason.AMOUNT_MISMATCH)
 
@@ -163,3 +176,50 @@ async def test_notice_on_sns_channel_is_held_and_other_channels_stay_a(gate: Gat
             act("publish_notice", "marketing", f"n{n + 2}", draft_id="d1", channel_code=channel)
         )
         assert (ok.grade, ok.status) == ("A", "executed")
+
+
+def _image(**over: Any) -> dict[str, Any]:
+    return {"post_draft_id": "pd_1", "media_kind": "image", "cost_krw": 90, **over}
+
+
+@pytest.mark.asyncio
+async def test_image_has_no_length_and_its_own_cost_limit(gate: Gate, verifier: Any, act) -> None:
+    ok = await gate.execute(act("generate_media", "marketing", "i1", **_image()))
+    assert (ok.grade, ok.status, ok.verifier) == ("B", "executed", "safety")
+    assert verifier.tasks == []
+    # 영상 상한(2,000원) 아래여도 이미지 상한(400원)을 넘으면 사람이 본다
+    held = await gate.execute(act("generate_media", "marketing", "i2", **_image(cost_krw=400)))
+    assert _rule_keys(gate, held.review_id) == {"image_cost_single"}
+    zero = await gate.execute(act("generate_media", "marketing", "i3", **_image(cost_krw=0)))
+    assert _rule_keys(gate, zero.review_id) == {"media_cost_zero"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", [None, "audio"])
+async def test_unknown_media_kind_is_held(gate: Gate, act, kind: str | None) -> None:
+    held = await gate.execute(act("generate_media", "marketing", "m1", **_image(media_kind=kind)))
+    assert held.status == "held"
+    assert "media_kind_known" in _rule_keys(gate, held.review_id)
+
+
+@pytest.mark.asyncio
+async def test_daily_total_adds_images_and_videos(gate: Gate, act) -> None:
+    for n in range(5):
+        ok = await gate.execute(
+            act("generate_media", "marketing", f"v{n}", **_video(cost_krw=1900))
+        )
+        assert ok.status == "executed"
+    for n in range(1):
+        ok = await gate.execute(act("generate_media", "marketing", f"i{n}", **_image(cost_krw=300)))
+        assert ok.status == "executed"
+    held = await gate.execute(act("generate_media", "marketing", "i9", **_image(cost_krw=300)))
+    assert _rule_keys(gate, held.review_id) == {"media_cost_daily"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["marketing_chat_send", "marketing_chat_close"])
+async def test_marketing_chat_is_a_and_only_marketing_asks(gate: Gate, act, action: str) -> None:
+    ok = await gate.execute(act(action, "marketing", "c1", thread_id="t1"))
+    assert (ok.grade, ok.status) == ("A", "executed")
+    other = await gate.execute(act(action, "support", "c2", thread_id="t1"))
+    assert other.hold_reason == HoldReason.UNREGISTERED_ACTION

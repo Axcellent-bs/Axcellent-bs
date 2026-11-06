@@ -55,8 +55,18 @@ def handoff_of(req: Request, tenant_id: str) -> HandoffCreate:
     )
 
 
-def hold_handoff(task: Task, pr: PR | None, context_id: str, tenant_id: str) -> HandoffCreate:
-    """코딩 작업이 사람 확인으로 멈춘 것 → 개발팀 할 일 (머지·수정 지시·다시 시도 판단)."""
+def hold_handoff(
+    task: Task,
+    pr: PR | None,
+    context_id: str,
+    tenant_id: str,
+    *,
+    reason: str | None = None,
+    key: str | None = None,
+) -> HandoffCreate:
+    """코딩 작업이 사람 확인으로 멈춘 것 → 개발팀 할 일 (머지·수정 지시·다시 시도 판단).
+
+    `reason`·`key`를 주면 그 글·멱등 키를 쓴다 (작업 실패, PR 머지 사람 확인으로 넘어감)."""
     cr = task.coding
     assert cr is not None
     assignment = routing.assignment_for("planning", HOLD_SKILL)
@@ -74,10 +84,10 @@ def hold_handoff(task: Task, pr: PR | None, context_id: str, tenant_id: str) -> 
             "pr_url": pr.url if pr else None,
             "why": cr.error,
         },
-        reason=f"개발 AI가 사람 확인으로 멈춤: {cr.error or '이유 없음'}",
+        reason=reason or f"개발 AI가 사람 확인으로 멈춤: {cr.error or '이유 없음'}",
         assignee_unit=assignment.unit if assignment else DEFAULT_UNIT,
         assignee=assignment.assignee if assignment else None,
-        idempotency_key=f"dev_hold:{task.id}:{cr.updated_at.isoformat()}",
+        idempotency_key=key or f"dev_hold:{task.id}:{cr.updated_at.isoformat()}",
     )
 
 

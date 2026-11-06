@@ -178,6 +178,11 @@ class ClaimStore:
         self._claims[claim.id] = claim
         return claim
 
+    def replace(self, claim: Claim) -> Claim:
+        """이미 있는 클레임을 바뀐 모습으로 바꿔 둔다 (보유기간 삭제가 글을 치환할 때 쓴다)."""
+        self._claims[claim.id] = claim
+        return claim
+
     def set_status(self, claim: Claim, status: str, action: str, **detail: Any) -> Claim:
         claim.status = status  # type: ignore[assignment]
         claim.updated_at = now_iso()
