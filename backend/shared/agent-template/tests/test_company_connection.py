@@ -29,7 +29,7 @@ def _write(path: Path, data: object) -> None:
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ("http://192.168.0.251:8080/shop-api/", "http://192.168.0.251:8080/shop-api"),
+        ("http://10.20.30.40:8080/shop-api/", "http://10.20.30.40:8080/shop-api"),
         ("  https://shop.example.com  ", "https://shop.example.com"),
     ],
 )
@@ -65,16 +65,16 @@ def test_without_a_file_shop_api_keeps_the_env_and_default(conn_file: Path, monk
 
 def test_the_file_wins_over_the_env_and_follows_changes(conn_file: Path, monkeypatch) -> None:
     monkeypatch.setenv("AX_SHOP_API_URL", "http://127.0.0.1:8010")
-    _write(conn_file, {"shop_api_url": "http://192.168.0.251:8080/shop-api"})
-    assert agent_url("shop-api") == "http://192.168.0.251:8080/shop-api"
-    _write(conn_file, {"shop_api_url": "http://192.168.0.252:8080/shop-api"})
-    assert agent_url("shop-api") == "http://192.168.0.252:8080/shop-api"
+    _write(conn_file, {"shop_api_url": "http://10.20.30.40:8080/shop-api"})
+    assert agent_url("shop-api") == "http://10.20.30.40:8080/shop-api"
+    _write(conn_file, {"shop_api_url": "http://10.20.30.41:8080/shop-api"})
+    assert agent_url("shop-api") == "http://10.20.30.41:8080/shop-api"
     conn_file.unlink()
     assert agent_url("shop-api") == "http://127.0.0.1:8010"
 
 
 def test_other_targets_ignore_the_connection(conn_file: Path) -> None:
-    _write(conn_file, {"shop_api_url": "http://192.168.0.251:8080/shop-api"})
+    _write(conn_file, {"shop_api_url": "http://10.20.30.40:8080/shop-api"})
     assert agent_url("support") == "http://support:8102"
 
 
@@ -96,14 +96,14 @@ def test_a_broken_file_is_ignored(conn_file: Path, content: str, caplog) -> None
 
 def test_save_and_clear_round_trip(conn_file: Path) -> None:
     saved = cc.save_connection(
-        "http://192.168.0.251:8080/shop-api/",
+        "http://10.20.30.40:8080/shop-api/",
         verified_at="2026-11-06T05:00:00+00:00",
         updated_by="yejin",
     )
-    assert saved.shop_api_url == "http://192.168.0.251:8080/shop-api"
+    assert saved.shop_api_url == "http://10.20.30.40:8080/shop-api"
     stored = json.loads(conn_file.read_text(encoding="utf-8"))
     assert stored["updated_by"] == "yejin" and stored["verified_at"].startswith("2026-11-06")
-    assert cc.shop_api_override() == "http://192.168.0.251:8080/shop-api"
+    assert cc.shop_api_override() == "http://10.20.30.40:8080/shop-api"
     assert not (conn_file.parent / "company_connection.json.tmp").exists()
     assert cc.clear_connection() is True
     assert cc.clear_connection() is False
@@ -119,7 +119,7 @@ def test_without_the_env_the_feature_is_off(monkeypatch) -> None:
 
 
 def test_a_disabled_connection_keeps_the_address_but_is_not_used(conn_file: Path) -> None:
-    _write(conn_file, {"shop_api_url": "http://192.168.0.251:8080/shop-api", "enabled": False})
+    _write(conn_file, {"shop_api_url": "http://10.20.30.40:8080/shop-api", "enabled": False})
     found = cc.read_connection()
     assert found is not None and found.enabled is False
     assert cc.shop_api_override() is None
@@ -127,8 +127,8 @@ def test_a_disabled_connection_keeps_the_address_but_is_not_used(conn_file: Path
 
 
 def test_an_old_file_without_enabled_counts_as_on(conn_file: Path) -> None:
-    _write(conn_file, {"shop_api_url": "http://192.168.0.251:8080/shop-api"})
-    assert cc.shop_api_override() == "http://192.168.0.251:8080/shop-api"
+    _write(conn_file, {"shop_api_url": "http://10.20.30.40:8080/shop-api"})
+    assert cc.shop_api_override() == "http://10.20.30.40:8080/shop-api"
 
 
 def test_enabled_must_be_a_boolean(conn_file: Path) -> None:

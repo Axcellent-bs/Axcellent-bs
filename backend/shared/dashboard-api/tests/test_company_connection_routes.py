@@ -15,7 +15,7 @@ from ax_dashboard_api import company_connection as routes
 from ax_dashboard_api.main import app
 
 BASE = "/api/dashboard/company-connection"
-SHOP = "http://192.168.0.251:8080/shop-api"
+SHOP = "http://10.20.30.40:8080/shop-api"
 
 GOOD = {
     "/shop-api/health": {"data": {"status": "ok"}, "meta": {}},

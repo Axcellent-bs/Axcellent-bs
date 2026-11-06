@@ -21,10 +21,8 @@ def conn_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_default_shop_follows_the_connection(conn_file: Path) -> None:
     shop = default_shop()
     assert isinstance(shop, HttpShop) and shop.base_url == "http://127.0.0.1:8010"
-    conn_file.write_text(
-        json.dumps({"shop_api_url": "http://192.168.0.251:8080/shop-api"}), "utf-8"
-    )
-    assert shop.base_url == "http://192.168.0.251:8080/shop-api"
+    conn_file.write_text(json.dumps({"shop_api_url": "http://10.20.30.40:8080/shop-api"}), "utf-8")
+    assert shop.base_url == "http://10.20.30.40:8080/shop-api"
 
 
 def test_a_fixed_address_still_works() -> None:
