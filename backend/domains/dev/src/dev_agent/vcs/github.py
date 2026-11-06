@@ -163,6 +163,9 @@ class GithubVcsAdapter:
         self._app = app
         self._client = client or httpx.AsyncClient(timeout=timeout)
         self._caps = Capabilities(kind="github", issues=True)
+        # 기준 브랜치 커밋 → 파일 경로 목록. 커밋이 같으면 트리도 같아 다시 받지 않는다
+        # (작업·대화마다 레포 전체 트리를 받던 것을 줄인다. 마지막 커밋 하나만 둔다)
+        self._tree_cache: dict[str, list[str]] = {}
 
     def __repr__(self) -> str:
         return (
@@ -462,14 +465,17 @@ class GithubVcsAdapter:
 
     async def list_files(self, prefix: str | None = None, limit: int = LIST_LIMIT) -> list[str]:
         head = await self._head(self.base_branch)
-        tree = await self._call("GET", f"/git/trees/{head}", params={"recursive": "1"})
-        rows = sorted(
-            str(item.get("path", ""))
-            for item in (tree or {}).get("tree", [])
-            if item.get("type") == "blob"
-            and (prefix is None or str(item.get("path", "")).startswith(prefix))
-        )
-        return rows[: max(0, limit)]
+        rows = self._tree_cache.get(head)
+        if rows is None:
+            tree = await self._call("GET", f"/git/trees/{head}", params={"recursive": "1"})
+            rows = sorted(
+                str(item.get("path", ""))
+                for item in (tree or {}).get("tree", [])
+                if item.get("type") == "blob"
+            )
+            self._tree_cache = {head: rows}
+        picked = [p for p in rows if prefix is None or p.startswith(prefix)]
+        return picked[: max(0, limit)]
 
     async def read_file(self, path: str, ref: str | None = None) -> str:
         path = check_path(path)

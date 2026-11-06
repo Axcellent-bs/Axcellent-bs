@@ -188,28 +188,41 @@ PR #508의 시작값을 PR #510이 예상 사용량에 맞춰 바꿨다. 값은 
 
 ## 6. Instagram Graph API 게시 절차
 
-> 아래 절차는 일반적으로 알려진 Content Publishing API 흐름이다. **게시 어댑터를 켜기 전에 공식 문서로 전부 다시 확인한다**(목록은 이 절 끝). 체크리스트 5절의 "환불 시 쿠폰 처리가 구매자 약관에서 확정되기 전에는 게시하지 않는다"도 그대로 적용.
+> 아래 절차는 Content Publishing API 흐름이다. 2026-11-06에 Meta 공식 문서(Instagram 게시, 미디어 참조, Instagram Login 시작하기)로 한 번 대조했고, 결과를 이 절과 "공식 문서로 확인할 항목"에 적었다. 대조는 문서 요약을 거친 것이라 **게시 어댑터를 켜기 전에 수치(규격·한도)는 원문으로 한 번 더 본다**. 체크리스트 5절의 "환불 시 쿠폰 처리가 구매자 약관에서 확정되기 전에는 게시하지 않는다"도 그대로 적용.
 
 | 단계 | 호출(개략) | 비고 |
 | --- | --- | --- |
-| 1 컨테이너 생성 | `POST /{ig-user-id}/media` — 릴스: `media_type=REELS`, `video_url=<공개 URL>`, `caption`, `share_to_feed`, `is_ai_generated=true` / 이미지: `image_url`, `caption`, `is_ai_generated=true` | 캐러셀은 컨테이너에만 라벨(체크리스트 3절) |
-| 2 상태 확인 | `GET /{container-id}?fields=status_code` → `IN_PROGRESS`/`FINISHED`/`ERROR`/`EXPIRED` | 폴링 간격·최대 대기 `(TODO)`; `ERROR`·`EXPIRED`면 게시하지 않고 `failed` |
+| 1 컨테이너 생성 | `POST /{ig-user-id}/media` — 릴스: `media_type=REELS`, `video_url=<공개 URL>`, `caption`, `share_to_feed`, `is_ai_generated=true` / 이미지: `image_url`, `caption`, `is_ai_generated=true` | 캐러셀은 부모 컨테이너에만 라벨, 자식에 넣으면 오류(공식 확인). `caption` 2,200자·해시태그 30개·멘션 20개 이하 |
+| 2 상태 확인 | `GET /{container-id}?fields=status_code` → `IN_PROGRESS`/`FINISHED`/`ERROR`/`EXPIRED` | 공식 권장은 1분 간격, 최대 5분. 컨테이너는 24시간 안에 게시하지 않으면 `EXPIRED`. `ERROR`·`EXPIRED`면 게시하지 않고 `failed`. 상태 값은 `EXPIRED`·`ERROR`·`FINISHED`·`IN_PROGRESS`·`PUBLISHED` |
 | 3 게시 | `POST /{ig-user-id}/media_publish?creation_id=<container-id>` → `{id}` | 이 호출 **1회만**. 응답 `id`를 멱등 결과로 저장 |
 | 4 (선택) 확인 | `GET /{media-id}?fields=permalink,media_type,timestamp` | `permalink`를 결과·공지 저장소에 기록 |
 
-- **Meta 서버가 접근할 수 있는 영상 URL**이 필요하다 → 로컬 볼륨만으로는 안 되고, 공개 HTTPS 호스팅(shop-web 정적 경로·오브젝트 스토리지 등) `[확인 필요 — 어디에 둘지, 누가 소유하는지]`. 서명 URL·만료 시간을 두고, 게시 뒤 원본 URL은 닫을 수 있는지 확인.
-- Reel 규격 `[확인 필요]`: 9:16, MP4(H.264/AAC), 길이 하한·상한, 파일 크기 상한, 프레임레이트. 공식 표를 설정으로 옮기고 `check_sns_post`가 ffprobe로 검사.
+- **Meta 서버가 접근할 수 있는 영상 URL**이 필요하다 → 로컬 볼륨만으로는 안 되고, 공개 HTTPS 호스팅(shop-web 정적 경로·오브젝트 스토리지 등) `[확인 필요 — 어디에 둘지, 누가 소유하는지]`. 서명 URL·만료 시간을 두고, 게시 뒤 원본 URL은 닫을 수 있는지 확인. 공식 문서는 "게시를 시도하는 시점에 공개 서버에 있어야 한다(Meta가 내려받는다)"고 적었다. 큰 영상용 resumable 업로드(`rupload.facebook.com`)는 Facebook Login for Business를 구현한 앱만 쓸 수 있다고 적혀 있어, 251 내부 주소만으로는 게시할 수 없다 → 10절 7번.
+- Reel 규격(공식 확인, 2026-11-06): MP4 또는 MOV(edit list 없음, moov atom 앞), 3초 이상 15분 이하, 비율 0.01:1~10:1(9:16 권장), 영상 H.264 또는 HEVC(progressive, closed GOP, 4:2:0), 23~60fps, 가로 1920px 이하, 영상 비트레이트 25Mbps 이하(VBR), 오디오 AAC 128kbps·48kHz 이하·1~2채널, 파일 300MB 이하. 커버는 JPEG·8MB 이하·sRGB(9:16 권장, `cover_url`이 `thumb_offset`보다 우선). `share_to_feed`는 true면 피드와 릴스, false면 릴스만(실제 노출은 Meta 판단). 공식 표를 설정으로 옮기고 `check_sns_post`가 ffprobe로 검사한다.
+- 이미지 규격(공식 확인): **JPEG만**(MPO·JPS 불가), 8MB 이하, sRGB, 비율 4:5~1.91:1, 너비 320~1440px. 미디어 생성이 PNG를 내면 게시 전에 JPEG로 바꾸는 단계가 필요하다(코드는 확인하지 않음). `alt_text`는 이미지에만(최대 1,000자), 릴스·스토리는 안 된다. 쇼핑 태그·필터는 지원하지 않는다.
+- 권한·토큰(공식 확인): 프로페셔널 계정이 필요하고, Page 게시 승인(PPA)이 필요한 페이지는 승인 전까지 게시가 막힌다. 로그인 방식별 권한은 Instagram Login `instagram_business_basic`+`instagram_business_content_publish`(Instagram 사용자 토큰, `graph.instagram.com`), Facebook Login `instagram_basic`+`instagram_content_publish`+`pages_read_engagement`. 앱 유형은 Business. Advanced Access가 필요하면 앱 검수를 거친다. Instagram Login의 토큰은 앱 대시보드에서 만들면 60일, 로그인 흐름으로 받으면 1시간이다. 만료 전 갱신·알림은 사람과 정한다(8절 체크리스트).
 - 실패 처리: 컨테이너 `ERROR` → 사유 코드 기록 후 `failed`(재시도는 사람 판단). 토큰 만료(190 계열) → `failed`, 사람에게 토큰 재발급 안내(에이전트는 발급 안 함). 전송 뒤 응답 유실 → 같은 `creation_id`로 재게시하지 않고 `GET /{ig-user-id}/media`로 최근 게시물에서 `creation_id`/캡션 해시 대조 `[확인 필요: 대조 가능한 필드]`.
-- 게시 한도: 체크리스트가 "24시간 100건 / 50건 어긋남"을 적어 두었다 `[확인 필요]`. 마케팅 설정의 일일 상한은 그보다 훨씬 낮게(`(TODO)`). safety 기준표에는 같은 취지의 `sns_daily_posts`(오늘 4건째부터 C)가 들어갔다.
+- 게시 한도: 공식 문서는 계정당 24시간(이동 구간) 100건, 캐러셀은 1건으로 센다고 적었고, 같은 문서의 캐러셀 절은 50건이라고 적어 **문서끼리 어긋난다**. 한도는 `media_publish`에서 적용되고 `GET /{ig-user-id}/content_publishing_limit`로 남은 양을 읽을 수 있다. 실제 값은 그 호출로 확인하고, 둘 중 하나를 코드에 박지 않는다. Meta도 예약 게시는 앱이 직접 한도를 세라고 권한다. 마케팅 설정의 일일 상한은 그보다 훨씬 낮게(`(TODO)`). safety 기준표에는 같은 취지의 `sns_daily_posts`(오늘 4건째부터 C)가 들어갔다.
 
-### 공식 문서로 확인할 항목
-1. `is_ai_generated` 파라미터의 정확한 이름·적용 미디어 종류(릴스·이미지·캐러셀)·응답 필드.
-2. 릴스 규격(해상도·길이·크기·코덱)과 `share_to_feed` 기본값.
-3. 컨테이너 상태 코드 목록과 만료 시간.
-4. 게시 한도(24h)와 개발 모드·앱 검수(권한 `instagram_business_content_publish` 등 `[확인 필요]`) 요건, 테스트 사용자.
-5. 개발자 정책 §6.2("게시만을 위한 용도") 해당 여부, 브랜디드 콘텐츠 정책(체크리스트 5절).
-6. 계정 단위 AI 라벨("AI-generated profile") 설정 방법.
-7. 미디어 URL 접근 요건(공개 HTTPS, 리다이렉트 허용 여부, 서명 URL 가능 여부).
+### 공식 문서로 확인할 항목 (2026-11-06 대조 결과)
+1. `is_ai_generated` 파라미터: **있음, 이름 확인됨**. 컨테이너 생성 때 `true`로 보낸다. 캐러셀은 부모 컨테이너에만(자식은 오류). Facebook Login·Instagram Login에서 쓸 수 있다고 적혀 있다. 응답에 라벨 관련 필드가 오는지는 문서에 없다 → 9-2의 API 기록으로 확인.
+2. 릴스 규격: 위 표로 확인됨. `share_to_feed` 기본값은 문서에 없다(명시적으로 보낸다).
+3. 컨테이너 상태 값 5개와 24시간 만료: 확인됨. 오류 사유 코드 목록은 이 문서들에 없다.
+4. 게시 한도 100건(문서 내 50건 표기와 어긋남): 위 한도 항목. 개발 모드·앱 검수 세부와 테스트 사용자 요건은 **아직 열림**(문서는 "Advanced Access가 필요하면 앱 검수"만 적음).
+5. 개발자 정책 §6.2, 브랜디드 콘텐츠 정책: **아직 열림**(이번 대조 범위 밖).
+6. 계정 단위 AI 라벨 설정 방법: **아직 열림**(이번 대조 범위 밖).
+7. 미디어 URL 접근 요건: 공개 서버에 있어야 한다는 것만 확인됨. 리다이렉트 허용·서명 URL 가능 여부는 **아직 열림**.
+
+### 6-1. Threads 게시 (참고, 이번 구현 범위 밖)
+
+지금 설계는 Instagram만 다룬다. Threads에도 같은 방식으로 올리려 할 때를 위해 공식 문서(2026-11-06, Threads 게시·시작하기·문제 해결)에서 확인한 것을 적어 둔다. 포함 여부는 10절 10번에서 정한다.
+
+- 흐름: `POST /{threads-user-id}/threads`로 컨테이너를 만들고(`media_type`, `text`·`image_url`·`video_url`), `POST /{threads-user-id}/threads_publish`에 `creation_id`를 보낸다. 게시 전 평균 30초 정도 처리 시간을 두라고 한다. 컨테이너 상태 값과 24시간 만료는 Instagram과 같다.
+- **AI 라벨**: `is_made_with_ai=true`(기본 false). 컨테이너 생성 때 보내고, 캐러셀은 부모 `CAROUSEL` 컨테이너에만 넣는다(자식에 넣으면 오류). `threads_publish`에는 넣지 않는다. 이 설계의 "라벨은 무조건"과 같은 규칙을 적용하면 `check_sns_post`에도 이 파라미터 검사가 필요하다.
+- 한도: 24시간 게시 250건·답글 1,000건·삭제 100건(`GET /{threads-user-id}/threads_publishing_limit`로 확인). 글 500자 이하(UTF-8 바이트 기준), 게시물당 고유 링크 5개 이하(초과하면 컨테이너 생성에서 실패).
+- 미디어: 이미지는 JPEG·PNG, 8MB 이하, 너비 320~1440px, 비율 10:1 이내, sRGB. 영상은 MOV·MP4, H.264 또는 HEVC, AAC, 23~60fps, 가로 1920px 이하, 5분 이하, 1GB 이하, 9:16 권장. 미디어는 공개 서버에 있어야 한다. 캐러셀은 2~20개.
+- 권한·토큰: `threads_basic`(모든 호출)과 `threads_content_publish`(게시). Threads 사용 사례로 Meta 앱을 만들고, 앱 역할이 없는 사용자에게 쓰려면 권한별 앱 검수와 앱 공개가 필요하다(검수 전에는 앱의 Threads 테스터만). 짧은 토큰은 1시간, 긴 토큰은 60일이며 만료 전에 `GET /refresh_access_token`으로 갱신한다. 공개 프로필 사용자의 권한 동의는 90일이고 갱신하면 90일 연장된다. 비공개 프로필은 만료되면 다시 동의받아야 한다.
+- 이 문서들에서 읽지 못한 것: 호출 횟수 제한식, 앱 검수 세부 절차, 비즈니스 인증 여부.
 
 ---
 
@@ -289,6 +302,7 @@ PR #508의 시작값을 PR #510이 예상 사용량에 맞춰 바꿨다. 값은 
 | 4 | **AI 라벨 문구·크기·위치** | 법령·가이드라인 확인 뒤 설정 파일 값 | 재헌 초안 → 팀·변호사 | 열림 |
 | 5 | **게시 계정** | 테스트 계정만 / 시연용 공식 계정(`catbooks.lab` 후보), 운영 주체 표기 | 준하·재헌 | 열림 |
 | 6 | **생성물·게시 기록 보관 기간** | 개인정보 방침 3개월에 맞춤 / 자산은 별도(개인정보 아님) / 게시 기록은 감사용으로 더 길게 | 재헌 → 팀 | 열림 |
-| 7 | 영상 공개 호스팅 위치·소유자 | shop-web 정적 / 별도 스토리지 | 준하·재헌 | 열림 |
+| 7 | 영상 공개 호스팅 위치·소유자 | shop-web 정적 / 별도 스토리지 | 준하·재헌 | 열림. 2026-11-06 확인: Meta가 게시 시점에 미디어를 직접 내려받아 공개 주소가 꼭 필요하고, resumable 업로드는 Facebook Login for Business 앱만 쓸 수 있다고 문서에 적혀 있다(6절) |
 | 8 | 새 이벤트(`sns.published`) 추가 여부 | `notice.published(channel_code=sns)` 재사용 / 계약 추가 | 계약 소유자 | 열림 |
 | 9 | `publish_notice`의 `sns` 채널 처리 | 코드 거부 / registry `when` 규칙 | 재헌·태윤 | **답변됨**: 둘 다 한다. 마케팅이 코드로 거부하고 safety도 `notice_sns_channel`로 C 보류(이중 방어). 마케팅 쪽 거부 코드는 S2에서 넣는다 |
+| 10 | **Threads 게시** 포함 여부 | Instagram만 / Threads 어댑터 추가(`is_made_with_ai`, 한도 250건, 6-1절) | 예진·재헌 | 열림 |
