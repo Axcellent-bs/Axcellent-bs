@@ -79,7 +79,8 @@ export interface ExportFile { name: string; bytes: number; sha256: string }
 export interface ExportPackage {
   package_id: string; month: string; version: number; generated_at: string; files: ExportFile[]; mock: boolean;
 }
-export interface BankImport { file: string; at: string; status: "imported" | "failed"; added?: number; rows?: number; skipped?: number; reason?: string }
+/** 은행 거래내역 파일을 읽은 기록. `source`: 화면에서 올림(`upload`, `by`가 올린 사람) / 서버 폴더(`folder`) */
+export interface BankImport { file: string; at: string; status: "imported" | "failed"; source?: "upload" | "folder"; by?: string; added?: number; rows?: number; withdrawals?: number; skipped?: number; reason?: string }
 export interface ExportsView { packages: ExportPackage[]; bank_imports: BankImport[] }
 
 // 캠페인 재무: 손익 기록, 예산 판단, 실패 교훈, 총괄에 낸 의견
@@ -518,7 +519,8 @@ export const humanTokenSet = SAFETY_HUMAN_TOKEN.length > 0 || exampleMode;
 /** 재무 화면 밖(고객지원·마케팅)의 보류 결정용. 재무 화면의 예시 데이터 전환과 상관없이 늘 실제 서버를 본다 */
 export const liveHumanTokenSet = SAFETY_HUMAN_TOKEN.length > 0;
 
-interface CallOptions { method?: "GET" | "POST"; body?: unknown; human?: boolean; live?: boolean }
+/** `raw`: 파일을 그대로 보낸다(JSON으로 바꾸지 않는다) */
+interface CallOptions { method?: "GET" | "POST"; body?: unknown; raw?: Blob; human?: boolean; live?: boolean }
 
 async function call(base: string, server: string, path: string, opts: CallOptions = {}): Promise<unknown> {
   if (exampleMode && !opts.live) {
@@ -529,14 +531,15 @@ async function call(base: string, server: string, path: string, opts: CallOption
     }
   }
   const headers: Record<string, string> = {};
-  if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+  if (opts.raw !== undefined) headers["Content-Type"] = "application/octet-stream";
+  else if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   if (opts.human && SAFETY_HUMAN_TOKEN) headers.Authorization = `Bearer ${SAFETY_HUMAN_TOKEN}`;
   let res: Response;
   try {
     res = await fetch(`${base}${path}`, {
       method: opts.method ?? "GET",
       headers,
-      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+      body: opts.raw ?? (opts.body === undefined ? undefined : JSON.stringify(opts.body)),
       cache: "no-store",
     });
   } catch {
@@ -618,6 +621,10 @@ export const finance = {
   bank: () => fin<Envelope<BankMatch>>("/api/finance/bank"),
   /** 은행 입금 내역 올리기. 사람 토큰만 */
   uploadBank: (rows: BankRowIn[], hasWithdrawals = false) => fin<Envelope<BankMatch> & { meta: FinanceMeta & { added?: number; withdrawals?: number } }>("/api/finance/bank/statement", { method: "POST", body: { rows, has_withdrawals: hasWithdrawals }, human: true }),
+  // 은행 화면에서 받은 파일(CSV·xlsx)을 그대로 보낸다. 글자 인코딩·안내 줄·칸 이름은 재무 AI 서버가 맞춘다
+  uploadBankFile: (file: File) =>
+    fin<Envelope<BankMatch> & { meta: FinanceMeta & { added: number; withdrawals: number; has_withdrawals: boolean; import: BankImport } }>(
+      `/api/finance/bank/file${query({ name: file.name })}`, { method: "POST", raw: file, human: true }),
   bankOutflows: () => fin<Envelope<BankOutflows>>("/api/finance/bank/outflows"),
   noteBankOutflow: (rowId: string, note: string) =>
     fin<Envelope<BankOutflows>>(`/api/finance/bank/outflows/${encodeURIComponent(rowId)}/note`, { method: "POST", body: { note }, human: true }),

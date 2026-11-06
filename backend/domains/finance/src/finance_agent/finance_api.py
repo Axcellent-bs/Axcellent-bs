@@ -19,6 +19,7 @@
 | `GET /api/finance/variance?date=` | ① 월간 변동 분석 (지난달·작년 같은 달 대비) | 없음 |
 | `GET /api/finance/bank` | ② 은행 입금 대조 (올린 거래내역 기간만) | 없음 |
 | `POST /api/finance/bank/statement` | ② 은행 거래내역 올리기 (출금은 음수) | **사람** |
+| `POST /api/finance/bank/file?name=` | ② 은행 거래내역 파일(CSV·xlsx)을 서버가 읽기 | **사람** |
 | `GET /api/finance/bank/outflows` | ② 은행 출금 대조 (판매자 이체·항목별·설명 없는 출금) | 없음 |
 | `POST /api/finance/bank/outflows/{row_id}/note` | ② 설명 없는 출금 메모 | **사람** |
 | `GET /api/finance/cashflow` | ③ 13주 현금 흐름 (확정 + 추정, 통장 잔액 기초) | 없음 |
@@ -60,6 +61,7 @@ from ax_agent_template.execute import execute
 from ax_contracts.schemas import Evidence, RequestMeta
 from finance_agent import (
     bank,
+    bank_file,
     cashflow,
     close_checklist,
     closing,
@@ -966,6 +968,51 @@ def add_finance_api(app: FastAPI) -> None:
             "skipped": problems[:20],
             "withdrawals": sum(1 for r in rows if r["amount"] < 0),
             "has_withdrawals": with_out,
+        }
+        return ok(result, meta)
+
+    @app.post("/api/finance/bank/file", response_model=None)
+    async def upload_bank_file(
+        request: Request, name: str = "", authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """사람이 은행에서 내려받은 거래내역 파일(CSV·xlsx)을 그대로 올린다. 본문은 파일 바이트다.
+
+        읽는 규칙은 폴더 읽기와 같다(`bank_file.py`): 글자 인코딩(UTF-8·CP949), 안내 줄 아래의
+        머리줄, 은행마다 다른 칸 이름을 코드가 맞춘다. 올린 기록은 `bank_imports`에 남는다.
+        """
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await request.body()
+        if not body:
+            return error(400, "invalid_request", "파일 내용이 비어 있습니다.")
+        records = state().records
+        record: dict[str, Any] = {
+            "file": (name.strip() or "올린 파일")[:120],
+            "at": fc.iso(fc.now()),
+            "source": "upload",
+            "by": person,
+        }
+        try:
+            record |= exports.import_statement(
+                body, name, records.bank_rows, records.bank_out_periods
+            )
+        except bank_file.BankFileError as exc:
+            record |= {"status": "failed", "reason": str(exc)[:200]}
+            records.bank_imports.append(record)
+            del records.bank_imports[:-100]
+            return error(400, "invalid_file", str(exc))
+        records.bank_imports.append(record)
+        del records.bank_imports[:-100]
+        books = await state().books()
+        result = await off(bank.match, books, records.bank_rows)
+        meta = books.meta() | {
+            "uploaded_by": person,
+            "import": record,
+            "added": record["added"],
+            "withdrawals": record["withdrawals"],
+            "has_withdrawals": record["has_withdrawals"],
         }
         return ok(result, meta)
 
