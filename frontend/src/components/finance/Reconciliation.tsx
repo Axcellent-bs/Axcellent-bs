@@ -58,8 +58,9 @@ const PAGE = 100;
 export function ReconciliationSection({ tick }: { tick: number }) {
   const [limit, setLimit] = useState(PAGE);
   const [date, setDate] = useState("");
-  const res = useResource(`recon:${date}`, () => finance.reconciliation(date || null), tick);
   const [shown, setShown] = useState<ReconStatus[]>(DEFAULT_RECON_FILTER);
+  const wanted = RECON_ORDER.filter((s) => shown.includes(s));
+  const res = useResource(`recon:${date}:${wanted.join(",")}`, () => finance.reconciliation(date || null, wanted), tick);
   const toggle = (s: ReconStatus) => setShown((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]));
 
   const saveItem = (next: ReconItem) =>
@@ -150,10 +151,15 @@ export function ReconciliationSection({ tick }: { tick: number }) {
                 </ul>
               ) : (
                 <Empty>
-                  {r.items.length === 0 ? "이 기간에는 맞춰 볼 결제가 없습니다."
+                  {Object.values(r.counts).every((n) => !n) ? "이 기간에는 맞춰 볼 결제가 없습니다."
                     : shown.length === 0 ? "위에서 볼 상태를 하나 이상 고르세요."
                       : "고른 상태에 해당하는 건이 없습니다. 맞지 않는 건이 없다는 뜻입니다."}
                 </Empty>
+              )}
+              {r.shown && r.shown.total > r.items.length && (
+                <p className="text-sm text-ink-500">
+                  건수가 많아 최근 {r.items.length.toLocaleString("ko-KR")}건만 받았습니다 (전체 {r.shown.total.toLocaleString("ko-KR")}건). 위에서 날짜를 골라 좁혀 보세요.
+                </p>
               )}
               {items.length > limit && (
                 <button type="button" className="btn-ghost" onClick={() => setLimit((n) => n + PAGE)}>

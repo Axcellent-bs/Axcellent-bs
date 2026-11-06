@@ -15,12 +15,12 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from finance_agent import finance_config as fc
 from finance_agent import settlement
-from finance_agent.books import Books, item_gross, order_sold
+from finance_agent.books import Books, item_gross, paid_at
 
 STATUS_ORDER = {"overdue": 0, "at_risk": 1, "due_soon": 2, "ok": 3}
 STATUS_KO = {
@@ -53,19 +53,20 @@ def deadline_report(
 
     sellers: dict[str, dict[str, Any]] = {}
     waiting = 0  # 배송 전이라 기한이 아직 시작되지 않은 주문
-    for o in books.orders:
-        if not order_sold(o):
-            continue
-        paid_at = settlement._paid_at(o)
-        if paid_at is None or paid_at.date() < since:
-            continue
-        week = _week_of(paid_at.date())
-        batch = batches.get(week) or {}
-        paid_sellers = (
-            set(batch.get("seller_ids") or []) if batch.get("status") == "approved" else set()
-        )
-        _, _, sunday = fc.week_range(week, today)
-        pay_date = sunday + timedelta(days=s.pay_days_after_period_end)
+    weeks: dict[date, tuple[str, set[str], date]] = {}  # 결제일 → (주, 지급한 판매자, 지급일)
+    for o in books.sold_between(fc.day_start(since), datetime.max.replace(tzinfo=UTC)):
+        paid_day = paid_at(o).date()
+        if paid_day not in weeks:
+            week = _week_of(paid_day)
+            batch = batches.get(week) or {}
+            approved = batch.get("status") == "approved"
+            _, _, sunday = fc.week_range(week, today)
+            weeks[paid_day] = (
+                week,
+                set(batch.get("seller_ids") or []) if approved else set(),
+                sunday + timedelta(days=s.pay_days_after_period_end),
+            )
+        week, paid_sellers, pay_date = weeks[paid_day]
         for item in o["items"]:
             seller_id = item.get("seller_id")
             if not seller_id or seller_id in paid_sellers:

@@ -369,7 +369,7 @@ def _slow_live(monkeypatch: pytest.MonkeyPatch) -> list[bk.Books]:
     bk.clear_live_cache()
     made: list[bk.Books] = []
 
-    async def fake_live() -> bk.Books:
+    async def fake_live(full: bool = False) -> bk.Books:
         await asyncio.sleep(0.05)
         made.append(bk.Books(source="shop-api", mock=False))
         return made[-1]
@@ -428,7 +428,7 @@ def test_failed_refresh_does_not_keep_serving_old_books(monkeypatch: pytest.Monk
         await bk.load_books()
         monkeypatch.setattr(bk, "LIVE_CACHE_SECONDS", 0.0)
 
-        async def broken() -> bk.Books:
+        async def broken(full: bool = False) -> bk.Books:
             return bk.Books(source="shop-api", mock=False, unavailable=["orders"])
 
         monkeypatch.setattr(bk, "live_books", broken)

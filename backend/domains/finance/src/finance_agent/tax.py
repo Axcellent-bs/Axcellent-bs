@@ -33,7 +33,7 @@ from typing import Any
 
 from finance_agent import closing
 from finance_agent import finance_config as fc
-from finance_agent.books import Books, in_range, item_gross, order_sold
+from finance_agent.books import Books, item_gross
 from finance_agent.rules import applied, applied_many, load_rules
 
 METHOD_KO = {
@@ -86,9 +86,8 @@ def vat_pack(books: Books, d: date | None = None) -> dict[str, Any]:
 
     shipping = 0
     if t.shipping_supplier == "platform":
-        for o in books.orders:
-            if order_sold(o) and in_range(_paid_at(o), start, end):
-                shipping += int(o.get("shipping_fee") or 0)
+        for o in books.sold_between(start, end):
+            shipping += int(o.get("shipping_fee") or 0)
     sales_rows = []
     if base_amount is not None:
         supply, tax_amt = _vat(base_amount, t.commission_vat)
@@ -305,10 +304,9 @@ def seller_sales_by_tax(books: Books, start_d: date, end_d: date) -> dict[str, i
     """판매자 상품 매출(회사 매출 아님)을 면세·과세로 나눈 합. 참고용."""
     start, end = fc.day_start(start_d), fc.day_start(end_d)
     out: dict[str, int] = {"exempt": 0, "taxable": 0}
-    for o in books.orders:
-        if order_sold(o) and in_range(_paid_at(o), start, end):
-            for item in o["items"]:
-                out[_tax_type(item.get("category_code"))] += item_gross(item)
+    for o in books.sold_between(start, end):
+        for item in o["items"]:
+            out[_tax_type(item.get("category_code"))] += item_gross(item)
     return out
 
 
@@ -323,10 +321,8 @@ def seller_report(books: Books, d: date | None = None) -> dict[str, Any]:
     start_d, end_d, name = quarter_range(d)
     start, end = fc.day_start(start_d), fc.day_start(end_d)
     rows: dict[tuple[str, str], dict[str, Any]] = {}
-    for o in books.orders:
+    for o in books.sold_between(start, end):
         paid = _paid_at(o)
-        if not order_sold(o) or not in_range(paid, start, end):
-            continue
         month = paid.date().isoformat()[:7]
         method = _method(o)
         for item in o["items"]:

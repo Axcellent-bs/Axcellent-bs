@@ -17,7 +17,7 @@ from typing import Any
 
 from finance_agent import closing
 from finance_agent import finance_config as fc
-from finance_agent.books import Books, in_range, item_gross, order_sold
+from finance_agent.books import Books, item_gross
 
 LABELS = {
     "gmv": "총거래액",
@@ -76,12 +76,7 @@ def _values(books: Books, start: datetime, end: datetime) -> dict[str, Any]:
 def by_category(books: Books, start: datetime, end: datetime) -> dict[str, dict[str, int]]:
     cfg = fc.load_config()
     out: dict[str, dict[str, int]] = {}
-    for o in books.orders:
-        if not order_sold(o):
-            continue
-        paid = [p["created_at"] for p in o["payments"] if p.get("status") == "succeeded"]
-        if not paid or not in_range(min(paid), start, end):
-            continue
+    for o in books.sold_between(start, end):
         for item in o["items"]:
             code = item.get("category_code") or "unknown"
             gross = item_gross(item)

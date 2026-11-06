@@ -61,8 +61,23 @@ def classify(
 def reconcile(
     books: Books, d: date | None, notes: dict[str, str], today: date | None = None
 ) -> dict[str, Any]:
+    """기간 안 결제를 한 건씩 맞춘다. 같은 장부·기간이면 계산은 한 번만 하고 메모만 새로 붙인다.
+
+    돌려준 결과는 읽기만 한다(같은 장부로 다시 부르면 같은 품목을 다시 쓴다).
+    """
     cfg = fc.load_config().pg
     today = today or fc.today()
+    base = books.memo(("recon", d, today, id(cfg)), lambda: _reconcile(books, d, today, cfg))
+    if not notes:
+        return base
+    items = [
+        i | {"note": notes[i["payment_id"]]} if i["payment_id"] in notes else i
+        for i in base["items"]
+    ]
+    return base | {"items": items}
+
+
+def _reconcile(books: Books, d: date | None, today: date, cfg: Any) -> dict[str, Any]:
     start_d, end_d = recon_range(d, today)
     start, end = fc.day_start(start_d), fc.day_start(end_d)
     pg = pg_settlements(books, today)
@@ -89,7 +104,7 @@ def reconcile(
                 "paid_out_date": record["paid_out_date"] if record and record["settled"] else None,
                 "status": status,
                 "reason": reason,
-                "note": notes.get(p["payment_id"]),
+                "note": None,
             }
         )
     items.sort(key=lambda i: (i["paid_at"], i["payment_id"]), reverse=True)
@@ -106,6 +121,34 @@ def reconcile(
         "counts": counts,
         "totals": totals,
         "items": items,
+    }
+
+
+EXCEPTION_STATUSES = ("mismatch", "missing_in_pg", "fee_anomaly")
+
+
+def parse_statuses(value: str | None) -> tuple[str, ...]:
+    """`status` 조회값 → 상태 목록. 없으면 사람이 볼 불일치, `all`이면 전부."""
+    if value is None or not value.strip():
+        return EXCEPTION_STATUSES
+    if value.strip() == "all":
+        return STATUSES
+    picked = tuple(dict.fromkeys(x.strip() for x in value.split(",") if x.strip()))
+    unknown = [x for x in picked if x not in STATUSES]
+    if unknown or not picked:
+        raise ValueError(f"status는 {', '.join(STATUSES)} 중에서 쉼표로 고르거나 all")
+    return picked
+
+
+def pick(result: dict[str, Any], statuses: tuple[str, ...], limit: int) -> dict[str, Any]:
+    """화면에 보낼 대사 결과. 고른 상태의 건만 최근 순으로 `limit`건까지.
+
+    `shown.total`은 고른 상태의 전체 건수다(잘렸으면 `limit`보다 크다).
+    """
+    chosen = [i for i in result["items"] if i["status"] in statuses]
+    return result | {
+        "items": chosen[:limit],
+        "shown": {"statuses": list(statuses), "total": len(chosen), "limit": limit},
     }
 
 
