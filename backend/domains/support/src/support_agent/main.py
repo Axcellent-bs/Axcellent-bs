@@ -26,6 +26,7 @@ from support_agent.planning_question_handlers import PLANNING_QUESTION_HANDLERS
 from support_agent.privacy_handlers import PRIVACY_HANDLERS
 from support_agent.proposal_handlers import PROPOSAL_HANDLERS
 from support_agent.purge_handlers import PURGE_HANDLERS
+from support_agent.qa_handlers import QA_HANDLERS
 from support_agent.resolution_note_handlers import RESOLUTION_NOTE_HANDLERS
 from support_agent.signal_handlers import SIGNAL_HANDLERS
 from support_agent.suggest_handlers import SUGGEST_HANDLERS
@@ -66,6 +67,7 @@ ALL_HANDLERS = {
     **PAYMENT_HANDLERS,
     **HANDOFF_HANDLERS,
     **GAP_HANDLERS,
+    **QA_HANDLERS,
     **AUDIT_HANDLERS,
     **PRIVACY_HANDLERS,
     **SIGNAL_HANDLERS,
