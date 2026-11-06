@@ -291,3 +291,90 @@ def test_a_stale_service_cache_cannot_bring_the_original_back(memory_repo) -> No
     assert done is not None and done.purged_at and done.messages[0].text == retention.PURGED
     assert service.get(conversation.id).purged_at  # type: ignore[union-attr]  # 서비스도 지운 모습을 받아들인다
     assert NAME not in service.get(conversation.id).model_dump_json()  # type: ignore[union-attr]
+
+
+# -------------------------------------------------------- --list-test (읽기 전용 목록, #822)
+def _aged(store: InquiryStore, subject: str, received: str, status: str = "resolved"):  # type: ignore[no-untyped-def]
+    conversation = _make(store, subject=subject, status=status)
+    conversation.messages[0].created_at = received
+    return conversation
+
+
+def test_list_shows_only_test_inquiries_with_number_date_status_claim() -> None:
+    store = InquiryStore()
+    test = _aged(store, "[시험] 목록", "2026-10-20T00:00:00Z")
+    _aged(store, "실제 환불 문의", "2026-10-20T00:00:00Z")  # 시험 표시가 없다
+    claims = ClaimStore()
+    rows = retention.list_test_inquiries(store, claims, now=NOW)
+    assert [r.inquiry_id for r in rows] == [test.id]
+    row = rows[0]
+    assert row.received == "2026-10-20" and row.status == "resolved"
+    assert row.claim_linked is False and row.age_days == 10
+
+
+def test_list_marks_only_inquiries_older_than_thirty_days() -> None:
+    store = InquiryStore()
+    day30 = _aged(store, "[시험] 30일째", "2026-09-30T10:00:00Z")
+    day31 = _aged(store, "[test] 31일째", "2026-09-29T10:00:00Z")
+    rows = {r.inquiry_id: r for r in retention.list_test_inquiries(store, ClaimStore(), now=NOW)}
+    assert rows[day30.id].age_days == 30 and rows[day30.id].over_limit is False
+    assert rows[day31.id].age_days == 31 and rows[day31.id].over_limit is True
+
+
+def test_list_flags_claim_linked_and_leaves_out_purged_ones() -> None:
+    store = InquiryStore()
+    claimed = _aged(store, "[시험] 클레임", "2026-10-20T00:00:00Z")
+    purged = _aged(store, "[시험] 지움", "2026-10-20T00:00:00Z")
+    retention.run(store, ClaimStore(), [purged.id], apply=True, now=NOW)
+    store.log_activity(claimed.id, kind="claim", title="클레임", ref="claim:7")
+    rows = {r.inquiry_id: r for r in retention.list_test_inquiries(store, ClaimStore(), now=NOW)}
+    assert rows[claimed.id].claim_linked is True
+    assert purged.id not in rows  # 지운 문의는 제목이 [삭제됨]이라 시험 표시가 없어진다
+
+
+def test_list_output_has_no_inquiry_text(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], memory_repo
+) -> None:  # type: ignore[no-untyped-def]
+    repo = memory_repo()
+    store = PersistentInquiryStore(repo)
+    conversation = _aged(store, "[시험] 비밀 제목 내용", "2026-10-01T00:00:00Z")
+    monkeypatch.setenv(persistence.DSN_ENV, "postgresql://unused")
+    monkeypatch.setattr(persistence, "get_repo", lambda: repo)
+    assert retention.main(["--list-test"]) == 0
+    out = capsys.readouterr().out
+    assert f"문의 {conversation.id}" in out and "읽기 전용" in out
+    for secret in (NAME, SECRET, "비밀 제목", "영수증 대조"):
+        assert secret not in out
+
+
+def test_list_changes_nothing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], memory_repo
+) -> None:  # type: ignore[no-untyped-def]
+    repo = memory_repo()
+    store = PersistentInquiryStore(repo)
+    conversation = _aged(store, "[시험] 그대로", "2026-10-01T00:00:00Z")
+    before = repr(repo.tables)
+    monkeypatch.setenv(persistence.DSN_ENV, "postgresql://unused")
+    monkeypatch.setattr(persistence, "get_repo", lambda: repo)
+    assert retention.main(["--list-test"]) == 0
+    capsys.readouterr()
+    assert repr(repo.tables) == before
+    assert PersistentInquiryStore(repo).get(conversation.id).purged_at is None  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize(
+    "argv", [["--list-test", "--apply"], ["--list-test", "--inquiry-id", "1"], []]
+)
+def test_list_never_leads_to_a_purge(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        retention.main(argv)
+    assert exit_info.value.code == 2  # 목록은 --apply·--inquiry-id와 같이 쓸 수 없다
+    capsys.readouterr()
+
+
+def test_list_needs_a_database(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv(persistence.DSN_ENV, raising=False)
+    assert retention.main(["--list-test"]) == 2
+    assert persistence.DSN_ENV in capsys.readouterr().err
