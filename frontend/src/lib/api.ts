@@ -1,6 +1,6 @@
 import { ApiError } from "./apiError";
 import type { ChangeProposalSent, DeclineReason, IncidentCompensationDecision } from "./support";
-import type { AdminReview, Claim, ClaimDetail, ClaimIntake, ClaimSuggestion, ClaimStats, CommLine, CommMeta, Conversation, ConversationListItem, Dashboard, FeedbackItem, FeedbackOverview, FeedbackStatus, Health, Kpi, Me, QueueRun, QueueView, ReceiptAnalysis, ReceiptImageInput, Summary, Validation } from "./types";
+import type { AdminReview, Claim, ClaimDetail, ClaimIntake, ClaimSuggestion, ClaimStats, CommLine, CommMeta, Conversation, ConversationListItem, Dashboard, FeedbackItem, FeedbackOverview, FeedbackStatus, Health, Kpi, Me, PurgeReport, QueueRun, QueueView, ReceiptAnalysis, ReceiptImageInput, Summary, Validation } from "./types";
 
 import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN } from "./env";
 
@@ -88,6 +88,10 @@ export const api = {
     send: (id: number, b: { text: string; draft_style?: string | null; draft_text?: string | null }) =>
       post<Conversation>(`/api/dashboard/conversations/${id}/agent-messages`, b),
     rejectDraft: (id: number, draft_style: string) => post<void>(`/api/dashboard/conversations/${id}/reject-draft`, { draft_style }),
+    /** 고객 요청 개인정보 삭제 미리보기(읽기): 이 문의를 낸 구매자의 문의 중 지워질 것과 보존 의무로 남을 것 */
+    purgePreview: (id: number) => request<PurgeReport>(`/api/dashboard/privacy/purge-preview?mode=customer_request&inquiry_id=${id}`),
+    /** 고객 요청 삭제. 안전 관문이 사람에게 보류해 처음엔 409(승인 대기), 승인한 뒤 다시 부르면 집행한다 */
+    purgeCustomerData: (id: number) => post<PurgeReport>(`/api/dashboard/conversations/${id}/customer-data-purge`),
     receiptAnalysis: (id: number, b: { images?: ReceiptImageInput[]; receipt_text?: string }) =>
       post<ReceiptAnalysis>(`/api/dashboard/conversations/${id}/receipt-analysis`, b),
     feedback: (q: { status?: FeedbackStatus; max_rating?: number } = {}) =>
