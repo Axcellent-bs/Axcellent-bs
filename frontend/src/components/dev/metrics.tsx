@@ -16,7 +16,7 @@ export function Autonomy({ s, d, item }: P & { item?: string }) {
   const linked = pol.history.filter((h) => h.result === '장애 연결').length
   const off = (r: AutoRule) => { d({ type: 'disableRule', rule: r.id }); toast.show(`${r.id} 해제 · 이 범위는 다시 교차검증으로`) }
   const cols: Column<AutoRule>[] = [
-    { key: 'id', header: '기준', render: (r) => <span className="mono">{r.id}</span> },
+    { key: 'id', header: '기준', render: (r) => <span className="mono idc">{r.id}</span> },
     { key: 'what', header: '내용', render: (r) => <>{TARGET_LABEL[r.action]} · {ruleText(r)}</> },
     { key: 'status', header: '상태', render: (r) => <State v={r.status} /> },
     { key: 'approver', header: '승인한 쪽', render: (r) => <span className="small">{r.approver}</span> },
@@ -61,7 +61,7 @@ export function Autonomy({ s, d, item }: P & { item?: string }) {
             rowTitle="PR과 코드 출처 보기"
             columns={[
               { key: 't', header: '시각', render: (h) => <span className="mono small">{h.t}</span> },
-              { key: 'pr', header: 'PR', render: (h) => <span className="mono">{h.pr}</span> },
+              { key: 'pr', header: 'PR', render: (h) => <span className="mono idc">{h.pr}</span> },
               { key: 'req', header: '요청', render: (h) => <Ref s={s} id={h.req} /> },
               { key: 'rule', header: '기준', render: (h) => (h.rule ? <Ref s={s} id={h.rule} /> : '-') },
               { key: 'size', header: '변경', render: (h) => `${h.lines}줄·${h.files}파일` },

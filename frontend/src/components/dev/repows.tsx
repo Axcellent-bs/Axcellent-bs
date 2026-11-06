@@ -209,7 +209,7 @@ function ExampleBoard({ s, repo }: { s: S; repo: string }) {
                     {p.target?.status === 'proposed' && <span className="tag">레포 승인 대기</span>}
                   </span>
                   <span className="rp-meta">
-                    <span className="mono">{p.id}</span>
+                    <span className="mono idc">{p.id}</span>
                     <Branches head={p.branch} base="main" />
                     <span>{p.gate.lines}줄 · {p.gate.files}파일</span>
                   </span>
