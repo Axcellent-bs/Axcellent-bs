@@ -119,7 +119,7 @@ class ReturnedMixin:
         why = out if isinstance(out, str) else f"마케팅이 거절 ({out.reason_code})"
 
         async def record(s: State) -> None:
-            text = f"{sp.id} 마케팅 " + ("받음" if ok else f"전달 실패 · {why}")
+            text = f"{sp.id} 마케팅 " + ("받음" if ok else f"전달 실패\n{why}")
             s.activity.append(
                 self._act(self.clock(), return_ctx(task_id), "marketing", "planning",
                           "receive_campaign_brief", "A2A", text)
@@ -135,7 +135,7 @@ class ReturnedMixin:
         sp.keep_dev = True
         sp.extra = {**sp.extra, REDEV_NOTE: why}  # 개발이 기획서와 같이 받아 읽는다
         self._redev_queue().append((sp.id, t.id))
-        text = f"{sp.id} {t.id} 개발로 다시 보냄 · {why}"
+        text = f"{sp.id} {t.id} 개발로 다시 보냄\n이유: {why}"
         act = self._act(self.clock(), return_ctx(t.id), "planning", "dev",
                         RETURNED_DEV, "사람", text)  # fmt: skip
         s.activity.append(act)
@@ -163,7 +163,7 @@ class ReturnedMixin:
                 continue
             dept = DEPT_KO.get(cr.returned_to or "", cr.returned_to or "다른 부서")
             text = f"{t.spec} {t.id} 개발이 돌려보냄 → {dept}" + (
-                f" · {cr.returned_reason}" if cr.returned_reason else ""
+                f"\n이유: {cr.returned_reason}" if cr.returned_reason else ""
             )
             s.activity.append(
                 self._act(self.clock(), ctx, "dev", "planning", DEV_RETURNED, "A2A", text, "A")

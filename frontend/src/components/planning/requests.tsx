@@ -1,13 +1,13 @@
 // 요청 탭 = 모든 요청이 지금 어느 단계에 있나를 한눈에 (프로젝트 탭은 요청 1건을 깊게).
 // 위: 같은 목록을 거르는 필터 한 줄 (주소 #/requests/<필터>). 아래: 요청 한 건 = 작은 제목 한 줄 + 가로 흐름바(접수 → 기획 → 작업 → 배포 → 처리) + 다음.
 // 멈춘 요청(사람 확인·질문·교차검증·채택 대기)이 먼저. 평소엔 제목과 흐름바만, 줄 클릭 = 흐름바 아래 글씨 펼치기, 제목 클릭 = 프로젝트, "다음 ›" = 다음 할 일.
-import { useEffect, useState, type Dispatch, type KeyboardEvent, type MouseEvent } from 'react'
+import { Fragment, useEffect, useState, type Dispatch, type KeyboardEvent, type MouseEvent } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, RELATION_LABEL, TODAY, byRelation, type Action, type Request, type State as S } from '@/lib/planningData'
 import { useAllReleaseChecks, type ReleaseCheck } from '@/lib/planning'
 import { Tag } from '@/components/planning-common/parts'
 import { Pager, usePage } from '@/components/planning-common/pager'
-import { Ref, convoHref, isFollowUp, nextOf, prName, prSlug, reviewHref, reviewOf, toPath } from '@/components/planning-common/links'
+import { Ref, convoHref, idText, isFollowUp, nextOf, prName, prSlug, reviewHref, reviewOf, toPath } from '@/components/planning-common/links'
 import { gather } from '@/components/planning/projects'
 import { releaseState } from '@/components/planning/specs'
 import { devDiscarded, pendingReturns } from '@/lib/returned'
@@ -29,13 +29,13 @@ export const FILTERS: { id: RequestFilter; label: string; match: (r: Request) =>
   { id: 'incoming', label: '들어온 요청', match: (r) => !isFollowUp(r) && r.state === '접수' },
   { id: 'progress', label: '진행 중', match: (r) => !isFollowUp(r) && (r.state === '기획 중' || r.state === '작업 중') },
   { id: 'done', label: '해결', match: (r) => !isFollowUp(r) && r.state === '완료' },
-  { id: 'followup', label: '후속', match: isFollowUp },
+  { id: 'followup', label: '후속 요청', match: isFollowUp },
 ]
 export const parseFilter = (x?: string): RequestFilter => (FILTERS.some((f) => f.id === x) ? (x as RequestFilter) : 'all')
 export const incomingCount = (s: S) => s.requests.filter(FILTERS[1].match).length
 
 // ---------------------------------------------------------------- 단계 계산 (순수 함수)
-export const STAGES = ['접수', '기획', '작업', '배포', '처리'] as const
+export const STAGES = ['접수', '기획', '개발', '배포', '회신'] as const
 export interface Cell { kind: 'past' | 'now' | 'next'; value?: string; meta?: string; href?: string; warn?: boolean }
 export interface Wait { label: string; rank: number } // rank 작을수록 먼저 (사람 확인 0 · 질문 1 · 교차검증 2 · 채택·초안 3)
 export interface PipeRow { r: Request; stage: number; finished: boolean; cells: Cell[]; wait?: Wait; born?: string; last?: string; minutes: number; dups: Request[] }
@@ -51,7 +51,7 @@ export function duration(min: number): string {
   return `${Math.floor(min / 1440)}일 ${Math.floor((min % 1440) / 60)}시간`
 }
 const stageOf = (r: Request) => (r.state === '접수' ? 0 : r.state === '기획 중' ? 1 : r.state === '작업 중' ? 2 : 4)
-const waitOf = (lane: 'ai' | 'human') => (lane === 'human' ? { label: '사람 확인 대기', rank: 0 } : { label: '교차검증 대기', rank: 2 })
+const waitOf = (lane: 'ai' | 'human') => (lane === 'human' ? { label: '사람 확인 대기', rank: 0 } : { label: 'AI 검토 대기', rank: 2 })
 
 export function pipeline(s: S, r: Request, rc?: ReleaseCheck): PipeRow {
   const g = gather(s, r)
@@ -90,7 +90,7 @@ export function pipeline(s: S, r: Request, rc?: ReleaseCheck): PipeRow {
         if (c1.kind === 'now') wait = { label: '질문 대기', rank: 1 }
       } else c1.meta = '초안'
     }
-    if (c1.kind === 'now' && !sp) wait = { label: '기획서 초안 전', rank: 3 }
+    if (c1.kind === 'now' && !sp) wait = { label: '기획서 작성 전', rank: 3 }
     if (c1.kind === 'now' && wait) c1.warn = true
   }
 
@@ -107,7 +107,7 @@ export function pipeline(s: S, r: Request, rc?: ReleaseCheck): PipeRow {
       const xr = reviewOf(s, pr.id)
       c2.href = xr ? reviewHref(xr) : toPath(`work/prs/${prSlug(pr.id)}`)
       if (xr) { const w = waitOf(xr.lane); c2.meta = w.label; if (c2.kind === 'now') wait = w }
-      else if (pr === fix) { c2.meta = '수정 후 재검수'; if (c2.kind === 'now') wait = { label: '수정 후 재검수', rank: 2 } }
+      else if (pr === fix) { c2.meta = '고친 뒤 다시 검사'; if (c2.kind === 'now') wait = { label: '고친 뒤 다시 검사', rank: 2 } }
       else c2.meta = !pr.merged ? '머지 전' : pr.mergedBy === 'rule' ? '자동 머지' : pr.mergedBy === 'review' ? '교차검증 후 머지' : '사람 머지'
     }
     if (c2.kind === 'now' && wait) c2.warn = true
@@ -193,17 +193,20 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
   const isDropped = (r: Request) => devDiscarded(s, gather(s, r).spec?.id)
   const droppedN = all.filter(isDropped).length
   const shown = (r: Request) => showDropped || !isDropped(r)
-  const sorted = sortRows(all.filter(shown).filter(FILTERS.find((x) => x.id === f)!.match).map((r) => pipeline(s, r, latestCheck(r))))
+  // 글자로 찾기(제목·번호)와 요청 부서 거르기. 화면 안에서만 거른다
+  const [q, setQ] = useState('')
+  const [dept, setDept] = useState('')
+  const depts = [...new Set(all.map((r) => r.from))]
+  const hit = (r: Request) => (!dept || r.from === dept) && (!q.trim() || `${r.id} ${idText(r.id)} ${r.title}`.toLowerCase().includes(q.trim().toLowerCase()))
+  const sorted = sortRows(all.filter(shown).filter(hit).filter(FILTERS.find((x) => x.id === f)!.match).map((r) => pipeline(s, r, latestCheck(r))))
   const rows = [...sorted.filter((x) => isFresh(x.r.id)), ...sorted.filter((x) => !isFresh(x.r.id))]
   // 같은 요청으로 연결만 한 것(REQ-15 등)은 원래 요청 줄을 가리킨다
   const target = s.requests.find((x) => x.id === item)
   const focus = target?.duplicateOf ?? item
   const stuck = rows.filter((x) => x.wait).length
-  const [view, setView] = useState<'list' | 'card'>(() => (localStorage.getItem('rq-view') === 'card' ? 'card' : 'list'))
-  const pickView = (v: 'list' | 'card') => { setView(v); localStorage.setItem('rq-view', v) }
   // 페이지: 목록 10줄 · 카드 12장(한 줄 4장). 필터·보기·폐기 토글을 바꾸면 첫 페이지로, 주소로 가리킨 요청은 그 페이지로
-  const pg = usePage(rows, view === 'card' ? 12 : 10)
-  useEffect(() => pg.setPage(0), [f, view, showDropped]) // eslint-disable-line react-hooks/exhaustive-deps
+  const pg = usePage(rows, 10)
+  useEffect(() => pg.setPage(0), [f, showDropped, q, dept]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!focus) return
     const at = rows.findIndex((x) => x.r.id === focus)
@@ -229,22 +232,21 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
           </button>
         )}
         {stuck > 0 && <span className="rq-stuck">멈춤 {stuck}</span>}
-        <div className="seg-toggle rq-view" role="group" aria-label="보기">
-          <button type="button" aria-pressed={view === 'list'} onClick={() => pickView('list')}>목록</button>
-          <button type="button" aria-pressed={view === 'card'} onClick={() => pickView('card')}>카드</button>
-        </div>
-        {view === 'list' && <button type="button" className="rq-all" aria-pressed={allOpen} onClick={() => setOpen(allOpen ? new Set() : new Set(pg.rows.map((x) => x.r.id)))}>{allOpen ? '모두 접기' : '모두 펼치기'}</button>}
+        <input type="search" className="rq-search" placeholder="제목·번호로 찾기" value={q} onChange={(e) => setQ(e.target.value)} aria-label="요청 찾기" />
+        <select className="rq-select" value={dept} onChange={(e) => setDept(e.target.value)} aria-label="요청 부서">
+          <option value="">요청 부서 전체</option>
+          {depts.map((x) => <option key={x} value={x}>{DEPT_NAME[x] ?? x}</option>)}
+        </select>
+        <button type="button" className="rq-all" aria-pressed={allOpen} onClick={() => setOpen(allOpen ? new Set() : new Set(pg.rows.map((x) => x.r.id)))}>{allOpen ? '모두 접기' : '모두 펼치기'}</button>
       </nav>
 
-      {view === 'card' && <><RequestCards s={s} rows={pg.rows} /><Pager {...pg} /></>}
-      {view === 'list' && <>
-      <div className="rq-head" aria-hidden>
-        {STAGES.map((x) => <span key={x}>{x}</span>)}
-        <span>다음</span>
-      </div>
-
-      {rows.length === 0 && <div className="empty"><b>{FILTERS.find((x) => x.id === f)!.label} 없음</b></div>}
-      <ol className="rq-list">
+      {rows.length === 0 && <div className="empty"><b>{q ? `"${q}" 찾은 요청 없음` : `${FILTERS.find((x) => x.id === f)!.label} 없음`}</b></div>}
+      {rows.length > 0 && (
+      <table className="data rq-table">
+        <thead>
+          <tr><th>번호</th><th>제목</th><th>요청 부서</th><th>진행 단계</th><th>상태</th><th>경과</th><th className="rq-th-next">다음 할 일</th></tr>
+        </thead>
+        <tbody>
         {pg.rows.map((row) => {
           const { r } = row
           const next = nextOf(s, r)
@@ -254,15 +256,16 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
           const isOpen = open.has(r.id)
           const onRow = (e: MouseEvent) => { if (!inner(e.target) && !window.getSelection()?.toString()) toggle(r.id) }
           const onKey = (e: KeyboardEvent) => { if ((e.key === 'Enter' || e.key === ' ') && !inner(e.target)) { e.preventDefault(); toggle(r.id) } }
+          const status = dropped ? { label: '개발에서 폐기함', tone: 'gray' } : r.paused ? { label: '중단됨', tone: 'amber' } : row.wait ? { label: row.wait.label, tone: 'amber' } : row.finished ? { label: '회신 완료', tone: 'green' } : { label: `${STAGES[row.stage]} 중`, tone: 'blue' }
+          const at = row.finished ? STAGES.length - 1 : row.stage
           return (
-            <li key={r.id} id={`req-${r.id}`} role="button" tabIndex={0} aria-expanded={isOpen} onClick={onRow} onKeyDown={onKey}
-              className={`rq-item${isOpen ? ' open' : ''}${row.finished ? ' fin' : ''}${dropped ? ' dropped' : ''}${focus === r.id ? ' hl' : ''}${isFresh(r.id) ? ' fresh' : ''}`}>
-              <div className="rq-title">
-                <span className={`rq-dept d-${r.from}`}>{DEPT_NAME[r.from]}</span>
+            <Fragment key={r.id}>
+            <tr id={`req-${r.id}`} tabIndex={0} aria-expanded={isOpen} onClick={onRow} onKeyDown={onKey}
+              className={`rq-tr${isOpen ? ' open' : ''}${row.finished ? ' fin' : ''}${dropped ? ' dropped' : ''}${focus === r.id ? ' hl' : ''}${isFresh(r.id) ? ' fresh' : ''}`}>
+              <td className="rq-td-id"><Ref s={s} id={r.id} /></td>
+              <td className="rq-td-title">
                 <a href={toPath(`projects/${r.id}`)} className="rq-name plain-link">{r.title}</a>
                 <span className="rq-meta">
-                  <span className="mono">{r.id}</span>
-                  {r.paused && !dropped && <Tag tone="amber">중단됨</Tag>}
                   {isFollowUp(r) && <Tag tone="amber">후속</Tag>}
                   {row.dups.map((x) => (
                     <span key={x.id} className="rq-dup">
@@ -270,26 +273,21 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
                       <button type="button" className="rq-unlink" title={`${x.id}을 따로 기획`} onClick={() => { d({ type: 'unlinkDuplicate', request: x.id }); toast.show(`${x.id} 따로 기획`) }}>풀기</button>
                     </span>
                   ))}
-                  {byRelation(r.related).slice(0, 3).map((x) => (
-                    <span key={x.id} title={x.reason}>
-                      <Tag tone={x.relation === 'conflict' ? 'amber' : undefined}>{RELATION_LABEL[x.relation]}</Tag> <Ref s={s} id={x.id} />
-                    </span>
+                  {byRelation(r.related).slice(0, 2).map((x) => (
+                    <span key={x.id} title={x.reason}>{RELATION_LABEL[x.relation]} <Ref s={s} id={x.id} /></span>
                   ))}
-                  {row.minutes > 0 && <span title={row.born ? `접수 ${row.born}` : undefined}>{row.finished ? `${duration(row.minutes)} 걸림` : `${duration(row.minutes)} 경과`}</span>}
                 </span>
-              </div>
-              <ol className="rq-track" aria-label="진행 단계">
-                {row.cells.map((c, i) => (
-                  <li key={i} className={`rq-c ${c.kind}${c.warn ? ' warn' : ''}${row.finished && i === 3 ? ' end' : ''}`}>
-                    <span className="rq-dot" aria-hidden />
-                    <span className="sr-only">{STAGES[i]}</span>
-                    {isOpen && c.value && (c.href ? <a href={c.href} className="rq-v plain-link" title={c.value}>{c.value}</a> : <span className="rq-v" title={c.value}>{c.value}</span>)}
-                    {isOpen && c.meta && <span className="rq-m">{c.meta}</span>}
-                  </li>
-                ))}
-              </ol>
-              <div className="rq-next">
-                {!row.finished && dropped && <span className="rq-stop muted" title="개발에서 이 요청의 작업을 폐기했어요">개발에서 폐기함</span>}
+              </td>
+              <td><span className={`rq-dept d-${r.from}`}>{DEPT_NAME[r.from]}</span></td>
+              <td className="rq-td-steps">
+                <span className={`rq-mini${dropped ? ' dropped' : ''}`} aria-label={`진행 단계 ${STAGES[at]}`}>
+                  {STAGES.map((x, i) => <i key={x} className={i < at || row.finished ? 'on' : i === at ? 'now' : undefined} title={x} />)}
+                </span>
+                <span className="rq-mini-l">{STAGES[at]}</span>
+              </td>
+              <td><span className={`rq-st ${status.tone}`}>{status.label}</span></td>
+              <td className="rq-td-time" title={row.born ? `접수 ${row.born}` : undefined}>{row.minutes > 0 ? duration(row.minutes) : ''}</td>
+              <td className="rq-td-next">
                 {!row.finished && !dropped && (
                   <button type="button" className="rq-stop" onClick={() => { d({ type: r.paused ? 'resumeRequest' : 'pauseRequest', request: r.id }); toast.show(`${r.id} ${r.paused ? '재개' : '중단'}`) }}>{r.paused ? '재개' : '중단'}</button>
                 )}
@@ -298,47 +296,35 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
                 ) : draft ? (
                   <Button size="small" variant="primary" onClick={() => { d({ type: 'writeSpec', request: r.id }); toast.show(`${r.id} 기획서 초안`) }}>기획서 초안</Button>
                 ) : (
-                  <a href={href} className={row.finished || dropped ? 'rq-go muted' : 'rq-go'}>{(row.finished || dropped ? '프로젝트' : next.label).replace(/\s*\(.*\)$/, '')} ›</a>
+                  <a href={href} className={row.finished || dropped ? 'rq-go muted' : 'rq-go'}>{(row.finished || dropped ? '진행 기록' : next.label).replace(/\s*\(.*\)$/, '')} ›</a>
                 )}
-              </div>
-            </li>
+              </td>
+            </tr>
+            {isOpen && (
+              <tr className="rq-detail">
+                <td />
+                <td colSpan={6}>
+                  <ol className="rq-steps-detail">
+                    {row.cells.map((c, i) => (
+                      <li key={i} className={`${c.kind}${c.warn ? ' warn' : ''}`}>
+                        <span className="rq-sd-k">{STAGES[i]}</span>
+                        <span className="rq-sd-v">
+                          {c.value ? (c.href ? <a href={c.href} className="plain-link">{c.value}</a> : c.value) : <span className="muted">—</span>}
+                          {c.meta && <span className="rq-m"> · {c.meta}</span>}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </td>
+              </tr>
+            )}
+            </Fragment>
           )
         })}
-      </ol>
+        </tbody>
+      </table>
+      )}
       <Pager {...pg} />
-      </>}
-    </div>
-  )
-}
-
-// 카드 보기 (개발 사후관리 카드와 같은 틀): 부서·번호·걸린 시간 / 제목 / 단계 막대 / 지금 단계 한 줄. 카드를 누르면 프로젝트
-function RequestCards({ s, rows }: { s: S; rows: PipeRow[] }) {
-  if (!rows.length) return null
-  return (
-    <div className="inc-grid rq-cards">
-      {rows.map((row) => {
-        const { r } = row
-        const at = row.finished ? row.cells.length - 1 : row.stage
-        const cur = row.cells[at]
-        const dropped = devDiscarded(s, gather(s, r).spec?.id) // 개발에서 작업을 모두 폐기함: 회색 막대
-        return (
-          <a key={r.id} href={toPath(`projects/${r.id}`)} className={`inc-card rq-card${row.wait ? ' wait' : ''}${row.finished ? ' fin' : ''}${dropped ? ' dropped' : ''}`}>
-            <span className="inc-card-top">
-              <span className={`rq-dept d-${r.from}`}>{DEPT_NAME[r.from]}</span>
-              {r.paused && !dropped && <Tag tone="amber">중단됨</Tag>}
-              <span className="mono">{r.id}</span>
-            </span>
-            <b className="inc-card-title">{r.title}</b>
-            <ol className="inc-steps" aria-label="진행 단계">
-              {row.cells.map((c, i) => <li key={i} className={`${c.kind !== 'next' ? 'on' : ''}${c.kind === 'now' ? ' now' : ''}${c.warn && c.kind === 'now' ? ' warn' : ''}`}>{STAGES[i]}</li>)}
-            </ol>
-            <span className="inc-card-meta">
-              {row.wait ? <span className="rq-card-wait">{row.wait.label}</span> : [cur?.value, cur?.meta].filter(Boolean).join(' · ') || STAGES[at]}
-              {row.minutes > 0 && <> · {row.finished ? `${duration(row.minutes)} 걸림` : `${duration(row.minutes)} 경과`}</>}
-            </span>
-          </a>
-        )
-      })}
     </div>
   )
 }

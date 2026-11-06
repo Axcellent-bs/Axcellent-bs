@@ -1,11 +1,11 @@
-// 기획 홈: 받은 요청·제안 최근 20개(메일함처럼 안 연 것은 밝게, 사람이 눌러야 할 것은 표시) + 두 흐름 단계별 개수 + 최근 활동
+// 기획 홈: 받은 요청·제안 최근 20개(메일함처럼 안 연 것은 밝게, 사람이 눌러야 할 것은 표시) + 그 아래 최근 활동 피드 + 오른쪽 두 흐름 단계별 개수
 import { useEffect, useState } from 'react'
 import { Pager, usePage } from '@/components/planning-common/pager'
-import { DEPT_NAME, type Dept, type State as S } from '@/lib/planningData'
+import { DEPT_NAME, TODAY, type Dept, type State as S } from '@/lib/planningData'
 import { PROPOSAL_STAGES, PROPOSAL_SKILL_LABEL, proposalEnded, proposalOpen, proposalStage } from '@/lib/proposals'
 import { useAllReleaseChecks } from '@/lib/planning'
-import { ActivityList, Tag, rowNav } from '@/components/planning-common/parts'
-import { toPath } from '@/components/planning-common/links'
+import { Grade, Point, Tag, rowNav } from '@/components/planning-common/parts'
+import { LinkedLines, convoHref, idText, toPath } from '@/components/planning-common/links'
 import { STAGES, pipeline, sortRows } from './requests'
 
 interface Todo { key: string; rank: number; kind: string; from: Dept; id: string; title: string; label: string; href: string; wait: boolean; at: string }
@@ -68,7 +68,7 @@ export function Home({ s }: { s: S }) {
                   <span className="sl-title">
                     {isNew && <span className="home-dot" aria-label="새로 옴" />}
                     <span className={`rq-dept d-${t.from}`}>{DEPT_NAME[t.from]}</span>
-                    <span className="mono muted sl-id">{t.id}</span>
+                    <span className="mono idc sl-id" title={t.id}>{idText(t.id)}</span>
                     <b title={t.title}>{t.title}</b>
                   </span>
                   <span>{t.wait ? <Tag tone="amber">{t.label}</Tag> : <span className="muted small">{t.label}</span>}</span>
@@ -87,8 +87,35 @@ export function Home({ s }: { s: S }) {
       </div>
 
       <section className="home-recent">
-        <h3>최근 활동</h3>
-        <ActivityList s={s} items={s.activity.slice(-8).reverse()} compact />
+        <h3>최근 활동 <span className="muted small home-recent-sub">AI·사람이 한 일 · 누르면 그 대화로</span></h3>
+        <ol className="feed">
+          {feedDays(s.activity.slice(-12).reverse()).map(([day, items]) => (
+            <li key={day} className="feed-day">
+              <div className="feed-day-h">{day === TODAY ? `오늘 · ${day}` : day}</div>
+              <ol>
+                {items.map((a, i) => {
+                  const nav = rowNav(convoHref(a.ctx), '이 요청·사건의 대화 보기')
+                  const who = a.kind === '사람' || a.from === 'human' ? 'human' : a.from
+                  return (
+                    <li key={i} {...nav} className={`feed-item ${nav.className ?? ''}`}>
+                      <span className={`feed-av d-${who}`} aria-hidden>{AV[who] ?? (DEPT_NAME[a.from] ?? a.from).slice(0, 1)}</span>
+                      <div className="feed-body">
+                        <div className="feed-head">
+                          <b>{who === 'human' ? '사람' : DEPT_NAME[a.from] ?? a.from}</b>
+                          <span className="feed-to">→ {DEPT_NAME[a.to] ?? a.to}</span>
+                          <Point>{a.point}</Point>
+                          <Grade g={a.grade} />
+                          <span className="feed-time">{a.t?.slice(6)}</span>
+                        </div>
+                        <div className="feed-text"><LinkedLines s={s} text={a.text} /></div>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ol>
+            </li>
+          ))}
+        </ol>
       </section>
     </div>
   )
@@ -105,4 +132,19 @@ function Flow({ title, href, stages, counts }: { title: string; href: string; st
       </ol>
     </a>
   )
+}
+
+// 피드 아이콘 글자 (부서 이름 첫 글자가 어색한 것만)
+const AV: Record<string, string> = { human: '사람', planning: '기획', orchestrator: '총괄' }
+
+// 활동을 날짜(MM-DD)별로 묶는다 (최근 날짜 먼저, 받은 순서 그대로)
+function feedDays(xs: S['activity']): [string, S['activity']][] {
+  const out: [string, S['activity']][] = []
+  for (const a of xs) {
+    const day = (a.t ?? '').slice(0, 5) || '날짜 없음'
+    const last = out[out.length - 1]
+    if (last && last[0] === day) last[1].push(a)
+    else out.push([day, [a]])
+  }
+  return out
 }

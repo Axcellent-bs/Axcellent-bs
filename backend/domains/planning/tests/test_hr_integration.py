@@ -128,8 +128,8 @@ def test_reject_draft_sends_decision_rejected(gate) -> None:
     decision = svc.state.decisions[-1]
     assert decision.text.startswith("[기각한 안]") and decision.sent_to_hr
     to_hr = [a for a in svc.state.activity if a.to == "hr" and a.point == "record_case"]
-    assert "decision_rejected" in to_hr[-1].text
-    assert any(m.to == "hr" and "decision_rejected" in m.text for m in svc.state.outbox)
+    assert "인사에 기각 기록" in to_hr[-1].text
+    assert any(m.to == "hr" and "인사에 기각 기록" in m.text for m in svc.state.outbox)
 
 
 @pytest.mark.parametrize(

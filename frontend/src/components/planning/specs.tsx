@@ -7,7 +7,7 @@ import { Linked, Ref, go, reviewOf, toPath } from '@/components/planning-common/
 import { CONFIRMED_BY } from '@/components/planning-common/flow'
 import { Pager, usePage } from '@/components/planning-common/pager'
 import { Markdown } from '@/components/planning-common/markdown'
-import { PROPOSAL_ORIGIN, handoffFailed, proposalReady, type Proposal } from '@/lib/proposals'
+import { PROPOSAL_ORIGIN, handoffFailed, handoffRetrying, proposalReady, type Proposal } from '@/lib/proposals'
 import { TEMPLATES, TEMPLATE_NAME, templateOf, type Section } from '@/lib/specTemplate'
 import { notionApi, previewFill, previewSuggest, useAllReleaseChecks, useReleaseChecks, type NotionHit, type ReleaseCheck } from '@/lib/planning'
 
@@ -282,10 +282,12 @@ function PlanHandoff({ s, d, spec }: P & { spec: Spec }) {
       <span style={{ flex: 1 }} />
       {proposalReady(p) ? (
         <>
-          {p.handoff && !p.handoff.ok
+          {handoffRetrying(p)
+            ? <span className="muted small" title={p.handoff?.reason}>마케팅 응답 없음 · 자동으로 다시 보내는 중 ({handoffRetrying(p)}번째)</span>
+            : p.handoff && !p.handoff.ok
             ? <span className="plan-fail" title={p.handoff.reason}>마케팅 전달 실패{p.handoff.reason ? ` · ${p.handoff.reason}` : ''}</span>
             : <span className="muted small">이 기획안을</span>}
-          <Button size="small" variant={mk ? 'primary' : undefined} onClick={() => { flush(); d({ type: 'approveProposal', proposal: p.id }); toast.show(`${spec.id} → 마케팅`) }}>{p.handoff && !p.handoff.ok ? '마케팅에 다시 보내기' : '마케팅으로 넘기기'}</Button>
+          <Button size="small" variant={mk ? 'primary' : undefined} onClick={() => { flush(); d({ type: 'approveProposal', proposal: p.id }); toast.show(`${spec.id} → 마케팅`) }}>{handoffRetrying(p) ? '지금 다시 보내기' : p.handoff && !p.handoff.ok ? '마케팅에 다시 보내기' : '마케팅으로 넘기기'}</Button>
           <Button size="small" variant={mk ? undefined : 'primary'} onClick={() => { flush(); d({ type: 'proposalToRequest', proposal: p.id }); toast.show(`${spec.id} → 개발`) }}>개발로 넘기기</Button>
         </>
       ) : p.status === '기획서로' ? <span className="small">개발로 넘김 · 작업 {s.tasks.filter((t) => t.spec === spec.id).length}개</span>
@@ -646,7 +648,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string; examp
 
         <nav className="sp-links" aria-label="이 기획서">
           <details className="sp-decisions" id="sec-decisions">
-            <summary>결정 이력 {decisions.length}건</summary>
+            <summary>결정 기록 {decisions.length}건</summary>
             {decisions.length ? (
               <ul>
                 {decisions.map((x) => <li key={x.id}><span className="sp-pid">{x.id}</span><span>{x.text}<HrRecord d={x} /></span></li>)}

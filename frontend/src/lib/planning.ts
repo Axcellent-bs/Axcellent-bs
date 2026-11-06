@@ -134,7 +134,7 @@ export function fromBackend(raw: Json, queue: QueueItem[]): State {
       return {
         ...p, created: kst(p.createdAt), note: p.note ?? undefined, insightId: p.insightId ?? undefined, format: p.format ?? undefined, request: p.request ?? undefined, spec: p.spec ?? undefined,
         bodyMd: p.bodyMd ?? undefined, target: p.target ? { ...(p.target as Json), measure: (p.target as Json).measure ?? undefined } : undefined, warnings: p.warnings ?? [], audience: p.audience ?? undefined, shortsFormat: p.shortsFormat ?? undefined,
-        handoff: h ? { ok: !!h.ok, reason: h.reason ?? undefined, campaign: h.campaign ?? undefined, at: kst(h.at) || undefined } : undefined,
+        handoff: h ? { ok: !!h.ok, reason: h.reason ?? undefined, campaign: h.campaign ?? undefined, at: kst(h.at) || undefined, retry: (h.retry as number | undefined) || undefined } : undefined,
         result: r ? { ...r, at: kst(r.at) } : undefined,
       } as unknown as Proposal
     }),

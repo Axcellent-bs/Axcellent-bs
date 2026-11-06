@@ -67,9 +67,11 @@ class Writer:
 
 
 def _svc(marketing=None, insights=None, writer=None) -> PlanningService:
-    return PlanningService(
+    svc = PlanningService(
         gate=_gate, relater=None, insights=insights, marketing=marketing, proposal_writer=writer
     )
+    svc.BRIEF_RETRY_DELAYS = (0, 0)  # 테스트는 기다리지 않고 두 번 더 보낸다
+    return svc
 
 
 def _p(svc: PlanningService, pid: str):
@@ -78,7 +80,7 @@ def _p(svc: PlanningService, pid: str):
 
 async def _flush(svc: PlanningService) -> None:
     while svc._sending:
-        await asyncio.gather(*list(svc._sending))
+        await asyncio.gather(*list(svc._sending), return_exceptions=True)
 
 
 def _new(svc: PlanningService, **kw) -> str:
@@ -131,8 +133,8 @@ def test_llm_draft_sets_target_and_warns_unknown_numbers() -> None:
     p = _p(svc, _new(svc, body="작년보다 2배 늘 것"))
     assert p.written_by == "llm" and p.target.value == "+10%" and p.format == "숏폼 30초"
     joined = " / ".join(p.warnings)
-    assert "이유의 숫자 3" in joined  # 3주는 근거에 없다
-    assert "설명의 숫자 2" in joined  # 본문 숫자도 대조한다
+    assert "이유에 근거·목표에 없는 숫자가 있음: 3" in joined  # 3주는 근거에 없다
+    assert "설명에 근거·목표에 없는 숫자가 있음: 2" in joined  # 본문 숫자도 대조한다
     assert "1.6" not in joined and "10" not in joined  # 근거·목표 숫자는 통과
 
 
@@ -180,6 +182,81 @@ def test_marketing_failure_is_kept_not_invented() -> None:
 
     p = _p(svc, asyncio.run(go()))
     assert p.handoff is not None and not p.handoff.ok and "ConnectError" in p.handoff.reason
+    assert "모두 실패" in p.handoff.reason and p.status == "확인 대기"  # 다 실패하면 되돌린다
+
+
+class Flaky(Brief):
+    """처음 `down`번은 응답이 없다가 그다음부터 받는다."""
+
+    def __init__(self, down: int) -> None:
+        super().__init__()
+        self.down = down
+
+    async def send(self, ctx, brief, key):
+        self.sent.append((ctx, brief, key))
+        if len(self.sent) <= self.down:
+            return "호출 실패 (ConnectError)"
+        return self.out
+
+
+@pytest.mark.role("planning")
+def test_marketing_down_is_resent_automatically_with_same_key() -> None:
+    flaky = Flaky(down=2)
+    svc = _svc(marketing=flaky)
+
+    async def go():
+        pid = (await svc.receive_insight(requester="data", inp=_insight())).output["proposal_id"]
+        await svc.dispatch({"type": "approveProposal", "proposal": pid})
+        await _flush(svc)
+        return pid
+
+    pid = asyncio.run(go())
+    p = _p(svc, pid)
+    assert p.status == "마케팅 전달" and p.handoff.ok and p.handoff.campaign == "CMP-1"
+    assert [k for _, _, k in flaky.sent] == [f"proposal:{pid}:brief"] * 3  # 같은 멱등 키
+    texts = [a.text for a in svc.state.activity if a.context_id == f"proposal:{pid}"]
+    assert any("자동으로 다시 보냄" in t for t in texts)
+    assert any("자동 재전송 2번째" in t for t in texts)
+
+
+@pytest.mark.role("planning")
+def test_marketing_rejection_is_not_resent() -> None:
+    class No(Brief):
+        async def send(self, ctx, brief, key):
+            self.sent.append(key)
+            return CampaignBriefOutput(outcome="rejected", reason_code="FORBIDDEN_SKILL")
+
+    no = No()
+    svc = _svc(marketing=no)
+
+    async def go():
+        pid = (await svc.receive_insight(requester="data", inp=_insight())).output["proposal_id"]
+        await svc.dispatch({"type": "approveProposal", "proposal": pid})
+        await _flush(svc)
+        return pid
+
+    pid = asyncio.run(go())
+    assert len(no.sent) == 1 and _p(svc, pid).status == "확인 대기"
+
+
+@pytest.mark.role("planning")
+def test_resume_briefs_resends_unfinished_handoff_on_start() -> None:
+    from ax_workflow.models import ProposalHandoff
+
+    brief = Brief()
+    svc = _svc(marketing=brief)
+    pid = _new(svc)
+    p = _p(svc, pid)
+    p.status = "마케팅 전달"
+    p.handoff = ProposalHandoff(ok=False, reason="호출 실패", retry=2)
+
+    async def go():
+        assert svc.resume_briefs() == 1
+        await _flush(svc)
+
+    asyncio.run(go())
+    p = _p(svc, pid)
+    assert p.handoff.ok and p.handoff.campaign == "CMP-1" and len(brief.sent) == 1
 
 
 @pytest.mark.role("planning")
@@ -279,7 +356,7 @@ def test_pull_insights_off_in_mock_and_converts_promo() -> None:
     p = _p(svc, out.output["created"][0])
     values = {f.value for f in p.facts}
     assert {"작년 11월 검색이 평균의 1.6배", "4.2만", "16,800원"} <= values
-    assert p.insight_id == "run-1:c1" and "콘티: 불 끄기" in (p.body_md or "")
+    assert p.insight_id == "promo:c1" and "콘티: 불 끄기" in (p.body_md or "")
     again = asyncio.run(svc.dispatch({"type": "pullInsights"}))
     assert again.output["created"] == []  # 같은 초안은 다시 만들지 않는다
 
@@ -617,7 +694,7 @@ def test_promo_reference_only_concept_is_skipped() -> None:
         }
     )  # fmt: skip
     got = proposals.from_promo(promo)
-    assert [x.insight_id for x in got] == ["run-2:c2"]
+    assert [x.insight_id for x in got] == ["promo:c2"]
 
 
 @pytest.mark.role("planning")
@@ -656,3 +733,17 @@ def test_delete_proposal_is_blocked_after_marketing_handoff() -> None:
     assert exc.value.code == "PROPOSAL_SENT"
     asyncio.run(svc.dispatch({"type": "deleteProposal", "proposal": failed}))
     assert [p.id for p in svc.state.proposals] == [sent]
+
+
+@pytest.mark.role("planning")
+def test_pull_failure_and_result_are_recorded_for_screen() -> None:
+    from planning_agent.domain.proposal_actions import PULL_DONE, PULL_FAILED
+
+    async def down(target, req):
+        raise RuntimeError("connect failed")
+
+    svc = _svc(insights=proposals.DataInsights(caller=down))
+    with pytest.raises(ActionError):
+        asyncio.run(svc.dispatch({"type": "pullInsights"}))
+    last = [a for a in svc.state.activity if a.point in (PULL_DONE, PULL_FAILED)][-1]
+    assert last.point == PULL_FAILED and "받아오기 실패" in last.text

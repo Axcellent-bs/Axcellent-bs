@@ -70,7 +70,7 @@ export function nextOf(s: State, r: Request): { href: string; label: string } {
   if (r.state === '기획 중') {
     if (!spec) return { href: toPath(`requests/${requestView(r)}/${r.id}`), label: '기획서 만들기' }
     const xr = reviewOf(s, spec.id)
-    if (xr) return { href: reviewHref(xr), label: xr.lane === 'human' ? '사람 확인하기 (되돌릴 수 없는 일)' : '확정 교차검증 보기' }
+    if (xr) return { href: reviewHref(xr), label: xr.lane === 'human' ? '사람 확인하기 (되돌릴 수 없는 일)' : 'AI 검토 보기' }
     const th = s.threads.find((t) => t.on === spec.id)
     if (spec.question) return { href: th ? toPath(`talk/${th.id}`) : toPath(`work/specs/${spec.id}`), label: '질문 답 받기 (답이 오면 자동 확정)' }
     return { href: toPath(`work/specs/${spec.id}`), label: '기획서 보기' }
@@ -79,13 +79,13 @@ export function nextOf(s: State, r: Request): { href: string; label: string } {
     const tasks = spec ? s.tasks.filter((t) => t.spec === spec.id).map((t) => t.id) : []
     const open = s.prs.filter((p) => tasks.includes(p.task) && !p.merged)
     const waiting = open.map((p) => reviewOf(s, p.id)).find(Boolean)
-    if (waiting) return { href: reviewHref(waiting), label: waiting.lane === 'human' ? `${waiting.ref} 사람 확인하기` : `${waiting.ref} 머지 교차검증 보기` }
+    if (waiting) return { href: reviewHref(waiting), label: waiting.lane === 'human' ? `${waiting.ref} 사람 확인하기` : `${waiting.ref} AI 검토 보기` }
     const fix = open.find((p) => p.reviews[p.reviews.length - 1] === '불일치' || s.reviews.some((x) => x.ref === p.id && x.result === '거절'))
-    if (fix) return { href: toPath(`work/prs/${prSlug(fix.id)}`), label: `${fix.id} 수정 후 재검수` }
+    if (fix) return { href: toPath(`work/prs/${prSlug(fix.id)}`), label: `${fix.id} 고친 뒤 다시 검사` }
     const pr = open[0] ?? s.prs.find((p) => tasks.includes(p.task))
-    return pr ? { href: toPath(`work/prs/${prSlug(pr.id)}`), label: `${pr.id} 보기` } : { href: spec ? toPath(`work/specs/${spec.id}`) : toPath('work/prs'), label: 'PR 만들기' }
+    return pr ? { href: toPath(`work/prs/${prSlug(pr.id)}`), label: `${pr.id} 보기` } : { href: spec ? toPath(`work/specs/${spec.id}`) : toPath('work/prs'), label: '개발 진행 보기' }
   }
-  return { href: toPath(`projects/${r.id}`), label: '프로젝트 보기' }
+  return { href: toPath(`projects/${r.id}`), label: '진행 기록 보기' }
 }
 
 export function hrefOf(s: State, id: string): string | undefined {
@@ -137,4 +137,25 @@ const ID_RE = /(?<![A-Za-z0-9_])(REQ-\d+|SPEC-[A-Z]?\d+|T-[A-Z]?\d+|PROP-\d+|PR 
 export function Linked({ s, text }: { s: State; text: string }) {
   const parts = text.split(ID_RE)
   return <>{parts.map((p, i) => (i % 2 ? <Ref key={i} s={s} id={p} /> : p))}</>
+}
+
+/** 긴 문장을 읽기 좋게 줄로 나눈다: 문장 끝(". ")과 " · " 구분에서. 너무 짧은 조각은 앞 줄에 붙인다 */
+export function splitLines(text: string): string[] {
+  // 문장을 만드는 쪽이 줄을 나눴으면(\n) 그대로 따른다. 옛 문장만 아래 규칙으로 나눈다
+  if (text.includes('\n')) return text.split('\n').map((x) => x.trim()).filter(Boolean)
+  const out: string[] = []
+  for (const x of text.split(/(?<=\.)\s+(?=\S)|\s+·\s+/)) {
+    const t = x.trim()
+    if (!t) continue
+    if (out.length && (t.length < 8 || out[out.length - 1].length < 8)) out[out.length - 1] += ` · ${t}`
+    else out.push(t)
+  }
+  return out
+}
+
+/** 줄로 나눈 문장 (각 줄 안의 REQ-·SPEC- 등은 링크) */
+export function LinkedLines({ s, text }: { s?: State; text: string }) {
+  const xs = splitLines(text)
+  if (xs.length < 2) return s ? <Linked s={s} text={text} /> : <>{text}</>
+  return <>{xs.map((x, i) => <span key={i} className="line">{s ? <Linked s={s} text={x} /> : x}</span>)}</>
 }

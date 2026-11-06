@@ -76,11 +76,12 @@ class PlanCheck:
     @property
     def text(self) -> str:
         if self.verdict == "ok":
-            return "② 기각 이력 질의 → 없음" + (f" ({self.message})" if self.message else "")
+            return "② 인사 기각 이력 확인 → 없음" + (f" ({self.message})" if self.message else "")
         if self.verdict == "warn":
-            card = self.card or "근거 카드 없음"
-            return f"② 기각 이력 질의 → warn ({card}) {self.message or ''}".strip()
-        return f"② 기각 이력 질의 → 확인 못 함 ({self.message})"
+            return "② 인사 기각 이력 확인 → 비슷한 기각 이력 있음" + (
+                f"\n{self.message}" if self.message else ""
+            )
+        return f"② 인사 기각 이력 확인 → 확인 못 함\n{self.message}"
 
 
 class HrClient:

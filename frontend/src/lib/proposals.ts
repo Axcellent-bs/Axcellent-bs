@@ -14,7 +14,7 @@ export interface ProposalFact { label: string; value: string; source: string; li
 /** 기획이 정한 목표치 (기획이 넣는 유일한 숫자) */
 export interface ProposalTarget { label: string; value: string; measure?: string }
 export interface ProposalResult { direction: '늘었음' | '같음' | '줄었음' | '확인 불가'; summary: string; facts?: ProposalFact[]; at: string }
-export interface ProposalHandoff { ok: boolean; reason?: string; campaign?: string; at?: string }
+export interface ProposalHandoff { ok: boolean; reason?: string; campaign?: string; at?: string; retry?: number } // retry: 마케팅 응답이 없어 자동으로 다시 보낸 횟수
 
 export interface Proposal {
   id: string // PROP-n
@@ -48,6 +48,8 @@ export const PROPOSAL_STAGES = ['받음', '기획안', '실행', '성과'] as co
 /** 상태 → 흐름 칸 (폐기는 받음에서 끝난다). 확정하면 기획안을 먼저 만들고, 마케팅·개발로 넘기는 건 그다음 */
 /** 마케팅에 넘기다 실패한 채 남은 기록 (서버는 이제 기획안으로 되돌리지만 예전 기록이 남아 있을 수 있다) */
 export const handoffFailed = (p: Proposal) => p.status === '마케팅 전달' && p.handoff?.ok === false
+/** 마케팅이 응답하지 않아 기획 AI가 자동으로 다시 보내는 중 (몇 번째인지) */
+export const handoffRetrying = (p: Proposal) => (handoffFailed(p) ? p.handoff?.retry ?? 0 : 0)
 export const proposalStage = (p: Proposal): number =>
   p.status === '확인 대기' || p.status === '폐기' ? 0 : p.status === '기획안' || handoffFailed(p) ? (p.spec ? 1 : 0) : p.status === '성과 확인' ? 3 : 2
 export const proposalOpen = (p: Proposal) => p.status === '확인 대기'
@@ -57,7 +59,8 @@ export const PROPOSAL_ORIGIN = 'proposal' // 기획 제안에서 만든 기획�
 export const proposalEnded = (p: Proposal) => p.status === '폐기'
 
 export const PROPOSAL_SKILL_LABEL: Record<string, string> = {
-  promo_concepts: '숏츠 기획안 재료',
+  promo_concepts: '숏츠 아이디어',
+  trend_insight_brief: '트렌드 인사이트',
   content_recommend: '소재 추천',
   youtube_velocity: '조회 급상승',
   trend_history: '시즌 흐름',

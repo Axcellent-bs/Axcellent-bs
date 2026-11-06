@@ -206,7 +206,7 @@ function Frame({ part, title, desc, home, sections, tabCount, tools, actions, ch
           )}
           {(section === 'requests' || section === 'work') && recentIn.length > 0 && (
             <div className="live-strip" aria-live="polite">
-              <span className="live-strip-h">새로 받은 연동</span>
+              <span className="live-strip-h">새로 들어온 요청</span>
               {recentIn.map((x, i) => (
                 <span key={x.seq ?? i} className={`live-item${(x.seq ?? 0) > highlightFrom.current ? ' fresh' : ''}`}>
                   <a href={convoHref(x.ctx)} className="live-link">
