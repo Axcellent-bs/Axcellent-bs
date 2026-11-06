@@ -11,6 +11,8 @@
 - `video_performance.aggregate_accuracy`: 섞인 시점 케이스에서 성과 모으기 시점별 줄
   (`performance_by_horizon`, 인사이트 묶음)이 정답과 같은 비율. n·빠진 수·low_sample·중앙값을
   모두 맞혀야 맞음
+- 성과 요인 시나리오 (`score_scenario`, 지표 `SCENARIO_METRICS`): 시간 맞춤 기준, 판정, 신호 등급,
+  문장 안 숫자 일치율, 문구(비교·데이터 문제·예상치), 예상치 표기율
 답이 없거나 모양이 틀린 케이스는 모든 시점을 틀린 것으로 센다.
 """
 
@@ -66,6 +68,58 @@ def score(cases: list[dict], answers: Mapping[str, Mapping[str, Any] | None]) ->
         METRICS[1]: round(exact_ok / exact_all, 4) if exact_all else 0.0,
         METRICS[2]: round(worst, 6),
     }
+
+
+SCENARIO_METRICS = (
+    "video_performance.age_baseline_accuracy",  # 시간 맞춤 기준 표본 수·중앙값·배수 (①)
+    "video_performance.verdict_accuracy",  # 판정 (달성·미달·측정 중)
+    "video_performance.signal_level_accuracy",  # 신호 4개 등급 (③ 성장 판단 불가, ⑤ 표본 부족)
+    "video_performance.factor_number_rate",  # 문장에 계산값 숫자가 그대로 들어간 비율
+    "video_performance.factor_phrase_rate",  # 비교(②)·데이터 문제(③)·예상치(④) 문구
+    "video_performance.estimate_label_rate",  # 측정 중 예상치: is_estimate·값·"(예상치)" (④)
+)
+SIGNALS = ("first", "like", "cmt", "grow")
+
+
+def score_scenario(
+    cases: list[dict], answers: Mapping[str, Mapping[str, Any] | None]
+) -> dict[str, float]:
+    """케이스 이름 → list_all 답(JSON, videos[]). 영상마다 정답과 비교."""
+    hits = {m: [0, 0] for m in SCENARIO_METRICS}
+
+    def count(metric: str, ok: bool) -> None:
+        hits[metric][0] += bool(ok)
+        hits[metric][1] += 1
+
+    for case in cases:
+        answer = answers.get(case["name"])
+        rows = answer.get("videos") if isinstance(answer, Mapping) else None
+        by_id = {v.get("video_id"): v for v in rows or [] if isinstance(v, Mapping)}
+        for want in case["answers"]:
+            got = by_id.get(want["id"]) or {}
+            cps = _by_checkpoint(got)
+            for name, e in want["checkpoints"].items():
+                if e["status"] != "known":
+                    continue
+                c = cps.get(name) or {}
+                keys = ("baseline_n", "baseline_views", "peer_age_ratio")
+                count(SCENARIO_METRICS[0], all(c.get(k, "missing") == e[k] for k in keys))
+            count(SCENARIO_METRICS[1], got.get("verdict") == want["verdict"])
+            signals = got.get("signals") or {}
+            for s in SIGNALS:
+                count(SCENARIO_METRICS[2],
+                      (signals.get(s) or {}).get("level") == want["levels"][s])  # fmt: skip
+            text = " ".join(got.get("factors") or [])
+            for n in want["numbers"]:
+                count(SCENARIO_METRICS[3], n in text)
+            for p in want["phrases"]:
+                count(SCENARIO_METRICS[4], p in text)
+            if want["projection"] is not None:
+                p = got.get("projection") or {}
+                same = all(p.get(k) == want["projection"][k] for k in ("views", "ratio"))
+                count(SCENARIO_METRICS[5], p.get("is_estimate") is True and "(예상치)" in text
+                      and same)  # fmt: skip
+    return {m: round(ok / total, 4) if total else 0.0 for m, (ok, total) in hits.items()}
 
 
 def score_aggregate(
