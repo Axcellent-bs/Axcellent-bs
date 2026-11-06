@@ -350,6 +350,7 @@ async def run(every: int | None, env: Mapping[str, str], precompute_after: bool 
                                         in_use=in_use_ids(env))  # fmt: skip
             print(result.line(), flush=True)
             await measure_videos(connector, env)  # 게시한 영상 성과: 지금 잴 시점만 (실패해도 계속)
+            await track_fresh(env)  # 새 숏츠 추적: 같은 형식 비교 기준 표본 (실패해도 계속)
             if result.saved and precompute_after:
                 # 새 스냅샷 직후 감지 탭 결과를 미리 계산해 저장 (화면은 읽기만).
                 # 실패해도 수집은 계속
@@ -387,6 +388,26 @@ async def measure_videos(
         print(f"[video] 성과 시점 값 {saved}개" + (f", {'; '.join(problems)}" if problems else ""),
               flush=True)  # fmt: skip
     return saved
+
+
+async def track_fresh(
+    env: Mapping[str, str], now: datetime | None = None, connector: YouTubeConnector | None = None
+) -> int:
+    """새 숏츠 추적 한 번 (형식마다 6시간에 1번 찾기 + 매시간 추적). 저장한 스냅샷 수.
+
+    장부의 부른 곳은 fresh_shorts (이 작업 하루 상한 2,500단위, 전체 8,000은 그대로).
+    실패해도 수집은 계속한다.
+    """
+    from data_agent import fresh_shorts
+
+    yt = connector or YouTubeConnector(env, caller=fresh_shorts.CALLER)
+    try:
+        result = await fresh_shorts.run_tick(yt, env, now)
+    except Exception as error:  # 형식 분류(LLM)·저장 실패 등: 다음 시간에 다시
+        print(f"[fresh] 새 숏츠 추적 실패 ({type(error).__name__})", flush=True)
+        return 0
+    print(result.line(), flush=True)
+    return result.snapshots
 
 
 def lock_path(env: Mapping[str, str]) -> Path:

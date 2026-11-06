@@ -31,6 +31,7 @@ from typing import Any, get_args
 
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
+    BaselineProgress,
     DataFact,
     ShortsStatsOutput,
     TrendInsight,
@@ -49,7 +50,8 @@ DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "video_performance.
 # v2: 목표 대비는 7일에만, 시점별 성과 모으기, line
 # v3: 같은 형식 대비 시간 맞춤, 판정·신호·성과 요인·개선 방향·예상치, list_all
 # v4: 영상의 매출 연결 (promo_id·coupon_id)과 매출 측정 가능 여부
-SCHEMA_VERSION = "video_performance.v4"
+# v5: 같은 형식 기준은 새 숏츠 추적 스냅샷만, 기준 모으는 중 진행(baseline_progress)·신호 collecting
+SCHEMA_VERSION = "video_performance.v5"
 SALES_UNMEASURABLE = "측정 불가: 프로모션 링크/쿠폰 없음"
 # 게시 후 시간과, 그 시점이 지난 뒤 이 시간 안에 재면 그 시점 값으로 보는 허용 창
 # (수집기가 1시간마다라 1시간 시점의 창은 1시간)
@@ -621,6 +623,22 @@ def describe_all(
     return outs
 
 
+def baseline_progress(env: Mapping[str, str]) -> list[BaselineProgress]:
+    """같은 형식 비교 기준 모으는 중: 새 숏츠 추적 대상 형식 × 시점마다 표본 수 (5개면 켜짐)."""
+    from data_agent.fresh_shorts import target_formats
+    from data_agent.skills import video_baseline
+
+    formats = target_formats(env)
+    windows = {c: (CHECKPOINTS[c], WINDOW_HOURS[c]) for c in CHECKPOINTS}
+    loaded = video_baseline.load(env, windows, formats=formats)
+    return [
+        BaselineProgress(shorts_format=f, checkpoint=c,
+                         n=len(loaded[f].samples.get(c, {})) if f in loaded else 0,
+                         need=video_baseline.MIN_BASELINE)  # fmt: skip
+        for f in formats for c in CHECKPOINTS
+    ]
+
+
 def _list_all(
     store: VideoStore, env: Mapping[str, str], now: datetime, shorts: ShortsStatsOutput | None,
     queries: list[str],
@@ -642,6 +660,10 @@ def _list_all(
         out.reason = "아직 측정한 캠페인 영상이 없습니다"
         out.summary = out.reason
     out.limits = [AGE_LIMIT, vf.ANALYTICS_LIMIT]
+    out.baseline_progress = baseline_progress(env)
+    out.baseline_ready = bool(out.baseline_progress) and all(
+        p.n >= p.need for p in out.baseline_progress
+    )
     return _done(out, queries, now, store, env, shorts)
 
 

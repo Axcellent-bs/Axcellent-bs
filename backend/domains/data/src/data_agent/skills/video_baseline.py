@@ -1,8 +1,9 @@
 """같은 형식 숏츠의 시간 맞춤 기준 (게시 후 같은 시간대). 새 API 호출 없이 저장분만 읽는다.
 
 - 형식: `shorts.db`의 `formats` (shorts_stats가 분류해 저장한 영상 형식)
-- 값: `youtube_snapshots.db`의 `snapshots` (수집기가 매시간 저장: 게시 시각·조회·좋아요·댓글).
-  영상마다 시점 창 [H, H + 창) 안 첫 스냅샷을 그 시점 값으로 본다 (우리 영상 측정과 같은 규칙)
+- 값: `youtube_snapshots.db`의 `snapshots` 중 새 숏츠 추적(`fresh_shorts`, source "fresh_track")이
+  게시 직후부터 매시간 저장한 것만. 영상마다 시점 창 [H, H + 창) 안 첫 스냅샷을 그 시점 값으로
+  본다 (우리 영상 측정과 같은 규칙)
 - 기준값 (형식·시점마다 중앙값): 조회수, 좋아요율, 댓글율, 1일 이후 성장(3d ÷ 1d − 1),
   3일→7일 배수(7d ÷ 3d)
 - 표본이 `MIN_BASELINE`(5)개 미만이면 기준 없음 (배수를 내지 않는다)
@@ -19,6 +20,9 @@ from datetime import datetime
 from pathlib import Path
 
 MIN_BASELINE = 5
+# 기준은 새 숏츠 추적(fresh_shorts)이 게시 직후부터 잰 스냅샷만 쓴다. 인기 목록·검색에서 본
+# 스냅샷은 이미 뜬 영상이라 치우쳐서 세지 않는다
+SOURCE = "fresh_track"
 
 
 @dataclass(frozen=True)
@@ -123,7 +127,8 @@ def load(
             marks = ",".join("?" * len(chunk))
             for vid, at, pub, views, likes, comments in conn.execute(
                 "SELECT video_id, collected_at, published_at, view_count, like_count,"
-                f" comment_count FROM snapshots WHERE video_id IN ({marks})", chunk,
+                f" comment_count FROM snapshots WHERE video_id IN ({marks})"
+                " AND ',' || sources || ',' LIKE ?", [*chunk, f"%,{SOURCE},%"],
             ):  # fmt: skip
                 if views is None:
                     continue

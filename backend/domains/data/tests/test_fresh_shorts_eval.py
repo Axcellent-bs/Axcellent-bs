@@ -186,8 +186,13 @@ def observe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, float]
     return score.score(cases, answers)
 
 
-def test_observe_fresh_shorts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """관찰만: 지표를 남긴다 (관문은 코드 PR에서 켠다)."""
+GATES = dict.fromkeys(score.METRICS, 1.0)  # 모두 맞아야 함 (기준선 그대로)
+
+
+def test_fresh_shorts_passes_the_gates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """관문: 창 일치(fresh_track·60초·8일), 하루 상한(찾기 먼저 멈춤), 기준 모으는 중 문구."""
     metrics = observe(tmp_path, monkeypatch)
     print("fresh_shorts eval:", json.dumps(metrics, ensure_ascii=False))
     assert set(metrics) == set(score.METRICS)
+    for name, gate in GATES.items():
+        assert metrics[name] >= gate, f"{name} {metrics[name]} (관문 {gate})"

@@ -44,3 +44,10 @@ def test_no_warning_without_placeholder(monkeypatch, real_mode, card, handlers, 
     caplog.set_level(logging.WARNING)
     create_agent_app(card, handlers)
     assert "자리표시자" not in "\n".join(r.getMessage() for r in caplog.records)
+
+
+def test_placeholder_has_one_definition() -> None:
+    """자리표시자는 config.py 하나에만 둔다 (server.py는 가져다 쓴다)."""
+    from ax_agent_template import server
+
+    assert server.PLACEHOLDER_TOKEN is config.PLACEHOLDER_TOKEN == "data-via-nginx"

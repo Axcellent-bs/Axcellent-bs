@@ -269,6 +269,7 @@ async def list_sources(
     from data_agent.skills.video_explorer import chart_failures
 
     out.youtube_chart_failures = chart_failures(env)
+    out.fresh_track = _fresh_track(env, now)  # 새 숏츠 추적 (수집기 상태 화면)
     # 기다리는 출처: 출처 목록(수집 계획 후보)에 넣지 않고 따로 보여 준다
     out.pending_sources = [PendingSource(name="광고 데이터", reason=AD_DATA_PENDING)]
     return SourcesResult(out, Evidence(queries=queries, data_summary=out.summary, collected_at=now))
@@ -297,6 +298,13 @@ def llm_usage_today(env: Mapping[str, str]) -> LlmDailyUsage:
                  for s, t, c, n in BUDGET.by_task(now.day)],
         reserve_ratio=ratio, reserving=reserving, status=_llm_status(env),
     )  # fmt: skip
+
+
+def _fresh_track(env: Mapping[str, str], now: datetime):  # noqa: ANN202 - FreshTrackStatus
+    """새 숏츠 추적: "새 숏츠 추적: 오늘 N유닛 / 2,500, 추적 중 N개" (읽기만, 만들지 않음)."""
+    from data_agent.fresh_shorts import status
+
+    return status(env, now)
 
 
 def _llm_status(env: Mapping[str, str]):  # noqa: ANN202 - LlmStatus

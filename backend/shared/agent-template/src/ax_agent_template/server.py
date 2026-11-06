@@ -41,6 +41,7 @@ from pydantic import ValidationError
 from ax_agent_template import events
 from ax_agent_template.config import (
     MAX_PATH_LENGTH,
+    PLACEHOLDER_TOKEN,
     agent_name_scope,
     is_mock,
     placeholder_entries,
@@ -83,9 +84,9 @@ def error_result(
     )
 
 
-# 공유 서버(251 등)의 화면은 번들에 실제 토큰을 넣지 않고 본문에 이 자리표시자를 보낸다.
-# 그때만(또는 본문이 비었을 때만) nginx가 넣은 `Authorization: Bearer <토큰>`을 읽는다.
-PLACEHOLDER_TOKEN = "data-via-nginx"
+# 공유 서버(251 등)의 화면은 번들에 실제 토큰을 넣지 않고 본문에 자리표시자(`PLACEHOLDER_TOKEN`,
+# config.py 하나에 둔다)를 보낸다. 그때만(또는 본문이 비었을 때만) nginx가 넣은
+# `Authorization: Bearer <토큰>`을 읽는다.
 
 
 def _bearer(authorization: str | None) -> str:
