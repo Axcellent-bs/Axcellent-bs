@@ -1198,3 +1198,14 @@ button.spec-pid { cursor: pointer; color: var(--primary); font-weight: 600; }
 .rq-item.dropped .rq-v, .rq-item.dropped .rq-m, .rq-item.dropped .rq-c.now .rq-v, .rq-item.dropped .rq-c.warn .rq-m { color: var(--text-3); }
 .rq-card.dropped .inc-steps li.on, .rq-card.dropped .inc-steps li.now, .rq-card.dropped .inc-steps li.now.warn { border-top-color: var(--text-3); color: var(--text-2); }
 .rq-card.dropped .inc-card-title { color: var(--text-2); font-weight: 500; }
+
+/* 코드 번호(REQ-·SPEC-·T-·PR #·ctx_ 등)는 설명 글과 섞이지 않게 작은 칩으로 */
+.idc { display: inline-block; font-family: var(--mono); font-size: 0.85em; line-height: 1.5; padding: 0 5px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); white-space: nowrap; vertical-align: baseline; }
+a.idc { color: var(--primary); }
+a.idc:hover { border-color: var(--primary); text-decoration: none; }
+/* 한글은 낱말 중간에서 줄을 바꾸지 않는다. 긴 경로·영문만 칸이 모자랄 때 끊는다 */
+.planning-scope { word-break: keep-all; overflow-wrap: anywhere; }
+.planning-scope .mono, .planning-scope code { overflow-wrap: anywhere; }
+/* 개발 작업의 바뀐 파일 표: 이유 칸이 너무 좁아지지 않게 */
+table.data td.path-cell { white-space: normal; overflow-wrap: anywhere; min-width: 14em; }
+table.data td.why-cell { min-width: 12em; }

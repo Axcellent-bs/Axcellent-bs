@@ -31,10 +31,10 @@ export function Ops({ s, item }: { s: S; item?: string }) {
         {merged.slice().reverse().map((p) => {
           const i = incidentOf(p.id)
           return (
-            <Step key={p.id} name={mergedAt(p.id).slice(6) || '-'} on={!i} href={toPath(`work/prs/${prSlug(p.id)}`)} title={<>{p.id} · {p.title.replace(/^[A-Z]\d+: /, '')}</>}>
+            <Step key={p.id} name={mergedAt(p.id).slice(6) || '-'} on={!i} href={toPath(`work/prs/${prSlug(p.id)}`)} title={<><span className="mono idc">{p.id}</span> {p.title.replace(/^[A-Z]\d+: /, '')}</>}>
               <Pairs items={[
                 ['머지', mergedLabel(p)],
-                ['크기·경로 점검', `${p.gate.result} · ${p.gate.lines}줄·${p.gate.files}파일 · ${p.gate.paths}`],
+                ['범위 점검', <>{p.gate.result} · {p.gate.lines}줄·{p.gate.files}파일 · <span className="mono">{p.gate.paths}</span></>],
                 ['장애', i ? <Ref s={s} id={i.ctx} /> : '없음'],
               ]} />
             </Step>
@@ -87,7 +87,7 @@ function Deployments({ s }: { s: S }) {
             const c = dep.check
             const rb = c?.rollback
             return (
-              <Step key={dep.id} name={kst(dep.at).slice(6) || '-'} on={dep.status === 'succeeded' && c?.verdict !== 'suspect'} title={<>{dep.id} · {dep.version ?? '-'} · {dep.env} <Chip v={DEP_STATUS[dep.status] ?? [dep.status, 'neutral']} /></>}>
+              <Step key={dep.id} name={kst(dep.at).slice(6) || '-'} on={dep.status === 'succeeded' && c?.verdict !== 'suspect'} title={<><span className="mono idc">{dep.id}</span> {dep.version ?? '-'} · {dep.env} <Chip v={DEP_STATUS[dep.status] ?? [dep.status, 'neutral']} /></>}>
                 <Pairs items={[
                   ['PR', dep.pr_numbers.map((n, i) => <span key={n}>{i > 0 && ', '}<Ref s={s} id={`PR #${n}`} /></span>)],
                   ...(dep.approval_reasons.length ? [['승인', <>{dep.approval_reasons.map((r) => APPROVAL[r] ?? r).join(' · ')}{dep.protected_paths.length > 0 && <span className="mono small"> {dep.protected_paths.join(', ')}</span>}{dep.approved_by && ` · ${dep.approved_by}`}</>] as [string, ReactNode]] : []),
@@ -132,7 +132,7 @@ export function Aftercare({ s, item }: { s: S; item?: string }) {
             const done = raw.map((on, n) => on || n < last)
             return (
               <a key={i.ctx} href={toPath(`work/aftercare/${i.ctx}`)} className={`inc-card${sel?.ctx === i.ctx ? ' on' : ''}`}>
-                <span className="inc-card-top"><span className="mono">{i.ctx}</span><State v={i.linked ? '완료' : '접수'} /></span>
+                <span className="inc-card-top"><span className="mono idc">{i.ctx}</span><State v={i.linked ? '완료' : '접수'} /></span>
                 <b className="inc-card-title">{i.title}</b>
                 <ol className="inc-steps" aria-label="흐름">
                   {INC_STEPS.map((x, n) => <li key={x} className={done[n] ? 'on' : ''}>{x}</li>)}
@@ -156,7 +156,7 @@ function IncidentPanel({ s, i }: { s: S; i: S['incidents'][number] }) {
   return (
     <aside className="chat-drawer inc-drawer" aria-label={`${i.ctx} 장애`}>
       <div className="inc-drawer-head">
-        <div><span className="mono small"><a href={convoHref(i.ctx)} className="plain-link">{i.ctx}</a> · {i.at}</span><h2>{i.title}</h2></div>
+        <div><span className="mono small"><a href={convoHref(i.ctx)} className="mono idc">{i.ctx}</a> · {i.at}</span><h2>{i.title}</h2></div>
         <a href={toPath('work/aftercare')} className="btn-quiet px-2 py-1" aria-label="닫기">✕</a>
       </div>
       <div className="inc-drawer-body">

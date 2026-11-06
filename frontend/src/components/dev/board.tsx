@@ -147,7 +147,7 @@ export function TaskBoard({ s, filter }: { s: S; filter?: string }) {
               <div className="rq-title">
                 <a href={row.next.href} className="rq-name plain-link">{t.title}</a>
                 <span className="rq-meta">
-                  <span className="mono">{t.id}</span>
+                  <span className="mono idc">{t.id}</span>
                   <OriginTag s={s} t={t} />
                   {row.group === 'stuck' && <Tag tone="amber">확인 필요</Tag>}
                   {t.discarded && <Tag>폐기</Tag>}

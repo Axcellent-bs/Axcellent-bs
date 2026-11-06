@@ -120,12 +120,12 @@ export function hrefOf(s: State, id: string): string | undefined {
 export function Ref({ s, id, children, className }: { s: State; id: string; children?: ReactNode; className?: string }) {
   const href = hrefOf(s, id)
   const text = children ?? (id.startsWith('PR #') ? prNameOf(s, id) : id)
-  if (!href) return <span className={className ?? 'mono'}>{text}</span>
-  return <a href={href} className={className ?? 'ref mono'}>{text}</a>
+  if (!href) return <span className={className ?? 'mono idc'}>{text}</span>
+  return <a href={href} className={className ?? 'ref mono idc'}>{text}</a>
 }
 
 // 문장 안의 ID를 링크로 바꾼다 (규칙으로만, 없는 ID는 글자 그대로)
-const ID_RE = /(?<![A-Za-z0-9_])(REQ-\d+|SPEC-\d+|T-\d+|PR #\d+|ctx_(?:req|inc)_\d+|DOC-\d+|TH-\d+|D-\d+|XR-\d+|AR-\d+)/g
+const ID_RE = /(?<![A-Za-z0-9_])(REQ-\d+|SPEC-[A-Z]?\d+|T-[A-Z]?\d+|PROP-\d+|PR #\d+|ctx_(?:req|inc)_\d+|DOC-\d+|TH-\d+|D-\d+|XR-\d+|AR-\d+)/g
 export function Linked({ s, text }: { s: State; text: string }) {
   const parts = text.split(ID_RE)
   return <>{parts.map((p, i) => (i % 2 ? <Ref key={i} s={s} id={p} /> : p))}</>

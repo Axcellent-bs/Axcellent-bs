@@ -297,9 +297,9 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
             <tbody>
               {files.map((x) => (
                 <tr key={x.path}>
-                  <td className="mono">{x.path}</td>
+                  <td className="mono path-cell">{x.path}</td>
                   <td className="num mono"><span className="tag-green">+{x.additions}</span> <span className="tag-amber">−{x.deletions}</span></td>
-                  <td className="small">{x.reason}</td>
+                  <td className="small why-cell">{x.reason}</td>
                 </tr>
               ))}
             </tbody>
