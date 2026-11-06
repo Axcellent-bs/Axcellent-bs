@@ -99,12 +99,26 @@ def token_registry() -> dict[str, str]:
     모든 에이전트가 같은 명부를 받아 서로의 토큰을 검증한다. 로컬 실행(`scripts/run_all.sh`)은
     켤 때마다 새 토큰을 만들어 넘기므로 비밀값이 파일에 남지 않는다.
     """
-    pairs: dict[str, str] = {}
+    return {name: token for name, token in _registry_pairs() if token != PLACEHOLDER_TOKEN}
+
+
+# 공유 서버 화면이 본문에 보내는 자리표시자. 명부 값으로 들어가면 누구나 이 문자열로 통과하므로
+# 그 항목은 받지 않는다 (`token_registry`에서 빼고, 서버를 켤 때 이름만 경고)
+PLACEHOLDER_TOKEN = "data-via-nginx"
+
+
+def _registry_pairs() -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
     for item in os.getenv(TOKENS_ENV, "").split(","):
         name, sep, token = item.strip().partition("=")
         if sep and name and token:
-            pairs[name.strip()] = token.strip()
+            pairs.append((name.strip(), token.strip()))
     return pairs
+
+
+def placeholder_entries() -> list[str]:
+    """명부에서 값이 자리표시자인 항목의 이름 (받지 않는 항목)."""
+    return [name for name, token in _registry_pairs() if token == PLACEHOLDER_TOKEN]
 
 
 def agent_token(name: str) -> str:

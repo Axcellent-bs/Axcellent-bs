@@ -124,32 +124,46 @@ class TimedLLMClient(LLMClient):
 
         return (current_name() or "unknown").split("@", 1)[0]
 
-    def _check(self) -> None:
-        """부르기 전에: 오류 원인으로 멈춘 상태(`llm_halt`) → 우리 하루 상한. 걸리면 안 부른다."""
+    def _check(self, request: str | None = None) -> None:
+        """부르기 전에: 오류 원인으로 멈춘 상태(`llm_halt`) → 우리 하루 상한. 걸리면 안 부른다.
+
+        `request`(모델·응답 형식): 400으로 막힌 같은 요청만 막고 다른 요청은 보낸다.
+        """
         try:
-            llm_halt.HALT.check()
+            llm_halt.HALT.check(request=request)
             llm_budget.BUDGET.check(skill=self._skill())
         except (llm_halt.LLMHalted, llm_budget.LLMDailyCapReached) as error:  # 짧게만 저장
             llm_failure.mark(error)
             raise
 
-    @staticmethod
-    def _after(error: Exception | None) -> None:
-        """응답 상태로 원인 기록: 401·403 키 오류, 429 공급자 한도. 성공이면 연속 429를 지운다."""
+    def _after(self, error: Exception | None, request: str | None = None,
+               model: str | None = None) -> None:  # fmt: skip
+        """응답 상태로 원인 기록: 400 요청 형식(같은 요청만), 401·403 키, 429 공급자 한도.
+
+        성공이면 연속 429를 지운다. 임베딩은 HTTP 오류가 httpx 예외 그대로라 응답 코드를 꺼낸다.
+        """
         if error is None:
             llm_halt.HALT.record_success()
-        elif isinstance(error, LLMResponseError):
-            llm_halt.HALT.record_error(error.status_code)
+            return
+        status_code = getattr(error, "status_code", None)
+        if status_code is None:  # 임베딩 (httpx.HTTPStatusError)
+            status_code = getattr(getattr(error, "response", None), "status_code", None)
+        if isinstance(error, LLMResponseError) or status_code is not None:
+            message = getattr(error, "provider_message", None)
+            llm_halt.HALT.record_error(status_code, request_key=request, model=model,
+                                       message=message)  # fmt: skip
 
     async def structured(self, *args: Any, **kwargs: Any) -> Any:
-        self._check()
         schema = args[1] if len(args) > 1 else kwargs.get("schema")
+        model = self.settings.model
+        request = llm_halt.request_key(model, getattr(schema, "__name__", "unknown"))
+        self._check(request)
         token = _LLM_TASK.set((self._skill(), llm_budget.task_of(schema)))
         try:
             with stage("llm"):
                 result = await super().structured(*args, **kwargs)
         except Exception as error:  # 실패한 계산은 저장하지 않게 표시 (llm_failure)
-            self._after(error)
+            self._after(error, request, model)
             llm_failure.mark(error)
             raise
         finally:
@@ -158,13 +172,15 @@ class TimedLLMClient(LLMClient):
         return result
 
     async def embed(self, texts: list[str], context_id: str | None = None) -> list[list[float]]:
-        self._check()
+        model = self.settings.embed_model or self.settings.model
+        request = llm_halt.request_key(model, llm_budget.EMBED_TASK)
+        self._check(request)
         token = _LLM_TASK.set((self._skill(), llm_budget.EMBED_TASK))
         try:
             with stage("llm"):
                 result = await super().embed(texts, context_id)
         except Exception as error:
-            self._after(error)
+            self._after(error, request, model)
             llm_failure.mark(error)
             raise
         finally:

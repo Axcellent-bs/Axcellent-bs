@@ -211,6 +211,7 @@ function LlmStatusLine({ s }: { s: LlmStatus | null | undefined }) {
     <div role="status" className={`border px-4 py-3 text-sm ${LLM_TONE[s.tone] ?? LLM_TONE.blue}`}>
       <p className="font-bold">{s.title}</p>
       {s.detail && <p>{s.detail}</p>}
+      {s.error_message && <p className="text-xs opacity-80">공급자 메시지{s.request ? ` (${s.request})` : ""}: {s.error_message}</p>}
       {where && <p className="text-xs opacity-80">{where}</p>}
     </div>
   );

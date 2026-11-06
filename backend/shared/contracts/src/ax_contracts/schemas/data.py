@@ -2337,8 +2337,8 @@ class LlmDailyUsage(AxModel):
 
 
 # LLM 상태: ok, key_error = 401·403 (그날 중단), provider_limit = 429 (1시간 뒤 다시, 3번 연속이면
-# 그날 중단), our_cap = 우리 하루 상한 도달
-LlmState = Literal["ok", "key_error", "provider_limit", "our_cap"]
+# 그날 중단), our_cap = 우리 하루 상한 도달, request_error = 400 (같은 요청만 그날 중단, 값 추가)
+LlmState = Literal["ok", "key_error", "provider_limit", "our_cap", "request_error"]
 
 
 class LlmStatus(AxModel):
@@ -2358,6 +2358,10 @@ class LlmStatus(AxModel):
     call_cap: int = Field(default=0, ge=0)
     tokens: int = Field(default=0, ge=0)
     token_cap: int = Field(default=0, ge=0)
+    # 아래는 예전 응답은 없다. request_error(400)일 때: 막힌 요청(응답 형식 이름)과 공급자 오류
+    # 메시지 앞 200자 (키·토큰 모양은 가림)
+    request: str | None = None
+    error_message: str | None = Field(default=None, max_length=200)
 
 
 class LlmTaskUsage(AxModel):
