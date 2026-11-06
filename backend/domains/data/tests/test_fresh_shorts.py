@@ -67,11 +67,12 @@ class FakeYouTube:
 
     async def search_fresh_shorts(self, query, published_after, **_):  # noqa: ANN001, ANN003, ANN201
         self.searches.append(query)
-        youtube_quota.LEDGER.add(fresh_shorts.CALLER, 100, search=True)
+        youtube_quota.LEDGER.add(fresh_shorts.CALLER, 100, search=True,
+                                 day=youtube_quota.day_of(NOW))  # 테스트 시각의 장부 날짜
         return await self.videos(["newshort001", "longvideo01"])
 
     async def videos(self, ids):  # noqa: ANN001, ANN201
-        youtube_quota.LEDGER.add(fresh_shorts.CALLER, 1)
+        youtube_quota.LEDGER.add(fresh_shorts.CALLER, 1, day=youtube_quota.day_of(NOW))
         out = []
         for i in ids:
             seconds = 90 if i.startswith("long") else 30
