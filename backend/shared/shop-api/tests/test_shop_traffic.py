@@ -124,3 +124,69 @@ def test_rate_and_admin_token_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert traffic.admin_token() == "adm-token"
     monkeypatch.setenv("SHOP_ADMIN_TOKEN", "explicit")
     assert traffic.admin_token() == "explicit"
+
+
+# ---------------------------------------------------------------- 발송·도착 (택배 흉내)
+def _paid_order(client: TestClient) -> str:
+    buyer = client.get("/api/shop/users").json()["data"][0]["buyer_id"]
+    product = _products(client)[0]["product_id"]
+    order = client.post(
+        "/api/shop/orders", json={"buyer_id": buyer, "items": [{"product_id": product, "qty": 1}]}
+    ).json()["data"]
+    paid = client.post(
+        f"/api/shop/orders/{order['order_id']}/payments", json={"method_code": "card"}
+    )
+    assert paid.json()["data"]["status"] == "paid"
+    return order["order_id"]
+
+
+def test_delivery_marks_only_arrived_orders_once(client: TestClient) -> None:
+    from datetime import datetime, timedelta
+
+    order_id = _paid_order(client)
+    created = datetime.fromisoformat(
+        client.get(f"/api/shop/orders/{order_id}")
+        .json()["data"]["created_at"]
+        .replace("Z", "+00:00")
+    )
+    logs: list[str] = []
+    clock = {"now": created + timedelta(hours=10)}
+    delivery = traffic.Delivery(
+        _caller(client), token="adm-token", log=logs.append, clock=lambda: clock["now"]
+    )
+    assert delivery.sweep()["delivered"] == 0  # 아직 도착할 시간이 아니다
+
+    clock["now"] = created + timedelta(days=4)
+    assert delivery.sweep() == {"shipped": 1, "delivered": 1, "failed": 0}
+    order = client.get(f"/api/shop/orders/{order_id}").json()["data"]
+    shipped, arrived = traffic.delivery_plan(order_id, created)
+    assert order["delivered_at"] is not None and order["shipped_at"] < order["delivered_at"]
+    assert created < shipped < arrived <= clock["now"]
+    assert any("도착 1건" in line for line in logs)
+
+    # 이미 본 구간은 다시 보지 않고, 다시 봐도 이미 적힌 주문은 건드리지 않는다
+    assert delivery.sweep()["delivered"] == 0
+    delivery.cursor = None
+    assert delivery.sweep()["delivered"] == 0
+    assert traffic.delivery_plan(order_id, created) == (shipped, arrived)  # 늘 같은 값
+
+
+def test_delivery_without_token_does_nothing(client: TestClient) -> None:
+    order_id = _paid_order(client)
+    delivery = traffic.Delivery(_caller(client), token="", log=lambda _: None)
+    assert delivery.sweep() == {"shipped": 0, "delivered": 0, "failed": 0}
+    assert client.get(f"/api/shop/orders/{order_id}").json()["data"]["delivered_at"] is None
+
+
+def test_delivery_with_wrong_token_counts_failures(client: TestClient) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    _paid_order(client)
+    logs: list[str] = []
+    delivery = traffic.Delivery(
+        _caller(client),
+        token="wrong",
+        log=logs.append,
+        clock=lambda: datetime.now(UTC) + timedelta(days=4),
+    )
+    assert delivery.sweep()["failed"] == 1 and any("실패 1건" in line for line in logs)
