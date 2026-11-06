@@ -359,6 +359,13 @@ export function DataSources() {
         <State s={sources.state} what="출처 목록">{(out) => (
           <div className="space-y-3">
             <Collectors list={out.collectors} />
+            {out.fresh_track && (
+              <p className={`rounded-xl px-3 py-2 text-sm ${out.fresh_track.find_stopped ? "bg-amber-50 text-amber-900" : "bg-ink-50 text-ink-700"}`}>
+                <span className="font-semibold">{out.fresh_track.line}</span>
+                {out.fresh_track.find_stopped && " · 상한 가까워 오늘 찾기는 멈춤 (추적은 계속)"}
+                {out.fresh_track.formats.length > 0 && <span className="block text-xs opacity-80">대상 형식: {out.fresh_track.formats.join(" · ")}</span>}
+              </p>
+            )}
             <LlmUsage usage={out.llm_usage ?? null} />
             <ChartFailures list={out.youtube_chart_failures ?? []} />
             <SourceTable out={out} plan={planOut} />

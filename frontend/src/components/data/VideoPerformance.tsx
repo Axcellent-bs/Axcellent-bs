@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Empty, Panel, Waiting } from "@/components/finance/bits";
 import {
   DATA_SERVER, dataAi, kpiLive,
-  type CampaignResultOutput, type CampaignSalesCell,
+  type BaselineProgress, type CampaignResultOutput, type CampaignSalesCell,
   type SignalLevel, type VideoCheckpoint, type VideoInsightCard, type VideoPerformanceListOutput,
   type VideoPerformanceVideo, type VideoSignal, type VideoVerdict,
 } from "@/lib/data";
@@ -120,8 +120,45 @@ function SignalTile({ name, s }: { name: keyof typeof SIGNAL_NAME; s: VideoSigna
     <div className="flex min-w-0 flex-col border border-ink-100 bg-surface px-3 py-2" title={s.reason ?? undefined}>
       <span className="text-[11px] text-ink-500">{SIGNAL_NAME[name]}</span>
       <b className="text-base text-ink-900">{s.display ?? "–"}</b>
-      <span className={`text-[11px] font-semibold ${level.text}`}>{level.label}</span>
+      <span className={`text-[11px] font-semibold ${s.collecting ? "text-violet-700" : level.text}`}>
+        {s.collecting ? (s.reason ?? "기준 모으는 중") : level.label}
+      </span>
     </div>
+  );
+}
+
+const PROGRESS_WHEN = { "1h": "오늘 안에", "1d": "약 1일 뒤", "3d": "약 3일 뒤", "7d": "약 7일 뒤" } as const;
+
+/** 같은 형식 비교 기준 모으는 중 (서버 표본 수 그대로). 모든 시점이 다 모이면 숨긴다 */
+function BaselineBox({ list, ready }: { list: BaselineProgress[]; ready: boolean }) {
+  if (ready || list.length === 0) return null;
+  const order = ["1h", "1d", "3d", "7d"] as const;
+  return (
+    <section className="card flex flex-col gap-3 border border-ink-100 p-4" aria-labelledby="data-baseline-progress">
+      <div>
+        <h3 id="data-baseline-progress" className="text-base font-semibold text-ink-900">같은 형식 비교 기준 모으는 중</h3>
+        <p className="text-sm text-ink-500">
+          새로 올라온 숏츠를 게시 직후부터 추적합니다. 시점마다 5개가 모이면 신호 등급이 켜집니다. 그 전에는 '기준 모으는 중'으로 표시합니다.
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {order.map((cp) => {
+          const cells = list.filter((p) => p.checkpoint === cp);
+          const done = cells.reduce((a, p) => a + Math.min(p.n, p.need), 0);
+          const total = cells.reduce((a, p) => a + p.need, 0) || 1;
+          return (
+            <div key={cp} className="flex min-w-0 flex-col gap-1">
+              <span className="text-xs text-ink-500">{CP_NAME[cp]} 기준</span>
+              <b className="text-sm text-ink-900">{cells.map((p) => `${p.shorts_format} ${Math.min(p.n, p.need)}/${p.need}`).join(" · ")}</b>
+              <div className="h-1.5 w-full bg-ink-100" aria-hidden>
+                <div className="h-full bg-violet-500" style={{ width: `${(done / total) * 100}%` }} />
+              </div>
+              <span className="text-[11px] text-ink-500">{done >= total ? "다 모임" : PROGRESS_WHEN[cp]}</span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -299,6 +336,7 @@ function Result({ out, at, campaigns }: { out: VideoPerformanceListOutput; at: s
         <p><b className="text-violet-700">근거 신호 4개</b> 첫 1시간 속도 · 좋아요율 · 댓글율 · 1일 이후 성장. 같은 형식 숏츠의 게시 후 같은 시간대 중앙값과 비교해
           강함(80% 이상) / 보통(50~80%) / 약함(50% 미만), 비교 표본이 5개 미만이면 판단 불가로 표시합니다.</p>
       </div>
+      <BaselineBox list={out.baseline_progress ?? []} ready={out.baseline_ready ?? false} />
       <section className="flex flex-col gap-3">
         <h3 className="text-base font-semibold text-ink-900">영상별 결과</h3>
         {out.videos.map((v) => <VideoCard key={`${v.video_id}-${v.test}`} v={v} />)}

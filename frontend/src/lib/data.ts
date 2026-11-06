@@ -1177,6 +1177,19 @@ export interface DataSourcesOutput {
   collectors?: CollectorStatus[];
   llm_usage?: LlmDailyUsage | null;
   youtube_chart_failures?: YouTubeChartFailure[];
+  /** 새 숏츠 추적 (같은 형식 비교 기준용). 예전 응답은 없다 */
+  fresh_track?: FreshTrackStatus | null;
+}
+/** 새 숏츠 추적: 오늘 쓴 YouTube 단위 / 이 작업 하루 상한, 추적 중 수 (서버 값 그대로) */
+export interface FreshTrackStatus {
+  units_today: number;
+  unit_cap: number;
+  tracking: number;
+  formats: string[];
+  /** 상한에 닿아 오늘 찾기를 멈춤 (추적은 계속) */
+  find_stopped: boolean;
+  /** "새 숏츠 추적: 오늘 N유닛 / 2,500, 추적 중 N개" */
+  line: string;
 }
 
 // ---------------------------------------------------------------- 수집 계획 (source_plan, #578)
@@ -1513,8 +1526,17 @@ export interface VideoSignal {
   level: SignalLevel;
   reason?: string | null;
   baseline_n: number;
+  /** v5: 같은 형식 기준 표본 5개 미만 = 기준 모으는 중 (reason "기준 모으는 중 (n/5)") */
+  collecting?: boolean;
 }
 export interface VideoSignals { first: VideoSignal; like: VideoSignal; cmt: VideoSignal; grow: VideoSignal }
+/** 같은 형식 비교 기준 모으는 중: 형식·시점마다 새 숏츠 추적 표본 수 (need개면 신호 등급이 켜짐) */
+export interface BaselineProgress {
+  shorts_format: string;
+  checkpoint: VideoCheckpointName;
+  n: number;
+  need: number;
+}
 export interface VideoProjection {
   views?: number | null;
   ratio?: number | null;
@@ -1626,6 +1648,9 @@ export interface VideoPerformanceListOutput {
   limits: string[];
   summary: string;
   schema_version?: string;
+  /** v5: 같은 형식 비교 기준 모으는 중 (대상 형식 × 시점). 모두 need개면 baseline_ready */
+  baseline_progress?: BaselineProgress[];
+  baseline_ready?: boolean;
 }
 
 /** 서버가 꺼졌을 때 무엇이 꺼졌는지 보여 주는 이름 */
