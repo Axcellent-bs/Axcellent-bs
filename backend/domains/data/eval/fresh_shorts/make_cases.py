@@ -4,8 +4,8 @@
     uv run python domains/data/eval/fresh_shorts/make_cases.py
 
 규칙 (이 파일이 직접 계산, skill과 따로 적음):
-- 시계: 한국 0시에서 시작해 1시간마다 한 번(tick). 하루 사용량은 한국 날짜마다 새로 센다
-  (`used` 정답은 가장 많이 쓴 날의 단위). 찾기는 6시간마다(tick 0, 6, 12, …) 형식마다 1번:
+- 시계: YouTube 장부 하루 시작(태평양 0시)에서 1시간마다 한 번(tick). 하루 사용량은 장부 날짜마다
+  새로 센다 (`used` 정답은 가장 많이 쓴 날의 단위). 찾기는 6시간마다(tick 0, 6, 12, …) 형식마다 1번:
   게시 시각이 (지금 − 6시간, 지금]인 짧은 영상을 최신순으로. 4분 미만이면 검색에 나오지만
   60초 넘는 영상은 추적하지 않는다. 형식당 추적 상한 40개
 - 추적: 찾은 tick부터 매 tick 스냅샷 (source "fresh_track"). 게시 후 8일(192시간)이 지나면 끝
@@ -52,7 +52,7 @@ def simulate(cap: int, ticks: int) -> dict:
     snaps: dict[str, list[float]] = {}
     used, finds, skipped_finds, track_ticks, peak = 0, 0, 0, 0, 0
     for t in range(ticks + 1):
-        if t % 24 == 0:  # 시계는 한국 0시에서 시작: 하루 사용량은 날마다 새로
+        if t % 24 == 0:  # 시계는 장부 하루 시작에서: 하루 사용량은 날마다 새로
             peak, used = max(peak, used), 0
         if t % FIND_EVERY == 0:
             for fmt in FORMATS:
