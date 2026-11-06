@@ -110,6 +110,7 @@ SKILL_KO: dict[str, str] = {
     "shorts_stats": "숏츠 통계 보기",
     "campaign_effect": "캠페인 효과 보기",
     "video_performance": "게시 영상 성과 보기",
+    "campaign_result": "캠페인 성과 결과 보기",
     "trend_age": "연령대별 상승 보기",
     "trend_insight_brief": "인사이트 브리프 보기",
     "domain_profile": "회사 도메인 프로필 보기",

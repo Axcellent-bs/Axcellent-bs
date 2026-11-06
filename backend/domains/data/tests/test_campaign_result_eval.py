@@ -100,9 +100,14 @@ def _answer(case: dict) -> dict | None:
             "videos": [v.model_dump(mode="json") for v in videos]}  # fmt: skip
 
 
-def test_observe_the_skill_on_the_cases() -> None:
-    """관찰만: 지표를 남긴다 (관문은 skill PR에서 켠다)."""
+GATES = dict.fromkeys(score.METRICS, 1.0)  # 모두 맞아야 함 (기준선 낮추지 않음)
+
+
+def test_the_skill_passes_the_gates_on_the_cases() -> None:
+    """관문: 판정·네 칸(마이너스 그대로, 합산 없음)·알림·측정 불가 표기가 모두 정답과 같다."""
     cases = make.cases()
     metrics = score.score(cases, {c["name"]: _answer(c) for c in cases})
     print("campaign_result eval:", json.dumps(metrics, ensure_ascii=False))
     assert set(metrics) == set(score.METRICS)
+    for name, gate in GATES.items():
+        assert metrics[name] >= gate, f"{name} {metrics[name]} (관문 {gate})"

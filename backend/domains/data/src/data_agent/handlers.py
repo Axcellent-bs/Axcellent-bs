@@ -1195,6 +1195,41 @@ async def video_performance(request: AgentRequest) -> AgentResult:
     )
 
 
+def _stored_shorts() -> Any:
+    """같은 형식 비교의 예전 기준(숏츠 통계 저장분). 없거나 모양이 틀리면 None."""
+    from ax_contracts.schemas.data import ShortsStatsOutput
+
+    stored = RESPONSES.latest("shorts_stats")
+    if isinstance(stored, list) and len(stored) > 1 and isinstance(stored[1], dict):
+        try:
+            return ShortsStatsOutput.model_validate(stored[1])
+        except ValidationError:
+            return None
+    return None
+
+
+async def campaign_result(request: AgentRequest) -> AgentResult:
+    """성과 결과 1건 (campaign_id 기준): 영상 성과 + 매출 효과 판정 + 알림. grade read, LLM 없음."""
+    from ax_contracts.schemas.data import CampaignResultRequest
+    from data_agent.skills.campaign_result import campaign_result as run
+
+    data = _parse(request, CampaignResultRequest)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        connector = get_campaign_connector()
+    except NotImplementedError:
+        connector = None  # 쇼핑몰 연결이 없으면 매출은 측정 불가 + 이유, 영상 성과는 그대로
+    result = await run(data, connector, env=os.environ, shorts=_stored_shorts())
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=result.output.status,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
+
+
 # 트렌드 감지 탭이 부르는 skill은 단계별 시간(sqlite·외부·LLM·계산 ms)을 로그 한 줄로 남긴다
 TIMED_SKILLS = frozenset({
     "trend_popular", "trend_scan", "trend_candidates", "youtube_velocity", "shorts_stats",
@@ -1220,6 +1255,7 @@ HANDLERS = {
     "answer_planning_question": answer_planning_question,
     "campaign_effect": campaign_effect,
     "video_performance": video_performance,
+    "campaign_result": campaign_result,
     "trend_age": trend_age,
     "trend_insight_brief": trend_insight_brief,
     "domain_profile": domain_profile,
