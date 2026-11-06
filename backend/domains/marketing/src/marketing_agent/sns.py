@@ -1,6 +1,6 @@
 """Instagram 게시 초안과 점검 (skill `draft_sns_post`, `check_sns_post`). SNS 설계 S2 단계.
 
-- 둘 다 읽기 전용이다(초안 저장만 한다). 상태를 바꾸는 `publish_sns`·`generate_video`는
+- 둘 다 읽기 전용이다(초안 저장만 한다). 상태를 바꾸는 `publish_sns`·`generate_media`는
   이 단계에 없다.
 - 초안 문안은 고정 템플릿이다. 이미 게시된 공지(`NoticeStore`)의 공개 문구 또는 공개 쿠폰 사실
   (제약 사항 포함)만 쓰고, 원인·영향 숫자는 적지 않는다. 외부 입력(`untrusted`)은 읽지 않는다.

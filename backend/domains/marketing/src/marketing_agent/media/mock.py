@@ -11,7 +11,7 @@ from marketing_agent.media.base import MediaRequest, MediaResult
 
 NAME = "mock"
 MODEL_ID = "mock-media"
-# 고정 비용(원). 0원은 safety 규칙(`video_cost_zero`)이 보류하므로 0이 아닌 값으로 둔다
+# 고정 비용(원). 0원은 safety 규칙(`media_cost_zero`)이 보류하므로 0이 아닌 값으로 둔다
 MOCK_COST_KRW = {"image": 100, "video": 1000}
 
 
