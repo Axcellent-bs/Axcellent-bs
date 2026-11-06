@@ -3,7 +3,7 @@
 import { useState, type Dispatch } from 'react'
 import {Button, PageHeader, Select, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, type Action, type Doc, type DocBlock, type State } from '@/lib/planningData'
-import { Linked, Ref, go, toPath } from '@/components/planning-common/links'
+import { Linked, Ref, go, idText, toPath } from '@/components/planning-common/links'
 import { Sec, Tag, rowNav } from '@/components/planning-common/parts'
 import { Pager, usePage } from '@/components/planning-common/pager'
 import { MdEditable } from '@/components/planning-common/markdown'
@@ -41,11 +41,11 @@ export function Docs({ s, d, item }: { s: State; d: Dispatch<Action>; item?: str
                 return (
                   <li key={x.id} {...nav} className={`sl-item dl-grid ${nav.className ?? ''}`}>
                     <span className="sl-title">
-                      <span className="mono muted sl-id">{x.id}</span>
+                      <span className="mono idc sl-id" title={x.id}>{idText(x.id)}</span>
                       <b title={x.title}>{x.title || '제목 없는 문서'}</b>
                       {x.by === 'ai' && <Tag tone="green">AI 정리</Tag>}
                     </span>
-                    <span className="sl-title">{r ? <><span className={`rq-dept d-${r.from}`}>{DEPT_NAME[r.from]}</span><span className="mono muted sl-id">{r.id}</span></> : <span className="muted small">직접 쓴 문서</span>}</span>
+                    <span className="sl-title">{r ? <><span className={`rq-dept d-${r.from}`}>{DEPT_NAME[r.from]}</span><span className="mono idc sl-id" title={r.id}>{idText(r.id)}</span></> : <span className="muted small">직접 쓴 문서</span>}</span>
                     <span className="muted small">{todos.length ? `${todos.filter((b) => b.done).length}/${todos.length}` : '—'}</span>
                     <span className="muted small">{x.updated}</span>
                   </li>
@@ -119,7 +119,7 @@ function Editor({ doc, d, s }: { doc: Doc; d: Dispatch<Action>; s: State }) {
         onBlur={(e) => e.target.value !== doc.title && d({ type: 'renameDoc', doc: doc.id, title: e.target.value })}
       />
       <p className="muted small" style={{ margin: 0 }}>
-        <span className="mono">{doc.id}</span> · 마지막 수정 {doc.updated}
+        <span className="mono idc" title={doc.id}>{idText(doc.id)}</span> · 마지막 수정 {doc.updated}
         {todos.length > 0 && <> · 할 일 {todos.filter((b) => b.done).length}/{todos.length}</>}
         {doc.about && <> · 요청 <Ref s={s} id={doc.about} /> · <a href={toPath(`projects/${doc.about}`)}>프로젝트 보기</a></>}
         {doc.by === 'ai' && <> · AI 어시스턴트가 정리</>}

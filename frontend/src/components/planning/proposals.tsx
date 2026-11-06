@@ -1,12 +1,12 @@
 // 기획 제안: ① 데이터분석 인사이트(근거 수치) → ② 기획 판단(할 일·이유·목표) → 사람 확정(기획안으로 만들기)·폐기
 // 마케팅·개발로 넘기는 건 기획안 다음 단계
 import { sourceLabel } from '@/lib/planningLabels'
-import { useState, type Dispatch } from 'react'
+import { useEffect, useState, type Dispatch } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, type Action, type State as S } from '@/lib/planningData'
 import { PROPOSAL_SKILL_LABEL, PROPOSAL_STAGES, WRITTEN_BY_LABEL, handoffRetrying, proposalEnded, proposalOpen, proposalStage, type Proposal, type ProposalFact } from '@/lib/proposals'
 import { Tag } from '@/components/planning-common/parts'
-import { LinkedLines, go, toPath } from '@/components/planning-common/links'
+import { LinkedLines, go, idText, toPath } from '@/components/planning-common/links'
 import { Pager, usePage } from '@/components/planning-common/pager'
 import { Markdown } from '@/components/planning-common/markdown'
 
@@ -60,8 +60,14 @@ function ProposalList({ d, s }: P) {
   const xs = (s.proposals ?? []).slice().reverse()
   const [stage, setStage] = useState<number | null>(null)
   const count = (n: number) => xs.filter((p) => proposalStage(p) === n && !proposalEnded(p)).length
-  const rows = stage === null ? xs : xs.filter((p) => proposalStage(p) === stage)
+  // 글자로 찾기(제목·번호·할 일)와 출처 부서 거르기. 화면 안에서만 거른다
+  const [q, setQ] = useState('')
+  const [from, setFrom] = useState('')
+  const froms = [...new Set(xs.map((p) => p.from))]
+  const hit = (p: Proposal) => (!from || p.from === from) && (!q.trim() || `${p.id} ${idText(p.id)} ${p.title} ${p.idea}`.toLowerCase().includes(q.trim().toLowerCase()))
+  const rows = (stage === null ? xs : xs.filter((p) => proposalStage(p) === stage)).filter(hit)
   const pg = usePage(rows, 12)
+  useEffect(() => pg.setPage(0), [q, from]) // eslint-disable-line react-hooks/exhaustive-deps
   // 마지막 받아오기 결과 (실패도 기록에 남는다, 알림이 사라져도 보이게)
   const pull = s.activity.filter((a) => a.ctx === 'ctx_proposals' && (a.point === 'pull_insights' || a.point === 'pull_insights_failed')).at(-1)
   const pullFailed = pull?.point === 'pull_insights_failed'
@@ -74,11 +80,18 @@ function ProposalList({ d, s }: P) {
             <button key={label} type="button" aria-pressed={stage === n} onClick={() => { setStage(n); pg.setPage(0) }}>{label} {count(n)}</button>
           ))}
         </div>
+        <input type="search" className="rq-search" placeholder="제목·번호로 찾기" value={q} onChange={(e) => setQ(e.target.value)} aria-label="제안 찾기" />
+        {froms.length > 1 && (
+          <select className="rq-select" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="출처">
+            <option value="">출처 전체</option>
+            {froms.map((x) => <option key={x} value={x}>{DEPT_NAME[x as keyof typeof DEPT_NAME] ?? x}</option>)}
+          </select>
+        )}
         <span style={{ flex: 1 }} />
         {pull && <span className={`small ${pullFailed ? 'pp-pull-fail' : 'muted'}`} title={pull.text}>{pull.t} · {pull.text.replace(/^데이터분석 받아오기(: | 실패 · |\s*실패\n)/, pullFailed ? '실패 · ' : '').replace(/\n/g, ' · ')}</span>}
         <Button size="small" variant="primary" onClick={() => { d({ type: 'pullInsights' }); toast.show('데이터분석에서 인사이트를 받아오는 중') }}>{pullFailed ? '다시 받아오기' : '데이터분석에서 받아오기'}</Button>
       </div>
-      {!pg.rows.length ? <div className="empty"><b>없음</b></div> : (
+      {!pg.rows.length ? <div className="empty"><b>{q.trim() ? `"${q.trim()}" 찾은 제안 없음` : '없음'}</b></div> : (
         <>
           <div className="inc-grid rq-cards">
             {pg.rows.map((p) => <ProposalCard key={p.id} p={p} />)}
@@ -108,7 +121,7 @@ function ProposalCard({ p }: { p: Proposal }) {
       <span className="inc-card-top">
         <span className={`rq-dept d-${p.from}`}>{DEPT_NAME[p.from]}</span>
         <Tag>{PROPOSAL_SKILL_LABEL[p.skill] ?? p.skill}</Tag>
-        <span className="mono">{p.id}</span>
+        <span className="mono idc" title={p.id}>{idText(p.id)}</span>
       </span>
       <b className="inc-card-title">{p.title}</b>
       <span className="pp-idea">{p.idea}</span>
@@ -178,7 +191,7 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
         <div className="pp-head">
           <span className={`rq-dept d-${p.from}`}>{DEPT_NAME[p.from]}</span>
           <Tag>{PROPOSAL_SKILL_LABEL[p.skill] ?? p.skill}</Tag>
-          <span className="mono muted" title={p.insightId ? `데이터분석 id ${p.insightId}` : undefined}>{p.id}</span>
+          <span className="mono idc" title={p.insightId ? `${p.id} · 데이터분석 id ${p.insightId}` : p.id}>{idText(p.id)}</span>
           <span style={{ flex: 1 }} />
           <Tag tone={STATUS_TONE[p.status]}>{p.status}</Tag>
           <span className="muted small">{p.created}</span>
