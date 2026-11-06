@@ -30,6 +30,7 @@ const STEP_KO: Record<string, string> = {
   cost: "처리 결과 장부에 기록", record: "처리 결과 기록", verify: "인사 기록 읽어 확인",
 };
 const NOTE_KO: Record<string, string> = {
+  suspected: "최근 배포가 원인으로 의심됨", linked_duplicate: "이미 있는 같은 요청에 연결함", verify_timeout: "자동 교차검증이 제때 끝나지 않아 사람 승인으로 넘김",
   undetermined: "원인을 특정하지 못함", requested: "보상을 요청함", card_created: "기록을 남김",
   listed: "인사 기록에서 확인함", partial: "일부만 확인함", candidate: "후보 기록으로 저장함 (사람 확인 대기)",
   found: "비슷한 과거 이벤트를 찾음", none: "비슷한 과거 이벤트 없음", recorded: "해결 내용을 남김", duplicate: "이미 남긴 해결 내용",
@@ -328,15 +329,15 @@ function IncidentDetail({ incident }: { incident: Incident }) {
       {!!incident.summary.length && (
         <section className="card p-5">
           <h3 className="mb-2 text-[15px] font-semibold">요약</h3>
-          <ul className="list-inside list-disc space-y-0.5 text-sm">{incident.summary.map((line) => <li key={line} title={line}>{eventKo(line.replace(/\s*\[[^\]]*\]/g, ""), incident)}</li>)}</ul>
+          <ul className="list-inside list-disc space-y-1 text-[15px]">{incident.summary.map((line) => <li key={line} title={line}>{eventKo(line.replace(/\s*\[[^\]]*\]/g, ""), incident)}</li>)}</ul>
         </section>
       )}
 
       <section className="card p-5">
         <h3 className="mb-2 text-[15px] font-semibold">진행 기록</h3>
-        <ol className="space-y-1 text-sm">
+        <ol className="space-y-1.5 text-[15px]">
           {incident.events.map((e, idx) => (
-            <li key={`${e.at}-${idx}`} className="flex gap-3"><span className="w-16 shrink-0 text-xs tabular-nums text-ink-500">{clock(e.at)}</span><span title={e.message}>{eventKo(e.message, incident)}</span></li>
+            <li key={`${e.at}-${idx}`} className="flex gap-3"><span className="w-28 shrink-0 whitespace-nowrap text-[13px] tabular-nums text-ink-500">{clock(e.at)}</span><span title={e.message}>{eventKo(e.message, incident)}</span></li>
           ))}
         </ol>
       </section>

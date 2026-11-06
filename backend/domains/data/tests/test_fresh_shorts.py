@@ -46,6 +46,9 @@ def _brief(tmp: Path, formats: list[str]) -> None:
 def ledger(monkeypatch: pytest.MonkeyPatch) -> youtube_quota.Ledger:
     fresh = youtube_quota.Ledger(None)
     monkeypatch.setattr(youtube_quota, "LEDGER", fresh)
+    # 장부는 실제 시계의 날짜(태평양 자정 기준)에 적는다. 시험은 NOW로 상태를 읽으므로 장부 날짜도
+    # NOW에 맞춘다. 맞추지 않으면 실제 시각이 NOW와 다른 날(17:00 KST 뒤 등)에 시험이 깨진다
+    monkeypatch.setattr(youtube_quota, "today", lambda: youtube_quota.day_of(NOW))
     return fresh
 
 
