@@ -27,7 +27,7 @@
 | 클레임·보상 | AXcellent | `/claims`, `/queue` |
 | 리뷰·지식 | AXcellent | `/reviews`, `/kb` |
 | 공지·쿠폰 | AXcellent | `/marketing` |
-| 재무 관리 | AXcellent | `/finance` |
+| 재무 관리 | AXcellent | `/finance`(장애 사건 재무), `/finance/daily`(평상시 재무 업무) |
 | 데이터 분석 | AXcellent | `/data` |
 | 인수인계 | AXcellent | `/hr` |
 | 결정 기록 | AXcellent | `/ops` |

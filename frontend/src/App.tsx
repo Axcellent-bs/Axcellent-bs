@@ -78,6 +78,7 @@ function Pages() {
           <Route path="/reviews" element={<Reviews />} />
           <Route path="/kb" element={<Kb />} />
           <Route path="/finance" element={<Finance />} />
+          <Route path="/finance/daily" element={<Finance />} />
           <Route path="/finance/guide" element={<FinanceGuide />} />
           <Route path="/ops" element={<Hr />} />
           <Route path="/org" element={<OrgChanges />} />
