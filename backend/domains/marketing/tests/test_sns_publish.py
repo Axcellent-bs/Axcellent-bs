@@ -509,7 +509,9 @@ def test_subscriber_is_reported_off_without_redis(monkeypatch: pytest.MonkeyPatc
 async def test_real_provider_is_rejected_before_any_call(
     gate: FakeGate, adapter: MockInstagramAdapter, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("MARKETING_SNS_PROVIDER", "instagram")
+    monkeypatch.setenv("MARKETING_SNS_PROVIDER", "instagram")  # 토큰·계정 ID가 비어 있다
+    monkeypatch.delenv("MARKETING_IG_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("MARKETING_IG_USER_ID", raising=False)
     result = await publisher.publish_sns(_request())
     assert result.status == TaskStatus.FAILED and result.outcome == "adapter_unavailable"
     assert not gate.calls

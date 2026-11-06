@@ -2,7 +2,7 @@
 
 | 변수 | 뜻 | 기본 |
 | --- | --- | --- |
-| `MARKETING_SNS_PROVIDER` | `mock`만 가능. 그 밖의 값은 호출 전에 거부 | `mock` |
+| `MARKETING_SNS_PROVIDER` | `mock` 또는 `instagram`. 그 밖의 값은 호출 전에 거부 | `mock` |
 | `MARKETING_SNS_PENDING_DB` | 게시 대기 저장소(SQLite 파일). 비우면 메모리 | `:memory:` |
 | `MARKETING_SNS_REVIEW_POLL_S` | 대기 건의 승인 여부를 safety에 묻는 간격(초). 0이면 끔 | `15` |
 | `MARKETING_SNS_MAX_RETRIES` | 일시 오류 재시도 상한 | `3` |
