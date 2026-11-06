@@ -401,7 +401,7 @@ def test_an_unknown_member_is_warned_once_a_roster_exists(make) -> None:
     _, client = make(llm=FakeLLM(parsed()))
     confirm(client, "emp_01", "join", None, "기획팀", "2026-10-01")
     out = parse(client)
-    assert any("확정 명부에 없는 직원" in w for w in out.warnings)
+    assert any("확정된 직원 명단에 없는 직원" in w for w in out.warnings)
 
 
 def test_the_sentence_goes_only_into_the_data_block_and_instructions_are_ignored(make) -> None:

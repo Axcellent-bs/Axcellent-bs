@@ -5,7 +5,7 @@ import IncidentRecords from "@/components/hr/IncidentRecords";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
 import { ago } from "@/lib/format";
 import { useSearchParams } from "@/lib/nav";
-import { hr, type HrCard, type PlanCheck, type PlanDraft } from "@/lib/hr";
+import { hr, readableBody, type HrCard, type PlanCheck, type PlanDraft } from "@/lib/hr";
 
 // 결정 기록 화면 (재무 AI 화면과 같은 짜임): ① 지금 사람이 할 일 → ② 기록 도구.
 // hr이 계산한 판정을 그대로 보여 주고, 사람이 하는 일(후보 카드 승인·폐기)만 버튼으로 둔다.
@@ -38,10 +38,10 @@ function Section({ title, desc, children }: { title: string; desc?: ReactNode; c
 interface View { cards: HrCard[]; decided: HrCard[] | null }
 
 const TITLE = "결정 기록";
-const DESC = "회사의 결정을 기록으로 남기고, 새 계획이 과거에 기각된 안과 겹치는지 확인합니다.";
+const DESC = "회사의 결정을 기록으로 남기고, 새 계획이 예전에 채택되지 않은 안과 겹치는지 확인합니다.";
 const GUIDE: ReactNode[] = [
-  <>맨 위 <b>지금 사람이 할 일</b>에서 확신이 낮아 후보로 남은 기록을 봅니다.</>,
-  <>내용을 읽고 <b>기록으로 확정</b> 또는 <b>폐기</b>를 누릅니다. 애매하면 폐기하세요. 필요하면 요청한 AI가 근거를 보강해 다시 올립니다.</>,
+  <>맨 위 <b>지금 사람이 할 일</b>에서 AI가 확신하지 못해 확정을 미뤄 둔 기록을 봅니다.</>,
+  <>내용을 읽고 <b>기록으로 확정</b> 또는 <b>폐기</b>를 누릅니다. 애매하면 폐기하세요. 필요하면 기록을 요청한 AI가 근거를 보강해 다시 올립니다.</>,
 ];
 
 export default function HrPage() {
@@ -75,7 +75,7 @@ export default function HrPage() {
       <header className="flex flex-wrap items-end gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{TITLE}</h1>
-          <p className="mt-1 text-sm text-ink-500">{DESC} 완성도와 판정은 AI가 아니라 정해진 계산과 기준으로 합니다.</p>
+          <p className="mt-1 text-sm text-ink-500">{DESC} 겹치는지 여부는 AI의 추측이 아니라 정해진 기준으로 계산합니다.</p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
           <Chip label={`${TITLE} ${up ? "켜짐" : "꺼짐"}`} tone={up ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"} />
@@ -99,10 +99,10 @@ export default function HrPage() {
             <p className={`mt-1 text-4xl font-bold tabular-nums ${tone}`}>{todo ? `${todo}건` : "없음"}</p>
           </div>
           <p className={`ml-auto max-w-sm pb-1 text-xs ${tone}`}>
-            대부분의 기록은 AI가 근거를 보고 바로 남깁니다. 근거가 약해 확신이 낮은 기록만 여기로 옵니다.
+            대부분의 기록은 AI가 바로 남깁니다. 근거가 부족해 AI가 확신하지 못한 기록만 여기서 사람이 확인합니다.
           </p>
         </div>
-        {!HUMAN_TOKEN_SET && todo > 0 && <p className="mt-3 text-xs text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 버튼이 꺼져 있습니다.</p>}
+        {!HUMAN_TOKEN_SET && todo > 0 && <p className="mt-3 text-xs text-amber-800">담당자 권한이 설정되지 않아 버튼을 쓸 수 없습니다. (개발자 설정: VITE_SAFETY_HUMAN_TOKEN)</p>}
         {todo > 0 && (
           <div className="mt-5 space-y-3">
             <Candidates cards={cards} onChanged={load} />
@@ -115,7 +115,7 @@ export default function HrPage() {
       <IncidentRecords initialCtx={ctxParam} />
       {/* 확정된 카드는 장애 대응(보라)·업무 결정(민트)으로 나눠 보여 준다. 최근 순 최대 200장 */}
       <CardSections cards={view.decided} />
-      <Section title="계획 비교" desc="새 계획이 과거에 기각된 안과 겹치는지 확인합니다. 저장하지 않고 보기만 합니다."><PlanChecker /></Section>
+      <Section title="계획 비교" desc="새 계획이 예전에 채택되지 않은 안과 겹치는지 확인합니다. 저장하지 않고 보기만 합니다."><PlanChecker /></Section>
     </div>
   );
 }
@@ -138,10 +138,10 @@ function Candidates({ cards, onChanged }: { cards: HrCard[]; onChanged: () => vo
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <b className="text-[15px]">{c.title}</b>
-              <Chip label="후보 기록" tone="bg-amber-100 text-amber-800" />
-              {c.confidence && <Chip label={`확신 ${CONF_KO[c.confidence]}`} tone="bg-ink-100 text-ink-500" />}
+              <Chip label="확정 전 기록" tone="bg-amber-100 text-amber-800" />
+              {c.confidence && <Chip label={`AI 확신도 ${CONF_KO[c.confidence]}`} tone="bg-ink-100 text-ink-500" />}
             </div>
-            <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-ink-50 px-3 py-2 text-xs leading-relaxed text-ink-700">{c.body}</pre>
+            <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-ink-50 px-3 py-2 text-xs leading-relaxed text-ink-700">{readableBody(c.body)}</pre>
             <p className="mt-1.5 text-xs text-ink-500">{c.author}가 {ago(c.created_at)} 올림</p>
           </div>
           <div className="flex gap-2 sm:flex-col">
@@ -172,11 +172,11 @@ function PlanChecker() {
     <div className="space-y-3">
       <form onSubmit={submit} className="grid gap-2 sm:grid-cols-2">
         <input className={INPUT} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="계획 제목" required />
-        <input className={INPUT} value={draft.area} onChange={(e) => setDraft({ ...draft, area: e.target.value })} placeholder="영역 (예: payment)" required />
+        <input className={INPUT} value={draft.area} onChange={(e) => setDraft({ ...draft, area: e.target.value })} placeholder="분야 코드 (예: payment = 결제)" required />
         <input className={`${INPUT} sm:col-span-2`} value={draft.summary} onChange={(e) => setDraft({ ...draft, summary: e.target.value })} placeholder="한 줄 요약" required />
         <div className="flex items-center gap-2 sm:col-span-2">
           <select className={INPUT} value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as PlanDraft["kind"] })}>
-            <option value="spec">기획·명세</option><option value="ticket">티켓</option><option value="deploy_plan">배포 계획</option>
+            <option value="spec">기획·명세</option><option value="ticket">작업 요청</option><option value="deploy_plan">배포 계획</option>
           </select>
           <button className="btn-primary shrink-0" disabled={busy}>비교하기</button>
         </div>
@@ -189,7 +189,7 @@ function PlanChecker() {
             <div key={i} className="space-y-1 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
               <p>{f.message}</p>
               {f.explanation && <p className="text-amber-900/80">AI 설명(참고용): {f.explanation}</p>}
-              {f.card_ids.length > 0 && <p className="text-[11px] text-amber-700/80" title="판정 근거로 쓴 결정 카드">근거 카드 {f.card_ids.join(", ")}</p>}
+              {f.card_ids.length > 0 && <p className="text-[11px] text-amber-700/80" title="판단에 참고한 결정 카드">참고한 결정 카드 {f.card_ids.join(", ")}</p>}
             </div>
           ))}
           {result.no_related_cards && <p className="text-xs text-ink-500">관련된 과거 기록을 찾지 못했습니다. 기록에 없는 것이지 문제가 없다는 뜻은 아닙니다.</p>}

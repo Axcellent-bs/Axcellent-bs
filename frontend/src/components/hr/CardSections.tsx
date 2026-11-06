@@ -50,7 +50,7 @@ export default function CardSections({ cards }: { cards: HrCard[] | null }) {
     return (
       <section className="card p-6">
         <h2 className="text-lg font-semibold">확정된 카드</h2>
-        <p className="mt-2 text-xs text-amber-800">확정 카드 목록을 받지 못했습니다. 서버가 이 조회를 아직 지원하지 않을 수 있습니다.</p>
+        <p className="mt-2 text-xs text-amber-800">확정 카드 목록을 받지 못했습니다. 서버가 이 기능을 아직 지원하지 않을 수 있습니다.</p>
       </section>
     );
   }
@@ -65,7 +65,7 @@ export default function CardSections({ cards }: { cards: HrCard[] | null }) {
             kind="incident"
             title="장애 대응 카드(이벤트 기록)"
             count={incidents.length}
-            desc="장애가 끝날 때 총괄이 남기고 비슷한 이벤트 검색에 쓰입니다."
+            desc="장애가 끝나면 총괄이 남기는 기록이고, 비슷한 이벤트를 찾는 데 쓰입니다."
           />
         </div>
         {incidents.length === 0
@@ -77,9 +77,9 @@ export default function CardSections({ cards }: { cards: HrCard[] | null }) {
         <div id="sec-decision">
           <Head
             kind="decision"
-            title="업무 결정 카드(기획·정책·기각 결정)"
+            title="업무 결정 카드(기획·정책·채택하지 않은 안)"
             count={decisions.length}
-            desc="같은 내용이 여러 장이면 자동 또는 승인으로 병합됩니다. 장애 대응 카드는 병합하지 않습니다."
+            desc="같은 내용의 카드가 여러 장이면 하나로 합칩니다(AI가 자동으로 합치거나 사람이 승인). 장애 대응 카드는 합치지 않습니다."
           />
         </div>
         <DuplicateGroups />
@@ -93,7 +93,7 @@ export default function CardSections({ cards }: { cards: HrCard[] | null }) {
           <summary className="cursor-pointer text-base font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
             그 밖의 카드 <span className="chip ml-2 bg-ink-100 text-ink-700 tabular-nums">{others.length}장</span>
           </summary>
-          <p className="mt-2 text-xs text-ink-500">사례·공지·정책·사기 카드입니다. 병합 대상이 아닙니다.</p>
+          <p className="mt-2 text-xs text-ink-500">사례·공지·정책·사기 카드입니다. 합치기 대상이 아닙니다.</p>
           <div className="mt-3 space-y-3">{others.map((c) => <DecisionCard key={c.card_id} card={c} />)}</div>
         </details>
       )}

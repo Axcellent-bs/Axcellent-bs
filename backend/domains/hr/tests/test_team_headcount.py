@@ -54,7 +54,7 @@ def test_counts_every_org_team_and_marks_the_roster_as_example(svc, org, client)
     assert [r.team for r in out.rows] == ["기획팀", "개발팀", "재무/정산"]
     assert sum(r.headcount for r in out.rows) == 10
     assert out.example is True
-    assert out.basis == "가상 명부(예시) 기준, 2026-11-01 소속"
+    assert out.basis == "예시 직원 명단 기준, 2026-11-01 소속"
     assert out.collected_at == svc.clock()
 
 

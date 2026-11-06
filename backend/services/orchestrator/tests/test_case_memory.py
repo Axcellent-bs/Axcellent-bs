@@ -44,7 +44,7 @@ async def test_resolution_is_recorded_after_the_case_card(harness) -> None:
     sent = called(harness, "record_resolution")[0].input
     assert sent["context_id"] == inc.context_id and sent["outcome"] == "resolved"
     assert sent["root_cause"] == "PR #412 배포가 원인일 수 있음"
-    assert "롤백" in sent["action"]
+    assert "되돌림" in sent["action"]
     assert isinstance(sent["minutes_to_resolve"], int) and sent["minutes_to_resolve"] >= 0
 
 

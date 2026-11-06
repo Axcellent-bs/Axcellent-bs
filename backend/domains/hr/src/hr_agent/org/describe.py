@@ -44,7 +44,7 @@ async def describe_org_change(svc: Services, request: AgentRequest) -> AgentResu
         return invalid_input(request, exc)
     row = changes.get(svc, params.change_id)
     if row is None:
-        return refused(request, "UNKNOWN_CHANGE", "없는 발령 기록이다")
+        return refused(request, "UNKNOWN_CHANGE", "찾을 수 없는 발령 기록이에요")
 
     month = row["counts_from_month"]
     this = changes._change(row)

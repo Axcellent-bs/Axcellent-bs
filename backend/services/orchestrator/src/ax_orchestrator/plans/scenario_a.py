@@ -108,7 +108,7 @@ def _rollback_gate(inc: Incident) -> tuple[str, str, str] | None:
     diagnosis = _out(inc, "diagnose")
     if diagnosis.get("status") == "suspected" and diagnosis.get("suspects"):
         return None
-    note = "원인 미확정 — 롤백하지 않고 사람이 원인을 확인하도록 이관 큐로 넘김"
+    note = "원인을 아직 모르므로 되돌리지 않고, 사람이 원인을 확인하도록 넘김"
     hint = past_hint(inc)  # 같은 유형의 과거 이벤트가 있으면 사람이 먼저 볼 수 있게 붙인다(참고용)
     return ("transfer_queued", "no_rollback_target", f"{note}. {hint}" if hint else note)
 
@@ -254,7 +254,9 @@ def _resolution(inc: Incident) -> dict[str, Any]:
         out = _out(inc, "rollback")
         service = out.get("service") or "배포"
         before, after = out.get("from_version"), out.get("to_version")
-        action = f"{service} 롤백" + (f" ({before} → {after})" if before and after else "")
+        action = f"{service} 이전 버전으로 되돌림" + (
+            f" ({before} → {after})" if before and after else ""
+        )
     found = _out(inc, "root_cause")
     top = next((h for h in found.get("hypotheses") or [] if h.get("confidence") == "high"), None)
     minutes = max(int((now() - inc.opened_at).total_seconds() // 60), 0)
@@ -301,7 +303,7 @@ def scenario_a() -> Plan:
             Step(
                 "rollback",
                 "rollback_deployment",
-                "원인 배포 롤백 (B)",
+                "문제 배포를 이전 버전으로 되돌리기 (B)",
                 after=("diagnose", "impact"),
                 build=_rollback,
                 gate=_rollback_gate,

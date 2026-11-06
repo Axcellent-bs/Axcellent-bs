@@ -11,7 +11,7 @@ export default function EventTimes({ inc }: { inc: OrchIncident & { timeline?: T
   const seg = segmentsOf(t);
   const rows: { label: string; at?: string | null; span: number | null; note?: string }[] = [
     { label: "감지", at: t.detected_at, span: null },
-    { label: "원인 후보 도착(AI)", at: t.cause_candidate_at, span: seg.evidence, note: t.cause_candidate_at ? undefined : "AI가 원인 후보를 내놓지 못함" },
+    { label: "원인 후보 나옴(AI)", at: t.cause_candidate_at, span: seg.evidence, note: t.cause_candidate_at ? undefined : "AI가 원인 후보를 내놓지 못함" },
     { label: "사람에게 넘김", at: t.human_work_started_at, span: secondsBetween(t.detected_at, t.human_work_started_at), note: t.human_work_started_at ? undefined : "넘기지 않고 AI가 처리함" },
     { label: "정상 복귀", at: t.recovered_at, span: seg.total, note: t.recovered_at ? undefined : "쇼핑몰이 정상 복귀를 알리면 채워집니다" },
   ];
@@ -19,7 +19,7 @@ export default function EventTimes({ inc }: { inc: OrchIncident & { timeline?: T
     <section className="card space-y-3 p-6">
       <div>
         <h2 className="text-lg font-semibold">이벤트 타임라인</h2>
-        <p className="mt-1 text-xs text-ink-500">시각은 모두 시스템이 잰 값입니다. 사람이 적는 값은 없습니다. 괄호는 감지부터 걸린 시간입니다.</p>
+        <p className="mt-1 text-xs text-ink-500">시각은 모두 시스템이 자동으로 잰 값입니다. 괄호 안은 장애를 감지한 뒤 걸린 시간입니다.</p>
       </div>
       <ol className="space-y-1.5 text-sm">
         {rows.map((r) => (

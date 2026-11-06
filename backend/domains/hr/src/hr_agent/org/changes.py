@@ -93,20 +93,22 @@ async def record_org_change(svc: Services, request: AgentRequest) -> AgentResult
     except ValidationError as exc:
         return invalid_input(request, exc)
     if not request.meta.idempotency_key:
-        return invalid_input(request, "상태를 바꾸는 요청에는 idempotency_key가 필요하다")
+        return invalid_input(
+            request, "같은 요청을 두 번 처리하지 않도록 요청 번호(idempotency_key)가 필요해요"
+        )
 
     teams = set(org_teams())
     unknown = [t for t in (params.from_team, params.to_team) if t and t not in teams]
     if unknown:
-        return refused(request, "UNKNOWN_TEAM", f"조직도에 없는 팀이다: {', '.join(unknown)}")
+        return refused(request, "UNKNOWN_TEAM", f"조직도에 없는 팀이에요: {', '.join(unknown)}")
 
     basis_title: str | None = None
     if params.basis_card_id:
         card = await svc.memory.get_card(params.basis_card_id)
         if card is None:
-            return refused(request, "UNKNOWN_CARD", "없는 근거 카드다")
+            return refused(request, "UNKNOWN_CARD", "찾을 수 없는 근거 카드예요")
         if card.kind != "decision" or card_state(card) != "active":
-            return refused(request, "NOT_BASIS_CARD", "확정된 업무 결정 카드만 근거로 쓸 수 있다")
+            return refused(request, "NOT_BASIS_CARD", "확정된 업무 결정 카드만 근거로 쓸 수 있어요")
         basis_title = card.title
 
     change_id = stable_id("orgchg_", request.meta.idempotency_key)
@@ -180,10 +182,12 @@ async def decide_org_change(svc: Services, request: AgentRequest) -> AgentResult
     except ValidationError as exc:
         return invalid_input(request, exc)
     if not request.meta.idempotency_key:
-        return invalid_input(request, "상태를 바꾸는 요청에는 idempotency_key가 필요하다")
+        return invalid_input(
+            request, "같은 요청을 두 번 처리하지 않도록 요청 번호(idempotency_key)가 필요해요"
+        )
     row = get(svc, params.change_id)
     if row is None:
-        return refused(request, "UNKNOWN_CHANGE", "없는 발령 기록이다")
+        return refused(request, "UNKNOWN_CHANGE", "찾을 수 없는 발령 기록이에요")
 
     target_status = "confirmed" if params.decision == "approve" else "rejected"
     summary = f"조직 변동 {params.decision}: {row['kind']}"
@@ -199,7 +203,11 @@ async def decide_org_change(svc: Services, request: AgentRequest) -> AgentResult
             evidence=evidence,
         )
     if row["status"] != "draft":
-        return refused(request, "NOT_DRAFT", f"초안이 아니다: {row['status']}")
+        return refused(
+            request,
+            "NOT_DRAFT",
+            "확정 전 초안만 확정하거나 반려할 수 있어요 (이미 처리된 기록이에요)",
+        )
 
     if params.decision == "approve":
         try:
@@ -271,7 +279,9 @@ async def set_org_roster_complete(svc: Services, request: AgentRequest) -> Agent
     except ValidationError as exc:
         return invalid_input(request, exc)
     if not request.meta.idempotency_key:
-        return invalid_input(request, "상태를 바꾸는 요청에는 idempotency_key가 필요하다")
+        return invalid_input(
+            request, "같은 요청을 두 번 처리하지 않도록 요청 번호(idempotency_key)가 필요해요"
+        )
 
     registered = registered_members(svc)
     already = roster_complete(svc)
@@ -279,8 +289,8 @@ async def set_org_roster_complete(svc: Services, request: AgentRequest) -> Agent
         return refused(
             request,
             "ROSTER_COUNT_MISMATCH",
-            f"확정된 명부가 {registered}명이다. 전체 직원 {EXPECTED_MEMBER_COUNT}명을 모두 "
-            "등록하고 확정한 뒤에 완료로 표시할 수 있다",
+            f"확정된 직원이 {registered}명이에요. 전체 직원 {EXPECTED_MEMBER_COUNT}명을 모두 "
+            "등록하고 확정한 뒤에 완료로 표시할 수 있어요",
         )
     summary = f"전 직원 등록 완료 {'표시' if params.complete else '해제'} ({registered}명)"
     evidence = make_evidence(svc.clock, summary)

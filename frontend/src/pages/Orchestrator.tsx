@@ -34,7 +34,7 @@ const NOTE_KO: Record<string, string> = {
   listed: "인사 기록에서 확인함", partial: "일부만 확인함", candidate: "후보 기록으로 저장함 (사람 확인 대기)",
   found: "비슷한 과거 이벤트를 찾음", none: "비슷한 과거 이벤트 없음", recorded: "해결 내용을 남김", duplicate: "이미 남긴 해결 내용",
   no_card: "해결 내용을 남길 기록이 없음",
-  "failed: gate_rejected": "안전 관문이 막음", recovered: "복구됨", not_recovered: "아직 복구 안 됨",
+  created: "요청을 만들었음", "failed: gate_rejected": "안전 확인 단계에서 막힘", recovered: "복구됨", not_recovered: "아직 복구 안 됨",
 };
 const STATUS_SAY: Record<string, string> = { degraded: "사람 확인 필요", resolved: "해결됨", open: "AI가 처리 중" };
 
@@ -57,7 +57,7 @@ function eventKo(message: string, inc: Incident): string {
   const named = message
     .replace(/notice_id 보관 \([^)]*\)/, "게시한 공지 번호를 기록함")
     .replace(/미완료\(([a-z_]+)\)/g, (_, k: string) => `미완료: ${STEP_KO[k] ?? k}`);
-  return stepLabel(named)
+  return stepLabel(named.replace("이관 큐로 넘김", "사람에게 넘김"))
     .replace(/\s+:/g, ":")
     .replace(/(\w+)에 요청/, (_, d: string) => `${DEPT_SAY[d] ?? d}에게 맡김`);
 }
@@ -83,7 +83,7 @@ export default function OrchestratorPage() {
     return () => clearInterval(timer);
   }, [load]);
 
-  if (!relayEnabled) return <Loading error="총괄 읽기 연결이 꺼져 있습니다. 열람 토큰(VITE_SHOP_VIEWER_TOKEN) 또는 관리자 토큰(VITE_SHOP_ADMIN_TOKEN)이 없습니다. 화면을 bash backend/scripts/run_web.sh 로 다시 켜 주세요(run_all.sh가 만든 backend/.data/web.env 값을 넘깁니다)." />;
+  if (!relayEnabled) return <Loading error="총괄 읽기 연결이 꺼져 있습니다. 화면을 볼 수 있는 권한(VITE_SHOP_VIEWER_TOKEN 또는 VITE_SHOP_ADMIN_TOKEN)이 설정되지 않았습니다. 화면을 bash backend/scripts/run_web.sh 로 다시 켜 주세요(run_all.sh가 만든 backend/.data/web.env 값을 넘깁니다)." />;
   if (!incidents) return <Loading error={error} what="총괄 이벤트를 불러오는 중…" />;
 
   const list = [...incidents].reverse();
@@ -117,7 +117,7 @@ export default function OrchestratorPage() {
             <div><dt className="text-xs opacity-80">전체 이벤트</dt><dd className="text-lg font-semibold tabular-nums">{incidents.length}건</dd></div>
             <div><dt className="text-xs opacity-80">진행 중</dt><dd className="text-lg font-semibold tabular-nums">{open}건</dd></div>
           </dl>
-          <p className={`ml-auto max-w-sm pb-1 text-xs ${tone}`}>승인·거절은 총괄이 하지 않고 사람이 안전 관문 보류 큐에서 합니다. 대부분의 단계는 총괄이 규칙대로 부서에 맡겨 끝냅니다.</p>
+          <p className={`ml-auto max-w-sm pb-1 text-xs ${tone}`}>승인·거절은 총괄이 하지 않고 사람이 직접 합니다(승인 대기함). 대부분의 단계는 총괄이 규칙대로 부서에 맡겨 끝냅니다.</p>
         </div>
       </section>
 
@@ -184,7 +184,7 @@ function SimilarCases({ incident }: { incident: Incident }) {
             <li key={c.card_id} className={`rounded-xl border border-ink-100 p-3 text-sm ${c.same_type === false ? "opacity-70" : ""}`}>
               <p className="flex flex-wrap items-center gap-2">
                 <span className="font-medium">{c.title}</span>
-                <span className="chip bg-ink-100 text-ink-700 tabular-nums">유사도 {Math.round(c.similarity * 100)}%</span>
+                <span className="chip bg-ink-100 text-ink-700 tabular-nums">비슷한 정도 {Math.round(c.similarity * 100)}%</span>
                 {c.same_type === false && <span className="chip bg-amber-50 text-amber-800" title="이 이벤트와 종류가 달라 원인·조치를 추천하지 않아요">다른 유형</span>}
                 <span className={`chip ${c.resolution?.outcome === "resolved" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{c.resolution ? OUTCOME_KO[c.resolution.outcome] ?? c.resolution.outcome : "해결 기록 없음"}</span>
               </p>
@@ -217,14 +217,14 @@ function PastRecommendation({ incident }: { incident: Incident }) {
     .find((c) => c.card_id === r.card_id);
   return (
     <section className="card space-y-2 p-5">
-      <h3 className="text-[15px] font-semibold">과거 근거 기반 추천</h3>
+      <h3 className="text-[15px] font-semibold">과거 사례로 본 추천</h3>
       {r.status !== "found" ? (
         <p className="text-sm text-ink-500">추천할 과거 근거가 없습니다. {r.reason}.</p>
       ) : (
         <>
           <p className="text-sm">
             <span className="font-medium">{r.title}</span>
-            <span className="chip ml-2 bg-ink-100 text-ink-700 tabular-nums">유사도 {Math.round((r.similarity ?? 0) * 100)}%</span>
+            <span className="chip ml-2 bg-ink-100 text-ink-700 tabular-nums">비슷한 정도 {Math.round((r.similarity ?? 0) * 100)}%</span>
           </p>
           <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1 text-sm">
             <dt className="text-ink-500">원인 후보</dt><dd>{r.root_cause ?? "확인할 수 없음"}</dd>
@@ -234,7 +234,7 @@ function PastRecommendation({ incident }: { incident: Incident }) {
           <p className="text-xs text-ink-500">{r.caveat}</p>
         </>
       )}
-      <p className="text-xs text-ink-500">참고용입니다. 이 추천으로 자동 조치하지 않고, 조치는 기존 안전 관문과 사람 승인을 따릅니다.</p>
+      <p className="text-xs text-ink-500">참고용입니다. 이 추천으로 자동 조치하지 않고, 조치는 기존처럼 안전 확인과 사람 승인을 거칩니다.</p>
     </section>
   );
 }
@@ -257,12 +257,12 @@ function HoldNotice({ holds }: { holds: Incident["pending_holds"] }) {
             <li key={h.step_id} className="flex flex-wrap items-center gap-2">
               <span>{stepLabel(h.label)}</span>
               {left && <span className={`chip ${left.urgent ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}>{left.text}</span>}
-              {h.review_id && <code className="text-[11px] opacity-70" title="안전 관문 보류 건 번호">{h.review_id}</code>}
+              {h.review_id && <code className="text-[11px] opacity-70" title="승인 대기 건 번호">{h.review_id}</code>}
             </li>
           );
         })}
       </ul>
-      <p className="mt-2 text-xs opacity-80">승인·거절은 안전 관문 보류 큐에서 사람이 합니다. 이 화면에서는 결정하지 않습니다. 마감이 지나면 자동으로 거절됩니다.</p>
+      <p className="mt-2 text-xs opacity-80">승인·거절은 사람이 승인 대기함에서 합니다. 이 화면에서는 결정하지 않습니다. 마감이 지나면 자동으로 거절됩니다.</p>
     </div>
   );
 }

@@ -73,6 +73,36 @@ export interface OrgHeadcount {
 }
 export interface PlanDraft { title: string; summary: string; area: string; kind: "spec" | "ticket" | "deploy_plan" }
 
+// 결정 카드 본문에 들어 있는 단계 코드·상태 코드를 사람이 읽는 말로 바꿔 보여 준다(저장된 값은 그대로 둔다).
+const STEP_NAME: Record<string, string> = {
+  compensation: "영향 고객 일괄 보상", recovery: "복구 검증", late_compensation: "복구 뒤 놓친 고객 보상 대기",
+  recovered_draft: "정상화 공지 초안", cost: "처리 결과 장부에 기록",
+  diagnose: "원인 진단", impact: "영향 분석", similar_cases: "비슷한 과거 이벤트 찾기", root_cause: "원인 후보 추정",
+  cause_check: "원인 확인 요청", rollback: "문제 배포를 이전 버전으로 되돌리기", related_prs: "관련 PR 찾기",
+  link_incident: "이벤트에 PR 연결", notice: "점검 공지 초안", notice_publish: "점검 공지 게시", publish_notice: "점검 공지 게시",
+  recovered_notice: "정상화 공지", kpi: "처리 시간 요약", record: "이벤트 기록", resolution: "해결 내용 기록",
+};
+const REASON_CODE: Record<string, string> = {
+  gate_rejected: "안전 확인 단계에서 막힘", metric_not_supported: "아직 분석하지 못하는 항목", service_disabled: "해당 서비스가 꺼져 있음",
+  human_input: "사람 확인이 필요함", cause_confident: "원인이 충분히 뚜렷함", undetermined: "원인을 특정하지 못함",
+};
+const DEPT_NAME: Record<string, string> = {
+  infra: "장애 대응 AI", data: "데이터분석 AI", planning: "기획 AI", dev: "개발 AI", marketing: "마케팅 AI",
+  support: "고객지원 AI", finance: "재무 AI", hr: "인사 AI", orchestrator: "총괄 AI",
+};
+export function readableBody(body: string): string {
+  return body
+    .replace(/^근거: (.+)$/m, (_, l: string) => `근거: ${l.split(", ").map((t) => STEP_NAME[t.replace(/^step:/, "")] ?? t).join(", ")}`)
+    .replace(/미완료\(([a-z_]+)\)/g, (_, k: string) => `미완료: ${STEP_NAME[k] ?? k}`)
+    .replace(/step:([a-z_]+)/g, (_, k: string) => STEP_NAME[k] ?? k)
+    .replace(/ (?:처리|실행) 결과(?:\.| —) (?:끝낸 일|완료):/g, "에서 끝낸 일:")
+    .replace(/; 미완료:/g, ". 끝내지 못한 일:")
+    .replace(/: (\w+)로 이관 \(([a-z_]+)\)/g, (_, d: string) => `: ${DEPT_NAME[d] ?? d}에게 넘김`)
+    .replace(/\(([a-z_:]+(?: [a-z_]+)?)\)/g, (m, k: string) => REASON_CODE[k.replace(/^failed: /, "")] ? `(${REASON_CODE[k.replace(/^failed: /, "")]})` : STEP_NAME[k] ? `(${STEP_NAME[k]})` : m)
+    .replace(/원인 배포 롤백/g, "문제 배포를 이전 버전으로 되돌리기")
+    .replace(/롤백/g, "이전 버전으로 되돌리기");
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${DASHBOARD_API_URL}/api/dashboard${path}`, {
     ...init,

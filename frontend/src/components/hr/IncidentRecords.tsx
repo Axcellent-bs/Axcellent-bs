@@ -26,29 +26,29 @@ const STEP_KO: Record<string, { label: string; tone: string }> = {
 };
 // 인사 AI가 돌려준 기록 결과
 const OUTCOME_KO: Record<string, string> = {
-  card_created: "결정 카드를 회사 기억에 저장했어요",
-  candidate: "확신이 낮아 후보 기록으로 남겼어요 (사람 확인 필요)",
+  card_created: "결정 카드를 기록으로 저장했어요",
+  candidate: "AI가 확신하지 못해 확정 전 기록으로 남겼어요 (사람 확인 필요)",
   record_only: "결정이 없는 이벤트라 기록만 남겼어요",
   duplicate: "이미 기록된 이벤트라 다시 저장하지 않았어요",
 };
 const CONF_KO: Record<string, string> = { low: "낮음", mid: "보통", high: "높음" };
 // 인사 AI 감사 기록의 종류 (domains/hr audit.record)
 const AUDIT_KIND_KO: Record<string, string> = {
-  "record_case.card_created": "결정 카드를 회사 기억에 저장",
-  "record_case.candidate": "후보 기록으로 저장 (사람 확인 대기)",
+  "record_case.card_created": "결정 카드를 기록으로 저장",
+  "record_case.candidate": "확정 전 기록으로 저장 (사람 확인 대기)",
   "record_case.duplicate": "같은 기록 요청이 다시 와서 건너뜀",
   record_only: "결정이 없어 기록만 남김",
-  card_write_blocked: "안전 관문이 카드 저장을 막음",
+  card_write_blocked: "안전 확인 단계가 카드 저장을 막음",
   "card_decision.duplicate": "같은 승인·폐기 요청이 다시 와서 건너뜀",
-  check_plan: "새 계획을 예전 결정과 비교",
+  check_plan: "새 계획을 예전 결정과 견줘 봄",
   start_handover: "인수인계 시작",
   "start_handover.duplicate": "같은 인수인계 시작 요청을 건너뜀",
   answer_handover_question: "인수인계 질문에 답 기록",
   "answer.duplicate": "같은 답을 다시 받아 건너뜀",
   confirm_handover: "인수인계 확정",
-  "confirm_handover.held": "인수인계 확정이 사람 확인 대기로 감",
+  "confirm_handover.held": "인수인계 확정이 사람 승인 대기로 감",
   "confirm_handover.rejected": "인수인계 확정이 거절됨",
-  "confirm_handover.gate_unavailable": "안전 관문 연결 문제로 확정하지 못함",
+  "confirm_handover.gate_unavailable": "안전 확인 단계에 연결하지 못해 확정하지 못함",
   "handover.question_reasked": "비어 있는 항목을 다시 물음",
   "timer.shift_handover": "교대 시간이 되어 인수인계를 시작",
   "timer.upstream_error": "교대 인수인계 중 다른 서비스 연결 문제",
@@ -66,8 +66,8 @@ function auditDetail(e: AuditEntry): string {
   const parts: string[] = [];
   const conf = str(p.confidence);
   if (conf) parts.push(`확신 ${CONF_KO[conf] ?? conf}`);
-  if (Array.isArray(p.superseded)) parts.push(p.superseded.length ? `예전 기록 ${p.superseded.length}건을 대체` : "대체한 예전 기록 없음");
-  if (typeof p.pct === "number") parts.push(`완성도 ${p.pct}%`);
+  if (Array.isArray(p.superseded)) parts.push(p.superseded.length ? `예전 기록 ${p.superseded.length}건을 새 기록으로 교체` : "교체한 예전 기록 없음");
+  if (typeof p.pct === "number") parts.push(`채워진 정도 ${p.pct}%`);
   return parts.join(" · ");
 }
 
@@ -99,7 +99,7 @@ export default function IncidentRecords({ initialCtx = null }: { initialCtx?: st
       <section className="card space-y-4 p-6">
         <div>
           <h2 className="text-lg font-semibold">AI가 남긴 이벤트 기록</h2>
-          <p className="mt-1 text-xs text-ink-500">캣북스에 이벤트가 나면 총괄 AI가 인사 AI에게 기록을 맡깁니다. 줄을 누르면 아래에서 인사 AI가 한 일을 봅니다.</p>
+          <p className="mt-1 text-xs text-ink-500">캣북스에 이벤트가 나면 총괄 AI가 인사 AI에게 기록을 맡깁니다. 줄을 누르면 아래에서 인사 AI가 한 일을 볼 수 있습니다.</p>
         </div>
         {err && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{err}</p>}
         {!incidents ? (!err && <p className="py-6 text-center text-sm text-ink-500">불러오는 중…</p>)
@@ -114,7 +114,7 @@ export default function IncidentRecords({ initialCtx = null }: { initialCtx?: st
       <section className="card space-y-4 p-6">
         <div>
           <h2 className="text-lg font-semibold">AI가 한 일</h2>
-          <p className="mt-1 text-xs text-ink-500">고른 이벤트에서 인사 AI가 한 일을 시간순으로 봅니다. 기록된 그대로이고 새로 계산하지 않습니다.</p>
+          <p className="mt-1 text-xs text-ink-500">고른 이벤트에서 인사 AI가 한 일을 시간순으로 봅니다. 남아 있는 기록을 그대로 보여 줍니다.</p>
         </div>
         {incidents && incidents.length > 0 && current && (
           <select className="field" value={current.context_id} onChange={(e) => setPicked(e.target.value)} aria-label="이벤트 고르기">
@@ -184,7 +184,7 @@ function Timeline({ inc }: { inc: OrchIncident }) {
       {step?.started_at && (
         <li className="flex flex-wrap items-baseline gap-x-3 px-4 py-2 text-xs" title={`${step.skill} · ${inc.context_id}`}>
           <span className="tabular-nums text-ink-500">{clockKo(step.started_at)}</span>
-          <span className="font-medium">총괄 AI가 이벤트 기록을 맡김</span>
+          <span className="font-medium">총괄 AI가 인사 AI에게 이벤트 기록을 맡김</span>
           <span className="text-ink-500">{incidentTitle(inc)}</span>
         </li>
       )}
