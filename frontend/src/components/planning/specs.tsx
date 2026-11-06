@@ -3,7 +3,7 @@ import { useEffect, useState, type Dispatch } from 'react'
 import { Button, Notice, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, exampleFill, nextDocId, type Action, type FillPreview, type Decision, type Spec, type State as S } from '@/lib/planningData'
 import { State, Tag, rowNav } from '@/components/planning-common/parts'
-import { Linked, Ref, go, reviewOf, toPath } from '@/components/planning-common/links'
+import { Linked, Ref, go, idText, reviewOf, toPath } from '@/components/planning-common/links'
 import { CONFIRMED_BY } from '@/components/planning-common/flow'
 import { Pager, usePage } from '@/components/planning-common/pager'
 import { Markdown } from '@/components/planning-common/markdown'
@@ -21,7 +21,7 @@ function ReviewDecide({ d, spec, xr }: { d: Dispatch<Action>; spec: Spec; xr: No
   return (
     <Notice tone="warn">
       <div className="xr-decide">
-        <span>{human ? `사람 확인 · 되돌릴 수 없음 ${xr.irreversible}` : `교차검증 · ${xr.routeWhy.join(', ')}`} <span className="mono muted">{xr.id}</span></span>
+        <span>{human ? `사람 확인 · 되돌릴 수 없음 ${xr.irreversible}` : `교차검증 · ${xr.routeWhy.join(', ')}`} <span className="mono idc" title={xr.id}>{idText(xr.id)}</span></span>
         <span style={{ flex: 1 }} />
         <Button variant="primary" onClick={() => { d({ type: 'humanDecide', review: xr.id, ok: true }); toast.show(`${spec.id} 승인`) }}>승인</Button>
         <Button onClick={() => setReason(reason === null ? '' : null)}>거절</Button>
@@ -169,8 +169,12 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
   const newest = (xs: ListRow[]) => xs.map((r) => ({ r, t: timeOf(r) })).sort((a, b) => (a.t === b.t ? num(b.r.id) - num(a.r.id) : a.t < b.t ? 1 : -1)).map((x) => x.r)
   const planRows = docRows.filter((r) => r.kind === 'plan')
   const plainDocs = docRows.filter((r) => r.kind === 'doc')
-  const all = newest(kind === 'spec' ? [...specRows, ...planRows] : kind === 'doc' ? plainDocs : [...specRows, ...docRows])
+  // 글자로 찾기(제목·번호). 화면 안에서만 거른다 (노션 찾기와는 따로)
+  const [q, setQ] = useState('')
+  const hit = (r: ListRow) => !q.trim() || `${r.id} ${idText(r.id)} ${r.title}`.toLowerCase().includes(q.trim().toLowerCase())
+  const all = newest(kind === 'spec' ? [...specRows, ...planRows] : kind === 'doc' ? plainDocs : [...specRows, ...docRows]).filter(hit)
   const pg = usePage(all, 10)
+  useEffect(() => pg.setPage(0), [q]) // eslint-disable-line react-hooks/exhaustive-deps
   const newDoc = () => { d({ type: 'newDoc', title: '' }); go(toPath(`docs/${nextDocId(s)}`)) }
   const toast = useToast()
   const [notion, setNotion] = useState<string | null>(null) // 노션 주소·제목 칸 (null = 닫힘)
@@ -202,6 +206,7 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
             <button key={k} type="button" aria-pressed={kind === k} onClick={() => { setKind(k); pg.setPage(0) }}>{label}</button>
           ))}
         </div>
+        <input type="search" className="rq-search" placeholder="제목·번호로 찾기" value={q} onChange={(e) => setQ(e.target.value)} aria-label="문서·기획서 찾기" />
         <span style={{ flex: 1 }} />
         {notion === null ? (
           <Button size="small" onClick={() => setNotion('')}>노션에서 가져오기</Button>
@@ -246,7 +251,7 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
                     {r.origin && <span className={`sl-origin${r.origin === '제안' ? ' prop' : ''}`} title={r.origin === '제안' ? '기획 제안에서 만든 기획서' : '요청에서 만든 기획서'}>{r.origin}</span>}
                     {r.from && <span className={`rq-dept d-${r.from}`} title="요청한 부서">{DEPT_NAME[r.from]}</span>}
                     {r.to && <span className={`rq-dept d-${r.to}`} title="기획안을 넘긴 부서">→ {DEPT_NAME[r.to]}</span>}
-                    <span className="mono muted sl-id">{r.id}</span>
+                    <span className="mono idc sl-id" title={r.id}>{idText(r.id)}</span>
                     <b title={r.title}>{r.title}</b>
                     {r.kind === 'spec' && r.note && <Tag tone="amber">{r.note}</Tag>}
                     {r.tail && <Tag tone={r.tail.tone} title={r.tail.title}>{r.tail.label}</Tag>}
@@ -277,7 +282,7 @@ function PlanHandoff({ s, d, spec }: P & { spec: Spec }) {
   return (
     <div className="plan-handoff">
       <span className="sl-origin prop">제안</span>
-      <a className="plain-link mono small" href={toPath(`proposals/${p.id}`)}>{p.id}</a>
+      <a className="mono idc" href={toPath(`proposals/${p.id}`)} title={p.id}>{idText(p.id)}</a>
       {p.target && <span className="small">목표 <b>{p.target.value}</b> {p.target.label}</span>}
       <span style={{ flex: 1 }} />
       {proposalReady(p) ? (
