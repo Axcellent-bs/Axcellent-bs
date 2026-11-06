@@ -159,7 +159,8 @@ export function readableBody(body: string): string {
     .replace(/: (\w+)로 이관 \(([a-z_]+)\)/g, (_, d: string) => `: ${DEPT_NAME[d] ?? d}에게 넘김`)
     .replace(/\(([a-z_:]+(?: [a-z_]+)?)\)/g, (m, k: string) => REASON_CODE[k.replace(/^failed: /, "")] ? `(${REASON_CODE[k.replace(/^failed: /, "")]})` : STEP_NAME[k] ? `(${STEP_NAME[k]})` : m)
     .replace(/원인 배포 롤백/g, "문제 배포를 이전 버전으로 되돌리기")
-    .replace(/롤백/g, "이전 버전으로 되돌리기");
+    .replace(/롤백/g, "이전 버전으로 되돌리기")
+    .replace(/되돌리기([과이은을])/g, (_, j: string) => `되돌리기${({ 과: "와", 이: "가", 은: "는", 을: "를" } as Record<string, string>)[j]}`);
 }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
