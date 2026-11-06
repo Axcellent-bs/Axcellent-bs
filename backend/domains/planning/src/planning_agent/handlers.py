@@ -250,9 +250,7 @@ async def receive_campaign_update(request: AgentRequest) -> AgentResult:
     if not request.meta.idempotency_key:
         return _missing_key(request)
     try:
-        result = await get_service().receive_campaign_update(
-            inp=inp, requester=_requester(request)
-        )
+        result = await get_service().receive_campaign_update(inp=inp, requester=_requester(request))
     except GateRefused as exc:
         return _gate_rejected(request, exc)
     out = ReceiveCampaignUpdateOutput.model_validate(result.output)

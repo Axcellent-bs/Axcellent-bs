@@ -16,6 +16,9 @@ export interface ProposalTarget { label: string; value: string; measure?: string
 export interface ProposalResult { direction: '늘었음' | '같음' | '줄었음' | '확인 불가'; summary: string; facts?: ProposalFact[]; at: string }
 export interface ProposalHandoff { ok: boolean; reason?: string; campaign?: string; at?: string; retry?: number } // retry: 마케팅 응답이 없어 자동으로 다시 보낸 횟수
 
+/** 이 인사이트로 했던 지난 캠페인 결과 (데이터분석 문장 그대로) */
+export interface ProposalPast { campaignId: string; viewsLabel: string; salesLabel: string; band: string; summaryLine: string; noteLine?: string; actions: string[] }
+
 export interface Proposal {
   id: string // PROP-n
   title: string
@@ -42,6 +45,8 @@ export interface Proposal {
   result?: ProposalResult
   request?: string // 개발로 보낸 요청 REQ-n
   spec?: string // 확정해 만든 기획안 (기획서 SPEC-n, origin 'proposal')
+  past?: ProposalPast[] // 지난 캠페인 결과 (받은 때 기준)
+  followOf?: string // 후속 기획이면 이어 가는 앞 제안 PROP-n
 }
 
 export const PROPOSAL_STAGES = ['받음', '기획안', '실행', '성과'] as const
@@ -149,6 +154,20 @@ export const SEED_PROPOSALS: Proposal[] = [
     why: '조회가 빠르게 느는 숏츠 3개 중 2개가 같은 형식이고 평균 길이가 18초로 짧다',
     format: '숏폼 15초',
     writtenBy: 'llm', warnings: ['할 일의 숫자 15가 근거·목표에 없음'], status: '확인 대기', created: '11-04 08:30',
+  },
+  {
+    id: 'PROP-5', title: '독서의 계절 기획전 배너 (후속)', from: 'data', skill: 'trend_insight_brief', insightId: 'ins-1028-2', followOf: 'PROP-3',
+    insight: '지난 기획전 배너가 조회·매출 모두 목표를 넘었고, 연말 선물 검색이 오르기 시작했다',
+    facts: [
+      { label: '"연말 선물 책" 검색 이번 주', value: '지난주의 1.7배', source: 'trend_history' },
+      { label: '지난 기획전 기간 주문', value: '+18%', source: 'campaign_effect' },
+    ],
+    products: [],
+    idea: '지난 기획전 배너를 이어 12월 연말 선물 기획전으로 바꿔 열고, 썸네일 글자를 줄인다',
+    why: '지난 캠페인이 조회 목표의 1.4배, 주문 +18%였고 "연말 선물 책" 검색이 지난주의 1.7배로 올랐다',
+    target: { label: '캠페인 기간 주문 증분', value: '+15%', measure: 'campaign_effect' }, format: '배너',
+    writtenBy: 'llm', warnings: [], status: '확인 대기', created: '11-06 15:40',
+    past: [{ campaignId: 'CMP-9', viewsLabel: '조회 달성', salesLabel: '더 팔림', band: 'green', summaryLine: '조회 목표의 1.4배 (영상 3개 중 2개 달성) · 매출 +412,000원 · 주문 +31건', noteLine: '지난번 개선 방향: 썸네일 글자를 줄이면 첫 3초 이탈이 줄었다', actions: ['썸네일 글자를 6자 안으로', '쿠폰 안내를 첫 컷에'] }],
   },
 ]
 
