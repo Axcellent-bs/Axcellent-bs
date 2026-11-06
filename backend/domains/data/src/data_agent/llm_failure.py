@@ -57,9 +57,11 @@ def mark(error: BaseException) -> None:
     """
     from ax_agent_template.llm import LLMNotConfiguredError
     from data_agent.llm_budget import LLMDailyCapReached
+    from data_agent.llm_halt import LLMHalted
 
     current = _CURRENT.get()
-    if isinstance(error, LLMDailyCapReached):
+    # 오류 원인으로 멈춘 것(키 오류·공급자 한도)도 풀리면 결과가 달라지므로 상한과 같이 짧게만 저장
+    if isinstance(error, LLMDailyCapReached | LLMHalted):
         if current is not None:
             current.capped = True
         return

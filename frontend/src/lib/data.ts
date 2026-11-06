@@ -995,6 +995,24 @@ export interface TrendInsightBriefOutput {
   facts?: DataFact[];
   schema_version?: string;
   snapshot_id?: string | null;
+  /** 지금 data LLM 상태 (오류 원인·중단). 저장된 브리프를 줄 때도 응답 시점 값. 예전 응답은 없다 */
+  llm_status?: LlmStatus | null;
+}
+/**
+ * data LLM 오류 원인과 중단 상태 (계약 LlmStatus). 문구는 서버 문장 그대로.
+ * key_error 빨강(401·403, 그날 중단) · provider_limit 노랑(429) · our_cap 파랑(우리 하루 상한).
+ * 키 값·주소 전체는 오지 않는다 (키 이름·모델·호스트만).
+ */
+export interface LlmStatus {
+  state: "ok" | "key_error" | "provider_limit" | "our_cap";
+  tone: "none" | "red" | "yellow" | "blue";
+  title?: string | null;
+  detail?: string | null;
+  key_source: string;
+  model?: string | null;
+  base_host?: string | null;
+  halted_until?: string | null;
+  strikes: number;
 }
 /** 응답에 나오는 숫자 하나 (출처·기간·표본, #614) */
 export interface DataFact {

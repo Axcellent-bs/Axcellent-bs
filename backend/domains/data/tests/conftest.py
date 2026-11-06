@@ -31,3 +31,12 @@ def _reset_line_store():
     LINES.clear()
     yield
     LINES.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_llm_halt(monkeypatch: pytest.MonkeyPatch):
+    """LLM 중단 상태(키 오류·공급자 한도)도 테스트마다 새로 (앞 테스트의 가짜 429·401이 안 남게)."""
+    from data_agent import llm_halt
+
+    monkeypatch.setattr(llm_halt, "HALT", llm_halt.HaltStore(None))
+    yield
