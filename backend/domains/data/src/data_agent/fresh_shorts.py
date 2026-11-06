@@ -13,8 +13,9 @@
 - 추적: 추적 목록을 매시간 `videos.list`(50개씩)로 재고 기존 스냅샷 표(`snapshots`)에
   source "fresh_track"으로 저장. 게시 후 8일이 지나면 추적 종료
 - 비용: 기존 YouTube 장부(같은 하루 전체 상한 8,000)에 부른 곳 "fresh_shorts"로 적힌다. 이 작업
-  전용 하루 상한 `DATA_FRESH_SHORTS_DAILY_UNITS`(기본 2,500). 찾기는 쓴 단위 + 101이 상한 − 추적
-  몫(100) 이하일 때만, 추적은 상한 안이면 계속 (상한에 가까우면 찾기를 먼저 멈춤)
+  몫 `DATA_FRESH_SHORTS_DAILY_UNITS`(기본 1,200)은 장부가 먼저 떼어 두는 예약 몫이다(다른 기능은
+  나머지 6,800 안에서). 찾기는 쓴 단위 + 101이 몫 − 추적 몫(100) 이하일 때만, 추적은 몫 안이면
+  계속 (몫에 가까우면 찾기를 먼저 멈춤)
 """
 
 from __future__ import annotations
@@ -40,8 +41,8 @@ CALLER = "fresh_shorts"
 SOURCE = "fresh_track"
 DB_ENV = "DATA_FRESH_SHORTS_DB"
 DEFAULT_DB = Path(__file__).resolve().parents[4] / ".data" / "fresh_shorts.db"  # backend/.data
-CAP_ENV = "DATA_FRESH_SHORTS_DAILY_UNITS"
-DEFAULT_CAP = 2500
+CAP_ENV = youtube_quota.RESERVE_ENV
+DEFAULT_CAP = youtube_quota.DEFAULT_RESERVE  # 1,200 (장부 예약 몫과 같은 값)
 FIND_EVERY = timedelta(hours=6)
 LOOKBACK = timedelta(hours=6)
 TRACK_FOR = timedelta(days=8)
@@ -57,11 +58,8 @@ Classify = Callable[[Sequence[Any]], Mapping[str, str] | Awaitable[Mapping[str, 
 
 
 def daily_cap(env: Mapping[str, str]) -> int:
-    try:
-        value = int(str(env.get(CAP_ENV, "")).strip())
-    except ValueError:
-        return DEFAULT_CAP
-    return value if value > 0 else DEFAULT_CAP
+    """이 작업 하루 몫 = 장부 예약 몫."""
+    return youtube_quota.reserve(env)
 
 
 def day_of(now: datetime) -> date:
@@ -358,7 +356,7 @@ async def run_tick(
 
 
 def status(env: Mapping[str, str] | None = None, now: datetime | None = None) -> FreshTrackStatus:
-    """수집기 상태 화면: "새 숏츠 추적: 오늘 N유닛 / 2,500, 추적 중 N개"."""
+    """수집기 상태 화면: "새 숏츠 추적: 오늘 N유닛 / 1,200, 추적 중 N개"."""
     env = os.environ if env is None else env
     now = now or datetime.now(UTC)
     path = env.get(DB_ENV) or DEFAULT_DB

@@ -45,7 +45,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import IO
 
-from data_agent import collector_lock
+from data_agent import collector_lock, youtube_quota
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.youtube import VideoStat, YouTubeConnector
 from data_agent.stage_timing import install_sqlite_timer
@@ -357,6 +357,8 @@ async def run(every: int | None, env: Mapping[str, str], precompute_after: bool 
                 problems = await precompute()
                 if problems:
                     print(f"[precompute] 일부 못 함: {', '.join(problems)}", flush=True)
+            # 기능별 오늘 YouTube 단위 (하나의 장부, 미리 계산까지 끝난 뒤)
+            print(youtube_quota.LEDGER.status_line(env), flush=True)
             if every is None:
                 return 1 if result.errors and not result.saved else 0
             await asyncio.sleep(every)
@@ -395,7 +397,7 @@ async def track_fresh(
 ) -> int:
     """새 숏츠 추적 한 번 (형식마다 6시간에 1번 찾기 + 매시간 추적). 저장한 스냅샷 수.
 
-    장부의 부른 곳은 fresh_shorts (이 작업 하루 상한 2,500단위, 전체 8,000은 그대로).
+    장부의 부른 곳은 fresh_shorts (장부 예약 몫 1,200단위, 다른 기능은 나머지 6,800 안에서).
     실패해도 수집은 계속한다.
     """
     from data_agent import fresh_shorts

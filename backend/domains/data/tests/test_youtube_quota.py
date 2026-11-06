@@ -69,3 +69,40 @@ def test_data_sources_shows_today_youtube_usage() -> None:
     out = asyncio.run(list_sources({}, prober=None)).output
     assert out.youtube_usage is not None
     assert (out.youtube_usage.units, out.youtube_usage.unit_cap) == (300, 8000)
+
+
+def test_fresh_shorts_keeps_its_reserved_share() -> None:
+    """다른 기능이 몫(상한 − 예약)을 다 써도 새 숏츠 추적은 예약 몫까지 검색한다."""
+    env = {"YOUTUBE_API_KEY": "test-key", "DATA_YOUTUBE_DAILY_UNITS": "1000",
+           "DATA_FRESH_SHORTS_DAILY_UNITS": "300"}  # fmt: skip
+    after = datetime.now(UTC) - timedelta(days=1)
+
+    async def go() -> tuple[int, int]:
+        other, fresh = _connector(env, caller="trend_popular"), _connector(env, "fresh_shorts")
+        n = m = 0
+        for _ in range(10):
+            try:
+                await other.search_recent(after, query="롤")
+                n += 1
+            except ConnectorUnavailable as error:
+                assert "새 숏츠 추적 몫 300 예약" in str(error)
+        for _ in range(5):
+            try:
+                await fresh.search_recent(after, query="책")
+                m += 1
+            except ConnectorUnavailable as error:
+                assert "새 숏츠 추적 몫에 닿아" in str(error)
+        return n, m
+
+    assert asyncio.run(go()) == (7, 3)  # 700 = 1,000 − 300, 그 뒤 예약 300
+    line = LEDGER.status_line(env)
+    assert line == ("[quota] 오늘 1,000/1,000단위 · 다른 기능 700/700 (trend_popular 700(검색 7)) ·"
+                    " 새 숏츠 추적 300/300 예약")  # fmt: skip
+
+
+def test_default_reserve_is_1200_of_8000() -> None:
+    from data_agent.youtube_quota import reserve
+
+    assert reserve({}) == 1200
+    assert reserve({"DATA_YOUTUBE_DAILY_UNITS": "250"}) == 37  # 상한을 낮추면 15%
+    assert reserve({"DATA_FRESH_SHORTS_DAILY_UNITS": "900"}) == 900

@@ -120,6 +120,11 @@ class PopularConfig:
     fill_query_cells: tuple[str, ...] = ()
     fill_query_topics: int = 2
     fill_search_calls: int = 6  # 보충 검색 하루 호출 상한 (넘으면 그 칸 보충은 unknown + 이유)
+    # 같은 YouTube 카테고리 보충 검색 하루 상한 (실패한 검색도 1번으로 셈.
+    # 장부가 막아 부르지 못한 것은 빼고)
+    fill_category_calls: int = 2
+    # 성공한 보충 결과를 다시 쓰는 시간 (지나면 카테고리 상한 안에서 다시 검색)
+    fill_cache_hours: float = 6.0
     # 주제 근거 영상 중 저장된 제목이 없는 것을 videos.list로 받는 하루 호출 상한
     # (한 번 = 영상 50개·1단위)
     title_fill_calls: int = 2
@@ -170,6 +175,12 @@ def load_config(env: Mapping[str, str]) -> PopularConfig:
                 1, min(5, int(raw.get("fill_query_topics", base.fill_query_topics)))
             ),  # fmt: skip
             fill_search_calls=max(0, int(raw.get("fill_search_calls", base.fill_search_calls))),
+            fill_category_calls=max(
+                0, int(raw.get("fill_category_calls", base.fill_category_calls))
+            ),  # fmt: skip
+            fill_cache_hours=max(
+                0.0, float(raw.get("fill_cache_hours", base.fill_cache_hours))
+            ),  # fmt: skip
             title_fill_calls=max(0, int(raw.get("title_fill_calls", base.title_fill_calls))),
             channel_fill_calls=max(
                 0, int(raw.get("channel_fill_calls", base.channel_fill_calls))
@@ -189,7 +200,11 @@ KST = timezone(timedelta(hours=9))
 
 
 class FillStore:
-    """카테고리별 그날 검색한 영상 (day, YouTube 카테고리) → 영상 목록 JSON 또는 실패 이유."""
+    """카테고리별 그날 검색한 영상 (day, YouTube 카테고리) → 영상 목록 JSON 또는 실패 이유.
+
+    `fill_attempts`: 보충 검색 시도 한 줄씩 (성공·실패, 시각). 하루 상한·카테고리 상한·6시간
+    재사용은 이 표로 센다 (실패도 할당량을 쓰므로 센다)
+    """
 
     def __init__(self, path: str | Path) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -205,6 +220,11 @@ class FillStore:
                 "CREATE TABLE IF NOT EXISTS title_calls"
                 " (day TEXT PRIMARY KEY, calls INTEGER NOT NULL)"
             )
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS fill_attempts (day TEXT NOT NULL,"
+                " youtube_category TEXT NOT NULL, key TEXT NOT NULL, language TEXT NOT NULL,"
+                " at TEXT NOT NULL, ok INTEGER NOT NULL)"
+            )
 
     def close(self) -> None:
         self._conn.close()
@@ -218,12 +238,41 @@ class FillStore:
         return json.loads(row[0]) if row else None
 
     def count(self, day: date) -> int:
-        """그날 한 검색 수 (검색 한 번 = 한 줄)."""
+        """그날 한 검색 수 (실패 포함 시도 수. 시도 기록 전 저장분은 결과 줄 수 중 큰 쪽)."""
+        key = day.isoformat()
+        with self._lock:
+            rows = self._conn.execute("SELECT COUNT(*) FROM fill WHERE day = ?", (key,)).fetchone()
+            tries = self._conn.execute(
+                "SELECT COUNT(*) FROM fill_attempts WHERE day = ?", (key,)
+            ).fetchone()
+        return max(int(rows[0]), int(tries[0]))
+
+    def category_count(self, day: date, cat: str) -> int:
+        """그날 그 YouTube 카테고리 보충 검색 시도 수 (검색어가 달라도 같은 카테고리)."""
         with self._lock:
             row = self._conn.execute(
-                "SELECT COUNT(*) FROM fill WHERE day = ?", (day.isoformat(),)
+                "SELECT COUNT(*) FROM fill_attempts WHERE day = ? AND youtube_category = ?",
+                (day.isoformat(), cat),
             ).fetchone()
         return int(row[0])
+
+    def last_ok(self, day: date, key: str, language: str) -> datetime | None:
+        """그날 그 검색(카테고리·검색어)이 마지막으로 성공한 시각. 없으면 None."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT MAX(at) FROM fill_attempts WHERE day = ? AND key = ? AND language = ?"
+                " AND ok = 1",
+                (day.isoformat(), key, language),
+            ).fetchone()
+        return datetime.fromisoformat(row[0]) if row and row[0] else None
+
+    def attempt(self, day: date, cat: str, key: str, language: str, at: datetime,
+                ok: bool) -> None:  # fmt: skip
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO fill_attempts VALUES (?,?,?,?,?,?)",
+                (day.isoformat(), cat, key, language, at.astimezone(UTC).isoformat(), int(ok)),
+            )
 
     def title_calls(self, day: date) -> int:
         """그날 제목을 받으려고 부른 videos.list 수."""
@@ -420,45 +469,63 @@ async def _fill_rows(
 ) -> list[dict[str, Any]] | str:
     """YouTube 카테고리 하나의 그날 검색 결과 (저장한 것이 있으면 그것). 실패면 이유 문자열.
 
-    같은 카테고리·검색어는 하루 1번. 그날 검색 수가 `fill_search_calls`에 닿으면 더 부르지 않는다.
+    - 성공한 결과는 `fill_cache_hours`(6시간) 동안 다시 쓴다. 지나면 아래 상한 안에서 다시
+      검색하고, 검색하지 못하거나 실패하면 그날 저장한 결과를 그대로 쓴다
+    - 같은 YouTube 카테고리는 하루 `fill_category_calls`(2번)까지, 그날 전체는
+      `fill_search_calls`까지. 실패한 검색도 1번으로 센다(실패도 할당량을 쓴다).
+      장부가 막아 부르지 않은 것(QUOTA_EXCEEDED)은 세지 않는다
     """
     lang = config.fill_language
     key = f"{yt_category} q={term}" if term else yt_category
     rows = store.get(today, key, lang)
-    if rows is None:
-        if youtube is None or not hasattr(youtube, "search_category"):
-            return "YouTube 커넥터가 없어 최근 조회수 높은 영상을 받지 않음"
-        if store.count(today) >= config.fill_search_calls:
-            return f"{OVER_CAP}({config.fill_search_calls}번)에 닿아 검색하지 않음"
-        try:
-            stats = await youtube.search_category(
-                yt_category,
-                now - timedelta(days=config.fill_days),
-                language=lang or None,
-                **({"query": term} if term else {}),
-            )
-        except ConnectorUnavailable as error:
-            return f"최근 조회수 높은 영상 검색 실패 [{error.code}]"
-        queries.append(
-            f"youtube search.list videoCategoryId={yt_category} order=viewCount"
-            + (f" q={term}" if term else "")
+    if rows is not None:
+        last = store.last_ok(today, key, lang)  # 시도 기록 전 저장분: 시각 모름 → 그날 재사용
+        if last is None or now - last < timedelta(hours=config.fill_cache_hours):
+            return rows
+    if youtube is None or not hasattr(youtube, "search_category"):
+        no_conn = "YouTube 커넥터가 없어 최근 조회수 높은 영상을 받지 않음"
+        return rows if rows is not None else no_conn
+    if store.count(today) >= config.fill_search_calls:
+        return rows if rows is not None else (
+            f"{OVER_CAP}({config.fill_search_calls}번)에 닿아 검색하지 않음"
+        )  # fmt: skip
+    if store.category_count(today, yt_category) >= config.fill_category_calls:
+        return rows if rows is not None else (
+            f"{OVER_CAP}(카테고리 {yt_category} {config.fill_category_calls}번)에 닿아"
+            " 검색하지 않음"
+        )  # fmt: skip
+    try:
+        stats = await youtube.search_category(
+            yt_category,
+            now - timedelta(days=config.fill_days),
+            language=lang or None,
+            **({"query": term} if term else {}),
         )
-        rows = [
-            {
-                "video_id": s.video_id,
-                "title": s.title or None,
-                "channel_title": s.channel_title or None,
-                "views": s.view_count,
-                "published_at": s.published_at.isoformat() if s.published_at else None,
-                "duration_seconds": s.duration_seconds,
-                "language": getattr(s, "language", None),
-                "category_id": s.category_id,
-                "tags": list(s.tags),
-                "thumbnail_url": getattr(s, "thumbnail_url", None),  # 받은 검색 응답 값
-            }
-            for s in stats
-        ]
-        store.put(today, key, lang, rows)
+    except ConnectorUnavailable as error:
+        if error.code != "QUOTA_EXCEEDED":
+            store.attempt(today, yt_category, key, lang, now, ok=False)
+        return rows if rows is not None else f"최근 조회수 높은 영상 검색 실패 [{error.code}]"
+    store.attempt(today, yt_category, key, lang, now, ok=True)
+    queries.append(
+        f"youtube search.list videoCategoryId={yt_category} order=viewCount"
+        + (f" q={term}" if term else "")
+    )
+    rows = [
+        {
+            "video_id": s.video_id,
+            "title": s.title or None,
+            "channel_title": s.channel_title or None,
+            "views": s.view_count,
+            "published_at": s.published_at.isoformat() if s.published_at else None,
+            "duration_seconds": s.duration_seconds,
+            "language": getattr(s, "language", None),
+            "category_id": s.category_id,
+            "tags": list(s.tags),
+            "thumbnail_url": getattr(s, "thumbnail_url", None),  # 받은 검색 응답 값
+        }
+        for s in stats
+    ]
+    store.put(today, key, lang, rows)
     return rows
 
 

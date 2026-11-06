@@ -2,7 +2,7 @@
 
 - 대상 형식: 브리프·캠페인에서 쓰는 형식 상위 5개 (기타·unknown 제외, 모자라면 저장분으로 채움)
 - 수집기 루프가 1시간마다 부른다 (run_all.sh 일정 그대로)
-- 상태 줄: "새 숏츠 추적: 오늘 N유닛 / 2,500, 추적 중 N개"
+- 상태 줄: "새 숏츠 추적: 오늘 N유닛 / 1,200, 추적 중 N개"
 - 성과 탭: 기준 모으는 중 진행(형식 × 시점 표본 수), 신호 "기준 모으는 중 (n/5)"
 """
 
@@ -96,7 +96,7 @@ def test_track_fresh_finds_then_tracks_and_shows_status(tmp_path: Path) -> None:
     assert conn.execute("SELECT DISTINCT sources FROM snapshots").fetchall() == [("fresh_track",)]
     conn.close()
     status = fresh_shorts.status(env, NOW + timedelta(hours=1))
-    assert status.line == "새 숏츠 추적: 오늘 103유닛 / 2,500, 추적 중 1개"
+    assert status.line == "새 숏츠 추적: 오늘 103유닛 / 1,200, 추적 중 1개"
     assert (status.units_today, status.tracking, status.find_stopped) == (103, 1, False)
 
 

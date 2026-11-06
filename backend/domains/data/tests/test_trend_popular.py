@@ -557,3 +557,69 @@ def test_title_fetch_failure_or_gone_videos_leave_a_reason(tmp_path: Path) -> No
     none = _topics(["v1"])
     _attach(tmp_path / "c", none, None)
     assert none[0].videos_reason == "YouTube 커넥터 없이 불러 저장된 제목만 붙임"
+
+
+def test_fill_search_counts_failures_and_reuses_results_for_six_hours() -> None:
+    """보충 검색: 실패도 1번으로 세고(카테고리당 하루 2번), 성공 결과는 6시간 재사용,
+    다시 검색이 실패하면 그날 저장한 결과를 쓴다."""
+    import asyncio as aio
+    from datetime import UTC, datetime, timedelta
+
+    from data_agent.connectors import ConnectorUnavailable
+    from data_agent.skills import trend_popular as tp
+
+    class Yt:
+        def __init__(self) -> None:
+            self.calls, self.fail = 0, False
+
+        async def search_category(self, *args: object, **kwargs: object) -> list:
+            self.calls += 1
+            if self.fail:
+                raise ConnectorUnavailable("RATE_LIMITED", "429")
+            return []
+
+    start = datetime(2026, 11, 5, 15, 0, tzinfo=UTC)  # 한국 11-06 0시
+    day = start.astimezone(tp.KST).date()
+    config = tp.PopularConfig(fill_search_calls=9)
+    store, yt = tp.FillStore(":memory:"), Yt()
+
+    def call(h: float, cat: str = "23") -> object:
+        return aio.run(tp._fill_rows(config, yt, store, cat, start + timedelta(hours=h), day, [],
+                                     "스텔라이브"))  # fmt: skip
+
+    assert call(0) == [] and call(5.9) == [] and yt.calls == 1  # 6시간 재사용
+    yt.fail = True
+    assert call(6) == [] and yt.calls == 2  # 다시 검색 실패 → 저장한 결과 그대로
+    assert call(13) == [] and yt.calls == 2  # 카테고리 23은 하루 2번에 닿음
+    got = call(14, "1")  # 다른 카테고리: 실패 이유
+    assert got == "최근 조회수 높은 영상 검색 실패 [RATE_LIMITED]" and yt.calls == 3
+    again = call(15, "1")
+    assert again == "최근 조회수 높은 영상 검색 실패 [RATE_LIMITED]" and yt.calls == 4
+    over = call(16, "1")
+    assert isinstance(over, str) and over.startswith(tp.OVER_CAP) and "카테고리 1 2번" in over
+    assert store.count(day) == 4 and yt.calls == 4
+    store.close()
+
+
+def test_fill_search_total_cap_counts_failed_tries() -> None:
+    import asyncio as aio
+    from datetime import UTC, datetime
+
+    from data_agent.connectors import ConnectorUnavailable
+    from data_agent.skills import trend_popular as tp
+
+    class Yt:
+        calls = 0
+
+        async def search_category(self, *args: object, **kwargs: object) -> list:
+            Yt.calls += 1
+            raise ConnectorUnavailable("UNAVAILABLE", "5xx")
+
+    now = datetime(2026, 11, 6, 3, 0, tzinfo=UTC)
+    day = now.astimezone(tp.KST).date()
+    config = tp.PopularConfig(fill_search_calls=3)
+    store = tp.FillStore(":memory:")
+    for cat in ["1", "10", "17", "20", "23"]:
+        aio.run(tp._fill_rows(config, Yt(), store, cat, now, day, []))
+    assert Yt.calls == 3  # 하루 전체 상한 3번 (실패도 셈)
+    store.close()

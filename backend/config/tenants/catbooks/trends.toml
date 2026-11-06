@@ -153,6 +153,9 @@ fill_always = true
 fill_query_cells = ["게임", "유머", "드라마", "교양"]
 fill_query_topics = 2
 fill_search_calls = 9    # 보충 검색 하루 호출 상한 (지금 칸별 YouTube 카테고리 수와 같다. 넘으면 그 칸 보충만 unknown + 이유)
+# 2026-11-06: 429로 실패한 보충 검색(23 q=스텔라이브)을 실행마다 다시 해 하루 3,200단위를 씀 → 실패도 세고 카테고리당 상한
+fill_category_calls = 2  # 같은 YouTube 카테고리 보충 검색 하루 상한 (실패한 검색도 1번으로 셈)
+fill_cache_hours = 6     # 성공한 보충 결과를 다시 쓰는 시간 (지나면 위 상한 안에서 다시 검색, 실패하면 그날 결과 그대로)
 title_fill_calls = 2     # 주제 근거 영상 제목 받기(videos.list) 하루 호출 상한. 한 번 = 영상 50개·1단위
 channel_fill_calls = 2   # 근거: 채널 구독자 받기(channels.list) 하루 호출 상한. 한 번 = 채널 50개·1단위, 받은 값은 하루 재사용
 fill_days = 7            # 최근 며칠 게시 영상에서 고를지

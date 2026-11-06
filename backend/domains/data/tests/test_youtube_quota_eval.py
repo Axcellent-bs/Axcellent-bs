@@ -3,7 +3,7 @@
 - 새 숏츠 추적 몫 1,200단위 예약: 다른 기능은 6,800단위 안에서 멈추고, 그 뒤에도 새 숏츠 추적은
   자기 몫만큼 검색한다
 - 지금 인기 보충 검색: 카테고리당 하루 최대 2번(실패도 셈), 성공한 결과는 6시간 재사용
-- 이 PR에서는 관찰만 (관문은 코드 PR에서)
+- 관문은 코드 PR에서 켬 (평가 정의 PR #799는 관찰만: dev 0.0 / 0.3333)
 """
 
 from __future__ import annotations
@@ -147,9 +147,14 @@ def _answers() -> dict[str, dict]:
     }
 
 
-def test_youtube_quota_observe() -> None:
-    """관찰만: 지금 코드의 점수를 남긴다 (관문은 코드 PR에서 켬)."""
+GATES = dict.fromkeys(score.METRICS, 1.0)  # 모두 맞아야 함 (기준선 그대로)
+
+
+def test_youtube_quota_pass_the_gates() -> None:
+    """관문: 예약 몫 보장(다른 기능 6,800 안, 새 숏츠 추적 1,200)·보충 검색 상한(카테고리당 2번)."""
     cases = make.cases()
     metrics = score.score(cases, _answers())
     print("youtube_quota eval:", json.dumps(metrics, ensure_ascii=False))
     assert set(metrics) == set(score.METRICS)
+    for name, gate in GATES.items():
+        assert metrics[name] >= gate, f"{name} {metrics[name]} (관문 {gate})"
