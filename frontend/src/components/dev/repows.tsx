@@ -23,7 +23,7 @@ const ERR: Record<string, string> = {
   NO_ISSUES: '이 형상관리 연결에는 이슈 칸이 없어요',
   NOT_FOUND: '찾지 못했어요',
   READ_ONLY: '읽기 전용 연결이라 바꿀 수 없어요',
-  GATE_REJECTED: '실행 관문이 보류했어요. AI 교차검증 탭에서 확인해 주세요',
+  GATE_REJECTED: '안전 점검에서 멈췄어요. AI 교차검증 탭에서 확인해 주세요',
   OPEN_PR: '열린 PR이 있는 브랜치라 지우지 않았어요',
   PROTECTED_BRANCH: '기준·기본·보호 브랜치는 지우지 않아요',
   INTERNAL_FLOW: '중단한 AI 작업이라 작업 화면에서 다시 시도해 주세요',

@@ -16,7 +16,7 @@ const STATUS: Record<ChatStatus, { label: string; tone: ChipTone }> = {
   talking: { label: '대화 중', tone: 'neutral' },
   started: { label: '작업 시작', tone: 'green' },
   blocked: { label: '막힘', tone: 'amber' },
-  waiting: { label: '앞 요청 대기', tone: 'amber' },
+  waiting: { label: '앞 요청 기다림', tone: 'amber' },
   answering: { label: '답하는 중', tone: 'neutral' },
   closed: { label: '끝난 대화', tone: 'neutral' },
 }
@@ -143,7 +143,7 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
       chat.select(t.id)
     } catch (x) {
       const code = x instanceof PlanningApiError ? x.code : 'NETWORK'
-      const msg = code === 'LLM_NOT_CONFIGURED' ? 'LLM 설정 필요 (backend/.env)'
+      const msg = code === 'LLM_NOT_CONFIGURED' ? '서버 AI 키가 설정되지 않음'
         : code === 'NO_VCS' ? '연결된 레포 없음'
         : code === 'THREAD_BUSY' ? '앞 말에 답하는 중이에요. 답이 온 뒤 보내 주세요'
         : code === 'THREAD_CLOSED' ? '끝난 대화예요. 새 대화에서 보내 주세요'
@@ -213,7 +213,7 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
         <div className="sl-composer-bar">
           <div className="seg-toggle" role="group" aria-label="누가 코딩하나" title={cur?.taskId ? '작업을 띄운 대화는 바꿀 수 없어요' : '서버 AI는 회사 토큰, 내 Claude는 내 구독으로 코딩해요'}>
             <button type="button" aria-pressed={mode === 'agent'} onClick={() => choose('agent')} disabled={busy || !!cur?.taskId || (trialOut && !noClaude)} title={trialOut ? `서버 AI 체험 한도 다 씀 (${setting!.trial_used.toLocaleString()}/${setting!.trial_limit.toLocaleString()} 토큰)` : undefined}>서버 AI</button>
-            <button type="button" aria-pressed={mode === 'subscription'} onClick={() => choose('subscription')} disabled={busy || !!cur?.taskId || noClaude} title={noClaude ? '연결된 본인 Claude 없음 (개발 도구 연결 → MCP)' : undefined}>내 Claude</button>
+            <button type="button" aria-pressed={mode === 'subscription'} onClick={() => choose('subscription')} disabled={busy || !!cur?.taskId || noClaude} title={noClaude ? '연결된 내 Claude 없음 (연결 메뉴에서 추가)' : undefined}>내 Claude</button>
           </div>
           <button type="button" className="send" onClick={() => void send()} disabled={busy || ended || !connected || !draft.trim()} aria-label="보내기">↑</button>
         </div>

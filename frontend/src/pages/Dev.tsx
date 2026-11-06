@@ -19,14 +19,14 @@ const SECTIONS: Record<string, Section> = {
   work: { label: '작업', icon: 'plan', tabs: [
     { id: 'prs', label: '작업·PR' },
     { id: 'reviews', label: 'AI 교차검증' },
-    { id: 'ops', label: '운영·배포' },
-    { id: 'aftercare', label: '사후관리' },
+    { id: 'ops', label: '배포' },
+    { id: 'aftercare', label: '장애 대응' },
   ] },
   agents: { label: '에이전트 대화', icon: 'send', tabs: [], hidden: true },  // 메뉴에서 뺌 (주소로만 연다)
   talk: { label: '소통', icon: 'send', tabs: [], hidden: true },
   metrics: { label: '지표', icon: 'dashboard', tabs: [
-    { id: 'autonomy', label: '자동 처리 범위' },
-    { id: 'audit', label: 'AI 승인 감사' },
+    { id: 'autonomy', label: '자동 머지 기준' },
+    { id: 'audit', label: 'AI 단독 처리' },
     { id: 'activity', label: '에이전트 활동' },
   ] },
 }
@@ -42,7 +42,7 @@ function DevTools({ v }: { v: View }) {
   return (
     <>
       {repoWait > 0 && firstRepoWait && (
-        <a href={toPath(`work/prs/${prSlug(firstRepoWait.id)}`)} className="chip amber" title="대상 레포 승인 대기 PR">레포 승인 대기 {repoWait}</a>
+        <a href={toPath(`work/prs/${prSlug(firstRepoWait.id)}`)} className="chip amber" title="올릴 레포 승인이 필요한 PR">레포 승인 대기 {repoWait}</a>
       )}
       {chat.working.length > 0 && (
         <button type="button" className="chip amber" onClick={() => { chat.select(chat.working[0]); setChatOpen(true) }}>AI 작업 중 {chat.working.length}</button>
@@ -63,7 +63,7 @@ export default function DevPage() {
     <PlanningShell
       part="dev"
       title="개발·배포"
-      desc="확정된 기획서를 작업·PR로 만들고, 교차검증·배포·사후관리까지 맡습니다."
+      desc="확정된 기획서대로 코드를 고치고, 검토·배포·장애 대응까지 이어 갑니다."
       home="tasks"
       sections={SECTIONS}
       tabCount={(v, section, tab) => (section === 'work' && tab === 'reviews' ? v.state.reviews.filter((x) => !x.result).length : 0)}

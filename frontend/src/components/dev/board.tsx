@@ -14,7 +14,7 @@ type Group = 'stuck' | 'running' | 'done' | 'stopped'
 export type TaskFilter = 'all' | Group
 export const TASK_FILTERS: { id: TaskFilter; label: string }[] = [
   { id: 'all', label: '전체' },
-  { id: 'stuck', label: '사람 확인' },
+  { id: 'stuck', label: '확인 필요' },
   { id: 'running', label: '진행 중' },
   { id: 'done', label: '머지됨' },
   { id: 'stopped', label: '중단' },
@@ -25,7 +25,7 @@ const parseFilter = (x?: string): TaskFilter => (TASK_FILTERS.some((f) => f.id =
 export const TASK_STAGES = ['기획서', '코딩', 'PR·검증', '머지'] as const
 export interface TaskRow { t: Task; pr?: PR; group: Group; cells: Cell[]; next: { href: string; label: string }; born?: string; last?: string; minutes: number }
 
-const MERGED_BY: Record<string, string> = { rule: '자동 머지', review: '교차검증 후 머지', human: '사람 머지' }
+const MERGED_BY: Record<string, string> = { rule: '자동 머지', review: '교차검증 후 머지', human: '사람이 머지' }
 const prOf = (s: S, t: Task) => {
   const all = s.prs.filter((p) => p.task === t.id)
   return all.find((p) => !p.merged && !p.closed) ?? all[all.length - 1]
@@ -64,7 +64,7 @@ export function taskRow(s: S, t: Task, runTokens = 600_000): TaskRow {
   if (pr) {
     c2.value = prName(pr)
     c2.href = xr ? toPath(`work/reviews/${xr.id}`) : toPath(`work/prs/${prSlug(pr.id)}`)
-    c2.meta = pr.target?.status === 'proposed' ? '레포 승인 대기' : xr ? (xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기') : lastReview === '불일치' ? '리뷰 불일치' : pr.closed ? '닫힘' : merged ? lastReview ?? '통과' : c?.status === 'waiting_human' ? '사람 확인' : '머지 전'
+    c2.meta = pr.target?.status === 'proposed' ? '레포 승인 대기' : xr ? (xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기') : lastReview === '불일치' ? '리뷰에서 걸림' : pr.closed ? '닫힘' : merged ? lastReview ?? '통과' : c?.status === 'waiting_human' ? '확인 필요' : '머지 기다림'
     if (c2.kind === 'now' && group === 'stuck') c2.warn = true
   }
 
@@ -73,7 +73,7 @@ export function taskRow(s: S, t: Task, runTokens = 600_000): TaskRow {
   if (merged) { c3.value = '머지됨'; c3.meta = pr?.mergedBy ? MERGED_BY[pr.mergedBy] : undefined }
 
   const href = pr && !pr.closed ? toPath(`work/prs/${prSlug(pr.id)}`) : c ? toPath(`work/prs/${encodeURIComponent(t.id)}`) : toPath(`work/specs/${t.spec}/${t.para}`)
-  const label = group === 'stuck' ? (xr ? '검증 보기' : '사람 확인하기') : group === 'running' ? '진행 보기' : '보기'
+  const label = group === 'stuck' ? (xr ? '검토 보기' : '확인하기') : group === 'running' ? '진행 보기' : '보기'
 
   const acts = s.activity.filter((a) => a.text.includes(t.id)).map((a) => a.t).sort((a, b) => toMin(a) - toMin(b))
   const born = acts[0]
@@ -149,7 +149,7 @@ export function TaskBoard({ s, filter }: { s: S; filter?: string }) {
                 <span className="rq-meta">
                   <span className="mono">{t.id}</span>
                   <OriginTag s={s} t={t} />
-                  {row.group === 'stuck' && <Tag tone="amber">멈춤</Tag>}
+                  {row.group === 'stuck' && <Tag tone="amber">확인 필요</Tag>}
                   {t.discarded && <Tag>폐기</Tag>}
                   {t.coding?.status === 'returned' && <Tag tone="amber">기획에 돌려보냄</Tag>}
                   {row.minutes > 0 && <span title={row.born ? `시작 ${row.born}` : undefined}>{fin ? `${duration(row.minutes)} 걸림` : `${duration(row.minutes)} 경과`}</span>}

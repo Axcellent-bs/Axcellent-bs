@@ -19,32 +19,32 @@ export function Autonomy({ s, d, item }: P & { item?: string }) {
     { key: 'id', header: '기준', render: (r) => <span className="mono">{r.id}</span> },
     { key: 'what', header: '내용', render: (r) => <>{TARGET_LABEL[r.action]} · {ruleText(r)}</> },
     { key: 'status', header: '상태', render: (r) => <State v={r.status} /> },
-    { key: 'approver', header: '넓히기 승인', render: (r) => <span className="small">{r.approver}</span> },
-    { key: 'basis', header: '관찰 통과 머지', render: (r) => <>{r.basis.map((b, i) => <span key={b}>{i > 0 && ' · '}<Ref s={s} id={b} /></span>)}</> },
-    { key: 'bt', header: '백테스트', render: (r) => <span className="small">과거 {r.backtest.checked}건 대조 · 기준에 드는 {r.backtest.covered}건 · 충돌 {r.backtest.conflicts.length}건</span> },
+    { key: 'approver', header: '승인한 쪽', render: (r) => <span className="small">{r.approver}</span> },
+    { key: 'basis', header: '근거가 된 머지', render: (r) => <>{r.basis.map((b, i) => <span key={b}>{i > 0 && ' · '}<Ref s={s} id={b} /></span>)}</> },
+    { key: 'bt', header: '과거 PR로 시험', render: (r) => <span className="small">{r.backtest.checked}건 중 {r.backtest.covered}건 해당 · 충돌 {r.backtest.conflicts.length}건</span> },
     { key: 't', header: '만든 시각', render: (r) => <span className="mono small">{r.t}</span> },
     { key: 'off', header: '', render: (r) => r.status === '정식' ? <Button size="small" onClick={() => off(r)}>기준 끄기</Button> : <span className="muted small">{r.offWhy ?? r.decideWhy}</span> },
   ]
   return (
     <>
-      <Lead>머지 → {OBSERVE_MIN}분 관찰(장애·revert 없음) → 같은 경로 {OBSERVE_N}건 → 기준 제안·백테스트 → 안전 장치({GUARD.lines}줄·{GUARD.files}파일) 안 재무 AI / 밖 사람(태윤) 승인 → 정식. 장애 연결·사람이 끄면 즉시 해제.</Lead>
+      <Lead>머지 → {OBSERVE_MIN}분 지켜보기(장애·되돌림 없음) → 같은 경로 {OBSERVE_N}건 → 기준 제안·과거 PR로 시험 → 승인({GUARD.lines}줄·{GUARD.files}파일 안은 재무 AI, 넘으면 사람) → 적용. 장애가 나거나 사람이 끄면 바로 꺼짐.</Lead>
       <Stats items={[
-        { label: '정식 기준', value: by('정식') },
-        { label: '관찰 중', value: pol.observing.filter((o) => o.result === '관찰 중').length, hint: `머지 뒤 ${OBSERVE_MIN}분` },
+        { label: '적용 중인 기준', value: by('정식') },
+        { label: '지켜보는 중', value: pol.observing.filter((o) => o.result === '관찰 중').length, hint: `머지 뒤 ${OBSERVE_MIN}분` },
         { label: '승인 대기', value: by('승인 대기'), hint: '재무 AI · 사람' },
-        { label: '해제됨', value: by('해제됨') },
-        { label: '기준으로 자동 머지 / 장애 연결', value: `${pol.history.length} / ${linked}`, hint: '건' },
+        { label: '꺼진 기준', value: by('해제됨') },
+        { label: '자동 머지 / 그중 장애', value: `${pol.history.length} / ${linked}`, hint: '건' },
       ]} />
-      <Card as="section" title="학습된 기준" sub="이 범위 안의 PR은 검수 통과 뒤 사람 클릭 없이 머지된다">
+      <Card as="section" title="자동 머지 기준" sub="이 범위의 PR은 리뷰를 통과하면 사람 확인 없이 머지">
         <LinkTable columns={cols} rows={pol.rules.slice().reverse()} rowKey={(r) => r.id} rowHref={(r) => hrefOf(s, r.basis[0])} rowTitle="이 기준을 배운 건 보기" highlight={(r) => r.id === item} />
       </Card>
       <div className="auto-grid">
-        <Card as="section" title="되돌릴 수 없는 일" sub="교차검증 대신 항상 사람이 확인한다">
+        <Card as="section" title="되돌릴 수 없는 일" sub="항상 사람이 확인">
           <ul className="levels">
             {IRREVERSIBLE.map((x) => <li key={x.id}><b>{x.label}</b> <span className="muted small">{x.words.join(', ')}</span></li>)}
           </ul>
         </Card>
-        <Card as="section" title="변경 기록" sub="누가(자동·교차검증·사람) 언제 바꿨나">
+        <Card as="section" title="변경 기록" sub="기준을 누가 언제 바꿨나">
           <ul className="levels">
             {pol.log.slice().reverse().map((x, i) => (
               <li key={i}><Tag tone={x.by === '자동' ? 'amber' : undefined}>{x.by}</Tag> <span className="muted small mono">{x.t}</span> <Linked s={s} text={x.text} /></li>
@@ -52,20 +52,20 @@ export function Autonomy({ s, d, item }: P & { item?: string }) {
           </ul>
         </Card>
       </div>
-      <Card as="section" title="기준으로 자동 머지한 이력" sub="학습된 기준으로 자동 머지한 PR과 그 뒤 결과">
+      <Card as="section" title="자동 머지한 PR" sub="머지 뒤 결과까지">
         {pol.history.length ? (
           <LinkTable
             rows={pol.history.slice().reverse()}
             rowKey={(h) => h.pr}
             rowHref={(h) => toPath(`work/prs/${prSlug(h.pr)}`)}
-            rowTitle="PR과 코드 역추적 보기"
+            rowTitle="PR과 코드 출처 보기"
             columns={[
               { key: 't', header: '시각', render: (h) => <span className="mono small">{h.t}</span> },
               { key: 'pr', header: 'PR', render: (h) => <span className="mono">{h.pr}</span> },
               { key: 'req', header: '요청', render: (h) => <Ref s={s} id={h.req} /> },
               { key: 'rule', header: '기준', render: (h) => (h.rule ? <Ref s={s} id={h.rule} /> : '-') },
               { key: 'size', header: '변경', render: (h) => `${h.lines}줄·${h.files}파일` },
-              { key: 'result', header: '결과', render: (h) => <State v={h.result === '정상' ? '완료' : '장애 연결'} /> },
+              { key: 'result', header: '결과', render: (h) => <State v={h.result === '정상' ? '완료' : '장애 발생'} /> },
             ]}
           />
         ) : <div className="muted small">아직 없습니다. 다른 부서 화면에서 "간단 요청 보내기"를 눌러 보세요.</div>}
@@ -84,19 +84,19 @@ export function Audit({ s, d }: P) {
     { key: 't', header: '시각', render: (x) => <span className="mono small">{x.t.slice(6)}</span> },
     { key: 'kind', header: 'AI가 한 일', render: (x) => <State v={x.kind} /> },
     { key: 'ref', header: '대상', render: (x) => <><Ref s={s} id={x.ref} /> <span className="small">{x.what}</span></> },
-    { key: 'basis', header: '어떤 기준으로', render: (x) => <span className="small">{x.rule && x.rule !== x.ref && <><Ref s={s} id={x.rule} /> · </>}<Linked s={s} text={x.basis} /></span> },
-    { key: 'verifier', header: '검증자', render: (x) => <span className="small">{x.verifier}</span> },
+    { key: 'basis', header: '근거', render: (x) => <span className="small">{x.rule && x.rule !== x.ref && <><Ref s={s} id={x.rule} /> · </>}<Linked s={s} text={x.basis} /></span> },
+    { key: 'verifier', header: '검토한 쪽', render: (x) => <span className="small">{x.verifier}</span> },
     { key: 'result', header: '결과', render: (x) => <span className="small">{x.result}</span> },
     { key: 'off', header: '', render: (x) => x.rule && live.has(x.rule) ? <Button size="small" onClick={() => { d({ type: 'disableRule', rule: x.rule! }); toast.show(`${x.rule} 해제`) }}>이 기준 끄기</Button> : null },
   ]
   return (
     <>
-      <Lead>오늘 AI가 사람 클릭 없이 승인·처리한 건. 사전 승인 대신 사후 감사.</Lead>
+      <Lead>오늘 AI가 사람 확인 없이 처리한 일. 문제가 있으면 그 기준을 끄면 됩니다.</Lead>
       <Stats items={[
-        { label: '자동 확정', value: n('자동 확정'), hint: '기획서' },
-        { label: '자동 머지', value: n('자동 머지'), hint: '학습된 기준으로' },
+        { label: '기획서 자동 확정', value: n('자동 확정') },
+        { label: '자동 머지', value: n('자동 머지'), hint: '자동 머지 기준으로' },
         { label: '교차검증 승인', value: n('교차검증 승인'), hint: `거절 ${n('교차검증 거절')}`, href: toPath('work/reviews') },
-        { label: '정식이 된 기준', value: n('기준 정식'), hint: `제안 ${n('기준 제안')} · 거부 ${n('학습 거부')}`, href: toPath('metrics/autonomy') },
+        { label: '새로 적용된 기준', value: n('기준 정식'), hint: `제안 ${n('기준 제안')} · 거부 ${n('학습 거부')}`, href: toPath('metrics/autonomy') },
       ]} />
       <Card as="section" title="건별 기록" sub={`오늘 ${today.length}건 · 최근 순`}>
         {today.length
