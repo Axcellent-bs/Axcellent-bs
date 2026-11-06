@@ -41,7 +41,7 @@ class QaReport(AxModel):
     window_days: int
     evaluated_at: str
     replies_checked: int  # 점검한 보낸 답변 수 (분모)
-    replies_flagged: int  # `flag` 규칙에 걸린 보낸 답변 수
+    replies_flagged: int  # 보낸 답변 중 `flag` 규칙(no_evidence_reply·language_mismatch)에 걸린 수
     flagged_rate: float | None = None  # 분모가 0이면 None
     rule_counts: dict[str, int] = Field(default_factory=dict)
     findings: list[QaFinding]

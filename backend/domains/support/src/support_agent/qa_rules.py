@@ -34,6 +34,10 @@ SEVERITY: dict[QaRule, QaSeverity] = {
     "unsupported_number": "info",
     "heavy_edit": "info",
 }
+CLAIMS_UNAVAILABLE_NOTE = (
+    "클레임 기록을 읽지 못해 unsupported_number 규칙은 건너뛰었다 "
+    "(금액이 근거 없는 숫자로 잡히는 것을 막는다)."
+)
 NOTES = [
     "점수가 아니라 규칙 코드다. 규칙은 근사이고 오탐·누락이 있으며 기준값은 모두 시드다.",
     "고객을 제대로 이해했는지는 자동으로 보지 않는다. human_review_sample을 사람이 본다.",
@@ -41,7 +45,7 @@ NOTES = [
 
 _NUMBER = r"\d[\d,]*(?:\.\d+)?"
 _UNIT = (
-    r"(?:영업일|일|개월|달|주일|주|시간|분|원|퍼센트|%|"
+    r"(?:영업일|일|개월|달|주일|주(?!문)|시간|분|원|퍼센트|%|"
     r"business\s+days?|days?|hours?|weeks?|months?|won|円|日|時間|週間|天|个月|元)"
 )
 # "2~3일"처럼 범위면 앞뒤 숫자를 모두 잡는다
@@ -93,19 +97,28 @@ def _previous_analysis(conversation: Conversation, index: int) -> Message | None
     return None
 
 
-def _allowed_numbers(conversation: Conversation, source_texts: list[str]) -> set[str]:
+def _allowed_numbers(
+    conversation: Conversation, source_texts: list[str], linked_claims: list[dict] | None
+) -> set[str]:
     """답변에 나와도 되는 숫자: 근거 조각, 문의에 이어진 클레임 기록, 고객이 쓴 글에 있는 숫자."""
     allowed: set[str] = set()
     for text in source_texts:
         allowed |= _all_numbers(text)
-    allowed |= _all_numbers(json.dumps(conversation.claims, ensure_ascii=False, default=str))
+    claims = [*conversation.claims, *(linked_claims or [])]
+    allowed |= _all_numbers(json.dumps(claims, ensure_ascii=False, default=str))
     for message in conversation.messages:
         if message.role == "customer":
             allowed |= _all_numbers(message.text)
     return allowed
 
 
-def _check_reply(conversation: Conversation, index: int, message: Message) -> list[QaFinding]:
+def _check_reply(
+    conversation: Conversation,
+    index: int,
+    message: Message,
+    linked_claims: list[dict] | None,
+    check_numbers: bool,
+) -> list[QaFinding]:
     out: list[QaFinding] = []
 
     def add(rule: QaRule, **extra: object) -> None:
@@ -145,7 +158,12 @@ def _check_reply(conversation: Conversation, index: int, message: Message) -> li
         if coverage is not None and coverage < WEAK_GROUNDING_COVERAGE:
             add("weak_grounding", value=coverage, threshold=WEAK_GROUNDING_COVERAGE)
 
-    unsupported = numbers_with_unit(message.text) - _allowed_numbers(conversation, source_texts)
+    unsupported = (
+        numbers_with_unit(message.text)
+        - _allowed_numbers(conversation, source_texts, linked_claims)
+        if check_numbers
+        else set()
+    )
     if unsupported:
         add("unsupported_number", codes=sorted(unsupported, key=lambda n: (len(n), n)))
     return out
@@ -204,6 +222,8 @@ def build_report(
     window_days: int = 7,
     inquiry_id: int | None = None,
     sample_size: int = 5,
+    claims_by_inquiry: dict[int, list[dict]] | None = None,
+    claims_available: bool = True,
 ) -> QaReport:
     now = now or datetime.now(UTC)
     since = now - timedelta(days=window_days)
@@ -230,7 +250,13 @@ def build_report(
                 continue
             checked += 1
             seen.add(conversation.id)
-            found = _check_reply(conversation, index, message)
+            found = _check_reply(
+                conversation,
+                index,
+                message,
+                (claims_by_inquiry or {}).get(conversation.id),
+                claims_available,
+            )
             findings.extend(found)
             if any(f.severity == "flag" for f in found):
                 flagged_messages.add((conversation.id, message.id))
@@ -275,5 +301,5 @@ def build_report(
         rule_counts=dict(Counter(f.rule for f in findings)),
         findings=findings,
         human_review_sample=sample,
-        notes=NOTES,
+        notes=NOTES if claims_available else [*NOTES, CLAIMS_UNAVAILABLE_NOTE],
     )

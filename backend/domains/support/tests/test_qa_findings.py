@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from ax_contracts.schemas import AgentResult, TaskStatus
 from support_agent import handlers, qa_rules
 from support_agent.main import ALL_HANDLERS, app, load_card
 from support_agent.schemas import Analysis, Classification, Draft, Finding, Source, Validation
@@ -29,6 +30,13 @@ GOOD_REPLY = "수령 후 7일 이내 단순 변심 환불은 왕복 배송비를
 def _fresh(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
     monkeypatch.setattr(handlers, "STORE", InquiryStore())
+
+    async def no_claims(
+        _target: str, req: Any
+    ) -> AgentResult:  # 클레임 서비스 호출은 기본적으로 빈 목록
+        return AgentResult(meta=req.meta, status=TaskStatus.COMPLETED, output={"items": []})
+
+    monkeypatch.setattr(handlers, "SEND", no_claims)
 
 
 def stamp(hours_ago: float = 1.0) -> str:
@@ -269,3 +277,48 @@ def test_skill_is_registered_as_read_and_validates_input() -> None:
     ok = call(client, "qa_findings", {})
     assert ok["status"] == "completed" and ok["output"]["window_days"] == 7
     assert call(client, "qa_findings", {"inquiry_id": 999})["outcome"] == "not_found"
+
+
+def recent(store: InquiryStore) -> None:
+    """핸들러는 실제 지금을 기준으로 기간을 자르므로 기록 시각을 방금으로 옮긴다."""
+    stamp_now = (datetime.now(UTC) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for conversation in store.all():
+        conversation.updated_at = stamp_now
+        for message in conversation.messages:
+            message.created_at = stamp_now
+
+
+def test_claim_amounts_from_the_claim_service_are_not_unsupported_numbers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    iid = add(handlers.STORE, GOOD_REPLY + " 환불 4500원을 처리했습니다.")
+    other = add(handlers.STORE, GOOD_REPLY + " 환불 4500원을 처리했습니다.")
+    recent(handlers.STORE)
+    seen: list[str] = []
+
+    async def claims(_target: str, req: Any) -> AgentResult:
+        seen.append(req.skill)
+        items = [{"id": 1, "conversation_id": iid, "amount": 4500}]
+        return AgentResult(meta=req.meta, status=TaskStatus.COMPLETED, output={"items": items})
+
+    monkeypatch.setattr(handlers, "SEND", claims)
+    out = call(TestClient(app), "qa_findings", {})["output"]
+    flagged = {f["inquiry_id"] for f in out["findings"] if f["rule"] == "unsupported_number"}
+    assert flagged == {other}  # 클레임이 이어진 문의의 금액만 근거로 인정한다
+    assert seen == ["list_claims"]  # 문의마다 부르지 않고 한 번에 읽는다
+
+
+def test_unreadable_claims_skip_the_number_rule_instead_of_guessing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    add(handlers.STORE, GOOD_REPLY + " 환불 4500원을 처리했습니다.", sources=False)
+    recent(handlers.STORE)
+
+    async def down(_target: str, req: Any) -> AgentResult:
+        raise ConnectionError("claims service down")
+
+    monkeypatch.setattr(handlers, "SEND", down)
+    out = call(TestClient(app), "qa_findings", {})["output"]
+    assert out["rule_counts"].get("unsupported_number") is None
+    assert out["rule_counts"]["no_evidence_reply"] == 1  # 나머지 규칙은 그대로 돈다
+    assert any("클레임" in n for n in out["notes"])
