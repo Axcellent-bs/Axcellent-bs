@@ -24,7 +24,7 @@ import {
 import { CompanyName } from "@/demo/CompanyName";
 import { setExampleOn } from "@/lib/financeExample";
 
-// 재무 AI 화면 = 고객사 재무팀. 기본 화면은 시나리오 A(결제 장애)의 "장애 사건 재무"(사건별 쿠폰·환불 장부).
+// 재무 AI 화면 = 고객사 재무팀. 기본 화면은 시나리오 A(결제 장애)의 "장애 이벤트 재무"(이벤트별 쿠폰·환불 장부).
 // 평상시 업무(결산·대사·정산·팀 예산·보류 추이)는 두 번째 탭에 둔다. 재무 AI 테스트는 서버가 10분마다 자동으로 한다.
 // 재무는 쿠폰·환불의 끝난 금액을 장부에 적기만 한다.
 // 숫자는 서버가 계산한 값을 그대로 보여 주고, 말만 쉽게 바꾼다.
@@ -106,7 +106,7 @@ async function settle<T>(p: Promise<T>): Promise<[T | null, string | null]> {
 }
 
 /** 화면 전환은 왼쪽 사이드바의 하위 탭이 한다(demo/services.ts finance 서비스 children, 데이터 AI와 같은 짜임):
- *  /finance 장애 사건 재무 · /finance/daily 평상시 재무 업무(①~⑥ 업무 탭은 #closing 같은 해시).
+ *  /finance 장애 이벤트 재무 · /finance/daily 평상시 재무 업무(①~⑥ 업무 탭은 #closing 같은 해시).
  *  옛 주소(/finance#daily, /finance#closing 등)는 새 주소로 옮긴다 */
 type Mode = "incident" | "daily";
 const DAILY_PATH = "/finance/daily";
@@ -128,7 +128,7 @@ export default function FinancePage() {
     navigate({ pathname: DAILY_PATH, search: location.search, hash: `#${t}` }, { replace: location.pathname.startsWith(DAILY_PATH) });
     if (scroll) scrollToId("finance-modules");
   }, [navigate, location.search, location.pathname]);
-  /** 사건 고르기: 주소(?incident=)에 남겨 새로고침해도 같은 사건을 본다 */
+  /** 이벤트 고르기: 주소(?incident=)에 남겨 새로고침해도 같은 이벤트를 본다 */
   const openIncident = useCallback((id: string, scroll = false) => {
     navigate({ pathname: INCIDENT_PATH, search: `?incident=${encodeURIComponent(id)}`, hash: "" }, { replace: location.pathname === INCIDENT_PATH });
     if (scroll) scrollToId("incident-finance");
@@ -235,7 +235,7 @@ export default function FinancePage() {
         <summary className="cursor-pointer font-semibold text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">처음이라면: 관리자가 할 일</summary>
         <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-ink-700">
           <li><b>재무 AI 테스트 확인</b>: 맨 위 <b>재무 AI 테스트</b>가 초록색(정상)인지 봅니다. 서버가 10분마다 스스로 테스트하므로 누를 필요는 없습니다. "늦어지고 있습니다" 경고가 보이면 재무 AI 서버를 확인합니다.</li>
-          <li><b>사건 고르기</b>: <b>장애 사건 재무</b> 탭 위쪽 사건 탭에서 살펴볼 사건을 고릅니다. 가장 최근 사건이 먼저 열려 있고, 오래된 사건은 끝의 <b>이전 사건</b> 목록에 있습니다.</li>
+          <li><b>이벤트 고르기</b>: <b>장애 이벤트 재무</b> 탭 위쪽 이벤트 탭에서 살펴볼 이벤트를 고릅니다. 가장 최근 이벤트가 먼저 열려 있고, 오래된 이벤트는 끝의 <b>이전 이벤트</b> 목록에 있습니다.</li>
           <li><b>장부 확인</b>: 피해(데이터 AI가 센 숫자), 보상 쿠폰, 환불로 빠져나간 돈을 봅니다.</li>
           <li><b>보류 큐 결정</b>: 판매자 정산 지급은 아래 <b>안전 장치 보류 큐</b>에서 진행 또는 멈춤을 누릅니다.</li>
           <li><b>평상시 업무</b>: <b>평상시 재무 업무</b> 탭에서 결산 확정, 대사 메모, 판매자 정산 묶음 요청, 팀 예산 확정을 합니다.</li>
@@ -300,8 +300,8 @@ export default function FinancePage() {
       </section>
 
       {mode === "incident" && (
-        <div aria-label="장애 사건 재무">
-          <ErrorBoundary title="사건 화면을 그리지 못했습니다">
+        <div aria-label="장애 이벤트 재무">
+          <ErrorBoundary title="이벤트 화면을 그리지 못했습니다">
             <IncidentFinance list={incidents} selected={selectedIncident} onSelect={(id) => openIncident(id)} tick={tick} />
           </ErrorBoundary>
         </div>

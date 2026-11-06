@@ -27,7 +27,7 @@ function Row({ r }: { r: SupportCostRecord }) {
       <td className="py-2 pr-3"><Chip label={spent} tone={r.expense_used ? TONE.warn : TONE.muted} /></td>
       <td className="py-2 pr-3 whitespace-nowrap text-ink-500">{shortDateTime(r.recorded_at)}</td>
       <td className="py-2">
-        <Link href={`/orchestrator?ctx=${encodeURIComponent(r.context_id)}`} className="whitespace-nowrap text-sm font-medium text-brand-700 underline">총괄 사건 →</Link>
+        <Link href={`/orchestrator?ctx=${encodeURIComponent(r.context_id)}`} className="whitespace-nowrap text-sm font-medium text-brand-700 underline">총괄 이벤트 →</Link>
       </td>
     </tr>
   );

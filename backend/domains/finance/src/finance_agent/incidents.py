@@ -200,7 +200,7 @@ def add_incident_api(app: FastAPI) -> None:
                 content={
                     "error": {
                         "code": "not_found",
-                        "message": f"재무가 아는 사건이 아니다: {context_id}",
+                        "message": f"재무가 아는 이벤트가 아니다: {context_id}",
                     }
                 },
             )
