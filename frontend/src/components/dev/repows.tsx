@@ -8,7 +8,7 @@ import type { Action, State as S } from '@/lib/planningData'
 import { DiffFiles } from '@/components/dev/diff'
 import { DEV_API, PlanningApiError, kst, repoApi, vcsApi, type MergeMethod, type RepoBranch, type RepoCheckState, type RepoGraph, type RepoGraphCommit, type RepoPr, type RepoIssue, type RepoIssueState, type RepoPrDetail, type RepoPrState, type VcsConnection } from '@/lib/planning'
 import { layoutGraph, laneColor, type GraphRow } from '@/components/dev/graphlayout'
-import { prSlug, toPath, go } from '@/components/planning-common/links'
+import { prSlug, toPath, go, idText } from '@/components/planning-common/links'
 import { Work } from '@/components/dev/work'
 
 // ---------------------------------------------------------------- 공용
@@ -209,7 +209,7 @@ function ExampleBoard({ s, repo }: { s: S; repo: string }) {
                     {p.target?.status === 'proposed' && <span className="tag">레포 승인 대기</span>}
                   </span>
                   <span className="rp-meta">
-                    <span className="mono idc">{p.id}</span>
+                    <span className="mono idc" title={p.id}>{idText(p.id)}</span>
                     <Branches head={p.branch} base="main" />
                     <span>{p.gate.lines}줄 · {p.gate.files}파일</span>
                   </span>

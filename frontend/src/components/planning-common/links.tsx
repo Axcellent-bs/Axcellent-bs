@@ -117,11 +117,19 @@ export function hrefOf(s: State, id: string): string | undefined {
   return undefined
 }
 
+/** 화면에 보이는 번호만 한글로: REQ-26 → 요청-26 (저장·주소·메시지의 번호는 그대로) */
+const ID_KO: [string, string][] = [['REQ-', '요청-'], ['SPEC-', '기획서-'], ['PROP-', '제안-'], ['DOC-', '문서-'], ['TH-', '대화-'], ['XR-', '교차검증-'], ['AR-', '자동머지기준-'], ['T-', '태스크-'], ['D-', '결정-']]
+export function idText(id: string): string {
+  const hit = ID_KO.find(([en]) => id.startsWith(en))
+  return hit ? hit[1] + id.slice(hit[0].length) : id
+}
+
 export function Ref({ s, id, children, className }: { s: State; id: string; children?: ReactNode; className?: string }) {
   const href = hrefOf(s, id)
-  const text = children ?? (id.startsWith('PR #') ? prNameOf(s, id) : id)
-  if (!href) return <span className={className ?? 'mono idc'}>{text}</span>
-  return <a href={href} className={className ?? 'ref mono idc'}>{text}</a>
+  const text = children ?? (id.startsWith('PR #') ? prNameOf(s, id) : idText(id))
+  const tip = text === id ? undefined : id
+  if (!href) return <span className={className ?? 'mono idc'} title={tip}>{text}</span>
+  return <a href={href} className={className ?? 'ref mono idc'} title={tip}>{text}</a>
 }
 
 // 문장 안의 ID를 링크로 바꾼다 (규칙으로만, 없는 ID는 글자 그대로)

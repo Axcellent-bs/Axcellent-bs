@@ -6,7 +6,7 @@ import { codeOf, traceOf, type CodeLine } from '@/components/dev/trace'
 import { DiffFiles } from '@/components/dev/diff'
 import { DEV_API, repoApi, type RepoFile } from '@/lib/planning'
 import { State, Tag } from '@/components/planning-common/parts'
-import { Linked, Ref, convoHref, hrefOf, prFromSlug, prName, prSlug, repoPrHref, reviewOf, toPath } from '@/components/planning-common/links'
+import { Linked, Ref, convoHref, hrefOf, prFromSlug, prName, prSlug, repoPrHref, reviewOf, toPath, idText } from '@/components/planning-common/links'
 import { Flow, Head, Layout, ListPane, Pairs, Side, Step, mergedLabel } from '@/components/planning-common/flow'
 import { RepoTargetBlock } from '@/components/planning-common/repo'
 import { CodingLabel, CodingStep, OriginTag, RelatedTags, codingState, isRunning } from '@/components/dev/coding'
@@ -121,16 +121,16 @@ export function Work({ s, d, item, repo }: P & { item?: string; repo?: string })
       href: p ? toPath(`work/prs/${prSlug(p.id)}`) : t.coding ? toPath(`work/prs/${encodeURIComponent(t.id)}`) : toPath(`work/specs/${t.spec}/${t.para}`),
       on: taskOnly ? t.id === taskOnly.id : !!p && p.id === sel?.id,
       title: t.title,
-      meta: <><span className="mono idc">{t.id}</span>{p ? <> <span className="mono idc">{prName(p)}</span></> : ''}{p?.target && p.vcsNumber == null ? ` · ${p.target.repo.split('/').pop()}` : ''} <State v={p?.target?.status === 'proposed' ? '레포 승인 대기' : xr ? waitLabel(xr) : coding ?? t.state} live={!!coding && !!t.coding && isRunning(t.coding.status)} /> <OriginTag s={s} t={t} /></>,
+      meta: <><span className="mono idc" title={t.id}>{idText(t.id)}</span>{p ? <> <span className="mono idc">{prName(p)}</span></> : ''}{p?.target && p.vcsNumber == null ? ` · ${p.target.repo.split('/').pop()}` : ''} <State v={p?.target?.status === 'proposed' ? '레포 승인 대기' : xr ? waitLabel(xr) : coding ?? t.state} live={!!coding && !!t.coding && isRunning(t.coding.status)} /> <OriginTag s={s} t={t} /></>,
     }
   }
   const list = <ListPane empty="작업 없음" groups={(['진행 중', '교차검증·사람 확인', '완료'] as const).map((label, i) => ({ label, rows: tasks.filter((t) => groupOf(t.id, t.state) === i).map(row) }))} />
   if (taskOnly) {
     const text = s.specs.find((x) => x.id === taskOnly.spec)?.paras.find((p) => p.id === taskOnly.para)?.text
     return (
-      <Layout list={list} head={<Head kicker={<><span className="mono idc">{taskOnly.id}</span> <span className="mono idc">{taskOnly.spec}</span> <OriginTag s={s} t={taskOnly} /><RelatedTags s={s} t={taskOnly} /></>} title={taskOnly.title} side={taskOnly.coding ? <CodingLabel c={taskOnly.coding} /> : <State v={taskOnly.state} />} />}>
+      <Layout list={list} head={<Head kicker={<><span className="mono idc" title={taskOnly.id}>{idText(taskOnly.id)}</span> <span className="mono idc" title={taskOnly.spec}>{idText(taskOnly.spec)}</span> <OriginTag s={s} t={taskOnly} /><RelatedTags s={s} t={taskOnly} /></>} title={taskOnly.title} side={taskOnly.coding ? <CodingLabel c={taskOnly.coding} /> : <State v={taskOnly.state} />} />}>
         <Flow>
-          <Step name="작업" on href={toPath(`work/specs/${taskOnly.spec}/${taskOnly.para}`)} title={<><span className="mono idc">{taskOnly.id}</span> <span className="mono idc">{taskOnly.spec} {taskOnly.para}</span></>}>
+          <Step name="작업" on href={toPath(`work/specs/${taskOnly.spec}/${taskOnly.para}`)} title={<><span className="mono idc" title={taskOnly.id}>{idText(taskOnly.id)}</span> <span className="mono idc" title={taskOnly.spec}>{idText(taskOnly.spec)} {taskOnly.para}</span></>}>
             {text && <p>{text}</p>}
           </Step>
           <CodingStep task={taskOnly} />
@@ -150,7 +150,7 @@ export function Work({ s, d, item, repo }: P & { item?: string; repo?: string })
   return (
     <Layout
       list={list}
-      head={<Head kicker={<>{sel.vcsNumber != null ? <a href={repoPrHref(sel.vcsNumber, sel.target?.connectionId)} className="ref mono idc">{prName(sel)}</a> : <span className="mono idc">{sel.id}</span>} {task && <span className="mono idc">{task.id}</span>} <span className="mono">{sel.branch}</span>{task && <> · <OriginTag s={s} t={task} /></>}<RelatedTags s={s} t={task} /></>} title={sel.title.replace(/^[A-Z]\d+: /, '')} side={<State v={sel.merged ? '완료' : xr ? waitLabel(xr) : last === '불일치' || rejected ? '불일치' : '머지 대기'} />} />}
+      head={<Head kicker={<>{sel.vcsNumber != null ? <a href={repoPrHref(sel.vcsNumber, sel.target?.connectionId)} className="ref mono idc">{prName(sel)}</a> : <span className="mono idc" title={sel.id}>{idText(sel.id)}</span>} {task && <span className="mono idc" title={task.id}>{idText(task.id)}</span>} <span className="mono">{sel.branch}</span>{task && <> · <OriginTag s={s} t={task} /></>}<RelatedTags s={s} t={task} /></>} title={sel.title.replace(/^[A-Z]\d+: /, '')} side={<State v={sel.merged ? '완료' : xr ? waitLabel(xr) : last === '불일치' || rejected ? '불일치' : '머지 대기'} />} />}
       side={
         <Side title="출처" sum={`${chain.length}단계`}>
           {chain.map((x, i) => <p key={i} className="pside-msg"><b>{x.kind}</b> {x.href ? <a href={x.kind === '문단' && spec && para ? toPath(`work/specs/${spec.id}/${para.id}`) : toPath(x.href)} className="plain-link"><Chipped text={x.title} /></a> : <Chipped text={x.title} />}</p>)}
@@ -159,7 +159,7 @@ export function Work({ s, d, item, repo }: P & { item?: string; repo?: string })
       below={<Trace s={s} pr={sel} line={line} setLine={setLine} />}
     >
       <Flow>
-        <Step name="작업" on href={task ? toPath(`work/specs/${task.spec}/${task.para}`) : undefined} title={task ? <><span className="mono idc">{task.id}</span> <span className="mono idc">{task.spec} {task.para}</span></> : '-'}>
+        <Step name="작업" on href={task ? toPath(`work/specs/${task.spec}/${task.para}`) : undefined} title={task ? <><span className="mono idc" title={task.id}>{idText(task.id)}</span> <span className="mono idc" title={task.spec}>{idText(task.spec)} {task.para}</span></> : '-'}>
           {para && <p>{para.text}</p>}
           {para?.warn && <Tag tone="amber">경고 {para.warn.card}</Tag>}
           {para?.incident && <Tag tone="amber">장애 {para.incident}</Tag>}
@@ -195,7 +195,7 @@ export function Work({ s, d, item, repo }: P & { item?: string; repo?: string })
 const CODE_RE = /(REQ-\d+|SPEC-[A-Z]?\d+(?: R\d+)?|T-[A-Z]?\d+|PR #\d+|PROP-\d+)/
 /** 줄바꿈(\n)과 " · "로 이어 붙인 항목(문제: … · 목표: …)을 줄로 나눠 보여 준다 */
 export const Lines = ({ text }: { text: string }) => <>{text.split(/\n|\s+·\s+/).filter(Boolean).map((x, i) => <span key={i} className="dev-line"><Chipped text={x} /></span>)}</>
-const Chipped = ({ text }: { text: string }) => <>{text.split(CODE_RE).map((x, i) => (i % 2 ? <span key={i} className="mono idc">{x}</span> : x))}</>
+const Chipped = ({ text }: { text: string }) => <>{text.split(CODE_RE).map((x, i) => (i % 2 ? <span key={i} className="mono idc" title={x}>{idText(x)}</span> : x))}</>
 
 // 코드 역추적 (코드 줄 → PR → 작업 → 문단 → 결정 → 요청 → 근거). 연결은 문단 id로만 따라간다
 function Trace({ s, pr, line: picked, setLine }: { s: S; pr: PR; line?: CodeLine; setLine: (x?: CodeLine) => void }) {
@@ -235,7 +235,7 @@ function Trace({ s, pr, line: picked, setLine }: { s: S; pr: PR; line?: CodeLine
 export function Reviews({ s, d, item }: P & { item?: string }) {
   const all = s.reviews.slice().reverse()
   const r = s.reviews.find((x) => x.id === item) ?? all.find((x) => !x.result) ?? all[0]
-  const row = (x: CrossReview) => ({ key: x.id, href: toPath(`work/reviews/${x.id}`), on: x.id === r?.id, title: `${TARGET_LABEL[x.target]} · ${x.title}`, meta: <><span className="mono idc">{x.id}</span> <span className="mono idc">{x.ref}</span> <State v={x.result ?? waitLabel(x)} /></> })
+  const row = (x: CrossReview) => ({ key: x.id, href: toPath(`work/reviews/${x.id}`), on: x.id === r?.id, title: `${TARGET_LABEL[x.target]} · ${x.title}`, meta: <><span className="mono idc" title={x.id}>{idText(x.id)}</span> <span className="mono idc" title={x.ref}>{idText(x.ref)}</span> <State v={x.result ?? waitLabel(x)} /></> })
   const list = <ListPane empty="대기 없음" groups={[
     { label: '교차검증 대기', rows: all.filter((x) => !x.result && x.lane === 'ai').map(row) },
     { label: '사람 확인 대기', rows: all.filter((x) => !x.result && x.lane === 'human').map(row) },
@@ -246,7 +246,7 @@ export function Reviews({ s, d, item }: P & { item?: string }) {
   return (
     <Layout
       list={list}
-      head={<Head kicker={<><span className="mono idc">{r.id}</span> {TARGET_LABEL[r.target]} · <Ref s={s} id={r.ref} /> · {r.t}</>} title={r.title} side={<State v={r.result ?? waitLabel(r)} />} />}
+      head={<Head kicker={<><span className="mono idc" title={r.id}>{idText(r.id)}</span> {TARGET_LABEL[r.target]} · <Ref s={s} id={r.ref} /> · {r.t}</>} title={r.title} side={<State v={r.result ?? waitLabel(r)} />} />}
       side={
         <>
           <Side title="판단하는 쪽">
@@ -256,7 +256,7 @@ export function Reviews({ s, d, item }: P & { item?: string }) {
               ...(r.irreversible ? [['되돌릴 수 없음', r.irreversible] as [string, string]] : []),
             ]} />
           </Side>
-          <Side title="대화" href={convoHref(r.ctx)} sum={<span className="mono idc">{r.ctx}</span>} />
+          <Side title="대화" href={convoHref(r.ctx)} sum={<span className="mono idc" title={r.ctx}>{idText(r.ctx)}</span>} />
         </>
       }
     >

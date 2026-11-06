@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react'
 import { DEPT_NAME, type PR, type State as S, type Task } from '@/lib/planningData'
 import { Tag, rowNav } from '@/components/planning-common/parts'
-import { prName, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
+import { prName, prSlug, reviewOf, toPath, idText } from '@/components/planning-common/links'
 import { duration, shortTime, toMin, type Cell } from '@/components/planning/requests'
 import { OriginTag, UsageBar, codingState, fromDevTeam, pctOf, requestOfTask, tokens } from '@/components/dev/coding'
 import { useCodingLimits } from '@/lib/planning'
@@ -46,7 +46,7 @@ export function taskRow(s: S, t: Task, runTokens = 600_000): TaskRow {
 
   // 기획서: 개발팀이 직접 쓴 기획인지, 다른 팀 요청에서 왔는지
   const req = requestOfTask(s, t)
-  const c0: Cell = { kind: 'past', value: t.spec, meta: fromDevTeam(s, t) ? '개발팀 기획' : req ? `${DEPT_NAME[req.from]} 요청` : t.para, href: toPath(`work/specs/${t.spec}/${t.para}`) }
+  const c0: Cell = { kind: 'past', value: idText(t.spec), meta: fromDevTeam(s, t) ? '개발팀 기획' : req ? `${DEPT_NAME[req.from]} 요청` : t.para, href: toPath(`work/specs/${t.spec}/${t.para}`) }
 
   // 코딩: 개발 AI 진행 (AI 없이 사람이 맡은 작업은 담당자)
   const c1: Cell = { kind: kind(1) }
@@ -147,7 +147,7 @@ export function TaskBoard({ s, filter }: { s: S; filter?: string }) {
               <div className="rq-title">
                 <a href={row.next.href} className="rq-name plain-link">{t.title}</a>
                 <span className="rq-meta">
-                  <span className="mono idc">{t.id}</span>
+                  <span className="mono idc" title={t.id}>{idText(t.id)}</span>
                   <OriginTag s={s} t={t} />
                   {row.group === 'stuck' && <Tag tone="amber">확인 필요</Tag>}
                   {t.discarded && <Tag>폐기</Tag>}
