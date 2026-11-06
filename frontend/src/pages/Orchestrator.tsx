@@ -328,15 +328,15 @@ function IncidentDetail({ incident }: { incident: Incident }) {
       {!!incident.summary.length && (
         <section className="card p-5">
           <h3 className="mb-2 text-[15px] font-semibold">요약</h3>
-          <ul className="list-inside list-disc space-y-0.5 text-sm">{incident.summary.map((line) => <li key={line} title={line}>{eventKo(line.replace(/\s*\[[^\]]*\]/g, ""), incident)}</li>)}</ul>
+          <ul className="list-inside list-disc space-y-1 text-[15px]">{incident.summary.map((line) => <li key={line} title={line}>{eventKo(line.replace(/\s*\[[^\]]*\]/g, ""), incident)}</li>)}</ul>
         </section>
       )}
 
       <section className="card p-5">
         <h3 className="mb-2 text-[15px] font-semibold">진행 기록</h3>
-        <ol className="space-y-1 text-sm">
+        <ol className="space-y-1.5 text-[15px]">
           {incident.events.map((e, idx) => (
-            <li key={`${e.at}-${idx}`} className="flex gap-3"><span className="w-16 shrink-0 text-xs tabular-nums text-ink-500">{clock(e.at)}</span><span title={e.message}>{eventKo(e.message, incident)}</span></li>
+            <li key={`${e.at}-${idx}`} className="flex gap-3"><span className="w-28 shrink-0 whitespace-nowrap text-[13px] tabular-nums text-ink-500">{clock(e.at)}</span><span title={e.message}>{eventKo(e.message, incident)}</span></li>
           ))}
         </ol>
       </section>
