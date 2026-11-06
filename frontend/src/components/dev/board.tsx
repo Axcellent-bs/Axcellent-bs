@@ -2,11 +2,11 @@
 // 위: 필터 한 줄 (주소 #/tasks/<필터>) + AI 사용 합계. 아래: 작업 한 건 = 제목 한 줄 + 가로 흐름바(기획서 → 코딩 → PR·검증 → 머지) + 다음.
 // 최신순(새로 생긴 작업이 위), 20개씩 페이지. 블록 통째 클릭 = 그 작업의 작업·PR 화면.
 import { useEffect, useState } from 'react'
-import { DEPT_NAME, type PR, type State as S, type Task } from '@/lib/planningData'
+import { type PR, type State as S, type Task } from '@/lib/planningData'
 import { Tag, rowNav } from '@/components/planning-common/parts'
 import { prName, prSlug, reviewOf, toPath, idText } from '@/components/planning-common/links'
 import { duration, shortTime, toMin, type Cell } from '@/components/planning/requests'
-import { OriginTag, UsageBar, codingState, fromDevTeam, pctOf, requestOfTask, tokens } from '@/components/dev/coding'
+import { OriginTag, UsageBar, codingState, originLabel, pctOf, tokens } from '@/components/dev/coding'
 import { useCodingLimits } from '@/lib/planning'
 
 // ---------------------------------------------------------------- 필터
@@ -44,9 +44,8 @@ export function taskRow(s: S, t: Task, runTokens = 600_000): TaskRow {
   const stage = merged ? 3 : pr && !pr.closed ? 2 : 1
   const kind = (i: number): Cell['kind'] => (merged || i < stage ? 'past' : i === stage ? 'now' : 'next')
 
-  // 기획서: 개발팀이 직접 쓴 기획인지, 다른 팀 요청에서 왔는지
-  const req = requestOfTask(s, t)
-  const c0: Cell = { kind: 'past', value: idText(t.spec), meta: fromDevTeam(s, t) ? '개발팀 기획' : req ? `${DEPT_NAME[req.from]} 요청` : t.para, href: toPath(`work/specs/${t.spec}/${t.para}`) }
+  // 기획서 유형: 개발팀 기획 · 장애 개선 · ○○ 요청
+  const c0: Cell = { kind: 'past', value: idText(t.spec), meta: originLabel(s, t) ?? t.para, href: toPath(`work/specs/${t.spec}/${t.para}`) }
 
   // 코딩: 개발 AI 진행 (AI 없이 사람이 맡은 작업은 담당자)
   const c1: Cell = { kind: kind(1) }
