@@ -25,6 +25,16 @@
     SHOP_TRAFFIC_REFILL=1 python scripts/shop_traffic.py
 
 `SHOP_TRAFFIC_ORDERS_PER_MIN`이 없으면 예전 설정 `SHOP_TRAFFIC_INTERVAL_S`(기본 3초)를 쓴다.
+
+발송·도착 (택배 흉내, `SHOP_TRAFFIC_DELIVERY=0`이면 끔):
+실제 쇼핑몰은 결제 뒤 판매자가 보내고 택배가 도착해야 구매가 확정된다. 이 기록이 없으면
+재무의 판매자 정산이 모든 주문을 "구매 미확정"으로 보류해 정산이 한 번도 나가지 않는다.
+그래서 결제된 주문마다
+결제 12~30시간 뒤 발송, 그 뒤 24~48시간 안에 도착으로 적는다(주문 id로 정해 늘 같은 값).
+도착 시각이 지난 주문만 적고, 관리 API(`/api/shop/admin/orders/{id}/shipped`·`delivered`)라
+관리자 토큰이 필요하다. 이미 적힌 주문은 건드리지 않는다.
+`SHOP_TRAFFIC_DELIVERY_EVERY_S`(기본 600)마다
+돌고, 처음에는 `SHOP_TRAFFIC_DELIVERY_LOOKBACK_DAYS`(기본 30)일 전 주문부터 본다.
 표준 라이브러리만 쓴다.
 """
 
@@ -34,10 +44,13 @@ import json
 import os
 import random
 import sys
+import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
 BASE = os.getenv("SHOP_API_URL", "http://127.0.0.1:8010").rstrip("/")
 INQUIRY_RATE = float(os.getenv("SHOP_TRAFFIC_INQUIRY_RATE", "0.3"))
@@ -180,6 +193,119 @@ def _print(line: str) -> None:
     print(line, flush=True)
 
 
+SHIP_HOURS = (12, 30)  # 결제 → 발송
+TRANSIT_HOURS = (24, 48)  # 발송 → 도착
+LAST_ARRIVAL = timedelta(hours=SHIP_HOURS[1] + TRANSIT_HOURS[1])  # 이보다 오래된 주문은 다 도착
+
+
+def _iso(moment: datetime) -> str:
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+
+
+def delivery_plan(order_id: str, paid_at: datetime) -> tuple[datetime, datetime]:
+    """발송·도착 시각. 주문 id로 정해 다시 돌려도 같은 값이다."""
+    rng = random.Random(order_id)
+    shipped = paid_at + timedelta(minutes=rng.randint(SHIP_HOURS[0] * 60, SHIP_HOURS[1] * 60))
+    arrived = shipped + timedelta(minutes=rng.randint(TRANSIT_HOURS[0] * 60, TRANSIT_HOURS[1] * 60))
+    return shipped, arrived
+
+
+class Delivery:
+    """결제된 주문의 발송·도착을 택배처럼 적는다. 도착 시각이 지난 주문만 적는다.
+
+    주문 접수 시각으로 `window_hours`씩 끊어 조회한다. 끝까지 다 도착했을 시간(`LAST_ARRIVAL`)이
+    지난 구간만 보고, 다 본 구간은 다시 보지 않는다(`cursor`).
+    """
+
+    def __init__(
+        self,
+        call: Call,
+        *,
+        token: str,
+        log: Callable[[str], None],
+        lookback_days: float = 30,
+        window_hours: int = 1,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        self.call = call
+        self.token = token
+        self.log = log
+        self.lookback = timedelta(days=lookback_days)
+        self.window = timedelta(hours=window_hours)
+        self.clock = clock
+        self.cursor: datetime | None = None
+
+    def sweep(self) -> dict[str, int]:
+        done = {"shipped": 0, "delivered": 0, "failed": 0}
+        if not self.token:
+            return done
+        now = self.clock()
+        ready = now - LAST_ARRIVAL
+        start = self.cursor or (now - self.lookback)
+        while start < ready:
+            end = min(start + self.window, ready)
+            query = urllib.parse.urlencode({"since": _iso(start), "until": _iso(end)})
+            status, body = self.call("GET", f"/api/shop/orders?{query}")
+            if status != 200:
+                self.log(f"{now_text()} 경고: 배송 표시용 주문 조회 실패 {status}")
+                break
+            for order in body.get("data", []):
+                self._deliver(order, now, done)
+            start = self.cursor = end
+        if done["delivered"] or done["failed"]:
+            self.log(
+                f"{now_text()} 배송 표시: 발송 {done['shipped']}건, 도착 {done['delivered']}건"
+                + (f", 실패 {done['failed']}건" if done["failed"] else "")
+            )
+        return done
+
+    def _deliver(self, order: dict, now: datetime, done: dict[str, int]) -> None:
+        if order.get("status") != "paid" or order.get("delivered_at"):
+            return
+        paid = [
+            p["created_at"] for p in order.get("payments", []) if p.get("status") == "succeeded"
+        ]
+        paid_at = _parse(min(paid) if paid else order["created_at"])
+        shipped, arrived = delivery_plan(order["order_id"], paid_at)
+        if arrived > now:
+            return
+        base = f"/api/shop/admin/orders/{order['order_id']}"
+        if not order.get("shipped_at"):
+            status, _ = self.call(
+                "POST", f"{base}/shipped", {"shipped_at": _iso(shipped)}, self.token
+            )
+            if status != 200:
+                done["failed"] += 1
+                return
+            done["shipped"] += 1
+        status, _ = self.call(
+            "POST", f"{base}/delivered", {"delivered_at": _iso(arrived)}, self.token
+        )
+        done["delivered" if status == 200 else "failed"] += 1
+
+
+def now_text() -> str:
+    return now()
+
+
+RETRY_S = 30.0  # 쇼핑몰이 바빠 조회가 시간 초과되면 이만큼 뒤 다시 (다 본 구간은 건너뛴다)
+
+
+def _delivery_loop(delivery: Delivery, every_s: float) -> None:
+    while True:
+        wait = every_s
+        try:
+            delivery.sweep()
+        except (urllib.error.URLError, OSError, KeyError, ValueError) as error:
+            print(f"{now()} 배송 표시 오류: {error}", file=sys.stderr, flush=True)
+            wait = min(every_s, RETRY_S)
+        time.sleep(wait)
+
+
 def main() -> int:
     rng = random.Random()
     interval = interval_s()
@@ -193,6 +319,21 @@ def main() -> int:
     )
     refill = "켜짐" if watch.refill else "꺼짐"
     _print(f"{now()} 주문 트래픽 시작: 분당 {60 / interval:g}건, 자동 보충 {refill}")
+    if os.getenv("SHOP_TRAFFIC_DELIVERY", "1") != "0":
+        if watch.token:
+            delivery = Delivery(
+                call,
+                token=watch.token,
+                log=_print,
+                lookback_days=float(os.getenv("SHOP_TRAFFIC_DELIVERY_LOOKBACK_DAYS", "30")),
+            )
+            every = float(os.getenv("SHOP_TRAFFIC_DELIVERY_EVERY_S", "600"))
+            threading.Thread(target=_delivery_loop, args=(delivery, every), daemon=True).start()
+            _print(f"{now()} 배송 표시 켜짐: {every:g}초마다 도착 시각이 지난 주문을 적는다")
+        else:
+            _print(
+                f"{now()} 경고: 관리자 토큰이 없어 배송 표시를 하지 않는다(판매자 정산이 보류된다)"
+            )
     while True:
         try:
             _, users = call("GET", "/api/shop/users")
