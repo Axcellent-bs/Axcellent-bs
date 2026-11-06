@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { finance, humanTokenSet, krw, plainText, signedKrw, type BankRowIn, type BankUnexplained, type BankOutflows } from "@/lib/finance";
+import { finance, humanTokenSet, krw, plainText, signedKrw, type BankUnexplained, type BankOutflows } from "@/lib/finance";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
 // 돈이 실제로 맞는지 보는 화면 3개. 숫자는 재무 AI 서버가 계산한 값 그대로다.
@@ -41,32 +41,6 @@ export function ChecklistSection({ tick, onOpen }: { tick: number; onOpen: (tab:
   );
 }
 
-/** 은행에서 내려받은 CSV를 읽는다. 머리줄에서 날짜·입금·출금·적요·잔액 열을 찾는다 (쉼표·탭 구분, 따옴표 허용).
- *  출금은 음수 금액으로 넣는다. 출금 열이 있었는지(`hasWithdrawals`)도 알려 준다 */
-export function parseBankCsv(text: string): { rows: BankRowIn[]; problem: string | null; hasWithdrawals: boolean } {
-  const lines = text.replace(/^﻿/, "").split(/\r?\n/).filter((l) => l.trim());
-  if (lines.length < 2) return { rows: [], problem: "머리줄과 거래 줄이 있어야 합니다.", hasWithdrawals: false };
-  const split = (l: string) => (l.includes("\t") ? l.split("\t") : l.match(/("([^"]|"")*"|[^,]*)(,|$)/g)?.map((c) => c.replace(/,$/, "")) ?? [])
-    .map((c) => c.trim().replace(/^"|"$/g, "").replace(/""/g, '"'));
-  const head = split(lines[0]);
-  const col = (...names: string[]) => head.findIndex((h) => names.some((n) => h.includes(n)));
-  const di = col("거래일", "일자", "날짜", "date"), ai = col("입금", "맡기신", "amount"), mi = col("적요", "내용", "memo", "기재"), bi = col("잔액", "balance");
-  const oi = col("출금", "찾으신", "withdrawal");
-  if (di < 0 || (ai < 0 && oi < 0)) return { rows: [], problem: "머리줄에서 '거래일자'와 '입금액'·'출금액' 열을 찾지 못했습니다.", hasWithdrawals: false };
-  const won = (v: string | undefined) => Number((v ?? "").replace(/[,\s원]/g, "") || "0");
-  const rows: BankRowIn[] = [];
-  for (const l of lines.slice(1)) {
-    const c = split(l);
-    const date = (c[di] ?? "").replace(/[./]/g, "-").slice(0, 10);
-    const deposit = ai >= 0 ? won(c[ai]) : 0;
-    const amount = deposit > 0 ? deposit : oi >= 0 ? -Math.abs(won(c[oi])) : 0;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isInteger(amount) || amount === 0) continue;
-    const balance = bi >= 0 ? Number((c[bi] ?? "").replace(/[,\s원]/g, "")) : NaN;
-    rows.push({ date, amount, memo: mi >= 0 ? (c[mi] ?? "") : "", ...(Number.isInteger(balance) ? { balance } : {}) });
-  }
-  return rows.length ? { rows, problem: null, hasWithdrawals: oi >= 0 } : { rows, problem: "거래 줄을 하나도 읽지 못했습니다.", hasWithdrawals: oi >= 0 };
-}
-
 const BANK_TONE: Record<string, string> = { matched: TONE.ok, short: TONE.bad, over: TONE.warn, missing: TONE.bad, unexpected: TONE.warn, not_covered: TONE.muted };
 
 export function BankSection({ tick }: { tick: number }) {
@@ -79,14 +53,11 @@ export function BankSection({ tick }: { tick: number }) {
     setBusy(true);
     setMessage(null);
     try {
-      const { rows, problem, hasWithdrawals } = parseBankCsv(await file.text());
-      if (problem) { setMessage(problem); return; }
-      const next = await finance.uploadBank(rows, hasWithdrawals);
+      const next = await finance.uploadBankFile(file);
       res.set(() => next);
       setBump((n) => n + 1);
-      const added = Number(next.meta.added ?? 0);
-      const outs = rows.filter((r) => r.amount < 0).length;
-      setMessage(`거래 ${rows.length}줄(출금 ${outs}줄)을 읽어 새로 ${added}줄을 더했습니다.${hasWithdrawals ? "" : " 출금 열이 없는 파일이라 출금 대조는 하지 않습니다."}`);
+      const { import: got, added, withdrawals, has_withdrawals: hasOut } = next.meta;
+      setMessage(`거래 ${(got.rows ?? 0).toLocaleString("ko-KR")}줄(출금 ${withdrawals}줄)을 읽어 새로 ${added}줄을 더했습니다.${hasOut ? "" : " 출금 칸이 없는 파일이라 출금 대조는 하지 않습니다."}`);
     } catch (e) {
       setMessage((e as Error).message);
     } finally {
@@ -100,11 +71,11 @@ export function BankSection({ tick }: { tick: number }) {
       hint="PG가 보내기로 한 정산금이 실제 통장에 들어왔는지 날짜별로 맞춥니다. 은행 연동이 없어 은행에서 내려받은 거래내역 CSV를 올린 기간의 입금만 봅니다. 출금은 아래 '은행 출금 대조'에서 봅니다.">
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <label className={`btn-primary ${!humanTokenSet || busy ? "pointer-events-none opacity-50" : "cursor-pointer"}`}>
-          {busy ? "올리는 중…" : "은행 거래내역 CSV 올리기"}
-          <input type="file" accept=".csv,.txt,text/csv" className="sr-only" disabled={!humanTokenSet || busy}
+          {busy ? "올리는 중…" : "은행 거래내역 파일 올리기"}
+          <input type="file" accept=".csv,.txt,.xlsx,.xls,text/csv" className="sr-only" disabled={!humanTokenSet || busy}
             onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ""; }} />
         </label>
-        <span className="text-sm text-ink-500">머리줄에 거래일자·입금액·출금액(·적요·잔액) 열이 있으면 됩니다. 같은 내역을 다시 올려도 한 번만 셉니다.</span>
+        <span className="text-sm text-ink-500">은행 화면의 거래내역 조회에서 받은 파일(CSV·엑셀 xlsx)을 고치지 말고 그대로 올리세요. 재무 AI가 날짜·입금·출금·적요 칸을 찾아 읽고, 같은 내역은 한 번만 셉니다.</span>
       </div>
       {!humanTokenSet && <p className="mb-2 text-sm text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 없어 올리기 버튼이 꺼져 있습니다.</p>}
       {message && <p role="status" className="mb-3 rounded-lg bg-surface-2 px-3 py-2 text-sm text-ink-700">{message}</p>}

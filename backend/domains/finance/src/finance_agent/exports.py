@@ -3,7 +3,8 @@
 자동으로 하는 일 (사람 없이)
 - 지난달 손익계산서, 분기가 끝났으면 부가세 집계와 판매자 명세, 전문가 확인 목록을
   `FINANCE_EXPORT_DIR`에 만든다
-- `FINANCE_BANK_INBOX`에 넣은 은행 거래내역 CSV를 읽어 대조 자료에 더한다
+- `FINANCE_BANK_INBOX`에 넣은 은행 거래내역 파일(CSV·xlsx)을 읽어 대조 자료에 더한다.
+  화면에서 올린 파일도 같은 방법(`import_statement`, `bank_file.py`)으로 읽는다
 
 세무사에게는 사람이 내려받아 전달한다. 회사마다 세무사와 전달 방법이 달라서 전달 기능을 두지 않는다.
 하지 않는 일: 외부 전송, 은행·홈택스 접속, 신고·제출.
@@ -23,20 +24,15 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from finance_agent import bank, statements, tax
+from finance_agent import bank, bank_file, statements, tax
 from finance_agent import finance_config as fc
 from finance_agent.books import Books
 from finance_agent.rules import applied, load_rules, review_checklist_docx
 
 logger = logging.getLogger("ax.finance.exports")
 
-MAX_INBOX_BYTES = 5_000_000
-# 은행마다 머리글이 달라 흔한 이름을 받는다
-DATE_HEADERS = ("date", "거래일자", "거래일", "일자", "거래일시")
-AMOUNT_HEADERS = ("amount", "입금액", "입금", "맡기신금액", "입금금액")
-MEMO_HEADERS = ("memo", "적요", "내용", "거래내용", "기재내용")
-BALANCE_HEADERS = ("balance", "잔액", "거래후잔액", "거래후 잔액")
-WITHDRAW_HEADERS = ("withdrawal", "출금액", "출금", "찾으신금액", "출금금액")
+MAX_INBOX_BYTES = bank_file.MAX_BYTES
+INBOX_SUFFIXES = (".csv", ".txt", ".xlsx", ".xls")  # .xls는 읽지 못한다고 failed/로 옮겨 알린다
 
 
 def _dir(env: str) -> Path | None:
@@ -204,76 +200,30 @@ def bundle(exports: dict[str, dict[str, Any]], package_id: str) -> tuple[str, by
 
 
 # ---------------------------------------------------------------- 은행 내역 폴더
-def _pick(row: dict[str, str], names: tuple[str, ...]) -> str | None:
-    for name in names:
-        value = row.get(name)
-        if value not in (None, ""):
-            return value
-    return None
+def import_statement(
+    body: bytes,
+    filename: str,
+    bank_rows: list[dict[str, Any]],
+    out_periods: list[dict[str, str]] | None,
+) -> dict[str, Any]:
+    """은행 거래내역 파일 하나를 읽어 대조 자료에 더한다. 기록(읽은 줄·더한 줄)을 돌려준다.
 
-
-def _won(text: str | None) -> int | None:
-    if text is None:
-        return None
-    cleaned = text.replace(",", "").replace("원", "").strip()
-    try:
-        return int(cleaned)
-    except ValueError:
-        try:
-            return int(float(cleaned))
-        except ValueError:
-            return None
-
-
-def parse_csv(body: bytes) -> list[dict[str, Any]]:
-    """CSV → `bank.parse_rows`가 받는 줄. 출금은 음수 금액으로 넣는다."""
-    for encoding in ("utf-8-sig", "cp949"):
-        try:
-            text = body.decode(encoding)
-            break
-        except UnicodeDecodeError:
-            continue
-    else:
-        raise ValueError("글자 인코딩을 읽지 못했다")
-    reader = csv.DictReader(io.StringIO(text))
-    headers = {h.strip() for h in (reader.fieldnames or []) if h}
-    if not headers & set(DATE_HEADERS) or not headers & (
-        set(AMOUNT_HEADERS) | set(WITHDRAW_HEADERS)
-    ):
-        raise ValueError("날짜와 입금액·출금액 칸을 찾지 못했다")
-    rows = []
-    for raw in reader:
-        row = {(k or "").strip(): (v or "").strip() for k, v in raw.items() if isinstance(v, str)}
-        day = _pick(row, DATE_HEADERS)
-        amount = _won(_pick(row, AMOUNT_HEADERS))
-        if not amount:
-            out = _won(_pick(row, WITHDRAW_HEADERS))
-            amount = -abs(out) if out else None
-        if not day or not amount:
-            continue
-        rows.append(
-            {
-                "date": day[:10].replace(".", "-").replace("/", "-"),
-                "amount": amount,
-                "memo": _pick(row, MEMO_HEADERS) or "",
-                "balance": _won(_pick(row, BALANCE_HEADERS)),
-            }
-        )
-    return rows
-
-
-def has_withdrawal_column(body: bytes) -> bool:
-    """출금 열이 있는 내역인가. 있으면 그 기간은 출금 대조를 한다."""
-    for encoding in ("utf-8-sig", "cp949"):
-        try:
-            first = body.decode(encoding).splitlines()[:1]
-            break
-        except UnicodeDecodeError:
-            continue
-    else:
-        return False
-    head = next(csv.reader(first), []) if first else []
-    return bool({h.strip() for h in head} & set(WITHDRAW_HEADERS))
+    화면에서 올린 파일과 폴더에 넣은 파일이 같이 쓴다. 못 읽으면 `BankFileError`.
+    """
+    raw, has_withdrawals = bank_file.read_statement(body, filename)
+    rows, problems = bank.parse_rows(raw)
+    if not rows:
+        raise bank_file.BankFileError("; ".join(problems[:3]) or "거래 줄이 없습니다.")
+    if out_periods is not None and has_withdrawals:
+        bank.add_out_period(out_periods, rows)
+    return {
+        "status": "imported",
+        "added": bank.merge_rows(bank_rows, rows),
+        "rows": len(rows),
+        "withdrawals": sum(1 for r in rows if r["amount"] < 0),
+        "has_withdrawals": has_withdrawals,
+        "skipped": len(problems),
+    }
 
 
 def scan_inbox(
@@ -286,23 +236,14 @@ def scan_inbox(
     if folder is None or not folder.is_dir():
         return []
     done: list[dict[str, Any]] = []
-    for path in sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == ".csv"):
-        record: dict[str, Any] = {"file": path.name, "at": fc.iso(fc.now())}
+    for path in sorted(
+        p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in INBOX_SUFFIXES
+    ):
+        record: dict[str, Any] = {"file": path.name, "at": fc.iso(fc.now()), "source": "folder"}
         try:
             if path.stat().st_size > MAX_INBOX_BYTES:
                 raise ValueError("파일이 너무 크다")
-            body = path.read_bytes()
-            rows, problems = bank.parse_rows(parse_csv(body))
-            if not rows:
-                raise ValueError("; ".join(problems[:3]) or "거래 줄이 없다")
-            if out_periods is not None and has_withdrawal_column(body):
-                bank.add_out_period(out_periods, rows)
-            record |= {
-                "status": "imported",
-                "added": bank.merge_rows(bank_rows, rows),
-                "rows": len(rows),
-                "skipped": len(problems),
-            }
+            record |= import_statement(path.read_bytes(), path.name, bank_rows, out_periods)
             where = "processed"
         except (OSError, ValueError) as exc:
             record |= {"status": "failed", "reason": str(exc)[:200]}

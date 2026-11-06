@@ -215,12 +215,16 @@ function ExportsPanel({ tick }: { tick: number }) {
               </ul>
             )}
             <div>
-              <h3 className="text-sm font-semibold text-ink-900">은행 내역 폴더</h3>
-              {v.bank_imports.length === 0 ? <p className="mt-1 text-sm text-ink-500">지정 폴더에서 읽은 파일이 없습니다. 은행에서 내려받은 CSV를 폴더에 넣으면 자동으로 읽습니다.</p> : (
+              <h3 className="text-sm font-semibold text-ink-900">은행 거래내역 읽은 기록</h3>
+              <p className="mt-1 text-sm text-ink-500">
+                은행 거래내역은 ② 매출·PG 대사 탭의 '은행 거래내역 파일 올리기'로 올립니다.
+                {(view.env?.meta as { inbox_enabled?: boolean } | undefined)?.inbox_enabled ? " 서버의 은행 내역 폴더에 넣은 파일도 자동으로 읽습니다." : ""}
+              </p>
+              {v.bank_imports.length === 0 ? <p className="mt-1 text-sm text-ink-500">아직 읽은 은행 거래내역이 없습니다.</p> : (
                 <ul className="mt-1 space-y-1 text-sm text-ink-700">
                   {v.bank_imports.slice(0, 5).map((b) => (
                     <li key={`${b.file}-${b.at}`} className="break-all">
-                      {shortDateTime(b.at)} · {b.file} · {b.status === "imported" ? `새로 ${b.added}줄 더함` : `읽지 못함: ${b.reason}`}
+                      {shortDateTime(b.at)} · {b.source === "upload" ? `${b.by ?? "사람"}님이 올림` : "폴더"} · {b.file} · {b.status === "imported" ? `새로 ${b.added}줄 더함` : `읽지 못함: ${b.reason}`}
                     </li>
                   ))}
                 </ul>
