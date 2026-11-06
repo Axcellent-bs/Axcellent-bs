@@ -5,8 +5,9 @@
 저장한다(`change_requests.py`). 같은 요청이 이미 있으면 기획이 묶어서(`linked_duplicate`) 같은
 `ctx_req_`를 돌려주므로 한 사건에 문의가 여러 개 붙을 수 있다.
 
-결과 통지(처리됨·거절됨)를 받는 skill은 계약이 정해지면 붙인다. 지금은 저장소의
-`record_result`·`attach_notice`까지만 준비돼 있다.
+기획이 요청을 닫을 때 보내는 결과 통지(처리됨·거절됨)는 `receive_change_result`가 받아 연결된
+모든 문의에 적용한다(계약 #293). 고객에게 알리는 공지를 붙이는 skill은 아직 없고, 저장소의
+`attach_notice`만 준비돼 있다.
 """
 
 from __future__ import annotations
@@ -160,8 +161,8 @@ async def receive_change_result(request: AgentRequest) -> AgentResult:
     통지는 `ctx_req_` 사건 하나당 한 번 온다(중복 연결된 요청은 원래 요청이 닫힐 때 같은 사건으로
     한 번에). 그 사건에 연결된 모든 문의에 같은 결과를 적용하고(`applied`는 그 문의 수), 같은
     결과가 다시 오면 한 번만 적용한 것으로 본다. 이미 닫힌 요청에 다른 결과가 오면 거절한다.
-    이 사건에 연결된 문의가 없으면 다른 부서 몫이라 `applied=0`으로 답한다. 고객 공지는 따로
-    붙인다(`attach_notice`).
+    이 사건에 연결된 문의가 없으면 다른 부서 몫이라 `applied=0`으로 답한다. 고객 공지를 붙이는
+    skill은 아직 없다(저장소 `attach_notice`만 준비됨).
     """
 
     parsed = h._parse(request, ChangeResultInput)
