@@ -164,12 +164,22 @@ export function requestOfTask(s: S, t?: Task): Request | undefined {
   return s.requests.find((r) => r.id === spec?.request)
 }
 
-/** 작업이 어디서 왔는지: 개발팀이 직접 넣은 기획이면 "개발팀 기획", 다른 팀 요청이면 "고객지원 요청" 같은 꼬리표 */
+/** 작업이 어디서 왔는지: 개발팀이 직접 넣은 기획이면 "개발팀 기획", 장애 후속이면 "장애 개선", 다른 팀 요청이면 "고객지원 요청" 같은 꼬리표 */
 export function OriginTag({ s, t }: { s: S; t?: Task }) {
   if (!t) return null
   if (fromDevTeam(s, t)) return <DevTeamTag />
+  const label = originLabel(s, t)
+  return label ? <Tag tone={label === '장애 개선' ? 'amber' : undefined}>{label}</Tag> : null
+}
+
+/** 기획서 유형 글자: 개발팀 기획 · 장애 개선(사건의 후속 요청) · ○○ 요청. 새 저장값 없이 요청·사건에서 계산한다 */
+export function originLabel(s: S, t?: Task): string | undefined {
+  if (!t) return undefined
+  if (fromDevTeam(s, t)) return '개발팀 기획'
   const req = requestOfTask(s, t)
-  return req ? <Tag>{DEPT_NAME[req.from] ?? req.from} 요청</Tag> : null
+  if (!req) return undefined
+  if (s.incidents.some((i) => i.followUp === req.id)) return '장애 개선'
+  return `${DEPT_NAME[req.from] ?? req.from} 요청`
 }
 
 /** 작업의 요청과 비슷한·충돌하는 요청 (제안). 충돌만 주황, 마우스를 올리면 판단 근거 */
