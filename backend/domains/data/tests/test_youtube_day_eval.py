@@ -3,7 +3,7 @@
 - 장부의 하루 = 미국 태평양 시간 0시 (서머타임 자동). 경계 앞뒤 사용량은 다른 날로 잡힌다
 - 다음 초기화는 한국 시각 문구로
 - 합계 8,000 초과 0회 (예약 도입 전에 많이 쓴 날은 새 숏츠도 남은 만큼만)
-- 이 PR에서는 관찰만 (관문은 코드 PR에서)
+- 관문은 코드 PR에서 켬 (평가 정의 PR #804는 관찰만: dev 0.0 / 0.0 / 0.5556, 초과 150번)
 """
 
 from __future__ import annotations
@@ -123,11 +123,17 @@ def _answers() -> dict[str, dict | None]:
             for c in make.cases()}  # fmt: skip
 
 
-def test_youtube_day_observe() -> None:
-    """관찰만: 지금 코드의 점수와 합계 초과 횟수를 남긴다 (관문은 코드 PR에서 켬)."""
+GATES = dict.fromkeys(score.METRICS, 1.0)  # 모두 맞아야 함 (기준선 그대로)
+
+
+def test_youtube_day_pass_the_gates() -> None:
+    """관문: 태평양 0시 경계(서머타임 전환일 포함)·한국 시각 초기화 문구·합계 8,000 초과 0회."""
     cases = make.cases()
     answers = _answers()
     metrics = score.score(cases, answers)
     print("youtube_day eval:", json.dumps(metrics, ensure_ascii=False),
           "over_cap:", score.over_cap(cases, answers))  # fmt: skip
     assert set(metrics) == set(score.METRICS)
+    assert score.over_cap(cases, answers) == 0
+    for name, gate in GATES.items():
+        assert metrics[name] >= gate, f"{name} {metrics[name]} (관문 {gate})"

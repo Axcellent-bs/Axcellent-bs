@@ -63,7 +63,8 @@ def daily_cap(env: Mapping[str, str]) -> int:
 
 
 def day_of(now: datetime) -> date:
-    return now.astimezone(youtube_quota.KST).date()
+    """장부 날짜 (YouTube 장부와 같은 태평양 시간 날짜)."""
+    return youtube_quota.day_of(now)
 
 
 def units_today(now: datetime) -> int:
@@ -356,7 +357,7 @@ async def run_tick(
 
 
 def status(env: Mapping[str, str] | None = None, now: datetime | None = None) -> FreshTrackStatus:
-    """수집기 상태 화면: "새 숏츠 추적: 오늘 N유닛 / 1,200, 추적 중 N개"."""
+    """수집기 상태 화면: "새 숏츠 추적: 오늘 N유닛 / 1,200, 추적 중 N개 · 다음 초기화: …"."""
     env = os.environ if env is None else env
     now = now or datetime.now(UTC)
     path = env.get(DB_ENV) or DEFAULT_DB
@@ -373,6 +374,9 @@ def status(env: Mapping[str, str] | None = None, now: datetime | None = None) ->
         unit_cap=cap,
         tracking=tracking,
         formats=target_formats(env),
-        find_stopped=used + SEARCH_UNITS + 1 > cap - RESERVE,
-        line=f"새 숏츠 추적: 오늘 {used:,}유닛 / {cap:,}, 추적 중 {tracking}개",
+        # 이 작업 몫이 거의 찼거나, 전체 상한(8,000)에 남은 것이 검색 하나보다 적으면 찾기를 멈춤
+        find_stopped=used + SEARCH_UNITS + 1 > cap - RESERVE
+        or youtube_quota.LEDGER.units(day_of(now)) + SEARCH_UNITS > youtube_quota.cap(env),
+        line=(f"새 숏츠 추적: 오늘 {used:,}유닛 / {cap:,}, 추적 중 {tracking}개 ·"
+              f" {youtube_quota.reset_label(now)}"),
     )

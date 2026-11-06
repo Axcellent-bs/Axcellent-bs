@@ -496,13 +496,13 @@ class YouTubeConnector:
             raise ConnectorUnavailable(
                 "UNAUTHORIZED", f"{KEY_ENV}가 없어 YouTube Data API를 부를 수 없다"
             )
-        # 하나의 장부(youtube_quota): 부른 곳의 몫(새 숏츠 추적 예약 몫 / 다른 기능 몫)을 넘으면
-        # 검색을 부르지 않는다
-        ledger = youtube_quota.LEDGER
+        # 하나의 장부(youtube_quota): 전체 상한, 검색은 부른 곳의 몫(새 숏츠 추적 예약 몫 / 다른
+        # 기능 몫)까지 확인하고 같이 적는다. 넘으면 부르지 않는다
         caller = youtube_quota.current_caller(self.caller)
-        if resource == "search" and not ledger.can_search(self._env, caller):
-            raise ConnectorUnavailable("QUOTA_EXCEEDED", ledger.limit_note(self._env, caller))
-        ledger.add(caller, COST[resource], search=resource == "search")
+        why = youtube_quota.LEDGER.take(caller, COST[resource], search=resource == "search",
+                                        env=self._env)  # fmt: skip
+        if why is not None:
+            raise ConnectorUnavailable("QUOTA_EXCEEDED", why)
         self.quota_used += COST[resource]
         client = self._client or _client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
         try:
