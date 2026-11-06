@@ -1,110 +1,180 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { PreparingChip } from '@/components/Preparing'
+import { ApiError } from '@/lib/apiError'
+import { companyConnection, type ConnectionHistory, type ConnectionMode, type ConnectionState, type ConnectionTest } from '@/lib/companyConnection'
+import { HUMAN_TOKEN_SET } from '@/lib/env'
 import { ago } from '@/lib/format'
-import { SCOPES, newId, now, useIntegrations, type Integration } from './store'
 
-// 회사가 운영하는 서비스(예: 캣북스 온라인 서점)를 연결하는 창구. URL·API·키를 넣으면 부서 AI가 그 서비스의 데이터를 받아 온다.
-// 솔루션은 서비스 안에 들어가지 않고, 여기서 연결만 한다. 회사 연결 화면(CompanyConnect) 아래쪽에 들어간다.
-const STATUS: Record<Integration['status'], { label: string; tone: string }> = {
-  connected: { label: '연결됨', tone: 'bg-emerald-50 text-emerald-700' },
-  untested: { label: '연결 확인 전', tone: 'bg-amber-50 text-amber-700' },
-  failed: { label: '연결 실패', tone: 'bg-red-50 text-red-700' },
+// 회사 서비스(고객사 판매 서버, shop-api 규격) 연결 창구. 저장하면 부서 AI가 모두 재시작 없이 이 주소를 읽는다.
+// 연결 확인은 서버(dashboard-api)가 그 주소를 실제로 불러 상태·상품·구매자를 읽어 본 결과다. 회사 연결 화면(CompanyConnect) 아래쪽에 들어간다.
+const SOURCE: Record<ConnectionState['source'], { label: string; tone: string }> = {
+  connection: { label: '연결됨', tone: 'bg-emerald-50 text-emerald-700' },
+  env: { label: '서버 설정값', tone: 'bg-ink-100 text-ink-700' },
+  default: { label: '기본 (로컬 판매 서버)', tone: 'bg-ink-100 text-ink-700' },
 }
-const EMPTY = { name: '', kind: '쇼핑몰', url: '', apiBase: '', apiKey: '', scopes: ['주문', '결제'] as string[] }
-const mask = (key: string) => (key.length <= 6 ? '••••' : `${key.slice(0, 3)}••••••${key.slice(-4)}`)
-const validUrl = (u: string) => /^https?:\/\/[^\s/]+/.test(u.trim())
+const MODES: { id: ConnectionMode; label: string }[] = [
+  { id: 'internal', label: '내부 데이터' },
+  { id: 'connected', label: '실제 연결' },
+]
+const ACTION: Record<ConnectionHistory['action'], string> = { save: '주소 저장', mode: '모드 전환', recheck: '다시 확인', clear: '연결 해제' }
+const modeOf = (enabled: boolean | null) => (enabled === null ? '' : enabled ? ' (실제 연결)' : ' (내부 데이터)')
+const normalize = (u: string) => u.trim().replace(/\/+$/, '')
+const message = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : '요청에 실패했습니다')
 
 export default function Integrations() {
-  const [items, setItems] = useIntegrations()
-  const [form, setForm] = useState(EMPTY)
+  const [state, setState] = useState<ConnectionState | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [url, setUrl] = useState('')
+  const [result, setResult] = useState<ConnectionTest | null>(null)
+  const [busy, setBusy] = useState<'test' | 'save' | 'clear' | 'mode' | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [testing, setTesting] = useState<string | null>(null)
 
-  const update = (id: string, patch: Partial<Integration>) => setItems((list) => list.map((x) => (x.id === id ? { ...x, ...patch } : x)))
-  const test = (id: string) => {
-    setTesting(id)
-    setTimeout(() => {
-      update(id, { status: 'connected', lastSync: now() })
-      setTesting(null)
-    }, 1000)
-  }
-  const toggleScope = (s: string) =>
-    setForm((f) => ({ ...f, scopes: f.scopes.includes(s) ? f.scopes.filter((x) => x !== s) : [...f.scopes, s] }))
+  useEffect(() => {
+    let live = true
+    companyConnection.get()
+      .then((s) => { if (!live) return; setState(s); setUrl(s.connection?.shop_api_url ?? '') })
+      .catch((e) => live && setLoadError(message(e)))
+    return () => { live = false }
+  }, [])
 
-  const add = (e: FormEvent) => {
-    e.preventDefault()
-    if (!form.name.trim()) return setError('서비스 이름을 입력하세요.')
-    if (!validUrl(form.url) || !validUrl(form.apiBase)) return setError('서비스 주소와 API 주소는 http(s)://로 시작해야 합니다.')
-    if (!form.apiKey.trim()) return setError('API 키를 입력하세요.')
-    const item: Integration = { id: newId(), ...form, name: form.name.trim(), status: 'untested', lastSync: null }
-    setItems((list) => [...list, item])
-    setForm(EMPTY)
+  const run = async (kind: 'test' | 'save' | 'clear' | 'mode', work: () => Promise<void>) => {
+    setBusy(kind)
     setError(null)
-    test(item.id)
+    try {
+      await work()
+    } catch (e) {
+      setError(message(e))
+    } finally {
+      setBusy(null)
+    }
   }
+  const test = (e: FormEvent) => {
+    e.preventDefault()
+    void run('test', async () => setResult(await companyConnection.test(url)))
+  }
+  const save = () => void run('save', async () => {
+    const saved = await companyConnection.save(url)
+    setState(saved)
+    setResult(null)
+  })
+  const switchMode = (mode: ConnectionMode) => void run('mode', async () => setState(await companyConnection.mode(mode)))
+  const clear = () => void run('clear', async () => {
+    setState(await companyConnection.clear())
+    setResult(null)
+    setUrl('')
+  })
+
+  const tested = result !== null && result.ok && result.url === normalize(url)
+  const canWrite = HUMAN_TOKEN_SET && (state?.editable ?? false)
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <h2 className="text-lg font-semibold">회사 서비스</h2>
-        <span className="chip bg-amber-50 text-amber-700" title="입력값은 이 브라우저에만 저장되고, 에이전트는 서버를 켤 때 정한 판매 서버(shop-api)를 읽어요">시연 화면 · 실제 연결 아님</span>
-      </div>
+      <h2 className="text-lg font-semibold">회사 서비스</h2>
 
-      <ul className="grid gap-4 lg:grid-cols-2">
-        {items.map((x) => (
-          <li key={x.id} className="card space-y-4 p-6">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs text-ink-500">{x.kind}</p>
-                <p className="card-title text-lg">{x.name}</p>
-              </div>
-              <span className={`chip ${STATUS[x.status].tone}`}>{testing === x.id ? '확인 중…' : STATUS[x.status].label}</span>
-            </div>
-            <dl className="grid grid-cols-[88px_1fr] gap-x-3 gap-y-2 text-sm">
-              <dt className="text-ink-500">서비스 주소</dt>
-              <dd className="truncate font-mono text-xs leading-5">{x.url}</dd>
-              <dt className="text-ink-500">API 주소</dt>
-              <dd className="truncate font-mono text-xs leading-5">{x.apiBase}</dd>
-              <dt className="text-ink-500">API 키</dt>
-              <dd className="font-mono text-xs leading-5">{mask(x.apiKey)}</dd>
-              <dt className="text-ink-500">받는 데이터</dt>
-              <dd className="flex flex-wrap gap-1">{x.scopes.map((s) => <span key={s} className="chip bg-ink-100 text-ink-700">{s}</span>)}</dd>
-              <dt className="text-ink-500">마지막 수신</dt>
-              <dd className="text-ink-700">{x.lastSync ? ago(x.lastSync) : '—'}</dd>
-            </dl>
-            <div className="flex gap-2">
-              <button type="button" className="btn-ghost" onClick={() => test(x.id)} disabled={testing === x.id}>연결 확인</button>
-              <button type="button" className="btn-quiet" onClick={() => setItems((list) => list.filter((y) => y.id !== x.id))}>연결 해제</button>
-            </div>
-          </li>
-        ))}
-      </ul>
+      <section className="card space-y-5 p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs text-ink-500">판매 서버 (shop-api 규격)</p>
+            <p className="card-title text-lg">고객사 쇼핑몰 연결</p>
+          </div>
+          {state && <span className={`chip ${SOURCE[state.source].tone}`}>{SOURCE[state.source].label}</span>}
+        </div>
 
-      <section className="card p-6">
-        <h2 className="card-title">새 서비스 연결</h2>
-        <form onSubmit={add} className="mt-4 space-y-3">
-          <div className="grid gap-3 md:grid-cols-[2fr_1fr]">
-            <input className="field" placeholder="서비스 이름 (예: 캣북스 모바일 앱)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} aria-label="서비스 이름" />
-            <select className="field" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })} aria-label="종류">
-              {['쇼핑몰', '모바일 앱', '결제사', '배송사', '사내 시스템'].map((k) => <option key={k}>{k}</option>)}
-            </select>
+        {state && (
+          <div className="space-y-2">
+            <div role="radiogroup" aria-label="데이터 모드" className="inline-flex rounded-xl bg-ink-100 p-1 text-sm">
+              {MODES.map((m) => {
+                const active = state.mode === m.id
+                const disabled = busy !== null || !canWrite || active || (m.id === 'connected' && !state.connection)
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    disabled={disabled}
+                    onClick={() => switchMode(m.id)}
+                    className={`rounded-lg px-3 py-1.5 ${active ? 'bg-white font-semibold text-ink-900 shadow-sm' : 'text-ink-500'}`}
+                  >
+                    {busy === 'mode' && !active ? '바꾸는 중…' : m.label}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-xs text-ink-500">
+              내부 데이터: <span className="font-mono">{state.internal_url}</span>
+              {state.connection && <> · 실제 연결: <span className="font-mono">{state.connection.shop_api_url}</span></>}
+              {!state.connection && ' · 실제 연결은 아래에서 주소를 확인·저장하면 켤 수 있어요.'}
+            </p>
+            <p className="text-xs text-amber-700">판매 서버를 바꾸면 확정하지 않은 결산 숫자가 바뀔 수 있어요. 확정한 결산은 그대로이고, 차이는 재무 화면에 결산 차이로 보여요.</p>
           </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <input className="field font-mono" placeholder="서비스 주소 https://" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} aria-label="서비스 주소" />
-            <input className="field font-mono" placeholder="API 주소 https://" value={form.apiBase} onChange={(e) => setForm({ ...form, apiBase: e.target.value })} aria-label="API 주소" />
-            <input className="field font-mono" type="password" placeholder="API 키" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} aria-label="API 키" />
+        )}
+
+        {loadError && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">연결 상태를 읽지 못했어요: {loadError}</p>}
+        {state && (
+          <dl className="grid grid-cols-[88px_1fr] gap-x-3 gap-y-2 text-sm">
+            <dt className="text-ink-500">지금 주소</dt>
+            <dd className="truncate font-mono text-xs leading-5">{state.shop_api_url}</dd>
+            <dt className="text-ink-500">확인 시각</dt>
+            <dd className="text-ink-700">{state.connection?.verified_at ? ago(state.connection.verified_at) : '—'}</dd>
+            <dt className="text-ink-500">바꾼 사람</dt>
+            <dd className="text-ink-700">{state.connection?.updated_by ?? '—'}</dd>
+            <dt className="text-ink-500">API 키</dt>
+            <dd><PreparingChip /></dd>
+            <dt className="text-ink-500">받는 데이터</dt>
+            <dd className="text-ink-700">주문·상품·구매자 조회 (토큰이 필요한 쿠폰·환불은 <PreparingChip />)</dd>
+          </dl>
+        )}
+
+        <form onSubmit={test} className="space-y-3">
+          <label className="block text-sm text-ink-500" htmlFor="shop-api-url">판매 서버 주소</label>
+          <input
+            id="shop-api-url"
+            className="field w-full font-mono"
+            placeholder="http://192.168.0.251:8080/shop-api"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <div className="flex flex-wrap gap-2">
+            <button className="btn-ghost" disabled={busy !== null || !url.trim() || !canWrite}>{busy === 'test' ? '확인 중…' : '연결 확인'}</button>
+            <button type="button" className="btn-primary" onClick={save} disabled={busy !== null || !tested || !canWrite}>{busy === 'save' ? '저장 중…' : '저장'}</button>
+            {state?.connection && (
+              <button type="button" className="btn-quiet" onClick={clear} disabled={busy !== null || !canWrite}>{busy === 'clear' ? '해제 중…' : '연결 해제'}</button>
+            )}
           </div>
-          <fieldset className="flex flex-wrap items-center gap-2">
-            <legend className="mb-2 text-sm text-ink-500">받을 데이터</legend>
-            {SCOPES.map((s) => (
-              <label key={s} className={`chip cursor-pointer px-3 py-1 text-xs ${form.scopes.includes(s) ? 'bg-brand-600 text-white' : 'bg-ink-100 text-ink-700'}`}>
-                <input type="checkbox" className="sr-only" checked={form.scopes.includes(s)} onChange={() => toggleScope(s)} />
-                {s}
-              </label>
-            ))}
-          </fieldset>
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button className="btn-primary">연결</button>
         </form>
+
+        {result && (
+          <ul className="space-y-1 text-sm" aria-label="연결 확인 결과">
+            {result.checks.map((c) => (
+              <li key={c.key} className="flex gap-2">
+                <span className={`chip ${c.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>{c.ok ? '통과' : '실패'}</span>
+                <span className="text-ink-700">{c.label}</span>
+                <span className="text-ink-500">{c.detail}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+
+        {state && state.history.length > 0 && (
+          <div>
+            <p className="mb-1 text-xs font-medium text-ink-500">바꾼 기록</p>
+            <ul className="space-y-0.5 text-xs text-ink-500" aria-label="회사 연결 바꾼 기록">
+              {state.history.map((h) => (
+                <li key={`${h.at}-${h.action}`}>
+                  {ago(h.at)} · {h.by} · {ACTION[h.action]} · <span className="font-mono">{h.from ?? '—'}</span>{modeOf(h.from_enabled)} → <span className="font-mono">{h.to ?? '—'}</span>{modeOf(h.to_enabled)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <p className="text-xs text-ink-500">
+          사내 주소(192.168.x.x 등)는 바로 되고, 사내 밖 주소는 설치 운영자가 허용 목록(AX_COMPANY_SHOP_ALLOWED_HOSTS)에 넣은 https 주소만 돼요. 세 항목을 모두 통과해야 저장할 수 있어요. 저장하면 실제 연결 모드가 되고, 모든 부서 AI가 다시 켜지 않아도 바로 이 주소를 읽어요. 내부 데이터로 바꾸면 주소는 남긴 채 원래 판매 서버를 읽고, 연결 해제는 주소까지 지워요.
+          {!HUMAN_TOKEN_SET && ' 사람 토큰이 없어 확인·저장이 꺼져 있어요 (run_web.sh로 켜면 들어가요).'}
+          {state && !state.editable && ' 서버에 회사 연결 파일 설정(AX_COMPANY_CONNECTION_FILE)이 없어 저장할 수 없어요 (run_all.sh로 켜면 생겨요).'}
+        </p>
       </section>
     </div>
   )

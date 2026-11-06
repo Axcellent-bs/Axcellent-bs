@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from ax_dashboard_api import handoffs, support_client
+from ax_dashboard_api import company_connection, handoffs, support_client
 from ax_dashboard_api.envelope import install_error_handlers, is_mock
 from ax_dashboard_api.routes import router
 
@@ -72,6 +72,8 @@ app.include_router(router)
 # 사람 할 일함: 에이전트가 넣는 창구(에이전트 토큰)와 사람이 보는 창구(쓰기는 사람 토큰)
 app.include_router(handoffs.intake)
 app.include_router(handoffs.inbox)
+# 시스템 관리 > 회사 연결 (고객사 판매 서버 주소, 쓰기는 사람 토큰)
+app.include_router(company_connection.router)
 
 
 @app.get("/health")

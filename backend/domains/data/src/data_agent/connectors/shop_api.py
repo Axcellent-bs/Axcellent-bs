@@ -4,7 +4,8 @@
 `shop_metric_series`). shop-api 응답을 표준 형식(`connectors.FailureEvent`, [(시각, 값)])으로
 바꾸는 일은 여기서만 한다.
 
-- 주소는 `AX_SHOP_API_URL`(없으면 `http://shop-api:8010`)이다.
+- 주소는 회사 연결(`AX_COMPANY_CONNECTION_FILE`) → `AX_SHOP_API_URL`
+  → `http://shop-api:8010` 순서다.
 - 토큰: `Authorization: Bearer <data 토큰>`(`DATA_TOKEN`, 목 모드는 `mock:data`).
 - 응답 없음·401·403·5xx·형식 오류는 `ShopUnavailable`(= `ConnectorUnavailable`)이다.
   0으로 내지 않는다.
@@ -12,6 +13,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any, get_args
 
@@ -66,14 +68,20 @@ class ShopApi:
 
     def __init__(
         self,
-        base_url: str = DEFAULT_SHOP_API_URL,
+        base_url: str | Callable[[], str] = DEFAULT_SHOP_API_URL,
         *,
         token: str | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
-        self.base_url = base_url.rstrip("/")
+        # 함수를 주면 부를 때마다 주소를 다시 정한다 (회사 연결이 바뀌면 재시작 없이 따라감)
+        self._base_url = base_url
         self._token = token
         self._client = client
+
+    @property
+    def base_url(self) -> str:
+        raw = self._base_url() if callable(self._base_url) else self._base_url
+        return raw.rstrip("/")
 
     def _headers(self) -> dict[str, str]:
         try:

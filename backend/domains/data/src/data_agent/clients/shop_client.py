@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 from pydantic import ValidationError
 
+from ax_agent_template.company_connection import shop_api_override
 from ax_contracts.data_access.shop_failed_orders import (
     FailedOrder,
     ShopFailedOrdersQuery,
@@ -173,9 +174,17 @@ class MockShopClient:
         return ShopFailedOrdersResult(orders=orders)
 
 
+def shop_api_url(env: Mapping[str, str] = os.environ) -> str:
+    """shop-api 주소: 회사 연결 → `AX_SHOP_API_URL` → `http://shop-api:8010`."""
+    return shop_api_override() or env.get("AX_SHOP_API_URL") or DEFAULT_SHOP_API_URL
+
+
 def shop_api(env: Mapping[str, str] = os.environ) -> ShopApi:
-    """`AX_SHOP_API_URL`(없으면 `http://shop-api:8010`)의 shop-api."""
-    return ShopApi(env.get("AX_SHOP_API_URL") or DEFAULT_SHOP_API_URL)
+    """부를 때마다 `shop_api_url`로 주소를 정하는 shop-api.
+
+    회사 연결이 바뀌면 재시작 없이 따라간다.
+    """
+    return ShopApi(lambda: shop_api_url(env))
 
 
 # 카탈로그 `connector` → 커넥터를 만드는 함수 (지금은 shop-api 하나)
