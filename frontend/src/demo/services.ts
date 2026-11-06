@@ -98,6 +98,11 @@ export const SERVICES: Service[] = [
   {
     id: 'finance', agent: 'finance', family: 'backoffice', name: '재무 관리', by: 'AXcellent', Icon: IconShield, entry: '/finance', paths: ['/finance'],
     desc: '결산·대사·정산과 장애 보상 장부, 사건 후 감사를 맡습니다.',
+    // 화면 안 전환(pages/Finance.tsx)을 사이드바 하위 탭으로 연다. ①~⑥ 업무 탭은 평상시 화면 안에 둔다
+    children: [
+      { href: '/finance', label: '장애 사건 재무' },
+      { href: '/finance/daily', label: '평상시 재무 업무' },
+    ],
   },
   {
     id: 'data', agent: 'data', family: 'growth', name: '데이터 분석', by: 'AXcellent', Icon: IconChart, entry: '/data', paths: ['/data'],

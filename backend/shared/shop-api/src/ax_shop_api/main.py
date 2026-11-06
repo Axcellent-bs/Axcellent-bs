@@ -167,6 +167,16 @@ class ClaimIn(BaseModel):
     description: str = Field(default="", max_length=2000)  # 고객이 쓴 문장. untrusted로만 넘긴다
 
 
+class InquiryImageIn(BaseModel):
+    """문의에 붙이는 사진 한 장. 내용은 로그·오류에 싣지 않고 고객지원에 `untrusted`로만 넘긴다."""
+
+    model_config = {"extra": "forbid"}
+
+    ref: str = Field(max_length=200)
+    media_type: Literal["image/jpeg", "image/png", "image/webp"] = "image/jpeg"
+    data_base64: str = Field(max_length=inquiries.MAX_IMAGE_BASE64)
+
+
 class InquiryIn(BaseModel):
     """고객 문의 접수. 주문 선택이 필수다(결정 1). 제목·본문 길이는 서버가 확인한다."""
 
@@ -176,6 +186,9 @@ class InquiryIn(BaseModel):
     order_id: str
     subject: str | None = None
     body: str
+    images: list[InquiryImageIn] = Field(
+        default_factory=list
+    )  # 영수증 사진. 서버가 개수·크기를 확인
 
 
 class InquiryFeedbackIn(BaseModel):
@@ -601,14 +614,20 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
         user_id = inquiries.buyer_number(body.buyer_id)
         inquiries.check_order_id(body.order_id)
         subject, message = inquiries.clean_text(body.subject, body.body, body.order_id)
+        photos = inquiries.clean_images([i.model_dump() for i in body.images])
         order = shop.get_order(body.order_id)  # 읽기만 한다. 없으면 404
         if order["buyer_id"] != body.buyer_id:  # 남의 주문도 같은 404로 답한다
             raise ShopError("ORDER_NOT_FOUND", "주문을 찾을 수 없다", 404)
         inquiry_limiter.hit(body.buyer_id)
-        digest = inquiries.digest(body.buyer_id, body.order_id, subject, message)
+        digest = inquiries.digest(
+            body.buyer_id, body.order_id, subject, message, images_key=inquiries.images_key(photos)
+        )
         context_id = (
             f"{support_client.CLAIM_CONTEXT_PREFIX}{digest[:12]}"  # 같은 접수는 같은 사건·키
         )
+        untrusted: dict = {"subject": subject, "message": message}
+        if photos:
+            untrusted["images"] = photos
         inquiry = await support_client.call(
             "create_inquiry",
             context_id,
@@ -617,7 +636,7 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
                 "customer_name": storefront.get_user(body.buyer_id)["display_name"],
                 "order_id": body.order_id,
             },
-            {"subject": subject, "message": message},
+            untrusted,
             target=f"user:{user_id}:{digest}",
         )
         if "id" not in inquiry:  # 문의가 아닌 응답은 성공으로 내보내지 않는다

@@ -8,10 +8,15 @@
   `SHOP_INQUIRY_RATE_PER_BUYER`(기본 5/분), `SHOP_INQUIRY_RATE_GLOBAL`(기본 60/분).
   중복 접수 창은 `SHOP_INQUIRY_DEDUP_WINDOW_SEC`(기본 600초).
   본문 상한은 `SHOP_INQUIRY_MAX_BODY`(기본 2000자), 제목은 `SHOP_INQUIRY_MAX_SUBJECT`(기본 100자).
+- 영수증 사진(`images`)은 최대 4장, 한 장 약 4.5MB(base64 6,000,000자), 합계 12,000,000자까지다.
+  형식이 base64가 아니면 400이다. 사진 내용은 로그·오류 메시지에 싣지 않고, 고객지원에는
+  `untrusted.images`로 가공 없이 넘긴다(저장은 고객지원이 읽은 요약만, 사진은 저장하지 않는다).
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import os
 import re
@@ -24,6 +29,9 @@ from ax_shop_api.service import ShopError
 BUYER_ID = re.compile(r"^buy_([0-9]{4,9})$")  # ASCII 숫자만(\d는 유니코드 숫자도 받는다)
 ORDER_ID = re.compile(r"^ord_[0-9]+$")
 WINDOW_SECONDS = 60.0
+MAX_IMAGES = 4
+MAX_IMAGE_BASE64 = 6_000_000  # 고객지원 `EvidenceImageIn`과 같은 한도
+MAX_IMAGES_TOTAL = MAX_IMAGE_BASE64 * 2
 
 
 def _int_env(name: str, default: int) -> int:
@@ -53,6 +61,8 @@ def digest(
     subject: str,
     message: str,
     now: Callable[[], float] = time.time,
+    *,
+    images_key: str = "",
 ) -> str:
     """같은 구간의 같은 접수(구매자·주문·제목·본문)는 같은 값이다.
 
@@ -61,7 +71,36 @@ def digest(
     """
     bucket = int(now() // dedup_window())
     joined = "".join((buyer_id, order_id, subject, message, str(bucket)))
+    if images_key:  # 사진이 없으면 예전과 같은 키다(이미 접수된 재시도와 맞는다)
+        joined += "" + images_key
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
+def clean_images(images: list[dict]) -> list[dict]:
+    """사진 개수·크기·base64 형식을 확인한다. 오류 메시지에 사진 내용을 싣지 않는다."""
+    if len(images) > MAX_IMAGES:
+        raise ShopError("TOO_MANY_IMAGES", f"사진은 최대 {MAX_IMAGES}장까지 보낼 수 있다", 400)
+    total = 0
+    for item in images:
+        data = item["data_base64"]
+        total += len(data)
+        try:
+            base64.b64decode(data, validate=True)
+        except (binascii.Error, ValueError):
+            raise ShopError("INVALID_IMAGE", "사진 형식이 올바르지 않다", 400) from None
+    if total > MAX_IMAGES_TOTAL:
+        raise ShopError("IMAGES_TOO_LARGE", "사진 크기가 너무 크다", 413)
+    return [dict(item) for item in images]
+
+
+def images_key(images: list[dict]) -> str:
+    """같은 사진인지 가리는 해시(내용 대신). 사진이 없으면 빈 문자열이라 기존 키가 그대로다."""
+    if not images:
+        return ""
+    sha = hashlib.sha256()
+    for item in images:
+        sha.update(item["data_base64"].encode("ascii"))
+    return sha.hexdigest()
 
 
 def check_order_id(order_id: str) -> None:

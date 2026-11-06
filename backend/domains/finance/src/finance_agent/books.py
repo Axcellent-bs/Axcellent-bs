@@ -543,6 +543,8 @@ def _norm_exec(raw: Any) -> dict[str, Any] | None:
 
 
 _live_cache: tuple[float, Books] | None = None  # (모은 시각 monotonic, 장부)
+# 새 장부를 캐시에 넣은 뒤 부른다 (화면 응답 미리 만들기, `screen_cache.py`)
+ON_NEW_BOOKS: list[Callable[[], None]] = []
 _live_inflight: asyncio.Task[Books] | None = None
 
 
@@ -577,6 +579,11 @@ async def _collect_live(full: bool = False) -> Books:
     else:
         await off(warm, books)
         _live_cache = (time.monotonic(), books)
+        for hook in ON_NEW_BOOKS:
+            try:
+                hook()
+            except Exception:  # 화면 미리 만들기가 실패해도 장부는 그대로 쓴다
+                logger.exception("새 장부 알림 처리 실패")
     return books
 
 

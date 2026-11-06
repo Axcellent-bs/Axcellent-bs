@@ -89,6 +89,7 @@
 
 ## 영수증·환불·교환 요청 분석 (`receipts.py`, `claim_analysis.py`)
 둘 다 **읽기 skill**(요청 가능: dashboard-api, orchestrator)이라 상태를 바꾸지 않고, 접수·지급은 하지 않는다.
+- 접수 때 사진 첨부: `create_inquiry`는 선택 `untrusted.images`(같은 형식·한도)를 받는다(shop-api `POST /api/shop/inquiries`의 `images`가 넘긴다). 접수가 끝난 뒤 같은 대조를 돌려 결과를 문의의 AI 처리 내력(`receipt_checked`)에 남기고, 상담 콘솔의 영수증 카드가 그걸 그대로 보여 준다. 사진 자체는 저장하지 않고 로그에도 남기지 않는다. 읽지 못했거나(`unavailable`·`failed`·`skipped`) 주문이 없어도 접수는 막지 않고 상태만 남겨 상담원이 직접 확인한다. 사진은 서버에 `SUPPORT_VISION=on`과 이미지 모델 설정이 있을 때만 읽는다(외부 모델로 나가므로 고객 동의 문구는 화면 몫).
 - `analyze_receipt`: 영수증 글(`untrusted.receipt_text`)과 사진(`untrusted.images`, 최대 4장)에서 금액·날짜·주문번호·배송비·품목을 **코드(정규식)가 뽑아** 문의에 붙은 주문(shop-api)과 대조한다. 총 결제금액은 "총 결제·결제금액" 줄을 우선하고, 후보가 서로 다르면 고르지 않는다(`ambiguous_total`). 금액은 실결제 현금 또는 포인트 전 총액과 같으면 맞다고 본다. 날짜는 하루 차이까지 허용한다. 결과는 `consistent`·`mismatch`·`insufficient`와 불일치 코드(`RECEIPT_AMOUNT_MISMATCH`·`RECEIPT_DATE_MISMATCH`·`RECEIPT_ORDER_NO_MISMATCH`·`RECEIPT_SHIPPING_MISMATCH`·`RECEIPT_ITEM_UNKNOWN`·`RECEIPT_ITEM_AMOUNT_MISMATCH`)뿐이다. **환불 판정은 하지 않는다.**
   - 개인정보(카드번호·전화번호·계좌 등)는 가린 뒤에 읽고, 결과에는 뽑은 사실과 가린 종류만 담는다. 영수증 원문과 사진은 어디에도 저장하지 않는다.
   - 사진은 이미지 분석기가 꽂혀 있을 때만 읽는다. 꽂혀 있지 않으면 `images_status: unavailable`로 읽지 못했다고 알리고 아무것도 지어내지 않는다. 글과 사진 값이 다르면 글 값을 쓰고 알린다. 개수·크기·형식(jpeg·png·webp)을 넘으면 읽지 않는다(`skipped`).

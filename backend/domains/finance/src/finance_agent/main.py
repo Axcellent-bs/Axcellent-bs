@@ -20,7 +20,7 @@ from ax_agent_template import events
 from ax_agent_template.events import subscribe
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
-from finance_agent import closing, exports, persist, tax
+from finance_agent import closing, exports, persist, screen_cache, tax
 from finance_agent import finance_config as fc
 from finance_agent.finance_api import add_finance_api, run_export_cycle
 from finance_agent.handlers import (
@@ -33,6 +33,7 @@ from finance_agent.handlers import (
 )
 from finance_agent.incidents import add_incident_api
 from finance_agent.ledger import EVENTS
+from finance_agent.screen_cache import add_screen_cache
 from finance_agent.selftest import SELF_TEST_TTL_HOURS, is_fresh, run_self_test
 
 # 대시보드(dashboard-web)는 브라우저에서 이 서버를 바로 부른다. 대부분 조회(GET)이고, 사람 결정
@@ -248,6 +249,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         tasks.append(
             asyncio.create_task(daily_closing_loop(closing_interval, DAILY_CLOSING_FIRST_DELAY))
         )
+    if screen_cache.enabled():  # 실제 모드: 장부와 첫 화면을 미리 만든다
+        tasks.append(asyncio.create_task(screen_cache.prime()))
     try:
         yield
     finally:
@@ -347,6 +350,7 @@ def add_read_api(app: FastAPI) -> None:
 def create_app() -> FastAPI:
     app = create_agent_app(load_card(), HANDLERS)
     app.router.lifespan_context = lifespan
+    add_screen_cache(app)  # CORS 안쪽: 기억해 둔 응답에도 CORS 머리글이 붙는다
     app.add_middleware(DashboardCORS, origins=cors_origins())
     add_read_api(app)
     add_finance_api(app)

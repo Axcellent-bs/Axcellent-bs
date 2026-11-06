@@ -11,20 +11,6 @@ export type Host = {
   lastSeen: string
 }
 
-export type Integration = {
-  id: string
-  name: string
-  kind: string
-  url: string
-  apiBase: string
-  apiKey: string
-  scopes: string[]
-  status: 'connected' | 'untested' | 'failed'
-  lastSync: string | null
-}
-
-export const SCOPES = ['주문', '결제', '고객 문의', '리뷰', '정산', '배포 기록']
-
 const now = () => new Date().toISOString()
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString()
 
@@ -38,13 +24,6 @@ const DEFAULT_HOSTS: Host[] = [
   { id: 'h8', dept: '운영팀', hostname: 'ops-pc-01', ip: '192.168.10.52', status: 'online', agent: 'AXcellent 0.9', lastSeen: minutesAgo(1) },
   { id: 'h5', dept: '재무팀', hostname: 'fin-pc-01', ip: '192.168.10.61', status: 'online', agent: 'AXcellent 0.9', lastSeen: minutesAgo(0) },
   { id: 'h6', dept: '데이터분석팀', hostname: 'data-pc-01', ip: '192.168.10.71', status: 'offline', agent: 'AXcellent 0.9', lastSeen: minutesAgo(47) },
-]
-
-const DEFAULT_INTEGRATIONS: Integration[] = [
-  {
-    id: 'i1', name: '캣북스 온라인 서점', kind: '쇼핑몰', url: 'https://shop.catbooks.example', apiBase: 'https://shop.catbooks.example/api',
-    apiKey: 'cb_live_demo_7f3a', scopes: ['주문', '결제', '고객 문의', '리뷰', '정산'], status: 'connected', lastSync: minutesAgo(3),
-  },
 ]
 
 function usePersisted<T>(key: string, fallback: T): [T, Dispatch<SetStateAction<T>>] {
@@ -67,7 +46,6 @@ function usePersisted<T>(key: string, fallback: T): [T, Dispatch<SetStateAction<
 }
 
 export const useHosts = () => usePersisted('axcellent-demo-hosts-v4', DEFAULT_HOSTS)
-export const useIntegrations = () => usePersisted('axcellent-demo-integrations', DEFAULT_INTEGRATIONS)
 export const newId = () => Math.random().toString(36).slice(2, 9)
 export { now }
 

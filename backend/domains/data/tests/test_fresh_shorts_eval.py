@@ -22,7 +22,7 @@ import pytest
 pytestmark = pytest.mark.eval
 
 HERE = Path(__file__).resolve().parents[1] / "eval" / "fresh_shorts"
-T0 = datetime(2026, 11, 5, 15, 0, tzinfo=UTC)  # 한국 11월 6일 0시
+T0 = datetime(2026, 11, 6, 8, 0, tzinfo=UTC)  # 장부 하루 시작: 태평양 11월 6일 0시 (한국 17시)
 
 
 def _load(name: str) -> ModuleType:
@@ -77,7 +77,7 @@ class FakeYouTube:
         from data_agent import youtube_quota
 
         self.ledger.add("fresh_shorts", units, search=search,
-                        day=self.now.astimezone(youtube_quota.KST).date())  # fmt: skip
+                        day=youtube_quota.day_of(self.now))  # fmt: skip
 
     def _stat(self, v: dict):  # noqa: ANN202
         from data_agent.connectors.youtube import VideoStat
@@ -154,7 +154,7 @@ def _run(case: dict, tmp: Path, monkeypatch: pytest.MonkeyPatch) -> dict | None:
         finds += result.searches
         skipped += result.skipped_searches
         track_ticks += 1 if result.tracked_calls else 0
-        day = yt.now.astimezone(youtube_quota.KST).date()
+        day = youtube_quota.day_of(yt.now)
         peak = max(peak, sum(u for c, u, _ in ledger.rows(day) if c == "fresh_shorts"))
     conn = sqlite3.connect(tmp / "youtube.db")
     snaps = dict(conn.execute("SELECT video_id, COUNT(*) FROM snapshots WHERE sources ="
