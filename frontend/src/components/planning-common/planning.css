@@ -1209,3 +1209,7 @@ a.idc:hover { border-color: var(--primary); text-decoration: none; }
 /* 개발 작업의 바뀐 파일 표: 이유 칸이 너무 좁아지지 않게 */
 table.data td.path-cell { white-space: normal; overflow-wrap: anywhere; min-width: 14em; }
 table.data td.why-cell { min-width: 12em; }
+/* 문장 줄바꿈: 서비스가 넣은 \n과 " · " 항목을 줄로 */
+.dev-line { display: block; }
+.dev-line + .dev-line { margin-top: 2px; }
+.pre-line { white-space: pre-line; }

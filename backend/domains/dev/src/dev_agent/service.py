@@ -109,6 +109,7 @@ from dev_agent.deploy_store import get_deploy_store
 from dev_agent.external_actions import MOCK_CONNECTION, VCS_WRITE_ACTIONS
 from dev_agent.vcs import inventory
 from dev_agent.vcs.base import VcsError
+from dev_agent.wording import gate_text
 
 MAX_INSTRUCTION_CHARS = 1000  # 사람 수정 지시 길이
 
@@ -471,7 +472,7 @@ class DevService(PlanningCore):
                         held.append(p.number)
             s.activity.append(
                 self._act(self.clock(), ctx, requester, "dev", "receive_request_pause", "A2A",
-                          f"{text} · 멈춘 작업 {len(stopping)} · PR {len(held)}", "A")
+                          f"{text}\n멈춘 작업 {len(stopping)} · PR {len(held)}", "A")
             )  # fmt: skip
             out = {"outcome": "applied", "tasks_stopped": stopping, "prs_held": held}
             return ActionResult(outcome="applied", output=out)
@@ -1559,9 +1560,9 @@ class DevService(PlanningCore):
                 "orchestrator",
                 "cross_check",
                 "A2A",
-                f"{p.id} 교차검증 근거: "
-                + " · ".join(f"{x.label} {x.value}" for x in ev.lines)
-                + (f" → 걸림 {', '.join(ev.rules)}" if ev.rules else " → 근거 통과"),
+                f"{p.id} 교차검증 근거\n"
+                + "\n".join(f"{x.label} {x.value}" for x in ev.lines)
+                + (f"\n걸림 {', '.join(ev.rules)}" if ev.rules else "\n근거 통과"),
                 "read",
             )
         )
@@ -2675,7 +2676,7 @@ class DevService(PlanningCore):
             req = self._request_of_spec(s, sp) if sp else None
             ctx = req.context_id if req else f"task:{task_id}"
             t = self.clock()
-            text = f"{task_id} 기획에 돌려보냄 ({label}, 사람{f' · {who}' if who else ''}): {why}"
+            text = f"{task_id} 기획에 돌려보냄 ({label}, 사람{f' · {who}' if who else ''})\n{why}"
             n = sum(1 for g in self.gate_calls if g.action == "dev_task_return") + 1
             await self._execute("dev_task_return", ctx, f"{task_id}:{n}", text, {"to": to})
             s.activity.append(self._act(t, ctx, "human", "dev", "dev_task_return", "사람", text))
@@ -2694,8 +2695,8 @@ class DevService(PlanningCore):
             x.coding.status = "returned"
             x.coding.returned_to, x.coding.returned_reason = to, why
             closed = pr is not None and pr.closed
-            x.coding.error = f"사람이 기획에 돌려보냄 ({label}): {why}" + (
-                f" · {pr.id} 닫음" if closed else ""
+            x.coding.error = f"사람이 기획에 돌려보냄 ({label})\n{why}" + (
+                f"\n{pr.id} 닫음" if closed else ""
             )
             x.coding.updated_at = t
             x.state = "중단"
@@ -3183,7 +3184,7 @@ class DevService(PlanningCore):
             except GateRefused as exc:
                 held = exc.decision.status == "held"
                 cr.status = "waiting_human" if held else "failed"
-                cr.error = f"실행 관문이 generate_pr를 허락하지 않음 ({exc.decision.status})"
+                cr.error = gate_text("generate_pr", exc.decision.status)
                 cr.error += inventory.hold_note(cr.connection) if held else ""
                 if held:
                     cr.hold_key, cr.hold_review = key, exc.decision.review_id
