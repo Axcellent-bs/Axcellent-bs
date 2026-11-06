@@ -193,6 +193,8 @@ export function Work({ s, d, item, repo }: P & { item?: string; repo?: string })
 
 /** 글 안의 코드 번호(T-·SPEC-·REQ-·PR #)만 칩으로. 링크 안에서도 쓸 수 있게 링크는 만들지 않는다 */
 const CODE_RE = /(REQ-\d+|SPEC-[A-Z]?\d+(?: R\d+)?|T-[A-Z]?\d+|PR #\d+|PROP-\d+)/
+/** 줄바꿈(\n)과 " · "로 이어 붙인 항목(문제: … · 목표: …)을 줄로 나눠 보여 준다 */
+export const Lines = ({ text }: { text: string }) => <>{text.split(/\n|\s+·\s+/).filter(Boolean).map((x, i) => <span key={i} className="dev-line"><Chipped text={x} /></span>)}</>
 const Chipped = ({ text }: { text: string }) => <>{text.split(CODE_RE).map((x, i) => (i % 2 ? <span key={i} className="mono idc">{x}</span> : x))}</>
 
 // 코드 역추적 (코드 줄 → PR → 작업 → 문단 → 결정 → 요청 → 근거). 연결은 문단 id로만 따라간다
@@ -219,7 +221,7 @@ function Trace({ s, pr, line: picked, setLine }: { s: S; pr: PR; line?: CodeLine
               <span className="trace-kind">{x.kind}</span>
               <div>
                 <div>{x.href ? <a href={toPath(x.href)}><Chipped text={x.title} /></a> : <b><Chipped text={x.title} /></b>}</div>
-                {x.detail && <div className="muted small">{x.detail}</div>}
+                {x.detail && <div className="muted small"><Lines text={x.detail} /></div>}
               </div>
             </li>
           ))}

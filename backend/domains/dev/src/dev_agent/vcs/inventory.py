@@ -258,7 +258,7 @@ def hold_note(cid: str | None) -> str:
     if st is None or not st.notice.hold:
         return ""
     cves = ", ".join(st.notice.kev_cves) or "KEV"
-    return f" · 연결 {cid} 긴급 취약({cves})으로 쓰기 보류 → 패치 확인 뒤 승인"
+    return f"\n연결 {cid} 긴급 취약({cves})으로 쓰기 보류\n패치 확인 뒤 승인"
 
 
 def _hold_of(cid: str) -> dict | None:

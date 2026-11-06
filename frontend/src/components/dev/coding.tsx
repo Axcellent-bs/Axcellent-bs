@@ -256,7 +256,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
     }
   }
   // 실행 관문이 PR 열기를 보류함 (보호 경로·한도 등): 사람이 승인하면 같은 코드로 PR을 연다
-  const heldPr = c.status === 'waiting_human' && !c.pr && (!!c.holdKey || (c.error ?? '').includes('generate_pr를 허락하지 않음 (held)'))
+  const heldPr = c.status === 'waiting_human' && !c.pr && (!!c.holdKey || (c.error ?? '').includes('generate_pr를 허락하지 않음 (held)') || (c.error ?? '').includes('안전 점검에서 PR 열기 보류'))
   const approveHold = () => act(async () => {
     const note = `${task.id} PR 열기 보류를 사람이 확인하고 승인`
     let ok = false
@@ -289,7 +289,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
         {c.status === 'covered' && <Tag tone="green">PR 없음 · {c.coveredBy?.length ? `${c.coveredBy.join(', ')}가 반영` : '앞 작업에 이미 들어감'}</Tag>}
       </span>
       {c.summary && <p>{c.summary}</p>}
-      {c.mode === 'subscription' && c.progress && <p className="muted">{c.progress}</p>}
+      {c.mode === 'subscription' && c.progress && <p className="muted pre-line">{c.progress}</p>}
       {!!files.length && (
         <div className="table-wrap">
           <table className="data">
@@ -308,7 +308,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
       )}
       {!!c.review?.notes.length && <ul>{c.review.notes.map((n, i) => <li key={i} className="muted">{n}</li>)}</ul>}
       {c.instruction && <p className="muted">지시: {c.instruction}</p>}
-      {c.error && <p className="tag-amber">{c.error.includes('generate_pr를 허락하지 않음') ? 'PR 열기 보류됨 · 승인 필요' : c.error}</p>}
+      {c.error && <p className="tag-amber pre-line">{c.error.includes('generate_pr를 허락하지 않음') ? 'PR 열기 보류됨 · 승인 필요' : c.error}</p>}
       {waitingPr && (
         <form className="flex gap-2" onSubmit={revise}>
           <input className="field flex-1" value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} placeholder="추가로 고칠 내용 (같은 PR에 커밋)" aria-label="추가 지시" />

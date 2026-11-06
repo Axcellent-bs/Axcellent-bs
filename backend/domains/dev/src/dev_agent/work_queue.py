@@ -34,6 +34,7 @@ from ax_workflow.models import PR, CodingFile, CodingRun, PrGate, State, Task
 from dev_agent import coder, vcs, vcs_bridge
 from dev_agent.vcs import inventory
 from dev_agent.vcs.base import BRANCH_PREFIX, VcsError
+from dev_agent.wording import gate_text
 
 if TYPE_CHECKING:
     from dev_agent.service import DevService
@@ -368,9 +369,7 @@ async def report_pr(
         if refused is not None:
             cr.status = "waiting_human"
             note = inventory.hold_note(cr.connection) if refused.status == "held" else ""
-            cr.error = (
-                f"실행 관문이 generate_pr를 허락하지 않음 ({refused.status}){note} → 사람 확인"
-            )
+            cr.error = gate_text("generate_pr", refused.status) + f"{note}\n사람 확인 필요"
             x.state = "C 보류"
             svc._hold(pr, WAIT_HUMAN, pr_check(s, pr), refused)
         else:

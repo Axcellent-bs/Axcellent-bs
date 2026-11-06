@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse, Response
 from ax_workflow.core import ActionError, GateRefused
 from dev_agent import work_queue
 from dev_agent.service import DevService
+from dev_agent.wording import gate_text
 from dev_agent.work_auth import require_worker
 
 PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")  # 앞이 최신
@@ -142,7 +143,7 @@ def _fail(exc: Exception) -> tuple[int, str, str]:
     if isinstance(exc, ActionError):
         return STATUS.get(exc.code, 400), exc.code, exc.message
     if isinstance(exc, GateRefused):
-        return 409, "GATE_REJECTED", f"실행 관문이 {exc.action}을 허락하지 않음"
+        return 409, "GATE_REJECTED", gate_text(exc.action)
     return 400, "INVALID_INPUT", str(exc)
 
 

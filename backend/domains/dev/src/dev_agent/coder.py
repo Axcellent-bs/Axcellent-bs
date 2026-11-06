@@ -33,6 +33,7 @@ from ax_workflow.core import GateRefused
 from ax_workflow.models import CodingFile
 from dev_agent import llm_env, llm_key, vcs_bridge
 from dev_agent.vcs.base import VcsAdapter, VcsError, check_path
+from dev_agent.wording import gate_text
 
 if TYPE_CHECKING:
     from dev_agent.service import DevService
@@ -954,8 +955,8 @@ async def _wait_turn(svc: DevService, job: Job, paths: list[str]) -> bool:
                 else f"앞 작업 {', '.join(undecided)}가 아직 고칠 파일을 고르는 중"
             )
             await svc.coding_step(
-                job, "queued", point="code.queue", text=f"{why} → 끝나면 이어서",
-                error=f"{why} → 끝나면 최신 코드로 이어서 해요", waiting_for=ids,
+                job, "queued", point="code.queue", text=f"{why}\n끝나면 이어서",
+                error=f"{why}\n끝나면 최신 코드로 이어서 해요", waiting_for=ids,
             )  # fmt: skip
             waited = True
         await asyncio.sleep(QUEUE_POLL_SECONDS)
@@ -982,9 +983,7 @@ async def run(svc: DevService, job: Job) -> None:
             from dev_agent.vcs import inventory  # 연결 보류 이유 (취약점 긴급)
 
             note = inventory.hold_note(job.connection) if status == "waiting_human" else ""
-            raise CoderStop(
-                status, f"실행 관문이 {exc.action}을 허락하지 않음 ({exc.decision.status}){note}"
-            ) from None
+            raise CoderStop(status, gate_text(exc.action, exc.decision.status) + note) from None
         except (CoderStop, CoderGone):
             raise
         except Exception as exc:  # noqa: BLE001 - 어떤 오류든 상태를 실패로 남긴다
@@ -1008,7 +1007,7 @@ async def run(svc: DevService, job: Job) -> None:
 async def _run(svc: DevService, job: Job) -> None:
     llm = get_llm()
     if llm is None:
-        raise CoderStop("failed", "LLM 설정이 없다")
+        raise CoderStop("failed", "서버 AI 키가 설정되지 않음")
     adapter = _adapter(job.connection)
 
     # 사람 수정 지시: 열린 PR 브랜치의 지금 글 위에서 고쳐 같은 PR에 커밋한다
@@ -1023,7 +1022,7 @@ async def _run(svc: DevService, job: Job) -> None:
             job,
             "writing",
             point="code.write",
-            text=f"작성해 둔 코드로 PR 다시 시도 · {write_text(draft.rows)}",
+            text=f"작성해 둔 코드로 PR 다시 시도\n{write_text(draft.rows)}",
             files=draft.rows,
             summary=draft.summary,
             attempts=draft.attempts,
@@ -1145,7 +1144,7 @@ async def _review(svc: DevService, job: Job, llm: Any, d: Draft) -> Draft:
             job,
             "writing",
             point="code.write",
-            text=f"리뷰 지적 반영 · {write_text(d.rows)}",
+            text=f"리뷰 지적 반영\n{write_text(d.rows)}",
             files=d.rows,
         )
 
@@ -1169,11 +1168,11 @@ async def _freshen(svc: DevService, job: Job, d: Draft) -> Draft:
         )
     llm = get_llm()
     if llm is None:
-        raise CoderStop("failed", "LLM 설정이 없다")
+        raise CoderStop("failed", "서버 AI 키가 설정되지 않음")
     d.freshened = True
     await svc.coding_step(
         job, "writing", point="code.rebase",
-        text=f"기준 코드가 바뀐 파일 {len(stale)}개 → 최신 글 위에서 다시 씀",
+        text=f"기준 코드가 바뀐 파일 {len(stale)}개\n최신 코드 위에서 다시 씀",
     )  # fmt: skip
     reasons = {r.path: r.reason for r in d.rows}
     d.originals.update({p: latest[p] for p in stale})
@@ -1198,7 +1197,7 @@ async def _freshen(svc: DevService, job: Job, d: Draft) -> Draft:
             " → 사람 확인 (PR 없음)",
         )
     await svc.coding_step(
-        job, "writing", point="code.write", text=f"최신 글 위에서 다시 씀 · {write_text(d.rows)}",
+        job, "writing", point="code.write", text=f"최신 코드 위에서 다시 씀\n{write_text(d.rows)}",
         files=d.rows,
     )  # fmt: skip
     d.verdicts.append("다시 씀")
@@ -1235,7 +1234,7 @@ async def _wait_ci(svc: DevService, job: Job) -> str | None:
             return f"{pr.id} CI 실패 ({names[:120]}) → 사람 확인"
         if not checks.runs and waited >= NO_CI_GRACE_SECONDS:
             await svc.coding_step(
-                job, "reviewing", point="code.ci", text=f"{pr.id} CI 없음 → 검사 없이 이어감"
+                job, "reviewing", point="code.ci", text=f"{pr.id} CI 없음\n검사 없이 이어감"
             )
             return None
         if waited >= CI_WAIT_SECONDS:
@@ -1306,7 +1305,7 @@ async def _revise(svc: DevService, job: Job, llm: Any, adapter: VcsAdapter) -> N
             "waiting_human", f"바뀐 줄 {total_lines(rows)}줄 > {MAX_TOTAL_LINES}줄 → 사람 확인"
         )
     await svc.coding_step(
-        job, "writing", point="code.write", text=f"사람 지시 반영 · {write_text(rows)}", files=rows
+        job, "writing", point="code.write", text=f"사람 지시 반영\n{write_text(rows)}", files=rows
     )
 
     d = await _review(svc, job, llm, Draft(job.connection, picks, base, contents, rows, None))
