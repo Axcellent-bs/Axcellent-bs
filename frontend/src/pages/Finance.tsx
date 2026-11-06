@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router";
+import { Navigate, useLocation, useNavigate } from "react-router";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ClosingSection } from "@/components/finance/Closing";
 import { DeadlineSection, PayablesSection, VarianceSection } from "@/components/finance/CloseControls";
@@ -105,9 +105,12 @@ async function settle<T>(p: Promise<T>): Promise<[T | null, string | null]> {
   try { return [await p, null]; } catch (e) { return [null, (e as Error).message]; }
 }
 
-/** 화면 맨 위 전환: 장애 사건 재무(기본) | 평상시 재무 업무. 주소가 #daily 또는 #closing 같은 모듈 이름이면 평상시 업무 */
+/** 화면 전환은 왼쪽 사이드바의 하위 탭이 한다(demo/services.ts finance 서비스 children, 데이터 AI와 같은 짜임):
+ *  /finance 장애 사건 재무 · /finance/daily 평상시 재무 업무(①~⑥ 업무 탭은 #closing 같은 해시).
+ *  옛 주소(/finance#daily, /finance#closing 등)는 새 주소로 옮긴다 */
 type Mode = "incident" | "daily";
-const MODE_LABEL: Record<Mode, string> = { incident: "장애 사건 재무", daily: "평상시 재무 업무" };
+const DAILY_PATH = "/finance/daily";
+const INCIDENT_PATH = "/finance";
 
 const scrollToId = (id: string) => requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }));
 
@@ -116,22 +119,20 @@ export default function FinancePage() {
   const navigate = useNavigate();
   const hashTab = location.hash.replace(/^#/, "");
   const isTab = (FINANCE_TABS as string[]).includes(hashTab);
-  const mode: Mode = isTab || hashTab === "daily" ? "daily" : "incident";
+  const mode: Mode = location.pathname.startsWith(DAILY_PATH) ? "daily" : "incident";
+  const legacyDaily = mode === "incident" && (isTab || hashTab === "daily");
   const tab: FinanceTab = isTab ? (hashTab as FinanceTab) : "closing";
   const urlIncident = new URLSearchParams(location.search).get("incident");
   const [closingFocus, setClosingFocus] = useState<{ date: string } | null>(null);
   const openTab = useCallback((t: FinanceTab, scroll = false) => {
-    navigate({ search: location.search, hash: `#${t}` }, { replace: true });
+    navigate({ pathname: DAILY_PATH, search: location.search, hash: `#${t}` }, { replace: location.pathname.startsWith(DAILY_PATH) });
     if (scroll) scrollToId("finance-modules");
-  }, [navigate, location.search]);
-  const openMode = useCallback((m: Mode) => {
-    navigate({ search: location.search, hash: m === "daily" ? "#daily" : "" }, { replace: true });
-  }, [navigate, location.search]);
+  }, [navigate, location.search, location.pathname]);
   /** 사건 고르기: 주소(?incident=)에 남겨 새로고침해도 같은 사건을 본다 */
   const openIncident = useCallback((id: string, scroll = false) => {
-    navigate({ search: `?incident=${encodeURIComponent(id)}`, hash: "" }, { replace: true });
+    navigate({ pathname: INCIDENT_PATH, search: `?incident=${encodeURIComponent(id)}`, hash: "" }, { replace: location.pathname === INCIDENT_PATH });
     if (scroll) scrollToId("incident-finance");
-  }, [navigate]);
+  }, [navigate, location.pathname]);
 
   // 30초마다, 그리고 무언가를 바꾼 뒤 모든 섹션을 새로 받는다
   const [tick, setTick] = useState(0);
@@ -205,6 +206,11 @@ export default function FinancePage() {
   const otherPending = pendingReviews.filter((r) => !todoReviewIds.has(r.review_id));
   const todoCount = todo.length + (otherPending.length ? 1 : 0);
   const anyTodoLoaded = overview.env || reviews;
+
+  // 옛 주소(/finance#daily, /finance#closing 등)는 평상시 업무 주소로 옮긴다 (?incident= 같은 쿼리는 그대로)
+  if (legacyDaily) {
+    return <Navigate replace to={{ pathname: DAILY_PATH, search: location.search, hash: hashTab === "daily" ? "" : location.hash }} />;
+  }
 
   return (
     <div className="w-full space-y-6 px-4 pb-12 pt-2 sm:space-y-8 sm:px-8">
@@ -293,18 +299,8 @@ export default function FinancePage() {
         {overview.env && todoCount === 0 && <p className="mt-2 text-sm text-emerald-800">재무 AI가 맞춰 본 결과, 지금 사람이 볼 예외가 없습니다.</p>}
       </section>
 
-      {/* 맨 위 전환: 장애 사건 재무 | 평상시 재무 업무 */}
-      <div role="tablist" aria-label="재무 화면" className="flex w-full gap-1 rounded-2xl bg-surface p-1 ring-1 ring-ink-100 sm:w-auto sm:max-w-md">
-        {(["incident", "daily"] as Mode[]).map((m) => (
-          <button key={m} type="button" role="tab" id={`mode-${m}`} aria-selected={mode === m} aria-controls={`mode-panel-${m}`} onClick={() => openMode(m)}
-            className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${mode === m ? "bg-brand-600 text-white" : "text-ink-700 hover:bg-ink-100"}`}>
-            {MODE_LABEL[m]}
-          </button>
-        ))}
-      </div>
-
       {mode === "incident" && (
-        <div role="tabpanel" id="mode-panel-incident" aria-labelledby="mode-incident">
+        <div aria-label="장애 사건 재무">
           <ErrorBoundary title="사건 화면을 그리지 못했습니다">
             <IncidentFinance list={incidents} selected={selectedIncident} onSelect={(id) => openIncident(id)} tick={tick} />
           </ErrorBoundary>
@@ -312,7 +308,7 @@ export default function FinancePage() {
       )}
 
       {mode === "daily" && (
-      <div role="tabpanel" id="mode-panel-daily" aria-labelledby="mode-daily" className="space-y-6 sm:space-y-8">
+      <div aria-label="평상시 재무 업무" className="space-y-6 sm:space-y-8">
       {/* 오늘의 재무 */}
       <section aria-labelledby="today" className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
