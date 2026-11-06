@@ -295,8 +295,15 @@ def llm_usage_today(env: Mapping[str, str]) -> LlmDailyUsage:
         token_cap=now.token_cap, reached=now.reached, note=note,
         by_task=[LlmTaskUsage(skill=s, task=t, calls=c, tokens=n)
                  for s, t, c, n in BUDGET.by_task(now.day)],
-        reserve_ratio=ratio, reserving=reserving,
+        reserve_ratio=ratio, reserving=reserving, status=_llm_status(env),
     )  # fmt: skip
+
+
+def _llm_status(env: Mapping[str, str]):  # noqa: ANN202 - LlmStatus
+    """LLM 오류 원인·중단 상태 (키 이름·모델·호스트만, 값 없음)."""
+    from data_agent.llm_halt import status
+
+    return status(env)
 
 
 # ---------------------------------------------------------------- 스냅샷 수집기 상태

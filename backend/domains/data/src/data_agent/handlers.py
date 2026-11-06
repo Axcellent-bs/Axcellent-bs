@@ -40,7 +40,7 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from ax_agent_template.client import call_agent
-from ax_agent_template.llm import LLMClient
+from ax_agent_template.llm import LLMClient, LLMResponseError
 from ax_contracts.schemas import (
     TENANT_ID_DEFAULT,
     AgentRequest,
@@ -70,7 +70,7 @@ from ax_contracts.schemas.data import (
     YouTubeVelocityRequest,
 )
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
-from data_agent import llm_budget, llm_failure
+from data_agent import llm_budget, llm_failure, llm_halt
 from data_agent.clients.fact_sources import notices_at
 from data_agent.clients.log_client import get_log_source
 from data_agent.clients.shop_client import (
@@ -125,11 +125,21 @@ class TimedLLMClient(LLMClient):
         return (current_name() or "unknown").split("@", 1)[0]
 
     def _check(self) -> None:
+        """부르기 전에: 오류 원인으로 멈춘 상태(`llm_halt`) → 우리 하루 상한. 걸리면 안 부른다."""
         try:
+            llm_halt.HALT.check()
             llm_budget.BUDGET.check(skill=self._skill())
-        except llm_budget.LLMDailyCapReached as error:  # 덜 만든 결과는 짧게만 저장 (capped)
+        except (llm_halt.LLMHalted, llm_budget.LLMDailyCapReached) as error:  # 짧게만 저장
             llm_failure.mark(error)
             raise
+
+    @staticmethod
+    def _after(error: Exception | None) -> None:
+        """응답 상태로 원인 기록: 401·403 키 오류, 429 공급자 한도. 성공이면 연속 429를 지운다."""
+        if error is None:
+            llm_halt.HALT.record_success()
+        elif isinstance(error, LLMResponseError):
+            llm_halt.HALT.record_error(error.status_code)
 
     async def structured(self, *args: Any, **kwargs: Any) -> Any:
         self._check()
@@ -137,24 +147,30 @@ class TimedLLMClient(LLMClient):
         token = _LLM_TASK.set((self._skill(), llm_budget.task_of(schema)))
         try:
             with stage("llm"):
-                return await super().structured(*args, **kwargs)
+                result = await super().structured(*args, **kwargs)
         except Exception as error:  # 실패한 계산은 저장하지 않게 표시 (llm_failure)
+            self._after(error)
             llm_failure.mark(error)
             raise
         finally:
             _LLM_TASK.reset(token)
+        self._after(None)
+        return result
 
     async def embed(self, texts: list[str], context_id: str | None = None) -> list[list[float]]:
         self._check()
         token = _LLM_TASK.set((self._skill(), llm_budget.EMBED_TASK))
         try:
             with stage("llm"):
-                return await super().embed(texts, context_id)
+                result = await super().embed(texts, context_id)
         except Exception as error:
+            self._after(error)
             llm_failure.mark(error)
             raise
         finally:
             _LLM_TASK.reset(token)
+        self._after(None)
+        return result
 
     def record_usage(
         self, context_id: str | None, model: str | None, input_tokens: int, output_tokens: int,
@@ -768,6 +784,7 @@ async def _trend_insight_brief(request: AgentRequest) -> AgentResult:
     if (hit := cached_brief(data, env)) is not None:
         note_cache("hit")
         output = hit.output.model_dump(mode="json")
+        output["llm_status"] = llm_halt.status(env).model_dump(mode="json")  # 응답 시점 상태
         return _result(request, TaskStatus.COMPLETED, outcome=hit.output.status, output=output,
                        evidence=hit.evidence)  # fmt: skip
     llm = get_llm()
@@ -835,11 +852,13 @@ async def _trend_insight_brief(request: AgentRequest) -> AgentResult:
         context_id=request.meta.context_id, opportunities_fn=opportunities,
         video_info=video_info, warned=warned, same_targets=cand_same_targets(env),
     )  # fmt: skip
+    output = result.output.model_dump(mode="json")
+    output["llm_status"] = llm_halt.status(env).model_dump(mode="json")  # 응답 시점 상태
     return _result(
         request,
         TaskStatus.COMPLETED,
         outcome=result.output.status,
-        output=result.output.model_dump(mode="json"),
+        output=output,
         evidence=result.evidence,
     )
 

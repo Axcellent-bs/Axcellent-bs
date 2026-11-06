@@ -2123,6 +2123,8 @@ class TrendInsightBriefOutput(AxModel):
     facts: list[DataFact] = Field(default_factory=list)
     schema_version: str = ""
     snapshot_id: str | None = None
+    # 아래는 예전 응답은 없다. 지금 data LLM 상태 (오류 원인·중단). 저장분을 줄 때도 응답 시점 값
+    llm_status: LlmStatus | None = None
 
 
 # ------------------------------------------------ 도메인 프로필 (domain_profile)
@@ -2330,6 +2332,32 @@ class LlmDailyUsage(AxModel):
     by_task: list[LlmTaskUsage] = Field(default_factory=list)
     reserve_ratio: float | None = Field(default=None, ge=0, le=1)  # 이 비율부터 브리프 몫만
     reserving: bool = False  # 지금 브리프·기회 카드 몫만 남기고 나머지는 다음 날로 미룸
+    # 아래는 예전 응답은 없다. LLM 오류 원인과 호출 중단 상태
+    status: LlmStatus | None = None
+
+
+# LLM 상태: ok, key_error = 401·403 (그날 중단), provider_limit = 429 (1시간 뒤 다시, 3번 연속이면
+# 그날 중단), our_cap = 우리 하루 상한 도달
+LlmState = Literal["ok", "key_error", "provider_limit", "our_cap"]
+
+
+class LlmStatus(AxModel):
+    """data LLM 오류 원인과 중단 상태. 키·주소 값은 담지 않는다 (키 이름·호스트만)."""
+
+    state: LlmState = "ok"
+    tone: Literal["none", "red", "yellow", "blue"] = "none"  # 화면 색 (빨강·노랑·파랑)
+    title: str | None = None  # 예: "LLM 키 오류 (401·403)"
+    detail: str | None = None  # 예: "쓰는 키: DATA_LLM_API_KEY · 오늘은 호출을 멈췄습니다. …"
+    # "DATA_LLM_API_KEY" · "공통 LLM_API_KEY(폴백)" · "키 없음" (이름만, 값 아님)
+    key_source: str = "키 없음"
+    model: str | None = None  # 모델 이름 (설정 값)
+    base_host: str | None = None  # base_url의 호스트만
+    halted_until: UtcDatetime | None = None  # 이 시각까지 호출하지 않음
+    strikes: int = Field(default=0, ge=0)  # 연속 429 수
+    calls: int = Field(default=0, ge=0)  # 오늘 호출 (우리 하루 상한 셈)
+    call_cap: int = Field(default=0, ge=0)
+    tokens: int = Field(default=0, ge=0)
+    token_cap: int = Field(default=0, ge=0)
 
 
 class LlmTaskUsage(AxModel):

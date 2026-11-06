@@ -6,7 +6,7 @@ import { OpportunityCards } from "@/components/data/OpportunityCards";
 import { AgeBars } from "@/components/data/AgeBars";
 import { useCompany } from "@/demo/company";
 import { CopyId, FoldRow, RestFacts, ShortsCard, TileRow, factLinks, shortsThumbs, shortsTiles, verdictOf } from "@/components/data/ShortsCard";
-import { DATA_SERVER, kpiLive, type DataFact, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
+import { DATA_SERVER, kpiLive, type DataFact, type LlmStatus, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
 
 // 트렌드 2단계(인사이트): 기획팀이 가져갈 인사이트 브리프 (v2 시안 ② 보드). trend_insight_brief(계약 TrendInsightBriefOutput) 응답 그대로.
 // - 카드 틀은 ShortsCard: 판정 칩 · 제목 · 한 문장(서버 line) · 숫자 타일 · 연결 상품 · 오른쪽 근거 숏츠 썸네일(최대 3) · "근거 전체 보기" 접힘 하나
@@ -197,6 +197,25 @@ function InsightCard({ i, facts }: { i: TrendInsight; facts: DataFact[] | undefi
 }
 
 /** 응답은 트렌드 화면(TrendScan)이 한 번 받는다. examples = 참고용 예시(기존 기획안 카드), examplesCount = 그 개수 */
+const LLM_TONE: Record<string, string> = {
+  red: "border-red-300 bg-red-50 text-red-800",
+  yellow: "border-amber-300 bg-amber-50 text-amber-800",
+  blue: "border-sky-300 bg-sky-50 text-sky-800",
+};
+
+/** data LLM이 멈췄을 때 원인 (서버 문구 그대로). 정상이면 아무것도 안 보인다 */
+function LlmStatusLine({ s }: { s: LlmStatus | null | undefined }) {
+  if (!s || s.state === "ok" || !s.title) return null;
+  const where = [s.model && `모델 ${s.model}`, s.base_host && `주소 ${s.base_host}`].filter(Boolean).join(" · ");
+  return (
+    <div role="status" className={`border px-4 py-3 text-sm ${LLM_TONE[s.tone] ?? LLM_TONE.blue}`}>
+      <p className="font-bold">{s.title}</p>
+      {s.detail && <p>{s.detail}</p>}
+      {where && <p className="text-xs opacity-80">{where}</p>}
+    </div>
+  );
+}
+
 export function InsightBrief({ state, examples, examplesCount }: {
   state: SkillState<TrendInsightBriefOutput>; examples: ReactNode; examplesCount: number | null;
 }) {
@@ -228,6 +247,7 @@ export function InsightBrief({ state, examples, examplesCount }: {
         : state.kind === "failed" ? <Empty>인사이트를 받지 못했어요. {state.reason} {DATA_SERVER}가 켜져 있는지 확인해 주세요.</Empty>
         : out && (
           <>
+            <LlmStatusLine s={out.llm_status} />
             {(out.status === "unknown" || all.length === 0) && <Empty>{out.reason ?? "오늘 인사이트가 없어요."}</Empty>}
             <section aria-labelledby="data-trend-insight-books" className="space-y-3">
               <h3 id="data-trend-insight-books" className="text-lg font-bold text-ink-900">{name} 책에서 뜨는 주제</h3>
