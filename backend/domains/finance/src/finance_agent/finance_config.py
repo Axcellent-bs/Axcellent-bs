@@ -56,10 +56,14 @@ class TaxConfig(_Strict):
 
 class BankConfig(_Strict):
     pg_memo: str = ""
+    transfer_days: int = Field(default=3, ge=0, le=14)
+    out_categories: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class CashflowConfig(_Strict):
     trailing_weeks: int = Field(default=8, ge=1, le=26)
+    min_cash_krw: int = Field(default=0, ge=0)
+    stale_days: int = Field(default=7, ge=1, le=60)
 
 
 class VarianceConfig(_Strict):

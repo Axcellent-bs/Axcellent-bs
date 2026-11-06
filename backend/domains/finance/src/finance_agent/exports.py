@@ -36,6 +36,7 @@ DATE_HEADERS = ("date", "거래일자", "거래일", "일자", "거래일시")
 AMOUNT_HEADERS = ("amount", "입금액", "입금", "맡기신금액", "입금금액")
 MEMO_HEADERS = ("memo", "적요", "내용", "거래내용", "기재내용")
 BALANCE_HEADERS = ("balance", "잔액", "거래후잔액", "거래후 잔액")
+WITHDRAW_HEADERS = ("withdrawal", "출금액", "출금", "찾으신금액", "출금금액")
 
 
 def _dir(env: str) -> Path | None:
@@ -225,7 +226,7 @@ def _won(text: str | None) -> int | None:
 
 
 def parse_csv(body: bytes) -> list[dict[str, Any]]:
-    """CSV → `bank.parse_rows`가 받는 줄. 출금만 있는 줄은 입금액이 비어 빠진다."""
+    """CSV → `bank.parse_rows`가 받는 줄. 출금은 음수 금액으로 넣는다."""
     for encoding in ("utf-8-sig", "cp949"):
         try:
             text = body.decode(encoding)
@@ -236,13 +237,18 @@ def parse_csv(body: bytes) -> list[dict[str, Any]]:
         raise ValueError("글자 인코딩을 읽지 못했다")
     reader = csv.DictReader(io.StringIO(text))
     headers = {h.strip() for h in (reader.fieldnames or []) if h}
-    if not headers & set(DATE_HEADERS) or not headers & set(AMOUNT_HEADERS):
-        raise ValueError("날짜와 입금액 칸을 찾지 못했다")
+    if not headers & set(DATE_HEADERS) or not headers & (
+        set(AMOUNT_HEADERS) | set(WITHDRAW_HEADERS)
+    ):
+        raise ValueError("날짜와 입금액·출금액 칸을 찾지 못했다")
     rows = []
     for raw in reader:
         row = {(k or "").strip(): (v or "").strip() for k, v in raw.items() if isinstance(v, str)}
         day = _pick(row, DATE_HEADERS)
         amount = _won(_pick(row, AMOUNT_HEADERS))
+        if not amount:
+            out = _won(_pick(row, WITHDRAW_HEADERS))
+            amount = -abs(out) if out else None
         if not day or not amount:
             continue
         rows.append(
@@ -256,8 +262,24 @@ def parse_csv(body: bytes) -> list[dict[str, Any]]:
     return rows
 
 
+def has_withdrawal_column(body: bytes) -> bool:
+    """출금 열이 있는 내역인가. 있으면 그 기간은 출금 대조를 한다."""
+    for encoding in ("utf-8-sig", "cp949"):
+        try:
+            first = body.decode(encoding).splitlines()[:1]
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        return False
+    head = next(csv.reader(first), []) if first else []
+    return bool({h.strip() for h in head} & set(WITHDRAW_HEADERS))
+
+
 def scan_inbox(
-    bank_rows: list[dict[str, Any]], imports: list[dict[str, Any]]
+    bank_rows: list[dict[str, Any]],
+    imports: list[dict[str, Any]],
+    out_periods: list[dict[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """폴더의 CSV를 읽어 더하고 `processed/`·`failed/`로 옮긴다. 이번에 처리한 기록을 돌려준다."""
     folder = inbox_dir()
@@ -269,9 +291,12 @@ def scan_inbox(
         try:
             if path.stat().st_size > MAX_INBOX_BYTES:
                 raise ValueError("파일이 너무 크다")
-            rows, problems = bank.parse_rows(parse_csv(path.read_bytes()))
+            body = path.read_bytes()
+            rows, problems = bank.parse_rows(parse_csv(body))
             if not rows:
-                raise ValueError("; ".join(problems[:3]) or "입금 줄이 없다")
+                raise ValueError("; ".join(problems[:3]) or "거래 줄이 없다")
+            if out_periods is not None and has_withdrawal_column(body):
+                bank.add_out_period(out_periods, rows)
             record |= {
                 "status": "imported",
                 "added": bank.merge_rows(bank_rows, rows),

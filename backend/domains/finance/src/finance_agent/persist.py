@@ -55,6 +55,9 @@ def dump(s: State) -> dict[str, Any]:
             "batches": records.batches,
             "policy_acks": records.policy_acks,
             "bank_rows": records.bank_rows,
+            "bank_out_periods": records.bank_out_periods,
+            "bank_notes": records.bank_notes,
+            "bank_note_log": records.bank_note_log,
             "team_budgets": records.team_budgets,
             "campaigns": records.campaigns,
             "campaign_starts": records.campaign_starts,
@@ -88,6 +91,9 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.records.batches = dict(rec["batches"])
     s.records.policy_acks = {k: dict(v) for k, v in rec.get("policy_acks", {}).items()}
     s.records.bank_rows = [dict(r) for r in rec.get("bank_rows", [])]
+    s.records.bank_out_periods = [dict(p) for p in rec.get("bank_out_periods", [])]
+    s.records.bank_notes = {k: dict(v) for k, v in rec.get("bank_notes", {}).items()}
+    s.records.bank_note_log = list(rec.get("bank_note_log", []))
     s.records.team_budgets = {k: dict(v) for k, v in rec.get("team_budgets", {}).items()}
     s.records.campaigns = {k: dict(v) for k, v in rec.get("campaigns", {}).items()}
     s.records.campaign_starts = {k: dict(v) for k, v in rec.get("campaign_starts", {}).items()}

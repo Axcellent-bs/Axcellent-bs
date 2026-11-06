@@ -8,6 +8,7 @@
 3. 은행 입금 대조: 그 달 날짜가 올린 거래내역에 들어 있고 차이가 없나 (안 올렸으면 `pending`)
 4. 판매자 정산: 그 달에 지급일이 있는 주의 정산 묶음이 모두 승인됐나
    (지급할 판매자가 없는 주는 제외)
+   4-1. 은행 출금 대조: 승인한 이체가 통장에서 확인되고, 설명 없는 출금에 모두 메모가 있나
 5. 판매자 미지급금: 롤포워드가 맞고 더 준 판매자가 없나
 6. 월 결산 확정: 사람이 그 달 결산을 확정했나
 """
@@ -128,6 +129,42 @@ def checklist(
             "settlements",
         )
     )
+
+    # 4-1. 은행 출금 대조 (판매자 이체 확인, 설명 없는 출금 메모)
+    periods = getattr(records, "bank_out_periods", [])
+    month = start.isoformat()[:7]
+    if not periods:
+        items.append(
+            _item(
+                "bank_out",
+                "은행 출금 대조",
+                False,
+                "출금 열이 있는 거래내역을 아직 올리지 않음",
+                "reconciliation",
+            )
+        )
+    else:
+        out = bank.outflows(
+            records.bank_rows,
+            periods,
+            records.batches,
+            seller_name=books.seller_name,
+            other_pnl=getattr(records, "other_pnl", {}),
+            campaigns=getattr(records, "campaigns", {}),
+            notes=getattr(records, "bank_notes", {}),
+            today=today,
+        )
+        n = bank.out_exceptions(out, month)
+        items.append(
+            _item(
+                "bank_out",
+                "은행 출금 대조",
+                n["transfer_not_found"] == 0 and n["unexplained_open"] == 0,
+                f"이체 못 찾음 {n['transfer_not_found']}건, "
+                f"메모 없는 설명 없는 출금 {n['unexplained_open']}건",
+                "reconciliation",
+            )
+        )
 
     # 5. 미지급금 롤포워드
     p = payables.rollforward(books, records.batches, d)

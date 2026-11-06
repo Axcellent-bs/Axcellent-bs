@@ -10,7 +10,11 @@
   평균을 낼 주가 없으면 비운다(None)
 - 회사 순현금 = 들어옴 − 나감. 보통 회사 몫(수수료)만큼 플러스이지만
   지급이 몰리는 주는 마이너스일 수 있다
-- 은행 잔액은 모른다(연동 없음). 그래서 "누적 순현금"은 오늘을 0으로 둔 상대값이다
+- 기초 잔액: 사람이 올린 통장 거래내역의 마지막 잔액(`bank.latest_balance`). 있으면 주별
+  예상 잔액 = 기초 잔액 + 누적 순현금을 내고, `cashflow.min_cash_krw`보다 적은 주를 표시한다.
+  없으면 누적은 오늘을 0으로 둔 상대값이다. 잔액이 `stale_days`보다 오래되면 "오래됨"이다
+- 월 고정비: 장부 밖 손익에 마지막으로 입력한 달의 급여·임차료·그 밖의 판관비를 주 단위로
+  나눠(× 12 ÷ 52) 나감에 따로 더한다(추정). 입력이 없으면 넣지 않고 그렇다고 알린다
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ from typing import Any
 from finance_agent import finance_config as fc
 from finance_agent import settlement
 from finance_agent.books import Books, pg_settlements
+from finance_agent.rules import applied
 
 WEEKS = 13
 
@@ -29,11 +34,31 @@ def _monday(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
+FIXED_FIELDS = ("salary", "rent", "other_sga")
+
+
+def fixed_costs(other_pnl: dict[str, dict[str, Any]] | None) -> dict[str, Any] | None:
+    """마지막으로 입력한 달의 월 고정비 (급여·임차료·그 밖의 판관비). 입력이 없으면 None."""
+    for month in sorted(other_pnl or {}, reverse=True):
+        entry = (other_pnl or {})[month]
+        values = [entry.get(k) for k in FIXED_FIELDS if isinstance(entry.get(k), int)]
+        if values:
+            monthly = sum(values)
+            return {"month": month, "monthly": monthly, "weekly": round(monthly * 12 / 52)}
+    return None
+
+
 def forecast(
-    books: Books, batches: dict[str, dict[str, Any]], today: date | None = None
+    books: Books,
+    batches: dict[str, dict[str, Any]],
+    today: date | None = None,
+    *,
+    opening: dict[str, Any] | None = None,
+    fixed: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     cfg = fc.load_config()
     today = today or fc.today()
+    weekly_fixed = fixed["weekly"] if fixed else None
     first = _monday(today)
     weeks = [first + timedelta(days=7 * k) for k in range(WEEKS)]
     inflow = {w: 0 for w in weeks}
@@ -101,7 +126,7 @@ def forecast(
             i, o = inflow[w], outflow[w]
         else:
             i, o = avg_in, avg_out
-        net = None if i is None or o is None else i - o
+        net = None if i is None or o is None else i - o - (weekly_fixed or 0)
         if net is not None and running is not None:
             running += net
         else:
@@ -112,16 +137,47 @@ def forecast(
                 "basis": "scheduled" if scheduled else "estimated",
                 "inflow": i if orders_known else None,
                 "outflow": o if orders_known else None,
+                "fixed": weekly_fixed,
                 "net": net if orders_known else None,
                 "cumulative": running if orders_known else None,
+                "balance": (
+                    opening["balance"] + running
+                    if opening and orders_known and running is not None
+                    else None
+                ),
             }
         )
     negative = [r["week_start"] for r in rows if r["net"] is not None and r["net"] < 0]
+    short = [
+        r["week_start"]
+        for r in rows
+        if r["balance"] is not None and r["balance"] < cfg.cashflow.min_cash_krw
+    ]
+    stale = (
+        opening is not None
+        and (today - date.fromisoformat(opening["as_of"])).days > cfg.cashflow.stale_days
+    )
+    if opening:
+        note = f"예상 잔액은 {opening['as_of']} 통장 잔액에서 시작합니다"
+        if stale:
+            note += f". 잔액이 {cfg.cashflow.stale_days}일보다 오래돼 그 뒤 거래가 빠져 있습니다"
+    else:
+        note = "통장 잔액을 올리지 않아 누적은 오늘을 0으로 둔 값입니다"
+    note += (
+        f". 월 고정비는 {fixed['month']} 입력값 기준 추정입니다"
+        if fixed
+        else ". 급여·임차료를 입력하지 않아 고정비는 빠져 있습니다"
+    )
     return {
         "today": today.isoformat(),
         "weeks": rows,
         "trailing_weeks": used_weeks,
         "average": {"inflow": avg_in, "outflow": avg_out},
         "negative_weeks": negative,
-        "note": "은행 잔액은 연동되지 않아 누적은 오늘을 0으로 둔 값입니다",
+        "opening": (opening or None) and (opening | {"stale": stale}),
+        "fixed": fixed,
+        "min_cash_krw": cfg.cashflow.min_cash_krw,
+        "short_weeks": short,
+        "note": note,
+        "applied_rules": [applied("CSH-001")] if opening else [],
     }

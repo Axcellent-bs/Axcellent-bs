@@ -18,8 +18,10 @@
 | `GET /api/finance/payables?date=` | ③ 판매자 미지급금 롤포워드 (그 달) | 없음 |
 | `GET /api/finance/variance?date=` | ① 월간 변동 분석 (지난달·작년 같은 달 대비) | 없음 |
 | `GET /api/finance/bank` | ② 은행 입금 대조 (올린 거래내역 기간만) | 없음 |
-| `POST /api/finance/bank/statement` | ② 은행 입금 내역 올리기 | **사람** |
-| `GET /api/finance/cashflow` | ③ 13주 현금 흐름 (확정 + 추정) | 없음 |
+| `POST /api/finance/bank/statement` | ② 은행 거래내역 올리기 (출금은 음수) | **사람** |
+| `GET /api/finance/bank/outflows` | ② 은행 출금 대조 (판매자 이체·항목별·설명 없는 출금) | 없음 |
+| `POST /api/finance/bank/outflows/{row_id}/note` | ② 설명 없는 출금 메모 | **사람** |
+| `GET /api/finance/cashflow` | ③ 13주 현금 흐름 (확정 + 추정, 통장 잔액 기초) | 없음 |
 | `GET /api/finance/close-checklist?date=` | ① 월 마감 체크리스트 | 없음 |
 | `GET /api/finance/tax/vat?date=` | ⑤ 부가세 신고 보조 집계 (분기) | 없음 |
 | `GET /api/finance/tax/seller-report?date=&format=` | ⑤ 판매자별 판매 명세 (제75조 초안) | 없음 |
@@ -129,7 +131,9 @@ async def run_export_cycle(trigger: str = "auto") -> dict[str, Any]:
     """
     async with _export_lock:
         records = state().records
-        imported = exports.scan_inbox(records.bank_rows, records.bank_imports)
+        imported = exports.scan_inbox(
+            records.bank_rows, records.bank_imports, records.bank_out_periods
+        )
         books = await state().fresh_books()
         package = exports.make_package(
             books,
@@ -910,19 +914,73 @@ def add_finance_api(app: FastAPI) -> None:
     async def upload_bank(
         request: Request, authorization: str | None = Header(default=None)
     ) -> dict | JSONResponse:
-        """사람이 은행에서 내려받은 입금 내역을 올린다. 겹치는 줄은 한 번만 센다."""
+        """사람이 은행에서 내려받은 거래내역을 올린다. 겹치는 줄은 한 번만 센다.
+
+        출금은 음수 금액이다. `has_withdrawals`가 참이면(파일에 출금 열이 있었으면) 그 기간을
+        출금 대조 기간으로 남긴다. 출금 열이 없던 내역은 출금 대조를 하지 않는다.
+        """
         try:
             person = human_from_authorization(authorization)
         except PermissionError as exc:
             return error(401, "unauthorized", str(exc))
-        rows, problems = bank.parse_rows((await _body(request)).get("rows"))
+        body = await _body(request)
+        rows, problems = bank.parse_rows(body.get("rows"))
         if problems and not rows:
             return error(400, "invalid_request", "; ".join(problems[:5]))
-        added = bank.merge_rows(state().records.bank_rows, rows)
+        records = state().records
+        added = bank.merge_rows(records.bank_rows, rows)
+        with_out = body.get("has_withdrawals") is True
+        if with_out:
+            bank.add_out_period(records.bank_out_periods, rows)
         books = await state().books()
-        result = bank.match(books, state().records.bank_rows)
-        meta = books.meta() | {"uploaded_by": person, "added": added, "skipped": problems[:20]}
+        result = bank.match(books, records.bank_rows)
+        meta = books.meta() | {
+            "uploaded_by": person,
+            "added": added,
+            "skipped": problems[:20],
+            "withdrawals": sum(1 for r in rows if r["amount"] < 0),
+            "has_withdrawals": with_out,
+        }
         return ok(result, meta)
+
+    def bank_outflows(books: Any) -> dict[str, Any]:
+        records = state().records
+        return bank.outflows(
+            records.bank_rows,
+            records.bank_out_periods,
+            records.batches,
+            seller_name=books.seller_name,
+            other_pnl=records.other_pnl,
+            campaigns=records.campaigns,
+            notes=records.bank_notes,
+        )
+
+    @app.get("/api/finance/bank/outflows")
+    async def get_bank_outflows() -> dict:
+        books = await state().books()
+        return ok(bank_outflows(books), books.meta())
+
+    @app.post("/api/finance/bank/outflows/{row_id}/note", response_model=None)
+    async def note_bank_outflow(
+        row_id: str, request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """설명 없는 출금에 이유를 적는다. 장부는 바꾸지 않는다 (틀린 돈은 조정 분개로)."""
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        note = (await _body(request)).get("note")
+        if not isinstance(note, str) or not note.strip() or len(note) > 500:
+            return error(400, "invalid_request", "note는 1~500자 문자열")
+        books = await state().books()
+        view = bank_outflows(books)
+        if row_id not in {u["id"] for u in view["unexplained"]}:
+            return error(404, "not_found", "설명 없는 출금 목록에 없는 거래다")
+        records = state().records
+        entry = {"note": note.strip(), "by": person, "at": fc.iso(fc.now())}
+        records.bank_notes[row_id] = entry
+        records.bank_note_log.append({"row_id": row_id, **entry})
+        return ok(bank_outflows(books), books.meta() | {"noted_by": person})
 
     @app.get("/api/finance/bank")
     async def get_bank() -> dict:
@@ -932,7 +990,16 @@ def add_finance_api(app: FastAPI) -> None:
     @app.get("/api/finance/cashflow")
     async def get_cashflow() -> dict:
         books = await state().books()
-        return ok(cashflow.forecast(books, state().records.batches), books.meta())
+        records = state().records
+        return ok(
+            cashflow.forecast(
+                books,
+                records.batches,
+                opening=bank.latest_balance(records.bank_rows),
+                fixed=cashflow.fixed_costs(records.other_pnl),
+            ),
+            books.meta(),
+        )
 
     @app.get("/api/finance/close-checklist", response_model=None)
     async def get_close_checklist(date: str | None = None) -> dict | JSONResponse:
