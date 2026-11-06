@@ -43,6 +43,7 @@ from ax_agent_template.config import (
     MAX_PATH_LENGTH,
     agent_name_scope,
     is_mock,
+    placeholder_entries,
     set_agent_name,
     token_registry,
 )
@@ -178,6 +179,9 @@ def create_agent_app(card: AgentCard, handlers: Mapping[str, Handler]) -> FastAP
     핸들러는 `async def handler(request: AgentRequest) -> AgentResult`다.
     """
     skill_ids = {skill.id for skill in card.skills}
+    for name in placeholder_entries():  # 명부의 자리표시자 항목: 받지 않고 이름만 경고
+        logger.warning("AX_AGENT_TOKENS의 %s 항목은 자리표시자라 받지 않는다 (실제 토큰 필요)",
+                       name)  # fmt: skip
     # 서비스 에이전트(services.py)는 부서 핸들러 중 자기 카드 skill만 쓴다.
     # 핸들러 없는 skill은 그대로 실패
     if card.name in SERVICE_PORTS:

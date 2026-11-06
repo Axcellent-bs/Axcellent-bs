@@ -199,3 +199,81 @@ def test_sources_usage_carries_the_status() -> None:
     assert usage.status is not None and usage.status.state == "provider_limit"
     assert usage.status.key_source == "공통 LLM_API_KEY(폴백)"
     assert SECRET not in usage.model_dump_json()
+
+
+# ---------------------------------------------------------------- 400 요청 형식 오류
+
+
+class Other(BaseModel):
+    y: str
+
+
+GOOGLE_KEY = "AIzaSyFAKE0000000000000000000000000000"  # 가짜 키 모양 (가려져야 함)
+
+
+def _bad_request(message: str):  # noqa: ANN202
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(400, json=[{"error": {"code": 400, "message": message,
+                                                    "status": "INVALID_ARGUMENT"}}])  # fmt: skip
+
+    return calls, handler
+
+
+def test_400_stops_only_the_same_request_until_midnight() -> None:
+    calls, handler = _bad_request("Invalid JSON payload received. Unknown name \"$defs\"")
+    settings = LLMSettings(model="gemini-3.5-flash", base_url="https://llm.example.com/v1",
+                           api_key=SECRET)  # fmt: skip
+    client = TimedLLMClient("data", settings=settings, transport=httpx.MockTransport(handler))
+    with pytest.raises(LLMResponseError):
+        _ask(client)
+    halt = llm_halt.HALT.active()
+    assert halt is not None and (halt.reason, halt.until) == ("request_error", MIDNIGHT)
+    with pytest.raises(llm_halt.LLMHalted):  # 같은 요청(같은 스키마·모델): HTTP 0회
+        _ask(client)
+    assert len(calls) == 1
+    with pytest.raises(LLMResponseError):  # 다른 스키마는 계속 보낸다
+        asyncio.run(client.structured("질문", Other))
+    assert len(calls) == 2
+
+
+def test_400_status_text_and_masked_provider_message() -> None:
+    long = f"Bad schema; key={GOOGLE_KEY} Authorization: Bearer {SECRET} " + "x" * 400
+    _, handler = _bad_request(long)
+    settings = LLMSettings(model="gemini-3.5-flash", base_url="https://llm.example.com/v1",
+                           api_key=SECRET)  # fmt: skip
+    client = TimedLLMClient("data", settings=settings, transport=httpx.MockTransport(handler))
+    with pytest.raises(LLMResponseError):
+        _ask(client)
+    status = llm_halt.status({"DATA_LLM_API_KEY": SECRET, "DATA_LLM_MODEL": "gemini-3.5-flash"})
+    assert (status.state, status.tone, status.title) == (
+        "request_error", "red", "LLM 요청 형식 오류 (400)")  # fmt: skip
+    assert status.detail == ("공급자가 응답 형식(스키마)을 받지 않았습니다. 모델: gemini-3.5-flash"
+                             " · 같은 요청은 오늘 다시 보내지 않습니다."
+                             " 모델·주소 설정을 확인하세요.")  # fmt: skip
+    assert status.request == "Answer" and status.error_message is not None
+    assert len(status.error_message) <= 200 and status.error_message.startswith("Bad schema")
+    dumped = status.model_dump_json()
+    assert GOOGLE_KEY not in dumped and SECRET not in dumped
+
+
+def test_key_error_still_comes_first() -> None:
+    llm_halt.HALT.record_error(400, request_key="m|Answer", message="bad", model="m")
+    llm_halt.HALT.record_error(401)
+    assert llm_halt.status({}).state == "key_error"
+
+
+def test_gemini_35_openai_compatible_request_shape() -> None:
+    """gemini-3.5-flash + Gemini OpenAI 호환 주소: 주소·본문 (가짜 응답, 실제 키·호출 없음)."""
+    fake = FakeLLM()
+    client = _client(fake, base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                     model="gemini-3.5-flash")  # fmt: skip
+    assert _ask(client).x == 1
+    (req,) = fake.requests
+    assert req.url.path == "/v1beta/openai/chat/completions"
+    body = json.loads(req.content)
+    assert body["model"] == "gemini-3.5-flash" and body["temperature"] == 0
+    block = body["response_format"]["json_schema"]
+    assert block["name"] == "Answer" and "strict" not in block  # Gemini는 strict 없이 (예전 그대로)

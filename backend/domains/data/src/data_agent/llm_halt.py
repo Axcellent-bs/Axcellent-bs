@@ -5,6 +5,10 @@
 - provider_limit: 429 → 1시간 뒤 다시 시도. 3번 연속 429면 그날 중단. 성공하면 연속 수 초기화.
   서버·수집기가 같이 보도록 `llm_budget`과 같은 SQLite 파일에 둔다 (없으면 메모리)
 - our_cap: 우리 하루 상한(`llm_budget`) 도달. 셈 방식은 그대로, 상태 표시만
+- request_error: 400 → 같은 요청(같은 모델·응답 형식)만 그날(한국 0시까지) 다시 보내지 않는다.
+  다른 응답 형식 호출은 계속 한다. 공급자 오류 메시지 앞 200자(키·토큰 모양은 가림)를 상태에 둔다.
+  설정을 고치면 재시작하므로 프로세스 메모리에만 둔다
+- 화면 상태 우선순위: key_error → request_error → provider_limit → our_cap
 - 멈춘 동안 부르면 `LLMHalted`(= LLMNotConfiguredError): 설정 없음·상한과 같은 대체 길(고정 문장·
   unknown)로 간다. 실패 호출로 하루 셈이 차지 않는다
 - 상태(`status`)에는 키 이름(key_source)·모델 이름·base_url 호스트만 담는다. 키 값은 담지 않는다
@@ -28,6 +32,12 @@ from ax_contracts.schemas.data import LlmStatus
 logger = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
 KEY_ERROR, PROVIDER_LIMIT, OUR_CAP = "key_error", "provider_limit", "our_cap"
+REQUEST_ERROR = "request_error"
+REQUEST_TEXT = (
+    "LLM 요청 형식 오류 (400)",
+    "공급자가 응답 형식(스키마)을 받지 않았습니다. 모델: {model} · 같은 요청은 오늘 다시 보내지"
+    " 않습니다. 모델·주소 설정을 확인하세요.",
+)
 RETRY_AFTER = timedelta(hours=1)
 LIMIT_STRIKES = 3
 KEY_TEXT = (
@@ -45,7 +55,7 @@ CAP_TEXT = (
 
 
 class LLMHalted(LLMNotConfiguredError):
-    """오류 원인 때문에 지금은 LLM을 부르지 않음 (key_error·provider_limit)."""
+    """오류 원인 때문에 지금은 LLM을 부르지 않음 (key_error·request_error·provider_limit)."""
 
 
 def _now() -> datetime:
@@ -63,6 +73,14 @@ class Halt:
     reason: str
     until: datetime
     strikes: int = 0  # 연속 429 수
+    request: str | None = None  # request_error: 막힌 응답 형식 이름
+    model: str | None = None  # request_error: 그 요청의 모델
+    message: str | None = None  # request_error: 공급자 메시지 앞 200자 (가림)
+
+
+def request_key(model: str | None, request: str) -> str:
+    """같은 요청의 기준: 모델 + 응답 형식(스키마) 이름."""
+    return f"{model or '-'}|{request}"
 
 
 class HaltStore:
@@ -71,6 +89,7 @@ class HaltStore:
     def __init__(self, path: str | Path | None = None) -> None:
         self._lock = threading.Lock()
         self._key_until: datetime | None = None
+        self._bad: dict[str, Halt] = {}  # request_error: 요청 기준 → 중단 (메모리)
         self._mem: tuple[int, datetime] | None = None  # (연속 429, 다시 시도할 시각)
         self._conn: sqlite3.Connection | None = None
         if path is not None:
@@ -103,26 +122,48 @@ class HaltStore:
                 )
 
     def active(self, now: datetime | None = None) -> Halt | None:
-        """지금 멈춘 상태 (key_error 먼저). 없으면 None."""
+        """화면 상태용: key_error → request_error(가장 최근) → provider_limit. 없으면 None."""
         now = now or _now()
         with self._lock:
             if self._key_until is not None and now < self._key_until:
                 return Halt(KEY_ERROR, self._key_until)
+            bad = [h for h in self._bad.values() if now < h.until]
             limit = self._limit()
+        if bad:
+            return bad[-1]
         if limit is not None and now < limit[1]:
             return Halt(PROVIDER_LIMIT, limit[1], limit[0])
         return None
 
-    def check(self, now: datetime | None = None) -> None:
-        """멈춘 상태면 부르지 않고 `LLMHalted`."""
-        halt = self.active(now)
-        if halt is not None:
-            title = KEY_TEXT[0] if halt.reason == KEY_ERROR else LIMIT_TEXT[0]
-            raise LLMHalted(f"{title}: {halt.until.isoformat()}까지 LLM을 부르지 않음")
-
-    def record_error(self, status_code: int | None, now: datetime | None = None) -> Halt | None:
-        """공급자 오류를 원인별로 기록한다. 401·403·429가 아니면 None (중단하지 않음)."""
+    def check(self, now: datetime | None = None, request: str | None = None) -> None:
+        """멈춘 상태면 부르지 않고 `LLMHalted`. request_error는 같은 요청만 막는다."""
         now = now or _now()
+        with self._lock:
+            key_until = self._key_until if self._key_until and now < self._key_until else None
+            bad = self._bad.get(request) if request else None
+            bad = bad if bad is not None and now < bad.until else None
+            limit = self._limit()
+        limit_until = limit[1] if limit is not None and now < limit[1] else None
+        for title, until in ((KEY_TEXT[0], key_until), (REQUEST_TEXT[0], bad and bad.until),
+                             (LIMIT_TEXT[0], limit_until)):  # fmt: skip
+            if until is not None:
+                raise LLMHalted(f"{title}: {until.isoformat()}까지 LLM을 부르지 않음")
+
+    def record_error(
+        self, status_code: int | None, now: datetime | None = None, *,
+        request_key: str | None = None, message: str | None = None, model: str | None = None,
+    ) -> Halt | None:  # fmt: skip
+        """공급자 오류를 원인별로 기록한다. 400·401·403·429가 아니면 None (중단하지 않음)."""
+        now = now or _now()
+        if status_code == 400 and request_key:
+            name = request_key.split("|", 1)[-1]
+            halt = Halt(REQUEST_ERROR, next_midnight(now), request=name, model=model,
+                        message=(message or "")[:200] or None)  # fmt: skip
+            with self._lock:
+                self._bad.pop(request_key, None)
+                self._bad[request_key] = halt  # 가장 최근 것이 끝으로
+            logger.warning("data LLM request_error (400, %s): 한국 0시까지 같은 요청 중단", name)
+            return halt
         if status_code in (401, 403):
             with self._lock:
                 self._key_until = next_midnight(now)
@@ -193,6 +234,10 @@ def status(env: Mapping[str, str] | None = None, now: datetime | None = None) ->
         out.state, out.tone, out.title = KEY_ERROR, "red", KEY_TEXT[0]
         out.detail = KEY_TEXT[1].format(source=out.key_source)
         out.halted_until = halt.until
+    elif halt is not None and halt.reason == REQUEST_ERROR:
+        out.state, out.tone, out.title = REQUEST_ERROR, "red", REQUEST_TEXT[0]
+        out.detail = REQUEST_TEXT[1].format(model=halt.model or out.model or "모름")
+        out.halted_until, out.request, out.error_message = halt.until, halt.request, halt.message
     elif halt is not None:
         out.state, out.tone, out.title, out.detail = PROVIDER_LIMIT, "yellow", *LIMIT_TEXT
         out.halted_until, out.strikes = halt.until, halt.strikes

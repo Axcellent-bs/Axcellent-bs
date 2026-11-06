@@ -1004,7 +1004,8 @@ export interface TrendInsightBriefOutput {
  * 키 값·주소 전체는 오지 않는다 (키 이름·모델·호스트만).
  */
 export interface LlmStatus {
-  state: "ok" | "key_error" | "provider_limit" | "our_cap";
+  /** request_error = 400 (같은 요청만 그날 중단, 빨강) */
+  state: "ok" | "key_error" | "provider_limit" | "our_cap" | "request_error";
   tone: "none" | "red" | "yellow" | "blue";
   title?: string | null;
   detail?: string | null;
@@ -1013,6 +1014,9 @@ export interface LlmStatus {
   base_host?: string | null;
   halted_until?: string | null;
   strikes: number;
+  /** request_error: 막힌 응답 형식 이름과 공급자 메시지 앞 200자 (서버가 키·토큰 모양을 가림) */
+  request?: string | null;
+  error_message?: string | null;
 }
 /** 응답에 나오는 숫자 하나 (출처·기간·표본, #614) */
 export interface DataFact {

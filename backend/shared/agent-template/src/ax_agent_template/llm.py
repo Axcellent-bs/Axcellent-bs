@@ -58,9 +58,51 @@ class LLMResponseError(RuntimeError):
     잠깐의 제한만 골라 다시 시도할 수 있게). 그 밖의 오류는 `None`이다.
     """
 
-    def __init__(self, message: str = "", status_code: int | None = None) -> None:
+    def __init__(
+        self, message: str = "", status_code: int | None = None,
+        provider_message: str | None = None,
+    ) -> None:  # fmt: skip
         super().__init__(message)
         self.status_code = status_code
+        # 공급자 오류 메시지 앞 200자 (키·토큰 모양은 가림, `mask_secrets`). 없으면 None
+        self.provider_message = provider_message
+
+
+# 키·토큰처럼 보이는 것. 앞말("Bearer ", "key=")은 남기고 값만 가리는 것과 통째로 가리는 것
+_SECRET_AFTER = (
+    re.compile(r"(?i)(bearer\s+)[^\s\"',;]+"),
+    re.compile(r"(?i)((?:api[_-]?key|key|token|secret|password)\s*[=:]\s*[\"']?)[^\s\"'&,;]+"),
+)
+_SECRET_WHOLE = (
+    re.compile(r"\b(?:sk|pk|rk)-[A-Za-z0-9_\-]{8,}"),  # sk-… 모양 키
+    re.compile(r"AIza[0-9A-Za-z_\-]{20,}"),  # Google API 키
+    re.compile(r"\b[A-Za-z0-9_\-]{40,}\b"),  # 긴 영숫자 덩어리
+)
+PROVIDER_MESSAGE_LIMIT = 200
+
+
+def mask_secrets(text: str) -> str:
+    """키·토큰 모양을 `***`로 가린다 (공급자 오류 메시지를 상태·화면에 보이기 전에)."""
+    for pattern in _SECRET_AFTER:
+        text = pattern.sub(lambda m: m.group(1) + "***", text)
+    for pattern in _SECRET_WHOLE:
+        text = pattern.sub("***", text)
+    return text
+
+
+def _provider_message(response: httpx.Response) -> str | None:
+    """오류 응답의 `error.message` (OpenAI 모양·Gemini 목록 모양). 가린 뒤 앞 200자만."""
+    try:
+        body: Any = response.json()
+    except ValueError:
+        return None
+    if isinstance(body, list) and body:
+        body = body[0]
+    error = body.get("error") if isinstance(body, dict) else None
+    message = error.get("message") if isinstance(error, dict) else error
+    if not isinstance(message, str) or not message.strip():
+        return None
+    return mask_secrets(message.strip())[:PROVIDER_MESSAGE_LIMIT]
 
 
 class LLMFormatError(LLMResponseError):
@@ -354,10 +396,12 @@ class LLMClient:
                     response.raise_for_status()
                 except httpx.HTTPStatusError as exc:
                     self.record_usage(context_id, model, 0, 0, False)
-                    # 응답 본문에 요청 내용이 섞일 수 있어 상태 코드만 남긴다
+                    # 응답 본문 전체는 남기지 않는다 (요청 내용이 섞일 수 있음). 공급자 오류
+                    # 메시지만 가린 뒤 앞 200자를 따로 둔다 (예외 문장에는 넣지 않음)
                     raise LLMResponseError(
                         f"LLM API가 {exc.response.status_code}를 돌려줬다",
                         status_code=exc.response.status_code,
+                        provider_message=_provider_message(exc.response),
                     ) from None
                 except httpx.HTTPError as exc:
                     self.record_usage(context_id, model, 0, 0, False)
