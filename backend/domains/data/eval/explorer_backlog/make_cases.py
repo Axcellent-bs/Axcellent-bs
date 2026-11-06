@@ -35,7 +35,8 @@ def order_case() -> dict:
     """1유닛(50개)만 읽을 수 있을 때 무엇을 먼저 읽나."""
     now = "2026-11-06T03:00:00Z"
     sample = [{"video_id": f"ss{d}{k}", "day_ago": d} for d in range(1, 7) for k in range(5)]
-    fill_short = [{"video_id": f"fs{k:02d}", "seconds": 30, "hours_ago": 2 + k} for k in range(40)]
+    fill_short = [{"video_id": f"fs{k:02d}", "seconds": 30, "hours_ago": 2 + k % 10}
+                  for k in range(40)]  # 오늘 게시 (2~11시간 전)
     fill_long = [{"video_id": f"fl{k:03d}", "seconds": 600, "hours_ago": 1} for k in range(500)]
     # 숏 후보 = 숏 검색 표본 30 + 길이 30초 보충 40. 최근 순: 보충(오늘 게시) 40 → 표본 1일 전 5
     # → 2일 전 5 → … 50개면 보충 40 + 표본 1·2일 전 10
