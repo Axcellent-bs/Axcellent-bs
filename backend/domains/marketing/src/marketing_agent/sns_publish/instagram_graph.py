@@ -6,7 +6,9 @@
   원인 사슬을 끊고 종류만 올린다.
 - 공개 미디어 주소: Meta가 게시 시점에 미디어를 직접 내려받는다. `media_ref`가 `https://`로
   시작하면 그대로 쓰고, 로컬 경로면 `MARKETING_IG_MEDIA_BASE_URL`(공개 HTTPS 주소) 뒤에
-  파일 이름을 붙인다. 파일을 그 주소에 올려 두는 일은 사람이 한다(서명 URL은 다음 단계).
+  파일 이름을 붙인다. 파일을 그 주소에 올려 두는 일은 사람이 한다.
+  `MARKETING_MEDIA_S3_BUCKET`이 있으면 대신 미디어 폴더의 JPEG를 S3 호환 버킷에 올리고
+  유효기간 있는 서명 URL을 쓴다(`media_host.py`). 이 경로는 이미지(JPEG)만 지원한다.
 - 이미지는 JPEG만 된다(공식 규격). 로컬 파일이면 호출 전에 JPEG 여부와 8MB 이하를 확인한다.
 - 삭제 API(`delete_media`)는 이 로그인 경로에 없다. 잘못 올린 게시물은 사람이 앱에서 지운다.
 - 상태 `ERROR`에서 사유 코드를 주는 필드는 `status`(문자열)뿐일 수 있어 코드는 None일 수 있다.
@@ -23,6 +25,7 @@ from typing import Any
 
 import httpx
 
+from marketing_agent import sns_media
 from marketing_agent.sns_publish.instagram import (
     TOKEN_ENV,
     USER_ID_ENV,
@@ -32,6 +35,11 @@ from marketing_agent.sns_publish.instagram import (
     IgApiError,
     IgResponseLost,
     MediaInfo,
+)
+from marketing_agent.sns_publish.media_host import (
+    MediaHostConfigError,
+    MediaHostError,
+    S3MediaHost,
 )
 
 MEDIA_BASE_URL_ENV = "MARKETING_IG_MEDIA_BASE_URL"
@@ -66,7 +74,9 @@ class GraphInstagramAdapter:
         api_version: str = "",
         timeout_s: float = 30.0,
         client: httpx.AsyncClient | None = None,
+        media_host: S3MediaHost | None = None,
     ) -> None:
+        self._media_host = media_host
         self._token = access_token
         self._user_id = user_id
         self._media_base = media_base_url.rstrip("/")
@@ -87,7 +97,12 @@ class GraphInstagramAdapter:
             timeout = float((os.getenv(TIMEOUT_ENV) or "").strip() or 30)
         except ValueError:
             timeout = 30.0
+        try:
+            media_host = S3MediaHost.from_env_optional()
+        except MediaHostConfigError as error:
+            raise GraphConfigError(str(error)) from None
         return cls(
+            media_host=media_host,
             access_token=token,
             user_id=user_id,
             media_base_url=(os.getenv(MEDIA_BASE_URL_ENV) or "").strip(),
@@ -124,6 +139,30 @@ class GraphInstagramAdapter:
             return
         if head != b"\xff\xd8\xff" or size > JPEG_MAX_BYTES:
             raise IgApiError(*_MEDIA_FORMAT)
+
+    async def _hosted_image_url(self, media_ref: str) -> str:
+        """미디어 폴더 안의 JPEG를 S3 호환 버킷에 올리고 읽기 전용 서명 URL을 돌려준다.
+
+        올리기 전에 폴더 안쪽 경로·JPEG·크기를 본다. 어느 단계가 실패해도 Graph API는 부르지 않는다.
+        """
+        assert self._media_host is not None
+        try:
+            path = sns_media.resolve_asset(media_ref)
+        except sns_media.MediaPathError:
+            raise IgApiError(*_MEDIA_URL_UNREACHABLE) from None
+        try:
+            content = path.read_bytes()
+        except OSError:
+            raise IgApiError(*_MEDIA_URL_UNREACHABLE) from None
+        if content[:3] != b"\xff\xd8\xff" or len(content) > JPEG_MAX_BYTES:
+            raise IgApiError(*_MEDIA_FORMAT)
+        try:
+            return await self._media_host.upload_jpeg(content)
+        except MediaHostError:
+            raise IgApiError(*_MEDIA_URL_UNREACHABLE) from None
+
+    def _uses_media_host(self, media_ref: str) -> bool:
+        return self._media_host is not None and not media_ref.startswith(("https://", "http://"))
 
     # ---- HTTP ----
     async def _request(
@@ -168,8 +207,11 @@ class GraphInstagramAdapter:
             "is_ai_generated": "true" if request.is_ai_generated else "false",
         }
         if request.media_kind == "image":
-            self.check_local_image(request.media_ref)
-            params["image_url"] = self.public_media_url(request.media_ref)
+            if self._uses_media_host(request.media_ref):
+                params["image_url"] = await self._hosted_image_url(request.media_ref)
+            else:
+                self.check_local_image(request.media_ref)
+                params["image_url"] = self.public_media_url(request.media_ref)
         else:
             params["media_type"] = "REELS"
             params["video_url"] = self.public_media_url(request.media_ref)
