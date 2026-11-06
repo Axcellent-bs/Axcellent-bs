@@ -98,7 +98,10 @@ def _contains(text: str, words: tuple[str, ...]) -> bool:
 # ---------------------------------------------------------------- 영수증
 def _images(request: AgentRequest) -> tuple[list[EvidenceImageIn], str | None]:
     """`untrusted.images`를 검사한다. 개수·크기를 넘거나 형식이 다르면 `(빈 목록, 이유)`다."""
-    raw = request.untrusted.get("images")
+    return read_images(request.untrusted.get("images"))
+
+
+def read_images(raw: Any) -> tuple[list[EvidenceImageIn], str | None]:
     if not raw:
         return [], None
     if not isinstance(raw, list) or len(raw) > MAX_IMAGES:
@@ -171,26 +174,13 @@ async def _inquiry_order(
     return inquiry, order
 
 
-async def analyze_receipt(request: AgentRequest) -> AgentResult:
-    parsed = h._parse(request, AnalyzeReceiptInput)
-    if isinstance(parsed, AgentResult):
-        return parsed
-    found = await _inquiry_order(request, parsed.inquiry_id, parsed.order_id)
-    if isinstance(found, AgentResult):
-        return found
-    inquiry, order = found
-
-    raw_text = request.untrusted.get("receipt_text")
-    text = raw_text if isinstance(raw_text, str) else ""
-    images, image_problem = _images(request)
-    if not text.strip() and not images and not image_problem:
-        return error_result(
-            request.meta,
-            TaskStatus.FAILED,
-            "invalid_input",
-            "untrusted.receipt_text 또는 untrusted.images가 필요하다",
-        )
-
+async def _compare_receipt(
+    text: str,
+    images: list[EvidenceImageIn],
+    image_problem: str | None,
+    order: Order,
+) -> tuple[AnalyzeReceiptOutput, Any]:
+    """영수증 글·사진을 읽어 주문과 코드로 대조한다. 사진은 읽기만 하고 저장하지 않는다."""
     notes: list[str] = []
     pii_kinds: list[str] = []
     facts = receipts.ReceiptFacts()
@@ -234,6 +224,30 @@ async def analyze_receipt(request: AgentRequest) -> AgentResult:
         pii_masked=pii_kinds,
         notes=notes,
     )
+    return output, check
+
+
+async def analyze_receipt(request: AgentRequest) -> AgentResult:
+    parsed = h._parse(request, AnalyzeReceiptInput)
+    if isinstance(parsed, AgentResult):
+        return parsed
+    found = await _inquiry_order(request, parsed.inquiry_id, parsed.order_id)
+    if isinstance(found, AgentResult):
+        return found
+    inquiry, order = found
+
+    raw_text = request.untrusted.get("receipt_text")
+    text = raw_text if isinstance(raw_text, str) else ""
+    images, image_problem = _images(request)
+    if not text.strip() and not images and not image_problem:
+        return error_result(
+            request.meta,
+            TaskStatus.FAILED,
+            "invalid_input",
+            "untrusted.receipt_text 또는 untrusted.images가 필요하다",
+        )
+
+    output, check = await _compare_receipt(text, images, image_problem, order)
     h.log_activity(
         inquiry.id,
         kind="receipt_checked",
@@ -258,6 +272,50 @@ async def analyze_receipt(request: AgentRequest) -> AgentResult:
             ),
         ),
     )
+
+
+async def check_attached_photos(inquiry: Any, raw_images: Any) -> None:
+    """접수 때 붙은 영수증 사진을 읽어 대조 결과를 내력에 남긴다 (`analyze_receipt`와 같은 모양).
+
+    사진·영수증 원문은 저장하지 않는다. 읽기에 실패해도 접수는 막지 않는다. 읽지 못했을 때는
+    상태(`unavailable`·`failed`·`skipped`)만 내력에 남기고 상담원이 직접 확인한다.
+    """
+    if not raw_images:
+        return
+    count = len(raw_images) if isinstance(raw_images, list) else 0
+    try:
+        images, problem = read_images(raw_images)
+        if not inquiry.order_id:
+            h.log_activity(
+                inquiry.id,
+                kind="receipt_checked",
+                title="사진을 받았지만 주문이 없어 대조하지 못했어요",
+                data={"verdict": None, "mismatches": [], "images": count},
+            )
+            return
+        order = await shop_client.load_order(inquiry.order_id)
+        if order is None:
+            raise LookupError("order not found")
+        output, check = await _compare_receipt("", images, problem, order)
+        h.log_activity(
+            inquiry.id,
+            kind="receipt_checked",
+            title="AI가 접수 때 받은 영수증 사진을 주문과 대조했어요",
+            data={
+                "verdict": check.verdict,
+                "mismatches": list(check.mismatches),
+                "images": len(images),
+                "analysis": output.model_dump(mode="json"),
+            },
+        )
+    except Exception:  # noqa: BLE001 - 접수를 막지 않는다. 사진·영수증 값은 로그에 남기지 않는다
+        logger.warning("접수 때 영수증 사진 대조 실패 (inquiry %s)", inquiry.id, exc_info=False)
+        h.log_activity(
+            inquiry.id,
+            kind="receipt_checked",
+            title="접수 때 받은 영수증 사진을 읽지 못했어요. 직접 확인해 주세요",
+            data={"verdict": None, "mismatches": [], "images": count},
+        )
 
 
 # ---------------------------------------------------------------- 환불·교환 요청

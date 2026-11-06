@@ -503,6 +503,10 @@ async def create_inquiry(request: AgentRequest) -> AgentResult:
         conversation = await _refine_abuse(conversation, analysis, early)
         _log_abuse(conversation)
         log_activity(conversation.id, **_analysis_entry(analysis, fallback=fallback, first=True))
+        if request.untrusted.get("images"):
+            from support_agent import claim_analysis  # 순환 import를 피해 쓸 때 가져온다
+
+            await claim_analysis.check_attached_photos(conversation, request.untrusted["images"])
         return _view(conversation), fallback
 
     return await _write(
