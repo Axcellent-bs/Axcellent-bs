@@ -104,9 +104,9 @@ export default function ResolutionForm({ inc }: { inc: OrchIncident }) {
           {(Object.keys(OUTCOME_KO) as Outcome[]).map((k) => <option key={k} value={k}>{OUTCOME_KO[k]}</option>)}
         </select>
         <label className="text-sm font-medium" htmlFor="res-cause">원인</label>
-        <input id="res-cause" className="field" maxLength={MAX} value={rootCause} onChange={(e) => { setTouched(true); setRootCause(e.target.value); }} placeholder="예: 결제 대행사 응답 지연" />
+        <input id="res-cause" className="field" maxLength={MAX} value={rootCause} onChange={(e) => { setTouched(true); setRootCause(e.target.value); }} placeholder="예: 결제 대행사의 응답이 늦어짐" />
         <label className="text-sm font-medium" htmlFor="res-action">한 조치</label>
-        <input id="res-action" className="field" maxLength={MAX} value={action} onChange={(e) => { setTouched(true); setAction(e.target.value); }} placeholder="예: 타임아웃을 늘리고 재시도" />
+        <input id="res-action" className="field" maxLength={MAX} value={action} onChange={(e) => { setTouched(true); setAction(e.target.value); }} placeholder="예: 응답 대기 시간을 늘리고 다시 시도하도록 변경" />
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" className="btn-primary" disabled={busy} onClick={save}>{busy ? "저장 중…" : "확인했어요, 해결 내용 남기기"}</button>

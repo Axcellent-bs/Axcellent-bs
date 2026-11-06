@@ -73,7 +73,7 @@ def past_hint(inc: Incident) -> str | None:
         return None
     pct = round((rec.get("similarity") or 0) * 100)
     return (
-        f"같은 유형의 과거 이벤트(유사도 {pct}%)에서는 "
+        f"같은 유형의 과거 이벤트(비슷한 정도 {pct}%)에서는 "
         f"원인 {rec.get('root_cause') or '확인할 수 없음'}, "
         f"조치 {rec.get('action') or '확인할 수 없음'} (참고용, 이번 원인으로 확정된 것 아님)"
     )

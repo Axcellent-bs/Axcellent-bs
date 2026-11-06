@@ -44,8 +44,11 @@ def test_completed_rollback_becomes_the_action() -> None:
     draft = resolution_draft(inc)
     assert draft is not None
     assert draft["outcome"] == "resolved" and draft["root_cause"] is None
-    assert draft["action"] == "shop-api 롤백 (v2.14 → v2.13)"
-    assert draft["basis"] == ["조치는 총괄이 끝낸 롤백"] and draft["source"] == "this_event"
+    assert draft["action"] == "shop-api 이전 버전으로 되돌림 (v2.14 → v2.13)"
+    assert (
+        draft["basis"] == ["조치는 총괄이 끝낸 '이전 버전으로 되돌리기'"]
+        and draft["source"] == "this_event"
+    )
 
 
 def test_rollback_that_did_not_finish_is_not_an_action() -> None:
@@ -113,7 +116,7 @@ def test_a_rollback_finished_in_this_event_wins_over_the_past_action() -> None:
     }
     draft = resolution_draft(inc)
     assert draft is not None and draft["source"] == "past_case"
-    assert draft["action"] == "shop-api 롤백 (v2.14 → v2.13)"
+    assert draft["action"] == "shop-api 이전 버전으로 되돌림 (v2.14 → v2.13)"
     assert draft["root_cause"] == "배포 후 결제 설정 누락" and len(draft["basis"]) == 2
 
 

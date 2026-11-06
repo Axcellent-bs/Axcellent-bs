@@ -148,7 +148,7 @@ def test_headcount_preview_and_unknown_month(client: TestClient, fake: Fake) -> 
     fake.outputs["team_headcount"] = {
         "month": "2026-11",
         "rows": [{"team": "기획팀", "headcount": 2}],
-        "basis": "가상 명부(예시) 기준, 2026-11-01 소속",
+        "basis": "예시 직원 명단 기준, 2026-11-01 소속",
         "collected_at": NOW,
         "example": True,
     }

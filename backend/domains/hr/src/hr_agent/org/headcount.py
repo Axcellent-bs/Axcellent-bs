@@ -44,12 +44,12 @@ async def team_headcount(svc: Services, request: AgentRequest) -> AgentResult:
 
     teams = org_teams()
     if not teams:
-        return failed(request, "NO_ORG_ROSTER", "조직도에서 팀을 읽지 못해 팀 인원을 셀 수 없다")
+        return failed(request, "NO_ORG_ROSTER", "조직도에서 팀을 읽지 못해 팀 인원을 셀 수 없어요")
 
     records = changes.confirmed(svc)
     if not records:
         members = [m.team for m in example_roster(teams)]
-        basis = f"가상 명부(예시) 기준, {params.month}-01 소속"
+        basis = f"예시 직원 명단 기준, {params.month}-01 소속"
         example = True
     else:
         first = ledger.earliest_month(records)
@@ -65,7 +65,7 @@ async def team_headcount(svc: Services, request: AgentRequest) -> AgentResult:
             ledger.LedgerError
         ):  # 확정할 때 맞춰 보지만, 저장소가 바뀌었으면 틀린 값을 내지 않는다
             return failed(
-                request, "LEDGER_CONFLICT", "발령 기록이 서로 맞지 않아 인원을 셀 수 없다"
+                request, "LEDGER_CONFLICT", "발령 기록이 서로 맞지 않아 인원을 셀 수 없어요"
             )
         basis = f"확정된 발령 기록 {len(records)}건 기준, {params.month}-01 소속"
         example = not baseline_complete(svc)

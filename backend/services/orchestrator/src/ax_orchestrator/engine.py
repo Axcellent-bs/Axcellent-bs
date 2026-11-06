@@ -39,7 +39,7 @@ from ax_orchestrator.models import (
     iso,
     now,
 )
-from ax_orchestrator.naming import PLAN_KO
+from ax_orchestrator.naming import DEPT_KO, NOTE_KO, PLAN_KO
 from ax_orchestrator.registry import Registry
 from ax_orchestrator.timeline import prior_case_of, times_of
 
@@ -100,6 +100,37 @@ class ReviewOutcome:
 def _plain(label: str) -> str:
     """단계 이름 끝의 담당 표시 "(infra)"를 뺀다."""
     return re.sub(r"\s*\([^)]*\)$", "", label)
+
+
+TIME_KO = {
+    "detected_at": "감지 시각",
+    "cause_candidate_at": "원인 후보가 나온 시각",
+    "human_work_started_at": "사람에게 넘긴 시각",
+    "human_work_done_at": "사람이 처리를 끝낸 시각",
+    "recovered_at": "정상 복귀 시각",
+}
+
+
+def _note_plain(inc: Incident, note: str) -> str:
+    """단계 메모를 사람이 읽는 말로 바꾼다(알려진 코드, 괄호 속 단계 번호)."""
+    if note in NOTE_KO:
+        return NOTE_KO[note]
+    note = re.sub(
+        r"미완료\(([a-z_]+)\)",
+        lambda m: (
+            f"미완료: {_plain(inc.steps[m.group(1)].label)}"
+            if m.group(1) in inc.steps
+            else m.group(0)
+        ),
+        note,
+    )
+    return re.sub(
+        r"\(([a-z_]+)\)",
+        lambda m: (
+            f"({_plain(inc.steps[m.group(1)].label)})" if m.group(1) in inc.steps else m.group(0)
+        ),
+        note,
+    )
 
 
 STATUS_KO = {
@@ -721,17 +752,18 @@ class Engine:
             "event_type": inc.event_type,
             "summary": inc.title + (f" · {note}" if isinstance(note, str) and note else ""),
             "decision_reason": (
-                f"{PLAN_KO.get(inc.kind, inc.kind)} 실행 결과 — "
-                f"완료: {', '.join(_plain(r.label) for r in done) or '없음'}; "
-                f"미완료: {', '.join(_plain(r.label) for r in problems) or '없음'}"
+                f"{PLAN_KO.get(inc.kind, inc.kind)}에서 "
+                f"끝낸 일: {', '.join(_plain(r.label) for r in done) or '없음'}. "
+                f"끝내지 못한 일: {', '.join(_plain(r.label) for r in problems) or '없음'}"
             ),
             "alternatives_considered": [
                 *(
-                    f"{_plain(r.label)}: {STATUS_KO.get(r.status, r.status)} ({r.note})"
+                    f"{_plain(r.label)}: {STATUS_KO.get(r.status, r.status)}"
+                    + (f" ({_note_plain(inc, r.note)})" if r.note else "")
                     for r in problems
                 ),
                 *(
-                    f"{_plain(r.label)}: {r.dept}로 이관 ({r.reason_code})"
+                    f"{_plain(r.label)}: {DEPT_KO.get(r.dept or '', r.dept)}에게 넘김"
                     for r in done
                     if r.transferred_to
                 ),
@@ -793,7 +825,7 @@ class Engine:
             return
         if outcome in ("recorded", "duplicate"):
             inc.times_sent.update(fresh)
-            inc.log(f"이벤트 시각 기록: {', '.join(sorted(fresh))}")
+            inc.log(f"이벤트 시각 기록: {', '.join(TIME_KO.get(k, k) for k in sorted(fresh))}")
         else:
             inc.log(f"이벤트 시각 기록 보류: {outcome or '결과 없음'}")
 

@@ -47,7 +47,7 @@ export default function RepeatCompare() {
     <section className="card space-y-3 p-6">
       <div>
         <h2 className="text-lg font-semibold">처음과 반복의 해결 시간</h2>
-        <p className="mt-1 text-xs text-ink-500">시간은 이벤트를 감지한 때부터 쇼핑몰이 정상 복귀를 알린 때까지이고, 시스템이 쟀습니다. 정상 복귀가 기록된 이벤트만 셉니다. 건수가 적어 통계가 아니라 사례 비교로만 보세요. 시연에서는 장애를 해제한 시각이 복귀 시각이라 시연하는 사람의 속도입니다.</p>
+        <p className="mt-1 text-xs text-ink-500">시간은 이벤트를 감지한 때부터 쇼핑몰이 정상 복귀를 알린 때까지이고, 시스템이 쟀습니다. 정상 복귀가 기록된 이벤트만 셉니다. 건수가 적어 통계로 보지 말고 사례를 견주는 용도로만 보세요. 시연에서는 장애를 해제한 시각이 복귀 시각이라 시연하는 사람의 속도입니다.</p>
       </div>
       {err && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{err}</p>}
       {!rows ? (!err && <p className="text-xs text-ink-500">불러오는 중…</p>) : (
@@ -59,7 +59,7 @@ export default function RepeatCompare() {
               {g.items.length === 0 ? <p className="mt-2 text-sm text-ink-500">아직 없습니다.</p> : (
                 <>
                   {g.items.length >= MIN_FOR_MEDIAN && (
-                    <p className="mt-2 text-2xl font-semibold tabular-nums">{durationKo(median(g.items.map((i) => i.total)))} <span className="text-xs font-normal text-ink-500">가운데 값</span></p>
+                    <p className="mt-2 text-2xl font-semibold tabular-nums">{durationKo(median(g.items.map((i) => i.total)))} <span className="text-xs font-normal text-ink-500">중간 값</span></p>
                   )}
                   <ul className="mt-2 space-y-1.5 text-xs tabular-nums">
                     {g.items.map((i) => (
@@ -67,13 +67,13 @@ export default function RepeatCompare() {
                         <span className="block truncate font-medium" title={i.title}>{i.title}</span>
                         <span className="text-ink-700">감지부터 복귀까지 <b>{durationKo(i.total)}</b></span>
                         <span className="ml-2 text-ink-500">
-                          {i.evidence != null && `원인 후보 ${durationKo(i.evidence)}`}
+                          {i.evidence != null && `원인 후보가 나오기까지 ${durationKo(i.evidence)}`}
                           {i.human != null && ` · 사람에게 넘긴 뒤 ${durationKo(i.human)}`}
                         </span>
                       </li>
                     ))}
                   </ul>
-                  {g.items.length < MIN_FOR_MEDIAN && <p className="mt-1 text-xs text-ink-500">{MIN_FOR_MEDIAN}건 미만이라 가운데 값은 내지 않습니다.</p>}
+                  {g.items.length < MIN_FOR_MEDIAN && <p className="mt-1 text-xs text-ink-500">{MIN_FOR_MEDIAN}건 미만이라 중간 값은 내지 않습니다.</p>}
                 </>
               )}
             </div>

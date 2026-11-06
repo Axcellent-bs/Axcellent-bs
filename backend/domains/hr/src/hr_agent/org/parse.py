@@ -9,7 +9,7 @@ LLM은 문장에 적힌 표현만 뽑는다. 값은 코드가 다시 검증한�
 - 직원 번호는 문장에 적힌 그대로여야 한다. 문장에 없으면 버린다.
 - 날짜는 LLM이 계산하지 않는다. "다음 달" 같은 상대 표현은 코드가 시계로 계산하고,
   없는 날짜는 비운다.
-- 원래 팀은 확정 명부의 현재 소속과 대조한다. 다르면 경고하고, 문장에 없으면 명부 값으로 채운다.
+- 원래 팀은 확정 명단의 현재 소속과 대조한다. 다르면 경고하고, 문장에 없으면 명단 값으로 채운다.
 문장은 프롬프트의 데이터 블록에만 넣고 그 안의 지시는 따르지 않는다. LLM이 꺼져 있거나 실패하면
 `available: false`로 돌려주고 사람이 직접 입력한다. 직원 이름은 받지 않고 번호만 쓴다.
 """
@@ -124,7 +124,7 @@ async def parse_org_change_text(svc: Services, request: AgentRequest) -> AgentRe
         return invalid_input(request, exc)
     if svc.llm is None:
         return _unavailable(
-            svc, request, "문장 정리는 LLM 설정이 있을 때만 쓸 수 있다. 직접 입력한다"
+            svc, request, "문장 정리는 AI 설정이 있을 때만 쓸 수 있어요. 직접 입력해 주세요"
         )
     try:
         parsed = await svc.llm.structured(
@@ -134,7 +134,7 @@ async def parse_org_change_text(svc: Services, request: AgentRequest) -> AgentRe
             context_id=request.meta.context_id,
         )
     except Exception:  # noqa: BLE001 - 어떤 실패든 직접 입력으로 돌아간다
-        return _unavailable(svc, request, "문장을 정리하지 못했다. 직접 입력한다")
+        return _unavailable(svc, request, "문장을 정리하지 못했어요. 직접 입력해 주세요")
 
     warnings: list[str] = []
     teams = org_teams()
@@ -168,13 +168,15 @@ async def parse_org_change_text(svc: Services, request: AgentRequest) -> AgentRe
         else:
             if kind == "join":
                 if current is not None:
-                    warnings.append(f"이미 확정 명부에 있는 직원이다 ({current})")
+                    warnings.append(f"이미 확정된 직원 명단에 있는 직원이다 ({current})")
             elif current is None:
-                warnings.append("확정 명부에 없는 직원이다")
+                warnings.append("확정된 직원 명단에 없는 직원이다")
             elif from_team is None:
                 from_team, from_roster = current, True
             elif from_team != current:
-                warnings.append(f"확정 명부의 현재 소속은 {current}이다 (문장은 {from_team})")
+                warnings.append(
+                    f"확정된 직원 명단의 현재 소속은 {current}이다 (문장은 {from_team})"
+                )
 
     if kind == "transfer" and (not from_team or not to_team):
         warnings.append("팀 이동은 원래 팀과 새 팀이 모두 필요하다")

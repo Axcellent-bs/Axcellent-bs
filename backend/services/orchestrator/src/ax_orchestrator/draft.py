@@ -46,15 +46,17 @@ def _this_event(inc: Incident) -> tuple[str | None, str | None, list[str]]:
         top = min(hypotheses, key=lambda h: _RANK.get(str(h.get("confidence")), 3))
         root_cause = kst_text(str(top["explanation"]))
         level = _CONFIDENCE_KO.get(str(top.get("confidence")), "알 수 없음")
-        basis.append(f"원인은 데이터분석 AI의 원인 후보 중 확신이 가장 높은 것(확신도 {level})")
+        basis.append(f"원인은 데이터분석 AI가 낸 원인 후보 중 가장 확실한 것(확신도 {level})")
     action = None
     rollback = inc.steps.get("rollback")
     if rollback is not None and rollback.status == "completed":
         out = inc.outputs.get("rollback") or {}
         service = out.get("service") or "배포"
         before, after = out.get("from_version"), out.get("to_version")
-        action = f"{service} 롤백" + (f" ({before} → {after})" if before and after else "")
-        basis.append("조치는 총괄이 끝낸 롤백")
+        action = f"{service} 이전 버전으로 되돌림" + (
+            f" ({before} → {after})" if before and after else ""
+        )
+        basis.append("조치는 총괄이 끝낸 '이전 버전으로 되돌리기'")
     return root_cause, action, basis
 
 
@@ -66,11 +68,14 @@ def resolution_draft(inc: Incident) -> dict[str, Any] | None:
     if past.get("status") == "found":
         pct = round((past.get("similarity") or 0) * 100)
         basis = [
-            f"같은 유형의 과거 이벤트(유사도 {pct}%)에서 가져온 원인과 조치예요. "
+            f"같은 유형의 과거 이벤트(비슷한 정도 {pct}%)에서 가져온 원인과 조치예요. "
             "이번 이벤트의 원인과 같은지 확인해 주세요"
         ]
         if this_action:
-            basis.append("조치는 이번 이벤트에서 총괄이 끝낸 롤백이라 과거 조치보다 우선했어요")
+            basis.append(
+                "조치는 이번 이벤트에서 총괄이 끝낸 '이전 버전으로 되돌리기'라서"
+                " 과거 조치보다 우선했어요"
+            )
         return {
             "outcome": outcome,
             "root_cause": past.get("root_cause"),

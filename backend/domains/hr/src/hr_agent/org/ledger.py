@@ -37,16 +37,22 @@ def _apply(roster: dict[str, str], change: Change) -> None:
     current = roster.get(change.member_id)
     if change.kind == "join":
         if current is not None:
-            raise LedgerError(f"{change.change_id}: 이미 명부에 있는 직원의 입사다")
+            raise LedgerError(
+                f"{change.member_id}는 이미 직원 명단에 있어서 입사로 기록할 수 없어요"
+            )
         assert change.to_team is not None
         roster[change.member_id] = change.to_team
     elif change.kind == "leave":
         if current is None or current != change.from_team:
-            raise LedgerError(f"{change.change_id}: 그 팀에 없는 직원의 퇴사다")
+            raise LedgerError(
+                f"{change.member_id}는 {change.from_team}에 없어서 퇴사로 기록할 수 없어요"
+            )
         del roster[change.member_id]
     else:
         if current is None or current != change.from_team:
-            raise LedgerError(f"{change.change_id}: 그 팀에 없는 직원의 이동이다")
+            raise LedgerError(
+                f"{change.member_id}는 {change.from_team}에 없어서 팀 이동으로 기록할 수 없어요"
+            )
         assert change.to_team is not None
         roster[change.member_id] = change.to_team
 
