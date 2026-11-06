@@ -345,7 +345,9 @@ async def publish_sns(request: AgentRequest, sns_store: Any | None = None) -> Ag
             meta=request.meta,
             status=TaskStatus.FAILED,
             outcome="adapter_unavailable",
-            output={"reason": "실제 Instagram 어댑터가 아직 없다"},
+            output={
+                "reason": "Instagram 어댑터 설정이 없다 (MARKETING_SNS_PROVIDER, MARKETING_IG_*)"
+            },
         )
 
     try:

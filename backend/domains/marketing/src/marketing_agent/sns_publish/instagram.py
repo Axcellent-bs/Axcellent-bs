@@ -2,8 +2,9 @@
 
 - 어댑터는 Graph API Content Publishing 흐름을 그대로 따른다:
   컨테이너 생성 → 상태 조회 → `media_publish`(1회) → 미디어 조회.
-- 실제 어댑터는 아직 없다. `MARKETING_SNS_PROVIDER`가 `mock`이 아니면 `get_adapter()`가
-  `AdapterUnavailable`을 올려 **호출 전에** 거부한다.
+- `MARKETING_SNS_PROVIDER`는 `mock`(기본)과 `instagram`(`instagram_graph.py`, Instagram Login)만
+  쓴다. 그 밖의 값이나 `instagram`인데 설정이 비었으면 `get_adapter()`가 `AdapterUnavailable`을
+  올려 **호출 전에** 거부한다.
 - 토큰·앱 시크릿은 환경변수 **이름만** 여기서 정한다. 이 패키지는 값을 읽지도, 출력하지도 않는다.
 - Facebook 로그인 경로의 삭제(`DELETE /{media-id}`)는 별도 액션(가칭 `unpublish_sns`, C 제안)으로만
   쓰고 `execute()`를 거쳐야 한다. 여기에는 인터페이스 자리만 둔다(`delete_media`).
@@ -21,6 +22,7 @@ SECRET_ENV_NAMES = (
     "MARKETING_IG_USER_ID",
     "MARKETING_IG_APP_SECRET",
 )
+TOKEN_ENV, USER_ID_ENV = SECRET_ENV_NAMES[0], SECRET_ENV_NAMES[1]  # 이름을 쓰는 곳은 이 파일뿐
 PROVIDER_ENV = "MARKETING_SNS_PROVIDER"
 PROVIDER_MOCK = "mock"
 
@@ -127,13 +129,28 @@ def classify(code: int | None, subcode: int | None = None) -> tuple[str, Action]
     return "ig_unknown_error", "fail"
 
 
+PROVIDER_INSTAGRAM = "instagram"
+
+
 def get_adapter() -> InstagramAdapter:
-    """설정된 어댑터. 목이 아니면 실제 어댑터가 없으므로 호출 전에 거부한다."""
+    """설정된 어댑터. `mock`(기본)과 `instagram`(Instagram Login 실제 어댑터)만 쓴다.
+
+    `instagram`은 명시적으로 켜야 한다. 토큰·계정 ID가 비어 있으면 호출 전에 거부한다
+    (메시지에는 변수 이름만 담는다).
+    """
     provider = (os.getenv(PROVIDER_ENV) or PROVIDER_MOCK).strip().lower()
-    if provider != PROVIDER_MOCK:
-        raise AdapterUnavailable(
-            "실제 Instagram 어댑터가 아직 없다 (MARKETING_SNS_PROVIDER=mock만 가능)"
+    if provider == PROVIDER_INSTAGRAM:
+        from marketing_agent.sns_publish.instagram_graph import (
+            GraphConfigError,
+            GraphInstagramAdapter,
         )
+
+        try:
+            return GraphInstagramAdapter.from_env()
+        except GraphConfigError as error:
+            raise AdapterUnavailable(str(error)) from None
+    if provider != PROVIDER_MOCK:
+        raise AdapterUnavailable("알 수 없는 MARKETING_SNS_PROVIDER (mock 또는 instagram만 가능)")
     from marketing_agent.sns_publish.instagram_mock import MockInstagramAdapter
 
     return _mock_singleton(MockInstagramAdapter)
