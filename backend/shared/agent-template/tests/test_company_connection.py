@@ -116,3 +116,21 @@ def test_without_the_env_the_feature_is_off(monkeypatch) -> None:
     assert cc.clear_connection() is False
     with pytest.raises(RuntimeError):
         cc.save_connection("http://x.example.com", verified_at="t", updated_by="y")
+
+
+def test_a_disabled_connection_keeps_the_address_but_is_not_used(conn_file: Path) -> None:
+    _write(conn_file, {"shop_api_url": "http://192.168.0.251:8080/shop-api", "enabled": False})
+    found = cc.read_connection()
+    assert found is not None and found.enabled is False
+    assert cc.shop_api_override() is None
+    assert agent_url("shop-api") == "http://shop-api:8010"
+
+
+def test_an_old_file_without_enabled_counts_as_on(conn_file: Path) -> None:
+    _write(conn_file, {"shop_api_url": "http://192.168.0.251:8080/shop-api"})
+    assert cc.shop_api_override() == "http://192.168.0.251:8080/shop-api"
+
+
+def test_enabled_must_be_a_boolean(conn_file: Path) -> None:
+    _write(conn_file, {"shop_api_url": "http://x.example.com", "enabled": "no"})
+    assert cc.read_connection() is None

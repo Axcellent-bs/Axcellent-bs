@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { PreparingChip } from '@/components/Preparing'
 import { ApiError } from '@/lib/apiError'
-import { companyConnection, type ConnectionState, type ConnectionTest } from '@/lib/companyConnection'
+import { companyConnection, type ConnectionMode, type ConnectionState, type ConnectionTest } from '@/lib/companyConnection'
 import { HUMAN_TOKEN_SET } from '@/lib/env'
 import { ago } from '@/lib/format'
 
@@ -12,6 +12,10 @@ const SOURCE: Record<ConnectionState['source'], { label: string; tone: string }>
   env: { label: '서버 설정값', tone: 'bg-ink-100 text-ink-700' },
   default: { label: '기본 (로컬 판매 서버)', tone: 'bg-ink-100 text-ink-700' },
 }
+const MODES: { id: ConnectionMode; label: string }[] = [
+  { id: 'internal', label: '내부 데이터' },
+  { id: 'connected', label: '실제 연결' },
+]
 const normalize = (u: string) => u.trim().replace(/\/+$/, '')
 const message = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : '요청에 실패했습니다')
 
@@ -20,7 +24,7 @@ export default function Integrations() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [url, setUrl] = useState('')
   const [result, setResult] = useState<ConnectionTest | null>(null)
-  const [busy, setBusy] = useState<'test' | 'save' | 'clear' | null>(null)
+  const [busy, setBusy] = useState<'test' | 'save' | 'clear' | 'mode' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -31,7 +35,7 @@ export default function Integrations() {
     return () => { live = false }
   }, [])
 
-  const run = async (kind: 'test' | 'save' | 'clear', work: () => Promise<void>) => {
+  const run = async (kind: 'test' | 'save' | 'clear' | 'mode', work: () => Promise<void>) => {
     setBusy(kind)
     setError(null)
     try {
@@ -51,6 +55,7 @@ export default function Integrations() {
     setState(saved)
     setResult(null)
   })
+  const switchMode = (mode: ConnectionMode) => void run('mode', async () => setState(await companyConnection.mode(mode)))
   const clear = () => void run('clear', async () => {
     setState(await companyConnection.clear())
     setResult(null)
@@ -72,6 +77,35 @@ export default function Integrations() {
           </div>
           {state && <span className={`chip ${SOURCE[state.source].tone}`}>{SOURCE[state.source].label}</span>}
         </div>
+
+        {state && (
+          <div className="space-y-2">
+            <div role="radiogroup" aria-label="데이터 모드" className="inline-flex rounded-xl bg-ink-100 p-1 text-sm">
+              {MODES.map((m) => {
+                const active = state.mode === m.id
+                const disabled = busy !== null || !canWrite || active || (m.id === 'connected' && !state.connection)
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    disabled={disabled}
+                    onClick={() => switchMode(m.id)}
+                    className={`rounded-lg px-3 py-1.5 ${active ? 'bg-white font-semibold text-ink-900 shadow-sm' : 'text-ink-500'}`}
+                  >
+                    {busy === 'mode' && !active ? '바꾸는 중…' : m.label}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-xs text-ink-500">
+              내부 데이터: <span className="font-mono">{state.internal_url}</span>
+              {state.connection && <> · 실제 연결: <span className="font-mono">{state.connection.shop_api_url}</span></>}
+              {!state.connection && ' · 실제 연결은 아래에서 주소를 확인·저장하면 켤 수 있어요.'}
+            </p>
+          </div>
+        )}
 
         {loadError && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">연결 상태를 읽지 못했어요: {loadError}</p>}
         {state && (
@@ -101,7 +135,7 @@ export default function Integrations() {
           <div className="flex flex-wrap gap-2">
             <button className="btn-ghost" disabled={busy !== null || !url.trim() || !canWrite}>{busy === 'test' ? '확인 중…' : '연결 확인'}</button>
             <button type="button" className="btn-primary" onClick={save} disabled={busy !== null || !tested || !canWrite}>{busy === 'save' ? '저장 중…' : '저장'}</button>
-            {state?.source === 'connection' && (
+            {state?.connection && (
               <button type="button" className="btn-quiet" onClick={clear} disabled={busy !== null || !canWrite}>{busy === 'clear' ? '해제 중…' : '연결 해제'}</button>
             )}
           </div>
@@ -121,7 +155,7 @@ export default function Integrations() {
         {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
 
         <p className="text-xs text-ink-500">
-          세 항목을 모두 통과해야 저장할 수 있어요. 저장하면 모든 부서 AI가 다시 켜지 않아도 바로 이 주소를 읽고, 연결을 해제하면 원래 판매 서버로 돌아가요.
+          세 항목을 모두 통과해야 저장할 수 있어요. 저장하면 실제 연결 모드가 되고, 모든 부서 AI가 다시 켜지 않아도 바로 이 주소를 읽어요. 내부 데이터로 바꾸면 주소는 남긴 채 원래 판매 서버를 읽고, 연결 해제는 주소까지 지워요.
           {!HUMAN_TOKEN_SET && ' 사람 토큰이 없어 확인·저장이 꺼져 있어요 (run_web.sh로 켜면 들어가요).'}
           {state && !state.editable && ' 서버에 회사 연결 파일 설정(AX_COMPANY_CONNECTION_FILE)이 없어 저장할 수 없어요 (run_all.sh로 켜면 생겨요).'}
         </p>

@@ -5,6 +5,8 @@
 - `POST   /api/dashboard/company-connection/test`: 저장하지 않고 연결 확인만
 - `PUT    /api/dashboard/company-connection`: 다시 확인하고, 모두 통과하면 저장
   (모든 서비스가 재시작 없이 따라감)
+- `POST   /api/dashboard/company-connection/mode`: 내부 데이터(`internal`) ↔ 실제 연결(`connected`).
+  저장한 주소는 지우지 않는다. 실제 연결로 켤 때는 다시 확인하고, 통과해야 켠다
 - `DELETE /api/dashboard/company-connection`: 연결을 지우고 원래 주소(`AX_SHOP_API_URL`·기본값)로
 
 쓰기(POST·PUT·DELETE)는 사람 토큰만 된다(`require_human_for_writes`).
@@ -44,6 +46,10 @@ router = APIRouter(
 
 class ConnectionIn(BaseModel):
     url: str = Field(min_length=1, max_length=store.MAX_URL_LENGTH)
+
+
+class ModeIn(BaseModel):
+    mode: Literal["internal", "connected"]
 
 
 @dataclass(frozen=True)
@@ -133,9 +139,15 @@ async def run_checks(url: str) -> list[Check]:
     return checks
 
 
+def _internal_url() -> str:
+    """내부 데이터 모드의 주소: 회사 연결을 빼고 정한 shop-api (`AX_SHOP_API_URL`·기본값)."""
+    env = os.getenv("AX_SHOP_API_URL")
+    return env.rstrip("/") if env else "http://shop-api:8010"
+
+
 def _state() -> dict[str, Any]:
     found = store.read_connection()
-    if found:
+    if found and found.enabled:
         source = "connection"
     elif os.getenv("AX_SHOP_API_URL"):
         source = "env"
@@ -144,9 +156,32 @@ def _state() -> dict[str, Any]:
     return {
         "shop_api_url": agent_url("shop-api"),
         "source": source,
+        "mode": "connected" if source == "connection" else "internal",
+        "internal_url": _internal_url(),
         "connection": found.as_dict() if found else None,
         "editable": bool(store.connection_file()),
     }
+
+
+def _require_editable() -> None:
+    if not store.connection_file():
+        raise ApiError(
+            409, "CONNECTION_NOT_EDITABLE", f"{store.CONNECTION_FILE_ENV}가 없어 저장할 수 없다"
+        )
+
+
+async def _checked(url: str) -> list[Check]:
+    """확인을 돌리고, 하나라도 실패하면 422로 이유를 알린다."""
+    checks = await run_checks(url)
+    failed = [c for c in checks if not c.ok]
+    if failed:
+        reasons = "; ".join(f"{c.label}: {c.detail}" for c in failed)
+        raise ApiError(422, "CONNECTION_CHECK_FAILED", f"연결 확인에 실패했다 ({reasons})")
+    return checks
+
+
+def _human(request: Request) -> str:
+    return getattr(request.state, "human", "unknown")
 
 
 @router.get("")
@@ -170,27 +205,38 @@ async def test_connection(body: ConnectionIn) -> dict:
 
 @router.put("")
 async def save_connection(body: ConnectionIn, request: Request) -> dict:
-    if not store.connection_file():
-        raise ApiError(
-            409, "CONNECTION_NOT_EDITABLE", f"{store.CONNECTION_FILE_ENV}가 없어 저장할 수 없다"
-        )
+    """주소를 확인하고 저장한다. 저장하면 실제 연결 모드가 된다."""
+    _require_editable()
     url = _valid(body.url)
-    checks = await run_checks(url)
-    failed = [c for c in checks if not c.ok]
-    if failed:
-        reasons = "; ".join(f"{c.label}: {c.detail}" for c in failed)
-        raise ApiError(
-            422, "CONNECTION_CHECK_FAILED", f"연결 확인에 실패해 저장하지 않았다 ({reasons})"
-        )
-    human = getattr(request.state, "human", "unknown")
-    store.save_connection(url, verified_at=_now(), updated_by=human)
-    logger.info("회사 연결 저장: %s (by %s)", url, human)
+    checks = await _checked(url)
+    store.save_connection(url, verified_at=_now(), updated_by=_human(request))
+    logger.info("회사 연결 저장: %s (by %s)", url, _human(request))
     return ok({**_state(), "checks": [c.as_dict() for c in checks]})
+
+
+@router.post("/mode")
+async def switch_mode(body: ModeIn, request: Request) -> dict:
+    """내부 데이터 ↔ 실제 연결. 저장한 주소는 남긴다. 실제 연결로 켤 때는 다시 확인한다."""
+    _require_editable()
+    found = store.read_connection()
+    if found is None:
+        raise ApiError(409, "NO_CONNECTION", "저장한 연결이 없어 모드를 바꿀 수 없다")
+    if body.mode == "connected":
+        await _checked(found.shop_api_url)
+        store.save_connection(found.shop_api_url, verified_at=_now(), updated_by=_human(request))
+    else:
+        store.save_connection(
+            found.shop_api_url,
+            verified_at=found.verified_at,
+            updated_by=_human(request),
+            enabled=False,
+        )
+    logger.info("회사 연결 모드: %s (%s, by %s)", body.mode, found.shop_api_url, _human(request))
+    return ok(_state())
 
 
 @router.delete("")
 def delete_connection(request: Request) -> dict:
-    removed = store.clear_connection()
-    if removed:
-        logger.info("회사 연결 해제 (by %s)", getattr(request.state, "human", "unknown"))
+    if store.clear_connection():
+        logger.info("회사 연결 해제 (by %s)", _human(request))
     return ok(_state())

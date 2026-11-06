@@ -1,11 +1,12 @@
 """회사 연결: 고객사 판매 서버(shop-api 규격) 주소를 화면에서 정한다.
 
 - 저장: `AX_COMPANY_CONNECTION_FILE`이 가리키는 JSON 파일
-  (`{"shop_api_url", "verified_at", "updated_at", "updated_by"}`).
+  (`{"shop_api_url", "enabled", "verified_at", "updated_at", "updated_by"}`).
   쓰는 곳은 dashboard-api 한 곳이다 (시스템 관리 > 회사 연결, 사람 토큰).
 - 읽기: `config.agent_url("shop-api")`가 부를 때마다 바뀐 시각·크기로 확인해 읽는다
   (재시작 없이 반영).
   순서는 이 파일 → `AX_SHOP_API_URL` → 기본 포트 표다.
+- `enabled`가 false면 주소는 남겨 두고 쓰지 않는다(내부 데이터 모드). 없으면 true(예전 파일).
 - 파일이 없으면 연결이 없는 것이다(로컬 개발 기본, 경고 없음).
   깨졌으면 경고를 한 번 남기고 없는 것으로 본다.
 """
@@ -35,10 +36,12 @@ class Connection:
     verified_at: str | None
     updated_at: str | None
     updated_by: str | None
+    enabled: bool = True
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "shop_api_url": self.shop_api_url,
+            "enabled": self.enabled,
             "verified_at": self.verified_at,
             "updated_at": self.updated_at,
             "updated_by": self.updated_by,
@@ -89,11 +92,15 @@ def _parse(raw: Any, path: str) -> Connection:
         value = raw.get(key)
         return value if isinstance(value, str) else None
 
+    enabled = raw.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise ValueError(f"{path}: enabled는 true·false여야 한다")
     return Connection(
         shop_api_url=validate_shop_url(url),
         verified_at=text("verified_at"),
         updated_at=text("updated_at"),
         updated_by=text("updated_by"),
+        enabled=enabled,
     )
 
 
@@ -124,16 +131,18 @@ def read_connection() -> Connection | None:
 
 
 def shop_api_override() -> str | None:
-    """화면에서 정한 판매 서버 주소. 없으면 None."""
+    """화면에서 정한 판매 서버 주소. 없거나 꺼져 있으면(내부 데이터 모드) None."""
     found = read_connection()
-    return found.shop_api_url if found else None
+    return found.shop_api_url if found and found.enabled else None
 
 
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def save_connection(url: str, *, verified_at: str, updated_by: str) -> Connection:
+def save_connection(
+    url: str, *, verified_at: str | None, updated_by: str, enabled: bool = True
+) -> Connection:
     """연결을 저장한다(임시 파일에 쓰고 바꿔치기). 파일 경로가 없으면 RuntimeError."""
     path = connection_file()
     if not path:
@@ -143,6 +152,7 @@ def save_connection(url: str, *, verified_at: str, updated_by: str) -> Connectio
         verified_at=verified_at,
         updated_at=_now(),
         updated_by=updated_by,
+        enabled=enabled,
     )
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)

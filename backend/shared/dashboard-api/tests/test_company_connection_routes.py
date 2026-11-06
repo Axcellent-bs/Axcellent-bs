@@ -61,6 +61,8 @@ def test_without_a_connection_the_default_address_is_reported(conn_file, client)
     assert body == {
         "shop_api_url": "http://shop-api:8010",
         "source": "default",
+        "mode": "internal",
+        "internal_url": "http://shop-api:8010",
         "connection": None,
         "editable": True,
     }
@@ -166,3 +168,39 @@ def test_writes_need_a_human_token(conn_file, client, method, path) -> None:
     res = getattr(client, method)(BASE + path, **kwargs)
     assert res.status_code == 401 and res.json()["error"]["code"] == "AUTH_REQUIRED"
     assert not conn_file.exists()
+
+
+def test_mode_switches_between_internal_and_connected_without_losing_the_address(
+    conn_file, client, monkeypatch
+) -> None:
+    monkeypatch.setenv("AX_SHOP_API_URL", "http://127.0.0.1:8010")
+    client.put(BASE, json={"url": SHOP})
+    internal = client.post(BASE + "/mode", json={"mode": "internal"}).json()["data"]
+    assert internal["mode"] == "internal" and internal["source"] == "env"
+    assert internal["shop_api_url"] == internal["internal_url"] == "http://127.0.0.1:8010"
+    assert internal["connection"]["shop_api_url"] == SHOP
+    assert internal["connection"]["enabled"] is False
+    connected = client.post(BASE + "/mode", json={"mode": "connected"}).json()["data"]
+    assert connected["mode"] == "connected" and connected["shop_api_url"] == SHOP
+
+
+def test_switching_to_connected_rechecks_and_refuses_a_dead_server(
+    conn_file, client, monkeypatch
+) -> None:
+    client.put(BASE, json={"url": SHOP})
+    client.post(BASE + "/mode", json={"mode": "internal"})
+    monkeypatch.setattr(routes, "TRANSPORT", _transport({}))
+    res = client.post(BASE + "/mode", json={"mode": "connected"})
+    assert res.status_code == 422 and res.json()["error"]["code"] == "CONNECTION_CHECK_FAILED"
+    assert client.get(BASE).json()["data"]["mode"] == "internal"
+
+
+def test_mode_needs_a_saved_connection(conn_file, client) -> None:
+    res = client.post(BASE + "/mode", json={"mode": "connected"})
+    assert res.status_code == 409 and res.json()["error"]["code"] == "NO_CONNECTION"
+
+
+def test_mode_needs_a_human_token(conn_file, client) -> None:
+    client.headers.pop("authorization")
+    res = client.post(BASE + "/mode", json={"mode": "internal"})
+    assert res.status_code == 401
