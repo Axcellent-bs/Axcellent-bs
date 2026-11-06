@@ -83,9 +83,14 @@ def _answer(case: dict) -> dict | None:
     return {"before": before, "after": after}
 
 
-def test_observe_past_results() -> None:
-    """관찰만: 지표를 남긴다 (관문은 코드 PR에서 켠다)."""
+GATES = dict.fromkeys(score.METRICS, 1.0)  # 모두 맞아야 함 (기준선 그대로)
+
+
+def test_past_results_pass_the_gates() -> None:
+    """관문: 연결(최근 3개·예전 id·시험 제외)·띠 색·반대 문구·예상치 없음·판정과 순서 불변."""
     cases = make.cases()
     metrics = score.score(cases, {c["name"]: _answer(c) for c in cases})
     print("past_results eval:", json.dumps(metrics, ensure_ascii=False))
     assert set(metrics) == set(score.METRICS)
+    for name, gate in GATES.items():
+        assert metrics[name] >= gate, f"{name} {metrics[name]} (관문 {gate})"

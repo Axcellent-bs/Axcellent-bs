@@ -2020,6 +2020,10 @@ class TrendInsight(AxModel):
     borrow_products: list[InsightProduct] = Field(default_factory=list)
     cautions: list[CautionType] = Field(default_factory=list)
     caution_note: str | None = None
+    # 아래는 예전 응답은 없다 (브리프 v4). 같은 insight_id로 한 캠페인의 성과 결과
+    # (campaign_result), 최근 3개까지 최신순. 없으면 []. 인사이트 판정·순서는 바꾸지 않는다
+    # (응답할 때 붙임)
+    past_results: list[InsightPastResult] = Field(default_factory=list, max_length=3)
 
 
 # ------------------------------------------------ 기회 가설 카드 (trend_insight_brief 선택 칸)
@@ -2866,3 +2870,42 @@ class CampaignResultOutput(AxModel):
     alerts: list[CampaignAlert] = Field(default_factory=list)
     summary: str = ""
     schema_version: str = ""
+
+
+# 인사이트 카드 "지난번 결과" 띠 색: green = 조회 달성 + 매출 더 팔림, red = 매출 덜 팔림이거나
+# 알림 loss (조회 판정과 상관없이), gray = 그 밖 (미달·확인 안 됨·측정 중)
+PastBand = Literal["green", "red", "gray"]
+
+
+class InsightPastResult(AxModel):
+    """인사이트의 지난번 캠페인 결과 하나 (campaign_result 값 그대로 + 띠 문장). 기획이 받는다.
+
+    조회와 매출을 합친 점수는 없다. 측정 중이면 "측정 중"만 (예상치 없음).
+    """
+
+    campaign_id: str
+    campaign_name: str | None = None
+    window_from: UtcDatetime | None = None  # 측정 기간
+    window_to: UtcDatetime | None = None
+    # 조회 판정: 끝난 영상(7일)의 목표 대비 배수 중앙값이 1 이상이면 achieved, 미만 missed,
+    # 끝난 영상이 없으면 measuring, 판정할 영상이 없으면 none
+    views_verdict: Literal["achieved", "missed", "measuring", "none"] = "none"
+    views_label: str  # "조회 달성" · "조회 미달" · "측정 중" · "조회 판정 없음"
+    target_ratio: float | None = Field(default=None, ge=0)  # 끝난 영상 목표 대비 중앙값
+    videos_total: int = Field(default=0, ge=0)  # 시험 영상 제외
+    videos_achieved: int = Field(default=0, ge=0)
+    # 매출 판정 (campaign_result 그대로)
+    sales_verdict: CampaignSalesVerdictName | None = None
+    sales_label: str  # "더 팔림" · "덜 팔림" · "효과 확인 안 됨(표본 적음)" · "측정 불가: …"
+    sales_low_sample: bool = False
+    incremental_gross_krw: int | None = None  # 마이너스 그대로
+    incremental_orders: int | None = None
+    actions: list[str] = Field(default_factory=list)  # 개선 방향 문장 그대로
+    alerts: list[CampaignAlert] = Field(default_factory=list)  # loss · data_gap
+    # 띠 (서버 문장, 화면은 계산하지 않음)
+    band: PastBand = "gray"
+    summary_line: str = ""  # "조회 목표의 N배 (영상 M개 중 K개 달성) · 매출 +N원 · 주문 +N건"
+    note_line: str | None = None  # "지난번 개선 방향: …" 또는 조회·매출 반대 문구
+
+
+TrendInsight.model_rebuild()

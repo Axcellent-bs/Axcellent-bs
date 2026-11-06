@@ -186,7 +186,7 @@ def category_insight_id(tenant: str, topic: str, category: str | None) -> str:
     return "ins_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
-SCHEMA_VERSION = "trend_insight_brief.v3"  # 응답 모양 버전 (facts·fact_ids·안정 insight_id)
+SCHEMA_VERSION = "trend_insight_brief.v4"  # 응답 모양 버전 (v4: past_results를 응답 때 붙임)
 
 
 def tenant_of(env: Mapping[str, str]) -> str:
