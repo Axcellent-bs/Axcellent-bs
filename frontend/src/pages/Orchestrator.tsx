@@ -30,6 +30,7 @@ const STEP_KO: Record<string, string> = {
   cost: "처리 결과 장부에 기록", record: "처리 결과 기록", verify: "인사 기록 읽어 확인",
 };
 const NOTE_KO: Record<string, string> = {
+  suspected: "최근 배포가 원인으로 의심됨", linked_duplicate: "이미 있는 같은 요청에 연결함", verify_timeout: "자동 교차검증이 제때 끝나지 않아 사람 승인으로 넘김",
   undetermined: "원인을 특정하지 못함", requested: "보상을 요청함", card_created: "기록을 남김",
   listed: "인사 기록에서 확인함", partial: "일부만 확인함", candidate: "후보 기록으로 저장함 (사람 확인 대기)",
   found: "비슷한 과거 이벤트를 찾음", none: "비슷한 과거 이벤트 없음", recorded: "해결 내용을 남김", duplicate: "이미 남긴 해결 내용",
