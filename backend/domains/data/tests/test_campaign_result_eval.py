@@ -83,8 +83,9 @@ def _answer(case: dict) -> dict | None:
     """skill 판정 함수에 같은 입력을 넣은 답. 판정 함수·계약 칸이 없으면(dev) None = 0점."""
     from pydantic import ValidationError
 
+    from ax_contracts.schemas.data import CampaignEffectOutput, VideoPerformanceOutput
+
     try:
-        from ax_contracts.schemas.data import CampaignEffectOutput, VideoPerformanceOutput
         from data_agent.skills.campaign_result import judge
     except ImportError:
         return None
