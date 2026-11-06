@@ -111,7 +111,7 @@ def test_register_then_measure_each_checkpoint_in_its_window(tmp_path: Path) -> 
     # 화면 한 줄은 시간 맞춤 기준: 같은 형식 숏츠 스냅샷이 없으면 배수 대신 "기준 없음(표본 0)"
     assert h1.line == "1시간 · 1,333회 · 기준 없음(표본 0)" and one.summary == h1.line
     assert h1.baseline_basis == "age_matched" and h1.baseline_n == 0 and h1.peer_age_ratio is None
-    assert one.schema_version == "video_performance.v4"
+    assert one.schema_version == "video_performance.v5"
     # 프로모션 링크·쿠폰 없이 등록: 이 영상의 매출은 측정 불가
     assert one.sales_measurable is False
     assert one.sales_reason == "측정 불가: 프로모션 링크/쿠폰 없음"

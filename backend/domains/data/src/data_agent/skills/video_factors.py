@@ -35,6 +35,7 @@ from data_agent.skills.video_baseline import MIN_BASELINE, FormatBaseline
 
 NAMES = {"1h": "1시간", "1d": "1일", "3d": "3일", "7d": "7일"}
 STRONG, NORMAL = 0.8, 0.5
+COLLECTING = "기준 모으는 중"  # 같은 형식 기준 표본 5개 미만 (새 숏츠 추적이 모으는 중)
 DATA_GAP = "놓침: 그 시점에 재지 못함 (데이터 끊김)"
 LATE_REGISTERED = "놓침: 등록 전에 그 시점이 지남"
 ANALYTICS_LIMIT = (
@@ -137,8 +138,8 @@ def level_of(
 ) -> tuple[SignalLevel, str | None]:
     if ours is None:
         return "unknown", f"{what} 값 없음"
-    if base is None or n < MIN_BASELINE:
-        return "unknown", f"기준 없음(같은 형식 {what} 표본 {n}개)"
+    if base is None or n < MIN_BASELINE:  # 새 숏츠 추적이 같은 형식 표본을 모으는 중
+        return "unknown", f"{COLLECTING} ({n}/{MIN_BASELINE})"
     if base <= 0:
         return "unknown", f"기준 {what}이 0 이하"
     r = ours / base
@@ -218,6 +219,8 @@ def signals_of(out: VideoPerformanceOutput, base: FormatBaseline | None) -> Vide
         elif missing is not None:
             why = f"판단 불가: {NAMES[missing.checkpoint]} {missing.reason or '값 없음'}"
         sig.grow = VideoSignal(reason=why)
+    for s in (sig.first, sig.like, sig.cmt, sig.grow):  # 기준 표본 5개 미만 = 기준 모으는 중
+        s.collecting = s.level == "unknown" and (s.reason or "").startswith(COLLECTING)
     return sig
 
 

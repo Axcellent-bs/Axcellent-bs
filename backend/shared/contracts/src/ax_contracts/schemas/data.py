@@ -2253,6 +2253,17 @@ class CollectorStatus(AxModel):
     reason: str  # 잠금 상태 한 줄 (사람이 읽음)
 
 
+class FreshTrackStatus(AxModel):
+    """새 숏츠 추적 (같은 형식 비교 기준용): 오늘 쓴 YouTube 단위 / 하루 상한, 추적 중 수."""
+
+    units_today: int = Field(default=0, ge=0)
+    unit_cap: int = Field(default=2500, gt=0)
+    tracking: int = Field(default=0, ge=0)  # 지금 추적 중 (게시 8일 안)
+    formats: list[str] = Field(default_factory=list)  # 대상 형식 (최대 5개)
+    find_stopped: bool = False  # 상한에 닿아 오늘 찾기를 멈춤 (추적은 계속)
+    line: str = ""  # "새 숏츠 추적: 오늘 N유닛 / 2,500, 추적 중 N개"
+
+
 class YouTubeChartFailure(AxModel):
     """영상 탐색 카테고리 인기 차트(videos.list chart=mostPopular)를 받지 못한 YouTube 카테고리.
 
@@ -2286,6 +2297,8 @@ class DataSourcesOutput(AxModel):
     youtube_usage: YouTubeDailyUsage | None = None
     # 아래는 예전 응답은 없다. 카테고리 인기 차트를 받지 못한 YouTube 카테고리 (영상 탐색)
     youtube_chart_failures: list[YouTubeChartFailure] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. 새 숏츠 추적 상태 (수집기 상태 화면에 같이 보인다)
+    fresh_track: FreshTrackStatus | None = None
 
 
 class YouTubeCallerUsage(AxModel):
@@ -2611,6 +2624,18 @@ class VideoSignal(AxModel):
     checkpoint: VideoCheckpointName | None = None  # 어느 시점 값인지
     level: SignalLevel = "unknown"
     reason: str | None = None  # unknown이면 이유
+    # 아래는 예전 응답은 없다 (v5). 같은 형식 기준 표본이 5개 미만이라 판단 불가 = 기준 모으는 중
+    # (reason "기준 모으는 중 (n/5)")
+    collecting: bool = False
+
+
+class BaselineProgress(AxModel):
+    """같은 형식 비교 기준 모으는 중: 형식·시점마다 새 숏츠 추적 표본 수 (5개면 등급이 켜짐)."""
+
+    shorts_format: str
+    checkpoint: VideoCheckpointName
+    n: int = Field(ge=0)
+    need: int = Field(default=5, gt=0)
 
 
 class VideoSignals(AxModel):
@@ -2714,6 +2739,10 @@ class VideoPerformanceOutput(AxModel):
     coupon_id: str | None = None
     sales_measurable: bool | None = None
     sales_reason: str | None = None
+    # 아래는 예전 응답은 없다 (v5, list_all). 같은 형식 비교 기준 모으는 중 (대상 형식 × 시점)과
+    # 모든 칸이 5개를 넘었는지 (넘으면 화면에서 이 칸을 숨김)
+    baseline_progress: list[BaselineProgress] = Field(default_factory=list)
+    baseline_ready: bool = False
 
 
 # ------------------------------------------------ campaign_result (성과 결과 1건, campaign_id 기준)
