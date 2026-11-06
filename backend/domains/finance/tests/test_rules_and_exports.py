@@ -304,9 +304,14 @@ def test_inbox_reads_korean_bank_csv_and_moves_files(
     (tmp_path / "bad.csv").write_text("이름,나이\n가,1\n", "utf-8")
     rows: list[dict[str, Any]] = []
     log: list[dict[str, Any]] = []
-    done = exports.scan_inbox(rows, log)
+    periods: list[dict[str, str]] = []
+    done = exports.scan_inbox(rows, log, periods)
     assert {d["file"]: d["status"] for d in done} == {"a.csv": "imported", "bad.csv": "failed"}
-    assert rows == [{"date": "2026-10-05", "amount": 1000, "memo": "PG정산", "balance": 5000}]
+    assert rows == [
+        {"date": "2026-10-05", "amount": 1000, "memo": "PG정산", "balance": 5000},
+        {"date": "2026-10-06", "amount": -300, "memo": "이체", "balance": 4700},  # 출금은 음수
+    ]
+    assert periods == [{"from": "2026-10-05", "to": "2026-10-06"}]  # 출금 열이 있던 기간
     assert len(list((tmp_path / "processed").iterdir())) == 1
     assert len(list((tmp_path / "failed").iterdir())) == 1
     assert not list(tmp_path.glob("*.csv"))
@@ -314,7 +319,7 @@ def test_inbox_reads_korean_bank_csv_and_moves_files(
     # 같은 내역을 다시 넣어도 겹치지 않는다
     (tmp_path / "a2.csv").write_bytes(text.encode("cp949"))
     again = exports.scan_inbox(rows, log)
-    assert again[0]["added"] == 0 and len(rows) == 1
+    assert again[0]["added"] == 0 and len(rows) == 2
 
 
 def test_inbox_is_off_without_a_folder(monkeypatch: pytest.MonkeyPatch) -> None:

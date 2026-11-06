@@ -57,17 +57,18 @@ def test_bank_match_finds_short_missing_and_unexpected(kit) -> None:
                 "memo": "토스페이먼츠",
             },
             {"date": "2026-10-17", "amount": 5000, "memo": "이자"},
-            {"date": "2026-10-17", "amount": -3000, "memo": "출금"},  # 출금은 대조하지 않는다
+            {"date": "2026-10-17", "amount": -3000, "memo": "출금"},  # 출금은 입금 대조에 안 쓴다
         ]
     )
-    assert problems == [] and len(rows) == 3
+    assert problems == [] and len(rows) == 4
     r = bank.match(books, rows, TODAY)
     days = {d["date"]: d for d in r["days"]}
     assert days["2026-10-14"]["status"] == "matched"
     assert (days["2026-10-15"]["status"], days["2026-10-15"]["diff"]) == ("short", -100)
     assert days["2026-10-16"]["status"] == "missing"
     assert days["2026-10-17"]["status"] == "unexpected"
-    assert r["covered"] == {"from": "2026-10-14", "to": "2026-10-17", "rows": 3}
+    assert days["2026-10-17"]["deposited"] == 5000  # 같은 날 출금 3,000원은 빼지 않는다
+    assert r["covered"] == {"from": "2026-10-14", "to": "2026-10-17", "rows": 4}
     assert {d["date"] for d in bank.exceptions(r)} == {"2026-10-15", "2026-10-16", "2026-10-17"}
 
 
@@ -142,8 +143,9 @@ def test_checklist_items_follow_records(kit) -> None:
     rec = handlers.FinanceRecords()
     r = close_checklist.checklist(books, rec, TODAY, TODAY)
     status = {i["key"]: i["status"] for i in r["items"]}
-    assert r["month"] == "2026-10" and r["total"] == 6
+    assert r["month"] == "2026-10" and r["total"] == 7
     assert status["daily_closing"] == "pending" and status["bank"] == "pending"
+    assert status["bank_out"] == "pending"  # 출금 열이 있는 내역을 아직 안 올림
     assert status["month_closing"] == "pending" and r["ready"] is False
 
     for k in range(22):

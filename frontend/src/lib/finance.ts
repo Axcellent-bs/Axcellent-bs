@@ -226,6 +226,7 @@ export interface Payables {
 }
 
 // ---------------------------------------------------------------- ② 은행 입금 대조 · ③ 13주 현금 흐름 · ① 월 마감
+/** 은행 거래 한 줄. 출금은 음수 금액 */
 export interface BankRowIn { date: string; amount: number; memo: string; balance?: number }
 export type BankStatus = "matched" | "short" | "over" | "missing" | "unexpected" | "not_covered";
 export interface BankDay { date: string; expected: number | null; deposited: number | null; diff: number | null; status: BankStatus; status_label: string }
@@ -236,13 +237,37 @@ export interface BankMatch {
   days: BankDay[];
   pg_memo: string;
 }
-export interface CashWeek { week_start: string; basis: "scheduled" | "estimated"; inflow: number | null; outflow: number | null; net: number | null; cumulative: number | null }
+export type TransferStatus = "paid" | "waiting" | "not_found" | "not_covered";
+export interface BankTransfer {
+  batch: string; seller_id: string | null; name: string; amount: number; approved_on: string; due_by: string;
+  status: TransferStatus; status_label: string; bank_date: string | null; bulk: boolean;
+}
+export interface BankOutRow { category: string; bank: number; book: number | null; book_source: string | null; diff: number | null; judged: boolean; comparable: boolean }
+export interface BankUnexplained { id: string; date: string; amount: number; memo: string; note: string | null; noted_by: string | null }
+export interface BankOutflows {
+  uploaded: boolean;
+  covered: { from: string; to: string }[];
+  transfers: BankTransfer[];
+  months: { month: string; fully_covered: boolean; rows: BankOutRow[] }[];
+  unexplained: BankUnexplained[];
+  counts: Partial<Record<TransferStatus, number>> & { unexplained_open?: number };
+  transfer_days: number;
+  applied_rules: AppliedRule[];
+}
+export interface CashWeek {
+  week_start: string; basis: "scheduled" | "estimated"; inflow: number | null; outflow: number | null;
+  fixed?: number | null; net: number | null; cumulative: number | null; balance?: number | null;
+}
 export interface Cashflow {
   today: string;
   weeks: CashWeek[];
   trailing_weeks: number;
   average: { inflow: number | null; outflow: number | null };
   negative_weeks: string[];
+  opening?: { as_of: string; balance: number; ordered: boolean; stale: boolean } | null;
+  fixed?: { month: string; monthly: number; weekly: number } | null;
+  min_cash_krw?: number;
+  short_weeks?: string[];
   note: string;
 }
 export interface CloseItem { key: string; label: string; status: "done" | "pending" | "unknown"; detail: string; link: string }
@@ -588,7 +613,10 @@ export const finance = {
   /** 은행 입금 대조 (올린 거래내역 기간만) */
   bank: () => fin<Envelope<BankMatch>>("/api/finance/bank"),
   /** 은행 입금 내역 올리기. 사람 토큰만 */
-  uploadBank: (rows: BankRowIn[]) => fin<Envelope<BankMatch> & { meta: FinanceMeta & { added?: number } }>("/api/finance/bank/statement", { method: "POST", body: { rows }, human: true }),
+  uploadBank: (rows: BankRowIn[], hasWithdrawals = false) => fin<Envelope<BankMatch> & { meta: FinanceMeta & { added?: number; withdrawals?: number } }>("/api/finance/bank/statement", { method: "POST", body: { rows, has_withdrawals: hasWithdrawals }, human: true }),
+  bankOutflows: () => fin<Envelope<BankOutflows>>("/api/finance/bank/outflows"),
+  noteBankOutflow: (rowId: string, note: string) =>
+    fin<Envelope<BankOutflows>>(`/api/finance/bank/outflows/${encodeURIComponent(rowId)}/note`, { method: "POST", body: { note }, human: true }),
   /** 13주 현금 흐름 */
   cashflow: () => fin<Envelope<Cashflow>>("/api/finance/cashflow"),
   /** 월 마감 체크리스트 */

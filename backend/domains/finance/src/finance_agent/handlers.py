@@ -154,7 +154,10 @@ class FinanceRecords:
         self.batches: dict[str, dict[str, Any]] = {}  # 정산 기간 → 묶음 요청 상태
         # 없앤 예산·한도 경보의 확인 메모. 쓰지 않지만 사람이 쓴 기록이라 저장 파일에 그대로 둔다
         self.policy_acks: dict[str, dict[str, Any]] = {}
-        self.bank_rows: list[dict[str, Any]] = []  # 사람이 올린 은행 입금 내역
+        self.bank_rows: list[dict[str, Any]] = []  # 사람이 올린 은행 거래내역 (출금은 음수)
+        self.bank_out_periods: list[dict[str, str]] = []  # 출금 열이 있던 내역의 기간
+        self.bank_notes: dict[str, dict[str, Any]] = {}  # 설명 없는 출금 id → 사람 메모
+        self.bank_note_log: list[dict[str, Any]] = []
         self.campaigns: dict[str, dict[str, Any]] = {}  # 캠페인 id → 손익 기록
         # 관문에서 읽은 start_campaign 실행 기록. 관문은 메모리라 재시작해도 잊지 않게 옮겨 둔다
         self.campaign_starts: dict[str, dict[str, Any]] = {}  # 실행 id → 기록
