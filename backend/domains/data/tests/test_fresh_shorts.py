@@ -135,3 +135,52 @@ def test_a_full_format_is_not_searched(tmp_path: Path, monkeypatch: pytest.Monke
     later = asyncio.run(fresh_shorts.run_tick(fake, env, NOW + timedelta(hours=6),
                                               formats=["정보·팁"], classify=classify))  # fmt: skip
     assert len(fake.searches) == 1 and later.full_skips == 1 and later.tracking == 1
+
+
+def test_a_find_the_ledger_refused_is_not_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """장부가 막아 부르지 않은 찾기는 시각을 남기지 않는다 → 장부 초기화 뒤 첫 루프에 찾는다."""
+    env, fake = _env(tmp_path), FakeYouTube()
+    youtube_quota.LEDGER.add("trend_popular", 7950)  # 예약 전에 다른 기능이 많이 쓴 날
+    refused = asyncio.run(fresh_shorts.run_tick(fake, env, NOW, formats=["정보·팁"],
+                                                classify=lambda st: {}))  # fmt: skip
+    assert fake.searches == [] and refused.ledger_refused == 1
+    assert "장부가 막아 안 부름 1" in refused.line()
+    store = fresh_shorts.store_of(env)
+    assert store.last_find("정보·팁") is None
+    store.close()
+    monkeypatch.setattr(youtube_quota, "LEDGER", youtube_quota.Ledger(None))  # 17:00 장부 초기화
+    later = NOW + timedelta(hours=1)
+    after = asyncio.run(fresh_shorts.run_tick(fake, env, later, formats=["정보·팁"],
+                                              classify=lambda st: {}))  # fmt: skip
+    assert fake.searches == ["정보 팁"] and after.searches == 1  # 6시간 안 기다림
+
+
+def test_a_race_refusal_rolls_back_but_a_real_failure_waits(tmp_path: Path) -> None:
+    from data_agent.connectors import ConnectorUnavailable
+    from data_agent.connectors.youtube import QuotaRefused
+
+    class Refusing(FakeYouTube):
+        def __init__(self, error: Exception) -> None:
+            super().__init__()
+            self.error = error
+
+        async def search_fresh_shorts(self, query, published_after, **_):  # noqa: ANN001, ANN003, ANN201
+            self.searches.append(query)
+            raise self.error
+
+    env = _env(tmp_path)
+    race = Refusing(QuotaRefused("QUOTA_EXCEEDED", "장부"))  # 확인 뒤 다른 곳이 써서 막힘
+    got = asyncio.run(fresh_shorts.run_tick(race, env, NOW, formats=["정보·팁"],
+                                            classify=lambda st: {}))  # fmt: skip
+    store = fresh_shorts.store_of(env)
+    assert got.ledger_refused == 1 and store.last_find("정보·팁") is None
+    real = Refusing(ConnectorUnavailable("RATE_LIMITED", "429"))  # 실제로 부른 뒤 실패
+    asyncio.run(fresh_shorts.run_tick(real, env, NOW, formats=["정보·팁"], classify=lambda st: {}))
+    assert store.last_find("정보·팁") == NOW  # 6시간 뒤에 다시
+    later = NOW + timedelta(hours=1)
+    again = asyncio.run(fresh_shorts.run_tick(real, env, later, formats=["정보·팁"],
+                                              classify=lambda st: {}))  # fmt: skip
+    assert real.searches == ["정보 팁"] and again.searches == 0
+    store.close()

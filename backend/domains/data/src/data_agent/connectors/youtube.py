@@ -46,6 +46,10 @@ QUOTA_REASONS = frozenset({"quotaExceeded", "dailyLimitExceeded", "rateLimitExce
 _client: httpx.AsyncClient | None = None  # 테스트가 `use_client`로 바꿔 끼운다
 
 
+class QuotaRefused(ConnectorUnavailable):
+    """장부(youtube_quota)가 막아 YouTube를 부르지 않음 (할당량 안 씀). code는 QUOTA_EXCEEDED."""
+
+
 def use_client(client: httpx.AsyncClient | None) -> None:
     """HTTP 클라이언트를 바꿔 끼운다 (테스트용). None이면 호출마다 새로 만든다."""
     global _client
@@ -502,7 +506,7 @@ class YouTubeConnector:
         why = youtube_quota.LEDGER.take(caller, COST[resource], search=resource == "search",
                                         env=self._env)  # fmt: skip
         if why is not None:
-            raise ConnectorUnavailable("QUOTA_EXCEEDED", why)
+            raise QuotaRefused("QUOTA_EXCEEDED", why)
         self.quota_used += COST[resource]
         client = self._client or _client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
         try:
