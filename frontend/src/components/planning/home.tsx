@@ -5,7 +5,7 @@ import { DEPT_NAME, TODAY, type Dept, type State as S } from '@/lib/planningData
 import { PROPOSAL_STAGES, PROPOSAL_SKILL_LABEL, proposalEnded, proposalOpen, proposalStage } from '@/lib/proposals'
 import { useAllReleaseChecks } from '@/lib/planning'
 import { Grade, Point, Tag, rowNav } from '@/components/planning-common/parts'
-import { LinkedLines, convoHref, toPath } from '@/components/planning-common/links'
+import { LinkedLines, convoHref, idText, toPath } from '@/components/planning-common/links'
 import { STAGES, pipeline, sortRows } from './requests'
 
 interface Todo { key: string; rank: number; kind: string; from: Dept; id: string; title: string; label: string; href: string; wait: boolean; at: string }
@@ -68,7 +68,7 @@ export function Home({ s }: { s: S }) {
                   <span className="sl-title">
                     {isNew && <span className="home-dot" aria-label="새로 옴" />}
                     <span className={`rq-dept d-${t.from}`}>{DEPT_NAME[t.from]}</span>
-                    <span className="mono muted sl-id">{t.id}</span>
+                    <span className="mono idc sl-id" title={t.id}>{idText(t.id)}</span>
                     <b title={t.title}>{t.title}</b>
                   </span>
                   <span>{t.wait ? <Tag tone="amber">{t.label}</Tag> : <span className="muted small">{t.label}</span>}</span>

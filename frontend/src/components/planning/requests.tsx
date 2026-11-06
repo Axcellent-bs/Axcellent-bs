@@ -7,7 +7,7 @@ import { DEPT_NAME, RELATION_LABEL, TODAY, byRelation, type Action, type Request
 import { useAllReleaseChecks, type ReleaseCheck } from '@/lib/planning'
 import { Tag } from '@/components/planning-common/parts'
 import { Pager, usePage } from '@/components/planning-common/pager'
-import { Ref, convoHref, isFollowUp, nextOf, prName, prSlug, reviewHref, reviewOf, toPath } from '@/components/planning-common/links'
+import { Ref, convoHref, idText, isFollowUp, nextOf, prName, prSlug, reviewHref, reviewOf, toPath } from '@/components/planning-common/links'
 import { gather } from '@/components/planning/projects'
 import { releaseState } from '@/components/planning/specs'
 import { devDiscarded, pendingReturns } from '@/lib/returned'
@@ -197,7 +197,7 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
   const [q, setQ] = useState('')
   const [dept, setDept] = useState('')
   const depts = [...new Set(all.map((r) => r.from))]
-  const hit = (r: Request) => (!dept || r.from === dept) && (!q.trim() || `${r.id} ${r.title}`.toLowerCase().includes(q.trim().toLowerCase()))
+  const hit = (r: Request) => (!dept || r.from === dept) && (!q.trim() || `${r.id} ${idText(r.id)} ${r.title}`.toLowerCase().includes(q.trim().toLowerCase()))
   const sorted = sortRows(all.filter(shown).filter(hit).filter(FILTERS.find((x) => x.id === f)!.match).map((r) => pipeline(s, r, latestCheck(r))))
   const rows = [...sorted.filter((x) => isFresh(x.r.id)), ...sorted.filter((x) => !isFresh(x.r.id))]
   // 같은 요청으로 연결만 한 것(REQ-15 등)은 원래 요청 줄을 가리킨다
