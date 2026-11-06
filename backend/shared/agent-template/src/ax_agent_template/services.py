@@ -68,6 +68,7 @@ SERVICES: tuple[Service, ...] = (
             "prepare_handoff",
             "assess_deletion_request",
             "knowledge_gap_report",
+            "qa_findings",
             "get_privacy_audit",
             "support_chat_send",
             "support_chat_close",
