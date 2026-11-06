@@ -5,7 +5,8 @@ import IncidentRecords from "@/components/hr/IncidentRecords";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
 import { ago } from "@/lib/format";
 import { useSearchParams } from "@/lib/nav";
-import { hr, readableBody, type HrCard, type PlanCheck, type PlanDraft } from "@/lib/hr";
+import CardBody from "@/components/hr/CardBody";
+import { authorKo, hr, plainText, type HrCard, type PlanCheck, type PlanDraft } from "@/lib/hr";
 
 // 결정 기록 화면 (재무 AI 화면과 같은 짜임): ① 지금 사람이 할 일 → ② 기록 도구.
 // hr이 계산한 판정을 그대로 보여 주고, 사람이 하는 일(후보 카드 승인·폐기)만 버튼으로 둔다.
@@ -137,12 +138,12 @@ function Candidates({ cards, onChanged }: { cards: HrCard[]; onChanged: () => vo
         <article key={c.card_id} className="grid gap-4 rounded-2xl bg-surface p-4 shadow-sm sm:grid-cols-[1fr_auto] sm:items-center">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <b className="text-[15px]">{c.title}</b>
+              <b className="text-base">{plainText(c.title).replace(/ · 문의 #\d+ 처리 결과 기록: /, " · ")}</b>
               <Chip label="확정 전 기록" tone="bg-amber-100 text-amber-800" />
               {c.confidence && <Chip label={`AI 확신도 ${CONF_KO[c.confidence]}`} tone="bg-ink-100 text-ink-500" />}
             </div>
-            <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-ink-50 px-3 py-2 text-xs leading-relaxed text-ink-700">{readableBody(c.body)}</pre>
-            <p className="mt-1.5 text-xs text-ink-500">{c.author}가 {ago(c.created_at)} 올림</p>
+            <div className="mt-2"><CardBody card={c} /></div>
+            <p className="mt-1.5 text-sm text-ink-500">{authorKo(c.author)}가 {ago(c.created_at)} 올림</p>
           </div>
           <div className="flex gap-2 sm:flex-col">
             <button className="btn-primary" disabled={!HUMAN_TOKEN_SET || busy !== null} onClick={() => decide(c, "approve")}>기록으로 확정</button>

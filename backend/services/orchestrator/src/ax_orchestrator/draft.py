@@ -14,6 +14,7 @@ import re
 from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
+from ax_orchestrator.naming import plain_terms
 from ax_orchestrator.recommend import recommend
 
 if TYPE_CHECKING:
@@ -31,7 +32,7 @@ def kst_text(text: str) -> str:
         at = datetime(*(int(g) for g in m.groups()), tzinfo=UTC).astimezone(_KST)
         return f"{at.month}월 {at.day}일 {at:%H:%M:%S}(한국 시간)"
 
-    return _ISO_UTC.sub(one, text)
+    return plain_terms(_ISO_UTC.sub(one, text))
 
 
 _CONFIDENCE_KO = {"high": "높음", "mid": "보통", "low": "낮음"}
@@ -51,7 +52,7 @@ def _this_event(inc: Incident) -> tuple[str | None, str | None, list[str]]:
     rollback = inc.steps.get("rollback")
     if rollback is not None and rollback.status == "completed":
         out = inc.outputs.get("rollback") or {}
-        service = out.get("service") or "배포"
+        service = plain_terms(str(out.get("service") or "배포"))
         before, after = out.get("from_version"), out.get("to_version")
         action = f"{service} 이전 버전으로 되돌림" + (
             f" ({before} → {after})" if before and after else ""

@@ -157,7 +157,7 @@ async def record_case(svc: Services, request: AgentRequest) -> AgentResult:
     fallback = False
     if svc.narrator.enabled:  # LLM 문장은 교훈 한 줄만. 실패하면 붙이지 않고 fallback으로 표시한다
         lesson = await svc.narrator.sentence(
-            "교훈과 재발 방지 한 줄",
+            "교훈 한 문장(50자 이내, 영어 단어·코드 없이 쉬운 말로)",
             {"decision": info.decision, "reason": info.reason, "alternatives": info.alternatives},
             "",
             untrusted=dict(request.untrusted),

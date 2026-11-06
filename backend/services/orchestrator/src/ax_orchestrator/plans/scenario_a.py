@@ -22,6 +22,7 @@ from typing import Any
 
 from ax_orchestrator.draft import kst_text
 from ax_orchestrator.models import Incident, Plan, Step, iso, now
+from ax_orchestrator.naming import plain_terms
 from ax_orchestrator.timeline import past_hint
 
 # 고객지원 `request_incident_compensation`이 한 호출에 받는 구매자 수 상한
@@ -252,7 +253,7 @@ def _resolution(inc: Incident) -> dict[str, Any]:
     action = None
     if rollback.status == "completed":
         out = _out(inc, "rollback")
-        service = out.get("service") or "배포"
+        service = plain_terms(str(out.get("service") or "배포"))
         before, after = out.get("from_version"), out.get("to_version")
         action = f"{service} 이전 버전으로 되돌림" + (
             f" ({before} → {after})" if before and after else ""
@@ -311,7 +312,7 @@ def scenario_a() -> Plan:
             Step(
                 "related_prs",
                 "find_related_prs",
-                "관련 PR 찾기 (planning)",
+                "관련 코드 변경 찾기 (planning)",
                 after=("diagnose", "impact"),
                 build=_related_prs,
                 required=False,
@@ -319,7 +320,7 @@ def scenario_a() -> Plan:
             Step(
                 "link_incident",
                 "link_incident",
-                "이벤트에 PR 연결 (planning)",
+                "이벤트에 코드 변경 연결 (planning)",
                 after=("related_prs",),
                 build=_link,
                 required=False,

@@ -90,6 +90,65 @@ const DEPT_NAME: Record<string, string> = {
   infra: "장애 대응 AI", data: "데이터분석 AI", planning: "기획 AI", dev: "개발 AI", marketing: "마케팅 AI",
   support: "고객지원 AI", finance: "재무 AI", hr: "인사 AI", orchestrator: "총괄 AI",
 };
+// 글 속 영어 지표·구성요소 이름과 문의 처리 결과 코드를 한국어로 (긴 이름부터 바꾼다)
+const TERM_KO: Record<string, string> = {
+  payment_fail_rate: "결제 실패율", error_rate_5xx: "서버 오류율", p95_latency_ms: "응답 시간", order_fail_rate: "주문 실패율",
+  "shop-api": "쇼핑몰 서버", payment: "결제", shipping: "배송", search: "검색", api: "판매 사이트", db: "주문 DB",
+  answered: "답변 완료", claim_decided: "클레임 결정", compensated: "보상 완료", escalated: "상담원에게 넘김",
+};
+const TERM_RE = new RegExp(`(?<![A-Za-z0-9_-])(${Object.keys(TERM_KO).sort((a, b) => b.length - a.length).join("|")})(?![A-Za-z0-9_-])`, "g");
+/** 직원 번호 emp_01을 e1로 보여 준다(저장된 값은 그대로) */
+export const showEmp = (text: string) => text.replace(/(?<![A-Za-z0-9_])emp_0*(\d+)(?![A-Za-z0-9_])/g, "e$1");
+/** 입력한 직원 번호 e1을 저장 형식 emp_01로 (emp_01은 그대로) */
+export const storedEmp = (id: string) => id.replace(/^e0*(\d+)$/i, (_, n: string) => `emp_${n.padStart(2, "0")}`);
+/** 문장 속 e3 같은 직원 번호를 저장 형식으로 */
+export const storedEmpInText = (text: string) => text.replace(/(?<![A-Za-z0-9_])e0*(\d+)(?![A-Za-z0-9_])/gi, (_, n: string) => `emp_${n.padStart(2, "0")}`);
+/** 화면에 보일 글: 코드·영어 이름을 쉬운 말로 */
+export const plainText = (text: string) => readableBody(text).replace(TERM_RE, (_, k: string) => TERM_KO[k] ?? k);
+
+export interface CardRow { label: string; text: string }
+const isMachineRef = (t: string) => /^(step:|seed:|ctx_)/.test(t.trim());
+function firstSentence(text: string, max = 90): string {
+  const clean = text.replace(/^(교훈:\s*)+/, "").trim();
+  const m = /^(.*?(?:다|요|음)\.)(?:\s|$)/.exec(clean);
+  const s = m ? m[1] : clean;
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+/** 카드 본문에서 읽는 사람에게 꼭 필요한 줄만 뽑는다. 저장된 본문은 그대로 두고 화면에서만 줄인다 */
+export function cardRows(card: Pick<HrCard, "title" | "body" | "kind">): CardRow[] {
+  const [main, resolution] = card.body.split(/\r?\n\[해결 기록\]/);
+  const fields: Record<string, string> = {};
+  let last = "";
+  for (const line of main.split(/\r?\n/)) {
+    const m = /^(결정|이유|검토한 대안|근거|교훈): ?(.*)$/.exec(line);
+    if (m) { last = m[1]; fields[last] = m[2]; } else if (last) fields[last] += ` ${line}`;
+  }
+  const rows: CardRow[] = [];
+  const titleText = plainText(card.title).replace(/^\[[^\]]*\]\s*/, "");
+  const decision = plainText(fields["결정"] ?? "").replace(/ · 문의 #\d+ 처리 결과 기록: /, " · ");
+  if (decision && !titleText.startsWith(decision.slice(0, 20)) && !decision.startsWith(titleText.slice(0, 20))) rows.push({ label: "결정", text: decision });
+  let reason = plainText(fields["이유"] ?? "");
+  const unfinished = /끝내지 못한 일: (.+)$/.exec(reason);
+  if (unfinished) reason = unfinished[1] === "없음" ? "모든 단계를 끝냈어요" : `끝내지 못한 일: ${unfinished[1]}`;
+  else if (/끝낸 일:/.test(reason)) reason = "";
+  if (reason) rows.push({ label: "이유", text: reason });
+  const alt = plainText(fields["검토한 대안"] ?? "");
+  if (card.kind !== "incident" && alt && alt !== "없음") rows.push({ label: "검토한 대안", text: alt });
+  const refs = fields["근거"] ?? "";
+  if (card.kind !== "incident" && refs && refs !== "확인할 수 없음" && !refs.split(",").every(isMachineRef)) rows.push({ label: "근거", text: plainText(refs) });
+  if (fields["교훈"]) rows.push({ label: "교훈", text: firstSentence(plainText(fields["교훈"])) });
+  if (resolution) {
+    const get = (k: string) => new RegExp(`${k}: (.+)`).exec(resolution)?.[1]?.trim();
+    const known = (v?: string) => (v && v !== "확인할 수 없음" ? plainText(v) : null);
+    const parts = [get("결과"), known(get("원인")) && `원인 ${known(get("원인"))}`, known(get("조치")) && `조치 ${known(get("조치"))}`].filter(Boolean);
+    if (parts.length) rows.push({ label: "해결", text: parts.join(" · ") });
+  }
+  return rows;
+}
+
+/** 카드를 남긴 주체 이름을 사람이 읽는 말로 (총괄·부서 코드) */
+export const authorKo = (author: string) => DEPT_NAME[author] ?? author;
+
 export function readableBody(body: string): string {
   return body
     .replace(/^근거: (.+)$/m, (_, l: string) => `근거: ${l.split(", ").map((t) => STEP_NAME[t.replace(/^step:/, "")] ?? t).join(", ")}`)
@@ -100,7 +159,8 @@ export function readableBody(body: string): string {
     .replace(/: (\w+)로 이관 \(([a-z_]+)\)/g, (_, d: string) => `: ${DEPT_NAME[d] ?? d}에게 넘김`)
     .replace(/\(([a-z_:]+(?: [a-z_]+)?)\)/g, (m, k: string) => REASON_CODE[k.replace(/^failed: /, "")] ? `(${REASON_CODE[k.replace(/^failed: /, "")]})` : STEP_NAME[k] ? `(${STEP_NAME[k]})` : m)
     .replace(/원인 배포 롤백/g, "문제 배포를 이전 버전으로 되돌리기")
-    .replace(/롤백/g, "이전 버전으로 되돌리기");
+    .replace(/롤백/g, "이전 버전으로 되돌리기")
+    .replace(/되돌리기([과이은을])/g, (_, j: string) => `되돌리기${({ 과: "와", 이: "가", 은: "는", 을: "를" } as Record<string, string>)[j]}`);
 }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {

@@ -8,9 +8,7 @@
 import os
 from pathlib import Path
 
-os.environ.setdefault(
-    "HR_AGENT_CARD", str(Path(__file__).resolve().parents[2] / "agent-card.json")
-)
+os.environ.setdefault("HR_AGENT_CARD", str(Path(__file__).resolve().parents[2] / "agent-card.json"))
 
 from hr_agent.main import app  # noqa: E402
 

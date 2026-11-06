@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import re
+
 COMPONENT_KO = {
     "payment": "결제",
     "api": "판매 사이트",
@@ -50,6 +52,36 @@ NOTE_KO = {
     "no_added_customers": "새로 확인된 고객 없음",
     "timeout": "응답이 늦어 중단됨",
 }
+# 문의 처리 결과 → 사람이 읽는 말
+RESOLUTION_KO = {
+    "answered": "답변 완료",
+    "claim_decided": "클레임 결정",
+    "compensated": "보상 완료",
+    "escalated": "상담원에게 넘김",
+}
+# 원인 설명 글에 섞여 나오는 영어 지표·구성요소 이름 → 쉬운 말 (긴 이름부터 바꾼다)
+TERM_KO = {
+    "payment_fail_rate": "결제 실패율",
+    "error_rate_5xx": "서버 오류율",
+    "p95_latency_ms": "응답 시간",
+    "order_fail_rate": "주문 실패율",
+    "shop-api": "쇼핑몰 서버",
+    "payment": "결제",
+    "shipping": "배송",
+    "search": "검색",
+    "api": "판매 사이트",
+    "db": "주문 DB",
+}
+
+
+def plain_terms(text: str) -> str:
+    """글 속 영어 지표·구성요소 이름을 한국어로 바꾼다(다른 단어 속 글자는 그대로 둔다)."""
+    pattern = "|".join(re.escape(k) for k in sorted(TERM_KO, key=len, reverse=True))
+    return re.sub(
+        rf"(?<![A-Za-z0-9_-])({pattern})(?![A-Za-z0-9_-])", lambda m: TERM_KO[m.group(1)], text
+    )
+
+
 PLAN_KO = {
     "scenario_a": "결제 장애 대응",
     "support_resolved": "고객 문의 처리 결과 기록",
