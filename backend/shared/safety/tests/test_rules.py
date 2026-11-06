@@ -14,7 +14,7 @@ from ax_safety.rules import ActionSpec, Rule, ThresholdTable, load_registry, loa
 
 def test_rule_files_load_and_match_agreed_values() -> None:
     registry, table = load_registry(), load_thresholds()
-    assert table.version == 6
+    assert table.version == 7
     assert table.review_timeout_seconds == 600  # 데모 10분 자동 거절
     values = {rule.key: rule.value for rule in table.rules if rule.metric != "param"}
     values.pop("pr_allowed_paths")

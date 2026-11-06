@@ -13,7 +13,7 @@
 # - param·paths_within·paths_avoid·paths_named: 금액이 아닌 규칙(아래 각 규칙 주석 참고)
 # op: ">=", ">", "<=", "<". when은 params가 이 값일 때만 규칙을 적용한다.
 
-version = 6
+version = 7
 
 # B 교차검증 응답 마감(초). 넘으면 실행하지 않고 C 보류
 verify_timeout_seconds = 30
@@ -603,3 +603,22 @@ action = "start_campaign"
 metric = "amount"
 op = ">="
 value = 500000
+
+# ---- 보유기간 지난 개인정보 지우기 (고객지원, #736). 기본 A(매일 도는 법정 파기)지만 되돌릴 수 없다.
+# 한 번에 지우는 건수가 평소보다 많으면 날짜 계산·설정이 잘못됐을 수 있어 사람이 본다.
+# 처음 켜는 날처럼 쌓인 건을 한꺼번에 지울 때도 사람이 한 번 확인한다. count가 없으면 C
+[[rules]]
+key = "purge_inquiries_batch"
+action = "purge_expired_inquiries"
+metric = "param"
+field = "count"
+op = ">"
+value = 200
+
+[[rules]]
+key = "purge_claims_batch"
+action = "purge_expired_claims"
+metric = "param"
+field = "count"
+op = ">"
+value = 100
