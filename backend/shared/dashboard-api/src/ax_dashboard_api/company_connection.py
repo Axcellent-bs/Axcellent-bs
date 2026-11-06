@@ -9,7 +9,8 @@
   저장한 주소는 지우지 않는다. 실제 연결로 켤 때는 다시 확인하고, 통과해야 켠다
 - `DELETE /api/dashboard/company-connection`: 연결을 지우고 원래 주소(`AX_SHOP_API_URL`·기본값)로
 
-쓰기(POST·PUT·DELETE)는 사람 토큰만 된다(`require_human_for_writes`).
+쓰기(POST·PUT·DELETE)는 사람 토큰만 된다(`require_human_for_writes`). 주소 정책은
+`ax_agent_template.company_connection.check_host`(사내 주소 또는 허용 목록 + https, 링크 로컬 차단).
 확인은 서버가 그 주소로 직접 GET을 보내므로 아무 주소나 부를 수 있다.
 사내 설치·사람 토큰 전제이고, 계정이 든 주소·http(s) 밖의 주소는 받지 않는다.
 연결 확인은 토큰 없이 읽히는 경로(상태·상품·구매자)만 본다. 숫자는 받은 그대로만 쓴다.
@@ -68,10 +69,13 @@ def _now() -> str:
 
 
 def _valid(url: str) -> str:
+    """주소 형식과 호스트 정책(사내 주소·허용 목록, 링크 로컬 차단). 어긋나면 422."""
     try:
-        return store.validate_shop_url(url)
+        valid = store.validate_shop_url(url)
+        store.check_host(valid)
     except ValueError as exc:
         raise ApiError(422, "INVALID_URL", str(exc)) from exc
+    return valid
 
 
 async def _get(client: httpx.AsyncClient, url: str) -> tuple[Any | None, str | None]:
@@ -160,6 +164,7 @@ def _state() -> dict[str, Any]:
         "internal_url": _internal_url(),
         "connection": found.as_dict() if found else None,
         "editable": bool(store.connection_file()),
+        "history": store.read_history(5),
     }
 
 
@@ -222,7 +227,7 @@ async def switch_mode(body: ModeIn, request: Request) -> dict:
     if found is None:
         raise ApiError(409, "NO_CONNECTION", "저장한 연결이 없어 모드를 바꿀 수 없다")
     if body.mode == "connected":
-        await _checked(found.shop_api_url)
+        await _checked(_valid(found.shop_api_url))
         store.save_connection(found.shop_api_url, verified_at=_now(), updated_by=_human(request))
     else:
         store.save_connection(
@@ -237,6 +242,6 @@ async def switch_mode(body: ModeIn, request: Request) -> dict:
 
 @router.delete("")
 def delete_connection(request: Request) -> dict:
-    if store.clear_connection():
+    if store.clear_connection(_human(request)):
         logger.info("회사 연결 해제 (by %s)", _human(request))
     return ok(_state())

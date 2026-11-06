@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { PreparingChip } from '@/components/Preparing'
 import { ApiError } from '@/lib/apiError'
-import { companyConnection, type ConnectionMode, type ConnectionState, type ConnectionTest } from '@/lib/companyConnection'
+import { companyConnection, type ConnectionHistory, type ConnectionMode, type ConnectionState, type ConnectionTest } from '@/lib/companyConnection'
 import { HUMAN_TOKEN_SET } from '@/lib/env'
 import { ago } from '@/lib/format'
 
@@ -16,6 +16,8 @@ const MODES: { id: ConnectionMode; label: string }[] = [
   { id: 'internal', label: '내부 데이터' },
   { id: 'connected', label: '실제 연결' },
 ]
+const ACTION: Record<ConnectionHistory['action'], string> = { save: '주소 저장', mode: '모드 전환', recheck: '다시 확인', clear: '연결 해제' }
+const modeOf = (enabled: boolean | null) => (enabled === null ? '' : enabled ? ' (실제 연결)' : ' (내부 데이터)')
 const normalize = (u: string) => u.trim().replace(/\/+$/, '')
 const message = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : '요청에 실패했습니다')
 
@@ -104,6 +106,7 @@ export default function Integrations() {
               {state.connection && <> · 실제 연결: <span className="font-mono">{state.connection.shop_api_url}</span></>}
               {!state.connection && ' · 실제 연결은 아래에서 주소를 확인·저장하면 켤 수 있어요.'}
             </p>
+            <p className="text-xs text-amber-700">판매 서버를 바꾸면 확정하지 않은 결산 숫자가 바뀔 수 있어요. 확정한 결산은 그대로이고, 차이는 재무 화면에 결산 차이로 보여요.</p>
           </div>
         )}
 
@@ -154,8 +157,21 @@ export default function Integrations() {
         )}
         {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
 
+        {state && state.history.length > 0 && (
+          <div>
+            <p className="mb-1 text-xs font-medium text-ink-500">바꾼 기록</p>
+            <ul className="space-y-0.5 text-xs text-ink-500" aria-label="회사 연결 바꾼 기록">
+              {state.history.map((h) => (
+                <li key={`${h.at}-${h.action}`}>
+                  {ago(h.at)} · {h.by} · {ACTION[h.action]} · <span className="font-mono">{h.from ?? '—'}</span>{modeOf(h.from_enabled)} → <span className="font-mono">{h.to ?? '—'}</span>{modeOf(h.to_enabled)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         <p className="text-xs text-ink-500">
-          세 항목을 모두 통과해야 저장할 수 있어요. 저장하면 실제 연결 모드가 되고, 모든 부서 AI가 다시 켜지 않아도 바로 이 주소를 읽어요. 내부 데이터로 바꾸면 주소는 남긴 채 원래 판매 서버를 읽고, 연결 해제는 주소까지 지워요.
+          사내 주소(192.168.x.x 등)는 바로 되고, 사내 밖 주소는 설치 운영자가 허용 목록(AX_COMPANY_SHOP_ALLOWED_HOSTS)에 넣은 https 주소만 돼요. 세 항목을 모두 통과해야 저장할 수 있어요. 저장하면 실제 연결 모드가 되고, 모든 부서 AI가 다시 켜지 않아도 바로 이 주소를 읽어요. 내부 데이터로 바꾸면 주소는 남긴 채 원래 판매 서버를 읽고, 연결 해제는 주소까지 지워요.
           {!HUMAN_TOKEN_SET && ' 사람 토큰이 없어 확인·저장이 꺼져 있어요 (run_web.sh로 켜면 들어가요).'}
           {state && !state.editable && ' 서버에 회사 연결 파일 설정(AX_COMPANY_CONNECTION_FILE)이 없어 저장할 수 없어요 (run_all.sh로 켜면 생겨요).'}
         </p>

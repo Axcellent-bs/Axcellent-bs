@@ -18,6 +18,17 @@ export interface StoredConnection {
   updated_by: string | null;
 }
 
+/** 바꾼 기록 한 줄 (새것부터) */
+export interface ConnectionHistory {
+  at: string;
+  by: string;
+  action: "save" | "mode" | "recheck" | "clear";
+  from: string | null;
+  from_enabled: boolean | null;
+  to: string | null;
+  to_enabled: boolean | null;
+}
+
 export interface ConnectionState {
   shop_api_url: string;
   source: ConnectionSource;
@@ -26,6 +37,7 @@ export interface ConnectionState {
   internal_url: string;
   connection: StoredConnection | null;
   editable: boolean;
+  history: ConnectionHistory[];
 }
 
 export interface ConnectionCheck {

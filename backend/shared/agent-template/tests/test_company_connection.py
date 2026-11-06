@@ -134,3 +134,28 @@ def test_an_old_file_without_enabled_counts_as_on(conn_file: Path) -> None:
 def test_enabled_must_be_a_boolean(conn_file: Path) -> None:
     _write(conn_file, {"shop_api_url": "http://x.example.com", "enabled": "no"})
     assert cc.read_connection() is None
+
+
+def test_a_hostname_is_resolved_before_the_policy(conn_file: Path, monkeypatch) -> None:
+    def fake(host, *_args, **_kwargs):  # noqa: ANN001, ANN002, ANN003
+        return [(2, 1, 6, "", ("169.254.169.254", 0))]
+
+    monkeypatch.setattr(cc.socket, "getaddrinfo", fake)
+    with pytest.raises(ValueError, match="링크 로컬"):
+        cc.check_host("http://metadata.internal")
+
+
+def test_a_hand_edited_file_outside_the_policy_is_ignored(conn_file: Path, caplog) -> None:
+    _write(conn_file, {"shop_api_url": "http://203.0.113.10/shop-api"})
+    assert cc.read_connection() is None
+    assert "허용 목록" in caplog.text
+
+
+def test_private_addresses_pass_without_a_list() -> None:
+    for url in (
+        "http://127.0.0.1:8010",
+        "http://10.1.2.3",
+        "http://172.20.0.5",
+        "http://[::1]:8010",
+    ):
+        cc.check_host(url)

@@ -65,6 +65,7 @@ def test_without_a_connection_the_default_address_is_reported(conn_file, client)
         "internal_url": "http://shop-api:8010",
         "connection": None,
         "editable": True,
+        "history": [],
     }
 
 
@@ -204,3 +205,35 @@ def test_mode_needs_a_human_token(conn_file, client) -> None:
     client.headers.pop("authorization")
     res = client.post(BASE + "/mode", json={"mode": "internal"})
     assert res.status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("url", "reason"),
+    [
+        ("http://203.0.113.10/shop-api", "허용 목록"),
+        ("http://169.254.169.254/latest", "링크 로컬"),
+        ("http://0.0.0.0:8010", "링크 로컬"),
+    ],
+)
+def test_outside_or_metadata_addresses_are_refused(conn_file, client, url, reason) -> None:
+    res = client.post(BASE + "/test", json={"url": url})
+    assert res.status_code == 422 and reason in res.json()["error"]["message"]
+
+
+def test_an_allowed_outside_host_needs_https(conn_file, client, monkeypatch) -> None:
+    monkeypatch.setenv(cc.ALLOWED_HOSTS_ENV, "203.0.113.10")
+    res = client.post(BASE + "/test", json={"url": "http://203.0.113.10/shop-api"})
+    assert res.status_code == 422 and "https" in res.json()["error"]["message"]
+    monkeypatch.setattr(routes, "TRANSPORT", _transport(GOOD))
+    res = client.post(BASE + "/test", json={"url": "https://203.0.113.10/shop-api"})
+    assert res.status_code == 200 and res.json()["data"]["ok"] is True
+
+
+def test_changes_are_kept_in_the_history(conn_file, client) -> None:
+    client.put(BASE, json={"url": SHOP})
+    client.post(BASE + "/mode", json={"mode": "internal"})
+    client.delete(BASE)
+    history = client.get(BASE).json()["data"]["history"]
+    assert [h["action"] for h in history] == ["clear", "mode", "save"]
+    assert history[-1]["to"] == SHOP and history[-1]["by"] == "tester"
+    assert history[1]["from_enabled"] is True and history[1]["to_enabled"] is False
