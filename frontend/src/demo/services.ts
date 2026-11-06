@@ -130,7 +130,7 @@ export const SERVICES: Service[] = [
   },
   {
     id: 'dev', agent: 'dev', family: 'product', name: '개발·배포', by: 'AXcellent', Icon: IconCode, entry: '/dev/tasks', paths: ['/dev'],
-    desc: '기획서를 작업·PR로 만들고 교차검증·배포·사후관리까지 맡습니다.',
+    desc: '확정된 기획서대로 코드를 고치고, 검토·배포·장애 대응까지 이어 갑니다.',
     // 화면 안 메뉴(pages/Dev.tsx SECTIONS)를 사이드바 하위 탭으로 연다
     children: [
       { href: '/dev/tasks', label: '작업 현황' },

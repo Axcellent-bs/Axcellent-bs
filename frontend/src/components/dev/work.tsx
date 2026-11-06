@@ -86,10 +86,10 @@ function Waiting({ s, d, r }: P & { r: CrossReview }) {
   return (
     <>
       <Pairs items={[
-        ['기다리는 것', r.lane === 'ai' ? `${r.verifier} 판정` : r.irreversible ? `사람 확인 · ${r.irreversible}` : '사람 확인'],
+        ['기다리는 판정', r.lane === 'ai' ? `${r.verifier} 판정` : r.irreversible ? `사람 확인 · ${r.irreversible}` : '사람 확인'],
         ['대기', waited === undefined ? r.t : `${r.t}부터 · ${waited}분`],
-        ...(r.lane === 'ai' ? [['사람 확인으로', left === undefined ? `${CROSS_CHECK_TIMEOUT_MIN}분 뒤 자동` : left > 0 ? `${left}분 뒤 자동` : '곧 넘어감'] as [string, string]] : []),
-        ...(open.length ? [['걸린 항목', open.join(' · ')] as [string, string]] : r.routeWhy.length ? [['걸린 항목', r.routeWhy.join(' · ')] as [string, string]] : []),
+        ...(r.lane === 'ai' ? [['사람에게 넘어감', left === undefined ? `${CROSS_CHECK_TIMEOUT_MIN}분 뒤 자동` : left > 0 ? `${left}분 뒤 자동` : '곧 넘어감'] as [string, string]] : []),
+        ...(open.length ? [['확인할 항목', open.join(' · ')] as [string, string]] : r.routeWhy.length ? [['확인할 항목', r.routeWhy.join(' · ')] as [string, string]] : []),
       ]} />
       {!!r.evidence?.length && <EvidenceList lines={r.evidence} />}
       <div className="actions">
@@ -152,7 +152,7 @@ export function Work({ s, d, item, repo }: P & { item?: string; repo?: string })
       list={list}
       head={<Head kicker={<>{sel.vcsNumber != null ? <a href={repoPrHref(sel.vcsNumber, sel.target?.connectionId)} className="plain-link">{prName(sel)}</a> : sel.id} · {task?.id} · <span className="mono">{sel.branch}</span>{task && <> · <OriginTag s={s} t={task} /></>}<RelatedTags s={s} t={task} /></>} title={sel.title.replace(/^[A-Z]\d+: /, '')} side={<State v={sel.merged ? '완료' : xr ? waitLabel(xr) : last === '불일치' || rejected ? '불일치' : '머지 대기'} />} />}
       side={
-        <Side title="근거 체인" sum={`${chain.length}단계`}>
+        <Side title="출처" sum={`${chain.length}단계`}>
           {chain.map((x, i) => <p key={i} className="pside-msg"><b>{x.kind}</b> {x.href ? <a href={x.kind === '문단' && spec && para ? toPath(`work/specs/${spec.id}/${para.id}`) : toPath(x.href)} className="plain-link">{x.title}</a> : x.title}</p>)}
         </Side>
       }
@@ -170,9 +170,9 @@ export function Work({ s, d, item, repo }: P & { item?: string; repo?: string })
             <RepoTargetBlock key={sel.id} p={sel} d={d} />
           </Step>
         )}
-        <Step name="관문" on title={`${sel.gate.result} · ${sel.gate.lines}줄·${sel.gate.files}파일 · ${sel.gate.paths}`} />
-        <Step name="검수" on={last === '통과'} title={sel.reviews.join(' → ')}>
-          {!sel.merged && (last === '불일치' || rejected) && <Button size="small" onClick={() => d({ type: 'reviewPr', pr: sel.id })}>다시 검수</Button>}
+        <Step name="크기·경로 점검" on title={`${sel.gate.result} · ${sel.gate.lines}줄·${sel.gate.files}파일 · ${sel.gate.paths}`} />
+        <Step name="리뷰" on={last === '통과'} title={sel.reviews.join(' → ')}>
+          {!sel.merged && (last === '불일치' || rejected) && <Button size="small" onClick={() => d({ type: 'reviewPr', pr: sel.id })}>다시 리뷰</Button>}
         </Step>
         {!!sel.crossEvidence?.length && (() => {
           const ev = sel.crossEvidence
@@ -183,7 +183,7 @@ export function Work({ s, d, item, repo }: P & { item?: string; repo?: string })
             </Step>
           )
         })()}
-        <Step name="머지" on={sel.merged} href={sel.url || (xr ? toPath(`work/reviews/${xr.id}`) : undefined)} title={sel.merged ? mergedLabel(sel) : xr ? `${waitLabel(xr)} · ${xr.id}` : rejected ? '검증자 거절' : '머지 전'}>
+        <Step name="머지" on={sel.merged} href={sel.url || (xr ? toPath(`work/reviews/${xr.id}`) : undefined)} title={sel.merged ? mergedLabel(sel) : xr ? `${waitLabel(xr)} · ${xr.id}` : rejected ? '검증자 거절' : '머지 기다림'}>
           {xr && <p className="muted">{xr.verifier}</p>}
         </Step>
       </Flow>
@@ -198,7 +198,7 @@ function Trace({ s, pr, line: picked, setLine }: { s: S; pr: PR; line?: CodeLine
   const steps = traceOf(s, pr.id, line)
   return (
     <section id="trace" className="flow-sec">
-      <h2>코드 역추적</h2>
+      <h2>코드 출처</h2>
       <div className="trace">
         <div className="trace-code">
           <div className="trace-h">바뀐 줄</div>
@@ -233,7 +233,7 @@ export function Reviews({ s, d, item }: P & { item?: string }) {
   const list = <ListPane empty="대기 없음" groups={[
     { label: '교차검증 대기', rows: all.filter((x) => !x.result && x.lane === 'ai').map(row) },
     { label: '사람 확인 대기', rows: all.filter((x) => !x.result && x.lane === 'human').map(row) },
-    { label: '끝남', rows: all.filter((x) => x.result).map(row) },
+    { label: '처리됨', rows: all.filter((x) => x.result).map(row) },
   ]} />
   if (!r) return <Layout list={list}><div className="empty"><b>대기 없음</b></div></Layout>
   const cnt = (k: CrossReview['checks'][number]['result']) => r.checks.filter((c) => c.result === k).length
@@ -243,10 +243,10 @@ export function Reviews({ s, d, item }: P & { item?: string }) {
       head={<Head kicker={<>{r.id} · {TARGET_LABEL[r.target]} · <Ref s={s} id={r.ref} /> · {r.t}</>} title={r.title} side={<State v={r.result ?? waitLabel(r)} />} />}
       side={
         <>
-          <Side title="판단">
+          <Side title="판단하는 쪽">
             <Pairs items={[
               ['검증자', r.verifier],
-              ['자기 승인', r.lane === 'ai' ? '아님 · 개발 밖' : '해당 없음'],
+              ['만든 쪽이 승인', r.lane === 'ai' ? '아님 · 다른 부서 AI' : '해당 없음'],
               ...(r.irreversible ? [['되돌릴 수 없음', r.irreversible] as [string, string]] : []),
             ]} />
           </Side>
@@ -255,12 +255,12 @@ export function Reviews({ s, d, item }: P & { item?: string }) {
       }
     >
       <Flow>
-        <Step name="이유" on title={r.routeWhy.join(', ') || '-'} />
-        <Step name="AI 정리" on title={r.recommend ? `추천 ${r.recommend}` : '추천 없음'}>
+        <Step name="검토로 온 이유" on title={r.routeWhy.join(', ') || '-'} />
+        <Step name="AI 요약" on title={r.recommend ? `추천 ${r.recommend}` : '추천 없음'}>
           <p><Linked s={s} text={r.summary} /></p>
           {r.recommendWhy && <p className="muted">{r.recommendWhy}</p>}
         </Step>
-        <Step name="규칙" on title={`통과 ${cnt('통과')} · 확인 필요 ${cnt('확인 필요')} · 걸림 ${cnt('걸림')}`}>
+        <Step name="규칙 점검" on title={`통과 ${cnt('통과')} · 확인 필요 ${cnt('확인 필요')} · 걸림 ${cnt('걸림')}`}>
           <ul>{r.checks.map((c) => <li key={c.label}><State v={c.result} tone={c.result === '확인 필요' ? 'amber' : c.result === '통과' ? 'green' : undefined} /> <b>{c.label}</b> <span className="muted"><Linked s={s} text={c.detail} /></span></li>)}</ul>
         </Step>
         {r.target === 'merge_pr' && (() => {
@@ -271,18 +271,18 @@ export function Reviews({ s, d, item }: P & { item?: string }) {
             </Step>
           ) : null
         })()}
-        <Step name="판단" on={!!r.result} title={r.result ? `${r.result} · ${r.decidedAt}` : <State v={waitLabel(r)} live />}>
+        <Step name="결정" on={!!r.result} title={r.result ? `${r.result} · ${r.decidedAt}` : <State v={waitLabel(r)} live />}>
           {r.result ? r.resultWhy && <p className="muted">{r.resultWhy}</p> : <Waiting s={s} d={d} r={r} />}
         </Step>
         {r.target === 'merge_pr' && r.lane === 'ai' && (() => {
           const o = s.autoPolicy.observing.find((x) => x.pr === r.ref)
           const rule = s.autoPolicy.rules.find((x) => x.basis.includes(r.ref))
           return (
-            <Step name="관찰" on={o?.result === '정상'} href={rule ? hrefOf(s, rule.id) : undefined} title={!o ? '-' : rule ? `${rule.id} ${rule.status}` : o.result}>
+            <Step name="머지 뒤 지켜보기" on={o?.result === '정상'} href={rule ? hrefOf(s, rule.id) : undefined} title={!o ? '-' : rule ? `${rule.id} ${rule.status}` : o.result}>
               {o && (
                 <Pairs items={[
                   ['머지', o.mergedAt],
-                  ['관찰', `${OBSERVE_MIN}분 · ${o.result}`],
+                  ['지켜본 시간', `${OBSERVE_MIN}분 · ${o.result}`],
                   ...(rule ? [['기준', <Ref key="r" s={s} id={rule.id} />] as [string, ReactNode]] : []),
                 ]} />
               )}

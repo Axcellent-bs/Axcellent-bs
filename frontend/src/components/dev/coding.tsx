@@ -13,8 +13,8 @@ const api = devTaskApi(DEV_API)
 const actions = planningApi(DEV_API)
 
 export const CODING_LABEL: Record<CodingStatus, string> = {
-  queued: '대기', claimed: '가져감', reading: '파일 읽는 중', writing: '코드 작성 중', reviewing: '리뷰 중',
-  opened: 'PR 열림', merged: '머지됨', waiting_human: '사람 확인', failed: '실패', canceled: '중단됨', covered: '반영됨',
+  queued: '대기', claimed: '맡음', reading: '파일 읽는 중', writing: '코드 작성 중', reviewing: '리뷰 중',
+  opened: 'PR 열림', merged: '머지됨', waiting_human: '확인 필요', failed: '실패', canceled: '중단됨', covered: '이미 반영됨',
   returned: '기획에 돌려보냄',
 }
 const DONE: CodingStatus[] = ['opened', 'merged', 'covered']
@@ -186,9 +186,9 @@ export function RelatedTags({ s, t }: { s: S; t?: Task }) {
 
 /** 목록 줄·머리에 쓰는 코딩 상태 글자 */
 export const codingState = (c: CodingRun) =>
-  c.status === 'queued' && c.waitingFor?.length ? `차례 기다림 (${c.waitingFor.join(', ')} 뒤)`
-    : c.status === 'queued' && c.mode === 'subscription' ? '내 Claude 대기'
-    : c.status === 'claimed' ? `가져감 · ${c.claimedBy ?? '개발자'}`
+  c.status === 'queued' && c.waitingFor?.length ? `순서 기다림 (${c.waitingFor.join(', ')} 다음)`
+    : c.status === 'queued' && c.mode === 'subscription' ? '내 Claude 차례 기다림'
+    : c.status === 'claimed' ? `맡음 · ${c.claimedBy ?? '개발자'}`
     : CODING_LABEL[c.status] ?? c.status
 
 /** 작업·PR 흐름 맨 위 "코딩 에이전트" 단계 */
@@ -216,7 +216,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
   }
   const revise = async (e: FormEvent) => {
     e.preventDefault()
-    if (note.trim() && await act(() => api.revise(task.id, note.trim()), `${c.pr} 수정 지시 보냄`)) setNote('')
+    if (note.trim() && await act(() => api.revise(task.id, note.trim()), `${c.pr} 추가 지시 보냄`)) setNote('')
   }
   const merge = () => {
     if (c.pr && window.confirm(`${c.pr}를 머지할까요? 자동 머지 기준 밖이라 사람이 머지한 것으로 기록돼요.`)) {
@@ -252,7 +252,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
   const noChange = !c.pr && (c.status === 'failed' || c.status === 'waiting_human') && (c.error ?? '').includes('바뀐 내용이 없음')
   const closeCovered = () => {
     if (window.confirm(`${task.id}를 앞 작업이 이미 반영한 것으로 닫을까요? PR 없이 완료돼요.`)) {
-      void act(() => api.closeCovered(task.id), `${task.id} 반영됨으로 닫음`)
+      void act(() => api.closeCovered(task.id), `${task.id} 이미 반영됨으로 닫음`)
     }
   }
   // 실행 관문이 PR 열기를 보류함 (보호 경로·한도 등): 사람이 승인하면 같은 코드로 PR을 연다
@@ -270,23 +270,23 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
     await api.retry(task.id, true)
   }, `${task.id} 보류 승인 → PR 여는 중`)
   return (
-    <Step name="코딩 에이전트" on={!!on || DONE.includes(c.status)} title={<CodingLabel c={c} />}>
+    <Step name="AI 코딩" on={!!on || DONE.includes(c.status)} title={<CodingLabel c={c} />}>
       <span className="tags">
         {c.mode === 'subscription' && c.assignee && <Tag>맡은 사람 {c.assignee}</Tag>}
-        {warns.length > 0 && <Tag tone={c.textOkBy ? undefined : 'amber'}>글 경고 · {warns.join(', ')}{c.textOkBy ? ` · ${c.textOkBy} 확인` : ''}</Tag>}
+        {warns.length > 0 && <Tag tone={c.textOkBy ? undefined : 'amber'}>작업 글 주의 · {warns.join(', ')}{c.textOkBy ? ` · ${c.textOkBy} 확인` : ''}</Tag>}
         {c.mode === 'subscription' ? <Tag>내 Claude{c.claimedBy ? ` · ${c.claimedBy}` : ''}</Tag> : c.model && <Tag><span className="mono">{c.model}</span></Tag>}
-        {c.attempts > 1 && <Tag>{c.attempts}회차</Tag>}
+        {c.attempts > 1 && <Tag>{c.attempts}번째 시도</Tag>}
         {!!c.llmCalls && <Tag><UsageBar used={c.llmTokens ?? 0} limit={lim.runTokens} label={`AI ${c.llmCalls}/${lim.runCalls}회 · 토큰`} title="코딩 실행 한 번의 한도 대비 (다시 시도까지 합친 양)" /></Tag>}
         {!!files.length && <Tag>{files.length}파일 · <span className="mono">+{add} −{del}</span></Tag>}
         {c.review && <Tag tone={c.review.verdict === '통과' ? 'green' : 'amber'}>리뷰 {c.review.verdict}</Tag>}
-        {c.instruction && <Tag>사람 지시</Tag>}
-        {c.ciHold && c.status === 'waiting_human' && <Tag tone="amber">CI 다시 보는 중</Tag>}
+        {c.instruction && <Tag>사람이 지시함</Tag>}
+        {c.ciHold && c.status === 'waiting_human' && <Tag tone="amber">CI 다시 확인 중</Tag>}
         {c.mode !== 'subscription' && (c.status === 'queued' || c.status === 'reading') && lim.est && (
           <Tag>{lim.est.samples
             ? <>예상 토큰 ~<span className="mono">{tokens(lim.est.tokens)}</span> (한도의 {pctOf(lim.est.tokens, lim.runTokens)}%) · AI {lim.est.calls}회 · 파일 {lim.est.files}개 · 지난 {lim.est.samples}건 기준</>
-            : '예상 규모 · 지난 기록 없음'}</Tag>
+            : '예상치 없음 · 지난 기록 없음'}</Tag>
         )}
-        {c.status === 'covered' && <Tag tone="green">PR 없음 · {c.coveredBy?.length ? `${c.coveredBy.join(', ')}가 반영` : '앞 작업이 반영'}</Tag>}
+        {c.status === 'covered' && <Tag tone="green">PR 없음 · {c.coveredBy?.length ? `${c.coveredBy.join(', ')}가 반영` : '앞 작업에 이미 들어감'}</Tag>}
       </span>
       {c.summary && <p>{c.summary}</p>}
       {c.mode === 'subscription' && c.progress && <p className="muted">{c.progress}</p>}
@@ -308,20 +308,20 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
       )}
       {!!c.review?.notes.length && <ul>{c.review.notes.map((n, i) => <li key={i} className="muted">{n}</li>)}</ul>}
       {c.instruction && <p className="muted">지시: {c.instruction}</p>}
-      {c.error && <p className="tag-amber">{c.error}</p>}
+      {c.error && <p className="tag-amber">{c.error.includes('generate_pr를 허락하지 않음') ? 'PR 열기 보류됨 · 승인 필요' : c.error}</p>}
       {waitingPr && (
         <form className="flex gap-2" onSubmit={revise}>
-          <input className="field flex-1" value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} placeholder="수정 지시 (같은 PR에 커밋)" aria-label="수정 지시" />
-          <Button size="small" type="submit" disabled={busy || !note.trim()}>수정 지시</Button>
+          <input className="field flex-1" value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} placeholder="추가로 고칠 내용 (같은 PR에 커밋)" aria-label="추가 지시" />
+          <Button size="small" type="submit" disabled={busy || !note.trim()}>추가 지시</Button>
         </form>
       )}
       <span className="tags">
         {waitingPr && <Button size="small" variant="primary" onClick={merge} disabled={busy}>머지</Button>}
         {heldPr && <Button size="small" variant="primary" onClick={() => void approveHold()} disabled={busy}>{busy ? '보내는 중…' : '승인하고 PR 열기'}</Button>}
-        {(STUCK.includes(c.status) || c.status === 'canceled' || c.status === 'returned') && !waitingPr && !task.discarded && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.returnedTo ? '개발에 다시 맡기기' : c.status === 'canceled' ? '재개' : c.mergeConflict ? '최신 코드로 다시 쓰기' : '다시 시도'}</Button>}
-        {textHeld && <Button size="small" onClick={textOk} disabled={busy}>글 확인함</Button>}
+        {(STUCK.includes(c.status) || c.status === 'canceled' || c.status === 'returned') && !waitingPr && !task.discarded && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.returnedTo ? '개발에 다시 맡기기' : c.status === 'canceled' ? '재개' : c.mergeConflict ? '최신 코드 기준으로 다시 작성' : '다시 시도'}</Button>}
+        {textHeld && <Button size="small" onClick={textOk} disabled={busy}>작업 글 확인함</Button>}
         {unclaimed && <Button size="small" onClick={() => void toAgent()} disabled={busy}>서버 AI로 넘기기</Button>}
-        {noChange && <Button size="small" onClick={closeCovered} disabled={busy}>반영됨으로 닫기</Button>}
+        {noChange && <Button size="small" onClick={closeCovered} disabled={busy}>이미 반영됨으로 닫기</Button>}
         <CancelButton taskId={task.id} status={c.status} />
         <DiscardButton task={task} />
         <ReturnButton task={task} />
