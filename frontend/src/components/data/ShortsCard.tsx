@@ -208,7 +208,7 @@ export function TileRow({ tiles }: { tiles: Tile[] }) {
   );
 }
 
-export function ShortsCard({ verdict, kicker, badges, title, line, lineNote, highlights, extraTiles, products, productsLabel = "연결 상품", thumbs, thumbsLabel = "이런 숏츠가 잘 돼요", fold, highlight }: {
+export function ShortsCard({ verdict, kicker, badges, title, line, lineNote, highlights, extraTiles, products, productsLabel = "연결 상품", thumbs, thumbsLabel = "이런 숏츠가 잘 돼요", fold, highlight, topBand }: {
   verdict: Verdict | null;
   kicker?: string | null;
   /** 판정 칩 옆 작은 칩 (예: 상표 주의) */
@@ -227,9 +227,11 @@ export function ShortsCard({ verdict, kicker, badges, title, line, lineNote, hig
   thumbsLabel?: string;
   fold: ReactNode;
   highlight?: boolean;
+  /** 카드 맨 위 띠 (예: 인사이트 "지난번 결과"). 없으면 카드는 예전 그대로 */
+  topBand?: ReactNode;
 }) {
   return (
-    <li className={`card flex gap-6 p-5 ${highlight ? "ring-2 ring-emerald-200" : ""}`}>
+    <CardShell band={topBand} highlight={highlight}>
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         {(verdict || kicker || badges) && (
           <div className="flex flex-wrap items-center gap-2">
@@ -275,6 +277,18 @@ export function ShortsCard({ verdict, kicker, badges, title, line, lineNote, hig
           </ul>
         </div>
       )}
+    </CardShell>
+  );
+}
+
+/** 카드 틀: 띠가 없으면 예전과 같은 한 줄 배치, 있으면 띠 아래에 같은 배치 */
+function CardShell({ band, highlight, children }: { band?: ReactNode; highlight?: boolean; children: ReactNode }) {
+  const ring = highlight ? "ring-2 ring-emerald-200" : "";
+  if (!band) return <li className={`card flex gap-6 p-5 ${ring}`}>{children}</li>;
+  return (
+    <li className={`card flex flex-col gap-4 p-5 ${ring}`}>
+      {band}
+      <div className="flex gap-6">{children}</div>
     </li>
   );
 }
