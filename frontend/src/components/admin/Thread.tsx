@@ -9,7 +9,16 @@ const ABUSE_LABEL = { profanity: "비속어 가림", insult: "모욕 표현 가�
 function Translation({ m }: { m: Message }) {
   const c = m.analysis?.classification;
   const points = c?.request_points_ko ?? [];
-  if (!c || (!c.message_ko && !points.length)) return null;
+  if (!c) return null;
+  if (!c.message_ko && !points.length) {
+    // 한국어가 아닌데 번역이 비었다: 분류 AI가 실패해 규칙 분류로 대체됐을 수 있다. 조용히 숨기지 않고 알린다
+    if (!c.language || c.language === "ko") return null;
+    return (
+      <div className="rounded-xl border border-ink-100 bg-surface-2 px-3 py-2 text-xs leading-relaxed text-ink-500" role="note" aria-label="한국어 번역 없음">
+        한국어 번역을 만들지 못했습니다. 원문 {LANGUAGE_KO[c.language] ?? "기타"} 그대로 확인하세요. AI 연결이 불안정했을 수 있습니다 (AI 처리 내력에서 대체 경로 여부를 볼 수 있습니다).
+      </div>
+    );
+  }
   return (
     <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-ink-700" aria-label="한국어 번역">
       <div className="mb-1 flex items-center gap-1.5 font-medium text-amber-800">

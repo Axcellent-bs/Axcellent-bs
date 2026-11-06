@@ -216,3 +216,8 @@ export interface CommLine {
   outcome: CommOutcome; context_id: string | null; execution_id: string | null;
 }
 export interface CommMeta { total: number; truncated: boolean }
+
+/** 개인정보 삭제 미리보기·집행 결과 (고객 요청). 고객 원문은 없고 건수·이유 코드·날짜만 있다 */
+export interface PurgeItem { inquiry_id: number; action: "purge" | "already_purged" | "blocked" | "not_found"; reasons: string[]; purged: Record<string, number>; retained_until: string | null }
+export interface PurgeReport { mode: "customer_request" | "expired"; items: PurgeItem[]; purge_count: number; retained_count: number; applied: boolean }
+

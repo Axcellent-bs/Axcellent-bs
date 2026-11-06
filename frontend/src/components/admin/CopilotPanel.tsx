@@ -7,6 +7,7 @@ import { FindingList, ValidationBadge } from "../Findings";
 import { StatusChip } from "./bits";
 import { ActivityLog } from "./ActivityLog";
 import { ClaimIntake } from "./ClaimIntake";
+import { DataPurgeCard } from "./DataPurgeCard";
 import { FeedbackCard } from "./FeedbackCard";
 import { ResolutionNotesCard } from "./ResolutionNotesCard";
 import { ReceiptAnalysisCard } from "./ReceiptAnalysisCard";
@@ -98,6 +99,8 @@ export function CopilotPanel({ conv, onUseDraft, onRejectDraft, onClaimCreated, 
       )}
 
       {gap && <PolicyGapNotice gap={gap} />}
+
+      {conv.category === "privacy_deletion" && <DataPurgeCard key={conv.id} conversationId={conv.id} />}
 
       {conv.order_id && (
         <section>
