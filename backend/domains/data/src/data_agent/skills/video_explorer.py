@@ -6,12 +6,17 @@
   1. YouTube 스냅샷 저장분(인기 차트·추적·회사 키워드 검색). 조회수·좋아요·채널은 마지막 스냅샷 값
   2. 숏츠 표본(`shorts.db` 최근 7일 검색)·하위 주제 검색(`subtopics.db`)·지금 인기 보충 영상
      (`popular_videos.db` 최근 7일)·이 skill의 보충 검색. 이 영상들은 올린 시각·좋아요·채널 id가
-     없거나 오래돼 `videos.list`(50개 = 1단위, 하루 상한 `video_calls`)로 다시 읽어 이 skill 저장분
-     (`video_explorer.db`)에 남긴다. 채널 id도 여기서 채운다
+     없거나 오래돼 `videos.list`(50개 = 1유닛, 하루 상한 `video_units` 50유닛, YouTube 장부 날짜
+     = 태평양 0시)로 다시 읽어 이 skill 저장분(`video_explorer.db`)에 남긴다. 채널 id도 여기서
+     채운다. 읽는 순서: 숏 후보(숏 검색 결과, 또는 길이를 아는 4분 미만 영상) 먼저, 그 안에서 최근
+     것(게시 시각을 알면 게시 시각, 모르면 검색한 날)부터
   - 한국 영상만(`[explorer] language`, 숏츠 통계와 같은 판단)
 - 분류: 공유 영상 분류기(`classify_videos`, 저장 재사용, 실존 이름 판정 포함). 한 번 계산에 새로
   묻는 영상은 한 번 `classify_max`개·하루 `classify_daily`개까지(LLM 하루 상한 보호, 분류 대기는
   하루 몫씩 나눠서). 못 한 영상은 칸에 넣지 않고 수만 남긴다
+  - 숏츠(60초 이하)를 먼저 묻는다. LLM 하루 사용이 `classify_shorts_only_share`(60%) 이상이면
+    숏츠만 묻고 롱은 다음 날 (80%부터는 브리프 몫이라 LLM 장부가 멈춘다)
+  - 한 번에 `classify_batch`(30)개씩 묶어 묻는다. 결과는 영상 번호로 맞춘다
 - 칸마다 최소 `min_per_cell`(10)개: 풀에서 먼저 찾고 모자란 칸만 검색으로 보충한다
   - 검색어: 그 카테고리 지금 인기 주제 이름 앞 `query_topics`개(사람 이름 제외, trend_popular),
     `seed_categories`(교육·책)는 도메인 프로필 씨앗. 손으로 나열하지 않는다. 이름이 없으면
@@ -39,7 +44,7 @@ import threading
 import tomllib
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -80,10 +85,16 @@ class ExplorerConfig:
     categories: tuple[str, ...] = ("게임", "유머", "드라마", "교양", "교육·책")
     min_per_cell: int = 10
     daily_searches: int = 20
-    video_calls: int = 10  # videos.list 하루 상한 (한 번 = 영상 50개·1단위)
+    # 다시 읽기(videos.list, 영상 50개 = 1유닛) 하루 상한. YouTube 장부 날짜(태평양 0시)로 센다
+    video_units: int = 50
     channel_calls: int = 4  # channels.list 하루 상한 (한 번 = 채널 50개·1단위)
     classify_max: int = 200  # 한 번 계산에 새로 분류할 영상 수 상한
     classify_daily: int = 300  # 하루에 새로 분류할 영상 수 (분류 대기는 하루 몫씩 나눠서)
+    # LLM 한 번에 묻는 영상 수. 20개 묶음 응답이 2,200~3,400토큰(영상당 최대 약 170)이라 30개면
+    # 최대 약 5,100토큰: 응답 시간 상한(60초) 안에서 반 이상 여유
+    classify_batch: int = 30
+    # LLM 하루 사용(호출·토큰 중 큰 쪽)이 이 비율 이상이면 숏츠만 분류하고 롱은 다음 날
+    classify_shorts_only_share: float = 0.6
     max_videos: int = 30  # 응답 칸마다 주는 영상 수 (count는 칸 전체 수)
     query_topics: int = 2
     seed_categories: tuple[str, ...] = ("교육·책",)
@@ -460,6 +471,75 @@ def other_ids(env: Mapping[str, str], now: datetime) -> list[tuple[str, str]]:
     return [(v, s) for v, s in out if not (v in seen or seen.add(v))]
 
 
+REREAD_KIND = "videos_pt"  # 다시 읽기 호출 수 (YouTube 장부 날짜로 셈. 예전 "videos"는 한국 날짜)
+SHORT_HINT_SECONDS = 240  # 숏 검색(videoDuration=short)과 같은 4분 미만
+
+
+def reread_rank(env: Mapping[str, str], now: datetime) -> dict[str, tuple[bool, float]]:
+    """다시 읽을 영상 → (숏 후보인지, 최근 정도). 최근 정도는 게시 시각(알면) 또는 검색한 날
+    (한국 0시)의 epoch 초, 모르면 -inf.
+
+    숏 후보: 숏 검색 결과(숏츠 표본·하위 주제), 또는 보충 검색 결과 중 길이를 아는 4분 미만 영상.
+    """
+    from data_agent.skills.domain_subtopics import pool_shorts
+    from data_agent.skills.shorts_stats import SHORTS_DB_ENV, SHORTS_DEFAULT_DB
+    from data_agent.skills.trend_popular import FILL_DB_ENV, FILL_DEFAULT_DB
+
+    since = (_day(now) - timedelta(days=POOL_DAYS)).isoformat()
+    out: dict[str, tuple[bool, float]] = {}
+
+    def put(vid: str, short: bool, at: float) -> None:
+        old = out.get(vid)
+        out[vid] = (short or bool(old and old[0]), max(at, old[1]) if old else at)
+
+    def day_ts(day: str) -> float:
+        try:
+            return datetime.combine(date.fromisoformat(day), time(0), tzinfo=KST).timestamp()
+        except ValueError:
+            return float("-inf")
+
+    def read(path: str | Path, sql: str) -> list[tuple[Any, ...]]:
+        if not Path(path).is_file():
+            return []
+        conn = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True, timeout=5.0)
+        try:
+            return conn.execute(sql, (since,)).fetchall()
+        except sqlite3.DatabaseError:
+            return []
+        finally:
+            conn.close()
+
+    shorts = env.get(SHORTS_DB_ENV) or SHORTS_DEFAULT_DB
+    for s in pool_shorts(env, now, shorts):
+        put(s.video_id, True, float("-inf"))
+    for vid, day in read(shorts, "SELECT video_id, MAX(day) FROM searched_videos WHERE day >= ?"
+                                 " GROUP BY video_id"):  # fmt: skip
+        put(str(vid), True, day_ts(str(day)))
+    fill = env.get(FILL_DB_ENV) or FILL_DEFAULT_DB
+    for raw, day in read(fill, "SELECT videos, day FROM fill WHERE day >= ?"):
+        try:
+            rows = json.loads(raw)
+        except ValueError:
+            continue
+        for r in rows if isinstance(rows, list) else []:
+            if not isinstance(r, dict) or not r.get("video_id"):
+                continue
+            seconds = r.get("duration_seconds")
+            short = isinstance(seconds, int | float) and seconds < SHORT_HINT_SECONDS
+            try:
+                at = datetime.fromisoformat(str(r.get("published_at"))).timestamp()
+            except ValueError:
+                at = day_ts(str(day))
+            put(str(r["video_id"]), short, at)
+    return out
+
+
+def _rank_key(rank: tuple[bool, float] | None) -> tuple[int, float]:
+    if rank is None:
+        return (1, float("inf"))
+    return (0 if rank[0] else 1, -rank[1])
+
+
 # ---------------------------------------------------------------- 계산 (수집기)
 
 TermsFn = Callable[[], Awaitable[Mapping[str, str]]]
@@ -507,7 +587,7 @@ async def compute(
 
     # 2. 분류 (저장 재사용, 새로 묻는 것은 한 번 상한·하루 몫까지. 나머지는 다음으로)
     pending = await _classify(pool, config, llm, cache, context_id, queries, store=store,
-                              today=today)  # fmt: skip
+                              today=today, env=env, max_seconds=max_seconds)  # fmt: skip
 
     # 3. 모자란 칸만 보충 검색: 7일 검색을 먼저 하고 그 결과까지 분류한 뒤, 남은 횟수로 1일 보충.
     #    검색 결과는 분류 상한과 무관하게 분류한다 (검색 1번에 50개 이하)
@@ -520,7 +600,8 @@ async def compute(
         )
         pool = {**pool, **added}
         await _classify(pool, dataclasses.replace(config, classify_max=10**6), llm, cache,
-                        context_id, queries, only=list(added))  # fmt: skip
+                        context_id, queries, only=list(added), env=env,
+                        max_seconds=max_seconds)  # fmt: skip
     searches = list(store.searched(today).values())
 
     # 4. 구독자 (조회수 많은 영상의 채널부터, 하루 상한)
@@ -720,10 +801,15 @@ async def _refresh(
     if youtube is None or not hasattr(youtube, "videos"):
         limits.append("YouTube 커넥터가 없어 다른 저장분 영상을 다시 읽지 않음")
         return
-    left = max(0, config.video_calls - store.calls(today, "videos"))
+    from data_agent import youtube_quota
+
+    rank = reread_rank(env, now)
+    todo.sort(key=lambda t: _rank_key(rank.get(t[0])))  # 숏 후보 먼저, 그 안에서 최근 것부터
+    ledger_day = youtube_quota.day_of(now)  # 하루 = YouTube 장부 날짜 (태평양 0시)
+    left = max(0, config.video_units - store.calls(ledger_day, REREAD_KIND))
     take = todo[: left * PAGE]
     if len(take) < len(todo):
-        limits.append(f"다시 읽기 하루 상한({config.video_calls}번)으로 {len(todo) - len(take)}개는"
+        limits.append(f"다시 읽기 하루 상한({config.video_units}번)으로 {len(todo) - len(take)}개는"
                       " 다음 날")  # fmt: skip
     src = dict(take)
     for start in range(0, len(take), PAGE):
@@ -732,9 +818,9 @@ async def _refresh(
             got = await youtube.videos(chunk)
         except ConnectorUnavailable as error:
             limits.append(f"다시 읽기 실패 [{error.code}]")
-            store.add_calls(today, "videos", 1)
+            store.add_calls(ledger_day, REREAD_KIND, 1)
             break
-        store.add_calls(today, "videos", 1)
+        store.add_calls(ledger_day, REREAD_KIND, 1)
         for kind in ("shorts", "subtopic", "popular_fill"):
             mine = [v for v in got if src.get(v.video_id) == kind]
             if mine:
@@ -754,26 +840,46 @@ async def _classify(
     *,
     store: ExplorerStore | None = None,
     today: date | None = None,
+    env: Mapping[str, str] | None = None,
+    max_seconds: int | None = None,
 ) -> int:
-    """풀 영상을 분류한다. 저장된 것은 그대로, 새로 묻는 것은 조회수 순으로 상한까지. 남은 수.
+    """풀 영상을 분류한다. 저장된 것은 그대로, 새로 묻는 것은 숏츠 먼저·조회수 순으로 상한까지.
+    남은 수.
 
     새로 묻는 수 = min(한 번 상한 `classify_max`, 오늘 남은 몫 `classify_daily` − 오늘 물은 수).
+    LLM 하루 사용이 `classify_shorts_only_share` 이상이면 숏츠만 묻는다(롱은 다음 날).
     분류 대기 영상은 하루 몫씩 나눠 다음 계산·다음 날로 넘긴다.
     """
+    from data_agent import llm_budget
+
     ids = list(pool) if only is None else [v for v in only if v in pool]
     if not ids:
         return 0
+
+    def short(v: str) -> bool:
+        d = pool[v].stat.duration_seconds
+        return max_seconds is not None and d is not None and d <= max_seconds
+
     stored = [v for v in ids if cache is not None and _has(cache, v)]
     new = sorted((v for v in ids if v not in set(stored)),
-                 key=lambda v: -(pool[v].stat.view_count or 0))  # fmt: skip
+                 key=lambda v: (not short(v), -(pool[v].stat.view_count or 0)))  # fmt: skip
     room = config.classify_max
     if store is not None and today is not None:
         room = min(room, max(0, config.classify_daily - store.calls(today, "classify")))
-    take = new[:room]
+    allowed = new
+    usage = llm_budget.BUDGET.usage(env) if env is not None else None
+    if usage is not None and (usage.reached
+                              or usage.share() >= llm_budget.reserve_ratio(env)):  # fmt: skip
+        allowed = []  # 상한·브리프 몫(80%)에 닿음: LLM 장부가 막으므로 묻지 않고 다음 날로
+    elif usage is not None and usage.share() >= config.classify_shorts_only_share:
+        allowed = [v for v in new if short(v)]  # 상한 가까움: 숏츠만, 롱은 다음 날
+        if len(allowed) < len(new):
+            queries.append(f"video classify shorts only (LLM {usage.line()})")
+    take = allowed[:room]
     ask = stored + take
     found = await classify_videos(
         [VideoInput(v, pool[v].stat.title, pool[v].stat.channel_title, pool[v].stat.tags)
-         for v in ask], llm, cache=cache, context_id=context_id,
+         for v in ask], llm, cache=cache, context_id=context_id, batch=config.classify_batch,
     ) if ask else {}  # fmt: skip
     if store is not None and today is not None and take:
         store.add_calls(today, "classify", len(take), 0)  # 물은 영상 수 (YouTube 단위 아님)

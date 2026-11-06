@@ -457,3 +457,48 @@ def test_two_computes_at_once_search_each_cell_once_within_the_cap(tmp_path: Pat
     again = ve.ExplorerStore(tmp_path / "other.db")
     _compute(tmp_path, yt, again)
     assert len(yt.searches) == 3 and again.searches_on(day) == 3
+
+
+def test_classification_asks_30_at_a_time_and_nothing_when_the_llm_cap_is_reached(
+    monkeypatch,  # noqa: ANN001
+) -> None:
+    """묶음 30개씩. LLM 하루 상한에 닿았으면 아무것도 묻지 않고 대기로 남긴다."""
+    import dataclasses
+
+    from data_agent import llm_budget
+
+    class Count(FakeLLM):
+        sizes: list[int] = []
+
+        async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):  # noqa: ANN001, ANN201
+            Count.sizes.append(sum(1 for k in (untrusted or {}) if k.startswith("영상")))
+            return await super().structured(prompt, schema, untrusted, images, context_id)
+
+    pool = {f"v{n}": ve._Item(_v(f"v{n}", f"게임 {n}", 30), "chart", NOW) for n in range(70)}
+    config = dataclasses.replace(ve.ExplorerConfig(), classify_max=1000)
+    budget = llm_budget.Budget(None)
+    monkeypatch.setattr(llm_budget, "BUDGET", budget)
+    env = {"DATA_LLM_DAILY_CALLS": "100"}
+    left = asyncio.run(ve._classify(pool, config, Count(), None, None, [], env=env, max_seconds=60))
+    assert left == 0 and Count.sizes == [30, 30, 10]
+    budget.add(100, 0)  # 상한
+    fresh = {f"w{n}": ve._Item(_v(f"w{n}", f"게임 {n}", 30), "chart", NOW) for n in range(5)}
+    Count.sizes = []
+    left = asyncio.run(ve._classify(fresh, config, Count(), None, None, [], env=env,
+                                    max_seconds=60))  # fmt: skip
+    assert left == 5 and Count.sizes == []  # 숏츠도 상한이면 묻지 않음 (다음 날)
+
+
+def test_reread_count_is_kept_by_the_youtube_ledger_day(tmp_path: Path) -> None:
+    """다시 읽기 호출 수는 장부 날짜(태평양 0시) 칸에 적고, 상한 문구는 그대로다."""
+    from data_agent import youtube_quota
+
+    env = _env(tmp_path, "[explorer.extra]\n")
+    store = ve.ExplorerStore(tmp_path / "ex.db")
+    yt = FakeYouTube()
+    limits: list[str] = []
+    asyncio.run(ve._refresh(env, yt, store, ve.load_config(env), {}, NOW, ve._day(NOW), [],
+                            limits))  # fmt: skip
+    assert store.calls(youtube_quota.day_of(NOW), ve.REREAD_KIND) == 1  # 표본 1개 = 1유닛
+    assert ve.load_config(env).video_units == 50
+    store.close()

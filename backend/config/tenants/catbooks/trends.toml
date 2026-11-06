@@ -168,10 +168,12 @@ fill_language = "ko"     # 한국 영상만 (제목·채널 이름에 한글이 
 categories = ["게임", "유머", "드라마", "교양", "교육·책"]
 min_per_cell = 10
 daily_searches = 20      # 하루 검색 상한: 7일 검색(카테고리 × 숏/롱, 최대 10번)에 먼저, 남은 횟수로 1일 보충
-video_calls = 10         # 다른 저장분 영상 다시 읽기(videos.list) 하루 상한. 한 번 = 50개·1단위
+video_units = 50         # 다른 저장분 영상 다시 읽기(videos.list) 하루 상한(유닛). 한 번 = 50개·1유닛, YouTube 장부 날짜(태평양 0시)
 channel_calls = 4        # 구독자 받기(channels.list) 하루 상한. 한 번 = 채널 50개·1단위
 classify_max = 200       # 한 번 계산에 새로 분류할 영상 수 (LLM 하루 상한 보호, 남으면 다음 계산 때)
-classify_daily = 300     # 하루에 새로 분류할 영상 수. 분류 대기는 하루 몫씩 나눠서 (20개 = LLM 1번)
+classify_daily = 300     # 하루에 새로 분류할 영상 수. 분류 대기는 하루 몫씩 나눠서 (30개 = LLM 1번)
+classify_batch = 30      # LLM 한 번에 묻는 영상 수 (20개 묶음 응답 2,200~3,400토큰 → 30개면 최대 약 5,100, 응답 60초 안)
+classify_shorts_only_share = 0.6  # LLM 하루 사용이 60% 이상이면 숏츠만 분류, 롱은 다음 날 (80%부터는 브리프 몫)
 max_videos = 30          # 응답 칸마다 주는 영상 수
 seed_categories = ["교육·책"]
 backfill_categories = ["교육·책"]   # 숏 칸이 모자라면 7일 이전 숏츠 표본(최근 것부터)으로 채움, 화면 "7일 이전"
