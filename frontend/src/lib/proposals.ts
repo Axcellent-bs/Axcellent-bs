@@ -59,7 +59,8 @@ export const PROPOSAL_ORIGIN = 'proposal' // 기획 제안에서 만든 기획�
 export const proposalEnded = (p: Proposal) => p.status === '폐기'
 
 export const PROPOSAL_SKILL_LABEL: Record<string, string> = {
-  promo_concepts: '숏츠 기획안 재료',
+  promo_concepts: '숏츠 아이디어',
+  trend_insight_brief: '트렌드 인사이트',
   content_recommend: '소재 추천',
   youtube_velocity: '조회 급상승',
   trend_history: '시즌 흐름',

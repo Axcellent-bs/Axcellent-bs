@@ -8,7 +8,7 @@
 .muted { color: var(--text-3); }
 .small { font-size: 12px; }
 .mono { font-family: var(--mono); font-size: 0.92em; }
-.point { font-family: var(--mono); font-size: 12px; background: var(--surface-2); border: 1px solid var(--border); padding: 0 5px; white-space: nowrap; }
+.point { font-size: 12px; background: var(--surface-2); border: 1px solid var(--border); padding: 0 5px; white-space: nowrap; }
 .dep { font-weight: 600; white-space: nowrap; }
 .kind { font-size: 11px; color: var(--text-3); }
 .actions { display: flex; gap: 8px; margin-top: 14px; }
@@ -395,7 +395,7 @@ a.plain-link:hover { color: var(--primary); }
 .peer-rows li:first-child { border-top: 0; }
 .peer-rows .num { font-variant-numeric: tabular-nums; color: var(--text); font-weight: 600; min-width: 24px; text-align: right; }
 .peer-rows li > span:first-child { min-width: 0; overflow-wrap: anywhere; }
-.peer-rows code.point { white-space: normal; word-break: break-all; }
+.peer-rows .point { white-space: normal; word-break: break-all; }
 
 /* ---------- 요청 탭 (10/23): 필터 한 줄 + 요청 한 건 = 작은 제목 + 가로 흐름바(접수 → 기획 → 작업 → 처리) + 다음 ---------- */
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -1214,3 +1214,9 @@ table.data td.why-cell { min-width: 12em; }
 .dev-line { display: block; }
 .dev-line + .dev-line { margin-top: 2px; }
 .pre-line { white-space: pre-line; }
+/* 긴 문장을 문장·구분점마다 줄로 (LinkedLines) */
+.line { display: block; }
+.line + .line { margin-top: 2px; }
+.pp-effect-row { display: grid; gap: 1px; margin-bottom: 4px; }
+.pp-effect-row b { font-weight: 600; }
+.rep-row { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; }

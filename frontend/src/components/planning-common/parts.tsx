@@ -1,8 +1,9 @@
 // 여러 화면이 같이 쓰는 작은 조각. 목록 줄·카드는 통째로 눌러 다음 화면으로 간다 (rowNav, LinkTable)
+import { GRADE_LABEL, GRADE_TITLE, kindLabel, pointLabel } from '@/lib/planningLabels'
 import type { Key, KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import { type ChipTone, type Column } from '@dejafix/common-frontend'
 import { DEPT_NAME, type Activity, type Dept, type State as S } from '@/lib/planningData'
-import { Linked, convoHref, deptHref, go, toPath } from '@/components/planning-common/links'
+import { LinkedLines, convoHref, deptHref, go, toPath } from '@/components/planning-common/links'
 
 // 부서·연결 지점은 글자로만 보인다. 링크가 필요한 곳에서만 link를 켠다
 export function Dep({ d, link }: { d: Dept; link?: boolean }) {
@@ -11,8 +12,8 @@ export function Dep({ d, link }: { d: Dept; link?: boolean }) {
 }
 
 export function Point({ children, link }: { children: string; link?: boolean }) {
-  if (!link) return <code className="point">{children}</code>
-  return <a href={toPath('metrics/links')} className="point-link" title="부서 연동 표에서 보기"><code className="point">{children}</code></a>
+  if (!link) return <span className="point" title={children}>{pointLabel(children)}</span>
+  return <a href={toPath('metrics/links')} className="point-link" title={`${children} · 부서 연동 표에서 보기`}><span className="point">{pointLabel(children)}</span></a>
 }
 
 // 색 배경 칩 대신 글자로만 표시한다. 색은 정말 봐야 하는 상태(초록=끝남, 주황=사람이 볼 것)에만
@@ -22,7 +23,7 @@ export function Tag({ tone, title, children }: { tone?: ChipTone; title?: string
 
 export function Grade({ g }: { g?: string }) {
   if (!g || g === '-') return null
-  return <span className="grade" title={g === 'read' ? '상태를 바꾸지 않는 읽기' : `${g} 등급`}>{g === 'read' ? '읽기' : `${g}등급`}</span>
+  return <span className="grade" title={GRADE_TITLE[g] ?? `${g} 등급`}>{GRADE_LABEL[g] ?? `${g}등급`}</span>
 }
 
 // 상태 = 점 하나 + 글자. 점 색 (10/29 예진 기준)
@@ -96,9 +97,9 @@ export function ActivityList({ s, items, compact }: { s: S; items: Activity[]; c
           <span className="act-t mono">{a.t}</span>
           <div className="act-main">
             <div className="act-route">
-              <Dep d={a.from} /> <span className="arrow">→</span> <Dep d={a.to} /> <Point>{a.point}</Point> <span className="kind">{a.kind}</span> <Grade g={a.grade} />
+              <Dep d={a.from} /> <span className="arrow">→</span> <Dep d={a.to} /> <Point>{a.point}</Point> <span className="kind">{kindLabel(a.kind)}</span> <Grade g={a.grade} />
             </div>
-            <div className="act-text"><Linked s={s} text={a.text} /></div>
+            <div className="act-text"><LinkedLines s={s} text={a.text} /></div>
             {!compact && <div className="act-ctx mono">{a.ctx}</div>}
           </div>
         </li>

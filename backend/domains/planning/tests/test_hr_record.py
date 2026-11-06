@@ -249,7 +249,7 @@ def test_check_plan_warn_puts_para_warn_and_waits() -> None:
     assert r1.warn is not None and r1.warn.card == "card_rej"
     assert sp.hr_check == "warn" and sp.status == "초안"
     assert sp.auto_review is not None and "spec_rejected_warning" in sp.auto_review.rules
-    assert "warn (card_rej)" in _plan_act(svc)
+    assert "비슷한 기각 이력 있음" in _plan_act(svc)
 
 
 def test_check_plan_unavailable_is_not_ok() -> None:
@@ -266,7 +266,7 @@ def test_check_plan_mock_mode_keeps_old_text(service) -> None:
     r = next(x for x in service.state.requests if x.id == "REQ-21")
     sp = next(x for x in service.state.specs if x.id == r.spec)
     assert sp.hr_check is None
-    assert _plan_act(service) == "② 기각 이력 질의 → 없음"
+    assert _plan_act(service) == "② 인사 기각 이력 확인 → 없음"
 
 
 # ---- 2단계: 기각 → 인사 record_case(decision_rejected) 실제 호출
@@ -288,7 +288,7 @@ def test_reject_draft_calls_hr_with_area() -> None:
     assert hr.asked[-1].meta.idempotency_key == "REQ-13:decision_rejected"
     assert svc.state.decisions[-1].sent_to_hr is True
     assert svc.state.decisions[-1].hr_record == "ok"
-    assert any("decision_rejected" in t and "인사 카드 생성" in t for t in _hr_acts(svc))
+    assert any("인사에 기각 기록" in t and "인사 카드 생성" in t for t in _hr_acts(svc))
 
 
 def test_reject_draft_hr_failure_keeps_rejection() -> None:

@@ -855,7 +855,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
                 "hr",
                 "check_plan",
                 "A2A",
-                plan.text if plan else "② 기각 이력 질의 → 없음",
+                plan.text if plan else "② 인사 기각 이력 확인 → 없음",
                 "read",
             )
         )
@@ -1001,7 +1001,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         refs = [f"spec:{sp.id}", f"question:{qid}", *evidence_ids]
         record = self._decision_record(ctx, dec_id, short, reason, [], refs, sp.title)
         hr_key = f"{dec_id}:decision_extracted"
-        case = f"① kind decision_extracted · {dec_id} (되묻기 답)"
+        case = f"① 인사에 결정 기록: {dec_id} (되묻기 답)"
         gate = await self._execute(
             "record_case",
             ctx,
@@ -1253,7 +1253,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
             s.activity.append(act)
             return act
 
-        step("planning", "hr", "check_plan", "A2A", "② 기각 이력 질의 → 없음", "read")
+        step("planning", "hr", "check_plan", "A2A", "② 인사 기각 이력 확인 → 없음", "read")
 
         spec_text = (
             f"{spec_id} 작성 (요구사항 1, 완료 기준 1, 질문 0) → 간단 요청 규칙으로 자동 확정"
@@ -1518,7 +1518,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         th = next((x for x in s.threads if x.on == spec), None)
         summary = f"스레드에서 결정 {dec_id} 추출, R1 반영, 질문 닫음"
         await self._execute("extract_decision", ctx, dec_id, summary, {"spec": spec})
-        case = f"① kind decision_extracted · {dec_id} (결정·이유·대안)"
+        case = f"① 인사에 결정 기록: {dec_id} (결정·이유·대안)"
         record = self._decision_record(
             ctx,
             dec_id,
@@ -1674,7 +1674,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         if auto:
             confirm_text = f"{sp.id} 자동 확정 ({rule_text} → confirm_spec 규칙 통과, 사후 감사)"
         else:
-            confirm_text = f"{sp.id} 확정 (팀장 {TEAM_LEAD})" + (f" · {audit}" if audit else "")
+            confirm_text = f"{sp.id} 확정 (팀장 {TEAM_LEAD})" + (f"\n{audit}" if audit else "")
         params: dict[str, Any] = {**check.params, "auto": auto}
         if warn_ignored:
             params["warn_ignored"] = warn_ignored
@@ -1906,7 +1906,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         실제 모드(인사 연결)에서는 인사를 A2A로 실제로 부른다. 인사가 자기 관문으로 실행하고,
         실패해도 기각은 되돌리지 않고 "인사 기록 실패"만 남긴다. 목 모드는 예전처럼 관문 기록만.
         """
-        case = f"① kind decision_rejected · {target} (이유: {record.decision_reason})"
+        case = f"① 인사에 기각 기록: {target}\n이유: {record.decision_reason}"
         key = f"{target}:decision_rejected"
         gate = await self._execute(
             "record_case",
@@ -2147,7 +2147,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
                     sp.extra[key] = v
                 else:
                     sp.extra.pop(key, None)
-                changed.append(key)
+                changed.append(spec_template.EXTRA_LABEL.get(key, key))
         if title.strip() and title.strip() != sp.title:
             sp.title = title.strip()
             changed.append("제목")
@@ -2181,7 +2181,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         s.activity.append(
             self._act(
                 self.clock(), ctx, "human", "planning", "edit_spec", "사람",
-                f"{sp.id} 사람이 고침 · {', '.join(changed)}",
+                f"{sp.id} 사람이 고침\n고친 칸: {', '.join(changed)}",
             )
         )  # fmt: skip
         return ActionResult(output={"spec": sp.id, "changed": changed})
@@ -2203,7 +2203,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         sp.auto_review = None
         req = self._request_of_spec(s, sp)
         ctx = req.context_id if req else f"spec:{sp.id}"
-        text = f"{sp.id} 기획서 거절 · {reason.strip()}"
+        text = f"{sp.id} 기획서 거절\n이유: {reason.strip()}"
         s.activity.append(
             self._act(self.clock(), ctx, "human", "planning", "reject_spec", "사람", text)
         )
@@ -2266,7 +2266,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         ctx = f"thread:{th.id}"
         summary = f"{th.title} 메시지에서 결정 {dec_id} 추출"
         await self._execute("extract_decision", ctx, dec_id, summary)
-        case = f"① kind decision_extracted · {dec_id}"
+        case = f"① 인사에 결정 기록: {dec_id}"
         reason = f"{m.who} 의견 ({th.title})"
         refs = [f"thread:{th.id}"] + ([f"spec:{th.on}"] if th.on else [])
         record = self._decision_record(ctx, dec_id, m.text, reason, [], refs, th.title)
@@ -2422,7 +2422,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
                 )
             how = {"rule": "소제목", "llm": "AI", "llm+rule": "AI+소제목"}[got.by]
             ctx = req.context_id if req else f"spec:{spec}"
-            text = f"{spec} 자유 작성으로 칸 채움 ({how}) · {', '.join(changed)}"
+            text = f"{spec} 자유 작성으로 칸 채움 ({how})\n채운 칸: {', '.join(changed)}"
             s.activity.append(
                 self._act(self.clock(), ctx, "planning", "planning", "fill_spec", "사람", text)
             )

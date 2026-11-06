@@ -215,7 +215,7 @@ class ProposalMixin:
         got = await self._insights.pull(PULL_CTX)
         if isinstance(got, str):
             # 실패도 기록에 남긴다: 화면이 알림 뒤에도 "마지막 받아오기 실패 · 이유"를 보여 준다
-            await self._apply(self._pull_note(PULL_FAILED, f"데이터분석 받아오기 실패 · {got}"))
+            await self._apply(self._pull_note(PULL_FAILED, f"데이터분석 받아오기 실패\n{got}"))
             raise ActionError("INSIGHTS_FAILED", f"데이터분석에서 받지 못했습니다: {got}")
         created: list[str] = []
         similar: list[dict[str, str]] = []
@@ -232,9 +232,9 @@ class ProposalMixin:
         text = f"데이터분석 받아오기: 받은 {len(got)}개 · 새 제안 {len(created)}개"
         if similar:
             near_ids = ", ".join(dict.fromkeys(x["proposal_id"] for x in similar))
-            text += f" · 비슷한 제안이 있어 건너뜀 {len(similar)}개 ({near_ids}과 비슷)"
+            text += f"\n비슷한 제안이 있어 건너뜀 {len(similar)}개 ({near_ids}과 비슷)"
         if len(got) > len(created) + len(similar):
-            text += f" · 이미 받은 것 {len(got) - len(created) - len(similar)}개"
+            text += f"\n이미 받은 것 {len(got) - len(created) - len(similar)}개"
         await self._apply(self._pull_note(PULL_DONE, text))
         return ActionResult(outcome="pulled", output=out)
 
@@ -311,7 +311,7 @@ class ProposalMixin:
                 p.result = ProposalResult(
                     direction=inp.direction, summary=inp.summary or "", facts=facts, at=now
                 )
-                text = f"{p.id} 성과 {inp.direction} · {inp.summary}"
+                text = f"{p.id} 성과 {inp.direction}\n{inp.summary}"
             upd: dict[str, Any] = {"campaign": inp.campaign_id}
             if inp.stage == "published":
                 pub = {"channel": inp.channel, "published_at": inp.published_at}
@@ -465,7 +465,7 @@ class ProposalMixin:
                 if isinstance(out, str) and not last:  # 상태는 그대로 두고 잠시 뒤 다시 보낸다
                     p.handoff = ProposalHandoff(ok=False, reason=why, at=now, retry=n + 1)
                     if n == 0:
-                        text = f"{p.id} 마케팅 응답 없음 · {why} → 자동으로 다시 보냄"
+                        text = f"{p.id} 마케팅 응답 없음 → 자동으로 다시 보냄\n{why}"
                         s.activity.append(
                             self._act(now, _ctx(p), "marketing", "planning",
                                       "receive_campaign_brief", "A2A", text)
@@ -475,7 +475,7 @@ class ProposalMixin:
                     why = f"{why} (자동 재전송 {n}번 모두 실패)"
                 p.handoff = ProposalHandoff(ok=False, reason=why, at=now)
                 _undo_send(s, p)  # 못 넘겼으면 기획안으로 되돌려 다시 보낼 수 있게
-                text = f"{p.id} 마케팅 전달 실패 · {why} → 기획안으로 되돌림"
+                text = f"{p.id} 마케팅 전달 실패 → 기획안으로 되돌림\n{why}"
                 s.activity.append(
                     self._act(now, _ctx(p), "marketing", "planning", "receive_campaign_brief",
                               "A2A", text)
@@ -505,7 +505,7 @@ class ProposalMixin:
             return None
         p.status = "폐기"
         p.note = reason
-        text = f"{p.id} 폐기 · {reason}"
+        text = f"{p.id} 폐기\n이유: {reason}"
         s.activity.append(
             self._act(self.clock(), _ctx(p), "human", "planning", "reject_proposal", "사람", text)
         )

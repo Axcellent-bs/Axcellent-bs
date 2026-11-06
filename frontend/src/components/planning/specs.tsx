@@ -648,7 +648,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string; examp
 
         <nav className="sp-links" aria-label="이 기획서">
           <details className="sp-decisions" id="sec-decisions">
-            <summary>결정 이력 {decisions.length}건</summary>
+            <summary>결정 기록 {decisions.length}건</summary>
             {decisions.length ? (
               <ul>
                 {decisions.map((x) => <li key={x.id}><span className="sp-pid">{x.id}</span><span>{x.text}<HrRecord d={x} /></span></li>)}

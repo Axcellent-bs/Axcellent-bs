@@ -1,6 +1,7 @@
 // 소통 (슬랙 벤치마킹): 왼쪽 채널 목록, 가운데 대화, 오른쪽 채널 정보.
 // 부서 채널에 쓴 메시지는 그 부서 창구(다른 부서 페이지)로 가고, 메시지는 결정으로 기록하거나 정리 문서에 옮길 수 있다.
 // 에이전트 대화: 사건·요청 하나(context_id)에서 에이전트끼리 주고받은 A2A·이벤트·execute 기록을 읽기 전용으로 본다.
+import { kindLabel } from '@/lib/planningLabels'
 import { useEffect, useRef, useState, type Dispatch, type KeyboardEvent } from 'react'
 import {Select, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, type Action, type Activity, type Dept, type Message, type State, type Thread } from '@/lib/planningData'
@@ -221,7 +222,7 @@ function ConvoView({ s, c }: { s: State; c: Convo }) {
                   <Dep d={a.from} /> <span className="arrow">→</span> <Dep d={a.to} /> <span className="muted small">{a.t}</span>
                 </div>
                 <div className="sl-text">
-                  <Point>{a.point}</Point> <span className="kind">{a.kind}</span> <Grade g={a.grade} /> <Linked s={s} text={a.text} />
+                  <Point>{a.point}</Point> <span className="kind">{kindLabel(a.kind)}</span> <Grade g={a.grade} /> <Linked s={s} text={a.text} />
                 </div>
               </div>
             </div>

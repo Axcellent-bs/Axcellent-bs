@@ -48,6 +48,8 @@ PROPOSAL = (
 
 TEMPLATES = {"plan": PLAN, "proposal": PROPOSAL}
 EXTRA_KEYS = {s.key for t in TEMPLATES.values() for s in t if s.source == "extra"}
+# 활동 기록에 쓰는 칸 이름 (audience → 대상)
+EXTRA_LABEL = {s.key: s.label for t in TEMPLATES.values() for s in t if s.source == "extra"}
 
 
 def template_of(origin: str | None) -> str:

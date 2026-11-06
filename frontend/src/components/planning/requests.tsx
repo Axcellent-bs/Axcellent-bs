@@ -29,13 +29,13 @@ export const FILTERS: { id: RequestFilter; label: string; match: (r: Request) =>
   { id: 'incoming', label: '들어온 요청', match: (r) => !isFollowUp(r) && r.state === '접수' },
   { id: 'progress', label: '진행 중', match: (r) => !isFollowUp(r) && (r.state === '기획 중' || r.state === '작업 중') },
   { id: 'done', label: '해결', match: (r) => !isFollowUp(r) && r.state === '완료' },
-  { id: 'followup', label: '후속', match: isFollowUp },
+  { id: 'followup', label: '후속 요청', match: isFollowUp },
 ]
 export const parseFilter = (x?: string): RequestFilter => (FILTERS.some((f) => f.id === x) ? (x as RequestFilter) : 'all')
 export const incomingCount = (s: S) => s.requests.filter(FILTERS[1].match).length
 
 // ---------------------------------------------------------------- 단계 계산 (순수 함수)
-export const STAGES = ['접수', '기획', '작업', '배포', '처리'] as const
+export const STAGES = ['접수', '기획', '개발', '배포', '회신'] as const
 export interface Cell { kind: 'past' | 'now' | 'next'; value?: string; meta?: string; href?: string; warn?: boolean }
 export interface Wait { label: string; rank: number } // rank 작을수록 먼저 (사람 확인 0 · 질문 1 · 교차검증 2 · 채택·초안 3)
 export interface PipeRow { r: Request; stage: number; finished: boolean; cells: Cell[]; wait?: Wait; born?: string; last?: string; minutes: number; dups: Request[] }
@@ -51,7 +51,7 @@ export function duration(min: number): string {
   return `${Math.floor(min / 1440)}일 ${Math.floor((min % 1440) / 60)}시간`
 }
 const stageOf = (r: Request) => (r.state === '접수' ? 0 : r.state === '기획 중' ? 1 : r.state === '작업 중' ? 2 : 4)
-const waitOf = (lane: 'ai' | 'human') => (lane === 'human' ? { label: '사람 확인 대기', rank: 0 } : { label: '교차검증 대기', rank: 2 })
+const waitOf = (lane: 'ai' | 'human') => (lane === 'human' ? { label: '사람 확인 대기', rank: 0 } : { label: 'AI 검토 대기', rank: 2 })
 
 export function pipeline(s: S, r: Request, rc?: ReleaseCheck): PipeRow {
   const g = gather(s, r)
@@ -90,7 +90,7 @@ export function pipeline(s: S, r: Request, rc?: ReleaseCheck): PipeRow {
         if (c1.kind === 'now') wait = { label: '질문 대기', rank: 1 }
       } else c1.meta = '초안'
     }
-    if (c1.kind === 'now' && !sp) wait = { label: '기획서 초안 전', rank: 3 }
+    if (c1.kind === 'now' && !sp) wait = { label: '기획서 작성 전', rank: 3 }
     if (c1.kind === 'now' && wait) c1.warn = true
   }
 
@@ -107,7 +107,7 @@ export function pipeline(s: S, r: Request, rc?: ReleaseCheck): PipeRow {
       const xr = reviewOf(s, pr.id)
       c2.href = xr ? reviewHref(xr) : toPath(`work/prs/${prSlug(pr.id)}`)
       if (xr) { const w = waitOf(xr.lane); c2.meta = w.label; if (c2.kind === 'now') wait = w }
-      else if (pr === fix) { c2.meta = '수정 후 재검수'; if (c2.kind === 'now') wait = { label: '수정 후 재검수', rank: 2 } }
+      else if (pr === fix) { c2.meta = '고친 뒤 다시 검사'; if (c2.kind === 'now') wait = { label: '고친 뒤 다시 검사', rank: 2 } }
       else c2.meta = !pr.merged ? '머지 전' : pr.mergedBy === 'rule' ? '자동 머지' : pr.mergedBy === 'review' ? '교차검증 후 머지' : '사람 머지'
     }
     if (c2.kind === 'now' && wait) c2.warn = true
@@ -298,7 +298,7 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
                 ) : draft ? (
                   <Button size="small" variant="primary" onClick={() => { d({ type: 'writeSpec', request: r.id }); toast.show(`${r.id} 기획서 초안`) }}>기획서 초안</Button>
                 ) : (
-                  <a href={href} className={row.finished || dropped ? 'rq-go muted' : 'rq-go'}>{(row.finished || dropped ? '프로젝트' : next.label).replace(/\s*\(.*\)$/, '')} ›</a>
+                  <a href={href} className={row.finished || dropped ? 'rq-go muted' : 'rq-go'}>{(row.finished || dropped ? '진행 기록' : next.label).replace(/\s*\(.*\)$/, '')} ›</a>
                 )}
               </div>
             </li>

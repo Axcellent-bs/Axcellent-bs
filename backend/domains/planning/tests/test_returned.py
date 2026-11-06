@@ -101,7 +101,7 @@ def test_returned_task_is_logged_and_sent_to_marketing_without_reason() -> None:
     tid = _dev_result(svc, spec, RETURNED, 1)
     assert pending_return(svc.state, tid) is not None
     assert any(
-        a.point == DEV_RETURNED and "마케팅 · 홍보 문구 일" in a.text for a in svc.state.activity
+        a.point == DEV_RETURNED and "이유: 홍보 문구 일" in a.text for a in svc.state.activity
     )
 
     async def go() -> None:

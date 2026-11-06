@@ -133,8 +133,8 @@ def test_llm_draft_sets_target_and_warns_unknown_numbers() -> None:
     p = _p(svc, _new(svc, body="작년보다 2배 늘 것"))
     assert p.written_by == "llm" and p.target.value == "+10%" and p.format == "숏폼 30초"
     joined = " / ".join(p.warnings)
-    assert "이유의 숫자 3" in joined  # 3주는 근거에 없다
-    assert "설명의 숫자 2" in joined  # 본문 숫자도 대조한다
+    assert "이유에 근거·목표에 없는 숫자가 있음: 3" in joined  # 3주는 근거에 없다
+    assert "설명에 근거·목표에 없는 숫자가 있음: 2" in joined  # 본문 숫자도 대조한다
     assert "1.6" not in joined and "10" not in joined  # 근거·목표 숫자는 통과
 
 

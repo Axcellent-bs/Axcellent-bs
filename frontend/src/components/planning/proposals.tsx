@@ -1,11 +1,12 @@
 // 기획 제안: ① 데이터분석 인사이트(근거 수치) → ② 기획 판단(할 일·이유·목표) → 사람 확정(기획안으로 만들기)·폐기
 // 마케팅·개발로 넘기는 건 기획안 다음 단계
+import { sourceLabel } from '@/lib/planningLabels'
 import { useState, type Dispatch } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, type Action, type State as S } from '@/lib/planningData'
 import { PROPOSAL_SKILL_LABEL, PROPOSAL_STAGES, WRITTEN_BY_LABEL, handoffRetrying, proposalEnded, proposalOpen, proposalStage, type Proposal, type ProposalFact } from '@/lib/proposals'
 import { Tag } from '@/components/planning-common/parts'
-import { go, toPath } from '@/components/planning-common/links'
+import { LinkedLines, go, toPath } from '@/components/planning-common/links'
 import { Pager, usePage } from '@/components/planning-common/pager'
 import { Markdown } from '@/components/planning-common/markdown'
 
@@ -74,7 +75,7 @@ function ProposalList({ d, s }: P) {
           ))}
         </div>
         <span style={{ flex: 1 }} />
-        {pull && <span className={`small ${pullFailed ? 'pp-pull-fail' : 'muted'}`} title={pull.text}>{pull.t} · {pull.text.replace(/^데이터분석 받아오기(: | 실패 · )/, pullFailed ? '실패 · ' : '')}</span>}
+        {pull && <span className={`small ${pullFailed ? 'pp-pull-fail' : 'muted'}`} title={pull.text}>{pull.t} · {pull.text.replace(/^데이터분석 받아오기(: | 실패 · |\s*실패\n)/, pullFailed ? '실패 · ' : '').replace(/\n/g, ' · ')}</span>}
         <Button size="small" variant="primary" onClick={() => { d({ type: 'pullInsights' }); toast.show('데이터분석에서 인사이트를 받아오는 중') }}>{pullFailed ? '다시 받아오기' : '데이터분석에서 받아오기'}</Button>
       </div>
       {!pg.rows.length ? <div className="empty"><b>없음</b></div> : (
@@ -115,7 +116,7 @@ function ProposalCard({ p }: { p: Proposal }) {
       <span className="inc-card-meta pp-meta">
         <Tag tone={STATUS_TONE[p.status]}>{p.status}</Tag>
         {p.target && <span className="pp-target-chip">목표 {p.target.value}</span>}
-        {p.warnings.length > 0 && <Tag tone="amber">숫자 확인 {p.warnings.length}</Tag>}
+        {p.warnings.length > 0 && <Tag tone="amber">근거 없는 숫자 {p.warnings.length}</Tag>}
         <span className="muted small">근거 {p.facts.length}{p.result ? ` · ${p.result.direction}` : ''}</span>
       </span>
     </a>
@@ -127,7 +128,7 @@ function Facts({ facts }: { facts: ProposalFact[] }) {
     <table className="pp-facts">
       <tbody>
         {facts.map((f, i) => (
-          <tr key={i}><td>{f.label}</td><td className="pp-num">{f.value}</td><td className="mono muted small">{f.link ? <a href={f.link} target="_blank" rel="noreferrer">{f.source} ↗</a> : f.source}</td></tr>
+          <tr key={i}><td>{f.label}</td><td className="pp-num">{f.value}</td><td className="muted small" title={f.source}>{f.link ? <a href={f.link} target="_blank" rel="noreferrer">{sourceLabel(f.source)} ↗</a> : sourceLabel(f.source)}</td></tr>
         ))}
       </tbody>
     </table>
@@ -153,11 +154,11 @@ function EffectFacts({ facts }: { facts: ProposalFact[] }) {
         return (
           <div key={g.source} className="pp-effect-group">
             <div className="pp-effect-head">{g.label}</div>
-            {rows.map((f) => <div key={f.label} className="small">{f.label} <b>{f.value}</b></div>)}
+            {rows.map((f) => <div key={f.label} className="small pp-effect-row"><span className="muted">{f.label}</span><b><LinkedLines text={f.value} /></b></div>)}
           </div>
         )
       })}
-      {rest.map((f) => <div key={f.label} className="small">{f.label} <b>{f.value}</b></div>)}
+      {rest.map((f) => <div key={f.label} className="small pp-effect-row"><span className="muted">{f.label}</span><b><LinkedLines text={f.value} /></b></div>)}
     </div>
   )
 }
@@ -177,7 +178,7 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
         <div className="pp-head">
           <span className={`rq-dept d-${p.from}`}>{DEPT_NAME[p.from]}</span>
           <Tag>{PROPOSAL_SKILL_LABEL[p.skill] ?? p.skill}</Tag>
-          <span className="mono muted">{p.id}{p.insightId ? ` · ${p.insightId}` : ''}</span>
+          <span className="mono muted" title={p.insightId ? `데이터분석 id ${p.insightId}` : undefined}>{p.id}</span>
           <span style={{ flex: 1 }} />
           <Tag tone={STATUS_TONE[p.status]}>{p.status}</Tag>
           <span className="muted small">{p.created}</span>
@@ -233,13 +234,13 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
         <aside className="pp-side">
           <dl className="pp-out">
             {p.spec && <><dt>기획안</dt><dd><a href={toPath(`work/specs/${p.spec}`)}>{p.spec}</a> <span className="muted small">{s.specs.find((x) => x.id === p.spec)?.status ?? ''}</span></dd></>}
-            {p.handoff && <><dt>마케팅</dt><dd>{p.handoff.ok ? <Tag>받음{p.handoff.campaign ? ` · ${p.handoff.campaign}` : ''}</Tag> : handoffRetrying(p) ? <Tag title={p.handoff.reason}>자동 재전송 중 · {handoffRetrying(p)}번째</Tag> : <Tag tone="amber" title={p.handoff.reason}>전달 실패</Tag>}{p.handoff.at && <span className="muted small"> {p.handoff.at}</span>}{!p.handoff.ok && p.handoff.reason && <div className="muted small">{p.handoff.reason}</div>}</dd></>}
+            {p.handoff && <><dt>마케팅</dt><dd>{p.handoff.ok ? <Tag title={p.handoff.campaign ? `캠페인 ${p.handoff.campaign}` : undefined}>마케팅이 받음</Tag> : handoffRetrying(p) ? <Tag title={p.handoff.reason}>자동 재전송 중 · {handoffRetrying(p)}번째</Tag> : <Tag tone="amber" title={p.handoff.reason}>전달 실패</Tag>}{p.handoff.at && <span className="muted small"> {p.handoff.at}</span>}{!p.handoff.ok && p.handoff.reason && <div className="muted small"><LinkedLines text={p.handoff.reason} /></div>}</dd></>}
             {p.request && p.status === '기획서로' && <><dt>개발</dt><dd><a href={toPath(`projects/${p.request}`)}>{p.request}</a>{req && <span className="muted small"> {req.state}</span>}</dd></>}
             {p.result && (
               <>
                 <dt>성과</dt>
                 <dd>
-                  <Tag tone={p.result.direction === '늘었음' ? 'green' : p.result.direction === '줄었음' ? 'amber' : 'neutral'}>{p.result.direction}</Tag> {p.result.summary}
+                  <Tag tone={p.result.direction === '늘었음' ? 'green' : p.result.direction === '줄었음' ? 'amber' : 'neutral'}>{p.result.direction}</Tag> <LinkedLines text={p.result.summary} />
                   {p.target && <div className="small">목표 {p.target.value}</div>}
                   <EffectFacts facts={p.result.facts ?? []} />
                   <div className="muted small">{p.result.at} · 데이터분석</div>
@@ -248,7 +249,7 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
             )}
             {p.note && <><dt>{p.status === '폐기' ? '폐기 이유' : '메모'}</dt><dd>{p.note}</dd></>}
             {p.handoff?.campaign && (
-              <><dt /><dd><Button size="small" onClick={() => { d({ type: 'measureProposal', proposal: p.id }); toast.show(`${p.id} 성과 재는 중`) }}>{p.result ? '성과 다시 재기' : '성과 재기'}</Button></dd></>
+              <><dt /><dd><Button size="small" onClick={() => { d({ type: 'measureProposal', proposal: p.id }); toast.show(`${p.id} 성과 가져오는 중`) }}>{p.result ? '성과 다시 가져오기' : '성과 가져오기'}</Button></dd></>
             )}
           </dl>
         </aside>

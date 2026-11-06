@@ -101,7 +101,7 @@ def number_warnings(
     for name, text in texts.items():
         extra = sorted(_numbers(text) - allowed)
         if extra:
-            out.append(f"{name}의 숫자 {', '.join(extra)}가 근거·목표에 없음")
+            out.append(f"{name}에 근거·목표에 없는 숫자가 있음: {', '.join(extra)} (확인 필요)")
     return out
 
 
@@ -268,7 +268,7 @@ class DataInsights:
         req = AgentRequest(meta=meta, skill="promo_concepts", input={})
         out = await _ask(self._call, "data", req, self.timeout)
         if isinstance(out, str):
-            return f"trend_insight_brief: {brief} / promo_concepts: {out}"
+            return f"인사이트 요약: {brief}\n숏츠 아이디어: {out}"
         try:
             parsed = PromoConceptsOutput.model_validate(out.output or {})
         except ValidationError:
