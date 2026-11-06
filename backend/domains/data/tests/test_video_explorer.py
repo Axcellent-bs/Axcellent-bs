@@ -500,5 +500,5 @@ def test_reread_count_is_kept_by_the_youtube_ledger_day(tmp_path: Path) -> None:
     asyncio.run(ve._refresh(env, yt, store, ve.load_config(env), {}, NOW, ve._day(NOW), [],
                             limits))  # fmt: skip
     assert store.calls(youtube_quota.day_of(NOW), ve.REREAD_KIND) == 1  # 표본 1개 = 1유닛
-    assert ve.load_config(env).video_units == 50
+    assert ve.load_config(env).video_units == 80
     store.close()

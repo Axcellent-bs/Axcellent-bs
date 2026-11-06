@@ -6,7 +6,7 @@
   1. YouTube 스냅샷 저장분(인기 차트·추적·회사 키워드 검색). 조회수·좋아요·채널은 마지막 스냅샷 값
   2. 숏츠 표본(`shorts.db` 최근 7일 검색)·하위 주제 검색(`subtopics.db`)·지금 인기 보충 영상
      (`popular_videos.db` 최근 7일)·이 skill의 보충 검색. 이 영상들은 올린 시각·좋아요·채널 id가
-     없거나 오래돼 `videos.list`(50개 = 1유닛, 하루 상한 `video_units` 50유닛, YouTube 장부 날짜
+     없거나 오래돼 `videos.list`(50개 = 1유닛, 하루 상한 `video_units` 80유닛, YouTube 장부 날짜
      = 태평양 0시)로 다시 읽어 이 skill 저장분(`video_explorer.db`)에 남긴다. 채널 id도 여기서
      채운다. 읽는 순서: 숏 후보(숏 검색 결과, 또는 길이를 아는 4분 미만 영상) 먼저, 그 안에서 최근
      것(게시 시각을 알면 게시 시각, 모르면 검색한 날)부터
@@ -86,7 +86,7 @@ class ExplorerConfig:
     min_per_cell: int = 10
     daily_searches: int = 20
     # 다시 읽기(videos.list, 영상 50개 = 1유닛) 하루 상한. YouTube 장부 날짜(태평양 0시)로 센다
-    video_units: int = 50
+    video_units: int = 80  # 평소 필요량(12시간마다 다시 읽기) 약 68유닛 + 여유
     channel_calls: int = 4  # channels.list 하루 상한 (한 번 = 채널 50개·1단위)
     classify_max: int = 200  # 한 번 계산에 새로 분류할 영상 수 상한
     classify_daily: int = 300  # 하루에 새로 분류할 영상 수 (분류 대기는 하루 몫씩 나눠서)
