@@ -3,7 +3,7 @@
 import { useState, type Dispatch } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, type Action, type State as S } from '@/lib/planningData'
-import { PROPOSAL_SKILL_LABEL, PROPOSAL_STAGES, WRITTEN_BY_LABEL, proposalEnded, proposalOpen, proposalStage, type Proposal, type ProposalFact } from '@/lib/proposals'
+import { PROPOSAL_SKILL_LABEL, PROPOSAL_STAGES, WRITTEN_BY_LABEL, handoffRetrying, proposalEnded, proposalOpen, proposalStage, type Proposal, type ProposalFact } from '@/lib/proposals'
 import { Tag } from '@/components/planning-common/parts'
 import { go, toPath } from '@/components/planning-common/links'
 import { Pager, usePage } from '@/components/planning-common/pager'
@@ -61,6 +61,9 @@ function ProposalList({ d, s }: P) {
   const count = (n: number) => xs.filter((p) => proposalStage(p) === n && !proposalEnded(p)).length
   const rows = stage === null ? xs : xs.filter((p) => proposalStage(p) === stage)
   const pg = usePage(rows, 12)
+  // 마지막 받아오기 결과 (실패도 기록에 남는다, 알림이 사라져도 보이게)
+  const pull = s.activity.filter((a) => a.ctx === 'ctx_proposals' && (a.point === 'pull_insights' || a.point === 'pull_insights_failed')).at(-1)
+  const pullFailed = pull?.point === 'pull_insights_failed'
   return (
     <div className="sl-wrap">
       <div className="sl-top">
@@ -71,7 +74,8 @@ function ProposalList({ d, s }: P) {
           ))}
         </div>
         <span style={{ flex: 1 }} />
-        <Button size="small" variant="primary" onClick={() => { d({ type: 'pullInsights' }); toast.show('데이터분석에서 인사이트를 받아오는 중') }}>데이터분석에서 받아오기</Button>
+        {pull && <span className={`small ${pullFailed ? 'pp-pull-fail' : 'muted'}`} title={pull.text}>{pull.t} · {pull.text.replace(/^데이터분석 받아오기(: | 실패 · )/, pullFailed ? '실패 · ' : '')}</span>}
+        <Button size="small" variant="primary" onClick={() => { d({ type: 'pullInsights' }); toast.show('데이터분석에서 인사이트를 받아오는 중') }}>{pullFailed ? '다시 받아오기' : '데이터분석에서 받아오기'}</Button>
       </div>
       {!pg.rows.length ? <div className="empty"><b>없음</b></div> : (
         <>
@@ -229,7 +233,7 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
         <aside className="pp-side">
           <dl className="pp-out">
             {p.spec && <><dt>기획안</dt><dd><a href={toPath(`work/specs/${p.spec}`)}>{p.spec}</a> <span className="muted small">{s.specs.find((x) => x.id === p.spec)?.status ?? ''}</span></dd></>}
-            {p.handoff && <><dt>마케팅</dt><dd>{p.handoff.ok ? <Tag>받음{p.handoff.campaign ? ` · ${p.handoff.campaign}` : ''}</Tag> : <Tag tone="amber" title={p.handoff.reason}>전달 실패</Tag>}{p.handoff.at && <span className="muted small"> {p.handoff.at}</span>}{!p.handoff.ok && p.handoff.reason && <div className="muted small">{p.handoff.reason}</div>}</dd></>}
+            {p.handoff && <><dt>마케팅</dt><dd>{p.handoff.ok ? <Tag>받음{p.handoff.campaign ? ` · ${p.handoff.campaign}` : ''}</Tag> : handoffRetrying(p) ? <Tag title={p.handoff.reason}>자동 재전송 중 · {handoffRetrying(p)}번째</Tag> : <Tag tone="amber" title={p.handoff.reason}>전달 실패</Tag>}{p.handoff.at && <span className="muted small"> {p.handoff.at}</span>}{!p.handoff.ok && p.handoff.reason && <div className="muted small">{p.handoff.reason}</div>}</dd></>}
             {p.request && p.status === '기획서로' && <><dt>개발</dt><dd><a href={toPath(`projects/${p.request}`)}>{p.request}</a>{req && <span className="muted small"> {req.state}</span>}</dd></>}
             {p.result && (
               <>

@@ -15,6 +15,7 @@ LLM 초안·다른 부서 호출(data promo_concepts, marketing receive_campaign
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -42,6 +43,8 @@ from ax_workflow.models import (
 from planning_agent import proposals as ext
 
 PULL_CTX = "ctx_proposals"
+PULL_DONE = "pull_insights"  # 받아오기 결과 기록 (화면이 마지막 것을 보여 준다)
+PULL_FAILED = "pull_insights_failed"
 DEPT_LABEL = {"data": "데이터분석", "marketing": "마케팅"}
 EFFECT_MAX_WINDOW = timedelta(days=7)  # 데이터분석 campaign_effect MAX_WINDOW와 같게
 
@@ -211,6 +214,8 @@ class ProposalMixin:
             )
         got = await self._insights.pull(PULL_CTX)
         if isinstance(got, str):
+            # 실패도 기록에 남긴다: 화면이 알림 뒤에도 "마지막 받아오기 실패 · 이유"를 보여 준다
+            await self._apply(self._pull_note(PULL_FAILED, f"데이터분석 받아오기 실패 · {got}"))
             raise ActionError("INSIGHTS_FAILED", f"데이터분석에서 받지 못했습니다: {got}")
         created: list[str] = []
         similar: list[dict[str, str]] = []
@@ -224,22 +229,22 @@ class ProposalMixin:
             if res.outcome == "created":
                 created.append(res.output["proposal_id"])
         out = {"created": created, "received": len(got), "similar": similar}
+        text = f"데이터분석 받아오기: 받은 {len(got)}개 · 새 제안 {len(created)}개"
         if similar:
             near_ids = ", ".join(dict.fromkeys(x["proposal_id"] for x in similar))
-            text = (
-                f"데이터분석 받아오기: 새 제안 {len(created)}개 · 비슷한 제안이 있어 건너뜀"
-                f" {len(similar)}개 ({near_ids}과 비슷)"
+            text += f" · 비슷한 제안이 있어 건너뜀 {len(similar)}개 ({near_ids}과 비슷)"
+        if len(got) > len(created) + len(similar):
+            text += f" · 이미 받은 것 {len(got) - len(created) - len(similar)}개"
+        await self._apply(self._pull_note(PULL_DONE, text))
+        return ActionResult(outcome="pulled", output=out)
+
+    def _pull_note(self: Any, point: str, text: str) -> Callable[[State], Awaitable[None]]:
+        async def note(s: State) -> None:
+            s.activity.append(
+                self._act(self.clock(), PULL_CTX, "data", "planning", point, "A2A", text)
             )
 
-            async def note(s: State) -> ActionResult:
-                s.activity.append(
-                    self._act(self.clock(), PULL_CTX, "data", "planning", "pull_insights", "A2A",
-                              text)
-                )  # fmt: skip
-                return ActionResult(outcome="pulled", output=out)
-
-            return await self._apply(note)
-        return ActionResult(outcome="pulled", output=out)
+        return note
 
     # ---- 받는 skill
 
@@ -410,20 +415,64 @@ class ProposalMixin:
             facts=_facts_in(p), target=_target_in(p), products=p.products, format=p.format,
             approved_by="사람", note=p.note, body_md=body_md,
         )  # fmt: skip
+        # 같은 제안을 보내는 중(자동 재전송 대기 포함)이면 그건 멈추고 지금 다시 보낸다
+        live: dict[str, asyncio.Task] = self.__dict__.setdefault("_brief_tasks", {})
+        old = live.get(p.id)
+        if old is not None and not old.done():
+            old.cancel()
         task = asyncio.create_task(self._send_brief(p.id, brief))
+        live[p.id] = task
         self._sending.add(task)
         task.add_done_callback(self._sending.discard)
 
-    async def _send_brief(self: Any, pid: str, brief: CampaignBriefInput) -> None:
-        out = await self._marketing.send(f"proposal:{pid}", brief, f"proposal:{pid}:brief")
+        def forget(t: asyncio.Task, pid: str = p.id) -> None:
+            if live.get(pid) is t:
+                live.pop(pid, None)
 
-        async def record(s: State) -> None:
-            p = _find(s, pid)
-            if p is None:
-                return
-            now = self.clock()
-            if isinstance(out, str) or out.outcome == "rejected":
+        task.add_done_callback(forget)
+
+    # 마케팅이 응답하지 않으면(연결 실패·시간 초과) 이 간격(초)으로 자동으로 다시 보낸다.
+    # 마케팅이 거절하면 다시 보내지 않는다. 다 실패하면 기획안으로 되돌려 사람이 다시 보낸다.
+    BRIEF_RETRY_DELAYS: tuple[float, ...] = (30, 60, 120, 300, 600)
+
+    async def _send_brief(self: Any, pid: str, brief: CampaignBriefInput) -> None:
+        delays = self.BRIEF_RETRY_DELAYS
+        for n in range(len(delays) + 1):
+            if n:
+                await asyncio.sleep(delays[n - 1])
+                p = _find(self.state, pid)
+                if p is None or p.status != "마케팅 전달" or (p.handoff and p.handoff.ok):
+                    return  # 지웠거나, 사람이 되돌렸거나, 이미 받았다
+            out = await self._marketing.send(f"proposal:{pid}", brief, f"proposal:{pid}:brief")
+            down = isinstance(out, str)  # 응답 없음 (거절은 CampaignBriefOutput)
+            last = n == len(delays)
+
+            async def record(s: State, out: Any = out, n: int = n, last: bool = last) -> None:
+                p = _find(s, pid)
+                if p is None:
+                    return
+                now = self.clock()
+                if not isinstance(out, str) and out.outcome != "rejected":
+                    p.handoff = ProposalHandoff(ok=True, campaign=out.campaign_id, at=now)
+                    if n:
+                        text = f"{p.id} 마케팅 전달 성공 (자동 재전송 {n}번째)"
+                        s.activity.append(
+                            self._act(now, _ctx(p), "marketing", "planning",
+                                      "receive_campaign_brief", "A2A", text)
+                        )  # fmt: skip
+                    return
                 why = out if isinstance(out, str) else f"마케팅이 거절 ({out.reason_code})"
+                if isinstance(out, str) and not last:  # 상태는 그대로 두고 잠시 뒤 다시 보낸다
+                    p.handoff = ProposalHandoff(ok=False, reason=why, at=now, retry=n + 1)
+                    if n == 0:
+                        text = f"{p.id} 마케팅 응답 없음 · {why} → 자동으로 다시 보냄"
+                        s.activity.append(
+                            self._act(now, _ctx(p), "marketing", "planning",
+                                      "receive_campaign_brief", "A2A", text)
+                        )  # fmt: skip
+                    return
+                if isinstance(out, str):
+                    why = f"{why} (자동 재전송 {n}번 모두 실패)"
                 p.handoff = ProposalHandoff(ok=False, reason=why, at=now)
                 _undo_send(s, p)  # 못 넘겼으면 기획안으로 되돌려 다시 보낼 수 있게
                 text = f"{p.id} 마케팅 전달 실패 · {why} → 기획안으로 되돌림"
@@ -431,10 +480,22 @@ class ProposalMixin:
                     self._act(now, _ctx(p), "marketing", "planning", "receive_campaign_brief",
                               "A2A", text)
                 )  # fmt: skip
-            else:
-                p.handoff = ProposalHandoff(ok=True, campaign=out.campaign_id, at=now)
 
-        await self._apply(record)
+            await self._apply(record)
+            if not down:
+                return
+
+    def resume_briefs(self: Any) -> int:
+        """켤 때: 마케팅에 보내다 끊긴 제안(마케팅 전달 + 못 받음)을 다시 보낸다 (같은 멱등 키)."""
+        if self._marketing is None:
+            return 0
+        n = 0
+        for p in self.state.proposals:
+            if p.status == "마케팅 전달" and p.handoff is not None and not p.handoff.ok:
+                sp = _plan_spec(self.state, p)
+                self._spawn_brief(p, plan_markdown(sp) if sp else p.body_md)
+                n += 1
+        return n
 
     async def _reject_proposal(
         self: Any, s: State, proposal: str, reason: str

@@ -209,7 +209,8 @@ def from_promo(out: PromoConceptsOutput) -> list[ReceiveInsightInput]:
         body += [f"- 주의: {x}" for x in [*c.warnings, *c.cautions]]
         items.append(
             ReceiveInsightInput(
-                insight_id=f"{out.run_id or 'promo'}:{c.concept_id}"[:80],
+                # concept_id는 내용 해시(#743): 날이 바뀌어도 같은 초안은 같은 id라 카드가 안 쌓인다
+                insight_id=f"promo:{c.concept_id}"[:80],
                 title=c.title[:120],
                 summary=summary[:400],
                 skill="promo_concepts",

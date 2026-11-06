@@ -1148,6 +1148,7 @@ button.spec-pid { cursor: pointer; color: var(--primary); font-weight: 600; }
 .sp-decisions .sp-empty { margin: 2px 0 4px 20px; }
 @media (prefers-reduced-motion: reduce) { .sp-decisions summary::before { transition: none; } }
 .plan-fail { font-size: 12px; color: var(--warning); max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-pull-fail { color: var(--warning); max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pp-head-reject { display: flex; gap: 6px; align-items: center; }
 .pp-head-reject .input { width: 220px; }
 .pl-actions { display: flex; gap: 6px; align-items: center; margin-left: 6px; padding-left: 12px; border-left: 1px solid var(--border); }

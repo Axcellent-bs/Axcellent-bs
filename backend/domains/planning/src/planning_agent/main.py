@@ -66,8 +66,10 @@ app.include_router(create_chat_router(get_chat_service))
 
 
 async def _resync_on_start() -> None:
-    """켤 때 개발 서비스와 맞춘다. 상대가 아직 안 떴으면 못 보낸 것으로 남겨 다시 보낸다."""
+    """켤 때 개발 서비스와 맞춘다. 상대가 아직 안 떴으면 못 보낸 것으로 남겨 다시 보낸다.
+    마케팅에 보내다 끊긴 제안도 다시 보낸다 (응답이 없으면 자동 재전송)."""
     asyncio.get_running_loop().create_task(get_service().resync_peer())
+    get_service().resume_briefs()
 
 
 app.router.on_startup.append(_resync_on_start)

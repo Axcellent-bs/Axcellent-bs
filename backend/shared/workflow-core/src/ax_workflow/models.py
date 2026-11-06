@@ -554,6 +554,7 @@ class ProposalHandoff(DomainModel):
     channel: str | None = None  # 게시 채널 (published 때 마케팅이 알려 줌)
     published_at: UtcDatetime | None = None
     post_ref: str | None = None  # 게시물 id
+    retry: int = 0  # 마케팅이 응답하지 않아 자동으로 다시 보낸 횟수 (0이면 자동 재전송 아님)
 
 
 class ProposalResult(DomainModel):
