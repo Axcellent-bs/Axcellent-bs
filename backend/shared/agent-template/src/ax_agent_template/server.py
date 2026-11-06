@@ -9,7 +9,9 @@
 수신 순서 (각 단계는 아래의 작은 함수이고, 내부 로직 중 TODO는 아직 스텁이다):
 
 1. `context_id`·`tenant_id` 확인 → 없으면 `MISSING_CONTEXT`
-2. 토큰 검증 → 실패하면 `UNAUTHORIZED` (`requester`는 토큰에서 꺼내고 본문 값은 무시한다)
+2. 토큰 검증 → 실패하면 `UNAUTHORIZED` (`requester`는 토큰에서 꺼내고 본문 값은 무시한다).
+   본문 `meta.token` 우선. 본문이 비었거나 자리표시자(`PLACEHOLDER_TOKEN`)일 때만
+   `Authorization: Bearer <토큰>` 헤더로 검증한다 (공유 서버의 nginx가 넣는 헤더)
 3. (새 요청일 때만) `path`에 자기 이름이 있으면 `LOOP_DETECTED`
 4. `path` 길이가 3을 넘으면 이관 큐에 넣고 `HOP_LIMIT`
 5. `allowed_requesters` 확인 → 없으면 `FORBIDDEN_SKILL`
@@ -78,6 +80,30 @@ def error_result(
         outcome=code_value,
         output={"message": message} if message else {},
     )
+
+
+# 공유 서버(251 등)의 화면은 번들에 실제 토큰을 넣지 않고 본문에 이 자리표시자를 보낸다.
+# 그때만(또는 본문이 비었을 때만) nginx가 넣은 `Authorization: Bearer <토큰>`을 읽는다.
+PLACEHOLDER_TOKEN = "data-via-nginx"
+
+
+def _bearer(authorization: str | None) -> str:
+    """`Authorization: Bearer <토큰>`의 토큰. 형식이 다르면 빈 문자열."""
+    scheme, _, value = (authorization or "").strip().partition(" ")
+    return value.strip() if scheme.lower() == "bearer" else ""
+
+
+def resolve_token(body_token: str, authorization: str | None) -> tuple[str, str]:
+    """검증에 쓸 토큰과 경로("body"·"header").
+
+    본문 우선: 본문 토큰이 실제 값이면(빈 값·자리표시자가 아니면) 헤더는 보지 않는다. 그래서 본문의
+    틀린 토큰은 헤더가 맞아도 거부된다. 본문이 비었거나 자리표시자일 때만 헤더를 쓰고, 헤더도
+    없으면 본문 값 그대로(검증에서 거부).
+    """
+    if body_token and body_token != PLACEHOLDER_TOKEN:
+        return body_token, "body"
+    header = _bearer(authorization)
+    return (header, "header") if header else (body_token, "body")
 
 
 def verify_token(token: str) -> str:
@@ -198,6 +224,16 @@ def create_agent_app(card: AgentCard, handlers: Mapping[str, Handler]) -> FastAP
             request = AgentRequest.model_validate(raw)
         except ValidationError as exc:
             return _bad_request("INVALID_REQUEST", str(exc))
+
+        token, via = resolve_token(request.meta.token, http_request.headers.get("authorization"))
+        if token != request.meta.token:
+            meta = request.meta.model_copy(update={"token": token})
+            request = request.model_copy(update={"meta": meta})
+        # 검증 경로와 명부 이름만 남긴다 (토큰 값은 남기지 않음)
+        name = _verified_requester(request.meta)
+        level = logging.DEBUG if via == "body" and name else logging.INFO
+        logger.log(level, "a2a 토큰 검증 via=%s requester=%s skill=%s", via, name or "(거부)",
+                   request.skill)  # fmt: skip
 
         with agent_name_scope(card.name):
             result = await _handle(card, handlers, request)

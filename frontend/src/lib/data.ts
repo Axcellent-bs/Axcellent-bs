@@ -1,5 +1,5 @@
 import { ApiError } from "./apiError";
-import { DATA_A2A_TOKEN, DATA_A2A_URL } from "./env";
+import { DATA_A2A_PLACEHOLDER, DATA_A2A_TOKEN, DATA_A2A_URL } from "./env";
 import type { OrchIncident, OrchStep } from "./agentChat";
 
 // 데이터분석 AI 화면(/data)의 자료.
@@ -1627,7 +1627,11 @@ export interface VideoPerformanceListOutput {
 /** 서버가 꺼졌을 때 무엇이 꺼졌는지 보여 주는 이름 */
 export const DATA_SERVER = "데이터 AI 서버(8106)";
 export const ORCH_SERVER = "총괄 서버(8000)";
-export const kpiLive = DATA_A2A_TOKEN !== "";
+/**
+ * 데이터 AI를 부를지. 실제 토큰(로컬)이거나 공유 서버의 자리표시자(DATA_A2A_PLACEHOLDER)면 부른다.
+ * 자리표시자도 본문 meta.token에 그대로 보내고, 실제 토큰은 nginx가 Authorization 헤더로 넣는다. 빈 값이면 부르지 않는다.
+ */
+export const kpiLive = DATA_A2A_TOKEN !== "" || DATA_A2A_TOKEN === DATA_A2A_PLACEHOLDER;
 
 export const dataAi = {
   health: async () => {

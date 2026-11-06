@@ -26,7 +26,12 @@ export const RELAY_VIEW_TOKEN = import.meta.env.VITE_SHOP_VIEWER_TOKEN || RELAY_
 /** 데이터분석 AI: 데이터 AI(data, 8106). 기본값 /data-a2a는 Vite 개발 프록시(vite.config.ts, DATA_PROXY_TARGET) */
 export const DATA_A2A_URL = import.meta.env.VITE_DATA_A2A_URL ?? '/data-a2a'
 /** 데이터 AI 직접 조회 토큰. 비어 있으면 KPI 실시간 조회를 하지 않는다. 브라우저 저장소에 두지 않는다 */
-export const DATA_A2A_TOKEN = import.meta.env.VITE_DATA_A2A_TOKEN ?? ''
+export const DATA_A2A_TOKEN = (import.meta.env.VITE_DATA_A2A_TOKEN ?? '').trim()
+/**
+ * 공유 서버(251 등)의 자리표시자. 번들에 실제 토큰을 넣지 않고 이 값을 본문 meta.token에 그대로 보낸다.
+ * 실제 토큰은 nginx가 `Authorization: Bearer <토큰>` 헤더로 넣고, 데이터 서버가 그 헤더로 검증한다.
+ */
+export const DATA_A2A_PLACEHOLDER = 'data-via-nginx'
 /** 사람 토큰이 설정돼 있는지. 없으면 쓰기 버튼을 끄고 안내한다 */
 export const HUMAN_TOKEN_SET = SAFETY_HUMAN_TOKEN.length > 0
 
