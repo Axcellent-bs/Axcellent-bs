@@ -456,3 +456,61 @@ def test_subscription_chat_queues_for_own_claude(service: PlanningService, adapt
 
         r = _post(c, message="배너 바꿔 줘", mode="robot")
         assert r.status_code == 400 and r.json()["error"]["code"] == "INVALID_INPUT"
+
+
+# ---------------------------------------- 큰 동작 변경은 영향·되돌리기·지표를 먼저 묻는다
+BIG = TurnPlan(
+    title="결제 실패 시 장바구니 유지",
+    plan="결제가 실패하면 장바구니를 비우지 않고 남긴다.",
+    done=["결제 실패 뒤에도 장바구니가 남는다"],
+    paths=[BANNER],
+    big=True,
+    impact="결제 실패한 고객의 장바구니",
+)
+
+
+def test_big_change_asks_impact_rollback_metric_once(service: PlanningService, adapter) -> None:
+    filled = BIG.model_copy(update={"rollback": "설정 끄기", "metric": "결제 재시도율"})
+    dev_chat.set_llm(
+        ChatLLM(
+            [
+                ChatTurn(reply="바로 할게요", action="start", plan=BIG),
+                ChatTurn(reply="시작할게요", action="start", plan=filled),
+            ]
+        )
+    )
+    with TestClient(app) as c:
+        th = _post(c, message="결제 실패하면 장바구니 남겨 줘 진행해").json()["data"]
+        ask = th["messages"][-1]
+        assert th["status"] == "talking" and ask["kind"] == "question"
+        assert ask["text"].startswith(dev_chat.IMPACT_ASK)
+        assert "되돌리기" in ask["text"] and "확인 지표" in ask["text"]
+        assert "영향 범위" not in ask["text"]  # 이미 아는 칸은 다시 묻지 않는다
+        th = _post(c, thread_id="chat-1", message="설정 끄기로 되돌리고 재시도율 볼게요")
+        th = th.json()["data"]
+    assert th["status"] == "started"
+    plan = th["messages"][-1]["plan"]["plan"]
+    assert "되돌리기: 설정 끄기" in plan and "확인 지표: 결제 재시도율" in plan
+
+
+def test_big_change_asks_only_once_then_marks_unknown(service: PlanningService, adapter) -> None:
+    dev_chat.set_llm(
+        ChatLLM(
+            [
+                ChatTurn(reply="할게요", action="start", plan=BIG),
+                ChatTurn(reply="시작할게요", action="start", plan=BIG),
+            ]
+        )
+    )
+    with TestClient(app) as c:
+        _post(c, message="결제 실패하면 장바구니 남겨 줘")
+        th = _post(c, thread_id="chat-1", message="모르겠어요 그냥 진행해").json()["data"]
+    assert th["status"] == "started"
+    assert "되돌리기: 미정" in th["messages"][-1]["plan"]["plan"]
+
+
+def test_small_change_does_not_ask_impact(service: PlanningService, adapter) -> None:
+    dev_chat.set_llm(ChatLLM([START]))
+    with TestClient(app) as c:
+        th = _post(c, message="배너 문구 바꿔 줘").json()["data"]
+    assert th["status"] == "started"
