@@ -2,7 +2,7 @@
 
 - 다시 읽기 하루 50유닛 (YouTube 장부 날짜), 숏 후보·최근 것 먼저
 - 분류 묶음에서 개별 결과가 섞이지 않음, LLM 상한 가까우면 숏츠만 (숏츠 먼저)
-- 이 PR에서는 관찰만 (관문은 코드 PR에서)
+- 관문은 코드 PR에서 켬 (평가 정의 PR #815는 관찰만: dev 0.0 / 0.2 / 1.0 / 0.0)
 """
 
 from __future__ import annotations
@@ -230,9 +230,14 @@ def _answers(tmp: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, dict]:
     return out
 
 
-def test_explorer_backlog_observe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """관찰만: 지금 코드의 점수를 남긴다 (관문은 코드 PR에서 켬)."""
+GATES = dict.fromkeys(score.METRICS, 1.0)  # 모두 맞아야 함 (기준선 그대로)
+
+
+def test_explorer_backlog_pass_the_gates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """관문: 다시 읽기 50유닛(장부 날짜)·숏 후보 먼저·묶음 결과 분리·상한 근처 숏츠만."""
     cases = make.cases()
     metrics = score.score(cases, _answers(tmp_path, monkeypatch))
     print("explorer_backlog eval:", json.dumps(metrics, ensure_ascii=False))
     assert set(metrics) == set(score.METRICS)
+    for name, gate in GATES.items():
+        assert metrics[name] >= gate, f"{name} {metrics[name]} (관문 {gate})"

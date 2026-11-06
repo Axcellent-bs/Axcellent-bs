@@ -512,8 +512,9 @@ async def classify_videos(
     *,
     cache: CategoryCache | None = None,
     context_id: str | None = None,
+    batch: int = BATCH,
 ) -> dict[str, CategoryResult]:
-    """영상들을 같은 분류 목록으로 분류한다 (영상 id → 결과).
+    """영상들을 같은 분류 목록으로 분류한다 (영상 id → 결과). `batch`개씩 묶어 묻는다.
 
     제목·채널 이름·태그 일부만 데이터 블록(untrusted)에 넣는다. 저장된 영상은 묻지 않고,
     나머지는 `BATCH`개씩 묶어서 묻는다. 결과는 영상 id로 저장해 재사용한다(unknown은 저장 안 함).
@@ -534,8 +535,9 @@ async def classify_videos(
             out[v.video_id] = hit
         else:
             todo.append(v)
-    for start in range(0, len(todo), BATCH):
-        answers = await _ask_videos(todo[start : start + BATCH], llm, context_id)
+    size = max(1, batch)
+    for start in range(0, len(todo), size):
+        answers = await _ask_videos(todo[start : start + size], llm, context_id)
         for vid, result in answers.items():
             out[vid] = result
             if cache is not None:
