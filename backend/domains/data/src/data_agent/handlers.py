@@ -775,6 +775,28 @@ def cand_same_targets(env: Mapping[str, str]) -> dict[str, tuple[str, ...]]:
     return out
 
 
+async def _with_past(brief: Any, env: Any) -> dict:
+    """브리프 응답에 인사이트마다 "지난번 결과"(past_results)를 붙인다 (판정·순서는 그대로).
+
+    캠페인 성과 결과는 campaign_result 그대로 (10분 캐시). 읽지 못해도 브리프는 준다 (빈 목록).
+    """
+    from data_agent.past_results import attach_past, campaign_results
+
+    try:
+        connector = get_campaign_connector()
+    except NotImplementedError:
+        connector = None
+    try:
+        results = await campaign_results(env, connector, _stored_shorts())
+    except Exception as error:  # 쇼핑몰·저장분을 못 읽어도 브리프는 준다
+        import logging
+
+        logging.getLogger(__name__).warning("지난번 결과를 붙이지 못함 (%s)",
+                                            type(error).__name__)  # fmt: skip
+        results = []
+    return attach_past(brief, results).model_dump(mode="json")
+
+
 async def trend_insight_brief(request: AgentRequest) -> AgentResult:
     """기획에 넘기는 인사이트 3~7개 (기존 skill 결과를 코드로 묶음, 하루 캐시). grade read.
 
@@ -799,7 +821,7 @@ async def _trend_insight_brief(request: AgentRequest) -> AgentResult:
     # 오늘 저장된 브리프가 있으면 재료(지금 인기·숏츠·상품)를 계산하지 않고 바로 준다
     if (hit := cached_brief(data, env)) is not None:
         note_cache("hit")
-        output = hit.output.model_dump(mode="json")
+        output = await _with_past(hit.output, env)
         output["llm_status"] = llm_halt.status(env).model_dump(mode="json")  # 응답 시점 상태
         return _result(request, TaskStatus.COMPLETED, outcome=hit.output.status, output=output,
                        evidence=hit.evidence)  # fmt: skip
@@ -868,7 +890,7 @@ async def _trend_insight_brief(request: AgentRequest) -> AgentResult:
         context_id=request.meta.context_id, opportunities_fn=opportunities,
         video_info=video_info, warned=warned, same_targets=cand_same_targets(env),
     )  # fmt: skip
-    output = result.output.model_dump(mode="json")
+    output = await _with_past(result.output, env)
     output["llm_status"] = llm_halt.status(env).model_dump(mode="json")  # 응답 시점 상태
     return _result(
         request,
