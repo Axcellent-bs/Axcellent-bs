@@ -37,6 +37,7 @@ def test_card_validates(card: AgentCard) -> None:
         "answer_planning_question",
         "campaign_effect",
         "video_performance",
+        "campaign_result",
         "trend_age",
         "trend_insight_brief",
         "domain_profile",
@@ -179,6 +180,16 @@ def test_video_performance_is_a_read_for_planning_marketing_dashboard_orchestrat
     assert skill.grade == "read"
     assert set(skill.allowed_requesters) == {"planning", "marketing", "dashboard-api",
                                              "orchestrator"}  # fmt: skip
+
+
+def test_campaign_result_is_a_read_for_planning_marketing_finance(card: AgentCard) -> None:
+    """성과 결과 1건: 기획·마케팅·재무가 부서별 묶음(view)으로 부른다. 상태를 바꾸지 않는다."""
+    skill = next(s for s in card.skills if s.id == "campaign_result")
+    assert skill.grade == "read"
+    assert set(skill.allowed_requesters) == {"planning", "marketing", "finance", "dashboard-api",
+                                             "orchestrator"}  # fmt: skip
+    assert skill.input_schema.endswith("#CampaignResultRequest")
+    assert skill.output_schema.endswith("#CampaignResultOutput")
 
 
 def test_campaign_effect_is_a_read_for_marketing_dashboard_and_planning(card: AgentCard) -> None:

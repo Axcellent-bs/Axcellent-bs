@@ -48,7 +48,9 @@ DB_ENV = "DATA_VIDEO_PERF_DB"
 DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "video_performance.db"  # backend/.data
 # v2: 목표 대비는 7일에만, 시점별 성과 모으기, line
 # v3: 같은 형식 대비 시간 맞춤, 판정·신호·성과 요인·개선 방향·예상치, list_all
-SCHEMA_VERSION = "video_performance.v3"
+# v4: 영상의 매출 연결 (promo_id·coupon_id)과 매출 측정 가능 여부
+SCHEMA_VERSION = "video_performance.v4"
+SALES_UNMEASURABLE = "측정 불가: 프로모션 링크/쿠폰 없음"
 # 게시 후 시간과, 그 시점이 지난 뒤 이 시간 안에 재면 그 시점 값으로 보는 허용 창
 # (수집기가 1시간마다라 1시간 시점의 창은 1시간)
 CHECKPOINTS: dict[VideoCheckpointName, int] = {"1h": 1, "1d": 24, "3d": 72, "7d": 168}
@@ -125,6 +127,8 @@ class Video:
     registered_at: datetime
     category: str | None
     shorts_format: str | None
+    promo_id: str | None = None  # v4: 프로모션 링크 꼬리표 (매출 연결)
+    coupon_id: str | None = None  # v4: 캠페인 쿠폰 (매출 연결)
 
 
 @dataclass
@@ -155,6 +159,10 @@ class VideoStore:
                 " measured_at TEXT NOT NULL, views INTEGER, likes INTEGER, comments INTEGER,"
                 " PRIMARY KEY (key, checkpoint));"
             )
+            cols = [r[1] for r in self._conn.execute("PRAGMA table_info(videos)")]
+            for col in ("promo_id", "coupon_id"):  # v4 칸: 예전 파일이면 끝에 더한다
+                if col not in cols:
+                    self._conn.execute(f"ALTER TABLE videos ADD COLUMN {col} TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -163,8 +171,13 @@ class VideoStore:
         """등록 (있으면 비어 있던 칸만 채운다. 시험 표시는 한 번 붙으면 그대로)."""
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT INTO videos VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE"
+                "INSERT INTO videos (key, platform, video_id, video_url, campaign_id, insight_id,"
+                " proposal_id, test, published_at, title, registered_at, category, shorts_format,"
+                " promo_id, coupon_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(key) DO UPDATE"
                 " SET campaign_id = COALESCE(videos.campaign_id, excluded.campaign_id),"
+                " promo_id = COALESCE(excluded.promo_id, videos.promo_id),"
+                " coupon_id = COALESCE(excluded.coupon_id, videos.coupon_id),"
                 " insight_id = COALESCE(videos.insight_id, excluded.insight_id),"
                 " proposal_id = COALESCE(videos.proposal_id, excluded.proposal_id),"
                 " test = MAX(videos.test, excluded.test),"
@@ -174,7 +187,8 @@ class VideoStore:
                 " shorts_format = COALESCE(videos.shorts_format, excluded.shorts_format)",
                 (v.key, v.platform, v.video_id, v.video_url, v.campaign_id, v.insight_id,
                  v.proposal_id, int(v.test), _iso(v.published_at), v.title,
-                 v.registered_at.isoformat(), v.category, v.shorts_format),  # fmt: skip
+                 v.registered_at.isoformat(), v.category, v.shorts_format, v.promo_id,
+                 v.coupon_id),  # fmt: skip
             )
 
     def videos(self, *, include_test: bool = True) -> list[Video]:
@@ -225,6 +239,7 @@ def _video(r: Sequence[Any]) -> Video:
         insight_id=r[5], proposal_id=r[6], test=bool(r[7]),
         published_at=datetime.fromisoformat(r[8]) if r[8] else None, title=r[9],
         registered_at=datetime.fromisoformat(r[10]), category=r[11], shorts_format=r[12],
+        promo_id=r[13] if len(r) > 13 else None, coupon_id=r[14] if len(r) > 14 else None,
     )  # fmt: skip
 
 
@@ -540,6 +555,9 @@ def describe(
         proposal_id=video.proposal_id, test=video.test, title=video.title,
         published_at=video.published_at, platform=video.platform, video_id=video.video_id,
         video_url=video.video_url, schema_version=SCHEMA_VERSION,
+        promo_id=video.promo_id, coupon_id=video.coupon_id,
+        sales_measurable=bool(video.promo_id or video.coupon_id),
+        sales_reason=None if video.promo_id or video.coupon_id else SALES_UNMEASURABLE,
     )  # fmt: skip
     if video.platform != "youtube":
         out.reason = f"{WAITING}: {video.platform} 성과를 읽는 연결이 아직 없음"
@@ -653,6 +671,7 @@ async def _register(
         registered_at=old.registered_at if old else now,
         category=insight.category if insight else None,
         shorts_format=insight.shorts_format if insight else None,
+        promo_id=request.promo_id, coupon_id=request.coupon_id,
     )  # fmt: skip
     if platform == "youtube" and (old is None or old.published_at is None):
         if youtube is None or not hasattr(youtube, "videos"):

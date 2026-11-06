@@ -2481,6 +2481,10 @@ class VideoPerformanceRequest(AxModel):
     test: bool = False  # 시험 영상: 진짜 캠페인과 섞지 않는다 (화면·브리프 집계에서 뺌)
     # 아래는 예전 요청은 없다 (v3). 등록된 영상 전부 (성과 탭). 새로 재지 않고 저장분만 읽는다
     list_all: bool = False
+    # 아래는 예전 요청은 없다 (v4). 이 영상의 매출 연결: 프로모션 링크 꼬리표(유입 표시)와 쿠폰.
+    # 둘 다 없으면 이 영상의 매출 효과는 "측정 불가: 프로모션 링크/쿠폰 없음"
+    promo_id: str | None = Field(default=None, min_length=1, max_length=120)
+    coupon_id: str | None = Field(default=None, min_length=1, max_length=120)
 
     @model_validator(mode="after")
     def _one_of(self) -> VideoPerformanceRequest:
@@ -2672,3 +2676,132 @@ class VideoPerformanceOutput(AxModel):
     videos: list[VideoPerformanceOutput] = Field(default_factory=list)
     tally: VideoVerdictTally | None = None
     insight_cards: list[VideoInsightCard] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다 (v4). 이 영상의 매출 연결 (등록 때 받은 값)과 매출 측정 가능 여부.
+    # 프로모션 링크·쿠폰이 둘 다 없으면 sales_measurable False와 그 이유 (측정 불가)
+    promo_id: str | None = None
+    coupon_id: str | None = None
+    sales_measurable: bool | None = None
+    sales_reason: str | None = None
+
+
+# ------------------------------------------------ campaign_result (성과 결과 1건, campaign_id 기준)
+# 영상 성과(video_performance)와 매출 효과(campaign_effect 계산 그대로)를 캠페인 하나로 묶는다.
+# 매출 판정은 기존 증분(판매액)을 기준선 날들의 흔들림 범위와 비교한 것뿐이다 (계산은 바꾸지 않음).
+# 네 칸(귀속·상품·쿠폰·전체 매장)은 같은 주문이 겹쳐 따로 계산·표시하고 더하지 않는다.
+# 만들지 않는 것: 조회와 매출을 합친 점수, 수익·ROI(재무 몫), 캠페인 자동 중단.
+
+# 매출 판정: more = 더 팔림 (범위 위), less = 덜 팔림 (범위 아래), no_effect = 효과 확인 안 됨
+# (범위 안, 또는 표본이 적어 단정하지 않음)
+CampaignSalesVerdictName = Literal["more", "less", "no_effect"]
+CampaignResultView = Literal["planning", "marketing", "finance"]
+CampaignResultSection = Literal["link", "videos", "sales", "advice", "alerts"]
+
+
+class CampaignSalesVerdict(AxModel):
+    """매출 효과 판정 (코드). 판매액 증분이 기준선 날들의 흔들림 범위 안·위·아래인지."""
+
+    status: CampaignStatus = "unknown"
+    verdict: CampaignSalesVerdictName | None = None
+    # "더 팔림" · "덜 팔림" · "효과 확인 안 됨" · "효과 확인 안 됨(표본 적음)" · "측정 불가: …"
+    label: str
+    low_sample: bool = False
+    low_sample_reason: str | None = None
+    reason: str | None = None  # 판정 근거 한 줄 (범위·기준선 날 수)
+    # 기존 계산 그대로 (마이너스도 그대로, 0으로 바꾸지 않음)
+    incremental_gross_krw: int | None = None
+    incremental_low_krw: int | None = None
+    incremental_high_krw: int | None = None
+    incremental_orders: int | None = None
+    baseline_days: int = Field(default=0, ge=0)
+    baseline_rule: str | None = None
+
+
+CampaignSalesCellKey = Literal["attribution", "products", "coupons", "store"]
+
+
+class CampaignSalesCell(AxModel):
+    """매출 네 칸 중 하나 (따로 계산·표시, 더하지 않음). 값은 campaign_effect 그대로."""
+
+    key: CampaignSalesCellKey
+    label: str  # 귀속(쿠폰·링크로 온 주문) · 상품(캠페인 대상 책) · 쿠폰 · 전체 매장
+    status: CampaignStatus = "unknown"
+    reason: str | None = None  # unknown이면 이유
+    line: str | None = None  # 화면 한 줄 (숫자는 아래 칸 그대로)
+    orders: int | None = None  # 귀속: 링크로 들어온 주문 수
+    gross_krw: int | None = None  # 귀속: 링크로 들어온 주문 판매액
+    coupon_orders: int | None = None  # 귀속: 캠페인 쿠폰을 쓴 주문 수
+    coupon_gross_krw: int | None = None  # 귀속: 캠페인 쿠폰을 쓴 주문 판매액
+    incremental_gross_krw: int | None = None  # 상품·전체 매장: 증분 판매액 (마이너스 그대로)
+    incremental_low_krw: int | None = None
+    incremental_high_krw: int | None = None
+    incremental_orders: int | None = None  # 전체 매장: 증분 주문 수 (마이너스 그대로)
+    use_rate: float | None = Field(default=None, ge=0, le=1)  # 쿠폰 누적 사용률
+    direction: Literal["up", "down", "uncertain"] | None = None
+
+
+class CampaignAlert(AxModel):
+    """알림: loss = 매출이 평소보다 줄었음 (덜 팔림), data_gap = 수집·기록 공백."""
+
+    kind: Literal["loss", "data_gap"]
+    message: str
+    note: str | None = None  # 예: "기획·재무 확인 필요 · 캠페인을 멈출지는 사람이 정합니다"
+
+
+class CampaignSalesEffect(AxModel):
+    """③ 매출 효과: 판정 + 네 칸 + 영상별 측정 가능 수 + 조회·매출 판정이 반대일 때 한 줄."""
+
+    status: CampaignStatus = "unknown"
+    reason: str | None = None
+    verdict: CampaignSalesVerdict | None = None
+    headline: str | None = None  # "+1,200,000원 · 주문 +40건 (4주 기준선 대비)"
+    cells: list[CampaignSalesCell] = Field(default_factory=list)  # 늘 네 칸, 순서 고정
+    videos_total: int = Field(default=0, ge=0)  # 이 캠페인 영상 (시험 영상 제외)
+    videos_measurable: int = Field(default=0, ge=0)  # 그중 프로모션 링크·쿠폰이 있는 영상
+    measurable_line: str = ""  # "영상 N개 중 매출 측정 가능 M개"
+    notes: list[str] = Field(default_factory=list)  # 조회 판정과 매출 판정이 반대일 때 등
+
+
+class CampaignVideoAdvice(AxModel):
+    """④ 영상마다 성과 요인·개선 방향 (video_performance 문장 그대로)."""
+
+    video_id: str
+    name: str
+    verdict: VideoVerdict | None = None
+    factors: list[str] = Field(default_factory=list)  # 마케팅 묶음에서는 비움 (개선 방향만)
+    actions: list[str] = Field(default_factory=list)
+
+
+class CampaignResultRequest(AxModel):
+    """성과 결과 1건. view로 부서별 묶음을 고른다 (skill은 하나).
+
+    planning = ①~⑤ 전부, marketing = ① 연결 + ④ 개선 방향만, finance = ① + ③ 매출 + ⑤ 알림.
+    """
+
+    campaign_id: str = Field(min_length=1, max_length=120)
+    view: CampaignResultView = "planning"
+
+
+class CampaignResultOutput(AxModel):
+    status: CampaignStatus = "unknown"
+    reason: str | None = None
+    view: CampaignResultView = "planning"
+    sections: list[CampaignResultSection] = Field(default_factory=list)  # 이 묶음에 든 칸
+    # ① 연결
+    campaign_id: str
+    campaign_name: str | None = None  # 인사이트 주제 (없으면 campaign_id)
+    insight_id: str | None = None
+    proposal_id: str | None = None
+    window_from: UtcDatetime | None = None  # 측정 기간 (첫 게시 ~ 7일 뒤 또는 지금)
+    window_to: UtcDatetime | None = None
+    test: bool = False  # 시험 캠페인 (영상이 모두 시험 영상)
+    # ② 영상 성과 (video_performance 결과 그대로)
+    videos: list[VideoPerformanceOutput] = Field(default_factory=list)
+    # ③ 매출 효과
+    sales: CampaignSalesEffect | None = None
+    # ④ 성과 요인 · 개선 방향 · 한계 문구
+    advice: list[CampaignVideoAdvice] = Field(default_factory=list)
+    limits: list[str] = Field(default_factory=list)
+    # ⑤ 알림
+    alerts: list[CampaignAlert] = Field(default_factory=list)
+    summary: str = ""
+    schema_version: str = ""

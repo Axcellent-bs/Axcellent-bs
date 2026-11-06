@@ -274,6 +274,23 @@
       "handoff": false
     },
     {
+      "id": "campaign_result",
+      "description": "성과 결과 1건 (campaign_id 기준). ① 연결(insight_id·proposal_id·campaign_id·측정 기간·schema_version) ② 영상 성과(video_performance 결과 그대로: 영상별 판정·목표 대비·시점별 조회·신호 4개) ③ 매출 효과(campaign_effect 계산 그대로, 귀속·상품·쿠폰·전체 매장 네 칸은 따로, 더하지 않음; 판매액 증분이 기준선 날들의 흔들림 범위 안이면 효과 확인 안 됨·위면 더 팔림·아래면 덜 팔림, 표본이 적으면 효과 확인 안 됨(표본 적음); 프로모션 링크·쿠폰 없는 영상은 측정 불가) ④ 성과 요인·개선 방향·한계 문구 ⑤ 알림(loss·data_gap). view로 부서별 묶음을 고른다(planning ①~⑤, marketing ① + 개선 방향만, finance ①③⑤). 조회와 매출을 합친 점수·수익·ROI·캠페인 자동 중단은 하지 않는다. LLM을 쓰지 않는다. 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#CampaignResultRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#CampaignResultOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "marketing",
+        "finance",
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
       "id": "trend_age",
       "description": "연령대별 상승: 오늘 급상승 판정·지금 인기 상위·시즌 키워드(수는 회사 설정 [age], 기본 3·5·2 = 10개, 손으로 나열하지 않음) 또는 요청 keywords를 연령대(회사 설정, 기본 10대·20대·30대·40대·50대 이상 = 네이버 연령 코드 묶음)마다 네이버 검색어 트렌드로 따로 조회해, trend_scan과 같은 판정 함수로 '그 연령대에서 평소 대비 몇 배'를 코드로 계산한다. 네이버 값은 요청마다 최댓값이 100인 상대값이라 연령대끼리 절대량은 비교하지 않는다. 하루 네이버 호출 상한(기본 80번), 넘으면 그 주제만 unknown + 이유. 하루 캐시. LLM을 쓰지 않는다. 회사 상태를 바꾸지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendAgeRequest",
