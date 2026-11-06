@@ -36,6 +36,7 @@ from typing import Any
 from ax_contracts.schemas.data import FreshTrackStatus
 from data_agent import youtube_quota
 from data_agent.connectors import ConnectorUnavailable
+from data_agent.connectors.youtube import QuotaRefused
 
 CALLER = "fresh_shorts"
 SOURCE = "fresh_track"
@@ -122,8 +123,12 @@ class FreshStore:
             row = self._conn.execute("SELECT at FROM finds WHERE format = ?", (fmt,)).fetchone()
         return datetime.fromisoformat(row[0]) if row else None
 
-    def set_find(self, fmt: str, at: datetime) -> None:
+    def set_find(self, fmt: str, at: datetime | None) -> None:
+        """마지막 찾기 시각. None이면 지운다 (부르지 않은 찾기를 되돌릴 때)."""
         with self._lock, self._conn:
+            if at is None:
+                self._conn.execute("DELETE FROM finds WHERE format = ?", (fmt,))
+                return
             self._conn.execute("INSERT OR REPLACE INTO finds VALUES (?, ?)", (fmt, at.isoformat()))
 
 
@@ -208,6 +213,8 @@ class TickResult:
     searches: int = 0  # 이번에 한 찾기 (검색 호출)
     skipped_searches: int = 0  # 하루 상한으로 건너뛴 찾기
     full_skips: int = 0  # 그 형식 추적 칸(40개)·전체(200개)가 다 차서 건너뛴 찾기
+    # 장부(전체 8,000·예약 몫)가 막아 부르지 않은 찾기. 시각을 남기지 않아 다음 루프에 다시 본다
+    ledger_refused: int = 0
     found: int = 0  # 검색 결과 중 60초 이하 새 영상
     added: int = 0  # 추적 목록에 넣은 수
     tracked_calls: int = 0  # 추적 videos.list 호출 수 (50개씩)
@@ -217,7 +224,9 @@ class TickResult:
 
     def line(self) -> str:
         return (
-            f"[fresh] 찾기 {self.searches}번(상한으로 건너뜀 {self.skipped_searches}), 새로 추적"
+            f"[fresh] 찾기 {self.searches}번(상한으로 건너뜀 {self.skipped_searches}"
+            + (f", 장부가 막아 안 부름 {self.ledger_refused}" if self.ledger_refused else "")
+            + f"), 새로 추적"
             f" {self.added}개, 추적 중 {self.tracking}개, 스냅샷 {self.snapshots}줄"
             + (f", {'; '.join(self.problems)}" if self.problems else "")
         )
@@ -286,18 +295,28 @@ async def run_tick(
             last = store.last_find(fmt)
             if last is not None and now - last < FIND_EVERY:
                 continue
-            store.set_find(fmt, now)  # 건너뛰어도 다음 시도는 6시간 뒤 (매시간 다시 보지 않음)
             full = Counter(f for _, f in live)[fmt] >= PER_FORMAT or len(live) >= TOTAL
             if full:  # 추적 칸이 다 찼으면 찾아도 넣지 못하니 검색 비용을 쓰지 않는다
+                store.set_find(fmt, now)  # 다음 시도는 6시간 뒤 (매시간 다시 보지 않음)
                 res.full_skips += 1
                 continue
             if units_today(now) + SEARCH_UNITS + 1 > cap - RESERVE:
+                store.set_find(fmt, now)
                 res.skipped_searches += 1
                 continue
+            # 장부가 막으면 부르지 않고 시각도 남기지 않는다 → 장부 초기화 뒤 첫 루프에 바로 찾는다
+            if not youtube_quota.LEDGER.can_search(env, CALLER):
+                res.ledger_refused += 1
+                continue
+            store.set_find(fmt, now)  # 실제로 부른 찾기만 (실패해도 6시간 뒤에 다시)
             try:
                 stats = await connector.search_fresh_shorts(
                     query_for(fmt), now - LOOKBACK, region="KR", language="ko"
                 )
+            except QuotaRefused:  # 확인과 부르기 사이에 다른 곳이 써서 장부가 막음: 되돌림
+                store.set_find(fmt, last)
+                res.ledger_refused += 1
+                continue
             except ConnectorUnavailable as error:
                 res.problems.append(f"{fmt} 찾기 실패 [{error.code}]")
                 continue
