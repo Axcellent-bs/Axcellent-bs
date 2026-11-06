@@ -30,6 +30,7 @@ from ax_contracts.schemas.planning import (
 from ax_contracts.schemas.planning import ProposalTarget as TargetIn
 from ax_workflow.core import ActionError, ActionResult
 from ax_workflow.models import (
+    DeletedProposal,
     Para,
     Proposal,
     ProposalFact,
@@ -168,6 +169,33 @@ def _bigrams(text: str) -> set[str]:
     return {t[i : i + 2] for i in range(len(t) - 1)} or {t}
 
 
+# 사람이 지운 제안은 이 기간 동안 같은·비슷한 인사이트를 다시 만들지 않는다 (11/6 예진 결정)
+DELETED_DAYS = 7
+
+
+def _alike(inp: ReceiveInsightInput, title: str, products: list[str], labels: set[str]) -> bool:
+    """같은 상품 + 근거 하나 이상 같음, 또는 제목 두 글자 묶음이 SIMILAR_TITLE 이상 겹침."""
+    goods = {x.strip().lower() for x in inp.products if x.strip()}
+    same_goods = goods and goods == {x.strip().lower() for x in products if x.strip()}
+    if same_goods and {f.label for f in inp.facts} & labels:
+        return True
+    a, b = _bigrams(inp.title), _bigrams(title)
+    return len(a & b) / len(a | b) >= SIMILAR_TITLE
+
+
+def recently_deleted(
+    s: State, inp: ReceiveInsightInput, frm: str, now: datetime
+) -> DeletedProposal | None:
+    """최근 DELETED_DAYS일 안에 사람이 지운 제안과 같은(같은 인사이트 id)·비슷한 인사이트."""
+    since = now - timedelta(days=DELETED_DAYS)
+    for x in s.deleted_proposals:
+        if x.deleted_at < since or x.source != frm:
+            continue
+        if x.insight_id == inp.insight_id or _alike(inp, x.title, x.products, set()):
+            return x
+    return None
+
+
 def similar_proposal(s: State, inp: ReceiveInsightInput, now: datetime) -> Proposal | None:
     """받아온 인사이트와 비슷한 최근 제안 (데이터분석 id가 매번 바뀌어도 거른다, #664).
 
@@ -219,6 +247,7 @@ class ProposalMixin:
             raise ActionError("INSIGHTS_FAILED", f"데이터분석에서 받지 못했습니다: {got}")
         created: list[str] = []
         similar: list[dict[str, str]] = []
+        deleted: list[str] = []
         for inp in got:
             if _same_insight(self.state, inp.insight_id, "data") is None:
                 near = similar_proposal(self.state, inp, self.clock())
@@ -228,13 +257,18 @@ class ProposalMixin:
             res = await self.receive_insight(requester="data", inp=inp)
             if res.outcome == "created":
                 created.append(res.output["proposal_id"])
+            elif res.outcome == "deleted_recently":
+                deleted.append(res.output["proposal_id"])
         out = {"created": created, "received": len(got), "similar": similar}
         text = f"데이터분석 받아오기: 받은 {len(got)}개 · 새 제안 {len(created)}개"
         if similar:
             near_ids = ", ".join(dict.fromkeys(x["proposal_id"] for x in similar))
             text += f"\n비슷한 제안이 있어 건너뜀 {len(similar)}개 ({near_ids}과 비슷)"
-        if len(got) > len(created) + len(similar):
-            text += f"\n이미 받은 것 {len(got) - len(created) - len(similar)}개"
+        if deleted:
+            ids = ", ".join(deleted)
+            text += f"\n최근 {DELETED_DAYS}일 안에 지운 제안이라 건너뜀 {len(deleted)}개 ({ids})"
+        if len(got) > len(created) + len(similar) + len(deleted):
+            text += f"\n이미 받은 것 {len(got) - len(created) - len(similar) - len(deleted)}개"
         await self._apply(self._pull_note(PULL_DONE, text))
         return ActionResult(outcome="pulled", output=out)
 
@@ -256,6 +290,10 @@ class ProposalMixin:
         if same is not None:  # 재전송: LLM을 다시 부르지 않는다
             out = {"outcome": "duplicate", "proposal_id": same.id}
             return ActionResult(changed=False, outcome="duplicate", output=out)
+        gone = recently_deleted(self.state, inp, frm, self.clock())
+        if gone is not None:  # 사람이 최근 지운 제안: 일주일 동안 다시 만들지 않는다
+            out = {"outcome": "deleted_recently", "proposal_id": gone.id}
+            return ActionResult(changed=False, outcome="deleted_recently", output=out)
         draft = await ext.write(self._proposal_writer, inp, f"insight:{inp.insight_id}")
 
         async def run(s: State) -> ActionResult:
@@ -535,6 +573,14 @@ class ProposalMixin:
             s.specs = [x for x in s.specs if x.id != sp.id]
         s.requests = [r for r in s.requests if r.id not in req_ids]
         s.proposals = [x for x in s.proposals if x.id != p.id]
+        # 일주일 동안 같은·비슷한 인사이트를 다시 받아오지 않게 흔적을 남긴다 (지난 것은 정리)
+        now = self.clock()
+        keep = now - timedelta(days=DELETED_DAYS)
+        s.deleted_proposals = [x for x in s.deleted_proposals if x.deleted_at >= keep]
+        s.deleted_proposals.append(
+            DeletedProposal(id=p.id, insight_id=p.insight_id, source=p.from_, title=p.title,
+                            products=p.products, deleted_at=now)
+        )  # fmt: skip
         gone = " · ".join(x for x in [sp.id if sp else "", *sorted(req_ids)] if x)
         text = f"{p.id} 제안 삭제" + (f" ({gone} 같이)" if gone else "")
         s.activity.append(

@@ -592,6 +592,17 @@ class Proposal(DomainModel):
     spec: str | None = None  # 사람이 확정해 만든 기획안 (기획서 SPEC-n, origin proposal)
 
 
+class DeletedProposal(DomainModel):
+    """사람이 지운 제안의 흔적. 이 기간 동안 받아오기는 같은·비슷한 인사이트를 만들지 않는다."""
+
+    id: str  # 지운 PROP-n
+    insight_id: str
+    source: str  # data · marketing
+    title: str
+    products: list[str] = Field(default_factory=list)
+    deleted_at: UtcDatetime
+
+
 class State(DomainModel):
     tenant_id: str = TENANT_ID_DEFAULT
     seq: int = 0  # 들어오고 나간 연동 건마다 1씩 (새로 받은 것 표시용)
@@ -624,6 +635,8 @@ class State(DomainModel):
     agents_seen: dict[str, UtcDatetime] = Field(default_factory=dict)
     # 기획 제안 (planning proposals.py). 개발은 쓰지 않는다
     proposals: list[Proposal] = Field(default_factory=list)
+    # 사람이 지운 제안 (일주일 동안 다시 받아오지 않는다, proposal_actions.DELETED_DAYS)
+    deleted_proposals: list[DeletedProposal] = Field(default_factory=list)
 
 
 def dump(model: BaseModel) -> dict:

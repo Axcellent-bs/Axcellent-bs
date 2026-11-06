@@ -708,6 +708,9 @@ def test_delete_proposal_removes_plan_and_request_but_not_after_dev() -> None:
     assert all(r.id != out["request_id"] for r in svc.state.requests)
     assert svc.state.activity[-1].point == "delete_proposal"
 
+    svc = _svc(
+        writer=Writer()
+    )  # 지운 제안과 비슷한 제안은 일주일 동안 다시 안 만들어서 새 서비스로
     pid2 = _new(svc, ref="ins-2")
     asyncio.run(svc.dispatch({"type": "makePlan", "proposal": pid2}))
     asyncio.run(svc.dispatch({"type": "proposalToRequest", "proposal": pid2}))
@@ -747,3 +750,24 @@ def test_pull_failure_and_result_are_recorded_for_screen() -> None:
         asyncio.run(svc.dispatch({"type": "pullInsights"}))
     last = [a for a in svc.state.activity if a.point in (PULL_DONE, PULL_FAILED)][-1]
     assert last.point == PULL_FAILED and "받아오기 실패" in last.text
+
+
+@pytest.mark.role("planning")
+def test_deleted_proposal_is_not_pulled_again_for_a_week() -> None:
+    """사람이 지운 제안은 일주일 동안 같은 인사이트·비슷한 인사이트로 다시 만들지 않는다."""
+    from datetime import timedelta
+
+    svc = _svc(writer=Writer())
+    pid = _new(svc)
+    asyncio.run(svc.dispatch({"type": "deleteProposal", "proposal": pid}))
+    assert [x.id for x in svc.state.deleted_proposals] == [pid]
+
+    again = asyncio.run(svc.receive_insight(requester="data", inp=_insight()))
+    assert again.outcome == "deleted_recently" and again.output["proposal_id"] == pid
+    alike = asyncio.run(svc.receive_insight(requester="data", inp=_insight(ref="ins-new")))
+    assert alike.outcome == "deleted_recently"  # 데이터분석 id가 바뀌어도 같은 제목·상품이면
+    assert svc.state.proposals == []
+
+    svc.state.deleted_proposals[0].deleted_at -= timedelta(days=8)  # 일주일이 지나면 다시 받는다
+    back = asyncio.run(svc.receive_insight(requester="data", inp=_insight()))
+    assert back.outcome == "created"
