@@ -271,8 +271,11 @@ def test_the_scenario_answers_come_from_the_curves() -> None:
     assert make.build_scenario() == case
 
 
-def test_observe_the_factor_scenario(tmp_path: Path) -> None:
-    """관찰만: 성과 요인 지표를 남긴다 (관문은 skill을 고치는 PR에서 켠다)."""
+SCENARIO_GATES = dict.fromkeys(score.SCENARIO_METRICS, 1.0)  # 모두 맞아야 함 (기준선 그대로)
+
+
+def test_the_skill_passes_the_factor_scenario_gates(tmp_path: Path) -> None:
+    """관문: 시간 맞춤 기준·판정·신호 등급·문장 숫자·문구·예상치 표기가 모두 정답과 같다."""
     answers = {}
     for c in make.scenario_cases():
         folder = tmp_path / c["name"]
@@ -281,6 +284,8 @@ def test_observe_the_factor_scenario(tmp_path: Path) -> None:
     metrics = score.score_scenario(make.scenario_cases(), answers)
     print("video_performance scenario:", json.dumps(metrics, ensure_ascii=False))
     assert set(metrics) == set(score.SCENARIO_METRICS)
+    for name, gate in SCENARIO_GATES.items():
+        assert metrics[name] >= gate, f"{name} {metrics[name]} (관문 {gate})"
 
 
 def test_the_scenario_scorer() -> None:

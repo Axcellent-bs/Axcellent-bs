@@ -49,8 +49,11 @@ class FakeYouTube:
 
 
 def _env(tmp_path: Path) -> dict[str, str]:
+    """저장 파일은 모두 임시 폴더 (같은 형식 숏츠 스냅샷·형식 분류도 실제 파일을 읽지 않는다)."""
     return {vp.DB_ENV: str(tmp_path / "perf.db"),
-            "DATA_INSIGHT_BRIEF_DB": str(tmp_path / "brief.db")}  # fmt: skip
+            "DATA_INSIGHT_BRIEF_DB": str(tmp_path / "brief.db"),
+            "DATA_YOUTUBE_DB": str(tmp_path / "youtube.db"),
+            "DATA_SHORTS_DB": str(tmp_path / "shorts.db")}  # fmt: skip
 
 
 def _run(tmp_path: Path, yt: FakeYouTube, at: datetime, shorts=None, **req):  # noqa: ANN001, ANN003, ANN202
@@ -105,8 +108,10 @@ def test_register_then_measure_each_checkpoint_in_its_window(tmp_path: Path) -> 
     assert h1.views_per_hour == 999.75 and h1.like_rate == 0.0495  # 1333 ÷ 1.333…시간
     # 목표 대비는 목표 시점(7일)에만: 1시간은 같은 형식(리뷰 중앙값 2000) 대비만
     assert h1.target_ratio is None and h1.peer_ratio == 0.666 and one.target_checkpoint == "7d"
-    assert h1.line == "1시간 · 1,333회 · 같은 형식 대비 0.67배" and one.summary == h1.line
-    assert one.schema_version == "video_performance.v2"
+    # 화면 한 줄은 시간 맞춤 기준: 같은 형식 숏츠 스냅샷이 없으면 배수 대신 "기준 없음(표본 0)"
+    assert h1.line == "1시간 · 1,333회 · 기준 없음(표본 0)" and one.summary == h1.line
+    assert h1.baseline_basis == "age_matched" and h1.baseline_n == 0 and h1.peer_age_ratio is None
+    assert one.schema_version == "video_performance.v3"
     assert one.target_views_reference == 5000.0 and "책추천" in (one.target_reference_basis or "")
     assert one.peer_median_views == 2000.0 and "형식 '리뷰'" in (one.peer_basis or "")
     by = {f.fact_id: f for f in one.facts}
@@ -245,8 +250,45 @@ def test_a_missed_horizon_is_left_out_of_that_horizon_only(tmp_path: Path) -> No
     seven = rows["7d"]
     assert seven.n == 2 and seven.median_target_ratio == 33.7  # 168.5시간: 168500 ÷ 5000
     assert (rows["3d"].n, rows["3d"].excluded_missed) == (1, 1)  # 늦게 등록한 영상은 3일 놓침
-    assert out.checkpoints[3].line == ("7일 · 168,500회 · 목표 대비 33.70배"
-                                       " · 같은 형식 대비 84.25배")  # fmt: skip
+    assert out.checkpoints[3].line == "7일 · 168,500회 · 목표 대비 33.70배 · 기준 없음(표본 0)"
+    assert out.verdict == "achieved" and out.checkpoints[3].peer_ratio == 84.25  # 칸은 남김
+
+
+def test_list_all_without_videos_says_so(tmp_path: Path) -> None:
+    """성과 탭: 등록된 영상이 없으면 빈 상태 문구만 (지어내지 않음)."""
+    out = _run(tmp_path, FakeYouTube(), PUB, video_url=None, campaign_id=None, list_all=True)
+    assert out.status == "unknown" and out.reason == "아직 측정한 캠페인 영상이 없습니다"
+    assert out.videos == [] and out.tally is not None and out.tally.videos == 0
+    assert out.insight_cards == []
+
+
+def test_list_all_shows_every_video_with_verdicts_and_keeps_test_videos_out(
+    tmp_path: Path,
+) -> None:
+    """영상 전부: 판정·인사이트 카드·요약 타일. 시험 영상은 보여 주되 집계·문장에서 뺀다."""
+    from data_agent.skills.video_factors import ANALYTICS_LIMIT
+
+    _brief(tmp_path)
+    yt = FakeYouTube()
+    _run(tmp_path, yt, PUB, insight_id="ins_1")
+    _run(tmp_path, yt, PUB, video_url="https://youtu.be/testtesttes", campaign_id="test-video-1",
+         insight_id="ins_1", test=True)  # fmt: skip
+    yt.now = PUB + timedelta(hours=168, minutes=10)
+    store = vp.store_of(_env(tmp_path))
+    asyncio.run(vp.measure_due(store, yt, yt.now))
+    store.close()
+    out = _run(tmp_path, yt, yt.now, video_url=None, campaign_id=None, list_all=True)
+    assert out.status == "known" and len(out.videos) == 2
+    real, test = (next(v for v in out.videos if v.test is t) for t in (False, True))
+    assert real.verdict == "achieved" and real.topic == "책추천" and real.factors
+    assert real.signals is not None and real.signals.first.level == "unknown"  # 같은 형식 표본 0
+    assert test.verdict == "excluded" and test.factors == [] and test.actions == []
+    assert out.tally is not None and (out.tally.videos, out.tally.achieved) == (1, 1)
+    (card,) = out.insight_cards
+    assert card.line == "끝난 1개 중 1개 달성 · 0개 측정 중" and card.median_target_ratio is None
+    assert card.notes == ["7일 결과가 1개뿐이라 결론은 이릅니다"]
+    assert [c.video_id for c in card.chips] == ["abcdefghijk"]  # 시험 영상 칩 없음
+    assert ANALYTICS_LIMIT in out.limits and ANALYTICS_LIMIT in real.limits
 
 
 def test_brief_shows_how_many_videos_are_being_collected(tmp_path: Path) -> None:
