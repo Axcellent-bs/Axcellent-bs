@@ -103,12 +103,17 @@ def test_register_then_measure_each_checkpoint_in_its_window(tmp_path: Path) -> 
     assert one.status == "known" and h1.checkpoint == "1h" and h1.views == 1333
     assert (h1.likes, h1.comments, h1.hours_after) == (66, 13, 1.33)
     assert h1.views_per_hour == 999.75 and h1.like_rate == 0.0495  # 1333 ÷ 1.333…시간
-    assert h1.target_ratio == 0.267 and h1.peer_ratio == 0.666  # 목표 5000, 리뷰 중앙값 2000
+    # 목표 대비는 목표 시점(7일)에만: 1시간은 같은 형식(리뷰 중앙값 2000) 대비만
+    assert h1.target_ratio is None and h1.peer_ratio == 0.666 and one.target_checkpoint == "7d"
+    assert h1.line == "1시간 · 1,333회 · 같은 형식 대비 0.67배" and one.summary == h1.line
+    assert one.schema_version == "video_performance.v2"
     assert one.target_views_reference == 5000.0 and "책추천" in (one.target_reference_basis or "")
     assert one.peer_median_views == 2000.0 and "형식 '리뷰'" in (one.peer_basis or "")
     by = {f.fact_id: f for f in one.facts}
     assert h1.fact_ids and all(by[i].about == "youtube:abcdefghijk" for i in h1.fact_ids)
-    assert {by[i].label for i in h1.fact_ids} >= {"1h 조회수", "1h 목표 대비 배수"}
+    labels = {by[i].label for i in h1.fact_ids}
+    assert labels >= {"1h 조회수", "1h 같은 숏츠 중앙값 대비 배수"}
+    assert "1h 목표 대비 배수" not in labels
     assert [c.reason for c in one.checkpoints[1:]][0].startswith("측정 중")
     # 같은 창 안에서 다시 불러도 다시 재지 않는다 (시점마다 한 번)
     asked = len(yt.asked)
@@ -189,8 +194,8 @@ def test_campaign_without_a_video_and_bad_urls_say_why(tmp_path: Path) -> None:
         VideoPerformanceRequest()
 
 
-def test_performance_table_groups_by_insight_format_and_category(tmp_path: Path) -> None:
-    """성과 모으기: 인사이트·형식·카테고리별 목표 대비 배수 중앙값 (영상마다 가장 늦게 잰 시점)."""
+def test_performance_is_collected_per_horizon_without_mixing(tmp_path: Path) -> None:
+    """성과 모으기: 시점(1일·3일·7일)마다 그 시점을 잰 영상만. 측정 중·놓침은 빠진 수로 센다."""
     _brief(tmp_path)
     yt = FakeYouTube()
     _run(tmp_path, yt, PUB, insight_id="ins_1")
@@ -199,13 +204,49 @@ def test_performance_table_groups_by_insight_format_and_category(tmp_path: Path)
     _run(tmp_path, yt, PUB, video_url="https://youtu.be/testtesttes", campaign_id="test-video-1",
          insight_id="ins_1", test=True)  # 시험 영상: 표에서 뺀다  # fmt: skip
     _run(tmp_path, yt, PUB, video_url="https://youtu.be/noinsightxx", campaign_id="cmp_3")
-    out = _run(tmp_path, yt, PUB + timedelta(hours=24, minutes=30), video_url=None)
+    out = _run(tmp_path, yt, PUB + timedelta(hours=24, minutes=30), video_url=None,
+               shorts=SHORTS)  # fmt: skip
+    rows = {(g.key, g.value, g.checkpoint): g for g in out.performance_by_horizon}
+    d1 = rows[("insight", "ins_1", "1d")]
+    # 시험 영상·인사이트 없는 영상은 안 셈
+    assert (d1.videos, d1.n, d1.excluded, d1.low_sample) == (2, 2, 0, True)
+    assert d1.median_views == 24500.0 and d1.median_peer_ratio == 12.25  # 리뷰 중앙값 2000
+    assert d1.median_target_ratio is None and d1.target_n == 0  # 목표 대비는 7일 줄에만
+    d7 = rows[("insight", "ins_1", "7d")]
+    assert (d7.n, d7.excluded, d7.excluded_measuring, d7.median_views) == (0, 2, 2, None)
+    # 예전 표는 목표 시점(7일) 줄: 1일 값을 섞지 않는다
     table = {(g.key, g.value): g for g in out.performance_table}
     ins = table[("insight", "ins_1")]
-    assert (ins.videos, ins.measured) == (2, 2)  # 시험 영상·인사이트 없는 영상은 안 셈
-    assert ins.median_target_ratio == 4.9  # 1일 24.5시간: 조회 24500 ÷ 목표 5000
+    assert (ins.videos, ins.measured, ins.median_target_ratio) == (2, 0, None)
     assert table[("format", "리뷰")].videos == 2 and table[("category", "교육·책")].videos == 2
     assert all(g.value != "test" for g in out.performance_table)
+
+
+def test_a_missed_horizon_is_left_out_of_that_horizon_only(tmp_path: Path) -> None:
+    """3일 창이 지나 등록한 영상: 3일 집계에서만 빠지고(놓침) 7일 집계에는 들어간다.
+
+    (아직 오지 않은 시점이 빠지는 경우는 평가 케이스 mixed가 본다: 7일 n=1, 3일 n=2)
+    """
+    _brief(tmp_path)
+    yt = FakeYouTube()
+    late = "https://youtu.be/latelatelat"
+    _run(tmp_path, yt, PUB, insight_id="ins_1")
+    yt.now = PUB + timedelta(hours=72, minutes=10)
+    store = vp.store_of(_env(tmp_path))
+    asyncio.run(vp.measure_due(store, yt, yt.now))  # 첫 영상 3일
+    store.close()
+    # 늦게 등록한 영상 (3일 창 72~75시간이 지난 뒤). 게시 시각은 PUB로 받는다
+    _run(tmp_path, yt, PUB + timedelta(hours=76), video_url=late, campaign_id="cmp_late",
+         insight_id="ins_1")  # fmt: skip
+    out = _run(tmp_path, yt, PUB + timedelta(hours=168, minutes=30), video_url=None,
+               shorts=SHORTS)  # fmt: skip
+    rows = {g.checkpoint: g for g in out.performance_by_horizon
+            if (g.key, g.value) == ("insight", "ins_1")}  # fmt: skip
+    seven = rows["7d"]
+    assert seven.n == 2 and seven.median_target_ratio == 33.7  # 168.5시간: 168500 ÷ 5000
+    assert (rows["3d"].n, rows["3d"].excluded_missed) == (1, 1)  # 늦게 등록한 영상은 3일 놓침
+    assert out.checkpoints[3].line == ("7일 · 168,500회 · 목표 대비 33.70배"
+                                       " · 같은 형식 대비 84.25배")  # fmt: skip
 
 
 def test_brief_shows_how_many_videos_are_being_collected(tmp_path: Path) -> None:
