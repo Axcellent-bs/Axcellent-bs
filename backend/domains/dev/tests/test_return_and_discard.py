@@ -216,3 +216,72 @@ def test_discard_route_needs_a_human_and_maps_errors(service: PlanningService, a
         r = c.post("/api/planning/dev-tasks/T-D1/discard")
         assert r.status_code == 200 and r.json()["data"]["discarded"] is True
         assert c.post("/api/planning/dev-tasks/T-NOPE/discard").status_code == 404
+
+
+def test_human_returns_a_task_and_open_pr_is_closed(service: PlanningService, adapter) -> None:
+    """사람이 돌려보내기: 열린 PR(사람 확인)은 닫고, returned로 둔다. 머지·폐기 작업은 안 된다."""
+    mismatch = CodeReview(verdict="불일치", notes=["아직 아님"])
+
+    class TwoMismatch(FakeLLM):
+        async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
+            if schema is CodeReview:
+                return mismatch
+            return await super().structured(prompt, schema, untrusted, images, context_id)
+
+    plan = CodePlan(files=[FilePick(path=BANNER, action="modify", reason="배너")], summary="배너")
+    coder.set_llm(TwoMismatch(plan))
+    asyncio.run(_create(service, "SNS 게시인데 PR이 열림"))
+    task = _task(service)
+    assert task.coding.status == "waiting_human" and task.coding.pr
+
+    with pytest.raises(ActionError) as bad_to:
+        asyncio.run(service.return_dev_task("T-D1", "boss", "이유"))
+    assert bad_to.value.code == "INVALID_INPUT"
+    with pytest.raises(ActionError) as no_reason:
+        asyncio.run(service.return_dev_task("T-D1", "marketing", "  "))
+    assert no_reason.value.code == "INVALID_INPUT"
+
+    out = asyncio.run(
+        service.return_dev_task("T-D1", "marketing", "인스타 게시는 마케팅 일", "yejin")
+    )
+    task = _task(service)
+    assert out.outcome == "returned" and task.coding.status == "returned" and task.state == "중단"
+    assert (task.coding.returned_to, task.coding.returned_reason) == (
+        "marketing",
+        "인스타 게시는 마케팅 일",
+    )
+    pr = next(p for p in service.state.prs if p.task == "T-D1")
+    assert pr.closed and not pr.merged
+    assert "dev_task_return" in [a.point for a in service.state.activity]
+    with pytest.raises(ActionError) as twice:
+        asyncio.run(service.return_dev_task("T-D1", "marketing", "또"))
+    assert twice.value.code == "NOT_RETURNABLE"
+
+    # 폐기한 작업·머지된 작업은 돌려보낼 수 없다
+    asyncio.run(service.discard_dev_task("T-D1"))
+    with pytest.raises(ActionError) as gone:
+        asyncio.run(service.return_dev_task("T-D1", "marketing", "이유"))
+    assert gone.value.code == "NOT_RETURNABLE"
+    coder.set_llm(FakeLLM(plan))
+    asyncio.run(_create(service, "배너"))
+    assert _task(service, "T-D2").coding.status == "merged"
+    with pytest.raises(ActionError) as merged:
+        asyncio.run(service.return_dev_task("T-D2", "marketing", "이유"))
+    assert merged.value.code == "NOT_RETURNABLE"
+
+
+def test_return_route(service: PlanningService, adapter) -> None:
+    coder.set_llm(FakeLLM(NOT_CODE, fail_plan=True))
+    asyncio.run(_create(service))
+    with TestClient(app) as c:
+        url = "/api/planning/dev-tasks/T-D1/return"
+        assert c.post(url, json={"to": "marketing"}).status_code == 400
+        r = c.post(url, json={"to": "marketing", "reason": "쿠폰 발행은 마케팅"})
+        assert r.status_code == 200 and r.json()["data"]["status"] == "returned"
+        assert c.post(url, json={"to": "marketing", "reason": "또"}).status_code == 409
+        assert (
+            c.post(
+                "/api/planning/dev-tasks/T-NOPE/return", json={"to": "data", "reason": "x"}
+            ).status_code
+            == 404
+        )

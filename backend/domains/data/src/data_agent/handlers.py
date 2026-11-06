@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Awaitable, Callable, Mapping
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
 
@@ -113,33 +114,59 @@ class TimedLLMClient(LLMClient):
     """data LLM: 하루 상한(`llm_budget`)을 먼저 보고, 대기 시간을 단계 기록에 더한다.
 
     상한에 닿으면 부르지 않고 `LLMDailyCapReached`(= LLMNotConfiguredError)를 올린다.
-    HTTP 요청 한 번마다 남기는 사용량(`record_usage`)을 하루 셈에도 더한다.
+    상한의 80%(설정)부터는 브리프 몫만 남기고 나머지 skill은 다음 날로 미룬다.
+    HTTP 요청 한 번마다 남기는 사용량(`record_usage`)을 하루 셈에 skill·작업과 같이 더한다.
     """
 
+    @staticmethod
+    def _skill() -> str:
+        from data_agent.stage_timing import current_name
+
+        return (current_name() or "unknown").split("@", 1)[0]
+
+    def _check(self) -> None:
+        try:
+            llm_budget.BUDGET.check(skill=self._skill())
+        except llm_budget.LLMDailyCapReached as error:  # 덜 만든 결과는 짧게만 저장 (capped)
+            llm_failure.mark(error)
+            raise
+
     async def structured(self, *args: Any, **kwargs: Any) -> Any:
-        llm_budget.BUDGET.check()
+        self._check()
+        schema = args[1] if len(args) > 1 else kwargs.get("schema")
+        token = _LLM_TASK.set((self._skill(), llm_budget.task_of(schema)))
         try:
             with stage("llm"):
                 return await super().structured(*args, **kwargs)
         except Exception as error:  # 실패한 계산은 저장하지 않게 표시 (llm_failure)
             llm_failure.mark(error)
             raise
+        finally:
+            _LLM_TASK.reset(token)
 
     async def embed(self, texts: list[str], context_id: str | None = None) -> list[list[float]]:
-        llm_budget.BUDGET.check()
+        self._check()
+        token = _LLM_TASK.set((self._skill(), llm_budget.EMBED_TASK))
         try:
             with stage("llm"):
                 return await super().embed(texts, context_id)
         except Exception as error:
             llm_failure.mark(error)
             raise
+        finally:
+            _LLM_TASK.reset(token)
 
     def record_usage(
         self, context_id: str | None, model: str | None, input_tokens: int, output_tokens: int,
         success: bool, tenant_id: str = TENANT_ID_DEFAULT,
     ) -> None:  # fmt: skip
         super().record_usage(context_id, model, input_tokens, output_tokens, success, tenant_id)
-        llm_budget.BUDGET.add(1, input_tokens + output_tokens)
+        skill, task = _LLM_TASK.get() or (self._skill(), "unknown")
+        llm_budget.BUDGET.add(1, input_tokens + output_tokens, skill=skill, task=task)
+
+
+# 지금 부르는 LLM의 (skill, 작업): 사용량 기록에 같이 남긴다
+_LLM_TASK: ContextVar[tuple[str, str] | None] = ContextVar("data_llm_task", default=None)
 
 
 def get_llm() -> LLMClient:
@@ -703,6 +730,19 @@ def cand_aliases(env: Mapping[str, str]) -> dict[str, tuple[str, ...]]:
     return dict(cand_mod.load_config(env).aliases)
 
 
+def cand_same_targets(env: Mapping[str, str]) -> dict[str, tuple[str, ...]]:
+    """같은 대상 표 (예시 아이디어 유행 ↔ 브리프 주제 맞추기): 최근 급상승 후보 계산의 자동 묶기
+    (#383, 같은 영상 동시 출현 + 일별 값 상관) + 사람 덮어쓰기 `[candidates.same_target]`."""
+    from data_agent.skills import trend_candidates as cand_mod
+
+    stored = RESPONSES.latest("trend_candidates")  # [outcome, output, evidence]
+    output = stored[1] if isinstance(stored, list) and len(stored) > 1 else None
+    out = cand_mod.auto_same_targets(output if isinstance(output, dict) else None)
+    for head, names in cand_mod.load_config(env).same_targets.items():
+        out[head] = tuple(dict.fromkeys([*out.get(head, ()), *names]))
+    return out
+
+
 async def trend_insight_brief(request: AgentRequest) -> AgentResult:
     """기획에 넘기는 인사이트 3~7개 (기존 skill 결과를 코드로 묶음, 하루 캐시). grade read.
 
@@ -793,7 +833,7 @@ async def _trend_insight_brief(request: AgentRequest) -> AgentResult:
         age_fn=ages, promo=promo_out, catalog=catalog, aliases=cand_aliases(env),
         category_cache=get_category_cache(), shorts=shorts_out,
         context_id=request.meta.context_id, opportunities_fn=opportunities,
-        video_info=video_info, warned=warned,
+        video_info=video_info, warned=warned, same_targets=cand_same_targets(env),
     )  # fmt: skip
     return _result(
         request,
@@ -1130,6 +1170,31 @@ async def campaign_effect(request: AgentRequest) -> AgentResult:
     )
 
 
+async def video_performance(request: AgentRequest) -> AgentResult:
+    """게시한 영상 성과 (1시간·1일·3일·7일). 영상 등록(추적 목록)과 시점 측정만, grade read."""
+    from ax_contracts.schemas.data import ShortsStatsOutput, VideoPerformanceRequest
+    from data_agent.skills.video_performance import video_performance as run
+
+    data = _parse(request, VideoPerformanceRequest)
+    if isinstance(data, AgentResult):
+        return data
+    stored = RESPONSES.latest("shorts_stats")  # 같은 숏츠 중앙값: 숏츠 통계 저장분
+    shorts = None
+    if isinstance(stored, list) and len(stored) > 1 and isinstance(stored[1], dict):
+        try:
+            shorts = ShortsStatsOutput.model_validate(stored[1])
+        except ValidationError:
+            shorts = None
+    result = await run(data, get_youtube(), env=os.environ, shorts=shorts)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=result.output.status,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
+
+
 # 트렌드 감지 탭이 부르는 skill은 단계별 시간(sqlite·외부·LLM·계산 ms)을 로그 한 줄로 남긴다
 TIMED_SKILLS = frozenset({
     "trend_popular", "trend_scan", "trend_candidates", "youtube_velocity", "shorts_stats",
@@ -1154,6 +1219,7 @@ HANDLERS = {
     "shorts_stats": shorts_stats,
     "answer_planning_question": answer_planning_question,
     "campaign_effect": campaign_effect,
+    "video_performance": video_performance,
     "trend_age": trend_age,
     "trend_insight_brief": trend_insight_brief,
     "domain_profile": domain_profile,

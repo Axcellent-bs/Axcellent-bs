@@ -258,6 +258,22 @@
       "handoff": false
     },
     {
+      "id": "video_performance",
+      "description": "게시한 영상 성과. 요청의 video_url(YouTube·인스타그램·틱톡 주소)을 추적 목록에 넣고(campaign_id·insight_id·proposal_id·test 같이 저장), campaign_id만 오면 등록된 영상을 찾는다. YouTube 영상은 게시 후 1시간·1일·3일·7일 시점이 지나면(허용 창 안) YouTube videos.list로 조회수·좋아요·댓글을 저장한다(1시간마다 도는 수집기와 요청이 같은 함수, YouTube 장부·하루 상한 안에서 영상 50개당 1단위). 결과는 시점별 값, 시간당 조회, 좋아요·댓글 비율, 그 인사이트의 목표 참고값(target_views_reference) 대비 배수, 같은 카테고리·형식 숏츠 조회 중앙값(숏츠 통계 저장분) 대비 배수이고 숫자는 모두 facts에 있다. 아직 그 시점이 안 됐으면 unknown + 측정 중, 창을 넘겨 못 쟀으면 unknown + 놓침. 인스타그램·틱톡은 unknown + 연결 대기와 필요한 것(계정 토큰 등). 시험 영상(test)은 화면·브리프 집계에서 뺀다. LLM을 쓰지 않는다. 회사 상태를 바꾸지 않는다(추적 목록 기록만).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#VideoPerformanceRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#VideoPerformanceOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "marketing",
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
       "id": "trend_age",
       "description": "연령대별 상승: 오늘 급상승 판정·지금 인기 상위·시즌 키워드(수는 회사 설정 [age], 기본 3·5·2 = 10개, 손으로 나열하지 않음) 또는 요청 keywords를 연령대(회사 설정, 기본 10대·20대·30대·40대·50대 이상 = 네이버 연령 코드 묶음)마다 네이버 검색어 트렌드로 따로 조회해, trend_scan과 같은 판정 함수로 '그 연령대에서 평소 대비 몇 배'를 코드로 계산한다. 네이버 값은 요청마다 최댓값이 100인 상대값이라 연령대끼리 절대량은 비교하지 않는다. 하루 네이버 호출 상한(기본 80번), 넘으면 그 주제만 unknown + 이유. 하루 캐시. LLM을 쓰지 않는다. 회사 상태를 바꾸지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendAgeRequest",

@@ -79,12 +79,22 @@ def _tier(c: _Cand, rule: Rule) -> tuple[int, float]:
     return (1 if _small(c, rule) else 0, -c.ratio)
 
 
+def _low(c: _Cand, rule: Rule) -> bool:
+    """표본이 기준보다 적은 근거 (숏츠 조회 배수처럼 분모가 작은 값도 같은 규칙)."""
+    return _small(c, rule) or _few(c, rule)
+
+
 def _sentence(c: _Cand, rule: Rule) -> str:
-    if _few(c, rule):
-        return f"{c.sentence} ({FEW})"
-    if _small(c, rule) or (c.show_sample and c.sample is not None):
+    """문장. 표본이 적은 근거는 표시 칸(`sample_note`)이 따로 있어 문장에 붙이지 않는다."""
+    if not _low(c, rule) and c.show_sample and c.sample is not None:
         return f"{c.sentence} (표본 {c.sample}개)"
     return c.sentence
+
+
+def _note(c: _Cand, rule: Rule) -> str | None:
+    if not _low(c, rule):
+        return None
+    return f"표본 {c.sample}개 · 참고" if c.sample is not None else f"{FEW} · 참고"
 
 
 def pick(cands: Sequence[_Cand], facts: Sequence[DataFact],
@@ -105,6 +115,7 @@ def pick(cands: Sequence[_Cand], facts: Sequence[DataFact],
             source=c.source,  # type: ignore[arg-type]
             label=c.label, value=c.value, unit=c.unit, baseline_value=c.baseline,
             ratio=c.ratio, period=c.period, sample=c.sample, sentence=_sentence(c, rule),
+            low_sample=_low(c, rule), sample_note=_note(c, rule),
             fact_id=ids.get(c.label),
         ))  # fmt: skip
         if len(out) == MAX:

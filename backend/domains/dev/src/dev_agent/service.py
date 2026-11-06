@@ -165,9 +165,9 @@ class DevService(PlanningCore):
         self._init_state()
         self._release_base = self._done_specs(self.state)
 
-    def _spawn_hold(self, task_id: str) -> None:
+    def _spawn_hold(self, task_id: str, reason: str | None = None, key: str | None = None) -> None:
         try:
-            task = asyncio.get_running_loop().create_task(self._hold_to_inbox(task_id))
+            task = asyncio.get_running_loop().create_task(self._hold_to_inbox(task_id, reason, key))
         except RuntimeError:
             return
         self._sending.add(task)
@@ -914,11 +914,49 @@ class DevService(PlanningCore):
         """화면이 열려 있는 동안 오래된 교차검증 대기를 사람 확인으로 넘긴다."""
         await self.escalate_waits()
 
+    def _mark(self, s: State) -> dict[str, Any]:
+        mark = super()._mark(s)
+        mark["failed"] = {t.id for t in s.tasks if t.coding and t.coding.status == "failed"}
+        mark["pr_human"] = {
+            p.id for p in s.prs if p.auto_review is not None and p.auto_review.state == WAIT_HUMAN
+        }
+        return mark
+
     def _after(self, s: State, mark: dict[str, Any], changed: bool) -> None:
         super()._after(s, mark, changed)
+        if changed:
+            self._spawn_more_holds(s, mark)
         spawn, self._pending_spawn = self._pending_spawn, []
         for task_id in spawn if changed else []:  # 넘겨받은 요청 작업 → 서버 AI 코딩
             self._spawn_coder(task_id)
+
+    def _spawn_more_holds(self, s: State, mark: dict[str, Any]) -> None:
+        """사람이 봐야 하는데 받은 요청에 안 가던 두 가지도 올린다 (사람 확인 멈춤은 base가 올린다).
+
+        - 코딩 작업이 새로 실패함 → 다시 시도·폐기·기획에 돌려보내기 판단
+        - PR 머지가 사람 확인으로 새로 넘어감 (교차검증 응답 없음·근거에 걸림 등) → 머지·보류 판단
+          그 작업이 이미 사람 확인 멈춤으로 올라갔으면 다시 올리지 않는다"""
+        for t in s.tasks:
+            cr = t.coding
+            if cr and cr.status == "failed" and t.id not in mark.get("failed", set()):
+                self._spawn_hold(
+                    t.id,
+                    f"개발 AI 작업 실패: {cr.error or '이유 없음'} → 다시 시도·폐기·돌려보내기",
+                    f"dev_fail:{t.id}:{cr.updated_at.isoformat()}",
+                )
+        for p in s.prs:
+            hold = p.auto_review
+            if hold is None or hold.state != WAIT_HUMAN or p.id in mark.get("pr_human", set()):
+                continue
+            task = next((t for t in s.tasks if t.id == p.task), None)
+            if task is None or task.coding is None or task.coding.status == "waiting_human":
+                continue
+            why = ", ".join(hold.rules) or "자동 머지 기준 밖"
+            self._spawn_hold(
+                task.id,
+                f"{p.id} 머지 사람 확인: {why}",
+                f"dev_pr_hold:{p.id}:{hold.at.isoformat()}",
+            )
 
     # ---- 요청 작업 코딩 방식 (회사 설정) · 서버 AI 체험 한도
 
@@ -1370,8 +1408,12 @@ class DevService(PlanningCore):
         self._dev_sent[POLICY_SENT] = fp
         return out
 
-    async def _hold_to_inbox(self, task_id: str) -> None:
-        """사람 확인으로 멈춘 코딩 작업을 받은 요청에 올리고 활동에 남긴다 (잠금 밖에서 보낸다)."""
+    async def _hold_to_inbox(
+        self, task_id: str, reason: str | None = None, key: str | None = None
+    ) -> None:
+        """사람 확인으로 멈춘 코딩 작업을 받은 요청에 올리고 활동에 남긴다 (잠금 밖에서 보낸다).
+
+        `reason`·`key`는 작업 실패·PR 머지 사람 확인처럼 다른 이유로 올릴 때 쓴다."""
         task = next((t for t in self.state.tasks if t.id == task_id), None)
         if task is None or task.coding is None:
             return
@@ -1379,7 +1421,7 @@ class DevService(PlanningCore):
         sp = next((x for x in self.state.specs if x.id == task.spec), None)
         req = self._request_of_spec(self.state, sp) if sp else None
         ctx = req.context_id if req else f"task:{task_id}"
-        body = cause_inbox.hold_handoff(task, pr, ctx, self.tenant_id)
+        body = cause_inbox.hold_handoff(task, pr, ctx, self.tenant_id, reason=reason, key=key)
         text = await cause_inbox.send_hold(body, self._cause_poster)
         if text is None:
             return
@@ -1506,6 +1548,9 @@ class DevService(PlanningCore):
             return check, None
         ev = await self._cross_checker.gather(s, p, ctx, self.clock())
         rules = [r for r in check.rules if r != "pr_linked_incident"] + ev.rules
+        # 통과해 머지되거나 사람이 결정한 뒤에도 PR 화면에 남긴다 (auto_review는 그때 비워진다)
+        p.cross_evidence = [line.dump() for line in ev.lines]
+        p.cross_checked_at = self.clock()
         s.activity.append(
             self._act(
                 self.clock(),
@@ -2586,6 +2631,77 @@ class DevService(PlanningCore):
             x.state = "중단"
             return ActionResult(
                 outcome="canceled", output={"task_id": task_id, "status": "canceled"}
+            )
+
+        return await self._apply(run)
+
+    async def return_dev_task(
+        self, task_id: str, to: str, reason: str, who: str | None = None
+    ) -> ActionResult:
+        """사람이 개발 작업을 보고 기획에 돌려보낸다 (코드 변경이 아닌 일, 다른 부서 일).
+
+        코딩 AI의 `not_code` 판단과 같은 결과(`coding.status = returned`, `returned_to`·
+        `returned_reason`, 작업 `중단`)로, 바뀐 작업은 `receive_dev_result`로 기획에 간다.
+        돌고 있으면 멈추고 열린 PR은 닫는다(중단과 같게). 내 Claude 작업에도 된다.
+        머지된 작업·폐기한 작업·이미 돌려보낸 작업은 안 된다."""
+        if to not in coder.DEPARTMENTS:
+            raise ActionError("INVALID_INPUT", f"to는 {', '.join(coder.DEPARTMENTS)} 중 하나다")
+        why = " ".join(str(reason or "").split())[:200]
+        if not why:
+            raise ActionError("INVALID_INPUT", "돌려보내는 이유 한 줄이 필요하다")
+        task = next((t for t in self.state.tasks if t.id == task_id), None)
+        if task is None:
+            raise ActionError("NOT_FOUND", f"작업 {task_id}가 없다")
+        status = task.coding.status if task.coding else None
+        if task.discarded or status in ("merged", "covered", "returned") or task.state == "완료":
+            raise ActionError(
+                "NOT_RETURNABLE", f"{task_id}는 머지·완료·폐기했거나 이미 돌려보낸 작업이다"
+            )
+        if any(p.task == task_id and p.merged for p in self.state.prs):
+            raise ActionError("NOT_RETURNABLE", f"{task_id}는 이미 머지된 PR이 있다")
+        # 먼저 실행을 끊는다 (중단과 같게): 다음 단계에서 CoderGone으로 멈춘다
+        self._coding_live.pop(task_id, None)
+        running = self._coding.pop(task_id, None)
+        if running is not None:
+            running.cancel()
+        coder.drop_draft(self, task_id)
+        label = coder.DEPT_LABEL[to]
+
+        async def run(s: State) -> ActionResult:
+            x = next((t for t in s.tasks if t.id == task_id), None)
+            if x is None:
+                raise ActionError("NOT_FOUND", f"작업 {task_id}가 없다")
+            sp = next((p for p in s.specs if p.id == x.spec), None)
+            req = self._request_of_spec(s, sp) if sp else None
+            ctx = req.context_id if req else f"task:{task_id}"
+            t = self.clock()
+            text = f"{task_id} 기획에 돌려보냄 ({label}, 사람{f' · {who}' if who else ''}): {why}"
+            n = sum(1 for g in self.gate_calls if g.action == "dev_task_return") + 1
+            await self._execute("dev_task_return", ctx, f"{task_id}:{n}", text, {"to": to})
+            s.activity.append(self._act(t, ctx, "human", "dev", "dev_task_return", "사람", text))
+            pr = next((p for p in s.prs if p.task == task_id and not p.merged), None)
+            if pr is not None and not pr.closed:
+                note = await vcs_bridge.close_pr(pr)
+                if note is not None:
+                    s.activity.append(
+                        self._act(self.clock(), ctx, "dev", "dev", note.point, "API", note.text)
+                    )
+                if note is None or note.ok:
+                    pr.closed = True
+                    pr.auto_review = None
+            if x.coding is None:
+                x.coding = CodingRun(updated_at=t)
+            x.coding.status = "returned"
+            x.coding.returned_to, x.coding.returned_reason = to, why
+            closed = pr is not None and pr.closed
+            x.coding.error = f"사람이 기획에 돌려보냄 ({label}): {why}" + (
+                f" · {pr.id} 닫음" if closed else ""
+            )
+            x.coding.updated_at = t
+            x.state = "중단"
+            return ActionResult(
+                outcome="returned",
+                output={"task_id": task_id, "status": "returned", "returned_to": to},
             )
 
         return await self._apply(run)

@@ -122,10 +122,14 @@ def _ages(seen: list[list[str]], fail: bool = False):  # noqa: ANN202
     return fn
 
 
-def _env(tmp_path: Path, extra: str = "") -> dict[str, str]:
+def _env(tmp_path: Path, extra: str = "", none_max: int = 7) -> dict[str, str]:
+    """기본은 연결 없는 주제 최대 몫을 열어 둔다 (그 칸을 보는 테스트). 몫 테스트는 none_max=2."""
     tmp_path.mkdir(parents=True, exist_ok=True)
     cfg = tmp_path / "trends.toml"
-    cfg.write_text("[brief]\nmax_insights = 3\n" + extra, encoding="utf-8")
+    # extra에 같은 키가 있으면 기본 줄을 쓰지 않는다 (TOML은 같은 키 두 번이면 읽기 실패)
+    base = {"max_insights": "3", "none_max": str(none_max)}
+    lines = [f"{k} = {v}\n" for k, v in base.items() if f"{k} =" not in extra]
+    cfg.write_text("[brief]\n" + "".join(lines) + extra, encoding="utf-8")
     return {"DATA_TREND_CONFIG": str(cfg), "DATA_INSIGHT_BRIEF_DB": str(tmp_path / "brief.db")}
 
 
@@ -607,6 +611,51 @@ def test_general_topics_without_company_link_become_reference_only(tmp_path: Pat
     assert [c.company_relevance for c in out.opportunities] == ["domain"]  # 카드는 그대로
 
 
+def test_format_insights_borrow_a_shorts_format_with_a_book_from_ideas() -> None:
+    """형식 빌리기: 직접 연결은 없지만 광고 재료·잘 되는 형식·예시 아이디어의 책이 있으면 format."""
+    from ax_contracts.schemas.data import (
+        InsightEvidence,
+        PromoConcept,
+        PromoProduct,
+        TrendInsight,
+    )
+
+    def ins(topic: str, **kw: Any) -> TrendInsight:
+        base = dict(insight_id=topic, rank=1, topic=topic, line="x", evidence=InsightEvidence(),
+                    company_relevance="none", reference_only=True, ad_material=True,
+                    shorts_format="챌린지", shorts_format_median_views=120000.0,
+                    shorts_format_samples=18, shorts_format_source="all",
+                    category="게임")  # fmt: skip
+        return TrendInsight(**{**base, **kw})
+
+    lol = ins("롤드컵", real_entity=True, entity_names=["롤드컵"])
+    golf = ins("골프", category="연예·스포츠")  # 예시 아이디어에 없음
+    news = ins("한남더힐 아파트", ad_material=False,
+               ad_material_reason="뉴스·사건 분류는 광고 재료로 쓰지 않음")  # fmt: skip
+    pen = ins("만년필 챌린지")  # 예시 아이디어의 상품이 경고로 뺀 문구뿐
+    promo = PromoConceptsOutput(concepts=[
+        PromoConcept(concept_id="c1", title="롤드컵 응원 독서 챌린지", borrowed_trend="롤드컵",
+                     products=[PromoProduct(product_id="p2", name="파이썬 입문서")]),
+        PromoConcept(concept_id="c2", title="한남더힐", borrowed_trend="한남더힐 아파트",
+                     products=[PromoProduct(product_id="p2", name="파이썬 입문서")]),
+        PromoConcept(concept_id="c3", title="만년필", borrowed_trend="만년필 챌린지",
+                     products=[PromoProduct(product_id="p1", name="무지 노트")]),
+    ])  # fmt: skip
+    why = brief.mark_format([lol, golf, news, pen], promo,
+                            brief.Warned(product_ids=frozenset({"p1"})))  # fmt: skip
+    assert why == []
+    assert lol.company_relevance == "format" and not lol.reference_only
+    assert lol.borrow_format is not None and lol.borrow_format.name == "챌린지"
+    assert [p.name for p in lol.borrow_products] == ["파이썬 입문서"]
+    assert lol.cautions == ["trademark"] and "형식만" in (lol.caution_note or "")
+    for other in (golf, news, pen):  # 책이 없거나 광고 재료가 아니면 그대로 참고용
+        assert other.company_relevance == "none" and other.reference_only
+    golf2 = ins("골프", category="연예·스포츠")
+    zero = brief.mark_format([golf2], promo, brief.Warned())
+    assert zero[0].startswith("형식 빌리기 0개: 예시 아이디어가 고른 트렌드")
+    assert any("골프: 예시 아이디어에서 이 주제와 이어진 회사 상품 없음" in z for z in zero)
+
+
 def test_relevance_rules() -> None:
     from ax_contracts.schemas.data import InsightEvidence, InsightProduct, TrendInsight
 
@@ -620,3 +669,118 @@ def test_relevance_rules() -> None:
     assert brief.relevance(ins("고양이 그림책 추천"), ["고양이 그림책"])[0] == "domain"
     assert brief.relevance(ins("골프"), ["고양이 그림책", "책"])[0] == "none"
     assert brief.relevance(ins("골프"), ["골"])[0] == "none"  # 한 글자 키워드는 안 본다
+
+
+# ------------------------------------------------ 브리프 몫 (회사 연결 먼저, 연결 없음 최대)
+
+
+def _card(subtopic: str, score: float, **kw: Any):  # noqa: ANN202
+    from ax_contracts.schemas.data import (
+        DomainOpportunity,
+        InsightProduct,
+        OpportunityEvidence,
+        OpportunityFormat,
+    )
+    from data_agent.skills.brief_facts import card_facts
+
+    naver = OpportunityEvidence(source_id="naver_search_trend", kind="search_interest",
+                                status="known", label="네이버 검색 평소 대비 배수", value=1.4,
+                                unit="배", period_start=date(2026, 9, 10),
+                                period_end=date(2026, 11, 3), samples=56)  # fmt: skip
+    products = kw.pop("products", [])
+    card = DomainOpportunity(
+        opportunity_id=f"opp_{subtopic}", subtopic=subtopic, line=f"{subtopic} 검색 1.4배",
+        line_status="llm", search_interest=[naver], score=score,
+        formats=[OpportunityFormat(name="리뷰", count=12, median_views=8000.0)],
+        products=[InsightProduct(product_id=p, name="파이썬 입문서", reason="r") for p in products],
+        company_relevance="direct" if products else "domain", **kw,
+    )  # fmt: skip
+    rows = card_facts(card)
+    card.fact_ids = [r.fact_id for r in rows]
+    return card, rows
+
+
+def _quota_run(tmp_path: Path, cards: list, extra: str = "", none_max: int = 2):  # noqa: ANN001, ANN202
+    from data_agent.skills.domain_opportunity import OpportunityResult
+
+    async def opps():  # noqa: ANN202
+        return OpportunityResult([c for c, _ in cards], None, "plan_1", [],
+                                 facts=[r for _, rows in cards for r in rows])  # fmt: skip
+
+    return asyncio.run(
+        brief.make_brief(
+            TrendInsightBriefRequest(), BriefLLM(cats={}),
+            env=_env(tmp_path, "max_insights = 5\n" + extra, none_max=none_max), popular=POPULAR,
+            popular_reason=None, rising=[], age_fn=_ages([]), promo=None, catalog=CATALOG,
+            now=NOW, opportunities_fn=opps,
+        )
+    ).output  # fmt: skip
+
+
+def test_domain_cards_come_first_with_a_minimum_and_none_is_capped(tmp_path: Path) -> None:
+    """오늘 인기 주제가 모두 연결 없음(none)이어도 기회 카드 하위 주제가 브리프 인사이트로."""
+    cards = [_card("책추천", 4.0, products=["p2"]), _card("니체 철학", 3.0),
+             _card("파이썬기초", 2.0), _card("코딩입문", 1.0)]  # fmt: skip
+    out = _quota_run(tmp_path, cards)
+    rel = [(i.topic, i.company_relevance) for i in out.insights]
+    assert rel[:3] == [("책추천", "direct"), ("니체 철학", "domain"), ("파이썬기초", "domain")]
+    assert [r for _, r in rel[3:]] == ["none", "none"] and len(rel) == 5  # none은 최대 2개
+    cut = next(x for x in out.limits if x.startswith("연결 없는 주제는 최대 2개라 뺌: "))
+    assert cut.count(",") == 0  # 인기 주제 3개 중 1개만 뺐다
+    book = out.insights[0]
+    assert book.rank == 1 and not book.reference_only and book.ad_material is True
+    assert book.company_related and "기회 카드 opp_책추천" in (book.company_reason or "")
+    assert book.insight_id == brief.stable_insight_id("default", "책추천")
+    assert book.evidence.naver_ratio == 1.4 and book.shorts_format == "리뷰"
+    assert [p.product_id for p in book.products] == ["p2"]
+    assert book.line == "책추천 검색 1.4배" and book.line_status == "llm"  # 카드 한 줄 그대로
+    by_id = {f.fact_id for f in out.facts}
+    assert set(cards[0][0].fact_ids) <= set(book.fact_ids) <= by_id  # 카드 숫자도 가리킨다
+    assert not any("최소 몫" in x for x in out.limits)
+
+
+def test_quota_settings_and_short_domain_say_why(tmp_path: Path) -> None:
+    none_only = _quota_run(tmp_path / "a", [])  # 카드 0개: none 2개만, 모자란 이유
+    assert [i.company_relevance for i in none_only.insights] == ["none", "none"]
+    assert "회사 연결 인사이트 0개: 최소 몫 3개에 모자람 (기회 카드 0개)" in none_only.limits
+    cards = [_card("책추천", 4.0), _card("니체 철학", 3.0), _card("코딩입문", 1.0)]
+    # 회사 설정: 최소 1개여도 연결 없음 2개 뒤 남는 자리는 카드로 채운다 (n=5, 카드 3개)
+    out = _quota_run(tmp_path / "b", cards, "domain_min = 1\n")
+    assert [i.topic for i in out.insights] == ["책추천", "니체 철학", "코딩입문", "리그오브레전드",
+                                               "한국철강"]  # fmt: skip
+    # 연결 없음 0개: 카드 3개만 (none으로 채우지 않는다)
+    only = _quota_run(tmp_path / "d", cards, "domain_min = 1\n", none_max=0)
+    assert [i.topic for i in only.insights] == ["책추천", "니체 철학", "코딩입문"]
+    zero = brief.load_config(_env(tmp_path / "c", "domain_min = 9\n", none_max=-1))
+    assert (zero.domain_min, zero.none_max) == (7, 0)
+
+
+# ------------------------------------------------ 같은 대상 묶기 (형식 빌리기 판정)
+
+
+def test_format_matches_an_idea_trend_through_the_same_target_group() -> None:
+    """예시 아이디어가 '리그오브레전드'를 빌렸고 브리프 주제가 't1'이면 같은 대상으로 맞춘다."""
+    from ax_contracts.schemas.data import InsightEvidence, PromoProduct, TrendInsight
+
+    def t1() -> TrendInsight:
+        return TrendInsight(insight_id="t1", rank=1, topic="t1", aliases=["티원"], line="x",
+                            evidence=InsightEvidence(), company_relevance="none",
+                            reference_only=True, ad_material=True, shorts_format="챌린지",
+                            category="게임", real_entity=True, entity_names=["t1"])  # fmt: skip
+
+    promo = PromoConceptsOutput(concepts=[
+        PromoConcept(concept_id="c1", title="오늘의 한 권", borrowed_trend="리그오브레전드",
+                     products=[PromoProduct(product_id="p2", name="파이썬 입문서")]),
+    ])  # fmt: skip
+    groups = brief.name_groups({"리그오브레전드": ["lol"], "t1": ["티원"]},
+                               {"리그오브레전드": ["t1"]})  # fmt: skip
+    assert groups["lol"] == groups["티원"] == {"리그오브레전드", "lol", "t1", "티원"}
+    plain = t1()
+    zero = brief.mark_format([plain], promo, brief.Warned())  # 묶음 없이: 못 맞춤
+    assert plain.company_relevance == "none" and zero
+    linked = t1()
+    assert brief.mark_format([linked], promo, brief.Warned(), groups) == []
+    assert linked.company_relevance == "format" and not linked.reference_only
+    assert "같은 대상: 리그오브레전드" in (linked.company_relevance_reason or "")
+    assert [p.product_id for p in linked.borrow_products] == ["p2"]
+    assert brief.same_target(["골프"], groups) == {"골프"}  # 묶음에 없으면 자기 이름만

@@ -50,6 +50,7 @@ from ax_contracts.schemas.data import (
     ExplorerVideo,
     VideoExplorerOutput,
     VideoExplorerRequest,
+    YouTubeChartFailure,
 )
 from data_agent import caution, llm_failure
 from data_agent.connectors import ConnectorUnavailable
@@ -69,6 +70,8 @@ POOL_DAYS = 7
 PAGE = 50  # videos.list·channels.list 한 번에 50개 (1단위)
 SEARCH_UNITS = 100
 CAP_REASON = "검색 상한"
+CHART_SEARCH = "chart:"  # 차트 대신 검색의 검색 기록 키 (chart:<YouTube 카테고리 id>)
+CHART_SEARCH_DAYS = 3  # 차트 대신 검색: 최근 3일 (칸 보충 3일 검색과 같은 구간)
 SOURCES = ("chart", "tracked", "shorts", "subtopic", "popular_fill", "search")
 
 
@@ -86,6 +89,10 @@ class ExplorerConfig:
     seed_categories: tuple[str, ...] = ("교육·책",)
     # 숏 칸이 모자라면 7일 이전 숏츠 표본으로 채울 카테고리 (화면 "7일 이전")
     backfill_categories: tuple[str, ...] = ("교육·책",)
+    # 카테고리별 인기 차트 (videos.list chart=mostPopular, regionCode KR, videoCategoryId별 1단위):
+    # 화면 카테고리 → 대응하는 YouTube 카테고리 id. 받은 영상은 우리 분류기로 다시 분류한다
+    chart: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    chart_minutes: int = 50  # 이보다 최근에 받았으면 다시 받지 않는다 (수집기 1시간마다)
     refresh_hours: float = 12.0  # 다시 읽은 지 이 시간이 지난 영상만 다시 읽는다
     language: str = "ko"
 
@@ -102,6 +109,14 @@ def load_config(env: Mapping[str, str]) -> ExplorerConfig:
         for k in dataclasses.fields(ExplorerConfig):
             default = getattr(base, k.name)
             value = raw.get(k.name, default)
+            if k.name == "chart":  # 표: 화면 카테고리 → YouTube 카테고리 id 하나 또는 여러 개
+                table = value if isinstance(value, dict) else dict(default)
+                values[k.name] = tuple(
+                    (str(cat), tuple(str(x) for x in (ids if isinstance(ids, list | tuple)
+                                                      else [ids])))
+                    for cat, ids in table.items()
+                )  # fmt: skip
+                continue
             values[k.name] = (
                 tuple(str(x) for x in value) if isinstance(default, tuple) else type(default)(value)
             )
@@ -154,6 +169,11 @@ class ExplorerStore:
                 " calls INTEGER NOT NULL, units INTEGER NOT NULL, PRIMARY KEY (day, kind));"
                 "CREATE TABLE IF NOT EXISTS result (id INTEGER PRIMARY KEY CHECK (id = 1),"
                 " computed_at TEXT NOT NULL, payload TEXT NOT NULL);"
+                # 카테고리 인기 차트를 받지 못한 YouTube 카테고리 (차트가 다시 되면 지운다)
+                "CREATE TABLE IF NOT EXISTS chart_failures (category_id TEXT PRIMARY KEY,"
+                " categories TEXT NOT NULL, code TEXT NOT NULL, reason TEXT NOT NULL,"
+                " failed_at TEXT NOT NULL, fallback TEXT NOT NULL DEFAULT 'not_run',"
+                " found INTEGER, fallback_reason TEXT, fallback_day TEXT);"
             )
 
     def close(self) -> None:
@@ -219,6 +239,8 @@ class ExplorerStore:
             ).fetchall()
         out: dict[tuple[str, str, str], ExplorerSearch] = {}
         for c, ln, w, s, q, n, r in rows:
+            if c.startswith(CHART_SEARCH):  # 차트 대신 검색: 칸 검색 기록이 아님 (상한만 같이 셈)
+                continue
             if s == "running":  # 다른 계산이 검색 중 (또는 검색 중에 멈춤)
                 s, r = "unknown", "다른 계산이 검색 중이거나 검색 중에 멈춤"
             out[(c, ln, w)] = ExplorerSearch.model_validate({
@@ -277,6 +299,62 @@ class ExplorerStore:
                 (day.isoformat(),),
             ).fetchone()
         return int(row[0])
+
+    def finish_search(self, day: date, key: str, status: str, found: int, reason: str | None,
+                      query: str | None = None) -> None:  # fmt: skip
+        """예약한 검색(`reserve`)의 결과를 남긴다 (차트 대신 검색처럼 ExplorerSearch가 아닌 것)."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE searches SET status = ?, query = ?, found = ?, reason = ?"
+                " WHERE day = ? AND category = ?",
+                (status, query, found, reason, day.isoformat(), key),
+            )
+
+    # 차트 실패
+    def chart_failed(self, cid: str, cats: Sequence[str], code: str, reason: str,
+                     at: datetime) -> None:  # fmt: skip
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO chart_failures (category_id, categories, code, reason, failed_at)"
+                " VALUES (?,?,?,?,?) ON CONFLICT(category_id) DO UPDATE SET"
+                " categories = excluded.categories, code = excluded.code,"
+                " reason = excluded.reason, failed_at = excluded.failed_at",
+                (cid, json.dumps(list(cats), ensure_ascii=False), code, reason, at.isoformat()),
+            )
+
+    def chart_fallback(self, cid: str, day: date, status: str, found: int | None,
+                       reason: str | None) -> None:  # fmt: skip
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE chart_failures SET fallback = ?, found = ?, fallback_reason = ?,"
+                " fallback_day = ? WHERE category_id = ?",
+                (status, found, reason, day.isoformat(), cid),
+            )
+
+    def chart_ok(self, cid: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM chart_failures WHERE category_id = ?", (cid,))
+
+    def chart_failures(self) -> list[YouTubeChartFailure]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT category_id, categories, code, reason, failed_at, fallback, found,"
+                " fallback_reason, fallback_day FROM chart_failures ORDER BY category_id"
+            ).fetchall()
+        return [
+            YouTubeChartFailure(
+                category_id=cid,
+                categories=json.loads(cats),
+                code=code,
+                reason=reason,
+                failed_at=datetime.fromisoformat(at),
+                fallback=fb,
+                fallback_found=found,
+                fallback_reason=why,
+                fallback_day=date.fromisoformat(day) if day else None,
+            )
+            for cid, cats, code, reason, at, fb, found, why, day in rows
+        ]
 
     # 미리 계산한 결과
     def result(self) -> dict[str, Any] | None:
@@ -364,6 +442,12 @@ def other_ids(env: Mapping[str, str], now: datetime) -> list[tuple[str, str]]:
         finally:
             conn.close()
 
+    # 순서 = 다시 읽기 우선순위 (하루 상한 안에서 앞부터). 하위 주제·숏츠 표본이 먼저:
+    # 교육·책처럼 7일 안 영상이 적은 칸을 채우는 숏츠가 여기 있다 (7일 이전 채우기에 올린 시각 필요)
+    shorts = env.get(SHORTS_DB_ENV) or SHORTS_DEFAULT_DB
+    out += [(s.video_id, "subtopic") for s in pool_shorts(env, now, shorts)]
+    out += [(r[0], "shorts") for r in read(
+        shorts, "SELECT DISTINCT video_id FROM searched_videos WHERE day >= ?")]  # fmt: skip
     fill = env.get(FILL_DB_ENV) or FILL_DEFAULT_DB
     for (raw,) in read(fill, "SELECT videos FROM fill WHERE day >= ?"):
         try:
@@ -372,11 +456,8 @@ def other_ids(env: Mapping[str, str], now: datetime) -> list[tuple[str, str]]:
             continue
         out += [(r["video_id"], "popular_fill") for r in rows if isinstance(r, dict) and
                 r.get("video_id")]  # fmt: skip
-    shorts = env.get(SHORTS_DB_ENV) or SHORTS_DEFAULT_DB
-    out += [(r[0], "shorts") for r in read(
-        shorts, "SELECT DISTINCT video_id FROM searched_videos WHERE day >= ?")]  # fmt: skip
-    out += [(s.video_id, "subtopic") for s in pool_shorts(env, now, shorts)]
-    return list(dict.fromkeys(out))
+    seen: set[str] = set()  # 같은 영상은 앞(우선순위 높은) 출처로 한 번만
+    return [(v, s) for v, s in out if not (v in seen or seen.add(v))]
 
 
 # ---------------------------------------------------------------- 계산 (수집기)
@@ -417,6 +498,7 @@ async def compute(
     # 1. 영상 풀: 스냅샷 + 다른 저장분(다시 읽기)
     items = snapshot_pool(yt_db, since)
     queries.append(f"youtube snapshots published>={since.date()} videos={len(items)}")
+    await _charts(youtube, store, config, now, today, queries, limits)
     await _refresh(env, youtube, store, config, items, now, today, queries, limits)
     for vid, (stat, source, at) in store.videos().items():
         if vid not in items or items[vid].at < at:
@@ -430,7 +512,7 @@ async def compute(
     # 3. 모자란 칸만 보충 검색: 7일 검색을 먼저 하고 그 결과까지 분류한 뒤, 남은 횟수로 1일 보충.
     #    검색 결과는 분류 상한과 무관하게 분류한다 (검색 1번에 50개 이하)
     names = _Terms(terms)
-    for window in ("7d", "1d"):
+    for window in ("7d", "3d", "1d"):
         await _search(env, youtube, store, config, pool, now, today, max_seconds, names, queries,
                       window)  # fmt: skip
         added = _korean_recent(
@@ -502,6 +584,112 @@ class _Terms:
             except Exception:  # 검색어를 못 만들면 YouTube 카테고리로만 찾는다
                 self.names = {}
         return self.names.get(cat) or None
+
+
+async def _charts(
+    youtube: Any,
+    store: ExplorerStore,
+    config: ExplorerConfig,
+    now: datetime,
+    today: date,
+    queries: list[str],
+    limits: list[str],
+) -> None:
+    """카테고리별 인기 차트 (`chart` 표의 YouTube 카테고리마다 1단위). 최근에 받았으면 건너뜀.
+
+    받은 영상은 `chart_cat` 출처로 남기고, 칸은 우리 분류기 결과로 정한다(YouTube 카테고리는 고르는
+    데만 씀). 실패한 카테고리(그 지역에 차트가 없음 등)는 실패를 기록하고(출처 현황) 그 카테고리를
+    검색(최근 3일)으로 대신 찾는다. 카테고리마다 하루 1번, 칸 보충 검색과 같은 하루 상한 안에서.
+    """
+    ids = list(dict.fromkeys(i for _, cats in config.chart for i in cats))
+    if not ids or youtube is None or not hasattr(youtube, "popular_category"):
+        return
+    last = [at for _, src, at in store.videos().values() if src == "chart_cat"]
+    if last and now - max(last) < timedelta(minutes=config.chart_minutes):
+        return
+    screens = {cid: [cat for cat, cs in config.chart if cid in cs] for cid in ids}
+    got: list[VideoStat] = []
+    failed: list[str] = []
+    for cid in ids:
+        try:
+            got += await youtube.popular_category(cid)
+            store.chart_ok(cid)
+        except ConnectorUnavailable as error:
+            failed.append(f"{cid} [{error.code}]")
+            store.chart_failed(cid, screens[cid], error.code, str(error) or error.code, now)
+            if error.code == "QUOTA_EXCEEDED":
+                store.chart_fallback(
+                    cid, today, "not_run", None, "YouTube 할당량 초과라 검색 안 함"
+                )
+                store.add_calls(today, "chart", 1)
+                break
+            note = await _chart_search(youtube, store, config, cid, now, today, queries)
+            failed[-1] += f" → {note}"
+        store.add_calls(today, "chart", 1)
+    store.save_videos(now, got, "chart_cat")
+    queries.append(f"youtube chart=mostPopular categories={len(ids)} videos={len(got)}")
+    if failed:
+        limits.append("카테고리 인기 차트를 받지 못함: " + ", ".join(failed))
+
+
+async def _chart_search(
+    youtube: Any,
+    store: ExplorerStore,
+    config: ExplorerConfig,
+    cid: str,
+    now: datetime,
+    today: date,
+    queries: list[str],
+) -> str:
+    """차트를 받지 못한 카테고리를 검색으로 대신 찾는다 (하루 1번·하루 상한 공유). 한 줄 결과."""
+    key = f"{CHART_SEARCH}{cid}"
+    if not hasattr(youtube, "search_recent"):
+        why = "YouTube 커넥터에 검색이 없음"
+        store.chart_fallback(cid, today, "not_run", None, why)
+        return why
+    got = store.reserve(today, key, "all", f"{CHART_SEARCH_DAYS}d", config.daily_searches)
+    if got == "done":
+        return "오늘 이미 검색으로 대신 찾음"
+    if got == "cap":
+        why = f"{CAP_REASON} (하루 {config.daily_searches}번)"
+        store.chart_fallback(cid, today, "cap", None, why)
+        return why
+    label = f"YouTube 카테고리 {cid} (차트 대신)"
+    before = getattr(youtube, "quota_used", None)
+    try:
+        found = await youtube.search_recent(
+            now - timedelta(days=CHART_SEARCH_DAYS), category_id=cid,
+            language=config.language or None,
+        )  # fmt: skip
+    except ConnectorUnavailable as error:
+        store.add_calls(today, "search", 1, SEARCH_UNITS)
+        why = f"검색 실패 [{error.code}]"
+        store.finish_search(today, key, "unknown", 0, why, label)
+        store.chart_fallback(cid, today, "failed", None, why)
+        return why
+    after = getattr(youtube, "quota_used", None)
+    units = after - before if isinstance(before, int) and isinstance(after, int) else (
+        SEARCH_UNITS + -(-len(found) // PAGE))  # fmt: skip
+    store.add_calls(today, "search", 1, units)
+    keep = [v for v in found if not config.language
+            or is_language(config.language, v.title, v.channel_title, v.language)]  # fmt: skip
+    store.save_videos(now, keep, "chart_search")
+    store.finish_search(today, key, "known", len(keep), None, label)
+    store.chart_fallback(cid, today, "searched", len(keep), None)
+    queries.append(f"youtube search category={cid} (차트 대신) found={len(keep)}")
+    return f"검색으로 대신 {len(keep)}개"
+
+
+def chart_failures(env: Mapping[str, str]) -> list[YouTubeChartFailure]:
+    """카테고리 인기 차트를 받지 못한 YouTube 카테고리 (출처 현황). 저장이 없으면 빈 목록."""
+    path = env.get(DB_ENV) or DEFAULT_DB
+    if str(path) != ":memory:" and not Path(path).is_file():
+        return []
+    store = ExplorerStore(path)
+    try:
+        return store.chart_failures()
+    finally:
+        store.close()
 
 
 async def _refresh(
@@ -633,7 +821,7 @@ async def _search(
 
     done = store.searched(today)
     fill = dict(load_popular(env).fill_youtube_categories)
-    days = 7 if window == "7d" else 1
+    days = PERIOD_DAYS[window]
     cells = [(cat, length) for cat in config.categories for length in LENGTHS]
     for cat, length in cells:
         key = (cat, length, window)
@@ -840,7 +1028,7 @@ def _shortages(videos: Sequence[ExplorerVideo], config: ExplorerConfig, now: dat
                 if n >= config.min_per_cell:
                     continue
                 why = f"이 기간 한국 영상 {n}개"
-                window = "1d" if period == "1d" else "7d"
+                window = period  # 칸 기간과 같은 구간의 보충 검색 (1d·3d·7d)
                 s = searched.get((cat, length, window))
                 if s is not None and s.status == "skipped":
                     why += f" ({s.reason})"

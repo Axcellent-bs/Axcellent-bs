@@ -43,14 +43,27 @@ verifier = "finance"
 verify_skill = "verify_campaign_budget"
 amount = { amount_field = "budget_krw" }
 
-# 영상 생성 (#487). 유료 API라 안전 레이어 코드 규칙이 비용·길이를 본다. 통과하면 B로 실행.
-# 금액은 마케팅 코드가 공급자 단가표로 계산해 보낸 cost_krw다
+# 이미지·영상 생성 (#487, #677). 유료 API라 안전 레이어 코드 규칙이 비용·길이를 본다.
+# 통과하면 B로 실행. 금액은 마케팅 코드가 공급자 단가표로 계산해 보낸 cost_krw다.
+# 매체 종류 media_kind(image | video)에 따라 건당 상한과 길이 규칙이 다르다(thresholds.toml)
 [[actions]]
-action = "generate_video"
+action = "generate_media"
 owner = "marketing"
 base_grade = "B"
 verifier = "safety"
 amount = { amount_field = "cost_krw", claimed_fields = ["claimed_cost_krw"] }
+
+# 사람과 마케팅 AI의 직접 대화. 대화 글을 저장하고 닫을 뿐 쿠폰·공지·게시는 건드리지 않는다
+# (그런 일은 기존 skill로 execute()와 안전 관문을 거친다). 고객지원·기획 대화와 같은 A
+[[actions]]
+action = "marketing_chat_send"
+owner = "marketing"
+base_grade = "A"
+
+[[actions]]
+action = "marketing_chat_close"
+owner = "marketing"
+base_grade = "A"
 
 # 쿠폰·환불은 A (재무 재설계 2026-10-23, docs/notes/finance/2026-10-23-finance-redesign.md 4장).
 # 건별 검사는 이 관문의 코드 규칙이 한다: 금액 계산, claimed_fields 불일치(C), 기준표 한도(C).
@@ -485,6 +498,13 @@ base_grade = "A"
 [[actions]]
 action = "dev_task_cancel"
 connection_field = "connection_id"
+owner = "planning"
+requesters = ["planning", "dev"]
+base_grade = "A"
+
+# 사람이 개발 작업을 기획에 돌려보내기 (코드 변경이 아닌 일). 열린 PR은 닫고(머지 안 됨) 기록만 남겨 A
+[[actions]]
+action = "dev_task_return"
 owner = "planning"
 requesters = ["planning", "dev"]
 base_grade = "A"

@@ -3,8 +3,10 @@
 문의 원문(3년, 고객지원 결정)과 달리 클레임 기록은 **팀 기준**을 따른다(방침과
 shop-api `retention.py`와 같은 방식).
 
-- 보유 일수: `SUPPORT_CLAIM_RETENTION_DAYS`(기본 1825 = 5년, 방침 제4조 ⑥). 비었거나 정수가 아니거나
-  0 이하·상한(36500) 초과면 기본값이다. 기준은 클레임의 `created_at`이다.
+- 보유 일수: `SUPPORT_CLAIM_RETENTION_DAYS`(기본 1825 = 5년, 방침 제4조 ⑥). **늘리는 것만 된다**:
+  `DEFAULT_DAYS <= 값 <= MAX_DAYS`(36500)일 때만 쓰고, 비었거나 정수가 아니거나 5년보다 짧거나
+  상한을 넘으면 기본값이다. 짧은 값을 받으면 5년이 안 된 클레임까지 A 등급으로 바로 지워지는데
+  안전 관문은 건수(`count`)만 봐서 막지 못하기 때문이다. 기준은 클레임의 `created_at`이다.
 - 삭제는 기본 **dry-run**(건수만 센다). 실제 삭제는 사람이 `SUPPORT_CLAIM_RETENTION_APPLY=1`로 켠다
   (shop-api `SHOP_RETENTION_APPLY`와 같다). 켜기 전에는 skill이 지울 건수만 알린다.
 - 행은 지우지 않는다. 사람 이름(`customer`)·상담원 결정 메모·검수 메모·내력의 글을 `[삭제됨]`으로
@@ -36,7 +38,7 @@ def retention_days() -> int:
         value = int(raw)
     except ValueError:
         return DEFAULT_DAYS
-    return value if 0 < value <= MAX_DAYS else DEFAULT_DAYS
+    return value if DEFAULT_DAYS <= value <= MAX_DAYS else DEFAULT_DAYS
 
 
 def apply_enabled() -> bool:

@@ -35,6 +35,7 @@ from dev_agent.work_api import add_work_routes
 # 코딩 작업 오류 중 409로 주는 것 (설정·상태 문제). 나머지 입력 오류는 400
 CODING_CONFLICT = {
     "NOT_DISCARDABLE",  # 폐기: 돌고 있거나 열린 PR이 있는 작업
+    "NOT_RETURNABLE",  # 돌려보내기: 머지·완료·폐기했거나 이미 돌려보낸 작업
     "THREAD_BUSY",  # 개발 AI 대화: 앞 말에 답하는 중
     "THREAD_CLOSED",  # 개발 AI 대화: 끝낸 대화
     "NO_VCS",
@@ -403,6 +404,24 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         svc = get_service()
         try:
             result = await svc.cancel_dev_task(task_id)
+        except ActionError as exc:
+            return _coding_err(exc)
+        except GateRefused as exc:
+            return _gate_err(exc)
+        return _ok(result.output, svc)
+
+    @router.post("/dev-tasks/{task_id}/return", response_model=None, dependencies=HUMAN)
+    async def post_dev_task_return(task_id: str, request: Request) -> dict | JSONResponse:
+        """사람이 기획에 돌려보내기 `{to, reason}`. 돌고 있으면 멈추고 열린 PR은 닫는다."""
+        svc = get_service()
+        body = await _body(request)
+        if body is None:
+            return _err(400, "INVALID_INPUT", "본문은 JSON 객체여야 한다")
+        to, reason = body.get("to"), body.get("reason")
+        if not isinstance(to, str) or not isinstance(reason, str):
+            return _err(400, "INVALID_INPUT", "to·reason은 문자열이어야 한다")
+        try:
+            result = await svc.return_dev_task(task_id, to, reason, _person(request))
         except ActionError as exc:
             return _coding_err(exc)
         except GateRefused as exc:

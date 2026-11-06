@@ -1,13 +1,14 @@
 // 프로젝트별 보기: 변경 요청 1건(context_id 하나)을 프로젝트 하나로 본다. 왼쪽은 프로젝트 목록.
 // 가운데는 순서대로 진행되는 요청 → 작업 → 운영 → 처리를 세로 흐름으로, 오른쪽은 아무 때나 생기는 소통.
 // 단계 한 줄·곁 블록은 통째로 눌러 그 내용을 다루는 화면(해당 프로젝트 항목)으로 간다.
-import type { Dispatch } from 'react'
+import { useState, type Dispatch } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, type Action, type Request, type State as S } from '@/lib/planningData'
 import { ActivityList, Dep, State, Tag } from '@/components/planning-common/parts'
 import { Linked, Ref, convoHref, go, hrefOf, prSlug, reviewOf, toPath } from '@/components/planning-common/links'
 import { RepoTag } from '@/components/planning-common/repo'
 import { Flow, Head, Layout, ListPane, Side, Step, mergedLabel, prStatus, specStatus } from '@/components/planning-common/flow'
+import { RETURN_DEPT, devDiscarded, pendingReturns } from '@/lib/returned'
 
 // 프로젝트 = 원본 요청 (같은 요청으로 연결만 한 것은 원본에 붙인다)
 export const projectsOf = (s: S) => s.requests.filter((r) => r.state !== '중복 연결')
@@ -37,7 +38,10 @@ export const doneLabel = (r: Request, g: ReturnType<typeof gather>) => r.state =
 export function Projects({ s, d, sel }: { s: S; d: Dispatch<Action>; sel?: string }) {
   const toast = useToast()
   const list = projectsOf(s)
-  const order = (r: Request) => (r.state === '작업 중' || r.state === '기획 중' ? 0 : r.state === '접수' ? 1 : 2)
+  // 개발에서 작업을 모두 폐기한 요청은 진행 중이 아니다 (완료 쪽, 상태 "개발에서 폐기함")
+  const dropped = (x: Request) => devDiscarded(s, gather(s, x).spec?.id)
+  const order = (r: Request) => (dropped(r) ? 2 : r.state === '작업 중' || r.state === '기획 중' ? 0 : r.state === '접수' ? 1 : 2)
+  const stateOf = (x: Request) => (dropped(x) ? <Tag tone="neutral">개발에서 폐기함</Tag> : <State v={x.state} />)
   const sorted = list.slice().sort((a, b) => order(a) - order(b))
   const r = list.find((x) => x.id === sel) ?? sorted[0]
   if (!r) return null
@@ -47,12 +51,12 @@ export function Projects({ s, d, sel }: { s: S; d: Dispatch<Action>; sel?: strin
     { label: '진행 중', rows: sorted.filter((x) => order(x) === 0) },
     { label: '접수', rows: sorted.filter((x) => order(x) === 1) },
     { label: '완료', rows: sorted.filter((x) => order(x) === 2) },
-  ].map((gr) => ({ label: gr.label, rows: gr.rows.map((x) => ({ key: x.id, href: toPath(`projects/${x.id}`), on: x.id === r.id, title: x.title, meta: <>{DEPT_NAME[x.from]} <State v={x.state} /></> })) }))
+  ].map((gr) => ({ label: gr.label, rows: gr.rows.map((x) => ({ key: x.id, href: toPath(`projects/${x.id}`), on: x.id === r.id, title: x.title, meta: <>{DEPT_NAME[x.from]} {stateOf(x)}</> })) }))
 
   return (
     <Layout
       list={<ListPane groups={groups} />}
-      head={<Head kicker={<><a href={toPath('requests')} className="plain-link proj-back">‹ 요청 목록</a>{r.id} · {DEPT_NAME[r.from]}</>} title={r.title} side={<><State v={r.state} />{r.paused && <Tag tone="amber">중단됨</Tag>}{r.state !== '완료' && r.state !== '기각' && <Button size="small" onClick={() => { d({ type: r.paused ? 'resumeRequest' : 'pauseRequest', request: r.id }); toast.show(`${r.id} ${r.paused ? '재개' : '중단'}`) }}>{r.paused ? '재개' : '중단'}</Button>}{g.spec ? <Button size="small" onClick={() => go(toPath(`work/specs/${g.spec!.id}`))}>기획서 보기</Button> : r.state !== '기각' && r.state !== '중복 연결' && <Button size="small" onClick={() => { d({ type: 'writeSpec', request: r.id }); toast.show(`${r.id} 기획서로 저장`); go(toPath('work/specs')) }}>기획서로 저장</Button>}</>} />}
+      head={<Head kicker={<><a href={toPath('requests')} className="plain-link proj-back">‹ 요청 목록</a>{r.id} · {DEPT_NAME[r.from]}</>} title={r.title} side={<>{stateOf(r)}{r.paused && !dropped(r) && <Tag tone="amber">중단됨</Tag>}{r.state !== '완료' && r.state !== '기각' && (dropped(r) ? null : <Button size="small" onClick={() => { d({ type: r.paused ? 'resumeRequest' : 'pauseRequest', request: r.id }); toast.show(`${r.id} ${r.paused ? '재개' : '중단'}`) }}>{r.paused ? '재개' : '중단'}</Button>)}{g.spec ? <Button size="small" onClick={() => go(toPath(`work/specs/${g.spec!.id}`))}>기획서 보기</Button> : r.state !== '기각' && r.state !== '중복 연결' && <Button size="small" onClick={() => { d({ type: 'writeSpec', request: r.id }); toast.show(`${r.id} 기획서로 저장`); go(toPath('work/specs')) }}>기획서로 저장</Button>}</>} />}
       side={
         <>
           <Side title="소통" href={g.threads[0] ? toPath(`talk/${g.threads[0].id}`) : convoHref(r.ctx)} sum={`대화 ${talks} · 결정 ${g.decisions.length}`}>
@@ -69,6 +73,8 @@ export function Projects({ s, d, sel }: { s: S; d: Dispatch<Action>; sel?: strin
         </details>
       }
     >
+      <>
+      {g.spec && <ReturnedBox s={s} d={d} spec={g.spec.id} />}
       <Flow>
         <Step name="요청" on href={hrefOf(s, r.id)} title={DEPT_NAME[r.from]}>
           <p><Linked s={s} text={r.evidence} /></p>
@@ -126,6 +132,40 @@ export function Projects({ s, d, sel }: { s: S; d: Dispatch<Action>; sel?: strin
           )}
         </Step>
       </Flow>
+      </>
     </Layout>
+  )
+}
+
+// 개발이 "코드 변경이 아니다"로 돌려보낸 작업: 이유를 보이고 사람이 고른다
+// 마케팅으로 보내기(이유 없이) · 개발로 다시 보내기(이유 필수, 다시 돌려보내지 않음) · 닫기(기획 화면에서만 숨김)
+function ReturnedBox({ s, d, spec }: { s: S; d: Dispatch<Action>; spec: string }) {
+  const toast = useToast()
+  const [redev, setRedev] = useState<string | null>(null) // 개발로 다시 보내는 이유 (열려 있으면 문자열)
+  const t = pendingReturns(s, spec)[0]
+  if (!t) return null
+  const to = t.coding?.returnedTo ?? 'other'
+  return (
+    <div className="returned-box" role="status">
+      <div className="returned-head">
+        <Tag tone="amber">개발이 돌려보냄</Tag>
+        <b>{RETURN_DEPT[to] ?? to} 일로 보여요</b>
+        <span className="mono muted small">{t.id}</span>
+      </div>
+      {t.coding?.returnedReason && <p className="returned-why">{t.coding.returnedReason}</p>}
+      {redev === null ? (
+        <div className="returned-acts">
+          <Button size="small" variant="primary" onClick={() => { d({ type: 'returnedToMarketing', task: t.id }); toast.show(`${t.id} → 마케팅`) }}>마케팅으로 보내기</Button>
+          <Button size="small" onClick={() => setRedev('')}>개발로 다시 보내기</Button>
+          <Button size="small" onClick={() => { d({ type: 'dismissReturned', task: t.id }); toast.show(`${t.id} 닫음`) }}>닫기</Button>
+        </div>
+      ) : (
+        <form className="returned-acts" onSubmit={(e) => { e.preventDefault(); if (!redev.trim()) return; d({ type: 'returnedToDev', task: t.id, reason: redev.trim() }); setRedev(null); toast.show(`${t.id} → 개발`) }}>
+          <input className="input" autoFocus placeholder="개발로 다시 보내는 이유" aria-label="개발로 다시 보내는 이유" value={redev} onChange={(e) => setRedev(e.target.value)} />
+          <Button size="small" variant="primary" type="submit" disabled={!redev.trim()}>보내기</Button>
+          <Button size="small" onClick={() => setRedev(null)}>취소</Button>
+        </form>
+      )}
+    </div>
   )
 }

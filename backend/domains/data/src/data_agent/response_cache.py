@@ -171,6 +171,17 @@ class ResponseCache:
             self.hits += 1
             return value
 
+    def latest(self, skill: str) -> Any | None:
+        """그 skill로 가장 최근에 저장한 값 (키와 상관없이). 없으면 None. hit·miss는 안 센다."""
+        with self._lock:
+            if self._conn is None:
+                return None  # 메모리 저장은 skill을 남기지 않는다
+            row = self._conn.execute(
+                "SELECT value FROM responses WHERE skill = ? ORDER BY stored_at DESC LIMIT 1",
+                (skill,),
+            ).fetchone()
+        return json.loads(row[0]) if row else None
+
     def put(self, key: str, value: Any, skill: str = "") -> None:
         with self._lock:
             if self._conn is not None:

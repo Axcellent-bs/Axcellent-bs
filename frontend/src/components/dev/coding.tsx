@@ -48,6 +48,46 @@ export const canDiscard = (t: Task) => !t.discarded && (t.coding ? DISCARDABLE.i
 const DEPT_KO: Record<string, string> = { marketing: '마케팅', support: '고객지원', finance: '재무', hr: '인사', data: '데이터분석', other: '다른 부서' }
 export const deptKo = (d?: string | null) => (d ? DEPT_KO[d] ?? d : '')
 
+/** 사람이 기획에 돌려보낼 수 있나 (머지·반영·폐기·이미 돌려보낸 작업은 안 된다) */
+export const canReturn = (t: Task) => !t.discarded && t.state !== '완료' && !['merged', 'covered', 'returned'].includes(t.coding?.status ?? '')
+const DEPTS = ['marketing', 'support', 'finance', 'hr', 'data', 'other'] as const
+
+/** 기획으로 돌려보내기: 부서 + 이유 한 줄. 돌고 있으면 멈추고 열린 PR은 서버가 닫는다 */
+export function ReturnButton({ task }: { task: Task }) {
+  const toast = useToast()
+  const [open, setOpen] = useState(false)
+  const [to, setTo] = useState<string>('marketing')
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  if (!canReturn(task)) return null
+  if (!open) return <Button size="small" onClick={() => setOpen(true)}>기획으로 돌려보내기</Button>
+  const send = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!reason.trim()) return
+    setBusy(true)
+    try {
+      await api.returnToPlanning(task.id, to, reason.trim())
+      toast.show(`${task.id} 기획에 돌려보냄`)
+      setOpen(false)
+      setReason('')
+    } catch (x) {
+      toast.show(x instanceof PlanningApiError ? x.message : '개발·배포 서버에 연결할 수 없어요')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <form className="flex flex-wrap items-center gap-2" onSubmit={send} aria-label="기획으로 돌려보내기">
+      <select className="field" value={to} onChange={(e) => setTo(e.target.value)} aria-label="맞는 부서">
+        {DEPTS.map((d) => <option key={d} value={d}>{deptKo(d)}</option>)}
+      </select>
+      <input className="field flex-1" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={200} placeholder="이유" aria-label="이유" required />
+      <Button size="small" type="submit" variant="primary" disabled={busy || !reason.trim()}>{busy ? '보내는 중…' : '돌려보내기'}</Button>
+      <Button size="small" type="button" onClick={() => setOpen(false)} disabled={busy}>취소</Button>
+    </form>
+  )
+}
+
 /** 멈춘 작업 폐기 버튼. 폐기한 작업은 다시 돌리지 않는다 */
 export function DiscardButton({ task }: { task: Task }) {
   const toast = useToast()
@@ -284,6 +324,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
         {noChange && <Button size="small" onClick={closeCovered} disabled={busy}>반영됨으로 닫기</Button>}
         <CancelButton taskId={task.id} status={c.status} />
         <DiscardButton task={task} />
+        <ReturnButton task={task} />
         {task.discarded && <Tag>폐기됨{task.discardedBy ? ` · ${task.discardedBy}` : ''}</Tag>}
       </span>
     </Step>

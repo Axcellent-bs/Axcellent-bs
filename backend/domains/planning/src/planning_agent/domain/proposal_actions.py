@@ -465,8 +465,10 @@ class ProposalMixin:
         spec_ids = {r.spec for r in s.requests if r.id in req_ids and r.spec} | (
             {sp.id} if sp else set()
         )
-        busy = any(t.spec in spec_ids for t in s.tasks)
-        if busy or (sp is not None and sp.handed_to_dev):
+        # 폐기한 작업(dev `discard_dev_task`)만 남았으면 쓰는 중이 아니다
+        mine = [t for t in s.tasks if t.spec in spec_ids]
+        dropped = bool(mine) and all(t.discarded for t in mine)
+        if (mine and not dropped) or (sp is not None and sp.handed_to_dev and not dropped):
             raise ActionError("PROPOSAL_IN_USE", f"{p.id}는 개발 작업이 나가 지울 수 없습니다")
         if sp is not None:
             s.specs = [x for x in s.specs if x.id != sp.id]

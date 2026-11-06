@@ -42,7 +42,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
@@ -96,6 +96,10 @@ class CandidateConfig:
     exclude_tags: frozenset[str] = field(default_factory=frozenset)
     # 대표 이름 → 별칭들 (정리한 값, 설정 순서). 별칭 → 대표 이름은 `canonical()`
     aliases: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    # 같은 대상 사람 덮어쓰기 `[candidates.same_target]` (대표 이름 → 같은 대상, 기본은 비움).
+    # 기본 판정은 자동 묶기(`auto_same_targets`: 같은 영상 동시 출현 + 일별 값 상관)이고 이 표는
+    # 그 위에 더한다. 후보 이름은 묶지 않고 예시 아이디어의 유행과 브리프 주제를 맞출 때만 쓴다
+    same_targets: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     # 인기 검색어 `[trending]`: 지역, YouTube와 겹치지 않는 후보 상한, 스냅샷 나이 기준
     trending_geo: str = "KR"
     trending_max: int = 5
@@ -166,6 +170,37 @@ def _load_aliases(raw: object) -> dict[str, tuple[str, ...]]:
     return out
 
 
+def _load_same(raw: object) -> dict[str, tuple[str, ...]]:
+    """`[candidates.same_target]` (대표 이름 = [같은 대상 이름…]). 다른 대표 이름도 넣을 수 있다
+    (별칭 표와 달리 후보를 묶지 않으므로). 틀린 모양이면 `TypeError`."""
+    if not isinstance(raw, Mapping):
+        raise TypeError("same_target은 표여야 한다")
+    out: dict[str, tuple[str, ...]] = {}
+    for key, values in raw.items():
+        name = clean_tag(str(key))
+        if not name or not isinstance(values, list):
+            raise TypeError("same_target의 값은 이름 목록이어야 한다")
+        others = (clean_tag(str(v)) for v in values)
+        out[name] = tuple(dict.fromkeys(o for o in others if o and o != name))
+    return out
+
+
+def auto_same_targets(output: Mapping[str, Any] | None) -> dict[str, tuple[str, ...]]:
+    """자동 묶기(#383) 결과 → 같은 대상 표. 기준을 넘어 실제로 묶은 쌍(`applied`)만 쓴다
+    (같은 영상 동시 출현 ≥ `min_shared_videos`, 일별 로그값 상관 ≥ `merge_corr`). 제안은 안 쓴다.
+
+    `output`은 저장된 trend_candidates 응답(`auto_groups` 칸). 없으면 빈 표.
+    """
+    out: dict[str, tuple[str, ...]] = {}
+    for g in (output or {}).get("auto_groups") or []:
+        names = [clean_tag(str(n)) for n in (g.get("names") or [])] if g.get("applied") else []
+        names = [n for n in names if n]
+        if len(names) >= 2:
+            head, *rest = names
+            out[head] = tuple(dict.fromkeys([*out.get(head, ()), *rest]))
+    return out
+
+
 def load_config(env: Mapping[str, str]) -> CandidateConfig:
     """`DATA_TREND_CONFIG`(회사 `trends.toml`)의 `[candidates]`. 없거나 틀리면 기본값."""
     path = env.get(TREND_CONFIG_ENV)
@@ -208,6 +243,7 @@ def load_config(env: Mapping[str, str]) -> CandidateConfig:
                 t for t in (clean_tag(str(x)) for x in raw.get("exclude_tags", [])) if t
             ),
             aliases=_load_aliases(raw.get("aliases", {})),
+            same_targets=_load_same(raw.get("same_target", {})),
         )
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return CandidateConfig()

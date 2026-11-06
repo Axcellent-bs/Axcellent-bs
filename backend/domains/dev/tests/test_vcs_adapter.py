@@ -1034,3 +1034,27 @@ def test_merge_405_split_conflict_and_protection() -> None:
     )
     blocked = merge_fail_reason("conflict", '→ 405 Required status check "build" is expected.')
     assert "보호 규칙" in blocked and CONFLICT_MARK not in blocked
+
+
+def test_github_file_list_reuses_tree_until_base_moves() -> None:
+    """같은 기준 커밋이면 레포 트리를 다시 받지 않는다. 기준 커밋이 바뀌면 새로 받는다."""
+    h = _github_harness()
+    _seed_files(h, BASE_FILES)
+    server = h.server  # type: ignore[attr-defined]
+
+    def trees() -> int:
+        return sum(1 for r in server.seen if "/git/trees/" in r.url.path and r.method == "GET")
+
+    server.seen.clear()
+    first = run(h.adapter.list_files())
+    again = run(h.adapter.list_files("shop-web/"))
+    assert trees() == 1 and again == [p for p in first if p.startswith("shop-web/")]
+    assert len(run(h.adapter.list_files(limit=1))) == 1 and trees() == 1
+
+    # 기준 브랜치를 새 커밋으로 옮긴다 (가짜 서버의 seed_files는 같은 커밋을 고친다)
+    old = server.refs[server.base_branch]
+    server.commits["c" * 40] = {**server.commits[old], "shop-web/new.tsx": "N\n"}
+    server.refs[server.base_branch] = "c" * 40
+    server.seen.clear()
+    assert "shop-web/new.tsx" in run(h.adapter.list_files())
+    assert trees() == 1  # 기준이 바뀌어 한 번 새로 받음

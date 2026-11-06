@@ -1,7 +1,7 @@
 // 개발 작업·PR과 AI 교차검증. 프로젝트 탭과 같은 틀(왼쪽 목록 / 가운데 세로 흐름 / 오른쪽 곁 블록)
 import { useEffect, useState, type Dispatch, type ReactNode } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
-import { CROSS_CHECK_TIMEOUT_MIN, EVIDENCE_SOURCE, TARGET_LABEL, OBSERVE_MIN, type Action, type CrossReview, type PR, type State as S } from '@/lib/planningData'
+import { CROSS_CHECK_TIMEOUT_MIN, EVIDENCE_SOURCE, TARGET_LABEL, OBSERVE_MIN, type Action, type CrossEvidence, type CrossReview, type PR, type State as S } from '@/lib/planningData'
 import { codeOf, traceOf, type CodeLine } from '@/components/dev/trace'
 import { DiffFiles } from '@/components/dev/diff'
 import { DEV_API, repoApi, type RepoFile } from '@/lib/planning'
@@ -62,6 +62,19 @@ function Changes({ s, pr }: { s: S; pr: PR }) {
   )
 }
 
+/** 교차검증 근거 줄: 어느 부서에 물어 무슨 답(또는 못 모음)이 왔는지 */
+function EvidenceList({ lines }: { lines: CrossEvidence[] }) {
+  return (
+    <ul aria-label="교차검증 근거">
+      {lines.map((e) => (
+        <li key={e.source + e.label}>
+          <State v={e.ok ? '통과' : '확인 필요'} tone={e.ok ? 'green' : 'amber'} /> <b>{e.label}</b> <span className="muted">{EVIDENCE_SOURCE[e.source] ?? e.source} · {e.value}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 // 판단 전: 무엇을 기다리는지 · 얼마나 · 언제 사람에게 넘어가는지 · 지금 사람이 할 수 있는 것
 function Waiting({ s, d, r }: P & { r: CrossReview }) {
   const toast = useToast()
@@ -78,15 +91,7 @@ function Waiting({ s, d, r }: P & { r: CrossReview }) {
         ...(r.lane === 'ai' ? [['사람 확인으로', left === undefined ? `${CROSS_CHECK_TIMEOUT_MIN}분 뒤 자동` : left > 0 ? `${left}분 뒤 자동` : '곧 넘어감'] as [string, string]] : []),
         ...(open.length ? [['걸린 항목', open.join(' · ')] as [string, string]] : r.routeWhy.length ? [['걸린 항목', r.routeWhy.join(' · ')] as [string, string]] : []),
       ]} />
-      {!!r.evidence?.length && (
-        <ul aria-label="교차검증 근거">
-          {r.evidence.map((e) => (
-            <li key={e.source + e.label}>
-              <State v={e.ok ? '통과' : '확인 필요'} tone={e.ok ? 'green' : 'amber'} /> <b>{e.label}</b> <span className="muted">{EVIDENCE_SOURCE[e.source] ?? e.source} · {e.value}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {!!r.evidence?.length && <EvidenceList lines={r.evidence} />}
       <div className="actions">
         <Button variant="primary" onClick={() => { d({ type: 'humanDecide', review: r.id, ok: true }); toast.show(`${r.ref} 진행`) }}>확인하고 진행</Button>
         {r.lane === 'human' && <Button onClick={() => { d({ type: 'humanDecide', review: r.id, ok: false }); toast.show(`${r.ref} 보류`) }}>보류</Button>}
@@ -169,6 +174,15 @@ export function Work({ s, d, item, repo }: P & { item?: string; repo?: string })
         <Step name="검수" on={last === '통과'} title={sel.reviews.join(' → ')}>
           {!sel.merged && (last === '불일치' || rejected) && <Button size="small" onClick={() => d({ type: 'reviewPr', pr: sel.id })}>다시 검수</Button>}
         </Step>
+        {!!sel.crossEvidence?.length && (() => {
+          const ev = sel.crossEvidence
+          const miss = ev.filter((e) => !e.ok).length
+          return (
+            <Step name="교차검증" on={miss === 0} title={`${[...new Set(ev.map((e) => EVIDENCE_SOURCE[e.source] ?? e.source))].join('·')} 근거 ${ev.length}건 · ${miss ? `확인 필요 ${miss}` : '모두 통과'}`}>
+              <EvidenceList lines={ev} />
+            </Step>
+          )
+        })()}
         <Step name="머지" on={sel.merged} href={sel.url || (xr ? toPath(`work/reviews/${xr.id}`) : undefined)} title={sel.merged ? mergedLabel(sel) : xr ? `${waitLabel(xr)} · ${xr.id}` : rejected ? '검증자 거절' : '머지 전'}>
           {xr && <p className="muted">{xr.verifier}</p>}
         </Step>

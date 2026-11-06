@@ -32,7 +32,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ValidationError
 
@@ -41,12 +41,15 @@ from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     AGE_NOTE,
     AgeTopic,
+    BorrowFormat,
+    DomainOpportunity,
     InsightEvidence,
     InsightProduct,
     PopularTopic,
     PromoConceptsOutput,
     ShortsFit,
     ShortsStatsOutput,
+    TopicCategory,
     TrendInsight,
     TrendInsightBriefOutput,
     TrendInsightBriefRequest,
@@ -117,6 +120,10 @@ class BriefConfig:
     company_pool: int = 4  # 회사 관련 후보로 연령대까지 볼 키워드 수 (시즌 배율 큰 순)
     company_min_season_ratio: float = 1.3  # 작년 같은 달·다음 달 ÷ 기간 평균이 이 이상
     company_min_age_ratio: float = 1.3  # 또는 어느 연령대 평소 대비 배수가 이 이상
+    # 브리프 몫: 회사 연결(direct·domain)은 최소 이만큼 (모자라면 기회 카드 하위 주제로 채움),
+    # 연결 없음(none, 분류 대기 포함)은 최대 이만큼
+    domain_min: int = 3
+    none_max: int = 2
 
 
 def load_config(env: Mapping[str, str]) -> BriefConfig:
@@ -137,6 +144,8 @@ def load_config(env: Mapping[str, str]) -> BriefConfig:
         values["per_category_max"] = max(1, int(values["per_category_max"]))
         values["company_topics"] = max(0, min(2, int(values["company_topics"])))
         values["company_pool"] = max(0, int(values["company_pool"]))
+        values["domain_min"] = max(0, min(7, int(values["domain_min"])))
+        values["none_max"] = max(0, min(7, int(values["none_max"])))
         return BriefConfig(**values)
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return BriefConfig()
@@ -188,7 +197,8 @@ def tenant_of(env: Mapping[str, str]) -> str:
 
 
 class BriefStore:
-    """하루 캐시: (날짜, 규칙 버전) → 브리프 JSON."""
+    """하루 캐시: (날짜, 규칙 버전) → 브리프 JSON. LLM 하루 상한으로 덜 만든 브리프는 만료 시각
+    (`expires_at`)까지만 쓴다 (상한이 풀리면 다음 미리 계산에서 다시 만든다)."""
 
     def __init__(self, path: str | Path) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -199,22 +209,40 @@ class BriefStore:
                 "CREATE TABLE IF NOT EXISTS briefs (day TEXT NOT NULL, rules TEXT NOT NULL,"
                 " created_at TEXT NOT NULL, output TEXT NOT NULL, PRIMARY KEY (day, rules))"
             )
+            cols = [r[1] for r in self._conn.execute("PRAGMA table_info(briefs)")]
+            if "expires_at" not in cols:  # 예전 파일: 만료 칸 (NULL = 하루 캐시)
+                self._conn.execute("ALTER TABLE briefs ADD COLUMN expires_at TEXT")
 
     def close(self) -> None:
         self._conn.close()
 
-    def get(self, day: date, rules: str) -> TrendInsightBriefOutput | None:
+    def get(
+        self, day: date, rules: str, now: datetime | None = None
+    ) -> TrendInsightBriefOutput | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT output FROM briefs WHERE day = ? AND rules = ?", (day.isoformat(), rules)
+                "SELECT output, expires_at FROM briefs WHERE day = ? AND rules = ?",
+                (day.isoformat(), rules),
             ).fetchone()
-        return TrendInsightBriefOutput.model_validate_json(row[0]) if row else None
+        if row is None:
+            return None
+        if row[1] is not None and datetime.fromisoformat(row[1]) <= (now or now_utc()):
+            return None  # 상한으로 덜 만든 브리프: 만료됨 (다시 만든다)
+        return TrendInsightBriefOutput.model_validate_json(row[0])
 
-    def put(self, day: date, rules: str, out: TrendInsightBriefOutput, at: datetime) -> None:
+    def put(self, day: date, rules: str, out: TrendInsightBriefOutput, at: datetime,
+            expires_at: datetime | None = None) -> None:  # fmt: skip
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO briefs VALUES (?,?,?,?)",
-                (day.isoformat(), rules, at.isoformat(), out.model_dump_json()),
+                "INSERT OR REPLACE INTO briefs (day, rules, created_at, output, expires_at)"
+                " VALUES (?,?,?,?,?)",
+                (
+                    day.isoformat(),
+                    rules,
+                    at.isoformat(),
+                    out.model_dump_json(),
+                    expires_at.isoformat() if expires_at else None,
+                ),
             )
 
 
@@ -237,29 +265,32 @@ class Candidate:
     def names(self) -> list[str]:
         return [self.topic, *self.aliases]
 
+    def _own_cls(self) -> CategoryResult | None:
+        """브리프가 직접 분류한 결과: 지금 인기에 없거나, 지금 인기가 분류하지 못한(미룬) 주제를
+        브리프가 분류했을 때. 지금 인기 분류를 쓰면 None."""
+        popular_known = (self.popular is not None
+                         and self.popular.topic_category not in (None, "", "unknown"))  # fmt: skip
+        return None if popular_known else self.cls
+
     def category(self) -> str | None:
-        if self.popular is not None and self.popular.topic_category:
-            return self.popular.topic_category
-        return self.cls.category if self.cls is not None else None
+        if (own := self._own_cls()) is not None:
+            return own.category
+        return self.popular.topic_category if self.popular is not None else None
 
     def is_person(self) -> bool | None:
-        return (
-            self.popular.is_person
-            if self.popular is not None
-            else (self.cls.is_person if self.cls is not None else None)
-        )
+        if (own := self._own_cls()) is not None:
+            return own.is_person
+        return self.popular.is_person if self.popular is not None else None
 
     def real_entity(self) -> bool | None:
-        return (
-            self.popular.real_entity
-            if self.popular is not None
-            else (self.cls.real_entity if self.cls is not None else None)
-        )
+        if (own := self._own_cls()) is not None:
+            return own.real_entity
+        return self.popular.real_entity if self.popular is not None else None
 
     def entity_names(self) -> list[str]:
-        if self.popular is not None:
-            return list(self.popular.entity_names)
-        return list(self.cls.entity_names) if self.cls is not None else []
+        if (own := self._own_cls()) is not None:
+            return list(own.entity_names)
+        return list(self.popular.entity_names) if self.popular is not None else []
 
     def pending(self) -> bool:
         return self.category() in (None, "unknown")
@@ -525,15 +556,26 @@ class _Lines(BaseModel):
 async def write_lines(
     insights: Sequence[TrendInsight], llm: LLMClient, context_id: str | None, queries: list[str]
 ) -> None:
-    """인사이트마다 한 줄 (묶어서 LLM 한 번). 검증에 걸리면 고정 문장."""
-    data = {i.topic: json.dumps(facts(i), ensure_ascii=False) for i in insights if facts(i)}
-    answer: dict[str, str] = {}
+    """인사이트마다 한 줄 (묶어서 LLM 한 번). 검증에 걸리면 고정 문장.
+
+    같은 insight_id + 같은 근거 숫자로 쓴 문장이 저장돼 있으면 다시 묻지 않는다 (`line_store`).
+    """
+    from data_agent.line_store import LINES, line_key
+
+    keys = {i.topic: line_key("brief", i.insight_id, facts(i)) for i in insights if facts(i)}
+    saved = {t: line for t, k in keys.items() if (line := LINES.get(k)) is not None}
+    data = {i.topic: json.dumps(facts(i), ensure_ascii=False) for i in insights
+            if facts(i) and i.topic not in saved}  # fmt: skip
+    answer: dict[str, str] = dict(saved)
     why: str | None = None
+    if saved:
+        queries.append(f"trend_insight_brief lines reused={len(saved)}")
     if data:
         queries.append(f"llm trend_insight_brief lines={len(data)}")
         try:
             got = await llm.structured(LINE_PROMPT, _Lines, untrusted=data, context_id=context_id)
-            answer = {x.keyword.strip(): x.line.strip() for x in got.items}
+            answer |= {x.keyword.strip(): x.line.strip() for x in got.items
+                       if x.keyword.strip() not in saved}  # fmt: skip
         except LLMNotConfiguredError as error:
             why = f"{no_llm(error)} 고정 문장"
         except (LLMFormatError, ValidationError):
@@ -547,9 +589,11 @@ async def write_lines(
             i.line_reason = "근거 숫자가 없음"
             continue
         line = answer.get(i.topic, "")
-        bad = why or brief_line.problem(line, f)
+        bad = (None if i.topic in saved else why) or brief_line.problem(line, f)
         if bad is None:
             i.line, i.line_status, i.line_reason = line.strip(), "llm", None
+            if i.topic not in saved:
+                LINES.put(keys[i.topic], i.line)
         else:  # 나열하지 않고 근거 1개만 쓴 짧은 고정 문장
             i.line, i.line_status = brief_line.short_fixed(f), "fixed"
             i.line_reason = bad if why else f"LLM 문장을 쓰지 않음 ({bad}), 고정 문장"
@@ -611,6 +655,7 @@ def build_insights(
     rules: AdRules,
     shorts: ShortsStatsOutput | None = None,
     tenant: str = "default",
+    groups: Mapping[str, frozenset[str]] | None = None,
 ) -> list[TrendInsight]:
     """후보 → 인사이트 칸 (한 줄은 아직 비움). 광고 재료가 아닌 것·분류 대기는 맨 아래."""
     out: list[TrendInsight] = []
@@ -626,7 +671,7 @@ def build_insights(
             samples = group.count
         age = c.age
         band = next((b for b in age.bands if b.band == age.top_band), None) if age else None
-        keys = {_norm(n) for n in c.names()}
+        keys = same_target(c.names(), groups)  # 같은 대상 묶음 포함 (리그오브레전드 = t1)
         ideas = [
             x.title for x in (promo.concepts if promo else []) if _norm(x.borrowed_trend) in keys
         ]
@@ -719,6 +764,23 @@ def pick(cands: Sequence[Candidate], config: BriefConfig, n: int) -> list[Candid
     for c in cands:
         c.score = score(c, config, max_videos)
     return sorted(cands, key=lambda c: -c.score)[:n]
+
+
+def material_pool(
+    popular: TrendPopularOutput | None,
+    rising: Sequence[TrendVerdict],
+    aliases: Mapping[str, Sequence[str]] | None,
+    env: Mapping[str, str],
+) -> tuple[list[str], int]:
+    """오늘 브리프 후보 중 광고 재료 가능한 유행 (예시 아이디어가 고를 재료). 브리프와 같은 규칙:
+    분류된 후보를 1차 점수 순으로 `max_insights + age_topics_extra`개, 그중 광고 재료 판정 가능.
+
+    (대표 이름 순서대로, 본 후보 수)."""
+    config = load_config(env)
+    rules = load_rules(env)
+    ready = [c for c in candidates(popular, rising, aliases) if not c.pending()]
+    first = pick(ready, config, config.max_insights + config.age_topics_extra)
+    return [c.topic for c in first if ad_material(c, rules)[0] is True], len(first)
 
 
 def season_of(name: str, promo: PromoConceptsOutput | None) -> tuple[str, float, date] | None:
@@ -852,6 +914,220 @@ def mark_relevance(insights: Sequence[TrendInsight], terms: Sequence[str]) -> No
             i.reference_only = True
 
 
+FORMAT_NOTE = "이름·로고는 쓰지 말고 형식만 빌릴 것"
+RELEVANCE_ORDER = {"direct": 0, "domain": 0, "format": 1, "none": 2}  # 브리프 순서
+
+
+def _format_ok(i: TrendInsight) -> str | None:
+    """형식 빌리기가 안 되는 이유 (되면 None). 상품 직접 연결·회사 관련은 이미 direct·domain."""
+    if i.ad_material is not True:
+        why = i.ad_material_reason or "광고 재료 판정 없음"
+        # 인물 이름 주제는 초상권 때문에 막힌 것이라 형식만은 빌릴 수 있다
+        if not (i.ad_material is False and "초상권" in why):
+            return f"광고 재료 아님 ({why})"
+    if not i.shorts_format:
+        return "이 주제의 잘 되는 숏츠 형식이 없음"
+    return None
+
+
+Groups = Mapping[str, frozenset[str]]  # 정리한 이름 → 같은 대상 이름 전부 (자기 포함)
+
+
+def name_groups(*tables: Mapping[str, Sequence[str]] | None) -> dict[str, frozenset[str]]:
+    """별칭 표(`[candidates.aliases]`)·같은 대상 표(`[candidates.same_target]`)를 이어 묶는다.
+
+    표끼리 이름이 겹치면 한 묶음 (리그오브레전드 = lol·t1, t1 = 티원 → 넷이 한 묶음).
+    """
+    parent: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for table in tables:
+        for rep, others in (table or {}).items():
+            for o in others:
+                a, b = find(_norm(rep)), find(_norm(o))
+                if a != b:
+                    parent[b] = a
+    members: dict[str, set[str]] = {}
+    for n in list(parent):
+        members.setdefault(find(n), set()).add(n)
+    return {n: frozenset(members[find(n)]) for n in parent}
+
+
+def same_target(names: Sequence[str], groups: Groups | None) -> set[str]:
+    """이름들과 같은 대상인 정리한 이름 전부."""
+    out: set[str] = set()
+    for n in names:
+        k = _norm(n)
+        out |= (groups or {}).get(k, frozenset({k}))
+    return out
+
+
+def mark_format(
+    insights: Sequence[TrendInsight],
+    promo: PromoConceptsOutput | None,
+    warned: Warned,
+    groups: Groups | None = None,
+) -> list[str]:
+    """참고용(none) 중 형식 빌리기(format)로 넘길 것을 고른다. 0개면 왜 0개인지 문장 목록.
+
+    조건(코드): 회사 상품 직접 연결은 없지만 광고 재료 가능(상표·인물은 형식만), 그 주제의 잘 되는
+    숏츠 형식이 있고, 예시 아이디어(promo_concepts)가 이 주제(같은 대상 묶음 포함, `groups`)를 빌려
+    회사 상품과 이었다(경고로 뺀 상품군은 제외). format은 참고용이 아니다(기획이 가져감).
+    """
+    concepts = list(promo.concepts) if promo else []
+    picked = {_norm(c.borrowed_trend) for c in concepts if c.borrowed_trend}
+    why: list[str] = []
+    made = 0
+    for i in insights:
+        if i.company_relevance != "none" or i.classification_pending:
+            continue
+        names = same_target([i.topic, *i.aliases], groups)
+        mine = [c for c in concepts if _norm(c.borrowed_trend) in names]
+        books = [
+            InsightProduct(product_id=p.product_id, name=p.name, category_name=p.category_name,
+                           reason=f"예시 아이디어 '{c.title}'에서 이 유행과 이어짐")  # fmt: skip
+            for c in mine for p in c.products if p.product_id not in warned.product_ids
+        ]
+        books = list({p.product_id: p for p in books}.values())
+        no_books = None if books else "예시 아이디어에서 이 주제와 이어진 회사 상품 없음"
+        bad = _format_ok(i) or no_books
+        if bad is not None:
+            why.append(f"{i.topic}: {bad}")
+            continue
+        warn = caution.judge(i.category, real_entity=i.real_entity,
+                             is_person="초상권" in (i.ad_material_reason or ""),
+                             names=i.entity_names)  # fmt: skip
+        i.company_relevance = "format"
+        i.company_relevance_reason = f"형식 빌리기: '{i.shorts_format}' 형식 + 예시 아이디어 상품"
+        own = {_norm(n) for n in [i.topic, *i.aliases]}
+        via = sorted({c.borrowed_trend for c in mine if _norm(c.borrowed_trend) not in own})
+        if via:
+            i.company_relevance_reason += f" (같은 대상: {', '.join(via)})"
+        i.reference_only = False
+        i.borrow_format = BorrowFormat(
+            name=i.shorts_format or "", median_views=i.shorts_format_median_views,
+            samples=i.shorts_format_samples, source=i.shorts_format_source,
+        )  # fmt: skip
+        i.borrow_products = books[:3]
+        i.cautions = list(warn.types)
+        i.caution_note = FORMAT_NOTE if (warn.types or i.real_entity) else None
+        made += 1
+    if made:
+        return []
+    trends = ", ".join(sorted({c.borrowed_trend for c in concepts})) if picked else "없음"
+    return [f"형식 빌리기 0개: 예시 아이디어가 고른 트렌드 {trends}", *why]
+
+
+CARD_MATERIAL = "회사 도메인 하위 주제 (광고 재료가 아닌 하위 주제는 기회 카드에서 이미 뺌)"
+
+
+def card_insight(
+    card: DomainOpportunity, *, day: date, tenant: str, promo: PromoConceptsOutput | None
+) -> TrendInsight:
+    """기회 카드(도메인 하위 주제) → 브리프 인사이트. 숫자는 카드 값 그대로 (새로 재지 않음)."""
+    naver = next(
+        (e for e in card.search_interest
+         if e.source_id == "naver_search_trend" and e.status == "known"),
+        None,
+    )  # fmt: skip
+    ev = InsightEvidence(
+        naver_ratio=naver.value if naver else None,
+        naver_until=naver.period_end if naver else None,
+        video_links=list(card.video_links),
+        links=[v.video_url for v in card.video_links if v.video_url],
+        missing=[
+            f"{e.label}: {e.reason}"
+            for e in [*card.search_interest, *card.consumption]
+            if e.status != "known" and e.reason
+        ],
+    )
+    fit = card.shorts_fit
+    cat = fit.category if fit is not None else None
+    fmt = card.formats[0] if card.formats else None
+    ideas = [x.title for x in (promo.concepts if promo else [])
+             if _norm(x.borrowed_trend) == _norm(card.subtopic)]  # fmt: skip
+    band = card.top_age_band
+    return TrendInsight(
+        insight_id=stable_insight_id(tenant, card.subtopic),
+        legacy_insight_ids=[insight_id(day, card.subtopic)],
+        rank=1, topic=card.subtopic, line=card.line, line_status=card.line_status,
+        line_reason=card.line_reason,
+        category=cat if cat in get_args(TopicCategory) else None,  # type: ignore[arg-type]
+        ad_material=True, ad_material_reason=CARD_MATERIAL, reference_only=False,
+        evidence=ev, age_bands=list(card.age_bands),
+        target_age=band, target_age_ratio=card.top_age_band_ratio,
+        target_age_status=next((b.status for b in card.age_bands if b.band == band), None),
+        target_age_reason=card.top_age_band_reason,
+        top_age_band=band, top_age_band_ratio=card.top_age_band_ratio,
+        top_age_band_reason=card.top_age_band_reason,
+        shorts_fit=fit, shorts_fit_status="known" if fit is not None else "unknown",
+        shorts_fit_reason=None if fit is not None else "숏츠 통계 없음",
+        target_views_reference=card.target_views_reference,
+        target_reference_basis=card.target_reference_basis,
+        products=list(card.products), products_reason=card.products_reason,
+        company_related=True,
+        company_reason=f"도메인 하위 주제 '{card.subtopic}' (기회 카드 {card.opportunity_id})",
+        company_relevance=card.company_relevance or "domain",
+        company_relevance_reason=(
+            f"기회 카드 하위 주제, 연결 상품 {len(card.products)}개" if card.products
+            else "기회 카드 하위 주제 (도메인 프로필에서 나옴)"
+        ),  # fmt: skip
+        shorts_format=fmt.name if fmt else None,
+        shorts_format_samples=fmt.count if fmt else None,
+        shorts_format_median_views=fmt.median_views if fmt else None,
+        shorts_format_reason=None if fmt else "이 하위 주제의 잘 되는 숏츠 형식이 없음",
+        limits=[BRIEF_LIMITS[0], *card.limits],
+        example_ideas=[f"{t} ({REFERENCE})" for t in ideas],
+        score=card.score,
+    )  # fmt: skip
+
+
+def linked(i: TrendInsight) -> bool:
+    return i.company_relevance in ("direct", "domain")
+
+
+def fill_quota(
+    insights: Sequence[TrendInsight], cards: Sequence[TrendInsight], config: BriefConfig, n: int
+) -> tuple[list[TrendInsight], list[str]]:
+    """브리프 몫: 회사 연결(direct·domain) 먼저 최소 `domain_min`개(모자라면 기회 카드로),
+    형식 빌리기(format), 연결 없음(none)은 최대 `none_max`개. 모두 n개 안.
+    분류 대기는 예전처럼 n개 밖 맨 아래 참고용(`pending_max`로 이미 골라 옴).
+
+    (고른 인사이트, 한계 문장)."""
+
+    def order(i: TrendInsight) -> tuple[Any, ...]:
+        return (i.classification_pending, RELEVANCE_ORDER.get(i.company_relevance or "none", 2),
+                i.reference_only, i.company_related, -i.score)  # fmt: skip
+
+    pending = [i for i in insights if i.classification_pending]
+    ready = [i for i in insights if not i.classification_pending]
+    taken = {_norm(x) for i in ready if linked(i) for x in [i.topic, *i.aliases]}
+    extra = [c for c in cards if _norm(c.topic) not in taken]
+    domain = sorted([i for i in ready if linked(i)], key=order) + extra
+    fmt = sorted([i for i in ready if i.company_relevance == "format"], key=order)
+    rest = sorted([i for i in ready if not linked(i) and i.company_relevance != "format"],
+                  key=order)  # fmt: skip
+    none = rest[: config.none_max]
+    want = max(min(config.domain_min, n), n - len(fmt) - len(none))
+    d = domain[:want]
+    f = fmt[: max(0, n - len(d))]
+    none = none[: max(0, n - len(d) - len(f))]
+    notes: list[str] = []
+    if len(d) < config.domain_min:
+        notes.append(f"회사 연결 인사이트 {len(d)}개: 최소 몫 {config.domain_min}개에 모자람"
+                     f" (기회 카드 {len(extra)}개)")  # fmt: skip
+    cut = [i.topic for i in rest[len(none) :]]
+    if cut:
+        notes.append(f"연결 없는 주제는 최대 {config.none_max}개라 뺌: " + ", ".join(cut))
+    return [*d, *f, *none, *pending], notes
+
+
 def company_reason(c: Candidate) -> str | None:
     if not c.company:
         return None
@@ -927,7 +1203,7 @@ def cached_brief(
     rules = rules_version(load_config(env))
     store = BriefStore(env.get(DB_ENV) or DEFAULT_DB)
     try:
-        hit = store.get(today_kst(now), rules)
+        hit = store.get(today_kst(now), rules, now)
     finally:
         store.close()
     if hit is None:
@@ -956,6 +1232,7 @@ async def make_brief(
     opportunities_fn: Any = None,
     video_info: Any = None,
     warned: Warned | None = None,
+    same_targets: Mapping[str, Sequence[str]] | None = None,
 ) -> BriefResult:
     """기존 skill 결과를 묶어 인사이트 3~7개 (하루 캐시). 상태를 바꾸지 않는다(브리프 기록만)."""
     from data_agent.skills.content_recommend import load_config as load_recommend
@@ -969,7 +1246,7 @@ async def make_brief(
     store = store or BriefStore(env.get(DB_ENV) or DEFAULT_DB)
     queries: list[str] = []
     try:
-        if not request.regenerate and (hit := store.get(day, rules)) is not None:
+        if not request.regenerate and (hit := store.get(day, rules, now)) is not None:
             out = hit.model_copy(update={"cached": True})
             return BriefResult(
                 out, as_evidence(out, [f"trend_insight_brief cache rules={rules}"], now)
@@ -984,7 +1261,8 @@ async def make_brief(
         # 지금 인기에 없는 급상승 주제만 여기서 묶어 분류한다(저장된 분류는 다시 묻지 않음)
         warned = warned or Warned()
         company = company_candidates(promo, catalog, cands, config.company_pool, warned)
-        todo = [c for c in [*cands, *company] if c.popular is None]
+        # 지금 인기가 분류하지 못한 주제(상한 가까이에서 다음 날로 미룬 것 등)도 브리프 몫으로 분류
+        todo = [c for c in [*cands, *company] if c.popular is None or c.pending()]
         if todo:
             try:
                 found = await classify_topics(
@@ -1075,9 +1353,11 @@ async def make_brief(
             + rising_company
             + pick(waiting, config, config.pending_max)
         )
+        # 같은 대상 묶음: 예시 아이디어의 유행과 브리프 주제를 맞출 때 (리그오브레전드 = t1)
+        groups = name_groups(aliases, same_targets)
         insights = build_insights(
             picked, day=day, popular=popular, promo=promo, products=prods, shorts=shorts,
-            tenant=tenant_of(env),
+            tenant=tenant_of(env), groups=groups,
             products_reason=prod_why, rules=load_rules(env),
         )  # fmt: skip
         await write_lines(insights, llm, context_id, queries)
@@ -1090,6 +1370,11 @@ async def make_brief(
         out.limits += [x for x in age_limits if x not in out.limits]
         if promo is None:
             out.limits.append("오늘 만든 예시 아이디어가 없어 example_ideas가 비어 있다")
+        # 게시 영상 성과(video_performance)는 쌓는 중: 점수에는 아직 넣지 않고 수만 보인다
+        from data_agent.skills.video_performance import counted_videos
+
+        videos = counted_videos(env)
+        out.limits.append(f"성과 데이터 쌓는 중(영상 {videos}개, 브리프 점수에는 아직 안 넣음)")
         if not rising_company:
             out.limits.append(
                 "회사 관련 인사이트 없음: 시즌 키워드·상품 핵심어 중 기준(시즌 배율"
@@ -1118,14 +1403,26 @@ async def make_brief(
             out.limits.append(
                 "도메인 프로필 키워드를 받지 못해 회사 연결은 연결 상품·회사 관련 키워드로만 봄"
             )
-        out.insights.sort(key=lambda i: (i.classification_pending, i.reference_only,
-                                         i.company_related, -i.score))  # fmt: skip
+        # 형식 빌리기: 참고용 중 예시 아이디어에서 회사 상품과 이어진 유행 (0개면 왜 0개인지)
+        out.limits += mark_format(out.insights, promo, warned, groups)
+        # 몫: 회사 연결 먼저 최소 몫(모자라면 기회 카드 하위 주제), 연결 없음은 최대 몫 안에서만
+        tenant = tenant_of(env)
+        from_cards = [card_insight(c, day=day, tenant=tenant, promo=promo)
+                      for c in out.opportunities]  # fmt: skip
+        out.insights, notes = fill_quota(out.insights, from_cards, config, n)
+        out.limits += notes
+        card_ids = {id(i): c.fact_ids for i, c in zip(from_cards, out.opportunities, strict=True)}
+        # 순서: 회사 상품·도메인(direct·domain) → 형식 빌리기(format) → 참고용(none)
+        out.insights.sort(key=lambda i: (
+            i.classification_pending, RELEVANCE_ORDER.get(i.company_relevance or "none", 2),
+            i.reference_only, i.company_related, -i.score))  # fmt: skip
         for n, i in enumerate(out.insights, start=1):
             i.rank = n
         out.summary = summary(out)
         for i in out.insights:  # 응답에 나오는 숫자 전부 (인사이트는 fact_ids로 가리킴)
             mine = insight_facts(i)
-            i.fact_ids = [f.fact_id for f in mine]
+            # 기회 카드에서 온 인사이트는 한 줄이 카드 숫자를 쓰므로 카드 facts도 가리킨다
+            i.fact_ids = [f.fact_id for f in mine] + card_ids.get(id(i), [])
             out.facts += mine
             # 근거 요약 (facts 중 센 것 최대 3개, 템플릿 문장)과 근거 숏츠 최대 3개
             pick_rule = hl.Rule(config.highlight_min_sample, config.highlight_max_ratio)
@@ -1143,6 +1440,13 @@ async def make_brief(
             out.limits.append(
                 "LLM 호출이 실패해 이 브리프는 저장하지 않음 (다음 요청에서 다시 만든다)"
             )
+        elif llm_failure.capped():  # 상한으로 덜 만든 브리프·기회 카드: 짧게만 (풀리면 다시)
+            ttl = llm_failure.cap_ttl(env)
+            out.limits.append(
+                f"LLM 하루 상한에 닿아 덜 만든 브리프라 {int(ttl.total_seconds() // 60)}분만 저장"
+                " (상한이 풀리면 다음 미리 계산에서 다시 만든다)"
+            )
+            store.put(day, rules, out, now, expires_at=now + ttl)
         else:
             store.put(day, rules, out, now)
         return BriefResult(out, as_evidence(out, queries, now))

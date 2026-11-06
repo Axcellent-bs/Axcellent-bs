@@ -619,8 +619,10 @@ class TrendCandidatesRequest(AxModel):
     end_date: dt.date | None = None  # 네이버 판정할 마지막 날 (한국 날짜). 없으면 어제
 
 
-# 회사와의 연결: direct = 연결 상품 있음, domain = 도메인 프로필·회사 키워드, none = 둘 다 아님
-CompanyRelevance = Literal["direct", "domain", "none"]
+# 회사와의 연결: direct = 연결 상품 있음, domain = 도메인 프로필·회사 키워드, none = 둘 다 아님,
+# format = 값 추가 (형식 빌리기: 상품 직접 연결은 없지만 광고 재료 가능하고, 그 주제의 잘 되는 숏츠
+# 형식이 있으며, 예시 아이디어에서 회사 상품과 이어진 유행. 참고용이 아님)
+CompanyRelevance = Literal["direct", "domain", "none", "format"]
 
 
 # 영상을 광고·홍보 재료로 쓸 때 확인할 것 (v2 화면 칸, 코드가 분류 결과로 정함):
@@ -1231,6 +1233,11 @@ class PromoConcept(AxModel):
     # 아래는 예전 응답은 없다. 빌린 트렌드가 회사 상품·도메인과 연결이 없으면 참고용 (코드)
     reference_only: bool = False
     reference_reason: str | None = None
+    # 아래는 예전 응답은 없다. concept_id는 내용 해시(회사·트렌드·정렬한 상품 id·숏츠 형식)라
+    # 같은 재료면 날·실행이 달라도 같다. 바뀌기 전의 무작위 id는 legacy_concept_id로만 준다
+    legacy_concept_id: str | None = None
+    # 빌린 트렌드가 지금 인기 주제면, 브리프가 같은 주제에 주는 insight_id (stable_insight_id 규칙)
+    source_insight_id: str | None = None
 
 
 class PromoShortsFormat(AxModel):
@@ -1485,7 +1492,7 @@ class ExplorerSearch(AxModel):
 
     category: str
     length: ExplorerLength
-    window: Literal["7d", "1d"]
+    window: Literal["7d", "1d", "3d"]  # 3d: 값 추가 (3일 칸 보충 검색)
     status: Literal["known", "unknown", "skipped"]
     query: str | None = None  # 검색어 (그 카테고리 지금 인기 주제 이름, 교육·책은 도메인 씨앗)
     found: int = Field(default=0, ge=0)  # 길이·한국 영상 기준을 통과한 수
@@ -1921,6 +1928,19 @@ class EvidenceHighlight(AxModel):
     sample: int | None = Field(default=None, ge=0)  # 표본 (날 수·영상 수)
     sentence: str  # 템플릿 문장 하나 (예: 네이버 검색이 평소의 1.42배예요 (지난 8주 기준))
     fact_id: str | None = None  # 고른 숫자의 facts id
+    # 아래는 예전 응답은 없다. 표본이 기준(설정)보다 적은 근거 (뒤로 보냄, 화면은 막대 없이 "참고")
+    # 와 그 표시 문구 (예: "표본 6개 · 참고")
+    low_sample: bool = False
+    sample_note: str | None = None
+
+
+class BorrowFormat(AxModel):
+    """형식 빌리기 인사이트의 빌릴 숏츠 형식 (숏츠 통계 값 그대로)."""
+
+    name: str = Field(min_length=1)  # 숏츠 형식 (예: 챌린지)
+    median_views: float | None = Field(default=None, ge=0)  # 그 형식 조회 중앙값
+    samples: int | None = Field(default=None, ge=0)  # 그 형식 숏츠 수
+    source: Literal["topic", "category", "all"] | None = None  # 어느 단계 숏츠 통계에서 골랐는지
 
 
 class TrendInsight(AxModel):
@@ -1994,6 +2014,12 @@ class TrendInsight(AxModel):
     # 근거 숏츠 (썸네일·제목·조회수, 최대 3개)
     evidence_highlights: list[EvidenceHighlight] = Field(default_factory=list, max_length=3)
     evidence_shorts: list[VideoLink] = Field(default_factory=list, max_length=3)
+    # 아래는 예전 응답은 없다. 형식 빌리기(company_relevance = format) 칸: 빌릴 형식, 이어 붙일 회사
+    # 상품(예시 아이디어에서 이어진 것), 주의(상표·인물·음원: 이름·로고는 쓰지 말고 형식만)
+    borrow_format: BorrowFormat | None = None
+    borrow_products: list[InsightProduct] = Field(default_factory=list)
+    cautions: list[CautionType] = Field(default_factory=list)
+    caution_note: str | None = None
 
 
 # ------------------------------------------------ 기회 가설 카드 (trend_insight_brief 선택 칸)
@@ -2225,6 +2251,25 @@ class CollectorStatus(AxModel):
     reason: str  # 잠금 상태 한 줄 (사람이 읽음)
 
 
+class YouTubeChartFailure(AxModel):
+    """영상 탐색 카테고리 인기 차트(videos.list chart=mostPopular)를 받지 못한 YouTube 카테고리.
+
+    차트가 다시 되면 목록에서 빠진다. 그 칸은 같은 카테고리 검색(최근 3일, 하루 검색 상한 안에서
+    카테고리마다 하루 1번)으로 대신 채운다.
+    """
+
+    category_id: str = Field(min_length=1)  # YouTube 카테고리 id (예: 27)
+    categories: list[str] = Field(default_factory=list)  # 이 id를 쓰는 화면 카테고리
+    code: str  # 실패 코드 (예: UNAVAILABLE)
+    reason: str  # 실패 이유 (커넥터 문장)
+    failed_at: UtcDatetime  # 마지막으로 실패한 시각
+    # 대신 검색: searched = 검색함, cap = 하루 검색 상한, failed = 검색도 실패, not_run = 안 함
+    fallback: Literal["searched", "cap", "failed", "not_run"] = "not_run"
+    fallback_found: int | None = Field(default=None, ge=0)  # 검색으로 찾은 영상 수
+    fallback_reason: str | None = None  # 검색하지 못했으면 이유
+    fallback_day: dt.date | None = None  # 대신 검색 상태의 날 (한국 날짜)
+
+
 class DataSourcesOutput(AxModel):
     sources: list[DataSource] = Field(default_factory=list)
     checked_at: UtcDatetime | None = None
@@ -2237,6 +2282,8 @@ class DataSourcesOutput(AxModel):
     pending_sources: list[PendingSource] = Field(default_factory=list)
     # 아래는 예전 응답은 없다. YouTube 오늘 사용량(하나의 장부)과 하루 상한
     youtube_usage: YouTubeDailyUsage | None = None
+    # 아래는 예전 응답은 없다. 카테고리 인기 차트를 받지 못한 YouTube 카테고리 (영상 탐색)
+    youtube_chart_failures: list[YouTubeChartFailure] = Field(default_factory=list)
 
 
 class YouTubeCallerUsage(AxModel):
@@ -2279,6 +2326,19 @@ class LlmDailyUsage(AxModel):
     token_cap: int = Field(gt=0)
     reached: bool  # 상한에 닿아 지금은 LLM을 부르지 않음
     note: str | None = None  # reached면 "LLM 하루 상한: …"
+    # 아래는 예전 응답은 없다. skill·작업별 오늘 사용량 (많은 순), 남겨 둔 몫 기준과 그 상태
+    by_task: list[LlmTaskUsage] = Field(default_factory=list)
+    reserve_ratio: float | None = Field(default=None, ge=0, le=1)  # 이 비율부터 브리프 몫만
+    reserving: bool = False  # 지금 브리프·기회 카드 몫만 남기고 나머지는 다음 날로 미룸
+
+
+class LlmTaskUsage(AxModel):
+    """data LLM 오늘 사용량 한 줄 (skill × 작업)."""
+
+    skill: str  # 부른 skill (미리 계산도 skill 이름)
+    task: str  # 문장·분류·계획·프로필·예시 아이디어·임베딩 등
+    calls: int = Field(ge=0)
+    tokens: int = Field(ge=0)
 
 
 # ------------------------------------------------ 수집 계획 (source_plan)
@@ -2399,3 +2459,216 @@ class DomainSubtopicsOutput(AxModel):
     generated_at: UtcDatetime | None = None
     limits: list[str] = Field(default_factory=list)
     summary: str = ""
+
+
+# ------------------------------------------------ video_performance (게시한 영상 성과)
+# 게시한 영상을 추적 목록에 넣어 게시 후 1시간·1일·3일·7일 시점의 조회수·좋아요·댓글을 저장하고,
+# 목표 참고값(인사이트 target_views_reference)·같은 카테고리·형식 숏츠 중앙값 대비 배수를 낸다.
+# 숫자는 모두 코드, facts에. 아직 그 시점이 안 됐으면 unknown + "측정 중".
+# 인스타그램·틱톡은 아직 읽는 길이 없어 unknown + "연결 대기"와 필요한 것.
+
+VideoPlatform = Literal["youtube", "instagram", "tiktok"]
+VideoCheckpointName = Literal["1h", "1d", "3d", "7d"]
+
+
+class VideoPerformanceRequest(AxModel):
+    """campaign_id 또는 video_url 중 하나는 있어야 한다. video_url이 있으면 등록(추적 목록)한다."""
+
+    campaign_id: str | None = Field(default=None, min_length=1, max_length=120)
+    video_url: str | None = Field(default=None, min_length=1, max_length=500)
+    insight_id: str | None = Field(default=None, max_length=80)  # 이 영상을 낸 인사이트
+    proposal_id: str | None = Field(default=None, max_length=80)
+    test: bool = False  # 시험 영상: 진짜 캠페인과 섞지 않는다 (화면·브리프 집계에서 뺌)
+    # 아래는 예전 요청은 없다 (v3). 등록된 영상 전부 (성과 탭). 새로 재지 않고 저장분만 읽는다
+    list_all: bool = False
+
+    @model_validator(mode="after")
+    def _one_of(self) -> VideoPerformanceRequest:
+        if not self.campaign_id and not self.video_url and not self.list_all:
+            raise ValueError("campaign_id 또는 video_url이 있어야 한다 (전부 보기는 list_all)")
+        return self
+
+
+class VideoCheckpoint(AxModel):
+    """게시 후 한 시점의 값. 모르면 None + 이유 (0으로 채우지 않는다)."""
+
+    checkpoint: VideoCheckpointName
+    due_at: UtcDatetime | None = None  # 게시 시각 + 시점
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = None  # 측정 중 · 놓침 · 연결 대기 등
+    measured_at: UtcDatetime | None = None
+    hours_after: float | None = Field(default=None, ge=0)  # 게시 후 실제로 잰 시간
+    views: int | None = Field(default=None, ge=0)
+    likes: int | None = Field(default=None, ge=0)  # 숨김이면 None
+    comments: int | None = Field(default=None, ge=0)
+    views_per_hour: float | None = Field(default=None, ge=0)  # 조회 ÷ 게시 후 시간
+    like_rate: float | None = Field(default=None, ge=0)  # 좋아요 ÷ 조회
+    comment_rate: float | None = Field(default=None, ge=0)  # 댓글 ÷ 조회
+    # 조회 ÷ 목표 참고값. v2부터 목표 시점(출력의 target_checkpoint, 7d)에만 있고 다른 시점은 None
+    target_ratio: float | None = Field(default=None, ge=0)
+    peer_ratio: float | None = Field(default=None, ge=0)  # 조회 ÷ 같은 카테고리·형식 숏츠 중앙값
+    fact_ids: list[str] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다 (v2). 화면 한 줄 (예: "1일 · 33,263회 · 같은 형식 대비 16.63배")
+    line: str | None = None
+    # 아래는 예전 응답은 없다 (v3). 같은 형식 숏츠의 게시 후 같은 시간대(이 시점 창) 조회 중앙값
+    # (시간 맞춤). 표본이 5개 미만이면 배수 없이 baseline_reason ("기준 없음(표본 n)").
+    # 위 peer_ratio(지금 조회수 중앙값 대비, 시간 안 맞춤)는 칸만 남기고 화면에서 쓰지 않는다
+    baseline_basis: Literal["age_matched"] | None = None
+    baseline_views: float | None = Field(default=None, ge=0)
+    baseline_n: int | None = Field(default=None, ge=0)
+    baseline_reason: str | None = None
+    peer_age_ratio: float | None = Field(default=None, ge=0)  # 조회 ÷ baseline_views
+
+
+class VideoPerformanceGroup(AxModel):
+    """성과 모으기 표 한 줄 (인사이트·형식·카테고리별). 시험 영상은 뺀다.
+
+    v2부터 목표 시점(7d) 값만 모은다 (performance_by_horizon의 7d 줄과 같음). 그 전에는 영상마다
+    가장 늦게 잰 시점 값을 섞었다.
+    """
+
+    key: Literal["insight", "format", "category"]
+    value: str
+    videos: int = Field(ge=0)  # 등록된 영상 수
+    measured: int = Field(ge=0)  # 목표 시점 목표 대비 배수가 있는 영상 수
+    median_target_ratio: float | None = Field(default=None, ge=0)  # 목표 시점(7d) 값의 중앙값
+
+
+class VideoPerformanceHorizonGroup(AxModel):
+    """성과 모으기 한 줄: 묶음 하나의 시점 하나 (1d·3d·7d). 시험 영상은 뺀다.
+
+    그 시점을 잰 영상만 넣는다. 측정 중·놓침·게시 시각 모름은 빼고 빠진 수로 센다.
+    """
+
+    key: Literal["insight", "format", "category"]
+    value: str
+    checkpoint: VideoCheckpointName
+    videos: int = Field(ge=0)  # 묶음의 영상 수
+    n: int = Field(ge=0)  # 집계에 들어간 영상 수 (그 시점을 잰 영상)
+    excluded: int = Field(ge=0)  # 빠진 수 (videos − n)
+    excluded_measuring: int = Field(default=0, ge=0)  # 그 시점이 아직 (측정 중)
+    excluded_missed: int = Field(default=0, ge=0)  # 그 시점을 놓침·게시 시각 모름 등
+    low_sample: bool = True  # n < 3
+    median_views: float | None = Field(default=None, ge=0)
+    median_peer_ratio: float | None = Field(default=None, ge=0)  # 기준값이 있는 영상만
+    peer_n: int = Field(default=0, ge=0)  # 같은 숏츠 대비가 있는 영상 수
+    median_target_ratio: float | None = Field(default=None, ge=0)  # 목표 시점(7d)에만
+    target_n: int = Field(default=0, ge=0)  # 목표 대비가 있는 영상 수
+
+
+# 판정 (v3): 7일 조회수 ÷ 목표. achieved = 1배 이상, missed = 미만, measuring = 7일이 아직,
+# excluded = 시험 영상·목표 없음·7일 놓침·연결 대기 (집계에서 뺌)
+VideoVerdict = Literal["achieved", "missed", "measuring", "excluded"]
+# 신호 등급: 같은 형식 숏츠(시간 맞춤) 중앙값의 80% 이상 strong, 50~80% normal, 50% 미만 weak,
+# 기준 표본 5개 미만·값 없음 = unknown (판단 불가)
+SignalLevel = Literal["strong", "normal", "weak", "unknown"]
+
+
+class VideoSignal(AxModel):
+    """성과 요인 신호 하나 (코드 계산). 비교는 같은 형식 숏츠의 시간 맞춤 중앙값."""
+
+    value: float | None = None  # 우리 영상 값 (first는 1시간 조회 ÷ 목표, 나머지는 비율)
+    display: str | None = None  # 화면 값 ("49%", "6.0%", "0.80%", "+64%")
+    compared: float | None = None  # 등급에 쓴 우리 값 (first는 1시간 조회수)
+    baseline: float | None = None  # 같은 형식 숏츠 중앙값 (같은 시점 창)
+    baseline_n: int = Field(default=0, ge=0)
+    checkpoint: VideoCheckpointName | None = None  # 어느 시점 값인지
+    level: SignalLevel = "unknown"
+    reason: str | None = None  # unknown이면 이유
+
+
+class VideoSignals(AxModel):
+    first: VideoSignal = Field(default_factory=VideoSignal)  # 첫 1시간 속도
+    like: VideoSignal = Field(default_factory=VideoSignal)  # 좋아요율 (마지막으로 잰 시점)
+    cmt: VideoSignal = Field(default_factory=VideoSignal)  # 댓글율 (마지막으로 잰 시점)
+    grow: VideoSignal = Field(default_factory=VideoSignal)  # 1일 이후 성장 = 3d ÷ 1d − 1
+
+
+class VideoProjection(AxModel):
+    """7일 예상치 (측정 중일 때만): 3일 조회 × 같은 형식 숏츠의 7일/3일 중앙값. 늘 예상치."""
+
+    views: int | None = Field(default=None, ge=0)
+    ratio: float | None = Field(default=None, ge=0)  # 예상 ÷ 목표
+    is_estimate: bool = True
+    multiplier: float | None = Field(default=None, ge=0)  # 같은 형식 7일/3일 중앙값
+    baseline_n: int = Field(default=0, ge=0)
+    reason: str | None = None  # 못 내면 이유
+
+
+class VideoChip(AxModel):
+    """인사이트 카드의 영상 칩."""
+
+    video_id: str
+    name: str
+    verdict: VideoVerdict
+    target_ratio: float | None = Field(default=None, ge=0)  # 7일 목표 대비 (측정 중이면 None)
+    projected_ratio: float | None = Field(default=None, ge=0)  # 측정 중이면 예상치 (예상치 표기)
+
+
+class VideoInsightCard(AxModel):
+    """인사이트별로 보면 (인사이트 묶음만, 시험 영상 제외)."""
+
+    insight_id: str
+    topic: str | None = None
+    finished: int = Field(default=0, ge=0)  # 7일 판정이 난 영상 (달성 + 미달)
+    achieved: int = Field(default=0, ge=0)
+    missed: int = Field(default=0, ge=0)
+    measuring: int = Field(default=0, ge=0)
+    line: str = ""  # "끝난 N개 중 M개 달성 · K개 측정 중"
+    chips: list[VideoChip] = Field(default_factory=list)
+    median_target_ratio: float | None = Field(default=None, ge=0)  # 끝난 영상 3개 이상일 때만
+    notes: list[str] = Field(default_factory=list)  # 결론 이름·결과 갈림 문구
+
+
+class VideoVerdictTally(AxModel):
+    """요약 타일: 영상 수(시험 영상 제외)와 판정별 수."""
+
+    videos: int = Field(default=0, ge=0)
+    achieved: int = Field(default=0, ge=0)
+    missed: int = Field(default=0, ge=0)
+    measuring: int = Field(default=0, ge=0)
+    excluded: int = Field(default=0, ge=0)
+
+
+class VideoPerformanceOutput(AxModel):
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = None
+    platform: VideoPlatform | None = None
+    video_id: str | None = None
+    video_url: str | None = None
+    campaign_id: str | None = None
+    insight_id: str | None = None
+    proposal_id: str | None = None
+    test: bool = False
+    title: str | None = None
+    published_at: UtcDatetime | None = None
+    tracking: bool = False  # 추적 목록에 있음 (시점마다 잰다)
+    checkpoints: list[VideoCheckpoint] = Field(default_factory=list)
+    target_views_reference: float | None = Field(default=None, ge=0)
+    target_reference_basis: str | None = None  # 어느 인사이트의 목표 참고값인지
+    category: str | None = None  # 비교에 쓴 카테고리 (인사이트에서)
+    shorts_format: str | None = None  # 비교에 쓴 숏츠 형식 (인사이트에서)
+    peer_median_views: float | None = Field(default=None, ge=0)
+    peer_basis: str | None = None  # 어느 숏츠 통계 중앙값인지 (모르면 이유)
+    needs: list[str] = Field(default_factory=list)  # 연결 대기면 필요한 것 (계정 토큰 등)
+    facts: list[DataFact] = Field(default_factory=list)
+    performance_table: list[VideoPerformanceGroup] = Field(default_factory=list)
+    limits: list[str] = Field(default_factory=list)
+    summary: str = ""
+    schema_version: str = ""
+    # 아래는 예전 응답은 없다 (v2). 목표 참고값이 정의된 시점과 시점별 성과 모으기
+    target_checkpoint: VideoCheckpointName | None = None
+    performance_by_horizon: list[VideoPerformanceHorizonGroup] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다 (v3). 판정·성과 요인·개선 방향 (규칙 기반, LLM 안 씀)
+    topic: str | None = None  # 인사이트 주제 (화면 "책추천 · 리뷰 · 목표 5,000회")
+    baseline_basis: Literal["age_matched"] | None = None  # 같은 형식 비교 기준
+    verdict: VideoVerdict | None = None
+    verdict_reason: str | None = None
+    signals: VideoSignals | None = None
+    factors: list[str] = Field(default_factory=list)  # 성과 요인 문장 (숫자 포함)
+    actions: list[str] = Field(default_factory=list)  # 개선 방향 문장
+    projection: VideoProjection | None = None
+    # list_all 응답: 영상마다 이 모양 (영상 칸만 채움), 요약 타일, 인사이트 카드
+    videos: list[VideoPerformanceOutput] = Field(default_factory=list)
+    tally: VideoVerdictTally | None = None
+    insight_cards: list[VideoInsightCard] = Field(default_factory=list)

@@ -146,6 +146,8 @@ export interface PR {
   target?: RepoTarget // 레포가 2개 이상일 때 AI가 고른 대상 레포 (사람 승인 전에는 PR을 열지 않는다)
   url?: string | null // 형상관리(깃허브)에 열린 실제 PR 주소
   vcsNumber?: number | null // 형상관리 변경 번호 (레포 PR 화면으로 잇는다)
+  crossEvidence?: CrossEvidence[] // 마지막 교차검증에서 다른 부서에 받은 근거 (통과·머지 뒤에도 남음)
+  crossCheckedAt?: string | null
 }
 
 // PR을 올릴 레포. 연결 1개면 자동 승인, 2개 이상이면 AI 제안 → 사람 승인
@@ -646,6 +648,10 @@ export type Action =
   | { type: 'editBlock'; doc: string; block: string; text: string }
   | { type: 'toggleTodo'; doc: string; block: string }
   | { type: 'removeBlock'; doc: string; block: string }
+  // 개발이 돌려보낸 작업 (서버 returned_actions.py, 예시 모드에서는 바꾸지 않는다)
+  | { type: 'returnedToMarketing'; task: string }
+  | { type: 'returnedToDev'; task: string; reason: string }
+  | { type: 'dismissReturned'; task: string }
 
 // 기획·개발이 다른 부서로 보낸 활동은 모두 그 부서 창구(outbox)에도 쌓는다
 export function reducer(s: State, a: Action): State {

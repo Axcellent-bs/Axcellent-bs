@@ -31,6 +31,10 @@
   새로 만든다. 규칙 버전(`rules_version`) = 재료 거르기 설정(`[promo]`)·분류 목록·프롬프트의 해시라,
   규칙이 바뀌면 다음 요청에서 자동으로 다시 만든다
   만든 기획안은 모두 기록으로 남긴다(`backend/.data/promo_concepts.db`, 피드백 저장은 아직 없음)
+- id(`stable_concept_id`): concept_id = 회사 + 빌린 트렌드 + 정렬한 상품 id + 숏츠 형식의
+  해시라 같은 재료면 날·실행이 달라도 같다(브리프 `stable_insight_id`와 같은 방식). 한 번에 같은
+  재료의 초안이 또 나오면 그 초안만 제목까지 넣은 해시. 예전 무작위 id는 `legacy_concept_id`.
+  지금 인기 트렌드를 빌렸으면 `source_insight_id` = 브리프가 같은 주제에 주는 insight_id
 README "promo_concepts".
 """
 
@@ -220,28 +224,35 @@ class PromoStore:
             cols = [r[1] for r in self._conn.execute("PRAGMA table_info(runs)")]
             if "rules" not in cols:  # 예전 파일: 규칙 버전 칸 (예전 줄은 NULL = 캐시로 안 씀)
                 self._conn.execute("ALTER TABLE runs ADD COLUMN rules TEXT")
+            if "expires_at" not in cols:  # 상한으로 덜 만든 기록의 만료 시각 (NULL = 하루 캐시)
+                self._conn.execute("ALTER TABLE runs ADD COLUMN expires_at TEXT")
             self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
 
-    def save(self, day: date, output: PromoConceptsOutput, rules: str | None = None) -> None:
+    def save(self, day: date, output: PromoConceptsOutput, rules: str | None = None,
+             expires_at: datetime | None = None) -> None:  # fmt: skip
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT INTO runs (run_id, day, created_at, output, rules) VALUES (?,?,?,?,?)",
+                "INSERT INTO runs (run_id, day, created_at, output, rules, expires_at)"
+                " VALUES (?,?,?,?,?,?)",
                 (
                     output.run_id,
                     day.isoformat(),
                     (output.generated_at or datetime.now(UTC)).isoformat(),
                     output.model_dump_json(),
                     rules,
+                    expires_at.isoformat() if expires_at else None,
                 ),
             )
 
-    def latest(self, day: date, rules: str | None = None) -> PromoConceptsOutput | None:
-        """그날 마지막 기록. `rules`를 주면 그 규칙 버전으로 만든 것만."""
-        sql = "SELECT output FROM runs WHERE day = ?"
-        args: tuple[str, ...] = (day.isoformat(),)
+    def latest(
+        self, day: date, rules: str | None = None, now: datetime | None = None
+    ) -> PromoConceptsOutput | None:
+        """그날 마지막 기록 (만료된 것은 빼고). `rules`를 주면 그 규칙 버전으로 만든 것만."""
+        sql = "SELECT output FROM runs WHERE day = ? AND (expires_at IS NULL OR expires_at > ?)"
+        args: tuple[str, ...] = (day.isoformat(), (now or datetime.now(UTC)).isoformat())
         if rules is not None:
             sql += " AND rules = ?"
             args += (rules,)
@@ -478,9 +489,56 @@ def rules_version(config: PromoConfig) -> str:
         "prompt": _prompt(config, None),
         "retry_rule": RETRY_RULE,
         "min_kept": MIN_KEPT,
+        "concept_id": ID_VERSION,
+        "trend_pool": POOL_VERSION,
     }
     text = json.dumps(parts, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+ID_VERSION = "content.v1"  # concept_id 규칙 (바뀌면 규칙 버전이 바뀌어 오늘 저장분을 다시 만든다)
+POOL_VERSION = "brief-pool.v1"  # 지금 인기 재료를 브리프 후보(광고 재료 가능) 안에서만 고름
+
+
+def _norm(text: str) -> str:
+    return "".join(text.split()).lower()
+
+
+def stable_concept_id(
+    tenant: str,
+    trend: str,
+    product_ids: Sequence[str],
+    shorts_format: str | None,
+    title: str | None = None,
+) -> str:
+    """내용 id: 회사 + 빌린 트렌드 + 정렬한 상품 id + 숏츠 형식 해시. 같은 재료면 늘 같다.
+
+    `title`은 한 번에 같은 재료의 초안이 둘 이상일 때 두 번째부터만 넣는다.
+    """
+    products = ",".join(sorted(dict.fromkeys(product_ids)))
+    key = f"{_norm(tenant)}|{_norm(trend)}|{products}|{_norm(shorts_format or '')}"
+    if title is not None:
+        key += f"|{_norm(title)}"
+    return "pc_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def assign_ids(concepts: Sequence[PromoConcept], tenant: str) -> None:
+    """무작위 id → legacy_concept_id, 내용 id → concept_id. 같은 재료가 또 나오면 제목까지 넣는다.
+
+    지금 인기 트렌드를 빌린 초안에는 브리프가 같은 주제에 주는 insight_id를 단다.
+    """
+    from data_agent.skills.trend_insight_brief import stable_insight_id
+
+    seen: set[str] = set()
+    for c in concepts:
+        parts = (tenant, c.borrowed_trend, [p.product_id for p in c.products], c.shorts_format)
+        cid = stable_concept_id(*parts)
+        if cid in seen:
+            cid = stable_concept_id(*parts, title=c.title)
+        seen.add(cid)
+        c.legacy_concept_id, c.concept_id = c.concept_id, cid
+        if c.trend_kind == "popular" and c.borrowed_trend:
+            c.source_insight_id = stable_insight_id(tenant, c.borrowed_trend)
 
 
 def _today(now: datetime) -> date:
@@ -622,7 +680,7 @@ async def make_concepts(
     store = store or PromoStore(env.get(DB_ENV) or DEFAULT_DB)
     try:
         rules = rules_version(config)
-        if not request.regenerate and (hit := store.latest(today, rules)) is not None:
+        if not request.regenerate and (hit := store.latest(today, rules, now)) is not None:
             out = hit.model_copy(update={"cached": True})
             return PromoResult(out, Evidence(queries=[f"promo_concepts cache rules={rules}"],
                                data_summary=out.summary, collected_at=now))  # fmt: skip
@@ -631,7 +689,10 @@ async def make_concepts(
             context_id=context_id, category_cache=category_cache, board=board, youtube=youtube,
         )  # fmt: skip
         # LLM 호출이 실패한 결과(두 번째 호출 실패로 첫 답만 쓴 것 등)는 저장하지 않는다
-        if result.output.concepts and not llm_failure.failed():
+        if result.output.concepts and llm_failure.capped() and not llm_failure.failed():
+            # LLM 하루 상한으로 덜 만든 것(분류 unknown·다시 묻기 못 함): 짧게만 (풀리면 다시)
+            store.save(today, result.output, rules, expires_at=now + llm_failure.cap_ttl(env))
+        elif result.output.concepts and not llm_failure.failed():
             store.save(today, result.output, rules)
         return result
     finally:
@@ -791,7 +852,10 @@ async def _generate(
             dropped += more_dropped
             popular_reason = popular_reason or second.no_popular_reason.strip()
             retry_note = " 버린 이유를 붙여 한 번 더 물음."
+    from data_agent.skills.trend_insight_brief import tenant_of
+
     out.concepts = kept[: config.concepts]
+    assign_ids(out.concepts, tenant_of(env))
     out.dropped = dropped
     mark_reference(out.concepts, company_terms(shop.products, shop.categories))
     if not any(c.trend_kind == "popular" for c in out.concepts):
@@ -909,6 +973,13 @@ async def popular_materials(
     allowed = [c for c in config.trend_categories if c not in NEVER_TREND]
     picked: list[PromoTrend] = []
     skipped: list[PromoSkippedTrend] = []
+    # 그날 브리프 후보(광고 재료 가능한 유행) 안에서만 고른다. 브리프가 형식 빌리기로 이을 수 있게
+    from data_agent.skills.trend_candidates import load_config as candidate_config
+    from data_agent.skills.trend_insight_brief import material_pool
+
+    rising = [v for n in board.rising_names() if (v := board.verdict([n]))] if board else []
+    pool, seen = material_pool(o, rising, candidate_config(env).aliases, env)
+    in_pool = {_key(n) for n in pool}
     for group in o.by_category:
         if group.category not in allowed:
             continue
@@ -917,6 +988,8 @@ async def popular_materials(
             if mine >= config.trends_per_category or i.brand_safe is False:
                 continue
             why = trend_skip_reason(i, config)
+            if why is None and not in_pool & {_key(n) for n in [i.keyword, *i.aliases]}:
+                why = f"오늘 브리프 후보(점수 상위 {seen}개 중 광고 재료 가능)에 없음"
             if why:
                 skipped.append(PromoSkippedTrend(name=i.keyword, reason=why))
                 continue

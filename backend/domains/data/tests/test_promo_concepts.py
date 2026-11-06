@@ -161,6 +161,8 @@ async def _fake_popular(*args: Any, **kw: Any) -> Any:
                     category="IT", items=[_topic("새 휴대폰", "IT", 1, videos=2, trending=3)]
                 ),  # 출처 2개
             ]
+            # 실제 응답처럼 전체 목록도 (브리프 후보 = 이 목록에서 고른다)
+            items = [t for g in by_category for t in g.items]
 
     return R()
 
@@ -354,6 +356,31 @@ def test_trend_material_needs_two_sources_or_enough_videos_and_no_person(
     assert skipped["원딜"].startswith("출처 1개·YouTube 인기 영상 4개")
     assert skipped["경기"].startswith("출처 1개·YouTube 인기 영상 0개")
     assert "한국철강" not in skipped  # 뉴스·사건은 기준을 보기 전에 늘 뺀다
+
+
+def test_popular_trends_come_only_from_the_days_brief_candidates(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """예시 아이디어의 지금 인기 재료는 그날 브리프 후보(광고 재료 가능) 안에서만."""
+    from data_agent.skills import trend_insight_brief as brief
+
+    monkeypatch.setattr(brief, "material_pool", lambda *a, **k: (["새 휴대폰"], 7))
+    out = _run(tmp_path, PromoLLM(), monkeypatch)
+    assert [t.name for t in out.trends if t.kind == "popular"] == ["새 휴대폰"]
+    skipped = {s.name: s.reason for s in out.skipped_trends}
+    assert skipped["리그오브레전드"] == "오늘 브리프 후보(점수 상위 7개 중 광고 재료 가능)에 없음"
+    assert skipped["페이커"].startswith("사람 이름")  # 원래 이유가 먼저
+
+
+def test_material_pool_uses_the_brief_rules(tmp_path: Path) -> None:
+    from data_agent.skills import trend_insight_brief as brief
+
+    popular = asyncio.run(_fake_popular()).output
+    cfg = tmp_path / "trends.toml"
+    cfg.write_text("[brief]\nmax_insights = 3\nage_topics_extra = 1\n", encoding="utf-8")
+    pool, seen = brief.material_pool(popular, [], {}, {"DATA_TREND_CONFIG": str(cfg)})
+    assert seen == 4  # 점수 상위 3 + 1개만 본다
+    assert "한국철강" not in pool and "페이커" not in pool  # 뉴스·사람 이름은 광고 재료 아님
 
 
 def test_reason_is_returned_when_no_draft_uses_a_popular_trend(
@@ -568,3 +595,50 @@ def test_concepts_borrowing_unrelated_popular_trends_are_reference_only() -> Non
     assert golf.reference_only and golf.reference_reason == promo.NO_COMPANY_LINK
     assert not note.reference_only  # 회사 상품 핵심어와 겹침
     assert not season.reference_only and not none.reference_only  # 시즌 재료·트렌드 없음은 그대로
+
+
+# ---------------------------------------------------------------- id (#664)
+
+
+def test_concept_id_is_the_same_for_the_same_material_across_runs(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    first = _run(tmp_path / "a", PromoLLM(), monkeypatch)
+    fresh = _run(tmp_path / "a", PromoLLM(), monkeypatch, regenerate=True)
+    other_day = _run(tmp_path / "b", PromoLLM(), monkeypatch)  # 저장분 없이 새로 계산
+    ids = {out.concepts[0].concept_id for out in (first, fresh, other_day)}
+    assert len(ids) == 1 and next(iter(ids)).startswith("pc_") and len(next(iter(ids))) == 19
+    assert fresh.run_id != first.run_id  # run_id는 시점 기록용으로 그대로 무작위
+    legacy = first.concepts[0].legacy_concept_id
+    assert legacy and legacy.startswith("pc_") and legacy != first.concepts[0].concept_id
+
+
+def test_concept_id_follows_trend_products_and_format_not_order_or_spaces() -> None:
+    trend = "무지 노트 12월 시즌"
+    base = promo.stable_concept_id("catbooks", trend, ["p2", "p1"], "챌린지")
+    assert base == promo.stable_concept_id("Catbooks", "무지노트 12월시즌", ["p1", "p2"], "챌린지")
+    assert base != promo.stable_concept_id("catbooks", trend, ["p1"], "챌린지")
+    assert base != promo.stable_concept_id("catbooks", trend, ["p1", "p2"], "브이로그")
+    assert base != promo.stable_concept_id("other", trend, ["p1", "p2"], "챌린지")
+
+
+def test_same_material_twice_gets_two_ids_and_popular_trends_get_the_brief_id() -> None:
+    from ax_contracts.schemas.data import PromoConcept, PromoProduct
+    from data_agent.skills.trend_insight_brief import stable_insight_id
+
+    def concept(title: str, trend: str, kind: Any) -> PromoConcept:
+        return PromoConcept(
+            concept_id=f"pc_{title}", title=title, borrowed_trend=trend, trend_kind=kind,
+            products=[PromoProduct(product_id="p1", name="노트")], shorts_format="챌린지",
+        )  # fmt: skip
+
+    items = [concept("a", "롤드컵", "popular"), concept("b", "롤드컵", "popular"),
+             concept("c", "무지 노트 12월 시즌", "season")]  # fmt: skip
+    promo.assign_ids(items, "catbooks")
+    a, b, c = items
+    assert a.concept_id == promo.stable_concept_id("catbooks", "롤드컵", ["p1"], "챌린지")
+    assert b.concept_id == promo.stable_concept_id("catbooks", "롤드컵", ["p1"], "챌린지", "b")
+    assert len({a.concept_id, b.concept_id, c.concept_id}) == 3
+    assert a.legacy_concept_id == "pc_a"
+    assert a.source_insight_id == b.source_insight_id == stable_insight_id("catbooks", "롤드컵")
+    assert c.source_insight_id is None  # 시즌 재료는 브리프 주제가 아님

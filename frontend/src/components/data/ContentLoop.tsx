@@ -97,6 +97,47 @@ function StageCard({ stage, trend, probes, active, onSelect }: {
   );
 }
 
+const CIRCLED = ["①", "②", "③", "④", "⑤"];
+
+/** 한 줄 스테퍼 (높이 40~56px): ① 감지 ● → ② 인사이트 ● → ③ 넘김 · 준비 중 → ④ 성과 · 측정 대기.
+ *  동작 중이면 파란 점, 확인 중이면 회색 점, 그 밖은 서버·정의 상태 글자. 누르면 그 단계 하위 탭.
+ *  설명 문장·범례·판정 개수(큰 루프 카드)는 접힘 "루프 설명" 안 (ContentLoop 그대로) */
+export function LoopStepper({ trend, probes, active, onSelect }: {
+  trend: LoopTrendState; probes: LoopProbes; active?: number; onSelect?: (stage: LoopStage) => void;
+}) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <ol className="flex h-11 min-w-0 items-center gap-1.5 overflow-x-auto rounded-full bg-surface px-3 ring-1 ring-ink-100" aria-label="콘텐츠 루프">
+        {LOOP_STAGES.map((stage, i) => {
+          const frame = frameOf(stage, probes);
+          const status = stage.probe ? PROBE_STATUS[probes[stage.probe]] : stage.status;
+          const on = stage.no === active;
+          return (
+            <Fragment key={stage.no}>
+              {i > 0 && <li aria-hidden className="text-xs text-ink-400">→</li>}
+              <li className="shrink-0">
+                <button type="button" onClick={() => onSelect?.(stage)} aria-current={on ? "step" : undefined}
+                  title={`${stage.title} · ${status.label}`}
+                  className={`flex items-center gap-1 whitespace-nowrap rounded-full px-1.5 py-1 text-[13px] transition hover:bg-ink-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${
+                    frame === "live" ? (on ? "font-bold text-brand-700" : "font-semibold text-ink-900") : "text-ink-500"}`}>
+                  <span>{CIRCLED[i] ?? stage.no} {stage.title}</span>
+                  {frame === "live" ? <span aria-label={status.label} className={`inline-block h-2 w-2 rounded-full ${on ? "bg-brand-600" : "bg-ink-900"}`} />
+                    : frame === "checking" ? <span aria-label={status.label} className="inline-block h-2 w-2 rounded-full bg-ink-300" />
+                    : <span>· {status.label}</span>}
+                </button>
+              </li>
+            </Fragment>
+          );
+        })}
+      </ol>
+      <details className="text-xs text-ink-500 [&[open]]:basis-full">
+        <summary className="cursor-pointer select-none">루프 설명</summary>
+        <div className="mt-2"><ContentLoop trend={trend} probes={probes} active={active} onSelect={onSelect} /></div>
+      </details>
+    </div>
+  );
+}
+
 export function ContentLoop({ trend, probes, active, onSelect }: {
   trend: LoopTrendState;
   probes: LoopProbes;

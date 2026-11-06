@@ -283,14 +283,24 @@ class _Lines(BaseModel):
 async def write_lines(
     cards: Sequence[DomainOpportunity], llm: LLMClient, context_id: str | None, queries: list[str]
 ) -> None:
-    data = {c.subtopic: json.dumps(facts(c), ensure_ascii=False) for c in cards if facts(c)}
-    answer: dict[str, str] = {}
+    """카드마다 한 줄 (묶어서 LLM 한 번). 같은 하위 주제 + 같은 근거 숫자로 쓴 문장은 다시 묻지
+    않는다 (`line_store`, 카드 id에는 날짜가 있어 하위 주제로 잇는다)."""
+    from data_agent.line_store import LINES, line_key
+
+    keys = {c.subtopic: line_key("card", c.subtopic, facts(c)) for c in cards if facts(c)}
+    saved = {t: line for t, k in keys.items() if (line := LINES.get(k)) is not None}
+    data = {c.subtopic: json.dumps(facts(c), ensure_ascii=False) for c in cards
+            if facts(c) and c.subtopic not in saved}  # fmt: skip
+    answer: dict[str, str] = dict(saved)
     why: str | None = None
+    if saved:
+        queries.append(f"opportunity lines reused={len(saved)}")
     if data:
         queries.append(f"llm opportunity lines={len(data)}")
         try:
             got = await llm.structured(LINE_PROMPT, _Lines, untrusted=data, context_id=context_id)
-            answer = {x.keyword.strip(): x.line.strip() for x in got.items}
+            answer |= {x.keyword.strip(): x.line.strip() for x in got.items
+                       if x.keyword.strip() not in saved}  # fmt: skip
         except LLMNotConfiguredError as error:
             why = f"{no_llm(error)} 고정 문장"
         except (LLMFormatError, ValidationError):
@@ -307,9 +317,11 @@ async def write_lines(
             )
             continue
         line = answer.get(c.subtopic, "")
-        bad = why or brief_line.problem(line, f)
+        bad = (None if c.subtopic in saved else why) or brief_line.problem(line, f)
         if bad is None:
             c.line, c.line_status, c.line_reason = line.strip(), "llm", None
+            if c.subtopic not in saved:
+                LINES.put(keys[c.subtopic], c.line)
         else:  # 나열하지 않고 근거 1개만 쓴 짧은 고정 문장
             c.line, c.line_status = brief_line.short_fixed(f), "fixed"
             c.line_reason = bad if why else f"LLM 문장을 쓰지 않음 ({bad}), 고정 문장"
