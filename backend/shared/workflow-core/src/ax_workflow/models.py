@@ -331,6 +331,10 @@ class PR(DomainModel):
     # 올릴 레포 제안·승인 (형상관리 연결이 있을 때만. 목 설정이면 None)
     target: RepoTarget | None = None
     closed: bool = False  # 작업 중단으로 닫음 (병합 안 함)
+    # 마지막 교차검증에서 다른 부서(총괄·데이터분석)에 받은 근거 줄 (dev cross_check.EvidenceLine).
+    # auto_review와 달리 통과·머지·사람 결정 뒤에도 남겨 PR 화면에서 늘 보인다
+    cross_evidence: list[dict[str, Any]] = Field(default_factory=list)
+    cross_checked_at: UtcDatetime | None = None
 
 
 class Message(DomainModel):

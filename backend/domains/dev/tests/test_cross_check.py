@@ -143,6 +143,10 @@ def test_clean_evidence_auto_merges_with_cross_check_params() -> None:
     assert asked and asked[0]["component"] == "payment" and asked[0]["occurred_at"]
     assert any(t == "data" and s == "anomaly_detection" for t, s, _ in agents.asked)
     assert any(a.point == "cross_check" and "근거 통과" in a.text for a in svc.state.activity)
+    # 머지된 뒤에도 PR에 근거가 남는다 (화면 "교차검증" 단계)
+    kept = {line["source"]: line for line in pr.cross_evidence}
+    assert {"orchestrator", "data"} <= set(kept) and all(x["ok"] for x in kept.values())
+    assert pr.cross_checked_at is not None and pr.auto_review is None
 
 
 def test_active_incident_goes_to_human_with_evidence() -> None:
@@ -164,6 +168,7 @@ def test_active_incident_goes_to_human_with_evidence() -> None:
     sources = {line["source"]: line for line in hold.evidence}
     assert sources["orchestrator"]["value"] == "ctx_inc_0042" and not sources["orchestrator"]["ok"]
     assert sources["data"]["value"].startswith("이상") and not sources["data"]["ok"]
+    assert pr.cross_evidence == hold.evidence  # 사람이 결정해 auto_review가 비워져도 남는다
 
 
 def test_data_refused_counts_as_missing_not_invented() -> None:
