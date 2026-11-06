@@ -131,7 +131,7 @@ export default function Integrations() {
           <input
             id="shop-api-url"
             className="field w-full font-mono"
-            placeholder="http://192.168.0.251:8080/shop-api"
+            placeholder="http://10.20.30.40:8080/shop-api"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
           />
