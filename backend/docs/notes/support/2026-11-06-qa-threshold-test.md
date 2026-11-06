@@ -4,6 +4,8 @@
 > 이 시험으로 정한다. 도구는 `python -m support_agent.qa_eval` (`backend/domains/support`).
 > 설계: `2026-10-28-knowledge-gap-qa-design.md` 9장.
 
+> **시험 문의는 제목을 `[시험]`으로 시작한다.** 시험이 끝난 뒤 정리 CLI(`retention --list-test`)가 이 표시로 시험 문의를 찾고, `qa_eval export`도 같은 표시로 제외한다. 평가가 끝난 날 목록을 이슈 #822에 적고, 만든 날부터 30일 안에 지운다.
+
 ## 1. 서버에서 내보내기 (한 번, 읽기만 한다)
 ```bash
 cd backend && SUPPORT_PG_DSN=... uv run python -m support_agent.qa_eval export --out ../qa-export.json --days 14

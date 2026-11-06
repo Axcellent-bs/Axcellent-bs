@@ -15,6 +15,11 @@
   (`python -m support_agent.retention --inquiry-id 5 [--apply]`).
 - 제목 접두어는 고객도 쓸 수 있어서 안전장치가 아니라 실수 방지용이다. 실행 전에 운영자가
   지울 문의 ID를 직접 확인한다(dry-run으로 건수를 보고 `--apply`).
+- `--list-test`는 읽기 전용 목록이다(이슈 #822). `[시험]`·`[test]` 문의의 번호·받은 날·상태·
+  클레임 연결 여부·경과 일수만 보여 주고, 30일을 넘긴 건은 따로 표시한다. 이름·제목·메시지 같은
+  원문은 출력하지 않는다. 지우는 옵션과 이어지지 않는다(`--apply`·`--inquiry-id`와 같이 쓸 수
+  없고, 목록에서 한꺼번에 지우는 `--all` 같은 것은 만들지 않는다). 지울 번호는 사람이 확인해서
+  `--inquiry-id`로 따로 준다.
 - `SUPPORT_PG_DSN`이 있어야 한다. 이 CLI는 별도 프로세스라 DSN이 없으면 서비스가 들고 있는 메모리를
   바꿀 수 없다. 집행한 뒤에는 support 서비스를 다시 시작해야 서비스의 캐시에도 반영된다.
 """
@@ -37,6 +42,7 @@ PURGED = "[삭제됨]"
 TEST_MARKERS = ("[시험]", "[test]")
 CRITERION = "explicit_test_inquiry"
 BACKFILL_CRITERION = "audit_backfill"  # 지운 뒤 기록이 빠진 문의의 기록만 보충한다
+LIST_AGE_LIMIT_DAYS = 30  # 시험 문의는 만든 날부터 이 기간 안에 지운다(태윤 의견, #819·#822)
 EXECUTOR_ROLE = "operator"  # 사람 이름이 아니라 역할 코드. 감사 기록에도 이것만 남긴다
 
 
@@ -370,6 +376,59 @@ def plan_customer_request(
     return plans
 
 
+@dataclass
+class ListedInquiry:
+    """`--list-test`가 보여 주는 한 줄. 문의 원문(이름·제목·메시지)은 담지 않는다."""
+
+    inquiry_id: int
+    received: str | None  # 받은 날(YYYY-MM-DD)
+    status: str
+    claim_linked: bool
+    age_days: int | None
+    over_limit: bool  # 받은 지 LIST_AGE_LIMIT_DAYS일을 넘김
+
+
+def list_test_inquiries(
+    store: InquiryStore, claims: ClaimStore, now: datetime | None = None
+) -> list[ListedInquiry]:
+    """시험 표시가 붙은 문의의 목록. 읽기만 한다(아무것도 바꾸지 않는다).
+
+    이미 지운 문의는 제목이 `[삭제됨]`으로 바뀌어 시험 표시가 없어지므로 목록에 나오지 않는다.
+    """
+    current = now or datetime.now(UTC)
+    rows = []
+    for conversation in store.all():
+        if not _is_test_data(conversation):
+            continue
+        received = received_at(conversation)
+        age = (current - received).days if received is not None else None
+        rows.append(
+            ListedInquiry(
+                inquiry_id=conversation.id,
+                received=received.date().isoformat() if received is not None else None,
+                status=conversation.status,
+                claim_linked=bool(_linked_claims(conversation, claims)),
+                age_days=age,
+                over_limit=age is not None and age > LIST_AGE_LIMIT_DAYS,
+            )
+        )
+    return sorted(rows, key=lambda r: r.inquiry_id)
+
+
+def _list_line(row: ListedInquiry) -> str:
+    parts = [
+        f"문의 {row.inquiry_id}",
+        f"받은 날 {row.received or '알 수 없음'}",
+        f"상태 {row.status}",
+        "클레임 연결" if row.claim_linked else "클레임 없음",
+    ]
+    if row.age_days is not None:
+        parts.append(f"{row.age_days}일 지남")
+    if row.over_limit:
+        parts.append(f"!! {LIST_AGE_LIMIT_DAYS}일 넘음")
+    return " · ".join(parts)
+
+
 def _line(plan: Plan, apply: bool) -> str:
     if plan.action == "purge":
         verb = "지움" if apply else "지울 예정"
@@ -390,15 +449,22 @@ def _parser() -> argparse.ArgumentParser:
         prog="python -m support_agent.retention",
         description="시험·시연 문의의 원문을 [삭제됨]으로 바꾼다. 기본은 dry-run(건수만 센다).",
     )
-    parser.add_argument(
-        "--inquiry-id", type=int, action="append", required=True, help="지울 문의 ID (여러 번 가능)"
+    pick = parser.add_mutually_exclusive_group(required=True)
+    pick.add_argument("--inquiry-id", type=int, action="append", help="지울 문의 ID (여러 번 가능)")
+    pick.add_argument(
+        "--list-test",
+        action="store_true",
+        help="시험 문의 목록만 본다(읽기 전용, 원문 없음, 30일 넘은 건 표시). 지우지 않는다",
     )
     parser.add_argument("--apply", action="store_true", help="실제로 집행한다 (없으면 dry-run)")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.list_test and args.apply:  # 목록에서 지우기로 이어지는 길을 만들지 않는다
+        parser.error("--list-test는 읽기 전용이라 --apply와 같이 쓸 수 없다")
     if persistence.dsn() is None:
         print(
             f"{persistence.DSN_ENV}가 없다. 별도 프로세스라 서비스의 메모리를 바꿀 수 없다.",
@@ -407,6 +473,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     store = persistence.build_inquiry_store()
     claims = persistence.build_claim_store()
+    if args.list_test:
+        rows = list_test_inquiries(store, claims)
+        for row in rows:
+            print(_list_line(row))
+        over = sum(1 for r in rows if r.over_limit)
+        print(f"시험 문의 {len(rows)}건 ({LIST_AGE_LIMIT_DAYS}일 넘은 것 {over}건).")
+        print("읽기 전용이다. 지울 번호는 직접 확인해서 --inquiry-id로 dry-run부터 한다.")
+        return 0
     plans = run(store, claims, args.inquiry_id, apply=args.apply)
     for plan in plans:
         print(_line(plan, args.apply))
