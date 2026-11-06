@@ -39,7 +39,7 @@ from ax_orchestrator.models import (
     iso,
     now,
 )
-from ax_orchestrator.naming import DEPT_KO, NOTE_KO, PLAN_KO
+from ax_orchestrator.naming import DEPT_KO, RESOLUTION_KO
 from ax_orchestrator.registry import Registry
 from ax_orchestrator.timeline import prior_case_of, times_of
 
@@ -111,26 +111,14 @@ TIME_KO = {
 }
 
 
-def _note_plain(inc: Incident, note: str) -> str:
-    """단계 메모를 사람이 읽는 말로 바꾼다(알려진 코드, 괄호 속 단계 번호)."""
-    if note in NOTE_KO:
-        return NOTE_KO[note]
-    note = re.sub(
-        r"미완료\(([a-z_]+)\)",
-        lambda m: (
-            f"미완료: {_plain(inc.steps[m.group(1)].label)}"
-            if m.group(1) in inc.steps
-            else m.group(0)
-        ),
-        note,
-    )
-    return re.sub(
-        r"\(([a-z_]+)\)",
-        lambda m: (
-            f"({_plain(inc.steps[m.group(1)].label)})" if m.group(1) in inc.steps else m.group(0)
-        ),
-        note,
-    )
+def _record_note(note: object) -> str | None:
+    """이벤트에 보관된 설명에서 중복 머리말을 떼고 영어 코드를 한국어로 바꾼다."""
+    if not isinstance(note, str) or not note:
+        return None
+    text = re.sub(r"^문의 #\d+ 처리 결과 기록: ", "", note)
+    for code, ko in RESOLUTION_KO.items():
+        text = text.replace(code, ko)
+    return text
 
 
 STATUS_KO = {
@@ -745,23 +733,19 @@ class Engine:
         ]
         kind, area = RECORD_BY_PLAN.get(inc.kind, ("incident", "infra"))
         # 재무가 남긴 기록처럼 앞 단계가 이벤트에 보관한 설명을 기록에 붙인다 (없으면 붙이지 않는다)
-        note = inc.shared.get("record_note")
+        note = _record_note(inc.shared.get("record_note"))
         payload = {
             "context_id": inc.context_id,
             "kind": kind,
             "event_type": inc.event_type,
-            "summary": inc.title + (f" · {note}" if isinstance(note, str) and note else ""),
+            "summary": inc.title + (f" · {note}" if note else ""),
             "decision_reason": (
-                f"{PLAN_KO.get(inc.kind, inc.kind)}에서 "
-                f"끝낸 일: {', '.join(_plain(r.label) for r in done) or '없음'}. "
-                f"끝내지 못한 일: {', '.join(_plain(r.label) for r in problems) or '없음'}"
+                f"끝내지 못한 일: {', '.join(_plain(r.label) for r in problems)}"
+                if problems
+                else "모든 단계를 끝냈어요"
             ),
             "alternatives_considered": [
-                *(
-                    f"{_plain(r.label)}: {STATUS_KO.get(r.status, r.status)}"
-                    + (f" ({_note_plain(inc, r.note)})" if r.note else "")
-                    for r in problems
-                ),
+                *(f"{_plain(r.label)}: {STATUS_KO.get(r.status, r.status)}" for r in problems),
                 *(
                     f"{_plain(r.label)}: {DEPT_KO.get(r.dept or '', r.dept)}에게 넘김"
                     for r in done

@@ -154,7 +154,9 @@ async def test_the_decision_card_reason_uses_korean_step_names(harness) -> None:
     await engine.run(inc, scenario_a())
     record = next(r.input for _, r in harness.fakes.calls if r.skill == "record_case")
     assert "diagnose_incident" not in record["decision_reason"]
-    assert "원인 진단" in record["decision_reason"] and "(infra)" not in record["decision_reason"]
+    reason = record["decision_reason"]
+    assert "(infra)" not in reason and "_" not in reason
+    assert reason == "모든 단계를 끝냈어요" or reason.startswith("끝내지 못한 일: ")
 
 
 @pytest.mark.asyncio

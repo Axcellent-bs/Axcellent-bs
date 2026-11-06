@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import { Loading } from "@/components/admin/bits";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
 import { shortDateTime } from "@/lib/format";
+import { showEmp, storedEmp, storedEmpInText } from "@/lib/hr";
 import {
   hr,
   type OrgBasis, type OrgChange, type OrgChangeInput, type OrgChangeKind, type OrgDescription, type OrgParse, type OrgChanges, type OrgChangeStatus, type OrgHeadcount,
@@ -20,7 +21,7 @@ const STATUS: Record<OrgChangeStatus, { label: string; tone: string }> = {
 };
 const INPUT = "w-full rounded-xl border border-ink-100 bg-app px-3 py-2 text-sm";
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : "요청에 실패했습니다");
+const errText = (e: unknown) => showEmp(e instanceof Error ? e.message : "요청에 실패했습니다");
 const Chip = ({ label, tone }: { label: string; tone: string }) => <span className={`chip ${tone}`}>{label}</span>;
 const two = (n: number) => String(n).padStart(2, "0");
 const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${two(d.getMonth() + 1)}`; };
@@ -127,10 +128,10 @@ export default function OrgChangesPage() {
                 <div className="min-w-0 space-y-1.5">
                   <div className="flex flex-wrap items-center gap-2">
                     <b className="text-[15px]">{KIND_KO[c.kind]}</b>
-                    <span className="text-sm">{c.member_id}</span>
+                    <span className="text-sm">{showEmp(c.member_id)}</span>
                     <span className="text-sm text-ink-700">{describe(c)}</span>
                   </div>
-                  <p className="text-xs text-ink-500">발령일 {c.effective_date} · 인원에는 {monthMark(c.counts_from_month)}부터 셉니다{c.note ? ` · ${c.note}` : ""}</p>
+                  <p className="text-xs text-ink-500">발령일 {c.effective_date} · 인원에는 {monthMark(c.counts_from_month)}부터 셉니다{c.note ? ` · ${showEmp(c.note)}` : ""}</p>
                   <p className="text-xs text-ink-500">{c.basis_title ? `참고한 결정 카드: ${c.basis_title}` : "참고한 결정 카드 없음"}</p>
                   <Describe changeId={c.change_id} />
                 </div>
@@ -217,7 +218,7 @@ export default function OrgChangesPage() {
                     <tr key={c.change_id} className="border-t border-ink-100">
                       <td className="py-1.5 pr-3"><Chip label={STATUS[c.status].label} tone={STATUS[c.status].tone} /></td>
                       <td className="py-1.5 pr-3">{KIND_KO[c.kind]}</td>
-                      <td className="py-1.5 pr-3">{c.member_id}</td>
+                      <td className="py-1.5 pr-3">{showEmp(c.member_id)}</td>
                       <td className="py-1.5 pr-3">{describe(c)}{c.basis_title && <span className="block text-xs text-ink-500">참고한 결정: {c.basis_title}</span>}</td>
                       <td className="py-1.5 pr-3 tabular-nums">{c.effective_date}</td>
                       <td className="py-1.5 tabular-nums">{c.status === "confirmed" ? `${monthMark(c.counts_from_month)}부터` : "-"}</td>
@@ -248,7 +249,7 @@ function Describe({ changeId }: { changeId: string }) {
     <div className="rounded-xl bg-ink-50 px-3 py-2 text-sm">
       {d && (
         <>
-          <p>{d.text}</p>
+          <p>{showEmp(d.text)}</p>
           <p className="mt-1 text-[11px] text-ink-500">{d.llm_used ? "AI가 다듬은 문장" : d.fallback ? "AI가 쓴 문장이 실제 숫자와 달라서 기본 문장으로 바꿨습니다" : "기본 문장"} · 인원 숫자는 프로그램이 직접 센 값입니다</p>
         </>
       )}
@@ -275,7 +276,7 @@ function BulkRegister({ teams, remaining, startNumber, busy, onSave }: {
     if (items.length) { onSave(items); setCounts({}); }
   }
   return (
-    <Section title="처음 직원 등록" desc={`팀별 인원을 넣으면 입사 초안이 한꺼번에 만들어집니다. 아직 등록할 인원: ${remaining}명. 직원 이름은 받지 않고 번호(emp_01처럼)만 붙입니다.`}>
+    <Section title="처음 직원 등록" desc={`팀별 인원을 넣으면 입사 초안이 한꺼번에 만들어집니다. 아직 등록할 인원: ${remaining}명. 직원 이름은 받지 않고 번호(e1, e2처럼)만 붙입니다.`}>
       {remaining === 0
         ? <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">전체 직원 수만큼 초안이 만들어졌습니다. 위에서 모두 확정한 뒤 등록 완료로 표시하세요.</p>
         : (
@@ -340,12 +341,12 @@ function ChangeForm({ teams, busy, onSave }: {
   async function fillFromSentence() {
     setParsing(true); setAiErr(null); setParse(null);
     try {
-      const res = await hr.orgParse(sentence.trim());
+      const res = await hr.orgParse(storedEmpInText(sentence.trim()));
       setParse(res);
       const s = res.suggestion;
       if (res.available && s) {
         if (s.kind) setKind(s.kind);
-        setMember(s.member_id ?? ""); setFrom(s.from_team ?? ""); setTo(s.to_team ?? ""); setDate(s.effective_date ?? "");
+        setMember(showEmp(s.member_id ?? "")); setFrom(s.from_team ?? ""); setTo(s.to_team ?? ""); setDate(s.effective_date ?? "");
       }
     } catch (e) { setAiErr(errText(e)); }
     finally { setParsing(false); }
@@ -359,7 +360,7 @@ function ChangeForm({ teams, busy, onSave }: {
   function submit(e: FormEvent) {
     e.preventDefault(); if (!ready) return;
     onSave({
-      member_id: member.trim(), kind, effective_date: date,
+      member_id: storedEmp(member.trim()), kind, effective_date: date,
       ...(needFrom ? { from_team: from } : {}), ...(needTo ? { to_team: to } : {}),
       ...(note.trim() ? { note: note.trim() } : {}), ...(basisId ? { basis_card_id: basisId } : {}),
     });
@@ -371,14 +372,14 @@ function ChangeForm({ teams, busy, onSave }: {
         <label className="block text-sm font-medium" htmlFor="org-sentence">발령 문장으로 채우기 (직원 번호로 적어 주세요)</label>
         <div className="flex flex-wrap gap-2">
           <input id="org-sentence" className={`${INPUT} min-w-[16rem] flex-1`} value={sentence} onChange={(e) => setSentence(e.target.value)}
-            placeholder="다음 달 1일자로 emp_03 기획팀에서 개발팀으로 발령" maxLength={500} />
+            placeholder="다음 달 1일자로 e3 기획팀에서 개발팀으로 발령" maxLength={500} />
           <button type="button" className="btn-ghost" disabled={!HUMAN_TOKEN_SET || parsing || sentence.trim().length < 2} onClick={fillFromSentence}>{parsing ? "정리 중…" : "칸 채우기"}</button>
         </div>
         {parse && !parse.available && <p className="rounded-xl bg-white px-3 py-2 text-sm text-ink-700">{parse.message ?? "문장 정리를 쓸 수 없습니다. 직접 입력해 주세요."}</p>}
         {parse?.available && (
           <div className="rounded-xl bg-white px-3 py-2 text-sm">
             <p className="text-xs text-ink-500">아래 칸을 채웠습니다. 내용을 확인하고 고친 뒤 저장하세요.{parse.suggestion?.from_team_from_roster ? " 원래 팀은 확정된 직원 명단의 현재 소속입니다." : ""}</p>
-            {parse.warnings.length > 0 && <ul className="mt-1 list-disc space-y-0.5 pl-5 text-amber-800">{parse.warnings.map((w) => <li key={w}>{w}</li>)}</ul>}
+            {parse.warnings.length > 0 && <ul className="mt-1 list-disc space-y-0.5 pl-5 text-amber-800">{parse.warnings.map((w) => <li key={w}>{showEmp(w)}</li>)}</ul>}
           </div>
         )}
       </div>
@@ -390,7 +391,7 @@ function ChangeForm({ teams, busy, onSave }: {
           </select>
         </label>
         <label className="space-y-1 text-sm"><span className="block text-xs text-ink-500">직원 번호</span>
-          <input id="org-member" className={INPUT} value={member} onChange={(e) => setMember(e.target.value)} placeholder="emp_01" required />
+          <input id="org-member" className={INPUT} value={member} onChange={(e) => setMember(e.target.value)} placeholder="e1" required />
         </label>
         <label className="space-y-1 text-sm"><span className="block text-xs text-ink-500">발령일</span>
           <input id="org-date" type="date" className={INPUT} value={date} onChange={(e) => setDate(e.target.value)} required />
