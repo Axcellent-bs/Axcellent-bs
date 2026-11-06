@@ -2502,19 +2502,48 @@ class VideoCheckpoint(AxModel):
     views_per_hour: float | None = Field(default=None, ge=0)  # 조회 ÷ 게시 후 시간
     like_rate: float | None = Field(default=None, ge=0)  # 좋아요 ÷ 조회
     comment_rate: float | None = Field(default=None, ge=0)  # 댓글 ÷ 조회
-    target_ratio: float | None = Field(default=None, ge=0)  # 조회 ÷ 목표 참고값
+    # 조회 ÷ 목표 참고값. v2부터 목표 시점(출력의 target_checkpoint, 7d)에만 있고 다른 시점은 None
+    target_ratio: float | None = Field(default=None, ge=0)
     peer_ratio: float | None = Field(default=None, ge=0)  # 조회 ÷ 같은 카테고리·형식 숏츠 중앙값
     fact_ids: list[str] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다 (v2). 화면 한 줄 (예: "1일 · 33,263회 · 같은 형식 대비 16.63배")
+    line: str | None = None
 
 
 class VideoPerformanceGroup(AxModel):
-    """성과 모으기 표 한 줄 (인사이트·형식·카테고리별). 시험 영상은 뺀다."""
+    """성과 모으기 표 한 줄 (인사이트·형식·카테고리별). 시험 영상은 뺀다.
+
+    v2부터 목표 시점(7d) 값만 모은다 (performance_by_horizon의 7d 줄과 같음). 그 전에는 영상마다
+    가장 늦게 잰 시점 값을 섞었다.
+    """
 
     key: Literal["insight", "format", "category"]
     value: str
     videos: int = Field(ge=0)  # 등록된 영상 수
-    measured: int = Field(ge=0)  # 목표 대비 배수가 있는 영상 수
-    median_target_ratio: float | None = Field(default=None, ge=0)  # 영상마다 가장 늦은 시점 값
+    measured: int = Field(ge=0)  # 목표 시점 목표 대비 배수가 있는 영상 수
+    median_target_ratio: float | None = Field(default=None, ge=0)  # 목표 시점(7d) 값의 중앙값
+
+
+class VideoPerformanceHorizonGroup(AxModel):
+    """성과 모으기 한 줄: 묶음 하나의 시점 하나 (1d·3d·7d). 시험 영상은 뺀다.
+
+    그 시점을 잰 영상만 넣는다. 측정 중·놓침·게시 시각 모름은 빼고 빠진 수로 센다.
+    """
+
+    key: Literal["insight", "format", "category"]
+    value: str
+    checkpoint: VideoCheckpointName
+    videos: int = Field(ge=0)  # 묶음의 영상 수
+    n: int = Field(ge=0)  # 집계에 들어간 영상 수 (그 시점을 잰 영상)
+    excluded: int = Field(ge=0)  # 빠진 수 (videos − n)
+    excluded_measuring: int = Field(default=0, ge=0)  # 그 시점이 아직 (측정 중)
+    excluded_missed: int = Field(default=0, ge=0)  # 그 시점을 놓침·게시 시각 모름 등
+    low_sample: bool = True  # n < 3
+    median_views: float | None = Field(default=None, ge=0)
+    median_peer_ratio: float | None = Field(default=None, ge=0)  # 기준값이 있는 영상만
+    peer_n: int = Field(default=0, ge=0)  # 같은 숏츠 대비가 있는 영상 수
+    median_target_ratio: float | None = Field(default=None, ge=0)  # 목표 시점(7d)에만
+    target_n: int = Field(default=0, ge=0)  # 목표 대비가 있는 영상 수
 
 
 class VideoPerformanceOutput(AxModel):
@@ -2543,3 +2572,6 @@ class VideoPerformanceOutput(AxModel):
     limits: list[str] = Field(default_factory=list)
     summary: str = ""
     schema_version: str = ""
+    # 아래는 예전 응답은 없다 (v2). 목표 참고값이 정의된 시점과 시점별 성과 모으기
+    target_checkpoint: VideoCheckpointName | None = None
+    performance_by_horizon: list[VideoPerformanceHorizonGroup] = Field(default_factory=list)

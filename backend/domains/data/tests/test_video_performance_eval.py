@@ -202,8 +202,18 @@ def _observe(tmp_path: Path) -> dict[str, float]:
     return metrics
 
 
-def test_observe_the_skill_on_the_curves(tmp_path: Path) -> None:
-    """관찰만: 지표를 남긴다 (관문은 skill을 고치는 PR에서 켠다)."""
+GATES = {  # 관문: 시점·값은 모두 맞고, 배수 오차 0, 시점별 집계 모두 맞음 (기준선 낮추지 않음)
+    "video_performance.status_accuracy": 1.0,
+    "video_performance.value_exact_rate": 1.0,
+    "video_performance.ratio_max_error": 0.0,
+    "video_performance.aggregate_accuracy": 1.0,
+}
+
+
+def test_the_skill_passes_the_gates_on_the_curves(tmp_path: Path) -> None:
     metrics = _observe(tmp_path)
     print("video_performance eval:", json.dumps(metrics, ensure_ascii=False))
     assert set(metrics) == {*score.METRICS, score.AGGREGATE_METRIC}
+    for name, gate in GATES.items():  # 오차는 작을수록, 나머지는 클수록 좋다
+        ok = metrics[name] <= gate if name.endswith("_error") else metrics[name] >= gate
+        assert ok, f"{name} {metrics[name]} (관문 {gate})"
