@@ -82,15 +82,18 @@ def test_default_is_five_years(store: ClaimStore) -> None:
     assert claim_retention.retention_days() == 1825
 
 
-@pytest.mark.parametrize("raw", ["", "abc", "0", "-5", "99999"])
-def test_a_bad_value_falls_back_to_five_years(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+@pytest.mark.parametrize("raw", ["", "abc", "0", "-5", "99999", "30", "365", "730", "1824"])
+def test_a_bad_or_shorter_value_falls_back_to_five_years(
+    monkeypatch: pytest.MonkeyPatch, raw: str
+) -> None:
     monkeypatch.setenv(claim_retention.ENV_DAYS, raw)
     assert claim_retention.retention_days() == 1825
 
 
-def test_the_days_can_be_set(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(claim_retention.ENV_DAYS, "730")
-    assert claim_retention.retention_days() == 730
+@pytest.mark.parametrize("raw", ["1825", "2000", "36500"])
+def test_the_days_can_only_be_lengthened(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+    monkeypatch.setenv(claim_retention.ENV_DAYS, raw)
+    assert claim_retention.retention_days() == int(raw)
 
 
 def test_only_claims_past_five_years_are_expired(store: ClaimStore) -> None:
@@ -172,11 +175,23 @@ def test_a_second_run_does_not_purge_again(
     assert actions.count("retention_purge") == 1
 
 
-def test_a_shorter_setting_expires_younger_claims(
+def test_a_shorter_setting_is_ignored_so_younger_claims_stay(
     store: ClaimStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(claim_retention.ENV_DAYS, "365")
     monkeypatch.setenv(claim_retention.ENV_APPLY, "1")
-    claim = _claim(store, years=2)
+    young = _claim(store, years=2)
+    old = _claim(store, years=6)
     call("purge_expired_claims", {})
-    assert store.get(claim.id).purged_at
+    assert store.get(young.id).purged_at is None  # 5년이 안 된 클레임은 설정이 짧아도 남는다
+    assert store.get(old.id).purged_at
+
+
+def test_a_longer_setting_keeps_claims_that_five_years_would_purge(
+    store: ClaimStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(claim_retention.ENV_DAYS, "3650")
+    monkeypatch.setenv(claim_retention.ENV_APPLY, "1")
+    claim = _claim(store, years=6)
+    call("purge_expired_claims", {})
+    assert store.get(claim.id).purged_at is None
