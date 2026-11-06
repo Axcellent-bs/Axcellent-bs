@@ -136,6 +136,8 @@ export function fromBackend(raw: Json, queue: QueueItem[]): State {
         bodyMd: p.bodyMd ?? undefined, target: p.target ? { ...(p.target as Json), measure: (p.target as Json).measure ?? undefined } : undefined, warnings: p.warnings ?? [], audience: p.audience ?? undefined, shortsFormat: p.shortsFormat ?? undefined,
         handoff: h ? { ok: !!h.ok, reason: h.reason ?? undefined, campaign: h.campaign ?? undefined, at: kst(h.at) || undefined, retry: (h.retry as number | undefined) || undefined } : undefined,
         result: r ? { ...r, at: kst(r.at) } : undefined,
+        past: ((Array.isArray(p.past) ? p.past : []) as Json[]).map((x) => ({ ...x, noteLine: x.noteLine ?? undefined, actions: x.actions ?? [] })),
+        followOf: p.followOf ?? undefined,
       } as unknown as Proposal
     }),
     autoPolicy: {

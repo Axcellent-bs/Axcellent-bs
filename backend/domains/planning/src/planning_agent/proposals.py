@@ -41,6 +41,7 @@ from ax_contracts.schemas.planning import (
     CampaignBriefInput,
     CampaignBriefOutput,
     InsightFact,
+    InsightPast,
     ProposalTarget,
     ReceiveInsightInput,
 )
@@ -398,9 +399,24 @@ def from_brief(out: TrendInsightBriefOutput) -> list[ReceiveInsightInput]:
                 shorts_format=t.shorts_format,
                 generated_at=out.generated_at,
                 body_md="\n".join(body)[:8000],
+                past=[_past(r) for r in getattr(t, "past_results", [])][:3],
             )
         )
     return items
+
+
+def _past(r) -> InsightPast:
+    """데이터분석 InsightPastResult → 기획이 쓰는 칸만 (문장은 그대로)."""
+    note = (r.note_line or "")[:300] or None
+    return InsightPast(
+        campaign_id=r.campaign_id[:80],
+        views_label=(r.views_label or "")[:40],
+        sales_label=(r.sales_label or "")[:80],
+        band=str(r.band or "gray")[:20],
+        summary_line=(r.summary_line or "")[:300],
+        note_line=note,
+        actions=[x[:300] for x in r.actions][:5],
+    )
 
 
 # 성과 근거의 구분 (#646). 화면이 `source`로 나눠 보여 준다. 같은 주문이 겹칠 수 있어 더하지 않는다

@@ -121,6 +121,7 @@ function ProposalCard({ p }: { p: Proposal }) {
       <span className="inc-card-top">
         <span className={`rq-dept d-${p.from}`}>{DEPT_NAME[p.from]}</span>
         <Tag>{PROPOSAL_SKILL_LABEL[p.skill] ?? p.skill}</Tag>
+        {p.followOf && <Tag tone="green" title={`${p.followOf} 캠페인을 이어 가는 후속 기획`}>후속</Tag>}
         <span className="mono idc" title={p.id}>{idText(p.id)}</span>
       </span>
       <b className="inc-card-title">{p.title}</b>
@@ -219,6 +220,22 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
             </details>
           )}
         </section>
+
+        {(p.past?.length ?? 0) > 0 && (
+          <section className="pp-part pp-past">
+            <h3 className="pp-part-h">지난 캠페인 결과{p.followOf && <span className="pp-by">후속 기획 · <a href={toPath(`proposals/${p.followOf}`)} className="mono idc" title={p.followOf}>{idText(p.followOf)}</a> 이어 감</span>}</h3>
+            <ul className="pp-past-list">
+              {(p.past ?? []).map((x) => (
+                <li key={x.campaignId} className={`band-${x.band}`}>
+                  <div className="pp-past-head"><Tag>{x.viewsLabel || '조회 판정 없음'}</Tag><Tag>{x.salesLabel || '매출 판정 없음'}</Tag><span className="mono muted small">{x.campaignId}</span></div>
+                  {x.summaryLine && <div>{x.summaryLine}</div>}
+                  {x.noteLine && <div className="muted small">{x.noteLine}</div>}
+                  {x.actions.length > 0 && <ul className="pp-past-acts">{x.actions.map((a) => <li key={a}>{a}</li>)}</ul>}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <section className="pp-part">
           <h3 className="pp-part-h"><span className="pp-no">2</span>기획 판단<span className="pp-by">{WRITTEN_BY_LABEL[p.writtenBy]}</span></h3>

@@ -35,6 +35,7 @@ from ax_workflow.models import (
     Proposal,
     ProposalFact,
     ProposalHandoff,
+    ProposalPast,
     ProposalResult,
     ProposalTarget,
     Request,
@@ -156,7 +157,23 @@ def _find(s: State, pid: str) -> Proposal | None:
 
 
 def _same_insight(s: State, ref: str, frm: str) -> Proposal | None:
-    return next((p for p in s.proposals if p.insight_id == ref and p.from_ == frm), None)
+    """같은 인사이트로 만든 제안 중 가장 최근 것 (후속 제안이 있으면 그것)."""
+    xs = [p for p in s.proposals if p.insight_id == ref and p.from_ == frm]
+    return xs[-1] if xs else None
+
+
+# 후속 기획: 앞 제안이 실행됐고(진행 중·성과 확인) 데이터분석이 지난 캠페인 결과를 붙여 다시 보내면
+# 중복으로 버리지 않고 같은 캠페인을 이어 가는 후속 제안을 만든다 (11/6 예진 결정: 계속하는 방향)
+FOLLOW_FROM = ("진행 중", "성과 확인")
+
+
+def _follow_of(s: State, same: Proposal | None, inp: ReceiveInsightInput) -> Proposal | None:
+    """이어 갈 앞 제안. 이미 후속 제안이 있으면 또 만들지 않는다 (받아오기를 거듭해도 하나)."""
+    if same is None or not inp.past or same.status not in FOLLOW_FROM:
+        return None
+    if any(p.follow_of == same.id for p in s.proposals):
+        return None
+    return same
 
 
 # 이 기간 안에 받은 제안과 견준다 (폐기한 것 포함: 사람이 버린 걸 다시 올리지 않게)
@@ -251,6 +268,13 @@ class ProposalMixin:
         for inp in got:
             if _same_insight(self.state, inp.insight_id, "data") is None:
                 near = similar_proposal(self.state, inp, self.clock())
+                if (
+                    near is not None and _follow_of(self.state, near, inp) is not None
+                ):  # 후속 기획으로 잇는다
+                    res = await self.receive_insight(requester="data", inp=inp, near=near.id)
+                    if res.outcome == "created":
+                        created.append(res.output["proposal_id"])
+                    continue
                 if near is not None:  # id는 새것이지만 이미 받은 제안과 같은 내용
                     similar.append({"title": inp.title, "proposal_id": near.id})
                     continue
@@ -283,22 +307,28 @@ class ProposalMixin:
     # ---- 받는 skill
 
     async def receive_insight(
-        self: Any, *, requester: str, inp: ReceiveInsightInput
+        self: Any, *, requester: str, inp: ReceiveInsightInput, near: str | None = None
     ) -> ActionResult:
+        """near: 받아오기가 찾은 비슷한 앞 제안 (인사이트 id가 날마다 바뀌어도 후속으로 잇는다)."""
         frm = "marketing" if requester == "marketing" else "data"
-        same = _same_insight(self.state, inp.insight_id, frm)
-        if same is not None:  # 재전송: LLM을 다시 부르지 않는다
+        same = _same_insight(self.state, inp.insight_id, frm) or (
+            _find(self.state, near) if near else None
+        )
+        if (
+            same is not None and _follow_of(self.state, same, inp) is None
+        ):  # 재전송: LLM을 다시 부르지 않는다
             out = {"outcome": "duplicate", "proposal_id": same.id}
             return ActionResult(changed=False, outcome="duplicate", output=out)
-        gone = recently_deleted(self.state, inp, frm, self.clock())
+        gone = None if same is not None else recently_deleted(self.state, inp, frm, self.clock())
         if gone is not None:  # 사람이 최근 지운 제안: 일주일 동안 다시 만들지 않는다
             out = {"outcome": "deleted_recently", "proposal_id": gone.id}
             return ActionResult(changed=False, outcome="deleted_recently", output=out)
         draft = await ext.write(self._proposal_writer, inp, f"insight:{inp.insight_id}")
 
         async def run(s: State) -> ActionResult:
-            dup = _same_insight(s, inp.insight_id, frm)
-            if dup is not None:
+            dup = _same_insight(s, inp.insight_id, frm) or (_find(s, near) if near else None)
+            follow = _follow_of(s, dup, inp)
+            if dup is not None and follow is None:
                 out = {"outcome": "duplicate", "proposal_id": dup.id}
                 return ActionResult(outcome="duplicate", output=out)
             pid = next_proposal_id(s)
@@ -312,11 +342,14 @@ class ProposalMixin:
                 audience=inp.audience, shorts_format=inp.shorts_format,
                 body_md=inp.body_md, idea=draft.idea, why=draft.why, target=target,
                 format=draft.format, written_by=draft.written_by, warnings=draft.warnings,
-                created_at=self.clock(),
+                created_at=self.clock(), follow_of=follow.id if follow else None,
+                past=[ProposalPast(**x.model_dump()) for x in inp.past],
             )  # fmt: skip
             s.proposals.append(p)
             warn = f", 경고 {len(p.warnings)}" if p.warnings else ""
             text = f'{pid} "{p.title}" 제안 (근거 {len(p.facts)}개{warn})'
+            if follow is not None:
+                text += f"\n후속 기획: {follow.id} 캠페인을 이어 감 (지난 결과 {len(p.past)}개)"
             act = self._act(self.clock(), _ctx(p), frm, "planning", "receive_insight", "A2A", text)
             act.grade = "A"
             s.activity.append(act)
@@ -452,6 +485,7 @@ class ProposalMixin:
             proposal_id=p.id, insight_id=p.insight_id, title=p.title, idea=p.idea, why=p.why,
             facts=_facts_in(p), target=_target_in(p), products=p.products, format=p.format,
             approved_by="사람", note=p.note, body_md=body_md,
+            continue_campaign=_prev_campaign(self.state, p),
         )  # fmt: skip
         # 같은 제안을 보내는 중(자동 재전송 대기 포함)이면 그건 멈추고 지금 다시 보낸다
         live: dict[str, asyncio.Task] = self.__dict__.setdefault("_brief_tasks", {})
@@ -692,3 +726,11 @@ class ProposalMixin:
                 raise ActionError("INVALID_ACTION", "proposal이 없다")
             return await self.proposal_to_request(pid)
         return None
+
+
+def _prev_campaign(s: State, p: Proposal) -> str | None:
+    """후속 제안이면 이어 가는 앞 제안의 캠페인 id (마케팅이 같은 캠페인을 계속하게)."""
+    prev = _find(s, p.follow_of) if p.follow_of else None
+    if prev is not None and prev.handoff is not None and prev.handoff.campaign:
+        return prev.handoff.campaign
+    return p.past[0].campaign_id if p.past else None

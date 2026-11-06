@@ -564,6 +564,18 @@ class ProposalResult(DomainModel):
     at: UtcDatetime
 
 
+class ProposalPast(DomainModel):
+    """이 인사이트로 했던 지난 캠페인 결과 (데이터분석 문장 그대로, 화면은 계산하지 않는다)."""
+
+    campaign_id: str
+    views_label: str = ""
+    sales_label: str = ""
+    band: str = "gray"
+    summary_line: str = ""
+    note_line: str | None = None
+    actions: list[str] = Field(default_factory=list)
+
+
 class Proposal(DomainModel):
     id: str  # PROP-n
     title: str
@@ -590,6 +602,9 @@ class Proposal(DomainModel):
     result: ProposalResult | None = None
     request: str | None = None  # 개발로 보냈으면 REQ-n
     spec: str | None = None  # 사람이 확정해 만든 기획안 (기획서 SPEC-n, origin proposal)
+    # 지난 캠페인 결과 (받은 때 기준)와 후속 기획이면 이어 가는 앞 제안 PROP-n
+    past: list[ProposalPast] = Field(default_factory=list)
+    follow_of: str | None = None
 
 
 class DeletedProposal(DomainModel):

@@ -771,3 +771,45 @@ def test_deleted_proposal_is_not_pulled_again_for_a_week() -> None:
     svc.state.deleted_proposals[0].deleted_at -= timedelta(days=8)  # 일주일이 지나면 다시 받는다
     back = asyncio.run(svc.receive_insight(requester="data", inp=_insight()))
     assert back.outcome == "created"
+
+
+@pytest.mark.role("planning")
+def test_follow_up_proposal_continues_the_same_campaign() -> None:
+    """실행된 제안의 인사이트가 지난 캠페인 결과와 함께 다시 오면 후속 제안을 하나만 만들고,
+    마케팅에 넘길 때 같은 캠페인을 이어 가게 캠페인 id를 보낸다 (11/6 예진 결정)."""
+    from ax_contracts.schemas.planning import InsightPast
+    from ax_workflow.models import ProposalHandoff
+
+    brief = Brief()
+    svc = _svc(marketing=brief, writer=Writer())
+    first = _new(svc)
+    p = _p(svc, first)
+    p.status = "성과 확인"
+    p.handoff = ProposalHandoff(ok=True, campaign="CMP-1")
+
+    again = _insight()  # 같은 인사이트 id, 지난 결과 없음 → 그대로 중복
+    assert asyncio.run(svc.receive_insight(requester="data", inp=again)).outcome == "duplicate"
+
+    past = InsightPast(
+        campaign_id="CMP-1",
+        views_label="조회 달성",
+        sales_label="더 팔림",
+        summary_line="조회 목표의 1.4배 · 매출 +12,000원",
+        actions=["썸네일 글자 줄이기"],
+    )
+    nxt = again.model_copy(update={"past": [past]})
+    res = asyncio.run(svc.receive_insight(requester="data", inp=nxt))
+    assert res.outcome == "created"
+    follow = _p(svc, res.output["proposal_id"])
+    assert follow.follow_of == first and follow.past[0].summary_line.startswith("조회 목표")
+    assert "후속 기획" in svc.state.activity[-1].text
+    # 한 번 더 와도 후속은 하나만
+    assert asyncio.run(svc.receive_insight(requester="data", inp=nxt)).outcome == "duplicate"
+
+    async def send():
+        await svc.dispatch({"type": "approveProposal", "proposal": follow.id})
+        await _flush(svc)
+
+    asyncio.run(send())
+    _, sent, _ = brief.sent[-1]
+    assert sent.continue_campaign == "CMP-1"

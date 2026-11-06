@@ -527,6 +527,19 @@ class ProposalTarget(AxModel):
     measure: str | None = Field(default=None, max_length=60)  # 잴 skill (예: campaign_effect)
 
 
+class InsightPast(AxModel):
+    """인사이트의 지난 캠페인 결과 하나 (데이터분석 InsightPastResult에서 기획이 쓰는 칸만).
+    조회·매출을 합친 점수는 없고, 문장(summary_line·note_line)은 데이터분석이 만든 그대로다."""
+
+    campaign_id: str = Field(min_length=1, max_length=80)
+    views_label: str = Field(default="", max_length=40)  # 조회 달성 · 조회 미달 · 측정 중 …
+    sales_label: str = Field(default="", max_length=80)  # 더 팔림 · 덜 팔림 · 효과 확인 안 됨 …
+    band: str = Field(default="gray", max_length=20)
+    summary_line: str = Field(default="", max_length=300)
+    note_line: str | None = Field(default=None, max_length=300)
+    actions: list[str] = Field(default_factory=list, max_length=5)  # 개선 방향 문장 그대로
+
+
 class ReceiveInsightInput(AxModel):
     schema_version: SchemaVersion = PROPOSAL_SCHEMA_VERSION
     insight_id: str = Field(min_length=1, max_length=80)  # 보낸 쪽 인사이트 id (재전송은 중복)
@@ -541,11 +554,14 @@ class ReceiveInsightInput(AxModel):
     shorts_format: str | None = Field(default=None, max_length=60)  # 잘 맞는 숏츠 형식
     generated_at: UtcDatetime | None = None  # 어느 시점 데이터 기준인지
     body_md: str | None = Field(default=None, max_length=8000)  # 설명 (마크다운)
+    # 이 인사이트로 했던 지난 캠페인 결과 (최근 3개, 데이터분석 brief v4 past_results)
+    past: list[InsightPast] = Field(default_factory=list, max_length=3)
 
 
 class ReceiveInsightOutput(AxModel):
     schema_version: SchemaVersion = PROPOSAL_SCHEMA_VERSION
-    outcome: Literal["created", "duplicate"]
+    # deleted_recently = 사람이 최근 지운 제안과 같은·비슷한 인사이트라 만들지 않음
+    outcome: Literal["created", "duplicate", "deleted_recently"]
     proposal_id: str  # PROP-n
 
 
@@ -565,6 +581,8 @@ class CampaignBriefInput(AxModel):
     approved_by: str  # 확정한 사람
     note: str | None = None
     body_md: str | None = None
+    # 후속 기획이면 이어 가는 지난 캠페인 id (같은 캠페인을 계속하는 방향, 11/6 예진 결정)
+    continue_campaign: str | None = None
 
 
 class CampaignBriefOutput(AxModel):
