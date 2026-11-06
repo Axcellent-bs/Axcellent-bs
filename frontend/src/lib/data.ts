@@ -1505,6 +1505,10 @@ export interface VideoPerformanceVideo {
   video_url?: string | null;
   title?: string | null;
   test: boolean;
+  campaign_id?: string | null;
+  /** v4: 프로모션 링크·쿠폰이 없으면 false + "측정 불가: 프로모션 링크/쿠폰 없음" */
+  sales_measurable?: boolean | null;
+  sales_reason?: string | null;
   insight_id?: string | null;
   topic?: string | null;
   shorts_format?: string | null;
@@ -1541,6 +1545,56 @@ export interface VideoInsightCard {
   notes: string[];
 }
 export interface VideoVerdictTally { videos: number; achieved: number; missed: number; measuring: number; excluded: number }
+// ---------------------------------------------------------------- 성과 결과 1건 (campaign_result)
+// 계약: data.py CampaignResultOutput. 판정·네 칸·알림·문장은 모두 서버 값이다.
+// 네 칸(귀속·상품·쿠폰·전체 매장)은 겹치는 매출이라 화면에서도 더하지 않는다. 마이너스는 그대로 보여 준다.
+export type CampaignSalesVerdictName = "more" | "less" | "no_effect";
+export interface CampaignSalesVerdict {
+  status: "known" | "unknown";
+  verdict?: CampaignSalesVerdictName | null;
+  /** "더 팔림" · "덜 팔림" · "효과 확인 안 됨" · "효과 확인 안 됨(표본 적음)" · "측정 불가: …" */
+  label: string;
+  low_sample: boolean;
+  low_sample_reason?: string | null;
+  reason?: string | null;
+}
+export interface CampaignSalesCell {
+  key: "attribution" | "products" | "coupons" | "store";
+  label: string;
+  status: "known" | "unknown";
+  reason?: string | null;
+  /** 서버 한 줄 (숫자 그대로) */
+  line?: string | null;
+}
+export interface CampaignSalesEffect {
+  status: "known" | "unknown";
+  reason?: string | null;
+  verdict?: CampaignSalesVerdict | null;
+  /** "+1,200,000원 · 주문 +40건 (… 대비)" */
+  headline?: string | null;
+  cells: CampaignSalesCell[];
+  videos_total: number;
+  videos_measurable: number;
+  /** "영상 N개 중 매출 측정 가능 M개" */
+  measurable_line: string;
+  notes: string[];
+}
+export interface CampaignAlert { kind: "loss" | "data_gap"; message: string; note?: string | null }
+export interface CampaignResultOutput {
+  status: "known" | "unknown";
+  reason?: string | null;
+  campaign_id: string;
+  campaign_name?: string | null;
+  test: boolean;
+  window_from?: string | null;
+  window_to?: string | null;
+  sales?: CampaignSalesEffect | null;
+  alerts: CampaignAlert[];
+  summary: string;
+  schema_version?: string;
+}
+export type CampaignResultView = "planning" | "marketing" | "finance";
+
 export interface VideoPerformanceListOutput {
   status: "known" | "unknown";
   reason?: string | null;
@@ -1615,6 +1669,9 @@ export const dataAi = {
   /** 게시 영상 성과 전부 (성과 탭). 저장분만 읽고 새로 재지 않는다 (수집기가 1시간마다 잰다) */
   videoPerformance: () =>
     askData<VideoPerformanceListOutput>("video_performance", "영상 성과", { list_all: true }, TREND_DEADLINE_MS),
+  /** 캠페인 성과 결과 1건. view = 부서별 묶음 (재무 = 연결·매출·알림). 매출은 캠페인 효과 계산 그대로 + 판정 */
+  campaignResult: (campaignId: string, view: CampaignResultView = "finance") =>
+    askData<CampaignResultOutput>("campaign_result", "캠페인 성과 결과", { campaign_id: campaignId, view }, CAMPAIGN_DEADLINE_MS),
 };
 
 const DEADLINE_MS = 30_000;

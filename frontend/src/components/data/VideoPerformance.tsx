@@ -2,9 +2,16 @@ import { useEffect, useState } from "react";
 import { Empty, Panel, Waiting } from "@/components/finance/bits";
 import {
   DATA_SERVER, dataAi, kpiLive,
+  type CampaignResultOutput, type CampaignSalesCell,
   type SignalLevel, type VideoCheckpoint, type VideoInsightCard, type VideoPerformanceListOutput,
   type VideoPerformanceVideo, type VideoSignal, type VideoVerdict,
 } from "@/lib/data";
+
+// 캠페인 매출 효과 (campaign_result, 재무 묶음 = 연결·매출·알림). 캠페인마다 따로 부른다.
+type CampaignState =
+  | { id: string; kind: "loading" }
+  | { id: string; kind: "ok"; out: CampaignResultOutput }
+  | { id: string; kind: "failed"; reason: string };
 
 // 영상 성과 (트렌드&콘텐츠 > 성과): 데이터 AI(8106) video_performance list_all 출력을 그대로 보여 준다.
 // - 판정(7일 조회수 ÷ 목표)·신호 등급·성과 요인·개선 방향 문장·예상치는 모두 서버 값이다. 화면은 자릿수와 색만 정한다.
@@ -132,6 +139,9 @@ function VideoCard({ v }: { v: VideoPerformanceVideo }) {
             {nameOf(v)} {v.test && <span className="chip ml-1 bg-ink-100 text-xs text-ink-500">시험 영상</span>}
           </h4>
           <p className="text-xs text-ink-500">{meta || "인사이트 없음"}</p>
+          {!v.test && v.sales_measurable === false && (
+            <p className="text-[11px] text-ink-500">매출 효과: {v.sales_reason ?? "측정 불가"}</p>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {order.map((k) => {
@@ -188,7 +198,81 @@ function InsightCard({ c }: { c: VideoInsightCard }) {
   );
 }
 
-function Result({ out, at }: { out: VideoPerformanceListOutput; at: string | null }) {
+const SALES_BADGE: Record<string, string> = {
+  more: "bg-emerald-50 text-emerald-700",
+  less: "bg-red-50 text-red-700",
+  no_effect: "bg-ink-100 text-ink-500",
+};
+const SALES_TEXT: Record<string, string> = { more: "text-emerald-700", less: "text-red-700", no_effect: "text-ink-700" };
+
+function SalesCell({ c }: { c: CampaignSalesCell }) {
+  return (
+    <div className="flex min-w-0 flex-col bg-surface-2 px-3 py-2">
+      <span className="text-[11px] text-ink-500">{c.label}</span>
+      <b className="text-sm text-ink-900">{c.status === "known" ? c.line : "확인할 수 없음"}</b>
+      {c.status !== "known" && c.reason && <span className="text-[11px] text-ink-500">{c.reason}</span>}
+    </div>
+  );
+}
+
+function CampaignCard({ c }: { c: CampaignState }) {
+  if (c.kind === "loading") return <div className="card border border-ink-100 p-4"><Waiting what={`캠페인 ${c.id} 매출 효과를 읽는 중…`} /></div>;
+  if (c.kind === "failed") return <div className="card border border-ink-100 p-4"><Empty>캠페인 {c.id} 매출 효과를 받지 못했어요. {c.reason}</Empty></div>;
+  const out = c.out;
+  const sales = out.sales;
+  const verdict = sales?.verdict;
+  const name = verdict?.verdict ?? "no_effect";
+  const loss = verdict?.verdict === "less";
+  return (
+    <article className={`card flex flex-col gap-2 p-4 ${loss ? "border-2 border-red-600" : "border border-ink-100"}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="text-base font-semibold text-ink-900">
+          {out.campaign_name ?? out.campaign_id} <span className="text-xs font-normal text-ink-500">({out.campaign_id})</span>
+        </h4>
+        <span className={`chip text-xs font-semibold ${SALES_BADGE[name]}`} title={verdict?.low_sample_reason ?? verdict?.reason ?? undefined}>
+          {verdict?.label ?? "측정 불가"}
+        </span>
+      </div>
+      <p className={`text-[22px] font-bold leading-tight ${SALES_TEXT[name]}`}>{sales?.headline ?? (sales?.reason ?? out.reason ?? "—")}</p>
+      {sales && sales.cells.length > 0 && (
+        <div className="grid grid-cols-2 gap-2">{sales.cells.map((cell) => <SalesCell key={cell.key} c={cell} />)}</div>
+      )}
+      {sales && <p className="text-xs text-ink-500">{sales.measurable_line}</p>}
+      {sales?.notes.map((note) => <p key={note} className="text-xs font-semibold text-amber-700">{note}</p>)}
+    </article>
+  );
+}
+
+function CampaignSection({ campaigns }: { campaigns: CampaignState[] }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <h3 className="text-base font-semibold text-ink-900">캠페인 매출 효과</h3>
+      {campaigns.length === 0
+        ? <Empty>아직 매출을 잴 캠페인이 없습니다</Empty>
+        : <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">{campaigns.map((c) => <CampaignCard key={c.id} c={c} />)}</div>}
+      <div className="text-xs leading-relaxed text-ink-500">
+        <p>네 칸은 겹치는 매출이라 더하지 않습니다. 표본이 적으면 '효과 확인 안 됨(표본 적음)'으로 표시합니다.</p>
+        <p>수익·손실(광고비·제작비 포함)은 재무에서 판단합니다.</p>
+      </div>
+    </section>
+  );
+}
+
+function LossAlerts({ campaigns }: { campaigns: CampaignState[] }) {
+  const losses = campaigns.flatMap((c) => (c.kind === "ok" ? c.out.alerts.filter((a) => a.kind === "loss") : []));
+  if (!losses.length) return null;
+  return (
+    <div role="alert" className="flex flex-col gap-1">
+      {losses.map((a) => (
+        <p key={a.message} className="text-base font-bold text-red-700">
+          ▲ {a.message} <span className="ml-2 text-xs font-semibold text-ink-700">{a.note}</span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function Result({ out, at, campaigns }: { out: VideoPerformanceListOutput; at: string | null; campaigns: CampaignState[] }) {
   const t = out.tally ?? { videos: 0, achieved: 0, missed: 0, measuring: 0, excluded: 0 };
   const limit = out.limits.find((l) => l.includes("YouTube Analytics"));
   const tiles: [string, number, string][] = [
@@ -196,6 +280,7 @@ function Result({ out, at }: { out: VideoPerformanceListOutput; at: string | nul
   ];
   return (
     <div className="flex flex-col gap-5">
+      <LossAlerts campaigns={campaigns} />
       <p className="text-sm text-ink-500">
         기획이 정한 7일 조회수 목표와 실제 7일 조회수를 비교하고, 숫자로 성과 요인과 개선 방향을 붙입니다. 기준 시각 {when(at)}
       </p>
@@ -209,7 +294,8 @@ function Result({ out, at }: { out: VideoPerformanceListOutput; at: string | nul
         ))}
       </div>
       <div className="bg-violet-50 px-4 py-3 text-sm leading-relaxed text-violet-900">
-        <p><b className="text-violet-700">보는 법</b> ① 판정은 7일 조회수 ÷ 목표 (파란 테두리 칸) ② 아래 회색 칸이 성과 요인과 개선 방향</p>
+        <p><b className="text-violet-700">보는 법</b> ① 판정은 7일 조회수 ÷ 목표 (파란 테두리 칸) ② 아래 회색 칸이 성과 요인과 개선 방향
+          ③ 매출 효과는 캠페인 단위로 따로 봅니다. 조회가 잘 돼도 매출은 그대로일 수 있습니다</p>
         <p><b className="text-violet-700">근거 신호 4개</b> 첫 1시간 속도 · 좋아요율 · 댓글율 · 1일 이후 성장. 같은 형식 숏츠의 게시 후 같은 시간대 중앙값과 비교해
           강함(80% 이상) / 보통(50~80%) / 약함(50% 미만), 비교 표본이 5개 미만이면 판단 불가로 표시합니다.</p>
       </div>
@@ -217,6 +303,7 @@ function Result({ out, at }: { out: VideoPerformanceListOutput; at: string | nul
         <h3 className="text-base font-semibold text-ink-900">영상별 결과</h3>
         {out.videos.map((v) => <VideoCard key={`${v.video_id}-${v.test}`} v={v} />)}
       </section>
+      <CampaignSection campaigns={campaigns} />
       {out.insight_cards.length > 0 && (
         <section className="flex flex-col gap-3">
           <h3 className="text-base font-semibold text-ink-900">인사이트별로 보면</h3>
@@ -258,12 +345,26 @@ export function VideoPerformance() {
     kpiLive ? { kind: "loading" } : { kind: "failed", reason: "데이터 AI 토큰(VITE_DATA_A2A_TOKEN)이 없어 영상 성과를 받지 않아요. backend/의 scripts/run_web.sh로 화면을 켜면 토큰이 들어갑니다." },
   );
 
+  const [campaigns, setCampaigns] = useState<CampaignState[]>([]);
+
   useEffect(() => {
     if (!kpiLive) return;
     let live = true;
     setState({ kind: "loading" });
+    setCampaigns([]);
     dataAi.videoPerformance()
-      .then((r) => live && setState({ kind: "ok", out: r.output, at: r.evidence?.collected_at ?? null }))
+      .then((r) => {
+        if (!live) return;
+        setState({ kind: "ok", out: r.output, at: r.evidence?.collected_at ?? null });
+        // 시험 영상이 아닌 영상의 캠페인만 (나온 순서대로, 한 번씩)
+        const ids = [...new Set(r.output.videos.filter((v) => !v.test).map((v) => v.campaign_id).filter((x): x is string => !!x))];
+        setCampaigns(ids.map((id) => ({ id, kind: "loading" })));
+        ids.forEach((id) => {
+          dataAi.campaignResult(id)
+            .then((c) => live && setCampaigns((all) => all.map((x) => (x.id === id ? { id, kind: "ok", out: c.output } : x))))
+            .catch((e: Error) => live && setCampaigns((all) => all.map((x) => (x.id === id ? { id, kind: "failed", reason: e.message } : x))));
+        });
+      })
       .catch((e: Error) => live && setState({ kind: "failed", reason: e.message }));
     return () => { live = false; };
   }, [run]);
@@ -277,7 +378,7 @@ export function VideoPerformance() {
       )}
       {state.kind === "ok" && (state.out.videos.length === 0
         ? <Empty>아직 측정한 캠페인 영상이 없습니다</Empty>
-        : <Result out={state.out} at={state.at} />)}
+        : <Result out={state.out} at={state.at} campaigns={campaigns} />)}
     </Panel>
   );
 }
