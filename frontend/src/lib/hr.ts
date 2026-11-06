@@ -94,7 +94,7 @@ const DEPT_NAME: Record<string, string> = {
 const TERM_KO: Record<string, string> = {
   payment_fail_rate: "결제 실패율", error_rate_5xx: "서버 오류율", p95_latency_ms: "응답 시간", order_fail_rate: "주문 실패율",
   "shop-api": "쇼핑몰 서버", payment: "결제", shipping: "배송", search: "검색", api: "판매 사이트", db: "주문 DB",
-  answered: "답변 완료", claim_decided: "클레임 결정", compensated: "보상 완료", escalated: "상담원에게 넘김",
+  confirm_spec: "기획서 확정", answered: "답변 완료", claim_decided: "클레임 결정", compensated: "보상 완료", escalated: "상담원에게 넘김",
 };
 const TERM_RE = new RegExp(`(?<![A-Za-z0-9_-])(${Object.keys(TERM_KO).sort((a, b) => b.length - a.length).join("|")})(?![A-Za-z0-9_-])`, "g");
 /** 직원 번호 emp_01을 e1로 보여 준다(저장된 값은 그대로) */
@@ -106,7 +106,7 @@ export const storedEmpInText = (text: string) => text.replace(/(?<![A-Za-z0-9_])
 /** 화면에 보일 글: 코드·영어 이름을 쉬운 말로 */
 export const plainText = (text: string) => readableBody(text).replace(TERM_RE, (_, k: string) => TERM_KO[k] ?? k);
 
-export interface CardRow { label: string; text: string }
+export interface CardRow { label: string; text: string; refs?: string[] }
 const isMachineRef = (t: string) => /^(step:|seed:|ctx_)/.test(t.trim());
 function firstSentence(text: string, max = 90): string {
   const clean = text.replace(/^(교훈:\s*)+/, "").trim();
@@ -135,7 +135,7 @@ export function cardRows(card: Pick<HrCard, "title" | "body" | "kind">): CardRow
   const alt = plainText(fields["검토한 대안"] ?? "");
   if (card.kind !== "incident" && alt && alt !== "없음") rows.push({ label: "검토한 대안", text: alt });
   const refs = fields["근거"] ?? "";
-  if (card.kind !== "incident" && refs && refs !== "확인할 수 없음" && !refs.split(",").every(isMachineRef)) rows.push({ label: "근거", text: plainText(refs) });
+  if (card.kind !== "incident" && refs && refs !== "확인할 수 없음" && !refs.split(",").every(isMachineRef)) rows.push({ label: "근거", text: plainText(refs), refs: refs.split(",").map((t) => t.trim()).filter(Boolean) });
   if (fields["교훈"]) rows.push({ label: "교훈", text: firstSentence(plainText(fields["교훈"])) });
   if (resolution) {
     const get = (k: string) => new RegExp(`${k}: (.+)`).exec(resolution)?.[1]?.trim();
@@ -159,6 +159,7 @@ export function readableBody(body: string): string {
     .replace(/: (\w+)로 이관 \(([a-z_]+)\)/g, (_, d: string) => `: ${DEPT_NAME[d] ?? d}에게 넘김`)
     .replace(/\(([a-z_:]+(?: [a-z_]+)?)\)/g, (m, k: string) => REASON_CODE[k.replace(/^failed: /, "")] ? `(${REASON_CODE[k.replace(/^failed: /, "")]})` : STEP_NAME[k] ? `(${STEP_NAME[k]})` : m)
     .replace(/원인 배포 롤백/g, "문제 배포를 이전 버전으로 되돌리기")
+    .replace(/사후 감사( 대상)?/g, "나중에 사람이 점검$1")
     .replace(/롤백/g, "이전 버전으로 되돌리기")
     .replace(/되돌리기([과이은을])/g, (_, j: string) => `되돌리기${({ 과: "와", 이: "가", 은: "는", 을: "를" } as Record<string, string>)[j]}`);
 }
