@@ -215,7 +215,11 @@ class TickResult:
     full_skips: int = 0  # 그 형식 추적 칸(40개)·전체(200개)가 다 차서 건너뛴 찾기
     # 장부(전체 8,000·예약 몫)가 막아 부르지 않은 찾기. 시각을 남기지 않아 다음 루프에 다시 본다
     ledger_refused: int = 0
+    # LLM 장부(하루 상한·브리프 몫 80%)가 형식 판정을 막을 때라 부르지 않은 찾기. 시각을 남기지 않음
+    llm_refused: int = 0
+    results: int = 0  # 검색 결과 수 (60초 넘는 것·이미 추적 중인 것 포함)
     found: int = 0  # 검색 결과 중 60초 이하 새 영상
+    unclassified: int = 0  # 60초 이하 새 영상 중 형식을 판정하지 못한 수
     added: int = 0  # 추적 목록에 넣은 수
     tracked_calls: int = 0  # 추적 videos.list 호출 수 (50개씩)
     snapshots: int = 0  # 저장한 스냅샷 줄
@@ -226,10 +230,26 @@ class TickResult:
         return (
             f"[fresh] 찾기 {self.searches}번(상한으로 건너뜀 {self.skipped_searches}"
             + (f", 장부가 막아 안 부름 {self.ledger_refused}" if self.ledger_refused else "")
-            + f"), 새로 추적"
+            + (f", LLM 장부가 막아 안 부름 {self.llm_refused}" if self.llm_refused else "")
+            + ")"
+            + (f", 결과 {self.results}개(60초 이하 새 영상 {self.found}개"
+               + (f", 형식 판정 못 함 {self.unclassified}" if self.unclassified else "") + ")"
+               if self.searches else "")
+            + f", 새로 추적"
             f" {self.added}개, 추적 중 {self.tracking}개, 스냅샷 {self.snapshots}줄"
             + (f", {'; '.join(self.problems)}" if self.problems else "")
         )
+
+
+def llm_refusal(env: Mapping[str, str]) -> str | None:
+    """LLM 장부가 지금 형식 판정(브리프가 아닌 일)을 막으면 그 이유, 아니면 None."""
+    from data_agent import llm_budget
+
+    try:
+        llm_budget.BUDGET.check(env)
+    except llm_budget.LLMDailyCapReached as error:
+        return str(error)
+    return None
 
 
 async def _llm_classify(stats: Sequence[Any], env: Mapping[str, str]) -> dict[str, str]:
@@ -287,6 +307,8 @@ async def run_tick(
     now = (now or datetime.now(UTC)).astimezone(UTC).replace(microsecond=0)
     formats = list(formats) if formats is not None else target_formats(env)
     cap = daily_cap(env)
+    # 기본 판정(LLM)을 쓸 때만 LLM 장부를 본다 (판정을 바꿔 끼우면 LLM을 부르지 않음)
+    llm_block = llm_refusal(env) if classify is None else None
     res = TickResult()
     store = store_of(env)
     try:
@@ -308,6 +330,11 @@ async def run_tick(
             if not youtube_quota.LEDGER.can_search(env, CALLER):
                 res.ledger_refused += 1
                 continue
+            # 찾은 영상은 형식을 판정해야 추적한다. LLM 장부가 판정을 막으면 검색 100단위만 쓰고
+            # 0개가 되므로 부르지 않고 시각도 남기지 않는다 (LLM 하루가 바뀐 뒤 첫 루프에 찾는다)
+            if llm_block is not None:
+                res.llm_refused += 1
+                continue
             store.set_find(fmt, now)  # 실제로 부른 찾기만 (실패해도 6시간 뒤에 다시)
             try:
                 stats = await connector.search_fresh_shorts(
@@ -321,6 +348,7 @@ async def run_tick(
                 res.problems.append(f"{fmt} 찾기 실패 [{error.code}]")
                 continue
             res.searches += 1
+            res.results += len(stats)
             fresh = [
                 s
                 for s in stats
@@ -334,6 +362,7 @@ async def run_tick(
             kinds = (classify or (lambda st: _llm_classify(st, env)))(fresh)
             if inspect.isawaitable(kinds):
                 kinds = await kinds
+            res.unclassified += sum(1 for s in fresh if s.video_id not in kinds)
             shorts = ShortsStore(env.get(SHORTS_DB_ENV) or SHORTS_DEFAULT_DB)
             try:  # 형식 판정을 기준 계산(video_baseline)이 읽는 저장분에 남긴다
                 shorts.save_formats(
