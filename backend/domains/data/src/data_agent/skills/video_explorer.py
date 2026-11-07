@@ -809,8 +809,9 @@ async def _refresh(
     left = max(0, config.video_units - store.calls(ledger_day, REREAD_KIND))
     take = todo[: left * PAGE]
     if len(take) < len(todo):
-        limits.append(f"다시 읽기 하루 상한({config.video_units}번)으로 {len(todo) - len(take)}개는"
-                      " 다음 날")  # fmt: skip
+        most = config.video_units * PAGE  # 1유닛 = 영상 50개
+        limits.append(f"다시 읽기 하루 상한({config.video_units}유닛 · 영상 최대 {most:,}개)으로"
+                      f" {len(todo) - len(take)}개는 다음 날")  # fmt: skip
     src = dict(take)
     for start in range(0, len(take), PAGE):
         chunk = [vid for vid, _ in take[start : start + PAGE]]

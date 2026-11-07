@@ -502,3 +502,17 @@ def test_reread_count_is_kept_by_the_youtube_ledger_day(tmp_path: Path) -> None:
     assert store.calls(youtube_quota.day_of(NOW), ve.REREAD_KIND) == 1  # 표본 1개 = 1유닛
     assert ve.load_config(env).video_units == 80
     store.close()
+
+
+def test_reread_limit_sentence_shows_units_and_max_videos(tmp_path: Path) -> None:
+    """상한에 닿으면 "다시 읽기 하루 상한(80유닛 · 영상 최대 4,000개)으로 N개는 다음 날"."""
+    from data_agent import youtube_quota
+
+    env = _env(tmp_path, "[explorer.extra]\n")
+    store = ve.ExplorerStore(tmp_path / "ex.db")
+    store.add_calls(youtube_quota.day_of(NOW), ve.REREAD_KIND, 80, 80)  # 오늘 몫을 다 씀
+    limits: list[str] = []
+    asyncio.run(ve._refresh(env, FakeYouTube(), store, ve.load_config(env), {}, NOW, ve._day(NOW),
+                            [], limits))  # fmt: skip
+    assert "다시 읽기 하루 상한(80유닛 · 영상 최대 4,000개)으로 1개는 다음 날" in limits
+    store.close()
