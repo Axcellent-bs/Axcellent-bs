@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 로컬에서 백엔드 전체(공통 4개 + 서비스 11개 + 총괄)를 실제 모드로 띄운다. 목 모드는 없다(*_MOCK은 테스트 전용).
 #   bash backend/scripts/run_all.sh          # 실제 LLM·실제 토큰·Redis·파일 DB, 캣북스 고객 주문 트래픽
-#   bash backend/scripts/run_all.sh stop     # 이 스크립트가 띄운 것 끄기
+#                                            # 이미 떠 있으면 켜지 않는다 ("이미 실행 중 (pid …), 먼저 stop")
+#   bash backend/scripts/run_all.sh stop     # 이 스크립트가 띄운 것 끄기 (자식까지, 끝에 "남은 프로세스 0개" 확인)
 #   bash backend/scripts/run_all.sh reset    # 끄고 테스트로 쌓인 기록(.data·이벤트 버스)을 지운다
 #   bash backend/scripts/run_all.sh --only data,finance,shop-api   # 고른 서버만 (이름은 아래 APPS)
 #   bash backend/scripts/run_all.sh --only data-demo              # 묶음: core, data-demo (아래 GROUP_*)
@@ -45,6 +46,13 @@ orchestrator 8000 ax_orchestrator.main:app
 # 접어 둔 서비스(띄우지 않고 켠 서비스에서도 뺀다). 되살리려면 위 APPS에 줄을 되돌리고 여기서 뺀다
 FOLDED="handover"
 PORTS=$(echo "$APPS" | awk 'NF {print $2}' | tr '\n' ',' | sed 's/,$//')
+# 이 스크립트가 띄우는 프로세스를 명령줄로 알아보는 표식 (scripts/procs.py: 이미 떠 있는지·끈 뒤 남았는지)
+MARKERS=()
+while read -r _ _ module; do
+  [ -n "${module:-}" ] && MARKERS+=("uvicorn $module")
+done <<< "$APPS"
+MARKERS+=("data_agent.trending_collect" "data_agent.youtube_collect" "shop_traffic.py")
+COLLECTOR_LOCKS=("$DATA/youtube_collect.lock" "$DATA/trending_collect.lock")
 
 # --only 묶음 이름 (data-demo = core + data 업무 리포트가 부르는 서비스)
 GROUP_core="safety,memory,shop-api,dashboard-api,orchestrator"
@@ -87,20 +95,30 @@ if [ -n "$ONLY" ]; then
   SKIPPED=$(echo "$APPS" | awk -v w="$wanted" 'NF && !index(w, "," $1 ",") {print $1}' | tr '\n' ' ' | sed 's/ $//')
 fi
 
+# bash의 $!는 Windows 프로세스 번호가 아니다. .pid에는 Windows 번호(/proc/<pid>/winpid)를 적는다
+winpid_of() { cat "/proc/$1/winpid" 2>/dev/null || echo "$1"; }
+
+# 끄기: 포트를 쥔 프로세스 + 기록한 pid와 그 자식(venv 런처 밑 실제 python) + 수집기 잠금에 적힌 pid.
+# 끈 뒤 표식으로 다시 찾아 "남은 프로세스 0개"를 확인한다. 남으면 pid·명령줄을 보여 주고 실패(1)
 stop_all() {
-  # bash의 $!는 Windows 프로세스 번호가 아니라서, 포트를 쥔 프로세스를 찾아 끈다
   if command -v powershell.exe >/dev/null 2>&1; then
     powershell.exe -NoProfile -Command "foreach(\$p in @($PORTS)){Get-NetTCPConnection -LocalPort \$p -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$_.OwningProcess -Force -ErrorAction SilentlyContinue }}" >/dev/null 2>&1
   fi
+  local pids=""
   for f in "$LOGS"/*.pid; do
     [ -f "$f" ] || continue
-    kill "$(cat "$f")" 2>/dev/null
+    kill "$(cat "$f")" 2>/dev/null  # 예전 .pid(bash 번호)도 끈다
+    pids="$pids $(cat "$f")"
     rm -f "$f"
   done
+  "$PY" scripts/procs.py stop --pids "$pids" --locks "${COLLECTOR_LOCKS[@]}" -- "${MARKERS[@]}"
 }
 
 if [ "$CMD" = "stop" ]; then
-  stop_all
+  if ! stop_all; then
+    echo "stop 실패: 위 프로세스가 남아 있습니다" >&2
+    exit 1
+  fi
   echo "stopped"
   exit 0
 fi
@@ -108,7 +126,10 @@ fi
 # 테스트로 쌓인 기록을 지우고 처음부터: 캣북스 주문·AI 대화 기록·인사 기록·LLM 사용량·이벤트 버스
 # (캣북스 쇼핑몰은 비어 있으면 시드를 다시 넣는다)
 if [ "$CMD" = "reset" ]; then
-  stop_all
+  if ! stop_all; then
+    echo "reset 실패: 위 프로세스가 남아 있어 기록을 지우지 않았습니다" >&2
+    exit 1
+  fi
   rm -f "$DATA"/*.db "$DATA"/*.db-wal "$DATA"/*.db-shm "$DATA"/web.env "$DATA"/tokens.env
   docker exec ax-redis redis-cli FLUSHALL >/dev/null 2>&1 || true
   echo "reset: backend/.data 와 이벤트 버스를 비웠습니다. 다시 켜려면 bash scripts/run_all.sh"
@@ -119,6 +140,18 @@ if [ "$CMD" = "mock" ]; then
   echo "목 모드는 지웠습니다. 로컬도 실제 모드 하나로 돕니다 (*_MOCK 스위치는 CI 단위 테스트 전용)." >&2
   exit 2
 fi
+
+# 켜기: 같은 서버·수집기가 이미 떠 있으면 켜지 않는다 (옛 코드가 남아 새 코드를 막지 않게)
+if ! "$PY" scripts/procs.py running "${MARKERS[@]}"; then
+  exit 1
+fi
+rm -f "$LOGS"/*.pid  # 떠 있는 것이 없으니 남은 .pid는 끝난 프로세스 것
+# 로그 첫 줄: 어느 코드로 언제 켰는지 (수집기 [quota] 줄에도 짧은 커밋이 붙는다)
+AX_GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "알 수 없음")
+GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "알 수 없음")
+export AX_GIT_COMMIT
+START_LINE="[start] 코드 $AX_GIT_COMMIT ($GIT_BRANCH) · 시작 $(date '+%Y-%m-%d %H:%M:%S %z')"
+echo "$START_LINE"
 
 # 컨테이너가 아니라서 서비스 이름 대신 localhost 주소를 알려 준다 (AX_<이름>_URL, agent_url)
 while read -r name port _; do
@@ -325,8 +358,6 @@ token_of() { echo "$AX_AGENT_TOKENS" | tr ',' '\n' | sed -n "s/^$1=//p"; }
   [ -z "${SHOP_VIEWER_TOKEN:-}" ] || echo "VITE_SHOP_VIEWER_TOKEN=$SHOP_VIEWER_TOKEN"
 } > "$DATA/web.env"
 
-stop_all
-
 RUN_COUNT=$(echo "$RUN_APPS" | awk 'NF' | wc -l | tr -d ' ')
 echo "띄운 서버 ${RUN_COUNT}개: $(echo "$RUN_APPS" | awk 'NF {print $1}' | tr '\n' ' ' | sed 's/ $//'), 안 띄움: ${SKIPPED:-없음}"
 
@@ -345,8 +376,9 @@ while read -r name port module; do
       sleep 1
     done
   fi
-  "$PY" -m uvicorn "$module" --host 127.0.0.1 --port "$port" > "$LOGS/$name.log" 2>&1 &
-  echo $! > "$LOGS/$name.pid"
+  echo "$START_LINE" > "$LOGS/$name.log"
+  "$PY" -m uvicorn "$module" --host 127.0.0.1 --port "$port" >> "$LOGS/$name.log" 2>&1 &
+  winpid_of $! > "$LOGS/$name.pid"
   started=$((started + 1))
 done <<< "$RUN_APPS"
 
@@ -354,19 +386,22 @@ done <<< "$RUN_APPS"
 if echo "$RUN_APPS" | awk '$1 == "shop-api" {found=1} END {exit !found}'; then
   # 재고가 0이 되면 주문이 조용히 멈춰 장애가 안 잡히는 것처럼 보인다. 자동 보충을 기본으로 켠다
   # (끄려면 SHOP_TRAFFIC_REFILL=0). 보충에는 위에서 만든 admin 토큰을 쓴다
+  echo "$START_LINE" > "$LOGS/shop-traffic.log"
   SHOP_API_URL=http://127.0.0.1:8010 SHOP_TRAFFIC_REFILL="${SHOP_TRAFFIC_REFILL:-1}" \
-    "$PY" scripts/shop_traffic.py > "$LOGS/shop-traffic.log" 2>&1 &
-  echo $! > "$LOGS/shop-traffic.pid"
+    "$PY" scripts/shop_traffic.py >> "$LOGS/shop-traffic.log" 2>&1 &
+  winpid_of $! > "$LOGS/shop-traffic.pid"
 fi
 
 # data: Google 인기 검색어 스냅샷을 1시간마다 모은다 (data를 띄웠을 때만, 끄기는 stop이 .pid로 같이 끈다)
 if echo "$RUN_APPS" | awk '$1 == "data" {found=1} END {exit !found}'; then
-  "$PY" -m data_agent.trending_collect --every 3600 > "$LOGS/trending-collect.log" 2>&1 &
-  echo $! > "$LOGS/trending-collect.pid"
+  echo "$START_LINE" > "$LOGS/trending-collect.log"
+  "$PY" -m data_agent.trending_collect --every 3600 >> "$LOGS/trending-collect.log" 2>&1 &
+  winpid_of $! > "$LOGS/trending-collect.pid"
   # YouTube 스냅샷도 1시간마다 (수집 직후 감지 탭 결과를 미리 계산). 이미 다른 수집기가 돌면
   # 잠금(backend/.data/youtube_collect.lock)을 못 잡아 바로 끝난다 → 두 개가 같이 돌지 않는다
-  "$PY" -m data_agent.youtube_collect --every 3600 > "$LOGS/youtube-collect.log" 2>&1 &
-  echo $! > "$LOGS/youtube-collect.pid"
+  echo "$START_LINE" > "$LOGS/youtube-collect.log"
+  "$PY" -m data_agent.youtube_collect --every 3600 >> "$LOGS/youtube-collect.log" 2>&1 &
+  winpid_of $! > "$LOGS/youtube-collect.pid"
   # 수집기 두 개를 켰다는 줄 (잠금을 못 잡아 끝났는지는 각 로그 첫 줄, 상태는 data_sources 출처 현황)
   echo "수집기: trending_collect·youtube_collect 1시간마다 (로그 $LOGS/trending-collect.log, $LOGS/youtube-collect.log)"
 fi
