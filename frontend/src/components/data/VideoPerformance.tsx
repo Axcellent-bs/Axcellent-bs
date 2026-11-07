@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Empty, Panel, Waiting } from "@/components/finance/bits";
 import {
   DATA_SERVER, dataAi, kpiLive,
-  type BaselineProgress, type CampaignResultOutput, type CampaignSalesCell,
+  type BaselineProgress, type CampaignResultOutput, type CampaignSalesCell, type CampaignSendState, type CampaignSendStatus,
   type SignalLevel, type VideoCheckpoint, type VideoInsightCard, type VideoPerformanceListOutput,
   type VideoPerformanceVideo, type VideoSignal, type VideoVerdict,
 } from "@/lib/data";
@@ -276,7 +276,26 @@ function CampaignCard({ c }: { c: CampaignState }) {
       )}
       {sales && <p className="text-xs text-ink-500">{sales.measurable_line}</p>}
       {sales?.notes.map((note) => <p key={note} className="text-xs font-semibold text-amber-700">{note}</p>)}
+      {out.send_status && <SendLine s={out.send_status} />}
     </article>
+  );
+}
+
+// 기획에 결과 보내기 상태 (campaign_result send_status). 칩 글자·문장은 서버 값 그대로, 화면은 색만 정한다.
+const SEND_CHIP: Record<CampaignSendState, string> = {
+  sent: "bg-emerald-50 text-emerald-700",
+  pending: "bg-ink-100 text-ink-500",
+  not_sent: "bg-ink-100 text-ink-500",
+  failed: "bg-amber-50 text-amber-700",
+  off: "bg-ink-100 text-ink-500",
+};
+
+function SendLine({ s }: { s: CampaignSendStatus }) {
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-ink-100 pt-2 text-xs text-ink-500">
+      <span className={`chip text-xs font-semibold ${SEND_CHIP[s.state]}`}>{s.chip}</span>
+      {s.state !== "failed" && s.line && <span>{s.line}</span>}
+    </div>
   );
 }
 
@@ -289,7 +308,7 @@ function CampaignSection({ campaigns }: { campaigns: CampaignState[] }) {
         : <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">{campaigns.map((c) => <CampaignCard key={c.id} c={c} />)}</div>}
       <div className="text-xs leading-relaxed text-ink-500">
         <p>네 칸은 겹치는 매출이라 더하지 않습니다. 표본이 적으면 '효과 확인 안 됨(표본 적음)'으로 표시합니다.</p>
-        <p>수익·손실(광고비·제작비 포함)은 재무에서 판단합니다.</p>
+        <p>수익·손실(광고비·제작비 포함)은 재무에서 판단합니다. 재무 장부에는 마케팅이 집행액과 함께 이 매출 효과를 기록합니다.</p>
       </div>
     </section>
   );
