@@ -148,3 +148,11 @@ def test_one_unit_calls_also_stop_at_the_total_cap(tmp_path: Path) -> None:
     why = ledger.take("youtube_collect", 1, env=env)
     assert why is not None and "부르지 않음" in why and "다음 초기화" in why
     assert ledger.units() == 1000
+
+
+def test_quota_line_code_version_comes_from_run_all_or_git() -> None:
+    """[quota] 줄 끝 "· 코드 <짧은 커밋>": run_all.sh가 넘긴 값, 없으면 git (옛 코드가 보이게)."""
+    from data_agent import youtube_collect
+
+    assert youtube_collect.code_version({"AX_GIT_COMMIT": "abc1234"}) == "abc1234"
+    assert youtube_collect.code_version({}) == youtube_collect._git_commit() != ""

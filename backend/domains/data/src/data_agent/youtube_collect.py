@@ -34,9 +34,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import functools
 import os
 import re
 import sqlite3
+import subprocess
 import sys
 import tomllib
 from collections.abc import Mapping
@@ -357,8 +359,8 @@ async def run(every: int | None, env: Mapping[str, str], precompute_after: bool 
                 problems = await precompute()
                 if problems:
                     print(f"[precompute] 일부 못 함: {', '.join(problems)}", flush=True)
-            # 기능별 오늘 YouTube 단위 (하나의 장부, 미리 계산까지 끝난 뒤)
-            print(youtube_quota.LEDGER.status_line(env), flush=True)
+            # 기능별 오늘 YouTube 단위 (하나의 장부, 미리 계산까지 끝난 뒤) + 이 수집기의 코드
+            print(f"{youtube_quota.LEDGER.status_line(env)} · 코드 {code_version(env)}", flush=True)
             if every is None:
                 return 1 if result.errors and not result.saved else 0
             await asyncio.sleep(every)
@@ -410,6 +412,27 @@ async def track_fresh(
         return 0
     print(result.line(), flush=True)
     return result.snapshots
+
+
+COMMIT_ENV = "AX_GIT_COMMIT"  # run_all.sh가 켤 때의 짧은 커밋을 넘긴다
+
+
+@functools.cache
+def _git_commit() -> str:
+    """이 프로세스가 처음 물었을 때의 짧은 커밋 (run_all.sh 없이 켰을 때)."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=Path(__file__).parent,
+            capture_output=True, text=True, timeout=5, check=False,
+        )  # fmt: skip
+    except (OSError, subprocess.SubprocessError):
+        return "알 수 없음"
+    return out.stdout.strip() or "알 수 없음"
+
+
+def code_version(env: Mapping[str, str]) -> str:
+    """[quota] 줄에 붙이는 짧은 커밋: 로그만 보고 옛 코드가 도는지 알 수 있게."""
+    return (env.get(COMMIT_ENV) or "").strip() or _git_commit()
 
 
 def lock_path(env: Mapping[str, str]) -> Path:
