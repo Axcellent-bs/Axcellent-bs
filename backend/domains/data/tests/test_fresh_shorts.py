@@ -161,6 +161,36 @@ def test_a_find_the_ledger_refused_is_not_recorded(
     assert fake.searches == ["정보 팁"] and after.searches == 1  # 6시간 안 기다림
 
 
+def test_no_find_while_the_llm_ledger_blocks_classification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LLM 장부가 형식 판정을 막으면(80%) 검색을 부르지 않고 시각도 남기지 않는다."""
+    from data_agent import llm_budget
+
+    budget = llm_budget.Budget(None)
+    budget.add(10, 320_000)  # 토큰 80%
+    monkeypatch.setattr(llm_budget, "BUDGET", budget)
+    env, fake = _env(tmp_path), FakeYouTube()
+    env |= {"DATA_LLM_DAILY_CALLS": "200", "DATA_LLM_DAILY_TOKENS": "400000"}
+    blocked = asyncio.run(fresh_shorts.run_tick(fake, env, NOW, formats=["정보·팁"]))
+    assert fake.searches == [] and blocked.llm_refused == 1 and blocked.searches == 0
+    assert "LLM 장부가 막아 안 부름 1" in blocked.line()
+    store = fresh_shorts.store_of(env)
+    assert store.last_find("정보·팁") is None
+    store.close()
+
+
+def test_the_fresh_line_shows_what_a_find_returned(tmp_path: Path) -> None:
+    """찾기 결과 수와 60초 이하 새 영상 수가 [fresh] 줄에 남는다 (0개여도 이유를 볼 수 있게)."""
+    env, fake = _env(tmp_path), FakeYouTube()
+    got = asyncio.run(fresh_shorts.run_tick(fake, env, NOW, formats=["정보·팁"],
+                                            classify=lambda st: {}))  # fmt: skip
+    assert got.searches == 1
+    assert f"결과 {got.results}개(60초 이하 새 영상 {got.found}개" in got.line()
+    if got.found:
+        assert f"형식 판정 못 함 {got.found}" in got.line()
+
+
 def test_a_race_refusal_rolls_back_but_a_real_failure_waits(tmp_path: Path) -> None:
     from data_agent.connectors import ConnectorUnavailable
     from data_agent.connectors.youtube import QuotaRefused
