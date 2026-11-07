@@ -56,7 +56,8 @@ def list_processes() -> list[Proc]:
             for r in rows
         ]
     out = subprocess.run(
-        ["ps", "-eo", "pid=,ppid=,args="], capture_output=True, text=True, check=False
+        # -ww: 명령줄을 자르지 않는다 (터미널이 아니면 80칸에서 잘려 끝의 표식이 사라짐)
+        ["ps", "-ww", "-eo", "pid=,ppid=,args="], capture_output=True, text=True, check=False
     ).stdout
     procs = []
     for line in out.splitlines():
