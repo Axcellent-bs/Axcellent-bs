@@ -1649,6 +1649,20 @@ export interface CampaignSalesEffect {
   notes: string[];
 }
 export interface CampaignAlert { kind: "loss" | "data_gap"; message: string; note?: string | null }
+/** 기획에 결과 보내기 상태 (campaign_result v2 send_status). 칩 글자·한 줄은 서버 문장 그대로. */
+export type CampaignSendState = "sent" | "pending" | "not_sent" | "failed" | "off";
+export interface CampaignSendStatus {
+  state: CampaignSendState;
+  /** 기획에 보냄 · 기획에 보낼 예정 · 보내지 않음 · 보내기 실패 · 다시 시도 중 (n/3) · 자동 보내기 꺼짐 */
+  chip: string;
+  /** PROP-3 · "늘었음" · 11월 12일 14:05 / 7일 측정이 끝나는 … 이후 자동으로 보냅니다 / 이유 */
+  line: string;
+  proposal_id?: string | null;
+  direction?: string | null;
+  failures?: number;
+  retry_limit?: number;
+  reason?: string | null;
+}
 export interface CampaignResultOutput {
   status: "known" | "unknown";
   reason?: string | null;
@@ -1661,6 +1675,8 @@ export interface CampaignResultOutput {
   alerts: CampaignAlert[];
   summary: string;
   schema_version?: string;
+  /** v2부터. 예전 응답에는 없다 (그러면 줄을 그리지 않는다) */
+  send_status?: CampaignSendStatus | null;
 }
 export type CampaignResultView = "planning" | "marketing" | "finance";
 
