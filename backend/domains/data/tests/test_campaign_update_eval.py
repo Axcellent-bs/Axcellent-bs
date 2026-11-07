@@ -7,7 +7,7 @@
   하루 3번까지 다시. 기능 플래그가 꺼져 있으면 호출 0회
 - 재무 기록용 값: 집행액 칸 없음, 음수 보존, 모르면 None
 - 실제 계약 모델(ReceiveCampaignUpdateInput·CampaignResultInput)로 검증한다. 기획·재무는 부르지 않음
-- 이 PR에서는 관찰만 (관문은 코드 PR에서)
+- 관문은 코드 PR에서 켬 (평가 정의 PR #828은 관찰만: dev 0.0 / 0.0 / 0.0)
 """
 
 from __future__ import annotations
@@ -194,9 +194,13 @@ def observe(tmp_path: Path) -> dict[str, float]:
     return score.score(cases, {c["name"]: _run(c, tmp_path) for c in cases})
 
 
-def test_campaign_update_observe(tmp_path: Path) -> None:
-    """관찰만: 지표를 출력하고 모양만 본다 (관문은 코드 PR에서 켬)."""
+GATES = dict.fromkeys(score.METRICS, 1.0)  # 모두 맞아야 함
+
+
+def test_campaign_update_passes_the_gates(tmp_path: Path) -> None:
+    """관문: 보내기 판정·응답 처리·플래그, 실제 계약 검증, direction·summary·facts·재무 값."""
     metrics = observe(tmp_path)
     print("campaign_update eval:", json.dumps(metrics, ensure_ascii=False))
     assert set(metrics) == set(score.METRICS)
-    assert all(0.0 <= v <= 1.0 for v in metrics.values())
+    for name, gate in GATES.items():
+        assert metrics[name] >= gate, f"{name} {metrics[name]} (관문 {gate})"

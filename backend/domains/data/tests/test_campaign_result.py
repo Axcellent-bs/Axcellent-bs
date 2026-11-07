@@ -110,7 +110,7 @@ def test_planning_gets_everything_with_a_loss_alert(tmp_path: Path) -> None:
     assert out.status == "known"
     assert out.sections == ["link", "videos", "sales", "advice", "alerts"]  # 기획: ①~⑤
     assert (out.campaign_name, out.insight_id, out.schema_version) == (
-        "파이썬 입문", "ins_1", "campaign_result.v1")  # fmt: skip
+        "파이썬 입문", "ins_1", "campaign_result.v2")  # fmt: skip
     assert out.window_from == PUB and out.window_to == PUB + timedelta(days=7)  # 첫 게시 ~ 7일
     (data,) = seen
     assert data.products == ["p1", "p2"] and data.campaign_id == "cmp_1"  # 인사이트 연결 상품
@@ -140,6 +140,32 @@ def test_marketing_and_finance_get_their_own_bundle(tmp_path: Path) -> None:
     fi, _ = _run(env, view="finance")
     assert fi.sections == ["link", "sales", "alerts"] and fi.videos == [] and fi.advice == []
     assert fi.sales is not None and fi.alerts and fi.window_from == PUB
+
+
+def test_finance_bundle_has_the_record_values_data_knows(tmp_path: Path) -> None:
+    """v2 재무 묶음 finance_record: 증가분이 음수면 gmv·orders 0, 잰 값은 그대로, 집행액 칸 없음."""
+    from ax_contracts.schemas.finance import CampaignResultInput
+
+    env = _setup(tmp_path)
+    fi, _ = _run(env, view="finance")
+    rec = fi.finance_record
+    assert rec is not None and fi.schema_version == "campaign_result.v2"
+    assert (rec.campaign_id, rec.period_from, rec.period_to) == ("cmp_1", "2026-11-01",
+                                                                 "2026-11-08")  # fmt: skip
+    assert (rec.gmv_krw, rec.orders) == (0, 0)  # 줄었으면 0 (재무 계약 ge=0)
+    assert (rec.measured_gmv_krw, rec.measured_orders) == (-700_000, -15)  # 잰 값 그대로
+    assert rec.source == "data.campaign_result"
+    body = rec.model_dump(mode="json")
+    assert "spend_krw" not in body and "campaign_name" not in body  # 마케팅이 채움
+    CampaignResultInput.model_validate({**{k: v for k, v in body.items() if v is not None},
+                                        "campaign_name": "파이썬 입문", "channel": "youtube",
+                                        "spend_krw": 1})  # fmt: skip
+    pl, _ = _run(env, view="planning")
+    assert pl.finance_record is None  # 재무 묶음만
+    for out in (fi, pl):  # 기능 플래그가 없으면(기본) 자동 보내기 꺼짐
+        assert out.send_status is not None and out.send_status.state == "off"
+        assert (out.send_status.chip, out.send_status.line) == ("자동 보내기 꺼짐",
+                                                                "safety 확인 후 켭니다")
 
 
 def test_low_sample_is_not_a_loss(tmp_path: Path) -> None:
