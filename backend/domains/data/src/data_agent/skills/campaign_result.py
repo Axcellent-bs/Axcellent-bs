@@ -31,6 +31,7 @@ from ax_contracts.schemas.data import (
     CampaignAlert,
     CampaignEffectInput,
     CampaignEffectOutput,
+    CampaignFinanceRecord,
     CampaignResultOutput,
     CampaignResultRequest,
     CampaignResultSection,
@@ -43,7 +44,7 @@ from ax_contracts.schemas.data import (
     VideoPerformanceOutput,
 )
 
-SCHEMA_VERSION = "campaign_result.v1"
+SCHEMA_VERSION = "campaign_result.v2"  # v2: finance_record(재무 묶음)·send_status 칸
 LOW_SAMPLE_WINDOWS = 4  # 4주 기준선 (7·14·21·28일 창)
 LOW_SAMPLE_ORDERS = 5
 CAMPAIGN_DAYS = 7
@@ -264,6 +265,39 @@ def judge(
     return sales, alerts
 
 
+def finance_record(out: CampaignResultOutput, generated_at: str | None) -> CampaignFinanceRecord:
+    """재무 기록용 값: finance `CampaignResultInput` 중 데이터가 아는 값만 (집행액 칸 없음).
+
+    gmv_krw·orders는 증가분이 음수면 0, 잰 값은 measured_*에 그대로. 모르면 None.
+    기간은 측정 기간(첫 게시 ~ 7일 뒤)의 한국 날짜.
+    """
+    from data_agent.youtube_store import KST
+
+    verdict = out.sales.verdict if out.sales else None
+    gross = verdict.incremental_gross_krw if verdict else None
+    orders = verdict.incremental_orders if verdict else None
+    start = out.window_from
+    return CampaignFinanceRecord(
+        campaign_id=out.campaign_id,
+        period_from=start.astimezone(KST).date().isoformat() if start else None,
+        period_to=(start + timedelta(days=CAMPAIGN_DAYS)).astimezone(KST).date().isoformat()
+        if start
+        else None,
+        gmv_krw=None if gross is None else max(gross, 0),
+        orders=None if orders is None else max(orders, 0),
+        measured_gmv_krw=gross,
+        measured_orders=orders,
+        effect_generated_at=generated_at,
+    )
+
+
+def _send_status(out: CampaignResultOutput, env: Mapping[str, str], now: datetime) -> None:
+    """기획에 결과 보내기 상태 (모든 묶음). 묶음을 고르기 전에(영상 칸이 있을 때) 붙인다."""
+    from data_agent import campaign_update
+
+    out.send_status = campaign_update.read_status(out, env, now)
+
+
 # ---------------------------------------------------------------- skill
 
 
@@ -314,6 +348,7 @@ async def campaign_result(
     if not mine:
         out.reason = f"캠페인 {request.campaign_id}에 등록된 영상이 없음"
         out.summary = out.reason
+        _send_status(out, env, now)
         return CampaignResultResult(
             out, Evidence(queries=queries, data_summary=out.summary, collected_at=now)
         )
@@ -374,6 +409,10 @@ async def campaign_result(
     out.limits = [video_factors.ANALYTICS_LIMIT, *SALES_LIMITS]
     label = sales.verdict.label if sales.verdict else "측정 불가"
     out.summary = f"{name}: 영상 {sales.videos_total}개 · 매출 {label} · {sales.measurable_line}"
+    if request.view == "finance":
+        made = effect.generated_at.isoformat() if effect and effect.generated_at else None
+        out.finance_record = finance_record(out, made)
+    _send_status(out, env, now)
     _keep(out)
     return CampaignResultResult(
         out, Evidence(queries=queries, data_summary=out.summary, collected_at=now)

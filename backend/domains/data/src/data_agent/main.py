@@ -18,6 +18,7 @@ from ax_agent_template.llm import LLMSettings
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard, RequestMeta
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT
+from data_agent import campaign_update
 from data_agent.clients.log_client import get_log_source
 from data_agent.handlers import HANDLERS
 from data_agent.monitor import run_snapshots_forever
@@ -100,11 +101,15 @@ def build_app() -> FastAPI:
     async def lifespan(a: FastAPI) -> AsyncIterator[None]:
         async with template_lifespan(a):
             task = start_report_snapshots()
+            # 성과 결과를 기획에 보내기 (한 시간마다, DATA_SEND_CAMPAIGN_UPDATE가 꺼져 있으면
+            # 기획을 부르지 않음)
+            sends = asyncio.create_task(campaign_update.run_forever())
             try:
                 yield
             finally:
                 if task:
                     task.cancel()
+                sends.cancel()
 
     app.router.lifespan_context = lifespan
     app.router.routes = [r for r in app.router.routes if getattr(r, "path", None) != "/health"]

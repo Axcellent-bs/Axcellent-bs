@@ -2836,6 +2836,46 @@ class CampaignVideoAdvice(AxModel):
     actions: list[str] = Field(default_factory=list)
 
 
+class CampaignFinanceRecord(AxModel):
+    """재무 기록용 값 (v2, 재무 묶음): finance `CampaignResultInput` 중 데이터가 아는 값만.
+
+    집행액(spend_krw)·캠페인 이름·채널·쿠폰 금액 칸은 없다. 마케팅이 채워 재무에 보낸다
+    (데이터는 집행액을 모른다). 모르는 값은 None (0으로 채우지 않는다).
+    """
+
+    campaign_id: str
+    period_from: str | None = None  # 측정 기간 (첫 게시 ~ 7일 뒤)의 한국 날짜 YYYY-MM-DD
+    period_to: str | None = None
+    gmv_krw: int | None = Field(default=None, ge=0)  # max(증가 매출, 0)
+    orders: int | None = Field(default=None, ge=0)  # max(증가 주문, 0)
+    measured_gmv_krw: int | None = None  # 잰 증가 매출 그대로 (음수 가능)
+    measured_orders: int | None = None  # 잰 증가 주문 그대로 (음수 가능)
+    effect_generated_at: str | None = None  # campaign_effect의 generated_at
+    source: str = "data.campaign_result"
+
+
+# 기획에 결과 보내기 상태 (data → planning receive_campaign_update, 캠페인당 1번):
+# sent 보냄 · pending 보낼 예정(7일 측정 끝난 뒤) · not_sent 보내지 않음(이유) ·
+# failed 보내기 실패(다시 시도 중, 한국 날짜 하루 3번) · off 자동 보내기 꺼짐(기능 플래그)
+CampaignSendState = Literal["sent", "pending", "not_sent", "failed", "off"]
+
+
+class CampaignSendStatus(AxModel):
+    """기획에 결과 보내기 상태 (v2). 화면은 chip·line을 그대로 쓴다 (문장·시각은 서버 값)."""
+
+    state: CampaignSendState
+    chip: str  # 기획에 보냄 · 기획에 보낼 예정 · 보내지 않음 · 보내기 실패 · 다시 시도 중 (n/3) …
+    # PROP-3 · "늘었음" · 11월 12일 14:05 / 7일 측정이 끝나는 … 이후 자동으로 보냅니다
+    line: str = ""
+    proposal_id: str | None = None
+    direction: str | None = None  # 보낸 direction (늘었음·같음·줄었음·확인 불가)
+    sent_at: UtcDatetime | None = None
+    send_after: UtcDatetime | None = None  # 대기면 이 시각 이후 보냄
+    failures: int = Field(default=0, ge=0)  # 오늘(한국 날짜) 실패 횟수
+    retry_limit: int = Field(default=3, ge=0)
+    reason: str | None = None  # 보내지 않음·실패 이유
+
+
 class CampaignResultRequest(AxModel):
     """성과 결과 1건. view로 부서별 묶음을 고른다 (skill은 하나).
 
@@ -2870,6 +2910,9 @@ class CampaignResultOutput(AxModel):
     alerts: list[CampaignAlert] = Field(default_factory=list)
     summary: str = ""
     schema_version: str = ""
+    # 아래는 예전 응답은 없다 (v2). 재무 기록용 값(재무 묶음만)과 기획에 결과 보내기 상태(모든 묶음)
+    finance_record: CampaignFinanceRecord | None = None
+    send_status: CampaignSendStatus | None = None
 
 
 # 인사이트 카드 "지난번 결과" 띠 색: green = 조회 달성 + 매출 더 팔림, red = 매출 덜 팔림이거나

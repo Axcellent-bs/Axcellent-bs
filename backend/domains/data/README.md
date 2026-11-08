@@ -29,6 +29,8 @@
 | `content_recommend` | 지금 만들 만한 영상 소재(급상승만, 최대 N개): 순위·점수 근거(z·배수·두 소스)·출처·주제 분류·묶음(회사 상품과 연결된 소재·일반 화제)·연결할 실제 상품(근거)·회사 관련성(상품 연결로, 표시만)·밈 형식·영상 아이디어 1~2문장·형식(숏폼·롱폼)·fallback. 추천 안 함 분류(회사 설정)는 참고용 + 이유로 따로. 콘텐츠 루프 2단계 | trend_scan(회사 기본 키워드 그룹)·trend_candidates(후보 전체)와 같은 네이버 요청(하루 캐시 같이 씀), 회사 상품 목록(shop-api `GET /api/shop/products`·`/categories`), LLM(아이디어 문장·밈 형식·주제 분류만), 임베딩(설정이 있을 때만). 설정: 회사 폴더 `trends.toml` `[recommend]` |
 | `answer_planning_question` | 기획이 되묻는 근거 질문의 답(answered·needs_human·unknown). 기획만 부른다 | data가 보낸 요청의 기록(`planning_questions.py`, 프로세스 안). 아직 요청을 보내는 코드가 없어 지금은 늘 unknown. 사람 답은 `human_answer_request`로 planning `receive_planning_answer`에 보낸다 |
 | `campaign_effect` | 캠페인 기간 주문 방향(늘었음·같음·줄었음)·증분(실제 − 지난 7일 같은 시간대 평균), 캠페인 쿠폰 조회 시점 누적 사용률. 매출은 매출 지표가 생기면 같은 방법(지금은 확인할 수 없음) | shop-api `GET /api/shop/metric-series`(`order_count`), `GET /api/shop/coupons?campaign_id=` |
+| 기획에 결과 보내기 (skill 아님, data 서버 주기 루틴) | 7일 측정이 끝난 캠페인의 성과(direction·summary·facts)를 기획 `receive_campaign_update`(stage result)로 캠페인당 1번 보냄. 기능 플래그 `DATA_SEND_CAMPAIGN_UPDATE`(기본 꺼짐). 아래 "기획에 결과 보내기" | `campaign_result` 기획 묶음(계산 그대로, LLM 없음), 보내기 상태 `backend/.data/campaign_sends.db` |
+| 재무 기록용 값 (`campaign_result` 재무 묶음 `finance_record`) | 재무 `CampaignResultInput` 중 데이터가 아는 값만(기간·증가 매출·증가 주문·잰 값 그대로). 집행액은 없음 → 마케팅이 채워 재무에 보냄. 아래 "재무 기록용 값 (마케팅이 씀)" | `campaign_result` 매출 판정 그대로 |
 
 ### skill별 평가와 알려진 한계 (2026-11-03 기준)
 
@@ -345,6 +347,60 @@ DATA_EXTERNAL_MODE=replay bash scripts/run_all.sh
 | `shorts_stats` | 0 | 검색 하루 ≤ 8번(100단위씩, 저장 재사용), 다시 보기 videos.list 50개마다 1단위, 화면 카드 구독자 channels.list 하루 ≤ 2번(1단위씩) |
 | `promo_concepts` | 시즌 키워드 ≤ 20번(하루 캐시) + 연령대(예시 트렌드 수 × 5) | shorts_stats와 같다 |
 | `trend_insight_brief` | trend_age(후보 × 5, 상한 공유) | trend_popular·shorts_stats와 같다 |
+
+### 기획에 결과 보내기 (data → planning `receive_campaign_update`)
+
+성과 결과(`campaign_result` 기획 묶음)를 기획에 캠페인당 한 번 보낸다. data 서버 안의 주기 루틴(한 시간마다,
+`campaign_update.run_forever`)이 보낸다. 수집기 프로세스에는 에이전트 이름·안전 관문이 없어서, 업무 리포트
+일간 저장처럼 data 서버가 스스로 시작하는 A2A로 한다.
+
+- **언제:** 시험 아닌 영상이 모두 7일을 쟀거나(측정 중 0개) 측정 기간(첫 게시 + 7일)이 끝난 캠페인
+- **안 보냄 (이유를 상태로):** 시험 캠페인 · 기획 제안 번호(proposal_id) 없음 · 결과 unknown
+- **값 (LLM 안 씀):**
+  - `direction`: 매출 판정 기준. 더 팔림 → 늘었음, 덜 팔림 → 줄었음, 효과 확인 안 됨 → 같음, 표본 적음·측정 불가 → 확인 불가
+  - `summary`: 인사이트 "지난번 결과"와 같은 문장 `조회 목표의 N배 (영상 M개 중 K개 달성) · 매출 ±N원 · 주문 ±N건`. loss 알림이면 ` · 매출 감소 경고`를 붙이고, 200자를 넘으면 `<조회 판정> · 매출 <direction>`
+  - `facts`(최대 12, source `data.campaign_result`): 조회 판정, 목표 대비 배수, 달성 영상 수, 매출 판정, 증가 매출, 증가 주문, 네 칸(귀속·상품·쿠폰·전체 매장) 각각, 표본 적음. 마이너스는 그대로, 네 칸은 더하지 않음
+- **방식:** data 자신의 `execute("send_campaign_update")` 뒤 `call_agent("planning", "receive_campaign_update")`
+  - idempotency_key `<campaign_id>:result`
+  - context_id는 캠페인마다 하나(`ctx_req_data_result_…`) 정해 저장하고, 재시도 때 같은 값을 쓴다
+- **응답:**
+  - applied·duplicate → 보냄
+  - unknown_proposal → 보내지 않음(다시 안 함)
+  - 그 밖의 거절 → 보내지 않음 · "기획이 거절: <코드>"(다시 안 함)
+  - 연결 실패·5xx·시간 초과·safety가 실행하지 않음 → 실패, 다음 루프에 다시(캠페인당 한국 날짜 하루 3번)
+- **상태:** `backend/.data/campaign_sends.db`(`DATA_CAMPAIGN_SEND_DB`). `campaign_result` 응답 `send_status`(모든 묶음)로 화면에 나간다: 보냄 · 보낼 예정 · 보내지 않음 · 보내기 실패 · 자동 보내기 꺼짐
+- **켜기:** `DATA_SEND_CAMPAIGN_UPDATE=1`. 기본은 꺼짐이고, 꺼져 있으면 기획을 부르지 않는다
+- **켜기 전에 필요한 것:**
+  - safety registry에 `send_campaign_update`(owner data) 항목
+  - planning 서비스(8101)가 `receive_campaign_update`를 받도록 하는 공유 영역 정리 (지금 서비스 13개 중 이 skill을 가진 서비스가 없다)
+
+### 재무 기록용 값 (마케팅이 씀)
+
+데이터는 재무에 직접 보내지 않는다. 집행액(`spend_krw`)을 모르기 때문이다. `campaign_result`의 재무 묶음(`view: "finance"`)에
+`finance_record`가 있다. 재무 `CampaignResultInput` 중 데이터가 아는 값만 들어 있다.
+
+- 들어 있는 값:
+  - `campaign_id`
+  - `period_from`·`period_to`: 측정 기간, 한국 날짜
+  - `gmv_krw` = max(증가 매출, 0), `orders` = max(증가 주문, 0)
+  - `measured_gmv_krw`·`measured_orders`: 잰 값 그대로(음수 가능)
+  - `effect_generated_at`, `source` = `data.campaign_result`
+- 모르는 값은 null이다(0으로 채우지 않음).
+- 비워 둔 칸(마케팅이 채움): `spend_krw`·`campaign_name`·`channel`·`coupon_krw`
+
+마케팅이 쓰는 방법 (예시, 마케팅 코드는 이 PR에서 바꾸지 않음):
+
+```python
+res = await call_agent("data", AgentRequest(meta=meta, skill="campaign_result",
+                                            input={"campaign_id": "cmp_1", "view": "finance"}))
+record = {k: v for k, v in res.output["finance_record"].items() if v is not None}
+body = {**record, "campaign_name": "책추천 11월", "channel": "youtube",
+        "spend_krw": 1_500_000, "coupon_krw": 120_000}  # 마케팅이 아는 값
+CampaignResultInput.model_validate(body)  # finance 계약 그대로
+key = f"{meta.context_id}:record_campaign_result:cmp_1"
+await call_agent("finance", AgentRequest(meta=meta.model_copy(update={"idempotency_key": key}),
+                                         skill="record_campaign_result", input=body))
+```
 
 ## 2. 실행 방법
 `docker compose -f infra/compose.yml up data` / 목 모드: `DATA_MOCK=1`
