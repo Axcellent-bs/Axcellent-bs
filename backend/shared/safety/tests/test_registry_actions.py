@@ -74,6 +74,15 @@ async def test_memory_card_review_only_hr(gate: Gate, act) -> None:
 
 
 @pytest.mark.asyncio
+async def test_data_send_campaign_update_only_data(gate: Gate, act) -> None:
+    """#829: 성과 결과를 기획에 보내기는 data만, A. 다른 부서가 요청하면 미등록으로 보류된다."""
+    ok = await gate.execute(act("send_campaign_update", "data", "cmp_1:result"))
+    assert (ok.grade, ok.status) == ("A", "executed")
+    other = await gate.execute(act("send_campaign_update", "marketing", "cmp_2:result"))
+    assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("action", ["memory.card_write", "memory.card_link", "memory.card_review"])
 async def test_memory_actions_reject_unlisted_requester(gate: Gate, act, action: str) -> None:
     decision = await gate.execute(act(action, "shop-api", f"x-{action}"))

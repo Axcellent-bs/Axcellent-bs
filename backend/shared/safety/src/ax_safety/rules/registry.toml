@@ -341,6 +341,14 @@ owner = "memory"
 requesters = ["memory", "hr"]
 base_grade = "A"
 
+# ---- 데이터 (재현, #829). 측정이 끝난 캠페인 성과 결과를 기획에 보낸다(data → planning receive_campaign_update)
+# 돈·외부 시스템을 건드리지 않고 기획 기록에 결과만 남겨 A. 캠페인당 1번, 멱등성 키 <campaign_id>:result
+[[actions]]
+action = "send_campaign_update"
+owner = "data"
+requesters = ["data"]
+base_grade = "A"
+
 # ---- 변경 요청 결과 받기 (#280·#292). planning이 요청을 닫을 때 보낸 결과를 요청 부서가 자기 기록에 반영한다
 # 상태 변경은 요청 부서 쪽 기록뿐이고 돈·외부 시스템을 건드리지 않아 A. 멱등성 키 ctx_req_…:change_result:REQ-n
 [[actions]]
