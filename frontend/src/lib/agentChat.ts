@@ -66,7 +66,7 @@ export interface DemoRequest {
 // ---------------------------------------------------------------- 이름표
 export const DEPT_KO: Record<string, string> = {
   orchestrator: "총괄 AI", planning: "기획", dev: "개발", support: "고객지원", marketing: "마케팅", hr: "인사",
-  finance: "재무", data: "데이터분석", infra: "장애 대응", safety: "안전 관문", memory: "회사 기억", "shop-api": "캣북스 쇼핑몰",
+  finance: "재무", data: "데이터분석", infra: "인프라", safety: "안전 관문", memory: "회사 기억", "shop-api": "캣북스 쇼핑몰",
   "dashboard-api": "AXcellent 화면", operator: "운영자(사람)",
 };
 // 백엔드는 서비스 단위로 나뉘어 있다(backend/README.md). 서비스 이름 → 화면 메뉴의 AI 이름
@@ -76,7 +76,7 @@ const SERVICE_DEPT: Record<string, string> = {
 };
 const SERVICE_KO: Record<string, string> = {
   inquiry: "고객 문의", claims: "클레임·보상", reviews: "리뷰·지식", coupon: "공지·쿠폰", decisions: "결정 기록",
-  dev: "개발·배포", planning: "요청·기획서", incident: "장애 대응",
+  dev: "개발·배포", planning: "요청·기획서", incident: "인프라",
 };
 const NOT_AGENT = new Set(["orchestrator", "safety", "memory", "shop-api", "dashboard-api", "operator"]);
 /** 말하는 쪽 이름. 부서·서비스는 "{부서} AI", 총괄·안전 관문 등은 그대로 */
@@ -176,7 +176,7 @@ export type Tone = "request" | "ok" | "warn" | "fail" | "muted";
 export interface Fact { label: string; value: string }
 
 export type ChatItem =
-  | { kind: "msg"; id: string; at: string; room: string; from: string; to: string; fromKey: string; central: boolean; text: string; tag?: string; raw?: string; tone: Tone; facts: Fact[]; repeat?: number; lastAt?: string }
+  | { kind: "msg"; id: string; at: string; room: string; from: string; to: string; fromKey: string; central: boolean; text: string; tag?: string; raw?: string; tone: Tone; facts: Fact[]; repeat?: number; lastAt?: string; human?: boolean }
   | { kind: "system"; id: string; at: string; room: string; text: string }
   | { kind: "hold"; id: string; at: string; room: string; title: string; detail: string; state: "pending" | "approved" | "rejected" | "timeout"; contextId?: string; stepId?: string; link?: string; decideAt?: string }
   | { kind: "separator"; id: string; at: string; room: string; text: string; raw?: string; variant: "day" | "topic" };

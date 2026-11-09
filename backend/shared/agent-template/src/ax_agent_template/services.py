@@ -32,7 +32,15 @@ SERVICES: tuple[Service, ...] = (
         "orchestrator",
         "orchestrator",
         8000,
-        ("find_active_incident", "answer_planning_question", "receive_finance_opinion"),
+        (
+            "find_active_incident",
+            "answer_planning_question",
+            "receive_finance_opinion",
+            "orchestrator_chat_send",
+            "orchestrator_chat_close",
+            "orchestrator_chat_list",
+            "orchestrator_chat_get",
+        ),
         "총괄·사건",
     ),
     Service(
@@ -301,8 +309,17 @@ SERVICES: tuple[Service, ...] = (
         "incident",
         "infra",
         8107,
-        ("diagnose_incident", "rollback_deployment", "verify_recovery"),
-        "장애 대응",
+        (
+            "diagnose_incident",
+            "rollback_deployment",
+            "verify_recovery",
+            # 사람과 직접 대화 (dashboard-api /api/dashboard/infra-chat)
+            "infra_chat_send",
+            "infra_chat_list",
+            "infra_chat_get",
+            "infra_chat_close",
+        ),
+        "인프라 AI",
     ),
     # 사내 PC·서버 연결: 아직 백엔드 skill이 없다 (backend/services/hosts/README.md)
     Service("hosts", "infra", 8117, (), "PC·서버 연결"),

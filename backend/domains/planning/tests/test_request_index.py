@@ -129,10 +129,10 @@ def test_waiting_on_remote_request_resumes_when_it_finishes(monkeypatch) -> None
     svc = PlanningService(gate=_gate, relater=Relater(LexicalEmbedder(), None, index))
     started: list[str] = []
 
-    async def fake_start(svc_, tid, plan, cid, reply="", skip_queue=False, mode="agent", who=None):
+    async def fake_handoff(svc_, tid, plan, reply="", *, connection=None):
         started.append(tid)
 
-    monkeypatch.setattr(dev_chat, "_start", fake_start)
+    monkeypatch.setattr(dev_chat, "_handoff", fake_handoff)
     t = datetime.now(UTC)
     plan = ChatPlan(title="배송비 문구", plan="3만 원으로")
     svc.state.chats.append(

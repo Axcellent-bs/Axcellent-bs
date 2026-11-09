@@ -59,8 +59,8 @@ const DEJAFIX_LOGO = `${import.meta.env.BASE_URL}dejafix-logo.png`
 
 export const SERVICES: Service[] = [
   {
-    id: 'incident', family: 'infra', name: '장애 대응', by: 'DejaFix', Icon: IconBox, logo: DEJAFIX_LOGO, entry: '/infra', paths: ['/infra'],
-    desc: '지금 진행 중인 서버 장애와 가장 급한 장애·요약·시간대별 분포를 DejaFix에서 받아 보여 줍니다.',
+    id: 'incident', family: 'infra', name: '인프라 AI', by: 'DejaFix', Icon: IconBox, logo: DEJAFIX_LOGO, entry: '/infra', paths: ['/infra'],
+    desc: '장애가 나면 원인 배포를 진단하고 롤백·복구 확인을 합니다. 지금 진행 중인 서버 장애와 요약은 DejaFix에서 받아 보여 줍니다.',
   },
   {
     id: 'hosts', family: 'infra', name: 'PC·서버 연결', by: 'DejaFix', Icon: IconBox, logo: DEJAFIX_LOGO, entry: '/hosts', paths: ['/hosts'],
@@ -168,11 +168,16 @@ export const activeChild = (path: string, items: SubItem[]) =>
 // 데모라 브라우저에만 기억한다. 메뉴·접근 검사·카탈로그 화면이 같은 값을 보도록 작은 저장소로 둔다.
 const KEY = 'axcellent-demo-services'
 const ALL = SERVICES.map((s) => s.id)
+// 필수 서비스: 회사가 끌 수 없고 카탈로그에서 내릴 수도 없다. 다른 AI가 장애 기록(총괄 사건·고객지원 장애 확인·
+// 재무 장애 비용·인사 대응 시간)을 쓰므로 장애 대응과 그 감시 대상인 PC·서버 연결은 늘 켜 둔다
+export const REQUIRED_SERVICES = ['incident', 'hosts']
+export const isRequired = (id: string) => REQUIRED_SERVICES.includes(id)
+const withRequired = (ids: string[]) => [...REQUIRED_SERVICES.filter((id) => !ids.includes(id)), ...ids]
 const read = (): string[] => {
   try {
     const raw = localStorage.getItem(KEY)
     const ids = raw ? (JSON.parse(raw) as string[]) : ALL
-    return ids.filter((id) => ALL.includes(id))
+    return withRequired(ids.filter((id) => ALL.includes(id)))
   } catch {
     return ALL
   }
@@ -182,15 +187,18 @@ const listeners = new Set<() => void>()
 
 export const getEnabled = () => enabled
 export function setEnabled(ids: string[]) {
-  enabled = ids
+  enabled = withRequired(ids)
   try {
-    localStorage.setItem(KEY, JSON.stringify(ids))
+    localStorage.setItem(KEY, JSON.stringify(enabled))
   } catch {
     /* 저장이 막힌 브라우저는 새로고침하면 전부 켠 상태로 돌아간다 */
   }
   listeners.forEach((l) => l())
 }
-export const toggleService = (id: string) => setEnabled(enabled.includes(id) ? enabled.filter((x) => x !== id) : [...enabled, id])
+export const toggleService = (id: string) => {
+  if (isRequired(id)) return
+  setEnabled(enabled.includes(id) ? enabled.filter((x) => x !== id) : [...enabled, id])
+}
 
 export function useEnabledServices() {
   return useSyncExternalStore(
@@ -207,7 +215,7 @@ export function useEnabledServices() {
 const HIDDEN_KEY = 'axcellent-demo-hidden-services'
 let hidden: string[] = (() => {
   try {
-    return JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? '[]') as string[]
+    return (JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? '[]') as string[]).filter((id) => !isRequired(id))
   } catch {
     return []
   }
@@ -215,6 +223,7 @@ let hidden: string[] = (() => {
 const hiddenListeners = new Set<() => void>()
 export const getHidden = () => hidden
 export function toggleHidden(id: string) {
+  if (isRequired(id)) return
   hidden = hidden.includes(id) ? hidden.filter((x) => x !== id) : [...hidden, id]
   try {
     localStorage.setItem(HIDDEN_KEY, JSON.stringify(hidden))

@@ -32,7 +32,7 @@ from ax_contracts.schemas.data import (
 )
 
 LIMIT = 3
-SCHEMA_VERSION = "trend_insight_brief.v4"  # past_results를 붙인 응답
+SCHEMA_VERSION = "trend_insight_brief.v5"  # past_results를 붙인 응답 (v5: 같은 날 판·다시 추천 칸)
 CONTRA = "조회와 매출이 반대로 나왔습니다. 다시 한다면 쿠폰 조건을 기획·재무와 먼저 확인하세요."
 VIEWS_LABEL = {
     "achieved": "조회 달성",

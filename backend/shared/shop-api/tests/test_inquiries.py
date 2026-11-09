@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from ax_agent_template import events
 from ax_contracts.schemas import AgentRequest, AgentResult, RequestMeta, TaskStatus
+from ax_contracts.schemas.common import TENANT_ID_DEFAULT
 from ax_shop_api import inquiries, support_client
 from ax_shop_api.db import Db
 from ax_shop_api.main import create_app
@@ -92,9 +93,21 @@ def test_정상_접수는_정수_user_id와_원문을_untrusted로_넘기고_접
     target, request = support.calls[0]
     assert (target, request.skill) == ("support", "create_inquiry")
     assert request.meta.token == "mock:shop-api"  # 요청자는 토큰에서 꺼낸다
+    assert request.meta.tenant_id == TENANT_ID_DEFAULT  # 회사가 하나일 때는 지금과 같다
     assert request.input["user_id"] == 1 and request.input["order_id"] == order_id
     assert request.untrusted == {"subject": "결제 문의", "message": SECRET}
     assert SECRET not in str(request.input)
+
+
+def test_고객지원_요청에_이_판매_서버의_회사를_싣는다(
+    client: TestClient, support: FakeSupport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """문의가 판매 서버의 회사로 접수되도록 `meta.tenant_id`에 회사를 싣는다."""
+    monkeypatch.setattr(support_client, "TENANT_ID", "acme-books")
+    order_id = _order(client)
+    response = client.post("/api/shop/inquiries", json=_body(order_id, subject="문의"))
+    assert response.status_code == 201
+    assert support.calls[-1][1].meta.tenant_id == "acme-books"
 
 
 def test_제목이_없으면_주문_번호로_채운다(client: TestClient, support: FakeSupport) -> None:

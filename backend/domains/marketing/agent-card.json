@@ -128,7 +128,7 @@
     },
     {
       "id": "start_campaign",
-      "description": "캠페인(campaign_id, campaign_name, channel, budget_krw 정수 원)을 시작한다. 먼저 재무 review_campaign_budget로 예산을 묻고, 거절이면 관문을 부르지 않고 멈춘다(rejected_by_finance). 승인·조건부(한도 안)면 safety 관문 start_campaign으로 실행하고 executed·held·rejected를 그대로 돌려준다. 50만 원 이상은 사람 승인 대기. 쿠폰 지급과 별개다.",
+      "description": "캠페인(campaign_id, campaign_name, channel, budget_krw 정수 원)을 시작한다. 먼저 재무 review_campaign_budget로 예산 의견(opinion, suggested_krw)을 받는다. 재무는 승인·반려하지 않으므로 권하지 않음이어도 막지 않고 의견을 review에 그대로 실어, safety 관문 start_campaign으로 실행하고 executed·held·rejected를 그대로 돌려준다. 막는 것은 관문뿐이다(건당 50만 원 이상·하루 합계 100만 원 이상은 사람 승인 대기, 0원 이하 거부). 쿠폰 지급과 별개다.",
       "input_schema": "agents/marketing/src/marketing_agent/campaign.py#StartCampaignInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
       "grade": "B",

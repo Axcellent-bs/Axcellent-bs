@@ -14,7 +14,8 @@ const api = chatApi(DEV_API)
 
 const STATUS: Record<ChatStatus, { label: string; tone: ChipTone }> = {
   talking: { label: '대화 중', tone: 'neutral' },
-  started: { label: '작업 시작', tone: 'green' },
+  handed: { label: '기획 확인 대기', tone: 'amber' },
+  started: { label: '작업 중', tone: 'green' },
   blocked: { label: '막힘', tone: 'amber' },
   waiting: { label: '앞 요청 기다림', tone: 'amber' },
   answering: { label: '답하는 중', tone: 'neutral' },
@@ -195,7 +196,10 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
             ))}
           </div>
         )}
-        {msgs.map((m) => <Msg key={m.id} m={m} s={s} onOpen={onClose} />)}
+        {msgs.map((m, i) => (
+          <Msg key={m.id} m={m} s={s} onOpen={onClose}
+            onGo={i === msgs.length - 1 && m.kind === 'plan' && !!m.plan && cur?.status === 'talking' && !busy && !ended ? () => void send('진행해') : undefined} />
+        ))}
         {pending && msgs[msgs.length - 1]?.text !== pending && <div className="bubble user">{pending}</div>}
         {busy && <div className="bubble ai"><span className="typing" aria-label="답 쓰는 중"><i /><i /><i /></span></div>}
         {err && (
@@ -226,7 +230,8 @@ const Tools = ({ onTools }: { onTools: () => void }) => (
   <div><button type="button" className="btn-ghost" onClick={onTools}>개발 도구 연결</button></div>
 )
 
-function Msg({ m, s, onOpen }: { m: ChatMessage; s: S; onOpen: () => void }) {
+// onGo: 마지막 계획 카드의 "이대로 진행" (누르면 "진행해"를 보내 기획에 넘긴다)
+function Msg({ m, s, onOpen, onGo }: { m: ChatMessage; s: S; onOpen: () => void; onGo?: () => void }) {
   if (m.role === 'user') return <div className="bubble user">{m.text}</div>
   if (m.kind === 'error') return <div className="bubble ai err">{m.text}</div>
   if (m.kind === 'question' || m.kind === 'waiting') return <div className="bubble ai q">{m.text}</div>
@@ -240,6 +245,7 @@ function Msg({ m, s, onOpen }: { m: ChatMessage; s: S; onOpen: () => void }) {
             <div className="chat-card-h">{p.title}</div>
             {!!p.done.length && <ul>{p.done.map((d, i) => <li key={i}>{d}</li>)}</ul>}
             {!!p.paths.length && <div className="chat-paths">{p.paths.map((x) => <span key={x} className="point">{x}</span>)}</div>}
+            {onGo && <div className="chat-card-row"><span /><button type="button" className="btn-primary" onClick={onGo}>이대로 진행</button></div>}
           </div>
         )}
       </>

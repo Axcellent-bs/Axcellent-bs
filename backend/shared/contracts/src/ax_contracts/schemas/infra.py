@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -54,3 +54,35 @@ class VerifyRecoveryOutput(AxModel):
     infra_metrics_ok: bool
     business_metrics_ok: bool | None = None  # data anomaly_detection 결과, 못 받으면 None
     checked_at: UtcDatetime
+
+
+# ---------------------------------------------------------------- 인프라 AI 직접 대화 (11/9)
+# dashboard-api `/api/dashboard/infra-chat` → incident `infra_chat_*`.
+# 재무·기획 AI 대화와 같은 모양이다.
+# 대화로는 조회·설명만 한다(롤백·장애 넣기·빼기·재시작은 하지 않는다).
+# who는 dashboard-api가 사람 토큰에서 채운다.
+INFRA_CHAT_MESSAGE_MAX = 2000
+
+
+class InfraChatSendInput(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=INFRA_CHAT_MESSAGE_MAX)
+
+
+class InfraChatListInput(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class InfraChatRef(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    thread_id: str = Field(min_length=1, max_length=64)
+
+
+class InfraChatThreadOutput(AxModel):
+    thread: dict[str, Any]
+
+
+class InfraChatListOutput(AxModel):
+    threads: list[dict[str, Any]]

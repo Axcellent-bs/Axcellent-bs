@@ -23,6 +23,9 @@ from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
 START_DEV = "start_dev"
 RECEIVE_DEV_RESULT = "receive_dev_result"
 ROLES = ("planning", "dev")
+# 개발 AI 대화가 기획에 넘긴 변경 요청의 source_ref 머리 (뒤에 대화 id). 기획은 이 요청을
+# 간단 요청·자동 확정으로 돌리지 않고 사람이 기획서를 확정해야 개발로 넘긴다 (11/09)
+DEV_CHAT_REF = "dev_chat:"
 CALL_TIMEOUT_SECONDS = 10
 
 # (skill, context_id, tenant_id, 입력, idempotency_key) → 보낸 결과 한 줄 (활동 기록용)

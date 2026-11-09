@@ -71,6 +71,11 @@ class StepRun:
     reason_code: str | None = None
     # 꺼진 서비스라 사람 할 일함으로 넘어간 일 번호 (status "waiting_human", 업무 요청 라우터)
     handoff_task_id: str | None = None
+    # 사람을 기다린 시간(초). 단계 전체 시간(started_at~finished_at)에 섞여 있어서 따로 남긴다.
+    # 승인 대기: 안전 관문 보류에 올린 때 ~ 사람이 결정한 때.
+    # 사람 할 일함 대기: 넘긴 때 ~ 사람이 끝낸 때
+    approval_wait_seconds: float | None = None
+    human_wait_seconds: float | None = None
 
     def view(self) -> dict[str, Any]:
         return {
@@ -87,6 +92,8 @@ class StepRun:
             "transferred_to": self.transferred_to,
             "reason_code": self.reason_code,
             "handoff_task_id": self.handoff_task_id,
+            "approval_wait_seconds": self.approval_wait_seconds,
+            "human_wait_seconds": self.human_wait_seconds,
             "output": self.output,
         }
 

@@ -183,8 +183,25 @@ const STATUS_TONE: Record<string, string> = {
 function RoomList({ rooms, selected, unseen, onSelect }: { rooms: Room[]; selected: string; unseen: Record<string, number>; onSelect: (id: string) => void }) {
   return (
     <nav aria-label="대화방 목록" className="card shrink-0 overflow-hidden lg:w-72">
-      <h2 className="px-4 pb-1 pt-4 text-sm font-semibold">대화방</h2>
-      <ul className="scroll-thin flex gap-1 overflow-x-auto px-2 pb-3 lg:max-h-[calc(100vh-260px)] lg:flex-col lg:overflow-y-auto lg:overflow-x-visible">
+      <h2 className="px-4 pb-1 pt-4 text-sm font-semibold">직접 대화</h2>
+      <ul className="scroll-thin flex gap-1 overflow-x-auto px-2 pb-3 lg:flex-col lg:overflow-x-visible">
+        {DIRECT_AGENTS.map((a) => {
+          const id = DIRECT_PREFIX + a.key;
+          const on = id === selected;
+          return (
+            <li key={a.key} className="shrink-0 lg:shrink">
+              <button onClick={() => onSelect(id)} aria-current={on ? "true" : undefined}
+                className={`flex w-full min-w-[140px] items-center gap-2 rounded-xl px-3 py-2 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${on ? "bg-brand-50" : "hover:bg-ink-50"}`}>
+                <Avatar name={a.name} k={a.key} small />
+                <span className={`truncate text-sm ${on ? "font-semibold text-brand-700" : a.live ? "font-medium" : "text-ink-500"}`}>{a.name}</span>
+                {!a.live && <span className="ml-auto shrink-0 text-[11px] text-ink-500">준비 중</span>}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <h2 className="border-t border-ink-100 px-4 pb-1 pt-4 text-sm font-semibold">대화방</h2>
+      <ul className="scroll-thin flex gap-1 overflow-x-auto px-2 pb-3 lg:max-h-[max(220px,calc(100vh-720px))] lg:flex-col lg:overflow-y-auto lg:overflow-x-visible">
         {rooms.map((r) => {
           const on = r.id === selected;
           const n = unseen[r.id] ?? 0;
@@ -203,23 +220,6 @@ function RoomList({ rooms, selected, unseen, onSelect }: { rooms: Room[]; select
                     {r.sub && <span className="truncate text-[11px] text-ink-500">{r.sub}</span>}
                   </div>
                 )}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-      <h2 className="border-t border-ink-100 px-4 pb-1 pt-4 text-sm font-semibold">직접 대화</h2>
-      <ul className="scroll-thin flex gap-1 overflow-x-auto px-2 pb-3 lg:flex-col lg:overflow-x-visible">
-        {DIRECT_AGENTS.map((a) => {
-          const id = DIRECT_PREFIX + a.key;
-          const on = id === selected;
-          return (
-            <li key={a.key} className="shrink-0 lg:shrink">
-              <button onClick={() => onSelect(id)} aria-current={on ? "true" : undefined}
-                className={`flex w-full min-w-[140px] items-center gap-2 rounded-xl px-3 py-2 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${on ? "bg-brand-50" : "hover:bg-ink-50"}`}>
-                <Avatar name={a.name} k={a.key} small />
-                <span className={`truncate text-sm ${on ? "font-semibold text-brand-700" : a.live ? "font-medium" : "text-ink-500"}`}>{a.name}</span>
-                {!a.live && <span className="ml-auto shrink-0 text-[11px] text-ink-500">준비 중</span>}
               </button>
             </li>
           );

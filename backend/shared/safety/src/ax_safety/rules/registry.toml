@@ -211,6 +211,18 @@ action = "planning_chat_close"
 owner = "planning"
 base_grade = "A"
 
+# 사람과 인프라 AI의 직접 대화(infra-dejafix chat/turn.py). 대화 글을 저장하고 닫을 뿐 배포·롤백·장애는
+# 건드리지 않는다 (롤백은 총괄 장애 처리 순서와 rollback_deployment 관문으로만). 다른 대화와 같은 A
+[[actions]]
+action = "infra_chat_send"
+owner = "infra"
+base_grade = "A"
+
+[[actions]]
+action = "infra_chat_close"
+owner = "infra"
+base_grade = "A"
+
 # 사람과 재무 AI의 직접 대화(finance chat/turn.py). 대화 글을 저장하고 닫을 뿐 장부·결산·정산은
 # 건드리지 않는다 (그런 일은 재무 화면에서 사람 토큰으로 한다). 기획·고객지원 대화와 같은 A
 [[actions]]
@@ -221,6 +233,18 @@ base_grade = "A"
 [[actions]]
 action = "finance_chat_close"
 owner = "finance"
+base_grade = "A"
+
+# 사람과 총괄 AI의 직접 대화(orchestrator chat/turn.py). 대화 글을 저장하고 닫을 뿐 이벤트·승인·단계는
+# 건드리지 않는다 (그런 일은 총괄 화면에서 사람 토큰으로 한다). 재무·기획 대화와 같은 A
+[[actions]]
+action = "orchestrator_chat_send"
+owner = "orchestrator"
+base_grade = "A"
+
+[[actions]]
+action = "orchestrator_chat_close"
+owner = "orchestrator"
 base_grade = "A"
 
 # 사람과 개발 AI의 직접 대화(dev dev_chat.py). 메시지 하나는 dev_chat(A)으로 기록하고, 계획이 서서

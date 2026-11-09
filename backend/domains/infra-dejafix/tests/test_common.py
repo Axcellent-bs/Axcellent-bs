@@ -21,7 +21,16 @@ def test_agent_card_format_and_served() -> None:
     card = load_card()
     assert (card.name, card.owner) == ("infra", "예진")
     skills = {s.id: s for s in card.skills}
-    assert set(skills) == {"diagnose_incident", "rollback_deployment", "verify_recovery"}
+    assert set(skills) == {
+        "diagnose_incident",
+        "rollback_deployment",
+        "verify_recovery",
+        # 사람과 직접 대화 (dashboard-api 전용, 조회·설명만)
+        "infra_chat_send",
+        "infra_chat_list",
+        "infra_chat_get",
+        "infra_chat_close",
+    }
     assert skills["diagnose_incident"].grade == "read"
     assert skills["verify_recovery"].grade == "read"
     assert skills["rollback_deployment"].grade == "B"

@@ -185,6 +185,8 @@ export MARKETING_SNS_PENDING_DB="$PWD/$DATA/marketing_sns_pending.db"
 export MARKETING_SNS_DRAFT_DB="$PWD/$DATA/marketing_sns_drafts.db"
 # marketing: 마케팅 AI와 사람의 직접 대화를 파일에 남겨 다시 켜도 대화가 유지되게
 export MARKETING_CHAT_DB="$PWD/$DATA/marketing_chat.db"
+# 인프라 AI 직접 대화 저장 (incident)
+export INFRA_CHAT_DB="$PWD/$DATA/infra_chat.db"
 # 기획·개발은 실제 시각으로 (기본은 10-22에서 1분씩 가는 시연 시계라 총괄이 사건 구간으로 묻는
 # 관련 PR 찾기·교차검증 최근 7일 장애가 실제 머지를 못 잡는다)
 export PLANNING_CLOCK=real

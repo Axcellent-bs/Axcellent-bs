@@ -48,6 +48,7 @@ from ax_dashboard_api import (
     dev_chat,
     finance_chat,
     hr_client,
+    infra_chat,
     live_views,
     marketing_client,
     mock_actions,
@@ -55,6 +56,7 @@ from ax_dashboard_api import (
     mock_data,
     mock_handover,
     mock_hr,
+    orchestrator_chat,
     planning_chat,
     relay,
     support_chat,
@@ -616,7 +618,11 @@ async def conversation_triage(conversation_id: int, body: TriageBody) -> dict:
     out = await support_client.call(
         "set_triage",
         {"inquiry_id": conversation_id, "action": body.action, "label": body.label},
-        target=f"inquiry:{conversation_id}:triage:{body.action}:{body.label or ''}",
+        # 분류 이름 원문은 멱등 키에 남기지 않고 해시만 쓴다 (이름이 다르면 다른 요청)
+        target=(
+            f"inquiry:{conversation_id}:triage:{body.action}:"
+            f"{hashlib.sha1((body.label or '').encode()).hexdigest()[:8]}"
+        ),
     )
     if "id" not in out:  # 문의가 아닌 응답(분류 필요로 올린 문의만 정할 수 있음 등)은 성공이 아니다
         raise ApiError(409, "INVALID_STATE", out.get("message", "지금은 할 수 없다"))
@@ -1000,6 +1006,48 @@ async def finance_chat_close(thread_id: str, request: Request) -> dict:
     return ok(out["thread"])
 
 
+# ---- 총괄 AI 직접 대화 (→ 총괄 `orchestrator_chat_*`). 재무 AI 대화와 같은 모양이다.
+# 조회·설명만 한다(이벤트·승인·단계는 바꾸지 않는다). 사람 토큰이 필요하다
+class OrchestratorChatSendBody(BaseModel):
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=2000)
+
+
+@router.get("/orchestrator-chat")
+async def orchestrator_chat_list(request: Request) -> dict:
+    """총괄 AI 대화 목록. 남의 대화는 원문 없이 요약만(`restricted`)."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await orchestrator_chat.call("orchestrator_chat_list", {"who": who})
+    return ok(out.get("threads", []))
+
+
+@router.get("/orchestrator-chat/{thread_id}")
+async def orchestrator_chat_get(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = {"who": who, "thread_id": thread_id}
+    out = await orchestrator_chat.call("orchestrator_chat_get", payload)
+    return ok(out["thread"])
+
+
+@router.post("/orchestrator-chat")
+async def orchestrator_chat_send(body: OrchestratorChatSendBody, request: Request) -> dict:
+    """말을 저장하고 `status: answering`으로 바로 돌려준다. 답은 GET으로 가져간다."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = {"who": who, "message": body.message} | (
+        {"thread_id": body.thread_id} if body.thread_id else {}
+    )
+    out = await orchestrator_chat.call("orchestrator_chat_send", payload)
+    return ok(out["thread"])
+
+
+@router.post("/orchestrator-chat/{thread_id}/close")
+async def orchestrator_chat_close(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = {"who": who, "thread_id": thread_id}
+    out = await orchestrator_chat.call("orchestrator_chat_close", payload)
+    return ok(out["thread"])
+
+
 # ---- 데이터분석 AI 직접 대화 (→ data `data_chat_*`). 기획 AI 대화와 같은 모양
 # + 대화 하루 상한(429 CHAT_LIMIT)
 class DataChatSendBody(BaseModel):
@@ -1037,6 +1085,46 @@ async def data_chat_send(body: DataChatSendBody, request: Request) -> dict:
 async def data_chat_close(thread_id: str, request: Request) -> dict:
     who = human_from_authorization(request.headers.get("authorization"))
     out = await data_chat.call("data_chat_close", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+# ---- 인프라 AI 직접 대화 (→ incident `infra_chat_*`). 재무·기획 AI 대화와 같은 모양이다.
+# 조회·설명만 한다(롤백·장애 넣기·빼기는 하지 않는다). 사람 토큰이 필요하다
+class InfraChatSendBody(BaseModel):
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=2000)
+
+
+@router.get("/infra-chat")
+async def infra_chat_list(request: Request) -> dict:
+    """인프라 AI 대화 목록. 남의 대화는 원문 없이 요약만(`restricted`)."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await infra_chat.call("infra_chat_list", {"who": who})
+    return ok(out.get("threads", []))
+
+
+@router.get("/infra-chat/{thread_id}")
+async def infra_chat_get(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await infra_chat.call("infra_chat_get", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+@router.post("/infra-chat")
+async def infra_chat_send(body: InfraChatSendBody, request: Request) -> dict:
+    """말을 저장하고 `status: answering`으로 바로 돌려준다. 답은 GET으로 가져간다."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = {"who": who, "message": body.message} | (
+        {"thread_id": body.thread_id} if body.thread_id else {}
+    )
+    out = await infra_chat.call("infra_chat_send", payload)
+    return ok(out["thread"])
+
+
+@router.post("/infra-chat/{thread_id}/close")
+async def infra_chat_close(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await infra_chat.call("infra_chat_close", {"who": who, "thread_id": thread_id})
     return ok(out["thread"])
 
 

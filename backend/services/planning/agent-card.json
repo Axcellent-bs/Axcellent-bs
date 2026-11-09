@@ -21,7 +21,8 @@
         "hr",
         "data",
         "finance",
-        "orchestrator"
+        "orchestrator",
+        "dev"
       ],
       "verifier": null,
       "priority": "required"

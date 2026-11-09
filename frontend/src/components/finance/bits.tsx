@@ -105,16 +105,90 @@ export function Panel({ id, title, titleHidden, hint, meta, tools, children }: {
     <section id={id} aria-labelledby={id ? `${id}-title` : undefined} className="card scroll-mt-4 p-4 sm:p-5">
       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
         <div className="min-w-0 flex-1">
-          <h2 id={id ? `${id}-title` : undefined} className="flex flex-wrap items-center gap-2 text-base font-semibold text-ink-900">
-            <span className={titleHidden ? "sr-only" : undefined}>{title}</span> <MockBadge meta={meta} />
-          </h2>
-          {hint && <p className="mt-0.5 text-sm leading-relaxed text-ink-500">{hint}</p>}
-          <MetaLine meta={meta} />
+          {/* 제목 줄: 제목 · 예시 표시 · 기준 시각(작게). 설명은 한 단 아래 읽기 좋은 폭으로만 */}
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <h2 id={id ? `${id}-title` : undefined} className="flex flex-wrap items-center gap-2 text-base font-semibold text-ink-900">
+              <span className={titleHidden ? "sr-only" : undefined}>{title}</span> <MockBadge meta={meta} />
+            </h2>
+            <MetaTime meta={meta} />
+          </div>
+          {hint && <p className="mt-1 max-w-3xl text-sm leading-relaxed text-ink-500">{hint}</p>}
+          <MetaMissing meta={meta} />
         </div>
         {tools && <div className="flex flex-wrap items-center gap-2">{tools}</div>}
       </div>
       <div className="mt-4">{children}</div>
     </section>
+  );
+}
+
+/** 제목 옆에 붙는 작은 기준 시각 */
+function MetaTime({ meta }: { meta: FinanceMeta | null | undefined }) {
+  if (!meta?.collected_at) return null;
+  return <span className="text-xs tabular-nums text-ink-500">{shortDateTime(meta.collected_at)} 기준</span>;
+}
+
+/** 받지 못한 값이 있을 때만 한 줄 */
+function MetaMissing({ meta }: { meta: FinanceMeta | null | undefined }) {
+  if (!meta?.unavailable?.length) return null;
+  return <p className="mt-1 text-sm text-amber-800">받지 못한 값 {meta.unavailable.length}개는 "확인할 수 없음"으로 표시합니다</p>;
+}
+
+// ---------------------------------------------------------------- 숫자 표시 부품
+/**
+ * 변동 표시: ▲ 1,234원 (+12%). `good`은 늘어나는 게 좋은 값인지(매출 true, 비용 false).
+ * 좋은 쪽 변동은 초록, 나쁜 쪽은 빨강, 방향을 모르면 회색이다.
+ */
+export function Delta({ diff, pct, unit = "won", good, className = "" }: { diff: number | null | undefined; pct?: number | null; unit?: "won" | "count" | "pp"; good?: boolean; className?: string }) {
+  if (diff == null || !Number.isFinite(diff)) return <span className={`text-sm text-ink-500 ${className}`}>변동 확인할 수 없음</span>;
+  if (diff === 0) return <span className={`text-sm tabular-nums text-ink-500 ${className}`}>변동 없음</span>;
+  const up = diff > 0;
+  const tone = good == null ? "text-ink-700" : up === good ? "text-emerald-700" : "text-red-700";
+  const abs = Math.abs(diff);
+  const amount = unit === "won" ? `${Math.round(abs).toLocaleString("ko-KR")}원` : unit === "count" ? `${Math.round(abs).toLocaleString("ko-KR")}건` : `${(abs * 100).toFixed(1)}%p`;
+  const rate = pct != null && Number.isFinite(pct) && unit !== "pp" ? `${up ? "+" : "−"}${Math.abs(pct * 100) >= 100 ? Math.round(Math.abs(pct * 100)).toLocaleString("ko-KR") : Math.abs(pct * 100).toFixed(1)}%` : null;
+  return (
+    <span className={`inline-flex flex-wrap items-baseline gap-x-1.5 text-sm tabular-nums ${tone} ${className}`}>
+      <span aria-hidden="true">{up ? "▲" : "▼"}</span>
+      <span className="sr-only">{up ? "늘어남" : "줄어듦"}</span>
+      <span className="font-medium">{amount}</span>
+      {rate && <span className="opacity-80">{rate}</span>}
+    </span>
+  );
+}
+
+/** 큰 숫자 하나: 이름표 · 값 · (비교 기준 값) · 변동. `lead`면 화면에서 가장 중요한 숫자로 크게 */
+export function Stat({ label, value, sub, delta, lead = false, flag }: { label: ReactNode; value: ReactNode; sub?: ReactNode; delta?: ReactNode; lead?: boolean; flag?: string }) {
+  return (
+    <div className={`rounded-2xl border px-4 py-3 ${lead ? "border-brand-100 bg-brand-50/40" : "border-ink-100 bg-surface"}`}>
+      <p className="flex items-center gap-1.5 text-sm text-ink-500">
+        {flag && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-700" aria-hidden="true" />}
+        {label}
+        {flag && <span className="sr-only">{flag}</span>}
+      </p>
+      <p className={`mt-1 break-words font-semibold tabular-nums text-ink-900 ${lead ? "text-2xl" : "text-xl"}`}>{value}</p>
+      {delta && <div className="mt-1">{delta}</div>}
+      {sub && <p className="mt-0.5 text-sm tabular-nums text-ink-500">{sub}</p>}
+    </div>
+  );
+}
+
+/** 한 값을 몇 갈래로 나눈 크기: 줄마다 이름 · 막대 · 값 · 비중 (음수도 크기로 그린다) */
+export function ShareBars({ rows, format }: { rows: { label: string; value: number }[]; format: (v: number) => string }) {
+  const max = Math.max(...rows.map((r) => Math.abs(r.value)), 1);
+  const total = rows.reduce((t, r) => t + Math.abs(r.value), 0) || 1;
+  return (
+    <ul className="space-y-2">
+      {rows.map((r) => (
+        <li key={r.label} className="grid grid-cols-[minmax(7rem,10rem)_1fr_auto] items-center gap-3 text-sm">
+          <span className="text-ink-700">{r.label}</span>
+          <span className="h-2 overflow-hidden rounded-full bg-ink-100" aria-hidden="true">
+            <span className={`block h-full rounded-full ${r.value < 0 ? "bg-red-700/60" : "bg-brand-500"}`} style={{ width: `${Math.max((Math.abs(r.value) / max) * 100, 1)}%` }} />
+          </span>
+          <span className="tabular-nums text-ink-900">{format(r.value)} <span className="text-ink-500">{Math.round((Math.abs(r.value) / total) * 100)}%</span></span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

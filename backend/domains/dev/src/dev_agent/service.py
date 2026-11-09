@@ -2015,6 +2015,41 @@ class DevService(PlanningCore):
         await self._apply(log)
         return found
 
+    async def record_demo_merge(
+        self, *, deployed_version: str, title: str, changed_paths: list[str]
+    ) -> PR:
+        """시연 준비: 장애 직전 배포로 나간 머지 PR 하나를 지금 시각으로 기록한다.
+
+        `scripts/demo_deploy.sh`가 infra 시연 배포와 같이 부른다(운영자 admin만).
+        코딩 작업·형상관리를 거치지 않은 시연용 기록이다. 롤백 교차검증(`verify_rollback_target`)이
+        이 PR을 "배포 직전 머지"로 찾아 자동 롤백을 승인할 수 있게 한다
+        (`deploy_of`·`merged_in_window`).
+        """
+        made: list[PR] = []
+
+        async def add(s: State) -> None:
+            number = max((p.number for p in s.prs), default=0) + 1
+            pr = PR(
+                id=f"PR #{number}",
+                number=number,
+                task="시연",
+                title=title,
+                branch=f"demo/pr-{number}",
+                reviews=["통과"],
+                gate=PrGate(
+                    result="통과", lines=0, files=len(changed_paths), paths=", ".join(changed_paths)
+                ),
+                merged=True,
+                merged_at=self.clock(),
+                changed_paths=changed_paths,
+                deployed_version=deployed_version,
+            )
+            s.prs.append(pr)
+            made.append(pr)
+
+        await self._apply(add)
+        return made[0]
+
     def rollback_record(
         self, context_id: str, service: str, version: str
     ) -> tuple[PR | None, Incident | None]:

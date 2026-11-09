@@ -694,13 +694,37 @@ class EventTimeline(AxModel):
     prior_case_id: str | None = None
 
 
+class StepTiming(AxModel):
+    """장애 대응 단계 하나의 시간. 총괄이 재고 사람이 적지 않는다. 모르는 값은 비워 둔다.
+
+    - `work_seconds`: 맡긴 때부터 끝날 때까지에서 승인 대기와 사람 할 일함 대기를 뺀 시간.
+      부서가 일한 시간이라 부서 평가는 이 값만 쓴다. 단계가 아직 끝나지 않았거나 시각을 모르면 None.
+    - `approval_wait_seconds`: 안전 관문 보류에 올린 때부터 사람이 결정한 때까지.
+    - `human_wait_seconds`: 사람 할 일함에 넘긴 때부터 사람이 끝낸 때까지.
+    - 부서 안에서 외부(쇼핑몰 서버 등)를 기다린 시간은 총괄이 구분할 수 없어
+      `work_seconds`에 들어간다.
+    """
+
+    step_id: str
+    dept: str | None = None
+    status: str
+    work_seconds: float | None = Field(default=None, ge=0)
+    approval_wait_seconds: float | None = Field(default=None, ge=0)
+    human_wait_seconds: float | None = Field(default=None, ge=0)
+    attempts: int = Field(default=0, ge=0)
+    reason_code: str | None = None
+
+
 class RecordEventTimesInput(EventTimeline):
     """`record_event_times` 입력. 이벤트(`context_id`)의 카드에 시각을 채운다.
 
     이미 값이 있는 시각은 덮어쓰지 않고, 비어 있던 시각만 채운다.
+    `step_timings`(선택)는 단계별 시간이다. 시각과 달리 장애가 끝난 뒤 값이 바뀔 수 있어
+    (사람 처리가 늦게 끝나는 경우) 마지막으로 받은 값으로 바꿔 둔다.
     """
 
     context_id: str
+    step_timings: list[StepTiming] | None = Field(default=None, max_length=64)
 
 
 class RecordEventTimesOutput(AxModel):
