@@ -1,12 +1,13 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Chip, Empty, TONE, Waiting } from "@/components/finance/bits";
 import { okEvidence, type SkillState } from "@/components/data/useSkill";
 import { Sources, when } from "@/components/data/Sources";
 import { OpportunityCards } from "@/components/data/OpportunityCards";
 import { AgeBars } from "@/components/data/AgeBars";
 import { useCompany } from "@/demo/company";
+import { useSession } from "@/demo/session";
 import { CopyId, FoldRow, RestFacts, ShortsCard, TileRow, factLinks, shortsThumbs, shortsTiles, verdictOf } from "@/components/data/ShortsCard";
-import { DATA_SERVER, kpiLive, type DataFact, type InsightPastResult, type LlmStatus, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
+import { DATA_SERVER, dataAi, kpiLive, type DataFact, type InsightPastResult, type LlmStatus, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
 
 // 트렌드 2단계(인사이트): 기획팀이 가져갈 인사이트 브리프 (v2 시안 ② 보드). trend_insight_brief(계약 TrendInsightBriefOutput) 응답 그대로.
 // - 카드 틀은 ShortsCard: 판정 칩 · 제목 · 한 문장(서버 line) · 숫자 타일 · 연결 상품 · 오른쪽 근거 숏츠 썸네일(최대 3) · "근거 전체 보기" 접힘 하나
@@ -253,12 +254,149 @@ function LlmStatusLine({ s }: { s: LlmStatus | null | undefined }) {
   );
 }
 
+// ---------------------------------------------------------------- 맨 위 줄: 판·다시 추천 (v5, 서버 값 그대로)
+
+const KST_HM = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+const KST_MD = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric" });
+/** "00:27" (한국 시각) */
+const hhmm = (iso: string | null | undefined) => (iso ? KST_HM.format(new Date(iso)) : "");
+/** "11월 9일 00:27" */
+const mdhm = (iso: string | null | undefined) => {
+  if (!iso) return "";
+  const p = KST_MD.formatToParts(new Date(iso));
+  const v = (t: string) => p.find((x) => x.type === t)?.value ?? "";
+  return `${v("month")}월 ${v("day")}일 ${hhmm(iso)}`;
+};
+const latestRow = (b: TrendInsightBriefOutput) => b.versions?.find((v) => v.version === b.latest_version) ?? null;
+/** 진행 상태 응답에서 맨 위 줄 칸만 (본문은 보고 있는 판 그대로) */
+const headOf = (s: TrendInsightBriefOutput): Partial<TrendInsightBriefOutput> => ({
+  versions: s.versions, latest_version: s.latest_version, regen_used: s.regen_used, regen_limit: s.regen_limit,
+  regen_blocked: s.regen_blocked, regen_job: s.regen_job, building: s.building, estimated_llm_pct: s.estimated_llm_pct,
+  estimated_llm_basis: s.estimated_llm_basis, estimated: s.estimated, llm_pct_now: s.llm_pct_now, detect_latest_at: s.detect_latest_at,
+});
+
+/** 가운데 2줄: 언제 만든 판인지, 어떤 감지 데이터 기준인지 */
+function BriefWhen({ out }: { out: TrendInsightBriefOutput }) {
+  const at = out.created_at ?? out.generated_at;
+  if (!at) return null;
+  const manual = out.trigger === "manual";
+  const first = manual
+    ? `오늘 브리프 · ${hhmm(at)}에 다시 만듦${out.requested_by ? ` (${out.requested_by})` : ""}`
+    : `오늘 브리프 · ${mdhm(at)}에 만듦`;
+  const base = out.detect_as_of ? `감지 데이터 ${hhmm(out.detect_as_of)} 기준 · ` : "";
+  const d = out.diff_from_previous;
+  const second = manual && d
+    ? `${base}${d.from_label.slice(0, 5)} 판 대비 새 주제 ${d.new_count}개, 빠진 주제 ${d.gone_count}개`
+    : `${base}매일 0시 이후 한 번 자동으로 만들어요`;
+  return (
+    <div className="min-w-0 space-y-0.5">
+      <p className="text-sm font-semibold text-ink-900">{first}</p>
+      <p className="text-xs text-ink-500">{second}</p>
+    </div>
+  );
+}
+
+/** 오른쪽: 판 고르기 · 오늘 다시 추천 n/3 · 다시 추천 버튼(화면 안 확인 상자) */
+function BriefControls({ out, head, pick, start, startError }: {
+  out: TrendInsightBriefOutput; head: TrendInsightBriefOutput; pick: (version: number) => void; start: () => void; startError: string | null;
+}) {
+  const [asking, setAsking] = useState(false);
+  const versions = head.versions ?? [];
+  const blocked = head.regen_blocked;
+  return (
+    <div className="ml-auto flex flex-wrap items-center gap-2">
+      {versions.length > 0 && (
+        <select className="field w-auto py-1 text-sm" aria-label="오늘 판" value={out.version ?? head.latest_version ?? ""}
+          onChange={(e) => pick(Number(e.target.value))}>
+          {versions.map((v) => <option key={v.version} value={v.version}>{v.label}</option>)}
+        </select>
+      )}
+      <Chip tone={TONE.muted} label={`오늘 다시 추천 ${head.regen_used ?? 0}/${head.regen_limit ?? 3}`} />
+      {head.building
+        ? <span className="text-sm font-semibold text-ink-700" role="status">{head.building.text}</span>
+        : (
+          <>
+            <button type="button" className="btn-primary px-3 py-1.5 text-sm" disabled={!!blocked} onClick={() => setAsking(true)}>다시 추천</button>
+            {blocked && <Chip tone={TONE.warn} label={blocked.text} />}
+          </>
+        )}
+      {startError && <span className="text-xs text-red-700">{startError}</span>}
+      {!head.building && head.regen_job?.state === "failed" && head.regen_job.reason && (
+        <span className="text-xs text-red-700">{head.regen_job.reason} (이전 판 그대로예요)</span>
+      )}
+      {asking && <RegenConfirm head={head} onCancel={() => setAsking(false)} onOk={() => { setAsking(false); start(); }} />}
+    </div>
+  );
+}
+
+/** 다시 추천 확인 상자 (브라우저 confirm을 쓰지 않는다) */
+function RegenConfirm({ head, onCancel, onOk }: { head: TrendInsightBriefOutput; onCancel: () => void; onOk: () => void }) {
+  const pct = head.estimated_llm_pct;
+  const now = head.llm_pct_now;
+  const cost = pct != null && now != null
+    ? `약 1~2분 걸리고 오늘 데이터 LLM의 약 ${pct}%${head.estimated ? "(추정)" : ""}를 써요 (지금 ${now}% → 약 ${Math.round((now + pct) * 10) / 10}%)`
+    : `약 1~2분 걸려요${now != null ? `. 오늘 데이터 LLM은 지금 ${now}%예요` : ""}`;
+  const title = head.detect_latest_at
+    ? `최신 감지 데이터(${hhmm(head.detect_latest_at)} 기준)로 인사이트를 다시 만들까요?`
+    : "최신 감지 데이터로 인사이트를 다시 만들까요?";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onCancel} role="presentation">
+      <div role="dialog" aria-modal="true" aria-label="다시 추천" className="w-full max-w-lg rounded-2xl bg-surface p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-base font-semibold text-ink-900">{title}</h2>
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-ink-700">
+          <li>{cost}</li>
+          <li>같은 주제는 같은 번호로 이어져서 기획에 이미 넘긴 제안은 그대로예요</li>
+          <li>지금 브리프({hhmm(latestRow(head)?.created_at ?? head.created_at ?? head.generated_at)})는 지워지지 않고 위 목록에서 다시 볼 수 있어요</li>
+        </ul>
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" className="btn-ghost px-3 py-1.5 text-sm" onClick={onCancel}>취소</button>
+          <button type="button" className="btn-primary px-3 py-1.5 text-sm" onClick={onOk}>다시 추천</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function InsightBrief({ state, examples, examplesCount }: {
   state: SkillState<TrendInsightBriefOutput>; examples: ReactNode; examplesCount: number | null;
 }) {
   const [examplesOpened, setExamplesOpened] = useState(false);
   const company = useCompany();
-  const out = state.kind === "ok" ? state.out : null;
+  const { account } = useSession();
+  // 고른 판·다시 추천 뒤 새 판 (없으면 처음 받은 최신 판), 진행 상태(2초마다)
+  const [shown, setShown] = useState<TrendInsightBriefOutput | null>(null);
+  const [live, setLive] = useState<TrendInsightBriefOutput | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+  const out = shown ?? (state.kind === "ok" ? state.out : null);
+  const head: TrendInsightBriefOutput | null = out && (live ? { ...out, ...headOf(live) } : out);
+  const building = !!head?.building;
+  useEffect(() => {
+    if (!building) return;
+    let alive = true;
+    const timer = setInterval(() => {
+      void dataAi.trendInsightBriefStatus().then((r) => {
+        if (!alive) return;
+        if (r.output.building) { setLive(r.output); return; }
+        // 다 만들었다 (누가 눌렀든): 최신 판을 다시 읽어 보여 준다
+        void dataAi.trendInsightBriefVersion().then((latest) => {
+          if (!alive) return;
+          setShown(latest.output);
+          setLive(r.output);
+        });
+      }).catch(() => undefined);
+    }, 2000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [building]);
+  const pick = (version: number) => {
+    const latest = version === head?.latest_version;
+    void dataAi.trendInsightBriefVersion(latest ? undefined : version).then((r) => setShown(r.output)).catch(() => undefined);
+  };
+  const start = () => {
+    setStartError(null);
+    void dataAi.trendInsightBriefRegenerate(account?.name ?? "이름 없음")
+      .then((r) => setLive(r.output))
+      .catch((e: Error) => setStartError(e.message));
+  };
   if (!kpiLive) return null;
   const all = out?.insights ?? [];
   // 두 묶음 (서버 company_relevance·reference_only 그대로, 서버 순서):
@@ -273,13 +411,20 @@ export function InsightBrief({ state, examples, examplesCount }: {
   const noBorrow = out?.limits.find((l) => l.startsWith("형식 빌리기 0개")) ?? null;
   return (
     <section id="data-trend-insight" aria-labelledby="data-trend-insight-title" className="space-y-4">
-      <div className="flex flex-wrap items-end gap-x-4 gap-y-1">
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
         <div className="min-w-0 space-y-1">
           <h2 id="data-trend-insight-title" className="text-2xl font-bold text-ink-900">기획팀에 넘길 인사이트</h2>
           <p className="text-sm text-ink-500">두 가지예요. {name} 책에서 뜨는 주제, 그리고 책 숏츠에 빌려 쓸 수 있는 요즘 유행. 숫자는 모두 데이터 근거예요.</p>
         </div>
-        {out?.generated_at && <span className="ml-auto text-xs text-ink-500">{when(out.generated_at)} 기준</span>}
+        {out && <BriefWhen out={out} />}
+        {/* 예전 서버(v5 전)는 판·다시 추천 칸이 없어 버튼을 숨긴다 */}
+        {out && head && out.status === "known" && all.length > 0 && head.versions !== undefined && <BriefControls out={out} head={head} pick={pick} start={start} startError={startError} />}
       </div>
+      {out && head && head.latest_version != null && out.version != null && out.version !== head.latest_version && (
+        <p className="rounded-xl bg-ink-50 px-3 py-2 text-sm text-ink-700">
+          이전 판({hhmm(out.created_at)})을 보고 있어요. 기획에 넘기는 내용은 최신 판({hhmm(latestRow(head)?.created_at)}) 기준이에요.
+        </p>
+      )}
       {state.kind === "loading" ? <Waiting what="인사이트를 묶는 중…" />
         : state.kind === "failed" ? <Empty>인사이트를 받지 못했어요. {state.reason} {DATA_SERVER}가 켜져 있는지 확인해 주세요.</Empty>
         : out && (
