@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import Field, model_validator
 
@@ -2949,6 +2949,43 @@ class InsightPastResult(AxModel):
     band: PastBand = "gray"
     summary_line: str = ""  # "조회 목표의 N배 (영상 M개 중 K개 달성) · 매출 +N원 · 주문 +N건"
     note_line: str | None = None  # "지난번 개선 방향: …" 또는 조회·매출 반대 문구
+
+
+# ---------------------------------------------------------------- 데이터분석 AI 직접 대화 (11/9)
+# dashboard-api `/api/dashboard/data-chat` → data `data_chat_*`. 기획 AI 대화와 같은 모양.
+# `who`는 dashboard-api가 사람 토큰에서만 채운다. 사람 말은 LLM 입력의 데이터 블록(untrusted)에만.
+# 대화(thread)는 id·title·status(talking·answering·closed)·who·summary·messages[]
+# ·task_id·restricted·message_count·created_at·updated_at.
+# 조회·설명만 하고 업무 상태를 바꾸지 않아 execute()를 부르지 않는다
+# (대화 기록 저장은 업무 상태가 아님).
+DATA_CHAT_SCHEMA_VERSION = "data_chat.v1"
+DATA_CHAT_MESSAGE_MAX = 2000
+
+
+class DataChatSendInput(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=DATA_CHAT_MESSAGE_MAX)
+
+
+class DataChatListInput(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class DataChatRef(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    thread_id: str = Field(min_length=1, max_length=64)
+
+
+class DataChatThreadOutput(AxModel):
+    thread: dict[str, Any]
+    schema_version: str = DATA_CHAT_SCHEMA_VERSION
+
+
+class DataChatListOutput(AxModel):
+    threads: list[dict[str, Any]]
+    schema_version: str = DATA_CHAT_SCHEMA_VERSION
 
 
 TrendInsight.model_rebuild()

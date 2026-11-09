@@ -22,6 +22,7 @@ from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
 from finance_agent import closing, exports, persist, screen_cache, tax
 from finance_agent import finance_config as fc
+from finance_agent.chat.a2a import CHAT_HANDLERS
 from finance_agent.finance_api import add_finance_api, run_export_cycle
 from finance_agent.handlers import (
     HANDLERS,
@@ -31,6 +32,7 @@ from finance_agent.handlers import (
     retry_opinions,
     state,
 )
+from finance_agent.incident_record import record_incident_finance
 from finance_agent.incidents import add_incident_api
 from finance_agent.ledger import EVENTS
 from finance_agent.screen_cache import add_screen_cache
@@ -348,7 +350,9 @@ def add_read_api(app: FastAPI) -> None:
 
 
 def create_app() -> FastAPI:
-    app = create_agent_app(load_card(), HANDLERS)
+    # 장애 이벤트 장부 기록·직접 대화 skill은 handlers를 import해서 여기서 합친다
+    skills = {**HANDLERS, **CHAT_HANDLERS, "record_incident_finance": record_incident_finance}
+    app = create_agent_app(load_card(), skills)
     app.router.lifespan_context = lifespan
     add_screen_cache(app)  # CORS 안쪽: 기억해 둔 응답에도 CORS 머리글이 붙는다
     app.add_middleware(DashboardCORS, origins=cors_origins())

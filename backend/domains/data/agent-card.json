@@ -320,6 +320,58 @@
       "verifier": null,
       "priority": "recommended",
       "handoff": false
+    },
+    {
+      "id": "data_chat_send",
+      "description": "데이터분석 AI 직접 대화(dashboard-api /api/dashboard/data-chat). 말을 저장하고 status answering으로 바로 돌려준다(답은 뒤에서 붙이고 talking으로 되돌림, 화면은 data_chat_get으로 다시 읽음). thread_id가 없으면 새 대화. 답의 재료는 저장된 결과만(영상 탐색·지금 인기·브리프·영상 성과·보내기 상태·수집 장부, 코드가 질문 낱말로 최대 3묶음, 새 수집·계산 없음). 답 숫자가 재료에 없으면 고정 문장, 마지막 줄 근거는 서버가 붙임. 상태 변경 명령은 LLM 없이 거절. 조회·설명만 하고 업무 상태를 바꾸지 않아 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채우고 사람 말은 untrusted로만 넣는다. 거절 outcome: invalid_input·forbidden(남의 대화)·not_found·llm_not_configured·thread_closed·thread_busy·chat_limit(대화 하루 30회·80,000토큰 또는 하루 LLM 100%).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatSendInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatThreadOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "data_chat_list",
+      "description": "데이터분석 AI 대화 목록(최근 순). 본인 대화는 원문 전부, 남의 대화는 messages 없이 요약만(restricted). 대화 기록만 읽는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatListInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatListOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "data_chat_get",
+      "description": "데이터분석 AI 대화 하나. 본인 대화는 원문 전부, 남의 대화는 요약만(restricted). 거절 outcome: not_found.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatRef",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatThreadOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "data_chat_close",
+      "description": "데이터분석 AI 대화 끝내기(closed, 더는 못 보냄). 요약이 없으면 첫 질문 일부만 남긴다. 대화 기록만 바꾸고 업무 상태는 바꾸지 않는다. 거절 outcome: not_found·forbidden(남의 대화).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatRef",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatThreadOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
     }
   ]
 }

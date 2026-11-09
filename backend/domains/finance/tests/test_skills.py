@@ -86,15 +86,25 @@ def test_agent_card(client: TestClient) -> None:
         "verify_campaign_budget",
         "finance_insights",
         "cancel_campaign",
+        # 장애 이벤트 재무 장부 기록 (총괄 → 재무, 2026-11-09 태윤 요청으로 장애 흐름에 다시 넣음)
+        "record_incident_finance",
+        # 사람과 직접 대화 (dashboard-api → 재무)
+        "finance_chat_send",
+        "finance_chat_close",
+        "finance_chat_list",
+        "finance_chat_get",
     }
     assert skills["answer_planning_question"].allowed_requesters == ["planning"]
     assert skills["answer_planning_question"].grade == "read"
     assert skills["closing_report"].allowed_requesters == ["orchestrator", "data"]
     assert "review_threshold_change" not in skills  # 한도는 제안만, 사람이 기준표 PR로 바꾼다
-    # 재무는 장애 대응 흐름의 단계가 아니다 (2026-10-27, 요구사항 DEP-FIN-01)
+    # 재무는 장애 손실을 집계·판단하지 않는다 (2026-10-27, DEP-FIN-01). 장애 흐름에서는 장부 기록만
+    # 한다(record_incident_finance, read: 보상·환불을 결정하지 않고 쿠폰·환불 상태를 바꾸지 않는다)
     assert "loss_aggregation" not in skills
+    record = skills["record_incident_finance"]
+    assert (record.grade, record.allowed_requesters) == ("read", ["orchestrator"])
     served = client.get("/.well-known/agent-card.json").json()
-    assert served["name"] == "finance" and len(served["skills"]) == 8
+    assert served["name"] == "finance" and len(served["skills"]) == 13
 
 
 # ------------------------------------------- 금액 다시 계산 (예전 verify_amount, recheck.py)

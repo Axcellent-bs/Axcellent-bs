@@ -33,8 +33,9 @@ DEFAULT_CALLS = 200
 DEFAULT_TOKENS = 400_000
 RESERVE_ENV = "DATA_LLM_RESERVE_RATIO"
 DEFAULT_RESERVE = 0.8
-# 남겨 둔 몫을 쓸 skill: 브리프 (기회 카드·수집 계획·프로필·주제 분류는 브리프 안에서 부른다)
-PRIORITY_SKILLS = frozenset({"trend_insight_brief"})
+# 남겨 둔 몫을 쓸 skill: 브리프 (기회 카드·수집 계획·프로필·주제 분류는 브리프 안에서 부른다),
+# 직접 대화(data_chat, 대화 하루 상한 30회·80,000토큰 안에서만 — `data_chat.chat_limit_reason`)
+PRIORITY_SKILLS = frozenset({"trend_insight_brief", "data_chat"})
 KST = timezone(timedelta(hours=9))
 
 

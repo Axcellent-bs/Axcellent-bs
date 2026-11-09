@@ -109,6 +109,66 @@
       ],
       "verifier": null,
       "priority": "recommended"
+    },
+    {
+      "id": "record_incident_finance",
+      "description": "장애 이벤트(ctx_inc_)의 재무 기록. 총괄이 영향 분석·보상 뒤에 부른다. 장애 구간·부품과 데이터 영향 분석 숫자(총괄이 옮겨 준 값 그대로)를 장부에 남기고, 재무 장부의 보상 쿠폰 합계와 구간 안 영향 고객 환불 합계를 더해 돌려준다. 모르는 금액은 0이 아니라 null이고 unavailable에 이름이 있다. 돈을 움직이지 않고 보상·환불을 결정하거나 승인하지 않는다(장부에만 적는다). 쿠폰·환불·결제의 상태를 바꾸지 않는다. 같은 이벤트를 다시 부르면 기록을 새 값으로 바꾼다.",
+      "input_schema": "domains/finance/src/finance_agent/schemas.py#IncidentFinanceInput",
+      "output_schema": "domains/finance/src/finance_agent/schemas.py#IncidentFinanceOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "finance_chat_send",
+      "description": "말을 저장하고 status answering으로 바로 돌려준다(답은 뒤에서 붙이고 talking으로 되돌림, 화면은 finance_chat_get으로 다시 읽음). thread_id가 없으면 새 대화. LLM은 코드가 모은 재무 사실(오늘 손익·월말 체크리스트·통장 대조·현금 예측·캠페인 손익·장애 이벤트 재무 기록)만 풀어 쓴다. 거절 outcome: invalid_input·forbidden(남의 대화)·not_found·llm_not_configured·thread_closed·thread_busy. 재무 AI 직접 대화(dashboard-api /api/dashboard/finance-chat). 조회·설명만 하고 장부·결산·정산의 상태를 바꾸지 않는다. 대화 기록만 저장해 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#FinanceChatSendInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#FinanceChatThreadOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "finance_chat_list",
+      "description": "대화 목록(최근 순). 본인 대화는 원문, 다른 사람 대화는 messages 빈 목록+summary+restricted true. 30분 말이 없던 대화는 이때 끝낸다. 재무 AI 직접 대화(dashboard-api /api/dashboard/finance-chat). 조회·설명만 하고 장부·결산·정산의 상태를 바꾸지 않는다. 대화 기록만 저장해 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#FinanceChatListInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#FinanceChatListOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "finance_chat_get",
+      "description": "대화 하나. 열람 규칙은 finance_chat_list와 같다. 없으면 not_found. 재무 AI 직접 대화(dashboard-api /api/dashboard/finance-chat). 조회·설명만 하고 장부·결산·정산의 상태를 바꾸지 않는다. 대화 기록만 저장해 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#FinanceChatRef",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#FinanceChatThreadOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "finance_chat_close",
+      "description": "대화를 끝낸다(status closed). 요약이 비어 있으면 첫 질문 일부를 남긴다. 남의 대화는 forbidden. 재무 AI 직접 대화(dashboard-api /api/dashboard/finance-chat). 조회·설명만 하고 장부·결산·정산의 상태를 바꾸지 않는다. 대화 기록만 저장해 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#FinanceChatRef",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#FinanceChatThreadOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
     }
   ]
 }

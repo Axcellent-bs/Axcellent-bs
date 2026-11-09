@@ -45,7 +45,19 @@ def test_card_validates(card: AgentCard) -> None:
         "domain_subtopics",
         "source_plan",
         "video_explorer",
+        "data_chat_send",
+        "data_chat_list",
+        "data_chat_get",
+        "data_chat_close",
     }
+
+
+def test_data_chat_is_a_read_only_for_the_screen(card: AgentCard) -> None:
+    """직접 대화: grade read, 화면(dashboard-api)만, execute() 안 씀 (registry 항목 필요 없음)."""
+    for sid in ("data_chat_send", "data_chat_list", "data_chat_get", "data_chat_close"):
+        skill = next(s for s in card.skills if s.id == sid)
+        assert skill.grade == "read" and skill.allowed_requesters == ["dashboard-api"]
+        assert "#DataChat" in skill.input_schema and "#DataChat" in skill.output_schema
 
 
 def test_video_explorer_is_a_read_for_screen_marketing_planning_and_orchestrator(

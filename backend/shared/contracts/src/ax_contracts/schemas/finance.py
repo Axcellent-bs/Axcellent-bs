@@ -160,3 +160,34 @@ class CampaignCancelInput(AxModel):
 
     campaign_id: str
     reason: str = Field(min_length=1)
+
+
+# ---------------------------------------------------------------- 재무 AI 직접 대화 (11/9)
+# dashboard-api `/api/dashboard/finance-chat` → finance `finance_chat_*`.
+# 기획 AI 대화와 같은 모양이다. 대화로는 조회·설명만 한다(장부·결산·정산을 바꾸지 않는다).
+# who는 dashboard-api가 사람 토큰에서 채운다.
+FINANCE_CHAT_MESSAGE_MAX = 2000
+
+
+class FinanceChatSendInput(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=FINANCE_CHAT_MESSAGE_MAX)
+
+
+class FinanceChatListInput(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class FinanceChatRef(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    thread_id: str = Field(min_length=1, max_length=64)
+
+
+class FinanceChatThreadOutput(AxModel):
+    thread: dict[str, Any]
+
+
+class FinanceChatListOutput(AxModel):
+    threads: list[dict[str, Any]]
