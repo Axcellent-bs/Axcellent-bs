@@ -206,6 +206,7 @@ from ax_contracts.schemas.event import (
     ShopDegradedData,
     SupportInquiryReceivedData,
     SupportInquiryResolvedData,
+    SupportInquirySurgeData,
 )
 from ax_contracts.schemas.execute import (
     ConnectionHoldNotice,
@@ -536,6 +537,7 @@ __all__ = [
     "SetOrgRosterCompleteOutput",
     "SupportInquiryReceivedData",
     "SupportInquiryResolvedData",
+    "SupportInquirySurgeData",
     "TaskStatus",
     "UtcDatetime",
     "DiagnoseIncidentInput",

@@ -152,7 +152,7 @@ C 등급 보류는 Task 상태가 아니라 안전 레이어의 실행 결과(`s
 | `seller.registered`, `product.created` | shop-api | 판매자·상품 ID, 카테고리, 가격 (소개·설명은 untrusted) | finance, marketing | 2차 |
 | `support.inquiry_received` | support (문의 위젯) | inquiry\_id, buyer\_id, order\_id, channel\_code (원문은 untrusted) | orchestrator | 1차 |
 | `support.inquiry_resolved` | support | inquiry\_id, order\_id, status(resolved·escalated), resolution(answered·claim\_decided·compensated·escalated), claim\_id, claim\_decision, coupon\_id, refund\_amount (원문·판단 문장 없음) | orchestrator | 1차 |
-| `support.inquiry_surge` | support | topic\_code, count, window (근거는 Task 쪽, 샘플 문의는 untrusted) | orchestrator → marketing | 2차 |
+| `support.inquiry_surge` | support | topic\_code, count, window\_minutes, window\_start, baseline\_per\_window, ratio, inquiry\_ids, triage\_reason("분류 필요" 급증일 때만). 코드 값만이고 분류 이름·원문은 없다. 고객 문의만 근거인 확신 낮은 신호(모니터링 증거 없음) | orchestrator → (기준 이상이면 이벤트로 열기) 서비스운영·데이터 원인 진단, marketing | 2차 |
 | `metric.anomaly` | data | metric, window, observed, baseline, severity | orchestrator | 1차 |
 | `infra.anomaly_detected` | infra | component, metric\_code, value, threshold, detected\_at, source\_ref (원인 판단은 넣지 않고 `diagnose_incident`로) | orchestrator | 1차 |
 | `incident.opened`, `incident.resolved` | **orchestrator** | context\_id, component, 감지 신호 출처, 시각 | 전 부서 | 1차 |

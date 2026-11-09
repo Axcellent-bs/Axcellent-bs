@@ -26,6 +26,7 @@ from ax_contracts.schemas import (
     ShopDegradedData,
     SupportInquiryReceivedData,
     SupportInquiryResolvedData,
+    SupportInquirySurgeData,
 )
 
 ENVELOPE_JSON = json.dumps(
@@ -195,6 +196,89 @@ def test_support_inquiry_resolved_data() -> None:
         SupportInquiryResolvedData(
             inquiry_id=7, status="resolved", resolution="answered", message="원문"
         )
+
+
+def test_support_inquiry_surge_data() -> None:
+    assert EVENT_DATA_MODELS[EventType.SUPPORT_INQUIRY_SURGE] is SupportInquirySurgeData
+    plain = SupportInquirySurgeData(
+        topic_code="payment",
+        count=6,
+        window_minutes=10,
+        window_start="2026-11-09T06:00:00Z",
+        baseline_per_window=1.2,
+        ratio=5.0,
+        inquiry_ids=[3, 5, 9],
+    )
+    assert plain.triage_reason is None  # 일반 분류 급증은 triage_reason이 없다
+    no_baseline = SupportInquirySurgeData(
+        topic_code="payment",
+        count=5,
+        window_minutes=10,
+        window_start="2026-11-09T06:00:00Z",
+        baseline_per_window=0,
+    )
+    assert no_baseline.ratio is None and no_baseline.inquiry_ids == []
+    triage = SupportInquirySurgeData(
+        topic_code="payment",
+        count=5,
+        window_minutes=10,
+        window_start="2026-11-09T06:00:00Z",
+        baseline_per_window=0,
+        triage_reason="no_error_code",
+    )
+    assert triage.model_dump(mode="json")["triage_reason"] == "no_error_code"
+
+
+def test_support_inquiry_surge_data_rejects_bad_values_and_free_text() -> None:
+    base = {
+        "topic_code": "payment",
+        "count": 5,
+        "window_minutes": 10,
+        "window_start": "2026-11-09T06:00:00Z",
+        "baseline_per_window": 1.0,
+    }
+    assert SupportInquirySurgeData.model_validate(base)
+    for bad in (
+        {"count": 0},
+        {"window_minutes": 0},
+        {"baseline_per_window": -1},
+        {"ratio": -0.5},
+        {"topic_code": ""},
+        {"topic_code": "x" * 41},
+        {"triage_reason": "manual"},  # 상담원이 직접 올린 표시는 급증의 근거가 아니다
+        {"inquiry_ids": list(range(21))},
+        {"window_start": "not-a-time"},
+    ):
+        with pytest.raises(ValidationError):
+            SupportInquirySurgeData.model_validate({**base, **bad})
+    free_texts = ({"message": "원문"}, {"label": "장바구니 화면 오류"}, {"customer_name": "김하늘"})
+    for free_text in free_texts:
+        with pytest.raises(ValidationError):  # 고객 원문·분류 이름 같은 글은 data에 못 넣는다
+            SupportInquirySurgeData.model_validate({**base, **free_text})
+
+
+def test_support_inquiry_surge_envelope_round_trip() -> None:
+    envelope = EventEnvelope.model_validate(
+        {
+            "event_id": "evt_surge_1",
+            "type": "support.inquiry_surge",
+            "occurred_at": "2026-11-09T06:10:00Z",
+            "context_id": None,
+            "source": "support",
+            "idempotency_key": "support:support.inquiry_surge:payment:2026-11-09T06:00:00Z",
+            "data": {
+                "topic_code": "payment",
+                "count": 5,
+                "window_minutes": 10,
+                "window_start": "2026-11-09T06:00:00Z",
+                "baseline_per_window": 0,
+                "inquiry_ids": [3, 5],
+                "triage_reason": "no_error_code",
+            },
+        }
+    )
+    assert envelope.type == EventType.SUPPORT_INQUIRY_SURGE
+    assert SupportInquirySurgeData.model_validate(envelope.data).count == 5
 
 
 def test_infra_anomaly_event_has_data_model() -> None:
