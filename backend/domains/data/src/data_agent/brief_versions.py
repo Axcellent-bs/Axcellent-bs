@@ -372,7 +372,8 @@ def decorate(out: TrendInsightBriefOutput, env: Mapping[str, str], now: datetime
         if version is not None and (picked := store.version(day, rules, version)) is not None:
             out = picked
         usage = llm_budget.BUDGET.usage(env)
-        why = blocked(store, day, rules, now, llm_share=usage.share(), detect=detect_stamp(env))
+        detect = detect_stamp(env)
+        why = blocked(store, day, rules, now, llm_share=usage.share(), detect=detect)
         b = store.building(now)
         job = store.last_job(day, rules)
         mine = next((r for r in rows if r["version"] == out.version), rows[-1] if rows else None)
@@ -398,6 +399,7 @@ def decorate(out: TrendInsightBriefOutput, env: Mapping[str, str], now: datetime
         "estimated_llm_basis": basis,
         "estimated": guessed,
         "llm_pct_now": round(usage.share() * 100, 1),
+        "detect_latest_at": detect.as_of,
     }
     if mine is not None:
         update |= {

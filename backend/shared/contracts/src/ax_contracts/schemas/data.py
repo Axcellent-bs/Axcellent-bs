@@ -2155,6 +2155,8 @@ class TrendInsightBriefOutput(AxModel):
     estimated_llm_basis: str | None = None  # 어떻게 셌는지 (최근 다시 추천 중앙값 / "추정")
     estimated: bool = False  # 다시 추천 기록이 없어 첫 자동 브리프 토큰으로 추정했으면 true
     llm_pct_now: float | None = Field(default=None, ge=0)  # 지금 LLM 오늘 사용 %
+    # 지금 있는 최신 감지 데이터 시각 (다시 추천이 쓸 것, 확인 상자 제목)
+    detect_latest_at: UtcDatetime | None = None
 
 
 BriefTrigger = Literal["auto", "manual"]
