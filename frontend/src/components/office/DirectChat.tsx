@@ -59,7 +59,7 @@ export interface DirectAgent {
   talk?: Talk
 }
 export const DIRECT_AGENTS: DirectAgent[] = [
-  { key: "dev", name: "개발 AI", note: "고칠 것을 말하면 되묻고 계획을 세워요. 계획이 서면 코딩 작업(PR)을 시작해요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/dev-chat" }, { closable: true }) },
+  { key: "dev", name: "개발 AI", note: "고칠 것을 말하면 되묻고 계획을 세워요. '진행해'라고 하면 기획에 요청으로 넘기고, 기획에서 확정하면 개발이 시작돼요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/dev-chat" }, { closable: true }) },
   { key: "hr", name: "인사 AI", note: "팀 인원·교대·인수인계 같은 인사 기록을 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요.", live: true, talk: hrTalk },
   { key: "planning", name: "기획 AI", note: "받은 요청·기획서·결정·제안 상태를 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/planning-chat" }, { closable: true }) },
   { key: "orchestrator", name: "총괄 AI", note: "지금 장애가 어디까지 왔는지, 어느 부서에서 오래 걸렸는지, 승인 대기가 있는지를 총괄 기록으로 읽고 설명해요. 대화로 승인하거나 상태를 바꾸지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/orchestrator-chat" }, { closable: true }) },
@@ -78,7 +78,7 @@ const isKeeper = (account: Account) => !!account.admin;
 const hhmm = (iso: string) => (iso ? new Date(iso).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" }) : "");
 const when = (iso: string) => (iso ? new Date(iso).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
 const errText = (e: unknown, name: string) => (e instanceof Error ? e.message : `${name}에 연결할 수 없어요`);
-const RESULT: Record<ChatStatus, string> = { talking: "대화만 함", started: "코딩 작업 시작", blocked: "막힘", waiting: "앞 요청 대기", answering: "답하는 중", closed: "끝난 대화" };
+const RESULT: Record<ChatStatus, string> = { talking: "대화만 함", handed: "기획에 넘김", started: "코딩 작업 시작", blocked: "막힘", waiting: "앞 요청 대기", answering: "답하는 중", closed: "끝난 대화" };
 /** 일이 생긴 대화: 담당자가 원문까지 본다 */
 const madeWork = (t: ChatThread) => t.status === "started" || !!t.taskId;
 

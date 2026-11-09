@@ -485,7 +485,8 @@ class ChatPlan(DomainModel):
     paths: list[str] = Field(default_factory=list)
 
 
-ChatKind = Literal["text", "question", "plan", "started", "waiting", "error"]
+# handoff: 계획을 기획에 요청으로 넘김 (대화는 개발 작업을 직접 띄우지 않는다)
+ChatKind = Literal["text", "question", "plan", "started", "waiting", "handoff", "error"]
 
 
 class ChatMessage(DomainModel):
@@ -499,17 +500,22 @@ class ChatMessage(DomainModel):
 
 
 class ChatThread(DomainModel):
-    """개발 화면에서 개발팀원이 개발 AI와 나눈 대화 하나. 계획이 서면 코딩 작업을 띄운다.
+    """개발팀원이 개발 AI와 나눈 대화 하나. 계획이 서면 기획에 요청으로 넘긴다.
 
-    status: talking(대화 중) · started(작업 띄움, `task_id`) · blocked(연결이 없어 못 띄움) ·
-    waiting(충돌하는 요청 `waiting_for`가 끝나면 마지막 계획으로 작업을 띄움) ·
+    status: talking(대화 중) · handed(계획을 기획에 요청 `request_id`로 넘김, 사람이 기획서를
+    확정하면 개발로 감) · started(작업과 이어짐, `task_id`) ·
+    blocked(연결이 없어 못 띄움, 예전 대화) ·
+    waiting(충돌하는 요청 `waiting_for`를 기다림, 예전 대화) ·
     answering(사람 말을 적고 답을 만드는 중) · closed(끝낸 대화, 30분 말이 없어도 끝남)."""
 
     id: str  # chat-1 …
     title: str
-    status: Literal["talking", "started", "blocked", "waiting", "answering", "closed"] = "talking"
+    status: Literal["talking", "handed", "started", "blocked", "waiting", "answering", "closed"] = (
+        "talking"
+    )
     messages: list[ChatMessage] = Field(default_factory=list)
     task_id: str | None = None
+    request_id: str | None = None  # 기획에 넘긴 요청 (REQ-…). 기획서가 확정돼 작업이 생기면 task_id
     connection: str | None = None
     waiting_for: list[str] = Field(default_factory=list)  # 끝나기를 기다리는 요청 ID
     # 작업을 누가 코딩하나: agent(서버 AI, API 키) · subscription(개발자 본인 Claude, work_queue.py)
