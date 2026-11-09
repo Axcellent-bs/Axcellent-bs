@@ -97,7 +97,8 @@ function Pages() {
           <Route path="/infra/:id" element={<IncidentDetail />} />
           {/* 예전 DejaFix 화면 주소(/infra/reports 등)는 현재 장애로 */}
           <Route path="/infra/*" element={<Navigate to="/infra" replace />} />
-          <Route path="/system/hosts" element={<InfraHosts />} />
+          {/* PC·서버 연결은 회원·서버 관리의 탭으로 합쳤다 */}
+          <Route path="/system/hosts" element={<Navigate to="/system/members?tab=pcs" replace />} />
           <Route path="/system/members" element={<MembersPage />} />
           <Route path="/system/services" element={<ServiceCatalog />} />
           <Route path="/system/connect" element={<CompanyConnect />} />

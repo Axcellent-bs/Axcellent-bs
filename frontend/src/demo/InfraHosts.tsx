@@ -2,9 +2,11 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useLocation } from 'react-router'
 import { ago } from '@/lib/format'
 import { useCompany } from './company'
+import { useProfiles } from './members'
+import { customerAccounts } from './session'
 import { newId, now, privateIp, useHosts, type Host } from './store'
 
-// 사내 PC 연결 (시스템 관리자 /system/hosts, DejaFix 서비스 /hosts 같은 화면).
+// 사내 PC 연결 (시스템 관리자 회원·서버 관리 /system/members?tab=pcs, DejaFix 서비스 /hosts 같은 화면).
 // PC를 IP로 등록하면 Zabbix에 호스트 등록 → 에이전트 응답 확인 → DejaFix가 그 호스트를 읽기 시작하는 순서로 연결된다.
 // 데모라 실제 Zabbix는 부르지 않고 단계만 보여 준다. 사내망 주소만 받아서 시스템이 회사 밖으로 열리지 않는다.
 const FLOW = [
@@ -20,10 +22,13 @@ const STATUS: Record<Host['status'], { label: string; tone: string; dot: string 
   pending: { label: '연결 확인 중', tone: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500' },
 }
 
-export default function InfraHosts() {
+/** embedded: 회원·서버 관리(/system/members)의 PC·서버 탭 안에 넣을 때. 페이지 제목 없이 내용만 그린다 */
+export default function InfraHosts({ embedded = false }: { embedded?: boolean }) {
   const [hosts, setHosts] = useHosts()
   const company = useCompany()
-  const [form, setForm] = useState({ dept: '', hostname: '', ip: '' })
+  useProfiles() // 회원 부서를 바꾸면 쓰는 사람 칸의 부서 표시를 다시 그린다
+  const accounts = customerAccounts()
+  const [form, setForm] = useState({ dept: '', hostname: '', ip: '', owner: '' })
   // 팀 이름은 회사가 정한다. 이미 쓰는 이름을 제안만 하고 새 이름도 받는다
   const teams = [...new Set(hosts.map((h) => h.dept))]
   const [error, setError] = useState<string | null>(null)
@@ -47,10 +52,10 @@ export default function InfraHosts() {
     if (!form.hostname.trim()) return setError('PC 이름을 입력하세요.')
     if (!privateIp(form.ip)) return setError('사내망 IP만 등록할 수 있습니다 (10.x, 172.16~31.x, 192.168.x).')
     if (hosts.some((h) => h.ip === form.ip.trim())) return setError('이미 등록된 IP입니다.')
-    const h: Host = { id: newId(), dept: form.dept.trim(), hostname: form.hostname.trim(), ip: form.ip.trim(), status: 'pending', agent: '설치 확인 중', lastSeen: now() }
+    const h: Host = { id: newId(), dept: form.dept.trim(), hostname: form.hostname.trim(), ip: form.ip.trim(), status: 'pending', agent: '설치 확인 중', lastSeen: now(), ...(form.owner ? { owner: form.owner } : {}) }
     setHosts((list) => [...list, h])
     setError(null)
-    setForm({ ...form, hostname: '', ip: '' })
+    setForm({ ...form, hostname: '', ip: '', owner: '' })
     setFlow({ id: h.id, name: h.hostname, step: 0 })
   }
 
@@ -66,12 +71,12 @@ export default function InfraHosts() {
   }, [flow]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="space-y-6 px-8 py-8">
+    <div className={embedded ? 'space-y-6' : 'space-y-6 px-8 py-8'}>
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-sm text-ink-500">{asAdmin ? '시스템 관리' : 'DejaFix'}</p>
-          <h1 className="text-2xl font-semibold">PC·서버 연결</h1>
-          <p className="mt-1 text-sm text-ink-500">회사 PC와 서버를 사내 IP로 연결하고 연결 상태를 챙깁니다.</p>
+          {!embedded && <p className="text-sm text-ink-500">{asAdmin ? '시스템 관리' : 'DejaFix'}</p>}
+          {!embedded && <h1 className="text-2xl font-semibold">PC·서버 연결</h1>}
+          <p className={`${embedded ? '' : 'mt-1 '}text-sm text-ink-500`}>회사 PC와 서버를 사내 IP로 연결하고 연결 상태를 챙깁니다.</p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
           {company && <span className="chip bg-ink-100 text-ink-700">사내망 {company.network}</span>}
@@ -101,38 +106,27 @@ export default function InfraHosts() {
         </div>
       </section>
 
-      <section className="card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-app text-left text-xs text-ink-500">
-            <tr>
-              <th className="px-6 py-3 font-medium">팀·위치</th>
-              <th className="px-3 py-3 font-medium">PC 이름</th>
-              <th className="px-3 py-3 font-medium">IP</th>
-              <th className="px-3 py-3 font-medium">설치</th>
-              <th className="px-3 py-3 font-medium">상태</th>
-              <th className="px-3 py-3 font-medium">마지막 응답</th>
-              <th className="px-6 py-3" />
-            </tr>
-          </thead>
-          <tbody>
-            {hosts.map((h) => (
-              <tr key={h.id} className="border-t border-ink-100">
-                <td className="px-6 py-3 font-medium">{h.dept}</td>
-                <td className="px-3 py-3">{h.hostname}</td>
-                <td className="px-3 py-3 font-mono text-xs">{h.ip}</td>
-                <td className="px-3 py-3 text-ink-700">{h.agent}</td>
-                <td className="px-3 py-3"><span className={`chip ${STATUS[h.status].tone}`}>{STATUS[h.status].label}</span></td>
-                <td className="px-3 py-3 text-ink-500">{ago(h.lastSeen)}</td>
-                <td className="px-6 py-3 text-right">
-                  <div className="flex justify-end gap-1">
-                    <button type="button" className="btn-quiet" onClick={() => check(h)}>연결 확인</button>
-                    <button type="button" className="btn-quiet" onClick={() => setHosts((list) => list.filter((x) => x.id !== h.id))}>해제</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <section className="card p-6">
+        <h2 className="card-title">PC 추가</h2>
+        <div className="mt-3 space-y-1 rounded-2xl bg-app p-4 text-sm">
+          <p className="font-medium text-ink-900">1. 그 PC에 Zabbix agent 2를 설치해요</p>
+          <p className="break-all rounded-xl bg-[#1d1d3a] px-3 py-2 font-mono text-xs text-[#e4e4f4]">
+            msiexec /i zabbix_agent2-7.0-windows-amd64.msi /qn SERVER={zabbixHost} SERVERACTIVE={zabbixHost} HOSTNAME={form.hostname.trim() || '<PC 이름>'}
+          </p>
+          <p className="pt-1 font-medium text-ink-900">2. 아래에 PC 이름과 IP를 넣고 연결하면 Zabbix 등록부터 DejaFix 연결까지 이어서 해요</p>
+        </div>
+        <form onSubmit={add} className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_1fr_1fr_auto]">
+          <input className="field" list="host-teams" placeholder="사용하는 팀·위치 (예: 3층 CS실)" value={form.dept} onChange={(e) => setForm({ ...form, dept: e.target.value })} aria-label="사용하는 팀·위치" />
+          <datalist id="host-teams">{teams.map((t) => <option key={t} value={t} />)}</datalist>
+          <input className="field" placeholder="PC 이름 (예: mkt-pc-02)" value={form.hostname} onChange={(e) => setForm({ ...form, hostname: e.target.value })} aria-label="PC 이름" />
+          <select className="field" value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} aria-label="쓰는 사람">
+            <option value="">쓰는 사람: 공용</option>
+            {accounts.map((a) => <option key={a.email} value={a.email}>{a.name}{a.dept ? ` (${a.dept})` : ''}</option>)}
+          </select>
+          <input className="field font-mono" placeholder="사내 IP (예: 192.168.10.42)" value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })} aria-label="IP" />
+          <button className="btn-primary" disabled={!!flow}>연결</button>
+        </form>
+        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
       </section>
 
       {flow && (
@@ -154,23 +148,47 @@ export default function InfraHosts() {
         </section>
       )}
 
-      <section className="card p-6">
-        <h2 className="card-title">PC 추가</h2>
-        <div className="mt-3 space-y-1 rounded-2xl bg-app p-4 text-sm">
-          <p className="font-medium text-ink-900">1. 그 PC에 Zabbix agent 2를 설치해요</p>
-          <p className="break-all rounded-xl bg-[#1d1d3a] px-3 py-2 font-mono text-xs text-[#e4e4f4]">
-            msiexec /i zabbix_agent2-7.0-windows-amd64.msi /qn SERVER={zabbixHost} SERVERACTIVE={zabbixHost} HOSTNAME={form.hostname.trim() || '<PC 이름>'}
-          </p>
-          <p className="pt-1 font-medium text-ink-900">2. 아래에 PC 이름과 IP를 넣고 연결하면 Zabbix 등록부터 DejaFix 연결까지 이어서 해요</p>
-        </div>
-        <form onSubmit={add} className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_1fr_auto]">
-          <input className="field" list="host-teams" placeholder="사용하는 팀·위치 (예: 3층 CS실)" value={form.dept} onChange={(e) => setForm({ ...form, dept: e.target.value })} aria-label="사용하는 팀·위치" />
-          <datalist id="host-teams">{teams.map((t) => <option key={t} value={t} />)}</datalist>
-          <input className="field" placeholder="PC 이름 (예: mkt-pc-02)" value={form.hostname} onChange={(e) => setForm({ ...form, hostname: e.target.value })} aria-label="PC 이름" />
-          <input className="field font-mono" placeholder="사내 IP (예: 192.168.10.42)" value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })} aria-label="IP" />
-          <button className="btn-primary" disabled={!!flow}>연결</button>
-        </form>
-        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      <section className="card overflow-x-auto">
+        <table className="w-full whitespace-nowrap text-sm">
+          <thead className="bg-app text-left text-xs text-ink-500">
+            <tr>
+              <th className="px-6 py-3 font-medium">팀·위치</th>
+              <th className="px-3 py-3 font-medium">PC 이름</th>
+              <th className="px-3 py-3 font-medium">쓰는 사람</th>
+              <th className="px-3 py-3 font-medium">IP</th>
+              <th className="px-3 py-3 font-medium">설치</th>
+              <th className="px-3 py-3 font-medium">상태</th>
+              <th className="px-3 py-3 font-medium">마지막 응답</th>
+              <th className="px-6 py-3" />
+            </tr>
+          </thead>
+          <tbody>
+            {hosts.map((h) => (
+              <tr key={h.id} className="border-t border-ink-100">
+                <td className="px-6 py-3 font-medium">{h.dept}</td>
+                <td className="px-3 py-3">{h.hostname}</td>
+                <td className="px-3 py-3">
+                  <select className="field w-36 py-1 text-xs" aria-label={`${h.hostname} 쓰는 사람`} value={h.owner ?? ''}
+                    onChange={(e) => update(h.id, { owner: e.target.value || undefined })}>
+                    <option value="">공용</option>
+                    {h.owner && !accounts.some((a) => a.email === h.owner) && <option value={h.owner}>{h.owner}</option>}
+                    {accounts.map((a) => <option key={a.email} value={a.email}>{a.name}{a.dept ? ` (${a.dept})` : ''}</option>)}
+                  </select>
+                </td>
+                <td className="px-3 py-3 font-mono text-xs">{h.ip}</td>
+                <td className="px-3 py-3 text-ink-700">{h.agent}</td>
+                <td className="px-3 py-3"><span className={`chip ${STATUS[h.status].tone}`}>{STATUS[h.status].label}</span></td>
+                <td className="px-3 py-3 text-ink-500">{ago(h.lastSeen)}</td>
+                <td className="px-6 py-3 text-right">
+                  <div className="flex justify-end gap-1">
+                    <button type="button" className="btn-quiet" onClick={() => check(h)}>연결 확인</button>
+                    <button type="button" className="btn-quiet" onClick={() => setHosts((list) => list.filter((x) => x.id !== h.id))}>해제</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </section>
     </div>
   )

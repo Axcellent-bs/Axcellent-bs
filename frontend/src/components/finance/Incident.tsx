@@ -119,7 +119,7 @@ function Card({ title, value, tone = "text-ink-900", children }: { title: string
   return (
     <div className="rounded-2xl border border-ink-100 bg-surface px-4 py-3">
       <p className="text-sm font-medium text-ink-500">{title}</p>
-      <p className={`mt-0.5 break-words font-bold tabular-nums ${unknown ? "text-sm text-ink-500" : `text-2xl ${tone}`}`}>{value}</p>
+      <p className={`mt-1 break-words font-semibold tabular-nums ${unknown ? "text-sm text-ink-500" : `text-2xl ${tone}`}`}>{value}</p>
       {children && <div className="mt-2 space-y-1 text-sm text-ink-700">{children}</div>}
     </div>
   );
@@ -239,16 +239,21 @@ function IncidentDetailView({ id, summary, tick }: { id: string; summary: Incide
         {res.loading && res.env && <span className="text-sm text-ink-500" aria-live="polite">새로 받는 중…</span>}
       </div>
       {res.env?.data.window && (
-        <p className="-mt-3 text-sm text-ink-500">영향 분석 구간 {shortDateTime(res.env.data.window.from)} ~ {shortDateTime(res.env.data.window.to)}{res.env.data.recovered_at && ` · 정상 복귀 ${shortDateTime(res.env.data.recovered_at)}`}</p>
+        <p className="-mt-3 text-sm text-ink-500">
+          영향 분석 구간 {shortDateTime(res.env.data.window.from)} ~ {shortDateTime(res.env.data.window.to)}{res.env.data.recovered_at && ` · 정상 복귀 ${shortDateTime(res.env.data.recovered_at)}`}
+          {meta?.collected_at && <span className="text-xs tabular-nums"> · {shortDateTime(meta.collected_at)} 기준</span>}
+        </p>
       )}
-      {summary && <SummaryStrip s={summary} />}
-      <MetaLine meta={meta} />
+      {/* 상세를 받기 전에만 목록 값으로 요약을 보인다. 받은 뒤에는 아래 카드가 같은 숫자를 크게 보여 준다 */}
+      {summary && !res.env && <SummaryStrip s={summary} />}
+      {!res.env?.data.window && <MetaLine meta={meta} />}
       <ResourceBody res={res}>
         {(d) => (
           <div className="space-y-5">
-            <WhatToDo />
+            {/* 숫자(피해·보상·환불)를 먼저, 안내와 장부 출처는 뒤로 */}
             <Cards d={d} />
             <Recipients d={d} />
+            <WhatToDo />
             <LedgerLine d={d} />
           </div>
         )}

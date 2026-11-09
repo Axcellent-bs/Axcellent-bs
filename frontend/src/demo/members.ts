@@ -1,4 +1,4 @@
-// 일반회원을 회사 계정에 연결하는 규칙. 관리자(회사 계정)가 회원 연결(/system/members)에서 정한다.
+// 일반회원을 회사 계정에 연결하는 규칙. 관리자(회사 계정)가 회원·서버 관리(/system/members)에서 정한다.
 // - 계정 연결: 회원 이메일을 회사에 묶는다 (가입 전이어도 미리 넣어 둘 수 있다)
 // - IP 연결: 사내 PC IP(또는 대역)를 묶는다. 그 PC에서 가입·로그인하면 회사 회원이 된다
 // 데모라 브라우저에만 기억한다. 실제로는 서버가 요청 IP를 보지만, 데모는 "이 PC" IP를 ?ip= 로 정한다.
@@ -81,7 +81,7 @@ export const ipLinked = (ip: string, l = links) => l.ips.some((r) => ipMatches(i
 export const memberLinked = (email: string, ip = thisPcIp(), l = links) => l.emails.includes(norm(email)) || ipLinked(ip, l)
 
 // ---------------------------------------------------------------- 회원 부서·확인 권한
-// 관리자가 회원 연결(/system/members)에서 바꾼 부서·확인 권한. 이메일을 열쇠로 기억하고 데모 계정에도 덮어쓴다.
+// 관리자가 회원·서버 관리(/system/members)에서 바꾼 부서·확인 권한. 이메일을 열쇠로 기억하고 데모 계정에도 덮어쓴다.
 // 확인 권한: 받은 요청 중 위험한 건(환불·롤백 등)을 승인할 수 있다.
 export type MemberProfile = { dept?: string; approver?: boolean }
 const PROFILE_KEY = 'axcellent-demo-member-profiles'

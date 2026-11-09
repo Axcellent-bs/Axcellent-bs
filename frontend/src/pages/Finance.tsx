@@ -270,7 +270,7 @@ export default function FinancePage() {
       <section aria-labelledby="todo" className={`rounded-3xl p-4 ring-1 sm:p-6 ${todoCount ? "bg-amber-50 ring-amber-100" : "bg-emerald-50 ring-emerald-100"}`}>
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
           <h2 id="todo" className={`text-sm font-semibold ${todoCount ? "text-amber-800" : "text-emerald-800"}`}>지금 사람이 할 일</h2>
-          <p className={`text-3xl font-bold tabular-nums ${todoCount ? "text-amber-800" : "text-emerald-800"}`}>{anyTodoLoaded ? (todoCount ? `${todoCount}가지` : "없음") : "–"}</p>
+          <p className={`text-2xl font-semibold tabular-nums ${todoCount ? "text-amber-800" : "text-emerald-800"}`}>{anyTodoLoaded ? (todoCount ? `${todoCount}가지` : "없음") : "–"}</p>
           <MockBadge meta={overview.env?.meta} />
         </div>
         {overview.error && !overview.env && <div className="mt-3"><ErrorBox message={overview.error} onRetry={overview.reload} /></div>}
@@ -322,12 +322,13 @@ export default function FinancePage() {
               {KPI.map(({ key, label, hint }) => {
                 const v = overview.env!.data.kpis[key];
                 return (
-                  <div key={key} className={`card px-4 py-3 ${key === "net_result" ? "ring-1 ring-brand-100" : ""}`}>
+                  <div key={key} title={hint} className={`card px-4 py-3 ${key === "net_result" ? "ring-1 ring-brand-100" : ""}`}>
                     <dt className="text-sm text-ink-500">{label}</dt>
-                    <dd className={`mt-0.5 break-words font-semibold tabular-nums ${v == null ? "text-sm text-ink-500" : `text-lg sm:text-xl ${v < 0 ? "text-red-700" : "text-ink-900"}`}`}>
+                    <dd className={`mt-1 break-words font-semibold tabular-nums ${v == null ? "text-sm text-ink-500" : `text-lg sm:text-xl ${v < 0 ? "text-red-700" : "text-ink-900"}`}`}>
                       {v != null && v < 0 ? `−${krw(-v)}` : krw(v)}
                     </dd>
-                    <dd className="mt-0.5 text-sm leading-snug text-ink-500">{hint}</dd>
+                    {/* 뜻은 마우스를 올리면(title) 보이고, 화면 읽기 프로그램에는 그대로 읽힌다. 용어 풀이에도 있다 */}
+                    <dd className="sr-only">{hint}</dd>
                   </div>
                 );
               })}

@@ -1,4 +1,4 @@
-import { AGENTS, agentName, toggleService, useEnabledServices, usePublishedServices, type Service } from './services'
+import { AGENTS, agentName, isRequired, toggleService, useEnabledServices, usePublishedServices, type Service } from './services'
 
 // 서비스 고르기: Adobe Creative Cloud 앱 목록처럼 회사가 쓸 서비스를 켜고 끈다. 끈 서비스는 모든 직원 메뉴에서 빠진다.
 function ServiceMark({ s }: { s: Service }) {
@@ -36,7 +36,8 @@ export default function ServiceCatalog() {
                   <p className="card-title">{s.name}</p>
                   <p className="text-xs text-ink-500">{agentName(s) ?? s.by}</p>
                 </div>
-                {on && <span className="chip ml-auto bg-emerald-50 text-emerald-700">사용 중</span>}
+                {isRequired(s.id) ? <span className="chip ml-auto bg-brand-50 text-brand-700">필수</span>
+                  : on && <span className="chip ml-auto bg-emerald-50 text-emerald-700">사용 중</span>}
               </div>
               <p className="text-sm text-ink-700">{s.desc}</p>
               {s.children && (
@@ -45,9 +46,13 @@ export default function ServiceCatalog() {
                 </div>
               )}
               <div className="mt-auto flex items-center justify-end gap-3 border-t border-ink-100 pt-3">
-                <button type="button" onClick={() => toggleService(s.id)} className={on ? 'btn-ghost' : 'btn-primary'}>
-                  {on ? '빼기' : '추가하기'}
-                </button>
+                {isRequired(s.id) ? (
+                  <span className="text-xs text-ink-500">다른 AI가 장애 기록을 써서 늘 켜 둬요</span>
+                ) : (
+                  <button type="button" onClick={() => toggleService(s.id)} className={on ? 'btn-ghost' : 'btn-primary'}>
+                    {on ? '빼기' : '추가하기'}
+                  </button>
+                )}
               </div>
             </li>
           )
@@ -89,6 +94,7 @@ export default function ServiceCatalog() {
         <h2 className="card-title">기본 포함</h2>
         <p className="mt-1 text-sm text-ink-500">고르지 않아도 모든 직원이 씁니다.</p>
         <div className="mt-3 flex flex-wrap gap-2">
+          {SERVICES.filter((s) => isRequired(s.id)).map((s) => <span key={s.id} className="chip bg-ink-100 text-ink-700">{s.name}</span>)}
           <span className="chip bg-ink-100 text-ink-700">AI 대화방</span>
           <span className="chip bg-ink-100 text-ink-700">AI 오피스</span>
         </div>

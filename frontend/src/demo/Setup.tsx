@@ -129,7 +129,7 @@ export default function Setup() {
                 {company && !sameCompany && <span className="chip bg-amber-50 text-amber-700">새 회사로 연결 · 지금 연결된 {company.name}은 끊겨요</span>}
                 <span className="chip bg-emerald-50 text-emerald-700">키 확인됨</span>
               </div>
-              <p className="text-sm text-ink-500">이 계정으로 서비스 고르기, 사내 PC 연결, 회원 연결을 해요.</p>
+              <p className="text-sm text-ink-500">이 계정으로 서비스 고르기와 회원·서버 관리(회원 연결, 사내 PC 연결)를 해요.</p>
               <input className="field" placeholder="이름" value={admin.name} onChange={(e) => setAdmin({ ...admin, name: e.target.value })} aria-label="관리자 이름" />
               <input className="field" placeholder="회사 이메일" value={admin.email} onChange={(e) => setAdmin({ ...admin, email: e.target.value })} aria-label="관리자 이메일" />
               <input className="field" type="password" placeholder="비밀번호 (8자 이상)" value={admin.password} onChange={(e) => setAdmin({ ...admin, password: e.target.value })} aria-label="비밀번호" />

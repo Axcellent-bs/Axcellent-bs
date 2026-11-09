@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { finance, humanTokenSet, krw, plainText, signedKrw, type BankUnexplained, type BankOutflows } from "@/lib/finance";
-import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
+import { Chip, Empty, Panel, ResourceBody, Stat, TONE, useResource } from "./bits";
 
 // 돈이 실제로 맞는지 보는 화면 3개. 숫자는 재무 AI 서버가 계산한 값 그대로다.
 // - 월 마감 체크리스트(①): 그 달을 닫기 전에 끝낼 일을 장부로 판정
@@ -19,20 +19,28 @@ export function ChecklistSection({ tick, onOpen }: { tick: number; onOpen: (tab:
       <ResourceBody res={res}>
         {(c) => (
           <div className="space-y-3">
-            <p className="text-sm text-ink-700">
-              <b className="text-ink-900">{c.month}</b> · {c.done}/{c.total} 끝남
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+              <b className="text-ink-900">{c.month}</b>
+              <span className="tabular-nums text-ink-700"><b className="text-ink-900">{c.done}</b>/{c.total} 끝남</span>
+              <span className="h-1.5 w-32 overflow-hidden rounded-full bg-ink-100" aria-hidden="true">
+                <span className="block h-full rounded-full bg-emerald-700" style={{ width: `${c.total ? (c.done / c.total) * 100 : 0}%` }} />
+              </span>
               {c.closed ? <Chip label="마감됨" tone={TONE.ok} /> : c.ready ? <Chip label="마감 준비됨 (월 결산 확정만 남음)" tone={TONE.info} /> : null}
-            </p>
+            </div>
             <ol className="space-y-1.5">
-              {c.items.map((i, n) => (
-                <li key={i.key} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-ink-100 px-3 py-2 text-sm">
-                  <span className="w-5 text-sm tabular-nums text-ink-500">{n + 1}</span>
-                  <Chip label={CHECK_KO[i.status]} tone={CHECK_TONE[i.status]} />
-                  <span className="font-medium text-ink-900">{i.label}</span>
-                  <span className="min-w-0 flex-1 text-sm text-ink-500">{i.detail}</span>
-                  {i.status !== "done" && <button type="button" className="text-sm font-medium text-brand-700 hover:underline" onClick={() => onOpen(i.link)}>하러 가기 →</button>}
-                </li>
-              ))}
+              {c.items.map((i, n) => {
+                const done = i.status === "done";
+                return (
+                  // 남은 일은 테두리로 띄우고, 끝난 일은 한 단계 가라앉힌다
+                  <li key={i.key} className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl px-3 py-2 text-sm ${done ? "bg-surface-2/60 text-ink-500" : "border border-ink-100"}`}>
+                    <span className="w-5 text-sm tabular-nums text-ink-500">{n + 1}</span>
+                    <Chip label={CHECK_KO[i.status]} tone={CHECK_TONE[i.status]} />
+                    <span className={done ? "text-ink-700" : "font-medium text-ink-900"}>{i.label}</span>
+                    <span className="min-w-0 flex-1 text-sm text-ink-500">{i.detail}</span>
+                    {!done && <button type="button" className="text-sm font-medium text-brand-700 hover:underline" onClick={() => onOpen(i.link)}>하러 가기 →</button>}
+                  </li>
+                );
+              })}
             </ol>
           </div>
         )}
@@ -82,7 +90,16 @@ export function BankSection({ tick }: { tick: number }) {
       <ResourceBody res={res}>
         {(b) => !b.uploaded ? <Empty>아직 올린 은행 거래내역이 없습니다. 올리면 그 기간의 PG 정산금 입금을 맞춰 봅니다.</Empty> : (
           <div className="space-y-3">
-            <p className="text-sm text-ink-500">올린 기간 {b.covered?.from} ~ {b.covered?.to} · {b.covered?.rows}줄{b.pg_memo ? ` · 적요에 "${b.pg_memo}"가 있는 입금만` : ""}</p>
+            {(() => {
+              const off = (b.counts.short ?? 0) + (b.counts.over ?? 0) + (b.counts.missing ?? 0) + (b.counts.unexpected ?? 0);
+              return (
+                <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+                  <p className="text-sm text-ink-500">맞음 <b className="text-lg font-semibold tabular-nums text-ink-900">{b.counts.matched ?? 0}</b>일</p>
+                  <p className="text-sm text-ink-500">확인 필요 <b className={`text-lg font-semibold tabular-nums ${off ? "text-red-700" : "text-ink-900"}`}>{off}</b>일</p>
+                  <p className="text-sm text-ink-500">올린 기간 {b.covered?.from} ~ {b.covered?.to} · {b.covered?.rows}줄{b.pg_memo ? ` · 적요에 "${b.pg_memo}"가 있는 입금만` : ""}</p>
+                </div>
+              );
+            })()}
             <div className="overflow-x-auto">
               <table className="w-full min-w-[520px] text-sm">
                 <thead className="text-left text-sm text-ink-500">
@@ -90,11 +107,11 @@ export function BankSection({ tick }: { tick: number }) {
                 </thead>
                 <tbody>
                   {b.days.map((d) => (
-                    <tr key={d.date} className="border-t border-ink-100">
+                    <tr key={d.date} className={`border-t border-ink-100 ${d.status === "matched" || d.status === "not_covered" ? "text-ink-500" : "text-ink-900"}`}>
                       <td className="py-1.5 tabular-nums">{d.date}</td>
                       <td className="py-1.5 text-right tabular-nums">{d.expected == null ? "–" : krw(d.expected)}</td>
                       <td className="py-1.5 text-right tabular-nums">{d.deposited == null ? "–" : krw(d.deposited)}</td>
-                      <td className="py-1.5 text-right tabular-nums">{d.diff == null || d.diff === 0 ? "–" : signedKrw(d.diff)}</td>
+                      <td className={`py-1.5 text-right tabular-nums ${d.diff ? "font-semibold text-red-700" : ""}`}>{d.diff == null || d.diff === 0 ? "–" : signedKrw(d.diff)}</td>
                       <td className="py-1.5"><Chip label={d.status_label} tone={BANK_TONE[d.status] ?? TONE.muted} /></td>
                     </tr>
                   ))}
@@ -228,9 +245,23 @@ export function CashflowSection({ tick }: { tick: number }) {
         {(c) => (
           <div className="space-y-3">
             {(c.short_weeks?.length ?? 0) > 0 && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">예상 잔액이 {krw(c.min_cash_krw ?? 0)}보다 적은 주 {c.short_weeks?.length}개: {c.short_weeks?.join(", ")} 시작 주. 판매자 정산과 고정비를 낼 현금이 모자랄 수 있습니다.</p>}
-            {c.opening && <p className="text-sm text-ink-700">기초 잔액 <b className="text-ink-900">{krw(c.opening.balance)}</b> ({c.opening.as_of} 통장){c.opening.stale ? <Chip label="오래됨" tone={TONE.warn} /> : null}{c.opening.ordered ? "" : " · 같은 날 거래 순서를 알 수 없어 올린 순서의 마지막 잔액"}</p>}
+            {(() => {
+              // 맨 위 큰 숫자 셋: 지금 잔액 → 13주 뒤 예상 잔액 → 모자랄 수 있는 주
+              const last = [...c.weeks].reverse().find((w) => w.balance != null);
+              const short = c.short_weeks?.length ?? 0;
+              return (
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <Stat label="기초 잔액 (통장)" value={c.opening ? krw(c.opening.balance) : "통장 내역 없음"}
+                    sub={c.opening ? `${c.opening.as_of} 기준${c.opening.stale ? " · 오래됨" : ""}${c.opening.ordered ? "" : " · 같은 날 순서 모름"}` : "통장 내역을 올리면 잔액에서 시작합니다"} />
+                  <Stat lead label={last ? `${last.week_start} 주 예상 잔액` : "예상 잔액"} value={last?.balance != null ? signedKrw(last.balance) : "확인할 수 없음"}
+                    sub={c.trailing_weeks ? `추정은 최근 ${c.trailing_weeks}주 평균` : "평균 낼 주가 모자라 뒤쪽 주는 비움"} />
+                  <Stat label="현금 부족 예상 주" value={`${short}주`} flag={short ? "주의" : undefined}
+                    sub={`예상 잔액이 ${krw(c.min_cash_krw ?? 0)}보다 적은 주`} />
+                </div>
+              );
+            })()}
             {c.negative_weeks.length > 0 && <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">나가는 돈이 들어오는 돈보다 많은 주 {c.negative_weeks.length}개: {c.negative_weeks.join(", ")} 시작 주</p>}
-            <p className="text-sm text-ink-500">{c.note}. 추정은 최근 {c.trailing_weeks}주 평균{c.trailing_weeks ? "" : " (평균을 낼 만큼 쌓인 주가 없어 비워 둠)"}입니다.</p>
+            <p className="text-sm text-ink-500">{c.note}</p>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px] text-sm">
                 <thead className="text-left text-sm text-ink-500">
