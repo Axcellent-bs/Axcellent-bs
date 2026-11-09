@@ -331,7 +331,7 @@ def scenario_a() -> Plan:
             Step(
                 "related_prs",
                 "find_related_prs",
-                "관련 코드 변경 찾기 (planning)",
+                "관련 코드 변경 찾기 (dev)",
                 after=("diagnose", "impact"),
                 build=_related_prs,
                 required=False,
@@ -339,7 +339,7 @@ def scenario_a() -> Plan:
             Step(
                 "link_incident",
                 "link_incident",
-                "이벤트에 코드 변경 연결 (planning)",
+                "이벤트에 코드 변경 연결 (dev)",
                 after=("related_prs",),
                 build=_link,
                 required=False,

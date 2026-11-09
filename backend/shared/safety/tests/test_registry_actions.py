@@ -96,7 +96,7 @@ async def test_generate_pr_is_verified_by_code_rules(gate: Gate, verifier: Any, 
     ok = await gate.execute(
         act(
             "generate_pr",
-            "planning",
+            "dev",
             "pr-ok",
             changed_lines=120,
             changed_files=4,
@@ -109,7 +109,7 @@ async def test_generate_pr_is_verified_by_code_rules(gate: Gate, verifier: Any, 
     too_big = await gate.execute(
         act(
             "generate_pr",
-            "planning",
+            "dev",
             "pr-big",
             changed_lines=301,
             changed_files=4,
@@ -120,7 +120,7 @@ async def test_generate_pr_is_verified_by_code_rules(gate: Gate, verifier: Any, 
     outside = await gate.execute(
         act(
             "generate_pr",
-            "planning",
+            "dev",
             "pr-out",
             changed_lines=10,
             changed_files=1,
@@ -137,7 +137,8 @@ async def test_generate_pr_is_verified_by_code_rules(gate: Gate, verifier: Any, 
     "action", ["create_ticket", "write_spec", "split_tasks", "review_pr", "send_message"]
 )
 async def test_planning_record_actions_are_a(gate: Gate, act, action: str) -> None:
-    decision = await gate.execute(act(action, "planning", f"plan-{action}"))
+    requester = "dev" if action == "review_pr" else "planning"  # PR 검수는 개발 몫
+    decision = await gate.execute(act(action, requester, f"plan-{action}"))
     assert (decision.grade, decision.status) == ("A", "executed")
 
 
@@ -201,7 +202,7 @@ async def test_merge_pr_rules(gate: Gate, verifier: Any, act) -> None:
         linked_incident_count=0,
         irreversible_count=0,
     )
-    ok = await gate.execute(act("merge_pr", "planning", "merge-ok", **clean))
+    ok = await gate.execute(act("merge_pr", "dev", "merge-ok", **clean))
     assert (ok.grade, ok.status, ok.verifier) == ("B", "executed", "safety")
     assert verifier.tasks == []
 
@@ -215,7 +216,7 @@ async def test_merge_pr_rules(gate: Gate, verifier: Any, act) -> None:
         "merge_irreversible": {"irreversible_count": 1},
     }.items():
         decision = await gate.execute(
-            act("merge_pr", "planning", f"merge-{key}", **{**clean, **bad})
+            act("merge_pr", "dev", f"merge-{key}", **{**clean, **bad})
         )
         assert decision.status == "held"
         review = gate.store.get_review(decision.review_id or "")
@@ -240,7 +241,7 @@ _CROSS_CLEAN = dict(
 @pytest.mark.asyncio
 async def test_merge_cross_check_clears_only_linked_incident(gate: Gate, act) -> None:
     """교차검증 근거가 깨끗하면 장애 났던 경로 규칙 대신 근거로 보고 B로 머지한다."""
-    ok = await gate.execute(act("merge_pr", "planning", "cross-ok", **_CROSS_CLEAN))
+    ok = await gate.execute(act("merge_pr", "dev", "cross-ok", **_CROSS_CLEAN))
     assert (ok.grade, ok.status, ok.verifier) == ("B", "executed", "safety")
 
     # 코드 위험 규칙은 근거로 풀리지 않는다
@@ -251,7 +252,7 @@ async def test_merge_cross_check_clears_only_linked_incident(gate: Gate, act) ->
         "merge_irreversible": {"irreversible_count": 1},
     }.items():
         decision = await gate.execute(
-            act("merge_pr", "planning", f"cross-code-{key}", **{**_CROSS_CLEAN, **bad})
+            act("merge_pr", "dev", f"cross-code-{key}", **{**_CROSS_CLEAN, **bad})
         )
         review = gate.store.get_review(decision.review_id or "")
         assert decision.status == "held"
@@ -274,7 +275,7 @@ async def test_merge_cross_check_evidence_goes_to_human(
 ) -> None:
     """근거 하나라도 걸리면 C(사람 확인). 진행 중인 사건과 겹쳐도 자동 거절이 아니라 보류다."""
     decision = await gate.execute(
-        act("merge_pr", "planning", f"cross-{key}-{bad}", **{**_CROSS_CLEAN, **bad})
+        act("merge_pr", "dev", f"cross-{key}-{bad}", **{**_CROSS_CLEAN, **bad})
     )
     assert (decision.grade, decision.status) == ("C", "held")
     review = gate.store.get_review(decision.review_id or "")
@@ -295,7 +296,7 @@ async def test_merge_cross_check_missing_evidence_fails_closed(gate: Gate, act) 
             "evidence_missing",
         )
     }
-    decision = await gate.execute(act("merge_pr", "planning", "cross-none", **params))
+    decision = await gate.execute(act("merge_pr", "dev", "cross-none", **params))
     assert decision.status == "held"
     review = gate.store.get_review(decision.review_id or "")
     assert {hit["key"] for hit in review.report["rules"]} == {  # type: ignore[union-attr]
@@ -336,7 +337,7 @@ async def test_repo_revert_pr_rules_match_merge(gate: Gate, verifier: Any, act) 
         "revert_irreversible": {"irreversible_count": 1},
     }.items():
         decision = await gate.execute(
-            act("repo_revert_pr", "planning", f"revert-{key}", **{**clean, **bad})
+            act("repo_revert_pr", "dev", f"revert-{key}", **{**clean, **bad})
         )
         assert decision.status == "held"
         review = gate.store.get_review(decision.review_id or "")
@@ -346,7 +347,7 @@ async def test_repo_revert_pr_rules_match_merge(gate: Gate, verifier: Any, act) 
 @pytest.mark.asyncio
 async def test_missing_rule_fields_fail_closed(gate: Gate, act) -> None:
     """금액이 아닌 규칙의 필드가 없으면 통과시키지 않는다."""
-    decision = await gate.execute(act("generate_pr", "planning", "pr-none", changed_lines=10))
+    decision = await gate.execute(act("generate_pr", "dev", "pr-none", changed_lines=10))
     assert decision.status == "held"
     review = gate.store.get_review(decision.review_id or "")
     assert {hit["key"] for hit in review.report["rules"]} == {  # type: ignore[union-attr]
@@ -382,7 +383,7 @@ async def test_protected_path_is_always_c(
     """허용 경로·크기 안이고 irreversible_count가 0이어도 보호 경로에 닿으면 C."""
     protected = "shop-api/src/ax_shop_api/service.py"
     decision = await gate.execute(
-        act(action, "planning", f"{key}-hit", changed_paths=["docs/a.md", protected], **clean)
+        act(action, "dev", f"{key}-hit", changed_paths=["docs/a.md", protected], **clean)
     )
     assert (decision.grade, decision.status) == ("C", "held")
     assert verifier.tasks == []
@@ -395,7 +396,7 @@ async def test_protected_path_is_always_c(
     unrelated = await gate.execute(
         act(
             action,
-            "planning",
+            "dev",
             f"{key}-ok",
             changed_paths=["shop-api/src/ax_shop_api/lookups.py", "docs/a.md"],
             **clean,
@@ -417,7 +418,7 @@ async def test_protected_paths_fail_closed(
 ) -> None:
     """changed_paths가 없거나 문자열 목록이 아니면 보호 경로 규칙도 걸린 것으로 본다."""
     for suffix, extra in {"none": {}, "str": {"changed_paths": "docs/a.md"}}.items():
-        decision = await gate.execute(act(action, "planning", f"{key}-{suffix}", **clean, **extra))
+        decision = await gate.execute(act(action, "dev", f"{key}-{suffix}", **clean, **extra))
         assert decision.status == "held"
         review = gate.store.get_review(decision.review_id or "")
         hits = {hit["key"]: hit for hit in review.report["rules"]}  # type: ignore[union-attr]
@@ -439,7 +440,7 @@ async def test_agent_config_file_inside_allowed_path_is_always_c(
     """#506: 허용 경로·크기 안이고 irreversible_count가 0이어도 깊은 곳의 CLAUDE.md는 C."""
     named = ["shop-web/CLAUDE.md", "shop-api/.CLAUDE/settings.json", "shop-web/package.json"]
     decision = await gate.execute(
-        act(action, "planning", f"{key}-hit", changed_paths=["docs/a.md", *named], **clean)
+        act(action, "dev", f"{key}-hit", changed_paths=["docs/a.md", *named], **clean)
     )
     assert (decision.grade, decision.status) == ("C", "held")
     assert decision.hold_reason == HoldReason.OVER_THRESHOLD
@@ -451,7 +452,7 @@ async def test_agent_config_file_inside_allowed_path_is_always_c(
     plain = await gate.execute(
         act(
             action,
-            "planning",
+            "dev",
             f"{key}-ok",
             changed_paths=["shop-web/src/pages/Notice.tsx", "docs/claude-notes.md"],
             **clean,
@@ -468,7 +469,7 @@ async def test_agent_config_rule_fails_closed(
     """changed_paths가 없거나 문자열 목록이 아니면 이름 규칙도 걸린 것으로 본다."""
     bad_values = {"none": {}, "str": {"changed_paths": "docs/a.md"}, "int": {"changed_paths": [1]}}
     for suffix, extra in bad_values.items():
-        decision = await gate.execute(act(action, "planning", f"{key}-{suffix}", **clean, **extra))
+        decision = await gate.execute(act(action, "dev", f"{key}-{suffix}", **clean, **extra))
         assert decision.status == "held"
         review = gate.store.get_review(decision.review_id or "")
         hits = {hit["key"]: hit for hit in review.report["rules"]}  # type: ignore[union-attr]
@@ -605,7 +606,7 @@ async def test_rollback_all_clear_goes_to_b_verification(
     )
     assert (decision.grade, decision.status) == ("B", "executed")
     assert [(t.verifier, t.skill) for t in verifier.tasks] == [
-        ("planning", "verify_rollback_target")
+        ("dev", "verify_rollback_target")
     ]
 
 
@@ -626,7 +627,7 @@ async def test_rollback_at_or_below_threshold_stays_b(
     assert (decision.grade, decision.status) == ("B", "executed")
     assert decision.hold_reason is None
     assert [(t.verifier, t.skill) for t in verifier.tasks] == [
-        ("planning", "verify_rollback_target")
+        ("dev", "verify_rollback_target")
     ]
 
 
@@ -653,7 +654,7 @@ async def test_rollback_multiple_rules_all_reported(rollback_gate: Gate, act) ->
 async def test_auto_policy_shrink_is_grade_a(gate: Gate, act, target: str, to: int) -> None:
     """자동 머지 PR이 사건에 연결되어 한 단계 줄이는 것은 승인 없이 A."""
     decision = await gate.execute(
-        act("auto_policy_update", "planning", f"shrink-{target}", target=target, to=to)
+        act("auto_policy_update", "dev", f"shrink-{target}", target=target, to=to)
     )
     assert (decision.grade, decision.status) == ("A", "executed")
 
@@ -665,7 +666,7 @@ async def test_auto_policy_expand_is_held_for_human(gate: Gate, act, target: str
     decision = await gate.execute(
         act(
             "auto_policy_update",
-            "planning",
+            "dev",
             f"expand-{target}",
             target=target,
             to=to,
@@ -697,7 +698,7 @@ async def test_auto_policy_missing_or_unknown_fails_closed(
     gate: Gate, act, params: dict[str, Any]
 ) -> None:
     """단계가 없거나 모르는 값이면 줄이기로 보지 않고 C (fail-closed)."""
-    decision = await gate.execute(act("auto_policy_update", "planning", "policy-bad", **params))
+    decision = await gate.execute(act("auto_policy_update", "dev", "policy-bad", **params))
     assert (decision.grade, decision.status) == ("C", "held")
 
 
@@ -795,3 +796,14 @@ async def test_only_marketing_starts_campaigns_and_coupons_skip_finance(
     assert other.hold_reason == HoldReason.UNREGISTERED_ACTION
     await gate.execute(coupon(1, 1000, purpose_code="campaign", key="k9"))
     assert verifier.tasks == []  # 쿠폰은 재무 검증을 받지 않는다
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("action", "requester"),
+    [("merge_pr", "planning"), ("generate_pr", "planning"), ("write_spec", "dev")],
+)
+async def test_planning_and_dev_do_not_share_actions(gate: Gate, act, action: str, requester: str):
+    """기획과 개발은 다른 부서다. 서로의 액션을 부서 이름으로 빌려 쓰지 못한다."""
+    decision = await gate.execute(act(action, requester, f"cross-{action}-{requester}"))
+    assert (decision.status, decision.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)

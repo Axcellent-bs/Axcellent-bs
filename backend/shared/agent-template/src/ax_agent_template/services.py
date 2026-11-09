@@ -283,9 +283,10 @@ SERVICES: tuple[Service, ...] = (
         ),
         "요청·기획서",
     ),
+    # 개발은 기획과 다른 부서다. 기획 이름을 빌리지 않아 기획 권한도 같이 갖지 않는다
     Service(
         "dev",
-        "planning",
+        "dev",
         8111,
         (
             "find_related_prs",
@@ -332,6 +333,13 @@ SERVICE_PORTS: dict[str, int] = {s.id: s.port for s in SERVICES}
 _SKILL_HOME: dict[tuple[str, str], str] = {
     (s.department, skill): s.id for s in SERVICES for skill in s.skills
 }
+# 예전에 다른 부서 이름으로 불리던 서비스 (서비스 id → 예전 부서 이름).
+# 그 이름 + 이 서비스 skill로 온 호출은 주소만 맞춰 이 서비스로 보낸다. 권한(`department_of`)은
+# 넘겨주지 않는다. 개발은 기획 부서 안에 있다가 따로 나왔다
+_FORMER_DEPARTMENT: dict[str, str] = {"dev": "planning"}
+for _sid, _old in _FORMER_DEPARTMENT.items():
+    for _skill in BY_ID[_sid].skills:
+        _SKILL_HOME.setdefault((_old, _skill), _sid)
 
 
 def department_of(name: str) -> str:

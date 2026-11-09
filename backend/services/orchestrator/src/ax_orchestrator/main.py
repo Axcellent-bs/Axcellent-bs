@@ -39,7 +39,7 @@ from ax_orchestrator.store import DB_ENV, IncidentStore
 from ax_orchestrator.usage import BUCKET_SECONDS, WINDOW_SECONDS, RecordingCaller, UsageRecorder
 
 STATIC = Path(__file__).parent / "static"
-DEPTS = ["infra", "data", "planning", "marketing", "support", "finance", "hr"]
+DEPTS = ["infra", "data", "planning", "dev", "marketing", "support", "finance", "hr"]
 
 
 class DemoRequest(BaseModel):

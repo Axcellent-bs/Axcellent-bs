@@ -1,6 +1,6 @@
 # services/dev — 개발·배포
 
-포트 8111 · 업무 로직 `domains/planning` · 화면 서비스 id `dev`
+포트 8111 · 업무 로직 `domains/dev` · 화면 서비스 id `dev`
 
 | skill | 등급 |
 | --- | --- |
@@ -12,5 +12,6 @@
 | `start_dev` | A |
 
 - 실행: `uv run --package ax-svc-dev uvicorn svc_dev.main:app --port 8111` (backend/ 에서, 목 모드 `AGENT_TEMPLATE_MOCK=1`)
-- 다른 에이전트가 `planning`로 불러도 위 skill이면 이 서비스로 온다 (`route_target`).
+- 다른 에이전트가 `dev`로 부른다. 예전 이름 `planning`으로 불러도 위 skill이면 이 서비스로 온다
+  (`route_target`). 다만 기획 권한은 같이 갖지 않는다.
 - 이 폴더는 `scripts/split_services.py`가 만든다. 손으로 고치지 말고 대응표를 고친다.

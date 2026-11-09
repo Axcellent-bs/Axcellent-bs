@@ -142,9 +142,9 @@ async def _run(table: dict[str, Any], llm: FakeLLM):
 async def test_facts_come_from_four_sources_over_a2a() -> None:
     result, sender = await _run(sources(), FakeLLM(fail=True))
     assert sorted(sender.calls) == [
+        ("dev", "find_related_prs"),
         ("marketing", "list_active_notices"),
         ("memory", "card_search"),
-        ("planning", "find_related_prs"),
         ("support", "detect_inquiry_surge"),
     ]
     kinds = [f.kind for f in result.output.facts]
@@ -153,7 +153,7 @@ async def test_facts_come_from_four_sources_over_a2a() -> None:
     assert "ntc_8" not in refs  # 이 사건에 대응해 올린 공지는 원인 사실이 아니다
     deploy = next(f for f in result.output.facts if f.ref == "pr:412")
     assert deploy.at == START - timedelta(minutes=10)
-    assert deploy.source == "planning.find_related_prs"
+    assert deploy.source == "dev.find_related_prs"
 
 
 @pytest.mark.asyncio
@@ -317,7 +317,7 @@ def test_skill_answers_over_a2a(client: TestClient) -> None:
     assert result["status"] == "completed", result
     assert result["fallback"] is True
     assert result["output"]["hypotheses"][0]["fact_ids"]
-    assert "planning.find_related_prs" in result["evidence"]["queries"]
+    assert "dev.find_related_prs" in result["evidence"]["queries"]
 
 
 def test_reversed_window_is_invalid(client: TestClient) -> None:

@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 from pydantic import BaseModel
 
 from ax_agent_template.client import call_agent
+from ax_agent_template.services import BY_ID
 from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
 
 START_DEV = "start_dev"
@@ -43,7 +44,7 @@ def dev_result_key(context_id: str, spec_id: str, fingerprint: str) -> str:
 async def send_to_service(
     skill: str, context_id: str, tenant_id: str, payload: BaseModel, idempotency_key: str
 ) -> str:
-    """planning 부서 이름으로 부르면 `call_agent`가 skill을 맡은 서비스로 보낸다."""
+    """skill을 맡은 쪽으로 보낸다. 개발 skill(start_dev 등)은 dev, 나머지는 기획(planning)."""
     meta = RequestMeta(
         context_id=context_id,
         tenant_id=tenant_id,
@@ -52,8 +53,9 @@ async def send_to_service(
         deadline=datetime.now(UTC) + timedelta(seconds=CALL_TIMEOUT_SECONDS),
         idempotency_key=idempotency_key,
     )
+    target = "dev" if skill in BY_ID["dev"].skills else "planning"
     out = await call_agent(
-        "planning", AgentRequest(meta=meta, skill=skill, input=payload.model_dump(mode="json"))
+        target, AgentRequest(meta=meta, skill=skill, input=payload.model_dump(mode="json"))
     )
     if out.status == TaskStatus.COMPLETED:
         return "보냄"

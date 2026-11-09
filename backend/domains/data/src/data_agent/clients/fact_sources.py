@@ -95,10 +95,10 @@ async def _ask(
 
 
 async def deploys(data: RootCauseInput, meta: RequestMeta, send: SendFn) -> list[RawFact]:
-    source = "planning.find_related_prs"
+    source = "dev.find_related_prs"
     start, end = span(data)
     payload = {"window_from": _iso(start), "window_to": _iso(end), "component": data.component}
-    result, error = await _ask(send, "planning", "find_related_prs", payload, meta)
+    result, error = await _ask(send, "dev", "find_related_prs", payload, meta)
     if result is None or result.status != TaskStatus.COMPLETED:
         return [_unavailable(source, result, error)]
     facts = []

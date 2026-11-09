@@ -34,7 +34,7 @@ def test_agent_card_format_and_served() -> None:
     assert skills["diagnose_incident"].grade == "read"
     assert skills["verify_recovery"].grade == "read"
     assert skills["rollback_deployment"].grade == "B"
-    assert skills["rollback_deployment"].verifier == "planning"
+    assert skills["rollback_deployment"].verifier == "dev"
     assert skills["rollback_deployment"].allowed_requesters == ["orchestrator"]
     assert skills["verify_recovery"].allowed_requesters == ["orchestrator"]
     assert "orchestrator" in skills["diagnose_incident"].allowed_requesters

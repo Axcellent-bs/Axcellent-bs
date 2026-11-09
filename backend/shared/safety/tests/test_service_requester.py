@@ -4,6 +4,16 @@ from ax_agent_template.services import department_of
 
 
 def test_service_requester_maps_to_department() -> None:
-    assert department_of("dev") == "planning"
+    assert department_of("dev") == "dev"  # 개발은 기획과 다른 부서
     assert department_of("claims") == "support"
     assert department_of("safety") == "safety"
+
+
+def test_dev_is_not_planning() -> None:
+    """개발은 기획 이름을 빌리지 않는다. 예전 주소(planning + 개발 skill)는 dev로만 보낸다."""
+    from ax_agent_template.services import route_target
+
+    assert route_target("dev", "find_related_prs") == "dev"
+    assert route_target("planning", "find_related_prs") == "dev"
+    assert route_target("planning", "create_ticket") == "planning"
+    assert department_of("dev") != "planning"

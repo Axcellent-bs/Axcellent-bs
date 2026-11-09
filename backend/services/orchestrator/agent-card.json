@@ -17,7 +17,8 @@
       "grade": "read",
       "allowed_requesters": [
         "support",
-        "planning"
+        "planning",
+        "dev"
       ],
       "verifier": null,
       "priority": "required",
