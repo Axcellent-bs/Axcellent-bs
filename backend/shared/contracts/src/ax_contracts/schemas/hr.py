@@ -35,6 +35,7 @@ skill과 등급(등급 신고는 안전 레이어 레지스트리가 원본이�
 | `set_org_roster_complete` | A | 인사 담당자가 "전 직원 등록 완료"를 표시 (요청자 dashboard-api) |
 | `team_headcount` | 읽기 | 그 달 1일 기준 팀별 인원수 (이름·직원 ID 없음, 요청자 finance 팀 예산) |
 | `record_leave` | A | 휴가 기간 기록(사유·종류 없음, 요청자 인사 서비스, 사람 토큰만) |
+| `cancel_leave` | A | 휴가 기록에 취소 표시(취소한 사람·시각)만 남김(지우지 않음), 사람 토큰만 |
 | `get_presence` | 읽기 | 교대 명부와 휴가를 합친 상태. 휴가 기간·입력자는 상세 요청일 때만 |
 
 `RecordCaseOutput`은 모델만 추가했고, hr의 출력 전환은 hr 담당 PR에서 한다.
@@ -1017,9 +1018,30 @@ class LeaveView(AxModel):
     end_date: str = Date
     recorded_by: str  # 입력한 사람(사람 토큰의 주체)
     recorded_at: UtcDatetime
+    # 취소한 기록만 채운다. 지우지 않고 취소 표시만 남긴다(취소한 기록은 상태 계산에서 뺀다)
+    cancelled_by: str | None = None
+    cancelled_at: UtcDatetime | None = None
 
 
 class RecordLeaveOutput(AxModel):
+    leave: LeaveView
+
+
+class CancelLeaveInput(AxModel):
+    """`cancel_leave` 입력(등급 A, 요청자 dashboard-api, 사람 토큰만).
+
+    휴가 기록을 지우지 않고 취소 표시만 남긴다. 수정은 "취소 + 새 기록"이다. 취소한 기록은
+    같은 사람·같은 기간을 다시 넣을 때의 중복으로 보지 않는다.
+    """
+
+    leave_id: str = Field(min_length=1, max_length=64)
+    # 취소한 사람. dashboard-api가 로그인에서 채운다
+    cancelled_by: str = Field(min_length=1, max_length=64)
+
+
+class CancelLeaveOutput(AxModel):
+    """이미 취소된 기록을 다시 취소해도 성공(`duplicate`)으로 같은 기록을 돌려준다."""
+
     leave: LeaveView
 
 
