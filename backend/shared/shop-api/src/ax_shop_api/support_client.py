@@ -18,6 +18,7 @@ from typing import Any
 from ax_agent_template import config
 from ax_agent_template.client import call_agent
 from ax_contracts.schemas import AgentRequest, AgentResult, RequestMeta, TaskStatus
+from ax_shop_api.db import TENANT_ID
 from ax_shop_api.service import ShopError
 
 AGENT_NAME = "shop-api"
@@ -72,6 +73,7 @@ async def call(
         request = AgentRequest(
             meta=RequestMeta(
                 context_id=context_id,
+                tenant_id=TENANT_ID,  # 이 판매 서버가 속한 회사. 고객지원이 문의에 그대로 붙인다
                 token=config.agent_token(AGENT_NAME),
                 deadline=datetime.now(UTC) + timedelta(seconds=DEADLINE_SECONDS),
                 idempotency_key=f"{context_id}:{skill}:{target}" if target else None,
