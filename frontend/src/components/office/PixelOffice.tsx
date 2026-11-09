@@ -14,9 +14,11 @@ const FONT = '"Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Noto Sa
 /** 배경 그림 비율 좌표 → 캔버스 좌표 */
 const toC = (fx: number, fy: number) => ({ x: fx * W, y: fy * H });
 
-type Side = "up" | "left";
+type Side = "up" | "down";
+/** 말풍선 최대 폭 (캔버스 폭의 22%) */
+const BUBBLE_MAX_W = Math.round(W * 0.22);
 /** 자리(그림 비율, 의자 위 발끝)와 스프라이트. 그림이 6벌이라 멀리 앉은 자리끼리 같은 그림을 쓴다.
- *  `back`: 책상 앞쪽 의자라 뒷모습으로 앉는다. `bubble`: 말풍선 방향(up 머리 위, left 머리 왼쪽 옆) */
+ *  `back`: 책상 앞쪽 의자라 뒷모습으로 앉는다. `bubble`: 말풍선 방향(up 머리 위, down 이름표 아래) */
 const SEATS: Record<DeskKey, { fx: number; fy: number; char: number; back?: boolean; bubble: Side }> = {
   // 위 책상 뒤쪽 의자 (앞모습). 위 책상 앞쪽 의자 2개는 비워 둔다
   infra: { fx: 0.272, fy: 0.436, char: 0, bubble: "up" },
@@ -25,10 +27,10 @@ const SEATS: Record<DeskKey, { fx: number; fy: number; char: number; back?: bool
   planning: { fx: 0.246, fy: 0.654, char: 5, bubble: "up" },
   marketing: { fx: 0.359, fy: 0.654, char: 1, bubble: "up" },
   hr: { fx: 0.471, fy: 0.654, char: 0, bubble: "up" },
-  // 아래 책상 앞쪽 의자 (뒷모습). 말풍선은 머리 왼쪽 옆에 (위 줄 이름표를 가리지 않게)
-  dev: { fx: 0.248, fy: 0.81, char: 4, back: true, bubble: "left" },
-  support: { fx: 0.359, fy: 0.81, char: 2, back: true, bubble: "left" },
-  finance: { fx: 0.472, fy: 0.81, char: 1, back: true, bubble: "left" },
+  // 아래 책상 앞쪽 의자 (뒷모습). 말풍선은 이름표 아래 (옆 사람 머리·위 줄 이름표를 가리지 않게)
+  dev: { fx: 0.248, fy: 0.81, char: 4, back: true, bubble: "down" },
+  support: { fx: 0.359, fy: 0.81, char: 2, back: true, bubble: "down" },
+  finance: { fx: 0.472, fy: 0.81, char: 1, back: true, bubble: "down" },
   // 라운지 빈백 (앞모습, 왕관)
   orchestrator: { fx: 0.795, fy: 0.638, char: 3, bubble: "up" },
 };
@@ -149,7 +151,8 @@ function draw(ctx: CanvasRenderingContext2D, art: Art, v: OfficeView, t: number,
     const b: Bubble | null = dv.state === "waiting" ? { text: "! 승인 대기", kind: "warn" } : dv.bubble;
     if (!b) return;
     const blink = dv.state === "waiting";
-    if (!away && SEATS[d.key].bubble === "left") { bubble(ctx, p.x - SW / 2, p.y - SH * 0.6, b, t, blink, "left"); return; }
+    // 이름표(p.y + 16, 높이 26) 바로 아래
+    if (!away && SEATS[d.key].bubble === "down") { bubble(ctx, p.x, p.y + 32, b, t, blink, "down"); return; }
     const crowded = away && v.walkTo !== null && (v.desks[v.walkTo].state === "waiting" || v.desks[v.walkTo].bubble !== null);
     bubble(ctx, p.x, p.y - SH - 6 - (crowded ? 48 : 0), b, t, blink, "up");
   });
@@ -234,19 +237,28 @@ function boardCard(ctx: CanvasRenderingContext2D, v: OfficeView) {
   }
 }
 
+/** 글을 폭(px)에 맞게 줄이고 "…"로 끝낸다 */
+function clip(ctx: CanvasRenderingContext2D, s: string, room: number): string {
+  if (ctx.measureText(s).width <= room) return s;
+  let out = s;
+  while (out && ctx.measureText(`${out}…`).width > room) out = out.slice(0, -1);
+  return `${out}…`;
+}
+
 /**
  * `up`: 꼬리가 아래(머리 위 말풍선, anchor = 꼬리 끝 아래 기준).
- * `left`: 꼬리가 오른쪽(머리 왼쪽 옆 말풍선, cx = 꼬리 끝 x, anchor = 말풍선 세로 가운데)
+ * `down`: 꼬리가 위(이름표 아래 말풍선, anchor = 꼬리 끝). 캔버스 아래로 넘치면 안으로 올려 붙인다.
+ * 폭은 BUBBLE_MAX_W까지. 넘는 글은 줄여서 "…"로 끝낸다 (글 길이 규칙 short가 먼저 적용된다)
  */
 function bubble(ctx: CanvasRenderingContext2D, cx: number, anchor: number, b: Bubble, t: number, blink: boolean, side: Side) {
   ctx.font = `700 18px ${FONT}`;
   const think = b.kind === "think";
-  const txt = think ? b.text + ".".repeat(1 + (Math.floor(t * 3) % 3)) : b.text;
-  const w = Math.ceil(ctx.measureText(think ? `${b.text}...` : txt).width) + 24, h = 34;
-  const x = side === "left"
-    ? Math.round(Math.max(6, cx - w - 14))
-    : Math.round(Math.max(6, Math.min(W - w - 6, cx - w / 2)));
-  const y = Math.round(side === "up" ? anchor - h - 12 : anchor - h / 2);
+  const room = BUBBLE_MAX_W - 24 - (think ? ctx.measureText("...").width : 0);
+  const base = clip(ctx, b.text, room);
+  const txt = think ? base + ".".repeat(1 + (Math.floor(t * 3) % 3)) : base;
+  const w = Math.ceil(ctx.measureText(think ? `${base}...` : txt).width) + 24, h = 34;
+  const x = Math.round(Math.max(6, Math.min(W - w - 6, cx - w / 2)));
+  const y = Math.round(side === "up" ? anchor - h - 12 : Math.min(anchor + 12, H - 4 - 3 - h));
   const look: Record<string, [string, string, string]> = {
     say: ["#ffffff", "#1d2233", "#1d2233"], think: ["#eef1ff", "#2e2688", "#2e2688"], ok: ["#dcf7e6", "#065f46", "#065f46"],
     warn: [blink && Math.floor(t * 2.5) % 2 ? "#ffb020" : "#ffc95a", "#3b2600", "#6b4500"], alert: ["#ff4d5e", "#ffffff", "#7a1420"],
@@ -259,9 +271,9 @@ function bubble(ctx: CanvasRenderingContext2D, cx: number, anchor: number, b: Bu
     ctx.fillStyle = bd; ctx.fillRect(ax - 7, y + h, 14, 4); ctx.fillRect(ax - 4, y + h + 4, 8, 4); ctx.fillRect(ax - 1, y + h + 8, 3, 4);
     ctx.fillStyle = bg; ctx.fillRect(ax - 4, y + h, 8, 4); ctx.fillRect(ax - 1, y + h + 4, 3, 1);
   } else {
-    const ay = y + h / 2, rx = x + w;
-    ctx.fillStyle = bd; ctx.fillRect(rx, ay - 7, 4, 14); ctx.fillRect(rx + 4, ay - 4, 4, 8); ctx.fillRect(rx + 8, ay - 1, 4, 3);
-    ctx.fillStyle = bg; ctx.fillRect(rx, ay - 4, 4, 8); ctx.fillRect(rx + 4, ay - 1, 1, 3);
+    const ax = Math.round(cx);
+    ctx.fillStyle = bd; ctx.fillRect(ax - 7, y - 4, 14, 4); ctx.fillRect(ax - 4, y - 8, 8, 4); ctx.fillRect(ax - 1, y - 12, 3, 4);
+    ctx.fillStyle = bg; ctx.fillRect(ax - 4, y - 4, 8, 4); ctx.fillRect(ax - 1, y - 5, 3, 1);
   }
   ctx.fillStyle = fg; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(txt, x + 12, y + h / 2 + 1);
 }
