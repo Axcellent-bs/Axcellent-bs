@@ -157,6 +157,20 @@ export interface ReconItem {
   status: ReconStatus;
   reason: string | null;
   note: string | null;
+  /** 무엇과 맞췄나: 올린 PG 정산 파일(uploaded) · 결제 기록으로 만든 모의 자료(generated) */
+  pg_basis?: "uploaded" | "generated";
+}
+/** 대사 기간의 건이 어느 PG 자료와 맞춰졌는지와 올린 파일이 덮는 판매일 기간 */
+export interface PgCoverage { uploaded: number; generated: number; periods: { from: string; to: string }[] }
+export interface PgImport {
+  file: string | null;
+  at: string;
+  source: "upload" | "folder" | "clear";
+  by?: string;
+  status: "imported" | "failed" | "cleared";
+  rows?: number;
+  period?: { from: string; to: string };
+  reason?: string;
 }
 export interface Reconciliation {
   from: string;
@@ -164,6 +178,7 @@ export interface Reconciliation {
   counts: Partial<Record<ReconStatus, number>>;
   totals: { order_amount: number | null; pg_amount: number | null; pg_fee: number | null; pay_out: number | null };
   items: ReconItem[];
+  pg_coverage?: PgCoverage;
   /** 서버가 보낸 건의 상태와 그 상태의 전체 건수. `total`이 items 수보다 크면 잘린 것이다 */
   shown?: { statuses: ReconStatus[]; total: number; limit: number };
 }
@@ -625,6 +640,11 @@ export const finance = {
   uploadBankFile: (file: File) =>
     fin<Envelope<BankMatch> & { meta: FinanceMeta & { added: number; withdrawals: number; has_withdrawals: boolean; import: BankImport } }>(
       `/api/finance/bank/file${query({ name: file.name })}`, { method: "POST", raw: file, human: true }),
+  // PG 관리자 화면에서 받은 정산 내역 CSV를 그대로 보낸다. 그 판매일 기간은 이 파일과 대사한다
+  uploadPgFile: (file: File) =>
+    fin<Envelope<PgImport>>(`/api/finance/pg/file${query({ name: file.name })}`, { method: "POST", raw: file, human: true }),
+  pgImports: () => fin<Envelope<{ imports: PgImport[]; periods: { from: string; to: string }[]; rows: number; inbox_enabled: boolean }>>("/api/finance/pg/imports"),
+  clearPg: (reason: string) => fin<Envelope<PgImport>>("/api/finance/pg/clear", { method: "POST", body: { reason }, human: true }),
   bankOutflows: () => fin<Envelope<BankOutflows>>("/api/finance/bank/outflows"),
   noteBankOutflow: (rowId: string, note: string) =>
     fin<Envelope<BankOutflows>>(`/api/finance/bank/outflows/${encodeURIComponent(rowId)}/note`, { method: "POST", body: { note }, human: true }),

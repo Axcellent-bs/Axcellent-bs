@@ -138,7 +138,7 @@ def test_closing_shape_and_params(client: TestClient) -> None:
 def test_reconciliation_shape(client: TestClient) -> None:
     body = _get(client, "/api/finance/reconciliation")
     data = body["data"]
-    assert set(data) == {"from", "to", "counts", "totals", "items", "shown"}
+    assert set(data) == {"from", "to", "pg_coverage", "counts", "totals", "items", "shown"}
     assert set(data["counts"]) == {"matched", "mismatch", "missing_in_pg", "pending", "fee_anomaly"}
     assert set(data["totals"]) == {"order_amount", "pg_amount", "pg_fee", "pay_out"}
     assert body["meta"]["pg_source"] == "mock_toss_settlement"

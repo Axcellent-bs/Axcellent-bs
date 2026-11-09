@@ -225,7 +225,9 @@ export ORCHESTRATOR_DB="$PWD/$DATA/orchestrator.db"
 export FINANCE_STATE_FILE="$PWD/$DATA/finance_state.json"
 export FINANCE_EXPORT_DIR="${FINANCE_EXPORT_DIR:-$PWD/$DATA/finance_exports}"
 export FINANCE_BANK_INBOX="${FINANCE_BANK_INBOX:-$PWD/$DATA/finance_bank_inbox}"
-mkdir -p "$FINANCE_EXPORT_DIR" "$FINANCE_BANK_INBOX"
+# PG 정산 파일(CSV) 폴더. 넣으면 재무가 읽어 그 판매일 기간을 파일과 대사한다
+export FINANCE_PG_INBOX="${FINANCE_PG_INBOX:-$PWD/$DATA/finance_pg_inbox}"
+mkdir -p "$FINANCE_EXPORT_DIR" "$FINANCE_BANK_INBOX" "$FINANCE_PG_INBOX"
 # 외부 연결 쓰기 보류(긴급 취약). 다시 켜도 잊지 않게 파일에 둔다
 export SAFETY_CONNECTION_HOLDS_FILE="$PWD/$DATA/connection_holds.json"
 

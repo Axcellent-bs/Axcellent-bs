@@ -7,7 +7,9 @@
 - `fee_anomaly`: PG 수수료가 기본 수수료율 계산값과 허용 오차(`fee_tolerance`)보다 더 다름
 - `matched`: 모두 맞음
 
-PG 정산은 목(토스 정산 형식)이다. 사람이 남긴 처리 메모(`note`)는 메모리에 둔다.
+PG 정산은 올린 PG 정산 파일이 덮는 날은 그 파일, 그 밖의 날은 결제 기록으로 만든 모의 자료
+(토스 정산 형식)다(`books.pg_settlements`, 건마다 `pg_basis`). 사람이 남긴 처리 메모(`note`)는
+메모리에 둔다.
 """
 
 from __future__ import annotations
@@ -16,7 +18,8 @@ from datetime import date, timedelta
 from typing import Any
 
 from finance_agent import finance_config as fc
-from finance_agent.books import Books, in_range, pg_settlements
+from finance_agent import pg_file
+from finance_agent.books import Books, in_range, pg_settlements, pg_upload
 
 STATUSES = ("matched", "mismatch", "missing_in_pg", "pending", "fee_anomaly")
 
@@ -67,7 +70,9 @@ def reconcile(
     """
     cfg = fc.load_config().pg
     today = today or fc.today()
-    base = books.memo(("recon", d, today, id(cfg)), lambda: _reconcile(books, d, today, cfg))
+    base = books.memo(
+        ("recon", d, today, id(cfg), pg_upload(books)[0]), lambda: _reconcile(books, d, today, cfg)
+    )
     if not notes:
         return base
     items = [
@@ -81,6 +86,7 @@ def _reconcile(books: Books, d: date | None, today: date, cfg: Any) -> dict[str,
     start_d, end_d = recon_range(d, today)
     start, end = fc.day_start(start_d), fc.day_start(end_d)
     pg = pg_settlements(books, today)
+    _, _, periods = pg_upload(books)
     items = []
     for p in books.payments():
         if not in_range(p["created_at"], start, end):
@@ -105,6 +111,10 @@ def _reconcile(books: Books, d: date | None, today: date, cfg: Any) -> dict[str,
                 "status": status,
                 "reason": reason,
                 "note": None,
+                # 무엇과 맞췄나: 올린 PG 정산 파일(uploaded) · 결제 기록으로 만든 모의 자료
+                "pg_basis": "uploaded"
+                if pg_file.covered(periods, p["created_at"].date().isoformat())
+                else "generated",
             }
         )
     items.sort(key=lambda i: (i["paid_at"], i["payment_id"]), reverse=True)
@@ -118,6 +128,11 @@ def _reconcile(books: Books, d: date | None, today: date, cfg: Any) -> dict[str,
     return {
         "from": fc.iso(start),
         "to": fc.iso(end),
+        "pg_coverage": {
+            "uploaded": sum(1 for i in items if i["pg_basis"] == "uploaded"),
+            "generated": sum(1 for i in items if i["pg_basis"] == "generated"),
+            "periods": [dict(per) for per in periods][-10:],
+        },
         "counts": counts,
         "totals": totals,
         "items": items,
