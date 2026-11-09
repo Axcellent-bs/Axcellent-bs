@@ -208,10 +208,17 @@ def test_waits_are_not_in_work_seconds_so_a_long_approval_wait_stays_normal() ->
 # ---- 시간이 아닌 상태가 먼저 ---------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("status", ["failed", "rejected_by_human", "transfer_queued"])
-def test_failed_rejected_or_transferred_steps_are_blocked_not_slow(status: str) -> None:
+@pytest.mark.parametrize("status", ["failed", "rejected_by_human"])
+def test_failed_or_rejected_steps_are_blocked_not_slow(status: str) -> None:
     assert _verdict(_t(status=status, work_seconds=1.0)) == "blocked"
     assert _verdict(_t(status=status, work_seconds=None)) == "blocked"
+
+
+@pytest.mark.parametrize("status", ["transfer_queued", "waiting_human"])
+def test_handing_a_step_to_a_person_is_neither_a_failure_nor_a_delay(status: str) -> None:
+    # 원인을 확정하지 못해 사람에게 넘기는 건 설계된 동작이다. 실패·막힘이 아니다
+    assert _verdict(_t("rollback", status=status, work_seconds=None)) == "handed_off"
+    assert _verdict(_t("rollback", status=status, work_seconds=40.0, attempts=3)) == "handed_off"
 
 
 def test_an_expired_approval_is_its_own_verdict() -> None:
@@ -224,7 +231,7 @@ def test_skipped_or_untimed_steps_have_no_record_instead_of_delay() -> None:
     assert _verdict(_t("publish_notice", status="completed", work_seconds=None)) == "no_record"
 
 
-@pytest.mark.parametrize("status", ["pending", "running", "waiting_human"])
+@pytest.mark.parametrize("status", ["pending", "running"])
 def test_unfinished_steps_are_put_off(status: str) -> None:
     assert _verdict(_t(status=status, work_seconds=None)) == "in_progress"
 

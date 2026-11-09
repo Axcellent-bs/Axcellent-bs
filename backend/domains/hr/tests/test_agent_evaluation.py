@@ -9,7 +9,7 @@ import pytest
 from ax_contracts.schemas import AgentRequest, EvaluateAgentsOutput, RecordCase
 from hr_agent.cards.service import record_case
 from hr_agent.case_memory.service import record_event_times
-from hr_agent.dept_eval.summary import AGENT_ORDER, evaluate_agents, reason_of
+from hr_agent.dept_eval.summary import AGENT_ORDER, _readable, evaluate_agents, reason_of
 
 SUMMARIES = {
     "a": "결제가 서버 오류로 자꾸 실패해요",
@@ -244,9 +244,29 @@ async def test_a_skipped_step_does_not_hide_a_finished_one(svc) -> None:
 
 
 @pytest.mark.asyncio
-async def test_handing_off_to_a_person_is_explained_not_called_a_failure(svc) -> None:
+async def test_handing_off_to_a_person_is_its_own_verdict_not_a_failure(svc) -> None:
     await _event(svc, "a", [_t("rollback", "infra", status="transfer_queued", work_seconds=None)])
     out = await _run(svc)
-    dot = _agent(out, "infra").recent[0]
-    assert dot.verdict == "blocked"
-    assert "사람이 보도록 넘김" in (dot.reason or "") and "실패" not in (dot.reason or "")
+    infra = _agent(out, "infra")
+    dot = infra.recent[0]
+    assert dot.verdict == "handed_off"
+    assert "사람에게 넘김" in (dot.reason or "") and "실패나 지연이 아니에요" in (dot.reason or "")
+    assert (infra.handed_off, infra.blocked, infra.check) == (1, 0, 0)
+    assert out.trend[0].with_check == 0  # 확인이 필요한 이벤트로 세지 않는다
+
+
+@pytest.mark.asyncio
+async def test_a_handoff_never_counts_as_a_repeat_problem(svc) -> None:
+    rows = [_t("rollback", "infra", status="transfer_queued", work_seconds=None)]
+    await _event(svc, "a", rows, minutes_ago=20, event_type="payment_failure")
+    await _event(svc, "b", rows, minutes_ago=10, event_type="payment_failure")
+    assert _agent(await _run(svc), "infra").repeats == []
+
+
+def test_judgments_saved_before_handoffs_were_split_read_the_same_way() -> None:
+    old = {"step_id": "rollback", "verdict": "blocked", "status": "transfer_queued"}
+    assert _readable(old)["verdict"] == "handed_off"
+    waiting = {"step_id": "notice", "verdict": "in_progress", "status": "waiting_human"}
+    assert _readable(waiting)["verdict"] == "handed_off"
+    failed = {"step_id": "rollback", "verdict": "blocked", "status": "failed"}
+    assert _readable(failed)["verdict"] == "blocked"  # 진짜 실패는 그대로

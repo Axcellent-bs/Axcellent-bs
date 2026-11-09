@@ -14,8 +14,8 @@ import { Link, useSearchParams } from "@/lib/nav";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : "불러오지 못했습니다");
 const RECENT_DOTS = 12;
-type Counted = "normal" | "check" | "blocked" | "approval_expired" | "no_record" | "in_progress";
-const ORDER: Counted[] = ["normal", "check", "blocked", "approval_expired", "no_record", "in_progress"];
+type Counted = "normal" | "check" | "blocked" | "handed_off" | "approval_expired" | "no_record" | "in_progress";
+const ORDER: Counted[] = ["normal", "check", "handed_off", "blocked", "approval_expired", "no_record", "in_progress"];
 
 function Section({ title, desc, children }: { title: string; desc?: string; children: React.ReactNode }) {
   return (
@@ -62,6 +62,7 @@ function AgentCard({ a, onPick }: { a: AgentSummary; onPick: (ctx: string) => vo
           {counts.map(([v, n]) => <span key={v} className={`chip ${VERDICT[v].chip}`}>{VERDICT[v].label} {n}</span>)}
         </p>
       )}
+      {a.handed_off > 0 && <p className="mt-3 text-xs text-ink-500">사람에게 넘김은 원인을 확정하지 못하는 등 사람의 확인이 필요해서 넘긴 것으로, 실패나 지연이 아니에요.</p>}
       {lastLate?.reason && <p className="mt-3 text-xs text-ink-600">가장 최근 확인이 필요했던 이유: {lastLate.reason}</p>}
       {(a.avg_work_seconds != null || a.repeats.length > 0) && (
         <ul className="mt-3 space-y-1 text-xs text-ink-500">
@@ -140,10 +141,12 @@ function EventTimeline({ ev }: { ev: EvaluatedEvent }) {
   const scale = Math.max(1, ...ev.steps.map((s) => (s.work_seconds ?? 0) + (s.approval_wait_seconds ?? 0) + (s.human_wait_seconds ?? 0)));
   const look = ev.steps.filter((s) => s.verdict === "check" || s.verdict === "blocked" || s.verdict === "approval_expired");
   const skipped = ev.steps.filter((s) => s.verdict === "no_record");
+  const handed = ev.steps.filter((s) => s.verdict === "handed_off");
   return (
     <div className="space-y-3">
       <p className="text-sm text-ink-700">
-        {look.length === 0 ? "시간을 잰 단계는 모두 제때 끝냈어요." : `확인이 필요한 단계가 ${look.length}개 있어요: ${look.map((s) => s.label).join(", ")}.`}
+        {look.length === 0 ? "확인이 필요한 단계는 없어요." : `확인이 필요한 단계가 ${look.length}개 있어요: ${look.map((s) => s.label).join(", ")}.`}
+        {handed.length > 0 && ` 사람에게 넘긴 단계는 ${handed.length}개예요(실패나 지연이 아니에요): ${handed.map((s) => s.label).join(", ")}.`}
         {skipped.length > 0 && ` 시간 기록이 없는 단계는 ${skipped.length}개예요(앞 단계가 끝나지 않아 건너뛴 경우 등): ${skipped.map((s) => s.label).join(", ")}.`}
       </p>
       <ul className="divide-y divide-ink-100 rounded-2xl border border-ink-100 px-4">
@@ -215,7 +218,7 @@ export default function AgentEvaluationPage() {
               {data.agents.map((a) => <AgentCard key={a.dept} a={a} onPick={(ctx) => { setPicked(ctx); document.getElementById("event-steps")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} />)}
             </div>
             <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-500">
-              {(["normal", "check", "blocked", "no_record", "absent"] as Verdict[]).map((v) => (
+              {(["normal", "check", "handed_off", "blocked", "no_record", "absent"] as Verdict[]).map((v) => (
                 <span key={v}><b className={VERDICT[v].dot}>{VERDICT[v].mark}</b> {VERDICT[v].label}</span>
               ))}
             </p>

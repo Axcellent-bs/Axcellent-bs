@@ -171,17 +171,38 @@ export const activeChild = (path: string, items: SubItem[]) =>
 // ---------------------------------------------------------------- 회사가 고른 서비스
 // 데모라 브라우저에만 기억한다. 메뉴·접근 검사·카탈로그 화면이 같은 값을 보도록 작은 저장소로 둔다.
 const KEY = 'axcellent-demo-services'
+// 저장한 서비스 선택과 함께, 그때 있던 서비스 목록도 남긴다. 그래야 그 뒤에 새로 생긴 서비스(예: 에이전트 평가)를
+// "끈 것"이 아니라 "새로 생긴 것"으로 알아보고 켜 둘 수 있다
+const KNOWN_KEY = 'axcellent-demo-services-known'
+// 위 목록을 남기기 전에 선택을 저장해 둔 브라우저를 위해, 그 뒤에 새로 생긴 서비스를 적어 둔다
+const ADDED_BEFORE_KNOWN_LIST = ['agent-eval']
 const ALL = SERVICES.map((s) => s.id)
 // 필수 서비스: 회사가 끌 수 없고 카탈로그에서 내릴 수도 없다. 다른 AI가 장애 기록(총괄 사건·고객지원 장애 확인·
 // 재무 장애 비용·인사 대응 시간)을 쓰므로 장애 대응과 그 감시 대상인 PC·서버 연결은 늘 켜 둔다
 export const REQUIRED_SERVICES = ['incident', 'hosts']
 export const isRequired = (id: string) => REQUIRED_SERVICES.includes(id)
 const withRequired = (ids: string[]) => [...REQUIRED_SERVICES.filter((id) => !ids.includes(id)), ...ids]
+const save = (ids: string[]) => {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(ids))
+    localStorage.setItem(KNOWN_KEY, JSON.stringify(ALL))
+  } catch {
+    /* 저장이 막힌 브라우저는 새로고침하면 전부 켠 상태로 돌아간다 */
+  }
+}
 const read = (): string[] => {
   try {
     const raw = localStorage.getItem(KEY)
-    const ids = raw ? (JSON.parse(raw) as string[]) : ALL
-    return withRequired(ids.filter((id) => ALL.includes(id)))
+    if (!raw) return ALL
+    const ids = (JSON.parse(raw) as string[]).filter((id) => ALL.includes(id))
+    const knownRaw = localStorage.getItem(KNOWN_KEY)
+    const known = knownRaw ? (JSON.parse(knownRaw) as string[]) : null
+    const fresh = (known ? ALL.filter((id) => !known.includes(id)) : ADDED_BEFORE_KNOWN_LIST).filter(
+      (id) => ALL.includes(id) && !ids.includes(id),
+    )
+    const merged = withRequired([...ids, ...fresh])
+    if (fresh.length || !known) save(merged) // 새 서비스를 켠 채로 남기고, 다음부터는 목록으로 알아본다
+    return merged
   } catch {
     return ALL
   }
@@ -192,11 +213,7 @@ const listeners = new Set<() => void>()
 export const getEnabled = () => enabled
 export function setEnabled(ids: string[]) {
   enabled = withRequired(ids)
-  try {
-    localStorage.setItem(KEY, JSON.stringify(enabled))
-  } catch {
-    /* 저장이 막힌 브라우저는 새로고침하면 전부 켠 상태로 돌아간다 */
-  }
+  save(enabled)
   listeners.forEach((l) => l())
 }
 export const toggleService = (id: string) => {

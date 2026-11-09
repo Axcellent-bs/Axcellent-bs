@@ -889,7 +889,14 @@ class GetAuditTimelineOutput(AxModel):
 # 점수·등급·순위는 없다. 사람이 "제때 끝냈다 / 늦었다"를 한눈에 보도록 건수와 이유만 모아 준다.
 
 AgentVerdict = Literal[
-    "normal", "check", "no_record", "blocked", "approval_expired", "in_progress", "absent"
+    "normal",
+    "check",
+    "no_record",
+    "blocked",
+    "approval_expired",
+    "in_progress",
+    "absent",
+    "handed_off",  # 스스로 끝내지 않고 사람이 보도록 넘김. 실패도 지연도 아니다
 ]
 
 
@@ -923,6 +930,7 @@ class AgentSummary(AxModel):
     check: int = Field(ge=0)
     no_record: int = Field(ge=0)
     blocked: int = Field(ge=0)
+    handed_off: int = Field(default=0, ge=0)
     approval_expired: int = Field(ge=0)
     in_progress: int = Field(ge=0)
     retried: int = Field(ge=0)  # 확인 필요 중 다시 시도가 있었던 이벤트 수

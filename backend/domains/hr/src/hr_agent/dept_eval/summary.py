@@ -37,7 +37,15 @@ AGENT_ORDER = ("infra", "data", "dev", "support", "marketing", "finance", "hr")
 # 한 이벤트 안에서 에이전트의 단계가 여럿일 때 점 하나로 줄이는 우선순위(앞쪽이 더 걸리는 판정)
 # 건너뛴 단계(기록 없음)는 다른 단계가 제때 끝났다면 점에 올리지 않는다
 # (앞 단계가 안 돌아서 건너뛴 것이지 그 에이전트 탓이 아니다)
-WORST_FIRST = ("approval_expired", "blocked", "check", "in_progress", "normal", "no_record")
+WORST_FIRST = (
+    "approval_expired",
+    "blocked",
+    "check",
+    "handed_off",
+    "in_progress",
+    "normal",
+    "no_record",
+)
 NEEDS_LOOK = ("check", "blocked", "approval_expired")
 KST = timedelta(hours=9)
 
@@ -59,10 +67,13 @@ def reason_of(item: dict[str, Any]) -> str | None:
         return " · ".join(parts) or "기준을 넘음"
     if verdict == "blocked":
         return {
-            "transfer_queued": "스스로 끝내지 않고 사람이 보도록 넘김",
             "rejected_by_human": "사람이 거절해서 끝내지 못함",
             "failed": "실패해서 끝내지 못함",
         }.get(str(item.get("status")), "실패하거나 막혀 끝내지 못함")
+    if verdict == "handed_off":
+        if item.get("status") == "waiting_human":
+            return "사람 할 일함으로 넘겨 사람이 처리하기를 기다리는 중 (실패나 지연이 아니에요)"
+        return "사람의 확인이 필요해 사람에게 넘김 (실패나 지연이 아니에요)"
     return {
         "approval_expired": "승인을 기다리다 시간이 지나 자동 거절됨",
         "no_record": "건너뛰었거나 시간을 알 수 없음",
@@ -92,11 +103,23 @@ def _latest_cards(cards: list[Any]) -> list[Any]:
     return sorted(best.values(), key=_when, reverse=True)
 
 
+def _readable(item: dict[str, Any]) -> dict[str, Any]:
+    """ "사람에게 넘김"을 따로 두기 전에 저장된 항목은 그 단계 상태를 보고 같은 판정으로 읽는다."""
+    status = item.get("status")
+    if (item["verdict"], status) in (
+        ("blocked", "transfer_queued"),
+        ("in_progress", "waiting_human"),
+    ):
+        return {**item, "verdict": "handed_off"}
+    return item
+
+
 def _event(card: Any) -> EvaluatedEvent:
     saved = card.extra["step_judgments"]
     waits = {t["step_id"]: t for t in card.extra.get("step_timings") or []}
     steps = []
-    for item in saved["items"]:
+    for stored in saved["items"]:
+        item = _readable(stored)
         timing = waits.get(item["step_id"], {})
         steps.append(
             EvaluatedStep(
@@ -177,6 +200,7 @@ def _summary(dept: str, events: list[EvaluatedEvent]) -> AgentSummary:
         check=counts["check"],
         no_record=counts["no_record"],
         blocked=counts["blocked"],
+        handed_off=counts["handed_off"],
         approval_expired=counts["approval_expired"],
         in_progress=counts["in_progress"],
         retried=len(retried & {d.context_id for d in joined if d.verdict == "check"}),

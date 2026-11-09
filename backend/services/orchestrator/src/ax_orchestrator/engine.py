@@ -303,7 +303,9 @@ class Engine:
         added = [c for c in output.get("affected_customer_ids") or [] if c not in old_ids]
         output["added_customer_ids"] = added
         run.output = output
-        run.finished_at = now()
+        run.refreshed_at = (
+            now()
+        )  # finished_at는 첫 분석이 끝난 시각 그대로 둔다(단계 시간이 부풀지 않게)
         inc.outputs["impact"] = output
         inc.log(f"{step.label}: 복구 시각까지 다시 계산 (새로 잡힌 영향 고객 {len(added)}명)")
         if added:
