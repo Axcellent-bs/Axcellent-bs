@@ -42,10 +42,12 @@ def test_agent_card_matches_template_format() -> None:
     assert card.name == "hr"
     skill = next(s for s in card.skills if s.id == "record_case")
     assert (skill.grade, skill.priority) == ("A", "required")
-    # 요청자 목록은 정확히 이 일곱 곳이다(넓히거나 좁히면 이 테스트가 먼저 알려 준다)
+    # 요청자 목록은 정확히 이 여덟 곳이다(넓히거나 좁히면 이 테스트가 먼저 알려 준다).
+    # dev는 개발이 기획에서 분리된 뒤(#881) PR 머지·요청 완료를 직접 기록하려고 더했다
     assert skill.allowed_requesters == [
         "orchestrator",
         "planning",
+        "dev",
         "support",
         "marketing",
         "finance",
